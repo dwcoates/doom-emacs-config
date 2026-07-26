@@ -1428,6 +1428,49 @@ on the ws plist (via `--latch-and-maybe-fire-loaded')."
       ;; :agent-ready is nil so latch hasn't fired+cleared; bit stays set.
       (should (eq (agent-repl--ws-get "ws1" :ws-loaded) t)))))
 
+(ert-deftest agent-repl-test-panels-on-workspace-switch-notifies-the-daemon ()
+  "`--on-workspace-switch' asks the daemon to ensure the switched-to ws.
+This is the SWITCH half of the never-blue requirement: without this call
+the daemon's eager bring-up fires only on an explicit open, so a workspace
+the user merely switches to stays blue despite having a transcript."
+  (agent-repl-test--with-clean-state
+    (let ((notified nil))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () nil))
+                ((symbol-function 'agent-repl--maybe-sweep-hidden-on-switch) #'ignore)
+                ((symbol-function 'agent-repl--update-all-workspace-states-now) #'ignore)
+                ((symbol-function 'agent-repl--drain-pending-magit) #'ignore)
+                ((symbol-function 'agent-repl--drain-pending-initial-buffers) #'ignore)
+                ((symbol-function 'agent-repl--drain-pending-show-panels) #'ignore)
+                ((symbol-function 'agent-repl--maybe-autoselect-input) #'ignore)
+                ((symbol-function 'agent-repl--frontend-notify-workspace-switch)
+                 (lambda (ws) (setq notified ws))))
+        ;; Act
+        (agent-repl--on-workspace-switch "ws1")
+        ;; Assert — keyed by the ws the hook captured, not whatever is current.
+        (should (equal notified "ws1"))))))
+
+(ert-deftest agent-repl-test-panels-on-workspace-switch-notifies-before-the-latch ()
+  "The daemon notify runs BEFORE the `:ws-loaded' latch tail.
+Ordering matters: the notify is what starts the backfill, so it must not
+sit behind anything that could return early."
+  (agent-repl-test--with-clean-state
+    (let ((latched-at-notify nil))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () nil))
+                ((symbol-function 'agent-repl--maybe-sweep-hidden-on-switch) #'ignore)
+                ((symbol-function 'agent-repl--update-all-workspace-states-now) #'ignore)
+                ((symbol-function 'agent-repl--drain-pending-magit) #'ignore)
+                ((symbol-function 'agent-repl--drain-pending-initial-buffers) #'ignore)
+                ((symbol-function 'agent-repl--drain-pending-show-panels) #'ignore)
+                ((symbol-function 'agent-repl--maybe-autoselect-input) #'ignore)
+                ((symbol-function 'agent-repl--frontend-notify-workspace-switch)
+                 (lambda (_ws)
+                   (setq latched-at-notify (agent-repl--ws-get "ws1" :ws-loaded)))))
+        ;; Act
+        (agent-repl--on-workspace-switch "ws1")
+        ;; Assert — unset at notify time, set once the tail ran.
+        (should-not latched-at-notify)
+        (should (eq (agent-repl--ws-get "ws1" :ws-loaded) t))))))
+
 (ert-deftest agent-repl-test-panels-on-workspace-switch-nil-ws-skips-latch ()
   "When `--on-workspace-switch' is called with nil ws (and current-name
 also returns nil), the latch flip is skipped — guards against poisoning

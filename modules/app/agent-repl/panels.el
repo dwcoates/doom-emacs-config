@@ -400,6 +400,15 @@ pending merge auto-fire."
     ;; after the show drain, so a webview that just became visible is
     ;; snapped too.
     (agent-repl--frontend-snap-webview-to-tail ws)
+    ;; NEVER-BLUE, switch half: tell the daemon this workspace was switched
+    ;; to, so it discovers + binds any on-disk transcript and brings the shim
+    ;; up.  A workspace the user merely LOOKS at must render its history
+    ;; rather than sitting blue until they type.  Heavily skipped (live
+    ;; session, cooldown, give-up) inside the notifier, and fire-and-forget
+    ;; here — a daemon that cannot open the workspace must never stall the
+    ;; switch, which is why the failure path is an ack callback and not a
+    ;; signal.
+    (agent-repl--frontend-notify-workspace-switch ws)
     ;; Flip the emacs-side bit on the fully-loaded latch.  If
     ;; --on-session-start-event has also fired, this fires the
     ;; ws-fully-loaded hook; otherwise we just record the bit and wait

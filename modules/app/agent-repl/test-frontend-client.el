@@ -1208,6 +1208,196 @@ guarantees each webview reloads the freshly built bundle."
   (should (memq #'agent-repl--frontend-release-workspace-session
                 agent-repl-ws-del-hook)))
 
+;;;; ---- never-blue: the workspace-switch ensure ---------------------------
+;;
+;; The switch half of the never-blue requirement: a persp activation sends
+;; `openWorkspace' so the daemon binds any on-disk transcript and brings the
+;; shim up.  These pin the SKIPS (which is most of the behavior) as hard as
+;; the send, because an unskipped send costs the daemon a projects-directory
+;; rescan on every switch.
+
+(defmacro agent-repl-test--with-switch-ensure (&rest body)
+  "Run BODY with the UDS boundary captured and the link reported UP."
+  (declare (indent 0))
+  `(cl-letf (((symbol-function 'agent-repl--uds-connected-p) (lambda () t)))
+     (agent-repl-test--with-uds ,@body)))
+
+(ert-deftest agent-repl-test-frontend-switch-ensure-sends-open-workspace ()
+  "A switch to a session-less workspace sends `openWorkspace' keyed by its cwd."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+    (agent-repl-test--with-switch-ensure
+      ;; Act
+      (agent-repl--frontend-notify-workspace-switch "ws1")
+      ;; Assert — the daemon routes purely by cwd, never the persp name.
+      (pcase-let ((`(,field ,payload ,ws) (car uds-commands)))
+        (should (equal field "openWorkspace"))
+        (should (null payload))
+        (should (equal ws "/w"))))))
+
+(ert-deftest agent-repl-test-frontend-switch-ensure-skips-when-session-live ()
+  "A workspace already driving a live session has nothing to ensure."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w" :frontend-session-id "s_1")
+    (cl-letf (((symbol-function 'agent-repl--frontend-session-live-p) (lambda (_id) t)))
+      (agent-repl-test--with-switch-ensure
+        ;; Act
+        (agent-repl--frontend-notify-workspace-switch "ws1")
+        ;; Assert — this is THE common case; a send here is pure daemon rescan.
+        (should (null uds-commands))))))
+
+(ert-deftest agent-repl-test-frontend-switch-ensure-sends-when-bound-session-dead ()
+  "A bound-but-dead session still needs the ensure (that is the blue case)."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w" :frontend-session-id "s_gone")
+    (cl-letf (((symbol-function 'agent-repl--frontend-session-live-p) (lambda (_id) nil)))
+      (agent-repl-test--with-switch-ensure
+        ;; Act
+        (agent-repl--frontend-notify-workspace-switch "ws1")
+        ;; Assert
+        (should (equal (car (car uds-commands)) "openWorkspace"))))))
+
+(ert-deftest agent-repl-test-frontend-switch-ensure-skips-when-link-down ()
+  "With the UDS link down the switch sends nothing.
+The reattach sweep owns daemon revival; a switch must not race it."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+    (cl-letf (((symbol-function 'agent-repl--uds-connected-p) (lambda () nil)))
+      (agent-repl-test--with-uds
+        ;; Act
+        (agent-repl--frontend-notify-workspace-switch "ws1")
+        ;; Assert
+        (should (null uds-commands))))))
+
+(ert-deftest agent-repl-test-frontend-switch-ensure-skips-without-project-dir ()
+  "No cwd means no routable wire key, so the switch sends nothing."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:agent-state :idle)
+    (agent-repl-test--with-switch-ensure
+      ;; Act — must not signal either; this runs on EVERY switch.
+      (agent-repl--frontend-notify-workspace-switch "ws1")
+      ;; Assert
+      (should (null uds-commands)))))
+
+(ert-deftest agent-repl-test-frontend-switch-ensure-debounces-within-cooldown ()
+  "A second switch inside the cooldown does not re-send."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+    (agent-repl-test--with-switch-ensure
+      (agent-repl--frontend-notify-workspace-switch "ws1")
+      ;; Act — rapid re-switch.
+      (agent-repl--frontend-notify-workspace-switch "ws1")
+      ;; Assert — exactly one command, not two.
+      (should (= 1 (length uds-commands))))))
+
+(ert-deftest agent-repl-test-frontend-switch-ensure-resends-after-cooldown ()
+  "Once the cooldown has elapsed a switch may ensure again."
+  ;; Arrange — a stamp older than the cooldown.
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+    (agent-repl--ws-put "ws1" :switch-ensure-at
+                        (- (float-time) agent-repl-frontend-switch-ensure-cooldown 1))
+    (agent-repl-test--with-switch-ensure
+      ;; Act
+      (agent-repl--frontend-notify-workspace-switch "ws1")
+      ;; Assert
+      (should (= 1 (length uds-commands))))))
+
+(ert-deftest agent-repl-test-frontend-switch-ensure-skips-after-give-up ()
+  "A workspace that gave up stops sending entirely."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w" :switch-ensure-failed t)
+    (agent-repl-test--with-switch-ensure
+      ;; Act
+      (agent-repl--frontend-notify-workspace-switch "ws1")
+      ;; Assert
+      (should (null uds-commands)))))
+
+(ert-deftest agent-repl-test-frontend-switch-ensure-counts-a-failed-ack ()
+  "A rejected ack increments the workspace's failure tally."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+    ;; Act
+    (agent-repl--frontend-note-switch-ensure-failure "ws1" "no live session")
+    ;; Assert
+    (should (= 1 (agent-repl--ws-get "ws1" :switch-ensure-failures)))))
+
+(ert-deftest agent-repl-test-frontend-switch-ensure-gives-up-at-the-cap ()
+  "At the failure cap the workspace latches `:switch-ensure-failed'."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+    (let ((display-warning-minimum-level :emergency))
+      ;; Act — one short of the cap, then the one that trips it.
+      (dotimes (_ agent-repl-frontend-switch-ensure-max-failures)
+        (agent-repl--frontend-note-switch-ensure-failure "ws1" "boom"))
+      ;; Assert — the retry-loop guard the directive asks for.
+      (should (agent-repl--ws-get "ws1" :switch-ensure-failed)))))
+
+(ert-deftest agent-repl-test-frontend-switch-ensure-does-not-give-up-early ()
+  "Below the cap the workspace keeps trying."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+    ;; Act
+    (agent-repl--frontend-note-switch-ensure-failure "ws1" "boom")
+    ;; Assert
+    (should-not (agent-repl--ws-get "ws1" :switch-ensure-failed))))
+
+(ert-deftest agent-repl-test-frontend-switch-ensure-boot-change-clears-give-up ()
+  "A new daemon instance earns a workspace fresh switch-ensure attempts."
+  ;; Arrange — a give-up that belonged to the PREVIOUS instance.
+  (agent-repl-test--with-ws "ws1" '(:switch-ensure-failed t :switch-ensure-failures 3)
+    (cl-letf (((symbol-function 'agent-repl--live-ws-names) (lambda () '("ws1"))))
+      (let ((agent-repl--frontend-last-boot-id "boot-old"))
+        ;; Act
+        (agent-repl--frontend-note-boot-id "boot-new")
+        ;; Assert
+        (should-not (agent-repl--ws-get "ws1" :switch-ensure-failed))
+        (should-not (agent-repl--ws-get "ws1" :switch-ensure-failures))))))
+
+(ert-deftest agent-repl-test-frontend-switch-ensure-boot-change-clears-cooldown ()
+  "A daemon bounce also clears the cooldown stamp.
+Otherwise the first switch after a restart would be swallowed by a timer
+belonging to the instance that is already gone."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:switch-ensure-at 12345.0)
+    (cl-letf (((symbol-function 'agent-repl--live-ws-names) (lambda () '("ws1"))))
+      (let ((agent-repl--frontend-last-boot-id "boot-old"))
+        ;; Act
+        (agent-repl--frontend-note-boot-id "boot-new")
+        ;; Assert
+        (should-not (agent-repl--ws-get "ws1" :switch-ensure-at))))))
+
+(ert-deftest agent-repl-test-frontend-switch-ensure-never-signals-on-send-failure ()
+  "A send that signals is logged, never raised.
+This runs on the persp-activation path, so a signal would strand the
+switch before the tail that flips `:ws-loaded'.  The link can die between
+the connected-p check and the send, so the skip guards cannot be the only
+protection."
+  ;; Arrange — connected, then the send blows up anyway.
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+    (cl-letf (((symbol-function 'agent-repl--uds-connected-p) (lambda () t))
+              ((symbol-function 'agent-repl--uds-send-command)
+               (lambda (&rest _) (user-error "not connected"))))
+      ;; Act / Assert — must return nil rather than signalling.
+      (should (null (agent-repl--frontend-notify-workspace-switch "ws1"))))))
+
+(ert-deftest agent-repl-test-frontend-switch-ensure-never-signals-without-cwd ()
+  "A workspace whose cwd lookup signals is skipped, not raised."
+  ;; Arrange — no :project-dir at all, which `--ws-dir' signals on.
+  (agent-repl-test--with-ws "ws1" '(:agent-state :idle)
+    (cl-letf (((symbol-function 'agent-repl--uds-connected-p) (lambda () t)))
+      ;; Act / Assert
+      (should (null (agent-repl--frontend-notify-workspace-switch "ws1"))))))
+
+(ert-deftest agent-repl-test-frontend-switch-ensure-stamps-before-sending ()
+  "The cooldown stamp is written on the send, which is what debounces it."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+    (agent-repl-test--with-switch-ensure
+      ;; Act
+      (agent-repl--frontend-notify-workspace-switch "ws1")
+      ;; Assert
+      (should (agent-repl--ws-get "ws1" :switch-ensure-at)))))
+
 ;;;; ---- gui-send-turn ------------------------------------------------------------
 
 (ert-deftest agent-repl-test-gui-send-turn-sets-thinking-before-send ()
