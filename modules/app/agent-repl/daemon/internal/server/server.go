@@ -1094,23 +1094,6 @@ func (e *InvalidCreateError) Error() string { return e.msg }
 // errSessionNotFound reports a delete/lookup for an id with no registry record.
 var errSessionNotFound = errors.New("no such session")
 
-// ungatedCreateNote is the suffix the create log carries when opts asks for a
-// session with no permission gate, and "" otherwise.
-//
-// The whole point is that an ungated session must not be able to come into
-// existence quietly. The daemon cannot gate what the SDK auto-approves — by
-// the time any tool call is visible here it has already run — so the log entry
-// naming the gate-less session at its moment of creation IS the record, and it
-// names the consent that admitted it rather than only the mode.
-func ungatedCreateNote(opts CreateOpts) string {
-	if !protocol.UngatedPermissionMode(opts.PermissionMode) {
-		return ""
-	}
-	return fmt.Sprintf(
-		" — UNGATED: permission_mode %q auto-approves every tool before canUseTool, so this session has NO permission gate (allow_ungated=%v)",
-		opts.PermissionMode, opts.AllowUngated)
-}
-
 // CreateSession is the shared create-session core behind both POST /sessions
 // (webapp) and the createSession UDS command (Emacs): validate, apply the
 // resume-viability gate, supersede transcript conflicts, register the record,
@@ -1147,7 +1130,8 @@ func (s *Server) CreateSession(_ context.Context, opts CreateOpts) (string, erro
 	// consent that admitted it.
 	dlog.Tag(s.logf, "cwd", opts.CWD, "model", opts.Model, "config_dir", opts.ConfigDir,
 		"permission_mode", opts.PermissionMode)(
-		"session create requested (resume=%s)%s", resumeLabel, ungatedCreateNote(opts))
+		"session create requested (resume=%s)%s", resumeLabel,
+		protocol.UngatedNote("this session", opts.PermissionMode, opts.AllowUngated))
 	// Resume viability gate: the CLI hard-exits when asked to --resume a
 	// session id with no transcript in this daemon's config dir. Silently
 	// downgrading to a FRESH conversation buries a genuinely lost session, so
