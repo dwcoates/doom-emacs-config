@@ -2681,8 +2681,14 @@ type BashResult struct {
 	StaleReadFileStateHint   string `protobuf:"bytes,11,opt,name=stale_read_file_state_hint,json=staleReadFileStateHint,proto3" json:"stale_read_file_state_hint,omitempty"`
 	BackgroundTaskId         string `protobuf:"bytes,12,opt,name=background_task_id,json=backgroundTaskId,proto3" json:"background_task_id,omitempty"` // set = background launch
 	BackgroundCwdHint        string `protobuf:"bytes,13,opt,name=background_cwd_hint,json=backgroundCwdHint,proto3" json:"background_cwd_hint,omitempty"`
-	unknownFields            protoimpl.UnknownFields
-	sizeCache                protoimpl.SizeCache
+	// [sdk BashOutput + corpus] the sandbox escape hatch this command ran under.
+	DangerouslyDisableSandbox bool `protobuf:"varint,14,opt,name=dangerously_disable_sandbox,json=dangerouslyDisableSandbox,proto3" json:"dangerously_disable_sandbox,omitempty"`
+	// [sdk BashOutput + corpus] the USER backgrounded a foreground command,
+	// which `background_task_id` alone cannot distinguish from a launch that
+	// was backgrounded by request.
+	BackgroundedByUser bool `protobuf:"varint,15,opt,name=backgrounded_by_user,json=backgroundedByUser,proto3" json:"backgrounded_by_user,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *BashResult) Reset() {
@@ -2806,6 +2812,20 @@ func (x *BashResult) GetBackgroundCwdHint() string {
 	return ""
 }
 
+func (x *BashResult) GetDangerouslyDisableSandbox() bool {
+	if x != nil {
+		return x.DangerouslyDisableSandbox
+	}
+	return false
+}
+
+func (x *BashResult) GetBackgroundedByUser() bool {
+	if x != nil {
+		return x.BackgroundedByUser
+	}
+	return false
+}
+
 type AgentToolStats struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	ReadCount      int64                  `protobuf:"varint,1,opt,name=read_count,json=readCount,proto3" json:"read_count,omitempty"`
@@ -2912,8 +2932,13 @@ type AgentResult struct {
 	TotalToolUseCount int64                  `protobuf:"varint,9,opt,name=total_tool_use_count,json=totalToolUseCount,proto3" json:"total_tool_use_count,omitempty"`
 	Usage             *ApiUsage              `protobuf:"bytes,10,opt,name=usage,proto3" json:"usage,omitempty"`
 	ToolStats         *AgentToolStats        `protobuf:"bytes,11,opt,name=tool_stats,json=toolStats,proto3" json:"tool_stats,omitempty"` // optional
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// [sdk AgentOutput + corpus] set only when the agent ran isolated in its own
+	// worktree, which is the only signal that its edits landed off the caller's
+	// checkout.
+	WorktreePath   string `protobuf:"bytes,12,opt,name=worktree_path,json=worktreePath,proto3" json:"worktree_path,omitempty"`
+	WorktreeBranch string `protobuf:"bytes,13,opt,name=worktree_branch,json=worktreeBranch,proto3" json:"worktree_branch,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *AgentResult) Reset() {
@@ -3021,6 +3046,20 @@ func (x *AgentResult) GetToolStats() *AgentToolStats {
 		return x.ToolStats
 	}
 	return nil
+}
+
+func (x *AgentResult) GetWorktreePath() string {
+	if x != nil {
+		return x.WorktreePath
+	}
+	return ""
+}
+
+func (x *AgentResult) GetWorktreeBranch() string {
+	if x != nil {
+		return x.WorktreeBranch
+	}
+	return ""
 }
 
 // Agent/Task background launch (run_in_background).
@@ -3813,8 +3852,11 @@ type WriteResult struct {
 	// Same hunk-array shape as EditResult; corpus: tool-results/write.jsonl.
 	StructuredPatch *structpb.ListValue `protobuf:"bytes,5,opt,name=structured_patch,json=structuredPatch,proto3" json:"structured_patch,omitempty"`
 	UserModified    bool                `protobuf:"varint,6,opt,name=user_modified,json=userModified,proto3" json:"user_modified,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// [corpus] the memdir twin of EditResult.memdir_stamped, which a Write to
+	// the same tree stamps identically.
+	MemdirStamped bool `protobuf:"varint,7,opt,name=memdir_stamped,json=memdirStamped,proto3" json:"memdir_stamped,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *WriteResult) Reset() {
@@ -3885,6 +3927,13 @@ func (x *WriteResult) GetStructuredPatch() *structpb.ListValue {
 func (x *WriteResult) GetUserModified() bool {
 	if x != nil {
 		return x.UserModified
+	}
+	return false
+}
+
+func (x *WriteResult) GetMemdirStamped() bool {
+	if x != nil {
+		return x.MemdirStamped
 	}
 	return false
 }
@@ -4581,9 +4630,12 @@ type AskUserQuestionResult struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Same element shape as AskUserQuestionInput.questions; corpus:
 	// tool-results/ask_user_question.jsonl.
-	Questions     []*Question      `protobuf:"bytes,1,rep,name=questions,proto3" json:"questions,omitempty"`
-	Answers       *structpb.Struct `protobuf:"bytes,2,opt,name=answers,proto3" json:"answers,omitempty"`
-	Annotations   *structpb.Struct `protobuf:"bytes,3,opt,name=annotations,proto3" json:"annotations,omitempty"`
+	Questions   []*Question      `protobuf:"bytes,1,rep,name=questions,proto3" json:"questions,omitempty"`
+	Answers     *structpb.Struct `protobuf:"bytes,2,opt,name=answers,proto3" json:"answers,omitempty"`
+	Annotations *structpb.Struct `protobuf:"bytes,3,opt,name=annotations,proto3" json:"annotations,omitempty"`
+	// [sdk AskUserQuestionOutput + corpus] the away-from-keyboard deadline the
+	// question was answered under.
+	AfkTimeoutMs  int64 `protobuf:"varint,4,opt,name=afk_timeout_ms,json=afkTimeoutMs,proto3" json:"afk_timeout_ms,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4639,13 +4691,26 @@ func (x *AskUserQuestionResult) GetAnnotations() *structpb.Struct {
 	return nil
 }
 
+func (x *AskUserQuestionResult) GetAfkTimeoutMs() int64 {
+	if x != nil {
+		return x.AfkTimeoutMs
+	}
+	return 0
+}
+
 type ScheduleWakeupResult struct {
 	state               protoimpl.MessageState `protogen:"open.v1"`
 	ClampedDelaySeconds int64                  `protobuf:"varint,1,opt,name=clamped_delay_seconds,json=clampedDelaySeconds,proto3" json:"clamped_delay_seconds,omitempty"`
 	ScheduledFor        int64                  `protobuf:"varint,2,opt,name=scheduled_for,json=scheduledFor,proto3" json:"scheduled_for,omitempty"` // epoch millis; corpus: tool-results/schedule_wakeup.jsonl
 	WasClamped          bool                   `protobuf:"varint,3,opt,name=was_clamped,json=wasClamped,proto3" json:"was_clamped,omitempty"`
-	unknownFields       protoimpl.UnknownFields
-	sizeCache           protoimpl.SizeCache
+	// [sdk ScheduleWakeupOutput + corpus] the model ended the loop via stop:true.
+	Stopped bool `protobuf:"varint,4,opt,name=stopped,proto3" json:"stopped,omitempty"`
+	// [sdk ScheduleWakeupOutput + corpus] how many pending dynamic-loop wakeups
+	// that stop cancelled; 0 means nothing was pending, which is NOT the same as
+	// the field being absent on a non-stopping wakeup.
+	CancelledWakeups int64 `protobuf:"varint,5,opt,name=cancelled_wakeups,json=cancelledWakeups,proto3" json:"cancelled_wakeups,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *ScheduleWakeupResult) Reset() {
@@ -4697,6 +4762,20 @@ func (x *ScheduleWakeupResult) GetWasClamped() bool {
 		return x.WasClamped
 	}
 	return false
+}
+
+func (x *ScheduleWakeupResult) GetStopped() bool {
+	if x != nil {
+		return x.Stopped
+	}
+	return false
+}
+
+func (x *ScheduleWakeupResult) GetCancelledWakeups() int64 {
+	if x != nil {
+		return x.CancelledWakeups
+	}
+	return 0
 }
 
 // [corpus] StructuredOutput — the payload is the caller's OWN schema, so it
@@ -8282,7 +8361,7 @@ const file_agentshim_data_v1_tools_proto_rawDesc = "" +
 	"\bartifact\x18\x19 \x01(\v2!.agentshim.data.v1.ArtifactResultH\x00R\bartifact\x12=\n" +
 	"\btask_get\x18\x1a \x01(\v2 .agentshim.data.v1.TaskGetResultH\x00R\ataskGet\x12=\n" +
 	"\funclassified\x18\x1e \x01(\v2\x17.google.protobuf.StructH\x00R\funclassifiedB\b\n" +
-	"\x06result\"\xb9\x04\n" +
+	"\x06result\"\xab\x05\n" +
 	"\n" +
 	"BashResult\x12\x16\n" +
 	"\x06stdout\x18\x01 \x01(\tR\x06stdout\x12\x16\n" +
@@ -8298,7 +8377,9 @@ const file_agentshim_data_v1_tools_proto_rawDesc = "" +
 	" \x01(\x03R\x0ftimedOutAfterMs\x12:\n" +
 	"\x1astale_read_file_state_hint\x18\v \x01(\tR\x16staleReadFileStateHint\x12,\n" +
 	"\x12background_task_id\x18\f \x01(\tR\x10backgroundTaskId\x12.\n" +
-	"\x13background_cwd_hint\x18\r \x01(\tR\x11backgroundCwdHint\"\x89\x02\n" +
+	"\x13background_cwd_hint\x18\r \x01(\tR\x11backgroundCwdHint\x12>\n" +
+	"\x1bdangerously_disable_sandbox\x18\x0e \x01(\bR\x19dangerouslyDisableSandbox\x120\n" +
+	"\x14backgrounded_by_user\x18\x0f \x01(\bR\x12backgroundedByUser\"\x89\x02\n" +
 	"\x0eAgentToolStats\x12\x1d\n" +
 	"\n" +
 	"read_count\x18\x01 \x01(\x03R\treadCount\x12!\n" +
@@ -8309,7 +8390,7 @@ const file_agentshim_data_v1_tools_proto_rawDesc = "" +
 	"\vlines_added\x18\x05 \x01(\x03R\n" +
 	"linesAdded\x12#\n" +
 	"\rlines_removed\x18\x06 \x01(\x03R\flinesRemoved\x12(\n" +
-	"\x10other_tool_count\x18\a \x01(\x03R\x0eotherToolCount\"\xf0\x03\n" +
+	"\x10other_tool_count\x18\a \x01(\x03R\x0eotherToolCount\"\xbe\x04\n" +
 	"\vAgentResult\x128\n" +
 	"\x06status\x18\x01 \x01(\x0e2 .agentshim.data.v1.RawTaskStatusR\x06status\x12\x16\n" +
 	"\x06prompt\x18\x02 \x01(\tR\x06prompt\x12\x19\n" +
@@ -8324,7 +8405,9 @@ const file_agentshim_data_v1_tools_proto_rawDesc = "" +
 	"\x05usage\x18\n" +
 	" \x01(\v2\x1b.agentshim.data.v1.ApiUsageR\x05usage\x12@\n" +
 	"\n" +
-	"tool_stats\x18\v \x01(\v2!.agentshim.data.v1.AgentToolStatsR\ttoolStats\"\xb5\x02\n" +
+	"tool_stats\x18\v \x01(\v2!.agentshim.data.v1.AgentToolStatsR\ttoolStats\x12#\n" +
+	"\rworktree_path\x18\f \x01(\tR\fworktreePath\x12'\n" +
+	"\x0fworktree_branch\x18\r \x01(\tR\x0eworktreeBranch\"\xb5\x02\n" +
 	"\x10AgentAsyncLaunch\x12\x19\n" +
 	"\bis_async\x18\x01 \x01(\bR\aisAsync\x128\n" +
 	"\x06status\x18\x02 \x01(\x0e2 .agentshim.data.v1.RawTaskStatusR\x06status\x12\x19\n" +
@@ -8399,14 +8482,15 @@ const file_agentshim_data_v1_tools_proto_rawDesc = "" +
 	"\x10structured_patch\x18\x06 \x01(\v2\x1a.google.protobuf.ListValueR\x0fstructuredPatch\x12#\n" +
 	"\ruser_modified\x18\a \x01(\bR\fuserModified\x12'\n" +
 	"\x0fstale_recovered\x18\b \x01(\bR\x0estaleRecovered\x12%\n" +
-	"\x0ememdir_stamped\x18\t \x01(\bR\rmemdirStamped\"\xe9\x01\n" +
+	"\x0ememdir_stamped\x18\t \x01(\bR\rmemdirStamped\"\x90\x02\n" +
 	"\vWriteResult\x12\x12\n" +
 	"\x04type\x18\x01 \x01(\tR\x04type\x12\x1b\n" +
 	"\tfile_path\x18\x02 \x01(\tR\bfilePath\x12\x18\n" +
 	"\acontent\x18\x03 \x01(\tR\acontent\x12#\n" +
 	"\roriginal_file\x18\x04 \x01(\tR\foriginalFile\x12E\n" +
 	"\x10structured_patch\x18\x05 \x01(\v2\x1a.google.protobuf.ListValueR\x0fstructuredPatch\x12#\n" +
-	"\ruser_modified\x18\x06 \x01(\bR\fuserModified\"o\n" +
+	"\ruser_modified\x18\x06 \x01(\bR\fuserModified\x12%\n" +
+	"\x0ememdir_stamped\x18\a \x01(\bR\rmemdirStamped\"o\n" +
 	"\vSkillResult\x12!\n" +
 	"\fcommand_name\x18\x01 \x01(\tR\vcommandName\x12\x18\n" +
 	"\asuccess\x18\x02 \x01(\bR\asuccess\x12#\n" +
@@ -8453,16 +8537,19 @@ const file_agentshim_data_v1_tools_proto_rawDesc = "" +
 	"\x10duration_seconds\x18\x01 \x01(\x01R\x0fdurationSeconds\x12\x14\n" +
 	"\x05query\x18\x02 \x01(\tR\x05query\x124\n" +
 	"\aresults\x18\x03 \x01(\v2\x1a.google.protobuf.ListValueR\aresults\x12!\n" +
-	"\fsearch_count\x18\x04 \x01(\x03R\vsearchCount\"\xc0\x01\n" +
+	"\fsearch_count\x18\x04 \x01(\x03R\vsearchCount\"\xe6\x01\n" +
 	"\x15AskUserQuestionResult\x129\n" +
 	"\tquestions\x18\x01 \x03(\v2\x1b.agentshim.data.v1.QuestionR\tquestions\x121\n" +
 	"\aanswers\x18\x02 \x01(\v2\x17.google.protobuf.StructR\aanswers\x129\n" +
-	"\vannotations\x18\x03 \x01(\v2\x17.google.protobuf.StructR\vannotations\"\x90\x01\n" +
+	"\vannotations\x18\x03 \x01(\v2\x17.google.protobuf.StructR\vannotations\x12$\n" +
+	"\x0eafk_timeout_ms\x18\x04 \x01(\x03R\fafkTimeoutMs\"\xd7\x01\n" +
 	"\x14ScheduleWakeupResult\x122\n" +
 	"\x15clamped_delay_seconds\x18\x01 \x01(\x03R\x13clampedDelaySeconds\x12#\n" +
 	"\rscheduled_for\x18\x02 \x01(\x03R\fscheduledFor\x12\x1f\n" +
 	"\vwas_clamped\x18\x03 \x01(\bR\n" +
-	"wasClamped\"E\n" +
+	"wasClamped\x12\x18\n" +
+	"\astopped\x18\x04 \x01(\bR\astopped\x12+\n" +
+	"\x11cancelled_wakeups\x18\x05 \x01(\x03R\x10cancelledWakeups\"E\n" +
 	"\x16StructuredOutputResult\x12+\n" +
 	"\x04data\x18\x01 \x01(\v2\x17.google.protobuf.StructR\x04data\"\xd7\x01\n" +
 	"\n" +

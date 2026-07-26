@@ -1590,6 +1590,8 @@ function classifyToolResult(o: Record<string, unknown>): ToolUseResult["result"]
       staleReadFileStateHint: strOf(pick(o, "stale_read_file_state_hint", "staleReadFileStateHint")),
       backgroundTaskId: strOf(pick(o, "background_task_id", "backgroundTaskId")),
       backgroundCwdHint: strOf(pick(o, "background_cwd_hint", "backgroundCwdHint")),
+      dangerouslyDisableSandbox: pick(o, "dangerously_disable_sandbox", "dangerouslyDisableSandbox") === true,
+      backgroundedByUser: pick(o, "backgrounded_by_user", "backgroundedByUser") === true,
     }) };
   }
   // Agent/Task BACKGROUND launch. `is_async` is unique to this member of the
@@ -1637,6 +1639,8 @@ function classifyToolResult(o: Record<string, unknown>): ToolUseResult["result"]
         linesRemoved: bigOf(pick(stats, "lines_removed", "linesRemoved")),
         otherToolCount: bigOf(pick(stats, "other_tool_count", "otherToolCount")),
       }) : undefined,
+      worktreePath: strOf(pick(o, "worktree_path", "worktreePath")),
+      worktreeBranch: strOf(pick(o, "worktree_branch", "worktreeBranch")),
     }) };
   }
   if (has("commandName") || (has("command_name") && any("success", "allowedTools", "allowed_tools"))) {
@@ -1737,6 +1741,7 @@ function classifyToolResult(o: Record<string, unknown>): ToolUseResult["result"]
       originalFile: strOf(pick(o, "original_file", "originalFile")),
       structuredPatch: asListValueOpt(pick(o, "structured_patch", "structuredPatch")),
       userModified: pick(o, "user_modified", "userModified") === true,
+      memdirStamped: pick(o, "memdir_stamped", "memdirStamped") === true,
     }) };
   }
   if (any("clampedDelaySeconds", "clamped_delay_seconds", "scheduledFor", "scheduled_for")) {
@@ -1744,6 +1749,8 @@ function classifyToolResult(o: Record<string, unknown>): ToolUseResult["result"]
       clampedDelaySeconds: bigOf(pick(o, "clamped_delay_seconds", "clampedDelaySeconds")),
       scheduledFor: bigOf(pick(o, "scheduled_for", "scheduledFor")),
       wasClamped: pick(o, "was_clamped", "wasClamped") === true,
+      stopped: pick(o, "stopped") === true,
+      cancelledWakeups: bigOf(pick(o, "cancelled_wakeups", "cancelledWakeups")),
     }) };
   }
   if (has("questions") && has("answers")) {
@@ -1751,6 +1758,7 @@ function classifyToolResult(o: Record<string, unknown>): ToolUseResult["result"]
       questions: questionsOf(o["questions"]),
       answers: asStructOpt(o["answers"]),
       annotations: asStructOpt(o["annotations"]),
+      afkTimeoutMs: bigOf(pick(o, "afk_timeout_ms", "afkTimeoutMs")),
     }) };
   }
   if (any("searchCount", "search_count", "durationSeconds", "duration_seconds")) {
