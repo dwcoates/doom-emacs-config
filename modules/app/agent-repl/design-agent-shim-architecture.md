@@ -348,6 +348,68 @@ Enums: `Plane`, `EventClass`, `TaskKind`, `TerminalStatus`, `SessionSource`,
 | `DegradedNotice` | store/sidecar/shim outage surfaced honestly |
 | `StateSnapshot` | full resync on frontend (re)connect |
 
+#### 5.4.1 Resync and the bounded below-floor history re-pull
+
+`StateSnapshot` carries NO conversation, by design. Conversation reaches a
+frontend only as pushed `ConversationDelta`s, which are fire-and-forget: a
+freshly-mounted GUI never sees what was pushed before it existed. So a
+(re)connecting frontend sends `ResyncCmd{from_seq}` and the daemon answers in
+two layers:
+
+1. **The retained ring** (`sessiondrv`, 4,096 events). Replayed from `from_seq`
+   as ordinary `ConversationDelta`s. Idempotent: frontends reconcile by uuid, so
+   a re-push REPLACES.
+2. **The below-floor re-pull** (`daemon/internal/storesub`), when `from_seq`
+   falls below the ring's oldest retained seq — which after a daemon restart is
+   EVERY request, since the ring is empty then. The floor comes from the ring
+   when it holds anything, and otherwise from the durable `last_seen_seq` plus
+   one.
+
+The re-pull deliberately reopens a tradeoff this design closed elsewhere: the
+daemon subscribes each shim from its HIGH-WATER mark precisely to avoid replay
+storms (a resumed conversation that re-subscribed from 0 once queued the first
+prompt behind ~6,000 replayed frames and blew its ack timeout). Four standing
+constraints are what keep the re-pull from becoming that:
+
+- **Frontend-initiated.** Nothing in the daemon ever starts one; it exists only
+  as the tail of a `ResyncCmd`.
+- **Bounded.** It stops at the ring floor, a hard event cap, an idle window, and
+  a deadline. A bound that trips is reported, never absorbed.
+- **A side channel.** It opens its OWN throwaway subscriber connection to the
+  store. It must NOT be done by sending the shim a low `Subscribe{from_seq}`:
+  the shim's `onSubscribe` reopens its one standing store subscription, which
+  would move the daemon's own position backwards AND replay everything down the
+  connection the SSM, task catalog, and progress resolver feed from.
+- **Conversation only.** Re-pulled events reach conversation translation and
+  nothing else — not the SSM, not `BuildTaskCatalog`, not the progress resolver,
+  not the retained ring. Those planes consumed these events once already, and
+  double-applying them is exactly what makes historical tasks masquerade as live
+  activity (see §5.4.2).
+
+At most one re-pull runs per workspace. A concurrent request whose range the
+in-flight pull already covers is coalesced onto it (the pull's output is
+broadcast to every subscriber of the workspace, so the second caller really is
+served); one reaching further back is refused loudly rather than silently
+under-served.
+
+#### 5.4.2 `BackgroundTasksChanged` is the authoritative live-task set
+
+`data.BackgroundTasksChanged` is the only event carrying the FULL current live
+task set, and the daemon used to drop it. It is now folded into both task
+planes as authoritative reconciliation:
+
+- `BuildTaskCatalog` sweeps any running entry absent from the list (status
+  `lost`, ended at the snapshot's timestamp) and opens an entry for any id in
+  the list it had never seen.
+- The SSM appends reconciliation rows so `live_task_count` equals the list's
+  size exactly, in BOTH failure directions: ghost starts with no end, and — the
+  shape a cursor-recovery failure produces — mass `task_ended` with no logged
+  `task_started`, which is what drove the observed `IMPOSSIBLE
+  live_task_count=-114`.
+
+The negative-count clamp in `ssm/resolve.go` stays: it is the loud report of an
+impossible state, and reconciliation removes its cause rather than its voice.
+
 ---
 
 ## 6. shim-store specification

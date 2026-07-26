@@ -410,6 +410,14 @@ func compactBoundaryItems(cb *datav1.CompactBoundary, tsMs int64, requestID stri
 // TaskProgress / TaskEnded) into a TaskCatalog, preserving task start order.
 // TaskProgress does not change status; TaskEnded stamps the terminal status and
 // end time. Non-task events are ignored.
+//
+// A vendor `data.BackgroundTasksChanged` is AUTHORITATIVE reconciliation, not
+// another increment: the SDK sends the complete live set on every change, so at
+// that point in the stream the live set IS that list. Folding it (see
+// applyBackgroundTasks) sweeps ghosts immediately instead of leaving them
+// running until a LOST staleness sweep gets to them — which is what let
+// replayed HISTORICAL task events masquerade as live activity in the footer's
+// roster.
 func BuildTaskCatalog(workspace, sessionID string, events []*corev1.Event) *frontendv1.TaskCatalog {
 	index := map[string]*frontendv1.TaskEntry{}
 	var order []string
@@ -443,6 +451,10 @@ func BuildTaskCatalog(workspace, sessionID string, events []*corev1.Event) *fron
 			if op := te.GetOutputPath(); op != "" {
 				e.OutputPath = op
 			}
+		case *corev1.Event_Vendor:
+			if btc := BackgroundTasksFromVendor(p.Vendor); btc != nil {
+				applyBackgroundTasks(btc, ev.GetProducedAtMs(), index, get)
+			}
 		}
 	}
 	catalog := &frontendv1.TaskCatalog{Workspace: workspace, SessionId: sessionID}
@@ -450,6 +462,78 @@ func BuildTaskCatalog(workspace, sessionID string, events []*corev1.Event) *fron
 		catalog.Tasks = append(catalog.Tasks, index[id])
 	}
 	return catalog
+}
+
+// BackgroundTasksFromVendor decodes a vendor event's Any into its
+// BackgroundTasksChanged arm, or nil when the Any is anything else. Exported so
+// the session driver can recognize the event without re-deriving the unwrap.
+func BackgroundTasksFromVendor(a *anypb.Any) *datav1.BackgroundTasksChanged {
+	if a == nil {
+		return nil
+	}
+	msg, err := a.UnmarshalNew()
+	if err != nil {
+		return nil
+	}
+	csm, ok := msg.(*datav1.ClaudeStreamMessage)
+	if !ok {
+		return nil
+	}
+	return csm.GetBackgroundTasksChanged()
+}
+
+// applyBackgroundTasks reconciles the folded catalog against an authoritative
+// live set, in both directions:
+//
+//   - A running entry ABSENT from the list is swept to `lost` at this event's
+//     timestamp. `lost`, not `done`: the session says it is no longer running
+//     and never said how it finished, and claiming success would be a
+//     fabrication. It is the same terminal status the staleness sweep would
+//     eventually assign, arrived at immediately.
+//   - An id in the list with no entry yet is opened as `running`, carrying the
+//     ref's type and description. Its start time is this event's timestamp —
+//     the honest "first observed here", never a fabricated earlier one.
+//   - An id in the list whose entry is already TERMINAL is re-opened: the list
+//     is the live set as of this point in the stream, and a later TaskEnded
+//     folds after it and closes it again.
+func applyBackgroundTasks(
+	btc *datav1.BackgroundTasksChanged,
+	atMs int64,
+	index map[string]*frontendv1.TaskEntry,
+	get func(string) *frontendv1.TaskEntry,
+) {
+	live := make(map[string]struct{}, len(btc.GetTasks()))
+	for _, ref := range btc.GetTasks() {
+		if ref.GetTaskId() != "" {
+			live[ref.GetTaskId()] = struct{}{}
+		}
+	}
+	for id, e := range index {
+		if _, ok := live[id]; ok {
+			continue
+		}
+		if e.GetStatus() == "running" {
+			e.Status = terminalStatusString(corev1.TerminalStatus_TERMINAL_STATUS_LOST)
+			e.EndedAtMs = atMs
+		}
+	}
+	for _, ref := range btc.GetTasks() {
+		if ref.GetTaskId() == "" {
+			continue
+		}
+		e := get(ref.GetTaskId())
+		if e.GetStartedAtMs() == 0 {
+			e.StartedAtMs = atMs
+		}
+		if e.GetKind() == "" {
+			e.Kind = ref.GetTaskType()
+		}
+		if e.GetDescription() == "" {
+			e.Description = ref.GetDescription()
+		}
+		e.Status = "running"
+		e.EndedAtMs = 0
+	}
 }
 
 // ---------------------------------------------------------------------------
