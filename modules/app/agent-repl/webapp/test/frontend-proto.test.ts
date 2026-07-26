@@ -642,11 +642,18 @@ describe("ProgressView decoding (F1)", () => {
     ).toThrow(/missing required `workspace`/);
   });
 
-  it("rejects an UNSPECIFIED phase mirror", () => {
-    // Arrange / Act / Assert — the resolver seeds INIT, so this is malformed.
-    expect(() => decodeFrontendFrame(pv({ state: "RENDER_STATE_UNSPECIFIED" }))).toThrow(
-      /UNSPECIFIED/,
-    );
+  it("accepts a view carrying no phase at all", () => {
+    // Arrange / Act / Assert — the phase moved to WorkspaceState (F5), so a
+    // ProgressView without one is the NORMAL shape rather than a malformed
+    // frame. The daemon stopped populating the field, and protojson omits it.
+    expect(() => decodeFrontendFrame(pv())).not.toThrow();
+  });
+
+  it("tolerates the deprecated phase mirror an older daemon still sends", () => {
+    // Arrange / Act / Assert — the field stays on the wire until the
+    // approval-gated removal pass, so it must not trip the strict decoder's
+    // unrecognized-field rejection. It is accepted and not read.
+    expect(() => decodeFrontendFrame(pv({ state: "RENDER_STATE_THINKING" }))).not.toThrow();
   });
 
   it("rejects an unrecognized field", () => {
