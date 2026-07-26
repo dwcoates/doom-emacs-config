@@ -1407,6 +1407,121 @@ describe("web_fetch arm", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Tool-result fields the DEPLOYED sidecar loud-logged as unknown on real
+// transcripts: each was genuinely unmodeled, so each is now typed additively.
+// One populated + one absent case per field.
+// ---------------------------------------------------------------------------
+
+describe("tool-result fields the sidecar logged as unknown", () => {
+  const bash = (extra: Record<string, unknown>) =>
+    convertToolUseResult({ stdout: "", stderr: "", interrupted: false, ...extra }, "s");
+  const write = (extra: Record<string, unknown>) =>
+    convertToolUseResult({ type: "update", filePath: "/f", content: "c", structuredPatch: [], ...extra }, "s");
+  const wakeup = (extra: Record<string, unknown>) =>
+    convertToolUseResult({ scheduledFor: 1, clampedDelaySeconds: 60, ...extra }, "s");
+  const question = (extra: Record<string, unknown>) =>
+    convertToolUseResult({ questions: [], answers: {}, ...extra }, "s");
+  const agent = (extra: Record<string, unknown>) =>
+    convertToolUseResult({ status: "completed", agentId: "a1", prompt: "p", content: [], totalDurationMs: 1, totalTokens: 1, totalToolUseCount: 1, ...extra }, "s");
+
+  it("types a Bash result's dangerouslyDisableSandbox", () => {
+    const r = bash({ dangerouslyDisableSandbox: true });
+    if (r.result.case !== "bash") throw new Error("case");
+    expect(r.result.value.dangerouslyDisableSandbox).toBe(true);
+  });
+
+  it("leaves dangerouslyDisableSandbox false when the Bash result omits it", () => {
+    const r = bash({});
+    if (r.result.case !== "bash") throw new Error("case");
+    expect(r.result.value.dangerouslyDisableSandbox).toBe(false);
+  });
+
+  it("types a Bash result's backgroundedByUser", () => {
+    const r = bash({ backgroundedByUser: true });
+    if (r.result.case !== "bash") throw new Error("case");
+    expect(r.result.value.backgroundedByUser).toBe(true);
+  });
+
+  it("leaves backgroundedByUser false when the Bash result omits it", () => {
+    const r = bash({});
+    if (r.result.case !== "bash") throw new Error("case");
+    expect(r.result.value.backgroundedByUser).toBe(false);
+  });
+
+  it("types a Write result's memdirStamped", () => {
+    const r = write({ memdirStamped: true });
+    if (r.result.case !== "write") throw new Error("case");
+    expect(r.result.value.memdirStamped).toBe(true);
+  });
+
+  it("leaves memdirStamped false when the Write result omits it", () => {
+    const r = write({});
+    if (r.result.case !== "write") throw new Error("case");
+    expect(r.result.value.memdirStamped).toBe(false);
+  });
+
+  it("types a ScheduleWakeup result's stopped flag", () => {
+    const r = wakeup({ stopped: true });
+    if (r.result.case !== "scheduleWakeup") throw new Error("case");
+    expect(r.result.value.stopped).toBe(true);
+  });
+
+  it("leaves stopped false when the ScheduleWakeup result omits it", () => {
+    const r = wakeup({});
+    if (r.result.case !== "scheduleWakeup") throw new Error("case");
+    expect(r.result.value.stopped).toBe(false);
+  });
+
+  it("types a ScheduleWakeup result's cancelledWakeups count", () => {
+    const r = wakeup({ stopped: true, cancelledWakeups: 2 });
+    if (r.result.case !== "scheduleWakeup") throw new Error("case");
+    expect(r.result.value.cancelledWakeups).toBe(2n);
+  });
+
+  it("leaves cancelledWakeups zero when the ScheduleWakeup result omits it", () => {
+    const r = wakeup({});
+    if (r.result.case !== "scheduleWakeup") throw new Error("case");
+    expect(r.result.value.cancelledWakeups).toBe(0n);
+  });
+
+  it("types an AskUserQuestion result's afkTimeoutMs", () => {
+    const r = question({ afkTimeoutMs: 60000 });
+    if (r.result.case !== "askUserQuestion") throw new Error("case");
+    expect(r.result.value.afkTimeoutMs).toBe(60000n);
+  });
+
+  it("leaves afkTimeoutMs zero when the AskUserQuestion result omits it", () => {
+    const r = question({});
+    if (r.result.case !== "askUserQuestion") throw new Error("case");
+    expect(r.result.value.afkTimeoutMs).toBe(0n);
+  });
+
+  it("types an Agent result's worktreePath", () => {
+    const r = agent({ worktreePath: "/w/tree" });
+    if (r.result.case !== "agent") throw new Error("case");
+    expect(r.result.value.worktreePath).toBe("/w/tree");
+  });
+
+  it("leaves worktreePath empty when the Agent result omits it", () => {
+    const r = agent({});
+    if (r.result.case !== "agent") throw new Error("case");
+    expect(r.result.value.worktreePath).toBe("");
+  });
+
+  it("types an Agent result's worktreeBranch", () => {
+    const r = agent({ worktreeBranch: "worktree-agent-a1" });
+    if (r.result.case !== "agent") throw new Error("case");
+    expect(r.result.value.worktreeBranch).toBe("worktree-agent-a1");
+  });
+
+  it("leaves worktreeBranch empty when the Agent result omits it", () => {
+    const r = agent({});
+    if (r.result.case !== "agent") throw new Error("case");
+    expect(r.result.value.worktreeBranch).toBe("");
+  });
+});
+
 describe("ToolReferenceBlock typing", () => {
   /** Walk user -> content_blocks -> tool_result -> content_blocks -> [0]. */
   function toolReferenceOf(toolName: string) {
