@@ -24,6 +24,7 @@ import (
 
 	"google.golang.org/protobuf/encoding/protojson"
 
+	"claude-repld/internal/errclass"
 	"claude-repld/internal/frontend"
 	"claude-repld/internal/registry"
 	"claude-repld/internal/session"
@@ -470,7 +471,7 @@ func TestSessionViewFromRecordShapesParityFields(t *testing.T) {
 		DeathReason:     "delete session",
 	}
 	// Act
-	v := SessionViewFromRecord(rec, []string{"p1", "p2"})
+	v := SessionViewFromRecord(nil, rec, []string{"p1", "p2"})
 	// Assert — the S7 parity fields plus the pending-permission COUNT.
 	if !v.GetTerminal() || v.GetDeathReason() != "delete session" {
 		t.Errorf("terminal/death = %v/%q", v.GetTerminal(), v.GetDeathReason())
@@ -486,12 +487,103 @@ func TestSessionViewFromRecordShapesParityFields(t *testing.T) {
 	}
 }
 
+// --- SessionView.death (F4) -------------------------------------------------
+//
+// death_reason had two producers and ZERO readers, because a frontend could
+// not tell what class of failure the string described. These assert the typed
+// counterpart, one edge case per test.
+
+func TestSessionViewClassifiesADeletedSession(t *testing.T) {
+	// Arrange.
+	rec := registry.Record{SessionID: "s1", CWD: "/w", Terminal: true, DeathReason: errclass.DeathReasonDeleted}
+
+	// Act.
+	v := SessionViewFromRecord(nil, rec, nil)
+
+	// Assert.
+	if got := v.GetDeath().GetErrorType(); got != string(errclass.TypeSessionDeleted) {
+		t.Fatalf("death error_type = %q, want %q", got, errclass.TypeSessionDeleted)
+	}
+}
+
+func TestSessionViewClassifiesASupersededSession(t *testing.T) {
+	// Arrange.
+	rec := registry.Record{SessionID: "s1", CWD: "/w", Terminal: true, DeathReason: errclass.DeathReasonSuperseded}
+
+	// Act.
+	v := SessionViewFromRecord(nil, rec, nil)
+
+	// Assert.
+	if got := v.GetDeath().GetErrorType(); got != string(errclass.TypeSessionSuperseded) {
+		t.Fatalf("death error_type = %q, want %q", got, errclass.TypeSessionSuperseded)
+	}
+}
+
+func TestSessionViewClassifiesAShimDeath(t *testing.T) {
+	// Arrange: the reason the registry documented and nothing ever wrote,
+	// until the driver's SessionEnded hook.
+	rec := registry.Record{SessionID: "s1", CWD: "/w", Terminal: true, DeathReason: errclass.DeathReasonShimDied}
+
+	// Act.
+	v := SessionViewFromRecord(nil, rec, nil)
+
+	// Assert.
+	if got := v.GetDeath().GetErrorType(); got != string(errclass.TypeSessionShimDied) {
+		t.Fatalf("death error_type = %q, want %q", got, errclass.TypeSessionShimDied)
+	}
+}
+
+func TestSessionViewClassifiesALegacyDeathReasonLoudly(t *testing.T) {
+	// Arrange: a registry carried over from a build predating the vocabulary.
+	var logged []string
+	logf := func(format string, args ...any) { logged = append(logged, fmt.Sprintf(format, args...)) }
+	rec := registry.Record{SessionID: "s1", CWD: "/w", Terminal: true, DeathReason: "some ancient reason"}
+
+	// Act.
+	v := SessionViewFromRecord(logf, rec, nil)
+
+	// Assert.
+	if got := v.GetDeath().GetErrorType(); got != string(errclass.TypeSessionEndedUnclassified) {
+		t.Fatalf("death error_type = %q, want %q", got, errclass.TypeSessionEndedUnclassified)
+	}
+	if len(logged) == 0 {
+		t.Fatal("an unknown death reason passed SILENTLY; the default must be loud")
+	}
+}
+
+func TestSessionViewCarriesNoDeathWhileTheSessionLives(t *testing.T) {
+	// Arrange: a live session has not died, so it has nothing to explain.
+	rec := registry.Record{SessionID: "s1", CWD: "/w"}
+
+	// Act.
+	v := SessionViewFromRecord(nil, rec, nil)
+
+	// Assert.
+	if v.GetDeath() != nil {
+		t.Fatalf("death = %v, want nil for a live session", v.GetDeath())
+	}
+}
+
+func TestSessionViewKeepsTheLegacyDeathReasonString(t *testing.T) {
+	// Arrange: the string stays populated until both frontends read the
+	// typed field.
+	rec := registry.Record{SessionID: "s1", CWD: "/w", Terminal: true, DeathReason: errclass.DeathReasonDeleted}
+
+	// Act.
+	v := SessionViewFromRecord(nil, rec, nil)
+
+	// Assert.
+	if v.GetDeathReason() != errclass.DeathReasonDeleted {
+		t.Fatalf("death_reason = %q, want it preserved", v.GetDeathReason())
+	}
+}
+
 func TestSessionViewFromRecordCarriesConfigDir(t *testing.T) {
 	// Arrange — a record whose shim runs under a non-default account root.
 	rec := registry.Record{SessionID: "s1", CWD: "/w", ConfigDir: "/cfg-work"}
 
 	// Act.
-	v := SessionViewFromRecord(rec, nil)
+	v := SessionViewFromRecord(nil, rec, nil)
 
 	// Assert — the account root rides on the SessionView (S8).
 	if v.GetConfigDir() != "/cfg-work" {
@@ -513,7 +605,7 @@ func TestSessionViewCarriesTheBackfillState(t *testing.T) {
 	}
 	for _, c := range cases {
 		rec := registry.Record{SessionID: "s1", CWD: "/w", BackfillState: c.stored}
-		if got := SessionViewFromRecord(rec, nil).GetBackfill(); got != c.want {
+		if got := SessionViewFromRecord(nil, rec, nil).GetBackfill(); got != c.want {
 			t.Fatalf("stored %q -> %v, want %v", c.stored, got, c.want)
 		}
 	}
@@ -524,7 +616,7 @@ func TestAnUnrecognizedBackfillTokenReadsAsUnspecified(t *testing.T) {
 	rec := registry.Record{SessionID: "s1", CWD: "/w", BackfillState: "teleporting"}
 
 	// Act
-	got := SessionViewFromRecord(rec, nil).GetBackfill()
+	got := SessionViewFromRecord(nil, rec, nil).GetBackfill()
 
 	// Assert — UNSPECIFIED is the SAFE direction: it makes the switch-ensure
 	// retry rather than skip, so an unreadable token cannot leave a workspace
