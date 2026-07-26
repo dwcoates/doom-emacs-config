@@ -31,6 +31,19 @@ export const CLIENT_FAILURE_TYPES = [
   "client.session_gone",
   /** The webapp could not boot at all. */
   "client.boot_failed",
+  /**
+   * A user-initiated call to the daemon's HTTP control plane failed.
+   *
+   * These used to reach `clog` and stop there: a failed account switch, a
+   * refused login and a remediation that never dispatched each produced a
+   * console line the user will never open, and no other sign whatsoever.
+   * The user pressed a button and the interface said nothing.
+   *
+   * The command plane is NOT this: a rejected `SubmitPromptCmd` comes back
+   * as a daemon-classified `CommandAck.err`, and re-classifying it here
+   * would be this end deciding something the daemon already decided.
+   */
+  "client.control_plane_failed",
 ] as const;
 export type ClientFailureType = (typeof CLIENT_FAILURE_TYPES)[number];
 
@@ -66,6 +79,28 @@ export function clientFailure(
     sourceDetail,
     resolvedAtMs,
     uuid: `local:${type}`,
+  };
+}
+
+/**
+ * Classify a failed control-plane call as the frontend's own failure.
+ *
+ * `what` names the action in the user's terms ("the account switch"), not the
+ * endpoint's — a card reading "POST /accounts/switch failed" explains nothing
+ * to the person who clicked a menu item.
+ *
+ * The uuid carries `what`, so two different failed actions are two cards
+ * while a retried one reconciles onto its own. Keying every control-plane
+ * failure alike would let a failed login overwrite a failed remediation.
+ */
+export function controlPlaneFailure(what: string, err: unknown): SystemFailureCard {
+  return {
+    ...clientFailure(
+      "client.control_plane_failed",
+      `${what} failed`,
+      err instanceof Error ? err.message : String(err),
+    ),
+    uuid: `local:client.control_plane_failed:${what}`,
   };
 }
 

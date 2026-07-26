@@ -52,7 +52,9 @@ import { attachLoginTerminal, type LoginTerminal } from "./login-terminal.js";
 import { closeLogin, loginNotice, requestLogin } from "./login.js";
 import { PermissionMode } from "./protocol.js";
 import { decodeFrontendFrame } from "./frontend-proto.js";
+import { escapeHtml } from "./highlight.js";
 import {
+  controlPlaneFailure,
   daemonReachableFailure,
   daemonUnreachableFailure,
   sessionGoneFailure,
@@ -733,6 +735,11 @@ async function boot(): Promise<void> {
         // effort that does not exist.
         remediationEl.textContent = remediationNotice("failed");
         clog("error", `remediation dispatch failed: ${String(err)}`);
+        // The notice line is transient — the next status overwrites it. The
+        // card is the durable record, and it carries the raw cause the
+        // notice has no room for.
+        if (store.addFailure(controlPlaneFailure("the remediation request", err)))
+          frames.schedule();
       });
   };
 
@@ -1059,6 +1066,8 @@ async function boot(): Promise<void> {
         // would send the user off to look for a terminal that is not coming.
         remediationEl.textContent = loginNotice("failed");
         clog("warn", `login request failed: ${String(err)}`);
+        if (store.addFailure(controlPlaneFailure("the login request", err)))
+          frames.schedule();
       })
       .finally(() => {
         accountEl.disabled = false;
@@ -1085,6 +1094,8 @@ async function boot(): Promise<void> {
         // spend tokens as whichever account they BELIEVE is active.
         remediationEl.textContent = "account switch failed";
         clog("error", `account switch failed: ${String(err)}`);
+        if (store.addFailure(controlPlaneFailure("the account switch", err)))
+          frames.schedule();
       })
       .finally(() => {
         accountEl.disabled = false;
@@ -1164,6 +1175,16 @@ async function boot(): Promise<void> {
 boot().catch((err: unknown) => {
   const feed = document.getElementById("feed");
   if (feed) {
-    feed.innerHTML = `<div class="error-banner">boot failed: ${String(err)}</div>`;
+    // The boot failure is the one card the store cannot carry — boot is what
+    // builds the store. It is rendered directly, but through the SAME classes
+    // every other failure uses, so the one surface a user hits when nothing
+    // else works does not look like a different application.
+    // It previously emitted `.error-banner`, a class the stylesheet no longer
+    // defines: unstyled black text on the feed background.
+    feed.innerHTML =
+      `<div class="failure-card failure-internal" data-error-type="client.boot_failed">` +
+      `<div class="failure-head"><span class="failure-mark">✕</span>` +
+      `<span class="failure-message">agent-repl could not start</span></div>` +
+      `<div class="failure-detail">${escapeHtml(String(err))}</div></div>`;
   }
 });
