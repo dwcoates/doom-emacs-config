@@ -163,6 +163,65 @@ func TestOpenEnsuresTheSessionEagerly(t *testing.T) {
 	}
 }
 
+func TestRepeatedOpensAreIdempotent(t *testing.T) {
+	// Arrange — Emacs sends `openWorkspace' on every workspace SWITCH (the
+	// never-blue switch half), so repeat opens are the STEADY STATE, not an
+	// edge case. This pins the property that decision rests on: open means
+	// "ensure this workspace", so sending it again is safe.
+	cfg := t.TempDir()
+	o, reg, ens, _ := openerRig(t, cfg)
+	writeProjectTranscript(t, cfg, "/w", "uuid-disk")
+	if err := reg.Put(registry.Record{SessionID: "s_1", CWD: "/w", ConfigDir: cfg, CreatedAt: "2026-07-25T10:00:00Z"}); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+
+	// Act — three switches to the same workspace.
+	for i := 0; i < 3; i++ {
+		if err := o.Open(context.Background(), "/w"); err != nil {
+			t.Fatalf("Open #%d: %v", i+1, err)
+		}
+	}
+
+	// Assert — the bind happened exactly once (the first open discovered the
+	// transcript; the rest found the record already bound and left it alone),
+	// and each open forwarded one Ensure, which bringUp collapses to a map
+	// lookup once a driver exists.
+	rec, _ := reg.Get("s_1")
+	if rec.ClaudeSessionID != "uuid-disk" {
+		t.Fatalf("ClaudeSessionID = %q; want the once-bound uuid-disk", rec.ClaudeSessionID)
+	}
+	if len(ens.calls) != 3 {
+		t.Fatalf("Ensure calls = %v; want one per open", ens.calls)
+	}
+}
+
+func TestRepeatedOpensNeverRebindADiscoveredTranscript(t *testing.T) {
+	// Arrange — a NEWER transcript appears after the first open bound an
+	// older one. A re-open must not silently move the session onto it: the
+	// binding is the conversation the user is in.
+	cfg := t.TempDir()
+	o, reg, _, _ := openerRig(t, cfg)
+	writeProjectTranscript(t, cfg, "/w", "uuid-first")
+	if err := reg.Put(registry.Record{SessionID: "s_1", CWD: "/w", ConfigDir: cfg, CreatedAt: "2026-07-25T10:00:00Z"}); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+	if err := o.Open(context.Background(), "/w"); err != nil {
+		t.Fatalf("first Open: %v", err)
+	}
+	writeProjectTranscript(t, cfg, "/w", "uuid-second")
+
+	// Act
+	if err := o.Open(context.Background(), "/w"); err != nil {
+		t.Fatalf("second Open: %v", err)
+	}
+
+	// Assert
+	rec, _ := reg.Get("s_1")
+	if rec.ClaudeSessionID != "uuid-first" {
+		t.Fatalf("ClaudeSessionID = %q; want the original binding kept", rec.ClaudeSessionID)
+	}
+}
+
 func TestOpenSurfacesAnEnsureFailure(t *testing.T) {
 	// Arrange
 	cfg := t.TempDir()
