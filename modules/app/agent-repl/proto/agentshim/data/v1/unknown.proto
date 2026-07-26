@@ -1,0 +1,75 @@
+// agentshim.data.v1 unknown — the PASSTHROUGH arm every closed union carries.
+//
+// WHY THIS EXISTS. The data.v1 vocabularies model a format Anthropic
+// documents as internal and explicitly version-unstable ("the entry format
+// is internal to Claude Code and changes between versions"). A closed oneof
+// over an unstable format turns every future vendor addition into a hard
+// error the moment it ships. That contradicts the Event.extras contract in
+// core.proto, which promises unknown material is CAPTURED, never dropped —
+// a promise the closed oneofs could not honor, because there was nowhere to
+// put a record whose discriminator no arm matched.
+//
+// THE SPLIT (normative). UnknownRecord and core.UnparsedEvent are NOT
+// alternatives; they answer different questions and both remain in force:
+//
+//   - core.UnparsedEvent  — "a record of a KNOWN shape FAILED conversion."
+//     A `user` message with no `message`, a `content_block_delta` with an
+//     unusable delta arm, a line that is not JSON. The schema says what this
+//     should look like and the data did not comply. Still a hard error, still
+//     carries the raw bytes and the verbatim reason. Nothing here relaxes it.
+//
+//   - UnknownRecord       — "the DISCRIMINATOR itself is unrecognized."
+//     A `type` or `subtype` the schema has never heard of. There is no
+//     expectation to violate, so failing is wrong: the honest answer is to
+//     preserve the record whole and say plainly which discriminator was
+//     unknown. A converter MUST NOT guess an arm for it.
+//
+// The practical test: if removing an arm from the union would turn a record
+// into an UnknownRecord, it belongs here; if the record would still be
+// rejected with every arm present, it is an UnparsedEvent.
+//
+// CONTRACT for producers filling this in:
+//   - `raw` holds the record ENTIRE and verbatim, including the
+//     discriminator. Nothing is stripped, summarized, or normalized.
+//   - The containing Event.extras is NOT also populated from the same
+//     record: `raw` already has every field, and duplicating it would make
+//     the unknown-field log lie about what is genuinely new.
+//   - The unknown discriminator is loud-logged ONCE per distinct value, the
+//     same once-per-name discipline Event.extras uses for field paths.
+
+syntax = "proto3";
+
+package agentshim.data.v1;
+
+import "google/protobuf/struct.proto";
+
+option go_package = "agentrepl/proto/agentshim/data/v1;datav1";
+
+// Which field carried the discriminator that no arm matched. Recorded so a
+// consumer can tell "a whole new top-level family appeared" (TYPE) from
+// "a family we model grew a new variant" (SUBTYPE) without re-parsing raw.
+enum DiscriminatorField {
+  DISCRIMINATOR_FIELD_UNSPECIFIED = 0;
+  DISCRIMINATOR_FIELD_TYPE = 1;     // top-level `type`
+  DISCRIMINATOR_FIELD_SUBTYPE = 2;  // `subtype` within a known `type`
+}
+
+// The passthrough arm of a closed union: a record whose discriminator the
+// schema does not model, preserved whole.
+message UnknownRecord {
+  // The unrecognized discriminator value, verbatim (e.g. "api_retry",
+  // "token_usage"). Empty only when the record carried none at all.
+  string discriminator = 1;
+
+  // Which field `discriminator` was read from.
+  DiscriminatorField discriminator_field = 2;
+
+  // The record ENTIRE and verbatim — the whole point of this message. A
+  // consumer that later learns the shape can reconstruct it from here with
+  // no loss, and a schema update can backfill from stored events.
+  google.protobuf.Struct raw = 3;
+
+  // For a SUBTYPE unknown, the known outer `type` it appeared under (e.g.
+  // "system"). Empty for a TYPE unknown, where `discriminator` is the type.
+  string parent_type = 4;
+}

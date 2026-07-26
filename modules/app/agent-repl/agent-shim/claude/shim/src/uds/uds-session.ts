@@ -31,7 +31,7 @@
 import { AsyncQueue } from "../input-queue.js";
 import { create } from "@bufbuild/protobuf";
 import type { JsonObject } from "@bufbuild/protobuf";
-import { isPermissionMode, type ContentBlock, type PermissionMode } from "../protocol.js";
+import { isSwitchablePermissionMode, type ContentBlock, type PermissionMode } from "../protocol.js";
 import type {
   CanUseToolLike,
   PermissionResultLike,
@@ -125,14 +125,28 @@ export class UdsSession {
         });
         // A prompt-scoped permission-mode override rides on SubmitPrompt. Apply
         // it to the live query (fire-and-forget: the sync Ack does not wait on
-        // the SDK). An unrecognized mode is loud-logged, never silently applied.
+        // the SDK).
+        //
+        // BOTH failure paths report DegradedState, not just a log line. The
+        // user picked a mode; if it did not take, the session is running under
+        // a DIFFERENT permission posture than the one they chose, and a log
+        // nobody reads is not an acceptable way to tell them that. The gate is
+        // `isSwitchablePermissionMode`, not `isPermissionMode`, because
+        // bypassPermissions is launch-only and the CLI is guaranteed to reject
+        // it here.
         if (permissionMode !== undefined && permissionMode !== "") {
-          if (isPermissionMode(permissionMode)) {
+          if (isSwitchablePermissionMode(permissionMode)) {
             void this.query?.setPermissionMode(permissionMode as PermissionMode).catch((err: unknown) => {
-              shimLog(COMPONENT, { session: this.deps.sessionId }, `setPermissionMode failed: ${errMsg(err)}`);
+              this.reportDegraded(
+                "claude-shim-permission-mode",
+                `permission mode "${permissionMode}" was rejected, session still in the previous mode: ${errMsg(err)}`,
+              );
             });
           } else {
-            shimLog(COMPONENT, { session: this.deps.sessionId, mode: permissionMode }, `ignoring unknown permission mode on SubmitPrompt`);
+            this.reportDegraded(
+              "claude-shim-permission-mode",
+              `permission mode "${permissionMode}" cannot be set on a running session, session still in the previous mode`,
+            );
           }
         }
       },
@@ -140,9 +154,23 @@ export class UdsSession {
         // Interrupt cancels every blocked permission wait so no SDK callback
         // hangs, then forwards to the SDK (a no-op when idle).
         this.control.cancelAll("interrupt");
-        void this.query?.interrupt().catch((err: unknown) => {
-          shimLog(COMPONENT, { session: this.deps.sessionId }, `interrupt failed: ${errMsg(err)}`);
-        });
+        void this.query?.interrupt()
+          .then((receipt) => {
+            // SDK >= 0.3.205 answers with an interrupt receipt. `still_queued`
+            // names async messages that SURVIVE the interrupt. Our daemon holds
+            // its own queue rather than enqueuing into the CLI, so a non-empty
+            // list means work outlived an interrupt the daemon believes it
+            // cancelled — reported as honest downtime, never a swallowed log.
+            const survivors = receipt?.still_queued ?? [];
+            if (survivors.length === 0) return;
+            this.reportDegraded(
+              "claude-shim-interrupt",
+              `interrupt left ${survivors.length} queued message(s) running: ${survivors.join(",")}`,
+            );
+          })
+          .catch((err: unknown) => {
+            this.reportDegraded("claude-shim-interrupt", `interrupt failed: ${errMsg(err)}`);
+          });
       },
     };
     this.control = new ControlDispatch(
@@ -292,6 +320,23 @@ export class UdsSession {
 
   private now(): number {
     return this.deps.nowMs !== undefined ? this.deps.nowMs() : Date.now();
+  }
+
+  /**
+   * Report an SDK-side failure to the daemon as honest downtime.
+   *
+   * The one channel this session has for "something the user asked for did
+   * not happen": a loud log PLUS a DegradedState the daemon can surface. A
+   * bare `shimLog` is not enough — nobody watching the UI ever sees it.
+   */
+  private reportDegraded(component: string, reason: string): void {
+    shimLog(COMPONENT, { session: this.deps.sessionId }, reason);
+    this.server.sendEvent(this.degradedEvent(create(DegradedStateSchema, {
+      component,
+      reason,
+      droppedCount: 0n,
+      recovered: false,
+    })));
   }
 
   /** Wrap a DegradedState as a SYNTHETIC/EPHEMERAL Event for the daemon. */

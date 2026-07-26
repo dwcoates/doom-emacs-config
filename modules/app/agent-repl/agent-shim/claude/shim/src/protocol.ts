@@ -24,14 +24,24 @@ export type PermissionMode =
   // CLI-era modes (claude >= 2.1); validated by the CLI itself.
   | "auto"
   | "manual"
-  | "dontAsk"
-  | "delegate";
+  | "dontAsk";
 
 /**
- * The PermissionMode enum, once. Both the command decoder and the
- * `--permission-mode` flag parser gate on THIS: the two used to carry
- * hand-written copies of the list, they drifted, and the decoder's copy
- * silently rejected every CLI-era mode the topbar offers.
+ * Every mode the CLI accepts at session LAUNCH.
+ *
+ * Matches the CLI's own enumeration, taken verbatim from its rejection
+ * message: "must be one of acceptEdits, auto, bypassPermissions, default,
+ * dontAsk, plan". `manual` is additionally accepted as an alias for
+ * `default` (SDK 0.3.200).
+ *
+ * `delegate` USED to be listed here and never worked: the CLI rejects it
+ * outright, verified against both SDK 0.1.77 and 0.3.220, and SDK 0.3.220
+ * dropped it from the PermissionMode type entirely. Offering a mode the
+ * session can never honor is worse than not offering it, so it is gone.
+ *
+ * Both the command decoder and the `--permission-mode` flag parser gate on
+ * THIS: the two used to carry hand-written copies of the list, they drifted,
+ * and the decoder's copy silently rejected every CLI-era mode.
  */
 export const PERMISSION_MODES: readonly PermissionMode[] = [
   "default",
@@ -41,11 +51,28 @@ export const PERMISSION_MODES: readonly PermissionMode[] = [
   "auto",
   "manual",
   "dontAsk",
-  "delegate",
 ];
+
+/**
+ * The subset that can be switched to MID-SESSION.
+ *
+ * `bypassPermissions` is launch-only: the CLI refuses to switch into it
+ * ("because the session was not launched with --dangerously-skip-permissions"),
+ * though it is perfectly valid as a starting mode — empirically confirmed by
+ * standing up a real session in it. Anything gating a mid-session switch must
+ * use this list, not {@link PERMISSION_MODES}, or it will accept a mode the
+ * CLI is guaranteed to reject.
+ */
+export const SWITCHABLE_PERMISSION_MODES: readonly PermissionMode[] =
+  PERMISSION_MODES.filter((m) => m !== "bypassPermissions");
 
 export function isPermissionMode(v: unknown): v is PermissionMode {
   return typeof v === "string" && (PERMISSION_MODES as readonly string[]).includes(v);
+}
+
+/** Whether `v` is a mode a RUNNING session can actually switch into. */
+export function isSwitchablePermissionMode(v: unknown): v is PermissionMode {
+  return typeof v === "string" && (SWITCHABLE_PERMISSION_MODES as readonly string[]).includes(v);
 }
 
 export interface Usage {
@@ -188,21 +215,6 @@ export interface RefreshCommandsCmd {
   request_id: RequestId;
 }
 
-/**
- * Re-resolve the session's `/status` snapshot (§1.1).
- *
- * The SDK bakes the init-handshake fields a `/status` panel reports
- * (`apiKeySource`, `output_style`, `fast_mode_state`, the MCP roster, the
- * plugin/skill/agent rosters, ...) into the live query's one init and never
- * re-emits them, so — exactly as `refresh-commands` does for the command
- * menu — re-resolving them means standing up a throwaway query purely to
- * re-run that handshake, which is what this command asks the shim to do.
- */
-export interface RefreshStatusCmd {
-  type: "refresh-status";
-  request_id: RequestId;
-}
-
 export type ShimCommand =
   | UserMessageCmd
   | PermissionDecisionCmd
@@ -210,7 +222,6 @@ export type ShimCommand =
   | SetPermissionModeCmd
   | SetModelCmd
   | RefreshCommandsCmd
-  | RefreshStatusCmd
   | ShutdownCmd;
 
 const COMMAND_TYPES: ReadonlySet<string> = new Set([
@@ -220,7 +231,6 @@ const COMMAND_TYPES: ReadonlySet<string> = new Set([
   "set-permission-mode",
   "set-model",
   "refresh-commands",
-  "refresh-status",
   "shutdown",
 ]);
 
@@ -263,23 +273,6 @@ export interface CommandsEvt {
   type: "commands";
   session_id: SessionId;
   commands: SlashCommand[];
-}
-
-/**
- * A freshly re-resolved `/status` snapshot (§1.2), emitted in answer to a
- * `refresh-status`.
- *
- * `status` is the SDK's `system:init` message verbatim — the same payload
- * the live init carries, but re-read off a throwaway query's handshake so it
- * reflects the CURRENT config rather than the value frozen at session start.
- * The daemon caches it and pushes it on; the shape is the SDK's to define
- * and grows per release, so it rides as opaque `unknown` exactly like
- * {@link SystemEvt.data}.
- */
-export interface StatusEvt {
-  type: "status";
-  session_id: SessionId;
-  status: unknown;
 }
 
 /** Inlined subset of the Anthropic Messages streaming event union. */
@@ -469,7 +462,6 @@ export type ShimEvent =
   | AckEvt
   | ModelsEvt
   | CommandsEvt
-  | StatusEvt
   | StreamEventEvt
   | AssistantMessageEvt
   | ResultEvt
@@ -546,7 +538,11 @@ export function decodeCommandLine(line: string): ShimCommand | null {
       break;
     }
     case "set-permission-mode": {
-      if (!isPermissionMode(frame.mode)) {
+      // Gated on the SWITCHABLE set, not the launch set: this command targets
+      // a running session, and bypassPermissions is launch-only. Rejecting it
+      // here with a real error beats forwarding it to a CLI that will refuse
+      // it and leave the caller thinking the mode took.
+      if (!isSwitchablePermissionMode(frame.mode)) {
         throw new ProtocolError(`set-permission-mode invalid mode: ${String(frame.mode)}`);
       }
       break;

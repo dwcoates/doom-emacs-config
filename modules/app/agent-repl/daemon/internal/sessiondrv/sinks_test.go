@@ -406,3 +406,98 @@ func TestResyncRespectsFromSeq(t *testing.T) {
 		t.Errorf("replayed through_seq: got %d, want 7", push.convo[0].GetThroughSeq())
 	}
 }
+
+// vendorEvent wraps a ClaudeStreamMessage as a vendor core Event.
+func vendorEvent(t *testing.T, csm *datav1.ClaudeStreamMessage, seq uint64) *corev1.Event {
+	t.Helper()
+	a, err := anypb.New(csm)
+	if err != nil {
+		t.Fatalf("anypb.New: %v", err)
+	}
+	return &corev1.Event{SessionId: "s1", Seq: seq, Payload: &corev1.Event_Vendor{Vendor: a}}
+}
+
+func initEvent(t *testing.T, seq uint64, commands ...string) *corev1.Event {
+	t.Helper()
+	return vendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_SystemInit{
+		SystemInit: &datav1.SystemInit{Model: "opus", SlashCommands: commands},
+	}}, seq)
+}
+
+func commandsChangedEvent(t *testing.T, seq uint64, names ...string) *corev1.Event {
+	t.Helper()
+	cmds := make([]*datav1.SlashCommandRef, 0, len(names))
+	for _, n := range names {
+		cmds = append(cmds, &datav1.SlashCommandRef{Name: n})
+	}
+	return vendorEvent(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_CommandsChanged{
+		CommandsChanged: &datav1.CommandsChanged{Commands: cmds},
+	}}, seq)
+}
+
+func TestCommandsChangedRepublishesSessionInitView(t *testing.T) {
+	// Arrange: an init has landed, so there is a snapshot to refresh.
+	push := &fakePusher{}
+	c := newTestConsumer(push, &fakeApplier{})
+	c.Consume(initEvent(t, 1, "compact"))
+
+	// Act: the CLI discovers a skill mid-session.
+	c.Consume(commandsChangedEvent(t, 2, "compact", "brand-new-skill"))
+
+	// Assert: a second SessionInitView carries the replaced list.
+	if len(push.inits) != 2 {
+		t.Fatalf("expected 2 SessionInitView pushes, got %d", len(push.inits))
+	}
+	got := push.inits[1].GetInit().GetSlashCommands()
+	if len(got) != 2 || got[1] != "brand-new-skill" {
+		t.Errorf("refreshed slash commands: got %v, want [compact brand-new-skill]", got)
+	}
+}
+
+func TestCommandsChangedReplacesRatherThanMerges(t *testing.T) {
+	// Arrange: the SDK contract for this push is REPLACE -- the payload is
+	// the complete current list, so a command that vanished must vanish.
+	push := &fakePusher{}
+	c := newTestConsumer(push, &fakeApplier{})
+	c.Consume(initEvent(t, 1, "compact", "debug-logs"))
+
+	// Act.
+	c.Consume(commandsChangedEvent(t, 2, "compact"))
+
+	// Assert.
+	got := push.inits[1].GetInit().GetSlashCommands()
+	if len(got) != 1 || got[0] != "compact" {
+		t.Errorf("replaced slash commands: got %v, want [compact]", got)
+	}
+}
+
+func TestCommandsChangedDoesNotMutateThePublishedSnapshot(t *testing.T) {
+	// Arrange: frontends still hold the pointer from the first push, so the
+	// refresh must clone rather than rewrite history under them.
+	push := &fakePusher{}
+	c := newTestConsumer(push, &fakeApplier{})
+	c.Consume(initEvent(t, 1, "compact"))
+
+	// Act.
+	c.Consume(commandsChangedEvent(t, 2, "other"))
+
+	// Assert: the FIRST view still reports what it reported when pushed.
+	first := push.inits[0].GetInit().GetSlashCommands()
+	if len(first) != 1 || first[0] != "compact" {
+		t.Errorf("first SessionInitView was mutated: got %v, want [compact]", first)
+	}
+}
+
+func TestCommandsChangedBeforeInitPushesNothing(t *testing.T) {
+	// Arrange: no init has landed, so there is no snapshot to fold into.
+	push := &fakePusher{}
+	c := newTestConsumer(push, &fakeApplier{})
+
+	// Act.
+	c.Consume(commandsChangedEvent(t, 1, "compact"))
+
+	// Assert: dropped (loud-logged), never a half-built init view.
+	if len(push.inits) != 0 {
+		t.Fatalf("expected no SessionInitView push, got %d", len(push.inits))
+	}
+}

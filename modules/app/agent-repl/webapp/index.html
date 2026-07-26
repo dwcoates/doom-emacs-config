@@ -24,15 +24,18 @@
         <span id="task-summary" class="topbar-summary" title=""></span>
         <span id="session-info" class="topbar-info"></span>
         <select id="model-select" title="model"></select>
+        <!-- Only modes a RUNNING session can switch into. `delegate` is not
+             here because the CLI rejects it outright, and `bypassPermissions`
+             is not here because it is launch-only ("the session was not
+             launched with --dangerously-skip-permissions"). Both used to be
+             offered and both silently did nothing. -->
         <select id="mode-select" title="permission mode">
           <option value="default">default</option>
           <option value="acceptEdits">acceptEdits</option>
-          <option value="bypassPermissions">bypassPermissions</option>
           <option value="plan">plan</option>
           <option value="auto">auto</option>
           <option value="manual">manual</option>
           <option value="dontAsk">dontAsk</option>
-          <option value="delegate">delegate</option>
         </select>
       </header>
       <!-- The account chip's dropdown: one re-auth verb for the current

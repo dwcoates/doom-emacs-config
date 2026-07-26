@@ -4,12 +4,18 @@
  * Each raw SDK stream message (the JSON the SDK `query()` iterator yields —
  * exactly the shapes in testdata/corpus/stream/) becomes a core `Event`
  * envelope (plane = STREAM, seq = 0 pre-ingest) whose `vendor` Any wraps the
- * total-fidelity `data.v1.ClaudeStreamMessage`. The switch is TOTAL: every
- * typed SDK family plus every observed-only family (task_started/_updated/
- * _notification, background_tasks_changed, rate_limit_event, hook_started,
- * thinking_tokens, notification) is modeled; an unknown `type`/`subtype`
- * discriminator hard-errors into a core `UnparsedEvent` (§5.1), never a zero
- * value.
+ * total-fidelity `data.v1.ClaudeStreamMessage`. The switch covers every family
+ * typed by SDK 0.3.220 plus the observed-only ones, and NOTHING is ever
+ * dropped. Two distinct failure channels, which are not interchangeable:
+ *
+ *   - An unknown `type`/`subtype` DISCRIMINATOR takes the passthrough arm
+ *     (`ClaudeStreamMessage.unknown`, a `data.v1.UnknownRecord`) preserving the
+ *     record whole, loud-logged once per distinct discriminator. The SDK union
+ *     grew 11 -> 38 members across 0.1.77 -> 0.3.220, so this is the expected
+ *     steady state, not an error.
+ *   - A record of a KNOWN family that fails conversion (a missing expected
+ *     field, an unusable nested discriminator) still hard-errors into a core
+ *     `UnparsedEvent` (§5.1), never a zero value.
  *
  * LIFECYCLE TWINS: where derivable, vendor-neutral core lifecycle Events are
  * emitted ALONGSIDE the vendor event (as separate Events the store also
@@ -51,9 +57,14 @@ import {
 import {
   MissingFieldError,
   Reader,
+  logUnknownDiscriminator,
   unparsedEvent,
   type ExtrasOutcome,
 } from "./extras.js";
+import {
+  DiscriminatorField,
+  UnknownRecordSchema,
+} from "../../../../../proto/gen/ts/agentshim/data/v1/unknown_pb.js";
 import {
   ApiKeySource,
   AssistantMessageError,
@@ -103,6 +114,35 @@ import {
   ToolProgressSchema,
   UsageSchema,
   UserMessageSchema,
+  // SDK 0.3.220 families:
+  ActiveGoalSchema,
+  ActiveGoalValueSchema,
+  ApiRetrySchema,
+  CommandsChangedSchema,
+  ControlRequestProgressSchema,
+  ConversationResetSchema,
+  ElicitationCompleteSchema,
+  FailedFileSchema,
+  FilesPersistedSchema,
+  HookProgressSchema,
+  InformationalSchema,
+  LocalCommandOutputSchema,
+  MemoryRecallSchema,
+  MirrorErrorSchema,
+  MirrorKeySchema,
+  ModelRefusalFallbackSchema,
+  ModelRefusalNoFallbackSchema,
+  PermissionDeniedSchema,
+  PersistedFileSchema,
+  PluginInstallSchema,
+  PromptSuggestionSchema,
+  RecalledMemorySchema,
+  SessionStateChangedSchema,
+  SlashCommandRefSchema,
+  TaskProgressMsgSchema,
+  TaskProgressUsageSchema,
+  ToolUseSummarySchema,
+  WorkerShuttingDownSchema,
   type ClaudeStreamMessage,
   type ModelUsage,
 } from "../../../../../proto/gen/ts/agentshim/data/v1/stream_pb.js";
@@ -114,7 +154,17 @@ import {
   AskUserQuestionResultSchema,
   BashResultSchema,
   CallerSchema,
+  CodeExecutionToolResultBlockSchema,
+  ContainerUploadBlockSchema,
   ContentBlockSchema,
+  McpToolResultBlockSchema,
+  McpToolUseBlockSchema,
+  RedactedThinkingBlockSchema,
+  SearchResultBlockSchema,
+  ServerToolUseBlockSchema,
+  ToolResultErrorCodeSchema,
+  WebFetchToolResultBlockSchema,
+  WebSearchToolResultBlockSchema,
   EditResultSchema,
   FallbackBlockSchema,
   FallbackModelRefSchema,
@@ -335,11 +385,56 @@ function build(type: string, message: Record<string, unknown>, r: Reader, opts?:
       return vendorOnly({ case: "controlCancelRequest", value: create(ControlCancelRequestSchema, { requestId: r.str("request_id", "requestId") }) }, type);
     case "keep_alive":
       return vendorOnly({ case: "keepAlive", value: create(KeepAliveSchema, {}) }, type);
+    case "tool_use_summary":
+      return vendorOnly({ case: "toolUseSummary", value: create(ToolUseSummarySchema, { summary: r.str("summary"), precedingToolUseIds: r.strList("preceding_tool_use_ids", "precedingToolUseIds"), uuid: uuidOf(message), sessionId: r.str("session_id", "sessionId") }) }, type);
+    case "prompt_suggestion":
+      return vendorOnly({ case: "promptSuggestion", value: create(PromptSuggestionSchema, { suggestion: r.str("suggestion"), uuid: uuidOf(message), sessionId: r.str("session_id", "sessionId") }) }, type);
+    case "conversation_reset":
+      return vendorOnly({ case: "conversationReset", value: create(ConversationResetSchema, { newConversationId: r.str("new_conversation_id", "newConversationId"), uuid: uuidOf(message), sessionId: r.str("session_id", "sessionId") }) }, type);
+    case "active_goal":
+      return buildActiveGoal(message, r);
     case "system":
       return buildSystem(message, r, opts);
     default:
-      throw new MissingFieldError(`unknown SDK message type "${type}"`);
+      // PASSTHROUGH, not an error: an unmodeled `type` means the SDK union
+      // grew, which it does constantly (11 -> 38 members across 0.1.77 ->
+      // 0.3.220). The record is preserved whole. A message of a type we DO
+      // model that fails conversion still becomes an UnparsedEvent, via the
+      // MissingFieldError the typed builders throw.
+      return buildUnknown(message, r, type, DiscriminatorField.TYPE, "");
   }
+}
+
+/**
+ * Build the passthrough arm for a record whose discriminator no arm matched.
+ *
+ * `consumeAll` is what keeps this honest: `UnknownRecord.raw` already holds
+ * every field, so the extras channel must NOT also collect them — otherwise
+ * each unknown family would spam the unknown-FIELD log with its entire key
+ * set and bury the signal that a family we model grew a field.
+ */
+function buildUnknown(
+  message: Record<string, unknown>,
+  r: Reader,
+  discriminator: string,
+  field: DiscriminatorField,
+  parentType: string,
+): Built {
+  r.consumeAll();
+  logUnknownDiscriminator(discriminator, parentType);
+  const label = parentType === "" ? discriminator : `${parentType}:${discriminator}`;
+  return vendorOnly(
+    {
+      case: "unknown",
+      value: create(UnknownRecordSchema, {
+        discriminator,
+        discriminatorField: field,
+        raw: message as JsonObject,
+        parentType,
+      }),
+    },
+    label,
+  );
 }
 
 function buildSystem(message: Record<string, unknown>, r: Reader, opts?: ConvertOptions): Built {
@@ -368,8 +463,93 @@ function buildSystem(message: Record<string, unknown>, r: Reader, opts?: Convert
       return buildBackgroundTasksChanged(message, r, label);
     case "compact_boundary":
       return buildCompactBoundary(message, r, label);
+    // --- SDK 0.3.220 system subtypes -------------------------------------
+    case "api_retry":
+      return buildApiRetry(message, r, label);
+    case "control_request_progress":
+      return buildControlRequestProgress(message, r, label);
+    case "model_refusal_fallback":
+      return vendorOnly({ case: "modelRefusalFallback", value: create(ModelRefusalFallbackSchema, {
+        trigger: r.str("trigger"),
+        direction: r.str("direction"),
+        originalModel: r.str("original_model", "originalModel"),
+        fallbackModel: r.str("fallback_model", "fallbackModel"),
+        requestId: r.str("request_id", "requestId"),
+        apiRefusalCategory: r.str("api_refusal_category", "apiRefusalCategory"),
+        apiRefusalExplanation: r.str("api_refusal_explanation", "apiRefusalExplanation"),
+        retractedMessageUuids: r.strList("retracted_message_uuids", "retractedMessageUuids"),
+        refusedUserMessageUuid: r.str("refused_user_message_uuid", "refusedUserMessageUuid"),
+        content: r.str("content"),
+        uuid: uuidOf(message),
+        sessionId: r.str("session_id", "sessionId"),
+      }) }, label);
+    case "model_refusal_no_fallback":
+      return vendorOnly({ case: "modelRefusalNoFallback", value: create(ModelRefusalNoFallbackSchema, {
+        originalModel: r.str("original_model", "originalModel"),
+        requestId: r.str("request_id", "requestId"),
+        apiRefusalCategory: r.str("api_refusal_category", "apiRefusalCategory"),
+        apiRefusalExplanation: r.str("api_refusal_explanation", "apiRefusalExplanation"),
+        refusedUserMessageUuid: r.str("refused_user_message_uuid", "refusedUserMessageUuid"),
+        content: r.str("content"),
+        uuid: uuidOf(message),
+        sessionId: r.str("session_id", "sessionId"),
+      }) }, label);
+    case "local_command_output":
+      return vendorOnly({ case: "localCommandOutput", value: create(LocalCommandOutputSchema, { content: r.str("content"), uuid: uuidOf(message), sessionId: r.str("session_id", "sessionId") }) }, label);
+    case "hook_progress":
+      return vendorOnly({ case: "hookProgress", value: create(HookProgressSchema, {
+        hookId: r.str("hook_id", "hookId"),
+        hookName: r.str("hook_name", "hookName"),
+        hookEvent: r.str("hook_event", "hookEvent"),
+        stdout: r.str("stdout"),
+        stderr: r.str("stderr"),
+        output: r.str("output"),
+        uuid: uuidOf(message),
+        sessionId: r.str("session_id", "sessionId"),
+      }) }, label);
+    case "plugin_install":
+      return vendorOnly({ case: "pluginInstall", value: create(PluginInstallSchema, { status: r.str("status"), name: r.str("name"), error: r.str("error"), uuid: uuidOf(message), sessionId: r.str("session_id", "sessionId") }) }, label);
+    case "task_progress":
+      return buildTaskProgress(message, r, label);
+    case "session_state_changed":
+      return vendorOnly({ case: "sessionStateChanged", value: create(SessionStateChangedSchema, { state: r.str("state"), uuid: uuidOf(message), sessionId: r.str("session_id", "sessionId") }) }, label);
+    case "worker_shutting_down":
+      return vendorOnly({ case: "workerShuttingDown", value: create(WorkerShuttingDownSchema, { reason: r.str("reason"), uuid: uuidOf(message), sessionId: r.str("session_id", "sessionId") }) }, label);
+    case "commands_changed":
+      return buildCommandsChanged(message, r, label);
+    case "files_persisted":
+      return buildFilesPersisted(message, r, label);
+    case "memory_recall":
+      return buildMemoryRecall(message, r, label);
+    case "elicitation_complete":
+      return vendorOnly({ case: "elicitationComplete", value: create(ElicitationCompleteSchema, { mcpServerName: r.str("mcp_server_name", "mcpServerName"), elicitationId: r.str("elicitation_id", "elicitationId"), uuid: uuidOf(message), sessionId: r.str("session_id", "sessionId") }) }, label);
+    case "permission_denied":
+      return vendorOnly({ case: "permissionDenied", value: create(PermissionDeniedSchema, {
+        toolName: r.str("tool_name", "toolName"),
+        toolUseId: r.str("tool_use_id", "toolUseId"),
+        agentId: r.str("agent_id", "agentId"),
+        decisionReasonType: r.str("decision_reason_type", "decisionReasonType"),
+        decisionReason: r.str("decision_reason", "decisionReason"),
+        message: r.str("message"),
+        uuid: uuidOf(message),
+        sessionId: r.str("session_id", "sessionId"),
+      }) }, label);
+    case "mirror_error":
+      return buildMirrorError(message, r, label);
+    case "informational":
+      return vendorOnly({ case: "informational", value: create(InformationalSchema, {
+        content: r.str("content"),
+        level: r.str("level"),
+        toolUseId: r.str("tool_use_id", "toolUseId"),
+        preventContinuation: r.bool("prevent_continuation", "preventContinuation"),
+        uuid: uuidOf(message),
+        sessionId: r.str("session_id", "sessionId"),
+      }) }, label);
     default:
-      throw new MissingFieldError(`unknown system subtype "${subtype}"`);
+      // PASSTHROUGH: an unmodeled system subtype, captured whole under
+      // parent_type "system" so a consumer can tell a new VARIANT of a family
+      // we model from a whole new top-level family.
+      return buildUnknown(message, r, subtype, DiscriminatorField.SUBTYPE, "system");
   }
 }
 
@@ -754,6 +934,159 @@ function buildBackgroundTasksChanged(message: Record<string, unknown>, r: Reader
 }
 
 // ---------------------------------------------------------------------------
+// SDK 0.3.220 families needing nested conversion or null-discrimination
+// ---------------------------------------------------------------------------
+
+/**
+ * `error_status` is `number | null`, and the null is MEANINGFUL: it marks a
+ * connection error that never got an HTTP response, as opposed to an HTTP
+ * failure that did. A bare 0 cannot carry that, hence the *_set companion.
+ */
+function buildApiRetry(message: Record<string, unknown>, r: Reader, label: string): Built {
+  const statusSet = r.has("error_status", "errorStatus") && r.val("error_status", "errorStatus") !== null;
+  return vendorOnly({ case: "apiRetry", value: create(ApiRetrySchema, {
+    attempt: r.num("attempt"),
+    maxRetries: r.num("max_retries", "maxRetries"),
+    retryDelayMs: r.big("retry_delay_ms", "retryDelayMs"),
+    errorStatus: r.big("error_status", "errorStatus"),
+    errorStatusSet: statusSet,
+    error: assistantErrorEnum(r.str("error")),
+    uuid: uuidOf(message),
+    sessionId: r.str("session_id", "sessionId"),
+  }) }, label);
+}
+
+/**
+ * Every numeric field here is optional and present only for the `api_retry`
+ * status, so each gets a *_set companion: "not retrying" and "retrying,
+ * attempt 0" are different facts and must not collapse onto the same zero.
+ */
+function buildControlRequestProgress(message: Record<string, unknown>, r: Reader, label: string): Built {
+  const set = (...k: string[]): boolean => r.has(...k) && r.val(...k) !== null;
+  return vendorOnly({ case: "controlRequestProgress", value: create(ControlRequestProgressSchema, {
+    requestId: r.str("request_id", "requestId"),
+    status: r.str("status"),
+    attempt: r.num("attempt"),
+    attemptSet: set("attempt"),
+    maxRetries: r.num("max_retries", "maxRetries"),
+    maxRetriesSet: set("max_retries", "maxRetries"),
+    retryDelayMs: r.big("retry_delay_ms", "retryDelayMs"),
+    retryDelayMsSet: set("retry_delay_ms", "retryDelayMs"),
+    errorStatus: r.big("error_status", "errorStatus"),
+    errorStatusSet: set("error_status", "errorStatus"),
+    uuid: uuidOf(message),
+    sessionId: r.str("session_id", "sessionId"),
+  }) }, label);
+}
+
+function buildTaskProgress(message: Record<string, unknown>, r: Reader, label: string): Built {
+  const usage = r.obj("usage");
+  return vendorOnly({ case: "taskProgress", value: create(TaskProgressMsgSchema, {
+    taskId: r.str("task_id", "taskId"),
+    toolUseId: r.str("tool_use_id", "toolUseId"),
+    description: r.str("description"),
+    subagentType: r.str("subagent_type", "subagentType"),
+    usage: usage === undefined ? undefined : create(TaskProgressUsageSchema, {
+      totalTokens: bigOf(pick(usage, "total_tokens", "totalTokens")),
+      toolUses: bigOf(pick(usage, "tool_uses", "toolUses")),
+      durationMs: bigOf(pick(usage, "duration_ms", "durationMs")),
+    }),
+    lastToolName: r.str("last_tool_name", "lastToolName"),
+    summary: r.str("summary"),
+    uuid: uuidOf(message),
+    sessionId: r.str("session_id", "sessionId"),
+  }) }, label);
+}
+
+function buildCommandsChanged(message: Record<string, unknown>, r: Reader, label: string): Built {
+  const commands = (r.arr("commands") ?? []).filter(isObject).map((c) => create(SlashCommandRefSchema, {
+    name: strOf(pick(c, "name")),
+    description: strOf(pick(c, "description")),
+    argumentHint: strOf(pick(c, "argument_hint", "argumentHint")),
+    aliases: strListOf(pick(c, "aliases")),
+  }));
+  return vendorOnly({ case: "commandsChanged", value: create(CommandsChangedSchema, {
+    commands,
+    uuid: uuidOf(message),
+    sessionId: r.str("session_id", "sessionId"),
+  }) }, label);
+}
+
+function buildFilesPersisted(message: Record<string, unknown>, r: Reader, label: string): Built {
+  const files = (r.arr("files") ?? []).filter(isObject).map((f) => create(PersistedFileSchema, {
+    filename: strOf(pick(f, "filename")),
+    fileId: strOf(pick(f, "file_id", "fileId")),
+  }));
+  const failed = (r.arr("failed") ?? []).filter(isObject).map((f) => create(FailedFileSchema, {
+    filename: strOf(pick(f, "filename")),
+    error: strOf(pick(f, "error")),
+  }));
+  return vendorOnly({ case: "filesPersisted", value: create(FilesPersistedSchema, {
+    files,
+    failed,
+    processedAt: r.str("processed_at", "processedAt"),
+    uuid: uuidOf(message),
+    sessionId: r.str("session_id", "sessionId"),
+  }) }, label);
+}
+
+/**
+ * `content` is absent for file-backed `select` entries (the renderer
+ * lazy-loads it from `path`) and present for `synthesize`/`organization`.
+ * `content_set` keeps "not inlined, go read the path" distinct from
+ * "inlined, and it is empty".
+ */
+function buildMemoryRecall(message: Record<string, unknown>, r: Reader, label: string): Built {
+  const memories = (r.arr("memories") ?? []).filter(isObject).map((m) => create(RecalledMemorySchema, {
+    path: strOf(pick(m, "path")),
+    scope: strOf(pick(m, "scope")),
+    content: strOf(pick(m, "content")),
+    contentSet: "content" in m && m["content"] !== null,
+  }));
+  return vendorOnly({ case: "memoryRecall", value: create(MemoryRecallSchema, {
+    mode: r.str("mode"),
+    memories,
+    uuid: uuidOf(message),
+    sessionId: r.str("session_id", "sessionId"),
+  }) }, label);
+}
+
+function buildMirrorError(message: Record<string, unknown>, r: Reader, label: string): Built {
+  const key = r.obj("key");
+  return vendorOnly({ case: "mirrorError", value: create(MirrorErrorSchema, {
+    error: r.str("error"),
+    key: key === undefined ? undefined : create(MirrorKeySchema, {
+      projectKey: strOf(pick(key, "projectKey", "project_key")),
+      sessionId: strOf(pick(key, "sessionId", "session_id")),
+      subpath: strOf(pick(key, "subpath")),
+    }),
+    uuid: uuidOf(message),
+    sessionId: r.str("session_id", "sessionId"),
+  }) }, label);
+}
+
+/**
+ * `value` is nullable and the NULL is the signal: it means the standing goal
+ * was cleared. `value_set` is what keeps that distinct from a goal that
+ * happens to have zero iterations.
+ */
+function buildActiveGoal(message: Record<string, unknown>, r: Reader): Built {
+  const value = r.obj("value");
+  return vendorOnly({ case: "activeGoal", value: create(ActiveGoalSchema, {
+    value: value === undefined ? undefined : create(ActiveGoalValueSchema, {
+      condition: strOf(pick(value, "condition")),
+      iterations: bigOf(pick(value, "iterations")),
+      setAt: bigOf(pick(value, "set_at", "setAt")),
+      tokensAtStart: bigOf(pick(value, "tokens_at_start", "tokensAtStart")),
+      lastReason: strOf(pick(value, "last_reason", "lastReason")),
+    }),
+    valueSet: value !== undefined,
+    uuid: uuidOf(message),
+    sessionId: r.str("session_id", "sessionId"),
+  }) }, "active_goal");
+}
+
+// ---------------------------------------------------------------------------
 // content blocks + API messages
 // ---------------------------------------------------------------------------
 
@@ -810,11 +1143,54 @@ function convertBlock(raw: Record<string, unknown>): ContentBlock | null {
       return create(ContentBlockSchema, { block: { case: "toolReference", value: create(ToolReferenceBlockSchema, { reference: asStruct(raw) }) } });
     case "fallback":
       return create(ContentBlockSchema, { block: { case: "fallback", value: create(FallbackBlockSchema, { from: fallbackModel(raw["from"]), to: fallbackModel(raw["to"]) }) } });
-    default:
-      // No catch-all arm exists on ContentBlock; loud-log the skip so an
-      // unmodeled block type is visible, never silently absorbed.
-      shimLog(COMPONENT, { block_type: String(raw["type"]) }, `unmodeled content block type skipped`);
-      return null;
+    case "redacted_thinking":
+      // `data` is an opaque encrypted blob that must survive byte-for-byte to
+      // be replayable to the API, so it is decoded to bytes, not kept as text.
+      return create(ContentBlockSchema, { block: { case: "redactedThinking", value: create(RedactedThinkingBlockSchema, { data: typeof raw["data"] === "string" ? base64ToBytes(raw["data"]) : new Uint8Array(0) }) } });
+    case "server_tool_use":
+      return create(ContentBlockSchema, { block: { case: "serverToolUse", value: create(ServerToolUseBlockSchema, { id: strOf(raw["id"]), name: strOf(raw["name"]), input: asStructOpt(raw["input"]) }) } });
+    case "mcp_tool_use":
+      return create(ContentBlockSchema, { block: { case: "mcpToolUse", value: create(McpToolUseBlockSchema, { id: strOf(raw["id"]), name: strOf(raw["name"]), serverName: strOf(pick(raw, "server_name", "serverName")), input: asStructOpt(raw["input"]) }) } });
+    case "mcp_tool_result":
+      return create(ContentBlockSchema, { block: { case: "mcpToolResult", value: create(McpToolResultBlockSchema, {
+        toolUseId: strOf(pick(raw, "tool_use_id", "toolUseId")),
+        isError: raw["is_error"] === true,
+        isErrorSet: raw["is_error"] !== undefined,
+        content: asListValueOpt(raw["content"]),
+      }) } });
+    case "web_search_tool_result":
+      return create(ContentBlockSchema, { block: { case: "webSearchToolResult", value: create(WebSearchToolResultBlockSchema, { toolUseId: strOf(pick(raw, "tool_use_id", "toolUseId")), content: toolResultUnion(raw["content"]) }) } });
+    case "web_fetch_tool_result":
+      return create(ContentBlockSchema, { block: { case: "webFetchToolResult", value: create(WebFetchToolResultBlockSchema, { toolUseId: strOf(pick(raw, "tool_use_id", "toolUseId")), content: toolResultUnion(raw["content"]) }) } });
+    case "code_execution_tool_result":
+      return create(ContentBlockSchema, { block: { case: "codeExecutionToolResult", value: create(CodeExecutionToolResultBlockSchema, { toolUseId: strOf(pick(raw, "tool_use_id", "toolUseId")), content: toolResultUnion(raw["content"]) }) } });
+    case "search_result":
+      return create(ContentBlockSchema, { block: { case: "searchResult", value: create(SearchResultBlockSchema, {
+        source: strOf(raw["source"]),
+        title: strOf(raw["title"]),
+        content: asListValueOpt(raw["content"]),
+        citations: asStructOpt(raw["citations"]),
+      }) } });
+    case "container_upload":
+      return create(ContentBlockSchema, { block: { case: "containerUpload", value: create(ContainerUploadBlockSchema, { fileId: strOf(pick(raw, "file_id", "fileId")) }) } });
+    default: {
+      // PASSTHROUGH: this used to return null, which DROPPED the block out of
+      // the message body — the one place the never-drop contract was actually
+      // violated. The block is now preserved whole on ContentBlock.unknown.
+      const type = typeof raw["type"] === "string" ? raw["type"] : "";
+      logUnknownDiscriminator(type, "content_block");
+      return create(ContentBlockSchema, {
+        block: {
+          case: "unknown",
+          value: create(UnknownRecordSchema, {
+            discriminator: type,
+            discriminatorField: DiscriminatorField.TYPE,
+            raw: raw as JsonObject,
+            parentType: "content_block",
+          }),
+        },
+      });
+    }
   }
 }
 
@@ -829,6 +1205,30 @@ function convertToolResultBlock(raw: Record<string, unknown>) {
     return create(ToolResultBlockSchema, { ...base, content: { case: "contentBlocks", value: create(ToolResultBlockListSchema, { blocks: convertBlocks(content) }) } });
   }
   return create(ToolResultBlockSchema, { ...base, content: { case: undefined } });
+}
+
+/**
+ * The result-or-error union shared by the three server-tool result blocks.
+ *
+ * On the wire `content` is EITHER an array of results OR an `{error_code}`
+ * object, and the distinction is load-bearing: collapsing them would make a
+ * failed search indistinguishable from one that found nothing. An array wins;
+ * an object is read as the error; anything else leaves the oneof unset rather
+ * than fabricating an empty result list.
+ */
+function toolResultUnion(
+  raw: unknown,
+): { case: "results"; value: ListValue } | { case: "error"; value: ReturnType<typeof create<typeof ToolResultErrorCodeSchema>> } | { case: undefined } {
+  if (Array.isArray(raw)) {
+    return { case: "results", value: fromJson(ListValueSchema, raw as JsonValue[]) };
+  }
+  if (isObject(raw)) {
+    return {
+      case: "error",
+      value: create(ToolResultErrorCodeSchema, { errorCode: strOf(pick(raw, "error_code", "errorCode")) }),
+    };
+  }
+  return { case: undefined };
 }
 
 function convertImageSource(raw: unknown) {
