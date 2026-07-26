@@ -1248,6 +1248,50 @@ describe("tool results that used to fall through to unclassified", () => {
 // captured verbatim (or, for TaskOutput, mistyped as a TaskCreate).
 // ---------------------------------------------------------------------------
 
+describe("agent arm", () => {
+  it("classifies a synchronous Agent result", () => {
+    const r = convertToolUseResult(loadToolResult("agent"), "s");
+    expect(r.result.case).toBe("agent");
+  });
+
+  it("types the Agent result's agent type", () => {
+    const r = convertToolUseResult(loadToolResult("agent"), "s");
+    if (r.result.case !== "agent") throw new Error("case");
+    expect(r.result.value.agentType).toBe("general-purpose");
+  });
+
+  it("maps the Agent result's status onto RawTaskStatus", () => {
+    const r = convertToolUseResult(loadToolResult("agent"), "s");
+    if (r.result.case !== "agent") throw new Error("case");
+    expect(r.result.value.status).toBe(RawTaskStatus.COMPLETED);
+  });
+
+  it("classifies the Agent result's final message blocks", () => {
+    const r = convertToolUseResult(loadToolResult("agent"), "s");
+    if (r.result.case !== "agent") throw new Error("case");
+    expect(r.result.value.content.map((b) => b.block.case)).toEqual(["text"]);
+  });
+
+  it("types the Agent result's toolStats", () => {
+    const r = convertToolUseResult(loadToolResult("agent"), "s");
+    if (r.result.case !== "agent") throw new Error("case");
+    expect(r.result.value.toolStats?.bashCount).toBe(18n);
+  });
+
+  it("keeps the Agent result's per-model usage iterations", () => {
+    const r = convertToolUseResult(loadToolResult("agent"), "s");
+    if (r.result.case !== "agent") throw new Error("case");
+    expect(listJson(r.result.value.usage!.iterations)).toHaveLength(1);
+  });
+
+  it("classifies an Agent result that omits the optional agentType", () => {
+    // `agentType` is optional on the SDK's completed AgentOutput member, so the
+    // arm keys on the two required totals instead.
+    const r = convertToolUseResult({ status: "completed", agentId: "a1", prompt: "p", content: [], totalDurationMs: 5, totalTokens: 7, totalToolUseCount: 1 }, "s");
+    expect(r.result.case).toBe("agent");
+  });
+});
+
 describe("agent_async_launch arm", () => {
   it("classifies an async agent launch", () => {
     const r = convertToolUseResult(loadToolResult("agent_async_launch"), "s");
