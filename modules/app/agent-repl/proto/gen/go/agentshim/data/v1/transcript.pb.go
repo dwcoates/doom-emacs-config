@@ -164,6 +164,9 @@ const (
 	ToolDenialKind_TOOL_DENIAL_KIND_AUTOMODE_BLOCKED ToolDenialKind = 1
 	ToolDenialKind_TOOL_DENIAL_KIND_USER_REJECTED    ToolDenialKind = 2
 	ToolDenialKind_TOOL_DENIAL_KIND_PERMISSION_RULE  ToolDenialKind = 3 // [corpus]
+	// [corpus] automode was not merely blocking, it was UNAVAILABLE — a distinct
+	// denial the harness reports separately from AUTOMODE_BLOCKED.
+	ToolDenialKind_TOOL_DENIAL_KIND_AUTOMODE_UNAVAILABLE ToolDenialKind = 4
 )
 
 // Enum value maps for ToolDenialKind.
@@ -173,12 +176,14 @@ var (
 		1: "TOOL_DENIAL_KIND_AUTOMODE_BLOCKED",
 		2: "TOOL_DENIAL_KIND_USER_REJECTED",
 		3: "TOOL_DENIAL_KIND_PERMISSION_RULE",
+		4: "TOOL_DENIAL_KIND_AUTOMODE_UNAVAILABLE",
 	}
 	ToolDenialKind_value = map[string]int32{
-		"TOOL_DENIAL_KIND_UNSPECIFIED":      0,
-		"TOOL_DENIAL_KIND_AUTOMODE_BLOCKED": 1,
-		"TOOL_DENIAL_KIND_USER_REJECTED":    2,
-		"TOOL_DENIAL_KIND_PERMISSION_RULE":  3,
+		"TOOL_DENIAL_KIND_UNSPECIFIED":          0,
+		"TOOL_DENIAL_KIND_AUTOMODE_BLOCKED":     1,
+		"TOOL_DENIAL_KIND_USER_REJECTED":        2,
+		"TOOL_DENIAL_KIND_PERMISSION_RULE":      3,
+		"TOOL_DENIAL_KIND_AUTOMODE_UNAVAILABLE": 4,
 	}
 )
 
@@ -7820,12 +7825,13 @@ const file_agentshim_data_v1_transcript_proto_rawDesc = "" +
 	"\x11PROMPT_SOURCE_SDK\x10\x01\x12\x17\n" +
 	"\x13PROMPT_SOURCE_TYPED\x10\x02\x12\x18\n" +
 	"\x14PROMPT_SOURCE_SYSTEM\x10\x03\x12\x18\n" +
-	"\x14PROMPT_SOURCE_QUEUED\x10\x04*\xa3\x01\n" +
+	"\x14PROMPT_SOURCE_QUEUED\x10\x04*\xce\x01\n" +
 	"\x0eToolDenialKind\x12 \n" +
 	"\x1cTOOL_DENIAL_KIND_UNSPECIFIED\x10\x00\x12%\n" +
 	"!TOOL_DENIAL_KIND_AUTOMODE_BLOCKED\x10\x01\x12\"\n" +
 	"\x1eTOOL_DENIAL_KIND_USER_REJECTED\x10\x02\x12$\n" +
-	" TOOL_DENIAL_KIND_PERMISSION_RULE\x10\x03*d\n" +
+	" TOOL_DENIAL_KIND_PERMISSION_RULE\x10\x03\x12)\n" +
+	"%TOOL_DENIAL_KIND_AUTOMODE_UNAVAILABLE\x10\x04*d\n" +
 	"\aQueueOp\x12\x18\n" +
 	"\x14QUEUE_OP_UNSPECIFIED\x10\x00\x12\x14\n" +
 	"\x10QUEUE_OP_ENQUEUE\x10\x01\x12\x14\n" +
