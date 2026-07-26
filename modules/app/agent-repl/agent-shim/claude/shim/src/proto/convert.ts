@@ -1786,6 +1786,13 @@ function convertApiUsage(raw: Record<string, unknown>) {
     cacheCreation: asStructOpt(pick(raw, "cache_creation", "cacheCreation")),
     serverToolUse: asStructOpt(pick(raw, "server_tool_use", "serverToolUse")),
     serviceTier: strOf(pick(raw, "service_tier", "serviceTier")),
+    // ApiUsage models these three (fields 8-10) and newer harness versions send
+    // all three on every assistant/agent usage block, but nothing read them, so
+    // the per-model iteration breakdown and the speed/geo routing were dropped
+    // on the floor at conversion time.
+    iterations: asListValueOpt(pick(raw, "iterations")),
+    speed: strOf(pick(raw, "speed")),
+    inferenceGeo: strOf(pick(raw, "inference_geo", "inferenceGeo")),
   });
 }
 

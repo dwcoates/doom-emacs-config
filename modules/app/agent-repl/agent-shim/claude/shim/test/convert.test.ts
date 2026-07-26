@@ -155,6 +155,31 @@ describe("assistant", () => {
   });
 });
 
+// ApiUsage fields 8-10, which the converter modeled but never read.
+describe("ApiUsage iterations / speed / inference_geo", () => {
+  /** Convert an assistant message carrying `usage` and return the typed usage. */
+  const usageOf = (usage: Record<string, unknown>) => {
+    const csm = vendor(convert({ type: "assistant", session_id: "s", message: { id: "m", model: "x", content: [], usage } }));
+    if (csm.msg.case !== "assistant") throw new Error("case");
+    return csm.msg.value.message!.usage!;
+  };
+
+  it("reads inference_geo off a real assistant usage block", () => {
+    const m = vendor(convert(loadStream("assistant")));
+    if (m.msg.case !== "assistant") throw new Error("case");
+    expect(m.msg.value.message!.usage!.inferenceGeo).toBe("not_available");
+  });
+
+  it("reads the speed routing hint", () => {
+    expect(usageOf({ speed: "standard" }).speed).toBe("standard");
+  });
+
+  it("keeps the per-model iterations breakdown as a list", () => {
+    const it0 = { input_tokens: 2, output_tokens: 3200, type: "message" };
+    expect(listJson(usageOf({ iterations: [it0] }).iterations)).toEqual([it0]);
+  });
+});
+
 describe("result_success", () => {
   const csm = () => {
     const m = vendor(convert(loadStream("result_success")));
