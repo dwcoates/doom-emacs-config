@@ -298,6 +298,9 @@ func (s *Server) PushHeartbeatView(h *frontendv1.HeartbeatView) {
 	s.Broadcast(HeartbeatViewFrame(h))
 }
 func (s *Server) PushQueueView(q *frontendv1.QueueView) { s.Broadcast(QueueViewFrame(q)) }
+func (s *Server) PushProgressView(p *frontendv1.ProgressView) {
+	s.Broadcast(ProgressViewFrame(p))
+}
 
 // ---------------------------------------------------------------------------
 // Per-connection lifecycle

@@ -33,6 +33,29 @@ type StateApplier interface {
 	Apply(ev *corev1.Event) error
 }
 
+// ProgressResolver is the slice of the progress-footer resolver (F1) the driver
+// feeds. Satisfied by *progress.Manager.
+//
+// The driver feeds it the SAME event stream it feeds the SSM, plus the two
+// daemon-local facts no store event carries: how many permission prompts are
+// waiting on the user, and how deep the held-prompt queue is. Its Apply takes
+// the workspace explicitly because a progress view is workspace-keyed and this
+// resolver, unlike the SSM, holds no session→workspace binding of its own.
+type ProgressResolver interface {
+	Apply(workspace string, ev *corev1.Event) error
+	SetCounts(workspace string, pendingPermissions, queueDepth int64)
+	NoteTurnAccepted(workspace, sessionID string)
+}
+
+// noopProgress is the ProgressResolver a driver built without one falls back
+// to. It exists so the progress feed is OPTIONAL for a test harness that does
+// not care about it, without every feed site growing a nil check.
+type noopProgress struct{}
+
+func (noopProgress) Apply(string, *corev1.Event) error { return nil }
+func (noopProgress) SetCounts(string, int64, int64)    {}
+func (noopProgress) NoteTurnAccepted(string, string)   {}
+
 // ringCap bounds the per-session retained event ring the daemon keeps for the
 // live TaskCatalog rebuild and for resync replay. It is a bounded window: older
 // history is served by the store-backed replay on the next Subscribe (the store
@@ -50,8 +73,11 @@ type consumer struct {
 	sessionID string
 	push      Pusher
 	ssm       StateApplier
-	logf      func(string, ...any)
-	now       func() int64
+	// prog is the progress-footer resolver, fed the same stream as the SSM.
+	// Never nil (noopProgress stands in), so the feed sites stay unconditional.
+	prog ProgressResolver
+	logf func(string, ...any)
+	now  func() int64
 	// onSessionStarted fires when a SessionStarted event arrives, letting the
 	// driver arm the metaprompt re-fire for a RESUME/COMPACT_CONTINUE session.
 	onSessionStarted func(*corev1.SessionStarted)
@@ -78,15 +104,19 @@ type consumer struct {
 	permOrder []string
 }
 
-func newConsumer(workspace, sessionID string, push Pusher, applier StateApplier, logf func(string, ...any), onSessionStarted func(*corev1.SessionStarted), onTurn func(active bool)) *consumer {
+func newConsumer(workspace, sessionID string, push Pusher, applier StateApplier, prog ProgressResolver, logf func(string, ...any), onSessionStarted func(*corev1.SessionStarted), onTurn func(active bool)) *consumer {
 	if logf == nil {
 		logf = func(string, ...any) {}
+	}
+	if prog == nil {
+		prog = noopProgress{}
 	}
 	return &consumer{
 		workspace:        workspace,
 		sessionID:        sessionID,
 		push:             push,
 		ssm:              applier,
+		prog:             prog,
 		logf:             logf,
 		now:              func() int64 { return time.Now().UnixMilli() },
 		onSessionStarted: onSessionStarted,
@@ -171,6 +201,7 @@ func (c *consumer) Apply(ev *corev1.Event) {
 		c.logf("sessiondrv: ssm apply failed session=%s seq=%d kind=%s: %v",
 			c.sessionID, ev.GetSeq(), stateKind(ev), err)
 	}
+	c.applyProgress(ev)
 	switch ev.GetPayload().(type) {
 	case *corev1.Event_TaskStarted, *corev1.Event_TaskProgress, *corev1.Event_TaskEnded:
 		c.push.PushTaskCatalog(frontend.BuildTaskCatalog(c.workspace, c.sessionID, c.snapshotRing()))
@@ -184,6 +215,7 @@ func (c *consumer) Apply(ev *corev1.Event) {
 // silent drop.
 func (c *consumer) Consume(ev *corev1.Event) {
 	c.retain(ev)
+	c.applyProgress(ev)
 	switch p := ev.GetPayload().(type) {
 	case *corev1.Event_ContentDelta:
 		if td := frontend.TypingDeltaFromContentDelta(c.workspace, c.sessionID, p.ContentDelta); td != nil {
@@ -216,6 +248,20 @@ func (c *consumer) Consume(ev *corev1.Event) {
 	default:
 		// UnparsedEvent / empty payloads carry no conversation content of their
 		// own; the demux already loud-logged them. Nothing to push.
+	}
+}
+
+// applyProgress folds an event into the progress-footer resolver. Both event
+// planes route through here — the lifecycle plane (Apply) carries the turn
+// boundaries and the data plane (Consume) carries the tickers and windows — so
+// the resolver sees the whole stream exactly once per event.
+//
+// A fold failure is loud-logged, never swallowed, and never stops the stream:
+// the footer degrading is not a reason to stop delivering conversation.
+func (c *consumer) applyProgress(ev *corev1.Event) {
+	if err := c.prog.Apply(c.workspace, ev); err != nil {
+		c.logf("sessiondrv: progress apply failed session=%s seq=%d kind=%s: %v",
+			c.sessionID, ev.GetSeq(), stateKind(ev), err)
 	}
 }
 

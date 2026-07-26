@@ -92,6 +92,10 @@ type Config struct {
 	Push Pusher
 	// SSM applies lifecycle events. Required.
 	SSM StateApplier
+	// Progress resolves the progress footer (F1) from the same event stream
+	// plus the daemon-local pending-permission and queue counts. Nil disables
+	// the feed (the footer simply never populates) rather than nil-derefing.
+	Progress ProgressResolver
 	// Spawner reattaches-or-spawns a session's UDS shim. Required.
 	Spawner Spawner
 	// Locator resolves a workspace to its live session id. Required.
@@ -315,7 +319,18 @@ func (m *Manager) SubmitPrompt(ctx context.Context, workspace, text, permissionM
 	if !queued {
 		m.mu.Unlock()
 		text = m.applyMetaprompt(d, text)
-		return d.client.SubmitPrompt(ctx, text, "frontend", permissionMode)
+		if err := d.client.SubmitPrompt(ctx, text, "frontend", permissionMode); err != nil {
+			return err
+		}
+		// The submit was ACCEPTED, so a turn is beginning. This is the earliest
+		// turn-start signal the daemon actually observes today (live TurnStarted
+		// events do not currently reach it), and it is what starts the footer's
+		// turn clock and resets its turn-scoped token figure. The resolver's open
+		// is idempotent, so the real TurnStarted arriving later changes nothing.
+		// A QUEUED prompt deliberately does not reach here: the turn it would
+		// report is the one already running.
+		m.progress().NoteTurnAccepted(workspace, d.sessionID)
+		return nil
 	}
 	running := d.runningText
 	view, recs := m.publishQueueLocked(d)
@@ -326,6 +341,27 @@ func (m *Manager) SubmitPrompt(ctx context.Context, workspace, text, permissionM
 	m.publish(d.sessionID, view, recs)
 	go m.classify(d, entry.id, running, text)
 	return nil
+}
+
+// progress returns the configured progress resolver, or the no-op stand-in when
+// the driver was built without one.
+func (m *Manager) progress() ProgressResolver {
+	if m.cfg.Progress == nil {
+		return noopProgress{}
+	}
+	return m.cfg.Progress
+}
+
+// noteProgressCounts republishes the workspace's two daemon-local ephemeral
+// counters to the progress footer: the permission prompts waiting on the user
+// and the depth of the held-prompt queue. Neither is a store fact, so nothing
+// else would ever tell the footer they moved.
+//
+// Must be called with m.mu RELEASED (it takes the permission registry's lock and
+// then the resolver's).
+func (m *Manager) noteProgressCounts(workspace string, queueDepth int64) {
+	pending := int64(len(m.reg.idsForWorkspace(workspace)))
+	m.progress().SetCounts(workspace, pending, queueDepth)
 }
 
 // applyMetaprompt folds the metaprompt directive into text once for an armed
@@ -520,14 +556,23 @@ func (m *Manager) bringUp(workspace string) (*driven, error) {
 	}
 
 	d := &driven{sessionID: sessionID, workspace: workspace}
-	cons := newConsumer(workspace, sessionID, m.cfg.Push, m.cfg.SSM, m.logf, func(ss *corev1.SessionStarted) {
+	cons := newConsumer(workspace, sessionID, m.cfg.Push, m.cfg.SSM, m.cfg.Progress, m.logf, func(ss *corev1.SessionStarted) {
 		m.armMetaprompt(d, ss)
 		m.persistVendorSessionID(sessionID, ss.GetVendorSessionId())
 	}, func(active bool) {
 		m.onTurnBoundary(d, active)
 	})
 	d.consumer = cons
-	ph := permHandler{reg: m.reg, cons: cons, logf: m.logf}
+	// onPermsChanged republishes the footer's pending-permission badge on both
+	// edges of a permission's life. The queue depth is read back off the live
+	// queue so the two counters are always reported together and neither can go
+	// stale behind the other.
+	ph := permHandler{reg: m.reg, cons: cons, logf: m.logf, onPermsChanged: func() {
+		m.mu.Lock()
+		depth := int64(len(d.queue.entries))
+		m.mu.Unlock()
+		m.noteProgressCounts(workspace, depth)
+	}}
 
 	runCtx, cancel := context.WithCancel(m.rootCtx)
 	d.cancel = cancel
@@ -576,8 +621,7 @@ func (m *Manager) bringUp(workspace string) (*driven, error) {
 			m.logf("sessiondrv: session %s ended with %d queued prompt(s) undelivered ws=%q",
 				sessionID, len(dropped), workspace)
 		}
-		m.cfg.Push.PushQueueView(view)
-		m.persistQueue(sessionID, nil)
+		m.publish(sessionID, view, nil)
 	}()
 	m.logf("sessiondrv: brought up session=%s ws=%q (reattach-first)", sessionID, workspace)
 	return d, nil
@@ -631,6 +675,16 @@ type permHandler struct {
 	reg  *permRegistry
 	cons *consumer
 	logf func(string, ...any)
+	// onPermsChanged fires whenever the workspace's pending-permission set
+	// moves, so the progress footer's badge tracks it. Nil-safe.
+	onPermsChanged func()
+}
+
+// permsChanged fires the pending-permission notification, if one is bound.
+func (h permHandler) permsChanged() {
+	if h.onPermsChanged != nil {
+		h.onPermsChanged()
+	}
 }
 
 func (h permHandler) HandlePermission(sessionID string, req *corev1.PermissionRequest) *corev1.PermissionResponse {
@@ -650,7 +704,13 @@ func (h permHandler) HandlePermission(sessionID string, req *corev1.PermissionRe
 		State:     frontendv1.RenderState_RENDER_STATE_PERMISSION,
 	})
 	ch, release := h.reg.await(req.GetRequestId(), h.cons.workspace)
-	defer release()
+	// The waiter is parked, so the workspace's pending count just went up; and
+	// however this returns, releasing it brings the count back down.
+	h.permsChanged()
+	defer func() {
+		release()
+		h.permsChanged()
+	}()
 	resp := <-ch
 	if resp == nil {
 		// Teardown abandoned the request (no response sent; the shim re-asks on

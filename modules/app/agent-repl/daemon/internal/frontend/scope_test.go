@@ -142,3 +142,44 @@ func TestScopeFrameFiltersSnapshotContents(t *testing.T) {
 		t.Fatalf("sessions = %v", got.GetSessions())
 	}
 }
+
+func TestScopeFrameDropsNonMatchingProgressView(t *testing.T) {
+	// Arrange — a progress view for a different session. Without its own scope
+	// case a ProgressView would fall to the default and leak connection-wide,
+	// putting another workspace's footer on this connection.
+	sc := Scope{SessionID: "s1"}
+	frame := ProgressViewFrame(&frontendv1.ProgressView{SessionId: "s2", Workspace: "/w2"})
+	// Act
+	_, keep := scopeFrame(frame, sc)
+	// Assert
+	if keep {
+		t.Fatal("a progress view for another session must be dropped")
+	}
+}
+
+func TestScopeFramePassesMatchingProgressView(t *testing.T) {
+	// Arrange
+	sc := Scope{SessionID: "s1"}
+	frame := ProgressViewFrame(&frontendv1.ProgressView{SessionId: "s1", Workspace: "/w1"})
+	// Act
+	_, keep := scopeFrame(frame, sc)
+	// Assert
+	if !keep {
+		t.Fatal("a progress view for this connection's own session must pass")
+	}
+}
+
+func TestFilterSnapshotKeepsOnlyTheScopedProgressView(t *testing.T) {
+	// Arrange
+	sc := Scope{Workspace: "/w1"}
+	snap := &frontendv1.StateSnapshot{Progress: []*frontendv1.ProgressView{
+		{Workspace: "/w1", SessionId: "s1"},
+		{Workspace: "/w2", SessionId: "s2"},
+	}}
+	// Act
+	got := filterSnapshot(snap, sc)
+	// Assert
+	if len(got.GetProgress()) != 1 || got.GetProgress()[0].GetWorkspace() != "/w1" {
+		t.Fatalf("progress = %v, want only /w1", got.GetProgress())
+	}
+}

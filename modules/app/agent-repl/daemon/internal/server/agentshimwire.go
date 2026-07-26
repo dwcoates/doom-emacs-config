@@ -11,6 +11,7 @@ import (
 	"fmt"
 
 	"claude-repld/internal/frontend"
+	"claude-repld/internal/progress"
 	"claude-repld/internal/ssm"
 	"claude-repld/internal/workspace/merge"
 )
@@ -26,6 +27,10 @@ type AgentShimConfig struct {
 	// read/write it. WireAgentShim does NOT close it — main does (the same SSM
 	// is shared with the per-session driver, so one owner closes it once).
 	SSM *ssm.Manager
+	// Progress is the progress-footer resolver (F1), a sibling of the SSM. It is
+	// created and owned by the caller for the same reason the SSM is: the
+	// per-session driver folds events into it too. Required.
+	Progress *progress.Manager
 	// Prompts routes prompt/interrupt/permission to the session shim.
 	Prompts PromptRouter
 	// MergeDirs resolves a workspace to its merge.Request (source/target
@@ -73,12 +78,14 @@ type MergeDirResolver interface {
 // The SSM is injected and owned by main (Close does NOT close it), because the
 // same SSM instance also backs the per-session driver.
 type AgentShim struct {
-	Server *frontend.Server
-	SSM    *ssm.Manager
-	Merge  *merge.Engine
+	Server   *frontend.Server
+	SSM      *ssm.Manager
+	Progress *progress.Manager
+	Merge    *merge.Engine
 
-	cancelPush func()
-	logf       func(string, ...any)
+	cancelPush     func()
+	cancelProgress func()
+	logf           func(string, ...any)
 }
 
 // mergeSink adapts the SSM to merge.StateSink: every merge-state transition the
@@ -128,6 +135,8 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 	switch {
 	case cfg.SSM == nil:
 		return nil, fmt.Errorf("server: WireAgentShim needs an SSM")
+	case cfg.Progress == nil:
+		return nil, fmt.Errorf("server: WireAgentShim needs a progress resolver")
 	case cfg.MergeDirs == nil:
 		return nil, fmt.Errorf("server: WireAgentShim needs a MergeDirResolver")
 	case cfg.SessionCommands == nil:
@@ -147,20 +156,41 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 
 	srv := frontend.New(frontend.Config{
 		Logf:    logf,
-		State:   &ssmSnapshotProvider{ssm: mgr, sessions: cfg.Sessions, inits: cfg.Inits, queues: cfg.Queues, daemon: cfg.SessionCommands},
+		State:   &ssmSnapshotProvider{ssm: mgr, sessions: cfg.Sessions, inits: cfg.Inits, queues: cfg.Queues, daemon: cfg.SessionCommands, progress: cfg.Progress},
 		Handler: handler,
 	})
 
-	// SSM state changes -> frontend WorkspaceState pushes. The loop ends when
-	// Close cancels the subscription (which closes the channel).
+	// SSM state changes -> frontend WorkspaceState pushes, AND the progress
+	// resolver's phase mirror (F1). Feeding the progress resolver from the same
+	// subscription is the seam between the two resolvers: the footer repeats the
+	// SSM's verdict rather than forming a second opinion from the same events,
+	// so the footer's phase can never disagree with the sidebar's. The loop ends
+	// when Close cancels the subscription (which closes the channel).
+	prog := cfg.Progress
 	states, cancel := mgr.Subscribe()
 	go func() {
 		for ws := range states {
 			srv.PushWorkspaceState(ws)
+			if err := prog.ObserveWorkspaceState(ws); err != nil {
+				logf("server: progress observe workspace state: %v", err)
+			}
 		}
 	}()
 
-	return &AgentShim{Server: srv, SSM: mgr, Merge: engine, cancelPush: cancel, logf: logf}, nil
+	// Progress changes -> frontend ProgressView pushes, on their own
+	// subscription so the resolver's coalescing governs the footer's frame rate
+	// independently of the SSM's transition cadence.
+	views, cancelProgress := prog.Subscribe()
+	go func() {
+		for v := range views {
+			srv.PushProgressView(v)
+		}
+	}()
+
+	return &AgentShim{
+		Server: srv, SSM: mgr, Progress: prog, Merge: engine,
+		cancelPush: cancel, cancelProgress: cancelProgress, logf: logf,
+	}, nil
 }
 
 // Close stops the push loop and closes the frontend server (disconnecting
@@ -170,6 +200,9 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 func (a *AgentShim) Close() error {
 	if a.cancelPush != nil {
 		a.cancelPush()
+	}
+	if a.cancelProgress != nil {
+		a.cancelProgress()
 	}
 	if a.Server != nil {
 		if err := a.Server.Close(); err != nil {
