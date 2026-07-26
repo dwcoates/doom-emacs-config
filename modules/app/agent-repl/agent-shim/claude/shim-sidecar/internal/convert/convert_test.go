@@ -63,29 +63,31 @@ func corpusRoot(t *testing.T) string {
 //
 // NOTE: as of proto commit bc3d014f the following ADDITIVE fields closed their
 // gaps (now decoded as typed data with zero extras, hence removed from this map):
-//   iterations → ApiUsage.iterations (google.protobuf.ListValue)
-//   speed → ApiUsage.speed (string)
-//   inferencegeo → ApiUsage.inference_geo (string)
-//   tooldenialkind → ToolDenialKind.TOOL_DENIAL_KIND_PERMISSION_RULE enum value
-//   precompactdiscoveredtools → DiskCompactMetadata.pre_compact_discovered_tools
-//   cumulativedroppedtokens → DiskCompactMetadata.cumulative_dropped_tokens
-//   blockingerror → HookBlockingErrorAttachment.blocking_error (BlockingErrorDetail)
+//
+//	iterations → ApiUsage.iterations (google.protobuf.ListValue)
+//	speed → ApiUsage.speed (string)
+//	inferencegeo → ApiUsage.inference_geo (string)
+//	tooldenialkind → ToolDenialKind.TOOL_DENIAL_KIND_PERMISSION_RULE enum value
+//	precompactdiscoveredtools → DiskCompactMetadata.pre_compact_discovered_tools
+//	cumulativedroppedtokens → DiskCompactMetadata.cumulative_dropped_tokens
+//	blockingerror → HookBlockingErrorAttachment.blocking_error (BlockingErrorDetail)
 //
 // The remaining 10 gap names were BREAKING type mismatches (a Struct/scalar proto
 // field where the disk carries an array/object/other type). All were corrected in
 // the proto under explicit user approval and are now decoded as typed data:
-//   structuredpatch      → Edit/WriteResult.structured_patch (ListValue)
-//   questions            → AskUserQuestionResult.questions (repeated Question)
-//   results              → WebSearchResult.results (ListValue)
-//   tasks                → TaskListResult.tasks (ListValue)
-//   updatedfields        → TaskUpdateResult.updated_fields (repeated string)
-//   statuschange         → TaskUpdateResult.status_change (TaskStatusChange)
-//   pin                  → SendMessageResult.pin (MessagePin)
-//   scheduledfor         → ScheduleWakeupResult.scheduled_for (int64)
-//   automodeconsentflow  → AutoModeAttachment.auto_mode_consent_flow (bool)
-//   files                → DiagnosticsAttachment.files (ListValue)
-//   content              → FileAttachment.content (AttachedFileContent) /
-//                          TaskReminderAttachment.content (ListValue)
+//
+//	structuredpatch      → Edit/WriteResult.structured_patch (ListValue)
+//	questions            → AskUserQuestionResult.questions (repeated Question)
+//	results              → WebSearchResult.results (ListValue)
+//	tasks                → TaskListResult.tasks (ListValue)
+//	updatedfields        → TaskUpdateResult.updated_fields (repeated string)
+//	statuschange         → TaskUpdateResult.status_change (TaskStatusChange)
+//	pin                  → SendMessageResult.pin (MessagePin)
+//	scheduledfor         → ScheduleWakeupResult.scheduled_for (int64)
+//	automodeconsentflow  → AutoModeAttachment.auto_mode_consent_flow (bool)
+//	files                → DiagnosticsAttachment.files (ListValue)
+//	content              → FileAttachment.content (AttachedFileContent) /
+//	                       TaskReminderAttachment.content (ListValue)
 //
 // A LATER pass replaced four of the schemaless homes above with typed messages
 // (updated_fields, status_change, pin, FileAttachment.content), so those shapes

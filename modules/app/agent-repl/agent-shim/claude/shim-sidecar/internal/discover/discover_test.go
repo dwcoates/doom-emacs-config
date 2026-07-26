@@ -76,10 +76,10 @@ func TestClassifySpoolKinds(t *testing.T) {
 	spool := t.TempDir()
 	d := New(nil, spool, nil)
 	cases := []struct {
-		name   string
-		file   string
-		want   tail.Kind
-		raw    bool
+		name string
+		file string
+		want tail.Kind
+		raw  bool
 	}{
 		{"agent", "a1234.output", tail.KindAgentTranscript, false},
 		{"shell", "b5678.output", tail.KindShellSpool, true},

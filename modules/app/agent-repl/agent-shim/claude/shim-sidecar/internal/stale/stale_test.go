@@ -87,7 +87,7 @@ func TestBootSweepLosesPreBootTasks(t *testing.T) {
 	// Arrange: one task started before boot, one after.
 	tr := New(Options{}, nil)
 	boot := int64(100_000)
-	tr.Open("old", tail.KindAgentTranscript, "s1", "", 50_000, 50_000)  // pre-boot
+	tr.Open("old", tail.KindAgentTranscript, "s1", "", 50_000, 50_000)   // pre-boot
 	tr.Open("new", tail.KindAgentTranscript, "s1", "", 150_000, 150_000) // post-boot
 	// Act
 	evs := tr.BootSweep(boot, 200_000)
