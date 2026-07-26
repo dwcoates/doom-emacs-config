@@ -526,8 +526,8 @@ func (c *Client) newRequestID(kind string) string {
 // google.protobuf.Any so the receiver can discriminate the type via the proto
 // global registry. Both halves of that envelope live in `agentrepl/wire`
 // (MarshalAny / ReadAny), shared with shim-store's server, the sidecar's store
-// client, and the daemon's storesub. Reads go straight through wire.ReadAny;
-// only the write needs a step of its own, for the mutex below. ---
+// client, and the daemon's shim listener. Reads go straight through
+// wire.ReadAny; only the write needs a step of its own, for the mutex below. ---
 
 // writeMsg serializes msg into an Any and writes it as one frame, serialized
 // across goroutines by the connection's write mutex.
