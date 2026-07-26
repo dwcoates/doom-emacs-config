@@ -331,19 +331,26 @@ export function sheetHtml(input: FooterInput, nowMs: number): string {
 }
 
 /**
- * The error row: a persistent red line carrying the daemon's error summary,
- * standing until the next turn starts. When the summary names a feed item it
- * is a button, because clicking it scrolls the feed to that item — the row is
- * the only way to find an error that has already scrolled away.
+ * The error row: a persistent line carrying the daemon's classified failure,
+ * standing until the next turn starts. When the failure names a feed item the
+ * row is a button, because clicking it scrolls the feed to that card — the row
+ * is the only way to find a failure that has already scrolled away.
+ *
+ * Its color is the failure's CLASS, from the same five-color assignment the
+ * card and the workspace dot take. It used to be a hardcoded red no other
+ * surface consulted, so the footer could contradict the very card it pointed
+ * at.
  */
 export function errorRowHtml(p: ProgressInput): string {
-  if (p.errorSummary === "") return "";
-  const addressable = p.errorItemUuid !== "";
+  const f = p.failure;
+  if (f === null) return "";
+  const addressable = f.uuid !== "";
   const attrs = addressable
-    ? ` role="button" tabindex="0" data-pfooter-error-uuid="${escapeHtml(p.errorItemUuid)}" title="show the error in the feed"`
+    ? ` role="button" tabindex="0" data-pfooter-error-uuid="${escapeHtml(f.uuid)}" title="show the error in the feed"`
     : "";
-  const cls = addressable ? "pfooter-error addressable" : "pfooter-error";
-  return `<div class="${cls}"${attrs}>${escapeHtml(p.errorSummary)}</div>`;
+  const classes = ["pfooter-error", `failure-${f.errorClass.toLowerCase()}`];
+  if (addressable) classes.push("addressable");
+  return `<div class="${classes.join(" ")}"${attrs}>${escapeHtml(f.message)}</div>`;
 }
 
 /** Marks the footer's whole clickable strip, so the expansion toggle delegates. */

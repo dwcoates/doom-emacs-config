@@ -52,7 +52,12 @@ import { attachLoginTerminal, type LoginTerminal } from "./login-terminal.js";
 import { closeLogin, loginNotice, requestLogin } from "./login.js";
 import { PermissionMode } from "./protocol.js";
 import { decodeFrontendFrame } from "./frontend-proto.js";
-import { StateAdapter, type DegradedBanner } from "./state-adapter.js";
+import {
+  daemonReachableFailure,
+  daemonUnreachableFailure,
+  sessionGoneFailure,
+} from "./local-failure.js";
+import { StateAdapter, systemFailureFrom } from "./state-adapter.js";
 import { CommandDispatcher } from "./command-dispatch.js";
 import { ConnectResync } from "./connect-resync.js";
 import type { CommandStruct } from "./frontend-command.js";
@@ -153,6 +158,13 @@ async function boot(): Promise<void> {
     // the daemon refused is a real failure of the diagnostics channel, not a
     // quiet fallback. The forward itself still happened and still failed loudly.
     logLocal: (message) => wslog.logLocalOnly("error", message),
+    // A refused command lands as a failure card IN THE FEED (F4). Before
+    // this it reached a human through nothing at all: the ack's text went to
+    // a local log and the promise it rejected was swallowed by every caller,
+    // so a rejected prompt looked exactly like a prompt that was never sent.
+    onFailure: (failure) => {
+      if (store.addFailure(systemFailureFrom(failure))) frames.schedule();
+    },
   });
   // The workspace a runtime command names — the live session's cwd, as the
   // pushed `SessionView` reports it. The daemon stamps the URL-scoped
@@ -193,19 +205,11 @@ async function boot(): Promise<void> {
       .catch((err: unknown) => clog("error", `${what} failed: ${String(err)}`));
   };
   const feedEl = must("feed");
-  // The store/sidecar/shim degraded-state banner (design §11): a simple line
-  // pinned above the feed, styled as a warning, shown while a component is
-  // degraded and cleared on its recovery notice.
-  const degradedBannerEl = must("degraded-banner");
-  const showDegraded = (dn: DegradedBanner): void => {
-    if (dn.recovered) {
-      degradedBannerEl.hidden = true;
-      degradedBannerEl.textContent = "";
-      return;
-    }
-    degradedBannerEl.textContent = `degraded: ${dn.component} — ${dn.reason}`;
-    degradedBannerEl.hidden = false;
-  };
+  // RETIRED (F4): the degraded-state banner. It was chrome that scrolled
+  // away, carried no correlation between a report and its all-clear, and
+  // showed a raw component/reason pair the daemon had already classified.
+  // Degradation now arrives as a self-resolving failure card in the feed,
+  // where a user whose workspace changed color can actually find it.
   // The search's echo area: isearch keeps its query out of the text being
   // searched, and so does this — the composer's draft stays untouched while
   // a search runs, and the query shows up here instead.
@@ -710,10 +714,6 @@ async function boot(): Promise<void> {
     history.replaceState(null, "", url.toString());
     spinnerEl.classList.remove("alarm");
     remediationEl.textContent = "";
-    // The successor is a fresh component set: any degraded banner belonged to
-    // the dead session and must not carry over.
-    degradedBannerEl.hidden = true;
-    degradedBannerEl.textContent = "";
     ws = makeClient(next);
     ws.connect();
   };
@@ -743,8 +743,8 @@ async function boot(): Promise<void> {
       onMessage: (data) => {
         // The one path: decode the protojson `frontend.v1` frame, let the
         // command dispatcher correlate its CommandAcks + a createSession's
-        // pushed SessionView, map it to typed adapter effects, surface any
-        // degraded banner, then ingest the effects into the store. A
+        // pushed SessionView, map it to typed adapter effects, then ingest
+        // them into the store. A
         // malformed/unknown frame hard-errors (the decoder and adapter never
         // degrade) — evidence first, then re-throw, as the old raw path did.
         let effects;
@@ -762,9 +762,6 @@ async function boot(): Promise<void> {
             `frontend frame decode/adapt threw: ${String(err)} — frame head: ${data.slice(0, 200)}`,
           );
           throw err;
-        }
-        for (const effect of effects) {
-          if (effect.kind === "degraded") showDegraded(effect.value);
         }
         const result = store.ingest(effects);
         // Ask for the conversation history this connection has not been told.
@@ -810,7 +807,19 @@ async function boot(): Promise<void> {
         clog(connected ? "info" : "warn", `ws: ${connected ? "connected" : "disconnected"}`);
       },
       sessionExists: makeSessionExistsProbe(httpBase, sessionId),
+      // The daemon-unreachable window (F4). It is the ONE fact the daemon
+      // definitionally cannot report about itself, so it is one of the very
+      // few things this end classifies for itself — and it now says WHICH
+      // fault it was, from the close code, instead of "reconnecting…" for
+      // every transport failure alike.
+      onUnreachable: (code, reason) => {
+        if (store.addFailure(daemonUnreachableFailure(code, reason))) frames.schedule();
+      },
+      onReachable: () => {
+        if (store.addFailure(daemonReachableFailure(Date.now()))) frames.schedule();
+      },
       onGone: () => {
+        if (store.addFailure(sessionGoneFailure(sessionId))) frames.schedule();
         statusEl.textContent = "session gone";
         statusEl.classList.remove("ok");
         // The turn-in-flight tick becomes a red/orange alarm: a lost session

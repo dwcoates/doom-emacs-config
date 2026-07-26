@@ -42,6 +42,7 @@ import {
   ConversationStore,
   ResultItem,
   StoreState,
+  SystemFailureCard,
   TextItem,
   ThinkingItem,
   ToolItem,
@@ -5364,5 +5365,131 @@ describe("a heartbeat alone puts elapsed on a plain running tool (MEDIUM)", () =
     const html = renderItem(tool());
     // Assert
     expect(html).not.toContain("face-elapsed");
+  });
+});
+
+// --- the system-failure card (F4) --------------------------------------------
+//
+// ErrorBanner and RetryBadge had NO render test of any kind. Their replacement
+// gets one per edge case, because it is now the only place a user learns why a
+// workspace changed color.
+
+/** A daemon-classified failure, defaulted to an open API failure. */
+function failure(over: Partial<SystemFailureCard> = {}): SystemFailureCard {
+  return {
+    kind: "failure",
+    errorClass: "API",
+    errorType: "api.overloaded",
+    message: "the API is overloaded",
+    sourceDetail: "status=529",
+    resolvedAtMs: 0,
+    uuid: "failure:e9",
+    ...over,
+  };
+}
+
+describe("the system-failure card", () => {
+  it("renders the daemon's message", () => {
+    // Arrange / Act
+    const html = renderItem(failure());
+    // Assert
+    expect(html).toContain("the API is overloaded");
+  });
+
+  it("shows the raw account beside the prose rather than instead of it", () => {
+    // Arrange / Act — the structured evidence is for whoever debugs this.
+    const html = renderItem(failure());
+    // Assert
+    expect(html).toContain("status=529");
+  });
+
+  it("omits the detail block when the source gave none", () => {
+    // Arrange / Act
+    const html = renderItem(failure({ sourceDetail: "" }));
+    // Assert
+    expect(html).not.toContain("failure-detail");
+  });
+
+  it("takes the API class's color", () => {
+    // Arrange / Act — a vendor block, which resolves the workspace purple.
+    const html = renderItem(failure({ errorClass: "API" }));
+    // Assert
+    expect(html).toContain("failure-api");
+  });
+
+  it("takes the INTERNAL class's color", () => {
+    // Arrange / Act — our own machinery, which resolves the workspace blue.
+    const html = renderItem(failure({ errorClass: "INTERNAL", errorType: "shim.degraded" }));
+    // Assert
+    expect(html).toContain("failure-internal");
+  });
+
+  it("marks an OPEN failure with the alarm glyph", () => {
+    // Arrange / Act
+    const html = renderItem(failure());
+    // Assert
+    expect(html).toContain("✕");
+  });
+
+  it("marks a RESOLVED failure with a check instead", () => {
+    // Arrange / Act — the window ended; a card still shouting would be lying
+    // about the present to be accurate about the past.
+    const html = renderItem(failure({ resolvedAtMs: Date.parse("2026-05-24T09:05:00Z") }));
+    // Assert
+    expect(html).toContain("✓");
+  });
+
+  it("adds the settled class to a resolved failure", () => {
+    // Arrange / Act
+    const html = renderItem(failure({ resolvedAtMs: Date.parse("2026-05-24T09:05:00Z") }));
+    // Assert
+    expect(html).toContain("resolved");
+  });
+
+  it("stamps the time a resolved window closed", () => {
+    // Arrange / Act
+    const html = renderItem(failure({ resolvedAtMs: Date.parse("2026-05-24T09:05:00Z") }));
+    // Assert
+    expect(html).toContain("failure-resolved");
+  });
+
+  it("carries the error type as data, so a test or a stylesheet can key on it", () => {
+    // Arrange / Act
+    const html = renderItem(failure({ errorType: "shim.rejected" }));
+    // Assert
+    expect(html).toContain('data-error-type="shim.rejected"');
+  });
+
+  it("escapes the message", () => {
+    // Arrange / Act
+    const html = renderItem(failure({ message: "<img src=x>" }));
+    // Assert
+    expect(html).not.toContain("<img");
+  });
+
+  it("escapes the source detail", () => {
+    // Arrange / Act
+    const html = renderItem(failure({ sourceDetail: "<script>x</script>" }));
+    // Assert
+    expect(html).not.toContain("<script>");
+  });
+});
+
+describe("failure card identity", () => {
+  it("keys a failure by its uuid so a resolution replaces its own alarm", () => {
+    // Arrange / Act — an index key would strand the two edges on separate
+    // DOM nodes, leaving the alarm standing beside its own all-clear.
+    const open = itemKey(failure(), 3);
+    const closed = itemKey(failure({ resolvedAtMs: 123 }), 7);
+    // Assert
+    expect(open).toBe(closed);
+  });
+
+  it("gives two DIFFERENT failures different keys", () => {
+    // Arrange / Act
+    const a = itemKey(failure({ uuid: "failure:e1" }), 0);
+    const b = itemKey(failure({ uuid: "failure:e2" }), 0);
+    // Assert
+    expect(a).not.toBe(b);
   });
 });
