@@ -283,12 +283,33 @@ export function promptPreview(text: string): string {
  */
 export class SessionStartGate {
   private seen: string | null = null;
+  private closed = false;
 
   /** True when this init's SessionStarted twin should be emitted. */
   admit(vendorSessionId: string): boolean {
+    if (this.closed) return false;
     if (this.seen === vendorSessionId) return false;
     this.seen = vendorSessionId;
     return true;
+  }
+
+  /**
+   * Permanently stop admitting: SessionStarted has already been asserted
+   * for this shim lifetime by someone else.
+   *
+   * UdsSession calls this when it emits readiness directly (see
+   * `emitSessionStarted`). The vendor's `system:init` is no longer the
+   * thing that announces a session — it arrives only on the FIRST PROMPT,
+   * which is far too late to be the signal that the session is usable — so
+   * its twin would be a duplicate of an assertion already made, arriving
+   * after the fact.
+   *
+   * Closing rather than pre-seeding a sentinel id is deliberate: the id the
+   * first init will carry is unknowable at readiness time on a fresh
+   * session, so there is nothing to seed it WITH.
+   */
+  close(): void {
+    this.closed = true;
   }
 }
 
