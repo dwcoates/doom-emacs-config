@@ -42,6 +42,7 @@ function workspaceEffect(over: Partial<WorkspaceStatusInput> = {}): AdapterEffec
       turnActive: true,
       liveTaskCount: 0,
       mergePhase: "",
+      generation: 1,
       ...over,
     },
   };
@@ -188,6 +189,32 @@ describe("ingest workspace-state", () => {
     store.ingest([workspaceEffect({ sessionId: "sX" })]);
     // Assert
     expect(store.state.sessionId).toBe("sX");
+  });
+
+  it("retains the resolved render state as the footer's phase source (F5)", () => {
+    // Arrange
+    const store = new ConversationStore();
+    // Act
+    store.ingest([workspaceEffect({ state: "ready" })]);
+    // Assert
+    expect(store.state.renderState).toBe("ready");
+  });
+
+  it("retains the delivery generation the paint ack names", () => {
+    // Arrange — Emacs is not sent the state until this end answers for this
+    // generation, so losing it would strand the tab bar.
+    const store = new ConversationStore();
+    // Act
+    store.ingest([workspaceEffect({ generation: 12 })]);
+    // Assert
+    expect(store.state.renderGeneration).toBe(12);
+  });
+
+  it("has no render state before the first workspace state lands", () => {
+    // Arrange / Act — null, not a fabricated phase.
+    const store = new ConversationStore();
+    // Assert
+    expect(store.state.renderState).toBeNull();
   });
 
   it("reports a change so the caller repaints", () => {
@@ -1072,7 +1099,6 @@ describe("the progress footer's input (F1)", () => {
     return {
       workspace: "/w",
       sessionId: "s1",
-      state: "idle",
       turnStartedAtMs: 0,
       thinkingTokens: 0,
       inputTokens: 0,

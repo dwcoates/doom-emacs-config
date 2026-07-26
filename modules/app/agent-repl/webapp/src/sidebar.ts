@@ -615,6 +615,20 @@ export class WorkspaceSidebar {
   }
 
   /**
+   * Redraw the rail from the roster it already holds (F5).
+   *
+   * A hidden webview has no animation frames, so the rail on screen is the
+   * frame from before it was hidden while the roster behind it has moved on.
+   * The repaint-on-show pass calls this so the rail shows the CURRENT roster
+   * rather than the stale frame — the same correction the feed and the footer
+   * get, applied to the one surface whose state is pushed rather than
+   * streamed. A no-op before the first push, which has nothing to draw.
+   */
+  repaint(): void {
+    this.render();
+  }
+
+  /**
    * Flip DIR's detail panel open or shut and repaint. The single
    * mutation point for `openDirs`, shared by the chevron click and the
    * Emacs expand hook (C-S-RET) so the two entry points can never

@@ -108,6 +108,16 @@ export interface WorkspaceState {
   causeKind: string;
   causeSeq: number;
   atMs: number;
+  /**
+   * The DELIVERY identity of this emission (F5), stamped by the daemon's
+   * frontend sequencer. It is what a paint acknowledgment names, so the daemon
+   * can tell a render of THIS state from a render of a superseded one and
+   * never release a newer state on an older ack.
+   *
+   * Strictly increasing per workspace. Emacs is not sent a state until this
+   * end has acknowledged the generation carrying it.
+   */
+  generation: number;
 }
 
 export interface SessionView {
@@ -362,8 +372,16 @@ export interface RateLimitWindow {
 export interface ProgressView {
   workspace: string;
   sessionId: string;
-  /** The SSM's resolved phase, mirrored so the footer is self-sufficient. */
-  state: RenderState;
+  // NO PHASE (F5). The daemon used to mirror the SSM's verdict here so the
+  // footer had one self-sufficient frame, and the copy went stale exactly as a
+  // second copy of an authoritative fact always does — it refreshed on the
+  // progress resolver's triggers rather than the SSM's, which is what put
+  // "starting" in the footer of an already-green tab. The footer reads the
+  // phase off `WorkspaceState` now, the same message the tab bar reads.
+  //
+  // The wire field is deprecated in place rather than removed, so it stays in
+  // the accepted key set below (an older daemon still sends it) and is simply
+  // not read.
   /** 0 = no turn in flight. */
   turnStartedAtMs: number;
   thinkingTokens: number;
@@ -575,6 +593,7 @@ const WORKSPACE_STATE_KEYS = new Set([
   "causeKind",
   "causeSeq",
   "atMs",
+  "generation",
 ]);
 function decodeWorkspaceState(v: unknown): WorkspaceState {
   const o = ensureObject(v, "WorkspaceState");
@@ -589,6 +608,7 @@ function decodeWorkspaceState(v: unknown): WorkspaceState {
     causeKind: str(o, "causeKind", "WorkspaceState"),
     causeSeq: num(o, "causeSeq", "WorkspaceState"),
     atMs: num(o, "atMs", "WorkspaceState"),
+    generation: num(o, "generation", "WorkspaceState"),
   };
   if (ws.workspace === "") {
     throw new Error("frontend-proto: WorkspaceState missing required `workspace`");
@@ -1057,7 +1077,6 @@ function decodeProgressView(v: unknown): ProgressView {
   const pv: ProgressView = {
     workspace: str(o, "workspace", "ProgressView"),
     sessionId: str(o, "sessionId", "ProgressView"),
-    state: enumRenderState(o, "state", "ProgressView"),
     turnStartedAtMs: num(o, "turnStartedAtMs", "ProgressView"),
     thinkingTokens: num(o, "thinkingTokens", "ProgressView"),
     inputTokens: num(o, "inputTokens", "ProgressView"),
@@ -1083,15 +1102,6 @@ function decodeProgressView(v: unknown): ProgressView {
   // which session it is describing.
   if (pv.workspace === "") {
     throw new Error("frontend-proto: ProgressView missing required `workspace`");
-  }
-  // The phase mirror must name a concrete state. A workspace with nothing
-  // resolved yet is INIT, which the daemon seeds — so UNSPECIFIED here is a
-  // malformed frame, not an early one.
-  if (pv.state === RenderState.UNSPECIFIED) {
-    throw new Error(
-      `frontend-proto: ProgressView for '${pv.workspace}' has UNSPECIFIED ` +
-        "render state (the resolver must mirror a concrete phase)",
-    );
   }
   return pv;
 }

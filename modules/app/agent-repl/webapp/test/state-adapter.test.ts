@@ -50,6 +50,7 @@ describe("WorkspaceState mapping", () => {
         turnActive: true,
         liveTaskCount: "2",
         mergePhase: "cherry-pick",
+        generation: "7",
       },
     });
     expect(effects).toEqual([
@@ -62,9 +63,21 @@ describe("WorkspaceState mapping", () => {
           turnActive: true,
           liveTaskCount: 2,
           mergePhase: "cherry-pick",
+          generation: 7,
         },
       },
     ]);
+  });
+
+  it("carries the delivery generation, which the paint ack names (F5)", () => {
+    // Arrange / Act — uint64 arrives as a protojson numeric string.
+    const effects = applyOne({
+      workspaceState: { workspace: "ws-a", state: "RENDER_STATE_READY", generation: "42" },
+    });
+    // Assert
+    const eff = effects[0];
+    if (eff.kind !== "workspace-state") throw new Error("expected a workspace-state effect");
+    expect(eff.value.generation).toBe(42);
   });
 
   const keywordCases: Array<[string, string]> = [
@@ -879,11 +892,13 @@ describe("progress (F1): the consolidated footer's whole input", () => {
     return eff.value;
   }
 
-  it("maps the phase mirror to the webapp's render-state keyword", () => {
-    // Arrange / Act
+  it("carries no phase, even when a deprecated mirror is on the wire", () => {
+    // Arrange / Act — an older daemon still sends the deprecated `state`, so
+    // the decoder tolerates it; the adapter maps it to nothing, because the
+    // phase is the WorkspaceState's and a second copy is what went stale.
     const got = progressOf(progressFrame({ state: "RENDER_STATE_THINKING" }));
     // Assert
-    expect(got.state).toBe("thinking");
+    expect(got).not.toHaveProperty("state");
   });
 
   it("carries the turn's input tokens through", () => {
@@ -917,16 +932,16 @@ describe("progress (F1): the consolidated footer's whole input", () => {
   });
 
   it("carries the blocked window, which is a window and NOT a phase", () => {
-    // Arrange / Act — `state` stays the SSM's verdict; this is separate signal.
+    // Arrange / Act — the phase is the WorkspaceState's; this is a separate
+    // signal about being parked on the user.
     const got = progressOf(
       progressFrame({
-        state: "RENDER_STATE_THINKING",
         blocked: { active: true, sinceMs: "5", detail: "waiting on you" },
       }),
     );
     // Assert
     expect(got.blocked).toEqual({ sinceMs: 5, detail: "waiting on you" });
-    expect(got.state).toBe("thinking");
+    expect(got).not.toHaveProperty("state");
   });
 
   it("carries the rate-limit window's structured detail", () => {

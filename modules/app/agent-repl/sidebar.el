@@ -699,6 +699,47 @@ visible to this very tick's compare rather than the next one."
       (setq agent-repl--sidebar-last-signature sig)
       (agent-repl--sidebar-push))))
 
+;;;; ---- The dot and the tab take the same value at the same moment --------
+;;
+;; The rail's dots and the tab-bar's colors are two renderings of ONE value:
+;; `agent-repl--ws-render-status', which is the render keyword the daemon
+;; pushed.  What used to differ was WHEN each read it.  The tab bar recolors
+;; the instant `frontend-state.el' stores the pushed state, while the rail
+;; waited for the 1Hz tick's signature compare to notice — so for up to a
+;; second the two surfaces showed different colors for the same workspace.
+;; That is the green-tab-beside-a-yellow-dot divergence, on the Emacs side of
+;; it.
+;;
+;; Pushing the roster FROM the state-transition hook removes the window rather
+;; than shrinking it: the rail is rebuilt as part of applying the state, from
+;; the same value the tab bar is about to read, so there is no interval in
+;; which one surface has the new state and the other has the old one.
+;;
+;; The 1Hz tick stays for the axes no pushed state moves — folds, task
+;; membership, the merged-window epoch, a freshly mounted webview — and its
+;; signature compare makes the overlap a no-op rather than a double push.
+
+(defun agent-repl--sidebar-react-to-pushed-state (ws new previous)
+  "Repaint the rail as part of applying WS's pushed render state.
+Subscriber for `agent-repl-ws-state-transition-functions'
+\(frontend-state.el).  NEW and PREVIOUS are the render keywords; a push
+that did not move the keyword changes no dot, so it is skipped.
+
+The push also refreshes `agent-repl--sidebar-last-signature', so the
+next 1Hz tick sees the state it already delivered and stays quiet."
+  (unless (eq new previous)
+    (agent-repl--log ws "sidebar-react-to-pushed-state: ws=%s %s -> %s — repainting the rail with the tab bar"
+                     ws previous new)
+    (setq agent-repl--sidebar-last-signature (agent-repl--sidebar-signature))
+    (agent-repl--sidebar-push)))
+
+;; Registered here though the hook variable is defined in frontend-state.el:
+;; `add-hook' auto-vivifies the unbound variable and that file's `defvar ...
+;; nil' does not reset an already-bound one, so this survives either load
+;; order (the same arrangement status.el's death reactor uses).
+(add-hook 'agent-repl-ws-state-transition-functions
+          #'agent-repl--sidebar-react-to-pushed-state)
+
 ;;;; ---- Keyboard navigation ----------------------------------------------
 
 (defun agent-repl--sidebar-visible-dirs ()

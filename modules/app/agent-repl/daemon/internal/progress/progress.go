@@ -11,8 +11,15 @@
 // a statement about RIGHT NOW, and a restart legitimately starts blank.
 //
 // The two are wired together at the seam rather than merged: the SSM's resolved
-// WorkspaceState is fed in via ObserveWorkspaceState, which supplies the phase
-// mirror and the live-task count so this resolver never re-derives either.
+// WorkspaceState is fed in via ObserveWorkspaceState, which supplies the
+// live-task count so this resolver never re-derives it.
+//
+// THE PHASE IS NOT HERE. This resolver used to keep a copy of the SSM's verdict
+// so the footer had one self-sufficient frame, and the copy went stale exactly
+// as a second copy of an authoritative fact always does — it refreshed on this
+// resolver's triggers rather than on the authority's. The footer reads the
+// phase off the WorkspaceState instead, which is the same message the sidebar
+// dot and the tab bar read, delivered in the same sequenced order.
 //
 // COALESCING. The ticker inputs (thinking tokens, per-request input usage) fire
 // far faster than any frontend can paint. They mark the workspace dirty and a
@@ -164,11 +171,20 @@ func New(opts Options) *Manager {
 // Inputs
 // ---------------------------------------------------------------------------
 
-// ObserveWorkspaceState adopts the SSM's resolved WorkspaceState as the
-// footer's phase mirror and live-task count. This is the seam between the two
-// resolvers: the progress view REPEATS the SSM's verdict rather than deriving a
-// second opinion from the same events, so the footer's phase and the sidebar's
-// can never disagree.
+// ObserveWorkspaceState adopts the live-task count and session identity off the
+// SSM's resolved WorkspaceState.
+//
+// IT NO LONGER MIRRORS THE PHASE. It used to copy the SSM's verdict into
+// `view.State` so the footer had one self-sufficient input, and the copy was
+// the defect: it refreshed only on THIS resolver's triggers, so a workspace
+// that acquired a progress fact before a state reached here kept the blank
+// view's INIT seed forever. That is why the footer read "starting" against an
+// already-green tab until the first prompt moved the phase.
+//
+// A second copy of an authoritative fact has no correct refresh policy, so
+// there is no longer a second copy: the footer reads the phase off the
+// WorkspaceState the SSM pushes, which every frontend already receives, and
+// which the delivery sequencer orders against every other surface.
 //
 // A nil state is a programmer error at the call site, surfaced rather than
 // silently ignored.
@@ -185,11 +201,6 @@ func (m *Manager) ObserveWorkspaceState(ws *frontendv1.WorkspaceState) error {
 	wp := m.forLocked(name)
 	if sid := ws.GetSessionId(); sid != "" {
 		wp.view.SessionId = sid
-	}
-	// An UNSPECIFIED state is the SSM saying nothing, not a state to mirror:
-	// adopting it would blank a phase the footer already had.
-	if st := ws.GetState(); st != frontendv1.RenderState_RENDER_STATE_UNSPECIFIED {
-		wp.view.State = st
 	}
 	wp.view.LiveTaskCount = ws.GetLiveTaskCount()
 	m.pushLocked(name, wp)
@@ -400,9 +411,10 @@ func (m *Manager) applyStreamLocked(workspace string, wp *workspaceProgress, csm
 // applySessionStateLocked folds the session's own idle/running/blocked report.
 //
 // It drives EXACTLY ONE thing: the `blocked` window. It is deliberately NOT a
-// phase source — `view.State` stays the SSM's verdict alone, because two
-// independent phase authorities is precisely the drift the SSM exists to
-// prevent. What this adds instead is a fact the daemon cannot otherwise see:
+// phase source — the SSM's WorkspaceState is the workspace's only phase,
+// because two independent phase authorities is precisely the drift the SSM
+// exists to prevent. What this adds instead is a fact the daemon cannot
+// otherwise see:
 // `requires_action` means the session is parked on the USER, and it covers
 // interactions the daemon holds no count for, so `pending_permissions` alone
 // under-reports "waiting on you".
@@ -700,17 +712,15 @@ func (m *Manager) forLocked(workspace string) *workspaceProgress {
 	if wp, ok := m.views[workspace]; ok {
 		return wp
 	}
-	// A fresh view is seeded INIT, not UNSPECIFIED. A workspace can acquire
-	// progress facts (a pending permission, a queued prompt) BEFORE the SSM has
-	// resolved a render state for it, and INIT is the honest name for "this
-	// session exists and nothing has resolved yet" — it is already in the closed
-	// vocabulary. Leaving it UNSPECIFIED would push a frame whose phase mirror
-	// names nothing renderable, which frontends reject.
+	// A fresh view carries NO phase. It used to be seeded INIT so the frame's
+	// phase mirror always named something renderable, and that seed was the
+	// stale value the footer showed against an already-green tab: a workspace
+	// can acquire a progress fact (a pending permission, a queued prompt)
+	// before any state reaches this resolver, and nothing ever corrected the
+	// seed afterwards. The phase now comes from the WorkspaceState the SSM
+	// pushes, so a blank view is blank about the phase too.
 	wp := &workspaceProgress{
-		view: &frontendv1.ProgressView{
-			Workspace: workspace,
-			State:     frontendv1.RenderState_RENDER_STATE_INIT,
-		},
+		view:         &frontendv1.ProgressView{Workspace: workspace},
 		countedUsage: map[string]struct{}{},
 	}
 	m.views[workspace] = wp
