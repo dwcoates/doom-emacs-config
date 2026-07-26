@@ -266,6 +266,7 @@ type FrontendFrame struct {
 	//	*FrontendFrame_SessionInit
 	//	*FrontendFrame_Heartbeat
 	//	*FrontendFrame_Queue
+	//	*FrontendFrame_Progress
 	Frame         isFrontendFrame_Frame `protobuf_oneof:"frame"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -416,6 +417,15 @@ func (x *FrontendFrame) GetQueue() *QueueView {
 	return nil
 }
 
+func (x *FrontendFrame) GetProgress() *ProgressView {
+	if x != nil {
+		if x, ok := x.Frame.(*FrontendFrame_Progress); ok {
+			return x.Progress
+		}
+	}
+	return nil
+}
+
 type isFrontendFrame_Frame interface {
 	isFrontendFrame_Frame()
 }
@@ -468,6 +478,10 @@ type FrontendFrame_Queue struct {
 	Queue *QueueView `protobuf:"bytes,12,opt,name=queue,proto3,oneof"` // Additive (E4)
 }
 
+type FrontendFrame_Progress struct {
+	Progress *ProgressView `protobuf:"bytes,13,opt,name=progress,proto3,oneof"` // Additive (F1)
+}
+
 func (*FrontendFrame_Snapshot) isFrontendFrame_Frame() {}
 
 func (*FrontendFrame_WorkspaceState) isFrontendFrame_Frame() {}
@@ -491,6 +505,8 @@ func (*FrontendFrame_SessionInit) isFrontendFrame_Frame() {}
 func (*FrontendFrame_Heartbeat) isFrontendFrame_Frame() {}
 
 func (*FrontendFrame_Queue) isFrontendFrame_Frame() {}
+
+func (*FrontendFrame_Progress) isFrontendFrame_Frame() {}
 
 // Additive (S7): daemon-level identity/liveness Emacs read from GET /sessions'
 // envelope (boot detection, version-mismatch warnings, binary staleness).
@@ -2825,22 +2841,342 @@ func (x *DegradedNotice) GetAtMs() int64 {
 	return 0
 }
 
+// An activity window: open until cleared. Each window is its own message so
+// window-specific detail has a home rather than being flattened into a
+// stringly-typed status.
+type ProgressWindow struct {
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Active  bool                   `protobuf:"varint,1,opt,name=active,proto3" json:"active,omitempty"`
+	SinceMs int64                  `protobuf:"varint,2,opt,name=since_ms,json=sinceMs,proto3" json:"since_ms,omitempty"`
+	// Window-specific detail (a hook name, an auth prompt line, a retry's
+	// attempt/status summary). Free text for display; never parsed.
+	Detail        string `protobuf:"bytes,3,opt,name=detail,proto3" json:"detail,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ProgressWindow) Reset() {
+	*x = ProgressWindow{}
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[30]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProgressWindow) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProgressWindow) ProtoMessage() {}
+
+func (x *ProgressWindow) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[30]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProgressWindow.ProtoReflect.Descriptor instead.
+func (*ProgressWindow) Descriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{30}
+}
+
+func (x *ProgressWindow) GetActive() bool {
+	if x != nil {
+		return x.Active
+	}
+	return false
+}
+
+func (x *ProgressWindow) GetSinceMs() int64 {
+	if x != nil {
+		return x.SinceMs
+	}
+	return 0
+}
+
+func (x *ProgressWindow) GetDetail() string {
+	if x != nil {
+		return x.Detail
+	}
+	return ""
+}
+
+// The rate-limit window, which carries structured detail no other window
+// needs (a reset deadline and a utilization fraction).
+type RateLimitWindow struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Active        bool                   `protobuf:"varint,1,opt,name=active,proto3" json:"active,omitempty"`
+	ResetsAt      int64                  `protobuf:"varint,2,opt,name=resets_at,json=resetsAt,proto3" json:"resets_at,omitempty"` // epoch SECONDS (the vendor event's own unit)
+	Utilization   float64                `protobuf:"fixed64,3,opt,name=utilization,proto3" json:"utilization,omitempty"`
+	Status        string                 `protobuf:"bytes,4,opt,name=status,proto3" json:"status,omitempty"` // e.g. "allowed_warning"
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RateLimitWindow) Reset() {
+	*x = RateLimitWindow{}
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[31]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RateLimitWindow) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RateLimitWindow) ProtoMessage() {}
+
+func (x *RateLimitWindow) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[31]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RateLimitWindow.ProtoReflect.Descriptor instead.
+func (*RateLimitWindow) Descriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{31}
+}
+
+func (x *RateLimitWindow) GetActive() bool {
+	if x != nil {
+		return x.Active
+	}
+	return false
+}
+
+func (x *RateLimitWindow) GetResetsAt() int64 {
+	if x != nil {
+		return x.ResetsAt
+	}
+	return 0
+}
+
+func (x *RateLimitWindow) GetUtilization() float64 {
+	if x != nil {
+		return x.Utilization
+	}
+	return 0
+}
+
+func (x *RateLimitWindow) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+type ProgressView struct {
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	Workspace string                 `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	SessionId string                 `protobuf:"bytes,2,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	// Phase mirror: the SSM's resolved state, repeated here so the footer has
+	// one self-sufficient input. Never re-derived frontend-side.
+	State RenderState `protobuf:"varint,3,opt,name=state,proto3,enum=agentshim.frontend.v1.RenderState" json:"state,omitempty"`
+	// Turn clock: 0 = no turn in flight.
+	TurnStartedAtMs int64 `protobuf:"varint,4,opt,name=turn_started_at_ms,json=turnStartedAtMs,proto3" json:"turn_started_at_ms,omitempty"`
+	// Live tickers (latest-wins), coalesced daemon-side so a high-frequency
+	// source cannot drive the frame rate.
+	ThinkingTokens int64 `protobuf:"varint,5,opt,name=thinking_tokens,json=thinkingTokens,proto3" json:"thinking_tokens,omitempty"` // data.ThinkingTokens.estimated_tokens
+	InputTokens    int64 `protobuf:"varint,6,opt,name=input_tokens,json=inputTokens,proto3" json:"input_tokens,omitempty"`          // THIS TURN's cumulative cached+uncached input
+	TtftMs         int64 `protobuf:"varint,7,opt,name=ttft_ms,json=ttftMs,proto3" json:"ttft_ms,omitempty"`                         // first-token latency of the current message
+	// Activity windows: open until cleared.
+	Compacting     *ProgressWindow  `protobuf:"bytes,8,opt,name=compacting,proto3" json:"compacting,omitempty"`                       // data.StatusMessage status="compacting"
+	Retrying       *ProgressWindow  `protobuf:"bytes,9,opt,name=retrying,proto3" json:"retrying,omitempty"`                           // ApiErrorLine retry family
+	Authenticating *ProgressWindow  `protobuf:"bytes,10,opt,name=authenticating,proto3" json:"authenticating,omitempty"`              // data.AuthStatus
+	Hook           *ProgressWindow  `protobuf:"bytes,11,opt,name=hook,proto3" json:"hook,omitempty"`                                  // data.HookStarted / HookResponse
+	RateLimited    *RateLimitWindow `protobuf:"bytes,12,opt,name=rate_limited,json=rateLimited,proto3" json:"rate_limited,omitempty"` // data.RateLimitEvent
+	// Error state: persists until the next turn starts. Set from a terminal
+	// ApiErrorLine (retries exhausted) or an errored turn end.
+	ErrorSummary string `protobuf:"bytes,13,opt,name=error_summary,json=errorSummary,proto3" json:"error_summary,omitempty"`
+	// The uuid of the conversation item the error summary came from, so a
+	// frontend can scroll its feed to that item. Empty when the summary has no
+	// addressable item (a turn-end error carries no ApiErrorLine of its own).
+	ErrorItemUuid string `protobuf:"bytes,17,opt,name=error_item_uuid,json=errorItemUuid,proto3" json:"error_item_uuid,omitempty"`
+	// Counts (ephemeral, session-scoped):
+	PendingPermissions int64 `protobuf:"varint,14,opt,name=pending_permissions,json=pendingPermissions,proto3" json:"pending_permissions,omitempty"`
+	QueueDepth         int64 `protobuf:"varint,15,opt,name=queue_depth,json=queueDepth,proto3" json:"queue_depth,omitempty"`
+	LiveTaskCount      int64 `protobuf:"varint,16,opt,name=live_task_count,json=liveTaskCount,proto3" json:"live_task_count,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *ProgressView) Reset() {
+	*x = ProgressView{}
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[32]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProgressView) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProgressView) ProtoMessage() {}
+
+func (x *ProgressView) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[32]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProgressView.ProtoReflect.Descriptor instead.
+func (*ProgressView) Descriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{32}
+}
+
+func (x *ProgressView) GetWorkspace() string {
+	if x != nil {
+		return x.Workspace
+	}
+	return ""
+}
+
+func (x *ProgressView) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *ProgressView) GetState() RenderState {
+	if x != nil {
+		return x.State
+	}
+	return RenderState_RENDER_STATE_UNSPECIFIED
+}
+
+func (x *ProgressView) GetTurnStartedAtMs() int64 {
+	if x != nil {
+		return x.TurnStartedAtMs
+	}
+	return 0
+}
+
+func (x *ProgressView) GetThinkingTokens() int64 {
+	if x != nil {
+		return x.ThinkingTokens
+	}
+	return 0
+}
+
+func (x *ProgressView) GetInputTokens() int64 {
+	if x != nil {
+		return x.InputTokens
+	}
+	return 0
+}
+
+func (x *ProgressView) GetTtftMs() int64 {
+	if x != nil {
+		return x.TtftMs
+	}
+	return 0
+}
+
+func (x *ProgressView) GetCompacting() *ProgressWindow {
+	if x != nil {
+		return x.Compacting
+	}
+	return nil
+}
+
+func (x *ProgressView) GetRetrying() *ProgressWindow {
+	if x != nil {
+		return x.Retrying
+	}
+	return nil
+}
+
+func (x *ProgressView) GetAuthenticating() *ProgressWindow {
+	if x != nil {
+		return x.Authenticating
+	}
+	return nil
+}
+
+func (x *ProgressView) GetHook() *ProgressWindow {
+	if x != nil {
+		return x.Hook
+	}
+	return nil
+}
+
+func (x *ProgressView) GetRateLimited() *RateLimitWindow {
+	if x != nil {
+		return x.RateLimited
+	}
+	return nil
+}
+
+func (x *ProgressView) GetErrorSummary() string {
+	if x != nil {
+		return x.ErrorSummary
+	}
+	return ""
+}
+
+func (x *ProgressView) GetErrorItemUuid() string {
+	if x != nil {
+		return x.ErrorItemUuid
+	}
+	return ""
+}
+
+func (x *ProgressView) GetPendingPermissions() int64 {
+	if x != nil {
+		return x.PendingPermissions
+	}
+	return 0
+}
+
+func (x *ProgressView) GetQueueDepth() int64 {
+	if x != nil {
+		return x.QueueDepth
+	}
+	return 0
+}
+
+func (x *ProgressView) GetLiveTaskCount() int64 {
+	if x != nil {
+		return x.LiveTaskCount
+	}
+	return 0
+}
+
 // Full resync on (re)connect: current state of every workspace + open tasks.
 type StateSnapshot struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Workspaces    []*WorkspaceState      `protobuf:"bytes,1,rep,name=workspaces,proto3" json:"workspaces,omitempty"`
 	Sessions      []*SessionView         `protobuf:"bytes,2,rep,name=sessions,proto3" json:"sessions,omitempty"`
 	Catalogs      []*TaskCatalog         `protobuf:"bytes,3,rep,name=catalogs,proto3" json:"catalogs,omitempty"`
-	Daemon        *DaemonView            `protobuf:"bytes,4,opt,name=daemon,proto3" json:"daemon,omitempty"` // Additive (S7)
-	Inits         []*SessionInitView     `protobuf:"bytes,5,rep,name=inits,proto3" json:"inits,omitempty"`   // Additive (S9)
-	Queues        []*QueueView           `protobuf:"bytes,6,rep,name=queues,proto3" json:"queues,omitempty"` // Additive (E4)
+	Daemon        *DaemonView            `protobuf:"bytes,4,opt,name=daemon,proto3" json:"daemon,omitempty"`     // Additive (S7)
+	Inits         []*SessionInitView     `protobuf:"bytes,5,rep,name=inits,proto3" json:"inits,omitempty"`       // Additive (S9)
+	Queues        []*QueueView           `protobuf:"bytes,6,rep,name=queues,proto3" json:"queues,omitempty"`     // Additive (E4)
+	Progress      []*ProgressView        `protobuf:"bytes,7,rep,name=progress,proto3" json:"progress,omitempty"` // Additive (F1)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *StateSnapshot) Reset() {
 	*x = StateSnapshot{}
-	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[30]
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2852,7 +3188,7 @@ func (x *StateSnapshot) String() string {
 func (*StateSnapshot) ProtoMessage() {}
 
 func (x *StateSnapshot) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[30]
+	mi := &file_agentshim_frontend_v1_frontend_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2865,7 +3201,7 @@ func (x *StateSnapshot) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StateSnapshot.ProtoReflect.Descriptor instead.
 func (*StateSnapshot) Descriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{30}
+	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *StateSnapshot) GetWorkspaces() []*WorkspaceState {
@@ -2910,11 +3246,18 @@ func (x *StateSnapshot) GetQueues() []*QueueView {
 	return nil
 }
 
+func (x *StateSnapshot) GetProgress() []*ProgressView {
+	if x != nil {
+		return x.Progress
+	}
+	return nil
+}
+
 var File_agentshim_frontend_v1_frontend_proto protoreflect.FileDescriptor
 
 const file_agentshim_frontend_v1_frontend_proto_rawDesc = "" +
 	"\n" +
-	"$agentshim/frontend/v1/frontend.proto\x12\x15agentshim.frontend.v1\x1a\x1cagentshim/core/v1/core.proto\x1a\x1eagentshim/data/v1/stream.proto\x1a\x1dagentshim/data/v1/tools.proto\x1a\"agentshim/data/v1/transcript.proto\x1a\x1cgoogle/protobuf/struct.proto\"\x8f\a\n" +
+	"$agentshim/frontend/v1/frontend.proto\x12\x15agentshim.frontend.v1\x1a\x1cagentshim/core/v1/core.proto\x1a\x1eagentshim/data/v1/stream.proto\x1a\x1dagentshim/data/v1/tools.proto\x1a\"agentshim/data/v1/transcript.proto\x1a\x1cgoogle/protobuf/struct.proto\"\xd2\a\n" +
 	"\rFrontendFrame\x12B\n" +
 	"\bsnapshot\x18\x01 \x01(\v2$.agentshim.frontend.v1.StateSnapshotH\x00R\bsnapshot\x12P\n" +
 	"\x0fworkspace_state\x18\x02 \x01(\v2%.agentshim.frontend.v1.WorkspaceStateH\x00R\x0eworkspaceState\x12G\n" +
@@ -2930,7 +3273,8 @@ const file_agentshim_frontend_v1_frontend_proto_rawDesc = "" +
 	"\fsession_init\x18\n" +
 	" \x01(\v2&.agentshim.frontend.v1.SessionInitViewH\x00R\vsessionInit\x12D\n" +
 	"\theartbeat\x18\v \x01(\v2$.agentshim.frontend.v1.HeartbeatViewH\x00R\theartbeat\x128\n" +
-	"\x05queue\x18\f \x01(\v2 .agentshim.frontend.v1.QueueViewH\x00R\x05queueB\a\n" +
+	"\x05queue\x18\f \x01(\v2 .agentshim.frontend.v1.QueueViewH\x00R\x05queue\x12A\n" +
+	"\bprogress\x18\r \x01(\v2#.agentshim.frontend.v1.ProgressViewH\x00R\bprogressB\a\n" +
 	"\x05frame\"\xac\x01\n" +
 	"\n" +
 	"DaemonView\x12\x17\n" +
@@ -3122,7 +3466,39 @@ const file_agentshim_frontend_v1_frontend_proto_rawDesc = "" +
 	"\tcomponent\x18\x01 \x01(\tR\tcomponent\x12\x16\n" +
 	"\x06reason\x18\x02 \x01(\tR\x06reason\x12\x1c\n" +
 	"\trecovered\x18\x03 \x01(\bR\trecovered\x12\x13\n" +
-	"\x05at_ms\x18\x04 \x01(\x03R\x04atMs\"\x89\x03\n" +
+	"\x05at_ms\x18\x04 \x01(\x03R\x04atMs\"[\n" +
+	"\x0eProgressWindow\x12\x16\n" +
+	"\x06active\x18\x01 \x01(\bR\x06active\x12\x19\n" +
+	"\bsince_ms\x18\x02 \x01(\x03R\asinceMs\x12\x16\n" +
+	"\x06detail\x18\x03 \x01(\tR\x06detail\"\x80\x01\n" +
+	"\x0fRateLimitWindow\x12\x16\n" +
+	"\x06active\x18\x01 \x01(\bR\x06active\x12\x1b\n" +
+	"\tresets_at\x18\x02 \x01(\x03R\bresetsAt\x12 \n" +
+	"\vutilization\x18\x03 \x01(\x01R\vutilization\x12\x16\n" +
+	"\x06status\x18\x04 \x01(\tR\x06status\"\xbd\x06\n" +
+	"\fProgressView\x12\x1c\n" +
+	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x02 \x01(\tR\tsessionId\x128\n" +
+	"\x05state\x18\x03 \x01(\x0e2\".agentshim.frontend.v1.RenderStateR\x05state\x12+\n" +
+	"\x12turn_started_at_ms\x18\x04 \x01(\x03R\x0fturnStartedAtMs\x12'\n" +
+	"\x0fthinking_tokens\x18\x05 \x01(\x03R\x0ethinkingTokens\x12!\n" +
+	"\finput_tokens\x18\x06 \x01(\x03R\vinputTokens\x12\x17\n" +
+	"\attft_ms\x18\a \x01(\x03R\x06ttftMs\x12E\n" +
+	"\n" +
+	"compacting\x18\b \x01(\v2%.agentshim.frontend.v1.ProgressWindowR\n" +
+	"compacting\x12A\n" +
+	"\bretrying\x18\t \x01(\v2%.agentshim.frontend.v1.ProgressWindowR\bretrying\x12M\n" +
+	"\x0eauthenticating\x18\n" +
+	" \x01(\v2%.agentshim.frontend.v1.ProgressWindowR\x0eauthenticating\x129\n" +
+	"\x04hook\x18\v \x01(\v2%.agentshim.frontend.v1.ProgressWindowR\x04hook\x12I\n" +
+	"\frate_limited\x18\f \x01(\v2&.agentshim.frontend.v1.RateLimitWindowR\vrateLimited\x12#\n" +
+	"\rerror_summary\x18\r \x01(\tR\ferrorSummary\x12&\n" +
+	"\x0ferror_item_uuid\x18\x11 \x01(\tR\rerrorItemUuid\x12/\n" +
+	"\x13pending_permissions\x18\x0e \x01(\x03R\x12pendingPermissions\x12\x1f\n" +
+	"\vqueue_depth\x18\x0f \x01(\x03R\n" +
+	"queueDepth\x12&\n" +
+	"\x0flive_task_count\x18\x10 \x01(\x03R\rliveTaskCount\"\xca\x03\n" +
 	"\rStateSnapshot\x12E\n" +
 	"\n" +
 	"workspaces\x18\x01 \x03(\v2%.agentshim.frontend.v1.WorkspaceStateR\n" +
@@ -3131,7 +3507,8 @@ const file_agentshim_frontend_v1_frontend_proto_rawDesc = "" +
 	"\bcatalogs\x18\x03 \x03(\v2\".agentshim.frontend.v1.TaskCatalogR\bcatalogs\x129\n" +
 	"\x06daemon\x18\x04 \x01(\v2!.agentshim.frontend.v1.DaemonViewR\x06daemon\x12<\n" +
 	"\x05inits\x18\x05 \x03(\v2&.agentshim.frontend.v1.SessionInitViewR\x05inits\x128\n" +
-	"\x06queues\x18\x06 \x03(\v2 .agentshim.frontend.v1.QueueViewR\x06queues*\xa7\x03\n" +
+	"\x06queues\x18\x06 \x03(\v2 .agentshim.frontend.v1.QueueViewR\x06queues\x12?\n" +
+	"\bprogress\x18\a \x03(\v2#.agentshim.frontend.v1.ProgressViewR\bprogress*\xa7\x03\n" +
 	"\vRenderState\x12\x1c\n" +
 	"\x18RENDER_STATE_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11RENDER_STATE_INIT\x10\x01\x12\x15\n" +
@@ -3174,7 +3551,7 @@ func file_agentshim_frontend_v1_frontend_proto_rawDescGZIP() []byte {
 }
 
 var file_agentshim_frontend_v1_frontend_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_agentshim_frontend_v1_frontend_proto_msgTypes = make([]protoimpl.MessageInfo, 31)
+var file_agentshim_frontend_v1_frontend_proto_msgTypes = make([]protoimpl.MessageInfo, 34)
 var file_agentshim_frontend_v1_frontend_proto_goTypes = []any{
 	(RenderState)(0),               // 0: agentshim.frontend.v1.RenderState
 	(QueueClassification)(0),       // 1: agentshim.frontend.v1.QueueClassification
@@ -3209,24 +3586,27 @@ var file_agentshim_frontend_v1_frontend_proto_goTypes = []any{
 	(*ResyncCmd)(nil),              // 30: agentshim.frontend.v1.ResyncCmd
 	(*CommandAck)(nil),             // 31: agentshim.frontend.v1.CommandAck
 	(*DegradedNotice)(nil),         // 32: agentshim.frontend.v1.DegradedNotice
-	(*StateSnapshot)(nil),          // 33: agentshim.frontend.v1.StateSnapshot
-	(*v1.ApiAssistantMessage)(nil), // 34: agentshim.data.v1.ApiAssistantMessage
-	(*v1.ApiUserMessage)(nil),      // 35: agentshim.data.v1.ApiUserMessage
-	(*v1.ToolUseBlock)(nil),        // 36: agentshim.data.v1.ToolUseBlock
-	(*v1.ToolResultBlock)(nil),     // 37: agentshim.data.v1.ToolResultBlock
-	(*v1.ToolUseResult)(nil),       // 38: agentshim.data.v1.ToolUseResult
-	(*v1.ResultMessage)(nil),       // 39: agentshim.data.v1.ResultMessage
-	(*v1.CompactBoundary)(nil),     // 40: agentshim.data.v1.CompactBoundary
-	(*v1.CompactBoundaryLine)(nil), // 41: agentshim.data.v1.CompactBoundaryLine
-	(*v1.ApiErrorLine)(nil),        // 42: agentshim.data.v1.ApiErrorLine
-	(*v11.PermissionItem)(nil),     // 43: agentshim.core.v1.PermissionItem
-	(*v11.ContentDelta)(nil),       // 44: agentshim.core.v1.ContentDelta
-	(*v11.HeartbeatProgress)(nil),  // 45: agentshim.core.v1.HeartbeatProgress
-	(*v1.SystemInit)(nil),          // 46: agentshim.data.v1.SystemInit
-	(*structpb.Struct)(nil),        // 47: google.protobuf.Struct
+	(*ProgressWindow)(nil),         // 33: agentshim.frontend.v1.ProgressWindow
+	(*RateLimitWindow)(nil),        // 34: agentshim.frontend.v1.RateLimitWindow
+	(*ProgressView)(nil),           // 35: agentshim.frontend.v1.ProgressView
+	(*StateSnapshot)(nil),          // 36: agentshim.frontend.v1.StateSnapshot
+	(*v1.ApiAssistantMessage)(nil), // 37: agentshim.data.v1.ApiAssistantMessage
+	(*v1.ApiUserMessage)(nil),      // 38: agentshim.data.v1.ApiUserMessage
+	(*v1.ToolUseBlock)(nil),        // 39: agentshim.data.v1.ToolUseBlock
+	(*v1.ToolResultBlock)(nil),     // 40: agentshim.data.v1.ToolResultBlock
+	(*v1.ToolUseResult)(nil),       // 41: agentshim.data.v1.ToolUseResult
+	(*v1.ResultMessage)(nil),       // 42: agentshim.data.v1.ResultMessage
+	(*v1.CompactBoundary)(nil),     // 43: agentshim.data.v1.CompactBoundary
+	(*v1.CompactBoundaryLine)(nil), // 44: agentshim.data.v1.CompactBoundaryLine
+	(*v1.ApiErrorLine)(nil),        // 45: agentshim.data.v1.ApiErrorLine
+	(*v11.PermissionItem)(nil),     // 46: agentshim.core.v1.PermissionItem
+	(*v11.ContentDelta)(nil),       // 47: agentshim.core.v1.ContentDelta
+	(*v11.HeartbeatProgress)(nil),  // 48: agentshim.core.v1.HeartbeatProgress
+	(*v1.SystemInit)(nil),          // 49: agentshim.data.v1.SystemInit
+	(*structpb.Struct)(nil),        // 50: google.protobuf.Struct
 }
 var file_agentshim_frontend_v1_frontend_proto_depIdxs = []int32{
-	33, // 0: agentshim.frontend.v1.FrontendFrame.snapshot:type_name -> agentshim.frontend.v1.StateSnapshot
+	36, // 0: agentshim.frontend.v1.FrontendFrame.snapshot:type_name -> agentshim.frontend.v1.StateSnapshot
 	5,  // 1: agentshim.frontend.v1.FrontendFrame.workspace_state:type_name -> agentshim.frontend.v1.WorkspaceState
 	6,  // 2: agentshim.frontend.v1.FrontendFrame.session_view:type_name -> agentshim.frontend.v1.SessionView
 	7,  // 3: agentshim.frontend.v1.FrontendFrame.conversation_delta:type_name -> agentshim.frontend.v1.ConversationDelta
@@ -3238,52 +3618,60 @@ var file_agentshim_frontend_v1_frontend_proto_depIdxs = []int32{
 	11, // 9: agentshim.frontend.v1.FrontendFrame.session_init:type_name -> agentshim.frontend.v1.SessionInitView
 	10, // 10: agentshim.frontend.v1.FrontendFrame.heartbeat:type_name -> agentshim.frontend.v1.HeartbeatView
 	16, // 11: agentshim.frontend.v1.FrontendFrame.queue:type_name -> agentshim.frontend.v1.QueueView
-	0,  // 12: agentshim.frontend.v1.WorkspaceState.state:type_name -> agentshim.frontend.v1.RenderState
-	8,  // 13: agentshim.frontend.v1.ConversationDelta.items:type_name -> agentshim.frontend.v1.ConversationItem
-	34, // 14: agentshim.frontend.v1.ConversationItem.assistant_message:type_name -> agentshim.data.v1.ApiAssistantMessage
-	35, // 15: agentshim.frontend.v1.ConversationItem.user_message:type_name -> agentshim.data.v1.ApiUserMessage
-	36, // 16: agentshim.frontend.v1.ConversationItem.tool_use:type_name -> agentshim.data.v1.ToolUseBlock
-	37, // 17: agentshim.frontend.v1.ConversationItem.tool_result:type_name -> agentshim.data.v1.ToolResultBlock
-	38, // 18: agentshim.frontend.v1.ConversationItem.tool_use_result:type_name -> agentshim.data.v1.ToolUseResult
-	39, // 19: agentshim.frontend.v1.ConversationItem.result:type_name -> agentshim.data.v1.ResultMessage
-	40, // 20: agentshim.frontend.v1.ConversationItem.compact_boundary:type_name -> agentshim.data.v1.CompactBoundary
-	41, // 21: agentshim.frontend.v1.ConversationItem.compact_boundary_line:type_name -> agentshim.data.v1.CompactBoundaryLine
-	42, // 22: agentshim.frontend.v1.ConversationItem.api_error:type_name -> agentshim.data.v1.ApiErrorLine
-	43, // 23: agentshim.frontend.v1.ConversationItem.permission:type_name -> agentshim.core.v1.PermissionItem
-	44, // 24: agentshim.frontend.v1.TypingDelta.delta:type_name -> agentshim.core.v1.ContentDelta
-	45, // 25: agentshim.frontend.v1.HeartbeatView.progress:type_name -> agentshim.core.v1.HeartbeatProgress
-	46, // 26: agentshim.frontend.v1.SessionInitView.init:type_name -> agentshim.data.v1.SystemInit
-	12, // 27: agentshim.frontend.v1.TaskCatalog.tasks:type_name -> agentshim.frontend.v1.TaskEntry
-	24, // 28: agentshim.frontend.v1.FrontendCommand.submit_prompt:type_name -> agentshim.frontend.v1.SubmitPromptCmd
-	25, // 29: agentshim.frontend.v1.FrontendCommand.interrupt:type_name -> agentshim.frontend.v1.InterruptCmd
-	26, // 30: agentshim.frontend.v1.FrontendCommand.permission_answer:type_name -> agentshim.frontend.v1.PermissionAnswerCmd
-	27, // 31: agentshim.frontend.v1.FrontendCommand.merge_workspace:type_name -> agentshim.frontend.v1.MergeWorkspaceCmd
-	28, // 32: agentshim.frontend.v1.FrontendCommand.close_workspace:type_name -> agentshim.frontend.v1.CloseWorkspaceCmd
-	29, // 33: agentshim.frontend.v1.FrontendCommand.open_workspace:type_name -> agentshim.frontend.v1.OpenWorkspaceCmd
-	30, // 34: agentshim.frontend.v1.FrontendCommand.resync:type_name -> agentshim.frontend.v1.ResyncCmd
-	22, // 35: agentshim.frontend.v1.FrontendCommand.create_session:type_name -> agentshim.frontend.v1.CreateSessionCmd
-	23, // 36: agentshim.frontend.v1.FrontendCommand.delete_session:type_name -> agentshim.frontend.v1.DeleteSessionCmd
-	21, // 37: agentshim.frontend.v1.FrontendCommand.shutdown:type_name -> agentshim.frontend.v1.ShutdownCmd
-	20, // 38: agentshim.frontend.v1.FrontendCommand.client_log:type_name -> agentshim.frontend.v1.ClientLogCmd
-	17, // 39: agentshim.frontend.v1.FrontendCommand.queue_force:type_name -> agentshim.frontend.v1.QueueForceCmd
-	18, // 40: agentshim.frontend.v1.FrontendCommand.queue_accept:type_name -> agentshim.frontend.v1.QueueAcceptCmd
-	19, // 41: agentshim.frontend.v1.FrontendCommand.queue_cancel:type_name -> agentshim.frontend.v1.QueueCancelCmd
-	1,  // 42: agentshim.frontend.v1.QueueEntry.classification:type_name -> agentshim.frontend.v1.QueueClassification
-	15, // 43: agentshim.frontend.v1.QueueView.entries:type_name -> agentshim.frontend.v1.QueueEntry
-	2,  // 44: agentshim.frontend.v1.ClientLogCmd.level:type_name -> agentshim.frontend.v1.ClientLogLevel
-	47, // 45: agentshim.frontend.v1.ClientLogCmd.context:type_name -> google.protobuf.Struct
-	47, // 46: agentshim.frontend.v1.PermissionAnswerCmd.updated_input:type_name -> google.protobuf.Struct
-	5,  // 47: agentshim.frontend.v1.StateSnapshot.workspaces:type_name -> agentshim.frontend.v1.WorkspaceState
-	6,  // 48: agentshim.frontend.v1.StateSnapshot.sessions:type_name -> agentshim.frontend.v1.SessionView
-	13, // 49: agentshim.frontend.v1.StateSnapshot.catalogs:type_name -> agentshim.frontend.v1.TaskCatalog
-	4,  // 50: agentshim.frontend.v1.StateSnapshot.daemon:type_name -> agentshim.frontend.v1.DaemonView
-	11, // 51: agentshim.frontend.v1.StateSnapshot.inits:type_name -> agentshim.frontend.v1.SessionInitView
-	16, // 52: agentshim.frontend.v1.StateSnapshot.queues:type_name -> agentshim.frontend.v1.QueueView
-	53, // [53:53] is the sub-list for method output_type
-	53, // [53:53] is the sub-list for method input_type
-	53, // [53:53] is the sub-list for extension type_name
-	53, // [53:53] is the sub-list for extension extendee
-	0,  // [0:53] is the sub-list for field type_name
+	35, // 12: agentshim.frontend.v1.FrontendFrame.progress:type_name -> agentshim.frontend.v1.ProgressView
+	0,  // 13: agentshim.frontend.v1.WorkspaceState.state:type_name -> agentshim.frontend.v1.RenderState
+	8,  // 14: agentshim.frontend.v1.ConversationDelta.items:type_name -> agentshim.frontend.v1.ConversationItem
+	37, // 15: agentshim.frontend.v1.ConversationItem.assistant_message:type_name -> agentshim.data.v1.ApiAssistantMessage
+	38, // 16: agentshim.frontend.v1.ConversationItem.user_message:type_name -> agentshim.data.v1.ApiUserMessage
+	39, // 17: agentshim.frontend.v1.ConversationItem.tool_use:type_name -> agentshim.data.v1.ToolUseBlock
+	40, // 18: agentshim.frontend.v1.ConversationItem.tool_result:type_name -> agentshim.data.v1.ToolResultBlock
+	41, // 19: agentshim.frontend.v1.ConversationItem.tool_use_result:type_name -> agentshim.data.v1.ToolUseResult
+	42, // 20: agentshim.frontend.v1.ConversationItem.result:type_name -> agentshim.data.v1.ResultMessage
+	43, // 21: agentshim.frontend.v1.ConversationItem.compact_boundary:type_name -> agentshim.data.v1.CompactBoundary
+	44, // 22: agentshim.frontend.v1.ConversationItem.compact_boundary_line:type_name -> agentshim.data.v1.CompactBoundaryLine
+	45, // 23: agentshim.frontend.v1.ConversationItem.api_error:type_name -> agentshim.data.v1.ApiErrorLine
+	46, // 24: agentshim.frontend.v1.ConversationItem.permission:type_name -> agentshim.core.v1.PermissionItem
+	47, // 25: agentshim.frontend.v1.TypingDelta.delta:type_name -> agentshim.core.v1.ContentDelta
+	48, // 26: agentshim.frontend.v1.HeartbeatView.progress:type_name -> agentshim.core.v1.HeartbeatProgress
+	49, // 27: agentshim.frontend.v1.SessionInitView.init:type_name -> agentshim.data.v1.SystemInit
+	12, // 28: agentshim.frontend.v1.TaskCatalog.tasks:type_name -> agentshim.frontend.v1.TaskEntry
+	24, // 29: agentshim.frontend.v1.FrontendCommand.submit_prompt:type_name -> agentshim.frontend.v1.SubmitPromptCmd
+	25, // 30: agentshim.frontend.v1.FrontendCommand.interrupt:type_name -> agentshim.frontend.v1.InterruptCmd
+	26, // 31: agentshim.frontend.v1.FrontendCommand.permission_answer:type_name -> agentshim.frontend.v1.PermissionAnswerCmd
+	27, // 32: agentshim.frontend.v1.FrontendCommand.merge_workspace:type_name -> agentshim.frontend.v1.MergeWorkspaceCmd
+	28, // 33: agentshim.frontend.v1.FrontendCommand.close_workspace:type_name -> agentshim.frontend.v1.CloseWorkspaceCmd
+	29, // 34: agentshim.frontend.v1.FrontendCommand.open_workspace:type_name -> agentshim.frontend.v1.OpenWorkspaceCmd
+	30, // 35: agentshim.frontend.v1.FrontendCommand.resync:type_name -> agentshim.frontend.v1.ResyncCmd
+	22, // 36: agentshim.frontend.v1.FrontendCommand.create_session:type_name -> agentshim.frontend.v1.CreateSessionCmd
+	23, // 37: agentshim.frontend.v1.FrontendCommand.delete_session:type_name -> agentshim.frontend.v1.DeleteSessionCmd
+	21, // 38: agentshim.frontend.v1.FrontendCommand.shutdown:type_name -> agentshim.frontend.v1.ShutdownCmd
+	20, // 39: agentshim.frontend.v1.FrontendCommand.client_log:type_name -> agentshim.frontend.v1.ClientLogCmd
+	17, // 40: agentshim.frontend.v1.FrontendCommand.queue_force:type_name -> agentshim.frontend.v1.QueueForceCmd
+	18, // 41: agentshim.frontend.v1.FrontendCommand.queue_accept:type_name -> agentshim.frontend.v1.QueueAcceptCmd
+	19, // 42: agentshim.frontend.v1.FrontendCommand.queue_cancel:type_name -> agentshim.frontend.v1.QueueCancelCmd
+	1,  // 43: agentshim.frontend.v1.QueueEntry.classification:type_name -> agentshim.frontend.v1.QueueClassification
+	15, // 44: agentshim.frontend.v1.QueueView.entries:type_name -> agentshim.frontend.v1.QueueEntry
+	2,  // 45: agentshim.frontend.v1.ClientLogCmd.level:type_name -> agentshim.frontend.v1.ClientLogLevel
+	50, // 46: agentshim.frontend.v1.ClientLogCmd.context:type_name -> google.protobuf.Struct
+	50, // 47: agentshim.frontend.v1.PermissionAnswerCmd.updated_input:type_name -> google.protobuf.Struct
+	0,  // 48: agentshim.frontend.v1.ProgressView.state:type_name -> agentshim.frontend.v1.RenderState
+	33, // 49: agentshim.frontend.v1.ProgressView.compacting:type_name -> agentshim.frontend.v1.ProgressWindow
+	33, // 50: agentshim.frontend.v1.ProgressView.retrying:type_name -> agentshim.frontend.v1.ProgressWindow
+	33, // 51: agentshim.frontend.v1.ProgressView.authenticating:type_name -> agentshim.frontend.v1.ProgressWindow
+	33, // 52: agentshim.frontend.v1.ProgressView.hook:type_name -> agentshim.frontend.v1.ProgressWindow
+	34, // 53: agentshim.frontend.v1.ProgressView.rate_limited:type_name -> agentshim.frontend.v1.RateLimitWindow
+	5,  // 54: agentshim.frontend.v1.StateSnapshot.workspaces:type_name -> agentshim.frontend.v1.WorkspaceState
+	6,  // 55: agentshim.frontend.v1.StateSnapshot.sessions:type_name -> agentshim.frontend.v1.SessionView
+	13, // 56: agentshim.frontend.v1.StateSnapshot.catalogs:type_name -> agentshim.frontend.v1.TaskCatalog
+	4,  // 57: agentshim.frontend.v1.StateSnapshot.daemon:type_name -> agentshim.frontend.v1.DaemonView
+	11, // 58: agentshim.frontend.v1.StateSnapshot.inits:type_name -> agentshim.frontend.v1.SessionInitView
+	16, // 59: agentshim.frontend.v1.StateSnapshot.queues:type_name -> agentshim.frontend.v1.QueueView
+	35, // 60: agentshim.frontend.v1.StateSnapshot.progress:type_name -> agentshim.frontend.v1.ProgressView
+	61, // [61:61] is the sub-list for method output_type
+	61, // [61:61] is the sub-list for method input_type
+	61, // [61:61] is the sub-list for extension type_name
+	61, // [61:61] is the sub-list for extension extendee
+	0,  // [0:61] is the sub-list for field type_name
 }
 
 func init() { file_agentshim_frontend_v1_frontend_proto_init() }
@@ -3304,6 +3692,7 @@ func file_agentshim_frontend_v1_frontend_proto_init() {
 		(*FrontendFrame_SessionInit)(nil),
 		(*FrontendFrame_Heartbeat)(nil),
 		(*FrontendFrame_Queue)(nil),
+		(*FrontendFrame_Progress)(nil),
 	}
 	file_agentshim_frontend_v1_frontend_proto_msgTypes[5].OneofWrappers = []any{
 		(*ConversationItem_AssistantMessage)(nil),
@@ -3339,7 +3728,7 @@ func file_agentshim_frontend_v1_frontend_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentshim_frontend_v1_frontend_proto_rawDesc), len(file_agentshim_frontend_v1_frontend_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   31,
+			NumMessages:   34,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
