@@ -62,6 +62,11 @@ type CreateOpts struct {
 	//
 	// Empty means "the daemon's own default", NOT "no config dir".
 	ConfigDir string `json:"config_dir,omitempty"`
+	// AllowUngated is the caller's DELIBERATE consent to create a session
+	// with no permission gate (protocol.UngatedPermissionMode). CreateSession
+	// refuses such a create without it; see the CreateSessionCmd.allow_ungated
+	// field comment for why the consent is create-time only.
+	AllowUngated bool `json:"allow_ungated,omitempty"`
 }
 
 // ShimArgv assembles the node argv that launches the shim for one
@@ -1089,6 +1094,23 @@ func (e *InvalidCreateError) Error() string { return e.msg }
 // errSessionNotFound reports a delete/lookup for an id with no registry record.
 var errSessionNotFound = errors.New("no such session")
 
+// ungatedCreateNote is the suffix the create log carries when opts asks for a
+// session with no permission gate, and "" otherwise.
+//
+// The whole point is that an ungated session must not be able to come into
+// existence quietly. The daemon cannot gate what the SDK auto-approves — by
+// the time any tool call is visible here it has already run — so the log entry
+// naming the gate-less session at its moment of creation IS the record, and it
+// names the consent that admitted it rather than only the mode.
+func ungatedCreateNote(opts CreateOpts) string {
+	if !protocol.UngatedPermissionMode(opts.PermissionMode) {
+		return ""
+	}
+	return fmt.Sprintf(
+		" — UNGATED: permission_mode %q auto-approves every tool before canUseTool, so this session has NO permission gate (allow_ungated=%v)",
+		opts.PermissionMode, opts.AllowUngated)
+}
+
 // CreateSession is the shared create-session core behind both POST /sessions
 // (webapp) and the createSession UDS command (Emacs): validate, apply the
 // resume-viability gate, supersede transcript conflicts, register the record,
@@ -1101,12 +1123,31 @@ func (s *Server) CreateSession(_ context.Context, opts CreateOpts) (string, erro
 	if opts.PermissionMode != "" && !protocol.ValidPermissionMode(opts.PermissionMode) {
 		return "", &InvalidCreateError{msg: fmt.Sprintf("invalid permission_mode %q", opts.PermissionMode)}
 	}
+	// The ungated-create consent gate. A mode that shadows canUseTool in the
+	// fail-open direction leaves this session with no permission gate at all
+	// (protocol.UngatedPermissionMode), and it is one string away from every
+	// ordinary create — so it takes a caller who SAID SO, not a caller who
+	// happened to pass it. Refused loudly rather than downgraded to a gated
+	// mode: silently running under a posture nobody asked for is how a caller
+	// ends up believing a gate exists.
+	if protocol.UngatedPermissionMode(opts.PermissionMode) && !opts.AllowUngated {
+		s.logf("session create REJECTED: permission_mode %q runs with NO permission gate (the SDK auto-approves every tool before canUseTool) and the create did not set allow_ungated",
+			opts.PermissionMode)
+		return "", &InvalidCreateError{msg: fmt.Sprintf(
+			"permission_mode %q creates a session with NO permission gate; set allow_ungated to confirm that is intended",
+			opts.PermissionMode)}
+	}
 	resumeLabel := opts.Resume
 	if resumeLabel == "" {
 		resumeLabel = "fresh"
 	}
-	dlog.Tag(s.logf, "cwd", opts.CWD, "model", opts.Model, "config_dir", opts.ConfigDir)(
-		"session create requested (resume=%s)", resumeLabel)
+	// permission_mode rides in the tag set because it is the session's whole
+	// safety posture, and an ungated create is announced in the message itself
+	// so the log carries a durable record of every gate-less session and the
+	// consent that admitted it.
+	dlog.Tag(s.logf, "cwd", opts.CWD, "model", opts.Model, "config_dir", opts.ConfigDir,
+		"permission_mode", opts.PermissionMode)(
+		"session create requested (resume=%s)%s", resumeLabel, ungatedCreateNote(opts))
 	// Resume viability gate: the CLI hard-exits when asked to --resume a
 	// session id with no transcript in this daemon's config dir. Silently
 	// downgrading to a FRESH conversation buries a genuinely lost session, so
