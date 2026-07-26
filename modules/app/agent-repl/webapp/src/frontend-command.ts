@@ -90,6 +90,24 @@ export interface ResyncBody {
   fromSeq: number;
 }
 
+/**
+ * PaintAckCmd — attest that this frontend PAINTED the workspace's
+ * conversation through `throughSeq`.
+ *
+ * The daemon tracks STATE; a frontend decides when that state is
+ * RENDERABLE. Nothing on the daemon's side can distinguish a webview that
+ * received every item and drew them from one that received every item and
+ * drew nothing, so it withholds "ready" until a frontend says it drew.
+ *
+ * `throughSeq` 0 is a REAL attestation of an EMPTY history — "there was
+ * nothing to paint and I painted it" — which is what lets a never-prompted
+ * session read as ready.
+ */
+export interface PaintAckBody {
+  case: "paintAck";
+  throughSeq: number;
+}
+
 /** The `ClientLogLevel` enum values, as their canonical protojson names. */
 const CLIENT_LOG_LEVEL_NAME = {
   info: "CLIENT_LOG_LEVEL_INFO",
@@ -142,7 +160,8 @@ export type FrontendCommandBody =
   | ClientLogBody
   | QueueForceBody
   | QueueAcceptBody
-  | QueueCancelBody;
+  | QueueCancelBody
+  | PaintAckBody;
 
 /** The command envelope: correlation id + workspace + exactly one command arm. */
 export interface FrontendCommand {
@@ -165,6 +184,7 @@ const ARM_KEY: Record<FrontendCommandBody["case"], string> = {
   queueForce: "queueForce",
   queueAccept: "queueAccept",
   queueCancel: "queueCancel",
+  paintAck: "paintAck",
 };
 
 /** Build the nested protojson command message for one body arm. */
@@ -199,6 +219,9 @@ function encodeBody(b: FrontendCommandBody): Record<string, unknown> {
     case "resync":
       // uint64 renders as a JSON string in protojson.
       return { fromSeq: String(b.fromSeq) };
+    case "paintAck":
+      // uint64 renders as a JSON string in protojson.
+      return { throughSeq: String(b.throughSeq) };
     case "clientLog": {
       // An enum renders as its proto NAME in canonical protojson.
       const arm: Record<string, unknown> = {

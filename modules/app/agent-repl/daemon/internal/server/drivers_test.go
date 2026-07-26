@@ -215,3 +215,6 @@ func (nopHandler) AcceptQueueEntry(context.Context, string, string, *frontendv1.
 func (nopHandler) CancelQueueEntry(context.Context, string, string, *frontendv1.QueueCancelCmd) error {
 	return nil
 }
+func (nopHandler) PaintAck(context.Context, string, string, *frontendv1.PaintAckCmd) error {
+	return nil
+}

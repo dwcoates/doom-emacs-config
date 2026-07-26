@@ -74,6 +74,10 @@ func (m *mockHandler) CancelQueueEntry(_ context.Context, ws, rid string, _ *fro
 	m.called, m.lastWorkspace, m.lastRequestID = "queue_cancel", ws, rid
 	return m.err
 }
+func (m *mockHandler) PaintAck(_ context.Context, ws, rid string, _ *frontendv1.PaintAckCmd) error {
+	m.called, m.lastWorkspace, m.lastRequestID = "paint_ack", ws, rid
+	return m.err
+}
 
 func TestDispatchRoutesEachCommand(t *testing.T) {
 	tests := []struct {
@@ -140,6 +144,20 @@ func TestDispatchRoutesEachCommand(t *testing.T) {
 			name:    "queue force",
 			cmd:     &frontendv1.FrontendCommand{RequestId: "r12", Workspace: "ws12", Command: &frontendv1.FrontendCommand_QueueForce{QueueForce: &frontendv1.QueueForceCmd{EntryId: "q_1"}}},
 			wantHit: "queue_force",
+		},
+		{
+			// A frontend's attestation that it PAINTED the history — the half
+			// of green's promise the daemon cannot observe for itself.
+			name:    "paint ack",
+			cmd:     &frontendv1.FrontendCommand{RequestId: "r17", Workspace: "ws17", Command: &frontendv1.FrontendCommand_PaintAck{PaintAck: &frontendv1.PaintAckCmd{ThroughSeq: 42}}},
+			wantHit: "paint_ack",
+		},
+		{
+			// Seq 0 is a REAL attestation of an empty history, not an absent
+			// one: it is what lets a never-prompted session read as ready.
+			name:    "paint ack of an empty history",
+			cmd:     &frontendv1.FrontendCommand{RequestId: "r18", Workspace: "ws18", Command: &frontendv1.FrontendCommand_PaintAck{PaintAck: &frontendv1.PaintAckCmd{ThroughSeq: 0}}},
+			wantHit: "paint_ack",
 		},
 		{
 			name:    "queue accept",
