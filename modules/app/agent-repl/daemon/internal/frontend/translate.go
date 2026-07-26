@@ -36,11 +36,19 @@
 // no visual value (an empty message, a known-but-non-conversational stream arm,
 // a metadata transcript line) is simply not pushed rather than emitted empty.
 //
-// Reconciliation contract: a message item's uuid is the claude message uuid the
-// TypingDelta previews key on (state-adapter derives `${uuid}:${blockIndex}`);
-// a permission item's uuid is the permission request_id (sourced from the
-// control plane in sinks.go / driver.go, not this file). A TypingDelta preview
-// is REPLACED when the ConversationDelta item for that message arrives.
+// Reconciliation contract: a message item's uuid is the RECORD ENVELOPE's uuid
+// — unique per emitted record, and what consumers dedup a replayed item on. It
+// is deliberately NOT the claude message id, which the item's own payload
+// carries: the SDK emits one assistant record per content block, all repeating
+// that message id, so keying items on it collapses a multi-block message onto
+// one item. A permission item's uuid is the permission request_id (sourced from
+// the control plane in sinks.go / driver.go, not this file).
+//
+// A TypingDelta preview is REPLACED when the ConversationDelta item for that
+// message arrives, but the two carry no common id — the preview keys the
+// message id + TRUE API block index, the record keys its envelope — so the
+// frontend MATCHES them rather than looking one up by the other. This daemon
+// carries both ids unchanged and derives neither; see stream_contract_test.go.
 //
 // Detached-task lifecycle is NOT a conversation item: it flows via TaskCatalog
 // (BuildTaskCatalog), which the webapp roster renders. The webapp has no `task`
