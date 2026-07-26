@@ -613,8 +613,22 @@ func (m *Manager) bringUp(workspace string) (*driven, error) {
 		m.onTurnBoundary(d, active)
 	}, func(state string) {
 		m.persistBackfillState(sessionID, state)
+		// The SSM composes green from this: a failed backfill is blue, and
+		// a settled one releases the axis so the workspace can be ready.
+		if err := m.cfg.SSM.ApplyBackfillState(workspace, state); err != nil {
+			m.logf("sessiondrv: applying backfill %s to the SSM (ws %q): %v", state, workspace, err)
+		}
 	})
 	d.consumer = cons
+	// Settle the backfill for a REOPENED session before any event flows.
+	//
+	// The live derivation can only witness a backfill happening; a session
+	// whose transcript was ingested in an earlier run produces no new line to
+	// witness, because the sidecar's cursor already sits at that file's tail.
+	// Reading the durable high-water instead answers the same question from
+	// the record, so a fully-backfilled workspace does not sit in "starting"
+	// forever waiting for evidence that will never come again.
+	cons.settleBackfillFromStore(m.cfg.SeqStore.LastSeq(sessionID))
 	// onPermsChanged republishes the footer's pending-permission badge on both
 	// edges of a permission's life. The queue depth is read back off the live
 	// queue so the two counters are always reported together and neither can go

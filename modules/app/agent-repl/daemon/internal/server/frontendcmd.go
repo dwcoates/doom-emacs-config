@@ -160,7 +160,18 @@ type commandHandler struct {
 	// queues backs the queue force/accept/cancel commands (E4). Nil makes each
 	// of them a loud failing ack rather than a silent no-op, same as shutdown.
 	queues QueueController
-	logf   func(string, ...any)
+	// painters records frontend paint attestations onto the SSM's paint
+	// axis. Nil makes a paint-ack a loud failing ack rather than a silent
+	// no-op: an attestation the daemon quietly dropped would leave the
+	// workspace blue with nothing to explain why.
+	painters PaintAcker
+	logf     func(string, ...any)
+}
+
+// PaintAcker records a frontend's attestation that it painted a workspace's
+// conversation through a seq. Satisfied by *ssm.Manager.
+type PaintAcker interface {
+	ApplyPaintAck(workspace string, throughSeq uint64) error
 }
 
 var _ frontend.CommandHandler = (*commandHandler)(nil)
@@ -169,7 +180,7 @@ var _ frontend.CommandHandler = (*commandHandler)(nil)
 // resyncer is optional (nil-safe) and shutdown is optional (an unconfigured
 // shutdown fails the command loudly); the three routers and the
 // session-lifecycle binding are required.
-func newCommandHandler(prompts PromptRouter, merges MergeRunner, lifecycle WorkspaceLifecycle, resyncer Resyncer, sessions SessionCreateDeleter, shutdown func(), queues QueueController, logf func(string, ...any)) (*commandHandler, error) {
+func newCommandHandler(prompts PromptRouter, merges MergeRunner, lifecycle WorkspaceLifecycle, resyncer Resyncer, sessions SessionCreateDeleter, shutdown func(), queues QueueController, painters PaintAcker, logf func(string, ...any)) (*commandHandler, error) {
 	switch {
 	case prompts == nil:
 		return nil, fmt.Errorf("server: frontend command handler needs a PromptRouter")
@@ -183,7 +194,7 @@ func newCommandHandler(prompts PromptRouter, merges MergeRunner, lifecycle Works
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
-	return &commandHandler{prompts: prompts, merges: merges, lifecycle: lifecycle, resyncer: resyncer, sessions: sessions, shutdown: shutdown, queues: queues, logf: logf}, nil
+	return &commandHandler{prompts: prompts, merges: merges, lifecycle: lifecycle, resyncer: resyncer, sessions: sessions, shutdown: shutdown, queues: queues, painters: painters, logf: logf}, nil
 }
 
 // checkWorkspaceKey rejects a prompt-plane workspace key that is not an
@@ -256,6 +267,26 @@ func (h *commandHandler) OpenWorkspace(ctx context.Context, workspace, requestID
 // per-session driver's retained-ring replay from the requested exclusive seq.
 // A nil resyncer (no driver wired) leaves this a documented no-op — the
 // snapshot half is honest and sufficient for state — rather than a swallow.
+// PaintAck records that a frontend PAINTED this workspace's conversation
+// through the carried seq, which is the half of green's promise the daemon
+// cannot observe for itself: it cannot distinguish a webview that drew the
+// history from one that received it and drew nothing.
+//
+// Emacs never sends this — it renders no conversation, so it has nothing to
+// attest to. The webapp sends it from the completion of a render that
+// actually drew.
+func (h *commandHandler) PaintAck(_ context.Context, workspace, requestID string, cmd *frontendv1.PaintAckCmd) error {
+	if workspace == "" {
+		return fmt.Errorf("frontend cmd: paint_ack request_id=%s carries no workspace", requestID)
+	}
+	if h.painters == nil {
+		return fmt.Errorf("frontend cmd: paint_ack ws=%s request_id=%s: no paint recorder wired", workspace, requestID)
+	}
+	h.logf("frontend cmd: paint_ack ws=%s request_id=%s through_seq=%d",
+		workspace, requestID, cmd.GetThroughSeq())
+	return h.painters.ApplyPaintAck(workspace, cmd.GetThroughSeq())
+}
+
 func (h *commandHandler) Resync(_ context.Context, workspace, requestID string, cmd *frontendv1.ResyncCmd) error {
 	if h.resyncer == nil {
 		h.logf("frontend cmd: resync ws=%s request_id=%s from_seq=%d (snapshot re-sent by server; no driver wired for conversation replay)",

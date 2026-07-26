@@ -1541,28 +1541,15 @@ just became visible on the switch is snapped to its tail too."
         (agent-repl--on-workspace-switch "ws1")
         (should (equal (nreverse order) '(show snap)))))))
 
-(ert-deftest agent-repl-test-panels-on-workspace-switch-done-stamps-acked-at ()
-  "Switching to a workspace in :done sets :done-acked t and stamps
-:done-acked-at with the current time so the focus-dwell countdown
-can start."
+(ert-deftest agent-repl-test-panels-on-workspace-switch-stamps-no-ack ()
+  "Switching to a :done workspace records no viewed-acknowledgment.
+The stamp existed only to start the removed decay's dwell countdown."
   (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
-              ((symbol-function 'agent-repl--maybe-sweep-hidden-on-switch) #'ignore)
-              ((symbol-function 'agent-repl--update-all-workspace-states-now) #'ignore)
-              ((symbol-function 'agent-repl--drain-pending-magit) #'ignore)
-              ((symbol-function 'agent-repl--drain-pending-initial-buffers) #'ignore)
-              ((symbol-function 'agent-repl--drain-pending-show-panels) #'ignore)
-              ((symbol-function 'agent-repl--maybe-autoselect-input) #'ignore))
-      (agent-repl--ws-set-agent-state "ws1" :done)
-      (let ((before (float-time)))
-        (agent-repl--on-workspace-switch "ws1")
-        (should (eq (agent-repl--ws-get "ws1" :done-acked) t))
-        (let ((stamp (agent-repl--ws-get "ws1" :done-acked-at)))
-          (should (numberp stamp))
-          (should (>= stamp before)))))))
+    (agent-repl--ws-put "ws1" :agent-state :done)
+    (should (null (agent-repl--ws-get "ws1" :done-acked-at)))))
 
 (ert-deftest agent-repl-test-panels-on-workspace-switch-non-done-does-not-stamp ()
-  "Switching to a workspace not in :done does not touch :done-acked-at."
+  "Switching to a workspace records no viewed-acknowledgment at all."
   (agent-repl-test--with-clean-state
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
               ((symbol-function 'agent-repl--maybe-sweep-hidden-on-switch) #'ignore)
@@ -1576,36 +1563,9 @@ can start."
       (should-not (agent-repl--ws-get "ws1" :done-acked))
       (should-not (agent-repl--ws-get "ws1" :done-acked-at)))))
 
-(ert-deftest agent-repl-test-panels-clear-done-ack-on-switch-away-done ()
-  "Leaving a workspace in :done clears :done-acked and :done-acked-at so
-the dwell countdown restarts on return."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-agent-state "ws1" :done)
-    (agent-repl--ws-put "ws1" :done-acked t)
-    (agent-repl--ws-put "ws1" :done-acked-at (float-time))
-    (agent-repl--clear-done-ack-on-switch-away "ws1")
-    (should-not (agent-repl--ws-get "ws1" :done-acked))
-    (should-not (agent-repl--ws-get "ws1" :done-acked-at))))
-
-(ert-deftest agent-repl-test-panels-clear-done-ack-on-switch-away-non-done ()
-  "Leaving a workspace NOT in :done leaves ack flags untouched — the
-clear only resets the dwell countdown for live :done workspaces."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-agent-state "ws1" :thinking)
-    (agent-repl--ws-put "ws1" :done-acked t)
-    (let ((stamp (float-time)))
-      (agent-repl--ws-put "ws1" :done-acked-at stamp)
-      (agent-repl--clear-done-ack-on-switch-away "ws1")
-      ;; :thinking ws was not affected.
-      (should (eq (agent-repl--ws-get "ws1" :done-acked) t))
-      (should (= (agent-repl--ws-get "ws1" :done-acked-at) stamp)))))
-
-(ert-deftest agent-repl-test-panels-clear-done-ack-on-switch-away-nil-ws ()
-  "Switch-away clear with nil ws is a no-op (covers test/init envs where
-+workspace-current-name returns nil)."
-  (agent-repl-test--with-clean-state
-    ;; Should not error.
-    (agent-repl--clear-done-ack-on-switch-away nil)))
+(ert-deftest agent-repl-test-panels-clear-done-ack-helper-is-gone ()
+  "The switch-away dwell reset went with the decay it paced."
+  (should-not (fboundp 'agent-repl--clear-done-ack-on-switch-away)))
 
 (ert-deftest agent-repl-test-panels-on-workspace-switch-explicit-ws-overrides-current ()
   "An explicit WS argument propagates to every per-ws side effect,

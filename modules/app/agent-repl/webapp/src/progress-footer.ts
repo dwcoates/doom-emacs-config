@@ -64,8 +64,18 @@ export interface FooterInput {
 /** The phase word and accent class the footer's anchor cell wears. */
 export interface PhaseLabel {
   word: string;
-  /** Accent class stem: `thinking` | `retry` | `error` | `ok` | `muted`. */
-  tone: "thinking" | "retry" | "error" | "ok" | "muted";
+  /**
+   * Accent class stem. The five state tones map onto the five colors the
+   * tab-bar and the sidebar dots speak, so a workspace never reads one way
+   * here and another there:
+   *   `thinking` red    a turn is in flight
+   *   `blocked`  purple the vendor or the account has stopped this session
+   *   `async`    yellow no foreground turn, live detached work
+   *   `ok`       green  ready
+   *   `error`    blue   the route is compromised on our side
+   *   `muted`    quiet chrome (merge phases), which spend no color
+   */
+  tone: "thinking" | "blocked" | "async" | "retry" | "error" | "ok" | "muted";
   /** Whether the phase spins (the agent is actively working). */
   spinning: boolean;
 }
@@ -87,14 +97,25 @@ export function phaseLabel(state: ProgressInput["state"]): PhaseLabel {
       return { word: "permission", tone: "retry", spinning: false };
     case "done":
       return { word: "done", tone: "ok", spinning: false };
+    // GREEN, not muted: idle and ready are the same claim as done — the
+    // route works and the agent is available. Greying them said "nothing to
+    // see here" about a workspace that was ready to be used.
     case "idle":
-      return { word: "idle", tone: "muted", spinning: false };
+      return { word: "ready", tone: "ok", spinning: false };
+    case "ready":
+      return { word: "ready", tone: "ok", spinning: false };
+    // YELLOW: no foreground turn, but detached work continues.
     case "idle_async":
-      return { word: "monitoring", tone: "thinking", spinning: true };
+      return { word: "monitoring", tone: "async", spinning: true };
+    // BLUE: the route is compromised on our side. `starting` keeps its spin
+    // because bring-up really is in progress.
     case "init":
-      return { word: "starting", tone: "muted", spinning: true };
-    case "stop_failed":
-      return { word: "stop failed", tone: "error", spinning: false };
+      return { word: "starting", tone: "error", spinning: true };
+    // PURPLE: blocked until a human or the vendor acts. It does NOT spin —
+    // every other phase that spins is work happening, and animating this one
+    // would say the opposite of what it means.
+    case "vendor_blocked":
+      return { word: "blocked", tone: "blocked", spinning: false };
     case "dead":
       return { word: "dead", tone: "error", spinning: false };
     case "degraded":
@@ -120,7 +141,7 @@ export function phaseLabel(state: ProgressInput["state"]): PhaseLabel {
 export interface Activity {
   text: string;
   /** Accent class stem, one per window so they read apart at a glance. */
-  tone: "tool" | "thinking" | "retry" | "error" | "muted";
+  tone: "tool" | "thinking" | "blocked" | "retry" | "error" | "muted";
 }
 
 /**

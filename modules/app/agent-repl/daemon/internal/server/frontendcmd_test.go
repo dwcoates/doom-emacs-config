@@ -106,7 +106,7 @@ func (f *fakeSessionCmds) DeleteSession(id string) error {
 func newTestHandler(t *testing.T) (*commandHandler, *fakePrompts, *fakeMerges, *fakeLifecycle) {
 	t.Helper()
 	p, m, l := &fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}
-	h, err := newCommandHandler(p, m, l, nil, &fakeSessionCmds{}, nil, nil, nil)
+	h, err := newCommandHandler(p, m, l, nil, &fakeSessionCmds{}, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("newCommandHandler: %v", err)
 	}
@@ -188,7 +188,7 @@ func TestCommandHandlerCloseOpenRouteToLifecycle(t *testing.T) {
 func TestCommandHandlerPromptErrorSurfaces(t *testing.T) {
 	// Arrange — the prompt router fails.
 	p := &fakePrompts{err: errors.New("no live shim")}
-	h, err := newCommandHandler(p, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil, nil)
+	h, err := newCommandHandler(p, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("newCommandHandler: %v", err)
 	}
@@ -202,14 +202,14 @@ func TestCommandHandlerPromptErrorSurfaces(t *testing.T) {
 
 func TestNewCommandHandlerRejectsNilDeps(t *testing.T) {
 	// Arrange / Act / Assert
-	if _, err := newCommandHandler(nil, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil, nil); err == nil {
+	if _, err := newCommandHandler(nil, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil, nil, nil); err == nil {
 		t.Fatal("want error for nil PromptRouter")
 	}
 }
 
 func TestNewCommandHandlerRejectsNilSessions(t *testing.T) {
 	// Arrange / Act / Assert — the session-lifecycle binding is required.
-	if _, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, nil, nil, nil, nil); err == nil {
+	if _, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, nil, nil, nil, nil, nil); err == nil {
 		t.Fatal("want error for nil SessionCreateDeleter")
 	}
 }
@@ -217,7 +217,7 @@ func TestNewCommandHandlerRejectsNilSessions(t *testing.T) {
 func TestCommandHandlerCreateSessionRoutesToSessions(t *testing.T) {
 	// Arrange
 	sc := &fakeSessionCmds{}
-	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, sc, nil, nil, nil)
+	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, sc, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("newCommandHandler: %v", err)
 	}
@@ -237,7 +237,7 @@ func TestCommandHandlerCarriesTheUngatedConsent(t *testing.T) {
 	// so dropping it in the dispatch would turn every such create into a
 	// refusal (or, worse, admit one nobody consented to).
 	sc := &fakeSessionCmds{}
-	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, sc, nil, nil, nil)
+	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, sc, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("newCommandHandler: %v", err)
 	}
@@ -259,7 +259,7 @@ func TestCommandHandlerCarriesTheUngatedConsent(t *testing.T) {
 func TestCommandHandlerWithholdsAnUnsetUngatedConsent(t *testing.T) {
 	// Arrange
 	sc := &fakeSessionCmds{}
-	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, sc, nil, nil, nil)
+	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, sc, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("newCommandHandler: %v", err)
 	}
@@ -277,7 +277,7 @@ func TestCommandHandlerWithholdsAnUnsetUngatedConsent(t *testing.T) {
 func TestCommandHandlerDeleteSessionRoutesToSessions(t *testing.T) {
 	// Arrange
 	sc := &fakeSessionCmds{}
-	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, sc, nil, nil, nil)
+	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, sc, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("newCommandHandler: %v", err)
 	}
@@ -296,7 +296,7 @@ func TestCommandHandlerShutdownRoutesToShutdownFunc(t *testing.T) {
 	// Arrange — a shutdown func that signals when invoked.
 	fired := make(chan struct{}, 1)
 	newHandlerWithShutdown := func(shutdown func()) *commandHandler {
-		h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, shutdown, nil, nil)
+		h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, shutdown, nil, nil, nil)
 		if err != nil {
 			t.Fatalf("newCommandHandler: %v", err)
 		}
@@ -319,7 +319,7 @@ func TestCommandHandlerShutdownRoutesToShutdownFunc(t *testing.T) {
 
 func TestCommandHandlerShutdownUnconfiguredErrors(t *testing.T) {
 	// Arrange — no shutdown func wired.
-	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil, nil)
+	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("newCommandHandler: %v", err)
 	}
@@ -333,7 +333,7 @@ func TestCommandHandlerShutdownUnconfiguredErrors(t *testing.T) {
 func TestCommandHandlerCreateSessionErrorSurfaces(t *testing.T) {
 	// Arrange — the session core fails.
 	sc := &fakeSessionCmds{err: errors.New("bring up shim failed")}
-	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, sc, nil, nil, nil)
+	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, sc, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("newCommandHandler: %v", err)
 	}
@@ -544,7 +544,7 @@ func TestWireAgentShimMergeTransitionReachesSSM(t *testing.T) {
 // client-log mirroring can be asserted on its ONLY observable effect.
 func newLoggingHandler(t *testing.T, lines *[]string) *commandHandler {
 	t.Helper()
-	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil,
+	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil, nil,
 		func(format string, args ...any) { *lines = append(*lines, fmt.Sprintf(format, args...)) })
 	if err != nil {
 		t.Fatalf("newCommandHandler: %v", err)
@@ -682,7 +682,7 @@ func TestCommandHandlerClientLogChangesNoDaemonState(t *testing.T) {
 	p := &fakePrompts{}
 	m := &fakeMerges{}
 	l := &fakeLifecycle{}
-	h, err := newCommandHandler(p, m, l, nil, &fakeSessionCmds{}, nil, nil, nil)
+	h, err := newCommandHandler(p, m, l, nil, &fakeSessionCmds{}, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("newCommandHandler: %v", err)
 	}
