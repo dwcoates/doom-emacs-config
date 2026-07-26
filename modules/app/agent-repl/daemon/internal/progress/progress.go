@@ -171,7 +171,11 @@ func (m *Manager) ObserveWorkspaceState(ws *frontendv1.WorkspaceState) error {
 	if sid := ws.GetSessionId(); sid != "" {
 		wp.view.SessionId = sid
 	}
-	wp.view.State = ws.GetState()
+	// An UNSPECIFIED state is the SSM saying nothing, not a state to mirror:
+	// adopting it would blank a phase the footer already had.
+	if st := ws.GetState(); st != frontendv1.RenderState_RENDER_STATE_UNSPECIFIED {
+		wp.view.State = st
+	}
 	wp.view.LiveTaskCount = ws.GetLiveTaskCount()
 	m.pushLocked(name, wp)
 	return nil
@@ -606,8 +610,17 @@ func (m *Manager) forLocked(workspace string) *workspaceProgress {
 	if wp, ok := m.views[workspace]; ok {
 		return wp
 	}
+	// A fresh view is seeded INIT, not UNSPECIFIED. A workspace can acquire
+	// progress facts (a pending permission, a queued prompt) BEFORE the SSM has
+	// resolved a render state for it, and INIT is the honest name for "this
+	// session exists and nothing has resolved yet" — it is already in the closed
+	// vocabulary. Leaving it UNSPECIFIED would push a frame whose phase mirror
+	// names nothing renderable, which frontends reject.
 	wp := &workspaceProgress{
-		view:         &frontendv1.ProgressView{Workspace: workspace},
+		view: &frontendv1.ProgressView{
+			Workspace: workspace,
+			State:     frontendv1.RenderState_RENDER_STATE_INIT,
+		},
 		countedUsage: map[string]struct{}{},
 	}
 	m.views[workspace] = wp
