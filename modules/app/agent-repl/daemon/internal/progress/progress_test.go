@@ -158,6 +158,20 @@ func assistantWithUsage(uuid string, u *datav1.ApiUsage) *datav1.ClaudeStreamMes
 	}}
 }
 
+// latencyEvent builds the EPHEMERAL first-token-latency relay the shim's delta
+// bypass emits off a message_start's ttft stamp. Ephemeral, so it carries no
+// seq.
+func latencyEvent(uuid string, ttftMs int64) *corev1.Event {
+	return &corev1.Event{
+		SessionId:    testSID,
+		Class:        corev1.EventClass_EVENT_CLASS_EPHEMERAL,
+		ProducedAtMs: atMs,
+		Payload: &corev1.Event_MessageLatency{
+			MessageLatency: &corev1.MessageLatency{Uuid: uuid, TtftMs: ttftMs},
+		},
+	}
+}
+
 // apiErrorLine builds the on-disk system line carrying an API error/retry.
 func apiErrorLine(uuid, message string, attempt, max int64) *datav1.TranscriptLine {
 	return &datav1.TranscriptLine{Line: &datav1.TranscriptLine_System{
@@ -427,6 +441,97 @@ func TestInputTokensIgnoredOffTurn(t *testing.T) {
 	cur, _ := h.m.Current(testWS)
 	if got := cur.GetInputTokens(); got != 0 {
 		t.Fatalf("inputTokens = %d, want 0 for usage observed off-turn", got)
+	}
+}
+
+// --- the ttft relay ---------------------------------------------------------
+//
+// The shim's delta bypass relays the vendor's mid-stream first-token stamp as
+// an EPHEMERAL MessageLatency. This resolver is its only consumer: the same
+// number reaches the daemon again on the turn's terminal result, but only once
+// the turn is over.
+
+func TestMessageLatencyFeedsTtft(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.openTurn()
+	// Act
+	h.apply(latencyEvent("msg_01ABC", 865))
+	// Assert
+	if got := h.last().GetTtftMs(); got != 865 {
+		t.Fatalf("ttftMs = %d, want 865", got)
+	}
+}
+
+func TestMessageLatencyLatestMessageWins(t *testing.T) {
+	// Arrange — two API requests in one turn, each with its own stamp.
+	h := newHarness(t)
+	h.openTurn()
+	h.apply(latencyEvent("msg_FIRST", 865))
+	// Act
+	h.apply(latencyEvent("msg_SECOND", 412))
+	// Assert — the field reports the CURRENT message, not the turn's first.
+	if got := h.last().GetTtftMs(); got != 412 {
+		t.Fatalf("ttftMs = %d, want 412 from the newer message", got)
+	}
+}
+
+func TestMessageLatencyResetsAtTurnStart(t *testing.T) {
+	// Arrange — a turn that measured a latency, then ended.
+	h := newHarness(t)
+	h.openTurn()
+	h.apply(latencyEvent("msg_01ABC", 865))
+	h.apply(&corev1.Event{
+		SessionId: testSID, ProducedAtMs: atMs,
+		Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{}},
+	})
+	h.drain()
+	// Act
+	h.m.NoteTurnAccepted(testWS, testSID)
+	// Assert
+	if got := h.last().GetTtftMs(); got != 0 {
+		t.Fatalf("ttftMs = %d, want 0 at the start of a fresh turn", got)
+	}
+}
+
+func TestMessageLatencyIsStructuralNotCoalesced(t *testing.T) {
+	// Arrange — coalescing ON, so a ticker would be held back.
+	h := newHarnessWindow(t, DefaultCoalesceWindow)
+	h.openTurn()
+	// Act
+	h.apply(latencyEvent("msg_01ABC", 865))
+	// Assert — latency moves at most once per message, so it goes out at once.
+	if got := h.last().GetTtftMs(); got != 865 {
+		t.Fatalf("ttftMs = %d, want 865 pushed without waiting on the window", got)
+	}
+}
+
+func TestRepeatedMessageLatencyIsQuiet(t *testing.T) {
+	// Arrange — the same stamp observed twice.
+	h := newHarness(t)
+	h.openTurn()
+	h.apply(latencyEvent("msg_01ABC", 865))
+	h.drain()
+	// Act
+	h.apply(latencyEvent("msg_01ABC", 865))
+	// Assert — no movement, no frame.
+	if got := h.drain(); len(got) != 0 {
+		t.Fatalf("pushes = %d, want 0 for an unchanged latency", len(got))
+	}
+}
+
+func TestZeroMessageLatencyLeavesTheFigureStanding(t *testing.T) {
+	// Arrange — absence-tolerance: a stampless relay must not blank a real one.
+	h := newHarness(t)
+	h.openTurn()
+	h.apply(latencyEvent("msg_01ABC", 865))
+	h.drain()
+	// Act
+	h.apply(latencyEvent("msg_SECOND", 0))
+	// Assert
+	cur, _ := h.m.Current(testWS)
+	if got := cur.GetTtftMs(); got != 865 {
+		t.Fatalf("ttftMs = %d, want the standing 865 preserved", got)
 	}
 }
 
