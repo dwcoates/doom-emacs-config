@@ -16,6 +16,7 @@ package agentshim.data.v1;
 
 import "google/protobuf/struct.proto";
 import "agentshim/data/v1/tools.proto";
+import "agentshim/data/v1/unknown.proto";
 
 option go_package = "agentrepl/proto/agentshim/data/v1;datav1";
 
@@ -79,6 +80,13 @@ message TranscriptLine {
     FileHistorySnapshotLine file_history_snapshot = 11;
     FileHistoryDeltaLine file_history_delta = 12;
     FrameLinkLine frame_link = 13;  // [corpus] observed post-census
+    AttributionSnapshotLine attribution_snapshot = 14;
+    // PASSTHROUGH (unknown.proto): a top-level `type` no arm above models.
+    // Captured whole rather than hard-erroring — the disk format is
+    // explicitly version-unstable, so a new line type is expected, not
+    // exceptional. A line of a KNOWN type that fails conversion is still a
+    // core.UnparsedEvent.
+    UnknownRecord unknown = 15;
   }
 }
 
@@ -162,6 +170,9 @@ message SystemLine {
     ApiErrorLine api_error = 10;
     ModelRefusalFallbackLine model_refusal_fallback = 11;  // [corpus]
     AwaySummaryLine away_summary = 12;                     // [corpus]
+    // PASSTHROUGH (unknown.proto): a system `subtype` no arm above models,
+    // captured whole with parent_type = "system".
+    UnknownRecord unknown = 13;
   }
 }
 
@@ -347,6 +358,28 @@ message FileHistoryDeltaLine {
   string timestamp = 5;
 }
 
+// Top-level type:"attribution-snapshot" — the periodic authorship snapshot
+// that pairs with the `attributionAgent` / `attributionSkill` /
+// `attributionPlugin` envelope fields LineEnvelope already models: those say
+// WHO produced one line, this says what the working tree and prompt counters
+// looked like at a moment, so authorship can be attributed over a span.
+//
+// Verified as a constructor in the harness bundle; zero occurrences in the
+// 463k-line local census, so every field below is grounded in the
+// constructor rather than observed data. `file_states` stays a Struct for
+// exactly that reason — its element shape was never seen, and inventing a
+// typed model for it would be a guess the schema then asserts as fact.
+message AttributionSnapshotLine {
+  string message_id = 1;
+  string surface = 2;  // which UI surface took the snapshot
+  google.protobuf.Struct file_states = 3;
+  int64 prompt_count = 4;
+  int64 prompt_count_at_last_commit = 5;
+  int64 permission_prompt_count = 6;
+  string session_id = 7;
+  string timestamp = 8;
+}
+
 // [corpus] top-level type:"frame-link" — an artifact/frame reference line.
 message FrameLinkLine {
   string session_id = 1;
@@ -388,6 +421,9 @@ message AttachmentLine {
     PlanModeExitAttachment plan_mode_exit = 25;
     HookCancelledAttachment hook_cancelled = 26;   // [corpus]
     InvokedSkillsAttachment invoked_skills = 27;   // [corpus]
+    // PASSTHROUGH (unknown.proto): an attachment `type` no arm above models,
+    // captured whole with parent_type = "attachment".
+    UnknownRecord unknown = 28;
   }
 }
 

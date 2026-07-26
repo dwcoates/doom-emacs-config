@@ -14,6 +14,7 @@ package agentshim.data.v1;
 
 import "google/protobuf/struct.proto";
 import "agentshim/data/v1/tools.proto";
+import "agentshim/data/v1/unknown.proto";
 
 option go_package = "agentrepl/proto/agentshim/data/v1;datav1";
 
@@ -44,6 +45,12 @@ message ClaudeStreamMessage {
     ControlResponse control_response = 20;
     ControlCancelRequest control_cancel_request = 21;
     KeepAlive keep_alive = 22;
+    // PASSTHROUGH (unknown.proto): a `type`/`subtype` no arm above models.
+    // The SDK union grew 11 -> 38 members between 0.1.77 and 0.3.220, so an
+    // unmodeled family is the NORMAL consequence of the vendor shipping,
+    // not a defect. Captured whole; a message of a KNOWN family that fails
+    // conversion is still a core.UnparsedEvent.
+    UnknownRecord unknown = 23;
   }
 }
 

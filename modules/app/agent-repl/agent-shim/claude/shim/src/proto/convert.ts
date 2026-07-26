@@ -51,9 +51,14 @@ import {
 import {
   MissingFieldError,
   Reader,
+  logUnknownDiscriminator,
   unparsedEvent,
   type ExtrasOutcome,
 } from "./extras.js";
+import {
+  DiscriminatorField,
+  UnknownRecordSchema,
+} from "../../../../../proto/gen/ts/agentshim/data/v1/unknown_pb.js";
 import {
   ApiKeySource,
   AssistantMessageError,
@@ -338,8 +343,45 @@ function build(type: string, message: Record<string, unknown>, r: Reader, opts?:
     case "system":
       return buildSystem(message, r, opts);
     default:
-      throw new MissingFieldError(`unknown SDK message type "${type}"`);
+      // PASSTHROUGH, not an error: an unmodeled `type` means the SDK union
+      // grew, which it does constantly (11 -> 38 members across 0.1.77 ->
+      // 0.3.220). The record is preserved whole. A message of a type we DO
+      // model that fails conversion still becomes an UnparsedEvent, via the
+      // MissingFieldError the typed builders throw.
+      return buildUnknown(message, r, type, DiscriminatorField.TYPE, "");
   }
+}
+
+/**
+ * Build the passthrough arm for a record whose discriminator no arm matched.
+ *
+ * `consumeAll` is what keeps this honest: `UnknownRecord.raw` already holds
+ * every field, so the extras channel must NOT also collect them — otherwise
+ * each unknown family would spam the unknown-FIELD log with its entire key
+ * set and bury the signal that a family we model grew a field.
+ */
+function buildUnknown(
+  message: Record<string, unknown>,
+  r: Reader,
+  discriminator: string,
+  field: DiscriminatorField,
+  parentType: string,
+): Built {
+  r.consumeAll();
+  logUnknownDiscriminator(discriminator, parentType);
+  const label = parentType === "" ? discriminator : `${parentType}:${discriminator}`;
+  return vendorOnly(
+    {
+      case: "unknown",
+      value: create(UnknownRecordSchema, {
+        discriminator,
+        discriminatorField: field,
+        raw: message as JsonObject,
+        parentType,
+      }),
+    },
+    label,
+  );
 }
 
 function buildSystem(message: Record<string, unknown>, r: Reader, opts?: ConvertOptions): Built {
@@ -369,7 +411,10 @@ function buildSystem(message: Record<string, unknown>, r: Reader, opts?: Convert
     case "compact_boundary":
       return buildCompactBoundary(message, r, label);
     default:
-      throw new MissingFieldError(`unknown system subtype "${subtype}"`);
+      // PASSTHROUGH: an unmodeled system subtype, captured whole under
+      // parent_type "system" so a consumer can tell a new VARIANT of a family
+      // we model from a whole new top-level family.
+      return buildUnknown(message, r, subtype, DiscriminatorField.SUBTYPE, "system");
   }
 }
 
@@ -810,11 +855,24 @@ function convertBlock(raw: Record<string, unknown>): ContentBlock | null {
       return create(ContentBlockSchema, { block: { case: "toolReference", value: create(ToolReferenceBlockSchema, { reference: asStruct(raw) }) } });
     case "fallback":
       return create(ContentBlockSchema, { block: { case: "fallback", value: create(FallbackBlockSchema, { from: fallbackModel(raw["from"]), to: fallbackModel(raw["to"]) }) } });
-    default:
-      // No catch-all arm exists on ContentBlock; loud-log the skip so an
-      // unmodeled block type is visible, never silently absorbed.
-      shimLog(COMPONENT, { block_type: String(raw["type"]) }, `unmodeled content block type skipped`);
-      return null;
+    default: {
+      // PASSTHROUGH: this used to return null, which DROPPED the block out of
+      // the message body — the one place the never-drop contract was actually
+      // violated. The block is now preserved whole on ContentBlock.unknown.
+      const type = typeof raw["type"] === "string" ? raw["type"] : "";
+      logUnknownDiscriminator(type, "content_block");
+      return create(ContentBlockSchema, {
+        block: {
+          case: "unknown",
+          value: create(UnknownRecordSchema, {
+            discriminator: type,
+            discriminatorField: DiscriminatorField.TYPE,
+            raw: raw as JsonObject,
+            parentType: "content_block",
+          }),
+        },
+      });
+    }
   }
 }
 
