@@ -88,6 +88,9 @@ type consumer struct {
 	// anything that needs that loop to make progress — notably an Ack-awaiting
 	// send back to the same shim.
 	onTurn func(active bool)
+	// onBackfill reports a never-blue backfill transition (F2), once per
+	// distinct state. The driver persists it and re-pushes the SessionView.
+	onBackfill func(state string)
 
 	mu   sync.Mutex
 	ring []*corev1.Event
@@ -103,9 +106,13 @@ type consumer struct {
 	// beside the ring and is replayed on every resync.
 	permItems map[string]*frontendv1.ConversationItem
 	permOrder []string
+	// backfill is the last never-blue state reported for this session (F2).
+	// In-memory latch: it is what keeps a long transcript from writing the
+	// registry record once per line.
+	backfill string
 }
 
-func newConsumer(workspace, sessionID string, push Pusher, applier StateApplier, prog ProgressResolver, logf func(string, ...any), onSessionStarted func(*corev1.SessionStarted), onTurn func(active bool)) *consumer {
+func newConsumer(workspace, sessionID string, push Pusher, applier StateApplier, prog ProgressResolver, logf func(string, ...any), onSessionStarted func(*corev1.SessionStarted), onTurn func(active bool), onBackfill func(state string)) *consumer {
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
@@ -122,6 +129,7 @@ func newConsumer(workspace, sessionID string, push Pusher, applier StateApplier,
 		now:              func() int64 { return time.Now().UnixMilli() },
 		onSessionStarted: onSessionStarted,
 		onTurn:           onTurn,
+		onBackfill:       onBackfill,
 	}
 }
 
@@ -269,6 +277,7 @@ func (c *consumer) Apply(ev *corev1.Event) {
 func (c *consumer) Consume(ev *corev1.Event) {
 	c.retain(ev)
 	c.applyProgress(ev)
+	c.observeBackfill(ev)
 	switch p := ev.GetPayload().(type) {
 	case *corev1.Event_ContentDelta:
 		if td := frontend.TypingDeltaFromContentDelta(c.workspace, c.sessionID, p.ContentDelta); td != nil {
@@ -317,6 +326,77 @@ func (c *consumer) Consume(ev *corev1.Event) {
 		// UnparsedEvent / empty payloads carry no conversation content of their
 		// own; the demux already loud-logged them. Nothing to push.
 	}
+}
+
+// Backfill states persisted on the registry record and mapped onto
+// frontendv1.BackfillState by the server. Strings (not the enum) because the
+// registry is JSON on disk and a numeric enum there would be unreadable.
+const (
+	BackfillPending = "pending"
+	BackfillDone    = "done"
+	BackfillFailed  = "failed"
+)
+
+// sidecarProducer is the UnparsedEvent producer tag the shim-claude-sidecar
+// stamps on a transcript line it could not read. It is the ONLY sidecar
+// failure that reaches the daemon durably (see frontendv1.BackfillState).
+const sidecarProducer = "shim-claude-sidecar"
+
+// noteBackfill records a backfill transition for this session, ONCE.
+//
+// Called on every qualifying event, so the in-memory latch is what keeps a
+// long transcript from writing the registry record per line. FAILED is
+// terminal for the session: a transcript the sidecar could not fully read does
+// not become readable by reading more of it, and letting a later good line
+// flip it back to DONE would hide exactly the partial-history case this signal
+// exists to surface.
+func (c *consumer) noteBackfill(state string) {
+	c.mu.Lock()
+	if c.backfill == state || c.backfill == BackfillFailed {
+		c.mu.Unlock()
+		return
+	}
+	c.backfill = state
+	c.mu.Unlock()
+	c.logf("sessiondrv: backfill %s session=%s ws=%s", state, c.sessionID, c.workspace)
+	if c.onBackfill != nil {
+		c.onBackfill(state)
+	}
+}
+
+// observeBackfill derives the never-blue backfill signal from the two pieces
+// of evidence that actually reach the daemon (the sidecar reports nothing of
+// its own — see frontendv1.BackfillState):
+//
+//   - a data.v1.TranscriptLine vendor event means the FILE plane delivered
+//     into the store, which is what "backfilled" means;
+//   - an UnparsedEvent stamped by the sidecar means it hit a line of that
+//     transcript it could not read.
+//
+// A stream-plane event proves nothing about the file plane and is ignored
+// here: a live turn writes ClaudeStreamMessage events for a session whose
+// history never arrived, which is precisely the blue-but-live case.
+func (c *consumer) observeBackfill(ev *corev1.Event) {
+	switch p := ev.GetPayload().(type) {
+	case *corev1.Event_Unparsed:
+		if p.Unparsed.GetProducer() == sidecarProducer {
+			c.logf("sessiondrv: sidecar could not read transcript line session=%s path=%s offset=%d: %s",
+				c.sessionID, p.Unparsed.GetSourcePath(), p.Unparsed.GetByteOffset(), p.Unparsed.GetError())
+			c.noteBackfill(BackfillFailed)
+		}
+	case *corev1.Event_Vendor:
+		if isTranscriptLine(p.Vendor) {
+			c.noteBackfill(BackfillDone)
+		}
+	}
+}
+
+// isTranscriptLine reports whether a vendor Any carries a file-plane
+// TranscriptLine. Matched on the Any's type identity rather than by
+// unmarshaling it: this runs on every vendor event, and which ARM it is is the
+// entire question being asked.
+func isTranscriptLine(a *anypb.Any) bool {
+	return a != nil && a.MessageIs((*datav1.TranscriptLine)(nil))
 }
 
 // applyProgress folds an event into the progress-footer resolver. Both event

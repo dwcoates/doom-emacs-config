@@ -53,6 +53,10 @@ type SessionRegistrar interface {
 	// HOLDING for a session (E4). A daemon that dies mid-queue would otherwise
 	// lose them with no trace; the record is the honest one.
 	QueuedPromptsChanged(sessionID string, queued []registry.QueuedPrompt)
+	// BackfillStateChanged persists the never-blue backfill signal (F2) and
+	// re-pushes the session's SessionView. Called only on a real transition,
+	// so a steady stream of transcript lines writes the record once.
+	BackfillStateChanged(sessionID, state string)
 }
 
 // Spawner makes sure a session has exactly one live shim: it leaves an existing
@@ -343,6 +347,20 @@ func (m *Manager) SubmitPrompt(ctx context.Context, workspace, text, permissionM
 	return nil
 }
 
+// persistBackfillState writes the never-blue backfill signal (F2) through to
+// the durable registry record. No-op without a registrar (a test harness).
+//
+// Persisted rather than kept in memory because the evidence it was derived
+// from does not survive a daemon restart: the re-Subscribe starts from
+// LastSeq, so the file-plane events that proved the backfill landed are never
+// re-delivered. See registry.Record.BackfillState.
+func (m *Manager) persistBackfillState(sessionID, state string) {
+	if m.cfg.Registrar == nil {
+		return
+	}
+	m.cfg.Registrar.BackfillStateChanged(sessionID, state)
+}
+
 // progress returns the configured progress resolver, or the no-op stand-in when
 // the driver was built without one.
 func (m *Manager) progress() ProgressResolver {
@@ -561,6 +579,8 @@ func (m *Manager) bringUp(workspace string) (*driven, error) {
 		m.persistVendorSessionID(sessionID, ss.GetVendorSessionId())
 	}, func(active bool) {
 		m.onTurnBoundary(d, active)
+	}, func(state string) {
+		m.persistBackfillState(sessionID, state)
 	})
 	d.consumer = cons
 	// onPermsChanged republishes the footer's pending-permission badge on both

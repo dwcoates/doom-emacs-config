@@ -217,7 +217,7 @@ func newUDSHarness(t *testing.T) *e2eHarness {
 		Locator:         &server.SessionLocator{Reg: reg},
 		Source:          &server.ShimConnSource{Listener: shimListener},
 		SeqStore:        server.NewRegistrySeqStore(reg, t.Logf),
-		Registrar:       server.RegistryRegistrar{Reg: reg, Logf: t.Logf},
+		Registrar:       &server.RegistryRegistrar{Reg: reg, Logf: t.Logf},
 		DaemonVersion:   "0.1.0-e2e",
 		ProtocolVersion: "1",
 		Logf:            t.Logf,

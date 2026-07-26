@@ -53,6 +53,16 @@ type Record struct {
 	// or losing events. Zero means "never subscribed"; a fresh subscribe
 	// from seq 0 then replays the whole session. See server.RegistrySeqStore.
 	LastSeq uint64 `json:"last_seq,omitempty"`
+	// BackfillState is the never-blue completion signal for this session's
+	// on-disk transcript: "" (nothing to backfill), "pending", "done", or
+	// "failed". See frontendv1.BackfillState for the full semantics.
+	//
+	// PERSISTED rather than derived fresh each boot, because the evidence it
+	// is derived from does not survive one: the daemon re-Subscribes from
+	// LastSeq, so the file-plane events that proved a backfill landed are
+	// never re-delivered. Without this a restarted daemon would report a
+	// long-since-backfilled session as PENDING forever.
+	BackfillState string `json:"backfill_state,omitempty"`
 	// QueuedPrompts are the prompts the daemon is currently HOLDING for
 	// this session because a turn was in flight when they were submitted
 	// (E4). Persisted for crash honesty: these are things the user typed
