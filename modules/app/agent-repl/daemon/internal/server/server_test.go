@@ -473,8 +473,8 @@ func TestSessionViewFromRecordShapesParityFields(t *testing.T) {
 	// Act
 	v := SessionViewFromRecord(nil, rec, []string{"p1", "p2"})
 	// Assert — the S7 parity fields plus the pending-permission COUNT.
-	if !v.GetTerminal() || v.GetDeathReason() != "delete session" {
-		t.Errorf("terminal/death = %v/%q", v.GetTerminal(), v.GetDeathReason())
+	if !v.GetTerminal() || v.GetDeath().GetErrorType() != string(errclass.TypeSessionDeleted) {
+		t.Errorf("terminal/death = %v/%q", v.GetTerminal(), v.GetDeath().GetErrorType())
 	}
 	if v.GetPendingPermissions() != 2 {
 		t.Errorf("pending_permissions = %d, want 2", v.GetPendingPermissions())
@@ -561,20 +561,6 @@ func TestSessionViewCarriesNoDeathWhileTheSessionLives(t *testing.T) {
 	// Assert.
 	if v.GetDeath() != nil {
 		t.Fatalf("death = %v, want nil for a live session", v.GetDeath())
-	}
-}
-
-func TestSessionViewKeepsTheLegacyDeathReasonString(t *testing.T) {
-	// Arrange: the string stays populated until both frontends read the
-	// typed field.
-	rec := registry.Record{SessionID: "s1", CWD: "/w", Terminal: true, DeathReason: errclass.DeathReasonDeleted}
-
-	// Act.
-	v := SessionViewFromRecord(nil, rec, nil)
-
-	// Assert.
-	if v.GetDeathReason() != errclass.DeathReasonDeleted {
-		t.Fatalf("death_reason = %q, want it preserved", v.GetDeathReason())
 	}
 }
 

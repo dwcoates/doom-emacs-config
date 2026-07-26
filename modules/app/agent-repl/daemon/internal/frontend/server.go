@@ -288,9 +288,6 @@ func (s *Server) PushConversationDelta(c *frontendv1.ConversationDelta) {
 }
 func (s *Server) PushTypingDelta(t *frontendv1.TypingDelta) { s.Broadcast(TypingDeltaFrame(t)) }
 func (s *Server) PushTaskCatalog(c *frontendv1.TaskCatalog) { s.Broadcast(TaskCatalogFrame(c)) }
-func (s *Server) PushDegradedNotice(n *frontendv1.DegradedNotice) {
-	s.Broadcast(DegradedNoticeFrame(n))
-}
 func (s *Server) PushSessionInitView(v *frontendv1.SessionInitView) {
 	s.Broadcast(SessionInitViewFrame(v))
 }

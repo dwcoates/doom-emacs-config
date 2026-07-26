@@ -103,15 +103,15 @@ func TestFilterSnapshotKeepsOnlyThisScopesQueue(t *testing.T) {
 	}
 }
 
-func TestScopeFramePassesGlobalDegradedNotice(t *testing.T) {
-	// Arrange — a DegradedNotice carries no session/workspace identity.
+func TestScopeFramePassesGlobalCommandAck(t *testing.T) {
+	// Arrange — a CommandAck carries no session/workspace identity.
 	sc := Scope{SessionID: "s1"}
-	frame := DegradedNoticeFrame(&frontendv1.DegradedNotice{Component: "shim-connection"})
+	frame := CommandAckFrame(&frontendv1.CommandAck{RequestId: "r1", Ok: true})
 	// Act
 	_, keep := scopeFrame(frame, sc)
 	// Assert — connection-global frames always pass.
 	if !keep {
-		t.Fatal("a global degraded notice must pass a scoped connection")
+		t.Fatal("a global command ack must pass a scoped connection")
 	}
 }
 

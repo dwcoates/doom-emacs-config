@@ -10,8 +10,8 @@
  * - `ConversationDelta.items` is a repeated typed `ConversationItem`: a thin
  *   envelope {uuid, tsMs, requestId} carrying EXACTLY ONE typed data.v1/core.v1
  *   payload arm (assistantMessage, userMessage, toolUse, toolResult,
- *   toolUseResult, result, compactBoundary, compactBoundaryLine, apiError,
- *   permission). The webapp DECOMPOSES those typed payloads back into its
+ *   toolUseResult, result, compactBoundary, compactBoundaryLine, permission,
+ *   systemFailure). The webapp DECOMPOSES those typed payloads back into its
  *   render vocabulary in `state-adapter.ts`; the OLD `kind`-discriminated
  *   pre-rendered Struct vocabulary is gone.
  * - `TypingDelta` embeds a `core.v1.ContentDelta` under `delta`
@@ -130,8 +130,6 @@ export interface SessionView {
   // that predates them decodes to the field default.
   /** Whether the session's conversation has ended (delete / shim death). */
   terminal: boolean;
-  /** Why a terminal session ended; "" while alive. */
-  deathReason: string;
   /** Retained for wire parity; false post-cutover. */
   rehydratable: boolean;
   /** Retained for wire parity; false post-cutover. */
@@ -188,7 +186,6 @@ export const CONVERSATION_ITEM_ARMS = [
   "result",
   "compactBoundary",
   "compactBoundaryLine",
-  "apiError",
   "permission",
   "systemFailure",
 ] as const;
@@ -333,13 +330,6 @@ export interface CommandAck {
   failure?: SystemFailure;
 }
 
-export interface DegradedNotice {
-  component: string;
-  reason: string;
-  recovered: boolean;
-  atMs: number;
-}
-
 /**
  * One activity window on the progress footer (F1): open until cleared.
  * `active` false is the window closed; `sinceMs` counts from when it opened
@@ -392,15 +382,11 @@ export interface ProgressView {
    * see, since a session can block on an interaction it holds no count for.
    */
   blocked?: ProgressWindow;
-  /** Persists until the next turn starts; "" = no error standing. */
-  errorSummary: string;
-  /** The feed item the error row scrolls to; "" = not addressable. */
-  errorItemUuid: string;
   /**
-   * The CLASSIFIED error state (F4), superseding the two fields above — its
-   * own `itemUuid` absorbs the addressing job. Carrying the class is what lets
-   * the footer take its color from the shared table instead of the hardcoded
-   * red no other surface consulted.
+   * The CLASSIFIED error state (F4). Persists until the next turn starts; its
+   * own `itemUuid` is the feed item the error row scrolls to. Carrying the
+   * class is what lets the footer take its color from the shared table
+   * instead of the hardcoded red no other surface consulted.
    */
   failure?: SystemFailure;
   pendingPermissions: number;
@@ -469,7 +455,6 @@ export type FrontendFrame = {
     | { case: "typingDelta"; value: TypingDelta }
     | { case: "taskCatalog"; value: TaskCatalog }
     | { case: "commandAck"; value: CommandAck }
-    | { case: "degradedNotice"; value: DegradedNotice }
     | { case: "daemonView"; value: DaemonView }
     | { case: "sessionInit"; value: SessionInitView }
     | { case: "heartbeat"; value: HeartbeatView }
@@ -571,7 +556,6 @@ const FRAME_DECODERS: ReadonlyMap<string, (v: unknown) => FrontendFrame["frame"]
   ["typingDelta", (v: unknown) => ({ case: "typingDelta" as const, value: decodeTypingDelta(v) })],
   ["taskCatalog", (v: unknown) => ({ case: "taskCatalog" as const, value: decodeTaskCatalog(v) })],
   ["commandAck", (v: unknown) => ({ case: "commandAck" as const, value: decodeCommandAck(v) })],
-  ["degradedNotice", (v: unknown) => ({ case: "degradedNotice" as const, value: decodeDegradedNotice(v) })],
   ["daemonView", (v: unknown) => ({ case: "daemonView" as const, value: decodeDaemonView(v) })],
   ["sessionInit", (v: unknown) => ({ case: "sessionInit" as const, value: decodeSessionInitView(v) })],
   ["heartbeat", (v: unknown) => ({ case: "heartbeat" as const, value: decodeHeartbeatView(v) })],
@@ -632,7 +616,6 @@ const SESSION_VIEW_KEYS = new Set([
   "claudeSessionId",
   "cwd",
   "terminal",
-  "deathReason",
   "rehydratable",
   "hibernated",
   "pendingPermissions",
@@ -660,7 +643,6 @@ function decodeSessionView(v: unknown): SessionView {
     // S7 parity fields: default to the zero value when absent (a pre-S7 daemon
     // does not send them), so the webapp is never fed a fabricated value.
     terminal: bool(o, "terminal", "SessionView"),
-    deathReason: str(o, "deathReason", "SessionView"),
     rehydratable: bool(o, "rehydratable", "SessionView"),
     hibernated: bool(o, "hibernated", "SessionView"),
     pendingPermissions: num(o, "pendingPermissions", "SessionView"),
@@ -1013,22 +995,6 @@ function decodeCommandAck(v: unknown): CommandAck {
   return ack;
 }
 
-const DEGRADED_NOTICE_KEYS = new Set(["component", "reason", "recovered", "atMs"]);
-function decodeDegradedNotice(v: unknown): DegradedNotice {
-  const o = ensureObject(v, "DegradedNotice");
-  rejectUnknown(o, DEGRADED_NOTICE_KEYS, "DegradedNotice");
-  const dn: DegradedNotice = {
-    component: str(o, "component", "DegradedNotice"),
-    reason: str(o, "reason", "DegradedNotice"),
-    recovered: bool(o, "recovered", "DegradedNotice"),
-    atMs: num(o, "atMs", "DegradedNotice"),
-  };
-  if (dn.component === "") {
-    throw new Error("frontend-proto: DegradedNotice missing required `component`");
-  }
-  return dn;
-}
-
 const DAEMON_VIEW_KEYS = new Set([
   "bootId",
   "protocolVersion",
@@ -1077,8 +1043,6 @@ const PROGRESS_VIEW_KEYS = new Set([
   "hook",
   "rateLimited",
   "blocked",
-  "errorSummary",
-  "errorItemUuid",
   "failure",
   "pendingPermissions",
   "queueDepth",
@@ -1098,8 +1062,6 @@ function decodeProgressView(v: unknown): ProgressView {
     thinkingTokens: num(o, "thinkingTokens", "ProgressView"),
     inputTokens: num(o, "inputTokens", "ProgressView"),
     ttftMs: num(o, "ttftMs", "ProgressView"),
-    errorSummary: str(o, "errorSummary", "ProgressView"),
-    errorItemUuid: str(o, "errorItemUuid", "ProgressView"),
     pendingPermissions: num(o, "pendingPermissions", "ProgressView"),
     queueDepth: num(o, "queueDepth", "ProgressView"),
     liveTaskCount: num(o, "liveTaskCount", "ProgressView"),
