@@ -22,7 +22,7 @@ import type {
   WorkspaceStatusInput,
 } from "../src/state-adapter.js";
 import type { CounterEntry } from "../src/counter-menu.js";
-import type { Usage } from "../src/protocol.js";
+import type { ModelUsage, Usage } from "../src/protocol.js";
 
 // The store's ONLY ingestion path after the agent-shim cutover: it folds
 // typed adapter effects (decoded `agentshim.frontend.v1` frames) onto its
@@ -1020,5 +1020,106 @@ describe("the progress footer's input (F1)", () => {
     store.reset();
     // Assert
     expect(store.progress).toBeNull();
+  });
+});
+
+describe("the tokens overlay's cumulative usage sources", () => {
+  /** One model's whole-tree slice. */
+  function slice(over: Partial<ModelUsage> = {}): ModelUsage {
+    return {
+      input_tokens: 100,
+      output_tokens: 200,
+      cache_creation_input_tokens: 0,
+      cache_read_input_tokens: 0,
+      web_search_requests: 0,
+      cost_usd: 0.5,
+      context_window: 200_000,
+      ...over,
+    };
+  }
+
+  it("has no top-level baseline before the first result", () => {
+    // Arrange / Act — dashes in the overlay rather than a lying zero.
+    const store = new ConversationStore();
+    // Assert
+    expect(store.state.resultUsage).toBeNull();
+  });
+
+  it("has no per-model map before the first result", () => {
+    // Arrange / Act
+    const store = new ConversationStore();
+    // Assert
+    expect(store.state.modelUsage).toBeNull();
+  });
+
+  it("adopts a landed result's top-level usage as the baseline", () => {
+    // Arrange
+    const store = new ConversationStore();
+    // Act
+    store.ingest([itemsEffect([resultItem({ usage: { input_tokens: 7, output_tokens: 3 } })])]);
+    // Assert
+    expect(store.state.resultUsage).toEqual({ input_tokens: 7, output_tokens: 3 });
+  });
+
+  it("adopts a landed result's per-model map", () => {
+    // Arrange
+    const store = new ConversationStore();
+    // Act
+    store.ingest([itemsEffect([resultItem({ modelUsage: { opus: slice() } })])]);
+    // Assert
+    expect(store.state.modelUsage).toEqual({ opus: slice() });
+  });
+
+  it("REPLACES the baseline on the next result, since each is cumulative", () => {
+    // Arrange — the SDK recomputes the session total per result, never a delta.
+    const store = new ConversationStore();
+    store.ingest([itemsEffect([resultItem({ usage: { input_tokens: 7, output_tokens: 3 } })])]);
+    // Act
+    store.ingest([itemsEffect([resultItem({ usage: { input_tokens: 20, output_tokens: 9 } })])]);
+    // Assert — 20, not 27.
+    expect(store.state.resultUsage).toEqual({ input_tokens: 20, output_tokens: 9 });
+  });
+
+  it("REPLACES the per-model map on the next result", () => {
+    // Arrange
+    const store = new ConversationStore();
+    store.ingest([itemsEffect([resultItem({ modelUsage: { opus: slice({ input_tokens: 1 }) } })])]);
+    // Act
+    store.ingest([itemsEffect([resultItem({ modelUsage: { opus: slice({ input_tokens: 5 }) } })])]);
+    // Assert
+    expect(store.state.modelUsage?.opus.input_tokens).toBe(5);
+  });
+
+  it("keeps the standing map when a result carries none", () => {
+    // Arrange — an absent map is the SDK declining to itemize, not a claim
+    // that the session has spent nothing.
+    const store = new ConversationStore();
+    store.ingest([itemsEffect([resultItem({ modelUsage: { opus: slice() } })])]);
+    // Act
+    store.ingest([itemsEffect([resultItem()])]);
+    // Assert
+    expect(store.state.modelUsage).toEqual({ opus: slice() });
+  });
+
+  it("clears the per-message tally when a fresh baseline lands", () => {
+    // Arrange — a request already folded into the new baseline must not also
+    // be summed on top of it by topLevelUsage.
+    const store = new ConversationStore();
+    store.state.turnUsage.set("m1", { input_tokens: 5, output_tokens: 5 });
+    // Act
+    store.ingest([itemsEffect([resultItem({ usage: { input_tokens: 7, output_tokens: 3 } })])]);
+    // Assert
+    expect(topLevelUsage(store.state)).toEqual({ input_tokens: 7, output_tokens: 3 });
+  });
+
+  it("discards both sources on a rebind onto a different session", () => {
+    // Arrange
+    const store = new ConversationStore();
+    store.ingest([itemsEffect([resultItem({ modelUsage: { opus: slice() } })])]);
+    // Act
+    store.reset();
+    // Assert
+    expect(store.state.modelUsage).toBeNull();
+    expect(store.state.resultUsage).toBeNull();
   });
 });
