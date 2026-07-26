@@ -123,11 +123,36 @@ func lastPermissionDenyMessage(p *fakePusher, uuid string) string {
 type fakeApplier struct {
 	applied []*corev1.Event
 	err     error
+	// reconciled records one entry per ReconcileTasks call, as
+	// (sessionID, liveTaskIDs).
+	reconciled  []reconcileCall
+	reconcErr   error
+	reconcMutex sync.Mutex
+}
+
+// reconcileCall is one authoritative live-task set the driver adopted.
+type reconcileCall struct {
+	sessionID string
+	taskIDs   []string
 }
 
 func (a *fakeApplier) Apply(ev *corev1.Event) error {
 	a.applied = append(a.applied, ev)
 	return a.err
+}
+
+func (a *fakeApplier) ReconcileTasks(sessionID string, liveTaskIDs []string) error {
+	a.reconcMutex.Lock()
+	a.reconciled = append(a.reconciled, reconcileCall{sessionID: sessionID, taskIDs: liveTaskIDs})
+	a.reconcMutex.Unlock()
+	return a.reconcErr
+}
+
+// reconcileCalls returns a copy of the recorded reconciliations.
+func (a *fakeApplier) reconcileCalls() []reconcileCall {
+	a.reconcMutex.Lock()
+	defer a.reconcMutex.Unlock()
+	return append([]reconcileCall(nil), a.reconciled...)
 }
 
 func newTestConsumer(push Pusher, applier StateApplier) *consumer {
@@ -771,5 +796,119 @@ func TestCommandsChangedBeforeInitPushesNothing(t *testing.T) {
 	// Assert: dropped (loud-logged), never a half-built init view.
 	if len(push.inits) != 0 {
 		t.Fatalf("expected no SessionInitView push, got %d", len(push.inits))
+	}
+}
+
+// --- BackgroundTasksChanged: the authoritative live-task set ----------------
+
+// backgroundTasksEvent wraps a live-set snapshot as a vendor core Event.
+func backgroundTasksEvent(t *testing.T, seq uint64, taskIDs ...string) *corev1.Event {
+	t.Helper()
+	refs := make([]*datav1.BackgroundTaskRef, 0, len(taskIDs))
+	for _, id := range taskIDs {
+		refs = append(refs, &datav1.BackgroundTaskRef{TaskId: id})
+	}
+	a, err := anypb.New(&datav1.ClaudeStreamMessage{
+		Msg: &datav1.ClaudeStreamMessage_BackgroundTasksChanged{
+			BackgroundTasksChanged: &datav1.BackgroundTasksChanged{Tasks: refs},
+		},
+	})
+	if err != nil {
+		t.Fatalf("anypb.New: %v", err)
+	}
+	return &corev1.Event{SessionId: "s1", Seq: seq, Payload: &corev1.Event_Vendor{Vendor: a}}
+}
+
+func TestBackgroundTasksChangedReconcilesTheSSM(t *testing.T) {
+	// Arrange
+	applier := &fakeApplier{}
+	c := newTestConsumer(&fakePusher{}, applier)
+
+	// Act.
+	c.Consume(backgroundTasksEvent(t, 5, "a1", "b1"))
+
+	// Assert.
+	calls := applier.reconcileCalls()
+	if len(calls) != 1 {
+		t.Fatalf("reconciliations = %d, want 1", len(calls))
+	}
+	if len(calls[0].taskIDs) != 2 || calls[0].taskIDs[0] != "a1" || calls[0].taskIDs[1] != "b1" {
+		t.Fatalf("reconciled task ids = %v, want [a1 b1]", calls[0].taskIDs)
+	}
+}
+
+func TestBackgroundTasksChangedReconcilesUnderTheEventSessionID(t *testing.T) {
+	// Arrange — the SSM resolves a workspace from the identity the EVENT
+	// carries, which for a store event is the vendor uuid.
+	applier := &fakeApplier{}
+	c := newTestConsumer(&fakePusher{}, applier)
+	ev := backgroundTasksEvent(t, 5, "a1")
+	ev.SessionId = "vendor-uuid"
+
+	// Act.
+	c.Consume(ev)
+
+	// Assert.
+	calls := applier.reconcileCalls()
+	if len(calls) != 1 || calls[0].sessionID != "vendor-uuid" {
+		t.Fatalf("reconciled under %v, want vendor-uuid", calls)
+	}
+}
+
+func TestBackgroundTasksChangedRepublishesTheTaskCatalog(t *testing.T) {
+	// Arrange — a ghost the roster is still showing as running.
+	push := &fakePusher{}
+	c := newTestConsumer(push, &fakeApplier{})
+	c.Apply(&corev1.Event{
+		SessionId: "s1", Seq: 1, ProducedAtMs: 100,
+		Payload: &corev1.Event_TaskStarted{TaskStarted: &corev1.TaskStarted{TaskId: "ghost"}},
+	})
+	push.mu.Lock()
+	push.catalog = nil
+	push.mu.Unlock()
+
+	// Act — the session reports nothing running.
+	c.Consume(backgroundTasksEvent(t, 5))
+
+	// Assert.
+	push.mu.Lock()
+	defer push.mu.Unlock()
+	if len(push.catalog) != 1 {
+		t.Fatalf("task catalog pushes = %d, want 1", len(push.catalog))
+	}
+	if got := push.catalog[0].GetTasks()[0].GetStatus(); got != "lost" {
+		t.Fatalf("ghost status = %q, want lost", got)
+	}
+}
+
+func TestBackgroundTasksChangedStillRefreshesTheRosterWhenTheSSMFails(t *testing.T) {
+	// Arrange — the two task planes are independent; losing both over one
+	// failure would be strictly worse than losing one.
+	push := &fakePusher{}
+	c := newTestConsumer(push, &fakeApplier{reconcErr: errors.New("ssm down")})
+
+	// Act.
+	c.Consume(backgroundTasksEvent(t, 5, "a1"))
+
+	// Assert.
+	push.mu.Lock()
+	defer push.mu.Unlock()
+	if len(push.catalog) != 1 {
+		t.Fatalf("task catalog pushes = %d, want 1 despite the SSM failure", len(push.catalog))
+	}
+}
+
+func TestNonTaskVendorEventReconcilesNothing(t *testing.T) {
+	// Arrange — every vendor event shares one Any type URL, so the inner arm
+	// must be the discriminator.
+	applier := &fakeApplier{}
+	c := newTestConsumer(&fakePusher{}, applier)
+
+	// Act.
+	c.Consume(initEvent(t, 1, "compact"))
+
+	// Assert.
+	if got := len(applier.reconcileCalls()); got != 0 {
+		t.Fatalf("reconciliations = %d for a non-task vendor event, want 0", got)
 	}
 }

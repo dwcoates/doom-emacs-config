@@ -32,6 +32,10 @@ type Pusher interface {
 // Satisfied by *ssm.Manager.
 type StateApplier interface {
 	Apply(ev *corev1.Event) error
+	// ReconcileTasks adopts an AUTHORITATIVE live-task set for the session's
+	// workspace, so live_task_count becomes exactly len(liveTaskIDs). Fed from
+	// data.BackgroundTasksChanged, the only event carrying the whole live set.
+	ReconcileTasks(sessionID string, liveTaskIDs []string) error
 }
 
 // ProgressResolver is the slice of the progress-footer resolver (F1) the driver
@@ -321,11 +325,48 @@ func (c *consumer) Consume(ev *corev1.Event) {
 				})
 			}
 		}
+		// The SDK's full live-task set. It is the one event that can CLOSE the
+		// ghost class rather than adding to it, so it drives both task planes
+		// (the SSM counter and the roster) as an authority.
+		if btc := frontend.BackgroundTasksFromVendor(p.Vendor); btc != nil {
+			c.reconcileTasks(ev, btc)
+		}
 		c.pushConversation(ev)
 	default:
 		// UnparsedEvent / empty payloads carry no conversation content of their
 		// own; the demux already loud-logged them. Nothing to push.
 	}
+}
+
+// reconcileTasks adopts a `BackgroundTasksChanged` snapshot as the
+// authoritative live-task set on BOTH task planes:
+//
+//   - the SSM's live_task_count, which appends reconciliation rows so the
+//     derived count equals the list exactly (it is the only thing that can
+//     settle the `IMPOSSIBLE live_task_count=-N` class, where replayed
+//     historical task_ended events arrive with no logged task_started); and
+//   - the frontend TaskCatalog, rebuilt from the ring — which already holds
+//     THIS event, since Consume retains before it translates — so the roster
+//     sweeps its ghosts in the same push.
+//
+// An SSM failure is loud-logged and does not stop the roster refresh: the two
+// planes are independent, and losing both over one failure would be worse.
+func (c *consumer) reconcileTasks(ev *corev1.Event, btc *datav1.BackgroundTasksChanged) {
+	ids := make([]string, 0, len(btc.GetTasks()))
+	for _, ref := range btc.GetTasks() {
+		if ref.GetTaskId() != "" {
+			ids = append(ids, ref.GetTaskId())
+		}
+	}
+	c.logf("sessiondrv: authoritative live-task set session=%s ws=%s seq=%d tasks=%d",
+		c.sessionID, c.workspace, ev.GetSeq(), len(ids))
+	// Keyed by the EVENT's session id: the SSM resolves a workspace from
+	// whichever identity the event carries, and a store event carries the
+	// vendor uuid rather than the daemon's s_ id.
+	if err := c.ssm.ReconcileTasks(ev.GetSessionId(), ids); err != nil {
+		c.logf("sessiondrv: task reconciliation failed session=%s seq=%d: %v", c.sessionID, ev.GetSeq(), err)
+	}
+	c.push.PushTaskCatalog(frontend.BuildTaskCatalog(c.workspace, c.sessionID, c.snapshotRing()))
 }
 
 // Backfill states persisted on the registry record and mapped onto

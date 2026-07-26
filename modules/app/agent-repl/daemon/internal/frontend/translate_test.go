@@ -606,6 +606,139 @@ func TestFrameWrappers(t *testing.T) {
 
 // helpers that need *testing.T but are used inside table literals ------------
 
+// --- BuildTaskCatalog: BackgroundTasksChanged reconciliation ----------------
+
+// backgroundTasksEvent wraps a live-set snapshot as a vendor core Event.
+func backgroundTasksEvent(t *testing.T, atMs int64, refs ...*datav1.BackgroundTaskRef) *corev1.Event {
+	t.Helper()
+	return &corev1.Event{
+		ProducedAtMs: atMs,
+		Payload: &corev1.Event_Vendor{Vendor: mustAny(t, &datav1.ClaudeStreamMessage{
+			Msg: &datav1.ClaudeStreamMessage_BackgroundTasksChanged{
+				BackgroundTasksChanged: &datav1.BackgroundTasksChanged{Tasks: refs},
+			},
+		})},
+	}
+}
+
+func TestBuildTaskCatalogSweepsAGhostAbsentFromTheLiveSet(t *testing.T) {
+	// Arrange — a task whose end never arrived, and a session that says it is
+	// not running. Without the authority this stays "running" until a LOST
+	// staleness sweep gets to it.
+	events := []*corev1.Event{
+		{ProducedAtMs: 100, Payload: &corev1.Event_TaskStarted{TaskStarted: &corev1.TaskStarted{TaskId: "ghost", Kind: corev1.TaskKind_TASK_KIND_AGENT}}},
+		backgroundTasksEvent(t, 300),
+	}
+
+	// Act.
+	got := BuildTaskCatalog("ws", "s1", events)
+
+	// Assert.
+	if len(got.GetTasks()) != 1 || got.GetTasks()[0].GetStatus() != "lost" {
+		t.Fatalf("catalog = %v, want the ghost swept to lost", got.GetTasks())
+	}
+}
+
+func TestBuildTaskCatalogStampsTheSweepAtTheSnapshotTime(t *testing.T) {
+	// Arrange
+	events := []*corev1.Event{
+		{ProducedAtMs: 100, Payload: &corev1.Event_TaskStarted{TaskStarted: &corev1.TaskStarted{TaskId: "ghost"}}},
+		backgroundTasksEvent(t, 300),
+	}
+
+	// Act.
+	got := BuildTaskCatalog("ws", "s1", events)
+
+	// Assert.
+	if got.GetTasks()[0].GetEndedAtMs() != 300 {
+		t.Fatalf("swept ended_at_ms = %d, want 300 (the snapshot's stamp)", got.GetTasks()[0].GetEndedAtMs())
+	}
+}
+
+func TestBuildTaskCatalogLeavesASettledTaskAlone(t *testing.T) {
+	// Arrange — a task that genuinely finished must keep its real status, not
+	// be re-reported as lost because it is absent from the live set.
+	events := []*corev1.Event{
+		{ProducedAtMs: 100, Payload: &corev1.Event_TaskStarted{TaskStarted: &corev1.TaskStarted{TaskId: "a1"}}},
+		{ProducedAtMs: 200, Payload: &corev1.Event_TaskEnded{TaskEnded: &corev1.TaskEnded{TaskId: "a1", Status: corev1.TerminalStatus_TERMINAL_STATUS_DONE}}},
+		backgroundTasksEvent(t, 300),
+	}
+
+	// Act.
+	got := BuildTaskCatalog("ws", "s1", events)
+
+	// Assert.
+	if got.GetTasks()[0].GetStatus() != "done" {
+		t.Fatalf("settled task status = %q, want done", got.GetTasks()[0].GetStatus())
+	}
+}
+
+func TestBuildTaskCatalogAdoptsATaskItNeverSawStart(t *testing.T) {
+	// Arrange — the live set names a task with no TaskStarted in the window.
+	events := []*corev1.Event{
+		backgroundTasksEvent(t, 300, &datav1.BackgroundTaskRef{TaskId: "unseen", TaskType: "shell", Description: "npm test"}),
+	}
+
+	// Act.
+	got := BuildTaskCatalog("ws", "s1", events)
+
+	// Assert.
+	want := &frontendv1.TaskEntry{TaskId: "unseen", Kind: "shell", Description: "npm test", Status: "running", StartedAtMs: 300}
+	if len(got.GetTasks()) != 1 || !proto.Equal(got.GetTasks()[0], want) {
+		t.Fatalf("catalog = %v, want one adopted running entry %v", got.GetTasks(), want)
+	}
+}
+
+func TestBuildTaskCatalogKeepsALiveTaskRunning(t *testing.T) {
+	// Arrange — a task present in the live set is untouched by the sweep.
+	events := []*corev1.Event{
+		{ProducedAtMs: 100, Payload: &corev1.Event_TaskStarted{TaskStarted: &corev1.TaskStarted{TaskId: "a1", Kind: corev1.TaskKind_TASK_KIND_AGENT, Description: "d"}}},
+		backgroundTasksEvent(t, 300, &datav1.BackgroundTaskRef{TaskId: "a1"}),
+	}
+
+	// Act.
+	got := BuildTaskCatalog("ws", "s1", events)
+
+	// Assert — its own start time and description survive the reconciliation.
+	want := &frontendv1.TaskEntry{TaskId: "a1", Kind: "agent", Description: "d", Status: "running", StartedAtMs: 100}
+	if !proto.Equal(got.GetTasks()[0], want) {
+		t.Fatalf("live entry = %v, want %v", got.GetTasks()[0], want)
+	}
+}
+
+func TestBuildTaskCatalogLetsALaterTaskEndedCloseAnAdoptedTask(t *testing.T) {
+	// Arrange — the live set is authoritative AT ITS POINT in the stream; a
+	// TaskEnded that folds after it still closes the task.
+	events := []*corev1.Event{
+		backgroundTasksEvent(t, 300, &datav1.BackgroundTaskRef{TaskId: "a1"}),
+		{ProducedAtMs: 400, Payload: &corev1.Event_TaskEnded{TaskEnded: &corev1.TaskEnded{TaskId: "a1", Status: corev1.TerminalStatus_TERMINAL_STATUS_DONE}}},
+	}
+
+	// Act.
+	got := BuildTaskCatalog("ws", "s1", events)
+
+	// Assert.
+	if got.GetTasks()[0].GetStatus() != "done" {
+		t.Fatalf("status = %q, want done", got.GetTasks()[0].GetStatus())
+	}
+}
+
+func TestBackgroundTasksFromVendorIgnoresAnotherStreamArm(t *testing.T) {
+	// Arrange — every vendor event shares one Any type URL; the inner oneof is
+	// the discriminator.
+	a := mustAny(t, &datav1.ClaudeStreamMessage{
+		Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{Uuid: "u"}},
+	})
+
+	// Act.
+	got := BackgroundTasksFromVendor(a)
+
+	// Assert.
+	if got != nil {
+		t.Fatalf("BackgroundTasksFromVendor on an assistant arm = %v, want nil", got)
+	}
+}
+
 func mustAnyHelper(t *testing.T, m proto.Message) *anypb.Any { return mustAny(t, m) }
 func mustStructHelper(t *testing.T, m map[string]any) *structpb.Struct {
 	return mustStructT(t, m)
