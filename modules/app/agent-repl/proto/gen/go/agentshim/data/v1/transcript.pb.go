@@ -7,6 +7,25 @@
 // compactMetadata.preTokens) where the stream is snake_case; the converter
 // normalizes into these messages and records the plane on the core Event.
 //
+// DISCRIMINATOR-SPELLING NOTE (census-confirmed): seven top-level `type`
+// values are HYPHEN-delimited on the wire, and proto field names are
+// snake_case by protobuf convention, so the two DO NOT match character for
+// character. A converter that string-matches a TranscriptLine field name
+// against the wire `type` silently never fires for any of them. The mapping:
+//
+//   proto field                 wire `type`
+//   permission_mode          -> "permission-mode"
+//   queue_operation          -> "queue-operation"
+//   last_prompt              -> "last-prompt"
+//   ai_title                 -> "ai-title"
+//   pr_link                  -> "pr-link"
+//   file_history_snapshot    -> "file-history-snapshot"
+//   file_history_delta       -> "file-history-delta"
+//   frame_link               -> "frame-link"
+//   attribution_snapshot     -> "attribution-snapshot"
+//
+// Every OTHER top-level type is a single lowercase word and needs no mapping.
+//
 // Nullable/optional conventions: proto3 scalar "" / 0 = JSON null or absent;
 // where absent-vs-false matters a *_set bool accompanies the field.
 
@@ -242,7 +261,10 @@ func (QueueOp) EnumDescriptor() ([]byte, []int) {
 	return file_agentshim_data_v1_transcript_proto_rawDescGZIP(), []int{3}
 }
 
-// origin.kind on user lines.
+// origin.kind. The FULL 8-variant vocabulary of the SDK's SDKMessageOrigin
+// (sdk.d.ts:4021-4069); the disk `origin` object has only ever been observed
+// carrying the first four, but both planes describe the same concept and are
+// modeled once here rather than twinned per plane.
 type OriginKind int32
 
 const (
@@ -250,6 +272,11 @@ const (
 	OriginKind_ORIGIN_KIND_HUMAN             OriginKind = 1
 	OriginKind_ORIGIN_KIND_TASK_NOTIFICATION OriginKind = 2
 	OriginKind_ORIGIN_KIND_COORDINATOR       OriginKind = 3
+	OriginKind_ORIGIN_KIND_CHANNEL           OriginKind = 4
+	OriginKind_ORIGIN_KIND_PEER              OriginKind = 5
+	OriginKind_ORIGIN_KIND_OBSERVER          OriginKind = 6
+	OriginKind_ORIGIN_KIND_AUTO_CONTINUATION OriginKind = 7
+	OriginKind_ORIGIN_KIND_OBSERVER_ACTIVITY OriginKind = 8
 )
 
 // Enum value maps for OriginKind.
@@ -259,12 +286,22 @@ var (
 		1: "ORIGIN_KIND_HUMAN",
 		2: "ORIGIN_KIND_TASK_NOTIFICATION",
 		3: "ORIGIN_KIND_COORDINATOR",
+		4: "ORIGIN_KIND_CHANNEL",
+		5: "ORIGIN_KIND_PEER",
+		6: "ORIGIN_KIND_OBSERVER",
+		7: "ORIGIN_KIND_AUTO_CONTINUATION",
+		8: "ORIGIN_KIND_OBSERVER_ACTIVITY",
 	}
 	OriginKind_value = map[string]int32{
 		"ORIGIN_KIND_UNSPECIFIED":       0,
 		"ORIGIN_KIND_HUMAN":             1,
 		"ORIGIN_KIND_TASK_NOTIFICATION": 2,
 		"ORIGIN_KIND_COORDINATOR":       3,
+		"ORIGIN_KIND_CHANNEL":           4,
+		"ORIGIN_KIND_PEER":              5,
+		"ORIGIN_KIND_OBSERVER":          6,
+		"ORIGIN_KIND_AUTO_CONTINUATION": 7,
+		"ORIGIN_KIND_OBSERVER_ACTIVITY": 8,
 	}
 )
 
@@ -591,9 +628,45 @@ func (*TranscriptLine_AttributionSnapshot) isTranscriptLine_Line() {}
 
 func (*TranscriptLine_Unknown) isTranscriptLine_Line() {}
 
+// Provenance of a user-role message. Modeled FLAT with `kind` as the
+// discriminator rather than as an 8-arm oneof: the variants overlap heavily
+// (`from` and `sender_task_id` appear on both peer and observer), so a oneof
+// would duplicate them per arm for no gain in fidelity. Every field names the
+// kinds that carry it.
+//
+// A host wrapping keyboard input stamps HUMAN explicitly; an absent origin is
+// UNATTRIBUTED and fails closed at strict is-human trust gates — it is NEVER
+// to be defaulted to HUMAN.
 type Origin struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Kind          OriginKind             `protobuf:"varint,1,opt,name=kind,proto3,enum=agentshim.data.v1.OriginKind" json:"kind,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Kind  OriginKind             `protobuf:"varint,1,opt,name=kind,proto3,enum=agentshim.data.v1.OriginKind" json:"kind,omitempty"`
+	// CHANNEL: the server the message arrived on.
+	Server string `protobuf:"bytes,2,opt,name=server,proto3" json:"server,omitempty"`
+	// PEER / OBSERVER: the sending session's id.
+	From string `protobuf:"bytes,3,opt,name=from,proto3" json:"from,omitempty"`
+	// PEER: sender display name, harness-normalized (control/format/surrogate
+	// and line/paragraph-separator code points stripped, trimmed, <=64 points).
+	Name string `protobuf:"bytes,4,opt,name=name,proto3" json:"name,omitempty"`
+	// PEER: the sender's host-openable session id (the envelope's `from-session`
+	// attribute). A navigation target only, NEVER authority.
+	FromSession string `protobuf:"bytes,5,opt,name=from_session,json=fromSession,proto3" json:"from_session,omitempty"`
+	// PEER / OBSERVER: task id of the in-process background subagent that sent
+	// the message, stamped by the harness from the sending loop — never from
+	// tool input. Absent for cross-session peers.
+	SenderTaskId string `protobuf:"bytes,6,opt,name=sender_task_id,json=senderTaskId,proto3" json:"sender_task_id,omitempty"`
+	// PEER: decoded body with the peer envelope stripped, byte-exact with what
+	// the model saw. Present only for a single harness-formed envelope.
+	Body string `protobuf:"bytes,7,opt,name=body,proto3" json:"body,omitempty"`
+	// PEER: kernel-verified pid of the process that connected to this session's
+	// cross-session messaging socket (SO_PEERCRED / LOCAL_PEERPID), read from
+	// the connection and NEVER from the payload. Key sender identity on this,
+	// never on `from`. Unverifiable (Windows, non-UDS ingress) => _set false.
+	VerifiedPeerPid    int64 `protobuf:"varint,8,opt,name=verified_peer_pid,json=verifiedPeerPid,proto3" json:"verified_peer_pid,omitempty"`
+	VerifiedPeerPidSet bool  `protobuf:"varint,9,opt,name=verified_peer_pid_set,json=verifiedPeerPidSet,proto3" json:"verified_peer_pid_set,omitempty"`
+	// TASK_NOTIFICATION: "scheduled-trigger" when the delivery is a scheduled
+	// task's fired stored prompt. Absent on webhook, PR-steward, plugin, and
+	// background-event deliveries.
+	Subkind       string `protobuf:"bytes,10,opt,name=subkind,proto3" json:"subkind,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -635,6 +708,69 @@ func (x *Origin) GetKind() OriginKind {
 	return OriginKind_ORIGIN_KIND_UNSPECIFIED
 }
 
+func (x *Origin) GetServer() string {
+	if x != nil {
+		return x.Server
+	}
+	return ""
+}
+
+func (x *Origin) GetFrom() string {
+	if x != nil {
+		return x.From
+	}
+	return ""
+}
+
+func (x *Origin) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *Origin) GetFromSession() string {
+	if x != nil {
+		return x.FromSession
+	}
+	return ""
+}
+
+func (x *Origin) GetSenderTaskId() string {
+	if x != nil {
+		return x.SenderTaskId
+	}
+	return ""
+}
+
+func (x *Origin) GetBody() string {
+	if x != nil {
+		return x.Body
+	}
+	return ""
+}
+
+func (x *Origin) GetVerifiedPeerPid() int64 {
+	if x != nil {
+		return x.VerifiedPeerPid
+	}
+	return 0
+}
+
+func (x *Origin) GetVerifiedPeerPidSet() bool {
+	if x != nil {
+		return x.VerifiedPeerPidSet
+	}
+	return false
+}
+
+func (x *Origin) GetSubkind() string {
+	if x != nil {
+		return x.Subkind
+	}
+	return ""
+}
+
 // Common envelope on user/assistant/system/attachment lines (census B2):
 // ~10 always-present fields plus every optional extra observed.
 type LineEnvelope struct {
@@ -654,7 +790,7 @@ type LineEnvelope struct {
 	RequestId                 string           `protobuf:"bytes,11,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`                                               // assistant only
 	PromptId                  string           `protobuf:"bytes,12,opt,name=prompt_id,json=promptId,proto3" json:"prompt_id,omitempty"`                                                  // user only
 	AgentId                   string           `protobuf:"bytes,13,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`                                                     // sidechain + some main lines
-	SourceToolAssistantUuid   string           `protobuf:"bytes,14,opt,name=source_tool_assistant_uuid,json=sourceToolAssistantUuid,proto3" json:"source_tool_assistant_uuid,omitempty"` // every tool_result user line
+	SourceToolAssistantUuid   string           `protobuf:"bytes,14,opt,name=source_tool_assistant_uuid,json=sourceToolAssistantUuid,proto3" json:"source_tool_assistant_uuid,omitempty"` // disk key `sourceToolAssistantUUID`
 	SnakeSessionId            string           `protobuf:"bytes,15,opt,name=snake_session_id,json=snakeSessionId,proto3" json:"snake_session_id,omitempty"`                              // vestigial duplicate `session_id`
 	Effort                    string           `protobuf:"bytes,16,opt,name=effort,proto3" json:"effort,omitempty"`                                                                      // "high" | "xhigh"
 	AttributionAgent          string           `protobuf:"bytes,17,opt,name=attribution_agent,json=attributionAgent,proto3" json:"attribution_agent,omitempty"`
@@ -665,7 +801,7 @@ type LineEnvelope struct {
 	PermissionMode            string           `protobuf:"bytes,22,opt,name=permission_mode,json=permissionMode,proto3" json:"permission_mode,omitempty"` // user prompt lines
 	Origin                    *Origin          `protobuf:"bytes,23,opt,name=origin,proto3" json:"origin,omitempty"`
 	IsMeta                    bool             `protobuf:"varint,24,opt,name=is_meta,json=isMeta,proto3" json:"is_meta,omitempty"`
-	SourceToolUseId           string           `protobuf:"bytes,25,opt,name=source_tool_use_id,json=sourceToolUseId,proto3" json:"source_tool_use_id,omitempty"`
+	SourceToolUseId           string           `protobuf:"bytes,25,opt,name=source_tool_use_id,json=sourceToolUseId,proto3" json:"source_tool_use_id,omitempty"` // disk key `sourceToolUseID`
 	ToolEndsTurn              bool             `protobuf:"varint,26,opt,name=tool_ends_turn,json=toolEndsTurn,proto3" json:"tool_ends_turn,omitempty"`
 	IsApiErrorMessage         bool             `protobuf:"varint,27,opt,name=is_api_error_message,json=isApiErrorMessage,proto3" json:"is_api_error_message,omitempty"`
 	Error                     string           `protobuf:"bytes,28,opt,name=error,proto3" json:"error,omitempty"` // with is_api_error_message
@@ -678,8 +814,11 @@ type LineEnvelope struct {
 	IsVisibleInTranscriptOnly bool             `protobuf:"varint,35,opt,name=is_visible_in_transcript_only,json=isVisibleInTranscriptOnly,proto3" json:"is_visible_in_transcript_only,omitempty"`
 	IsCompactSummary          bool             `protobuf:"varint,36,opt,name=is_compact_summary,json=isCompactSummary,proto3" json:"is_compact_summary,omitempty"`
 	LogicalParentUuid         string           `protobuf:"bytes,37,opt,name=logical_parent_uuid,json=logicalParentUuid,proto3" json:"logical_parent_uuid,omitempty"` // compact_boundary lines
-	unknownFields             protoimpl.UnknownFields
-	sizeCache                 protoimpl.SizeCache
+	// [corpus] disk key `interruptedByShutdown` — the turn did not end, the
+	// harness went away underneath it.
+	InterruptedByShutdown bool `protobuf:"varint,38,opt,name=interrupted_by_shutdown,json=interruptedByShutdown,proto3" json:"interrupted_by_shutdown,omitempty"`
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
 }
 
 func (x *LineEnvelope) Reset() {
@@ -969,6 +1108,13 @@ func (x *LineEnvelope) GetLogicalParentUuid() string {
 		return x.LogicalParentUuid
 	}
 	return ""
+}
+
+func (x *LineEnvelope) GetInterruptedByShutdown() bool {
+	if x != nil {
+		return x.InterruptedByShutdown
+	}
+	return false
 }
 
 type UserLine struct {
@@ -1511,8 +1657,11 @@ type TurnDurationLine struct {
 	MessageCount                int64                  `protobuf:"varint,2,opt,name=message_count,json=messageCount,proto3" json:"message_count,omitempty"`
 	PendingBackgroundAgentCount int64                  `protobuf:"varint,3,opt,name=pending_background_agent_count,json=pendingBackgroundAgentCount,proto3" json:"pending_background_agent_count,omitempty"`
 	IsMeta                      bool                   `protobuf:"varint,4,opt,name=is_meta,json=isMeta,proto3" json:"is_meta,omitempty"`
-	unknownFields               protoimpl.UnknownFields
-	sizeCache                   protoimpl.SizeCache
+	// [corpus] disk key `pendingWorkflowCount` — the workflow counterpart of
+	// pending_background_agent_count, so queue depth is reportable in full.
+	PendingWorkflowCount int64 `protobuf:"varint,5,opt,name=pending_workflow_count,json=pendingWorkflowCount,proto3" json:"pending_workflow_count,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *TurnDurationLine) Reset() {
@@ -1571,6 +1720,13 @@ func (x *TurnDurationLine) GetIsMeta() bool {
 		return x.IsMeta
 	}
 	return false
+}
+
+func (x *TurnDurationLine) GetPendingWorkflowCount() int64 {
+	if x != nil {
+		return x.PendingWorkflowCount
+	}
+	return 0
 }
 
 type LocalCommandLine struct {
@@ -2225,12 +2381,15 @@ func (x *ApiErrorDetail) GetRateLimits() *structpb.Struct {
 }
 
 type ApiErrorLine struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Level         string                 `protobuf:"bytes,1,opt,name=level,proto3" json:"level,omitempty"` // "error"
-	Error         *ApiErrorDetail        `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
-	RetryInMs     float64                `protobuf:"fixed64,3,opt,name=retry_in_ms,json=retryInMs,proto3" json:"retry_in_ms,omitempty"`
-	RetryAttempt  int64                  `protobuf:"varint,4,opt,name=retry_attempt,json=retryAttempt,proto3" json:"retry_attempt,omitempty"`
-	MaxRetries    int64                  `protobuf:"varint,5,opt,name=max_retries,json=maxRetries,proto3" json:"max_retries,omitempty"`
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	Level        string                 `protobuf:"bytes,1,opt,name=level,proto3" json:"level,omitempty"` // "error"
+	Error        *ApiErrorDetail        `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
+	RetryInMs    float64                `protobuf:"fixed64,3,opt,name=retry_in_ms,json=retryInMs,proto3" json:"retry_in_ms,omitempty"`
+	RetryAttempt int64                  `protobuf:"varint,4,opt,name=retry_attempt,json=retryAttempt,proto3" json:"retry_attempt,omitempty"`
+	MaxRetries   int64                  `protobuf:"varint,5,opt,name=max_retries,json=maxRetries,proto3" json:"max_retries,omitempty"`
+	// [corpus] "request_retry" | "connection_retry" — which layer retried,
+	// which is what separates a slow API from a flaky link.
+	Source        string `protobuf:"bytes,6,opt,name=source,proto3" json:"source,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2298,6 +2457,13 @@ func (x *ApiErrorLine) GetMaxRetries() int64 {
 		return x.MaxRetries
 	}
 	return 0
+}
+
+func (x *ApiErrorLine) GetSource() string {
+	if x != nil {
+		return x.Source
+	}
+	return ""
 }
 
 // [corpus] system/model_refusal_fallback — the refusal-with-fallback twin of
@@ -2825,10 +2991,14 @@ func (x *PrLinkLine) GetTimestamp() string {
 }
 
 type FileHistorySnapshotLine struct {
-	state            protoimpl.MessageState `protogen:"open.v1"`
-	MessageId        string                 `protobuf:"bytes,1,opt,name=message_id,json=messageId,proto3" json:"message_id,omitempty"`
-	Snapshot         *structpb.Struct       `protobuf:"bytes,2,opt,name=snapshot,proto3" json:"snapshot,omitempty"` // {messageId, timestamp, trackedFileBackups}
-	IsSnapshotUpdate bool                   `protobuf:"varint,3,opt,name=is_snapshot_update,json=isSnapshotUpdate,proto3" json:"is_snapshot_update,omitempty"`
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	MessageId string                 `protobuf:"bytes,1,opt,name=message_id,json=messageId,proto3" json:"message_id,omitempty"`
+	// SHAPE (census, 2,815 lines): {messageId, timestamp, trackedFileBackups},
+	// where trackedFileBackups maps a path to a FileBackup. Left as a Struct for
+	// the same reason as ApiUsage.cache_creation (retyping a live field breaks
+	// every persisted event).
+	Snapshot         *structpb.Struct `protobuf:"bytes,2,opt,name=snapshot,proto3" json:"snapshot,omitempty"`
+	IsSnapshotUpdate bool             `protobuf:"varint,3,opt,name=is_snapshot_update,json=isSnapshotUpdate,proto3" json:"is_snapshot_update,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -2889,8 +3059,11 @@ type FileBackup struct {
 	BackupFileName string                 `protobuf:"bytes,1,opt,name=backup_file_name,json=backupFileName,proto3" json:"backup_file_name,omitempty"` // "hash@vN"
 	Version        int64                  `protobuf:"varint,2,opt,name=version,proto3" json:"version,omitempty"`
 	BackupTime     string                 `protobuf:"bytes,3,opt,name=backup_time,json=backupTime,proto3" json:"backup_time,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// [corpus] disk key `realParentDir` — the resolved parent of a symlinked
+	// path, without which a backup cannot be restored to where it came from.
+	RealParentDir string `protobuf:"bytes,4,opt,name=real_parent_dir,json=realParentDir,proto3" json:"real_parent_dir,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *FileBackup) Reset() {
@@ -2940,6 +3113,13 @@ func (x *FileBackup) GetVersion() int64 {
 func (x *FileBackup) GetBackupTime() string {
 	if x != nil {
 		return x.BackupTime
+	}
+	return ""
+}
+
+func (x *FileBackup) GetRealParentDir() string {
+	if x != nil {
+		return x.RealParentDir
 	}
 	return ""
 }
@@ -4921,8 +5101,10 @@ func (x *QueuedCommandAttachment) GetOrigin() *Origin {
 }
 
 type ReadTruncationNoticeAttachment struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Payload       *structpb.Struct       `protobuf:"bytes,1,opt,name=payload,proto3" json:"payload,omitempty"` // shape sparse/variable in census
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// SHAPE (census): {banner, toolUseID}. Kept a Struct: retyping a live field is
+	// wire-breaking for persisted events, and nothing is lost as a Struct.
+	Payload       *structpb.Struct `protobuf:"bytes,1,opt,name=payload,proto3" json:"payload,omitempty"` // shape sparse/variable in census
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5017,8 +5199,10 @@ func (x *StructuredOutputAttachment) GetToolUseId() string {
 }
 
 type CompactFileReferenceAttachment struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Payload       *structpb.Struct       `protobuf:"bytes,1,opt,name=payload,proto3" json:"payload,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// SHAPE (census): {filename, displayPath}. Kept a Struct: retyping a live field is
+	// wire-breaking for persisted events, and nothing is lost as a Struct.
+	Payload       *structpb.Struct `protobuf:"bytes,1,opt,name=payload,proto3" json:"payload,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5061,8 +5245,10 @@ func (x *CompactFileReferenceAttachment) GetPayload() *structpb.Struct {
 }
 
 type ContextTipAttachment struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Payload       *structpb.Struct       `protobuf:"bytes,1,opt,name=payload,proto3" json:"payload,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// SHAPE (census): {tip}. Kept a Struct: retyping a live field is
+	// wire-breaking for persisted events, and nothing is lost as a Struct.
+	Payload       *structpb.Struct `protobuf:"bytes,1,opt,name=payload,proto3" json:"payload,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5105,8 +5291,10 @@ func (x *ContextTipAttachment) GetPayload() *structpb.Struct {
 }
 
 type DateChangeAttachment struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Payload       *structpb.Struct       `protobuf:"bytes,1,opt,name=payload,proto3" json:"payload,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// SHAPE (census): {newDate}. Kept a Struct: retyping a live field is
+	// wire-breaking for persisted events, and nothing is lost as a Struct.
+	Payload       *structpb.Struct `protobuf:"bytes,1,opt,name=payload,proto3" json:"payload,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5149,8 +5337,10 @@ func (x *DateChangeAttachment) GetPayload() *structpb.Struct {
 }
 
 type NestedMemoryAttachment struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Payload       *structpb.Struct       `protobuf:"bytes,1,opt,name=payload,proto3" json:"payload,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// SHAPE (census): {path, content, displayPath}. Kept a Struct: retyping a live field is
+	// wire-breaking for persisted events, and nothing is lost as a Struct.
+	Payload       *structpb.Struct `protobuf:"bytes,1,opt,name=payload,proto3" json:"payload,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5387,8 +5577,10 @@ func (x *FileAttachment) GetFilename() string {
 }
 
 type UltrathinkEffortAttachment struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Payload       *structpb.Struct       `protobuf:"bytes,1,opt,name=payload,proto3" json:"payload,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// SHAPE (census): no keys observed. Kept a Struct: retyping a live field is
+	// wire-breaking for persisted events, and nothing is lost as a Struct.
+	Payload       *structpb.Struct `protobuf:"bytes,1,opt,name=payload,proto3" json:"payload,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5431,8 +5623,10 @@ func (x *UltrathinkEffortAttachment) GetPayload() *structpb.Struct {
 }
 
 type DynamicSkillAttachment struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Payload       *structpb.Struct       `protobuf:"bytes,1,opt,name=payload,proto3" json:"payload,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// SHAPE (census): {skillDir, skillNames, displayPath}. Kept a Struct: retyping a live field is
+	// wire-breaking for persisted events, and nothing is lost as a Struct.
+	Payload       *structpb.Struct `protobuf:"bytes,1,opt,name=payload,proto3" json:"payload,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5475,8 +5669,10 @@ func (x *DynamicSkillAttachment) GetPayload() *structpb.Struct {
 }
 
 type UltraEffortEnterAttachment struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Payload       *structpb.Struct       `protobuf:"bytes,1,opt,name=payload,proto3" json:"payload,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// SHAPE (census): {reminderType}. Kept a Struct: retyping a live field is
+	// wire-breaking for persisted events, and nothing is lost as a Struct.
+	Payload       *structpb.Struct `protobuf:"bytes,1,opt,name=payload,proto3" json:"payload,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5519,8 +5715,10 @@ func (x *UltraEffortEnterAttachment) GetPayload() *structpb.Struct {
 }
 
 type UltraEffortExitAttachment struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Payload       *structpb.Struct       `protobuf:"bytes,1,opt,name=payload,proto3" json:"payload,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// SHAPE (census): no keys observed. Kept a Struct: retyping a live field is
+	// wire-breaking for persisted events, and nothing is lost as a Struct.
+	Payload       *structpb.Struct `protobuf:"bytes,1,opt,name=payload,proto3" json:"payload,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5563,8 +5761,10 @@ func (x *UltraEffortExitAttachment) GetPayload() *structpb.Struct {
 }
 
 type PlanModeExitAttachment struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Payload       *structpb.Struct       `protobuf:"bytes,1,opt,name=payload,proto3" json:"payload,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// SHAPE (census): {planFilePath, planExists}. Kept a Struct: retyping a live field is
+	// wire-breaking for persisted events, and nothing is lost as a Struct.
+	Payload       *structpb.Struct `protobuf:"bytes,1,opt,name=payload,proto3" json:"payload,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5608,10 +5808,16 @@ func (x *PlanModeExitAttachment) GetPayload() *structpb.Struct {
 
 // [corpus] attachment.type:"hook_cancelled".
 type HookCancelledAttachment struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	HookName      string                 `protobuf:"bytes,1,opt,name=hook_name,json=hookName,proto3" json:"hook_name,omitempty"`
-	ToolUseId     string                 `protobuf:"bytes,2,opt,name=tool_use_id,json=toolUseId,proto3" json:"tool_use_id,omitempty"` // disk key `toolUseID`
-	HookEvent     string                 `protobuf:"bytes,3,opt,name=hook_event,json=hookEvent,proto3" json:"hook_event,omitempty"`
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	HookName  string                 `protobuf:"bytes,1,opt,name=hook_name,json=hookName,proto3" json:"hook_name,omitempty"`
+	ToolUseId string                 `protobuf:"bytes,2,opt,name=tool_use_id,json=toolUseId,proto3" json:"tool_use_id,omitempty"` // disk key `toolUseID`
+	HookEvent string                 `protobuf:"bytes,3,opt,name=hook_event,json=hookEvent,proto3" json:"hook_event,omitempty"`
+	// [corpus] the same command/duration pair HookSuccessAttachment carries,
+	// plus WHY it stopped: a timeout is a hook problem, a cancel is not.
+	Command       string `protobuf:"bytes,4,opt,name=command,proto3" json:"command,omitempty"`
+	DurationMs    int64  `protobuf:"varint,5,opt,name=duration_ms,json=durationMs,proto3" json:"duration_ms,omitempty"` // disk key `durationMs`
+	TimedOut      bool   `protobuf:"varint,6,opt,name=timed_out,json=timedOut,proto3" json:"timed_out,omitempty"`       // disk key `timedOut`
+	TimeoutMs     int64  `protobuf:"varint,7,opt,name=timeout_ms,json=timeoutMs,proto3" json:"timeout_ms,omitempty"`    // disk key `timeoutMs`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5665,6 +5871,34 @@ func (x *HookCancelledAttachment) GetHookEvent() string {
 		return x.HookEvent
 	}
 	return ""
+}
+
+func (x *HookCancelledAttachment) GetCommand() string {
+	if x != nil {
+		return x.Command
+	}
+	return ""
+}
+
+func (x *HookCancelledAttachment) GetDurationMs() int64 {
+	if x != nil {
+		return x.DurationMs
+	}
+	return 0
+}
+
+func (x *HookCancelledAttachment) GetTimedOut() bool {
+	if x != nil {
+		return x.TimedOut
+	}
+	return false
+}
+
+func (x *HookCancelledAttachment) GetTimeoutMs() int64 {
+	if x != nil {
+		return x.TimeoutMs
+	}
+	return 0
 }
 
 // [corpus] attachment.type:"invoked_skills".
@@ -7050,9 +7284,19 @@ const file_agentshim_data_v1_transcript_proto_rawDesc = "" +
 	"frame_link\x18\r \x01(\v2 .agentshim.data.v1.FrameLinkLineH\x00R\tframeLink\x12_\n" +
 	"\x14attribution_snapshot\x18\x0e \x01(\v2*.agentshim.data.v1.AttributionSnapshotLineH\x00R\x13attributionSnapshot\x12<\n" +
 	"\aunknown\x18\x0f \x01(\v2 .agentshim.data.v1.UnknownRecordH\x00R\aunknownB\x06\n" +
-	"\x04line\";\n" +
+	"\x04line\"\xd1\x02\n" +
 	"\x06Origin\x121\n" +
-	"\x04kind\x18\x01 \x01(\x0e2\x1d.agentshim.data.v1.OriginKindR\x04kind\"\x91\f\n" +
+	"\x04kind\x18\x01 \x01(\x0e2\x1d.agentshim.data.v1.OriginKindR\x04kind\x12\x16\n" +
+	"\x06server\x18\x02 \x01(\tR\x06server\x12\x12\n" +
+	"\x04from\x18\x03 \x01(\tR\x04from\x12\x12\n" +
+	"\x04name\x18\x04 \x01(\tR\x04name\x12!\n" +
+	"\ffrom_session\x18\x05 \x01(\tR\vfromSession\x12$\n" +
+	"\x0esender_task_id\x18\x06 \x01(\tR\fsenderTaskId\x12\x12\n" +
+	"\x04body\x18\a \x01(\tR\x04body\x12*\n" +
+	"\x11verified_peer_pid\x18\b \x01(\x03R\x0fverifiedPeerPid\x121\n" +
+	"\x15verified_peer_pid_set\x18\t \x01(\bR\x12verifiedPeerPidSet\x12\x18\n" +
+	"\asubkind\x18\n" +
+	" \x01(\tR\asubkind\"\xc9\f\n" +
 	"\fLineEnvelope\x12\x1f\n" +
 	"\vparent_uuid\x18\x01 \x01(\tR\n" +
 	"parentUuid\x12!\n" +
@@ -7097,7 +7341,8 @@ const file_agentshim_data_v1_transcript_proto_rawDesc = "" +
 	"\x0equeue_priority\x18\" \x01(\x03R\rqueuePriority\x12@\n" +
 	"\x1dis_visible_in_transcript_only\x18# \x01(\bR\x19isVisibleInTranscriptOnly\x12,\n" +
 	"\x12is_compact_summary\x18$ \x01(\bR\x10isCompactSummary\x12.\n" +
-	"\x13logical_parent_uuid\x18% \x01(\tR\x11logicalParentUuid\"\xfd\x01\n" +
+	"\x13logical_parent_uuid\x18% \x01(\tR\x11logicalParentUuid\x126\n" +
+	"\x17interrupted_by_shutdown\x18& \x01(\bR\x15interruptedByShutdown\"\xfd\x01\n" +
 	"\bUserLine\x12;\n" +
 	"\benvelope\x18\x01 \x01(\v2\x1f.agentshim.data.v1.LineEnvelopeR\benvelope\x12;\n" +
 	"\amessage\x18\x02 \x01(\v2!.agentshim.data.v1.ApiUserMessageR\amessage\x12H\n" +
@@ -7141,13 +7386,14 @@ const file_agentshim_data_v1_transcript_proto_rawDesc = "" +
 	"\n" +
 	"has_output\x18\a \x01(\bR\thasOutput\x12\x14\n" +
 	"\x05level\x18\b \x01(\tR\x05level\x12\x1e\n" +
-	"\vtool_use_id\x18\t \x01(\tR\ttoolUseId\"\xb6\x01\n" +
+	"\vtool_use_id\x18\t \x01(\tR\ttoolUseId\"\xec\x01\n" +
 	"\x10TurnDurationLine\x12\x1f\n" +
 	"\vduration_ms\x18\x01 \x01(\x03R\n" +
 	"durationMs\x12#\n" +
 	"\rmessage_count\x18\x02 \x01(\x03R\fmessageCount\x12C\n" +
 	"\x1epending_background_agent_count\x18\x03 \x01(\x03R\x1bpendingBackgroundAgentCount\x12\x17\n" +
-	"\ais_meta\x18\x04 \x01(\bR\x06isMeta\"B\n" +
+	"\ais_meta\x18\x04 \x01(\bR\x06isMeta\x124\n" +
+	"\x16pending_workflow_count\x18\x05 \x01(\x03R\x14pendingWorkflowCount\"B\n" +
 	"\x10LocalCommandLine\x12\x18\n" +
 	"\acontent\x18\x01 \x01(\tR\acontent\x12\x14\n" +
 	"\x05level\x18\x02 \x01(\tR\x05level\"\x12\n" +
@@ -7203,14 +7449,15 @@ const file_agentshim_data_v1_transcript_proto_rawDesc = "" +
 	"connection\x12&\n" +
 	"\x0fis_network_down\x18\x06 \x01(\bR\risNetworkDown\x128\n" +
 	"\vrate_limits\x18\a \x01(\v2\x17.google.protobuf.StructR\n" +
-	"rateLimits\"\xc3\x01\n" +
+	"rateLimits\"\xdb\x01\n" +
 	"\fApiErrorLine\x12\x14\n" +
 	"\x05level\x18\x01 \x01(\tR\x05level\x127\n" +
 	"\x05error\x18\x02 \x01(\v2!.agentshim.data.v1.ApiErrorDetailR\x05error\x12\x1e\n" +
 	"\vretry_in_ms\x18\x03 \x01(\x01R\tretryInMs\x12#\n" +
 	"\rretry_attempt\x18\x04 \x01(\x03R\fretryAttempt\x12\x1f\n" +
 	"\vmax_retries\x18\x05 \x01(\x03R\n" +
-	"maxRetries\"\x94\x03\n" +
+	"maxRetries\x12\x16\n" +
+	"\x06source\x18\x06 \x01(\tR\x06source\"\x94\x03\n" +
 	"\x18ModelRefusalFallbackLine\x12\x1c\n" +
 	"\tdirection\x18\x01 \x01(\tR\tdirection\x12\x18\n" +
 	"\acontent\x18\x02 \x01(\tR\acontent\x12\x14\n" +
@@ -7262,13 +7509,14 @@ const file_agentshim_data_v1_transcript_proto_rawDesc = "" +
 	"\n" +
 	"message_id\x18\x01 \x01(\tR\tmessageId\x123\n" +
 	"\bsnapshot\x18\x02 \x01(\v2\x17.google.protobuf.StructR\bsnapshot\x12,\n" +
-	"\x12is_snapshot_update\x18\x03 \x01(\bR\x10isSnapshotUpdate\"q\n" +
+	"\x12is_snapshot_update\x18\x03 \x01(\bR\x10isSnapshotUpdate\"\x99\x01\n" +
 	"\n" +
 	"FileBackup\x12(\n" +
 	"\x10backup_file_name\x18\x01 \x01(\tR\x0ebackupFileName\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\x03R\aversion\x12\x1f\n" +
 	"\vbackup_time\x18\x03 \x01(\tR\n" +
-	"backupTime\"\xdf\x01\n" +
+	"backupTime\x12&\n" +
+	"\x0freal_parent_dir\x18\x04 \x01(\tR\rrealParentDir\"\xdf\x01\n" +
 	"\x14FileHistoryDeltaLine\x12\x1d\n" +
 	"\n" +
 	"message_id\x18\x01 \x01(\tR\tmessageId\x12.\n" +
@@ -7458,12 +7706,18 @@ const file_agentshim_data_v1_transcript_proto_rawDesc = "" +
 	"\x19UltraEffortExitAttachment\x121\n" +
 	"\apayload\x18\x01 \x01(\v2\x17.google.protobuf.StructR\apayload\"K\n" +
 	"\x16PlanModeExitAttachment\x121\n" +
-	"\apayload\x18\x01 \x01(\v2\x17.google.protobuf.StructR\apayload\"u\n" +
+	"\apayload\x18\x01 \x01(\v2\x17.google.protobuf.StructR\apayload\"\xec\x01\n" +
 	"\x17HookCancelledAttachment\x12\x1b\n" +
 	"\thook_name\x18\x01 \x01(\tR\bhookName\x12\x1e\n" +
 	"\vtool_use_id\x18\x02 \x01(\tR\ttoolUseId\x12\x1d\n" +
 	"\n" +
-	"hook_event\x18\x03 \x01(\tR\thookEvent\"P\n" +
+	"hook_event\x18\x03 \x01(\tR\thookEvent\x12\x18\n" +
+	"\acommand\x18\x04 \x01(\tR\acommand\x12\x1f\n" +
+	"\vduration_ms\x18\x05 \x01(\x03R\n" +
+	"durationMs\x12\x1b\n" +
+	"\ttimed_out\x18\x06 \x01(\bR\btimedOut\x12\x1d\n" +
+	"\n" +
+	"timeout_ms\x18\a \x01(\x03R\ttimeoutMs\"P\n" +
 	"\fInvokedSkill\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
 	"\x04path\x18\x02 \x01(\tR\x04path\x12\x18\n" +
@@ -7576,13 +7830,18 @@ const file_agentshim_data_v1_transcript_proto_rawDesc = "" +
 	"\x14QUEUE_OP_UNSPECIFIED\x10\x00\x12\x14\n" +
 	"\x10QUEUE_OP_ENQUEUE\x10\x01\x12\x14\n" +
 	"\x10QUEUE_OP_DEQUEUE\x10\x02\x12\x13\n" +
-	"\x0fQUEUE_OP_REMOVE\x10\x03*\x80\x01\n" +
+	"\x0fQUEUE_OP_REMOVE\x10\x03*\x8f\x02\n" +
 	"\n" +
 	"OriginKind\x12\x1b\n" +
 	"\x17ORIGIN_KIND_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11ORIGIN_KIND_HUMAN\x10\x01\x12!\n" +
 	"\x1dORIGIN_KIND_TASK_NOTIFICATION\x10\x02\x12\x1b\n" +
-	"\x17ORIGIN_KIND_COORDINATOR\x10\x03B*Z(agentrepl/proto/agentshim/data/v1;datav1b\x06proto3"
+	"\x17ORIGIN_KIND_COORDINATOR\x10\x03\x12\x17\n" +
+	"\x13ORIGIN_KIND_CHANNEL\x10\x04\x12\x14\n" +
+	"\x10ORIGIN_KIND_PEER\x10\x05\x12\x18\n" +
+	"\x14ORIGIN_KIND_OBSERVER\x10\x06\x12!\n" +
+	"\x1dORIGIN_KIND_AUTO_CONTINUATION\x10\a\x12!\n" +
+	"\x1dORIGIN_KIND_OBSERVER_ACTIVITY\x10\bB*Z(agentrepl/proto/agentshim/data/v1;datav1b\x06proto3"
 
 var (
 	file_agentshim_data_v1_transcript_proto_rawDescOnce sync.Once

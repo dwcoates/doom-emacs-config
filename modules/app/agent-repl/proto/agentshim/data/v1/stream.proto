@@ -29,6 +29,7 @@ package agentshim.data.v1;
 
 import "google/protobuf/struct.proto";
 import "agentshim/data/v1/tools.proto";
+import "agentshim/data/v1/transcript.proto";
 import "agentshim/data/v1/unknown.proto";
 
 option go_package = "agentrepl/proto/agentshim/data/v1;datav1";
@@ -111,6 +112,17 @@ message UserMessage {
   // [observed] present on subagent-context user messages:
   string subagent_type = 8;
   string task_description = 9;
+  // [sdk 0.3.220] fields beyond the folded 0.1.77 core:
+  string timestamp = 10;
+  // "now" | "next" | "later" — the queue-priority signal.
+  string priority = 11;
+  // Provenance. UNSET is UNATTRIBUTED, never "human": strict trust gates fail
+  // closed on it (see Origin in transcript.proto).
+  Origin origin = 12;
+  bool should_query = 13;
+  // REPLAY-ONLY (SDKUserMessageReplay). Typed `unknown[]` by the SDK, so
+  // captured verbatim rather than guessed at.
+  google.protobuf.ListValue file_attachments = 14;
 }
 
 // [sdk coreTypes.d.ts:427] SDKAssistantMessageError.
@@ -122,6 +134,12 @@ enum AssistantMessageError {
   ASSISTANT_MESSAGE_ERROR_INVALID_REQUEST = 4;
   ASSISTANT_MESSAGE_ERROR_SERVER_ERROR = 5;
   ASSISTANT_MESSAGE_ERROR_UNKNOWN = 6;
+  // [sdk 0.3.220] the rest of the 10-member vocabulary. Without these the
+  // converter collapsed four distinct failures into UNSPECIFIED.
+  ASSISTANT_MESSAGE_ERROR_OAUTH_ORG_NOT_ALLOWED = 7;
+  ASSISTANT_MESSAGE_ERROR_OVERLOADED = 8;
+  ASSISTANT_MESSAGE_ERROR_MODEL_NOT_FOUND = 9;
+  ASSISTANT_MESSAGE_ERROR_MAX_OUTPUT_TOKENS = 10;
 }
 
 // [sdk coreTypes.d.ts:428-435] SDKAssistantMessage.
@@ -132,6 +150,17 @@ message AssistantMessage {
   bool has_error = 4;               // disambiguates unset vs UNKNOWN
   string uuid = 5;
   string session_id = 6;
+  // [sdk 0.3.220]:
+  string request_id = 7;
+  string timestamp = 8;
+  bool resumed_from_incomplete_thinking = 9;
+  // The uuids this message REPLACES (a re-issued assistant turn). Consumers
+  // reconciling per uuid must retract these, not render both.
+  repeated string supersedes = 10;
+  bool aborted = 11;
+  // Subagent context, matching UserMessage's pair.
+  string subagent_type = 12;
+  string task_description = 13;
 }
 
 // [sdk coreTypes.d.ts:441-474] SDKResultMessage, both variants, plus
@@ -160,15 +189,39 @@ message ResultMessage {
   repeated string errors = 12;             // error variants only
   string uuid = 13;
   string session_id = 14;
-  // [observed] stream-only extras beyond the typings:
+  // Fields 15-22 were reverse-engineered as [observed] against SDK 0.1.77 and
+  // are TYPED as of 0.3.220 — the guesses were right. stop_reason is required
+  // on both variants there; the rest ride the success variant only, except
+  // terminal_reason / fast_mode_state, which ride both.
   int64 api_error_status = 15;   // number|null; 0 = null
   bool api_error_status_set = 16;
   int64 ttft_ms = 17;
   int64 ttft_stream_ms = 18;
   int64 time_to_request_ms = 19;
   string stop_reason = 20;       // e.g. "end_turn"
-  string terminal_reason = 21;   // e.g. "completed"
-  string fast_mode_state = 22;   // e.g. "off"
+  // 19-value TerminalReason vocabulary, e.g. "completed", "max_turns",
+  // "budget_exhausted", "hook_stopped".
+  string terminal_reason = 21;
+  string fast_mode_state = 22;   // "off" | "cooldown" | "on"
+  // [sdk 0.3.220] spawn-to-first-request latency and turn attribution:
+  string user_message_uuid = 23;
+  int64 request_sent_wall_ms = 24;
+  int64 time_to_request_from_spawn_ms = 25;
+  bool warm_spare_claimed = 26;
+  int64 time_origin_ms = 27;
+  // A tool the turn ended WITHOUT running (terminal_reason "tool_deferred").
+  DeferredToolUse deferred_tool_use = 28;
+  // 10-value FastModeDisabledReason vocabulary, e.g. "free", "preference",
+  // "network_error", "model_not_allowed".
+  string fast_mode_disabled_reason = 29;
+  Origin origin = 30;
+}
+
+// [sdk 0.3.220 SDKDeferredToolUse] the tool a deferred turn never ran.
+message DeferredToolUse {
+  string id = 1;
+  string name = 2;
+  google.protobuf.Struct input = 3;
 }
 
 // Anthropic API usage block (NonNullableUsage).
@@ -191,7 +244,11 @@ message ModelUsage {
   int64 web_search_requests = 5;
   double cost_usd = 6;
   int64 context_window = 7;
-  int64 max_output_tokens = 8;  // [observed]
+  int64 max_output_tokens = 8;  // [observed] in 0.1.77; TYPED in 0.3.220
+  // [sdk 0.3.220] which model actually served the request, and through whom —
+  // an alias resolves to a canonical id, and the provider may not be Anthropic.
+  string canonical_model = 9;
+  string provider = 10;
 }
 
 // [sdk coreTypes.d.ts:436-440].
@@ -208,13 +265,44 @@ enum McpServerState {
   MCP_SERVER_STATE_UNSPECIFIED = 0;
   MCP_SERVER_STATE_CONNECTED = 1;
   MCP_SERVER_STATE_FAILED = 2;
-  MCP_SERVER_STATE_NEEDS_AUTH = 3;
+  MCP_SERVER_STATE_NEEDS_AUTH = 3;  // wire spelling is "needs-auth"
   MCP_SERVER_STATE_PENDING = 4;
+  MCP_SERVER_STATE_DISABLED = 5;
 }
 
+// [sdk 0.3.220 McpServerStatus]. NOTE the asymmetry: `system:init` carries
+// only the narrow {name, status} pair, while the RICH form below arrives on
+// the control channel's mcp_server_status response. One message models both,
+// so the extra fields are simply unset on the init path.
 message McpServerStatus {
   string name = 1;
   McpServerState status = 2;
+  McpServerInfo server_info = 3;
+  string error = 4;
+  // McpServerStatusConfig is a union of transport configs, so it stays a
+  // Struct: there is no single shape to type it as.
+  google.protobuf.Struct config = 5;
+  string scope = 6;
+  repeated McpToolRef tools = 7;
+}
+
+message McpServerInfo {
+  string name = 1;
+  string version = 2;
+}
+
+// One tool an MCP server advertises, with the hints a permission surface needs
+// to decide how loudly to ask.
+message McpToolRef {
+  string name = 1;
+  string description = 2;
+  McpToolAnnotations annotations = 3;
+}
+
+message McpToolAnnotations {
+  bool read_only = 1;
+  bool destructive = 2;
+  bool open_world = 3;
 }
 
 message PluginRef {
@@ -251,12 +339,15 @@ message SystemInit {
   repeated PluginRef plugins = 13;
   string uuid = 14;
   string session_id = 15;
-  string fast_mode_state = 16;  // [observed]
+  string fast_mode_state = 16;  // [observed] in 0.1.77; TYPED in 0.3.220
   // [corpus] further observed init fields:
   repeated string capabilities = 17;        // e.g. "interrupt_receipt_v1"
   bool analytics_disabled = 18;
   bool product_feedback_disabled = 19;
   map<string, string> memory_paths = 20;    // e.g. {"auto": <memory dir>}
+  // [sdk 0.3.220] WHY fast mode is off, so the state is explicable and not
+  // just a flag. Same 10-value vocabulary as ResultMessage's.
+  string fast_mode_disabled_reason = 21;
 }
 
 // --- stream_event (partial messages) ----------------------------------------
@@ -342,18 +433,35 @@ enum CompactTrigger {
 }
 
 // [sdk coreTypes.d.ts:507-516] compact_boundary (stream variant, snake_case).
+// [sdk 0.3.220] the stream type CAUGHT UP to the disk twin: post_tokens,
+// duration_ms, preserved_segment and preserved_messages are all typed now, so
+// compaction is a measurable operation here and not just a marker. The
+// preserved_* messages are DiskCompactMetadata's (transcript.proto) — one
+// model, since both planes describe the same compaction.
 message CompactBoundary {
   CompactTrigger trigger = 1;
   int64 pre_tokens = 2;
   string uuid = 3;
   string session_id = 4;
+  int64 post_tokens = 5;
+  int64 duration_ms = 6;
+  PreservedSegment preserved_segment = 7;
+  PreservedMessages preserved_messages = 8;
 }
 
-// [sdk coreTypes.d.ts:517-524] subtype "status"; status: 'compacting'|null.
+// [sdk 0.3.220 SDKStatusMessage] subtype "status".
 message StatusMessage {
-  string status = 1;  // "" = null
+  // SDKStatus: "compacting" | "requesting" | null. "" = null. ("requesting"
+  // was corpus-observed before the typings named it.)
+  string status = 1;
   string uuid = 2;
   string session_id = 3;
+  // "default"|"acceptEdits"|"bypassPermissions"|"plan"|"dontAsk"|"auto".
+  string permission_mode = 4;
+  // Turns compaction from an in-progress marker into an outcome:
+  // "success" | "failed", with the reason when it failed.
+  string compact_result = 5;
+  string compact_error = 6;
 }
 
 // [sdk coreTypes.d.ts:525-535] subtype "hook_response" + [observed] extras.
@@ -364,14 +472,17 @@ message HookResponse {
   string stderr = 4;
   int32 exit_code = 5;
   bool exit_code_set = 6;
-  string hook_id = 7;   // [observed]
-  string output = 8;    // [observed]
-  string outcome = 9;   // [observed] e.g. "error"
+  // Fields 7-9 were [observed] against 0.1.77 and are REQUIRED in 0.3.220.
+  string hook_id = 7;
+  string output = 8;
+  // Closed vocabulary: "success" | "error" | "cancelled". "cancelled" is
+  // NEVER an error — the hook was called off, it did not fail.
+  string outcome = 9;
   string uuid = 10;
   string session_id = 11;
 }
 
-// [sdk coreTypes.d.ts:536-544].
+// [sdk 0.3.220 SDKToolProgressMessage].
 message ToolProgress {
   string tool_use_id = 1;
   string tool_name = 2;
@@ -379,6 +490,23 @@ message ToolProgress {
   double elapsed_time_seconds = 4;
   string uuid = 5;
   string session_id = 6;
+  string task_id = 7;
+  // TRUE = a liveness ping, not progress. A spinner must not advance on it.
+  bool heartbeat = 8;
+  string subagent_type = 9;
+  SubagentRetry subagent_retry = 10;
+}
+
+// [sdk 0.3.220] a subagent's retry/backoff state, so a stalled task reads as
+// "retrying" rather than "hung".
+message SubagentRetry {
+  string agent_id = 1;
+  int32 attempt = 2;
+  int32 max_retries = 3;
+  int64 retry_delay_ms = 4;
+  int64 error_status = 5;   // number|null; 0 = null
+  bool error_status_set = 6;
+  string error_category = 7;
 }
 
 // [sdk coreTypes.d.ts:545-552].
@@ -392,15 +520,30 @@ message AuthStatus {
 
 // --- observed-only stream families ------------------------------------------
 
-// [observed] type:"rate_limit_event".
+// [sdk 0.3.220 SDKRateLimitInfo] type:"rate_limit_event". The base seven
+// fields were [observed] against 0.1.77 and are typed now; the overage/credit
+// half was entirely unmodeled, which is exactly the half that tells a user
+// they are blocked and what they could do about it.
 message RateLimitInfo {
-  string status = 1;           // e.g. "allowed_warning"
+  // "allowed" | "allowed_warning" | "rejected".
+  string status = 1;
   int64 resets_at = 2;         // epoch seconds
-  string rate_limit_type = 3;  // e.g. "overage"
+  // "five_hour" | "seven_day" | "seven_day_opus" | "seven_day_sonnet" |
+  // "seven_day_overage_included" | "overage".
+  string rate_limit_type = 3;
   double utilization = 4;
   bool is_using_overage = 5;
   bool overage_in_use = 6;
   double surpassed_threshold = 7;
+  // Same vocabulary as `status`, for the overage allowance specifically.
+  string overage_status = 8;
+  int64 overage_resets_at = 9;
+  // 13-value vocabulary, e.g. "out_of_credits", "org_level_disabled",
+  // "member_zero_credit_limit", "fetch_error".
+  string overage_disabled_reason = 10;
+  string error_code = 11;      // "credits_required"
+  bool can_user_purchase_credits = 12;
+  bool has_chargeable_saved_payment_method = 13;
 }
 
 message RateLimitEvent {
@@ -435,8 +578,9 @@ message SystemNotification {
   string session_id = 5;
 }
 
-// [observed] system/task_started. task_type: "local_bash" | "local_agent"
-// (workflows announce via tool results instead).
+// [sdk 0.3.220 SDKTaskStartedMessage] system/task_started. task_type is
+// "local_bash" | "local_agent" | "local_workflow" — 0.3.220 announces
+// workflows HERE, not only via tool results as 0.1.77 did.
 message TaskStartedMsg {
   string task_id = 1;
   string tool_use_id = 2;
@@ -446,12 +590,24 @@ message TaskStartedMsg {
   string prompt = 6;         // agent tasks only
   string uuid = 7;
   string session_id = 8;
+  // meta.name of the workflow script (e.g. "spec"); local_workflow only.
+  string workflow_name = 9;
+  // Ambient/housekeeping work. A consumer should HIDE it from the inline
+  // transcript rather than render it as a task the user started.
+  bool skip_transcript = 10;
 }
 
-// [observed] system/task_updated.
+// [sdk 0.3.220 SDKTaskUpdatedMessage.patch] system/task_updated.
 message TaskPatch {
-  string status = 1;    // "completed" | "failed" | "killed"
+  // "pending" | "running" | "completed" | "failed" | "killed" | "paused".
+  // NOTE the first two and the last are NON-terminal: a patch is not
+  // automatically a task ending.
+  string status = 1;
   int64 end_time = 2;   // epoch millis
+  string description = 3;
+  int64 total_paused_ms = 4;
+  string error = 5;
+  bool is_backgrounded = 6;
 }
 
 message TaskUpdatedMsg {
@@ -479,6 +635,8 @@ message TaskNotificationMsg {
   TaskUsage usage = 6;     // agent tasks only
   string uuid = 7;
   string session_id = 8;
+  // Ambient/housekeeping work; hide from the inline transcript.
+  bool skip_transcript = 9;
 }
 
 // [observed] system/background_tasks_changed — full current list each time.
@@ -503,9 +661,39 @@ message ControlRequest {
   google.protobuf.Struct request = 2;
 }
 
+// [sdk 0.3.220 SDKControlResponse] STRUCTURAL NOTE — the wire is
+//
+//   {type:"control_response", response:{subtype, request_id, ...}}
+//
+// There is NO top-level `request_id` sibling. The id lives INSIDE `response`,
+// beside the subtype that says whether the request succeeded. Verified against
+// the shipped sdk.mjs, which constructs exactly two shapes (success/error).
+// A converter reading a top-level `request_id` therefore always got "" and
+// correlation was impossible.
+//
+// Field 1 is KEPT and now filled by LIFTING response.request_id, so every
+// existing reader that correlates on it starts working rather than breaking.
+// Field 2 is kept as the verbatim capture; `body` is the same object TYPED.
 message ControlResponse {
+  // Lifted from response.request_id (there is no top-level key to read).
   string request_id = 1;
+  // The nested response object, verbatim.
   google.protobuf.Struct response = 2;
+  // The nested response object, typed.
+  ControlResponseBody body = 3;
+}
+
+// The nested body of a control_response, both arms folded (`subtype`
+// discriminates; `response` is success-only and `error` is error-only).
+message ControlResponseBody {
+  string subtype = 1;   // "success" | "error"
+  string request_id = 2;
+  google.protobuf.Struct response = 3;  // success only
+  string error = 4;                     // error only
+  // Requests still awaiting an answer, echoed on BOTH arms so a reconnecting
+  // client learns what it is still blocking.
+  repeated google.protobuf.Struct pending_permission_requests = 5;
+  repeated google.protobuf.Struct pending_user_dialog_requests = 6;
 }
 
 message ControlCancelRequest {
