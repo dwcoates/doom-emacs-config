@@ -98,11 +98,9 @@ Sourcing notes:
   `HookStarted`/`HookResponse` are today vendor-only events that die in
   `conversationItemsFromVendor` (`daemon/internal/frontend/translate.go`);
   the resolver is their first consumer.
-- `ttft_ms` dies earlier — the shim's delta bypass forwards only
-  content-bearing arms (`streamEventToContentDelta` returns null for
-  structural frames), so the shim grows a minimal relay for it. The
-  `message_delta` cumulative output usage stays dropped on purpose: the
-  footer wants input tokens only.
+- `ttft_ms` is fed by a dedicated EPHEMERAL relay, `core.MessageLatency`
+  (SHIPPED — see §The ttft relay below). The `message_delta` cumulative output
+  usage stays dropped on purpose: the footer wants input tokens only.
 - `input_tokens` is TURN-scoped, not session-scoped: the resolver sums each
   API request's input usage (`input_tokens` + `cache_read_input_tokens` +
   `cache_creation_input_tokens`) across the current turn and resets the sum
@@ -250,13 +248,8 @@ retry accent still depends on.
 
 Recorded so the gap is a known one rather than a silent zero.
 
-- **`ttft_ms`** — genuinely unfed. `ResultMessage.ttft_ms` exists but arrives
-  only at TURN END, which is useless to a live footer, and the mid-turn
-  `StreamEvent.ttft_ms` is unreachable: `stream_event` is ephemeral, so
-  `convert()` never runs on it, and the delta bypass returns null for every
-  non-`content_block_delta` frame. Feeding it needs a minimal shim relay —
-  OUT OF SCOPE here (the shim was a hard boundary for this work). The footer's
-  sheet omits the row entirely rather than printing a zero.
+- **`ttft_ms`** — FED, by the relay described in §The ttft relay below. It was
+  the one genuinely unfed seam when the footer landed; it no longer is.
 - **`authenticating`** — WIRED but unwitnessed. `data.AuthStatus` is converted
   and would forward, but no corpus fixture exists and the CLI has not been
   observed emitting it. The resolver's arm is real, not a placeholder.
@@ -311,3 +304,58 @@ The open is idempotent (guarded by the resolver's own `turnOpen`), so whichever
 arrives second is a no-op and the accumulated figures survive it. A QUEUED
 prompt deliberately does not fire it: the turn it would report is the one
 already running.
+
+## The ttft relay (executed)
+
+`ttft_ms` is fed by a new EPHEMERAL core payload, `core.MessageLatency`
+(`{uuid, ttft_ms}`, `Event.payload` field 21), carried on the same delta bypass
+as `ContentDelta` and `HeartbeatProgress`.
+
+### Where the number comes from
+
+`ttft_ms` is a TOP-LEVEL field of the `stream_event` envelope, and the SDK
+stamps it on the `message_start` frame that opens a streamed assistant message
+— never on the `content_block_delta` chunks that follow. So the one stream frame
+carrying first-token latency is precisely the frame the ContentDelta mapper
+drops. `ResultMessage.ttft_ms` reports the same number at TURN END, far too
+late for a live footer.
+
+### The path
+
+1. `streamEventToMessageLatency` (`shim/src/proto/delta.ts`) maps a stamped
+   `message_start` to an EPHEMERAL `MessageLatency` Event. `toEphemeralEvent`
+   tries the ContentDelta mapper first and falls through to this one — the two
+   are mutually exclusive by frame type, so neither shadows the other. Its
+   `uuid` is the streamed message's id (`StreamMessageTracker.current()`),
+   exactly the key `ContentDelta` uses, so both describe one message.
+2. `shimclient.dispatchEvent` routes it to the `FrameSink` alongside the other
+   two ephemerals.
+3. `sessiondrv.consumer.Consume` folds it into the progress resolver and pushes
+   NOTHING to the frontend conversation surface — it is footer input only.
+4. `progress.applyLatencyLocked` sets `ProgressView.ttft_ms` and pushes.
+
+### Semantics
+
+- **LATEST-WINS per message**, matching the field's own wording ("first-token
+  latency of the current message"): a turn streams one message per API request,
+  each with its own stamp, and the footer reports the newest.
+- **STRUCTURAL, not coalesced.** It moves at most once per message, so holding
+  it for the ticker window would only add latency to a latency display.
+- **Absence-tolerant, per the EPHEMERAL contract.** The shim declines to emit a
+  relay for an absent, zero, or non-numeric stamp, and the resolver refuses a
+  zero rather than blanking a figure already standing. Nothing is persisted and
+  nothing is replayed: a reconnecting frontend simply has no latency until the
+  next message starts.
+- Reset at turn start with the other turn-scoped figures (§Turn-start reset
+  signal above).
+
+### Why a new payload rather than a field on `ContentDelta`
+
+A `ttft_ms` field on `core.ContentDelta` would have ridden into the webapp:
+`TypingDeltaFromContentDelta` embeds the delta UNCHANGED, and the webapp's
+`decodeTypingDelta` rejects any key outside `CONTENT_DELTA_KEYS`
+(`webapp/src/frontend-proto.ts`). Every stamped message would have thrown on
+decode, breaking live typing, and fixing it would have meant editing the webapp
+to carry a field it has no use for. A separate payload keeps the ttft on the
+daemon-facing side of the wire entirely; the webapp sees it only where it
+belongs, as `ProgressView.ttft_ms`.
