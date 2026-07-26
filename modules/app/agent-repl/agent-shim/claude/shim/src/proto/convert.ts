@@ -173,6 +173,8 @@ import {
 } from "../../../../../proto/gen/ts/agentshim/data/v1/transcript_pb.js";
 import {
   AgentAsyncLaunchSchema,
+  AgentResultSchema,
+  AgentToolStatsSchema,
   ApiAssistantMessageSchema,
   ApiContentBlocksSchema,
   ApiUsageSchema,
@@ -1597,6 +1599,37 @@ function classifyToolResult(o: Record<string, unknown>): ToolUseResult["result"]
       prompt: strOf(pick(o, "prompt")),
       outputFile: strOf(pick(o, "output_file", "outputFile")),
       canReadOutputFile: pick(o, "can_read_output_file", "canReadOutputFile") === true,
+    }) };
+  }
+  // Agent/Task SYNCHRONOUS completion. Keyed on the two totals that 0.3.220's
+  // AgentOutput marks REQUIRED on its completed member and that appear on no
+  // other tool output in the union. `agent_type` looks like the obvious key but
+  // is optional there, so keying on it would drop a result that omits it. The
+  // async-launch and remote-launch members carry neither total, so neither can
+  // land here.
+  if (any("total_duration_ms", "totalDurationMs") && any("total_tool_use_count", "totalToolUseCount")) {
+    const usage = pick(o, "usage");
+    const stats = pick(o, "tool_stats", "toolStats");
+    return { case: "agent", value: create(AgentResultSchema, {
+      status: rawTaskStatusEnum(strOf(pick(o, "status"))),
+      prompt: strOf(pick(o, "prompt")),
+      agentId: strOf(pick(o, "agent_id", "agentId")),
+      agentType: strOf(pick(o, "agent_type", "agentType")),
+      content: Array.isArray(o["content"]) ? convertBlocks(o["content"]) : [],
+      resolvedModel: strOf(pick(o, "resolved_model", "resolvedModel")),
+      totalDurationMs: bigOf(pick(o, "total_duration_ms", "totalDurationMs")),
+      totalTokens: bigOf(pick(o, "total_tokens", "totalTokens")),
+      totalToolUseCount: bigOf(pick(o, "total_tool_use_count", "totalToolUseCount")),
+      usage: isObject(usage) ? convertApiUsage(usage) : undefined,
+      toolStats: isObject(stats) ? create(AgentToolStatsSchema, {
+        readCount: bigOf(pick(stats, "read_count", "readCount")),
+        searchCount: bigOf(pick(stats, "search_count", "searchCount")),
+        bashCount: bigOf(pick(stats, "bash_count", "bashCount")),
+        editFileCount: bigOf(pick(stats, "edit_file_count", "editFileCount")),
+        linesAdded: bigOf(pick(stats, "lines_added", "linesAdded")),
+        linesRemoved: bigOf(pick(stats, "lines_removed", "linesRemoved")),
+        otherToolCount: bigOf(pick(stats, "other_tool_count", "otherToolCount")),
+      }) : undefined,
     }) };
   }
   if (has("commandName") || (has("command_name") && any("success", "allowedTools", "allowed_tools"))) {
