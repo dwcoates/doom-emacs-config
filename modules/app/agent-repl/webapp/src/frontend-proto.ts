@@ -312,6 +312,12 @@ export interface ProgressView {
   authenticating?: ProgressWindow;
   hook?: ProgressWindow;
   rateLimited?: RateLimitWindow;
+  /**
+   * The session reporting it is parked on the USER. NOT a phase — `state`
+   * above remains the SSM's verdict — but a fact the daemon cannot otherwise
+   * see, since a session can block on an interaction it holds no count for.
+   */
+  blocked?: ProgressWindow;
   /** Persists until the next turn starts; "" = no error standing. */
   errorSummary: string;
   /** The feed item the error row scrolls to; "" = not addressable. */
@@ -930,6 +936,7 @@ const PROGRESS_VIEW_KEYS = new Set([
   "authenticating",
   "hook",
   "rateLimited",
+  "blocked",
   "errorSummary",
   "errorItemUuid",
   "pendingPermissions",
@@ -958,7 +965,7 @@ function decodeProgressView(v: unknown): ProgressView {
   };
   // A window is a message: absent means CLOSED, which is why each is decoded
   // only when present rather than materialized as an inactive placeholder.
-  for (const key of ["compacting", "retrying", "authenticating", "hook"] as const) {
+  for (const key of ["compacting", "retrying", "authenticating", "hook", "blocked"] as const) {
     if (o[key] !== undefined && o[key] !== null) {
       pv[key] = decodeProgressWindow(o[key], `ProgressView.${key}`);
     }

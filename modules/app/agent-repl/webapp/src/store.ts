@@ -164,6 +164,17 @@ export interface ResultItem {
   numTurns: number;
   totalCostUsd: number;
   usage: Usage;
+  /**
+   * The result's per-model usage map (§2.4 `model_usage`): session-wide and
+   * WHOLE-TREE, so unlike `usage` it counts every subagent's requests too.
+   * ABSENT when the result carried none, the same convention `resultText`
+   * below follows.
+   *
+   * It rides here because the daemon passes the typed `ResultMessage` through
+   * unchanged into the `result` conversation item, so the map has always been
+   * on the wire — the webapp simply never read it.
+   */
+  modelUsage?: Record<string, ModelUsage>;
   isError: boolean;
   resultText?: string;
   /**
@@ -345,20 +356,24 @@ export interface StoreState {
    */
   contextTokens: number | null;
   /**
-   * The top-level agent's CUMULATIVE session usage baseline. GAP after the
-   * cutover: `SessionView` reports only aggregate token counts, not the
-   * per-message `Usage` breakdown, so the tokens dropdown's detailed
-   * resolution stays null.
+   * The top-level agent's CUMULATIVE session usage baseline, re-adopted from
+   * every landed `result` item's `usage` (see `adoptResultUsage`). `null`
+   * before the session's first result, which dashes the overlay's top-level
+   * section rather than lying with zeros.
    */
   resultUsage: Usage | null;
   /**
-   * Per-message usage observed since `resultUsage` was adopted. GAP after the
-   * cutover (see `resultUsage`); stays empty.
+   * Per-message usage observed SINCE `resultUsage` was adopted, summed onto
+   * that baseline by `topLevelUsage`. Cleared whenever a fresh result
+   * re-baselines, so a request folded into the new baseline is never counted
+   * twice. Still empty in practice: the daemon pushes no per-message usage
+   * frame, so the baseline alone carries the top-level figure between results.
    */
   turnUsage: Map<string, Usage>;
   /**
-   * Per-model usage INCLUDING subagents. GAP after the cutover: no
-   * `model_usage` map in `frontend.v1`; stays null.
+   * Per-model usage INCLUDING subagents (§2.4 `model_usage`) — the only figure
+   * that counts subagent spend. Re-adopted from every landed `result` item
+   * that carries a map; `null` until the first one does.
    */
   modelUsage: Record<string, ModelUsage> | null;
   /**
@@ -626,9 +641,35 @@ export class ConversationStore {
     items: readonly ConversationItem[],
     throughSeq: number,
   ): boolean {
-    for (const item of items) this.mergeItem(item);
+    for (const item of items) {
+      this.mergeItem(item);
+      if (item.kind === "result") this.adoptResultUsage(item);
+    }
     if (throughSeq > this.state.lastSeq) this.state.lastSeq = throughSeq;
     return items.length > 0;
+  }
+
+  /**
+   * Bank a landed result's usage figures — the tokens overlay's two cumulative
+   * sources, which had no feed at all after the cutover and rendered as dashes.
+   *
+   * Both are SESSION-CUMULATIVE snapshots the SDK recomputes per result, not
+   * deltas, so each result REPLACES rather than accumulates onto the last:
+   * - `resultUsage` is the top-level agent loop's own spend, and `turnUsage`
+   *   (the per-message increments banked on top of it) is cleared with it, so
+   *   the overlay's top-level section never double-counts a request already
+   *   folded into the new baseline;
+   * - `modelUsage` is the whole-tree per-model map, the only figure that
+   *   counts subagents.
+   *
+   * A result carrying no map leaves the standing one alone: an absent map is
+   * the SDK declining to itemize this result, not an assertion that the
+   * session has spent nothing.
+   */
+  private adoptResultUsage(item: ResultItem): void {
+    this.state.resultUsage = item.usage;
+    this.state.turnUsage.clear();
+    if (item.modelUsage !== undefined) this.state.modelUsage = item.modelUsage;
   }
 
   /**

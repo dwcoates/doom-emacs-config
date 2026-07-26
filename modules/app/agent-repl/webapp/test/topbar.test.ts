@@ -526,6 +526,37 @@ describe("sessionTopbarDatapoints", () => {
     expect(html).not.toContain("data-tasks-toggle");
   });
 
+  it("lights up the overlay's per-model sections once a result has landed", () => {
+    // Arrange — the store's map, fed from a landed result's `model_usage`.
+    const modelUsage = {
+      "claude-opus-4": {
+        input_tokens: 100,
+        output_tokens: 200,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 0,
+        web_search_requests: 0,
+        cost_usd: 0.5,
+        context_window: 200_000,
+      },
+    };
+    // A landed result feeds BOTH sources at once (see `adoptResultUsage`).
+    const resultUsage = { input_tokens: 10, output_tokens: 20 };
+    // Act — the strip with its tokens overlay open.
+    const state = storeState({ modelUsage, resultUsage });
+    const html = topbarInfoHtml(sessionTopbarDatapoints(state, null), {
+      agentsOpen: false,
+      tasksOpen: false,
+      tokensOpen: true,
+    });
+    // Assert — the sections that used to render as dashes now carry figures:
+    // the model gets its own section, and the whole-tree totals are summed
+    // from the map rather than showing the unknown-source dashes.
+    expect(html).toContain("claude-opus-4");
+    expect(html).toContain("all agents");
+    expect(html).toContain("200,000");
+    expect(html).not.toContain(`<span class="tokens-value">—</span>`);
+  });
+
   it("keeps the session tokens chip, which is NOT ephemeral state", () => {
     // Arrange + Act — session-scoped token usage stays topbar territory.
     const html = topbarInfoHtml(sessionTopbarDatapoints(storeState(), null), {
