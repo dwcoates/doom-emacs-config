@@ -37,6 +37,9 @@ import {
   PermissionRequestSchema,
   PermissionResponseSchema,
   SessionSource,
+  ReplayDoneSchema,
+  ReplayEventSchema,
+  ReplayRequestSchema,
   ShimHelloSchema,
   StoreWriteAckSchema,
   StoreWriteSchema,
@@ -154,7 +157,7 @@ afterEach(async () => {
 
 /** Stand up store + session, connect a daemon, and (optionally) subscribe. */
 async function rig(
-  opts: { subscribe?: boolean; sessionSource?: SessionSource; storeSessionId?: string } = {},
+  opts: { subscribe?: boolean; sessionSource?: SessionSource; storeSessionId?: string; replayIdleMs?: number } = {},
 ): Promise<Rig> {
   const store = await fakeStore();
   cleanups.push(() => store.close());
@@ -181,6 +184,7 @@ async function rig(
     ...(opts.storeSessionId !== undefined ? { storeSessionId: opts.storeSessionId } : {}),
     createQuery,
     heartbeatIntervalMs: 0,
+    ...(opts.replayIdleMs !== undefined ? { replayIdleMs: opts.replayIdleMs } : {}),
     newRequestId: (() => {
       let n = 0;
       return () => `req-${++n}`;
@@ -558,5 +562,68 @@ describe("UdsSession store subscription key", () => {
     await until(() => store.count() > initialConnections, "resubscribed under the vendor uuid");
     const resub = await store.latest().next(SubscribeSchema);
     expect(resub.sessionId).toBe("96a0baaf-652a-4bb1-9450-e8292c595d33");
+  });
+});
+
+describe("UdsSession bounded historical replay (core.proto ReplayRequest)", () => {
+  it("serves a ReplayRequest as tagged ReplayEvents", async () => {
+    // Arrange: a daemon whose frontend needs history the daemon no longer holds.
+    const { store, daemon } = await rig({ storeSessionId: "vendor-uuid", replayIdleMs: 200 });
+    // Act
+    daemon.send(ReplayRequestSchema, create(ReplayRequestSchema, { requestId: "r1", fromSeq: 0n, toSeq: 3n }));
+    await until(() => store.count() >= 2);
+    const replayConn = store.latest();
+    await replayConn.next(SubscribeSchema);
+    replayConn.send(EventSchema, create(EventSchema, { sessionId: "vendor-uuid", seq: 1n }));
+    const replayed = await daemon.next(ReplayEventSchema);
+    // Assert
+    expect(replayed.requestId).toBe("r1");
+    expect(replayed.event?.seq).toBe(1n);
+  });
+
+  it("closes a served replay with exactly one ReplayDone", async () => {
+    // Arrange
+    const { store, daemon } = await rig({ storeSessionId: "vendor-uuid", replayIdleMs: 200 });
+    // Act
+    daemon.send(ReplayRequestSchema, create(ReplayRequestSchema, { requestId: "r1", fromSeq: 0n, toSeq: 3n }));
+    await until(() => store.count() >= 2);
+    const replayConn = store.latest();
+    await replayConn.next(SubscribeSchema);
+    replayConn.send(EventSchema, create(EventSchema, { sessionId: "vendor-uuid", seq: 3n }));
+    const done = await daemon.next(ReplayDoneSchema);
+    // Assert
+    expect(done.requestId).toBe("r1");
+    expect(done.truncated).toBe(false);
+  });
+
+  it("reports a truncated replay honestly", async () => {
+    // Arrange: the store never reaches to_seq, so the range is never closed.
+    const { store, daemon } = await rig({ storeSessionId: "vendor-uuid", replayIdleMs: 60 });
+    // Act
+    daemon.send(ReplayRequestSchema, create(ReplayRequestSchema, { requestId: "r1", fromSeq: 0n, toSeq: 999n }));
+    await until(() => store.count() >= 2);
+    await store.latest().next(SubscribeSchema);
+    const done = await daemon.next(ReplayDoneSchema);
+    // Assert
+    expect(done.truncated).toBe(true);
+    expect(done.reason).not.toBe("");
+  });
+
+  it("serves a replay WITHOUT re-subscribing the standing tail", async () => {
+    // Arrange: the standing subscription's position belongs to the daemon;
+    // moving it would drag the daemon's own consumption backwards.
+    const { store, daemon } = await rig({ subscribe: true, storeSessionId: "vendor-uuid", replayIdleMs: 200 });
+    const standing = store.latest();
+    const standingFrames: unknown[] = [];
+    standing.socket.on("data", (chunk) => standingFrames.push(chunk));
+    // Act
+    daemon.send(ReplayRequestSchema, create(ReplayRequestSchema, { requestId: "r1", fromSeq: 0n, toSeq: 3n }));
+    await until(() => store.count() >= 3);
+    const replayConn = store.latest();
+    await replayConn.next(SubscribeSchema);
+    replayConn.send(EventSchema, create(EventSchema, { sessionId: "vendor-uuid", seq: 3n }));
+    await daemon.next(ReplayDoneSchema);
+    // Assert
+    expect(standingFrames).toEqual([]);
   });
 });

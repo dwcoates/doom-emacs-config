@@ -63,6 +63,27 @@ export type StoreSink = (evt: Event) => void;
 /** Receives an honest degraded report when the store cannot be served. */
 export type DegradedReporter = (report: DegradedState) => void;
 
+/** One bounded historical replay's request (see {@link StoreClient.replay}). */
+export interface ReplayOptions {
+  /** EXCLUSIVE lower bound, matching Subscribe.from_seq. */
+  fromSeq: bigint;
+  /** EXCLUSIVE upper bound; 0n = stream until the replay drains. */
+  toSeq: bigint;
+  /** Hard cap on events delivered by this replay; 0 = uncapped. */
+  maxEvents: number;
+  /** No frame within this window means the replay drained. */
+  idleMs: number;
+  /** Receives each replayed event, in store order. */
+  onEvent: (evt: Event) => void;
+}
+
+/** How a bounded replay ended. `reason` is empty unless truncated. */
+export interface ReplayOutcome {
+  delivered: number;
+  truncated: boolean;
+  reason: string;
+}
+
 export interface StoreClientOptions {
   socketPath: string;
   sessionId: string;
@@ -470,6 +491,106 @@ export class StoreClient {
       shimLog(COMPONENT, { session: this.opts.sessionId, seq: evt.seq, kind: envelopeKind(evt) }, `DROPPED event: ${reason}`);
     }
     this.degrade(reason, events.length);
+  }
+
+  /**
+   * Serve one BOUNDED historical replay over a THROWAWAY store subscription.
+   *
+   * This is the shim's half of `ReplayRequest` (core.proto, design §5.4.1).
+   * The daemon needs a range of history it no longer holds; the store already
+   * serves `Subscribe{from_seq}` replay-then-live-tail, so the range comes off
+   * a subscription opened for this call and closed when it ends.
+   *
+   * THE STANDING SUBSCRIPTION IS NEVER TOUCHED. `subConn` is the daemon's live
+   * tail and its position belongs to the daemon (§4.4); serving history by
+   * reopening it at a low `from_seq` would drag that position backwards and
+   * re-deliver history down the live path. The whole reason this method exists
+   * as a separate connection is that it cannot do that. `this.subConn` is not
+   * read or written anywhere below.
+   *
+   * BOUNDED, and every bound that trips is REPORTED rather than absorbed:
+   * - `toSeq` — the first seq the daemon's own window already covers. Reaching
+   *   it is the only COMPLETE ending.
+   * - `maxEvents` — a hard cap on one replay.
+   * - `idleMs` — no frame within the window means the replay drained and the
+   *   subscription is sitting in live-tail with nothing to say. With no
+   *   `toSeq` asked for, a drained replay IS the whole answer and is complete;
+   *   with one, it means the range was never reached.
+   * - a closed/failed connection.
+   *
+   * NOT a retry path: a dial that fails is a truncated replay, reported. The
+   * producer connection's redial exists because a dead producer means
+   * PERMANENT event loss; a failed replay just means the frontend asks again.
+   */
+  replay(opts: ReplayOptions): Promise<ReplayOutcome> {
+    return new Promise<ReplayOutcome>((resolve) => {
+      let delivered = 0;
+      let settled = false;
+      let idleTimer: NodeJS.Timeout | null = null;
+      let conn: MessageConn | null = null;
+
+      const finish = (truncated: boolean, reason: string): void => {
+        if (settled) return;
+        settled = true;
+        if (idleTimer) clearTimeout(idleTimer);
+        conn?.close();
+        shimLog(COMPONENT, { session: this.opts.sessionId, store_key: this.storeKey, delivered, truncated },
+          truncated ? `replay TRUNCATED: ${reason}` : `replay complete`);
+        resolve({ delivered, truncated, reason: truncated ? reason : "" });
+      };
+
+      const armIdle = (): void => {
+        if (idleTimer) clearTimeout(idleTimer);
+        idleTimer = setTimeout(() => {
+          // No `toSeq` asked for means "stream until the replay drains", so a
+          // quiet subscription is the honest complete answer, not a shortfall.
+          if (opts.toSeq === 0n) finish(false, "");
+          else finish(true, `store subscription idle for ${opts.idleMs}ms before reaching seq ${opts.toSeq}`);
+        }, opts.idleMs);
+        idleTimer.unref?.();
+      };
+
+      const socket = net.connect(this.opts.socketPath);
+      const onDialError = (err: Error) => finish(true, `cannot open replay subscription: ${err.message}`);
+      socket.once("error", onDialError);
+      socket.once("connect", () => {
+        socket.removeListener("error", onDialError);
+        conn = new MessageConn(
+          socket,
+          {
+            onMessage: (msg) => {
+              const evt = unpackAs(msg, EventSchema);
+              if (!evt) return; // heartbeats and anything else: not replay content
+              armIdle();
+              // The store replays then LIVE-TAILS; `toSeq` is where the
+              // daemon's own window takes over, so that event and everything
+              // after it are its business, not this replay's.
+              if (opts.toSeq !== 0n && evt.seq >= opts.toSeq) {
+                finish(false, "");
+                return;
+              }
+              opts.onEvent(evt);
+              delivered += 1;
+              if (opts.maxEvents > 0 && delivered >= opts.maxEvents) {
+                finish(true, `hit the ${opts.maxEvents}-event cap before reaching seq ${opts.toSeq}`);
+              }
+            },
+            onClose: (err) => finish(true, err ? `replay subscription lost: ${err.message}` : `store closed the replay subscription`),
+          },
+          COMPONENT,
+        );
+        // storeKey, not opts.sessionId: the store keys events by the vendor
+        // uuid on the Event envelope (see storeKey), so any other id
+        // subscribes to a channel nothing publishes to.
+        conn.send(SubscribeSchema, create(SubscribeSchema, {
+          sessionId: this.storeKey,
+          fromSeq: opts.fromSeq,
+        }));
+        shimLog(COMPONENT, { session: this.opts.sessionId, store_key: this.storeKey, from_seq: opts.fromSeq, to_seq: opts.toSeq },
+          `opened throwaway replay subscription (standing subscription untouched)`);
+        armIdle();
+      });
+    });
   }
 
   private degrade(reason: string, droppedCount: number): void {
