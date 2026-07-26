@@ -100,6 +100,12 @@ type consumer struct {
 	// onBackfill reports a never-blue backfill transition (F2), once per
 	// distinct state. The driver persists it and re-pushes the SessionView.
 	onBackfill func(state string)
+	// onSessionEnded reports that the session's shim reported it is over (F4).
+	// Nothing marked a record terminal on shim death before this, so
+	// RENDER_STATE_DEAD and death_reason sat on two disconnected axes: the
+	// workspace went dead with no account of why, and the one death reason the
+	// registry documented was never written by anything.
+	onSessionEnded func()
 
 	mu   sync.Mutex
 	ring []*corev1.Event
@@ -121,7 +127,7 @@ type consumer struct {
 	backfill string
 }
 
-func newConsumer(workspace, sessionID string, push Pusher, applier StateApplier, prog ProgressResolver, logf func(string, ...any), onSessionStarted func(*corev1.SessionStarted), onTurn func(active bool), onBackfill func(state string)) *consumer {
+func newConsumer(workspace, sessionID string, push Pusher, applier StateApplier, prog ProgressResolver, logf func(string, ...any), onSessionStarted func(*corev1.SessionStarted), onTurn func(active bool), onBackfill func(state string), onSessionEnded func()) *consumer {
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
@@ -139,6 +145,7 @@ func newConsumer(workspace, sessionID string, push Pusher, applier StateApplier,
 		onSessionStarted: onSessionStarted,
 		onTurn:           onTurn,
 		onBackfill:       onBackfill,
+		onSessionEnded:   onSessionEnded,
 	}
 }
 
@@ -275,6 +282,13 @@ func (c *consumer) Apply(ev *corev1.Event) {
 	switch ev.GetPayload().(type) {
 	case *corev1.Event_TaskStarted, *corev1.Event_TaskProgress, *corev1.Event_TaskEnded:
 		c.push.PushTaskCatalog(frontend.BuildTaskCatalog(c.workspace, c.sessionID, c.snapshotRing()))
+	case *corev1.Event_SessionEnded:
+		// The SAME event the SSM resolves to RENDER_STATE_DEAD also records
+		// WHY, so the color and its account cannot disagree. Before this the
+		// SSM went dead and the record stayed silent.
+		if c.onSessionEnded != nil {
+			c.onSessionEnded()
+		}
 	}
 }
 

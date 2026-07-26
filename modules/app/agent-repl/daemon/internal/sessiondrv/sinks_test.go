@@ -172,7 +172,7 @@ func (a *fakeApplier) reconcileCalls() []reconcileCall {
 }
 
 func newTestConsumer(push Pusher, applier StateApplier) *consumer {
-	c := newConsumer("ws", "s1", push, applier, nil, nil, nil, nil, nil)
+	c := newConsumer("ws", "s1", push, applier, nil, nil, nil, nil, nil, nil)
 	c.now = func() int64 { return 1000 }
 	return c
 }
@@ -193,7 +193,7 @@ func (p *fakeProgress) SetCounts(string, int64, int64)  {}
 func (p *fakeProgress) NoteTurnAccepted(string, string) {}
 
 func newProgressConsumer(prog ProgressResolver) *consumer {
-	c := newConsumer("ws", "s1", &fakePusher{}, &fakeApplier{}, prog, nil, nil, nil, nil)
+	c := newConsumer("ws", "s1", &fakePusher{}, &fakeApplier{}, prog, nil, nil, nil, nil, nil)
 	c.now = func() int64 { return 1000 }
 	return c
 }
@@ -266,7 +266,7 @@ func TestMessageLatencyPushesNoConversationFrame(t *testing.T) {
 // backfillConsumer builds a consumer recording its backfill transitions.
 func backfillConsumer(states *[]string) *consumer {
 	c := newConsumer("ws", "s1", &fakePusher{}, &fakeApplier{}, nil, nil, nil, nil,
-		func(state string) { *states = append(*states, state) })
+		func(state string) { *states = append(*states, state) }, nil)
 	c.now = func() int64 { return 1000 }
 	return c
 }
@@ -388,7 +388,7 @@ func TestProgressFoldFailureDoesNotStopTheStream(t *testing.T) {
 	// Arrange — the resolver rejects everything.
 	prog := &fakeProgress{err: errors.New("boom")}
 	push := &fakePusher{}
-	c := newConsumer("ws", "s1", push, &fakeApplier{}, prog, nil, nil, nil, nil)
+	c := newConsumer("ws", "s1", push, &fakeApplier{}, prog, nil, nil, nil, nil, nil)
 	c.now = func() int64 { return 1000 }
 	// Act
 	c.Consume(&corev1.Event{
@@ -586,7 +586,7 @@ func TestApplyNonTaskEventDoesNotPushCatalog(t *testing.T) {
 func TestApplyFiresOnSessionStarted(t *testing.T) {
 	// Arrange.
 	var seen *corev1.SessionStarted
-	c := newConsumer("ws", "s1", &fakePusher{}, &fakeApplier{}, nil, nil, func(ss *corev1.SessionStarted) { seen = ss }, nil, nil)
+	c := newConsumer("ws", "s1", &fakePusher{}, &fakeApplier{}, nil, nil, func(ss *corev1.SessionStarted) { seen = ss }, nil, nil, nil)
 
 	// Act.
 	c.Apply(&corev1.Event{SessionId: "s1", Payload: &corev1.Event_SessionStarted{SessionStarted: &corev1.SessionStarted{Source: corev1.SessionSource_SESSION_SOURCE_RESUME}}})
@@ -997,5 +997,41 @@ func TestStoreSettleIsIdempotent(t *testing.T) {
 	// Assert — one transition, not one per call.
 	if len(states) != 1 {
 		t.Fatalf("backfill states = %v, want exactly one transition", states)
+	}
+}
+
+// --- Session death (F4) -----------------------------------------------------
+//
+// Nothing marked a record terminal on shim death, so the SSM resolved the
+// workspace RENDER_STATE_DEAD while the record still claimed the session was
+// alive — the color and its account on two disconnected axes.
+
+func TestSessionEndedReportsTheDeath(t *testing.T) {
+	// Arrange.
+	var ended int
+	c := newConsumer("ws", "s1", &fakePusher{}, &fakeApplier{}, nil, nil, nil, nil, nil,
+		func() { ended++ })
+
+	// Act.
+	c.Apply(&corev1.Event{Payload: &corev1.Event_SessionEnded{SessionEnded: &corev1.SessionEnded{}}})
+
+	// Assert.
+	if ended != 1 {
+		t.Fatalf("session-ended reports = %d, want 1", ended)
+	}
+}
+
+func TestATurnEndDoesNotReportADeath(t *testing.T) {
+	// Arrange: a turn ending is not a session ending.
+	var ended int
+	c := newConsumer("ws", "s1", &fakePusher{}, &fakeApplier{}, nil, nil, nil, nil, nil,
+		func() { ended++ })
+
+	// Act.
+	c.Apply(&corev1.Event{Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{}}})
+
+	// Assert.
+	if ended != 0 {
+		t.Fatalf("session-ended reports = %d, want 0", ended)
 	}
 }

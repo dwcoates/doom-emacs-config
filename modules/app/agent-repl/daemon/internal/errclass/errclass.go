@@ -453,13 +453,23 @@ func TurnEnd(te *corev1.TurnEnded) *frontendv1.SystemFailureItem {
 	}
 }
 
+// The persisted death-reason literals. They live beside their classification
+// so a producer cannot write a reason the classifier does not know — which is
+// exactly what happened to "shim_died", documented in the registry and
+// present in a test fixture while no code path ever wrote it.
+const (
+	DeathReasonDeleted    = "delete session"
+	DeathReasonSuperseded = "superseded"
+	DeathReasonShimDied   = "shim_died"
+)
+
 // deathReasonTypes maps the persisted registry death reasons to their types.
-// Only two strings are ever written, but a registry carried over from an
-// earlier build may hold anything, which is what the loud default is for.
+// A registry carried over from an earlier build may hold anything outside this
+// set, which is what the loud default is for.
 var deathReasonTypes = map[string]Type{
-	"delete session": TypeSessionDeleted,
-	"superseded":     TypeSessionSuperseded,
-	"shim_died":      TypeSessionShimDied,
+	DeathReasonDeleted:    TypeSessionDeleted,
+	DeathReasonSuperseded: TypeSessionSuperseded,
+	DeathReasonShimDied:   TypeSessionShimDied,
 }
 
 // Death classifies a persisted registry death reason. It returns nil for the
