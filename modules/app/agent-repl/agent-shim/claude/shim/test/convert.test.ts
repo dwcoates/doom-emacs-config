@@ -551,6 +551,173 @@ describe("corrected tool-result shapes", () => {
 // Missing / unknown discriminators → UnparsedEvent (never a zero value).
 // ---------------------------------------------------------------------------
 
+describe("SDK 0.3.220 stream families", () => {
+  const armOf = (msg: Record<string, unknown>) => vendor(convert({ session_id: "s", ...msg })).msg;
+
+  it("system/api_retry maps its retry counters", () => {
+    const arm = armOf({ type: "system", subtype: "api_retry", attempt: 2, max_retries: 5, retry_delay_ms: 400, error_status: 529, error: "server_error" });
+    if (arm.case !== "apiRetry") throw new Error(`case ${arm.case}`);
+    expect(arm.value.attempt).toBe(2);
+    expect(arm.value.retryDelayMs).toBe(400n);
+  });
+
+  it("system/api_retry distinguishes a null error_status from a zero one", () => {
+    // null means "connection error, no HTTP response" — a different fact
+    // from an HTTP 0, so the *_set companion must carry it.
+    const arm = armOf({ type: "system", subtype: "api_retry", attempt: 1, error_status: null });
+    if (arm.case !== "apiRetry") throw new Error(`case ${arm.case}`);
+    expect(arm.value.errorStatusSet).toBe(false);
+  });
+
+  it("system/api_retry marks a present error_status as set", () => {
+    const arm = armOf({ type: "system", subtype: "api_retry", attempt: 1, error_status: 500 });
+    if (arm.case !== "apiRetry") throw new Error(`case ${arm.case}`);
+    expect(arm.value.errorStatusSet).toBe(true);
+  });
+
+  it("system/control_request_progress leaves absent retry fields unset", () => {
+    const arm = armOf({ type: "system", subtype: "control_request_progress", request_id: "r1", status: "started" });
+    if (arm.case !== "controlRequestProgress") throw new Error(`case ${arm.case}`);
+    expect(arm.value.attemptSet).toBe(false);
+  });
+
+  it("system/task_progress maps the nested usage block", () => {
+    const arm = armOf({ type: "system", subtype: "task_progress", task_id: "a1", description: "d", usage: { total_tokens: 120, tool_uses: 3, duration_ms: 900 } });
+    if (arm.case !== "taskProgress") throw new Error(`case ${arm.case}`);
+    expect(arm.value.usage?.totalTokens).toBe(120n);
+  });
+
+  it("system/session_state_changed carries the requires_action state", () => {
+    const arm = armOf({ type: "system", subtype: "session_state_changed", state: "requires_action" });
+    if (arm.case !== "sessionStateChanged") throw new Error(`case ${arm.case}`);
+    expect(arm.value.state).toBe("requires_action");
+  });
+
+  it("system/commands_changed maps each command including its aliases", () => {
+    const arm = armOf({ type: "system", subtype: "commands_changed", commands: [{ name: "usage", description: "d", argumentHint: "", aliases: ["cost", "stats"] }] });
+    if (arm.case !== "commandsChanged") throw new Error(`case ${arm.case}`);
+    expect(arm.value.commands[0]?.aliases).toEqual(["cost", "stats"]);
+  });
+
+  it("system/files_persisted keeps successes and failures apart", () => {
+    const arm = armOf({ type: "system", subtype: "files_persisted", files: [{ filename: "a", file_id: "f1" }], failed: [{ filename: "b", error: "nope" }], processed_at: "2026-07-25T00:00:00Z" });
+    if (arm.case !== "filesPersisted") throw new Error(`case ${arm.case}`);
+    expect(arm.value.files).toHaveLength(1);
+    expect(arm.value.failed[0]?.error).toBe("nope");
+  });
+
+  it("system/memory_recall marks a lazy-loaded memory's content unset", () => {
+    // A file-backed `select` entry omits content; the renderer reads `path`.
+    const arm = armOf({ type: "system", subtype: "memory_recall", mode: "select", memories: [{ path: "/m.md", scope: "personal" }] });
+    if (arm.case !== "memoryRecall") throw new Error(`case ${arm.case}`);
+    expect(arm.value.memories[0]?.contentSet).toBe(false);
+  });
+
+  it("system/memory_recall marks an inlined memory's content set", () => {
+    const arm = armOf({ type: "system", subtype: "memory_recall", mode: "synthesize", memories: [{ path: "<synthesis:/d>", scope: "team", content: "body" }] });
+    if (arm.case !== "memoryRecall") throw new Error(`case ${arm.case}`);
+    expect(arm.value.memories[0]?.contentSet).toBe(true);
+  });
+
+  it("system/permission_denied carries the decision reason the result tally lacks", () => {
+    const arm = armOf({ type: "system", subtype: "permission_denied", tool_name: "Bash", tool_use_id: "t1", decision_reason: "deny rule", message: "blocked" });
+    if (arm.case !== "permissionDenied") throw new Error(`case ${arm.case}`);
+    expect(arm.value.decisionReason).toBe("deny rule");
+  });
+
+  it("system/mirror_error maps its camelCase nested key", () => {
+    const arm = armOf({ type: "system", subtype: "mirror_error", error: "eperm", key: { projectKey: "p", sessionId: "s2", subpath: "x" } });
+    if (arm.case !== "mirrorError") throw new Error(`case ${arm.case}`);
+    expect(arm.value.key?.projectKey).toBe("p");
+  });
+
+  it("system/informational carries prevent_continuation", () => {
+    const arm = armOf({ type: "system", subtype: "informational", content: "c", level: "warning", prevent_continuation: true });
+    if (arm.case !== "informational") throw new Error(`case ${arm.case}`);
+    expect(arm.value.preventContinuation).toBe(true);
+  });
+
+  it("system/hook_progress is distinct from the finished hook_response", () => {
+    const arm = armOf({ type: "system", subtype: "hook_progress", hook_id: "h1", hook_name: "n", hook_event: "PreToolUse", stdout: "o", stderr: "", output: "" });
+    if (arm.case !== "hookProgress") throw new Error(`case ${arm.case}`);
+    expect(arm.value.hookId).toBe("h1");
+  });
+
+  it("system/plugin_install carries its lifecycle status", () => {
+    const arm = armOf({ type: "system", subtype: "plugin_install", status: "failed", name: "p", error: "boom" });
+    if (arm.case !== "pluginInstall") throw new Error(`case ${arm.case}`);
+    expect(arm.value.status).toBe("failed");
+  });
+
+  it("system/worker_shutting_down carries its reason", () => {
+    const arm = armOf({ type: "system", subtype: "worker_shutting_down", reason: "host_exit" });
+    if (arm.case !== "workerShuttingDown") throw new Error(`case ${arm.case}`);
+    expect(arm.value.reason).toBe("host_exit");
+  });
+
+  it("system/local_command_output carries its content", () => {
+    const arm = armOf({ type: "system", subtype: "local_command_output", content: "out" });
+    if (arm.case !== "localCommandOutput") throw new Error(`case ${arm.case}`);
+    expect(arm.value.content).toBe("out");
+  });
+
+  it("system/elicitation_complete names the server and elicitation", () => {
+    const arm = armOf({ type: "system", subtype: "elicitation_complete", mcp_server_name: "srv", elicitation_id: "e1" });
+    if (arm.case !== "elicitationComplete") throw new Error(`case ${arm.case}`);
+    expect(arm.value.elicitationId).toBe("e1");
+  });
+
+  it("system/model_refusal_fallback records the retracted message uuids", () => {
+    const arm = armOf({ type: "system", subtype: "model_refusal_fallback", trigger: "refusal", direction: "retry", original_model: "a", fallback_model: "b", request_id: "r", content: "c", retracted_message_uuids: ["u1"] });
+    if (arm.case !== "modelRefusalFallback") throw new Error(`case ${arm.case}`);
+    expect(arm.value.retractedMessageUuids).toEqual(["u1"]);
+  });
+
+  it("system/model_refusal_no_fallback maps a null request_id to empty", () => {
+    const arm = armOf({ type: "system", subtype: "model_refusal_no_fallback", original_model: "a", request_id: null, content: "c" });
+    if (arm.case !== "modelRefusalNoFallback") throw new Error(`case ${arm.case}`);
+    expect(arm.value.requestId).toBe("");
+  });
+
+  it("tool_use_summary names the tool uses it covers", () => {
+    const arm = armOf({ type: "tool_use_summary", summary: "read some files", preceding_tool_use_ids: ["t1", "t2"] });
+    if (arm.case !== "toolUseSummary") throw new Error(`case ${arm.case}`);
+    expect(arm.value.precedingToolUseIds).toEqual(["t1", "t2"]);
+  });
+
+  it("prompt_suggestion carries the suggestion", () => {
+    const arm = armOf({ type: "prompt_suggestion", suggestion: "try /help" });
+    if (arm.case !== "promptSuggestion") throw new Error(`case ${arm.case}`);
+    expect(arm.value.suggestion).toBe("try /help");
+  });
+
+  it("conversation_reset carries the new conversation id", () => {
+    const arm = armOf({ type: "conversation_reset", new_conversation_id: "c2" });
+    if (arm.case !== "conversationReset") throw new Error(`case ${arm.case}`);
+    expect(arm.value.newConversationId).toBe("c2");
+  });
+
+  it("active_goal maps a set goal", () => {
+    const arm = armOf({ type: "active_goal", value: { condition: "tests pass", iterations: 3, set_at: 10, tokens_at_start: 99 } });
+    if (arm.case !== "activeGoal") throw new Error(`case ${arm.case}`);
+    expect(arm.value.value?.condition).toBe("tests pass");
+  });
+
+  it("active_goal distinguishes a cleared goal from a zero-iteration one", () => {
+    // `value: null` IS the clear signal, so value_set must carry it.
+    const arm = armOf({ type: "active_goal", value: null });
+    if (arm.case !== "activeGoal") throw new Error(`case ${arm.case}`);
+    expect(arm.value.valueSet).toBe(false);
+  });
+
+  it("a new family is PERSISTENT, not ephemeral", () => {
+    // None of these has a store-delivered final form to be replaced by, so
+    // EPHEMERAL would mean LOST on reconnect rather than merely transient.
+    const result = convert({ type: "system", subtype: "task_progress", session_id: "s", task_id: "a1", description: "d" });
+    expect(result.vendor.class).toBe(EventClass.PERSISTENT);
+  });
+});
+
 /**
  * The two halves of the §5.1 contract, which are NOT alternatives:
  * UnparsedEvent is for a KNOWN shape that failed conversion; the
