@@ -7,6 +7,25 @@
 // compactMetadata.preTokens) where the stream is snake_case; the converter
 // normalizes into these messages and records the plane on the core Event.
 //
+// DISCRIMINATOR-SPELLING NOTE (census-confirmed): seven top-level `type`
+// values are HYPHEN-delimited on the wire, and proto field names are
+// snake_case by protobuf convention, so the two DO NOT match character for
+// character. A converter that string-matches a TranscriptLine field name
+// against the wire `type` silently never fires for any of them. The mapping:
+//
+//   proto field                 wire `type`
+//   permission_mode          -> "permission-mode"
+//   queue_operation          -> "queue-operation"
+//   last_prompt              -> "last-prompt"
+//   ai_title                 -> "ai-title"
+//   pr_link                  -> "pr-link"
+//   file_history_snapshot    -> "file-history-snapshot"
+//   file_history_delta       -> "file-history-delta"
+//   frame_link               -> "frame-link"
+//   attribution_snapshot     -> "attribution-snapshot"
+//
+// Every OTHER top-level type is a single lowercase word and needs no mapping.
+//
 // Nullable/optional conventions: proto3 scalar "" / 0 = JSON null or absent;
 // where absent-vs-false matters a *_set bool accompanies the field.
 
@@ -52,12 +71,20 @@ enum QueueOp {
   QUEUE_OP_REMOVE = 3;
 }
 
-// origin.kind on user lines.
+// origin.kind. The FULL 8-variant vocabulary of the SDK's SDKMessageOrigin
+// (sdk.d.ts:4021-4069); the disk `origin` object has only ever been observed
+// carrying the first four, but both planes describe the same concept and are
+// modeled once here rather than twinned per plane.
 enum OriginKind {
   ORIGIN_KIND_UNSPECIFIED = 0;
   ORIGIN_KIND_HUMAN = 1;
   ORIGIN_KIND_TASK_NOTIFICATION = 2;
   ORIGIN_KIND_COORDINATOR = 3;
+  ORIGIN_KIND_CHANNEL = 4;
+  ORIGIN_KIND_PEER = 5;
+  ORIGIN_KIND_OBSERVER = 6;
+  ORIGIN_KIND_AUTO_CONTINUATION = 7;
+  ORIGIN_KIND_OBSERVER_ACTIVITY = 8;
 }
 
 // ---------------------------------------------------------------------------
@@ -90,8 +117,44 @@ message TranscriptLine {
   }
 }
 
+// Provenance of a user-role message. Modeled FLAT with `kind` as the
+// discriminator rather than as an 8-arm oneof: the variants overlap heavily
+// (`from` and `sender_task_id` appear on both peer and observer), so a oneof
+// would duplicate them per arm for no gain in fidelity. Every field names the
+// kinds that carry it.
+//
+// A host wrapping keyboard input stamps HUMAN explicitly; an absent origin is
+// UNATTRIBUTED and fails closed at strict is-human trust gates — it is NEVER
+// to be defaulted to HUMAN.
 message Origin {
   OriginKind kind = 1;
+  // CHANNEL: the server the message arrived on.
+  string server = 2;
+  // PEER / OBSERVER: the sending session's id.
+  string from = 3;
+  // PEER: sender display name, harness-normalized (control/format/surrogate
+  // and line/paragraph-separator code points stripped, trimmed, <=64 points).
+  string name = 4;
+  // PEER: the sender's host-openable session id (the envelope's `from-session`
+  // attribute). A navigation target only, NEVER authority.
+  string from_session = 5;
+  // PEER / OBSERVER: task id of the in-process background subagent that sent
+  // the message, stamped by the harness from the sending loop — never from
+  // tool input. Absent for cross-session peers.
+  string sender_task_id = 6;
+  // PEER: decoded body with the peer envelope stripped, byte-exact with what
+  // the model saw. Present only for a single harness-formed envelope.
+  string body = 7;
+  // PEER: kernel-verified pid of the process that connected to this session's
+  // cross-session messaging socket (SO_PEERCRED / LOCAL_PEERPID), read from
+  // the connection and NEVER from the payload. Key sender identity on this,
+  // never on `from`. Unverifiable (Windows, non-UDS ingress) => _set false.
+  int64 verified_peer_pid = 8;
+  bool verified_peer_pid_set = 9;
+  // TASK_NOTIFICATION: "scheduled-trigger" when the delivery is a scheduled
+  // task's fired stored prompt. Absent on webhook, PR-steward, plugin, and
+  // background-event deliveries.
+  string subkind = 10;
 }
 
 // Common envelope on user/assistant/system/attachment lines (census B2):
@@ -113,7 +176,7 @@ message LineEnvelope {
   string request_id = 11;                  // assistant only
   string prompt_id = 12;                   // user only
   string agent_id = 13;                    // sidechain + some main lines
-  string source_tool_assistant_uuid = 14;  // every tool_result user line
+  string source_tool_assistant_uuid = 14;  // disk key `sourceToolAssistantUUID`
   string snake_session_id = 15;            // vestigial duplicate `session_id`
   string effort = 16;                      // "high" | "xhigh"
   string attribution_agent = 17;
@@ -124,7 +187,7 @@ message LineEnvelope {
   string permission_mode = 22;             // user prompt lines
   Origin origin = 23;
   bool is_meta = 24;
-  string source_tool_use_id = 25;
+  string source_tool_use_id = 25;  // disk key `sourceToolUseID`
   bool tool_ends_turn = 26;
   bool is_api_error_message = 27;
   string error = 28;                       // with is_api_error_message
@@ -137,6 +200,9 @@ message LineEnvelope {
   bool is_visible_in_transcript_only = 35;
   bool is_compact_summary = 36;
   string logical_parent_uuid = 37;         // compact_boundary lines
+  // [corpus] disk key `interruptedByShutdown` — the turn did not end, the
+  // harness went away underneath it.
+  bool interrupted_by_shutdown = 38;
 }
 
 message UserLine {
@@ -199,6 +265,9 @@ message TurnDurationLine {
   int64 message_count = 2;
   int64 pending_background_agent_count = 3;
   bool is_meta = 4;
+  // [corpus] disk key `pendingWorkflowCount` — the workflow counterpart of
+  // pending_background_agent_count, so queue depth is reportable in full.
+  int64 pending_workflow_count = 5;
 }
 
 message LocalCommandLine {
@@ -275,6 +344,9 @@ message ApiErrorLine {
   double retry_in_ms = 3;
   int64 retry_attempt = 4;
   int64 max_retries = 5;
+  // [corpus] "request_retry" | "connection_retry" — which layer retried,
+  // which is what separates a slow API from a flaky link.
+  string source = 6;
 }
 
 // [corpus] system/model_refusal_fallback — the refusal-with-fallback twin of
@@ -348,6 +420,9 @@ message FileBackup {
   string backup_file_name = 1;  // "hash@vN"
   int64 version = 2;
   string backup_time = 3;
+  // [corpus] disk key `realParentDir` — the resolved parent of a symlinked
+  // path, without which a backup cannot be restored to where it came from.
+  string real_parent_dir = 4;
 }
 
 message FileHistoryDeltaLine {
@@ -625,6 +700,12 @@ message HookCancelledAttachment {
   string hook_name = 1;
   string tool_use_id = 2;  // disk key `toolUseID`
   string hook_event = 3;
+  // [corpus] the same command/duration pair HookSuccessAttachment carries,
+  // plus WHY it stopped: a timeout is a hook problem, a cancel is not.
+  string command = 4;
+  int64 duration_ms = 5;   // disk key `durationMs`
+  bool timed_out = 6;      // disk key `timedOut`
+  int64 timeout_ms = 7;    // disk key `timeoutMs`
 }
 
 // [corpus] attachment.type:"invoked_skills".
