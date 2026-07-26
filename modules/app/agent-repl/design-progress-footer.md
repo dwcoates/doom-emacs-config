@@ -166,7 +166,9 @@ gain the telemetry below.)
 The precise inventory of removed code, with line ranges as they stood at
 removal time (i.e. against the commit the nuke was applied to).
 
-### `webapp/src/render.ts` (3601 → 3120 lines)
+### `webapp/src/render.ts` (3600 → 3238 lines)
+
+Line ranges below are against `fc38125d~1` (the commit the nuke was applied to).
 
 | symbol | kind | lines at removal |
 |---|---|---|
@@ -229,7 +231,7 @@ callback repointed from `feed.paintTurnTimer` to `footer.paintTurnTimer`.
 
 ### Tests removed with their subjects
 
-`webapp/test/render.test.ts` (5711 → 5369 lines): the `interruptingIndicatorHtml`,
+`webapp/test/render.test.ts` (6316 → 5368 lines): the `interruptingIndicatorHtml`,
 `workingRowHtml`, `thinkingRowHtml`, `retryingRowHtml`, `turnStatsRowHtml`,
 `isPulsed`, `tailStatusRow`, `tailLineHtml` describes; the three `pulseTarget`
 describes; `FeedRenderer: the tail line pins to the bottom slot, not the feed`;
