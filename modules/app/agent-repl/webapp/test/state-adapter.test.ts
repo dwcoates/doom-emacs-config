@@ -452,7 +452,7 @@ describe("compact-boundary arms", () => {
 describe("apiError arm", () => {
   it("maps a retryable api error to a retry item", () => {
     const items = itemsFrom({ uuid: "m1", apiError: { error: { message: "overloaded" }, retryAttempt: 2, maxRetries: 5 } });
-    const expected: RetryItem = { kind: "retry", attempt: 2, reason: "overloaded", fatal: false };
+    const expected: RetryItem = { kind: "retry", attempt: 2, reason: "overloaded", fatal: false, uuid: "m1" };
     expect(items).toEqual([expected]);
   });
 
@@ -463,8 +463,15 @@ describe("apiError arm", () => {
 
   it("maps a terminal api error to an error item", () => {
     const items = itemsFrom({ uuid: "m1", apiError: { error: { message: "boom" } } });
-    const expected: ErrorItem = { kind: "error", code: "api_error", message: "boom", recoverable: false };
+    const expected: ErrorItem = { kind: "error", code: "api_error", message: "boom", recoverable: false, uuid: "m1" };
     expect(items).toEqual([expected]);
+  });
+
+  it("carries the line's uuid so the footer's error row can address it", () => {
+    // Arrange / Act — the ProgressView's error_item_uuid names this item.
+    const items = itemsFrom({ uuid: "err-9", apiError: { error: { message: "boom" } } });
+    // Assert
+    expect((items[0] as ErrorItem).uuid).toBe("err-9");
   });
 });
 

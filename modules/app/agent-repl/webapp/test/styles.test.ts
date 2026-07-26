@@ -942,56 +942,6 @@ describe("async catalog badges", () => {
   });
 });
 
-describe("the bubble pulse", () => {
-  const pulsing = blockAfter(css, ".bubble.pulsing {");
-  const breathe = blockAfter(css, "@keyframes bubble-breathe");
-  const reducedPulse = blockAfter(
-    blockAfter(css, "@media (prefers-reduced-motion: reduce)"),
-    ".bubble.pulsing",
-  );
-  /** Seconds a breathing bubble takes to complete one breath. */
-  const period = Number(pulsing.match(/bubble-breathe\s+([\d.]+)s/)?.[1]);
-
-  it("breathes a flagged bubble on an endless loop", () => {
-    // Arrange / Act — the .bubble.pulsing rule.
-    // Assert
-    expect(pulsing).toMatch(/animation:\s*bubble-breathe\s+[\d.]+s\s+ease-in-out\s+infinite/);
-  });
-
-  it("holds the breath slower than every ticking indicator in the app", () => {
-    // Arrange / Act — the spinners and the cursor all tick in around a second,
-    // so a two-second breath still reads as the slowest motion in the app.
-    // Assert
-    expect(period).toBeGreaterThanOrEqual(2);
-  });
-
-  it("carries no hue of its own, breathing toward whatever the role names", () => {
-    // Arrange / Act — the @keyframes bubble-breathe midpoint. One keyframe
-    // serves both roles precisely because it names none of their colors.
-    // Assert
-    expect(breathe).toMatch(/background:\s*var\(--pulse-to\)/);
-  });
-
-  it("points the assistant bubble's breath at the assistant-pulse token", () => {
-    // Arrange / Act — the .bubble.assistant rule.
-    // Assert
-    expect(blockAfter(css, ".bubble.assistant {")).toMatch(
-      /--pulse-to:\s*var\(--assistant-pulse\)/,
-    );
-  });
-
-  it("points the user bubble's breath at the user-pulse token", () => {
-    // Arrange / Act — the .bubble.user rule.
-    // Assert
-    expect(blockAfter(css, ".bubble.user {")).toMatch(/--pulse-to:\s*var\(--user-pulse\)/);
-  });
-
-  it("drops the breath entirely under reduced motion, since it is a hint and not the signal", () => {
-    // Arrange / Act — the reduced-motion .bubble.pulsing override.
-    // Assert
-    expect(reducedPulse).toMatch(/animation:\s*none/);
-  });
-});
 
 describe("framed column: tool cards center, prompt right-flushes, response left-flushes", () => {
   const feed = blockAfter(css, "#feed {");
@@ -1024,7 +974,7 @@ describe("framed column: tool cards center, prompt right-flushes, response left-
 
   it("sets the agent bubble cap to 75% on the column so the tail slot inherits it", () => {
     // Arrange / Act — the cap now lives on #main-col, not #feed, so the
-    // bottom-pinned #tail-slot sibling inherits it and its rails match the feed's.
+    // bottom-pinned #progress-footer sibling inherits it and its rails match the feed's.
     // Assert
     expect(mainCol).toMatch(/--agent-bubble-cap:\s*75%/);
   });
@@ -1125,105 +1075,6 @@ describe("framed column: tool cards center, prompt right-flushes, response left-
     const userStamp = blockAfter(css, ".bubble.user .turn-ts {");
     // Act / Assert — the stamp is drawn on the bubble fill it sits over.
     expect(userStamp).toMatch(/background:\s*var\(--user\)/);
-  });
-});
-
-/**
- * Every breathing section takes the SAME breath and differs only in the wash it
- * takes it from — the working frontier from the assistant purple and the
- * just-sent prompt from the user blue — so the palette contract is one table
- * run per role rather than suites drifting apart.
- */
-describe.each([
-  { role: "working-frontier", wash: "--assistant", far: "--assistant-pulse" },
-  { role: "sent-prompt", wash: "--user", far: "--user-pulse" },
-])("$role pulse palette", ({ wash, far }) => {
-  it("keeps the light-theme breath inside the bubble's own hue", () => {
-    // Arrange
-    const [near, deep] = [token(lightTheme, wash), token(lightTheme, far)];
-    // Act
-    const drift = Math.abs(hue(deep) - hue(near));
-    // Assert
-    expect(drift).toBeLessThan(10);
-  });
-
-  it("keeps the dark-theme breath inside the bubble's own hue", () => {
-    // Arrange
-    const [near, deep] = [token(darkTheme, wash), token(darkTheme, far)];
-    // Act
-    const drift = Math.abs(hue(deep) - hue(near));
-    // Assert
-    expect(drift).toBeLessThan(10);
-  });
-
-  it("deepens the light-theme wash at the top of the breath", () => {
-    // Arrange
-    const [near, deep] = [token(lightTheme, wash), token(lightTheme, far)];
-    // Act
-    const deeper = luminance(deep) < luminance(near);
-    // Assert
-    expect(deeper).toBe(true);
-  });
-
-  it("lifts the dark-theme wash at the top of the breath, where deepening would vanish", () => {
-    // Arrange
-    const [near, deep] = [token(darkTheme, wash), token(darkTheme, far)];
-    // Act
-    const lifted = luminance(deep) > luminance(near);
-    // Assert
-    expect(lifted).toBe(true);
-  });
-
-  it("keeps the light-theme breath shallow enough to read under prose", () => {
-    // Arrange
-    const [near, deep] = [token(lightTheme, wash), token(lightTheme, far)];
-    // Act
-    const depth = Math.abs(luminance(deep) - luminance(near));
-    // Assert
-    expect(depth).toBeLessThan(30);
-  });
-
-  it("keeps the dark-theme breath shallow enough to read under prose", () => {
-    // Arrange
-    const [near, deep] = [token(darkTheme, wash), token(darkTheme, far)];
-    // Act
-    const depth = Math.abs(luminance(deep) - luminance(near));
-    // Assert
-    expect(depth).toBeLessThan(30);
-  });
-});
-
-/**
- * The bubble breath is deliberately deeper than the tool-card breath: it is the
- * one motion under a freshly sent prompt or a caught-up frontier, so it must
- * register at a glance. It lives in a band whose ceiling ("shallow enough to
- * read under prose") the palette suite above pins and whose floor is here — a
- * breath shallower than this floor reads as no breath at all. Bubble-scoped on
- * purpose: the tool-card washes take a quieter breath and sit this floor out.
- */
-describe.each([
-  { role: "working-frontier", wash: "--assistant", far: "--assistant-pulse" },
-  { role: "sent-prompt", wash: "--user", far: "--user-pulse" },
-])("$role breath is perceptible", ({ wash, far }) => {
-  /** Luminance units below which the breath stops registering as motion. */
-  const FLOOR = 20;
-
-  it("deepens the light-theme breath past the perceptibility floor", () => {
-    // Arrange
-    const [near, deep] = [token(lightTheme, wash), token(lightTheme, far)];
-    // Act
-    const depth = Math.abs(luminance(deep) - luminance(near));
-    // Assert
-    expect(depth).toBeGreaterThanOrEqual(FLOOR);
-  });
-
-  it("lifts the dark-theme breath past the perceptibility floor", () => {
-    // Arrange
-    const [near, deep] = [token(darkTheme, wash), token(darkTheme, far)];
-    // Act
-    const depth = Math.abs(luminance(deep) - luminance(near));
-    // Assert
-    expect(depth).toBeGreaterThanOrEqual(FLOOR);
   });
 });
 
@@ -1751,10 +1602,11 @@ describe("animated ellipsis", () => {
   });
 
   it("pulls the ellipsis flush against its word, cancelling the row's flex gap", () => {
-    // Arrange — the pending rows are flex with a 0.5rem gap, and the ellipsis
-    // span is its own flex item, so the gap would otherwise read as "working …".
-    const flush = blockAfter(css, ".interrupting-pending .animated-ellipsis");
-    // Assert — a negative margin the width of the gap restores "working…".
+    // Arrange — the pending row is flex with a 0.5rem gap, and the ellipsis
+    // span is its own flex item, so the gap would otherwise read as
+    // "processing …".
+    const flush = blockAfter(css, ".thinking-pending .animated-ellipsis");
+    // Assert — a negative margin the width of the gap restores "processing…".
     expect(flush).toMatch(/margin-left:\s*-0\.5rem/);
   });
 
@@ -1779,147 +1631,8 @@ describe("animated ellipsis", () => {
   });
 });
 
-const turnStatsLive = blockAfter(css, ".turn-stats-live {");
-const workingRowScale = blockAfter(css, ".working-pending {");
 
-describe("live turn-stats row", () => {
-  it("right-aligns the running stats within their box", () => {
-    // Arrange / Act — the .turn-stats-live rule.
-    // Assert — text-align right lands the figures at the box's right edge,
-    // which the margin-right below insets to the response column's right rail.
-    expect(turnStatsLive).toMatch(/text-align:\s*right/);
-  });
 
-  it("insets the box to the response column's right rail rather than the feed edge", () => {
-    // Arrange / Act — the .turn-stats-live rule.
-    // Assert — a right margin of the same half-leftover gutter the column hugs,
-    // so text-align:right lands the figures at the column's right-most limit.
-    expect(turnStatsLive).toMatch(
-      /margin-right:\s*calc\(\(100% - var\(--agent-bubble-cap\)\) \/ 2\)/,
-    );
-  });
-
-  it("lands the stats' right edge flush with the prompt bubble's right edge", () => {
-    // Arrange — the prompt bubble hugs the same column right rail (see .bubble.user).
-    const userBubble = blockAfter(css, ".bubble.user {");
-    // Act — the right margin each box carries.
-    const statsRight = turnStatsLive.match(/margin-right:\s*([^;]+);/)?.[1]?.trim();
-    const promptRight = userBubble.match(/margin-right:\s*([^;]+);/)?.[1]?.trim();
-    // Assert — identical insets, so the counters end where the prompt's right edge does.
-    expect(statsRight).toBe(promptRight);
-  });
-
-  it("matches the progress indicator's font size", () => {
-    // Arrange / Act — the counter and the working row beside it.
-    // Assert — the same 0.85rem, so the two halves read as one scale.
-    expect(turnStatsLive).toMatch(/font-size:\s*0\.85rem/);
-    expect(workingRowScale).toMatch(/font-size:\s*0\.85rem/);
-  });
-
-  it("collapses the shared row's free space to its left so it lands at the right rail", () => {
-    // Arrange / Act — the .turn-stats-live rule.
-    // Assert — an auto left margin absorbs the flex line's slack, pushing the
-    // stats to the right rail whether or not an indicator shares the line.
-    expect(turnStatsLive).toMatch(/margin-left:\s*auto/);
-  });
-
-  it("keeps the clock and the token delta on one line once the delta appears", () => {
-    // Arrange / Act — the .turn-stats-live rule.
-    // Assert — nowrap, so the bullet-separated `1m 30s · +12,000` never breaks
-    // at its inner spaces onto a line below the indicator when the token delta
-    // widens the box, the same single-line protection `.turn-meta` carries.
-    expect(turnStatsLive).toMatch(/white-space:\s*nowrap/);
-  });
-});
-
-const tailLine = blockAfter(css, ".tail-line {");
-const tailSlot = blockAfter(css, "#tail-slot {");
-const tailSlotEmpty = blockAfter(css, "#tail-slot:empty {");
-
-describe("bottom-pinned tail slot (#tail-slot)", () => {
-  it("stays content-sized so the feed absorbs the leftover height", () => {
-    // Arrange / Act — the #tail-slot rule.
-    // Assert — flex:none keeps the slot the height of its one row, so #feed's
-    // flex:1 takes the rest and the slot sits stuck at the window's bottom.
-    expect(tailSlot).toMatch(/flex:\s*none/);
-  });
-
-  it("matches the feed's horizontal padding so the rails line up", () => {
-    // Arrange / Act — the #tail-slot rule.
-    // Assert — the same 1rem side padding #feed carries, so the tail line's
-    // content box lines up with the feed's and its rails hug the same columns.
-    expect(tailSlot).toMatch(/padding:\s*0\.25rem\s+1rem/);
-  });
-
-  it("collapses when empty so an off-turn slot takes no vertical space", () => {
-    // Arrange / Act — the #tail-slot:empty rule.
-    // Assert — display:none, so the slot the renderer empties off-turn vanishes
-    // rather than leaving a gap above the composer.
-    expect(tailSlotEmpty).toMatch(/display:\s*none/);
-  });
-
-  it("inherits the agent-bubble cap from the column, not the feed", () => {
-    // Arrange / Act — the #main-col rule now declares the cap.
-    // Assert — declared on the column so the sibling #tail-slot inherits it and
-    // the tail line's rails match the feed's; a feed-scoped var would not reach.
-    expect(mainCol).toMatch(/--agent-bubble-cap:\s*75%/);
-  });
-});
-
-describe("combined tail line (indicator and stats on one row)", () => {
-  it("lays the two halves out on one flex row so they share a baseline", () => {
-    // Arrange / Act — the .tail-line wrapper rule.
-    // Assert — flex, so the indicator and the stats sit on a single line.
-    expect(tailLine).toMatch(/display:\s*flex/);
-  });
-
-  it("centers the indicator and the stats on a shared vertical center", () => {
-    // Arrange / Act — the .tail-line wrapper rule.
-    // Assert — align-items center lands the two on the same baseline.
-    expect(tailLine).toMatch(/align-items:\s*center/);
-  });
-});
-
-const tailFlush = blockAfter(css, ".thinking-pending,");
-/** Selector list of the rule that flushes the tail-status rows to the left rail. */
-const tailFlushSelector = css.slice(
-  css.indexOf(".thinking-pending,"),
-  css.indexOf("{", css.indexOf(".thinking-pending,")),
-);
-
-describe("tail status rows flush the response column's left rail", () => {
-  it("insets the tail-status rows to the column's left rail rather than the feed gutter", () => {
-    // Arrange / Act — the grouped flush rule over all five pending rows.
-    // Assert — a left margin of the half-leftover gutter the response column hugs.
-    expect(tailFlush).toMatch(
-      /margin-left:\s*calc\(\(100% - var\(--agent-bubble-cap\)\) \/ 2\)/,
-    );
-  });
-
-  it("lands the indicator's left edge flush with the response bubble's left edge", () => {
-    // Arrange — the assistant response hugs the same column left rail (see .bubble.assistant).
-    const assistantBubble = blockAfter(css, ".bubble.assistant {");
-    // Act — the left margin each box carries.
-    const rowLeft = tailFlush.match(/margin-left:\s*([^;]+);/)?.[1]?.trim();
-    const bubbleLeft = assistantBubble.match(/margin-left:\s*([^;]+);/)?.[1]?.trim();
-    // Assert — identical insets, so the spinner starts where the response's left edge does.
-    expect(rowLeft).toBe(bubbleLeft);
-  });
-
-  it.each(["thinking", "working", "retrying", "interrupting"])(
-    "flushes the %s-pending row, leaving no variant stranded at the feed gutter",
-    (variant) => {
-      // Arrange / Act — the grouped flush selector must name every tail-status variant.
-      // Assert
-      expect(tailFlushSelector).toContain(`.${variant}-pending`);
-    },
-  );
-
-  it("no longer flushes a monitoring-pending row, that signal having left the feed", () => {
-    // Arrange / Act / Assert — the monitoring datapoint moved to the topbar strip.
-    expect(tailFlushSelector).not.toContain(".monitoring-pending");
-  });
-});
 
 const statusBadges = blockAfter(css, ".result,");
 /** Selector list of the rule that fits the standalone status badges to their text and flushes them to the left rail. */
@@ -1996,82 +1709,9 @@ describe("standalone status badges hug the response column and fit their text", 
   });
 });
 
-const interruptingPending = blockAfter(css, ".interrupting-pending");
-const interruptingSpinner = blockAfter(css, ".interrupting-spinner {");
-const reducedMotion = blockAfter(css, "@media (prefers-reduced-motion: reduce)");
 
-describe("interrupting indicator", () => {
-  it("reads in the alarm red rather than the thinking orange", () => {
-    // Arrange / Act — the .interrupting-pending label rule.
-    // Assert — --err (red), the opposite signal from --thinking (working orange).
-    expect(interruptingPending).toMatch(/color:\s*var\(--err\)/);
-  });
 
-  it("spins the same thinking-spin animation the thinking indicator uses", () => {
-    // Arrange / Act — the base .interrupting-spinner rule.
-    // Assert — reusing thinking-spin means only the hue differs from thinking.
-    expect(interruptingSpinner).toMatch(/animation:\s*thinking-spin\s+[\d.]+s\s+linear\s+infinite/);
-  });
-
-  it("draws the spinning arc in red", () => {
-    // Arrange / Act — the base .interrupting-spinner rule.
-    // Assert — the arc's leading edge is the alarm red.
-    expect(interruptingSpinner).toMatch(/border-top-color:\s*var\(--err\)/);
-  });
-
-  it("slows the interrupting arc under reduced motion alongside the thinking arc", () => {
-    // Arrange / Act — the reduced-motion block names the interrupting spinner too.
-    // Assert
-    expect(reducedMotion).toContain(".interrupting-spinner");
-  });
-});
-
-const workingPending = blockAfter(css, ".working-pending");
-
-describe("working indicator", () => {
-  it("reads in the working orange, the same hue the thinking indicator uses", () => {
-    // Arrange / Act — the .working-pending label rule.
-    // Assert — --thinking (orange), so "still working" reads the same everywhere.
-    expect(workingPending).toMatch(/color:\s*var\(--thinking\)/);
-  });
-
-  it("reuses the textless-thinking arc rather than defining its own spinner", () => {
-    // Arrange / Act — no bespoke .working-spinner exists; the row leans on
-    // .thinking-spinner (asserted by the workingRowHtml markup test), which the
-    // reduced-motion block already slows.
-    // Assert
-    expect(css).not.toContain(".working-spinner");
-  });
-});
-
-const retryingPending = blockAfter(css, ".retrying-pending");
-const retryingSpinner = blockAfter(css, ".retrying-spinner {");
-
-describe("retrying indicator", () => {
-  it("reads in the retry purple rather than the working orange or alarm red", () => {
-    // Arrange / Act — the .retrying-pending label rule.
-    // Assert — --retry (purple = network), distinct from --thinking and --err.
-    expect(retryingPending).toMatch(/color:\s*var\(--retry\)/);
-  });
-
-  it("spins the same thinking-spin animation the thinking indicator uses", () => {
-    // Arrange / Act — the base .retrying-spinner rule.
-    // Assert — reusing thinking-spin means only the hue differs from thinking.
-    expect(retryingSpinner).toMatch(/animation:\s*thinking-spin\s+[\d.]+s\s+linear\s+infinite/);
-  });
-
-  it("draws the spinning arc in purple", () => {
-    // Arrange / Act — the base .retrying-spinner rule.
-    // Assert — the arc's leading edge is the retry purple.
-    expect(retryingSpinner).toMatch(/border-top-color:\s*var\(--retry\)/);
-  });
-
-  it("slows the retrying arc under reduced motion alongside the thinking arc", () => {
-    // Arrange / Act — the reduced-motion block names the retrying spinner too.
-    // Assert
-    expect(reducedMotion).toContain(".retrying-spinner");
-  });
-
+describe("the retry purple, which the footer's retrying accent still wears", () => {
   it("defines the purple token for the light theme", () => {
     // Arrange / Act — the :root palette.
     // Assert

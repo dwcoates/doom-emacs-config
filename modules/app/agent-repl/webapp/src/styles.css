@@ -39,18 +39,9 @@
      since a faint wash all but vanishes on a dark ground. */
   --bottom-shadow: linear-gradient(to top, color-mix(in srgb, #000000 7.5%, transparent), transparent);
   --user: #e0ecff;
-  /* The far end of the breath a just-sent prompt takes (see .bubble.pulsing):
-     the same blue one shade deeper, on the same terms as --assistant-pulse. */
-  --user-pulse: #bfd3f6;
   /* Raw assistant text bubbles: purple counterpart to the user blue,
      from the same family as --tool-title. */
   --assistant: #ece4fa;
-  /* The far end of the breath the working frontier takes (see
-     .bubble.pulsing): the SAME purple one shade deeper, never a
-     second hue — the pulse is a sign of life on a bubble the reader is
-     mid-sentence in, so it must be readable as motion out of the corner of the
-     eye and invisible to the eye reading the words. */
-  --assistant-pulse: #d2c6f2;
   --accent: #2563eb;
   --ok: #16a34a;
   --err: #dc2626;
@@ -211,9 +202,7 @@
        bottom edge stays the subtler shade. */
     --bottom-shadow: linear-gradient(to top, color-mix(in srgb, #000000 28.5%, transparent), transparent);
     --user: #1e2a44;
-    --user-pulse: #31456e;
     --assistant: #292040;
-    --assistant-pulse: #443669;
     --thinking: #fb923c;
     --retry: #a78bfa;
     --info-ws: #4ade80;
@@ -298,7 +287,7 @@ body::after {
      the prompt's right margin is half the leftover so its right edge lands
      flush with the centered response's, and follows automatically if this
      cap is retuned. Declared on the column (not just #feed) so the
-     bottom-pinned #tail-slot below the feed inherits the same cap, landing
+     bottom-pinned #progress-footer below the feed inherits the same cap, landing
      the tail line's rails on the very columns the feed's bubbles hug. */
   --agent-bubble-cap: 75%;
 }
@@ -989,7 +978,6 @@ pre {
 .bubble-body { flex: 1; min-width: 0; }
 .bubble.user {
   background: var(--user);
-  --pulse-to: var(--user-pulse);
   width: fit-content;
   max-width: 60%;
   margin-left: auto;
@@ -1104,7 +1092,6 @@ pre {
    long one grow rightward only to the agent cap. */
 .bubble.assistant {
   background: var(--assistant);
-  --pulse-to: var(--assistant-pulse);
   width: fit-content;
   max-width: var(--agent-bubble-cap);
   margin-left: calc((100% - var(--agent-bubble-cap)) / 2);
@@ -1129,21 +1116,11 @@ pre {
    the color changes, so the reserved 0.3px stays put — no reflow on the flip. */
 .bubble.assistant.async-live,
 .bubble.user.async-live { border-color: var(--async); }
-/* The breath of the bubble the UI has nothing newer to show for: it rocks
-   between its own wash and one shade of that same wash (--pulse-to, named by
-   each role above), so a reader who has caught up sees the session still
-   moving rather than gone quiet. Two bubbles take it, never both at once
-   (see pulseTarget): the prompt just sent, until the agent draws anything at
-   all in reply, and the working frontier, the last response a still-running
-   turn has finished. SLOW (a full breath takes seconds, where every other
-   indicator in the app ticks in around one) and SHALLOW on purpose — this is
-   the only motion the app puts under a block of prose the user is reading, so
-   it must never pull the eye the way the spinners are meant to. A turn that
-   has ENDED never pulses. */
-.bubble.pulsing { animation: bubble-breathe 2s ease-in-out infinite; }
-@keyframes bubble-breathe {
-  50% { background: var(--pulse-to); }
-}
+/* The working-frontier BREATH is gone with the pulse machinery that drove it:
+   the consolidated progress footer is the one place a still-running turn
+   announces itself now, so no bubble rocks its background any more. The
+   streaming cursor below is untouched — it is a per-bubble signal about THAT
+   bubble's own text, not a stand-in for the turn. */
 .cursor { animation: pulse 1s infinite; color: var(--accent); }
 
 /* Markdown-rendered assistant text */
@@ -1984,161 +1961,35 @@ pre {
   50% { content: ".."; }
   75% { content: "..."; }
 }
-/* The interrupting indicator: the red twin of the textless-thinking spinner,
-   shown at the feed tail while a turn is being aborted. Same geometry and
-   the SAME thinking-spin animation; only the hue differs — the --err alarm red
-   rather than the --thinking working orange — so an interrupt reads as
-   "stopping", not "working". */
-.interrupting-pending {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.25rem 0;
-  color: var(--err);
-  font-size: 0.85rem;
-}
-.interrupting-spinner {
-  flex: none;
-  width: 0.9em;
-  height: 0.9em;
-  border: 2px solid color-mix(in srgb, var(--err) 25%, transparent);
-  border-top-color: var(--err);
-  border-radius: 50%;
-  animation: thinking-spin 0.8s linear infinite;
-}
-/* The working indicator: the orange dead-air row at the feed tail, shown while
-   the main chain is in flight but nothing else is live (see pulseTarget's
-   `working` state). Same geometry as the thinking/interrupting rows; it REUSES
-   the textless-thinking arc (.thinking-spinner) rather than defining its own,
-   since the hue is the same working orange. */
-.working-pending {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.25rem 0;
-  color: var(--thinking);
-  font-size: 0.85rem;
-}
-/* The retrying indicator: the purple twin of the interrupting row, shown while
-   the SDK auto-retries a failed API request. Same geometry and the SAME
-   thinking-spin animation; only the hue differs — the --retry purple
-   ("network") rather than the --err red ("stopping") or --thinking orange
-   ("working"). */
-.retrying-pending {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.25rem 0;
-  color: var(--retry);
-  font-size: 0.85rem;
-}
-.retrying-spinner {
-  flex: none;
-  width: 0.9em;
-  height: 0.9em;
-  border: 2px solid color-mix(in srgb, var(--retry) 25%, transparent);
-  border-top-color: var(--retry);
-  border-radius: 50%;
-  animation: thinking-spin 0.8s linear infinite;
-}
-/* The monitoring indicator is NOT a feed-tail row: it breathes as the
-   sidebar's amber dot on the session's own row (`.st-monitoring`), so the
-   in-bubble catalog, the feed tail, and the topbar strip all carry none —
-   the bubble's own amber border and badge dots signal per-bubble liveness. */
-/* Pull the ellipsis flush against its status word. The pending rows above are
-   flex with a 0.5rem inter-item gap (so the spinner clears the word), but the
-   ellipsis span is its OWN flex item too, so that same gap lands between the
-   word and its dots and reads as a stray space ("working …"). A negative
-   margin the width of the gap cancels it for this one item, leaving the dots
-   flush ("working…") and the spinner's gap intact. Scoped to these flex rows,
-   so the non-flex `(thinking…)` summary label — which has no gap to cancel —
-   is left alone. */
-.thinking-pending .animated-ellipsis,
-.working-pending .animated-ellipsis,
-.retrying-pending .animated-ellipsis,
-.interrupting-pending .animated-ellipsis {
+/* The dead-air progress indicators (working / retrying / interrupting) and the
+   live turn-stats row that used to live here are GONE: the consolidated
+   progress footer (`.pfooter`) is the one home for every in-flight signal now.
+   `.thinking-pending` survives only as the chess widget's own "processing…"
+   row (see chess-game.ts), which is where its remaining rules below belong.
+
+   The monitoring indicator was never a feed-tail row: it breathes as the
+   sidebar's amber dot on the session's own row (`.st-monitoring`), and still
+   does — the footer's phase cell names the same state in words. */
+/* Pull the ellipsis flush against its status word. The row is flex with a
+   0.5rem inter-item gap (so the spinner clears the word), but the ellipsis
+   span is its OWN flex item too, so that same gap lands between the word and
+   its dots and reads as a stray space ("processing …"). A negative margin the
+   width of the gap cancels it for this one item, leaving the dots flush and
+   the spinner's gap intact. Scoped to this flex row, so the non-flex
+   `(thinking…)` summary label — which has no gap to cancel — is left alone. */
+.thinking-pending .animated-ellipsis {
   margin-left: -0.5rem;
 }
-/* Flush every tail-status row's left edge with the response column's left rail
-   rather than the feed's far-left gutter. The bubbles and tool cards above hug
-   a column inset half the agent cap's leftover from each side (the same
+/* Flush the row's left edge with the response column's left rail rather than
+   the feed's far-left gutter. The bubbles and tool cards above hug a column
+   inset half the agent cap's leftover from each side (the same
    `calc((100% - var(--agent-bubble-cap)) / 2)` the assistant response's
    `margin-left` and the centered `.feed-item > .tool-card` derive from), so
-   the identical left margin lands a running "thinking…"/"working…"/"retrying…"
-   row's spinner directly beneath where the last response bubble's own left edge
-   sits. One grouped rule for all four rows, the twin of their shared
-   ellipsis-gap rule above. */
-.thinking-pending,
-.working-pending,
-.retrying-pending,
-.interrupting-pending {
+   the identical left margin lands the row's spinner directly beneath where the
+   last response bubble's own left edge sits. */
+.thinking-pending {
   margin-left: calc((100% - var(--agent-bubble-cap)) / 2);
 }
-/* The live tail line's bottom-pinned slot (see `#tail-slot` in index.html): a
-   flex sibling wedged between the scrolling #feed and the #composer, so the
-   progress indicator + running turn-stats stay stuck to the window's bottom
-   rather than floating just under the last bubble as the feed grows (which
-   moved them around the UI). `flex: none` keeps it content-sized so #feed
-   absorbs all the leftover height, and the horizontal padding matches #feed's
-   so the row's content box lines up with the feed's — landing the tail line's
-   rails on the very columns the bubbles above hug. Empty (and so collapsed via
-   :empty) off-turn, when the tail line has no content to show. */
-#tail-slot {
-  flex: none;
-  padding: 0.25rem 1rem;
-}
-#tail-slot:empty { display: none; }
-/* The combined feed-tail line: the live progress indicator and the running
-   turn-stats share ONE flex row so they sit on a single baseline at the same
-   0.85rem size rather than stacking on two lines (see `tailLineHtml`). The row
-   spans the full slot width, so each half keeps the inset it carried when the
-   two were separate rows — the indicator's `margin-left` (the grouped flush
-   rule above) pins it to the response column's left rail, and the stats'
-   `margin-left: auto` below collapses the row's free space to their left,
-   pushing them across to the right rail their `margin-right` insets. Whichever
-   half is absent, the surviving half lands on the same rail it always did.
-   `align-items: center` lands the indicator and the stats on a shared vertical
-   center. */
-.tail-line {
-  display: flex;
-  align-items: center;
-}
-/* The live turn-stats row: the running turn's elapsed clock and the context
-   it has grown so far, shown at the feed tail beside the progress indicator on
-   the shared `.tail-line` for as long as the turn runs (see turnStatsRowHtml).
-   It is the running twin of the corner a final response settles into
-   (.turn-meta), so it reuses the SAME two topbar hues — the clock's
-   --info-time blue and the delta's --info-tokens amber — bullet-separated.
-   Same tail geometry as the pending rows beside it, minus the spinner: the
-   indicator to its left already carries the arc.
-
-   Right-biased to the response column's right rail rather than the feed's far
-   edge: a `margin-right` of the same half-leftover the prompt bubble hugs (see
-   `.bubble.user`) insets the block so `text-align: right` lands the figures at
-   the column's right-most limit — where a capped tool card and the prompt's
-   own right edge sit — rather than out at the window gutter. A `margin-left:
-   auto` absorbs the shared row's free space, so the counters land at that
-   right rail whether or not an indicator shares the line, the mirror of the
-   indicator flushing to that stream's left rail.
-
-   `white-space: nowrap` keeps the elapsed clock and the token delta on ONE
-   line beside the indicator, the same protection the settled twin `.turn-meta`
-   carries. Without it the bullet-separated figures break at their inner
-   spaces: as a shrinkable flex item on the `.tail-line`, this box's min-content
-   collapses to the widest breakable run, so the moment the token delta is
-   appended (`1m 30s · +12,000`, wider than the clock alone) the box shrinks and
-   drops the figures onto a line BELOW the indicator instead of staying on it. */
-.turn-stats-live {
-  padding: 0.25rem 0;
-  font-size: 0.85rem;
-  font-variant-numeric: tabular-nums;
-  text-align: right;
-  white-space: nowrap;
-  margin-left: auto;
-  margin-right: calc((100% - var(--agent-bubble-cap)) / 2);
-}
-.turn-stats-live .info-time { color: var(--info-time); }
-.turn-stats-live .info-tokens { color: var(--info-tokens); }
 /* A tool call that has not settled spins the same arc, one size down, inside
    its running badge — through BOTH in-flight phases (streaming input, then
    awaiting the result), so every card in progress reads the same. Two
@@ -2170,8 +2021,6 @@ pre {
    rotation stays continuous and only slows down. */
 @media (prefers-reduced-motion: reduce) {
   .thinking-spinner,
-  .interrupting-spinner,
-  .retrying-spinner,
   .pfooter-spin {
     animation-duration: 1.4s;
   }
@@ -2195,12 +2044,6 @@ pre {
   .agent-dot.agent-running,
   .task-dot.task-starting,
   .task-dot.task-running {
-    animation: none;
-  }
-  /* A breath is a hint, never the sole liveness signal (the topbar spinner and
-     the running tool arcs both still say a turn is in flight), so it drops
-     entirely rather than degrading to something slower. */
-  .bubble.pulsing {
     animation: none;
   }
   /* The compaction bar's sweep is a hint, not the sole signal (the

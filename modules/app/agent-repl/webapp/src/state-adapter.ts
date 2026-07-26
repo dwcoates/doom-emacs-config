@@ -631,7 +631,7 @@ function itemsFromFrame(frame: ConversationItemFrame): { items: ConversationItem
     case "compactBoundaryLine":
       return { items: [compactBoundaryLineItem(frame.payload)], ignores: [] };
     case "apiError":
-      return { items: [apiErrorItem(frame.payload)], ignores: [] };
+      return { items: [apiErrorItem(frame.payload, frame.uuid)], ignores: [] };
     case "permission":
       return { items: [permissionItemFrom(frame.payload, frame.uuid)], ignores: [] };
     default: {
@@ -883,7 +883,10 @@ function compactBoundaryLineItem(line: Obj): CompactBoundaryItem {
   };
 }
 
-function apiErrorItem(e: Obj): ErrorItem | RetryItem {
+// UUID is the item envelope's uuid, carried onto the store item so the
+// progress footer's error row can scroll the feed to the exact line the
+// daemon's error summary came from.
+function apiErrorItem(e: Obj, uuid: string): ErrorItem | RetryItem {
   const detail = pobj(e, "error") ?? {};
   const message = pstr(detail, "message");
   const retryAttempt = pnum(e, "retryAttempt");
@@ -895,9 +898,10 @@ function apiErrorItem(e: Obj): ErrorItem | RetryItem {
       attempt: retryAttempt,
       reason: message,
       fatal: pbool(detail, "isNetworkDown") || (maxRetries > 0 && retryAttempt >= maxRetries),
+      uuid,
     };
   }
-  return { kind: "error", code: "api_error", message, recoverable: false };
+  return { kind: "error", code: "api_error", message, recoverable: false, uuid };
 }
 
 /** core.v1.PermissionItem.Resolution (proto enum name) → the store shape. */
