@@ -393,30 +393,32 @@ func TestClassifyToolResultArms(t *testing.T) {
 	// fixture basename → expected ToolUseResult arm (the oneof field name), or
 	// "" for the unclassified Struct arm.
 	cases := map[string]string{
-		"agent.jsonl":                      "agent",
-		"agent_async_launch.jsonl":         "agent_async_launch",
-		"ask_user_question.jsonl":          "ask_user_question",
-		"bash.jsonl":                       "bash",
-		"bash-background.jsonl":            "bash",
-		"edit.jsonl":                       "edit",
-		"monitor.jsonl":                    "monitor",
-		"read.jsonl":                       "read",
-		"read-image.jsonl":                 "read",
-		"schedule_wakeup.jsonl":            "schedule_wakeup",
-		"send_message.jsonl":               "send_message",
-		"skill.jsonl":                      "skill",
-		"task_create.jsonl":                "task_create",
-		"task_list.jsonl":                  "task_list",
-		"task_stop.jsonl":                  "task_stop",
-		"task_update.jsonl":                "task_update",
-		"tool_search.jsonl":                "tool_search",
-		"web_fetch.jsonl":                  "web_fetch",
-		"web_search.jsonl":                 "web_search",
-		"workflow_launch.jsonl":            "workflow_launch",
-		"write.jsonl":                      "write",
-		"raw_string.jsonl":                 "raw_string",
-		"unclassified-message_success.jsonl":  "",
-		"unclassified-path_title_url.jsonl":   "",
+		"agent.jsonl":                        "agent",
+		"agent_async_launch.jsonl":           "agent_async_launch",
+		"ask_user_question.jsonl":            "ask_user_question",
+		"bash.jsonl":                         "bash",
+		"bash-background.jsonl":              "bash",
+		"edit.jsonl":                         "edit",
+		"monitor.jsonl":                      "monitor",
+		"read.jsonl":                         "read",
+		"read-image.jsonl":                   "read",
+		"schedule_wakeup.jsonl":              "schedule_wakeup",
+		"send_message.jsonl":                 "send_message",
+		"skill.jsonl":                        "skill",
+		"task_create.jsonl":                  "task_create",
+		"task_list.jsonl":                    "task_list",
+		"task_output.jsonl":                  "task_output",
+		"task_output-local_agent.jsonl":      "task_output",
+		"task_stop.jsonl":                    "task_stop",
+		"task_update.jsonl":                  "task_update",
+		"tool_search.jsonl":                  "tool_search",
+		"web_fetch.jsonl":                    "web_fetch",
+		"web_search.jsonl":                   "web_search",
+		"workflow_launch.jsonl":              "workflow_launch",
+		"write.jsonl":                        "write",
+		"raw_string.jsonl":                   "raw_string",
+		"unclassified-message_success.jsonl": "",
+		"unclassified-path_title_url.jsonl":  "",
 	}
 	names := make([]string, 0, len(cases))
 	for n := range cases {
@@ -475,6 +477,26 @@ func TestTypedToolResultShapes(t *testing.T) {
 				got := r.GetTaskUpdate().GetUpdatedFields()
 				if len(got) != 1 || got[0] != "status" {
 					t.Fatalf("updated_fields = %v, want [status]", got)
+				}
+			},
+		},
+		{
+			name:    "task_output dispatches its task oneof to local_bash",
+			fixture: "task_output.jsonl",
+			assert: func(t *testing.T, r *datav1.ToolUseResult) {
+				got := r.GetTaskOutput().GetLocalBash()
+				if got.GetTaskId() != "b86pl7ir1" {
+					t.Fatalf("local_bash = %+v, want task_id b86pl7ir1", got)
+				}
+			},
+		},
+		{
+			name:    "task_output dispatches its task oneof to local_agent",
+			fixture: "task_output-local_agent.jsonl",
+			assert: func(t *testing.T, r *datav1.ToolUseResult) {
+				got := r.GetTaskOutput().GetLocalAgent()
+				if got.GetTaskId() != "a0cbd94e5da2d662d" {
+					t.Fatalf("local_agent = %+v, want task_id a0cbd94e5da2d662d", got)
 				}
 			},
 		},
