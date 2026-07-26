@@ -1,0 +1,70 @@
+{
+  "_comment": [
+    "THE cross-language color contract. Go, TypeScript and elisp each assert",
+    "their own table against this file, row for row, which is the only",
+    "mechanism that makes a divergence between the three fail loudly instead",
+    "of quietly.",
+    "",
+    "It pins WHICH of the five colors a state or an error class takes, not",
+    "what that color's value is: each renderer keeps its own hex, because a",
+    "tab-bar background and a CSS dot legitimately want different shades of",
+    "the same idea. What may never differ is the ASSIGNMENT — a workspace",
+    "that reads green in one surface and red in another is the failure this",
+    "file exists to prevent.",
+    "",
+    "'none' is a real answer, not a gap. The merge states deliberately carry",
+    "badges and glyphs instead of colors so they never spend one of the",
+    "five, and UNSPECIFIED is the absence of a verdict rather than a verdict",
+    "of its own."
+  ],
+
+  "colors": ["blue", "purple", "red", "yellow", "green"],
+
+  "_precedence_comment": [
+    "The five-color precedence, strongest claim first. Each color is a",
+    "strictly stronger claim about what the user CANNOT do than the one",
+    "beneath it, so the strongest true claim wins. This order is the SSM's",
+    "SQL prec ranks made readable; the SSM stays the sole precedence",
+    "authority and this must not reorder it."
+  ],
+  "precedence": ["blue", "purple", "red", "yellow", "green"],
+
+  "render_states": {
+    "RENDER_STATE_UNSPECIFIED": "none",
+
+    "RENDER_STATE_INIT": "blue",
+    "RENDER_STATE_DEAD": "blue",
+    "RENDER_STATE_DEGRADED": "blue",
+
+    "RENDER_STATE_VENDOR_BLOCKED": "purple",
+    "RENDER_STATE_STOP_FAILED": "purple",
+
+    "RENDER_STATE_THINKING": "red",
+
+    "RENDER_STATE_IDLE_ASYNC": "yellow",
+
+    "RENDER_STATE_IDLE": "green",
+    "RENDER_STATE_READY": "green",
+    "RENDER_STATE_DONE": "green",
+    "RENDER_STATE_PERMISSION": "green",
+
+    "RENDER_STATE_MERGING": "none",
+    "RENDER_STATE_MERGE_QUEUED": "none",
+    "RENDER_STATE_MERGE_CONFLICT": "none",
+    "RENDER_STATE_MERGE_FAILED": "none",
+    "RENDER_STATE_MERGED": "none"
+  },
+
+  "_error_classes_comment": [
+    "A failure card takes the color of the state its class resolves the",
+    "workspace to — card color IS state color, from this one table, so a",
+    "user cannot see a purple workspace explained by a red card. INTERNAL",
+    "resolves blue (agent-repl's own machinery is compromised) and API",
+    "resolves purple (the vendor or the account has stopped the work)."
+  ],
+  "error_classes": {
+    "ERROR_CLASS_UNSPECIFIED": "none",
+    "ERROR_CLASS_INTERNAL": "blue",
+    "ERROR_CLASS_API": "purple"
+  }
+}
