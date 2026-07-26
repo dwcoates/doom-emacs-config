@@ -27,7 +27,6 @@ package sessiondrv
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sort"
 	"sync"
@@ -36,6 +35,7 @@ import (
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
+	"claude-repld/internal/errclass"
 	"claude-repld/internal/frontend"
 	"claude-repld/internal/registry"
 	"claude-repld/internal/shimclient"
@@ -478,8 +478,9 @@ func (m *Manager) PendingPermissions(workspace string) []string {
 // ErrNotLiveSession reports that the workspace IS driven, but by a DIFFERENT
 // session than the one the caller asked to stand down. Distinct from the "no
 // live session" error so a caller can tell "nothing to stop" (benign) from
-// "that shim belongs to someone else — do not touch it".
-var ErrNotLiveSession = errors.New("sessiondrv: not the live session for this workspace")
+// "that shim belongs to someone else — do not touch it". Its value lives in
+// internal/errclass beside its classification; this is the historic name.
+var ErrNotLiveSession = errclass.ErrNotLiveSession
 
 // Hibernate suspends the workspace's live session, WHICHEVER session that is:
 // it stops consuming the stream and SIGTERMs the child shim (the redefined

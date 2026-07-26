@@ -2,25 +2,31 @@ package shimclient
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
 
+	"claude-repld/internal/errclass"
+
 	"google.golang.org/protobuf/proto"
 )
 
+// The control-plane sentinels. Their VALUES live in internal/errclass, which
+// is the package that classifies them; these are the historic names, kept so
+// every existing errors.Is call site is unchanged and so the sentinel and its
+// classification cannot be added independently of each other.
+
 // ErrNotConnected is returned by a control send when there is no live shim
 // connection. Control commands are never silently queued or dropped.
-var ErrNotConnected = errors.New("shimclient: no live shim connection")
+var ErrNotConnected = errclass.ErrShimNotConnected
 
 // ErrNack is returned when the shim Nacks a control request. The reason is
 // wrapped; there is NO silent retry (metaprompt no-fallbacks rule).
-var ErrNack = errors.New("shimclient: request nacked")
+var ErrNack = errclass.ErrShimNack
 
 // ErrAckTimeout is returned when no Ack/Nack arrives within the AckTimeout.
-var ErrAckTimeout = errors.New("shimclient: control request timed out")
+var ErrAckTimeout = errclass.ErrShimAckTimeout
 
 // protoControl is a proto control message carrying a request_id.
 type protoControl interface {
