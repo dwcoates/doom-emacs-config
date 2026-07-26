@@ -69,6 +69,8 @@ export enum RenderState {
   MERGED = 12,
   DEAD = 13,
   DEGRADED = 14,
+  READY = 15,
+  VENDOR_BLOCKED = 16,
 }
 
 const RENDER_STATE_BY_NAME: Readonly<Record<string, RenderState>> = {
@@ -76,6 +78,8 @@ const RENDER_STATE_BY_NAME: Readonly<Record<string, RenderState>> = {
   RENDER_STATE_INIT: RenderState.INIT,
   RENDER_STATE_IDLE: RenderState.IDLE,
   RENDER_STATE_IDLE_ASYNC: RenderState.IDLE_ASYNC,
+  RENDER_STATE_READY: RenderState.READY,
+  RENDER_STATE_VENDOR_BLOCKED: RenderState.VENDOR_BLOCKED,
   RENDER_STATE_THINKING: RenderState.THINKING,
   RENDER_STATE_PERMISSION: RenderState.PERMISSION,
   RENDER_STATE_DONE: RenderState.DONE,
