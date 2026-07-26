@@ -34,6 +34,29 @@ const (
 	PermissionModeDontAsk PermissionMode = "dontAsk"
 )
 
+// UngatedPermissionMode reports whether s names a mode under which the
+// daemon has NO permission gate at all.
+//
+// The shim's only hook into tool approval is the SDK's canUseTool callback,
+// which is what the whole daemon permission round-trip hangs off:
+// PermissionRequest -> the frontend's permission card -> PermissionResponse,
+// plus the pending-permission accounting. Under bypassPermissions the SDK
+// auto-approves every tool call BEFORE that callback is consulted, so none of
+// it ever engages — verified against SDK 0.3.220 both by its own
+// CLAUDE_SDK_CAN_USE_TOOL_SHADOWED process warning ("canUseTool will not be
+// invoked: permissionMode 'bypassPermissions' auto-approves every tool call
+// ... before the callback is consulted") and by a live session whose
+// canUseTool denied everything and whose Write nevertheless executed.
+//
+// bypassPermissions is the ONLY member. dontAsk also bypasses canUseTool, but
+// it bypasses it by DENYING (fail-closed, surfaced as a permission_denied with
+// decision_reason_type=mode), so it grants nothing behind the gate's back.
+// plan executes no mutating tool. default/acceptEdits/auto all still reach the
+// callback for the ask path.
+func UngatedPermissionMode(s string) bool {
+	return PermissionMode(s) == PermissionModeBypassPermissions
+}
+
 // ValidPermissionMode reports whether s is a member of the PermissionMode
 // enum.
 func ValidPermissionMode(s string) bool {

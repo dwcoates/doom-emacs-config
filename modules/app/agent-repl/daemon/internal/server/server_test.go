@@ -271,6 +271,69 @@ func TestCreateSessionRejectsInvalidPermissionMode(t *testing.T) {
 	}
 }
 
+func TestCreateSessionRejectsUngatedModeWithoutConsent(t *testing.T) {
+	// Arrange — bypassPermissions leaves the session with no permission gate
+	// at all, and it is one string away from every ordinary create.
+	h := newHarness(t)
+	// Act
+	_, err := createSessionErr(t, h, `{"cwd":"/w","permission_mode":"bypassPermissions"}`)
+	// Assert — refused loudly, never downgraded to a gated mode.
+	var invalid *InvalidCreateError
+	if !errors.As(err, &invalid) {
+		t.Fatalf("err = %v, want an *InvalidCreateError", err)
+	}
+}
+
+func TestCreateSessionRejectionNamesTheMissingConsent(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	// Act
+	_, err := createSessionErr(t, h, `{"cwd":"/w","permission_mode":"bypassPermissions"}`)
+	// Assert — the caller must be able to learn what to set from the message.
+	if err == nil || !strings.Contains(err.Error(), "allow_ungated") {
+		t.Fatalf("err = %v, want it to name allow_ungated", err)
+	}
+}
+
+func TestCreateSessionRegistersNoRecordForARefusedUngatedCreate(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	// Act
+	_, _ = createSessionErr(t, h, `{"cwd":"/w","permission_mode":"bypassPermissions"}`)
+	// Assert — the refusal precedes registration, so no half-created session
+	// is left behind for a later rehydration to bring up ungated.
+	if got := len(h.reg.All()); got != 0 {
+		t.Fatalf("registry holds %d records, want 0 after a refused create", got)
+	}
+}
+
+func TestCreateSessionAllowsUngatedModeWithExplicitConsent(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	// Act
+	id, err := createSessionErr(t, h, `{"cwd":"/w","permission_mode":"bypassPermissions","allow_ungated":true}`)
+	// Assert — the mode is legitimate, it just may not be reached by accident.
+	if err != nil {
+		t.Fatalf("CreateSession with allow_ungated: %v", err)
+	}
+	rec, ok := h.reg.Get(id)
+	if !ok || rec.PermissionMode != "bypassPermissions" {
+		t.Fatalf("record = %+v (ok=%v), want the ungated mode carried through", rec, ok)
+	}
+}
+
+func TestCreateSessionNeedsNoConsentForAGatedMode(t *testing.T) {
+	// Arrange — dontAsk also bypasses canUseTool, but fail-CLOSED, so it
+	// grants nothing behind the gate's back and takes no consent.
+	h := newHarness(t)
+	// Act
+	_, err := createSessionErr(t, h, `{"cwd":"/w","permission_mode":"dontAsk"}`)
+	// Assert
+	if err != nil {
+		t.Fatalf("CreateSession(dontAsk): %v", err)
+	}
+}
+
 func TestCreateSessionHardFailsUnresumableResume(t *testing.T) {
 	// Arrange — a resume target whose transcript does not exist.
 	h := newHarness(t)

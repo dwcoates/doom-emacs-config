@@ -271,8 +271,9 @@ func (h *commandHandler) Resync(_ context.Context, workspace, requestID string, 
 // frontend as the SessionView the create core pushes). A typed create failure
 // (invalid mode / resume-missing) or a bring-up error surfaces loudly.
 func (h *commandHandler) CreateSession(ctx context.Context, workspace, requestID string, cmd *frontendv1.CreateSessionCmd) error {
-	h.logf("frontend cmd: create_session ws=%s request_id=%s model=%s config_dir=%s resume=%q fake=%v",
-		workspace, requestID, cmd.GetModel(), cmd.GetConfigDir(), cmd.GetResumeClaudeSessionId(), cmd.GetFake())
+	h.logf("frontend cmd: create_session ws=%s request_id=%s model=%s config_dir=%s resume=%q fake=%v permission_mode=%q allow_ungated=%v",
+		workspace, requestID, cmd.GetModel(), cmd.GetConfigDir(), cmd.GetResumeClaudeSessionId(), cmd.GetFake(),
+		cmd.GetPermissionMode(), cmd.GetAllowUngated())
 	id, err := h.sessions.CreateSession(ctx, CreateOpts{
 		CWD:            cmd.GetCwd(),
 		Model:          cmd.GetModel(),
@@ -280,6 +281,7 @@ func (h *commandHandler) CreateSession(ctx context.Context, workspace, requestID
 		ConfigDir:      cmd.GetConfigDir(),
 		Resume:         cmd.GetResumeClaudeSessionId(),
 		Fake:           cmd.GetFake(),
+		AllowUngated:   cmd.GetAllowUngated(),
 	})
 	if err != nil {
 		return err
