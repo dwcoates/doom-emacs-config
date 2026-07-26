@@ -150,7 +150,7 @@ the tab-bar renders the badge when render-status yields
 (ert-deftest agent-repl-test-tab-palette-has-start-failed-label ()
   "Palette has a `:start-failed' entry mapping to the 🚫 label so a
 workspace whose agent session failed to start renders a visible badge,
-distinct from `:stop-failed' (⚠) and `:dead' (❌)."
+distinct from `:dead' (❌)."
   (should (equal (plist-get
                   (alist-get :start-failed agent-repl--tab-palette)
                   :label)
@@ -236,7 +236,7 @@ reads distinctly from :idle orange and :thinking red."
                (lambda (_ws) nil)))
       (should-not (agent-repl--ws-display-state "ws1")))))
 
-(ert-deftest agent-repl-test-display-state-stop-failed-panels-closed-renders-nil ()
+(ert-deftest agent-repl-test-display-state-vendor-blocked-panels-closed-renders-nil ()
   ":vendor-blocked with panels closed suppresses the purple ⛔ badge."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-set-agent-state "ws1" :vendor-blocked)
@@ -2517,12 +2517,13 @@ liveness — a dead workspace can still have a merge-completed parent."
 ;; owns turn-finished / subagent-in-flight resolution and pushes it as a
 ;; `frontend.v1' WorkspaceState frame.
 
-;;;; ---- Tests: :stop-failed ws-display-state behavior ----
+;;;; ---- Tests: :vendor-blocked ws-display-state behavior ----
 ;;
-;; The legacy `--composed-state' pure-mapping coverage for
-;; `:stop-failed' moved into test-workspace.el's `--ws-render-status'
-;; coverage.  Only the display-state (panel-gated) wrapper assertion
-;; remains here.
+;; `:vendor-blocked' superseded the retired `:stop-failed' keyword in
+;; the status-semantics cutover.  The legacy `--composed-state'
+;; pure-mapping coverage moved into test-workspace.el's
+;; `--ws-render-status' coverage.  Only the display-state (panel-gated)
+;; wrapper assertion remains here.
 
 (ert-deftest agent-repl-test-display-state-vendor-blocked ()
   "ws-display-state returns the pushed :vendor-blocked state when visible."
@@ -2532,7 +2533,7 @@ liveness — a dead workspace can still have a merge-completed parent."
                (lambda (_ws) t)))
       (should (eq :vendor-blocked (agent-repl--ws-display-state "ws1"))))))
 
-;;;; ---- Tests: :stop-failed palette resolution ----
+;;;; ---- Tests: :vendor-blocked palette resolution ----
 
 (ert-deftest agent-repl-test-tab-spec-vendor-blocked-unselected ()
   "tab-spec for :vendor-blocked unselected returns the purple plist."

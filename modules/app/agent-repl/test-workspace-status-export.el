@@ -27,7 +27,7 @@
 (ert-deftest agent-repl-test-ws-keyword-to-string-keyword ()
   "Keywords lose their leading colon."
   (should (equal "thinking" (agent-repl--ws-keyword-to-string :thinking)))
-  (should (equal "stop-failed" (agent-repl--ws-keyword-to-string :stop-failed))))
+  (should (equal "vendor-blocked" (agent-repl--ws-keyword-to-string :vendor-blocked))))
 
 (ert-deftest agent-repl-test-ws-keyword-to-string-symbol ()
   "Plain symbols (e.g. `clean'/`dirty' from :git-clean) serialize as their name."
