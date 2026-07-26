@@ -596,8 +596,49 @@ current workspace excepted).  This — not `--ws-list-names' — is the
 list the tab-bar renders and the list the indexed switchers
 \(`SPC 1'..`SPC 9') index into, so the visible tab numbers stay
 contiguous as repos fold and unfold."
-  (agent-repl--filter-folded-names (agent-repl--ws-list-names)
-                                   (agent-repl--ws-current-name)))
+  (agent-repl--filter-folded-names
+   (agent-repl--filter-merged-names (agent-repl--ws-list-names))
+   (agent-repl--ws-current-name)))
+
+(defun agent-repl--merged-ws-p (name)
+  "Return non-nil when workspace NAME has merged into its source.
+Reads the SSM-pushed render state, which is the single authority on
+what a workspace is — the same value every renderer keys on.
+
+UI-boundary tolerance: the name list this filters can briefly contain
+names the workspace hash does not know (a mid-creation persp, the
+`none' sentinel).  `--ws-render-status' signals `user-error' for those,
+so unknown names are answered NOT-merged here — the filter's job is to
+remove merged workspaces, and a workspace we know nothing about is not
+one of them.  This mirrors the same documented exception
+`--ws-display-state' makes at the renderer boundary."
+  (and (agent-repl--ws-known-p name)
+       (eq (agent-repl--ws-render-status name) :merged)))
+
+(defun agent-repl--filter-merged-names (names)
+  "Drop every merged workspace from NAMES.
+A merged workspace leaves the tab-bar the MOMENT the merge lands, not
+when the teardown that follows it finishes.
+
+The teardown is asynchronous and multi-step — a socket-close round-trip
+to the agent, then the workspace close, then a magit refresh — and the
+session dies partway through it.  The old design kept the tab and
+painted a 🔀 badge on it purely so the tab would not flash `:dead'
+during that window.  That made the badge a workaround for a visible tab
+with no reason to be visible: the work has landed, the user is done
+with the workspace, and nothing they can do to the tab is useful.
+
+Filtering here makes the flash structurally impossible rather than
+merely covered up — there is no tab to flash — and the teardown proceeds
+detached.  A teardown that stalls or dies cannot resurrect the tab
+either: the filter reads the merge state, which never un-sets, not the
+teardown's progress.
+
+Unlike `agent-repl--filter-folded-names', the current workspace gets NO
+exemption.  Folding is a view preference the user can reverse, so
+hiding the workspace they are standing in would strand them; a merge is
+terminal, and the merge flow moves them off it."
+  (cl-remove-if #'agent-repl--merged-ws-p names))
 
 ;;;; ---- Render-state: daemon-pushed lookup ------------------------------
 ;;
@@ -666,10 +707,11 @@ Returns:
   '((:init           . "⏳")
     (:thinking       . "⌛")
     (:done           . "✅")
-    (:idle           . "💤")
+    (:ready          . "✅")
+    (:idle           . "✅")
     (:idle-async     . "🌙")
     (:permission     . "❓")
-    (:stop-failed    . "❗")
+    (:vendor-blocked . "⛔")
     (:start-failed   . "🚫")
     (:dead           . "❌")
     (:degraded       . "📡")
