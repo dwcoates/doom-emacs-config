@@ -54,11 +54,10 @@
            "Compacting conversation…" bar while a /compact runs, empty (and so
            collapsed) otherwise. -->
       <div id="compact-progress-slot"></div>
-      <!-- The agent-shim degraded-state banner (design §11): shown while the
-           store/sidecar/shim reports a component degraded (honest downtime,
-           not a fallback), cleared on its recovery notice. Hidden (and so
-           collapsed) otherwise. -->
-      <div id="degraded-banner" hidden></div>
+      <!-- RETIRED (F4): the degraded-state banner lived here. Degradation is
+           now a self-resolving failure card IN the feed, because a user whose
+           workspace changed color needs to find out why from the conversation
+           rather than from chrome that scrolls away. -->
       <main id="feed"></main>
       <!-- The consolidated progress footer's slot (progress-footer.ts): THE
            in-flight indicator, a flex sibling wedged between the scrolling
