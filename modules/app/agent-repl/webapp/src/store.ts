@@ -23,6 +23,7 @@ import type {
   SessionViewInput,
   ToolProgressInput,
   TypingReveal,
+  WebRenderState,
   WorkspaceStatusInput,
 } from "./state-adapter.js";
 import { applyStreamDelta, blockKey, settleStreamedBlock } from "./streaming.js";
@@ -420,6 +421,22 @@ export interface StoreState {
    * `throughSeq` ingested. Diagnostics only; the daemon owns ordering now.
    */
   lastSeq: number;
+  /**
+   * THE workspace's resolved render state (F5) — the one authority for the
+   * footer's phase, the same message the Emacs tab bar reads.
+   *
+   * `null` before the first `WorkspaceState` lands. The footer used to read a
+   * copy of this carried on `ProgressView`; the copy refreshed on the progress
+   * resolver's own triggers and went stale, which is what put "starting" in
+   * the footer of an already-green tab.
+   */
+  renderState: WebRenderState | null;
+  /**
+   * The delivery generation of `renderState` — what this end acknowledges once
+   * it has drawn that state. Emacs is not sent a state until this end answers
+   * for its generation, so the two surfaces cannot show different states.
+   */
+  renderGeneration: number;
 }
 
 function initialState(): StoreState {
@@ -447,6 +464,8 @@ function initialState(): StoreState {
     costUsd: null,
     taskSummary: null,
     lastSeq: 0,
+    renderState: null,
+    renderGeneration: 0,
   };
 }
 
@@ -608,6 +627,11 @@ export class ConversationStore {
   private applyWorkspaceState(ws: WorkspaceStatusInput): boolean {
     const s = this.state;
     if (ws.sessionId !== "") s.sessionId = ws.sessionId;
+    // THE workspace's phase, kept so the footer reads the same authority the
+    // tab bar does. The generation rides with it because acknowledging the
+    // state is how this end releases it to Emacs.
+    s.renderState = ws.state;
+    s.renderGeneration = ws.generation;
     const wasActive = s.turnInFlight;
     s.turnInFlight = ws.turnActive;
     if (ws.turnActive && !wasActive) {

@@ -630,6 +630,27 @@ describe("WorkspaceSidebar", () => {
     expect(mount.innerHTML).toContain("st-monitoring");
   });
 
+  it("redraws the rail from its retained roster on a repaint (F5)", () => {
+    // Arrange — a pushed roster, then the rail is blown away as a hidden
+    // webview's stale frame would be.
+    const { mount, sidebar } = harness();
+    sidebar.update(roster({ repos: [group({ rows: [row({ name: "alpha" })] })] }));
+    mount.innerHTML = "";
+    // Act — the repaint-on-show pass.
+    sidebar.repaint();
+    // Assert — the rail is back, from the roster it already held.
+    expect(mount.innerHTML).toContain("alpha");
+  });
+
+  it("draws nothing on a repaint before the first roster push", () => {
+    // Arrange — nothing has been pushed, so there is nothing to draw.
+    const { mount, sidebar } = harness();
+    // Act
+    sidebar.repaint();
+    // Assert
+    expect(mount.innerHTML).toBe("");
+  });
+
   it("stays hidden until the first roster push", () => {
     // Arrange + Act
     const { mount } = harness();
