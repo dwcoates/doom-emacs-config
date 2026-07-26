@@ -247,6 +247,7 @@ Envelope & stream:
 | `TaskStarted` / `TaskProgress` / `TaskEnded` | detached-work lifecycle; `task_id`, `kind` (AGENT/SHELL/WORKFLOW), `terminal_status` (DONE/ERROR/KILLED/STOPPED/LOST), `output_path` |
 | `ContentDelta` | EPHEMERAL live-typing delta: `uuid`, `block_index`, `text`/`thinking`/`input_json` oneof |
 | `HeartbeatProgress` | EPHEMERAL `tool_progress` relay: `tool_use_id`, `elapsed_seconds` |
+| `MessageLatency` | EPHEMERAL first-token-latency relay: `uuid`, `ttft_ms` (off the `message_start` stamp) |
 | `DegradedState` | shim→daemon sad-path report: `component`, `reason`, `dropped_count` |
 
 Control plane (daemon↔shim, both directions):
@@ -502,7 +503,7 @@ spawn/`--resume` model) with:
 3. **Store client:** writes PERSISTENT events via `StoreWrite`; subscribes to
    the merged session stream and forwards it to the daemon verbatim.
 4. **Delta bypass:** `stream_event`/`tool_progress` → `ContentDelta`/
-   `HeartbeatProgress` (EPHEMERAL) direct to daemon.
+   `MessageLatency`/`HeartbeatProgress` (EPHEMERAL) direct to daemon.
 5. **Control handling:** `SubmitPrompt`→ SDK input; `Interrupt`→
    `query.interrupt()`; `canUseTool`→ `PermissionRequest` round-trip to the
    daemon (blocking, correlation by `request_id`).
@@ -862,7 +863,7 @@ corpus.
 - `agent-shim/claude/shim/src/proto/extras.ts` — unknown-field capture + once-per-name
   loud-log helper.
 - `agent-shim/claude/shim/src/proto/delta.ts` — `stream_event`/`tool_progress` →
-  `ContentDelta`/`HeartbeatProgress` (EPHEMERAL) mapping.
+  `ContentDelta`/`MessageLatency`/`HeartbeatProgress` (EPHEMERAL) mapping.
 - Tests: `webapp`-style vitest in `agent-shim/claude/shim/test/` over G13 stream fixtures
   (every message type at least once; every union arm).
 
