@@ -36,7 +36,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -46,7 +45,6 @@ import (
 	"agentrepl/wire"
 
 	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/anypb"
 
 	"claude-repld/internal/dlog"
 )
@@ -517,18 +515,23 @@ func (c *Client) newRequestID(kind string) string {
 
 // --- frame codec: one proto message per length-prefixed frame, wrapped in a
 // google.protobuf.Any so the receiver can discriminate the type via the proto
-// global registry. ---
+// global registry. Both halves of that envelope live in `agentrepl/wire`
+// (MarshalAny / ReadAny), shared with shim-store's server, the sidecar's store
+// client, and the daemon's storesub. Reads go straight through wire.ReadAny;
+// only the write needs a step of its own, for the mutex below. ---
 
 // writeMsg serializes msg into an Any and writes it as one frame, serialized
 // across goroutines by the connection's write mutex.
+//
+// The encode deliberately happens OUTSIDE the mutex. writeMu exists so two
+// goroutines cannot interleave bytes on one socket, which is a property of the
+// WRITE alone; holding it across marshaling would serialize senders on CPU work
+// that no ordering guarantee depends on. That is why this composes
+// wire.MarshalAny + wire.WriteFrame rather than calling wire.WriteAny.
 func (ac *activeConn) writeMsg(msg proto.Message) error {
-	env, err := anypb.New(msg)
+	payload, err := wire.MarshalAny(msg)
 	if err != nil {
-		return fmt.Errorf("wrapping %T in Any: %w", msg, err)
-	}
-	payload, err := proto.Marshal(env)
-	if err != nil {
-		return fmt.Errorf("marshaling %T frame: %w", msg, err)
+		return err
 	}
 	ac.writeMu.Lock()
 	defer ac.writeMu.Unlock()
@@ -536,23 +539,6 @@ func (ac *activeConn) writeMsg(msg proto.Message) error {
 		return fmt.Errorf("writing %T frame: %w", msg, err)
 	}
 	return nil
-}
-
-// readMsg reads one frame and returns the concrete proto message it carries.
-func readMsg(r io.Reader) (proto.Message, error) {
-	payload, err := wire.ReadFrame(r)
-	if err != nil {
-		return nil, err // io.EOF / io.ErrUnexpectedEOF propagate verbatim
-	}
-	var env anypb.Any
-	if err := proto.Unmarshal(payload, &env); err != nil {
-		return nil, fmt.Errorf("unmarshaling frame envelope: %w", err)
-	}
-	msg, err := env.UnmarshalNew()
-	if err != nil {
-		return nil, fmt.Errorf("resolving frame type %q: %w", env.GetTypeUrl(), err)
-	}
-	return msg, nil
 }
 
 // failPending resolves every outstanding control waiter with err (connection

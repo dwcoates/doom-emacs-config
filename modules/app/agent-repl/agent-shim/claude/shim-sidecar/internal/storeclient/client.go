@@ -2,7 +2,7 @@
 // cursors at startup (CursorQuery → CursorList), writes StoreWrite batches over a
 // long-lived producer connection (reading each StoreWriteAck), and heartbeats.
 //
-// Transport is the system-wide convention (shim-store server.go): agentrepl/wire
+// Transport is the system-wide convention (agentrepl/wire WriteAny/ReadAny): a
 // 4-byte length prefix wrapping a serialized google.protobuf.Any whose type_url
 // discriminates the message. The store fixes a connection's role by its FIRST
 // frame, so the producer connection opens with a StoreWrite; cursor recovery uses
@@ -22,8 +22,6 @@ import (
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	"agentrepl/wire"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/anypb"
 )
 
 // Logf is the loud-logging sink (§12).
@@ -55,10 +53,10 @@ func (c *Client) RecoverCursors(fileID string) ([]*corev1.CursorState, error) {
 		return nil, fmt.Errorf("storeclient: dial %s: %w", c.socket, err)
 	}
 	defer conn.Close()
-	if err := writeMsg(conn, &corev1.CursorQuery{FileId: fileID}); err != nil {
+	if err := wire.WriteAny(conn, &corev1.CursorQuery{FileId: fileID}); err != nil {
 		return nil, err
 	}
-	msg, err := readMsg(conn)
+	msg, err := wire.ReadAny(conn)
 	if err != nil {
 		return nil, fmt.Errorf("storeclient: reading CursorList: %w", err)
 	}
@@ -80,11 +78,11 @@ func (c *Client) Write(producer string, batch *corev1.EventBatch) (*corev1.Store
 	if err != nil {
 		return nil, err
 	}
-	if err := writeMsg(conn, &corev1.StoreWrite{Producer: producer, Batch: batch}); err != nil {
+	if err := wire.WriteAny(conn, &corev1.StoreWrite{Producer: producer, Batch: batch}); err != nil {
 		c.dropConn()
 		return nil, fmt.Errorf("storeclient: sending StoreWrite: %w", err)
 	}
-	msg, err := readMsg(conn)
+	msg, err := wire.ReadAny(conn)
 	if err != nil {
 		c.dropConn()
 		return nil, fmt.Errorf("storeclient: reading StoreWriteAck: %w", err)
@@ -110,11 +108,11 @@ func (c *Client) Heartbeat() error {
 	if c.conn == nil {
 		return nil
 	}
-	if err := writeMsg(c.conn, &corev1.Heartbeat{SentAtMs: time.Now().UnixMilli()}); err != nil {
+	if err := wire.WriteAny(c.conn, &corev1.Heartbeat{SentAtMs: time.Now().UnixMilli()}); err != nil {
 		c.dropConn()
 		return fmt.Errorf("storeclient: sending Heartbeat: %w", err)
 	}
-	if _, err := readMsg(c.conn); err != nil {
+	if _, err := wire.ReadAny(c.conn); err != nil {
 		c.dropConn()
 		return fmt.Errorf("storeclient: reading Heartbeat echo: %w", err)
 	}
@@ -152,34 +150,4 @@ func (c *Client) dropConn() {
 		c.conn.Close()
 		c.conn = nil
 	}
-}
-
-// ---- Any framing (matches shim-store server.go) ---------------------------
-
-func writeMsg(conn net.Conn, m proto.Message) error {
-	a, err := anypb.New(m)
-	if err != nil {
-		return fmt.Errorf("storeclient: wrapping %T in Any: %w", m, err)
-	}
-	b, err := proto.Marshal(a)
-	if err != nil {
-		return fmt.Errorf("storeclient: marshaling Any(%T): %w", m, err)
-	}
-	return wire.WriteFrame(conn, b)
-}
-
-func readMsg(conn net.Conn) (proto.Message, error) {
-	frame, err := wire.ReadFrame(conn)
-	if err != nil {
-		return nil, err
-	}
-	a := &anypb.Any{}
-	if err := proto.Unmarshal(frame, a); err != nil {
-		return nil, fmt.Errorf("storeclient: decoding Any frame: %w", err)
-	}
-	m, err := a.UnmarshalNew()
-	if err != nil {
-		return nil, fmt.Errorf("storeclient: resolving Any type %q: %w", a.GetTypeUrl(), err)
-	}
-	return m, nil
 }

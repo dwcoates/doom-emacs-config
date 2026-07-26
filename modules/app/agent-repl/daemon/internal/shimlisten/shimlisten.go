@@ -37,9 +37,6 @@ import (
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	"agentrepl/wire"
-
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/anypb"
 )
 
 // DefaultSocketPath is the one socket every shim dials. Fixed and well-known:
@@ -247,18 +244,19 @@ func (s *Server) Close() error {
 }
 
 // readHello reads the first frame and requires it to be a ShimHello.
+//
+// The frame read stays split from the envelope decode here, unlike the plain
+// wire.ReadAny call sites: this one WRAPS the frame error with what it was
+// trying to read, and nothing about the listener's error handling should change
+// as a side effect of sharing the decode half.
 func readHello(conn net.Conn) (*corev1.ShimHello, error) {
 	payload, err := wire.ReadFrame(conn)
 	if err != nil {
 		return nil, fmt.Errorf("reading hello frame: %w", err)
 	}
-	var env anypb.Any
-	if err := proto.Unmarshal(payload, &env); err != nil {
-		return nil, fmt.Errorf("unmarshalling hello envelope: %w", err)
-	}
-	msg, err := env.UnmarshalNew()
+	msg, err := wire.UnmarshalAny(payload)
 	if err != nil {
-		return nil, fmt.Errorf("resolving hello type %q: %w", env.GetTypeUrl(), err)
+		return nil, err
 	}
 	hello, ok := msg.(*corev1.ShimHello)
 	if !ok {
