@@ -12,6 +12,7 @@ import {
   ClaudeStreamMessageSchema,
   type ClaudeStreamMessage,
 } from "../../../../proto/gen/ts/agentshim/data/v1/stream_pb.js";
+import { DiscriminatorField } from "../../../../proto/gen/ts/agentshim/data/v1/unknown_pb.js";
 
 const streamDir = fileURLToPath(new URL("../../../../testdata/corpus/stream/", import.meta.url));
 const toolResultsDir = fileURLToPath(new URL("../../../../testdata/corpus/tool-results/", import.meta.url));
@@ -550,22 +551,330 @@ describe("corrected tool-result shapes", () => {
 // Missing / unknown discriminators → UnparsedEvent (never a zero value).
 // ---------------------------------------------------------------------------
 
-describe("UnparsedEvent hard-error path", () => {
+describe("Anthropic API content blocks", () => {
+  /** Convert one assistant content block and return its ContentBlock arm. */
+  const blockOf = (block: Record<string, unknown>) => {
+    const csm = vendor(convert({ type: "assistant", session_id: "s", message: { id: "m", model: "x", content: [block] } }));
+    if (csm.msg.case !== "assistant") throw new Error("case");
+    return csm.msg.value.message!.content[0]!.block;
+  };
+
+  it("redacted_thinking decodes its opaque blob to bytes", () => {
+    // The blob must survive byte-for-byte to be replayable to the API.
+    const arm = blockOf({ type: "redacted_thinking", data: Buffer.from("secret").toString("base64") });
+    if (arm.case !== "redactedThinking") throw new Error(`case ${arm.case}`);
+    expect(Buffer.from(arm.value.data).toString()).toBe("secret");
+  });
+
+  it("server_tool_use keeps its input struct", () => {
+    const arm = blockOf({ type: "server_tool_use", id: "s1", name: "web_search", input: { query: "x" } });
+    if (arm.case !== "serverToolUse") throw new Error(`case ${arm.case}`);
+    expect(arm.value.input).toEqual({ query: "x" });
+  });
+
+  it("mcp_tool_use carries the server name that distinguishes it from tool_use", () => {
+    const arm = blockOf({ type: "mcp_tool_use", id: "m1", name: "search", server_name: "srv" });
+    if (arm.case !== "mcpToolUse") throw new Error(`case ${arm.case}`);
+    expect(arm.value.serverName).toBe("srv");
+  });
+
+  it("mcp_tool_result preserves a heterogeneous content array", () => {
+    const arm = blockOf({ type: "mcp_tool_result", tool_use_id: "t1", content: [{ type: "text", text: "a" }, "bare"] });
+    if (arm.case !== "mcpToolResult") throw new Error(`case ${arm.case}`);
+    expect(toJson(ListValueSchema, arm.value.content!)).toEqual([{ type: "text", text: "a" }, "bare"]);
+  });
+
+  it("web_search_tool_result routes an array to the results arm", () => {
+    const arm = blockOf({ type: "web_search_tool_result", tool_use_id: "t1", content: [{ url: "u" }] });
+    if (arm.case !== "webSearchToolResult") throw new Error(`case ${arm.case}`);
+    expect(arm.value.content.case).toBe("results");
+  });
+
+  it("web_search_tool_result routes an error object to the error arm", () => {
+    // A failed search must stay distinguishable from one that found nothing.
+    const arm = blockOf({ type: "web_search_tool_result", tool_use_id: "t1", content: { error_code: "max_uses_exceeded" } });
+    if (arm.case !== "webSearchToolResult") throw new Error(`case ${arm.case}`);
+    if (arm.value.content.case !== "error") throw new Error(`content ${arm.value.content.case}`);
+    expect(arm.value.content.value.errorCode).toBe("max_uses_exceeded");
+  });
+
+  it("web_fetch_tool_result shares the result-or-error union", () => {
+    const arm = blockOf({ type: "web_fetch_tool_result", tool_use_id: "t1", content: { error_code: "unavailable" } });
+    if (arm.case !== "webFetchToolResult") throw new Error(`case ${arm.case}`);
+    expect(arm.value.content.case).toBe("error");
+  });
+
+  it("code_execution_tool_result shares the result-or-error union", () => {
+    const arm = blockOf({ type: "code_execution_tool_result", tool_use_id: "t1", content: [{ stdout: "hi" }] });
+    if (arm.case !== "codeExecutionToolResult") throw new Error(`case ${arm.case}`);
+    expect(arm.value.content.case).toBe("results");
+  });
+
+  it("search_result carries its source", () => {
+    const arm = blockOf({ type: "search_result", source: "docs", title: "t", content: [] });
+    if (arm.case !== "searchResult") throw new Error(`case ${arm.case}`);
+    expect(arm.value.source).toBe("docs");
+  });
+
+  it("container_upload carries the container's file id", () => {
+    const arm = blockOf({ type: "container_upload", file_id: "f1" });
+    if (arm.case !== "containerUpload") throw new Error(`case ${arm.case}`);
+    expect(arm.value.fileId).toBe("f1");
+  });
+});
+
+describe("SDK 0.3.220 stream families", () => {
+  const armOf = (msg: Record<string, unknown>) => vendor(convert({ session_id: "s", ...msg })).msg;
+
+  it("system/api_retry maps its retry counters", () => {
+    const arm = armOf({ type: "system", subtype: "api_retry", attempt: 2, max_retries: 5, retry_delay_ms: 400, error_status: 529, error: "server_error" });
+    if (arm.case !== "apiRetry") throw new Error(`case ${arm.case}`);
+    expect(arm.value.attempt).toBe(2);
+    expect(arm.value.retryDelayMs).toBe(400n);
+  });
+
+  it("system/api_retry distinguishes a null error_status from a zero one", () => {
+    // null means "connection error, no HTTP response" — a different fact
+    // from an HTTP 0, so the *_set companion must carry it.
+    const arm = armOf({ type: "system", subtype: "api_retry", attempt: 1, error_status: null });
+    if (arm.case !== "apiRetry") throw new Error(`case ${arm.case}`);
+    expect(arm.value.errorStatusSet).toBe(false);
+  });
+
+  it("system/api_retry marks a present error_status as set", () => {
+    const arm = armOf({ type: "system", subtype: "api_retry", attempt: 1, error_status: 500 });
+    if (arm.case !== "apiRetry") throw new Error(`case ${arm.case}`);
+    expect(arm.value.errorStatusSet).toBe(true);
+  });
+
+  it("system/control_request_progress leaves absent retry fields unset", () => {
+    const arm = armOf({ type: "system", subtype: "control_request_progress", request_id: "r1", status: "started" });
+    if (arm.case !== "controlRequestProgress") throw new Error(`case ${arm.case}`);
+    expect(arm.value.attemptSet).toBe(false);
+  });
+
+  it("system/task_progress maps the nested usage block", () => {
+    const arm = armOf({ type: "system", subtype: "task_progress", task_id: "a1", description: "d", usage: { total_tokens: 120, tool_uses: 3, duration_ms: 900 } });
+    if (arm.case !== "taskProgress") throw new Error(`case ${arm.case}`);
+    expect(arm.value.usage?.totalTokens).toBe(120n);
+  });
+
+  it("system/session_state_changed carries the requires_action state", () => {
+    const arm = armOf({ type: "system", subtype: "session_state_changed", state: "requires_action" });
+    if (arm.case !== "sessionStateChanged") throw new Error(`case ${arm.case}`);
+    expect(arm.value.state).toBe("requires_action");
+  });
+
+  it("system/commands_changed maps each command including its aliases", () => {
+    const arm = armOf({ type: "system", subtype: "commands_changed", commands: [{ name: "usage", description: "d", argumentHint: "", aliases: ["cost", "stats"] }] });
+    if (arm.case !== "commandsChanged") throw new Error(`case ${arm.case}`);
+    expect(arm.value.commands[0]?.aliases).toEqual(["cost", "stats"]);
+  });
+
+  it("system/files_persisted keeps successes and failures apart", () => {
+    const arm = armOf({ type: "system", subtype: "files_persisted", files: [{ filename: "a", file_id: "f1" }], failed: [{ filename: "b", error: "nope" }], processed_at: "2026-07-25T00:00:00Z" });
+    if (arm.case !== "filesPersisted") throw new Error(`case ${arm.case}`);
+    expect(arm.value.files).toHaveLength(1);
+    expect(arm.value.failed[0]?.error).toBe("nope");
+  });
+
+  it("system/memory_recall marks a lazy-loaded memory's content unset", () => {
+    // A file-backed `select` entry omits content; the renderer reads `path`.
+    const arm = armOf({ type: "system", subtype: "memory_recall", mode: "select", memories: [{ path: "/m.md", scope: "personal" }] });
+    if (arm.case !== "memoryRecall") throw new Error(`case ${arm.case}`);
+    expect(arm.value.memories[0]?.contentSet).toBe(false);
+  });
+
+  it("system/memory_recall marks an inlined memory's content set", () => {
+    const arm = armOf({ type: "system", subtype: "memory_recall", mode: "synthesize", memories: [{ path: "<synthesis:/d>", scope: "team", content: "body" }] });
+    if (arm.case !== "memoryRecall") throw new Error(`case ${arm.case}`);
+    expect(arm.value.memories[0]?.contentSet).toBe(true);
+  });
+
+  it("system/permission_denied carries the decision reason the result tally lacks", () => {
+    const arm = armOf({ type: "system", subtype: "permission_denied", tool_name: "Bash", tool_use_id: "t1", decision_reason: "deny rule", message: "blocked" });
+    if (arm.case !== "permissionDenied") throw new Error(`case ${arm.case}`);
+    expect(arm.value.decisionReason).toBe("deny rule");
+  });
+
+  it("system/mirror_error maps its camelCase nested key", () => {
+    const arm = armOf({ type: "system", subtype: "mirror_error", error: "eperm", key: { projectKey: "p", sessionId: "s2", subpath: "x" } });
+    if (arm.case !== "mirrorError") throw new Error(`case ${arm.case}`);
+    expect(arm.value.key?.projectKey).toBe("p");
+  });
+
+  it("system/informational carries prevent_continuation", () => {
+    const arm = armOf({ type: "system", subtype: "informational", content: "c", level: "warning", prevent_continuation: true });
+    if (arm.case !== "informational") throw new Error(`case ${arm.case}`);
+    expect(arm.value.preventContinuation).toBe(true);
+  });
+
+  it("system/hook_progress is distinct from the finished hook_response", () => {
+    const arm = armOf({ type: "system", subtype: "hook_progress", hook_id: "h1", hook_name: "n", hook_event: "PreToolUse", stdout: "o", stderr: "", output: "" });
+    if (arm.case !== "hookProgress") throw new Error(`case ${arm.case}`);
+    expect(arm.value.hookId).toBe("h1");
+  });
+
+  it("system/plugin_install carries its lifecycle status", () => {
+    const arm = armOf({ type: "system", subtype: "plugin_install", status: "failed", name: "p", error: "boom" });
+    if (arm.case !== "pluginInstall") throw new Error(`case ${arm.case}`);
+    expect(arm.value.status).toBe("failed");
+  });
+
+  it("system/worker_shutting_down carries its reason", () => {
+    const arm = armOf({ type: "system", subtype: "worker_shutting_down", reason: "host_exit" });
+    if (arm.case !== "workerShuttingDown") throw new Error(`case ${arm.case}`);
+    expect(arm.value.reason).toBe("host_exit");
+  });
+
+  it("system/local_command_output carries its content", () => {
+    const arm = armOf({ type: "system", subtype: "local_command_output", content: "out" });
+    if (arm.case !== "localCommandOutput") throw new Error(`case ${arm.case}`);
+    expect(arm.value.content).toBe("out");
+  });
+
+  it("system/elicitation_complete names the server and elicitation", () => {
+    const arm = armOf({ type: "system", subtype: "elicitation_complete", mcp_server_name: "srv", elicitation_id: "e1" });
+    if (arm.case !== "elicitationComplete") throw new Error(`case ${arm.case}`);
+    expect(arm.value.elicitationId).toBe("e1");
+  });
+
+  it("system/model_refusal_fallback records the retracted message uuids", () => {
+    const arm = armOf({ type: "system", subtype: "model_refusal_fallback", trigger: "refusal", direction: "retry", original_model: "a", fallback_model: "b", request_id: "r", content: "c", retracted_message_uuids: ["u1"] });
+    if (arm.case !== "modelRefusalFallback") throw new Error(`case ${arm.case}`);
+    expect(arm.value.retractedMessageUuids).toEqual(["u1"]);
+  });
+
+  it("system/model_refusal_no_fallback maps a null request_id to empty", () => {
+    const arm = armOf({ type: "system", subtype: "model_refusal_no_fallback", original_model: "a", request_id: null, content: "c" });
+    if (arm.case !== "modelRefusalNoFallback") throw new Error(`case ${arm.case}`);
+    expect(arm.value.requestId).toBe("");
+  });
+
+  it("tool_use_summary names the tool uses it covers", () => {
+    const arm = armOf({ type: "tool_use_summary", summary: "read some files", preceding_tool_use_ids: ["t1", "t2"] });
+    if (arm.case !== "toolUseSummary") throw new Error(`case ${arm.case}`);
+    expect(arm.value.precedingToolUseIds).toEqual(["t1", "t2"]);
+  });
+
+  it("prompt_suggestion carries the suggestion", () => {
+    const arm = armOf({ type: "prompt_suggestion", suggestion: "try /help" });
+    if (arm.case !== "promptSuggestion") throw new Error(`case ${arm.case}`);
+    expect(arm.value.suggestion).toBe("try /help");
+  });
+
+  it("conversation_reset carries the new conversation id", () => {
+    const arm = armOf({ type: "conversation_reset", new_conversation_id: "c2" });
+    if (arm.case !== "conversationReset") throw new Error(`case ${arm.case}`);
+    expect(arm.value.newConversationId).toBe("c2");
+  });
+
+  it("active_goal maps a set goal", () => {
+    const arm = armOf({ type: "active_goal", value: { condition: "tests pass", iterations: 3, set_at: 10, tokens_at_start: 99 } });
+    if (arm.case !== "activeGoal") throw new Error(`case ${arm.case}`);
+    expect(arm.value.value?.condition).toBe("tests pass");
+  });
+
+  it("active_goal distinguishes a cleared goal from a zero-iteration one", () => {
+    // `value: null` IS the clear signal, so value_set must carry it.
+    const arm = armOf({ type: "active_goal", value: null });
+    if (arm.case !== "activeGoal") throw new Error(`case ${arm.case}`);
+    expect(arm.value.valueSet).toBe(false);
+  });
+
+  it("a new family is PERSISTENT, not ephemeral", () => {
+    // None of these has a store-delivered final form to be replaced by, so
+    // EPHEMERAL would mean LOST on reconnect rather than merely transient.
+    const result = convert({ type: "system", subtype: "task_progress", session_id: "s", task_id: "a1", description: "d" });
+    expect(result.vendor.class).toBe(EventClass.PERSISTENT);
+  });
+});
+
+/**
+ * The two halves of the §5.1 contract, which are NOT alternatives:
+ * UnparsedEvent is for a KNOWN shape that failed conversion; the
+ * UnknownRecord passthrough is for an unrecognized DISCRIMINATOR.
+ */
+describe("UnparsedEvent hard-error path (known shape, failed conversion)", () => {
   it("a message with no type is unparsed", () => {
     const result = convert({ foo: "bar" });
     expect(result.vendor.payload.case).toBe("unparsed");
   });
 
-  it("an unknown type is unparsed with the producer stamped", () => {
-    const result = convert({ type: "totally_new_message", session_id: "s" });
+  it("a user message missing `message` is unparsed with the producer stamped", () => {
+    // `user` IS a modeled type, so its shape is an expectation the record
+    // violated — a hard error, never the passthrough arm.
+    const result = convert({ type: "user", session_id: "s" });
     expect(result.vendor.payload.case).toBe("unparsed");
     if (result.vendor.payload.case !== "unparsed") throw new Error("case");
     expect(result.vendor.payload.value.producer).toBe("claude-shim");
   });
 
-  it("an unknown system subtype is unparsed", () => {
-    const result = convert({ type: "system", subtype: "brand_new_subtype", session_id: "s" });
+  it("a stream_event with an unusable delta arm is unparsed", () => {
+    const result = convert({
+      type: "stream_event",
+      session_id: "s",
+      event: { type: "content_block_delta", index: 0, delta: { type: "no_such_delta" } },
+    });
     expect(result.vendor.payload.case).toBe("unparsed");
+  });
+});
+
+describe("UnknownRecord passthrough (unrecognized discriminator)", () => {
+  const unknownOf = (msg: unknown) => {
+    const csm = vendor(convert(msg));
+    if (csm.msg.case !== "unknown") throw new Error(`expected unknown arm, got ${csm.msg.case}`);
+    return csm.msg.value;
+  };
+
+  it("an unknown top-level type lands on the passthrough arm", () => {
+    const rec = unknownOf({ type: "totally_new_message", session_id: "s" });
+    expect(rec.discriminator).toBe("totally_new_message");
+  });
+
+  it("an unknown top-level type is tagged as a TYPE discriminator", () => {
+    const rec = unknownOf({ type: "totally_new_message", session_id: "s" });
+    expect(rec.discriminatorField).toBe(DiscriminatorField.TYPE);
+  });
+
+  it("an unknown top-level type preserves the whole record verbatim", () => {
+    const rec = unknownOf({ type: "totally_new_message", session_id: "s", payload: { a: 1 } });
+    expect(rec.raw).toEqual({ type: "totally_new_message", session_id: "s", payload: { a: 1 } });
+  });
+
+  it("an unknown system subtype lands on the passthrough arm", () => {
+    const rec = unknownOf({ type: "system", subtype: "brand_new_subtype", session_id: "s" });
+    expect(rec.discriminator).toBe("brand_new_subtype");
+  });
+
+  it("an unknown system subtype is tagged as a SUBTYPE discriminator", () => {
+    const rec = unknownOf({ type: "system", subtype: "brand_new_subtype", session_id: "s" });
+    expect(rec.discriminatorField).toBe(DiscriminatorField.SUBTYPE);
+  });
+
+  it("an unknown system subtype records `system` as its parent type", () => {
+    const rec = unknownOf({ type: "system", subtype: "brand_new_subtype", session_id: "s" });
+    expect(rec.parentType).toBe("system");
+  });
+
+  it("a passthrough record does not also populate Event.extras", () => {
+    // UnknownRecord.raw already holds every field; duplicating them into
+    // extras would make the unknown-FIELD log lie about what is new.
+    const result = convert({ type: "totally_new_message", session_id: "s", novel: 1 });
+    expect(result.vendor.extras).toBeUndefined();
+    expect(result.loggedExtras).toEqual([]);
+  });
+
+  it("an unknown content block is preserved instead of dropped", () => {
+    const csm = vendor(convert({
+      type: "assistant",
+      session_id: "s",
+      message: { id: "m", model: "x", content: [{ type: "no_such_block", data: "keep me" }] },
+    }));
+    if (csm.msg.case !== "assistant") throw new Error("case");
+    const [block] = csm.msg.value.message!.content;
+    if (block?.block.case !== "unknown") throw new Error(`expected unknown block, got ${block?.block.case}`);
+    expect(block.block.value.raw).toEqual({ type: "no_such_block", data: "keep me" });
   });
 });
 

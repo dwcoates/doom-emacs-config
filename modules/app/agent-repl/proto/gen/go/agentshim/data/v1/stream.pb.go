@@ -1,8 +1,23 @@
 // agentshim.data.v1 stream — TOTAL-FIDELITY models of the Claude Agent SDK
 // live stream (`query()` iterator), grounded in @anthropic-ai/claude-agent-sdk
-// v0.1.77 typings plus empirically observed stream-only families (CLI 2.1.215
-// probes). Field comments cite the source: [sdk coreTypes.d.ts:NNN] for typed
-// members, [observed] for shapes absent from the typings.
+// v0.3.220 typings (`package/sdk.d.ts`) plus empirically observed stream-only
+// families (CLI 2.1.215 probes). Field comments cite the source:
+// [sdk coreTypes.d.ts:NNN] for members typed as of 0.1.77, [sdk 0.3.220] for
+// members the 0.3.220 typings added, [observed] for shapes absent from the
+// typings, [corpus] for shapes grounded in captured fixtures.
+//
+// The eight families once carried as [observed] guesses (rate_limit_event,
+// hook_started, thinking_tokens, notification, task_started, task_updated,
+// task_notification, background_tasks_changed) are all first-class typed
+// members as of 0.3.220, with field sets matching what was reverse-engineered.
+//
+// DELIBERATELY NOT MODELED. `system/post_turn_summary` and
+// `system/task_summary` are forwarded to the query() iterator by SDK 0.3.220
+// but are typed NOWHERE in it, constructed nowhere, and have no field ever
+// read — their shape is genuinely unknown. Inventing fields for them would
+// assert a guess as schema, so they ride the `unknown` passthrough arm, which
+// preserves them whole until a real shape can be observed. This absence is a
+// decision, not an oversight.
 //
 // Conversion contract (§5.1 of the design doc): the claude-shim converter
 // hard-errors (→ core.UnparsedEvent) on missing expected fields, captures
@@ -344,6 +359,28 @@ type ClaudeStreamMessage struct {
 	//	*ClaudeStreamMessage_ControlResponse
 	//	*ClaudeStreamMessage_ControlCancelRequest
 	//	*ClaudeStreamMessage_KeepAlive
+	//	*ClaudeStreamMessage_Unknown
+	//	*ClaudeStreamMessage_ApiRetry
+	//	*ClaudeStreamMessage_ControlRequestProgress
+	//	*ClaudeStreamMessage_ModelRefusalFallback
+	//	*ClaudeStreamMessage_ModelRefusalNoFallback
+	//	*ClaudeStreamMessage_LocalCommandOutput
+	//	*ClaudeStreamMessage_HookProgress
+	//	*ClaudeStreamMessage_PluginInstall
+	//	*ClaudeStreamMessage_TaskProgress
+	//	*ClaudeStreamMessage_SessionStateChanged
+	//	*ClaudeStreamMessage_WorkerShuttingDown
+	//	*ClaudeStreamMessage_CommandsChanged
+	//	*ClaudeStreamMessage_FilesPersisted
+	//	*ClaudeStreamMessage_MemoryRecall
+	//	*ClaudeStreamMessage_ElicitationComplete
+	//	*ClaudeStreamMessage_PermissionDenied
+	//	*ClaudeStreamMessage_MirrorError
+	//	*ClaudeStreamMessage_Informational
+	//	*ClaudeStreamMessage_ToolUseSummary
+	//	*ClaudeStreamMessage_PromptSuggestion
+	//	*ClaudeStreamMessage_ConversationReset
+	//	*ClaudeStreamMessage_ActiveGoal
 	Msg           isClaudeStreamMessage_Msg `protobuf_oneof:"msg"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -584,6 +621,204 @@ func (x *ClaudeStreamMessage) GetKeepAlive() *KeepAlive {
 	return nil
 }
 
+func (x *ClaudeStreamMessage) GetUnknown() *UnknownRecord {
+	if x != nil {
+		if x, ok := x.Msg.(*ClaudeStreamMessage_Unknown); ok {
+			return x.Unknown
+		}
+	}
+	return nil
+}
+
+func (x *ClaudeStreamMessage) GetApiRetry() *ApiRetry {
+	if x != nil {
+		if x, ok := x.Msg.(*ClaudeStreamMessage_ApiRetry); ok {
+			return x.ApiRetry
+		}
+	}
+	return nil
+}
+
+func (x *ClaudeStreamMessage) GetControlRequestProgress() *ControlRequestProgress {
+	if x != nil {
+		if x, ok := x.Msg.(*ClaudeStreamMessage_ControlRequestProgress); ok {
+			return x.ControlRequestProgress
+		}
+	}
+	return nil
+}
+
+func (x *ClaudeStreamMessage) GetModelRefusalFallback() *ModelRefusalFallback {
+	if x != nil {
+		if x, ok := x.Msg.(*ClaudeStreamMessage_ModelRefusalFallback); ok {
+			return x.ModelRefusalFallback
+		}
+	}
+	return nil
+}
+
+func (x *ClaudeStreamMessage) GetModelRefusalNoFallback() *ModelRefusalNoFallback {
+	if x != nil {
+		if x, ok := x.Msg.(*ClaudeStreamMessage_ModelRefusalNoFallback); ok {
+			return x.ModelRefusalNoFallback
+		}
+	}
+	return nil
+}
+
+func (x *ClaudeStreamMessage) GetLocalCommandOutput() *LocalCommandOutput {
+	if x != nil {
+		if x, ok := x.Msg.(*ClaudeStreamMessage_LocalCommandOutput); ok {
+			return x.LocalCommandOutput
+		}
+	}
+	return nil
+}
+
+func (x *ClaudeStreamMessage) GetHookProgress() *HookProgress {
+	if x != nil {
+		if x, ok := x.Msg.(*ClaudeStreamMessage_HookProgress); ok {
+			return x.HookProgress
+		}
+	}
+	return nil
+}
+
+func (x *ClaudeStreamMessage) GetPluginInstall() *PluginInstall {
+	if x != nil {
+		if x, ok := x.Msg.(*ClaudeStreamMessage_PluginInstall); ok {
+			return x.PluginInstall
+		}
+	}
+	return nil
+}
+
+func (x *ClaudeStreamMessage) GetTaskProgress() *TaskProgressMsg {
+	if x != nil {
+		if x, ok := x.Msg.(*ClaudeStreamMessage_TaskProgress); ok {
+			return x.TaskProgress
+		}
+	}
+	return nil
+}
+
+func (x *ClaudeStreamMessage) GetSessionStateChanged() *SessionStateChanged {
+	if x != nil {
+		if x, ok := x.Msg.(*ClaudeStreamMessage_SessionStateChanged); ok {
+			return x.SessionStateChanged
+		}
+	}
+	return nil
+}
+
+func (x *ClaudeStreamMessage) GetWorkerShuttingDown() *WorkerShuttingDown {
+	if x != nil {
+		if x, ok := x.Msg.(*ClaudeStreamMessage_WorkerShuttingDown); ok {
+			return x.WorkerShuttingDown
+		}
+	}
+	return nil
+}
+
+func (x *ClaudeStreamMessage) GetCommandsChanged() *CommandsChanged {
+	if x != nil {
+		if x, ok := x.Msg.(*ClaudeStreamMessage_CommandsChanged); ok {
+			return x.CommandsChanged
+		}
+	}
+	return nil
+}
+
+func (x *ClaudeStreamMessage) GetFilesPersisted() *FilesPersisted {
+	if x != nil {
+		if x, ok := x.Msg.(*ClaudeStreamMessage_FilesPersisted); ok {
+			return x.FilesPersisted
+		}
+	}
+	return nil
+}
+
+func (x *ClaudeStreamMessage) GetMemoryRecall() *MemoryRecall {
+	if x != nil {
+		if x, ok := x.Msg.(*ClaudeStreamMessage_MemoryRecall); ok {
+			return x.MemoryRecall
+		}
+	}
+	return nil
+}
+
+func (x *ClaudeStreamMessage) GetElicitationComplete() *ElicitationComplete {
+	if x != nil {
+		if x, ok := x.Msg.(*ClaudeStreamMessage_ElicitationComplete); ok {
+			return x.ElicitationComplete
+		}
+	}
+	return nil
+}
+
+func (x *ClaudeStreamMessage) GetPermissionDenied() *PermissionDenied {
+	if x != nil {
+		if x, ok := x.Msg.(*ClaudeStreamMessage_PermissionDenied); ok {
+			return x.PermissionDenied
+		}
+	}
+	return nil
+}
+
+func (x *ClaudeStreamMessage) GetMirrorError() *MirrorError {
+	if x != nil {
+		if x, ok := x.Msg.(*ClaudeStreamMessage_MirrorError); ok {
+			return x.MirrorError
+		}
+	}
+	return nil
+}
+
+func (x *ClaudeStreamMessage) GetInformational() *Informational {
+	if x != nil {
+		if x, ok := x.Msg.(*ClaudeStreamMessage_Informational); ok {
+			return x.Informational
+		}
+	}
+	return nil
+}
+
+func (x *ClaudeStreamMessage) GetToolUseSummary() *ToolUseSummary {
+	if x != nil {
+		if x, ok := x.Msg.(*ClaudeStreamMessage_ToolUseSummary); ok {
+			return x.ToolUseSummary
+		}
+	}
+	return nil
+}
+
+func (x *ClaudeStreamMessage) GetPromptSuggestion() *PromptSuggestion {
+	if x != nil {
+		if x, ok := x.Msg.(*ClaudeStreamMessage_PromptSuggestion); ok {
+			return x.PromptSuggestion
+		}
+	}
+	return nil
+}
+
+func (x *ClaudeStreamMessage) GetConversationReset() *ConversationReset {
+	if x != nil {
+		if x, ok := x.Msg.(*ClaudeStreamMessage_ConversationReset); ok {
+			return x.ConversationReset
+		}
+	}
+	return nil
+}
+
+func (x *ClaudeStreamMessage) GetActiveGoal() *ActiveGoal {
+	if x != nil {
+		if x, ok := x.Msg.(*ClaudeStreamMessage_ActiveGoal); ok {
+			return x.ActiveGoal
+		}
+	}
+	return nil
+}
+
 type isClaudeStreamMessage_Msg interface {
 	isClaudeStreamMessage_Msg()
 }
@@ -678,6 +913,102 @@ type ClaudeStreamMessage_KeepAlive struct {
 	KeepAlive *KeepAlive `protobuf:"bytes,22,opt,name=keep_alive,json=keepAlive,proto3,oneof"`
 }
 
+type ClaudeStreamMessage_Unknown struct {
+	// PASSTHROUGH (unknown.proto): a `type`/`subtype` no arm above models.
+	// The SDK union grew 11 -> 38 members between 0.1.77 and 0.3.220, so an
+	// unmodeled family is the NORMAL consequence of the vendor shipping,
+	// not a defect. Captured whole; a message of a KNOWN family that fails
+	// conversion is still a core.UnparsedEvent.
+	Unknown *UnknownRecord `protobuf:"bytes,23,opt,name=unknown,proto3,oneof"`
+}
+
+type ClaudeStreamMessage_ApiRetry struct {
+	// Families typed by SDK 0.3.220 that 0.1.77 did not have. All are
+	// PERSISTENT (see the classification note above this file's system
+	// section).
+	ApiRetry *ApiRetry `protobuf:"bytes,24,opt,name=api_retry,json=apiRetry,proto3,oneof"`
+}
+
+type ClaudeStreamMessage_ControlRequestProgress struct {
+	ControlRequestProgress *ControlRequestProgress `protobuf:"bytes,25,opt,name=control_request_progress,json=controlRequestProgress,proto3,oneof"`
+}
+
+type ClaudeStreamMessage_ModelRefusalFallback struct {
+	ModelRefusalFallback *ModelRefusalFallback `protobuf:"bytes,26,opt,name=model_refusal_fallback,json=modelRefusalFallback,proto3,oneof"`
+}
+
+type ClaudeStreamMessage_ModelRefusalNoFallback struct {
+	ModelRefusalNoFallback *ModelRefusalNoFallback `protobuf:"bytes,27,opt,name=model_refusal_no_fallback,json=modelRefusalNoFallback,proto3,oneof"`
+}
+
+type ClaudeStreamMessage_LocalCommandOutput struct {
+	LocalCommandOutput *LocalCommandOutput `protobuf:"bytes,28,opt,name=local_command_output,json=localCommandOutput,proto3,oneof"`
+}
+
+type ClaudeStreamMessage_HookProgress struct {
+	HookProgress *HookProgress `protobuf:"bytes,29,opt,name=hook_progress,json=hookProgress,proto3,oneof"`
+}
+
+type ClaudeStreamMessage_PluginInstall struct {
+	PluginInstall *PluginInstall `protobuf:"bytes,30,opt,name=plugin_install,json=pluginInstall,proto3,oneof"`
+}
+
+type ClaudeStreamMessage_TaskProgress struct {
+	TaskProgress *TaskProgressMsg `protobuf:"bytes,31,opt,name=task_progress,json=taskProgress,proto3,oneof"`
+}
+
+type ClaudeStreamMessage_SessionStateChanged struct {
+	SessionStateChanged *SessionStateChanged `protobuf:"bytes,32,opt,name=session_state_changed,json=sessionStateChanged,proto3,oneof"`
+}
+
+type ClaudeStreamMessage_WorkerShuttingDown struct {
+	WorkerShuttingDown *WorkerShuttingDown `protobuf:"bytes,33,opt,name=worker_shutting_down,json=workerShuttingDown,proto3,oneof"`
+}
+
+type ClaudeStreamMessage_CommandsChanged struct {
+	CommandsChanged *CommandsChanged `protobuf:"bytes,34,opt,name=commands_changed,json=commandsChanged,proto3,oneof"`
+}
+
+type ClaudeStreamMessage_FilesPersisted struct {
+	FilesPersisted *FilesPersisted `protobuf:"bytes,35,opt,name=files_persisted,json=filesPersisted,proto3,oneof"`
+}
+
+type ClaudeStreamMessage_MemoryRecall struct {
+	MemoryRecall *MemoryRecall `protobuf:"bytes,36,opt,name=memory_recall,json=memoryRecall,proto3,oneof"`
+}
+
+type ClaudeStreamMessage_ElicitationComplete struct {
+	ElicitationComplete *ElicitationComplete `protobuf:"bytes,37,opt,name=elicitation_complete,json=elicitationComplete,proto3,oneof"`
+}
+
+type ClaudeStreamMessage_PermissionDenied struct {
+	PermissionDenied *PermissionDenied `protobuf:"bytes,38,opt,name=permission_denied,json=permissionDenied,proto3,oneof"`
+}
+
+type ClaudeStreamMessage_MirrorError struct {
+	MirrorError *MirrorError `protobuf:"bytes,39,opt,name=mirror_error,json=mirrorError,proto3,oneof"`
+}
+
+type ClaudeStreamMessage_Informational struct {
+	Informational *Informational `protobuf:"bytes,40,opt,name=informational,proto3,oneof"`
+}
+
+type ClaudeStreamMessage_ToolUseSummary struct {
+	ToolUseSummary *ToolUseSummary `protobuf:"bytes,41,opt,name=tool_use_summary,json=toolUseSummary,proto3,oneof"`
+}
+
+type ClaudeStreamMessage_PromptSuggestion struct {
+	PromptSuggestion *PromptSuggestion `protobuf:"bytes,42,opt,name=prompt_suggestion,json=promptSuggestion,proto3,oneof"`
+}
+
+type ClaudeStreamMessage_ConversationReset struct {
+	ConversationReset *ConversationReset `protobuf:"bytes,43,opt,name=conversation_reset,json=conversationReset,proto3,oneof"`
+}
+
+type ClaudeStreamMessage_ActiveGoal struct {
+	ActiveGoal *ActiveGoal `protobuf:"bytes,44,opt,name=active_goal,json=activeGoal,proto3,oneof"`
+}
+
 func (*ClaudeStreamMessage_User) isClaudeStreamMessage_Msg() {}
 
 func (*ClaudeStreamMessage_Assistant) isClaudeStreamMessage_Msg() {}
@@ -721,6 +1052,50 @@ func (*ClaudeStreamMessage_ControlResponse) isClaudeStreamMessage_Msg() {}
 func (*ClaudeStreamMessage_ControlCancelRequest) isClaudeStreamMessage_Msg() {}
 
 func (*ClaudeStreamMessage_KeepAlive) isClaudeStreamMessage_Msg() {}
+
+func (*ClaudeStreamMessage_Unknown) isClaudeStreamMessage_Msg() {}
+
+func (*ClaudeStreamMessage_ApiRetry) isClaudeStreamMessage_Msg() {}
+
+func (*ClaudeStreamMessage_ControlRequestProgress) isClaudeStreamMessage_Msg() {}
+
+func (*ClaudeStreamMessage_ModelRefusalFallback) isClaudeStreamMessage_Msg() {}
+
+func (*ClaudeStreamMessage_ModelRefusalNoFallback) isClaudeStreamMessage_Msg() {}
+
+func (*ClaudeStreamMessage_LocalCommandOutput) isClaudeStreamMessage_Msg() {}
+
+func (*ClaudeStreamMessage_HookProgress) isClaudeStreamMessage_Msg() {}
+
+func (*ClaudeStreamMessage_PluginInstall) isClaudeStreamMessage_Msg() {}
+
+func (*ClaudeStreamMessage_TaskProgress) isClaudeStreamMessage_Msg() {}
+
+func (*ClaudeStreamMessage_SessionStateChanged) isClaudeStreamMessage_Msg() {}
+
+func (*ClaudeStreamMessage_WorkerShuttingDown) isClaudeStreamMessage_Msg() {}
+
+func (*ClaudeStreamMessage_CommandsChanged) isClaudeStreamMessage_Msg() {}
+
+func (*ClaudeStreamMessage_FilesPersisted) isClaudeStreamMessage_Msg() {}
+
+func (*ClaudeStreamMessage_MemoryRecall) isClaudeStreamMessage_Msg() {}
+
+func (*ClaudeStreamMessage_ElicitationComplete) isClaudeStreamMessage_Msg() {}
+
+func (*ClaudeStreamMessage_PermissionDenied) isClaudeStreamMessage_Msg() {}
+
+func (*ClaudeStreamMessage_MirrorError) isClaudeStreamMessage_Msg() {}
+
+func (*ClaudeStreamMessage_Informational) isClaudeStreamMessage_Msg() {}
+
+func (*ClaudeStreamMessage_ToolUseSummary) isClaudeStreamMessage_Msg() {}
+
+func (*ClaudeStreamMessage_PromptSuggestion) isClaudeStreamMessage_Msg() {}
+
+func (*ClaudeStreamMessage_ConversationReset) isClaudeStreamMessage_Msg() {}
+
+func (*ClaudeStreamMessage_ActiveGoal) isClaudeStreamMessage_Msg() {}
 
 // [sdk coreTypes.d.ts:396-426] SDKUserMessage + SDKUserMessageReplay folded
 // (is_replay=true for the replay variant, whose uuid is required).
@@ -3963,11 +4338,2213 @@ func (*KeepAlive) Descriptor() ([]byte, []int) {
 	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{42}
 }
 
+// [sdk 0.3.220] system/api_retry — a retryable API failure about to be
+// retried. error_status is null for connection errors with no HTTP response.
+type ApiRetry struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	Attempt        int32                  `protobuf:"varint,1,opt,name=attempt,proto3" json:"attempt,omitempty"`
+	MaxRetries     int32                  `protobuf:"varint,2,opt,name=max_retries,json=maxRetries,proto3" json:"max_retries,omitempty"`
+	RetryDelayMs   int64                  `protobuf:"varint,3,opt,name=retry_delay_ms,json=retryDelayMs,proto3" json:"retry_delay_ms,omitempty"`
+	ErrorStatus    int64                  `protobuf:"varint,4,opt,name=error_status,json=errorStatus,proto3" json:"error_status,omitempty"`            // 0 = null; see error_status_set
+	ErrorStatusSet bool                   `protobuf:"varint,5,opt,name=error_status_set,json=errorStatusSet,proto3" json:"error_status_set,omitempty"` // false = the null (connection-error) case
+	Error          AssistantMessageError  `protobuf:"varint,6,opt,name=error,proto3,enum=agentshim.data.v1.AssistantMessageError" json:"error,omitempty"`
+	Uuid           string                 `protobuf:"bytes,7,opt,name=uuid,proto3" json:"uuid,omitempty"`
+	SessionId      string                 `protobuf:"bytes,8,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *ApiRetry) Reset() {
+	*x = ApiRetry{}
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[43]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ApiRetry) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ApiRetry) ProtoMessage() {}
+
+func (x *ApiRetry) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[43]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ApiRetry.ProtoReflect.Descriptor instead.
+func (*ApiRetry) Descriptor() ([]byte, []int) {
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{43}
+}
+
+func (x *ApiRetry) GetAttempt() int32 {
+	if x != nil {
+		return x.Attempt
+	}
+	return 0
+}
+
+func (x *ApiRetry) GetMaxRetries() int32 {
+	if x != nil {
+		return x.MaxRetries
+	}
+	return 0
+}
+
+func (x *ApiRetry) GetRetryDelayMs() int64 {
+	if x != nil {
+		return x.RetryDelayMs
+	}
+	return 0
+}
+
+func (x *ApiRetry) GetErrorStatus() int64 {
+	if x != nil {
+		return x.ErrorStatus
+	}
+	return 0
+}
+
+func (x *ApiRetry) GetErrorStatusSet() bool {
+	if x != nil {
+		return x.ErrorStatusSet
+	}
+	return false
+}
+
+func (x *ApiRetry) GetError() AssistantMessageError {
+	if x != nil {
+		return x.Error
+	}
+	return AssistantMessageError_ASSISTANT_MESSAGE_ERROR_UNSPECIFIED
+}
+
+func (x *ApiRetry) GetUuid() string {
+	if x != nil {
+		return x.Uuid
+	}
+	return ""
+}
+
+func (x *ApiRetry) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+// [sdk 0.3.220] system/control_request_progress — progress on an in-flight
+// control request. The optional numeric fields are present only for the
+// `api_retry` status, so each carries a *_set companion.
+type ControlRequestProgress struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	RequestId       string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Status          string                 `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"` // "started" | "api_retry"
+	Attempt         int32                  `protobuf:"varint,3,opt,name=attempt,proto3" json:"attempt,omitempty"`
+	AttemptSet      bool                   `protobuf:"varint,4,opt,name=attempt_set,json=attemptSet,proto3" json:"attempt_set,omitempty"`
+	MaxRetries      int32                  `protobuf:"varint,5,opt,name=max_retries,json=maxRetries,proto3" json:"max_retries,omitempty"`
+	MaxRetriesSet   bool                   `protobuf:"varint,6,opt,name=max_retries_set,json=maxRetriesSet,proto3" json:"max_retries_set,omitempty"`
+	RetryDelayMs    int64                  `protobuf:"varint,7,opt,name=retry_delay_ms,json=retryDelayMs,proto3" json:"retry_delay_ms,omitempty"`
+	RetryDelayMsSet bool                   `protobuf:"varint,8,opt,name=retry_delay_ms_set,json=retryDelayMsSet,proto3" json:"retry_delay_ms_set,omitempty"`
+	ErrorStatus     int64                  `protobuf:"varint,9,opt,name=error_status,json=errorStatus,proto3" json:"error_status,omitempty"`
+	ErrorStatusSet  bool                   `protobuf:"varint,10,opt,name=error_status_set,json=errorStatusSet,proto3" json:"error_status_set,omitempty"`
+	Uuid            string                 `protobuf:"bytes,11,opt,name=uuid,proto3" json:"uuid,omitempty"`
+	SessionId       string                 `protobuf:"bytes,12,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *ControlRequestProgress) Reset() {
+	*x = ControlRequestProgress{}
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[44]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ControlRequestProgress) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ControlRequestProgress) ProtoMessage() {}
+
+func (x *ControlRequestProgress) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[44]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ControlRequestProgress.ProtoReflect.Descriptor instead.
+func (*ControlRequestProgress) Descriptor() ([]byte, []int) {
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{44}
+}
+
+func (x *ControlRequestProgress) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *ControlRequestProgress) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *ControlRequestProgress) GetAttempt() int32 {
+	if x != nil {
+		return x.Attempt
+	}
+	return 0
+}
+
+func (x *ControlRequestProgress) GetAttemptSet() bool {
+	if x != nil {
+		return x.AttemptSet
+	}
+	return false
+}
+
+func (x *ControlRequestProgress) GetMaxRetries() int32 {
+	if x != nil {
+		return x.MaxRetries
+	}
+	return 0
+}
+
+func (x *ControlRequestProgress) GetMaxRetriesSet() bool {
+	if x != nil {
+		return x.MaxRetriesSet
+	}
+	return false
+}
+
+func (x *ControlRequestProgress) GetRetryDelayMs() int64 {
+	if x != nil {
+		return x.RetryDelayMs
+	}
+	return 0
+}
+
+func (x *ControlRequestProgress) GetRetryDelayMsSet() bool {
+	if x != nil {
+		return x.RetryDelayMsSet
+	}
+	return false
+}
+
+func (x *ControlRequestProgress) GetErrorStatus() int64 {
+	if x != nil {
+		return x.ErrorStatus
+	}
+	return 0
+}
+
+func (x *ControlRequestProgress) GetErrorStatusSet() bool {
+	if x != nil {
+		return x.ErrorStatusSet
+	}
+	return false
+}
+
+func (x *ControlRequestProgress) GetUuid() string {
+	if x != nil {
+		return x.Uuid
+	}
+	return ""
+}
+
+func (x *ControlRequestProgress) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+// [sdk 0.3.220] system/model_refusal_fallback — the stream twin of the disk
+// ModelRefusalFallbackLine. Richer than the disk form: it also names the
+// messages retracted by the fallback.
+type ModelRefusalFallback struct {
+	state                  protoimpl.MessageState `protogen:"open.v1"`
+	Trigger                string                 `protobuf:"bytes,1,opt,name=trigger,proto3" json:"trigger,omitempty"`     // "refusal"
+	Direction              string                 `protobuf:"bytes,2,opt,name=direction,proto3" json:"direction,omitempty"` // "retry" | "revert" | "sticky"
+	OriginalModel          string                 `protobuf:"bytes,3,opt,name=original_model,json=originalModel,proto3" json:"original_model,omitempty"`
+	FallbackModel          string                 `protobuf:"bytes,4,opt,name=fallback_model,json=fallbackModel,proto3" json:"fallback_model,omitempty"`
+	RequestId              string                 `protobuf:"bytes,5,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`                                       // nullable: "" = null
+	ApiRefusalCategory     string                 `protobuf:"bytes,6,opt,name=api_refusal_category,json=apiRefusalCategory,proto3" json:"api_refusal_category,omitempty"`          // nullable
+	ApiRefusalExplanation  string                 `protobuf:"bytes,7,opt,name=api_refusal_explanation,json=apiRefusalExplanation,proto3" json:"api_refusal_explanation,omitempty"` // nullable
+	RetractedMessageUuids  []string               `protobuf:"bytes,8,rep,name=retracted_message_uuids,json=retractedMessageUuids,proto3" json:"retracted_message_uuids,omitempty"`
+	RefusedUserMessageUuid string                 `protobuf:"bytes,9,opt,name=refused_user_message_uuid,json=refusedUserMessageUuid,proto3" json:"refused_user_message_uuid,omitempty"` // nullable
+	Content                string                 `protobuf:"bytes,10,opt,name=content,proto3" json:"content,omitempty"`
+	Uuid                   string                 `protobuf:"bytes,11,opt,name=uuid,proto3" json:"uuid,omitempty"`
+	SessionId              string                 `protobuf:"bytes,12,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
+}
+
+func (x *ModelRefusalFallback) Reset() {
+	*x = ModelRefusalFallback{}
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[45]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ModelRefusalFallback) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ModelRefusalFallback) ProtoMessage() {}
+
+func (x *ModelRefusalFallback) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[45]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ModelRefusalFallback.ProtoReflect.Descriptor instead.
+func (*ModelRefusalFallback) Descriptor() ([]byte, []int) {
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{45}
+}
+
+func (x *ModelRefusalFallback) GetTrigger() string {
+	if x != nil {
+		return x.Trigger
+	}
+	return ""
+}
+
+func (x *ModelRefusalFallback) GetDirection() string {
+	if x != nil {
+		return x.Direction
+	}
+	return ""
+}
+
+func (x *ModelRefusalFallback) GetOriginalModel() string {
+	if x != nil {
+		return x.OriginalModel
+	}
+	return ""
+}
+
+func (x *ModelRefusalFallback) GetFallbackModel() string {
+	if x != nil {
+		return x.FallbackModel
+	}
+	return ""
+}
+
+func (x *ModelRefusalFallback) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *ModelRefusalFallback) GetApiRefusalCategory() string {
+	if x != nil {
+		return x.ApiRefusalCategory
+	}
+	return ""
+}
+
+func (x *ModelRefusalFallback) GetApiRefusalExplanation() string {
+	if x != nil {
+		return x.ApiRefusalExplanation
+	}
+	return ""
+}
+
+func (x *ModelRefusalFallback) GetRetractedMessageUuids() []string {
+	if x != nil {
+		return x.RetractedMessageUuids
+	}
+	return nil
+}
+
+func (x *ModelRefusalFallback) GetRefusedUserMessageUuid() string {
+	if x != nil {
+		return x.RefusedUserMessageUuid
+	}
+	return ""
+}
+
+func (x *ModelRefusalFallback) GetContent() string {
+	if x != nil {
+		return x.Content
+	}
+	return ""
+}
+
+func (x *ModelRefusalFallback) GetUuid() string {
+	if x != nil {
+		return x.Uuid
+	}
+	return ""
+}
+
+func (x *ModelRefusalFallback) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+// [sdk 0.3.220] system/model_refusal_no_fallback — a refusal with no model to
+// fall back to, so it surfaces rather than retrying.
+type ModelRefusalNoFallback struct {
+	state                  protoimpl.MessageState `protogen:"open.v1"`
+	OriginalModel          string                 `protobuf:"bytes,1,opt,name=original_model,json=originalModel,proto3" json:"original_model,omitempty"`
+	RequestId              string                 `protobuf:"bytes,2,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`                                            // nullable: "" = null
+	ApiRefusalCategory     string                 `protobuf:"bytes,3,opt,name=api_refusal_category,json=apiRefusalCategory,proto3" json:"api_refusal_category,omitempty"`               // nullable
+	ApiRefusalExplanation  string                 `protobuf:"bytes,4,opt,name=api_refusal_explanation,json=apiRefusalExplanation,proto3" json:"api_refusal_explanation,omitempty"`      // nullable
+	RefusedUserMessageUuid string                 `protobuf:"bytes,5,opt,name=refused_user_message_uuid,json=refusedUserMessageUuid,proto3" json:"refused_user_message_uuid,omitempty"` // nullable
+	Content                string                 `protobuf:"bytes,6,opt,name=content,proto3" json:"content,omitempty"`
+	Uuid                   string                 `protobuf:"bytes,7,opt,name=uuid,proto3" json:"uuid,omitempty"`
+	SessionId              string                 `protobuf:"bytes,8,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
+}
+
+func (x *ModelRefusalNoFallback) Reset() {
+	*x = ModelRefusalNoFallback{}
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[46]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ModelRefusalNoFallback) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ModelRefusalNoFallback) ProtoMessage() {}
+
+func (x *ModelRefusalNoFallback) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[46]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ModelRefusalNoFallback.ProtoReflect.Descriptor instead.
+func (*ModelRefusalNoFallback) Descriptor() ([]byte, []int) {
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{46}
+}
+
+func (x *ModelRefusalNoFallback) GetOriginalModel() string {
+	if x != nil {
+		return x.OriginalModel
+	}
+	return ""
+}
+
+func (x *ModelRefusalNoFallback) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *ModelRefusalNoFallback) GetApiRefusalCategory() string {
+	if x != nil {
+		return x.ApiRefusalCategory
+	}
+	return ""
+}
+
+func (x *ModelRefusalNoFallback) GetApiRefusalExplanation() string {
+	if x != nil {
+		return x.ApiRefusalExplanation
+	}
+	return ""
+}
+
+func (x *ModelRefusalNoFallback) GetRefusedUserMessageUuid() string {
+	if x != nil {
+		return x.RefusedUserMessageUuid
+	}
+	return ""
+}
+
+func (x *ModelRefusalNoFallback) GetContent() string {
+	if x != nil {
+		return x.Content
+	}
+	return ""
+}
+
+func (x *ModelRefusalNoFallback) GetUuid() string {
+	if x != nil {
+		return x.Uuid
+	}
+	return ""
+}
+
+func (x *ModelRefusalNoFallback) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+// [sdk 0.3.220] system/local_command_output — stdout of a local (slash)
+// command, the stream twin of the disk LocalCommandLine.
+type LocalCommandOutput struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Content       string                 `protobuf:"bytes,1,opt,name=content,proto3" json:"content,omitempty"`
+	Uuid          string                 `protobuf:"bytes,2,opt,name=uuid,proto3" json:"uuid,omitempty"`
+	SessionId     string                 `protobuf:"bytes,3,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LocalCommandOutput) Reset() {
+	*x = LocalCommandOutput{}
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[47]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LocalCommandOutput) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LocalCommandOutput) ProtoMessage() {}
+
+func (x *LocalCommandOutput) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[47]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LocalCommandOutput.ProtoReflect.Descriptor instead.
+func (*LocalCommandOutput) Descriptor() ([]byte, []int) {
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{47}
+}
+
+func (x *LocalCommandOutput) GetContent() string {
+	if x != nil {
+		return x.Content
+	}
+	return ""
+}
+
+func (x *LocalCommandOutput) GetUuid() string {
+	if x != nil {
+		return x.Uuid
+	}
+	return ""
+}
+
+func (x *LocalCommandOutput) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+// [sdk 0.3.220] system/hook_progress — mid-execution output from a running
+// hook. Distinct from HookResponse, which reports a FINISHED hook: this is
+// the same hook_id reporting while it still runs.
+type HookProgress struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	HookId        string                 `protobuf:"bytes,1,opt,name=hook_id,json=hookId,proto3" json:"hook_id,omitempty"`
+	HookName      string                 `protobuf:"bytes,2,opt,name=hook_name,json=hookName,proto3" json:"hook_name,omitempty"`
+	HookEvent     string                 `protobuf:"bytes,3,opt,name=hook_event,json=hookEvent,proto3" json:"hook_event,omitempty"`
+	Stdout        string                 `protobuf:"bytes,4,opt,name=stdout,proto3" json:"stdout,omitempty"`
+	Stderr        string                 `protobuf:"bytes,5,opt,name=stderr,proto3" json:"stderr,omitempty"`
+	Output        string                 `protobuf:"bytes,6,opt,name=output,proto3" json:"output,omitempty"`
+	Uuid          string                 `protobuf:"bytes,7,opt,name=uuid,proto3" json:"uuid,omitempty"`
+	SessionId     string                 `protobuf:"bytes,8,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HookProgress) Reset() {
+	*x = HookProgress{}
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[48]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HookProgress) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HookProgress) ProtoMessage() {}
+
+func (x *HookProgress) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[48]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HookProgress.ProtoReflect.Descriptor instead.
+func (*HookProgress) Descriptor() ([]byte, []int) {
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{48}
+}
+
+func (x *HookProgress) GetHookId() string {
+	if x != nil {
+		return x.HookId
+	}
+	return ""
+}
+
+func (x *HookProgress) GetHookName() string {
+	if x != nil {
+		return x.HookName
+	}
+	return ""
+}
+
+func (x *HookProgress) GetHookEvent() string {
+	if x != nil {
+		return x.HookEvent
+	}
+	return ""
+}
+
+func (x *HookProgress) GetStdout() string {
+	if x != nil {
+		return x.Stdout
+	}
+	return ""
+}
+
+func (x *HookProgress) GetStderr() string {
+	if x != nil {
+		return x.Stderr
+	}
+	return ""
+}
+
+func (x *HookProgress) GetOutput() string {
+	if x != nil {
+		return x.Output
+	}
+	return ""
+}
+
+func (x *HookProgress) GetUuid() string {
+	if x != nil {
+		return x.Uuid
+	}
+	return ""
+}
+
+func (x *HookProgress) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+// [sdk 0.3.220] system/plugin_install — plugin installation lifecycle.
+type PluginInstall struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Status        string                 `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"` // "started" | "installed" | "failed" | "completed"
+	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Error         string                 `protobuf:"bytes,3,opt,name=error,proto3" json:"error,omitempty"`
+	Uuid          string                 `protobuf:"bytes,4,opt,name=uuid,proto3" json:"uuid,omitempty"`
+	SessionId     string                 `protobuf:"bytes,5,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PluginInstall) Reset() {
+	*x = PluginInstall{}
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[49]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PluginInstall) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PluginInstall) ProtoMessage() {}
+
+func (x *PluginInstall) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[49]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PluginInstall.ProtoReflect.Descriptor instead.
+func (*PluginInstall) Descriptor() ([]byte, []int) {
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{49}
+}
+
+func (x *PluginInstall) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *PluginInstall) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *PluginInstall) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+func (x *PluginInstall) GetUuid() string {
+	if x != nil {
+		return x.Uuid
+	}
+	return ""
+}
+
+func (x *PluginInstall) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+// [sdk 0.3.220] system/task_progress — live in-flight subagent telemetry:
+// cumulative usage plus the tool it is currently in. `summary` is populated
+// only when the `agentProgressSummaries` option is on (the CLI forks the
+// subagent every ~30s to author one).
+type TaskProgressUsage struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TotalTokens   int64                  `protobuf:"varint,1,opt,name=total_tokens,json=totalTokens,proto3" json:"total_tokens,omitempty"`
+	ToolUses      int64                  `protobuf:"varint,2,opt,name=tool_uses,json=toolUses,proto3" json:"tool_uses,omitempty"`
+	DurationMs    int64                  `protobuf:"varint,3,opt,name=duration_ms,json=durationMs,proto3" json:"duration_ms,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TaskProgressUsage) Reset() {
+	*x = TaskProgressUsage{}
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[50]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TaskProgressUsage) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TaskProgressUsage) ProtoMessage() {}
+
+func (x *TaskProgressUsage) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[50]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TaskProgressUsage.ProtoReflect.Descriptor instead.
+func (*TaskProgressUsage) Descriptor() ([]byte, []int) {
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{50}
+}
+
+func (x *TaskProgressUsage) GetTotalTokens() int64 {
+	if x != nil {
+		return x.TotalTokens
+	}
+	return 0
+}
+
+func (x *TaskProgressUsage) GetToolUses() int64 {
+	if x != nil {
+		return x.ToolUses
+	}
+	return 0
+}
+
+func (x *TaskProgressUsage) GetDurationMs() int64 {
+	if x != nil {
+		return x.DurationMs
+	}
+	return 0
+}
+
+type TaskProgressMsg struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TaskId        string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	ToolUseId     string                 `protobuf:"bytes,2,opt,name=tool_use_id,json=toolUseId,proto3" json:"tool_use_id,omitempty"`
+	Description   string                 `protobuf:"bytes,3,opt,name=description,proto3" json:"description,omitempty"`
+	SubagentType  string                 `protobuf:"bytes,4,opt,name=subagent_type,json=subagentType,proto3" json:"subagent_type,omitempty"`
+	Usage         *TaskProgressUsage     `protobuf:"bytes,5,opt,name=usage,proto3" json:"usage,omitempty"`
+	LastToolName  string                 `protobuf:"bytes,6,opt,name=last_tool_name,json=lastToolName,proto3" json:"last_tool_name,omitempty"`
+	Summary       string                 `protobuf:"bytes,7,opt,name=summary,proto3" json:"summary,omitempty"`
+	Uuid          string                 `protobuf:"bytes,8,opt,name=uuid,proto3" json:"uuid,omitempty"`
+	SessionId     string                 `protobuf:"bytes,9,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TaskProgressMsg) Reset() {
+	*x = TaskProgressMsg{}
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[51]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TaskProgressMsg) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TaskProgressMsg) ProtoMessage() {}
+
+func (x *TaskProgressMsg) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[51]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TaskProgressMsg.ProtoReflect.Descriptor instead.
+func (*TaskProgressMsg) Descriptor() ([]byte, []int) {
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{51}
+}
+
+func (x *TaskProgressMsg) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *TaskProgressMsg) GetToolUseId() string {
+	if x != nil {
+		return x.ToolUseId
+	}
+	return ""
+}
+
+func (x *TaskProgressMsg) GetDescription() string {
+	if x != nil {
+		return x.Description
+	}
+	return ""
+}
+
+func (x *TaskProgressMsg) GetSubagentType() string {
+	if x != nil {
+		return x.SubagentType
+	}
+	return ""
+}
+
+func (x *TaskProgressMsg) GetUsage() *TaskProgressUsage {
+	if x != nil {
+		return x.Usage
+	}
+	return nil
+}
+
+func (x *TaskProgressMsg) GetLastToolName() string {
+	if x != nil {
+		return x.LastToolName
+	}
+	return ""
+}
+
+func (x *TaskProgressMsg) GetSummary() string {
+	if x != nil {
+		return x.Summary
+	}
+	return ""
+}
+
+func (x *TaskProgressMsg) GetUuid() string {
+	if x != nil {
+		return x.Uuid
+	}
+	return ""
+}
+
+func (x *TaskProgressMsg) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+// [sdk 0.3.220] system/session_state_changed — the explicit idle/busy/blocked
+// signal. `requires_action` is precisely "waiting on the user".
+type SessionStateChanged struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	State         string                 `protobuf:"bytes,1,opt,name=state,proto3" json:"state,omitempty"` // "idle" | "running" | "requires_action"
+	Uuid          string                 `protobuf:"bytes,2,opt,name=uuid,proto3" json:"uuid,omitempty"`
+	SessionId     string                 `protobuf:"bytes,3,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SessionStateChanged) Reset() {
+	*x = SessionStateChanged{}
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[52]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SessionStateChanged) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SessionStateChanged) ProtoMessage() {}
+
+func (x *SessionStateChanged) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[52]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SessionStateChanged.ProtoReflect.Descriptor instead.
+func (*SessionStateChanged) Descriptor() ([]byte, []int) {
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{52}
+}
+
+func (x *SessionStateChanged) GetState() string {
+	if x != nil {
+		return x.State
+	}
+	return ""
+}
+
+func (x *SessionStateChanged) GetUuid() string {
+	if x != nil {
+		return x.Uuid
+	}
+	return ""
+}
+
+func (x *SessionStateChanged) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+// [sdk 0.3.220] system/worker_shutting_down — opt-in graceful teardown
+// notice. Its ABSENCE is explicitly NOT a dead-host signal (handoffs,
+// respawns and hard kills all emit nothing), and because it lands in the
+// durable event stream a resumed session can replay a historical one, so
+// consumers must treat it as a live-tail hint rather than a session fact.
+type WorkerShuttingDown struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Reason        string                 `protobuf:"bytes,1,opt,name=reason,proto3" json:"reason,omitempty"` // snake_case, e.g. "host_exit"
+	Uuid          string                 `protobuf:"bytes,2,opt,name=uuid,proto3" json:"uuid,omitempty"`
+	SessionId     string                 `protobuf:"bytes,3,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WorkerShuttingDown) Reset() {
+	*x = WorkerShuttingDown{}
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[53]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkerShuttingDown) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkerShuttingDown) ProtoMessage() {}
+
+func (x *WorkerShuttingDown) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[53]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkerShuttingDown.ProtoReflect.Descriptor instead.
+func (*WorkerShuttingDown) Descriptor() ([]byte, []int) {
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{53}
+}
+
+func (x *WorkerShuttingDown) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+func (x *WorkerShuttingDown) GetUuid() string {
+	if x != nil {
+		return x.Uuid
+	}
+	return ""
+}
+
+func (x *WorkerShuttingDown) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+// [sdk 0.3.220] system/commands_changed — the full slash-command list after a
+// mid-session change. Consumers REPLACE their cached list with this payload;
+// it is not a delta.
+type SlashCommandRef struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Description   string                 `protobuf:"bytes,2,opt,name=description,proto3" json:"description,omitempty"`
+	ArgumentHint  string                 `protobuf:"bytes,3,opt,name=argument_hint,json=argumentHint,proto3" json:"argument_hint,omitempty"`
+	Aliases       []string               `protobuf:"bytes,4,rep,name=aliases,proto3" json:"aliases,omitempty"` // [sdk 0.3.220] e.g. /cost -> /usage
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SlashCommandRef) Reset() {
+	*x = SlashCommandRef{}
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[54]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SlashCommandRef) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SlashCommandRef) ProtoMessage() {}
+
+func (x *SlashCommandRef) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[54]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SlashCommandRef.ProtoReflect.Descriptor instead.
+func (*SlashCommandRef) Descriptor() ([]byte, []int) {
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{54}
+}
+
+func (x *SlashCommandRef) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *SlashCommandRef) GetDescription() string {
+	if x != nil {
+		return x.Description
+	}
+	return ""
+}
+
+func (x *SlashCommandRef) GetArgumentHint() string {
+	if x != nil {
+		return x.ArgumentHint
+	}
+	return ""
+}
+
+func (x *SlashCommandRef) GetAliases() []string {
+	if x != nil {
+		return x.Aliases
+	}
+	return nil
+}
+
+type CommandsChanged struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Commands      []*SlashCommandRef     `protobuf:"bytes,1,rep,name=commands,proto3" json:"commands,omitempty"`
+	Uuid          string                 `protobuf:"bytes,2,opt,name=uuid,proto3" json:"uuid,omitempty"`
+	SessionId     string                 `protobuf:"bytes,3,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CommandsChanged) Reset() {
+	*x = CommandsChanged{}
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[55]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CommandsChanged) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CommandsChanged) ProtoMessage() {}
+
+func (x *CommandsChanged) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[55]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CommandsChanged.ProtoReflect.Descriptor instead.
+func (*CommandsChanged) Descriptor() ([]byte, []int) {
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{55}
+}
+
+func (x *CommandsChanged) GetCommands() []*SlashCommandRef {
+	if x != nil {
+		return x.Commands
+	}
+	return nil
+}
+
+func (x *CommandsChanged) GetUuid() string {
+	if x != nil {
+		return x.Uuid
+	}
+	return ""
+}
+
+func (x *CommandsChanged) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+// [sdk 0.3.220] system/files_persisted — outcome of persisting attached
+// files, reporting successes and failures separately.
+type PersistedFile struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Filename      string                 `protobuf:"bytes,1,opt,name=filename,proto3" json:"filename,omitempty"`
+	FileId        string                 `protobuf:"bytes,2,opt,name=file_id,json=fileId,proto3" json:"file_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PersistedFile) Reset() {
+	*x = PersistedFile{}
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[56]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PersistedFile) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PersistedFile) ProtoMessage() {}
+
+func (x *PersistedFile) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[56]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PersistedFile.ProtoReflect.Descriptor instead.
+func (*PersistedFile) Descriptor() ([]byte, []int) {
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{56}
+}
+
+func (x *PersistedFile) GetFilename() string {
+	if x != nil {
+		return x.Filename
+	}
+	return ""
+}
+
+func (x *PersistedFile) GetFileId() string {
+	if x != nil {
+		return x.FileId
+	}
+	return ""
+}
+
+type FailedFile struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Filename      string                 `protobuf:"bytes,1,opt,name=filename,proto3" json:"filename,omitempty"`
+	Error         string                 `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FailedFile) Reset() {
+	*x = FailedFile{}
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[57]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FailedFile) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FailedFile) ProtoMessage() {}
+
+func (x *FailedFile) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[57]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FailedFile.ProtoReflect.Descriptor instead.
+func (*FailedFile) Descriptor() ([]byte, []int) {
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{57}
+}
+
+func (x *FailedFile) GetFilename() string {
+	if x != nil {
+		return x.Filename
+	}
+	return ""
+}
+
+func (x *FailedFile) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+type FilesPersisted struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Files         []*PersistedFile       `protobuf:"bytes,1,rep,name=files,proto3" json:"files,omitempty"`
+	Failed        []*FailedFile          `protobuf:"bytes,2,rep,name=failed,proto3" json:"failed,omitempty"`
+	ProcessedAt   string                 `protobuf:"bytes,3,opt,name=processed_at,json=processedAt,proto3" json:"processed_at,omitempty"` // ISO-8601
+	Uuid          string                 `protobuf:"bytes,4,opt,name=uuid,proto3" json:"uuid,omitempty"`
+	SessionId     string                 `protobuf:"bytes,5,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FilesPersisted) Reset() {
+	*x = FilesPersisted{}
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[58]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FilesPersisted) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FilesPersisted) ProtoMessage() {}
+
+func (x *FilesPersisted) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[58]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FilesPersisted.ProtoReflect.Descriptor instead.
+func (*FilesPersisted) Descriptor() ([]byte, []int) {
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{58}
+}
+
+func (x *FilesPersisted) GetFiles() []*PersistedFile {
+	if x != nil {
+		return x.Files
+	}
+	return nil
+}
+
+func (x *FilesPersisted) GetFailed() []*FailedFile {
+	if x != nil {
+		return x.Failed
+	}
+	return nil
+}
+
+func (x *FilesPersisted) GetProcessedAt() string {
+	if x != nil {
+		return x.ProcessedAt
+	}
+	return ""
+}
+
+func (x *FilesPersisted) GetUuid() string {
+	if x != nil {
+		return x.Uuid
+	}
+	return ""
+}
+
+func (x *FilesPersisted) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+// [sdk 0.3.220] system/memory_recall — memories surfaced into the context.
+// `content` is absent for file-backed `select` entries (the renderer
+// lazy-loads from `path`) and always present for `synthesize` mode and
+// `organization` scope, neither of which has an on-disk path.
+type RecalledMemory struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Path          string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`   // abs path, "<synthesis:DIR>" sentinel, or an https URL
+	Scope         string                 `protobuf:"bytes,2,opt,name=scope,proto3" json:"scope,omitempty"` // "personal" | "team" | "organization"
+	Content       string                 `protobuf:"bytes,3,opt,name=content,proto3" json:"content,omitempty"`
+	ContentSet    bool                   `protobuf:"varint,4,opt,name=content_set,json=contentSet,proto3" json:"content_set,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RecalledMemory) Reset() {
+	*x = RecalledMemory{}
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[59]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RecalledMemory) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RecalledMemory) ProtoMessage() {}
+
+func (x *RecalledMemory) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[59]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RecalledMemory.ProtoReflect.Descriptor instead.
+func (*RecalledMemory) Descriptor() ([]byte, []int) {
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{59}
+}
+
+func (x *RecalledMemory) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *RecalledMemory) GetScope() string {
+	if x != nil {
+		return x.Scope
+	}
+	return ""
+}
+
+func (x *RecalledMemory) GetContent() string {
+	if x != nil {
+		return x.Content
+	}
+	return ""
+}
+
+func (x *RecalledMemory) GetContentSet() bool {
+	if x != nil {
+		return x.ContentSet
+	}
+	return false
+}
+
+type MemoryRecall struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Mode          string                 `protobuf:"bytes,1,opt,name=mode,proto3" json:"mode,omitempty"` // "select" | "synthesize"
+	Memories      []*RecalledMemory      `protobuf:"bytes,2,rep,name=memories,proto3" json:"memories,omitempty"`
+	Uuid          string                 `protobuf:"bytes,3,opt,name=uuid,proto3" json:"uuid,omitempty"`
+	SessionId     string                 `protobuf:"bytes,4,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MemoryRecall) Reset() {
+	*x = MemoryRecall{}
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[60]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MemoryRecall) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MemoryRecall) ProtoMessage() {}
+
+func (x *MemoryRecall) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[60]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MemoryRecall.ProtoReflect.Descriptor instead.
+func (*MemoryRecall) Descriptor() ([]byte, []int) {
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{60}
+}
+
+func (x *MemoryRecall) GetMode() string {
+	if x != nil {
+		return x.Mode
+	}
+	return ""
+}
+
+func (x *MemoryRecall) GetMemories() []*RecalledMemory {
+	if x != nil {
+		return x.Memories
+	}
+	return nil
+}
+
+func (x *MemoryRecall) GetUuid() string {
+	if x != nil {
+		return x.Uuid
+	}
+	return ""
+}
+
+func (x *MemoryRecall) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+// [sdk 0.3.220] system/elicitation_complete — an MCP elicitation finished.
+type ElicitationComplete struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	McpServerName string                 `protobuf:"bytes,1,opt,name=mcp_server_name,json=mcpServerName,proto3" json:"mcp_server_name,omitempty"`
+	ElicitationId string                 `protobuf:"bytes,2,opt,name=elicitation_id,json=elicitationId,proto3" json:"elicitation_id,omitempty"`
+	Uuid          string                 `protobuf:"bytes,3,opt,name=uuid,proto3" json:"uuid,omitempty"`
+	SessionId     string                 `protobuf:"bytes,4,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ElicitationComplete) Reset() {
+	*x = ElicitationComplete{}
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[61]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ElicitationComplete) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ElicitationComplete) ProtoMessage() {}
+
+func (x *ElicitationComplete) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[61]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ElicitationComplete.ProtoReflect.Descriptor instead.
+func (*ElicitationComplete) Descriptor() ([]byte, []int) {
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{61}
+}
+
+func (x *ElicitationComplete) GetMcpServerName() string {
+	if x != nil {
+		return x.McpServerName
+	}
+	return ""
+}
+
+func (x *ElicitationComplete) GetElicitationId() string {
+	if x != nil {
+		return x.ElicitationId
+	}
+	return ""
+}
+
+func (x *ElicitationComplete) GetUuid() string {
+	if x != nil {
+		return x.Uuid
+	}
+	return ""
+}
+
+func (x *ElicitationComplete) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+// [sdk 0.3.220] system/permission_denied — a tool call refused. Distinct from
+// ResultMessage.permission_denials, which is the end-of-turn TALLY: this is
+// the live per-denial event, and carries the reason the tally does not.
+type PermissionDenied struct {
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	ToolName           string                 `protobuf:"bytes,1,opt,name=tool_name,json=toolName,proto3" json:"tool_name,omitempty"`
+	ToolUseId          string                 `protobuf:"bytes,2,opt,name=tool_use_id,json=toolUseId,proto3" json:"tool_use_id,omitempty"`
+	AgentId            string                 `protobuf:"bytes,3,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
+	DecisionReasonType string                 `protobuf:"bytes,4,opt,name=decision_reason_type,json=decisionReasonType,proto3" json:"decision_reason_type,omitempty"`
+	DecisionReason     string                 `protobuf:"bytes,5,opt,name=decision_reason,json=decisionReason,proto3" json:"decision_reason,omitempty"`
+	Message            string                 `protobuf:"bytes,6,opt,name=message,proto3" json:"message,omitempty"`
+	Uuid               string                 `protobuf:"bytes,7,opt,name=uuid,proto3" json:"uuid,omitempty"`
+	SessionId          string                 `protobuf:"bytes,8,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *PermissionDenied) Reset() {
+	*x = PermissionDenied{}
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[62]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PermissionDenied) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PermissionDenied) ProtoMessage() {}
+
+func (x *PermissionDenied) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[62]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PermissionDenied.ProtoReflect.Descriptor instead.
+func (*PermissionDenied) Descriptor() ([]byte, []int) {
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{62}
+}
+
+func (x *PermissionDenied) GetToolName() string {
+	if x != nil {
+		return x.ToolName
+	}
+	return ""
+}
+
+func (x *PermissionDenied) GetToolUseId() string {
+	if x != nil {
+		return x.ToolUseId
+	}
+	return ""
+}
+
+func (x *PermissionDenied) GetAgentId() string {
+	if x != nil {
+		return x.AgentId
+	}
+	return ""
+}
+
+func (x *PermissionDenied) GetDecisionReasonType() string {
+	if x != nil {
+		return x.DecisionReasonType
+	}
+	return ""
+}
+
+func (x *PermissionDenied) GetDecisionReason() string {
+	if x != nil {
+		return x.DecisionReason
+	}
+	return ""
+}
+
+func (x *PermissionDenied) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *PermissionDenied) GetUuid() string {
+	if x != nil {
+		return x.Uuid
+	}
+	return ""
+}
+
+func (x *PermissionDenied) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+// [sdk 0.3.220] system/mirror_error — transcript mirroring failed for one
+// session key.
+type MirrorKey struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ProjectKey    string                 `protobuf:"bytes,1,opt,name=project_key,json=projectKey,proto3" json:"project_key,omitempty"`
+	SessionId     string                 `protobuf:"bytes,2,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	Subpath       string                 `protobuf:"bytes,3,opt,name=subpath,proto3" json:"subpath,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MirrorKey) Reset() {
+	*x = MirrorKey{}
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[63]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MirrorKey) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MirrorKey) ProtoMessage() {}
+
+func (x *MirrorKey) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[63]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MirrorKey.ProtoReflect.Descriptor instead.
+func (*MirrorKey) Descriptor() ([]byte, []int) {
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{63}
+}
+
+func (x *MirrorKey) GetProjectKey() string {
+	if x != nil {
+		return x.ProjectKey
+	}
+	return ""
+}
+
+func (x *MirrorKey) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *MirrorKey) GetSubpath() string {
+	if x != nil {
+		return x.Subpath
+	}
+	return ""
+}
+
+type MirrorError struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Error         string                 `protobuf:"bytes,1,opt,name=error,proto3" json:"error,omitempty"`
+	Key           *MirrorKey             `protobuf:"bytes,2,opt,name=key,proto3" json:"key,omitempty"`
+	Uuid          string                 `protobuf:"bytes,3,opt,name=uuid,proto3" json:"uuid,omitempty"`
+	SessionId     string                 `protobuf:"bytes,4,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MirrorError) Reset() {
+	*x = MirrorError{}
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[64]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MirrorError) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MirrorError) ProtoMessage() {}
+
+func (x *MirrorError) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[64]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MirrorError.ProtoReflect.Descriptor instead.
+func (*MirrorError) Descriptor() ([]byte, []int) {
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{64}
+}
+
+func (x *MirrorError) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+func (x *MirrorError) GetKey() *MirrorKey {
+	if x != nil {
+		return x.Key
+	}
+	return nil
+}
+
+func (x *MirrorError) GetUuid() string {
+	if x != nil {
+		return x.Uuid
+	}
+	return ""
+}
+
+func (x *MirrorError) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+// [sdk 0.3.220] system/informational — host-directed notice. `level` drives
+// prominence ("info" is transcript-only); `prevent_continuation` marks a
+// notice the agent must not simply continue past.
+type Informational struct {
+	state               protoimpl.MessageState `protogen:"open.v1"`
+	Content             string                 `protobuf:"bytes,1,opt,name=content,proto3" json:"content,omitempty"`
+	Level               string                 `protobuf:"bytes,2,opt,name=level,proto3" json:"level,omitempty"`                            // "info" | "notice" | "suggestion" | "warning"
+	ToolUseId           string                 `protobuf:"bytes,3,opt,name=tool_use_id,json=toolUseId,proto3" json:"tool_use_id,omitempty"` // dedupes notices for the same tool use
+	PreventContinuation bool                   `protobuf:"varint,4,opt,name=prevent_continuation,json=preventContinuation,proto3" json:"prevent_continuation,omitempty"`
+	Uuid                string                 `protobuf:"bytes,5,opt,name=uuid,proto3" json:"uuid,omitempty"`
+	SessionId           string                 `protobuf:"bytes,6,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
+}
+
+func (x *Informational) Reset() {
+	*x = Informational{}
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[65]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Informational) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Informational) ProtoMessage() {}
+
+func (x *Informational) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[65]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Informational.ProtoReflect.Descriptor instead.
+func (*Informational) Descriptor() ([]byte, []int) {
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{65}
+}
+
+func (x *Informational) GetContent() string {
+	if x != nil {
+		return x.Content
+	}
+	return ""
+}
+
+func (x *Informational) GetLevel() string {
+	if x != nil {
+		return x.Level
+	}
+	return ""
+}
+
+func (x *Informational) GetToolUseId() string {
+	if x != nil {
+		return x.ToolUseId
+	}
+	return ""
+}
+
+func (x *Informational) GetPreventContinuation() bool {
+	if x != nil {
+		return x.PreventContinuation
+	}
+	return false
+}
+
+func (x *Informational) GetUuid() string {
+	if x != nil {
+		return x.Uuid
+	}
+	return ""
+}
+
+func (x *Informational) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+// [sdk 0.3.220] tool_use_summary — a natural-language summary standing in for
+// a run of tool calls, naming the calls it covers.
+type ToolUseSummary struct {
+	state               protoimpl.MessageState `protogen:"open.v1"`
+	Summary             string                 `protobuf:"bytes,1,opt,name=summary,proto3" json:"summary,omitempty"`
+	PrecedingToolUseIds []string               `protobuf:"bytes,2,rep,name=preceding_tool_use_ids,json=precedingToolUseIds,proto3" json:"preceding_tool_use_ids,omitempty"`
+	Uuid                string                 `protobuf:"bytes,3,opt,name=uuid,proto3" json:"uuid,omitempty"`
+	SessionId           string                 `protobuf:"bytes,4,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
+}
+
+func (x *ToolUseSummary) Reset() {
+	*x = ToolUseSummary{}
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[66]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ToolUseSummary) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ToolUseSummary) ProtoMessage() {}
+
+func (x *ToolUseSummary) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[66]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ToolUseSummary.ProtoReflect.Descriptor instead.
+func (*ToolUseSummary) Descriptor() ([]byte, []int) {
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{66}
+}
+
+func (x *ToolUseSummary) GetSummary() string {
+	if x != nil {
+		return x.Summary
+	}
+	return ""
+}
+
+func (x *ToolUseSummary) GetPrecedingToolUseIds() []string {
+	if x != nil {
+		return x.PrecedingToolUseIds
+	}
+	return nil
+}
+
+func (x *ToolUseSummary) GetUuid() string {
+	if x != nil {
+		return x.Uuid
+	}
+	return ""
+}
+
+func (x *ToolUseSummary) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+// [sdk 0.3.220] prompt_suggestion — a suggested next prompt for the user.
+type PromptSuggestion struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Suggestion    string                 `protobuf:"bytes,1,opt,name=suggestion,proto3" json:"suggestion,omitempty"`
+	Uuid          string                 `protobuf:"bytes,2,opt,name=uuid,proto3" json:"uuid,omitempty"`
+	SessionId     string                 `protobuf:"bytes,3,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PromptSuggestion) Reset() {
+	*x = PromptSuggestion{}
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[67]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PromptSuggestion) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PromptSuggestion) ProtoMessage() {}
+
+func (x *PromptSuggestion) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[67]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PromptSuggestion.ProtoReflect.Descriptor instead.
+func (*PromptSuggestion) Descriptor() ([]byte, []int) {
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{67}
+}
+
+func (x *PromptSuggestion) GetSuggestion() string {
+	if x != nil {
+		return x.Suggestion
+	}
+	return ""
+}
+
+func (x *PromptSuggestion) GetUuid() string {
+	if x != nil {
+		return x.Uuid
+	}
+	return ""
+}
+
+func (x *PromptSuggestion) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+// [sdk 0.3.220] conversation_reset — the conversation was reset and continues
+// under a NEW id. Consumers keyed by conversation id must re-key here.
+type ConversationReset struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	NewConversationId string                 `protobuf:"bytes,1,opt,name=new_conversation_id,json=newConversationId,proto3" json:"new_conversation_id,omitempty"`
+	Uuid              string                 `protobuf:"bytes,2,opt,name=uuid,proto3" json:"uuid,omitempty"`
+	SessionId         string                 `protobuf:"bytes,3,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *ConversationReset) Reset() {
+	*x = ConversationReset{}
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[68]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ConversationReset) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ConversationReset) ProtoMessage() {}
+
+func (x *ConversationReset) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[68]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ConversationReset.ProtoReflect.Descriptor instead.
+func (*ConversationReset) Descriptor() ([]byte, []int) {
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{68}
+}
+
+func (x *ConversationReset) GetNewConversationId() string {
+	if x != nil {
+		return x.NewConversationId
+	}
+	return ""
+}
+
+func (x *ConversationReset) GetUuid() string {
+	if x != nil {
+		return x.Uuid
+	}
+	return ""
+}
+
+func (x *ConversationReset) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+// [sdk 0.3.220] active_goal — the standing goal condition the loop is working
+// toward, or its clearing. NOTE: this type is NOT a member of the SDK's
+// `SDKMessage` union, but the SDK explicitly forwards it to the query()
+// iterator, so it reaches this converter and needs an arm like any other.
+//
+// `value` is nullable on the wire and the null IS the signal (the goal was
+// cleared), so `value_set` distinguishes "no goal" from "a goal with zero
+// iterations" — a distinction a bare zero value would destroy.
+type ActiveGoalValue struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Condition     string                 `protobuf:"bytes,1,opt,name=condition,proto3" json:"condition,omitempty"`
+	Iterations    int64                  `protobuf:"varint,2,opt,name=iterations,proto3" json:"iterations,omitempty"`
+	SetAt         int64                  `protobuf:"varint,3,opt,name=set_at,json=setAt,proto3" json:"set_at,omitempty"`
+	TokensAtStart int64                  `protobuf:"varint,4,opt,name=tokens_at_start,json=tokensAtStart,proto3" json:"tokens_at_start,omitempty"`
+	LastReason    string                 `protobuf:"bytes,5,opt,name=last_reason,json=lastReason,proto3" json:"last_reason,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ActiveGoalValue) Reset() {
+	*x = ActiveGoalValue{}
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[69]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ActiveGoalValue) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ActiveGoalValue) ProtoMessage() {}
+
+func (x *ActiveGoalValue) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[69]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ActiveGoalValue.ProtoReflect.Descriptor instead.
+func (*ActiveGoalValue) Descriptor() ([]byte, []int) {
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{69}
+}
+
+func (x *ActiveGoalValue) GetCondition() string {
+	if x != nil {
+		return x.Condition
+	}
+	return ""
+}
+
+func (x *ActiveGoalValue) GetIterations() int64 {
+	if x != nil {
+		return x.Iterations
+	}
+	return 0
+}
+
+func (x *ActiveGoalValue) GetSetAt() int64 {
+	if x != nil {
+		return x.SetAt
+	}
+	return 0
+}
+
+func (x *ActiveGoalValue) GetTokensAtStart() int64 {
+	if x != nil {
+		return x.TokensAtStart
+	}
+	return 0
+}
+
+func (x *ActiveGoalValue) GetLastReason() string {
+	if x != nil {
+		return x.LastReason
+	}
+	return ""
+}
+
+type ActiveGoal struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Value         *ActiveGoalValue       `protobuf:"bytes,1,opt,name=value,proto3" json:"value,omitempty"`
+	ValueSet      bool                   `protobuf:"varint,2,opt,name=value_set,json=valueSet,proto3" json:"value_set,omitempty"`
+	Uuid          string                 `protobuf:"bytes,3,opt,name=uuid,proto3" json:"uuid,omitempty"`
+	SessionId     string                 `protobuf:"bytes,4,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ActiveGoal) Reset() {
+	*x = ActiveGoal{}
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[70]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ActiveGoal) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ActiveGoal) ProtoMessage() {}
+
+func (x *ActiveGoal) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_data_v1_stream_proto_msgTypes[70]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ActiveGoal.ProtoReflect.Descriptor instead.
+func (*ActiveGoal) Descriptor() ([]byte, []int) {
+	return file_agentshim_data_v1_stream_proto_rawDescGZIP(), []int{70}
+}
+
+func (x *ActiveGoal) GetValue() *ActiveGoalValue {
+	if x != nil {
+		return x.Value
+	}
+	return nil
+}
+
+func (x *ActiveGoal) GetValueSet() bool {
+	if x != nil {
+		return x.ValueSet
+	}
+	return false
+}
+
+func (x *ActiveGoal) GetUuid() string {
+	if x != nil {
+		return x.Uuid
+	}
+	return ""
+}
+
+func (x *ActiveGoal) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
 var File_agentshim_data_v1_stream_proto protoreflect.FileDescriptor
 
 const file_agentshim_data_v1_stream_proto_rawDesc = "" +
 	"\n" +
-	"\x1eagentshim/data/v1/stream.proto\x12\x11agentshim.data.v1\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1dagentshim/data/v1/tools.proto\"\xf5\f\n" +
+	"\x1eagentshim/data/v1/stream.proto\x12\x11agentshim.data.v1\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1dagentshim/data/v1/tools.proto\x1a\x1fagentshim/data/v1/unknown.proto\"\xf4\x1a\n" +
 	"\x13ClaudeStreamMessage\x124\n" +
 	"\x04user\x18\x01 \x01(\v2\x1e.agentshim.data.v1.UserMessageH\x00R\x04user\x12C\n" +
 	"\tassistant\x18\x02 \x01(\v2#.agentshim.data.v1.AssistantMessageH\x00R\tassistant\x12:\n" +
@@ -3994,7 +6571,30 @@ const file_agentshim_data_v1_stream_proto_rawDesc = "" +
 	"\x10control_response\x18\x14 \x01(\v2\".agentshim.data.v1.ControlResponseH\x00R\x0fcontrolResponse\x12_\n" +
 	"\x16control_cancel_request\x18\x15 \x01(\v2'.agentshim.data.v1.ControlCancelRequestH\x00R\x14controlCancelRequest\x12=\n" +
 	"\n" +
-	"keep_alive\x18\x16 \x01(\v2\x1c.agentshim.data.v1.KeepAliveH\x00R\tkeepAliveB\x05\n" +
+	"keep_alive\x18\x16 \x01(\v2\x1c.agentshim.data.v1.KeepAliveH\x00R\tkeepAlive\x12<\n" +
+	"\aunknown\x18\x17 \x01(\v2 .agentshim.data.v1.UnknownRecordH\x00R\aunknown\x12:\n" +
+	"\tapi_retry\x18\x18 \x01(\v2\x1b.agentshim.data.v1.ApiRetryH\x00R\bapiRetry\x12e\n" +
+	"\x18control_request_progress\x18\x19 \x01(\v2).agentshim.data.v1.ControlRequestProgressH\x00R\x16controlRequestProgress\x12_\n" +
+	"\x16model_refusal_fallback\x18\x1a \x01(\v2'.agentshim.data.v1.ModelRefusalFallbackH\x00R\x14modelRefusalFallback\x12f\n" +
+	"\x19model_refusal_no_fallback\x18\x1b \x01(\v2).agentshim.data.v1.ModelRefusalNoFallbackH\x00R\x16modelRefusalNoFallback\x12Y\n" +
+	"\x14local_command_output\x18\x1c \x01(\v2%.agentshim.data.v1.LocalCommandOutputH\x00R\x12localCommandOutput\x12F\n" +
+	"\rhook_progress\x18\x1d \x01(\v2\x1f.agentshim.data.v1.HookProgressH\x00R\fhookProgress\x12I\n" +
+	"\x0eplugin_install\x18\x1e \x01(\v2 .agentshim.data.v1.PluginInstallH\x00R\rpluginInstall\x12I\n" +
+	"\rtask_progress\x18\x1f \x01(\v2\".agentshim.data.v1.TaskProgressMsgH\x00R\ftaskProgress\x12\\\n" +
+	"\x15session_state_changed\x18  \x01(\v2&.agentshim.data.v1.SessionStateChangedH\x00R\x13sessionStateChanged\x12Y\n" +
+	"\x14worker_shutting_down\x18! \x01(\v2%.agentshim.data.v1.WorkerShuttingDownH\x00R\x12workerShuttingDown\x12O\n" +
+	"\x10commands_changed\x18\" \x01(\v2\".agentshim.data.v1.CommandsChangedH\x00R\x0fcommandsChanged\x12L\n" +
+	"\x0ffiles_persisted\x18# \x01(\v2!.agentshim.data.v1.FilesPersistedH\x00R\x0efilesPersisted\x12F\n" +
+	"\rmemory_recall\x18$ \x01(\v2\x1f.agentshim.data.v1.MemoryRecallH\x00R\fmemoryRecall\x12[\n" +
+	"\x14elicitation_complete\x18% \x01(\v2&.agentshim.data.v1.ElicitationCompleteH\x00R\x13elicitationComplete\x12R\n" +
+	"\x11permission_denied\x18& \x01(\v2#.agentshim.data.v1.PermissionDeniedH\x00R\x10permissionDenied\x12C\n" +
+	"\fmirror_error\x18' \x01(\v2\x1e.agentshim.data.v1.MirrorErrorH\x00R\vmirrorError\x12H\n" +
+	"\rinformational\x18( \x01(\v2 .agentshim.data.v1.InformationalH\x00R\rinformational\x12M\n" +
+	"\x10tool_use_summary\x18) \x01(\v2!.agentshim.data.v1.ToolUseSummaryH\x00R\x0etoolUseSummary\x12R\n" +
+	"\x11prompt_suggestion\x18* \x01(\v2#.agentshim.data.v1.PromptSuggestionH\x00R\x10promptSuggestion\x12U\n" +
+	"\x12conversation_reset\x18+ \x01(\v2$.agentshim.data.v1.ConversationResetH\x00R\x11conversationReset\x12@\n" +
+	"\vactive_goal\x18, \x01(\v2\x1d.agentshim.data.v1.ActiveGoalH\x00R\n" +
+	"activeGoalB\x05\n" +
 	"\x03msg\"\x84\x03\n" +
 	"\vUserMessage\x12;\n" +
 	"\amessage\x18\x01 \x01(\v2!.agentshim.data.v1.ApiUserMessageR\amessage\x12+\n" +
@@ -4281,7 +6881,218 @@ const file_agentshim_data_v1_stream_proto_rawDesc = "" +
 	"\x14ControlCancelRequest\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\"\v\n" +
-	"\tKeepAlive*\xc2\x02\n" +
+	"\tKeepAlive\"\xab\x02\n" +
+	"\bApiRetry\x12\x18\n" +
+	"\aattempt\x18\x01 \x01(\x05R\aattempt\x12\x1f\n" +
+	"\vmax_retries\x18\x02 \x01(\x05R\n" +
+	"maxRetries\x12$\n" +
+	"\x0eretry_delay_ms\x18\x03 \x01(\x03R\fretryDelayMs\x12!\n" +
+	"\ferror_status\x18\x04 \x01(\x03R\verrorStatus\x12(\n" +
+	"\x10error_status_set\x18\x05 \x01(\bR\x0eerrorStatusSet\x12>\n" +
+	"\x05error\x18\x06 \x01(\x0e2(.agentshim.data.v1.AssistantMessageErrorR\x05error\x12\x12\n" +
+	"\x04uuid\x18\a \x01(\tR\x04uuid\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\b \x01(\tR\tsessionId\"\xa6\x03\n" +
+	"\x16ControlRequestProgress\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12\x16\n" +
+	"\x06status\x18\x02 \x01(\tR\x06status\x12\x18\n" +
+	"\aattempt\x18\x03 \x01(\x05R\aattempt\x12\x1f\n" +
+	"\vattempt_set\x18\x04 \x01(\bR\n" +
+	"attemptSet\x12\x1f\n" +
+	"\vmax_retries\x18\x05 \x01(\x05R\n" +
+	"maxRetries\x12&\n" +
+	"\x0fmax_retries_set\x18\x06 \x01(\bR\rmaxRetriesSet\x12$\n" +
+	"\x0eretry_delay_ms\x18\a \x01(\x03R\fretryDelayMs\x12+\n" +
+	"\x12retry_delay_ms_set\x18\b \x01(\bR\x0fretryDelayMsSet\x12!\n" +
+	"\ferror_status\x18\t \x01(\x03R\verrorStatus\x12(\n" +
+	"\x10error_status_set\x18\n" +
+	" \x01(\bR\x0eerrorStatusSet\x12\x12\n" +
+	"\x04uuid\x18\v \x01(\tR\x04uuid\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\f \x01(\tR\tsessionId\"\xe5\x03\n" +
+	"\x14ModelRefusalFallback\x12\x18\n" +
+	"\atrigger\x18\x01 \x01(\tR\atrigger\x12\x1c\n" +
+	"\tdirection\x18\x02 \x01(\tR\tdirection\x12%\n" +
+	"\x0eoriginal_model\x18\x03 \x01(\tR\roriginalModel\x12%\n" +
+	"\x0efallback_model\x18\x04 \x01(\tR\rfallbackModel\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x05 \x01(\tR\trequestId\x120\n" +
+	"\x14api_refusal_category\x18\x06 \x01(\tR\x12apiRefusalCategory\x126\n" +
+	"\x17api_refusal_explanation\x18\a \x01(\tR\x15apiRefusalExplanation\x126\n" +
+	"\x17retracted_message_uuids\x18\b \x03(\tR\x15retractedMessageUuids\x129\n" +
+	"\x19refused_user_message_uuid\x18\t \x01(\tR\x16refusedUserMessageUuid\x12\x18\n" +
+	"\acontent\x18\n" +
+	" \x01(\tR\acontent\x12\x12\n" +
+	"\x04uuid\x18\v \x01(\tR\x04uuid\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\f \x01(\tR\tsessionId\"\xd0\x02\n" +
+	"\x16ModelRefusalNoFallback\x12%\n" +
+	"\x0eoriginal_model\x18\x01 \x01(\tR\roriginalModel\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x02 \x01(\tR\trequestId\x120\n" +
+	"\x14api_refusal_category\x18\x03 \x01(\tR\x12apiRefusalCategory\x126\n" +
+	"\x17api_refusal_explanation\x18\x04 \x01(\tR\x15apiRefusalExplanation\x129\n" +
+	"\x19refused_user_message_uuid\x18\x05 \x01(\tR\x16refusedUserMessageUuid\x12\x18\n" +
+	"\acontent\x18\x06 \x01(\tR\acontent\x12\x12\n" +
+	"\x04uuid\x18\a \x01(\tR\x04uuid\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\b \x01(\tR\tsessionId\"a\n" +
+	"\x12LocalCommandOutput\x12\x18\n" +
+	"\acontent\x18\x01 \x01(\tR\acontent\x12\x12\n" +
+	"\x04uuid\x18\x02 \x01(\tR\x04uuid\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x03 \x01(\tR\tsessionId\"\xde\x01\n" +
+	"\fHookProgress\x12\x17\n" +
+	"\ahook_id\x18\x01 \x01(\tR\x06hookId\x12\x1b\n" +
+	"\thook_name\x18\x02 \x01(\tR\bhookName\x12\x1d\n" +
+	"\n" +
+	"hook_event\x18\x03 \x01(\tR\thookEvent\x12\x16\n" +
+	"\x06stdout\x18\x04 \x01(\tR\x06stdout\x12\x16\n" +
+	"\x06stderr\x18\x05 \x01(\tR\x06stderr\x12\x16\n" +
+	"\x06output\x18\x06 \x01(\tR\x06output\x12\x12\n" +
+	"\x04uuid\x18\a \x01(\tR\x04uuid\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\b \x01(\tR\tsessionId\"\x84\x01\n" +
+	"\rPluginInstall\x12\x16\n" +
+	"\x06status\x18\x01 \x01(\tR\x06status\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x14\n" +
+	"\x05error\x18\x03 \x01(\tR\x05error\x12\x12\n" +
+	"\x04uuid\x18\x04 \x01(\tR\x04uuid\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x05 \x01(\tR\tsessionId\"t\n" +
+	"\x11TaskProgressUsage\x12!\n" +
+	"\ftotal_tokens\x18\x01 \x01(\x03R\vtotalTokens\x12\x1b\n" +
+	"\ttool_uses\x18\x02 \x01(\x03R\btoolUses\x12\x1f\n" +
+	"\vduration_ms\x18\x03 \x01(\x03R\n" +
+	"durationMs\"\xc0\x02\n" +
+	"\x0fTaskProgressMsg\x12\x17\n" +
+	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x1e\n" +
+	"\vtool_use_id\x18\x02 \x01(\tR\ttoolUseId\x12 \n" +
+	"\vdescription\x18\x03 \x01(\tR\vdescription\x12#\n" +
+	"\rsubagent_type\x18\x04 \x01(\tR\fsubagentType\x12:\n" +
+	"\x05usage\x18\x05 \x01(\v2$.agentshim.data.v1.TaskProgressUsageR\x05usage\x12$\n" +
+	"\x0elast_tool_name\x18\x06 \x01(\tR\flastToolName\x12\x18\n" +
+	"\asummary\x18\a \x01(\tR\asummary\x12\x12\n" +
+	"\x04uuid\x18\b \x01(\tR\x04uuid\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\t \x01(\tR\tsessionId\"^\n" +
+	"\x13SessionStateChanged\x12\x14\n" +
+	"\x05state\x18\x01 \x01(\tR\x05state\x12\x12\n" +
+	"\x04uuid\x18\x02 \x01(\tR\x04uuid\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x03 \x01(\tR\tsessionId\"_\n" +
+	"\x12WorkerShuttingDown\x12\x16\n" +
+	"\x06reason\x18\x01 \x01(\tR\x06reason\x12\x12\n" +
+	"\x04uuid\x18\x02 \x01(\tR\x04uuid\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x03 \x01(\tR\tsessionId\"\x86\x01\n" +
+	"\x0fSlashCommandRef\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12 \n" +
+	"\vdescription\x18\x02 \x01(\tR\vdescription\x12#\n" +
+	"\rargument_hint\x18\x03 \x01(\tR\fargumentHint\x12\x18\n" +
+	"\aaliases\x18\x04 \x03(\tR\aaliases\"\x84\x01\n" +
+	"\x0fCommandsChanged\x12>\n" +
+	"\bcommands\x18\x01 \x03(\v2\".agentshim.data.v1.SlashCommandRefR\bcommands\x12\x12\n" +
+	"\x04uuid\x18\x02 \x01(\tR\x04uuid\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x03 \x01(\tR\tsessionId\"D\n" +
+	"\rPersistedFile\x12\x1a\n" +
+	"\bfilename\x18\x01 \x01(\tR\bfilename\x12\x17\n" +
+	"\afile_id\x18\x02 \x01(\tR\x06fileId\">\n" +
+	"\n" +
+	"FailedFile\x12\x1a\n" +
+	"\bfilename\x18\x01 \x01(\tR\bfilename\x12\x14\n" +
+	"\x05error\x18\x02 \x01(\tR\x05error\"\xd5\x01\n" +
+	"\x0eFilesPersisted\x126\n" +
+	"\x05files\x18\x01 \x03(\v2 .agentshim.data.v1.PersistedFileR\x05files\x125\n" +
+	"\x06failed\x18\x02 \x03(\v2\x1d.agentshim.data.v1.FailedFileR\x06failed\x12!\n" +
+	"\fprocessed_at\x18\x03 \x01(\tR\vprocessedAt\x12\x12\n" +
+	"\x04uuid\x18\x04 \x01(\tR\x04uuid\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x05 \x01(\tR\tsessionId\"u\n" +
+	"\x0eRecalledMemory\x12\x12\n" +
+	"\x04path\x18\x01 \x01(\tR\x04path\x12\x14\n" +
+	"\x05scope\x18\x02 \x01(\tR\x05scope\x12\x18\n" +
+	"\acontent\x18\x03 \x01(\tR\acontent\x12\x1f\n" +
+	"\vcontent_set\x18\x04 \x01(\bR\n" +
+	"contentSet\"\x94\x01\n" +
+	"\fMemoryRecall\x12\x12\n" +
+	"\x04mode\x18\x01 \x01(\tR\x04mode\x12=\n" +
+	"\bmemories\x18\x02 \x03(\v2!.agentshim.data.v1.RecalledMemoryR\bmemories\x12\x12\n" +
+	"\x04uuid\x18\x03 \x01(\tR\x04uuid\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x04 \x01(\tR\tsessionId\"\x97\x01\n" +
+	"\x13ElicitationComplete\x12&\n" +
+	"\x0fmcp_server_name\x18\x01 \x01(\tR\rmcpServerName\x12%\n" +
+	"\x0eelicitation_id\x18\x02 \x01(\tR\relicitationId\x12\x12\n" +
+	"\x04uuid\x18\x03 \x01(\tR\x04uuid\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x04 \x01(\tR\tsessionId\"\x92\x02\n" +
+	"\x10PermissionDenied\x12\x1b\n" +
+	"\ttool_name\x18\x01 \x01(\tR\btoolName\x12\x1e\n" +
+	"\vtool_use_id\x18\x02 \x01(\tR\ttoolUseId\x12\x19\n" +
+	"\bagent_id\x18\x03 \x01(\tR\aagentId\x120\n" +
+	"\x14decision_reason_type\x18\x04 \x01(\tR\x12decisionReasonType\x12'\n" +
+	"\x0fdecision_reason\x18\x05 \x01(\tR\x0edecisionReason\x12\x18\n" +
+	"\amessage\x18\x06 \x01(\tR\amessage\x12\x12\n" +
+	"\x04uuid\x18\a \x01(\tR\x04uuid\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\b \x01(\tR\tsessionId\"e\n" +
+	"\tMirrorKey\x12\x1f\n" +
+	"\vproject_key\x18\x01 \x01(\tR\n" +
+	"projectKey\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x02 \x01(\tR\tsessionId\x12\x18\n" +
+	"\asubpath\x18\x03 \x01(\tR\asubpath\"\x86\x01\n" +
+	"\vMirrorError\x12\x14\n" +
+	"\x05error\x18\x01 \x01(\tR\x05error\x12.\n" +
+	"\x03key\x18\x02 \x01(\v2\x1c.agentshim.data.v1.MirrorKeyR\x03key\x12\x12\n" +
+	"\x04uuid\x18\x03 \x01(\tR\x04uuid\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x04 \x01(\tR\tsessionId\"\xc5\x01\n" +
+	"\rInformational\x12\x18\n" +
+	"\acontent\x18\x01 \x01(\tR\acontent\x12\x14\n" +
+	"\x05level\x18\x02 \x01(\tR\x05level\x12\x1e\n" +
+	"\vtool_use_id\x18\x03 \x01(\tR\ttoolUseId\x121\n" +
+	"\x14prevent_continuation\x18\x04 \x01(\bR\x13preventContinuation\x12\x12\n" +
+	"\x04uuid\x18\x05 \x01(\tR\x04uuid\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x06 \x01(\tR\tsessionId\"\x92\x01\n" +
+	"\x0eToolUseSummary\x12\x18\n" +
+	"\asummary\x18\x01 \x01(\tR\asummary\x123\n" +
+	"\x16preceding_tool_use_ids\x18\x02 \x03(\tR\x13precedingToolUseIds\x12\x12\n" +
+	"\x04uuid\x18\x03 \x01(\tR\x04uuid\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x04 \x01(\tR\tsessionId\"e\n" +
+	"\x10PromptSuggestion\x12\x1e\n" +
+	"\n" +
+	"suggestion\x18\x01 \x01(\tR\n" +
+	"suggestion\x12\x12\n" +
+	"\x04uuid\x18\x02 \x01(\tR\x04uuid\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x03 \x01(\tR\tsessionId\"v\n" +
+	"\x11ConversationReset\x12.\n" +
+	"\x13new_conversation_id\x18\x01 \x01(\tR\x11newConversationId\x12\x12\n" +
+	"\x04uuid\x18\x02 \x01(\tR\x04uuid\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x03 \x01(\tR\tsessionId\"\xaf\x01\n" +
+	"\x0fActiveGoalValue\x12\x1c\n" +
+	"\tcondition\x18\x01 \x01(\tR\tcondition\x12\x1e\n" +
+	"\n" +
+	"iterations\x18\x02 \x01(\x03R\n" +
+	"iterations\x12\x15\n" +
+	"\x06set_at\x18\x03 \x01(\x03R\x05setAt\x12&\n" +
+	"\x0ftokens_at_start\x18\x04 \x01(\x03R\rtokensAtStart\x12\x1f\n" +
+	"\vlast_reason\x18\x05 \x01(\tR\n" +
+	"lastReason\"\x96\x01\n" +
+	"\n" +
+	"ActiveGoal\x128\n" +
+	"\x05value\x18\x01 \x01(\v2\".agentshim.data.v1.ActiveGoalValueR\x05value\x12\x1b\n" +
+	"\tvalue_set\x18\x02 \x01(\bR\bvalueSet\x12\x12\n" +
+	"\x04uuid\x18\x03 \x01(\tR\x04uuid\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x04 \x01(\tR\tsessionId*\xc2\x02\n" +
 	"\x15AssistantMessageError\x12'\n" +
 	"#ASSISTANT_MESSAGE_ERROR_UNSPECIFIED\x10\x00\x121\n" +
 	"-ASSISTANT_MESSAGE_ERROR_AUTHENTICATION_FAILED\x10\x01\x12)\n" +
@@ -4328,7 +7139,7 @@ func file_agentshim_data_v1_stream_proto_rawDescGZIP() []byte {
 }
 
 var file_agentshim_data_v1_stream_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
-var file_agentshim_data_v1_stream_proto_msgTypes = make([]protoimpl.MessageInfo, 45)
+var file_agentshim_data_v1_stream_proto_msgTypes = make([]protoimpl.MessageInfo, 73)
 var file_agentshim_data_v1_stream_proto_goTypes = []any{
 	(AssistantMessageError)(0),     // 0: agentshim.data.v1.AssistantMessageError
 	(ResultSubtype)(0),             // 1: agentshim.data.v1.ResultSubtype
@@ -4378,12 +7189,41 @@ var file_agentshim_data_v1_stream_proto_goTypes = []any{
 	(*ControlResponse)(nil),        // 45: agentshim.data.v1.ControlResponse
 	(*ControlCancelRequest)(nil),   // 46: agentshim.data.v1.ControlCancelRequest
 	(*KeepAlive)(nil),              // 47: agentshim.data.v1.KeepAlive
-	nil,                            // 48: agentshim.data.v1.ResultMessage.ModelUsageEntry
-	nil,                            // 49: agentshim.data.v1.SystemInit.MemoryPathsEntry
-	(*ApiUserMessage)(nil),         // 50: agentshim.data.v1.ApiUserMessage
-	(*ToolUseResult)(nil),          // 51: agentshim.data.v1.ToolUseResult
-	(*ApiAssistantMessage)(nil),    // 52: agentshim.data.v1.ApiAssistantMessage
-	(*structpb.Struct)(nil),        // 53: google.protobuf.Struct
+	(*ApiRetry)(nil),               // 48: agentshim.data.v1.ApiRetry
+	(*ControlRequestProgress)(nil), // 49: agentshim.data.v1.ControlRequestProgress
+	(*ModelRefusalFallback)(nil),   // 50: agentshim.data.v1.ModelRefusalFallback
+	(*ModelRefusalNoFallback)(nil), // 51: agentshim.data.v1.ModelRefusalNoFallback
+	(*LocalCommandOutput)(nil),     // 52: agentshim.data.v1.LocalCommandOutput
+	(*HookProgress)(nil),           // 53: agentshim.data.v1.HookProgress
+	(*PluginInstall)(nil),          // 54: agentshim.data.v1.PluginInstall
+	(*TaskProgressUsage)(nil),      // 55: agentshim.data.v1.TaskProgressUsage
+	(*TaskProgressMsg)(nil),        // 56: agentshim.data.v1.TaskProgressMsg
+	(*SessionStateChanged)(nil),    // 57: agentshim.data.v1.SessionStateChanged
+	(*WorkerShuttingDown)(nil),     // 58: agentshim.data.v1.WorkerShuttingDown
+	(*SlashCommandRef)(nil),        // 59: agentshim.data.v1.SlashCommandRef
+	(*CommandsChanged)(nil),        // 60: agentshim.data.v1.CommandsChanged
+	(*PersistedFile)(nil),          // 61: agentshim.data.v1.PersistedFile
+	(*FailedFile)(nil),             // 62: agentshim.data.v1.FailedFile
+	(*FilesPersisted)(nil),         // 63: agentshim.data.v1.FilesPersisted
+	(*RecalledMemory)(nil),         // 64: agentshim.data.v1.RecalledMemory
+	(*MemoryRecall)(nil),           // 65: agentshim.data.v1.MemoryRecall
+	(*ElicitationComplete)(nil),    // 66: agentshim.data.v1.ElicitationComplete
+	(*PermissionDenied)(nil),       // 67: agentshim.data.v1.PermissionDenied
+	(*MirrorKey)(nil),              // 68: agentshim.data.v1.MirrorKey
+	(*MirrorError)(nil),            // 69: agentshim.data.v1.MirrorError
+	(*Informational)(nil),          // 70: agentshim.data.v1.Informational
+	(*ToolUseSummary)(nil),         // 71: agentshim.data.v1.ToolUseSummary
+	(*PromptSuggestion)(nil),       // 72: agentshim.data.v1.PromptSuggestion
+	(*ConversationReset)(nil),      // 73: agentshim.data.v1.ConversationReset
+	(*ActiveGoalValue)(nil),        // 74: agentshim.data.v1.ActiveGoalValue
+	(*ActiveGoal)(nil),             // 75: agentshim.data.v1.ActiveGoal
+	nil,                            // 76: agentshim.data.v1.ResultMessage.ModelUsageEntry
+	nil,                            // 77: agentshim.data.v1.SystemInit.MemoryPathsEntry
+	(*UnknownRecord)(nil),          // 78: agentshim.data.v1.UnknownRecord
+	(*ApiUserMessage)(nil),         // 79: agentshim.data.v1.ApiUserMessage
+	(*ToolUseResult)(nil),          // 80: agentshim.data.v1.ToolUseResult
+	(*ApiAssistantMessage)(nil),    // 81: agentshim.data.v1.ApiAssistantMessage
+	(*structpb.Struct)(nil),        // 82: google.protobuf.Struct
 }
 var file_agentshim_data_v1_stream_proto_depIdxs = []int32{
 	6,  // 0: agentshim.data.v1.ClaudeStreamMessage.user:type_name -> agentshim.data.v1.UserMessage
@@ -4408,51 +7248,81 @@ var file_agentshim_data_v1_stream_proto_depIdxs = []int32{
 	45, // 19: agentshim.data.v1.ClaudeStreamMessage.control_response:type_name -> agentshim.data.v1.ControlResponse
 	46, // 20: agentshim.data.v1.ClaudeStreamMessage.control_cancel_request:type_name -> agentshim.data.v1.ControlCancelRequest
 	47, // 21: agentshim.data.v1.ClaudeStreamMessage.keep_alive:type_name -> agentshim.data.v1.KeepAlive
-	50, // 22: agentshim.data.v1.UserMessage.message:type_name -> agentshim.data.v1.ApiUserMessage
-	51, // 23: agentshim.data.v1.UserMessage.tool_use_result:type_name -> agentshim.data.v1.ToolUseResult
-	52, // 24: agentshim.data.v1.AssistantMessage.message:type_name -> agentshim.data.v1.ApiAssistantMessage
-	0,  // 25: agentshim.data.v1.AssistantMessage.error:type_name -> agentshim.data.v1.AssistantMessageError
-	1,  // 26: agentshim.data.v1.ResultMessage.subtype:type_name -> agentshim.data.v1.ResultSubtype
-	9,  // 27: agentshim.data.v1.ResultMessage.usage:type_name -> agentshim.data.v1.Usage
-	48, // 28: agentshim.data.v1.ResultMessage.model_usage:type_name -> agentshim.data.v1.ResultMessage.ModelUsageEntry
-	11, // 29: agentshim.data.v1.ResultMessage.permission_denials:type_name -> agentshim.data.v1.PermissionDenial
-	53, // 30: agentshim.data.v1.ResultMessage.structured_output:type_name -> google.protobuf.Struct
-	53, // 31: agentshim.data.v1.Usage.cache_creation:type_name -> google.protobuf.Struct
-	53, // 32: agentshim.data.v1.Usage.server_tool_use:type_name -> google.protobuf.Struct
-	53, // 33: agentshim.data.v1.PermissionDenial.tool_input:type_name -> google.protobuf.Struct
-	2,  // 34: agentshim.data.v1.McpServerStatus.status:type_name -> agentshim.data.v1.McpServerState
-	3,  // 35: agentshim.data.v1.SystemInit.api_key_source:type_name -> agentshim.data.v1.ApiKeySource
-	12, // 36: agentshim.data.v1.SystemInit.mcp_servers:type_name -> agentshim.data.v1.McpServerStatus
-	13, // 37: agentshim.data.v1.SystemInit.plugins:type_name -> agentshim.data.v1.PluginRef
-	49, // 38: agentshim.data.v1.SystemInit.memory_paths:type_name -> agentshim.data.v1.SystemInit.MemoryPathsEntry
-	16, // 39: agentshim.data.v1.StreamEvent.event:type_name -> agentshim.data.v1.RawMessageStreamEvent
-	17, // 40: agentshim.data.v1.RawMessageStreamEvent.message_start:type_name -> agentshim.data.v1.MessageStartEvent
-	18, // 41: agentshim.data.v1.RawMessageStreamEvent.content_block_start:type_name -> agentshim.data.v1.ContentBlockStartEvent
-	19, // 42: agentshim.data.v1.RawMessageStreamEvent.content_block_delta:type_name -> agentshim.data.v1.ContentBlockDeltaEvent
-	24, // 43: agentshim.data.v1.RawMessageStreamEvent.content_block_stop:type_name -> agentshim.data.v1.ContentBlockStopEvent
-	25, // 44: agentshim.data.v1.RawMessageStreamEvent.message_delta:type_name -> agentshim.data.v1.MessageDeltaEvent
-	26, // 45: agentshim.data.v1.RawMessageStreamEvent.message_stop:type_name -> agentshim.data.v1.MessageStopEvent
-	53, // 46: agentshim.data.v1.MessageStartEvent.message:type_name -> google.protobuf.Struct
-	53, // 47: agentshim.data.v1.ContentBlockStartEvent.content_block:type_name -> google.protobuf.Struct
-	20, // 48: agentshim.data.v1.ContentBlockDeltaEvent.text_delta:type_name -> agentshim.data.v1.TextDelta
-	21, // 49: agentshim.data.v1.ContentBlockDeltaEvent.thinking_delta:type_name -> agentshim.data.v1.ThinkingDelta
-	22, // 50: agentshim.data.v1.ContentBlockDeltaEvent.input_json_delta:type_name -> agentshim.data.v1.InputJsonDelta
-	23, // 51: agentshim.data.v1.ContentBlockDeltaEvent.signature_delta:type_name -> agentshim.data.v1.SignatureDelta
-	53, // 52: agentshim.data.v1.MessageDeltaEvent.delta:type_name -> google.protobuf.Struct
-	9,  // 53: agentshim.data.v1.MessageDeltaEvent.usage:type_name -> agentshim.data.v1.Usage
-	4,  // 54: agentshim.data.v1.CompactBoundary.trigger:type_name -> agentshim.data.v1.CompactTrigger
-	32, // 55: agentshim.data.v1.RateLimitEvent.rate_limit_info:type_name -> agentshim.data.v1.RateLimitInfo
-	38, // 56: agentshim.data.v1.TaskUpdatedMsg.patch:type_name -> agentshim.data.v1.TaskPatch
-	40, // 57: agentshim.data.v1.TaskNotificationMsg.usage:type_name -> agentshim.data.v1.TaskUsage
-	42, // 58: agentshim.data.v1.BackgroundTasksChanged.tasks:type_name -> agentshim.data.v1.BackgroundTaskRef
-	53, // 59: agentshim.data.v1.ControlRequest.request:type_name -> google.protobuf.Struct
-	53, // 60: agentshim.data.v1.ControlResponse.response:type_name -> google.protobuf.Struct
-	10, // 61: agentshim.data.v1.ResultMessage.ModelUsageEntry.value:type_name -> agentshim.data.v1.ModelUsage
-	62, // [62:62] is the sub-list for method output_type
-	62, // [62:62] is the sub-list for method input_type
-	62, // [62:62] is the sub-list for extension type_name
-	62, // [62:62] is the sub-list for extension extendee
-	0,  // [0:62] is the sub-list for field type_name
+	78, // 22: agentshim.data.v1.ClaudeStreamMessage.unknown:type_name -> agentshim.data.v1.UnknownRecord
+	48, // 23: agentshim.data.v1.ClaudeStreamMessage.api_retry:type_name -> agentshim.data.v1.ApiRetry
+	49, // 24: agentshim.data.v1.ClaudeStreamMessage.control_request_progress:type_name -> agentshim.data.v1.ControlRequestProgress
+	50, // 25: agentshim.data.v1.ClaudeStreamMessage.model_refusal_fallback:type_name -> agentshim.data.v1.ModelRefusalFallback
+	51, // 26: agentshim.data.v1.ClaudeStreamMessage.model_refusal_no_fallback:type_name -> agentshim.data.v1.ModelRefusalNoFallback
+	52, // 27: agentshim.data.v1.ClaudeStreamMessage.local_command_output:type_name -> agentshim.data.v1.LocalCommandOutput
+	53, // 28: agentshim.data.v1.ClaudeStreamMessage.hook_progress:type_name -> agentshim.data.v1.HookProgress
+	54, // 29: agentshim.data.v1.ClaudeStreamMessage.plugin_install:type_name -> agentshim.data.v1.PluginInstall
+	56, // 30: agentshim.data.v1.ClaudeStreamMessage.task_progress:type_name -> agentshim.data.v1.TaskProgressMsg
+	57, // 31: agentshim.data.v1.ClaudeStreamMessage.session_state_changed:type_name -> agentshim.data.v1.SessionStateChanged
+	58, // 32: agentshim.data.v1.ClaudeStreamMessage.worker_shutting_down:type_name -> agentshim.data.v1.WorkerShuttingDown
+	60, // 33: agentshim.data.v1.ClaudeStreamMessage.commands_changed:type_name -> agentshim.data.v1.CommandsChanged
+	63, // 34: agentshim.data.v1.ClaudeStreamMessage.files_persisted:type_name -> agentshim.data.v1.FilesPersisted
+	65, // 35: agentshim.data.v1.ClaudeStreamMessage.memory_recall:type_name -> agentshim.data.v1.MemoryRecall
+	66, // 36: agentshim.data.v1.ClaudeStreamMessage.elicitation_complete:type_name -> agentshim.data.v1.ElicitationComplete
+	67, // 37: agentshim.data.v1.ClaudeStreamMessage.permission_denied:type_name -> agentshim.data.v1.PermissionDenied
+	69, // 38: agentshim.data.v1.ClaudeStreamMessage.mirror_error:type_name -> agentshim.data.v1.MirrorError
+	70, // 39: agentshim.data.v1.ClaudeStreamMessage.informational:type_name -> agentshim.data.v1.Informational
+	71, // 40: agentshim.data.v1.ClaudeStreamMessage.tool_use_summary:type_name -> agentshim.data.v1.ToolUseSummary
+	72, // 41: agentshim.data.v1.ClaudeStreamMessage.prompt_suggestion:type_name -> agentshim.data.v1.PromptSuggestion
+	73, // 42: agentshim.data.v1.ClaudeStreamMessage.conversation_reset:type_name -> agentshim.data.v1.ConversationReset
+	75, // 43: agentshim.data.v1.ClaudeStreamMessage.active_goal:type_name -> agentshim.data.v1.ActiveGoal
+	79, // 44: agentshim.data.v1.UserMessage.message:type_name -> agentshim.data.v1.ApiUserMessage
+	80, // 45: agentshim.data.v1.UserMessage.tool_use_result:type_name -> agentshim.data.v1.ToolUseResult
+	81, // 46: agentshim.data.v1.AssistantMessage.message:type_name -> agentshim.data.v1.ApiAssistantMessage
+	0,  // 47: agentshim.data.v1.AssistantMessage.error:type_name -> agentshim.data.v1.AssistantMessageError
+	1,  // 48: agentshim.data.v1.ResultMessage.subtype:type_name -> agentshim.data.v1.ResultSubtype
+	9,  // 49: agentshim.data.v1.ResultMessage.usage:type_name -> agentshim.data.v1.Usage
+	76, // 50: agentshim.data.v1.ResultMessage.model_usage:type_name -> agentshim.data.v1.ResultMessage.ModelUsageEntry
+	11, // 51: agentshim.data.v1.ResultMessage.permission_denials:type_name -> agentshim.data.v1.PermissionDenial
+	82, // 52: agentshim.data.v1.ResultMessage.structured_output:type_name -> google.protobuf.Struct
+	82, // 53: agentshim.data.v1.Usage.cache_creation:type_name -> google.protobuf.Struct
+	82, // 54: agentshim.data.v1.Usage.server_tool_use:type_name -> google.protobuf.Struct
+	82, // 55: agentshim.data.v1.PermissionDenial.tool_input:type_name -> google.protobuf.Struct
+	2,  // 56: agentshim.data.v1.McpServerStatus.status:type_name -> agentshim.data.v1.McpServerState
+	3,  // 57: agentshim.data.v1.SystemInit.api_key_source:type_name -> agentshim.data.v1.ApiKeySource
+	12, // 58: agentshim.data.v1.SystemInit.mcp_servers:type_name -> agentshim.data.v1.McpServerStatus
+	13, // 59: agentshim.data.v1.SystemInit.plugins:type_name -> agentshim.data.v1.PluginRef
+	77, // 60: agentshim.data.v1.SystemInit.memory_paths:type_name -> agentshim.data.v1.SystemInit.MemoryPathsEntry
+	16, // 61: agentshim.data.v1.StreamEvent.event:type_name -> agentshim.data.v1.RawMessageStreamEvent
+	17, // 62: agentshim.data.v1.RawMessageStreamEvent.message_start:type_name -> agentshim.data.v1.MessageStartEvent
+	18, // 63: agentshim.data.v1.RawMessageStreamEvent.content_block_start:type_name -> agentshim.data.v1.ContentBlockStartEvent
+	19, // 64: agentshim.data.v1.RawMessageStreamEvent.content_block_delta:type_name -> agentshim.data.v1.ContentBlockDeltaEvent
+	24, // 65: agentshim.data.v1.RawMessageStreamEvent.content_block_stop:type_name -> agentshim.data.v1.ContentBlockStopEvent
+	25, // 66: agentshim.data.v1.RawMessageStreamEvent.message_delta:type_name -> agentshim.data.v1.MessageDeltaEvent
+	26, // 67: agentshim.data.v1.RawMessageStreamEvent.message_stop:type_name -> agentshim.data.v1.MessageStopEvent
+	82, // 68: agentshim.data.v1.MessageStartEvent.message:type_name -> google.protobuf.Struct
+	82, // 69: agentshim.data.v1.ContentBlockStartEvent.content_block:type_name -> google.protobuf.Struct
+	20, // 70: agentshim.data.v1.ContentBlockDeltaEvent.text_delta:type_name -> agentshim.data.v1.TextDelta
+	21, // 71: agentshim.data.v1.ContentBlockDeltaEvent.thinking_delta:type_name -> agentshim.data.v1.ThinkingDelta
+	22, // 72: agentshim.data.v1.ContentBlockDeltaEvent.input_json_delta:type_name -> agentshim.data.v1.InputJsonDelta
+	23, // 73: agentshim.data.v1.ContentBlockDeltaEvent.signature_delta:type_name -> agentshim.data.v1.SignatureDelta
+	82, // 74: agentshim.data.v1.MessageDeltaEvent.delta:type_name -> google.protobuf.Struct
+	9,  // 75: agentshim.data.v1.MessageDeltaEvent.usage:type_name -> agentshim.data.v1.Usage
+	4,  // 76: agentshim.data.v1.CompactBoundary.trigger:type_name -> agentshim.data.v1.CompactTrigger
+	32, // 77: agentshim.data.v1.RateLimitEvent.rate_limit_info:type_name -> agentshim.data.v1.RateLimitInfo
+	38, // 78: agentshim.data.v1.TaskUpdatedMsg.patch:type_name -> agentshim.data.v1.TaskPatch
+	40, // 79: agentshim.data.v1.TaskNotificationMsg.usage:type_name -> agentshim.data.v1.TaskUsage
+	42, // 80: agentshim.data.v1.BackgroundTasksChanged.tasks:type_name -> agentshim.data.v1.BackgroundTaskRef
+	82, // 81: agentshim.data.v1.ControlRequest.request:type_name -> google.protobuf.Struct
+	82, // 82: agentshim.data.v1.ControlResponse.response:type_name -> google.protobuf.Struct
+	0,  // 83: agentshim.data.v1.ApiRetry.error:type_name -> agentshim.data.v1.AssistantMessageError
+	55, // 84: agentshim.data.v1.TaskProgressMsg.usage:type_name -> agentshim.data.v1.TaskProgressUsage
+	59, // 85: agentshim.data.v1.CommandsChanged.commands:type_name -> agentshim.data.v1.SlashCommandRef
+	61, // 86: agentshim.data.v1.FilesPersisted.files:type_name -> agentshim.data.v1.PersistedFile
+	62, // 87: agentshim.data.v1.FilesPersisted.failed:type_name -> agentshim.data.v1.FailedFile
+	64, // 88: agentshim.data.v1.MemoryRecall.memories:type_name -> agentshim.data.v1.RecalledMemory
+	68, // 89: agentshim.data.v1.MirrorError.key:type_name -> agentshim.data.v1.MirrorKey
+	74, // 90: agentshim.data.v1.ActiveGoal.value:type_name -> agentshim.data.v1.ActiveGoalValue
+	10, // 91: agentshim.data.v1.ResultMessage.ModelUsageEntry.value:type_name -> agentshim.data.v1.ModelUsage
+	92, // [92:92] is the sub-list for method output_type
+	92, // [92:92] is the sub-list for method input_type
+	92, // [92:92] is the sub-list for extension type_name
+	92, // [92:92] is the sub-list for extension extendee
+	0,  // [0:92] is the sub-list for field type_name
 }
 
 func init() { file_agentshim_data_v1_stream_proto_init() }
@@ -4461,6 +7331,7 @@ func file_agentshim_data_v1_stream_proto_init() {
 		return
 	}
 	file_agentshim_data_v1_tools_proto_init()
+	file_agentshim_data_v1_unknown_proto_init()
 	file_agentshim_data_v1_stream_proto_msgTypes[0].OneofWrappers = []any{
 		(*ClaudeStreamMessage_User)(nil),
 		(*ClaudeStreamMessage_Assistant)(nil),
@@ -4484,6 +7355,28 @@ func file_agentshim_data_v1_stream_proto_init() {
 		(*ClaudeStreamMessage_ControlResponse)(nil),
 		(*ClaudeStreamMessage_ControlCancelRequest)(nil),
 		(*ClaudeStreamMessage_KeepAlive)(nil),
+		(*ClaudeStreamMessage_Unknown)(nil),
+		(*ClaudeStreamMessage_ApiRetry)(nil),
+		(*ClaudeStreamMessage_ControlRequestProgress)(nil),
+		(*ClaudeStreamMessage_ModelRefusalFallback)(nil),
+		(*ClaudeStreamMessage_ModelRefusalNoFallback)(nil),
+		(*ClaudeStreamMessage_LocalCommandOutput)(nil),
+		(*ClaudeStreamMessage_HookProgress)(nil),
+		(*ClaudeStreamMessage_PluginInstall)(nil),
+		(*ClaudeStreamMessage_TaskProgress)(nil),
+		(*ClaudeStreamMessage_SessionStateChanged)(nil),
+		(*ClaudeStreamMessage_WorkerShuttingDown)(nil),
+		(*ClaudeStreamMessage_CommandsChanged)(nil),
+		(*ClaudeStreamMessage_FilesPersisted)(nil),
+		(*ClaudeStreamMessage_MemoryRecall)(nil),
+		(*ClaudeStreamMessage_ElicitationComplete)(nil),
+		(*ClaudeStreamMessage_PermissionDenied)(nil),
+		(*ClaudeStreamMessage_MirrorError)(nil),
+		(*ClaudeStreamMessage_Informational)(nil),
+		(*ClaudeStreamMessage_ToolUseSummary)(nil),
+		(*ClaudeStreamMessage_PromptSuggestion)(nil),
+		(*ClaudeStreamMessage_ConversationReset)(nil),
+		(*ClaudeStreamMessage_ActiveGoal)(nil),
 	}
 	file_agentshim_data_v1_stream_proto_msgTypes[11].OneofWrappers = []any{
 		(*RawMessageStreamEvent_MessageStart)(nil),
@@ -4505,7 +7398,7 @@ func file_agentshim_data_v1_stream_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentshim_data_v1_stream_proto_rawDesc), len(file_agentshim_data_v1_stream_proto_rawDesc)),
 			NumEnums:      5,
-			NumMessages:   45,
+			NumMessages:   73,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

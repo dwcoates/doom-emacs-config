@@ -23,10 +23,15 @@ const (
 	// passes modes through to the CLI's own validation, so the enum
 	// tracks the superset the CLI accepts rather than gatekeeping a
 	// stale subset.
-	PermissionModeAuto     PermissionMode = "auto"
-	PermissionModeManual   PermissionMode = "manual"
-	PermissionModeDontAsk  PermissionMode = "dontAsk"
-	PermissionModeDelegate PermissionMode = "delegate"
+	//
+	// "delegate" is deliberately NOT here. It was, and the CLI rejected
+	// every attempt to use it ("must be one of acceptEdits, auto,
+	// bypassPermissions, default, dontAsk, plan"), so accepting it here
+	// only carried a doomed value further down the stack. SDK 0.3.220
+	// dropped it from its own PermissionMode type too.
+	PermissionModeAuto    PermissionMode = "auto"
+	PermissionModeManual  PermissionMode = "manual"
+	PermissionModeDontAsk PermissionMode = "dontAsk"
 )
 
 // ValidPermissionMode reports whether s is a member of the PermissionMode
@@ -36,7 +41,7 @@ func ValidPermissionMode(s string) bool {
 	case PermissionModeDefault, PermissionModeAcceptEdits,
 		PermissionModeBypassPermissions, PermissionModePlan,
 		PermissionModeAuto, PermissionModeManual,
-		PermissionModeDontAsk, PermissionModeDelegate:
+		PermissionModeDontAsk:
 		return true
 	}
 	return false
@@ -114,8 +119,15 @@ type L1Event struct {
 	// commands
 	Commands []SlashCommand `json:"commands,omitempty"`
 
-	// status — the SDK's system:init re-read off a throwaway probe handshake,
-	// forwarded opaque exactly like Data below.
+	// status — VESTIGIAL. It carried a `/status` snapshot re-read off a
+	// throwaway probe handshake, but the shim no longer has that path: the
+	// CLI never emits system:init on a query whose prompt iterable does not
+	// yield, so the probe waited forever, and nothing ever sent the
+	// `refresh-status` that drove it. The producer is gone.
+	//
+	// The field and its entry in l1EventKnownTypes are KEPT so an older shim
+	// binary still parses cleanly rather than tripping the unknown-event log.
+	// Nothing reads it.
 	Status json.RawMessage `json:"status,omitempty"`
 
 	// stream-event / assistant-message / tool-result

@@ -22,6 +22,15 @@ import type { QueueClassification } from "./frontend-proto.js";
 
 export type { QueueClassification };
 
+/**
+ * Every mode the CLI accepts at session LAUNCH.
+ *
+ * `delegate` is absent because the CLI rejects it outright (verified against
+ * both SDK 0.1.77 and 0.3.220), and SDK 0.3.220 dropped it from its own
+ * PermissionMode type. `bypassPermissions` IS a valid launch mode but cannot
+ * be switched into mid-session, which is why the topbar picker offers a
+ * strict subset of this type rather than all of it.
+ */
 export type PermissionMode =
   | "default"
   | "acceptEdits"
@@ -30,8 +39,7 @@ export type PermissionMode =
   // CLI-era modes (claude >= 2.1); validated by the CLI itself.
   | "auto"
   | "manual"
-  | "dontAsk"
-  | "delegate";
+  | "dontAsk";
 
 export interface Usage {
   input_tokens: number;

@@ -8,6 +8,7 @@
 
 PROTOS := \
   agentshim/core/v1/core.proto \
+  agentshim/data/v1/unknown.proto \
   agentshim/data/v1/tools.proto \
   agentshim/data/v1/stream.proto \
   agentshim/data/v1/transcript.proto \
