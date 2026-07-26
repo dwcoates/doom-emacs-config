@@ -1254,11 +1254,11 @@ func SessionViewFromRecord(logf dlog.Logf, rec registry.Record, pendingPermissio
 		ClaudeSessionId: rec.ClaudeSessionID,
 		Cwd:             rec.CWD,
 		Terminal:        rec.Terminal,
-		DeathReason:     rec.DeathReason,
-		// The TYPED death (F4). death_reason had two producers and zero
-		// readers because a frontend could not tell what class of failure the
-		// string described; this is the same fact classified once so the
-		// dead-state card can render it like every other failure.
+		// The TYPED death (F4), superseding the free-string death_reason
+		// (RETIRED, step 11): it had two producers and zero readers because a
+		// frontend could not tell what class of failure the string described;
+		// this is the same fact classified once so the dead-state card can
+		// render it like every other failure.
 		Death:              errclass.Death(logf, rec.DeathReason),
 		PendingPermissions: int64(len(pendingPermissions)),
 		// The CLAUDE_CONFIG_DIR the session's shim runs against — the ACCOUNT it
