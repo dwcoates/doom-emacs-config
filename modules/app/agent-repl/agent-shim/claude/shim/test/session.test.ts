@@ -30,7 +30,6 @@ interface Harness {
   modeCalls: () => PermissionMode[];
   modelCalls: () => string[];
   probeCalls: () => number;
-  probeStatusCalls: () => number;
   exitCode: () => number | null;
   pump: Promise<void>;
   send: (frame: Record<string, unknown>) => void;
@@ -49,9 +48,6 @@ interface HarnessOpts {
   /** What a `refresh-commands` probe resolves to (defaults to REFRESHED_COMMANDS). */
   probeCommands?: SlashCommand[];
   probeCommandsError?: Error;
-  /** What a `refresh-status` probe resolves to (defaults to REFRESHED_STATUS). */
-  probeStatus?: unknown;
-  probeStatusError?: Error;
 }
 
 const FAKE_MODELS: ModelInfo[] = [
@@ -70,14 +66,6 @@ const REFRESHED_COMMANDS: SlashCommand[] = [
   { name: "brand-new-skill", description: "added mid-session", argumentHint: "" },
 ];
 
-/** The snapshot a re-probe resolves: a `/fast` toggled on since start. */
-const REFRESHED_STATUS = {
-  type: "system",
-  subtype: "init",
-  model: "claude-opus-4-5",
-  fast_mode_state: "on",
-};
-
 function makeHarness(opts?: HarnessOpts): Harness {
   const emitted: ShimEvent[] = [];
   const sdkOut = new AsyncQueue<SdkMessageLike>();
@@ -87,7 +75,6 @@ function makeHarness(opts?: HarnessOpts): Harness {
   const modes: PermissionMode[] = [];
   const models: string[] = [];
   let probeCount = 0;
-  let probeStatusCount = 0;
   let exit: number | null = null;
   let requestCounter = 0;
 
@@ -132,11 +119,6 @@ function makeHarness(opts?: HarnessOpts): Harness {
       if (opts?.probeCommandsError) throw opts.probeCommandsError;
       return opts?.probeCommands ?? REFRESHED_COMMANDS;
     },
-    probeStatus: async () => {
-      probeStatusCount++;
-      if (opts?.probeStatusError) throw opts.probeStatusError;
-      return opts && "probeStatus" in opts ? opts.probeStatus : REFRESHED_STATUS;
-    },
     emit: (evt) => emitted.push(evt),
     exit: (code) => {
       exit = code;
@@ -155,7 +137,6 @@ function makeHarness(opts?: HarnessOpts): Harness {
     modeCalls: () => modes,
     modelCalls: () => models,
     probeCalls: () => probeCount,
-    probeStatusCalls: () => probeStatusCount,
     exitCode: () => exit,
     pump,
     send: (frame) => session.handleLine(JSON.stringify(frame)),
@@ -261,7 +242,6 @@ describe("ShimSession lifecycle", () => {
       initialPermissionMode: "default",
       createQuery: () => throwingQuery,
       probeCommands: async () => [],
-      probeStatus: async () => ({}),
       emit: (e) => emitted.push(e),
       exit: (c) => {
         exit = c;
@@ -611,82 +591,6 @@ describe("ShimSession refresh-commands", () => {
     await until(() => h.eventsOfType("error").length === 1);
     // Assert — the startup menu stands; a failed refresh never blanks it.
     expect(h.eventsOfType("commands")).toHaveLength(1);
-  });
-});
-
-describe("ShimSession refresh-status", () => {
-  it("emits a status event carrying the fresh probe snapshot", async () => {
-    // Arrange — the live query's init is memoized, so only the probe sees a
-    // `/fast` toggled on since the session started.
-    const h = makeHarness();
-    // Act
-    h.send({ type: "refresh-status", request_id: "r1" });
-    await until(() => h.eventsOfType("status").length === 1);
-    // Assert
-    expect(h.eventsOfType("status")[0]).toEqual({
-      type: "status",
-      session_id: "sess-1",
-      status: REFRESHED_STATUS,
-    });
-  });
-
-  it("probes exactly once per refresh-status", async () => {
-    // Arrange
-    const h = makeHarness();
-    // Act
-    h.send({ type: "refresh-status", request_id: "r1" });
-    await until(() => h.eventsOfType("status").length === 1);
-    // Assert — no startup status publish rides the live query, so the probe
-    // count is exactly the one refresh asked for.
-    expect(h.probeStatusCalls()).toBe(1);
-  });
-
-  it("acks the refresh-status once the snapshot is published", async () => {
-    // Arrange
-    const h = makeHarness();
-    // Act
-    h.send({ type: "refresh-status", request_id: "r1" });
-    await until(() => h.eventsOfType("ack").length === 1);
-    // Assert
-    expect(h.eventsOfType("ack")[0]).toEqual({
-      type: "ack",
-      session_id: "sess-1",
-      request_id: "r1",
-    });
-  });
-
-  it("surfaces a failed status probe as an sdk_throw carrying the request_id", async () => {
-    // Arrange — a refresh that cannot spawn its probe leaves the session
-    // perfectly usable.
-    const h = makeHarness({ probeStatusError: new Error("spawn failed") });
-    // Act
-    h.send({ type: "refresh-status", request_id: "r1" });
-    await until(() => h.eventsOfType("error").length === 1);
-    // Assert
-    expect(h.eventsOfType("error")[0]).toMatchObject({
-      code: "sdk_throw",
-      request_id: "r1",
-    });
-  });
-
-  it("does not ack a refresh-status whose probe failed", async () => {
-    // Arrange
-    const h = makeHarness({ probeStatusError: new Error("spawn failed") });
-    // Act
-    h.send({ type: "refresh-status", request_id: "r1" });
-    await until(() => h.eventsOfType("error").length === 1);
-    // Assert
-    expect(h.eventsOfType("ack")).toEqual([]);
-  });
-
-  it("emits no status event when the probe failed", async () => {
-    // Arrange
-    const h = makeHarness({ probeStatusError: new Error("spawn failed") });
-    // Act
-    h.send({ type: "refresh-status", request_id: "r1" });
-    await until(() => h.eventsOfType("error").length === 1);
-    // Assert — a failed refresh publishes nothing rather than an empty status.
-    expect(h.eventsOfType("status")).toEqual([]);
   });
 });
 
