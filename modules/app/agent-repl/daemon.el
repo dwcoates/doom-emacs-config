@@ -447,11 +447,23 @@ Assumes the artifacts are already built; call
       proc)))
 
 (defun agent-repl--frontend-daemon-sentinel (proc event)
-  "Clear the tracked process when PROC dies; EVENT is the status change."
+  "Clear the tracked process when PROC dies; EVENT is the status change.
+
+Surfaces the death rather than only logging it (F4).  The daemon\='s own
+exit is the one failure with no card anywhere — the process that composes
+every other failure card is the one that just died, so it cannot report
+this about itself.  Emacs supervises the process, so Emacs classifies it,
+under the reserved `client.\=' prefix."
   (unless (process-live-p proc)
     (when (eq proc agent-repl--frontend-daemon-process)
       (setq agent-repl--frontend-daemon-process nil))
-    (agent-repl--log nil "claude-repld exited: %s" (string-trim event))))
+    (agent-repl--log nil "claude-repld exited: %s" (string-trim event))
+    (agent-repl-failure-surface
+     nil
+     (agent-repl-failure-local
+      "client.daemon_exited"
+      "the agent-repl daemon exited"
+      (string-trim event)))))
 
 ;;;; ---- Entry point ------------------------------------------------------
 

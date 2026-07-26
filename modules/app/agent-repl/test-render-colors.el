@@ -1,0 +1,151 @@
+;;; test-render-colors.el --- The cross-language color contract -*- lexical-binding: t; -*-
+
+;;; Commentary:
+
+;; Emacs's corner of the contract in proto/vocab/render-colors.json.
+;;
+;; That file is the ONE table naming which of the five colors each
+;; RenderState and each ErrorClass takes.  Go asserts against it, TypeScript
+;; asserts against it, and this file is the third corner — which is what
+;; makes a divergence between the three fail loudly instead of quietly.
+;;
+;; It checks the ASSIGNMENT, not the hex: each renderer keeps its own shades
+;; (a tab-bar background and a CSS dot legitimately want different ones).
+;; What may never differ is which color a state gets.
+;;
+;; It also finally CHECKS the two-sided contract `sidebar.el' has only ever
+;; asserted in a comment.
+
+;;; Code:
+
+(require 'ert)
+(require 'json)
+
+(let ((dir (file-name-directory (or load-file-name buffer-file-name))))
+  (load (expand-file-name "test-helpers.el" dir) nil t))
+
+(defconst agent-repl-test--color-fixture
+  (let* ((dir (file-name-directory (or load-file-name buffer-file-name)))
+         (path (expand-file-name "proto/vocab/render-colors.json" dir)))
+    (with-temp-buffer
+      (insert-file-contents path)
+      (let ((json-object-type 'alist)
+            (json-array-type 'list)
+            (json-key-type 'string))
+        (json-read))))
+  "The checked-in cross-language color assignment, decoded.")
+
+(defun agent-repl-test--fixture (key)
+  "Return the fixture's KEY section as an alist."
+  (cdr (assoc key agent-repl-test--color-fixture)))
+
+(defun agent-repl-test--state-keyword (enum-name)
+  "Return the render keyword ENUM-NAME maps to, or nil."
+  (cdr (assoc enum-name agent-repl--frontend-render-state-map)))
+
+;;;; ---- Fixture coverage ------------------------------------------------
+
+(ert-deftest agent-repl-test-colors-every-mapped-state-has-a-fixture-row ()
+  "Every RenderState this frontend decodes has a color assignment.
+A state Emacs accepts with no row would reach the palette needing a color
+nobody agreed on."
+  ;; Act / Assert
+  (dolist (entry agent-repl--frontend-render-state-map)
+    (should (assoc (car entry) (agent-repl-test--fixture "render_states")))))
+
+(ert-deftest agent-repl-test-colors-every-fixture-state-is-decodable ()
+  "Every colored RenderState is one this frontend can decode.
+The other direction: a row for a state Emacs would reject is an
+assignment nothing can honor."
+  ;; Act / Assert
+  (dolist (row (agent-repl-test--fixture "render_states"))
+    (unless (equal (car row) "RENDER_STATE_UNSPECIFIED")
+      (should (agent-repl-test--state-keyword (car row))))))
+
+(ert-deftest agent-repl-test-colors-match-the-fixture ()
+  "Emacs's per-state color NAME equals the fixture's, row for row.
+This is the assertion the whole file exists for: the moment the three
+renderers disagree about which color a state takes, this fails."
+  ;; Act / Assert
+  (dolist (row (agent-repl-test--fixture "render_states"))
+    (let ((keyword (agent-repl-test--state-keyword (car row))))
+      (when (and keyword (assq keyword agent-repl--state-color))
+        (should (equal (alist-get keyword agent-repl--state-color) (cdr row)))))))
+
+(ert-deftest agent-repl-test-colors-precedence-matches-the-fixture ()
+  "Emacs restates the SSM's rank order without reordering it."
+  ;; Act / Assert
+  (should (equal agent-repl--color-precedence
+                 (cdr (assoc "precedence" agent-repl-test--color-fixture)))))
+
+(ert-deftest agent-repl-test-colors-every-named-color-has-a-value ()
+  "Each of the five names resolves to a constant this renderer draws with.
+A color the fixture ranks but Emacs cannot draw is an assignment nothing
+can honor."
+  ;; Act / Assert
+  (dolist (name (cdr (assoc "colors" agent-repl-test--color-fixture)))
+    (should (stringp (alist-get name agent-repl--color-by-name nil nil #'equal)))))
+
+;;;; ---- The palette actually paints what the table says -----------------
+
+(ert-deftest agent-repl-test-colors-palette-paints-the-assigned-color ()
+  "Each palette row's background IS its assigned color's constant.
+Without this the shared table could agree with the fixture while the tab
+bar painted something else entirely."
+  ;; Act / Assert
+  (dolist (entry agent-repl--state-color)
+    (let* ((keyword (car entry))
+           (name (cdr entry))
+           (row (alist-get keyword agent-repl--tab-palette))
+           (bg (plist-get (plist-get row :unselected) :bg)))
+      (when (and row bg (not (equal name "none")))
+        (should (equal bg (alist-get name agent-repl--color-by-name nil nil #'equal)))))))
+
+(ert-deftest agent-repl-test-colors-merge-states-spend-no-color ()
+  "The merge states carry badges, never one of the five."
+  ;; Act / Assert
+  (dolist (keyword '(:merging :merge-queued :merge-conflict :merge-failed :merged))
+    (should (equal (alist-get keyword agent-repl--state-color) "none"))))
+
+;;;; ---- Exhaustiveness across the three Emacs tables --------------------
+
+(ert-deftest agent-repl-test-colors-every-state-has-a-sidebar-row ()
+  "Every decodable render state has a sidebar wire string.
+A state absent from `agent-repl--sidebar-status-wire' is a violated
+invariant, never a silent default dot."
+  ;; Act / Assert
+  (dolist (entry agent-repl--frontend-render-state-map)
+    (should (assq (cdr entry) agent-repl--sidebar-status-wire))))
+
+(ert-deftest agent-repl-test-colors-every-state-has-a-glyph ()
+  "Every decodable render state has a workspace glyph."
+  ;; Act / Assert
+  (dolist (entry agent-repl--frontend-render-state-map)
+    (should (assq (cdr entry) agent-repl-ws-state-icons))))
+
+;;;; ---- Error classes ---------------------------------------------------
+
+(ert-deftest agent-repl-test-colors-every-error-class-has-a-fixture-row ()
+  "Every class Emacs decodes has a color assignment."
+  ;; Act / Assert
+  (dolist (entry agent-repl-failure-class-wire)
+    (should (assoc (car entry) (agent-repl-test--fixture "error_classes")))))
+
+(ert-deftest agent-repl-test-colors-internal-class-matches-its-state ()
+  "The INTERNAL class takes the same color the degraded state takes.
+Card color IS state color: a blue workspace explained by a card of some
+other color is the drift this table prevents."
+  ;; Act / Assert
+  (should (equal (alist-get "ERROR_CLASS_INTERNAL"
+                            (agent-repl-test--fixture "error_classes") nil nil #'equal)
+                 (alist-get :degraded agent-repl--state-color))))
+
+(ert-deftest agent-repl-test-colors-api-class-matches-its-state ()
+  "The API class takes the same color the vendor-blocked state takes."
+  ;; Act / Assert
+  (should (equal (alist-get "ERROR_CLASS_API"
+                            (agent-repl-test--fixture "error_classes") nil nil #'equal)
+                 (alist-get :vendor-blocked agent-repl--state-color))))
+
+(provide 'test-render-colors)
+;;; test-render-colors.el ends here
