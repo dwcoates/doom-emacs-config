@@ -44,7 +44,7 @@ import { SessionStartGate, convert, promptPreview } from "../proto/convert.js";
 import { isEphemeral, toEphemeralEvent, StreamMessageTracker } from "../proto/delta.js";
 import { ControlDispatch, type SdkControlTarget, type ToolPermissionResult } from "./control.js";
 import { SessionServer, type SessionServerHandlers } from "./server.js";
-import { StoreClient } from "./store-client.js";
+import { StoreClient, type ReplayOutcome } from "./store-client.js";
 import { shimLog } from "./log.js";
 import {
   DegradedState,
@@ -53,6 +53,8 @@ import {
   EventClass,
   EventSchema,
   Plane,
+  ReplayDoneSchema,
+  ReplayRequest,
   SessionSource,
   TurnStartedSchema,
 } from "./proto.js";
@@ -90,6 +92,12 @@ export interface UdsSessionDeps {
   heartbeatIntervalMs?: number;
   /** Wall-clock injection for deterministic tests. */
   nowMs?: () => number;
+  /**
+   * How long a bounded replay waits for the next store frame before deciding
+   * its subscription drained. A FAILURE bound, not a pace: a store mid-replay
+   * writes back to back. Default 5000ms; tests shorten it.
+   */
+  replayIdleMs?: number;
 }
 
 export class UdsSession {
@@ -106,6 +114,8 @@ export class UdsSession {
    */
   private turnsInFlight = 0;
   private closed = false;
+  /** Idle bound for a bounded replay's store subscription (see deps). */
+  private readonly replayIdleMs: number;
   /**
    * Which assistant message the SDK is currently streaming. Deltas carry no
    * message identity of their own, so this supplies the one consumers
@@ -136,6 +146,7 @@ export class UdsSession {
 
   constructor(private readonly deps: UdsSessionDeps) {
     this.storeKeyKnown = deps.storeSessionId !== undefined && deps.storeSessionId !== "";
+    this.replayIdleMs = deps.replayIdleMs ?? 5000;
     const target: SdkControlTarget = {
       submitPrompt: ({ requestId, text, permissionMode }): void => {
         this.turnsInFlight++;
@@ -219,6 +230,7 @@ export class UdsSession {
       // The reattach hinge: a daemon Subscribe drives the store re-subscribe
       // that replays from `from_seq` (§4.4).
       onSubscribe: (m) => this.store.subscribe(m.fromSeq),
+      onReplayRequest: (m) => void this.serveReplay(m),
       onDaemonDisconnected: () => {
         // Reattach (§4.4): the turn keeps running and nothing is torn down.
         // Pending permission waits are NOT cancelled — a reattaching daemon can
@@ -237,6 +249,41 @@ export class UdsSession {
       },
       handlers,
     );
+  }
+
+  /**
+   * Serve one bounded historical replay for the daemon (core.proto
+   * ReplayRequest, design §5.4.1).
+   *
+   * The events come off a THROWAWAY store subscription (StoreClient.replay)
+   * and go back as ReplayEvent, which is a different wire type from the live
+   * Event stream — so the daemon routes them to conversation translation and
+   * nothing else, by frame type rather than by convention.
+   *
+   * Exactly one ReplayDone is sent, whatever happens. A replay that simply
+   * stopped streaming would be indistinguishable from one still in flight, so
+   * even an unexpected failure closes the request (loudly, as truncated).
+   */
+  private async serveReplay(req: ReplayRequest): Promise<void> {
+    let outcome: ReplayOutcome;
+    try {
+      outcome = await this.store.replay({
+        fromSeq: req.fromSeq,
+        toSeq: req.toSeq,
+        maxEvents: req.maxEvents,
+        idleMs: this.replayIdleMs,
+        onEvent: (evt) => this.server.sendReplayEvent(req.requestId, evt),
+      });
+    } catch (err) {
+      outcome = { delivered: 0, truncated: true, reason: `replay failed: ${errMsg(err)}` };
+      shimLog(COMPONENT, { session: this.deps.sessionId, request: req.requestId }, outcome.reason);
+    }
+    this.server.sendReplayDone(create(ReplayDoneSchema, {
+      requestId: req.requestId,
+      truncated: outcome.truncated,
+      reason: outcome.reason,
+      delivered: BigInt(outcome.delivered),
+    }));
   }
 
   /**

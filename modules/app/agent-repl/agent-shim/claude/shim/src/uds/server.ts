@@ -40,6 +40,11 @@ import {
   PermissionRequestSchema,
   PermissionResponse,
   PermissionResponseSchema,
+  ReplayDone,
+  ReplayDoneSchema,
+  ReplayEventSchema,
+  ReplayRequest,
+  ReplayRequestSchema,
   ShimHelloSchema,
   Subscribe,
   SubscribeSchema,
@@ -60,6 +65,12 @@ export interface SessionServerHandlers {
   onPermissionResponse(msg: PermissionResponse): void;
   /** (Re)start the store→daemon forward from `from_seq` (reattach replay). */
   onSubscribe(msg: Subscribe): void;
+  /**
+   * Serve a BOUNDED historical replay (core.proto ReplayRequest). Distinct
+   * from onSubscribe in the way that matters: this must NOT move the standing
+   * subscription, and its events go back as ReplayEvent rather than Event.
+   */
+  onReplayRequest(msg: ReplayRequest): void;
   /** Daemon (re)connected and completed the handshake. */
   onDaemonConnected?(hello: DaemonHello): void;
   /** Daemon connection lost (reattach possible; nothing torn down). */
@@ -184,6 +195,31 @@ export class SessionServer {
     this.conn!.send(EventSchema, evt);
   }
 
+  /**
+   * Forward one REPLAYED historical event, tagged with the request that asked
+   * for it.
+   *
+   * A ReplayEvent is a different wire type from an Event on purpose: the
+   * daemon's demux routes it to conversation translation only, and cannot
+   * confuse replayed history for live state even by mistake (core.proto).
+   */
+  sendReplayEvent(requestId: string, evt: Event): void {
+    if (!this.isConnected()) {
+      shimLog(COMPONENT, { session: this.opts.sessionId, request: requestId, seq: evt.seq }, `no daemon attached; replay event not forwarded`);
+      return;
+    }
+    this.conn!.send(ReplayEventSchema, create(ReplayEventSchema, { requestId, event: evt }));
+  }
+
+  /** Close a replay. Exactly one per ReplayRequest, whatever the outcome. */
+  sendReplayDone(done: ReplayDone): void {
+    if (!this.isConnected()) {
+      shimLog(COMPONENT, { session: this.opts.sessionId, request: done.requestId }, `no daemon attached; replay completion not forwarded`);
+      return;
+    }
+    this.conn!.send(ReplayDoneSchema, done);
+  }
+
   /** Send a canUseTool PermissionRequest to the daemon. */
   sendPermissionRequest(req: PermissionRequest): void {
     if (!this.isConnected()) {
@@ -272,6 +308,13 @@ export class SessionServer {
     if (sub) {
       shimLog(COMPONENT, { session: this.opts.sessionId, from_seq: sub.fromSeq }, `daemon subscribed`);
       this.handlers.onSubscribe(sub);
+      return;
+    }
+    const replay = unpackAs(msg, ReplayRequestSchema);
+    if (replay) {
+      shimLog(COMPONENT, { session: this.opts.sessionId, request: replay.requestId, from_seq: replay.fromSeq, to_seq: replay.toSeq },
+        `daemon requested a bounded history replay`);
+      this.handlers.onReplayRequest(replay);
       return;
     }
     const hb = unpackAs(msg, HeartbeatSchema);

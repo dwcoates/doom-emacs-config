@@ -90,6 +90,7 @@ describe("daemon reattach with from_seq continuation", () => {
         onPermissionResponse: () => {},
         // The reattach hinge: a daemon Subscribe drives a store re-subscribe.
         onSubscribe: (m) => storeClient.subscribe(m.fromSeq),
+        onReplayRequest: () => {},
       },
     );
     cleanups.push(() => server.close());

@@ -9,6 +9,9 @@ import {
   NackSchema,
   PermissionRequestSchema,
   PermissionResponseSchema,
+  ReplayDoneSchema,
+  ReplayEventSchema,
+  ReplayRequestSchema,
   ShimHelloSchema,
   SubmitPromptSchema,
   SubscribeSchema,
@@ -16,6 +19,7 @@ import {
 import type {
   Interrupt,
   PermissionResponse,
+  ReplayRequest,
   SubmitPrompt,
   Subscribe,
 } from "../src/uds/proto.js";
@@ -26,6 +30,7 @@ interface Calls {
   interrupts: Interrupt[];
   perms: PermissionResponse[];
   subs: Subscribe[];
+  replays: ReplayRequest[];
   connected: number;
   disconnected: number;
 }
@@ -36,7 +41,7 @@ function harness(overrides: Partial<SessionServerHandlers> = {}): {
   calls: Calls;
 } {
   const socketPath = tmpSocketPath();
-  const calls: Calls = { prompts: [], interrupts: [], perms: [], subs: [], connected: 0, disconnected: 0 };
+  const calls: Calls = { prompts: [], interrupts: [], perms: [], subs: [], replays: [], connected: 0, disconnected: 0 };
   const handlers: SessionServerHandlers = {
     onSubmitPrompt: (m): Receipt => {
       calls.prompts.push(m);
@@ -48,6 +53,7 @@ function harness(overrides: Partial<SessionServerHandlers> = {}): {
     },
     onPermissionResponse: (m) => calls.perms.push(m),
     onSubscribe: (m) => calls.subs.push(m),
+    onReplayRequest: (m) => calls.replays.push(m),
     onDaemonConnected: () => calls.connected++,
     onDaemonDisconnected: () => calls.disconnected++,
     ...overrides,
