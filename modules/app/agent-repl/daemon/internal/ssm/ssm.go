@@ -387,6 +387,44 @@ func (m *Manager) ApplyVendorCleared(workspace, reason string) error {
 	return m.reresolveLocked(workspace, cause, 0)
 }
 
+// ApplyConnectionDegraded records the daemon's OWN observation of the shim
+// transport going quiet, or coming back (F4).
+//
+// The degraded AXIS already existed, fed by the shim's own DegradedState
+// events. What did not reach it was the transport-level miss the daemon
+// detects itself: the missed-heartbeat window called the Degraded sink and
+// nothing appended a row, so a heartbeat miss produced a banner and no state
+// at all. Retiring that banner without this would have lost the ambience
+// entirely.
+//
+// degraded=false CLEARS the axis, the same token the shim's recovery writes,
+// so the two sources of the same fact settle the same way.
+func (m *Manager) ApplyConnectionDegraded(workspace string, degraded bool, reason string) error {
+	if workspace == "" {
+		return fmt.Errorf("ssm: ApplyConnectionDegraded got an empty workspace")
+	}
+	token := sigDegradedClear
+	cause := "connection_recovered"
+	if degraded {
+		token = sigDegraded
+		cause = "connection_degraded"
+	}
+	if reason != "" {
+		cause = cause + ":" + reason
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	at := m.nextAt()
+	// Daemon-local: the observation is the daemon's own, so it carries no
+	// store seq and no task id.
+	if err := appendRow(m.db, workspace, "", token, cause, sql.NullInt64{}, at, ""); err != nil {
+		return err
+	}
+	return m.reresolveLocked(workspace, cause, 0)
+}
+
 // ApplyMergeTransition records a daemon-local merge phase change (merge
 // state lives ONLY in the SSM, §9.2). phase is a merge signal token
 // (merging|merge_queued|merge_conflict|merge_failed|merged) or the empty
