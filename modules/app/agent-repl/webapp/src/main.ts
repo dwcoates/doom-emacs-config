@@ -56,6 +56,7 @@ import { StateAdapter, type DegradedBanner } from "./state-adapter.js";
 import { CommandDispatcher } from "./command-dispatch.js";
 import type { CommandStruct } from "./frontend-command.js";
 import { PendingPermissionMode } from "./pending-mode.js";
+import { ungatedBannerHtml, ungatedModeOf, unswitchableModeOptionHtml } from "./ungated.js";
 import { rebindSession, rememberResumeKeys } from "./rebind.js";
 import { hiddenContinueMessage, rememberMidTask, shouldAutoContinue } from "./resume-continue.js";
 import { remediationNotice, requestRemediation } from "./remediation.js";
@@ -344,6 +345,12 @@ async function boot(): Promise<void> {
   const modelEl = must<HTMLSelectElement>("model-select");
   const spinnerEl = must("spinner");
   const compactBarEl = must("compact-progress-slot");
+  const ungatedBannerEl = must("ungated-banner");
+  // The picker's own vocabulary, captured BEFORE any live-mode option is
+  // appended, so an ungated session's disabled marker never gets mistaken for
+  // a switchable mode on the next frame.
+  const switchableModes = Array.from(modeEl.options, (o) => o.value);
+  const baseModeOptions = modeEl.innerHTML;
   const remediationEl = must("remediation");
   const accountEl = must<HTMLButtonElement>("account");
   const accountMenuEl = must("account-menu");
@@ -426,7 +433,26 @@ async function boot(): Promise<void> {
     // A held permission-mode pick keeps the picker on the user's choice until
     // the daemon reports that mode in force, at which point the pick is spent.
     const wantMode = pendingMode.settle(s.permissionMode);
+    // The picker offers only SWITCHABLE modes, so a launch-only mode
+    // (bypassPermissions) matches nothing and would render the select BLANK —
+    // an ungated session looking like the most ordinary thing on screen. Carry
+    // the live mode as a disabled option instead, so the picker always names
+    // what is actually running.
+    const liveOption = unswitchableModeOptionHtml(switchableModes, wantMode);
+    const nextModeOptions = baseModeOptions + liveOption;
+    if (modeEl.innerHTML !== nextModeOptions) modeEl.innerHTML = nextModeOptions;
     if (modeEl.value !== wantMode) modeEl.value = wantMode;
+    // THE ungated-session surface: a session whose mode shadows canUseTool in
+    // the fail-open direction has no daemon permission gate at all, so it gets
+    // a permanent banner plus a document-wide marker the chrome paints against
+    // (styles.css `.ungated`). Both are pure functions of the live mode — there
+    // is nothing to dismiss while the mode is in force.
+    const ungatedMode = ungatedModeOf({
+      requestedMode: wantMode,
+      systemInit: s.systemInit,
+    });
+    ungatedBannerEl.innerHTML = ungatedBannerHtml(ungatedMode);
+    document.body.classList.toggle("ungated", ungatedMode !== "");
     spinnerEl.classList.toggle("on", s.turnInFlight);
     // The centered "current objective" label (§2.14): textContent (not
     // innerHTML) so the daemon's summary is inert text, and the full line

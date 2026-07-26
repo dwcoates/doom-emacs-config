@@ -1880,14 +1880,15 @@ describe("activity fold", () => {
     // Arrange — the ticker body was copied per fold, and every copy was
     // byte-identical, so a new fold silently grew another.
     const bodies = css.match(/display: inline-flex;/g) ?? [];
-    // Act / Assert — one shared ticker rule, plus the eight unrelated
+    // Act / Assert — one shared ticker rule, plus the nine unrelated
     // inline-flex users (.tab-chip, the counter chip, the .async-badge, the
     // face's .face-side, the sidebar merge glyph that centers itself for an
     // on-axis spin, the sidebar inactive question-mark glyph that centers
-    // its emoji, the sidebar view-selector segmented control, and the task
-    // checkbox that centers its check mark).
+    // its emoji, the sidebar view-selector segmented control, the task
+    // checkbox that centers its check mark, and the ungated banner's
+    // .ungated-mark disc that centers its "!").
     expect(css).toMatch(/\.agent-ticker,\s*\n\.async-ticker,\s*\n\.gns-ticker\s*\{/);
-    expect(bodies.length).toBe(9);
+    expect(bodies.length).toBe(10);
   });
 
   it("offers the fold-back cursor on the open fold's ticker only", () => {
@@ -2728,5 +2729,36 @@ describe("sidebar inactive (perspective-less) glyph", () => {
     // Arrange + Act + Assert
     expect(inactive).toContain("display: inline-flex");
     expect(inactive).toContain("justify-content: center");
+  });
+});
+
+describe("ungated-session surface", () => {
+  // A session under bypassPermissions has no permission gate at all, so the
+  // chrome must be unmistakable and must not be escapable by scrolling.
+  it("fills the banner rather than outlining it like the downtime notices", () => {
+    // Arrange + Act
+    const banner = blockAfter(css, "#ungated-banner {");
+    // Assert
+    expect(banner).toContain("background: var(--err)");
+  });
+
+  it("collapses the banner slot entirely on a gated session", () => {
+    // Arrange + Act + Assert
+    expect(css).toContain("#ungated-banner:empty { display: none; }");
+  });
+
+  it("frames the whole viewport so scrolling never hides the warning", () => {
+    // Arrange + Act
+    const frame = blockAfter(css, "body.ungated::after {");
+    // Assert
+    expect(frame).toContain("position: fixed");
+    expect(frame).toContain("border: 3px solid var(--err)");
+  });
+
+  it("lets clicks through the viewport frame", () => {
+    // Arrange + Act
+    const frame = blockAfter(css, "body.ungated::after {");
+    // Assert
+    expect(frame).toContain("pointer-events: none");
   });
 });

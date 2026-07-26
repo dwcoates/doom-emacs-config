@@ -2327,3 +2327,72 @@ pre {
   top: auto;
   bottom: calc(100% + 6px);
 }
+
+/* --- the ungated-session surface (ungated.ts) -----------------------------
+   A session under `bypassPermissions` has NO permission gate: the SDK
+   auto-approves every tool before `canUseTool` — the shim's only approval
+   hook — is consulted, so no permission card ever appears and none ever
+   could. Without this treatment such a session is pixel-identical to a fully
+   gated one, which is the whole problem these rules exist to end.
+
+   Two cues, both permanent while the mode is in force and neither
+   dismissible:
+     1. #ungated-banner, a FILLED high-contrast bar under the topbar. Filled,
+        not outlined like #degraded-banner and .error-banner — those are
+        "something went wrong" notices sharing the feed's ground, and an open
+        door must not read as one more of them.
+     2. body.ungated, an inset frame around the whole viewport, so the warning
+        survives scrolling the banner off screen. */
+#ungated-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: var(--err);
+  color: #ffffff;
+  border-radius: 8px;
+  padding: 0.5rem 0.75rem;
+  margin: 0.25rem 0.75rem;
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+/* An empty slot collapses completely: a gated session pays no layout for a
+   warning it does not carry. */
+#ungated-banner:empty { display: none; }
+/* The leading glyph: a filled disc carrying "!" rather than an emoji, so the
+   mark renders identically on every platform and takes the bar's own colors. */
+.ungated-mark {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.15rem;
+  height: 1.15rem;
+  border-radius: 50%;
+  background: #ffffff;
+  color: var(--err);
+  font-weight: 900;
+  line-height: 1;
+}
+.ungated-text { flex: 1 1 auto; }
+
+/* The viewport frame. `position: fixed` plus `pointer-events: none` floats it
+   over every layer (feed, rail, login overlay) without intercepting a single
+   click, and drawing it on ::after leaves every existing box untouched. */
+body.ungated::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  border: 3px solid var(--err);
+  pointer-events: none;
+  z-index: 9999;
+}
+/* The picker's disabled live-mode option (unswitchableModeOptionHtml): the
+   mode is SHOWN because a blank picker would hide it, but it is not a choice,
+   and on an ungated session the select wears the alarm color so the topbar
+   agrees with the banner. */
+body.ungated #mode-select {
+  color: var(--err);
+  border-color: var(--err);
+  font-weight: 700;
+}
