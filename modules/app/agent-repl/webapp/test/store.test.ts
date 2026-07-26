@@ -10,6 +10,7 @@ import {
   type ResultItem,
   type StoreState,
   type TextItem,
+  type ThinkingItem,
   type ToolItem,
 } from "../src/store.js";
 import type {
@@ -69,18 +70,15 @@ function sessionEffect(over: Partial<SessionViewInput> = {}): AdapterEffect {
 }
 
 function typingEffect(over: Partial<TypingReveal> = {}): AdapterEffect {
-  const uuid = over.uuid ?? "u1";
-  const blockIndex = over.blockIndex ?? 0;
   return {
     kind: "typing",
     value: {
       workspace: "ws",
       sessionId: "s1",
-      uuid,
-      blockIndex,
+      messageId: "u1",
+      blockIndex: 0,
       kind: "text",
       delta: "hi",
-      blockId: `${uuid}:${blockIndex}`,
       ...over,
     },
   };
@@ -415,7 +413,7 @@ describe("ingest typing", () => {
     const store = new ConversationStore();
     store.ingest([itemsEffect([textItem({ blockId: "u1:0", text: "he", done: false })])]);
     // Act
-    store.ingest([typingEffect({ uuid: "u1", blockIndex: 0, delta: "llo" })]);
+    store.ingest([typingEffect({ messageId: "u1", blockIndex: 0, delta: "llo" })]);
     // Assert
     expect((store.state.items[0] as TextItem).text).toBe("hello");
   });
@@ -424,7 +422,7 @@ describe("ingest typing", () => {
     // Arrange
     const store = new ConversationStore();
     // Act
-    store.ingest([typingEffect({ uuid: "u9", blockIndex: 2, delta: "start" })]);
+    store.ingest([typingEffect({ messageId: "u9", blockIndex: 2, delta: "start" })]);
     // Assert
     const item = store.state.items[0] as TextItem;
     expect(item.kind).toBe("text");
@@ -437,7 +435,7 @@ describe("ingest typing", () => {
     const store = new ConversationStore();
     store.ingest([itemsEffect([textItem({ blockId: "u1:0", text: "he", done: true })])]);
     // Act
-    store.ingest([typingEffect({ uuid: "u1", blockIndex: 0, delta: "llo" })]);
+    store.ingest([typingEffect({ messageId: "u1", blockIndex: 0, delta: "llo" })]);
     // Assert
     expect((store.state.items[0] as TextItem).done).toBe(false);
   });
@@ -446,7 +444,7 @@ describe("ingest typing", () => {
     // Arrange
     const store = new ConversationStore();
     // Act
-    store.ingest([typingEffect({ kind: "thinking", uuid: "u2", blockIndex: 0, delta: "weigh" })]);
+    store.ingest([typingEffect({ kind: "thinking", messageId: "u2", blockIndex: 0, delta: "weigh" })]);
     // Assert
     expect(store.state.items[0].kind).toBe("thinking");
   });
@@ -874,9 +872,9 @@ describe("streaming chunks reconcile into one block", () => {
     const store = new ConversationStore();
 
     // Act: three chunks of the SAME message.
-    store.ingest([typingEffect({ uuid: "msg_01ABC", delta: "Hel" })]);
-    store.ingest([typingEffect({ uuid: "msg_01ABC", delta: "lo " })]);
-    store.ingest([typingEffect({ uuid: "msg_01ABC", delta: "there" })]);
+    store.ingest([typingEffect({ messageId: "msg_01ABC", delta: "Hel" })]);
+    store.ingest([typingEffect({ messageId: "msg_01ABC", delta: "lo " })]);
+    store.ingest([typingEffect({ messageId: "msg_01ABC", delta: "there" })]);
 
     // Assert: one bubble, fully assembled — not three.
     const texts = store.state.items.filter((i) => i.kind === "text");
@@ -889,8 +887,8 @@ describe("streaming chunks reconcile into one block", () => {
     const store = new ConversationStore();
 
     // Act
-    store.ingest([typingEffect({ uuid: "msg_FIRST", delta: "one" })]);
-    store.ingest([typingEffect({ uuid: "msg_SECOND", delta: "two" })]);
+    store.ingest([typingEffect({ messageId: "msg_FIRST", delta: "one" })]);
+    store.ingest([typingEffect({ messageId: "msg_SECOND", delta: "two" })]);
 
     // Assert
     expect(store.state.items.filter((i) => i.kind === "text")).toHaveLength(2);
@@ -901,8 +899,8 @@ describe("streaming chunks reconcile into one block", () => {
     const store = new ConversationStore();
 
     // Act
-    store.ingest([typingEffect({ uuid: "msg_01ABC", blockIndex: 0, delta: "a" })]);
-    store.ingest([typingEffect({ uuid: "msg_01ABC", blockIndex: 1, delta: "b" })]);
+    store.ingest([typingEffect({ messageId: "msg_01ABC", blockIndex: 0, delta: "a" })]);
+    store.ingest([typingEffect({ messageId: "msg_01ABC", blockIndex: 1, delta: "b" })]);
 
     // Assert
     expect(store.state.items.filter((i) => i.kind === "text")).toHaveLength(2);
@@ -911,8 +909,8 @@ describe("streaming chunks reconcile into one block", () => {
   it("replaces the streamed preview with the finished message", () => {
     // Arrange: the preview the chunks grew.
     const store = new ConversationStore();
-    store.ingest([typingEffect({ uuid: "msg_01ABC", blockIndex: 0, delta: "Hel" })]);
-    store.ingest([typingEffect({ uuid: "msg_01ABC", blockIndex: 0, delta: "lo" })]);
+    store.ingest([typingEffect({ messageId: "msg_01ABC", blockIndex: 0, delta: "Hel" })]);
+    store.ingest([typingEffect({ messageId: "msg_01ABC", blockIndex: 0, delta: "lo" })]);
 
     // Act: the persistent item arrives, keyed on the SAME Anthropic id.
     store.ingest([
@@ -926,6 +924,156 @@ describe("streaming chunks reconcile into one block", () => {
     expect(texts).toHaveLength(1);
     expect(texts[0]!.kind === "text" && texts[0]!.done).toBe(true);
     expect(texts[0]!.kind === "text" && texts[0]!.text).toBe("Hello");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A finished block SETTLES onto the preview its deltas grew.
+//
+// The two sides share no key and cannot: a preview is keyed by the API block
+// index (the only ordinal the live stream states), while a finished record is
+// keyed by an envelope that did not exist while the message was streaming.
+//
+// The SDK emits one assistant record PER CONTENT BLOCK — every record of one
+// API message carrying the same `message.id` and a `content` array of length
+// ONE — so the index within `content` is always 0 and says nothing about which
+// API block the record holds. Keying finished blocks on it therefore both
+// FAILED to meet the preview (a `[thinking, text]` message previewed its text
+// at index 1 and finalized it at index 0, so the half-typed card stayed on
+// screen beside the final one) and COLLIDED with itself (two thinking blocks
+// of one message both keyed `:0`, so the second silently replaced the first).
+// ---------------------------------------------------------------------------
+
+/** A finished text block as the adapter now emits it: envelope-keyed. */
+function finishedText(over: Partial<TextItem> = {}): TextItem {
+  return {
+    kind: "text",
+    blockId: "env1:0",
+    uuid: "env1:0",
+    messageId: "msg_01ABC",
+    text: "Hello",
+    done: true,
+    ts: TS,
+    ...over,
+  };
+}
+
+/** A finished thinking block as the adapter now emits it: envelope-keyed. */
+function finishedThinking(over: Partial<ThinkingItem> = {}): ThinkingItem {
+  return {
+    kind: "thinking",
+    blockId: "env1:0",
+    uuid: "env1:0",
+    messageId: "msg_01ABC",
+    text: "hmm",
+    done: true,
+    ...over,
+  };
+}
+
+describe("a finished block settles onto its streamed preview", () => {
+  it("lands a text block previewed at API index 1 on that preview, not beside it", () => {
+    // Arrange: the reported bug's exact shape — a [thinking, text] message,
+    // so the text streams at API block index 1.
+    const store = new ConversationStore();
+    store.ingest([typingEffect({ kind: "thinking", messageId: "msg_01ABC", blockIndex: 0, delta: "hmm" })]);
+    store.ingest([typingEffect({ kind: "text", messageId: "msg_01ABC", blockIndex: 1, delta: "Hel" })]);
+
+    // Act: the finished text record, whose own content index is 0.
+    store.ingest([itemsEffect([finishedText({ blockId: "env2:0", uuid: "env2:0", text: "Hello" })])]);
+
+    // Assert: ONE text card, complete — not a stalled preview plus a final.
+    const texts = store.state.items.filter((i) => i.kind === "text");
+    expect(texts).toHaveLength(1);
+    expect(texts[0]!.kind === "text" && texts[0]!.text).toBe("Hello");
+  });
+
+  it("keeps two finished thinking blocks of one message as two items", () => {
+    // Arrange: both records carry content index 0, so an index-keyed identity
+    // made the second silently overwrite the first.
+    const store = new ConversationStore();
+
+    // Act
+    store.ingest([itemsEffect([finishedThinking({ blockId: "env1:0", uuid: "env1:0", text: "first" })])]);
+    store.ingest([itemsEffect([finishedThinking({ blockId: "env2:0", uuid: "env2:0", text: "second" })])]);
+
+    // Assert: no data loss — both blocks survive.
+    const thinking = store.state.items.filter((i) => i.kind === "thinking");
+    expect(thinking.map((i) => i.kind === "thinking" && i.text)).toEqual(["first", "second"]);
+  });
+
+  it("pins the settled block to the preview's blockId so the reveal never restarts", () => {
+    // Arrange: smooth.ts tracks reveal progress BY blockId, so moving the id
+    // under a settling block would re-type prose already on screen.
+    const store = new ConversationStore();
+    store.ingest([typingEffect({ messageId: "msg_01ABC", blockIndex: 3, delta: "Hel" })]);
+
+    // Act
+    store.ingest([itemsEffect([finishedText({ blockId: "env9:0", uuid: "env9:0", text: "Hello" })])]);
+
+    // Assert: the settled block kept the id the reveal has been animating.
+    const settled = store.state.items.filter((i) => i.kind === "text" && i.done);
+    expect(settled.map((i) => i.kind === "text" && i.blockId)).toEqual(["msg_01ABC:3"]);
+  });
+
+  it("replaces rather than duplicates when a resync re-delivers a settled block", () => {
+    // Arrange: the settled item is keyed by its envelope, so the replay of the
+    // very same record must find it even though it holds the preview's blockId.
+    const store = new ConversationStore();
+    store.ingest([typingEffect({ messageId: "msg_01ABC", blockIndex: 1, delta: "Hel" })]);
+    store.ingest([itemsEffect([finishedText({ blockId: "env2:0", uuid: "env2:0", text: "Hello" })])]);
+
+    // Act: the same record again, as a reconnect gap-fill delivers it.
+    store.ingest([itemsEffect([finishedText({ blockId: "env2:0", uuid: "env2:0", text: "Hello" })])]);
+
+    // Assert
+    expect(store.state.items.filter((i) => i.kind === "text")).toHaveLength(1);
+  });
+
+  it("appends a finished block that no preview ever opened", () => {
+    // Arrange: a replayed or gap-filled message whose deltas this webapp never
+    // saw must still render, rather than being swallowed for want of a preview.
+    const store = new ConversationStore();
+
+    // Act
+    store.ingest([itemsEffect([finishedText({ text: "backfilled" })])]);
+
+    // Assert
+    const texts = store.state.items.filter((i) => i.kind === "text");
+    expect(texts).toHaveLength(1);
+    expect(texts[0]!.kind === "text" && texts[0]!.text).toBe("backfilled");
+  });
+
+  it("does not let a text block settle onto a thinking preview of the same message", () => {
+    // Arrange: kind is part of the match, so the two streams cannot cross.
+    const store = new ConversationStore();
+    store.ingest([typingEffect({ kind: "thinking", messageId: "msg_01ABC", blockIndex: 0, delta: "hmm" })]);
+
+    // Act
+    store.ingest([itemsEffect([finishedText({ blockId: "env2:0", uuid: "env2:0", text: "Hello" })])]);
+
+    // Assert: the thinking preview is untouched and the text landed on its own.
+    expect(store.state.items.filter((i) => i.kind === "thinking")).toHaveLength(1);
+    expect(store.state.items.filter((i) => i.kind === "text")).toHaveLength(1);
+  });
+
+  it("settles each of two same-kind blocks onto its own preview, earliest first", () => {
+    // Arrange: two thinking blocks streaming, then both finishing. Claiming the
+    // EARLIEST unclaimed preview is what keeps the pairing in block order.
+    const store = new ConversationStore();
+    store.ingest([typingEffect({ kind: "thinking", messageId: "msg_01ABC", blockIndex: 0, delta: "first" })]);
+    store.ingest([typingEffect({ kind: "thinking", messageId: "msg_01ABC", blockIndex: 1, delta: "second" })]);
+
+    // Act
+    store.ingest([itemsEffect([finishedThinking({ blockId: "env1:0", uuid: "env1:0", text: "first" })])]);
+    store.ingest([itemsEffect([finishedThinking({ blockId: "env2:0", uuid: "env2:0", text: "second" })])]);
+
+    // Assert: two items, each pinned to the preview it grew from.
+    const thinking = store.state.items.filter((i) => i.kind === "thinking");
+    expect(thinking.map((i) => i.kind === "thinking" && i.blockId)).toEqual([
+      "msg_01ABC:0",
+      "msg_01ABC:1",
+    ]);
   });
 });
 

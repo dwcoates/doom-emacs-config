@@ -133,7 +133,11 @@ describe("SessionView mapping", () => {
 // --- TypingDelta → smooth.ts reveal feed -----------------------------------
 
 describe("TypingDelta mapping", () => {
-  it("derives a stable block id from the content delta's uuid + block index", () => {
+  it("carries the delta's identity through without deriving a block id of its own", () => {
+    // The adapter is a CARRIER of identity, not a second source of it: the
+    // message id was chosen at the shim and the block id is derived in exactly
+    // one place (streaming.ts). Re-deriving one here is what let the preview's
+    // key and the finished record's key drift apart.
     const effects = applyOne({
       typingDelta: { workspace: "ws", sessionId: "s1", delta: { uuid: "msg-7", blockIndex: 2, thinking: "..." } },
     });
@@ -143,11 +147,10 @@ describe("TypingDelta mapping", () => {
         value: {
           workspace: "ws",
           sessionId: "s1",
-          uuid: "msg-7",
+          messageId: "msg-7",
           blockIndex: 2,
           kind: "thinking",
           delta: "...",
-          blockId: "msg-7:2",
         },
       },
     ]);
@@ -255,17 +258,26 @@ describe("ConversationDelta envelope", () => {
 });
 
 describe("assistantMessage arm", () => {
-  it("decomposes content blocks into text/thinking items keyed by uuid:blockIndex", () => {
+  it("decomposes content blocks into text/thinking items", () => {
     const items = itemsFrom({
       uuid: "m1",
       assistantMessage: {
         content: [{ text: { text: "hello" } }, { thinking: { thinking: "hmm", signature: "sig" } }],
       },
     });
-    const text: TextItem = { kind: "text", blockId: "m1:0", messageId: "m1", text: "hello", done: true, ts: "" };
+    const text: TextItem = {
+      kind: "text",
+      blockId: "m1:0",
+      uuid: "m1:0",
+      messageId: "m1",
+      text: "hello",
+      done: true,
+      ts: "",
+    };
     const thinking: ThinkingItem = {
       kind: "thinking",
       blockId: "m1:1",
+      uuid: "m1:1",
       messageId: "m1",
       text: "hmm",
       done: true,
@@ -274,16 +286,15 @@ describe("assistantMessage arm", () => {
     expect(items).toEqual([text, thinking]);
   });
 
-  it("keys blocks on the ANTHROPIC message id when the payload carries one", () => {
-    // The finished message must land on the SAME block the live deltas grew,
-    // and the only id it shares with its own stream is Anthropic's message id
-    // — the envelope uuid does not exist yet while the message is streaming.
+  it("derives the block's feed place from the ENVELOPE, so two records never collide", () => {
+    // The feed place must be unique per RECORD. Deriving it from the Anthropic
+    // message id gave every record of one message the same place, because each
+    // record's own content array holds exactly one block (index 0).
     const items = itemsFrom({
       uuid: "envelope-uuid",
       assistantMessage: { id: "msg_01ABC", content: [{ text: { text: "hello" } }] },
     });
-    expect((items[0] as TextItem).blockId).toBe("msg_01ABC:0");
-    expect((items[0] as TextItem).blockId).not.toContain("envelope-uuid");
+    expect((items[0] as TextItem).blockId).toBe("envelope-uuid:0");
   });
 
   it("falls back to the envelope uuid when the payload carries no id", () => {
@@ -294,6 +305,51 @@ describe("assistantMessage arm", () => {
       assistantMessage: { content: [{ text: { text: "hello" } }] },
     });
     expect((items[0] as TextItem).blockId).toBe("envelope-uuid:0");
+  });
+
+  it("stamps the record identity from the ENVELOPE, not the message id", () => {
+    // `uuid` is what the store dedups a finished block on. Deriving it from the
+    // Anthropic message id collapses every block of a message onto one key,
+    // because the SDK emits one record per block and each record's own content
+    // array holds exactly one entry (so its index is always 0).
+    const items = itemsFrom({
+      uuid: "envelope-uuid",
+      assistantMessage: { id: "msg_01ABC", content: [{ text: { text: "hello" } }] },
+    });
+    expect((items[0] as TextItem).uuid).toBe("envelope-uuid:0");
+  });
+
+  it("keeps the message id as the block's messageId, the stream's shared identity", () => {
+    // The message id is what pairs the finished block with its live preview,
+    // so it must survive as `messageId` even though it no longer keys the item.
+    const items = itemsFrom({
+      uuid: "envelope-uuid",
+      assistantMessage: { id: "msg_01ABC", content: [{ text: { text: "hello" } }] },
+    });
+    expect((items[0] as TextItem).messageId).toBe("msg_01ABC");
+  });
+
+  it("gives two records of ONE message two distinct identities", () => {
+    // The data-loss case: two thinking blocks of one API message arrive as two
+    // records sharing `msg_01ABC`, each with content index 0. Keyed on that
+    // index the second silently replaced the first.
+    const first = itemsFrom({
+      uuid: "env1",
+      assistantMessage: { id: "msg_01ABC", content: [{ thinking: { thinking: "one" } }] },
+    });
+    const second = itemsFrom({
+      uuid: "env2",
+      assistantMessage: { id: "msg_01ABC", content: [{ thinking: { thinking: "two" } }] },
+    });
+    expect((first[0] as ThinkingItem).uuid).not.toBe((second[0] as ThinkingItem).uuid);
+  });
+
+  it("stamps the record identity on thinking blocks too", () => {
+    const items = itemsFrom({
+      uuid: "env1",
+      assistantMessage: { id: "msg_01ABC", content: [{ thinking: { thinking: "hmm" } }] },
+    });
+    expect((items[0] as ThinkingItem).uuid).toBe("env1:0");
   });
 
   it("derives the block ts from the envelope tsMs", () => {

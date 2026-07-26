@@ -1,0 +1,171 @@
+{
+  "$comment": [
+    "ONE assistant message, carried across every hop that touches its identity.",
+    "",
+    "The message holds TWO content blocks — a thinking block at API index 0 and a",
+    "text block at API index 1 — because that is the shape the whole class of",
+    "identity bugs hides in. A single-block message reconciles even when the two",
+    "sides disagree about what a block index means, so it proves nothing.",
+    "",
+    "Note what the SDK does with `content`: it emits ONE assistant record PER",
+    "BLOCK, both repeating `msg_01ABC` and each carrying a `content` array of",
+    "length one. So a record's own content index is always 0 and identifies",
+    "nothing, while the live deltas number the blocks 0 and 1. Any hop that",
+    "re-derives identity from the wrong one of those two ordinals reproduces the",
+    "bug this fixture exists to catch.",
+    "",
+    "Consumed by:",
+    "  agent-shim/claude/shim/test/stream-contract.test.ts  (sdkMessages -> wire)",
+    "  daemon/internal/frontend/stream_contract_test.go     (wire -> frames)",
+    "  webapp/test/stream-contract.test.ts                  (frames -> store)",
+    "Each hop asserts against the SAME fixture, so drift at any one of them fails",
+    "in CI instead of rendering twice on screen."
+  ],
+
+  "sessionId": "s1",
+  "workspace": "ws",
+  "messageId": "msg_01ABC",
+  "tsMs": "1700000000000",
+
+  "sdkMessages": [
+    {
+      "type": "stream_event",
+      "session_id": "s1",
+      "uuid": "evt-1",
+      "event": {
+        "type": "message_start",
+        "message": { "id": "msg_01ABC", "role": "assistant", "content": [] }
+      }
+    },
+    {
+      "type": "stream_event",
+      "session_id": "s1",
+      "uuid": "evt-2",
+      "event": {
+        "type": "content_block_delta",
+        "index": 0,
+        "delta": { "type": "thinking_delta", "thinking": "weigh" }
+      }
+    },
+    {
+      "type": "stream_event",
+      "session_id": "s1",
+      "uuid": "evt-3",
+      "event": {
+        "type": "content_block_delta",
+        "index": 0,
+        "delta": { "type": "thinking_delta", "thinking": "ing it" }
+      }
+    },
+    {
+      "type": "stream_event",
+      "session_id": "s1",
+      "uuid": "evt-4",
+      "event": {
+        "type": "content_block_delta",
+        "index": 1,
+        "delta": { "type": "text_delta", "text": "Hel" }
+      }
+    },
+    {
+      "type": "stream_event",
+      "session_id": "s1",
+      "uuid": "evt-5",
+      "event": {
+        "type": "content_block_delta",
+        "index": 1,
+        "delta": { "type": "text_delta", "text": "lo" }
+      }
+    },
+    {
+      "type": "assistant",
+      "session_id": "s1",
+      "uuid": "env-1",
+      "message": {
+        "id": "msg_01ABC",
+        "role": "assistant",
+        "content": [{ "type": "thinking", "thinking": "weighing it", "signature": "sig" }]
+      }
+    },
+    {
+      "type": "assistant",
+      "session_id": "s1",
+      "uuid": "env-2",
+      "message": {
+        "id": "msg_01ABC",
+        "role": "assistant",
+        "content": [{ "type": "text", "text": "Hello" }]
+      }
+    }
+  ],
+
+  "frontendFrames": [
+    {
+      "typingDelta": {
+        "workspace": "ws",
+        "sessionId": "s1",
+        "delta": { "uuid": "msg_01ABC", "blockIndex": 0, "thinking": "weigh" }
+      }
+    },
+    {
+      "typingDelta": {
+        "workspace": "ws",
+        "sessionId": "s1",
+        "delta": { "uuid": "msg_01ABC", "blockIndex": 0, "thinking": "ing it" }
+      }
+    },
+    {
+      "typingDelta": {
+        "workspace": "ws",
+        "sessionId": "s1",
+        "delta": { "uuid": "msg_01ABC", "blockIndex": 1, "text": "Hel" }
+      }
+    },
+    {
+      "typingDelta": {
+        "workspace": "ws",
+        "sessionId": "s1",
+        "delta": { "uuid": "msg_01ABC", "blockIndex": 1, "text": "lo" }
+      }
+    },
+    {
+      "conversationDelta": {
+        "workspace": "ws",
+        "sessionId": "s1",
+        "throughSeq": "1",
+        "items": [
+          {
+            "uuid": "env-1",
+            "tsMs": "1700000000000",
+            "assistantMessage": {
+              "id": "msg_01ABC",
+              "content": [{ "thinking": { "thinking": "weighing it", "signature": "sig" } }]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "conversationDelta": {
+        "workspace": "ws",
+        "sessionId": "s1",
+        "throughSeq": "2",
+        "items": [
+          {
+            "uuid": "env-2",
+            "tsMs": "1700000000000",
+            "assistantMessage": {
+              "id": "msg_01ABC",
+              "content": [{ "text": { "text": "Hello" } }]
+            }
+          }
+        ]
+      }
+    }
+  ],
+
+  "expectItems": [
+    { "kind": "thinking", "text": "weighing it", "done": true, "messageId": "msg_01ABC", "blockId": "msg_01ABC:0" },
+    { "kind": "text", "text": "Hello", "done": true, "messageId": "msg_01ABC", "blockId": "msg_01ABC:1" }
+  ]
+}

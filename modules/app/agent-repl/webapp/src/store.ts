@@ -24,6 +24,7 @@ import type {
   TypingReveal,
   WorkspaceStatusInput,
 } from "./state-adapter.js";
+import { applyStreamDelta, blockKey, settleStreamedBlock } from "./streaming.js";
 import {
   AssistantMessageError,
   AsyncSource,
@@ -56,8 +57,22 @@ export interface UserTurnItem {
 }
 export interface TextItem {
   kind: "text";
+  /**
+   * The block's PLACE in the feed: the DOM key `render.ts` draws it under and
+   * the id `smooth.ts` tracks its reveal by. Opened by whichever side saw the
+   * block first (a preview's `${messageId}:${apiBlockIndex}`, or a backfilled
+   * record's own identity) and never moved afterwards, so neither the reveal
+   * cursor nor the rendered node is disturbed when the block settles.
+   */
   blockId: string;
   messageId: string;
+  /**
+   * The block's RECORD identity, set once the finished message lands and
+   * absent while it is only a streamed preview. This — not `blockId` — is what
+   * the block is deduped on, so a replayed record replaces the item it already
+   * produced instead of appearing twice.
+   */
+  uuid?: string;
   /** Owning subagent call; undefined on main-chain blocks. */
   parentToolUseId?: string;
   text: string;
@@ -77,8 +92,11 @@ export interface TextItem {
 }
 export interface ThinkingItem {
   kind: "thinking";
+  /** The block's place in the feed; see {@link TextItem.blockId}. */
   blockId: string;
   messageId: string;
+  /** The block's record identity; see {@link TextItem.uuid}. */
+  uuid?: string;
   /** Owning subagent call; undefined on main-chain blocks. */
   parentToolUseId?: string;
   text: string;
@@ -473,10 +491,11 @@ function itemKey(item: ConversationItem): string | null {
   switch (item.kind) {
     case "user-turn":
       return `user-turn:${item.requestId}`;
+    // Streamed prose is keyed by the ONE authority on block identity, so the
+    // rule cannot drift from the one the reconciler matches on.
     case "text":
-      return `text:${item.blockId}`;
     case "thinking":
-      return `thinking:${item.blockId}`;
+      return blockKey(item);
     case "tool":
       return `tool:${item.toolUseId}`;
     case "permission":
@@ -679,6 +698,13 @@ export class ConversationStore {
    * carry no id and always append.
    */
   private mergeItem(item: ConversationItem): void {
+    // Streamed prose has its own lifecycle — a finished block and the preview
+    // its deltas grew share no key, so pairing them is a match rather than a
+    // lookup — and `streaming.ts` owns all of it.
+    if (item.kind === "text" || item.kind === "thinking") {
+      settleStreamedBlock(this.state.items, item);
+      return;
+    }
     const key = itemKey(item);
     if (key !== null) {
       const idx = this.state.items.findIndex((i) => itemKey(i) === key);
@@ -686,7 +712,7 @@ export class ConversationStore {
         const existing = this.state.items[idx];
         // A tool call's two items (use + result) field-merge so the result
         // never wipes the call's name/input; every other kind is a whole-item
-        // replace (a completing text/thinking block supersedes its preview).
+        // replace.
         this.state.items[idx] =
           item.kind === "tool" && existing.kind === "tool"
             ? mergeToolItem(existing, item)
@@ -761,48 +787,17 @@ export class ConversationStore {
   }
 
   private applyTyping(reveal: TypingReveal): boolean {
-    const s = this.state;
-    if (reveal.kind === "text" || reveal.kind === "thinking") {
-      const existing = s.items.find(
-        (i): i is TextItem | ThinkingItem =>
-          (i.kind === "text" || i.kind === "thinking") && i.blockId === reveal.blockId,
-      );
-      if (existing) {
-        existing.text += reveal.delta;
-        existing.done = false;
-        return true;
-      }
-      if (reveal.kind === "text") {
-        s.items.push({
-          kind: "text",
-          blockId: reveal.blockId,
-          messageId: reveal.uuid,
-          text: reveal.delta,
-          done: false,
-          ts: new Date(this.now()).toISOString(),
-        });
-      } else {
-        s.items.push({
-          kind: "thinking",
-          blockId: reveal.blockId,
-          messageId: reveal.uuid,
-          text: reveal.delta,
-          done: false,
-        });
-      }
-      return true;
-    }
-    // input_json: grow the most recent tool call whose input is still open.
-    for (let i = s.items.length - 1; i >= 0; i--) {
-      const item = s.items[i];
-      if (item.kind === "tool" && !item.inputDone) {
-        item.inputJson += reveal.delta;
-        return true;
-      }
-    }
+    const outcome = applyStreamDelta(
+      this.state.items,
+      reveal,
+      new Date(this.now()).toISOString(),
+    );
+    if (outcome.changed) return true;
+    // A dropped delta is prose the user never sees, so it is reported loudly
+    // rather than being absorbed by the `false` return.
     this.log(
       "warn",
-      `typing input_json delta with no open tool to grow (block ${reveal.blockId})`,
+      `typing input_json delta with no open tool to grow (block ${outcome.blockId})`,
     );
     return false;
   }
