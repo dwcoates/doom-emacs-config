@@ -14,7 +14,13 @@ import {
   McpServerState,
   type ClaudeStreamMessage,
 } from "../../../../proto/gen/ts/agentshim/data/v1/stream_pb.js";
-import { RawTaskStatus, RetrievalStatus } from "../../../../proto/gen/ts/agentshim/data/v1/tools_pb.js";
+import {
+  GitBranchAction,
+  GitCommitKind,
+  GitPullRequestAction,
+  RawTaskStatus,
+  RetrievalStatus,
+} from "../../../../proto/gen/ts/agentshim/data/v1/tools_pb.js";
 import { OriginKind } from "../../../../proto/gen/ts/agentshim/data/v1/transcript_pb.js";
 import { DiscriminatorField } from "../../../../proto/gen/ts/agentshim/data/v1/unknown_pb.js";
 
@@ -1519,6 +1525,74 @@ describe("tool-result fields the sidecar logged as unknown", () => {
     const r = agent({});
     if (r.result.case !== "agent") throw new Error("case");
     expect(r.result.value.worktreeBranch).toBe("");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// BashResult.git_operation, retyped in place from string to a typed
+// GitOperation: the disk has always carried an object here, so the old string
+// typing meant every one of the 696 census records was captured verbatim.
+// ---------------------------------------------------------------------------
+
+describe("BashResult.gitOperation typing", () => {
+  const bash = (extra: Record<string, unknown>) =>
+    convertToolUseResult({ stdout: "", stderr: "", interrupted: false, ...extra }, "s");
+  const gitOp = (op: unknown) => {
+    const r = bash({ gitOperation: op });
+    if (r.result.case !== "bash") throw new Error("case");
+    return r.result.value.gitOperation;
+  };
+
+  it("types a commit operation's sha", () => {
+    expect(gitOp({ commit: { sha: "868db15d", kind: "committed" } })?.commit?.sha).toBe("868db15d");
+  });
+
+  it("maps commit.kind onto GitCommitKind", () => {
+    expect(gitOp({ commit: { sha: "x", kind: "cherry-picked" } })?.commit?.kind).toBe(GitCommitKind.CHERRY_PICKED);
+  });
+
+  it("leaves an unknown commit.kind UNSPECIFIED rather than guessing", () => {
+    expect(gitOp({ commit: { sha: "x", kind: "squashed" } })?.commit?.kind).toBe(GitCommitKind.UNSPECIFIED);
+  });
+
+  it("types a push operation's branch", () => {
+    expect(gitOp({ push: { branch: "DWC/x" } })?.push?.branch).toBe("DWC/x");
+  });
+
+  it("maps branch.action onto GitBranchAction", () => {
+    expect(gitOp({ branch: { ref: "master", action: "rebased" } })?.branch?.action).toBe(GitBranchAction.REBASED);
+  });
+
+  it("types a pr operation's number as an integer", () => {
+    expect(gitOp({ pr: { number: 9155, url: "https://x/y", action: "created" } })?.pr?.number).toBe(9155n);
+  });
+
+  it("maps the hyphenated pr.action onto GitPullRequestAction", () => {
+    expect(gitOp({ pr: { number: 1, action: "auto-merge-enabled" } })?.pr?.action).toBe(GitPullRequestAction.AUTO_MERGE_ENABLED);
+  });
+
+  it("leaves a pr url empty when the operation omits it", () => {
+    // Observed on the auto-merge actions, which name a PR the command did not open.
+    expect(gitOp({ pr: { number: 1, action: "auto-merge-enabled" } })?.pr?.url).toBe("");
+  });
+
+  it("carries TWO arms at once (a command that commits and pushes)", () => {
+    // The reason GitOperation is not a oneof; 23 census records look like this.
+    const op = gitOp({ commit: { sha: "abc", kind: "committed" }, push: { branch: "b" } });
+    expect([op?.commit?.sha, op?.push?.branch]).toEqual(["abc", "b"]);
+  });
+
+  it("leaves gitOperation ABSENT when the Bash result omits it", () => {
+    expect(gitOp(undefined)).toBeUndefined();
+  });
+
+  it("leaves gitOperation ABSENT for an object with no recognized arm", () => {
+    // An all-empty GitOperation would read as "git work we could not classify".
+    expect(gitOp({ rebase: { onto: "master" } })).toBeUndefined();
+  });
+
+  it("leaves gitOperation ABSENT when the value is not an object", () => {
+    expect(gitOp("committed")).toBeUndefined();
   });
 });
 
