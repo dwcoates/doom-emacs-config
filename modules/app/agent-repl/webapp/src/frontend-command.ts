@@ -55,7 +55,17 @@ export interface PermissionAnswerBody {
   denyMessage: string;
 }
 
-/** CreateSessionCmd — spawn a session; the new id arrives via a pushed SessionView. */
+/**
+ * CreateSessionCmd — spawn a session; the new id arrives via a pushed SessionView.
+ *
+ * `allow_ungated` is DELIBERATELY absent. The daemon refuses to create a
+ * session in a mode that leaves it with no permission gate
+ * (`bypassPermissions`, under which the SDK auto-approves every tool before
+ * `canUseTool` is consulted) unless the create carries that consent, and the
+ * webapp has no business consenting on the user's behalf from a browser tab.
+ * Omitting the field here makes a webapp-originated ungated session
+ * unrepresentable rather than merely discouraged.
+ */
 export interface CreateSessionBody {
   case: "createSession";
   cwd: string;
