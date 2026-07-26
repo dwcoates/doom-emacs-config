@@ -14,7 +14,7 @@ import {
   McpServerState,
   type ClaudeStreamMessage,
 } from "../../../../proto/gen/ts/agentshim/data/v1/stream_pb.js";
-import { RawTaskStatus } from "../../../../proto/gen/ts/agentshim/data/v1/tools_pb.js";
+import { RawTaskStatus, RetrievalStatus } from "../../../../proto/gen/ts/agentshim/data/v1/tools_pb.js";
 import { OriginKind } from "../../../../proto/gen/ts/agentshim/data/v1/transcript_pb.js";
 import { DiscriminatorField } from "../../../../proto/gen/ts/agentshim/data/v1/unknown_pb.js";
 
@@ -1315,6 +1315,51 @@ describe("agent_async_launch arm", () => {
     // carries no `isAsync`, so nothing discriminates it — capture, never a
     // guess at the nearest arm.
     const r = convertToolUseResult({ status: "remote_launched", taskId: "t1", sessionUrl: "https://x/y", description: "d", prompt: "p", outputFile: "/tmp/o" }, "s");
+    expect(r.result.case).toBe("unclassified");
+  });
+});
+
+describe("task_output arm", () => {
+  it("classifies a TaskOutput result rather than mistaking it for a TaskCreate", () => {
+    // Both carry `task`; only TaskOutput carries a retrieval_status.
+    const r = convertToolUseResult(loadToolResult("task_output"), "s");
+    expect(r.result.case).toBe("taskOutput");
+  });
+
+  it("maps the TaskOutput retrieval_status onto RetrievalStatus", () => {
+    const r = convertToolUseResult(loadToolResult("task_output"), "s");
+    if (r.result.case !== "taskOutput") throw new Error("case");
+    expect(r.result.value.retrievalStatus).toBe(RetrievalStatus.NOT_READY);
+  });
+
+  it("routes a local_bash TaskOutput to the local_bash arm", () => {
+    const r = convertToolUseResult(loadToolResult("task_output"), "s");
+    if (r.result.case !== "taskOutput") throw new Error("case");
+    expect(r.result.value.task.case).toBe("localBash");
+  });
+
+  it("keeps a running local_bash task's null exitCode unset", () => {
+    const r = convertToolUseResult(loadToolResult("task_output"), "s");
+    if (r.result.case !== "taskOutput" || r.result.value.task.case !== "localBash") throw new Error("case");
+    expect(r.result.value.task.value.exitCodeSet).toBe(false);
+  });
+
+  it("routes a local_agent TaskOutput to the local_agent arm", () => {
+    const r = convertToolUseResult(loadToolResult("task_output-local_agent"), "s");
+    if (r.result.case !== "taskOutput") throw new Error("case");
+    expect(r.result.value.task.case).toBe("localAgent");
+  });
+
+  it("keeps a local_agent task's isRawTranscript=false distinguishable from absent", () => {
+    const r = convertToolUseResult(loadToolResult("task_output-local_agent"), "s");
+    if (r.result.case !== "taskOutput" || r.result.value.task.case !== "localAgent") throw new Error("case");
+    expect(r.result.value.task.value.isRawTranscriptSet).toBe(true);
+  });
+
+  it("leaves a TaskOutput of an UNKNOWN task type unclassified rather than dropping its task", () => {
+    // TaskOutputResult's oneof models only local_bash/local_agent, so a third
+    // task type has nowhere to go and must survive whole instead.
+    const r = convertToolUseResult({ retrieval_status: "success", task: { task_id: "t1", task_type: "local_something_new", status: "running" } }, "s");
     expect(r.result.case).toBe("unclassified");
   });
 });
