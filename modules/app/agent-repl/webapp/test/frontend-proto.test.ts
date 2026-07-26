@@ -565,6 +565,44 @@ describe("UNSUPPORTED_SHAPES registry", () => {
   });
 });
 
+describe("SessionView.backfill decoding (F2)", () => {
+  /** A SessionView frame body carrying an optional backfill value. */
+  function sv(over: Record<string, unknown> = {}): string {
+    return JSON.stringify({ sessionView: { sessionId: "s1", workspace: "/w", ...over } });
+  }
+
+  function backfillOf(json: string) {
+    const got = decodeFrontendFrame(json);
+    if (got.frame.case !== "sessionView") throw new Error("wrong variant");
+    return got.frame.value.backfill;
+  }
+
+  it("reads a pre-F2 daemon's absent field as unspecified", () => {
+    // Arrange / Act / Assert — same "nothing to backfill" a fresh ws has.
+    expect(backfillOf(sv())).toBe("unspecified");
+  });
+
+  it("decodes pending", () => {
+    expect(backfillOf(sv({ backfill: "BACKFILL_STATE_PENDING" }))).toBe("pending");
+  });
+
+  it("decodes done", () => {
+    expect(backfillOf(sv({ backfill: "BACKFILL_STATE_DONE" }))).toBe("done");
+  });
+
+  it("decodes failed", () => {
+    expect(backfillOf(sv({ backfill: "BACKFILL_STATE_FAILED" }))).toBe("failed");
+  });
+
+  it("rejects an unrecognized state rather than guessing", () => {
+    // Arrange / Act / Assert — reading an unknown state as `done` would leave
+    // a workspace blue with nothing retrying it.
+    expect(() => backfillOf(sv({ backfill: "BACKFILL_STATE_TELEPORTING" }))).toThrow(
+      /unrecognized value/,
+    );
+  });
+});
+
 describe("ProgressView decoding (F1)", () => {
   /** A minimal well-formed ProgressView frame body. */
   function pv(over: Record<string, unknown> = {}): string {

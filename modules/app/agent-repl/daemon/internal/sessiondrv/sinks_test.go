@@ -131,7 +131,7 @@ func (a *fakeApplier) Apply(ev *corev1.Event) error {
 }
 
 func newTestConsumer(push Pusher, applier StateApplier) *consumer {
-	c := newConsumer("ws", "s1", push, applier, nil, nil, nil, nil)
+	c := newConsumer("ws", "s1", push, applier, nil, nil, nil, nil, nil)
 	c.now = func() int64 { return 1000 }
 	return c
 }
@@ -152,7 +152,7 @@ func (p *fakeProgress) SetCounts(string, int64, int64)  {}
 func (p *fakeProgress) NoteTurnAccepted(string, string) {}
 
 func newProgressConsumer(prog ProgressResolver) *consumer {
-	c := newConsumer("ws", "s1", &fakePusher{}, &fakeApplier{}, prog, nil, nil, nil)
+	c := newConsumer("ws", "s1", &fakePusher{}, &fakeApplier{}, prog, nil, nil, nil, nil)
 	c.now = func() int64 { return 1000 }
 	return c
 }
@@ -220,11 +220,134 @@ func TestMessageLatencyPushesNoConversationFrame(t *testing.T) {
 	}
 }
 
+// --- F2: the never-blue backfill derivation ---------------------------------
+
+// backfillConsumer builds a consumer recording its backfill transitions.
+func backfillConsumer(states *[]string) *consumer {
+	c := newConsumer("ws", "s1", &fakePusher{}, &fakeApplier{}, nil, nil, nil, nil,
+		func(state string) { *states = append(*states, state) })
+	c.now = func() int64 { return 1000 }
+	return c
+}
+
+// transcriptEvent wraps a file-plane TranscriptLine as a vendor event.
+func transcriptEvent(t *testing.T) *corev1.Event {
+	t.Helper()
+	a, err := anypb.New(&datav1.TranscriptLine{})
+	if err != nil {
+		t.Fatalf("anypb.New: %v", err)
+	}
+	return &corev1.Event{SessionId: "s1", Payload: &corev1.Event_Vendor{Vendor: a}}
+}
+
+// streamEventOf wraps a stream-plane ClaudeStreamMessage as a vendor event.
+func streamEventOf(t *testing.T) *corev1.Event {
+	t.Helper()
+	a, err := anypb.New(&datav1.ClaudeStreamMessage{})
+	if err != nil {
+		t.Fatalf("anypb.New: %v", err)
+	}
+	return &corev1.Event{SessionId: "s1", Payload: &corev1.Event_Vendor{Vendor: a}}
+}
+
+func TestFilePlaneEventMarksTheBackfillDone(t *testing.T) {
+	// Arrange
+	var states []string
+	c := backfillConsumer(&states)
+	// Act — a TranscriptLine means the file plane really delivered.
+	c.Consume(transcriptEvent(t))
+	// Assert
+	if len(states) != 1 || states[0] != BackfillDone {
+		t.Fatalf("backfill states = %v, want [done]", states)
+	}
+}
+
+func TestStreamPlaneEventProvesNothingAboutTheBackfill(t *testing.T) {
+	// Arrange
+	var states []string
+	c := backfillConsumer(&states)
+	// Act — a live turn writes stream events for a session whose history never
+	// arrived; that is PRECISELY the blue-but-live case this signal exists for.
+	c.Consume(streamEventOf(t))
+	// Assert
+	if len(states) != 0 {
+		t.Fatalf("backfill states = %v, want none from a stream-plane event", states)
+	}
+}
+
+func TestBackfillDoneIsReportedOnlyOnce(t *testing.T) {
+	// Arrange — a long transcript is many events.
+	var states []string
+	c := backfillConsumer(&states)
+	// Act
+	for i := 0; i < 5; i++ {
+		c.Consume(transcriptEvent(t))
+	}
+	// Assert — the in-memory latch is what keeps this off the registry record.
+	if len(states) != 1 {
+		t.Fatalf("backfill states = %v, want exactly one write", states)
+	}
+}
+
+func TestSidecarUnparsedEventMarksTheBackfillFailed(t *testing.T) {
+	// Arrange
+	var states []string
+	c := backfillConsumer(&states)
+	// Act — the one sidecar read failure that reaches the daemon durably.
+	c.Consume(&corev1.Event{
+		SessionId: "s1",
+		Payload: &corev1.Event_Unparsed{Unparsed: &corev1.UnparsedEvent{
+			Producer: sidecarProducer, SourcePath: "/p/u.jsonl", ByteOffset: 42, Error: "bad json",
+		}},
+	})
+	// Assert
+	if len(states) != 1 || states[0] != BackfillFailed {
+		t.Fatalf("backfill states = %v, want [failed]", states)
+	}
+}
+
+func TestAnUnparsedEventFromTheSHIMIsNotABackfillFailure(t *testing.T) {
+	// Arrange — the stream plane's own producer says nothing about the
+	// transcript read.
+	var states []string
+	c := backfillConsumer(&states)
+	// Act
+	c.Consume(&corev1.Event{
+		SessionId: "s1",
+		Payload: &corev1.Event_Unparsed{Unparsed: &corev1.UnparsedEvent{
+			Producer: "claude-shim", Error: "bad json",
+		}},
+	})
+	// Assert
+	if len(states) != 0 {
+		t.Fatalf("backfill states = %v, want none for a shim-produced unparsed event", states)
+	}
+}
+
+func TestBackfillFailedIsTerminalForTheSession(t *testing.T) {
+	// Arrange — a transcript the sidecar could not fully read.
+	var states []string
+	c := backfillConsumer(&states)
+	c.Consume(&corev1.Event{
+		SessionId: "s1",
+		Payload: &corev1.Event_Unparsed{Unparsed: &corev1.UnparsedEvent{
+			Producer: sidecarProducer, Error: "bad json",
+		}},
+	})
+	// Act — later lines of the SAME transcript still arrive fine.
+	c.Consume(transcriptEvent(t))
+	// Assert — letting a good line flip it back to DONE would hide exactly the
+	// partial-history case this signal exists to surface.
+	if len(states) != 1 || states[0] != BackfillFailed {
+		t.Fatalf("backfill states = %v, want [failed] to be terminal", states)
+	}
+}
+
 func TestProgressFoldFailureDoesNotStopTheStream(t *testing.T) {
 	// Arrange — the resolver rejects everything.
 	prog := &fakeProgress{err: errors.New("boom")}
 	push := &fakePusher{}
-	c := newConsumer("ws", "s1", push, &fakeApplier{}, prog, nil, nil, nil)
+	c := newConsumer("ws", "s1", push, &fakeApplier{}, prog, nil, nil, nil, nil)
 	c.now = func() int64 { return 1000 }
 	// Act
 	c.Consume(&corev1.Event{
@@ -422,7 +545,7 @@ func TestApplyNonTaskEventDoesNotPushCatalog(t *testing.T) {
 func TestApplyFiresOnSessionStarted(t *testing.T) {
 	// Arrange.
 	var seen *corev1.SessionStarted
-	c := newConsumer("ws", "s1", &fakePusher{}, &fakeApplier{}, nil, nil, func(ss *corev1.SessionStarted) { seen = ss }, nil)
+	c := newConsumer("ws", "s1", &fakePusher{}, &fakeApplier{}, nil, nil, func(ss *corev1.SessionStarted) { seen = ss }, nil, nil)
 
 	// Act.
 	c.Apply(&corev1.Event{SessionId: "s1", Payload: &corev1.Event_SessionStarted{SessionStarted: &corev1.SessionStarted{Source: corev1.SessionSource_SESSION_SOURCE_RESUME}}})
