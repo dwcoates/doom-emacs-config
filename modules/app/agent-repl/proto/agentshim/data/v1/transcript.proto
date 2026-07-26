@@ -424,6 +424,44 @@ message AttachmentLine {
     // PASSTHROUGH (unknown.proto): an attachment `type` no arm above models,
     // captured whole with parent_type = "attachment".
     UnknownRecord unknown = 28;
+
+    // Attachment types mined from the harness's own attachment renderer and
+    // `attachment.type ===` sites. NONE appears in the 463k-line local census
+    // because each is feature-gated, config-gated, or newer than the capture
+    // — a census-only sweep structurally cannot find them, which is exactly
+    // why they were missing. Shapes are grounded in the harness constructors.
+    TokenUsageAttachment token_usage = 29;
+    BudgetUsdAttachment budget_usd = 30;
+    TaskProgressAttachment task_progress = 31;
+    TaskStatusAttachment task_status = 32;
+    HookStoppedContinuationAttachment hook_stopped_continuation = 33;
+    // Three notices sharing one field set; the ARM carries the distinction.
+    HookNoticeAttachment hook_system_message = 34;
+    HookNoticeAttachment hook_additional_context = 35;
+    HookNoticeAttachment hook_error_during_execution = 36;
+    HookPermissionDecisionAttachment hook_permission_decision = 37;
+    AgentMentionAttachment agent_mention = 38;
+    PlanModeAttachment plan_mode = 39;
+    PlanModeReentryAttachment plan_mode_reentry = 40;
+    DelegateModeAttachment delegate_mode = 41;
+    DelegateModeExitAttachment delegate_mode_exit = 42;
+    OutputStyleAttachment output_style = 43;
+    OpenedFileInIdeAttachment opened_file_in_ide = 44;
+    CriticalSystemReminderAttachment critical_system_reminder = 45;
+    EditedImageFileAttachment edited_image_file = 46;
+    MemoryAttachment memory = 47;
+    MemoryAttachment ultramemory = 48;
+    MemoryAttachment team_context = 49;
+    PlanFileReferenceAttachment plan_file_reference = 50;
+    SelectedLinesInIdeAttachment selected_lines_in_ide = 51;
+    McpResourceAttachment mcp_resource = 52;
+    // `already_read_file` shares the `file` renderer case, so it shares the
+    // FileAttachment shape rather than getting a near-duplicate twin.
+    FileAttachment already_read_file = 53;
+    // `todo_reminder` is the PREDECESSOR NAME of disk's `task_reminder` with
+    // an identical {content, itemCount} shape, so it reuses
+    // TaskReminderAttachment. A separate message would be a copy that drifts.
+    TaskReminderAttachment todo_reminder = 54;
   }
 }
 
@@ -598,6 +636,169 @@ message InvokedSkill {
 
 message InvokedSkillsAttachment {
   repeated InvokedSkill skills = 1;
+}
+
+// ---------------------------------------------------------------------------
+// Feature-gated / newer attachment types (none observed in the local census;
+// shapes grounded in the harness's own constructors and renderer switch)
+// ---------------------------------------------------------------------------
+
+// attachment.type:"token_usage" — a literal token ticker, gated on
+// CLAUDE_CODE_ENABLE_TOKEN_USAGE_ATTACHMENT. Shape parallels budget_usd, but
+// the two are kept apart because their UNITS differ: tokens are integral,
+// dollars are not, and folding both into one message would force token counts
+// through a double.
+message TokenUsageAttachment {
+  int64 used = 1;
+  int64 total = 2;
+  int64 remaining = 3;
+}
+
+// attachment.type:"budget_usd" — the cost counterpart, emitted whenever the
+// `maxBudgetUsd` option is set.
+message BudgetUsdAttachment {
+  double used = 1;
+  double total = 2;
+  double remaining = 3;
+}
+
+// attachment.type:"task_progress" — the transcript-plane note that a detached
+// task made progress. Thinner than the stream's system/task_progress, which
+// carries the usage counters; this is the durable breadcrumb.
+message TaskProgressAttachment {
+  string task_id = 1;    // disk key `taskId`
+  string task_type = 2;  // disk key `taskType`
+  string message = 3;
+}
+
+// attachment.type:"task_status" — the subagent lifecycle transition feed,
+// carrying an INCREMENTAL summary of what changed since the last transition.
+message TaskStatusAttachment {
+  string task_id = 1;        // disk key `taskId`
+  string task_type = 2;      // disk key `taskType`
+  string status = 3;
+  string description = 4;
+  string delta_summary = 5;  // disk key `deltaSummary`
+}
+
+// attachment.type:"hook_stopped_continuation" — a hook halted the turn.
+// Carries `message` where the notices below carry `content`, so it is its own
+// message rather than sharing HookNoticeAttachment.
+message HookStoppedContinuationAttachment {
+  string message = 1;
+  string hook_name = 2;   // disk key `hookName`
+  string tool_use_id = 3; // disk key `toolUseID`
+  string hook_event = 4;  // disk key `hookEvent`
+}
+
+// The shared shape of the three hook NOTICE attachments — hook_system_message,
+// hook_additional_context and hook_error_during_execution — which the harness
+// constructs with an identical field set. The AttachmentLine arm carries the
+// distinction, so one message serves all three without three copies that
+// would drift apart.
+message HookNoticeAttachment {
+  string content = 1;
+  string hook_name = 2;   // disk key `hookName`
+  string tool_use_id = 3; // disk key `toolUseID`
+  string hook_event = 4;  // disk key `hookEvent`
+}
+
+// attachment.type:"hook_permission_decision" — a hook ruled on a permission.
+message HookPermissionDecisionAttachment {
+  string decision = 1;
+  string tool_use_id = 2; // disk key `toolUseID`
+  string hook_event = 3;  // disk key `hookEvent`
+}
+
+// attachment.type:"agent_mention" — the user named an agent in the prompt.
+message AgentMentionAttachment {
+  string agent_type = 1;  // disk key `agentType`
+}
+
+// attachment.type:"plan_mode" — the plan-mode reminder. `plan_exists`
+// distinguishes "a plan file is expected here" from "one is already written",
+// which is why it is carried alongside the path rather than inferred from it.
+message PlanModeAttachment {
+  string reminder_type = 1;  // disk key `reminderType`
+  bool is_sub_agent = 2;     // disk key `isSubAgent`
+  string plan_file_path = 3; // disk key `planFilePath`
+  bool plan_exists = 4;      // disk key `planExists`
+}
+
+// attachment.type:"plan_mode_reentry" — plan mode was re-entered.
+message PlanModeReentryAttachment {
+  string plan_file_path = 1;  // disk key `planFilePath`
+}
+
+// attachment.type:"delegate_mode" — a delegated (team) run began.
+message DelegateModeAttachment {
+  string team_name = 1;      // disk key `teamName`
+  string task_list_path = 2; // disk key `taskListPath`
+}
+
+// attachment.type:"delegate_mode_exit" — delegated mode ended. The harness
+// constructs it with no payload; the arm's presence IS the signal.
+message DelegateModeExitAttachment {}
+
+// attachment.type:"output_style" — the active output style changed.
+message OutputStyleAttachment {
+  string style = 1;
+}
+
+// attachment.type:"opened_file_in_ide" — the user opened a file in the IDE.
+message OpenedFileInIdeAttachment {
+  string filename = 1;
+}
+
+// attachment.type:"critical_system_reminder" — a reminder rendered with
+// higher prominence than an ordinary system reminder.
+message CriticalSystemReminderAttachment {
+  string content = 1;
+}
+
+// attachment.type:"edited_image_file" — an image edited in place. `content`
+// is the harness's own textual description of the edit, NOT image bytes
+// (contrast ImageBlock.source, which carries the bytes).
+message EditedImageFileAttachment {
+  string filename = 1;
+  string content = 2;
+}
+
+// The shared carrier for `memory`, `ultramemory` and `team_context`.
+//
+// These three were confirmed as attachment-type sites in the harness, but
+// none is literal-constructed anywhere reachable, so their field sets were
+// never observed. `payload` therefore stays a Struct: it preserves whatever
+// arrives with zero loss, and asserting a typed shape here would be a guess
+// the schema then presents as fact — the same treatment the corpus-sparse
+// attachments above already get. The ARM distinguishes the three.
+message MemoryAttachment {
+  google.protobuf.Struct payload = 1;
+}
+
+// attachment.type:"plan_file_reference" — a plan file pulled into context,
+// with its body inlined.
+message PlanFileReferenceAttachment {
+  string plan_file_path = 1;  // disk key `planFilePath`
+  string plan_content = 2;    // disk key `planContent`
+}
+
+// attachment.type:"selected_lines_in_ide" — the user's IDE selection.
+message SelectedLinesInIdeAttachment {
+  string ide_name = 1;   // disk key `ideName`
+  int64 line_start = 2;  // disk key `lineStart`
+  int64 line_end = 3;    // disk key `lineEnd`
+  string filename = 4;
+  string content = 5;
+}
+
+// attachment.type:"mcp_resource" — an MCP resource pulled into context.
+message McpResourceAttachment {
+  string server = 1;
+  string uri = 2;
+  string name = 3;
+  string description = 4;
+  string content = 5;
 }
 
 // ---------------------------------------------------------------------------
