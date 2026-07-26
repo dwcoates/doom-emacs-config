@@ -282,8 +282,22 @@ func (h *commandHandler) PaintAck(_ context.Context, workspace, requestID string
 	if h.painters == nil {
 		return fmt.Errorf("frontend cmd: paint_ack ws=%s request_id=%s: no paint recorder wired", workspace, requestID)
 	}
-	h.logf("frontend cmd: paint_ack ws=%s request_id=%s through_seq=%d",
-		workspace, requestID, cmd.GetThroughSeq())
+	// An outcome is required. "I drew this" and "I cannot draw this" are
+	// opposite claims about the same generation, and only the first may green a
+	// workspace — so an ack that names neither is refused rather than read as
+	// whichever one the zero value happens to be.
+	if cmd.GetOutcome() == frontendv1.PaintOutcome_PAINT_OUTCOME_UNSPECIFIED {
+		return fmt.Errorf("frontend cmd: paint_ack ws=%s request_id=%s names no paint outcome", workspace, requestID)
+	}
+	h.logf("frontend cmd: paint_ack ws=%s request_id=%s through_seq=%d generation=%d outcome=%s",
+		workspace, requestID, cmd.GetThroughSeq(), cmd.GetStateGeneration(), cmd.GetOutcome())
+	// A SUSPENDED ack settles the state's DELIVERY (the frontend server does
+	// that on the read loop) but attests no paint: the webview holds the state
+	// and cannot draw it, and greening a workspace on that would be exactly the
+	// lie the attestation exists to prevent.
+	if !frontend.AttestsPaint(cmd) {
+		return nil
+	}
 	return h.painters.ApplyPaintAck(workspace, cmd.GetThroughSeq())
 }
 

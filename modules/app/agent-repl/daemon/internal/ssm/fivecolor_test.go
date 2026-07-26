@@ -24,17 +24,64 @@ func evTurnEndedReason(sid string, seq uint64, reason string, isErr bool) *corev
 // ---------------------------------------------------------------------------
 
 // A session that is never prompted must still reach green: that is the whole
-// reason readiness moved off the vendor's first-prompt-only system:init.
+// reason readiness moved off the vendor's first-prompt-only system:init. It
+// takes the paint attestation too, which readiness alone no longer implies.
 func TestSessionStartedReachesReadyWithoutAnyPrompt(t *testing.T) {
 	// Arrange.
 	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	// Act — readiness only; no prompt is ever submitted.
+	// Act — readiness plus an attestation of the empty history; no prompt is
+	// ever submitted.
 	if err := m.Apply(evSessionStarted("s1", 1)); err != nil {
 		t.Fatalf("session started: %v", err)
+	}
+	if err := m.ApplyPaintAck("ws1", 0); err != nil {
+		t.Fatalf("paint ack: %v", err)
 	}
 	// Assert.
 	if got := mustCurrent(t, m, "ws1").State; got != frontendv1.RenderState_RENDER_STATE_READY {
 		t.Fatalf("state = %s, want READY", renderName(got))
+	}
+}
+
+// THE BLUE GATE, made reachable. Readiness alone is HALF of green's promise:
+// the route works, but nothing has drawn the history, and the five-color
+// contract says a workspace no frontend has attested is blue.
+//
+// Before the opening edge existed the paint axis had exactly one writer (the
+// attestation itself), so a workspace with no paint rows contributed no
+// candidate and resolved green — the documented gate never engaged at all.
+func TestSessionStartedAloneStaysBlueUntilAFrontendAttests(t *testing.T) {
+	// Arrange.
+	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
+	// Act — readiness only; no frontend has painted anything.
+	if err := m.Apply(evSessionStarted("s1", 1)); err != nil {
+		t.Fatalf("session started: %v", err)
+	}
+	// Assert.
+	if got := mustCurrent(t, m, "ws1").State; got != frontendv1.RenderState_RENDER_STATE_INIT {
+		t.Fatalf("state = %s, want INIT (unattested route is blue)", renderName(got))
+	}
+}
+
+// A shim relaunch is a NEW route, so it re-arms the gate: the attestation the
+// previous shim's renderer made does not carry over to a session that just
+// came up again.
+func TestReadinessReArmsTheBlueGateAfterAnAttestation(t *testing.T) {
+	// Arrange — an attested, green workspace.
+	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
+	if err := m.Apply(evSessionStarted("s1", 1)); err != nil {
+		t.Fatalf("session started: %v", err)
+	}
+	if err := m.ApplyPaintAck("ws1", 4); err != nil {
+		t.Fatalf("paint ack: %v", err)
+	}
+	// Act — the shim comes up again.
+	if err := m.Apply(evSessionStarted("s1", 2)); err != nil {
+		t.Fatalf("session restarted: %v", err)
+	}
+	// Assert.
+	if got := mustCurrent(t, m, "ws1").State; got != frontendv1.RenderState_RENDER_STATE_INIT {
+		t.Fatalf("state = %s, want INIT (a fresh route must be re-attested)", renderName(got))
 	}
 }
 
@@ -86,6 +133,9 @@ func TestReadinessAfterTurnEndsApplies(t *testing.T) {
 	// Act.
 	if err := m.Apply(evSessionStarted("s1", 3)); err != nil {
 		t.Fatalf("session started: %v", err)
+	}
+	if err := m.ApplyPaintAck("ws1", 0); err != nil {
+		t.Fatalf("paint ack: %v", err)
 	}
 	// Assert.
 	if got := mustCurrent(t, m, "ws1").State; got != frontendv1.RenderState_RENDER_STATE_READY {

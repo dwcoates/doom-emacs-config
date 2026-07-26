@@ -186,7 +186,9 @@ func TestServeWSScopedCommandStrictRoutesCommand(t *testing.T) {
 	s, h := newTestServer(t, 0)
 	defer s.Close()
 	httpSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		s.ServeWSScoped(w, r, Scope{Workspace: "ws"}, nil) // nil translator = command-strict
+		// nil translator = command-strict; observer role keeps this case about
+		// command routing rather than about delivery sequencing.
+		s.ServeWSScoped(w, r, Scope{Workspace: "ws"}, RoleObserver, nil)
 	}))
 	defer httpSrv.Close()
 
