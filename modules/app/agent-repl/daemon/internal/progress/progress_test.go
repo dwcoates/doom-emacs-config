@@ -8,6 +8,9 @@ import (
 	datav1 "agentrepl/proto/agentshim/data/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
+	"claude-repld/internal/errclass"
+	"claude-repld/internal/frontend"
+
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 )
@@ -730,6 +733,98 @@ func TestExhaustedApiErrorClosesTheRetryingWindow(t *testing.T) {
 	// Assert
 	if w := h.last().GetRetrying(); w.GetActive() {
 		t.Fatalf("retrying window = %+v, want closed once retries are exhausted", w)
+	}
+}
+
+// --- ProgressView.failure (F4) ----------------------------------------------
+//
+// The footer used to carry daemon-authored prose in a hardcoded red no other
+// surface consulted. The classified failure lets it take its color from the
+// same table the card and the workspace do.
+
+func TestExhaustedApiErrorSetsTheClassifiedFailure(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	// Act
+	h.apply(vendorEvent(t, apiErrorLine("e9", "overloaded", 10, 10)))
+	// Assert
+	if h.last().GetFailure() == nil {
+		t.Fatal("a terminal API error left the footer with no classified failure")
+	}
+}
+
+func TestExhaustedApiErrorFailureIsApiClass(t *testing.T) {
+	// Arrange: the vendor concluded the work; agent-repl's machinery is fine.
+	h := newHarness(t)
+	// Act
+	h.apply(vendorEvent(t, apiErrorLine("e9", "overloaded", 10, 10)))
+	// Assert
+	if got := h.last().GetFailure().GetErrorClass(); got != frontendv1.ErrorClass_ERROR_CLASS_API {
+		t.Fatalf("class = %v, want API", got)
+	}
+}
+
+func TestExhaustedApiErrorFailureAddressesTheCard(t *testing.T) {
+	// Arrange: the footer's error row must scroll to the CARD, not to the raw
+	// line, because the raw line renders nothing a user can act on.
+	h := newHarness(t)
+	// Act
+	h.apply(vendorEvent(t, apiErrorLine("e9", "boom", 10, 10)))
+	// Assert
+	if got := h.last().GetFailure().GetItemUuid(); got != frontend.FailureUUID("e9") {
+		t.Fatalf("item_uuid = %q, want the card's uuid %q", got, frontend.FailureUUID("e9"))
+	}
+}
+
+func TestRetryableApiErrorSetsNoFailure(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	// Act — mid-backoff: the turn has not failed.
+	h.apply(vendorEvent(t, apiErrorLine("e1", "overloaded", 3, 10)))
+	// Assert
+	if got := h.last().GetFailure(); got != nil {
+		t.Fatalf("failure = %v, want none while retries remain", got)
+	}
+}
+
+func TestATurnStartClearsTheFailure(t *testing.T) {
+	// Arrange: a failed turn, then a fresh one.
+	h := newHarness(t)
+	h.apply(vendorEvent(t, apiErrorLine("e9", "boom", 10, 10)))
+	h.drain()
+	// Act
+	h.apply(&corev1.Event{Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{}}})
+	// Assert — the error persists until the NEXT turn starts, and no longer.
+	if got := h.last().GetFailure(); got != nil {
+		t.Fatalf("failure = %v, want it cleared at the turn start", got)
+	}
+}
+
+func TestAnErroredTurnEndSetsTheClassifiedFailure(t *testing.T) {
+	// Arrange: a turn that concluded abnormally with no ApiErrorLine of its own.
+	h := newHarness(t)
+	h.apply(&corev1.Event{Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{}}})
+	h.drain()
+	// Act
+	h.apply(&corev1.Event{Payload: &corev1.Event_TurnEnded{
+		TurnEnded: &corev1.TurnEnded{IsError: true, StopReason: "error_max_turns"},
+	}})
+	// Assert
+	if got := h.last().GetFailure().GetErrorType(); got != string(errclass.TypeAPIMaxTurns) {
+		t.Fatalf("error_type = %q, want %q", got, errclass.TypeAPIMaxTurns)
+	}
+}
+
+func TestACleanTurnEndSetsNoFailure(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.apply(&corev1.Event{Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{}}})
+	h.drain()
+	// Act
+	h.apply(&corev1.Event{Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{}}})
+	// Assert
+	if got := h.last().GetFailure(); got != nil {
+		t.Fatalf("failure = %v, want none for a clean conclusion", got)
 	}
 }
 

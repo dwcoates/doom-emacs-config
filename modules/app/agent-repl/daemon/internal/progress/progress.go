@@ -39,6 +39,7 @@ import (
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/errclass"
+	"claude-repld/internal/frontend"
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -481,9 +482,7 @@ func (m *Manager) applyTranscriptLocked(workspace string, wp *workspaceProgress,
 // closes and the error summary takes over, addressed to the line's own item so
 // the footer's error row can scroll the feed to it.
 func (m *Manager) applyApiErrorLocked(workspace string, wp *workspaceProgress, uuid string, ae *datav1.ApiErrorLine, atMs int64) {
-	attempt, max := ae.GetRetryAttempt(), ae.GetMaxRetries()
-	retrying := max > 0 && attempt < max
-	if retrying {
+	if errclass.Retrying(ae) {
 		if wp.retryDetailRich {
 			return // api_retry already said it better
 		}
@@ -498,6 +497,10 @@ func (m *Manager) applyApiErrorLocked(workspace string, wp *workspaceProgress, u
 	}
 	wp.view.ErrorSummary = summary
 	wp.view.ErrorItemUuid = uuid
+	// The CLASSIFIED counterpart (F4). It addresses the failure CARD rather
+	// than the api_error item, because the card is what the footer's error row
+	// should scroll to — the raw line renders nothing a user can act on.
+	wp.view.Failure = errclass.APIError(ae, frontend.FailureUUID(uuid))
 	m.pushLocked(workspace, wp)
 }
 
@@ -559,6 +562,7 @@ func (m *Manager) openTurnLocked(wp *workspaceProgress, atMs int64) bool {
 	// this is exactly where it clears.
 	wp.view.ErrorSummary = ""
 	wp.view.ErrorItemUuid = ""
+	wp.view.Failure = nil
 	wp.view.Retrying = nil
 	wp.retryDetailRich = false
 	return true
@@ -580,6 +584,11 @@ func (m *Manager) closeTurnLocked(wp *workspaceProgress, te *corev1.TurnEnded) {
 		if wp.view.GetErrorSummary() == "" {
 			wp.view.ErrorSummary = turnErrorSummary(te)
 			wp.view.ErrorItemUuid = ""
+			// The classified counterpart (F4). TurnEnd returns nil for a
+			// conclusion the SSM does not treat as blocking, so the footer
+			// and the workspace color agree on what "the turn failed" means
+			// instead of each deciding for itself.
+			wp.view.Failure = errclass.TurnEnd(te)
 		}
 	}
 }
