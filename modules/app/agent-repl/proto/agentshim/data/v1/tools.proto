@@ -1,7 +1,14 @@
 // agentshim.data.v1 tools — content blocks, tool inputs, and per-tool
-// result shapes, grounded in sdk-tools.d.ts (v0.1.77) and the on-disk
+// result shapes, grounded in sdk-tools.d.ts (v0.3.220) and the on-disk
 // toolUseResult census. Total fidelity: every shape found in the
-// investigation is typed here; nothing is folded into a generic passthrough.
+// investigation is typed here.
+//
+// "Nothing is folded into a generic passthrough" USED to be the rule and is
+// now qualified: ContentBlock carries an `unknown` arm (unknown.proto) for a
+// block type no arm models. That is not a retreat from typing — every type we
+// can ground is still typed — it is the fix for the one place the never-drop
+// contract was violated, where the converter's only option was to SKIP an
+// unrecognized block and lose it from the message body entirely.
 //
 // UNIVERSAL CAVEAT (verified): every tool's toolUseResult can be a plain
 // string on error/rejection ("Error: …", "User rejected tool use",
