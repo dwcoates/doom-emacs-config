@@ -572,22 +572,6 @@ func TestTypingDeltaFromContentDelta(t *testing.T) {
 	}
 }
 
-// --- DegradedNoticeFromState ------------------------------------------------
-
-func TestDegradedNoticeFromState(t *testing.T) {
-	// Arrange.
-	ds := &corev1.DegradedState{Component: "store-client", Reason: "store unreachable", Recovered: false}
-
-	// Act.
-	got := DegradedNoticeFromState(ds, 1234)
-
-	// Assert.
-	want := &frontendv1.DegradedNotice{Component: "store-client", Reason: "store unreachable", Recovered: false, AtMs: 1234}
-	if !proto.Equal(got, want) {
-		t.Errorf("mismatch\n got: %v\nwant: %v", got, want)
-	}
-}
-
 // --- BuildTaskCatalog -------------------------------------------------------
 
 func TestBuildTaskCatalog(t *testing.T) {
@@ -694,9 +678,6 @@ func TestFrameWrappers(t *testing.T) {
 	}
 	if got := CommandAckFrame(&frontendv1.CommandAck{RequestId: "r"}); got.GetCommandAck().GetRequestId() != "r" {
 		t.Error("CommandAckFrame did not set command_ack arm")
-	}
-	if got := DegradedNoticeFrame(&frontendv1.DegradedNotice{Component: "c"}); got.GetDegradedNotice().GetComponent() != "c" {
-		t.Error("DegradedNoticeFrame did not set degraded_notice arm")
 	}
 	if got := SessionInitViewFrame(&frontendv1.SessionInitView{Workspace: "w"}); got.GetSessionInit().GetWorkspace() != "w" {
 		t.Error("SessionInitViewFrame did not set session_init arm")

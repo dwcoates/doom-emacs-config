@@ -22,7 +22,6 @@ type Pusher interface {
 	PushConversationDelta(*frontendv1.ConversationDelta)
 	PushTypingDelta(*frontendv1.TypingDelta)
 	PushTaskCatalog(*frontendv1.TaskCatalog)
-	PushDegradedNotice(*frontendv1.DegradedNotice)
 	PushWorkspaceState(*frontendv1.WorkspaceState)
 	PushSessionInitView(*frontendv1.SessionInitView)
 	PushHeartbeatView(*frontendv1.HeartbeatView)

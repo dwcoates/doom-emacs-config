@@ -97,8 +97,8 @@ type FrameSink interface {
 // DegradedReporter receives sad-path signals. DegradedState events come from
 // the shim (store unreachable, converter storm, …); ConnectionDegraded /
 // ConnectionRecovered are transport-level, detected by this client's
-// missed-heartbeat monitor. The stitch phase binds these to frontend
-// DegradedNotice emission.
+// missed-heartbeat monitor. The stitch phase binds these to a self-resolving
+// SystemFailureItem conversation card (F4).
 type DegradedReporter interface {
 	// Degraded reports a shim-sourced DegradedState event.
 	Degraded(sessionID string, ds *corev1.DegradedState)

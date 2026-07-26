@@ -317,7 +317,6 @@ func TestProtojsonRoundTripStability(t *testing.T) {
 		})},
 		{"task_catalog", TaskCatalogFrame(&frontendv1.TaskCatalog{Workspace: "w", Tasks: []*frontendv1.TaskEntry{{TaskId: "t", Kind: "agent", Status: "running"}}})},
 		{"command_ack", CommandAckFrame(&frontendv1.CommandAck{RequestId: "r", Ok: true})},
-		{"degraded_notice", DegradedNoticeFrame(&frontendv1.DegradedNotice{Component: "c", Reason: "r", AtMs: 5})},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

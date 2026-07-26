@@ -113,11 +113,6 @@ func CommandAckFrame(a *frontendv1.CommandAck) *frontendv1.FrontendFrame {
 	return &frontendv1.FrontendFrame{Frame: &frontendv1.FrontendFrame_CommandAck{CommandAck: a}}
 }
 
-// DegradedNoticeFrame wraps a DegradedNotice.
-func DegradedNoticeFrame(n *frontendv1.DegradedNotice) *frontendv1.FrontendFrame {
-	return &frontendv1.FrontendFrame{Frame: &frontendv1.FrontendFrame_DegradedNotice{DegradedNotice: n}}
-}
-
 // SessionInitViewFrame wraps a SessionInitView (S9): the session's retained
 // SystemInit (slash commands, tools, skills, model list).
 func SessionInitViewFrame(v *frontendv1.SessionInitView) *frontendv1.FrontendFrame {
@@ -186,39 +181,21 @@ func HeartbeatViewFromProgress(workspace, sessionID string, hp *corev1.Heartbeat
 }
 
 // ---------------------------------------------------------------------------
-// DegradedState -> DegradedNotice (passthrough)
+// DegradedState -> SystemFailureItem
 // ---------------------------------------------------------------------------
 
-// DegradedNoticeFromState maps a core.DegradedState to the frontend
-// DegradedNotice. It is a faithful passthrough: honest sad-path reporting, never
-// a fallback.
-//
-// SUPERSEDED (F4) by SystemFailureFromDegradedState. Kept for the transition
-// while both frontends still decode the banner arm; nothing pushes its result
-// any more.
-func DegradedNoticeFromState(ds *corev1.DegradedState, atMs int64) *frontendv1.DegradedNotice {
-	if ds == nil {
-		return nil
-	}
-	return &frontendv1.DegradedNotice{
-		Component: ds.GetComponent(),
-		Reason:    ds.GetReason(),
-		Recovered: ds.GetRecovered(),
-		AtMs:      atMs,
-	}
-}
-
 // SystemFailureItemFromDegradedState classifies a shim-reported DegradedState
-// as a conversation card (F4), replacing the banner passthrough above.
+// as a conversation card (F4), replacing the DegradedNotice banner (RETIRED,
+// step 11).
 //
 // The window's two edges become ONE card: the opening report leaves
 // resolved_at_ms zero and the recovery stamps it, under the same uuid the
 // caller keys them by, so the feed reconciles in place and shows a settled
 // card instead of a permanent alarm about something that ended.
 //
-// dropped_count finally survives. The passthrough discarded it, which meant
-// the single most useful fact about a store outage — how much conversation
-// was lost — reached no surface at all.
+// dropped_count finally survives. The banner discarded it, which meant the
+// single most useful fact about a store outage — how much conversation was
+// lost — reached no surface at all.
 func SystemFailureItemFromDegradedState(ds *corev1.DegradedState, atMs int64) *frontendv1.SystemFailureItem {
 	if ds == nil {
 		return nil
