@@ -85,6 +85,18 @@ type sidecar struct {
 
 	handlers map[tail.Kind]tail.Handler
 	watchers map[string]*watched // by path
+
+	// Store-link state machine (link.go). `cursors` is CONNECTION-SCOPED: it is
+	// recovered as the first act of every established connection and dropped the
+	// moment the link is lost, so a tailer can never be built from a stale — or
+	// absent — recovery.
+	link         linkState
+	cursors      map[string]*corev1.CursorState // by path; nil unless recovered
+	dialT        *time.Timer
+	backoff      time.Duration
+	dialFailures int
+	downSince    time.Time
+	bootSwept    bool
 }
 
 func newSidecar(storeSocket string, roots []string, spoolRoot string, log handler.Logf) *sidecar {
@@ -101,15 +113,17 @@ func newSidecar(storeSocket string, roots []string, spoolRoot string, log handle
 			tail.KindShellSpool:        handler.NewShellOutputHandler(log),
 		},
 		watchers: map[string]*watched{},
+		// A fresh sidecar is simply a sidecar whose link is not up yet, with its
+		// first dial due immediately. That is all "boot" means here.
+		link:      linkDown,
+		downSince: time.Now(),
+		dialT:     time.NewTimer(0),
 	}
 }
 
-// Run recovers cursors, boot-sweeps, then drives the poll/sweep/heartbeat loop
-// until a termination signal.
+// Run drives the store-link state machine and, while that link is up, the
+// poll/rescan/sweep/heartbeat loop, until a termination signal.
 func (s *sidecar) Run(stop <-chan os.Signal) error {
-	cursors := s.recoverCursors()
-	s.bootSweep()
-
 	pollT := time.NewTicker(time.Second)
 	sweepT := time.NewTicker(30 * time.Second)
 	beatT := time.NewTicker(15 * time.Second)
@@ -118,39 +132,44 @@ func (s *sidecar) Run(stop <-chan os.Signal) error {
 	defer sweepT.Stop()
 	defer beatT.Stop()
 	defer rescanT.Stop()
+	defer s.dialT.Stop()
 
-	s.rescan(cursors) // initial discovery + restore
 	for {
 		select {
 		case <-stop:
 			s.log("received signal; shutting down")
 			return s.store.Close()
+		case <-s.dialT.C:
+			s.dial()
 		case <-rescanT.C:
-			s.rescan(nil)
+			s.whenUp(s.rescan)
 		case <-pollT.C:
-			s.pollAll()
+			s.whenUp(s.pollAll)
 		case <-sweepT.C:
-			s.emit(s.tracker.Sweep(time.Now().UnixMilli()))
+			s.whenUp(s.sweep)
 		case <-beatT.C:
-			if err := s.store.Heartbeat(); err != nil {
-				s.log("heartbeat failed: %v", err)
-			}
+			s.whenUp(s.heartbeat)
 		}
 	}
 }
 
-// recoverCursors fetches persisted cursors from the store, indexed by path.
-func (s *sidecar) recoverCursors() map[string]*corev1.CursorState {
-	cs, err := s.store.RecoverCursors("")
-	if err != nil {
-		s.log("cursor recovery failed (starting cold): %v", err)
-		return nil
+// sweep emits the LOST inferences that crossed their thresholds.
+func (s *sidecar) sweep() {
+	s.emit(s.tracker.Sweep(time.Now().UnixMilli()))
+}
+
+// heartbeat pings the store, and treats a dead connection as a lost link rather
+// than a log line.
+func (s *sidecar) heartbeat() {
+	if err := s.store.Heartbeat(); err != nil {
+		s.log("heartbeat failed: %v", err)
+		s.noteStoreErr("heartbeat", err)
 	}
-	s.log("recovered %d cursors from store", len(cs))
-	return indexCursorsByPath(cs)
 }
 
 // bootSweep LOSTs discovered task files whose mtime predates the machine boot.
+// Runs once per process, on the first established connection — the sweep is
+// about MACHINE boot, but its LOST events need a store to land in.
 func (s *sidecar) bootSweep() {
 	boot := bootTimeMillis()
 	if boot == 0 {
@@ -172,9 +191,16 @@ func (s *sidecar) bootSweep() {
 	}
 }
 
-// rescan discovers targets and creates a tailer for each new one, restoring its
-// cursor when one was recovered.
-func (s *sidecar) rescan(cursors map[string]*corev1.CursorState) {
+// rescan discovers targets and creates a tailer for each new one, seeded from
+// the cursor this connection's store handed us.
+//
+// This is the ONLY place a tailer is ever built, which is why it asserts the
+// link: a tailer built without a recovered cursor map starts at offset 0, and
+// that silent cold start is the bug the whole state machine exists to prevent.
+// A file the connected store genuinely holds no cursor for still starts at 0 —
+// that case is honest, and it is the backfill path.
+func (s *sidecar) rescan() {
+	s.requireLinkUp("rescan")
 	for _, tgt := range s.disc.Scan() {
 		if _, ok := s.watchers[tgt.Path]; ok {
 			continue
@@ -188,10 +214,8 @@ func (s *sidecar) rescan(cursors map[string]*corev1.CursorState) {
 			RunID:     tgt.RunID,
 		}
 		tr := tail.New(tgt.Path, tgt.Codec(), s.handlers[tgt.Kind], ctx, s.log)
-		if cursors != nil {
-			if c := cursors[tgt.Path]; c != nil {
-				tr.Restore(c)
-			}
+		if c := s.cursors[tgt.Path]; c != nil {
+			tr.Restore(c)
 		}
 		s.watchers[tgt.Path] = &watched{target: tgt, tailer: tr}
 		if tgt.TaskID != "" {
@@ -203,8 +227,10 @@ func (s *sidecar) rescan(cursors map[string]*corev1.CursorState) {
 }
 
 // pollAll polls every watched file once, writing any batch to the store and
-// committing the cursor only on a durable ack.
+// committing the cursor only on a durable ack. It is reachable only with the
+// link up, so a file is never read without somewhere to put what it says.
 func (s *sidecar) pollAll() {
+	s.requireLinkUp("pollAll")
 	now := time.Now().UnixMilli()
 	for path, w := range s.watchers {
 		res, err := w.tailer.Poll()
@@ -228,6 +254,12 @@ func (s *sidecar) pollAll() {
 			// Honest sad path: do NOT commit; the batch replays and dedup absorbs.
 			s.log("store write failed for %s (cursor NOT advanced, %d events dropped this cycle): %v",
 				path, len(res.Events), err)
+			if s.link != linkUp {
+				// The write did not merely fail, it revealed a dead link. Abandon
+				// the pass rather than reading the remaining files with nowhere
+				// to put what they say.
+				return
+			}
 			continue
 		}
 		w.tailer.Commit(res)
@@ -241,8 +273,7 @@ func (s *sidecar) pollAll() {
 // writeBatch sends one tailer batch (events + cursor advance) as a StoreWrite.
 func (s *sidecar) writeBatch(res tail.PollResult) error {
 	batch := &corev1.EventBatch{Events: res.Events, CursorAdvance: res.Next}
-	_, err := s.store.Write(handler.Producer, batch)
-	return err
+	return s.storeWrite("tailer batch", batch)
 }
 
 // applyLifecycle updates the stale tracker from a batch's lifecycle events: a
@@ -264,7 +295,7 @@ func (s *sidecar) emit(events []*corev1.Event) {
 	if len(events) == 0 {
 		return
 	}
-	if _, err := s.store.Write(handler.Producer, &corev1.EventBatch{Events: events}); err != nil {
+	if err := s.storeWrite("synthetic events", &corev1.EventBatch{Events: events}); err != nil {
 		s.log("store write failed for %d synthetic event(s): %v", len(events), err)
 	}
 }

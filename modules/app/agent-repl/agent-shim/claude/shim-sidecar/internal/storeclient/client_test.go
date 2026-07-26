@@ -1,6 +1,7 @@
 package storeclient
 
 import (
+	"errors"
 	"net"
 	"os"
 	"os/exec"
@@ -100,6 +101,9 @@ func TestIntegrationWriteAckThenCursorRecovery(t *testing.T) {
 	sock := startRealStore(t)
 	c := New(sock, nil)
 	defer c.Close()
+	if err := c.Connect(); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
 	ev := &corev1.Event{
 		SessionId: "s1",
 		Plane:     corev1.Plane_PLANE_FILE,
@@ -136,6 +140,9 @@ func TestIntegrationDedupOnReplay(t *testing.T) {
 	sock := startRealStore(t)
 	c := New(sock, nil)
 	defer c.Close()
+	if err := c.Connect(); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
 	mk := func() *corev1.EventBatch {
 		return &corev1.EventBatch{Events: []*corev1.Event{{
 			SessionId: "s1",
@@ -165,6 +172,9 @@ func TestIntegrationHeartbeat(t *testing.T) {
 	sock := startRealStore(t)
 	c := New(sock, nil)
 	defer c.Close()
+	if err := c.Connect(); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
 	if _, err := c.Write("shim-claude-sidecar", &corev1.EventBatch{}); err != nil {
 		t.Fatalf("prime write: %v", err)
 	}
@@ -182,5 +192,63 @@ func TestWriteErrorSurfacedOnDeadStore(t *testing.T) {
 	// Assert: the failure is surfaced, never swallowed.
 	if err == nil {
 		t.Fatal("expected an error writing to a dead store")
+	}
+}
+
+func TestWriteNeverDialsImplicitly(t *testing.T) {
+	// Arrange: a LIVE store, but a client that was never connected. The dial
+	// would succeed, which is exactly why the write must not attempt one: a
+	// connection born under a write skipped cursor recovery.
+	sock := startRealStore(t)
+	c := New(sock, nil)
+	defer c.Close()
+
+	// Act
+	_, err := c.Write("shim-claude-sidecar", &corev1.EventBatch{})
+
+	// Assert
+	if !errors.Is(err, ErrNotConnected) {
+		t.Fatalf("Write err = %v, want ErrNotConnected", err)
+	}
+	if c.Connected() {
+		t.Fatal("Write opened a producer connection; it must never dial")
+	}
+}
+
+func TestHeartbeatOnADownConnectionIsAnErrorNotSilence(t *testing.T) {
+	// Arrange: never connected. A heartbeat exists to detect a dead link, so
+	// answering "fine" here would hide the very outage it is asked about.
+	c := New(filepath.Join(t.TempDir(), "nonexistent.sock"), nil)
+
+	// Act / Assert
+	if err := c.Heartbeat(); !errors.Is(err, ErrNotConnected) {
+		t.Fatalf("Heartbeat err = %v, want ErrNotConnected", err)
+	}
+}
+
+func TestConnectedGoesFalseAfterTheStoreDies(t *testing.T) {
+	// Arrange: an established producer connection to a real store.
+	sock := startRealStore(t)
+	c := New(sock, nil)
+	defer c.Close()
+	if err := c.Connect(); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	if _, err := c.Write("shim-claude-sidecar", &corev1.EventBatch{}); err != nil {
+		t.Fatalf("prime write: %v", err)
+	}
+
+	// Act: break the socket underneath the client (same-package reach-in, so the
+	// connection stays non-nil and the failure has to come from the transport),
+	// then write.
+	c.conn.Close()
+	_, err := c.Write("shim-claude-sidecar", &corev1.EventBatch{})
+
+	// Assert: the caller learns the LINK is gone, not merely that a write failed.
+	if err == nil {
+		t.Fatal("expected an error writing on a dropped connection")
+	}
+	if c.Connected() {
+		t.Fatal("Connected() stayed true after the connection was dropped")
 	}
 }
