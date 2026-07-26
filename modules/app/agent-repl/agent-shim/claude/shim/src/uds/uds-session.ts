@@ -31,7 +31,7 @@
 import { AsyncQueue } from "../input-queue.js";
 import { create } from "@bufbuild/protobuf";
 import type { JsonObject } from "@bufbuild/protobuf";
-import { isPermissionMode, type ContentBlock, type PermissionMode } from "../protocol.js";
+import { isSwitchablePermissionMode, type ContentBlock, type PermissionMode } from "../protocol.js";
 import type {
   CanUseToolLike,
   PermissionResultLike,
@@ -125,14 +125,28 @@ export class UdsSession {
         });
         // A prompt-scoped permission-mode override rides on SubmitPrompt. Apply
         // it to the live query (fire-and-forget: the sync Ack does not wait on
-        // the SDK). An unrecognized mode is loud-logged, never silently applied.
+        // the SDK).
+        //
+        // BOTH failure paths report DegradedState, not just a log line. The
+        // user picked a mode; if it did not take, the session is running under
+        // a DIFFERENT permission posture than the one they chose, and a log
+        // nobody reads is not an acceptable way to tell them that. The gate is
+        // `isSwitchablePermissionMode`, not `isPermissionMode`, because
+        // bypassPermissions is launch-only and the CLI is guaranteed to reject
+        // it here.
         if (permissionMode !== undefined && permissionMode !== "") {
-          if (isPermissionMode(permissionMode)) {
+          if (isSwitchablePermissionMode(permissionMode)) {
             void this.query?.setPermissionMode(permissionMode as PermissionMode).catch((err: unknown) => {
-              shimLog(COMPONENT, { session: this.deps.sessionId }, `setPermissionMode failed: ${errMsg(err)}`);
+              this.reportDegraded(
+                "claude-shim-permission-mode",
+                `permission mode "${permissionMode}" was rejected, session still in the previous mode: ${errMsg(err)}`,
+              );
             });
           } else {
-            shimLog(COMPONENT, { session: this.deps.sessionId, mode: permissionMode }, `ignoring unknown permission mode on SubmitPrompt`);
+            this.reportDegraded(
+              "claude-shim-permission-mode",
+              `permission mode "${permissionMode}" cannot be set on a running session, session still in the previous mode`,
+            );
           }
         }
       },

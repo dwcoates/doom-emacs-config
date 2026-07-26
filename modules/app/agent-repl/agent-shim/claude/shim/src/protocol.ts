@@ -24,14 +24,24 @@ export type PermissionMode =
   // CLI-era modes (claude >= 2.1); validated by the CLI itself.
   | "auto"
   | "manual"
-  | "dontAsk"
-  | "delegate";
+  | "dontAsk";
 
 /**
- * The PermissionMode enum, once. Both the command decoder and the
- * `--permission-mode` flag parser gate on THIS: the two used to carry
- * hand-written copies of the list, they drifted, and the decoder's copy
- * silently rejected every CLI-era mode the topbar offers.
+ * Every mode the CLI accepts at session LAUNCH.
+ *
+ * Matches the CLI's own enumeration, taken verbatim from its rejection
+ * message: "must be one of acceptEdits, auto, bypassPermissions, default,
+ * dontAsk, plan". `manual` is additionally accepted as an alias for
+ * `default` (SDK 0.3.200).
+ *
+ * `delegate` USED to be listed here and never worked: the CLI rejects it
+ * outright, verified against both SDK 0.1.77 and 0.3.220, and SDK 0.3.220
+ * dropped it from the PermissionMode type entirely. Offering a mode the
+ * session can never honor is worse than not offering it, so it is gone.
+ *
+ * Both the command decoder and the `--permission-mode` flag parser gate on
+ * THIS: the two used to carry hand-written copies of the list, they drifted,
+ * and the decoder's copy silently rejected every CLI-era mode.
  */
 export const PERMISSION_MODES: readonly PermissionMode[] = [
   "default",
@@ -41,11 +51,28 @@ export const PERMISSION_MODES: readonly PermissionMode[] = [
   "auto",
   "manual",
   "dontAsk",
-  "delegate",
 ];
+
+/**
+ * The subset that can be switched to MID-SESSION.
+ *
+ * `bypassPermissions` is launch-only: the CLI refuses to switch into it
+ * ("because the session was not launched with --dangerously-skip-permissions"),
+ * though it is perfectly valid as a starting mode — empirically confirmed by
+ * standing up a real session in it. Anything gating a mid-session switch must
+ * use this list, not {@link PERMISSION_MODES}, or it will accept a mode the
+ * CLI is guaranteed to reject.
+ */
+export const SWITCHABLE_PERMISSION_MODES: readonly PermissionMode[] =
+  PERMISSION_MODES.filter((m) => m !== "bypassPermissions");
 
 export function isPermissionMode(v: unknown): v is PermissionMode {
   return typeof v === "string" && (PERMISSION_MODES as readonly string[]).includes(v);
+}
+
+/** Whether `v` is a mode a RUNNING session can actually switch into. */
+export function isSwitchablePermissionMode(v: unknown): v is PermissionMode {
+  return typeof v === "string" && (SWITCHABLE_PERMISSION_MODES as readonly string[]).includes(v);
 }
 
 export interface Usage {
@@ -511,7 +538,11 @@ export function decodeCommandLine(line: string): ShimCommand | null {
       break;
     }
     case "set-permission-mode": {
-      if (!isPermissionMode(frame.mode)) {
+      // Gated on the SWITCHABLE set, not the launch set: this command targets
+      // a running session, and bypassPermissions is launch-only. Rejecting it
+      // here with a real error beats forwarding it to a CLI that will refuse
+      // it and leave the caller thinking the mode took.
+      if (!isSwitchablePermissionMode(frame.mode)) {
         throw new ProtocolError(`set-permission-mode invalid mode: ${String(frame.mode)}`);
       }
       break;
