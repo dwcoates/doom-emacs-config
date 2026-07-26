@@ -144,6 +144,20 @@ export class CommandDispatcher {
     return this.dispatch(workspace, { case: "resync", fromSeq });
   }
 
+  /**
+   * Attest that the feed has been PAINTED through `throughSeq`.
+   *
+   * Sent from the completion of a render that actually drew, never from the
+   * arrival of the frames describing one: receiving the history and drawing
+   * it are different facts, and only the second earns the ready state. A
+   * webview that cannot paint simply never calls this, and the workspace
+   * stays on the compromised-route state — which is the honest answer, not a
+   * gap to be papered over with a timeout.
+   */
+  paintAck(workspace: string, throughSeq: number): Promise<void> {
+    return this.dispatch(workspace, { case: "paintAck", throughSeq });
+  }
+
   deleteSession(sessionId: string): Promise<void> {
     return this.dispatch("", { case: "deleteSession", sessionId });
   }

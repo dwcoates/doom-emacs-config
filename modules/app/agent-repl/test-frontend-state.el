@@ -53,7 +53,11 @@
 (agent-repl-test--deftest-state-map
  agent-repl-test-state-map-done "RENDER_STATE_DONE" :done)
 (agent-repl-test--deftest-state-map
- agent-repl-test-state-map-stop-failed "RENDER_STATE_STOP_FAILED" :stop-failed)
+ agent-repl-test-state-map-stop-failed "RENDER_STATE_STOP_FAILED" :vendor-blocked)
+(agent-repl-test--deftest-state-map
+ agent-repl-test-state-map-ready "RENDER_STATE_READY" :ready)
+(agent-repl-test--deftest-state-map
+ agent-repl-test-state-map-vendor-blocked "RENDER_STATE_VENDOR_BLOCKED" :vendor-blocked)
 (agent-repl-test--deftest-state-map
  agent-repl-test-state-map-merging "RENDER_STATE_MERGING" :merging)
 (agent-repl-test--deftest-state-map

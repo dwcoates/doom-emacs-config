@@ -291,8 +291,38 @@ message Interrupt {
   bool hard = 2;  // hard: SDK interrupt(); soft: end after current message
 }
 
+// The three-valued outcome of an Interrupt, decided by the SHIM.
+//
+// The shim owns turn lifecycle (it counts prompts in and results out) and
+// its event loop is single-threaded, so the liveness check inside its
+// interrupt handler is naturally atomic against turn end: whichever the
+// counter says at that instant IS the answer, and no later event can
+// retroactively change it. The ambiguous fourth case — "the turn ended at
+// about the moment the stop landed, so was that a stop or a no-op?" — is
+// therefore unrepresentable rather than merely unlikely.
+//
+// Deriving this downstream is what made it ambiguous before: a daemon or a
+// frontend watching for an `aborted` result sees the turn end and the
+// interrupt arrive as two unordered events, and could not tell a stop that
+// FAILED from a turn that had ALREADY ENDED. It painted the second as the
+// first.
+enum InterruptOutcome {
+  INTERRUPT_OUTCOME_UNSPECIFIED = 0;
+  // A turn was live and the stop was delivered.
+  INTERRUPT_OUTCOME_INTERRUPTED = 1;
+  // No turn was live. SUCCESS, not an error: the user asked for the turn to
+  // be over and it already is.
+  INTERRUPT_OUTCOME_ALREADY_COMPLETE = 2;
+  // The stop could not be delivered at all. A route/control failure, and
+  // the only outcome that reads as a failure anywhere downstream.
+  INTERRUPT_OUTCOME_FAILED = 3;
+}
+
 message Ack {
   string request_id = 1;
+  // Set only on an Interrupt's ack; UNSPECIFIED on every other command,
+  // whose success is unqualified.
+  InterruptOutcome interrupt_outcome = 2;
 }
 
 message Nack {

@@ -27,14 +27,12 @@
   ;; and nothing is: the aggregate is the only thing CI and the pre-commit gate
   ;; invoke, so an unlisted file's failures are invisible.
   ;;
-  ;; KNOWN EXCLUSION (deliberate, and the only one):
-  ;;   test-sidebar.el — 14 of its 81 tests fail, standalone and here alike
-  ;;   (agent-repl--sidebar-wire-status returns "init" where they expect
-  ;;   "none", plus the merged-list and roster-roundtrip cases). Those failures
-  ;;   PRE-DATE this list becoming exhaustive and are a real red suite, not a
-  ;;   harness artifact. It is left out so the aggregate stays a trustworthy
-  ;;   green/red signal, and named here so the debt is visible rather than
-  ;;   silently missing. Adding it back is a fix to sidebar.el or its tests.
+  ;; There is no exclusion any more. test-sidebar.el was held out while 14
+  ;; of its 81 tests were red — casualties of the SSM cutover, which moved
+  ;; render state onto the daemon-pushed :pushed-render-state while those
+  ;; tests still seeded the pre-cutover :repl-state / :agent-state. The
+  ;; five-color remap fixed the vocabulary half and re-seeded the rest, so
+  ;; the file is green and back in the list where its failures are visible.
   (load (expand-file-name "test-ai-title.el" dir) nil t)
   (load (expand-file-name "test-autosave.el" dir) nil t)
   (load (expand-file-name "test-backend.el" dir) nil t)
@@ -73,6 +71,7 @@
   (load (expand-file-name "test-rename.el" dir) nil t)
   (load (expand-file-name "test-sentinel.el" dir) nil t)
   (load (expand-file-name "test-session.el" dir) nil t)
+  (load (expand-file-name "test-sidebar.el" dir) nil t)
   (load (expand-file-name "test-sibling-popup.el" dir) nil t)
   (load (expand-file-name "test-status.el" dir) nil t)
   (load (expand-file-name "test-tasks.el" dir) nil t)

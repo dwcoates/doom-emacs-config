@@ -678,20 +678,13 @@ paths fire for the same turn completion."
 
 (defun agent-repl--mark-agent-done (ws)
   "Mark WS's agent-state as :done.
-Unconditional: called on every Stop hook.  Also manages the
-`:done-acked' acknowledgment flag and `:done-acked-at' focus-start
-timestamp (orthogonal to `:repl-state'):
-  - If WS is the current workspace, the user is actively looking at
-    this :done as it arrives — set `:done-acked' to t and stamp
-    `:done-acked-at' with the current time so the decay timer can
-    clear it once `agent-repl-done-idle-delay' seconds have
-    elapsed.
-  - Otherwise, clear both flags so this fresh :done starts
-    unacknowledged (regardless of any leftover ack from a prior
-    cycle); `on-workspace-switch' sets them when the user next
-    selects the workspace.
+Unconditional: called on every Stop hook.
 
-Finally fires the finished desktop notification via
+No viewed-acknowledgment is recorded: `:done', `:ready' and `:idle' are
+all READY under the five-color vocabulary, so there is no decay left for
+an acknowledgment to pace.
+
+Fires the finished desktop notification via
 `agent-repl--maybe-notify-finished', so every transition to :done —
 not just the Stop-hook completion path — notifies the user when Emacs
 is unfocused.  The notification is gated on frame focus and debounced
@@ -705,8 +698,7 @@ user is focused) stay silent."
                     (agent-repl--ws-get ws :merge-completed-at))
   (agent-repl--ws-set-agent-state ws :done)
   (let ((current (agent-repl--current-ws-p ws)))
-    (agent-repl--ws-put ws :done-acked current)
-    (agent-repl--ws-put ws :done-acked-at (and current (float-time))))
+    )
   (agent-repl--maybe-notify-finished ws))
 
 (defun agent-repl--refresh-magit-status-for-dir (dir &optional ws)
