@@ -148,6 +148,42 @@ workspace frontend's."
         ;; Assert
         (should (equal captured-mode agent-repl-explain-config-permission-mode))))))
 
+(ert-deftest agent-repl-ecfg-test-ensure-session/consents-to-the-ungated-mode ()
+  "Creation binds the ungated consent the daemon requires for `bypassPermissions'."
+  ;; Arrange
+  (agent-repl-ecfg-test--with-state
+    (let ((agent-repl-explain-config-permission-mode "bypassPermissions")
+          (agent-repl-frontend-allow-ungated nil)
+          captured-consent)
+      (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&rest _) 'proc))
+                ((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t))
+                ((symbol-function 'agent-repl--frontend-create-session)
+                 (lambda (&rest _)
+                   (setq captured-consent agent-repl-frontend-allow-ungated)
+                   "s_new")))
+        ;; Act
+        (agent-repl--explain-config-ensure-session)
+        ;; Assert
+        (should captured-consent)))))
+
+(ert-deftest agent-repl-ecfg-test-ensure-session/withholds-consent-for-a-gated-mode ()
+  "A gated explain-config mode sends no ungated consent."
+  ;; Arrange
+  (agent-repl-ecfg-test--with-state
+    (let ((agent-repl-explain-config-permission-mode "acceptEdits")
+          (agent-repl-frontend-allow-ungated nil)
+          captured-consent)
+      (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&rest _) 'proc))
+                ((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t))
+                ((symbol-function 'agent-repl--frontend-create-session)
+                 (lambda (&rest _)
+                   (setq captured-consent agent-repl-frontend-allow-ungated)
+                   "s_new")))
+        ;; Act
+        (agent-repl--explain-config-ensure-session)
+        ;; Assert
+        (should-not captured-consent)))))
+
 (ert-deftest agent-repl-ecfg-test-ensure-session/reuses-live-session ()
   "A recorded session the daemon still lists as live is reused, not recreated."
   ;; Arrange

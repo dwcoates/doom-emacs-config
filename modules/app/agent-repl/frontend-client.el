@@ -133,6 +133,41 @@ the SDK default."
   :type '(choice (const :tag "SDK default" nil) string)
   :group 'agent-repl)
 
+;; The daemon REFUSES to create a session in a permission mode that leaves it
+;; with no permission gate — `bypassPermissions', under which the SDK
+;; auto-approves every tool call BEFORE the shim's `canUseTool' callback is
+;; consulted, so the permission round-trip (request -> card -> answer) never
+;; engages and no permission card can ever appear.  The refusal is lifted only
+;; by this flag, which becomes `CreateSessionCmd.allow_ungated'.
+;;
+;; It is a DEFVAR and not a defcustom on purpose: the consent belongs to the
+;; one call site that genuinely wants an ungated session (it `let'-binds this
+;; alongside `agent-repl-frontend-permission-mode'), not to a global preference
+;; that would quietly re-arm every later create.
+(defvar agent-repl-frontend-allow-ungated nil
+  "When non-nil, consent to creating a session with NO permission gate.
+Required by the daemon whenever `agent-repl-frontend-permission-mode' names
+an ungated mode (`bypassPermissions'); without it the create is refused
+loudly rather than downgraded to a gated mode.  `let'-bind it at the call
+site that wants such a session; never set it globally.")
+
+(defconst agent-repl-frontend-ungated-permission-modes '("bypassPermissions")
+  "Permission modes under which a session has NO permission gate.
+The elisp twin of the daemon's `protocol.UngatedPermissionMode' and the
+webapp's `UNGATED_PERMISSION_MODES'; all three must name the same set.
+
+`bypassPermissions' is the only member.  `dontAsk' also bypasses the SDK's
+`canUseTool' callback, but bypasses it by DENYING (fail-closed), so it
+grants nothing behind the gate's back, and `default'/`acceptEdits'/`auto'
+all still reach the callback for the ask path.")
+
+(defun agent-repl-frontend-ungated-permission-mode-p (mode)
+  "Return non-nil when MODE names a session with no permission gate.
+See `agent-repl-frontend-ungated-permission-modes'."
+  (and (stringp mode)
+       (member mode agent-repl-frontend-ungated-permission-modes)
+       t))
+
 (defcustom agent-repl-frontend-ready-attempts 25
   "Poll attempts for `agent-repl--frontend-wait-ready' (0.2s apart)."
   :type 'integer
@@ -322,7 +357,11 @@ inherited."
                           (when resume (list :resumeClaudeSessionId resume))
                           (when config-dir (list :configDir config-dir))
                           (when agent-repl-frontend-permission-mode
-                            (list :permissionMode agent-repl-frontend-permission-mode))))
+                            (list :permissionMode agent-repl-frontend-permission-mode))
+                          ;; Sent ONLY when a caller has bound the consent, so
+                          ;; an ordinary create can never carry it by accident.
+                          (when agent-repl-frontend-allow-ungated
+                            (list :allowUngated t))))
          ;; Mutable outcome the ack callbacks flip; all keys pre-populated so
          ;; `plist-put' mutates in place and the closures + await loop observe it.
          (ack (list :done nil :ok nil :error nil)))

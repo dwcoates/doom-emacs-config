@@ -232,6 +232,48 @@ func TestCommandHandlerCreateSessionRoutesToSessions(t *testing.T) {
 	}
 }
 
+func TestCommandHandlerCarriesTheUngatedConsent(t *testing.T) {
+	// Arrange — the consent is what admits a session with no permission gate,
+	// so dropping it in the dispatch would turn every such create into a
+	// refusal (or, worse, admit one nobody consented to).
+	sc := &fakeSessionCmds{}
+	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, sc, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("newCommandHandler: %v", err)
+	}
+	// Act
+	err = h.CreateSession(context.Background(), "/w", "r1", &frontendv1.CreateSessionCmd{
+		Cwd:            "/w",
+		PermissionMode: "bypassPermissions",
+		AllowUngated:   true,
+	})
+	// Assert
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if len(sc.created) != 1 || !sc.created[0].AllowUngated {
+		t.Fatalf("created = %+v, want allow_ungated carried through", sc.created)
+	}
+}
+
+func TestCommandHandlerWithholdsAnUnsetUngatedConsent(t *testing.T) {
+	// Arrange
+	sc := &fakeSessionCmds{}
+	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, sc, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("newCommandHandler: %v", err)
+	}
+	// Act
+	err = h.CreateSession(context.Background(), "/w", "r1", &frontendv1.CreateSessionCmd{Cwd: "/w"})
+	// Assert — an ordinary create never fabricates the consent.
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if len(sc.created) != 1 || sc.created[0].AllowUngated {
+		t.Fatalf("created = %+v, want allow_ungated false", sc.created)
+	}
+}
+
 func TestCommandHandlerDeleteSessionRoutesToSessions(t *testing.T) {
 	// Arrange
 	sc := &fakeSessionCmds{}
