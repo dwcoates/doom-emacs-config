@@ -123,6 +123,40 @@ describe("StoreClient subscribe/write happy path", () => {
     expect(ack.lastSeq).toBe(42n);
   });
 
+  it("issues the second write without waiting for the first write's ack", async () => {
+    // Arrange: sends chain on ISSUE, never on acks — chaining on acks would
+    // serialize every batch behind a store round-trip and throttle the stream.
+    const store = await fakeStore();
+    stores.push(store);
+    const client = await connectedClient(store);
+    // Act: two batches back to back, with NOTHING acked in between.
+    const first = client.write([create(EventSchema, { sessionId: "sess-1", seq: 1n })]);
+    const second = client.write([create(EventSchema, { sessionId: "sess-1", seq: 2n })]);
+    const w1 = await store.peer().next(StoreWriteSchema, "first batch");
+    const w2 = await store.peer().next(StoreWriteSchema, "second batch (pipelined)");
+    // Assert: both reached the wire un-acked, in call order.
+    expect([w1, w2].map((w) => w.batch!.events[0]!.seq)).toEqual([1n, 2n]);
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, { lastSeq: 1n }));
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, { lastSeq: 2n }));
+    await Promise.all([first, second]);
+  });
+
+  it("matches acks to pipelined batches positionally", async () => {
+    // Arrange: pendingWrites is matched to acks POSITIONALLY, so pipelining
+    // must not hand a caller another batch's ack.
+    const store = await fakeStore();
+    stores.push(store);
+    const client = await connectedClient(store);
+    // Act: three un-acked batches on the wire, then acks in arrival order.
+    const acks = [1n, 2n, 3n].map((seq) => client.write([create(EventSchema, { sessionId: "sess-1", seq })]));
+    for (let i = 0; i < 3; i++) await store.peer().next(StoreWriteSchema, `batch ${i + 1}`);
+    for (const lastSeq of [1n, 2n, 3n]) {
+      store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, { lastSeq }));
+    }
+    // Assert: each caller got ITS batch's ack.
+    expect((await Promise.all(acks)).map((a) => a.lastSeq)).toEqual([1n, 2n, 3n]);
+  });
+
   it("hands merged store events to the sink", async () => {
     // Arrange
     const store = await fakeStore();
@@ -245,6 +279,21 @@ describe("StoreClient sad path (no spill, no retry)", () => {
     expect(degradations.some((d) => d.droppedCount === 1n)).toBe(true);
     expect(client.isConnected()).toBe(false);
   });
+
+  it("rejects every pipelined in-flight write when the store drops", async () => {
+    // Arrange: pipelining puts several batches in flight at once, and a drop
+    // must leave none of them hanging on an ack that will never come.
+    const store = await fakeStore();
+    stores.push(store);
+    const client = await connectedClient(store);
+    // Act: two un-acked batches on the wire, then the store dies.
+    const writes = [1n, 2n].map((seq) => client.write([create(EventSchema, { sessionId: "sess-1", seq })]));
+    for (let i = 0; i < 2; i++) await store.peer().next(StoreWriteSchema, `batch ${i + 1}`);
+    store.close();
+    // Assert
+    const settled = await Promise.allSettled(writes);
+    expect(settled.map((s) => s.status)).toEqual(["rejected", "rejected"]);
+  });
 });
 
 describe("StoreClient producer redial", () => {
@@ -340,6 +389,31 @@ describe("StoreClient producer redial", () => {
     // Assert: FIFO on the wire, and each caller got ITS batch's ack.
     expect(seen).toEqual([1n, 2n, 3n]);
     expect((await Promise.all(acks)).map((a) => a.lastSeq)).toEqual([1n, 2n, 3n]);
+  });
+
+  it("keeps sending after a batch fails to reach the store", async () => {
+    // Arrange: the send chain carries ORDER only, so one failed batch must not
+    // wedge every write queued behind it.
+    const store = await fakeStore();
+    stores.push(store);
+    const client = await connectedClient(store);
+    const socketPath = store.socketPath;
+    store.close();
+    await until(() => !client.isConnected(), "producer conn observed down");
+
+    // Act: the first write fails its redial (nothing listening), then the
+    // store comes back and a second write follows it.
+    await expect(client.write([create(EventSchema, { sessionId: "sess-1", seq: 1n })])).rejects.toThrow();
+    const restarted = await fakeStoreAt(socketPath);
+    stores.push(restarted);
+    const ackP = client.write([create(EventSchema, { sessionId: "sess-1", seq: 2n })]);
+    await until(() => restarted.count() >= 1, "redialed connection accepted");
+    const write = await restarted.peer().next(StoreWriteSchema, "post-failure batch");
+    restarted.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, { accepted: 1n }));
+
+    // Assert
+    expect(write.batch!.events[0]!.seq).toBe(2n);
+    await expect(ackP).resolves.toMatchObject({ accepted: 1n });
   });
 
   it("never redials after a deliberate close", async () => {
