@@ -112,8 +112,8 @@ value RENDER_STATE_UNSPECIFIED: receiving it means the daemon pushed an
 unresolved state, which is an invariant violation, not a state to
 render — `agent-repl--frontend-state->keyword' errors on it.
 
-Note: `:degraded' has no `agent-repl-ws-state-icons' glyph yet; the
-stitch phase adds one (see this module's landing report).")
+`:degraded' carries the 📡 glyph in `agent-repl-ws-state-icons'
+\(workspace.el); `test-render-colors.el' asserts it exists.")
 
 (defun agent-repl--frontend-state->keyword (state)
   "Map RenderState enum NAME STATE (a string) to a render keyword.
