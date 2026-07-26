@@ -101,6 +101,8 @@ The golden corpus (design doc §14.1 G13, §5.3 shape inventory). Every fixture 
 | `tool-results/skill.jsonl` | `~/.claude-chesscom/projects/<project>/<session>.jsonl` | ToolUseResult.skill / SkillResult | shortest real sample; structural fields intact |
 | `tool-results/task_create.jsonl` | `~/.claude-chesscom/projects/<project>/<session>.jsonl` | ToolUseResult.task_create / TaskCreateResult | shortest real sample; structural fields intact |
 | `tool-results/task_list.jsonl` | `~/.claude-chesscom/projects/<project>/<session>.jsonl` | ToolUseResult.task_list / TaskListResult | shortest real sample; structural fields intact |
+| `tool-results/task_output-local_agent.jsonl` | `~/.claude-chesscom/projects/<project>/<session>.jsonl` | ToolUseResult.task_output / TaskOutputResult / LocalAgentTask (retrieval_status=success) | shortest real sample; structural fields intact |
+| `tool-results/task_output.jsonl` | `~/.claude-chesscom/projects/<project>/<session>.jsonl` | ToolUseResult.task_output / TaskOutputResult / LocalBashTask (retrieval_status=not_ready, exitCode null) | shortest real sample; structural fields intact |
 | `tool-results/task_stop.jsonl` | `~/.claude-chesscom/projects/<project>/<session>.jsonl` | ToolUseResult.task_stop / TaskStopResult | shortest real sample; structural fields intact |
 | `tool-results/task_update.jsonl` | `~/.claude-chesscom/projects/<project>/<session>.jsonl` | ToolUseResult.task_update / TaskUpdateResult | shortest real sample; structural fields intact |
 | `tool-results/tool_search.jsonl` | `~/.claude-chesscom/projects/<project>/<session>.jsonl` | ToolUseResult.tool_search / ToolSearchResult | shortest real sample; structural fields intact |
