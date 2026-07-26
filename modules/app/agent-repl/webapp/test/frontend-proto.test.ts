@@ -39,7 +39,6 @@ const CONV_DELTA = {
 };
 const SESSION_INIT = { workspace: "ws", sessionId: "s1", init: { model: "claude", cwd: "/w" } };
 const COMMAND_ACK = { requestId: "r1", ok: true };
-const DEGRADED = { component: "shim-store", reason: "down" };
 const DAEMON_VIEW = {
   bootId: "b_abc",
   protocolVersion: "1",
@@ -75,7 +74,6 @@ describe("decodeFrontendFrame — every frame variant decodes", () => {
     ["typingDelta", { typingDelta: TYPING }],
     ["taskCatalog", { taskCatalog: TASK_CATALOG }],
     ["commandAck", { commandAck: COMMAND_ACK }],
-    ["degradedNotice", { degradedNotice: DEGRADED }],
     ["daemonView", { daemonView: DAEMON_VIEW }],
     ["sessionInit", { sessionInit: SESSION_INIT }],
     ["heartbeat", { heartbeat: HEARTBEAT }],
@@ -127,11 +125,16 @@ describe("decodeFrontendFrame — SessionView resume keys + config dir", () => {
 });
 
 describe("decodeFrontendFrame — SessionView S7 parity fields", () => {
-  it("decodes terminal + deathReason", () => {
-    const frame = decode({ sessionView: { ...SESSION_VIEW, terminal: true, deathReason: "delete session" } });
+  it("decodes terminal", () => {
+    const frame = decode({ sessionView: { ...SESSION_VIEW, terminal: true } });
     if (frame.frame.case !== "sessionView") throw new Error("wrong variant");
     expect(frame.frame.value.terminal).toBe(true);
-    expect(frame.frame.value.deathReason).toBe("delete session");
+  });
+
+  it("rejects the retired deathReason field (step 11)", () => {
+    expect(() =>
+      decode({ sessionView: { ...SESSION_VIEW, terminal: true, deathReason: "delete session" } }),
+    ).toThrow(/unrecognized field/);
   });
 
   it("decodes pendingPermissions from its protojson int64 string", () => {
@@ -358,9 +361,9 @@ describe("decodeFrontendFrame — required-field validation is loud", () => {
     expect(() => decode({ commandAck: { ok: true } })).toThrow(/CommandAck missing required `request_id`/);
   });
 
-  it("rejects a DegradedNotice without a component", () => {
-    expect(() => decode({ degradedNotice: { reason: "down" } })).toThrow(
-      /DegradedNotice missing required `component`/,
+  it("rejects the retired degradedNotice frame arm (step 11)", () => {
+    expect(() => decode({ degradedNotice: { component: "shim-store", reason: "down" } })).toThrow(
+      /unrecognized field/,
     );
   });
 

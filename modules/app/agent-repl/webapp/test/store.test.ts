@@ -527,20 +527,9 @@ describe("ingest session-init", () => {
   });
 });
 
-// --- degraded / ignored / batching -----------------------------------------
+// --- ignored / batching ------------------------------------------------------
 
-describe("ingest degraded and ignored", () => {
-  it("treats a degraded effect as no store change (the banner is the caller's)", () => {
-    // Arrange
-    const store = new ConversationStore();
-    // Act
-    const result = store.ingest([
-      { kind: "degraded", value: { component: "store", reason: "down", recovered: false, atMs: 0 } },
-    ]);
-    // Assert
-    expect(result.changed).toBe(false);
-  });
-
+describe("ingest ignored", () => {
   it("treats an ignored effect as no store change", () => {
     // Arrange
     const store = new ConversationStore();
@@ -1094,8 +1083,6 @@ describe("the progress footer's input (F1)", () => {
       hook: null,
       blocked: null,
       rateLimited: null,
-      errorSummary: "",
-      errorItemUuid: "",
       failure: null,
       pendingPermissions: 0,
       queueDepth: 0,
