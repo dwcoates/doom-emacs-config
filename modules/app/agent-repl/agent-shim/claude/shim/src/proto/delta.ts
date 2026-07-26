@@ -253,8 +253,7 @@ export function toolProgressToHeartbeat(
   msg: Record<string, unknown>,
   opts?: DeltaOptions,
 ): Event {
-  const sessionId = typeof msg["session_id"] === "string" ? msg["session_id"]
-    : typeof msg["sessionId"] === "string" ? (msg["sessionId"] as string) : "";
+  const sessionId = firstString(msg["session_id"], msg["sessionId"]);
   const elapsed = firstNumber(msg["elapsed_time_seconds"], msg["elapsedTimeSeconds"], msg["elapsed_seconds"]);
   return ephemeralEvent(sessionId, producedAt(opts), {
     case: "heartbeatProgress",
