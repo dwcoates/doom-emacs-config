@@ -16,10 +16,16 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"claude-repld/internal/protocol"
 )
 
 // DefaultBin is the CLI invoked when Config.Bin is empty.
 const DefaultBin = "claude"
+
+// analystSubject names the analyst in every ungated log record, so the boot
+// note and the dispatch note read as one another's halves.
+const analystSubject = "the headless remediation analyst"
 
 // Model is the analyst model. Diagnosing a lost session and designing
 // the durable fix is the hardest reasoning the daemon ever asks for, so
@@ -43,7 +49,28 @@ type Config struct {
 	// keyboard to answer a headless prompt, so every tool call it makes
 	// is auto-denied and it can only report, never remediate. Loosening
 	// this is the operator's decision, so it is never assumed here.
+	//
+	// An UNGATED mode (protocol.UngatedPermissionMode) additionally
+	// requires AllowUngated; New refuses without it.
 	PermissionMode string
+	// AllowUngated is the operator's DELIBERATE consent to run the analyst
+	// with no permission gate at all, and is required whenever
+	// PermissionMode names an ungated mode.
+	//
+	// THE TRADEOFF this consent acknowledges: the analyst is a headless
+	// `claude -p` with nobody at the keyboard, so under any gated mode
+	// every tool call it makes is auto-denied and it can do nothing but
+	// narrate a diagnosis into the daemon log. Reading the logs, running
+	// git, and driving the workspace-creation skill — the whole reason the
+	// analyst exists — all need it ungated. So ungated is the only mode in
+	// which the feature WORKS, and this flag is where an operator says they
+	// understand what that buys: a `claude` running unattended, against a
+	// real checkout, approving its own tool calls.
+	//
+	// Requiring it earns something concrete rather than ceremony: nothing
+	// that spawns claude-repld can arrive at an ungated analyst by passing
+	// a mode string alone.
+	AllowUngated bool
 	// Start launches the process. Required.
 	Start StartFunc
 	// Logf records dispatches. Required.
@@ -55,6 +82,7 @@ type Runner struct {
 	bin            string
 	dir            string
 	permissionMode string
+	allowUngated   bool
 	start          StartFunc
 	logf           func(format string, args ...any)
 	// bootedAt anchors the daemon-uptime datum handed to the analyst: a
@@ -78,14 +106,40 @@ func New(cfg Config, bootedAt time.Time) (*Runner, error) {
 	if cfg.Logf == nil {
 		return nil, fmt.Errorf("remediation: Logf is required")
 	}
+	// The ungated-analyst consent gate, checked HERE — at construction, from
+	// the daemon's own flags — rather than at dispatch.
+	//
+	// A refusal at dispatch would land at the worst possible moment: a session
+	// has just been lost, the frontend is showing "session gone", and the one
+	// thing that could recover it declines over a configuration fact that was
+	// knowable at boot. This is a misconfiguration, and the daemon already
+	// exits on those (-accounts, --shim), so it fails the same way and at the
+	// same time.
+	//
+	// Refused, never downgraded to a gated mode: a silently gated analyst
+	// still spawns, still costs an Opus run, and can only narrate — an
+	// operator would see "remediation dispatched" and get nothing.
+	if protocol.UngatedPermissionMode(cfg.PermissionMode) && !cfg.AllowUngated {
+		return nil, fmt.Errorf(
+			"remediation: permission mode %q runs the headless analyst with NO permission gate (it auto-approves its own tool calls against %s); pass the ungated-analyst consent to confirm that is intended, or choose a gated mode",
+			cfg.PermissionMode, cfg.Dir)
+	}
 	bin := cfg.Bin
 	if bin == "" {
 		bin = DefaultBin
+	}
+	// The boot-time half of the record: an ungated analyst is configured now,
+	// long before any session is lost, and the operator learns it at the
+	// moment the daemon adopts the configuration rather than at 3am when it
+	// finally fires.
+	if note := protocol.UngatedNote(analystSubject, cfg.PermissionMode, cfg.AllowUngated); note != "" {
+		cfg.Logf("remediation: analyst configured for %s%s", cfg.Dir, note)
 	}
 	return &Runner{
 		bin:            bin,
 		dir:            cfg.Dir,
 		permissionMode: cfg.PermissionMode,
+		allowUngated:   cfg.AllowUngated,
 		start:          cfg.Start,
 		logf:           cfg.Logf,
 		bootedAt:       bootedAt,
@@ -147,6 +201,11 @@ func (r *Runner) Start(sessionID string) (bool, error) {
 		// error is surfaced to the caller either way.
 		return false, fmt.Errorf("remediation: launch analyst for %s: %w", sessionID, err)
 	}
-	r.logf("remediation: dispatched %s analyst for lost session %s in %s", Model, sessionID, r.dir)
+	// The dispatch half of the record: every ungated analyst SPAWN is named,
+	// with the consent that admitted it, exactly as an ungated session create
+	// is. The boot-time note says one is configured; this says one is running.
+	r.logf("remediation: dispatched %s analyst for lost session %s in %s%s",
+		Model, sessionID, r.dir,
+		protocol.UngatedNote(analystSubject, r.permissionMode, r.allowUngated))
 	return true, nil
 }

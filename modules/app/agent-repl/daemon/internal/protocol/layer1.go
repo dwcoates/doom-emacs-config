@@ -57,6 +57,28 @@ func UngatedPermissionMode(s string) bool {
 	return PermissionMode(s) == PermissionModeBypassPermissions
 }
 
+// UngatedNote is the log clause announcing that SUBJECT runs with no
+// permission gate, and "" when mode is gated.
+//
+// THE record. The daemon cannot gate what the SDK auto-approves — by the time
+// a tool call is visible to any Go code it has already run — so a log entry
+// naming the gate-less thing at the moment it comes into existence is the only
+// honest accounting available, and it names the consent that admitted it
+// rather than only the mode.
+//
+// Shared by every ungated launch path (a created session, a dispatched
+// remediation analyst) so the wording of "there is no permission gate here"
+// cannot drift between them. SUBJECT is the thing running ungated, phrased to
+// read after "UNGATED: " (e.g. "this session", "the remediation analyst").
+func UngatedNote(subject, mode string, consented bool) string {
+	if !UngatedPermissionMode(mode) {
+		return ""
+	}
+	return fmt.Sprintf(
+		" — UNGATED: %s runs under permission_mode %q, which auto-approves every tool before canUseTool, so it has NO permission gate (consent=%v)",
+		subject, mode, consented)
+}
+
 // ValidPermissionMode reports whether s is a member of the PermissionMode
 // enum.
 func ValidPermissionMode(s string) bool {

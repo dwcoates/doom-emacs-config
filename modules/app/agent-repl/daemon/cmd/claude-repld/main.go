@@ -156,7 +156,9 @@ func main() {
 		widgetAssets   = flag.String("widget-assets", envStr("AGENT_REPL_WIDGET_ASSETS", ""), "optional directory of embeddable-widget assets (e.g. a chess-widget dist) to serve at /widget-assets/; empty = capability off")
 		remediationDir = flag.String("remediation-dir", "", "checkout the \"session gone\" analyst diagnoses and opens a resilience workspace against (empty = remediation disabled)")
 		remediationPM  = flag.String("remediation-permission-mode", "", "--permission-mode for the \"session gone\" analyst (empty = the CLI default, under which every headless tool call is auto-denied)")
-		accountsFlag   = flag.String("accounts", "", "canonical account roster as comma-separated label=config-dir pairs (empty dir = the CLI's default root), e.g. \"personal=,work=/home/u/.claude-chesscom\"; empty = account routes disabled")
+		//nolint:lll // the consent's whole job is to state what it consents to.
+		remediationUngated = flag.Bool("allow-ungated-remediation", false, "consent to running the \"session gone\" analyst with NO permission gate; required when -remediation-permission-mode is ungated (bypassPermissions), because that analyst then approves its own tool calls against -remediation-dir unattended. Without it such a config REFUSES to boot rather than running ungated by default")
+		accountsFlag       = flag.String("accounts", "", "canonical account roster as comma-separated label=config-dir pairs (empty dir = the CLI's default root), e.g. \"personal=,work=/home/u/.claude-chesscom\"; empty = account routes disabled")
 	)
 	flag.Parse()
 
@@ -192,6 +194,7 @@ func main() {
 			Bin:            *claudeBin,
 			Dir:            *remediationDir,
 			PermissionMode: *remediationPM,
+			AllowUngated:   *remediationUngated,
 			Start:          startAnalyst,
 			Logf:           log.Printf,
 		}, bootedAt)

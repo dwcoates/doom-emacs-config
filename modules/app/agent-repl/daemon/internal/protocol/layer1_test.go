@@ -182,6 +182,34 @@ func TestUngatedPermissionMode(t *testing.T) {
 	}
 }
 
+func TestUngatedNoteAnnouncesTheAbsentGate(t *testing.T) {
+	// Arrange + Act
+	note := UngatedNote("this session", "bypassPermissions", true)
+	// Assert — the record must name the subject, the mode, and the absence.
+	for _, want := range []string{"UNGATED", "this session", "bypassPermissions", "NO permission gate"} {
+		if !strings.Contains(note, want) {
+			t.Fatalf("note %q omits %q", note, want)
+		}
+	}
+}
+
+func TestUngatedNoteRecordsTheConsentThatAdmittedIt(t *testing.T) {
+	// Arrange + Act — an ungated launch with NO consent is the interesting
+	// record, so the flag rides in the note either way.
+	note := UngatedNote("the remediation analyst", "bypassPermissions", false)
+	// Assert
+	if !strings.Contains(note, "consent=false") {
+		t.Fatalf("note %q omits the consent", note)
+	}
+}
+
+func TestUngatedNoteIsSilentForAGatedMode(t *testing.T) {
+	// Arrange + Act + Assert — a gated launch pays no log noise.
+	if got := UngatedNote("this session", "acceptEdits", false); got != "" {
+		t.Fatalf("UngatedNote(acceptEdits) = %q, want \"\"", got)
+	}
+}
+
 func TestDecodeL1EventModels(t *testing.T) {
 	// Arrange
 	line := `{"type":"models","session_id":"s1","models":[{"value":"opus","displayName":"Opus 4.5","description":"smartest"}]}`
