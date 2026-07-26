@@ -166,10 +166,10 @@ dead session."
                   :label)
                  "⛔")))
 
-(ert-deftest agent-repl-test-tab-spec-idle-async-is-amber ()
+(ert-deftest agent-repl-test-tab-spec-idle-async-is-yellow ()
   ":idle-async resolves to the amber background so an idle-but-working tab
 reads distinctly from :idle orange and :thinking red."
-  (should (equal agent-repl--color-idle-async-amber
+  (should (equal agent-repl--color-idle-async-yellow
                  (plist-get (agent-repl--tab-spec :idle-async nil) :bg))))
 
 ;;;; ---- Tests: ws-display-state suppresses all coloring when panels closed ----
@@ -237,9 +237,9 @@ reads distinctly from :idle orange and :thinking red."
       (should-not (agent-repl--ws-display-state "ws1")))))
 
 (ert-deftest agent-repl-test-display-state-stop-failed-panels-closed-renders-nil ()
-  ":stop-failed with panels closed suppresses the magenta ⚠ badge."
+  ":vendor-blocked with panels closed suppresses the purple ⛔ badge."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-agent-state "ws1" :stop-failed)
+    (agent-repl--ws-set-agent-state "ws1" :vendor-blocked)
     (cl-letf (((symbol-function 'agent-repl--ws-agent-open-p)
                (lambda (_ws) nil)))
       (should-not (agent-repl--ws-display-state "ws1")))))
@@ -488,7 +488,7 @@ workspace takes its index rather than leaving a gap."
       (let ((result (agent-repl--tabline-advice '("test-ws"))))
         (should (string-match-p "1❌" result))))))
 
-(ert-deftest agent-repl-test-tabline-merged-label ()
+(ert-deftest agent-repl-test-tabline-merged-label-removed ()
   "Tabline shows index and 🔀 for a merged workspace (bracket-only,
 panels closed) — :merged uses the same palette `:label' mechanism as
 :dead but emits the merge glyph instead."
@@ -498,7 +498,7 @@ panels closed) — :merged uses the same palette `:label' mechanism as
               ((symbol-function '+workspace-list-names) (lambda () '("test-ws")))
               ((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) nil)))
       (let ((result (agent-repl--tabline-advice '("test-ws"))))
-        (should (string-match-p "1🔀" result))))))
+        (should-not (string-match-p "🔀" result))))))
 
 (ert-deftest agent-repl-test-tabline-done-face ()
   "A background tab with :done should use `agent-repl-tab-done' face (panels visible)."
@@ -613,14 +613,14 @@ even when the full-tab background is suppressed."
       (let ((result (agent-repl--tabline-advice '("current-ws" "bg-ws"))))
         (should (string-match-p "\\[2❌\\]" result))))))
 
-(ert-deftest agent-repl-test-tabline-panels-closed-stop-failed-bracket-keeps-glyph ()
-  "Panels closed for :stop-failed — bracket label keeps the ⚠ glyph."
+(ert-deftest agent-repl-test-tabline-panels-closed-vendor-blocked-bracket-keeps-glyph ()
+  "Panels closed for :vendor-blocked — bracket label keeps the ⛔ glyph."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "bg-ws" :pushed-render-state :stop-failed)
+    (agent-repl--ws-put "bg-ws" :pushed-render-state :vendor-blocked)
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
               ((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) nil)))
       (let ((result (agent-repl--tabline-advice '("current-ws" "bg-ws"))))
-        (should (string-match-p "\\[2⚠\\]" result))))))
+        (should (string-match-p "\\[2⛔\\]" result))))))
 
 (ert-deftest agent-repl-test-tabline-panels-closed-thinking-bracket-stays-plain ()
   "Panels closed for :thinking — bracket label has no glyph
@@ -837,7 +837,7 @@ even when the full-tab background is suppressed."
   (agent-repl-test--with-clean-state
     (let ((proc (start-process "sentinel-clean" nil "true")))
       (while (process-live-p proc) (accept-process-output proc 0.1))
-      (cl-letf (((symbol-function 'agent-repl--update-ws-state) #'ignore))
+      (progn
         (agent-repl--git-diff-sentinel "ws1" proc "finished\n")
         (should (eq (agent-repl--ws-get "ws1" :git-clean) 'clean))))))
 
@@ -846,7 +846,7 @@ even when the full-tab background is suppressed."
   (agent-repl-test--with-clean-state
     (let ((proc (start-process "sentinel-dirty" nil "false")))
       (while (process-live-p proc) (accept-process-output proc 0.1))
-      (cl-letf (((symbol-function 'agent-repl--update-ws-state) #'ignore))
+      (progn
         (agent-repl--git-diff-sentinel "ws1" proc "finished\n")
         (should (eq (agent-repl--ws-get "ws1" :git-clean) 'dirty))))))
 
@@ -856,32 +856,29 @@ even when the full-tab background is suppressed."
     (let ((proc (start-process "sentinel-clear" nil "true")))
       (while (process-live-p proc) (accept-process-output proc 0.1))
       (agent-repl--ws-put "ws1" :git-proc proc)
-      (cl-letf (((symbol-function 'agent-repl--update-ws-state) #'ignore))
+      (progn
         (agent-repl--git-diff-sentinel "ws1" proc "finished\n")
         (should-not (agent-repl--ws-get "ws1" :git-proc))))))
 
-(ert-deftest agent-repl-test-git-diff-sentinel-calls-update-ws-state ()
-  "git-diff-sentinel should call update-ws-state after completion."
+(ert-deftest agent-repl-test-git-diff-sentinel-drives-no-state-transition ()
+  "git-diff-sentinel caches cleanliness and changes no state.
+Worktree cleanliness was only ever an input to the removed decay."
   (agent-repl-test--with-clean-state
     (let ((proc (start-process "sentinel-update" nil "true"))
           (called-with nil))
       (while (process-live-p proc) (accept-process-output proc 0.1))
-      (cl-letf (((symbol-function 'agent-repl--update-ws-state)
-                 (lambda (ws) (setq called-with ws))))
-        (agent-repl--git-diff-sentinel "ws1" proc "finished\n")
-        (should (equal called-with "ws1"))))))
+      (ignore called-with)
+      (agent-repl--git-diff-sentinel "ws1" proc "finished\n")
+      (should (eq (agent-repl--ws-get "ws1" :git-clean) 'clean)))))
 
 (ert-deftest agent-repl-test-git-diff-sentinel-noop-when-live ()
   "git-diff-sentinel should be a no-op when the process is still live."
   (agent-repl-test--with-clean-state
-    (let ((proc (start-process "sentinel-live" nil "sleep" "60"))
-          (update-called nil))
+    (let ((proc (start-process "sentinel-live" nil "sleep" "60")))
       (unwind-protect
-          (cl-letf (((symbol-function 'agent-repl--update-ws-state)
-                     (lambda (_ws) (setq update-called t))))
+          (progn
             (agent-repl--git-diff-sentinel "ws1" proc "running\n")
-            (should-not (agent-repl--ws-get "ws1" :git-clean))
-            (should-not update-called))
+            (should-not (agent-repl--ws-get "ws1" :git-clean)))
         (delete-process proc)))))
 
 ;;;; ---- Tests: async-refresh-git-status ----
@@ -962,10 +959,10 @@ selected tab dims to the normal selected face like other states."
     (should (equal (plist-get spec :bracket-bg) "#cc3333"))
     (should (equal (plist-get spec :bracket-fg) "white"))))
 
-(ert-deftest agent-repl-test-tab-spec-selected-idle-bracket-bg ()
-  "Selected :idle bracket-bg should be the idle orange color."
-  (let ((spec (agent-repl--tab-spec :idle t)))
-    (should (equal (plist-get spec :bracket-bg) "#d97706"))
+(ert-deftest agent-repl-test-tab-spec-selected-ready-bracket-bg ()
+  "Selected :ready bracket-bg is the green every ready state wears."
+  (let ((spec (agent-repl--tab-spec :ready t)))
+    (should (equal (plist-get spec :bracket-bg) agent-repl--color-done-green))
     (should (equal (plist-get spec :bracket-fg) "white"))))
 
 (ert-deftest agent-repl-test-tab-spec-selected-permission-bracket-bg ()
@@ -1730,105 +1727,33 @@ native-comp."
       (should (agent-repl--ws-agent-open-p "bg-ws"))
       (should (equal wconf-called "bg-ws")))))
 
-;;;; ---- Tests: update-ws-state (state machine) ----
+;;;; ---- Tests: the removed :done->:idle decay ----
+;;
+;; `agent-repl--update-ws-state' and the `:done-acked' / `:done-acked-at'
+;; viewed-bookkeeping it read are GONE.  The decay moved a workspace off the
+;; green "ready for review" color once the user had looked at it, which made
+;; sense while green and orange were two different claims.  They are not:
+;; `:done', `:ready' and `:idle' are ALL green, so the decay changed the
+;; color without changing anything true.
 
-(ert-deftest agent-repl-test-update-ws-state-thinking-unchanged ()
-  ":thinking state should remain unchanged regardless of dirty value."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-set "ws1" :thinking)
-    (cl-letf (((symbol-function 'agent-repl--workspace-clean-p) (lambda (_ws) nil)))
-      (agent-repl--update-ws-state "ws1")
-      (should (eq (agent-repl--ws-state "ws1") :thinking)))))
+(ert-deftest agent-repl-test-decay-function-is-gone ()
+  "The :done->:idle decay entrypoint no longer exists."
+  (should-not (fboundp 'agent-repl--update-ws-state)))
 
-(ert-deftest agent-repl-test-update-ws-state-done-clean-acked-dwell-elapsed-to-idle ()
-  ":done + clean + acked + dwell elapsed → :idle (user has dwelled long enough)."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-agent-state "ws1" :done)
-    (agent-repl--ws-put "ws1" :done-acked t)
-    ;; Focus started well in the past so dwell exceeds delay.
-    (agent-repl--ws-put "ws1" :done-acked-at
-                         (- (float-time) (+ agent-repl-done-idle-delay 1)))
-    (agent-repl--ws-put "ws1" :git-clean 'clean)
-    (agent-repl--update-ws-state "ws1")
-    (should (eq (agent-repl--ws-agent-state "ws1") :idle))
-    ;; Both ack flags clear so a future :done cycle starts unacknowledged.
-    (should (null (agent-repl--ws-get "ws1" :done-acked)))
-    (should (null (agent-repl--ws-get "ws1" :done-acked-at)))))
+(ert-deftest agent-repl-test-done-idle-delay-custom-is-gone ()
+  "The decay's dwell knob went with the decay."
+  (should-not (boundp 'agent-repl-done-idle-delay)))
 
-(ert-deftest agent-repl-test-update-ws-state-done-clean-acked-dwell-not-elapsed-stays-done ()
-  ":done + clean + acked + dwell NOT elapsed stays :done — user just arrived."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-agent-state "ws1" :done)
-    (agent-repl--ws-put "ws1" :done-acked t)
-    ;; Focus started right now — dwell is essentially zero.
-    (agent-repl--ws-put "ws1" :done-acked-at (float-time))
-    (agent-repl--ws-put "ws1" :git-clean 'clean)
-    (agent-repl--update-ws-state "ws1")
-    (should (eq (agent-repl--ws-agent-state "ws1") :done))
-    ;; Timestamp preserved so the countdown continues on the next tick.
-    (should (agent-repl--ws-get "ws1" :done-acked-at))))
+(ert-deftest agent-repl-test-orange-is-gone ()
+  "The orange that used to mean :idle is gone from every constant.
+Orange claimed a state between working and ready that does not exist:
+an idle workspace IS ready."
+  (should-not (boundp 'agent-repl--color-idle-orange)))
 
-(ert-deftest agent-repl-test-update-ws-state-done-clean-not-acked-stays-done ()
-  ":done + clean + NOT acked stays :done — wait for user to view."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-agent-state "ws1" :done)
-    (agent-repl--ws-put "ws1" :done-acked nil)
-    (agent-repl--ws-put "ws1" :done-acked-at nil)
-    (agent-repl--ws-put "ws1" :git-clean 'clean)
-    (agent-repl--update-ws-state "ws1")
-    (should (eq (agent-repl--ws-agent-state "ws1") :done))))
-
-(ert-deftest agent-repl-test-update-ws-state-done-dirty-stays-done ()
-  ":done + dirty stays :done — waiting on user to stage/commit."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-agent-state "ws1" :done)
-    (agent-repl--ws-put "ws1" :done-acked t)
-    (agent-repl--ws-put "ws1" :done-acked-at
-                         (- (float-time) (+ agent-repl-done-idle-delay 1)))
-    (agent-repl--ws-put "ws1" :git-clean 'dirty)
-    (agent-repl--update-ws-state "ws1")
-    (should (eq (agent-repl--ws-agent-state "ws1") :done))))
-
-(ert-deftest agent-repl-test-update-ws-state-inactive-dirty ()
-  ":inactive + dirty should remain :inactive.
-:inactive is terminal — git status is irrelevant once the user has dismissed it."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-set "ws1" :inactive)
-    (cl-letf (((symbol-function 'agent-repl--workspace-clean-p) (lambda (_ws) nil)))
-      (agent-repl--update-ws-state "ws1")
-      (should (eq (agent-repl--ws-state "ws1") :inactive)))))
-
-(ert-deftest agent-repl-test-update-ws-state-inactive-clean ()
-  ":inactive + clean should remain :inactive."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-set "ws1" :inactive)
-    (cl-letf (((symbol-function 'agent-repl--workspace-clean-p) (lambda (_ws) t)))
-      (agent-repl--update-ws-state "ws1")
-      (should (eq (agent-repl--ws-state "ws1") :inactive)))))
-
-(ert-deftest agent-repl-test-update-ws-state-nil-dirty-stays-nil ()
-  "nil + dirty no longer transitions (dirty ≠ signal from the agent anymore).
-The old (nil . t) → :done inference was a footgun on pre-existing dirty
-trees; under the revised model only the Stop hook writes :done."
-  (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'agent-repl--workspace-clean-p) (lambda (_ws) nil)))
-      (agent-repl--update-ws-state "ws1")
-      (should-not (agent-repl--ws-agent-state "ws1")))))
-
-(ert-deftest agent-repl-test-update-ws-state-nil-clean ()
-  "nil + clean should remain nil."
-  (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'agent-repl--workspace-clean-p) (lambda (_ws) t)))
-      (agent-repl--update-ws-state "ws1")
-      (should-not (agent-repl--ws-state "ws1")))))
-
-(ert-deftest agent-repl-test-update-ws-state-permission-unchanged ()
-  ":permission state should remain unchanged regardless of dirty value."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-set "ws1" :permission)
-    (cl-letf (((symbol-function 'agent-repl--workspace-clean-p) (lambda (_ws) nil)))
-      (agent-repl--update-ws-state "ws1")
-      (should (eq (agent-repl--ws-state "ws1") :permission)))))
+(ert-deftest agent-repl-test-stop-failed-magenta-is-gone ()
+  "The magenta that used to mean :stop-failed is gone.
+It was a sixth vocabulary word for a condition purple already covers."
+  (should-not (boundp 'agent-repl--color-stop-failed-magenta)))
 
 ;;;; ---- Tests: update-all-workspace-states ----
 
@@ -1840,19 +1765,18 @@ trees; under the revised model only the Stop hook writes :done."
       (cl-letf (((symbol-function 'agent-repl--poll-workspace-notifications) #'ignore)
                 ;; sidebar.el's roster tick rides update-all too; out of scope here.
                 ((symbol-function 'agent-repl--sidebar-tick) #'ignore)
-                ((symbol-function 'agent-repl--update-ws-state)
+                ((symbol-function 'agent-repl--async-refresh-git-status)
                  (lambda (_ws) (setq update-called t))))
         (agent-repl--update-all-workspace-states)
         (should-not update-called)))))
 
 (ert-deftest agent-repl-test-update-all-running-agent ()
-  "update-all should call update-ws-state and async-refresh for ws with a running agent.
+  "update-all should call async-refresh for a ws with a running agent.
 Binds `agent-repl-state-git-tick-modulus' to 1 so every tick is a git tick;
 otherwise the mod-N gate would suppress `--async-refresh-git-status' on the
 first call (counter increments to 1, `(mod 1 5)' is non-zero)."
   (agent-repl-test--with-clean-state
-    (let ((updated-ws nil)
-          (refreshed-ws nil)
+    (let ((refreshed-ws nil)
           (agent-repl-state-git-tick-modulus 1))
       ;; Register ws1 in the hashmap so the iterator finds it
       (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
@@ -1860,13 +1784,10 @@ first call (counter increments to 1, `(mod 1 5)' is non-zero)."
                 ;; sidebar.el's roster tick rides update-all too; out of scope here.
                 ((symbol-function 'agent-repl--sidebar-tick) #'ignore)
                 ((symbol-function 'agent-repl--agent-running-p) (lambda (_ws) t))
-                ((symbol-function 'agent-repl--update-ws-state)
-                 (lambda (ws) (setq updated-ws ws)))
                 ((symbol-function 'agent-repl--async-refresh-git-status)
                  (lambda (ws) (setq refreshed-ws ws)))
                 ((symbol-function 'agent-repl--async-refresh-branch-merged) #'ignore))
         (agent-repl--update-all-workspace-states)
-        (should (equal updated-ws "ws1"))
         (should (equal refreshed-ws "ws1"))))))
 
 (ert-deftest agent-repl-test-update-all-excludes-projectless-placeholders ()
@@ -1922,25 +1843,26 @@ meaningless and the daemon owns death via session_dead_* sentinels."
       (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
       (agent-repl--ws-put "ws1" :frontend 'gui)
       (cl-letf (((symbol-function 'agent-repl--agent-running-p) (lambda (_ws) nil))
-                ((symbol-function 'agent-repl--update-ws-state) #'ignore)
                 ((symbol-function 'agent-repl--mark-dead)
                  (lambda (ws) (setq dead-ws ws))))
         (agent-repl--update-one-workspace-state "ws1" nil)
         (should-not dead-ws)))))
 
-(ert-deftest agent-repl-test-update-one-gui-runs-decay ()
-  "update-one-workspace-state still runs the :done->:idle decay for gui.
-`agent-repl--update-ws-state' is frontend-agnostic and must keep
-firing so gui tabs decay like vterm tabs."
+(ert-deftest agent-repl-test-update-one-gui-takes-the-alive-branch ()
+  "A gui workspace takes the alive branch even when agent-running-p is nil.
+Liveness for a gui workspace is the daemon's to report (a pushed DEAD
+WorkspaceState), so the poll never marks one dead — it only refreshes
+git for it."
   (agent-repl-test--with-clean-state
-    (let ((decayed-ws nil))
+    (let ((refreshed-ws nil))
       (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
       (agent-repl--ws-put "ws1" :frontend 'gui)
       (cl-letf (((symbol-function 'agent-repl--agent-running-p) (lambda (_ws) nil))
-                ((symbol-function 'agent-repl--update-ws-state)
-                 (lambda (ws) (setq decayed-ws ws))))
-        (agent-repl--update-one-workspace-state "ws1" nil)
-        (should (equal decayed-ws "ws1"))))))
+                ((symbol-function 'agent-repl--async-refresh-branch-merged) #'ignore)
+                ((symbol-function 'agent-repl--async-refresh-git-status)
+                 (lambda (ws) (setq refreshed-ws ws))))
+        (agent-repl--update-one-workspace-state "ws1" t)
+        (should (equal refreshed-ws "ws1"))))))
 
 (ert-deftest agent-repl-test-update-one-gui-preserves-sentinel-state ()
   "The poll must not clobber sentinel-driven agent-state on a gui workspace.
@@ -1951,7 +1873,7 @@ ever being reached, keeping :thinking intact and :repl-state un-dead."
     (agent-repl--ws-put "ws1" :frontend 'gui)
     (agent-repl--ws-set-agent-state "ws1" :thinking)
     (cl-letf (((symbol-function 'agent-repl--agent-running-p) (lambda (_ws) nil))
-              ((symbol-function 'agent-repl--update-ws-state) #'ignore))
+)
       (agent-repl--update-one-workspace-state "ws1" nil)
       (should (eq (agent-repl--ws-get "ws1" :agent-state) :thinking))
       (should-not (eq (agent-repl--ws-get "ws1" :repl-state) :dead)))))
@@ -2104,32 +2026,6 @@ Mocks the unguarded `-now' entrypoint; matches what production code calls."
         (agent-repl--on-frame-focus)
         (should-not update-called)))))
 
-;;;; ---- Tests: update-ws-state edge cases (status transitions .md) ----
-
-(ert-deftest agent-repl-test-update-ws-state-thinking-clean-unchanged ()
-  ":thinking + clean should remain unchanged (pcase wildcard catches both dirty values)."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-set "ws1" :thinking)
-    (cl-letf (((symbol-function 'agent-repl--workspace-clean-p) (lambda (_ws) t)))
-      (agent-repl--update-ws-state "ws1")
-      (should (eq (agent-repl--ws-state "ws1") :thinking)))))
-
-(ert-deftest agent-repl-test-update-ws-state-done-dirty-stays-done-explicit ()
-  ":done + dirty stays :done — dirty worktree blocks the :done→:idle decay."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-set-agent-state "ws1" :done)
-    (cl-letf (((symbol-function 'agent-repl--workspace-clean-p) (lambda (_ws) nil)))
-      (agent-repl--update-ws-state "ws1")
-      (should (eq (agent-repl--ws-agent-state "ws1") :done)))))
-
-(ert-deftest agent-repl-test-update-ws-state-permission-clean-unchanged ()
-  ":permission + clean should remain unchanged.
-:permission is never auto-cleared by the state machine regardless of dirty value."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-set "ws1" :permission)
-    (cl-letf (((symbol-function 'agent-repl--workspace-clean-p) (lambda (_ws) t)))
-      (agent-repl--update-ws-state "ws1")
-      (should (eq (agent-repl--ws-state "ws1") :permission)))))
 
 ;;;; ---- Tests: ws-clear-if-status cross-state edge cases ----
 
@@ -2171,7 +2067,7 @@ Mocks the unguarded `-now' entrypoint; matches what production code calls."
 ;;;; ---- Tests: update-all-workspace-states multi-workspace dispatch ----
 
 (ert-deftest agent-repl-test-update-all-multiple-workspaces-dispatch ()
-  "update-all should dispatch correctly per workspace: update running, clear dead.
+  "update-all should dispatch per workspace: refresh running, clear dead.
 Binds `agent-repl-state-git-tick-modulus' to 1 so git refreshes fire on the
 first tick.  Synchronous step chaining comes from `--with-clean-state' setting
 `agent-repl--update-spread-sync' to `t', so both workspaces are processed
@@ -2183,8 +2079,7 @@ timers that would never fire under ERT batch mode.
 `--update-one-workspace-state' would take the running path regardless
 of the stubbed `agent-repl--agent-running-p' answer below."
   (agent-repl-test--with-clean-state
-    (let ((updated nil)
-          (refreshed nil)
+    (let ((refreshed nil)
           (cleared nil)
           (agent-repl-state-git-tick-modulus 1))
       ;; Register both workspaces in the hashmap
@@ -2196,8 +2091,6 @@ of the stubbed `agent-repl--agent-running-p' answer below."
                 ((symbol-function 'agent-repl--sidebar-tick) #'ignore)
                 ((symbol-function 'agent-repl--agent-running-p)
                  (lambda (ws) (equal ws "running-ws")))
-                ((symbol-function 'agent-repl--update-ws-state)
-                 (lambda (ws) (push ws updated)))
                 ((symbol-function 'agent-repl--async-refresh-git-status)
                  (lambda (ws) (push ws refreshed)))
                 ((symbol-function 'agent-repl--async-refresh-branch-merged) #'ignore)
@@ -2205,12 +2098,10 @@ of the stubbed `agent-repl--agent-running-p' answer below."
                  (lambda (ws) (push ws cleared))))
         (agent-repl--update-all-workspace-states)
         ;; running-ws should get update + refresh
-        (should (member "running-ws" updated))
         (should (member "running-ws" refreshed))
         (should-not (member "running-ws" cleared))
         ;; dead-ws should get clear, not update
         (should (member "dead-ws" cleared))
-        (should-not (member "dead-ws" updated))
         (should-not (member "dead-ws" refreshed))))))
 
 ;;;; ---- Tests: mod-N git tick gate ----
@@ -2218,26 +2109,21 @@ of the stubbed `agent-repl--agent-running-p' answer below."
 (ert-deftest agent-repl-test-update-all-git-gate-skips-non-modulus-tick ()
   "Git refreshes do NOT fire on ticks where `(mod counter modulus) /= 0'.
 With modulus=5 and counter starting at 0, the first tick post-increment is
-counter=1, `(mod 1 5)' = 1, so the gate is closed.  update-ws-state still runs
-for the running ws because the cheap state-machine work is gate-independent."
+counter=1, `(mod 1 5)' = 1, so the gate is closed."
   (agent-repl-test--with-clean-state
     (let ((git-refreshed nil)
           (merge-refreshed nil)
-          (state-updated nil)
           (agent-repl-state-git-tick-modulus 5))
       (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
       (cl-letf (((symbol-function 'agent-repl--poll-workspace-notifications) #'ignore)
                 ;; sidebar.el's roster tick rides update-all too; out of scope here.
                 ((symbol-function 'agent-repl--sidebar-tick) #'ignore)
                 ((symbol-function 'agent-repl--agent-running-p) (lambda (_ws) t))
-                ((symbol-function 'agent-repl--update-ws-state)
-                 (lambda (_ws) (setq state-updated t)))
                 ((symbol-function 'agent-repl--async-refresh-git-status)
                  (lambda (_ws) (setq git-refreshed t)))
                 ((symbol-function 'agent-repl--async-refresh-branch-merged)
                  (lambda (_ws) (setq merge-refreshed t))))
         (agent-repl--update-all-workspace-states)
-        (should state-updated)
         (should-not git-refreshed)
         (should-not merge-refreshed)))))
 
@@ -2255,7 +2141,6 @@ lands on a multiple of modulus, opening the gate."
                 ;; sidebar.el's roster tick rides update-all too; out of scope here.
                 ((symbol-function 'agent-repl--sidebar-tick) #'ignore)
                 ((symbol-function 'agent-repl--agent-running-p) (lambda (_ws) t))
-                ((symbol-function 'agent-repl--update-ws-state) #'ignore)
                 ((symbol-function 'agent-repl--async-refresh-git-status)
                  (lambda (_ws) (setq git-refreshed t)))
                 ((symbol-function 'agent-repl--async-refresh-branch-merged)
@@ -2462,14 +2347,11 @@ The cheap state-machine work still runs."
           (state-fired nil))
       (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
       (cl-letf (((symbol-function 'agent-repl--agent-running-p) (lambda (_ws) t))
-                ((symbol-function 'agent-repl--update-ws-state)
-                 (lambda (_ws) (setq state-fired t)))
                 ((symbol-function 'agent-repl--async-refresh-git-status)
                  (lambda (_ws) (setq git-fired t)))
                 ((symbol-function 'agent-repl--async-refresh-branch-merged)
                  (lambda (_ws) (setq merge-fired t))))
         (agent-repl--update-one-workspace-state "ws1" nil)
-        (should state-fired)
         (should-not git-fired)
         (should-not merge-fired)))))
 
@@ -2480,7 +2362,6 @@ The cheap state-machine work still runs."
           (merge-fired nil))
       (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
       (cl-letf (((symbol-function 'agent-repl--agent-running-p) (lambda (_ws) t))
-                ((symbol-function 'agent-repl--update-ws-state) #'ignore)
                 ((symbol-function 'agent-repl--async-refresh-git-status)
                  (lambda (_ws) (setq git-fired t)))
                 ((symbol-function 'agent-repl--async-refresh-branch-merged)
@@ -2491,25 +2372,21 @@ The cheap state-machine work still runs."
 
 (ert-deftest agent-repl-test-update-one-ws-dead-agent-skips-state-update ()
   "When a non-gui workspace's agent is not running, `--update-one-workspace-state'
-calls `--mark-dead' instead of `--update-ws-state'.  Merge refresh still
+calls `--mark-dead' and skips the git refresh.  Merge refresh still
 fires when DO-GIT-P is on because merged-ness is independent of agent
 liveness — a dead workspace can still have a merge-completed parent."
   (agent-repl-test--with-clean-state
     (let ((dead-called nil)
-          (state-called nil)
           (merge-called nil))
       (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
       (agent-repl--ws-put "ws1" :frontend 'not-gui)
       (cl-letf (((symbol-function 'agent-repl--agent-running-p) (lambda (_ws) nil))
-                ((symbol-function 'agent-repl--update-ws-state)
-                 (lambda (_ws) (setq state-called t)))
                 ((symbol-function 'agent-repl--mark-dead)
                  (lambda (_ws) (setq dead-called t)))
                 ((symbol-function 'agent-repl--async-refresh-branch-merged)
                  (lambda (_ws) (setq merge-called t))))
         (agent-repl--update-one-workspace-state "ws1" t)
         (should dead-called)
-        (should-not state-called)
         (should merge-called)))))
 
 ;;;; ---- Tests: priority-image (moved from core.el) ----
@@ -2647,33 +2524,33 @@ liveness — a dead workspace can still have a merge-completed parent."
 ;; coverage.  Only the display-state (panel-gated) wrapper assertion
 ;; remains here.
 
-(ert-deftest agent-repl-test-display-state-stop-failed ()
-  "ws-display-state returns the pushed :stop-failed state when panels visible."
+(ert-deftest agent-repl-test-display-state-vendor-blocked ()
+  "ws-display-state returns the pushed :vendor-blocked state when visible."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :pushed-render-state :stop-failed)
+    (agent-repl--ws-put "ws1" :pushed-render-state :vendor-blocked)
     (cl-letf (((symbol-function 'agent-repl--ws-agent-open-p)
                (lambda (_ws) t)))
-      (should (eq :stop-failed (agent-repl--ws-display-state "ws1"))))))
+      (should (eq :vendor-blocked (agent-repl--ws-display-state "ws1"))))))
 
 ;;;; ---- Tests: :stop-failed palette resolution ----
 
-(ert-deftest agent-repl-test-tab-spec-stop-failed-unselected ()
-  "tab-spec for :stop-failed unselected returns the magenta plist."
-  (let ((spec (agent-repl--tab-spec :stop-failed nil)))
-    (should (equal (plist-get spec :bg) agent-repl--color-stop-failed-magenta))
+(ert-deftest agent-repl-test-tab-spec-vendor-blocked-unselected ()
+  "tab-spec for :vendor-blocked unselected returns the purple plist."
+  (let ((spec (agent-repl--tab-spec :vendor-blocked nil)))
+    (should (equal (plist-get spec :bg) agent-repl--color-vendor-blocked-purple))
     (should (equal (plist-get spec :fg) agent-repl--color-light))))
 
-(ert-deftest agent-repl-test-tab-spec-stop-failed-selected ()
-  "tab-spec for :stop-failed selected returns selected-bg with stop-failed bracket-bg."
-  (let ((spec (agent-repl--tab-spec :stop-failed t)))
+(ert-deftest agent-repl-test-tab-spec-vendor-blocked-selected ()
+  "tab-spec for :vendor-blocked selected keeps the purple on the bracket."
+  (let ((spec (agent-repl--tab-spec :vendor-blocked t)))
     (should (equal (plist-get spec :bg) agent-repl--color-selected-bg))
     (should (equal (plist-get spec :bracket-bg)
-                   agent-repl--color-stop-failed-magenta))))
+                   agent-repl--color-vendor-blocked-purple))))
 
-(ert-deftest agent-repl-test-tab-label-stop-failed-includes-warn-glyph ()
-  "tab-label for :stop-failed appends the ⚠ glyph after the index."
-  (let ((label (agent-repl--tab-label :stop-failed 3)))
-    (should (string= label (concat "3" agent-repl--label-stop-failed)))))
+(ert-deftest agent-repl-test-tab-label-vendor-blocked-includes-blocked-glyph ()
+  "tab-label for :vendor-blocked appends the ⛔ glyph after the index."
+  (let ((label (agent-repl--tab-label :vendor-blocked 3)))
+    (should (string= label (concat "3" agent-repl--label-vendor-blocked)))))
 
 ;;;; ---- Tests: hide-mode tabline (no filtering — tab-bar reflects raw list) ----
 

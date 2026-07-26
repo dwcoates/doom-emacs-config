@@ -88,7 +88,15 @@ failure is surfaced, not hidden)."
     ("RENDER_STATE_THINKING"       . :thinking)
     ("RENDER_STATE_PERMISSION"     . :permission)
     ("RENDER_STATE_DONE"           . :done)
-    ("RENDER_STATE_STOP_FAILED"    . :stop-failed)
+    ("RENDER_STATE_READY"          . :ready)
+    ("RENDER_STATE_VENDOR_BLOCKED" . :vendor-blocked)
+    ;; DEPRECATED upstream and no longer resolved by the SSM, but still
+    ;; mapped: an old daemon binary, or a state log written before the
+    ;; remap, can still push it, and erroring on a state we know how to
+    ;; render would be worse than rendering it.  It resolves to the same
+    ;; purple `:vendor-blocked' means, because that is what it always was —
+    ;; a turn that ended on something only a human or the vendor can fix.
+    ("RENDER_STATE_STOP_FAILED"    . :vendor-blocked)
     ("RENDER_STATE_MERGING"        . :merging)
     ("RENDER_STATE_MERGE_QUEUED"   . :merge-queued)
     ("RENDER_STATE_MERGE_CONFLICT" . :merge-conflict)

@@ -74,7 +74,7 @@ recognized repo or the repo has no configured default."
 (defcustom agent-repl-state-git-tick-modulus 5
   "Per-workspace git refreshes fire once every N timer ticks.
 The 1Hz `agent-repl--update-all-workspace-states' timer drives both
-the cheap state-machine work (agent-running-p, update-ws-state,
+the cheap state-machine work (agent-running-p,
 mark-dead) and the expensive git work
 \(`agent-repl--async-refresh-git-status' and
 `agent-repl--async-refresh-branch-merged').  Cheap work runs every
@@ -123,15 +123,17 @@ new chain can start.  Belt-and-braces against permanent wedging."
   :type 'number
   :group 'agent-repl)
 
-(defcustom agent-repl-done-idle-delay 1
-  "Seconds the user must focus a :done workspace before it decays to :idle.
-The countdown starts when the workspace becomes the active workspace
-\(or when :done arrives while it is already active).  Switching away
-from a :done workspace before the delay elapses clears the timestamp,
-so a quick transit through the tab does not silently strip the green
-\"ready for review\" indicator — the user must return and dwell again."
-  :type 'number
-  :group 'agent-repl)
+;; There is no `agent-repl-done-idle-delay' any more, and no :done->:idle
+;; decay for it to pace.  The decay moved a workspace off the green "ready
+;; for review" color once the user had looked at it, which mattered while
+;; green and orange were two different claims.  They are not: `:done',
+;; `:ready' and `:idle' are ALL green — the route works and the agent is
+;; available — so decaying one into another changed the color without
+;; changing anything true.  The `:done-acked' / `:done-acked-at'
+;; viewed-bookkeeping that drove it went with it.
+;;
+;; It was already vestigial for the tab: the tab reads the SSM-pushed
+;; render state, while the decay mutated only the local `:agent-state'.
 
 (defvar agent-repl--priority-images nil
   "Alist mapping priority strings (\"p05\" \"p1\" \"p2\" \"p3\") to Emacs image specs.")
@@ -330,10 +332,9 @@ STATE is one of:
                now-sessionless workspace dead.
   :dead      — agent session gone
 
-The orthogonal `:done-acked' boolean tracks whether the user has seen
-the current `:agent-state :done' result.  It used to be the
-`:repl-state :viewed' value but was lifted out — viewing isn't a
-lifecycle phase, it's an acknowledgment flag that overlays :done.
+There is no viewed-acknowledgment axis any more: `:done', `:ready' and
+`:idle' are all READY, so tracking whether the user had looked at a
+`:done' only ever changed the color without changing anything true.
 
 Persists the new value to disk via `agent-repl--state-save' when STATE
 is `:active', `:inactive', or `:hidden' so panel-visibility (and the
@@ -440,8 +441,11 @@ completed before consulting this predicate."
 (defun agent-repl--git-diff-sentinel (ws proc _event)
   "Process sentinel for `git diff --quiet' in workspace WS.
 When PROC finishes, records `:git-clean' as `clean' or `dirty' and
-triggers a state update via `agent-repl--update-ws-state'.
-_EVENT is ignored."
+_EVENT is ignored.
+
+The result is cached for callers that want to know whether a workspace
+has uncommitted work; it drives no state transition, since worktree
+cleanliness was only ever an input to the removed :done->:idle decay."
   (unless (process-live-p proc)
     (let* ((exit-code (process-exit-status proc))
            (clean-result (cond
@@ -454,14 +458,12 @@ _EVENT is ignored."
       (agent-repl--log-verbose ws "git-diff-sentinel: ws=%s exit-code=%s result=%s" ws exit-code clean-result)
       (when clean-result
         (agent-repl--ws-put ws :git-clean clean-result))
-      (agent-repl--ws-put ws :git-proc nil)
-      (agent-repl--update-ws-state ws))))
+      (agent-repl--ws-put ws :git-proc nil))))
 
 (defun agent-repl--async-refresh-git-status (ws)
   "Asynchronously refresh the git cleanliness cache for workspace WS.
 Starts `git diff --quiet' in WS's directory.  On exit, sets `:git-clean'
 to `clean' or `dirty' in the workspace plist and calls
-`agent-repl--update-ws-state' to apply any resulting state transition.
 A no-op if a check is already in progress for WS."
   (when-let ((dir (agent-repl--ws-dir ws)))
     (if (agent-repl--git-check-in-progress-p ws)
@@ -506,35 +508,51 @@ A no-op if a check is already in progress for WS."
 ;; --- Named color / style constants --- ;;
 
 (defconst agent-repl--color-init-blue        "#3366cc"
-  "Blue used for the :init agent-state tab background.")
+  "BLUE: the route Emacs→daemon→shim→SDK is compromised on OUR side.
+Covers every way green's promise cannot be kept — no session yet, the
+shim dead or unspawned, bring-up in progress, a store outage, a
+backfill that failed, and a webview that never attested painting the
+history.
+
+It is deliberately ONE color for all of them.  The distinctions matter
+to whoever debugs it, not to the user reading a tab: every one of them
+means the same thing to them, which is that this workspace cannot be
+relied on right now.  The badges (❌ dead, 🚫 start-failed) carry the
+distinction where it is worth having.")
 
 (defconst agent-repl--color-thinking-red     "#cc3333"
-  "Red used for the :thinking agent-state tab background.")
+  "RED: a turn is in flight.
+A failed interrupt is NOT a state here.  A stop that did not land means
+the turn is still running, so the workspace stays red and the failure
+surfaces in the feed — the old `:stop-failed' magenta said \"stopped\"
+about a session that was still working.")
 
 (defconst agent-repl--color-done-green       "#1a7a1a"
-  "Dark green used for :done and :permission tab backgrounds.")
+  "GREEN: ready.
+The route is proven usable WITHOUT requiring a first message, the
+backfill has settled, and a frontend has attested painting the history.
+Covers `:ready', `:idle', `:done', and `:permission' alike — a pending
+permission means the agent is ready for the user to view the response
+and answer it.")
 
-(defconst agent-repl--color-idle-orange      "#d97706"
-  "Orange used for the :idle agent-state tab background.
-:idle means \"session alive, awaiting prompt or decayed from :done\" — an
-explicit palette entry (not a fallback) so idle workspaces are
-visually distinct from states that have no palette mapping.")
+(defconst agent-repl--color-idle-async-yellow "#f59e0b"
+  "YELLOW: no foreground turn, but live detached work.
+The one state between \"a turn is running\" and \"nothing is running\".
+Shares its value with the webapp's `--async' so the async bubble border
+and this tab are literally the same color rather than two that nearly
+match.")
 
-(defconst agent-repl--color-idle-async-amber "#f59e0b"
-  "Amber used for the :idle-async agent-state tab background.
-:idle-async means \"session idle/available, but detached background work
-is still running\" — mirrors the webapp's amber async bubble border
-\(--async #f59e0b).  Distinct from :idle orange (available, nothing
-running) and :thinking red (a turn actively in flight).")
+(defconst agent-repl--color-vendor-blocked-purple "#a21caf"
+  "PURPLE: blocked on the VENDOR or the ACCOUNT.
+Auth needed, usage limit reached, a persistent 4xx/5xx, or any other
+abnormal turn-CONCLUDING error — a user-set max-turns/max-budget stop, a
+model refusal, an execution error.  Purple means blocked until a human
+or the vendor acts, so an in-flight retry is NOT purple: retrying is the
+agent working, which is red.
 
-(defconst agent-repl--color-stop-failed-magenta "#8b1f8b"
-  "Magenta used for the :stop-failed agent-state tab background.
-:stop-failed means the StopFailure hook fired — the agent's turn ended
-due to an API error (rate limit, auth failure, billing, etc.).  The
-agent session is still alive and re-promptable; :dead (the plain ❌
-badge) is reserved for agent session death.  A distinct color signals
-\"needs your attention, but not the same kind of attention as :thinking
-or :dead\".")
+A magenta-leaning purple, deliberately clear of any violet a merge or a
+retry wears: those are the system working, and confusing one with a
+session that has stopped is the misread this color exists to prevent.")
 
 (defconst agent-repl--color-done-green-bright "#2a8c2a"
   "Brighter green used for :done / :permission bracket-fg on selected
@@ -560,10 +578,12 @@ asking for a permission decision.")
   "Bracket label shown adjacent to the numeric index when the agent
 session has died.")
 
-(defconst agent-repl--label-stop-failed      "⚠"
-  "Bracket label shown adjacent to the numeric index when the
-StopFailure hook fired (turn ended on an API error, but the agent
-session is still alive and re-promptable).")
+(defconst agent-repl--label-vendor-blocked   "⛔"
+  "Bracket label shown adjacent to the numeric index when the session is
+blocked on the vendor or the account (auth, usage limit, a persistent
+API failure, or an abnormal turn conclusion).  Pairs with the purple
+background: the color says \"stopped\", the glyph says \"and only a human
+or the vendor restarts it\".")
 
 (defconst agent-repl--label-start-failed     "🚫"
   "Bracket label shown adjacent to the numeric index when starting
@@ -671,64 +691,107 @@ Distributed evenly across `agent-repl-flash-count' on/off cycles."
                   :bracket-fg ,agent-repl--color-light
                   :weight ,agent-repl--tab-weight))
     (:idle
-     :face       agent-repl-tab-idle
-     :unselected (:bg ,agent-repl--color-idle-orange
+     :face       agent-repl-tab-ready
+     :unselected (:bg ,agent-repl--color-done-green
                   :fg ,agent-repl--color-dark
                   :bracket-fg ,agent-repl--color-default-bracket
                   :weight ,agent-repl--tab-weight)
      :selected   (:bg ,agent-repl--color-selected-bg
                   :fg ,agent-repl--color-dark
-                  :bracket-bg ,agent-repl--color-idle-orange
+                  :bracket-bg ,agent-repl--color-done-green
+                  :bracket-fg ,agent-repl--color-light
+                  :weight ,agent-repl--tab-weight))
+    (:ready
+     :face       agent-repl-tab-ready
+     :unselected (:bg ,agent-repl--color-done-green
+                  :fg ,agent-repl--color-dark
+                  :bracket-fg ,agent-repl--color-default-bracket
+                  :weight ,agent-repl--tab-weight)
+     :selected   (:bg ,agent-repl--color-selected-bg
+                  :fg ,agent-repl--color-dark
+                  :bracket-bg ,agent-repl--color-done-green
                   :bracket-fg ,agent-repl--color-light
                   :weight ,agent-repl--tab-weight))
     (:idle-async
      :face       agent-repl-tab-idle-async
-     :unselected (:bg ,agent-repl--color-idle-async-amber
+     :unselected (:bg ,agent-repl--color-idle-async-yellow
                   :fg ,agent-repl--color-dark
                   :bracket-fg ,agent-repl--color-default-bracket
                   :weight ,agent-repl--tab-weight)
      :selected   (:bg ,agent-repl--color-selected-bg
                   :fg ,agent-repl--color-dark
-                  :bracket-bg ,agent-repl--color-idle-async-amber
+                  :bracket-bg ,agent-repl--color-idle-async-yellow
                   :bracket-fg ,agent-repl--color-light
                   :weight ,agent-repl--tab-weight))
-    (:stop-failed
-     :face       agent-repl-tab-stop-failed
-     :label      ,agent-repl--label-stop-failed
-     :unselected (:bg ,agent-repl--color-stop-failed-magenta
+    (:vendor-blocked
+     :face       agent-repl-tab-vendor-blocked
+     :label      ,agent-repl--label-vendor-blocked
+     :unselected (:bg ,agent-repl--color-vendor-blocked-purple
                   :fg ,agent-repl--color-light
                   :bracket-fg ,agent-repl--color-default-bracket
                   :weight ,agent-repl--tab-weight)
      :selected   (:bg ,agent-repl--color-selected-bg
                   :fg ,agent-repl--color-dark
-                  :bracket-bg ,agent-repl--color-stop-failed-magenta
+                  :bracket-bg ,agent-repl--color-vendor-blocked-purple
                   :bracket-fg ,agent-repl--color-light
                   :weight ,agent-repl--tab-weight))
+    ;; `:start-failed', `:dead' and `:degraded' are BLUE, not colors of
+    ;; their own: a shim that never came up, one that has gone away, and a
+    ;; store outage are the same compromised route.  They keep their own
+    ;; palette rows so their BADGES survive — the color says the route is
+    ;; broken, the badge says which way.
     (:start-failed
-     :face       agent-repl-tab-stop-failed
+     :face       agent-repl-tab-init
      :label      ,agent-repl--label-start-failed
-     :unselected (:bg ,agent-repl--color-stop-failed-magenta
+     :unselected (:bg ,agent-repl--color-init-blue
                   :fg ,agent-repl--color-light
                   :bracket-fg ,agent-repl--color-default-bracket
                   :weight ,agent-repl--tab-weight)
      :selected   (:bg ,agent-repl--color-selected-bg
                   :fg ,agent-repl--color-dark
-                  :bracket-bg ,agent-repl--color-stop-failed-magenta
+                  :bracket-bg ,agent-repl--color-init-blue
                   :bracket-fg ,agent-repl--color-light
                   :weight ,agent-repl--tab-weight))
     (:dead
-     :label      ,agent-repl--label-dead)
+     :face       agent-repl-tab-init
+     :label      ,agent-repl--label-dead
+     :unselected (:bg ,agent-repl--color-init-blue
+                  :fg ,agent-repl--color-light
+                  :bracket-fg ,agent-repl--color-default-bracket
+                  :weight ,agent-repl--tab-weight)
+     :selected   (:bg ,agent-repl--color-selected-bg
+                  :fg ,agent-repl--color-dark
+                  :bracket-bg ,agent-repl--color-init-blue
+                  :bracket-fg ,agent-repl--color-light
+                  :weight ,agent-repl--tab-weight))
+    (:degraded
+     :face       agent-repl-tab-init
+     :unselected (:bg ,agent-repl--color-init-blue
+                  :fg ,agent-repl--color-light
+                  :bracket-fg ,agent-repl--color-default-bracket
+                  :weight ,agent-repl--tab-weight)
+     :selected   (:bg ,agent-repl--color-selected-bg
+                  :fg ,agent-repl--color-dark
+                  :bracket-bg ,agent-repl--color-init-blue
+                  :bracket-fg ,agent-repl--color-light
+                  :weight ,agent-repl--tab-weight))
+    ;; The merge states carry badges and NO color, deliberately: the
+    ;; sidebar's spinning recycle glyph plus these badges already say
+    ;; everything the merge pipeline needs to, and giving them colors would
+    ;; put a sixth and seventh vocabulary beside the five.
     (:merge-conflict
      :label      ,agent-repl--label-merge-conflict)
     (:merge-failed
-     :label      ,agent-repl--label-merge-failed)
-    (:merged
-     :label      ,agent-repl--label-merged))
+     :label      ,agent-repl--label-merge-failed))
   "Per-state tab-appearance palette.
 Each entry fully describes both selected and unselected looks for a
 agent-state keyword via nested `:unselected' and `:selected' plists.
 `:repl-state :inactive' does not contribute to color (it is bookkeeping
-only).")
+only).
+
+`:merged' has NO entry: a merged workspace never reaches the tab-bar
+\(`agent-repl--filter-merged-names'), so it has no appearance to
+describe here.")
 
 (defun agent-repl--tab-spec (state selected)
   "Return the appearance spec (plist) for STATE with SELECTED flag.
@@ -785,24 +848,27 @@ falls back to the default appearance."
        :weight ,agent-repl--tab-weight))
   "Face for workspace tabs where the agent needs permission (green + emoji).")
 
-(defface agent-repl-tab-idle
-  `((t :background ,agent-repl--color-idle-orange
+(defface agent-repl-tab-ready
+  `((t :background ,agent-repl--color-done-green
        :foreground ,agent-repl--color-dark
        :weight ,agent-repl--tab-weight))
-  "Face for workspace tabs where the agent is idle (orange).")
+  "Face for workspace tabs whose agent is ready (green): came up and was
+never prompted, or went quiet after a clean conclusion.")
 
 (defface agent-repl-tab-idle-async
-  `((t :background ,agent-repl--color-idle-async-amber
+  `((t :background ,agent-repl--color-idle-async-yellow
        :foreground ,agent-repl--color-dark
        :weight ,agent-repl--tab-weight))
-  "Face for workspace tabs that are idle but have background work running (amber).")
+  "Face for workspace tabs with no foreground turn but live detached
+background work (yellow).")
 
-(defface agent-repl-tab-stop-failed
-  `((t :background ,agent-repl--color-stop-failed-magenta
+(defface agent-repl-tab-vendor-blocked
+  `((t :background ,agent-repl--color-vendor-blocked-purple
        :foreground ,agent-repl--color-light
        :weight ,agent-repl--tab-weight))
-  "Face for workspace tabs where the last turn failed via the
-StopFailure hook (magenta + ⚠).")
+  "Face for workspace tabs blocked on the vendor or the account
+\(purple + ⛔): auth, usage limit, a persistent API failure, or an
+abnormal turn conclusion.")
 
 (defface agent-repl-tab-flash
   `((t :background ,agent-repl--color-flash-bg
@@ -1562,50 +1628,11 @@ For background workspaces, inspects the saved persp window configuration."
 
 ;;; State machine ------------------------------------------------------------
 
-(defun agent-repl--update-ws-state (ws)
-  "Decay WS's agent-state from :done to :idle when conditions are met.
-
-This is the sole transition the timer drives on the agent-state axis.
-Every other transition is sentinel-owned (see the hook handlers in
-`sentinel.el').  When the agent finishes a turn the Stop hook writes
-`:done'; if the worktree is clean AND the user has been focused on
-the workspace for at least `agent-repl-done-idle-delay' seconds
-\(tracked via `:done-acked-at'), the tab decays to `:idle'.  If the
-worktree is dirty, the user has not yet focused the workspace, or
-the focus dwell time has not yet elapsed, the tab stays green.
-
-The dwell requirement prevents a quick transit through a `:done'
-workspace from silently dropping the green indicator: the focus
-timestamp is cleared on switch-away from a `:done' workspace, so the
-countdown restarts on every return.
-
-Decay also clears `:done-acked' and `:done-acked-at' so a future
-:done cycle starts from a clean slate.
-
-State table:
-  :done + clean + acked + dwell-elapsed   → :idle   (this function)
-  :done + clean + acked + !dwell          → unchanged (still counting)
-  :done + clean + !acked                  → unchanged (wait for user to view)
-  :done + dirty                           → unchanged (wait for stage/commit)
-  anything else                           → unchanged
-                                            (sentinel-owned or terminal)"
-  (let* ((state (agent-repl--ws-agent-state ws))
-         (acked (agent-repl--ws-get ws :done-acked))
-         (acked-at (agent-repl--ws-get ws :done-acked-at))
-         (git-status (agent-repl--ws-get ws :git-clean))
-         (dwell (and acked-at (- (float-time) acked-at)))
-         (dwell-elapsed (and dwell (> dwell agent-repl-done-idle-delay))))
-    (cond
-     ((null git-status)
-      (agent-repl--log-verbose ws "update-ws-state ws=%s state=%s git-clean not yet populated, skipping" ws state))
-     ((and (eq state :done) (eq git-status 'clean) acked dwell-elapsed)
-      (agent-repl--log ws "update-ws-state ws=%s :done->:idle (clean, acked, dwell=%.2fs)" ws dwell)
-      (agent-repl--ws-set-agent-state ws :idle)
-      (agent-repl--ws-put ws :done-acked nil)
-      (agent-repl--ws-put ws :done-acked-at nil))
-     (t
-      (agent-repl--log-verbose ws "update-ws-state ws=%s state=%s acked=%s dwell=%s git-status=%s no-op"
-                                ws state acked dwell git-status)))))
+;; `agent-repl--update-ws-state' is gone with the decay it drove.  The
+;; timer no longer touches the agent-state axis at all: every transition on
+;; it is now owned by the SSM's pushed WorkspaceState, which is what makes
+;; a tab's color a report of something that happened rather than partly a
+;; report and partly a clock.
 
 (defvar agent-repl--update-tick-counter 0
   "Monotonic tick counter for the workspace-state update timer.
@@ -1653,8 +1680,7 @@ caller is told to proceed."
 (defun agent-repl--update-one-workspace-state (ws do-git-p)
   "Run the per-workspace state-update body for WS.
 The cheap parts (`agent-repl--agent-running-p',
-`agent-repl--update-ws-state', `agent-repl--mark-dead') run every tick
-so transitions like `:done' -> `:idle' stay snappy.  DO-GIT-P gates the
+`agent-repl--mark-dead') run every tick.  DO-GIT-P gates the
 expensive git refreshes (`agent-repl--async-refresh-git-status' and
 `agent-repl--async-refresh-branch-merged') so they fire only on the
 mod-N tick selected by `agent-repl-state-git-tick-modulus'.
@@ -1668,14 +1694,11 @@ that are not a death (e.g. mid-reattach after a daemon restart).
 Liveness/death for a gui workspace is owned exclusively by the daemon
 \(pushed DEAD `WorkspaceState' — see
 `agent-repl--status-react-to-pushed-death'), so this poll deliberately
-never marks a gui workspace dead; it only runs the frontend-agnostic
-decay + git refresh for it."
+never marks a gui workspace dead; it only runs the git refresh for it."
   (if (or (agent-repl--ws-gui-frontend-p ws)
           (agent-repl--agent-running-p ws))
-      (progn
-        (agent-repl--update-ws-state ws)
-        (when do-git-p
-          (agent-repl--async-refresh-git-status ws)))
+      (when do-git-p
+        (agent-repl--async-refresh-git-status ws))
     ;; No live agent session → clear non-thinking state.
     (agent-repl--mark-dead ws))
   ;; Merged-ness is independent of agent liveness — refresh for every
