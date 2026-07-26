@@ -125,6 +125,11 @@ func TestEventRouting(t *testing.T) {
 			want: "frame",
 		},
 		{
+			name: "message latency to frame sink",
+			ev:   &corev1.Event{SessionId: "s", Payload: &corev1.Event_MessageLatency{MessageLatency: &corev1.MessageLatency{Uuid: "m", TtftMs: 865}}},
+			want: "frame",
+		},
+		{
 			name: "heartbeat progress to frame sink",
 			ev:   &corev1.Event{SessionId: "s", Payload: &corev1.Event_HeartbeatProgress{HeartbeatProgress: &corev1.HeartbeatProgress{ToolUseId: "t"}}},
 			want: "frame",
