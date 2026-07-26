@@ -39,7 +39,7 @@ import type {
   SdkMessageLike,
   SdkUserMessageLike,
 } from "../session.js";
-import { convert } from "../proto/convert.js";
+import { SessionStartGate, convert, promptPreview } from "../proto/convert.js";
 import { isEphemeral, toEphemeralEvent, StreamMessageTracker } from "../proto/delta.js";
 import { ControlDispatch, type SdkControlTarget, type ToolPermissionResult } from "./control.js";
 import { SessionServer, type SessionServerHandlers } from "./server.js";
@@ -53,6 +53,7 @@ import {
   EventSchema,
   Plane,
   SessionSource,
+  TurnStartedSchema,
 } from "./proto.js";
 
 const COMPONENT = "uds-session";
@@ -111,10 +112,31 @@ export class UdsSession {
    * frontend opened a bubble per chunk.
    */
   private readonly streamMessages = new StreamMessageTracker();
+  /**
+   * Admits only the FIRST `system:init` of this shim's lifetime to emit a
+   * SessionStarted twin. Shim-lifetime state, so it is owned here and injected
+   * into every convert() rather than living in the (otherwise stateless)
+   * converter.
+   */
+  private readonly sessionGate = new SessionStartGate();
+  /**
+   * Whether the VENDOR session id — the key the store files this session's
+   * events under — is known yet. Known up front on `--resume`; otherwise only
+   * the SDK can reveal it, on the first converted message.
+   */
+  private storeKeyKnown: boolean;
+  /**
+   * TurnStarted events accepted before the vendor session id was known. See
+   * emitTurnStarted: writing them under the placeholder key would file them in
+   * a seq space nothing subscribes to, so they wait for the real key instead
+   * of being lost.
+   */
+  private readonly deferredTurnStarts: Event[] = [];
 
   constructor(private readonly deps: UdsSessionDeps) {
+    this.storeKeyKnown = deps.storeSessionId !== undefined && deps.storeSessionId !== "";
     const target: SdkControlTarget = {
-      submitPrompt: ({ text, permissionMode }): void => {
+      submitPrompt: ({ requestId, text, permissionMode }): void => {
         this.turnsInFlight++;
         const content: ContentBlock[] = [{ type: "text", text }];
         this.input.push({
@@ -123,6 +145,11 @@ export class UdsSession {
           parent_tool_use_id: null,
           session_id: this.deps.sessionId,
         });
+        // Turn start is SHIM-AUTHORITATIVE (see convert.ts's header): the
+        // vendor stream has no "a turn began" message, and the user-message
+        // echo the converter used to derive one from never arrives for a live
+        // submit. Accepting the prompt IS the turn starting, so say so here.
+        this.emitTurnStarted(requestId, text);
         // A prompt-scoped permission-mode override rides on SubmitPrompt. Apply
         // it to the live query (fire-and-forget: the sync Ack does not wait on
         // the SDK).
@@ -300,17 +327,77 @@ export class UdsSession {
     }
     // A result closes the turn it belongs to.
     if (msg.type === "result" && this.turnsInFlight > 0) this.turnsInFlight--;
-    const { vendor, lifecycle } = convert(msg, { sessionSource: this.deps.sessionSource, ...this.convertOpts() });
+    const { vendor, lifecycle } = convert(msg, {
+      sessionSource: this.deps.sessionSource,
+      sessionGate: this.sessionGate,
+      ...this.convertOpts(),
+    });
     // The converted envelope carries the VENDOR session id (read off the SDK
     // message), which is the id the store files these events under. Adopt it
     // as the subscription key: a fresh session has no other way to learn it,
     // and subscribing under this shim's `--session-id` listens on a channel
     // nothing publishes to.
     this.store.adoptStoreKey(vendor.sessionId);
+    this.settleStoreKey(vendor.sessionId);
     void this.store.write([vendor, ...lifecycle]).catch(() => {
       // The honest sad path lives INSIDE StoreClient (loud-log per dropped
       // event + DegradedState to onDegraded). Nothing to add here; we only
       // keep the rejected promise from going unhandled.
+    });
+  }
+
+  /**
+   * Write the shim-authoritative TurnStarted for a just-accepted prompt.
+   *
+   * PERSISTENT and store-bound like every other lifecycle twin, so it takes
+   * the same seq-stamped round-trip back to the daemon and lands in the SSM in
+   * order with the TurnEnded that closes it.
+   */
+  private emitTurnStarted(requestId: string, text: string): void {
+    const evt = create(EventSchema, {
+      sessionId: this.store.storeSessionId(),
+      seq: 0n,
+      plane: Plane.STREAM,
+      class: EventClass.PERSISTENT,
+      requestId,
+      producedAtMs: BigInt(this.now()),
+      payload: {
+        case: "turnStarted",
+        value: create(TurnStartedSchema, { promptPreview: promptPreview(text) }),
+      },
+    });
+    if (!this.storeKeyKnown) {
+      // The vendor session id is genuinely unknown until the SDK reveals it
+      // (a fresh session carries no `--resume` id), and the store keys its seq
+      // space by it. Writing now would file this turn under the placeholder
+      // `--session-id`, which nothing subscribes to, so the daemon would never
+      // see the turn it just asked for. It waits for the real key instead.
+      this.deferredTurnStarts.push(evt);
+      shimLog(COMPONENT, { session: this.deps.sessionId, request: requestId },
+        `turn accepted before the vendor session id was known; TurnStarted held until the store key settles`);
+      return;
+    }
+    void this.store.write([evt]).catch(() => {
+      // StoreClient owns the honest sad path (loud per-event drop log +
+      // DegradedState). Only keeping the rejection handled here.
+    });
+  }
+
+  /**
+   * Record that the vendor session id is now known and flush any TurnStarted
+   * held for it, restamped with the settled key.
+   */
+  private settleStoreKey(vendorSessionId: string): void {
+    if (vendorSessionId === "") return;
+    this.storeKeyKnown = true;
+    if (this.deferredTurnStarts.length === 0) return;
+    const key = this.store.storeSessionId();
+    const held = this.deferredTurnStarts.splice(0);
+    for (const evt of held) evt.sessionId = key;
+    shimLog(COMPONENT, { session: this.deps.sessionId, store_key: key },
+      `store key settled; flushing ${held.length} held TurnStarted event(s)`);
+    void this.store.write(held).catch(() => {
+      // See emitTurnStarted: StoreClient reports the drop.
     });
   }
 
