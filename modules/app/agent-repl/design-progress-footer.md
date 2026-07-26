@@ -14,8 +14,16 @@ frames or stranded with no frontend representation at all.
   - the duration and token widgets they orbit (exact file map produced at
     execution time, then recorded here).
 - **One frame.** A single `frontend.ProgressView` message carries the footer's
-  entire input: phase mirror, tickers, activity windows, counts. Extensible to
+  entire EPHEMERAL input: tickers, activity windows, counts. Extensible to
   tasks/workspace detail later. No constellation of per-signal frames.
+  - SUPERSEDED (F5): the frame also carried a mirror of the SSM's phase, so
+    the footer had one self-sufficient input. The mirror refreshed on the
+    progress resolver's own triggers rather than on the SSM's, so a workspace
+    that acquired a progress fact before a state reached the resolver kept the
+    blank view's `INIT` seed forever — the footer read `starting` against an
+    already-green tab until the first prompt moved it. The footer reads the
+    phase off `WorkspaceState` now, which is the same message the tab bar and
+    the sidebar dot read.
 - **No Emacs component.** The footer is webapp-only. Emacs keeps its existing
   tab-bar/sidebar render of `WorkspaceState` and gains nothing new here.
 - **No output tokens in the footer.** The token cell shows the CURRENT
@@ -333,10 +341,10 @@ shut window.
 `ProgressView.blocked` window (`requires_action` opens it, `idle`/`running`
 close it, anything else is loud-logged and changes nothing).
 
-It is deliberately NOT wired to `ProgressView.state`. The SSM remains THE
+It is deliberately NOT a phase source. The SSM's `WorkspaceState` remains THE
 phase authority, and two independent phase sources is precisely the drift the
-SSM exists to prevent — a test pins this: an `idle` report while the SSM has
-resolved `THINKING` leaves the phase untouched.
+SSM exists to prevent — a test pins this: the progress resolver writes no
+phase at all, so an `idle` report cannot become one.
 
 What it genuinely adds is a fact the daemon cannot otherwise see. The daemon
 counts the permission prompts IT parked (`pending_permissions`), but a session
