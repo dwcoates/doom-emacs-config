@@ -21,11 +21,13 @@
  * This module maps those two SDK stream messages into their core payloads:
  *   - `stream_event` → `core.ContentDelta` (live text/thinking/tool-input/
  *     signature typing), one per `content_block_delta` frame.
+ *   - `stream_event` → `core.MessageLatency`, one per `message_start` frame
+ *     that carries a `ttft_ms` stamp (the ONE progress fact a structural frame
+ *     carries; see {@link streamEventToMessageLatency}).
  *   - `tool_progress` → `core.HeartbeatProgress`.
- * Each is wrapped in an `Event` with `class = EPHEMERAL`. The structural
- * stream_event frames (`message_start`/`content_block_start`/`_stop`/
- * `message_delta`/`message_stop`) carry no live-typing content and yield
- * `null` — there is nothing to relay ephemerally.
+ * Each is wrapped in an `Event` with `class = EPHEMERAL`. The remaining
+ * structural stream_event frames (`content_block_start`/`_stop`/
+ * `message_delta`/`message_stop`) carry nothing relayable and yield `null`.
  *
  * ROUTING CONTRACT: these Events are returned DISTINCTLY (a dedicated entry
  * point, never mixed into {@link import("./convert.js")}'s persistent output)
@@ -39,6 +41,7 @@ import {
   EventClass,
   EventSchema,
   HeartbeatProgressSchema,
+  MessageLatencySchema,
   Plane,
   type Event,
 } from "../uds/proto.js";
@@ -159,6 +162,48 @@ export function streamEventToContentDelta(
   });
 }
 
+/**
+ * Map a raw `stream_event` SDK message to an EPHEMERAL `MessageLatency` Event,
+ * or `null` for a frame that is not a `message_start` or that carries no
+ * `ttft_ms` stamp.
+ *
+ * WHY THIS FRAME. `ttft_ms` is a top-level field of the `stream_event`
+ * envelope, and the SDK stamps it on the `message_start` that OPENS a streamed
+ * assistant message — never on the `content_block_delta` chunks that follow.
+ * So the one stream frame carrying first-token latency is precisely a frame
+ * {@link streamEventToContentDelta} drops. Relaying it as its own EPHEMERAL
+ * payload is what makes the latency reachable mid-turn: the only other place
+ * the number appears is the turn's terminal result message, which arrives when
+ * the turn is already over.
+ *
+ * The two mappers are mutually exclusive by construction — a `message_start`
+ * never yields a ContentDelta and a `content_block_delta` never yields a
+ * MessageLatency — so the dispatcher can try one then the other.
+ *
+ * Never throws: a shape it cannot read, or an absent/unusable stamp, yields
+ * `null` rather than a MessageLatency reporting a latency nobody measured.
+ */
+export function streamEventToMessageLatency(
+  msg: Record<string, unknown>,
+  opts?: DeltaOptions,
+): Event | null {
+  const event = msg["event"];
+  if (!isObject(event) || event["type"] !== "message_start") return null;
+  const ttft = msg["ttft_ms"];
+  if (typeof ttft !== "number" || !Number.isFinite(ttft) || ttft <= 0) return null;
+
+  const sessionId = typeof msg["session_id"] === "string" ? msg["session_id"] : "";
+  return ephemeralEvent(sessionId, producedAt(opts), {
+    case: "messageLatency",
+    value: create(MessageLatencySchema, {
+      // The message this stamp measures, keyed exactly as ContentDelta keys
+      // its own chunks (see StreamMessageTracker), NOT the envelope uuid.
+      uuid: opts?.messageId ?? "",
+      ttftMs: BigInt(Math.trunc(ttft)),
+    }),
+  });
+}
+
 /** The ContentDelta oneof arm for one `content_block_delta.delta`, or null. */
 function deltaArm(delta: Record<string, unknown>): ContentDeltaArm | null {
   switch (delta["type"]) {
@@ -213,7 +258,7 @@ export function toEphemeralEvent(msg: unknown, opts?: DeltaOptions): Event | nul
   if (!isObject(msg)) return null;
   switch (msg["type"]) {
     case "stream_event":
-      return streamEventToContentDelta(msg, opts);
+      return streamEventToContentDelta(msg, opts) ?? streamEventToMessageLatency(msg, opts);
     case "tool_progress":
       return toolProgressToHeartbeat(msg, opts);
     default:
