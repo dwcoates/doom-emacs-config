@@ -30,6 +30,7 @@ import (
 	"github.com/gorilla/websocket"
 	"google.golang.org/protobuf/encoding/protojson"
 
+	"claude-repld/internal/progress"
 	"claude-repld/internal/registry"
 	"claude-repld/internal/server"
 	"claude-repld/internal/sessiondrv"
@@ -229,6 +230,7 @@ func newUDSHarness(t *testing.T) *e2eHarness {
 	binding := &server.SessionCommandBinding{Logf: t.Logf}
 	agentShim, err := server.WireAgentShim(server.AgentShimConfig{
 		SSM:             ssmMgr,
+		Progress:        progress.New(progress.Options{Logf: t.Logf}),
 		Prompts:         driver,
 		MergeDirs:       stubMergeDirs{},
 		Lifecycle:       stubLifecycle{},
