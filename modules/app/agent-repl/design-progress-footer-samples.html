@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>agent-repl footer — 4 style candidates</title>
+<style>
+  /* Palette lifted from webapp/src/styles.css so the candidates sit in the
+     app's real look and feel. Dark values approximate where styles.css keeps
+     them in @media blocks not copied here. */
+  :root {
+    color-scheme: light dark;
+    --bg: #ffffff; --fg: #1a1a1a; --muted: #6b7280; --border: #e5e7eb;
+    --card: #eef1f4;
+    --bubble-shadow: 0 1px 3px rgba(0,0,0,.07), inset 0 1px 0 rgba(255,255,255,.35);
+    --dock-shadow: 0 2px 12px rgba(0,0,0,.14);
+    --assistant: #ece4fa; --ok: #16a34a; --err: #dc2626; --accent: #2563eb;
+    --thinking: #ea580c; --retry: #8b5cf6; --tool-title: #9370db;
+    --info-tokens: #b45309; --info-time: #1d4ed8; --info-agents: #7c3aed;
+    --async-border: #4fb8a8; --q-border: #eab308;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #101216; --fg: #e5e7eb; --muted: #9ca3af; --border: #2a2e37;
+      --card: #1a1e25; --assistant: #2b2440;
+      --bubble-shadow: 0 1px 3px rgba(0,0,0,.30), inset 0 1px 0 rgba(255,255,255,.05);
+      --dock-shadow: 0 2px 14px rgba(0,0,0,.48);
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font-family: ui-sans-serif, system-ui, sans-serif; font-size: 14px;
+  }
+  .page { max-width: 780px; margin: 0 auto; padding: 24px 16px 80px; }
+  h1 { font-size: 18px; } h2 { font-size: 15px; margin: 40px 0 6px; }
+  .note { color: var(--muted); font-size: 12.5px; margin-bottom: 18px; }
+
+  /* Context: one green-bordered purple assistant bubble above each candidate,
+     so width and tone are judged against the real feed language. */
+  .feed { display: flex; flex-direction: column; gap: 12px; }
+  .bubble {
+    background: var(--assistant); border: 1.5px solid var(--ok);
+    border-radius: 10px; padding: 10px 14px; box-shadow: var(--bubble-shadow);
+    color: var(--fg); font-size: 13.5px;
+  }
+  .bubble .who { color: var(--tool-title); font-weight: 600; font-size: 12px; }
+
+  /* Shared footer bones: raised flat bubble, feed width, thin. */
+  .footer {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 10px; box-shadow: var(--dock-shadow);
+    padding: 7px 12px; font-size: 12.5px; line-height: 1.5;
+  }
+  .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .spacer { flex: 1; }
+  .muted { color: var(--muted); }
+  .phase { font-weight: 650; }
+  .phase.thinking { color: var(--thinking); }
+  .phase.retrying { color: var(--retry); }
+  .phase.error { color: var(--err); }
+  .spin { display: inline-block; width: 9px; height: 9px; border-radius: 50%;
+    border: 2px solid currentColor; border-top-color: transparent;
+    animation: r 1s linear infinite; vertical-align: -1px; }
+  @keyframes r { to { transform: rotate(360deg); } }
+  .tok { color: var(--info-tokens); font-variant-numeric: tabular-nums; }
+  .clock { color: var(--info-time); font-variant-numeric: tabular-nums; }
+  .agents { color: var(--info-agents); }
+  .tool { color: var(--tool-title); }
+
+  /* V1 inline strip */
+  .v1 .sep { color: var(--border); }
+
+  /* V2 chip row */
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--bg); border: 1px solid var(--border);
+    border-radius: 999px; padding: 2px 10px; white-space: nowrap;
+  }
+  .chip.state { border-color: var(--thinking); color: var(--thinking); font-weight: 650; }
+  .chip.state.retry { border-color: var(--retry); color: var(--retry); }
+  .chip.err { border-color: var(--err); color: var(--err); }
+
+  /* V3 accent edge console */
+  .v3 { border-left: 4px solid var(--thinking); padding-left: 12px; }
+  .v3.retry { border-left-color: var(--retry); }
+  .v3.err { border-left-color: var(--err); }
+  .v3 .l2 { margin-top: 2px; display: flex; gap: 14px; color: var(--muted); }
+
+  /* V4 segmented dock */
+  .v4 { padding: 0; overflow: hidden; }
+  .v4 .grab { height: 4px; width: 44px; border-radius: 2px; background: var(--border);
+    margin: 4px auto 2px; }
+  .v4 .cells { display: flex; align-items: stretch; }
+  .v4 .cell { padding: 5px 12px 8px; border-right: 1px solid var(--border);
+    display: flex; align-items: center; gap: 7px; }
+  .v4 .cell:last-child { border-right: 0; }
+  .v4 .grow { flex: 1; }
+  .v4 .sheet { border-top: 1px solid var(--border); padding: 8px 12px;
+    color: var(--muted); font-size: 12px; display: flex; gap: 22px; }
+
+  .errline { color: var(--err); font-size: 12px; margin-top: 3px;
+    border-top: 1px dashed var(--border); padding-top: 4px; }
+  .badge { background: var(--q-border); color: #1a1a1a; border-radius: 8px;
+    padding: 0 7px; font-size: 11.5px; font-weight: 650; }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>Footer candidates</h1>
+  <div class="note">Each sits under a real-language assistant bubble at feed width.
+    Same sample state everywhere: thinking 24s, <code>Bash</code> running 12s, 41.2k input
+    tokens this turn, 2 agents + 1 task live, 1 pending permission. A second render
+    shows the retrying window, a third the persistent error line.</div>
+
+  <h2>V1 — Inline strip (quietest: plain text, dividers, zero chrome inside)</h2>
+  <div class="feed">
+    <div class="bubble"><span class="who">assistant</span><br>…streamed response text…</div>
+    <div class="footer v1 row">
+      <span class="phase thinking"><span class="spin"></span> thinking</span>
+      <span class="sep">│</span><span class="tool">Bash · 12s</span>
+      <span class="sep">│</span><span class="muted">thinking 1.4k tok</span>
+      <span class="spacer"></span>
+      <span class="clock">0:24</span><span class="tok">41.2k in</span>
+      <span class="agents">2 agents · 1 task</span><span class="badge">1 perm</span>
+    </div>
+    <div class="footer v1 row">
+      <span class="phase retrying"><span class="spin"></span> retrying</span>
+      <span class="sep">│</span><span class="muted">attempt 3/10 · next in 8s · 529</span>
+      <span class="spacer"></span><span class="clock">1:03</span><span class="tok">41.2k in</span>
+    </div>
+  </div>
+
+  <h2>V2 — Chip row (topbar datapoint language brought down)</h2>
+  <div class="feed">
+    <div class="bubble"><span class="who">assistant</span><br>…streamed response text…</div>
+    <div class="footer row">
+      <span class="chip state"><span class="spin"></span> thinking 0:24</span>
+      <span class="chip tool">Bash · 12s</span>
+      <span class="chip muted">думает 1.4k</span>
+      <span class="spacer"></span>
+      <span class="chip tok">41.2k in</span>
+      <span class="chip agents">⛭ 2 · ⚙ 1</span>
+      <span class="chip err">1 perm</span>
+    </div>
+    <div class="footer row">
+      <span class="chip state retry"><span class="spin"></span> retrying 3/10 · 8s</span>
+      <span class="spacer"></span><span class="chip tok">41.2k in</span>
+    </div>
+  </div>
+
+  <h2>V3 — Accent-edge console (phase color as a left edge, two quiet lines)</h2>
+  <div class="feed">
+    <div class="bubble"><span class="who">assistant</span><br>…streamed response text…</div>
+    <div class="footer v3">
+      <div class="row"><span class="phase thinking">thinking</span>
+        <span class="tool">Bash · 12s</span><span class="spacer"></span>
+        <span class="clock">0:24</span></div>
+      <div class="l2"><span>41.2k in</span><span>thinking 1.4k</span>
+        <span>2 agents · 1 task</span><span>1 permission waiting</span></div>
+    </div>
+    <div class="footer v3 err">
+      <div class="row"><span class="phase error">error</span>
+        <span class="muted">api: overloaded (529) after 10 attempts</span>
+        <span class="spacer"></span><span class="clock">2:41</span></div>
+    </div>
+  </div>
+
+  <h2>V4 — Segmented dock (cells + grabber; expansion affordance built in)</h2>
+  <div class="feed">
+    <div class="bubble"><span class="who">assistant</span><br>…streamed response text…</div>
+    <div class="footer v4">
+      <div class="grab"></div>
+      <div class="cells">
+        <div class="cell"><span class="phase thinking"><span class="spin"></span> thinking</span></div>
+        <div class="cell grow"><span class="tool">Bash · 12s</span>
+          <span class="muted">· thinking 1.4k</span></div>
+        <div class="cell"><span class="clock">0:24</span></div>
+        <div class="cell"><span class="tok">41.2k in</span></div>
+        <div class="cell"><span class="agents">2 ⛭ · 1 ⚙</span> <span class="badge">1</span></div>
+      </div>
+      <div class="sheet"><span>agent: verify:delta (0:41)</span>
+        <span>agent: review:ssm (0:12)</span><span>task: npm test (2:03)</span></div>
+    </div>
+    <div class="footer v4">
+      <div class="grab"></div>
+      <div class="cells">
+        <div class="cell"><span class="phase error">error</span></div>
+        <div class="cell grow"><span class="muted">api: overloaded (529) after 10 attempts</span></div>
+        <div class="cell"><span class="clock">2:41</span></div>
+      </div>
+      <div class="errline" style="padding:0 12px 6px">click scrolls the feed to the error item</div>
+    </div>
+  </div>
+</div>
+</body>
+</html>
