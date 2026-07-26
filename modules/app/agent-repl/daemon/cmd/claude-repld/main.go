@@ -23,6 +23,7 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/frontend"
 	"claude-repld/internal/login"
+	"claude-repld/internal/progress"
 	"claude-repld/internal/registry"
 	"claude-repld/internal/remediation"
 	"claude-repld/internal/replog"
@@ -239,6 +240,12 @@ func main() {
 	}
 	defer ssmMgr.Close()
 
+	// The progress-footer resolver (F1) is the SSM's sibling and is owned here
+	// for the same reason: both the frontend push loop and the per-session
+	// driver feed it, so one owner closes it once.
+	progressMgr := progress.New(progress.Options{Logf: log.Printf})
+	defer progressMgr.Close()
+
 	// Shims dial US. One listening socket serves every session; each shim
 	// announces itself with its ShimHello and the listener routes the
 	// connection to the driver that owns that session. Started BEFORE any
@@ -303,6 +310,7 @@ func main() {
 	driver, err := sessiondrv.New(sessiondrv.Config{
 		Push:            forwarder,
 		SSM:             ssmMgr,
+		Progress:        progressMgr,
 		Spawner:         server.NewShimSpawner(sessionRegistry, shimListener.Connected, udsSpawn, log.Printf),
 		Source:          &server.ShimConnSource{Listener: shimListener},
 		Locator:         &server.SessionLocator{Reg: sessionRegistry},
@@ -338,6 +346,7 @@ func main() {
 	sessionCommands := &server.SessionCommandBinding{Logf: log.Printf}
 	agentShim, err := server.WireAgentShim(server.AgentShimConfig{
 		SSM:             ssmMgr,
+		Progress:        progressMgr,
 		Prompts:         driver,
 		MergeDirs:       pendingMergeDirs{},
 		Lifecycle:       pendingLifecycle{},

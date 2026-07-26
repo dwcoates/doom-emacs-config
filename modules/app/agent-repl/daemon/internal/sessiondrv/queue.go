@@ -222,6 +222,9 @@ func (m *Manager) publishQueueLocked(d *driven) (*frontendv1.QueueView, []regist
 func (m *Manager) publish(sessionID string, view *frontendv1.QueueView, recs []registry.QueuedPrompt) {
 	m.cfg.Push.PushQueueView(view)
 	m.persistQueue(sessionID, recs)
+	// Every queue change is also a change to the footer's queue-depth badge, and
+	// this is the one place every queue change funnels through.
+	m.noteProgressCounts(view.GetWorkspace(), int64(len(view.GetEntries())))
 }
 
 // persistQueue writes the session's held prompts through to the durable
