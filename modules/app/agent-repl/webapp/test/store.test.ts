@@ -70,18 +70,15 @@ function sessionEffect(over: Partial<SessionViewInput> = {}): AdapterEffect {
 }
 
 function typingEffect(over: Partial<TypingReveal> = {}): AdapterEffect {
-  const uuid = over.uuid ?? "u1";
-  const blockIndex = over.blockIndex ?? 0;
   return {
     kind: "typing",
     value: {
       workspace: "ws",
       sessionId: "s1",
-      uuid,
-      blockIndex,
+      messageId: "u1",
+      blockIndex: 0,
       kind: "text",
       delta: "hi",
-      blockId: `${uuid}:${blockIndex}`,
       ...over,
     },
   };
@@ -416,7 +413,7 @@ describe("ingest typing", () => {
     const store = new ConversationStore();
     store.ingest([itemsEffect([textItem({ blockId: "u1:0", text: "he", done: false })])]);
     // Act
-    store.ingest([typingEffect({ uuid: "u1", blockIndex: 0, delta: "llo" })]);
+    store.ingest([typingEffect({ messageId: "u1", blockIndex: 0, delta: "llo" })]);
     // Assert
     expect((store.state.items[0] as TextItem).text).toBe("hello");
   });
@@ -425,7 +422,7 @@ describe("ingest typing", () => {
     // Arrange
     const store = new ConversationStore();
     // Act
-    store.ingest([typingEffect({ uuid: "u9", blockIndex: 2, delta: "start" })]);
+    store.ingest([typingEffect({ messageId: "u9", blockIndex: 2, delta: "start" })]);
     // Assert
     const item = store.state.items[0] as TextItem;
     expect(item.kind).toBe("text");
@@ -438,7 +435,7 @@ describe("ingest typing", () => {
     const store = new ConversationStore();
     store.ingest([itemsEffect([textItem({ blockId: "u1:0", text: "he", done: true })])]);
     // Act
-    store.ingest([typingEffect({ uuid: "u1", blockIndex: 0, delta: "llo" })]);
+    store.ingest([typingEffect({ messageId: "u1", blockIndex: 0, delta: "llo" })]);
     // Assert
     expect((store.state.items[0] as TextItem).done).toBe(false);
   });
@@ -447,7 +444,7 @@ describe("ingest typing", () => {
     // Arrange
     const store = new ConversationStore();
     // Act
-    store.ingest([typingEffect({ kind: "thinking", uuid: "u2", blockIndex: 0, delta: "weigh" })]);
+    store.ingest([typingEffect({ kind: "thinking", messageId: "u2", blockIndex: 0, delta: "weigh" })]);
     // Assert
     expect(store.state.items[0].kind).toBe("thinking");
   });
@@ -875,9 +872,9 @@ describe("streaming chunks reconcile into one block", () => {
     const store = new ConversationStore();
 
     // Act: three chunks of the SAME message.
-    store.ingest([typingEffect({ uuid: "msg_01ABC", delta: "Hel" })]);
-    store.ingest([typingEffect({ uuid: "msg_01ABC", delta: "lo " })]);
-    store.ingest([typingEffect({ uuid: "msg_01ABC", delta: "there" })]);
+    store.ingest([typingEffect({ messageId: "msg_01ABC", delta: "Hel" })]);
+    store.ingest([typingEffect({ messageId: "msg_01ABC", delta: "lo " })]);
+    store.ingest([typingEffect({ messageId: "msg_01ABC", delta: "there" })]);
 
     // Assert: one bubble, fully assembled — not three.
     const texts = store.state.items.filter((i) => i.kind === "text");
@@ -890,8 +887,8 @@ describe("streaming chunks reconcile into one block", () => {
     const store = new ConversationStore();
 
     // Act
-    store.ingest([typingEffect({ uuid: "msg_FIRST", delta: "one" })]);
-    store.ingest([typingEffect({ uuid: "msg_SECOND", delta: "two" })]);
+    store.ingest([typingEffect({ messageId: "msg_FIRST", delta: "one" })]);
+    store.ingest([typingEffect({ messageId: "msg_SECOND", delta: "two" })]);
 
     // Assert
     expect(store.state.items.filter((i) => i.kind === "text")).toHaveLength(2);
@@ -902,8 +899,8 @@ describe("streaming chunks reconcile into one block", () => {
     const store = new ConversationStore();
 
     // Act
-    store.ingest([typingEffect({ uuid: "msg_01ABC", blockIndex: 0, delta: "a" })]);
-    store.ingest([typingEffect({ uuid: "msg_01ABC", blockIndex: 1, delta: "b" })]);
+    store.ingest([typingEffect({ messageId: "msg_01ABC", blockIndex: 0, delta: "a" })]);
+    store.ingest([typingEffect({ messageId: "msg_01ABC", blockIndex: 1, delta: "b" })]);
 
     // Assert
     expect(store.state.items.filter((i) => i.kind === "text")).toHaveLength(2);
@@ -912,8 +909,8 @@ describe("streaming chunks reconcile into one block", () => {
   it("replaces the streamed preview with the finished message", () => {
     // Arrange: the preview the chunks grew.
     const store = new ConversationStore();
-    store.ingest([typingEffect({ uuid: "msg_01ABC", blockIndex: 0, delta: "Hel" })]);
-    store.ingest([typingEffect({ uuid: "msg_01ABC", blockIndex: 0, delta: "lo" })]);
+    store.ingest([typingEffect({ messageId: "msg_01ABC", blockIndex: 0, delta: "Hel" })]);
+    store.ingest([typingEffect({ messageId: "msg_01ABC", blockIndex: 0, delta: "lo" })]);
 
     // Act: the persistent item arrives, keyed on the SAME Anthropic id.
     store.ingest([
@@ -979,8 +976,8 @@ describe("a finished block settles onto its streamed preview", () => {
     // Arrange: the reported bug's exact shape — a [thinking, text] message,
     // so the text streams at API block index 1.
     const store = new ConversationStore();
-    store.ingest([typingEffect({ kind: "thinking", uuid: "msg_01ABC", blockIndex: 0, delta: "hmm" })]);
-    store.ingest([typingEffect({ kind: "text", uuid: "msg_01ABC", blockIndex: 1, delta: "Hel" })]);
+    store.ingest([typingEffect({ kind: "thinking", messageId: "msg_01ABC", blockIndex: 0, delta: "hmm" })]);
+    store.ingest([typingEffect({ kind: "text", messageId: "msg_01ABC", blockIndex: 1, delta: "Hel" })]);
 
     // Act: the finished text record, whose own content index is 0.
     store.ingest([itemsEffect([finishedText({ blockId: "env2:0", uuid: "env2:0", text: "Hello" })])]);
@@ -1009,7 +1006,7 @@ describe("a finished block settles onto its streamed preview", () => {
     // Arrange: smooth.ts tracks reveal progress BY blockId, so moving the id
     // under a settling block would re-type prose already on screen.
     const store = new ConversationStore();
-    store.ingest([typingEffect({ uuid: "msg_01ABC", blockIndex: 3, delta: "Hel" })]);
+    store.ingest([typingEffect({ messageId: "msg_01ABC", blockIndex: 3, delta: "Hel" })]);
 
     // Act
     store.ingest([itemsEffect([finishedText({ blockId: "env9:0", uuid: "env9:0", text: "Hello" })])]);
@@ -1023,7 +1020,7 @@ describe("a finished block settles onto its streamed preview", () => {
     // Arrange: the settled item is keyed by its envelope, so the replay of the
     // very same record must find it even though it holds the preview's blockId.
     const store = new ConversationStore();
-    store.ingest([typingEffect({ uuid: "msg_01ABC", blockIndex: 1, delta: "Hel" })]);
+    store.ingest([typingEffect({ messageId: "msg_01ABC", blockIndex: 1, delta: "Hel" })]);
     store.ingest([itemsEffect([finishedText({ blockId: "env2:0", uuid: "env2:0", text: "Hello" })])]);
 
     // Act: the same record again, as a reconnect gap-fill delivers it.
@@ -1050,7 +1047,7 @@ describe("a finished block settles onto its streamed preview", () => {
   it("does not let a text block settle onto a thinking preview of the same message", () => {
     // Arrange: kind is part of the match, so the two streams cannot cross.
     const store = new ConversationStore();
-    store.ingest([typingEffect({ kind: "thinking", uuid: "msg_01ABC", blockIndex: 0, delta: "hmm" })]);
+    store.ingest([typingEffect({ kind: "thinking", messageId: "msg_01ABC", blockIndex: 0, delta: "hmm" })]);
 
     // Act
     store.ingest([itemsEffect([finishedText({ blockId: "env2:0", uuid: "env2:0", text: "Hello" })])]);
@@ -1064,8 +1061,8 @@ describe("a finished block settles onto its streamed preview", () => {
     // Arrange: two thinking blocks streaming, then both finishing. Claiming the
     // EARLIEST unclaimed preview is what keeps the pairing in block order.
     const store = new ConversationStore();
-    store.ingest([typingEffect({ kind: "thinking", uuid: "msg_01ABC", blockIndex: 0, delta: "first" })]);
-    store.ingest([typingEffect({ kind: "thinking", uuid: "msg_01ABC", blockIndex: 1, delta: "second" })]);
+    store.ingest([typingEffect({ kind: "thinking", messageId: "msg_01ABC", blockIndex: 0, delta: "first" })]);
+    store.ingest([typingEffect({ kind: "thinking", messageId: "msg_01ABC", blockIndex: 1, delta: "second" })]);
 
     // Act
     store.ingest([itemsEffect([finishedThinking({ blockId: "env1:0", uuid: "env1:0", text: "first" })])]);
