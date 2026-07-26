@@ -186,6 +186,7 @@ import {
   LocalBashTaskSchema,
   RetrievalStatus,
   TaskOutputResultSchema,
+  WebFetchResultSchema,
   CodeExecutionToolResultBlockSchema,
   ContainerUploadBlockSchema,
   ContentBlockSchema,
@@ -1756,6 +1757,27 @@ function classifyToolResult(o: Record<string, unknown>): ToolUseResult["result"]
       query: strOf(o["query"]),
       results: asListValueOpt(o["results"]),
       searchCount: bigOf(pick(o, "search_count", "searchCount")),
+    }) };
+  }
+  // WebFetch, right after its WebSearch sibling. Keyed on the HTTP status text
+  // plus the byte count, both required by 0.3.220's WebFetchOutput and neither
+  // present on any other result in the census. It cannot collide with the two
+  // arms it shares a key with: WebSearch keys on `duration_seconds` (a fetch
+  // reports `duration_ms`), and Artifact's `!has("code")` guard already excludes
+  // anything carrying an HTTP code.
+  //
+  // WebFetchResult does not model `artifact_read` ({slug, ver}), the one
+  // optional sibling 0.3.220 adds and which no observed result carries, so it
+  // drops here exactly as the unmodeled siblings of the other arms do; typing
+  // it needs a proto change.
+  if (any("code_text", "codeText") && has("bytes")) {
+    return { case: "webFetch", value: create(WebFetchResultSchema, {
+      bytes: bigOf(pick(o, "bytes")),
+      code: bigOf(pick(o, "code")),
+      codeText: strOf(pick(o, "code_text", "codeText")),
+      durationMs: bigOf(pick(o, "duration_ms", "durationMs")),
+      result: strOf(pick(o, "result")),
+      url: strOf(pick(o, "url")),
     }) };
   }
   if (any("statusChange", "status_change", "updatedFields", "updated_fields")) {
