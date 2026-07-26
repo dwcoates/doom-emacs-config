@@ -20,10 +20,103 @@ import (
 	"time"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
+	"agentrepl/shim-claude-sidecar/internal/discover"
 	"agentrepl/shim-claude-sidecar/internal/storeclient"
+	"agentrepl/wire"
 )
 
 func quietLog(string, ...any) {}
+
+// probeComponent labels the events used to prove a store subscription is live,
+// so the real degraded report can be told apart from the handshake.
+const probeComponent = "link-test-probe"
+
+// subscribeEvents opens a store subscription for session and returns a channel
+// of every event delivered on it.
+func subscribeEvents(t *testing.T, sock, session string) <-chan *corev1.Event {
+	t.Helper()
+	conn, err := net.Dial("unix", sock)
+	if err != nil {
+		t.Fatalf("dial store: %v", err)
+	}
+	t.Cleanup(func() { conn.Close() })
+	if err := wire.WriteAny(conn, &corev1.Subscribe{SessionId: session, FromSeq: 0}); err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	ch := make(chan *corev1.Event, 64)
+	go func() {
+		defer close(ch)
+		for {
+			msg, err := wire.ReadAny(conn)
+			if err != nil {
+				return
+			}
+			if ev, ok := msg.(*corev1.Event); ok {
+				ch <- ev
+			}
+		}
+	}()
+	awaitSubscriberRegistered(t, sock, session, ch)
+	return ch
+}
+
+// awaitSubscriberRegistered publishes ephemeral probes until one comes back.
+// The store registers a subscriber on its own accept loop, so this round trip
+// is the only in-band proof that a later publish will actually be delivered.
+func awaitSubscriberRegistered(t *testing.T, sock, session string, ch <-chan *corev1.Event) {
+	t.Helper()
+	probe := storeclient.New(sock, nil)
+	defer probe.Close()
+	if err := probe.Connect(); err != nil {
+		t.Fatalf("probe connect: %v", err)
+	}
+	deadline := time.After(10 * time.Second)
+	for {
+		batch := &corev1.EventBatch{Events: []*corev1.Event{{
+			SessionId: session,
+			Plane:     corev1.Plane_PLANE_SYNTHETIC,
+			Class:     corev1.EventClass_EVENT_CLASS_EPHEMERAL,
+			Payload: &corev1.Event_DegradedState{
+				DegradedState: &corev1.DegradedState{Component: probeComponent},
+			},
+		}}}
+		if _, err := probe.Write(probeComponent, batch); err != nil {
+			t.Fatalf("probe write: %v", err)
+		}
+		select {
+		case ev, ok := <-ch:
+			if !ok {
+				t.Fatal("subscription closed during the registration handshake")
+			}
+			if ev.GetDegradedState().GetComponent() == probeComponent {
+				return
+			}
+		case <-time.After(50 * time.Millisecond):
+		case <-deadline:
+			t.Fatal("store never delivered the subscription probe")
+		}
+	}
+}
+
+// awaitDegraded waits for the sidecar's own degraded report, skipping the
+// registration probes.
+func awaitDegraded(t *testing.T, ch <-chan *corev1.Event) *corev1.DegradedState {
+	t.Helper()
+	deadline := time.After(10 * time.Second)
+	for {
+		select {
+		case ev, ok := <-ch:
+			if !ok {
+				t.Fatal("subscription closed before a degraded report arrived")
+			}
+			if ds := ev.GetDegradedState(); ds != nil && ds.GetComponent() != probeComponent {
+				return ds
+			}
+		case <-deadline:
+			t.Fatal("no DegradedState was delivered after the link recovered")
+		}
+	}
+}
 
 // ---------------------------------------------------------------------------
 // A stoppable, restartable real store
@@ -404,6 +497,88 @@ func TestConnectedStoreWithNoCursorReadsFromZeroExactlyOnce(t *testing.T) {
 	// Assert — once, not on every pass.
 	if len(res.Events) != 0 {
 		t.Fatalf("second poll produced %d event(s); the cold read must happen exactly once", len(res.Events))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// The outage is surfaced, not just logged
+// ---------------------------------------------------------------------------
+
+func TestOutageIsSurfacedAsDegradedStateOnRecovery(t *testing.T) {
+	// Arrange — a sidecar that fails a dial (the outage), then a store that
+	// comes up with a subscriber already listening on the watched session.
+	h := newStoreHarness(t)
+	root, _ := writeHistory(t, 5)
+	s := h.sidecarOver(root)
+	s.dial() // fails; the degraded window opens
+
+	h.start()
+	events := subscribeEvents(t, h.sock, backfillSession)
+
+	// Act — the link comes back, and reports the window it just spent down.
+	s.dial()
+
+	// Assert
+	ds := awaitDegraded(t, events)
+	if ds.GetComponent() != degradedComponent {
+		t.Fatalf("component = %q, want %q", ds.GetComponent(), degradedComponent)
+	}
+	if !ds.GetRecovered() {
+		t.Fatal("report is not marked recovered; it is the CLOSING report of the window")
+	}
+}
+
+func TestNoDegradedReportWhenTheLinkComesUpFirstTry(t *testing.T) {
+	// Arrange — a store that was already up. There is no outage to report.
+	h := newStoreHarness(t)
+	h.start()
+	root, _ := writeHistory(t, 5)
+	s := h.sidecarOver(root)
+
+	// Act
+	if err := s.establish(); err != nil {
+		t.Fatalf("establish: %v", err)
+	}
+
+	// Assert
+	if s.dialFailures != 0 {
+		t.Fatalf("dialFailures = %d, want 0 on a first-try connection", s.dialFailures)
+	}
+}
+
+func TestDegradedEventsAreEphemeralAndSynthetic(t *testing.T) {
+	// Arrange / Act — an operational notice about the pipe, one per session.
+	evs := degradedEvents([]string{"a", "b"}, "store was unreachable")
+
+	// Assert — EPHEMERAL keeps it out of the durable conversation history the
+	// pipe carries, matching how the shim reports its own degraded windows.
+	if len(evs) != 2 {
+		t.Fatalf("built %d event(s), want one per session", len(evs))
+	}
+	for _, ev := range evs {
+		if ev.GetClass() != corev1.EventClass_EVENT_CLASS_EPHEMERAL {
+			t.Fatalf("class = %v, want EPHEMERAL", ev.GetClass())
+		}
+		if ev.GetPlane() != corev1.Plane_PLANE_SYNTHETIC {
+			t.Fatalf("plane = %v, want SYNTHETIC", ev.GetPlane())
+		}
+	}
+}
+
+func TestWatchedSessionsAreDeduplicated(t *testing.T) {
+	// Arrange — two files of the same session, plus one with no session id.
+	s := &sidecar{watchers: map[string]*watched{
+		"/a": {target: discover.Target{SessionID: "s1"}},
+		"/b": {target: discover.Target{SessionID: "s1"}},
+		"/c": {target: discover.Target{}},
+	}}
+
+	// Act
+	got := s.watchedSessions()
+
+	// Assert — the report goes to each channel once.
+	if len(got) != 1 || got[0] != "s1" {
+		t.Fatalf("watchedSessions() = %v, want [s1]", got)
 	}
 }
 

@@ -65,6 +65,9 @@ const (
 	dialBackoffMax = 5 * time.Second
 )
 
+// degradedComponent names this state machine in DegradedState reports.
+const degradedComponent = "shim-claude-sidecar-store-link"
+
 // whenUp runs one unit of ingestion work, and only while the store link is up.
 // EVERY periodic action in the sidecar goes through here, so "reads while the
 // store is down" is one decision in one place rather than a condition each
@@ -132,6 +135,7 @@ func (s *sidecar) establish() error {
 		s.bootSweep()
 		s.bootSwept = true
 	}
+	s.reportOutageClosed()
 	return nil
 }
 
@@ -160,6 +164,69 @@ func (s *sidecar) noteStoreErr(what string, err error) {
 		return
 	}
 	s.linkLost(fmt.Sprintf("%s: %v", what, err))
+}
+
+// reportOutageClosed surfaces the window the sidecar just spent unable to
+// ingest, as the closing report of a DegradedState window (`recovered` is
+// documented as exactly that).
+//
+// Only the CLOSING report is sendable, and that is honest rather than a
+// shortcut: the store is the sidecar's only channel, so while the link is down
+// there is by definition nobody to tell. The outage is loud in the log
+// throughout, and becomes an event the moment there is a store to carry it.
+//
+// A link that came up on its first attempt spent no time down and reports
+// nothing.
+func (s *sidecar) reportOutageClosed() {
+	if s.dialFailures == 0 {
+		return
+	}
+	downMs := time.Since(s.downSince).Milliseconds()
+	reason := fmt.Sprintf("store unreachable for %dms across %d failed dial attempt(s); no files were read during the outage",
+		downMs, s.dialFailures)
+	s.log("store link recovered: %s", reason)
+	s.emit(degradedEvents(s.watchedSessions(), reason))
+	s.dialFailures = 0
+}
+
+// watchedSessions lists the distinct session ids the sidecar currently watches,
+// which are the channels a degraded report can actually reach: the store fans
+// an event out to that session's subscribers and nobody else.
+func (s *sidecar) watchedSessions() []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, w := range s.watchers {
+		id := w.target.SessionID
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		out = append(out, id)
+	}
+	return out
+}
+
+// degradedEvents builds one closing DegradedState per session. They are
+// SYNTHETIC/EPHEMERAL, matching how the shim reports its own degraded windows:
+// an operational notice about the pipe belongs in the live stream, never in the
+// durable conversation history the pipe carries.
+func degradedEvents(sessions []string, reason string) []*corev1.Event {
+	now := time.Now().UnixMilli()
+	out := make([]*corev1.Event, 0, len(sessions))
+	for _, id := range sessions {
+		out = append(out, &corev1.Event{
+			SessionId:    id,
+			Plane:        corev1.Plane_PLANE_SYNTHETIC,
+			Class:        corev1.EventClass_EVENT_CLASS_EPHEMERAL,
+			ProducedAtMs: now,
+			Payload: &corev1.Event_DegradedState{DegradedState: &corev1.DegradedState{
+				Component: degradedComponent,
+				Reason:    reason,
+				Recovered: true,
+			}},
+		})
+	}
+	return out
 }
 
 // armDial schedules the next dial attempt after d. Every caller runs on Run's
