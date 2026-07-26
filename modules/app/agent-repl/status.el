@@ -587,9 +587,10 @@ or the vendor restarts it\".")
 
 (defconst agent-repl--label-start-failed     "🚫"
   "Bracket label shown adjacent to the numeric index when starting
-the agent failed.  Distinct from `:stop-failed' (⚠, a live re-promptable
-session) and `:dead' (❌, a session that died) — the session never came
-up at all.")
+the agent failed.  Distinct from `:dead' (❌, a session that died) — the
+session never came up at all.  There is no `:stop-failed' glyph to be
+distinct from any more: a stop that did not land leaves the turn RUNNING,
+so the workspace stays red and the failure surfaces as a card.")
 
 (defconst agent-repl--label-merge-conflict   "💥"
   "Bracket label shown adjacent to the numeric index when a workspace's
@@ -643,6 +644,61 @@ Distributed evenly across `agent-repl-flash-count' on/off cycles."
                  :bracket-fg ,agent-repl--color-dark
                  :weight ,agent-repl--tab-weight))
   "Default tab-appearance spec for states absent from `agent-repl--tab-palette'.")
+
+;; --- The five-color assignment --- ;;
+
+(defconst agent-repl--state-color
+  '((:init           . "blue")
+    (:dead           . "blue")
+    (:degraded       . "blue")
+    (:start-failed   . "blue")
+    (:vendor-blocked . "purple")
+    (:thinking       . "red")
+    (:idle-async     . "yellow")
+    (:idle           . "green")
+    (:ready          . "green")
+    (:done           . "green")
+    (:permission     . "green")
+    (:merging        . "none")
+    (:merge-queued   . "none")
+    (:merge-conflict . "none")
+    (:merge-failed   . "none")
+    (:merged         . "none"))
+  "Which of the five colors each render state takes, BY NAME.
+
+This is Emacs\='s corner of the cross-language contract in
+proto/vocab/render-colors.json.  Go, TypeScript and this table each
+assert against that one file, which is the only mechanism that makes a
+divergence between the three fail loudly rather than quietly — sidebar.el
+has claimed in a COMMENT that its wire table and the webapp\='s union are
+one contract, and until now nothing checked it.
+
+It names the color rather than its value: each renderer keeps its own
+hex, since a tab-bar background and a CSS dot legitimately want different
+shades of one idea.  What may never differ is the ASSIGNMENT.
+
+\"none\" is a real answer.  The merge states carry badges and glyphs
+precisely so they never spend one of the five.")
+
+(defconst agent-repl--color-by-name
+  `(("blue"   . ,agent-repl--color-init-blue)
+    ("purple" . ,agent-repl--color-vendor-blocked-purple)
+    ("red"    . ,agent-repl--color-thinking-red)
+    ("yellow" . ,agent-repl--color-idle-async-yellow)
+    ("green"  . ,agent-repl--color-done-green))
+  "Map each of the five color NAMES to the constant this renderer draws it with.
+
+The indirection is what lets `agent-repl--state-color\=' speak the shared
+vocabulary while the palette keeps painting with Emacs\='s own values.")
+
+(defconst agent-repl--color-precedence
+  '("blue" "purple" "red" "yellow" "green")
+  "The five-color precedence, strongest claim first.
+
+Each color is a strictly stronger claim about what the user CANNOT do
+than the one beneath it.  The SSM\='s SQL `prec\=' ranks are the sole
+authority; this restates that order for the cross-language assertion and
+may never reorder it.")
 
 (defconst agent-repl--tab-palette
   `((:init
@@ -1073,7 +1129,7 @@ dismissed for a workspace that still has agent-state), the spec is
 built via `agent-repl--tab-spec-bracket-only' so only the [N] bracket
 keeps the state's color.  The bracket label is driven by bracket-state
 when display-state is suppressed, so palette `:label' glyphs (❓ for
-:permission, ❌ for :dead, ⚠ for :stop-failed) render even on
+:permission, ❌ for :dead, 🚫 for :start-failed) render even on
 workspaces whose agent panels are closed — only the full-tab
 background requires panels to be open.  When the workspace's
 `:flashing' flag is set \(see `agent-repl-flash-tab'\), the spec and

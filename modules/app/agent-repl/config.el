@@ -339,6 +339,11 @@ returns the SHA string (or the sentinel \"unknown\" when undetermined)."
 (agent-repl--load-module "session")
 (agent-repl--load-module "daemon")
 (agent-repl--load-module "frontend-client")
+;; The classified-failure vocabulary (F4): the ONE place Emacs turns a
+;; failure into something a human reads, and the closed `client.'-prefixed
+;; set it is allowed to classify for itself. Loaded BEFORE the transport,
+;; which surfaces a refused command's classified ack through it.
+(agent-repl--load-module "failure")
 ;; The agent-shim frontend UDS transport + state application (design §10,
 ;; G10).  Loaded right after frontend-client: `frontend-uds' owns the
 ;; connection/framing/dispatch, `frontend-state' registers the state-bearing
