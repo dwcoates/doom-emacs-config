@@ -276,6 +276,73 @@ vendor events that previously died in `conversationItemsFromVendor`.
   the corresponding item, which needs the item's address. `ErrorItem` /
   `RetryItem` grew a matching `uuid` in the webapp store.
 
+### Retry sourcing after the SDK 0.3.220 upgrade
+
+The retrying window now has TWO sources describing the same backoff on
+different planes, with a strict precedence between them:
+
+- **`data.ApiRetry`** (stream `system/api_retry`) is AUTHORITATIVE. It carries
+  what the transcript twin cannot — the backoff delay and the HTTP status — so
+  its detail reads `attempt 3/10 · next in 8s · 529`. A connection error that
+  never got a response has no status to print (`error_status_set` false), so
+  the detail names the typed error family instead (`server error`); a bare `0`
+  would read as a status.
+- **`data.ApiErrorLine`** (transcript `system/api_error`) is the FALLBACK for
+  the window and remains the SOLE terminal error record. It opens the window
+  only when no `api_retry` has spoken for it (`retryDetailRich`), because the
+  disk twin generally lands second and would otherwise overwrite the richer
+  live detail with its own poorer one. When retries are EXHAUSTED it still
+  closes the window and sets `error_summary` — `api_retry` never reports a
+  terminal failure, so that half is unchanged.
+
+`retryDetailRich` clears whenever the window closes (terminal error, turn
+start, turn end), so the fallback speaks again on the next turn and a session
+whose plane or CLI version emits no `api_retry` at all is never left with a
+shut window.
+
+### `session_state_changed`: a window, deliberately NOT a phase
+
+`data.SessionStateChanged` drives EXACTLY ONE thing: the new
+`ProgressView.blocked` window (`requires_action` opens it, `idle`/`running`
+close it, anything else is loud-logged and changes nothing).
+
+It is deliberately NOT wired to `ProgressView.state`. The SSM remains THE
+phase authority, and two independent phase sources is precisely the drift the
+SSM exists to prevent — a test pins this: an `idle` report while the SSM has
+resolved `THINKING` leaves the phase untouched.
+
+What it genuinely adds is a fact the daemon cannot otherwise see. The daemon
+counts the permission prompts IT parked (`pending_permissions`), but a session
+can block on an interaction the daemon holds no count for, so that count alone
+under-reports "waiting on you". `requires_action` is the session's own report
+of exactly that.
+
+In the footer's activity cell it sits ABOVE the retry/compaction/hook/tool band
+("nothing will happen until you act" outranks any account of the agent being
+busy) and BELOW auth and rate limits (the same statement with a specific
+remedy attached).
+
+### Per-model token usage: no new surface was needed
+
+The tokens overlay's per-model sections rendered as dashes because the store
+marked `resultUsage`/`modelUsage` as GAPs on the premise that `frontend.v1`
+carries no `model_usage` map. That premise was wrong.
+
+`translate.go`'s `resultItems` passes the typed `ResultMessage` through
+UNCHANGED into the `result` conversation item, and `frontend-proto` adopts an
+item's payload opaquely, so `modelUsage` has been arriving intact the whole
+time — the webapp adapter simply never read it. The fix was to read it: no
+proto field, no daemon change.
+
+Both figures are session-CUMULATIVE snapshots the SDK recomputes per result,
+so a landed result REPLACES rather than accumulates, and `turnUsage` clears
+with the baseline so a request already folded into it is never counted twice.
+An ABSENT map leaves the standing one alone (the SDK declined to itemize this
+result); an EMPTY map is a real, different answer and is adopted.
+
+Per-model figures stay TOPBAR territory by the settled decision — nothing
+per-model appears in the footer.
+
 ### Counter relocation (executed)
 
 The topbar's `sessionTopbarDatapoints` now returns empty `agents` / `tasks`,

@@ -28,6 +28,8 @@ import (
 	"fmt"
 	"log"
 	"sort"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -114,6 +116,17 @@ type workspaceProgress struct {
 	// on-disk transcript), so counting every sighting would double the turn's
 	// input figure. Reset at each turn start.
 	countedUsage map[string]struct{}
+	// retryDetailRich marks the retrying window's detail as having come from a
+	// data.ApiRetry rather than the poorer ApiErrorLine retry fields.
+	//
+	// The two are TWINS describing the same backoff on different planes: the
+	// stream's api_retry (which carries the backoff delay and the HTTP status)
+	// and the transcript's api_error (which carries attempt counts only). The
+	// disk twin generally lands second, so without this flag it would overwrite
+	// the richer live detail with its own. Cleared whenever the window closes,
+	// so the ApiErrorLine fallback still works for a plane or a CLI version
+	// that emits no api_retry at all.
+	retryDetailRich bool
 }
 
 // New builds a Manager.
@@ -336,8 +349,41 @@ func (m *Manager) applyStreamLocked(workspace string, wp *workspaceProgress, csm
 			inner.AuthStatus.GetIsAuthenticating(), atMs, authDetail(inner.AuthStatus))
 	case *datav1.ClaudeStreamMessage_RateLimitEvent:
 		m.applyRateLimitLocked(workspace, wp, inner.RateLimitEvent.GetRateLimitInfo())
+	case *datav1.ClaudeStreamMessage_ApiRetry:
+		// STRUCTURAL: the AUTHORITATIVE retrying source. It carries what the
+		// transcript twin cannot — the backoff delay and the HTTP status — so it
+		// claims the window's detail and marks it rich.
+		m.setWindowLocked(workspace, wp, &wp.view.Retrying, true, atMs, apiRetryDetail(inner.ApiRetry))
+		wp.retryDetailRich = true
+	case *datav1.ClaudeStreamMessage_SessionStateChanged:
+		m.applySessionStateLocked(workspace, wp, inner.SessionStateChanged.GetState(), atMs)
 	default:
 		// A known stream arm carrying no progress fact of its own.
+	}
+}
+
+// applySessionStateLocked folds the session's own idle/running/blocked report.
+//
+// It drives EXACTLY ONE thing: the `blocked` window. It is deliberately NOT a
+// phase source — `view.State` stays the SSM's verdict alone, because two
+// independent phase authorities is precisely the drift the SSM exists to
+// prevent. What this adds instead is a fact the daemon cannot otherwise see:
+// `requires_action` means the session is parked on the USER, and it covers
+// interactions the daemon holds no count for, so `pending_permissions` alone
+// under-reports "waiting on you".
+//
+// `idle` and `running` both close the window: neither is blocked, and the
+// difference between them is the SSM's business, not this window's. An
+// unrecognized state is loud-logged and changes nothing rather than being
+// guessed at.
+func (m *Manager) applySessionStateLocked(workspace string, wp *workspaceProgress, state string, atMs int64) {
+	switch state {
+	case "requires_action":
+		m.setWindowLocked(workspace, wp, &wp.view.Blocked, true, atMs, "waiting on you")
+	case "idle", "running":
+		m.setWindowLocked(workspace, wp, &wp.view.Blocked, false, atMs, "")
+	default:
+		m.logf("progress: unknown session state %q ws=%s; blocked window unchanged", state, workspace)
 	}
 }
 
@@ -390,19 +436,28 @@ func (m *Manager) applyTranscriptLocked(workspace string, wp *workspaceProgress,
 // applyApiErrorLocked splits the ApiErrorLine family into its two meanings.
 //
 // A line WITH retries remaining is the SDK saying "this failed and I am going
-// again": the retrying window opens (or refreshes its detail) and no error is
-// reported, because the turn has not failed. A line with retries EXHAUSTED is
-// the terminal account of the failure: the window closes and the error summary
-// takes over, addressed to the line's own item so the footer's error row can
-// scroll the feed to it.
+// again": the retrying window opens and no error is reported, because the turn
+// has not failed. This is the FALLBACK half of the retry sourcing — a live
+// data.ApiRetry says the same thing with a backoff delay and an HTTP status
+// attached, so once one has spoken for this window its detail stands and this
+// line does not downgrade it (see `retryDetailRich`).
+//
+// A line with retries EXHAUSTED is the TERMINAL account of the failure, which
+// is this family's own job and which api_retry never reports: the window
+// closes and the error summary takes over, addressed to the line's own item so
+// the footer's error row can scroll the feed to it.
 func (m *Manager) applyApiErrorLocked(workspace string, wp *workspaceProgress, uuid string, ae *datav1.ApiErrorLine, atMs int64) {
 	attempt, max := ae.GetRetryAttempt(), ae.GetMaxRetries()
 	retrying := max > 0 && attempt < max
 	if retrying {
+		if wp.retryDetailRich {
+			return // api_retry already said it better
+		}
 		m.setWindowLocked(workspace, wp, &wp.view.Retrying, true, atMs, retryDetail(ae))
 		return
 	}
 	m.setWindowLocked(workspace, wp, &wp.view.Retrying, false, atMs, "")
+	wp.retryDetailRich = false
 	summary := errorSummary(ae)
 	if wp.view.GetErrorSummary() == summary && wp.view.GetErrorItemUuid() == uuid {
 		return
@@ -471,6 +526,7 @@ func (m *Manager) openTurnLocked(wp *workspaceProgress, atMs int64) bool {
 	wp.view.ErrorSummary = ""
 	wp.view.ErrorItemUuid = ""
 	wp.view.Retrying = nil
+	wp.retryDetailRich = false
 	return true
 }
 
@@ -481,6 +537,7 @@ func (m *Manager) closeTurnLocked(wp *workspaceProgress, te *corev1.TurnEnded) {
 	wp.turnOpen = false
 	wp.view.TurnStartedAtMs = 0
 	wp.view.Retrying = nil
+	wp.retryDetailRich = false
 	if te.GetIsError() {
 		// A turn-end error carries no ApiErrorLine of its own, so the summary has
 		// no addressable feed item — the uuid stays empty rather than pointing at
@@ -706,6 +763,63 @@ func retryDetail(ae *datav1.ApiErrorLine) string {
 		detail += " · " + msg
 	}
 	return detail
+}
+
+// apiRetryDetail renders a data.ApiRetry as the footer's activity detail: the
+// attempt, how long until the next one, and what failed.
+//
+// The failure is named by the HTTP status when there was a response and by the
+// typed error enum otherwise — which is exactly the distinction `error_status_set`
+// exists to carry, since a connection error that never got a response has no
+// status to print and a bare 0 would read as one.
+func apiRetryDetail(r *datav1.ApiRetry) string {
+	parts := []string{fmt.Sprintf("attempt %d/%d", r.GetAttempt(), r.GetMaxRetries())}
+	if d := r.GetRetryDelayMs(); d > 0 {
+		parts = append(parts, "next in "+formatDelay(d))
+	}
+	if cause := retryCause(r); cause != "" {
+		parts = append(parts, cause)
+	}
+	return strings.Join(parts, " · ")
+}
+
+// retryCause names what the retry is retrying: the HTTP status when the
+// request got a response, else the typed error family.
+func retryCause(r *datav1.ApiRetry) string {
+	if r.GetErrorStatusSet() {
+		return strconv.FormatInt(r.GetErrorStatus(), 10)
+	}
+	return assistantErrorName(r.GetError())
+}
+
+// assistantErrorName is the short human token for an AssistantMessageError, or
+// "" when the enum is unset (nothing useful to add to the detail line).
+func assistantErrorName(e datav1.AssistantMessageError) string {
+	switch e {
+	case datav1.AssistantMessageError_ASSISTANT_MESSAGE_ERROR_AUTHENTICATION_FAILED:
+		return "auth failed"
+	case datav1.AssistantMessageError_ASSISTANT_MESSAGE_ERROR_BILLING_ERROR:
+		return "billing"
+	case datav1.AssistantMessageError_ASSISTANT_MESSAGE_ERROR_RATE_LIMIT:
+		return "rate limit"
+	case datav1.AssistantMessageError_ASSISTANT_MESSAGE_ERROR_INVALID_REQUEST:
+		return "invalid request"
+	case datav1.AssistantMessageError_ASSISTANT_MESSAGE_ERROR_SERVER_ERROR:
+		return "server error"
+	case datav1.AssistantMessageError_ASSISTANT_MESSAGE_ERROR_UNKNOWN:
+		return "unknown error"
+	default:
+		return ""
+	}
+}
+
+// formatDelay renders a backoff in the coarsest unit that still reads: whole
+// seconds once past a second, millis below it.
+func formatDelay(ms int64) string {
+	if ms < 1000 {
+		return fmt.Sprintf("%dms", ms)
+	}
+	return fmt.Sprintf("%ds", (ms+999)/1000)
 }
 
 // errorSummary renders an exhausted-retry failure as the footer's error row.

@@ -2991,11 +2991,21 @@ type ProgressView struct {
 	InputTokens    int64 `protobuf:"varint,6,opt,name=input_tokens,json=inputTokens,proto3" json:"input_tokens,omitempty"`          // THIS TURN's cumulative cached+uncached input
 	TtftMs         int64 `protobuf:"varint,7,opt,name=ttft_ms,json=ttftMs,proto3" json:"ttft_ms,omitempty"`                         // first-token latency of the current message
 	// Activity windows: open until cleared.
-	Compacting     *ProgressWindow  `protobuf:"bytes,8,opt,name=compacting,proto3" json:"compacting,omitempty"`                       // data.StatusMessage status="compacting"
-	Retrying       *ProgressWindow  `protobuf:"bytes,9,opt,name=retrying,proto3" json:"retrying,omitempty"`                           // ApiErrorLine retry family
+	Compacting *ProgressWindow `protobuf:"bytes,8,opt,name=compacting,proto3" json:"compacting,omitempty"` // data.StatusMessage status="compacting"
+	Retrying   *ProgressWindow `protobuf:"bytes,9,opt,name=retrying,proto3" json:"retrying,omitempty"`     // data.ApiRetry, else the ApiErrorLine
+	// retry family (see §retry sourcing)
 	Authenticating *ProgressWindow  `protobuf:"bytes,10,opt,name=authenticating,proto3" json:"authenticating,omitempty"`              // data.AuthStatus
 	Hook           *ProgressWindow  `protobuf:"bytes,11,opt,name=hook,proto3" json:"hook,omitempty"`                                  // data.HookStarted / HookResponse
 	RateLimited    *RateLimitWindow `protobuf:"bytes,12,opt,name=rate_limited,json=rateLimited,proto3" json:"rate_limited,omitempty"` // data.RateLimitEvent
+	// The session itself reporting it is parked on the USER
+	// (data.SessionStateChanged state="requires_action").
+	//
+	// NOT A PHASE. `state` above remains the SSM's verdict and the SSM remains
+	// the sole phase authority; this is an activity window like every other one
+	// here, and it exists because it carries a fact the daemon cannot otherwise
+	// see: the session can be blocked on an interaction the daemon holds no
+	// count for, so `pending_permissions` alone under-reports "waiting on you".
+	Blocked *ProgressWindow `protobuf:"bytes,18,opt,name=blocked,proto3" json:"blocked,omitempty"`
 	// Error state: persists until the next turn starts. Set from a terminal
 	// ApiErrorLine (retries exhausted) or an errored turn end.
 	ErrorSummary string `protobuf:"bytes,13,opt,name=error_summary,json=errorSummary,proto3" json:"error_summary,omitempty"`
@@ -3121,6 +3131,13 @@ func (x *ProgressView) GetHook() *ProgressWindow {
 func (x *ProgressView) GetRateLimited() *RateLimitWindow {
 	if x != nil {
 		return x.RateLimited
+	}
+	return nil
+}
+
+func (x *ProgressView) GetBlocked() *ProgressWindow {
+	if x != nil {
+		return x.Blocked
 	}
 	return nil
 }
@@ -3475,7 +3492,7 @@ const file_agentshim_frontend_v1_frontend_proto_rawDesc = "" +
 	"\x06active\x18\x01 \x01(\bR\x06active\x12\x1b\n" +
 	"\tresets_at\x18\x02 \x01(\x03R\bresetsAt\x12 \n" +
 	"\vutilization\x18\x03 \x01(\x01R\vutilization\x12\x16\n" +
-	"\x06status\x18\x04 \x01(\tR\x06status\"\xbd\x06\n" +
+	"\x06status\x18\x04 \x01(\tR\x06status\"\xfe\x06\n" +
 	"\fProgressView\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12\x1d\n" +
 	"\n" +
@@ -3492,7 +3509,8 @@ const file_agentshim_frontend_v1_frontend_proto_rawDesc = "" +
 	"\x0eauthenticating\x18\n" +
 	" \x01(\v2%.agentshim.frontend.v1.ProgressWindowR\x0eauthenticating\x129\n" +
 	"\x04hook\x18\v \x01(\v2%.agentshim.frontend.v1.ProgressWindowR\x04hook\x12I\n" +
-	"\frate_limited\x18\f \x01(\v2&.agentshim.frontend.v1.RateLimitWindowR\vrateLimited\x12#\n" +
+	"\frate_limited\x18\f \x01(\v2&.agentshim.frontend.v1.RateLimitWindowR\vrateLimited\x12?\n" +
+	"\ablocked\x18\x12 \x01(\v2%.agentshim.frontend.v1.ProgressWindowR\ablocked\x12#\n" +
 	"\rerror_summary\x18\r \x01(\tR\ferrorSummary\x12&\n" +
 	"\x0ferror_item_uuid\x18\x11 \x01(\tR\rerrorItemUuid\x12/\n" +
 	"\x13pending_permissions\x18\x0e \x01(\x03R\x12pendingPermissions\x12\x1f\n" +
@@ -3660,18 +3678,19 @@ var file_agentshim_frontend_v1_frontend_proto_depIdxs = []int32{
 	33, // 51: agentshim.frontend.v1.ProgressView.authenticating:type_name -> agentshim.frontend.v1.ProgressWindow
 	33, // 52: agentshim.frontend.v1.ProgressView.hook:type_name -> agentshim.frontend.v1.ProgressWindow
 	34, // 53: agentshim.frontend.v1.ProgressView.rate_limited:type_name -> agentshim.frontend.v1.RateLimitWindow
-	5,  // 54: agentshim.frontend.v1.StateSnapshot.workspaces:type_name -> agentshim.frontend.v1.WorkspaceState
-	6,  // 55: agentshim.frontend.v1.StateSnapshot.sessions:type_name -> agentshim.frontend.v1.SessionView
-	13, // 56: agentshim.frontend.v1.StateSnapshot.catalogs:type_name -> agentshim.frontend.v1.TaskCatalog
-	4,  // 57: agentshim.frontend.v1.StateSnapshot.daemon:type_name -> agentshim.frontend.v1.DaemonView
-	11, // 58: agentshim.frontend.v1.StateSnapshot.inits:type_name -> agentshim.frontend.v1.SessionInitView
-	16, // 59: agentshim.frontend.v1.StateSnapshot.queues:type_name -> agentshim.frontend.v1.QueueView
-	35, // 60: agentshim.frontend.v1.StateSnapshot.progress:type_name -> agentshim.frontend.v1.ProgressView
-	61, // [61:61] is the sub-list for method output_type
-	61, // [61:61] is the sub-list for method input_type
-	61, // [61:61] is the sub-list for extension type_name
-	61, // [61:61] is the sub-list for extension extendee
-	0,  // [0:61] is the sub-list for field type_name
+	33, // 54: agentshim.frontend.v1.ProgressView.blocked:type_name -> agentshim.frontend.v1.ProgressWindow
+	5,  // 55: agentshim.frontend.v1.StateSnapshot.workspaces:type_name -> agentshim.frontend.v1.WorkspaceState
+	6,  // 56: agentshim.frontend.v1.StateSnapshot.sessions:type_name -> agentshim.frontend.v1.SessionView
+	13, // 57: agentshim.frontend.v1.StateSnapshot.catalogs:type_name -> agentshim.frontend.v1.TaskCatalog
+	4,  // 58: agentshim.frontend.v1.StateSnapshot.daemon:type_name -> agentshim.frontend.v1.DaemonView
+	11, // 59: agentshim.frontend.v1.StateSnapshot.inits:type_name -> agentshim.frontend.v1.SessionInitView
+	16, // 60: agentshim.frontend.v1.StateSnapshot.queues:type_name -> agentshim.frontend.v1.QueueView
+	35, // 61: agentshim.frontend.v1.StateSnapshot.progress:type_name -> agentshim.frontend.v1.ProgressView
+	62, // [62:62] is the sub-list for method output_type
+	62, // [62:62] is the sub-list for method input_type
+	62, // [62:62] is the sub-list for extension type_name
+	62, // [62:62] is the sub-list for extension extendee
+	0,  // [0:62] is the sub-list for field type_name
 }
 
 func init() { file_agentshim_frontend_v1_frontend_proto_init() }

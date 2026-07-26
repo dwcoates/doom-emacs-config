@@ -628,6 +628,218 @@ func TestExhaustedApiErrorClosesTheRetryingWindow(t *testing.T) {
 	}
 }
 
+// --- data.ApiRetry: the richer in-flight retry source -----------------------
+
+// apiRetry builds the stream plane's api_retry message.
+func apiRetry(attempt, max int32, delayMs int64, status int64, statusSet bool, err datav1.AssistantMessageError) *datav1.ClaudeStreamMessage {
+	return &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_ApiRetry{
+		ApiRetry: &datav1.ApiRetry{
+			Attempt: attempt, MaxRetries: max, RetryDelayMs: delayMs,
+			ErrorStatus: status, ErrorStatusSet: statusSet, Error: err,
+		},
+	}}
+}
+
+func TestApiRetryOpensTheRetryingWindow(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	// Act
+	h.apply(streamEvent(t, apiRetry(3, 10, 8000, 529, true, 0)))
+	// Assert
+	if w := h.last().GetRetrying(); !w.GetActive() {
+		t.Fatalf("retrying window = %+v, want opened by api_retry", w)
+	}
+}
+
+func TestApiRetryCarriesTheBackoffDelay(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	// Act — the delay is what the transcript twin cannot report.
+	h.apply(streamEvent(t, apiRetry(3, 10, 8000, 529, true, 0)))
+	// Assert
+	if got := h.last().GetRetrying().GetDetail(); got != "attempt 3/10 · next in 8s · 529" {
+		t.Fatalf("retrying detail = %q, want the attempt, backoff and status", got)
+	}
+}
+
+func TestApiRetrySubSecondBackoffReadsInMillis(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	// Act
+	h.apply(streamEvent(t, apiRetry(1, 10, 250, 500, true, 0)))
+	// Assert — a "0s" backoff would read as no wait at all.
+	if got := h.last().GetRetrying().GetDetail(); got != "attempt 1/10 · next in 250ms · 500" {
+		t.Fatalf("retrying detail = %q, want a millisecond backoff", got)
+	}
+}
+
+func TestApiRetryNamesTheErrorFamilyWhenThereWasNoResponse(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	// Act — a connection error never got an HTTP status, which is exactly what
+	// error_status_set=false marks; printing a bare 0 would read as a status.
+	h.apply(streamEvent(t, apiRetry(2, 10, 1000, 0, false,
+		datav1.AssistantMessageError_ASSISTANT_MESSAGE_ERROR_SERVER_ERROR)))
+	// Assert
+	if got := h.last().GetRetrying().GetDetail(); got != "attempt 2/10 · next in 1s · server error" {
+		t.Fatalf("retrying detail = %q, want the typed error family", got)
+	}
+}
+
+func TestApiRetryReportsNoError(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	// Act — a retry in flight is not a failed turn.
+	h.apply(streamEvent(t, apiRetry(3, 10, 8000, 529, true, 0)))
+	// Assert
+	if got := h.last().GetErrorSummary(); got != "" {
+		t.Fatalf("errorSummary = %q, want empty while a retry is in flight", got)
+	}
+}
+
+func TestApiRetryDetailSurvivesTheTranscriptTwin(t *testing.T) {
+	// Arrange — the live api_retry lands first with the richer detail.
+	h := newHarness(t)
+	h.apply(streamEvent(t, apiRetry(3, 10, 8000, 529, true, 0)))
+	h.drain()
+	// Act — the disk twin of the SAME backoff arrives after it.
+	h.apply(vendorEvent(t, apiErrorLine("e1", "overloaded", 3, 10)))
+	// Assert — the poorer detail must not overwrite the richer one.
+	cur, _ := h.m.Current(testWS)
+	if got := cur.GetRetrying().GetDetail(); got != "attempt 3/10 · next in 8s · 529" {
+		t.Fatalf("retrying detail = %q, want the api_retry detail preserved", got)
+	}
+}
+
+func TestApiErrorStillOpensTheWindowWithoutAnApiRetry(t *testing.T) {
+	// Arrange — a plane (or CLI version) that emits no api_retry at all.
+	h := newHarness(t)
+	// Act
+	h.apply(vendorEvent(t, apiErrorLine("e1", "overloaded", 3, 10)))
+	// Assert — the fallback still speaks, so the window is never left shut.
+	if got := h.last().GetRetrying().GetDetail(); got != "attempt 3/10 · overloaded" {
+		t.Fatalf("retrying detail = %q, want the ApiErrorLine fallback", got)
+	}
+}
+
+func TestTerminalApiErrorStillWinsOverAnOpenApiRetry(t *testing.T) {
+	// Arrange — a retry in flight, then the retries run out.
+	h := newHarness(t)
+	h.apply(streamEvent(t, apiRetry(10, 10, 8000, 529, true, 0)))
+	h.drain()
+	// Act — ApiErrorLine remains the TERMINAL record; api_retry never reports one.
+	h.apply(vendorEvent(t, apiErrorLine("e9", "overloaded (529)", 10, 10)))
+	// Assert
+	v := h.last()
+	if v.GetErrorSummary() == "" {
+		t.Fatal("wanted the terminal ApiErrorLine to set the error summary")
+	}
+	if v.GetRetrying().GetActive() {
+		t.Fatalf("retrying window = %+v, want closed by the terminal error", v.GetRetrying())
+	}
+}
+
+func TestAFreshTurnLetsTheApiErrorFallbackSpeakAgain(t *testing.T) {
+	// Arrange — a previous turn's api_retry claimed the rich detail.
+	h := newHarness(t)
+	h.openTurn()
+	h.apply(streamEvent(t, apiRetry(1, 10, 8000, 529, true, 0)))
+	h.apply(&corev1.Event{
+		SessionId: testSID, ProducedAtMs: atMs,
+		Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{}},
+	})
+	h.drain()
+	// Act — the next turn retries, and only the disk twin reports it.
+	h.m.NoteTurnAccepted(testWS, testSID)
+	h.apply(vendorEvent(t, apiErrorLine("e1", "overloaded", 2, 10)))
+	// Assert — the rich-detail claim did not outlive its turn.
+	if got := h.last().GetRetrying().GetDetail(); got != "attempt 2/10 · overloaded" {
+		t.Fatalf("retrying detail = %q, want the fallback speaking on a fresh turn", got)
+	}
+}
+
+// --- data.SessionStateChanged: the blocked window, NOT a phase --------------
+
+// sessionState builds the stream plane's session_state_changed message.
+func sessionState(state string) *datav1.ClaudeStreamMessage {
+	return &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_SessionStateChanged{
+		SessionStateChanged: &datav1.SessionStateChanged{State: state},
+	}}
+}
+
+func TestRequiresActionOpensTheBlockedWindow(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	// Act
+	h.apply(streamEvent(t, sessionState("requires_action")))
+	// Assert
+	w := h.last().GetBlocked()
+	if !w.GetActive() || w.GetDetail() != "waiting on you" {
+		t.Fatalf("blocked window = %+v, want active and named", w)
+	}
+}
+
+func TestRunningClosesTheBlockedWindow(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.apply(streamEvent(t, sessionState("requires_action")))
+	h.drain()
+	// Act
+	h.apply(streamEvent(t, sessionState("running")))
+	// Assert
+	if w := h.last().GetBlocked(); w.GetActive() {
+		t.Fatalf("blocked window = %+v, want closed", w)
+	}
+}
+
+func TestIdleClosesTheBlockedWindow(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.apply(streamEvent(t, sessionState("requires_action")))
+	h.drain()
+	// Act
+	h.apply(streamEvent(t, sessionState("idle")))
+	// Assert
+	if w := h.last().GetBlocked(); w.GetActive() {
+		t.Fatalf("blocked window = %+v, want closed", w)
+	}
+}
+
+func TestSessionStateNeverTouchesThePhase(t *testing.T) {
+	// Arrange — the SSM has resolved THINKING and remains the phase authority.
+	h := newHarness(t)
+	if err := h.m.ObserveWorkspaceState(&frontendv1.WorkspaceState{
+		Workspace: testWS, State: frontendv1.RenderState_RENDER_STATE_THINKING,
+	}); err != nil {
+		t.Fatalf("ObserveWorkspaceState: %v", err)
+	}
+	h.drain()
+	// Act — the session reports itself idle, which is a DIFFERENT question.
+	h.apply(streamEvent(t, sessionState("idle")))
+	// Assert — two phase authorities is exactly the drift the SSM prevents.
+	cur, _ := h.m.Current(testWS)
+	if cur.GetState() != frontendv1.RenderState_RENDER_STATE_THINKING {
+		t.Fatalf("state = %v, want the SSM's THINKING untouched", cur.GetState())
+	}
+}
+
+func TestUnknownSessionStateChangesNothing(t *testing.T) {
+	// Arrange — a state this resolver has no policy for.
+	h := newHarness(t)
+	h.apply(streamEvent(t, sessionState("requires_action")))
+	h.drain()
+	// Act
+	h.apply(streamEvent(t, sessionState("teleporting")))
+	// Assert — guessing at it would be worse than leaving the window standing.
+	if pushes := h.drain(); len(pushes) != 0 {
+		t.Fatalf("wanted no push for an unknown session state, got %d", len(pushes))
+	}
+	cur, _ := h.m.Current(testWS)
+	if !cur.GetBlocked().GetActive() {
+		t.Fatal("wanted the standing blocked window left alone")
+	}
+}
+
 // --- daemon-local counts ----------------------------------------------------
 
 func TestSetCountsCarriesThePendingAndQueuedFigures(t *testing.T) {

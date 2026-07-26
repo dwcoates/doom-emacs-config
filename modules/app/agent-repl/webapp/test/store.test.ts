@@ -944,6 +944,7 @@ describe("the progress footer's input (F1)", () => {
       retrying: null,
       authenticating: null,
       hook: null,
+      blocked: null,
       rateLimited: null,
       errorSummary: "",
       errorItemUuid: "",

@@ -204,6 +204,8 @@ export interface ProgressInput {
   authenticating: ProgressWindowInput | null;
   hook: ProgressWindowInput | null;
   rateLimited: RateLimitInput | null;
+  /** The session reporting it is parked on the user. NOT a phase. */
+  blocked: ProgressWindowInput | null;
   /** Persists until the next turn starts; "" = no error standing. */
   errorSummary: string;
   /** The feed item the error row scrolls to; "" = not addressable. */
@@ -456,6 +458,7 @@ export class StateAdapter {
         retrying: openWindow(pv.retrying),
         authenticating: openWindow(pv.authenticating),
         hook: openWindow(pv.hook),
+        blocked: openWindow(pv.blocked),
         rateLimited:
           pv.rateLimited !== undefined && pv.rateLimited.active
             ? {
