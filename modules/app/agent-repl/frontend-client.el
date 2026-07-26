@@ -36,6 +36,8 @@
 (require 'cl-lib)
 
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
+(declare-function agent-repl--log-verbose "agent-repl-core" (ws fmt &rest args))
+(declare-function agent-repl--ws-current-name "agent-repl-workspace" ())
 (declare-function agent-repl--ws-get "agent-repl-workspace" (ws key))
 (declare-function agent-repl--ws-put "agent-repl-workspace" (ws key val))
 (declare-function agent-repl--ensure-frontend-daemon "agent-repl-daemon" (&optional force))
@@ -622,7 +624,15 @@ predate boot ids report nil, which never triggers a reset."
       (dolist (ws (agent-repl--live-ws-names))
         (when (agent-repl--ws-get ws :reattach-failed)
           (agent-repl--ws-put ws :reattach-failed nil)
-          (agent-repl--ws-put ws :reattach-failures nil))))
+          (agent-repl--ws-put ws :reattach-failures nil))
+        ;; The switch-ensure give-up binds to ONE daemon instance for the same
+        ;; reason: a workspace the old instance could not open deserves a
+        ;; fresh attempt from the new one. Its cooldown stamp goes too, so the
+        ;; first switch after a bounce is not swallowed by the old timer.
+        (when (agent-repl--ws-get ws :switch-ensure-failed)
+          (agent-repl--ws-put ws :switch-ensure-failed nil)
+          (agent-repl--ws-put ws :switch-ensure-failures nil))
+        (agent-repl--ws-put ws :switch-ensure-at nil)))
     (setq agent-repl--frontend-last-boot-id boot-id)))
 
 (defun agent-repl--frontend-reattach-ws (ws stale-id)
@@ -837,6 +847,130 @@ is gone — matching the already-dead server behavior (the retired HTTP
                 (agent-repl--frontend-ws-command-key ws))))
       (agent-repl--uds-track-command req "submitPrompt" ws)
       req)))
+
+;;;; ---- Never-blue: the workspace-SWITCH ensure ---------------------------
+;;
+;; WHY `openWorkspace' AND NOT A NEW `switchWorkspace' ARM.
+;;
+;; The daemon's open handler is already an idempotent "ensure this workspace"
+;; and carries NO view side effects, so a switch means exactly what an open
+;; means to it.  `server.WorkspaceOpener.Open' (daemon/internal/server/
+;; workspaceopen.go) is precisely `BindWorkspace' + `Ensurer.Ensure':
+;;
+;;   - `bindRecord' returns early WITHOUT writing once the record already
+;;     carries a `claude_session_id', so a re-open never re-binds;
+;;   - `Ensure' -> `sessiondrv.Manager.bringUp' takes the manager mutex,
+;;     finds the workspace in `byWS' and returns the live driver
+;;     immediately — no shim spawn, no consumer, no push.
+;;
+;; Panel mounting is entirely Emacs-side, so there is no open-only side
+;; effect a switch would wrongly imply.  A second command arm would therefore
+;; be a synonym, and two names for one daemon behavior is exactly how the two
+;; drift apart later.  So: open == ensure, and switch sends open.
+;;
+;; WHAT IS NOT FREE.  `bindRecord' runs `session.Discover' on EVERY call —
+;; the already-bound early-return sits AFTER it, because the migration report
+;; needs the probe.  That is a projects-directory scan per send, which is why
+;; the debounce below is a real requirement rather than politeness.
+
+(defcustom agent-repl-frontend-switch-ensure-cooldown 30
+  "Seconds before a workspace switch may re-send `openWorkspace' for a ws.
+Only reached when the workspace still has no live session: a switch to a
+workspace that already has one skips the send outright (nothing to ensure).
+The cooldown bounds the remaining case — repeatedly switching to a
+workspace the daemon cannot bring up — so the daemon is not made to rescan
+its projects directory on every persp activation."
+  :type 'integer
+  :group 'agent-repl)
+
+(defcustom agent-repl-frontend-switch-ensure-max-failures 3
+  "Consecutive switch-ensure failures after which a workspace gives up.
+A give-up sets `:switch-ensure-failed', surfaces ONE warning, and stops
+sending until the daemon instance changes (see
+`agent-repl--frontend-note-boot-id') — the same give-up shape the reattach
+sweep uses, so a workspace the daemon simply cannot open never retry-loops."
+  :type 'integer
+  :group 'agent-repl)
+
+(defun agent-repl--frontend-switch-ensure-skip-reason (ws)
+  "Return a string naming why WS's switch must not send, or nil to send.
+Ordered cheapest-first.  Every arm is a genuine no-op rather than a
+deferral: nothing here is retried later on this path, because the switch
+that would have retried it is the retry."
+  (cond
+   ((null ws) "no workspace")
+   ;; Nothing to send into. The reattach sweep owns daemon revival; a switch
+   ;; must not race it into a second spawn.
+   ((not (agent-repl--uds-connected-p)) "uds link down")
+   ;; No cwd means no routable wire key, and the daemon routes purely by cwd.
+   ((null (agent-repl--ws-get ws :project-dir)) "no project-dir")
+   ;; THE common case: a workspace already driving a live session has
+   ;; nothing to ensure, so the send would be pure daemon-side rescan.
+   ((let ((id (agent-repl--ws-get ws :frontend-session-id)))
+      (and id (agent-repl--frontend-session-live-p id)))
+    "session already live")
+   ((agent-repl--ws-get ws :switch-ensure-failed) "gave up after repeated failures")
+   ((let ((at (agent-repl--ws-get ws :switch-ensure-at)))
+      (and at (< (- (float-time) at) agent-repl-frontend-switch-ensure-cooldown)))
+    "within cooldown")
+   (t nil)))
+
+(defun agent-repl--frontend-note-switch-ensure-failure (ws err)
+  "Record a failed switch-ensure for WS, giving up loudly at the cap.
+ERR is the ack's error string.  Mirrors the reattach sweep's give-up: a
+workspace the daemon cannot open is surfaced ONCE, not once per switch."
+  (let ((n (1+ (or (agent-repl--ws-get ws :switch-ensure-failures) 0))))
+    (agent-repl--ws-put ws :switch-ensure-failures n)
+    (agent-repl--log ws "switch-ensure: ws=%s attempt %d/%d failed: %s"
+                     ws n agent-repl-frontend-switch-ensure-max-failures err)
+    (when (>= n agent-repl-frontend-switch-ensure-max-failures)
+      (agent-repl--ws-put ws :switch-ensure-failed t)
+      (display-warning
+       'agent-repl
+       (format (concat "workspace %s could not be opened on the daemon after %d "
+                       "switches (%s) — its history will not backfill; check the "
+                       "daemon log for transcript discovery")
+               ws n err)
+       :warning))))
+
+(defun agent-repl--frontend-notify-workspace-switch (&optional ws)
+  "Tell the daemon WS was switched to, so it binds + ensures the session.
+This is the SWITCH half of the never-blue requirement: a workspace with a
+known on-disk transcript must render its history the moment the user looks
+at it, rather than sitting blue until they type.  The daemon side
+\(`server.WorkspaceOpener') does the transcript discovery, the resume bind
+and the shim bring-up; this only has to ask.
+
+Fire-and-forget and heavily skipped — see
+`agent-repl--frontend-switch-ensure-skip-reason'.  A rejected ack counts
+toward the per-workspace give-up rather than retrying.  Returns the
+request-id when a command went out, else nil.
+
+LOGS, NEVER SIGNALS — the same contract
+`agent-repl--frontend-release-workspace-session' keeps, and for the same
+reason: this runs on the persp-activation path, where a signal would
+strand the switch before the tail that flips the `:ws-loaded' latch.  The
+link can also die between the connected-p check and the send, so the
+guards above cannot be the only protection."
+  (let* ((ws (or ws (agent-repl--ws-current-name)))
+         (skip (agent-repl--frontend-switch-ensure-skip-reason ws)))
+    (if skip
+        (progn (agent-repl--log-verbose ws "switch-ensure: skipped (%s)" skip) nil)
+      (condition-case err
+          (progn
+            (agent-repl--ws-put ws :switch-ensure-at (float-time))
+            (agent-repl--log ws "switch-ensure: ws=%s -> openWorkspace (never-blue backfill)" ws)
+            (let ((req (agent-repl--uds-send-command
+                        "openWorkspace" nil (agent-repl--frontend-ws-command-key ws))))
+              (agent-repl--uds-track-command
+               req "openWorkspace" ws
+               (lambda (e) (agent-repl--frontend-note-switch-ensure-failure ws e))
+               (lambda () (agent-repl--ws-put ws :switch-ensure-failures nil)))
+              req))
+        (error
+         (agent-repl--log ws "switch-ensure: ws=%s send FAILED: %s"
+                          ws (error-message-string err))
+         nil)))))
 
 (defun agent-repl--frontend-release-workspace-session (ws)
   "Best-effort DELETE of WS's daemon session (for `agent-repl-ws-del-hook').
