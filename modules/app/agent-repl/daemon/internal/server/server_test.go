@@ -499,6 +499,41 @@ func TestSessionViewFromRecordCarriesConfigDir(t *testing.T) {
 	}
 }
 
+func TestSessionViewCarriesTheBackfillState(t *testing.T) {
+	// Arrange / Act / Assert — the never-blue signal rides every SessionView,
+	// so it reaches a reconnecting frontend on the connect snapshot (F2).
+	cases := []struct {
+		stored string
+		want   frontendv1.BackfillState
+	}{
+		{"", frontendv1.BackfillState_BACKFILL_STATE_UNSPECIFIED},
+		{sessiondrv.BackfillPending, frontendv1.BackfillState_BACKFILL_STATE_PENDING},
+		{sessiondrv.BackfillDone, frontendv1.BackfillState_BACKFILL_STATE_DONE},
+		{sessiondrv.BackfillFailed, frontendv1.BackfillState_BACKFILL_STATE_FAILED},
+	}
+	for _, c := range cases {
+		rec := registry.Record{SessionID: "s1", CWD: "/w", BackfillState: c.stored}
+		if got := SessionViewFromRecord(rec, nil).GetBackfill(); got != c.want {
+			t.Fatalf("stored %q -> %v, want %v", c.stored, got, c.want)
+		}
+	}
+}
+
+func TestAnUnrecognizedBackfillTokenReadsAsUnspecified(t *testing.T) {
+	// Arrange — a token from a newer daemon, or a corrupted record.
+	rec := registry.Record{SessionID: "s1", CWD: "/w", BackfillState: "teleporting"}
+
+	// Act
+	got := SessionViewFromRecord(rec, nil).GetBackfill()
+
+	// Assert — UNSPECIFIED is the SAFE direction: it makes the switch-ensure
+	// retry rather than skip, so an unreadable token cannot leave a workspace
+	// blue by being mistaken for DONE.
+	if got != frontendv1.BackfillState_BACKFILL_STATE_UNSPECIFIED {
+		t.Fatalf("backfill = %v, want UNSPECIFIED for an unknown token", got)
+	}
+}
+
 // --- Account switch (S8: webapp-initiated, daemon-executed) ----------------
 
 // accountRoster is the two-account roster the switch tests use.
