@@ -2171,7 +2171,8 @@ pre {
 @media (prefers-reduced-motion: reduce) {
   .thinking-spinner,
   .interrupting-spinner,
-  .retrying-spinner {
+  .retrying-spinner,
+  .pfooter-spin {
     animation-duration: 1.4s;
   }
   /* Per-animation durations, in the order the base rule declares them: the
@@ -2313,4 +2314,173 @@ pre {
   font-size: 0.85rem;
   color: #b91c1c;
   background: color-mix(in srgb, #b91c1c 8%, var(--bg));
+}
+
+/* ---- The consolidated progress footer (progress-footer.ts) ---------------
+   THE in-flight indicator: one raised, flat, segmented dock replacing every
+   scattered progress signal the feed used to carry. The V4 "segmented dock"
+   from design-progress-footer-samples.html — a grabber notch over a row of
+   bordered cells, with an error row and an expansion sheet under it.
+
+   The slot is a flex sibling wedged between the scrolling #feed and the
+   #composer, so the dock stays stuck to the window's bottom rather than
+   floating just under the last bubble as the feed grows. `flex: none` keeps it
+   content-sized so #feed absorbs the leftover height; :empty collapses it
+   before the daemon has resolved anything. */
+#progress-footer {
+  flex: none;
+  padding: 0.25rem 1rem 0.5rem;
+}
+#progress-footer:empty { display: none; }
+
+/* The dock itself: capped to the SAME width as the widest response bubble
+   (--agent-bubble-cap, inherited from #main-col) and centered in the same
+   column, so its rails land on the very columns the feed's bubbles hug. It
+   wears the sidebar's elevation treatment on purpose — the design asks it to
+   read as chrome lifted off the feed, like the workspaces rail, rather than as
+   another card in the conversation. */
+.pfooter {
+  max-width: var(--agent-bubble-cap);
+  margin: 0 auto;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--sidebar-shadow);
+  overflow: hidden;
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+/* The grabber notch: the affordance that says the dock opens. Purely visual —
+   the whole cell row is the click target (FOOTER_STRIP_ATTR). */
+.pfooter-grab {
+  height: 3px;
+  width: 40px;
+  border-radius: 2px;
+  background: var(--border);
+  margin: 4px auto 1px;
+}
+
+/* The cell row: segments divided by hairlines, thin by default (one line). */
+.pfooter-cells {
+  display: flex;
+  align-items: stretch;
+  cursor: pointer;
+}
+.pfooter-cell {
+  padding: 3px 10px 6px;
+  border-right: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.pfooter-cell:last-child { border-right: 0; }
+/* The activity-detail cell takes the leftover width and truncates rather than
+   wrapping: a long hook name or auth line must not make the dock two lines
+   tall, which is the one shape constraint the design fixes. */
+.pfooter-grow {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
+  padding-top: 5px;
+}
+
+/* Phase tones: the footer's anchor word, colored by what the session is doing.
+   Each reuses the hue that already speaks for that state elsewhere in the GUI,
+   so the footer never invents a vocabulary. */
+.pfooter-phase { font-weight: 650; }
+.pfooter-phase.thinking { color: var(--thinking); }
+.pfooter-phase.retry { color: var(--retry); }
+.pfooter-phase.error { color: var(--err); }
+.pfooter-phase.ok { color: var(--ok); }
+.pfooter-phase.muted { color: var(--muted); }
+
+/* Activity-detail tones: one accent per window, so which kind of dead air the
+   session is in reads at a glance without parsing the words. */
+.pfooter-grow.tool { color: var(--tool-title); }
+.pfooter-grow.thinking { color: var(--thinking); }
+.pfooter-grow.retry { color: var(--retry); }
+.pfooter-grow.error { color: var(--err); }
+.pfooter-grow.muted { color: var(--muted); }
+
+/* The phase spinner: the same arc the feed's progress rows wore, inheriting
+   its cell's phase color so it spins in whatever hue the phase speaks in. */
+.pfooter-spin {
+  flex: none;
+  display: inline-block;
+  width: 0.8em;
+  height: 0.8em;
+  border: 2px solid color-mix(in srgb, currentColor 25%, transparent);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: thinking-spin 0.8s linear infinite;
+}
+
+/* The turn clock and token cells: tabular figures so a ticking digit never
+   shifts the cells beside it. */
+.pfooter-clock,
+.pfooter-tokens { font-variant-numeric: tabular-nums; }
+/* The thinking ticker rides beside the turn's input figure in the muted tone:
+   it is an estimate, not a billed count, and must not read as loud as the
+   real token figure it sits next to. */
+.pfooter-thinking-tokens { color: var(--muted); }
+
+/* The counters cluster's badges: queue depth and pending permissions. The
+   permission badge takes the alarm red (it is waiting on the READER), the
+   queue badge the pending yellow the queue already wears elsewhere. */
+.pfooter-badge {
+  border-radius: 8px;
+  padding: 0 6px;
+  font-size: 0.72rem;
+  font-weight: 650;
+}
+.pfooter-badge.queued {
+  background: var(--q-border);
+  color: #1a1a1a;
+}
+.pfooter-badge.perm {
+  background: var(--err);
+  color: #ffffff;
+}
+
+/* The error row: a persistent red line under the strip, standing until the
+   next turn starts. When it names a feed item it is clickable, and says so. */
+.pfooter-error {
+  color: var(--err);
+  font-size: 0.74rem;
+  border-top: 1px dashed var(--border);
+  padding: 4px 10px 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pfooter-error.addressable { cursor: pointer; }
+.pfooter-error.addressable:hover { text-decoration: underline; }
+
+/* The expansion sheet: the detail the thin strip drops, shown while the dock
+   is open. Wraps, since it is the one part of the footer allowed to be tall. */
+.pfooter-sheet {
+  border-top: 1px solid var(--border);
+  padding: 6px 10px 8px;
+  color: var(--muted);
+  font-size: 0.74rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+}
+.pfooter-sheet-empty { font-style: italic; }
+
+/* The relocated counter chips sit in the last cell, where the topbar's
+   overlays would drop DOWNWARD off the bottom of the window. Flipping them
+   upward is the whole adaptation the relocation needs — the chips, rows, and
+   colors are the shared counter-menu facade's, untouched. */
+.pfooter-counters .agents-menu,
+.pfooter-counters .tasks-menu { position: relative; }
+.pfooter-counters .agents-overlay,
+.pfooter-counters .tasks-overlay {
+  top: auto;
+  bottom: calc(100% + 6px);
 }
