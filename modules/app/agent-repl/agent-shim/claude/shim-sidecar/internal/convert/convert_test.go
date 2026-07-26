@@ -520,6 +520,199 @@ func TestSidecarLoggedFieldsNowTyped(t *testing.T) {
 	}
 }
 
+// TestRetypedFieldsNowDecode covers the four fields RETYPED IN PLACE under the
+// user's explicit approval. Each previously had a proto type the disk never
+// matched, so the converter captured every value into extras; each must now
+// decode as typed data with ZERO extras. Populated + absent per field (AAA).
+func TestRetypedFieldsNowDecode(t *testing.T) {
+	userLine := func(extra map[string]any) map[string]any {
+		obj := map[string]any{
+			"type":    "user",
+			"message": map[string]any{"role": "user", "content": "x"},
+		}
+		for k, v := range extra {
+			obj[k] = v
+		}
+		return obj
+	}
+	tests := []struct {
+		name     string
+		envelope map[string]any
+		lineType string
+		get      func(l *datav1.TranscriptLine) any
+		want     any
+	}{
+		{
+			name:     "classifier_meta_lines populated (raw NDJSON text)",
+			envelope: map[string]any{"classifierMetaLines": "{\"meta\":{\"gitStatus\":{\"clean\":true}}}\n"},
+			get: func(l *datav1.TranscriptLine) any {
+				return l.GetUser().GetEnvelope().GetClassifierMetaLines()
+			},
+			want: "{\"meta\":{\"gitStatus\":{\"clean\":true}}}\n",
+		},
+		{
+			name:     "classifier_meta_lines absent",
+			envelope: map[string]any{},
+			get: func(l *datav1.TranscriptLine) any {
+				return l.GetUser().GetEnvelope().GetClassifierMetaLines()
+			},
+			want: "",
+		},
+		{
+			name:     "error_details populated (status code plus raw body)",
+			envelope: map[string]any{"errorDetails": `429 {"type":"error"}`},
+			get: func(l *datav1.TranscriptLine) any {
+				return l.GetUser().GetEnvelope().GetErrorDetails()
+			},
+			want: `429 {"type":"error"}`,
+		},
+		{
+			name:     "error_details absent",
+			envelope: map[string]any{},
+			get: func(l *datav1.TranscriptLine) any {
+				return l.GetUser().GetEnvelope().GetErrorDetails()
+			},
+			want: "",
+		},
+		{
+			name:     "queue_priority populated (named priority, not a rank)",
+			envelope: map[string]any{"queuePriority": "later"},
+			get: func(l *datav1.TranscriptLine) any {
+				return l.GetUser().GetEnvelope().GetQueuePriority()
+			},
+			want: "later",
+		},
+		{
+			name:     "queue_priority absent",
+			envelope: map[string]any{},
+			get: func(l *datav1.TranscriptLine) any {
+				return l.GetUser().GetEnvelope().GetQueuePriority()
+			},
+			want: "",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			c := New(nil)
+			// Act
+			line, extras, err := c.TranscriptLine(userLine(tc.envelope))
+			// Assert
+			if err != nil {
+				t.Fatalf("conversion error: %v", err)
+			}
+			if extras != nil {
+				t.Fatalf("expected zero extras, got %v", extras.AsMap())
+			}
+			if got := tc.get(line); got != tc.want {
+				t.Fatalf("field = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestGitOperationDecodes pins BashResult.git_operation, retyped in place from
+// string to a typed GitOperation. The sidecar's reflective assign has to walk
+// the nested arms and their enums, so these assert it really does (AAA).
+func TestGitOperationDecodes(t *testing.T) {
+	bash := func(op any) map[string]any {
+		r := map[string]any{"stdout": "", "stderr": "", "interrupted": false}
+		if op != nil {
+			r["gitOperation"] = op
+		}
+		return r
+	}
+	tests := []struct {
+		name   string
+		op     any
+		assert func(t *testing.T, g *datav1.GitOperation)
+	}{
+		{
+			name: "commit sha and kind",
+			op:   map[string]any{"commit": map[string]any{"sha": "868db15d", "kind": "committed"}},
+			assert: func(t *testing.T, g *datav1.GitOperation) {
+				if g.GetCommit().GetSha() != "868db15d" ||
+					g.GetCommit().GetKind() != datav1.GitCommitKind_GIT_COMMIT_KIND_COMMITTED {
+					t.Fatalf("commit = %+v", g.GetCommit())
+				}
+			},
+		},
+		{
+			name: "hyphenated commit kind",
+			op:   map[string]any{"commit": map[string]any{"sha": "x", "kind": "cherry-picked"}},
+			assert: func(t *testing.T, g *datav1.GitOperation) {
+				if g.GetCommit().GetKind() != datav1.GitCommitKind_GIT_COMMIT_KIND_CHERRY_PICKED {
+					t.Fatalf("kind = %v", g.GetCommit().GetKind())
+				}
+			},
+		},
+		{
+			name: "branch ref and action",
+			op:   map[string]any{"branch": map[string]any{"ref": "master", "action": "rebased"}},
+			assert: func(t *testing.T, g *datav1.GitOperation) {
+				if g.GetBranch().GetRef() != "master" ||
+					g.GetBranch().GetAction() != datav1.GitBranchAction_GIT_BRANCH_ACTION_REBASED {
+					t.Fatalf("branch = %+v", g.GetBranch())
+				}
+			},
+		},
+		{
+			name: "pr number url and action",
+			op:   map[string]any{"pr": map[string]any{"number": float64(9155), "url": "https://x/y", "action": "created"}},
+			assert: func(t *testing.T, g *datav1.GitOperation) {
+				if g.GetPr().GetNumber() != 9155 || g.GetPr().GetUrl() != "https://x/y" ||
+					g.GetPr().GetAction() != datav1.GitPullRequestAction_GIT_PULL_REQUEST_ACTION_CREATED {
+					t.Fatalf("pr = %+v", g.GetPr())
+				}
+			},
+		},
+		{
+			name: "hyphenated pr action",
+			op:   map[string]any{"pr": map[string]any{"number": float64(1), "action": "auto-merge-enabled"}},
+			assert: func(t *testing.T, g *datav1.GitOperation) {
+				want := datav1.GitPullRequestAction_GIT_PULL_REQUEST_ACTION_AUTO_MERGE_ENABLED
+				if g.GetPr().GetAction() != want {
+					t.Fatalf("action = %v, want %v", g.GetPr().GetAction(), want)
+				}
+			},
+		},
+		{
+			name: "two arms at once (why it is not a oneof)",
+			op: map[string]any{
+				"commit": map[string]any{"sha": "abc", "kind": "committed"},
+				"push":   map[string]any{"branch": "b"},
+			},
+			assert: func(t *testing.T, g *datav1.GitOperation) {
+				if g.GetCommit().GetSha() != "abc" || g.GetPush().GetBranch() != "b" {
+					t.Fatalf("commit+push = %+v", g)
+				}
+			},
+		},
+		{
+			name: "absent",
+			op:   nil,
+			assert: func(t *testing.T, g *datav1.GitOperation) {
+				if g != nil {
+					t.Fatalf("git_operation = %+v, want nil", g)
+				}
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			c := New(nil)
+			// Act
+			res, extras := c.ToolUseResult(bash(tc.op))
+			// Assert
+			if extras != nil {
+				t.Fatalf("expected zero extras, got %v", extras.AsMap())
+			}
+			tc.assert(t, res.GetBash().GetGitOperation())
+		})
+	}
+}
+
 // TestClassifyToolResultArms pins the ToolUseResult classifier to the arm the
 // MANIFEST documents for each tool-results fixture (AAA, one arm per case).
 func TestClassifyToolResultArms(t *testing.T) {
