@@ -2,6 +2,7 @@ package convert
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -889,5 +890,107 @@ func TestFileAttachmentContentTyped(t *testing.T) {
 	if body.GetNumLines() != 16 || body.GetStartLine() != 1 || body.GetTotalLines() != 16 {
 		t.Fatalf("content.file line bounds = {num:%d start:%d total:%d}, want {16 1 16}",
 			body.GetNumLines(), body.GetStartLine(), body.GetTotalLines())
+	}
+}
+
+// TestQueuedCommandPromptStringArm pins the 702/731-census string form of the
+// string-or-blocks `prompt` union onto the prompt_value oneof's `prompt` arm.
+func TestQueuedCommandPromptStringArm(t *testing.T) {
+	// Arrange
+	root := corpusRoot(t)
+	objs := readLines(t, filepath.Join(root, "attachments", "queued_command.jsonl"))
+	c := New(func(string, ...any) {})
+	// Act
+	line, extras, err := c.TranscriptLine(objs[0])
+	// Assert
+	if err != nil {
+		t.Fatalf("conversion error: %v", err)
+	}
+	if extras != nil {
+		t.Fatalf("expected zero extras, got %v", extras.AsMap())
+	}
+	qc := line.GetAttachment().GetQueuedCommand()
+	if _, ok := qc.GetPromptValue().(*datav1.QueuedCommandAttachment_Prompt); !ok {
+		t.Fatalf("prompt_value arm = %T, want *QueuedCommandAttachment_Prompt", qc.GetPromptValue())
+	}
+	if !strings.HasPrefix(qc.GetPrompt(), "also, yes, fix failure A and B") {
+		t.Fatalf("prompt = %q, want the fixture's string prompt", qc.GetPrompt())
+	}
+}
+
+// TestQueuedCommandPromptBlocksArm covers the 29/731-census ARRAY form of the
+// `prompt` union, which the pre-union string-typed field could not hold: it hit
+// setField's type-mismatch arm, left prompt at "" and dumped the blocks into
+// extras as a misleading `unknown field "prompt"`.
+func TestQueuedCommandPromptBlocksArm(t *testing.T) {
+	// Arrange
+	root := corpusRoot(t)
+	objs := readLines(t, filepath.Join(root, "attachments", "queued_command.jsonl"))
+	c := New(func(string, ...any) {})
+	// Act
+	line, extras, err := c.TranscriptLine(objs[1])
+	// Assert
+	if err != nil {
+		t.Fatalf("conversion error: %v", err)
+	}
+	if extras != nil {
+		t.Fatalf("expected zero extras, got %v", extras.AsMap())
+	}
+	blocks := line.GetAttachment().GetQueuedCommand().GetPromptBlocks().GetBlocks()
+	if len(blocks) != 1 {
+		t.Fatalf("prompt_blocks.blocks len = %d, want 1", len(blocks))
+	}
+	if got := blocks[0].GetText().GetText(); got != "/effort xhigh" {
+		t.Fatalf("prompt_blocks.blocks[0].text = %q, want %q", got, "/effort xhigh")
+	}
+}
+
+// TestQueuedCommandPromptArrayLogsNoUnknownField is the regression for the
+// original defect: the array form must produce NO loud unknown-field log, which
+// is what the 2026-07-25 23:21:16 sidecar entry reported against a freshly-built
+// binary whose proto already "had" a prompt field.
+func TestQueuedCommandPromptArrayLogsNoUnknownField(t *testing.T) {
+	// Arrange
+	root := corpusRoot(t)
+	objs := readLines(t, filepath.Join(root, "attachments", "queued_command.jsonl"))
+	var logs []string
+	c := New(func(f string, a ...any) { logs = append(logs, fmt.Sprintf(f, a...)) })
+	// Act
+	if _, _, err := c.TranscriptLine(objs[1]); err != nil {
+		t.Fatalf("conversion error: %v", err)
+	}
+	// Assert
+	for _, l := range logs {
+		if strings.Contains(l, "unknown field") {
+			t.Fatalf("array-form prompt still loud-logged: %s", l)
+		}
+	}
+}
+
+// TestQueuedCommandPromptUnmodeledTypeCaptured pins the union's loud arm: a
+// prompt value that is NEITHER string nor array selects no oneof arm and is
+// captured verbatim rather than silently dropped.
+func TestQueuedCommandPromptUnmodeledTypeCaptured(t *testing.T) {
+	// Arrange
+	obj := map[string]any{
+		"type": "attachment",
+		"attachment": map[string]any{
+			"type":        "queued_command",
+			"prompt":      map[string]any{"unexpected": "object"},
+			"commandMode": "prompt",
+		},
+	}
+	c := New(func(string, ...any) {})
+	// Act
+	line, extras, err := c.TranscriptLine(obj)
+	// Assert
+	if err != nil {
+		t.Fatalf("conversion error: %v", err)
+	}
+	if extras == nil || extras.AsMap()["queued_command.prompt"] == nil {
+		t.Fatalf("expected queued_command.prompt captured into extras, got %v", extras)
+	}
+	if arm := line.GetAttachment().GetQueuedCommand().GetPromptValue(); arm != nil {
+		t.Fatalf("prompt_value arm = %T, want none set for an unmodeled type", arm)
 	}
 }

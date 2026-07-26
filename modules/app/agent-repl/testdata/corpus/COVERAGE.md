@@ -105,7 +105,7 @@ Checklist of the full `agentshim.data.v1` shape inventory (design doc §5.3 + th
 | `EditedTextFileAttachment` | FOUND | attachments/edited_text_file.jsonl |
 | `DiagnosticsAttachment` | FOUND | attachments/diagnostics.jsonl |
 | `CommandPermissionsAttachment` | FOUND | attachments/command_permissions.jsonl |
-| `QueuedCommandAttachment` | FOUND | attachments/queued_command.jsonl |
+| `QueuedCommandAttachment` | FOUND | attachments/queued_command.jsonl (BOTH `prompt_value` arms: line 1 string, line 2 blocks) |
 | `ReadTruncationNoticeAttachment` | FOUND | attachments/read_truncation_notice.jsonl |
 | `StructuredOutputAttachment` | FOUND | attachments/structured_output.jsonl |
 | `CompactFileReferenceAttachment` | FOUND | attachments/compact_file_reference.jsonl |
