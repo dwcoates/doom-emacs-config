@@ -14,8 +14,12 @@
  * payload back into the store's bubble/card vocabulary. The mapping mirrors the
  * old translate.go decomposition semantics:
  * - assistantMessage (ApiAssistantMessage) → one item per content block:
- *   text → TextItem, thinking → ThinkingItem, tool_use → ToolItem; block id is
- *   `${uuid}:${blockIndex}`, message id is the envelope uuid.
+ *   text → TextItem, thinking → ThinkingItem, tool_use → ToolItem. A prose
+ *   block carries TWO ids: `messageId` is the Anthropic message id (the
+ *   identity it shares with its own live stream, so a finished block can be
+ *   paired with the preview the deltas grew), and `uuid` is the record's own
+ *   envelope-derived identity (what the store dedups a replayed record on).
+ *   The index within `content` is NOT an identity — see assistantMessageItems.
  * - userMessage (ApiUserMessage) → each tool_result block → a ToolItem
  *   (result-only, empty toolName — it reconciles onto the tool_use item by
  *   toolUseId in the store); the remaining blocks → one UserTurnItem (none = no
@@ -678,15 +682,23 @@ function assistantMessageItems(frame: ConversationItemFrame): {
   items: ConversationItem[];
   ignores: string[];
 } {
-  // Key blocks on the ANTHROPIC message id, not the SDK envelope uuid: it is
-  // the only identity a message shares with its own live stream, so it is what
-  // lets a finished block replace the preview the deltas grew. The envelope
-  // uuid still identifies the ITEM (and is what both planes dedup on), but it
-  // does not exist yet while the message is still streaming.
+  // TWO ids, because a finished block answers to two different questions.
   //
-  // Falls back to the envelope uuid when a payload carries no id, so a block
-  // always has SOME stable key rather than colliding on "".
-  const uuid = pstr(frame.payload, "id") || frame.uuid;
+  // `messageId` is the ANTHROPIC message id — the only identity a message
+  // shares with its own live stream, and so the only thing that can pair a
+  // finished block with the preview its deltas grew. It falls back to the
+  // envelope uuid when a payload carries no id.
+  //
+  // `identity` is the RECORD's own id, and it is what the block is deduped on.
+  // It must come from the ENVELOPE, never from the message id plus a content
+  // index: the SDK emits one assistant record PER CONTENT BLOCK, every record
+  // of one API message carrying the same `message.id` and a `content` array of
+  // length ONE. So the index within `content` is always 0 and says nothing
+  // about which API block the record holds. Keying on it made every block of a
+  // message collide (two thinking blocks silently overwrote each other) while
+  // never meeting the preview, which keys the TRUE API block index.
+  const messageId = pstr(frame.payload, "id") || frame.uuid;
+  const identity = frame.uuid || messageId;
   const ts = tsFromMs(frame.tsMs);
   const items: ConversationItem[] = [];
   const ignores: string[] = [];
@@ -696,33 +708,35 @@ function assistantMessageItems(frame: ConversationItemFrame): {
       case "text": {
         const item: TextItem = {
           kind: "text",
-          blockId: `${uuid}:${index}`,
-          messageId: uuid,
+          blockId: `${identity}:${index}`,
+          messageId,
           text: pstr(value, "text"),
           done: true,
           ts,
         };
+        if (identity !== "") item.uuid = `${identity}:${index}`;
         items.push(item);
         break;
       }
       case "thinking": {
         const item: ThinkingItem = {
           kind: "thinking",
-          blockId: `${uuid}:${index}`,
-          messageId: uuid,
+          blockId: `${identity}:${index}`,
+          messageId,
           text: pstr(value, "thinking"),
           done: true,
         };
+        if (identity !== "") item.uuid = `${identity}:${index}`;
         const sig = pstr(value, "signature");
         if (sig !== "") item.signature = sig;
         items.push(item);
         break;
       }
       case "toolUse":
-        items.push(toolItemFromUse(value, uuid, ts));
+        items.push(toolItemFromUse(value, messageId, ts));
         break;
       case "toolResult":
-        items.push(toolItemFromResult(value, uuid, ts));
+        items.push(toolItemFromResult(value, messageId, ts));
         break;
       default:
         // image | toolReference | fallback | unknown — no per-block visual.
