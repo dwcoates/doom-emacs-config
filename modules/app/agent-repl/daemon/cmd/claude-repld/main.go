@@ -15,7 +15,6 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -524,22 +523,6 @@ func envStr(name, def string) string {
 		return v
 	}
 	return def
-}
-
-// envBool parses name as a bool default (via strconv), falling back to def
-// when the variable is unset or unparseable. An unparseable value is
-// surfaced loudly rather than silently treated as false.
-func envBool(name string, def bool) bool {
-	v := os.Getenv(name)
-	if v == "" {
-		return def
-	}
-	b, err := strconv.ParseBool(v)
-	if err != nil {
-		log.Printf("claude-repld: %s=%q is not a bool (%v); using default %t", name, v, err, def)
-		return def
-	}
-	return b
 }
 
 // pumpAnalystOutput mirrors the analyst's output into the daemon log.
