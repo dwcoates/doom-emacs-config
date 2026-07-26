@@ -8,6 +8,7 @@ import {
   CLIENT_FAILURE_TYPES,
   CLIENT_PREFIX,
   clientFailure,
+  controlPlaneFailure,
   daemonReachableFailure,
   daemonUnreachableFailure,
   isClientType,
@@ -116,6 +117,64 @@ describe("daemonReachableFailure", () => {
     const f = daemonReachableFailure(1700000000000);
     // Assert
     expect(f.resolvedAtMs).toBe(1700000000000);
+  });
+});
+
+describe("controlPlaneFailure", () => {
+  it("names the action in the user's terms, not the endpoint's", () => {
+    // Arrange / Act — "POST /accounts/switch failed" explains nothing to the
+    // person who clicked a menu item.
+    const f = controlPlaneFailure("the account switch", new Error("503"));
+    // Assert
+    expect(f.message).toBe("the account switch failed");
+  });
+
+  it("carries a thrown Error's message as the cause", () => {
+    // Arrange / Act — the raw cause is what the transient notice line has no
+    // room for, and it used to reach `clog` and stop there.
+    const f = controlPlaneFailure("the login request", new Error("connection refused"));
+    // Assert
+    expect(f.sourceDetail).toBe("connection refused");
+  });
+
+  it("stringifies a non-Error throw rather than dropping it", () => {
+    // Arrange / Act — a rejected fetch is not obliged to throw an Error, and
+    // an empty detail would lose the only evidence there is.
+    const f = controlPlaneFailure("the remediation request", "gateway timeout");
+    // Assert
+    expect(f.sourceDetail).toBe("gateway timeout");
+  });
+
+  it("gives two different actions two different cards", () => {
+    // Arrange / Act — keying every control-plane failure alike would let a
+    // failed login overwrite a failed remediation.
+    const login = controlPlaneFailure("the login request", new Error("x"));
+    const account = controlPlaneFailure("the account switch", new Error("x"));
+    // Assert
+    expect(login.uuid).not.toBe(account.uuid);
+  });
+
+  it("reconciles a retried action onto its own card", () => {
+    // Arrange / Act — pressing the same button twice is one condition.
+    const first = controlPlaneFailure("the account switch", new Error("503"));
+    const second = controlPlaneFailure("the account switch", new Error("504"));
+    // Assert
+    expect(first.uuid).toBe(second.uuid);
+  });
+
+  it("classifies in the frontend's own namespace", () => {
+    // Arrange / Act — the daemon never sees these calls fail, so the type
+    // must be one the daemon can never emit.
+    const f = controlPlaneFailure("the login request", new Error("x"));
+    // Assert
+    expect(f.errorType).toBe("client.control_plane_failed");
+  });
+
+  it("opens unresolved, because nothing retries it on the user's behalf", () => {
+    // Arrange / Act
+    const f = controlPlaneFailure("the login request", new Error("x"));
+    // Assert
+    expect(f.resolvedAtMs).toBe(0);
   });
 });
 
