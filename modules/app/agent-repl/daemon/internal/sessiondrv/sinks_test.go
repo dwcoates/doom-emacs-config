@@ -21,7 +21,6 @@ type fakePusher struct {
 	convo      []*frontendv1.ConversationDelta
 	typing     []*frontendv1.TypingDelta
 	catalog    []*frontendv1.TaskCatalog
-	degraded   []*frontendv1.DegradedNotice
 	state      []*frontendv1.WorkspaceState
 	inits      []*frontendv1.SessionInitView
 	heartbeats []*frontendv1.HeartbeatView
@@ -41,11 +40,6 @@ func (p *fakePusher) PushTypingDelta(t *frontendv1.TypingDelta) {
 func (p *fakePusher) PushTaskCatalog(c *frontendv1.TaskCatalog) {
 	p.mu.Lock()
 	p.catalog = append(p.catalog, c)
-	p.mu.Unlock()
-}
-func (p *fakePusher) PushDegradedNotice(n *frontendv1.DegradedNotice) {
-	p.mu.Lock()
-	p.degraded = append(p.degraded, n)
 	p.mu.Unlock()
 }
 func (p *fakePusher) PushWorkspaceState(w *frontendv1.WorkspaceState) {
@@ -688,21 +682,6 @@ func TestDegradedStateCardCarriesTheDroppedCount(t *testing.T) {
 	// Assert.
 	if got := failureItems(push)[0].GetSourceDetail(); !strings.Contains(got, "dropped=12") {
 		t.Fatalf("source_detail = %q, want the dropped count", got)
-	}
-}
-
-func TestDegradedStateNoLongerPushesABanner(t *testing.T) {
-	// Arrange.
-	push := &fakePusher{}
-	c := newTestConsumer(push, &fakeApplier{})
-
-	// Act.
-	c.Degraded("s1", &corev1.DegradedState{Component: "store", Reason: "down"})
-
-	// Assert: the arm stays on the wire for the transition, but nothing
-	// populates it any more.
-	if len(push.degraded) != 0 {
-		t.Fatalf("degraded banner pushes = %d, want 0", len(push.degraded))
 	}
 }
 
