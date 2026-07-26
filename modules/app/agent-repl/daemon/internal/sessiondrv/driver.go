@@ -133,6 +133,17 @@ type Config struct {
 	// that owns that session. Required.
 	Source shimclient.ConnSource
 
+	// History re-pulls conversation history older than the retained ring,
+	// straight from the event store on its own connection (repull.go). Nil
+	// means a below-floor resync fails LOUDLY with "no history source is
+	// wired" rather than answering with the silence that left a freshly-mounted
+	// GUI blank.
+	History HistorySource
+	// VendorSessionID resolves a daemon session id to the vendor session uuid
+	// the store keys events by. Required alongside History; a re-pull without
+	// it fails loudly (subscribing under the wrong id returns nothing at all).
+	VendorSessionID VendorSessionIDFunc
+
 	// newClient is injected only by tests; production uses a real shimclient.
 	newClient func(cfg shimclient.Config) sessionClient
 }
@@ -183,6 +194,11 @@ type driven struct {
 	// this daemon saw it. It is the classifier's "what is already running"
 	// context, and is empty when the turn predates this daemon.
 	runningText string
+
+	// repull is the below-floor history re-pull now running for this workspace,
+	// or nil. Guarded by the manager mutex; it is what keeps two frontends
+	// mounting at once from pulling the same history twice (repull.go).
+	repull *repullState
 }
 
 // New builds a Manager. Required collaborators missing is a construction error
@@ -426,14 +442,36 @@ func (m *Manager) AnswerPermission(_ context.Context, workspace, permissionReque
 }
 
 // Resync replays the workspace session's retained conversation deltas from
-// fromSeq (task step 5). A workspace with no live session is a loud error.
+// fromSeq (task step 5), then closes whatever the ring could not cover.
+//
+// The retained ring is a bounded live window (4,096 events) and is EMPTY after
+// a daemon restart, so a frontend asking from a seq below the ring's floor used
+// to be answered with silence — the blank-feed bug. When fromSeq falls below
+// the floor, the remainder is served by a bounded, frontend-initiated re-pull
+// straight from the store (repull.go), which feeds CONVERSATION TRANSLATION
+// ONLY.
+//
+// The floor comes from the ring when the ring holds anything, and otherwise
+// from the DURABLE last_seen_seq: everything up to that mark was consumed by
+// some daemon and is no longer held here, so the first seq the live window
+// covers is one past it.
+//
+// A workspace with no live session is a loud error.
 func (m *Manager) Resync(workspace string, fromSeq uint64) error {
 	d, err := m.existing(workspace)
 	if err != nil {
 		return err
 	}
-	d.consumer.resync(fromSeq)
-	return nil
+	floor, haveFloor := d.consumer.resync(fromSeq)
+	if !haveFloor {
+		floor = m.cfg.SeqStore.LastSeq(d.sessionID) + 1
+	}
+	if fromSeq >= floor {
+		return nil // the ring covered the whole request
+	}
+	m.logf("sessiondrv: resync ws=%q from_seq=%d is below the retained floor %d; re-pulling the gap from the store",
+		workspace, fromSeq, floor)
+	return m.startRepull(d, fromSeq, floor)
 }
 
 // PendingPermissions lists the request ids of the workspace's unresolved

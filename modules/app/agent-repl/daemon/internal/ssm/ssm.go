@@ -51,12 +51,19 @@ type Manager struct {
 	resolver Resolver
 	clock    func() int64
 
-	mu      sync.Mutex
-	lastAt  int64
-	last    map[string]frontendv1.RenderState // last-resolved state per workspace
-	subs    map[int]chan *frontendv1.WorkspaceState
-	nextSub int
-	closed  bool
+	mu     sync.Mutex
+	lastAt int64
+	last   map[string]frontendv1.RenderState // last-resolved state per workspace
+	// lastTasks is the last-pushed live_task_count per workspace. The count is
+	// an INPUT the frontend renders (the footer's live-task figure, sourced via
+	// progress.ApplyWorkspaceState), so it can move while the render state does
+	// not — 5 background tasks becoming 2 leaves a workspace idle_async either
+	// way. Keying the push on state alone left that change unpushed, which is
+	// how a swept ghost count stayed on screen.
+	lastTasks map[string]int64
+	subs      map[int]chan *frontendv1.WorkspaceState
+	nextSub   int
+	closed    bool
 }
 
 // Open opens the SSM database and warms the last-resolved cache from the
@@ -84,12 +91,13 @@ func Open(opts Options) (*Manager, error) {
 		return nil, err
 	}
 	m := &Manager{
-		db:       db,
-		logf:     logf,
-		resolver: opts.Resolver,
-		clock:    clock,
-		last:     make(map[string]frontendv1.RenderState),
-		subs:     make(map[int]chan *frontendv1.WorkspaceState),
+		db:        db,
+		logf:      logf,
+		resolver:  opts.Resolver,
+		clock:     clock,
+		last:      make(map[string]frontendv1.RenderState),
+		lastTasks: make(map[string]int64),
+		subs:      make(map[int]chan *frontendv1.WorkspaceState),
 	}
 	if err := m.warm(); err != nil {
 		db.Close()
@@ -124,6 +132,7 @@ func (m *Manager) warm() error {
 		}
 		if r.found {
 			m.last[ws] = r.state
+			m.lastTasks[ws] = r.liveTaskCount
 			restored++
 		}
 	}
@@ -228,6 +237,12 @@ func (m *Manager) ApplyMergeTransition(workspace, phase, cause string) error {
 // reresolveLocked recomputes the workspace's state, loud-logs a transition
 // when it changed, and pushes the new WorkspaceState to subscribers. Caller
 // holds mu.
+//
+// A push happens when EITHER the render state or the live-task count moved.
+// The count is not a debug field: it is what the webapp footer's live-task
+// figure renders, so a count-only change (background tasks going 5→2, or a
+// reconciliation sweeping ghosts) that produced no push left a stale number on
+// screen with nothing that could ever correct it.
 func (m *Manager) reresolveLocked(workspace, causeKind string, causeSeq uint64) error {
 	r, err := resolve(m.db, workspace, m.logf)
 	if err != nil {
@@ -237,18 +252,27 @@ func (m *Manager) reresolveLocked(workspace, causeKind string, causeSeq uint64) 
 		return nil
 	}
 	old, had := m.last[workspace]
-	if had && old == r.state {
-		return nil // no visible transition; stay quiet (§12: log deltas only)
+	oldTasks, hadTasks := m.lastTasks[workspace]
+	stateMoved := !had || old != r.state
+	tasksMoved := !hadTasks || oldTasks != r.liveTaskCount
+	if !stateMoved && !tasksMoved {
+		return nil // nothing visible changed; stay quiet (§12: log deltas only)
 	}
 	m.last[workspace] = r.state
+	m.lastTasks[workspace] = r.liveTaskCount
 
-	oldName := "∅"
-	if had {
-		oldName = renderName(old)
+	if stateMoved {
+		oldName := "∅"
+		if had {
+			oldName = renderName(old)
+		}
+		// §12 SSM contract: every transition logged old→new + cause kind + seq.
+		m.logf("ssm: transition ws=%s %s→%s cause_kind=%s cause_seq=%d turn_active=%t live_tasks=%d merge=%q",
+			workspace, oldName, renderName(r.state), causeKind, causeSeq, r.turnActive, r.liveTaskCount, r.mergePhase)
+	} else {
+		m.logf("ssm: live_tasks ws=%s %d→%d cause_kind=%s cause_seq=%d state=%s",
+			workspace, oldTasks, r.liveTaskCount, causeKind, causeSeq, renderName(r.state))
 	}
-	// §12 SSM contract: every transition logged old→new + cause kind + seq.
-	m.logf("ssm: transition ws=%s %s→%s cause_kind=%s cause_seq=%d turn_active=%t live_tasks=%d merge=%q",
-		workspace, oldName, renderName(r.state), causeKind, causeSeq, r.turnActive, r.liveTaskCount, r.mergePhase)
 
 	m.pushLocked(workspace, r)
 	return nil

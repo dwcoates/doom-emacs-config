@@ -54,6 +54,7 @@ import { PermissionMode } from "./protocol.js";
 import { decodeFrontendFrame } from "./frontend-proto.js";
 import { StateAdapter, type DegradedBanner } from "./state-adapter.js";
 import { CommandDispatcher } from "./command-dispatch.js";
+import { ConnectResync } from "./connect-resync.js";
 import type { CommandStruct } from "./frontend-command.js";
 import { PendingPermissionMode } from "./pending-mode.js";
 import { ungatedBannerHtml, ungatedModeOf, unswitchableModeOptionHtml } from "./ungated.js";
@@ -165,6 +166,16 @@ async function boot(): Promise<void> {
   // so this is advisory on the session socket and is legitimately "" until the
   // first SessionView lands.
   const cmdWorkspace = (): string => store.state.cwd;
+
+  // The conversation-history request. `StateSnapshot` carries no conversation,
+  // and the deltas that carry it were pushed before this page existed, so a
+  // fresh mount asks for them: one `resync(workspace, lastSeq)` per connection,
+  // fired once the snapshot has landed and a workspace is known. See
+  // connect-resync.ts for why it must be exactly once per socket.
+  const connectResync = new ConnectResync({
+    resync: (workspace, fromSeq) => dispatcher.resync(workspace, fromSeq),
+    log: (level, message) => clog(level, message),
+  });
 
   // Close the diagnostics loop declared above: from here every forwarded line
   // rides the protobuf command plane into the daemon's log.
@@ -709,8 +720,12 @@ async function boot(): Promise<void> {
         // malformed/unknown frame hard-errors (the decoder and adapter never
         // degrade) — evidence first, then re-throw, as the old raw path did.
         let effects;
+        // Whether THIS frame was the connect StateSnapshot — the signal the
+        // history request waits for (it carries no conversation of its own).
+        let isSnapshot = false;
         try {
           const decoded = decodeFrontendFrame(data);
+          isSnapshot = decoded.frame.case === "snapshot";
           dispatcher.observe(decoded);
           effects = adapter.apply(decoded);
         } catch (err) {
@@ -724,6 +739,10 @@ async function boot(): Promise<void> {
           if (effect.kind === "degraded") showDegraded(effect.value);
         }
         const result = store.ingest(effects);
+        // Ask for the conversation history this connection has not been told.
+        // Read AFTER ingest so the snapshot's own SessionView has supplied the
+        // workspace key the daemon routes a resync by.
+        connectResync.observe(isSnapshot, cmdWorkspace(), store.state.lastSeq);
         // Resume/rebind + auto-continue, re-fed from the SessionView plane the
         // store now populates (claude_session_id/cwd). Skipped entirely until a
         // durable CLI uuid is known (pre-init frames carry none).
@@ -778,6 +797,9 @@ async function boot(): Promise<void> {
         return undefined;
       },
       onStatusChange: (connected) => {
+        // Every socket owes its own history request; a dropped one owes none.
+        if (connected) connectResync.onConnect();
+        else connectResync.onDisconnect();
         statusEl.textContent = connected ? "connected" : "disconnected";
         statusEl.classList.toggle("ok", connected);
         // Socket lifecycle in the daemon log: pairs with the daemon's

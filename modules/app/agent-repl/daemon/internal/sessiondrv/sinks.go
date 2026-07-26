@@ -32,6 +32,10 @@ type Pusher interface {
 // Satisfied by *ssm.Manager.
 type StateApplier interface {
 	Apply(ev *corev1.Event) error
+	// ReconcileTasks adopts an AUTHORITATIVE live-task set for the session's
+	// workspace, so live_task_count becomes exactly len(liveTaskIDs). Fed from
+	// data.BackgroundTasksChanged, the only event carrying the whole live set.
+	ReconcileTasks(sessionID string, liveTaskIDs []string) error
 }
 
 // ProgressResolver is the slice of the progress-footer resolver (F1) the driver
@@ -321,11 +325,48 @@ func (c *consumer) Consume(ev *corev1.Event) {
 				})
 			}
 		}
+		// The SDK's full live-task set. It is the one event that can CLOSE the
+		// ghost class rather than adding to it, so it drives both task planes
+		// (the SSM counter and the roster) as an authority.
+		if btc := frontend.BackgroundTasksFromVendor(p.Vendor); btc != nil {
+			c.reconcileTasks(ev, btc)
+		}
 		c.pushConversation(ev)
 	default:
 		// UnparsedEvent / empty payloads carry no conversation content of their
 		// own; the demux already loud-logged them. Nothing to push.
 	}
+}
+
+// reconcileTasks adopts a `BackgroundTasksChanged` snapshot as the
+// authoritative live-task set on BOTH task planes:
+//
+//   - the SSM's live_task_count, which appends reconciliation rows so the
+//     derived count equals the list exactly (it is the only thing that can
+//     settle the `IMPOSSIBLE live_task_count=-N` class, where replayed
+//     historical task_ended events arrive with no logged task_started); and
+//   - the frontend TaskCatalog, rebuilt from the ring — which already holds
+//     THIS event, since Consume retains before it translates — so the roster
+//     sweeps its ghosts in the same push.
+//
+// An SSM failure is loud-logged and does not stop the roster refresh: the two
+// planes are independent, and losing both over one failure would be worse.
+func (c *consumer) reconcileTasks(ev *corev1.Event, btc *datav1.BackgroundTasksChanged) {
+	ids := make([]string, 0, len(btc.GetTasks()))
+	for _, ref := range btc.GetTasks() {
+		if ref.GetTaskId() != "" {
+			ids = append(ids, ref.GetTaskId())
+		}
+	}
+	c.logf("sessiondrv: authoritative live-task set session=%s ws=%s seq=%d tasks=%d",
+		c.sessionID, c.workspace, ev.GetSeq(), len(ids))
+	// Keyed by the EVENT's session id: the SSM resolves a workspace from
+	// whichever identity the event carries, and a store event carries the
+	// vendor uuid rather than the daemon's s_ id.
+	if err := c.ssm.ReconcileTasks(ev.GetSessionId(), ids); err != nil {
+		c.logf("sessiondrv: task reconciliation failed session=%s seq=%d: %v", c.sessionID, ev.GetSeq(), err)
+	}
+	c.push.PushTaskCatalog(frontend.BuildTaskCatalog(c.workspace, c.sessionID, c.snapshotRing()))
 }
 
 // Backfill states persisted on the registry record and mapped onto
@@ -458,11 +499,16 @@ func (c *consumer) ConnectionRecovered(_ string) {
 // resync replays the retained conversation deltas from fromSeq (0 = from the
 // start of the retained window) via the normal PushConversationDelta path. It
 // is idempotent by construction: the frontends reconcile by through_seq/uuid,
-// so re-pushing already-seen items REPLACES rather than duplicates them. This
-// is the simplest honest mechanism (task step 5): the daemon replays its
-// bounded retained ring; history older than the window is recovered by the
-// store-backed Subscribe replay on reconnect.
-func (c *consumer) resync(fromSeq uint64) {
+// so re-pushing already-seen items REPLACES rather than duplicates them.
+//
+// It returns the ring's FLOOR: the oldest seq this replay could possibly have
+// covered. A caller asking below the floor was answered incompletely, and the
+// floor is what tells it so — the bounded store re-pull (repull.go) closes the
+// remainder. Before the floor was reported, "older than the retained window"
+// was answered with silence, which is what left a freshly-mounted GUI blank
+// after a daemon restart (the ring is empty then, so EVERY request is
+// below-floor).
+func (c *consumer) resync(fromSeq uint64) (floor uint64, haveFloor bool) {
 	for _, ev := range c.snapshotRing() {
 		if ev.GetSeq() < fromSeq {
 			continue
@@ -478,6 +524,28 @@ func (c *consumer) resync(fromSeq uint64) {
 	for _, item := range c.snapshotPermItems() {
 		c.pushPermissionDelta(item)
 	}
+	return c.ringFloor()
+}
+
+// ringFloor reports the oldest store seq the retained ring still holds — the
+// first seq a resync replay can cover — and whether the ring holds one at all.
+//
+// ok=false means the ring carries no seq-bearing event: it was emptied by the
+// cap, or (the case that matters) this is a freshly restarted daemon whose ring
+// has not filled yet. A caller cannot derive the floor from the ring then, and
+// must fall back to the DURABLE last_seen_seq — see Manager.Resync.
+//
+// Reporting 0 in that case would claim the ring covers all of history, which is
+// the silent answer this whole mechanism exists to replace.
+func (c *consumer) ringFloor() (uint64, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, ev := range c.ring {
+		if seq := ev.GetSeq(); seq > 0 {
+			return seq, true
+		}
+	}
+	return 0, false
 }
 
 // pushPermission retains and pushes a permission ConversationItem, keyed by its

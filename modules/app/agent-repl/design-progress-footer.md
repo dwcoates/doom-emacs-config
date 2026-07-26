@@ -145,19 +145,53 @@ above, which IS in the footer's scope: the rosters move as-is; they do not
 gain the telemetry below.)
 
 - `core.TaskProgress` is stranded: `BuildTaskCatalog`
-  (`daemon/internal/frontend/translate.go:407`) has no arm for it and
+  (`daemon/internal/frontend/translate.go`) has no arm for it and
   `TaskEntry` has no progress fields (`bytes_observed` / `records_observed` /
   `last_progress_at_ms` to add).
 - `data.TaskNotificationMsg.TaskUsage` (total_tokens / tool_uses /
   duration_ms at task end) is stranded — only status/summary survive into
   `TaskEntry`.
-- `data.BackgroundTasksChanged` is persisted vendor-only with no twin
-  (`shim src/proto/convert.ts:24` note) and dropped by the daemon. It is the
-  only full-live-set snapshot, so it should be folded into the SSM and
-  `BuildTaskCatalog` as an authoritative reconciliation input — the sweep for
-  the `IMPOSSIBLE live_task_count=-N` ghost class.
 - A per-task progress pulse on the relocated rosters (fed by the items
   above) would be the eventual render, were this ever revisited.
+
+### PROMOTED OUT of the not-to-implement bundle: `BackgroundTasksChanged`
+
+`data.BackgroundTasksChanged` reconciliation was the third item of the bundle
+above. It is hereby PROMOTED and IMPLEMENTED; the rest of the bundle stays
+explicitly not-to-implement.
+
+It was promoted because it is not telemetry at all — it is the only
+full-live-set snapshot the session emits, and therefore the only thing that can
+CLOSE the ghost class rather than describe it. The backfill-to-GUI work made
+that urgent: replaying history to a freshly-mounted GUI means historical task
+events arrive en masse, and without an authority they masquerade as live
+activity until slow LOST staleness sweeps close them one by one.
+
+What landed:
+
+- **`BuildTaskCatalog`** (`daemon/internal/frontend/translate.go`) folds a
+  vendor `BackgroundTasksChanged` as authoritative reconciliation: a running
+  entry absent from the list is swept to `lost` at the snapshot's timestamp
+  (`lost`, not `done` — the session never said how it finished), and an id in
+  the list with no entry is opened as `running` from the ref's type and
+  description. A later `TaskEnded` still folds after it and closes the task.
+- **`ssm.Manager.ReconcileTasks`** (`daemon/internal/ssm/reconcile.go`) appends
+  reconciliation rows so `live_task_count` equals the list's size exactly. It
+  settles BOTH failure directions, which the original note only half-named:
+  ghost starts with no end, AND mass `task_ended` with no logged `task_started`
+  — the shape a sidecar cursor-recovery failure produces, and the direct cause
+  of the observed `ssm: IMPOSSIBLE live_task_count=-114` (plus −17/−3/−2 on
+  three other workspaces in the same second) on 2026-07-26.
+- **The negative-count clamp stays.** It is the loud report of an impossible
+  state; reconciliation removes its CAUSE, not its voice.
+- **`live_task_count` now pushes on its own.** The SSM keyed its
+  `WorkspaceState` push on the render state alone, so a count-only change
+  (5 tasks becoming 2, or a reconciliation sweeping ghosts) never reached the
+  frontend and the stale figure stayed on screen with nothing that could
+  correct it.
+
+Not promoted with it: `TaskProgress` counters and `TaskUsage` remain stranded
+by decision.
 
 ## Nuked (recorded at execution)
 

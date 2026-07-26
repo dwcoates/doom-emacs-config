@@ -91,7 +91,7 @@ when the ack reports failure — in addition to the loud log + echo).")
 (defconst agent-repl--uds-known-frame-fields
   '("snapshot" "workspaceState" "sessionView" "conversationDelta"
     "typingDelta" "taskCatalog" "commandAck" "degradedNotice" "daemonView"
-    "sessionInit" "heartbeat" "queue")
+    "sessionInit" "heartbeat" "queue" "progress")
   "The protojson (lowerCamelCase) names of every `FrontendFrame' oneof arm.
 Mirrors the `frame' oneof in proto/agentshim/frontend/v1/frontend.proto.
 A decoded frame whose sole top-level key is NOT one of these is
@@ -101,12 +101,12 @@ malformed (unknown wire field) and signals loudly.
 commands, tools, skills, model list); it is the pushed-frame replacement
 for the deleted GET /commands HTTP slash-menu source.
 
-`heartbeat' (E4) is the ephemeral long-tool liveness relay and `queue'
-(E4) is the daemon-held prompt queue; Emacs decodes both for wire parity
-and renders neither — see `agent-repl--uds-ignored-frame-fields'.")
+`heartbeat' (E4), `queue' (E4), and `progress' (F1) are decoded for wire
+parity and rendered by nothing here — see
+`agent-repl--uds-ignored-frame-fields'.")
 
 (defconst agent-repl--uds-ignored-frame-fields
-  '("heartbeat" "queue")
+  '("heartbeat" "queue" "progress")
   "Frame arms Emacs decodes for wire parity but DELIBERATELY renders nothing for.
 These are a subset of `agent-repl--uds-known-frame-fields'.
 
@@ -123,7 +123,17 @@ webapp's running-tool chip.  Emacs shows no per-tool elapsed clock.
 `queue' (E4): the prompts the daemon is holding for a session.  The
 queue's controls (force/accept/cancel) live where the prompt was typed —
 the webapp composer — and Emacs does not offer them, so rendering the
-chips here would show state the user could not act on.")
+chips here would show state the user could not act on.
+
+`progress' (F1): the consolidated progress footer's whole input.  The
+footer is webapp-only by settled decision (design-progress-footer.md,
+\"No Emacs component\"), so this arm has no Emacs consumer and never
+will.  It is registered because the daemon PUSHES it: this vocabulary
+predated the frame, so every ProgressView push signalled
+`agent-repl-uds-malformed-frame' and surfaced as a user-visible error on
+workspace open.  Registering this one KNOWN arm is the fix; the
+malformed guard itself is unchanged, so a genuinely unknown future arm
+still fails loudly.")
 
 (defconst agent-repl--uds-known-command-fields
   '("submitPrompt" "interrupt" "permissionAnswer" "mergeWorkspace"
