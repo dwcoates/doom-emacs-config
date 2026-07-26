@@ -153,6 +153,35 @@ func TestValidPermissionMode(t *testing.T) {
 	}
 }
 
+func TestUngatedPermissionMode(t *testing.T) {
+	tests := []struct {
+		name string
+		mode string
+		want bool
+	}{
+		// The SDK auto-approves every tool BEFORE canUseTool, so the daemon's
+		// permission round-trip never engages.
+		{"bypassPermissions auto-approves before canUseTool", "bypassPermissions", true},
+		{"default reaches canUseTool for the ask path", "default", false},
+		{"acceptEdits still asks about non-edit tools", "acceptEdits", false},
+		{"auto still reaches canUseTool for the ask path", "auto", false},
+		// dontAsk also bypasses canUseTool, but by DENYING, so it grants
+		// nothing behind the gate's back.
+		{"dontAsk bypasses fail-closed", "dontAsk", false},
+		{"plan executes no mutating tool", "plan", false},
+		{"an unset mode is not a claim of ungatedness", "", false},
+		{"an unknown mode gets no invented verdict", "someFutureMode", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act + Assert
+			if got := UngatedPermissionMode(tt.mode); got != tt.want {
+				t.Errorf("UngatedPermissionMode(%q) = %v, want %v", tt.mode, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestDecodeL1EventModels(t *testing.T) {
 	// Arrange
 	line := `{"type":"models","session_id":"s1","models":[{"value":"opus","displayName":"Opus 4.5","description":"smartest"}]}`
