@@ -360,12 +360,6 @@ Snaps the agent's webview feed to its last message
 \(`agent-repl--frontend-snap-webview-to-tail'), so a switched-to
 workspace never shows stale middle-of-history output.
 
-If the newly-active workspace has `:agent-state :done', stamps
-`:done-acked' to t and `:done-acked-at' to the current time so the
-decay timer can clear :done → :idle once
-`agent-repl-done-idle-delay' seconds of continuous focus have
-elapsed.  The companion clear in `--before-persp-deactivate' resets
-the timestamp on switch-away, so a quick transit through the tab
 never causes a silent decay.
 
 Also runs `agent-repl--maybe-sweep-hidden-on-switch' so workspaces
@@ -382,9 +376,6 @@ pending merge auto-fire."
     ;; panels if they were visible before this workspace was deactivated.
     ;; Must run BEFORE autoselect so it sees the correct panel windows.
     (agent-repl--ensure-own-panels-on-persp-switch ws)
-    (when (eq (agent-repl--ws-agent-state ws) :done)
-      (agent-repl--ws-put ws :done-acked t)
-      (agent-repl--ws-put ws :done-acked-at (float-time)))
     (agent-repl--maybe-sweep-hidden-on-switch ws)
     (agent-repl--dequeue-merge ws)
     ;; Event-driven (workspace just activated) → kick a fresh pass via
@@ -460,31 +451,19 @@ side-window-only frame)."
                           (window-list))))
         (select-window target)))))
 
-(defun agent-repl--clear-done-ack-on-switch-away (ws)
-  "Reset WS's :done focus-dwell tracking when switching away.
-If WS is in `:agent-state :done' and the decay has not yet fired,
-clear `:done-acked' and `:done-acked-at' so the dwell countdown
-restarts on the next return.  This makes the
-`agent-repl-done-idle-delay' check count only continuous focus
-periods — a quick transit (< delay) leaves the workspace green."
-  (when (and ws (eq (agent-repl--ws-agent-state ws) :done))
-    (agent-repl--log ws "clear-done-ack-on-switch-away ws=%s" ws)
-    (agent-repl--ws-put ws :done-acked nil)
-    (agent-repl--ws-put ws :done-acked-at nil)))
+;; `agent-repl--clear-done-ack-on-switch-away' is gone: there is no dwell
+;; countdown left to restart, because there is no decay left to pace.
 
 (defun agent-repl--before-persp-deactivate (&rest _)
   "Save window state before perspective deactivation.
 Redirects away from agent buffers and saves frame state.  Also
 records `:panels-were-visible' so `--ensure-own-panels-on-persp-switch'
 can restore the correct workspace's panels after activation.
-Clears the `:done' focus-dwell tracking on the outgoing workspace so
-a sub-`agent-repl-done-idle-delay' transit never decays it.
 Logs `persp-names-cache' so cache mutations across persp lifecycle
 events (kill, switch, add) are traceable."
   (let ((ws (agent-repl--ws-current-name)))
     (agent-repl--log ws "before-persp-deactivate: entry cache=%S"
                       (or (agent-repl--ws-names-cache) "(unbound)"))
-    (agent-repl--clear-done-ack-on-switch-away ws)
     ;; Record whether panels are visible BEFORE redirecting/saving so
     ;; the activated hook can restore them if persp-mode drops them.
     (agent-repl--ws-put ws :panels-were-visible (agent-repl--panels-visible-p))
