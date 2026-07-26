@@ -327,7 +327,7 @@ describe("ShimSession command handling", () => {
     // Assert — surfaced as a command-scoped error, never swallowed.
     const [err] = h.eventsOfType("error");
     expect(err!.request_id).toBe("r1");
-    expect(err!.message).toContain("u-1,u-2");
+    expect(err!.message).toContain("still_queued=[u-1 u-2]");
   });
 
   it("stays silent when an interrupt receipt reports no survivors", async () => {
@@ -338,6 +338,29 @@ describe("ShimSession command handling", () => {
     await until(() => h.interruptCalls() === 1);
     // Assert
     expect(h.eventsOfType("error")).toEqual([]);
+  });
+
+  it("stays silent when an older CLI resolves interrupt with no receipt", async () => {
+    // Arrange — pre-`interrupt_receipt_v1`: absent is not an anomaly.
+    const h = makeHarness();
+    // Act
+    h.send({ type: "interrupt", request_id: "r1" });
+    await until(() => h.interruptCalls() === 1);
+    // Assert
+    expect(h.eventsOfType("error")).toEqual([]);
+  });
+
+  it("reports the cancelled entries alongside the survivors", async () => {
+    // Arrange — `cancelled` rides only on a cancel_queued interrupt, and is
+    // part of the same anomaly: it names what the CLI DID drop.
+    const h = makeHarness({
+      interruptReceipt: { still_queued: ["u-1"], cancelled: ["u-9"] },
+    });
+    // Act
+    h.send({ type: "interrupt", request_id: "r1" });
+    await until(() => h.eventsOfType("error").length === 1);
+    // Assert
+    expect(h.eventsOfType("error")[0]!.message).toContain("cancelled=[u-9]");
   });
 
   it("acks set-permission-mode after applying it to the query", async () => {
