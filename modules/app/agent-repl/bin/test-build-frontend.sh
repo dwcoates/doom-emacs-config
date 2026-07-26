@@ -99,8 +99,39 @@ run_script() {
     local root="$1"; shift
     STUB_LOG="$root/stub.log" \
         AGENT_REPL_NODE_STORE="${STORE:-$root/store}" \
+        AGENT_REPL_WORKTREE_ROOTS="${WORKTREE_ROOTS:-}" \
+        AGENT_REPL_NODE_STORE_GRACE_MINS="${GRACE_MINS:-60}" \
         PATH="$root/stubs:$PATH" \
         bash "$root/bin/build-frontend.sh" "$@"
+}
+
+# --- gc helpers -------------------------------------------------------------
+
+# store_key_of MANIFEST — mirror build-frontend.sh's store_key so a test can
+# name the entry a given lockfile keys.
+store_key_of() {
+    { shasum -a 256 "$1" 2>/dev/null || sha256sum "$1"; } | cut -c1-16
+}
+
+# seed_entry STORE NAME [KB] — create a populated store entry, optionally with
+# bulk so the size reporting has something to report.
+seed_entry() {
+    local store="$1" name="$2" kb="${3:-0}"
+    mkdir -p "$store/$name/node_modules"
+    if [ "$kb" -gt 0 ]; then
+        dd if=/dev/zero of="$store/$name/node_modules/blob" bs=1024 count="$kb" 2>/dev/null
+    fi
+    return 0
+}
+
+# age_entries STORE — backdate every entry past any plausible grace window, so
+# a test exercises the REFERENCE rules rather than the age rule.
+age_entries() {
+    local e
+    for e in "$1"/*; do
+        [ -d "$e" ] && touch -t 202001010000 "$e"
+    done
+    return 0
 }
 
 # --- Test 1: all fresh -> nothing rebuilt ----------------------------------
@@ -226,7 +257,211 @@ t_missing_artifact
 t_force
 t_deps_linked_from_store
 t_deps_store_shared_across_worktrees
+
+# --- Test 8: gc collects a stranded entry, keeps the referenced one ----------
+t_gc_collects_stranded_keeps_referenced() {
+    local root; root="$(mktemp -d)"
+    local store="$root/store"
+    make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
+    echo '{"lockfileVersion":3,"packages":{"live":{}}}' > "$root/webapp/package-lock.json"
+    local live="webapp-$(store_key_of "$root/webapp/package-lock.json")"
+    seed_entry "$store" "$live" 64
+    seed_entry "$store" "webapp-deadbeefdeadbeef" 512
+    age_entries "$store"
+
+    WORKTREE_ROOTS="$root" run_script "$root" gc >"$root/gc.log" 2>&1
+
+    if [ -d "$store/$live" ] && [ ! -d "$store/webapp-deadbeefdeadbeef" ]; then
+        pass "gc: stranded entry collected, referenced entry kept"
+    else
+        fail "gc: stranded collected / referenced kept" "$(cat "$root/gc.log")"
+    fi
+    rm -rf "$root"
+}
+
+# --- Test 9: an entry referenced only by a SYMLINK survives -------------------
+# The safety-critical case: a worktree whose lockfile changed but which has not
+# rebuilt is still POINTING at the old entry. Hashing the current lockfile alone
+# would delete the deps out from under it.
+t_gc_protects_symlink_target() {
+    local root; root="$(mktemp -d)"
+    local store="$root/store"
+    make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
+    # The entry the worktree is actually USING.
+    seed_entry "$store" "webapp-0000000000000000" 64
+    rm -rf "$root/webapp/node_modules"
+    ln -sfn "$store/webapp-0000000000000000/node_modules" "$root/webapp/node_modules"
+    # Its lockfile has since moved on to a different (not-yet-built) key.
+    echo '{"lockfileVersion":3,"packages":{"moved-on":{}}}' > "$root/webapp/package-lock.json"
+    age_entries "$store"
+
+    WORKTREE_ROOTS="$root" run_script "$root" gc >"$root/gc.log" 2>&1
+
+    if [ -d "$store/webapp-0000000000000000" ] && [ -d "$root/webapp/node_modules" ]; then
+        pass "gc: entry referenced only by a node_modules symlink is protected"
+    else
+        fail "gc: symlink target protected" "$(cat "$root/gc.log")"
+    fi
+    rm -rf "$root"
+}
+
+# --- Test 10: another worktree's lockfile protects an entry -------------------
+t_gc_protects_other_worktrees() {
+    local store; store="$(mktemp -d)/store"
+    local first; first="$(mktemp -d)"
+    local second; second="$(mktemp -d)"
+    make_tree "$first"; make_stubs "$first/stubs"; make_fresh_artifacts "$first"
+    make_tree "$second"; make_stubs "$second/stubs"; make_fresh_artifacts "$second"
+    echo '{"lockfileVersion":3,"packages":{"a":{}}}' > "$first/webapp/package-lock.json"
+    echo '{"lockfileVersion":3,"packages":{"b":{}}}' > "$second/webapp/package-lock.json"
+    local key_a="webapp-$(store_key_of "$first/webapp/package-lock.json")"
+    local key_b="webapp-$(store_key_of "$second/webapp/package-lock.json")"
+    seed_entry "$store" "$key_a" 64
+    seed_entry "$store" "$key_b" 64
+    age_entries "$store"
+
+    # Sweep from the FIRST worktree only; the second's entry must survive.
+    STORE="$store" WORKTREE_ROOTS="$(printf '%s\n%s' "$first" "$second")" \
+        run_script "$first" gc >"$first/gc.log" 2>&1
+
+    if [ -d "$store/$key_a" ] && [ -d "$store/$key_b" ]; then
+        pass "gc: an entry referenced by ANOTHER worktree is protected"
+    else
+        fail "gc: other worktree protected" "$(cat "$first/gc.log")"
+    fi
+    rm -rf "$first" "$second" "$store"
+}
+
+# --- Test 11: a held lock makes the sweep skip (concurrency guard) ------------
+t_gc_skips_when_lock_held() {
+    local root; root="$(mktemp -d)"
+    local store="$root/store"
+    make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
+    seed_entry "$store" "webapp-deadbeefdeadbeef" 64
+    age_entries "$store"
+    # Stand in for a sweep already running in another worktree. Fresh, so the
+    # stale-lock breaker must not fire.
+    mkdir -p "$store/.gc.lock"
+
+    WORKTREE_ROOTS="$root" run_script "$root" gc >"$root/gc.log" 2>&1
+
+    if [ -d "$store/webapp-deadbeefdeadbeef" ] && grep -q "lock, skipping" "$root/gc.log"; then
+        pass "gc: a held lock skips the sweep and collects nothing"
+    else
+        fail "gc: held lock skips sweep" "$(cat "$root/gc.log")"
+    fi
+    rm -rf "$root"
+}
+
+# --- Test 12: the lock is released so a later sweep can run ------------------
+t_gc_releases_lock() {
+    local root; root="$(mktemp -d)"
+    local store="$root/store"
+    make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
+    seed_entry "$store" "webapp-deadbeefdeadbeef" 64
+    seed_entry "$store" "webapp-cafecafecafecafe" 64
+    age_entries "$store"
+
+    WORKTREE_ROOTS="$root" run_script "$root" gc >/dev/null 2>&1
+    # A second sweep must not find the lock still held.
+    WORKTREE_ROOTS="$root" run_script "$root" gc >"$root/gc2.log" 2>&1
+
+    if [ ! -d "$store/.gc.lock" ] && ! grep -q "lock, skipping" "$root/gc2.log"; then
+        pass "gc: the sweep releases its lock"
+    else
+        fail "gc: lock released" "$(cat "$root/gc2.log")"
+    fi
+    rm -rf "$root"
+}
+
+# --- Test 13: --dry-run reports but deletes nothing ---------------------------
+t_gc_dry_run_deletes_nothing() {
+    local root; root="$(mktemp -d)"
+    local store="$root/store"
+    make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
+    seed_entry "$store" "webapp-deadbeefdeadbeef" 512
+    age_entries "$store"
+
+    WORKTREE_ROOTS="$root" run_script "$root" gc --dry-run >"$root/gc.log" 2>&1
+
+    if [ -d "$store/webapp-deadbeefdeadbeef" ] &&
+           grep -q "WOULD collect webapp-deadbeefdeadbeef" "$root/gc.log"; then
+        pass "gc: --dry-run reports the collection without performing it"
+    else
+        fail "gc: dry-run deletes nothing" "$(cat "$root/gc.log")"
+    fi
+    rm -rf "$root"
+}
+
+# --- Test 14: an entry inside the grace window survives -----------------------
+# Guards a build in another worktree that is populating this entry right now.
+t_gc_respects_grace_window() {
+    local root; root="$(mktemp -d)"
+    local store="$root/store"
+    make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
+    seed_entry "$store" "webapp-deadbeefdeadbeef" 64   # freshly created
+
+    WORKTREE_ROOTS="$root" run_script "$root" gc -v >"$root/gc.log" 2>&1
+
+    if [ -d "$store/webapp-deadbeefdeadbeef" ] && grep -q "grace" "$root/gc.log"; then
+        pass "gc: an entry younger than the grace window is protected"
+    else
+        fail "gc: grace window respected" "$(cat "$root/gc.log")"
+    fi
+    rm -rf "$root"
+}
+
+# --- Test 15: minting a new entry triggers a sweep ---------------------------
+t_gc_runs_after_minting_an_entry() {
+    local root; root="$(mktemp -d)"
+    local store="$root/store"
+    make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
+    rm -rf "$root/webapp/node_modules"
+    echo '{"lockfileVersion":3,"packages":{"fresh":{}}}' > "$root/webapp/package-lock.json"
+    seed_entry "$store" "webapp-deadbeefdeadbeef" 64
+    age_entries "$store"
+
+    # `deps` mints the webapp entry, which should pull the sweep in behind it.
+    WORKTREE_ROOTS="$root" run_script "$root" deps >"$root/gc.log" 2>&1
+
+    if [ ! -d "$store/webapp-deadbeefdeadbeef" ] && grep -q "gc: collecting" "$root/gc.log"; then
+        pass "gc: a run that mints an entry sweeps afterwards"
+    else
+        fail "gc: sweep on mint" "$(cat "$root/gc.log")"
+    fi
+    rm -rf "$root"
+}
+
+# --- Test 16: a run that mints nothing does not sweep ------------------------
+t_gc_not_run_when_nothing_minted() {
+    local root; root="$(mktemp -d)"
+    local store="$root/store"
+    make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
+    seed_entry "$store" "webapp-deadbeefdeadbeef" 64
+    age_entries "$store"
+
+    # Everything fresh and node_modules already present: nothing is minted, so
+    # the (multi-second) enumeration must not run at all.
+    WORKTREE_ROOTS="$root" run_script "$root" >"$root/gc.log" 2>&1
+
+    if [ -d "$store/webapp-deadbeefdeadbeef" ] && ! grep -q "\[build-frontend\] gc:" "$root/gc.log"; then
+        pass "gc: a run that mints nothing does not sweep"
+    else
+        fail "gc: no sweep without a mint" "$(cat "$root/gc.log")"
+    fi
+    rm -rf "$root"
+}
+
 t_deps_lockfile_change_rekeys_store
+t_gc_collects_stranded_keeps_referenced
+t_gc_protects_symlink_target
+t_gc_protects_other_worktrees
+t_gc_skips_when_lock_held
+t_gc_releases_lock
+t_gc_dry_run_deletes_nothing
+t_gc_respects_grace_window
+t_gc_runs_after_minting_an_entry
+t_gc_not_run_when_nothing_minted
 
 echo "-----"
 echo "passed: $PASS  failed: $FAIL"
