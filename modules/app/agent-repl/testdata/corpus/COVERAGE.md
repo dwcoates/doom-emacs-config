@@ -61,7 +61,7 @@ Checklist of the full `agentshim.data.v1` shape inventory (design doc §5.3 + th
 |---|---|---|
 | `Entrypoint` | FOUND | envelope on transcript-lines/*.jsonl |
 | `PromptSource` | FOUND | transcript-lines/user.jsonl (promptSource) |
-| `ToolDenialKind` | FOUND | tool-results/raw_string.jsonl (toolDenialKind) |
+| `ToolDenialKind` | PARTIAL | tool-results/raw_string.jsonl (toolDenialKind); all 4 census values map, only 1 is fixture-backed |
 | `QueueOp` | FOUND | transcript-lines/queue-operation.jsonl |
 | `OriginKind` | FOUND | attachments/queued_command.jsonl (origin.kind="human") |
 | `TranscriptLine` | FOUND | oneof wrapper; every transcript-lines/*.jsonl |
@@ -199,8 +199,8 @@ Checklist of the full `agentshim.data.v1` shape inventory (design doc §5.3 + th
 
 ## Summary
 
-- FOUND: 149
-- PARTIAL: 3
+- FOUND: 148
+- PARTIAL: 4
 - NOT-FOUND-ON-MACHINE: 23
 - Total shapes: 175
 
@@ -220,6 +220,7 @@ Checklist of the full `agentshim.data.v1` shape inventory (design doc §5.3 + th
 - `stream:ControlCancelRequest` (NOT-FOUND-ON-MACHINE) — control channel not in probes
 - `stream:KeepAlive` (NOT-FOUND-ON-MACHINE) — control channel not in probes
 - `transcript:AgentMetaJson` (PARTIAL) — sidechain/agent-*.meta.json (model field absent in sample; other fields present)
+- `transcript:ToolDenialKind` (PARTIAL) — all 4 census values map ("user-rejected", "automode-blocked", "permission-rule", "automode-unavailable"); only "user-rejected" is fixture-backed
 - `tools:ToolReferenceBlock` (NOT-FOUND-ON-MACHINE) — tool_reference content block not observed on the machine
 - `tools:ArtifactRead` (NOT-FOUND-ON-MACHINE) — WebFetchOutput.artifactRead is typings-only; no fetch on the machine resolved to an Artifact
 - `tools:KillShellInput` (NOT-FOUND-ON-MACHINE) — no KillShell tool use on the machine (proto already notes zero disk occurrences)
