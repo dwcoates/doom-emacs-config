@@ -113,6 +113,27 @@ describe("encodeFrontendCommand — createSession", () => {
       fake: true,
     });
   });
+
+  it("never encodes the ungated-session consent the daemon gates on", () => {
+    // Arrange / Act — the daemon refuses a bypassPermissions create without
+    // allow_ungated, and the webapp has no business consenting from a browser
+    // tab, so the field is unrepresentable here rather than merely unset.
+    const w = wire({
+      requestId: "r1",
+      workspace: "",
+      body: {
+        case: "createSession",
+        cwd: "/work/ws",
+        model: "opus",
+        permissionMode: "bypassPermissions",
+        configDir: "",
+        resumeClaudeSessionId: "",
+        fake: false,
+      },
+    });
+    // Assert
+    expect(w.createSession).not.toHaveProperty("allowUngated");
+  });
 });
 
 describe("encodeFrontendCommand — deleteSession", () => {

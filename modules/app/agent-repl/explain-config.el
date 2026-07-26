@@ -51,6 +51,7 @@
 (declare-function agent-repl--frontend-delete-session "agent-repl-frontend-client" (id &optional ws))
 (declare-function agent-repl--frontend-session-live-p "agent-repl-frontend-client" (id))
 (declare-function agent-repl--frontend-session-url "agent-repl-frontend-client" (session-id))
+(declare-function agent-repl-frontend-ungated-permission-mode-p "agent-repl-frontend-client" (mode))
 (declare-function agent-repl--uds-send-command "frontend-uds" (field payload &optional workspace process))
 (declare-function agent-repl--uds-track-command "frontend-uds" (request-id field workspace &optional on-failure on-success))
 (declare-function agent-repl--frontend-make-webview-buffer "agent-repl-frontend" (url))
@@ -62,6 +63,7 @@
 (declare-function agent-repl-window--harden "agent-repl-window" (win &rest recipe))
 
 (defvar agent-repl-frontend-permission-mode)
+(defvar agent-repl-frontend-allow-ungated)
 (defvar xwidget-webkit-buffer-name-format)
 
 ;;;; ---- Customization -------------------------------------------------------
@@ -347,6 +349,15 @@ flag, so its first turn carries the read-only preamble."
     (let* ((dir (agent-repl--explain-config-cwd))
            (agent-repl-frontend-permission-mode
             agent-repl-explain-config-permission-mode)
+           ;; THE one deliberate ungated create in the tree.  The daemon
+           ;; refuses `bypassPermissions' without this consent, because that
+           ;; mode leaves the session with no permission gate at all: the SDK
+           ;; auto-approves every tool before `canUseTool' is consulted.  Said
+           ;; out loud here rather than defaulted on globally, so no other
+           ;; create inherits it.
+           (agent-repl-frontend-allow-ungated
+            (agent-repl-frontend-ungated-permission-mode-p
+             agent-repl-explain-config-permission-mode))
            (id (agent-repl--frontend-create-session
                 dir agent-repl-explain-config-model)))
       (setq agent-repl--explain-config-session-id id

@@ -2234,8 +2234,22 @@ type CreateSessionCmd struct {
 	ConfigDir             string                 `protobuf:"bytes,4,opt,name=config_dir,json=configDir,proto3" json:"config_dir,omitempty"`
 	ResumeClaudeSessionId string                 `protobuf:"bytes,5,opt,name=resume_claude_session_id,json=resumeClaudeSessionId,proto3" json:"resume_claude_session_id,omitempty"` // "" = fresh
 	Fake                  bool                   `protobuf:"varint,6,opt,name=fake,proto3" json:"fake,omitempty"`                                                                   // test harness sessions
-	unknownFields         protoimpl.UnknownFields
-	sizeCache             protoimpl.SizeCache
+	// The caller's DELIBERATE consent to create a session with NO permission
+	// gate. Required whenever permission_mode names a mode that shadows the
+	// shim's canUseTool callback in the fail-OPEN direction
+	// (bypassPermissions): under such a mode the SDK auto-approves every tool
+	// before canUseTool is consulted, so the daemon's whole permission
+	// round-trip never engages and no permission card can ever appear.
+	//
+	// The daemon REFUSES such a create without this flag. The mode is otherwise
+	// one string away from every ordinary create, and "reachable by a typo" is
+	// not an acceptable property for the switch that turns the gate off. It is
+	// a create-time consent only: a session already registered in that mode
+	// still rehydrates after a daemon restart, since refusing there would
+	// silently change a live session's posture.
+	AllowUngated  bool `protobuf:"varint,7,opt,name=allow_ungated,json=allowUngated,proto3" json:"allow_ungated,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *CreateSessionCmd) Reset() {
@@ -2306,6 +2320,13 @@ func (x *CreateSessionCmd) GetResumeClaudeSessionId() string {
 func (x *CreateSessionCmd) GetFake() bool {
 	if x != nil {
 		return x.Fake
+	}
+	return false
+}
+
+func (x *CreateSessionCmd) GetAllowUngated() bool {
+	if x != nil {
+		return x.AllowUngated
 	}
 	return false
 }
@@ -3439,7 +3460,7 @@ const file_agentshim_frontend_v1_frontend_proto_rawDesc = "" +
 	"\x05level\x18\x01 \x01(\x0e2%.agentshim.frontend.v1.ClientLogLevelR\x05level\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x121\n" +
 	"\acontext\x18\x03 \x01(\v2\x17.google.protobuf.StructR\acontext\"\r\n" +
-	"\vShutdownCmd\"\xcf\x01\n" +
+	"\vShutdownCmd\"\xf4\x01\n" +
 	"\x10CreateSessionCmd\x12\x10\n" +
 	"\x03cwd\x18\x01 \x01(\tR\x03cwd\x12\x14\n" +
 	"\x05model\x18\x02 \x01(\tR\x05model\x12'\n" +
@@ -3447,7 +3468,8 @@ const file_agentshim_frontend_v1_frontend_proto_rawDesc = "" +
 	"\n" +
 	"config_dir\x18\x04 \x01(\tR\tconfigDir\x127\n" +
 	"\x18resume_claude_session_id\x18\x05 \x01(\tR\x15resumeClaudeSessionId\x12\x12\n" +
-	"\x04fake\x18\x06 \x01(\bR\x04fake\"1\n" +
+	"\x04fake\x18\x06 \x01(\bR\x04fake\x12#\n" +
+	"\rallow_ungated\x18\a \x01(\bR\fallowUngated\"1\n" +
 	"\x10DeleteSessionCmd\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\"N\n" +
