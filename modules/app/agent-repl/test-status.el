@@ -1493,32 +1493,31 @@ mock."
                   (lambda () "ws-five")))
          ,@body))))
 
-(ert-deftest agent-repl-test-workspace-tabline-formatted-always-two-rows ()
-  "The formatted tab-bar segment ALWAYS spans exactly two rows.
+(ert-deftest agent-repl-test-workspace-tabline-formatted-always-one-row ()
+  "The formatted tab-bar segment ALWAYS spans exactly one row.
 The row count is FIXED (never varies with workspace count): a
 row-count change alters the tab-bar pixel height; on macOS
 `ns_change_tab_bar_height' then resizes the NSWindow, and a clipped
-resize livelocks redisplay at 100% CPU.  Two rows joined by
-`agent-repl--join-tabline-rows' contain exactly one newline, and many
-workspaces at a narrow frame width must elide behind badges, never
-wrap to a third row."
+resize livelocks redisplay at 100% CPU.  A single row carries no
+newline, and many workspaces at a narrow frame width must elide
+behind badges, never wrap to a second row."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-eight-registered-workspaces
      (cl-letf (((symbol-function 'frame-width) (lambda () 24)))
        (dolist (agent-repl--tabline-space-toggle '(nil t))
          (let ((result (agent-repl-workspace-tabline-formatted)))
            (should (stringp result))
-           (should (= 1 (cl-count ?\n result)))))))))
+           (should (= 0 (cl-count ?\n result)))))))))
 
-(ert-deftest agent-repl-test-workspace-tabline-formatted-two-rows-when-tabs-fit-one ()
-  "Even when the tabs need only one row, the segment still spans two rows.
-The second row renders blank, keeping the tab-bar's height fixed."
+(ert-deftest agent-repl-test-workspace-tabline-formatted-single-row-when-few-tabs ()
+  "With only a couple of tabs, the segment is a single row with no newline.
+The fixed one-row count keeps the tab-bar's pixel height constant."
   (agent-repl-test--with-clean-state
     (cl-letf (((symbol-function '+workspace-list-names) (lambda () '("ws1" "ws2")))
               ((symbol-function '+workspace-current-name) (lambda () "ws1"))
               ((symbol-function 'frame-width) (lambda () 80)))
       (let ((agent-repl--tabline-space-toggle nil))
-        (should (= 1 (cl-count ?\n (agent-repl-workspace-tabline-formatted))))))))
+        (should (= 0 (cl-count ?\n (agent-repl-workspace-tabline-formatted))))))))
 
 (ert-deftest agent-repl-test-workspace-tabline-formatted-overflow-shows-current ()
   "When workspaces overflow the single row, the current one stays visible."
