@@ -39,19 +39,29 @@ type protoControl interface {
 // error — this layer never retries (the caller decides).
 func (c *Client) SubmitPrompt(ctx context.Context, text, origin, permissionMode string) error {
 	reqID := c.newRequestID("prompt")
-	return c.sendAwait(ctx, &corev1.SubmitPrompt{
+	_, err := c.sendAwait(ctx, &corev1.SubmitPrompt{
 		RequestId:      reqID,
 		Text:           text,
 		Origin:         origin,
 		PermissionMode: permissionMode,
 	})
+	return err
 }
 
 // Interrupt asks the shim to interrupt the current turn (hard = SDK
 // interrupt(); soft = end after the current message) and awaits the Ack/Nack.
-func (c *Client) Interrupt(ctx context.Context, hard bool) error {
+//
+// It returns the shim's OWN verdict on what the stop did. That verdict is
+// only obtainable here: from outside, a stop that failed and a turn that had
+// already ended arrive as the same silence, which is how a no-op stop came to
+// be painted as a failed one. A Nack or timeout is still an error, unchanged.
+func (c *Client) Interrupt(ctx context.Context, hard bool) (corev1.InterruptOutcome, error) {
 	reqID := c.newRequestID("interrupt")
-	return c.sendAwait(ctx, &corev1.Interrupt{RequestId: reqID, Hard: hard})
+	ack, err := c.sendAwait(ctx, &corev1.Interrupt{RequestId: reqID, Hard: hard})
+	if err != nil {
+		return corev1.InterruptOutcome_INTERRUPT_OUTCOME_UNSPECIFIED, err
+	}
+	return ack.GetInterruptOutcome(), nil
 }
 
 // PermissionResponse sends the answer to an inbound PermissionRequest,
@@ -80,11 +90,16 @@ func (c *Client) currentConn() *activeConn {
 
 // sendAwait registers a correlation waiter, sends msg, then blocks for the
 // matching Ack/Nack. The waiter is always deregistered before returning.
-func (c *Client) sendAwait(ctx context.Context, msg protoControl) error {
+//
+// It returns the ACK itself, not just success: an Ack carries a verdict on
+// some commands (an interrupt's outcome) and discarding it here would put the
+// only process that can see that verdict in the position of having to guess
+// at it later.
+func (c *Client) sendAwait(ctx context.Context, msg protoControl) (*corev1.Ack, error) {
 	reqID := msg.GetRequestId()
 	ac := c.currentConn()
 	if ac == nil {
-		return ErrNotConnected
+		return nil, ErrNotConnected
 	}
 
 	ch := make(chan ackResult, 1)
@@ -98,7 +113,7 @@ func (c *Client) sendAwait(ctx context.Context, msg protoControl) error {
 	}()
 
 	if err := ac.writeMsg(msg); err != nil {
-		return fmt.Errorf("sending control request (request_id=%s): %w", reqID, err)
+		return nil, fmt.Errorf("sending control request (request_id=%s): %w", reqID, err)
 	}
 	c.logf("sent control request request_id=%s, awaiting ack (timeout=%s)", reqID, c.cfg.AckTimeout)
 
@@ -106,25 +121,25 @@ func (c *Client) sendAwait(ctx context.Context, msg protoControl) error {
 	defer timer.Stop()
 	select {
 	case <-ctx.Done():
-		return fmt.Errorf("control request %s cancelled: %w", reqID, ctx.Err())
+		return nil, fmt.Errorf("control request %s cancelled: %w", reqID, ctx.Err())
 	case <-timer.C:
-		return fmt.Errorf("%w: request_id=%s after %s", ErrAckTimeout, reqID, c.cfg.AckTimeout)
+		return nil, fmt.Errorf("%w: request_id=%s after %s", ErrAckTimeout, reqID, c.cfg.AckTimeout)
 	case res := <-ch:
 		if res.err != nil {
-			return res.err
+			return nil, res.err
 		}
 		if res.nack != nil {
-			return fmt.Errorf("%w: request_id=%s reason=%q", ErrNack, reqID, res.nack.GetReason())
+			return nil, fmt.Errorf("%w: request_id=%s reason=%q", ErrNack, reqID, res.nack.GetReason())
 		}
-		c.logf("control request request_id=%s acked", reqID)
-		return nil
+		c.logf("control request request_id=%s acked outcome=%s", reqID, res.ack.GetInterruptOutcome())
+		return res.ack, nil
 	}
 }
 
 // resolveAck delivers an Ack to the correlated waiter. An Ack with no waiter is
 // loud-logged (a stray or duplicate ack) but not fatal.
 func (c *Client) resolveAck(ac *activeConn, ack *corev1.Ack) {
-	if !ac.deliver(ack.GetRequestId(), ackResult{}) {
+	if !ac.deliver(ack.GetRequestId(), ackResult{ack: ack}) {
 		c.logf("received Ack for unknown request_id=%s (stray or late)", ack.GetRequestId())
 	}
 }

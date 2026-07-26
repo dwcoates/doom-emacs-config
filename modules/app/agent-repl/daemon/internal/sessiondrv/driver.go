@@ -86,7 +86,9 @@ type sessionClient interface {
 	Run(ctx context.Context) error
 	AwaitReady(ctx context.Context) error
 	SubmitPrompt(ctx context.Context, text, origin, permissionMode string) error
-	Interrupt(ctx context.Context, hard bool) error
+	// Interrupt returns the shim's own verdict on what the stop did, which is
+	// the only place that verdict is observable.
+	Interrupt(ctx context.Context, hard bool) (corev1.InterruptOutcome, error)
 	// Replay asks the shim for a bounded slice of persisted history, streaming
 	// it to onEvent. Its events arrive over the wire as ReplayEvent, a
 	// different type from live Events, which is what keeps replayed history
@@ -419,12 +421,27 @@ func (m *Manager) applyMetaprompt(d *driven, text string) string {
 
 // Interrupt interrupts the workspace's live turn. A workspace with no live
 // session is a loud error (the frontend renders the failed CommandAck).
+//
+// The shim's OUTCOME decides whether the stop failed, not the absence of an
+// error: an undeliverable stop is a failure, while a stop that arrived after
+// the turn had already finished is a success the user explicitly asked for.
+// Those two used to be indistinguishable from here, and the second was
+// reported as the first.
 func (m *Manager) Interrupt(ctx context.Context, workspace string, hard bool) error {
 	d, err := m.existing(workspace)
 	if err != nil {
 		return err
 	}
-	return d.client.Interrupt(ctx, hard)
+	outcome, err := d.client.Interrupt(ctx, hard)
+	if err != nil {
+		return err
+	}
+	if failed := errclass.InterruptError(outcome); failed != nil {
+		m.logf("sessiondrv: interrupt undeliverable ws=%s session=%s outcome=%s", workspace, d.sessionID, outcome)
+		return failed
+	}
+	m.logf("sessiondrv: interrupt ws=%s session=%s outcome=%s", workspace, d.sessionID, outcome)
+	return nil
 }
 
 // AnswerPermission delivers a frontend permission answer to the parked

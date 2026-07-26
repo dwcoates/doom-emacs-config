@@ -237,6 +237,7 @@ type activeConn struct {
 
 // ackResult carries the outcome of a correlated control request.
 type ackResult struct {
+	ack  *corev1.Ack  // non-nil on success; carries the interrupt outcome
 	nack *corev1.Nack // non-nil = Nack; nil = Ack
 	err  error        // connection lost etc.
 }
