@@ -21,6 +21,7 @@ import {
   Ack,
   AckSchema,
   Interrupt,
+  InterruptOutcome,
   Nack,
   NackSchema,
   PermissionDecision,
@@ -42,8 +43,15 @@ export interface SdkControlTarget {
     origin: string;
     permissionMode?: string;
   }): void;
-  /** Interrupt the current turn. `hard` maps to the SDK `interrupt()`. */
-  interrupt(input: { requestId: string; hard: boolean }): void;
+  /**
+   * Interrupt the current turn. `hard` maps to the SDK `interrupt()`.
+   *
+   * Returns the THREE-VALUED outcome, decided SYNCHRONOUSLY. The
+   * implementation owns turn lifecycle, so only it can answer "was a turn
+   * live when this landed?" without racing — see the emitter in
+   * uds-session.ts for why that read must precede every await.
+   */
+  interrupt(input: { requestId: string; hard: boolean }): InterruptOutcome;
 }
 
 /** The shim's own resolution of a canUseTool request. */
@@ -94,11 +102,28 @@ export class ControlDispatch {
     }
   }
 
-  /** Handle an Interrupt; forward to the SDK turn and Ack (Nack on throw). */
+  /**
+   * Handle an Interrupt; forward to the SDK turn and Ack with the outcome
+   * the target decided (Nack on throw).
+   *
+   * THE AMBIGUITY THIS REMOVES. A consumer watching for an `aborted` result
+   * sees the turn end and the interrupt arrive as two unordered events, and
+   * so cannot tell a stop that FAILED from a turn that had ALREADY ENDED —
+   * it painted the second as the first. The shim owns turn lifecycle and its
+   * event loop is single-threaded, so the answer is unambiguous HERE and
+   * nowhere downstream. Carrying it on the Ack is what stops every consumer
+   * from re-deriving it wrongly.
+   *
+   * A synchronous throw stays a NACK rather than becoming an Ack carrying
+   * FAILED: a Nack is the stronger, already-established failure signal on
+   * this wire, and downgrading it to a successful receipt with a sad field
+   * would weaken error coverage the daemon already acts on. FAILED is for
+   * the case the target can prove undeliverable while still answering.
+   */
   handleInterrupt(msg: Interrupt): Ack | Nack {
     try {
-      this.target.interrupt({ requestId: msg.requestId, hard: msg.hard });
-      return create(AckSchema, { requestId: msg.requestId });
+      const outcome = this.target.interrupt({ requestId: msg.requestId, hard: msg.hard });
+      return create(AckSchema, { requestId: msg.requestId, interruptOutcome: outcome });
     } catch (err) {
       shimLog(COMPONENT, { request: msg.requestId }, `interrupt failed: ${errMsg(err)}`);
       return create(NackSchema, { requestId: msg.requestId, reason: errMsg(err) });

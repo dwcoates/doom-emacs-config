@@ -54,6 +54,7 @@ import {
   EventSchema,
   Plane,
   ReplayDoneSchema,
+  InterruptOutcome,
   ReplayRequest,
   SessionSource,
   SessionStartedSchema,
@@ -190,11 +191,34 @@ export class UdsSession {
           }
         }
       },
-      interrupt: (): void => {
+      interrupt: (): InterruptOutcome => {
+        // THE RACE, MADE STRUCTURALLY IMPOSSIBLE.
+        //
+        // The liveness read happens SYNCHRONOUSLY, here, before any await
+        // and before any promise is created. This event loop is
+        // single-threaded and this class owns the turn counter — it
+        // increments on submit-accept and decrements when the result lands —
+        // so no turn can start or end between this read and the outcome it
+        // decides. A turn that ends a microsecond later cannot retroactively
+        // turn INTERRUPTED into ALREADY_COMPLETE, and one that ended a
+        // microsecond earlier is already counted out.
+        //
+        // Deciding it downstream is what made it ambiguous: an observer
+        // watching for the turn's `aborted` result sees the stop and the
+        // turn end as two unordered events.
+        const wasLive = this.turnsInFlight > 0;
         // Interrupt cancels every blocked permission wait so no SDK callback
         // hangs, then forwards to the SDK (a no-op when idle).
         this.control.cancelAll("interrupt");
-        void this.query?.interrupt()
+        if (!this.query) {
+          // No SDK query to interrupt: the stop provably cannot be
+          // delivered. Previously the optional-chain below swallowed this
+          // whole — no forward, no report, and an Ack that read as success.
+          this.reportDegraded("claude-shim-interrupt",
+            "interrupt could not be delivered: no SDK query is constructed for this session");
+          return InterruptOutcome.FAILED;
+        }
+        void this.query.interrupt()
           .then((receipt) => {
             // SDK >= 0.3.205 answers with an interrupt receipt. The anomaly
             // wording is shared with the stdio path (describeInterruptSurvivors)
@@ -206,8 +230,14 @@ export class UdsSession {
             this.reportDegraded("claude-shim-interrupt", anomaly);
           })
           .catch((err: unknown) => {
+            // An async rejection cannot revise an Ack already written, so it
+            // keeps its DegradedState channel unchanged. That is the right
+            // shape: the outcome is a statement about the TURN at the moment
+            // the stop landed, while this is a later transport failure, and
+            // collapsing the two would put a stale verdict on the wire.
             this.reportDegraded("claude-shim-interrupt", `interrupt failed: ${errMsg(err)}`);
           });
+        return wasLive ? InterruptOutcome.INTERRUPTED : InterruptOutcome.ALREADY_COMPLETE;
       },
     };
     this.control = new ControlDispatch(

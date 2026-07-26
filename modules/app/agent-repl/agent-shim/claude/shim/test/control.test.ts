@@ -7,6 +7,7 @@ import {
 } from "../src/uds/control.js";
 import {
   AckSchema,
+  InterruptOutcome,
   InterruptSchema,
   NackSchema,
   PermissionDecision,
@@ -22,7 +23,17 @@ interface Recorder {
   throwOnPrompt?: string;
 }
 
-function recorder(throwOnPrompt?: string): Recorder {
+/**
+ * @param outcome what the target reports for an interrupt; defaults to
+ *   INTERRUPTED (a live turn was signalled).
+ * @param throwOnInterrupt makes the target throw SYNCHRONOUSLY, which is the
+ *   Nack path rather than an outcome.
+ */
+function recorder(
+  throwOnPrompt?: string,
+  outcome: InterruptOutcome = InterruptOutcome.INTERRUPTED,
+  throwOnInterrupt?: string,
+): Recorder {
   const prompts: Recorder["prompts"] = [];
   const interrupts: Recorder["interrupts"] = [];
   return {
@@ -35,7 +46,9 @@ function recorder(throwOnPrompt?: string): Recorder {
         prompts.push(input);
       },
       interrupt: (input) => {
+        if (throwOnInterrupt) throw new Error(throwOnInterrupt);
         interrupts.push(input);
+        return outcome;
       },
     },
   };
@@ -94,6 +107,70 @@ describe("ControlDispatch.handleInterrupt", () => {
     // Assert
     expect(receipt.$typeName).toBe(AckSchema.typeName);
     expect(rec.interrupts).toEqual([{ requestId: "i1", hard: true }]);
+  });
+
+  // --- the three-valued outcome ------------------------------------------
+  //
+  // A consumer watching for the turn's `aborted` result sees the stop and the
+  // turn end as two unordered events, so it cannot tell a stop that FAILED
+  // from a turn that had ALREADY ENDED. Carrying the verdict on the Ack is
+  // what stops every consumer re-deriving it wrongly.
+
+  it("acks INTERRUPTED when a live turn was signalled", () => {
+    // Arrange
+    const rec = recorder(undefined, InterruptOutcome.INTERRUPTED);
+    const d = dispatch(rec, []);
+    // Act
+    const receipt = d.handleInterrupt(create(InterruptSchema, { requestId: "i1", hard: true }));
+    // Assert
+    expect((receipt as { interruptOutcome: InterruptOutcome }).interruptOutcome)
+      .toBe(InterruptOutcome.INTERRUPTED);
+  });
+
+  it("acks ALREADY_COMPLETE when no turn was in flight", () => {
+    // Arrange
+    const rec = recorder(undefined, InterruptOutcome.ALREADY_COMPLETE);
+    const d = dispatch(rec, []);
+    // Act
+    const receipt = d.handleInterrupt(create(InterruptSchema, { requestId: "i1", hard: false }));
+    // Assert — a SUCCESS: the user asked for the turn to be over, and it is.
+    expect(receipt.$typeName).toBe(AckSchema.typeName);
+    expect((receipt as { interruptOutcome: InterruptOutcome }).interruptOutcome)
+      .toBe(InterruptOutcome.ALREADY_COMPLETE);
+  });
+
+  it("acks FAILED when the stop provably cannot be delivered", () => {
+    // Arrange
+    const rec = recorder(undefined, InterruptOutcome.FAILED);
+    const d = dispatch(rec, []);
+    // Act
+    const receipt = d.handleInterrupt(create(InterruptSchema, { requestId: "i1", hard: true }));
+    // Assert
+    expect((receipt as { interruptOutcome: InterruptOutcome }).interruptOutcome)
+      .toBe(InterruptOutcome.FAILED);
+  });
+
+  it("keeps the Nack for a synchronous throw rather than a FAILED ack", () => {
+    // Arrange — the target throws before it can decide anything.
+    const rec = recorder(undefined, InterruptOutcome.INTERRUPTED, "sdk exploded");
+    const d = dispatch(rec, []);
+    // Act
+    const receipt = d.handleInterrupt(create(InterruptSchema, { requestId: "i1", hard: true }));
+    // Assert — a Nack is the stronger, established failure signal on this
+    // wire; downgrading it to a successful receipt with a sad field would
+    // weaken error coverage the daemon already acts on.
+    expect(receipt.$typeName).toBe(NackSchema.typeName);
+    expect((receipt as { reason: string }).reason).toBe("sdk exploded");
+  });
+
+  it("carries the request id alongside the outcome", () => {
+    // Arrange
+    const rec = recorder(undefined, InterruptOutcome.ALREADY_COMPLETE);
+    const d = dispatch(rec, []);
+    // Act
+    const receipt = d.handleInterrupt(create(InterruptSchema, { requestId: "i9", hard: false }));
+    // Assert
+    expect((receipt as { requestId: string }).requestId).toBe("i9");
   });
 });
 
