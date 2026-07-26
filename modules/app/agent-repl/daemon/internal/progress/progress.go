@@ -38,6 +38,7 @@ import (
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/errclass"
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -825,25 +826,35 @@ func retryCause(r *datav1.ApiRetry) string {
 	return assistantErrorName(r.GetError())
 }
 
+// retryShortNames are the footer's TERSE labels for a retry cause, keyed by
+// the shared failure type rather than by the SDK enum.
+//
+// The enum -> type mapping used to live here, as a switch that existed only
+// to build this one detail string. It now lives in errclass, which is the
+// vocabulary every surface shares; what remains here is genuinely a footer
+// concern — a detail row has room for "auth failed", not for the card's full
+// sentence.
+var retryShortNames = map[errclass.Type]string{
+	errclass.TypeAPIAuthenticationFailed: "auth failed",
+	errclass.TypeAPIBillingError:         "billing",
+	errclass.TypeAPIRateLimit:            "rate limit",
+	errclass.TypeAPIInvalidRequest:       "invalid request",
+	errclass.TypeAPIServerError:          "server error",
+	errclass.TypeAPIUnknown:              "unknown error",
+	errclass.TypeAPIOAuthOrgNotAllowed:   "org not allowed",
+	errclass.TypeAPIOverloaded:           "overloaded",
+	errclass.TypeAPIModelNotFound:        "model not found",
+	errclass.TypeAPIMaxOutputTokens:      "max output tokens",
+}
+
 // assistantErrorName is the short human token for an AssistantMessageError, or
 // "" when the enum is unset (nothing useful to add to the detail line).
 func assistantErrorName(e datav1.AssistantMessageError) string {
-	switch e {
-	case datav1.AssistantMessageError_ASSISTANT_MESSAGE_ERROR_AUTHENTICATION_FAILED:
-		return "auth failed"
-	case datav1.AssistantMessageError_ASSISTANT_MESSAGE_ERROR_BILLING_ERROR:
-		return "billing"
-	case datav1.AssistantMessageError_ASSISTANT_MESSAGE_ERROR_RATE_LIMIT:
-		return "rate limit"
-	case datav1.AssistantMessageError_ASSISTANT_MESSAGE_ERROR_INVALID_REQUEST:
-		return "invalid request"
-	case datav1.AssistantMessageError_ASSISTANT_MESSAGE_ERROR_SERVER_ERROR:
-		return "server error"
-	case datav1.AssistantMessageError_ASSISTANT_MESSAGE_ERROR_UNKNOWN:
-		return "unknown error"
-	default:
+	t, ok := errclass.Assistant(e)
+	if !ok {
 		return ""
 	}
+	return retryShortNames[t]
 }
 
 // formatDelay renders a backoff in the coarsest unit that still reads: whole
