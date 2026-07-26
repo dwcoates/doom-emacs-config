@@ -36,6 +36,11 @@ type StateApplier interface {
 	// workspace, so live_task_count becomes exactly len(liveTaskIDs). Fed from
 	// data.BackgroundTasksChanged, the only event carrying the whole live set.
 	ReconcileTasks(sessionID string, liveTaskIDs []string) error
+	// ApplyBackfillState records the workspace's transcript-backfill outcome
+	// on the SSM's backfill axis. A FAILED backfill compromises the route
+	// and resolves the workspace blue: an incomplete history cannot be the
+	// basis of a "ready" claim.
+	ApplyBackfillState(workspace, state string) error
 }
 
 // ProgressResolver is the slice of the progress-footer resolver (F1) the driver
@@ -405,6 +410,45 @@ func (c *consumer) noteBackfill(state string) {
 	}
 }
 
+// settleBackfillFromStore settles the backfill for a session whose history is
+// ALREADY in the store, using the durable high-water as the evidence.
+//
+// THE REOPEN WEDGE this exists to close: observeBackfill can only ever see a
+// backfill happen — it flips DONE when a TranscriptLine ARRIVES. On reopening
+// a session whose transcript was fully ingested in an earlier run, the
+// sidecar's cursor already sits at the tail of that file, so no new line is
+// ever written and no new event ever arrives. The backfill was complete before
+// this daemon started, and waiting for evidence of it happening again would
+// wait forever — leaving a workspace with a complete, replayable history stuck
+// reporting "still starting" and therefore stuck BLUE, permanently, on the
+// most ordinary action there is.
+//
+// A nonzero high-water is proof of exactly the right fact: the daemon has
+// durably observed store events for this session, which means the file plane
+// really did deliver into the store. It is the same conclusion
+// observeBackfill draws, read from the accumulated record rather than from a
+// live arrival.
+//
+// It never overwrites a state already known — in particular never a FAILED,
+// which is terminal (a transcript the sidecar could not fully read does not
+// become readable by reopening it).
+func (c *consumer) settleBackfillFromStore(highWater uint64) {
+	if highWater == 0 {
+		// No durable events for this session: genuinely nothing ingested
+		// yet, so the live path is the one that will settle it.
+		return
+	}
+	c.mu.Lock()
+	already := c.backfill != ""
+	c.mu.Unlock()
+	if already {
+		return
+	}
+	c.logf("sessiondrv: backfill settled from store high-water session=%s ws=%s seq=%d (history already ingested; no new line will arrive)",
+		c.sessionID, c.workspace, highWater)
+	c.noteBackfill(BackfillDone)
+}
+
 // observeBackfill derives the never-blue backfill signal from the two pieces
 // of evidence that actually reach the daemon (the sidecar reports nothing of
 // its own — see frontendv1.BackfillState):
@@ -417,6 +461,9 @@ func (c *consumer) noteBackfill(state string) {
 // A stream-plane event proves nothing about the file plane and is ignored
 // here: a live turn writes ClaudeStreamMessage events for a session whose
 // history never arrived, which is precisely the blue-but-live case.
+//
+// This sees only backfills that HAPPEN. A session reopened with its history
+// already ingested is settled by settleBackfillFromStore instead.
 func (c *consumer) observeBackfill(ev *corev1.Event) {
 	switch p := ev.GetPayload().(type) {
 	case *corev1.Event_Unparsed:

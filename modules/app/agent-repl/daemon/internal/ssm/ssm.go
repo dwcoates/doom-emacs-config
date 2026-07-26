@@ -328,6 +328,41 @@ func (m *Manager) ApplyPaintLost(workspace, reason string) error {
 	return m.reresolveLocked(workspace, cause, 0)
 }
 
+// ApplyBackfillState records the workspace's transcript-backfill outcome.
+//
+// A FAILED backfill compromises the route and resolves BLUE: the workspace's
+// history is incomplete, so anything painted from it is a partial account of
+// the conversation, and calling that ready would be the lie the whole
+// vocabulary exists to prevent.
+//
+// DONE and the empty-workspace case both CLEAR the axis. "Nothing to
+// backfill" is a real, correct answer — a genuinely fresh workspace — not an
+// unknown, so it must not hold the workspace blue.
+//
+// STATE is the sessiondrv token ("pending" | "done" | "failed"). `pending` is
+// deliberately NOT blue on its own: a session mid-backfill is covered by the
+// paint axis (no frontend has attested yet), and treating pending as a
+// separate blue would mean a REOPENED session whose history is already in the
+// store — and which therefore never emits a fresh transition — could never
+// leave it. See sessiondrv.settleBackfillFromStore for the other half of that.
+func (m *Manager) ApplyBackfillState(workspace, state string) error {
+	if workspace == "" {
+		return fmt.Errorf("ssm: ApplyBackfillState got an empty workspace")
+	}
+	token := sigBackfillOK
+	if state == "failed" {
+		token = sigBackfillFailed
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	at := m.nextAt()
+	cause := "backfill:" + state
+	if err := appendRow(m.db, workspace, "", token, cause, sql.NullInt64{}, at, ""); err != nil {
+		return err
+	}
+	return m.reresolveLocked(workspace, cause, 0)
+}
+
 // ApplyVendorCleared releases a vendor/account block because the vendor or a
 // human released it — a clean turn conclusion, or a clean auth report.
 //
