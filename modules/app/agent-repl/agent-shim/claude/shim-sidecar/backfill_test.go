@@ -16,12 +16,9 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
-	"time"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	"agentrepl/shim-claude-sidecar/internal/handler"
@@ -47,46 +44,14 @@ func repoSubdir(t *testing.T, marker string, parts ...string) string {
 	}
 }
 
-// startStore builds and spawns the REAL shim-store on a temp socket.
+// startStore spawns the REAL shim-store on a temp socket and returns its path.
+// It is the "just give me a running store" shorthand over the stoppable harness
+// in link_test.go.
 func startStore(t *testing.T) string {
 	t.Helper()
-	srcDir := repoSubdir(t, "main.go", "agent-shim", "shim-store")
-	tmp := t.TempDir()
-	bin := filepath.Join(tmp, "shim-store")
-	build := exec.Command("go", "build", "-o", bin, ".")
-	build.Dir = srcDir
-	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("building shim-store: %v\n%s", err, out)
-	}
-	// macOS sun_path is short; keep the socket under /tmp.
-	sockDir, err := os.MkdirTemp("/tmp", "backfill")
-	if err != nil {
-		t.Fatalf("mkdtemp: %v", err)
-	}
-	t.Cleanup(func() { os.RemoveAll(sockDir) })
-	sock := filepath.Join(sockDir, "s")
-
-	cmd := exec.Command(bin, "-socket", sock, "-db", filepath.Join(tmp, "events.db"), "-log", filepath.Join(tmp, "store.log"))
-	cmd.Stderr = os.Stderr
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("starting shim-store: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = cmd.Process.Kill()
-		_, _ = cmd.Process.Wait()
-	})
-	// Readiness poll on an EXTERNAL process's socket; no in-process channel can
-	// signal it.
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		if c, err := net.Dial("unix", sock); err == nil {
-			c.Close()
-			return sock
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	t.Fatalf("shim-store did not start listening on %s", sock)
-	return ""
+	h := newStoreHarness(t)
+	h.start()
+	return h.sock
 }
 
 // writeHistory lays down a config root holding one session transcript of n
@@ -108,36 +73,61 @@ func writeHistory(t *testing.T, n int) (string, string) {
 	}
 	defer f.Close()
 	for i := 0; i < n; i++ {
-		line := map[string]any{
-			"type":      "assistant",
-			"uuid":      fmt.Sprintf("hist-uuid-%d", i),
-			"sessionId": backfillSession,
-			"timestamp": "2026-07-25T12:00:00.000Z",
-			"message": map[string]any{
-				"id":      fmt.Sprintf("msg_%d", i),
-				"role":    "assistant",
-				"model":   "claude",
-				"content": []any{map[string]any{"type": "text", "text": "history"}},
-			},
-		}
-		raw, err := json.Marshal(line)
-		if err != nil {
-			t.Fatalf("marshal: %v", err)
-		}
-		if _, err := f.Write(append(raw, '\n')); err != nil {
+		if _, err := f.Write(historyLine(t, i)); err != nil {
 			t.Fatalf("write: %v", err)
 		}
 	}
 	return root, path
 }
 
-// pollTranscript builds a sidecar over root, discovers the transcript with NO
-// cursor (exactly the newly-discovered case), and polls it once.
+// appendHistory appends n further assistant lines to an existing transcript,
+// numbered from `from` so their uuids (and therefore their dedup keys) stay
+// distinct from the lines already there.
+func appendHistory(t *testing.T, path string, from, n int) {
+	t.Helper()
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		t.Fatalf("open %s for append: %v", path, err)
+	}
+	defer f.Close()
+	for i := from; i < from+n; i++ {
+		if _, err := f.Write(historyLine(t, i)); err != nil {
+			t.Fatalf("append: %v", err)
+		}
+	}
+}
+
+// historyLine renders one newline-terminated assistant transcript line.
+func historyLine(t *testing.T, i int) []byte {
+	t.Helper()
+	raw, err := json.Marshal(map[string]any{
+		"type":      "assistant",
+		"uuid":      fmt.Sprintf("hist-uuid-%d", i),
+		"sessionId": backfillSession,
+		"timestamp": "2026-07-25T12:00:00.000Z",
+		"message": map[string]any{
+			"id":      fmt.Sprintf("msg_%d", i),
+			"role":    "assistant",
+			"model":   "claude",
+			"content": []any{map[string]any{"type": "text", "text": "history"}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	return append(raw, '\n')
+}
+
+// pollTranscript builds a sidecar over root, brings its store link up (which
+// recovers cursors before anything is read), and polls the discovered
+// transcript once.
 func pollTranscript(t *testing.T, sock, root string) (*sidecar, tail.PollResult, string) {
 	t.Helper()
 	s := newSidecar(sock, []string{root}, t.TempDir(), func(string, ...any) {})
 	t.Cleanup(func() { s.store.Close() })
-	s.rescan(nil)
+	if err := s.establish(); err != nil {
+		t.Fatalf("establish: %v", err)
+	}
 	if len(s.watchers) != 1 {
 		t.Fatalf("discovered %d targets; want exactly the transcript", len(s.watchers))
 	}
@@ -189,12 +179,16 @@ func TestBackfillCarriesEveryHistoryLineIntoTheStore(t *testing.T) {
 }
 
 func TestBackfillOverlapIsAbsorbedByStoreDedup(t *testing.T) {
-	// Arrange — the history is already persisted (a prior backfill, or the
-	// stream plane having written the same messages).
+	// Arrange — the history is already persisted, but its CURSOR never was.
+	// That is the sad path the dedup contract exists for: the events reached the
+	// store and the cursor commit did not, so the next reader legitimately has
+	// no cursor and replays the file. (With cursor recovery now scoped to the
+	// connection, an ordinary rediscovery DOES find its cursor and reads
+	// nothing — see TestReconnectResumesFromTheCommittedCursorNotZero.)
 	sock := startStore(t)
 	root, _ := writeHistory(t, 5)
 	first, firstRes, _ := pollTranscript(t, sock, root)
-	if _, err := first.store.Write(handler.Producer, &corev1.EventBatch{Events: firstRes.Events, CursorAdvance: firstRes.Next}); err != nil {
+	if _, err := first.store.Write(handler.Producer, &corev1.EventBatch{Events: firstRes.Events}); err != nil {
 		t.Fatalf("first write: %v", err)
 	}
 

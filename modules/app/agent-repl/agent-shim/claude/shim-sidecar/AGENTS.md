@@ -32,6 +32,26 @@ Ever.
 - The zero-`UnparsedEvent` golden-corpus contract is the executable form of
   this mandate; weakening it violates this document.
 
+## Ingestion is connection-scoped, never boot-scoped
+
+The sidecar reads a watched file ONLY while a store connection is established,
+and the FIRST act of every established connection — boot and reconnect alike —
+is recovering that store's cursors. There is no boot path: boot is simply the
+first time the link is not up yet. See `link.go`.
+
+- While no connection exists the sidecar produces NOTHING, loudly. A store that
+  has not started yet is a down dependency, never a reason to read anyway.
+- A tailer's read position may ONLY come from a cursor the store handed us on
+  the live connection. `rescan` is the only thing that builds a tailer and it
+  fails hard if that is not true.
+- "Cold" means exactly one thing: a CONNECTED store that genuinely holds no
+  cursor for a file. That is the backfill path and it reads from offset 0
+  honestly.
+- Recovery that fails is never softened into a cold start. The predecessor of
+  this design recovered cursors once at boot and, on failure, re-read every
+  watched file from offset 0 — a fallback masking a down dependency, which
+  re-ingested whole conversations and drove an SSM task-count clamp storm.
+
 ## Vendor carry-over (viral)
 
 Any future vendor-equivalent sidecar (e.g. a codex sidecar) MUST inherit this
