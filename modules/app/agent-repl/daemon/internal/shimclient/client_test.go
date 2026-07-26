@@ -180,6 +180,14 @@ func startFakeShim(t *testing.T, handler func(conn net.Conn)) string {
 	return path
 }
 
+// mustWriteMsg is the FAKE SHIM's encoder, and it stays hand-rolled on
+// purpose rather than calling wire.WriteAny.
+//
+// Every production site now shares one encoder, so a regression in it would
+// move both ends of these tests together and stay invisible. Keeping the test
+// peer independent means these tests interop a real client against a separately
+// written implementation of the convention — the only place that cross-check
+// exists, since wire's own byte-identity test is the only other one.
 func mustWriteMsg(t *testing.T, conn net.Conn, msg proto.Message) {
 	t.Helper()
 	env, err := anypb.New(msg)
@@ -206,14 +214,14 @@ func fakeServerHandshake(t *testing.T, conn net.Conn, sessionID, protoVer string
 		ProtocolVersion: protoVer,
 		TurnInFlight:    turnInFlight,
 	})
-	m, err := readMsg(conn)
+	m, err := wire.ReadAny(conn)
 	if err != nil {
 		t.Fatalf("shim reading DaemonHello: %v", err)
 	}
 	if _, ok := m.(*corev1.DaemonHello); !ok {
 		t.Fatalf("shim expected DaemonHello, got %T", m)
 	}
-	m2, err := readMsg(conn)
+	m2, err := wire.ReadAny(conn)
 	if err != nil {
 		t.Fatalf("shim reading Subscribe: %v", err)
 	}
@@ -250,7 +258,7 @@ func TestHandshakeHappyPath(t *testing.T) {
 			SessionId: "sess-1", Vendor: "claude", ShimVersion: "test-shim",
 			ProtocolVersion: "1", TurnInFlight: true,
 		})
-		m, err := readMsg(conn)
+		m, err := wire.ReadAny(conn)
 		if err != nil {
 			t.Errorf("read DaemonHello: %v", err)
 			return
@@ -261,14 +269,14 @@ func TestHandshakeHappyPath(t *testing.T) {
 			return
 		}
 		gotHello <- dh
-		m2, err := readMsg(conn)
+		m2, err := wire.ReadAny(conn)
 		if err != nil {
 			t.Errorf("read Subscribe: %v", err)
 			return
 		}
 		gotSub <- m2.(*corev1.Subscribe)
 		// Hold the connection open.
-		_, _ = readMsg(conn)
+		_, _ = wire.ReadAny(conn)
 	})
 
 	cfg := h.config(t, "sess-1", path)
@@ -314,7 +322,7 @@ func TestHandshakeVersionMismatchIsTerminal(t *testing.T) {
 			SessionId: "sess-1", Vendor: "claude", ShimVersion: "test-shim",
 			ProtocolVersion: "99",
 		})
-		_, _ = readMsg(conn)
+		_, _ = wire.ReadAny(conn)
 	})
 	cfg := h.config(t, "sess-1", path)
 	c := New(cfg)
@@ -357,7 +365,7 @@ func TestReconnectAndResumeMidStream(t *testing.T) {
 		for seq := uint64(4); seq <= 5; seq++ {
 			mustWriteMsg(t, conn, persistentTurnEnd("sess-1", seq))
 		}
-		_, _ = readMsg(conn)
+		_, _ = wire.ReadAny(conn)
 	})
 
 	c := New(h.config(t, "sess-1", path))
@@ -399,7 +407,7 @@ func TestHeartbeatMissSurfacesDegraded(t *testing.T) {
 	h := newHarness()
 	path := startFakeShim(t, func(conn net.Conn) {
 		_ = fakeServerHandshake(t, conn, "sess-1", "1", false)
-		_, _ = readMsg(conn) // block; never send anything else
+		_, _ = wire.ReadAny(conn) // block; never send anything else
 	})
 	cfg := h.config(t, "sess-1", path)
 	cfg.HeartbeatInterval = time.Hour
