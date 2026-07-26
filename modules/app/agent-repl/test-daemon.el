@@ -838,6 +838,42 @@ multi-repo config dir as work, matching how sessions record the dirs."
       (should (member "-remediation-dir" cmd))
       (should-not (member "-remediation-permission-mode" cmd)))))
 
+(ert-deftest agent-repl-test-daemon-command-carries-the-ungated-analyst-consent ()
+  "The held consent reaches the daemon, which refuses to boot ungated without it."
+  ;; Arrange
+  (let ((agent-repl-frontend-remediate-lost-sessions t)
+        (agent-repl-frontend-remediation-allow-ungated t))
+    ;; Act
+    (let ((cmd (agent-repl--frontend-daemon-command)))
+      ;; Assert
+      (should (member "-allow-ungated-remediation" cmd)))))
+
+(ert-deftest agent-repl-test-daemon-command-withholds-a-revoked-ungated-consent ()
+  "Withdrawing the consent withholds the flag rather than quietly re-granting it."
+  ;; Arrange
+  (let ((agent-repl-frontend-remediate-lost-sessions t)
+        (agent-repl-frontend-remediation-allow-ungated nil))
+    ;; Act
+    (let ((cmd (agent-repl--frontend-daemon-command)))
+      ;; Assert
+      (should-not (member "-allow-ungated-remediation" cmd)))))
+
+(ert-deftest agent-repl-test-daemon-command-omits-ungated-consent-when-remediation-off ()
+  "No remediation means no analyst, so there is nothing to consent to."
+  ;; Arrange
+  (let ((agent-repl-frontend-remediate-lost-sessions nil)
+        (agent-repl-frontend-remediation-allow-ungated t))
+    ;; Act
+    (let ((cmd (agent-repl--frontend-daemon-command)))
+      ;; Assert
+      (should-not (member "-allow-ungated-remediation" cmd)))))
+
+(ert-deftest agent-repl-test-daemon-remediation-consent-defaults-to-acknowledged ()
+  "The shipped default accepts the ungated tradeoff deliberately, not by omission."
+  ;; Arrange / Act / Assert — a gated analyst is auto-denied on every tool
+  ;; call, so the ungated mode is the only one in which remediation works.
+  (should (eq (default-value 'agent-repl-frontend-remediation-allow-ungated) t)))
+
 (ert-deftest agent-repl-test-daemon-command-omits-remediation-when-disabled ()
   "Disabling remediation drops -remediation-dir, which disables it daemon-side."
   ;; Arrange
