@@ -454,10 +454,21 @@ message ProgressView {
 
   // Activity windows: open until cleared.
   ProgressWindow compacting = 8;       // data.StatusMessage status="compacting"
-  ProgressWindow retrying = 9;         // ApiErrorLine retry family
+  ProgressWindow retrying = 9;         // data.ApiRetry, else the ApiErrorLine
+                                       // retry family (see §retry sourcing)
   ProgressWindow authenticating = 10;  // data.AuthStatus
   ProgressWindow hook = 11;            // data.HookStarted / HookResponse
   RateLimitWindow rate_limited = 12;   // data.RateLimitEvent
+
+  // The session itself reporting it is parked on the USER
+  // (data.SessionStateChanged state="requires_action").
+  //
+  // NOT A PHASE. `state` above remains the SSM's verdict and the SSM remains
+  // the sole phase authority; this is an activity window like every other one
+  // here, and it exists because it carries a fact the daemon cannot otherwise
+  // see: the session can be blocked on an interaction the daemon holds no
+  // count for, so `pending_permissions` alone under-reports "waiting on you".
+  ProgressWindow blocked = 18;
 
   // Error state: persists until the next turn starts. Set from a terminal
   // ApiErrorLine (retries exhausted) or an errored turn end.
