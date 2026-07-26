@@ -158,6 +158,14 @@ export interface SessionView {
    * the Emacs workspace-switch ensure.
    */
   backfill: BackfillState;
+  /**
+   * The classified death of a terminal session (delete, supersede, shim
+   * death), absent while the session lives. Emacs surfaces it as a failure
+   * card (frontend-state.el); the webapp decodes it so a terminal push never
+   * breaks the strict decoder, and card rendering rides the feed's own
+   * SystemFailureItem.
+   */
+  death?: SystemFailure;
 }
 
 /**
@@ -641,6 +649,7 @@ const SESSION_VIEW_KEYS = new Set([
   "pendingPermissions",
   "configDir",
   "backfill",
+  "death",
 ]);
 function decodeSessionView(v: unknown): SessionView {
   const o = ensureObject(v, "SessionView");
@@ -672,6 +681,12 @@ function decodeSessionView(v: unknown): SessionView {
     // `unspecified` — the same "nothing to backfill" a fresh workspace has.
     backfill: decodeBackfillState(o.backfill),
   };
+  // F4 terminal-session classification: optional, present only once the
+  // session died. Decoded strictly (an unknown class still throws) rather
+  // than skipped, so a malformed death is loud while an absent one is normal.
+  if (o.death !== undefined) {
+    sv.death = decodeSystemFailure(o.death, "SessionView.death");
+  }
   if (sv.sessionId === "") {
     throw new Error("frontend-proto: SessionView missing required `session_id`");
   }

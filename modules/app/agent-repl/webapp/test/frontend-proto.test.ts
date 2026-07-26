@@ -606,6 +606,49 @@ describe("SessionView.backfill decoding (F2)", () => {
   });
 });
 
+describe("SessionView.death decoding (F4)", () => {
+  /** A SessionView frame body, optionally carrying a classified death. */
+  function sv(over: Record<string, unknown> = {}): string {
+    return JSON.stringify({ sessionView: { sessionId: "s1", workspace: "/w", ...over } });
+  }
+
+  function deathOf(json: string) {
+    const got = decodeFrontendFrame(json);
+    if (got.frame.case !== "sessionView") throw new Error("wrong variant");
+    return got.frame.value.death;
+  }
+
+  it("reads a live session's absent death as undefined", () => {
+    // Arrange / Act / Assert — absence is the normal alive case, not an error.
+    expect(deathOf(sv())).toBeUndefined();
+  });
+
+  it("decodes a terminal push's classified death instead of throwing", () => {
+    // Arrange — the strict decoder once lacked this key, so every terminal
+    // SessionView (delete, supersede, shim death) threw in the live frame
+    // path; this pins the fix.
+    const death = {
+      errorClass: "ERROR_CLASS_INTERNAL",
+      errorType: "internal.shim_died",
+      message: "shim process exited",
+    };
+    // Act
+    const got = deathOf(sv({ death }));
+    // Assert
+    expect(got).toEqual(
+      expect.objectContaining({ errorClass: "INTERNAL", errorType: "internal.shim_died" }),
+    );
+  });
+
+  it("rejects a death with an unrecognized class rather than guessing", () => {
+    // Arrange / Act / Assert — the class decides the card color; guessing one
+    // would paint the failure the wrong color quietly.
+    expect(() =>
+      deathOf(sv({ death: { errorClass: "ERROR_CLASS_MYSTERY", errorType: "x", message: "y" } })),
+    ).toThrow(/unrecognized value/);
+  });
+});
+
 describe("ProgressView decoding (F1)", () => {
   /** A minimal well-formed ProgressView frame body. */
   function pv(over: Record<string, unknown> = {}): string {
