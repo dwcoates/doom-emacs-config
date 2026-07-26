@@ -281,7 +281,7 @@ handler runs on the UNSCOPED Emacs connection, which receives all of them."
                      (length workspaces) (length sessions) (length inits))
     (length workspaces)))
 
-;;;; ---- DegradedNotice: RETIRED (F4) ------------------------------------
+;;;; ---- DegradedNotice: RETIRED (F4, wire removed in step 11) -----------
 ;;
 ;; `agent-repl--frontend-apply-degraded-notice' lived here.  It echoed a raw
 ;; component/reason pair the daemon had already classified, carried no
@@ -290,9 +290,11 @@ handler runs on the UNSCOPED Emacs connection, which receives all of them."
 ;;
 ;; Degradation is now a self-resolving failure CARD on the conversation
 ;; plane, plus a move on the SSM's degraded axis that colors the workspace.
-;; The frame arm stays on the wire (removing it is a breaking oneof change)
-;; and is listed in `agent-repl--uds-ignored-frame-fields' so a push from an
-;; older daemon is a settled no-op rather than an unfinished-wiring warning.
+;; The frame arm itself is gone (reserved 8/"degraded_notice" in
+;; frontend.proto, step 11): `degradedNotice' is no longer in
+;; `agent-repl--uds-known-frame-fields', so a push from a daemon old enough
+;; to still send it is now the loud unknown-field signal rather than a
+;; settled no-op — the expected, approved shape of a breaking wire change.
 
 ;;;; ---- SessionView store -----------------------------------------------
 ;;
