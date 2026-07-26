@@ -30,9 +30,26 @@ import {
 // SDK boundary types (structural, so tests can inject fakes)
 // ---------------------------------------------------------------------------
 
+/**
+ * The SDK's `interrupt()` receipt (SDK >= 0.3.205, gated on the CLI
+ * advertising `interrupt_receipt_v1` in system:init `capabilities`).
+ *
+ * `still_queued` names async user messages that SURVIVE the interrupt and
+ * will still run. Our daemon holds its own prompt queue rather than
+ * enqueuing into the CLI, so this is expected to be empty — a non-empty
+ * list means work outlived an interrupt the daemon believes it cancelled,
+ * which is exactly the kind of thing that must be loud, never swallowed.
+ * Older CLIs resolve `undefined`.
+ */
+export interface InterruptReceipt {
+  still_queued: string[];
+  /** Present only when the request set `cancel_queued`. */
+  cancelled?: string[];
+}
+
 /** Structural subset of the SDK `Query` interface the shim uses. */
 export interface QueryLike extends AsyncIterable<SdkMessageLike> {
-  interrupt(): Promise<void>;
+  interrupt(): Promise<InterruptReceipt | undefined>;
   setPermissionMode(mode: PermissionMode): Promise<void>;
   setModel(model: string): Promise<void>;
   supportedModels(): Promise<ModelInfo[]>;
@@ -96,16 +113,6 @@ export interface SessionDeps {
    * actually invoke.
    */
   probeCommands: () => Promise<SlashCommand[]>;
-  /**
-   * Re-resolve the `/status` snapshot from a throwaway SDK handshake.
-   *
-   * Separate from {@link SessionDeps.createQuery} for the same reason
-   * {@link SessionDeps.probeCommands} is: the fields a `/status` panel
-   * reports are memoized against the live query's init handshake, so only a
-   * NEW handshake sees a value changed since. Resolves to the SDK's
-   * `system:init` message, whose shape is the SDK's own.
-   */
-  probeStatus: () => Promise<unknown>;
   /** Emit one Layer-1 event (the transport writes the NDJSON line). */
   emit: (evt: ShimEvent) => void;
   /** Terminate the shim process with the given exit code. */
@@ -216,9 +223,13 @@ export class ShimSession {
           this.interruptRequested = true;
         }
         this.cancelPendingPermissions();
-        void this.query!.interrupt().catch((err: unknown) => {
-          this.emitError("sdk_throw", `interrupt failed: ${errMessage(err)}`, cmd.request_id);
-        });
+        void this.query!.interrupt()
+          .then((receipt) => {
+            this.reportInterruptSurvivors(receipt, cmd.request_id);
+          })
+          .catch((err: unknown) => {
+            this.emitError("sdk_throw", `interrupt failed: ${errMessage(err)}`, cmd.request_id);
+          });
         break;
       case "set-permission-mode":
         this.ackOnSettled(cmd.type, cmd.request_id, this.query!.setPermissionMode(cmd.mode));
@@ -228,9 +239,6 @@ export class ShimSession {
         break;
       case "refresh-commands":
         this.ackOnSettled(cmd.type, cmd.request_id, this.republishCommands());
-        break;
-      case "refresh-status":
-        this.ackOnSettled(cmd.type, cmd.request_id, this.republishStatus());
         break;
       case "shutdown":
         this.shutdownRequestId = cmd.request_id;
@@ -342,27 +350,6 @@ export class ShimSession {
     });
   }
 
-  /**
-   * Re-resolve and republish the `/status` snapshot for a `refresh-status`.
-   *
-   * Goes through {@link SessionDeps.probeStatus} rather than the live query
-   * for the same reason {@link republishCommands} does: the fields a
-   * `/status` panel reports are memoized against the live query's init
-   * handshake, so re-reading them means running a fresh handshake on a
-   * throwaway query.
-   */
-  private async republishStatus(): Promise<void> {
-    this.emitStatus(await this.deps.probeStatus());
-  }
-
-  private emitStatus(status: unknown): void {
-    this.deps.emit({
-      type: "status",
-      session_id: this.deps.sessionId,
-      status,
-    });
-  }
-
   private handleUserMessage(cmd: UserMessageCmd): void {
     this.turnsInFlight++;
     const content: ContentBlock[] =
@@ -426,6 +413,27 @@ export class ShimSession {
       });
     });
   };
+
+  /**
+   * Surface an interrupt receipt that reports surviving work.
+   *
+   * An empty (or absent) receipt is the expected case and stays silent. A
+   * NON-empty `still_queued` contradicts the interrupt's whole contract, so
+   * it is reported as a command-scoped error rather than logged and dropped
+   * — the daemon must not believe it cancelled work that is still running.
+   */
+  private reportInterruptSurvivors(
+    receipt: InterruptReceipt | undefined,
+    requestId: RequestId,
+  ): void {
+    const survivors = receipt?.still_queued ?? [];
+    if (survivors.length === 0) return;
+    this.emitError(
+      "sdk_throw",
+      `interrupt left ${survivors.length} queued message(s) running: ${survivors.join(",")}`,
+      requestId,
+    );
+  }
 
   /** Unblock any pending SDK permission waits (interrupt/shutdown). */
   private cancelPendingPermissions(): void {

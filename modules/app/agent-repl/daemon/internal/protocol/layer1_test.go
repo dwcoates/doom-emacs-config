@@ -136,7 +136,10 @@ func TestValidPermissionMode(t *testing.T) {
 		{"auto", true},
 		{"manual", true},
 		{"dontAsk", true},
-		{"delegate", true},
+		// The CLI rejects "delegate" outright ("must be one of acceptEdits,
+		// auto, bypassPermissions, default, dontAsk, plan"), so accepting it
+		// here only carried a doomed value further down the stack.
+		{"delegate", false},
 		{"yolo", false},
 		{"", false},
 	}
