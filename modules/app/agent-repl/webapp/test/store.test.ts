@@ -14,6 +14,7 @@ import {
 } from "../src/store.js";
 import type {
   AdapterEffect,
+  ProgressInput,
   QueueInput,
   SessionViewInput,
   ToolProgressInput,
@@ -925,5 +926,99 @@ describe("streaming chunks reconcile into one block", () => {
     expect(texts).toHaveLength(1);
     expect(texts[0]!.kind === "text" && texts[0]!.done).toBe(true);
     expect(texts[0]!.kind === "text" && texts[0]!.text).toBe("Hello");
+  });
+});
+
+describe("the progress footer's input (F1)", () => {
+  /** A resolved progress view, defaulted to a quiet idle session. */
+  function progressValue(over: Partial<ProgressInput> = {}): ProgressInput {
+    return {
+      workspace: "/w",
+      sessionId: "s1",
+      state: "idle",
+      turnStartedAtMs: 0,
+      thinkingTokens: 0,
+      inputTokens: 0,
+      ttftMs: 0,
+      compacting: null,
+      retrying: null,
+      authenticating: null,
+      hook: null,
+      rateLimited: null,
+      errorSummary: "",
+      errorItemUuid: "",
+      pendingPermissions: 0,
+      queueDepth: 0,
+      liveTaskCount: 0,
+      ...over,
+    };
+  }
+
+  function progressEffect(over: Partial<ProgressInput> = {}): AdapterEffect {
+    return { kind: "progress", value: progressValue(over) };
+  }
+
+  it("is null before the daemon has resolved anything", () => {
+    // Arrange / Act
+    const store = new ConversationStore();
+    // Assert
+    expect(store.progress).toBeNull();
+  });
+
+  it("adopts the resolved view wholesale", () => {
+    // Arrange
+    const store = new ConversationStore();
+    // Act
+    store.ingest([progressEffect({ inputTokens: 41_200 })]);
+    // Assert
+    expect(store.progress?.inputTokens).toBe(41_200);
+  });
+
+  it("fills the compaction indicator, which had no source at all after the cutover", () => {
+    // Arrange
+    const store = new ConversationStore();
+    // Act
+    store.ingest([progressEffect({ compacting: { sinceMs: 1, detail: "compacting" } })]);
+    // Assert
+    expect(store.state.compacting).toBe(true);
+  });
+
+  it("clears the compaction indicator when the window closes", () => {
+    // Arrange
+    const store = new ConversationStore();
+    store.ingest([progressEffect({ compacting: { sinceMs: 1, detail: "compacting" } })]);
+    // Act
+    store.ingest([progressEffect()]);
+    // Assert
+    expect(store.state.compacting).toBe(false);
+  });
+
+  it("takes the turn's REAL start stamp, so a mid-turn join does not restart the clock", () => {
+    // Arrange
+    const store = new ConversationStore();
+    const startedAt = Date.parse("2024-05-01T12:00:00.000Z");
+    // Act
+    store.ingest([progressEffect({ turnStartedAtMs: startedAt })]);
+    // Assert
+    expect(store.state.turnStartedAt).toBe(new Date(startedAt).toISOString());
+  });
+
+  it("leaves the turn stamp alone off-turn", () => {
+    // Arrange
+    const store = new ConversationStore();
+    // Act — a 0 stamp is "no turn in flight", not a 1970 start.
+    store.ingest([progressEffect()]);
+    // Assert
+    expect(store.state.turnStartedAt).toBeNull();
+  });
+
+  it("is discarded on a rebind onto a different session", () => {
+    // Arrange
+    const store = new ConversationStore();
+    store.ingest([progressEffect({ inputTokens: 9 })]);
+    // Act
+    store.reset();
+    // Assert
+    expect(store.progress).toBeNull();
   });
 });
