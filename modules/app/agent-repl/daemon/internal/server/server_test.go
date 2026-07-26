@@ -564,21 +564,6 @@ func TestSessionViewCarriesNoDeathWhileTheSessionLives(t *testing.T) {
 	}
 }
 
-func TestSessionViewNoLongerPopulatesTheLegacyDeathReasonString(t *testing.T) {
-	// Arrange: RETIRED (step 11) — the free-string field stays reserved on
-	// the wire, but the daemon never sets it now that both frontends read
-	// the typed `death` field exclusively.
-	rec := registry.Record{SessionID: "s1", CWD: "/w", Terminal: true, DeathReason: errclass.DeathReasonDeleted}
-
-	// Act.
-	v := SessionViewFromRecord(nil, rec, nil)
-
-	// Assert.
-	if v.GetDeathReason() != "" {
-		t.Fatalf("death_reason = %q, want empty (retired)", v.GetDeathReason())
-	}
-}
-
 func TestSessionViewFromRecordCarriesConfigDir(t *testing.T) {
 	// Arrange — a record whose shim runs under a non-default account root.
 	rec := registry.Record{SessionID: "s1", CWD: "/w", ConfigDir: "/cfg-work"}
