@@ -363,6 +363,19 @@ var statusTypes = map[int64]Type{
 	529: TypeAPIOverloaded,
 }
 
+// Retrying reports whether an ApiErrorLine is mid-backoff — the SDK will try
+// again, so the turn has NOT failed and there is nothing to report yet.
+//
+// This is the daemon's single answer to that question, and it lives in the
+// classifier because it IS a classification. It used to exist as one rule in
+// the progress resolver and a DIFFERENT rule in the webapp, plus a third for
+// "fatal" on top, so the same bytes meant three things depending on who read
+// them. Both processes hold the fact; only the daemon holds the cause.
+func Retrying(ae *datav1.ApiErrorLine) bool {
+	max := ae.GetMaxRetries()
+	return max > 0 && ae.GetRetryAttempt() < max
+}
+
 // APIError classifies a TERMINAL ApiErrorLine — one whose retries are
 // exhausted. A line that is still mid-backoff is not a failure to report: the
 // turn is still in flight and the retrying window covers it, which is why the
