@@ -18,6 +18,11 @@
 // - Replay handshake: the connecting side (daemon→shim, shim→store) sends
 //   Subscribe{session_id, from_seq}; the serving side replays persisted
 //   events with seq > from_seq, then live-tails. Same message both hops.
+// - Bounded historical replay: ReplayRequest{from_seq, to_seq} asks for a
+//   one-shot RANGE without moving the standing subscription. Its events come
+//   back wrapped in ReplayEvent, a distinct message type so replayed history
+//   can never be mistaken for live state, and the range is closed by exactly
+//   one ReplayDone.
 // - Correlation: any control message carries request_id; asynchronous
 //   consequences echo it in Event.request_id where attributable. Ack/Nack is
 //   the synchronous receipt on the connection the request arrived on.
@@ -299,6 +304,78 @@ message Nack {
 message Subscribe {
   string session_id = 1;
   uint64 from_seq = 2;
+}
+
+// ---------------------------------------------------------------------------
+// Bounded historical replay (daemon→shim). See design §5.4.1.
+// ---------------------------------------------------------------------------
+//
+// Subscribe above moves the STANDING subscription: the serving side replays
+// from from_seq and then live-tails there forever. That is the wrong shape for
+// "a frontend mounted and needs history the daemon no longer holds", because
+// it would drag the daemon's own consumption position backwards and re-deliver
+// history down the live path, where the SSM, the task catalog, and the progress
+// resolver would apply it a second time.
+//
+// ReplayRequest is the right shape: a BOUNDED, one-shot, side-channel range.
+// The shim serves it from a THROWAWAY store subscription of its own and leaves
+// the standing one exactly where it was.
+//
+// WHY THE SHIM SERVES IT rather than the daemon dialling the store directly:
+// the store is an internal of the agent-shim facade. A daemon that dials it
+// leaks the socket location, the connection lifecycle, and the vendor-uuid
+// keying rule across the boundary — and serving history through that side door
+// while the shim is down would be a FALLBACK (metaprompt no-fallbacks rule):
+// the shim IS the session's transport, and an outage must surface, not be
+// papered over with a second route to the same data.
+message ReplayRequest {
+  string request_id = 1;
+  // EXCLUSIVE lower bound, matching Subscribe.from_seq.
+  uint64 from_seq = 2;
+  // EXCLUSIVE upper bound: the first seq the requester's own live window
+  // already covers, so the replay stops on reaching it. 0 = no upper bound,
+  // and the serving side then streams until its replay drains.
+  uint64 to_seq = 3;
+  // The requester's cap on how many events this one replay may deliver.
+  // 0 = the serving side's own default. A cap that trips is reported as a
+  // TRUNCATED ReplayDone, never as a quiet short answer.
+  uint32 max_events = 4;
+}
+
+// One replayed historical event.
+//
+// This is a WRAPPER, deliberately, rather than a request_id field on Event.
+// The distinction is structural and load-bearing: a replay frame is a
+// DIFFERENT MESSAGE TYPE on the wire, so a receiver's frame demux cannot route
+// it into the live-event path even by mistake. Tagging Event itself would have
+// left both kinds arriving as the same type, with only an if-statement between
+// replayed history and live state — exactly the "remember to check" discipline
+// this replaces ("structurally impossible beats very improbable", metaprompt).
+//
+// Two lesser reasons point the same way. Event.request_id is already taken, by
+// the control-request correlation described at the top of this file. And the
+// replayed Event is a VERBATIM copy of the persisted record; stamping a
+// transport-only id into it would both mutate that copy and push a daemon↔shim
+// concern into a schema the store persists.
+message ReplayEvent {
+  string request_id = 1;
+  Event event = 2;
+}
+
+// Closes a replay. Exactly one per ReplayRequest, whatever the outcome: a
+// replay that simply stops streaming would be indistinguishable from one still
+// in flight.
+message ReplayDone {
+  string request_id = 1;
+  // True when a bound tripped before to_seq was reached (the event cap, an
+  // idle store subscription, a lost connection). The requester received only
+  // PART of the range it asked for and must say so rather than presenting the
+  // result as complete.
+  bool truncated = 2;
+  // Why it was truncated, verbatim. Empty when truncated is false.
+  string reason = 3;
+  // How many ReplayEvents were sent for this request.
+  uint64 delivered = 4;
 }
 
 // canUseTool round-trip. The shim BLOCKS the SDK callback on the response.
