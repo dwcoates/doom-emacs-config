@@ -113,7 +113,7 @@ export interface SessionViewInput {
   contextWindow: number;
   permissionMode: string;
   shimAttached: boolean;
-  /** Durable CLI conversation uuid — the resume/rebind + auto-continue key. */
+  /** Durable CLI conversation uuid — the resume/rebind key. */
   claudeSessionId: string;
   /** Working directory a rebind's CreateSessionCmd needs. */
   cwd: string;

@@ -279,7 +279,7 @@ describe("ingest session-view", () => {
     expect(store.state.taskSummary).toBe("first");
   });
 
-  it("adopts the resume keys (claudeSessionId + cwd) for rebind/auto-continue", () => {
+  it("adopts the resume keys (claudeSessionId + cwd) for rebind", () => {
     // Arrange
     const store = new ConversationStore();
     // Act
