@@ -6,6 +6,7 @@ import (
 
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
+	"claude-repld/internal/errclass"
 	"claude-repld/internal/frontend"
 	"claude-repld/internal/registry"
 )
@@ -217,4 +218,99 @@ func (nopHandler) CancelQueueEntry(context.Context, string, string, *frontendv1.
 }
 func (nopHandler) PaintAck(context.Context, string, string, *frontendv1.PaintAckCmd) error {
 	return nil
+}
+
+// --- RegistryRegistrar.SessionDied (F4) -------------------------------------
+//
+// The write that never existed: a shim death resolved the workspace dead
+// through the SSM while the record still claimed the session was alive.
+
+func TestSessionDiedMarksTheRecordTerminal(t *testing.T) {
+	// Arrange.
+	reg := openTestRegistry(t)
+	if err := reg.Put(registry.Record{SessionID: "s1", CWD: "/w"}); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+	r := &RegistryRegistrar{Reg: reg}
+
+	// Act.
+	r.SessionDied("s1", errclass.DeathReasonShimDied)
+
+	// Assert.
+	rec, ok := reg.Get("s1")
+	if !ok || !rec.Terminal {
+		t.Fatalf("record terminal = %v (found=%v), want true", rec.Terminal, ok)
+	}
+}
+
+func TestSessionDiedRecordsTheReason(t *testing.T) {
+	// Arrange.
+	reg := openTestRegistry(t)
+	if err := reg.Put(registry.Record{SessionID: "s1", CWD: "/w"}); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+	r := &RegistryRegistrar{Reg: reg}
+
+	// Act.
+	r.SessionDied("s1", errclass.DeathReasonShimDied)
+
+	// Assert.
+	rec, _ := reg.Get("s1")
+	if rec.DeathReason != errclass.DeathReasonShimDied {
+		t.Fatalf("death_reason = %q, want %q", rec.DeathReason, errclass.DeathReasonShimDied)
+	}
+}
+
+func TestSessionDiedLeavesAnAlreadyTerminalRecordAlone(t *testing.T) {
+	// Arrange: the user deleted the session, THEN its shim exited. The first
+	// reason is the true one — "the user deleted this" must not become "the
+	// process exited".
+	reg := openTestRegistry(t)
+	if err := reg.Put(registry.Record{SessionID: "s1", CWD: "/w", Terminal: true, DeathReason: errclass.DeathReasonDeleted}); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+	r := &RegistryRegistrar{Reg: reg}
+
+	// Act.
+	r.SessionDied("s1", errclass.DeathReasonShimDied)
+
+	// Assert.
+	rec, _ := reg.Get("s1")
+	if rec.DeathReason != errclass.DeathReasonDeleted {
+		t.Fatalf("death_reason = %q, want the first reason %q preserved", rec.DeathReason, errclass.DeathReasonDeleted)
+	}
+}
+
+func TestSessionDiedRepushesTheSessionView(t *testing.T) {
+	// Arrange: without the push the dead-state card would wait for whatever
+	// unrelated event next pushed a view.
+	reg := openTestRegistry(t)
+	if err := reg.Put(registry.Record{SessionID: "s1", CWD: "/w"}); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+	var pushed []string
+	r := &RegistryRegistrar{Reg: reg, PushView: func(id string) { pushed = append(pushed, id) }}
+
+	// Act.
+	r.SessionDied("s1", errclass.DeathReasonShimDied)
+
+	// Assert.
+	if len(pushed) != 1 || pushed[0] != "s1" {
+		t.Fatalf("pushed = %v, want [s1]", pushed)
+	}
+}
+
+func TestSessionDiedOnAnUnknownSessionIsLoud(t *testing.T) {
+	// Arrange: a death for a session that was never registered.
+	reg := openTestRegistry(t)
+	var logged []string
+	r := &RegistryRegistrar{Reg: reg, Logf: func(f string, a ...any) { logged = append(logged, f) }}
+
+	// Act.
+	r.SessionDied("ghost", errclass.DeathReasonShimDied)
+
+	// Assert.
+	if len(logged) == 0 {
+		t.Fatal("a death write for an unknown session passed SILENTLY")
+	}
 }

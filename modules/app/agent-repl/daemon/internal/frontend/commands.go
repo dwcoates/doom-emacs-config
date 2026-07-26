@@ -5,6 +5,9 @@ import (
 	"fmt"
 
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+
+	"claude-repld/internal/dlog"
+	"claude-repld/internal/errclass"
 )
 
 // CommandHandler is the injected dispatch surface for inbound FrontendCommands.
@@ -69,9 +72,14 @@ type CommandHandler interface {
 // send back to the requesting client. An unknown/empty command oneof produces a
 // loud failing ack (never silently ignored). A handler error becomes a failing
 // ack carrying the error text.
-func Dispatch(ctx context.Context, h CommandHandler, cmd *frontendv1.FrontendCommand) *frontendv1.CommandAck {
+//
+// This is THE classification point for command failures: every handler error
+// in the tree funnels through the one `err != nil` below, which makes it both
+// the only place a classifier is needed and the natural one. logf carries the
+// classifier's loud unclassified-fallthrough line.
+func Dispatch(ctx context.Context, logf dlog.Logf, h CommandHandler, cmd *frontendv1.FrontendCommand) *frontendv1.CommandAck {
 	if cmd == nil {
-		return failAck("", "frontend: nil command")
+		return failAck(logf, "", fmt.Errorf("frontend: nil command"))
 	}
 	reqID := cmd.GetRequestId()
 	ws := cmd.GetWorkspace()
@@ -110,14 +118,23 @@ func Dispatch(ctx context.Context, h CommandHandler, cmd *frontendv1.FrontendCom
 		err = h.PaintAck(ctx, ws, reqID, c.PaintAck)
 	default:
 		// Unknown/empty command oneof: fail loudly, never silently.
-		return failAck(reqID, fmt.Sprintf("frontend: unknown command (workspace=%q): the command oneof was empty or unrecognized", ws))
+		return failAck(logf, reqID, fmt.Errorf("frontend: unknown command (workspace=%q): the command oneof was empty or unrecognized", ws))
 	}
 	if err != nil {
-		return failAck(reqID, err.Error())
+		return failAck(logf, reqID, err)
 	}
 	return &frontendv1.CommandAck{RequestId: reqID, Ok: true}
 }
 
-func failAck(requestID, msg string) *frontendv1.CommandAck {
-	return &frontendv1.CommandAck{RequestId: requestID, Ok: false, Error: msg}
+// failAck builds a refusal ack carrying BOTH the classified failure and the
+// legacy error text. The text stays until both frontends read the classified
+// field; dropping it now would blank the one surface (Emacs's echo) that
+// renders a refusal at all today.
+func failAck(logf dlog.Logf, requestID string, err error) *frontendv1.CommandAck {
+	return &frontendv1.CommandAck{
+		RequestId: requestID,
+		Ok:        false,
+		Error:     err.Error(),
+		Failure:   errclass.Command(logf, err),
+	}
 }

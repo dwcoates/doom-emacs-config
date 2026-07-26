@@ -27,7 +27,6 @@ package sessiondrv
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sort"
 	"sync"
@@ -36,6 +35,7 @@ import (
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
+	"claude-repld/internal/errclass"
 	"claude-repld/internal/frontend"
 	"claude-repld/internal/registry"
 	"claude-repld/internal/shimclient"
@@ -57,6 +57,12 @@ type SessionRegistrar interface {
 	// re-pushes the session's SessionView. Called only on a real transition,
 	// so a steady stream of transcript lines writes the record once.
 	BackfillStateChanged(sessionID, state string)
+	// SessionDied marks the session's record terminal with the reason its
+	// death carried (F4), and re-pushes the SessionView so the dead-state
+	// card gets its account. Before this the shim-death path wrote nothing,
+	// leaving the SSM's dead state and the record's death reason on two
+	// disconnected axes.
+	SessionDied(sessionID, reason string)
 }
 
 // Spawner makes sure a session has exactly one live shim: it leaves an existing
@@ -86,7 +92,9 @@ type sessionClient interface {
 	Run(ctx context.Context) error
 	AwaitReady(ctx context.Context) error
 	SubmitPrompt(ctx context.Context, text, origin, permissionMode string) error
-	Interrupt(ctx context.Context, hard bool) error
+	// Interrupt returns the shim's own verdict on what the stop did, which is
+	// the only place that verdict is observable.
+	Interrupt(ctx context.Context, hard bool) (corev1.InterruptOutcome, error)
 	// Replay asks the shim for a bounded slice of persisted history, streaming
 	// it to onEvent. Its events arrive over the wire as ReplayEvent, a
 	// different type from live Events, which is what keeps replayed history
@@ -371,6 +379,21 @@ func (m *Manager) persistBackfillState(sessionID, state string) {
 	m.cfg.Registrar.BackfillStateChanged(sessionID, state)
 }
 
+// persistSessionDeath marks the session's record terminal with the reason its
+// death carried (F4).
+//
+// Nothing did this before, which is why the registry documented a "shim_died"
+// reason that no code path ever wrote: a shim death resolved the workspace
+// RENDER_STATE_DEAD through the SSM and left the record claiming the session
+// was alive with no reason recorded. The dead-state card had nothing to show.
+func (m *Manager) persistSessionDeath(sessionID, reason string) {
+	if m.cfg.Registrar == nil {
+		return
+	}
+	m.logf("sessiondrv: session %s ended — marking the record terminal (reason=%s)", sessionID, reason)
+	m.cfg.Registrar.SessionDied(sessionID, reason)
+}
+
 // progress returns the configured progress resolver, or the no-op stand-in when
 // the driver was built without one.
 func (m *Manager) progress() ProgressResolver {
@@ -419,12 +442,27 @@ func (m *Manager) applyMetaprompt(d *driven, text string) string {
 
 // Interrupt interrupts the workspace's live turn. A workspace with no live
 // session is a loud error (the frontend renders the failed CommandAck).
+//
+// The shim's OUTCOME decides whether the stop failed, not the absence of an
+// error: an undeliverable stop is a failure, while a stop that arrived after
+// the turn had already finished is a success the user explicitly asked for.
+// Those two used to be indistinguishable from here, and the second was
+// reported as the first.
 func (m *Manager) Interrupt(ctx context.Context, workspace string, hard bool) error {
 	d, err := m.existing(workspace)
 	if err != nil {
 		return err
 	}
-	return d.client.Interrupt(ctx, hard)
+	outcome, err := d.client.Interrupt(ctx, hard)
+	if err != nil {
+		return err
+	}
+	if failed := errclass.InterruptError(outcome); failed != nil {
+		m.logf("sessiondrv: interrupt undeliverable ws=%s session=%s outcome=%s", workspace, d.sessionID, outcome)
+		return failed
+	}
+	m.logf("sessiondrv: interrupt ws=%s session=%s outcome=%s", workspace, d.sessionID, outcome)
+	return nil
 }
 
 // AnswerPermission delivers a frontend permission answer to the parked
@@ -478,8 +516,9 @@ func (m *Manager) PendingPermissions(workspace string) []string {
 // ErrNotLiveSession reports that the workspace IS driven, but by a DIFFERENT
 // session than the one the caller asked to stand down. Distinct from the "no
 // live session" error so a caller can tell "nothing to stop" (benign) from
-// "that shim belongs to someone else — do not touch it".
-var ErrNotLiveSession = errors.New("sessiondrv: not the live session for this workspace")
+// "that shim belongs to someone else — do not touch it". Its value lives in
+// internal/errclass beside its classification; this is the historic name.
+var ErrNotLiveSession = errclass.ErrNotLiveSession
 
 // Hibernate suspends the workspace's live session, WHICHEVER session that is:
 // it stops consuming the stream and SIGTERMs the child shim (the redefined
@@ -618,6 +657,8 @@ func (m *Manager) bringUp(workspace string) (*driven, error) {
 		if err := m.cfg.SSM.ApplyBackfillState(workspace, state); err != nil {
 			m.logf("sessiondrv: applying backfill %s to the SSM (ws %q): %v", state, workspace, err)
 		}
+	}, func() {
+		m.persistSessionDeath(sessionID, errclass.DeathReasonShimDied)
 	})
 	d.consumer = cons
 	// Settle the backfill for a REOPENED session before any event flows.

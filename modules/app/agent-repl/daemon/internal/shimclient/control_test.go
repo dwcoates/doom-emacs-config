@@ -150,7 +150,7 @@ func TestInterruptAckSuccess(t *testing.T) {
 	waitConnected(t, connected)
 
 	// Act
-	err := c.Interrupt(context.Background(), true)
+	_, err := c.Interrupt(context.Background(), true)
 
 	// Assert
 	if err != nil {

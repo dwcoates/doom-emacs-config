@@ -190,8 +190,49 @@ export const CONVERSATION_ITEM_ARMS = [
   "compactBoundaryLine",
   "apiError",
   "permission",
+  "systemFailure",
 ] as const;
 export type ConversationItemArm = (typeof CONVERSATION_ITEM_ARMS)[number];
+
+/**
+ * `frontend.v1.ErrorClass` — the SEMANTIC class of a system failure.
+ *
+ * It says what KIND of thing failed, never what color to draw: INTERNAL is
+ * agent-repl's own machinery (shim down, store outage, a refused command) and
+ * API is the vendor or the account stopping the work. Each frontend maps class
+ * to color from the shared table, so a wire that spoke in colors would make
+ * every future frontend inherit this one's palette.
+ */
+export const ERROR_CLASSES = ["INTERNAL", "API"] as const;
+export type ErrorClass = (typeof ERROR_CLASSES)[number];
+
+/**
+ * A daemon-classified failure (`frontend.v1.SystemFailureItem`).
+ *
+ * Every render-bound error in the tree arrives as one of these. Nothing here
+ * is re-interpreted frontend-side: the class, the type and the prose are the
+ * daemon's verdict, and this end renders them.
+ */
+export interface SystemFailure {
+  errorClass: ErrorClass;
+  /** The specific failure within the class ("shim.rejected", "api.rate_limit"). */
+  errorType: string;
+  /** The plain-language explanation the card renders. */
+  message: string;
+  /** The raw structured account, shown beside the prose rather than replacing it. */
+  sourceDetail: string;
+  /**
+   * Wall-clock ms a WINDOW-shaped failure closed; 0 means still open. The card
+   * is re-sent under the SAME uuid with this set, so the feed reconciles it in
+   * place and shows a settled card rather than a standing alarm.
+   */
+  resolvedAtMs: number;
+  /**
+   * The conversation item this failure was filed under. It is how a failure
+   * reached OUTSIDE the feed (a footer row, an ack) addresses its card.
+   */
+  itemUuid: string;
+}
 
 /**
  * One decoded conversation addition: the {uuid, tsMs, requestId} envelope plus
@@ -283,6 +324,13 @@ export interface CommandAck {
   requestId: string;
   ok: boolean;
   error: string;
+  /**
+   * The CLASSIFIED refusal (F4). `error` above is the raw handler text this
+   * end never rendered at all; this is the same failure run through the
+   * daemon's one classifier, which is what lets a rejected prompt become a
+   * visible card instead of a console log. Absent when `ok`.
+   */
+  failure?: SystemFailure;
 }
 
 export interface DegradedNotice {
@@ -348,6 +396,13 @@ export interface ProgressView {
   errorSummary: string;
   /** The feed item the error row scrolls to; "" = not addressable. */
   errorItemUuid: string;
+  /**
+   * The CLASSIFIED error state (F4), superseding the two fields above — its
+   * own `itemUuid` absorbs the addressing job. Carrying the class is what lets
+   * the footer take its color from the shared table instead of the hardcoded
+   * red no other surface consulted.
+   */
+  failure?: SystemFailure;
   pendingPermissions: number;
   queueDepth: number;
   liveTaskCount: number;
@@ -905,7 +960,42 @@ function decodeTaskCatalog(v: unknown): TaskCatalog {
   return tc;
 }
 
-const COMMAND_ACK_KEYS = new Set(["requestId", "ok", "error"]);
+const SYSTEM_FAILURE_KEYS = new Set([
+  "errorClass",
+  "errorType",
+  "message",
+  "sourceDetail",
+  "resolvedAtMs",
+  "itemUuid",
+]);
+
+/**
+ * Decode a `SystemFailureItem`.
+ *
+ * An UNSPECIFIED or unrecognized class THROWS rather than defaulting: the
+ * class decides the card's color, so guessing one would paint a failure the
+ * wrong color — quietly, and in a way that contradicts the workspace beside
+ * it. A frame that cannot say what kind of failure it carries is malformed.
+ */
+export function decodeSystemFailure(v: unknown, where: string): SystemFailure {
+  const o = ensureObject(v, where);
+  rejectUnknown(o, SYSTEM_FAILURE_KEYS, where);
+  const cls = str(o, "errorClass", where);
+  const known = ERROR_CLASSES.find((c) => cls === c || cls === `ERROR_CLASS_${c}`);
+  if (known === undefined) {
+    throw new Error(`frontend-proto: ${where}.error_class has unrecognized value '${cls}'`);
+  }
+  return {
+    errorClass: known,
+    errorType: str(o, "errorType", where),
+    message: str(o, "message", where),
+    sourceDetail: str(o, "sourceDetail", where),
+    resolvedAtMs: num(o, "resolvedAtMs", where),
+    itemUuid: str(o, "itemUuid", where),
+  };
+}
+
+const COMMAND_ACK_KEYS = new Set(["requestId", "ok", "error", "failure"]);
 function decodeCommandAck(v: unknown): CommandAck {
   const o = ensureObject(v, "CommandAck");
   rejectUnknown(o, COMMAND_ACK_KEYS, "CommandAck");
@@ -914,6 +1004,9 @@ function decodeCommandAck(v: unknown): CommandAck {
     ok: bool(o, "ok", "CommandAck"),
     error: str(o, "error", "CommandAck"),
   };
+  if (o.failure !== undefined && o.failure !== null) {
+    ack.failure = decodeSystemFailure(o.failure, "CommandAck.failure");
+  }
   if (ack.requestId === "") {
     throw new Error("frontend-proto: CommandAck missing required `request_id`");
   }
@@ -986,6 +1079,7 @@ const PROGRESS_VIEW_KEYS = new Set([
   "blocked",
   "errorSummary",
   "errorItemUuid",
+  "failure",
   "pendingPermissions",
   "queueDepth",
   "liveTaskCount",
@@ -1019,6 +1113,9 @@ function decodeProgressView(v: unknown): ProgressView {
   }
   if (o.rateLimited !== undefined && o.rateLimited !== null) {
     pv.rateLimited = decodeRateLimitWindow(o.rateLimited);
+  }
+  if (o.failure !== undefined && o.failure !== null) {
+    pv.failure = decodeSystemFailure(o.failure, "ProgressView.failure");
   }
   // Without a workspace the view addresses nothing: the footer could not tell
   // which session it is describing.

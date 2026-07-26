@@ -369,7 +369,7 @@ func main() {
 		Prompts:         driver,
 		MergeDirs:       pendingMergeDirs{},
 		Lifecycle:       opener,
-		Sessions:        registrySessions{reg: sessionRegistry, driver: driver},
+		Sessions:        registrySessions{reg: sessionRegistry, driver: driver, logf: log.Printf},
 		Inits:           driver,
 		Queues:          driver,
 		SessionCommands: sessionCommands,

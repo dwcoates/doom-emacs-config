@@ -23,14 +23,17 @@
 package server
 
 import (
+	"claude-repld/internal/errclass"
 	"claude-repld/internal/registry"
 	"claude-repld/internal/session"
 )
 
 // supersedeReason is the death reason a superseded record carries. It
 // reads as a planned handover in the log and in GET /sessions rather
-// than as a conversation that died on its own.
-const supersedeReason = "superseded"
+// than as a conversation that died on its own. The literal lives in
+// errclass beside its classification so a producer cannot write a reason
+// the classifier does not know.
+const supersedeReason = errclass.DeathReasonSuperseded
 
 // transcriptOwner is the identity of the file a session appends to. The
 // resume id ALONE is not that identity: the same claude session uuid

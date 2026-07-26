@@ -13,8 +13,8 @@
 ;;                          wrappers) that the renderer reads at stitch.
 ;;   - `snapshot'        -> full resync: apply every WorkspaceState in the
 ;;                          StateSnapshot on (re)connect.
-;;   - `degradedNotice'  -> honest degraded surfacing: echo-area message +
-;;                          log.  No fallback behavior, no work-around.
+;;   - `sessionView'     -> the session store, plus the FIRST reader
+;;                          `SessionView.death' ever had (F4).
 ;;
 ;; The daemon is the SINGLE SOURCE OF TRUTH for render-state (SSM-resolved);
 ;; Emacs never re-derives it.  Per §10 the local precedence `cond' in
@@ -112,8 +112,8 @@ value RENDER_STATE_UNSPECIFIED: receiving it means the daemon pushed an
 unresolved state, which is an invariant violation, not a state to
 render — `agent-repl--frontend-state->keyword' errors on it.
 
-Note: `:degraded' has no `agent-repl-ws-state-icons' glyph yet; the
-stitch phase adds one (see this module's landing report).")
+`:degraded' carries the 📡 glyph in `agent-repl-ws-state-icons'
+\(workspace.el); `test-render-colors.el' asserts it exists.")
 
 (defun agent-repl--frontend-state->keyword (state)
   "Map RenderState enum NAME STATE (a string) to a render keyword.
@@ -281,33 +281,18 @@ handler runs on the UNSCOPED Emacs connection, which receives all of them."
                      (length workspaces) (length sessions) (length inits))
     (length workspaces)))
 
-;;;; ---- DegradedNotice surfacing ----------------------------------------
-
-(defun agent-repl--frontend-apply-degraded-notice (notice)
-  "Surface a `DegradedNotice' NOTICE (a plist) honestly.
-Handler for the `degradedNotice' oneof arm.  Emits an echo-area message
-AND a log line — honest degraded display (design §4.4), never a
-work-around or fallback path.  `:recovered' t surfaces the recovery
-instead.  Returns the `:recovered' flag.
-
-Fails loudly on a missing/blank `component' (invariant violation)."
-  (let ((component (plist-get notice :component))
-        (reason (plist-get notice :reason))
-        (recovered (plist-get notice :recovered)))
-    (when (or (null component) (string-empty-p component))
-      (agent-repl--log nil
-                       "frontend-apply-degraded-notice: MISSING component in %S — no fallback"
-                       notice)
-      (error "agent-repl frontend: DegradedNotice missing component"))
-    (if recovered
-        (progn
-          (agent-repl--log nil "frontend-degraded: RECOVERED component=%s reason=%s"
-                           component reason)
-          (message "agent-repl: %s recovered" component))
-      (agent-repl--log nil "frontend-degraded: DEGRADED component=%s reason=%s"
-                       component reason)
-      (message "agent-repl DEGRADED: %s — %s" component reason))
-    recovered))
+;;;; ---- DegradedNotice: RETIRED (F4) ------------------------------------
+;;
+;; `agent-repl--frontend-apply-degraded-notice' lived here.  It echoed a raw
+;; component/reason pair the daemon had already classified, carried no
+;; correlation between a report and its all-clear, and said nothing about
+;; how much conversation the outage had cost.
+;;
+;; Degradation is now a self-resolving failure CARD on the conversation
+;; plane, plus a move on the SSM's degraded axis that colors the workspace.
+;; The frame arm stays on the wire (removing it is a breaking oneof change)
+;; and is listed in `agent-repl--uds-ignored-frame-fields' so a push from an
+;; older daemon is a settled no-op rather than an unfinished-wiring warning.
 
 ;;;; ---- SessionView store -----------------------------------------------
 ;;
@@ -361,17 +346,44 @@ A view with no `:sessionId' is an invariant violation and fails loudly
     (puthash id view agent-repl--frontend-session-views)
     id))
 
+(defvar agent-repl--frontend-surfaced-deaths (make-hash-table :test 'equal)
+  "Session ids whose death has already been surfaced.
+
+A terminal SessionView is re-pushed on every snapshot and on any later
+write to its record, so without this latch a dead session would announce
+its death again on every reconnect — turning one honest report into
+recurring noise about something the user already knows.")
+
 (defun agent-repl--frontend-apply-session-view (view)
   "Apply a `SessionView' frame VIEW (a plist).  Handler for `sessionView'.
-Upserts it into `agent-repl--frontend-session-views' and logs the parity
-fields the reattach/orphan/turn-active reads consume.  Returns the id."
+Upserts it into `agent-repl--frontend-session-views', logs the parity
+fields the reattach/orphan/turn-active reads consume, and surfaces a
+session DEATH the first time one is seen.  Returns the id.
+
+The death reader is new (F4).  `death_reason' had two producers and ZERO
+readers — this file never read it at all, despite a comment elsewhere
+claiming the detail rides the pushed `SessionView' — because a free string
+gave no way to know what class of failure it described.  `:death' is that
+same fact classified, so it can finally be shown."
   (let ((id (agent-repl--frontend-store-session-view view)))
     (agent-repl--log (plist-get view :workspace)
                      "frontend-apply-session-view: id=%s ws=%s terminal=%S claude-id=%s pending=%s"
                      id (plist-get view :workspace) (plist-get view :terminal)
                      (or (plist-get view :claudeSessionId) "nil")
                      (or (plist-get view :pendingPermissions) "0"))
+    (agent-repl--frontend-surface-session-death id view)
     id))
+
+(defun agent-repl--frontend-surface-session-death (id view)
+  "Surface VIEW's classified death for session ID, at most once.
+
+Returns the surfaced text, or nil when the session is alive, carries no
+classified death, or has already been reported."
+  (when-let* ((item (plist-get view :death))
+              ((not (gethash id agent-repl--frontend-surfaced-deaths))))
+    (puthash id t agent-repl--frontend-surfaced-deaths)
+    (agent-repl-failure-surface (plist-get view :workspace)
+                                (agent-repl-failure-from-wire item))))
 
 ;;;; ---- SessionInit store (slash-command menu source) -------------------
 ;;
@@ -483,8 +495,6 @@ change still resets the reattach give-ups.  Returns the boot id."
                                   #'agent-repl--frontend-apply-workspace-state)
 (agent-repl--uds-register-handler "snapshot"
                                   #'agent-repl--frontend-apply-snapshot)
-(agent-repl--uds-register-handler "degradedNotice"
-                                  #'agent-repl--frontend-apply-degraded-notice)
 (agent-repl--uds-register-handler "sessionView"
                                   #'agent-repl--frontend-apply-session-view)
 (agent-repl--uds-register-handler "daemonView"

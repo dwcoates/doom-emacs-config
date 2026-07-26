@@ -803,23 +803,7 @@ describe("final-response border", () => {
   });
 });
 
-describe("error-response border", () => {
-  const errorBubble = blockAfter(css, ".bubble.assistant.error-response");
-
-  it("borders an API-error response with the red error token instead of the green one", () => {
-    // Arrange / Act — the .bubble.assistant.error-response rule.
-    // Assert
-    expect(errorBubble).toMatch(/border-color:\s*var\(--err\)/);
-    expect(errorBubble).not.toMatch(/var\(--final-response\)/);
-  });
-
-  it("only recolors the reserved border, so the red flip never reflows the feed", () => {
-    // Arrange / Act — like final-response, it sets no border width of its own.
-    // Assert
-    expect(errorBubble).not.toMatch(/border:\s/);
-    expect(errorBubble).not.toMatch(/border-width/);
-  });
-
+describe("the error token", () => {
   it("defines a red error token for the light theme", () => {
     // Arrange / Act
     const red = isRed(token(lightTheme, "--err"));
@@ -1678,7 +1662,7 @@ describe("standalone status badges hug the response column and fit their text", 
     expect(badgeLeft).toBe(bubbleLeft);
   });
 
-  it.each(["result", "retry-badge", "system-note", "error-banner"])(
+  it.each(["result", "failure-card", "system-note"])(
     "brings the %s badge into the fit-to-text column, leaving none full-width",
     (badge) => {
       // Arrange / Act — the grouped selector must name every standalone status badge.
@@ -1703,7 +1687,7 @@ describe("standalone status badges hug the response column and fit their text", 
   });
 
   it("drops the inert align-self from the shared note rule too", () => {
-    // Arrange / Act — the same no-op removed from the compact-divider/system-note/retry-badge base rule.
+    // Arrange / Act — the same no-op removed from the compact-divider/system-note base rule.
     // Assert
     expect(blockAfter(css, ".compact-divider,")).not.toMatch(/align-self/);
   });
@@ -2760,5 +2744,110 @@ describe("ungated-session surface", () => {
     const frame = blockAfter(css, "body.ungated::after {");
     // Assert
     expect(frame).toContain("pointer-events: none");
+  });
+});
+
+// --- the system-failure card (F4) --------------------------------------------
+//
+// #degraded-banner had no CSS test of any kind and .error-banner only a
+// column-placement one. Their replacement asserts the load-bearing property:
+// that a card's color is its CLASS's color, from the same assignment the
+// workspace dot takes.
+
+describe("the system-failure card's class colors", () => {
+  it("paints an INTERNAL failure the blue our own machinery resolves to", () => {
+    // Arrange / Act — the same --init the workspace dot takes for init, dead
+    // and degraded alike, so a card can never explain a blue workspace in
+    // some other color.
+    const rule = blockAfter(css, ".failure-card.failure-internal {");
+    // Assert
+    expect(rule).toContain("var(--init)");
+  });
+
+  it("paints an API failure the purple vendor-blocked resolves to", () => {
+    // Arrange / Act
+    const rule = blockAfter(css, ".failure-card.failure-api {");
+    // Assert
+    expect(rule).toContain("var(--blocked)");
+  });
+
+  it("gives the INTERNAL card the same hue the sidebar's degraded dot wears", () => {
+    // Arrange / Act — the cross-surface half of the assertion: the card and
+    // the dot must literally reference one token, not two that agree today.
+    const card = blockAfter(css, ".failure-card.failure-internal {");
+    const dot = blockAfter(css, "#ws-sidebar .st-degraded {");
+    // Assert
+    expect(card).toContain("var(--init)");
+    expect(dot).toContain("var(--init)");
+  });
+
+  it("gives the API card the same hue the sidebar's vendor-blocked dot wears", () => {
+    // Arrange / Act
+    const card = blockAfter(css, ".failure-card.failure-api {");
+    const dot = blockAfter(css, "#ws-sidebar .st-vendor-blocked {");
+    // Assert
+    expect(card).toContain("var(--blocked)");
+    expect(dot).toContain("var(--blocked)");
+  });
+
+  it("drops a resolved card to the ordinary border rather than the alarm one", () => {
+    // Arrange / Act — the window ended; a card still wearing its class color
+    // would keep reading as a live failure.
+    const rule = blockAfter(css, ".failure-card.resolved {");
+    // Assert
+    expect(rule).toContain("var(--border)");
+  });
+
+  it("mutes a resolved card's text", () => {
+    // Arrange / Act
+    const rule = blockAfter(css, ".failure-card.resolved {");
+    // Assert
+    expect(rule).toContain("var(--muted)");
+  });
+});
+
+describe("the footer's error row takes its color from the failure's class", () => {
+  it("uses the INTERNAL blue rather than a red of its own", () => {
+    // Arrange / Act — a footer that painted its own red could contradict the
+    // very card it points at.
+    const rule = blockAfter(css, ".pfooter-error.failure-internal {");
+    // Assert
+    expect(rule).toContain("var(--init)");
+  });
+
+  it("uses the API purple", () => {
+    // Arrange / Act
+    const rule = blockAfter(css, ".pfooter-error.failure-api {");
+    // Assert
+    expect(rule).toContain("var(--blocked)");
+  });
+});
+
+describe("the retired error chrome", () => {
+  it("no longer defines the degraded banner", () => {
+    // Arrange / Act — the banner is gone from the DOM, so a rule for it would
+    // be dead weight that reads as coverage.
+    // Assert
+    expect(css).not.toContain("#degraded-banner {");
+  });
+
+  it("no longer defines the error banner", () => {
+    // Arrange / Act
+    // Assert
+    expect(css).not.toContain(".error-banner {");
+  });
+
+  it("no longer defines the error-response bubble border", () => {
+    // Arrange / Act — no producer ever set TextItem.error, so the red bubble
+    // variant was a fiction; API failures render as their own failure card.
+    // Assert
+    expect(css).not.toContain(".bubble.assistant.error-response");
+  });
+
+  it("no longer defines the retry badge", () => {
+    // Arrange / Act — it was grey while a --retry purple existed and went
+    // unused by it, which is the drift the one table now prevents.
+    // Assert
+    expect(css).not.toContain(".retry-badge {");
   });
 });

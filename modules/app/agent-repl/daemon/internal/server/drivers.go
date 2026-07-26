@@ -252,6 +252,37 @@ func (r *RegistryRegistrar) BackfillStateChanged(sessionID, state string) {
 	r.repush(sessionID)
 }
 
+// SessionDied marks sessionID's record terminal with the reason its death
+// carried (F4) and re-pushes its SessionView.
+//
+// This is the write that never existed: a shim death resolved the workspace
+// dead through the SSM while the record still claimed the session was alive,
+// so the dead-state card had nothing to explain itself with. An ALREADY
+// terminal record is left alone — the FIRST reason is the true one, and a
+// later shim exit must not overwrite "the user deleted this" with "the
+// process exited".
+func (r *RegistryRegistrar) SessionDied(sessionID, reason string) {
+	if r.Reg == nil {
+		return
+	}
+	found, err := r.Reg.Update(sessionID, func(rec *registry.Record) {
+		if rec.Terminal {
+			return
+		}
+		rec.Terminal = true
+		rec.DeathReason = reason
+	})
+	if err != nil && r.Logf != nil {
+		r.Logf("server: session %s: registry death write FAILED — the session will read as alive after a restart: %v", sessionID, err)
+		return
+	}
+	if !found && r.Logf != nil {
+		r.Logf("server: session %s: death write found no record (never registered)", sessionID)
+		return
+	}
+	r.repush(sessionID)
+}
+
 // ClaudeSessionIDChanged persists claudeSessionID on sessionID's record. A
 // missing record or a write failure is loud-logged, never silently dropped
 // (the session would not survive a restart).

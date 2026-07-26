@@ -25,9 +25,23 @@ import {
   toolElapsed,
 } from "../src/progress-footer.js";
 import type { ProgressInput } from "../src/state-adapter.js";
-import { ConversationItem, ToolItem } from "../src/store.js";
+import { ConversationItem, SystemFailureCard, ToolItem } from "../src/store.js";
 
 const NOW = Date.parse("2024-05-01T12:00:00.000Z");
+
+/** A daemon-classified failure, defaulted to an addressable API failure. */
+function failureCard(over: Partial<SystemFailureCard> = {}): SystemFailureCard {
+  return {
+    kind: "failure",
+    errorClass: "API",
+    errorType: "api.overloaded",
+    message: "the API is overloaded",
+    sourceDetail: "status=529",
+    resolvedAtMs: 0,
+    uuid: "failure:e9",
+    ...over,
+  };
+}
 
 /** A resolved progress view, defaulted to a quiet idle session. */
 function progress(over: Partial<ProgressInput> = {}): ProgressInput {
@@ -46,6 +60,7 @@ function progress(over: Partial<ProgressInput> = {}): ProgressInput {
     blocked: null,
     rateLimited: null,
     errorSummary: "",
+    failure: null,
     errorItemUuid: "",
     pendingPermissions: 0,
     queueDepth: 0,
@@ -527,30 +542,46 @@ describe("errorRowHtml: the persistent error line", () => {
     expect(got).toBe("");
   });
 
-  it("carries the daemon's summary", () => {
+  it("carries the daemon's classified message", () => {
     // Arrange / Act
-    const got = errorRowHtml(progress({ errorSummary: "overloaded (529) after 10 attempts" }));
+    const got = errorRowHtml(
+      progress({ failure: failureCard({ message: "overloaded (529) after 10 attempts" }) }),
+    );
     // Assert
     expect(got).toContain("overloaded (529) after 10 attempts");
   });
 
-  it("addresses the feed item it names, so the row can scroll to it", () => {
+  it("addresses the card it names, so the row can scroll to it", () => {
     // Arrange / Act
-    const got = errorRowHtml(progress({ errorSummary: "boom", errorItemUuid: "e9" }));
+    const got = errorRowHtml(progress({ failure: failureCard({ uuid: "failure:e9" }) }));
     // Assert
-    expect(got).toContain('data-pfooter-error-uuid="e9"');
+    expect(got).toContain('data-pfooter-error-uuid="failure:e9"');
   });
 
-  it("is not clickable when the summary names no item", () => {
+  it("is not clickable when the failure names no card", () => {
     // Arrange / Act — a turn-end error carries no ApiErrorLine of its own.
-    const got = errorRowHtml(progress({ errorSummary: "turn ended in error" }));
+    const got = errorRowHtml(progress({ failure: failureCard({ uuid: "" }) }));
     // Assert
     expect(got).not.toContain("addressable");
   });
 
-  it("escapes the summary", () => {
+  it("takes the API class's color rather than a red of its own", () => {
+    // Arrange / Act — the footer must not contradict the card it points at.
+    const got = errorRowHtml(progress({ failure: failureCard({ errorClass: "API" }) }));
+    // Assert
+    expect(got).toContain("failure-api");
+  });
+
+  it("takes the INTERNAL class's color for a machinery failure", () => {
     // Arrange / Act
-    const got = errorRowHtml(progress({ errorSummary: "<img src=x>" }));
+    const got = errorRowHtml(progress({ failure: failureCard({ errorClass: "INTERNAL" }) }));
+    // Assert
+    expect(got).toContain("failure-internal");
+  });
+
+  it("escapes the message", () => {
+    // Arrange / Act
+    const got = errorRowHtml(progress({ failure: failureCard({ message: "<img src=x>" }) }));
     // Assert
     expect(got).not.toContain("<img");
   });

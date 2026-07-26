@@ -709,3 +709,64 @@ func TestMigratedV1RowsStillCountIndividually(t *testing.T) {
 		t.Fatalf("live task count over legacy NULL rows = %d, want 2", got)
 	}
 }
+
+// --- ApplyConnectionDegraded (F4) -------------------------------------------
+//
+// The transport-level heartbeat miss called the Degraded sink and appended NO
+// state row, so it produced a banner and no workspace color at all. Retiring
+// the banner without this would have lost the ambience entirely.
+
+func TestConnectionDegradedResolvesTheWorkspaceDegraded(t *testing.T) {
+	// Arrange.
+	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
+
+	// Act.
+	if err := m.ApplyConnectionDegraded("ws1", true, "no shim traffic for 30s"); err != nil {
+		t.Fatalf("ApplyConnectionDegraded: %v", err)
+	}
+
+	// Assert.
+	if got := mustCurrent(t, m, "ws1").GetState(); got != frontendv1.RenderState_RENDER_STATE_DEGRADED {
+		t.Fatalf("state = %v, want RENDER_STATE_DEGRADED", got)
+	}
+}
+
+func TestConnectionRecoveredRevealsTheStateUnderneath(t *testing.T) {
+	// Arrange: a live workspace that then went quiet. The degraded axis sits
+	// ON TOP of the agent axis rather than replacing it, so clearing it must
+	// reveal the session underneath rather than leave the workspace stateless.
+	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
+	if err := m.Apply(evSessionStarted("s1", 1)); err != nil {
+		t.Fatalf("session started: %v", err)
+	}
+	if err := m.ApplyConnectionDegraded("ws1", true, "no traffic"); err != nil {
+		t.Fatalf("degrade: %v", err)
+	}
+	if got := mustCurrent(t, m, "ws1").GetState(); got != frontendv1.RenderState_RENDER_STATE_DEGRADED {
+		t.Fatalf("state before recovery = %v, want DEGRADED", got)
+	}
+
+	// Act.
+	if err := m.ApplyConnectionDegraded("ws1", false, ""); err != nil {
+		t.Fatalf("recover: %v", err)
+	}
+
+	// Assert.
+	if got := mustCurrent(t, m, "ws1").GetState(); got == frontendv1.RenderState_RENDER_STATE_DEGRADED {
+		t.Fatal("state stayed DEGRADED after recovery; the axis did not clear")
+	}
+}
+
+func TestConnectionDegradedRejectsAnEmptyWorkspace(t *testing.T) {
+	// Arrange: a degraded transition with nothing to key by is a caller bug,
+	// and writing it under "" would degrade a workspace nobody can see.
+	m, _, _ := openTest(t, fakeResolver{})
+
+	// Act.
+	err := m.ApplyConnectionDegraded("", true, "no traffic")
+
+	// Assert.
+	if err == nil {
+		t.Fatal("ApplyConnectionDegraded with no workspace must error")
+	}
+}

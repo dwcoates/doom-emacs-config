@@ -2,12 +2,12 @@ package sessiondrv
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
 
+	"claude-repld/internal/errclass"
 	"claude-repld/internal/shimclient"
 )
 
@@ -24,13 +24,14 @@ const repullTimeout = 60 * time.Second
 const repullMaxEvents = 20000
 
 // ErrRepullInFlight reports that the workspace already has a re-pull running
-// that does NOT cover the newly requested range.
-var ErrRepullInFlight = errors.New("sessiondrv: a history re-pull is already in flight for this workspace")
+// that does NOT cover the newly requested range. Its value lives in
+// internal/errclass beside its classification; this is the historic name.
+var ErrRepullInFlight = errclass.ErrRepullInFlight
 
 // ErrRepullTruncated reports that a re-pull hit one of its bounds before
 // reaching the retained floor, so the frontend received only part of the
 // history it asked for. Surfaced, never presented as a complete answer.
-var ErrRepullTruncated = errors.New("sessiondrv: history re-pull truncated before reaching the retained window")
+var ErrRepullTruncated = errclass.ErrRepullTruncated
 
 // repullState is one workspace's in-flight re-pull, guarded by m.mu.
 type repullState struct {

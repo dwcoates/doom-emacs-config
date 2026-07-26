@@ -3,9 +3,13 @@ package frontend
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+
+	"claude-repld/internal/errclass"
 )
 
 // mockHandler records the last method invoked and can inject an error.
@@ -176,7 +180,7 @@ func TestDispatchRoutesEachCommand(t *testing.T) {
 			h := &mockHandler{}
 
 			// Act.
-			ack := Dispatch(context.Background(), h, tc.cmd)
+			ack := Dispatch(context.Background(), nil, h, tc.cmd)
 
 			// Assert.
 			if h.called != tc.wantHit {
@@ -198,7 +202,7 @@ func TestDispatchResyncCarriesSeq(t *testing.T) {
 	cmd := &frontendv1.FrontendCommand{RequestId: "r", Command: &frontendv1.FrontendCommand_Resync{Resync: &frontendv1.ResyncCmd{FromSeq: 99}}}
 
 	// Act.
-	Dispatch(context.Background(), h, cmd)
+	Dispatch(context.Background(), nil, h, cmd)
 
 	// Assert.
 	if h.lastResyncSeq != 99 {
@@ -212,7 +216,7 @@ func TestDispatchHandlerErrorBecomesFailingAck(t *testing.T) {
 	cmd := &frontendv1.FrontendCommand{RequestId: "r8", Command: &frontendv1.FrontendCommand_SubmitPrompt{SubmitPrompt: &frontendv1.SubmitPromptCmd{}}}
 
 	// Act.
-	ack := Dispatch(context.Background(), h, cmd)
+	ack := Dispatch(context.Background(), nil, h, cmd)
 
 	// Assert.
 	if ack.GetOk() {
@@ -232,7 +236,7 @@ func TestDispatchUnknownCommandFailsLoudly(t *testing.T) {
 	cmd := &frontendv1.FrontendCommand{RequestId: "r9", Workspace: "wsX"}
 
 	// Act.
-	ack := Dispatch(context.Background(), h, cmd)
+	ack := Dispatch(context.Background(), nil, h, cmd)
 
 	// Assert: loud failing ack, no handler method invoked.
 	if h.called != "" {
@@ -251,10 +255,164 @@ func TestDispatchUnknownCommandFailsLoudly(t *testing.T) {
 
 func TestDispatchNilCommand(t *testing.T) {
 	// Act.
-	ack := Dispatch(context.Background(), &mockHandler{}, nil)
+	ack := Dispatch(context.Background(), nil, &mockHandler{}, nil)
 
 	// Assert.
 	if ack.GetOk() || ack.GetError() == "" {
 		t.Errorf("nil command should produce a loud failing ack, got %v", ack)
+	}
+}
+
+// --- CommandAck classification (F4) -----------------------------------------
+//
+// Before this, a refused command reached Emacs as raw Go text and reached the
+// webapp as nothing at all. These assert the ack now carries the CLASSIFIED
+// account beside the legacy string, one edge case per test.
+
+func TestDispatchFailingAckCarriesAClassifiedFailure(t *testing.T) {
+	// Arrange.
+	h := &mockHandler{err: errors.New("submit exploded")}
+	cmd := &frontendv1.FrontendCommand{RequestId: "r", Command: &frontendv1.FrontendCommand_SubmitPrompt{SubmitPrompt: &frontendv1.SubmitPromptCmd{}}}
+
+	// Act.
+	ack := Dispatch(context.Background(), nil, h, cmd)
+
+	// Assert.
+	if ack.GetFailure() == nil {
+		t.Fatal("a failing ack carried no classified failure; the webapp renders nothing from the string")
+	}
+}
+
+func TestDispatchOkAckCarriesNoFailure(t *testing.T) {
+	// Arrange.
+	h := &mockHandler{}
+	cmd := &frontendv1.FrontendCommand{RequestId: "r", Command: &frontendv1.FrontendCommand_SubmitPrompt{SubmitPrompt: &frontendv1.SubmitPromptCmd{}}}
+
+	// Act.
+	ack := Dispatch(context.Background(), nil, h, cmd)
+
+	// Assert.
+	if ack.GetFailure() != nil {
+		t.Fatalf("a successful ack carried a failure: %v", ack.GetFailure())
+	}
+}
+
+func TestDispatchClassifiesEachSentinel(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want errclass.Type
+	}{
+		{"shim not connected", errclass.ErrShimNotConnected, errclass.TypeShimNotConnected},
+		{"shim nack", errclass.ErrShimNack, errclass.TypeShimRejected},
+		{"shim ack timeout", errclass.ErrShimAckTimeout, errclass.TypeShimAckTimeout},
+		{"shim version mismatch", errclass.ErrShimVersionMismatch, errclass.TypeShimVersionMismatch},
+		{"shim seq regression", errclass.ErrShimSeqRegression, errclass.TypeShimSeqRegression},
+		{"not live session", errclass.ErrNotLiveSession, errclass.TypeSessionNotLive},
+		{"repull in flight", errclass.ErrRepullInFlight, errclass.TypeHistoryRepullInFlight},
+		{"repull truncated", errclass.ErrRepullTruncated, errclass.TypeHistoryReplayTruncated},
+		{"interrupt undelivered", errclass.ErrInterruptUndelivered, errclass.TypeInterruptUndelivered},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := &mockHandler{err: tc.err}
+			cmd := &frontendv1.FrontendCommand{RequestId: "r", Command: &frontendv1.FrontendCommand_SubmitPrompt{SubmitPrompt: &frontendv1.SubmitPromptCmd{}}}
+
+			// Act.
+			ack := Dispatch(context.Background(), nil, h, cmd)
+
+			// Assert.
+			if got := ack.GetFailure().GetErrorType(); got != string(tc.want) {
+				t.Fatalf("error_type = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestDispatchClassifiesAWrappedNackWithItsReason(t *testing.T) {
+	// Arrange: the shape control.go actually produces. The shim's raw reason
+	// is machinery and must land in source_detail rather than in the headline.
+	h := &mockHandler{err: fmt.Errorf("%w: request_id=r reason=%q", errclass.ErrShimNack, "store rejected batch")}
+	cmd := &frontendv1.FrontendCommand{RequestId: "r", Command: &frontendv1.FrontendCommand_SubmitPrompt{SubmitPrompt: &frontendv1.SubmitPromptCmd{}}}
+
+	// Act.
+	ack := Dispatch(context.Background(), nil, h, cmd)
+
+	// Assert.
+	if !strings.Contains(ack.GetFailure().GetSourceDetail(), "store rejected batch") {
+		t.Fatalf("source_detail = %q, want the shim's raw reason", ack.GetFailure().GetSourceDetail())
+	}
+}
+
+func TestDispatchFallsThroughLoudlyForAnUnclassifiedError(t *testing.T) {
+	// Arrange: an error matching no sentinel.
+	var logged []string
+	logf := func(format string, args ...any) { logged = append(logged, fmt.Sprintf(format, args...)) }
+	h := &mockHandler{err: errors.New("submit exploded")}
+	cmd := &frontendv1.FrontendCommand{RequestId: "r", Command: &frontendv1.FrontendCommand_SubmitPrompt{SubmitPrompt: &frontendv1.SubmitPromptCmd{}}}
+
+	// Act.
+	ack := Dispatch(context.Background(), logf, h, cmd)
+
+	// Assert.
+	if ack.GetFailure().GetErrorType() != string(errclass.TypeInternalUnclassified) {
+		t.Fatalf("error_type = %q, want %q", ack.GetFailure().GetErrorType(), errclass.TypeInternalUnclassified)
+	}
+	if len(logged) == 0 {
+		t.Fatal("an unclassified command error passed SILENTLY; the fallthrough must be loud")
+	}
+}
+
+func TestDispatchKeepsTheLegacyErrorStringBesideTheFailure(t *testing.T) {
+	// Arrange: Emacs's echo is the only surface rendering a refusal today, so
+	// the string must survive until both frontends read the classified field.
+	h := &mockHandler{err: errors.New("submit exploded")}
+	cmd := &frontendv1.FrontendCommand{RequestId: "r", Command: &frontendv1.FrontendCommand_SubmitPrompt{SubmitPrompt: &frontendv1.SubmitPromptCmd{}}}
+
+	// Act.
+	ack := Dispatch(context.Background(), nil, h, cmd)
+
+	// Assert.
+	if ack.GetError() != "submit exploded" {
+		t.Fatalf("ack error = %q, want the legacy text preserved", ack.GetError())
+	}
+}
+
+func TestDispatchClassifiesAnUnknownCommand(t *testing.T) {
+	// Arrange: an empty oneof.
+	cmd := &frontendv1.FrontendCommand{RequestId: "r", Workspace: "wsX"}
+
+	// Act.
+	ack := Dispatch(context.Background(), nil, &mockHandler{}, cmd)
+
+	// Assert.
+	if ack.GetFailure() == nil {
+		t.Fatal("an unknown command produced no classified failure")
+	}
+}
+
+func TestDispatchClassifiesANilCommand(t *testing.T) {
+	// Arrange.
+	// Act.
+	ack := Dispatch(context.Background(), nil, &mockHandler{}, nil)
+
+	// Assert.
+	if ack.GetFailure() == nil {
+		t.Fatal("a nil command produced no classified failure")
+	}
+}
+
+func TestDispatchNeverEmitsAClientPrefixedType(t *testing.T) {
+	// Arrange: the namespace partition — `client.` belongs to the frontends.
+	h := &mockHandler{err: errclass.ErrShimNack}
+	cmd := &frontendv1.FrontendCommand{RequestId: "r", Command: &frontendv1.FrontendCommand_SubmitPrompt{SubmitPrompt: &frontendv1.SubmitPromptCmd{}}}
+
+	// Act.
+	ack := Dispatch(context.Background(), nil, h, cmd)
+
+	// Assert.
+	if !errclass.IsDaemonType(ack.GetFailure().GetErrorType()) {
+		t.Fatalf("daemon emitted %q, which is frontend-reserved", ack.GetFailure().GetErrorType())
 	}
 }

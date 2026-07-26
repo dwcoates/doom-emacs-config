@@ -36,6 +36,7 @@ import (
 	"claude-repld/internal/account"
 	"claude-repld/internal/addsupport"
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/errclass"
 	"claude-repld/internal/frontend"
 	"claude-repld/internal/login"
 	"claude-repld/internal/protocol"
@@ -1199,7 +1200,7 @@ func (s *Server) DeleteSession(id string) error {
 	if !rec.Terminal {
 		s.updateRegistry(id, "terminal transition", func(r *registry.Record) {
 			r.Terminal = true
-			r.DeathReason = "delete session"
+			r.DeathReason = errclass.DeathReasonDeleted
 		})
 		// Best-effort stop of THIS session's shim. Session-scoped, never
 		// workspace-scoped: several records can share a cwd (a stale
@@ -1239,16 +1240,26 @@ func (s *Server) DaemonView() *frontendv1.DaemonView {
 // snapshot (cmd/claude-repld registrySessions) and the create/delete pushes, so
 // the two cannot drift. Rehydratable/Hibernated are not listed session state
 // post-cutover (driver-internal shim lifecycle) and stay false.
-func SessionViewFromRecord(rec registry.Record, pendingPermissions []string) *frontendv1.SessionView {
+//
+// logf carries the classifier's loud default for a persisted death reason
+// outside the known set. A record written by an earlier build may hold an
+// arbitrary string, and passing one through silently is precisely what the
+// backfillState precedent below exists to avoid.
+func SessionViewFromRecord(logf dlog.Logf, rec registry.Record, pendingPermissions []string) *frontendv1.SessionView {
 	return &frontendv1.SessionView{
-		Workspace:          rec.CWD,
-		SessionId:          rec.SessionID,
-		Model:              rec.Model,
-		PermissionMode:     rec.PermissionMode,
-		ClaudeSessionId:    rec.ClaudeSessionID,
-		Cwd:                rec.CWD,
-		Terminal:           rec.Terminal,
-		DeathReason:        rec.DeathReason,
+		Workspace:       rec.CWD,
+		SessionId:       rec.SessionID,
+		Model:           rec.Model,
+		PermissionMode:  rec.PermissionMode,
+		ClaudeSessionId: rec.ClaudeSessionID,
+		Cwd:             rec.CWD,
+		Terminal:        rec.Terminal,
+		DeathReason:     rec.DeathReason,
+		// The TYPED death (F4). death_reason had two producers and zero
+		// readers because a frontend could not tell what class of failure the
+		// string described; this is the same fact classified once so the
+		// dead-state card can render it like every other failure.
+		Death:              errclass.Death(logf, rec.DeathReason),
 		PendingPermissions: int64(len(pendingPermissions)),
 		// The CLAUDE_CONFIG_DIR the session's shim runs against — the ACCOUNT it
 		// runs as (S8). Empty names the CLI's own default root. Carried on every
@@ -1299,7 +1310,7 @@ func (s *Server) pushSessionView(id string) {
 	if !rec.Terminal && rec.CWD != "" && s.driver != nil {
 		pending = s.driver.PendingPermissions(rec.CWD)
 	}
-	s.frontend.PushSessionView(SessionViewFromRecord(rec, pending))
+	s.frontend.PushSessionView(SessionViewFromRecord(s.logf, rec, pending))
 }
 
 func (s *Server) handleListSessions(w http.ResponseWriter, _ *http.Request) {

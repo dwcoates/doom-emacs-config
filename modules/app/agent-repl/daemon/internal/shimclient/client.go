@@ -47,6 +47,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/errclass"
 )
 
 // Terminal (non-retryable) protocol errors: reconnecting cannot fix them, so
@@ -55,11 +56,11 @@ var (
 	// ErrVersionMismatch is returned when the shim's protocol_version does not
 	// match the daemon's. A version-incompatible shim will not become
 	// compatible on reconnect.
-	ErrVersionMismatch = errors.New("shimclient: protocol version mismatch")
+	ErrVersionMismatch = errclass.ErrShimVersionMismatch
 	// ErrSeqRegression is returned when the store-assigned seq of a PERSISTENT
 	// event goes backwards on a session — a protocol violation that means the
 	// merged stream can no longer be trusted.
-	ErrSeqRegression = errors.New("shimclient: sequence regression")
+	ErrSeqRegression = errclass.ErrShimSeqRegression
 )
 
 // SeqStore supplies and consumes the daemon-tracked last_seen_seq per session.
@@ -236,6 +237,7 @@ type activeConn struct {
 
 // ackResult carries the outcome of a correlated control request.
 type ackResult struct {
+	ack  *corev1.Ack  // non-nil on success; carries the interrupt outcome
 	nack *corev1.Nack // non-nil = Nack; nil = Ack
 	err  error        // connection lost etc.
 }
