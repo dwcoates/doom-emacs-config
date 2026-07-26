@@ -42,6 +42,7 @@
 
 import type { CounterEntry, CounterStatus } from "./counter-menu.js";
 import type { ContentBlock, ModelUsage, ResultSubtype, Usage } from "./protocol.js";
+import { recordBlockIdentity } from "./streaming.js";
 import type {
   CompactBoundaryItem,
   ConversationItem,
@@ -126,21 +127,31 @@ export interface SessionViewInput {
   configDir: string;
 }
 
-/** TypingDelta → the smooth.ts reveal feed's append. */
+/**
+ * TypingDelta → the store's live-typing feed, structurally a
+ * {@link StreamDelta} so `streaming.ts` can reconcile it directly.
+ *
+ * No block id is carried. The identity of a streamed block is derived in ONE
+ * place — `streaming.ts` — precisely so a second derivation here cannot drift
+ * from the one the finished record is matched against, which is the bug this
+ * shape used to have.
+ */
 export interface TypingReveal {
   workspace: string;
   sessionId: string;
-  uuid: string;
+  /**
+   * The ANTHROPIC message id every delta of one message shares, stamped at the
+   * source (the shim's `message_start` tracker) and carried opaquely since.
+   *
+   * The proto field it arrives in is spelled `uuid`, which is a misnomer it has
+   * outlived: it has never held an SDK envelope uuid, because the SDK mints a
+   * fresh one per emitted event and a message's chunks would then share nothing.
+   */
+  messageId: string;
+  /** The block's ordinal within that message, as the API numbered it. */
   blockIndex: number;
   kind: "text" | "thinking" | "input_json";
   delta: string;
-  /**
-   * The stable block id the store/smooth reveal keys the growing block on,
-   * synthesized from the ephemeral relay's `uuid` + `block_index`. Matches how
-   * the complete assistantMessage's blocks key (`${uuid}:${blockIndex}`), so a
-   * preview reconciles onto its finished block.
-   */
-  blockId: string;
 }
 
 /**
@@ -489,11 +500,10 @@ export class StateAdapter {
         value: {
           workspace: td.workspace,
           sessionId: td.sessionId,
-          uuid: td.uuid,
+          messageId: td.uuid,
           blockIndex: td.blockIndex,
           kind: td.kind,
           delta: td.delta,
-          blockId: `${td.uuid}:${td.blockIndex}`,
         },
       },
     ];
@@ -682,23 +692,14 @@ function assistantMessageItems(frame: ConversationItemFrame): {
   items: ConversationItem[];
   ignores: string[];
 } {
-  // TWO ids, because a finished block answers to two different questions.
+  // The ANTHROPIC message id: the only identity a message shares with its own
+  // live stream, and so the only thing that can pair a finished block with the
+  // preview its deltas grew. Falls back to the envelope uuid when a payload
+  // carries no id of its own.
   //
-  // `messageId` is the ANTHROPIC message id — the only identity a message
-  // shares with its own live stream, and so the only thing that can pair a
-  // finished block with the preview its deltas grew. It falls back to the
-  // envelope uuid when a payload carries no id.
-  //
-  // `identity` is the RECORD's own id, and it is what the block is deduped on.
-  // It must come from the ENVELOPE, never from the message id plus a content
-  // index: the SDK emits one assistant record PER CONTENT BLOCK, every record
-  // of one API message carrying the same `message.id` and a `content` array of
-  // length ONE. So the index within `content` is always 0 and says nothing
-  // about which API block the record holds. Keying on it made every block of a
-  // message collide (two thinking blocks silently overwrote each other) while
-  // never meeting the preview, which keys the TRUE API block index.
+  // The block's own RECORD identity comes from `recordBlockIdentity` — the one
+  // authority — rather than being spelled out a second time here.
   const messageId = pstr(frame.payload, "id") || frame.uuid;
-  const identity = frame.uuid || messageId;
   const ts = tsFromMs(frame.tsMs);
   const items: ConversationItem[] = [];
   const ignores: string[] = [];
@@ -708,25 +709,23 @@ function assistantMessageItems(frame: ConversationItemFrame): {
       case "text": {
         const item: TextItem = {
           kind: "text",
-          blockId: `${identity}:${index}`,
+          ...recordBlockIdentity(frame.uuid, messageId, index),
           messageId,
           text: pstr(value, "text"),
           done: true,
           ts,
         };
-        if (identity !== "") item.uuid = `${identity}:${index}`;
         items.push(item);
         break;
       }
       case "thinking": {
         const item: ThinkingItem = {
           kind: "thinking",
-          blockId: `${identity}:${index}`,
+          ...recordBlockIdentity(frame.uuid, messageId, index),
           messageId,
           text: pstr(value, "thinking"),
           done: true,
         };
-        if (identity !== "") item.uuid = `${identity}:${index}`;
         const sig = pstr(value, "signature");
         if (sig !== "") item.signature = sig;
         items.push(item);
