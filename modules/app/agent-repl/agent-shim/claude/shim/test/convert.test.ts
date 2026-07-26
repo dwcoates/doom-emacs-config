@@ -551,6 +551,78 @@ describe("corrected tool-result shapes", () => {
 // Missing / unknown discriminators → UnparsedEvent (never a zero value).
 // ---------------------------------------------------------------------------
 
+describe("Anthropic API content blocks", () => {
+  /** Convert one assistant content block and return its ContentBlock arm. */
+  const blockOf = (block: Record<string, unknown>) => {
+    const csm = vendor(convert({ type: "assistant", session_id: "s", message: { id: "m", model: "x", content: [block] } }));
+    if (csm.msg.case !== "assistant") throw new Error("case");
+    return csm.msg.value.message!.content[0]!.block;
+  };
+
+  it("redacted_thinking decodes its opaque blob to bytes", () => {
+    // The blob must survive byte-for-byte to be replayable to the API.
+    const arm = blockOf({ type: "redacted_thinking", data: Buffer.from("secret").toString("base64") });
+    if (arm.case !== "redactedThinking") throw new Error(`case ${arm.case}`);
+    expect(Buffer.from(arm.value.data).toString()).toBe("secret");
+  });
+
+  it("server_tool_use keeps its input struct", () => {
+    const arm = blockOf({ type: "server_tool_use", id: "s1", name: "web_search", input: { query: "x" } });
+    if (arm.case !== "serverToolUse") throw new Error(`case ${arm.case}`);
+    expect(arm.value.input).toEqual({ query: "x" });
+  });
+
+  it("mcp_tool_use carries the server name that distinguishes it from tool_use", () => {
+    const arm = blockOf({ type: "mcp_tool_use", id: "m1", name: "search", server_name: "srv" });
+    if (arm.case !== "mcpToolUse") throw new Error(`case ${arm.case}`);
+    expect(arm.value.serverName).toBe("srv");
+  });
+
+  it("mcp_tool_result preserves a heterogeneous content array", () => {
+    const arm = blockOf({ type: "mcp_tool_result", tool_use_id: "t1", content: [{ type: "text", text: "a" }, "bare"] });
+    if (arm.case !== "mcpToolResult") throw new Error(`case ${arm.case}`);
+    expect(toJson(ListValueSchema, arm.value.content!)).toEqual([{ type: "text", text: "a" }, "bare"]);
+  });
+
+  it("web_search_tool_result routes an array to the results arm", () => {
+    const arm = blockOf({ type: "web_search_tool_result", tool_use_id: "t1", content: [{ url: "u" }] });
+    if (arm.case !== "webSearchToolResult") throw new Error(`case ${arm.case}`);
+    expect(arm.value.content.case).toBe("results");
+  });
+
+  it("web_search_tool_result routes an error object to the error arm", () => {
+    // A failed search must stay distinguishable from one that found nothing.
+    const arm = blockOf({ type: "web_search_tool_result", tool_use_id: "t1", content: { error_code: "max_uses_exceeded" } });
+    if (arm.case !== "webSearchToolResult") throw new Error(`case ${arm.case}`);
+    if (arm.value.content.case !== "error") throw new Error(`content ${arm.value.content.case}`);
+    expect(arm.value.content.value.errorCode).toBe("max_uses_exceeded");
+  });
+
+  it("web_fetch_tool_result shares the result-or-error union", () => {
+    const arm = blockOf({ type: "web_fetch_tool_result", tool_use_id: "t1", content: { error_code: "unavailable" } });
+    if (arm.case !== "webFetchToolResult") throw new Error(`case ${arm.case}`);
+    expect(arm.value.content.case).toBe("error");
+  });
+
+  it("code_execution_tool_result shares the result-or-error union", () => {
+    const arm = blockOf({ type: "code_execution_tool_result", tool_use_id: "t1", content: [{ stdout: "hi" }] });
+    if (arm.case !== "codeExecutionToolResult") throw new Error(`case ${arm.case}`);
+    expect(arm.value.content.case).toBe("results");
+  });
+
+  it("search_result carries its source", () => {
+    const arm = blockOf({ type: "search_result", source: "docs", title: "t", content: [] });
+    if (arm.case !== "searchResult") throw new Error(`case ${arm.case}`);
+    expect(arm.value.source).toBe("docs");
+  });
+
+  it("container_upload carries the container's file id", () => {
+    const arm = blockOf({ type: "container_upload", file_id: "f1" });
+    if (arm.case !== "containerUpload") throw new Error(`case ${arm.case}`);
+    expect(arm.value.fileId).toBe("f1");
+  });
+});
+
 describe("SDK 0.3.220 stream families", () => {
   const armOf = (msg: Record<string, unknown>) => vendor(convert({ session_id: "s", ...msg })).msg;
 

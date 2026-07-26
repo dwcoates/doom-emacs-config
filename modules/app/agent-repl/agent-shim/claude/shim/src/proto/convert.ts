@@ -154,7 +154,17 @@ import {
   AskUserQuestionResultSchema,
   BashResultSchema,
   CallerSchema,
+  CodeExecutionToolResultBlockSchema,
+  ContainerUploadBlockSchema,
   ContentBlockSchema,
+  McpToolResultBlockSchema,
+  McpToolUseBlockSchema,
+  RedactedThinkingBlockSchema,
+  SearchResultBlockSchema,
+  ServerToolUseBlockSchema,
+  ToolResultErrorCodeSchema,
+  WebFetchToolResultBlockSchema,
+  WebSearchToolResultBlockSchema,
   EditResultSchema,
   FallbackBlockSchema,
   FallbackModelRefSchema,
@@ -1133,6 +1143,36 @@ function convertBlock(raw: Record<string, unknown>): ContentBlock | null {
       return create(ContentBlockSchema, { block: { case: "toolReference", value: create(ToolReferenceBlockSchema, { reference: asStruct(raw) }) } });
     case "fallback":
       return create(ContentBlockSchema, { block: { case: "fallback", value: create(FallbackBlockSchema, { from: fallbackModel(raw["from"]), to: fallbackModel(raw["to"]) }) } });
+    case "redacted_thinking":
+      // `data` is an opaque encrypted blob that must survive byte-for-byte to
+      // be replayable to the API, so it is decoded to bytes, not kept as text.
+      return create(ContentBlockSchema, { block: { case: "redactedThinking", value: create(RedactedThinkingBlockSchema, { data: typeof raw["data"] === "string" ? base64ToBytes(raw["data"]) : new Uint8Array(0) }) } });
+    case "server_tool_use":
+      return create(ContentBlockSchema, { block: { case: "serverToolUse", value: create(ServerToolUseBlockSchema, { id: strOf(raw["id"]), name: strOf(raw["name"]), input: asStructOpt(raw["input"]) }) } });
+    case "mcp_tool_use":
+      return create(ContentBlockSchema, { block: { case: "mcpToolUse", value: create(McpToolUseBlockSchema, { id: strOf(raw["id"]), name: strOf(raw["name"]), serverName: strOf(pick(raw, "server_name", "serverName")), input: asStructOpt(raw["input"]) }) } });
+    case "mcp_tool_result":
+      return create(ContentBlockSchema, { block: { case: "mcpToolResult", value: create(McpToolResultBlockSchema, {
+        toolUseId: strOf(pick(raw, "tool_use_id", "toolUseId")),
+        isError: raw["is_error"] === true,
+        isErrorSet: raw["is_error"] !== undefined,
+        content: asListValueOpt(raw["content"]),
+      }) } });
+    case "web_search_tool_result":
+      return create(ContentBlockSchema, { block: { case: "webSearchToolResult", value: create(WebSearchToolResultBlockSchema, { toolUseId: strOf(pick(raw, "tool_use_id", "toolUseId")), content: toolResultUnion(raw["content"]) }) } });
+    case "web_fetch_tool_result":
+      return create(ContentBlockSchema, { block: { case: "webFetchToolResult", value: create(WebFetchToolResultBlockSchema, { toolUseId: strOf(pick(raw, "tool_use_id", "toolUseId")), content: toolResultUnion(raw["content"]) }) } });
+    case "code_execution_tool_result":
+      return create(ContentBlockSchema, { block: { case: "codeExecutionToolResult", value: create(CodeExecutionToolResultBlockSchema, { toolUseId: strOf(pick(raw, "tool_use_id", "toolUseId")), content: toolResultUnion(raw["content"]) }) } });
+    case "search_result":
+      return create(ContentBlockSchema, { block: { case: "searchResult", value: create(SearchResultBlockSchema, {
+        source: strOf(raw["source"]),
+        title: strOf(raw["title"]),
+        content: asListValueOpt(raw["content"]),
+        citations: asStructOpt(raw["citations"]),
+      }) } });
+    case "container_upload":
+      return create(ContentBlockSchema, { block: { case: "containerUpload", value: create(ContainerUploadBlockSchema, { fileId: strOf(pick(raw, "file_id", "fileId")) }) } });
     default: {
       // PASSTHROUGH: this used to return null, which DROPPED the block out of
       // the message body — the one place the never-drop contract was actually
@@ -1165,6 +1205,30 @@ function convertToolResultBlock(raw: Record<string, unknown>) {
     return create(ToolResultBlockSchema, { ...base, content: { case: "contentBlocks", value: create(ToolResultBlockListSchema, { blocks: convertBlocks(content) }) } });
   }
   return create(ToolResultBlockSchema, { ...base, content: { case: undefined } });
+}
+
+/**
+ * The result-or-error union shared by the three server-tool result blocks.
+ *
+ * On the wire `content` is EITHER an array of results OR an `{error_code}`
+ * object, and the distinction is load-bearing: collapsing them would make a
+ * failed search indistinguishable from one that found nothing. An array wins;
+ * an object is read as the error; anything else leaves the oneof unset rather
+ * than fabricating an empty result list.
+ */
+function toolResultUnion(
+  raw: unknown,
+): { case: "results"; value: ListValue } | { case: "error"; value: ReturnType<typeof create<typeof ToolResultErrorCodeSchema>> } | { case: undefined } {
+  if (Array.isArray(raw)) {
+    return { case: "results", value: fromJson(ListValueSchema, raw as JsonValue[]) };
+  }
+  if (isObject(raw)) {
+    return {
+      case: "error",
+      value: create(ToolResultErrorCodeSchema, { errorCode: strOf(pick(raw, "error_code", "errorCode")) }),
+    };
+  }
+  return { case: undefined };
 }
 
 function convertImageSource(raw: unknown) {
