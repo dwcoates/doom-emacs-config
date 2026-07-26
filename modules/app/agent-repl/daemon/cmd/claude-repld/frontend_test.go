@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"claude-repld/internal/errclass"
 	"claude-repld/internal/registry"
 )
 
@@ -59,9 +60,9 @@ func TestRegistrySessionViewsPopulatesRegistryFields(t *testing.T) {
 }
 
 // TestRegistrySessionViewsIncludesTerminalRecords verifies the S7 parity
-// change: a terminal record IS included now (the orphan/reattach sweep re-keys
-// on its terminal + death_reason fields), carrying terminal=true and its death
-// reason, so Emacs can drop the GET /sessions poller.
+// change: a terminal record IS included now (the orphan/reattach sweep
+// re-keys on its terminal field), carrying terminal=true, so Emacs can drop
+// the GET /sessions poller.
 func TestRegistrySessionViewsIncludesTerminalRecords(t *testing.T) {
 	// Arrange.
 	reg := registry.Open(filepath.Join(t.TempDir(), "registry.json"), func(string, ...any) {})
@@ -80,8 +81,8 @@ func TestRegistrySessionViewsIncludesTerminalRecords(t *testing.T) {
 	if !v.GetTerminal() {
 		t.Errorf("terminal: got false, want true")
 	}
-	if got := v.GetDeathReason(); got != "delete session" {
-		t.Errorf("death_reason: got %q, want %q", got, "delete session")
+	if got := v.GetDeath().GetErrorType(); got != string(errclass.TypeSessionDeleted) {
+		t.Errorf("death.error_type: got %q, want %q", got, errclass.TypeSessionDeleted)
 	}
 }
 
