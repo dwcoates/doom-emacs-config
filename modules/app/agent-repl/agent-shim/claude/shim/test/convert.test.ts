@@ -14,6 +14,7 @@ import {
   McpServerState,
   type ClaudeStreamMessage,
 } from "../../../../proto/gen/ts/agentshim/data/v1/stream_pb.js";
+import { RawTaskStatus, RetrievalStatus } from "../../../../proto/gen/ts/agentshim/data/v1/tools_pb.js";
 import { OriginKind } from "../../../../proto/gen/ts/agentshim/data/v1/transcript_pb.js";
 import { DiscriminatorField } from "../../../../proto/gen/ts/agentshim/data/v1/unknown_pb.js";
 
@@ -152,6 +153,31 @@ describe("assistant", () => {
     const m = csm();
     if (m.msg.case !== "assistant") throw new Error("case");
     expect(m.msg.value.hasError).toBe(false);
+  });
+});
+
+// ApiUsage fields 8-10, which the converter modeled but never read.
+describe("ApiUsage iterations / speed / inference_geo", () => {
+  /** Convert an assistant message carrying `usage` and return the typed usage. */
+  const usageOf = (usage: Record<string, unknown>) => {
+    const csm = vendor(convert({ type: "assistant", session_id: "s", message: { id: "m", model: "x", content: [], usage } }));
+    if (csm.msg.case !== "assistant") throw new Error("case");
+    return csm.msg.value.message!.usage!;
+  };
+
+  it("reads inference_geo off a real assistant usage block", () => {
+    const m = vendor(convert(loadStream("assistant")));
+    if (m.msg.case !== "assistant") throw new Error("case");
+    expect(m.msg.value.message!.usage!.inferenceGeo).toBe("not_available");
+  });
+
+  it("reads the speed routing hint", () => {
+    expect(usageOf({ speed: "standard" }).speed).toBe("standard");
+  });
+
+  it("keeps the per-model iterations breakdown as a list", () => {
+    const it0 = { input_tokens: 2, output_tokens: 3200, type: "message" };
+    expect(listJson(usageOf({ iterations: [it0] }).iterations)).toEqual([it0]);
   });
 });
 
@@ -1213,6 +1239,157 @@ describe("tool results that used to fall through to unclassified", () => {
     const r = convertToolUseResult({ structuredOutput: { verdict: "ok", score: 3 } }, "s");
     if (r?.result.case !== "structuredOutput") throw new Error("case");
     expect(r.result.value.data).toEqual({ verdict: "ok", score: 3 });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The four ToolUseResult arms the proto declared but the classifier never
+// reached: every Agent, async agent launch, TaskOutput and WebFetch result was
+// captured verbatim (or, for TaskOutput, mistyped as a TaskCreate).
+// ---------------------------------------------------------------------------
+
+describe("agent arm", () => {
+  it("classifies a synchronous Agent result", () => {
+    const r = convertToolUseResult(loadToolResult("agent"), "s");
+    expect(r.result.case).toBe("agent");
+  });
+
+  it("types the Agent result's agent type", () => {
+    const r = convertToolUseResult(loadToolResult("agent"), "s");
+    if (r.result.case !== "agent") throw new Error("case");
+    expect(r.result.value.agentType).toBe("general-purpose");
+  });
+
+  it("maps the Agent result's status onto RawTaskStatus", () => {
+    const r = convertToolUseResult(loadToolResult("agent"), "s");
+    if (r.result.case !== "agent") throw new Error("case");
+    expect(r.result.value.status).toBe(RawTaskStatus.COMPLETED);
+  });
+
+  it("classifies the Agent result's final message blocks", () => {
+    const r = convertToolUseResult(loadToolResult("agent"), "s");
+    if (r.result.case !== "agent") throw new Error("case");
+    expect(r.result.value.content.map((b) => b.block.case)).toEqual(["text"]);
+  });
+
+  it("types the Agent result's toolStats", () => {
+    const r = convertToolUseResult(loadToolResult("agent"), "s");
+    if (r.result.case !== "agent") throw new Error("case");
+    expect(r.result.value.toolStats?.bashCount).toBe(18n);
+  });
+
+  it("keeps the Agent result's per-model usage iterations", () => {
+    const r = convertToolUseResult(loadToolResult("agent"), "s");
+    if (r.result.case !== "agent") throw new Error("case");
+    expect(listJson(r.result.value.usage!.iterations)).toHaveLength(1);
+  });
+
+  it("classifies an Agent result that omits the optional agentType", () => {
+    // `agentType` is optional on the SDK's completed AgentOutput member, so the
+    // arm keys on the two required totals instead.
+    const r = convertToolUseResult({ status: "completed", agentId: "a1", prompt: "p", content: [], totalDurationMs: 5, totalTokens: 7, totalToolUseCount: 1 }, "s");
+    expect(r.result.case).toBe("agent");
+  });
+});
+
+describe("agent_async_launch arm", () => {
+  it("classifies an async agent launch", () => {
+    const r = convertToolUseResult(loadToolResult("agent_async_launch"), "s");
+    expect(r.result.case).toBe("agentAsyncLaunch");
+  });
+
+  it("keeps the async launch's output file", () => {
+    const r = convertToolUseResult(loadToolResult("agent_async_launch"), "s");
+    if (r.result.case !== "agentAsyncLaunch") throw new Error("case");
+    expect(r.result.value.outputFile).toBe("/private/tmp/claude-501/-Users-dodgecoates--config-doom-worktrees-async-quiescence-rgm/f2c3c473-defc-4d8c-91de-d27177b2568e/tasks/a15b5267244c1360e.output");
+  });
+
+  it("maps the async launch's status onto RawTaskStatus", () => {
+    const r = convertToolUseResult(loadToolResult("agent_async_launch"), "s");
+    if (r.result.case !== "agentAsyncLaunch") throw new Error("case");
+    expect(r.result.value.status).toBe(RawTaskStatus.ASYNC_LAUNCHED);
+  });
+
+  it("leaves a remote agent launch unclassified (AgentOutput member with no proto arm)", () => {
+    // Shares status/description/prompt/outputFile with the async launch but
+    // carries no `isAsync`, so nothing discriminates it — capture, never a
+    // guess at the nearest arm.
+    const r = convertToolUseResult({ status: "remote_launched", taskId: "t1", sessionUrl: "https://x/y", description: "d", prompt: "p", outputFile: "/tmp/o" }, "s");
+    expect(r.result.case).toBe("unclassified");
+  });
+});
+
+describe("task_output arm", () => {
+  it("classifies a TaskOutput result rather than mistaking it for a TaskCreate", () => {
+    // Both carry `task`; only TaskOutput carries a retrieval_status.
+    const r = convertToolUseResult(loadToolResult("task_output"), "s");
+    expect(r.result.case).toBe("taskOutput");
+  });
+
+  it("maps the TaskOutput retrieval_status onto RetrievalStatus", () => {
+    const r = convertToolUseResult(loadToolResult("task_output"), "s");
+    if (r.result.case !== "taskOutput") throw new Error("case");
+    expect(r.result.value.retrievalStatus).toBe(RetrievalStatus.NOT_READY);
+  });
+
+  it("routes a local_bash TaskOutput to the local_bash arm", () => {
+    const r = convertToolUseResult(loadToolResult("task_output"), "s");
+    if (r.result.case !== "taskOutput") throw new Error("case");
+    expect(r.result.value.task.case).toBe("localBash");
+  });
+
+  it("keeps a running local_bash task's null exitCode unset", () => {
+    const r = convertToolUseResult(loadToolResult("task_output"), "s");
+    if (r.result.case !== "taskOutput" || r.result.value.task.case !== "localBash") throw new Error("case");
+    expect(r.result.value.task.value.exitCodeSet).toBe(false);
+  });
+
+  it("routes a local_agent TaskOutput to the local_agent arm", () => {
+    const r = convertToolUseResult(loadToolResult("task_output-local_agent"), "s");
+    if (r.result.case !== "taskOutput") throw new Error("case");
+    expect(r.result.value.task.case).toBe("localAgent");
+  });
+
+  it("keeps a local_agent task's isRawTranscript=false distinguishable from absent", () => {
+    const r = convertToolUseResult(loadToolResult("task_output-local_agent"), "s");
+    if (r.result.case !== "taskOutput" || r.result.value.task.case !== "localAgent") throw new Error("case");
+    expect(r.result.value.task.value.isRawTranscriptSet).toBe(true);
+  });
+
+  it("leaves a TaskOutput of an UNKNOWN task type unclassified rather than dropping its task", () => {
+    // TaskOutputResult's oneof models only local_bash/local_agent, so a third
+    // task type has nowhere to go and must survive whole instead.
+    const r = convertToolUseResult({ retrieval_status: "success", task: { task_id: "t1", task_type: "local_something_new", status: "running" } }, "s");
+    expect(r.result.case).toBe("unclassified");
+  });
+});
+
+describe("web_fetch arm", () => {
+  it("classifies a WebFetch result", () => {
+    const r = convertToolUseResult(loadToolResult("web_fetch"), "s");
+    expect(r.result.case).toBe("webFetch");
+  });
+
+  it("keeps the WebFetch HTTP code", () => {
+    const r = convertToolUseResult(loadToolResult("web_fetch"), "s");
+    if (r.result.case !== "webFetch") throw new Error("case");
+    expect(r.result.value.code).toBe(302n);
+  });
+
+  it("keeps the WebFetch HTTP status text", () => {
+    const r = convertToolUseResult(loadToolResult("web_fetch"), "s");
+    if (r.result.case !== "webFetch") throw new Error("case");
+    expect(r.result.value.codeText).toBe("Found");
+  });
+
+  it("does not mistake a WebFetch result for an Artifact (both carry a url)", () => {
+    const r = convertToolUseResult(loadToolResult("web_fetch"), "s");
+    expect(r.result.case).not.toBe("artifact");
+  });
+
+  it("leaves a bare {url,bytes} object unclassified (no HTTP status text)", () => {
+    const r = convertToolUseResult({ url: "https://x/y", bytes: 626 }, "s");
+    expect(r.result.case).toBe("unclassified");
   });
 });
 

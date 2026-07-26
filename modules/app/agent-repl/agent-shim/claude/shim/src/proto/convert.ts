@@ -172,6 +172,9 @@ import {
   PreservedSegmentSchema,
 } from "../../../../../proto/gen/ts/agentshim/data/v1/transcript_pb.js";
 import {
+  AgentAsyncLaunchSchema,
+  AgentResultSchema,
+  AgentToolStatsSchema,
   ApiAssistantMessageSchema,
   ApiContentBlocksSchema,
   ApiUsageSchema,
@@ -179,6 +182,11 @@ import {
   AskUserQuestionResultSchema,
   BashResultSchema,
   CallerSchema,
+  LocalAgentTaskSchema,
+  LocalBashTaskSchema,
+  RetrievalStatus,
+  TaskOutputResultSchema,
+  WebFetchResultSchema,
   CodeExecutionToolResultBlockSchema,
   ContainerUploadBlockSchema,
   ContentBlockSchema,
@@ -1582,6 +1590,53 @@ function classifyToolResult(o: Record<string, unknown>): ToolUseResult["result"]
       backgroundCwdHint: strOf(pick(o, "background_cwd_hint", "backgroundCwdHint")),
     }) };
   }
+  // Agent/Task BACKGROUND launch. `is_async` is unique to this member of the
+  // SDK's AgentOutput union (and to the whole result census); it is paired with
+  // `output_file`, required on the same member, so a stray async flag on some
+  // other tool's result cannot claim the arm.
+  if (any("is_async", "isAsync") && any("output_file", "outputFile")) {
+    return { case: "agentAsyncLaunch", value: create(AgentAsyncLaunchSchema, {
+      isAsync: pick(o, "is_async", "isAsync") === true,
+      status: rawTaskStatusEnum(strOf(pick(o, "status"))),
+      agentId: strOf(pick(o, "agent_id", "agentId")),
+      description: strOf(pick(o, "description")),
+      resolvedModel: strOf(pick(o, "resolved_model", "resolvedModel")),
+      prompt: strOf(pick(o, "prompt")),
+      outputFile: strOf(pick(o, "output_file", "outputFile")),
+      canReadOutputFile: pick(o, "can_read_output_file", "canReadOutputFile") === true,
+    }) };
+  }
+  // Agent/Task SYNCHRONOUS completion. Keyed on the two totals that 0.3.220's
+  // AgentOutput marks REQUIRED on its completed member and that appear on no
+  // other tool output in the union. `agent_type` looks like the obvious key but
+  // is optional there, so keying on it would drop a result that omits it. The
+  // async-launch and remote-launch members carry neither total, so neither can
+  // land here.
+  if (any("total_duration_ms", "totalDurationMs") && any("total_tool_use_count", "totalToolUseCount")) {
+    const usage = pick(o, "usage");
+    const stats = pick(o, "tool_stats", "toolStats");
+    return { case: "agent", value: create(AgentResultSchema, {
+      status: rawTaskStatusEnum(strOf(pick(o, "status"))),
+      prompt: strOf(pick(o, "prompt")),
+      agentId: strOf(pick(o, "agent_id", "agentId")),
+      agentType: strOf(pick(o, "agent_type", "agentType")),
+      content: Array.isArray(o["content"]) ? convertBlocks(o["content"]) : [],
+      resolvedModel: strOf(pick(o, "resolved_model", "resolvedModel")),
+      totalDurationMs: bigOf(pick(o, "total_duration_ms", "totalDurationMs")),
+      totalTokens: bigOf(pick(o, "total_tokens", "totalTokens")),
+      totalToolUseCount: bigOf(pick(o, "total_tool_use_count", "totalToolUseCount")),
+      usage: isObject(usage) ? convertApiUsage(usage) : undefined,
+      toolStats: isObject(stats) ? create(AgentToolStatsSchema, {
+        readCount: bigOf(pick(stats, "read_count", "readCount")),
+        searchCount: bigOf(pick(stats, "search_count", "searchCount")),
+        bashCount: bigOf(pick(stats, "bash_count", "bashCount")),
+        editFileCount: bigOf(pick(stats, "edit_file_count", "editFileCount")),
+        linesAdded: bigOf(pick(stats, "lines_added", "linesAdded")),
+        linesRemoved: bigOf(pick(stats, "lines_removed", "linesRemoved")),
+        otherToolCount: bigOf(pick(stats, "other_tool_count", "otherToolCount")),
+      }) : undefined,
+    }) };
+  }
   if (has("commandName") || (has("command_name") && any("success", "allowedTools", "allowed_tools"))) {
     return { case: "skill", value: create(SkillResultSchema, {
       commandName: strOf(pick(o, "command_name", "commandName")),
@@ -1603,6 +1658,35 @@ function classifyToolResult(o: Record<string, unknown>): ToolUseResult["result"]
       taskType: strOf(pick(o, "task_type", "taskType")),
       command: strOf(o["command"]),
     }) };
+  }
+  // TaskOutput MUST precede every `task`-keyed arm below: it also carries a
+  // `task` object, so without this it was classified as a TaskCreate result and
+  // silently MISTYPED (not merely left unclassified).
+  //
+  // The wire spelling is snake_case `retrieval_status`, which is unique to this
+  // result across the whole census. The arm ALSO requires its nested task to
+  // discriminate, because TaskOutputResult's oneof has only local_bash and
+  // local_agent: a task of any other type has nowhere to go and would be
+  // DROPPED by the typed arm, so an unresolved inner discriminator sends the
+  // whole object to `unclassified`, where it survives verbatim and is logged.
+  if (any("retrieval_status", "retrievalStatus")) {
+    const t = o["task"];
+    if (!isObject(t)) return null;
+    const retrievalStatus = retrievalStatusEnum(strOf(pick(o, "retrieval_status", "retrievalStatus")));
+    switch (strOf(pick(t, "task_type", "taskType"))) {
+      case "local_bash":
+        return { case: "taskOutput", value: create(TaskOutputResultSchema, {
+          retrievalStatus,
+          task: { case: "localBash", value: localBashTask(t) },
+        }) };
+      case "local_agent":
+        return { case: "taskOutput", value: create(TaskOutputResultSchema, {
+          retrievalStatus,
+          task: { case: "localAgent", value: localAgentTask(t) },
+        }) };
+      default:
+        return null;
+    }
   }
   // TaskGet before TaskCreate: BOTH key on `task`, and only TaskGet's carries
   // the dependency lists. `task` is also NULLABLE here, and a null task is
@@ -1673,6 +1757,27 @@ function classifyToolResult(o: Record<string, unknown>): ToolUseResult["result"]
       query: strOf(o["query"]),
       results: asListValueOpt(o["results"]),
       searchCount: bigOf(pick(o, "search_count", "searchCount")),
+    }) };
+  }
+  // WebFetch, right after its WebSearch sibling. Keyed on the HTTP status text
+  // plus the byte count, both required by 0.3.220's WebFetchOutput and neither
+  // present on any other result in the census. It cannot collide with the two
+  // arms it shares a key with: WebSearch keys on `duration_seconds` (a fetch
+  // reports `duration_ms`), and Artifact's `!has("code")` guard already excludes
+  // anything carrying an HTTP code.
+  //
+  // WebFetchResult does not model `artifact_read` ({slug, ver}), the one
+  // optional sibling 0.3.220 adds and which no observed result carries, so it
+  // drops here exactly as the unmodeled siblings of the other arms do; typing
+  // it needs a proto change.
+  if (any("code_text", "codeText") && has("bytes")) {
+    return { case: "webFetch", value: create(WebFetchResultSchema, {
+      bytes: bigOf(pick(o, "bytes")),
+      code: bigOf(pick(o, "code")),
+      codeText: strOf(pick(o, "code_text", "codeText")),
+      durationMs: bigOf(pick(o, "duration_ms", "durationMs")),
+      result: strOf(pick(o, "result")),
+      url: strOf(pick(o, "url")),
     }) };
   }
   if (any("statusChange", "status_change", "updatedFields", "updated_fields")) {
@@ -1760,6 +1865,50 @@ function classifyToolResult(o: Record<string, unknown>): ToolUseResult["result"]
   return null;
 }
 
+/**
+ * TaskOutput's `local_bash` task record (corpus:
+ * tool-results/task_output.jsonl).
+ *
+ * `exitCode` is `number|null` on the wire — null while the task is still
+ * running — so the null is carried as `exit_code_set: false` rather than
+ * collapsing to a 0 that would read as a clean exit.
+ */
+function localBashTask(t: Record<string, unknown>) {
+  const exitCode = pick(t, "exit_code", "exitCode");
+  return create(LocalBashTaskSchema, {
+    taskId: strOf(pick(t, "task_id", "taskId")),
+    taskType: strOf(pick(t, "task_type", "taskType")),
+    status: rawTaskStatusEnum(strOf(pick(t, "status"))),
+    description: strOf(pick(t, "description")),
+    output: strOf(pick(t, "output")),
+    exitCode: numOf(exitCode),
+    exitCodeSet: exitCode !== undefined && exitCode !== null,
+  });
+}
+
+/**
+ * TaskOutput's `local_agent` task record (corpus:
+ * tool-results/task_output-local_agent.jsonl).
+ *
+ * `isRawTranscript` is ABSENT while the agent is still running, so its
+ * presence is tracked separately: an absent flag is "not known yet", which is
+ * not the same claim as "the output is not a raw transcript".
+ */
+function localAgentTask(t: Record<string, unknown>) {
+  const isRawTranscript = pick(t, "is_raw_transcript", "isRawTranscript");
+  return create(LocalAgentTaskSchema, {
+    taskId: strOf(pick(t, "task_id", "taskId")),
+    taskType: strOf(pick(t, "task_type", "taskType")),
+    status: rawTaskStatusEnum(strOf(pick(t, "status"))),
+    description: strOf(pick(t, "description")),
+    output: strOf(pick(t, "output")),
+    prompt: strOf(pick(t, "prompt")),
+    result: strOf(pick(t, "result")),
+    isRawTranscript: isRawTranscript === true,
+    isRawTranscriptSet: isRawTranscript !== undefined && isRawTranscript !== null,
+  });
+}
+
 // ---------------------------------------------------------------------------
 // usage / model_usage / permission_denials / mcp / plugins
 // ---------------------------------------------------------------------------
@@ -1786,6 +1935,13 @@ function convertApiUsage(raw: Record<string, unknown>) {
     cacheCreation: asStructOpt(pick(raw, "cache_creation", "cacheCreation")),
     serverToolUse: asStructOpt(pick(raw, "server_tool_use", "serverToolUse")),
     serviceTier: strOf(pick(raw, "service_tier", "serviceTier")),
+    // ApiUsage models these three (fields 8-10) and newer harness versions send
+    // all three on every assistant/agent usage block, but nothing read them, so
+    // the per-model iteration breakdown and the speed/geo routing were dropped
+    // on the floor at conversion time.
+    iterations: asListValueOpt(pick(raw, "iterations")),
+    speed: strOf(pick(raw, "speed")),
+    inferenceGeo: strOf(pick(raw, "inference_geo", "inferenceGeo")),
   });
 }
 
@@ -1961,6 +2117,16 @@ function terminalStatusEnum(status: string): TerminalStatus {
     case "killed": return TerminalStatus.KILLED;
     case "stopped": return TerminalStatus.STOPPED;
     default: return TerminalStatus.UNSPECIFIED;
+  }
+}
+
+/** TaskOutput's `retrieval_status` vocabulary → RetrievalStatus. */
+function retrievalStatusEnum(s: string): RetrievalStatus {
+  switch (s) {
+    case "success": return RetrievalStatus.SUCCESS;
+    case "timeout": return RetrievalStatus.TIMEOUT;
+    case "not_ready": return RetrievalStatus.NOT_READY;
+    default: return RetrievalStatus.UNSPECIFIED;
   }
 }
 
