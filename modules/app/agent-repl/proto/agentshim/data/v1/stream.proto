@@ -1,8 +1,23 @@
 // agentshim.data.v1 stream — TOTAL-FIDELITY models of the Claude Agent SDK
 // live stream (`query()` iterator), grounded in @anthropic-ai/claude-agent-sdk
-// v0.1.77 typings plus empirically observed stream-only families (CLI 2.1.215
-// probes). Field comments cite the source: [sdk coreTypes.d.ts:NNN] for typed
-// members, [observed] for shapes absent from the typings.
+// v0.3.220 typings (`package/sdk.d.ts`) plus empirically observed stream-only
+// families (CLI 2.1.215 probes). Field comments cite the source:
+// [sdk coreTypes.d.ts:NNN] for members typed as of 0.1.77, [sdk 0.3.220] for
+// members the 0.3.220 typings added, [observed] for shapes absent from the
+// typings, [corpus] for shapes grounded in captured fixtures.
+//
+// The eight families once carried as [observed] guesses (rate_limit_event,
+// hook_started, thinking_tokens, notification, task_started, task_updated,
+// task_notification, background_tasks_changed) are all first-class typed
+// members as of 0.3.220, with field sets matching what was reverse-engineered.
+//
+// DELIBERATELY NOT MODELED. `system/post_turn_summary` and
+// `system/task_summary` are forwarded to the query() iterator by SDK 0.3.220
+// but are typed NOWHERE in it, constructed nowhere, and have no field ever
+// read — their shape is genuinely unknown. Inventing fields for them would
+// assert a guess as schema, so they ride the `unknown` passthrough arm, which
+// preserves them whole until a real shape can be observed. This absence is a
+// decision, not an oversight.
 //
 // Conversion contract (§5.1 of the design doc): the claude-shim converter
 // hard-errors (→ core.UnparsedEvent) on missing expected fields, captures
@@ -51,6 +66,30 @@ message ClaudeStreamMessage {
     // not a defect. Captured whole; a message of a KNOWN family that fails
     // conversion is still a core.UnparsedEvent.
     UnknownRecord unknown = 23;
+    // Families typed by SDK 0.3.220 that 0.1.77 did not have. All are
+    // PERSISTENT (see the classification note above this file's system
+    // section).
+    ApiRetry api_retry = 24;
+    ControlRequestProgress control_request_progress = 25;
+    ModelRefusalFallback model_refusal_fallback = 26;
+    ModelRefusalNoFallback model_refusal_no_fallback = 27;
+    LocalCommandOutput local_command_output = 28;
+    HookProgress hook_progress = 29;
+    PluginInstall plugin_install = 30;
+    TaskProgressMsg task_progress = 31;
+    SessionStateChanged session_state_changed = 32;
+    WorkerShuttingDown worker_shutting_down = 33;
+    CommandsChanged commands_changed = 34;
+    FilesPersisted files_persisted = 35;
+    MemoryRecall memory_recall = 36;
+    ElicitationComplete elicitation_complete = 37;
+    PermissionDenied permission_denied = 38;
+    MirrorError mirror_error = 39;
+    Informational informational = 40;
+    ToolUseSummary tool_use_summary = 41;
+    PromptSuggestion prompt_suggestion = 42;
+    ConversationReset conversation_reset = 43;
+    ActiveGoal active_goal = 44;
   }
 }
 
@@ -474,3 +513,317 @@ message ControlCancelRequest {
 }
 
 message KeepAlive {}
+
+// ---------------------------------------------------------------------------
+// SDK 0.3.220 families (absent from the 0.1.77 typings these protos were
+// first grounded in). Grounded in `package/sdk.d.ts` of 0.3.220.
+// ---------------------------------------------------------------------------
+//
+// PERSISTENCE CLASSIFICATION (normative, applies to EVERY message below).
+//
+// All of these are PERSISTENT. EPHEMERAL is not "transient telemetry" — it
+// is a narrow contract defined in core.proto and implemented in the shim's
+// delta bypass: an EPHEMERAL event bypasses the store, is never replayed,
+// and is reconciled by REPLACING it with the store-delivered FINAL form of
+// the same thing (a ContentDelta is replaced by its finished message; a
+// HeartbeatProgress by the tool's result). The test for EPHEMERAL is
+// therefore "does a durable final form of this same fact arrive later?"
+//
+// For every family below the answer is no, so marking any of them EPHEMERAL
+// would not make it transient — it would make it LOST on reconnect, with
+// nothing to restore it. Two were genuinely arguable and are recorded here
+// as considered-and-rejected:
+//
+//   - `task_progress` — the live subagent ticker, and the closest thing to a
+//     heartbeat here. Rejected because HeartbeatProgress is superseded by the
+//     tool result that follows it, whereas a subagent's cumulative usage
+//     figures have no successor: dropping them on reconnect would silently
+//     empty a progress surface mid-run. This is the one classification a
+//     future reader is most likely to want to revisit.
+//   - `control_request_progress` — per-request retry chatter. Rejected for
+//     the same reason, plus it is the only durable record that a request was
+//     retried at all, which is exactly what a post-hoc latency question asks.
+
+// [sdk 0.3.220] system/api_retry — a retryable API failure about to be
+// retried. error_status is null for connection errors with no HTTP response.
+message ApiRetry {
+  int32 attempt = 1;
+  int32 max_retries = 2;
+  int64 retry_delay_ms = 3;
+  int64 error_status = 4;      // 0 = null; see error_status_set
+  bool error_status_set = 5;   // false = the null (connection-error) case
+  AssistantMessageError error = 6;
+  string uuid = 7;
+  string session_id = 8;
+}
+
+// [sdk 0.3.220] system/control_request_progress — progress on an in-flight
+// control request. The optional numeric fields are present only for the
+// `api_retry` status, so each carries a *_set companion.
+message ControlRequestProgress {
+  string request_id = 1;
+  string status = 2;  // "started" | "api_retry"
+  int32 attempt = 3;
+  bool attempt_set = 4;
+  int32 max_retries = 5;
+  bool max_retries_set = 6;
+  int64 retry_delay_ms = 7;
+  bool retry_delay_ms_set = 8;
+  int64 error_status = 9;
+  bool error_status_set = 10;
+  string uuid = 11;
+  string session_id = 12;
+}
+
+// [sdk 0.3.220] system/model_refusal_fallback — the stream twin of the disk
+// ModelRefusalFallbackLine. Richer than the disk form: it also names the
+// messages retracted by the fallback.
+message ModelRefusalFallback {
+  string trigger = 1;    // "refusal"
+  string direction = 2;  // "retry" | "revert" | "sticky"
+  string original_model = 3;
+  string fallback_model = 4;
+  string request_id = 5;              // nullable: "" = null
+  string api_refusal_category = 6;    // nullable
+  string api_refusal_explanation = 7; // nullable
+  repeated string retracted_message_uuids = 8;
+  string refused_user_message_uuid = 9;  // nullable
+  string content = 10;
+  string uuid = 11;
+  string session_id = 12;
+}
+
+// [sdk 0.3.220] system/model_refusal_no_fallback — a refusal with no model to
+// fall back to, so it surfaces rather than retrying.
+message ModelRefusalNoFallback {
+  string original_model = 1;
+  string request_id = 2;              // nullable: "" = null
+  string api_refusal_category = 3;    // nullable
+  string api_refusal_explanation = 4; // nullable
+  string refused_user_message_uuid = 5;  // nullable
+  string content = 6;
+  string uuid = 7;
+  string session_id = 8;
+}
+
+// [sdk 0.3.220] system/local_command_output — stdout of a local (slash)
+// command, the stream twin of the disk LocalCommandLine.
+message LocalCommandOutput {
+  string content = 1;
+  string uuid = 2;
+  string session_id = 3;
+}
+
+// [sdk 0.3.220] system/hook_progress — mid-execution output from a running
+// hook. Distinct from HookResponse, which reports a FINISHED hook: this is
+// the same hook_id reporting while it still runs.
+message HookProgress {
+  string hook_id = 1;
+  string hook_name = 2;
+  string hook_event = 3;
+  string stdout = 4;
+  string stderr = 5;
+  string output = 6;
+  string uuid = 7;
+  string session_id = 8;
+}
+
+// [sdk 0.3.220] system/plugin_install — plugin installation lifecycle.
+message PluginInstall {
+  string status = 1;  // "started" | "installed" | "failed" | "completed"
+  string name = 2;
+  string error = 3;
+  string uuid = 4;
+  string session_id = 5;
+}
+
+// [sdk 0.3.220] system/task_progress — live in-flight subagent telemetry:
+// cumulative usage plus the tool it is currently in. `summary` is populated
+// only when the `agentProgressSummaries` option is on (the CLI forks the
+// subagent every ~30s to author one).
+message TaskProgressUsage {
+  int64 total_tokens = 1;
+  int64 tool_uses = 2;
+  int64 duration_ms = 3;
+}
+
+message TaskProgressMsg {
+  string task_id = 1;
+  string tool_use_id = 2;
+  string description = 3;
+  string subagent_type = 4;
+  TaskProgressUsage usage = 5;
+  string last_tool_name = 6;
+  string summary = 7;
+  string uuid = 8;
+  string session_id = 9;
+}
+
+// [sdk 0.3.220] system/session_state_changed — the explicit idle/busy/blocked
+// signal. `requires_action` is precisely "waiting on the user".
+message SessionStateChanged {
+  string state = 1;  // "idle" | "running" | "requires_action"
+  string uuid = 2;
+  string session_id = 3;
+}
+
+// [sdk 0.3.220] system/worker_shutting_down — opt-in graceful teardown
+// notice. Its ABSENCE is explicitly NOT a dead-host signal (handoffs,
+// respawns and hard kills all emit nothing), and because it lands in the
+// durable event stream a resumed session can replay a historical one, so
+// consumers must treat it as a live-tail hint rather than a session fact.
+message WorkerShuttingDown {
+  string reason = 1;  // snake_case, e.g. "host_exit"
+  string uuid = 2;
+  string session_id = 3;
+}
+
+// [sdk 0.3.220] system/commands_changed — the full slash-command list after a
+// mid-session change. Consumers REPLACE their cached list with this payload;
+// it is not a delta.
+message SlashCommandRef {
+  string name = 1;
+  string description = 2;
+  string argument_hint = 3;
+  repeated string aliases = 4;  // [sdk 0.3.220] e.g. /cost -> /usage
+}
+
+message CommandsChanged {
+  repeated SlashCommandRef commands = 1;
+  string uuid = 2;
+  string session_id = 3;
+}
+
+// [sdk 0.3.220] system/files_persisted — outcome of persisting attached
+// files, reporting successes and failures separately.
+message PersistedFile {
+  string filename = 1;
+  string file_id = 2;
+}
+
+message FailedFile {
+  string filename = 1;
+  string error = 2;
+}
+
+message FilesPersisted {
+  repeated PersistedFile files = 1;
+  repeated FailedFile failed = 2;
+  string processed_at = 3;  // ISO-8601
+  string uuid = 4;
+  string session_id = 5;
+}
+
+// [sdk 0.3.220] system/memory_recall — memories surfaced into the context.
+// `content` is absent for file-backed `select` entries (the renderer
+// lazy-loads from `path`) and always present for `synthesize` mode and
+// `organization` scope, neither of which has an on-disk path.
+message RecalledMemory {
+  string path = 1;   // abs path, "<synthesis:DIR>" sentinel, or an https URL
+  string scope = 2;  // "personal" | "team" | "organization"
+  string content = 3;
+  bool content_set = 4;
+}
+
+message MemoryRecall {
+  string mode = 1;  // "select" | "synthesize"
+  repeated RecalledMemory memories = 2;
+  string uuid = 3;
+  string session_id = 4;
+}
+
+// [sdk 0.3.220] system/elicitation_complete — an MCP elicitation finished.
+message ElicitationComplete {
+  string mcp_server_name = 1;
+  string elicitation_id = 2;
+  string uuid = 3;
+  string session_id = 4;
+}
+
+// [sdk 0.3.220] system/permission_denied — a tool call refused. Distinct from
+// ResultMessage.permission_denials, which is the end-of-turn TALLY: this is
+// the live per-denial event, and carries the reason the tally does not.
+message PermissionDenied {
+  string tool_name = 1;
+  string tool_use_id = 2;
+  string agent_id = 3;
+  string decision_reason_type = 4;
+  string decision_reason = 5;
+  string message = 6;
+  string uuid = 7;
+  string session_id = 8;
+}
+
+// [sdk 0.3.220] system/mirror_error — transcript mirroring failed for one
+// session key.
+message MirrorKey {
+  string project_key = 1;
+  string session_id = 2;
+  string subpath = 3;
+}
+
+message MirrorError {
+  string error = 1;
+  MirrorKey key = 2;
+  string uuid = 3;
+  string session_id = 4;
+}
+
+// [sdk 0.3.220] system/informational — host-directed notice. `level` drives
+// prominence ("info" is transcript-only); `prevent_continuation` marks a
+// notice the agent must not simply continue past.
+message Informational {
+  string content = 1;
+  string level = 2;  // "info" | "notice" | "suggestion" | "warning"
+  string tool_use_id = 3;  // dedupes notices for the same tool use
+  bool prevent_continuation = 4;
+  string uuid = 5;
+  string session_id = 6;
+}
+
+// [sdk 0.3.220] tool_use_summary — a natural-language summary standing in for
+// a run of tool calls, naming the calls it covers.
+message ToolUseSummary {
+  string summary = 1;
+  repeated string preceding_tool_use_ids = 2;
+  string uuid = 3;
+  string session_id = 4;
+}
+
+// [sdk 0.3.220] prompt_suggestion — a suggested next prompt for the user.
+message PromptSuggestion {
+  string suggestion = 1;
+  string uuid = 2;
+  string session_id = 3;
+}
+
+// [sdk 0.3.220] conversation_reset — the conversation was reset and continues
+// under a NEW id. Consumers keyed by conversation id must re-key here.
+message ConversationReset {
+  string new_conversation_id = 1;
+  string uuid = 2;
+  string session_id = 3;
+}
+
+// [sdk 0.3.220] active_goal — the standing goal condition the loop is working
+// toward, or its clearing. NOTE: this type is NOT a member of the SDK's
+// `SDKMessage` union, but the SDK explicitly forwards it to the query()
+// iterator, so it reaches this converter and needs an arm like any other.
+//
+// `value` is nullable on the wire and the null IS the signal (the goal was
+// cleared), so `value_set` distinguishes "no goal" from "a goal with zero
+// iterations" — a distinction a bare zero value would destroy.
+message ActiveGoalValue {
+  string condition = 1;
+  int64 iterations = 2;
+  int64 set_at = 3;
+  int64 tokens_at_start = 4;
+  string last_reason = 5;
+}
+
+message ActiveGoal {
+  ActiveGoalValue value = 1;
+  bool value_set = 2;
+  string uuid = 3;
+  string session_id = 4;
+}
