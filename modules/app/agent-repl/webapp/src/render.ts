@@ -261,89 +261,6 @@ export function compactionBannerHtml(compacting: boolean): string {
 }
 
 /**
- * The "interrupting…" indicator: the red twin of the textless-thinking
- * spinner (`.thinking-pending`), shown at the feed tail while the store is
- * interrupting a turn. It marks the window between the interrupt gesture and
- * the turn's aborted result — during which in-flight bubbles keep streaming
- * but no new ones open. Same spinner animation as the thinking indicator, in
- * the alarm red rather than the working orange.
- *
- * Returns "" when not interrupting, so the caller can drop the tail node.
- */
-export function interruptingIndicatorHtml(interrupting: boolean): string {
-  if (!interrupting) return "";
-  return (
-    `<div class="interrupting-pending" role="status" aria-live="polite">` +
-    `<span class="interrupting-spinner" aria-hidden="true"></span> interrupting${animatedEllipsis()}` +
-    `</div>`
-  );
-}
-
-/**
- * The "thinking…" indicator: the orange tail row shown while a TEXTLESS
- * thinking block is live at the tail — an adaptive-thinking model that streams
- * a signature but no summary, so there is no disclosure card to carry the arc
- * inline. It stands in the same bottom-pinned slot as the working/retrying rows
- * (see `tailStatusRow`) rather than as its own card just under the feed, so
- * every dead-air progress signal reads from the one place. Reuses the same
- * `.thinking-pending` markup the row has always worn, now aria-live like its
- * tail-row siblings.
- *
- * Returns "" when not thinking, so the caller can drop the tail node.
- */
-export function thinkingRowHtml(thinking: boolean): string {
-  if (!thinking) return "";
-  return (
-    `<div class="thinking-pending" role="status" aria-live="polite">` +
-    `<span class="thinking-spinner" aria-hidden="true"></span> thinking${animatedEllipsis()}` +
-    `</div>`
-  );
-}
-
-/**
- * The "working…" indicator: the orange dead-air row shown at the feed tail
- * while the main agent chain is in flight but nothing else is live — no
- * streaming cursor, no thinking spinner, no running-tool arc, and no frontier
- * breath carrying the beat (see `pulseTarget`, whose `working` state gates
- * this). It fills the gaps a still feed would otherwise leave: the window
- * right after a prompt is sent before the first frame, and any gap between a
- * tool result going back and the next content frame. Reuses the textless-
- * thinking spinner (`.thinking-spinner`) in the working orange, so "still
- * working" reads the same wherever that color speaks.
- *
- * Returns "" when not working, so the caller can drop the tail node.
- */
-export function workingRowHtml(working: boolean): string {
-  if (!working) return "";
-  return (
-    `<div class="working-pending" role="status" aria-live="polite">` +
-    `<span class="thinking-spinner" aria-hidden="true"></span> working${animatedEllipsis()}` +
-    `</div>`
-  );
-}
-
-/**
- * The "retrying…" indicator: the purple tail row shown while the SDK is
- * auto-retrying a failed API request (429/529/5xx/connection drop) — the
- * window between a `retry` frame and the next content frame. Same
- * `thinking-spin` arc as the thinking and interrupting rows, in a purple
- * (`--retry`) that reads as "network", distinct from the interrupting alarm
- * red ("stopping") and the working orange ("working"). It takes precedence
- * over the working row, since a retry is the more specific account of the
- * dead air (see `pulseTarget`, whose `retrying` state gates this).
- *
- * Returns "" when not retrying, so the caller can drop the tail node.
- */
-export function retryingRowHtml(retrying: boolean): string {
-  if (!retrying) return "";
-  return (
-    `<div class="retrying-pending" role="status" aria-live="polite">` +
-    `<span class="retrying-spinner" aria-hidden="true"></span> retrying${animatedEllipsis()}` +
-    `</div>`
-  );
-}
-
-/**
  * Whether the GLOBAL `monitoring…` indicator shows: the session is IDLE (no
  * turn in flight, so none of thinking/working/retrying/interrupting speak for
  * the tail) yet live async continues somewhere in the feed. It is the
@@ -456,7 +373,7 @@ function Bubble(cls: string, body: string, ts: string, meta = ""): string {
 /**
  * The prompt bubble. It never breathes: a just-sent prompt whose turn has
  * produced nothing visible yet is covered by the orange `working…` tail row
- * now (see `pulseTarget`), which retired the prompt breath — so the bubble is
+ * now (the progress footer), which retired the prompt breath — so the bubble is
  * a plain `bubble user`, the same way a running tool card ignores the pulse.
  */
 function UserTurn(item: UserTurnItem, panels?: PanelContext): string {
@@ -603,7 +520,8 @@ function warnTreeMisfire(blockId: string, done: boolean, segText: string): void 
  * pill floating in the feed beneath. Only a final response carries one, so
  * CHIP is null for the commentary bubbles above it (see `finalResponses`).
  *
- * The working frontier takes the breath instead (see `pulseTarget`), but
+ * The working frontier no longer breathes at all (the progress footer speaks
+ * for a running turn now), but
  * this function never renders it: the breath is a live-view accent the
  * reconcile toggles as a class on the mounted bubble (`applyPulse`), NOT
  * part of an item's intrinsic HTML. Baking it into the string would change
@@ -688,7 +606,7 @@ function Thinking(item: ThinkingItem): string {
   // disclosure triangle over an empty <pre> unfolds to nothing, so a
   // textless block draws NO inline card at all: while it is open its
   // `thinking…` beat moves to the bottom-pinned tail slot beside the
-  // working/retrying rows (see `pulseTarget`/`thinkingRowHtml`), and once it
+  // working/retrying rows (now the progress footer), and once it
   // closes it disappears entirely (`rendersEmpty`). It stays non-empty here
   // while live so the tail scan can still name it for that slot.
   if (item.text === "") return "";
@@ -1794,7 +1712,7 @@ export function finalResponses(items: readonly ConversationItem[]): FinalRespons
  * Whether an item draws NOTHING into the feed.
  *
  * The renderer and the pulse both need this same answer, from opposite ends:
- * `renderItem` returns the empty node, and `pulseTarget` scans straight past
+ * `renderItem` returns the empty node, and the nav scan walks straight past
  * it, since a thing the feed never drew cannot be the progress that
  * supersedes a breathing bubble. Keeping the two on one predicate is what
  * stops a suppressed tool from silently stilling a pulse it never replaced.
@@ -1862,216 +1780,9 @@ export function rendersEmpty(
   }
 }
 
-/**
- * What the feed's tail is doing, or null when a live channel already speaks
- * for it. Exactly one:
- * - `text` — the WORKING FRONTIER breathes (the last finished response of a
- *   still-running turn), a locational accent on the bubble the reader is in.
- * - `working` — the main chain is in flight through a dead-air gap, so the
- *   orange `working…` tail row stands in for the silent feed.
- * - `retrying` — the SDK is auto-retrying a failed request, so the purple
- *   `retrying…` tail row supersedes the working one.
- * - `thinking` — a TEXTLESS thinking block is live at the tail, so the orange
- *   `thinking…` row stands in the same bottom-pinned slot the working row uses,
- *   rather than as its own card just under the feed.
- * - `null` — a streaming cursor, a live TEXTED thinking disclosure (its own
- *   inline arc), a running-tool arc, or a pending permission is itself the live
- *   signal, so nothing extra shows.
- */
-export type PulseTarget =
-  | { kind: "text"; blockId: string }
-  | { kind: "working" }
-  | { kind: "retrying" }
-  | { kind: "thinking" }
-  | null;
-
-/**
- * The single source of truth for what the feed's tail is doing, so a running
- * session always shows one live signal somewhere at its tail. Scans tail-first
- * and returns the FIRST thing that speaks for the turn:
- * - the WORKING FRONTIER (the last response a still-running turn has finished)
- *   breathes once the agent has written something, so a reader who has caught
- *   up sees it is still writing rather than that it went quiet (`text`).
- * - a `retry` at the very tail means the SDK is auto-retrying, so the purple
- *   `retrying…` row supersedes the working one (`retrying`).
- * - reaching the prompt itself (the turn has drawn no visible content yet)
- *   means the chain is in a dead-air gap, so the orange `working…` row stands
- *   in — the PROMPT no longer breathes, the row replaces it (`working`).
- *
- * The states that yield null, each because something else already carries the
- * beat (or because there is no beat to carry):
- * - the turn is not in flight, so nothing more is coming at all;
- * - a response is streaming, and its own cursor is the live signal;
- * - a TEXTED thinking disclosure is streaming, and its own inline `(thinking…)`
- *   arc is the live signal (a TEXTLESS one yields `thinking` for the tail slot);
- * - a tool call is running at the tail, and its own run badge (the arc in
- *   `.badge.run`) is the live signal, so the feed shows brief dead air;
- * - a pending permission is at the tail, and the agent is blocked on the USER
- *   rather than working, so its card is the signal and nothing breathes.
- *
- * A settled section (a done tool, a resolved permission, a recoverable error)
- * followed the prompt before the agent wrote a word: it falls through to the
- * `working` state, since the chain is between frames, not blocked. The scan
- * stops at the newest user turn: the previous turn's answer belongs to a
- * question already answered, so a fresh prompt never breathes life back into
- * it. What the feed never drew (`rendersEmpty`) is skipped outright — a pulse
- * is stilled only by progress the user can actually see — and so are a
- * subagent's parented blocks: their prose lives in its card's panel, so it
- * neither carries the main feed's pulse nor silences the main-chain frontier
- * behind it.
- */
-export function pulseTarget(
-  items: readonly ConversationItem[],
-  turnInFlight: boolean,
-  finals?: FinalResponses,
-): PulseTarget {
-  if (!turnInFlight) return null;
-  // Whether the cursor is still at the feed's visible tail, i.e. nothing
-  // drawn has been passed on the way back to the item under inspection.
-  let atTail = true;
-  for (let i = items.length - 1; i >= 0; i--) {
-    const item = items[i];
-    if (rendersEmpty(item, finals)) continue;
-    // A subagent's parented blocks live in its card's panel: they neither
-    // carry the main feed's pulse nor count as visible progress stilling it.
-    if (
-      (item.kind === "text" || item.kind === "thinking" || item.kind === "tool") &&
-      item.parentToolUseId !== undefined
-    ) {
-      continue;
-    }
-    // The prompt no longer breathes: a turn that has drawn no visible content
-    // is simply WORKING, and the orange tail row speaks for it now.
-    if (item.kind === "user-turn") return { kind: "working" };
-    // A live thinking block at the tail: a TEXTLESS one draws no inline card,
-    // so its `thinking…` signal moves to the bottom-pinned tail slot beside
-    // working/retrying (`thinking`). A TEXTED one IS a disclosure card carrying
-    // its own inline `(thinking…)` arc, so it keeps the beat itself (null).
-    if (item.kind === "thinking" && !item.done) {
-      return item.text === "" ? { kind: "thinking" } : null;
-    }
-    if (item.kind === "text") {
-      return item.done ? { kind: "text", blockId: item.blockId } : null;
-    }
-    // A running tool card at the tail no longer takes the beat: its own run
-    // badge (the arc spinning in `.badge.run`) is the live signal, so the feed
-    // shows brief dead air rather than a second beat competing with it. A
-    // settled card falls through, letting the finished response above it
-    // breathe as the working frontier.
-    if (item.kind === "tool" && atTail && !item.result) return null;
-    // Two tail-only signals, checked before the settled fall-through: a retry
-    // at the very tail IS the auto-retry window, so the purple row supersedes
-    // working; a pending permission at the tail blocks the turn on the user,
-    // so nothing breathes beneath its card. A recoverable error is neither —
-    // it falls through to `working`, since the chain is about to continue.
-    if (atTail) {
-      if (item.kind === "retry") return { kind: "retrying" };
-      if (item.kind === "permission" && !item.resolution) return null;
-    }
-    atTail = false;
-  }
-  return null;
-}
-
-/** Whether PULSE names this item as the bubble that breathes (only `text` does). */
-export function isPulsed(item: ConversationItem, pulse: PulseTarget): boolean {
-  if (!pulse || pulse.kind !== "text") return false;
-  return item.kind === "text" && item.blockId === pulse.blockId;
-}
-
-/**
- * The single force-appended tail status row to show, or null when none. This
- * is the one home of the tail-row precedence — interrupting (red) > compacting
- * > retrying (purple) > thinking (orange) > working (orange) — shared by the
- * incremental render and the fresh-join restore so the two never drift. The
- * compaction banner is the topbar's own element (see main.ts), so a compaction
- * shows NO feed-tail row; it only suppresses the pulse-driven rows beneath it.
- * The `thinking`/`retrying`/`working` pulse kinds are mutually exclusive (the
- * tail scan names exactly one), so their order among themselves only reads as
- * intent. The `text` pulse is a bubble breath, not a tail row, so it never
- * reaches here.
- */
-export function tailStatusRow(
-  interrupting: boolean,
-  compacting: boolean,
-  pulse: PulseTarget,
-): { key: string; html: string } | null {
-  if (interrupting) {
-    return { key: "interrupting", html: interruptingIndicatorHtml(true) };
-  }
-  if (compacting) return null;
-  if (pulse?.kind === "retrying") {
-    return { key: "retrying", html: retryingRowHtml(true) };
-  }
-  if (pulse?.kind === "thinking") {
-    return { key: "thinking", html: thinkingRowHtml(true) };
-  }
-  if (pulse?.kind === "working") {
-    return { key: "working", html: workingRowHtml(true) };
-  }
-  return null;
-}
-
 /** A context increase as a signed figure: `+100,000`, `-40,000`, `+0`. */
 function formatTokenDelta(n: number): string {
   return `${n < 0 ? "" : "+"}${formatTokens(n)}`;
-}
-
-/**
- * The running turn's live stats row, force-appended at the feed tail right
- * BELOW whatever progress indicator (thinking/working/retrying) currently
- * speaks for it: the turn's elapsed clock in the topbar's time blue, then the
- * context it has grown so far in the topbar's token amber, bullet-separated
- * (`1m 30s · +12,000`). It is the live twin of the corner a final response
- * settles into (`resultMeta`) — the same two figures in the same two colors,
- * shown WHILE the turn runs rather than after it lands, which is why the
- * session topbar no longer carries the clock (see `sessionTopbarDatapoints`).
- *
- * TIMER-LABEL is the elapsed clock's current reading, baked in so a fresh
- * render shows it at once; the once-a-second tick then repaints just the
- * `TIMER_SLOT` span between renders (see `FeedRenderer.paintTurnTimer`). The
- * delta reads the live figure (`liveContextDelta`), so it starts each turn at
- * `+0` and grows as requests land, and is omitted when the size is unknown (a
- * `/clear` or a compaction) — exactly as the settled corner omits it.
- *
- * Returns "" off-turn, so the caller drops the node when no turn is running.
- */
-export function turnStatsRowHtml(state: StoreState, timerLabel: string): string {
-  if (state.turnStartedAt === null) return "";
-  const parts = [`<span class="info-time" ${TIMER_SLOT}>${escapeHtml(timerLabel)}</span>`];
-  const delta = liveContextDelta(state);
-  if (delta !== null) {
-    parts.push(`<span class="info-tokens">${escapeHtml(formatTokenDelta(delta))}</span>`);
-  }
-  return `<div class="turn-stats-live" aria-hidden="true">${parts.join(" · ")}</div>`;
-}
-
-/**
- * The combined feed-tail line: the live progress indicator (the main chain's
- * interrupting/retrying/working row) on the LEFT and the running turn-stats
- * (elapsed clock + grown context) on the RIGHT, sharing ONE flex row so the
- * two sit on a single baseline at the same 0.85rem size rather than stacking
- * on two lines. The indicator keeps the `margin-left` that flushes it to the
- * response column's left rail, and the stats keep the `margin-right` that
- * flushes them to its right rail (see `.tail-line` in styles.css).
- *
- * Either half may be absent: a streaming bubble carries the beat itself, so
- * the turn runs with stats but no tail indicator, and an interrupting row can
- * outlive the running turn's stats. The wrapper is emitted only when at least
- * one half has content, and returns null when BOTH are empty so the caller
- * drops the node. The `monitoring…` fallback is NOT folded in here: it speaks
- * only while the turn is idle, when no stats run, so it stays its own node.
- */
-export function tailLineHtml(
-  state: StoreState,
-  pulse: PulseTarget,
-  timerLabel: string,
-): string | null {
-  const tailRow = tailStatusRow(state.interrupting, state.compacting, pulse);
-  const indicator = tailRow ? tailRow.html : "";
-  const stats = turnStatsRowHtml(state, timerLabel);
-  if (!indicator && !stats) return null;
-  return `<div class="tail-line">${indicator}${stats}</div>`;
 }
 
 /**
@@ -2190,7 +1901,7 @@ function SystemNote(item: SystemItem): string {
  * carrying its chip, and the paired result renders as nothing, since the
  * bubble above it has already drawn it.
  *
- * The breath (`pulseTarget`) is NOT rendered here: it is a live-view accent
+ * The breath is gone entirely with the pulse machinery: the progress footer
  * the reconcile toggles as a class on the mounted bubble (`applyPulse`), so
  * a moving pulse never rewrites an item's HTML. PANELS carries the feed
  * partition's child lists, letting a spawning card fold its confined children
@@ -2653,21 +2364,6 @@ export function anyLiveThinking(items: readonly ConversationItem[]): boolean {
  */
 export class FeedRenderer {
   private container: HTMLElement;
-  /**
-   * The bottom-pinned slot the combined tail line renders into (see
-   * `#tail-slot`): a flex sibling OUTSIDE the scrolling feed, so the progress
-   * indicator + running turn-stats stay stuck to the window's bottom rather
-   * than floating just under the last bubble as the feed grows. Defaults to a
-   * detached element for headless tests that do not exercise the tail.
-   */
-  private tailSlot: HTMLElement;
-  /**
-   * The last tail-line HTML written to the slot. A render rewrites the slot
-   * only when this changes, so a mounted spinner/arc keeps animating across
-   * renders instead of resetting to frame 0 — the same continuity the old
-   * in-feed `reconcileTailNode` gave it by comparing html before rewriting.
-   */
-  private tailHtml = "";
   private actions: Actions;
   private nodes = new Map<string, { el: HTMLElement; html: string }>();
   /** AskUserQuestion picks (renderer-owned so re-renders keep them). */
@@ -2686,13 +2382,6 @@ export class FeedRenderer {
   /** Half-typed agent messages, keyed by agent id (see agentComposer). */
   private msgDrafts = new Map<string, string>();
   private lastState: StoreState | null = null;
-  /**
-   * The running turn's elapsed-clock reading, baked into the live turn-stats
-   * tail row on every render and repainted between renders by `paintTurnTimer`
-   * (the once-a-second tick's target). Off-turn the row is absent and this
-   * holds the idle placeholder the next turn's first render starts from.
-   */
-  private turnTimerLabel = IDLE_LABEL;
   /**
    * Whether the session is IDLE yet live async continues somewhere in the
    * feed — the amber monitoring signal, now the sidebar's breathing dot on
@@ -2749,10 +2438,8 @@ export class FeedRenderer {
   constructor(
     container: HTMLElement,
     actions: Actions,
-    tailSlot: HTMLElement = document.createElement("div"),
   ) {
     this.container = container;
-    this.tailSlot = tailSlot;
     this.actions = actions;
     if (actions.fetchTaskTail) {
       const fetchTail = actions.fetchTaskTail;
@@ -2828,6 +2515,27 @@ export class FeedRenderer {
    */
   revealAgent(agentId: string): boolean {
     return this.revealToolCard(agentId);
+  }
+
+  /**
+   * Reveal the error/retry item carrying UUID — the progress footer's error
+   * row clicking through to the line its summary came from, which is the only
+   * way to find an error that has already scrolled off the feed.
+   *
+   * Answers whether the line was found: false when the uuid names nothing in
+   * the current feed (a `/clear` discarded it, or the error predates this
+   * view), which the caller reports rather than silently doing nothing.
+   */
+  revealError(uuid: string): boolean {
+    if (!this.lastState) return false;
+    const index = this.lastState.items.findIndex(
+      (i) => (i.kind === "error" || i.kind === "retry") && i.uuid === uuid,
+    );
+    if (index === -1) return false;
+    const node = this.nodes.get(itemKey(this.lastState.items[index], index))?.el;
+    if (!node) return false;
+    revealNode(node, "start");
+    return true;
   }
 
   /**
@@ -3157,25 +2865,6 @@ export class FeedRenderer {
     return this.itemHtml(entry.item, finals, panels);
   }
 
-  /**
-   * Toggle the working-frontier breath on ENTRY's bubble IN PLACE, via a
-   * class flip on the mounted node rather than a rewrite of its HTML. The
-   * breath is a live-view accent (`pulseTarget`), not part of an item's
-   * intrinsic HTML, and deliberately kept OUT of `entryHtml`: were it baked
-   * into the string, the HTML would change every time the pulse moved, and
-   * the reconcile would then rewrite the whole `.feed-item` — destroying and
-   * recreating the `.bubble` child, restarting its CSS `bubble-breathe` from
-   * frame 0 (the reset the reader sees as a jerk). As a class toggle,
-   * re-applying the breath to a bubble already breathing is a no-op the
-   * animation never notices, so a burst of unrelated renders can no longer
-   * stutter it. Only a `text` item ever breathes (`isPulsed`), so a group
-   * entry and every other kind toggle it off.
-   */
-  private applyPulse(el: HTMLElement, entry: FeedEntry, pulse: PulseTarget): void {
-    const on = entry.kind !== "group" && isPulsed(entry.item, pulse);
-    const bubble = el.querySelector(":scope > .bubble");
-    bubble?.classList.toggle("pulsing", on);
-  }
 
   private pendingQuestionItem(requestId: string): { item: PermissionItem; questions: AskQuestion[] } | null {
     const item = this.lastState?.items.find(
@@ -3281,7 +2970,7 @@ export class FeedRenderer {
     const items = itemsFromLastClear(state.items);
     this.lastClearKey = clearBoundary(items);
     // The gns-sockets fold: bridge upkeep leaves the top feed and every
-    // turn-shaped projection (finals, watchers, pulse), so the green
+    // turn-shaped projection (finals, watchers), so the green
     // border lands on the real answer and the folded segment renders
     // inside its host bubble's panel instead. The partition still runs on
     // the FULL list — a folded spawn card keeps its parented children,
@@ -3294,7 +2983,6 @@ export class FeedRenderer {
     const panels = this.panelContext(part.children, watchers, gns.byBubble);
     this.syncWatcherPolls(watchers, panels);
     const finals = finalResponses(visible);
-    const pulse = pulseTarget(visible, state.turnInFlight, finals);
     const shells: Array<{ el: HTMLElement; entry: FeedEntry }> = [];
     for (const entry of groupFeed(top)) {
       const key = this.entryKey(entry);
@@ -3305,12 +2993,6 @@ export class FeedRenderer {
       this.nodes.set(key, { el, html: "" });
       shells.push({ el, entry });
     }
-    // A fresh join landing mid-turn shows the combined tail line immediately in
-    // its bottom-pinned slot — the same content, precedence, and running clock +
-    // grown-context figure render() keeps it in (see `tailLineHtml`): the live
-    // progress indicator (left) and the running turn-stats (right) on one flex
-    // row, stuck to the window's bottom rather than trailing the last bubble.
-    this.renderTailLine(tailLineHtml(state, pulse, this.turnTimerLabel));
     // The global monitoring signal, on the same idle-with-live-async terms
     // render() computes it (see `showsMonitoringRow`), so a fresh join landing
     // on a quiescent-but-still-watching session sees its sidebar dot breathe
@@ -3343,7 +3025,6 @@ export class FeedRenderer {
         const html = this.entryHtml(entry, finals, panels);
         el.innerHTML = html;
         this.stampNav(el, entry, finals, html);
-        this.applyPulse(el, entry, pulse);
         hydrateChessGames(el);
         const node = this.nodes.get(el.dataset.key ?? "");
         if (node) node.html = html;
@@ -3386,35 +3067,7 @@ export class FeedRenderer {
     }
   }
 
-  /**
-   * Paint the combined tail line into the bottom-pinned slot outside the feed
-   * (see `#tail-slot`), so the progress indicator + running turn-stats stay
-   * stuck to the window's bottom rather than trailing the last bubble as the
-   * feed grows. HTML is null (or "") off-turn, which empties the slot and lets
-   * `:empty` collapse it. Rewrites only when the html actually changed, so a
-   * live spinner/arc keeps animating across renders instead of resetting to
-   * frame 0 — the continuity the old in-feed reconcile gave it.
-   */
-  private renderTailLine(html: string | null): void {
-    const next = html ?? "";
-    if (next === this.tailHtml) return;
-    this.tailSlot.innerHTML = next;
-    this.tailHtml = next;
-  }
 
-  /**
-   * Repaint the live turn-stats row's elapsed clock between feed renders —
-   * the once-a-second tick's one write, the feed twin of the topbar timer's
-   * old slot paint. Stores the reading so the next render bakes it in, and
-   * updates the mounted span in place. The span is legitimately absent when no
-   * turn runs (no row) and during a replay-only paint (the feed is not
-   * rendered then), so a missing slot is skipped rather than treated as error.
-   */
-  paintTurnTimer(label: string): void {
-    this.turnTimerLabel = label;
-    const slot = this.tailSlot.querySelector(`.turn-stats-live [${TIMER_SLOT}]`);
-    if (slot) slot.textContent = label;
-  }
 
   /**
    * Whether the session is monitoring live async while idle — the amber
@@ -3477,7 +3130,7 @@ export class FeedRenderer {
     }
     this.lastClearKey = boundary;
     // The gns-sockets fold: bridge upkeep leaves the top feed and every
-    // turn-shaped projection (finals, watchers, pulse), so the green
+    // turn-shaped projection (finals, watchers), so the green
     // border lands on the real answer and the folded segment renders
     // inside its host bubble's panel instead. The partition still runs on
     // the FULL list — a folded spawn card keeps its parented children,
@@ -3490,7 +3143,6 @@ export class FeedRenderer {
     const panels = this.panelContext(part.children, watchers, gns.byBubble);
     this.syncWatcherPolls(watchers, panels);
     const finals = finalResponses(visible);
-    const pulse = pulseTarget(visible, state.turnInFlight, finals);
     const seen = new Set<string>();
     // Walks the container as the desired order is emitted, so each node can be
     // slotted at its rank. `null` means "next goes at the very front".
@@ -3534,21 +3186,7 @@ export class FeedRenderer {
         hydrateChessGames(entry.el);
         entry.html = html;
       }
-      // Runs every render, whether or not the HTML changed: the breath is a
-      // class on the mounted bubble, so a pulse that moved onto or off this
-      // item since last frame is reflected without a body rewrite (see
-      // `applyPulse`), and an unchanged pulse toggle is a no-op the running
-      // animation never notices.
-      this.applyPulse(entry.el, feedEntry, pulse);
     }
-    // The combined tail line paints into its bottom-pinned slot outside the
-    // feed (see `#tail-slot`): the live progress indicator (left) and the
-    // running turn-stats (right) share one flex row (see `tailLineHtml`), so
-    // the two sit on a single baseline rather than stacking, stuck to the
-    // window's bottom rather than trailing the last bubble. Dropped the moment
-    // both halves fall silent (the slot empties and `:empty` collapses it). The
-    // precedence within the indicator half lives in `tailStatusRow`.
-    this.renderTailLine(tailLineHtml(state, pulse, this.turnTimerLabel));
     // The global `monitoring…` signal: the amber fallback for when the owning
     // bubble is scrolled off, shown only while the session is idle and live
     // async continues (mutually exclusive with the bucket-1 tail above, whose

@@ -9,15 +9,15 @@
  */
 import {
   TOPBAR_AGENT_ATTR,
-  nextCounterMenu,
   runningAgentClocks,
   sessionTopbarDatapoints,
   topbarClickAction,
   topbarInfoHtml,
 } from "./topbar.js";
 import { AgentClock } from "./agent-clock.js";
-import { AGENTS_SPEC } from "./agents.js";
+import { AGENTS_SPEC, sessionSubagents } from "./agents.js";
 import { TASKS_SPEC } from "./tasks.js";
+import { ProgressFooter, footerClickAction } from "./progress-footer.js";
 import {
   type CounterSpec,
   MISSING_BUBBLE_NOTICE_MS,
@@ -70,7 +70,7 @@ import {
   installWorkspaceRosterHook,
 } from "./sidebar.js";
 import { ConversationStore } from "./store.js";
-import { TIMER_SLOT, TaskTimer, windowHost } from "./timer.js";
+import { IDLE_LABEL, TIMER_SLOT, TaskTimer, windowHost } from "./timer.js";
 import { WsClient, composerEnabled, makeSessionExistsProbe } from "./ws.js";
 import {
   ForwardingLogger,
@@ -263,11 +263,6 @@ async function boot(): Promise<void> {
     searchStatusEl.classList.toggle("on", text !== "");
   });
   installSearchHook(window as unknown as SearchHost, search);
-  // The live tail line's bottom-pinned slot (see `#tail-slot`): a flex sibling
-  // between the scrolling feed and the composer, so the progress indicator +
-  // running turn-stats stay stuck to the window's bottom rather than trailing
-  // the last bubble as the feed grows.
-  const tailSlotEl = must("tail-slot");
   const feed = new FeedRenderer(feedEl, {
     onRendered: () => search.refresh(),
     decidePermission: (requestId, behavior) => {
@@ -333,7 +328,14 @@ async function boot(): Promise<void> {
         snapshot: statusSnapshotFromInit(store.state.systemInit),
         account,
       })),
-  }, tailSlotEl);
+  });
+
+  // THE consolidated progress footer (F1): the raised dock between the feed
+  // and the composer that replaced every scattered in-flight indicator. Its
+  // whole input is the daemon's resolved ProgressView, so nothing here derives
+  // a progress fact.
+  const footerEl = must("progress-footer");
+  const footer = new ProgressFooter(footerEl);
 
   const statusEl = must("conn-status");
   const infoEl = must("session-info");
@@ -351,21 +353,25 @@ async function boot(): Promise<void> {
   const loginCloseEl = must<HTMLButtonElement>("login-close");
   const parentWs = params.get("parent_ws");
 
-  // Which topbar dropdown is open (only one at a time): a counter roster
-  // or the tokens breakdown. It lives HERE rather than in the DOM because
-  // renderChrome rewrites the whole topbar on every frame, which would
-  // otherwise collapse an overlay the user is reading mid-turn.
-  let counterMenu: "agents" | "tasks" | "tokens" | null = null;
+  // Whether the topbar's tokens breakdown is open. It lives HERE rather than
+  // in the DOM because renderChrome rewrites the whole topbar on every frame,
+  // which would otherwise collapse an overlay the user is reading mid-turn.
+  // The roster overlays are the FOOTER's disclosure now (see `footer`), which
+  // owns its own for exactly the same reason.
+  let tokensMenuOpen = false;
 
-  // The running task's timer now paints the live feed-tail stats row, not a
-  // topbar slot: its clock moved down beside the progress indicator (see
-  // `turnStatsRowHtml`). Its tick writes just that one span rather than
-  // re-rendering the feed — a whole-feed rewrite once a second, on top of the
-  // per-frame rewrites a streaming turn already drives, would be churn in
-  // service of a single changing digit. The FeedRenderer skips the write when
-  // no row is mounted (off-turn, or a replay-only paint), and bakes the last
-  // reading into every render so a fresh row never blinks empty.
-  const timer = new TaskTimer(windowHost(window), (label) => feed.paintTurnTimer(label));
+  // The running turn's timer paints the footer's clock cell. Its tick writes
+  // just that one span rather than re-rendering the dock — and emphatically not
+  // the FEED, which is what the nuked stats row's ancestor once cost. The
+  // footer skips the write when no span is mounted (before the first
+  // ProgressView, or during a replay-only paint), and bakes the last reading
+  // into every render so a fresh dock never blinks empty.
+  const timer = new TaskTimer(windowHost(window), (label) => {
+    timerLabel = label;
+    footer.paintTurnTimer(label);
+  });
+  // The tick's latest reading, so the next footer render bakes it in.
+  let timerLabel = IDLE_LABEL;
 
   // The agent bubbles' own elapsed tick, the header timer's twin (see
   // agent-clock.ts): one interval repaints every RUNNING agent's topbar
@@ -383,17 +389,30 @@ async function boot(): Promise<void> {
     const s = store.state;
     // topbarInfoHtml escapes every value it interpolates. The same strip
     // renderer draws the agent-scoped bubble topbars (see topbar.ts).
-    infoEl.innerHTML = topbarInfoHtml(sessionTopbarDatapoints(s, parentWs, store.taskRoster), {
-      agentsOpen: counterMenu === "agents",
-      tasksOpen: counterMenu === "tasks",
-      tokensOpen: counterMenu === "tokens",
+    infoEl.innerHTML = topbarInfoHtml(sessionTopbarDatapoints(s, parentWs), {
+      // The header strip carries NO roster chips any more (they relocated into
+      // the footer's counters cluster), so only the tokens disclosure can open.
+      agentsOpen: false,
+      tasksOpen: false,
+      tokensOpen: tokensMenuOpen,
     });
     // The idle-with-live-async signal breathes as the sidebar's amber dot on
     // this session's own row rather than as strip text. The flag is the feed
     // renderer's own gate reading (idle + live async), read back here so the
     // rail mirrors the feed the last render already partitioned.
     sidebar.setMonitoring(feed.isMonitoring());
-    // After the strip exists, so the paint on a starting turn has a span to
+    // THE progress footer. Rendered on the chrome cadence (not the feed's), so
+    // a dock rewrite never rides a feed reconcile. It reads the daemon's
+    // resolved view plus the two rosters and the feed items the activity cell
+    // needs; it derives no progress fact of its own.
+    footer.render({
+      progress: store.progress,
+      agents: sessionSubagents(s.items),
+      tasks: store.taskRoster,
+      items: s.items,
+      timerLabel,
+    });
+    // After the footer exists, so the paint on a starting turn has a span to
     // land in. Only the edges of a turn touch the interval.
     timer.sync(s.turnStartedAt);
     // The bubble clocks reconcile on the same cadence: whichever agents are
@@ -421,11 +440,18 @@ async function boot(): Promise<void> {
     document.title = s.model ? `claude-repl · ${s.model}` : "claude-repl";
   };
 
-  const setCounterMenu = (menu: "agents" | "tasks" | "tokens" | null): void => {
-    if (counterMenu === menu) return;
-    counterMenu = menu;
+  // The chip is re-created by every renderChrome, so the toggle is delegated
+  // off the topbar rather than bound to a node that will not survive the turn.
+  // The click vocabulary is the strip's own (topbarClickAction), shared with
+  // the agent bubbles' delegation in the FeedRenderer — the HEADER strip now
+  // only ever sees the tokens toggle, since its roster chips relocated into
+  // the progress footer.
+  infoEl.addEventListener("click", (e) => {
+    const action = topbarClickAction(e.target as HTMLElement);
+    if (action?.kind !== "toggle" || action.menu !== "tokens") return;
+    tokensMenuOpen = !tokensMenuOpen;
     renderChrome();
-  };
+  });
 
   // The reveal half of a roster-row click: dismiss the roster either way so
   // a revealed card is unobscured, and when the entry's bubble was NOT
@@ -433,39 +459,67 @@ async function boot(): Promise<void> {
   // few seconds instead of silently doing nothing. The timed clear checks
   // the slot still shows THIS notice, so it never wipes a login or
   // remediation notice that landed meanwhile.
-  const settleRosterReveal = (spec: CounterSpec, revealed: boolean): void => {
-    setCounterMenu(null);
-    if (revealed) return;
-    const notice = missingBubbleNotice(spec);
+  const notify = (notice: string): void => {
     remediationEl.textContent = notice;
     window.setTimeout(() => {
       if (remediationEl.textContent === notice) remediationEl.textContent = "";
     }, MISSING_BUBBLE_NOTICE_MS);
   };
 
-  // The chips are re-created by every renderChrome, so the toggles are
-  // delegated off the topbar rather than bound to nodes that will not
-  // survive the turn. Opening one counter closes the other. The click
-  // vocabulary is the strip's own (topbarClickAction), shared with the
-  // agent bubbles' delegation in the FeedRenderer.
-  infoEl.addEventListener("click", (e) => {
-    const action = topbarClickAction(e.target as HTMLElement);
+  // The footer's own delegation. Its dock is rewritten by every renderChrome,
+  // so the verbs are delegated off the slot rather than bound to nodes that
+  // will not survive the turn. Its vocabulary is the footer's own
+  // (footerClickAction), which checks the roster verbs BEFORE the strip's
+  // expansion toggle — a counter chip lives INSIDE the clickable strip.
+  const setFooterMenu = (menu: "agents" | "tasks" | null): void => {
+    footer.setMenu(menu);
+    renderChrome();
+  };
+  const settleFooterReveal = (spec: CounterSpec, revealed: boolean): void => {
+    setFooterMenu(null);
+    if (!revealed) notify(missingBubbleNotice(spec));
+  };
+  footerEl.addEventListener("click", (e) => {
+    const action = footerClickAction(e.target as HTMLElement);
     if (!action) return;
-    if (action.kind === "toggle") {
-      setCounterMenu(nextCounterMenu(counterMenu, action.menu));
-      return;
+    switch (action.kind) {
+      case "toggle-menu": {
+        const open = footer.disclosure();
+        const current = open.agentsOpen ? "agents" : open.tasksOpen ? "tasks" : null;
+        setFooterMenu(current === action.menu ? null : action.menu);
+        return;
+      }
+      case "reveal-agent":
+        settleFooterReveal(AGENTS_SPEC, feed.revealAgent(action.agentId));
+        return;
+      case "reveal-task":
+        settleFooterReveal(TASKS_SPEC, feed.revealTask(action.taskId));
+        return;
+      case "reveal-error":
+        // The error row's whole purpose: an error that has already scrolled
+        // away is otherwise unfindable. A miss is reported in the topbar's
+        // status slot rather than silently doing nothing.
+        if (!feed.revealError(action.uuid)) {
+          notify("the error's line is not in the current feed");
+        }
+        return;
+      case "toggle-expand":
+        footer.toggleExpanded();
+        renderChrome();
+        return;
     }
-    // A roster row jumps the feed to the entry's bubble — a subagent's
-    // card, a task's TaskCreate card — and lays it open.
-    if (action.kind === "reveal") {
-      settleRosterReveal(AGENTS_SPEC, feed.revealAgent(action.agentId));
-      return;
-    }
-    settleRosterReveal(TASKS_SPEC, feed.revealTask(action.taskId));
   });
-  // An open overlay closes the way every dropdown does: click off it, or
-  // Escape. The agent bubbles' topbar overlays dismiss on the same
-  // gestures, so both handlers close them alongside the header's.
+
+  // Every open overlay closes the way every dropdown does: click off it, or
+  // Escape. Three surfaces now hold one each — the header's tokens breakdown,
+  // the footer's relocated rosters, and the agent bubbles' own strips — so all
+  // three dismiss together on the same gestures.
+  const closeAllMenus = (): void => {
+    tokensMenuOpen = false;
+    footer.closeMenus();
+    feed.closeAgentMenus();
+    renderChrome();
+  };
   document.addEventListener("click", (e) => {
     const target = e.target as HTMLElement;
     if (
@@ -473,23 +527,17 @@ async function boot(): Promise<void> {
       !target.closest(".tasks-menu") &&
       !target.closest(".tokens-menu")
     ) {
-      setCounterMenu(null);
-      feed.closeAgentMenus();
+      closeAllMenus();
     }
   });
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") {
-      setCounterMenu(null);
-      feed.closeAgentMenus();
-    }
+    if (e.key === "Escape") closeAllMenus();
   });
   // The composer is a separate Emacs window the outside-click handler above
   // cannot see, so the host fires this hook when the user clicks into it —
-  // closing the header and bubble dropdowns the same way a click-away would.
-  installHostCloseMenusHook(window as unknown as HostGlobal, () => {
-    setCounterMenu(null);
-    feed.closeAgentMenus();
-  });
+  // closing the header, footer and bubble dropdowns the same way a click-away
+  // would.
+  installHostCloseMenusHook(window as unknown as HostGlobal, closeAllMenus);
 
   // Keyboard cycling of the feed, driven from whichever input box this
   // build has. The cursor is re-seated after every feed render (never

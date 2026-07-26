@@ -12,6 +12,7 @@ import (
 	datav1 "agentrepl/proto/agentshim/data/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
+	"claude-repld/internal/progress"
 	"claude-repld/internal/registry"
 	"claude-repld/internal/ssm"
 	"claude-repld/internal/workspace/merge"
@@ -335,6 +336,7 @@ func TestSnapshotProviderCombinesSSMAndSessions(t *testing.T) {
 	}
 	shim, err := WireAgentShim(AgentShimConfig{
 		SSM:             openTestSSM(t, reg),
+		Progress:        progress.New(progress.Options{Logf: func(string, ...any) {}}),
 		Prompts:         &fakePrompts{},
 		MergeDirs:       fakeMergeDirs{},
 		Lifecycle:       &fakeLifecycle{},
@@ -358,6 +360,69 @@ func TestSnapshotProviderCombinesSSMAndSessions(t *testing.T) {
 	}
 	if len(snap.GetSessions()) != 1 || snap.GetSessions()[0].GetModel() != "haiku" {
 		t.Fatalf("sessions = %v", snap.GetSessions())
+	}
+}
+
+func TestSnapshotProviderCarriesTheProgressViews(t *testing.T) {
+	// Arrange — a resolver holding one workspace's progress.
+	prog := progress.New(progress.Options{Logf: func(string, ...any) {}})
+	defer prog.Close()
+	prog.SetCounts("/w", 2, 1)
+	// Act — a (re)connecting frontend's footer must start populated.
+	provider := &ssmSnapshotProvider{progress: prog}
+	snap := provider.Snapshot()
+	// Assert
+	if len(snap.GetProgress()) != 1 || snap.GetProgress()[0].GetPendingPermissions() != 2 {
+		t.Fatalf("progress = %v, want the resolved view for /w", snap.GetProgress())
+	}
+}
+
+func TestWireAgentShimMirrorsSSMStateIntoProgress(t *testing.T) {
+	// Arrange — the seam between the two resolvers: the footer's phase must be
+	// the SSM's verdict, not a second opinion.
+	reg := openTestRegistry(t)
+	prog := progress.New(progress.Options{Logf: func(string, ...any) {}})
+	shim, err := WireAgentShim(AgentShimConfig{
+		SSM:             openTestSSM(t, reg),
+		Progress:        prog,
+		Prompts:         &fakePrompts{},
+		MergeDirs:       fakeMergeDirs{},
+		Lifecycle:       &fakeLifecycle{},
+		SessionCommands: &SessionCommandBinding{},
+	})
+	if err != nil {
+		t.Fatalf("WireAgentShim: %v", err)
+	}
+	defer shim.Close()
+	views, cancel := prog.Subscribe()
+	defer cancel()
+	// Act — an SSM transition feeds the progress resolver through the same loop
+	// that pushes the WorkspaceState frame.
+	if err := shim.SSM.ApplyMergeTransition("/w", "merging", "test"); err != nil {
+		t.Fatalf("apply merge transition: %v", err)
+	}
+	// Assert
+	select {
+	case v := <-views:
+		if v.GetState() != frontendv1.RenderState_RENDER_STATE_MERGING {
+			t.Fatalf("progress state = %v, want MERGING mirrored from the SSM", v.GetState())
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the SSM transition to reach the progress resolver")
+	}
+}
+
+func TestWireAgentShimRejectsNilProgress(t *testing.T) {
+	// Arrange / Act / Assert — an unwired footer resolver is a construction
+	// error, not a silently progress-free daemon.
+	reg := openTestRegistry(t)
+	_, err := WireAgentShim(AgentShimConfig{
+		SSM:             openTestSSM(t, reg),
+		MergeDirs:       fakeMergeDirs{},
+		SessionCommands: &SessionCommandBinding{},
+	})
+	if err == nil {
+		t.Fatal("want a construction error for a nil progress resolver")
 	}
 }
 
@@ -406,6 +471,7 @@ func TestWireAgentShimMergeTransitionReachesSSM(t *testing.T) {
 	reg := openTestRegistry(t)
 	shim, err := WireAgentShim(AgentShimConfig{
 		SSM:             openTestSSM(t, reg),
+		Progress:        progress.New(progress.Options{Logf: func(string, ...any) {}}),
 		Prompts:         &fakePrompts{},
 		MergeDirs:       fakeMergeDirs{},
 		Lifecycle:       &fakeLifecycle{},
