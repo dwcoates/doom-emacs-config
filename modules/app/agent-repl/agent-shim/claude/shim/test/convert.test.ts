@@ -14,6 +14,7 @@ import {
   McpServerState,
   type ClaudeStreamMessage,
 } from "../../../../proto/gen/ts/agentshim/data/v1/stream_pb.js";
+import { RawTaskStatus } from "../../../../proto/gen/ts/agentshim/data/v1/tools_pb.js";
 import { OriginKind } from "../../../../proto/gen/ts/agentshim/data/v1/transcript_pb.js";
 import { DiscriminatorField } from "../../../../proto/gen/ts/agentshim/data/v1/unknown_pb.js";
 
@@ -1238,6 +1239,39 @@ describe("tool results that used to fall through to unclassified", () => {
     const r = convertToolUseResult({ structuredOutput: { verdict: "ok", score: 3 } }, "s");
     if (r?.result.case !== "structuredOutput") throw new Error("case");
     expect(r.result.value.data).toEqual({ verdict: "ok", score: 3 });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The four ToolUseResult arms the proto declared but the classifier never
+// reached: every Agent, async agent launch, TaskOutput and WebFetch result was
+// captured verbatim (or, for TaskOutput, mistyped as a TaskCreate).
+// ---------------------------------------------------------------------------
+
+describe("agent_async_launch arm", () => {
+  it("classifies an async agent launch", () => {
+    const r = convertToolUseResult(loadToolResult("agent_async_launch"), "s");
+    expect(r.result.case).toBe("agentAsyncLaunch");
+  });
+
+  it("keeps the async launch's output file", () => {
+    const r = convertToolUseResult(loadToolResult("agent_async_launch"), "s");
+    if (r.result.case !== "agentAsyncLaunch") throw new Error("case");
+    expect(r.result.value.outputFile).toBe("/private/tmp/claude-501/-Users-dodgecoates--config-doom-worktrees-async-quiescence-rgm/f2c3c473-defc-4d8c-91de-d27177b2568e/tasks/a15b5267244c1360e.output");
+  });
+
+  it("maps the async launch's status onto RawTaskStatus", () => {
+    const r = convertToolUseResult(loadToolResult("agent_async_launch"), "s");
+    if (r.result.case !== "agentAsyncLaunch") throw new Error("case");
+    expect(r.result.value.status).toBe(RawTaskStatus.ASYNC_LAUNCHED);
+  });
+
+  it("leaves a remote agent launch unclassified (AgentOutput member with no proto arm)", () => {
+    // Shares status/description/prompt/outputFile with the async launch but
+    // carries no `isAsync`, so nothing discriminates it — capture, never a
+    // guess at the nearest arm.
+    const r = convertToolUseResult({ status: "remote_launched", taskId: "t1", sessionUrl: "https://x/y", description: "d", prompt: "p", outputFile: "/tmp/o" }, "s");
+    expect(r.result.case).toBe("unclassified");
   });
 });
 

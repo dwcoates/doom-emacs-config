@@ -172,6 +172,7 @@ import {
   PreservedSegmentSchema,
 } from "../../../../../proto/gen/ts/agentshim/data/v1/transcript_pb.js";
 import {
+  AgentAsyncLaunchSchema,
   ApiAssistantMessageSchema,
   ApiContentBlocksSchema,
   ApiUsageSchema,
@@ -1580,6 +1581,22 @@ function classifyToolResult(o: Record<string, unknown>): ToolUseResult["result"]
       staleReadFileStateHint: strOf(pick(o, "stale_read_file_state_hint", "staleReadFileStateHint")),
       backgroundTaskId: strOf(pick(o, "background_task_id", "backgroundTaskId")),
       backgroundCwdHint: strOf(pick(o, "background_cwd_hint", "backgroundCwdHint")),
+    }) };
+  }
+  // Agent/Task BACKGROUND launch. `is_async` is unique to this member of the
+  // SDK's AgentOutput union (and to the whole result census); it is paired with
+  // `output_file`, required on the same member, so a stray async flag on some
+  // other tool's result cannot claim the arm.
+  if (any("is_async", "isAsync") && any("output_file", "outputFile")) {
+    return { case: "agentAsyncLaunch", value: create(AgentAsyncLaunchSchema, {
+      isAsync: pick(o, "is_async", "isAsync") === true,
+      status: rawTaskStatusEnum(strOf(pick(o, "status"))),
+      agentId: strOf(pick(o, "agent_id", "agentId")),
+      description: strOf(pick(o, "description")),
+      resolvedModel: strOf(pick(o, "resolved_model", "resolvedModel")),
+      prompt: strOf(pick(o, "prompt")),
+      outputFile: strOf(pick(o, "output_file", "outputFile")),
+      canReadOutputFile: pick(o, "can_read_output_file", "canReadOutputFile") === true,
     }) };
   }
   if (has("commandName") || (has("command_name") && any("success", "allowedTools", "allowed_tools"))) {
