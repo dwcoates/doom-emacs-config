@@ -55,6 +55,8 @@ import (
 	datav1 "agentrepl/proto/agentshim/data/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
+	"claude-repld/internal/errclass"
+
 	"google.golang.org/protobuf/types/known/anypb"
 )
 
@@ -177,6 +179,10 @@ func HeartbeatViewFromProgress(workspace, sessionID string, hp *corev1.Heartbeat
 // DegradedNoticeFromState maps a core.DegradedState to the frontend
 // DegradedNotice. It is a faithful passthrough: honest sad-path reporting, never
 // a fallback.
+//
+// SUPERSEDED (F4) by SystemFailureFromDegradedState. Kept for the transition
+// while both frontends still decode the banner arm; nothing pushes its result
+// any more.
 func DegradedNoticeFromState(ds *corev1.DegradedState, atMs int64) *frontendv1.DegradedNotice {
 	if ds == nil {
 		return nil
@@ -187,6 +193,28 @@ func DegradedNoticeFromState(ds *corev1.DegradedState, atMs int64) *frontendv1.D
 		Recovered: ds.GetRecovered(),
 		AtMs:      atMs,
 	}
+}
+
+// SystemFailureItemFromDegradedState classifies a shim-reported DegradedState
+// as a conversation card (F4), replacing the banner passthrough above.
+//
+// The window's two edges become ONE card: the opening report leaves
+// resolved_at_ms zero and the recovery stamps it, under the same uuid the
+// caller keys them by, so the feed reconciles in place and shows a settled
+// card instead of a permanent alarm about something that ended.
+//
+// dropped_count finally survives. The passthrough discarded it, which meant
+// the single most useful fact about a store outage — how much conversation
+// was lost — reached no surface at all.
+func SystemFailureItemFromDegradedState(ds *corev1.DegradedState, atMs int64) *frontendv1.SystemFailureItem {
+	if ds == nil {
+		return nil
+	}
+	item := errclass.Degraded(ds.GetComponent(), ds.GetReason(), int64(ds.GetDroppedCount()))
+	if ds.GetRecovered() {
+		item.ResolvedAtMs = atMs
+	}
+	return item
 }
 
 // ---------------------------------------------------------------------------

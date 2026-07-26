@@ -8,6 +8,7 @@ import (
 	datav1 "agentrepl/proto/agentshim/data/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
+	"claude-repld/internal/errclass"
 	"claude-repld/internal/frontend"
 
 	"google.golang.org/protobuf/proto"
@@ -41,6 +42,11 @@ type StateApplier interface {
 	// and resolves the workspace blue: an incomplete history cannot be the
 	// basis of a "ready" claim.
 	ApplyBackfillState(workspace, state string) error
+	// ApplyConnectionDegraded records the daemon's OWN observation that the
+	// shim transport went quiet, or came back (F4). The shim's DegradedState
+	// events already reached the degraded axis; this transport-level miss did
+	// not, so it produced a banner and no workspace color at all.
+	ApplyConnectionDegraded(workspace string, degraded bool, reason string) error
 }
 
 // ProgressResolver is the slice of the progress-footer resolver (F1) the driver
@@ -121,6 +127,13 @@ type consumer struct {
 	// beside the ring and is replayed on every resync.
 	permItems map[string]*frontendv1.ConversationItem
 	permOrder []string
+	// failItems retains the LATEST system-failure ConversationItem per uuid,
+	// in first-seen order, on the same footing as permItems and for the same
+	// reason (F4). A WINDOW-shaped failure is re-sent under its opening uuid
+	// with resolved_at_ms set, so the retained copy is the SETTLED card and a
+	// resync replays that rather than re-opening the alarm.
+	failItems map[string]*frontendv1.ConversationItem
+	failOrder []string
 	// backfill is the last never-blue state reported for this session (F2).
 	// In-memory latch: it is what keeps a long transcript from writing the
 	// registry record once per line.
@@ -529,32 +542,66 @@ func (c *consumer) pushConversation(ev *corev1.Event) {
 	c.push.PushConversationDelta(cd)
 }
 
-// Degraded surfaces a shim-sourced DegradedState as a frontend DegradedNotice.
+// connectionComponent names the daemon's own transport in a degraded card.
+const connectionComponent = "shim-connection"
+
+// Degraded surfaces a shim-sourced DegradedState as a self-resolving failure
+// card (F4).
+//
+// It used to push a DegradedNotice: chrome that scrolled away, carried no
+// correlation id, and threw dropped_count away in translation. A user whose
+// workspace changed color needs to find out why from the conversation itself,
+// so the account lives there now.
 func (c *consumer) Degraded(_ string, ds *corev1.DegradedState) {
-	if n := frontend.DegradedNoticeFromState(ds, c.now()); n != nil {
-		c.push.PushDegradedNotice(n)
+	item := frontend.SystemFailureItemFromDegradedState(ds, c.now())
+	if item == nil {
+		return
+	}
+	c.pushFailure(c.degradedUUID(ds.GetComponent()), item)
+}
+
+// ConnectionDegraded surfaces a transport-level missed-heartbeat window: the
+// SSM's degraded axis PLUS the opening edge of a failure card.
+//
+// The SSM row is the half that never existed. The missed-heartbeat window
+// called this sink and nothing appended a state row, so the transport going
+// quiet produced a banner and no workspace color at all — the ambience the
+// banner was standing in for had no other home.
+func (c *consumer) ConnectionDegraded(_ string, reason string) {
+	c.applyConnectionDegraded(true, reason)
+	c.pushFailure(c.degradedUUID(connectionComponent), errclass.ConnectionDegraded(reason))
+}
+
+// ConnectionRecovered closes the window: the SSM's degraded axis clears and
+// the SAME card is re-sent with resolved_at_ms stamped.
+//
+// Re-sending under the opening card's uuid is what makes it ONE card that
+// settles rather than two cards that accumulate — the recovery report used to
+// carry neither a reason nor any correlation to what it was recovering from.
+func (c *consumer) ConnectionRecovered(_ string) {
+	c.applyConnectionDegraded(false, "")
+	item := errclass.ConnectionDegraded("")
+	item.ResolvedAtMs = c.now()
+	c.pushFailure(c.degradedUUID(connectionComponent), item)
+}
+
+// applyConnectionDegraded moves the SSM's degraded axis, loud-logging a
+// failure rather than swallowing it: a workspace whose color silently failed
+// to move is the exact misreport this axis exists to prevent.
+func (c *consumer) applyConnectionDegraded(degraded bool, reason string) {
+	if err := c.ssm.ApplyConnectionDegraded(c.workspace, degraded, reason); err != nil {
+		c.logf("sessiondrv: applying connection degraded=%v to the SSM (ws %q): %v", degraded, c.workspace, err)
 	}
 }
 
-// ConnectionDegraded surfaces a transport-level missed-heartbeat window as a
-// DegradedNotice (component shim-connection), honest reporting of a stale
-// display — not a fallback.
-func (c *consumer) ConnectionDegraded(_ string, reason string) {
-	c.push.PushDegradedNotice(&frontendv1.DegradedNotice{
-		Component: "shim-connection",
-		Reason:    reason,
-		Recovered: false,
-		AtMs:      c.now(),
-	})
-}
-
-// ConnectionRecovered clears the shim-connection degraded notice.
-func (c *consumer) ConnectionRecovered(_ string) {
-	c.push.PushDegradedNotice(&frontendv1.DegradedNotice{
-		Component: "shim-connection",
-		Recovered: true,
-		AtMs:      c.now(),
-	})
+// degradedUUID is the STABLE card identity for one component's degraded
+// window on this session. Both edges of the window derive the same id, which
+// is what lets the closing edge reconcile the opening card in place.
+func (c *consumer) degradedUUID(component string) string {
+	if component == "" {
+		component = connectionComponent
+	}
+	return "degraded:" + c.sessionID + ":" + component
 }
 
 // resync replays the retained conversation deltas from fromSeq (0 = from the
@@ -583,6 +630,12 @@ func (c *consumer) resync(fromSeq uint64) (floor uint64, haveFloor bool) {
 	// permission is re-presented on reconnect regardless of fromSeq. Idempotent
 	// by uuid (the permission request_id) — a re-push REPLACES.
 	for _, item := range c.snapshotPermItems() {
+		c.pushPermissionDelta(item)
+	}
+	// Same for the retained failure cards (F4): they carry no store seq
+	// either, and a reconnecting frontend that could not see WHY its
+	// workspace is off-green is the gap the cards exist to close.
+	for _, item := range c.snapshotFailItems() {
 		c.pushPermissionDelta(item)
 	}
 	return c.ringFloor()
@@ -635,6 +688,50 @@ func (c *consumer) pushPermissionDelta(item *frontendv1.ConversationItem) {
 		SessionId: c.sessionID,
 		Items:     []*frontendv1.ConversationItem{item},
 	})
+}
+
+// pushFailure retains and pushes a system-failure ConversationItem under uuid,
+// on the same retained-and-replayed path permissions use (F4).
+//
+// Keying by uuid is what makes a WINDOW-shaped failure one card: the closing
+// edge REPLACES the retained item with its resolved twin, so a resync replays
+// the settled card rather than re-opening an alarm about something that
+// already ended.
+func (c *consumer) pushFailure(uuid string, failure *frontendv1.SystemFailureItem) {
+	item := &frontendv1.ConversationItem{
+		Uuid: uuid,
+		TsMs: c.now(),
+		Item: &frontendv1.ConversationItem_SystemFailure{SystemFailure: failure},
+	}
+	// The failure carries its own addressing so a surface reached OUTSIDE the
+	// feed (a footer row) can still scroll to this card.
+	failure.ItemUuid = uuid
+
+	c.mu.Lock()
+	if c.failItems == nil {
+		c.failItems = map[string]*frontendv1.ConversationItem{}
+	}
+	if _, seen := c.failItems[uuid]; !seen {
+		c.failOrder = append(c.failOrder, uuid)
+	}
+	c.failItems[uuid] = item
+	c.mu.Unlock()
+
+	c.logf("sessiondrv: system failure session=%s uuid=%s type=%s resolved=%v: %s",
+		c.sessionID, uuid, failure.GetErrorType(), failure.GetResolvedAtMs() != 0, failure.GetSourceDetail())
+	c.pushPermissionDelta(item)
+}
+
+// snapshotFailItems returns the retained failure items in first-seen order,
+// taken under the lock so a concurrent pushFailure cannot race the read.
+func (c *consumer) snapshotFailItems() []*frontendv1.ConversationItem {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make([]*frontendv1.ConversationItem, 0, len(c.failOrder))
+	for _, id := range c.failOrder {
+		out = append(out, c.failItems[id])
+	}
+	return out
 }
 
 // snapshotPermItems returns the retained permission items in first-seen order,

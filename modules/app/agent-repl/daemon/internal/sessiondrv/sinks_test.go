@@ -2,12 +2,15 @@ package sessiondrv
 
 import (
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+
+	"claude-repld/internal/errclass"
 
 	"google.golang.org/protobuf/types/known/anypb"
 )
@@ -131,6 +134,10 @@ type fakeApplier struct {
 	// backfills records one entry per ApplyBackfillState call, as the
 	// (workspace, state) pair the driver pushed onto the SSM's backfill axis.
 	backfills []backfillCall
+	// degradations records one entry per ApplyConnectionDegraded call (F4) —
+	// the transport-level miss that used to reach no state axis at all.
+	degradations []degradedCall
+	degradedErr  error
 }
 
 // backfillCall is one backfill outcome the driver applied to the SSM.
@@ -139,11 +146,32 @@ type backfillCall struct {
 	state     string
 }
 
+// degradedCall is one connection-degraded transition the driver applied.
+type degradedCall struct {
+	workspace string
+	degraded  bool
+	reason    string
+}
+
 func (f *fakeApplier) ApplyBackfillState(workspace, state string) error {
 	f.reconcMutex.Lock()
 	defer f.reconcMutex.Unlock()
 	f.backfills = append(f.backfills, backfillCall{workspace: workspace, state: state})
 	return nil
+}
+
+func (f *fakeApplier) ApplyConnectionDegraded(workspace string, degraded bool, reason string) error {
+	f.reconcMutex.Lock()
+	defer f.reconcMutex.Unlock()
+	f.degradations = append(f.degradations, degradedCall{workspace: workspace, degraded: degraded, reason: reason})
+	return f.degradedErr
+}
+
+// degradedCalls returns the recorded transitions, taken under the lock.
+func (f *fakeApplier) degradedCalls() []degradedCall {
+	f.reconcMutex.Lock()
+	defer f.reconcMutex.Unlock()
+	return append([]degradedCall(nil), f.degradations...)
 }
 
 // reconcileCall is one authoritative live-task set the driver adopted.
@@ -597,28 +625,217 @@ func TestApplyFiresOnSessionStarted(t *testing.T) {
 	}
 }
 
-func TestDegradedReporterPushesNotices(t *testing.T) {
+// --- Degraded as a self-resolving card (F4) ---------------------------------
+//
+// The banner was chrome that scrolled away, carried no correlation id, and
+// threw dropped_count away in translation. Its replacement is a conversation
+// card whose two edges reconcile onto ONE uuid, plus the SSM row the
+// transport-level miss never wrote.
+
+// failureItems returns the system-failure items among a fake pusher's
+// conversation deltas, which is where the degraded account now lives.
+func failureItems(push *fakePusher) []*frontendv1.SystemFailureItem {
+	var out []*frontendv1.SystemFailureItem
+	for _, cd := range push.convo {
+		for _, item := range cd.GetItems() {
+			if f := item.GetSystemFailure(); f != nil {
+				out = append(out, f)
+			}
+		}
+	}
+	return out
+}
+
+// failureUUIDs returns the ConversationItem uuids of the pushed failure cards.
+func failureUUIDs(push *fakePusher) []string {
+	var out []string
+	for _, cd := range push.convo {
+		for _, item := range cd.GetItems() {
+			if item.GetSystemFailure() != nil {
+				out = append(out, item.GetUuid())
+			}
+		}
+	}
+	return out
+}
+
+func TestDegradedStateBecomesAFailureCard(t *testing.T) {
 	// Arrange.
 	push := &fakePusher{}
 	c := newTestConsumer(push, &fakeApplier{})
 
 	// Act.
 	c.Degraded("s1", &corev1.DegradedState{Component: "store", Reason: "down"})
+
+	// Assert.
+	got := failureItems(push)
+	if len(got) != 1 {
+		t.Fatalf("failure cards = %d, want 1", len(got))
+	}
+	if got[0].GetErrorType() != string(errclass.TypeShimStoreWriteRejected) {
+		t.Fatalf("error_type = %q, want %q", got[0].GetErrorType(), errclass.TypeShimStoreWriteRejected)
+	}
+}
+
+func TestDegradedStateCardCarriesTheDroppedCount(t *testing.T) {
+	// Arrange: how much conversation was lost — the fact translation discarded.
+	push := &fakePusher{}
+	c := newTestConsumer(push, &fakeApplier{})
+
+	// Act.
+	c.Degraded("s1", &corev1.DegradedState{Component: "store", Reason: "down", DroppedCount: 12})
+
+	// Assert.
+	if got := failureItems(push)[0].GetSourceDetail(); !strings.Contains(got, "dropped=12") {
+		t.Fatalf("source_detail = %q, want the dropped count", got)
+	}
+}
+
+func TestDegradedStateNoLongerPushesABanner(t *testing.T) {
+	// Arrange.
+	push := &fakePusher{}
+	c := newTestConsumer(push, &fakeApplier{})
+
+	// Act.
+	c.Degraded("s1", &corev1.DegradedState{Component: "store", Reason: "down"})
+
+	// Assert: the arm stays on the wire for the transition, but nothing
+	// populates it any more.
+	if len(push.degraded) != 0 {
+		t.Fatalf("degraded banner pushes = %d, want 0", len(push.degraded))
+	}
+}
+
+func TestConnectionDegradedAppendsTheSSMRow(t *testing.T) {
+	// Arrange: the half that never existed. A heartbeat miss produced a banner
+	// and NO workspace color, so retiring the banner without this would have
+	// lost the ambience entirely.
+	applier := &fakeApplier{}
+	c := newTestConsumer(&fakePusher{}, applier)
+
+	// Act.
 	c.ConnectionDegraded("s1", "no traffic")
+
+	// Assert.
+	got := applier.degradedCalls()
+	if len(got) != 1 || !got[0].degraded || got[0].workspace != "ws" {
+		t.Fatalf("degraded transitions = %+v, want one degraded=true on ws", got)
+	}
+}
+
+func TestConnectionRecoveredClearsTheSSMAxis(t *testing.T) {
+	// Arrange.
+	applier := &fakeApplier{}
+	c := newTestConsumer(&fakePusher{}, applier)
+
+	// Act.
 	c.ConnectionRecovered("s1")
 
 	// Assert.
-	if len(push.degraded) != 3 {
-		t.Fatalf("expected 3 degraded pushes, got %d", len(push.degraded))
+	got := applier.degradedCalls()
+	if len(got) != 1 || got[0].degraded {
+		t.Fatalf("degraded transitions = %+v, want one degraded=false", got)
 	}
-	if push.degraded[0].GetComponent() != "store" {
-		t.Errorf("first degraded component: got %q, want store", push.degraded[0].GetComponent())
+}
+
+func TestConnectionDegradedFailureIsLoudNotSwallowed(t *testing.T) {
+	// Arrange: a workspace whose color silently failed to move is the exact
+	// misreport this axis exists to prevent.
+	var logged []string
+	applier := &fakeApplier{degradedErr: errors.New("db gone")}
+	c := newConsumer("ws", "s1", &fakePusher{}, applier, nil,
+		func(f string, a ...any) { logged = append(logged, f) }, nil, nil, nil, nil)
+
+	// Act.
+	c.ConnectionDegraded("s1", "no traffic")
+
+	// Assert.
+	if len(logged) == 0 {
+		t.Fatal("an SSM apply failure passed SILENTLY")
 	}
-	if push.degraded[1].GetComponent() != "shim-connection" || push.degraded[1].GetRecovered() {
-		t.Errorf("connection-degraded notice malformed: %+v", push.degraded[1])
+}
+
+func TestAConnectionWindowIsOneCardNotTwo(t *testing.T) {
+	// Arrange: the degraded edge and its recovery.
+	push := &fakePusher{}
+	c := newTestConsumer(push, &fakeApplier{})
+
+	// Act.
+	c.ConnectionDegraded("s1", "no traffic")
+	c.ConnectionRecovered("s1")
+
+	// Assert: two pushes, ONE uuid — the feed reconciles in place rather than
+	// accumulating an alarm and a separate all-clear.
+	ids := failureUUIDs(push)
+	if len(ids) != 2 {
+		t.Fatalf("failure pushes = %d, want 2", len(ids))
 	}
-	if !push.degraded[2].GetRecovered() {
-		t.Error("connection-recovered notice must set recovered=true")
+	if ids[0] != ids[1] {
+		t.Fatalf("uuids = %v, want both edges under one uuid", ids)
+	}
+}
+
+func TestTheOpeningEdgeIsUnresolved(t *testing.T) {
+	// Arrange.
+	push := &fakePusher{}
+	c := newTestConsumer(push, &fakeApplier{})
+
+	// Act.
+	c.ConnectionDegraded("s1", "no traffic")
+
+	// Assert.
+	if got := failureItems(push)[0].GetResolvedAtMs(); got != 0 {
+		t.Fatalf("resolved_at_ms = %d, want 0 while the window is open", got)
+	}
+}
+
+func TestTheClosingEdgeStampsResolution(t *testing.T) {
+	// Arrange.
+	push := &fakePusher{}
+	c := newTestConsumer(push, &fakeApplier{})
+
+	// Act.
+	c.ConnectionDegraded("s1", "no traffic")
+	c.ConnectionRecovered("s1")
+
+	// Assert: a settled card, not a permanent alarm about something that ended.
+	if got := failureItems(push)[1].GetResolvedAtMs(); got == 0 {
+		t.Fatal("resolved_at_ms = 0 on the closing edge; the card would stand as a permanent alarm")
+	}
+}
+
+func TestAResyncReplaysTheSettledCard(t *testing.T) {
+	// Arrange: a window that opened and closed, then a reconnect.
+	push := &fakePusher{}
+	c := newTestConsumer(push, &fakeApplier{})
+	c.ConnectionDegraded("s1", "no traffic")
+	c.ConnectionRecovered("s1")
+	before := len(failureItems(push))
+
+	// Act.
+	c.resync(0)
+
+	// Assert: exactly one replayed card, and it is the RESOLVED one.
+	replayed := failureItems(push)[before:]
+	if len(replayed) != 1 {
+		t.Fatalf("replayed failure cards = %d, want 1", len(replayed))
+	}
+	if replayed[0].GetResolvedAtMs() == 0 {
+		t.Fatal("the resync re-opened a window that had already closed")
+	}
+}
+
+func TestAFailureCardCarriesItsOwnAddressing(t *testing.T) {
+	// Arrange: what lets a footer row scroll the feed to this card.
+	push := &fakePusher{}
+	c := newTestConsumer(push, &fakeApplier{})
+
+	// Act.
+	c.ConnectionDegraded("s1", "no traffic")
+
+	// Assert.
+	if got := failureItems(push)[0].GetItemUuid(); got != failureUUIDs(push)[0] {
+		t.Fatalf("item_uuid = %q, want it to match the envelope uuid %q", got, failureUUIDs(push)[0])
 	}
 }
 
