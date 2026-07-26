@@ -391,7 +391,7 @@ var errBringUp = errors.New("bring-up failed")
 func newTestPermHandler() (permHandler, *permRegistry, *fakePusher) {
 	push := &fakePusher{}
 	reg := newPermRegistry(nil)
-	cons := newConsumer("ws", "s1", push, &fakeApplier{}, nil, nil, nil, nil, nil)
+	cons := newConsumer("ws", "s1", push, &fakeApplier{}, nil, nil, nil, nil, nil, nil)
 	return permHandler{reg: reg, cons: cons, logf: func(string, ...any) {}}, reg, push
 }
 

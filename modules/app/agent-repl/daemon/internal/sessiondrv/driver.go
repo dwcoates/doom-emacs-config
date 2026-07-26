@@ -57,6 +57,12 @@ type SessionRegistrar interface {
 	// re-pushes the session's SessionView. Called only on a real transition,
 	// so a steady stream of transcript lines writes the record once.
 	BackfillStateChanged(sessionID, state string)
+	// SessionDied marks the session's record terminal with the reason its
+	// death carried (F4), and re-pushes the SessionView so the dead-state
+	// card gets its account. Before this the shim-death path wrote nothing,
+	// leaving the SSM's dead state and the record's death reason on two
+	// disconnected axes.
+	SessionDied(sessionID, reason string)
 }
 
 // Spawner makes sure a session has exactly one live shim: it leaves an existing
@@ -373,6 +379,21 @@ func (m *Manager) persistBackfillState(sessionID, state string) {
 	m.cfg.Registrar.BackfillStateChanged(sessionID, state)
 }
 
+// persistSessionDeath marks the session's record terminal with the reason its
+// death carried (F4).
+//
+// Nothing did this before, which is why the registry documented a "shim_died"
+// reason that no code path ever wrote: a shim death resolved the workspace
+// RENDER_STATE_DEAD through the SSM and left the record claiming the session
+// was alive with no reason recorded. The dead-state card had nothing to show.
+func (m *Manager) persistSessionDeath(sessionID, reason string) {
+	if m.cfg.Registrar == nil {
+		return
+	}
+	m.logf("sessiondrv: session %s ended — marking the record terminal (reason=%s)", sessionID, reason)
+	m.cfg.Registrar.SessionDied(sessionID, reason)
+}
+
 // progress returns the configured progress resolver, or the no-op stand-in when
 // the driver was built without one.
 func (m *Manager) progress() ProgressResolver {
@@ -636,6 +657,8 @@ func (m *Manager) bringUp(workspace string) (*driven, error) {
 		if err := m.cfg.SSM.ApplyBackfillState(workspace, state); err != nil {
 			m.logf("sessiondrv: applying backfill %s to the SSM (ws %q): %v", state, workspace, err)
 		}
+	}, func() {
+		m.persistSessionDeath(sessionID, errclass.DeathReasonShimDied)
 	})
 	d.consumer = cons
 	// Settle the backfill for a REOPENED session before any event flows.
