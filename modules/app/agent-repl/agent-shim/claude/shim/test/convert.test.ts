@@ -9,9 +9,12 @@ import { __resetExtrasSeen } from "../src/proto/extras.js";
 import { EventClass, Plane, SessionSource } from "../src/uds/proto.js";
 import {
   ApiKeySource,
+  AssistantMessageError,
   ClaudeStreamMessageSchema,
+  McpServerState,
   type ClaudeStreamMessage,
 } from "../../../../proto/gen/ts/agentshim/data/v1/stream_pb.js";
+import { OriginKind } from "../../../../proto/gen/ts/agentshim/data/v1/transcript_pb.js";
 import { DiscriminatorField } from "../../../../proto/gen/ts/agentshim/data/v1/unknown_pb.js";
 
 const streamDir = fileURLToPath(new URL("../../../../testdata/corpus/stream/", import.meta.url));
@@ -938,6 +941,218 @@ describe("UnknownRecord passthrough (unrecognized discriminator)", () => {
     const [block] = csm.msg.value.message!.content;
     if (block?.block.case !== "unknown") throw new Error(`expected unknown block, got ${block?.block.case}`);
     expect(block.block.value.raw).toEqual({ type: "no_such_block", data: "keep me" });
+  });
+});
+
+describe("SDK 0.3.220 stream field gaps", () => {
+  it("UserMessage carries the SDK timestamp", () => {
+    const csm = vendor(convert({ type: "user", session_id: "s", uuid: "u", timestamp: "2026-07-25T12:00:00Z", message: { role: "user", content: "hi" } }));
+    if (csm.msg.case !== "user") throw new Error("case");
+    expect(csm.msg.value.timestamp).toBe("2026-07-25T12:00:00Z");
+  });
+
+  it("UserMessage carries the queue priority", () => {
+    const csm = vendor(convert({ type: "user", session_id: "s", uuid: "u", priority: "next", message: { role: "user", content: "hi" } }));
+    if (csm.msg.case !== "user") throw new Error("case");
+    expect(csm.msg.value.priority).toBe("next");
+  });
+
+  it("UserMessage carries a peer origin's kernel-verified pid", () => {
+    const csm = vendor(convert({
+      type: "user", session_id: "s", uuid: "u",
+      origin: { kind: "peer", from: "sess-2", name: "mate", verifiedPeerPid: 4242 },
+      message: { role: "user", content: "hi" },
+    }));
+    if (csm.msg.case !== "user") throw new Error("case");
+    expect(csm.msg.value.origin?.verifiedPeerPid).toBe(4242n);
+  });
+
+  it("an absent origin stays UNSET rather than defaulting to human", () => {
+    // A strict is-human trust gate must never be handed an invented attribution.
+    const csm = vendor(convert({ type: "user", session_id: "s", uuid: "u", message: { role: "user", content: "hi" } }));
+    if (csm.msg.case !== "user") throw new Error("case");
+    expect(csm.msg.value.origin).toBeUndefined();
+  });
+
+  it("a hyphenated origin kind maps onto its enum member", () => {
+    const csm = vendor(convert({
+      type: "user", session_id: "s", uuid: "u",
+      origin: { kind: "observer-activity" },
+      message: { role: "user", content: "hi" },
+    }));
+    if (csm.msg.case !== "user") throw new Error("case");
+    expect(csm.msg.value.origin?.kind).toBe(OriginKind.OBSERVER_ACTIVITY);
+  });
+
+  it("AssistantMessage carries the request id", () => {
+    const csm = vendor(convert({ type: "assistant", session_id: "s", uuid: "u", request_id: "req_9", message: { id: "m", model: "x", content: [] } }));
+    if (csm.msg.case !== "assistant") throw new Error("case");
+    expect(csm.msg.value.requestId).toBe("req_9");
+  });
+
+  it("AssistantMessage carries the uuids it supersedes", () => {
+    const csm = vendor(convert({ type: "assistant", session_id: "s", uuid: "u", supersedes: ["a", "b"], message: { id: "m", model: "x", content: [] } }));
+    if (csm.msg.case !== "assistant") throw new Error("case");
+    expect(csm.msg.value.supersedes).toEqual(["a", "b"]);
+  });
+
+  it("an overloaded assistant error is no longer collapsed into UNKNOWN", () => {
+    const csm = vendor(convert({ type: "assistant", session_id: "s", uuid: "u", error: "overloaded", message: { id: "m", model: "x", content: [] } }));
+    if (csm.msg.case !== "assistant") throw new Error("case");
+    expect(csm.msg.value.error).toBe(AssistantMessageError.OVERLOADED);
+  });
+
+  it("ResultMessage carries the spawn-to-request latency", () => {
+    const csm = vendor(convert({ type: "result", subtype: "success", session_id: "s", uuid: "u", time_to_request_from_spawn_ms: 1234 }));
+    if (csm.msg.case !== "result") throw new Error("case");
+    expect(csm.msg.value.timeToRequestFromSpawnMs).toBe(1234n);
+  });
+
+  it("ResultMessage carries the deferred tool use", () => {
+    const csm = vendor(convert({ type: "result", subtype: "success", session_id: "s", uuid: "u", deferred_tool_use: { id: "toolu_1", name: "Bash", input: { command: "ls" } } }));
+    if (csm.msg.case !== "result") throw new Error("case");
+    expect(csm.msg.value.deferredToolUse?.name).toBe("Bash");
+  });
+
+  it("ModelUsage carries the canonical model", () => {
+    const csm = vendor(convert({ type: "result", subtype: "success", session_id: "s", uuid: "u", modelUsage: { alias: { canonicalModel: "claude-opus-5-20260101" } } }));
+    if (csm.msg.case !== "result") throw new Error("case");
+    expect(csm.msg.value.modelUsage["alias"]?.canonicalModel).toBe("claude-opus-5-20260101");
+  });
+
+  it("a needs-auth MCP server converts to NEEDS_AUTH", () => {
+    // The wire spelling is hyphenated; matching only needs_auth lost exactly
+    // the status a human has to act on.
+    const csm = vendor(convert({ type: "system", subtype: "init", session_id: "s", uuid: "u", mcp_servers: [{ name: "srv", status: "needs-auth" }] }));
+    if (csm.msg.case !== "systemInit") throw new Error("case");
+    expect(csm.msg.value.mcpServers[0]?.status).toBe(McpServerState.NEEDS_AUTH);
+  });
+
+  it("a disabled MCP server converts to DISABLED", () => {
+    const csm = vendor(convert({ type: "system", subtype: "init", session_id: "s", uuid: "u", mcp_servers: [{ name: "srv", status: "disabled" }] }));
+    if (csm.msg.case !== "systemInit") throw new Error("case");
+    expect(csm.msg.value.mcpServers[0]?.status).toBe(McpServerState.DISABLED);
+  });
+
+  it("an MCP server's advertised tool annotations survive", () => {
+    const csm = vendor(convert({
+      type: "system", subtype: "init", session_id: "s", uuid: "u",
+      mcp_servers: [{ name: "srv", status: "connected", tools: [{ name: "t", annotations: { readOnly: true, destructive: false } }] }],
+    }));
+    if (csm.msg.case !== "systemInit") throw new Error("case");
+    expect(csm.msg.value.mcpServers[0]?.tools[0]?.annotations?.readOnly).toBe(true);
+  });
+
+  it("SystemInit carries the fast-mode disabled reason", () => {
+    const csm = vendor(convert({ type: "system", subtype: "init", session_id: "s", uuid: "u", fast_mode_disabled_reason: "network_error" }));
+    if (csm.msg.case !== "systemInit") throw new Error("case");
+    expect(csm.msg.value.fastModeDisabledReason).toBe("network_error");
+  });
+
+  it("StatusMessage carries the compact result", () => {
+    const csm = vendor(convert({ type: "system", subtype: "status", session_id: "s", uuid: "u", status: "compacting", compact_result: "failed" }));
+    if (csm.msg.case !== "status") throw new Error("case");
+    expect(csm.msg.value.compactResult).toBe("failed");
+  });
+
+  it("ToolProgress distinguishes a heartbeat from real progress", () => {
+    const csm = vendor(convert({ type: "tool_progress", session_id: "s", uuid: "u", tool_use_id: "t1", tool_name: "Bash", heartbeat: true }));
+    if (csm.msg.case !== "toolProgress") throw new Error("case");
+    expect(csm.msg.value.heartbeat).toBe(true);
+  });
+
+  it("ToolProgress carries the subagent retry attempt", () => {
+    const csm = vendor(convert({
+      type: "tool_progress", session_id: "s", uuid: "u", tool_use_id: "t1", tool_name: "Agent",
+      subagent_retry: { agent_id: "a1", attempt: 2, max_retries: 5, error_status: 529, error_category: "overloaded" },
+    }));
+    if (csm.msg.case !== "toolProgress") throw new Error("case");
+    expect(csm.msg.value.subagentRetry?.attempt).toBe(2);
+  });
+
+  it("a null subagent-retry error status is distinguishable from zero", () => {
+    const csm = vendor(convert({
+      type: "tool_progress", session_id: "s", uuid: "u", tool_use_id: "t1", tool_name: "Agent",
+      subagent_retry: { agent_id: "a1", attempt: 1, error_status: null },
+    }));
+    if (csm.msg.case !== "toolProgress") throw new Error("case");
+    expect(csm.msg.value.subagentRetry?.errorStatusSet).toBe(false);
+  });
+
+  it("TaskStartedMsg carries the workflow name", () => {
+    const csm = vendor(convert({ type: "system", subtype: "task_started", session_id: "s", uuid: "u", task_id: "w1", task_type: "local_workflow", workflow_name: "spec" }));
+    if (csm.msg.case !== "taskStarted") throw new Error("case");
+    expect(csm.msg.value.workflowName).toBe("spec");
+  });
+
+  it("a running task patch emits NO TaskEnded", () => {
+    // 0.3.220 patches carry pending/running/paused; ending the task on those
+    // decremented the live-task counter for work still in flight.
+    const { lifecycle } = convert({ type: "system", subtype: "task_updated", session_id: "s", uuid: "u", task_id: "t1", patch: { status: "running" } });
+    expect(lifecycle).toHaveLength(0);
+  });
+
+  it("a completed task patch still emits TaskEnded", () => {
+    const { lifecycle } = convert({ type: "system", subtype: "task_updated", session_id: "s", uuid: "u", task_id: "t1", patch: { status: "completed" } });
+    expect(lifecycle[0]!.payload.case).toBe("taskEnded");
+  });
+
+  it("TaskPatch carries the pause accounting", () => {
+    const csm = vendor(convert({ type: "system", subtype: "task_updated", session_id: "s", uuid: "u", task_id: "t1", patch: { status: "paused", total_paused_ms: 900 } }));
+    if (csm.msg.case !== "taskUpdated") throw new Error("case");
+    expect(csm.msg.value.patch?.totalPausedMs).toBe(900n);
+  });
+
+  it("RateLimitInfo carries the overage disabled reason", () => {
+    const csm = vendor(convert({ type: "rate_limit_event", session_id: "s", uuid: "u", rate_limit_info: { status: "rejected", overage_disabled_reason: "out_of_credits" } }));
+    if (csm.msg.case !== "rateLimitEvent") throw new Error("case");
+    expect(csm.msg.value.rateLimitInfo?.overageDisabledReason).toBe("out_of_credits");
+  });
+
+  it("RateLimitInfo carries whether credits can be purchased", () => {
+    const csm = vendor(convert({ type: "rate_limit_event", session_id: "s", uuid: "u", rate_limit_info: { status: "rejected", can_user_purchase_credits: true } }));
+    if (csm.msg.case !== "rateLimitEvent") throw new Error("case");
+    expect(csm.msg.value.rateLimitInfo?.canUserPurchaseCredits).toBe(true);
+  });
+
+  it("CompactBoundary carries the post-compaction token count", () => {
+    const csm = vendor(convert({ type: "compact_boundary", session_id: "s", uuid: "u", trigger: "auto", pre_tokens: 100, post_tokens: 40 }));
+    if (csm.msg.case !== "compactBoundary") throw new Error("case");
+    expect(csm.msg.value.postTokens).toBe(40n);
+  });
+
+  it("CompactBoundary carries the preserved segment anchors", () => {
+    const csm = vendor(convert({ type: "compact_boundary", session_id: "s", uuid: "u", trigger: "manual", preserved_segment: { head_uuid: "h", anchor_uuid: "a", tail_uuid: "t" } }));
+    if (csm.msg.case !== "compactBoundary") throw new Error("case");
+    expect(csm.msg.value.preservedSegment?.anchorUuid).toBe("a");
+  });
+});
+
+describe("control_response structural nesting", () => {
+  it("lifts the nested request id onto the top-level field", () => {
+    // The wire has no top-level request_id sibling, so reading one always
+    // produced "" and correlation was impossible.
+    const csm = vendor(convert({ type: "control_response", response: { subtype: "success", request_id: "req_7", response: { ok: true } } }));
+    if (csm.msg.case !== "controlResponse") throw new Error("case");
+    expect(csm.msg.value.requestId).toBe("req_7");
+  });
+
+  it("types the success body's subtype", () => {
+    const csm = vendor(convert({ type: "control_response", response: { subtype: "success", request_id: "req_7" } }));
+    if (csm.msg.case !== "controlResponse") throw new Error("case");
+    expect(csm.msg.value.body?.subtype).toBe("success");
+  });
+
+  it("types the error body's message", () => {
+    const csm = vendor(convert({ type: "control_response", response: { subtype: "error", request_id: "req_8", error: "nope" } }));
+    if (csm.msg.case !== "controlResponse") throw new Error("case");
+    expect(csm.msg.value.body?.error).toBe("nope");
+  });
+
+  it("carries the pending permission requests echoed on the body", () => {
+    const csm = vendor(convert({ type: "control_response", response: { subtype: "success", request_id: "r", pending_permission_requests: [{ request_id: "p1" }] } }));
+    if (csm.msg.case !== "controlResponse") throw new Error("case");
+    expect(csm.msg.value.body?.pendingPermissionRequests).toHaveLength(1);
   });
 });
 
