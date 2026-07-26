@@ -34,7 +34,6 @@ import (
 	"claude-repld/internal/shimlisten"
 	"claude-repld/internal/ssm"
 	"claude-repld/internal/stateroot"
-	"claude-repld/internal/storesub"
 )
 
 // shimProtocolVersion is the agent-shim wire protocol version the daemon's
@@ -314,39 +313,18 @@ func main() {
 	// Held by pointer so its SessionView re-push can be late-bound below: the
 	// Server it pushes through does not exist yet (same shape as forwarder).
 	registrar := &server.RegistryRegistrar{Reg: sessionRegistry, Logf: log.Printf}
-	// The below-floor history re-pull's store connection (bounded,
-	// frontend-initiated, conversation-only — see sessiondrv/repull.go). A store
-	// socket that cannot be resolved leaves History nil, which makes a
-	// below-floor resync fail LOUDLY rather than silently answering a
-	// freshly-mounted GUI with a blank feed.
-	var history sessiondrv.HistorySource
-	if storeSocket, serr := storesub.DefaultSocketPath(); serr != nil {
-		log.Printf("claude-repld: cannot resolve the store socket for history re-pulls: %v", serr)
-	} else if hc, herr := storesub.New(storesub.Config{SocketPath: storeSocket, Logf: log.Printf}); herr != nil {
-		log.Printf("claude-repld: cannot build the history re-pull client: %v", herr)
-	} else {
-		history = hc
-	}
+	// The below-floor history re-pull needs no wiring of its own: it rides the
+	// session's existing shim connection as a ReplayRequest, so the store stays
+	// behind the agent-shim facade (sessiondrv/repull.go).
 	driver, err := sessiondrv.New(sessiondrv.Config{
-		Push:      forwarder,
-		SSM:       ssmMgr,
-		Progress:  progressMgr,
-		Spawner:   server.NewShimSpawner(sessionRegistry, shimListener.Connected, udsSpawn, log.Printf),
-		Source:    &server.ShimConnSource{Listener: shimListener},
-		Locator:   &server.SessionLocator{Reg: sessionRegistry},
-		SeqStore:  server.NewRegistrySeqStore(sessionRegistry, log.Printf),
-		Registrar: registrar,
-		History:   history,
-		// The store keys its seq space by the VENDOR session uuid, so a re-pull
-		// subscribes under the registry's durable claude_session_id — never the
-		// daemon's own s_ id, which names a channel nothing publishes to.
-		VendorSessionID: func(sessionID string) string {
-			rec, ok := sessionRegistry.Get(sessionID)
-			if !ok {
-				return ""
-			}
-			return rec.ClaudeSessionID
-		},
+		Push:            forwarder,
+		SSM:             ssmMgr,
+		Progress:        progressMgr,
+		Spawner:         server.NewShimSpawner(sessionRegistry, shimListener.Connected, udsSpawn, log.Printf),
+		Source:          &server.ShimConnSource{Listener: shimListener},
+		Locator:         &server.SessionLocator{Reg: sessionRegistry},
+		SeqStore:        server.NewRegistrySeqStore(sessionRegistry, log.Printf),
+		Registrar:       registrar,
 		DaemonVersion:   daemonVersion,
 		ProtocolVersion: shimProtocolVersion,
 		Logf:            log.Printf,

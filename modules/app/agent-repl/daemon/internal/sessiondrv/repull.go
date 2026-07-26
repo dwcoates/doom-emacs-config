@@ -7,37 +7,30 @@ import (
 	"time"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
+
+	"claude-repld/internal/shimclient"
 )
 
-// HistorySource re-pulls a slice of a session's history straight from the
-// event store, bypassing the shim entirely. Satisfied by *storesub.Client; an
-// interface so the driver's re-pull policy is unit-testable without a store.
-//
-// vendorSessionID is the VENDOR session uuid: the store keys its seq space,
-// dedup index, and fan-out by it, so any other id subscribes to a channel
-// nothing publishes to.
-type HistorySource interface {
-	// Replay delivers events with seq in (fromSeq, stopAtSeq), calling onEvent
-	// in store order, and reports how many it delivered. A bound tripped before
-	// stopAtSeq is a partial answer and comes back as an error.
-	Replay(ctx context.Context, vendorSessionID string, fromSeq, stopAtSeq uint64, onEvent func(*corev1.Event)) (int, error)
-}
-
-// VendorSessionIDFunc resolves a daemon session id to the vendor session uuid
-// the store files its events under. Bound at stitch to the registry record's
-// claude_session_id, which is DURABLE — the re-pull's whole purpose is serving
-// a frontend after a daemon restart, and an in-memory mapping learned from a
-// SessionStarted would be empty exactly then.
-type VendorSessionIDFunc func(sessionID string) string
-
 // repullTimeout bounds one below-floor re-pull end to end. It is a FAILURE
-// bound, not a pacing knob: a store mid-replay writes back to back, so this
-// only decides how long a wedged store may hold a re-pull open.
+// bound, not a pacing knob: a shim mid-replay streams back to back, so this
+// only decides how long a wedged replay may hold a resync open.
 const repullTimeout = 60 * time.Second
+
+// repullMaxEvents caps how many events ONE re-pull may deliver. Generously
+// above the largest observed backfill burst (~1,009 events) and the retained
+// ring (4,096), while making an unbounded replay impossible. Carried on the
+// ReplayRequest so the bound is the REQUESTER's stated policy rather than
+// something the shim invents on the daemon's behalf.
+const repullMaxEvents = 20000
 
 // ErrRepullInFlight reports that the workspace already has a re-pull running
 // that does NOT cover the newly requested range.
 var ErrRepullInFlight = errors.New("sessiondrv: a history re-pull is already in flight for this workspace")
+
+// ErrRepullTruncated reports that a re-pull hit one of its bounds before
+// reaching the retained floor, so the frontend received only part of the
+// history it asked for. Surfaced, never presented as a complete answer.
+var ErrRepullTruncated = errors.New("sessiondrv: history re-pull truncated before reaching the retained window")
 
 // repullState is one workspace's in-flight re-pull, guarded by m.mu.
 type repullState struct {
@@ -46,7 +39,7 @@ type repullState struct {
 }
 
 // ---------------------------------------------------------------------------
-// Why a below-floor re-pull exists at all, and why it stays a side channel
+// Why a below-floor re-pull exists, and why it goes THROUGH THE SHIM
 // ---------------------------------------------------------------------------
 //
 // The daemon deliberately subscribes each shim from its HIGH-WATER mark. That
@@ -60,29 +53,52 @@ type repullState struct {
 // history the daemon no longer holds. The retained ring is 4,096 events and is
 // empty outright after a restart, so `resync(fromSeq)` below the ring's oldest
 // retained seq would otherwise answer with silence, which is precisely the
-// blank-feed bug. The re-pull answers it under four standing constraints:
+// blank-feed bug.
+//
+// # The store stays behind the agent-shim facade
+//
+// An earlier version of this dialled the shim-store DIRECTLY (a deleted
+// internal/storesub package). It worked, and it was wrong twice over:
+//
+//   - It LEAKED FACADE INTERNALS into the daemon. The store's socket location,
+//     its connection lifecycle, and the rule that its seq space is keyed by the
+//     vendor uuid all became daemon knowledge. The agent-shim exists so the
+//     daemon consumes exactly one totally-ordered stream per session and knows
+//     nothing about how it is produced; a second, private route to the same
+//     data dissolves that boundary.
+//   - Its one apparent ADVANTAGE — history still served while the shim is down
+//     — is a FALLBACK under the metaprompt's no-fallbacks rule. The shim IS the
+//     session's transport. Serving history through a side door while it is down
+//     masks an outage that eager-ensure already surfaces loudly, and trades a
+//     visible failure for a quietly half-working display.
+//
+// So the range is asked for over the shim connection (core.proto
+// ReplayRequest) and the shim serves it from a throwaway store subscription of
+// its own. Four standing constraints hold:
 //
 //  1. FRONTEND-INITIATED. Nothing in the daemon starts one. It exists only as
 //     the tail of a ResyncCmd a frontend sent.
-//  2. BOUNDED. It stops at the ring floor (the first seq the live window
-//     already covers), a hard event cap, an idle window, and a deadline —
-//     see internal/storesub.
-//  3. SIDE CHANNEL. Its own throwaway store connection. The standing shim
-//     subscription's position is never touched, and no SeqStore write happens.
-//  4. CONVERSATION ONLY. Re-pulled events reach frontend conversation
-//     translation and NOTHING else — not the SSM, not the task catalog, not the
-//     progress resolver, not the retained ring. Those planes consumed these
-//     events once already; feeding them again is what makes historical tasks
-//     masquerade as live activity and drives live_task_count into impossible
-//     values. This constraint is enforced in one place (repullConversation) and
-//     is the reason the re-pull does not reuse consumer.Consume.
+//  2. BOUNDED. to_seq is the ring floor (the first seq the live window already
+//     covers); max_events caps one replay; the shim adds an idle window; this
+//     side adds a deadline. A tripped bound comes back as a TRUNCATED
+//     ReplayDone and becomes ErrRepullTruncated here.
+//  3. SIDE CHANNEL. The shim opens a throwaway store subscription and leaves
+//     its standing one alone, so the daemon's own consumption position never
+//     moves and no SeqStore write happens.
+//  4. CONVERSATION ONLY — and now STRUCTURALLY so. Replayed events arrive as
+//     `ReplayEvent`, a different wire type from live `Event`s, so shimclient's
+//     read loop cannot route them into the SSM, the task catalog, or the
+//     progress resolver even by mistake. Those planes consumed this history
+//     once already; applying it again is what makes historical tasks
+//     masquerade as live activity. This used to be a daemon-side convention at
+//     one choke point; it is now the frame type.
 //
 // A daemon-standing version of any of this would be the replay storm the
 // high-water subscribe exists to prevent. This is not that, and must not become
 // it.
 
-// startRepull runs a below-floor history re-pull for d, delivering re-pulled
-// events to CONVERSATION TRANSLATION ONLY (constraint 4 above).
+// startRepull runs a below-floor history re-pull for d over the session's shim,
+// delivering replayed events to CONVERSATION TRANSLATION ONLY (constraint 4).
 //
 // Concurrency: at most one re-pull per workspace. A second request whose range
 // is already COVERED by the in-flight one is coalesced onto it — the pull's
@@ -95,19 +111,6 @@ type repullState struct {
 // Runs synchronously: it is the tail of a ResyncCmd, and the CommandAck should
 // report what actually happened rather than acknowledging an intent.
 func (m *Manager) startRepull(d *driven, fromSeq, stopAt uint64) error {
-	if m.cfg.History == nil {
-		return fmt.Errorf("sessiondrv: resync for workspace %q asked for seq %d, below the retained window (floor %d), but no history source is wired",
-			d.workspace, fromSeq, stopAt)
-	}
-	vendorID := ""
-	if m.cfg.VendorSessionID != nil {
-		vendorID = m.cfg.VendorSessionID(d.sessionID)
-	}
-	if vendorID == "" {
-		return fmt.Errorf("sessiondrv: cannot re-pull history for session %s (ws %q): no vendor session id known, and the store keys events by it",
-			d.sessionID, d.workspace)
-	}
-
 	m.mu.Lock()
 	if cur := d.repull; cur != nil {
 		covered := cur.fromSeq <= fromSeq
@@ -130,18 +133,25 @@ func (m *Manager) startRepull(d *driven, fromSeq, stopAt uint64) error {
 
 	ctx, cancel := context.WithTimeout(m.rootCtx, repullTimeout)
 	defer cancel()
-	m.logf("sessiondrv: re-pulling history ws=%q session=%s vendor=%s from_seq=%d stop_at=%d (frontend-initiated, conversation only)",
-		d.workspace, d.sessionID, vendorID, fromSeq, stopAt)
-	n, err := m.cfg.History.Replay(ctx, vendorID, fromSeq, stopAt, d.consumer.repullConversation)
+	m.logf("sessiondrv: re-pulling history ws=%q session=%s from_seq=%d stop_at=%d (frontend-initiated, via the shim, conversation only)",
+		d.workspace, d.sessionID, fromSeq, stopAt)
+	res, err := d.client.Replay(ctx, fromSeq, stopAt, repullMaxEvents, d.consumer.repullConversation)
 	if err != nil {
-		return fmt.Errorf("sessiondrv: history re-pull for ws %q (from_seq=%d stop_at=%d) delivered %d event(s) then failed: %w",
-			d.workspace, fromSeq, stopAt, n, err)
+		return fmt.Errorf("sessiondrv: history re-pull for ws %q (from_seq=%d stop_at=%d) failed: %w",
+			d.workspace, fromSeq, stopAt, err)
 	}
-	m.logf("sessiondrv: re-pull complete ws=%q delivered=%d event(s) from_seq=%d stop_at=%d", d.workspace, n, fromSeq, stopAt)
+	if res.Truncated {
+		// A partial answer is reported as one. The frontend rendered whatever
+		// did arrive; the ack tells it the rest is still missing.
+		return fmt.Errorf("%w: ws=%q from_seq=%d stop_at=%d delivered %d event(s): %s",
+			ErrRepullTruncated, d.workspace, fromSeq, stopAt, res.Delivered, res.Reason)
+	}
+	m.logf("sessiondrv: re-pull complete ws=%q delivered=%d event(s) from_seq=%d stop_at=%d",
+		d.workspace, res.Delivered, fromSeq, stopAt)
 	return nil
 }
 
-// repullConversation is the ONLY sink a re-pulled historical event may reach.
+// repullConversation is the ONLY sink a replayed historical event reaches.
 //
 // It deliberately does NOT call retain, ssm.Apply, applyProgress,
 // observeBackfill, or PushTaskCatalog. Every one of those planes already
@@ -150,11 +160,21 @@ func (m *Manager) startRepull(d *driven, fromSeq, stopAt uint64) error {
 // is translated to a ConversationDelta and pushed, exactly as consumer.resync
 // does for the retained ring, and that is all.
 //
+// The guarantee no longer rests on this function alone: a replayed event
+// arrives as a `ReplayEvent`, so shimclient's read loop has nowhere else to put
+// it (see replay.go). This is where the content is rendered, not where the
+// separation is enforced.
+//
 // The ring is not extended either: the ring is the LIVE window, and back-filling
-// it with re-pulled history would make the floor drift under the next request.
+// it with replayed history would make the floor drift under the next request.
 func (c *consumer) repullConversation(ev *corev1.Event) {
 	if ev.GetVendor() == nil {
 		return // only vendor payloads carry conversation content
 	}
 	c.pushConversation(ev)
 }
+
+// compile-time proof that the real client satisfies the driver's replay need.
+var _ interface {
+	Replay(context.Context, uint64, uint64, uint32, func(*corev1.Event)) (shimclient.ReplayResult, error)
+} = (*shimclient.Client)(nil)

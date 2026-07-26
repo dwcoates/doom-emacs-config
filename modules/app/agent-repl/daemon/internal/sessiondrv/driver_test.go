@@ -107,6 +107,13 @@ func (c *fakeClient) Interrupt(_ context.Context, _ bool) error {
 	return nil
 }
 
+// Replay is the shim-mediated bounded history replay. The default fake serves
+// an empty, complete one; the replay-specific harness (repull_test.go) swaps in
+// a scripted stand-in.
+func (c *fakeClient) Replay(_ context.Context, _, _ uint64, _ uint32, _ func(*corev1.Event)) (shimclient.ReplayResult, error) {
+	return shimclient.ReplayResult{}, nil
+}
+
 // promptTexts returns a copy of the prompts the driver sent, safe to read while
 // the driver's own goroutines are still running.
 func (c *fakeClient) promptTexts() []string {
@@ -608,7 +615,7 @@ func TestEnsureDoesNotWaitForReadiness(t *testing.T) {
 // nothing ever sent a ResyncCmd.
 func TestResyncRoundTripReplaysTheRetainedHistory(t *testing.T) {
 	// Arrange: a live driver whose ring holds three streamed assistant messages.
-	h := newRepullHarness(t, &fakeHistory{}, "vendor-uuid")
+	h := newRepullHarness(t, &replayClient{})
 	d := h.driver(t)
 	for i, uuid := range []string{"u1", "u2", "u3"} {
 		d.consumer.Consume(assistantEvent(t, uint64(6108+i), uuid))

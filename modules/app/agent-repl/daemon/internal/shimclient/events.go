@@ -41,6 +41,14 @@ func (c *Client) readLoop(ctx context.Context, ac *activeConn) error {
 			c.resolveNack(ac, m)
 		case *corev1.PermissionRequest:
 			c.dispatchPermission(ctx, ac, m)
+		// REPLAYED HISTORY. Its own arms, physically apart from the live
+		// *corev1.Event case above: a replayed event cannot reach dispatchEvent
+		// (and so cannot reach the SSM, the task catalog, or the progress
+		// resolver) because it is not that type. See replay.go.
+		case *corev1.ReplayEvent:
+			c.dispatchReplayEvent(m)
+		case *corev1.ReplayDone:
+			c.dispatchReplayDone(m)
 		case *corev1.Heartbeat:
 			// Liveness only (already recorded via markRecv). No reply: our own
 			// heartbeatSender covers the reverse direction.

@@ -348,7 +348,7 @@ Enums: `Plane`, `EventClass`, `TaskKind`, `TerminalStatus`, `SessionSource`,
 | `DegradedNotice` | store/sidecar/shim outage surfaced honestly |
 | `StateSnapshot` | full resync on frontend (re)connect |
 
-#### 5.4.1 Resync and the bounded below-floor history re-pull
+#### 5.4.1 Resync and the shim-mediated bounded history replay
 
 `StateSnapshot` carries NO conversation, by design. Conversation reaches a
 frontend only as pushed `ConversationDelta`s, which are fire-and-forget: a
@@ -359,38 +359,68 @@ two layers:
 1. **The retained ring** (`sessiondrv`, 4,096 events). Replayed from `from_seq`
    as ordinary `ConversationDelta`s. Idempotent: frontends reconcile by uuid, so
    a re-push REPLACES.
-2. **The below-floor re-pull** (`daemon/internal/storesub`), when `from_seq`
-   falls below the ring's oldest retained seq — which after a daemon restart is
-   EVERY request, since the ring is empty then. The floor comes from the ring
-   when it holds anything, and otherwise from the durable `last_seen_seq` plus
-   one.
+2. **The below-floor replay** (`core.ReplayRequest` over the session's existing
+   shim connection), when `from_seq` falls below the ring's oldest retained seq
+   — which after a daemon restart is EVERY request, since the ring is empty
+   then. The floor comes from the ring when it holds anything, and otherwise
+   from the durable `last_seen_seq` plus one.
 
-The re-pull deliberately reopens a tradeoff this design closed elsewhere: the
+The replay deliberately reopens a tradeoff this design closed elsewhere: the
 daemon subscribes each shim from its HIGH-WATER mark precisely to avoid replay
 storms (a resumed conversation that re-subscribed from 0 once queued the first
 prompt behind ~6,000 replayed frames and blew its ack timeout). Four standing
-constraints are what keep the re-pull from becoming that:
+constraints keep it from becoming that:
 
 - **Frontend-initiated.** Nothing in the daemon ever starts one; it exists only
   as the tail of a `ResyncCmd`.
-- **Bounded.** It stops at the ring floor, a hard event cap, an idle window, and
-  a deadline. A bound that trips is reported, never absorbed.
-- **A side channel.** It opens its OWN throwaway subscriber connection to the
-  store. It must NOT be done by sending the shim a low `Subscribe{from_seq}`:
-  the shim's `onSubscribe` reopens its one standing store subscription, which
-  would move the daemon's own position backwards AND replay everything down the
-  connection the SSM, task catalog, and progress resolver feed from.
-- **Conversation only.** Re-pulled events reach conversation translation and
-  nothing else — not the SSM, not `BuildTaskCatalog`, not the progress resolver,
-  not the retained ring. Those planes consumed these events once already, and
-  double-applying them is exactly what makes historical tasks masquerade as live
-  activity (see §5.4.2).
+- **Bounded.** `to_seq` is the ring floor and the only COMPLETE ending;
+  `max_events` caps one replay; the shim adds an idle window; the daemon adds a
+  deadline. A tripped bound comes back as `ReplayDone{truncated, reason}` and
+  becomes `ErrRepullTruncated` — reported, never absorbed.
+- **A side channel.** The SHIM opens a throwaway store subscription and leaves
+  its standing one exactly where it was. It must NOT be served by sending the
+  shim a low `Subscribe{from_seq}`: `onSubscribe` REOPENS that standing
+  subscription, which would move the daemon's own position backwards AND replay
+  everything down the connection the SSM, task catalog, and progress resolver
+  feed from.
+- **Conversation only, structurally.** Replayed events arrive as `ReplayEvent`,
+  a different wire type from live `Event`s, so `shimclient`'s read loop has
+  nowhere to route them but the replay registry. They reach conversation
+  translation and nothing else — not the SSM, not `BuildTaskCatalog`, not the
+  progress resolver, not the retained ring. Those planes consumed these events
+  once already, and double-applying them is exactly what makes historical tasks
+  masquerade as live activity (see §5.4.2).
 
-At most one re-pull runs per workspace. A concurrent request whose range the
-in-flight pull already covers is coalesced onto it (the pull's output is
-broadcast to every subscriber of the workspace, so the second caller really is
-served); one reaching further back is refused loudly rather than silently
-under-served.
+At most one replay runs per workspace. A concurrent request whose range the
+in-flight one already covers is coalesced onto it (its output is broadcast to
+every subscriber of the workspace, so the second caller really is served); one
+reaching further back is refused loudly rather than silently under-served.
+
+##### Why the daemon does not dial the store itself (a reverted design)
+
+The first implementation of this had the daemon dial the shim-store DIRECTLY,
+in a `daemon/internal/storesub` package that has since been deleted. It worked.
+It was reverted by user ruling, for two reasons worth keeping written down:
+
+- **It leaked facade internals.** The store is an internal of the agent-shim.
+  Dialling it made the store's socket location, its connection lifecycle, and
+  the rule that its seq space is keyed by the vendor uuid all into daemon
+  knowledge. The whole point of the agent-shim boundary (§4) is that the daemon
+  consumes exactly one totally-ordered stream per session and knows nothing
+  about how it is produced; a second, private route to the same data dissolves
+  that.
+- **Its one apparent advantage was a fallback.** The direct dial could still
+  serve history while the shim was down. Under the metaprompt's no-fallbacks
+  rule that is a defect, not a feature: the shim IS the session's transport, and
+  serving history through a side door while it is down masks an outage that
+  eager-ensure already surfaces loudly. A visible failure beats a quietly
+  half-working display.
+
+The structural distinction moved with it, and improved. The direct dial kept
+replayed history out of the SSM/task/progress planes by DISCIPLINE — one daemon
+function that remembered not to call the others. `ReplayEvent` makes it a frame
+type, so the separation is enforced by the demux rather than by remembering
+("structurally impossible beats very improbable").
 
 #### 5.4.2 `BackgroundTasksChanged` is the authoritative live-task set
 

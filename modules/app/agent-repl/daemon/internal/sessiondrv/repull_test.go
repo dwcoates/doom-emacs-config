@@ -17,62 +17,66 @@ import (
 
 // --- fakes ------------------------------------------------------------------
 
-// fakeHistory records what the driver asked the store for and replays a
-// scripted slice back through the caller's sink.
-type fakeHistory struct {
+// replayClient is a fakeClient whose Replay is scripted: it records what the
+// driver asked the SHIM for and streams a canned range back.
+type replayClient struct {
+	fakeClient
+
 	mu sync.Mutex
-	// calls records one entry per Replay, as "from-stop".
+	// calls records one entry per Replay, as [from, to].
 	calls [][2]uint64
-	// vendorIDs records the id each Replay subscribed under.
-	vendorIDs []string
-	events    []*corev1.Event
-	err       error
+	// caps records the max_events each request carried.
+	caps   []uint32
+	events []*corev1.Event
+	result shimclient.ReplayResult
+	err    error
 	// block, when non-nil, holds Replay open until it is closed — the
-	// in-flight-re-pull shape the concurrency guard is about.
+	// in-flight shape the concurrency guard is about.
 	block chan struct{}
 }
 
-func (h *fakeHistory) Replay(_ context.Context, vendorID string, from, stop uint64, onEvent func(*corev1.Event)) (int, error) {
-	h.mu.Lock()
-	h.calls = append(h.calls, [2]uint64{from, stop})
-	h.vendorIDs = append(h.vendorIDs, vendorID)
-	block := h.block
-	events := h.events
-	err := h.err
-	h.mu.Unlock()
+func (c *replayClient) Replay(_ context.Context, from, to uint64, maxEvents uint32, onEvent func(*corev1.Event)) (shimclient.ReplayResult, error) {
+	c.mu.Lock()
+	c.calls = append(c.calls, [2]uint64{from, to})
+	c.caps = append(c.caps, maxEvents)
+	block := c.block
+	events := c.events
+	result := c.result
+	err := c.err
+	c.mu.Unlock()
 	if block != nil {
 		<-block
 	}
 	for _, ev := range events {
 		onEvent(ev)
 	}
-	return len(events), err
+	return result, err
 }
 
-func (h *fakeHistory) callCount() int {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	return len(h.calls)
+func (c *replayClient) callCount() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.calls)
 }
 
 // repullHarness is one live driver whose collaborators are all recorders, so a
-// re-pull's blast radius is directly assertable.
+// replay's blast radius is directly assertable.
 type repullHarness struct {
 	m        *Manager
 	push     *fakePusher
 	applier  *fakeApplier
 	progress *fakeProgress
-	history  *fakeHistory
+	client   *replayClient
 	seq      *fakeSeqStore
 }
 
-func newRepullHarness(t *testing.T, history *fakeHistory, vendorID string) *repullHarness {
+func newRepullHarness(t *testing.T, client *replayClient) *repullHarness {
 	t.Helper()
 	h := &repullHarness{
 		push:     &fakePusher{},
 		applier:  &fakeApplier{},
 		progress: &fakeProgress{},
-		history:  history,
+		client:   client,
 		seq:      &fakeSeqStore{seq: map[string]uint64{}},
 	}
 	m, err := New(Config{
@@ -84,9 +88,7 @@ func newRepullHarness(t *testing.T, history *fakeHistory, vendorID string) *repu
 		SeqStore:        h.seq,
 		ProtocolVersion: "1",
 		Source:          stubSource{},
-		History:         history,
-		VendorSessionID: func(string) string { return vendorID },
-		newClient:       func(cfg shimclient.Config) sessionClient { return &fakeClient{cfg: cfg} },
+		newClient:       func(shimclient.Config) sessionClient { return client },
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -130,74 +132,75 @@ func assistantEvent(t *testing.T, seq uint64, uuid string) *corev1.Event {
 
 func TestResyncWithinTheRingDoesNotRePull(t *testing.T) {
 	// Arrange — the ring's floor is seq 10.
-	history := &fakeHistory{}
-	h := newRepullHarness(t, history, "vendor-uuid")
+	client := &replayClient{}
+	h := newRepullHarness(t, client)
 	h.driver(t).consumer.Consume(assistantEvent(t, 10, "u10"))
 	// Act
 	if err := h.m.Resync("ws", 10); err != nil {
 		t.Fatalf("Resync: %v", err)
 	}
 	// Assert
-	if history.callCount() != 0 {
-		t.Fatalf("re-pulled %d time(s) for an in-window resync, want 0", history.callCount())
+	if client.callCount() != 0 {
+		t.Fatalf("replayed %d time(s) for an in-window resync, want 0", client.callCount())
 	}
 }
 
-func TestResyncBelowTheRingFloorRePullsTheGap(t *testing.T) {
+func TestResyncBelowTheRingFloorAsksTheShimForTheGap(t *testing.T) {
 	// Arrange — the ring's floor is seq 10; the frontend asks from 0.
-	history := &fakeHistory{}
-	h := newRepullHarness(t, history, "vendor-uuid")
+	client := &replayClient{}
+	h := newRepullHarness(t, client)
 	h.driver(t).consumer.Consume(assistantEvent(t, 10, "u10"))
 	// Act
 	if err := h.m.Resync("ws", 0); err != nil {
 		t.Fatalf("Resync: %v", err)
 	}
 	// Assert
-	history.mu.Lock()
-	defer history.mu.Unlock()
-	if len(history.calls) != 1 || history.calls[0] != [2]uint64{0, 10} {
-		t.Fatalf("re-pull calls = %v, want one [0 10]", history.calls)
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	if len(client.calls) != 1 || client.calls[0] != [2]uint64{0, 10} {
+		t.Fatalf("replay calls = %v, want one [0 10]", client.calls)
+	}
+}
+
+func TestRePullCarriesTheRequestersEventCap(t *testing.T) {
+	// Arrange — the bound is the REQUESTER's stated policy, not something the
+	// shim invents on the daemon's behalf.
+	client := &replayClient{}
+	h := newRepullHarness(t, client)
+	h.seq.SetLastSeq("s1", 9)
+	// Act
+	if err := h.m.Resync("ws", 0); err != nil {
+		t.Fatalf("Resync: %v", err)
+	}
+	// Assert
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	if len(client.caps) != 1 || client.caps[0] != repullMaxEvents {
+		t.Fatalf("replay caps = %v, want [%d]", client.caps, repullMaxEvents)
 	}
 }
 
 func TestEmptyRingTakesItsFloorFromTheDurableHighWaterMark(t *testing.T) {
 	// Arrange — a restarted daemon: nothing retained, but last_seen_seq survives.
-	history := &fakeHistory{}
-	h := newRepullHarness(t, history, "vendor-uuid")
+	client := &replayClient{}
+	h := newRepullHarness(t, client)
 	h.seq.SetLastSeq("s1", 7117)
 	// Act
 	if err := h.m.Resync("ws", 0); err != nil {
 		t.Fatalf("Resync: %v", err)
 	}
 	// Assert
-	history.mu.Lock()
-	defer history.mu.Unlock()
-	if len(history.calls) != 1 || history.calls[0] != [2]uint64{0, 7118} {
-		t.Fatalf("re-pull calls = %v, want one [0 7118]", history.calls)
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	if len(client.calls) != 1 || client.calls[0] != [2]uint64{0, 7118} {
+		t.Fatalf("replay calls = %v, want one [0 7118]", client.calls)
 	}
 }
 
-func TestRePullSubscribesUnderTheVendorSessionID(t *testing.T) {
+func TestReplayedEventsReachConversation(t *testing.T) {
 	// Arrange
-	history := &fakeHistory{}
-	h := newRepullHarness(t, history, "vendor-uuid")
-	h.seq.SetLastSeq("s1", 5)
-	// Act
-	if err := h.m.Resync("ws", 0); err != nil {
-		t.Fatalf("Resync: %v", err)
-	}
-	// Assert
-	history.mu.Lock()
-	defer history.mu.Unlock()
-	if len(history.vendorIDs) != 1 || history.vendorIDs[0] != "vendor-uuid" {
-		t.Fatalf("re-pull subscribed under %v, want [vendor-uuid]", history.vendorIDs)
-	}
-}
-
-func TestRePulledEventsReachConversation(t *testing.T) {
-	// Arrange
-	history := &fakeHistory{events: []*corev1.Event{assistantEvent(t, 3, "old")}}
-	h := newRepullHarness(t, history, "vendor-uuid")
+	client := &replayClient{events: []*corev1.Event{assistantEvent(t, 3, "old")}}
+	h := newRepullHarness(t, client)
 	h.seq.SetLastSeq("s1", 9)
 	// Act
 	if err := h.m.Resync("ws", 0); err != nil {
@@ -211,14 +214,14 @@ func TestRePulledEventsReachConversation(t *testing.T) {
 	}
 }
 
-func TestRePulledEventsNeverReachTheSSM(t *testing.T) {
+func TestReplayedEventsNeverReachTheSSM(t *testing.T) {
 	// Arrange — the SSM consumed this history once already; re-applying it is
 	// what drives live_task_count into impossible values.
-	history := &fakeHistory{events: []*corev1.Event{
+	client := &replayClient{events: []*corev1.Event{
 		{SessionId: "vendor-uuid", Seq: 3, Payload: &corev1.Event_TaskEnded{TaskEnded: &corev1.TaskEnded{TaskId: "t1"}}},
 		assistantEvent(t, 4, "old"),
 	}}
-	h := newRepullHarness(t, history, "vendor-uuid")
+	h := newRepullHarness(t, client)
 	h.seq.SetLastSeq("s1", 9)
 	// Act
 	if err := h.m.Resync("ws", 0); err != nil {
@@ -226,14 +229,14 @@ func TestRePulledEventsNeverReachTheSSM(t *testing.T) {
 	}
 	// Assert
 	if len(h.applier.applied) != 0 {
-		t.Fatalf("SSM saw %d re-pulled event(s), want 0", len(h.applier.applied))
+		t.Fatalf("SSM saw %d replayed event(s), want 0", len(h.applier.applied))
 	}
 }
 
-func TestRePulledEventsNeverReachTheProgressResolver(t *testing.T) {
+func TestReplayedEventsNeverReachTheProgressResolver(t *testing.T) {
 	// Arrange
-	history := &fakeHistory{events: []*corev1.Event{assistantEvent(t, 3, "old")}}
-	h := newRepullHarness(t, history, "vendor-uuid")
+	client := &replayClient{events: []*corev1.Event{assistantEvent(t, 3, "old")}}
+	h := newRepullHarness(t, client)
 	h.seq.SetLastSeq("s1", 9)
 	// Act
 	if err := h.m.Resync("ws", 0); err != nil {
@@ -241,16 +244,16 @@ func TestRePulledEventsNeverReachTheProgressResolver(t *testing.T) {
 	}
 	// Assert
 	if len(h.progress.applied) != 0 {
-		t.Fatalf("progress saw %d re-pulled event(s), want 0", len(h.progress.applied))
+		t.Fatalf("progress saw %d replayed event(s), want 0", len(h.progress.applied))
 	}
 }
 
-func TestRePulledEventsNeverRebuildTheTaskCatalog(t *testing.T) {
+func TestReplayedEventsNeverRebuildTheTaskCatalog(t *testing.T) {
 	// Arrange — a historical task lifecycle must not repopulate the roster.
-	history := &fakeHistory{events: []*corev1.Event{
+	client := &replayClient{events: []*corev1.Event{
 		{SessionId: "vendor-uuid", Seq: 3, Payload: &corev1.Event_TaskStarted{TaskStarted: &corev1.TaskStarted{TaskId: "t1"}}},
 	}}
-	h := newRepullHarness(t, history, "vendor-uuid")
+	h := newRepullHarness(t, client)
 	h.seq.SetLastSeq("s1", 9)
 	// Act
 	if err := h.m.Resync("ws", 0); err != nil {
@@ -260,15 +263,15 @@ func TestRePulledEventsNeverRebuildTheTaskCatalog(t *testing.T) {
 	h.push.mu.Lock()
 	defer h.push.mu.Unlock()
 	if len(h.push.catalog) != 0 {
-		t.Fatalf("re-pull pushed %d task catalog(s), want 0", len(h.push.catalog))
+		t.Fatalf("replay pushed %d task catalog(s), want 0", len(h.push.catalog))
 	}
 }
 
-func TestRePulledEventsNeverEnterTheRetainedRing(t *testing.T) {
+func TestReplayedEventsNeverEnterTheRetainedRing(t *testing.T) {
 	// Arrange — back-filling the live window would drift the floor under the
 	// next request.
-	history := &fakeHistory{events: []*corev1.Event{assistantEvent(t, 3, "old")}}
-	h := newRepullHarness(t, history, "vendor-uuid")
+	client := &replayClient{events: []*corev1.Event{assistantEvent(t, 3, "old")}}
+	h := newRepullHarness(t, client)
 	h.seq.SetLastSeq("s1", 9)
 	// Act
 	if err := h.m.Resync("ws", 0); err != nil {
@@ -276,14 +279,14 @@ func TestRePulledEventsNeverEnterTheRetainedRing(t *testing.T) {
 	}
 	// Assert
 	if got := len(h.driver(t).consumer.snapshotRing()); got != 0 {
-		t.Fatalf("ring holds %d re-pulled event(s), want 0", got)
+		t.Fatalf("ring holds %d replayed event(s), want 0", got)
 	}
 }
 
 func TestConcurrentCoveredRePullCoalesces(t *testing.T) {
-	// Arrange — a pull from 0 is already running when a second asks from 5.
-	history := &fakeHistory{block: make(chan struct{})}
-	h := newRepullHarness(t, history, "vendor-uuid")
+	// Arrange — a replay from 0 is already running when a second asks from 5.
+	client := &replayClient{block: make(chan struct{})}
+	h := newRepullHarness(t, client)
 	h.seq.SetLastSeq("s1", 100)
 	started := make(chan struct{})
 	go func() {
@@ -291,10 +294,10 @@ func TestConcurrentCoveredRePullCoalesces(t *testing.T) {
 		_ = h.m.Resync("ws", 0)
 	}()
 	<-started
-	waitFor(t, "the first re-pull to start", func() bool { return history.callCount() == 1 })
+	waitFor(t, "the first replay to start", func() bool { return client.callCount() == 1 })
 	// Act
 	err := h.m.Resync("ws", 5)
-	close(history.block)
+	close(client.block)
 	// Assert
 	if err != nil {
 		t.Fatalf("a covered concurrent resync must coalesce, got %v", err)
@@ -302,10 +305,10 @@ func TestConcurrentCoveredRePullCoalesces(t *testing.T) {
 }
 
 func TestConcurrentUncoveredRePullIsRefusedLoudly(t *testing.T) {
-	// Arrange — a pull from 50 is running when a second asks from 5, which it
+	// Arrange — a replay from 50 is running when a second asks from 5, which it
 	// does NOT cover.
-	history := &fakeHistory{block: make(chan struct{})}
-	h := newRepullHarness(t, history, "vendor-uuid")
+	client := &replayClient{block: make(chan struct{})}
+	h := newRepullHarness(t, client)
 	h.seq.SetLastSeq("s1", 100)
 	started := make(chan struct{})
 	go func() {
@@ -313,67 +316,65 @@ func TestConcurrentUncoveredRePullIsRefusedLoudly(t *testing.T) {
 		_ = h.m.Resync("ws", 50)
 	}()
 	<-started
-	waitFor(t, "the first re-pull to start", func() bool { return history.callCount() == 1 })
+	waitFor(t, "the first replay to start", func() bool { return client.callCount() == 1 })
 	// Act
 	err := h.m.Resync("ws", 5)
-	close(history.block)
+	close(client.block)
 	// Assert
 	if !errors.Is(err, ErrRepullInFlight) {
 		t.Fatalf("err = %v, want ErrRepullInFlight", err)
 	}
 }
 
-func TestBelowFloorResyncWithNoHistorySourceFailsLoudly(t *testing.T) {
-	// Arrange
-	m, _ := newTestManager(t, fakeLocator{m: map[string]string{"ws": "s1"}}, &fakeSpawner{})
-	if err := m.Ensure("ws"); err != nil {
-		t.Fatalf("Ensure: %v", err)
-	}
-	// Act
-	err := m.Resync("ws", 0)
-	// Assert
-	if err == nil || !strings.Contains(err.Error(), "no history source is wired") {
-		t.Fatalf("err = %v, want a loud no-history-source failure", err)
-	}
-}
-
-func TestBelowFloorResyncWithNoVendorSessionIDFailsLoudly(t *testing.T) {
-	// Arrange — the store keys events by the vendor uuid; without one a
-	// subscribe registers on a channel nothing publishes to.
-	history := &fakeHistory{}
-	h := newRepullHarness(t, history, "")
+func TestTruncatedReplayIsReportedNotPassedOffAsComplete(t *testing.T) {
+	// Arrange — the shim hit a bound before reaching the floor.
+	client := &replayClient{result: shimclient.ReplayResult{Delivered: 12, Truncated: true, Reason: "hit the cap"}}
+	h := newRepullHarness(t, client)
 	h.seq.SetLastSeq("s1", 9)
 	// Act
 	err := h.m.Resync("ws", 0)
 	// Assert
-	if err == nil || !strings.Contains(err.Error(), "no vendor session id") {
-		t.Fatalf("err = %v, want a loud missing-vendor-id failure", err)
+	if !errors.Is(err, ErrRepullTruncated) {
+		t.Fatalf("err = %v, want ErrRepullTruncated", err)
 	}
 }
 
-func TestRePullFailureSurfacesToTheCaller(t *testing.T) {
+func TestTruncatedReplayNamesTheShimsReason(t *testing.T) {
 	// Arrange
-	history := &fakeHistory{err: errors.New("store down")}
-	h := newRepullHarness(t, history, "vendor-uuid")
+	client := &replayClient{result: shimclient.ReplayResult{Truncated: true, Reason: "store subscription idle"}}
+	h := newRepullHarness(t, client)
 	h.seq.SetLastSeq("s1", 9)
 	// Act
 	err := h.m.Resync("ws", 0)
 	// Assert
-	if err == nil || !strings.Contains(err.Error(), "store down") {
-		t.Fatalf("err = %v, want the store failure surfaced", err)
+	if err == nil || !strings.Contains(err.Error(), "store subscription idle") {
+		t.Fatalf("err = %v, want the shim's own reason carried through", err)
+	}
+}
+
+func TestReplayFailureSurfacesToTheCaller(t *testing.T) {
+	// Arrange
+	client := &replayClient{err: errors.New("shim went away")}
+	h := newRepullHarness(t, client)
+	h.seq.SetLastSeq("s1", 9)
+	// Act
+	err := h.m.Resync("ws", 0)
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "shim went away") {
+		t.Fatalf("err = %v, want the shim failure surfaced", err)
 	}
 }
 
 func TestRePullClearsItsInFlightMarkOnFailure(t *testing.T) {
-	// Arrange — a failed pull that stayed "in flight" would wedge the workspace.
-	history := &fakeHistory{err: errors.New("store down")}
-	h := newRepullHarness(t, history, "vendor-uuid")
+	// Arrange — a failed replay that stayed "in flight" would wedge the workspace.
+	client := &replayClient{err: errors.New("shim went away")}
+	h := newRepullHarness(t, client)
 	h.seq.SetLastSeq("s1", 9)
 	_ = h.m.Resync("ws", 0)
 	// Act
 	_ = h.m.Resync("ws", 0)
 	// Assert
-	if history.callCount() != 2 {
-		t.Fatalf("re-pulled %d time(s), want 2 (the first failure released the mark)", history.callCount())
+	if client.callCount() != 2 {
+		t.Fatalf("replayed %d time(s), want 2 (the first failure released the mark)", client.callCount())
 	}
 }
