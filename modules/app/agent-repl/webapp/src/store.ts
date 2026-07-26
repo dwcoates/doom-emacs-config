@@ -26,7 +26,6 @@ import type {
   WorkspaceStatusInput,
 } from "./state-adapter.js";
 import {
-  AssistantMessageError,
   AsyncSource,
   ContentBlock,
   ModelInfo,
@@ -63,13 +62,6 @@ export interface TextItem {
   parentToolUseId?: string;
   text: string;
   done: boolean;
-  /**
-   * Set when the owning assistant message was an API-level failure (a
-   * session/usage limit, a billing or auth error): the bubble is a failure
-   * notice, not an answer, so it renders red instead of the green
-   * final-response border. Undefined on a normal block.
-   */
-  error?: AssistantMessageError;
   /**
    * When the agent OPENED the block, rendered on the bubble. Taken at the
    * start rather than the end so the stamp holds still while the block streams.

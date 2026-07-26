@@ -672,10 +672,10 @@ describe("renderItem", () => {
     expect(html).toContain(`class="bubble assistant md final-response"`);
   });
 
-  it("red-borders an API-error response instead of greening it as the final answer", () => {
-    // Arrange — a session-limit message: an errored assistant message that is
-    // also the turn's last text before a success result, so absent the error
-    // flag it would win the green final-response border.
+  it("never emits the retired error-response class on a text bubble", () => {
+    // Arrange — an ordinary completed answer: API-level failures now arrive
+    // as their own SystemFailureItem card, so no text bubble ever wears the
+    // old red error-response border.
     const item: ConversationItem = {
       kind: "text",
       ts: TEXT_TS,
@@ -683,31 +683,11 @@ describe("renderItem", () => {
       messageId: "m1",
       text: "You've hit your session limit",
       done: true,
-      error: "rate_limit",
     };
     // Act
     const html = renderItem(item, undefined, finalsClosing(item));
     // Assert
-    expect(html).toContain(`class="bubble assistant md error-response"`);
-    expect(html).not.toContain("final-response");
-  });
-
-  it("red-borders an API-error response that never became a final answer", () => {
-    // Arrange — an errored message with no closing chip: it must still read as
-    // a failure rather than an unbordered ordinary block.
-    const item: ConversationItem = {
-      kind: "text",
-      ts: TEXT_TS,
-      blockId: "b1",
-      messageId: "m1",
-      text: "Overloaded",
-      done: true,
-      error: "server_error",
-    };
-    // Act
-    const html = renderItem(item);
-    // Assert
-    expect(html).toContain(`class="bubble assistant md error-response"`);
+    expect(html).not.toContain("error-response");
   });
 
   it("nests the completed turn's chip inside the final response it closes", () => {
