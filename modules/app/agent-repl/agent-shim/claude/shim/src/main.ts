@@ -40,6 +40,7 @@ import {
 } from "./protocol.js";
 import {
   CanUseToolLike,
+  InterruptReceipt,
   QueryLike,
   SdkUserMessageLike,
   SessionDeps,
@@ -53,9 +54,14 @@ interface CliArgs {
   cwd?: string;
   model?: string;
   resume?: string;
-  /** Path to the claude CLI the SDK should drive (system binary for
-   *  version parity with vterm sessions and CLI-era permission modes
-   *  like `auto` that the SDK's bundled cli.js predates). */
+  /** Path to the claude CLI the SDK should drive.
+   *
+   *  Kept for VERSION PARITY with vterm sessions: the user upgrades their
+   *  `claude` independently of our lockfile, so the system binary can lead
+   *  the SDK's bundled one. It no longer exists to work around a stale
+   *  bundle — since SDK 0.2.113 the SDK spawns a per-platform NATIVE
+   *  Claude Code binary (0.3.220 bundles 2.1.220), not a JS `cli.js`, and
+   *  that bundle is current enough to resolve the same command set. */
   claudeBin?: string;
   /** UDS-mode listener path (session-<id>.sock). Present => UDS mode. */
   daemonSocket?: string;
@@ -419,7 +425,8 @@ function lazyQuery(queryPromise: Promise<QueryLike>): QueryLike {
         },
       };
     },
-    interrupt: async (): Promise<void> => (await queryPromise).interrupt(),
+    interrupt: async (): Promise<InterruptReceipt | undefined> =>
+      (await queryPromise).interrupt(),
     setPermissionMode: async (mode): Promise<void> =>
       (await queryPromise).setPermissionMode(mode),
     setModel: async (model): Promise<void> => (await queryPromise).setModel(model),

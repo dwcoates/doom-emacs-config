@@ -3,6 +3,7 @@ import { AsyncQueue } from "../src/input-queue.js";
 import { ModelInfo, PermissionMode, ShimEvent, SlashCommand } from "../src/protocol.js";
 import {
   CanUseToolLike,
+  InterruptReceipt,
   PermissionResultLike,
   QueryLike,
   SdkMessageLike,
@@ -37,6 +38,8 @@ interface Harness {
 }
 
 interface HarnessOpts {
+  /** The receipt `interrupt()` resolves; absent models a pre-0.3.205 CLI. */
+  interruptReceipt?: InterruptReceipt;
   setPermissionModeError?: Error;
   setModelError?: Error;
   supportedModels?: ModelInfo[];
@@ -92,6 +95,7 @@ function makeHarness(opts?: HarnessOpts): Harness {
     [Symbol.asyncIterator]: () => sdkOut[Symbol.asyncIterator](),
     interrupt: async () => {
       interruptCount++;
+      return opts?.interruptReceipt;
     },
     setPermissionMode: async (mode) => {
       if (opts?.setPermissionModeError) throw opts.setPermissionModeError;
@@ -244,7 +248,7 @@ describe("ShimSession lifecycle", () => {
           throw new Error("boom");
         },
       }),
-      interrupt: async () => {},
+      interrupt: async () => undefined,
       setPermissionMode: async () => {},
       setModel: async () => {},
       supportedModels: async () => [],
@@ -332,6 +336,28 @@ describe("ShimSession command handling", () => {
     await until(() => h.interruptCalls() === 1);
     // Assert
     expect(h.interruptCalls()).toBe(1);
+  });
+
+  it("reports an interrupt receipt whose still_queued names surviving work", async () => {
+    // Arrange — the SDK answers interrupt() with messages that outlived it.
+    const h = makeHarness({ interruptReceipt: { still_queued: ["u-1", "u-2"] } });
+    // Act
+    h.send({ type: "interrupt", request_id: "r1" });
+    await until(() => h.eventsOfType("error").length === 1);
+    // Assert — surfaced as a command-scoped error, never swallowed.
+    const [err] = h.eventsOfType("error");
+    expect(err!.request_id).toBe("r1");
+    expect(err!.message).toContain("u-1,u-2");
+  });
+
+  it("stays silent when an interrupt receipt reports no survivors", async () => {
+    // Arrange — the ordinary case.
+    const h = makeHarness({ interruptReceipt: { still_queued: [] } });
+    // Act
+    h.send({ type: "interrupt", request_id: "r1" });
+    await until(() => h.interruptCalls() === 1);
+    // Assert
+    expect(h.eventsOfType("error")).toEqual([]);
   });
 
   it("acks set-permission-mode after applying it to the query", async () => {
