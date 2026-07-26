@@ -1124,13 +1124,6 @@ pre {
 /* The answer the turn landed on, as against the commentary above it. Only
    the border color changes, so the 0.3px the base reserved stays laid out. */
 .bubble.assistant.final-response { border-color: var(--final-response); }
-/* An API-level error response (a session/usage limit, a billing or auth
-   failure): the bubble is a failure notice, not an answer, so it wears the
-   red error border in place of the green one. The renderer applies only ONE
-   state class at a time, so this never fights final-response/async-live on
-   specificity — it replaces them. Only the color changes, so the reserved
-   0.3px stays laid out and the flip causes no reflow. */
-.bubble.assistant.error-response { border-color: var(--err); }
 /* Async quiescence: a bubble whose LIVE background work is enumerated inside
    it (see AsyncCatalog) wears the amber async border — "the answer is landed
    but its detached work is not". Amber outranks the green final-response (it
