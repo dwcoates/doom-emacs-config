@@ -10,8 +10,8 @@ import (
 
 // stubHandler records the frames it saw and emits one event per decoded object.
 type stubHandler struct {
-	batches   [][]Frame
-	lastCtx   Context
+	batches [][]Frame
+	lastCtx Context
 }
 
 func (s *stubHandler) Handle(fr []Frame, ctx *Context) []*corev1.Event {

@@ -77,11 +77,11 @@ type watched struct {
 }
 
 type sidecar struct {
-	store    *storeclient.Client
-	disc     *discover.Discoverer
-	tracker  *stale.Tracker
-	roots    []string
-	log      handler.Logf
+	store   *storeclient.Client
+	disc    *discover.Discoverer
+	tracker *stale.Tracker
+	roots   []string
+	log     handler.Logf
 
 	handlers map[tail.Kind]tail.Handler
 	watchers map[string]*watched // by path

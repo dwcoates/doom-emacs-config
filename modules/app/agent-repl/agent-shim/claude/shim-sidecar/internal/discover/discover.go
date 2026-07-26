@@ -21,11 +21,11 @@ type Target struct {
 	Path      string
 	Kind      tail.Kind
 	SessionID string
-	TaskID    string    // agent/shell/workflow files
-	RunID     string    // workflow journals
-	SpoolDir  string    // session's /tmp task dir (shell output_path construction)
-	MetaPath  string    // agent sidechain companion agent-<id>.meta.json, if any
-	Raw       bool      // true → RawTextCodec (shell spool); else JSONLCodec
+	TaskID    string // agent/shell/workflow files
+	RunID     string // workflow journals
+	SpoolDir  string // session's /tmp task dir (shell output_path construction)
+	MetaPath  string // agent sidechain companion agent-<id>.meta.json, if any
+	Raw       bool   // true → RawTextCodec (shell spool); else JSONLCodec
 }
 
 // Codec returns the framing codec for this target.
@@ -39,7 +39,7 @@ func (t Target) Codec() tail.Codec {
 // Discoverer holds the configured roots and performs discovery.
 type Discoverer struct {
 	configRoots []string // e.g. ~/.claude, ~/.claude-chesscom
-	spoolRoot   string    // e.g. /tmp (resolves /tmp/claude-<uid>/… itself)
+	spoolRoot   string   // e.g. /tmp (resolves /tmp/claude-<uid>/… itself)
 	log         Logf
 }
 
