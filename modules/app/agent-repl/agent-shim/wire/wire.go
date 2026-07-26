@@ -16,12 +16,13 @@
 // against the proto global registry. core.proto carries no top-level frame
 // oneof, so the Any IS the type tag.
 //
-// That envelope layer used to be copy-pasted into four packages
-// (shim-store's server, the sidecar's store client, the daemon's shimclient,
-// and the daemon's storesub). Four hand-maintained copies of a wire contract
-// is exactly the drift this package exists to make impossible, so the encode
-// and decode halves live here: MarshalAny/UnmarshalAny for callers that need
-// the two steps apart, and WriteAny/ReadAny for the ordinary case.
+// That envelope layer used to be copy-pasted into four packages, each with its
+// own hand-maintained copy of one wire contract — exactly the drift this
+// package exists to make impossible. So the encode and decode halves live here:
+// MarshalAny/UnmarshalAny for callers that need the two steps apart, and
+// WriteAny/ReadAny for the ordinary case. Today's callers are shim-store's
+// server, the sidecar's store client, the daemon's shimclient, and the daemon's
+// shim listener.
 //
 // The protobuf dependency this adds is not new weight on any consumer: every
 // package that frames an Any already depends on protobuf, and only packages

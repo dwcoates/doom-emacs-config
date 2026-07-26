@@ -13,12 +13,11 @@ import (
 	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
-// The Any envelope layer is a WIRE CONTRACT shared by four packages that were
-// each carrying their own copy of it (shim-store's server, the sidecar's store
-// client, the daemon's shimclient, and the daemon's storesub). These tests pin
-// the byte-level behavior those copies had, so the unification is verifiable
-// rather than asserted: TestWriteAnyIsByteIdenticalToTheHandRolledSequence is
-// the one that actually holds the contract, and the rest pin the error
+// The Any envelope layer is a WIRE CONTRACT with live peers on both ends, and
+// it was once four hand-maintained copies rather than one owner. These tests
+// pin the byte-level behavior those copies had, so the unification is
+// verifiable rather than asserted: TestWriteAnyIsByteIdenticalToTheHandRolledSequence
+// is the one that actually holds the contract, and the rest pin the error
 // classification each call site keys on.
 //
 // The messages under test are well-known types on purpose. This module owns
@@ -165,10 +164,10 @@ func TestReadAnyDoesNotWrapTheFrameError(t *testing.T) {
 }
 
 func TestReadAnyKeepsATransportErrorMatchable(t *testing.T) {
-	// Arrange — storesub classifies a read deadline with
-	// errors.Is(err, os.ErrDeadlineExceeded) and shimclient classifies a closed
-	// socket with net.ErrClosed. Both arrive from the transport mid-header, so
-	// the sentinel has to survive ReadFrame's wrap and ReadAny's passthrough.
+	// Arrange — shimclient classifies a closed socket with net.ErrClosed, and
+	// a read deadline surfaces as os.ErrDeadlineExceeded. Both arrive from the
+	// transport mid-header, so the sentinel has to survive ReadFrame's wrap and
+	// ReadAny's passthrough.
 	sentinel := errors.New("transport is gone")
 	// Act
 	_, err := ReadAny(errReader{err: sentinel})
