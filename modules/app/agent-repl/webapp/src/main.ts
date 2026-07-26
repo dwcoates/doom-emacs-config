@@ -50,6 +50,7 @@ import {
 } from "./account.js";
 import { attachLoginTerminal, type LoginTerminal } from "./login-terminal.js";
 import { closeLogin, loginNotice, requestLogin } from "./login.js";
+import { PaintAttestation } from "./paint-attest.js";
 import { PermissionMode } from "./protocol.js";
 import { decodeFrontendFrame } from "./frontend-proto.js";
 import { escapeHtml } from "./highlight.js";
@@ -425,6 +426,9 @@ async function boot(): Promise<void> {
     // needs; it derives no progress fact of its own.
     footer.render({
       progress: store.progress,
+      // THE phase, read off the workspace's one authoritative state rather
+      // than off a copy carried in a second message (F5).
+      renderState: s.renderState,
       agents: sessionSubagents(s.items),
       tasks: store.taskRoster,
       items: s.items,
@@ -600,32 +604,27 @@ async function boot(): Promise<void> {
   const smooth = new SmoothReveal({ now: () => performance.now() });
 
   /**
-   * The last seq this webview reported painting, or -1 for none.
+   * THE paint attestation (see paint-attest.ts): this end's answer for every
+   * render pass, carrying both identities of that pass — the conversation seq
+   * drawn and the workspace state's delivery generation.
    *
-   * Reset to -1 on a send failure so a later paint re-attests rather than
-   * assuming the daemon heard: the failure mode this whole mechanism guards
-   * against is a frontend that LOOKS attested without having drawn, so it
-   * must never bookkeep an ack it did not land.
+   * `canPaint` is the visibility fact only this end knows. A hidden webview
+   * has no animation frames at all, so it cannot draw and says so rather than
+   * going silent and wedging the Emacs tab bar behind a webview nobody is
+   * looking at.
    */
-  let attestedThroughSeq = -1;
+  const attest = new PaintAttestation({
+    send: (throughSeq, generation, outcome) =>
+      dispatcher.paintAck(cmdWorkspace(), throughSeq, generation, outcome),
+    canPaint: () => document.visibilityState !== "hidden",
+    log: (message) => clog("error", message),
+  });
 
-  /**
-   * Report that the feed has been painted through `throughSeq`.
-   *
-   * Called only from the completion of a render that actually drew, so a
-   * webview that cannot paint simply never calls it and its workspace stays
-   * on the compromised-route state — the honest answer. A seq of 0 is a real
-   * attestation of an EMPTY history, which is what lets a never-prompted
-   * session read as ready.
-   */
-  const attestPaint = (throughSeq: number): void => {
-    if (throughSeq <= attestedThroughSeq) return;
-    attestedThroughSeq = throughSeq;
-    void dispatcher.paintAck(cmdWorkspace(), throughSeq).catch((err: unknown) => {
-      attestedThroughSeq = -1;
-      clog("error", `paint ack failed: ${String(err)}`);
-    });
-  };
+  /** What one render pass has in hand, for the attestation. */
+  const paintSnapshot = (): { throughSeq: number; generation: number } => ({
+    throughSeq: store.state.lastSeq,
+    generation: store.state.renderGeneration,
+  });
 
   const rerender = (): void => {
     const shown = smooth.reveal(store.state);
@@ -633,14 +632,15 @@ async function boot(): Promise<void> {
     nav.reconcile(lastUserTurnId(store.state.items));
     renderChrome();
     if (shown.pending) frames.schedule();
-    // PAINT ATTESTATION. The history is on screen, so the route is not merely
-    // healthy hop by hop — it is demonstrably RENDERABLE, the one fact the
-    // daemon cannot observe from its own side and therefore will not assume.
+    // PAINT ATTESTATION. The history and the state are on screen, so the route
+    // is not merely healthy hop by hop — it is demonstrably RENDERABLE, the one
+    // fact the daemon cannot observe from its own side and therefore will not
+    // assume.
     //
     // Attesting from HERE rather than from effect ingestion is the whole
-    // point: receiving the history and drawing it are different facts, and
-    // only the second earns the ready state.
-    attestPaint(store.state.lastSeq);
+    // point: receiving the frames and drawing them are different facts, and
+    // only the second earns the ready state and releases the state to Emacs.
+    attest.painted(paintSnapshot());
   };
 
   // Renders are coalesced onto animation frames: a burst of ingested effects
@@ -684,6 +684,24 @@ async function boot(): Promise<void> {
   // ask keeps them honest through the same coalescer every other render
   // rides; reconciliation no-ops every node whose HTML did not change.
   window.setInterval(() => frames.schedule(), 30_000);
+
+  // REPAINT ON SHOW. A hidden webview's animation frames are suspended, so
+  // whatever is on screen is the frame from before it was hidden while the
+  // store behind it has moved on — the socket keeps delivering either way.
+  // Becoming visible therefore repaints from the CURRENT snapshot rather than
+  // waiting for the next arriving frame to trigger one, and the render that
+  // follows is what sends the PAINTED attestation.
+  //
+  // The order is the point: this end draws what it holds BEFORE it tells the
+  // daemon it is painting again, so there is no instant at which the daemon
+  // believes a stale frame has been attested.
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") return;
+    // The rail's roster is PUSHED by Emacs rather than streamed, so it is the
+    // one surface the feed render would not refresh on its own.
+    sidebar.repaint();
+    frames.schedule();
+  });
 
   // swapTo rebinds the live view onto a successor session id (the
   // client-side twin of the Emacs sync-webview rebind): fresh store,
@@ -771,6 +789,12 @@ async function boot(): Promise<void> {
           throw err;
         }
         const result = store.ingest(effects);
+        // Answer for a state this end cannot draw. A hidden webview receives
+        // frames normally and has no animation frame to render them in, so it
+        // reports that at once rather than going silent and holding the Emacs
+        // tab bar behind a webview nobody is looking at. While this end CAN
+        // paint this is a no-op and the render reports the truth instead.
+        attest.observe(paintSnapshot());
         // Ask for the conversation history this connection has not been told.
         // Read AFTER ingest so the snapshot's own SessionView has supplied the
         // workspace key the daemon routes a resync by.

@@ -48,7 +48,6 @@ function progress(over: Partial<ProgressInput> = {}): ProgressInput {
   return {
     workspace: "/w",
     sessionId: "s1",
-    state: "idle",
     turnStartedAtMs: 0,
     thinkingTokens: 0,
     inputTokens: 0,
@@ -71,6 +70,7 @@ function progress(over: Partial<ProgressInput> = {}): ProgressInput {
 function input(over: Partial<FooterInput> = {}): FooterInput {
   return {
     progress: progress(),
+    renderState: "idle",
     agents: [],
     tasks: [],
     items: [],
@@ -633,6 +633,43 @@ describe("sheetHtml: the detail the thin strip drops", () => {
 });
 
 // --- the whole dock ----------------------------------------------------------
+
+describe("footerHtml: the phase comes from the workspace state (F5)", () => {
+  it("shows the phase the WORKSPACE STATE resolved", () => {
+    // Arrange / Act — the footer's phase source is the same message the tab
+    // bar and the sidebar dot read, so the three cannot disagree.
+    const got = footerHtml(input({ renderState: "thinking" }), CLOSED, NOW);
+    // Assert
+    expect(got).toContain("thinking");
+  });
+
+  it("shows ready for a fully backfilled workspace with no prompt yet", () => {
+    // Arrange / Act — THE regression this closes. The footer used to read a
+    // copy of the phase kept on ProgressView, seeded INIT and refreshed only
+    // on the progress resolver's own triggers, so a freshly opened workspace
+    // read "starting" against an already-green tab until the first prompt.
+    const got = footerHtml(input({ renderState: "ready" }), CLOSED, NOW);
+    // Assert
+    expect(got).toContain("ready");
+    expect(got).not.toContain("starting");
+  });
+
+  it("names no phase at all before a state has been resolved", () => {
+    // Arrange / Act — naming one anyway is exactly the fabrication the stale
+    // mirror committed.
+    const got = footerHtml(input({ renderState: null }), CLOSED, NOW);
+    // Assert
+    expect(got).not.toContain("pfooter-phase");
+  });
+
+  it("takes no phase from the progress view, which no longer carries one", () => {
+    // Arrange / Act — the ProgressInput has no `state` field to read; the
+    // footer's only phase source is renderState.
+    const got = footerHtml(input({ renderState: "vendor_blocked" }), CLOSED, NOW);
+    // Assert
+    expect(got).toContain("blocked");
+  });
+});
 
 describe("footerHtml: the V4 segmented dock", () => {
   it("renders nothing before the daemon has resolved anything", () => {

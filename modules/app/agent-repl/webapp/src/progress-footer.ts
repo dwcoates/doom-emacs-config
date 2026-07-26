@@ -29,7 +29,7 @@ import { AGENTS_SPEC, agentsMenuHtml } from "./agents.js";
 import { CounterEntry, CounterSpec, isActive } from "./counter-menu.js";
 import { formatElapsed } from "./duration.js";
 import { escapeHtml } from "./highlight.js";
-import type { ProgressInput } from "./state-adapter.js";
+import type { ProgressInput, WebRenderState } from "./state-adapter.js";
 import { ConversationItem, ToolItem } from "./store.js";
 import { TASKS_SPEC, tasksMenuHtml } from "./tasks.js";
 import { IDLE_LABEL, TIMER_SLOT } from "./timer.js";
@@ -47,6 +47,16 @@ export interface FooterDisclosure {
 export interface FooterInput {
   /** The daemon's resolved view, or null before the first one lands. */
   progress: ProgressInput | null;
+  /**
+   * THE workspace's resolved phase (F5), read off the same `WorkspaceState` the
+   * Emacs tab bar and the sidebar dot read. `null` before the first one lands,
+   * which collapses the phase cell rather than naming a phase nothing resolved.
+   *
+   * It arrives here rather than on `progress` because a phase carried in two
+   * messages is a phase kept in two copies, and the stale copy is what read
+   * "starting" against an already-green tab.
+   */
+  renderState: WebRenderState | null;
   /** The session's subagent roster, relocated from the topbar. */
   agents: readonly CounterEntry[];
   /** The session's task roster, relocated from the topbar. */
@@ -81,15 +91,15 @@ export interface PhaseLabel {
 }
 
 /**
- * The phase mirror: the SSM's resolved render state as the footer's anchor
- * word, tone, and spin.
+ * The workspace's resolved render state as the footer's anchor word, tone, and
+ * spin — read off the ONE authority, not off a copy.
  *
  * The vocabulary is CLOSED, so a new render state is a compile error here
  * rather than a footer that silently shows nothing. Merge phases get the quiet
  * muted tone: a merge is chrome the sidebar leads on, and the footer only
  * echoes it.
  */
-export function phaseLabel(state: ProgressInput["state"]): PhaseLabel {
+export function phaseLabel(state: WebRenderState): PhaseLabel {
   switch (state) {
     case "thinking":
       return { word: "thinking", tone: "thinking", spinning: true };
@@ -367,11 +377,17 @@ export function footerHtml(
 ): string {
   const p = input.progress;
   if (p === null) return "";
-  const phase = phaseLabel(p.state);
-  const spin = phase.spinning ? `<span class="pfooter-spin" aria-hidden="true"></span> ` : "";
-  const cells: string[] = [
-    `<div class="pfooter-cell pfooter-phase ${phase.tone}">${spin}${escapeHtml(phase.word)}</div>`,
-  ];
+  const cells: string[] = [];
+  // The phase cell is present only once a state has actually been resolved.
+  // Before that there is no phase to name, and naming one anyway is exactly
+  // the fabrication the stale mirror used to commit.
+  if (input.renderState !== null) {
+    const phase = phaseLabel(input.renderState);
+    const spin = phase.spinning ? `<span class="pfooter-spin" aria-hidden="true"></span> ` : "";
+    cells.push(
+      `<div class="pfooter-cell pfooter-phase ${phase.tone}">${spin}${escapeHtml(phase.word)}</div>`,
+    );
+  }
   const activity = activityDetail(input, nowMs);
   cells.push(
     `<div class="pfooter-cell pfooter-grow ${activity ? activity.tone : "muted"}">` +

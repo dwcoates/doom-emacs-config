@@ -419,9 +419,13 @@ func TestSnapshotProviderCarriesTheProgressViews(t *testing.T) {
 	}
 }
 
-func TestWireAgentShimMirrorsSSMStateIntoProgress(t *testing.T) {
-	// Arrange — the seam between the two resolvers: the footer's phase must be
-	// the SSM's verdict, not a second opinion.
+// The seam between the two resolvers still fires — an SSM transition reaches
+// the progress resolver through the same loop that pushes the WorkspaceState
+// frame — but it no longer carries a PHASE. The footer reads the phase off the
+// WorkspaceState, so a copy here would be a second, staler answer to a question
+// the SSM has already answered.
+func TestWireAgentShimFeedsTheSsmTransitionIntoProgressWithoutAPhaseCopy(t *testing.T) {
+	// Arrange.
 	reg := openTestRegistry(t)
 	prog := progress.New(progress.Options{Logf: func(string, ...any) {}})
 	shim, err := WireAgentShim(AgentShimConfig{
@@ -446,8 +450,11 @@ func TestWireAgentShimMirrorsSSMStateIntoProgress(t *testing.T) {
 	// Assert
 	select {
 	case v := <-views:
-		if v.GetState() != frontendv1.RenderState_RENDER_STATE_MERGING {
-			t.Fatalf("progress state = %v, want MERGING mirrored from the SSM", v.GetState())
+		if v.GetWorkspace() != "/w" {
+			t.Fatalf("progress view = %v, want the transition's workspace", v)
+		}
+		if v.GetState() != frontendv1.RenderState_RENDER_STATE_UNSPECIFIED {
+			t.Fatalf("progress state = %v, want UNSPECIFIED (the phase is not mirrored)", v.GetState())
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for the SSM transition to reach the progress resolver")
@@ -693,6 +700,90 @@ func TestCommandHandlerClientLogChangesNoDaemonState(t *testing.T) {
 	// Assert.
 	if len(p.prompted) != 0 || len(p.interrupts) != 0 {
 		t.Fatal("a client log must not drive the prompt router")
+	}
+}
+
+// --- PaintAck outcomes (F5) --------------------------------------------------
+
+// fakePainters records the attestations the handler forwards to the SSM.
+type fakePainters struct{ acked []uint64 }
+
+func (f *fakePainters) ApplyPaintAck(_ string, throughSeq uint64) error {
+	f.acked = append(f.acked, throughSeq)
+	return nil
+}
+
+func newPaintHandler(t *testing.T, p *fakePainters) *commandHandler {
+	t.Helper()
+	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{},
+		nil, nil, p, func(string, ...any) {})
+	if err != nil {
+		t.Fatalf("newCommandHandler: %v", err)
+	}
+	return h
+}
+
+// A PAINTED ack is the attestation: it advances the SSM's paint watermark.
+func TestPaintAckPaintedAttestsToTheSsm(t *testing.T) {
+	// Arrange.
+	p := &fakePainters{}
+	h := newPaintHandler(t, p)
+
+	// Act.
+	if err := h.PaintAck(context.Background(), "/w", "r1", &frontendv1.PaintAckCmd{
+		ThroughSeq: 7, StateGeneration: 3,
+		Outcome: frontendv1.PaintOutcome_PAINT_OUTCOME_PAINTED,
+	}); err != nil {
+		t.Fatalf("PaintAck: %v", err)
+	}
+
+	// Assert.
+	if len(p.acked) != 1 || p.acked[0] != 7 {
+		t.Fatalf("attestations = %v, want [7]", p.acked)
+	}
+}
+
+// A SUSPENDED ack attests NOTHING. The webview holds the state and cannot draw
+// it, so greening the workspace on that would be the exact lie the attestation
+// exists to prevent. Its delivery half runs on the frontend server's read loop.
+func TestPaintAckSuspendedAttestsNothing(t *testing.T) {
+	// Arrange.
+	p := &fakePainters{}
+	h := newPaintHandler(t, p)
+
+	// Act.
+	if err := h.PaintAck(context.Background(), "/w", "r1", &frontendv1.PaintAckCmd{
+		ThroughSeq: 7, StateGeneration: 3,
+		Outcome: frontendv1.PaintOutcome_PAINT_OUTCOME_SUSPENDED,
+	}); err != nil {
+		t.Fatalf("PaintAck: %v", err)
+	}
+
+	// Assert.
+	if len(p.acked) != 0 {
+		t.Fatalf("attestations = %v, want none (nothing was painted)", p.acked)
+	}
+}
+
+// An ack that names no outcome is a malformed frame, refused loudly rather
+// than read as whichever claim the zero value happens to encode.
+func TestPaintAckWithoutAnOutcomeIsRefused(t *testing.T) {
+	// Arrange.
+	p := &fakePainters{}
+	h := newPaintHandler(t, p)
+
+	// Act.
+	err := h.PaintAck(context.Background(), "/w", "r1", &frontendv1.PaintAckCmd{ThroughSeq: 7})
+
+	// Assert.
+	if err == nil {
+		t.Fatal("expected a refusal for a paint ack with no outcome")
+	}
+	if !strings.Contains(err.Error(), "names no paint outcome") {
+		t.Fatalf("error = %v, want it to name the missing outcome", err)
+	}
+	if len(p.acked) != 0 {
+		t.Fatalf("attestations = %v, want none", p.acked)
 	}
 }
 

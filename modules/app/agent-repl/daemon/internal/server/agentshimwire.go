@@ -158,6 +158,18 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 		Logf:    logf,
 		State:   &ssmSnapshotProvider{ssm: mgr, sessions: cfg.Sessions, inits: cfg.Inits, queues: cfg.Queues, daemon: cfg.SessionCommands, progress: cfg.Progress},
 		Handler: handler,
+		// THE PRODUCTION CALLER ApplyPaintLost never had. The withdrawal half of
+		// the paint attestation existed, was documented, and was reachable from
+		// nothing — so a webview that went away, or a fresh one that replaced
+		// it, left the previous renderer's claim standing and the workspace
+		// green on the strength of a paint nobody could still see. The delivery
+		// sequencer knows both edges (a painter attaching, a painter leaving),
+		// which is what makes it the right place to close it.
+		WithdrawPaint: func(workspace, reason string) {
+			if err := mgr.ApplyPaintLost(workspace, reason); err != nil {
+				logf("server: withdraw paint attestation ws=%s reason=%s: %v", workspace, reason, err)
+			}
+		},
 	})
 
 	// SSM state changes -> frontend WorkspaceState pushes, AND the progress

@@ -108,6 +108,11 @@ export interface WorkspaceStatusInput {
   turnActive: boolean;
   liveTaskCount: number;
   mergePhase: string;
+  /**
+   * The emission's delivery identity (F5). This end acknowledges it once it has
+   * drawn the state, which is what releases the state to the Emacs tab bar.
+   */
+  generation: number;
 }
 
 /** SessionView → topbar / session-info input. */
@@ -211,7 +216,10 @@ export interface RateLimitInput {
 export interface ProgressInput {
   workspace: string;
   sessionId: string;
-  state: WebRenderState;
+  // NO PHASE (F5): the footer reads the workspace's one authoritative render
+  // state off `StoreState.renderState`, which is the same message the tab bar
+  // and the sidebar dot read. The copy that used to live here refreshed on the
+  // progress resolver's triggers and went stale.
   /** 0 = no turn in flight. */
   turnStartedAtMs: number;
   thinkingTokens: number;
@@ -356,6 +364,7 @@ export class StateAdapter {
         turnActive: ws.turnActive,
         liveTaskCount: Number(ws.liveTaskCount),
         mergePhase: ws.mergePhase,
+        generation: Number(ws.generation),
       },
     };
   }
@@ -448,7 +457,6 @@ export class StateAdapter {
       value: {
         workspace: pv.workspace,
         sessionId: pv.sessionId,
-        state: renderStateKeyword(pv.state),
         turnStartedAtMs: pv.turnStartedAtMs,
         thinkingTokens: pv.thinkingTokens,
         inputTokens: pv.inputTokens,

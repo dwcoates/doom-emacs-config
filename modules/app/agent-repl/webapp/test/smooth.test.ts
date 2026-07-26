@@ -67,6 +67,8 @@ function state(items: ConversationItem[]): StoreState {
     costUsd: null,
     taskSummary: null,
     lastSeq: 0,
+    renderState: null,
+    renderGeneration: 0,
   };
 }
 

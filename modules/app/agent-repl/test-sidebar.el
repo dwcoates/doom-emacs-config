@@ -519,6 +519,50 @@ render state, since sidebar-but-not-tab-bar is the fact being conveyed."
         (agent-repl--sidebar-tick))
       (should (= pushes 2)))))
 
+;;;; ---- The rail moves with the tab bar, not a second later -----------------
+;;
+;; The dot and the tab are two renderings of ONE value.  What used to differ
+;; was when each read it: the tab bar recolored as the pushed state was
+;; stored, the rail waited for the 1Hz tick to notice.  These pin the repaint
+;; onto the application point itself, so no interval exists in which the two
+;; surfaces disagree.
+
+(ert-deftest agent-repl-test-sidebar-pushes-on-a-pushed-state-transition ()
+  "Applying a pushed render state repaints the rail in the same breath."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
+    (let ((pushes 0))
+      (cl-letf (((symbol-function 'agent-repl--sidebar-push)
+                 (lambda () (cl-incf pushes))))
+        (agent-repl--sidebar-react-to-pushed-state "ws" :ready :init))
+      (should (= pushes 1)))))
+
+(ert-deftest agent-repl-test-sidebar-skips-a-push-that-moved-no-keyword ()
+  "A re-push of the same keyword changes no dot, so it repaints nothing."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
+    (let ((pushes 0))
+      (cl-letf (((symbol-function 'agent-repl--sidebar-push)
+                 (lambda () (cl-incf pushes))))
+        (agent-repl--sidebar-react-to-pushed-state "ws" :ready :ready))
+      (should (= pushes 0)))))
+
+(ert-deftest agent-repl-test-sidebar-transition-push-quiets-the-next-tick ()
+  "The transition push refreshes the signature, so the tick does not repeat it."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
+    (let ((pushes 0))
+      (cl-letf (((symbol-function 'agent-repl--sidebar-push)
+                 (lambda () (cl-incf pushes))))
+        (agent-repl--sidebar-react-to-pushed-state "ws" :ready :init)
+        (agent-repl--sidebar-tick))
+      (should (= pushes 1)))))
+
+(ert-deftest agent-repl-test-sidebar-reactor-is-registered-on-the-state-hook ()
+  "The repaint is wired to the state-transition hook, not to a timer alone."
+  (should (memq #'agent-repl--sidebar-react-to-pushed-state
+                agent-repl-ws-state-transition-functions)))
+
 ;;;; ---- Keyboard navigation -------------------------------------------------
 
 (ert-deftest agent-repl-test-sidebar-nav-empty-user-errors ()
