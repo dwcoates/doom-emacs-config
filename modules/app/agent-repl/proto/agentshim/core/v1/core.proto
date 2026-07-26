@@ -10,7 +10,7 @@
 //   Event.dedup_key, persists, and fans out to subscribers. The daemon only
 //   ever consumes the store-merged stream forwarded by the shim — everything
 //   the daemon sees (except EPHEMERAL class) is already durable.
-// - EPHEMERAL class (ContentDelta, HeartbeatProgress) bypasses the store:
+// - EPHEMERAL class (ContentDelta, HeartbeatProgress, MessageLatency) bypasses the store:
 //   shim → daemon directly. Consumers reconcile per claude uuid, REPLACING a
 //   streamed preview with the store-delivered final message. Cross-path
 //   ordering is therefore irrelevant. Ephemeral events are never persisted
@@ -125,6 +125,7 @@ message Event {
     HeartbeatProgress heartbeat_progress = 18;
     DegradedState degraded_state = 19;
     UnparsedEvent unparsed = 20;
+    MessageLatency message_latency = 21;
     // Vendor extension payload (e.g. agentshim.data.v1.* messages). The
     // daemon treats it opaquely except for frontend translation; the store
     // treats it fully opaquely apart from dedup-key extraction.
@@ -228,6 +229,23 @@ message HeartbeatProgress {
   string tool_name = 2;
   string parent_tool_use_id = 3;
   double elapsed_seconds = 4;
+}
+
+// EPHEMERAL first-token-latency relay.
+//
+// The vendor stamps time-to-first-token on the frame that OPENS a streamed
+// assistant message — a structural frame the delta bypass otherwise drops,
+// since it carries no typing content. This message is that one fact, relayed
+// on its own so a live progress display can show first-token latency DURING
+// the turn instead of waiting for the turn's terminal result, which carries
+// the same number far too late to be useful.
+//
+// EPHEMERAL like its neighbours above: never persisted, never replayed, and a
+// consumer that never receives one simply has no latency to show. It is a
+// statement about the message in flight, not a durable fact about the turn.
+message MessageLatency {
+  string uuid = 1;    // the message id the stamp belongs to (ContentDelta.uuid)
+  int64 ttft_ms = 2;  // time to first token, as the vendor measured it
 }
 
 // Honest sad-path report (store unreachable, converter storm, …).
