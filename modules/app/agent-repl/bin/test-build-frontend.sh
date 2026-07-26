@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+
+# shellcheck disable=SC2250,SC2292,SC2312,SC2310
+# Opt-in (`-o all`) style checks, declined for the same reasons spelled out at
+# the top of build-frontend.sh. This harness is clean at the real default bar
+# (plus `-S style`) with no suppressions at all.
 # test-build-frontend.sh — hermetic tests for build-frontend.sh staleness logic.
 #
 # Builds a throwaway project tree around a copy of build-frontend.sh and stubs
@@ -264,7 +269,8 @@ t_gc_collects_stranded_keeps_referenced() {
     local store="$root/store"
     make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
     echo '{"lockfileVersion":3,"packages":{"live":{}}}' > "$root/webapp/package-lock.json"
-    local live="webapp-$(store_key_of "$root/webapp/package-lock.json")"
+    local live
+    live="webapp-$(store_key_of "$root/webapp/package-lock.json")"
     seed_entry "$store" "$live" 64
     seed_entry "$store" "webapp-deadbeefdeadbeef" 512
     age_entries "$store"
@@ -314,8 +320,9 @@ t_gc_protects_other_worktrees() {
     make_tree "$second"; make_stubs "$second/stubs"; make_fresh_artifacts "$second"
     echo '{"lockfileVersion":3,"packages":{"a":{}}}' > "$first/webapp/package-lock.json"
     echo '{"lockfileVersion":3,"packages":{"b":{}}}' > "$second/webapp/package-lock.json"
-    local key_a="webapp-$(store_key_of "$first/webapp/package-lock.json")"
-    local key_b="webapp-$(store_key_of "$second/webapp/package-lock.json")"
+    local key_a key_b
+    key_a="webapp-$(store_key_of "$first/webapp/package-lock.json")"
+    key_b="webapp-$(store_key_of "$second/webapp/package-lock.json")"
     seed_entry "$store" "$key_a" 64
     seed_entry "$store" "$key_b" 64
     age_entries "$store"
@@ -461,7 +468,72 @@ t_gc_releases_lock
 t_gc_dry_run_deletes_nothing
 t_gc_respects_grace_window
 t_gc_runs_after_minting_an_entry
+
+# --- Tests 17-19: the staleness source list is passed WITHOUT word splitting --
+# These pin the semantics the SC2046 array refactor had to preserve (and, for
+# the space case, the bug it had to fix): build-frontend.sh used to pass
+# $(collect_sources ...) unquoted, so the shell split the list on IFS and
+# glob-expanded it before is_stale ever saw it.
+
+t_stale_source_with_space_in_name() {
+    local root; root="$(mktemp -d)"
+    make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
+    : > "$root/stub.log"
+    sleep 1
+    # A source whose name contains a space. Under word splitting this arrived
+    # at newest_mtime as two nonexistent paths, both skipped, so edits to it
+    # were INVISIBLE to staleness and never triggered a rebuild.
+    printf 'export const z = 1' > "$root/webapp/src/my component.ts"
+    run_script "$root" webapp >/dev/null
+    if grep -q npm "$root/stub.log"; then
+        pass "staleness: a source filename containing a space triggers a rebuild"
+    else
+        fail "staleness: space in source filename" "stub.log: $(cat "$root/stub.log")"
+    fi
+    rm -rf "$root"
+}
+
+t_stale_source_with_glob_chars() {
+    local root; root="$(mktemp -d)"
+    make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
+    : > "$root/stub.log"
+    sleep 1
+    # Glob metacharacters in a source name must be taken literally, never
+    # expanded against the cwd on their way to is_stale.
+    printf 'export const z = 1' > "$root/webapp/src/a[1]*.ts"
+    run_script "$root" webapp >/dev/null
+    if grep -q npm "$root/stub.log"; then
+        pass "staleness: a source filename with glob metacharacters triggers a rebuild"
+    else
+        fail "staleness: glob chars in source filename" "stub.log: $(cat "$root/stub.log")"
+    fi
+    rm -rf "$root"
+}
+
+t_stale_empty_source_set() {
+    local root; root="$(mktemp -d)"
+    make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
+    : > "$root/stub.log"
+    # No src/ and no manifests: collect_sources emits NOTHING. An empty list
+    # must neither crash the script (bash 3.2 errors on "${arr[@]}" for an
+    # empty array under `set -u`) nor be read as "stale".
+    rm -rf "$root/webapp/src" "$root/webapp/package.json"
+    if run_script "$root" webapp >/dev/null 2>&1; then
+        if [ ! -s "$root/stub.log" ]; then
+            pass "staleness: an empty source set neither crashes nor forces a rebuild"
+        else
+            fail "staleness: empty source set" "stub.log: $(cat "$root/stub.log")"
+        fi
+    else
+        fail "staleness: empty source set" "script exited non-zero"
+    fi
+    rm -rf "$root"
+}
+
 t_gc_not_run_when_nothing_minted
+t_stale_source_with_space_in_name
+t_stale_source_with_glob_chars
+t_stale_empty_source_set
 
 echo "-----"
 echo "passed: $PASS  failed: $FAIL"

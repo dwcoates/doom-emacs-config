@@ -1,4 +1,18 @@
 #!/usr/bin/env bash
+
+# shellcheck disable=SC2250,SC2292,SC2312,SC2310
+# The four checks above are OPT-IN (`shellcheck -o all`) and are declined
+# deliberately, not overlooked. The file is clean at shellcheck's real bar
+# (default plus `-S style`) with no suppressions at all.
+#   SC2250 (${x} braces) / SC2292 (prefer [[ ]]) — cosmetic house-style
+#     opinions. Applying them would rewrite ~170 sites across code this change
+#     never touches, for no defect reduction.
+#   SC2312 (command substitution masks a return value) — fires on idioms like
+#     "$(basename "$entry")" where the substitution genuinely cannot fail in a
+#     way this script should abort on.
+#   SC2310 (a function in an `if` disables set -e) — that is the POINT of
+#     is_stale: it is a predicate whose false answer means "fresh", not an
+#     error. Making it abort the script would invert the staleness logic.
 # build-frontend.sh — build the claude-repl frontend artifacts, but only
 # when they are out of date ("build-if-stale").
 #
@@ -169,6 +183,11 @@ artifact_mtime() {
 
 # is_stale ARTIFACT SOURCE... — return 0 (stale, needs build) when ARTIFACT is
 # missing or older than the newest SOURCE; return 1 (fresh) otherwise.
+#
+# Callers pass the source list as ${SOURCES[@]+"${SOURCES[@]}"}. The `+` guard
+# is not decoration: bash 3.2 -- still /bin/bash on macOS, and this script runs
+# under `set -u` -- aborts on "${arr[@]}" when arr is EMPTY, which is exactly
+# the case for a project with no src/ and no manifests.
 is_stale() {
     local artifact="$1"; shift
     [ "$FORCE" -eq 1 ] && return 0
@@ -178,16 +197,46 @@ is_stale() {
     [ "$s" -ge "$a" ] || [ "$a" -eq 0 ]
 }
 
-# collect_sources DIR — print every regular source file under DIR/src plus the
-# package/build manifests that also invalidate the artifact when they change.
-collect_sources() {
-    local dir="$1"
+# emit_sources DIR [EXTRA_FIND_ARGS...] — print DIR's complete source set,
+# NUL-delimited: every regular file under DIR/src, the package/build manifests
+# that also invalidate the artifact, and (when EXTRA_FIND_ARGS are given)
+# everything `find DIR EXTRA_FIND_ARGS` matches.
+#
+# NUL rather than newline because this list is read back into an array and a
+# path is the one thing that may contain any byte except NUL. The predecessor
+# printed newline-separated paths that the caller then passed UNQUOTED, so the
+# shell split them on IFS and glob-expanded the pieces: a source file named
+# `my component.ts` reached the mtime scan as two nonexistent paths, both
+# silently skipped, and edits to it never triggered a rebuild.
+emit_sources() {
+    local dir="$1"; shift
     if [ -d "$dir/src" ]; then
-        find "$dir/src" -type f
+        find "$dir/src" -type f -print0
     fi
+    local manifest
     for manifest in package.json tsconfig.json vite.config.ts go.mod go.sum; do
-        [ -f "$dir/$manifest" ] && echo "$dir/$manifest"
+        if [ -f "$dir/$manifest" ]; then
+            printf '%s\0' "$dir/$manifest"
+        fi
     done
+    if [ "$#" -gt 0 ]; then
+        find "$dir" "$@" -print0
+    fi
+    return 0
+}
+
+# SOURCES — the array load_sources fills, consumed immediately by its caller.
+# A global because bash 3.2 (still /bin/bash on macOS) has no namerefs.
+SOURCES=()
+
+# load_sources DIR [EXTRA_FIND_ARGS...] — populate SOURCES from emit_sources,
+# one array element per path however awkward the filename.
+load_sources() {
+    SOURCES=()
+    local f
+    while IFS= read -r -d '' f; do
+        SOURCES+=("$f")
+    done < <(emit_sources "$@")
 }
 
 # store_key DIR — echo a short content hash of DIR's dependency manifest, so a
@@ -326,7 +375,7 @@ gc_store() {
     for entry in "$NODE_STORE"/*; do
         [ -d "$entry" ] || continue
         base="$(basename "$entry")"
-        case "$base" in .gc.lock) continue ;; esac
+        [ "$base" = ".gc.lock" ] && continue
 
         if grep -qxF "$base" "$keep_file"; then
             [ "$VERBOSE" -eq 1 ] && echo "[build-frontend] gc: keep $base (referenced)"
@@ -368,7 +417,8 @@ build_deps() {
 
 build_shim() {
     link_node_modules "$SHIM_DIR" shim
-    if ! is_stale "$SHIM_ARTIFACT" $(collect_sources "$SHIM_DIR"); then
+    load_sources "$SHIM_DIR"
+    if ! is_stale "$SHIM_ARTIFACT" ${SOURCES[@]+"${SOURCES[@]}"}; then
         echo "[build-frontend] shim: fresh, skipping"
         return 0
     fi
@@ -380,7 +430,8 @@ build_shim() {
 
 build_webapp() {
     link_node_modules "$WEBAPP_DIR" webapp
-    if ! is_stale "$WEBAPP_ARTIFACT" $(collect_sources "$WEBAPP_DIR"); then
+    load_sources "$WEBAPP_DIR"
+    if ! is_stale "$WEBAPP_ARTIFACT" ${SOURCES[@]+"${SOURCES[@]}"}; then
         echo "[build-frontend] webapp: fresh, skipping"
         return 0
     fi
@@ -391,7 +442,9 @@ build_webapp() {
 }
 
 build_daemon() {
-    if ! is_stale "$DAEMON_ARTIFACT" $(collect_sources "$DAEMON_DIR") $(find "$DAEMON_DIR" -name '*.go'); then
+    # The daemon's set is its manifests plus every .go file in the tree.
+    load_sources "$DAEMON_DIR" -name '*.go'
+    if ! is_stale "$DAEMON_ARTIFACT" ${SOURCES[@]+"${SOURCES[@]}"}; then
         echo "[build-frontend] daemon: fresh, skipping"
         return 0
     fi
@@ -410,6 +463,13 @@ for target in "${TARGETS[@]}"; do
         webapp) build_webapp ;;
         daemon) build_daemon ;;
         gc)     EXPLICIT_GC=1 ;;
+        # Unreachable: the argument parser allowlists these same names. It is
+        # here so that adding a target THERE and forgetting it here fails
+        # loudly instead of silently doing nothing.
+        *)
+            echo "build-frontend.sh: internal error: unhandled target '$target'" >&2
+            exit 1
+            ;;
     esac
 done
 
