@@ -112,6 +112,12 @@
      orange nor a settled green, so a quiescent-but-still-watching session is
      unmistakable at a glance. */
   --async: #f59e0b;
+  /* The vendor/account block: stopped until a human or the vendor acts.
+     Deliberately a MAGENTA-leaning purple rather than the violet --retry
+     (#8b5cf6) or --info-agents (#7c3aed): a retry is the system working and
+     a merged workspace is a settled success, so neither may be confusable
+     with a session that has stopped and will not restart on its own. */
+  --blocked: #a21caf;
   /* AskUserQuestion picker. Two tokens shape the "answer me" panel:
      --q-opt-bg lifts the option bubbles (and the question badge, which shares
        their fill) clear of the plain feed background the picker sits on, so an
@@ -228,6 +234,7 @@
     --final-response: #4ade80;
     /* Brighter amber for the dark theme, as the other state borders lift. */
     --async: #fbbf24;
+    --blocked: #e879f9;
     --q-border: #facc15;
     --async-card: #09433b;
     --async-border: #4fc4b0;
@@ -483,11 +490,28 @@ body::after {
    init blue: red here read as an error on a workspace that was merely
    starting, and as identical to a thinking one. */
 #ws-sidebar .st-init { background: var(--init); animation: ws-pulse 1.3s ease-in-out infinite; }
-#ws-sidebar .st-permission { background: var(--q-border); animation: ws-pulse 1.3s ease-in-out infinite; }
+/* GREEN, breathing: a pending permission means the agent is READY for the
+   user to view the response and answer. The breath distinguishes "ready AND
+   waiting on you" from "ready"; the color says it is not a fault. */
+#ws-sidebar .st-permission { background: var(--ok); animation: ws-pulse 1.3s ease-in-out infinite; }
 #ws-sidebar .st-done { background: var(--ok); }
-#ws-sidebar .st-done-viewed { background: var(--thinking); }
-#ws-sidebar .st-idle { background: none; border: 1.5px solid var(--muted); }
-#ws-sidebar .st-dead { background: var(--muted); }
+/* GREEN, filled: a ready workspace is as available as a done one, and the
+   hollow ring said "nothing here" about a session ready to be used. */
+#ws-sidebar .st-ready { background: var(--ok); }
+#ws-sidebar .st-idle { background: var(--ok); }
+/* YELLOW, breathing: no foreground turn, but detached work continues. The
+   same --async the bubble border wears, so the two are one color rather than
+   two that nearly match. */
+#ws-sidebar .st-idle-async { background: var(--async); animation: ws-pulse 1.3s ease-in-out infinite; }
+/* PURPLE: blocked until a human or the vendor acts. Still, not breathing —
+   nothing is in progress. */
+#ws-sidebar .st-vendor-blocked { background: var(--blocked); }
+/* BLUE: a dead or never-started session is a compromised ROUTE, not a
+   terminal outcome, so it wears the same blue as bring-up — without the
+   breath, because nothing is in progress. */
+#ws-sidebar .st-dead { background: var(--init); }
+#ws-sidebar .st-start-failed { background: var(--init); }
+#ws-sidebar .st-degraded { background: var(--init); }
 #ws-sidebar .st-none { visibility: hidden; }
 /* A perspective-less workspace — registered in the roster but with no open
    perspective, so it shows in the sidebar yet not the tab-bar.  No live session
@@ -2236,6 +2260,10 @@ pre {
    so the footer never invents a vocabulary. */
 .pfooter-phase { font-weight: 650; }
 .pfooter-phase.thinking { color: var(--thinking); }
+/* The five state tones, matching the tab-bar and the sidebar dots exactly so
+   a workspace never reads one way here and another there. */
+.pfooter-phase.blocked { color: var(--blocked); }
+.pfooter-phase.async { color: var(--async); }
 .pfooter-phase.retry { color: var(--retry); }
 .pfooter-phase.error { color: var(--err); }
 .pfooter-phase.ok { color: var(--ok); }
@@ -2245,6 +2273,7 @@ pre {
    session is in reads at a glance without parsing the words. */
 .pfooter-grow.tool { color: var(--tool-title); }
 .pfooter-grow.thinking { color: var(--thinking); }
+.pfooter-grow.blocked { color: var(--blocked); }
 .pfooter-grow.retry { color: var(--retry); }
 .pfooter-grow.error { color: var(--err); }
 .pfooter-grow.muted { color: var(--muted); }

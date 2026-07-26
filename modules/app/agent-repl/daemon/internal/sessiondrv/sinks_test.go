@@ -128,6 +128,22 @@ type fakeApplier struct {
 	reconciled  []reconcileCall
 	reconcErr   error
 	reconcMutex sync.Mutex
+	// backfills records one entry per ApplyBackfillState call, as the
+	// (workspace, state) pair the driver pushed onto the SSM's backfill axis.
+	backfills []backfillCall
+}
+
+// backfillCall is one backfill outcome the driver applied to the SSM.
+type backfillCall struct {
+	workspace string
+	state     string
+}
+
+func (f *fakeApplier) ApplyBackfillState(workspace, state string) error {
+	f.reconcMutex.Lock()
+	defer f.reconcMutex.Unlock()
+	f.backfills = append(f.backfills, backfillCall{workspace: workspace, state: state})
+	return nil
 }
 
 // reconcileCall is one authoritative live-task set the driver adopted.
@@ -910,5 +926,76 @@ func TestNonTaskVendorEventReconcilesNothing(t *testing.T) {
 	// Assert.
 	if got := len(applier.reconcileCalls()); got != 0 {
 		t.Fatalf("reconciliations = %d for a non-task vendor event, want 0", got)
+	}
+}
+
+// --- F3: the REOPEN wedge ---------------------------------------------------
+//
+// observeBackfill can only witness a backfill HAPPENING. A session reopened
+// with its transcript already fully ingested produces no new line to witness
+// — the sidecar's cursor sits at that file's tail — so waiting for one waits
+// forever, and the workspace sits blue despite complete, replayable history.
+
+func TestReopenWithIngestedHistorySettlesTheBackfill(t *testing.T) {
+	// Arrange — a session the daemon has durably observed store events for.
+	var states []string
+	c := backfillConsumer(&states)
+	// Act — no event ever arrives; only the high-water speaks.
+	c.settleBackfillFromStore(4200)
+	// Assert
+	if len(states) != 1 || states[0] != BackfillDone {
+		t.Fatalf("backfill states = %v, want [done] from the store high-water", states)
+	}
+}
+
+func TestReopenSettlesWithoutAnyEventArriving(t *testing.T) {
+	// Arrange
+	var states []string
+	c := backfillConsumer(&states)
+	// Act
+	c.settleBackfillFromStore(1)
+	// Assert — the point is that NO Consume() call was needed.
+	if c.backfill != BackfillDone {
+		t.Fatalf("backfill = %q, want %q with no event consumed", c.backfill, BackfillDone)
+	}
+}
+
+func TestZeroHighWaterLeavesTheBackfillToTheLivePath(t *testing.T) {
+	// Arrange — a genuinely fresh session: nothing durably observed.
+	var states []string
+	c := backfillConsumer(&states)
+	// Act
+	c.settleBackfillFromStore(0)
+	// Assert — claiming DONE here would assert a backfill that never happened.
+	if len(states) != 0 {
+		t.Fatalf("backfill states = %v, want none for a zero high-water", states)
+	}
+}
+
+// FAILED is terminal: a transcript the sidecar could not fully read does not
+// become readable by reopening the session.
+func TestStoreHighWaterNeverOverwritesAFailedBackfill(t *testing.T) {
+	// Arrange
+	var states []string
+	c := backfillConsumer(&states)
+	c.noteBackfill(BackfillFailed)
+	// Act
+	c.settleBackfillFromStore(9999)
+	// Assert
+	if c.backfill != BackfillFailed {
+		t.Fatalf("backfill = %q, want it to stay %q", c.backfill, BackfillFailed)
+	}
+}
+
+func TestStoreSettleIsIdempotent(t *testing.T) {
+	// Arrange
+	var states []string
+	c := backfillConsumer(&states)
+	// Act
+	c.settleBackfillFromStore(10)
+	c.settleBackfillFromStore(20)
+	// Assert — one transition, not one per call.
+	if len(states) != 1 {
+		t.Fatalf("backfill states = %v, want exactly one transition", states)
 	}
 }

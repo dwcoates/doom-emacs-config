@@ -73,9 +73,20 @@ func TestResolvePrecedence(t *testing.T) {
 			want: frontendv1.RenderState_RENDER_STATE_MERGED,
 		},
 		{
-			name: "merged suppressed by an active agent state (guard)",
+			// The agent-state guard is GONE. A merged workspace leaves the
+			// tab-bar the moment the merge lands, so there is no tab for a
+			// live agent state to compete for — the guard existed only to
+			// keep that tab from flashing during the async teardown, and
+			// removing the tab makes the flash impossible rather than
+			// merely covered up.
+			name: "merged is not suppressed by a later agent state",
 			sigs: []sig{{sigMerged, causeMergeTransition, 1}, {sigIdle, causeSessionStarted, 2}},
-			want: frontendv1.RenderState_RENDER_STATE_IDLE,
+			want: frontendv1.RenderState_RENDER_STATE_MERGED,
+		},
+		{
+			name: "merged survives a teardown that leaves the session dead",
+			sigs: []sig{{sigMerged, causeMergeTransition, 1}, {sigDead, causeSessionEnded, 2}},
+			want: frontendv1.RenderState_RENDER_STATE_MERGED,
 		},
 		{
 			name: "merging beats dead",
@@ -103,9 +114,12 @@ func TestResolvePrecedence(t *testing.T) {
 			want: frontendv1.RenderState_RENDER_STATE_DONE,
 		},
 		{
-			name: "stop_failed on an errored turn end",
-			sigs: []sig{{sigThinking, causeTurnStarted, 1}, {sigStopFailed, causeTurnEnded, 2}},
-			want: frontendv1.RenderState_RENDER_STATE_STOP_FAILED,
+			// An abnormal CONCLUSION is a vendor/account block, not a state
+			// of its own: the turn is over and only a human or the vendor
+			// can release whatever ended it.
+			name: "vendor_blocked on an errored turn end",
+			sigs: []sig{{sigThinking, causeTurnStarted, 1}, {sigVendorBlocked, causeVendorBlocked, 2}},
+			want: frontendv1.RenderState_RENDER_STATE_VENDOR_BLOCKED,
 		},
 		{
 			name: "init is the earliest agent state",
@@ -116,6 +130,13 @@ func TestResolvePrecedence(t *testing.T) {
 			name: "idle when available and no other signal",
 			sigs: []sig{{sigIdle, causeSessionStarted, 1}},
 			want: frontendv1.RenderState_RENDER_STATE_IDLE,
+		},
+		{
+			// Shim-asserted readiness: the route is proven usable without a
+			// first message ever having been sent.
+			name: "ready when the shim asserted readiness",
+			sigs: []sig{{sigReady, causeSessionStarted, 1}},
+			want: frontendv1.RenderState_RENDER_STATE_READY,
 		},
 		{
 			name: "degraded ranks under dead, over agent states",

@@ -56,6 +56,7 @@ import {
   ReplayDoneSchema,
   ReplayRequest,
   SessionSource,
+  SessionStartedSchema,
   TurnStartedSchema,
 } from "./proto.js";
 
@@ -231,6 +232,18 @@ export class UdsSession {
       // that replays from `from_seq` (§4.4).
       onSubscribe: (m) => this.store.subscribe(m.fromSeq),
       onReplayRequest: (m) => void this.serveReplay(m),
+      // SHIM-ASSERTED READINESS, on the handshake edge.
+      //
+      // Not after `server.connect()`: that resolves on the first successful
+      // DIAL, while sendEvent drops anything sent before the DaemonHello
+      // completes the handshake. An assertion the daemon is not yet
+      // listening for is not an assertion, so it has to ride this hook.
+      //
+      // It fires again on every REATTACH, and that is the point rather than
+      // a flaw: a restarted daemon has no memory of this session and must be
+      // told it is ready, exactly as the first one was. The SSM's no-regress
+      // guard drops a repeat that would land under a live turn.
+      onDaemonConnected: () => this.emitSessionStarted(),
       onDaemonDisconnected: () => {
         // Reattach (§4.4): the turn keeps running and nothing is torn down.
         // Pending permission waits are NOT cancelled — a reattaching daemon can
@@ -305,8 +318,51 @@ export class UdsSession {
     // to the daemon (StoreClient has already loud-logged each dropped event).
     this.store.onDegraded((report) => this.server.sendEvent(this.degradedEvent(report)));
     await this.store.connect();
+    // Readiness is asserted from the handshake hook wired in the
+    // constructor, not here: connect() resolves on the DIAL, and an event
+    // sent before the DaemonHello would be dropped.
     await this.server.connect();
     return this.pump();
+  }
+
+  /**
+   * Announce that this shim is ready, directly to the daemon.
+   *
+   * WHY NOT THE VENDOR'S system:init. SessionStarted used to ride as a twin
+   * of the SDK's `system:init`, but the SDK does not emit that until the
+   * FIRST PROMPT — so a session nobody had typed into yet never announced
+   * itself, and the workspace sat in bring-up indefinitely waiting for a
+   * message the user had no reason to send. Readiness cannot be conditional
+   * on being used; that is the circularity this replaces.
+   *
+   * WHY DIRECT AND NOT THROUGH THE STORE. Every other lifecycle twin takes
+   * the store round-trip so it lands seq-ordered against the conversation.
+   * Readiness cannot: the store keys events by the VENDOR session id, which
+   * on a fresh session is unknown until the SDK reveals it on the first
+   * converted message — the first prompt again. A store write here would be
+   * deferred exactly as `emitTurnStarted` defers its held turns, walking
+   * straight back into the trap. Readiness is a fact about the SHIM rather
+   * than about the vendor conversation, so it takes the same
+   * SYNTHETIC/EPHEMERAL direct path DegradedState does.
+   *
+   * The gate is CLOSED afterwards so the vendor init's twin does not
+   * re-announce a session already announced.
+   */
+  private emitSessionStarted(): void {
+    this.sessionGate.close();
+    this.server.sendEvent(create(EventSchema, {
+      sessionId: this.deps.sessionId,
+      seq: 0n,
+      plane: Plane.SYNTHETIC,
+      class: EventClass.EPHEMERAL,
+      producedAtMs: BigInt(this.now()),
+      payload: {
+        case: "sessionStarted",
+        value: create(SessionStartedSchema, { source: this.deps.sessionSource }),
+      },
+    }));
+    shimLog(COMPONENT, { session: this.deps.sessionId },
+      `readiness asserted (lock held, SDK query built, daemon handshaked)`);
   }
 
   /** True while a handshaked daemon connection is live (test/diagnostics). */

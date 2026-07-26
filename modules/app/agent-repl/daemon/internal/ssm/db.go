@@ -209,6 +209,62 @@ func seqApplied(db *sql.DB, sessionID string, seq uint64) (bool, error) {
 	return true, nil
 }
 
+// turnActive reports whether the workspace's LATEST agent-axis row is a
+// running turn. It is the no-regress guard's only input: a readiness
+// assertion arriving over a live turn must be dropped rather than appended,
+// because the agent axis resolves on its latest row and the readiness row
+// would otherwise win.
+//
+// It reads the same agent-axis membership the resolution query does, so the
+// two can never disagree about which rows count as agent states.
+func turnActive(db *sql.DB, workspace string) (bool, error) {
+	var state string
+	err := db.QueryRow(
+		`SELECT state FROM workspace_state
+		 WHERE workspace = ?
+		   AND state IN ('init','thinking','permission','done','ready','idle','dead','vendor_blocked')
+		 ORDER BY at DESC LIMIT 1`, workspace).Scan(&state)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("ssm: turn-active check for workspace %q: %w", workspace, err)
+	}
+	return state == "thinking", nil
+}
+
+// paintWatermark returns the highest seq a frontend has attested painting
+// for the workspace, and whether any attestation currently stands.
+//
+// The two answers are separate on purpose: seq 0 is a REAL attestation of an
+// empty history, so "attested at 0" and "never attested" are different facts
+// that a single integer could not distinguish. Without the boolean, the
+// never-prompted session this whole mechanism exists to make ready could
+// never be told apart from one that had reported nothing.
+func paintWatermark(db *sql.DB, workspace string) (uint64, bool, error) {
+	var (
+		state string
+		seq   sql.NullInt64
+	)
+	err := db.QueryRow(
+		`SELECT state, cause_seq FROM workspace_state
+		 WHERE workspace = ? AND state IN ('painted','unpainted')
+		 ORDER BY at DESC LIMIT 1`, workspace).Scan(&state, &seq)
+	if err == sql.ErrNoRows {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, fmt.Errorf("ssm: paint watermark for workspace %q: %w", workspace, err)
+	}
+	if state != "painted" {
+		// The latest paint-axis row withdrew the attestation, so the
+		// watermark is gone with it: a re-attestation after a route break
+		// starts from nothing rather than inheriting the pre-break seq.
+		return 0, false, nil
+	}
+	return uint64(seq.Int64), true, nil
+}
+
 // distinctWorkspaces lists every workspace that has any logged signal, in
 // stable order, for Snapshot.
 func distinctWorkspaces(db *sql.DB) ([]string, error) {

@@ -103,9 +103,12 @@ rather than a roster rebuild.")
     (:permission     . "permission")
     (:init           . "init")
     (:done           . "done")
-    (:idle           . "idle")
-    (:idle-async     . "idle")
-    (:stop-failed    . "dead")
+    (:ready          . "ready")
+    (:idle           . "ready")
+    (:idle-async     . "idle-async")
+    (:vendor-blocked . "vendor-blocked")
+    (:start-failed   . "start-failed")
+    (:degraded       . "degraded")
     (:dead           . "dead")
     (:merging        . "merging")
     (:merge-queued   . "merge-queued")
@@ -113,6 +116,18 @@ rather than a roster rebuild.")
     (:merge-failed   . "merge-failed")
     (:merged         . "merged"))
   "Maps `agent-repl--ws-render-status' keywords onto sidebar wire strings.
+The dots speak the SAME five-color vocabulary the tab-bar does, so a
+workspace can never read one way in the rail and another in the tabs.
+Nothing coarsens any more: `:idle-async' is its own yellow dot rather
+than borrowing idle's ring, and `:vendor-blocked' is its own purple dot
+rather than sharing the grey one with `:dead'.  A workspace that read
+differently in the two places was exactly what the old coarsening
+produced.
+
+`:start-failed' and `:degraded' are mapped rather than absent: both are
+real render states the daemon can push, and an unmapped one signals an
+error instead of drawing a dot.
+
 The value set is the webapp's closed WorkspaceRow.status union
 \(webapp/src/sidebar.ts) — the two sides are one contract and MUST
 stay in sync.  Two states coarsen deliberately because the sidebar's
@@ -122,7 +137,7 @@ idle hollow ring (the topbar already carries the async signal), and
 attention, not running\").  \"done-viewed\" and \"inactive\" are absent
 here because neither is a render-status keyword —
 `agent-repl--sidebar-wire-status' derives \"done-viewed\" from `:done' +
-`:done-acked' and \"inactive\" from `agent-repl--ws-open-p'.")
+`agent-repl--ws-open-p'.")
 
 (defun agent-repl--sidebar-wire-status (name)
   "Return the wire status string for known workspace NAME.
@@ -135,9 +150,8 @@ dead, or idle registration that is perspective-less still serializes
 \"inactive\" — because being in the sidebar yet not the tab-bar is the
 fact the row is conveying.
 
-\"done-viewed\" when the :done state has been acked (`:done-acked' —
-the same viewed semantics the tab-bar renders); \"none\" when
-`agent-repl--ws-render-status' reports nil (tombstoned / unborn).
+\"none\" when `agent-repl--ws-render-status' reports nil (tombstoned /
+unborn).
 Signals on an unmapped keyword: a render state missing from
 `agent-repl--sidebar-status-wire' means a new state was added without
 extending the sidebar contract — a violated invariant, never a silent
@@ -147,7 +161,6 @@ default dot."
     (let ((kw (agent-repl--ws-render-status name)))
       (cond
        ((null kw) "none")
-       ((and (eq kw :done) (agent-repl--ws-get name :done-acked)) "done-viewed")
        (t (or (alist-get kw agent-repl--sidebar-status-wire)
               (error "agent-repl--sidebar-wire-status: unmapped render state %S for ws=%s"
                      kw name)))))))
@@ -643,7 +656,7 @@ flips the panel and re-renders on its own.  No roster round-trip means
 (defun agent-repl--sidebar-signature ()
   "Return a cheap value that changes whenever the roster would.
 Pure in-memory reads plus the persp membership probe:
-per-live-workspace render state (status keyword, done-acked,
+per-live-workspace render state (status keyword,
 repl-state, open-p — the greyed flag's other input, last-viewed), the
 current workspace, the fold set, the nav cursor, and the set of live
 webview buffers.  The webview set matters because a freshly
@@ -652,7 +665,6 @@ itself changed."
   (list (mapcar (lambda (name)
                   (list name
                         (agent-repl--ws-render-status name)
-                        (and (agent-repl--ws-get name :done-acked) t)
                         (agent-repl--ws-get name :repl-state)
                         (and (agent-repl--ws-open-p name) t)
                         (agent-repl--ws-get name :last-viewed-at)

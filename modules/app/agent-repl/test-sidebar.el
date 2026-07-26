@@ -73,8 +73,12 @@ than the perspective-less short-circuit."
     (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
     (cl-letf (((symbol-function 'agent-repl--ws-open-p) (lambda (_ws) t)))
       (dolist (case '((:thinking . "thinking") (:permission . "permission")
-                      (:init . "init") (:idle . "idle") (:idle-async . "idle")
-                      (:stop-failed . "dead") (:dead . "dead")
+                      (:init . "init") (:done . "done")
+                      (:ready . "ready") (:idle . "ready")
+                      (:idle-async . "idle-async")
+                      (:vendor-blocked . "vendor-blocked")
+                      (:start-failed . "start-failed")
+                      (:degraded . "degraded") (:dead . "dead")
                       (:merging . "merging") (:merge-queued . "merge-queued")
                       (:merge-conflict . "merge-conflict")
                       (:merge-failed . "merge-failed") (:merged . "merged")))
@@ -82,26 +86,31 @@ than the perspective-less short-circuit."
                    (lambda (_ws) (car case))))
           (should (equal (agent-repl--sidebar-wire-status "ws") (cdr case))))))))
 
-(ert-deftest agent-repl-test-sidebar-wire-status-done-unacked ()
-  "An unacked :done serializes as plain \"done\"."
-  (agent-repl-test--with-clean-state
-    (agent-repl-test--sidebar-ws "ws" "/tmp/ws" :agent-state :done)
-    (cl-letf (((symbol-function 'agent-repl--ws-open-p) (lambda (_ws) t)))
-      (should (equal (agent-repl--sidebar-wire-status "ws") "done")))))
-
-(ert-deftest agent-repl-test-sidebar-wire-status-done-acked-is-viewed ()
-  "An acked :done serializes as \"done-viewed\" (tab-bar viewed semantics)."
-  (agent-repl-test--with-clean-state
-    (agent-repl-test--sidebar-ws "ws" "/tmp/ws"
-                                 :agent-state :done :done-acked t)
-    (cl-letf (((symbol-function 'agent-repl--ws-open-p) (lambda (_ws) t)))
-      (should (equal (agent-repl--sidebar-wire-status "ws") "done-viewed")))))
-
-(ert-deftest agent-repl-test-sidebar-wire-status-nil-is-none ()
-  "A nil render status (unborn workspace) serializes as \"none\"."
+(ert-deftest agent-repl-test-sidebar-wire-status-done-is-plain-done ()
+  "A :done workspace serializes as \"done\", viewed or not.
+There is no viewed axis any more: `:done', `:ready' and `:idle' are all
+green, so tracking whether the user had looked at a `:done' changed the
+dot without changing anything true."
   (agent-repl-test--with-clean-state
     (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
-    (cl-letf (((symbol-function 'agent-repl--ws-open-p) (lambda (_ws) t)))
+    (cl-letf (((symbol-function 'agent-repl--ws-open-p) (lambda (_ws) t))
+              ((symbol-function 'agent-repl--ws-render-status) (lambda (_ws) :done)))
+      (should (equal (agent-repl--sidebar-wire-status "ws") "done")))))
+
+(ert-deftest agent-repl-test-sidebar-wire-status-done-viewed-is-gone ()
+  "\"done-viewed\" is no longer a wire status the sidebar can emit."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws" :done-acked t)
+    (cl-letf (((symbol-function 'agent-repl--ws-open-p) (lambda (_ws) t))
+              ((symbol-function 'agent-repl--ws-render-status) (lambda (_ws) :done)))
+      (should-not (equal (agent-repl--sidebar-wire-status "ws") "done-viewed")))))
+
+(ert-deftest agent-repl-test-sidebar-wire-status-nil-is-none ()
+  "A nil render status (tombstoned workspace) serializes as \"none\"."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
+    (cl-letf (((symbol-function 'agent-repl--ws-open-p) (lambda (_ws) t))
+              ((symbol-function 'agent-repl--ws-render-status) (lambda (_ws) nil)))
       (should (equal (agent-repl--sidebar-wire-status "ws") "none")))))
 
 (ert-deftest agent-repl-test-sidebar-wire-status-perspective-less-is-inactive ()
@@ -398,7 +407,7 @@ render state, since sidebar-but-not-tab-bar is the fact being conveyed."
   "The serialized roster parses back with contract keys and JSON types."
   (agent-repl-test--with-clean-state
     (agent-repl-test--sidebar-ws "ws" "/tmp/ws"
-                                 :agent-state :thinking
+                                 :pushed-render-state :thinking
                                  :branch-name "DWC/ws"
                                  :last-viewed-at 1000.5)
     ;; Hold the perspective open so the row carries its live "thinking"
@@ -673,7 +682,7 @@ render state, since sidebar-but-not-tab-bar is the fact being conveyed."
   (agent-repl-test--with-clean-state
     (agent-repl-test--sidebar-ws "live" "/tmp/live")
     (agent-repl-test--sidebar-ws "gone" "/tmp/gone"
-                                 :repl-state :merged
+                                 :pushed-render-state :merged
                                  :merge-completed-at (float-time))
     (let ((names (agent-repl-test--roster-repo-names
                   (car (agent-repl--sidebar-build)))))
@@ -685,9 +694,9 @@ render state, since sidebar-but-not-tab-bar is the fact being conveyed."
   (agent-repl-test--with-clean-state
     (let ((now (float-time)))
       (agent-repl-test--sidebar-ws "older" "/tmp/older"
-                                   :repl-state :merged :merge-completed-at (- now 100))
+                                   :pushed-render-state :merged :merge-completed-at (- now 100))
       (agent-repl-test--sidebar-ws "newer" "/tmp/newer"
-                                   :repl-state :merged :merge-completed-at (- now 10))
+                                   :pushed-render-state :merged :merge-completed-at (- now 10))
       (let* ((roster (car (agent-repl--sidebar-build)))
              (rows (append (plist-get (plist-get roster :recentlyMerged) :rows) nil)))
         (should (equal (mapcar (lambda (r) (plist-get r :name)) rows)
@@ -699,7 +708,7 @@ render state, since sidebar-but-not-tab-bar is the fact being conveyed."
     (let* ((now (float-time))
            (agent-repl--sidebar-merged-epoch now))
       (agent-repl-test--sidebar-ws "stale" "/tmp/stale"
-                                   :repl-state :merged :merge-completed-at (- now 1000))
+                                   :pushed-render-state :merged :merge-completed-at (- now 1000))
       (let ((roster (car (agent-repl--sidebar-build))))
         (should (eq (plist-get roster :recentlyMerged) :null))
         (should-not (member "stale" (agent-repl-test--roster-repo-names roster)))))))

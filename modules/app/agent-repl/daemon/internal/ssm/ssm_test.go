@@ -111,10 +111,10 @@ func TestApplyLifecycleTransitions(t *testing.T) {
 		ev   *corev1.Event
 		want frontendv1.RenderState
 	}{
-		{"session started -> idle", evSessionStarted("s1", 1), frontendv1.RenderState_RENDER_STATE_IDLE},
+		{"session started -> ready", evSessionStarted("s1", 1), frontendv1.RenderState_RENDER_STATE_READY},
 		{"turn started -> thinking", evTurnStarted("s1", 1), frontendv1.RenderState_RENDER_STATE_THINKING},
 		{"clean turn end -> done", evTurnEnded("s1", 1, false), frontendv1.RenderState_RENDER_STATE_DONE},
-		{"errored turn end -> stop_failed", evTurnEnded("s1", 1, true), frontendv1.RenderState_RENDER_STATE_STOP_FAILED},
+		{"errored turn end -> vendor_blocked", evTurnEnded("s1", 1, true), frontendv1.RenderState_RENDER_STATE_VENDOR_BLOCKED},
 		{"session ended -> dead", evSessionEnded("s1", 1), frontendv1.RenderState_RENDER_STATE_DEAD},
 	}
 	for _, tt := range tests {
@@ -172,7 +172,7 @@ func TestLiveTaskCounting(t *testing.T) {
 		{evTaskStarted("s1", 2, "a1"), 1, frontendv1.RenderState_RENDER_STATE_IDLE_ASYNC},
 		{evTaskStarted("s1", 3, "a2"), 2, frontendv1.RenderState_RENDER_STATE_IDLE_ASYNC},
 		{evTaskEnded("s1", 4, "a1", corev1.TerminalStatus_TERMINAL_STATUS_DONE), 1, frontendv1.RenderState_RENDER_STATE_IDLE_ASYNC},
-		{evTaskEnded("s1", 5, "a2", corev1.TerminalStatus_TERMINAL_STATUS_LOST), 0, frontendv1.RenderState_RENDER_STATE_IDLE},
+		{evTaskEnded("s1", 5, "a2", corev1.TerminalStatus_TERMINAL_STATUS_LOST), 0, frontendv1.RenderState_RENDER_STATE_READY},
 	}
 	for i, s := range steps {
 		if err := m.Apply(s.ev); err != nil {
@@ -292,8 +292,8 @@ func TestPersistenceAcrossReopen(t *testing.T) {
 	if err := m2.Apply(evTaskEnded("s1", 3, "a1", corev1.TerminalStatus_TERMINAL_STATUS_DONE)); err != nil {
 		t.Fatalf("task end: %v", err)
 	}
-	if got := mustCurrent(t, m2, "ws1").State; got != frontendv1.RenderState_RENDER_STATE_IDLE {
-		t.Fatalf("state after task end = %s, want IDLE", renderName(got))
+	if got := mustCurrent(t, m2, "ws1").State; got != frontendv1.RenderState_RENDER_STATE_READY {
+		t.Fatalf("state after task end = %s, want READY", renderName(got))
 	}
 }
 
@@ -463,8 +463,8 @@ func TestSnapshotAllWorkspaces(t *testing.T) {
 	if snap[0].Workspace != "wsA" || snap[0].State != frontendv1.RenderState_RENDER_STATE_THINKING {
 		t.Fatalf("snap[0] = %q/%s, want wsA/THINKING", snap[0].Workspace, renderName(snap[0].State))
 	}
-	if snap[1].Workspace != "wsB" || snap[1].State != frontendv1.RenderState_RENDER_STATE_IDLE {
-		t.Fatalf("snap[1] = %q/%s, want wsB/IDLE", snap[1].Workspace, renderName(snap[1].State))
+	if snap[1].Workspace != "wsB" || snap[1].State != frontendv1.RenderState_RENDER_STATE_READY {
+		t.Fatalf("snap[1] = %q/%s, want wsB/READY", snap[1].Workspace, renderName(snap[1].State))
 	}
 }
 

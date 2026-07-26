@@ -28,6 +28,7 @@ import type {
   SdkUserMessageLike,
 } from "../src/session.js";
 import type { ModelInfo, SlashCommand } from "../src/protocol.js";
+import type { Event } from "../src/uds/proto.js";
 import {
   AckSchema,
   DaemonHelloSchema,
@@ -148,6 +149,15 @@ interface Rig {
   udsSocketPath: string;
   /** Accepts the shim's RECONNECT after a daemon drop. */
   daemonListener: { next: () => Promise<FramedPeer>; close: () => void };
+  /**
+   * The shim-asserted readiness Event, already drained off `daemon`.
+   *
+   * The shim announces readiness on the handshake edge, so it is ALWAYS the
+   * first Event a handshaked daemon sees. rig() consumes it so every other
+   * test still reads its own event as the next one; the readiness tests
+   * assert on this value instead.
+   */
+  readiness: Event;
 }
 
 const cleanups: Array<() => void | Promise<void>> = [];
@@ -209,7 +219,9 @@ async function rig(
     await until(() => store.count() >= 2);
     await store.latest().next(SubscribeSchema);
   }
-  return { session, query, store, daemon, udsSocketPath, daemonListener };
+  // Readiness rides the handshake edge, so it is already in flight by now.
+  const readiness = await daemon.next(EventSchema);
+  return { session, query, store, daemon, udsSocketPath, daemonListener, readiness };
 }
 
 describe("UdsSession control: prompt in → SDK", () => {
@@ -302,9 +314,10 @@ describe("UdsSession lifecycle: shim-authoritative TurnStarted", () => {
     expect(first.batch!.events[0]!.sessionId).toBe("vendor-uuid");
   });
 
-  it("emits SessionStarted for the first system:init only, across re-inits", async () => {
-    // Arrange: the SDK re-inits per submit; a second twin would knock the SSM
-    // back to IDLE at submit time.
+  it("no system:init emits a SessionStarted twin, first or otherwise", async () => {
+    // Arrange: readiness is asserted at start() now, so an init's twin would
+    // re-announce a session already announced — and, arriving on the FIRST
+    // PROMPT, would land after the fact.
     const { query, store } = await rig({ subscribe: true, storeSessionId: "vendor-uuid" });
     const init = {
       type: "system",
@@ -325,8 +338,64 @@ describe("UdsSession lifecycle: shim-authoritative TurnStarted", () => {
     query.emit(init);
     const secondWrite = await store.peer().next(StoreWriteSchema);
     // Assert
-    expect(firstWrite.batch!.events.map((e) => e.payload.case)).toContain("sessionStarted");
+    expect(firstWrite.batch!.events.map((e) => e.payload.case)).not.toContain("sessionStarted");
     expect(secondWrite.batch!.events.map((e) => e.payload.case)).not.toContain("sessionStarted");
+  });
+});
+
+describe("UdsSession lifecycle: shim-asserted readiness", () => {
+  // THE POINT OF THE WHOLE MECHANISM. The SDK emits system:init only on the
+  // first prompt, so a session nobody has typed into never announced itself
+  // and its workspace sat in bring-up waiting for a message the user had no
+  // reason to send. Readiness cannot be conditional on being used.
+  it("announces readiness without any prompt ever being submitted", async () => {
+    // Arrange + Act: rig() only starts the session and handshakes.
+    const { readiness } = await rig();
+    // Assert
+    expect(readiness.payload.case).toBe("sessionStarted");
+  });
+
+  it("announces readiness without the SDK emitting anything at all", async () => {
+    // Arrange + Act: no query.emit() in this test, deliberately.
+    const { readiness } = await rig();
+    // Assert: the assertion is the shim's own, not a twin of a vendor message.
+    expect(readiness.sessionId).toBe("sess-1");
+  });
+
+  it("sends readiness DIRECT to the daemon, never through the store", async () => {
+    // Arrange + Act
+    const { store } = await rig();
+    // Assert: the store keys by the VENDOR session id, unknown on a fresh
+    // session until the first prompt — a store write here would be deferred
+    // straight back into the trap this escapes.
+    expect(store.peer().count(StoreWriteSchema)).toBe(0);
+  });
+
+  it("carries the session source on the readiness assertion", async () => {
+    // Arrange + Act
+    const { readiness } = await rig({ sessionSource: SessionSource.RESUME });
+    // Assert
+    expect(readiness.payload.case).toBe("sessionStarted");
+    if (readiness.payload.case === "sessionStarted") {
+      expect(readiness.payload.value.source).toBe(SessionSource.RESUME);
+    }
+  });
+
+  it("announces readiness exactly once per handshake", async () => {
+    // Arrange: rig() already drained the one readiness event.
+    const { daemon, query } = await rig();
+    // Act: an init afterwards must not re-announce.
+    query.emit({
+      type: "system",
+      subtype: "init",
+      session_id: "vendor-uuid",
+      uuid: "i1",
+      model: "claude",
+      cwd: "/tmp",
+    } as unknown as SdkMessageLike);
+    await tick();
+    // Assert: nothing further reached the daemon directly.
+    expect(daemon.count(EventSchema)).toBe(0);
   });
 });
 
@@ -412,6 +481,11 @@ describe("UdsSession lifetime: reattach", () => {
     expect(hello.turnInFlight).toBe(true);
     daemon2.send(DaemonHelloSchema, create(DaemonHelloSchema, { daemonVersion: "d2" }));
     await until(() => session.isConnected());
+    // Readiness is re-asserted to the REPLACEMENT daemon. That is the point,
+    // not a duplicate: a restarted daemon has no memory of this session and
+    // must be told it is usable exactly as the first one was.
+    const readiness2 = await daemon2.next(EventSchema);
+    expect(readiness2.payload.case).toBe("sessionStarted");
     daemon2.send(SubscribeSchema, create(SubscribeSchema, { sessionId: "sess-1", fromSeq: 2n }));
     await until(() => store.count() >= 3);
     const sub2 = await store.latest().next(SubscribeSchema);

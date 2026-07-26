@@ -197,11 +197,194 @@ func (m *Manager) Apply(ev *corev1.Event) error {
 		return nil
 	}
 
+	// NO-REGRESS GUARD. A readiness assertion may never knock an ACTIVE turn
+	// back to a settled state.
+	//
+	// SessionStarted is now emitted at the SHIM's own readiness rather than
+	// off the vendor's first `system:init`, which means it can legitimately
+	// arrive while a turn is already running — a shim relaunch, a revive, a
+	// re-handshake. The agent axis resolves on its LATEST row, so appending
+	// `ready` underneath a live `thinking` would resolve the workspace green
+	// while the agent was mid-turn. That regression was observed directly
+	// (a THINKING→IDLE flip at 01:24:20 in the readiness logs).
+	//
+	// Readiness is a floor, not a transition: it says "the route works",
+	// which a running turn already proves more strongly. So the row is
+	// dropped rather than appended, and the running turn stands. The turn's
+	// own TurnEnded still moves the workspace off thinking normally.
+	if state == sigReady {
+		active, err := turnActive(m.db, ws)
+		if err != nil {
+			return err
+		}
+		if active {
+			m.logf("ssm: readiness suppressed (turn in flight) ws=%s session=%s seq=%d — the running turn is the stronger claim",
+				ws, sid, ev.GetSeq())
+			return nil
+		}
+	}
+
 	at := m.nextAt()
 	if err := appendRow(m.db, ws, sid, state, causeKind, sql.NullInt64{Int64: int64(ev.GetSeq()), Valid: true}, at, taskIDOf(ev)); err != nil {
 		return err
 	}
+
+	// The VENDOR axis, written alongside the agent axis rather than instead
+	// of it. A turn that concluded abnormally is two facts at once — the
+	// turn ended, AND something only a human or the vendor can release
+	// stopped it — and collapsing them into one row loses whichever is not
+	// written. Keeping both means clearing the block reveals the settled
+	// turn underneath instead of leaving the workspace with no state.
+	if token, cause, blocked := vendorBlockOf(ev); blocked {
+		if err := appendRow(m.db, ws, sid, token, cause,
+			sql.NullInt64{Int64: int64(ev.GetSeq()), Valid: true}, m.nextAt(), ""); err != nil {
+			return err
+		}
+		causeKind = cause
+	}
 	return m.reresolveLocked(ws, causeKind, ev.GetSeq())
+}
+
+// vendorBlockOf reports the vendor-axis row an event implies, if any.
+//
+// Only turn-CONCLUDING events produce one. A tool returning non-zero, or an
+// API call the SDK retries past, is not a conclusion: the turn is still in
+// flight, so the workspace stays red and nothing here fires.
+//
+// A CLEAN conclusion produces the clearing token rather than nothing, so a
+// session that recovers stops reading as blocked. That is the only evidence
+// the daemon accepts for a release — our own retries never write it, because
+// retrying is not evidence the vendor unblocked.
+func vendorBlockOf(ev *corev1.Event) (token, causeKind string, blocked bool) {
+	te, ok := ev.GetPayload().(*corev1.Event_TurnEnded)
+	if !ok {
+		return "", "", false
+	}
+	if VendorBlockingTurnEnd(te.TurnEnded.GetStopReason(), te.TurnEnded.GetIsError()) {
+		return sigVendorBlocked, causeVendorBlocked, true
+	}
+	return sigVendorClear, causeVendorCleared, true
+}
+
+// ApplyPaintAck records a frontend's attestation that it painted the
+// workspace's conversation through THROUGHSEQ.
+//
+// The daemon tracks STATE; a frontend decides when that state is
+// RENDERABLE. Nothing here can distinguish a webview that drew the history
+// from one that received it and drew nothing, so the workspace stays on the
+// unpainted (blue) token until a frontend says otherwise.
+//
+// Versioned by THROUGHSEQ: an ack that does not advance the watermark is
+// dropped, so an ack minted before a route break cannot re-green the
+// workspace after it, and a slow frontend's stale ack cannot green a gap a
+// faster one already reported. A seq of 0 is a REAL attestation of an empty
+// history, which is what lets a never-prompted session reach green.
+func (m *Manager) ApplyPaintAck(workspace string, throughSeq uint64) error {
+	if workspace == "" {
+		return fmt.Errorf("ssm: ApplyPaintAck got an empty workspace")
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	prev, attested, err := paintWatermark(m.db, workspace)
+	if err != nil {
+		return err
+	}
+	if attested && throughSeq <= prev {
+		m.logf("ssm: paint ack superseded ws=%s through_seq=%d watermark=%d — attestation unchanged",
+			workspace, throughSeq, prev)
+		return nil
+	}
+
+	at := m.nextAt()
+	if err := appendRow(m.db, workspace, "", sigPainted, causePaintAck,
+		sql.NullInt64{Int64: int64(throughSeq), Valid: true}, at, ""); err != nil {
+		return err
+	}
+	return m.reresolveLocked(workspace, causePaintAck, throughSeq)
+}
+
+// ApplyPaintLost withdraws a workspace's paint attestation because the route
+// broke — a shim death, a hibernation, a frontend disconnect.
+//
+// Disconnect resolves BLUE, never to a terminal color: a workspace whose
+// session went away is not "done", it is unreachable, and the next frontend
+// to attach must re-attest before green can be claimed again.
+func (m *Manager) ApplyPaintLost(workspace, reason string) error {
+	if workspace == "" {
+		return fmt.Errorf("ssm: ApplyPaintLost got an empty workspace")
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	at := m.nextAt()
+	cause := causePaintLost
+	if reason != "" {
+		cause = causePaintLost + ":" + reason
+	}
+	if err := appendRow(m.db, workspace, "", sigUnpainted, cause, sql.NullInt64{}, at, ""); err != nil {
+		return err
+	}
+	return m.reresolveLocked(workspace, cause, 0)
+}
+
+// ApplyBackfillState records the workspace's transcript-backfill outcome.
+//
+// A FAILED backfill compromises the route and resolves BLUE: the workspace's
+// history is incomplete, so anything painted from it is a partial account of
+// the conversation, and calling that ready would be the lie the whole
+// vocabulary exists to prevent.
+//
+// DONE and the empty-workspace case both CLEAR the axis. "Nothing to
+// backfill" is a real, correct answer — a genuinely fresh workspace — not an
+// unknown, so it must not hold the workspace blue.
+//
+// STATE is the sessiondrv token ("pending" | "done" | "failed"). `pending` is
+// deliberately NOT blue on its own: a session mid-backfill is covered by the
+// paint axis (no frontend has attested yet), and treating pending as a
+// separate blue would mean a REOPENED session whose history is already in the
+// store — and which therefore never emits a fresh transition — could never
+// leave it. See sessiondrv.settleBackfillFromStore for the other half of that.
+func (m *Manager) ApplyBackfillState(workspace, state string) error {
+	if workspace == "" {
+		return fmt.Errorf("ssm: ApplyBackfillState got an empty workspace")
+	}
+	token := sigBackfillOK
+	if state == "failed" {
+		token = sigBackfillFailed
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	at := m.nextAt()
+	cause := "backfill:" + state
+	if err := appendRow(m.db, workspace, "", token, cause, sql.NullInt64{}, at, ""); err != nil {
+		return err
+	}
+	return m.reresolveLocked(workspace, cause, 0)
+}
+
+// ApplyVendorCleared releases a vendor/account block because the vendor or a
+// human released it — a clean turn conclusion, or a clean auth report.
+//
+// Our own retries never call this: retrying is not evidence the vendor
+// unblocked, and treating it as such is how a blocked session comes to look
+// available.
+func (m *Manager) ApplyVendorCleared(workspace, reason string) error {
+	if workspace == "" {
+		return fmt.Errorf("ssm: ApplyVendorCleared got an empty workspace")
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	at := m.nextAt()
+	cause := causeVendorCleared
+	if reason != "" {
+		cause = causeVendorCleared + ":" + reason
+	}
+	if err := appendRow(m.db, workspace, "", sigVendorClear, cause, sql.NullInt64{}, at, ""); err != nil {
+		return err
+	}
+	return m.reresolveLocked(workspace, cause, 0)
 }
 
 // ApplyMergeTransition records a daemon-local merge phase change (merge
@@ -413,13 +596,20 @@ func taskIDOf(ev *corev1.Event) string {
 func agentOrTaskSignal(ev *corev1.Event) (state, causeKind string, ok bool) {
 	switch ev.GetPayload().(type) {
 	case *corev1.Event_SessionStarted:
-		return sigIdle, causeSessionStarted, true
+		// READY, not idle: the shim asserts SessionStarted at its OWN
+		// readiness (session lock held, daemon handshake complete, SDK query
+		// constructed), so this is the moment the route is proven usable
+		// WITHOUT a first message ever having been sent.
+		return sigReady, causeSessionStarted, true
 	case *corev1.Event_TurnStarted:
 		return sigThinking, causeTurnStarted, true
 	case *corev1.Event_TurnEnded:
-		if ev.GetTurnEnded().GetIsError() {
-			return sigStopFailed, causeTurnEnded, true
-		}
+		// ALWAYS `done` on the agent axis: the turn ended, and that is a
+		// fact about the agent regardless of why. An abnormal conclusion
+		// ADDITIONALLY blocks the vendor axis (see vendorBlockOf), which
+		// outranks done — so the workspace reads purple while the block
+		// stands and falls back to the green underneath once it clears,
+		// rather than being left with no state at all.
 		return sigDone, causeTurnEnded, true
 	case *corev1.Event_SessionEnded:
 		return sigDead, causeSessionEnded, true

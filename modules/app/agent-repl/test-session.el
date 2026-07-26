@@ -638,52 +638,15 @@ already looking\" gate. Post-axis-split that gate is the renderer's job."
         (agent-repl--mark-agent-done "ws1")
         (should (equal done-set "ws1"))))))
 
-(ert-deftest agent-repl-test-mark-agent-done-current-ws-acks ()
-  "mark-agent-done sets :done-acked t when the workspace is current
-(user is actively looking when :done arrives)."
+(ert-deftest agent-repl-test-mark-agent-done-records-no-viewed-ack ()
+  "mark-agent-done records no viewed-acknowledgment.
+`:done', `:ready' and `:idle' are all READY under the five-color
+vocabulary, so there is no decay left for an acknowledgment to pace."
   (agent-repl-test--with-clean-state
     (cl-letf (((symbol-function 'agent-repl--maybe-notify-finished) #'ignore)
-              ((symbol-function 'agent-repl--current-ws-p)
-               (lambda (_ws) t)))
+              ((symbol-function 'agent-repl--current-ws-p) (lambda (_ws) t)))
       (agent-repl--mark-agent-done "ws1")
-      (should (eq (agent-repl--ws-get "ws1" :done-acked) t)))))
-
-(ert-deftest agent-repl-test-mark-agent-done-current-ws-stamps-acked-at ()
-  "mark-agent-done stamps :done-acked-at with current time when the
-workspace is current, so the focus-dwell countdown can start."
-  (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'agent-repl--maybe-notify-finished) #'ignore)
-              ((symbol-function 'agent-repl--current-ws-p)
-               (lambda (_ws) t)))
-      (let ((before (float-time)))
-        (agent-repl--mark-agent-done "ws1")
-        (let ((stamp (agent-repl--ws-get "ws1" :done-acked-at)))
-          (should (numberp stamp))
-          (should (>= stamp before)))))))
-
-(ert-deftest agent-repl-test-mark-agent-done-non-current-ws-clears-ack ()
-  "mark-agent-done clears :done-acked to nil for non-current workspaces
-so a fresh :done starts unacknowledged regardless of any leftover ack
-from a prior cycle."
-  (agent-repl-test--with-clean-state
-    ;; Pretend a prior cycle left :done-acked t — must be cleared.
-    (agent-repl--ws-put "ws1" :done-acked t)
-    (cl-letf (((symbol-function 'agent-repl--maybe-notify-finished) #'ignore)
-              ((symbol-function 'agent-repl--current-ws-p)
-               (lambda (_ws) nil)))
-      (agent-repl--mark-agent-done "ws1")
-      (should (null (agent-repl--ws-get "ws1" :done-acked))))))
-
-(ert-deftest agent-repl-test-mark-agent-done-non-current-ws-clears-acked-at ()
-  "mark-agent-done clears :done-acked-at for non-current workspaces so
-a stale focus timestamp from a prior cycle does not bleed into the
-new :done lifecycle."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :done-acked-at (float-time))
-    (cl-letf (((symbol-function 'agent-repl--maybe-notify-finished) #'ignore)
-              ((symbol-function 'agent-repl--current-ws-p)
-               (lambda (_ws) nil)))
-      (agent-repl--mark-agent-done "ws1")
+      (should (null (agent-repl--ws-get "ws1" :done-acked)))
       (should (null (agent-repl--ws-get "ws1" :done-acked-at))))))
 
 (ert-deftest agent-repl-test-mark-agent-done-notifies ()

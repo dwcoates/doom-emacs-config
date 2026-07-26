@@ -592,12 +592,49 @@ async function boot(): Promise<void> {
   // and that self-driven loop stops the moment every block reaches its
   // frontier (see `SmoothReveal.reveal`).
   const smooth = new SmoothReveal({ now: () => performance.now() });
+
+  /**
+   * The last seq this webview reported painting, or -1 for none.
+   *
+   * Reset to -1 on a send failure so a later paint re-attests rather than
+   * assuming the daemon heard: the failure mode this whole mechanism guards
+   * against is a frontend that LOOKS attested without having drawn, so it
+   * must never bookkeep an ack it did not land.
+   */
+  let attestedThroughSeq = -1;
+
+  /**
+   * Report that the feed has been painted through `throughSeq`.
+   *
+   * Called only from the completion of a render that actually drew, so a
+   * webview that cannot paint simply never calls it and its workspace stays
+   * on the compromised-route state — the honest answer. A seq of 0 is a real
+   * attestation of an EMPTY history, which is what lets a never-prompted
+   * session read as ready.
+   */
+  const attestPaint = (throughSeq: number): void => {
+    if (throughSeq <= attestedThroughSeq) return;
+    attestedThroughSeq = throughSeq;
+    void dispatcher.paintAck(cmdWorkspace(), throughSeq).catch((err: unknown) => {
+      attestedThroughSeq = -1;
+      clog("error", `paint ack failed: ${String(err)}`);
+    });
+  };
+
   const rerender = (): void => {
     const shown = smooth.reveal(store.state);
     feed.render(shown.state);
     nav.reconcile(lastUserTurnId(store.state.items));
     renderChrome();
     if (shown.pending) frames.schedule();
+    // PAINT ATTESTATION. The history is on screen, so the route is not merely
+    // healthy hop by hop — it is demonstrably RENDERABLE, the one fact the
+    // daemon cannot observe from its own side and therefore will not assume.
+    //
+    // Attesting from HERE rather than from effect ingestion is the whole
+    // point: receiving the history and drawing it are different facts, and
+    // only the second earns the ready state.
+    attestPaint(store.state.lastSeq);
   };
 
   // Renders are coalesced onto animation frames: a burst of ingested effects
