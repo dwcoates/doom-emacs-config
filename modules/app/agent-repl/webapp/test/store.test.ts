@@ -1096,6 +1096,7 @@ describe("the progress footer's input (F1)", () => {
       rateLimited: null,
       errorSummary: "",
       errorItemUuid: "",
+      failure: null,
       pendingPermissions: 0,
       queueDepth: 0,
       liveTaskCount: 0,

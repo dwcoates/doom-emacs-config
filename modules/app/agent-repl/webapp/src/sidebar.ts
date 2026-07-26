@@ -54,8 +54,15 @@ export type WorkspaceStatus =
   // question mark rather than a lifecycle dot (see `statusDotHtml`).
   | "inactive";
 
-/** Every status the roster may carry; anything else is a contract breach. */
-const WORKSPACE_STATUSES: ReadonlySet<string> = new Set([
+/**
+ * Every status the roster may carry; anything else is a contract breach.
+ *
+ * EXPORTED so the cross-language color test can assert it against the shared
+ * fixture. `sidebar.el` claims in a comment that its wire table and this set
+ * "are one contract and MUST stay in sync" — this is what lets that claim be
+ * checked rather than merely asserted.
+ */
+export const WORKSPACE_STATUSES: ReadonlySet<string> = new Set([
   "thinking",
   "permission",
   "done",

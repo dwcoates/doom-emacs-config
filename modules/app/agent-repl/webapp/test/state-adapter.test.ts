@@ -13,10 +13,9 @@ import {
 import type {
   CompactBoundaryItem,
   ConversationItem,
-  ErrorItem,
   PermissionItem,
   ResultItem,
-  RetryItem,
+  SystemFailureCard,
   TextItem,
   ThinkingItem,
   ToolItem,
@@ -568,28 +567,99 @@ describe("compact-boundary arms", () => {
 });
 
 describe("apiError arm", () => {
-  it("maps a retryable api error to a retry item", () => {
-    const items = itemsFrom({ uuid: "m1", apiError: { error: { message: "overloaded" }, retryAttempt: 2, maxRetries: 5 } });
-    const expected: RetryItem = { kind: "retry", attempt: 2, reason: "overloaded", fatal: false, uuid: "m1" };
-    expect(items).toEqual([expected]);
-  });
-
-  it("marks a retry fatal once it reaches maxRetries", () => {
-    const items = itemsFrom({ uuid: "m1", apiError: { error: { message: "overloaded" }, retryAttempt: 5, maxRetries: 5 } });
-    expect((items[0] as RetryItem).fatal).toBe(true);
-  });
-
-  it("maps a terminal api error to an error item", () => {
-    const items = itemsFrom({ uuid: "m1", apiError: { error: { message: "boom" } } });
-    const expected: ErrorItem = { kind: "error", code: "api_error", message: "boom", recoverable: false, uuid: "m1" };
-    expect(items).toEqual([expected]);
-  });
-
-  it("carries the line's uuid so the footer's error row can address it", () => {
-    // Arrange / Act — the ProgressView's error_item_uuid names this item.
-    const items = itemsFrom({ uuid: "err-9", apiError: { error: { message: "boom" } } });
+  it("renders nothing, because the daemon classifies this line now", () => {
+    // Arrange / Act — reading it meant re-deciding retrying-vs-terminal by a
+    // rule the daemon did not share, which is the divergence the card closed.
+    const items = itemsFrom({
+      uuid: "m1",
+      apiError: { error: { message: "overloaded" }, retryAttempt: 2, maxRetries: 5 },
+    });
     // Assert
-    expect((items[0] as ErrorItem).uuid).toBe("err-9");
+    expect(items).toEqual([]);
+  });
+});
+
+describe("systemFailure arm", () => {
+  it("adopts the daemon's classified failure as a card", () => {
+    // Arrange / Act
+    const items = itemsFrom({
+      uuid: "failure:e9",
+      systemFailure: {
+        errorClass: "ERROR_CLASS_API",
+        errorType: "api.overloaded",
+        message: "the API is overloaded",
+        sourceDetail: "status=529",
+      },
+    });
+    // Assert
+    const expected: SystemFailureCard = {
+      kind: "failure",
+      errorClass: "API",
+      errorType: "api.overloaded",
+      message: "the API is overloaded",
+      sourceDetail: "status=529",
+      resolvedAtMs: 0,
+      uuid: "failure:e9",
+    };
+    expect(items).toEqual([expected]);
+  });
+
+  it("adopts an INTERNAL class unchanged", () => {
+    // Arrange / Act
+    const items = itemsFrom({
+      uuid: "degraded:s1:shim-connection",
+      systemFailure: {
+        errorClass: "ERROR_CLASS_INTERNAL",
+        errorType: "shim.degraded",
+        message: "no traffic",
+      },
+    });
+    // Assert
+    expect((items[0] as SystemFailureCard).errorClass).toBe("INTERNAL");
+  });
+
+  it("carries the resolution stamp that settles a window", () => {
+    // Arrange / Act — the closing edge of a degraded window.
+    const items = itemsFrom({
+      uuid: "degraded:s1:shim-connection",
+      systemFailure: {
+        errorClass: "ERROR_CLASS_INTERNAL",
+        errorType: "shim.degraded",
+        message: "no traffic",
+        resolvedAtMs: "1700000000000",
+      },
+    });
+    // Assert
+    expect((items[0] as SystemFailureCard).resolvedAtMs).toBe(1700000000000);
+  });
+
+  it("carries the item uuid so the footer's error row can address it", () => {
+    // Arrange / Act
+    const items = itemsFrom({
+      uuid: "failure:e9",
+      systemFailure: {
+        errorClass: "ERROR_CLASS_API",
+        errorType: "api.overloaded",
+        message: "boom",
+      },
+    });
+    // Assert
+    expect((items[0] as SystemFailureCard).uuid).toBe("failure:e9");
+  });
+
+  it("throws on an unrecognized class rather than guessing a color", () => {
+    // Arrange / Act / Assert — the class decides the card's color, so a
+    // default would paint a failure the wrong color, quietly.
+    expect(() =>
+      itemsFrom({
+        uuid: "f1",
+        systemFailure: {
+          errorClass: "ERROR_CLASS_SOMETHING_NEW",
+          errorType: "x",
+          message: "y",
+        },
+      }),
+    ).toThrow(/unrecognized error_class/);
   });
 });
 

@@ -8,6 +8,8 @@ import (
 	datav1 "agentrepl/proto/agentshim/data/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
+	"claude-repld/internal/errclass"
+
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -321,8 +323,9 @@ func TestConversationDeltaFromEventTranscriptCompactBoundaryLine(t *testing.T) {
 }
 
 func TestConversationDeltaFromEventTranscriptApiError(t *testing.T) {
-	// Arrange: an api_error line passes through the api_error arm; the webapp
-	// derives retry-vs-terminal from the typed ApiErrorLine, not the daemon.
+	// Arrange: a MID-BACKOFF api_error line. It passes through the legacy
+	// api_error arm and gets no failure card — the SDK is going again, so the
+	// turn has not failed and the retrying window is what covers it.
 	line := &datav1.ApiErrorLine{
 		Error:     &datav1.ApiErrorDetail{Message: "overloaded"},
 		RetryInMs: 2000, RetryAttempt: 2, MaxRetries: 5,
@@ -353,6 +356,108 @@ func TestConversationDeltaFromEventTranscriptApiError(t *testing.T) {
 	}
 	if !proto.Equal(got, want) {
 		t.Errorf("mismatch\n got: %v\nwant: %v", got, want)
+	}
+}
+
+// --- the terminal API failure card (F4) -------------------------------------
+//
+// The webapp used to classify this same line by its own rule, and a third rule
+// for "fatal" on top, while the daemon used a different one. Both processes
+// held the fact; only the daemon holds the cause, so the daemon decides.
+
+// apiErrorEvent wraps an ApiErrorLine as the transcript-plane vendor event the
+// curator sees.
+func apiErrorEvent(t *testing.T, uuid string, attempt, max int64) *corev1.Event {
+	t.Helper()
+	return &corev1.Event{
+		SessionId: "s1", Seq: 22, ProducedAtMs: producedMs,
+		Payload: &corev1.Event_Vendor{Vendor: mustAnyHelper(t, &datav1.TranscriptLine{
+			Line: &datav1.TranscriptLine_System{System: &datav1.SystemLine{
+				Envelope: &datav1.LineEnvelope{Uuid: uuid},
+				Subtype: &datav1.SystemLine_ApiError{ApiError: &datav1.ApiErrorLine{
+					Error:        &datav1.ApiErrorDetail{Message: "overloaded", Status: 529},
+					RetryAttempt: attempt, MaxRetries: max,
+				}},
+			}},
+		})},
+	}
+}
+
+// failureOf returns the single system-failure item in a delta, or nil.
+func failureOf(cd *frontendv1.ConversationDelta) *frontendv1.SystemFailureItem {
+	for _, it := range cd.GetItems() {
+		if f := it.GetSystemFailure(); f != nil {
+			return f
+		}
+	}
+	return nil
+}
+
+func TestATerminalApiErrorGetsAFailureCard(t *testing.T) {
+	// Arrange: retries exhausted.
+	// Act.
+	got, err := ConversationDeltaFromEvent("ws", apiErrorEvent(t, "sy2", 10, 10))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Assert.
+	if failureOf(got) == nil {
+		t.Fatal("a terminal API error produced no failure card")
+	}
+}
+
+func TestAMidBackoffApiErrorGetsNoFailureCard(t *testing.T) {
+	// Arrange: the SDK will try again.
+	// Act.
+	got, err := ConversationDeltaFromEvent("ws", apiErrorEvent(t, "sy2", 2, 10))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Assert: reporting a retry as a failure is how a working session came to
+	// look broken between attempts.
+	if f := failureOf(got); f != nil {
+		t.Fatalf("failure card = %v, want none while retries remain", f)
+	}
+}
+
+func TestTheFailureCardKeepsTheLegacyItemBesideIt(t *testing.T) {
+	// Arrange: the api_error arm must keep flowing until both frontends have
+	// shipped their card readers.
+	// Act.
+	got, err := ConversationDeltaFromEvent("ws", apiErrorEvent(t, "sy2", 10, 10))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Assert.
+	if len(got.GetItems()) != 2 || got.GetItems()[0].GetApiError() == nil {
+		t.Fatalf("items = %v, want the legacy api_error item plus the card", got.GetItems())
+	}
+}
+
+func TestTheFailureCardUuidIsDerivedFromTheLine(t *testing.T) {
+	// Arrange: a derived uuid cannot collide with the legacy item's and stays
+	// stable across a resync, which a freshly minted one would not.
+	// Act.
+	got, err := ConversationDeltaFromEvent("ws", apiErrorEvent(t, "sy2", 10, 10))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Assert.
+	if want := FailureUUID("sy2"); got.GetItems()[1].GetUuid() != want {
+		t.Fatalf("card uuid = %q, want %q", got.GetItems()[1].GetUuid(), want)
+	}
+}
+
+func TestTheFailureCardClassifiesTheStatus(t *testing.T) {
+	// Arrange: a 529 is overload, which the raw line never said in words.
+	// Act.
+	got, err := ConversationDeltaFromEvent("ws", apiErrorEvent(t, "sy2", 10, 10))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Assert.
+	if f := failureOf(got); f.GetErrorType() != string(errclass.TypeAPIOverloaded) {
+		t.Fatalf("error_type = %q, want %q", f.GetErrorType(), errclass.TypeAPIOverloaded)
 	}
 }
 

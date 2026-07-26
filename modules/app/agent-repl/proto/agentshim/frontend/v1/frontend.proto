@@ -161,6 +161,16 @@ message SessionView {
   // Additive (F2): whether this session's on-disk transcript has been read
   // into the store — the NEVER-BLUE completion signal (see BackfillState).
   BackfillState backfill = 19;
+  // Additive (F4): the TYPED account of why this session is terminal,
+  // superseding the free-string death_reason above.
+  //
+  // death_reason was a free string with two producers, zero readers, and no
+  // way for a frontend to know what class of failure it described. This is
+  // the same fact classified once, daemon-side, so the dead-state card can
+  // render it the way every other failure renders. Unset while the session
+  // lives; field 14 stays populated in parallel until the frontends have
+  // shipped their readers.
+  SystemFailureItem death = 20;
 }
 
 // Whether a session's on-disk transcript has been backfilled into the store.
@@ -286,6 +296,17 @@ message SystemFailureItem {
   // budget stop, a refusal) has no closing edge — the turn is over and
   // stays over — so it never resolves.
   int64 resolved_at_ms = 5;
+  // Additive (F4): the ConversationItem.uuid this failure was filed under,
+  // carried on the failure itself so a SystemFailureItem reached OUTSIDE the
+  // conversation feed (ProgressView.failure, a CommandAck) can still address
+  // the card it corresponds to.
+  //
+  // It is the failure's own identity, not a second copy of the envelope's:
+  // when the item rides ConversationItem the envelope's uuid is authoritative
+  // and this repeats it; when it rides anywhere else the envelope is absent
+  // and this is the only addressing there is. Empty means the failure has no
+  // addressable card (a turn-end error carries no item of its own).
+  string item_uuid = 6;
 }
 
 // Ephemeral live-typing relay (never persisted, never in snapshots).
@@ -573,6 +594,16 @@ message CommandAck {
   string request_id = 1;
   bool ok = 2;
   string error = 3;
+  // Additive (F4): the CLASSIFIED account of a refusal, superseding the free
+  // string above.
+  //
+  // `error` was an err.Error() funnel: every handler failure, every Nack
+  // reason, every truncated replay arrived as raw Go text that Emacs echoed
+  // verbatim and the webapp did not render at all. This is that same failure
+  // run through the daemon's one classifier, so both frontends can show a
+  // refusal as a failure card instead of as a log line or as nothing.
+  // Unset when ok is true.
+  SystemFailureItem failure = 4;
 }
 
 message DegradedNotice {
@@ -665,6 +696,14 @@ message ProgressView {
   // frontend can scroll its feed to that item. Empty when the summary has no
   // addressable item (a turn-end error carries no ApiErrorLine of its own).
   string error_item_uuid = 17;
+  // Additive (F4): the CLASSIFIED error state, superseding error_summary and
+  // error_item_uuid above (whose job the failure's own item_uuid absorbs).
+  //
+  // The footer used to render daemon-authored prose in a hardcoded red that
+  // no other surface consulted; carrying the classified failure instead lets
+  // it take its color from the same table the card and the workspace do.
+  // Cleared at the next turn start, exactly as the summary was.
+  SystemFailureItem failure = 19;
 
   // Counts (ephemeral, session-scoped):
   int64 pending_permissions = 14;

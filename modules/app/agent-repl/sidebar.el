@@ -130,11 +130,7 @@ error instead of drawing a dot.
 
 The value set is the webapp's closed WorkspaceRow.status union
 \(webapp/src/sidebar.ts) — the two sides are one contract and MUST
-stay in sync.  Two states coarsen deliberately because the sidebar's
-dot palette draws no distinct visual for them: `:idle-async' rides the
-idle hollow ring (the topbar already carries the async signal), and
-`:stop-failed' rides the dead grey dot (both mean \"session needs
-attention, not running\").  \"done-viewed\" and \"inactive\" are absent
+stay in sync.  \"done-viewed\" and \"inactive\" are absent
 here because neither is a render-status keyword —
 `agent-repl--sidebar-wire-status' derives \"done-viewed\" from `:done' +
 `agent-repl--ws-open-p'.")

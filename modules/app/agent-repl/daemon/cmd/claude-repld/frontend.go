@@ -5,6 +5,7 @@ import (
 
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
+	"claude-repld/internal/dlog"
 	"claude-repld/internal/registry"
 	"claude-repld/internal/server"
 	"claude-repld/internal/session"
@@ -41,6 +42,10 @@ import (
 type registrySessions struct {
 	reg    *registry.Registry
 	driver *sessiondrv.Manager
+	// logf carries the death-reason classifier's loud default for a record
+	// written by a build that predates the failure vocabulary. Nil is
+	// tolerated (the classifier checks) so a unit harness need not supply one.
+	logf dlog.Logf
 }
 
 func (r registrySessions) SessionViews() []*frontendv1.SessionView {
@@ -58,7 +63,7 @@ func (r registrySessions) SessionViews() []*frontendv1.SessionView {
 		if !rec.Terminal && r.driver != nil {
 			pending = r.driver.PendingPermissions(rec.CWD)
 		}
-		out = append(out, server.SessionViewFromRecord(rec, pending))
+		out = append(out, server.SessionViewFromRecord(r.logf, rec, pending))
 	}
 	return out
 }

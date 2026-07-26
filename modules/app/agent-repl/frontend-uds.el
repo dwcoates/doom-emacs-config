@@ -106,7 +106,7 @@ parity and rendered by nothing here — see
 `agent-repl--uds-ignored-frame-fields'.")
 
 (defconst agent-repl--uds-ignored-frame-fields
-  '("heartbeat" "queue" "progress")
+  '("heartbeat" "queue" "progress" "degradedNotice")
   "Frame arms Emacs decodes for wire parity but DELIBERATELY renders nothing for.
 These are a subset of `agent-repl--uds-known-frame-fields'.
 
@@ -162,7 +162,7 @@ does not render the queue they act on.")
 The handler is called with ONE argument: the plist decoded from that
 arm's protojson value.  Populated via `agent-repl--uds-register-handler'
 (e.g. `frontend-state.el' registers `workspaceState'/`snapshot'/
-`degradedNotice').  A known field with no entry here is logged, not
+`sessionView').  A known field with no entry here is logged, not
 dropped silently.")
 
 ;;;; ---- Handler registry ------------------------------------------------
@@ -290,8 +290,16 @@ process on success, nil on a failed dial."
        (agent-repl--log nil
                         "uds-connect: FAILED dialing %s: %S — scheduling reconnect in %ss"
                         sock err agent-repl-uds-reconnect-delay)
-       (message "agent-repl UDS: daemon unreachable at %s (%s); reconnecting"
-                sock (error-message-string err))
+       ;; Emacs's OWN classification (F4). The daemon definitionally cannot
+       ;; report that Emacs could not reach it, so this is one of the very
+       ;; few facts this end classifies for itself — and it carries the
+       ;; reserved `client.' prefix that says so.
+       (agent-repl-failure-surface
+        nil
+        (agent-repl-failure-local
+         "client.daemon_unreachable"
+         "the agent-repl daemon is unreachable; reconnecting"
+         (format "socket=%s %s" sock (error-message-string err))))
        (agent-repl--uds-schedule-reconnect)
        nil))))
 
@@ -514,8 +522,14 @@ Returns REQUEST-ID."
 
 (defun agent-repl--uds-handle-command-ack (ack)
   "Handler for the `commandAck' FrontendFrame arm.  ACK is a plist.
-Reads `:requestId', `:ok', and `:error'.  protojson omits a false `ok',
-so a failed ack decodes with `:ok' nil (and usually an `:error' string).
+Reads `:requestId', `:ok', `:failure' and the legacy `:error'.  protojson
+omits a false `ok', so a failed ack decodes with `:ok' nil.
+
+The ECHO comes from `:failure' — the daemon's classified account — not
+from `:error', which is an `err.Error()' funnel this end used to print
+verbatim: package-prefixed Go text such as `shimclient: request nacked',
+shown to a user who has no idea what a shimclient is.  The raw text still
+rides the log line, where it is evidence rather than prose.
 
   ok=t   -> the command was accepted; log and drop the pending entry.
   ok=nil -> the command was REJECTED; loud-log AND surface an echo-area
@@ -528,6 +542,8 @@ the `:ok' flag."
   (let* ((request-id (plist-get ack :requestId))
          (ok (plist-get ack :ok))
          (err (plist-get ack :error))
+         (failure (when-let ((item (plist-get ack :failure)))
+                    (agent-repl-failure-from-wire item)))
          (pending (and request-id
                        (gethash request-id agent-repl--uds-pending-commands)))
          (workspace (plist-get pending :workspace))
@@ -554,8 +570,13 @@ the `:ok' flag."
       (agent-repl--log workspace
                        "uds-command-ack: REJECTED request-id=%s field=%s error=%s — surfacing"
                        request-id field (or err "nil"))
-      (message "agent-repl: %s command failed: %s"
-               (or field "frontend") (or err "no error detail"))
+      ;; An ack with no classified failure is an OLD daemon, not a silent
+      ;; case: it still surfaces, from the raw text, so a refusal is never
+      ;; invisible while the two builds are mixed.
+      (if failure
+          (agent-repl-failure-surface workspace failure)
+        (message "agent-repl: %s command failed: %s"
+                 (or field "frontend") (or err "no error detail")))
       (when-let ((on-failure (plist-get pending :on-failure)))
         (condition-case cb-err
             (funcall on-failure (or err "command rejected"))

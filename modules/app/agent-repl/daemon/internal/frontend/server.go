@@ -386,7 +386,7 @@ func (s *Server) readLoop(c conn, cl *client) {
 				s.enqueue(cl, snap)
 			}
 		}
-		ack := Dispatch(context.Background(), s.handler, cmd)
+		ack := Dispatch(context.Background(), s.logf, s.handler, cmd)
 		if !ack.GetOk() {
 			s.logf("frontend: command nack {request_id=%s ws=%s}: %s", ack.GetRequestId(), cmd.GetWorkspace(), ack.GetError())
 		}
