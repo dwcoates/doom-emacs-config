@@ -1200,15 +1200,22 @@ matching `SPC <n>' (which indexes the same list)."
              for i from 1
              collect (agent-repl--render-tab-entry name current-name i))))
 
-(defconst agent-repl--tabline-row-count 2
+(defconst agent-repl--tabline-row-count 1
   "Number of rows the workspace tab-bar ALWAYS renders.
 Fixed (never varies with workspace count), so the tab-bar's pixel
 height is constant.  A height change resizes the NSWindow on macOS,
 and a clipped resize livelocks redisplay at 100% CPU
 \(`ns_change_tab_bar_height' -> `adjust_frame_size' in src/); pinning
-the row count sidesteps that entirely.  Entries beyond what the fixed
-rows hold are elided behind `+N' overflow badges rather than wrapping
-to a third row (see `agent-repl--tabline-rows').")
+the row count sidesteps that entirely.
+
+Fixed at 1 because `auto-resize-tab-bars' is nil, which clamps the
+tab-bar to a SINGLE text line of frame height regardless of the
+`tab-bar-lines' value.  A larger row count renders a tabline taller
+than that one-line strip can show, so the extra rows are clipped
+vertically (the bug this constant was lowered to 1 to fix).  Entries
+beyond what the single row holds are elided behind `+N' overflow
+badges rather than wrapping to a second row (see
+`agent-repl--tabline-rows').")
 
 (defun agent-repl--pack-first-fit (widths caps)
   "Greedily first-fit WIDTHS into rows sized by CAPS.
@@ -1438,7 +1445,7 @@ therefore the tab-bar) naturally."
 ;; rationale.
 
 (defun agent-repl-workspace-tabline-formatted ()
-  "Format workspace list for tab-bar display as EXACTLY TWO rows.
+  "Format workspace list for tab-bar display as a FIXED row count.
 Renders `agent-repl--tabline-row-count' rows, each no wider than
 `(1- (frame-width))', via `agent-repl--tabline-rows', which keeps the
 current workspace visible and elides overflow behind \"+N\" badges.
@@ -1541,7 +1548,7 @@ fix into an older live process does not leave its timer or hook behind."
     (list :timer-cancelled timer-cancelled :hook-present hook-present)))
 
 (defun agent-repl--install-fixed-height-tab-bar ()
-  "Install agent-repl's two-row tab bar without native auto-resizing.
+  "Install agent-repl's fixed-height tab bar without native auto-resizing.
 Sets the global tab-bar formatter, disables `auto-resize-tab-bars',
 pins `tab-bar-lines' for every current graphical frame, and writes the
 same value to `default-frame-alist' for future frames.  Also removes the
