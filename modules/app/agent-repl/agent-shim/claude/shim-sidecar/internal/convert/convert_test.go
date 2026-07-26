@@ -386,6 +386,140 @@ func TestPermissionRuleDenialKind(t *testing.T) {
 	}
 }
 
+// TestAutomodeUnavailableDenialKind pins the fourth ToolDenialKind value, which
+// the deployed sidecar loud-logged as an unmodeled enum value on real
+// transcripts (27 occurrences) before it was added.
+func TestAutomodeUnavailableDenialKind(t *testing.T) {
+	// Arrange
+	c := New(nil)
+	obj := map[string]any{
+		"type":           "user",
+		"toolDenialKind": "automode-unavailable",
+		"message":        map[string]any{"role": "user", "content": "x"},
+	}
+	// Act
+	line, extras, err := c.TranscriptLine(obj)
+	// Assert
+	if err != nil {
+		t.Fatalf("conversion error: %v", err)
+	}
+	if extras != nil {
+		t.Fatalf("expected zero extras, got %v", extras.AsMap())
+	}
+	got := line.GetUser().GetEnvelope().GetToolDenialKind()
+	if got != datav1.ToolDenialKind_TOOL_DENIAL_KIND_AUTOMODE_UNAVAILABLE {
+		t.Fatalf("tool_denial_kind = %v, want AUTOMODE_UNAVAILABLE", got)
+	}
+}
+
+// TestSidecarLoggedFieldsNowTyped covers the tool-result fields the DEPLOYED
+// sidecar loud-logged as unknown on real transcripts. The sidecar's reflective
+// assign resolves them by canonical name, so these pin that it really does pick
+// each newly-added proto field up — populated and absent (AAA, one field per
+// case).
+func TestSidecarLoggedFieldsNowTyped(t *testing.T) {
+	tests := []struct {
+		name     string
+		result   map[string]any
+		populate map[string]any
+		want     func(r *datav1.ToolUseResult) any
+		wantSet  any
+		wantZero any
+	}{
+		{
+			name:     "bash dangerouslyDisableSandbox",
+			result:   map[string]any{"stdout": "", "stderr": "", "interrupted": false},
+			populate: map[string]any{"dangerouslyDisableSandbox": true},
+			want:     func(r *datav1.ToolUseResult) any { return r.GetBash().GetDangerouslyDisableSandbox() },
+			wantSet:  true, wantZero: false,
+		},
+		{
+			name:     "bash backgroundedByUser",
+			result:   map[string]any{"stdout": "", "stderr": "", "interrupted": false},
+			populate: map[string]any{"backgroundedByUser": true},
+			want:     func(r *datav1.ToolUseResult) any { return r.GetBash().GetBackgroundedByUser() },
+			wantSet:  true, wantZero: false,
+		},
+		{
+			name:     "write memdirStamped",
+			result:   map[string]any{"type": "update", "filePath": "/f", "content": "c", "structuredPatch": []any{}},
+			populate: map[string]any{"memdirStamped": true},
+			want:     func(r *datav1.ToolUseResult) any { return r.GetWrite().GetMemdirStamped() },
+			wantSet:  true, wantZero: false,
+		},
+		{
+			name:     "schedule_wakeup stopped",
+			result:   map[string]any{"scheduledFor": float64(1), "clampedDelaySeconds": float64(60)},
+			populate: map[string]any{"stopped": true},
+			want:     func(r *datav1.ToolUseResult) any { return r.GetScheduleWakeup().GetStopped() },
+			wantSet:  true, wantZero: false,
+		},
+		{
+			name:     "schedule_wakeup cancelledWakeups",
+			result:   map[string]any{"scheduledFor": float64(1), "clampedDelaySeconds": float64(60)},
+			populate: map[string]any{"cancelledWakeups": float64(2)},
+			want:     func(r *datav1.ToolUseResult) any { return r.GetScheduleWakeup().GetCancelledWakeups() },
+			wantSet:  int64(2), wantZero: int64(0),
+		},
+		{
+			name:     "ask_user_question afkTimeoutMs",
+			result:   map[string]any{"questions": []any{}, "answers": map[string]any{}},
+			populate: map[string]any{"afkTimeoutMs": float64(60000)},
+			want:     func(r *datav1.ToolUseResult) any { return r.GetAskUserQuestion().GetAfkTimeoutMs() },
+			wantSet:  int64(60000), wantZero: int64(0),
+		},
+		{
+			name:     "agent worktreePath",
+			result:   map[string]any{"agentType": "general-purpose", "totalDurationMs": float64(1), "totalToolUseCount": float64(1)},
+			populate: map[string]any{"worktreePath": "/w/tree"},
+			want:     func(r *datav1.ToolUseResult) any { return r.GetAgent().GetWorktreePath() },
+			wantSet:  "/w/tree", wantZero: "",
+		},
+		{
+			name:     "agent worktreeBranch",
+			result:   map[string]any{"agentType": "general-purpose", "totalDurationMs": float64(1), "totalToolUseCount": float64(1)},
+			populate: map[string]any{"worktreeBranch": "worktree-agent-a1"},
+			want:     func(r *datav1.ToolUseResult) any { return r.GetAgent().GetWorktreeBranch() },
+			wantSet:  "worktree-agent-a1", wantZero: "",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name+"/populated", func(t *testing.T) {
+			// Arrange
+			obj := map[string]any{}
+			for k, v := range tc.result {
+				obj[k] = v
+			}
+			for k, v := range tc.populate {
+				obj[k] = v
+			}
+			c := New(nil)
+			// Act
+			res, extras := c.ToolUseResult(obj)
+			// Assert
+			if extras != nil {
+				t.Fatalf("expected zero extras, got %v", extras.AsMap())
+			}
+			if got := tc.want(res); got != tc.wantSet {
+				t.Fatalf("field = %v, want %v", got, tc.wantSet)
+			}
+		})
+		t.Run(tc.name+"/absent", func(t *testing.T) {
+			// Arrange
+			c := New(nil)
+			// Act
+			res, extras := c.ToolUseResult(tc.result)
+			// Assert
+			if extras != nil {
+				t.Fatalf("expected zero extras, got %v", extras.AsMap())
+			}
+			if got := tc.want(res); got != tc.wantZero {
+				t.Fatalf("field = %v, want zero %v", got, tc.wantZero)
+			}
+		})
+	}
+}
+
 // TestClassifyToolResultArms pins the ToolUseResult classifier to the arm the
 // MANIFEST documents for each tool-results fixture (AAA, one arm per case).
 func TestClassifyToolResultArms(t *testing.T) {
