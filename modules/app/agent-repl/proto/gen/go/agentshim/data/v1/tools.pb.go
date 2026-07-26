@@ -1927,19 +1927,25 @@ func (x *ApiContentBlocks) GetBlocks() []*ContentBlock {
 // The assistant API message envelope. stop_details/diagnostics/
 // context_management are version-dependent (absent on old CC lines).
 type ApiAssistantMessage struct {
-	state             protoimpl.MessageState `protogen:"open.v1"`
-	Id                string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Model             string                 `protobuf:"bytes,2,opt,name=model,proto3" json:"model,omitempty"`
-	Content           []*ContentBlock        `protobuf:"bytes,3,rep,name=content,proto3" json:"content,omitempty"`
-	StopReason        string                 `protobuf:"bytes,4,opt,name=stop_reason,json=stopReason,proto3" json:"stop_reason,omitempty"`       // nullable: "" = null
-	StopSequence      string                 `protobuf:"bytes,5,opt,name=stop_sequence,json=stopSequence,proto3" json:"stop_sequence,omitempty"` // nullable: "" = null
-	StopDetails       *structpb.Struct       `protobuf:"bytes,6,opt,name=stop_details,json=stopDetails,proto3" json:"stop_details,omitempty"`
-	Usage             *ApiUsage              `protobuf:"bytes,7,opt,name=usage,proto3" json:"usage,omitempty"`
-	Diagnostics       *structpb.Struct       `protobuf:"bytes,8,opt,name=diagnostics,proto3" json:"diagnostics,omitempty"`
-	ContextManagement *structpb.Struct       `protobuf:"bytes,9,opt,name=context_management,json=contextManagement,proto3" json:"context_management,omitempty"`
-	Container         *structpb.Struct       `protobuf:"bytes,10,opt,name=container,proto3" json:"container,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	Id           string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Model        string                 `protobuf:"bytes,2,opt,name=model,proto3" json:"model,omitempty"`
+	Content      []*ContentBlock        `protobuf:"bytes,3,rep,name=content,proto3" json:"content,omitempty"`
+	StopReason   string                 `protobuf:"bytes,4,opt,name=stop_reason,json=stopReason,proto3" json:"stop_reason,omitempty"`       // nullable: "" = null
+	StopSequence string                 `protobuf:"bytes,5,opt,name=stop_sequence,json=stopSequence,proto3" json:"stop_sequence,omitempty"` // nullable: "" = null
+	// SHAPE (census, 2 lines): {type, category, explanation}. Two observations
+	// is too thin to close the shape, so it stays genuinely schemaless.
+	StopDetails *structpb.Struct `protobuf:"bytes,6,opt,name=stop_details,json=stopDetails,proto3" json:"stop_details,omitempty"`
+	Usage       *ApiUsage        `protobuf:"bytes,7,opt,name=usage,proto3" json:"usage,omitempty"`
+	// SHAPE (census, 1,813 lines): {cache_miss_reason} — a direct explanation for
+	// a slow turn.
+	Diagnostics *structpb.Struct `protobuf:"bytes,8,opt,name=diagnostics,proto3" json:"diagnostics,omitempty"`
+	// SHAPE (census, 23 lines): {applied_edits}. Thinly observed; schemaless.
+	ContextManagement *structpb.Struct `protobuf:"bytes,9,opt,name=context_management,json=contextManagement,proto3" json:"context_management,omitempty"`
+	// Shape never observed in the census; genuinely schemaless.
+	Container     *structpb.Struct `protobuf:"bytes,10,opt,name=container,proto3" json:"container,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ApiAssistantMessage) Reset() {
@@ -2050,10 +2056,19 @@ type ApiUsage struct {
 	OutputTokens             int64                  `protobuf:"varint,2,opt,name=output_tokens,json=outputTokens,proto3" json:"output_tokens,omitempty"`
 	CacheReadInputTokens     int64                  `protobuf:"varint,3,opt,name=cache_read_input_tokens,json=cacheReadInputTokens,proto3" json:"cache_read_input_tokens,omitempty"`
 	CacheCreationInputTokens int64                  `protobuf:"varint,4,opt,name=cache_creation_input_tokens,json=cacheCreationInputTokens,proto3" json:"cache_creation_input_tokens,omitempty"`
-	CacheCreation            *structpb.Struct       `protobuf:"bytes,5,opt,name=cache_creation,json=cacheCreation,proto3" json:"cache_creation,omitempty"`
-	ServerToolUse            *structpb.Struct       `protobuf:"bytes,6,opt,name=server_tool_use,json=serverToolUse,proto3" json:"server_tool_use,omitempty"`
-	ServiceTier              string                 `protobuf:"bytes,7,opt,name=service_tier,json=serviceTier,proto3" json:"service_tier,omitempty"`
+	// SHAPE (census, 129,415 lines): {ephemeral_5m_input_tokens,
+	// ephemeral_1h_input_tokens}. Left as a Struct deliberately: retyping a live
+	// field is wire-breaking for every event already in the store, and no data is
+	// lost as a Struct. Documented so a consumer knows exactly what to read.
+	CacheCreation *structpb.Struct `protobuf:"bytes,5,opt,name=cache_creation,json=cacheCreation,proto3" json:"cache_creation,omitempty"`
+	// SHAPE (census, 103,749 lines): {web_search_requests, web_fetch_requests}.
+	// Same reasoning as cache_creation.
+	ServerToolUse *structpb.Struct `protobuf:"bytes,6,opt,name=server_tool_use,json=serverToolUse,proto3" json:"server_tool_use,omitempty"`
+	ServiceTier   string           `protobuf:"bytes,7,opt,name=service_tier,json=serviceTier,proto3" json:"service_tier,omitempty"`
 	// [corpus] observed on newer CC versions:
+	// SHAPE (census, 103,504 lines): per element {input_tokens, output_tokens,
+	// cache_read_input_tokens, cache_creation_input_tokens, cache_creation,
+	// type, model?}.
 	Iterations    *structpb.ListValue `protobuf:"bytes,8,opt,name=iterations,proto3" json:"iterations,omitempty"`                          // per-model iteration breakdown
 	Speed         string              `protobuf:"bytes,9,opt,name=speed,proto3" json:"speed,omitempty"`                                    // e.g. "standard"
 	InferenceGeo  string              `protobuf:"bytes,10,opt,name=inference_geo,json=inferenceGeo,proto3" json:"inference_geo,omitempty"` // e.g. "global"
