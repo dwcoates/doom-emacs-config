@@ -213,12 +213,49 @@ func (s *ShimSpawner) StopShim(sessionID string) error {
 type RegistryRegistrar struct {
 	Reg  *registry.Registry
 	Logf func(string, ...any)
+	// PushView re-pushes a session's SessionView after a record write, so a
+	// CONNECTED frontend sees the change rather than waiting for whatever
+	// unrelated event next happens to push one. Late-bound by main (the Server
+	// does not exist when the registrar is built), which is why the registrar
+	// is held by pointer. Nil-safe: the connect snapshot still carries the
+	// record, so a nil pusher costs freshness, never correctness.
+	PushView func(sessionID string)
+}
+
+// repush delivers the post-write SessionView push, if one is wired.
+func (r *RegistryRegistrar) repush(sessionID string) {
+	if r.PushView != nil {
+		r.PushView(sessionID)
+	}
+}
+
+// BackfillStateChanged persists the never-blue backfill signal (F2) on
+// sessionID's record and re-pushes its SessionView.
+//
+// This is the completion signal the switch-ensure keys its already-live skip
+// on: without it a live session whose history never arrived is indistinguishable
+// from one whose history is fully rendered, and the workspace stays blue. Same
+// loud-on-failure contract as its siblings.
+func (r *RegistryRegistrar) BackfillStateChanged(sessionID, state string) {
+	if r.Reg == nil {
+		return
+	}
+	found, err := r.Reg.Update(sessionID, func(rec *registry.Record) { rec.BackfillState = state })
+	if err != nil && r.Logf != nil {
+		r.Logf("server: session %s: registry backfill_state write FAILED — the workspace may read as blue after a restart: %v", sessionID, err)
+		return
+	}
+	if !found && r.Logf != nil {
+		r.Logf("server: session %s: backfill_state write found no record (never registered)", sessionID)
+		return
+	}
+	r.repush(sessionID)
 }
 
 // ClaudeSessionIDChanged persists claudeSessionID on sessionID's record. A
 // missing record or a write failure is loud-logged, never silently dropped
 // (the session would not survive a restart).
-func (r RegistryRegistrar) ClaudeSessionIDChanged(sessionID, claudeSessionID string) {
+func (r *RegistryRegistrar) ClaudeSessionIDChanged(sessionID, claudeSessionID string) {
 	if r.Reg == nil {
 		return
 	}
@@ -236,7 +273,7 @@ func (r RegistryRegistrar) ClaudeSessionIDChanged(sessionID, claudeSessionID str
 // sessionID (E4). Same loud-on-failure contract as above: these are things the
 // user typed that the agent has not seen, so losing the record silently is the
 // one outcome that must not happen.
-func (r RegistryRegistrar) QueuedPromptsChanged(sessionID string, queued []registry.QueuedPrompt) {
+func (r *RegistryRegistrar) QueuedPromptsChanged(sessionID string, queued []registry.QueuedPrompt) {
 	if r.Reg == nil {
 		return
 	}

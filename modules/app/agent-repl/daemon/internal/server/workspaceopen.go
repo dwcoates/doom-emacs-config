@@ -23,6 +23,37 @@
 // A transcript found under a DIFFERENT config dir than the session's own is
 // NEVER adopted. Binding it would resume a conversation the session's CLI root
 // cannot see, so it is loud-logged as a migration candidate and left alone.
+//
+// THE SWITCH HALF, AND WHY LIVENESS IS NOT THE WHOLE ANSWER (F2). Emacs sends
+// openWorkspace on every persp activation, and skips the send once the
+// workspace's session is live. That skip was wrong on its own: a session the
+// daemon bound and brought up, but whose transcript the sidecar never
+// delivered, is LIVE and BLUE at the same time. So a session also carries a
+// backfill verdict (registry.Record.BackfillState -> SessionView.backfill),
+// and the skip requires it to be settled.
+//
+// The verdict is DERIVED, because the sidecar cannot report. It has no daemon
+// channel at all; it writes to the shim-store, throws away the store's own
+// StoreWriteAck, keys its cursor per-FILE (dev:inode) rather than per-session,
+// and emits no terminal marker for a finished file. The daemon therefore reads
+// the only evidence that reaches it:
+//
+//   - PENDING is set HERE, because this is the only place that knows a
+//     transcript exists at all — the event-stream derivation downstream can
+//     see backfill ARRIVE but never that one was owed;
+//   - DONE and FAILED are derived in sessiondrv's consumer from the event
+//     stream (a data.v1.TranscriptLine, and a sidecar-stamped UnparsedEvent
+//     respectively). See frontendv1.BackfillState for the full mapping.
+//
+// KNOWN LIMITATION, recorded so the next reader does not go looking: a sidecar
+// read error that is NOT a malformed line (a permission error, an unreadable
+// project dir) is only logged sidecar-side and retried every second forever,
+// with nothing durable written anywhere. It manifests as a PENDING that never
+// advances rather than as FAILED. The switch-ensure still retries such a
+// workspace and still gives up loudly after its cap, so the user is told —
+// but the daemon cannot say WHY. Closing that needs a sidecar report the wire
+// does not carry today; the cheapest honest paths are the StoreWriteAck the
+// sidecar currently discards, or a status event on its store connection.
 package server
 
 import (
@@ -31,6 +62,7 @@ import (
 
 	"claude-repld/internal/registry"
 	"claude-repld/internal/session"
+	"claude-repld/internal/sessiondrv"
 )
 
 // WorkspaceEnsurer brings a workspace's session up without submitting a
@@ -134,6 +166,22 @@ func (o *WorkspaceOpener) bindRecord(rec registry.Record) bool {
 		// or re-account the conversation deliberately.
 		o.Logf("server: MIGRATION CANDIDATE — session %s (cwd %s, config dir %s) has a transcript under a DIFFERENT config dir %s (%s); NOT adopted",
 			rec.SessionID, rec.CWD, ownDir, m.ConfigDir, m.Path)
+	}
+	// A transcript exists for this cwd, so this session HAS history to
+	// backfill: mark it PENDING unless a state is already recorded. This is
+	// the only place that knows a transcript exists at all — the event-stream
+	// derivation downstream can only ever see backfill ARRIVE, never that one
+	// was owed — so without this a workspace with history reads UNSPECIFIED
+	// ("nothing to backfill") right up until the first line lands, which is
+	// exactly the blue window the never-blue contract is about.
+	if d.Found && rec.BackfillState == "" {
+		if _, err := o.Reg.Update(rec.SessionID, func(r *registry.Record) {
+			r.BackfillState = sessiondrv.BackfillPending
+		}); err != nil {
+			o.Logf("server: marking session %s backfill-pending FAILED: %v", rec.SessionID, err)
+		} else {
+			o.Logf("server: session %s (cwd %s) has an on-disk transcript; backfill pending", rec.SessionID, rec.CWD)
+		}
 	}
 	if rec.ClaudeSessionID != "" {
 		return false // already bound; discovery was only for the migration report

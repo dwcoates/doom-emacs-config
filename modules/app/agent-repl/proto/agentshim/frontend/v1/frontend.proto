@@ -110,6 +110,47 @@ message SessionView {
   // Additive (S8): account identity — the CLAUDE_CONFIG_DIR the session's
   // shim runs against (account switching is daemon-executed, webapp-initiated).
   string config_dir = 18;
+  // Additive (F2): whether this session's on-disk transcript has been read
+  // into the store — the NEVER-BLUE completion signal (see BackfillState).
+  BackfillState backfill = 19;
+}
+
+// Whether a session's on-disk transcript has been backfilled into the store.
+//
+// This is the completion signal the never-blue contract needs: a workspace
+// whose session is LIVE but whose history never arrived is still blue, and
+// "live" alone cannot tell those apart. DAEMON-RESOLVED, never frontend-
+// derived, and carried on SessionView so it rides every connect snapshot.
+//
+// DERIVED, not reported. The sidecar has no channel to the daemon at all: it
+// writes to the shim-store, discards the store's own StoreWriteAck, keeps its
+// cursor per-FILE (dev:inode) rather than per-session, and emits no terminal
+// marker for a finished file. So the daemon reads the only evidence that
+// actually reaches it — the event stream — and the mapping is:
+//
+//   PENDING  a transcript exists on disk for this session's cwd, but no
+//            file-plane event has arrived for it yet.
+//   DONE     at least one data.v1.TranscriptLine event has arrived, so the
+//            file plane really did deliver into the store.
+//   FAILED   the sidecar could not read part of the transcript: it emitted a
+//            core.v1.UnparsedEvent, which IS durable and DOES reach the
+//            daemon. Surfaced loudly rather than left reading as "not yet".
+//
+// KNOWN LIMITATION — a sidecar read error that is NOT a malformed line (a
+// permission error, an unreadable project dir) is only logged sidecar-side and
+// retried every second forever, with nothing durable written. It therefore
+// manifests here as a PENDING that never advances, not as FAILED. Closing that
+// needs a sidecar report the wire does not carry today; the cheapest honest
+// paths are the StoreWriteAck the sidecar currently throws away, or a status
+// event on its store connection.
+enum BackfillState {
+  // No transcript on disk for this session's cwd: a genuinely fresh
+  // workspace with nothing to backfill. NOT "unknown" — an empty workspace
+  // is a real, correct answer, and it is what a blue workspace should be.
+  BACKFILL_STATE_UNSPECIFIED = 0;
+  BACKFILL_STATE_PENDING = 1;
+  BACKFILL_STATE_DONE = 2;
+  BACKFILL_STATE_FAILED = 3;
 }
 
 // Complete (store-round-tripped) conversation additions, composed from the
