@@ -20,8 +20,9 @@
 //   while an assistant record's own `content` array holds exactly one block
 //   (the SDK emits one record per block) — so that array index is always 0 and
 //   is NOT an identity. Deriving one from it renders a message's blocks twice.
-// - DegradedNotice is honest sad-path reporting (store/sidecar/shim outage);
-//   frontends display it, they do not work around it.
+// - A shim/store/sidecar outage is honest sad-path reporting, surfaced as a
+//   self-resolving SystemFailureItem conversation card; frontends display
+//   it, they do not work around it.
 
 syntax = "proto3";
 
@@ -94,6 +95,11 @@ enum RenderState {
 }
 
 message FrontendFrame {
+  // 8 was degraded_notice (DegradedNotice): RETIRED (step 11). Stage 2
+  // replaced it with a self-resolving SystemFailureItem conversation card
+  // (F4); both frontends have shipped their readers.
+  reserved 8;
+  reserved "degraded_notice";
   oneof frame {
     StateSnapshot snapshot = 1;
     WorkspaceState workspace_state = 2;
@@ -102,7 +108,6 @@ message FrontendFrame {
     TypingDelta typing_delta = 5;
     TaskCatalog task_catalog = 6;
     CommandAck command_ack = 7;
-    DegradedNotice degraded_notice = 8;
     DaemonView daemon_view = 9;   // Additive (S7)
     SessionInitView session_init = 10;  // Additive (S9)
     HeartbeatView heartbeat = 11;       // Additive (E4)
@@ -136,6 +141,11 @@ message WorkspaceState {
 }
 
 message SessionView {
+  // 14 was death_reason (string): RETIRED (step 11). It had two producers
+  // and zero readers on either frontend; `death` below (F4) is the sole
+  // reader-facing account now.
+  reserved 14;
+  reserved "death_reason";
   string workspace = 1;
   string session_id = 2;
   string model = 3;
@@ -151,7 +161,6 @@ message SessionView {
   string cwd = 12;
   // Additive (S7): GET /sessions parity so Emacs can drop HTTP entirely.
   bool terminal = 13;
-  string death_reason = 14;
   bool rehydratable = 15;
   bool hibernated = 16;
   int64 pending_permissions = 17;
@@ -162,14 +171,13 @@ message SessionView {
   // into the store — the NEVER-BLUE completion signal (see BackfillState).
   BackfillState backfill = 19;
   // Additive (F4): the TYPED account of why this session is terminal,
-  // superseding the free-string death_reason above.
+  // superseding the free-string death_reason (RETIRED, step 11).
   //
   // death_reason was a free string with two producers, zero readers, and no
   // way for a frontend to know what class of failure it described. This is
   // the same fact classified once, daemon-side, so the dead-state card can
   // render it the way every other failure renders. Unset while the session
-  // lives; field 14 stays populated in parallel until the frontends have
-  // shipped their readers.
+  // lives.
   SystemFailureItem death = 20;
 }
 
@@ -226,6 +234,11 @@ message ConversationDelta {
 // data.v1/core.v1 payload. Consumers reconcile by uuid (permission items
 // use the permission request_id as their uuid).
 message ConversationItem {
+  // 18 was api_error (ApiErrorLine): RETIRED (step 11). A terminal line now
+  // curates to system_failure below (F4) only; a mid-backoff line curates to
+  // no item at all (the retrying window covers it).
+  reserved 18;
+  reserved "api_error";
   string uuid = 1;
   int64 ts_ms = 2;
   string request_id = 3;  // vendor API request correlation, "" when absent
@@ -238,7 +251,6 @@ message ConversationItem {
     agentshim.data.v1.ResultMessage result = 15;
     agentshim.data.v1.CompactBoundary compact_boundary = 16;
     agentshim.data.v1.CompactBoundaryLine compact_boundary_line = 17;
-    agentshim.data.v1.ApiErrorLine api_error = 18;
     agentshim.core.v1.PermissionItem permission = 30;
     SystemFailureItem system_failure = 31;  // Additive (F3)
   }
@@ -606,13 +618,6 @@ message CommandAck {
   SystemFailureItem failure = 4;
 }
 
-message DegradedNotice {
-  string component = 1;  // "shim-store" | "shim-sidecar" | "claude-shim:<id>"
-  string reason = 2;
-  bool recovered = 3;
-  int64 at_ms = 4;
-}
-
 // ---------------------------------------------------------------------------
 // The consolidated progress footer (F1).
 //
@@ -655,6 +660,11 @@ message RateLimitWindow {
 }
 
 message ProgressView {
+  // 13/17 were error_summary/error_item_uuid (string): RETIRED (step 11).
+  // `failure` below (F4) is the sole reader-facing account now; its own
+  // item_uuid absorbed error_item_uuid's addressing job.
+  reserved 13, 17;
+  reserved "error_summary", "error_item_uuid";
   string workspace = 1;
   string session_id = 2;
 
@@ -689,20 +699,15 @@ message ProgressView {
   // count for, so `pending_permissions` alone under-reports "waiting on you".
   ProgressWindow blocked = 18;
 
-  // Error state: persists until the next turn starts. Set from a terminal
-  // ApiErrorLine (retries exhausted) or an errored turn end.
-  string error_summary = 13;
-  // The uuid of the conversation item the error summary came from, so a
-  // frontend can scroll its feed to that item. Empty when the summary has no
-  // addressable item (a turn-end error carries no ApiErrorLine of its own).
-  string error_item_uuid = 17;
-  // Additive (F4): the CLASSIFIED error state, superseding error_summary and
-  // error_item_uuid above (whose job the failure's own item_uuid absorbs).
+  // The CLASSIFIED error state (F4), superseding the free-string
+  // error_summary/error_item_uuid (RETIRED, step 11) — this failure's own
+  // item_uuid absorbed error_item_uuid's addressing job.
   //
   // The footer used to render daemon-authored prose in a hardcoded red that
   // no other surface consulted; carrying the classified failure instead lets
   // it take its color from the same table the card and the workspace do.
-  // Cleared at the next turn start, exactly as the summary was.
+  // Persists until the next turn starts, when it clears; set from a terminal
+  // ApiErrorLine (retries exhausted) or an errored turn end.
   SystemFailureItem failure = 19;
 
   // Counts (ephemeral, session-scoped):

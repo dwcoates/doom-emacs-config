@@ -213,19 +213,15 @@ describe("SessionInit mapping", () => {
   });
 });
 
-// --- DegradedNotice → banner -----------------------------------------------
+// --- DegradedNotice: RETIRED (step 11) --------------------------------------
 
 describe("DegradedNotice mapping", () => {
-  it("produces a banner input", () => {
-    const effects = applyOne({
-      degradedNotice: { component: "shim-store", reason: "socket closed", recovered: false, atMs: "1700000000000" },
-    });
-    expect(effects).toEqual([
-      {
-        kind: "degraded",
-        value: { component: "shim-store", reason: "socket closed", recovered: false, atMs: 1700000000000 },
-      },
-    ]);
+  it("rejects the retired degradedNotice frame arm", () => {
+    expect(() =>
+      applyOne({
+        degradedNotice: { component: "shim-store", reason: "socket closed", recovered: false, atMs: "1700000000000" },
+      }),
+    ).toThrow(/unrecognized field/);
   });
 });
 
@@ -566,16 +562,16 @@ describe("compact-boundary arms", () => {
   });
 });
 
-describe("apiError arm", () => {
-  it("renders nothing, because the daemon classifies this line now", () => {
-    // Arrange / Act — reading it meant re-deciding retrying-vs-terminal by a
-    // rule the daemon did not share, which is the divergence the card closed.
-    const items = itemsFrom({
-      uuid: "m1",
-      apiError: { error: { message: "overloaded" }, retryAttempt: 2, maxRetries: 5 },
-    });
-    // Assert
-    expect(items).toEqual([]);
+describe("apiError arm: RETIRED (step 11)", () => {
+  it("rejects the retired apiError conversation-item arm", () => {
+    // Arrange / Act / Assert — the daemon curates a terminal line to
+    // systemFailure only now; a mid-backoff line curates to no item at all.
+    expect(() =>
+      itemsFrom({
+        uuid: "m1",
+        apiError: { error: { message: "overloaded" }, retryAttempt: 2, maxRetries: 5 },
+      }),
+    ).toThrow(/unrecognized field/);
   });
 });
 

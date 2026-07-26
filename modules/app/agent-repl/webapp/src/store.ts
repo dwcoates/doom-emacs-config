@@ -559,9 +559,9 @@ export class ConversationStore {
 
   /**
    * THE ingestion entry point. Folds a batch of decoded-frame adapter effects
-   * onto the store, returning whether anything visible changed. `degraded` and
-   * `ignored` effects are not store state — the caller surfaces the banner and
-   * the adapter already counted/logged the ignore — so they are no-ops here.
+   * onto the store, returning whether anything visible changed. An `ignored`
+   * effect is not store state — the adapter already counted/logged it — so
+   * it is a no-op here.
    */
   ingest(effects: readonly AdapterEffect[]): IngestResult {
     let changed = false;
@@ -595,7 +595,6 @@ export class ConversationStore {
         case "session-init":
           changed = this.applySessionInit(effect.value) || changed;
           break;
-        case "degraded":
         case "ignored":
           break;
       }

@@ -322,10 +322,11 @@ func TestConversationDeltaFromEventTranscriptCompactBoundaryLine(t *testing.T) {
 	}
 }
 
-func TestConversationDeltaFromEventTranscriptApiError(t *testing.T) {
-	// Arrange: a MID-BACKOFF api_error line. It passes through the legacy
-	// api_error arm and gets no failure card — the SDK is going again, so the
-	// turn has not failed and the retrying window is what covers it.
+func TestConversationDeltaFromEventTranscriptApiErrorMidBackoffCuratesToNothing(t *testing.T) {
+	// Arrange: a MID-BACKOFF api_error line. The retrying window (internal/
+	// progress) is what covers it, so the curator emits no conversation item
+	// at all for it — RETIRED (step 11): the legacy api_error passthrough
+	// this arm used to also emit here is gone, not merely un-asserted.
 	line := &datav1.ApiErrorLine{
 		Error:     &datav1.ApiErrorDetail{Message: "overloaded"},
 		RetryInMs: 2000, RetryAttempt: 2, MaxRetries: 5,
@@ -339,14 +340,6 @@ func TestConversationDeltaFromEventTranscriptApiError(t *testing.T) {
 			}},
 		})},
 	}
-	want := &frontendv1.ConversationDelta{
-		Workspace: "ws", SessionId: "s1", ThroughSeq: 22,
-		Items: []*frontendv1.ConversationItem{{
-			Uuid: "sy2", TsMs: producedMs,
-			Item: &frontendv1.ConversationItem_ApiError{ApiError: line},
-		}},
-	}
-
 	// Act.
 	got, err := ConversationDeltaFromEvent("ws", ev)
 
@@ -354,8 +347,8 @@ func TestConversationDeltaFromEventTranscriptApiError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !proto.Equal(got, want) {
-		t.Errorf("mismatch\n got: %v\nwant: %v", got, want)
+	if got != nil {
+		t.Errorf("got %v, want nil (no conversation-bearing items)", got)
 	}
 }
 
@@ -420,17 +413,18 @@ func TestAMidBackoffApiErrorGetsNoFailureCard(t *testing.T) {
 	}
 }
 
-func TestTheFailureCardKeepsTheLegacyItemBesideIt(t *testing.T) {
-	// Arrange: the api_error arm must keep flowing until both frontends have
-	// shipped their card readers.
+func TestTheFailureCardIsTheOnlyItem(t *testing.T) {
+	// Arrange: RETIRED (step 11) — the legacy api_error passthrough that used
+	// to ride beside the card is gone, so a terminal failure curates to
+	// exactly the card and nothing else.
 	// Act.
 	got, err := ConversationDeltaFromEvent("ws", apiErrorEvent(t, "sy2", 10, 10))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	// Assert.
-	if len(got.GetItems()) != 2 || got.GetItems()[0].GetApiError() == nil {
-		t.Fatalf("items = %v, want the legacy api_error item plus the card", got.GetItems())
+	if len(got.GetItems()) != 1 || got.GetItems()[0].GetSystemFailure() == nil {
+		t.Fatalf("items = %v, want exactly one system_failure item", got.GetItems())
 	}
 }
 
@@ -443,8 +437,8 @@ func TestTheFailureCardUuidIsDerivedFromTheLine(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	// Assert.
-	if want := FailureUUID("sy2"); got.GetItems()[1].GetUuid() != want {
-		t.Fatalf("card uuid = %q, want %q", got.GetItems()[1].GetUuid(), want)
+	if want := FailureUUID("sy2"); got.GetItems()[0].GetUuid() != want {
+		t.Fatalf("card uuid = %q, want %q", got.GetItems()[0].GetUuid(), want)
 	}
 }
 
@@ -578,22 +572,6 @@ func TestTypingDeltaFromContentDelta(t *testing.T) {
 	}
 }
 
-// --- DegradedNoticeFromState ------------------------------------------------
-
-func TestDegradedNoticeFromState(t *testing.T) {
-	// Arrange.
-	ds := &corev1.DegradedState{Component: "store-client", Reason: "store unreachable", Recovered: false}
-
-	// Act.
-	got := DegradedNoticeFromState(ds, 1234)
-
-	// Assert.
-	want := &frontendv1.DegradedNotice{Component: "store-client", Reason: "store unreachable", Recovered: false, AtMs: 1234}
-	if !proto.Equal(got, want) {
-		t.Errorf("mismatch\n got: %v\nwant: %v", got, want)
-	}
-}
-
 // --- BuildTaskCatalog -------------------------------------------------------
 
 func TestBuildTaskCatalog(t *testing.T) {
@@ -700,9 +678,6 @@ func TestFrameWrappers(t *testing.T) {
 	}
 	if got := CommandAckFrame(&frontendv1.CommandAck{RequestId: "r"}); got.GetCommandAck().GetRequestId() != "r" {
 		t.Error("CommandAckFrame did not set command_ack arm")
-	}
-	if got := DegradedNoticeFrame(&frontendv1.DegradedNotice{Component: "c"}); got.GetDegradedNotice().GetComponent() != "c" {
-		t.Error("DegradedNoticeFrame did not set degraded_notice arm")
 	}
 	if got := SessionInitViewFrame(&frontendv1.SessionInitView{Workspace: "w"}); got.GetSessionInit().GetWorkspace() != "w" {
 		t.Error("SessionInitViewFrame did not set session_init arm")

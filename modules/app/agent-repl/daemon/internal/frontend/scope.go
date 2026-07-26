@@ -33,7 +33,7 @@ func (s Scope) matches(sessionID, workspace string) bool {
 // the frame to actually send. A StateSnapshot is REPLACED with a scope-filtered
 // copy so a scoped client's connect/resync snapshot carries only its own
 // workspace and session. A frame that carries no session/workspace identity
-// (DegradedNotice, CommandAck) is connection-global and always passes.
+// (CommandAck) is connection-global and always passes.
 func scopeFrame(frame *frontendv1.FrontendFrame, sc Scope) (*frontendv1.FrontendFrame, bool) {
 	switch f := frame.GetFrame().(type) {
 	case *frontendv1.FrontendFrame_Snapshot:
@@ -57,7 +57,7 @@ func scopeFrame(frame *frontendv1.FrontendFrame, sc Scope) (*frontendv1.Frontend
 	case *frontendv1.FrontendFrame_Progress:
 		return frame, sc.matches(f.Progress.GetSessionId(), f.Progress.GetWorkspace())
 	default:
-		// DegradedNotice / CommandAck / unknown: connection-global, pass through.
+		// CommandAck / unknown: connection-global, pass through.
 		return frame, true
 	}
 }
