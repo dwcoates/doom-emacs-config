@@ -59,6 +59,7 @@ message FrontendFrame {
     SessionInitView session_init = 10;  // Additive (S9)
     HeartbeatView heartbeat = 11;       // Additive (E4)
     QueueView queue = 12;               // Additive (E4)
+    ProgressView progress = 13;         // Additive (F1)
   }
 }
 
@@ -393,6 +394,85 @@ message DegradedNotice {
   int64 at_ms = 4;
 }
 
+// ---------------------------------------------------------------------------
+// The consolidated progress footer (F1).
+//
+// ONE daemon-resolved frame carrying the footer's ENTIRE input: the phase
+// mirror, the live tickers, the activity windows, and the ephemeral counts.
+// It replaces the constellation of scattered in-flight indicators the webapp
+// used to derive for itself (the thinking/working/retrying tail rows and the
+// pulse machinery that orbited them).
+//
+// Resolved by daemon/internal/progress, a SIBLING of the SSM: it folds the
+// same store event stream plus the ephemeral relays into a latest-wins
+// ProgressView per workspace, pushed on change and carried in StateSnapshot.
+// Frontends RENDER it; they never re-derive any of it.
+//
+// Deliberately NO output-token ticker. The token cell shows the CURRENT
+// TURN's cumulative INPUT tokens (cached + uncached) only; the running
+// output-token figure is explicitly unwanted, so the message_delta usage
+// relay is out of this frame's scope entirely. Session-wide and per-model
+// token figures are topbar territory (SessionView) and never appear here.
+// ---------------------------------------------------------------------------
+
+// An activity window: open until cleared. Each window is its own message so
+// window-specific detail has a home rather than being flattened into a
+// stringly-typed status.
+message ProgressWindow {
+  bool active = 1;
+  int64 since_ms = 2;
+  // Window-specific detail (a hook name, an auth prompt line, a retry's
+  // attempt/status summary). Free text for display; never parsed.
+  string detail = 3;
+}
+
+// The rate-limit window, which carries structured detail no other window
+// needs (a reset deadline and a utilization fraction).
+message RateLimitWindow {
+  bool active = 1;
+  int64 resets_at = 2;    // epoch SECONDS (the vendor event's own unit)
+  double utilization = 3;
+  string status = 4;      // e.g. "allowed_warning"
+}
+
+message ProgressView {
+  string workspace = 1;
+  string session_id = 2;
+
+  // Phase mirror: the SSM's resolved state, repeated here so the footer has
+  // one self-sufficient input. Never re-derived frontend-side.
+  RenderState state = 3;
+
+  // Turn clock: 0 = no turn in flight.
+  int64 turn_started_at_ms = 4;
+
+  // Live tickers (latest-wins), coalesced daemon-side so a high-frequency
+  // source cannot drive the frame rate.
+  int64 thinking_tokens = 5;   // data.ThinkingTokens.estimated_tokens
+  int64 input_tokens = 6;      // THIS TURN's cumulative cached+uncached input
+  int64 ttft_ms = 7;           // first-token latency of the current message
+
+  // Activity windows: open until cleared.
+  ProgressWindow compacting = 8;       // data.StatusMessage status="compacting"
+  ProgressWindow retrying = 9;         // ApiErrorLine retry family
+  ProgressWindow authenticating = 10;  // data.AuthStatus
+  ProgressWindow hook = 11;            // data.HookStarted / HookResponse
+  RateLimitWindow rate_limited = 12;   // data.RateLimitEvent
+
+  // Error state: persists until the next turn starts. Set from a terminal
+  // ApiErrorLine (retries exhausted) or an errored turn end.
+  string error_summary = 13;
+  // The uuid of the conversation item the error summary came from, so a
+  // frontend can scroll its feed to that item. Empty when the summary has no
+  // addressable item (a turn-end error carries no ApiErrorLine of its own).
+  string error_item_uuid = 17;
+
+  // Counts (ephemeral, session-scoped):
+  int64 pending_permissions = 14;
+  int64 queue_depth = 15;
+  int64 live_task_count = 16;
+}
+
 // Full resync on (re)connect: current state of every workspace + open tasks.
 message StateSnapshot {
   repeated WorkspaceState workspaces = 1;
@@ -401,4 +481,5 @@ message StateSnapshot {
   DaemonView daemon = 4;  // Additive (S7)
   repeated SessionInitView inits = 5;  // Additive (S9)
   repeated QueueView queues = 6;  // Additive (E4)
+  repeated ProgressView progress = 7;  // Additive (F1)
 }
