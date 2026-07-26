@@ -32,6 +32,7 @@ import { AsyncQueue } from "../input-queue.js";
 import { create } from "@bufbuild/protobuf";
 import type { JsonObject } from "@bufbuild/protobuf";
 import { isSwitchablePermissionMode, type ContentBlock, type PermissionMode } from "../protocol.js";
+import { describeInterruptSurvivors } from "../session.js";
 import type {
   CanUseToolLike,
   PermissionResultLike,
@@ -183,17 +184,14 @@ export class UdsSession {
         this.control.cancelAll("interrupt");
         void this.query?.interrupt()
           .then((receipt) => {
-            // SDK >= 0.3.205 answers with an interrupt receipt. `still_queued`
-            // names async messages that SURVIVE the interrupt. Our daemon holds
-            // its own queue rather than enqueuing into the CLI, so a non-empty
-            // list means work outlived an interrupt the daemon believes it
-            // cancelled — reported as honest downtime, never a swallowed log.
-            const survivors = receipt?.still_queued ?? [];
-            if (survivors.length === 0) return;
-            this.reportDegraded(
-              "claude-shim-interrupt",
-              `interrupt left ${survivors.length} queued message(s) running: ${survivors.join(",")}`,
-            );
+            // SDK >= 0.3.205 answers with an interrupt receipt. The anomaly
+            // wording is shared with the stdio path (describeInterruptSurvivors)
+            // so the two transports cannot describe the same broken assumption
+            // two different ways. An empty receipt is the expected case and
+            // says nothing; a non-empty one is honest downtime.
+            const anomaly = describeInterruptSurvivors(receipt);
+            if (anomaly === null) return;
+            this.reportDegraded("claude-shim-interrupt", anomaly);
           })
           .catch((err: unknown) => {
             this.reportDegraded("claude-shim-interrupt", `interrupt failed: ${errMsg(err)}`);

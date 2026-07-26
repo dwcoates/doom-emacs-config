@@ -248,3 +248,17 @@ describe("!bg background turns", () => {
     expect(String(blocks[0].text)).toContain("<status>completed</status>");
   });
 });
+
+describe("fake query interrupt receipt", () => {
+  it("resolves the receipt shape the real SDK returns, not undefined", async () => {
+    // The shim depends on SDK 0.3.220, whose interrupt() always answers with
+    // a receipt (a real probe returns {"still_queued":[]}). Resolving
+    // undefined here would leave every offline run exercising a shape the
+    // real SDK never produces.
+    const h = makeFake();
+    // Act
+    const receipt = await h.query.interrupt();
+    // Assert
+    expect(receipt).toEqual({ still_queued: [] });
+  });
+});

@@ -363,11 +363,17 @@ export function createFakeQuery(
   const iterator = out[Symbol.asyncIterator]();
   return {
     [Symbol.asyncIterator]: () => iterator,
-    // The offline query has no CLI behind it to queue anything, so it models
-    // a pre-`interrupt_receipt_v1` CLI and resolves without a receipt.
+    // Resolves a REPRESENTATIVE receipt, not `undefined`. The shim depends on
+    // SDK 0.3.220, whose interrupt() always answers with one — probing a real
+    // session returns exactly `{"still_queued":[]}` — so returning undefined
+    // would model a CLI we no longer ship against and leave every offline run
+    // exercising a shape the real SDK never produces.
+    //
+    // Empty is the honest value: the offline query has no CLI queue behind it,
+    // so nothing can survive an interrupt here.
     interrupt: async (): Promise<InterruptReceipt | undefined> => {
       interrupted = true;
-      return undefined;
+      return { still_queued: [] };
     },
     setPermissionMode: async (mode: PermissionMode): Promise<void> => {
       permissionMode = mode;
