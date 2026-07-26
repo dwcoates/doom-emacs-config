@@ -313,8 +313,10 @@ describe("UdsSession lifecycle: shim-authoritative TurnStarted", () => {
     // Act
     query.emit(init);
     const firstWrite = await store.peer().next(StoreWriteSchema);
-    // StoreClient chains sends on acks, so the second batch only leaves once
-    // the first is acked (production's store always does).
+    // Ack the first batch as production's store always does. StoreClient
+    // pipelines sends (a batch issues without waiting for the prior ack), so
+    // this ack is not needed to release the second emit — it keeps the fake
+    // store's ack bookkeeping faithful to the real one.
     store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, { accepted: 2n, lastSeq: 2n }));
     query.emit(init);
     const secondWrite = await store.peer().next(StoreWriteSchema);
