@@ -266,6 +266,61 @@ export interface DegradedNotice {
   atMs: number;
 }
 
+/**
+ * One activity window on the progress footer (F1): open until cleared.
+ * `active` false is the window closed; `sinceMs` counts from when it opened
+ * and survives a detail refresh.
+ */
+export interface ProgressWindow {
+  active: boolean;
+  sinceMs: number;
+  /** Window-specific detail (a hook name, an auth line, a retry summary). */
+  detail: string;
+}
+
+/** The rate-limit window, which carries structured detail (F1). */
+export interface RateLimitWindow {
+  active: boolean;
+  /** Epoch SECONDS (the vendor event's own unit), not millis. */
+  resetsAt: number;
+  utilization: number;
+  status: string;
+}
+
+/**
+ * The consolidated progress footer's ENTIRE input (F1), resolved daemon-side.
+ *
+ * Latest-wins per workspace: every push carries the complete view, so an absent
+ * window means closed rather than "no news". Deliberately carries NO
+ * output-token figure — the token cell is the CURRENT TURN's cumulative input
+ * only, and session-wide token figures stay in `SessionView`.
+ */
+export interface ProgressView {
+  workspace: string;
+  sessionId: string;
+  /** The SSM's resolved phase, mirrored so the footer is self-sufficient. */
+  state: RenderState;
+  /** 0 = no turn in flight. */
+  turnStartedAtMs: number;
+  thinkingTokens: number;
+  /** THIS turn's cumulative cached + uncached input tokens. */
+  inputTokens: number;
+  ttftMs: number;
+  /** Absent = the window is closed. */
+  compacting?: ProgressWindow;
+  retrying?: ProgressWindow;
+  authenticating?: ProgressWindow;
+  hook?: ProgressWindow;
+  rateLimited?: RateLimitWindow;
+  /** Persists until the next turn starts; "" = no error standing. */
+  errorSummary: string;
+  /** The feed item the error row scrolls to; "" = not addressable. */
+  errorItemUuid: string;
+  pendingPermissions: number;
+  queueDepth: number;
+  liveTaskCount: number;
+}
+
 export interface StateSnapshot {
   workspaces: WorkspaceState[];
   sessions: SessionView[];
@@ -276,6 +331,8 @@ export interface StateSnapshot {
   inits: SessionInitView[];
   /** Each live session's held-prompt queue (E4); empty on a pre-E4 daemon. */
   queues: QueueView[];
+  /** Each workspace's resolved progress view (F1); empty on a pre-F1 daemon. */
+  progress: ProgressView[];
 }
 
 /**
@@ -329,7 +386,8 @@ export type FrontendFrame = {
     | { case: "daemonView"; value: DaemonView }
     | { case: "sessionInit"; value: SessionInitView }
     | { case: "heartbeat"; value: HeartbeatView }
-    | { case: "queue"; value: QueueView };
+    | { case: "queue"; value: QueueView }
+    | { case: "progress"; value: ProgressView };
 };
 
 /** The frame-variant discriminators FrontendFrame.frame.case may hold. */
@@ -431,6 +489,7 @@ const FRAME_DECODERS: ReadonlyMap<string, (v: unknown) => FrontendFrame["frame"]
   ["sessionInit", (v: unknown) => ({ case: "sessionInit" as const, value: decodeSessionInitView(v) })],
   ["heartbeat", (v: unknown) => ({ case: "heartbeat" as const, value: decodeHeartbeatView(v) })],
   ["queue", (v: unknown) => ({ case: "queue" as const, value: decodeQueueView(v) })],
+  ["progress", (v: unknown) => ({ case: "progress" as const, value: decodeProgressView(v) })],
 ]);
 
 // --- per-message decoders (strict: reject unknown fields, validate required) -
@@ -858,7 +917,103 @@ function decodeDaemonView(v: unknown): DaemonView {
   };
 }
 
-const STATE_SNAPSHOT_KEYS = new Set(["workspaces", "sessions", "catalogs", "daemon", "inits", "queues"]);
+const PROGRESS_VIEW_KEYS = new Set([
+  "workspace",
+  "sessionId",
+  "state",
+  "turnStartedAtMs",
+  "thinkingTokens",
+  "inputTokens",
+  "ttftMs",
+  "compacting",
+  "retrying",
+  "authenticating",
+  "hook",
+  "rateLimited",
+  "errorSummary",
+  "errorItemUuid",
+  "pendingPermissions",
+  "queueDepth",
+  "liveTaskCount",
+]);
+const PROGRESS_WINDOW_KEYS = new Set(["active", "sinceMs", "detail"]);
+const RATE_LIMIT_WINDOW_KEYS = new Set(["active", "resetsAt", "utilization", "status"]);
+
+function decodeProgressView(v: unknown): ProgressView {
+  const o = ensureObject(v, "ProgressView");
+  rejectUnknown(o, PROGRESS_VIEW_KEYS, "ProgressView");
+  const pv: ProgressView = {
+    workspace: str(o, "workspace", "ProgressView"),
+    sessionId: str(o, "sessionId", "ProgressView"),
+    state: enumRenderState(o, "state", "ProgressView"),
+    turnStartedAtMs: num(o, "turnStartedAtMs", "ProgressView"),
+    thinkingTokens: num(o, "thinkingTokens", "ProgressView"),
+    inputTokens: num(o, "inputTokens", "ProgressView"),
+    ttftMs: num(o, "ttftMs", "ProgressView"),
+    errorSummary: str(o, "errorSummary", "ProgressView"),
+    errorItemUuid: str(o, "errorItemUuid", "ProgressView"),
+    pendingPermissions: num(o, "pendingPermissions", "ProgressView"),
+    queueDepth: num(o, "queueDepth", "ProgressView"),
+    liveTaskCount: num(o, "liveTaskCount", "ProgressView"),
+  };
+  // A window is a message: absent means CLOSED, which is why each is decoded
+  // only when present rather than materialized as an inactive placeholder.
+  for (const key of ["compacting", "retrying", "authenticating", "hook"] as const) {
+    if (o[key] !== undefined && o[key] !== null) {
+      pv[key] = decodeProgressWindow(o[key], `ProgressView.${key}`);
+    }
+  }
+  if (o.rateLimited !== undefined && o.rateLimited !== null) {
+    pv.rateLimited = decodeRateLimitWindow(o.rateLimited);
+  }
+  // Without a workspace the view addresses nothing: the footer could not tell
+  // which session it is describing.
+  if (pv.workspace === "") {
+    throw new Error("frontend-proto: ProgressView missing required `workspace`");
+  }
+  // The phase mirror must name a concrete state. A workspace with nothing
+  // resolved yet is INIT, which the daemon seeds — so UNSPECIFIED here is a
+  // malformed frame, not an early one.
+  if (pv.state === RenderState.UNSPECIFIED) {
+    throw new Error(
+      `frontend-proto: ProgressView for '${pv.workspace}' has UNSPECIFIED ` +
+        "render state (the resolver must mirror a concrete phase)",
+    );
+  }
+  return pv;
+}
+
+function decodeProgressWindow(v: unknown, ctx: string): ProgressWindow {
+  const o = ensureObject(v, ctx);
+  rejectUnknown(o, PROGRESS_WINDOW_KEYS, ctx);
+  return {
+    active: bool(o, "active", ctx),
+    sinceMs: num(o, "sinceMs", ctx),
+    detail: str(o, "detail", ctx),
+  };
+}
+
+function decodeRateLimitWindow(v: unknown): RateLimitWindow {
+  const ctx = "ProgressView.rateLimited";
+  const o = ensureObject(v, ctx);
+  rejectUnknown(o, RATE_LIMIT_WINDOW_KEYS, ctx);
+  return {
+    active: bool(o, "active", ctx),
+    resetsAt: num(o, "resetsAt", ctx),
+    utilization: num(o, "utilization", ctx),
+    status: str(o, "status", ctx),
+  };
+}
+
+const STATE_SNAPSHOT_KEYS = new Set([
+  "workspaces",
+  "sessions",
+  "catalogs",
+  "daemon",
+  "inits",
+  "queues",
+  "progress",
+]);
 function decodeStateSnapshot(v: unknown): StateSnapshot {
   const o = ensureObject(v, "StateSnapshot");
   rejectUnknown(o, STATE_SNAPSHOT_KEYS, "StateSnapshot");
@@ -883,6 +1038,10 @@ function decodeStateSnapshot(v: unknown): StateSnapshot {
       ? []
       : ensureArray(o.queues, "StateSnapshot.queues")
     ).map(decodeQueueView),
+    progress: (o.progress === undefined || o.progress === null
+      ? []
+      : ensureArray(o.progress, "StateSnapshot.progress")
+    ).map(decodeProgressView),
   };
   // The daemon block is optional (absent on a pre-S7 daemon). Decode it when
   // present rather than defaulting it away.

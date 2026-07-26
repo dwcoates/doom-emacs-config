@@ -559,4 +559,80 @@ describe("UNSUPPORTED_SHAPES registry", () => {
   it("reports a mapped variant as visually supported", () => {
     expect(isVisuallySupportedFrame("workspaceState")).toBe(true);
   });
+
+  it("reports progress as visually supported (it IS the footer)", () => {
+    expect(isVisuallySupportedFrame("progress")).toBe(true);
+  });
+});
+
+describe("ProgressView decoding (F1)", () => {
+  /** A minimal well-formed ProgressView frame body. */
+  function pv(over: Record<string, unknown> = {}): string {
+    return JSON.stringify({
+      progress: { workspace: "/w", sessionId: "s1", state: "RENDER_STATE_THINKING", ...over },
+    });
+  }
+
+  it("decodes int64 fields from their protojson numeric strings", () => {
+    // Arrange / Act
+    const got = decodeFrontendFrame(pv({ inputTokens: "41200", turnStartedAtMs: "1700000000000" }));
+    // Assert
+    if (got.frame.case !== "progress") throw new Error("wrong variant");
+    expect(got.frame.value.inputTokens).toBe(41200);
+  });
+
+  it("decodes an activity window", () => {
+    // Arrange / Act
+    const got = decodeFrontendFrame(pv({ hook: { active: true, sinceMs: "5", detail: "PreToolUse" } }));
+    // Assert
+    if (got.frame.case !== "progress") throw new Error("wrong variant");
+    expect(got.frame.value.hook).toEqual({ active: true, sinceMs: 5, detail: "PreToolUse" });
+  });
+
+  it("leaves an absent window undefined rather than defaulting it open", () => {
+    // Arrange / Act
+    const got = decodeFrontendFrame(pv());
+    // Assert
+    if (got.frame.case !== "progress") throw new Error("wrong variant");
+    expect(got.frame.value.compacting).toBeUndefined();
+  });
+
+  it("rejects a view with no workspace", () => {
+    // Arrange / Act / Assert — it would address no session.
+    expect(() =>
+      decodeFrontendFrame(JSON.stringify({ progress: { sessionId: "s1", state: "RENDER_STATE_IDLE" } })),
+    ).toThrow(/missing required `workspace`/);
+  });
+
+  it("rejects an UNSPECIFIED phase mirror", () => {
+    // Arrange / Act / Assert — the resolver seeds INIT, so this is malformed.
+    expect(() => decodeFrontendFrame(pv({ state: "RENDER_STATE_UNSPECIFIED" }))).toThrow(
+      /UNSPECIFIED/,
+    );
+  });
+
+  it("rejects an unrecognized field", () => {
+    // Arrange / Act / Assert — strict decoding, never a silent drop.
+    expect(() => decodeFrontendFrame(pv({ outputTokens: "9000" }))).toThrow(/unrecognized/);
+  });
+
+  it("decodes a snapshot's progress list", () => {
+    // Arrange / Act
+    const got = decodeFrontendFrame(
+      JSON.stringify({
+        snapshot: { progress: [{ workspace: "/w", sessionId: "s1", state: "RENDER_STATE_IDLE" }] },
+      }),
+    );
+    // Assert
+    if (got.frame.case !== "snapshot") throw new Error("wrong variant");
+    expect(got.frame.value.progress).toHaveLength(1);
+  });
+
+  it("leaves a pre-F1 daemon's snapshot progress list empty", () => {
+    // Arrange / Act
+    const got = decodeFrontendFrame(JSON.stringify({ snapshot: {} }));
+    // Assert
+    if (got.frame.case !== "snapshot") throw new Error("wrong variant");
+    expect(got.frame.value.progress).toEqual([]);
+  });
 });

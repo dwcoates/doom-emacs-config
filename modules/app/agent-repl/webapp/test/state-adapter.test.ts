@@ -674,3 +674,99 @@ describe("queue -> queue effect (E4)", () => {
     expect(adapter.ignoredCounts().get("queue")).toBeUndefined();
   });
 });
+
+describe("progress (F1): the consolidated footer's whole input", () => {
+  /** The minimum a ProgressView frame must carry to decode. */
+  function progressFrame(over: Record<string, unknown> = {}): Record<string, unknown> {
+    return { progress: { workspace: "ws", sessionId: "s1", state: "RENDER_STATE_INIT", ...over } };
+  }
+
+  /** The single progress effect a frame produced. */
+  function progressOf(obj: unknown) {
+    const eff = applyOne(obj).find((e) => e.kind === "progress");
+    if (eff?.kind !== "progress") throw new Error("no progress effect");
+    return eff.value;
+  }
+
+  it("maps the phase mirror to the webapp's render-state keyword", () => {
+    // Arrange / Act
+    const got = progressOf(progressFrame({ state: "RENDER_STATE_THINKING" }));
+    // Assert
+    expect(got.state).toBe("thinking");
+  });
+
+  it("carries the turn's input tokens through", () => {
+    // Arrange / Act — int64 arrives as a protojson numeric string.
+    const got = progressOf(progressFrame({ inputTokens: "41200" }));
+    // Assert
+    expect(got.inputTokens).toBe(41200);
+  });
+
+  it("flattens an OPEN window to its detail", () => {
+    // Arrange / Act
+    const got = progressOf(
+      progressFrame({ retrying: { active: true, sinceMs: "17", detail: "attempt 3/10" } }),
+    );
+    // Assert
+    expect(got.retrying).toEqual({ sinceMs: 17, detail: "attempt 3/10" });
+  });
+
+  it("flattens an INACTIVE window to null", () => {
+    // Arrange / Act — absent and inactive mean the same thing: nothing to say.
+    const got = progressOf(progressFrame({ retrying: { active: false, detail: "stale" } }));
+    // Assert
+    expect(got.retrying).toBeNull();
+  });
+
+  it("flattens an absent window to null", () => {
+    // Arrange / Act
+    const got = progressOf(progressFrame());
+    // Assert
+    expect(got.compacting).toBeNull();
+  });
+
+  it("carries the rate-limit window's structured detail", () => {
+    // Arrange / Act
+    const got = progressOf(
+      progressFrame({
+        rateLimited: {
+          active: true,
+          resetsAt: "1700000900",
+          utilization: 0.91,
+          status: "allowed_warning",
+        },
+      }),
+    );
+    // Assert
+    expect(got.rateLimited).toEqual({
+      resetsAt: 1700000900,
+      utilization: 0.91,
+      status: "allowed_warning",
+    });
+  });
+
+  it("fans a snapshot's progress views out into per-workspace effects", () => {
+    // Arrange / Act
+    const effects = applyOne({
+      snapshot: {
+        workspaces: [],
+        sessions: [],
+        catalogs: [],
+        inits: [],
+        queues: [],
+        progress: [{ workspace: "ws", sessionId: "s1", state: "RENDER_STATE_INIT" }],
+      },
+    });
+    // Assert
+    expect(effects.filter((e) => e.kind === "progress")).toHaveLength(1);
+  });
+
+  it("does not route progress down the explicit-ignore path", () => {
+    // Arrange
+    const adapter = new StateAdapter();
+    // Act
+    adapter.apply(frame(progressFrame()));
+    // Assert
+    expect(adapter.ignoredCounts().get("progress")).toBeUndefined();
+  });
+});
