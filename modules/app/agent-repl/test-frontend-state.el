@@ -488,46 +488,78 @@ daemon no longer knows."
   (should (eq (cdr (assoc "daemonView" agent-repl--uds-frame-handlers))
               #'agent-repl--frontend-apply-daemon-view)))
 
-;;;; ---- DegradedNotice surfacing ----------------------------------------
+;;;; ---- SessionView.death: the reader it never had (F4) ----------------
+;;
+;; These replace the five DegradedNotice tests that stood here. The banner
+;; is retired: degradation is a self-resolving failure card on the
+;; conversation plane plus a move on the SSM's degraded axis, so there is no
+;; echo-area handler left to test.
 
-(ert-deftest agent-repl-test-degraded-notice-messages-echo-area ()
-  "A DegradedNotice surfaces the component + reason in the echo area."
+(ert-deftest agent-repl-test-session-death-surfaces ()
+  "A terminal SessionView's classified death reaches the echo area."
   ;; Arrange
-  (let (echoed)
-    (cl-letf (((symbol-function 'message)
-               (lambda (fmt &rest args) (setq echoed (apply #'format fmt args)))))
-      ;; Act
-      (agent-repl--frontend-apply-degraded-notice
-       '(:component "shim-store" :reason "socket closed"))
-      ;; Assert
-      (should (string-match-p "shim-store" echoed))
-      (should (string-match-p "socket closed" echoed)))))
+  (agent-repl-test--with-clean-state
+   (clrhash agent-repl--frontend-surfaced-deaths)
+   (let (echoed)
+     (cl-letf (((symbol-function 'message)
+                (lambda (fmt &rest args) (setq echoed (apply #'format fmt args)))))
+       ;; Act
+       (agent-repl--frontend-apply-session-view
+        '(:sessionId "s1" :workspace "/w" :terminal t
+          :death (:errorClass "ERROR_CLASS_INTERNAL"
+                  :errorType "session.shim_died"
+                  :message "the agent process exited")))
+       ;; Assert
+       (should (string-match-p "the agent process exited" echoed))))))
 
-(ert-deftest agent-repl-test-degraded-notice-recovered-messages-recovery ()
-  "A recovered DegradedNotice surfaces a recovery message."
+(ert-deftest agent-repl-test-session-death-surfaces-only-once ()
+  "A re-pushed terminal SessionView does not re-announce the death."
+  ;; Arrange — a terminal view is re-pushed on every snapshot, so without the
+  ;; latch one honest report becomes recurring noise.
+  (agent-repl-test--with-clean-state
+   (clrhash agent-repl--frontend-surfaced-deaths)
+   (let ((count 0)
+         (view '(:sessionId "s1" :workspace "/w" :terminal t
+                 :death (:errorClass "ERROR_CLASS_INTERNAL"
+                         :errorType "session.shim_died"
+                         :message "the agent process exited"))))
+     (cl-letf (((symbol-function 'message) (lambda (&rest _) (setq count (1+ count)))))
+       ;; Act
+       (agent-repl--frontend-apply-session-view view)
+       (agent-repl--frontend-apply-session-view view)
+       ;; Assert
+       (should (equal count 1))))))
+
+(ert-deftest agent-repl-test-live-session-surfaces-no-death ()
+  "A living session announces nothing."
   ;; Arrange
-  (let (echoed)
-    (cl-letf (((symbol-function 'message)
-               (lambda (fmt &rest args) (setq echoed (apply #'format fmt args)))))
-      ;; Act
-      (agent-repl--frontend-apply-degraded-notice
-       '(:component "shim-store" :reason "socket closed" :recovered t))
-      ;; Assert
-      (should (string-match-p "recovered" echoed)))))
+  (agent-repl-test--with-clean-state
+   (clrhash agent-repl--frontend-surfaced-deaths)
+   (let (echoed)
+     (cl-letf (((symbol-function 'message)
+                (lambda (fmt &rest args) (setq echoed (apply #'format fmt args)))))
+       ;; Act
+       (agent-repl--frontend-apply-session-view '(:sessionId "s1" :workspace "/w"))
+       ;; Assert
+       (should (null echoed))))))
 
-(ert-deftest agent-repl-test-degraded-notice-returns-recovered-flag ()
-  "The handler returns the :recovered flag."
+(ert-deftest agent-repl-test-session-death-carries-the-raw-reason ()
+  "The death's source detail rides the surfaced text as evidence."
   ;; Arrange
-  (cl-letf (((symbol-function 'message) (lambda (&rest _) nil)))
-    ;; Act / Assert
-    (should (eq (agent-repl--frontend-apply-degraded-notice
-                 '(:component "x" :reason "y" :recovered t))
-                t))))
-
-(ert-deftest agent-repl-test-degraded-notice-missing-component-errors ()
-  "A DegradedNotice with no component fails loudly (invariant violation)."
-  ;; Act / Assert
-  (should-error (agent-repl--frontend-apply-degraded-notice '(:reason "y"))))
+  (agent-repl-test--with-clean-state
+   (clrhash agent-repl--frontend-surfaced-deaths)
+   (let (echoed)
+     (cl-letf (((symbol-function 'message)
+                (lambda (fmt &rest args) (setq echoed (apply #'format fmt args)))))
+       ;; Act
+       (agent-repl--frontend-apply-session-view
+        '(:sessionId "s1" :workspace "/w" :terminal t
+          :death (:errorClass "ERROR_CLASS_INTERNAL"
+                  :errorType "session.ended_unclassified"
+                  :message "the session ended"
+                  :sourceDetail "some ancient reason")))
+       ;; Assert
+       (should (string-match-p "some ancient reason" echoed))))))
 
 ;;;; ---- Handler registration wiring -------------------------------------
 
@@ -541,10 +573,13 @@ daemon no longer knows."
   (should (eq (cdr (assoc "snapshot" agent-repl--uds-frame-handlers))
               #'agent-repl--frontend-apply-snapshot)))
 
-(ert-deftest agent-repl-test-state-registers-degraded-handler ()
-  "Loading frontend-state.el registers the degradedNotice handler."
-  (should (eq (cdr (assoc "degradedNotice" agent-repl--uds-frame-handlers))
-              #'agent-repl--frontend-apply-degraded-notice)))
+(ert-deftest agent-repl-test-state-registers-no-degraded-handler ()
+  "The degradedNotice arm has NO handler: the banner is retired (F4).
+It stays in the KNOWN frame fields (the arm is still on the wire) and is
+listed as deliberately ignored, so a push from an older daemon is a
+settled no-op rather than an unfinished-wiring warning."
+  (should-not (assoc "degradedNotice" agent-repl--uds-frame-handlers))
+  (should (member "degradedNotice" agent-repl--uds-ignored-frame-fields)))
 
 (ert-deftest agent-repl-test-state-dispatch-end-to-end ()
   "A decoded workspaceState frame dispatched through the transport applies state."
