@@ -220,6 +220,14 @@ import {
   ThinkingBlockSchema,
   ArtifactReadSchema,
   ArtifactResultSchema,
+  GitBranchAction,
+  GitBranchSchema,
+  GitCommitKind,
+  GitCommitSchema,
+  GitOperationSchema,
+  GitPullRequestAction,
+  GitPullRequestSchema,
+  GitPushSchema,
   GlobResultSchema,
   GrepResultSchema,
   StructuredOutputResultSchema,
@@ -236,6 +244,7 @@ import {
   WriteResultSchema,
   type ArtifactRead,
   type ContentBlock,
+  type GitOperation,
   type MessagePin,
   type Question,
   type TaskStatusChange,
@@ -1583,7 +1592,7 @@ function classifyToolResult(o: Record<string, unknown>): ToolUseResult["result"]
       isImage: pick(o, "is_image", "isImage") === true,
       noOutputExpected: pick(o, "no_output_expected", "noOutputExpected") === true,
       returnCodeInterpretation: strOf(pick(o, "return_code_interpretation", "returnCodeInterpretation")),
-      gitOperation: strOf(pick(o, "git_operation", "gitOperation")),
+      gitOperation: gitOperationOf(pick(o, "git_operation", "gitOperation")),
       persistedOutputPath: strOf(pick(o, "persisted_output_path", "persistedOutputPath")),
       persistedOutputSize: bigOf(pick(o, "persisted_output_size", "persistedOutputSize")),
       timedOutAfterMs: bigOf(pick(o, "timed_out_after_ms", "timedOutAfterMs")),
@@ -2126,6 +2135,41 @@ function terminalStatusEnum(status: string): TerminalStatus {
   }
 }
 
+/** `gitOperation.commit.kind` vocabulary → GitCommitKind. */
+function gitCommitKindEnum(s: string): GitCommitKind {
+  switch (s) {
+    case "committed": return GitCommitKind.COMMITTED;
+    case "amended": return GitCommitKind.AMENDED;
+    case "cherry-picked": return GitCommitKind.CHERRY_PICKED;
+    default: return GitCommitKind.UNSPECIFIED;
+  }
+}
+
+/** `gitOperation.branch.action` vocabulary → GitBranchAction. */
+function gitBranchActionEnum(s: string): GitBranchAction {
+  switch (s) {
+    case "merged": return GitBranchAction.MERGED;
+    case "rebased": return GitBranchAction.REBASED;
+    default: return GitBranchAction.UNSPECIFIED;
+  }
+}
+
+/** `gitOperation.pr.action` vocabulary → GitPullRequestAction. */
+function gitPrActionEnum(s: string): GitPullRequestAction {
+  switch (s) {
+    case "created": return GitPullRequestAction.CREATED;
+    case "edited": return GitPullRequestAction.EDITED;
+    case "merged": return GitPullRequestAction.MERGED;
+    case "commented": return GitPullRequestAction.COMMENTED;
+    case "closed": return GitPullRequestAction.CLOSED;
+    case "ready": return GitPullRequestAction.READY;
+    case "draft": return GitPullRequestAction.DRAFT;
+    case "auto-merge-enabled": return GitPullRequestAction.AUTO_MERGE_ENABLED;
+    case "auto-merge-disabled": return GitPullRequestAction.AUTO_MERGE_DISABLED;
+    default: return GitPullRequestAction.UNSPECIFIED;
+  }
+}
+
 /** TaskOutput's `retrieval_status` vocabulary → RetrievalStatus. */
 function retrievalStatusEnum(s: string): RetrievalStatus {
   switch (s) {
@@ -2249,6 +2293,40 @@ function pinOf(v: unknown): MessagePin | undefined {
     id: strOf(v["id"]),
     name: strOf(v["name"]),
     ref: strOf(v["ref"]),
+  });
+}
+
+/**
+ * Map a Bash result's `gitOperation` onto the typed `GitOperation` (sdk
+ * BashOutput). Four INDEPENDENT optional arms, not a union: a single command
+ * routinely reports two at once (census: commit+push, branch+push, pr+push).
+ *
+ * A non-object yields undefined, and so does an object with no recognized arm
+ * — an all-empty GitOperation would read downstream as "this command did git
+ * work we could not classify", which is a different claim from "no git work".
+ */
+function gitOperationOf(v: unknown): GitOperation | undefined {
+  if (!isObject(v)) return undefined;
+  const commit = asStructOpt(v["commit"]);
+  const push = asStructOpt(v["push"]);
+  const branch = asStructOpt(v["branch"]);
+  const pr = asStructOpt(v["pr"]);
+  if (!commit && !push && !branch && !pr) return undefined;
+  return create(GitOperationSchema, {
+    commit: commit && create(GitCommitSchema, {
+      sha: strOf(commit["sha"]),
+      kind: gitCommitKindEnum(strOf(commit["kind"])),
+    }),
+    push: push && create(GitPushSchema, { branch: strOf(push["branch"]) }),
+    branch: branch && create(GitBranchSchema, {
+      ref: strOf(branch["ref"]),
+      action: gitBranchActionEnum(strOf(branch["action"])),
+    }),
+    pr: pr && create(GitPullRequestSchema, {
+      number: bigOf(pr["number"]),
+      url: strOf(pr["url"]),
+      action: gitPrActionEnum(strOf(pr["action"])),
+    }),
   });
 }
 

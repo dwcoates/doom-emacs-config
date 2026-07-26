@@ -142,6 +142,14 @@ Checklist of the full `agentshim.data.v1` shape inventory (design doc §5.3 + th
 | `ApiUsage` | FOUND | transcript-lines/assistant.jsonl (usage) |
 | `ToolUseResult` | FOUND | tool-results/*.jsonl |
 | `BashResult` | FOUND | tool-results/bash.jsonl, bash-background.jsonl |
+| `GitOperation` | FOUND | census only (696 bash results); no fixture yet carries `gitOperation` |
+| `GitCommit` | FOUND | census only (356) |
+| `GitPush` | FOUND | census only (113) |
+| `GitBranch` | FOUND | census only (222) |
+| `GitPullRequest` | FOUND | census only (28) |
+| `GitCommitKind` | FOUND | census only; all 3 SDK values observed |
+| `GitBranchAction` | FOUND | census only; both SDK values observed |
+| `GitPullRequestAction` | PARTIAL | census only; 5 of the 9 SDK values observed |
 | `AgentToolStats` | FOUND | tool-results/agent.jsonl (toolStats) |
 | `AgentResult` | FOUND | tool-results/agent.jsonl |
 | `AgentAsyncLaunch` | FOUND | tool-results/agent_async_launch.jsonl |
@@ -199,10 +207,10 @@ Checklist of the full `agentshim.data.v1` shape inventory (design doc §5.3 + th
 
 ## Summary
 
-- FOUND: 148
-- PARTIAL: 4
+- FOUND: 155
+- PARTIAL: 5
 - NOT-FOUND-ON-MACHINE: 23
-- Total shapes: 175
+- Total shapes: 183
 
 ### NOT-FOUND / PARTIAL detail (nothing fabricated)
 
@@ -223,6 +231,7 @@ Checklist of the full `agentshim.data.v1` shape inventory (design doc §5.3 + th
 - `transcript:ToolDenialKind` (PARTIAL) — all 4 census values map ("user-rejected", "automode-blocked", "permission-rule", "automode-unavailable"); only "user-rejected" is fixture-backed
 - `tools:ToolReferenceBlock` (NOT-FOUND-ON-MACHINE) — tool_reference content block not observed on the machine
 - `tools:ArtifactRead` (NOT-FOUND-ON-MACHINE) — WebFetchOutput.artifactRead is typings-only; no fetch on the machine resolved to an Artifact
+- `tools:GitPullRequestAction` (PARTIAL) — census hits created/edited/commented/closed/auto-merge-enabled; merged/ready/draft/auto-merge-disabled are modeled from the SDK typings but unobserved
 - `tools:KillShellInput` (NOT-FOUND-ON-MACHINE) — no KillShell tool use on the machine (proto already notes zero disk occurrences)
 - `tools:GrepInput` (NOT-FOUND-ON-MACHINE) — no Grep tool on the machine (grep is run via Bash)
 - `tools:NotebookEditInput` (NOT-FOUND-ON-MACHINE) — no NotebookEdit tool use on the machine
