@@ -803,23 +803,7 @@ describe("final-response border", () => {
   });
 });
 
-describe("error-response border", () => {
-  const errorBubble = blockAfter(css, ".bubble.assistant.error-response");
-
-  it("borders an API-error response with the red error token instead of the green one", () => {
-    // Arrange / Act — the .bubble.assistant.error-response rule.
-    // Assert
-    expect(errorBubble).toMatch(/border-color:\s*var\(--err\)/);
-    expect(errorBubble).not.toMatch(/var\(--final-response\)/);
-  });
-
-  it("only recolors the reserved border, so the red flip never reflows the feed", () => {
-    // Arrange / Act — like final-response, it sets no border width of its own.
-    // Assert
-    expect(errorBubble).not.toMatch(/border:\s/);
-    expect(errorBubble).not.toMatch(/border-width/);
-  });
-
+describe("the error token", () => {
   it("defines a red error token for the light theme", () => {
     // Arrange / Act
     const red = isRed(token(lightTheme, "--err"));
@@ -2851,6 +2835,13 @@ describe("the retired error chrome", () => {
     // Arrange / Act
     // Assert
     expect(css).not.toContain(".error-banner {");
+  });
+
+  it("no longer defines the error-response bubble border", () => {
+    // Arrange / Act — no producer ever set TextItem.error, so the red bubble
+    // variant was a fiction; API failures render as their own failure card.
+    // Assert
+    expect(css).not.toContain(".bubble.assistant.error-response");
   });
 
   it("no longer defines the retry badge", () => {
