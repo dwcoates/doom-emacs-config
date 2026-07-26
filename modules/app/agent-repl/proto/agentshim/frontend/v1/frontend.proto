@@ -133,6 +133,19 @@ message WorkspaceState {
   string cause_kind = 7;  // event kind that caused this transition
   uint64 cause_seq = 8;   // store seq when event-caused (0 = daemon-local)
   int64 at_ms = 9;
+  // Additive (F5): the DELIVERY identity of this state for this workspace.
+  //
+  // Stamped by the daemon's frontend delivery layer, not by the resolver:
+  // it names an EMISSION of a state rather than the resolution behind it,
+  // which is what a paint acknowledgment has to be able to address. Strictly
+  // increasing per workspace, so "the ack names an older emission" is a
+  // comparison rather than a guess, and a stale ack can never settle a newer
+  // state (see PaintAckCmd.state_generation).
+  //
+  // It is deliberately NOT at_ms: at_ms is the winning LOG ROW's timestamp,
+  // so two different emissions can legitimately carry the same one, and an
+  // identity that repeats is not an identity.
+  uint64 generation = 10;
 }
 
 message SessionView {
@@ -409,6 +422,46 @@ message PaintAckCmd {
   // never-prompted session reach READY. The daemon versions acks by this
   // value so a stale one cannot green a newer gap.
   uint64 through_seq = 1;
+  // Additive (F5): the WorkspaceState.generation this ack settles.
+  //
+  // The second identity dimension of one render pass. through_seq addresses
+  // the CONVERSATION the frontend drew; this addresses the STATE it drew,
+  // which is what the delivery sequencer withholds from Emacs until a
+  // painting frontend has caught up. The daemon settles a held state only on
+  // an ack whose generation is at least the held one's, so an ack minted
+  // against an older emission can never release a newer one.
+  uint64 state_generation = 2;
+  // Additive (F5): what the render attempt actually produced.
+  //
+  // Required. The daemon rejects an ack that names no outcome rather than
+  // assuming one: "I drew it" and "I cannot draw" are opposite claims about
+  // the same generation, and only the first may attest paint to the SSM.
+  PaintOutcome outcome = 3;
+}
+
+// What a frontend's render attempt produced for one WorkspaceState (F5).
+//
+// A mounted webview whose rendering is suspended (a hidden xwidget has no
+// requestAnimationFrame, a stall of 13.6 seconds was measured directly) can
+// still RECEIVE frames and still answer on its socket. So it answers
+// honestly — "I have this generation and I cannot draw it" — instead of
+// going silent and wedging Emacs behind a webview nobody is looking at. That
+// is the structural alternative to a delivery timeout: the frontend reports
+// the fact it alone knows, rather than the daemon guessing from elapsed time.
+enum PaintOutcome {
+  // Never sent. A paint ack that names no outcome is a malformed frame, not
+  // an ack with a default: the two real outcomes are opposite claims and
+  // must not share an encoding with "the field was absent".
+  PAINT_OUTCOME_UNSPECIFIED = 0;
+  // The frontend DREW this state. Attests paint to the SSM (through_seq) and
+  // settles the state for delivery to Emacs.
+  PAINT_OUTCOME_PAINTED = 1;
+  // The frontend HAS this state and cannot draw it, because its rendering is
+  // suspended. It settles the state for delivery to Emacs — a webview nobody
+  // can see has no divergence to cause — but attests NOTHING to the SSM,
+  // because nothing was painted. The frontend repaints and re-acks PAINTED
+  // when it becomes visible again.
+  PAINT_OUTCOME_SUSPENDED = 2;
 }
 
 // ---------------------------------------------------------------------------
@@ -616,11 +669,15 @@ message DegradedNotice {
 // ---------------------------------------------------------------------------
 // The consolidated progress footer (F1).
 //
-// ONE daemon-resolved frame carrying the footer's ENTIRE input: the phase
-// mirror, the live tickers, the activity windows, and the ephemeral counts.
-// It replaces the constellation of scattered in-flight indicators the webapp
-// used to derive for itself (the thinking/working/retrying tail rows and the
-// pulse machinery that orbited them).
+// ONE daemon-resolved frame carrying the footer's EPHEMERAL input: the live
+// tickers, the activity windows, and the ephemeral counts. It replaces the
+// constellation of scattered in-flight indicators the webapp used to derive
+// for itself (the thinking/working/retrying tail rows and the pulse
+// machinery that orbited them).
+//
+// The footer's PHASE is not here. It is the workspace's one authoritative
+// render state, which arrives as WorkspaceState (see the deprecated `state`
+// below for why the copy that used to live here was removed).
 //
 // Resolved by daemon/internal/progress, a SIBLING of the SSM: it folds the
 // same store event stream plus the ephemeral relays into a latest-wins
@@ -658,9 +715,21 @@ message ProgressView {
   string workspace = 1;
   string session_id = 2;
 
-  // Phase mirror: the SSM's resolved state, repeated here so the footer has
-  // one self-sufficient input. Never re-derived frontend-side.
-  RenderState state = 3;
+  // DEPRECATED (F5), and no longer populated by the resolver.
+  //
+  // It was a COPY of the SSM's verdict kept in a second message, refreshed
+  // only on this resolver's own triggers. A workspace that acquired a
+  // progress fact before the SSM's state reached this resolver got a view
+  // seeded INIT, and nothing ever corrected it — which is why the footer read
+  // "starting" against an already-green tab until the first prompt moved the
+  // phase. A second copy of an authoritative fact has no correct refresh
+  // policy; the only fix is to stop keeping one.
+  //
+  // The footer now reads the phase off the WorkspaceState the SSM pushes,
+  // which every frontend already receives. The field stays on the wire until
+  // the approval-gated removal pass (proto/AGENTS.md), so an older frontend
+  // decoding an older log still reads what it always did.
+  RenderState state = 3 [deprecated = true];
 
   // Turn clock: 0 = no turn in flight.
   int64 turn_started_at_ms = 4;
