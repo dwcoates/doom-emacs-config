@@ -27,7 +27,12 @@
 //	ResultMessage                      result            (ResultMessage)
 //	CompactBoundary (stream)           compact_boundary  (CompactBoundary)
 //	SystemLine.CompactBoundary (disk)  compact_boundary_line (CompactBoundaryLine)
-//	SystemLine.ApiError (disk)         api_error         (ApiErrorLine)
+//	SystemLine.ApiError (disk), terminal only  system_failure (SystemFailureItem)
+//
+// A mid-backoff SystemLine.ApiError curates to NOTHING: the retrying window
+// (internal/progress) is what covers it, and the legacy api_error passthrough
+// this used to also emit alongside the card was retired in step 11 once both
+// frontends read the card only.
 //
 // The tool_use / tool_result blocks ride INSIDE their carrying message: a
 // tool call's tool_use block travels in the assistant_message item and its
@@ -331,9 +336,9 @@ func transcriptLineItems(tl *datav1.TranscriptLine, producedAtMs int64, requestI
 }
 
 // systemLineItems curates the system-line subtypes the webapp renders:
-// compaction boundaries and API errors/retries. Their typed payloads pass
-// through — the webapp splits a mid-backoff api_error into a retry chip from
-// the ApiErrorLine's own retry fields, so no daemon re-typing is needed.
+// compaction boundaries and terminal API failures. A mid-backoff API error
+// curates to nothing here — internal/progress's retrying window is what
+// covers it — so no daemon re-typing of the retry shape is needed.
 func systemLineItems(sl *datav1.SystemLine, tsMs int64, requestID string) []*frontendv1.ConversationItem {
 	uuid := sl.GetEnvelope().GetUuid()
 	switch sub := sl.GetSubtype().(type) {
@@ -349,11 +354,9 @@ func systemLineItems(sl *datav1.SystemLine, tsMs int64, requestID string) []*fro
 		if sub.ApiError == nil {
 			return nil
 		}
-		items := []*frontendv1.ConversationItem{{
-			Uuid: uuid, TsMs: tsMs, RequestId: requestID,
-			Item: &frontendv1.ConversationItem_ApiError{ApiError: sub.ApiError},
-		}}
-		// A TERMINAL failure additionally gets the classified card (F4).
+		// Only a TERMINAL failure becomes a conversation item, as the
+		// classified card (F4). Reporting a mid-backoff retry as one is how a
+		// working session came to look broken between attempts.
 		//
 		// The webapp used to classify this same line by its OWN rule — and a
 		// third rule for "fatal" on top — while the daemon classified it by a
@@ -361,18 +364,18 @@ func systemLineItems(sl *datav1.SystemLine, tsMs int64, requestID string) []*fro
 		// bytes meant. Both hold the fact; only the daemon holds the cause, so
 		// the daemon decides and the frontend renders.
 		//
-		// It is a SEPARATE item rather than a different arm of the same one
-		// because the arms are a oneof and the legacy api_error must keep
-		// flowing until both frontends have shipped their card readers. Its
-		// uuid is derived from this line's so the two cannot collide, and so
-		// the card is stable across a resync.
-		if failure := ApiFailureFromLine(sub.ApiError, uuid); failure != nil {
-			items = append(items, &frontendv1.ConversationItem{
-				Uuid: failure.GetItemUuid(), TsMs: tsMs, RequestId: requestID,
-				Item: &frontendv1.ConversationItem_SystemFailure{SystemFailure: failure},
-			})
+		// Its uuid is derived from this line's rather than reusing it, so the
+		// card stays stable and addressable across a resync. The raw api_error
+		// passthrough this arm used to also emit alongside the card is retired
+		// (step 11): both frontends now read the card only.
+		failure := ApiFailureFromLine(sub.ApiError, uuid)
+		if failure == nil {
+			return nil
 		}
-		return items
+		return []*frontendv1.ConversationItem{{
+			Uuid: failure.GetItemUuid(), TsMs: tsMs, RequestId: requestID,
+			Item: &frontendv1.ConversationItem_SystemFailure{SystemFailure: failure},
+		}}
 	default:
 		return nil
 	}
