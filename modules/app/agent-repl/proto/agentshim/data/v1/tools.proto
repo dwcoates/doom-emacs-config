@@ -352,7 +352,13 @@ message BashResult {
   bool no_output_expected = 5;
   // Optionals (census):
   string return_code_interpretation = 6;
-  string git_operation = 7;
+  // RETYPED IN PLACE (string -> GitOperation), field number 7 reused with the
+  // user's EXPLICIT APPROVAL per the AGENTS.md wire-protocol gate. Safe because
+  // the field was provably NEVER populated: the disk has always carried an
+  // OBJECT here (696/696 census records), so the old string typing meant every
+  // value was captured to extras instead, and proto3 omits the empty string, so
+  // no persisted event carries field 7 at all.
+  GitOperation git_operation = 7;
   string persisted_output_path = 8;
   int64 persisted_output_size = 9;
   int64 timed_out_after_ms = 10;
@@ -365,6 +371,78 @@ message BashResult {
   // which `background_task_id` alone cannot distinguish from a launch that
   // was backgrounded by request.
   bool backgrounded_by_user = 15;
+}
+
+// [sdk BashOutput.gitOperation] the harness's own structured classification of
+// the git/gh activity it detected in a command, so a client can render git
+// activity without re-parsing stdout.
+//
+// NOT a oneof, deliberately: 23 census records carry TWO arms at once
+// (commit+push 20, branch+push 2, pr+push 1), which a union could not express.
+// Every arm is an optional submessage — absence means "no such activity".
+message GitOperation {
+  GitCommit commit = 1;       // census 356
+  GitPush push = 2;           // census 113
+  GitBranch branch = 3;       // census 222
+  GitPullRequest pr = 4;      // census 28
+}
+
+// commit.kind — closed 3-value union in the SDK typings; the census hits all 3.
+enum GitCommitKind {
+  GIT_COMMIT_KIND_UNSPECIFIED = 0;
+  GIT_COMMIT_KIND_COMMITTED = 1;      // census 336
+  GIT_COMMIT_KIND_AMENDED = 2;        // census 4
+  GIT_COMMIT_KIND_CHERRY_PICKED = 3;  // census 16
+}
+
+// SHAPE (census, 356 records): {sha, kind} — both always present.
+message GitCommit {
+  string sha = 1;  // abbreviated, e.g. "868db15d"
+  GitCommitKind kind = 2;
+}
+
+// SHAPE (census, 113 records): {branch} — the only field ever observed.
+message GitPush {
+  string branch = 1;
+}
+
+// branch.action — closed 2-value union in the SDK typings; the census hits both.
+enum GitBranchAction {
+  GIT_BRANCH_ACTION_UNSPECIFIED = 0;
+  GIT_BRANCH_ACTION_MERGED = 1;   // census 18
+  GIT_BRANCH_ACTION_REBASED = 2;  // census 204
+}
+
+// SHAPE (census, 222 records): {ref, action} — both always present. `ref` is
+// whatever the command named, so it is NOT always a real ref (the census
+// includes unexpanded shell text like "$TARGET"); kept a free string.
+message GitBranch {
+  string ref = 1;
+  GitBranchAction action = 2;
+}
+
+// pr.action — closed 9-value union in the SDK typings; the census hits 5 of 9.
+// The four unhit values are modeled anyway rather than left to UNSPECIFIED,
+// because the typings enumerate them exhaustively.
+enum GitPullRequestAction {
+  GIT_PULL_REQUEST_ACTION_UNSPECIFIED = 0;
+  GIT_PULL_REQUEST_ACTION_CREATED = 1;              // census 22
+  GIT_PULL_REQUEST_ACTION_EDITED = 2;               // census 2
+  GIT_PULL_REQUEST_ACTION_MERGED = 3;
+  GIT_PULL_REQUEST_ACTION_COMMENTED = 4;            // census 1
+  GIT_PULL_REQUEST_ACTION_CLOSED = 5;               // census 1
+  GIT_PULL_REQUEST_ACTION_READY = 6;
+  GIT_PULL_REQUEST_ACTION_DRAFT = 7;
+  GIT_PULL_REQUEST_ACTION_AUTO_MERGE_ENABLED = 8;   // census 2
+  GIT_PULL_REQUEST_ACTION_AUTO_MERGE_DISABLED = 9;
+}
+
+// SHAPE (census, 28 records): {number, action} always, {url} in 25 of 28 —
+// absent on the auto-merge actions, which name a PR the command did not open.
+message GitPullRequest {
+  int64 number = 1;
+  string url = 2;  // optional
+  GitPullRequestAction action = 3;
 }
 
 message AgentToolStats {

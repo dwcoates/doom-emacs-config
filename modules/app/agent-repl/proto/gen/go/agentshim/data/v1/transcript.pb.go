@@ -792,33 +792,53 @@ type LineEnvelope struct {
 	GitBranch   string     `protobuf:"bytes,9,opt,name=git_branch,json=gitBranch,proto3" json:"git_branch,omitempty"` // may be ""
 	Entrypoint  Entrypoint `protobuf:"varint,10,opt,name=entrypoint,proto3,enum=agentshim.data.v1.Entrypoint" json:"entrypoint,omitempty"`
 	// Optional extras (occurrence counts in the census):
-	RequestId                 string           `protobuf:"bytes,11,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`                                               // assistant only
-	PromptId                  string           `protobuf:"bytes,12,opt,name=prompt_id,json=promptId,proto3" json:"prompt_id,omitempty"`                                                  // user only
-	AgentId                   string           `protobuf:"bytes,13,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`                                                     // sidechain + some main lines
-	SourceToolAssistantUuid   string           `protobuf:"bytes,14,opt,name=source_tool_assistant_uuid,json=sourceToolAssistantUuid,proto3" json:"source_tool_assistant_uuid,omitempty"` // disk key `sourceToolAssistantUUID`
-	SnakeSessionId            string           `protobuf:"bytes,15,opt,name=snake_session_id,json=snakeSessionId,proto3" json:"snake_session_id,omitempty"`                              // vestigial duplicate `session_id`
-	Effort                    string           `protobuf:"bytes,16,opt,name=effort,proto3" json:"effort,omitempty"`                                                                      // "high" | "xhigh"
-	AttributionAgent          string           `protobuf:"bytes,17,opt,name=attribution_agent,json=attributionAgent,proto3" json:"attribution_agent,omitempty"`
-	AttributionSkill          string           `protobuf:"bytes,18,opt,name=attribution_skill,json=attributionSkill,proto3" json:"attribution_skill,omitempty"`
-	AttributionPlugin         string           `protobuf:"bytes,19,opt,name=attribution_plugin,json=attributionPlugin,proto3" json:"attribution_plugin,omitempty"`
-	Slug                      string           `protobuf:"bytes,20,opt,name=slug,proto3" json:"slug,omitempty"` // e.g. "lucky-spinning-glacier"
-	PromptSource              PromptSource     `protobuf:"varint,21,opt,name=prompt_source,json=promptSource,proto3,enum=agentshim.data.v1.PromptSource" json:"prompt_source,omitempty"`
-	PermissionMode            string           `protobuf:"bytes,22,opt,name=permission_mode,json=permissionMode,proto3" json:"permission_mode,omitempty"` // user prompt lines
-	Origin                    *Origin          `protobuf:"bytes,23,opt,name=origin,proto3" json:"origin,omitempty"`
-	IsMeta                    bool             `protobuf:"varint,24,opt,name=is_meta,json=isMeta,proto3" json:"is_meta,omitempty"`
-	SourceToolUseId           string           `protobuf:"bytes,25,opt,name=source_tool_use_id,json=sourceToolUseId,proto3" json:"source_tool_use_id,omitempty"` // disk key `sourceToolUseID`
-	ToolEndsTurn              bool             `protobuf:"varint,26,opt,name=tool_ends_turn,json=toolEndsTurn,proto3" json:"tool_ends_turn,omitempty"`
-	IsApiErrorMessage         bool             `protobuf:"varint,27,opt,name=is_api_error_message,json=isApiErrorMessage,proto3" json:"is_api_error_message,omitempty"`
-	Error                     string           `protobuf:"bytes,28,opt,name=error,proto3" json:"error,omitempty"` // with is_api_error_message
-	ApiErrorStatus            int64            `protobuf:"varint,29,opt,name=api_error_status,json=apiErrorStatus,proto3" json:"api_error_status,omitempty"`
-	ErrorDetails              *structpb.Struct `protobuf:"bytes,30,opt,name=error_details,json=errorDetails,proto3" json:"error_details,omitempty"`
-	ToolDenialKind            ToolDenialKind   `protobuf:"varint,31,opt,name=tool_denial_kind,json=toolDenialKind,proto3,enum=agentshim.data.v1.ToolDenialKind" json:"tool_denial_kind,omitempty"`
-	ClassifierMetaLines       *structpb.Struct `protobuf:"bytes,32,opt,name=classifier_meta_lines,json=classifierMetaLines,proto3" json:"classifier_meta_lines,omitempty"`
-	InterruptedMessageId      string           `protobuf:"bytes,33,opt,name=interrupted_message_id,json=interruptedMessageId,proto3" json:"interrupted_message_id,omitempty"`
-	QueuePriority             int64            `protobuf:"varint,34,opt,name=queue_priority,json=queuePriority,proto3" json:"queue_priority,omitempty"`
-	IsVisibleInTranscriptOnly bool             `protobuf:"varint,35,opt,name=is_visible_in_transcript_only,json=isVisibleInTranscriptOnly,proto3" json:"is_visible_in_transcript_only,omitempty"`
-	IsCompactSummary          bool             `protobuf:"varint,36,opt,name=is_compact_summary,json=isCompactSummary,proto3" json:"is_compact_summary,omitempty"`
-	LogicalParentUuid         string           `protobuf:"bytes,37,opt,name=logical_parent_uuid,json=logicalParentUuid,proto3" json:"logical_parent_uuid,omitempty"` // compact_boundary lines
+	RequestId               string       `protobuf:"bytes,11,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`                                               // assistant only
+	PromptId                string       `protobuf:"bytes,12,opt,name=prompt_id,json=promptId,proto3" json:"prompt_id,omitempty"`                                                  // user only
+	AgentId                 string       `protobuf:"bytes,13,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`                                                     // sidechain + some main lines
+	SourceToolAssistantUuid string       `protobuf:"bytes,14,opt,name=source_tool_assistant_uuid,json=sourceToolAssistantUuid,proto3" json:"source_tool_assistant_uuid,omitempty"` // disk key `sourceToolAssistantUUID`
+	SnakeSessionId          string       `protobuf:"bytes,15,opt,name=snake_session_id,json=snakeSessionId,proto3" json:"snake_session_id,omitempty"`                              // vestigial duplicate `session_id`
+	Effort                  string       `protobuf:"bytes,16,opt,name=effort,proto3" json:"effort,omitempty"`                                                                      // "high" | "xhigh"
+	AttributionAgent        string       `protobuf:"bytes,17,opt,name=attribution_agent,json=attributionAgent,proto3" json:"attribution_agent,omitempty"`
+	AttributionSkill        string       `protobuf:"bytes,18,opt,name=attribution_skill,json=attributionSkill,proto3" json:"attribution_skill,omitempty"`
+	AttributionPlugin       string       `protobuf:"bytes,19,opt,name=attribution_plugin,json=attributionPlugin,proto3" json:"attribution_plugin,omitempty"`
+	Slug                    string       `protobuf:"bytes,20,opt,name=slug,proto3" json:"slug,omitempty"` // e.g. "lucky-spinning-glacier"
+	PromptSource            PromptSource `protobuf:"varint,21,opt,name=prompt_source,json=promptSource,proto3,enum=agentshim.data.v1.PromptSource" json:"prompt_source,omitempty"`
+	PermissionMode          string       `protobuf:"bytes,22,opt,name=permission_mode,json=permissionMode,proto3" json:"permission_mode,omitempty"` // user prompt lines
+	Origin                  *Origin      `protobuf:"bytes,23,opt,name=origin,proto3" json:"origin,omitempty"`
+	IsMeta                  bool         `protobuf:"varint,24,opt,name=is_meta,json=isMeta,proto3" json:"is_meta,omitempty"`
+	SourceToolUseId         string       `protobuf:"bytes,25,opt,name=source_tool_use_id,json=sourceToolUseId,proto3" json:"source_tool_use_id,omitempty"` // disk key `sourceToolUseID`
+	ToolEndsTurn            bool         `protobuf:"varint,26,opt,name=tool_ends_turn,json=toolEndsTurn,proto3" json:"tool_ends_turn,omitempty"`
+	IsApiErrorMessage       bool         `protobuf:"varint,27,opt,name=is_api_error_message,json=isApiErrorMessage,proto3" json:"is_api_error_message,omitempty"`
+	Error                   string       `protobuf:"bytes,28,opt,name=error,proto3" json:"error,omitempty"` // with is_api_error_message
+	ApiErrorStatus          int64        `protobuf:"varint,29,opt,name=api_error_status,json=apiErrorStatus,proto3" json:"api_error_status,omitempty"`
+	// RETYPED IN PLACE (Struct -> string), field number 30 reused with the user's
+	// EXPLICIT APPROVAL per the AGENTS.md wire-protocol gate. Safe because the
+	// field was provably NEVER populated: the disk carries a STRING (7/7 census
+	// records, assistant lines) so the Struct typing captured every value to
+	// extras instead. NOT parseable as JSON — the value is an HTTP status code
+	// followed by the raw error body, e.g. `429 {"type":"error",…}`.
+	ErrorDetails   string         `protobuf:"bytes,30,opt,name=error_details,json=errorDetails,proto3" json:"error_details,omitempty"`
+	ToolDenialKind ToolDenialKind `protobuf:"varint,31,opt,name=tool_denial_kind,json=toolDenialKind,proto3,enum=agentshim.data.v1.ToolDenialKind" json:"tool_denial_kind,omitempty"`
+	// RETYPED IN PLACE (Struct -> string), field number 32 reused with the user's
+	// EXPLICIT APPROVAL per the AGENTS.md wire-protocol gate. Safe because the
+	// field was provably NEVER populated: the disk carries a STRING (365/365
+	// census records, user lines) so the Struct typing captured every value to
+	// extras instead. The name is literal — the value is newline-delimited JSON
+	// LINES as raw text, e.g. `{"meta":{"gitStatus":{"clean":true}}}\n`, so it is
+	// a string rather than one JSON object.
+	ClassifierMetaLines  string `protobuf:"bytes,32,opt,name=classifier_meta_lines,json=classifierMetaLines,proto3" json:"classifier_meta_lines,omitempty"`
+	InterruptedMessageId string `protobuf:"bytes,33,opt,name=interrupted_message_id,json=interruptedMessageId,proto3" json:"interrupted_message_id,omitempty"`
+	// RETYPED IN PLACE (int64 -> string), field number 34 reused with the user's
+	// EXPLICIT APPROVAL per the AGENTS.md wire-protocol gate. Safe because the
+	// field was provably NEVER populated: the disk carries a STRING (22/22 census
+	// records, user lines) so the int64 typing captured every value to extras
+	// instead. It is a named priority, not a rank — the only observed value is
+	// "later". Left a free string rather than an enum: one observed value is too
+	// thin a vocabulary to enumerate (cf. `permission_mode`, `effort`).
+	QueuePriority             string `protobuf:"bytes,34,opt,name=queue_priority,json=queuePriority,proto3" json:"queue_priority,omitempty"`
+	IsVisibleInTranscriptOnly bool   `protobuf:"varint,35,opt,name=is_visible_in_transcript_only,json=isVisibleInTranscriptOnly,proto3" json:"is_visible_in_transcript_only,omitempty"`
+	IsCompactSummary          bool   `protobuf:"varint,36,opt,name=is_compact_summary,json=isCompactSummary,proto3" json:"is_compact_summary,omitempty"`
+	LogicalParentUuid         string `protobuf:"bytes,37,opt,name=logical_parent_uuid,json=logicalParentUuid,proto3" json:"logical_parent_uuid,omitempty"` // compact_boundary lines
 	// [corpus] disk key `interruptedByShutdown` — the turn did not end, the
 	// harness went away underneath it.
 	InterruptedByShutdown bool `protobuf:"varint,38,opt,name=interrupted_by_shutdown,json=interruptedByShutdown,proto3" json:"interrupted_by_shutdown,omitempty"`
@@ -1059,11 +1079,11 @@ func (x *LineEnvelope) GetApiErrorStatus() int64 {
 	return 0
 }
 
-func (x *LineEnvelope) GetErrorDetails() *structpb.Struct {
+func (x *LineEnvelope) GetErrorDetails() string {
 	if x != nil {
 		return x.ErrorDetails
 	}
-	return nil
+	return ""
 }
 
 func (x *LineEnvelope) GetToolDenialKind() ToolDenialKind {
@@ -1073,11 +1093,11 @@ func (x *LineEnvelope) GetToolDenialKind() ToolDenialKind {
 	return ToolDenialKind_TOOL_DENIAL_KIND_UNSPECIFIED
 }
 
-func (x *LineEnvelope) GetClassifierMetaLines() *structpb.Struct {
+func (x *LineEnvelope) GetClassifierMetaLines() string {
 	if x != nil {
 		return x.ClassifierMetaLines
 	}
-	return nil
+	return ""
 }
 
 func (x *LineEnvelope) GetInterruptedMessageId() string {
@@ -1087,11 +1107,11 @@ func (x *LineEnvelope) GetInterruptedMessageId() string {
 	return ""
 }
 
-func (x *LineEnvelope) GetQueuePriority() int64 {
+func (x *LineEnvelope) GetQueuePriority() string {
 	if x != nil {
 		return x.QueuePriority
 	}
-	return 0
+	return ""
 }
 
 func (x *LineEnvelope) GetIsVisibleInTranscriptOnly() bool {
@@ -7301,7 +7321,7 @@ const file_agentshim_data_v1_transcript_proto_rawDesc = "" +
 	"\x11verified_peer_pid\x18\b \x01(\x03R\x0fverifiedPeerPid\x121\n" +
 	"\x15verified_peer_pid_set\x18\t \x01(\bR\x12verifiedPeerPidSet\x12\x18\n" +
 	"\asubkind\x18\n" +
-	" \x01(\tR\asubkind\"\xc9\f\n" +
+	" \x01(\tR\asubkind\"\x97\f\n" +
 	"\fLineEnvelope\x12\x1f\n" +
 	"\vparent_uuid\x18\x01 \x01(\tR\n" +
 	"parentUuid\x12!\n" +
@@ -7338,12 +7358,12 @@ const file_agentshim_data_v1_transcript_proto_rawDesc = "" +
 	"\x0etool_ends_turn\x18\x1a \x01(\bR\ftoolEndsTurn\x12/\n" +
 	"\x14is_api_error_message\x18\x1b \x01(\bR\x11isApiErrorMessage\x12\x14\n" +
 	"\x05error\x18\x1c \x01(\tR\x05error\x12(\n" +
-	"\x10api_error_status\x18\x1d \x01(\x03R\x0eapiErrorStatus\x12<\n" +
-	"\rerror_details\x18\x1e \x01(\v2\x17.google.protobuf.StructR\ferrorDetails\x12K\n" +
-	"\x10tool_denial_kind\x18\x1f \x01(\x0e2!.agentshim.data.v1.ToolDenialKindR\x0etoolDenialKind\x12K\n" +
-	"\x15classifier_meta_lines\x18  \x01(\v2\x17.google.protobuf.StructR\x13classifierMetaLines\x124\n" +
+	"\x10api_error_status\x18\x1d \x01(\x03R\x0eapiErrorStatus\x12#\n" +
+	"\rerror_details\x18\x1e \x01(\tR\ferrorDetails\x12K\n" +
+	"\x10tool_denial_kind\x18\x1f \x01(\x0e2!.agentshim.data.v1.ToolDenialKindR\x0etoolDenialKind\x122\n" +
+	"\x15classifier_meta_lines\x18  \x01(\tR\x13classifierMetaLines\x124\n" +
 	"\x16interrupted_message_id\x18! \x01(\tR\x14interruptedMessageId\x12%\n" +
-	"\x0equeue_priority\x18\" \x01(\x03R\rqueuePriority\x12@\n" +
+	"\x0equeue_priority\x18\" \x01(\tR\rqueuePriority\x12@\n" +
 	"\x1dis_visible_in_transcript_only\x18# \x01(\bR\x19isVisibleInTranscriptOnly\x12,\n" +
 	"\x12is_compact_summary\x18$ \x01(\bR\x10isCompactSummary\x12.\n" +
 	"\x13logical_parent_uuid\x18% \x01(\tR\x11logicalParentUuid\x126\n" +
@@ -7955,10 +7975,10 @@ var file_agentshim_data_v1_transcript_proto_goTypes = []any{
 	(*McpResourceAttachment)(nil),             // 88: agentshim.data.v1.McpResourceAttachment
 	(*AgentMetaJson)(nil),                     // 89: agentshim.data.v1.AgentMetaJson
 	(*UnknownRecord)(nil),                     // 90: agentshim.data.v1.UnknownRecord
-	(*structpb.Struct)(nil),                   // 91: google.protobuf.Struct
-	(*ApiUserMessage)(nil),                    // 92: agentshim.data.v1.ApiUserMessage
-	(*ToolUseResult)(nil),                     // 93: agentshim.data.v1.ToolUseResult
-	(*ApiAssistantMessage)(nil),               // 94: agentshim.data.v1.ApiAssistantMessage
+	(*ApiUserMessage)(nil),                    // 91: agentshim.data.v1.ApiUserMessage
+	(*ToolUseResult)(nil),                     // 92: agentshim.data.v1.ToolUseResult
+	(*ApiAssistantMessage)(nil),               // 93: agentshim.data.v1.ApiAssistantMessage
+	(*structpb.Struct)(nil),                   // 94: google.protobuf.Struct
 	(*structpb.ListValue)(nil),                // 95: google.protobuf.ListValue
 }
 var file_agentshim_data_v1_transcript_proto_depIdxs = []int32{
@@ -7981,118 +8001,116 @@ var file_agentshim_data_v1_transcript_proto_depIdxs = []int32{
 	0,   // 16: agentshim.data.v1.LineEnvelope.entrypoint:type_name -> agentshim.data.v1.Entrypoint
 	1,   // 17: agentshim.data.v1.LineEnvelope.prompt_source:type_name -> agentshim.data.v1.PromptSource
 	6,   // 18: agentshim.data.v1.LineEnvelope.origin:type_name -> agentshim.data.v1.Origin
-	91,  // 19: agentshim.data.v1.LineEnvelope.error_details:type_name -> google.protobuf.Struct
-	2,   // 20: agentshim.data.v1.LineEnvelope.tool_denial_kind:type_name -> agentshim.data.v1.ToolDenialKind
-	91,  // 21: agentshim.data.v1.LineEnvelope.classifier_meta_lines:type_name -> google.protobuf.Struct
-	7,   // 22: agentshim.data.v1.UserLine.envelope:type_name -> agentshim.data.v1.LineEnvelope
-	92,  // 23: agentshim.data.v1.UserLine.message:type_name -> agentshim.data.v1.ApiUserMessage
-	93,  // 24: agentshim.data.v1.UserLine.tool_use_result:type_name -> agentshim.data.v1.ToolUseResult
-	7,   // 25: agentshim.data.v1.AssistantLine.envelope:type_name -> agentshim.data.v1.LineEnvelope
-	94,  // 26: agentshim.data.v1.AssistantLine.message:type_name -> agentshim.data.v1.ApiAssistantMessage
-	7,   // 27: agentshim.data.v1.SystemLine.envelope:type_name -> agentshim.data.v1.LineEnvelope
-	12,  // 28: agentshim.data.v1.SystemLine.stop_hook_summary:type_name -> agentshim.data.v1.StopHookSummaryLine
-	13,  // 29: agentshim.data.v1.SystemLine.turn_duration:type_name -> agentshim.data.v1.TurnDurationLine
-	14,  // 30: agentshim.data.v1.SystemLine.local_command:type_name -> agentshim.data.v1.LocalCommandLine
-	15,  // 31: agentshim.data.v1.SystemLine.agents_killed:type_name -> agentshim.data.v1.AgentsKilledLine
-	19,  // 32: agentshim.data.v1.SystemLine.compact_boundary:type_name -> agentshim.data.v1.CompactBoundaryLine
-	20,  // 33: agentshim.data.v1.SystemLine.informational:type_name -> agentshim.data.v1.InformationalLine
-	21,  // 34: agentshim.data.v1.SystemLine.scheduled_task_fire:type_name -> agentshim.data.v1.ScheduledTaskFireLine
-	22,  // 35: agentshim.data.v1.SystemLine.model_refusal_no_fallback:type_name -> agentshim.data.v1.ModelRefusalNoFallbackLine
-	24,  // 36: agentshim.data.v1.SystemLine.api_error:type_name -> agentshim.data.v1.ApiErrorLine
-	25,  // 37: agentshim.data.v1.SystemLine.model_refusal_fallback:type_name -> agentshim.data.v1.ModelRefusalFallbackLine
-	26,  // 38: agentshim.data.v1.SystemLine.away_summary:type_name -> agentshim.data.v1.AwaySummaryLine
-	90,  // 39: agentshim.data.v1.SystemLine.unknown:type_name -> agentshim.data.v1.UnknownRecord
-	11,  // 40: agentshim.data.v1.StopHookSummaryLine.hook_infos:type_name -> agentshim.data.v1.HookInfo
-	16,  // 41: agentshim.data.v1.DiskCompactMetadata.preserved_segment:type_name -> agentshim.data.v1.PreservedSegment
-	17,  // 42: agentshim.data.v1.DiskCompactMetadata.preserved_messages:type_name -> agentshim.data.v1.PreservedMessages
-	18,  // 43: agentshim.data.v1.CompactBoundaryLine.compact_metadata:type_name -> agentshim.data.v1.DiskCompactMetadata
-	91,  // 44: agentshim.data.v1.ApiErrorDetail.connection:type_name -> google.protobuf.Struct
-	91,  // 45: agentshim.data.v1.ApiErrorDetail.rate_limits:type_name -> google.protobuf.Struct
-	23,  // 46: agentshim.data.v1.ApiErrorLine.error:type_name -> agentshim.data.v1.ApiErrorDetail
-	3,   // 47: agentshim.data.v1.QueueOperationLine.operation:type_name -> agentshim.data.v1.QueueOp
-	91,  // 48: agentshim.data.v1.FileHistorySnapshotLine.snapshot:type_name -> google.protobuf.Struct
-	34,  // 49: agentshim.data.v1.FileHistoryDeltaLine.backup:type_name -> agentshim.data.v1.FileBackup
-	91,  // 50: agentshim.data.v1.AttributionSnapshotLine.file_states:type_name -> google.protobuf.Struct
-	7,   // 51: agentshim.data.v1.AttachmentLine.envelope:type_name -> agentshim.data.v1.LineEnvelope
-	39,  // 52: agentshim.data.v1.AttachmentLine.hook_success:type_name -> agentshim.data.v1.HookSuccessAttachment
-	40,  // 53: agentshim.data.v1.AttachmentLine.hook_non_blocking_error:type_name -> agentshim.data.v1.HookNonBlockingErrorAttachment
-	42,  // 54: agentshim.data.v1.AttachmentLine.hook_blocking_error:type_name -> agentshim.data.v1.HookBlockingErrorAttachment
-	43,  // 55: agentshim.data.v1.AttachmentLine.deferred_tools_delta:type_name -> agentshim.data.v1.DeferredToolsDeltaAttachment
-	44,  // 56: agentshim.data.v1.AttachmentLine.skill_listing:type_name -> agentshim.data.v1.SkillListingAttachment
-	45,  // 57: agentshim.data.v1.AttachmentLine.agent_listing_delta:type_name -> agentshim.data.v1.AgentListingDeltaAttachment
-	46,  // 58: agentshim.data.v1.AttachmentLine.task_reminder:type_name -> agentshim.data.v1.TaskReminderAttachment
-	47,  // 59: agentshim.data.v1.AttachmentLine.auto_mode:type_name -> agentshim.data.v1.AutoModeAttachment
-	48,  // 60: agentshim.data.v1.AttachmentLine.edited_text_file:type_name -> agentshim.data.v1.EditedTextFileAttachment
-	49,  // 61: agentshim.data.v1.AttachmentLine.diagnostics:type_name -> agentshim.data.v1.DiagnosticsAttachment
-	50,  // 62: agentshim.data.v1.AttachmentLine.command_permissions:type_name -> agentshim.data.v1.CommandPermissionsAttachment
-	51,  // 63: agentshim.data.v1.AttachmentLine.queued_command:type_name -> agentshim.data.v1.QueuedCommandAttachment
-	52,  // 64: agentshim.data.v1.AttachmentLine.read_truncation_notice:type_name -> agentshim.data.v1.ReadTruncationNoticeAttachment
-	53,  // 65: agentshim.data.v1.AttachmentLine.structured_output:type_name -> agentshim.data.v1.StructuredOutputAttachment
-	54,  // 66: agentshim.data.v1.AttachmentLine.compact_file_reference:type_name -> agentshim.data.v1.CompactFileReferenceAttachment
-	55,  // 67: agentshim.data.v1.AttachmentLine.context_tip:type_name -> agentshim.data.v1.ContextTipAttachment
-	56,  // 68: agentshim.data.v1.AttachmentLine.date_change:type_name -> agentshim.data.v1.DateChangeAttachment
-	57,  // 69: agentshim.data.v1.AttachmentLine.nested_memory:type_name -> agentshim.data.v1.NestedMemoryAttachment
-	60,  // 70: agentshim.data.v1.AttachmentLine.file:type_name -> agentshim.data.v1.FileAttachment
-	61,  // 71: agentshim.data.v1.AttachmentLine.ultrathink_effort:type_name -> agentshim.data.v1.UltrathinkEffortAttachment
-	62,  // 72: agentshim.data.v1.AttachmentLine.dynamic_skill:type_name -> agentshim.data.v1.DynamicSkillAttachment
-	63,  // 73: agentshim.data.v1.AttachmentLine.ultra_effort_enter:type_name -> agentshim.data.v1.UltraEffortEnterAttachment
-	64,  // 74: agentshim.data.v1.AttachmentLine.ultra_effort_exit:type_name -> agentshim.data.v1.UltraEffortExitAttachment
-	65,  // 75: agentshim.data.v1.AttachmentLine.plan_mode_exit:type_name -> agentshim.data.v1.PlanModeExitAttachment
-	66,  // 76: agentshim.data.v1.AttachmentLine.hook_cancelled:type_name -> agentshim.data.v1.HookCancelledAttachment
-	68,  // 77: agentshim.data.v1.AttachmentLine.invoked_skills:type_name -> agentshim.data.v1.InvokedSkillsAttachment
-	90,  // 78: agentshim.data.v1.AttachmentLine.unknown:type_name -> agentshim.data.v1.UnknownRecord
-	69,  // 79: agentshim.data.v1.AttachmentLine.token_usage:type_name -> agentshim.data.v1.TokenUsageAttachment
-	70,  // 80: agentshim.data.v1.AttachmentLine.budget_usd:type_name -> agentshim.data.v1.BudgetUsdAttachment
-	71,  // 81: agentshim.data.v1.AttachmentLine.task_progress:type_name -> agentshim.data.v1.TaskProgressAttachment
-	72,  // 82: agentshim.data.v1.AttachmentLine.task_status:type_name -> agentshim.data.v1.TaskStatusAttachment
-	73,  // 83: agentshim.data.v1.AttachmentLine.hook_stopped_continuation:type_name -> agentshim.data.v1.HookStoppedContinuationAttachment
-	74,  // 84: agentshim.data.v1.AttachmentLine.hook_system_message:type_name -> agentshim.data.v1.HookNoticeAttachment
-	74,  // 85: agentshim.data.v1.AttachmentLine.hook_additional_context:type_name -> agentshim.data.v1.HookNoticeAttachment
-	74,  // 86: agentshim.data.v1.AttachmentLine.hook_error_during_execution:type_name -> agentshim.data.v1.HookNoticeAttachment
-	75,  // 87: agentshim.data.v1.AttachmentLine.hook_permission_decision:type_name -> agentshim.data.v1.HookPermissionDecisionAttachment
-	76,  // 88: agentshim.data.v1.AttachmentLine.agent_mention:type_name -> agentshim.data.v1.AgentMentionAttachment
-	77,  // 89: agentshim.data.v1.AttachmentLine.plan_mode:type_name -> agentshim.data.v1.PlanModeAttachment
-	78,  // 90: agentshim.data.v1.AttachmentLine.plan_mode_reentry:type_name -> agentshim.data.v1.PlanModeReentryAttachment
-	79,  // 91: agentshim.data.v1.AttachmentLine.delegate_mode:type_name -> agentshim.data.v1.DelegateModeAttachment
-	80,  // 92: agentshim.data.v1.AttachmentLine.delegate_mode_exit:type_name -> agentshim.data.v1.DelegateModeExitAttachment
-	81,  // 93: agentshim.data.v1.AttachmentLine.output_style:type_name -> agentshim.data.v1.OutputStyleAttachment
-	82,  // 94: agentshim.data.v1.AttachmentLine.opened_file_in_ide:type_name -> agentshim.data.v1.OpenedFileInIdeAttachment
-	83,  // 95: agentshim.data.v1.AttachmentLine.critical_system_reminder:type_name -> agentshim.data.v1.CriticalSystemReminderAttachment
-	84,  // 96: agentshim.data.v1.AttachmentLine.edited_image_file:type_name -> agentshim.data.v1.EditedImageFileAttachment
-	85,  // 97: agentshim.data.v1.AttachmentLine.memory:type_name -> agentshim.data.v1.MemoryAttachment
-	85,  // 98: agentshim.data.v1.AttachmentLine.ultramemory:type_name -> agentshim.data.v1.MemoryAttachment
-	85,  // 99: agentshim.data.v1.AttachmentLine.team_context:type_name -> agentshim.data.v1.MemoryAttachment
-	86,  // 100: agentshim.data.v1.AttachmentLine.plan_file_reference:type_name -> agentshim.data.v1.PlanFileReferenceAttachment
-	87,  // 101: agentshim.data.v1.AttachmentLine.selected_lines_in_ide:type_name -> agentshim.data.v1.SelectedLinesInIdeAttachment
-	88,  // 102: agentshim.data.v1.AttachmentLine.mcp_resource:type_name -> agentshim.data.v1.McpResourceAttachment
-	60,  // 103: agentshim.data.v1.AttachmentLine.already_read_file:type_name -> agentshim.data.v1.FileAttachment
-	46,  // 104: agentshim.data.v1.AttachmentLine.todo_reminder:type_name -> agentshim.data.v1.TaskReminderAttachment
-	39,  // 105: agentshim.data.v1.HookNonBlockingErrorAttachment.fields:type_name -> agentshim.data.v1.HookSuccessAttachment
-	39,  // 106: agentshim.data.v1.HookBlockingErrorAttachment.fields:type_name -> agentshim.data.v1.HookSuccessAttachment
-	41,  // 107: agentshim.data.v1.HookBlockingErrorAttachment.blocking_error:type_name -> agentshim.data.v1.BlockingErrorDetail
-	95,  // 108: agentshim.data.v1.TaskReminderAttachment.content:type_name -> google.protobuf.ListValue
-	95,  // 109: agentshim.data.v1.DiagnosticsAttachment.files:type_name -> google.protobuf.ListValue
-	6,   // 110: agentshim.data.v1.QueuedCommandAttachment.origin:type_name -> agentshim.data.v1.Origin
-	91,  // 111: agentshim.data.v1.ReadTruncationNoticeAttachment.payload:type_name -> google.protobuf.Struct
-	91,  // 112: agentshim.data.v1.StructuredOutputAttachment.data:type_name -> google.protobuf.Struct
-	91,  // 113: agentshim.data.v1.CompactFileReferenceAttachment.payload:type_name -> google.protobuf.Struct
-	91,  // 114: agentshim.data.v1.ContextTipAttachment.payload:type_name -> google.protobuf.Struct
-	91,  // 115: agentshim.data.v1.DateChangeAttachment.payload:type_name -> google.protobuf.Struct
-	91,  // 116: agentshim.data.v1.NestedMemoryAttachment.payload:type_name -> google.protobuf.Struct
-	58,  // 117: agentshim.data.v1.AttachedFileContent.file:type_name -> agentshim.data.v1.AttachedFileBody
-	59,  // 118: agentshim.data.v1.FileAttachment.content:type_name -> agentshim.data.v1.AttachedFileContent
-	91,  // 119: agentshim.data.v1.UltrathinkEffortAttachment.payload:type_name -> google.protobuf.Struct
-	91,  // 120: agentshim.data.v1.DynamicSkillAttachment.payload:type_name -> google.protobuf.Struct
-	91,  // 121: agentshim.data.v1.UltraEffortEnterAttachment.payload:type_name -> google.protobuf.Struct
-	91,  // 122: agentshim.data.v1.UltraEffortExitAttachment.payload:type_name -> google.protobuf.Struct
-	91,  // 123: agentshim.data.v1.PlanModeExitAttachment.payload:type_name -> google.protobuf.Struct
-	67,  // 124: agentshim.data.v1.InvokedSkillsAttachment.skills:type_name -> agentshim.data.v1.InvokedSkill
-	91,  // 125: agentshim.data.v1.MemoryAttachment.payload:type_name -> google.protobuf.Struct
-	126, // [126:126] is the sub-list for method output_type
-	126, // [126:126] is the sub-list for method input_type
-	126, // [126:126] is the sub-list for extension type_name
-	126, // [126:126] is the sub-list for extension extendee
-	0,   // [0:126] is the sub-list for field type_name
+	2,   // 19: agentshim.data.v1.LineEnvelope.tool_denial_kind:type_name -> agentshim.data.v1.ToolDenialKind
+	7,   // 20: agentshim.data.v1.UserLine.envelope:type_name -> agentshim.data.v1.LineEnvelope
+	91,  // 21: agentshim.data.v1.UserLine.message:type_name -> agentshim.data.v1.ApiUserMessage
+	92,  // 22: agentshim.data.v1.UserLine.tool_use_result:type_name -> agentshim.data.v1.ToolUseResult
+	7,   // 23: agentshim.data.v1.AssistantLine.envelope:type_name -> agentshim.data.v1.LineEnvelope
+	93,  // 24: agentshim.data.v1.AssistantLine.message:type_name -> agentshim.data.v1.ApiAssistantMessage
+	7,   // 25: agentshim.data.v1.SystemLine.envelope:type_name -> agentshim.data.v1.LineEnvelope
+	12,  // 26: agentshim.data.v1.SystemLine.stop_hook_summary:type_name -> agentshim.data.v1.StopHookSummaryLine
+	13,  // 27: agentshim.data.v1.SystemLine.turn_duration:type_name -> agentshim.data.v1.TurnDurationLine
+	14,  // 28: agentshim.data.v1.SystemLine.local_command:type_name -> agentshim.data.v1.LocalCommandLine
+	15,  // 29: agentshim.data.v1.SystemLine.agents_killed:type_name -> agentshim.data.v1.AgentsKilledLine
+	19,  // 30: agentshim.data.v1.SystemLine.compact_boundary:type_name -> agentshim.data.v1.CompactBoundaryLine
+	20,  // 31: agentshim.data.v1.SystemLine.informational:type_name -> agentshim.data.v1.InformationalLine
+	21,  // 32: agentshim.data.v1.SystemLine.scheduled_task_fire:type_name -> agentshim.data.v1.ScheduledTaskFireLine
+	22,  // 33: agentshim.data.v1.SystemLine.model_refusal_no_fallback:type_name -> agentshim.data.v1.ModelRefusalNoFallbackLine
+	24,  // 34: agentshim.data.v1.SystemLine.api_error:type_name -> agentshim.data.v1.ApiErrorLine
+	25,  // 35: agentshim.data.v1.SystemLine.model_refusal_fallback:type_name -> agentshim.data.v1.ModelRefusalFallbackLine
+	26,  // 36: agentshim.data.v1.SystemLine.away_summary:type_name -> agentshim.data.v1.AwaySummaryLine
+	90,  // 37: agentshim.data.v1.SystemLine.unknown:type_name -> agentshim.data.v1.UnknownRecord
+	11,  // 38: agentshim.data.v1.StopHookSummaryLine.hook_infos:type_name -> agentshim.data.v1.HookInfo
+	16,  // 39: agentshim.data.v1.DiskCompactMetadata.preserved_segment:type_name -> agentshim.data.v1.PreservedSegment
+	17,  // 40: agentshim.data.v1.DiskCompactMetadata.preserved_messages:type_name -> agentshim.data.v1.PreservedMessages
+	18,  // 41: agentshim.data.v1.CompactBoundaryLine.compact_metadata:type_name -> agentshim.data.v1.DiskCompactMetadata
+	94,  // 42: agentshim.data.v1.ApiErrorDetail.connection:type_name -> google.protobuf.Struct
+	94,  // 43: agentshim.data.v1.ApiErrorDetail.rate_limits:type_name -> google.protobuf.Struct
+	23,  // 44: agentshim.data.v1.ApiErrorLine.error:type_name -> agentshim.data.v1.ApiErrorDetail
+	3,   // 45: agentshim.data.v1.QueueOperationLine.operation:type_name -> agentshim.data.v1.QueueOp
+	94,  // 46: agentshim.data.v1.FileHistorySnapshotLine.snapshot:type_name -> google.protobuf.Struct
+	34,  // 47: agentshim.data.v1.FileHistoryDeltaLine.backup:type_name -> agentshim.data.v1.FileBackup
+	94,  // 48: agentshim.data.v1.AttributionSnapshotLine.file_states:type_name -> google.protobuf.Struct
+	7,   // 49: agentshim.data.v1.AttachmentLine.envelope:type_name -> agentshim.data.v1.LineEnvelope
+	39,  // 50: agentshim.data.v1.AttachmentLine.hook_success:type_name -> agentshim.data.v1.HookSuccessAttachment
+	40,  // 51: agentshim.data.v1.AttachmentLine.hook_non_blocking_error:type_name -> agentshim.data.v1.HookNonBlockingErrorAttachment
+	42,  // 52: agentshim.data.v1.AttachmentLine.hook_blocking_error:type_name -> agentshim.data.v1.HookBlockingErrorAttachment
+	43,  // 53: agentshim.data.v1.AttachmentLine.deferred_tools_delta:type_name -> agentshim.data.v1.DeferredToolsDeltaAttachment
+	44,  // 54: agentshim.data.v1.AttachmentLine.skill_listing:type_name -> agentshim.data.v1.SkillListingAttachment
+	45,  // 55: agentshim.data.v1.AttachmentLine.agent_listing_delta:type_name -> agentshim.data.v1.AgentListingDeltaAttachment
+	46,  // 56: agentshim.data.v1.AttachmentLine.task_reminder:type_name -> agentshim.data.v1.TaskReminderAttachment
+	47,  // 57: agentshim.data.v1.AttachmentLine.auto_mode:type_name -> agentshim.data.v1.AutoModeAttachment
+	48,  // 58: agentshim.data.v1.AttachmentLine.edited_text_file:type_name -> agentshim.data.v1.EditedTextFileAttachment
+	49,  // 59: agentshim.data.v1.AttachmentLine.diagnostics:type_name -> agentshim.data.v1.DiagnosticsAttachment
+	50,  // 60: agentshim.data.v1.AttachmentLine.command_permissions:type_name -> agentshim.data.v1.CommandPermissionsAttachment
+	51,  // 61: agentshim.data.v1.AttachmentLine.queued_command:type_name -> agentshim.data.v1.QueuedCommandAttachment
+	52,  // 62: agentshim.data.v1.AttachmentLine.read_truncation_notice:type_name -> agentshim.data.v1.ReadTruncationNoticeAttachment
+	53,  // 63: agentshim.data.v1.AttachmentLine.structured_output:type_name -> agentshim.data.v1.StructuredOutputAttachment
+	54,  // 64: agentshim.data.v1.AttachmentLine.compact_file_reference:type_name -> agentshim.data.v1.CompactFileReferenceAttachment
+	55,  // 65: agentshim.data.v1.AttachmentLine.context_tip:type_name -> agentshim.data.v1.ContextTipAttachment
+	56,  // 66: agentshim.data.v1.AttachmentLine.date_change:type_name -> agentshim.data.v1.DateChangeAttachment
+	57,  // 67: agentshim.data.v1.AttachmentLine.nested_memory:type_name -> agentshim.data.v1.NestedMemoryAttachment
+	60,  // 68: agentshim.data.v1.AttachmentLine.file:type_name -> agentshim.data.v1.FileAttachment
+	61,  // 69: agentshim.data.v1.AttachmentLine.ultrathink_effort:type_name -> agentshim.data.v1.UltrathinkEffortAttachment
+	62,  // 70: agentshim.data.v1.AttachmentLine.dynamic_skill:type_name -> agentshim.data.v1.DynamicSkillAttachment
+	63,  // 71: agentshim.data.v1.AttachmentLine.ultra_effort_enter:type_name -> agentshim.data.v1.UltraEffortEnterAttachment
+	64,  // 72: agentshim.data.v1.AttachmentLine.ultra_effort_exit:type_name -> agentshim.data.v1.UltraEffortExitAttachment
+	65,  // 73: agentshim.data.v1.AttachmentLine.plan_mode_exit:type_name -> agentshim.data.v1.PlanModeExitAttachment
+	66,  // 74: agentshim.data.v1.AttachmentLine.hook_cancelled:type_name -> agentshim.data.v1.HookCancelledAttachment
+	68,  // 75: agentshim.data.v1.AttachmentLine.invoked_skills:type_name -> agentshim.data.v1.InvokedSkillsAttachment
+	90,  // 76: agentshim.data.v1.AttachmentLine.unknown:type_name -> agentshim.data.v1.UnknownRecord
+	69,  // 77: agentshim.data.v1.AttachmentLine.token_usage:type_name -> agentshim.data.v1.TokenUsageAttachment
+	70,  // 78: agentshim.data.v1.AttachmentLine.budget_usd:type_name -> agentshim.data.v1.BudgetUsdAttachment
+	71,  // 79: agentshim.data.v1.AttachmentLine.task_progress:type_name -> agentshim.data.v1.TaskProgressAttachment
+	72,  // 80: agentshim.data.v1.AttachmentLine.task_status:type_name -> agentshim.data.v1.TaskStatusAttachment
+	73,  // 81: agentshim.data.v1.AttachmentLine.hook_stopped_continuation:type_name -> agentshim.data.v1.HookStoppedContinuationAttachment
+	74,  // 82: agentshim.data.v1.AttachmentLine.hook_system_message:type_name -> agentshim.data.v1.HookNoticeAttachment
+	74,  // 83: agentshim.data.v1.AttachmentLine.hook_additional_context:type_name -> agentshim.data.v1.HookNoticeAttachment
+	74,  // 84: agentshim.data.v1.AttachmentLine.hook_error_during_execution:type_name -> agentshim.data.v1.HookNoticeAttachment
+	75,  // 85: agentshim.data.v1.AttachmentLine.hook_permission_decision:type_name -> agentshim.data.v1.HookPermissionDecisionAttachment
+	76,  // 86: agentshim.data.v1.AttachmentLine.agent_mention:type_name -> agentshim.data.v1.AgentMentionAttachment
+	77,  // 87: agentshim.data.v1.AttachmentLine.plan_mode:type_name -> agentshim.data.v1.PlanModeAttachment
+	78,  // 88: agentshim.data.v1.AttachmentLine.plan_mode_reentry:type_name -> agentshim.data.v1.PlanModeReentryAttachment
+	79,  // 89: agentshim.data.v1.AttachmentLine.delegate_mode:type_name -> agentshim.data.v1.DelegateModeAttachment
+	80,  // 90: agentshim.data.v1.AttachmentLine.delegate_mode_exit:type_name -> agentshim.data.v1.DelegateModeExitAttachment
+	81,  // 91: agentshim.data.v1.AttachmentLine.output_style:type_name -> agentshim.data.v1.OutputStyleAttachment
+	82,  // 92: agentshim.data.v1.AttachmentLine.opened_file_in_ide:type_name -> agentshim.data.v1.OpenedFileInIdeAttachment
+	83,  // 93: agentshim.data.v1.AttachmentLine.critical_system_reminder:type_name -> agentshim.data.v1.CriticalSystemReminderAttachment
+	84,  // 94: agentshim.data.v1.AttachmentLine.edited_image_file:type_name -> agentshim.data.v1.EditedImageFileAttachment
+	85,  // 95: agentshim.data.v1.AttachmentLine.memory:type_name -> agentshim.data.v1.MemoryAttachment
+	85,  // 96: agentshim.data.v1.AttachmentLine.ultramemory:type_name -> agentshim.data.v1.MemoryAttachment
+	85,  // 97: agentshim.data.v1.AttachmentLine.team_context:type_name -> agentshim.data.v1.MemoryAttachment
+	86,  // 98: agentshim.data.v1.AttachmentLine.plan_file_reference:type_name -> agentshim.data.v1.PlanFileReferenceAttachment
+	87,  // 99: agentshim.data.v1.AttachmentLine.selected_lines_in_ide:type_name -> agentshim.data.v1.SelectedLinesInIdeAttachment
+	88,  // 100: agentshim.data.v1.AttachmentLine.mcp_resource:type_name -> agentshim.data.v1.McpResourceAttachment
+	60,  // 101: agentshim.data.v1.AttachmentLine.already_read_file:type_name -> agentshim.data.v1.FileAttachment
+	46,  // 102: agentshim.data.v1.AttachmentLine.todo_reminder:type_name -> agentshim.data.v1.TaskReminderAttachment
+	39,  // 103: agentshim.data.v1.HookNonBlockingErrorAttachment.fields:type_name -> agentshim.data.v1.HookSuccessAttachment
+	39,  // 104: agentshim.data.v1.HookBlockingErrorAttachment.fields:type_name -> agentshim.data.v1.HookSuccessAttachment
+	41,  // 105: agentshim.data.v1.HookBlockingErrorAttachment.blocking_error:type_name -> agentshim.data.v1.BlockingErrorDetail
+	95,  // 106: agentshim.data.v1.TaskReminderAttachment.content:type_name -> google.protobuf.ListValue
+	95,  // 107: agentshim.data.v1.DiagnosticsAttachment.files:type_name -> google.protobuf.ListValue
+	6,   // 108: agentshim.data.v1.QueuedCommandAttachment.origin:type_name -> agentshim.data.v1.Origin
+	94,  // 109: agentshim.data.v1.ReadTruncationNoticeAttachment.payload:type_name -> google.protobuf.Struct
+	94,  // 110: agentshim.data.v1.StructuredOutputAttachment.data:type_name -> google.protobuf.Struct
+	94,  // 111: agentshim.data.v1.CompactFileReferenceAttachment.payload:type_name -> google.protobuf.Struct
+	94,  // 112: agentshim.data.v1.ContextTipAttachment.payload:type_name -> google.protobuf.Struct
+	94,  // 113: agentshim.data.v1.DateChangeAttachment.payload:type_name -> google.protobuf.Struct
+	94,  // 114: agentshim.data.v1.NestedMemoryAttachment.payload:type_name -> google.protobuf.Struct
+	58,  // 115: agentshim.data.v1.AttachedFileContent.file:type_name -> agentshim.data.v1.AttachedFileBody
+	59,  // 116: agentshim.data.v1.FileAttachment.content:type_name -> agentshim.data.v1.AttachedFileContent
+	94,  // 117: agentshim.data.v1.UltrathinkEffortAttachment.payload:type_name -> google.protobuf.Struct
+	94,  // 118: agentshim.data.v1.DynamicSkillAttachment.payload:type_name -> google.protobuf.Struct
+	94,  // 119: agentshim.data.v1.UltraEffortEnterAttachment.payload:type_name -> google.protobuf.Struct
+	94,  // 120: agentshim.data.v1.UltraEffortExitAttachment.payload:type_name -> google.protobuf.Struct
+	94,  // 121: agentshim.data.v1.PlanModeExitAttachment.payload:type_name -> google.protobuf.Struct
+	67,  // 122: agentshim.data.v1.InvokedSkillsAttachment.skills:type_name -> agentshim.data.v1.InvokedSkill
+	94,  // 123: agentshim.data.v1.MemoryAttachment.payload:type_name -> google.protobuf.Struct
+	124, // [124:124] is the sub-list for method output_type
+	124, // [124:124] is the sub-list for method input_type
+	124, // [124:124] is the sub-list for extension type_name
+	124, // [124:124] is the sub-list for extension extendee
+	0,   // [0:124] is the sub-list for field type_name
 }
 
 func init() { file_agentshim_data_v1_transcript_proto_init() }
