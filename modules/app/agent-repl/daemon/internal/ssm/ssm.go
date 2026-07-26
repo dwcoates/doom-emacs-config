@@ -229,6 +229,28 @@ func (m *Manager) Apply(ev *corev1.Event) error {
 		return err
 	}
 
+	// OPEN THE PAINT AXIS on a fresh route.
+	//
+	// READY's promise is "the route is proven usable AND a frontend has
+	// attested painting the history". The second half was documented and never
+	// enforced: the paint axis only contributed a candidate once a row existed,
+	// the sole writer was the attestation itself, and so a workspace with no
+	// paint rows at all resolved green without any frontend ever having drawn
+	// anything. The blue gate was unreachable.
+	//
+	// This is the opening edge that makes it reachable. A newly ready session is
+	// a NEW route — a fresh shim, a relaunch, a re-handshake — and no renderer
+	// has attested to it yet, so the paint axis opens unpainted and holds the
+	// workspace blue until one does. It rides the same branch `ready` does, so
+	// the no-regress guard above covers it too: a mid-turn re-handshake writes
+	// neither row and the running turn stands.
+	if state == sigReady {
+		if err := appendRow(m.db, ws, sid, sigUnpainted, causePaintLost+":"+causeSessionStarted,
+			sql.NullInt64{}, m.nextAt(), ""); err != nil {
+			return err
+		}
+	}
+
 	// The VENDOR axis, written alongside the agent axis rather than instead
 	// of it. A turn that concluded abnormally is two facts at once — the
 	// turn ended, AND something only a human or the vendor can release

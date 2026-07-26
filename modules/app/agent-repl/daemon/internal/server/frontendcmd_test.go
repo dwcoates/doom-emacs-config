@@ -696,6 +696,90 @@ func TestCommandHandlerClientLogChangesNoDaemonState(t *testing.T) {
 	}
 }
 
+// --- PaintAck outcomes (F5) --------------------------------------------------
+
+// fakePainters records the attestations the handler forwards to the SSM.
+type fakePainters struct{ acked []uint64 }
+
+func (f *fakePainters) ApplyPaintAck(_ string, throughSeq uint64) error {
+	f.acked = append(f.acked, throughSeq)
+	return nil
+}
+
+func newPaintHandler(t *testing.T, p *fakePainters) *commandHandler {
+	t.Helper()
+	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{},
+		nil, nil, p, func(string, ...any) {})
+	if err != nil {
+		t.Fatalf("newCommandHandler: %v", err)
+	}
+	return h
+}
+
+// A PAINTED ack is the attestation: it advances the SSM's paint watermark.
+func TestPaintAckPaintedAttestsToTheSsm(t *testing.T) {
+	// Arrange.
+	p := &fakePainters{}
+	h := newPaintHandler(t, p)
+
+	// Act.
+	if err := h.PaintAck(context.Background(), "/w", "r1", &frontendv1.PaintAckCmd{
+		ThroughSeq: 7, StateGeneration: 3,
+		Outcome: frontendv1.PaintOutcome_PAINT_OUTCOME_PAINTED,
+	}); err != nil {
+		t.Fatalf("PaintAck: %v", err)
+	}
+
+	// Assert.
+	if len(p.acked) != 1 || p.acked[0] != 7 {
+		t.Fatalf("attestations = %v, want [7]", p.acked)
+	}
+}
+
+// A SUSPENDED ack attests NOTHING. The webview holds the state and cannot draw
+// it, so greening the workspace on that would be the exact lie the attestation
+// exists to prevent. Its delivery half runs on the frontend server's read loop.
+func TestPaintAckSuspendedAttestsNothing(t *testing.T) {
+	// Arrange.
+	p := &fakePainters{}
+	h := newPaintHandler(t, p)
+
+	// Act.
+	if err := h.PaintAck(context.Background(), "/w", "r1", &frontendv1.PaintAckCmd{
+		ThroughSeq: 7, StateGeneration: 3,
+		Outcome: frontendv1.PaintOutcome_PAINT_OUTCOME_SUSPENDED,
+	}); err != nil {
+		t.Fatalf("PaintAck: %v", err)
+	}
+
+	// Assert.
+	if len(p.acked) != 0 {
+		t.Fatalf("attestations = %v, want none (nothing was painted)", p.acked)
+	}
+}
+
+// An ack that names no outcome is a malformed frame, refused loudly rather
+// than read as whichever claim the zero value happens to encode.
+func TestPaintAckWithoutAnOutcomeIsRefused(t *testing.T) {
+	// Arrange.
+	p := &fakePainters{}
+	h := newPaintHandler(t, p)
+
+	// Act.
+	err := h.PaintAck(context.Background(), "/w", "r1", &frontendv1.PaintAckCmd{ThroughSeq: 7})
+
+	// Assert.
+	if err == nil {
+		t.Fatal("expected a refusal for a paint ack with no outcome")
+	}
+	if !strings.Contains(err.Error(), "names no paint outcome") {
+		t.Fatalf("error = %v, want it to name the missing outcome", err)
+	}
+	if len(p.acked) != 0 {
+		t.Fatalf("attestations = %v, want none", p.acked)
+	}
+}
+
 // --- workspace-key validation ----------------------------------------------
 //
 // Session-routed commands are keyed by the session CWD. A display name matches
