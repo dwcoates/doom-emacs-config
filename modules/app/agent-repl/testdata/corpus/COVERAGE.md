@@ -125,7 +125,7 @@ Checklist of the full `agentshim.data.v1` shape inventory (design doc §5.3 + th
 | Shape | Status | Fixture / reason |
 |---|---|---|
 | `RawTaskStatus` | FOUND | tool-results/agent.jsonl, workflow_launch.jsonl (status) |
-| `RetrievalStatus` | NOT-FOUND-ON-MACHINE | no TaskOutput toolUseResult on the machine (retrievalStatus never observed) |
+| `RetrievalStatus` | FOUND | tool-results/task_output.jsonl (not_ready), task_output-local_agent.jsonl (success) |
 | `ContentBlock` | FOUND | content-blocks/*.jsonl |
 | `TextBlock` | FOUND | content-blocks/text.jsonl |
 | `ThinkingBlock` | FOUND | content-blocks/thinking.jsonl |
@@ -145,9 +145,9 @@ Checklist of the full `agentshim.data.v1` shape inventory (design doc §5.3 + th
 | `AgentToolStats` | FOUND | tool-results/agent.jsonl (toolStats) |
 | `AgentResult` | FOUND | tool-results/agent.jsonl |
 | `AgentAsyncLaunch` | FOUND | tool-results/agent_async_launch.jsonl |
-| `LocalBashTask` | NOT-FOUND-ON-MACHINE | TaskOutput result not on the machine |
-| `LocalAgentTask` | NOT-FOUND-ON-MACHINE | TaskOutput result not on the machine |
-| `TaskOutputResult` | NOT-FOUND-ON-MACHINE | TaskOutput result not on the machine |
+| `LocalBashTask` | FOUND | tool-results/task_output.jsonl |
+| `LocalAgentTask` | FOUND | tool-results/task_output-local_agent.jsonl |
+| `TaskOutputResult` | FOUND | tool-results/task_output.jsonl, task_output-local_agent.jsonl |
 | `TaskStopResult` | FOUND | tool-results/task_stop.jsonl |
 | `WorkflowLaunchResult` | FOUND | tool-results/workflow_launch.jsonl |
 | `MonitorResult` | FOUND | tool-results/monitor.jsonl |
@@ -198,9 +198,9 @@ Checklist of the full `agentshim.data.v1` shape inventory (design doc §5.3 + th
 
 ## Summary
 
-- FOUND: 145
+- FOUND: 149
 - PARTIAL: 3
-- NOT-FOUND-ON-MACHINE: 26
+- NOT-FOUND-ON-MACHINE: 22
 - Total shapes: 174
 
 ### NOT-FOUND / PARTIAL detail (nothing fabricated)
@@ -219,11 +219,7 @@ Checklist of the full `agentshim.data.v1` shape inventory (design doc §5.3 + th
 - `stream:ControlCancelRequest` (NOT-FOUND-ON-MACHINE) — control channel not in probes
 - `stream:KeepAlive` (NOT-FOUND-ON-MACHINE) — control channel not in probes
 - `transcript:AgentMetaJson` (PARTIAL) — sidechain/agent-*.meta.json (model field absent in sample; other fields present)
-- `tools:RetrievalStatus` (NOT-FOUND-ON-MACHINE) — no TaskOutput toolUseResult on the machine (retrievalStatus never observed)
 - `tools:ToolReferenceBlock` (NOT-FOUND-ON-MACHINE) — tool_reference content block not observed on the machine
-- `tools:LocalBashTask` (NOT-FOUND-ON-MACHINE) — TaskOutput result not on the machine
-- `tools:LocalAgentTask` (NOT-FOUND-ON-MACHINE) — TaskOutput result not on the machine
-- `tools:TaskOutputResult` (NOT-FOUND-ON-MACHINE) — TaskOutput result not on the machine
 - `tools:KillShellInput` (NOT-FOUND-ON-MACHINE) — no KillShell tool use on the machine (proto already notes zero disk occurrences)
 - `tools:GrepInput` (NOT-FOUND-ON-MACHINE) — no Grep tool on the machine (grep is run via Bash)
 - `tools:NotebookEditInput` (NOT-FOUND-ON-MACHINE) — no NotebookEdit tool use on the machine
