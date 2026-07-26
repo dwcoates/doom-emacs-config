@@ -204,3 +204,22 @@ describe("encodeFrontendCommand — queue controls (E4)", () => {
     expect(w.queueCancel).toEqual({ entryId: "q1" });
   });
 });
+
+describe("encodeFrontendCommand — paintAck", () => {
+  it("encodes the painted seq as a protojson uint64 string", () => {
+    const w = wire({ requestId: "r1", workspace: "ws", body: { case: "paintAck", throughSeq: 42 } });
+    expect(w.paintAck).toEqual({ throughSeq: "42" });
+  });
+
+  it("encodes an empty-history attestation at seq 0", () => {
+    // Seq 0 is a REAL attestation — "there was nothing to paint and I
+    // painted it" — which is what lets a never-prompted session read ready.
+    const w = wire({ requestId: "r1", workspace: "ws", body: { case: "paintAck", throughSeq: 0 } });
+    expect(w.paintAck).toEqual({ throughSeq: "0" });
+  });
+
+  it("carries the workspace the attestation is about", () => {
+    const w = wire({ requestId: "r1", workspace: "ws-7", body: { case: "paintAck", throughSeq: 3 } });
+    expect(w.workspace).toBe("ws-7");
+  });
+});

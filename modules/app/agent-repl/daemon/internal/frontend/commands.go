@@ -54,6 +54,15 @@ type CommandHandler interface {
 	AcceptQueueEntry(ctx context.Context, workspace, requestID string, cmd *frontendv1.QueueAcceptCmd) error
 	// CancelQueueEntry drops a held prompt; it is never delivered.
 	CancelQueueEntry(ctx context.Context, workspace, requestID string, cmd *frontendv1.QueueCancelCmd) error
+	// PaintAck records a frontend's attestation that it PAINTED the
+	// workspace's conversation through the carried seq.
+	//
+	// The daemon tracks STATE; a frontend decides when that state is
+	// RENDERABLE. Nothing on this side of the wire can distinguish a webview
+	// that drew the history from one that received it and drew nothing, so
+	// the workspace stays on the compromised-route state until a frontend
+	// says otherwise. An absent ack is a meaningful, correct outcome.
+	PaintAck(ctx context.Context, workspace, requestID string, cmd *frontendv1.PaintAckCmd) error
 }
 
 // Dispatch routes a FrontendCommand to the handler and returns the CommandAck to
@@ -97,6 +106,8 @@ func Dispatch(ctx context.Context, h CommandHandler, cmd *frontendv1.FrontendCom
 		err = h.AcceptQueueEntry(ctx, ws, reqID, c.QueueAccept)
 	case *frontendv1.FrontendCommand_QueueCancel:
 		err = h.CancelQueueEntry(ctx, ws, reqID, c.QueueCancel)
+	case *frontendv1.FrontendCommand_PaintAck:
+		err = h.PaintAck(ctx, ws, reqID, c.PaintAck)
 	default:
 		// Unknown/empty command oneof: fail loudly, never silently.
 		return failAck(reqID, fmt.Sprintf("frontend: unknown command (workspace=%q): the command oneof was empty or unrecognized", ws))
