@@ -27,8 +27,10 @@
  * - toolUse (ToolUseBlock) / toolResult (ToolResultBlock) arms → the same two
  *   ToolItems, standalone; the store field-merges the pair by toolUseId.
  * - result (ResultMessage) → ResultItem; compactBoundary / compactBoundaryLine
- *   → CompactBoundaryItem; apiError (ApiErrorLine) → RetryItem or ErrorItem;
- *   permission (core.v1.PermissionItem) → PermissionItem.
+ *   → CompactBoundaryItem; permission (core.v1.PermissionItem) →
+ *   PermissionItem; systemFailure (SystemFailureItem) → the classified
+ *   failure card (F4) — the ApiErrorLine `apiError` arm it superseded is
+ *   RETIRED (step 11).
  * - sessionInit (SessionInitView) → the /status panel's SystemInit source.
  *
  * EXPLICIT IGNORE (no new visuals; §11): a frame variant in `UNSUPPORTED_SHAPES`
@@ -61,7 +63,6 @@ import {
   type ConversationDelta,
   type ConversationItemArm,
   type ConversationItemFrame,
-  type DegradedNotice,
   type ErrorClass,
   type SystemFailure,
   type FrontendFrame,
@@ -224,15 +225,11 @@ export interface ProgressInput {
   rateLimited: RateLimitInput | null;
   /** The session reporting it is parked on the user. NOT a phase. */
   blocked: ProgressWindowInput | null;
-  /** Persists until the next turn starts; "" = no error standing. */
-  errorSummary: string;
-  /** The feed item the error row scrolls to; "" = not addressable. */
-  errorItemUuid: string;
   /**
-   * The CLASSIFIED error state (F4), superseding the two fields above. The
-   * footer takes its color from the failure's class rather than from a
-   * hardcoded red no other surface consulted, and addresses the card through
-   * the failure's own uuid. `null` = no error standing.
+   * The CLASSIFIED error state (F4). The footer takes its color from the
+   * failure's class rather than from a hardcoded red no other surface
+   * consulted, and addresses the card through the failure's own uuid.
+   * `null` = no error standing.
    */
   failure: SystemFailureCard | null;
   pendingPermissions: number;
@@ -255,14 +252,6 @@ export interface SessionInitInput {
   init: Record<string, unknown>;
 }
 
-/** DegradedNotice → the visible banner input. */
-export interface DegradedBanner {
-  component: string;
-  reason: string;
-  recovered: boolean;
-  atMs: number;
-}
-
 /** One thing the store/render layer should adopt from a decoded frame. */
 export type AdapterEffect =
   | { kind: "workspace-state"; value: WorkspaceStatusInput }
@@ -280,7 +269,6 @@ export type AdapterEffect =
   | { kind: "task-catalog"; value: TaskCatalogInput }
   | { kind: "progress"; value: ProgressInput }
   | { kind: "session-init"; value: SessionInitInput }
-  | { kind: "degraded"; value: DegradedBanner }
   | { kind: "ignored"; shape: string };
 
 export type AdapterLogLevel = "debug" | "info" | "warn";
@@ -335,8 +323,6 @@ export class StateAdapter {
         return [this.catalogEffect(frame.frame.value)];
       case "sessionInit":
         return [this.sessionInitEffect(frame.frame.value)];
-      case "degradedNotice":
-        return [this.degradedEffect(frame.frame.value)];
       case "commandAck":
         // Registered unsupported shape: no webapp visual (§11).
         return [this.ignore("commandAck")];
@@ -413,18 +399,6 @@ export class StateAdapter {
     };
   }
 
-  private degradedEffect(dn: DegradedNotice): AdapterEffect {
-    return {
-      kind: "degraded",
-      value: {
-        component: dn.component,
-        reason: dn.reason,
-        recovered: dn.recovered,
-        atMs: Number(dn.atMs),
-      },
-    };
-  }
-
   /**
    * A `text`/`thinking`/`input_json` content delta grows the reveal feed; a
    * `signature` delta streams the thinking block's signature, which the webapp
@@ -492,8 +466,6 @@ export class StateAdapter {
                 status: pv.rateLimited.status,
               }
             : null,
-        errorSummary: pv.errorSummary,
-        errorItemUuid: pv.errorItemUuid,
         failure: pv.failure === undefined ? null : systemFailureFrom(pv.failure),
         pendingPermissions: pv.pendingPermissions,
         queueDepth: pv.queueDepth,
@@ -665,12 +637,6 @@ function itemsFromFrame(frame: ConversationItemFrame): { items: ConversationItem
       return { items: [compactBoundaryItem(frame.payload)], ignores: [] };
     case "compactBoundaryLine":
       return { items: [compactBoundaryLineItem(frame.payload)], ignores: [] };
-    case "apiError":
-      // SUPERSEDED (F4) by the systemFailure arm. The daemon still emits this
-      // for the transition, and this end deliberately renders nothing from
-      // it: reading it meant re-deciding retrying-vs-terminal by a rule the
-      // daemon did not share, which is the divergence the card closed.
-      return { items: [], ignores: ["conversation-item:apiError"] };
     case "permission":
       return { items: [permissionItemFrom(frame.payload, frame.uuid)], ignores: [] };
     case "systemFailure":

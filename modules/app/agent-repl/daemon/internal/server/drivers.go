@@ -365,14 +365,6 @@ func (f *PushForwarder) PushTaskCatalog(c *frontendv1.TaskCatalog) {
 	f.logMiss("task-catalog")
 }
 
-func (f *PushForwarder) PushDegradedNotice(n *frontendv1.DegradedNotice) {
-	if s := f.target.Load(); s != nil {
-		s.PushDegradedNotice(n)
-		return
-	}
-	f.logMiss("degraded-notice")
-}
-
 func (f *PushForwarder) PushWorkspaceState(w *frontendv1.WorkspaceState) {
 	if s := f.target.Load(); s != nil {
 		s.PushWorkspaceState(w)

@@ -90,7 +90,7 @@ when the ack reports failure — in addition to the loud log + echo).")
 
 (defconst agent-repl--uds-known-frame-fields
   '("snapshot" "workspaceState" "sessionView" "conversationDelta"
-    "typingDelta" "taskCatalog" "commandAck" "degradedNotice" "daemonView"
+    "typingDelta" "taskCatalog" "commandAck" "daemonView"
     "sessionInit" "heartbeat" "queue" "progress")
   "The protojson (lowerCamelCase) names of every `FrontendFrame' oneof arm.
 Mirrors the `frame' oneof in proto/agentshim/frontend/v1/frontend.proto.
@@ -106,7 +106,7 @@ parity and rendered by nothing here — see
 `agent-repl--uds-ignored-frame-fields'.")
 
 (defconst agent-repl--uds-ignored-frame-fields
-  '("heartbeat" "queue" "progress" "degradedNotice")
+  '("heartbeat" "queue" "progress")
   "Frame arms Emacs decodes for wire parity but DELIBERATELY renders nothing for.
 These are a subset of `agent-repl--uds-known-frame-fields'.
 
