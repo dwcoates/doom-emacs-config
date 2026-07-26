@@ -42,6 +42,14 @@
            account, one switch verb per other canonical root. Built on open
            from the daemon's roster, so the identities are live. -->
       <div id="account-menu" hidden></div>
+      <!-- The ungated-session banner (ungated.ts): filled whenever the session
+           runs under a permission mode that shadows canUseTool in the
+           fail-OPEN direction (bypassPermissions), which leaves the daemon
+           with NO permission gate at all. Empty (and so collapsed via :empty)
+           for every gated session, and deliberately carries no dismiss
+           control — it is a pure function of the live mode, re-rendered from
+           state on every chrome frame. -->
+      <div id="ungated-banner"></div>
       <!-- The compaction-in-progress banner slot: filled with an indeterminate
            "Compacting conversation…" bar while a /compact runs, empty (and so
            collapsed) otherwise. -->
