@@ -305,7 +305,8 @@ test callers that have not yet migrated."
   "Set workspace WS's :agent-state to STATE.
 STATE is one of: nil, :init, :idle, :thinking, :done, :permission."
   (unless ws (error "agent-repl--ws-set-agent-state: ws is nil"))
-  (agent-repl--log ws "agent-state %s -> %s" ws state)
+  (let ((previous (agent-repl--ws-get ws :agent-state)))
+    (agent-repl--log ws "agent-state: ws=%s previous=%s next=%s" ws previous state))
   (agent-repl--ws-put ws :agent-state state)
   (force-mode-line-update t)
   (agent-repl--memory-state-save ws))
@@ -344,7 +345,9 @@ open-panels behavior applies.  `:dead' is set via `--ws-put' directly
 (in `--mark-dead'), bypassing this setter, so no special-case is
 needed there."
   (unless ws (error "agent-repl--ws-set-repl-state: ws is nil"))
-  (agent-repl--log ws "repl-state %s -> %s" ws state)
+  (let ((previous (agent-repl--ws-get ws :repl-state)))
+    (agent-repl--log ws "repl-state: ws=%s previous=%s next=%s persists=%s"
+                      ws previous state (memq state '(:active :inactive :hidden))))
   (agent-repl--ws-put ws :repl-state state)
   (force-mode-line-update t)
   (when (memq state '(:active :inactive :hidden))
@@ -411,10 +414,21 @@ latter happens early in session startup, before the dir is initialized,
 and a later panel show re-runs this alignment once the dir lands.  This
 is deliberately soft rather than an assertion: the buffer can legitimately
 exist before its workspace directory is known."
-  (when (buffer-live-p buf)
-    (when-let ((dir (agent-repl--ws-get ws :project-dir)))
+  (cond
+   ((not (buffer-live-p buf))
+    (agent-repl--log-verbose ws "align-buffer-to-ws-dir: ws=%s skipped dead-buffer=%S" ws buf))
+   ((not (agent-repl--ws-get ws :project-dir))
+    (agent-repl--log-verbose ws "align-buffer-to-ws-dir: ws=%s skipped missing-project-dir buffer=%s"
+                              ws (buffer-name buf)))
+   (t
+    (let ((dir (agent-repl--ws-get ws :project-dir)))
       (with-current-buffer buf
-        (setq default-directory (file-name-as-directory dir))))))
+        (let ((previous default-directory)
+              (resolved (file-name-as-directory dir)))
+          (setq default-directory resolved)
+          (agent-repl--log ws
+                            "align-buffer-to-ws-dir: ws=%s buffer=%s previous=%s next=%s"
+                            ws (buffer-name buf) previous resolved)))))))
 
 ;;; Git status (async) -------------------------------------------------------
 
@@ -943,7 +957,11 @@ pulse — solid blue background regardless of the underlying state.")
   "Set workspace WS's :flashing flag to VAL.
 The tab renderer treats non-nil as an instruction to paint the tab with
 the flash face/spec on the next refresh."
-  (agent-repl--ws-put ws :flashing val))
+  (let ((previous (agent-repl--ws-get ws :flashing)))
+    (agent-repl--ws-put ws :flashing val)
+    ;; Flash steps are timer-driven and can be frequent; retain their state
+    ;; transitions only in verbose traces.
+    (agent-repl--log-verbose ws "ws-set-flashing: ws=%s previous=%s next=%s" ws previous val)))
 
 (defun agent-repl--flash-spec ()
   "Return the appearance spec plist used for a flashing tab.
@@ -966,6 +984,8 @@ a different cache-buster suffix (`agent-repl--tabline-cache-buster')
 and produces a different string, then drives the tab-bar update
 primitives.  See the block comment above the toggle's defvar for the
 rationale."
+  ;; This runs on the 1Hz status timer and is also called by flash timers;
+  ;; logging each redraw would bury actionable lifecycle records.
   (setq agent-repl--tabline-space-toggle (not agent-repl--tabline-space-toggle))
   (when (fboundp 'tab-bar-tabs-set)
     (tab-bar-tabs-set (tab-bar-tabs)))
@@ -981,6 +1001,8 @@ on, odd STEPs paint it off.  The terminal step (STEP == TOTAL-STEPS-1)
 clears `:flashing' and stops the chain — it does NOT schedule a
 successor.  Every step calls `agent-repl--force-tab-bar-redraw' so
 the tab repaints at flash speed instead of waiting for the 1-Hz poll."
+  (agent-repl--log-verbose ws "flash-step: ws=%s step=%d total=%d interval=%.3fs terminal=%s"
+                            ws step total-steps interval (>= step (1- total-steps)))
   (if (>= step (1- total-steps))
       (progn
         (agent-repl--ws-set-flashing ws nil)
@@ -1136,6 +1158,8 @@ workspaces whose agent panels are closed — only the full-tab
 background requires panels to be open.  When the workspace's
 `:flashing' flag is set \(see `agent-repl-flash-tab'\), the spec and
 name face are overridden to a uniform pulse so the tab stands out."
+  ;; Called on every tab-bar redisplay, potentially many times per second;
+  ;; renderer branch traces would overwhelm even verbose diagnostics.
   (let* ((selected      (equal current-name name))
          (flashing      (agent-repl--ws-flashing-p name))
          (display-state (agent-repl--ws-display-state name))
@@ -1165,13 +1189,18 @@ to skip soon-to-be-killed `:hidden' workspaces.  The tab-bar itself is
 NOT filtered — it reflects the raw persp-names-cache, and `:hidden'
 workspaces disappear naturally once the next workspace switch triggers
 `agent-repl--sweep-hidden-workspaces'."
-  (if agent-repl-hide-mode-enabled
-      (cl-remove-if
-       (lambda (n)
-         (and (not (equal n current-name))
-              (eq (agent-repl--ws-repl-state n) :hidden)))
-       names)
-    names))
+  (let ((result
+         (if agent-repl-hide-mode-enabled
+             (cl-remove-if
+              (lambda (n)
+                (and (not (equal n current-name))
+                     (eq (agent-repl--ws-repl-state n) :hidden)))
+              names)
+           names)))
+    (agent-repl--log (and current-name (agent-repl--ws-known-p current-name) current-name)
+                     "filter-hidden-names: hide-mode=%s current=%s input=%S output=%S"
+                     agent-repl-hide-mode-enabled current-name names result)
+    result))
 
 (cl-defun agent-repl--tabline-rendered-entries (&optional (names nil names-supplied-p))
   "Return the list of rendered tab-entry strings for NAMES.
@@ -1471,6 +1500,8 @@ width.  Without the cache-buster, face-only status transitions
 Enumerates `agent-repl--ws-tabline-names', so workspaces belonging to
 a folded repo are absent from the rendered rows and the
 remaining tabs carry contiguous 1-based numbers."
+  ;; The visible formatter runs in redisplay, often more than once per
+  ;; second.  Its per-branch values are deliberately not logged.
   (let* ((width (frame-width))
          (line-width (max 1 (1- width)))
          (names (agent-repl--ws-tabline-names))
@@ -1608,7 +1639,11 @@ are persp-killed on the next workspace switch.  When OFF, they remain
 in the workspace list and behave like ordinary `:inactive' workspaces.
 Forces a tab-bar repaint so cycling-skip semantics update immediately."
   (interactive)
-  (setq agent-repl-hide-mode-enabled (not agent-repl-hide-mode-enabled))
+  (let ((previous agent-repl-hide-mode-enabled))
+    (setq agent-repl-hide-mode-enabled (not previous))
+    (agent-repl--log (agent-repl--ws-current-name)
+                      "toggle-hide-mode: previous=%s next=%s current=%s"
+                      previous agent-repl-hide-mode-enabled (agent-repl--ws-current-name)))
   (agent-repl--force-tab-bar-redraw)
   (message "agent-repl hide-mode %s"
            (if agent-repl-hide-mode-enabled "enabled" "disabled")))
@@ -1732,9 +1767,14 @@ wedged chain (the per-step `condition-case' didn't catch some error
 path or the finalize never ran), force-cleared in place, and the
 caller is told to proceed."
   (cond
-   ((null agent-repl--update-in-flight) nil)
+   ((null agent-repl--update-in-flight)
+    (agent-repl--log-verbose nil "update-in-flight-p: result=nil reason=no-chain")
+    nil)
    ((< (- (float-time) agent-repl--update-in-flight)
        agent-repl-state-stale-threshold)
+    (agent-repl--log-verbose nil "update-in-flight-p: result=t age=%.2fs threshold=%.2fs"
+                              (- (float-time) agent-repl--update-in-flight)
+                              agent-repl-state-stale-threshold)
     t)
    (t
     (agent-repl--log nil "update-in-flight-p: stale flag (%.2fs old), force-clearing"
@@ -1760,12 +1800,18 @@ Liveness/death for a gui workspace is owned exclusively by the daemon
 \(pushed DEAD `WorkspaceState' — see
 `agent-repl--status-react-to-pushed-death'), so this poll deliberately
 never marks a gui workspace dead; it only runs the git refresh for it."
-  (if (or (agent-repl--ws-gui-frontend-p ws)
-          (agent-repl--agent-running-p ws))
-      (when do-git-p
-        (agent-repl--async-refresh-git-status ws))
-    ;; No live agent session → clear non-thinking state.
-    (agent-repl--mark-dead ws))
+  (let* ((gui-p (agent-repl--ws-gui-frontend-p ws))
+         (running-p (and (not gui-p) (agent-repl--agent-running-p ws))))
+    ;; Per-workspace timer body: record detailed branch inputs only in
+    ;; verbose traces because it normally runs once per second per workspace.
+    (agent-repl--log-verbose ws
+                              "update-one-workspace-state: ws=%s gui=%s running=%s do-git=%s"
+                              ws gui-p running-p do-git-p)
+    (if (or gui-p running-p)
+        (when do-git-p
+          (agent-repl--async-refresh-git-status ws))
+      ;; No live agent session → clear non-thinking state.
+      (agent-repl--mark-dead ws)))
   ;; Merged-ness is independent of agent liveness — refresh for every
   ;; workspace so `agent-repl--ws-merged-p' always reads a
   ;; fresh `:branch-merged' value.  Gated on DO-GIT-P because the
@@ -1819,6 +1865,8 @@ recurses directly instead of via `run-at-time'."
 (defun agent-repl--update-all-workspace-states--finalize ()
   "Terminal step of the workspace-state update chain.
 Clears the in-flight flag so the next timer tick can run."
+  (agent-repl--log-verbose nil "update-all-workspace-states--finalize: previous=%S"
+                            agent-repl--update-in-flight)
   (setq agent-repl--update-in-flight nil))
 
 (defun agent-repl--update-all-workspace-states-now ()
@@ -1924,7 +1972,8 @@ the in-flight slot."
   ;; signature gate keeps the per-tick cost to in-memory reads + one
   ;; stat.
   (agent-repl--sidebar-tick)
-  (unless (agent-repl--update-in-flight-p)
+  (if (agent-repl--update-in-flight-p)
+      (agent-repl--log-verbose nil "update-all-workspace-states: skipped reason=in-flight")
     (agent-repl--update-all-workspace-states-now)))
 
 ;; Periodically update all workspace states (catches git changes, etc.)
@@ -1963,13 +2012,18 @@ dies the death event must still clear it — otherwise the tab spins
    ((or (eq (agent-repl--ws-repl-state ws) :merged)
         (eq (agent-repl--ws-repl-state ws) :merge-failed)
         (eq (agent-repl--ws-agent-state ws) :init))
+    (agent-repl--log-verbose ws
+                              "mark-dead: ws=%s skipped repl-state=%s agent-state=%s"
+                              ws (agent-repl--ws-repl-state ws) (agent-repl--ws-agent-state ws))
     nil)
    ((eq (agent-repl--ws-repl-state ws) :dead)
     (when (agent-repl--ws-agent-state ws)
       (agent-repl--log ws "mark-dead: ws=%s already :dead — clearing stale agent-state=%s"
                         ws (agent-repl--ws-agent-state ws))
       (agent-repl--ws-put ws :agent-state nil)
-      (force-mode-line-update t)))
+      (force-mode-line-update t))
+    (unless (agent-repl--ws-agent-state ws)
+      (agent-repl--log-verbose ws "mark-dead: ws=%s skipped already-dead-clean" ws)))
    (t
     (agent-repl--log ws "mark-dead: ws=%s agent-state=%s -> :dead"
                       ws (agent-repl--ws-agent-state ws))
@@ -1977,7 +2031,7 @@ dies the death event must still clear it — otherwise the tab spins
     (agent-repl--ws-put ws :agent-state nil)
     (force-mode-line-update t))))
 
-(defun agent-repl--status-react-to-pushed-death (ws new _previous)
+(defun agent-repl--status-react-to-pushed-death (ws new previous)
   "Mark WS dead when the daemon pushes a DEAD render state NEW.
 Subscriber for `agent-repl-ws-state-transition-functions' (frontend-state.el).
 
@@ -1989,9 +2043,13 @@ deleted `session_dead_' sentinel handler's SOLE effect was
 \(idempotent; respects the `:merged'/`:merge-failed' precedence and the
 `:init' grace), so a non-DEAD NEW is a no-op — this subscriber only
 forwards the DEAD case that used to arrive as a daemon-written sentinel."
-  (when (eq new :dead)
-    (agent-repl--log ws "status-react-to-pushed-death: ws=%s pushed :dead — marking dead" ws)
-    (agent-repl--mark-dead ws)))
+  (if (eq new :dead)
+      (progn
+        (agent-repl--log ws "status-react-to-pushed-death: ws=%s previous=%s next=%s action=mark-dead"
+                          ws previous new)
+        (agent-repl--mark-dead ws))
+    (agent-repl--log ws "status-react-to-pushed-death: ws=%s previous=%s next=%s action=ignored"
+                      ws previous new)))
 
 ;; Registered here (status.el owns `mark-dead') though the hook variable is
 ;; defined later in frontend-state.el: `add-hook' auto-vivifies the unbound
