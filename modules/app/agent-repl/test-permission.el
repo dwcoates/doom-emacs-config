@@ -228,6 +228,24 @@
       (should (= n 0))
       (should-not (agent-repl--ws-get "ws1" :permission-prompt-active)))))
 
+(ert-deftest agent-repl-test-permission-delta-logs-nonpermission-frame-verbosely ()
+  "A chatty frame with no permission item records only verbose frame telemetry."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let (ordinary verbose)
+      (cl-letf (((symbol-function 'agent-repl--log)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) ordinary)))
+                ((symbol-function 'agent-repl--log-verbose)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) verbose))))
+        ;; Act
+        (agent-repl--frontend-apply-conversation-delta
+         (list :workspace "ws1"
+               :items (list '(:uuid "m1" :assistantMessage (:content "private message")))))
+        ;; Assert
+        (should-not ordinary)
+        (should (seq-some (lambda (line) (string-match-p "item-count=1" line)) verbose))
+        (should-not (seq-some (lambda (line) (string-match-p "private message" line)) verbose))))))
+
 ;;;; ---- No-Silent-Fallbacks ---------------------------------------------
 
 (ert-deftest agent-repl-test-permission-missing-workspace-errors ()
@@ -243,8 +261,40 @@
   ;; Arrange / Act / Assert
   (should-error
    (agent-repl--frontend-apply-conversation-delta
-    (list :workspace "ws1"
-          :items (list (agent-repl-test--perm-item "r1" "Bash" "RESOLUTION_BOGUS"))))))
+   (list :workspace "ws1"
+         :items (list (agent-repl-test--perm-item "r1" "Bash" "RESOLUTION_BOGUS"))))))
+
+(ert-deftest agent-repl-test-permission-missing-workspace-log-excludes-tool-input ()
+  "The missing-workspace diagnostic retains the request id but not sensitive input."
+  ;; Arrange
+  (let (logs)
+    (cl-letf (((symbol-function 'agent-repl--log)
+               (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logs)))
+              ((symbol-function 'agent-repl--log-verbose) (lambda (&rest _) nil)))
+      ;; Act / Assert
+      (should-error
+       (agent-repl--frontend-apply-conversation-delta
+        (list :workspace ""
+              :items (list (agent-repl-test--perm-item
+                            "r1" "Bash" "RESOLUTION_PENDING" nil
+                            '(:command "TOP-SECRET-TOOL-INPUT"))))))
+      (should (seq-some (lambda (line) (string-match-p "request=r1 workspace=missing" line)) logs))
+      (should-not (seq-some (lambda (line) (string-match-p "TOP-SECRET-TOOL-INPUT" line)) logs)))))
+
+(ert-deftest agent-repl-test-permission-notify-failure-logs-and-does-not-record-prompt ()
+  "A notification failure is logged and leaves no unsurfaced active prompt."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let (logs)
+      (cl-letf (((symbol-function 'agent-repl--log)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logs)))
+                ((symbol-function 'agent-repl--notify)
+                 (lambda (&rest _) (error "desktop unavailable"))))
+        ;; Act / Assert
+        (should-error (agent-repl--permission-present "ws1" "r1" "Bash" '(:command "TOP-SECRET")))
+        (should-not (agent-repl--ws-get "ws1" :permission-prompt-active))
+        (should (seq-some (lambda (line) (string-match-p "request=r1 failed error-type=error" line)) logs))
+        (should-not (seq-some (lambda (line) (string-match-p "TOP-SECRET" line)) logs))))))
 
 ;;;; ---- answer round-trip -----------------------------------------------
 
@@ -319,6 +369,22 @@ name matches nothing and the answer is NACKed as \"no live session\"."
         (agent-repl--send-permission-answer "ws1" "r1" t)
         ;; Assert
         (should (equal key "/w"))))))
+
+(ert-deftest agent-repl-test-permission-answer-uds-failure-logs-without-payload-content ()
+  "A UDS send error logs request identity and error type, never edited input."
+  ;; Arrange
+  (agent-repl-test--with-answer-ws
+    (let (logs)
+      (cl-letf (((symbol-function 'agent-repl--log)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logs)))
+                ((symbol-function 'agent-repl--uds-send-command)
+                 (lambda (&rest _) (error "uds unavailable"))))
+        ;; Act / Assert
+        (should-error
+         (agent-repl--send-permission-answer "ws1" "r1" t
+                                             '(:command "TOP-SECRET-EDITED-INPUT")))
+        (should (seq-some (lambda (line) (string-match-p "request=r1 uds-send-failed error-type=error" line)) logs))
+        (should-not (seq-some (lambda (line) (string-match-p "TOP-SECRET-EDITED-INPUT" line)) logs))))))
 
 ;;;; ---- interactive answer command --------------------------------------
 

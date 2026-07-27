@@ -49,6 +49,7 @@
 (require 'subr-x)
 
 (declare-function agent-repl--log "core" (ws fmt &rest args))
+(declare-function agent-repl--log-verbose "core" (ws fmt &rest args))
 (declare-function agent-repl--ws-get "workspace" (ws key))
 (declare-function agent-repl--ws-put "workspace" (ws key val))
 (declare-function agent-repl--frontend-ws-name "frontend-state" (workspace))
@@ -94,15 +95,26 @@ workspace.  Returns the count of permission items handled."
   ;; `agent-repl--frontend-ws-name').
   (let* ((raw-workspace (plist-get delta :workspace))
          (workspace (or (agent-repl--frontend-ws-name raw-workspace) raw-workspace))
+         (items (plist-get delta :items))
          (handled 0))
-    (dolist (item (plist-get delta :items))
+    ;; Conversation deltas can arrive in rapid succession while a turn is
+    ;; streaming, so retain their frame-level trace only in verbose mode.
+    ;; Do not log ITEM: it can contain conversation and tool-argument data.
+    (agent-repl--log-verbose
+     workspace
+     "permission-delta: workspace-source=%s item-count=%d"
+     (if (equal workspace raw-workspace) "raw" "resolved")
+     (length items))
+    (dolist (item items)
       (when (agent-repl--permission-item-p item)
         (agent-repl--permission-handle-item workspace item)
         (cl-incf handled)))
-    (when (> handled 0)
-      (agent-repl--log workspace
-                       "frontend-apply-conversation-delta: ws=%s handled %d permission item(s)"
-                       workspace handled))
+    (if (> handled 0)
+        (agent-repl--log workspace
+                         "frontend-apply-conversation-delta: ws=%s handled %d permission item(s)"
+                         workspace handled)
+      (agent-repl--log-verbose workspace
+                               "permission-delta: no permission items handled"))
     handled))
 
 (defun agent-repl--permission-handle-item (workspace item)
@@ -112,9 +124,10 @@ ITEM is a `ConversationItem' plist whose `:permission' arm is a
 when WORKSPACE is missing/blank or the resolution is unknown/absent —
 never a defaulted value.  Returns the resolution keyword acted on."
   (when (or (null workspace) (and (stringp workspace) (string-empty-p workspace)))
+    ;; Never print ITEM: its request input may contain sensitive tool arguments.
     (agent-repl--log nil
-                     "permission-handle-item: MISSING workspace for item=%S — no fallback"
-                     item)
+                     "permission-handle-item: request=%s workspace=missing — no fallback"
+                     (plist-get item :uuid))
     (error "agent-repl permission: ConversationItem permission arm missing workspace"))
   (let* ((uuid (plist-get item :uuid))
          (perm (plist-get item :permission))
@@ -131,9 +144,9 @@ never a defaulted value.  Returns the resolution keyword acted on."
       (agent-repl--permission-clear workspace uuid resolution deny-message)
       (intern (concat ":" (downcase (or resolution "")))))
      (t
-      (agent-repl--log workspace
-                       "permission-handle-item: UNKNOWN resolution=%S uuid=%s ws=%s — no fallback"
-                       resolution uuid workspace)
+     (agent-repl--log workspace
+                       "permission-handle-item: request=%s resolution=%S unknown — no fallback"
+                       uuid resolution)
       (error "agent-repl permission: unknown resolution %S" resolution)))))
 
 ;;;; ---- Present / clear the prompt --------------------------------------
@@ -153,29 +166,42 @@ when it was already active."
     (if (and active (equal (plist-get active :request-id) uuid))
         (progn
           (agent-repl--log ws
-                           "permission-present: ws=%s uuid=%s already active — no re-notify"
-                           ws uuid)
+                           "permission-present: request=%s already-active=t — no re-notify"
+                           uuid)
           nil)
       (let ((prompt (list :request-id uuid :tool-name tool-name :input input)))
+        (agent-repl--log ws
+                         "permission-present: request=%s replaced-active=%s tool-present=%s — presenting + notifying"
+                         uuid (if active "t" "nil") (if tool-name "t" "nil"))
+        (agent-repl--permission-notify ws uuid tool-name)
+        ;; Notify before changing workspace state: a notification failure must
+        ;; abort presentation without leaving a prompt that cannot be surfaced.
         (agent-repl--ws-put ws :permission-prompt-active prompt)
-        (agent-repl--log ws "permission-present: ws=%s uuid=%s tool=%s — presenting + notifying"
-                         ws uuid (or tool-name "?"))
-        (agent-repl--permission-notify ws tool-name)
+        (agent-repl--log ws "permission-present: request=%s active-prompt-recorded=t" uuid)
         prompt))))
 
-(defun agent-repl--permission-notify (ws tool-name)
+(defun agent-repl--permission-notify (ws request-id tool-name)
   "Fire Emacs's own desktop notification that WS is awaiting a permission answer.
-TOOL-NAME names the requested tool.  Uses `agent-repl--notify' — the same
+REQUEST-ID identifies the permission lifecycle and TOOL-NAME names the requested tool.
+Uses `agent-repl--notify' — the same
 focus-gated desktop-notification mechanism the module already uses for the
 agent-finished banner — so no banner appears while the user is already
 looking at Emacs.  Replaces the notification the deleted `Notification'
 managed hook used to fire."
-  (agent-repl--notify ws "Agent REPL"
-                      (format "%s: permission requested%s"
-                              ws
-                              (if (and tool-name (not (string-empty-p tool-name)))
-                                  (format " — %s" tool-name)
-                                ""))))
+  (agent-repl--log ws "permission-notify: request=%s dispatching" request-id)
+  (condition-case err
+      (progn
+        (agent-repl--notify ws "Agent REPL"
+                            (format "%s: permission requested%s"
+                                    ws
+                                    (if (and tool-name (not (string-empty-p tool-name)))
+                                        (format " — %s" tool-name)
+                                      "")))
+        (agent-repl--log ws "permission-notify: request=%s dispatched" request-id))
+    (error
+     (agent-repl--log ws "permission-notify: request=%s failed error-type=%s"
+                      request-id (car err))
+     (signal (car err) (cdr err)))))
 
 (defun agent-repl--permission-clear (ws uuid resolution deny-message)
   "Clear WS's active permission prompt when its uuid matches UUID.
@@ -194,6 +220,9 @@ never an error.  Returns non-nil when a prompt was cleared."
           (when (and (equal resolution "RESOLUTION_DENIED")
                      (stringp deny-message)
                      (not (string-empty-p deny-message)))
+            (agent-repl--log ws
+                             "permission-clear: request=%s resolution=denied deny-message-present=t — echoing"
+                             uuid)
             (message "agent-repl: permission denied — %s" deny-message))
           t)
       (agent-repl--log ws
@@ -211,23 +240,43 @@ equals it, and a bare name matches nothing.
 ALLOW non-nil answers allow; nil answers deny.  UPDATED-INPUT, when
 non-nil, is an allow-with-edits Struct (a plist) sent as `updatedInput'.
 DENY-MESSAGE, when non-nil on a deny, travels as `denyMessage'.  A false
-`allow' is OMITTED from the frame rather than sent as JSON false, matching
+  `allow' is OMITTED from the frame rather than sent as JSON false, matching
 protojson's default-omission (the daemon reads an absent bool as deny).
 Tracks the command so a rejected ack surfaces loudly.  Returns the
 request id of the sent command."
-  (let* ((payload (append (list :permissionRequestId request-id)
-                          (when allow (list :allow t))
-                          (when updated-input (list :updatedInput updated-input))
-                          (when (and (not allow) deny-message
-                                     (not (string-empty-p deny-message)))
-                            (list :denyMessage deny-message))))
-         (req (agent-repl--uds-send-command
-               "permissionAnswer" payload
-               (agent-repl--frontend-ws-command-key ws))))
-    (agent-repl--uds-track-command req "permissionAnswer" ws)
-    (agent-repl--log ws "send-permission-answer: ws=%s request=%s allow=%s"
-                     ws request-id (if allow "yes" "no"))
-    req))
+  (let ((payload (append (list :permissionRequestId request-id)
+                         (when allow (list :allow t))
+                         (when updated-input (list :updatedInput updated-input))
+                         (when (and (not allow) deny-message
+                                    (not (string-empty-p deny-message)))
+                           (list :denyMessage deny-message)))))
+    ;; Payload values can contain edited tool input or a user-written denial;
+    ;; retain only their presence, never their contents.
+    (agent-repl--log ws
+                     "send-permission-answer: request=%s allow=%s updated-input-present=%s deny-message-present=%s dispatching"
+                     request-id (if allow "yes" "no")
+                     (if updated-input "t" "nil")
+                     (if (and (not allow) deny-message
+                              (not (string-empty-p deny-message))) "t" "nil"))
+    (let ((req (condition-case err
+                   (agent-repl--uds-send-command
+                    "permissionAnswer" payload
+                    (agent-repl--frontend-ws-command-key ws))
+                 (error
+                  (agent-repl--log ws
+                                   "send-permission-answer: request=%s uds-send-failed error-type=%s"
+                                   request-id (car err))
+                  (signal (car err) (cdr err))))))
+      (condition-case err
+          (agent-repl--uds-track-command req "permissionAnswer" ws)
+        (error
+         (agent-repl--log ws
+                          "send-permission-answer: request=%s uds-request=%s tracking-failed error-type=%s"
+                          request-id req (car err))
+         (signal (car err) (cdr err))))
+      (agent-repl--log ws "send-permission-answer: ws=%s request=%s uds-request=%s allow=%s"
+                       ws request-id req (if allow "yes" "no"))
+      req)))
 
 ;;;###autoload
 (defun agent-repl-answer-permission (&optional ws)
@@ -243,6 +292,7 @@ current workspace."
   (let* ((ws (or ws (agent-repl--ws-current-name)))
          (prompt (and ws (agent-repl--ws-get ws :permission-prompt-active))))
     (unless prompt
+      (agent-repl--log ws "answer-permission: active-prompt=missing — rejecting command")
       (user-error "agent-repl: no active permission prompt in workspace '%s'" ws))
     (let* ((request-id (plist-get prompt :request-id))
            (tool-name (plist-get prompt :tool-name))
@@ -251,6 +301,8 @@ current workspace."
            (deny-message (unless allow
                            (let ((m (read-string "Deny message (optional): ")))
                              (unless (string-empty-p m) m)))))
+      (agent-repl--log ws "answer-permission: request=%s allow=%s deny-message-present=%s"
+                       request-id (if allow "yes" "no") (if deny-message "t" "nil"))
       (agent-repl--send-permission-answer ws request-id allow nil deny-message)
       (message "agent-repl: %s permission for %s"
                (if allow "allowed" "denied") (or tool-name "tool")))))
