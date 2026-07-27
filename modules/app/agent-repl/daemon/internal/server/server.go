@@ -1146,11 +1146,12 @@ func (s *Server) CreateSession(_ context.Context, opts CreateOpts) (string, erro
 			return "", &ResumeTranscriptMissingError{ResumeID: opts.Resume, SearchedPaths: []string{path}}
 		}
 	}
-	// A transcript takes exactly one writer, and this create is the newest
-	// claim on it, so any older session still holding it stands down BEFORE a
-	// second CLI exists (see supersede.go). After the viability gate so a
-	// create about to be rejected never tears down a healthy session.
-	s.supersedeResumeConflicts(opts)
+	// A workspace takes exactly one live session and a transcript exactly one
+	// writer, and this create is the newest claim on both, so any older
+	// session still holding either stands down BEFORE a second CLI exists
+	// (see supersede.go). After the viability gate so a create about to be
+	// rejected never tears down a healthy session.
+	s.supersedeCreateConflicts(opts)
 	id := newSessionID()
 	// Register BEFORE bring-up: the driver's SessionLocator resolves a
 	// workspace to a session by reading the registry, so the record MUST exist
@@ -1214,8 +1215,15 @@ func (s *Server) DeleteSession(id string) error {
 				s.logf("session %s: delete shim stop (ws %s): %v (expected when no live shim, or another session drives it)", id, rec.CWD, err)
 			}
 		}
-		// Push the terminal SessionView so frontends reap the workspace binding
-		// (the orphan/reattach sweep re-keys on it) instead of polling.
+		// Push the terminal SessionView so frontends drop the workspace binding
+		// (the reattach sweep re-keys on it) instead of polling.
+		s.pushSessionView(id)
+	} else {
+		// Idempotent delete of an already-terminal record: re-push its
+		// terminal view instead of going silent. A frontend that asks for
+		// this delete believes the session is still live — its roster missed
+		// the earlier transition — and a silent no-op leaves it retrying the
+		// same delete forever (the observed 15s delete loop).
 		s.pushSessionView(id)
 	}
 	return nil
