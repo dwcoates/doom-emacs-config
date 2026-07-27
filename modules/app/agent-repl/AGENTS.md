@@ -18,23 +18,30 @@ report says what you rebuilt and what you restarted.
 A merged-but-undeployed fix looks exactly like a fix that does not work, except
 the correct code sitting in `git log` makes it harder to diagnose.
 
-There are two deploy paths, and the second is easy to forget because the first
-is automated.
+The two deploy paths have OPPOSITE bounce policies. Follow each as written
+rather than re-deciding per change.
 
-**1. `bin/build-frontend.sh` — shim, webapp bundle, daemon.** Build-if-stale, so
-it is cheap to run unconditionally:
+**1. `bin/build-frontend.sh` — shim, webapp bundle, daemon. ALWAYS bounce the
+daemon afterwards.** Build-if-stale, so it is cheap to run unconditionally:
 
 ```sh
 modules/app/agent-repl/bin/build-frontend.sh
 ```
 
-Rebuilding the daemon is not deploying it — bounce claude-repld afterwards per
-the top-level "Daemon bounce policy (claude-repld)" section (never mid-turn;
-prefer the Emacs restart path). The bounce also remounts webviews, which is how
-a webapp rebuild reaches the user.
+Then bounce claude-repld — every time, without asking and without weighing
+whether this particular change merits it. Rebuilding the binary is not deploying
+it, and the bounce is also what remounts webviews, which is how a webapp rebuild
+reaches the user. The top-level "Daemon bounce policy (claude-repld)" section
+governs HOW (never mid-turn; prefer the Emacs restart path) — never whether.
 
-**2. Hand-deployed launchd services — shim-store, shim-claude-sidecar.**
-`build-frontend.sh` does NOT touch these. They run out of
+**2. Hand-deployed launchd services — shim-store, shim-claude-sidecar. Leave
+these IN FLIGHT; bounce only when the user asks.** They carry the file plane for
+every live session, so restarting them is disruptive in a way a daemon bounce is
+not. After landing an important change to either, ASK the user whether to bounce
+— an unbounced service means they never see the change, so silence is not the
+safe option either.
+
+`build-frontend.sh` does NOT touch them. They run out of
 `~/.cache/agent-repl/bin/` under `com.agentrepl.shim-store` and
 `com.agentrepl.shim-claude-sidecar` (plists in `launchd/`), so changes under
 `agent-shim/shim-store/` or `agent-shim/claude/shim-sidecar/` deploy nothing
