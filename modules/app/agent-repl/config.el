@@ -352,6 +352,11 @@ returns the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; supersede the sentinel/hook-derived render-status inputs the cutover deletes.
 (agent-repl--load-module "frontend-uds")
 (agent-repl--load-module "frontend-state")
+;; WHY: services.el owns launchd lifecycle for shim-store/sidecar and the
+;; coordinated runtime bounce.  It needs the daemon/client plus the pushed
+;; state stores loaded so its preflight can reject every active turn before
+;; changing any process.
+(agent-repl--load-module "services")
 ;; WHY: permission.el registers the `conversationDelta' frame handler on the
 ;; transport (frontend-uds), so it must load after it; it drives the
 ;; permission UX (prompt bookkeeping + desktop notification + answer
