@@ -559,3 +559,64 @@ func TestPrepareFailsOnInvalidCheckpointState(t *testing.T) {
 		t.Fatalf("migration failure was not loud: %q", logged)
 	}
 }
+
+// --- the replay-floor mark ---------------------------------------------------
+//
+// NewestClearOrCompactSeq is the store seq of the newest clear or compaction on
+// a conversation. It rides the same durable paths LastSeq does, because it is
+// the same kind of fact and is lost for the same reason if it does not.
+
+func TestReplayFloorWritesThroughToTheConversationCheckpoint(t *testing.T) {
+	// Arrange.
+	path := testPath(t)
+	r := Open(path, discardLogf)
+	rec := Record{SessionID: "s_1", ConfigDir: "/cfg", CWD: "/w", ClaudeSessionID: "uuid-1"}
+	if err := r.Put(rec); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act: model the hot-path writer (the driver observing a clear).
+	found, err := r.Update(rec.SessionID, func(stored *Record) {
+		stored.NewestClearOrCompactSeq = 512
+	})
+	if err != nil || !found {
+		t.Fatalf("Update: found=%v err=%v", found, err)
+	}
+	reopened := Open(path, discardLogf)
+
+	// Assert: the checkpoint carries it, so a later session id for the same
+	// conversation still finds the floor.
+	cp, ok := reopened.Checkpoint(ConversationIdentity{
+		ConfigDir: "/cfg", CWD: "/w", ClaudeSessionID: "uuid-1",
+	})
+	if !ok || cp.NewestClearOrCompactSeq != 512 {
+		t.Fatalf("checkpoint = %+v ok=%v, want newest_clear_or_compact_seq=512", cp, ok)
+	}
+}
+
+func TestReplayFloorCheckpointKeepsTheHighestAcrossSessions(t *testing.T) {
+	// Arrange: two daemon sessions for ONE conversation, the older one holding
+	// the higher floor. Merging must not let the newer record's lower mark win,
+	// or the resync would replay history a clear already discarded.
+	path := testPath(t)
+	r := Open(path, discardLogf)
+	for _, rec := range []Record{
+		{SessionID: "s_old", ConfigDir: "/cfg", CWD: "/w", ClaudeSessionID: "uuid-1", NewestClearOrCompactSeq: 900},
+		{SessionID: "s_new", ConfigDir: "/cfg", CWD: "/w", ClaudeSessionID: "uuid-1", NewestClearOrCompactSeq: 10},
+	} {
+		if err := r.Put(rec); err != nil {
+			t.Fatalf("Put(%s): %v", rec.SessionID, err)
+		}
+	}
+
+	// Act.
+	reopened := Open(path, discardLogf)
+
+	// Assert.
+	cp, ok := reopened.Checkpoint(ConversationIdentity{
+		ConfigDir: "/cfg", CWD: "/w", ClaudeSessionID: "uuid-1",
+	})
+	if !ok || cp.NewestClearOrCompactSeq != 900 {
+		t.Fatalf("checkpoint = %+v ok=%v, want newest_clear_or_compact_seq=900", cp, ok)
+	}
+}
