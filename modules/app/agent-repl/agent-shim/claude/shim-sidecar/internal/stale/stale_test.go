@@ -101,6 +101,72 @@ func TestBootSweepLosesPreBootTasks(t *testing.T) {
 	}
 }
 
+func TestRestoreReplacesArtifactDerivedStateWithPersistedOpenTasks(t *testing.T) {
+	tr := New(Options{}, nil)
+	tr.Open("artifact-only", tail.KindAgentTranscript, "s1", "/old", 10, 10)
+	start := recoveredStart("s2", "persisted-open", corev1.TaskKind_TASK_KIND_WORKFLOW, 50_000, 55_000)
+
+	if err := tr.Restore([]*corev1.OpenTaskState{start}); err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	if tr.IsOpen("artifact-only") {
+		t.Fatal("Restore retained artifact-only task; store snapshot must replace tracker state")
+	}
+	if !tr.IsOpen("persisted-open") {
+		t.Fatal("Restore did not open persisted task")
+	}
+}
+
+func TestRestoreRejectsMalformedSnapshotWithoutMutatingTracker(t *testing.T) {
+	tr := New(Options{}, nil)
+	tr.Open("prior", tail.KindShellSpool, "s1", "", 10, 10)
+
+	err := tr.Restore([]*corev1.OpenTaskState{
+		recoveredStart("", "bad", corev1.TaskKind_TASK_KIND_SHELL, 50_000, 50_000),
+	})
+	if err == nil {
+		t.Fatal("Restore accepted TaskStarted with no session")
+	}
+	if !tr.IsOpen("prior") {
+		t.Fatal("failed Restore mutated prior tracker state")
+	}
+}
+
+func TestRestoreUsesPersistedLastActivityForSilence(t *testing.T) {
+	tr := New(Options{}, nil)
+	state := recoveredStart("s1", "b1", corev1.TaskKind_TASK_KIND_SHELL, 1, 25*min)
+	if err := tr.Restore([]*corev1.OpenTaskState{state}); err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	if evs := tr.Sweep(40 * min); len(evs) != 0 {
+		t.Fatalf("task LOST 15m after persisted activity: %+v", evs)
+	}
+}
+
+func TestLostCarriesStableSyntheticDedupIdentity(t *testing.T) {
+	tr := New(Options{Grace: time.Second}, nil)
+	tr.Open("b1", tail.KindShellSpool, "s1", "", 10, 10)
+	tr.MarkVanished("b1", 20)
+	evs := tr.Sweep(2_000)
+	onlyLost(t, evs)
+	if got := evs[0].GetDedupKey(); got != "task-lost:b1" {
+		t.Fatalf("LOST dedup_key = %q, want task-lost:b1", got)
+	}
+}
+
+func recoveredStart(session, taskID string, kind corev1.TaskKind, startedAt, lastActivityAt int64) *corev1.OpenTaskState {
+	return &corev1.OpenTaskState{
+		LastActivityAtMs: lastActivityAt,
+		Started: &corev1.Event{
+			SessionId: session, Seq: 1, ProducedAtMs: startedAt,
+			Plane: corev1.Plane_PLANE_FILE, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT,
+			Payload: &corev1.Event_TaskStarted{TaskStarted: &corev1.TaskStarted{
+				TaskId: taskID, Kind: kind, OutputPath: "/tmp/" + taskID,
+			}},
+		},
+	}
+}
+
 func TestCloseRemovesTaskFromSweep(t *testing.T) {
 	// Arrange: a task that reached a real terminal elsewhere.
 	tr := New(Options{Grace: time.Second}, nil)

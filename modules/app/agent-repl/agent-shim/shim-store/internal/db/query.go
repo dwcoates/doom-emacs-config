@@ -82,6 +82,64 @@ func (d *DB) EventsByTask(sessionID, taskID string) ([]*corev1.Event, error) {
 	return out, nil
 }
 
+// OpenTasks returns one persisted TaskStarted plus the latest persisted
+// task-scoped activity time for every (session_id, task_id) that has no
+// persisted TaskEnded. The store uses only indexed envelope columns to select
+// lifecycle state; payloads remain opaque except for unmarshalling the selected
+// start events back onto the wire.
+func (d *DB) OpenTasks() ([]*corev1.OpenTaskState, error) {
+	rows, err := d.sql.Query(`
+		SELECT started.payload, (
+		  SELECT active.produced_at
+		  FROM event active
+		  WHERE active.session_id = started.session_id
+		    AND active.task_id = started.task_id
+		  ORDER BY active.seq DESC
+		  LIMIT 1
+		)
+		FROM event started
+		WHERE started.kind = 'TaskStarted'
+		  AND started.task_id IS NOT NULL
+		  AND started.seq = (
+		    SELECT MIN(first_start.seq)
+		    FROM event first_start
+		    WHERE first_start.session_id = started.session_id
+		      AND first_start.task_id = started.task_id
+		      AND first_start.kind = 'TaskStarted'
+		  )
+		  AND NOT EXISTS (
+		    SELECT 1 FROM event ended
+		    WHERE ended.session_id = started.session_id
+		      AND ended.task_id = started.task_id
+		      AND ended.kind = 'TaskEnded'
+		  )
+		ORDER BY started.session_id, started.task_id`)
+	if err != nil {
+		return nil, fmt.Errorf("shim-store query: open tasks: %w", err)
+	}
+	defer rows.Close()
+	var out []*corev1.OpenTaskState
+	for rows.Next() {
+		var blob []byte
+		var lastActivityAtMs int64
+		if err := rows.Scan(&blob, &lastActivityAtMs); err != nil {
+			return nil, fmt.Errorf("shim-store query: scanning open task: %w", err)
+		}
+		ev := &corev1.Event{}
+		if err := proto.Unmarshal(blob, ev); err != nil {
+			return nil, fmt.Errorf("shim-store query: unmarshaling open task start: %w", err)
+		}
+		out = append(out, &corev1.OpenTaskState{
+			Started:          ev,
+			LastActivityAtMs: lastActivityAtMs,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("shim-store query: iterating open tasks: %w", err)
+	}
+	return out, nil
+}
+
 // Cursors returns all persisted file cursors for the sidecar's startup
 // recovery (§7.3). The sidecar resumes each file from its stored offset/carry.
 func (d *DB) Cursors() ([]*corev1.CursorState, error) {
