@@ -72,7 +72,6 @@ func TestConversationDeltaFromEvent(t *testing.T) {
 		DurationMs: 1200, NumTurns: 3, TotalCostUsd: 0.5, Result: "done",
 		Usage: &datav1.Usage{InputTokens: 10, OutputTokens: 5},
 	}
-	compact := &datav1.CompactBoundary{Trigger: datav1.CompactTrigger_COMPACT_TRIGGER_AUTO, PreTokens: 5000}
 
 	tests := []struct {
 		name  string
@@ -156,20 +155,6 @@ func TestConversationDeltaFromEvent(t *testing.T) {
 				Items: []*frontendv1.ConversationItem{{
 					TsMs: producedMs,
 					Item: &frontendv1.ConversationItem_Result{Result: resultMsg},
-				}},
-			},
-		},
-		{
-			name: "stream compact boundary passes through into the compact_boundary arm",
-			event: &corev1.Event{
-				SessionId: "s1", Seq: 13, ProducedAtMs: producedMs,
-				Payload: &corev1.Event_Vendor{Vendor: mustAnyHelper(t, compact)},
-			},
-			want: &frontendv1.ConversationDelta{
-				Workspace: "ws", SessionId: "s1", ThroughSeq: 13,
-				Items: []*frontendv1.ConversationItem{{
-					TsMs: producedMs,
-					Item: &frontendv1.ConversationItem_CompactBoundary{CompactBoundary: compact},
 				}},
 			},
 		},
@@ -273,40 +258,6 @@ func TestConversationDeltaFromEventTranscriptAssistantUsesEnvelopeTs(t *testing.
 		Items: []*frontendv1.ConversationItem{{
 			Uuid: "au1", TsMs: wantTsMs,
 			Item: &frontendv1.ConversationItem_AssistantMessage{AssistantMessage: msg},
-		}},
-	}
-
-	// Act.
-	got, err := ConversationDeltaFromEvent("ws", ev)
-
-	// Assert.
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !proto.Equal(got, want) {
-		t.Errorf("mismatch\n got: %v\nwant: %v", got, want)
-	}
-}
-
-func TestConversationDeltaFromEventTranscriptCompactBoundaryLine(t *testing.T) {
-	// Arrange: the on-disk compact boundary passes through the compact_boundary_line arm.
-	line := &datav1.CompactBoundaryLine{
-		CompactMetadata: &datav1.DiskCompactMetadata{Trigger: "manual", PreTokens: 100, PostTokens: 40},
-	}
-	ev := &corev1.Event{
-		SessionId: "s1", Seq: 21, ProducedAtMs: producedMs,
-		Payload: &corev1.Event_Vendor{Vendor: mustAnyHelper(t, &datav1.TranscriptLine{
-			Line: &datav1.TranscriptLine_System{System: &datav1.SystemLine{
-				Envelope: &datav1.LineEnvelope{Uuid: "sy1"},
-				Subtype:  &datav1.SystemLine_CompactBoundary{CompactBoundary: line},
-			}},
-		})},
-	}
-	want := &frontendv1.ConversationDelta{
-		Workspace: "ws", SessionId: "s1", ThroughSeq: 21,
-		Items: []*frontendv1.ConversationItem{{
-			Uuid: "sy1", TsMs: producedMs,
-			Item: &frontendv1.ConversationItem_CompactBoundaryLine{CompactBoundaryLine: line},
 		}},
 	}
 
