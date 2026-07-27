@@ -38,12 +38,17 @@ path.")
 Keywords drop their leading colon (`:thinking' → \"thinking\") so the
 JSON values are plain strings rather than `:thinking' literals that
 a jq consumer would have to know to strip."
-  (cond
-   ((null val) nil)
-   ((keywordp val) (substring (symbol-name val) 1))
-   ((symbolp val) (symbol-name val))
-   ((stringp val) val)
-   (t (format "%s" val))))
+  (let ((result
+         (cond
+          ((null val) nil)
+          ((keywordp val) (substring (symbol-name val) 1))
+          ((symbolp val) (symbol-name val))
+          ((stringp val) val)
+          (t (format "%s" val)))))
+    (agent-repl--log-verbose
+     nil "ws-keyword-to-string: input-type=%S input=%S output=%S"
+     (type-of val) val result)
+    result))
 
 (defun agent-repl--json-null-if-nil (val)
   "Return VAL, or `json-null' when VAL is nil.
@@ -52,7 +57,11 @@ serializes it to `{}'), which would mis-render absent optional fields
 like `priority' or `last_prompt_summary'.  Substituting the
 `json-null' sentinel routes those through `json-encode-keyword' so
 they emit as `null'."
-  (if (null val) json-null val))
+  (let ((result (if (null val) json-null val)))
+    (agent-repl--log-verbose
+     nil "json-null-if-nil: input-nil=%s output=%S"
+     (if (null val) "t" "nil") result)
+    result))
 
 (defun agent-repl--workspace-status-entry (ws)
   "Return an alist of JSON-serializable status fields for workspace WS.
@@ -72,6 +81,13 @@ serialize as JSON `null' instead of `{}'."
         (git      (agent-repl--ws-keyword-to-string
                    (agent-repl--ws-get ws :git-clean)))
         (acked    (if (agent-repl--ws-get ws :done-acked) t json-false)))
+    ;; A snapshot scans every live workspace on each write, so retain
+    ;; field-level evidence only while verbose logging is enabled.
+    (agent-repl--log-verbose
+     ws
+     "workspace-status-entry: ws=%s agent=%S repl=%S project-dir=%S source-ws-dir=%S priority=%S summary-present=%s git=%S done-acked=%s"
+     ws claude repl proj src priority (if summary "t" "nil") git
+     (if (eq acked t) "t" "nil"))
     `(("agent_state"         . ,(agent-repl--json-null-if-nil claude))
       ;; Legacy duplicate of agent_state from before the claude-repl ->
       ;; agent-repl rename: external consumers (workspace-status skills
@@ -94,10 +110,15 @@ they are filtered out of the JSON snapshot to (a) keep the on-disk
 file focused on live workspaces and (b) scale json-encode cost with
 the live roster rather than the total roster.  Profiling on a
 ~111-workspace registry showed ~95% of entries were merged."
-  (eq (agent-repl--ws-repl-state ws) :merged))
+  (let* ((repl-state (agent-repl--ws-repl-state ws))
+         (merged-p (eq repl-state :merged)))
+    (agent-repl--log-verbose
+     ws "workspace-status-merged-p: ws=%s repl-state=%S merged=%s"
+     ws repl-state (if merged-p "t" "nil"))
+    merged-p))
 
 (defun agent-repl--workspace-status-snapshot ()
-  "Return an alist describing every non-merged registered workspace's status.
+  "Return an alist describing every non-merged live workspace's status.
 Shape:
   ((\"updated_at\" . ISO-8601-STRING)
    (\"workspaces\" . ((WS-NAME . STATUS-ALIST) ...)))
@@ -105,22 +126,27 @@ Shape:
 shape `json-encode' recognizes) so an empty roster serializes as
 `{}' instead of `[]'.
 
-`:merged' workspaces are skipped — see
+Tombstoned workspaces are excluded by `agent-repl--live-ws-names';
+`:merged' live workspaces are skipped — see
 `agent-repl--workspace-status-merged-p'."
-  (let (entries)
-    (maphash (lambda (ws _plist)
-               (unless (agent-repl--workspace-status-merged-p ws)
-                 (push (cons ws (agent-repl--workspace-status-entry ws))
-                       entries)))
-             agent-repl--workspaces)
+  (let ((live-ws (agent-repl--live-ws-names))
+        (merged-count 0)
+        entries)
+    (dolist (ws live-ws)
+      (if (agent-repl--workspace-status-merged-p ws)
+          (progn
+            (cl-incf merged-count)
+            (agent-repl--log-verbose
+             ws "workspace-status-snapshot: ws=%s outcome=skipped-merged" ws))
+        (push (cons ws (agent-repl--workspace-status-entry ws)) entries)))
     ;; Sort by workspace name so the file is diff-stable across ticks
     ;; — easier to eyeball changes when tailing the file.
     (setq entries (sort entries (lambda (a b) (string< (car a) (car b)))))
+    (agent-repl--log-verbose
+     nil
+     "workspace-status-snapshot: live-count=%d included-count=%d merged-skipped=%d"
+     (length live-ws) (length entries) merged-count)
     `(("updated_at" . ,(format-time-string "%FT%T%z"))
-      ;; Empty alist must be a non-nil singleton so json-encode emits
-      ;; `{}' rather than `null'.  When entries is nil we substitute
-      ;; an alist with a no-op marker that json.el ignores; the
-      ;; simpler fix is to emit a hash table for the workspaces map.
       ("workspaces" . ,(agent-repl--alist->json-object entries)))))
 
 (defun agent-repl--alist->json-object (entries)
@@ -130,6 +156,9 @@ when ENTRIES is empty — an empty hash table always serializes to `{}'."
   (let ((h (make-hash-table :test 'equal)))
     (dolist (e entries)
       (puthash (car e) (cdr e) h))
+    (agent-repl--log-verbose
+     nil "alist->json-object: entry-count=%d output-count=%d"
+     (length entries) (hash-table-count h))
     h))
 
 (defun agent-repl--snapshot->json-serializable (snapshot)
@@ -145,7 +174,8 @@ The projection is shallow-recursive: the top-level alist becomes a
 hash table; the `workspaces' value is already a hash table whose
 values are per-workspace string-keyed alists, so each of those is
 projected into its own hash table too."
-  (let ((top (make-hash-table :test 'equal)))
+  (let ((top (make-hash-table :test 'equal))
+        (workspace-count 0))
     (dolist (pair snapshot)
       (let ((k (car pair)) (v (cdr pair)))
         (puthash k
@@ -158,11 +188,15 @@ projected into its own hash table too."
                                 (let ((entry-hash (make-hash-table :test 'equal)))
                                   (dolist (p entry-alist)
                                     (puthash (car p) (cdr p) entry-hash))
+                                  (cl-incf workspace-count)
                                   (puthash ws entry-hash out)))
                               v)
                      out))
                   (t v))
                  top)))
+    (agent-repl--log-verbose
+     nil "snapshot->json-serializable: top-field-count=%d workspace-count=%d"
+     (hash-table-count top) workspace-count)
     top))
 
 (defun agent-repl--write-workspace-status ()
@@ -185,13 +219,20 @@ Profiling on a ~111-workspace registry showed `json-encode' (with
 per profile window to produce a ~43 KB file; that GC was the proximate
 cause of the visible periodic hang.  `json-serialize' is a C builtin
 that emits compact JSON with dramatically lower allocation."
-  (agent-repl--with-error-logging "write-workspace-status"
+  (agent-repl--with-error-logging
+      (format "write-workspace-status file=%s" agent-repl-workspace-status-file)
     (let* ((json-null :null)
            (snapshot (agent-repl--workspace-status-snapshot))
            (file agent-repl-workspace-status-file)
            (dir  (file-name-directory file)))
       (when (and dir (not (file-directory-p dir)))
+        (agent-repl--log
+         nil "write-workspace-status: outcome=create-parent-directory file=%s dir=%s"
+         file dir)
         (make-directory dir t))
+      (when (and dir (file-directory-p dir))
+        (agent-repl--log-verbose
+         nil "write-workspace-status: parent-directory-ready file=%s dir=%s" file dir))
       ;; Force utf-8-unix on the write.  On Emacs 30, `with-temp-file' without an
       ;; explicit coding system can land in `select-safe-coding-system' when the
       ;; serialized JSON contains characters whose default encoding is ambiguous
@@ -200,13 +241,24 @@ that emits compact JSON with dramatically lower allocation."
       ;; especially bad here because this writer fires from a 1-Hz timer, so the
       ;; prompt instantly re-pops the moment focus shifts away.  utf-8-unix is
       ;; the only encoding that round-trips json-serialize's output, so pin it.
-      (let ((coding-system-for-write 'utf-8-unix))
+      (let* ((json (json-serialize
+                    (agent-repl--snapshot->json-serializable snapshot)
+                    :null-object :null
+                    :false-object :json-false))
+             (workspace-count
+              (hash-table-count (cdr (assoc "workspaces" snapshot))))
+             (coding-system-for-write 'utf-8-unix))
+        (agent-repl--log-verbose
+         nil
+         "write-workspace-status: outcome=serialized file=%s workspace-count=%d byte-count=%d coding=%S"
+         file workspace-count (string-bytes json) coding-system-for-write)
         (with-temp-file file
-          (insert (json-serialize
-                   (agent-repl--snapshot->json-serializable snapshot)
-                   :null-object :null
-                   :false-object :json-false))
-          (insert "\n"))))))
+          (insert json)
+          (insert "\n"))
+        (agent-repl--log-verbose
+         nil
+         "write-workspace-status: outcome=wrote file=%s workspace-count=%d byte-count=%d"
+         file workspace-count (1+ (string-bytes json)))))))
 
 ;;;; Staggered write scheduler --------------------------------------------------
 
@@ -234,26 +286,38 @@ Re-cancelled and re-populated each window by
 ;; (e.g. via `doom/reload') would leak the previous window's sub-timers
 ;; — they outlive `agent-repl--cancel-all-timers' because they are not
 ;; registered in `agent-repl--timers'.
-(dolist (agent-repl--ws-status-write-stale-timer
-         agent-repl--workspace-status-write-sub-timers)
+(let ((stale-count (length agent-repl--workspace-status-write-sub-timers))
+      (cancelled-count 0))
+  (dolist (agent-repl--ws-status-write-stale-timer
+           agent-repl--workspace-status-write-sub-timers)
   (when (timerp agent-repl--ws-status-write-stale-timer)
-    (cancel-timer agent-repl--ws-status-write-stale-timer)))
+      (cancel-timer agent-repl--ws-status-write-stale-timer)
+      (cl-incf cancelled-count)))
+  (agent-repl--log
+   nil
+   "workspace-status-export reload: stale-timer-count=%d cancelled-count=%d"
+   stale-count cancelled-count))
 (setq agent-repl--workspace-status-write-sub-timers nil)
 
 (defun agent-repl--workspace-status-live-count ()
-  "Return the number of registered workspaces that are NOT `:merged'.
+  "Return the number of live workspaces that are NOT `:merged'.
 Mirrors the filter in `agent-repl--workspace-status-snapshot' so the
 staggered scheduler's N tracks the live roster rather than the total
 roster.  Without this, a long-running session that accumulates 100+
 merged workspaces would still schedule 100+ writes per window even
 though each write only encodes the ~5 live entries."
   (if (boundp 'agent-repl--workspaces)
-      (let ((n 0))
-        (maphash (lambda (ws _plist)
-                   (unless (agent-repl--workspace-status-merged-p ws)
-                     (cl-incf n)))
-                 agent-repl--workspaces)
+      (let ((live-ws (agent-repl--live-ws-names))
+            (n 0))
+        (dolist (ws live-ws)
+          (unless (agent-repl--workspace-status-merged-p ws)
+            (cl-incf n)))
+        (agent-repl--log-verbose
+         nil "workspace-status-live-count: live-count=%d non-merged-count=%d"
+         (length live-ws) n)
         n)
+    (agent-repl--log
+     nil "workspace-status-live-count: --workspaces-bound=nil outcome=zero")
     0))
 
 (defun agent-repl--reschedule-workspace-status-writes ()
@@ -266,23 +330,44 @@ the window rather than spiking at the 1-Hz state-poll cadence.
 
 When no live workspaces are registered, no writes are scheduled; the
 next window will pick up any newly-registered workspaces."
-  (dolist (timer agent-repl--workspace-status-write-sub-timers)
-    (when (timerp timer) (cancel-timer timer)))
+  (let ((prior-count (length agent-repl--workspace-status-write-sub-timers))
+        (cancelled-count 0))
+    (dolist (timer agent-repl--workspace-status-write-sub-timers)
+      (when (timerp timer)
+        (cancel-timer timer)
+        (cl-incf cancelled-count)))
+    (agent-repl--log-verbose
+     nil
+     "reschedule-workspace-status-writes: prior-timer-count=%d cancelled-count=%d"
+     prior-count cancelled-count))
   (setq agent-repl--workspace-status-write-sub-timers nil)
   (let ((n (agent-repl--workspace-status-live-count)))
-    (when (> n 0)
-      (let ((interval (/ (float agent-repl-workspace-status-write-window-seconds)
-                         n)))
+    (if (> n 0)
+        (let ((interval (/ (float agent-repl-workspace-status-write-window-seconds)
+                           n)))
+          (agent-repl--log
+           nil
+           "reschedule-workspace-status-writes: outcome=scheduled live-count=%d window-seconds=%s interval-seconds=%s"
+           n agent-repl-workspace-status-write-window-seconds interval)
         (dotimes (i n)
           (push (run-at-time (* i interval) nil
                              #'agent-repl--write-workspace-status)
-                agent-repl--workspace-status-write-sub-timers))))))
+                agent-repl--workspace-status-write-sub-timers)))
+      (agent-repl--log
+       nil
+       "reschedule-workspace-status-writes: outcome=not-scheduled live-count=0 window-seconds=%s"
+       agent-repl-workspace-status-write-window-seconds))))
 
 ;; Outer scheduler: fire immediately on load so a fresh status file is
 ;; produced without waiting a full window, then re-plan every window.
 (push (run-with-timer 0 agent-repl-workspace-status-write-window-seconds
                       #'agent-repl--reschedule-workspace-status-writes)
       agent-repl--timers)
+(agent-repl--log
+ nil
+ "workspace-status-export scheduler: outcome=started window-seconds=%s timer-count=%d"
+ agent-repl-workspace-status-write-window-seconds
+ (length agent-repl--timers))
 
 (provide 'agent-repl-workspace-status-export)
 ;;; workspace-status-export.el ends here
