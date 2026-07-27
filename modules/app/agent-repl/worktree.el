@@ -5399,7 +5399,7 @@ Prompts for which workspace to merge in."
     (let* ((default-ws (cl-find-if
                         (lambda (ws)
                           (and (member ws other-ws)
-                               (gethash ws agent-repl--workspaces)))
+                               (agent-repl--ws-known-p ws)))
                         agent-repl--workspace-history))
            (target-ws (completing-read
                        (if default-ws
@@ -5407,6 +5407,10 @@ Prompts for which workspace to merge in."
                                    default-ws)
                          "Merge workspace into current: ")
                        other-ws nil t nil nil default-ws)))
+      (agent-repl--log current-ws
+                        "workspace-merge: candidates=%S history=%S default=%s selected=%s"
+                        other-ws agent-repl--workspace-history
+                        (or default-ws "nil") target-ws)
       (agent-repl--workspace-merge-do target-ws))))
 
 (defun agent-repl--ws-merge-parent-dir (ws)
@@ -6246,18 +6250,22 @@ canonical paths are unique per LIVE workspace by construction.
 Skips tombstoned entries (`:nuked-at' set) so a previously-nuked
 workspace's preserved `:project-dir' cannot shadow a live workspace
 that subsequently registers at the same canonical path."
-  (when dir
-    (let ((canon (agent-repl--path-canonical dir))
-          (result nil))
-      (maphash (lambda (ws plist)
-                 (unless result
-                   (let ((wd (plist-get plist :project-dir)))
-                     (when (and wd
-                                (null (plist-get plist :nuked-at))
-                                (string= (agent-repl--path-canonical wd)
-                                         canon))
-                       (setq result ws)))))
-               agent-repl--workspaces)
+  (if (not dir)
+      (progn
+        (agent-repl--log nil "ws-name-for-dir: dir=nil result=nil")
+        nil)
+    (let* ((canon (agent-repl--path-canonical dir))
+           (live-names (agent-repl--live-ws-names))
+           (result
+            (cl-find-if
+             (lambda (ws)
+               (let ((wd (agent-repl--ws-get ws :project-dir)))
+                 (and wd
+                      (string= (agent-repl--path-canonical wd) canon))))
+             live-names)))
+      (agent-repl--log result
+                        "ws-name-for-dir: dir=%s canonical=%s live-count=%d result=%s"
+                        dir canon (length live-names) (or result "nil"))
       result)))
 
 (defun agent-repl--record-merged-in-workspace (target-dir merged-ws)

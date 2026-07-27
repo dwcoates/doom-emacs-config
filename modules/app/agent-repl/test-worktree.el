@@ -3474,58 +3474,67 @@ completes immediately with the real exit status instead of blocking
 until the timeout.  Guards the sentinel-install race: the status-change
 notification was already consumed, so the sentinel never fires and the
 post-install status sample is the only completion path."
-  (let ((proc (start-process "test-already-exited" nil "sh" "-c" "exit 7")))
-    (while (process-live-p proc)
-      (accept-process-output proc 0.05))
-    ;; Drain any pending status-change so the default sentinel consumes it.
-    (accept-process-output nil 0.05)
-    (cl-letf (((symbol-function 'condition-wait)
+  (let ((proc 'fake-exited-process))
+    (cl-letf (((symbol-function 'set-process-sentinel) (lambda (&rest _) nil))
+              ((symbol-function 'process-name) (lambda (_p) "fake-exited"))
+              ((symbol-function 'process-status) (lambda (_p) 'exit))
+              ((symbol-function 'process-exit-status) (lambda (_p) 7))
+              ((symbol-function 'condition-wait)
                (lambda (&rest _) (error "condition-wait must not be reached"))))
       (should (= 7 (agent-repl--wait-for-process-exit--worker proc 5 nil nil))))))
 
 (ert-deftest agent-repl-test-wait-for-process-exit-worker-already-exited-skips-timeout-timer ()
   "When the post-install status sample finds the process already dead,
 no timeout timer is scheduled — there is nothing left to deadline."
-  (let ((proc (start-process "test-already-exited-timer" nil "true"))
+  (let ((proc 'fake-exited-process)
         (timer-created nil))
-    (while (process-live-p proc)
-      (accept-process-output proc 0.05))
-    (accept-process-output nil 0.05)
-    (cl-letf (((symbol-function 'run-at-time)
+    (cl-letf (((symbol-function 'set-process-sentinel) (lambda (&rest _) nil))
+              ((symbol-function 'process-name) (lambda (_p) "fake-exited"))
+              ((symbol-function 'process-status) (lambda (_p) 'exit))
+              ((symbol-function 'process-exit-status) (lambda (_p) 0))
+              ((symbol-function 'run-at-time)
                (lambda (&rest _) (setq timer-created t) nil))
               ((symbol-function 'condition-wait)
                (lambda (&rest _) nil)))
       (agent-repl--wait-for-process-exit--worker proc 5 nil nil))
     (should-not timer-created)))
 
+(defmacro agent-repl-test--with-completed-spawn (start-function &rest body)
+  "Run BODY with START-FUNCTION as a pure in-memory completed process spawn.
+The real process boundary is never invoked.  The shared wait helper
+returns exit status zero immediately, and query-on-exit bookkeeping is
+stubbed because the fake process value is intentionally not an Emacs
+process object."
+  (declare (indent 1) (debug (form body)))
+  `(cl-letf (((symbol-function 'start-process) ,start-function)
+             ((symbol-function 'set-process-query-on-exit-flag)
+              (lambda (&rest _) nil))
+             ((symbol-function 'agent-repl--wait-for-process-exit)
+              (lambda (&rest _) 0)))
+     ,@body))
+
 (ert-deftest agent-repl-test-spawn-and-wait-kills-buffer-when-keep-buffer-nil ()
   "Default behavior of `agent-repl--spawn-and-wait' is to kill OUT-BUF
 after extracting + logging output.  Callers (e.g. verify) rely on this
 to avoid leaking temp buffers."
-  (let* ((out-buf (generate-new-buffer " *test-spawn-and-wait-kill*"))
-         (real-start (symbol-function 'start-process)))
-    (cl-letf (((symbol-function 'start-process)
-               (lambda (_name _buf &rest _cmd)
-                 (funcall real-start "stub"
-                          (generate-new-buffer " *stub*") "true")))
-              ((symbol-function 'agent-repl--log) (lambda (&rest _) nil)))
-      (agent-repl--spawn-and-wait
-       '("true") out-buf
-       :process-name "test" :timeout 5
-       :log-tag "test" :log-ws nil)
-      (should-not (buffer-live-p out-buf)))))
+  (let ((out-buf (generate-new-buffer " *test-spawn-and-wait-kill*")))
+    (agent-repl-test--with-completed-spawn
+        (lambda (&rest _) 'fake-process)
+      (cl-letf (((symbol-function 'agent-repl--log) (lambda (&rest _) nil)))
+        (agent-repl--spawn-and-wait
+         '("true") out-buf
+         :process-name "test" :timeout 5
+         :log-tag "test" :log-ws nil)
+        (should-not (buffer-live-p out-buf))))))
 
 (ert-deftest agent-repl-test-spawn-and-wait-preserves-buffer-when-keep-buffer-t ()
   "When :KEEP-BUFFER is non-nil, `agent-repl--spawn-and-wait' leaves
 OUT-BUF alive after return so callers can use it for live inspection
 (the merge resolver side-buffer case)."
-  (let* ((out-buf (generate-new-buffer " *test-spawn-and-wait-keep*"))
-         (real-start (symbol-function 'start-process)))
-    (cl-letf (((symbol-function 'start-process)
-               (lambda (_name _buf &rest _cmd)
-                 (funcall real-start "stub"
-                          (generate-new-buffer " *stub*") "true")))
-              ((symbol-function 'agent-repl--log) (lambda (&rest _) nil)))
+  (let ((out-buf (generate-new-buffer " *test-spawn-and-wait-keep*")))
+    (agent-repl-test--with-completed-spawn
+        (lambda (&rest _) 'fake-process)
+      (cl-letf (((symbol-function 'agent-repl--log) (lambda (&rest _) nil)))
       (unwind-protect
           (progn
             (agent-repl--spawn-and-wait
@@ -3534,27 +3543,24 @@ OUT-BUF alive after return so callers can use it for live inspection
              :log-tag "test" :log-ws nil
              :keep-buffer t)
             (should (buffer-live-p out-buf)))
-        (when (buffer-live-p out-buf) (kill-buffer out-buf))))))
+          (when (buffer-live-p out-buf) (kill-buffer out-buf)))))))
 
 (ert-deftest agent-repl-test-spawn-and-wait-calls-on-completed-callback ()
   "When :ON-COMPLETED is supplied, `agent-repl--spawn-and-wait' invokes
 it with (status output) AFTER the exit log line BEFORE buffer cleanup.
 Used by the merge resolver to annotate the side buffer with the final
 `# exit:' marker."
-  (let* ((out-buf (generate-new-buffer " *test-spawn-and-wait-cb*"))
-         (real-start (symbol-function 'start-process))
-         (captured nil))
-    (cl-letf (((symbol-function 'start-process)
-               (lambda (_name _buf &rest _cmd)
-                 (funcall real-start "stub"
-                          (generate-new-buffer " *stub*") "true")))
-              ((symbol-function 'agent-repl--log) (lambda (&rest _) nil)))
-      (agent-repl--spawn-and-wait
-       '("true") out-buf
-       :process-name "test" :timeout 5
-       :log-tag "test" :log-ws nil
-       :on-completed (lambda (status output)
-                       (setq captured (list status output)))))
+  (let ((out-buf (generate-new-buffer " *test-spawn-and-wait-cb*"))
+        (captured nil))
+    (agent-repl-test--with-completed-spawn
+        (lambda (&rest _) 'fake-process)
+      (cl-letf (((symbol-function 'agent-repl--log) (lambda (&rest _) nil)))
+        (agent-repl--spawn-and-wait
+         '("true") out-buf
+         :process-name "test" :timeout 5
+         :log-tag "test" :log-ws nil
+         :on-completed (lambda (status output)
+                         (setq captured (list status output))))))
     (should (numberp (car captured)))
     (should (eql (car captured) 0))
     ;; Output captured pre-cleanup; not asserting exact content because
@@ -3574,16 +3580,11 @@ resolver cannot stall on a permission prompt even when
   "`--invoke-auto-resolve-agent' includes the configured extra-args
 (including `--dangerously-skip-permissions') in the spawned command,
 after the base `-p --model MODEL' args."
-  (let* ((captured-cmd nil)
-         (real-start (symbol-function 'start-process)))
-    (cl-letf (((symbol-function 'start-process)
-               (lambda (_name _buf &rest cmd)
-                 (setq captured-cmd cmd)
-                 ;; Run a trivially-succeeding process so the live-p
-                 ;; poll loop terminates immediately without spawning
-                 ;; the real `claude' binary.
-                 (funcall real-start "agent-auto-resolve-stub"
-                          (generate-new-buffer " *stub*") "true"))))
+  (let ((captured-cmd nil))
+    (agent-repl-test--with-completed-spawn
+        (lambda (_name _buf &rest cmd)
+          (setq captured-cmd cmd)
+          'fake-process)
       (agent-repl--invoke-auto-resolve-agent "/tmp" "prompt"))
     (should (member "--dangerously-skip-permissions" captured-cmd))
     (should (equal (cl-subseq captured-cmd 0 4)
@@ -3595,13 +3596,11 @@ after the base `-p --model MODEL' args."
   "`--invoke-auto-resolve-agent' passes PROMPT as the final positional
 argument to `claude -p' (that is how the non-interactive API consumes
 the prompt — NOT via stdin)."
-  (let* ((captured-cmd nil)
-         (real-start (symbol-function 'start-process)))
-    (cl-letf (((symbol-function 'start-process)
-               (lambda (_name _buf &rest cmd)
-                 (setq captured-cmd cmd)
-                 (funcall real-start "agent-auto-resolve-stub"
-                          (generate-new-buffer " *stub*") "true"))))
+  (let ((captured-cmd nil))
+    (agent-repl-test--with-completed-spawn
+        (lambda (_name _buf &rest cmd)
+          (setq captured-cmd cmd)
+          'fake-process)
       (agent-repl--invoke-auto-resolve-agent "/tmp" "RESOLVE THIS"))
     (should (equal (car (last captured-cmd)) "RESOLVE THIS"))))
 
@@ -3611,13 +3610,11 @@ the prompt — NOT via stdin)."
 swallow the prompt as another tool name.  Without `--', claude exits
 1 with `Input must be provided either through stdin or as a prompt
 argument when using --print' and the resolver always fails."
-  (let* ((captured-cmd nil)
-         (real-start (symbol-function 'start-process)))
-    (cl-letf (((symbol-function 'start-process)
-               (lambda (_name _buf &rest cmd)
-                 (setq captured-cmd cmd)
-                 (funcall real-start "stub"
-                          (generate-new-buffer " *stub*") "true"))))
+  (let ((captured-cmd nil))
+    (agent-repl-test--with-completed-spawn
+        (lambda (_name _buf &rest cmd)
+          (setq captured-cmd cmd)
+          'fake-process)
       (agent-repl--invoke-auto-resolve-agent "/tmp" "MY PROMPT"))
     (let ((tail (last captured-cmd 2)))
       (should (equal (car tail) "--"))
@@ -3629,18 +3626,16 @@ into the logfile via `agent-repl--log'.  Without this the resolver's
 response only lives in a dedicated Emacs buffer — ungreppable, lost on
 session restart — and a post-mortem requires the user to know the
 buffer name."
-  (let* ((logged nil)
-         (real-start (symbol-function 'start-process)))
-    (cl-letf (((symbol-function 'start-process)
-               (lambda (_name buf &rest _cmd)
-                 (with-current-buffer buf
-                   (insert "RESOLVER STDOUT\n"))
-                 (funcall real-start "stub"
-                          (generate-new-buffer " *stub*") "true")))
-              ((symbol-function 'agent-repl--log)
-               (lambda (_ws fmt &rest args)
-                 (push (apply #'format fmt args) logged))))
-      (agent-repl--invoke-auto-resolve-agent "/tmp" "prompt" "ws1"))
+  (let ((logged nil))
+    (agent-repl-test--with-completed-spawn
+        (lambda (_name buf &rest _cmd)
+          (with-current-buffer buf
+            (insert "RESOLVER STDOUT\n"))
+          'fake-process)
+      (cl-letf (((symbol-function 'agent-repl--log)
+                 (lambda (_ws fmt &rest args)
+                   (push (apply #'format fmt args) logged))))
+        (agent-repl--invoke-auto-resolve-agent "/tmp" "prompt" "ws1")))
     (should (cl-some (lambda (l) (string-match-p "RESOLVER STDOUT" l)) logged))
     (should (cl-some (lambda (l)
                        (string-match-p "auto-resolve: exited status=" l))
@@ -3651,18 +3646,16 @@ buffer name."
 header block we insert into the side buffer at the top.  Only the
 resolver's actual stdout/stderr should appear in the log — leaking our
 own header is just noise that obscures the real response."
-  (let* ((logged nil)
-         (real-start (symbol-function 'start-process)))
-    (cl-letf (((symbol-function 'start-process)
-               (lambda (_name buf &rest _cmd)
-                 (with-current-buffer buf
-                   (insert "ACTUAL RESOLVER OUTPUT\n"))
-                 (funcall real-start "stub"
-                          (generate-new-buffer " *stub*") "true")))
-              ((symbol-function 'agent-repl--log)
-               (lambda (_ws fmt &rest args)
-                 (push (apply #'format fmt args) logged))))
-      (agent-repl--invoke-auto-resolve-agent "/tmp" "prompt" "ws1"))
+  (let ((logged nil))
+    (agent-repl-test--with-completed-spawn
+        (lambda (_name buf &rest _cmd)
+          (with-current-buffer buf
+            (insert "ACTUAL RESOLVER OUTPUT\n"))
+          'fake-process)
+      (cl-letf (((symbol-function 'agent-repl--log)
+                 (lambda (_ws fmt &rest args)
+                   (push (apply #'format fmt args) logged))))
+        (agent-repl--invoke-auto-resolve-agent "/tmp" "prompt" "ws1")))
     (let ((output-log (cl-find-if
                        (lambda (l) (string-match-p "output follows" l))
                        logged)))
@@ -3676,18 +3669,15 @@ own header is just noise that obscures the real response."
   "Resolver-output log entries carry TARGET-WS as the workspace tag, so
 the standard `{ws=... id=...}` metadata block disambiguates resolver
 runs across concurrent merges."
-  (let* ((logged-ws nil)
-         (real-start (symbol-function 'start-process)))
-    (cl-letf (((symbol-function 'start-process)
-               (lambda (_name _buf &rest _cmd)
-                 (funcall real-start "stub"
-                          (generate-new-buffer " *stub*") "true")))
-              ((symbol-function 'agent-repl--log)
-               (lambda (ws fmt &rest args)
-                 (when (string-match-p "exited status="
-                                       (apply #'format fmt args))
-                   (push ws logged-ws)))))
-      (agent-repl--invoke-auto-resolve-agent "/tmp" "prompt" "my-ws"))
+  (let ((logged-ws nil))
+    (agent-repl-test--with-completed-spawn
+        (lambda (&rest _) 'fake-process)
+      (cl-letf (((symbol-function 'agent-repl--log)
+                 (lambda (ws fmt &rest args)
+                   (when (string-match-p "exited status="
+                                         (apply #'format fmt args))
+                     (push ws logged-ws)))))
+        (agent-repl--invoke-auto-resolve-agent "/tmp" "prompt" "my-ws")))
     (should (member "my-ws" logged-ws))))
 
 (ert-deftest agent-repl-test-invoke-auto-resolve-verify-logs-output ()
@@ -3695,18 +3685,16 @@ runs across concurrent merges."
 stdout/stderr into the logfile before the temp buffer is killed, so a
 non-zero exit (which blocks the merge) can be diagnosed from the
 logfile alone — the temp buffer is gone by the time anyone looks."
-  (let* ((logged nil)
-         (real-start (symbol-function 'start-process)))
-    (cl-letf (((symbol-function 'start-process)
-               (lambda (_name buf &rest _cmd)
-                 (with-current-buffer buf
-                   (insert "VERIFY OUTPUT\n"))
-                 (funcall real-start "stub"
-                          (generate-new-buffer " *stub*") "true")))
-              ((symbol-function 'agent-repl--log)
-               (lambda (_ws fmt &rest args)
-                 (push (apply #'format fmt args) logged))))
-      (agent-repl--invoke-auto-resolve-verify "/tmp" (list "true")))
+  (let ((logged nil))
+    (agent-repl-test--with-completed-spawn
+        (lambda (_name buf &rest _cmd)
+          (with-current-buffer buf
+            (insert "VERIFY OUTPUT\n"))
+          'fake-process)
+      (cl-letf (((symbol-function 'agent-repl--log)
+                 (lambda (_ws fmt &rest args)
+                   (push (apply #'format fmt args) logged))))
+        (agent-repl--invoke-auto-resolve-verify "/tmp" (list "true"))))
     (should (cl-some (lambda (l) (string-match-p "VERIFY OUTPUT" l)) logged))
     (should (cl-some (lambda (l)
                        (string-match-p "auto-resolve-verify: exited status=" l))
@@ -6216,17 +6204,19 @@ from `default-directory' via `agent-repl--git-root'."
         (progn
           (with-current-buffer proc-buf
             (insert "  git output here  "))
-          (let ((proc (start-process "test-sentinel" proc-buf "true")))
-            ;; Prevent default sentinel from inserting status text into buffer
-            (set-process-sentinel proc #'ignore)
-            ;; Wait for process to finish
-            (while (process-live-p proc)
-              (accept-process-output proc 0.1))
-            (process-put proc 'agent-repl-callback
+          (cl-letf (((symbol-function 'process-status) (lambda (_p) 'exit))
+                    ((symbol-function 'process-exit-status) (lambda (_p) 0))
+                    ((symbol-function 'process-buffer) (lambda (_p) proc-buf))
+                    ((symbol-function 'process-name) (lambda (_p) "fake-success"))
+                    ((symbol-function 'process-get)
+                     (lambda (_p prop)
+                       (when (eq prop 'agent-repl-callback)
                          (lambda (ok output)
                            (setq captured-ok ok
-                                 captured-output output)))
-            (agent-repl--async-git-sentinel proc "finished\n")
+                                 captured-output output)))))
+                    ((symbol-function 'agent-repl--kill-buffer-safely)
+                     (lambda (buf) (kill-buffer buf))))
+            (agent-repl--async-git-sentinel 'fake-process "finished\n")
             (should (eq captured-ok t))
             (should (equal captured-output "git output here"))))
       (when (buffer-live-p proc-buf)
@@ -6241,17 +6231,19 @@ from `default-directory' via `agent-repl--git-root'."
         (progn
           (with-current-buffer proc-buf
             (insert "fatal: error message"))
-          (let ((proc (start-process "test-sentinel" proc-buf "false")))
-            ;; Prevent default sentinel from inserting status text into buffer
-            (set-process-sentinel proc #'ignore)
-            ;; Wait for process to finish
-            (while (process-live-p proc)
-              (accept-process-output proc 0.1))
-            (process-put proc 'agent-repl-callback
+          (cl-letf (((symbol-function 'process-status) (lambda (_p) 'exit))
+                    ((symbol-function 'process-exit-status) (lambda (_p) 1))
+                    ((symbol-function 'process-buffer) (lambda (_p) proc-buf))
+                    ((symbol-function 'process-name) (lambda (_p) "fake-failure"))
+                    ((symbol-function 'process-get)
+                     (lambda (_p prop)
+                       (when (eq prop 'agent-repl-callback)
                          (lambda (ok output)
                            (setq captured-ok ok
-                                 captured-output output)))
-            (agent-repl--async-git-sentinel proc "finished\n")
+                                 captured-output output)))))
+                    ((symbol-function 'agent-repl--kill-buffer-safely)
+                     (lambda (buf) (kill-buffer buf))))
+            (agent-repl--async-git-sentinel 'fake-process "finished\n")
             (should (eq captured-ok nil))
             (should (equal captured-output "fatal: error message"))))
       (when (buffer-live-p proc-buf)
@@ -6266,17 +6258,19 @@ from `default-directory' via `agent-repl--git-root'."
         (progn
           (with-current-buffer proc-buf
             (insert "partial output"))
-          (let ((proc (start-process "test-sentinel" proc-buf "sleep" "60")))
-            (process-put proc 'agent-repl-callback
+          (cl-letf (((symbol-function 'process-status) (lambda (_p) 'signal))
+                    ((symbol-function 'process-exit-status) (lambda (_p) 9))
+                    ((symbol-function 'process-buffer) (lambda (_p) proc-buf))
+                    ((symbol-function 'process-name) (lambda (_p) "fake-signaled"))
+                    ((symbol-function 'process-get)
+                     (lambda (_p prop)
+                       (when (eq prop 'agent-repl-callback)
                          (lambda (ok output)
                            (setq captured-ok ok
-                                 captured-output output)))
-            ;; Kill the process to produce a signal
-            (kill-process proc)
-            ;; Wait for process to be fully dead
-            (while (process-live-p proc)
-              (accept-process-output proc 0.1))
-            (agent-repl--async-git-sentinel proc "killed\n")
+                                 captured-output output)))))
+                    ((symbol-function 'agent-repl--kill-buffer-safely)
+                     (lambda (buf) (kill-buffer buf))))
+            (agent-repl--async-git-sentinel 'fake-process "killed\n")
             (should (not (eq captured-ok 'not-set)))
             (should (stringp captured-output))))
       (when (buffer-live-p proc-buf)
@@ -6287,12 +6281,15 @@ from `default-directory' via `agent-repl--git-root'."
   (let ((proc-buf (generate-new-buffer " *test-sentinel-bufkill*")))
     (with-current-buffer proc-buf
       (insert "output"))
-    (let ((proc (start-process "test-sentinel" proc-buf "true")))
-      ;; Wait for process to finish
-      (while (process-live-p proc)
-        (accept-process-output proc 0.1))
-      (process-put proc 'agent-repl-callback (lambda (_ok _output) nil))
-      (agent-repl--async-git-sentinel proc "finished\n")
+    (cl-letf (((symbol-function 'process-status) (lambda (_p) 'exit))
+              ((symbol-function 'process-exit-status) (lambda (_p) 0))
+              ((symbol-function 'process-buffer) (lambda (_p) proc-buf))
+              ((symbol-function 'process-name) (lambda (_p) "fake-buffer-kill"))
+              ((symbol-function 'process-get)
+               (lambda (_p prop)
+                 (when (eq prop 'agent-repl-callback)
+                   (lambda (_ok _output) nil)))))
+      (agent-repl--async-git-sentinel 'fake-process "finished\n")
       (should-not (buffer-live-p proc-buf)))))
 
 ;;;; ---- Tests: open-initial-buffers (moved from core.el) ----
@@ -7600,6 +7597,28 @@ Covers the full call the interactive `SPC TAB n' path builds up."
                 ((symbol-function 'agent-repl--workspace-merge-do) #'ignore))
         (agent-repl-workspace-merge)
         (should (equal captured-default "ws-b"))))))
+
+(ert-deftest agent-repl-test-workspace-merge-known-tombstone-remains-history-default ()
+  "The wrapper migration preserves the former membership semantics:
+a registered tombstone still counts as known when history chooses the
+default, just as direct hash membership did."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "current" :project-dir "/tmp/cur")
+    (puthash "tomb" '(:project-dir "/tmp/tomb" :nuked-at (1 2 3))
+             agent-repl--workspaces)
+    (let ((agent-repl--workspace-history '("tomb" "current"))
+          (captured-default nil))
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current"))
+                ((symbol-function '+workspace-list-names)
+                 (lambda () '("current" "tomb")))
+                ((symbol-function 'agent-repl--assert-clean-worktree) #'ignore)
+                ((symbol-function 'completing-read)
+                 (lambda (_prompt _coll &optional _pred _req _init _hist default &rest _)
+                   (setq captured-default default)
+                   "tomb"))
+                ((symbol-function 'agent-repl--workspace-merge-do) #'ignore))
+        (agent-repl-workspace-merge)
+        (should (equal captured-default "tomb"))))))
 
 (ert-deftest agent-repl-test-workspace-merge-no-default-when-history-empty ()
   "workspace-merge passes nil default when no history matches."
@@ -8916,6 +8935,15 @@ were reached without the wrapper stub."
     (puthash "alpha" '(:project-dir "/repo-a/") agent-repl--workspaces)
     (cl-letf (((symbol-function 'agent-repl--path-canonical) #'identity))
       (should (null (agent-repl--ws-name-for-dir "/missing/"))))))
+
+(ert-deftest agent-repl-test-ws-name-for-dir-skips-tombstoned-match ()
+  "Reverse lookup remains live-only after moving iteration behind workspace.el."
+  (agent-repl-test--with-clean-state
+    (puthash "tomb" '(:project-dir "/shared/" :nuked-at (1 2 3))
+             agent-repl--workspaces)
+    (puthash "live" '(:project-dir "/shared/") agent-repl--workspaces)
+    (cl-letf (((symbol-function 'agent-repl--path-canonical) #'identity))
+      (should (equal (agent-repl--ws-name-for-dir "/shared/") "live")))))
 
 ;;;; ---- Tests: --place-generated-workspace (child tab placement) ----
 
