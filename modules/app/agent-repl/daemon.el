@@ -28,6 +28,7 @@
 (require 'cl-lib)
 
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
+(declare-function agent-repl--log-verbose "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--error "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--in-sandbox-p "agent-repl-install" ())
 (declare-function agent-repl--frontend-turn-active-sessions "agent-repl-frontend-client" ())
@@ -216,15 +217,26 @@ Only the path shapes are assembled here; the caller checks existence."
                    (not (string-empty-p agent-repl-frontend-widget-assets-search-root))
                    (expand-file-name agent-repl-frontend-widget-assets-search-root)))
         (rel "apps/cee-web-widget/dist"))
-    (when (and root (file-directory-p root))
-      (let ((worktrees (expand-file-name "explanation-engine-worktrees" root)))
-        (append
-         (list (expand-file-name (concat "explanation-engine/" rel) root))
-         (when (file-directory-p worktrees)
-           (mapcar (lambda (d) (expand-file-name rel d))
-                   (directory-files worktrees t "\\`[^.]" t)))
-         (mapcar (lambda (d) (expand-file-name rel d))
-                 (directory-files root t "\\`[^.]" t)))))))
+    (if (and root (file-directory-p root))
+        (let* ((worktrees (expand-file-name "explanation-engine-worktrees" root))
+               (candidates
+                (append
+                 (list (expand-file-name (concat "explanation-engine/" rel) root))
+                 (when (file-directory-p worktrees)
+                   (mapcar (lambda (d) (expand-file-name rel d))
+                           (directory-files worktrees t "\\`[^.]" t)))
+                 (mapcar (lambda (d) (expand-file-name rel d))
+                         (directory-files root t "\\`[^.]" t)))))
+          (agent-repl--log nil
+                           "widget-assets candidates: root=%s worktrees-dir=%s worktrees-exists=%s count=%s candidates=%S"
+                           root worktrees (file-directory-p worktrees)
+                           (length candidates) candidates)
+          candidates)
+      (agent-repl--log nil
+                       "widget-assets candidates unavailable: configured-root=%S expanded-root=%S root-exists=%s"
+                       agent-repl-frontend-widget-assets-search-root root
+                       (and root (file-directory-p root)))
+      nil)))
 
 (defun agent-repl--frontend-discover-widget-assets-dir ()
   "Resolve the widget-assets dir the daemon should serve, or nil.
@@ -233,10 +245,21 @@ returned verbatim (expanded).  When it is empty, auto-discover the first
 candidate (see `agent-repl--frontend-widget-assets-candidates') that
 actually holds `chess-widget.js', so a stale or empty dist is skipped."
   (if (not (string-empty-p agent-repl-frontend-widget-assets-dir))
-      (expand-file-name agent-repl-frontend-widget-assets-dir)
-    (seq-find (lambda (dir)
-                (file-exists-p (expand-file-name "chess-widget.js" dir)))
-              (agent-repl--frontend-widget-assets-candidates))))
+      (let ((dir (expand-file-name agent-repl-frontend-widget-assets-dir)))
+        (agent-repl--log nil
+                         "widget-assets resolution: source=explicit configured=%S resolved=%s widget-exists=%s"
+                         agent-repl-frontend-widget-assets-dir dir
+                         (file-exists-p (expand-file-name "chess-widget.js" dir)))
+        dir)
+    (let* ((candidates (agent-repl--frontend-widget-assets-candidates))
+           (dir (seq-find (lambda (candidate)
+                            (file-exists-p
+                             (expand-file-name "chess-widget.js" candidate)))
+                          candidates)))
+      (agent-repl--log nil
+                       "widget-assets resolution: source=discovery candidate-count=%s resolved=%S"
+                       (length candidates) dir)
+      dir)))
 
 (defun agent-repl--widget-doctor-issues ()
   "Return (LEVEL . MESSAGE) issues for the chess-widget capability.
@@ -246,10 +269,15 @@ the `chess-widget.js' the webapp imports.  No-ops in the sandbox, where
 the daemon and its assets are a host concern.  Aggregated by `doctor.el'
 alongside the install and codex checks."
   (if (agent-repl--in-sandbox-p)
-      nil
+      (progn
+        (agent-repl--log nil "widget doctor: sandbox=t; skipping host asset checks")
+        nil)
     (let ((dir (agent-repl--frontend-discover-widget-assets-dir)))
       (cond
        ((null dir)
+        (agent-repl--log nil "widget doctor: result=missing configured-dir=%S search-root=%S"
+                         agent-repl-frontend-widget-assets-dir
+                         agent-repl-frontend-widget-assets-search-root)
         (list (cons 'warn
                     (format (concat "chess-widget capability OFF: no widget-assets dir resolves"
                                     " — set agent-repl-frontend-widget-assets-dir or put a"
@@ -258,13 +286,16 @@ alongside the install and codex checks."
                             (or agent-repl-frontend-widget-assets-search-root
                                 "your explanation-engine checkout")))))
        ((not (file-exists-p (expand-file-name "chess-widget.js" dir)))
+        (agent-repl--log nil "widget doctor: result=invalid dir=%s widget-exists=nil" dir)
         (list (cons 'warn
                     (format (concat "chess-widget dir %s lacks chess-widget.js"
                                     " — point agent-repl-frontend-widget-assets-dir at a real"
                                     " cee-web-widget/dist, then"
                                     " M-x agent-repl-frontend-daemon-restart")
                             dir))))
-       (t nil)))))
+       (t
+        (agent-repl--log nil "widget doctor: result=ready dir=%s widget-exists=t" dir)
+        nil)))))
 
 ;;;; ---- State ------------------------------------------------------------
 
@@ -302,10 +333,17 @@ after the grace window\" or \"socket still bound after shutdown\".
 Uses `sleep-for', NOT `sit-for': sit-for returns immediately on pending
 input, which would collapse the wait window while the user types (the
 same rationale as the readiness poll in frontend-client.el)."
+  (agent-repl--log-verbose nil
+                            "frontend poll: begin predicate=%S timeout=%s interval=%s"
+                            predicate timeout interval)
   (let ((deadline (+ (float-time) timeout)))
     (while (and (funcall predicate) (< (float-time) deadline))
       (sleep-for interval))
-    (funcall predicate)))
+    (let ((remaining (funcall predicate)))
+      (agent-repl--log-verbose nil
+                                "frontend poll: complete predicate=%S remaining=%S timeout=%s interval=%s"
+                                predicate remaining timeout interval)
+      remaining)))
 
 ;;;; ---- Build-if-stale ---------------------------------------------------
 
@@ -327,7 +365,12 @@ TARGETS is a list of build-frontend target strings, or nil for its normal
 shim/webapp/daemon set.  With FORCE non-nil, every selected artifact is
 rebuilt.  The complete captured subprocess output is copied into the
 persistent agent-repl log before success or failure is decided."
+  (agent-repl--log nil "frontend build-if-stale: requested targets=%S force=%s script=%s"
+                   (or targets 'default) (if force "t" "nil")
+                   agent-repl--frontend-build-script)
   (unless (file-exists-p agent-repl--frontend-build-script)
+    (agent-repl--log nil "frontend build-if-stale: script missing path=%s"
+                     agent-repl--frontend-build-script)
     (error "agent-repl: frontend build script not found: %s"
            agent-repl--frontend-build-script))
   (with-current-buffer (get-buffer-create agent-repl--frontend-build-buffer)
@@ -467,16 +510,24 @@ exit is the one failure with no card anywhere — the process that composes
 every other failure card is the one that just died, so it cannot report
 this about itself.  Emacs supervises the process, so Emacs classifies it,
 under the reserved `client.\=' prefix."
-  (unless (process-live-p proc)
-    (when (eq proc agent-repl--frontend-daemon-process)
-      (setq agent-repl--frontend-daemon-process nil))
-    (agent-repl--log nil "claude-repld exited: %s" (string-trim event))
-    (agent-repl-failure-surface
-     nil
-     (agent-repl-failure-local
-      "client.daemon_exited"
-      "the agent-repl daemon exited"
-      (string-trim event)))))
+  (let ((live (process-live-p proc))
+        (tracked (eq proc agent-repl--frontend-daemon-process))
+        (trimmed-event (string-trim event)))
+    (if live
+        (agent-repl--log-verbose nil
+                                  "claude-repld sentinel: process-live=t tracked=%s event=%s"
+                                  tracked trimmed-event)
+      (when tracked
+        (setq agent-repl--frontend-daemon-process nil))
+      (agent-repl--log nil
+                       "claude-repld exited: tracked=%s event=%s"
+                       tracked trimmed-event)
+      (agent-repl-failure-surface
+       nil
+       (agent-repl-failure-local
+        "client.daemon_exited"
+        "the agent-repl daemon exited"
+        trimmed-event)))))
 
 ;;;; ---- Entry point ------------------------------------------------------
 
@@ -531,7 +582,11 @@ and bounce it in a loop.  Nil (fresh) whenever either mtime is unknown, so
 nothing is ever bounced on a guess."
   (let ((disk (agent-repl--frontend-daemon-binary-disk-mtime))
         (running (agent-repl--frontend-running-daemon-binary-mtime)))
-    (and disk running (> disk running))))
+    (let ((stale (and disk running (> disk running))))
+      (agent-repl--log nil
+                       "frontend daemon staleness: disk-mtime=%S running-mtime=%S stale=%s"
+                       disk running (if stale "t" "nil"))
+      stale)))
 
 (defun agent-repl--frontend-request-foreign-shutdown ()
   "Ask the daemon on the frontend UDS to shut down (`ShutdownCmd').
@@ -545,11 +600,15 @@ Tracks the command so a rejected ack is surfaced loudly rather than read
 as success.  Signals (`agent-repl--uds-send-command's loud `user-error')
 when there is no connection to send on; the caller logs that and falls
 through to the liveness poll, which is the real exit signal."
-  (unless (agent-repl--uds-connected-p)
+  (let ((connected (agent-repl--uds-connected-p)))
+    (agent-repl--log nil "foreign daemon shutdown: uds-connected=%s addr=%s"
+                     connected agent-repl-frontend-daemon-addr)
+    (unless connected
     (agent-repl-uds-connect))
-  (let ((req (agent-repl--uds-send-command "shutdown" nil)))
-    (agent-repl--uds-track-command req "shutdown" nil)
-    req))
+    (let ((req (agent-repl--uds-send-command "shutdown" nil)))
+      (agent-repl--uds-track-command req "shutdown" nil)
+      (agent-repl--log nil "foreign daemon shutdown: command accepted request-id=%S" req)
+      req)))
 
 (defun agent-repl--frontend-bounce-foreign-daemon ()
   "Bounce an ADOPTED daemon this Emacs does not track, via `ShutdownCmd'.
@@ -562,19 +621,28 @@ it tears down, so a transport error on the send is logged and ignored —
 the liveness poll is the real exit signal.  A daemon that never frees the
 socket within `agent-repl-frontend-foreign-stop-grace-seconds' fails loudly
 and is left in place; spawning next to it would only bind-fail."
+  (agent-repl--log nil
+                   "foreign daemon bounce: begin addr=%s grace-seconds=%s"
+                   agent-repl-frontend-daemon-addr
+                   agent-repl-frontend-foreign-stop-grace-seconds)
   (condition-case err
       (agent-repl--frontend-request-foreign-shutdown)
     (error
      (agent-repl--log nil "startup: foreign daemon shutdown request errored (%s) — polling the socket anyway"
                        (error-message-string err))))
-  (if (agent-repl--frontend-poll-until
-       #'agent-repl--frontend-daemon-responsive-p
-       agent-repl-frontend-foreign-stop-grace-seconds 0.1)
+  (let ((still-responsive
+         (agent-repl--frontend-poll-until
+          #'agent-repl--frontend-daemon-responsive-p
+          agent-repl-frontend-foreign-stop-grace-seconds 0.1)))
+    (agent-repl--log nil
+                     "foreign daemon bounce: shutdown wait complete still-responsive=%S addr=%s"
+                     still-responsive agent-repl-frontend-daemon-addr)
+    (if still-responsive
       (agent-repl--error nil
                          "adopted daemon on %s ignored shutdown within %ss; replacement aborted"
                          agent-repl-frontend-daemon-addr
                          agent-repl-frontend-foreign-stop-grace-seconds)
-    (agent-repl--frontend-start-daemon)))
+      (agent-repl--frontend-start-daemon))))
 
 (defun agent-repl--frontend-runtime-bounce-preflight ()
   "Resolve and validate the daemon state before any runtime mutation.
@@ -655,8 +723,11 @@ outlives this window."
   "Return the port component of `agent-repl-frontend-daemon-addr' as a string.
 Nil when the address carries no port, which makes every port-based
 detection below a no-op rather than a guess."
-  (when (string-match "\\`.*:\\([0-9]+\\)\\'" agent-repl-frontend-daemon-addr)
-    (match-string 1 agent-repl-frontend-daemon-addr)))
+  (let ((port (when (string-match "\\`.*:\\([0-9]+\\)\\'" agent-repl-frontend-daemon-addr)
+                (match-string 1 agent-repl-frontend-daemon-addr))))
+    (agent-repl--log-verbose nil "daemon port resolution: addr=%s port=%S"
+                             agent-repl-frontend-daemon-addr port)
+    port))
 
 (defun agent-repl--frontend-run-listener-probe (port)
   "External-boundary wrapper: return `lsof' output naming PORT's listener.
@@ -693,9 +764,13 @@ stranger than a stale daemon."
 (defun agent-repl--frontend-listener-owner ()
   "Return (PID . COMMAND) for the process listening on the daemon's port.
 Nil when the port is free, unparseable, or has no resolvable port."
-  (when-let ((port (agent-repl--frontend-daemon-port)))
-    (agent-repl--frontend-parse-listener
-     (agent-repl--frontend-run-listener-probe port))))
+  (let* ((port (agent-repl--frontend-daemon-port))
+         (output (and port (agent-repl--frontend-run-listener-probe port)))
+         (owner (and port (agent-repl--frontend-parse-listener output))))
+    (agent-repl--log-verbose nil
+                             "daemon listener probe: addr=%s port=%S output-present=%s owner=%S"
+                             agent-repl-frontend-daemon-addr port (not (null output)) owner)
+    owner))
 
 (defun agent-repl--frontend-our-daemon-command-p (command)
   "Return non-nil when COMMAND names THIS module's daemon executable.
@@ -724,14 +799,30 @@ case:
 
 Returns nil in every other case, including when the port is held by a
 foreign program — that is reported by the caller, not acted on."
-  (unless (agent-repl--frontend-daemon-responsive-p)
-    (when-let ((owner (agent-repl--frontend-listener-owner)))
-      (if (agent-repl--frontend-our-daemon-command-p (cdr owner))
-          owner
-        (agent-repl--log nil
-                         "startup: %s is held by pid %s (%s), which is NOT our daemon — leaving it alone"
-                         agent-repl-frontend-daemon-addr (car owner) (cdr owner))
-        nil))))
+  (let ((responsive (agent-repl--frontend-daemon-responsive-p)))
+    (if responsive
+        (progn
+          (agent-repl--log nil
+                           "incompatible daemon check: addr=%s responsive=t; no replacement needed"
+                           agent-repl-frontend-daemon-addr)
+          nil)
+      (let ((owner (agent-repl--frontend-listener-owner)))
+        (cond
+         ((null owner)
+          (agent-repl--log nil
+                           "incompatible daemon check: addr=%s responsive=nil owner=nil"
+                           agent-repl-frontend-daemon-addr)
+          nil)
+         ((agent-repl--frontend-our-daemon-command-p (cdr owner))
+          (agent-repl--log nil
+                           "incompatible daemon check: addr=%s responsive=nil owner=%S ours=t"
+                           agent-repl-frontend-daemon-addr owner)
+          owner)
+         (t
+          (agent-repl--log nil
+                           "startup: %s is held by pid %s (%s), which is NOT our daemon — leaving it alone"
+                           agent-repl-frontend-daemon-addr (car owner) (cdr owner))
+          nil))))))
 
 (defun agent-repl--frontend-terminate-incompatible-daemon (pid)
   "Terminate the incompatible daemon PID, gracefully first.
@@ -746,16 +837,28 @@ a port nothing can use."
   (agent-repl--log nil "startup: terminating incompatible daemon pid=%s on %s"
                    pid agent-repl-frontend-daemon-addr)
   (agent-repl--signal-process pid 'TERM)
-  (when (agent-repl--frontend-poll-until
-         #'agent-repl--frontend-listener-owner
-         agent-repl-frontend-incompatible-stop-grace-seconds 0.1)
-    (agent-repl--log nil "startup: incompatible daemon pid=%s ignored SIGTERM for %ss; sending KILL"
-                     pid agent-repl-frontend-incompatible-stop-grace-seconds)
-    (agent-repl--signal-process pid 'KILL)
-    (agent-repl--frontend-poll-until
-     #'agent-repl--frontend-listener-owner
-     agent-repl-frontend-incompatible-stop-grace-seconds 0.1))
-  (not (agent-repl--frontend-listener-owner)))
+  (let ((survived-term
+         (agent-repl--frontend-poll-until
+          #'agent-repl--frontend-listener-owner
+          agent-repl-frontend-incompatible-stop-grace-seconds 0.1)))
+    (agent-repl--log nil
+                     "incompatible daemon termination: pid=%s TERM-survived=%S"
+                     pid survived-term)
+    (when survived-term
+      (agent-repl--log nil "startup: incompatible daemon pid=%s ignored SIGTERM for %ss; sending KILL"
+                       pid agent-repl-frontend-incompatible-stop-grace-seconds)
+      (agent-repl--signal-process pid 'KILL)
+      (let ((survived-kill
+             (agent-repl--frontend-poll-until
+              #'agent-repl--frontend-listener-owner
+              agent-repl-frontend-incompatible-stop-grace-seconds 0.1)))
+        (agent-repl--log nil
+                         "incompatible daemon termination: pid=%s KILL-survived=%S"
+                         pid survived-kill))))
+  (let ((stopped (not (agent-repl--frontend-listener-owner))))
+    (agent-repl--log nil "incompatible daemon termination: pid=%s stopped=%s"
+                     pid stopped)
+    stopped))
 
 (defun agent-repl--ensure-frontend-daemon (&optional force)
   "Ensure the frontend daemon is built and running; return its process.
@@ -770,12 +873,23 @@ when `agent-repl-frontend-auto-start' is nil or automatic init is
 inhibited (batch/sandbox).  The post-snapshot startup coordinator in
 services.el owns the once-per-Emacs full-runtime bounce; this function
 remains the cheap idempotent session-open ensure."
-  (cond
-   ((not agent-repl-frontend-auto-start) nil)
-   ((agent-repl--frontend-init-inhibited-p) nil)
+  (let ((inhibited (agent-repl--frontend-init-inhibited-p)))
+    (agent-repl--log nil
+                     "ensure-frontend-daemon: force=%s auto-start=%s init-inhibited=%s tracked-live=%s"
+                     (if force "t" "nil") agent-repl-frontend-auto-start inhibited
+                     (agent-repl--frontend-daemon-live-p))
+    (cond
+   ((not agent-repl-frontend-auto-start)
+    (agent-repl--log nil "ensure-frontend-daemon: skipped reason=auto-start-disabled")
+    nil)
+   (inhibited
+    (agent-repl--log nil "ensure-frontend-daemon: skipped reason=init-inhibited")
+    nil)
    (t
     (cond
      ((and (not force) (agent-repl--frontend-daemon-live-p))
+      (agent-repl--log nil "ensure-frontend-daemon: reusing tracked pid=%S"
+                       (process-id agent-repl--frontend-daemon-process))
       agent-repl--frontend-daemon-process)
      ((and (not force) (agent-repl--frontend-daemon-responsive-p))
       (agent-repl--log nil "ensure-frontend-daemon: adopting foreign daemon on %s"
@@ -783,9 +897,12 @@ remains the cheap idempotent session-open ensure."
       t)
      (t
       (when (and force (agent-repl--frontend-daemon-live-p))
+        (agent-repl--log nil "ensure-frontend-daemon: force=t; stopping tracked daemon before rebuild")
         (agent-repl--frontend-stop-daemon))
+      (agent-repl--log nil "ensure-frontend-daemon: build-and-launch force=%s"
+                       (if force "t" "nil"))
       (agent-repl--frontend-build-if-stale force)
-      (agent-repl--frontend-start-daemon))))))
+      (agent-repl--frontend-start-daemon)))))))
 
 (defun agent-repl--frontend-stop-daemon (&optional force)
   "Stop the tracked `claude-repld' process, gracefully first.
@@ -803,20 +920,31 @@ restart, which is exactly the restart class the session registry exists
 to survive — the registry makes that survivable either way, and the
 graceful window additionally lets shims exit cleanly instead of by
 inherited-pipe EOF."
-  (when (agent-repl--frontend-daemon-live-p)
-    (unless force
-      (when-let ((busy (agent-repl--frontend-turn-active-sessions)))
-        (error "agent-repl: refusing daemon stop — turn in flight in %s; retry when idle or pass FORCE"
-               busy)))
+  (let ((live (agent-repl--frontend-daemon-live-p)))
+    (agent-repl--log nil "frontend stop: requested force=%s tracked-live=%s"
+                     (if force "t" "nil") live)
+    (if (not live)
+        (agent-repl--log nil "frontend stop: no tracked live daemon; clearing process slot")
+      (unless force
+        (when-let ((busy (agent-repl--frontend-turn-active-sessions)))
+          (agent-repl--log nil "frontend stop: refused force=nil active-sessions=%S" busy)
+          (error "agent-repl: refusing daemon stop — turn in flight in %s; retry when idle or pass FORCE"
+                 busy)))
     (let ((proc agent-repl--frontend-daemon-process))
+      (agent-repl--log nil "frontend stop: sending TERM pid=%S grace-seconds=%s"
+                       (process-id proc) agent-repl-frontend-stop-grace-seconds)
       (signal-process proc 'TERM)
-      (when (agent-repl--frontend-poll-until
-             (lambda () (process-live-p proc))
-             agent-repl-frontend-stop-grace-seconds 0.05)
-        (agent-repl--log nil "claude-repld ignored SIGTERM for %ss; falling back to delete-process"
-                         agent-repl-frontend-stop-grace-seconds)
-        (delete-process proc))))
-  (setq agent-repl--frontend-daemon-process nil))
+      (if (agent-repl--frontend-poll-until
+           (lambda () (process-live-p proc))
+           agent-repl-frontend-stop-grace-seconds 0.05)
+          (progn
+            (agent-repl--log nil "claude-repld ignored SIGTERM for %ss; falling back to delete-process"
+                             agent-repl-frontend-stop-grace-seconds)
+            (delete-process proc)
+            (agent-repl--log nil "frontend stop: delete-process issued pid=%S" (process-id proc)))
+        (agent-repl--log nil "frontend stop: graceful exit observed pid=%S" (process-id proc)))))
+    (setq agent-repl--frontend-daemon-process nil)
+    (agent-repl--log nil "frontend stop: complete tracked-process-cleared=t")))
 
 ;;;; ---- Interactive commands ---------------------------------------------
 
