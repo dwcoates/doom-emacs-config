@@ -69,6 +69,20 @@ type Record struct {
 	// or losing events. Zero means "never subscribed"; a fresh subscribe
 	// from seq 0 then replays the whole session. See server.RegistrySeqStore.
 	LastSeq uint64 `json:"last_seq,omitempty"`
+	// NewestClearOrCompactSeq is the store seq of the newest CLEAR OR COMPACTION
+	// observed on this conversation, whichever came last. It is the frontend
+	// REPLAY FLOOR: a resync is served from this seq forward (INCLUSIVE of the
+	// clear or compaction itself), so a reconnecting frontend never receives
+	// history that clear or compaction already made irrelevant, and never has
+	// to find the boundary for itself.
+	//
+	// PERSISTED for the same reason BackfillState is: the evidence does not
+	// survive a restart. The daemon re-Subscribes from LastSeq, so a clear or
+	// compaction observed before the restart is never re-delivered, and a floor
+	// held only in memory would silently revert to replaying the whole
+	// conversation that preceded it. Zero means "no clear and no compaction
+	// seen on this conversation".
+	NewestClearOrCompactSeq uint64 `json:"newest_clear_or_compact_seq,omitempty"`
 	// BackfillState is the never-blue completion signal for this session's
 	// on-disk transcript: "" (nothing to backfill), "pending", "done", or
 	// "failed". See frontendv1.BackfillState for the full semantics.
@@ -102,8 +116,14 @@ type ConversationIdentity struct {
 // terminal SessionView records.
 type ConversationCheckpoint struct {
 	ConversationIdentity
-	LastSeq       uint64 `json:"last_seq,omitempty"`
-	BackfillState string `json:"backfill_state,omitempty"`
+	LastSeq uint64 `json:"last_seq,omitempty"`
+	// NewestClearOrCompactSeq is the conversation's replay floor (see
+	// Record.NewestClearOrCompactSeq). It belongs on the CHECKPOINT, not just
+	// the record: every restart mints a fresh s_ session id for the same
+	// conversation, and a floor filed only under the retired id would be lost
+	// exactly when it is needed.
+	NewestClearOrCompactSeq uint64 `json:"newest_clear_or_compact_seq,omitempty"`
+	BackfillState           string `json:"backfill_state,omitempty"`
 }
 
 // QueuedPrompt is one held prompt's durable form. Only the fields needed to
@@ -253,6 +273,7 @@ func mergeCheckpoint(dst map[ConversationIdentity]ConversationCheckpoint, cp Con
 	}
 	if prior, ok := dst[id]; ok {
 		cp.LastSeq = max(cp.LastSeq, prior.LastSeq)
+		cp.NewestClearOrCompactSeq = max(cp.NewestClearOrCompactSeq, prior.NewestClearOrCompactSeq)
 		cp.BackfillState = strongerBackfill(prior.BackfillState, cp.BackfillState)
 	}
 	dst[id] = cp
@@ -507,6 +528,7 @@ func (r *Registry) maintain(state *registryState) (maintenanceStats, error) {
 			stats.checkpointsCreated++
 		}
 		cp.LastSeq = max(cp.LastSeq, rec.LastSeq)
+		cp.NewestClearOrCompactSeq = max(cp.NewestClearOrCompactSeq, rec.NewestClearOrCompactSeq)
 		cp.BackfillState = strongerBackfill(cp.BackfillState, rec.BackfillState)
 		state.checkpoints[id] = cp
 	}
@@ -520,6 +542,10 @@ func (r *Registry) maintain(state *registryState) (maintenanceStats, error) {
 		changed := false
 		if rec.LastSeq < cp.LastSeq {
 			rec.LastSeq = cp.LastSeq
+			changed = true
+		}
+		if rec.NewestClearOrCompactSeq < cp.NewestClearOrCompactSeq {
+			rec.NewestClearOrCompactSeq = cp.NewestClearOrCompactSeq
 			changed = true
 		}
 		if stronger := strongerBackfill(rec.BackfillState, cp.BackfillState); stronger != rec.BackfillState {
