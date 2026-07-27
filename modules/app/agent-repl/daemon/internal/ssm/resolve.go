@@ -14,17 +14,19 @@ import (
 // signals (merge_none, degraded_clear, task_started, task_ended) that the
 // resolution query interprets but never emits as a resolved state.
 const (
-	sigInit          = "init"
-	sigThinking      = "thinking"
-	sigDone          = "done"
-	sigPermission    = "permission"
-	sigIdle          = "idle"
-	sigReady         = "ready"
-	sigIdleAsync     = "idle_async" // DERIVED at resolve time; never stored.
+	sigInit       = "init"
+	sigThinking   = "thinking"
+	sigDone       = "done"
+	sigPermission = "permission"
+	sigIdle       = "idle"
+	sigReady      = "ready"
+	sigIdleAsync  = "idle_async" // DERIVED at resolve time; never stored.
+	// An AGENT-axis token: it reports HOW the last turn ended, exactly as
+	// `done` reports that it ended cleanly. It is not a latch and has no
+	// clearing token — the next agent-axis row supersedes it.
 	sigVendorBlocked = "vendor_blocked"
-	sigVendorClear   = "vendor_clear" // vendor axis cleared (released).
-	sigUnpainted     = "unpainted"    // no frontend has attested painting.
-	sigPainted       = "painted"      // paint axis cleared (attested).
+	sigUnpainted     = "unpainted" // no frontend has attested painting.
+	sigPainted       = "painted"   // paint axis cleared (attested).
 	// A transcript the sidecar could not fully read: the history is
 	// incomplete, so anything painted from it is a partial account.
 	sigBackfillFailed = "backfill_failed"
@@ -54,7 +56,6 @@ const (
 	causePaintAck        = "paint_ack"
 	causePaintLost       = "paint_lost"
 	causeVendorBlocked   = "vendor_blocked"
-	causeVendorCleared   = "vendor_cleared"
 )
 
 // vendorBlockingStopReasons are the TurnEnded stop reasons that conclude a
@@ -194,9 +195,12 @@ func renderStateOf(token string) frontendv1.RenderState {
 //   - BLUE outranks everything, INCLUDING a live turn. A turn running behind
 //     a route the user cannot see is not something to advertise as working,
 //     it is something to advertise as broken.
-//   - PURPLE outranks red for the mirror of that reason: a session the
-//     vendor has stopped is not going to finish whatever it still looks
-//     busy doing.
+//   - PURPLE outranks red for the mirror of that reason, but only ever
+//     among rows of the SAME vintage: `vendor_blocked` is an AGENT-axis
+//     turn OUTCOME, so it competes with the non-agent axes at rank 20 and
+//     is superseded outright by whatever the agent does next. A `thinking`
+//     row appended after it means a new turn is genuinely running, and red
+//     is then the true answer.
 //   - YELLOW sits between red and green because "something is still running"
 //     is a weaker claim than "a turn is running" and a stronger one than
 //     "nothing is running".
@@ -217,7 +221,7 @@ func renderStateOf(token string) frontendv1.RenderState {
 //	13 backfill_failed  the transcript could not be fully read
 //	14 init             bring-up
 //	--- purple -------------------------------------------------------------
-//	20 vendor_blocked
+//	20 vendor_blocked   agent axis: the last turn ended AT THE VENDOR
 //	--- red ----------------------------------------------------------------
 //	30 thinking
 //	--- yellow -------------------------------------------------------------
@@ -249,7 +253,7 @@ WITH
     ('unpainted','paint',12),
     ('backfill_failed','backfill',13),
     ('init','agent',14),
-    ('vendor_blocked','vendor',20),
+    ('vendor_blocked','agent',20),
     ('thinking','agent',30),
     ('permission','agent',40),
     ('done','agent',41),
@@ -274,11 +278,6 @@ WITH
     WHERE r.state IN ('degraded','degraded_clear')
     ORDER BY r.at DESC LIMIT 1
   ),
-  latest_vendor AS (
-    SELECT r.* FROM rows r
-    WHERE r.state IN ('vendor_blocked','vendor_clear')
-    ORDER BY r.at DESC LIMIT 1
-  ),
   latest_paint AS (
     SELECT r.* FROM rows r
     WHERE r.state IN ('unpainted','painted')
@@ -295,8 +294,6 @@ WITH
     SELECT state, cause_kind, cause_seq, at, session_id FROM latest_merge WHERE state <> 'merge_none'
     UNION ALL
     SELECT state, cause_kind, cause_seq, at, session_id FROM latest_degraded WHERE state <> 'degraded_clear'
-    UNION ALL
-    SELECT state, cause_kind, cause_seq, at, session_id FROM latest_vendor WHERE state <> 'vendor_clear'
     UNION ALL
     SELECT state, cause_kind, cause_seq, at, session_id FROM latest_paint WHERE state <> 'painted'
     UNION ALL
