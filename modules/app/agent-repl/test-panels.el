@@ -229,60 +229,51 @@
 
 ;;;; ---- Tests: sync-panels ----
 
-(defun agent-repl-test--run-sync-panels (current-ws window-buffers visible-names)
+(defun agent-repl-test--run-sync-panels (current-ws window-buffers)
   "Drive `agent-repl--sync-panels' over a mocked window layout.
 CURRENT-WS is returned by `+workspace-current-name'.  WINDOW-BUFFERS is
-an alist of (WINDOW-SYMBOL . BUFFER-NAME); a live buffer is created for
-each BUFFER-NAME for the duration of the run.  VISIBLE-NAMES lists the
-buffer names whose `get-buffer-window' should report a live window.
-Returns the list of window symbols `delete-window' was asked to delete."
-  (let ((created '())
-        (deleted '())
-        (windows (mapcar #'car window-buffers)))
+an alist of (WINDOW-SYMBOL . BUFFER-NAME).  Builds the layout with real,
+in-memory Emacs windows so native-compiled window primitives are never
+rebound through `cl-letf' (which can trigger trampoline compilation before
+the test subject runs).  Returns the labels of windows actually deleted."
+  (let ((created '()))
     (unwind-protect
-        (progn
-          (dolist (cell window-buffers)
-            (push (get-buffer-create (cdr cell)) created))
-          (cl-letf (((symbol-function '+workspace-current-name)
-                     (lambda () current-ws))
-                    ((symbol-function 'window-list)
-                     (lambda (&rest _) windows))
-                    ((symbol-function 'window-buffer)
-                     (lambda (win) (get-buffer (cdr (assq win window-buffers)))))
-                    ((symbol-function 'window-live-p)
-                     (lambda (win) (and (memq win windows) t)))
-                    ((symbol-function 'agent-repl-window--side-window-p)
-                     (lambda (_win) nil))
-                    ;; `--delete-where' now also excludes the minibuffer
-                    ;; window; the mocked window symbols are never it.
-                    ((symbol-function 'window-minibuffer-p)
-                     (lambda (&optional _win) nil))
-                    ((symbol-function 'one-window-p)
-                     (lambda (&rest _) nil))
-                    ((symbol-function 'get-buffer-window)
-                     (lambda (name &rest _)
-                       (when (member name visible-names) 'fake-window)))
-                    ((symbol-function 'delete-window)
-                     (lambda (&optional win) (push win deleted))))
-            (agent-repl--sync-panels))
-          (nreverse deleted))
+        (save-window-excursion
+          (delete-other-windows)
+          (let ((first t)
+                (window-labels '()))
+            (dolist (cell window-buffers)
+              (let* ((name (cdr cell))
+                     (existing (get-buffer name))
+                     (buf (get-buffer-create name))
+                     (win (if first
+                              (selected-window)
+                            (split-window (selected-window)))))
+                (unless existing
+                  (push buf created))
+                (setq first nil)
+                (set-window-buffer win buf)
+                (push (cons win (car cell)) window-labels)))
+            (cl-letf (((symbol-function '+workspace-current-name)
+                       (lambda () current-ws)))
+              (agent-repl--sync-panels)
+              (cl-loop for (win . label) in window-labels
+                       unless (window-live-p win)
+                       collect label))))
       (dolist (buf created)
         (when (buffer-live-p buf) (kill-buffer buf))))))
 
 (ert-deftest agent-repl-test-panels-sync-keeps-current-input-when-webview-absent ()
   "sync-panels does NOT sweep the current ws input panel mid-split.
-Models the regression: the webview window is not yet observable via
-`get-buffer-window' during the split, so the current ws input (and
-webview) look orphaned — but both belong to the current ws and must
-survive."
+Models the regression with the input window present before its webview
+partner is observable, so the current workspace's input looks orphaned
+but must survive."
   (agent-repl-test--with-clean-state
     (should-not
      (agent-repl-test--run-sync-panels
       "cur"
       '((win-input . "*agent-panel-input-cur*")
-        (win-webview . "*agent-frontend-cur*"))
-      ;; Nothing observable yet -> both panels look orphaned.
-      '()))))
+        (win-control . "*agent-sync-control-cur*"))))))
 
 (ert-deftest agent-repl-test-panels-sync-sweeps-orphaned-other-ws-panel ()
   "sync-panels sweeps a genuinely orphaned panel from another workspace."
@@ -290,10 +281,11 @@ survive."
     (should (equal
              (agent-repl-test--run-sync-panels
               "cur"
-              '((win-keep . "*scratch*")
-                (win-other . "*agent-panel-input-other*"))
-              ;; The other ws webview partner is not visible -> orphaned.
-              '())
+              '((win-keep . "*agent-sync-control-other*")
+                ;; A foreign frontend has no input partner.  Using the
+                ;; frontend side keeps the predicate independent of the
+                ;; global loading-placeholder buffer used by other tests.
+                (win-other . "*agent-frontend-other*")))
              '(win-other)))))
 
 (ert-deftest agent-repl-test-panels-sync-leaves-settled-layout-intact ()
@@ -303,9 +295,7 @@ survive."
      (agent-repl-test--run-sync-panels
       "cur"
       '((win-input . "*agent-panel-input-cur*")
-        (win-webview . "*agent-frontend-cur*"))
-      ;; Both windows observable -> neither panel is orphaned.
-      '("*agent-panel-input-cur*" "*agent-frontend-cur*")))))
+        (win-webview . "*agent-frontend-cur*"))))))
 
 ;;;; ---- Tests: on-window-change ----
 
