@@ -361,6 +361,44 @@ func TestCursorQueryReturnsAllPersistedCursors(t *testing.T) {
 	}
 }
 
+func TestCursorQueryReturnsAuthoritativeOpenTaskStarts(t *testing.T) {
+	h := start(t, 0, func(string, ...any) {})
+	started := func(taskID string) *corev1.Event {
+		return &corev1.Event{
+			SessionId: "s1", Plane: corev1.Plane_PLANE_FILE,
+			Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, ProducedAtMs: 100,
+			Payload: &corev1.Event_TaskStarted{TaskStarted: &corev1.TaskStarted{
+				TaskId: taskID, Kind: corev1.TaskKind_TASK_KIND_SHELL,
+			}},
+		}
+	}
+	closed := started("closed")
+	ended := &corev1.Event{
+		SessionId: "s1", Plane: corev1.Plane_PLANE_STREAM,
+		Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, ProducedAtMs: 200,
+		Payload: &corev1.Event_TaskEnded{TaskEnded: &corev1.TaskEnded{
+			TaskId: "closed", Kind: corev1.TaskKind_TASK_KIND_SHELL,
+			Status: corev1.TerminalStatus_TERMINAL_STATUS_DONE,
+		}},
+	}
+	if _, err := h.db.Ingest("test", []*corev1.Event{started("open"), closed, ended}, nil); err != nil {
+		t.Fatalf("Ingest lifecycle: %v", err)
+	}
+
+	cq := h.dial(t)
+	send(t, cq, &corev1.CursorQuery{})
+	list := recvCursorList(t, cq)
+	if !list.GetOpenTasksAuthoritative() {
+		t.Fatal("all-cursors recovery did not attest authoritative open-task state")
+	}
+	if len(list.GetOpenTasks()) != 1 {
+		t.Fatalf("open_tasks = %d, want 1", len(list.GetOpenTasks()))
+	}
+	if got := list.GetOpenTasks()[0].GetStarted().GetTaskStarted().GetTaskId(); got != "open" {
+		t.Fatalf("open task id = %q, want open", got)
+	}
+}
+
 func TestCursorQueryByFileID(t *testing.T) {
 	// Arrange: two persisted cursors.
 	h := start(t, 0, func(string, ...any) {})
