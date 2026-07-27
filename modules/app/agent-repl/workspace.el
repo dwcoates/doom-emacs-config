@@ -15,6 +15,7 @@
 ;;   - `agent-repl--workspaces'           the hash itself
 ;;   - `agent-repl--ws-runtime-keys'      keys cleared on tombstone
 ;;   - `agent-repl--ws-get'                read one plist key
+;;   - `agent-repl--ws-plist'              copy the complete known plist
 ;;   - `agent-repl--ws-put'                set one plist key (logs stub-create)
 ;;   - `agent-repl--ws-put-caller-trace'   diagnostic helper for `--ws-put'
 ;;   - `agent-repl--ws-del'                tombstone (preserves identity)
@@ -125,6 +126,21 @@ returning the same workspace twice.")
 (defun agent-repl--ws-get (ws key)
   "Get KEY from workspace WS's plist."
   (plist-get (gethash ws agent-repl--workspaces) key))
+
+(defun agent-repl--ws-plist (ws)
+  "Return a shallow copy of the complete state plist for known workspace WS.
+WS must name a registered workspace, live or tombstoned; unknown names
+signal `user-error' through `agent-repl--ws-require-known'.  The returned
+top-level plist is a copy, so consumers such as snapshot serialization may
+filter or rewrite it without mutating workspace-owned state.  Values inside
+the plist are intentionally shared: this is a state query, not a deep clone
+of buffers, processes, or environment structs."
+  (agent-repl--ws-require-known ws "ws-plist")
+  (let ((plist (gethash ws agent-repl--workspaces)))
+    (agent-repl--log-verbose
+     ws "ws-plist: ws=%s key-count=%s tombstoned=%s"
+     ws (/ (length plist) 2) (if (plist-get plist :nuked-at) "t" "nil"))
+    (copy-sequence plist)))
 
 (defun agent-repl--ws-put-caller-trace ()
   "Return a short caller chain string for diagnostic logging.
@@ -328,6 +344,8 @@ e.g. `\"ws-render-status\"' or `\"ws-open-p\"'.  Used by wrappers that
 contractually refuse to operate on an unknown ws (per the AGENTS.md
 no-silent-fallback rule).  Returns nil on success."
   (unless (agent-repl--ws-known-p ws)
+    (agent-repl--log ws "ws-require-known: REJECT ws=%S context=%s reason=unregistered"
+                     ws context)
     (user-error "agent-repl: %s: workspace %S is not registered" context ws)))
 
 (defun agent-repl--ws-tombstoned-p (ws)
@@ -821,12 +839,17 @@ finish-workspace path."
     (error (agent-repl--log ws "nuke-one-workspace: pre-teardown state-save error: %S" err)))
   (unwind-protect
       (progn
-        (when-let ((proc (agent-repl--ws-get ws :git-proc)))
-          (when (process-live-p proc)
-            (agent-repl--log ws "nuke-one-workspace: killing git-proc")
+        (let ((proc (agent-repl--ws-get ws :git-proc)))
+          (cond
+           ((null proc)
+            (agent-repl--log ws "nuke-one-workspace: git-proc decision=none"))
+           ((not (process-live-p proc))
+            (agent-repl--log ws "nuke-one-workspace: git-proc decision=already-dead proc=%S" proc))
+           (t
+            (agent-repl--log ws "nuke-one-workspace: git-proc decision=kill proc=%S" proc)
             (condition-case err
                 (delete-process proc)
-              (error (agent-repl--log ws "nuke-one-workspace: git-proc kill error: %S" err)))))
+              (error (agent-repl--log ws "nuke-one-workspace: git-proc kill error: %S" err))))))
         (agent-repl--log ws "nuke-one-workspace: calling frontend kill-fn ws=%s" ws)
         (condition-case err
             (funcall (agent-repl-frontend-kill-fn (agent-repl--ws-frontend ws)) ws)
@@ -836,7 +859,9 @@ finish-workspace path."
     ;; in the steps above (unless PRESERVE-ENTRY was requested).
     ;; Persisted state.el is intentionally NOT touched here — see the
     ;; docstring.
-    (unless preserve-entry
+    (if preserve-entry
+        (agent-repl--log ws "nuke-one-workspace: ws-del decision=preserve-entry")
+      (agent-repl--log ws "nuke-one-workspace: ws-del decision=tombstone")
       (condition-case err
           (agent-repl--ws-del ws)
         (error (agent-repl--log ws "nuke-one-workspace: ws-del error: %S" err))))
@@ -876,14 +901,22 @@ finish-workspace path."
     ;; emitted the user-visible warning `'<ws>' workspace doesn't
     ;; exist' in the echo area after every successful merge.
     (condition-case err
-        (when (and (agent-repl--ws-system-available-p)
-                   (fboundp '+workspace-exists-p)
-                   (+workspace-exists-p ws))
+        (let* ((system-available (agent-repl--ws-system-available-p))
+               (exists-fn-bound (fboundp '+workspace-exists-p))
+               (exists (and system-available exists-fn-bound
+                            (+workspace-exists-p ws))))
+          (agent-repl--log
+           ws
+           "nuke-one-workspace: persp-kill decision=%s system-available=%s exists-fn-bound=%s"
+           (if exists "kill" "skip")
+           (if system-available "t" "nil")
+           (if exists-fn-bound "t" "nil"))
+          (when exists
           (agent-repl--log ws "nuke-one-workspace: pre-persp-kill ws=%s cache=%S"
                             ws persp-names-cache)
           (+workspace/kill ws)
           (agent-repl--log ws "nuke-one-workspace: post-persp-kill ws=%s in-cache=%s cache=%S"
-                            ws (if (member ws persp-names-cache) "t" "nil") persp-names-cache))
+                            ws (if (member ws persp-names-cache) "t" "nil") persp-names-cache)))
       (error (agent-repl--log ws "nuke-one-workspace: workspace-kill error: %S" err)))
     (agent-repl--log ws "nuke-one-workspace: DONE ws=%s all-cleanup-complete" ws)))
 
@@ -1295,7 +1328,7 @@ the original error is re-signaled."
       (error "agent-repl: perspective %s exists without daemon bookkeeping" ws))
      (t
       ;; Check every rollback dependency before creating anything.
-      (dolist (fn '(persp-add-new set-persp-parameter persp-kill))
+     (dolist (fn '(persp-add-new set-persp-parameter persp-kill))
         (unless (fboundp fn)
           (agent-repl--log
            ws
@@ -1307,6 +1340,10 @@ the original error is re-signaled."
         (condition-case err
             (let ((persp (persp-add-new ws)))
               (unless (and persp (not (keywordp persp)))
+                (agent-repl--log
+                 ws
+                 "ws-materialize-daemon: CREATE-FAILED ws=%s job-id=%s reason=invalid-persp result=%S"
+                 ws job-id persp)
                 (error "persp-add-new did not create perspective %s" ws))
               (setq persp-created t)
               (set-persp-parameter '+workspace-project path persp)
@@ -1411,11 +1448,30 @@ ONLY when a live persp existed but `persp-rename' reported failure.
 This is the persp-mode rename boundary owned by `workspace.el'.
 Callers must use this function instead of calling `persp-rename'
 directly or wrapping it themselves with `fboundp'."
-  (if (not (fboundp 'persp-rename))
-      t
-    (if-let ((persp (agent-repl--ws-resolve-persp old-ws)))
-        (and (persp-rename new-ws persp) t)
-      t)))
+  (cond
+   ((not (fboundp 'persp-rename))
+    (agent-repl--log old-ws
+                     "ws-rename-persp: SKIP old-ws=%s new-ws=%s reason=persp-rename-unbound"
+                     old-ws new-ws)
+    t)
+   (t
+    (let ((persp (agent-repl--ws-resolve-persp old-ws)))
+      (if (not persp)
+          (progn
+            (agent-repl--log old-ws
+                             "ws-rename-persp: SKIP old-ws=%s new-ws=%s reason=no-live-persp"
+                             old-ws new-ws)
+            t)
+        (if (persp-rename new-ws persp)
+            (progn
+              (agent-repl--log old-ws
+                               "ws-rename-persp: RENAMED old-ws=%s new-ws=%s persp=%S"
+                               old-ws new-ws persp)
+              t)
+          (agent-repl--log old-ws
+                           "ws-rename-persp: FAILED old-ws=%s new-ws=%s persp=%S"
+                           old-ws new-ws persp)
+          nil))))))
 
 (defun agent-repl--ws-frame-ordered-names ()
   "Return workspace names in current-frame tab-bar order.
