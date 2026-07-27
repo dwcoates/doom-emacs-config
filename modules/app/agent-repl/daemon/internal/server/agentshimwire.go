@@ -33,6 +33,12 @@ type AgentShimConfig struct {
 	Progress *progress.Manager
 	// Prompts routes prompt/interrupt/permission to the session shim.
 	Prompts PromptRouter
+	// Health routes correlated session health checks to the existing live shim
+	// connection.  It must be the same driver fleet as Prompts.
+	Health SessionHealthRouter
+	// DaemonHealth supplies the one daemon-global readiness assertion shared by
+	// the HTTP health route and frontend health command.
+	DaemonHealth DaemonHealthChecker
 	// MergeDirs resolves a workspace to its merge.Request (source/target
 	// worktrees + branch). Required: the merge Engine cannot run without it.
 	MergeDirs MergeDirResolver
@@ -152,7 +158,7 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 		return nil, fmt.Errorf("server: build merge engine: %w", err)
 	}
 
-	handler, err := newCommandHandler(cfg.Prompts, mergeRunner{engine: engine, resolver: cfg.MergeDirs}, cfg.Lifecycle, cfg.Resyncer, cfg.SessionCommands, cfg.RequestShutdown, cfg.Queues, cfg.SSM, logf)
+	handler, err := newCommandHandler(cfg.Prompts, mergeRunner{engine: engine, resolver: cfg.MergeDirs}, cfg.Lifecycle, cfg.Resyncer, cfg.SessionCommands, cfg.RequestShutdown, cfg.Queues, cfg.SSM, logf, HealthConfig{Router: cfg.Health, Daemon: cfg.DaemonHealth})
 	if err != nil {
 		return nil, err
 	}
