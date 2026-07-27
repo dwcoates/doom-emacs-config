@@ -883,8 +883,8 @@ type Event_MessageLatency struct {
 }
 
 type Event_ContextCleared struct {
-	// Context cuts. First-class payloads so the store's `kind` column names
-	// them and the daemon can find the newest cut with an envelope query.
+	// Clear and compact. First-class payloads so the store's `kind` column
+	// names them and the daemon can find the newest one with an envelope query.
 	ContextCleared *ContextCleared `protobuf:"bytes,22,opt,name=context_cleared,json=contextCleared,proto3,oneof"`
 }
 

@@ -179,8 +179,8 @@ export type Event = Message<"agentshim.core.v1.Event"> & {
     case: "messageLatency";
   } | {
     /**
-     * Context cuts. First-class payloads so the store's `kind` column names
-     * them and the daemon can find the newest cut with an envelope query.
+     * Clear and compact. First-class payloads so the store's `kind` column
+     * names them and the daemon can find the newest one with an envelope query.
      *
      * @generated from field: agentshim.core.v1.ContextCleared context_cleared = 22;
      */
