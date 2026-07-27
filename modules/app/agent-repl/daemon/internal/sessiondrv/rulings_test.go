@@ -101,13 +101,6 @@ func (f *fakeRegistrar) BackfillStateChanged(sessionID, state string) {
 	f.backfills = append(f.backfills, sessionID+"="+state)
 }
 
-// backfillWrites returns the recorded transitions, taken under the lock.
-func (f *fakeRegistrar) backfillWrites() []string {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return append([]string(nil), f.backfills...)
-}
-
 // SessionDied records the terminal write a shim death produces (F4).
 func (f *fakeRegistrar) SessionDied(sessionID, reason string) {
 	f.mu.Lock()
