@@ -82,6 +82,7 @@
   (load (expand-file-name "test-window.el" dir) nil t)
   (load (expand-file-name "test-workspace-status-export.el" dir) nil t)
   (load (expand-file-name "test-workspace.el" dir) nil t)
+  (load (expand-file-name "test-workspace-create-client.el" dir) nil t)
   (load (expand-file-name "test-worktree.el" dir) nil t))
 
 (provide 'test-agent-repl)
