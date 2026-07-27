@@ -1763,6 +1763,122 @@ the wire would deprive the agent of the directive it must read."
       (should (eq (agent-repl--gui-interrupt "ws1" 'escape) t))
       (should (eq (agent-repl--gui-interrupt "ws1" 'ctrl-c) t)))))
 
+;;;; ---- the interrupt confirmation challenge -----------------------------
+;;
+;; The daemon refuses an interrupt that would stop live SUBAGENTS with
+;; `CommandAck.interrupt_confirm_required' — a CHALLENGE, not an error: the
+;; command was understood and deliberately not performed.  These drive the
+;; REAL ack handler (only the socket write is shadowed) so the routing from
+;; ack arm to minibuffer question to resend is covered end to end.
+
+(defmacro agent-repl-test--with-interrupt-acks (answer &rest body)
+  "Run BODY with the interrupt round trip observable and `y-or-n-p' stubbed.
+ANSWER is what the stubbed prompt returns; the questions it was asked
+accumulate in `asked' (newest last) and the sent commands in
+`uds-commands' as (FIELD PAYLOAD WORKSPACE), both anaphoric.  The command
+tracking table is real (and cleared first), so acks route exactly as they
+do live; `message' is silenced but captured in `echoed'."
+  (declare (indent 1))
+  `(let ((uds-commands '()) (uds-counter 0) (asked '()) (echoed nil))
+     (ignore uds-commands asked echoed)
+     (clrhash agent-repl--uds-pending-commands)
+     (cl-letf (((symbol-function 'agent-repl--uds-send-command)
+                (lambda (field payload &optional workspace &rest _)
+                  (setq uds-commands
+                        (append uds-commands (list (list field payload workspace))))
+                  (format "req-%d" (cl-incf uds-counter))))
+               ((symbol-function 'y-or-n-p)
+                (lambda (question)
+                  (setq asked (append asked (list question)))
+                  ,answer))
+               ((symbol-function 'message)
+                (lambda (fmt &rest args) (setq echoed (apply #'format fmt args)))))
+       ,@body)))
+
+(ert-deftest agent-repl-test-gui-interrupt-challenge-yes-resends-confirmed ()
+  "A yes to the challenge resends the interrupt carrying `confirmAgents'."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w" :frontend-session-id "s_1")
+    (agent-repl-test--with-interrupt-acks t
+      (agent-repl--gui-interrupt "ws1" 'escape)
+      ;; Act — the daemon challenges the first (unconfirmed) send
+      (agent-repl--uds-handle-command-ack
+       '(:requestId "req-1" :interruptConfirmRequired (:liveTasks "3")))
+      ;; Assert — a second interrupt goes out, confirmed, on the same key
+      (should (equal (length uds-commands) 2))
+      (should (equal (nth 1 uds-commands) '("interrupt" (:confirmAgents t) "/w"))))))
+
+(ert-deftest agent-repl-test-gui-interrupt-challenge-no-sends-nothing ()
+  "A no to the challenge sends nothing further — the subagents keep running."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w" :frontend-session-id "s_1")
+    (agent-repl-test--with-interrupt-acks nil
+      (agent-repl--gui-interrupt "ws1" 'escape)
+      ;; Act
+      (agent-repl--uds-handle-command-ack
+       '(:requestId "req-1" :interruptConfirmRequired (:liveTasks "3")))
+      ;; Assert
+      (should (equal (length uds-commands) 1)))))
+
+(ert-deftest agent-repl-test-gui-interrupt-challenge-question-names-the-stakes ()
+  "The question counts the subagents it would stop, in the wire's own shapes."
+  ;; Arrange — (liveTasks . expected question)
+  (dolist (case '(("3" . "Interrupt 3 running subagents? ")
+                  ("1" . "Interrupt 1 running subagent? ")
+                  (2 . "Interrupt 2 running subagents? ")
+                  (nil . "Interrupt the running subagents? ")))
+    (agent-repl-test--with-ws "ws1" '(:project-dir "/w" :frontend-session-id "s_1")
+      (agent-repl-test--with-interrupt-acks nil
+        (agent-repl--gui-interrupt "ws1" 'escape)
+        ;; Act
+        (agent-repl--uds-handle-command-ack
+         (list :requestId "req-1"
+               :interruptConfirmRequired (list :liveTasks (car case))))
+        ;; Assert
+        (should (equal asked (list (cdr case))))))))
+
+(ert-deftest agent-repl-test-gui-interrupt-ok-ack-never-prompts ()
+  "An accepted interrupt is done: no question, no resend."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w" :frontend-session-id "s_1")
+    (agent-repl-test--with-interrupt-acks t
+      (agent-repl--gui-interrupt "ws1" 'escape)
+      ;; Act
+      (agent-repl--uds-handle-command-ack '(:requestId "req-1" :ok t))
+      ;; Assert
+      (should-not asked)
+      (should (equal (length uds-commands) 1)))))
+
+(ert-deftest agent-repl-test-gui-interrupt-error-ack-still-surfaces ()
+  "A genuine error ack keeps the old failure path: echoed, never a question."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w" :frontend-session-id "s_1")
+    (agent-repl-test--with-interrupt-acks t
+      (agent-repl--gui-interrupt "ws1" 'escape)
+      ;; Act — protojson omits ok=false, so a rejection arrives with no :ok
+      (agent-repl--uds-handle-command-ack
+       '(:requestId "req-1" :error "no live session to drive"))
+      ;; Assert
+      (should-not asked)
+      (should (equal (length uds-commands) 1))
+      (should (string-match-p "interrupt" echoed))
+      (should (string-match-p "no live session to drive" echoed)))))
+
+(ert-deftest agent-repl-test-gui-interrupt-confirmed-resend-is-not-rechallenged ()
+  "The confirmed resend carries no challenge handler — a re-challenge cannot loop."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w" :frontend-session-id "s_1")
+    (agent-repl-test--with-interrupt-acks t
+      (agent-repl--gui-interrupt "ws1" 'escape)
+      (agent-repl--uds-handle-command-ack
+       '(:requestId "req-1" :interruptConfirmRequired (:liveTasks "3")))
+      ;; Act — the daemon contradicts itself and challenges the confirmed send
+      (agent-repl--uds-handle-command-ack
+       '(:requestId "req-2" :interruptConfirmRequired (:liveTasks "3")))
+      ;; Assert — asked once, sent twice: no third command, no second question
+      (should (equal (length asked) 1))
+      (should (equal (length uds-commands) 2)))))
+
 (ert-deftest agent-repl-test-gui-send-turn-records-the-sent-turn ()
   "The send records what an undo of it would need: the id and the RAW text."
   ;; Arrange
