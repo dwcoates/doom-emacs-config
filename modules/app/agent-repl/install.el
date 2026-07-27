@@ -138,15 +138,26 @@ under the same conditions: a `/.dockerenv' file exists or the
 Returns a list (EXIT-CODE OUTPUT-STRING).  Signals an error when the
 script cannot be located."
   (unless (file-exists-p agent-repl--install-script)
+    (agent-repl--log nil
+                      "install-script unavailable action=%s script=%s shell=%s"
+                      action agent-repl--install-script agent-repl-install-shell)
     (error "agent-repl install script not found: %s"
            agent-repl--install-script))
+  (agent-repl--log nil "install-script invoking action=%s script=%s shell=%s"
+                    action agent-repl--install-script agent-repl-install-shell)
   (with-temp-buffer
     (let ((exit-code (call-process agent-repl-install-shell nil t nil ;; ALLOW-EXTERNAL-BOUNDARY
                                    agent-repl--install-script action)))
-      (list exit-code (buffer-string)))))
+      (let ((output (buffer-string)))
+        (agent-repl--log nil
+                          "install-script completed action=%s exit=%s output-bytes=%d"
+                          action exit-code (string-bytes output))
+        (list exit-code output)))))
 
 (defun agent-repl--surface-install-output (output)
   "Place OUTPUT in `agent-repl--install-output-buffer' and return the buffer."
+  (agent-repl--log nil "install-output surfacing buffer=%s output-bytes=%d"
+                    agent-repl--install-output-buffer (string-bytes output))
   (with-current-buffer (get-buffer-create agent-repl--install-output-buffer)
     (let ((inhibit-read-only t))
       (erase-buffer)
@@ -175,12 +186,17 @@ output window as before."
                  (agent-repl--run-install-script action)))
       (agent-repl--surface-install-output output)
       (if (= code 0)
-          (agent-repl--info nil "hooks %s succeeded (see %s)."
-                            action agent-repl--install-output-buffer)
+          (progn
+            (agent-repl--log nil "hooks %s succeeded output:\n%s" action output)
+            (agent-repl--info nil "hooks %s succeeded (see %s)."
+                              action agent-repl--install-output-buffer))
         (if quiet
             (agent-repl--log nil
                               "hooks %s failed (exit %d); output:\n%s"
                               action code output)
+          (agent-repl--log nil
+                            "hooks %s failed interactively (exit %d); output:\n%s"
+                            action code output)
           (display-buffer agent-repl--install-output-buffer))
         (error "[agent-repl] hooks %s failed (exit %d); see %s"
                action code agent-repl--install-output-buffer)))))
@@ -240,14 +256,23 @@ suite, CI, ad-hoc scripts) from spawning bash and `display-buffer'ing the
 install-output buffer into the session's frame — none of which is
 meaningful without an interactive startup, and the stray window
 corrupts window-layout assertions in the test suite."
-  (when (and agent-repl-auto-install-hooks
-             (not noninteractive)
-             (not (agent-repl--in-sandbox-p))
-             (agent-repl--doctor-issues))
-    (condition-case err
-        (agent-repl--run-install-action "install" t)
-      (error
-       (agent-repl--log nil "auto-install failed: %S" err)))))
+  (cond
+   ((not agent-repl-auto-install-hooks)
+    (agent-repl--log nil "auto-install skipped: disabled"))
+   (noninteractive
+    (agent-repl--log nil "auto-install skipped: batch session"))
+   ((agent-repl--in-sandbox-p)
+    (agent-repl--log nil "auto-install skipped: sandbox"))
+   (t
+    (let ((issues (agent-repl--doctor-issues)))
+      (if (null issues)
+          (agent-repl--log nil "auto-install skipped: doctor reports healthy")
+        (agent-repl--log nil "auto-install starting: doctor issue-count=%d"
+                          (length issues))
+        (condition-case err
+            (agent-repl--run-install-action "install" t)
+          (error
+           (agent-repl--log nil "auto-install failed: %S" err))))))))
 
 ;; The actual call happens at the bottom of this file, after
 ;; `agent-repl--doctor-issues' and its helpers are defined.
@@ -296,18 +321,29 @@ repo-local skills (`agent-repl--managed-local-skills')."
     (let ((names   (car pair))
           (src-dir (cdr pair)))
       (dolist (name names)
-        (let ((dest (agent-repl--skill-dest-path name)))
+        (let ((dest (agent-repl--skill-dest-path name))
+              (expected (agent-repl--skill-src-path name src-dir)))
           (cond
            ((not (file-exists-p dest))
+            (agent-repl--log nil
+                              "doctor skill-link missing name=%s dest=%s expected=%s"
+                              name dest expected)
             (agent-repl--push-issue
              issues-cell 'warn
              (format "Skill symlink missing: %s — run M-x agent-repl-install-hooks"
                      dest)))
            ((not (agent-repl--skill-link-ok-p name src-dir))
+            (agent-repl--log nil
+                              "doctor skill-link incorrect name=%s dest=%s actual=%s expected=%s"
+                              name dest (file-symlink-p dest) expected)
             (agent-repl--push-issue
              issues-cell 'warn
              (format "Skill symlink points elsewhere: %s — run M-x agent-repl-reinstall-hooks"
-                     dest)))))))))
+                     dest)))
+           (t
+            (agent-repl--log nil
+                              "doctor skill-link healthy name=%s dest=%s expected=%s"
+                              name dest expected))))))))
 
 (defun agent-repl--check-unmanaged-broken-links (issues-cell)
   "Populate ISSUES-CELL with warnings for broken symlinks we don't manage.
@@ -316,15 +352,25 @@ and not in our managed set — likely stale leftovers from old worktrees."
   (let ((skills-dir (expand-file-name agent-repl--skills-dest-dir))
         (managed (agent-repl--all-managed-skill-names)))
     (when (file-directory-p skills-dir)
+      (agent-repl--log nil "doctor scanning unmanaged symlinks dir=%s" skills-dir)
       (dolist (entry (directory-files skills-dir t))
         (let ((name (file-name-nondirectory entry)))
+          (agent-repl--log-verbose nil
+                                    "doctor scanned skill entry=%s symlink=%s exists=%s managed=%s"
+                                    entry (file-symlink-p entry) (file-exists-p entry)
+                                    (member name managed))
           (when (and (file-symlink-p entry)
                      (not (file-exists-p entry))
                      (not (member name managed)))
+            (agent-repl--log nil "doctor unmanaged broken symlink entry=%s target=%s"
+                              entry (file-symlink-p entry))
             (agent-repl--push-issue
              issues-cell 'warn
              (format "Unmanaged broken symlink: %s -> %s — consider removing"
-                     entry (file-symlink-p entry)))))))))
+                     entry (file-symlink-p entry)))))))
+    (unless (file-directory-p skills-dir)
+      (agent-repl--log nil "doctor skipped unmanaged symlink scan: missing dir=%s"
+                        skills-dir))))
 
 (defun agent-repl--doctor-issues ()
   "Return a list of (LEVEL . MESSAGE) describing skill-install problems.
@@ -338,11 +384,19 @@ this no longer checks `~/.claude/settings.json' registrations or hook
 scripts; only the managed skill symlinks (plus stale unmanaged broken
 links) are inspected."
   (if (agent-repl--in-sandbox-p)
-      nil
+      (progn
+        (agent-repl--log nil "doctor skipped: sandbox")
+        nil)
     (let ((issues (list nil)))
+      (agent-repl--log nil "doctor starting managed-skill-count=%d local-skill-count=%d"
+                        (length agent-repl--managed-skills)
+                        (length agent-repl--managed-local-skills))
       (agent-repl--check-skill-links issues)
       (agent-repl--check-unmanaged-broken-links issues)
-      (nreverse (car issues)))))
+      (setq issues (nreverse (car issues)))
+      (agent-repl--log nil "doctor complete issue-count=%d issues=%S"
+                        (length issues) issues)
+      issues)))
 
 ;;;; ---- Legacy hook purge (first boot after the sentinel endgame) --------
 
@@ -375,8 +429,13 @@ name is hardcoded.  Mirrors `_legacy_hook_settings_files' in install.sh."
                        (file-expand-wildcards (expand-file-name "~/.claude-*"))))
       (let ((settings (expand-file-name "settings.json" dir)))
         (when (and (file-directory-p dir) (file-readable-p settings))
+          (agent-repl--log-verbose nil
+                                    "purge-legacy-hooks: settings candidate accepted dir=%s file=%s"
+                                    dir settings)
           (push settings out))))
-    (nreverse out)))
+    (setq out (nreverse out))
+    (agent-repl--log nil "purge-legacy-hooks: readable settings-files=%S" out)
+    out))
 
 (defun agent-repl--legacy-hooks-present-p ()
   "Return non-nil when any settings.json still registers a legacy hook.
@@ -386,22 +445,39 @@ owns the actual structural edit.  Being wrong in the false-positive
 direction costs one no-op bash run; being wrong the other way would
 leave the hooks firing, so the scan is on the script BASENAMES, which
 appear in the registered command string however it is spelled."
-  (seq-some
-   (lambda (settings)
-     (let ((body (condition-case nil
-                     (with-temp-buffer
-                       (insert-file-contents settings)
-                       (buffer-string))
-                   ;; An unreadable settings.json is not evidence either
-                   ;; way; report it and treat this file as clean rather
-                   ;; than forcing a purge run on a guess.
-                   (error
-                    (agent-repl--log nil "purge-legacy-hooks: cannot read %s" settings)
-                    nil))))
-       (and body
-            (seq-some (lambda (name) (string-search name body))
-                      agent-repl--legacy-hook-scripts))))
-   (agent-repl--legacy-hook-settings-files)))
+  (let ((settings-files (agent-repl--legacy-hook-settings-files)))
+    (agent-repl--log nil "purge-legacy-hooks: scanning settings-file-count=%d"
+                      (length settings-files))
+    (or
+     (seq-some
+      (lambda (settings)
+        (let ((body (condition-case nil
+                        (with-temp-buffer
+                          (insert-file-contents settings)
+                          (buffer-string))
+                      ;; An unreadable settings.json is not evidence either
+                      ;; way; report it and treat this file as clean rather
+                      ;; than forcing a purge run on a guess.
+                      (error
+                       (agent-repl--log nil "purge-legacy-hooks: cannot read %s" settings)
+                       nil))))
+          (when body
+            (let ((legacy-name
+                   (seq-find (lambda (name) (string-search name body))
+                             agent-repl--legacy-hook-scripts)))
+              (if legacy-name
+                  (progn
+                    (agent-repl--log nil
+                                      "purge-legacy-hooks: legacy hook found file=%s script=%s"
+                                      settings legacy-name)
+                    legacy-name)
+                (agent-repl--log-verbose nil
+                                          "purge-legacy-hooks: no legacy hook in file=%s"
+                                          settings))))))
+      settings-files)
+     (progn
+       (agent-repl--log nil "purge-legacy-hooks: no legacy hook entries found")
+       nil))))
 
 (defvar agent-repl--legacy-hooks-purged nil
   "Non-nil once the legacy-hook purge has run in this Emacs session.")
@@ -424,22 +500,31 @@ The script itself is idempotent, so a redundant run is harmless; these
 guards are about cost and blast radius, not correctness.  A failure is
 logged, never signalled: a leftover hook writes sentinel files nobody
 reads, which must not be allowed to break module load."
-  (unless (or agent-repl--legacy-hooks-purged
-              noninteractive
-              (agent-repl--in-sandbox-p)
-              (not agent-repl-auto-install-hooks))
+  (cond
+   (agent-repl--legacy-hooks-purged
+    (agent-repl--log nil "purge-legacy-hooks: skipped; already attempted this session"))
+   (noninteractive
+    (agent-repl--log nil "purge-legacy-hooks: skipped; batch session"))
+   ((agent-repl--in-sandbox-p)
+    (agent-repl--log nil "purge-legacy-hooks: skipped; sandbox"))
+   ((not agent-repl-auto-install-hooks)
+    (agent-repl--log nil "purge-legacy-hooks: skipped; auto-install disabled"))
+   (t
     (setq agent-repl--legacy-hooks-purged t)
-    (when (agent-repl--legacy-hooks-present-p)
-      (agent-repl--log nil "purge-legacy-hooks: legacy hook entries found; purging")
-      (condition-case err
-          (pcase-let ((`(,code ,output)
-                       (agent-repl--run-install-script "purge-legacy-hooks")))
-            (if (eq code 0)
-                (agent-repl--log nil "purge-legacy-hooks: done\n%s" output)
-              (agent-repl--log nil "purge-legacy-hooks: FAILED (exit %s)\n%s" code output)))
-        (error
-         (agent-repl--log nil "purge-legacy-hooks: FAILED (%s)"
-                          (error-message-string err)))))))
+    (agent-repl--log nil "purge-legacy-hooks: marked attempted for this session")
+    (if (agent-repl--legacy-hooks-present-p)
+        (progn
+          (agent-repl--log nil "purge-legacy-hooks: legacy hook entries found; purging")
+          (condition-case err
+              (pcase-let ((`(,code ,output)
+                           (agent-repl--run-install-script "purge-legacy-hooks")))
+                (if (eq code 0)
+                    (agent-repl--log nil "purge-legacy-hooks: done\n%s" output)
+                  (agent-repl--log nil "purge-legacy-hooks: FAILED (exit %s)\n%s" code output)))
+            (error
+             (agent-repl--log nil "purge-legacy-hooks: FAILED (%s)"
+                              (error-message-string err)))))
+      (agent-repl--log nil "purge-legacy-hooks: skipped; no legacy entries")))))
 
 ;; Run inline at load time so a missing managed skill symlink self-heals
 ;; on startup.  Guarded to no-op on healthy installs — see the function's
