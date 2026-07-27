@@ -76,20 +76,23 @@ type watched struct {
 	tailer *tail.Tailer
 }
 
-// UnownedSpoolWindow is how long a spool may sit unattributed before the hold
-// is re-logged as an anomaly. The launch line that names an owner is written
+// UnownedSpoolWindow is how long a spool may sit unattributed before it counts
+// as an anomaly rather than a race. The launch line naming an owner is written
 // when the task starts, so a hold normally clears within a rescan tick; one
-// that outlives this window means the mapping is genuinely missing, and that
-// has to be visible rather than waited on forever in silence.
+// that outlives this window means the mapping is genuinely missing.
 const UnownedSpoolWindow = 60 * time.Second
 
-// heldSpool is one spool discovered before its owning session was known.
-type heldSpool struct {
-	firstSeenMs int64
-	// escalated keeps the past-the-window report to ONE line per spool: the
-	// rescan that notices it runs every few seconds, and re-reporting on each
-	// pass would bury the log it is meant to make legible.
-	escalated bool
+// heldReport is the last hold summary written to the log, so an unchanged
+// backlog stays silent.
+//
+// REPORTED IN AGGREGATE, deliberately. /tmp accumulates spools from every
+// project and every past session — well over a thousand here — and their launch
+// lines sit far behind every cursor, so they are permanently unattributable.
+// A line per spool meant thousands per restart, which buries the one thing
+// worth seeing: that the backlog CHANGED.
+type heldReport struct {
+	held  int
+	stale int
 }
 
 type sidecar struct {
@@ -111,7 +114,10 @@ type sidecar struct {
 	// held records spools discovered before their owner was known, so an
 	// attribution that never arrives is visible rather than silent. A held
 	// spool is NOT tailed: reading it would mean inventing an owner.
-	held map[string]*heldSpool // by path
+	held map[string]int64 // path -> first-seen ms
+	// lastHeldReport is the last summary written, so an unchanged backlog is
+	// not re-reported on every rescan.
+	lastHeldReport heldReport
 
 	// Store-link state machine (link.go). `cursors` is CONNECTION-SCOPED: it is
 	// recovered as the first act of every established connection and dropped the
@@ -141,7 +147,7 @@ func newSidecar(storeSocket string, roots []string, spoolRoot string, log handle
 		},
 		watchers: map[string]*watched{},
 		owners:   map[string]string{},
-		held:     map[string]*heldSpool{},
+		held:     map[string]int64{},
 		// A fresh sidecar is simply a sidecar whose link is not up yet, with its
 		// first dial due immediately. That is all "boot" means here.
 		link:      linkDown,
@@ -250,6 +256,7 @@ func (s *sidecar) rescan() {
 		}
 		s.watchers[tgt.Path] = &watched{target: tgt, tailer: tr}
 	}
+	s.reportHeld(now)
 }
 
 // resolveOwner returns the session a target's events belong to.
@@ -270,31 +277,47 @@ func (s *sidecar) resolveOwner(tgt discover.Target, nowMs int64) (string, bool) 
 		s.holdUnowned(tgt, nowMs)
 		return "", false
 	}
-	if h := s.held[tgt.Path]; h != nil {
+	if firstSeenMs, ok := s.held[tgt.Path]; ok {
 		delete(s.held, tgt.Path)
+		// Per-spool, because a hold that CLEARS is rare and is the interesting
+		// half: it says attribution arrived, and how long it took.
 		s.log("spool: owner resolved for %s task=%s session=%s after %dms held",
-			tgt.Path, tgt.TaskID, session, nowMs-h.firstSeenMs)
+			tgt.Path, tgt.TaskID, session, nowMs-firstSeenMs)
 	}
 	return session, true
 }
 
-// holdUnowned records (and reports) a spool whose owning session is not known
-// yet. First sight is logged once; a hold outliving UnownedSpoolWindow is
-// logged once more, so a mapping that never arrives surfaces instead of the
-// file simply never being read.
+// holdUnowned records a spool whose owning session is not known yet. Silent by
+// itself — reportHeld does the talking, in aggregate, once the pass is done.
 func (s *sidecar) holdUnowned(tgt discover.Target, nowMs int64) {
-	h := s.held[tgt.Path]
-	if h == nil {
-		s.held[tgt.Path] = &heldSpool{firstSeenMs: nowMs}
-		s.log("spool: HELD %s task=%s — no launching session known yet; not tailed until one is",
-			tgt.Path, tgt.TaskID)
+	if _, ok := s.held[tgt.Path]; !ok {
+		s.held[tgt.Path] = nowMs
+	}
+}
+
+// reportHeld summarizes the unattributed backlog after a rescan pass, and only
+// when it CHANGED. /tmp holds spools from every past session and project, whose
+// launch lines sit behind every cursor and will never be re-read, so the steady
+// state is a large permanent backlog: reporting it per spool (or on every pass)
+// drowns the log instead of informing it. What matters is the delta — a NEW
+// spool nothing can attribute — and that moves the counts.
+func (s *sidecar) reportHeld(nowMs int64) {
+	report := heldReport{held: len(s.held)}
+	for _, firstSeenMs := range s.held {
+		if nowMs-firstSeenMs >= UnownedSpoolWindow.Milliseconds() {
+			report.stale++
+		}
+	}
+	if report == s.lastHeldReport {
 		return
 	}
-	if !h.escalated && nowMs-h.firstSeenMs >= UnownedSpoolWindow.Milliseconds() {
-		h.escalated = true
-		s.log("spool: STILL UNOWNED after %s: %s task=%s — its launch was never observed, so it stays unread rather than being filed under a guessed session",
-			UnownedSpoolWindow, tgt.Path, tgt.TaskID)
+	s.lastHeldReport = report
+	if report.held == 0 {
+		s.log("spool: no unattributed spools remain")
+		return
 	}
+	s.log("spool: %d held awaiting attribution (%d past %s) — not tailed rather than filed under a guessed session",
+		report.held, report.stale, UnownedSpoolWindow)
 }
 
 // seedOwners populates the owner index from the store's authoritative open
