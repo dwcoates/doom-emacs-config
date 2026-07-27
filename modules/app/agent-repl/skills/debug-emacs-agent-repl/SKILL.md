@@ -238,6 +238,46 @@ Read the rolling log file (§2.1–§2.4) instead when:
 - Stub workspaces (entries without `:project-dir`) have no snapshot — they appear in the log's `STUB-CREATE` lines instead.
 - A killed buffer renders as `#<buffer nil dead>` because Emacs clears `buffer-name` on kill — the `nil` is normal, not a bug.
 
+### 2.6 Other Emacs-plane artifacts
+
+Two more files under `~/.claude-emacs/` are readable without an Emacs session.
+
+**`~/.claude-emacs/workspace-status.json`** — a JSON snapshot of **every registered workspace**, written by `workspace-status-export.el`. Use it when you want a cross-workspace view rather than one workspace's plist.
+
+- Top-level keys: `updated_at` and `workspaces`.
+- Keyword values are **stringified with the leading colon dropped** (`:thinking` → `"thinking"`), so `jq` consumers don't have to strip it.
+- Refresh is on a **staggered window**: an outer scheduler runs every 60s and stages N evenly-spaced sub-timers (N = the registered workspace count), each rewriting the full snapshot. So the file is refreshed far more often than every 60s, but any single workspace's row can still be up to a window old — don't read it as instantaneous.
+
+```sh
+jq '.updated_at' ~/.claude-emacs/workspace-status.json
+jq '.workspaces[] | {name, claude_state, repl_state}' ~/.claude-emacs/workspace-status.json
+```
+
+**`~/.claude-emacs/workspaces.el`** — the persisted workspace registry.
+
+#### 2.6.1 The `agent-repl-debug/*` command surface
+
+Defined in `keybindings.el`. These run **inside Emacs**, so dispatch them via `/runtime-eval-code` (§9) rather than asking the user, unless the command is destructive.
+
+| Command | What it does |
+|---|---|
+| `dump-workspace` | Full plist dump for one workspace (`SPC j h p`; also written to §2.5's file) |
+| `workspace-states` | State across all workspaces |
+| `buffer-info` | Buffer/panel details |
+| `refresh-state` | Recompute workspace state |
+| `clear-state` | Clear workspace state |
+| `obliterate` | **Destructive** — tear a workspace down |
+| `cancel-timers` | Cancel this workspace's pending timers |
+| `toggle-logging` | Toggle `agent-repl-debug` (`SPC j h D`) — minibuffer echo only, §2.3 |
+| `toggle-log-to-file` | Toggle file writes — leave this ON |
+| `toggle-metaprompt` | Toggle metaprompt injection |
+| `prefix-counter` | Inspect the metaprompt re-injection counter |
+| `set-owning-workspace` | Reassign a buffer's owning workspace |
+| `mock-workspace-generation` | Simulate workspace generation |
+| `workspace-clean-p` | Git-clean predicate for the workspace |
+
+Ask before running `obliterate` or `clear-state` — both destroy the state you are trying to diagnose.
+
 ## 3. The daemon plane
 
 `~/.claude-emacs/claude-repld.log` is the daemon's full stderr, teed to disk. **Three planes land in this one file** — the daemon itself, the shim (§3.4), and the webapp (§3.5) — so it is the highest-yield file in the system.
