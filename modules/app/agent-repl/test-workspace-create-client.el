@@ -56,22 +56,50 @@
       (should (equal seen '(master "source"))))))
 
 (ert-deftest agent-repl-test-workspace-create-send-includes-nonblank-prompt ()
-  "A nonblank prompt is queued by the daemon through createWorkspace."
+  "Creation carries prompt, account, permission posture, and consent."
   (let ((sent nil))
-    (cl-letf (((symbol-function 'agent-repl--uds-send-command)
+    (let ((agent-repl-frontend-permission-mode "auto")
+          (agent-repl-frontend-allow-ungated t))
+      (cl-letf (((symbol-function 'agent-repl--compute-config-dir)
+                 (lambda (dir)
+                   (should (equal dir "/tmp/source"))
+                   "/tmp/account"))
+                ((symbol-function 'agent-repl--uds-send-command)
                (lambda (field payload &optional workspace _process)
                  (setq sent (list field payload workspace))
                  "req-2"))
+                ((symbol-function 'agent-repl--uds-track-command)
+                 (lambda (&rest _) nil)))
+        (agent-repl--workspace-create-send
+         "new" "/tmp/source" "master" "source" "/tmp/source"
+         "  investigate this  " "p1" "opus")
+        (should (equal (plist-get (cadr sent) :initialPrompt)
+                       "investigate this"))
+        (should (equal (plist-get (cadr sent) :baseCommit) "master"))
+        (should (equal (plist-get (cadr sent) :priority) "p1"))
+        (should (equal (plist-get (cadr sent) :model) "opus"))
+        (should (equal (plist-get (cadr sent) :configDir) "/tmp/account"))
+        (should (equal (plist-get (cadr sent) :permissionMode) "auto"))
+        (should (eq (plist-get (cadr sent) :allowUngated) t))))))
+
+(ert-deftest agent-repl-test-workspace-create-send-explicit-default-posture ()
+  "Nil account/mode become explicit empty wire values without consent."
+  (let ((sent nil)
+        (agent-repl-frontend-permission-mode nil)
+        (agent-repl-frontend-allow-ungated nil))
+    (cl-letf (((symbol-function 'agent-repl--compute-config-dir)
+               (lambda (_dir) nil))
+              ((symbol-function 'agent-repl--uds-send-command)
+               (lambda (_field payload &rest _)
+                 (setq sent payload)
+                 "req-default"))
               ((symbol-function 'agent-repl--uds-track-command)
                (lambda (&rest _) nil)))
       (agent-repl--workspace-create-send
-       "new" "/tmp/source" "master" "source" "/tmp/source"
-       "  investigate this  " "p1" "opus")
-      (should (equal (plist-get (cadr sent) :initialPrompt)
-                     "investigate this"))
-      (should (equal (plist-get (cadr sent) :baseCommit) "master"))
-      (should (equal (plist-get (cadr sent) :priority) "p1"))
-      (should (equal (plist-get (cadr sent) :model) "opus")))))
+       "new" "/tmp/source" "master" "source" "/tmp/source" nil)
+      (should (equal (plist-get sent :configDir) ""))
+      (should (equal (plist-get sent :permissionMode) ""))
+      (should-not (plist-member sent :allowUngated)))))
 
 (ert-deftest agent-repl-test-workspace-available-validates-before-mutation ()
   "A missing authoritative field causes no materialization and no ACK."
@@ -99,7 +127,9 @@
              :worktreePath "/tmp/new" :sessionId "session-1"
              :branch "DWC/new" :gitRoot "/tmp/source"
              :baseCommit "HEAD" :sourceWorkspace "source"
-             :sourceDir "/tmp/source" :initialPromptQueued t)))
+             :sourceDir "/tmp/source" :initialPromptQueued t
+             :configDir "/tmp/account" :permissionMode "auto"
+             :allowUngated t)))
       (cl-letf (((symbol-function 'file-directory-p) (lambda (_path) t))
                 ((symbol-function 'agent-repl--ws-dir-owner)
                  (lambda (&rest _) nil))
@@ -131,6 +161,10 @@
         (should (= (length tracks) 2))
         (should (equal (agent-repl--ws-get "new" :frontend-session-id)
                        "session-1"))
+        (should (equal (agent-repl--ws-get "new" :config-dir-override)
+                       "/tmp/account"))
+        (should (equal (agent-repl--ws-get "new" :permission-mode) "auto"))
+        (should (eq (agent-repl--ws-get "new" :allow-ungated) t))
         (should (eq (agent-repl--ws-get "new" :initial-prompt-queued) t))))))
 
 (ert-deftest agent-repl-test-workspace-available-never-creates-git-session-or-shim ()
@@ -196,10 +230,12 @@
         (should-not (agent-repl--ws-known-p "broken"))
         (should-not acked)))))
 
-(ert-deftest agent-repl-test-workspace-command-create-is-not-emacs-owned ()
-  "Legacy workspace_commands create entries have no local dispatcher."
-  (should-not
-   (assoc "create" agent-repl--workspace-command-dispatch-table)))
+(ert-deftest agent-repl-test-workspace-command-files-are-not-emacs-owned ()
+  "Emacs exposes no watcher, drain, or file claimant for daemon-owned JSON."
+  (dolist (fn '(agent-repl--register-workspace-commands-watch
+                agent-repl--drain-workspace-commands-files
+                agent-repl--process-workspace-commands-file))
+    (should-not (fboundp fn))))
 
 (ert-deftest agent-repl-test-daemon-materialization-envelope-clears-on-tombstone ()
   "The replay envelope does not retain a dead workspace's session id."
@@ -231,6 +267,85 @@
       (should (equal (car completion) "hostActionCompleted"))
       (should (equal (plist-get (cadr completion) :actionId) "action-1"))
       (should (eq (plist-get (cadr completion) :ok) t)))))
+
+(ert-deftest agent-repl-test-host-action-legacy-command-translates-struct ()
+  "legacyCommand converts its recursive Struct and ACKs handler completion."
+  (let ((handled nil)
+        (completion nil)
+        (tracked nil))
+    (cl-letf (((symbol-function 'agent-repl--handle-send-command)
+               (lambda (cmd) (setq handled cmd)))
+              ((symbol-function 'agent-repl--uds-send-command)
+               (lambda (field payload &optional workspace _process)
+                 (setq completion (list field payload workspace))
+                 "host-legacy-ack"))
+              ((symbol-function 'agent-repl--uds-track-command)
+               (lambda (&rest args) (setq tracked args))))
+      (should
+       (agent-repl--workspace-create-handle-host-action
+        '(:actionId "legacy-1"
+          :legacyCommand
+          (:type "send"
+           :payload (:workspace "ws1"
+                     :data (:pgn "1. e4" :labels ("a" "b")))))))
+      (should
+       (equal handled
+              '((workspace . "ws1")
+                (data . ((pgn . "1. e4") (labels . ("a" "b")))))))
+      (should (equal (car completion) "hostActionCompleted"))
+      (should (equal (plist-get (cadr completion) :actionId) "legacy-1"))
+      (should (eq (plist-get (cadr completion) :ok) t))
+      (should (equal tracked
+                     '("host-legacy-ack" "hostActionCompleted" "ws1"))))))
+
+(ert-deftest agent-repl-test-host-action-legacy-types-are-exact ()
+  "Only the eight daemon legacy-command types resolve to host handlers."
+  (should
+   (equal
+    (mapcar #'car agent-repl--legacy-host-action-handlers)
+    '("prompt" "finish" "close" "open"
+      "clipboard" "send" "merge" "eval")))
+  (should-not (assoc "create" agent-repl--legacy-host-action-handlers)))
+
+(ert-deftest agent-repl-test-host-action-unknown-legacy-type-nacks ()
+  "Unknown legacy types fail loudly and send an unsuccessful completion."
+  (let ((completion nil))
+    (cl-letf (((symbol-function 'agent-repl--uds-send-command)
+               (lambda (field payload &rest _)
+                 (setq completion (list field payload))
+                 "host-failure-ack"))
+              ((symbol-function 'agent-repl--uds-track-command)
+               (lambda (&rest _) nil)))
+      (should-error
+       (agent-repl--workspace-create-handle-host-action
+        '(:actionId "legacy-bad"
+          :legacyCommand (:type "create" :payload (:name "forbidden")))))
+      (should (equal (car completion) "hostActionCompleted"))
+      (should (equal (plist-get (cadr completion) :actionId) "legacy-bad"))
+      (should (eq (plist-get (cadr completion) :ok) json-false))
+      (should (string-match-p
+               "unsupported HostAction legacyCommand type create"
+               (plist-get (cadr completion) :error))))))
+
+(ert-deftest agent-repl-test-host-action-handler-error-nacks-and-resignals ()
+  "A legacy handler error is ACKed false before the error escapes."
+  (let ((completion nil))
+    (cl-letf (((symbol-function 'agent-repl--handle-prompt-command)
+               (lambda (_cmd) (error "prompt handler exploded")))
+              ((symbol-function 'agent-repl--uds-send-command)
+               (lambda (_field payload &rest _)
+                 (setq completion payload)
+                 "host-failure-ack"))
+              ((symbol-function 'agent-repl--uds-track-command)
+               (lambda (&rest _) nil)))
+      (should-error
+       (agent-repl--workspace-create-handle-host-action
+        '(:actionId "legacy-handler-failure"
+          :legacyCommand
+          (:type "prompt" :payload (:workspace "ws1" :prompt "hi")))))
+      (should (eq (plist-get completion :ok) json-false))
+      (should (equal (plist-get completion :error)
+                     "prompt handler exploded")))))
 
 (ert-deftest agent-repl-test-snapshot-materializes-before-render-state ()
   "Reconnect snapshots never render a created workspace before Available."

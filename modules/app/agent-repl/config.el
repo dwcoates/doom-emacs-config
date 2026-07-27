@@ -339,6 +339,7 @@ returns the SHA string (or the sentinel \"unknown\" when undetermined)."
 (agent-repl--load-module "session")
 (agent-repl--load-module "daemon")
 (agent-repl--load-module "frontend-client")
+(agent-repl--load-module "dir-watcher")
 ;; The classified-failure vocabulary (F4): the ONE place Emacs turns a
 ;; failure into something a human reads, and the closed `client.'-prefixed
 ;; set it is allowed to classify for itself. Loaded BEFORE the transport,
@@ -392,9 +393,6 @@ returns the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; workspace.el must precede it too — every one of those is loaded above.
 (agent-repl--load-module "explain-config")
 (agent-repl--load-module "merge-handlers")
-;; WHY: dir-watcher.el is the generic watched-directory intake that
-;; worktree.el (workspace commands) registers against at load time.
-(agent-repl--load-module "dir-watcher")
 (agent-repl--load-module "worktree")
 ;; The daemon owns workspace creation.  This thin-client bridge loads after
 ;; worktree.el/sidebar.el so inbound HostAction can reuse the existing UI-only
