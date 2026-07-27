@@ -287,8 +287,6 @@ so the picker's sort-by-last-killed sees this tombstone immediately.
 No-op (beyond the log line) when WS has no hash entry — the bare ws-del
 log line preserves the pre-existing diagnostic shape."
   (let ((had-entry (not (null (gethash ws agent-repl--workspaces)))))
-    (agent-repl--log ws "ws-del: ws=%s had-entry=%s (tombstone) kill-cause=%s"
-                      ws (if had-entry "t" "nil") (agent-repl--kill-cause-str))
     (maphash (lambda (peer plist)
                (when (equal (plist-get plist :source-ws-name) ws)
                  (agent-repl--ws-put peer :source-ws-name nil)))
@@ -301,7 +299,11 @@ log line preserves the pre-existing diagnostic shape."
       (dolist (key agent-repl--ws-runtime-keys)
         (agent-repl--ws-put ws key nil))
       (agent-repl--ws-put ws :last-killed-at (current-time))
-      (agent-repl--ws-put ws :nuked-at (current-time)))))
+      (agent-repl--ws-put ws :nuked-at (current-time)))
+    ;; Keep this as the operation's final normal log.  Consumers use it as
+    ;; the canonical completed-tombstone record after setter advice settles.
+    (agent-repl--log ws "ws-del: ws=%s had-entry=%s (tombstone) kill-cause=%s"
+                     ws (if had-entry "t" "nil") (agent-repl--kill-cause-str))))
 
 ;;;; ---- Membership predicates -------------------------------------------
 
