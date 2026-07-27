@@ -57,64 +57,120 @@ lookup would be wasteful for large transcripts."
 
 ;;;; Usage extraction
 
-(defun agent-repl--context-usage-total (usage)
+(defvar agent-repl--context-log-ws nil
+  "Dynamically bound workspace whose transcript context is being read.
+`agent-repl--transcript-cached' invokes backend readers with PATH only, so
+`agent-repl--context-for-ws' binds this while its reader runs.  Keeping the
+capability's one-argument signature preserves the backend boundary while
+letting every context-reader diagnostic retain workspace metadata.")
+
+(defun agent-repl--context-usage-total (usage &optional ws)
   "Return the input-side token total from a parsed USAGE alist, or nil.
 Sums `input_tokens', `cache_creation_input_tokens', and
 `cache_read_input_tokens', treating any missing counter as 0.  Returns
 nil when USAGE is not an alist or carries none of the three counters, so
-callers can skip lines that lack usable usage."
-  (when (listp usage)
+callers can skip lines that lack usable usage.  WS supplies logging context
+when this helper runs as part of a workspace lookup."
+  (if (not (listp usage))
+      (progn
+        (agent-repl--log ws
+                         "context usage-total: usage-type=%S result=no-usage-alist"
+                         (type-of usage))
+        nil)
     (let ((keys '("input_tokens"
                   "cache_creation_input_tokens"
                   "cache_read_input_tokens"))
           (total 0)
-          (any nil))
+          (numeric-key-count 0))
       (dolist (k keys)
         (let ((v (cdr (assoc k usage))))
           (when (numberp v)
-            (setq any t)
+            (cl-incf numeric-key-count)
             (setq total (+ total v)))))
-      (when any total))))
+      (agent-repl--log ws
+                       "context usage-total: usage=%S numeric-key-count=%d total=%d result=%s"
+                       usage numeric-key-count total
+                       (if (> numeric-key-count 0) "total" "no-numeric-counters"))
+      (when (> numeric-key-count 0) total))))
 
-(defun agent-repl--context-extract-from-tail (tail)
+(defun agent-repl--context-extract-from-tail (tail &optional ws)
   "Return the most recent assistant context-token total found in TAIL, or nil.
 TAIL is the trailing chunk of a session jsonl (one JSON object per
 line).  Walks lines bottom-up so we hit the most recent assistant entry
 first.  Skips lines that are not main-chain `type:assistant' entries
 \(sidechain lines are ignored so the figure reflects the primary
-conversation), don't parse, or carry no usable `message.usage'."
-  (when (and (stringp tail) (not (string-empty-p tail)))
+conversation), don't parse, or carry no usable `message.usage'.  WS supplies
+logging context when available."
+  (if (not (and (stringp tail) (not (string-empty-p tail))))
+      (progn
+        (agent-repl--log ws
+                         "context extract: tail-type=%S empty=%s result=invalid-tail"
+                         (type-of tail) (and (stringp tail) (string-empty-p tail)))
+        nil)
     (let ((lines (split-string tail "\n" t))
-          (found nil))
+          (found nil)
+          (candidate-count 0)
+          (sidechain-count 0)
+          (parse-error-count 0)
+          (missing-message-count 0)
+          (missing-usage-count 0)
+          (no-total-count 0))
       (cl-loop for line in (nreverse lines)
                while (not found)
-               when (and (string-match-p "\"type\":\"assistant\"" line)
-                         (not (string-match-p "\"isSidechain\":true" line)))
-               do (let ((parsed (ignore-errors
-                                  (let ((json-object-type 'alist)
-                                        (json-array-type 'list)
-                                        (json-key-type 'string)
-                                        (json-false nil)
-                                        (json-null nil))
-                                    (json-read-from-string line)))))
-                    (let* ((message (and (listp parsed)
-                                         (cdr (assoc "message" parsed))))
-                           (usage (and (listp message)
-                                       (cdr (assoc "usage" message))))
-                           (total (agent-repl--context-usage-total usage)))
-                      (when total
-                        (setq found total)))))
+               do (cond
+                   ((not (string-match-p "\"type\":\"assistant\"" line)))
+                   ((string-match-p "\"isSidechain\":true" line)
+                    (cl-incf sidechain-count))
+                   (t
+                    (cl-incf candidate-count)
+                    (let ((parsed
+                           (condition-case _err
+                               (let ((json-object-type 'alist)
+                                     (json-array-type 'list)
+                                     (json-key-type 'string)
+                                     (json-false nil)
+                                     (json-null nil))
+                                 (json-read-from-string line))
+                             (error
+                              (cl-incf parse-error-count)
+                              nil))))
+                      (let* ((message (and (listp parsed)
+                                           (cdr (assoc "message" parsed))))
+                             (usage (and (listp message)
+                                         (cdr (assoc "usage" message))))
+                             (total (agent-repl--context-usage-total usage ws)))
+                        (cond
+                         ((not (listp message))
+                          (cl-incf missing-message-count))
+                         ((not (listp usage))
+                          (cl-incf missing-usage-count))
+                         (total
+                         (setq found total))
+                         (t
+                          (cl-incf no-total-count))))))))
+      (agent-repl--log ws
+                       "context extract: tail-bytes=%d lines=%d candidates=%d sidechains=%d parse-errors=%d missing-message=%d missing-usage=%d no-total=%d result=%s total=%S"
+                       (string-bytes tail) (length lines) candidate-count sidechain-count
+                       parse-error-count missing-message-count missing-usage-count no-total-count
+                       (if found "found" "no-context-usage") found)
       found)))
 
-(defun agent-repl--context-read-from-jsonl (path)
+(defun agent-repl--context-read-from-jsonl (path &optional ws)
   "Return the most recent assistant context-token total from PATH, or nil.
 Reads only the trailing `agent-repl-context-scan-bytes' (via
 `agent-repl--transcript-read-tail') so this stays cheap on large
 transcripts.  Returns nil on missing/unreadable file or when no
 assistant usage is present in the scanned tail."
-  (let ((tail (agent-repl--transcript-read-tail
-               path agent-repl-context-scan-bytes)))
-    (and tail (agent-repl--context-extract-from-tail tail))))
+  (let* ((log-ws (or ws agent-repl--context-log-ws))
+         (tail (agent-repl--transcript-read-tail
+                path agent-repl-context-scan-bytes))
+         (total (and tail (agent-repl--context-extract-from-tail tail log-ws))))
+    (agent-repl--log log-ws
+                     "context read: path=%S scan-bytes=%d tail-present=%s tail-bytes=%s result=%s total=%S"
+                     path agent-repl-context-scan-bytes (not (null tail))
+                     (and tail (string-bytes tail))
+                     (if total "context-found" "no-context-usage") total)
+    total))
 
 ;;;; Cached lookup
 
@@ -124,8 +180,16 @@ Delegates to `agent-repl--transcript-cached' with the `:context-cache'
 key and WS's backend TRANSCRIPT-CONTEXT-FN reader (this file's
 `agent-repl--context-read-from-jsonl' for the claude backend).  Returns
 nil when no usage is available."
-  (agent-repl--transcript-cached
-   ws :context-cache #'agent-repl-backend-transcript-context-fn))
+  ;; WHY: backend transcript-reader capabilities take PATH only; this dynamic
+  ;; binding keeps their diagnostic records attached to the caller's workspace.
+  (let ((agent-repl--context-log-ws ws)
+        (total (agent-repl--transcript-cached
+                ws :context-cache #'agent-repl-backend-transcript-context-fn)))
+    ;; Mode-line consumers can request this on each redisplay, so keep the
+    ;; per-lookup outcome behind verbose logging.
+    (agent-repl--log-verbose ws "context for-ws: result=%s total=%S"
+                             (if total "context-found" "no-context-usage") total)
+    total))
 
 (provide 'agent-repl-context)
 ;;; context.el ends here
