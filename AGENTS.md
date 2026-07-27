@@ -329,6 +329,8 @@ When you wrap a new external binary `X`:
 
 Agents may bounce the resident claude-repld to deploy a rebuilt binary — clients are expected to reconnect — under these rules:
 
+- **Committing to master is not deploying: always bounce what you changed, and report what you rebuilt and restarted.** `bin/build-frontend.sh` covers the shim, webapp bundle and daemon (bounce claude-repld after); the shim-store and shim-claude-sidecar launchd services are hand-deployed separately — see `modules/app/agent-repl/AGENTS.md`.
+
 - **Never bounce while a turn is in flight.** `agent-repl--frontend-stop-daemon' (and therefore `agent-repl-frontend-daemon-restart') refuses with "turn in flight" when any session reports `turn_active`; retry when idle. Do not work around the refusal with a direct `kill` — if you must kill directly (Emacs unavailable), check `GET /sessions` for `turn_active` yourself first.
 
 - **Prefer the Emacs restart path** (`agent-repl-frontend-daemon-restart` via emacsclient): it serializes concurrent bounces, runs build-if-stale, and its refusal semantics are the policy.
