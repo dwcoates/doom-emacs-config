@@ -200,9 +200,8 @@ EMACS_PROBE_OUT=""
 if ! EMACS_PROBE_OUT="$("$EMACSCLIENT" --eval t 2>&1)"; then
     case "$EMACS_PROBE_OUT" in
         *"can't find socket"*|*"No socket or alternate editor"*|*"Could not connect to the Emacs daemon"*|*"Connection refused"*)
-            log "daemon: Emacs server probe unavailable: $EMACS_PROBE_OUT"
-            log "daemon: restart deferred; Emacs server is unavailable"
-            log "daemon: the rebuilt backend will start when Emacs starts"
+            log "daemon: Emacs is not running; restart deferred until Emacs starts"
+            log "daemon: the rebuilt backend will start automatically at startup"
             if [ -n "$ELISP_RANGE" ]; then
                 log "elisp: reload deferred; Emacs will load the changed files at startup"
             fi
