@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	corev1 "agentrepl/proto/agentshim/core/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 	"claude-repld/internal/registry"
 	"claude-repld/internal/server"
@@ -296,6 +297,35 @@ func (c daemonSessionCreator) EnsureSession(ctx context.Context, job workspacecr
 // the workspace-ready invariant to Ensure/AwaitReady.
 type WorkspaceHealthProbe interface {
 	CheckWorkspaceHealth(context.Context, string, string, string) error
+}
+
+// sessionDriverHealthProbe turns the driver's correlated shim health RPC into
+// the create manager's hard readiness gate.  It deliberately rejects a nil or
+// unhealthy reply; a shim connection alone is not evidence that the complete
+// daemon-to-shim path is usable.
+type sessionDriverHealthProbe struct {
+	Driver interface {
+		Health(context.Context, string, string, string) (*corev1.HealthStatus, error)
+	}
+	Logf func(string, ...any)
+}
+
+func (h sessionDriverHealthProbe) CheckWorkspaceHealth(ctx context.Context, workspace, sessionID, requestID string) error {
+	if h.Driver == nil || h.Logf == nil {
+		return fmt.Errorf("workspace create: session health probe is not fully configured")
+	}
+	status, err := h.Driver.Health(ctx, workspace, sessionID, requestID)
+	if err != nil {
+		return fmt.Errorf("workspace create: health rpc workspace=%s session=%s job=%s: %w", workspace, sessionID, requestID, err)
+	}
+	if status == nil {
+		return fmt.Errorf("workspace create: health rpc workspace=%s session=%s job=%s returned no status", workspace, sessionID, requestID)
+	}
+	if !status.GetHealthy() {
+		return fmt.Errorf("workspace create: health rpc workspace=%s session=%s job=%s component=%q unhealthy: %s", workspace, sessionID, requestID, status.GetComponent(), status.GetReason())
+	}
+	h.Logf("workspace-create: health confirmed workspace=%s session=%s job=%s component=%q", workspace, sessionID, requestID, status.GetComponent())
+	return nil
 }
 
 type daemonSessionHealth struct{ Probe WorkspaceHealthProbe }
