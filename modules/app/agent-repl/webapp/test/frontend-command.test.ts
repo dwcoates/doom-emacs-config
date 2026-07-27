@@ -15,7 +15,7 @@ describe("encodeFrontendCommand — envelope", () => {
     const w = wire({
       requestId: "r1",
       workspace: "ws-a",
-      body: { case: "interrupt", hard: true },
+      body: { case: "interrupt", confirmAgents: true },
     });
     expect(w.requestId).toBe("r1");
     expect(w.workspace).toBe("ws-a");
@@ -43,9 +43,13 @@ describe("encodeFrontendCommand — submitPrompt", () => {
 });
 
 describe("encodeFrontendCommand — interrupt", () => {
-  it("encodes the hard flag", () => {
-    const w = wire({ requestId: "r1", workspace: "ws", body: { case: "interrupt", hard: false } });
-    expect(w.interrupt).toEqual({ hard: false });
+  it("encodes the confirm-agents flag", () => {
+    const w = wire({
+      requestId: "r1",
+      workspace: "ws",
+      body: { case: "interrupt", confirmAgents: false },
+    });
+    expect(w.interrupt).toEqual({ confirmAgents: false });
   });
 });
 

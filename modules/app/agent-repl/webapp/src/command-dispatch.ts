@@ -135,8 +135,8 @@ export class CommandDispatcher {
     return this.dispatch(workspace, { case: "submitPrompt", text, permissionMode });
   }
 
-  interrupt(workspace: string, hard = false): Promise<void> {
-    return this.dispatch(workspace, { case: "interrupt", hard });
+  interrupt(workspace: string, confirmAgents = false): Promise<void> {
+    return this.dispatch(workspace, { case: "interrupt", confirmAgents });
   }
 
   permissionAnswer(workspace: string, args: PermissionAnswerArgs): Promise<void> {

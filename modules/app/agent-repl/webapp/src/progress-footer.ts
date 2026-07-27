@@ -107,6 +107,11 @@ export function phaseLabel(state: WebRenderState): PhaseLabel {
       return { word: "permission", tone: "retry", spinning: false };
     case "done":
       return { word: "done", tone: "ok", spinning: false };
+    // GREEN like done: an interrupted turn is a CONCLUDED turn — the user
+    // asked for the stop, got it, and can prompt again immediately. The word
+    // is the distinction; the color claim is the same.
+    case "interrupted":
+      return { word: "interrupted", tone: "ok", spinning: false };
     // GREEN, not muted: idle and ready are the same claim as done — the
     // route works and the agent is available. Greying them said "nothing to
     // see here" about a workspace that was ready to be used.

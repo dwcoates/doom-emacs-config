@@ -159,7 +159,7 @@ func TestServeWSSnapshotThenCommandAck(t *testing.T) {
 
 	// Act 2: command + ack.
 	cmdData, err := protojson.Marshal(&frontendv1.FrontendCommand{
-		RequestId: "cws", Command: &frontendv1.FrontendCommand_Interrupt{Interrupt: &frontendv1.InterruptCmd{Hard: true}},
+		RequestId: "cws", Command: &frontendv1.FrontendCommand_Interrupt{Interrupt: &frontendv1.InterruptCmd{}},
 	})
 	if err != nil {
 		t.Fatalf("marshal cmd: %v", err)

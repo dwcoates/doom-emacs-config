@@ -44,14 +44,14 @@ export interface SdkControlTarget {
     permissionMode?: string;
   }): void;
   /**
-   * Interrupt the current turn. `hard` maps to the SDK `interrupt()`.
+   * Interrupt the current turn via the SDK `interrupt()`.
    *
    * Returns the THREE-VALUED outcome, decided SYNCHRONOUSLY. The
    * implementation owns turn lifecycle, so only it can answer "was a turn
    * live when this landed?" without racing — see the emitter in
    * uds-session.ts for why that read must precede every await.
    */
-  interrupt(input: { requestId: string; hard: boolean }): InterruptOutcome;
+  interrupt(input: { requestId: string }): InterruptOutcome;
 }
 
 /** The shim's own resolution of a canUseTool request. */
@@ -122,7 +122,7 @@ export class ControlDispatch {
    */
   handleInterrupt(msg: Interrupt): Ack | Nack {
     try {
-      const outcome = this.target.interrupt({ requestId: msg.requestId, hard: msg.hard });
+      const outcome = this.target.interrupt({ requestId: msg.requestId });
       return create(AckSchema, { requestId: msg.requestId, interruptOutcome: outcome });
     } catch (err) {
       shimLog(COMPONENT, { request: msg.requestId }, `interrupt failed: ${errMsg(err)}`);

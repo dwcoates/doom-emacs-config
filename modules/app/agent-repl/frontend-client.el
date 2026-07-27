@@ -970,14 +970,16 @@ Sends the UDS `interrupt' command keyed by WS's cwd
 \(`agent-repl--frontend-ws-command-key' — the daemon resolves that cwd ->
 session).  KIND (`escape' = `C-c C-k' STOP, `ctrl-c' = `C-c C-c' clear
 draft) no longer changes the wire request: frontend.v1's `InterruptCmd'
-carries only `hard' and NO retract id, so the retract half of the old
-`C-c C-k' undo is gone (it was already a daemon no-op post-cutover — the
-daemon's HTTP interrupt always reported retracted=false).  Always returns
-t: the interrupt is dispatched, never `retracted'."
+carries only `confirm_agents' (the answer to the daemon's
+interrupt-confirmation challenge) and NO retract id, so the retract half
+of the old `C-c C-k' undo is gone (it was already a daemon no-op
+post-cutover — the daemon's HTTP interrupt always reported
+retracted=false).  Always returns t: the interrupt is dispatched, never
+`retracted'."
   (let ((id (agent-repl--ws-get ws :frontend-session-id))
         (key (agent-repl--frontend-ws-command-key ws)))
-    ;; nil payload -> the daemon reads InterruptCmd{} (hard=false), the same
-    ;; soft interrupt the retired HTTP route drove.
+    ;; nil payload -> the daemon reads InterruptCmd{} (confirm_agents=false),
+    ;; a plain stop of the live turn.
     (let ((req (agent-repl--uds-send-command "interrupt" nil key)))
       (agent-repl--uds-track-command req "interrupt" ws)
       (agent-repl--log ws "interrupt[gui]: ws=%s session=%s kind=%s (uds interrupt)"

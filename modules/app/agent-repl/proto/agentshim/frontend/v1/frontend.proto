@@ -95,6 +95,11 @@ enum RenderState {
   // cause chain distinguishes "never ran" from "ran and finished".
   RENDER_STATE_READY = 15;
   RENDER_STATE_VENDOR_BLOCKED = 16;
+  // Additive (I1): a turn OUTCOME on the agent axis, exactly as DONE and
+  // VENDOR_BLOCKED are: it reports that the LAST turn ended because a stop
+  // was delivered (core.InterruptOutcome INTERRUPTED), and the next
+  // agent-axis row supersedes it. Never a latch, never needs releasing.
+  RENDER_STATE_INTERRUPTED = 17;
 }
 
 message FrontendFrame {
@@ -697,8 +702,17 @@ message SubmitPromptCmd {
   string permission_mode = 2;
 }
 
+// Stop the running turn. Interrupting a LIVE TURN never asks for
+// confirmation. When no turn is live but subagent tasks are, the daemon
+// refuses with CommandAck.interrupt_confirm_required and performs the
+// interrupt only on a resend carrying confirm_agents=true — stopping working
+// subagents is the one interrupt worth a deliberate second keystroke.
+//
+// (The retired `hard` flag also lived at field 1: it promised a soft variant
+// no layer implemented, and was deleted rather than reserved — this repo had
+// no live frontend commitments at the time.)
 message InterruptCmd {
-  bool hard = 1;
+  bool confirm_agents = 1;
 }
 
 message PermissionAnswerCmd {
@@ -840,6 +854,19 @@ message CommandAck {
   // refusal as a failure card instead of as a log line or as nothing.
   // Unset when ok is true.
   SystemFailureItem failure = 4;
+  // Additive (I1): the interrupt confirmation CHALLENGE. Not a failure and
+  // not an error: the command was understood and deliberately not performed,
+  // because no turn was live and stopping live subagents deserves an
+  // explicit yes. Set with ok=false and `failure` unset; the client asks the
+  // user and resends InterruptCmd{confirm_agents: true}.
+  InterruptConfirmRequired interrupt_confirm_required = 5;
+}
+
+// The challenge payload: what the interrupt would actually stop, so the
+// client can render a concrete question ("interrupt 3 running subagents?")
+// rather than a bare are-you-sure.
+message InterruptConfirmRequired {
+  int64 live_tasks = 1;
 }
 
 // ---------------------------------------------------------------------------
@@ -885,6 +912,18 @@ message RateLimitWindow {
   int64 resets_at = 2;    // epoch SECONDS (the vendor event's own unit)
   double utilization = 3;
   string status = 4;      // e.g. "allowed_warning"
+}
+
+// Additive (I1): the interrupt window. Opens the moment the shim's ack
+// lands — the outcome is decided ATOMICALLY on that ack (core.proto
+// InterruptOutcome: the shim's single-threaded liveness check is the
+// answer), so there is no outcome-pending phase to represent. Clears when
+// the next turn starts. `outcome` is carried so ALREADY_COMPLETE and FAILED
+// render distinctly even though neither moves the workspace's phase.
+message InterruptWindow {
+  bool active = 1;
+  int64 since_ms = 2;
+  agentshim.core.v1.InterruptOutcome outcome = 3;
 }
 
 message ProgressView {
@@ -938,6 +977,9 @@ message ProgressView {
   // see: the session can be blocked on an interaction the daemon holds no
   // count for, so `pending_permissions` alone under-reports "waiting on you".
   ProgressWindow blocked = 18;
+
+  // Additive (I1): see InterruptWindow. Ack-opened, next-turn-cleared.
+  InterruptWindow interrupt = 20;
 
   // The CLASSIFIED error state (F4), superseding the free-string
   // error_summary/error_item_uuid (RETIRED, step 11) — this failure's own

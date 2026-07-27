@@ -883,6 +883,7 @@ Returns:
     (:done           . "✅")
     (:ready          . "✅")
     (:idle           . "✅")
+    (:interrupted    . "✋")
     (:idle-async     . "🌙")
     (:permission     . "❓")
     (:vendor-blocked . "⛔")

@@ -723,7 +723,7 @@ describe("UdsSession permission round-trip", () => {
     const decision: Promise<PermissionResultLike> = query.canUseTool("Bash", { command: "rm" }, { signal: ac.signal });
     await daemon.next(PermissionRequestSchema);
     // Act
-    daemon.send(InterruptSchema, create(InterruptSchema, { requestId: "i1", hard: true }));
+    daemon.send(InterruptSchema, create(InterruptSchema, { requestId: "i1" }));
     await daemon.next(AckSchema);
     // Assert: the SDK was interrupted and the blocked callback resolved as deny.
     await until(() => query.interruptCalls >= 1);
@@ -736,7 +736,7 @@ describe("UdsSession permission round-trip", () => {
     const { query, daemon } = await rig();
     query.interruptReceipt = { still_queued: ["u-1", "u-2"] };
     // Act
-    daemon.send(InterruptSchema, create(InterruptSchema, { requestId: "i1", hard: true }));
+    daemon.send(InterruptSchema, create(InterruptSchema, { requestId: "i1" }));
     await daemon.next(AckSchema);
     // Assert: the survivors are surfaced, not swallowed into a log line.
     const evt = await daemon.next(EventSchema);
@@ -751,7 +751,7 @@ describe("UdsSession permission round-trip", () => {
     const { query, store, daemon } = await rig();
     query.interruptReceipt = { still_queued: [] };
     // Act
-    daemon.send(InterruptSchema, create(InterruptSchema, { requestId: "i1", hard: true }));
+    daemon.send(InterruptSchema, create(InterruptSchema, { requestId: "i1" }));
     await daemon.next(AckSchema);
     await until(() => query.interruptCalls >= 1);
     // Assert: the FIRST Event to arrive is the store outage deliberately
@@ -775,7 +775,7 @@ describe("UdsSession interrupt outcome", () => {
     await daemon.next(AckSchema);
     await until(() => session.turnCount() === 1);
     // Act
-    daemon.send(InterruptSchema, create(InterruptSchema, { requestId: "i1", hard: true }));
+    daemon.send(InterruptSchema, create(InterruptSchema, { requestId: "i1" }));
     const ack = await daemon.next(AckSchema);
     // Assert
     expect(ack.interruptOutcome).toBe(InterruptOutcome.INTERRUPTED);
@@ -786,7 +786,7 @@ describe("UdsSession interrupt outcome", () => {
     const { daemon, session } = await rig();
     expect(session.turnCount()).toBe(0);
     // Act
-    daemon.send(InterruptSchema, create(InterruptSchema, { requestId: "i1", hard: true }));
+    daemon.send(InterruptSchema, create(InterruptSchema, { requestId: "i1" }));
     const ack = await daemon.next(AckSchema);
     // Assert — a SUCCESS: the user asked for the turn to be over and it is.
     // The old two-valued reading painted precisely this as a failed stop.
@@ -807,7 +807,7 @@ describe("UdsSession interrupt outcome", () => {
     } as unknown as SdkMessageLike);
     await until(() => session.turnCount() === 0);
     // Act
-    daemon.send(InterruptSchema, create(InterruptSchema, { requestId: "i1", hard: true }));
+    daemon.send(InterruptSchema, create(InterruptSchema, { requestId: "i1" }));
     const ack = await daemon.next(AckSchema);
     // Assert
     expect(ack.interruptOutcome).toBe(InterruptOutcome.ALREADY_COMPLETE);
@@ -824,7 +824,7 @@ describe("UdsSession interrupt outcome", () => {
     daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go" }));
     await daemon.next(AckSchema);
     await until(() => session.turnCount() === 1);
-    daemon.send(InterruptSchema, create(InterruptSchema, { requestId: "i1", hard: true }));
+    daemon.send(InterruptSchema, create(InterruptSchema, { requestId: "i1" }));
     const ack = await daemon.next(AckSchema);
     // Act: the turn ends AFTERWARDS.
     query.emit({
@@ -854,7 +854,7 @@ describe("UdsSession interrupt outcome", () => {
     await until(() => session.turnCount() === 1);
     // Act: the stop is sent over the socket, but the result — emitted
     // synchronously into the SDK stream — closes the turn before it lands.
-    daemon.send(InterruptSchema, create(InterruptSchema, { requestId: "i1", hard: true }));
+    daemon.send(InterruptSchema, create(InterruptSchema, { requestId: "i1" }));
     query.emit({
       type: "result",
       uuid: "r1",
@@ -877,7 +877,7 @@ describe("UdsSession interrupt outcome", () => {
       query.canUseTool("Bash", { command: "ls" }, { signal: ac.signal });
     await daemon.next(PermissionRequestSchema);
     // Act
-    daemon.send(InterruptSchema, create(InterruptSchema, { requestId: "i1", hard: true }));
+    daemon.send(InterruptSchema, create(InterruptSchema, { requestId: "i1" }));
     const ack = await daemon.next(AckSchema);
     // Assert: the outcome rides along without disturbing the cancel path.
     expect(ack.interruptOutcome).toBe(InterruptOutcome.INTERRUPTED);
@@ -892,7 +892,7 @@ describe("UdsSession interrupt outcome", () => {
     await daemon.next(AckSchema);
     await until(() => session.turnCount() === 1);
     // Act
-    daemon.send(InterruptSchema, create(InterruptSchema, { requestId: "i1", hard: true }));
+    daemon.send(InterruptSchema, create(InterruptSchema, { requestId: "i1" }));
     const ack = await daemon.next(AckSchema);
     // Assert: the outcome is on the ack, and the survivors still reach the
     // daemon on their own DegradedState channel.
@@ -966,7 +966,7 @@ describe("UdsSession interrupt outcome", () => {
     await daemon.next(AckSchema);
     await until(() => session.turnCount() === 1);
     // Act
-    daemon.send(InterruptSchema, create(InterruptSchema, { requestId: "i1", hard: true }));
+    daemon.send(InterruptSchema, create(InterruptSchema, { requestId: "i1" }));
     const ack = await daemon.next(AckSchema);
     // Assert
     expect(ack.interruptOutcome).toBe(InterruptOutcome.INTERRUPTED);
@@ -977,7 +977,7 @@ describe("UdsSession interrupt outcome", () => {
     const { daemon, session } = await rig();
     expect(session.turnCount()).toBe(0);
     // Act
-    daemon.send(InterruptSchema, create(InterruptSchema, { requestId: "i1", hard: true }));
+    daemon.send(InterruptSchema, create(InterruptSchema, { requestId: "i1" }));
     const ack = await daemon.next(AckSchema);
     // Assert — a SUCCESS: the user asked for the turn to be over and it is.
     // The old two-valued reading painted precisely this as a failed stop.
@@ -998,7 +998,7 @@ describe("UdsSession interrupt outcome", () => {
     } as unknown as SdkMessageLike);
     await until(() => session.turnCount() === 0);
     // Act
-    daemon.send(InterruptSchema, create(InterruptSchema, { requestId: "i1", hard: true }));
+    daemon.send(InterruptSchema, create(InterruptSchema, { requestId: "i1" }));
     const ack = await daemon.next(AckSchema);
     // Assert
     expect(ack.interruptOutcome).toBe(InterruptOutcome.ALREADY_COMPLETE);
@@ -1015,7 +1015,7 @@ describe("UdsSession interrupt outcome", () => {
     daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go" }));
     await daemon.next(AckSchema);
     await until(() => session.turnCount() === 1);
-    daemon.send(InterruptSchema, create(InterruptSchema, { requestId: "i1", hard: true }));
+    daemon.send(InterruptSchema, create(InterruptSchema, { requestId: "i1" }));
     const ack = await daemon.next(AckSchema);
     // Act: the turn ends AFTERWARDS.
     query.emit({
@@ -1045,7 +1045,7 @@ describe("UdsSession interrupt outcome", () => {
     await until(() => session.turnCount() === 1);
     // Act: the stop is sent over the socket, but the result — emitted
     // synchronously into the SDK stream — closes the turn before it lands.
-    daemon.send(InterruptSchema, create(InterruptSchema, { requestId: "i1", hard: true }));
+    daemon.send(InterruptSchema, create(InterruptSchema, { requestId: "i1" }));
     query.emit({
       type: "result",
       uuid: "r1",
@@ -1068,7 +1068,7 @@ describe("UdsSession interrupt outcome", () => {
       query.canUseTool("Bash", { command: "ls" }, { signal: ac.signal });
     await daemon.next(PermissionRequestSchema);
     // Act
-    daemon.send(InterruptSchema, create(InterruptSchema, { requestId: "i1", hard: true }));
+    daemon.send(InterruptSchema, create(InterruptSchema, { requestId: "i1" }));
     const ack = await daemon.next(AckSchema);
     // Assert: the outcome rides along without disturbing the cancel path.
     expect(ack.interruptOutcome).toBe(InterruptOutcome.INTERRUPTED);
@@ -1083,7 +1083,7 @@ describe("UdsSession interrupt outcome", () => {
     await daemon.next(AckSchema);
     await until(() => session.turnCount() === 1);
     // Act
-    daemon.send(InterruptSchema, create(InterruptSchema, { requestId: "i1", hard: true }));
+    daemon.send(InterruptSchema, create(InterruptSchema, { requestId: "i1" }));
     const ack = await daemon.next(AckSchema);
     // Assert: the outcome is on the ack, and the survivors still reach the
     // daemon on their own DegradedState channel.

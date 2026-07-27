@@ -41,7 +41,7 @@ func openTestSSM(t *testing.T, reg *registry.Registry) *ssm.Manager {
 
 type fakePrompts struct {
 	prompted   []string
-	interrupts []bool
+	interrupts []string
 	perms      []string
 	err        error
 }
@@ -50,8 +50,8 @@ func (f *fakePrompts) SubmitPrompt(_ context.Context, ws, text, _ string) error 
 	f.prompted = append(f.prompted, ws+":"+text)
 	return f.err
 }
-func (f *fakePrompts) Interrupt(_ context.Context, _ string, hard bool) error {
-	f.interrupts = append(f.interrupts, hard)
+func (f *fakePrompts) Interrupt(_ context.Context, ws string) error {
+	f.interrupts = append(f.interrupts, ws)
 	return f.err
 }
 func (f *fakePrompts) AnswerPermission(_ context.Context, _, permReqID string, _ bool, _ string, _ *structpb.Struct) error {
@@ -222,9 +222,9 @@ func TestCommandHandlerInterruptRoutesToPrompts(t *testing.T) {
 	// Arrange
 	h, p, _, _ := newTestHandler(t)
 	// Act
-	_ = h.Interrupt(context.Background(), "/ws1", "r1", &frontendv1.InterruptCmd{Hard: true})
+	_ = h.Interrupt(context.Background(), "/ws1", "r1", &frontendv1.InterruptCmd{})
 	// Assert
-	if len(p.interrupts) != 1 || !p.interrupts[0] {
+	if len(p.interrupts) != 1 || p.interrupts[0] != "/ws1" {
 		t.Fatalf("interrupts = %v", p.interrupts)
 	}
 }

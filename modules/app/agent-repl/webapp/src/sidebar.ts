@@ -66,6 +66,7 @@ export const WORKSPACE_STATUSES: ReadonlySet<string> = new Set([
   "thinking",
   "permission",
   "done",
+  "interrupted",
   "ready",
   "idle-async",
   "vendor-blocked",

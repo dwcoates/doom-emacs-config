@@ -674,6 +674,7 @@ Distributed evenly across `agent-repl-flash-count' on/off cycles."
     (:idle           . "green")
     (:ready          . "green")
     (:done           . "green")
+    (:interrupted    . "green")
     (:permission     . "green")
     (:merging        . "none")
     (:merge-queued   . "none")

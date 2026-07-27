@@ -48,16 +48,16 @@ func (c *Client) SubmitPrompt(ctx context.Context, text, origin, permissionMode 
 	return err
 }
 
-// Interrupt asks the shim to interrupt the current turn (hard = SDK
-// interrupt(); soft = end after the current message) and awaits the Ack/Nack.
+// Interrupt asks the shim to interrupt the current turn (the SDK's
+// interrupt()) and awaits the Ack/Nack.
 //
 // It returns the shim's OWN verdict on what the stop did. That verdict is
 // only obtainable here: from outside, a stop that failed and a turn that had
 // already ended arrive as the same silence, which is how a no-op stop came to
 // be painted as a failed one. A Nack or timeout is still an error, unchanged.
-func (c *Client) Interrupt(ctx context.Context, hard bool) (corev1.InterruptOutcome, error) {
+func (c *Client) Interrupt(ctx context.Context) (corev1.InterruptOutcome, error) {
 	reqID := c.newRequestID("interrupt")
-	ack, err := c.sendAwait(ctx, &corev1.Interrupt{RequestId: reqID, Hard: hard})
+	ack, err := c.sendAwait(ctx, &corev1.Interrupt{RequestId: reqID})
 	if err != nil {
 		return corev1.InterruptOutcome_INTERRUPT_OUTCOME_UNSPECIFIED, err
 	}

@@ -132,7 +132,7 @@ func TestDispatchRoutesEachCommand(t *testing.T) {
 		},
 		{
 			name:    "interrupt",
-			cmd:     &frontendv1.FrontendCommand{RequestId: "r2", Workspace: "ws2", Command: &frontendv1.FrontendCommand_Interrupt{Interrupt: &frontendv1.InterruptCmd{Hard: true}}},
+			cmd:     &frontendv1.FrontendCommand{RequestId: "r2", Workspace: "ws2", Command: &frontendv1.FrontendCommand_Interrupt{Interrupt: &frontendv1.InterruptCmd{}}},
 			wantHit: "interrupt",
 		},
 		{

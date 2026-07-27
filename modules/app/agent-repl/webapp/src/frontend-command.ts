@@ -38,10 +38,12 @@ export interface SubmitPromptBody {
   permissionMode: string;
 }
 
-/** InterruptCmd — stop the running turn (hard = SDK interrupt, soft = after msg). */
+/** InterruptCmd — stop the running turn. `confirmAgents` answers the daemon's
+ * interrupt_confirm_required challenge: false asks, true confirms stopping
+ * live subagents when no turn is in flight. */
 export interface InterruptBody {
   case: "interrupt";
-  hard: boolean;
+  confirmAgents: boolean;
 }
 
 /** PermissionAnswerCmd — resolve a pending canUseTool request. */
@@ -222,7 +224,7 @@ function encodeBody(b: FrontendCommandBody): Record<string, unknown> {
     case "submitPrompt":
       return { text: b.text, permissionMode: b.permissionMode };
     case "interrupt":
-      return { hard: b.hard };
+      return { confirmAgents: b.confirmAgents };
     case "permissionAnswer": {
       const arm: Record<string, unknown> = {
         permissionRequestId: b.permissionRequestId,

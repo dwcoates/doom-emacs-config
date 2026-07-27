@@ -46,6 +46,7 @@
     "RENDER_STATE_IDLE": "green",
     "RENDER_STATE_READY": "green",
     "RENDER_STATE_DONE": "green",
+    "RENDER_STATE_INTERRUPTED": "green",
     "RENDER_STATE_PERMISSION": "green",
 
     "RENDER_STATE_MERGING": "none",

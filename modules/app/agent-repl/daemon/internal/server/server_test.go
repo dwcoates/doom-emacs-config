@@ -1194,7 +1194,7 @@ func TestFrontendCommandTranslatorRoutesEachCommand(t *testing.T) {
 		ok   func(*frontendv1.FrontendCommand) bool
 	}{
 		{"submit", &frontendv1.FrontendCommand{RequestId: "r1", Command: &frontendv1.FrontendCommand_SubmitPrompt{SubmitPrompt: &frontendv1.SubmitPromptCmd{Text: "hi"}}}, func(c *frontendv1.FrontendCommand) bool { return c.GetSubmitPrompt().GetText() == "hi" }},
-		{"interrupt", &frontendv1.FrontendCommand{RequestId: "r2", Command: &frontendv1.FrontendCommand_Interrupt{Interrupt: &frontendv1.InterruptCmd{Hard: true}}}, func(c *frontendv1.FrontendCommand) bool { return c.GetInterrupt().GetHard() }},
+		{"interrupt", &frontendv1.FrontendCommand{RequestId: "r2", Command: &frontendv1.FrontendCommand_Interrupt{Interrupt: &frontendv1.InterruptCmd{ConfirmAgents: true}}}, func(c *frontendv1.FrontendCommand) bool { return c.GetInterrupt().GetConfirmAgents() }},
 		{"permission-answer", &frontendv1.FrontendCommand{RequestId: "r3", Command: &frontendv1.FrontendCommand_PermissionAnswer{PermissionAnswer: &frontendv1.PermissionAnswerCmd{PermissionRequestId: "perm-1", Allow: true}}}, func(c *frontendv1.FrontendCommand) bool {
 			return c.GetPermissionAnswer().GetPermissionRequestId() == "perm-1" && c.GetPermissionAnswer().GetAllow()
 		}},
