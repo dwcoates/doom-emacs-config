@@ -76,9 +76,20 @@ type fakeClient struct {
 	// (the default) means the connection is already usable, so tests that do
 	// not care about bring-up timing are unaffected.
 	notReady chan struct{}
+	// runResult, when non-nil, makes Run terminate with the received error.
+	// This models a protocol failure that evicts the driver without Hibernate.
+	runResult chan error
 }
 
 func (c *fakeClient) Run(ctx context.Context) error {
+	if c.runResult != nil {
+		select {
+		case err := <-c.runResult:
+			return err
+		case <-ctx.Done():
+			return nil
+		}
+	}
 	<-ctx.Done()
 	return nil
 }
@@ -518,7 +529,7 @@ func TestHibernateSessionStopsTheMatchingSession(t *testing.T) {
 	}
 }
 
-func TestHibernateSessionLeavesADifferentSessionRunning(t *testing.T) {
+func TestHibernateSessionStopsOnlyTheRequestedDifferentSession(t *testing.T) {
 	// Arrange: s1 is the live driver for ws.
 	spawner := &fakeSpawner{}
 	m, _ := newTestManager(t, fakeLocator{m: map[string]string{"ws": "s1"}}, spawner)
@@ -529,12 +540,13 @@ func TestHibernateSessionLeavesADifferentSessionRunning(t *testing.T) {
 	// Act: stand down a STALE record that shares the cwd (the orphan reap).
 	err := m.HibernateSession("ws", "s_orphan")
 
-	// Assert: nothing was stopped, and the refusal is distinguishable.
-	if !errors.Is(err, ErrNotLiveSession) {
-		t.Fatalf("err = %v, want ErrNotLiveSession", err)
+	// Assert: the stale process handle is reachable by id; the live shim is
+	// untouched even though both records share the workspace.
+	if err != nil {
+		t.Fatalf("HibernateSession: %v", err)
 	}
-	if len(spawner.stopped) != 0 {
-		t.Fatalf("stopped = %v, want none (s1 must survive)", spawner.stopped)
+	if !reflect.DeepEqual(spawner.stopped, []string{"s_orphan"}) {
+		t.Fatalf("stopped = %v, want [s_orphan] (s1 must survive)", spawner.stopped)
 	}
 }
 
@@ -558,19 +570,71 @@ func TestHibernateSessionKeepsTheDriverLiveOnAMismatch(t *testing.T) {
 	}
 }
 
-func TestHibernateSessionOnAnUnbroughtUpWorkspaceErrors(t *testing.T) {
-	// Arrange: nothing brought up.
-	m, _ := newTestManager(t, fakeLocator{m: map[string]string{"ws": "s1"}}, &fakeSpawner{})
+func TestHibernateSessionStopsAnEvictedSessionsProcess(t *testing.T) {
+	// Arrange: no byWS driver remains, but the spawner still owns the process
+	// handle created before the driver failed.
+	spawner := &fakeSpawner{}
+	m, _ := newTestManager(t, fakeLocator{m: map[string]string{"ws": "s1"}}, spawner)
 
-	// Act
+	// Act.
 	err := m.HibernateSession("ws", "s1")
 
-	// Assert: the "nothing to hibernate" error, NOT the identity refusal.
-	if err == nil {
-		t.Fatal("hibernating an unbrought-up workspace must error")
+	// Assert: session identity is sufficient; absence from byWS must not make
+	// the child process unreachable.
+	if err != nil {
+		t.Fatalf("HibernateSession: %v", err)
 	}
-	if errors.Is(err, ErrNotLiveSession) {
-		t.Fatalf("err = %v, want the no-live-session error", err)
+	if !reflect.DeepEqual(spawner.stopped, []string{"s1"}) {
+		t.Fatalf("stopped = %v, want [s1]", spawner.stopped)
+	}
+}
+
+func TestTerminalDriverErrorStopsShimAfterEviction(t *testing.T) {
+	// Arrange: a client whose Run loop terminates independently, reproducing
+	// the sequence-regression path that left the shim parked and unreachable.
+	spawner := &fakeSpawner{}
+	runResult := make(chan error, 1)
+	var client *fakeClient
+	m, err := New(Config{
+		Push:            &fakePusher{},
+		SSM:             &fakeApplier{},
+		Spawner:         spawner,
+		Locator:         fakeLocator{m: map[string]string{"ws": "s1"}},
+		SeqStore:        &fakeSeqStore{seq: map[string]uint64{}},
+		ProtocolVersion: "1",
+		Source:          stubSource{},
+		newClient: func(cfg shimclient.Config) sessionClient {
+			client = &fakeClient{cfg: cfg, runResult: runResult}
+			return client
+		},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(m.Close)
+	if err := m.SubmitPrompt(context.Background(), "ws", "hi", ""); err != nil {
+		t.Fatalf("SubmitPrompt: %v", err)
+	}
+
+	// Act.
+	runResult <- errors.New("sequence regression")
+
+	// Assert: Run's terminal return evicts the driver and stops its exact shim.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		spawner.mu.Lock()
+		stopped := append([]string(nil), spawner.stopped...)
+		spawner.mu.Unlock()
+		if reflect.DeepEqual(stopped, []string{"s1"}) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("stopped = %v, want [s1]", stopped)
+		}
+		runtime.Gosched()
+	}
+	if _, err := m.existing("ws"); err == nil {
+		t.Fatal("driver still present after terminal Run error")
 	}
 }
 
