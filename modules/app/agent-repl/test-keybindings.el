@@ -518,17 +518,26 @@ contains no `modules/app/agent-repl/config.el', reload falls back to
 
 (ert-deftest agent-repl-test-kill-owned-panel-buffers-silences-process ()
   "kill-owned-panel-buffers should silence process query before killing."
-  (let ((buf (get-buffer-create "*agent-frontend-99887766*")))
+  (let ((buf (get-buffer-create "*agent-frontend-99887766*"))
+        (fake-proc 'fake-agent-process)
+        (silenced nil)
+        (killed nil))
     (unwind-protect
-        (let ((proc (start-process "test-proc" buf "cat")))
-          (set-process-query-on-exit-flag proc t)
+        (progn
           (with-current-buffer buf
             (setq-local agent-repl--owning-workspace "target-ws"))
-          ;; Verify the flag is set before calling the function
-          (should (process-query-on-exit-flag proc))
-          (agent-repl--kill-owned-panel-buffers "target-ws")
-          ;; Buffer should have been killed (and process silenced first)
-          (should-not (buffer-live-p buf)))
+          (cl-letf (((symbol-function 'get-buffer-process)
+                     (lambda (candidate)
+                       (and (eq candidate buf) fake-proc)))
+                    ((symbol-function 'set-process-query-on-exit-flag)
+                     (lambda (proc flag)
+                       (setq silenced (list proc flag))))
+                    ((symbol-function 'kill-buffer)
+                     (lambda (candidate)
+                       (setq killed candidate))))
+            (agent-repl--kill-owned-panel-buffers "target-ws")
+            (should (equal silenced (list fake-proc nil)))
+            (should (eq killed buf))))
       (when (buffer-live-p buf) (kill-buffer buf)))))
 
 ;;;; ---- Tests: agent-repl-debug/obliterate ----
