@@ -232,10 +232,12 @@ func (s *FileJobStore) CompleteHostAction(id string, ok bool, failure string) er
 		action.Completed = true
 		action.Failure = ""
 	} else {
-		// A failed host action deliberately remains incomplete.  Its failure is
-		// durable diagnostic evidence and reconnect snapshots continue to show
-		// it until an explicit retry succeeds.
+		// A failed host action deliberately remains incomplete and becomes
+		// publishable again. Its failure is durable diagnostic evidence, while
+		// clearing Published makes the active daemon drain retry it rather than
+		// waiting indefinitely for a frontend reconnect snapshot.
 		action.Failure = failure
+		action.Published = false
 	}
 	s.doc.HostActions[id] = action
 	if err := s.saveLocked(); err != nil {

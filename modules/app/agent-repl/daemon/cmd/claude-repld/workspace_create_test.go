@@ -26,6 +26,13 @@ type fakeGitRunner struct {
 	calls []gitCall
 }
 
+type fakeProjectileMarker struct{ calls [][2]string }
+
+func (f *fakeProjectileMarker) Ensure(path, name string) error {
+	f.calls = append(f.calls, [2]string{path, name})
+	return nil
+}
+
 func (f *fakeGitRunner) RunGit(_ context.Context, _ string, args ...string) (string, int, error) {
 	if len(f.calls) == 0 {
 		return "", -1, fmt.Errorf("unexpected git call %q", args)
@@ -55,16 +62,18 @@ func TestDaemonWorktreePlansCollisionDeterministically(t *testing.T) {
 	root := testGitRoot(t)
 	job := workspacecreate.Job{ID: "file-uuid:0", Request: workspacecreate.Request{Name: "DWC/feature", GitRoot: root, BaseCommit: "HEAD"}}
 	git := &fakeGitRunner{calls: []gitCall{
+		{args: []string{"rev-parse", "--verify", "HEAD^{commit}"}, out: "abc123\n"},
 		{args: []string{"worktree", "list", "--porcelain"}, out: "worktree /tmp/other\nbranch refs/heads/DWC/feature\n\n"},
 		{args: []string{"show-ref", "--verify", "--quiet", "refs/heads/" + candidateBranch(job.Request.Name, job.ID, 1)}, exit: 1},
+		{args: []string{"rev-parse", "--verify", "refs/tags/start/" + candidateBranch(job.Request.Name, job.ID, 1) + "^{commit}"}, exit: 1},
 	}}
-	worktree := DaemonWorktree{Git: git, Logf: func(string, ...any) {}}
+	worktree := DaemonWorktree{Git: git, Marker: &fakeProjectileMarker{}, Logf: func(string, ...any) {}}
 	plan, err := worktree.PlanWorktree(context.Background(), job)
 	if err != nil {
 		t.Fatal(err)
 	}
 	wantBranch := candidateBranch(job.Request.Name, job.ID, 1)
-	if plan.FinalName != filepath.Base(wantBranch) || plan.Branch != wantBranch || plan.BaseCommit != "HEAD" {
+	if plan.FinalName != filepath.Base(wantBranch) || plan.Branch != wantBranch || plan.BaseCommit != "abc123" {
 		t.Fatalf("plan = %#v", plan)
 	}
 	if filepath.Base(plan.Path) != filepath.Base(wantBranch) {
@@ -72,12 +81,67 @@ func TestDaemonWorktreePlansCollisionDeterministically(t *testing.T) {
 	}
 }
 
+func TestDaemonWorktreeForkUsesSourceWorkspaceHeadAndVendorSession(t *testing.T) {
+	root := testGitRoot(t)
+	reg := registry.Open(filepath.Join(t.TempDir(), "registry.json"), func(string, ...any) {})
+	if err := reg.Put(registry.Record{SessionID: "source-daemon", CWD: "/source-worktree", ClaudeSessionID: "vendor-source"}); err != nil {
+		t.Fatal(err)
+	}
+	job := workspacecreate.Job{ID: "fork-job", Request: workspacecreate.Request{Name: "DWC/child", GitRoot: root, ForkFrom: "DWC/source-worktree"}}
+	git := &fakeGitRunner{calls: []gitCall{
+		{args: []string{"rev-parse", "--verify", "HEAD^{commit}"}, out: "source-head\n"},
+		{args: []string{"worktree", "list", "--porcelain"}},
+		{args: []string{"show-ref", "--verify", "--quiet", "refs/heads/DWC/child"}, exit: 1},
+		{args: []string{"rev-parse", "--verify", "refs/tags/start/DWC/child^{commit}"}, exit: 1},
+	}}
+	plan, err := (DaemonWorktree{Git: git, Registry: reg, Marker: &fakeProjectileMarker{}, Logf: func(string, ...any) {}}).PlanWorktree(context.Background(), job)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.BaseCommit != "source-head" || plan.ForkSessionID != "vendor-source" {
+		t.Fatalf("fork plan = %#v", plan)
+	}
+}
+
+func TestDaemonWorktreeKeepsDivergentMaster(t *testing.T) {
+	root := testGitRoot(t)
+	git := &fakeGitRunner{calls: []gitCall{
+		{args: []string{"fetch", "origin", "master"}},
+		{args: []string{"merge-base", "--is-ancestor", "master", "origin/master"}, exit: 1},
+	}}
+	worktree := DaemonWorktree{Git: git, Logf: func(string, ...any) {}}
+	if err := worktree.fastForwardMaster(context.Background(), root); err != nil {
+		t.Fatal(err)
+	}
+	if len(git.calls) != 0 {
+		t.Fatalf("unexpected calls: %#v", git.calls)
+	}
+}
+
+func TestOSProjectileMarkerIsIdempotentAndRejectsMismatch(t *testing.T) {
+	dir := t.TempDir()
+	marker := osProjectileMarker{}
+	if err := marker.Ensure(dir, "child"); err != nil {
+		t.Fatal(err)
+	}
+	if err := marker.Ensure(dir, "child"); err != nil {
+		t.Fatal(err)
+	}
+	if err := marker.Ensure(dir, "other"); err == nil {
+		t.Fatal("mismatching projectile marker was accepted")
+	}
+}
+
 func TestDaemonWorktreeResumesPersistedPlanWithoutSecondAdd(t *testing.T) {
 	root := testGitRoot(t)
 	path := filepath.Join(filepath.Dir(root), "repo-worktrees", "feature")
 	job := workspacecreate.Job{ID: "j", Request: workspacecreate.Request{Name: "DWC/feature", GitRoot: root}, WorktreePath: path, FinalName: "DWC/feature", Branch: "DWC/feature", ResolvedBaseCommit: "HEAD"}
-	git := &fakeGitRunner{calls: []gitCall{{args: []string{"worktree", "list", "--porcelain"}, out: "worktree " + path + "\nbranch refs/heads/DWC/feature\n\n"}}}
-	if err := (DaemonWorktree{Git: git, Logf: func(string, ...any) {}}).EnsureWorktree(context.Background(), job); err != nil {
+	git := &fakeGitRunner{calls: []gitCall{
+		{args: []string{"worktree", "list", "--porcelain"}, out: "worktree " + path + "\nbranch refs/heads/DWC/feature\n\n"},
+		{args: []string{"rev-parse", "--verify", "refs/tags/start/DWC/feature^{commit}"}, exit: 1},
+		{args: []string{"tag", "start/DWC/feature", "HEAD"}},
+	}}
+	if err := (DaemonWorktree{Git: git, Marker: &fakeProjectileMarker{}, Logf: func(string, ...any) {}}).EnsureWorktree(context.Background(), job); err != nil {
 		t.Fatal(err)
 	}
 	if len(git.calls) != 0 {
@@ -92,8 +156,10 @@ func TestDaemonWorktreeAddsPersistedPlan(t *testing.T) {
 	git := &fakeGitRunner{calls: []gitCall{
 		{args: []string{"worktree", "list", "--porcelain"}},
 		{args: []string{"worktree", "add", "-b", "DWC/feature", path, "HEAD"}},
+		{args: []string{"rev-parse", "--verify", "refs/tags/start/DWC/feature^{commit}"}, exit: 1},
+		{args: []string{"tag", "start/DWC/feature", "HEAD"}},
 	}}
-	if err := (DaemonWorktree{Git: git, Logf: func(string, ...any) {}}).EnsureWorktree(context.Background(), job); err != nil {
+	if err := (DaemonWorktree{Git: git, Marker: &fakeProjectileMarker{}, Logf: func(string, ...any) {}}).EnsureWorktree(context.Background(), job); err != nil {
 		t.Fatal(err)
 	}
 	if len(git.calls) != 0 {
@@ -140,8 +206,47 @@ func TestDaemonSessionCreatorUsesExplicitAccountAndPermissionMetadata(t *testing
 	if id != "s_new" || commands.calls != 1 {
 		t.Fatalf("id=%s calls=%d", id, commands.calls)
 	}
-	if commands.opts.ConfigDir != "/cfg" || commands.opts.PermissionMode != "plan" || commands.opts.Model != "sonnet" {
+	if commands.opts.ConfigDir != "/cfg" || commands.opts.PermissionMode != "plan" || commands.opts.Model != "sonnet" || commands.opts.Resume != "" {
 		t.Fatalf("opts = %#v", commands.opts)
+	}
+}
+
+func TestDaemonSessionCreatorPassesResolvedForkVendorSessionAsResume(t *testing.T) {
+	reg := registry.Open(filepath.Join(t.TempDir(), "registry.json"), func(string, ...any) {})
+	var got server.CreateOpts
+	creator := daemonSessionCreator{Registry: reg, Logf: func(string, ...any) {}}
+	creator.Commands = sessionCommandFunc(func(_ context.Context, opts server.CreateOpts) (string, error) {
+		got = opts
+		if err := reg.Put(registry.Record{SessionID: "s_child", CWD: "/child"}); err != nil {
+			return "", err
+		}
+		return "s_child", nil
+	})
+	if _, err := creator.EnsureSession(context.Background(), workspacecreate.Job{ID: "fork", WorktreePath: "/child", Request: workspacecreate.Request{ForkSessionID: "vendor-source"}}); err != nil {
+		t.Fatal(err)
+	}
+	if got.Resume != "vendor-source" {
+		t.Fatalf("CreateSession Resume=%q, want resolved fork vendor session", got.Resume)
+	}
+}
+
+func TestDaemonSessionCreatorSourceMetadataAssertionsAndInheritance(t *testing.T) {
+	reg := registry.Open(filepath.Join(t.TempDir(), "registry.json"), func(string, ...any) {})
+	if err := reg.Put(registry.Record{SessionID: "source", CWD: "/source", ConfigDir: "/cfg-source", PermissionMode: "plan"}); err != nil {
+		t.Fatal(err)
+	}
+	creator := daemonSessionCreator{Registry: reg, Logf: func(string, ...any) {}}
+	job := workspacecreate.Job{ID: "child", Request: workspacecreate.Request{SourceWorkspace: "source", SourceDir: "/source", ConfigDir: "/cfg-source", PermissionMode: "plan"}}
+	request, err := creator.ResolveSessionMetadata(context.Background(), job)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if request.ConfigDir != "/cfg-source" || request.PermissionMode != "plan" {
+		t.Fatalf("resolved request = %#v", request)
+	}
+	job.Request.PermissionMode = "bypassPermissions"
+	if _, err := creator.ResolveSessionMetadata(context.Background(), job); err == nil {
+		t.Fatal("mismatching source metadata assertion was accepted")
 	}
 }
 
