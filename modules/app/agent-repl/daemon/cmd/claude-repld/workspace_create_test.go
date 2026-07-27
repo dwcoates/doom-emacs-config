@@ -63,7 +63,7 @@ func TestDaemonWorktreePlansCollisionDeterministically(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantBranch := candidateBranch(job.Request.Name, job.ID, 1)
-	if plan.FinalName != wantBranch || plan.Branch != wantBranch || plan.BaseCommit != "HEAD" {
+	if plan.FinalName != filepath.Base(wantBranch) || plan.Branch != wantBranch || plan.BaseCommit != "HEAD" {
 		t.Fatalf("plan = %#v", plan)
 	}
 	if filepath.Base(plan.Path) != filepath.Base(wantBranch) {
@@ -153,8 +153,8 @@ func (sessionCommandFunc) DeleteSession(string) error { return nil }
 
 type fakePromptRouter struct{ calls [][]string }
 
-func (f *fakePromptRouter) SubmitWorkspaceInitialPrompt(_ context.Context, workspace, sessionID, jobID, text, permission string) error {
-	f.calls = append(f.calls, []string{workspace, sessionID, jobID, text, permission})
+func (f *fakePromptRouter) SubmitWorkspaceInitialPrompt(_ context.Context, workspace, jobID, text, permission string) error {
+	f.calls = append(f.calls, []string{workspace, jobID, text, permission})
 	return nil
 }
 
@@ -169,7 +169,7 @@ func TestInitialPromptAdapterRequiresLiveRegisteredJobSession(t *testing.T) {
 	if err := submitter.SubmitInitialPrompt(context.Background(), job); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"/worktree", "s1", "job-1", "start", "plan"}
+	want := []string{"/worktree", "job-1", "start", "plan"}
 	if !reflect.DeepEqual(router.calls, [][]string{want}) {
 		t.Fatalf("router calls = %#v", router.calls)
 	}

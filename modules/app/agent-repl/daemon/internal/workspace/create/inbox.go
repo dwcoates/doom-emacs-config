@@ -190,7 +190,11 @@ func parseCommands(payload []byte) ([]parsedCommand, error) {
 		switch head.Type {
 		case "create":
 			var wire struct {
-				Type string `json:"type"`
+				Type     string `json:"type"`
+				SourceWS *struct {
+					Name string `json:"name"`
+					Path string `json:"path"`
+				} `json:"source_ws"`
 				Request
 			}
 			if err := json.Unmarshal(item, &wire); err != nil {
@@ -200,7 +204,17 @@ func parseCommands(payload []byte) ([]parsedCommand, error) {
 			if err := json.Unmarshal(item, &extra); err != nil {
 				return nil, fmt.Errorf("entry %d create metadata: %w", index, err)
 			}
-			for _, key := range []string{"type", "name", "git_root", "prompt", "priority", "fork_from", "fork_session_id", "source_workspace", "source_dir", "base_commit", "model", "config_dir", "permission_mode", "allow_ungated", "postprocessing_prompt", "before_ws_merge"} {
+			if wire.SourceWS != nil {
+				if wire.SourceWS.Name == "" || wire.SourceWS.Path == "" {
+					return nil, fmt.Errorf("entry %d create: source_ws requires name and path", index)
+				}
+				if wire.SourceWorkspace != "" || wire.SourceDir != "" {
+					return nil, fmt.Errorf("entry %d create: source_ws cannot be combined with source_workspace or source_dir", index)
+				}
+				wire.SourceWorkspace = wire.SourceWS.Name
+				wire.SourceDir = wire.SourceWS.Path
+			}
+			for _, key := range []string{"type", "name", "git_root", "prompt", "priority", "fork_from", "fork_session_id", "source_workspace", "source_dir", "source_ws", "base_commit", "model", "config_dir", "permission_mode", "allow_ungated", "postprocessing_prompt", "before_ws_merge"} {
 				delete(extra, key)
 			}
 			if len(extra) > 0 {
