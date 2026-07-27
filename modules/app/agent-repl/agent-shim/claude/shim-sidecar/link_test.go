@@ -12,6 +12,7 @@
 package main
 
 import (
+	"encoding/json"
 	"net"
 	"os"
 	"os/exec"
@@ -308,6 +309,142 @@ func TestRescanDoesNotTreatTaskArtifactAsOpenLifecycle(t *testing.T) {
 	}
 	if s.tracker.IsOpen("s1", "a1") {
 		t.Fatal("artifact presence opened task a1; liveness must come only from persisted lifecycle state")
+	}
+}
+
+// writeSpool creates one /tmp-shaped spool file and returns the spool root and
+// the file's path. The directory embeds a session-SHAPED segment on purpose:
+// the point is that it is NOT read.
+func writeSpool(t *testing.T, taskID string) (string, string) {
+	t.Helper()
+	spoolRoot := t.TempDir()
+	path := filepath.Join(spoolRoot, "claude-501", "slug", "a4f52dc5-runtime-id", "tasks", taskID+".output")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir spool dir: %v", err)
+	}
+	if err := os.WriteFile(path, []byte("hello\n"), 0o644); err != nil {
+		t.Fatalf("write spool: %v", err)
+	}
+	return spoolRoot, path
+}
+
+func TestRescanBuildsNoTailerForAnUnattributedSpool(t *testing.T) {
+	// Arrange — a spool exists but nothing has announced which session
+	// launched it.
+	spoolRoot, path := writeSpool(t, "b1pi0nmip")
+	s := newSidecar(filepath.Join(t.TempDir(), "unused.sock"), nil, spoolRoot, quietLog)
+	s.link = linkUp
+	s.cursors = map[string]*corev1.CursorState{}
+
+	// Act
+	s.rescan()
+
+	// Assert — held, not read. Reading it would require inventing an owner.
+	if _, ok := s.watchers[path]; ok {
+		t.Fatal("rescan tailed a spool with no known launching session")
+	}
+	if _, ok := s.held[path]; !ok {
+		t.Fatal("unattributed spool was skipped without being recorded as held")
+	}
+}
+
+func TestRescanTailsASpoolOnceItsLaunchingSessionIsKnown(t *testing.T) {
+	// Arrange — same spool, but the launch has been attributed.
+	spoolRoot, path := writeSpool(t, "b1pi0nmip")
+	s := newSidecar(filepath.Join(t.TempDir(), "unused.sock"), nil, spoolRoot, quietLog)
+	s.link = linkUp
+	s.cursors = map[string]*corev1.CursorState{}
+	s.noteOwner("b1pi0nmip", "9b6a4f2d-transcript-id")
+
+	// Act
+	s.rescan()
+
+	// Assert — tailed, and stamped with the TRANSCRIPT id rather than the
+	// runtime id sitting in its own path.
+	w, ok := s.watchers[path]
+	if !ok {
+		t.Fatal("rescan did not tail an attributed spool")
+	}
+	if w.target.SessionID != "" {
+		t.Fatalf("target session = %q, want empty — identity must not come from the path", w.target.SessionID)
+	}
+}
+
+// launchLine is a transcript line whose tool result reports a background bash
+// launch — the record that names which session owns a task, and therefore its
+// spool. Shape taken from real transcripts: the task id rides `toolUseResult`,
+// and the spool path is NOT in it (which is why attribution goes by task id).
+func launchLine(t *testing.T, taskID string) []byte {
+	t.Helper()
+	raw, err := json.Marshal(map[string]any{
+		"type":      "user",
+		"uuid":      "launch-uuid-1",
+		"sessionId": backfillSession,
+		"timestamp": "2026-07-25T12:00:00.000Z",
+		"message": map[string]any{
+			"role": "user",
+			"content": []any{map[string]any{
+				"tool_use_id": "toolu_launch1",
+				"type":        "tool_result",
+				"content":     "Command running in background with ID: " + taskID,
+			}},
+		},
+		"toolUseResult": map[string]any{
+			"stdout": "", "stderr": "", "interrupted": false,
+			"isImage": false, "noOutputExpected": false,
+			"backgroundTaskId": taskID,
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal launch line: %v", err)
+	}
+	return append(raw, '\n')
+}
+
+// The whole point of the change, end to end: a spool is attributed from the
+// TRANSCRIPT that launched it, even though its own path spells a different,
+// runtime-minted session id. Before this, the path segment was read as the
+// owner and the same task landed under two session ids.
+func TestSpoolIsAttributedFromTheLaunchingTranscriptNotItsPath(t *testing.T) {
+	// Arrange — a transcript carrying the launch, plus that task's spool under
+	// a directory named with a DIFFERENT (runtime) session id.
+	h := newStoreHarness(t)
+	h.start()
+	root := t.TempDir()
+	dir := filepath.Join(root, "projects", "-w")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir transcript dir: %v", err)
+	}
+	transcript := filepath.Join(dir, backfillSession+".jsonl")
+	if err := os.WriteFile(transcript, launchLine(t, "b1pi0nmip"), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+	spoolRoot, spoolPath := writeSpool(t, "b1pi0nmip")
+	s := newSidecar(h.sock, []string{root}, spoolRoot, quietLog)
+	t.Cleanup(func() { s.store.Close() })
+	if err := s.establish(); err != nil {
+		t.Fatalf("establish: %v", err)
+	}
+	// The first rescan runs inside establish, before anything is read, so the
+	// spool starts out unattributed.
+	if _, ok := s.watchers[spoolPath]; ok {
+		t.Fatal("spool was tailed before its launching session was known")
+	}
+
+	// Act — read the transcript (which announces the launch), then rescan.
+	s.pollAll()
+	s.rescan()
+
+	// Assert — now tailed, and attributed to the TRANSCRIPT's session. The
+	// runtime id in its own path never becomes an identity.
+	if _, ok := s.watchers[spoolPath]; !ok {
+		t.Fatal("spool was not tailed after its launch was observed")
+	}
+	if got := s.owners["b1pi0nmip"]; got != backfillSession {
+		t.Fatalf("owner = %q, want the transcript session %q", got, backfillSession)
+	}
+	if _, held := s.held[spoolPath]; held {
+		t.Fatal("spool is still recorded as held after being attributed")
 	}
 }
 
