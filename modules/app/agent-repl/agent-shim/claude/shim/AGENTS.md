@@ -14,3 +14,12 @@ A daemon disconnect does not end the in-flight turn (reattach support).
 
 Dependencies: `@anthropic-ai/claude-agent-sdk`, `proto/agentshim/` (generated
 TS), the shim-store UDS socket.
+
+## No real SDK calls from tests
+
+`src/vendor-guard.ts` is the ONLY place that may dynamically import
+`@anthropic-ai/claude-agent-sdk`; every call site goes through `importRealSDK`.
+When `AGENT_REPL_FORBID_VENDOR_CALLS` is set to any non-empty value the guard
+throws and the shim exits nonzero — never a silent no-op, never a fake
+fallback. `test/setup.ts` sets it for the whole vitest suite, so a test that
+needs offline behavior must pass `--fake`. Production must never set it.
