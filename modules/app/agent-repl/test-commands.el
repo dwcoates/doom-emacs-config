@@ -3258,18 +3258,18 @@ jump path on purpose."
 
 ;;;; ---- Tests: snapshot startup/quit wrappers ----
 
-(ert-deftest agent-repl-cmd-test-load-snapshot-on-startup/schedules-bounce-when-file-absent ()
-  "No snapshot still schedules the required full-runtime startup bounce."
+(ert-deftest agent-repl-cmd-test-load-snapshot-on-startup/prepares-before-snapshot-lookup ()
+  "Startup health preparation precedes even the snapshot path lookup."
   (agent-repl-test--with-clean-state
-    (let ((agent-repl-workspace-snapshot-file "/nonexistent/agent-snap.el")
-          loaded scheduled)
-      (cl-letf (((symbol-function 'agent-repl-load-workspace-snapshot)
-                 (lambda (&rest _) (setq loaded t)))
-                ((symbol-function 'agent-repl--schedule-runtime-startup-bounce)
-                 (lambda () (setq scheduled t))))
+    (let (events)
+      (cl-letf (((symbol-function 'agent-repl--runtime-startup-prepare)
+                 (lambda () (push 'prepare events) t))
+                ((symbol-function 'agent-repl--workspace-snapshot-file-for-read)
+                 (lambda () (push 'lookup events) "/nonexistent/agent-snap.el"))
+                ((symbol-function 'agent-repl-load-workspace-snapshot)
+                 (lambda (&rest _) (push 'load events))))
         (agent-repl--load-workspace-snapshot-on-startup)
-        (should-not loaded)
-        (should scheduled)))))
+        (should (equal (nreverse events) '(prepare lookup)))))))
 
 (ert-deftest agent-repl-cmd-test-load-snapshot-on-startup/invokes-load-when-file-present ()
   "Startup wrapper marks the real snapshot load as startup-owned."
@@ -3280,24 +3280,26 @@ jump path on purpose."
           (let ((agent-repl-workspace-snapshot-file snapshot-file))
             (cl-letf (((symbol-function 'agent-repl-load-workspace-snapshot)
                        (lambda (&optional file startup)
-                         (setq captured (list file startup)))))
+                         (setq captured (list file startup))))
+                      ((symbol-function 'agent-repl--runtime-startup-prepare)
+                       (lambda () t)))
               (agent-repl--load-workspace-snapshot-on-startup)
-              (should (equal captured '(nil t)))))
+              (should (equal captured (list snapshot-file t)))))
         (delete-file snapshot-file)))))
 
-(ert-deftest agent-repl-cmd-test-load-snapshot-on-startup/swallows-errors ()
-  "A load error is logged and still schedules the required runtime bounce."
+(ert-deftest agent-repl-cmd-test-load-snapshot-on-startup/aborts-loudly-on-load-error ()
+  "A malformed startup snapshot is a loud abort, never a degraded restore."
   (agent-repl-test--with-clean-state
     (let ((snapshot-file (make-temp-file "agent-snap-"))
-          scheduled)
+          prepared)
       (unwind-protect
           (let ((agent-repl-workspace-snapshot-file snapshot-file))
             (cl-letf (((symbol-function 'agent-repl-load-workspace-snapshot)
                        (lambda (&rest _) (error "boom")))
-                      ((symbol-function 'agent-repl--schedule-runtime-startup-bounce)
-                       (lambda () (setq scheduled t))))
-              (agent-repl--load-workspace-snapshot-on-startup)
-              (should scheduled)))
+                      ((symbol-function 'agent-repl--runtime-startup-prepare)
+                       (lambda () (setq prepared t) t)))
+              (should-error (agent-repl--load-workspace-snapshot-on-startup))
+              (should prepared)))
         (delete-file snapshot-file)))))
 
 ;;;; ---- Tests: workspace snapshot path resolver ----
@@ -4175,8 +4177,8 @@ without waiting for a hook fire."
         (delete-file snapshot-file)
         (delete-directory real-dir t)))))
 
-(ert-deftest agent-repl-cmd-test-snapshot-load/timeout-advances-queue ()
-  "Per-entry watchdog firing advances past a wedged workspace."
+(ert-deftest agent-repl-cmd-test-snapshot-load/timeout-aborts-queue ()
+  "Per-entry watchdog aborts rather than treating a wedged workspace as ready."
   (agent-repl-test--with-clean-state
     (let ((snapshot-file (make-temp-file "agent-snap-"))
           (dir-a (make-temp-file "agent-proj-a-" t))
@@ -4200,17 +4202,16 @@ without waiting for a hook fire."
               (agent-repl-load-workspace-snapshot)
               (should (equal established '("ws-a")))
               ;; Fire the timeout for ws-a manually.
-              (apply (car captured-timer-callback) (cdr captured-timer-callback))
-              (should (equal (sort (copy-sequence established) #'string<)
-                             '("ws-a" "ws-b")))))
+              (should-error
+               (apply (car captured-timer-callback) (cdr captured-timer-callback)))
+              (should (equal established '("ws-a")))
+              (should-not agent-repl--snapshot-load-state)))
         (delete-file snapshot-file)
         (delete-directory dir-a t)
         (delete-directory dir-b t)))))
 
-(ert-deftest agent-repl-cmd-test-snapshot-load/timeout-fires-fully-loaded-with-marker ()
-  "Watchdog timeout for ws fires `ws-fully-loaded-functions' with the
-`:timed-out' marker so observers can distinguish forced advance from
-the happy-path advance."
+(ert-deftest agent-repl-cmd-test-snapshot-load/timeout-never-fires-synthetic-loaded-hook ()
+  "Watchdog timeout does not invent a fully-loaded event for an unhealthy ws."
   (agent-repl-test--with-clean-state
     (let ((snapshot-file (make-temp-file "agent-snap-"))
           (dir-a (make-temp-file "agent-proj-a-" t))
@@ -4237,12 +4238,9 @@ the happy-path advance."
                            #'agent-repl--snapshot-load-on-loaded)))
                 (agent-repl-load-workspace-snapshot)
                 ;; Fire the timeout for ws-a manually.
-                (apply (car captured-timer-callback) (cdr captured-timer-callback))
-                ;; Hook fired for ws-a with :timed-out marker.
-                (should (cl-some (lambda (e)
-                                   (and (equal (car e) "ws-a")
-                                        (eq (cdr e) :timed-out)))
-                                 fired-with)))))
+                (should-error
+                 (apply (car captured-timer-callback) (cdr captured-timer-callback)))
+                (should-not fired-with))))
         (delete-file snapshot-file)
         (delete-directory dir-a t)
         (delete-directory dir-b t)))))

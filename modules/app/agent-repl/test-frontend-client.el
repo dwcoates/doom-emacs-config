@@ -605,6 +605,122 @@ Distinct failure mode from an unreachable socket, and the error says so."
       ;; Assert — one dial per attempt, no more.
       (should (= dials 3)))))
 
+;;;; ---- UDS health commands ---------------------------------------------------
+
+(ert-deftest agent-repl-test-frontend-daemon-health-awaits-correlated-view ()
+  "Daemon health succeeds only from its correlated healthy result frame."
+  (let (sent tracked-command tracked-health)
+    (cl-letf (((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t))
+              ((symbol-function 'agent-repl--uds-send-command)
+               (lambda (field payload workspace &rest _)
+                 (setq sent (list field payload workspace)) "health-1"))
+              ((symbol-function 'agent-repl--uds-track-health-response)
+               (lambda (id field workspace session-id callback)
+                 (setq tracked-health
+                       (list id field workspace session-id))
+                 (funcall callback '(:requestId "health-1" :healthy t))))
+              ((symbol-function 'agent-repl--uds-track-command)
+               (lambda (id field workspace &rest _)
+                 (setq tracked-command (list id field workspace))))
+              ((symbol-function 'agent-repl--frontend-await-uds)
+               (lambda (predicate &rest _) (funcall predicate))))
+      (should (agent-repl--frontend-wait-daemon-healthy))
+      (should (equal sent '("daemonHealth" nil nil)))
+      (should (equal tracked-command
+                     '("health-1" "daemonHealth" nil)))
+      (should (equal tracked-health
+                     '("health-1" "daemonHealth" nil nil))))))
+
+(ert-deftest agent-repl-test-frontend-session-health-sends-session-id-and-cwd ()
+  "Session health binds the daemon's verdict to the rendered session id."
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w/tree")
+    (let (sent tracked-health)
+      (cl-letf (((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t))
+                ((symbol-function 'agent-repl--uds-send-command)
+                 (lambda (field payload workspace &rest _)
+                   (setq sent (list field payload workspace)) "health-2"))
+                ((symbol-function 'agent-repl--uds-track-health-response)
+                 (lambda (id field workspace session-id callback)
+                   (setq tracked-health
+                         (list id field workspace session-id))
+                   (funcall callback
+                            '(:requestId "health-2"
+                              :workspace "/w/tree"
+                              :sessionId "s_expected"
+                              :healthy t))))
+                ((symbol-function 'agent-repl--uds-track-command)
+                 (lambda (&rest _) "health-2"))
+                ((symbol-function 'agent-repl--frontend-await-uds)
+                 (lambda (predicate &rest _) (funcall predicate))))
+        (should (agent-repl--frontend-wait-session-healthy "ws1" "s_expected"))
+        (should (equal sent
+                       '("sessionHealth" (:sessionId "s_expected") "/w/tree")))
+        (should (equal tracked-health
+                       '("health-2" "sessionHealth" "/w/tree" "s_expected")))))))
+
+(ert-deftest agent-repl-test-frontend-health-accepted-ack-alone-times-out ()
+  "A successful command receipt cannot satisfy a health wait."
+  (let (command-tracked)
+    (cl-letf (((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t))
+              ((symbol-function 'agent-repl--uds-send-command)
+               (lambda (&rest _) "health-ack-only"))
+              ((symbol-function 'agent-repl--uds-track-health-response)
+               (lambda (&rest _) "health-ack-only"))
+              ((symbol-function 'agent-repl--uds-track-command)
+               (lambda (&rest _)
+                 (setq command-tracked t)
+                 "health-ack-only"))
+              ((symbol-function 'agent-repl--frontend-await-uds)
+               (lambda (predicate &rest _)
+                 (should-not (funcall predicate))
+                 nil))
+              ((symbol-function 'agent-repl--uds-untrack-command)
+               (lambda (&rest _) nil))
+              ((symbol-function 'agent-repl--uds-untrack-health-response)
+               (lambda (&rest _) nil)))
+      (should-error (agent-repl--frontend-wait-daemon-healthy))
+      (should command-tracked))))
+
+(ert-deftest agent-repl-test-frontend-unhealthy-result-fails-loudly ()
+  "A correlated `healthy=false' result aborts and includes its reason."
+  (cl-letf (((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t))
+            ((symbol-function 'agent-repl--uds-send-command)
+             (lambda (&rest _) "health-bad"))
+            ((symbol-function 'agent-repl--uds-track-health-response)
+             (lambda (_id _field _workspace _session-id callback)
+               (funcall callback
+                        '(:requestId "health-bad"
+                          :reason "store link down"))))
+            ((symbol-function 'agent-repl--uds-track-command)
+             (lambda (&rest _) "health-bad"))
+            ((symbol-function 'agent-repl--frontend-await-uds)
+             (lambda (predicate &rest _) (funcall predicate))))
+    (let ((err (should-error
+                (agent-repl--frontend-wait-daemon-healthy))))
+      (should (string-match-p "store link down"
+                              (error-message-string err))))))
+
+(ert-deftest agent-repl-test-frontend-health-timeout-untracks-and-fails-loudly ()
+  "A health timeout removes its delayed callback and aborts rendering/startup."
+  (let (command-untracked health-untracked)
+    (cl-letf (((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t))
+              ((symbol-function 'agent-repl--uds-send-command) (lambda (&rest _) "health-3"))
+              ((symbol-function 'agent-repl--uds-track-health-response)
+               (lambda (&rest _) "health-3"))
+              ((symbol-function 'agent-repl--uds-track-command) (lambda (&rest _) "health-3"))
+              ((symbol-function 'agent-repl--frontend-await-uds) (lambda (&rest _) nil))
+              ((symbol-function 'agent-repl--uds-untrack-command)
+               (lambda (id workspace reason)
+                 (setq command-untracked (list id workspace reason))))
+              ((symbol-function 'agent-repl--uds-untrack-health-response)
+               (lambda (id workspace reason)
+                 (setq health-untracked (list id workspace reason)))))
+      (should-error (agent-repl--frontend-wait-daemon-healthy))
+      (should (equal command-untracked
+                     '("health-3" nil "health-timeout")))
+      (should (equal health-untracked
+                     '("health-3" nil "health-timeout"))))))
+
 ;;;; ---- ensure-session ----------------------------------------------------------
 
 (ert-deftest agent-repl-test-frontend-ensure-session-reuses-live-id ()

@@ -22,6 +22,7 @@
 (declare-function agent-repl--frontend-init-inhibited-p "daemon" ())
 (declare-function agent-repl--frontend-rebind-workspaces-after-restart "frontend-client" ())
 (declare-function agent-repl--frontend-runtime-bounce-preflight "daemon" ())
+(declare-function agent-repl--frontend-wait-daemon-healthy "frontend-client" ())
 (declare-function agent-repl--frontend-wait-ready "frontend-client" ())
 (declare-function agent-repl--log "core" (ws fmt &rest args))
 
@@ -188,19 +189,11 @@ validated both jobs before building any runtime artifact."
                    agent-repl--shim-store-label agent-repl--shim-sidecar-label)
   t)
 
-(defvar agent-repl--runtime-startup-bounce-scheduled nil
-  "Non-nil once this Emacs scheduled its post-restore runtime bounce.")
-
-(defvar agent-repl--runtime-startup-bounce-completed nil
-  "Non-nil once this Emacs completed its post-restore runtime bounce.")
-
-(defun agent-repl-runtime-restart ()
-  "Rebuild stale artifacts and bounce the complete agent-repl runtime.
-launchd retains ownership of store and sidecar.  The daemon restart
-terminates its old session shims, then the normal rebind path resumes each
-durable conversation with a fresh shim.  Refuses before any build or bounce
-when any daemon workspace reports an active turn."
-  (interactive)
+(defun agent-repl--runtime-prepare (rebind)
+  "Bounce backend dependencies, require daemon health, and optionally REBIND.
+REBIND is non-nil only for an explicit runtime restart with workspaces
+already loaded.  Startup passes nil so the backend becomes healthy before
+the snapshot reader can establish, restore, or render any workspace."
   (agent-repl--assert-main-thread "runtime-restart")
   (let* ((daemon-state (agent-repl--frontend-runtime-bounce-preflight))
          (daemon-present (memq daemon-state '(:tracked :responsive))))
@@ -223,36 +216,46 @@ when any daemon workspace reports an active turn."
     (agent-repl--frontend-build-if-stale nil)
     (agent-repl--shim-services-build-and-bounce t)
     (agent-repl--frontend-bounce-after-build daemon-state)
-    (let ((rebound (agent-repl--frontend-rebind-workspaces-after-restart)))
-      (setq agent-repl--runtime-startup-bounce-completed t)
+    ;; The new daemon can accept a UDS connection before it can service
+    ;; requests.  Require both the link/snapshot readiness and the daemon's
+    ;; correlated initialization readiness before a caller can continue.
+    (agent-repl--frontend-wait-ready)
+    (agent-repl--frontend-wait-daemon-healthy)
+    (if rebind
+        (let ((rebound (agent-repl--frontend-rebind-workspaces-after-restart)))
+          (agent-repl--log nil
+                           "runtime-prepare complete: mode=restart rebound=%d launchd-store=%s launchd-sidecar=%s"
+                           rebound agent-repl--shim-store-label
+                           agent-repl--shim-sidecar-label)
+          rebound)
       (agent-repl--log nil
-                       "runtime-restart complete: rebound=%d launchd-store=%s launchd-sidecar=%s"
-                       rebound agent-repl--shim-store-label
+                       "runtime-prepare complete: mode=startup launchd-store=%s launchd-sidecar=%s"
+                       agent-repl--shim-store-label
                        agent-repl--shim-sidecar-label)
-      (when (called-interactively-p 'interactive)
-        (message "agent-repl runtime restarted; rebound %d workspace%s"
-                 rebound (if (= rebound 1) "" "s")))
-      rebound)))
+      t)))
 
-(defun agent-repl--run-runtime-startup-bounce ()
-  "Run the coordinated runtime bounce scheduled after snapshot restoration."
+(defun agent-repl-runtime-restart ()
+  "Rebuild, bounce, verify, then rebind the complete agent-repl runtime.
+Refuses before any build or bounce when any daemon workspace reports an
+active turn."
+  (interactive)
+  (let ((rebound (agent-repl--runtime-prepare t)))
+    (when (called-interactively-p 'interactive)
+      (message "agent-repl runtime restarted; rebound %d workspace%s"
+               rebound (if (= rebound 1) "" "s")))
+    rebound))
+
+(defun agent-repl--runtime-startup-prepare ()
+  "Prepare runtime services and daemon readiness before snapshot restoration.
+Batch and sandbox loads intentionally inhibit automatic backend startup;
+outside those explicit no-runtime contexts, a failed readiness check signals
+and leaves snapshot restoration entirely untouched."
   (if (agent-repl--frontend-init-inhibited-p)
       (agent-repl--log nil
-                       "runtime-startup-bounce: inhibited noninteractive=%s"
+                       "runtime-startup-prepare: inhibited noninteractive=%s"
                        noninteractive)
-    (agent-repl--log nil "runtime-startup-bounce: beginning")
-    (agent-repl-runtime-restart)))
-
-(defun agent-repl--schedule-runtime-startup-bounce ()
-  "Schedule one coordinated runtime bounce after startup restoration."
-  (unless (or agent-repl--runtime-startup-bounce-scheduled
-              agent-repl--runtime-startup-bounce-completed)
-    (setq agent-repl--runtime-startup-bounce-scheduled t)
-    (agent-repl--log nil
-                     "runtime-startup-bounce: scheduled after snapshot restore")
-    ;; Let the snapshot loader unwind fully before a restart rebinds its
-    ;; sessions and webviews.
-    (run-at-time 0 nil #'agent-repl--run-runtime-startup-bounce)))
+    (agent-repl--log nil "runtime-startup-prepare: beginning before snapshot restore")
+    (agent-repl--runtime-prepare nil)))
 
 (provide 'services)
 

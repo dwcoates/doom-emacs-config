@@ -34,6 +34,7 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'subr-x)
 
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--log-verbose "agent-repl-core" (ws fmt &rest args))
@@ -57,6 +58,12 @@
 ;; that replaced the GET /sessions poller); resolved at call time.
 (declare-function agent-repl--uds-send-command "frontend-uds" (field payload &optional workspace process))
 (declare-function agent-repl--uds-track-command "frontend-uds" (request-id field workspace &optional on-failure on-success))
+(declare-function agent-repl--uds-untrack-command "frontend-uds" (request-id workspace reason))
+(declare-function agent-repl--uds-track-health-response
+                  "frontend-uds"
+                  (request-id field workspace session-id on-response))
+(declare-function agent-repl--uds-untrack-health-response
+                  "frontend-uds" (request-id workspace reason))
 (declare-function agent-repl--uds-connected-p "frontend-uds" ())
 (declare-function agent-repl-uds-connect "frontend-uds" (&optional path readiness-p))
 (declare-function agent-repl--frontend-session-view "frontend-state" (session-id))
@@ -292,6 +299,11 @@ on a pushed `SessionView'.  This bounds the synchronous await for both."
   :type 'integer
   :group 'agent-repl)
 
+(defcustom agent-repl-frontend-health-timeout 10
+  "Seconds to await a correlated daemon or session health result over UDS."
+  :type 'number
+  :group 'agent-repl)
+
 (defvar agent-repl--frontend-creates-in-flight (make-hash-table :test 'equal)
   "Set of cwds with a `createSession' command awaiting its ack.
 Serializes concurrent creates per workspace so the SessionView->id
@@ -314,6 +326,87 @@ worker-thread trap); every blocking wait in this module asserts it."
                 (< (float-time) deadline))
       (accept-process-output agent-repl--uds-process 0.1))
     result))
+
+(defun agent-repl--frontend-await-health-command
+    (field payload workspace session-id what)
+  "Require successful UDS health FIELD with PAYLOAD for WORKSPACE.
+SESSION-ID is the expected identity for session health and nil for daemon
+health.  WHAT identifies the scope in diagnostics.  The correlated health
+view with `healthy=true' is authoritative; a `CommandAck' only confirms
+receipt.  Timeout, command rejection, and an unhealthy result all abort
+before the caller mutates UI or workspace state."
+  (agent-repl--frontend-wait-ready)
+  (let (response rejection request-id)
+    (agent-repl--log workspace
+                     "frontend-health: begin what=%s field=%s payload=%S session-id=%s"
+                     what field payload (or session-id "nil"))
+    (setq request-id (agent-repl--uds-send-command field payload workspace))
+    (agent-repl--uds-track-health-response
+     request-id field workspace session-id
+     (lambda (view) (setq response view)))
+    (agent-repl--uds-track-command
+     request-id field workspace
+     (lambda (err) (setq rejection err)))
+    (unless (agent-repl--frontend-await-uds
+             (lambda () (or response rejection))
+             agent-repl-frontend-health-timeout
+             (format "health %s" what))
+      (agent-repl--uds-untrack-command request-id workspace "health-timeout")
+      (agent-repl--uds-untrack-health-response
+       request-id workspace "health-timeout")
+      (agent-repl--log workspace
+                       "frontend-health: TIMEOUT what=%s field=%s request-id=%s timeout=%.3fs"
+                       what field request-id agent-repl-frontend-health-timeout)
+      (error "agent-repl: %s health check timed out after %.3fs"
+             what agent-repl-frontend-health-timeout))
+    (when rejection
+      (agent-repl--uds-untrack-health-response
+       request-id workspace "command-rejected")
+      (agent-repl--log workspace
+                       "frontend-health: REJECTED what=%s field=%s request-id=%s error=%s"
+                       what field request-id rejection)
+      (error "agent-repl: %s health check rejected: %s" what rejection))
+    (unless (plist-get response :healthy)
+      (let ((reason (plist-get response :reason)))
+        (agent-repl--log workspace
+                         "frontend-health: UNHEALTHY what=%s field=%s request-id=%s session-id=%s reason=%S response=%S"
+                         what field request-id (or session-id "nil")
+                         reason response)
+        (error "agent-repl: %s is unhealthy: %s"
+               what
+               (if (and (stringp reason) (not (string-empty-p reason)))
+                   reason
+                 "daemon supplied no reason"))))
+    (agent-repl--log workspace
+                     "frontend-health: HEALTHY what=%s field=%s request-id=%s session-id=%s response=%S"
+                     what field request-id (or session-id "nil") response)
+    t))
+
+(defun agent-repl--frontend-wait-daemon-healthy ()
+  "Require the daemon's correlated initialization-readiness assertion.
+This proves the daemon completed its startup assembly and bound its
+boot-critical listeners.  It does not probe shim-store or the sidecar:
+session health separately proves the live daemon -> shim route and the shim's
+own dependencies, including shim-store; startup service orchestration
+separately validates and kickstarts the launchd jobs."
+  (agent-repl--frontend-await-health-command
+   "daemonHealth" nil nil nil "daemon"))
+
+(defun agent-repl--frontend-wait-session-healthy (ws session-id)
+  "Require WS's live shim health and identity before rendering SESSION-ID.
+The daemon routes the command by WS's project directory and verifies that
+its live shim is connected and healthy.  SESSION-ID correlation prevents a
+stale binding from being rendered after a restart or remount."
+  (unless (and (stringp session-id) (not (string-empty-p session-id)))
+    (agent-repl--log ws
+                     "frontend-health: invalid session id for session health id=%S"
+                     session-id)
+    (error "agent-repl: cannot health-check workspace %s without a session id" ws))
+  (agent-repl--frontend-await-health-command
+   "sessionHealth" (list :sessionId session-id)
+   (agent-repl--frontend-ws-command-key ws)
+   session-id
+   (format "session ws=%s id=%s" ws session-id)))
 
 (defun agent-repl--frontend-create-handle-rejection (cwd model resume force-fresh err)
   "Handle a REJECTED `createSession' for CWD; MODEL/RESUME were the request.
