@@ -22,6 +22,19 @@ type mockHandler struct {
 	lastResyncSeq uint64
 }
 
+func (m *mockHandler) CreateWorkspace(_ context.Context, ws, rid string, _ *frontendv1.CreateWorkspaceCmd) error {
+	m.called, m.lastWorkspace, m.lastRequestID = "create_workspace", ws, rid
+	return m.err
+}
+func (m *mockHandler) WorkspaceMaterialized(_ context.Context, ws, rid string, _ *frontendv1.WorkspaceMaterializedCmd) error {
+	m.called, m.lastWorkspace, m.lastRequestID = "workspace_materialized", ws, rid
+	return m.err
+}
+func (m *mockHandler) HostActionCompleted(_ context.Context, ws, rid string, _ *frontendv1.HostActionCompletedCmd) error {
+	m.called, m.lastWorkspace, m.lastRequestID = "host_action_completed", ws, rid
+	return m.err
+}
+
 func (m *mockHandler) SubmitPrompt(_ context.Context, ws, rid string, _ *frontendv1.SubmitPromptCmd) error {
 	m.called, m.lastWorkspace, m.lastRequestID = "submit_prompt", ws, rid
 	return m.err
@@ -89,6 +102,21 @@ func TestDispatchRoutesEachCommand(t *testing.T) {
 		cmd     *frontendv1.FrontendCommand
 		wantHit string
 	}{
+		{
+			name:    "create workspace",
+			cmd:     &frontendv1.FrontendCommand{RequestId: "r0", Command: &frontendv1.FrontendCommand_CreateWorkspace{CreateWorkspace: &frontendv1.CreateWorkspaceCmd{RequestedName: "new", GitRoot: "/repo"}}},
+			wantHit: "create_workspace",
+		},
+		{
+			name:    "workspace materialized",
+			cmd:     &frontendv1.FrontendCommand{RequestId: "r0b", Command: &frontendv1.FrontendCommand_WorkspaceMaterialized{WorkspaceMaterialized: &frontendv1.WorkspaceMaterializedCmd{JobId: "job-1"}}},
+			wantHit: "workspace_materialized",
+		},
+		{
+			name:    "host action completed",
+			cmd:     &frontendv1.FrontendCommand{RequestId: "r0c", Command: &frontendv1.FrontendCommand_HostActionCompleted{HostActionCompleted: &frontendv1.HostActionCompletedCmd{ActionId: "action-1", Ok: true}}},
+			wantHit: "host_action_completed",
+		},
 		{
 			name:    "submit prompt",
 			cmd:     &frontendv1.FrontendCommand{RequestId: "r1", Workspace: "ws1", Command: &frontendv1.FrontendCommand_SubmitPrompt{SubmitPrompt: &frontendv1.SubmitPromptCmd{Text: "hi"}}},

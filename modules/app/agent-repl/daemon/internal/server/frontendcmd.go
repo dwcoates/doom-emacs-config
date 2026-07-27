@@ -176,6 +176,29 @@ type PaintAcker interface {
 
 var _ frontend.CommandHandler = (*commandHandler)(nil)
 
+// CreateWorkspace is deliberately loud until the daemon workspace-creation
+// manager is stitched into this command handler.  The frontend transport is
+// allowed to ship first, but a host request must never be acknowledged as if a
+// worktree/shim had been created when no lifecycle owner is wired.
+func (h *commandHandler) CreateWorkspace(_ context.Context, _ string, requestID string, cmd *frontendv1.CreateWorkspaceCmd) error {
+	h.logf("frontend cmd: create_workspace request_id=%s requested_name=%s git_root=%s", requestID, cmd.GetRequestedName(), cmd.GetGitRoot())
+	return fmt.Errorf("server: create_workspace is unavailable: workspace creation manager is not wired")
+}
+
+// WorkspaceMaterialized is deliberately loud until the workspace-creation
+// manager owns the durable acknowledgement and queued-prompt release.
+func (h *commandHandler) WorkspaceMaterialized(_ context.Context, _ string, requestID string, cmd *frontendv1.WorkspaceMaterializedCmd) error {
+	h.logf("frontend cmd: workspace_materialized request_id=%s job_id=%s", requestID, cmd.GetJobId())
+	return fmt.Errorf("server: workspace_materialized is unavailable: workspace creation manager is not wired")
+}
+
+// HostActionCompleted is deliberately loud until the daemon inbox owner is
+// wired; silently dropping a completion would race or strand durable UI work.
+func (h *commandHandler) HostActionCompleted(_ context.Context, _ string, requestID string, cmd *frontendv1.HostActionCompletedCmd) error {
+	h.logf("frontend cmd: host_action_completed request_id=%s action_id=%s ok=%t error=%s", requestID, cmd.GetActionId(), cmd.GetOk(), cmd.GetError())
+	return fmt.Errorf("server: host_action_completed is unavailable: workspace creation manager is not wired")
+}
+
 // newCommandHandler validates its dependencies and returns the handler. The
 // resyncer is optional (nil-safe) and shutdown is optional (an unconfigured
 // shutdown fails the command loudly); the three routers and the

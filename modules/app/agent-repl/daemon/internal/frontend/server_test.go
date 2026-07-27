@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
@@ -174,6 +175,97 @@ func TestServeWSSnapshotThenCommandAck(t *testing.T) {
 	}
 	if h.called != "interrupt" {
 		t.Errorf("handler called %q, want interrupt", h.called)
+	}
+}
+
+func TestHostOnlyWorkspaceWorkReachesUDSButNotGUI(t *testing.T) {
+	// Arrange.  Both connections are observers, so this proves delivery is
+	// controlled by ClientKind rather than by the paint role they share.
+	h := &mockHandler{}
+	s := New(Config{Logf: testLogf(t), State: staticState{snap: &frontendv1.StateSnapshot{
+		WorkspaceAvailable: []*frontendv1.WorkspaceAvailable{{JobId: "job-1", FinalName: "new"}},
+		HostActions:        []*frontendv1.HostAction{{ActionId: "action-1"}},
+	}}, Handler: h})
+	defer s.Close()
+
+	l, err := net.Listen("unix", shortSock(t, "host.sock"))
+	if err != nil {
+		t.Fatalf("listen host UDS: %v", err)
+	}
+	go func() { _ = s.Serve(l) }()
+	httpSrv := httptest.NewServer(http.HandlerFunc(s.ServeWS))
+	defer httpSrv.Close()
+
+	host, err := net.Dial("unix", l.Addr().String())
+	if err != nil {
+		t.Fatalf("dial host UDS: %v", err)
+	}
+	defer host.Close()
+	guiURL := "ws" + strings.TrimPrefix(httpSrv.URL, "http")
+	gui, _, err := websocket.DefaultDialer.Dial(guiURL, nil)
+	if err != nil {
+		t.Fatalf("dial GUI: %v", err)
+	}
+	defer gui.Close()
+
+	// Act: the connect snapshots carry durable host work.
+	hostSnap := readFrame(t, bufio.NewReader(host)).GetSnapshot()
+	guiSnap := readWSFrame(t, gui).GetSnapshot()
+
+	// Assert: only the UDS host sees either host-only snapshot collection.
+	if len(hostSnap.GetWorkspaceAvailable()) != 1 || len(hostSnap.GetHostActions()) != 1 {
+		t.Fatalf("host snapshot lost durable work: %+v", hostSnap)
+	}
+	if len(guiSnap.GetWorkspaceAvailable()) != 0 || len(guiSnap.GetHostActions()) != 0 {
+		t.Fatalf("GUI snapshot leaked host work: %+v", guiSnap)
+	}
+
+	// Act / Assert: push fanout applies the same capability filter.
+	s.PushWorkspaceAvailable(&frontendv1.WorkspaceAvailable{JobId: "job-2"})
+	if got := readFrame(t, bufio.NewReader(host)); got.GetWorkspaceAvailable().GetJobId() != "job-2" {
+		t.Fatalf("host live frame = %+v, want workspaceAvailable job-2", got)
+	}
+	if err := gui.SetReadDeadline(time.Now().Add(100 * time.Millisecond)); err != nil {
+		t.Fatalf("set GUI deadline: %v", err)
+	}
+	if _, _, err := gui.ReadMessage(); err == nil {
+		t.Fatal("GUI received host-only workspaceAvailable frame")
+	}
+}
+
+func TestGUIRejectsHostOnlyCommand(t *testing.T) {
+	// Arrange.
+	s, h := newTestServer(t, 0)
+	defer s.Close()
+	httpSrv := httptest.NewServer(http.HandlerFunc(s.ServeWS))
+	defer httpSrv.Close()
+	guiURL := "ws" + strings.TrimPrefix(httpSrv.URL, "http")
+	gui, _, err := websocket.DefaultDialer.Dial(guiURL, nil)
+	if err != nil {
+		t.Fatalf("dial GUI: %v", err)
+	}
+	defer gui.Close()
+	_ = readWSFrame(t, gui) // connect snapshot
+
+	// Act.
+	data, err := protojson.Marshal(&frontendv1.FrontendCommand{
+		RequestId: "create-from-gui",
+		Command:   &frontendv1.FrontendCommand_CreateWorkspace{CreateWorkspace: &frontendv1.CreateWorkspaceCmd{RequestedName: "nope", GitRoot: "/repo"}},
+	})
+	if err != nil {
+		t.Fatalf("marshal create: %v", err)
+	}
+	if err := gui.WriteMessage(websocket.TextMessage, data); err != nil {
+		t.Fatalf("write create: %v", err)
+	}
+	ack := readWSFrame(t, gui).GetCommandAck()
+
+	// Assert.
+	if ack.GetOk() || !strings.Contains(ack.GetError(), "host-only command") {
+		t.Fatalf("GUI create ack = %+v, want loud host-only refusal", ack)
+	}
+	if h.called != "" {
+		t.Fatalf("GUI host-only command reached handler %q", h.called)
 	}
 }
 

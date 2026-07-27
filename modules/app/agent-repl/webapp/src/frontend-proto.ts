@@ -432,7 +432,42 @@ export interface StateSnapshot {
   queues: QueueView[];
   /** Each workspace's resolved progress view (F1); empty on a pre-F1 daemon. */
   progress: ProgressView[];
+  /** Durable host-only workspace descriptors; stripped before a GUI receives a snapshot. */
+  workspaceAvailable: WorkspaceAvailable[];
+  /** Durable host-only UI actions; stripped before a GUI receives a snapshot. */
+  hostActions: HostAction[];
 }
+
+/** The daemon's authoritative, shim-ready workspace descriptor for the Emacs host. */
+export interface WorkspaceAvailable {
+  jobId: string;
+  finalName: string;
+  worktreePath: string;
+  branch: string;
+  gitRoot: string;
+  baseCommit: string;
+  sourceWorkspace: string;
+  sourceDir: string;
+  forkFrom: string;
+  forkSessionId: string;
+  sessionId: string;
+  priority: string;
+  model: string;
+  initialPromptQueued: boolean;
+}
+
+/** A typed UI-only action from the daemon-owned workspace-command inbox. */
+export type HostAction = {
+  actionId: string;
+  action:
+    | { case: "switchWorkspace"; dir: string }
+    | { case: "setRepositoryFold"; repoKey: string; folded: boolean }
+    | { case: "setSidebarView"; view: string }
+    | { case: "taskCreate" }
+    | { case: "taskToggleDone"; id: string }
+    | { case: "taskOpen"; id: string }
+    | { case: "taskAddWorkspace"; id: string };
+};
 
 /**
  * How the classifier judged a held prompt (E4). `pending` = still being
@@ -485,7 +520,9 @@ export type FrontendFrame = {
     | { case: "sessionInit"; value: SessionInitView }
     | { case: "heartbeat"; value: HeartbeatView }
     | { case: "queue"; value: QueueView }
-    | { case: "progress"; value: ProgressView };
+    | { case: "progress"; value: ProgressView }
+    | { case: "workspaceAvailable"; value: WorkspaceAvailable }
+    | { case: "hostAction"; value: HostAction };
 };
 
 /** The frame-variant discriminators FrontendFrame.frame.case may hold. */
@@ -523,6 +560,11 @@ export const UNSUPPORTED_SHAPES: ReadonlyMap<string, string> = new Map<string, s
       "webapp decodes it but renders no visual — boot detection and " +
       "version-mismatch warnings are an Emacs-frontend concern",
   ],
+  [
+    "workspaceAvailable",
+    "host-only workspace materialization directive; GUI transports never receive it",
+  ],
+  ["hostAction", "host-only UI inbox action; GUI transports never receive it"],
 ]);
 
 /** Whether a frame variant is mapped to a webapp visual (not in the registry). */
@@ -587,6 +629,11 @@ const FRAME_DECODERS: ReadonlyMap<string, (v: unknown) => FrontendFrame["frame"]
   ["heartbeat", (v: unknown) => ({ case: "heartbeat" as const, value: decodeHeartbeatView(v) })],
   ["queue", (v: unknown) => ({ case: "queue" as const, value: decodeQueueView(v) })],
   ["progress", (v: unknown) => ({ case: "progress" as const, value: decodeProgressView(v) })],
+  [
+    "workspaceAvailable",
+    (v: unknown) => ({ case: "workspaceAvailable" as const, value: decodeWorkspaceAvailable(v) }),
+  ],
+  ["hostAction", (v: unknown) => ({ case: "hostAction" as const, value: decodeHostAction(v) })],
 ]);
 
 // --- per-message decoders (strict: reject unknown fields, validate required) -
@@ -1151,6 +1198,8 @@ const STATE_SNAPSHOT_KEYS = new Set([
   "inits",
   "queues",
   "progress",
+  "workspaceAvailable",
+  "hostActions",
 ]);
 function decodeStateSnapshot(v: unknown): StateSnapshot {
   const o = ensureObject(v, "StateSnapshot");
@@ -1180,6 +1229,14 @@ function decodeStateSnapshot(v: unknown): StateSnapshot {
       ? []
       : ensureArray(o.progress, "StateSnapshot.progress")
     ).map(decodeProgressView),
+    workspaceAvailable: (o.workspaceAvailable === undefined || o.workspaceAvailable === null
+      ? []
+      : ensureArray(o.workspaceAvailable, "StateSnapshot.workspaceAvailable")
+    ).map(decodeWorkspaceAvailable),
+    hostActions: (o.hostActions === undefined || o.hostActions === null
+      ? []
+      : ensureArray(o.hostActions, "StateSnapshot.hostActions")
+    ).map(decodeHostAction),
   };
   // The daemon block is optional (absent on a pre-S7 daemon). Decode it when
   // present rather than defaulting it away.
@@ -1187,6 +1244,103 @@ function decodeStateSnapshot(v: unknown): StateSnapshot {
     snap.daemon = decodeDaemonView(o.daemon);
   }
   return snap;
+}
+
+const WORKSPACE_AVAILABLE_KEYS = new Set([
+  "jobId",
+  "finalName",
+  "worktreePath",
+  "branch",
+  "gitRoot",
+  "baseCommit",
+  "sourceWorkspace",
+  "sourceDir",
+  "forkFrom",
+  "forkSessionId",
+  "sessionId",
+  "priority",
+  "model",
+  "initialPromptQueued",
+]);
+
+function decodeWorkspaceAvailable(v: unknown): WorkspaceAvailable {
+  const o = ensureObject(v, "WorkspaceAvailable");
+  rejectUnknown(o, WORKSPACE_AVAILABLE_KEYS, "WorkspaceAvailable");
+  const available: WorkspaceAvailable = {
+    jobId: str(o, "jobId", "WorkspaceAvailable"),
+    finalName: str(o, "finalName", "WorkspaceAvailable"),
+    worktreePath: str(o, "worktreePath", "WorkspaceAvailable"),
+    branch: str(o, "branch", "WorkspaceAvailable"),
+    gitRoot: str(o, "gitRoot", "WorkspaceAvailable"),
+    baseCommit: str(o, "baseCommit", "WorkspaceAvailable"),
+    sourceWorkspace: str(o, "sourceWorkspace", "WorkspaceAvailable"),
+    sourceDir: str(o, "sourceDir", "WorkspaceAvailable"),
+    forkFrom: str(o, "forkFrom", "WorkspaceAvailable"),
+    forkSessionId: str(o, "forkSessionId", "WorkspaceAvailable"),
+    sessionId: str(o, "sessionId", "WorkspaceAvailable"),
+    priority: str(o, "priority", "WorkspaceAvailable"),
+    model: str(o, "model", "WorkspaceAvailable"),
+    initialPromptQueued: bool(o, "initialPromptQueued", "WorkspaceAvailable"),
+  };
+  if (available.jobId === "" || available.finalName === "" || available.worktreePath === "" || available.sessionId === "") {
+    throw new Error("frontend-proto: WorkspaceAvailable missing jobId, finalName, worktreePath, or sessionId");
+  }
+  return available;
+}
+
+const HOST_ACTION_KEYS = new Set([
+  "actionId",
+  "switchWorkspace",
+  "setRepositoryFold",
+  "setSidebarView",
+  "taskCreate",
+  "taskToggleDone",
+  "taskOpen",
+  "taskAddWorkspace",
+]);
+const HOST_ACTION_ARMS = [
+  "switchWorkspace",
+  "setRepositoryFold",
+  "setSidebarView",
+  "taskCreate",
+  "taskToggleDone",
+  "taskOpen",
+  "taskAddWorkspace",
+] as const;
+
+function decodeHostAction(v: unknown): HostAction {
+  const o = ensureObject(v, "HostAction");
+  rejectUnknown(o, HOST_ACTION_KEYS, "HostAction");
+  const actionId = str(o, "actionId", "HostAction");
+  if (actionId === "") throw new Error("frontend-proto: HostAction missing required `actionId`");
+  const arms = HOST_ACTION_ARMS.filter((arm) => o[arm] !== undefined && o[arm] !== null);
+  if (arms.length !== 1) {
+    throw new Error(`frontend-proto: HostAction must set exactly one action arm (got ${arms.join(", ") || "none"})`);
+  }
+  const arm = arms[0];
+  const payload = ensureObject(o[arm], `HostAction.${arm}`);
+  switch (arm) {
+    case "switchWorkspace":
+      rejectUnknown(payload, new Set(["dir"]), `HostAction.${arm}`);
+      return { actionId, action: { case: arm, dir: str(payload, "dir", `HostAction.${arm}`) } };
+    case "setRepositoryFold":
+      rejectUnknown(payload, new Set(["repoKey", "folded"]), `HostAction.${arm}`);
+      return {
+        actionId,
+        action: { case: arm, repoKey: str(payload, "repoKey", `HostAction.${arm}`), folded: bool(payload, "folded", `HostAction.${arm}`) },
+      };
+    case "setSidebarView":
+      rejectUnknown(payload, new Set(["view"]), `HostAction.${arm}`);
+      return { actionId, action: { case: arm, view: str(payload, "view", `HostAction.${arm}`) } };
+    case "taskCreate":
+      rejectUnknown(payload, new Set(), `HostAction.${arm}`);
+      return { actionId, action: { case: arm } };
+    case "taskToggleDone":
+    case "taskOpen":
+    case "taskAddWorkspace":
+      rejectUnknown(payload, new Set(["id"]), `HostAction.${arm}`);
+      return { actionId, action: { case: arm, id: str(payload, "id", `HostAction.${arm}`) } };
+  }
 }
 
 // --- primitive readers (loud, protojson-aware) ------------------------------
