@@ -453,9 +453,8 @@ func TestAuthApiErrorLineClassifiesAsAPI(t *testing.T) {
 	}
 }
 
-// A vendor block is released only by evidence the vendor released it — a clean
-// turn conclusion — never by a retry. The green underneath is then revealed
-// rather than the workspace being left with no state.
+// The purple is a report of the LAST turn, so the next turn's own outcome
+// replaces it wholesale. A retry that succeeds simply reports `done`.
 func TestCleanTurnAfterAuthFailureReleasesTheBlock(t *testing.T) {
 	// Arrange
 	rig := newFaultRig(t)
@@ -901,9 +900,10 @@ func TestConnectionOutageOutranksAnOpenVendorBlock(t *testing.T) {
 	rig.wantState(frontendv1.RenderState_RENDER_STATE_DEGRADED, "connection lost while vendor blocked")
 }
 
-// Purple outranks red: a session the vendor has stopped is not going to finish
-// whatever it still looks busy doing.
-func TestVendorBlockOutranksALiveTurn(t *testing.T) {
+// A live turn supersedes the purple: `vendor_blocked` reports how the LAST
+// turn ended, and a turn that is running now is the newer, truer fact. The
+// user was never gated from retrying, so the retry must read red.
+func TestALiveTurnSupersedesTheVendorBlock(t *testing.T) {
 	// Arrange
 	rig := newFaultRig(t)
 	rig.settleGreen()
@@ -911,11 +911,11 @@ func TestVendorBlockOutranksALiveTurn(t *testing.T) {
 	rig.apply(&corev1.TurnEnded{StopReason: "authentication_failed", IsError: true})
 	rig.wantState(frontendv1.RenderState_RENDER_STATE_VENDOR_BLOCKED, "vendor blocked")
 
-	// Act — a new turn starts while the block still stands.
+	// Act — the user retries.
 	rig.apply(&corev1.TurnStarted{})
 
 	// Assert
-	rig.wantState(frontendv1.RenderState_RENDER_STATE_VENDOR_BLOCKED, "turn started while vendor blocked")
+	rig.wantState(frontendv1.RenderState_RENDER_STATE_THINKING, "retry after a vendor block")
 }
 
 // Yellow outranks green: detached work is a stronger claim than nothing

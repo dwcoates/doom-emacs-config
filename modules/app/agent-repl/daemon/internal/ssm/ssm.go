@@ -261,41 +261,7 @@ func (m *Manager) Apply(ev *corev1.Event) error {
 		}
 	}
 
-	// The VENDOR axis, written alongside the agent axis rather than instead
-	// of it. A turn that concluded abnormally is two facts at once — the
-	// turn ended, AND something only a human or the vendor can release
-	// stopped it — and collapsing them into one row loses whichever is not
-	// written. Keeping both means clearing the block reveals the settled
-	// turn underneath instead of leaving the workspace with no state.
-	if token, cause, blocked := vendorBlockOf(ev); blocked {
-		if err := appendRow(m.db, ws, sid, token, cause,
-			sql.NullInt64{Int64: int64(ev.GetSeq()), Valid: true}, m.nextAt(), ""); err != nil {
-			return err
-		}
-		causeKind = cause
-	}
 	return m.reresolveLocked(ws, causeKind, ev.GetSeq())
-}
-
-// vendorBlockOf reports the vendor-axis row an event implies, if any.
-//
-// Only turn-CONCLUDING events produce one. A tool returning non-zero, or an
-// API call the SDK retries past, is not a conclusion: the turn is still in
-// flight, so the workspace stays red and nothing here fires.
-//
-// A CLEAN conclusion produces the clearing token rather than nothing, so a
-// session that recovers stops reading as blocked. That is the only evidence
-// the daemon accepts for a release — our own retries never write it, because
-// retrying is not evidence the vendor unblocked.
-func vendorBlockOf(ev *corev1.Event) (token, causeKind string, blocked bool) {
-	te, ok := ev.GetPayload().(*corev1.Event_TurnEnded)
-	if !ok {
-		return "", "", false
-	}
-	if VendorBlockingTurnEnd(te.TurnEnded.GetStopReason(), te.TurnEnded.GetIsError()) {
-		return sigVendorBlocked, causeVendorBlocked, true
-	}
-	return sigVendorClear, causeVendorCleared, true
 }
 
 // ApplyPaintAck records a frontend's attestation that it painted the
@@ -390,30 +356,6 @@ func (m *Manager) ApplyBackfillState(workspace, state string) error {
 	at := m.nextAt()
 	cause := "backfill:" + state
 	if err := appendRow(m.db, workspace, "", token, cause, sql.NullInt64{}, at, ""); err != nil {
-		return err
-	}
-	return m.reresolveLocked(workspace, cause, 0)
-}
-
-// ApplyVendorCleared releases a vendor/account block because the vendor or a
-// human released it — a clean turn conclusion, or a clean auth report.
-//
-// Our own retries never call this: retrying is not evidence the vendor
-// unblocked, and treating it as such is how a blocked session comes to look
-// available.
-func (m *Manager) ApplyVendorCleared(workspace, reason string) error {
-	if workspace == "" {
-		return fmt.Errorf("ssm: ApplyVendorCleared got an empty workspace")
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	at := m.nextAt()
-	cause := causeVendorCleared
-	if reason != "" {
-		cause = causeVendorCleared + ":" + reason
-	}
-	if err := appendRow(m.db, workspace, "", sigVendorClear, cause, sql.NullInt64{}, at, ""); err != nil {
 		return err
 	}
 	return m.reresolveLocked(workspace, cause, 0)
@@ -674,12 +616,18 @@ func agentOrTaskSignal(ev *corev1.Event) (state, causeKind string, ok bool) {
 	case *corev1.Event_TurnStarted:
 		return sigThinking, causeTurnStarted, true
 	case *corev1.Event_TurnEnded:
-		// ALWAYS `done` on the agent axis: the turn ended, and that is a
-		// fact about the agent regardless of why. An abnormal conclusion
-		// ADDITIONALLY blocks the vendor axis (see vendorBlockOf), which
-		// outranks done — so the workspace reads purple while the block
-		// stands and falls back to the green underneath once it clears,
-		// rather than being left with no state at all.
+		// EXACTLY ONE agent-axis row per turn end, naming HOW the turn
+		// ended. `vendor_blocked` and `done` are the same kind of fact —
+		// a report of the concluded turn — so they are the same axis and
+		// the same row, and whatever the agent does next supersedes it.
+		//
+		// Writing a second row on a vendor axis instead was the latch that
+		// made a workspace purple forever: a session that died blocked
+		// could never emit the clean turn that released it.
+		te := ev.GetTurnEnded()
+		if VendorBlockingTurnEnd(te.GetStopReason(), te.GetIsError()) {
+			return sigVendorBlocked, causeVendorBlocked, true
+		}
 		return sigDone, causeTurnEnded, true
 	case *corev1.Event_SessionEnded:
 		return sigDead, causeSessionEnded, true
