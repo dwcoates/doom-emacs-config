@@ -17,10 +17,9 @@ const causeTaskReconciled = "task_reconciled"
 //
 // # Why an authority is needed at all
 //
-// live_task_count is derived from the append-only log as
-// `count(distinct task_started) - count(distinct task_ended)`, which is only
-// the truth while the log sees BOTH halves of every task. It routinely does
-// not:
+// live_task_count is derived from the append-only log as the distinct
+// task-start set EXCEPT the distinct task-end set. That projection cannot go
+// negative, but the log can still miss either half of a lifecycle:
 //
 //   - GHOST STARTS. A task whose start was logged and whose end never arrived
 //     (the daemon was not watching when it finished) counts forever, and only a
@@ -55,8 +54,9 @@ const causeTaskReconciled = "task_reconciled"
 // DISTINCT count — so it is loud-logged and left alone rather than papered over.
 // The SDK reusing a retired task id has not been observed.
 //
-// The negative-count clamp in resolve.go is untouched. It is the loud report of
-// an impossible state; this removes its CAUSE, not its voice.
+// Apply and Open repair orphan ends at their respective ingestion boundaries.
+// This reconciliation remains the authoritative-set edge that also sweeps
+// ghost starts and adopts unseen live tasks.
 func (m *Manager) ReconcileTasks(sessionID string, liveTaskIDs []string) error {
 	if sessionID == "" {
 		return fmt.Errorf("ssm: ReconcileTasks got an empty session id")

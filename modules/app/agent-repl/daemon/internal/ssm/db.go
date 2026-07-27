@@ -165,6 +165,10 @@ func hasColumn(db *sql.DB, table, column string) (bool, error) {
 	return false, nil
 }
 
+type rowExecer interface {
+	Exec(query string, args ...any) (sql.Result, error)
+}
+
 // appendRow appends one signal to the log. causeSeq is invalid (NULL) for
 // daemon-local transitions with no store seq. `at` MUST be strictly
 // increasing per workspace (the caller's monotonic clock guarantees it),
@@ -173,7 +177,7 @@ func hasColumn(db *sql.DB, table, column string) (bool, error) {
 // taskID identifies the task a task_started/task_ended row is about, and is
 // empty for every other signal. It is what makes the live-task counter
 // idempotent per task rather than per row.
-func appendRow(db *sql.DB, workspace, sessionID, state, causeKind string, causeSeq sql.NullInt64, at int64, taskID string) error {
+func appendRow(db rowExecer, workspace, sessionID, state, causeKind string, causeSeq sql.NullInt64, at int64, taskID string) error {
 	var sid any
 	if sessionID != "" {
 		sid = sessionID
