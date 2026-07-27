@@ -65,7 +65,7 @@ Prevents the layout-restoring close — which switches buffers and so
 re-enters the advised primitives — from recursing back into the
 advice.")
 
-(defun agent-repl--open-target-is-panel-p (args)
+(defun agent-repl--open-target-is-panel-p (args &optional ws)
   "Return non-nil when ARGS's first element resolves to a live Claude panel buffer.
 ARGS is the argument list passed to an advised open function.  Only a
 buffer object or the name of an existing buffer counts as a target — a
@@ -75,9 +75,20 @@ never panels.  This lets the advice skip the programmatic
 `switch-to-buffer'/`pop-to-buffer-same-window' calls that panel
 machinery uses to place panels into their own windows."
   (let* ((arg (car args))
+         (arg-kind (cond ((bufferp arg) :buffer)
+                         ((stringp arg) :string)
+                         ((null arg) :nil)
+                         (t (type-of arg))))
          (buf (cond ((bufferp arg) arg)
-                    ((stringp arg) (get-buffer arg)))))
-    (and buf (buffer-live-p buf) (agent-repl--agent-panel-buffer-p buf))))
+                    ((stringp arg) (get-buffer arg))))
+         (live-p (and buf (buffer-live-p buf)))
+         (panel-p (and live-p (agent-repl--agent-panel-buffer-p buf))))
+    (agent-repl--log
+     ws
+     (concat "close-panels-open: classified target arg=%S kind=%S "
+             "resolved-buffer=%S live=%s panel=%s")
+     arg arg-kind (and live-p (buffer-name buf)) live-p panel-p)
+    panel-p))
 
 (defun agent-repl--close-panels-before-open (&rest args)
   "Close Agent REPL panels before an interactive buffer/file open.
@@ -89,11 +100,33 @@ not itself a Claude panel buffer (see
 so the pre-panel layout is restored and `:repl-state' becomes
 :inactive; the wrapped open then displays in whatever window that
 close leaves selected."
-  (unless agent-repl--closing-panels-for-open
-    (when (and (agent-repl--panels-visible-p)
-               (not (agent-repl--open-target-is-panel-p args)))
-      (let ((agent-repl--closing-panels-for-open t))
-        (agent-repl--simple-hide-and-preserve-status)))))
+  (let ((ws (agent-repl--ws-current-name)))
+    (if agent-repl--closing-panels-for-open
+        (agent-repl--log ws
+                         "close-panels-open: skipped re-entrant advice args=%S"
+                         args)
+      (let ((panels-visible-p (agent-repl--panels-visible-p)))
+        (if (not panels-visible-p)
+            (agent-repl--log ws
+                             "close-panels-open: skipped hidden panels args=%S visible=%s"
+                             args panels-visible-p)
+          (let ((target-is-panel-p (agent-repl--open-target-is-panel-p args ws)))
+            (if target-is-panel-p
+                (agent-repl--log
+                 ws
+                 (concat "close-panels-open: skipped panel target args=%S "
+                         "visible=%s panel-target=%s")
+                 args panels-visible-p target-is-panel-p)
+              (let ((agent-repl--closing-panels-for-open t))
+                (agent-repl--log
+                 ws
+                 (concat "close-panels-open: closing panels before target open "
+                         "args=%S visible=%s panel-target=%s")
+                 args panels-visible-p target-is-panel-p)
+                (agent-repl--simple-hide-and-preserve-status)
+                (agent-repl--log ws
+                                 "close-panels-open: panel close completed args=%S"
+                                 args)))))))))
 
 (dolist (fn agent-repl-close-panels-on-open-fns)
   (advice-add fn :before #'agent-repl--close-panels-before-open))
