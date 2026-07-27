@@ -64,6 +64,9 @@
 (declare-function +workspace/kill "ext:persp-mode" (name))
 (declare-function persp-update-names-cache "ext:persp-mode" (cache))
 (declare-function persp-rename "ext:persp-mode" (new-name &optional persp phash))
+(declare-function persp-add-new "ext:persp-mode" (name))
+(declare-function set-persp-parameter "ext:persp-mode" (parameter value &optional persp))
+(declare-function persp-kill "ext:persp-mode" (name))
 (declare-function magit-status "ext:magit" (&optional directory cache))
 (declare-function agent-repl--magit-status-same-window "agent-repl-magit" (dir))
 (declare-function agent-repl--path-canonical "agent-repl-core" (path))
@@ -181,7 +184,8 @@ debug logging on."
     :deferred-input-queue :done-ack :permission-prompt-active
     :done-ack-pending :source-ws-name :frontend-session-id
     :frontend-buffer :frontend-buffer-session-id
-    :incoming-session-id :pushed-render-state :pushed-render-state-meta)
+    :incoming-session-id :pushed-render-state :pushed-render-state-meta
+    :daemon-workspace-metadata)
   "Plist keys cleared by `agent-repl--ws-del' when tombstoning a workspace.
 Anything not in this list is treated as identity/historical and survives
 the tombstone — notably `:project-dir', `:created-at', `:last-killed-at',
@@ -1227,6 +1231,126 @@ Callers must use this function instead of calling `persp-add-new' or
         ;; through this creation boundary.
         (agent-repl--ws-put ws :project-dir project-dir))
       persp)))
+
+(defun agent-repl--ws-daemon-materialization-matches-p (ws metadata)
+  "Return non-nil when live WS exactly matches daemon METADATA.
+METADATA is the authoritative plist assembled from a
+`WorkspaceAvailable' frame.  This comparison is the replay/idempotency
+boundary: only an exact job, path, session, and creation-metadata match is
+accepted as an already-materialized workspace.  Unknown and tombstoned
+workspaces return nil."
+  (and (agent-repl--ws-live-p ws)
+       (equal (agent-repl--ws-get ws :daemon-workspace-metadata)
+              metadata)))
+
+(defun agent-repl--ws-materialize-daemon-workspace (ws metadata)
+  "Materialize daemon-owned workspace WS from authoritative METADATA.
+Creates only the perspective and the `agent-repl--workspaces' bookkeeping
+entry.  It never invokes git, session creation, shim startup, prompt
+delivery, projectile registration, or frontend mounting.
+
+Returns `created' for a new materialization and `existing' for an exact
+replay.  A same-name conflict, duplicate path owner, tombstone, or missing
+persp-mode primitive fails before mutation.  If perspective setup fails
+after creation, the perspective and fresh hash entry are rolled back before
+the original error is re-signaled."
+  (let ((path (plist-get metadata :project-dir))
+        (job-id (plist-get metadata :daemon-workspace-job-id))
+        (session-id (plist-get metadata :frontend-session-id)))
+    (agent-repl--log
+     ws
+     "ws-materialize-daemon: ENTRY ws=%s job-id=%s path=%s session-id=%s known=%S live=%S"
+     ws job-id path session-id (agent-repl--ws-known-p ws)
+     (agent-repl--ws-live-p ws))
+    (cond
+     ((agent-repl--ws-daemon-materialization-matches-p ws metadata)
+      (agent-repl--log
+       ws
+       "ws-materialize-daemon: IDEMPOTENT replay ws=%s job-id=%s path=%s session-id=%s"
+       ws job-id path session-id)
+      'existing)
+     ((agent-repl--ws-known-p ws)
+      (agent-repl--log
+       ws
+       "ws-materialize-daemon: CONFLICT known workspace ws=%s job-id=%s existing-job=%s existing-path=%s existing-session=%s"
+       ws job-id (agent-repl--ws-get ws :daemon-workspace-job-id)
+       (agent-repl--ws-get ws :project-dir)
+       (agent-repl--ws-get ws :frontend-session-id))
+      (error "agent-repl: daemon workspace %s conflicts with registered workspace" ws))
+     ((agent-repl--ws-dir-owner path)
+      (let ((owner (agent-repl--ws-dir-owner path)))
+        (agent-repl--log
+         ws
+         "ws-materialize-daemon: CONFLICT path=%s already owned by ws=%s job-id=%s"
+         path owner job-id)
+        (error "agent-repl: daemon workspace path %s is already owned by %s"
+               path owner)))
+     ((agent-repl--ws-resolve-persp ws)
+      (agent-repl--log
+       ws
+       "ws-materialize-daemon: CONFLICT perspective exists without bookkeeping ws=%s job-id=%s"
+       ws job-id)
+      (error "agent-repl: perspective %s exists without daemon bookkeeping" ws))
+     (t
+      ;; Check every rollback dependency before creating anything.
+      (dolist (fn '(persp-add-new set-persp-parameter persp-kill))
+        (unless (fboundp fn)
+          (agent-repl--log
+           ws
+           "ws-materialize-daemon: MISSING required perspective primitive=%s ws=%s job-id=%s — aborting before mutation"
+           fn ws job-id)
+          (error "agent-repl: cannot materialize %s; %s is unavailable" ws fn)))
+      (let ((persp-created nil)
+            (hash-created nil))
+        (condition-case err
+            (let ((persp (persp-add-new ws)))
+              (unless (and persp (not (keywordp persp)))
+                (error "persp-add-new did not create perspective %s" ws))
+              (setq persp-created t)
+              (set-persp-parameter '+workspace-project path persp)
+              ;; One write is the bookkeeping commit point.  Keeping all
+              ;; metadata in one plist prevents observers from seeing a
+              ;; project-dir-only or session-id-only partial workspace.
+              (puthash
+               ws
+               (append
+                (list :created-at (current-time)
+                      :worktree-p t
+                      ;; Preserve the immutable creation envelope separately
+                      ;; from mutable top-level fields such as :priority.
+                      ;; Reconnect replay compares this exact original value,
+                      ;; so a later user priority edit cannot turn the same
+                      ;; daemon job into a false conflict.
+                      :daemon-workspace-metadata metadata
+                      :ws-id (substring
+                              (md5 (directory-file-name
+                                    (expand-file-name path)))
+                              0 agent-repl-workspace-id-length))
+                metadata)
+               agent-repl--workspaces)
+              (setq hash-created t)
+              (agent-repl--log
+               ws
+               "ws-materialize-daemon: CREATED ws=%s job-id=%s path=%s session-id=%s branch=%s prompt-queued=%S"
+               ws job-id path session-id (plist-get metadata :branch-name)
+               (plist-get metadata :initial-prompt-queued))
+              'created)
+          (error
+           (when hash-created
+             (remhash ws agent-repl--workspaces))
+           (when persp-created
+             (condition-case rollback-err
+                 (persp-kill ws)
+               (error
+                (agent-repl--log
+                 ws
+                 "ws-materialize-daemon: ROLLBACK perspective kill FAILED ws=%s job-id=%s err=%S"
+                 ws job-id rollback-err))))
+           (agent-repl--log
+            ws
+            "ws-materialize-daemon: FAILED and rolled back ws=%s job-id=%s hash-created=%S persp-created=%S err=%S"
+            ws job-id hash-created persp-created err)
+           (signal (car err) (cdr err)))))))))
 
 (defun agent-repl--ws-protected-p (ws)
   "Return non-nil when workspace WS is protected from deletion/cycling.
