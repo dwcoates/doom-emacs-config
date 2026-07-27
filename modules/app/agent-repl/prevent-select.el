@@ -20,17 +20,30 @@
 
 (require 'cl-lib)
 
-(defun agent-repl--prev-buffer-skip-agent-panel (_window buffer _bury-or-kill)
+(defun agent-repl--prev-buffer-skip-agent-panel (_window buffer bury-or-kill)
   "Predicate for `switch-to-prev-buffer-skip'.
 Return non-nil when BUFFER is a Claude panel buffer (the input
 composer or the webview) so it is skipped by `next-buffer',
 `previous-buffer', and the replacement chooser invoked after
 `kill-buffer'."
-  (and (buffer-live-p buffer)
-       (agent-repl--agent-panel-buffer-p buffer)))
+  (let* ((live-p (buffer-live-p buffer))
+         (ws (and live-p (agent-repl--buffer-owner buffer)))
+         (panel-p (and live-p (agent-repl--agent-panel-buffer-p buffer))))
+    ;; This predicate can run once for every candidate in a window's history.
+    ;; Keep its branch trace behind verbose logging so buffer cycling remains
+    ;; cheap outside an explicitly requested diagnostic session.
+    (agent-repl--log-verbose
+     ws
+     "prevent-select: candidate buffer=%S live=%s panel=%s bury-or-kill=%S skip=%s"
+     (and live-p (buffer-name buffer)) live-p panel-p bury-or-kill panel-p)
+    panel-p))
 
 (setq switch-to-prev-buffer-skip
       #'agent-repl--prev-buffer-skip-agent-panel)
+
+(agent-repl--log nil
+                  "prevent-select: installed switch-to-prev-buffer-skip predicate=%S"
+                  switch-to-prev-buffer-skip)
 
 (provide 'prevent-select)
 

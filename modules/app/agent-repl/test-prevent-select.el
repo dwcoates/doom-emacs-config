@@ -72,6 +72,22 @@ be skipped — liveness alone must be what defeats it here."
     (kill-buffer buf)
     (should-not (agent-repl--prev-buffer-skip-agent-panel nil buf nil))))
 
+(ert-deftest agent-repl-prevent-select-test-skip-logs-workspace-owned-candidate ()
+  "The candidate trace uses the panel buffer's owning workspace."
+  (agent-repl-prevent-select-test--with-buffers
+      ((buf "*agent-panel-input-logging-ws*"))
+    (with-current-buffer buf
+      (setq-local agent-repl--owning-workspace "logging-ws"))
+    (let (log-call)
+      (cl-letf (((symbol-function 'agent-repl--log-verbose)
+                 (lambda (&rest args) (setq log-call args))))
+        (should (agent-repl--prev-buffer-skip-agent-panel nil buf 'kill)))
+      (should (equal (car log-call) "logging-ws"))
+      (should (equal (cadr log-call)
+                     "prevent-select: candidate buffer=%S live=%s panel=%s bury-or-kill=%S skip=%s"))
+      (should (equal (nth 5 log-call) 'kill))
+      (should (nth 6 log-call)))))
+
 ;;;; ---- Variable installation ----
 
 (ert-deftest agent-repl-prevent-select-test-installed-on-skip-var ()
