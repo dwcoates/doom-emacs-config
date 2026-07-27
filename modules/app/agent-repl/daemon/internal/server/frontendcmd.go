@@ -95,9 +95,12 @@ type WorkspaceHostWorkSnapshot struct {
 	HostActions        []*frontendv1.HostAction
 }
 
-// Resyncer replays a workspace's retained conversation deltas from an exclusive
-// seq (design §5.4), the conversation-delta half of a frontend resync the
-// StateSnapshot re-send does not cover. Satisfied by *sessiondrv.Manager.
+// Resyncer replays a workspace's retained conversation deltas from the
+// requested seq INCLUSIVE (design §5.4), the conversation-delta half of a
+// frontend resync the StateSnapshot re-send does not cover. The implementation
+// raises that start to the newest clear or compaction when there is one, so a
+// frontend is never served history one of those already discarded. Satisfied by
+// *sessiondrv.Manager.
 type Resyncer interface {
 	Resync(workspace string, fromSeq uint64) error
 }
@@ -414,7 +417,8 @@ func (h *commandHandler) OpenWorkspace(ctx context.Context, workspace, requestID
 
 // Resync drives the conversation-delta replay half of a frontend resync (the
 // frontend server independently re-sends the StateSnapshot). It routes to the
-// per-session driver's retained-ring replay from the requested exclusive seq.
+// per-session driver's retained-ring replay from the requested seq, inclusive
+// and floored at the newest clear or compaction.
 // A nil resyncer (no driver wired) leaves this a documented no-op — the
 // snapshot half is honest and sufficient for state — rather than a swallow.
 // PaintAck records that a frontend PAINTED this workspace's conversation
