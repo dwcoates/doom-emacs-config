@@ -288,6 +288,29 @@ func TestBootWithNoStoreRecoversNoCursors(t *testing.T) {
 	}
 }
 
+func TestRescanDoesNotTreatTaskArtifactAsOpenLifecycle(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "projects", "-p", "s1", "subagents", "agent-a1.jsonl")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir artifact dir: %v", err)
+	}
+	if err := os.WriteFile(path, nil, 0o644); err != nil {
+		t.Fatalf("write artifact: %v", err)
+	}
+	s := newSidecar(filepath.Join(t.TempDir(), "unused.sock"), []string{root}, t.TempDir(), quietLog)
+	s.link = linkUp
+	s.cursors = map[string]*corev1.CursorState{}
+
+	s.rescan()
+
+	if _, ok := s.watchers[path]; !ok {
+		t.Fatal("rescan did not build a tailer for discovered artifact")
+	}
+	if s.tracker.IsOpen("a1") {
+		t.Fatal("artifact presence opened task a1; liveness must come only from persisted lifecycle state")
+	}
+}
+
 func TestStoreUpLateRecoversCursorsOnTheFirstConnection(t *testing.T) {
 	// Arrange — the store already holds an end-of-file cursor from an earlier
 	// sidecar, and is then taken down. A fresh sidecar boots against the dead

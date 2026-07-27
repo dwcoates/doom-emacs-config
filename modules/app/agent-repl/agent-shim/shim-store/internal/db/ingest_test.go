@@ -92,6 +92,33 @@ func TestIngestDedupIsIdempotentAcrossBatches(t *testing.T) {
 	}
 }
 
+func TestSyntheticLostDedupsWithoutSuppressingARealTerminal(t *testing.T) {
+	d := openTemp(t)
+	lost := func() *corev1.Event {
+		return terminalTaskEnded("s1", "task-1", corev1.TerminalStatus_TERMINAL_STATUS_LOST, "task-lost:task-1")
+	}
+	first, err := d.Ingest("sidecar", []*corev1.Event{lost()}, nil)
+	if err != nil {
+		t.Fatalf("first LOST Ingest: %v", err)
+	}
+	repeated, err := d.Ingest("sidecar", []*corev1.Event{lost()}, nil)
+	if err != nil {
+		t.Fatalf("repeated LOST Ingest: %v", err)
+	}
+	real, err := d.Ingest("stream", []*corev1.Event{
+		terminalTaskEnded("s1", "task-1", corev1.TerminalStatus_TERMINAL_STATUS_DONE, ""),
+	}, nil)
+	if err != nil {
+		t.Fatalf("real terminal Ingest: %v", err)
+	}
+	if first.Accepted != 1 || repeated.Deduped != 1 || real.Accepted != 1 {
+		t.Fatalf("results first=%+v repeated=%+v real=%+v; want accepted, deduped, accepted", first, repeated, real)
+	}
+	if max, err := d.MaxSeq("s1"); err != nil || max != 2 {
+		t.Fatalf("MaxSeq = %d, err=%v; want 2", max, err)
+	}
+}
+
 func TestIngestCommitsCursorAtomically(t *testing.T) {
 	// Arrange
 	d := openTemp(t)

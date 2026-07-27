@@ -1,6 +1,7 @@
 // Package storeclient is the sidecar's UDS client to the shim-store: it recovers
-// cursors (CursorQuery → CursorList), writes StoreWrite batches over a long-lived
-// producer connection (reading each StoreWriteAck), and heartbeats.
+// cursors plus authoritative open-task lifecycle state (CursorQuery →
+// CursorList), writes StoreWrite batches over a long-lived producer connection
+// (reading each StoreWriteAck), and heartbeats.
 //
 // Transport is the system-wide convention (agentrepl/wire WriteAny/ReadAny): a
 // 4-byte length prefix wrapping a serialized google.protobuf.Any whose type_url
@@ -88,27 +89,50 @@ func (c *Client) Connected() bool {
 	return c.conn != nil
 }
 
-// RecoverCursors asks the store for persisted cursors (§7.3). An empty fileID
-// recovers all. It uses a dedicated short-lived connection (CursorQuery is its
-// own connection role).
-func (c *Client) RecoverCursors(fileID string) ([]*corev1.CursorState, error) {
+// RecoveryState is the store's durable startup snapshot. OpenTasks is the
+// authoritative live-task set: artifact existence is not lifecycle evidence.
+type RecoveryState struct {
+	Cursors   []*corev1.CursorState
+	OpenTasks []*corev1.OpenTaskState
+}
+
+// Recover asks the store for persisted startup state (§7.3). An empty fileID
+// recovers all cursors plus authoritative open tasks. It uses a dedicated
+// short-lived connection (CursorQuery is its own connection role).
+func (c *Client) Recover(fileID string) (RecoveryState, error) {
 	conn, err := net.Dial("unix", c.socket)
 	if err != nil {
-		return nil, fmt.Errorf("storeclient: dial %s: %w", c.socket, err)
+		return RecoveryState{}, fmt.Errorf("storeclient: dial %s: %w", c.socket, err)
 	}
 	defer conn.Close()
 	if err := wire.WriteAny(conn, &corev1.CursorQuery{FileId: fileID}); err != nil {
-		return nil, err
+		return RecoveryState{}, err
 	}
 	msg, err := wire.ReadAny(conn)
 	if err != nil {
-		return nil, fmt.Errorf("storeclient: reading CursorList: %w", err)
+		return RecoveryState{}, fmt.Errorf("storeclient: reading CursorList: %w", err)
 	}
 	list, ok := msg.(*corev1.CursorList)
 	if !ok {
-		return nil, fmt.Errorf("storeclient: expected CursorList, got %T", msg)
+		return RecoveryState{}, fmt.Errorf("storeclient: expected CursorList, got %T", msg)
 	}
-	return list.GetCursors(), nil
+	if fileID == "" && !list.GetOpenTasksAuthoritative() {
+		return RecoveryState{}, fmt.Errorf("storeclient: CursorList lacks authoritative open-task state; refusing startup against an incompatible store")
+	}
+	return RecoveryState{
+		Cursors:   list.GetCursors(),
+		OpenTasks: list.GetOpenTasks(),
+	}, nil
+}
+
+// RecoverCursors returns only the cursor portion for callers that do not own
+// task liveness.
+func (c *Client) RecoverCursors(fileID string) ([]*corev1.CursorState, error) {
+	recovery, err := c.Recover(fileID)
+	if err != nil {
+		return nil, err
+	}
+	return recovery.Cursors, nil
 }
 
 // Write sends one StoreWrite batch and returns the store's ack. It NEVER dials:

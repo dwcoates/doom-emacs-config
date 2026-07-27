@@ -470,6 +470,19 @@ message CursorQuery {
   string file_id = 1;
 }
 
+message OpenTaskState {
+  Event started = 1;
+  int64 last_activity_at_ms = 2;
+}
+
 message CursorList {
   repeated CursorState cursors = 1;
+  // Authoritative persisted tasks with no TaskEnded for the same session/task
+  // identity. Returned with an all-cursors startup query so the sidecar
+  // restores liveness and last activity from durable state, not file presence.
+  repeated OpenTaskState open_tasks = 2;
+  // True only when open_tasks was computed by a store that implements the
+  // authoritative lifecycle query. Distinguishes an empty set from an older
+  // store that does not understand field 2.
+  bool open_tasks_authoritative = 3;
 }

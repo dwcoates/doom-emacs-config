@@ -16,6 +16,7 @@
 package stale
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
@@ -99,6 +100,50 @@ func (t *Tracker) Open(id string, kind tail.Kind, session, outputPath string, st
 		id: id, kind: kind, session: session, outputPath: outputPath,
 		startedAtMs: startedAtMs, lastActMs: nowMs,
 	}
+}
+
+// Restore replaces the in-memory tracker with the store's authoritative
+// persisted open-task set. It validates the complete snapshot before mutation,
+// so a malformed persisted lifecycle leaves the prior tracker intact and
+// prevents the sidecar link from coming up.
+func (t *Tracker) Restore(states []*corev1.OpenTaskState) error {
+	restored := make(map[string]*task, len(states))
+	for _, state := range states {
+		if state == nil || state.GetStarted() == nil {
+			return fmt.Errorf("stale: recovery contains an open task with no start event")
+		}
+		ev := state.GetStarted()
+		ts := ev.GetTaskStarted()
+		if ts == nil {
+			return fmt.Errorf("stale: recovery session=%s seq=%d is not TaskStarted", ev.GetSessionId(), ev.GetSeq())
+		}
+		if ev.GetSessionId() == "" || ts.GetTaskId() == "" || ev.GetProducedAtMs() <= 0 || state.GetLastActivityAtMs() <= 0 {
+			return fmt.Errorf("stale: invalid recovered TaskStarted session=%q task_id=%q produced_at_ms=%d last_activity_at_ms=%d seq=%d",
+				ev.GetSessionId(), ts.GetTaskId(), ev.GetProducedAtMs(), state.GetLastActivityAtMs(), ev.GetSeq())
+		}
+		if prior, exists := restored[ts.GetTaskId()]; exists {
+			return fmt.Errorf("stale: duplicate recovered task_id=%q across sessions %q and %q",
+				ts.GetTaskId(), prior.session, ev.GetSessionId())
+		}
+		kind, err := coreTaskKindToTail(ts.GetKind())
+		if err != nil {
+			return fmt.Errorf("stale: invalid recovered TaskStarted session=%q task_id=%q: %w",
+				ev.GetSessionId(), ts.GetTaskId(), err)
+		}
+		restored[ts.GetTaskId()] = &task{
+			id:          ts.GetTaskId(),
+			kind:        kind,
+			session:     ev.GetSessionId(),
+			outputPath:  ts.GetOutputPath(),
+			startedAtMs: ev.GetProducedAtMs(),
+			lastActMs:   state.GetLastActivityAtMs(),
+		}
+	}
+	t.mu.Lock()
+	t.tasks = restored
+	t.mu.Unlock()
+	t.log("stale: restored %d authoritative open task(s) with persisted activity from store", len(restored))
+	return nil
 }
 
 // Activity records that a task's file produced new bytes at nowMs and clears any
@@ -189,6 +234,7 @@ func (t *Tracker) lost(tk *task, inference string) *corev1.Event {
 		Plane:        corev1.Plane_PLANE_SYNTHETIC,
 		Class:        corev1.EventClass_EVENT_CLASS_PERSISTENT,
 		ProducedAtMs: nowMillis(),
+		DedupKey:     "task-lost:" + tk.id,
 		Payload: &corev1.Event_TaskEnded{TaskEnded: &corev1.TaskEnded{
 			TaskId:     tk.id,
 			Kind:       kindToTaskKind(tk.kind),
@@ -207,6 +253,19 @@ func (t *Tracker) silence(k tail.Kind) time.Duration {
 		return t.opt.WorkflowSilence
 	default:
 		return t.opt.AgentSilence
+	}
+}
+
+func coreTaskKindToTail(k corev1.TaskKind) (tail.Kind, error) {
+	switch k {
+	case corev1.TaskKind_TASK_KIND_SHELL:
+		return tail.KindShellSpool, nil
+	case corev1.TaskKind_TASK_KIND_WORKFLOW:
+		return tail.KindWorkflowJournal, nil
+	case corev1.TaskKind_TASK_KIND_AGENT:
+		return tail.KindAgentTranscript, nil
+	default:
+		return 0, fmt.Errorf("unsupported task kind %s", k)
 	}
 }
 
