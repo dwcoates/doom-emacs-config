@@ -5197,10 +5197,22 @@ describe("panelSeedsOnOpen", () => {
   });
 });
 
+/**
+ * The wslog helper prepends its own `HH:MM:SS.mmm ` client stamp to every line
+ * (wslog.test.ts owns that contract). These suites assert on the MESSAGE, so
+ * they record it stamp-free rather than pinning a wall clock.
+ */
+const CLIENT_STAMP = /^\d{2}:\d{2}:\d{2}\.\d{3} /;
+
 describe("off-enum status/kind logging", () => {
   function spyLines(): string[] {
     const lines: string[] = [];
-    setLogger(new ForwardingLogger(() => true, (level, line) => lines.push(`${level}: ${line}`)));
+    setLogger(
+      new ForwardingLogger(
+        () => true,
+        (level, line) => lines.push(`${level}: ${line.replace(CLIENT_STAMP, "")}`),
+      ),
+    );
     return lines;
   }
   afterEach(() => resetLoggingForTests());
@@ -5239,7 +5251,12 @@ describe("FeedRenderer.render/renderRestored: logs then rethrows a mid-reconcile
 
   function spyLines(): string[] {
     const lines: string[] = [];
-    setLogger(new ForwardingLogger(() => true, (level, line) => lines.push(`${level}: ${line}`)));
+    setLogger(
+      new ForwardingLogger(
+        () => true,
+        (level, line) => lines.push(`${level}: ${line.replace(CLIENT_STAMP, "")}`),
+      ),
+    );
     return lines;
   }
   afterEach(() => resetLoggingForTests());
@@ -5500,7 +5517,12 @@ describe("FeedRenderer: fresh user turn logs a rendering receipt", () => {
 
   function recordLines(): string[] {
     const lines: string[] = [];
-    setLogger(new ForwardingLogger(() => true, (level, l) => lines.push(`${level}: ${l}`)));
+    setLogger(
+      new ForwardingLogger(
+        () => true,
+        (level, l) => lines.push(`${level}: ${l.replace(CLIENT_STAMP, "")}`),
+      ),
+    );
     return lines;
   }
 

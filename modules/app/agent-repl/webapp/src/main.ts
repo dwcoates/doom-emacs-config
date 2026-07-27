@@ -60,7 +60,7 @@ import {
   daemonUnreachableFailure,
   sessionGoneFailure,
 } from "./local-failure.js";
-import { StateAdapter, systemFailureFrom } from "./state-adapter.js";
+import { StateAdapter, systemFailureFrom, userTurnReceipt } from "./state-adapter.js";
 import { CommandDispatcher } from "./command-dispatch.js";
 import { ConnectResync } from "./connect-resync.js";
 import type { CommandStruct } from "./frontend-command.js";
@@ -787,6 +787,19 @@ async function boot(): Promise<void> {
             `frontend frame decode/adapt threw: ${String(err)} — frame head: ${data.slice(0, 200)}`,
           );
           throw err;
+        }
+        // Receipt for an arriving prompt, stamped at INGEST. The feed logs a
+        // turn only when the rAF-coalesced render draws it, so on its own that
+        // line cannot separate a suspended animation frame from a delta that
+        // simply came late. Read `lastSeq` before ingest, which advances it; a
+        // resync replay lands at or below it and is forwarded to the daemon by
+        // nobody — it is a re-delivery, and a whole replayed history would eat
+        // the forward budget the live line needs.
+        const receipt = userTurnReceipt(effects, store.state.lastSeq);
+        if (receipt !== null) {
+          const line = `feed: user turn received request_id=${receipt.requestId} seq=${receipt.seq} len=${receipt.len} live=${receipt.live}`;
+          if (receipt.live) clog("info", line);
+          else wslog.logLocalOnly("info", line);
         }
         const result = store.ingest(effects);
         // Answer for a state this end cannot draw. A hidden webview receives

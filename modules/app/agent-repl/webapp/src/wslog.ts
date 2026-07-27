@@ -22,6 +22,15 @@ export type { ClientLogContext };
 export const FORWARD_WINDOW_MS = 60_000;
 export const MAX_FORWARDS_PER_WINDOW = 60;
 
+/**
+ * `HH:MM:SS.mmm` (UTC) for MS — the ISO slice the shim's UDS logger uses
+ * (agent-shim/.../uds/log.ts `stamp`), so a webapp line and a shim line in the
+ * same daemon log read on one clock.
+ */
+function stamp(ms: number): string {
+  return new Date(ms).toISOString().slice(11, 23);
+}
+
 export class ForwardingLogger {
   private windowStart = 0;
   private forwarded = 0;
@@ -45,8 +54,13 @@ export class ForwardingLogger {
    * gets the message text, since a console line is read by a human.
    */
   log(level: ClientLogLevel, message: string, context?: ClientLogContext): void {
-    this.consoleFn(level, message);
     const t = this.now();
+    // Stamped HERE and nowhere else: call sites pass bare text, and both the
+    // console line and the daemon-side copy carry the WEBAPP's clock. The
+    // daemon stamps at receipt, which hides every delay between the two —
+    // exactly the interval a prompt-latency question is about.
+    const line = `${stamp(t)} ${message}`;
+    this.consoleFn(level, line);
     if (t - this.windowStart >= FORWARD_WINDOW_MS) {
       this.windowStart = t;
       this.forwarded = 0;
@@ -60,13 +74,18 @@ export class ForwardingLogger {
         this.send({
           type: "client-log",
           level: "warn",
-          message: `client-log rate limit (${MAX_FORWARDS_PER_WINDOW}/${FORWARD_WINDOW_MS}ms) reached — suppressing forwards for the rest of the window`,
+          message: `${stamp(t)} client-log rate limit (${MAX_FORWARDS_PER_WINDOW}/${FORWARD_WINDOW_MS}ms) reached — suppressing forwards for the rest of the window`,
         });
       }
       return;
     }
     this.forwarded++;
-    this.send({ type: "client-log", level, message, ...(context !== undefined ? { context } : {}) });
+    this.send({
+      type: "client-log",
+      level,
+      message: line,
+      ...(context !== undefined ? { context } : {}),
+    });
   }
 
   /**
@@ -79,7 +98,9 @@ export class ForwardingLogger {
    * rather than being swallowed or bypassing the sink with a bare console call.
    */
   logLocalOnly(level: ClientLogLevel, message: string): void {
-    this.consoleFn(level, message);
+    // Same stamp as `log`: a console-only line is still evidence, and a reader
+    // correlating it against a forwarded one needs the two on one clock.
+    this.consoleFn(level, `${stamp(this.now())} ${message}`);
   }
 }
 

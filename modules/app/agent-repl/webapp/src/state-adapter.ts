@@ -282,6 +282,57 @@ export type AdapterEffect =
 export type AdapterLogLevel = "debug" | "info" | "warn";
 export type AdapterLogger = (level: AdapterLogLevel, message: string) => void;
 
+// --- ingest-time user-turn receipt -------------------------------------------
+
+/** A user turn as it ARRIVED, before the store or the renderer saw it. */
+export interface UserTurnReceipt {
+  requestId: string;
+  /** The delta's `throughSeq` — the daemon's sequence for this batch. */
+  seq: number;
+  /** Total length of the turn's text blocks. */
+  len: number;
+  /**
+   * Whether the batch carries ground the store has not covered. A connect
+   * resync replays history at or below `lastSeq`, so its user turns are
+   * re-deliveries of prompts already ingested once, not arrivals.
+   */
+  live: boolean;
+}
+
+/**
+ * The user turn EFFECTS carry, if any — the ingest-side counterpart to render's
+ * `feed: user turn rendering` line. The two are separated by a coalesced
+ * animation frame, so with only the render line a suspended rAF and a late
+ * delta look identical in the log; this pins WHEN the delta reached the webapp.
+ *
+ * LASTSEQ must be read BEFORE the effects are ingested, since ingesting is what
+ * advances it. Null when the batch carries no user turn, or when the turn has
+ * no text (a pure tool-feedback message yields no turn at all, and a textless
+ * one times nothing).
+ */
+export function userTurnReceipt(effects: AdapterEffect[], lastSeq: number): UserTurnReceipt | null {
+  for (const effect of effects) {
+    if (effect.kind !== "conversation-items") continue;
+    for (const item of effect.items) {
+      if (item.kind !== "user-turn") continue;
+      let len = 0;
+      for (const block of item.content) {
+        // Only text blocks carry prompt length; the catch-all ContentBlock arm
+        // makes `text` unknown, so read it defensively rather than casting.
+        if (block.type === "text" && typeof block.text === "string") len += block.text.length;
+      }
+      if (len === 0) continue;
+      return {
+        requestId: item.requestId,
+        seq: effect.throughSeq,
+        len,
+        live: effect.throughSeq > lastSeq,
+      };
+    }
+  }
+  return null;
+}
+
 // --- the adapter ------------------------------------------------------------
 
 export class StateAdapter {
