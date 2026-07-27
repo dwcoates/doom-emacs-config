@@ -256,7 +256,7 @@ func main() {
 		loginBin = "claude"
 	}
 	logins := login.NewManager(login.Config{
-		Start: login.Spawn([]string{loginBin, "/login"}),
+		Start: login.SpawnVendor([]string{loginBin, "/login"}),
 		Logf:  log.Printf,
 	})
 	defer logins.CloseAll()
