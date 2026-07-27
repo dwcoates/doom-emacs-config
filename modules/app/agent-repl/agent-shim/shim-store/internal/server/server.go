@@ -17,6 +17,9 @@
 //   - StoreWrite → PRODUCER connection: the store ingests the batch and replies
 //     with one StoreWriteAck frame, then loops (further StoreWrite frames each
 //     get an ack; Heartbeat frames get a Heartbeat reply).
+//   - Heartbeat → PRODUCER-PREAMBLE connection: the store echoes heartbeats
+//     until the first StoreWrite declares the producer. This keeps an idle
+//     sidecar link alive after startup recovery but before any file changes.
 //   - Subscribe → SUBSCRIBER connection: the store replays persisted events with
 //     seq > from_seq, then live-tails Event frames until the client disconnects
 //     or falls behind.
@@ -158,12 +161,18 @@ func (s *Server) handleConn(conn net.Conn) {
 	switch m := msg.(type) {
 	case *corev1.StoreWrite:
 		s.serveProducer(conn, m)
+	case *corev1.Heartbeat:
+		if err := s.echoHeartbeat(conn, m); err != nil {
+			return
+		}
+		s.log("producer connection opened with heartbeat; awaiting first StoreWrite")
+		s.serveProducerPreamble(conn)
 	case *corev1.Subscribe:
 		s.serveSubscriber(conn, m)
 	case *corev1.CursorQuery:
 		s.serveCursorQuery(conn, m)
 	default:
-		s.log("first frame is %T; expected StoreWrite, Subscribe, or CursorQuery", m)
+		s.log("first frame is %T; expected StoreWrite, Heartbeat, Subscribe, or CursorQuery", m)
 	}
 }
 
@@ -209,6 +218,34 @@ func (s *Server) serveCursorQuery(conn net.Conn, q *corev1.CursorQuery) {
 
 // ---- producer side --------------------------------------------------------
 
+// serveProducerPreamble keeps a recovered-but-idle producer connection alive
+// until its first StoreWrite identifies the producer. A sidecar can legitimately
+// have no event to write for hours after startup, so requiring a write before
+// its first heartbeat turns healthy idleness into a reconnect loop.
+func (s *Server) serveProducerPreamble(conn net.Conn) {
+	for {
+		msg, err := wire.ReadAny(conn)
+		if err != nil {
+			if !errors.Is(err, io.EOF) {
+				s.log("producer preamble connection dropped: %v", err)
+			}
+			return
+		}
+		switch m := msg.(type) {
+		case *corev1.StoreWrite:
+			s.serveProducer(conn, m)
+			return
+		case *corev1.Heartbeat:
+			if err := s.echoHeartbeat(conn, m); err != nil {
+				return
+			}
+		default:
+			s.log("producer preamble sent an unrecognized frame (%T); disconnecting", m)
+			return
+		}
+	}
+}
+
 func (s *Server) serveProducer(conn net.Conn, first *corev1.StoreWrite) {
 	if err := s.processWrite(conn, first); err != nil {
 		s.log("producer write failed (producer=%s): %v", first.GetProducer(), err)
@@ -229,7 +266,7 @@ func (s *Server) serveProducer(conn net.Conn, first *corev1.StoreWrite) {
 				return
 			}
 		case *corev1.Heartbeat:
-			if err := wire.WriteAny(conn, &corev1.Heartbeat{SentAtMs: m.GetSentAtMs()}); err != nil {
+			if err := s.echoHeartbeat(conn, m); err != nil {
 				return
 			}
 		default:
@@ -237,6 +274,10 @@ func (s *Server) serveProducer(conn net.Conn, first *corev1.StoreWrite) {
 			return
 		}
 	}
+}
+
+func (s *Server) echoHeartbeat(conn net.Conn, heartbeat *corev1.Heartbeat) error {
+	return wire.WriteAny(conn, &corev1.Heartbeat{SentAtMs: heartbeat.GetSentAtMs()})
 }
 
 // processWrite ingests one batch and fans out its events, then acks. A rejected

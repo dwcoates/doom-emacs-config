@@ -165,6 +165,31 @@ func TestRoundTripWriteAckSubscribeReplay(t *testing.T) {
 	}
 }
 
+func TestHeartbeatCanPrecedeTheFirstProducerWrite(t *testing.T) {
+	// Arrange: startup recovery established the producer socket, but no source
+	// file changed yet, so the sidecar has no StoreWrite with which to declare
+	// the connection's role.
+	h := start(t, 0, func(string, ...any) {})
+	prod := h.dial(t)
+
+	// Act: idle liveness traffic arrives first, then a real producer batch.
+	send(t, prod, &corev1.Heartbeat{SentAtMs: 42})
+	echo, ok := recv(t, prod).(*corev1.Heartbeat)
+	if !ok {
+		t.Fatalf("heartbeat reply type = %T, want *Heartbeat", echo)
+	}
+	send(t, prod, write(vAssistantStream(t, "s1", "A")))
+	ack := recvAck(t, prod)
+
+	// Assert: the preamble stayed connected and the first write was ingested.
+	if echo.GetSentAtMs() != 42 {
+		t.Fatalf("heartbeat sent_at_ms = %d, want 42", echo.GetSentAtMs())
+	}
+	if ack.GetAccepted() != 1 || ack.GetLastSeq() != 1 {
+		t.Fatalf("ack = %+v, want accepted=1 last_seq=1", ack)
+	}
+}
+
 func TestReplayFromMidSeq(t *testing.T) {
 	// Arrange
 	h := start(t, 0, func(string, ...any) {})
