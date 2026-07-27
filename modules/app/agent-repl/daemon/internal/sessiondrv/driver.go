@@ -286,6 +286,12 @@ func (m *Manager) SessionInits() []*frontendv1.SessionInitView {
 	return out
 }
 
+// taskCatalogForDriven rebuilds one live driver's complete detached-task roster
+// from its retained event ring.
+func taskCatalogForDriven(d *driven) *frontendv1.TaskCatalog {
+	return frontend.BuildTaskCatalog(d.workspace, d.sessionID, d.consumer.snapshotRing())
+}
+
 // TaskEntry returns the frontend TaskEntry (including its output_path) for a
 // detached task on the workspace's live session, rebuilt from the retained
 // event ring. ok=false when the workspace has no live driver or no such task.
@@ -295,7 +301,7 @@ func (m *Manager) TaskEntry(workspace, taskID string) (*frontendv1.TaskEntry, bo
 	if err != nil {
 		return nil, false
 	}
-	cat := frontend.BuildTaskCatalog(workspace, d.sessionID, d.consumer.snapshotRing())
+	cat := taskCatalogForDriven(d)
 	for _, e := range cat.GetTasks() {
 		if e.GetTaskId() == taskID {
 			return e, true
