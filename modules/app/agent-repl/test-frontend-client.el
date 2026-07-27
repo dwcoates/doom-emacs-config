@@ -437,7 +437,7 @@ each test drives it explicitly."
      (ignore dials pumps sleeps)
      (cl-letf (((symbol-function 'agent-repl--uds-connected-p) ,connected-fn)
                ((symbol-function 'agent-repl-uds-connect)
-                (lambda (&optional _p) (cl-incf dials) nil))
+                (lambda (&optional _p _readiness-p) (cl-incf dials) nil))
                ((symbol-function 'accept-process-output)
                 (lambda (&rest _) (cl-incf pumps) nil))
                ((symbol-function 'sleep-for)
@@ -482,13 +482,16 @@ daemon that may be gone."
     (should (= pumps 0))))
 
 (ert-deftest agent-repl-test-frontend-wait-ready-dials-while-the-link-is-down ()
-  "Each attempt against a DOWN link dials, and paces with a blocking sleep."
+  "Each DOWN-link attempt is readiness-owned and paces with a blocking sleep."
   ;; Arrange — the first two dials fail; the third connects with a view.
-  (let ((attempts 0))
+  (let ((attempts 0)
+        readiness-args)
     (agent-repl-test--with-readiness (lambda () (>= attempts 3))
       (cl-letf (((symbol-function 'agent-repl-uds-connect)
-                 (lambda (&optional _p)
+                 (lambda (&optional _p readiness-p)
                    (cl-incf attempts)
+                   (setq readiness-args
+                         (append readiness-args (list readiness-p)))
                    (when (>= attempts 3)
                      (setq agent-repl--frontend-last-daemon-view '(:bootId "b_1")))
                    nil)))
@@ -496,6 +499,7 @@ daemon that may be gone."
         (should (agent-repl--frontend-wait-ready))
         ;; Assert — one dial per attempt, one 0.2s pacing sleep per FAILED dial.
         (should (= attempts 3))
+        (should (equal readiness-args '(t t t)))
         (should (equal sleeps '(0.2 0.2)))))))
 
 (ert-deftest agent-repl-test-frontend-wait-ready-pumps-a-live-link-for-the-view ()

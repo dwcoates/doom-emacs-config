@@ -57,7 +57,7 @@
 (declare-function agent-repl--uds-send-command "frontend-uds" (field payload &optional workspace process))
 (declare-function agent-repl--uds-track-command "frontend-uds" (request-id field workspace &optional on-failure on-success))
 (declare-function agent-repl--uds-connected-p "frontend-uds" ())
-(declare-function agent-repl-uds-connect "frontend-uds" (&optional path))
+(declare-function agent-repl-uds-connect "frontend-uds" (&optional path readiness-p))
 (declare-function agent-repl--frontend-session-view "frontend-state" (session-id))
 (declare-function agent-repl--frontend-session-views-all "frontend-state" ())
 (declare-function agent-repl--frontend-live-session-id-for-cwd "frontend-state" (cwd))
@@ -210,11 +210,13 @@ round-trip."
   "Block until the frontend UDS link is ready, or signal an error.
 `agent-repl--ensure-frontend-daemon' returns as soon as the process is
 SPAWNED, which precedes the socket bind; polling closes that gap.  Each
-attempt dials when the link is down (`agent-repl-uds-connect', which
-loud-logs its own failures and arms the reconnect timer) and otherwise
-PUMPS the live connection so the connect snapshot — which carries the
-`DaemonView' readiness depends on — is dispatched while we wait.  Polls
-`agent-repl-frontend-ready-attempts' times, 0.2s apart.
+attempt dials when the link is down (`agent-repl-uds-connect' in its
+readiness-owned mode, which loud-logs without raising a premature outage
+alarm or arming a competing reconnect timer) and otherwise PUMPS the live
+connection so the connect snapshot — which carries the `DaemonView'
+readiness depends on — is dispatched while we wait.  Polls
+`agent-repl-frontend-ready-attempts' times, 0.2s apart, then fails loudly
+once if the daemon never becomes ready.
 
 MAIN THREAD ONLY: `accept-process-output' routes through `ns_select_1' ->
 `[NSApp run]', which deadlocks Emacs off the main thread (the AGENTS.md
@@ -223,10 +225,20 @@ synchronous HTTP boundary did."
   (agent-repl--assert-main-thread "frontend-wait-ready")
   (let ((attempt 0)
         (ready (agent-repl--frontend-daemon-ready-p)))
+    (agent-repl--log
+     nil
+     "frontend-wait-ready: begin ready=%s connected=%s daemon-view=%s budget=%d"
+     ready (agent-repl--uds-connected-p)
+     (and (agent-repl--frontend-daemon-view) t)
+     agent-repl-frontend-ready-attempts)
     (while (and (not ready) (< attempt agent-repl-frontend-ready-attempts))
       (setq attempt (1+ attempt))
       (unless (agent-repl--uds-connected-p)
-        (agent-repl-uds-connect))
+        ;; WHY: a freshly spawned daemon has not bound its socket yet.  The
+        ;; wait loop owns this expected retry window; routing the dial through
+        ;; ordinary outage handling produced the false startup alarms this
+        ;; function exists to prevent.
+        (agent-repl-uds-connect nil t))
       (if (agent-repl--uds-connected-p)
           (accept-process-output agent-repl--uds-process 0.2)
         ;; sleep-for, NOT sit-for: sit-for returns immediately when
@@ -235,10 +247,21 @@ synchronous HTTP boundary did."
         (sleep-for 0.2))
       (setq ready (agent-repl--frontend-daemon-ready-p)))
     (unless ready
+      (agent-repl--log
+       nil
+       "frontend-wait-ready: TIMEOUT attempts=%d socket=%s connected=%s daemon-view=%s"
+       attempt agent-repl-uds-socket-path
+       (agent-repl--uds-connected-p)
+       (and (agent-repl--frontend-daemon-view) t))
       (error "agent-repl: daemon at %s never became ready (%d attempts; connected=%s daemon-view=%s)"
              agent-repl-uds-socket-path attempt
              (if (agent-repl--uds-connected-p) "yes" "no")
              (if (agent-repl--frontend-daemon-view) "yes" "no")))
+    (agent-repl--log
+     nil
+     "frontend-wait-ready: READY attempts=%d connected=%s daemon-view=%s"
+     attempt (agent-repl--uds-connected-p)
+     (and (agent-repl--frontend-daemon-view) t))
     t))
 
 ;;;; ---- Session CRUD -------------------------------------------------------

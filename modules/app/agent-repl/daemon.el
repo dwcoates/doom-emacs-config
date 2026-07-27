@@ -34,7 +34,7 @@
 (declare-function agent-repl--frontend-rebind-workspaces-after-restart "agent-repl-frontend-client" ())
 (declare-function agent-repl--uds-socket-live-p "frontend-uds" (&optional path))
 (declare-function agent-repl--uds-connected-p "frontend-uds" ())
-(declare-function agent-repl-uds-connect "frontend-uds" (&optional path))
+(declare-function agent-repl-uds-connect "frontend-uds" (&optional path readiness-p))
 (declare-function agent-repl--uds-send-command "frontend-uds" (field payload &optional workspace process))
 (declare-function agent-repl--uds-track-command "frontend-uds" (request-id field workspace &optional on-failure on-success))
 (declare-function agent-repl--frontend-daemon-view-binary-mtime-seconds "frontend-state" ())
