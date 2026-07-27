@@ -1332,6 +1332,7 @@ recorded :input-buffer nor the canonically-named buffer is live."
     (unwind-protect
         (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws")))
           (agent-repl--ws-put "test-ws" :input-buffer nil)
+          (agent-repl--ws-put "test-ws" :project-dir temporary-file-directory)
           (let ((result (agent-repl--ensure-input-buffer "test-ws")))
             (should (buffer-live-p result))
             (should (eq result (agent-repl--ws-get "test-ws" :input-buffer)))
@@ -1797,6 +1798,7 @@ background workspace's panels."
                      (lambda () (setq mode-called t)))
                     ((symbol-function 'agent-repl--history-restore)
                      (lambda (_ws) (setq history-called t))))
+            (agent-repl--ws-put "test-ws" :project-dir temporary-file-directory)
             (agent-repl--initialize-input-buffer "test-ws")
             (should mode-called)
             (should history-called)
@@ -1813,8 +1815,17 @@ background workspace's panels."
               (setq major-mode 'agent-repl-input-mode))
             (cl-letf (((symbol-function 'agent-repl--create-buffer)
                        (lambda (_ws &optional _s) buf)))
+              (agent-repl--ws-put "test-ws" :project-dir temporary-file-directory)
               (should-error (agent-repl--initialize-input-buffer "test-ws"))))
         (when (buffer-live-p buf) (kill-buffer buf))))))
+
+(ert-deftest agent-repl-test-initialize-input-buffer-requires-project-dir-before-mutation ()
+  "Input creation fails before it records a composer without :project-dir."
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws")))
+      (should-error (agent-repl--initialize-input-buffer "test-ws") :type 'error)
+      (should-not (agent-repl--ws-get "test-ws" :input-buffer))
+      (should-not (get-buffer "*agent-panel-input-test-ws*")))))
 
 (ert-deftest agent-repl-test-panels-spc-o-C-kills-session ()
   "hide-and-preserve-status (SPC o C) kills through the frontend registry.
