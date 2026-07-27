@@ -233,8 +233,16 @@ nuked workspace's identity record survives in the hash for
   (let* ((known (agent-repl--live-ws-names))
          (current (agent-repl--ws-current-name))
          (default (and current (member current known) current)))
-    (unless known (user-error "No agent-repl workspaces registered"))
-    (completing-read prompt known nil t nil nil default)))
+    (unless known
+      (agent-repl--log current
+                        "read-known-workspace: rejected prompt=%S current=%S known-count=0"
+                        prompt current)
+      (user-error "No agent-repl workspaces registered"))
+    (let ((selected (completing-read prompt known nil t nil nil default)))
+      (agent-repl--log selected
+                        "read-known-workspace: prompt=%S current=%S default=%S known-count=%d selected=%S"
+                        prompt current default (length known) selected)
+      selected)))
 
 (defun agent-repl--nukeable-workspace-names ()
   "Return candidate names for the nuke/kill picker.
@@ -260,17 +268,30 @@ candidates exist."
   (let* ((known (agent-repl--nukeable-workspace-names))
          (current (agent-repl--ws-current-name))
          (default (and current (member current known) current)))
-    (unless known (user-error "No workspaces available to nuke/kill"))
-    (completing-read prompt known nil t nil nil default)))
+    (unless known
+      (agent-repl--log current
+                        "read-nukeable-workspace: rejected prompt=%S current=%S candidate-count=0"
+                        prompt current)
+      (user-error "No workspaces available to nuke/kill"))
+    (let ((selected (completing-read prompt known nil t nil nil default)))
+      (agent-repl--log selected
+                        "read-nukeable-workspace: prompt=%S current=%S default=%S candidate-count=%d selected=%S"
+                        prompt current default (length known) selected)
+      selected)))
 
 (defun agent-repl--write-output-json (filename content)
   "Write CONTENT as JSON to FILENAME inside `agent-repl--output-dir'.
 Ensures the output directory exists.  Returns the full path of the written file."
   (make-directory agent-repl--output-dir t)
   (let ((file (expand-file-name filename agent-repl--output-dir)))
-    (agent-repl--log (agent-repl--ws-current-name) "write-output-json: filename=%s dir=%s" filename agent-repl--output-dir)
+    (agent-repl--log (agent-repl--ws-current-name)
+                      "write-output-json: filename=%s dir=%s content=%S"
+                      filename agent-repl--output-dir content)
     (with-temp-file file
       (insert (json-encode content)))
+    (agent-repl--log (agent-repl--ws-current-name)
+                      "write-output-json: wrote file=%s bytes=%d"
+                      file (nth 7 (file-attributes file)))
     file))
 
 ;;; Section 2: Utility commands used by keybindings
@@ -351,7 +372,7 @@ image so the visual mapping between key and glyph is obvious."
          (ws (or ws (agent-repl--ws-current-name)))
          (old-priority (agent-repl--ws-get ws :priority))
          (new-priority (if (string-empty-p priority) nil priority))
-         (had-entry (not (null (gethash ws agent-repl--workspaces))))
+         (had-entry (agent-repl--ws-known-p ws))
          (cache-before (or (agent-repl--ws-names-cache) "(unbound)")))
     (agent-repl--log ws "set-priority: ws=%s ws-explicit=%s had-entry=%s priority %s -> %s cache=%S"
                       ws (if ws-explicit-p "t" "nil") (if had-entry "t" "nil")
@@ -408,6 +429,8 @@ doom-config worktree reloads its own checkout."
 (defun agent-repl-debug/cancel-timers ()
   "Cancel all agent-repl timers."
   (interactive)
+  (agent-repl--log (agent-repl--ws-current-name)
+                    "debug/cancel-timers: requested")
   (agent-repl--cancel-all-timers)
   (message "Cancelled all agent-repl timers."))
 
@@ -427,6 +450,9 @@ test entry."
   "Display all workspace states."
   (interactive)
   (let ((states (mapcar #'agent-repl--cons-name-state (agent-repl--ws-list-names))))
+    (agent-repl--log (agent-repl--ws-current-name)
+                      "debug/workspace-states: count=%d states=%S"
+                      (length states) states)
     (message "Workspace states:\n%s"
              (mapconcat #'agent-repl--format-workspace-state states "\n"))))
 
@@ -435,12 +461,17 @@ test entry."
   (interactive)
   (let* ((bufs (cl-remove-if-not #'agent-repl--agent-view-buffer-p (buffer-list)))
          (lines (mapcar #'agent-repl--format-buffer-info bufs)))
+    (agent-repl--log (agent-repl--ws-current-name)
+                      "debug/buffer-info: agent-view-count=%d buffers=%S"
+                      (length bufs) (mapcar #'buffer-name bufs))
     (message "Claude buffers:\n%s"
              (if lines (mapconcat #'identity lines "\n") "  (none)"))))
 
 (defun agent-repl-debug/clear-state (ws)
   "Clear all states for workspace WS without killing buffers."
   (interactive (list (agent-repl--read-workspace "Workspace: ")))
+  (agent-repl--log ws "debug/clear-state: ws=%s states=%S"
+                    ws '(:thinking :done :permission :inactive))
   (dolist (state '(:thinking :done :permission :inactive))
     (agent-repl--ws-agent-state-clear-if ws state))
   (message "Cleared all states for %s" ws))
@@ -477,6 +508,8 @@ Kills agent buffers, closes windows, and removes all state."
          (ws (agent-repl--read-workspace "Owning workspace: ")))
     (with-current-buffer buf-name
       (setq-local agent-repl--owning-workspace ws))
+    (agent-repl--log ws "debug/set-owning-workspace: buffer=%s ws=%s candidate-count=%d"
+                      buf-name ws (length bufs))
     (message "Set %s owning workspace to %s" buf-name ws)))
 
 (defun agent-repl-debug/toggle-logging (&optional verbose)
@@ -517,6 +550,9 @@ appended to the file regardless of the `agent-repl-debug' level."
   "Toggle the metaprompt prefix injection."
   (interactive)
   (setq agent-repl-skip-permissions (not agent-repl-skip-permissions))
+  (agent-repl--log (agent-repl--ws-current-name)
+                    "debug/toggle-metaprompt: skip-permissions=%s"
+                    (if agent-repl-skip-permissions "t" "nil"))
   (message "Agent REPL metaprompt: %s" (if agent-repl-skip-permissions "ON" "OFF")))
 
 (defun agent-repl-debug/prefix-counter ()
@@ -524,6 +560,10 @@ appended to the file regardless of the `agent-repl-debug' level."
   (interactive)
   (let* ((ws (agent-repl--ws-current-name))
          (counter (or (agent-repl--ws-get ws :prefix-counter) 0)))
+    (agent-repl--log ws
+                      "debug/prefix-counter: counter=%d period=%d remaining=%d"
+                      counter agent-repl-prefix-period
+                      (- agent-repl-prefix-period (mod counter agent-repl-prefix-period)))
     (message "[%s] Prefix counter: %d  period: %d  next metaprompt in: %d sends"
              ws counter agent-repl-prefix-period
              (- agent-repl-prefix-period (mod counter agent-repl-prefix-period)))))
@@ -545,6 +585,8 @@ faces so they stand out visually in the help buffer."
          (alist (agent-repl--dump-plist-to-alist plist))
          (partition (agent-repl--dump-partition
                      alist agent-repl--dump-sections)))
+    (agent-repl--log ws "debug/dump-workspace: ws=%s plist-key-count=%d section-count=%d"
+                      ws (/ (length plist) 2) (length partition))
     (with-help-window agent-repl-dump-buffer-name
       (with-current-buffer agent-repl-dump-buffer-name
         (insert (propertize (format "Workspace: %s" ws)
@@ -561,6 +603,8 @@ faces so they stand out visually in the help buffer."
 Uses `agent-repl--workspace-clean-p' -- the same function used in production."
   (interactive (list (agent-repl--read-workspace-with-default "Workspace: ")))
   (let ((clean (agent-repl--workspace-clean-p ws-name)))
+    (agent-repl--log ws-name "debug/workspace-clean-p: ws=%s clean=%s"
+                      ws-name (if clean "t" "nil"))
     (message "Workspace %s: %s" ws-name (if clean "clean" "dirty"))))
 
 (defun agent-repl-debug/--gather-ws-diagnostics (ws-name)
@@ -614,8 +658,17 @@ Reports comprehensive diagnostics."
   (interactive (list (agent-repl--read-workspace-with-default "Workspace: ")))
   (let* ((before (agent-repl--ws-agent-state ws-name))
          (diag (agent-repl-debug/--gather-ws-diagnostics ws-name)))
+    (agent-repl--log ws-name
+                      "debug/refresh-state: ws=%s before=%S agent-open=%s dirty=%s owning-ws=%S has-window=%s"
+                      ws-name before
+                      (if (plist-get diag :agent-open) "t" "nil")
+                      (if (plist-get diag :dirty) "t" "nil")
+                      (plist-get diag :owning-ws)
+                      (if (plist-get diag :has-window) "t" "nil"))
     (agent-repl-debug/--apply-state-refresh ws-name (plist-get diag :agent-open))
     (let ((after (agent-repl--ws-agent-state ws-name)))
+      (agent-repl--log ws-name "debug/refresh-state: ws=%s outcome=%s"
+                        ws-name (if (plist-get diag :agent-open) "update" "mark-dead"))
       (force-mode-line-update t)
       (message "%s" (agent-repl-debug/--format-diagnostics ws-name diag before after)))))
 
