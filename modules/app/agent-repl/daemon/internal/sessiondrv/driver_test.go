@@ -714,3 +714,37 @@ func TestResyncRoundTripReplaysTheRetainedHistory(t *testing.T) {
 		t.Fatalf("replayed through_seqs = %v, want [6108 6109 6110]", gotSeqs)
 	}
 }
+
+func TestTaskCatalogsSnapshotsEveryLiveSessionIncludingAnEmptyRoster(t *testing.T) {
+	// Arrange — one live driver with no task events yet. The empty catalog is
+	// necessary to clear stale frontend state after reconnect.
+	h := newRepullHarness(t, &replayClient{})
+	d := h.driver(t)
+
+	// Act.
+	empty := h.m.TaskCatalogs()
+	d.consumer.Apply(&corev1.Event{
+		SessionId: "s1",
+		Seq:       1,
+		Payload: &corev1.Event_TaskStarted{TaskStarted: &corev1.TaskStarted{
+			TaskId:      "t1",
+			Kind:        corev1.TaskKind_TASK_KIND_AGENT,
+			Description: "investigate",
+		}},
+	})
+	populated := h.m.TaskCatalogs()
+
+	// Assert.
+	if len(empty) != 1 || empty[0].GetWorkspace() != "ws" || empty[0].GetSessionId() != "s1" {
+		t.Fatalf("empty catalogs = %v, want one catalog for ws/s1", empty)
+	}
+	if len(empty[0].GetTasks()) != 0 {
+		t.Fatalf("empty catalog tasks = %v, want none", empty[0].GetTasks())
+	}
+	if len(populated) != 1 || len(populated[0].GetTasks()) != 1 {
+		t.Fatalf("populated catalogs = %v, want one task", populated)
+	}
+	if got := populated[0].GetTasks()[0].GetTaskId(); got != "t1" {
+		t.Fatalf("task id = %q, want t1", got)
+	}
+}
