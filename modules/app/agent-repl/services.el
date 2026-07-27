@@ -25,6 +25,7 @@
 (declare-function agent-repl--frontend-wait-daemon-healthy "frontend-client" ())
 (declare-function agent-repl--frontend-wait-ready "frontend-client" ())
 (declare-function agent-repl--log "core" (ws fmt &rest args))
+(declare-function agent-repl--log-verbose "core" (ws fmt &rest args))
 
 (defcustom agent-repl-shim-services-launchctl-program "launchctl"
   "Program used to inspect and kickstart the launchd-managed shim services."
@@ -133,6 +134,9 @@
          (stamp (expand-file-name
                  (format ".%s.deployed" (file-name-nondirectory binary))
                  agent-repl--shim-service-cache-bin)))
+    (agent-repl--log nil
+                     "shim-services deployed stamp: recording binary=%s stamp=%s sha256=%s"
+                     binary stamp digest)
     (agent-repl--shim-service-write-stamp stamp digest)
     (agent-repl--log nil
                      "shim-services deployed stamp: binary=%s stamp=%s sha256=%s"
@@ -140,20 +144,39 @@
 
 (defun agent-repl--shim-store-wait-ready ()
   "Wait for the newly kickstarted store socket, failing on timeout."
-  (let ((deadline (+ (float-time) agent-repl-shim-store-ready-timeout))
-        (ready (agent-repl--shim-store-socket-present-p)))
+  (let* ((started-at (float-time))
+         (deadline (+ started-at agent-repl-shim-store-ready-timeout))
+         (ready (agent-repl--shim-store-socket-present-p)))
+    (agent-repl--log nil
+                     "shim-services store readiness: socket=%s timeout=%.1fs initial-ready=%s"
+                     agent-repl--shim-store-socket
+                     agent-repl-shim-store-ready-timeout
+                     (if ready "t" "nil"))
     (while (and (not ready)
                 (< (float-time) deadline))
       (sleep-for 0.1)
-      (setq ready (agent-repl--shim-store-socket-present-p)))
+      (setq ready (agent-repl--shim-store-socket-present-p))
+      ;; This poll runs up to ten times per second while a service is starting.
+      (agent-repl--log-verbose nil
+                               "shim-services store readiness poll: socket=%s ready=%s elapsed=%.3fs remaining=%.3fs"
+                               agent-repl--shim-store-socket
+                               (if ready "t" "nil")
+                               (- (float-time) started-at)
+                               (max 0.0 (- deadline (float-time)))))
     (unless ready
+      (agent-repl--log nil
+                       "shim-services store readiness: timeout socket=%s elapsed=%.3fs timeout=%.1fs"
+                       agent-repl--shim-store-socket
+                       (- (float-time) started-at)
+                       agent-repl-shim-store-ready-timeout)
       (agent-repl--error nil
                          "shim-store socket %s absent after %.1fs"
                          agent-repl--shim-store-socket
                          agent-repl-shim-store-ready-timeout))
     (agent-repl--log nil
-                     "shim-services store ready: socket=%s timeout=%.1fs"
+                     "shim-services store ready: socket=%s elapsed=%.3fs timeout=%.1fs"
                      agent-repl--shim-store-socket
+                     (- (float-time) started-at)
                      agent-repl-shim-store-ready-timeout)
     t))
 
@@ -163,20 +186,35 @@ The store is kickstarted and confirmed ready before the sidecar is touched.
 Both deployed-binary stamps are written only after their corresponding
 kickstart succeeds.  PREFLIGHT-COMPLETE means the coordinator already
 validated both jobs before building any runtime artifact."
-  (unless preflight-complete
-    (agent-repl--shim-services-assert-launchd-loaded))
   (agent-repl--log nil
-                   "shim-services build-and-bounce: preflight-complete=%s"
-                   (if preflight-complete "t" "nil"))
-  (agent-repl--frontend-build-targets-if-stale '("store" "sidecar"))
-  (unless (and (agent-repl--frontend-artifact-exists-p
-                agent-repl--shim-store-binary)
-               (agent-repl--frontend-artifact-exists-p
-                agent-repl--shim-sidecar-binary))
-    (agent-repl--error nil
-                       "shim service build completed without both binaries: store=%s sidecar=%s"
-                       agent-repl--shim-store-binary
-                       agent-repl--shim-sidecar-binary))
+                   "shim-services build-and-bounce: beginning preflight-complete=%s store=%s sidecar=%s"
+                   (if preflight-complete "t" "nil")
+                   agent-repl--shim-store-binary
+                   agent-repl--shim-sidecar-binary)
+  (if preflight-complete
+      (agent-repl--log nil
+                       "shim-services build-and-bounce: using coordinator launchd preflight")
+    (agent-repl--log nil
+                     "shim-services build-and-bounce: validating launchd jobs before build")
+    (agent-repl--shim-services-assert-launchd-loaded))
+  (let ((build-result
+         (agent-repl--frontend-build-targets-if-stale '("store" "sidecar"))))
+    (agent-repl--log nil
+                     "shim-services build-and-bounce: target build completed targets=%S result=%S"
+                     '("store" "sidecar") build-result))
+  (let ((store-present (agent-repl--frontend-artifact-exists-p
+                        agent-repl--shim-store-binary))
+        (sidecar-present (agent-repl--frontend-artifact-exists-p
+                          agent-repl--shim-sidecar-binary)))
+    (agent-repl--log nil
+                     "shim-services build-and-bounce: artifacts checked store=%s present=%s sidecar=%s present=%s"
+                     agent-repl--shim-store-binary (if store-present "t" "nil")
+                     agent-repl--shim-sidecar-binary (if sidecar-present "t" "nil"))
+    (unless (and store-present sidecar-present)
+      (agent-repl--error nil
+                         "shim service build completed without both binaries: store=%s present=%s sidecar=%s present=%s"
+                         agent-repl--shim-store-binary (if store-present "t" "nil")
+                         agent-repl--shim-sidecar-binary (if sidecar-present "t" "nil"))))
   (agent-repl--shim-services-launchctl "kickstart"
                                        agent-repl--shim-store-label)
   (agent-repl--shim-store-wait-ready)
@@ -197,10 +235,19 @@ the snapshot reader can establish, restore, or render any workspace."
   (agent-repl--assert-main-thread "runtime-restart")
   (let* ((daemon-state (agent-repl--frontend-runtime-bounce-preflight))
          (daemon-present (memq daemon-state '(:tracked :responsive))))
+    (agent-repl--log nil
+                     "runtime-prepare: beginning rebind=%s daemon-state=%S daemon-present=%s"
+                     (if rebind "t" "nil") daemon-state
+                     (if daemon-present "t" "nil"))
     ;; Pump the authoritative snapshot before checking active turns.  This
     ;; includes states for workspace paths not yet restored into Emacs.
-    (when daemon-present
-      (agent-repl--frontend-wait-ready))
+    (if daemon-present
+        (progn
+          (agent-repl--log nil
+                           "runtime-prepare: waiting for pre-existing daemon snapshot before turn preflight")
+          (agent-repl--frontend-wait-ready))
+      (agent-repl--log nil
+                       "runtime-prepare: daemon absent; skipping pre-bounce snapshot wait"))
     (let ((busy (agent-repl--frontend-all-turn-active-session-ids)))
       (agent-repl--log nil
                        "runtime-restart preflight: daemon-state=%S daemon-present=%s busy=%S store=%s sidecar=%s"
@@ -213,7 +260,10 @@ the snapshot reader can establish, restore, or render any workspace."
                            busy)))
     ;; Validate both launchd jobs before any build changes installed files.
     (agent-repl--shim-services-assert-launchd-loaded)
-    (agent-repl--frontend-build-if-stale nil)
+    (let ((frontend-build-result (agent-repl--frontend-build-if-stale nil)))
+      (agent-repl--log nil
+                       "runtime-prepare: frontend build completed result=%S"
+                       frontend-build-result))
     (agent-repl--shim-services-build-and-bounce t)
     (agent-repl--frontend-bounce-after-build daemon-state)
     ;; The new daemon can accept a UDS connection before it can service
@@ -239,8 +289,14 @@ the snapshot reader can establish, restore, or render any workspace."
 Refuses before any build or bounce when any daemon workspace reports an
 active turn."
   (interactive)
+  (agent-repl--log nil
+                   "runtime-restart command: invoked interactive=%s"
+                   (if (called-interactively-p 'interactive) "t" "nil"))
   (let ((rebound (agent-repl--runtime-prepare t)))
     (when (called-interactively-p 'interactive)
+      (agent-repl--log nil
+                       "runtime-restart command: presenting interactive completion rebound=%d"
+                       rebound)
       (message "agent-repl runtime restarted; rebound %d workspace%s"
                rebound (if (= rebound 1) "" "s")))
     rebound))
