@@ -104,43 +104,42 @@ Requires that the feature be enabled, we're on macOS, and the
 
 (defun agent-repl--caffeinate-any-agent-state-active-p ()
   "Return non-nil when any workspace's `:agent-state' is in active list.
-Iterates `agent-repl--workspaces' and checks each plist's
-`:agent-state' against `agent-repl-caffeinate-active-states'.  First
-of the two activity signals consulted by
+Iterates workspace names through workspace.el's live/tombstone APIs and
+checks each `:agent-state' against
+`agent-repl-caffeinate-active-states'.  First of the two activity
+signals consulted by
 `agent-repl--caffeinate-any-active-p'."
-  (let ((active nil)
-        (workspace-count 0)
-        (active-workspaces nil)
-        (workspaces-bound-p (boundp 'agent-repl--workspaces)))
-    (when (boundp 'agent-repl--workspaces)
-      (maphash
-       (lambda (ws plist)
-         ;; Skip tombstoned entries — a nuked workspace's residual
-         ;; `:agent-state' (e.g. `:thinking' captured pre-nuke) must
-         ;; not hold caffeinate alive.  Identity-only records are
-         ;; intentionally invisible to runtime predicates.
-         (let* ((tombstoned-p (not (null (plist-get plist :nuked-at))))
-                (agent-state (plist-get plist :agent-state))
-                (state-active-p (memq agent-state
-                                      agent-repl-caffeinate-active-states))
-                (included-p (and (not tombstoned-p) state-active-p)))
-           (cl-incf workspace-count)
-           (when included-p
-             (setq active t)
-             (push ws active-workspaces))
-           ;; The scan can emit one line per workspace on every watched-state
-           ;; update, so retain its branch evidence only in verbose mode.
-           (agent-repl--log-verbose
-            ws
-            "caffeinate: agent-state-scan ws=%s tombstoned=%s agent-state=%S active-states=%S included=%s"
-            ws tombstoned-p agent-state agent-repl-caffeinate-active-states
-            included-p)))
-       agent-repl--workspaces))
+  (let* ((live-workspaces (agent-repl--live-ws-names))
+         (tombstoned-workspaces (agent-repl--ws-tombstoned-names))
+         (workspace-names (append live-workspaces tombstoned-workspaces))
+         (active nil)
+         (active-workspaces nil))
+    (dolist (ws workspace-names)
+      ;; Skip tombstoned entries — a nuked workspace's residual
+      ;; `:agent-state' (e.g. `:thinking' captured pre-nuke) must
+      ;; not hold caffeinate alive.  Identity-only records are
+      ;; intentionally invisible to runtime predicates.
+      (let* ((tombstoned-p (agent-repl--ws-tombstoned-p ws))
+             (agent-state (agent-repl--ws-get ws :agent-state))
+             (state-active-p (memq agent-state
+                                   agent-repl-caffeinate-active-states))
+             (included-p (and (not tombstoned-p) state-active-p)))
+        (when included-p
+          (setq active t)
+          (push ws active-workspaces))
+        ;; The scan can emit one line per workspace on every watched-state
+        ;; update, so retain its branch evidence only in verbose mode.
+        (agent-repl--log-verbose
+         ws
+         "caffeinate: agent-state-scan ws=%s tombstoned=%s agent-state=%S active-states=%S included=%s"
+         ws tombstoned-p agent-state agent-repl-caffeinate-active-states
+         included-p)))
     (setq active-workspaces (nreverse active-workspaces))
     (agent-repl--log
      nil
-     "caffeinate: agent-state-scan result=%s workspaces-bound=%s workspace-count=%d active-workspaces=%S active-states=%S"
-     active workspaces-bound-p workspace-count active-workspaces
+     "caffeinate: agent-state-scan result=%s workspace-count=%d live-count=%d tombstoned-count=%d active-workspaces=%S active-states=%S"
+     active (length workspace-names) (length live-workspaces)
+     (length tombstoned-workspaces) active-workspaces
      agent-repl-caffeinate-active-states)
     active))
 
@@ -156,39 +155,37 @@ follow-up cherry-pick + optional agent-driven conflict resolution.
 are *not* considered active: a completed merge has no further work, a
 conflict awaiting human resolution is bottlenecked on the user (same
 exclusion principle as `:permission'), and a failed merge is terminal."
-  (let ((active nil)
-        (workspace-count 0)
-        (active-workspaces nil)
-        (workspaces-bound-p (boundp 'agent-repl--workspaces)))
-    (when (boundp 'agent-repl--workspaces)
-      (maphash
-       (lambda (ws plist)
-         ;; Skip tombstoned entries — a workspace nuked mid-merge no
-         ;; longer needs caffeinate; the sentinel/cherry-pick that the
-         ;; `:merging' flag was guarding is moot once the entry is
-         ;; tombstoned.
-         (let* ((tombstoned-p (not (null (plist-get plist :nuked-at))))
-                (merging-p (eq (plist-get plist :merging) t))
-                (repl-state (plist-get plist :repl-state))
-                (merge-queued-p (eq repl-state :merge-queued))
-                (included-p (and (not tombstoned-p)
-                                 (or merging-p merge-queued-p))))
-           (cl-incf workspace-count)
-           (when included-p
-             (setq active t)
-             (push ws active-workspaces))
-           ;; The scan can emit one line per workspace on every watched-state
-           ;; update, so retain its branch evidence only in verbose mode.
-           (agent-repl--log-verbose
-            ws
-            "caffeinate: merge-scan ws=%s tombstoned=%s merging=%s repl-state=%S merge-queued=%s included=%s"
-            ws tombstoned-p merging-p repl-state merge-queued-p included-p)))
-       agent-repl--workspaces))
+  (let* ((live-workspaces (agent-repl--live-ws-names))
+         (tombstoned-workspaces (agent-repl--ws-tombstoned-names))
+         (workspace-names (append live-workspaces tombstoned-workspaces))
+         (active nil)
+         (active-workspaces nil))
+    (dolist (ws workspace-names)
+      ;; Skip tombstoned entries — a workspace nuked mid-merge no
+      ;; longer needs caffeinate; the sentinel/cherry-pick that the
+      ;; `:merging' flag was guarding is moot once the entry is
+      ;; tombstoned.
+      (let* ((tombstoned-p (agent-repl--ws-tombstoned-p ws))
+             (merging-p (eq (agent-repl--ws-get ws :merging) t))
+             (repl-state (agent-repl--ws-get ws :repl-state))
+             (merge-queued-p (eq repl-state :merge-queued))
+             (included-p (and (not tombstoned-p)
+                              (or merging-p merge-queued-p))))
+        (when included-p
+          (setq active t)
+          (push ws active-workspaces))
+        ;; The scan can emit one line per workspace on every watched-state
+        ;; update, so retain its branch evidence only in verbose mode.
+        (agent-repl--log-verbose
+         ws
+         "caffeinate: merge-scan ws=%s tombstoned=%s merging=%s repl-state=%S merge-queued=%s included=%s"
+         ws tombstoned-p merging-p repl-state merge-queued-p included-p)))
     (setq active-workspaces (nreverse active-workspaces))
     (agent-repl--log
      nil
-     "caffeinate: merge-scan result=%s workspaces-bound=%s workspace-count=%d active-workspaces=%S"
-     active workspaces-bound-p workspace-count active-workspaces)
+     "caffeinate: merge-scan result=%s workspace-count=%d live-count=%d tombstoned-count=%d active-workspaces=%S"
+     active (length workspace-names) (length live-workspaces)
+     (length tombstoned-workspaces) active-workspaces)
     active))
 
 (defun agent-repl--caffeinate-any-active-p ()
