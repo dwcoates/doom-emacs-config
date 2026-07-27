@@ -894,6 +894,29 @@ bounce."
       ;; Act / Assert
       (should (null (agent-repl--frontend-turn-active-sessions))))))
 
+(ert-deftest agent-repl-test-frontend-all-turn-active-includes-unrestored-workspace ()
+  "Startup safety sees an active daemon path before Emacs restores its workspace."
+  (let ((agent-repl--frontend-workspace-state-views
+         (make-hash-table :test 'equal)))
+    (puthash "/unrestored"
+             '(:workspace "/unrestored" :sessionId "s_busy" :turnActive t)
+             agent-repl--frontend-workspace-state-views)
+    (agent-repl-test--with-views
+        '((:sessionId "s_busy" :workspace "/unrestored"))
+      (should (equal (agent-repl--frontend-all-turn-active-session-ids)
+                     '("s_busy"))))))
+
+(ert-deftest agent-repl-test-frontend-all-turn-active-skips-terminal-session ()
+  "A terminal session cannot block the coordinated startup restart."
+  (let ((agent-repl--frontend-workspace-state-views
+         (make-hash-table :test 'equal)))
+    (puthash "/old"
+             '(:workspace "/old" :sessionId "s_dead" :turnActive t)
+             agent-repl--frontend-workspace-state-views)
+    (agent-repl-test--with-views
+        '((:sessionId "s_dead" :workspace "/old" :terminal t))
+      (should-not (agent-repl--frontend-all-turn-active-session-ids)))))
+
 ;;;; ---- reattach loop -----------------------------------------------------------
 
 (ert-deftest agent-repl-test-frontend-reattach-check-no-op-when-listed ()
