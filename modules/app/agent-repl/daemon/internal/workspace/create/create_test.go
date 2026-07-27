@@ -7,18 +7,43 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sync"
 	"testing"
+	"time"
 )
 
 type fakeWorktrees struct {
-	calls int
-	path  string
-	err   error
+	calls  int
+	plans  int
+	path   string
+	name   string
+	branch string
+	base   string
+	err    error
 }
 
-func (f *fakeWorktrees) EnsureWorktree(_ context.Context, _ Job) (string, error) {
+func (f *fakeWorktrees) PlanWorktree(_ context.Context, job Job) (WorktreeResult, error) {
+	f.plans++
+	return WorktreeResult{
+		Path:       f.path,
+		FinalName:  firstNonEmpty(f.name, job.Request.Name),
+		Branch:     firstNonEmpty(f.branch, job.Request.Name),
+		BaseCommit: firstNonEmpty(f.base, job.Request.BaseCommit, "HEAD"),
+	}, f.err
+}
+
+func (f *fakeWorktrees) EnsureWorktree(_ context.Context, _ Job) error {
 	f.calls++
-	return f.path, f.err
+	return f.err
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 type fakeSessions struct {
@@ -107,7 +132,7 @@ func newFixture(t *testing.T, statePath string) *fixture {
 	}
 	f.store = store
 	f.manager, err = NewManager(Config{
-		Store: store, Worktrees: f.worktrees, Sessions: f.sessions, Health: f.health,
+		Store: store, Planner: f.worktrees, Worktrees: f.worktrees, Sessions: f.sessions, Health: f.health,
 		Prompts: f.prompts, Available: f.available, HostActions: f.actions, Logf: logf,
 	})
 	if err != nil {
@@ -154,7 +179,7 @@ func TestInboxCrashRestartResumesClaimedInFlightJob(t *testing.T) {
 		t.Fatalf("ScanAndDrain: %v", err)
 	}
 	got := job(t, f.store, "workspace_commands_recover:0")
-	if got.State != StateAwaitingEmacs || got.WorktreePath != "/worktrees/new" || got.SessionID != "s_new" {
+	if got.State != StateAwaitingEmacs || got.WorktreePath != "/worktrees/new" || got.FinalName != "DWC/recover" || got.SessionID != "s_new" {
 		t.Fatalf("resumed job = %#v", got)
 	}
 	if f.worktrees.calls != 1 || f.sessions.calls != 1 || f.health.calls != 1 || f.available.calls != 1 {
@@ -295,6 +320,208 @@ func TestMaterializationAckIsIdempotentAndDeliversPromptOnce(t *testing.T) {
 	if !reflect.DeepEqual(f.prompts.jobs, []string{"prompt"}) {
 		t.Fatalf("prompt jobs = %#v", f.prompts.jobs)
 	}
+}
+
+func TestResolvedWorktreeIdentitySurvivesRestart(t *testing.T) {
+	root := t.TempDir()
+	state := filepath.Join(root, "jobs.json")
+	f := newFixture(t, state)
+	f.worktrees.name, f.worktrees.branch, f.worktrees.base = "DWC/requested-abc", "DWC/requested-abc", "origin/main"
+	if _, _, err := f.store.Enqueue(Job{ID: "resolved", Request: Request{Name: "DWC/requested", GitRoot: "/repo", BaseCommit: "origin/main"}, State: StateQueued}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.manager.Process(context.Background(), "resolved"); err != nil {
+		t.Fatal(err)
+	}
+	restarted := newFixture(t, state)
+	got := job(t, restarted.store, "resolved")
+	if got.FinalName != "DWC/requested-abc" || got.Branch != "DWC/requested-abc" || got.ResolvedBaseCommit != "origin/main" {
+		t.Fatalf("persisted identity = %#v", got)
+	}
+}
+
+func TestCrashAfterIdentityCheckpointResumesWithoutAnotherPlan(t *testing.T) {
+	root := t.TempDir()
+	f := newFixture(t, filepath.Join(root, "jobs.json"))
+	// This is the exact durable state after planning but before git mutates the
+	// repository.  A restarted daemon must reuse it rather than resolve a new
+	// suffix after seeing the branch/path its interrupted predecessor created.
+	seed := Job{ID: "planned", Request: Request{Name: "DWC/requested", GitRoot: "/repo", BaseCommit: "HEAD"}, State: StateWorktreeCreating, WorktreePath: "/worktrees/requested-abc", FinalName: "DWC/requested-abc", Branch: "DWC/requested-abc", ResolvedBaseCommit: "HEAD"}
+	if _, _, err := f.store.Enqueue(seed); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.manager.Process(context.Background(), "planned"); err != nil {
+		t.Fatal(err)
+	}
+	if f.worktrees.plans != 0 || f.worktrees.calls != 1 {
+		t.Fatalf("resume replanned=%d create_calls=%d", f.worktrees.plans, f.worktrees.calls)
+	}
+}
+
+type reentrantAvailable struct {
+	manager *Manager
+	seen    int
+}
+
+func (p *reentrantAvailable) PublishWorkspaceAvailable(ctx context.Context, available Available) error {
+	p.seen++
+	return p.manager.MarkMaterialized(ctx, available.JobID)
+}
+
+func TestAvailableStateIsPersistedBeforeAReentrantMaterializationAck(t *testing.T) {
+	root := t.TempDir()
+	f := newFixture(t, filepath.Join(root, "jobs.json"))
+	publisher := &reentrantAvailable{manager: f.manager}
+	f.manager.cfg.Available = publisher
+	if _, _, err := f.store.Enqueue(Job{ID: "ack-race", Request: Request{Name: "DWC/ack", GitRoot: "/repo", Prompt: "begin"}, State: StateQueued}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.manager.Process(context.Background(), "ack-race"); err != nil {
+		t.Fatal(err)
+	}
+	got := job(t, f.store, "ack-race")
+	if publisher.seen != 1 || got.State != StateReady || !got.PromptDelivered || f.prompts.calls != 1 {
+		t.Fatalf("reentrant result publisher=%d job=%#v prompt_calls=%d", publisher.seen, got, f.prompts.calls)
+	}
+}
+
+func TestInteractiveCreatePersistsBeforeItsAsyncWork(t *testing.T) {
+	root := t.TempDir()
+	f := newFixture(t, filepath.Join(root, "jobs.json"))
+	created, inserted, err := f.manager.EnqueueInteractiveCreate("frontend-r1", Request{Name: "DWC/interactive", GitRoot: "/repo"})
+	if err != nil || !inserted {
+		t.Fatalf("EnqueueInteractiveCreate = %#v, %t, %v", created, inserted, err)
+	}
+	if created.ID != "interactive:frontend-r1" || created.State != StateQueued {
+		t.Fatalf("created = %#v", created)
+	}
+	if f.worktrees.calls != 0 || f.sessions.calls != 0 {
+		t.Fatalf("enqueue performed effects: worktrees=%d sessions=%d", f.worktrees.calls, f.sessions.calls)
+	}
+	duplicate, inserted, err := f.manager.EnqueueInteractiveCreate("frontend-r1", Request{Name: "DWC/interactive", GitRoot: "/repo"})
+	if err != nil || inserted || duplicate.ID != created.ID {
+		t.Fatalf("duplicate enqueue = %#v, %t, %v", duplicate, inserted, err)
+	}
+	if err := f.manager.Process(context.Background(), created.ID); err != nil {
+		t.Fatal(err)
+	}
+	if f.worktrees.calls != 1 || f.sessions.calls != 1 {
+		t.Fatalf("process calls worktrees=%d sessions=%d", f.worktrees.calls, f.sessions.calls)
+	}
+}
+
+func TestHostActionFailureRemainsPendingUntilSuccess(t *testing.T) {
+	root := t.TempDir()
+	f := newFixture(t, filepath.Join(root, "jobs.json"))
+	action := HostAction{ID: "a1", SourceFile: "file", Type: "switch", Payload: json.RawMessage(`{"type":"switch","dir":"/worktree"}`)}
+	if _, _, err := f.store.EnqueueHostAction(action); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.manager.DrainHostActions(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if f.actions.calls != 1 {
+		t.Fatalf("publish calls=%d", f.actions.calls)
+	}
+	if err := f.manager.CompleteHostAction("a1", false, "Emacs refused workspace"); err != nil {
+		t.Fatal(err)
+	}
+	pending, err := f.store.PendingHostActions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending) != 1 || pending[0].Completed || pending[0].Failure != "Emacs refused workspace" {
+		t.Fatalf("pending = %#v", pending)
+	}
+	if err := f.manager.DrainHostActions(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if f.actions.calls != 1 {
+		t.Fatalf("failed action republished without an explicit retry: calls=%d", f.actions.calls)
+	}
+	if err := f.manager.CompleteHostAction("a1", true, ""); err != nil {
+		t.Fatal(err)
+	}
+	pending, err = f.store.PendingHostActions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending) != 0 {
+		t.Fatalf("successful completion still pending: %#v", pending)
+	}
+}
+
+func TestConcurrentProcessSerializesOneJob(t *testing.T) {
+	root := t.TempDir()
+	f := newFixture(t, filepath.Join(root, "jobs.json"))
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var lock sync.Mutex
+	active, maxActive := 0, 0
+	f.worktrees = &fakeWorktrees{path: "/worktrees/new"}
+	blocking := f.worktrees
+	// A function-shaped wrapper is intentionally avoided here: the fake is the
+	// external boundary and this test observes only manager serialization.
+	worktrees := &blockingWorktrees{fakeWorktrees: blocking, entered: entered, release: release, active: &active, maxActive: &maxActive, lock: &lock}
+	f.manager.cfg.Planner = worktrees
+	f.manager.cfg.Worktrees = worktrees
+	if _, _, err := f.store.Enqueue(Job{ID: "concurrent", Request: Request{Name: "DWC/concurrent", GitRoot: "/repo"}, State: StateQueued}); err != nil {
+		t.Fatal(err)
+	}
+	first := make(chan error, 1)
+	go func() { first <- f.manager.Process(context.Background(), "concurrent") }()
+	<-entered
+	second := make(chan error, 1)
+	go func() { second <- f.manager.Process(context.Background(), "concurrent") }()
+	select {
+	case err := <-second:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("second Process did not observe the in-flight job")
+	}
+	close(release)
+	if err := <-first; err != nil {
+		t.Fatal(err)
+	}
+	lock.Lock()
+	gotMax := maxActive
+	lock.Unlock()
+	if gotMax != 1 || blocking.calls != 1 {
+		t.Fatalf("max concurrent worktree calls=%d calls=%d", gotMax, blocking.calls)
+	}
+}
+
+type blockingWorktrees struct {
+	*fakeWorktrees
+	entered   chan struct{}
+	release   chan struct{}
+	active    *int
+	maxActive *int
+	lock      *sync.Mutex
+}
+
+func (f *blockingWorktrees) EnsureWorktree(ctx context.Context, job Job) error {
+	f.lock.Lock()
+	*f.active++
+	if *f.active > *f.maxActive {
+		*f.maxActive = *f.active
+	}
+	f.lock.Unlock()
+	select {
+	case f.entered <- struct{}{}:
+	default:
+	}
+	select {
+	case <-f.release:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	f.lock.Lock()
+	*f.active--
+	f.lock.Unlock()
+	return f.fakeWorktrees.EnsureWorktree(ctx, job)
 }
 
 func TestParseCommandsAuditsEveryKnownCommandType(t *testing.T) {

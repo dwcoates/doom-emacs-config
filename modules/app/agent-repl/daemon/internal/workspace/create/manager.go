@@ -3,6 +3,7 @@ package create
 import (
 	"context"
 	"fmt"
+	"sync"
 )
 
 // Config supplies the daemon-owned creation collaborators.  They are all
@@ -10,6 +11,7 @@ import (
 // plumbing; the daemon stitch point supplies concrete adapters later.
 type Config struct {
 	Store       JobStore
+	Planner     WorktreePlanner
 	Worktrees   WorktreeCreator
 	Sessions    SessionCreator
 	Health      SessionHealthChecker
@@ -24,12 +26,21 @@ type Config struct {
 // unambiguous: this package owns creation; other packages supply adapters.
 type Manager struct {
 	cfg Config
+
+	// running serializes every durable transition for one job.  Inbox polling,
+	// interactive submission, restart recovery, and a materialization ACK can
+	// all arrive concurrently; allowing two of them to drive the same state
+	// machine would duplicate effects between checkpoints.
+	mu      sync.Mutex
+	running map[string]bool
 }
 
 func NewManager(cfg Config) (*Manager, error) {
 	switch {
 	case cfg.Store == nil:
 		return nil, fmt.Errorf("workspace create: manager needs a JobStore")
+	case cfg.Planner == nil:
+		return nil, fmt.Errorf("workspace create: manager needs a WorktreePlanner")
 	case cfg.Worktrees == nil:
 		return nil, fmt.Errorf("workspace create: manager needs a WorktreeCreator")
 	case cfg.Sessions == nil:
@@ -45,7 +56,45 @@ func NewManager(cfg Config) (*Manager, error) {
 	case cfg.Logf == nil:
 		return nil, fmt.Errorf("workspace create: manager needs a logger")
 	}
-	return &Manager{cfg: cfg}, nil
+	return &Manager{cfg: cfg, running: map[string]bool{}}, nil
+}
+
+// EnqueueInteractiveCreate durably accepts one frontend create command before
+// any git/session mutation.  REQUESTID is the frontend's idempotency key: a
+// reconnect retry gets the same job instead of a second worktree.
+func (m *Manager) EnqueueInteractiveCreate(requestID string, request Request) (Job, bool, error) {
+	if requestID == "" {
+		return Job{}, false, fmt.Errorf("workspace create: interactive request id is required")
+	}
+	job := Job{
+		ID:          "interactive:" + requestID,
+		SourceFile:  "interactive",
+		SourceIndex: 0,
+		Request:     request,
+		State:       StateQueued,
+	}
+	persisted, inserted, err := m.cfg.Store.Enqueue(job)
+	if err != nil {
+		return Job{}, false, err
+	}
+	m.cfg.Logf("workspace-create: interactive enqueue request=%s job=%s inserted=%t name=%q", requestID, persisted.ID, inserted, persisted.Request.Name)
+	return persisted, inserted, nil
+}
+
+// StartInteractiveCreate queues the job durably, then advances it in a
+// goroutine.  CTX must be the daemon lifetime context, never a short-lived
+// frontend request context: an HTTP/UDS ACK is allowed to return immediately.
+func (m *Manager) StartInteractiveCreate(ctx context.Context, requestID string, request Request) (Job, bool, error) {
+	job, inserted, err := m.EnqueueInteractiveCreate(requestID, request)
+	if err != nil || !inserted {
+		return job, inserted, err
+	}
+	go func() {
+		if processErr := m.Process(ctx, job.ID); processErr != nil {
+			m.cfg.Logf("workspace-create: interactive job FAILED id=%s request=%s error=%v", job.ID, requestID, processErr)
+		}
+	}()
+	return job, true, nil
 }
 
 // Resume restarts every non-terminal job after daemon startup.  The external
@@ -72,6 +121,23 @@ func (m *Manager) Resume(ctx context.Context) error {
 // It never creates an implicit alternate path: every missing prerequisite is
 // terminally recorded and returned to the caller.
 func (m *Manager) Process(ctx context.Context, id string) error {
+	m.mu.Lock()
+	if m.running[id] {
+		m.mu.Unlock()
+		m.cfg.Logf("workspace-create: process already active id=%s; leaving durable worker to finish", id)
+		return nil
+	}
+	m.running[id] = true
+	m.mu.Unlock()
+	defer func() {
+		m.mu.Lock()
+		delete(m.running, id)
+		m.mu.Unlock()
+	}()
+	return m.process(ctx, id)
+}
+
+func (m *Manager) process(ctx context.Context, id string) error {
 	for {
 		job, ok, err := m.cfg.Store.Get(id)
 		if err != nil {
@@ -88,15 +154,30 @@ func (m *Manager) Process(ctx context.Context, id string) error {
 				}
 				continue
 			}
-			path, err := m.cfg.Worktrees.EnsureWorktree(ctx, job)
-			if err != nil {
+			if job.WorktreePath == "" {
+				result, err := m.cfg.Planner.PlanWorktree(ctx, job)
+				if err != nil {
+					return m.fail(id, "plan worktree", err)
+				}
+				if result.Path == "" || result.FinalName == "" || result.Branch == "" || result.BaseCommit == "" {
+					return m.fail(id, "plan worktree", fmt.Errorf("planner returned incomplete worktree identity path=%q final_name=%q branch=%q base=%q", result.Path, result.FinalName, result.Branch, result.BaseCommit))
+				}
+				if _, err := m.cfg.Store.Update(id, func(j *Job) error {
+					j.WorktreePath = result.Path
+					j.FinalName = result.FinalName
+					j.Branch = result.Branch
+					j.ResolvedBaseCommit = result.BaseCommit
+					j.LastError = ""
+					return nil
+				}); err != nil {
+					return err
+				}
+				continue
+			}
+			if err := m.cfg.Worktrees.EnsureWorktree(ctx, job); err != nil {
 				return m.fail(id, "ensure worktree", err)
 			}
-			if path == "" {
-				return m.fail(id, "ensure worktree", fmt.Errorf("creator returned an empty worktree path"))
-			}
 			if _, err := m.cfg.Store.Update(id, func(j *Job) error {
-				j.WorktreePath = path
 				j.State = StateWorktreeReady
 				j.LastError = ""
 				return nil
@@ -133,20 +214,31 @@ func (m *Manager) Process(ctx context.Context, id string) error {
 				return err
 			}
 		case StateSessionHealthy:
-			available := Available{JobID: job.ID, Name: job.Request.Name, WorktreePath: job.WorktreePath, SessionID: job.SessionID, Request: job.Request}
-			m.cfg.Logf("workspace-create: publishing available id=%s name=%q worktree=%s session=%s", job.ID, job.Request.Name, job.WorktreePath, job.SessionID)
+			// Persist the visible descriptor before publishing it.  A fast host ACK
+			// can arrive synchronously from the publisher; it must see an
+			// awaiting-emacs job instead of being rejected as premature.
+			if _, err := m.transition(id, StateAwaitingEmacs, ""); err != nil {
+				return err
+			}
+			job, _, err = m.cfg.Store.Get(id)
+			if err != nil {
+				return err
+			}
+			available := Available{JobID: job.ID, Name: job.FinalName, Branch: job.Branch, BaseCommit: job.ResolvedBaseCommit, WorktreePath: job.WorktreePath, SessionID: job.SessionID, Request: job.Request}
+			m.cfg.Logf("workspace-create: publishing available id=%s name=%q branch=%q base=%q worktree=%s session=%s", job.ID, job.FinalName, job.Branch, job.ResolvedBaseCommit, job.WorktreePath, job.SessionID)
 			if err := m.cfg.Available.PublishWorkspaceAvailable(ctx, available); err != nil {
 				return m.fail(id, "publish workspace available", err)
 			}
 			if _, err := m.cfg.Store.Update(id, func(j *Job) error {
 				j.AvailablePublished = true
-				j.State = StateAwaitingEmacs
 				j.LastError = ""
 				return nil
 			}); err != nil {
 				return err
 			}
-			return nil
+			// A reentrant ACK may have advanced state while Publish returned.  Read
+			// it again and continue directly to prompt delivery when that happened.
+			continue
 		case StateAwaitingEmacs, StateReady, StateFailed:
 			return nil
 		case StateEmacsMaterialized, StatePromptSubmitting:
@@ -208,7 +300,7 @@ func (m *Manager) MarkMaterialized(ctx context.Context, id string) error {
 // sink deduplicates by action ID because the action is deliberately marked only
 // after its publish returns successfully.
 func (m *Manager) DrainHostActions(ctx context.Context) error {
-	actions, err := m.cfg.Store.PendingHostActions()
+	actions, err := m.cfg.Store.HostActionsForDelivery()
 	if err != nil {
 		return err
 	}
@@ -217,10 +309,20 @@ func (m *Manager) DrainHostActions(ctx context.Context) error {
 		if err := m.cfg.HostActions.PublishHostAction(ctx, action); err != nil {
 			return fmt.Errorf("workspace create: publish host action %s: %w", action.ID, err)
 		}
-		if err := m.cfg.Store.MarkHostActionDelivered(action.ID); err != nil {
+		if err := m.cfg.Store.MarkHostActionPublished(action.ID); err != nil {
 			return err
 		}
 	}
+	return nil
+}
+
+// CompleteHostAction records the host's terminal verdict.  A failure remains
+// pending with its diagnostic text, while a success is terminal and idempotent.
+func (m *Manager) CompleteHostAction(id string, ok bool, failure string) error {
+	if err := m.cfg.Store.CompleteHostAction(id, ok, failure); err != nil {
+		return err
+	}
+	m.cfg.Logf("workspace-create: completed host action id=%s ok=%t failure=%q", id, ok, failure)
 	return nil
 }
 
