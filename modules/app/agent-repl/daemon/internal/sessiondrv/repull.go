@@ -168,10 +168,14 @@ func (m *Manager) startRepull(d *driven, fromSeq, stopAt uint64) error {
 //
 // The ring is not extended either: the ring is the LIVE window, and back-filling
 // it with replayed history would make the floor drift under the next request.
+// Every replayed event is offered to the curator, which decides what carries
+// conversation content — including the first-class clear and compaction, which
+// are not vendor payloads and were skipped outright while this filtered on one.
+// A clear or a compaction re-pulled from history does NOT re-raise the replay
+// floor: the floor is durable, a re-pull is bounded ABOVE by it, and letting
+// history move it would be the replayed-history-as-live-state class of bug
+// repull exists to avoid.
 func (c *consumer) repullConversation(ev *corev1.Event) {
-	if ev.GetVendor() == nil {
-		return // only vendor payloads carry conversation content
-	}
 	c.pushConversation(ev, false)
 }
 

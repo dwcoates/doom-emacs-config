@@ -25,6 +25,30 @@ type fakeSeqStore struct{ seq map[string]uint64 }
 func (f *fakeSeqStore) LastSeq(id string) uint64       { return f.seq[id] }
 func (f *fakeSeqStore) SetLastSeq(id string, s uint64) { f.seq[id] = s }
 
+// fakeClearCompactStore is an in-memory ClearCompactStore. It keeps the real store's MONOTONIC
+// contract so a test cannot pass against a fake that is more forgiving than
+// production. Its map is what a "daemon restart" hands to a fresh Manager.
+type fakeClearCompactStore struct {
+	mu  sync.Mutex
+	seq map[string]uint64
+}
+
+func newFakeClearCompactStore() *fakeClearCompactStore {
+	return &fakeClearCompactStore{seq: map[string]uint64{}}
+}
+
+func (f *fakeClearCompactStore) NewestClearOrCompactSeq(id string) uint64 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.seq[id]
+}
+
+func (f *fakeClearCompactStore) SetNewestClearOrCompactSeq(id string, s uint64) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.seq[id] = max(f.seq[id], s)
+}
+
 type fakeSpawner struct {
 	mu      sync.Mutex
 	calls   []string
@@ -172,13 +196,14 @@ func newTestManager(t *testing.T, locator SessionLocator, spawner Spawner) (*Man
 	var mu sync.Mutex
 	var last *fakeClient
 	m, err := New(Config{
-		Push:            &fakePusher{},
-		SSM:             &fakeApplier{},
-		Spawner:         spawner,
-		Locator:         locator,
-		SeqStore:        &fakeSeqStore{seq: map[string]uint64{}},
-		ProtocolVersion: "1",
-		Source:          stubSource{},
+		Push:              &fakePusher{},
+		SSM:               &fakeApplier{},
+		Spawner:           spawner,
+		Locator:           locator,
+		SeqStore:          &fakeSeqStore{seq: map[string]uint64{}},
+		ClearCompactStore: newFakeClearCompactStore(),
+		ProtocolVersion:   "1",
+		Source:            stubSource{},
 		newClient: func(cfg shimclient.Config) sessionClient {
 			fc := &fakeClient{cfg: cfg}
 			mu.Lock()
@@ -202,13 +227,14 @@ func newTestManagerNotReady(t *testing.T, locator SessionLocator, spawner Spawne
 	var mu sync.Mutex
 	var last *fakeClient
 	m, err := New(Config{
-		Push:            &fakePusher{},
-		SSM:             &fakeApplier{},
-		Spawner:         spawner,
-		Locator:         locator,
-		SeqStore:        &fakeSeqStore{seq: map[string]uint64{}},
-		ProtocolVersion: "1",
-		Source:          stubSource{},
+		Push:              &fakePusher{},
+		SSM:               &fakeApplier{},
+		Spawner:           spawner,
+		Locator:           locator,
+		SeqStore:          &fakeSeqStore{seq: map[string]uint64{}},
+		ClearCompactStore: newFakeClearCompactStore(),
+		ProtocolVersion:   "1",
+		Source:            stubSource{},
 		newClient: func(cfg shimclient.Config) sessionClient {
 			fc := &fakeClient{cfg: cfg, notReady: notReady}
 			mu.Lock()
@@ -457,7 +483,7 @@ var errBringUp = errors.New("bring-up failed")
 func newTestPermHandler() (permHandler, *permRegistry, *fakePusher) {
 	push := &fakePusher{}
 	reg := newPermRegistry(nil)
-	cons := newConsumer("ws", "s1", push, &fakeApplier{}, nil, nil, nil, nil, nil, nil)
+	cons := newConsumer("ws", "s1", push, &fakeApplier{}, nil, newFakeClearCompactStore(), nil, nil, nil, nil, nil)
 	return permHandler{reg: reg, cons: cons, logf: func(string, ...any) {}}, reg, push
 }
 
@@ -651,13 +677,14 @@ func TestTerminalDriverErrorStopsShimAfterEviction(t *testing.T) {
 	runResult := make(chan error, 1)
 	var client *fakeClient
 	m, err := New(Config{
-		Push:            &fakePusher{},
-		SSM:             &fakeApplier{},
-		Spawner:         spawner,
-		Locator:         fakeLocator{m: map[string]string{"ws": "s1"}},
-		SeqStore:        &fakeSeqStore{seq: map[string]uint64{}},
-		ProtocolVersion: "1",
-		Source:          stubSource{},
+		Push:              &fakePusher{},
+		SSM:               &fakeApplier{},
+		Spawner:           spawner,
+		Locator:           fakeLocator{m: map[string]string{"ws": "s1"}},
+		SeqStore:          &fakeSeqStore{seq: map[string]uint64{}},
+		ClearCompactStore: newFakeClearCompactStore(),
+		ProtocolVersion:   "1",
+		Source:            stubSource{},
 		newClient: func(cfg shimclient.Config) sessionClient {
 			client = &fakeClient{cfg: cfg, runResult: runResult}
 			return client

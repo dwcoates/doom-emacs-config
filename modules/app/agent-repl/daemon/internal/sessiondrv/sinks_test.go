@@ -187,7 +187,7 @@ func (a *fakeApplier) reconcileCalls() []reconcileCall {
 }
 
 func newTestConsumer(push Pusher, applier StateApplier) *consumer {
-	c := newConsumer("ws", "s1", push, applier, nil, nil, nil, nil, nil, nil)
+	c := newConsumer("ws", "s1", push, applier, nil, newFakeClearCompactStore(), nil, nil, nil, nil, nil)
 	c.now = func() int64 { return 1000 }
 	return c
 }
@@ -208,7 +208,7 @@ func (p *fakeProgress) SetCounts(string, int64, int64)  {}
 func (p *fakeProgress) NoteTurnAccepted(string, string) {}
 
 func newProgressConsumer(prog ProgressResolver) *consumer {
-	c := newConsumer("ws", "s1", &fakePusher{}, &fakeApplier{}, prog, nil, nil, nil, nil, nil)
+	c := newConsumer("ws", "s1", &fakePusher{}, &fakeApplier{}, prog, newFakeClearCompactStore(), nil, nil, nil, nil, nil)
 	c.now = func() int64 { return 1000 }
 	return c
 }
@@ -280,7 +280,7 @@ func TestMessageLatencyPushesNoConversationFrame(t *testing.T) {
 
 // backfillConsumer builds a consumer recording its backfill transitions.
 func backfillConsumer(states *[]string) *consumer {
-	c := newConsumer("ws", "s1", &fakePusher{}, &fakeApplier{}, nil, nil, nil, nil,
+	c := newConsumer("ws", "s1", &fakePusher{}, &fakeApplier{}, nil, newFakeClearCompactStore(), nil, nil, nil,
 		func(state string) { *states = append(*states, state) }, nil)
 	c.now = func() int64 { return 1000 }
 	return c
@@ -403,7 +403,7 @@ func TestProgressFoldFailureDoesNotStopTheStream(t *testing.T) {
 	// Arrange — the resolver rejects everything.
 	prog := &fakeProgress{err: errors.New("boom")}
 	push := &fakePusher{}
-	c := newConsumer("ws", "s1", push, &fakeApplier{}, prog, nil, nil, nil, nil, nil)
+	c := newConsumer("ws", "s1", push, &fakeApplier{}, prog, newFakeClearCompactStore(), nil, nil, nil, nil, nil)
 	c.now = func() int64 { return 1000 }
 	// Act
 	c.Consume(&corev1.Event{
@@ -631,7 +631,7 @@ func TestApplyNonTaskEventDoesNotPushCatalog(t *testing.T) {
 func TestApplyFiresOnSessionStarted(t *testing.T) {
 	// Arrange.
 	var seen *corev1.SessionStarted
-	c := newConsumer("ws", "s1", &fakePusher{}, &fakeApplier{}, nil, nil, func(ss *corev1.SessionStarted) { seen = ss }, nil, nil, nil)
+	c := newConsumer("ws", "s1", &fakePusher{}, &fakeApplier{}, nil, newFakeClearCompactStore(), nil, func(ss *corev1.SessionStarted) { seen = ss }, nil, nil, nil)
 
 	// Act.
 	c.Apply(&corev1.Event{SessionId: "s1", Payload: &corev1.Event_SessionStarted{SessionStarted: &corev1.SessionStarted{Source: corev1.SessionSource_SESSION_SOURCE_RESUME}}})
@@ -745,7 +745,7 @@ func TestConnectionDegradedFailureIsLoudNotSwallowed(t *testing.T) {
 	// misreport this axis exists to prevent.
 	var logged []string
 	applier := &fakeApplier{degradedErr: errors.New("db gone")}
-	c := newConsumer("ws", "s1", &fakePusher{}, applier, nil,
+	c := newConsumer("ws", "s1", &fakePusher{}, applier, nil, newFakeClearCompactStore(),
 		func(f string, a ...any) { logged = append(logged, f) }, nil, nil, nil, nil)
 
 	// Act.
@@ -1228,7 +1228,7 @@ func TestStoreSettleIsIdempotent(t *testing.T) {
 func TestSessionEndedReportsTheDeath(t *testing.T) {
 	// Arrange.
 	var ended int
-	c := newConsumer("ws", "s1", &fakePusher{}, &fakeApplier{}, nil, nil, nil, nil, nil,
+	c := newConsumer("ws", "s1", &fakePusher{}, &fakeApplier{}, nil, newFakeClearCompactStore(), nil, nil, nil, nil,
 		func() { ended++ })
 
 	// Act.
@@ -1243,7 +1243,7 @@ func TestSessionEndedReportsTheDeath(t *testing.T) {
 func TestATurnEndDoesNotReportADeath(t *testing.T) {
 	// Arrange: a turn ending is not a session ending.
 	var ended int
-	c := newConsumer("ws", "s1", &fakePusher{}, &fakeApplier{}, nil, nil, nil, nil, nil,
+	c := newConsumer("ws", "s1", &fakePusher{}, &fakeApplier{}, nil, newFakeClearCompactStore(), nil, nil, nil, nil,
 		func() { ended++ })
 
 	// Act.

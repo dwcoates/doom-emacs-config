@@ -68,6 +68,7 @@ type repullHarness struct {
 	progress *fakeProgress
 	client   *replayClient
 	seq      *fakeSeqStore
+	floors   *fakeClearCompactStore
 }
 
 func newRepullHarness(t *testing.T, client *replayClient) *repullHarness {
@@ -78,17 +79,19 @@ func newRepullHarness(t *testing.T, client *replayClient) *repullHarness {
 		progress: &fakeProgress{},
 		client:   client,
 		seq:      &fakeSeqStore{seq: map[string]uint64{}},
+		floors:   newFakeClearCompactStore(),
 	}
 	m, err := New(Config{
-		Push:            h.push,
-		SSM:             h.applier,
-		Progress:        h.progress,
-		Spawner:         &fakeSpawner{},
-		Locator:         fakeLocator{m: map[string]string{"ws": "s1"}},
-		SeqStore:        h.seq,
-		ProtocolVersion: "1",
-		Source:          stubSource{},
-		newClient:       func(shimclient.Config) sessionClient { return client },
+		Push:              h.push,
+		SSM:               h.applier,
+		Progress:          h.progress,
+		Spawner:           &fakeSpawner{},
+		Locator:           fakeLocator{m: map[string]string{"ws": "s1"}},
+		SeqStore:          h.seq,
+		ClearCompactStore: h.floors,
+		ProtocolVersion:   "1",
+		Source:            stubSource{},
+		newClient:         func(shimclient.Config) sessionClient { return client },
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)

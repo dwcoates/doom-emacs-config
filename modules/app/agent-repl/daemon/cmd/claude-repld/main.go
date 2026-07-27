@@ -352,21 +352,26 @@ func main() {
 	// Held by pointer so its SessionView re-push can be late-bound below: the
 	// Server it pushes through does not exist yet (same shape as forwarder).
 	registrar := &server.RegistryRegistrar{Reg: sessionRegistry, Logf: log.Printf}
+	// One registry adapter serves both durable seq marks: last_seen_seq (the
+	// shimclient replay high-water) and newest_clear_or_compact_seq (the
+	// frontend replay floor).
+	seqStore := server.NewRegistrySeqStore(sessionRegistry, log.Printf)
 	// The below-floor history re-pull needs no wiring of its own: it rides the
 	// session's existing shim connection as a ReplayRequest, so the store stays
 	// behind the agent-shim facade (sessiondrv/repull.go).
 	driver, err := sessiondrv.New(sessiondrv.Config{
-		Push:            forwarder,
-		SSM:             ssmMgr,
-		Progress:        progressMgr,
-		Spawner:         server.NewShimSpawner(sessionRegistry, shimListener.Connected, udsSpawn, log.Printf),
-		Source:          &server.ShimConnSource{Listener: shimListener},
-		Locator:         &server.SessionLocator{Reg: sessionRegistry},
-		SeqStore:        server.NewRegistrySeqStore(sessionRegistry, log.Printf),
-		Registrar:       registrar,
-		DaemonVersion:   daemonVersion,
-		ProtocolVersion: shimProtocolVersion,
-		Logf:            log.Printf,
+		Push:              forwarder,
+		SSM:               ssmMgr,
+		Progress:          progressMgr,
+		Spawner:           server.NewShimSpawner(sessionRegistry, shimListener.Connected, udsSpawn, log.Printf),
+		Source:            &server.ShimConnSource{Listener: shimListener},
+		Locator:           &server.SessionLocator{Reg: sessionRegistry},
+		SeqStore:          seqStore,
+		ClearCompactStore: seqStore,
+		Registrar:         registrar,
+		DaemonVersion:     daemonVersion,
+		ProtocolVersion:   shimProtocolVersion,
+		Logf:              log.Printf,
 		// The prompt queue's classifier (E4). A queued prompt is judged by a
 		// cheap headless run under the SESSION's own account, so the
 		// classification cannot land on a different account's quota or config.
