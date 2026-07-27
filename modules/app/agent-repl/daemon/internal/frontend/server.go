@@ -33,9 +33,13 @@ const defaultClientBuffer = 256
 // stitch phase binds the real SSM-backed implementation.
 type StateProvider interface {
 	// Snapshot returns the current resolved state of every workspace, session,
-	// and open-task catalog. It must be safe for concurrent use; the server
-	// calls it while holding its client-registry lock so the snapshot and the
-	// subsequent delta stream cannot interleave.
+	// and open-task catalog, plus every durable WorkspaceAvailable and
+	// HostAction still awaiting the Emacs host.  The workspace-creation manager
+	// is the authority for those latter fields; stitch it into the provider
+	// rather than teaching the transport package creation business logic.  It
+	// must be safe for concurrent use; the server calls it while holding its
+	// client-registry lock so the snapshot and subsequent delta stream cannot
+	// interleave.
 	Snapshot() *frontendv1.StateSnapshot
 }
 
@@ -105,6 +109,7 @@ type client struct {
 	closeOnce sync.Once
 	scope     *Scope
 	role      Role
+	kind      ClientKind
 }
 
 // New builds a Server. It panics on a missing required dependency: a frontend
@@ -193,7 +198,7 @@ func (s *Server) Serve(l net.Listener) error {
 		// The UDS endpoint is Emacs: it renders no conversation and draws no
 		// state it must attest to, so it is an observer and the sequencer holds
 		// states back from it until a painter has caught up.
-		go s.serveClient(newUDSConn(conn), nil, RoleObserver)
+		go s.serveClient(newUDSConn(conn), nil, RoleObserver, ClientKindHost)
 	}
 }
 
@@ -213,7 +218,7 @@ func (s *Server) ServeWS(w http.ResponseWriter, r *http.Request) {
 		s.logf("frontend: websocket upgrade: %v", err)
 		return
 	}
-	s.serveClient(newWSConn(conn), nil, RoleObserver)
+	s.serveClient(newWSConn(conn), nil, RoleObserver, ClientKindGUIBootstrap)
 }
 
 // CommandTranslator converts one raw inbound message on a scoped connection
@@ -246,7 +251,11 @@ func (s *Server) ServeWSScoped(w http.ResponseWriter, r *http.Request, scope Sco
 	wc := newWSConn(conn)
 	wc.translate = translate
 	wc.logf = s.logf
-	s.serveClient(wc, &scope, role)
+	kind := ClientKindGUIObserver
+	if role == RolePainter {
+		kind = ClientKindGUIPainter
+	}
+	s.serveClient(wc, &scope, role, kind)
 }
 
 // Close stops accepting, disconnects every client, and closes the listener.
@@ -309,6 +318,9 @@ func (s *Server) Broadcast(frame *frontendv1.FrontendFrame) {
 	}
 	s.mu.Unlock()
 	for _, cl := range clients {
+		if isHostOnlyFrame(frame) && !cl.kind.isHost() {
+			continue
+		}
 		var (
 			data []byte
 			err  error
@@ -395,6 +407,9 @@ func (s *Server) deliverLocked(frame *frontendv1.FrontendFrame, want func(*clien
 		if !want(cl) {
 			continue
 		}
+		if isHostOnlyFrame(frame) && !cl.kind.isHost() {
+			continue
+		}
 		var (
 			data []byte
 			err  error
@@ -467,17 +482,73 @@ func (s *Server) PushQueueView(q *frontendv1.QueueView) { s.Broadcast(QueueViewF
 func (s *Server) PushProgressView(p *frontendv1.ProgressView) {
 	s.Broadcast(ProgressViewFrame(p))
 }
+func (s *Server) PushWorkspaceAvailable(v *frontendv1.WorkspaceAvailable) {
+	s.Broadcast(WorkspaceAvailableFrame(v))
+}
+func (s *Server) PushHostAction(v *frontendv1.HostAction) { s.Broadcast(HostActionFrame(v)) }
+
+// isHostOnlyFrame marks daemon-to-host work that must never cross into either
+// GUI transport.  ClientKind, not RoleObserver, is the authority: GUI
+// bootstrap is also an observer and must not receive an Emacs action.
+func isHostOnlyFrame(frame *frontendv1.FrontendFrame) bool {
+	if frame == nil {
+		return false
+	}
+	return frame.GetWorkspaceAvailable() != nil || frame.GetHostAction() != nil
+}
+
+// snapshotForClient applies the two independent views of a snapshot.  Scope
+// limits a GUI painter to its session; host-only durable work is then removed
+// from every non-host client regardless of whether it happens to be an
+// observer.  The clone prevents a reconnect's filtering from mutating the
+// state provider's retained snapshot.
+func snapshotForClient(snapshot *frontendv1.StateSnapshot, scope *Scope, kind ClientKind) *frontendv1.StateSnapshot {
+	if scope != nil {
+		snapshot = filterSnapshot(snapshot, *scope)
+	}
+	if kind.isHost() {
+		return snapshot
+	}
+	if snapshot == nil {
+		return &frontendv1.StateSnapshot{}
+	}
+	filtered := proto.Clone(snapshot).(*frontendv1.StateSnapshot)
+	filtered.WorkspaceAvailable = nil
+	filtered.HostActions = nil
+	return filtered
+}
+
+// isHostOnlyCommand identifies commands whose authority belongs exclusively
+// to the Emacs UDS host.  They mutate durable creation/inbox state, so letting
+// a GUI bootstrap or painter submit one would make an unrelated webview able
+// to release prompts or consume host work.
+func isHostOnlyCommand(cmd *frontendv1.FrontendCommand) bool {
+	if cmd == nil {
+		return false
+	}
+	return cmd.GetCreateWorkspace() != nil || cmd.GetWorkspaceMaterialized() != nil || cmd.GetHostActionCompleted() != nil
+}
+
+func (s *Server) dispatchClientCommand(cl *client, cmd *frontendv1.FrontendCommand) *frontendv1.CommandAck {
+	if isHostOnlyCommand(cmd) && !cl.kind.isHost() {
+		err := fmt.Errorf("frontend: host-only command rejected from client kind %s", cl.kind)
+		s.logf("frontend: host-only command rejected kind=%s request_id=%s", cl.kind, cmd.GetRequestId())
+		return failAck(s.logf, cmd.GetRequestId(), err)
+	}
+	return dispatch(context.Background(), s.logf, s.handler, cmd)
+}
 
 // ---------------------------------------------------------------------------
 // Per-connection lifecycle
 // ---------------------------------------------------------------------------
 
-func (s *Server) serveClient(c conn, scope *Scope, role Role) {
+func (s *Server) serveClient(c conn, scope *Scope, role Role, kind ClientKind) {
 	cl := &client{
 		send:  make(chan []byte, s.bufSize),
 		done:  make(chan struct{}),
 		scope: scope,
 		role:  role,
+		kind:  kind,
 	}
 
 	// Register the client and enqueue its StateSnapshot atomically, under the
@@ -492,10 +563,7 @@ func (s *Server) serveClient(c conn, scope *Scope, role Role) {
 	}
 	// The sequencer's view first, so an observer's reconnect cannot hand it a
 	// state no painter has settled, then the connection's own scope filter.
-	snapshot := s.gate.snapshotLocked(s.state.Snapshot(), role)
-	if scope != nil {
-		snapshot = filterSnapshot(snapshot, *scope)
-	}
+	snapshot := snapshotForClient(s.gate.snapshotLocked(s.state.Snapshot(), role), scope, kind)
 	snap, err := marshalFrame(SnapshotFrame(snapshot))
 	if err != nil {
 		s.mu.Unlock()
@@ -580,9 +648,7 @@ func (s *Server) readLoop(c conn, cl *client) {
 			s.mu.Lock()
 			snapshot := s.gate.snapshotLocked(s.state.Snapshot(), cl.role)
 			s.mu.Unlock()
-			if cl.scope != nil {
-				snapshot = filterSnapshot(snapshot, *cl.scope)
-			}
+			snapshot = snapshotForClient(snapshot, cl.scope, cl.kind)
 			if snap, err := marshalFrame(SnapshotFrame(snapshot)); err != nil {
 				s.logf("frontend: marshal resync snapshot: %v", err)
 			} else {
@@ -596,7 +662,7 @@ func (s *Server) readLoop(c conn, cl *client) {
 		if pa := cmd.GetPaintAck(); pa != nil && settlesDelivery(pa) {
 			s.settlePaint(cmd.GetWorkspace(), pa.GetStateGeneration())
 		}
-		ack := Dispatch(context.Background(), s.logf, s.handler, cmd)
+		ack := s.dispatchClientCommand(cl, cmd)
 		if !ack.GetOk() {
 			s.logf("frontend: command nack {request_id=%s ws=%s}: %s", ack.GetRequestId(), cmd.GetWorkspace(), ack.GetError())
 		}
