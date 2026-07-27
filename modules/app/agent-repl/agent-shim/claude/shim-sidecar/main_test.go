@@ -1,14 +1,117 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
+	"agentrepl/shim-claude-sidecar/internal/handler"
 	"agentrepl/shim-claude-sidecar/internal/tail"
 )
+
+// capturingLog returns a Logf that records every formatted line, plus a reader
+// for what it has seen. It is mutex-guarded because the sidecar's logger is.
+func capturingLog() (handler.Logf, func() []string) {
+	var (
+		mu    sync.Mutex
+		lines []string
+	)
+	logf := func(format string, args ...any) {
+		msg := fmt.Sprintf(format, args...)
+		mu.Lock()
+		lines = append(lines, msg)
+		mu.Unlock()
+	}
+	return logf, func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]string(nil), lines...)
+	}
+}
+
+// linesContaining filters captured log lines by substring.
+func linesContaining(lines []string, sub string) []string {
+	var out []string
+	for _, l := range lines {
+		if strings.Contains(l, sub) {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+// pickupSidecar wires a live store, a 5-line transcript, and a log-capturing
+// sidecar with its link established — the arrangement both pickup tests share.
+func pickupSidecar(t *testing.T) (*sidecar, string, func() []string) {
+	t.Helper()
+	h := newStoreHarness(t)
+	h.start()
+	root, path := writeHistory(t, 5)
+	logf, read := capturingLog()
+	s := newSidecar(h.sock, []string{root}, t.TempDir(), logf)
+	t.Cleanup(func() { s.store.Close() })
+	if err := s.establish(); err != nil {
+		t.Fatalf("establish: %v", err)
+	}
+	return s, path, read
+}
+
+func TestPollLogsOnePickupLinePerChangedFile(t *testing.T) {
+	// Arrange
+	s, path, read := pickupSidecar(t)
+
+	// Act
+	s.pollAll()
+
+	// Assert — exactly one line, carrying path, count, kind and write latency.
+	got := linesContaining(read(), "picked up")
+	if len(got) != 1 {
+		t.Fatalf("pickup lines = %v, want exactly 1", got)
+	}
+	for _, want := range []string{path, "5 event(s)", "kind=session", "store_write_ms="} {
+		if !strings.Contains(got[0], want) {
+			t.Fatalf("pickup line %q missing %q", got[0], want)
+		}
+	}
+}
+
+func TestPollLogsNothingWhenNothingChanged(t *testing.T) {
+	// Arrange — the file's events are already picked up and cursored.
+	s, _, read := pickupSidecar(t)
+	s.pollAll()
+	before := len(read())
+
+	// Act — a second pass over an unchanged file.
+	s.pollAll()
+
+	// Assert — steady state is silent.
+	if after := read(); len(after) != before {
+		t.Fatalf("unchanged poll logged %v", after[before:])
+	}
+}
+
+func TestKindLabel(t *testing.T) {
+	cases := []struct {
+		in   tail.Kind
+		want string
+	}{
+		{tail.KindSessionTranscript, "session"},
+		{tail.KindAgentTranscript, "agent"},
+		{tail.KindWorkflowJournal, "workflow"},
+		{tail.KindShellSpool, "shell"},
+		{tail.Kind(42), "kind(42)"},
+	}
+	for _, tc := range cases {
+		if got := kindLabel(tc.in); got != tc.want {
+			t.Fatalf("kindLabel(%d) = %q, want %q", int(tc.in), got, tc.want)
+		}
+	}
+}
 
 func TestParseRootsSplitsAndExpandsHome(t *testing.T) {
 	// Arrange
