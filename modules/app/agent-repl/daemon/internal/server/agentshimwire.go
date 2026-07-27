@@ -10,6 +10,8 @@ import (
 	"context"
 	"fmt"
 
+	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+
 	"claude-repld/internal/frontend"
 	"claude-repld/internal/progress"
 	"claude-repld/internal/ssm"
@@ -65,6 +67,12 @@ type AgentShimConfig struct {
 	// shutdown FrontendCommand (the same func POST /shutdown drives). Nil makes
 	// the shutdown command a loud failing ack (the capability is unconfigured).
 	RequestShutdown func()
+	// WorkspaceCreation owns durable workspace-create jobs and retained host
+	// actions. Required: it receives create/materialized/completion commands
+	// and supplies/publishes the host-only work that Emacs renders. It is kept
+	// behind the server-local bridge so this transport package never imports the
+	// workspace creation implementation or store.
+	WorkspaceCreation WorkspaceCreationBridge
 	// Logf is the daemon logger. Nil discards.
 	Logf func(string, ...any)
 }
@@ -86,9 +94,39 @@ type AgentShim struct {
 	Progress *progress.Manager
 	Merge    *merge.Engine
 
-	cancelPush     func()
-	cancelProgress func()
-	logf           func(string, ...any)
+	cancelPush               func()
+	cancelProgress           func()
+	cancelWorkspaceAvailable func()
+	cancelHostActions        func()
+	logf                     func(string, ...any)
+}
+
+// hostWorkPublisher is the narrow frontend surface the durable creation
+// manager needs. *frontend.Server satisfies it; isolating the forwarding loop
+// here keeps it testable without opening a real listener.
+type hostWorkPublisher interface {
+	PushWorkspaceAvailable(*frontendv1.WorkspaceAvailable)
+	PushHostAction(*frontendv1.HostAction)
+}
+
+func forwardWorkspaceAvailable(logf func(string, ...any), publisher hostWorkPublisher, values <-chan *frontendv1.WorkspaceAvailable) {
+	for available := range values {
+		if available == nil {
+			panic("server: workspace creation bridge published nil WorkspaceAvailable")
+		}
+		logf("server: host-work push workspace_available job_id=%s workspace=%s", available.GetJobId(), available.GetFinalName())
+		publisher.PushWorkspaceAvailable(available)
+	}
+}
+
+func forwardHostActions(logf func(string, ...any), publisher hostWorkPublisher, values <-chan *frontendv1.HostAction) {
+	for action := range values {
+		if action == nil {
+			panic("server: workspace creation bridge published nil HostAction")
+		}
+		logf("server: host-work push host_action action_id=%s action_type=%T", action.GetActionId(), action.GetAction())
+		publisher.PushHostAction(action)
+	}
 }
 
 // mergeSink adapts the SSM to merge.StateSink: every merge-state transition the
@@ -144,6 +182,8 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 		return nil, fmt.Errorf("server: WireAgentShim needs a MergeDirResolver")
 	case cfg.SessionCommands == nil:
 		return nil, fmt.Errorf("server: WireAgentShim needs a SessionCommands binding")
+	case cfg.WorkspaceCreation == nil:
+		return nil, fmt.Errorf("server: WireAgentShim needs a WorkspaceCreation bridge")
 	}
 	mgr := cfg.SSM
 
@@ -152,9 +192,21 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 		return nil, fmt.Errorf("server: build merge engine: %w", err)
 	}
 
-	handler, err := newCommandHandler(cfg.Prompts, mergeRunner{engine: engine, resolver: cfg.MergeDirs}, cfg.Lifecycle, cfg.Resyncer, cfg.SessionCommands, cfg.RequestShutdown, cfg.Queues, cfg.SSM, logf)
+	handler, err := newCommandHandler(cfg.Prompts, mergeRunner{engine: engine, resolver: cfg.MergeDirs}, cfg.Lifecycle, cfg.Resyncer, cfg.SessionCommands, cfg.RequestShutdown, cfg.Queues, cfg.SSM, logf, cfg.WorkspaceCreation)
 	if err != nil {
 		return nil, err
+	}
+	// Validate the required typed subscriptions before starting any push loop. That
+	// keeps WireAgentShim atomic: an invalid bridge cannot leave a live SSM or
+	// progress subscription behind after construction reports an error.
+	workspaceAvailable, cancelWorkspaceAvailable := cfg.WorkspaceCreation.SubscribeWorkspaceAvailable()
+	if workspaceAvailable == nil || cancelWorkspaceAvailable == nil {
+		return nil, fmt.Errorf("server: workspace creation bridge returned an invalid workspace-available subscription")
+	}
+	hostActions, cancelHostActions := cfg.WorkspaceCreation.SubscribeHostActions()
+	if hostActions == nil || cancelHostActions == nil {
+		cancelWorkspaceAvailable()
+		return nil, fmt.Errorf("server: workspace creation bridge returned an invalid host-action subscription")
 	}
 
 	srv := frontend.New(frontend.Config{
@@ -162,7 +214,7 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 		State: &ssmSnapshotProvider{
 			ssm: mgr, sessions: cfg.Sessions, inits: cfg.Inits,
 			catalogs: cfg.Catalogs, queues: cfg.Queues, daemon: cfg.SessionCommands,
-			progress: cfg.Progress, logf: logf,
+			progress: cfg.Progress, workspaceCreation: cfg.WorkspaceCreation, logf: logf,
 		},
 		Handler: handler,
 		// THE PRODUCTION CALLER ApplyPaintLost never had. The withdrawal half of
@@ -206,9 +258,21 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 		}
 	}()
 
+	// Durable workspace work -> host-only frontend pushes. The bridge's store
+	// snapshot is authoritative on reconnect; these subscriptions only reduce
+	// latency for an already-connected Emacs. Separate typed channels make an
+	// ambiguous availability/action publication unrepresentable.
+	go func() {
+		forwardWorkspaceAvailable(logf, srv, workspaceAvailable)
+	}()
+	go func() {
+		forwardHostActions(logf, srv, hostActions)
+	}()
+
 	return &AgentShim{
 		Server: srv, SSM: mgr, Progress: prog, Merge: engine,
-		cancelPush: cancel, cancelProgress: cancelProgress, logf: logf,
+		cancelPush: cancel, cancelProgress: cancelProgress,
+		cancelWorkspaceAvailable: cancelWorkspaceAvailable, cancelHostActions: cancelHostActions, logf: logf,
 	}, nil
 }
 
@@ -222,6 +286,12 @@ func (a *AgentShim) Close() error {
 	}
 	if a.cancelProgress != nil {
 		a.cancelProgress()
+	}
+	if a.cancelWorkspaceAvailable != nil {
+		a.cancelWorkspaceAvailable()
+	}
+	if a.cancelHostActions != nil {
+		a.cancelHostActions()
 	}
 	if a.Server != nil {
 		if err := a.Server.Close(); err != nil {

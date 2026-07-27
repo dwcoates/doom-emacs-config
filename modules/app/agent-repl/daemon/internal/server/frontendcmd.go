@@ -55,6 +55,30 @@ type WorkspaceLifecycle interface {
 	Open(ctx context.Context, workspace string) error
 }
 
+// WorkspaceCreationBridge is the server-side seam for daemon-owned workspace
+// creation.  It deliberately speaks only frontend.v1 messages: the concrete
+// adapter may compose workspace/create.Manager, its durable store, and the
+// inbox without making this transport/server package import any of them.
+//
+// A nil bridge is an explicit unsupported capability: the command handler
+// returns a loud Nack rather than claiming a workspace or host action exists.
+type WorkspaceCreationBridge interface {
+	CreateWorkspace(ctx context.Context, requestID string, cmd *frontendv1.CreateWorkspaceCmd) error
+	MarkWorkspaceMaterialized(ctx context.Context, jobID string) error
+	CompleteHostAction(ctx context.Context, actionID string, ok bool, failure string) error
+	SnapshotHostWork() WorkspaceHostWorkSnapshot
+	SubscribeWorkspaceAvailable() (<-chan *frontendv1.WorkspaceAvailable, func())
+	SubscribeHostActions() (<-chan *frontendv1.HostAction, func())
+}
+
+// WorkspaceHostWorkSnapshot is the durable host-only subset a reconnecting
+// Emacs receives.  Its proto representation lets frontend.Server enforce its
+// ClientKind boundary without knowing how the creation store persists jobs.
+type WorkspaceHostWorkSnapshot struct {
+	WorkspaceAvailable []*frontendv1.WorkspaceAvailable
+	HostActions        []*frontendv1.HostAction
+}
+
 // Resyncer replays a workspace's retained conversation deltas from an exclusive
 // seq (design §5.4), the conversation-delta half of a frontend resync the
 // StateSnapshot re-send does not cover. Satisfied by *sessiondrv.Manager.
@@ -165,7 +189,10 @@ type commandHandler struct {
 	// no-op: an attestation the daemon quietly dropped would leave the
 	// workspace blue with nothing to explain why.
 	painters PaintAcker
-	logf     func(string, ...any)
+	// workspaceCreation owns durable create jobs and the file-inbox actions.
+	// Nil is a loud unsupported capability, never a success-shaped no-op.
+	workspaceCreation WorkspaceCreationBridge
+	logf              func(string, ...any)
 }
 
 // PaintAcker records a frontend's attestation that it painted a workspace's
@@ -176,34 +203,36 @@ type PaintAcker interface {
 
 var _ frontend.CommandHandler = (*commandHandler)(nil)
 
-// CreateWorkspace is deliberately loud until the daemon workspace-creation
-// manager is stitched into this command handler.  The frontend transport is
-// allowed to ship first, but a host request must never be acknowledged as if a
-// worktree/shim had been created when no lifecycle owner is wired.
-func (h *commandHandler) CreateWorkspace(_ context.Context, _ string, requestID string, cmd *frontendv1.CreateWorkspaceCmd) error {
-	h.logf("frontend cmd: create_workspace request_id=%s requested_name=%s git_root=%s", requestID, cmd.GetRequestedName(), cmd.GetGitRoot())
-	return fmt.Errorf("server: create_workspace is unavailable: workspace creation manager is not wired")
+func (h *commandHandler) CreateWorkspace(ctx context.Context, _ string, requestID string, cmd *frontendv1.CreateWorkspaceCmd) error {
+	h.logf("frontend cmd: create_workspace request_id=%s requested_name=%s git_root=%s base_commit=%s source_workspace=%s source_dir=%s initial_prompt_present=%t priority=%s model=%s fork_from=%s fork_session_id=%s postprocessing_prompt_present=%t before_ws_merge_present=%t config_dir=%s permission_mode=%s allow_ungated=%t",
+		requestID, cmd.GetRequestedName(), cmd.GetGitRoot(), cmd.GetBaseCommit(), cmd.GetSourceWorkspace(), cmd.GetSourceDir(), cmd.InitialPrompt != nil, cmd.GetPriority(), cmd.GetModel(), cmd.GetForkFrom(), cmd.GetForkSessionId(), cmd.GetPostprocessingPrompt() != "", cmd.GetBeforeWsMerge() != "", cmd.GetConfigDir(), cmd.GetPermissionMode(), cmd.GetAllowUngated())
+	if h.workspaceCreation == nil {
+		return fmt.Errorf("server: create_workspace is unavailable: workspace creation manager is not wired")
+	}
+	return h.workspaceCreation.CreateWorkspace(ctx, requestID, cmd)
 }
 
-// WorkspaceMaterialized is deliberately loud until the workspace-creation
-// manager owns the durable acknowledgement and queued-prompt release.
-func (h *commandHandler) WorkspaceMaterialized(_ context.Context, _ string, requestID string, cmd *frontendv1.WorkspaceMaterializedCmd) error {
+func (h *commandHandler) WorkspaceMaterialized(ctx context.Context, _ string, requestID string, cmd *frontendv1.WorkspaceMaterializedCmd) error {
 	h.logf("frontend cmd: workspace_materialized request_id=%s job_id=%s", requestID, cmd.GetJobId())
-	return fmt.Errorf("server: workspace_materialized is unavailable: workspace creation manager is not wired")
+	if h.workspaceCreation == nil {
+		return fmt.Errorf("server: workspace_materialized is unavailable: workspace creation manager is not wired")
+	}
+	return h.workspaceCreation.MarkWorkspaceMaterialized(ctx, cmd.GetJobId())
 }
 
-// HostActionCompleted is deliberately loud until the daemon inbox owner is
-// wired; silently dropping a completion would race or strand durable UI work.
-func (h *commandHandler) HostActionCompleted(_ context.Context, _ string, requestID string, cmd *frontendv1.HostActionCompletedCmd) error {
+func (h *commandHandler) HostActionCompleted(ctx context.Context, _ string, requestID string, cmd *frontendv1.HostActionCompletedCmd) error {
 	h.logf("frontend cmd: host_action_completed request_id=%s action_id=%s ok=%t error=%s", requestID, cmd.GetActionId(), cmd.GetOk(), cmd.GetError())
-	return fmt.Errorf("server: host_action_completed is unavailable: workspace creation manager is not wired")
+	if h.workspaceCreation == nil {
+		return fmt.Errorf("server: host_action_completed is unavailable: workspace creation manager is not wired")
+	}
+	return h.workspaceCreation.CompleteHostAction(ctx, cmd.GetActionId(), cmd.GetOk(), cmd.GetError())
 }
 
 // newCommandHandler validates its dependencies and returns the handler. The
 // resyncer is optional (nil-safe) and shutdown is optional (an unconfigured
 // shutdown fails the command loudly); the three routers and the
 // session-lifecycle binding are required.
-func newCommandHandler(prompts PromptRouter, merges MergeRunner, lifecycle WorkspaceLifecycle, resyncer Resyncer, sessions SessionCreateDeleter, shutdown func(), queues QueueController, painters PaintAcker, logf func(string, ...any)) (*commandHandler, error) {
+func newCommandHandler(prompts PromptRouter, merges MergeRunner, lifecycle WorkspaceLifecycle, resyncer Resyncer, sessions SessionCreateDeleter, shutdown func(), queues QueueController, painters PaintAcker, logf func(string, ...any), workspaceCreations ...WorkspaceCreationBridge) (*commandHandler, error) {
 	switch {
 	case prompts == nil:
 		return nil, fmt.Errorf("server: frontend command handler needs a PromptRouter")
@@ -217,7 +246,14 @@ func newCommandHandler(prompts PromptRouter, merges MergeRunner, lifecycle Works
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
-	return &commandHandler{prompts: prompts, merges: merges, lifecycle: lifecycle, resyncer: resyncer, sessions: sessions, shutdown: shutdown, queues: queues, painters: painters, logf: logf}, nil
+	if len(workspaceCreations) > 1 {
+		return nil, fmt.Errorf("server: frontend command handler received %d workspace creation bridges; expected at most one", len(workspaceCreations))
+	}
+	var workspaceCreation WorkspaceCreationBridge
+	if len(workspaceCreations) == 1 {
+		workspaceCreation = workspaceCreations[0]
+	}
+	return &commandHandler{prompts: prompts, merges: merges, lifecycle: lifecycle, resyncer: resyncer, sessions: sessions, shutdown: shutdown, queues: queues, painters: painters, workspaceCreation: workspaceCreation, logf: logf}, nil
 }
 
 // checkWorkspaceKey rejects a prompt-plane workspace key that is not an
@@ -501,6 +537,11 @@ type ssmSnapshotProvider struct {
 	// (re)connecting frontend's footer is populated before the next change
 	// pushes. Nil-safe: a nil source leaves snapshot.progress empty.
 	progress ProgressSource
+	// workspaceCreation supplies retained daemon-owned work for the Emacs host.
+	// frontend.Server removes these fields for all GUI client kinds; retaining
+	// them here makes a reconnecting host drain the durable queue before relying
+	// on best-effort live publications.
+	workspaceCreation WorkspaceCreationBridge
 	// logf records the complete snapshot shape at the reconnect boundary. It is
 	// optional only for focused unit construction outside WireAgentShim.
 	logf dlog.Logf
@@ -579,14 +620,20 @@ func (p *ssmSnapshotProvider) Snapshot() *frontendv1.StateSnapshot {
 	if p.progress != nil {
 		snap.Progress = p.progress.Snapshot()
 	}
+	if p.workspaceCreation == nil {
+		panic("server: snapshot provider requires workspace creation bridge")
+	}
+	hostWork := p.workspaceCreation.SnapshotHostWork()
+	snap.WorkspaceAvailable = hostWork.WorkspaceAvailable
+	snap.HostActions = hostWork.HostActions
 	if p.logf != nil {
 		taskCount := 0
 		for _, catalog := range snap.GetCatalogs() {
 			taskCount += len(catalog.GetTasks())
 		}
-		p.logf("frontend: connect snapshot workspaces=%d sessions=%d catalogs=%d tasks=%d inits=%d queues=%d progress=%d daemon=%t",
+		p.logf("frontend: connect snapshot workspaces=%d sessions=%d catalogs=%d tasks=%d inits=%d queues=%d progress=%d workspace_available=%d host_actions=%d daemon=%t",
 			len(snap.GetWorkspaces()), len(snap.GetSessions()), len(snap.GetCatalogs()), taskCount,
-			len(snap.GetInits()), len(snap.GetQueues()), len(snap.GetProgress()), snap.GetDaemon() != nil)
+			len(snap.GetInits()), len(snap.GetQueues()), len(snap.GetProgress()), len(snap.GetWorkspaceAvailable()), len(snap.GetHostActions()), snap.GetDaemon() != nil)
 	}
 	return snap
 }
