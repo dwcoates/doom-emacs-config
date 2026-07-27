@@ -69,3 +69,14 @@ silently re-reads every watched transcript from offset zero (observed
 service that is "running" while doing nothing. Read the tail of
 `~/.cache/agent-repl/log/shim-{store,claude-sidecar}.log` and confirm the steady
 state — for the sidecar, `store link UP`, not a repeating `store link DOWN`.
+
+## No real Claude/Anthropic calls from tests
+
+`AGENT_REPL_FORBID_VENDOR_CALLS`, set to any non-empty value, makes every
+vendor entry point refuse loudly: `daemon/internal/vendorguard` returns an
+error at the queue classifier's `claude -p` exec and at the login pty, and
+`agent-shim/claude/shim/src/vendor-guard.ts` throws at the one chokepoint that
+can import the real SDK. The harnesses set it for you — `TestMain` in
+`daemon/e2e` and `daemon/internal/sessiondrv`, and the shim's vitest setup — and
+children inherit it, so a new test needs no opt-in. Production must never set
+it.
