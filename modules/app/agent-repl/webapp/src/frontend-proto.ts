@@ -10,8 +10,8 @@
  * - `ConversationDelta.items` is a repeated typed `ConversationItem`: a thin
  *   envelope {uuid, tsMs, requestId} carrying EXACTLY ONE typed data.v1/core.v1
  *   payload arm (assistantMessage, userMessage, toolUse, toolResult,
- *   toolUseResult, result, compactBoundary, compactBoundaryLine, permission,
- *   systemFailure). The webapp DECOMPOSES those typed payloads back into its
+ *   toolUseResult, result, contextCleared, contextCompacted,
+ *   permission, systemFailure). The webapp DECOMPOSES those typed payloads back into its
  *   render vocabulary in `state-adapter.ts`; the OLD `kind`-discriminated
  *   pre-rendered Struct vocabulary is gone.
  * - `TypingDelta` embeds a `core.v1.ContentDelta` under `delta`
@@ -202,8 +202,8 @@ export const CONVERSATION_ITEM_ARMS = [
   "toolResult",
   "toolUseResult",
   "result",
-  "compactBoundary",
-  "compactBoundaryLine",
+  "contextCleared",
+  "contextCompacted",
   "permission",
   "systemFailure",
 ] as const;

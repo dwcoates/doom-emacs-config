@@ -72,13 +72,17 @@ export const MISSING_BUBBLE_NOTICE_MS = 4000;
 
 /**
  * The topbar notice for a roster row whose entry has no bubble in the
- * current feed: a subagent discarded by `/clear`, or a task created before
- * one (the task roster is harness-global, so its rows outlive the cut that
- * removed their cards). A click on such a row must say why nothing moved
- * rather than silently doing nothing.
+ * current feed: a subagent a context CLEAR or a COMPACTION discarded, or a
+ * task created before one (the task roster is harness-global, so its rows
+ * outlive the truncation that removed their cards). A click on such a row must
+ * say why nothing moved rather than silently doing nothing.
+ *
+ * The notice names both events because either can be the reason, and blaming a
+ * clear for a compaction's truncation would send the reader hunting for a
+ * command nobody ran.
  */
 export function missingBubbleNotice(spec: CounterSpec): string {
-  return `${spec.noun} has no bubble in the current feed (discarded by /clear)`;
+  return `${spec.noun} has no bubble in the current feed (discarded by a context clear or compaction)`;
 }
 
 /**

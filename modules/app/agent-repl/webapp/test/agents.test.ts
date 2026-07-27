@@ -20,13 +20,23 @@ function agentTool(over: Partial<ToolItem> = {}): ToolItem {
   };
 }
 
-/** The `/clear` prompt, whose bubble bounds the context the roster counts. */
-function clearTurn(): ConversationItem {
+/** A context clear, which bounds the context the roster counts. */
+function cleared(): ConversationItem {
+  return { kind: "context-cleared", uuid: "c1" };
+}
+
+/** A compaction, the other event the roster counts from. */
+function compacted(): ConversationItem {
   return {
-    kind: "user-turn",
-    requestId: "r1",
-    content: [{ type: "text", text: "/clear" }],
-    ts: "2026-05-24T09:05:00Z",
+    kind: "context-compacted",
+    uuid: "k1",
+    trigger: "auto",
+    preTokens: 100,
+    postTokens: 10,
+    durationMs: 500,
+    summary: "what came before",
+    result: "success",
+    error: "",
   };
 }
 
@@ -163,16 +173,23 @@ describe("sessionSubagents", () => {
     expect(agent.nested).toBe(false);
   });
 
-  it("forgets a subagent the /clear discarded from the context", () => {
+  it("forgets a subagent a clear discarded from the context", () => {
     // Arrange
-    const items: ConversationItem[] = [agentTool(), clearTurn()];
+    const items: ConversationItem[] = [agentTool(), cleared()];
     // Act + Assert
     expect(sessionSubagents(items)).toHaveLength(0);
   });
 
-  it("keeps a subagent spawned after the /clear", () => {
+  it("forgets a subagent a compaction discarded from the context", () => {
     // Arrange
-    const items: ConversationItem[] = [agentTool(), clearTurn(), agentTool({ toolUseId: "t2" })];
+    const items: ConversationItem[] = [agentTool(), compacted()];
+    // Act + Assert
+    expect(sessionSubagents(items)).toHaveLength(0);
+  });
+
+  it("keeps a subagent spawned after the clear", () => {
+    // Arrange
+    const items: ConversationItem[] = [agentTool(), cleared(), agentTool({ toolUseId: "t2" })];
     // Act
     const agents = sessionSubagents(items);
     // Assert
