@@ -190,6 +190,30 @@ func TestHeartbeatCanPrecedeTheFirstProducerWrite(t *testing.T) {
 	}
 }
 
+func TestHealthCheckCanPrecedeTheFirstProducerWrite(t *testing.T) {
+	// Arrange: health is the first intentional frame on the recovered producer
+	// socket, before a file change provides a StoreWrite.
+	h := start(t, 0, func(string, ...any) {})
+	prod := h.dial(t)
+
+	// Act: assert a correlated health reply, then write on the same connection.
+	send(t, prod, &corev1.HealthCheck{RequestId: "health-before-write"})
+	status, ok := recv(t, prod).(*corev1.HealthStatus)
+	if !ok {
+		t.Fatalf("health reply type = %T, want *HealthStatus", status)
+	}
+	send(t, prod, write(vAssistantStream(t, "s1", "A")))
+	ack := recvAck(t, prod)
+
+	// Assert: health was correlated and did not discard the producer preamble.
+	if status.GetRequestId() != "health-before-write" || !status.GetHealthy() || status.GetComponent() != "shim-store" {
+		t.Fatalf("health status = %+v, want correlated healthy shim-store status", status)
+	}
+	if ack.GetAccepted() != 1 || ack.GetLastSeq() != 1 {
+		t.Fatalf("ack = %+v, want accepted=1 last_seq=1", ack)
+	}
+}
+
 func TestReplayFromMidSeq(t *testing.T) {
 	// Arrange
 	h := start(t, 0, func(string, ...any) {})
