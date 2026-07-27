@@ -200,7 +200,7 @@ func parseCommands(payload []byte) ([]parsedCommand, error) {
 			if err := json.Unmarshal(item, &extra); err != nil {
 				return nil, fmt.Errorf("entry %d create metadata: %w", index, err)
 			}
-			for _, key := range []string{"type", "name", "git_root", "prompt", "priority", "fork_from", "base_commit", "model", "postprocessing_prompt", "before_ws_merge"} {
+			for _, key := range []string{"type", "name", "git_root", "prompt", "priority", "fork_from", "fork_session_id", "source_workspace", "source_dir", "base_commit", "model", "config_dir", "permission_mode", "allow_ungated", "postprocessing_prompt", "before_ws_merge"} {
 				delete(extra, key)
 			}
 			if len(extra) > 0 {
