@@ -1,0 +1,227 @@
+package create
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+)
+
+const commandPrefix = "workspace_commands_"
+
+// Inbox owns the command-file ingress.  It atomically claims files, persists
+// every array entry, then deletes the claim only after persistence succeeds.
+// Claimed files are scanned on startup, so a crash never converts a command
+// into an untracked vanished request.
+type Inbox struct {
+	Dir      string
+	Store    JobStore
+	Manager  *Manager
+	Logf     func(string, ...any)
+	Interval time.Duration
+}
+
+func (i *Inbox) validate() error {
+	switch {
+	case i.Dir == "":
+		return fmt.Errorf("workspace create: inbox directory is required")
+	case i.Store == nil:
+		return fmt.Errorf("workspace create: inbox needs a JobStore")
+	case i.Manager == nil:
+		return fmt.Errorf("workspace create: inbox needs a Manager")
+	case i.Logf == nil:
+		return fmt.Errorf("workspace create: inbox needs a logger")
+	}
+	return nil
+}
+
+// Run startup-drains then actively polls for newly emitted command files.
+// Polling keeps the core free of an OS-specific watcher while still providing
+// a single durable ingress path on every supported daemon host.
+func (i *Inbox) Run(ctx context.Context) error {
+	if err := i.validate(); err != nil {
+		return err
+	}
+	if err := i.ScanAndDrain(ctx); err != nil {
+		return err
+	}
+	interval := i.Interval
+	if interval <= 0 {
+		return fmt.Errorf("workspace create: inbox poll interval must be positive")
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			if err := i.ScanAndDrain(ctx); err != nil {
+				return err
+			}
+		}
+	}
+}
+
+// ScanAndDrain handles all visible fresh and previously claimed files, then
+// resumes durable work and non-create actions.  It is exported for daemon
+// startup and focused tests; Run is the continuous watcher entry point.
+func (i *Inbox) ScanAndDrain(ctx context.Context) error {
+	if err := i.validate(); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(i.Dir, 0o755); err != nil {
+		return fmt.Errorf("workspace create: create inbox directory %s: %w", i.Dir, err)
+	}
+	entries, err := os.ReadDir(i.Dir)
+	if err != nil {
+		return fmt.Errorf("workspace create: read inbox directory %s: %w", i.Dir, err)
+	}
+	paths := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || !isCommandFile(entry.Name()) {
+			continue
+		}
+		paths = append(paths, filepath.Join(i.Dir, entry.Name()))
+	}
+	sort.Strings(paths)
+	for _, path := range paths {
+		if err := i.claimAndPersist(ctx, path); err != nil {
+			return err
+		}
+	}
+	if err := i.Manager.Resume(ctx); err != nil {
+		return err
+	}
+	return nil
+}
+
+func isCommandFile(name string) bool {
+	if strings.HasPrefix(name, commandPrefix) && strings.HasSuffix(name, ".json") {
+		return true
+	}
+	return strings.HasPrefix(name, "."+commandPrefix) && strings.HasSuffix(name, ".claimed")
+}
+
+func (i *Inbox) claimAndPersist(ctx context.Context, path string) error {
+	claimed := path
+	if !strings.HasSuffix(path, ".claimed") {
+		claimed = "." + filepath.Base(path) + ".claimed"
+		claimed = filepath.Join(i.Dir, claimed)
+		if err := os.Rename(path, claimed); err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return fmt.Errorf("workspace create: claim %s: %w", path, err)
+		}
+		i.Logf("workspace-create: claimed command file path=%s claim=%s", path, claimed)
+	}
+	payload, err := os.ReadFile(claimed)
+	if err != nil {
+		return fmt.Errorf("workspace create: read claimed command file %s: %w", claimed, err)
+	}
+	commands, err := parseCommands(payload)
+	if err != nil {
+		return fmt.Errorf("workspace create: parse command file %s: %w", claimed, err)
+	}
+	fileID := commandFileID(claimed)
+	for index, command := range commands {
+		id := fmt.Sprintf("%s:%d", fileID, index)
+		if command.Type == "create" {
+			job := Job{ID: id, SourceFile: fileID, SourceIndex: index, Request: command.Create, State: StateQueued}
+			if _, _, err := i.Store.Enqueue(job); err != nil {
+				return fmt.Errorf("workspace create: persist create entry %d from %s: %w", index, claimed, err)
+			}
+			continue
+		}
+		action := HostAction{ID: id, SourceFile: fileID, SourceIndex: index, Type: command.Type, Payload: command.Raw}
+		if _, _, err := i.Store.EnqueueHostAction(action); err != nil {
+			return fmt.Errorf("workspace create: persist host action entry %d from %s: %w", index, claimed, err)
+		}
+	}
+	if err := os.Remove(claimed); err != nil {
+		return fmt.Errorf("workspace create: delete durably ingested claim %s: %w", claimed, err)
+	}
+	i.Logf("workspace-create: ingested command file id=%s entries=%d", fileID, len(commands))
+	return nil
+}
+
+func commandFileID(path string) string {
+	name := filepath.Base(path)
+	name = strings.TrimPrefix(name, ".")
+	name = strings.TrimSuffix(name, ".claimed")
+	name = strings.TrimSuffix(name, ".json")
+	return name
+}
+
+type parsedCommand struct {
+	Type   string
+	Raw    json.RawMessage
+	Create Request
+}
+
+// parseCommands audits every type currently in Emacs' workspace-command
+// dispatch table.  Non-create commands retain their original JSON byte shape
+// for HostActionSink; unknown types are rejected before any durable mutation.
+func parseCommands(payload []byte) ([]parsedCommand, error) {
+	var raw []json.RawMessage
+	if err := json.Unmarshal(payload, &raw); err != nil {
+		return nil, err
+	}
+	if len(raw) == 0 {
+		return nil, fmt.Errorf("command array must not be empty")
+	}
+	commands := make([]parsedCommand, 0, len(raw))
+	for index, item := range raw {
+		var head struct {
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal(item, &head); err != nil {
+			return nil, fmt.Errorf("entry %d: %w", index, err)
+		}
+		if head.Type == "" {
+			return nil, fmt.Errorf("entry %d: type is required", index)
+		}
+		command := parsedCommand{Type: head.Type, Raw: append(json.RawMessage(nil), item...)}
+		switch head.Type {
+		case "create":
+			var wire struct {
+				Type string `json:"type"`
+				Request
+			}
+			if err := json.Unmarshal(item, &wire); err != nil {
+				return nil, fmt.Errorf("entry %d create: %w", index, err)
+			}
+			var extra map[string]json.RawMessage
+			if err := json.Unmarshal(item, &extra); err != nil {
+				return nil, fmt.Errorf("entry %d create metadata: %w", index, err)
+			}
+			for _, key := range []string{"type", "name", "git_root", "prompt", "priority", "fork_from", "base_commit", "model", "postprocessing_prompt", "before_ws_merge"} {
+				delete(extra, key)
+			}
+			if len(extra) > 0 {
+				encoded, err := json.Marshal(extra)
+				if err != nil {
+					return nil, fmt.Errorf("entry %d create extra metadata: %w", index, err)
+				}
+				wire.Extra = encoded
+			}
+			if err := wire.Request.validate(); err != nil {
+				return nil, fmt.Errorf("entry %d: %w", index, err)
+			}
+			command.Create = wire.Request
+		case "prompt", "finish", "close", "open", "clipboard", "send", "merge", "eval", "switch", "fold", "set-view", "task-create", "task-toggle-done", "task-open", "task-add-workspace":
+			// The host still owns these UI semantics.  Preserve the complete
+			// payload, including intentionally false/zero values, in the durable
+			// HostAction record rather than reinterpreting it here.
+		default:
+			return nil, fmt.Errorf("entry %d: unsupported workspace command type %q", index, head.Type)
+		}
+		commands = append(commands, command)
+	}
+	return commands, nil
+}
