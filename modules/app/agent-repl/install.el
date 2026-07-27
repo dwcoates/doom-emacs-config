@@ -102,9 +102,9 @@ Sourced from `agent-repl-local-skills-src-dir' (this repo's
 `modules/app/agent-repl/skills/').  Must match the `LOCAL_SKILLS'
 array in `.claude/install.sh'.
 
-debug-logs is deliberately absent: it is PROJECT-scoped via the
-checked-in `<repo>/.claude/skills/debug-logs' symlink, not a
-user-level `~/.claude/skills' link.
+debug-emacs-agent-repl is deliberately absent: it is PROJECT-scoped
+via the checked-in `<repo>/.claude/skills/debug-emacs-agent-repl'
+symlink, not a user-level `~/.claude/skills' link.
 
 The former `workspace-open' skill is deliberately absent: it was
 superseded by the `create-or-update-workspace' skill's `open' verb
