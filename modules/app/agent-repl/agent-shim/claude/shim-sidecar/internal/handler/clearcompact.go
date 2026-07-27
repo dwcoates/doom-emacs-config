@@ -72,14 +72,6 @@ import (
 // clearCommand is the exact command name a cleared context is spelled with.
 const clearCommand = "/clear"
 
-// compactResultSuccess is the only outcome the file plane can attest to. The
-// harness writes a `compact_boundary` line when a compaction has COMPLETED, so
-// the line's existence IS the success record; a compaction that failed leaves
-// no boundary behind, and a boundary that never appears is not something this
-// file can observe. `error` is therefore always empty here — the sidecar never
-// guesses an outcome it cannot see.
-const compactResultSuccess = "success"
-
 // maxHoldDeliveries is the SILENCE BOUND on a held compaction boundary: the
 // number of further deliveries the handler waits for a summary that never
 // arrives before emitting the boundary bare.
@@ -255,7 +247,6 @@ func compactedEvent(sessionID string, env *datav1.LineEnvelope, cb *datav1.Compa
 		PostTokens: md.GetPostTokens(),
 		DurationMs: md.GetDurationMs(),
 		Summary:    summary,
-		Result:     compactResultSuccess,
 	}}
 	return e
 }

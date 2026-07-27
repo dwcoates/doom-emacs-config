@@ -1623,14 +1623,6 @@ pre {
 .compact-divider {
   text-align: center;
 }
-/* A FAILED compaction's reason, in the error red and centered under the
-   stamp. It is drawn rather than dropped because a rule with no word about
-   why the work failed would be the feed swallowing the daemon's report. */
-.compact-error {
-  text-align: center;
-  color: var(--err);
-  font-size: 0.85rem;
-}
 /* The compaction summary bubble: the --final-response GREEN border every
    landed answer wears, on the purple --compact-summary-bg wash no other
    bubble uses. The pairing is deliberate — it reads as an answer (it IS the
@@ -1651,7 +1643,6 @@ pre {
    column, not the window. */
 .clear-divider,
 .compact-divider,
-.compact-error,
 .compact-rule {
   width: var(--agent-bubble-cap);
   margin-left: auto;

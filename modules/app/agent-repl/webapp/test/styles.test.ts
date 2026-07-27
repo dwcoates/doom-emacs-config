@@ -48,7 +48,6 @@ const dividerColumn = blockAfter(css, ".clear-divider,");
 const compactDivider = blockAfter(css, "\n.compact-divider {");
 const compactRule = blockAfter(css, "\n.compact-rule {");
 const compactSummary = blockAfter(css, ".bubble.assistant.compact-summary");
-const compactError = blockAfter(css, "\n.compact-error {");
 const scrollZone = blockAfter(css, ".scroll-zone {");
 const scrollZoneBox = blockAfter(css, ".scroll-zone-box");
 
@@ -810,30 +809,6 @@ describe("compaction summary bubble", () => {
     const readers = css.match(/var\(--compact-summary-bg\)/g) ?? [];
     // Assert
     expect(readers).toHaveLength(1);
-  });
-});
-
-describe("failed-compaction line", () => {
-  it("paints the reason in the error red rather than the body color", () => {
-    // Arrange / Act — the .compact-error rule.
-    // Assert
-    expect(compactError).toMatch(/color:\s*var\(--err\)/);
-  });
-
-  it("centers the reason under the stamp it belongs to", () => {
-    // Arrange / Act
-    // Assert
-    expect(compactError).toMatch(/text-align:\s*center/);
-  });
-
-  it("rides the same central-column confinement as the two rules", () => {
-    // Arrange / Act
-    const dividerSelector = css.slice(
-      css.indexOf(".clear-divider,"),
-      css.indexOf("{", css.indexOf(".clear-divider,")),
-    );
-    // Assert
-    expect(dividerSelector).toContain(".compact-error");
   });
 });
 

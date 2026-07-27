@@ -582,7 +582,6 @@ describe("contextCleared / contextCompacted arms", () => {
         postTokens: "9001",
         durationMs: "4200",
         summary: "the story so far",
-        result: "success",
       },
     });
     // Assert
@@ -594,8 +593,6 @@ describe("contextCleared / contextCompacted arms", () => {
       postTokens: 9001,
       durationMs: 4200,
       summary: "the story so far",
-      result: "success",
-      error: "",
     };
     expect(items).toEqual([expected]);
   });
@@ -623,17 +620,6 @@ describe("contextCleared / contextCompacted arms", () => {
     expect(() =>
       itemsFrom({ uuid: "m1", contextCompacted: { trigger: "CONTEXT_COMPACT_TRIGGER_TELEPATHY" } }),
     ).toThrow("unknown ContextCompactTrigger");
-  });
-
-  it("carries a failed compaction's verdict and reason", () => {
-    // Arrange + Act
-    const items = itemsFrom({
-      uuid: "m1",
-      contextCompacted: { result: "failed", error: "context window exceeded" },
-    });
-    // Assert — neither half is swallowed.
-    const compaction = items[0] as ContextCompactedItem;
-    expect([compaction.result, compaction.error]).toEqual(["failed", "context window exceeded"]);
   });
 
   it("carries an EMPTY summary as empty rather than inventing one", () => {

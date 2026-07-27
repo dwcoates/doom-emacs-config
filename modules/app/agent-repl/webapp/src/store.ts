@@ -253,10 +253,6 @@ export interface ContextCompactedItem extends FeedOrderedItem {
   postTokens: number;
   durationMs: number;
   summary: string;
-  /** "success" | "failed", the daemon's verdict, adopted unexamined. */
-  result: string;
-  /** Populated only when `result` is "failed"; surfaced, never swallowed. */
-  error: string;
 }
 /**
  * A daemon-classified failure, as a conversation card.

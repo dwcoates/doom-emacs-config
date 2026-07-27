@@ -1002,8 +1002,6 @@ function contextCompactedItem(c: Obj, uuid: string): ContextCompactedItem {
     postTokens: pnum(c, "postTokens"),
     durationMs: pnum(c, "durationMs"),
     summary: pstr(c, "summary"),
-    result: pstr(c, "result"),
-    error: pstr(c, "error"),
   };
 }
 

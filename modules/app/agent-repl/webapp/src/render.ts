@@ -1888,9 +1888,10 @@ function ClearDivider(_item: ContextClearedItem): string {
  * compaction, and whether the system or the user asked for one changes
  * nothing a reader can act on — so `auto` and `manual` render identically.
  *
- * A FAILED compaction says so under the stamp, with the daemon's reason when
- * it gave one. The daemon reports the failure on this same message, and a
- * rule drawn with no word about it would be the feed quietly swallowing it.
+ * There is NO failure branch. A compaction reaches this end only by way of a
+ * `compact_boundary` line in the vendor transcript, and that line is written
+ * once the compaction has COMPLETED — a failed one leaves no line, so the file
+ * plane that produces this item structurally cannot report a failure here.
  */
 function CompactDivider(item: ContextCompactedItem): string {
   // The orange rule sits BEFORE the label, so it lands between whatever
@@ -1898,15 +1899,6 @@ function CompactDivider(item: ContextCompactedItem): string {
   // red
   // rule a clear draws (see `ClearDivider`).
   const tokens = `${formatTokens(item.preTokens)} → ${formatTokens(item.postTokens)} tokens`;
-  // The daemon's OWN verdict decides this, not the presence of prose: a
-  // failure reported without an explanation still has to be said out loud,
-  // and keying off `error` alone would let that one disappear.
-  const failure =
-    item.result === "failed"
-      ? `<div class="compact-error">compaction failed${
-          item.error !== "" ? `: ${escapeHtml(item.error)}` : ""
-        }</div>`
-      : "";
   const summary =
     item.summary !== ""
       ? `<div class="bubble assistant md compact-summary"><div class="bubble-body">${renderMarkdown(
@@ -1916,7 +1908,6 @@ function CompactDivider(item: ContextCompactedItem): string {
   return (
     `<div class="compact-rule" role="separator" aria-label="context compacted"></div>` +
     `<div class="compact-divider">— context compacted (${tokens}) —</div>` +
-    failure +
     summary
   );
 }
