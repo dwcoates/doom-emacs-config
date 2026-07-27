@@ -138,6 +138,16 @@ FIELD-JSON is the already-serialized `\"field\": {...}' body."
     (should-error (agent-repl--uds-dispatch-frame nil)
                   :type 'agent-repl-uds-malformed-frame)))
 
+(ert-deftest agent-repl-test-uds-dispatch-multiple-oneof-keys-signals ()
+  "A frame carrying more than one oneof arm is malformed and signals loudly."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    ;; Act / Assert
+    (should-error
+     (agent-repl--uds-dispatch-frame
+      '(:workspaceState (:workspace "ws1") :snapshot (:workspace "ws1")))
+     :type 'agent-repl-uds-malformed-frame)))
+
 (ert-deftest agent-repl-test-uds-dispatch-unknown-field-signals ()
   "A frame with an unknown oneof field is malformed and signals loudly."
   ;; Arrange
@@ -798,6 +808,15 @@ workspace open."
          '(:requestId "ghost" :error "boom"))
         ;; Assert — untracked acks are not surfaced (no pending caller cares)
         (should-not echoed)))))
+
+(ert-deftest agent-repl-test-uds-command-ack-without-request-id-is-malformed ()
+  "A command acknowledgement without correlation identity fails loudly."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    ;; Act / Assert
+    (should-error
+     (agent-repl--uds-handle-command-ack '(:ok t :workspace "ws1"))
+     :type 'agent-repl-uds-malformed-frame)))
 
 ;;;; ---- correlated health responses ------------------------------------
 
