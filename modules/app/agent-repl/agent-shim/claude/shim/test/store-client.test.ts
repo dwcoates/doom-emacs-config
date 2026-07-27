@@ -7,6 +7,8 @@ import {
   DegradedState,
   Event,
   EventSchema,
+  HealthCheckSchema,
+  HealthStatusSchema,
   StoreWriteAckSchema,
   StoreWriteSchema,
   SubscribeSchema,
@@ -93,6 +95,71 @@ async function connectedClient(store: FakeStore, sink?: (e: Event) => void, degr
 }
 
 describe("StoreClient subscribe/write happy path", () => {
+  it("requires a live standing subscription before asserting store health", async () => {
+    // Arrange: a producer socket by itself cannot render merged state.
+    const store = await fakeStore();
+    stores.push(store);
+    const client = await connectedClient(store);
+
+    // Act / Assert
+    await expect(client.health("health-without-subscription")).resolves.toEqual({
+      healthy: false,
+      reason: "standing store subscription is not live",
+    });
+  });
+
+  it("proves store health through a correlated probe without moving the standing subscription", async () => {
+    // Arrange: producer + daemon-owned merged-event subscription are live.
+    const store = await fakeStore();
+    stores.push(store);
+    const client = await connectedClient(store);
+    client.subscribe(0n);
+    await until(() => store.count() === 2);
+    await store.latest().next(SubscribeSchema);
+
+    // Act: health opens one throwaway probe and requires its matching reply.
+    const health = client.health("store-health-1");
+    await until(() => store.count() === 3);
+    const probe = store.latest();
+    const check = await probe.next(HealthCheckSchema);
+    expect(check.requestId).toBe("store-health-1");
+    probe.send(HealthStatusSchema, create(HealthStatusSchema, {
+      requestId: "store-health-1",
+      healthy: true,
+      component: "shim-store",
+    }));
+
+    // Assert
+    await expect(health).resolves.toEqual({ healthy: true, reason: "" });
+    expect(client.isSubscribed()).toBe(true);
+  });
+
+  it("rejects a mismatched store-health response rather than accepting another probe's verdict", async () => {
+    // Arrange
+    const store = await fakeStore();
+    stores.push(store);
+    const client = await connectedClient(store);
+    client.subscribe(0n);
+    await until(() => store.count() === 2);
+    await store.latest().next(SubscribeSchema);
+
+    // Act
+    const health = client.health("store-health-expected");
+    await until(() => store.count() === 3);
+    await store.latest().next(HealthCheckSchema);
+    store.latest().send(HealthStatusSchema, create(HealthStatusSchema, {
+      requestId: "another-probe",
+      healthy: true,
+      component: "shim-store",
+    }));
+
+    // Assert
+    await expect(health).resolves.toMatchObject({
+      healthy: false,
+      reason: expect.stringContaining("store-health-expected"),
+    });
+  });
+
   it("sends Subscribe{session_id, from_seq} first on a dedicated connection", async () => {
     // Arrange
     const store = await fakeStore();

@@ -192,6 +192,45 @@ func (c *Client) Heartbeat() error {
 	return nil
 }
 
+// Health sends a correlated health probe over the recovered producer
+// connection.  Connected only means a file descriptor exists; this method
+// proves the store can parse and answer a protocol frame.  A failed assertion
+// drops the connection so link.go repeats its mandatory recovery before this
+// sidecar reads another file.
+func (c *Client) Health(requestID string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.conn == nil {
+		return ErrNotConnected
+	}
+	if requestID == "" {
+		return errors.New("storeclient: health check requires request_id")
+	}
+	if err := wire.WriteAny(c.conn, &corev1.HealthCheck{RequestId: requestID}); err != nil {
+		c.dropConn()
+		return fmt.Errorf("storeclient: sending HealthCheck: %w", err)
+	}
+	msg, err := wire.ReadAny(c.conn)
+	if err != nil {
+		c.dropConn()
+		return fmt.Errorf("storeclient: reading HealthStatus: %w", err)
+	}
+	status, ok := msg.(*corev1.HealthStatus)
+	if !ok {
+		c.dropConn()
+		return fmt.Errorf("storeclient: expected HealthStatus, got %T", msg)
+	}
+	if status.GetRequestId() != requestID {
+		c.dropConn()
+		return fmt.Errorf("storeclient: HealthStatus request_id=%q, want %q", status.GetRequestId(), requestID)
+	}
+	if !status.GetHealthy() {
+		c.dropConn()
+		return fmt.Errorf("storeclient: store health failed: %s", status.GetReason())
+	}
+	return nil
+}
+
 // Close closes the producer connection.
 func (c *Client) Close() error {
 	c.mu.Lock()

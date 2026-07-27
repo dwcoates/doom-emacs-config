@@ -32,7 +32,7 @@ func TestVanishGraceEmitsLostAfterWindow(t *testing.T) {
 	// Arrange
 	tr := New(Options{Grace: 30 * time.Second}, nil)
 	tr.Open("b1", tail.KindShellSpool, "s1", "/p/b1.output", 1000, 1000)
-	tr.MarkVanished("b1", 10_000)
+	tr.MarkVanished("s1", "b1", 10_000)
 	// Act: sweep before grace elapses.
 	if evs := tr.Sweep(20_000); len(evs) != 0 {
 		t.Fatalf("premature LOST: %+v", evs)
@@ -44,7 +44,7 @@ func TestVanishGraceEmitsLostAfterWindow(t *testing.T) {
 	if te.GetInference() != "vanished-file" {
 		t.Fatalf("inference = %q, want vanished-file", te.GetInference())
 	}
-	if tr.IsOpen("b1") {
+	if tr.IsOpen("s1", "b1") {
 		t.Fatalf("task should be closed after LOST")
 	}
 }
@@ -53,10 +53,10 @@ func TestVanishThenPresentDoesNotLose(t *testing.T) {
 	// Arrange
 	tr := New(Options{Grace: 30 * time.Second}, nil)
 	tr.Open("a1", tail.KindAgentTranscript, "s1", "", 1000, 1000)
-	tr.MarkVanished("a1", 10_000)
+	tr.MarkVanished("s1", "a1", 10_000)
 	// Act: the file reappears, then a sweep well past the grace window.
-	tr.MarkPresent("a1")
-	tr.Activity("a1", 15_000)
+	tr.MarkPresent("s1", "a1")
+	tr.Activity("s1", "a1", 15_000)
 	evs := tr.Sweep(60_000)
 	// Assert: no LOST (activity is recent, vanish cleared).
 	if len(evs) != 0 {
@@ -78,7 +78,7 @@ func TestSilenceTimeoutPerKind(t *testing.T) {
 	if te.GetTaskId() != "b1" || te.GetInference() != "silence-timeout" {
 		t.Fatalf("LOST = %+v, want shell b1 silence-timeout", te)
 	}
-	if !tr.IsOpen("a1") {
+	if !tr.IsOpen("s1", "a1") {
 		t.Fatalf("agent task should still be open at 40m")
 	}
 }
@@ -96,7 +96,7 @@ func TestBootSweepLosesPreBootTasks(t *testing.T) {
 	if te.GetTaskId() != "old" || te.GetInference() != "boot-sweep" {
 		t.Fatalf("LOST = %+v, want old boot-sweep", te)
 	}
-	if !tr.IsOpen("new") {
+	if !tr.IsOpen("s1", "new") {
 		t.Fatalf("post-boot task should survive the boot sweep")
 	}
 }
@@ -109,10 +109,10 @@ func TestRestoreReplacesArtifactDerivedStateWithPersistedOpenTasks(t *testing.T)
 	if err := tr.Restore([]*corev1.OpenTaskState{start}); err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
-	if tr.IsOpen("artifact-only") {
+	if tr.IsOpen("s1", "artifact-only") {
 		t.Fatal("Restore retained artifact-only task; store snapshot must replace tracker state")
 	}
-	if !tr.IsOpen("persisted-open") {
+	if !tr.IsOpen("s2", "persisted-open") {
 		t.Fatal("Restore did not open persisted task")
 	}
 }
@@ -127,7 +127,7 @@ func TestRestoreRejectsMalformedSnapshotWithoutMutatingTracker(t *testing.T) {
 	if err == nil {
 		t.Fatal("Restore accepted TaskStarted with no session")
 	}
-	if !tr.IsOpen("prior") {
+	if !tr.IsOpen("s1", "prior") {
 		t.Fatal("failed Restore mutated prior tracker state")
 	}
 }
@@ -146,7 +146,7 @@ func TestRestoreUsesPersistedLastActivityForSilence(t *testing.T) {
 func TestLostCarriesStableSyntheticDedupIdentity(t *testing.T) {
 	tr := New(Options{Grace: time.Second}, nil)
 	tr.Open("b1", tail.KindShellSpool, "s1", "", 10, 10)
-	tr.MarkVanished("b1", 20)
+	tr.MarkVanished("s1", "b1", 20)
 	evs := tr.Sweep(2_000)
 	onlyLost(t, evs)
 	if got := evs[0].GetDedupKey(); got != "task-lost:b1" {
@@ -171,8 +171,8 @@ func TestCloseRemovesTaskFromSweep(t *testing.T) {
 	// Arrange: a task that reached a real terminal elsewhere.
 	tr := New(Options{Grace: time.Second}, nil)
 	tr.Open("b1", tail.KindShellSpool, "s1", "", 0, 0)
-	tr.MarkVanished("b1", 0)
-	tr.Close("b1")
+	tr.MarkVanished("s1", "b1", 0)
+	tr.Close("s1", "b1")
 	// Act: a sweep long after the grace window.
 	evs := tr.Sweep(10 * min)
 	// Assert: no LOST (a closed task is never swept).
@@ -185,11 +185,35 @@ func TestActivityResetsSilence(t *testing.T) {
 	// Arrange: a shell task kept alive by activity just under the window.
 	tr := New(Options{}, nil)
 	tr.Open("b1", tail.KindShellSpool, "s1", "", 0, 0)
-	tr.Activity("b1", 20*min)
+	tr.Activity("s1", "b1", 20*min)
 	// Act: sweep at 40m — only 20m since the last activity (< 30m window).
 	evs := tr.Sweep(40 * min)
 	// Assert
 	if len(evs) != 0 {
 		t.Fatalf("LOST despite recent activity: %+v", evs)
+	}
+}
+
+func TestRestoreKeepsSameTaskIDInSeparateSessions(t *testing.T) {
+	tr := New(Options{Grace: time.Second}, nil)
+	states := []*corev1.OpenTaskState{
+		recoveredStart("session-a", "shared-id", corev1.TaskKind_TASK_KIND_SHELL, 1, 1),
+		recoveredStart("session-b", "shared-id", corev1.TaskKind_TASK_KIND_AGENT, 1, 1),
+	}
+
+	if err := tr.Restore(states); err != nil {
+		t.Fatalf("Restore rejected distinct session task identities: %v", err)
+	}
+	if !tr.IsOpen("session-a", "shared-id") || !tr.IsOpen("session-b", "shared-id") {
+		t.Fatal("Restore did not retain both session-scoped tasks")
+	}
+
+	tr.MarkVanished("session-a", "shared-id", 1)
+	evs := tr.Sweep(2_000)
+	if len(evs) != 1 || evs[0].GetSessionId() != "session-a" {
+		t.Fatalf("LOST events = %+v, want only session-a's task", evs)
+	}
+	if !tr.IsOpen("session-b", "shared-id") {
+		t.Fatal("sweeping session-a's task closed session-b's same-id task")
 	}
 }
