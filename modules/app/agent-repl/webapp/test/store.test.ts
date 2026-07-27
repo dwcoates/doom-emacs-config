@@ -1216,23 +1216,13 @@ describe("the progress footer's input (F1)", () => {
     expect(store.progress?.inputTokens).toBe(41_200);
   });
 
-  it("fills the compaction indicator, which had no source at all after the cutover", () => {
+  it("retains the compaction window on the progress view the footer reads", () => {
     // Arrange
     const store = new ConversationStore();
     // Act
     store.ingest([progressEffect({ compacting: { sinceMs: 1, detail: "compacting" } })]);
     // Assert
-    expect(store.state.compacting).toBe(true);
-  });
-
-  it("clears the compaction indicator when the window closes", () => {
-    // Arrange
-    const store = new ConversationStore();
-    store.ingest([progressEffect({ compacting: { sinceMs: 1, detail: "compacting" } })]);
-    // Act
-    store.ingest([progressEffect()]);
-    // Assert
-    expect(store.state.compacting).toBe(false);
+    expect(store.progress?.compacting).toEqual({ sinceMs: 1, detail: "compacting" });
   });
 
   it("takes the turn's REAL start stamp, so a mid-turn join does not restart the clock", () => {
