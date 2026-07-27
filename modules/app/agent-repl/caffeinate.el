@@ -90,9 +90,16 @@ display sleep, `-s' to assert against system sleep on AC power, etc."
   "Return non-nil when caffeinate management is appropriate for this Emacs.
 Requires that the feature be enabled, we're on macOS, and the
 `caffeinate' binary is on PATH."
-  (and agent-repl-caffeinate-enabled
-       (eq system-type 'darwin)
-       (executable-find agent-repl-caffeinate-program)))
+  (let* ((enabled agent-repl-caffeinate-enabled)
+         (darwin-p (eq system-type 'darwin))
+         (program agent-repl-caffeinate-program)
+         (program-path (and enabled darwin-p (executable-find program)))
+         (supported-p (and enabled darwin-p program-path)))
+    (agent-repl--log
+     nil
+     "caffeinate: support-check enabled=%s system-type=%S darwin-p=%s program=%S program-path=%S supported=%s"
+     enabled system-type darwin-p program program-path supported-p)
+    supported-p))
 
 (defun agent-repl--caffeinate-any-agent-state-active-p ()
   "Return non-nil when any workspace's `:agent-state' is in active list.
@@ -100,19 +107,40 @@ Iterates `agent-repl--workspaces' and checks each plist's
 `:agent-state' against `agent-repl-caffeinate-active-states'.  First
 of the two activity signals consulted by
 `agent-repl--caffeinate-any-active-p'."
-  (let ((active nil))
+  (let ((active nil)
+        (workspace-count 0)
+        (active-workspaces nil)
+        (workspaces-bound-p (boundp 'agent-repl--workspaces)))
     (when (boundp 'agent-repl--workspaces)
       (maphash
-       (lambda (_ws plist)
+       (lambda (ws plist)
          ;; Skip tombstoned entries — a nuked workspace's residual
          ;; `:agent-state' (e.g. `:thinking' captured pre-nuke) must
          ;; not hold caffeinate alive.  Identity-only records are
          ;; intentionally invisible to runtime predicates.
-         (when (and (null (plist-get plist :nuked-at))
-                    (memq (plist-get plist :agent-state)
-                          agent-repl-caffeinate-active-states))
-           (setq active t)))
+         (let* ((tombstoned-p (not (null (plist-get plist :nuked-at))))
+                (agent-state (plist-get plist :agent-state))
+                (state-active-p (memq agent-state
+                                      agent-repl-caffeinate-active-states))
+                (included-p (and (not tombstoned-p) state-active-p)))
+           (cl-incf workspace-count)
+           (when included-p
+             (setq active t)
+             (push ws active-workspaces))
+           ;; The scan can emit one line per workspace on every watched-state
+           ;; update, so retain its branch evidence only in verbose mode.
+           (agent-repl--log-verbose
+            ws
+            "caffeinate: agent-state-scan ws=%s tombstoned=%s agent-state=%S active-states=%S included=%s"
+            ws tombstoned-p agent-state agent-repl-caffeinate-active-states
+            included-p)))
        agent-repl--workspaces))
+    (setq active-workspaces (nreverse active-workspaces))
+    (agent-repl--log
+     nil
+     "caffeinate: agent-state-scan result=%s workspaces-bound=%s workspace-count=%d active-workspaces=%S active-states=%S"
+     active workspaces-bound-p workspace-count active-workspaces
+     agent-repl-caffeinate-active-states)
     active))
 
 (defun agent-repl--caffeinate-any-merging-p ()
@@ -127,19 +155,39 @@ follow-up cherry-pick + optional agent-driven conflict resolution.
 are *not* considered active: a completed merge has no further work, a
 conflict awaiting human resolution is bottlenecked on the user (same
 exclusion principle as `:permission'), and a failed merge is terminal."
-  (let ((active nil))
+  (let ((active nil)
+        (workspace-count 0)
+        (active-workspaces nil)
+        (workspaces-bound-p (boundp 'agent-repl--workspaces)))
     (when (boundp 'agent-repl--workspaces)
       (maphash
-       (lambda (_ws plist)
+       (lambda (ws plist)
          ;; Skip tombstoned entries — a workspace nuked mid-merge no
          ;; longer needs caffeinate; the sentinel/cherry-pick that the
          ;; `:merging' flag was guarding is moot once the entry is
          ;; tombstoned.
-         (when (and (null (plist-get plist :nuked-at))
-                    (or (eq (plist-get plist :merging) t)
-                        (eq (plist-get plist :repl-state) :merge-queued)))
-           (setq active t)))
+         (let* ((tombstoned-p (not (null (plist-get plist :nuked-at))))
+                (merging-p (eq (plist-get plist :merging) t))
+                (repl-state (plist-get plist :repl-state))
+                (merge-queued-p (eq repl-state :merge-queued))
+                (included-p (and (not tombstoned-p)
+                                 (or merging-p merge-queued-p))))
+           (cl-incf workspace-count)
+           (when included-p
+             (setq active t)
+             (push ws active-workspaces))
+           ;; The scan can emit one line per workspace on every watched-state
+           ;; update, so retain its branch evidence only in verbose mode.
+           (agent-repl--log-verbose
+            ws
+            "caffeinate: merge-scan ws=%s tombstoned=%s merging=%s repl-state=%S merge-queued=%s included=%s"
+            ws tombstoned-p merging-p repl-state merge-queued-p included-p)))
        agent-repl--workspaces))
+    (setq active-workspaces (nreverse active-workspaces))
+    (agent-repl--log
+     nil
+     "caffeinate: merge-scan result=%s workspaces-bound=%s workspace-count=%d active-workspaces=%S"
+     active workspaces-bound-p workspace-count active-workspaces)
     active))
 
 (defun agent-repl--caffeinate-any-active-p ()
@@ -152,8 +200,21 @@ Logical OR of the two activity signals:
   flight or queued, so the editor must stay awake to detect the
   workspace-merge sentinel file, run the cherry-pick, and optionally
   drive Claude-based conflict resolution."
-  (or (agent-repl--caffeinate-any-agent-state-active-p)
-      (agent-repl--caffeinate-any-merging-p)))
+  (let ((agent-state-active-p
+         (agent-repl--caffeinate-any-agent-state-active-p)))
+    (if agent-state-active-p
+        (progn
+          (agent-repl--log
+           nil
+           "caffeinate: activity-decision agent-state-active=%s merge-active=skipped result=t"
+           agent-state-active-p)
+          t)
+      (let ((merge-active-p (agent-repl--caffeinate-any-merging-p)))
+        (agent-repl--log
+         nil
+         "caffeinate: activity-decision agent-state-active=%s merge-active=%s result=%s"
+         agent-state-active-p merge-active-p merge-active-p)
+        merge-active-p))))
 
 (defun agent-repl--caffeinate-running-p ()
   "Return non-nil when the caffeinate subprocess is live."
@@ -163,7 +224,11 @@ Logical OR of the two activity signals:
 (defun agent-repl--caffeinate-start ()
   "Spawn the caffeinate subprocess if it isn't already running.
 Idempotent: a second call while the process is live is a no-op."
-  (unless (agent-repl--caffeinate-running-p)
+  (if (agent-repl--caffeinate-running-p)
+      (agent-repl--log
+       nil "caffeinate: start skipped branch=already-running pid=%s program=%S args=%S"
+       (process-id agent-repl--caffeinate-process)
+       agent-repl-caffeinate-program agent-repl-caffeinate-args)
     (let* ((proc (apply #'start-process
                         "agent-repl-caffeinate"
                         nil
@@ -171,19 +236,21 @@ Idempotent: a second call while the process is live is a no-op."
                         agent-repl-caffeinate-args)))
       (setq agent-repl--caffeinate-process proc)
       (set-process-query-on-exit-flag proc nil)
-      (when (fboundp 'agent-repl--log)
-        (agent-repl--log nil "caffeinate: started pid=%s args=%S"
-                          (process-id proc) agent-repl-caffeinate-args))
+      (agent-repl--log nil "caffeinate: started pid=%s program=%S args=%S"
+                        (process-id proc) agent-repl-caffeinate-program
+                        agent-repl-caffeinate-args)
       proc)))
 
 (defun agent-repl--caffeinate-stop ()
   "Kill the caffeinate subprocess if running, then clear the handle.
 Idempotent: a no-op when nothing is live."
-  (when (agent-repl--caffeinate-running-p)
-    (let ((pid (process-id agent-repl--caffeinate-process)))
-      (delete-process agent-repl--caffeinate-process)
-      (when (fboundp 'agent-repl--log)
-        (agent-repl--log nil "caffeinate: stopped pid=%s" pid))))
+  (if (agent-repl--caffeinate-running-p)
+      (let ((pid (process-id agent-repl--caffeinate-process)))
+        (delete-process agent-repl--caffeinate-process)
+        (agent-repl--log nil "caffeinate: stopped pid=%s" pid))
+    (agent-repl--log
+     nil "caffeinate: stop skipped branch=not-running handle-present=%s"
+     (not (null agent-repl--caffeinate-process))))
   (setq agent-repl--caffeinate-process nil))
 
 (defun agent-repl--caffeinate-refresh (&rest _)
@@ -191,10 +258,21 @@ Idempotent: a no-op when nothing is live."
 Starts the subprocess when at least one workspace is in an active
 state and none is running; stops it when every workspace has
 resolved.  Bails on unsupported platforms."
-  (when (agent-repl--caffeinate-supported-p)
-    (if (agent-repl--caffeinate-any-active-p)
-        (agent-repl--caffeinate-start)
-      (agent-repl--caffeinate-stop))))
+  (let ((supported-p (agent-repl--caffeinate-supported-p)))
+    (if supported-p
+        (let* ((active-p (agent-repl--caffeinate-any-active-p))
+               (running-p (agent-repl--caffeinate-running-p))
+               (action (if active-p 'start 'stop)))
+          (agent-repl--log
+           nil
+           "caffeinate: refresh supported=%s active=%s running-before=%s action=%s"
+           supported-p active-p running-p action)
+          (if active-p
+              (agent-repl--caffeinate-start)
+            (agent-repl--caffeinate-stop)))
+      (agent-repl--log
+       nil "caffeinate: refresh skipped branch=unsupported supported=%s"
+       supported-p))))
 
 (defconst agent-repl--caffeinate-watched-keys
   '(:agent-state :merging :merge-completed :repl-state)
@@ -211,13 +289,23 @@ resolved.  Bails on unsupported platforms."
 A `--ws-put' call with any other key is a no-op for caffeinate and
 deliberately skipped to avoid spurious reconciles on hot paths.")
 
-(defun agent-repl--caffeinate-refresh-on-ws-put (_ws key _val)
+(defun agent-repl--caffeinate-refresh-on-ws-put (ws key val)
   "Reconcile caffeinate when KEY is one we watch.
 Wraps `agent-repl--caffeinate-refresh' for `:after' advice on
 `agent-repl--ws-put'.  Only relevant keys (see
 `agent-repl--caffeinate-watched-keys') trigger a reconcile."
-  (when (memq key agent-repl--caffeinate-watched-keys)
-    (agent-repl--caffeinate-refresh)))
+  (let ((watched-p (memq key agent-repl--caffeinate-watched-keys)))
+    (agent-repl--log
+     ws
+     "caffeinate: ws-put advice ws=%s key=%S val=%S watched=%s action=%s"
+     ws key val watched-p (if watched-p 'refresh 'skip))
+    (when watched-p
+      (agent-repl--caffeinate-refresh))))
+
+(defun agent-repl--caffeinate-refresh-on-ws-del (ws)
+  "Reconcile caffeinate after workspace WS is removed."
+  (agent-repl--log ws "caffeinate: ws-del advice ws=%s action=refresh" ws)
+  (agent-repl--caffeinate-refresh))
 
 ;; Reconcile on every plist mutation of a watched key.  Advising
 ;; `agent-repl--ws-put' (the single central plist setter in core.el)
@@ -233,7 +321,7 @@ Wraps `agent-repl--caffeinate-refresh' for `:after' advice on
 ;; happened to be `:thinking' or mid-merge doesn't leave caffeinate
 ;; orphaned.
 (advice-add 'agent-repl--ws-del
-            :after #'agent-repl--caffeinate-refresh)
+            :after #'agent-repl--caffeinate-refresh-on-ws-del)
 
 ;; Never leak a subprocess past Emacs exit.
 (add-hook 'kill-emacs-hook #'agent-repl--caffeinate-stop)
