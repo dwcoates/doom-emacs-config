@@ -93,6 +93,18 @@ EOF
     cat > "$stubs/emacsclient" <<'EOF'
 #!/usr/bin/env bash
 echo "emacsclient $*" >> "$STUB_LOG"
+if [ "${EC_STUB_UNAVAILABLE:-0}" = "1" ]; then
+    echo "emacsclient: can't find socket; have you started the server?" >&2
+    exit 1
+fi
+if [ "${EC_STUB_PROBE_ERROR:-0}" = "1" ]; then
+    case "$*" in
+        *"--eval t"*)
+            echo "emacsclient: permission denied" >&2
+            exit 1
+            ;;
+    esac
+fi
 if [ "${EC_STUB_REFUSE:-0}" = "1" ]; then
     case "$*" in
         *daemon-restart*)
@@ -278,6 +290,31 @@ if [ "$RC" -eq 0 ] \
     pass "--force propagates to build-frontend and kickstarts both services"
 else
     fail "--force propagates to build-frontend and kickstarts both services" "rc=$RC log: $(cat "$STUB_LOG")"
+fi
+
+# --- 9. no Emacs server defers restart and elisp reload ---------------------
+d="$TMP/t9"; mkdir -p "$d"; RUN_ENV="EC_STUB_UNAVAILABLE=1" run_deploy "$d" --elisp "abc..def"
+if [ "$RC" -eq 0 ] \
+   && log_has 'emacsclient --eval t' \
+   && ! log_has 'daemon-restart' \
+   && ! log_has 'emacsclient --eval (load' \
+   && grep -q "restart deferred; Emacs server is unavailable" "$d/stdout" \
+   && grep -q "reload deferred; Emacs will load the changed files at startup" "$d/stdout"; then
+    pass "an unavailable Emacs server defers restart and hot-reload until startup"
+else
+    fail "an unavailable Emacs server defers restart and hot-reload until startup" \
+         "rc=$RC stdout: $(cat "$d/stdout") stderr: $(cat "$d/stderr") log: $(cat "$STUB_LOG")"
+fi
+
+# --- 10. a non-connectivity probe error remains fatal -----------------------
+d="$TMP/t10"; mkdir -p "$d"; RUN_ENV="EC_STUB_PROBE_ERROR=1" run_deploy "$d"
+if [ "$RC" -eq 3 ] \
+   && ! log_has 'daemon-restart' \
+   && grep -q "Emacs server probe failed: emacsclient: permission denied" "$d/stderr"; then
+    pass "a non-connectivity Emacs probe error fails the deploy loudly"
+else
+    fail "a non-connectivity Emacs probe error fails the deploy loudly" \
+         "rc=$RC stdout: $(cat "$d/stdout") stderr: $(cat "$d/stderr") log: $(cat "$STUB_LOG")"
 fi
 
 echo
