@@ -16,6 +16,9 @@
 ;;   - `agent-repl--ws-runtime-keys'      keys cleared on tombstone
 ;;   - `agent-repl--ws-get'                read one plist key
 ;;   - `agent-repl--ws-plist'              copy the complete known plist
+;;   - `agent-repl--ws-rename-state'        atomically move state to a new name
+;;   - `agent-repl--ws-rewrite-source-back-refs'
+;;                                         rewrite renamed-source references
 ;;   - `agent-repl--ws-put'                set one plist key (logs stub-create)
 ;;   - `agent-repl--ws-put-caller-trace'   diagnostic helper for `--ws-put'
 ;;   - `agent-repl--ws-del'                tombstone (preserves identity)
@@ -141,6 +144,140 @@ of buffers, processes, or environment structs."
      ws "ws-plist: ws=%s key-count=%s tombstoned=%s"
      ws (/ (length plist) 2) (if (plist-get plist :nuked-at) "t" "nil"))
     (copy-sequence plist)))
+
+(defun agent-repl--ws-rename-state (old-ws new-ws new-project-dir)
+  "Atomically move live OLD-WS state to NEW-WS at NEW-PROJECT-DIR.
+OLD-WS and NEW-WS must be distinct non-empty strings.  OLD-WS must name
+a live registered workspace, and NEW-WS must be unregistered.  All
+preconditions and the canonical NEW-PROJECT-DIR are resolved before the
+hash is mutated, so a rejected rename leaves both names untouched.
+
+The complete OLD-WS plist is preserved under NEW-WS except that
+`:project-dir' is replaced with the canonical new path and cached
+`:ws-id' is cleared for lazy recomputation from that path.  OLD-WS is
+then removed.  Returns NEW-WS after the move; invariant violations
+signal `user-error'."
+  (unless (and (stringp old-ws) (not (string-empty-p old-ws)))
+    (agent-repl--log old-ws
+                     "ws-rename-state: REJECT old-ws=%S new-ws=%S reason=invalid-old-name"
+                     old-ws new-ws)
+    (user-error "agent-repl: ws-rename-state: invalid old workspace name %S"
+                old-ws))
+  (unless (and (stringp new-ws) (not (string-empty-p new-ws)))
+    (agent-repl--log old-ws
+                     "ws-rename-state: REJECT old-ws=%S new-ws=%S reason=invalid-new-name"
+                     old-ws new-ws)
+    (user-error "agent-repl: ws-rename-state: invalid new workspace name %S"
+                new-ws))
+  (when (equal old-ws new-ws)
+    (agent-repl--log old-ws
+                     "ws-rename-state: REJECT old-ws=%s new-ws=%s reason=identical-names"
+                     old-ws new-ws)
+    (user-error "agent-repl: ws-rename-state: workspace names are identical: %s"
+                old-ws))
+  (agent-repl--ws-require-known old-ws "ws-rename-state")
+  (unless (agent-repl--ws-live-p old-ws)
+    (agent-repl--log old-ws
+                     "ws-rename-state: REJECT old-ws=%s new-ws=%s reason=tombstoned"
+                     old-ws new-ws)
+    (user-error "agent-repl: ws-rename-state: workspace %S is tombstoned"
+                old-ws))
+  (when (agent-repl--ws-known-p new-ws)
+    (agent-repl--log old-ws
+                     "ws-rename-state: REJECT old-ws=%s new-ws=%s reason=target-registered target-live=%s"
+                     old-ws new-ws
+                     (if (agent-repl--ws-live-p new-ws) "t" "nil"))
+    (user-error "agent-repl: ws-rename-state: target workspace %S is already registered"
+                new-ws))
+  (unless (and (stringp new-project-dir)
+               (not (string-empty-p new-project-dir)))
+    (agent-repl--log old-ws
+                     "ws-rename-state: REJECT old-ws=%s new-ws=%s new-project-dir=%S reason=invalid-project-dir"
+                     old-ws new-ws new-project-dir)
+    (user-error "agent-repl: ws-rename-state: invalid project directory %S"
+                new-project-dir))
+  (let* ((canonical-dir (agent-repl--path-canonical new-project-dir))
+         (old-plist (gethash old-ws agent-repl--workspaces))
+         (new-plist (plist-put
+                     (plist-put (copy-sequence old-plist)
+                                :project-dir canonical-dir)
+                     :ws-id nil)))
+    (agent-repl--log old-ws
+                     "ws-rename-state: MOVE old-ws=%s new-ws=%s old-project-dir=%S new-project-dir=%s key-count=%d"
+                     old-ws new-ws (plist-get old-plist :project-dir)
+                     canonical-dir (/ (length new-plist) 2))
+    ;; No Lisp call that can signal sits between these primitive hash
+    ;; mutations, so observers cannot run against a half-moved entry.
+    (puthash new-ws new-plist agent-repl--workspaces)
+    (remhash old-ws agent-repl--workspaces)
+    new-ws))
+
+(defun agent-repl--ws-rewrite-source-back-refs
+    (old-source-dir new-source-dir)
+  "Rewrite workspace source back-references from OLD-SOURCE-DIR to NEW-SOURCE-DIR.
+Both paths must be non-empty strings and must canonicalize to distinct
+directories.  Every registered workspace whose canonical
+`:source-ws-dir' matches OLD-SOURCE-DIR receives the canonical new path
+and has its cached `:source-ws-name' cleared, forcing the next source
+resolution to discover the renamed workspace identity.
+
+Live and tombstoned entries are both rewritten because source identity
+is historical state that must remain correct if a tombstone is later
+restored.  Returns the number of rewritten workspaces.  Invalid path
+arguments signal `user-error' before any workspace is mutated."
+  (unless (and (stringp old-source-dir)
+               (not (string-empty-p old-source-dir)))
+    (agent-repl--log nil
+                     "ws-rewrite-source-back-refs: REJECT old-source-dir=%S new-source-dir=%S reason=invalid-old-dir"
+                     old-source-dir new-source-dir)
+    (user-error "agent-repl: ws-rewrite-source-back-refs: invalid old source directory %S"
+                old-source-dir))
+  (unless (and (stringp new-source-dir)
+               (not (string-empty-p new-source-dir)))
+    (agent-repl--log nil
+                     "ws-rewrite-source-back-refs: REJECT old-source-dir=%S new-source-dir=%S reason=invalid-new-dir"
+                     old-source-dir new-source-dir)
+    (user-error "agent-repl: ws-rewrite-source-back-refs: invalid new source directory %S"
+                new-source-dir))
+  (let ((canonical-old (agent-repl--path-canonical old-source-dir))
+        (canonical-new (agent-repl--path-canonical new-source-dir))
+        (rewritten 0))
+    (when (string= canonical-old canonical-new)
+      (agent-repl--log nil
+                       "ws-rewrite-source-back-refs: REJECT old-source-dir=%s new-source-dir=%s reason=identical-canonical-dirs"
+                       canonical-old canonical-new)
+      (user-error "agent-repl: ws-rewrite-source-back-refs: source directories are identical: %s"
+                  canonical-old))
+    (maphash
+     (lambda (ws plist)
+       (let ((source-dir (plist-get plist :source-ws-dir)))
+         (cond
+          ((null source-dir)
+           (agent-repl--log
+            ws
+            "ws-rewrite-source-back-refs: SKIP ws=%s source-dir=nil old-source-dir=%s reason=no-source"
+            ws canonical-old))
+          ((not (string=
+                 (agent-repl--path-canonical source-dir)
+                 canonical-old))
+           (agent-repl--log
+            ws
+            "ws-rewrite-source-back-refs: SKIP ws=%s source-dir=%s old-source-dir=%s reason=different-source"
+            ws source-dir canonical-old))
+          (t
+           (agent-repl--ws-put ws :source-ws-dir canonical-new)
+           (agent-repl--ws-put ws :source-ws-name nil)
+           (cl-incf rewritten)
+           (agent-repl--log
+            ws
+            "ws-rewrite-source-back-refs: REWROTE ws=%s source-dir=%s -> %s source-ws-name-cleared=t tombstoned=%s"
+            ws source-dir canonical-new
+            (if (plist-get plist :nuked-at) "t" "nil"))))))
+     agent-repl--workspaces)
+    (agent-repl--log nil
+                     "ws-rewrite-source-back-refs: DONE old-source-dir=%s new-source-dir=%s rewritten=%d"
+                     canonical-old canonical-new rewritten)
+    rewritten))
 
 (defun agent-repl--ws-put-caller-trace ()
   "Return a short caller chain string for diagnostic logging.
