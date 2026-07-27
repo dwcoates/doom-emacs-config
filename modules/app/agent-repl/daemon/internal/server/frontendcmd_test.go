@@ -353,6 +353,10 @@ type fakeInits struct{ inits []*frontendv1.SessionInitView }
 
 func (f fakeInits) SessionInits() []*frontendv1.SessionInitView { return f.inits }
 
+type fakeCatalogs struct{ catalogs []*frontendv1.TaskCatalog }
+
+func (f fakeCatalogs) TaskCatalogs() []*frontendv1.TaskCatalog { return f.catalogs }
+
 func TestSnapshotProviderIncludesSessionInits(t *testing.T) {
 	// Arrange — a snapshot provider with a SessionInitSource (S9).
 	provider := &ssmSnapshotProvider{
@@ -367,6 +371,31 @@ func TestSnapshotProviderIncludesSessionInits(t *testing.T) {
 	// Assert — the retained inits ride on the connect snapshot.
 	if len(snap.GetInits()) != 1 || snap.GetInits()[0].GetInit().GetModel() != "haiku" {
 		t.Fatalf("inits = %v", snap.GetInits())
+	}
+}
+
+func TestSnapshotProviderIncludesTaskCatalogsAndLogsTheirShape(t *testing.T) {
+	// Arrange.
+	var logs []string
+	provider := &ssmSnapshotProvider{
+		catalogs: fakeCatalogs{catalogs: []*frontendv1.TaskCatalog{{
+			Workspace: "/w", SessionId: "s1",
+			Tasks: []*frontendv1.TaskEntry{{TaskId: "t1"}},
+		}}},
+		logf: func(format string, args ...any) {
+			logs = append(logs, fmt.Sprintf(format, args...))
+		},
+	}
+
+	// Act.
+	snap := provider.Snapshot()
+
+	// Assert.
+	if len(snap.GetCatalogs()) != 1 || snap.GetCatalogs()[0].GetTasks()[0].GetTaskId() != "t1" {
+		t.Fatalf("catalogs = %v, want t1", snap.GetCatalogs())
+	}
+	if len(logs) != 1 || !strings.Contains(logs[0], "catalogs=1 tasks=1") {
+		t.Fatalf("snapshot logs = %v, want catalog/task counts", logs)
 	}
 }
 

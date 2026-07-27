@@ -371,6 +371,7 @@ func main() {
 		Lifecycle:       opener,
 		Sessions:        registrySessions{reg: sessionRegistry, driver: driver, logf: log.Printf},
 		Inits:           driver,
+		Catalogs:        driver,
 		Queues:          driver,
 		SessionCommands: sessionCommands,
 		Resyncer:        driver,
