@@ -40,6 +40,7 @@
 (declare-function agent-repl--ws-current-name "agent-repl-workspace" ())
 (declare-function agent-repl--ws-get "agent-repl-workspace" (ws key))
 (declare-function agent-repl--ws-put "agent-repl-workspace" (ws key val))
+(declare-function agent-repl--ws-name-for-dir "agent-repl-workspace" (dir))
 (declare-function agent-repl--ensure-frontend-daemon "agent-repl-daemon" (&optional force))
 (declare-function agent-repl--resolve-current-git-root "agent-repl-core" ())
 (declare-function agent-repl--ws-durable-claude-session-id "agent-repl-core" (ws))
@@ -170,6 +171,23 @@ See `agent-repl-frontend-ungated-permission-modes'."
   (and (stringp mode)
        (member mode agent-repl-frontend-ungated-permission-modes)
        t))
+
+(defun agent-repl--frontend-session-posture (cwd)
+  "Return the explicit daemon-session account and permission posture for CWD.
+The result is a plist with `:config-dir', `:permission-mode', and
+`:allow-ungated'.  Both direct session creation and daemon-owned workspace
+creation consume this helper so the two entry points cannot drift."
+  (let ((config-dir (agent-repl--compute-config-dir cwd))
+        (permission-mode agent-repl-frontend-permission-mode)
+        (allow-ungated (and agent-repl-frontend-allow-ungated t)))
+    (agent-repl--log
+     (agent-repl--ws-name-for-dir cwd)
+     "frontend-session-posture: cwd=%s config-dir=%s permission-mode=%s allow-ungated=%S"
+     cwd (or config-dir "CLI-default") (or permission-mode "SDK-default")
+     allow-ungated)
+    (list :config-dir config-dir
+          :permission-mode permission-mode
+          :allow-ungated allow-ungated)))
 
 (defcustom agent-repl-frontend-ready-attempts 25
   "Poll attempts for `agent-repl--frontend-wait-ready' (0.2s apart)."
@@ -379,16 +397,19 @@ inherited."
     (error "agent-repl: a createSession for %s is already in flight" cwd))
   (let* ((force-fresh (or force-fresh agent-repl--force-fresh-conversation))
          (model (agent-repl--effective-model model))
-         (config-dir (agent-repl--compute-config-dir cwd))
+         (posture (agent-repl--frontend-session-posture cwd))
+         (config-dir (plist-get posture :config-dir))
+         (permission-mode (plist-get posture :permission-mode))
+         (allow-ungated (plist-get posture :allow-ungated))
          (payload (append (list :cwd cwd)
                           (when model (list :model model))
                           (when resume (list :resumeClaudeSessionId resume))
                           (when config-dir (list :configDir config-dir))
-                          (when agent-repl-frontend-permission-mode
-                            (list :permissionMode agent-repl-frontend-permission-mode))
+                          (when permission-mode
+                            (list :permissionMode permission-mode))
                           ;; Sent ONLY when a caller has bound the consent, so
                           ;; an ordinary create can never carry it by accident.
-                          (when agent-repl-frontend-allow-ungated
+                          (when allow-ungated
                             (list :allowUngated t))))
          ;; Mutable outcome the ack callbacks flip; all keys pre-populated so
          ;; `plist-put' mutates in place and the closures + await loop observe it.

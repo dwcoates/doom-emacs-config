@@ -761,38 +761,6 @@ var is unset, yielding the bare slug with no leading slash."
                 (should (equal (aref data 1) "branch-b"))))))
       (delete-directory tmpdir t))))
 
-;;;; ---- Tests: agent-repl-debug/process-pending-commands ----
-
-(ert-deftest agent-repl-test-process-pending-commands-no-dir ()
-  "process-pending-commands should message when output dir does not exist."
-  (let ((msg nil)
-        (agent-repl--output-dir "/nonexistent/path/"))
-    (cl-letf (((symbol-function 'message) (lambda (fmt &rest args)
-                                            (setq msg (apply #'format fmt args)))))
-      (agent-repl-debug/process-pending-commands)
-      (should (string-match-p "No workspace_commands" msg)))))
-
-(ert-deftest agent-repl-test-process-pending-commands-processes-files ()
-  "process-pending-commands should process all matching JSON files."
-  (let* ((tmpdir (make-temp-file "agent-repl-test-" t))
-         (agent-repl--output-dir tmpdir)
-         (processed nil))
-    (unwind-protect
-        (progn
-          ;; Create matching files
-          (with-temp-file (expand-file-name "workspace_commands_001.json" tmpdir)
-            (insert "[]"))
-          (with-temp-file (expand-file-name "workspace_commands_002.json" tmpdir)
-            (insert "[]"))
-          ;; Create a non-matching file
-          (with-temp-file (expand-file-name "other_file.json" tmpdir)
-            (insert "[]"))
-          (cl-letf (((symbol-function 'agent-repl--process-workspace-commands-file)
-                     (lambda (file) (push file processed))))
-            (agent-repl-debug/process-pending-commands)
-            (should (= (length processed) 2))))
-      (delete-directory tmpdir t))))
-
 ;;;; ---- Tests: agent-repl-debug/workspace-states ----
 
 (ert-deftest agent-repl-test-debug-workspace-states ()
@@ -878,52 +846,6 @@ var is unset, yielding the bare slug with no leading slash."
       (let ((result (agent-repl--format-buffer-info (current-buffer))))
         (should (string-match-p "owning=my-ws" result))
         (should (string-match-p "persp=nil" result))))))
-
-;;;; ---- Tests: mock-workspace-commands-with-priority (interactive) ----
-
-(ert-deftest agent-repl-test-mock-workspace-commands-with-priority ()
-  "mock-workspace-commands-with-priority should write a JSON file with priority and name."
-  (let* ((tmpdir (make-temp-file "agent-repl-test-" t))
-         (agent-repl--output-dir tmpdir))
-    (unwind-protect
-        (cl-letf (((symbol-function 'completing-read)
-                   (lambda (_prompt _coll &rest _) "p2"))
-                  ((symbol-function 'read-string)
-                   (lambda (_prompt &rest _) "DWC/test-branch"))
-                  ((symbol-function 'format-time-string)
-                   (lambda (_fmt) "1234567890"))
-                  ;; Silence the command's echo; the assertions below read
-                  ;; the written JSON file, not the message.
-                  ((symbol-function 'message) #'ignore))
-          (agent-repl-debug/mock-workspace-commands-with-priority)
-          (let ((file (expand-file-name "workspace_commands_1234567890.json" tmpdir)))
-            (should (file-exists-p file))
-            (with-temp-buffer
-              (insert-file-contents file)
-              (let* ((data (json-read-from-string (buffer-string)))
-                     (entry (aref data 0)))
-                (should (equal (alist-get 'type entry) "create"))
-                (should (equal (alist-get 'name entry) "DWC/test-branch"))
-                (should (equal (alist-get 'priority entry) "p2"))))))
-      (delete-directory tmpdir t))))
-
-;;;; ---- Tests: process-pending-commands with empty directory ----
-
-(ert-deftest agent-repl-test-process-pending-commands-empty-dir ()
-  "process-pending-commands should message 'No workspace_commands' when dir exists but has no matching files."
-  (let* ((tmpdir (make-temp-file "agent-repl-test-" t))
-         (agent-repl--output-dir tmpdir)
-         (msg nil))
-    (unwind-protect
-        (progn
-          ;; Create a non-matching file so the directory is not empty
-          (with-temp-file (expand-file-name "unrelated.json" tmpdir)
-            (insert "[]"))
-          (cl-letf (((symbol-function 'message)
-                     (lambda (fmt &rest args) (setq msg (apply #'format fmt args)))))
-            (agent-repl-debug/process-pending-commands)
-            (should (string-match-p "No workspace_commands" msg))))
-      (delete-directory tmpdir t))))
 
 ;;;; ---- Tests: workspace-states with empty workspace list ----
 

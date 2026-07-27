@@ -206,6 +206,22 @@ id the daemon delivers on the pushed SessionView."
   ;; Arrange + Act + Assert
   (should-not (agent-repl-frontend-ungated-permission-mode-p nil)))
 
+(ert-deftest agent-repl-test-frontend-session-posture-is-shared-explicit-state ()
+  "The shared posture helper returns account, mode, and deliberate consent."
+  (let ((agent-repl-frontend-permission-mode "bypassPermissions")
+        (agent-repl-frontend-allow-ungated t))
+    (cl-letf (((symbol-function 'agent-repl--compute-config-dir)
+               (lambda (cwd)
+                 (should (equal cwd "/work"))
+                 "/account"))
+              ((symbol-function 'agent-repl--ws-name-for-dir)
+               (lambda (_cwd) "ws")))
+      (should
+       (equal (agent-repl--frontend-session-posture "/work")
+              '(:config-dir "/account"
+                :permission-mode "bypassPermissions"
+                :allow-ungated t))))))
+
 (ert-deftest agent-repl-test-frontend-create-sends-multi-repo-config-dir ()
   "A cwd under the multi-repo root carries that account's CLAUDE_CONFIG_DIR."
   ;; Arrange

@@ -14,9 +14,6 @@
 | `agent-repl--apply-workspace-properties` | 3 tests | nil values skipped, all non-nil stored, empty plist no-op |
 | `agent-repl--enqueue-preemptive-prompt` | 3 tests | non-empty prompt stored, nil prompt ignored, empty string ignored |
 | `agent-repl--dispatch-prompt-command` | 4 tests | no vterm buffer (enqueue), buffer not ready (enqueue), appends multiple, normalizes branch name |
-| `agent-repl--workspace-commands-watch-handler` | 5 tests | ignores non-workspace files, dispatches on created/changed/renamed, ignores delete action |
-| `agent-repl--dispatch-workspace-command` | 4 tests | create increments delay, prompt preserves delay, finish preserves delay, unknown type no-op |
-| `agent-repl--process-workspace-commands-file` | 3 tests | missing file, staggered create delays, mixed command types |
 | `agent-repl--cherry-pick-base` (alias `+dwc/workspace-merge--fork`) | 6 tests | no-annotations fallback, clean chain, already fully merged, growing workspace, deep chain, annotation survives conflict resolution |
 | `agent-repl--validate-worktree-creation` | 4 tests | empty name, existing projectile project, existing branch, valid inputs pass |
 | `agent-repl--worktree-add-callback` | 2 tests | failure (finalize not called), success (finalize called with args) |
@@ -29,15 +26,14 @@
 
 | Function | Status | Notes |
 |----------|--------|-------|
-| `agent-repl--handle-create-command` | Indirectly tested | Tested via `process-workspace-commands-file` integration test; not unit-tested in isolation. Would need stubbing `run-with-timer` to verify timer scheduling and arg forwarding. |
-| `agent-repl--handle-prompt-command` | Indirectly tested | Tested via `dispatch-workspace-command`; simple delegation to `dispatch-prompt-command`. |
-| `agent-repl--handle-finish-command` | Indirectly tested | Tested via `dispatch-workspace-command`; simple delegation to `finish-workspace`. |
+| `agent-repl--handle-create-command` | Direct unit coverage | Collaborators and timer scheduling are stubbed in `test-worktree.el`; the daemon owns production dispatch. |
+| `agent-repl--handle-prompt-command` | HostAction integration | Covered through `legacyCommand` translation in `test-workspace-create-client.el`. |
+| `agent-repl--handle-finish-command` | HostAction integration | Covered through the exact legacy handler table in `test-workspace-create-client.el`. |
 
 ### Not Tested (require Doom/vterm/persp/projectile/magit runtime)
 
 | Function | Reason | Edge Cases to Consider |
 |----------|--------|----------------------|
-| `agent-repl--register-workspace-commands-watch` | Requires `file-notify-add-watch` runtime; has side effects at load time. | (1) Tears down existing valid watch before creating new one, (2) creates output directory if missing, (3) handles invalid/nil existing watch gracefully. |
 | `agent-repl--switch-to-workspace` | Requires `+workspace-switch-to` and `+workspace/switch-to` (Doom). | (1) Primary succeeds, (2) primary fails and fallback succeeds, (3) both fail -- messages but does not error. |
 | `agent-repl--register-worktree-ws` | Requires `+workspace-current-name` side effect. | (1) Explicit ws arg used, (2) defaults to `+workspace-current-name`, (3) stores :worktree-p and :project-dir correctly. |
 | `agent-repl--setup-worktree-session` | Requires `make-agent-repl-instantiation`, `agent-repl--initialize-claude`. | (1) force-bare-metal=t sets :active-env to :bare-metal, (2) force-bare-metal=nil sets :active-env to :sandbox, (3) default-directory is bound to path during initialize-claude. |
