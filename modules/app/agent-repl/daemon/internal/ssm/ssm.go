@@ -120,6 +120,9 @@ func (m *Manager) warm() error {
 	if maxAt.Valid {
 		m.lastAt = maxAt.Int64
 	}
+	if err := m.repairPersistedOrphanTaskEndsLocked(); err != nil {
+		return err
+	}
 	names, err := distinctWorkspaces(m.db)
 	if err != nil {
 		return err
@@ -224,9 +227,16 @@ func (m *Manager) Apply(ev *corev1.Event) error {
 		}
 	}
 
-	at := m.nextAt()
-	if err := appendRow(m.db, ws, sid, state, causeKind, sql.NullInt64{Int64: int64(ev.GetSeq()), Valid: true}, at, taskIDOf(ev)); err != nil {
-		return err
+	causeSeq := sql.NullInt64{Int64: int64(ev.GetSeq()), Valid: true}
+	if state == sigTaskEnded {
+		if err := m.appendTaskEndLocked(ws, sid, causeKind, causeSeq, taskIDOf(ev)); err != nil {
+			return err
+		}
+	} else {
+		at := m.nextAt()
+		if err := appendRow(m.db, ws, sid, state, causeKind, causeSeq, at, taskIDOf(ev)); err != nil {
+			return err
+		}
 	}
 
 	// OPEN THE PAINT AXIS on a fresh route.
