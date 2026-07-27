@@ -162,21 +162,31 @@ else
     fail "fresh tree runs the full chain in dependency order" "rc=$RC log: $(cat "$STUB_LOG")"
 fi
 
-# --- 2. unchanged binaries: no kickstarts, daemon still restarts ------------
-d="$TMP/t2"; mkdir -p "$d/h/.cache/agent-repl/bin"
-printf 'bin-v1' > "$d/h/.cache/agent-repl/bin/shim-store"
-printf 'bin-v1' > "$d/h/.cache/agent-repl/bin/shim-claude-sidecar"
+# Pre-seed an installed binary AND its deployed stamp, i.e. a service already
+# running the binary that sits in the cache — the only state that may skip a
+# kickstart.
+seed_deployed() { # case-dir name content
+    local bin="$2" content="$3" dir="$1/h/.cache/agent-repl/bin"
+    mkdir -p "$dir"
+    printf '%s' "$content" > "$dir/$bin"
+    shasum -a 256 "$dir/$bin" | cut -d' ' -f1 > "$dir/.$bin.deployed"
+}
+
+# --- 2. services already running the installed binary: no kickstarts --------
+d="$TMP/t2"
+seed_deployed "$d" shim-store bin-v1
+seed_deployed "$d" shim-claude-sidecar bin-v1
 RUN_ENV="" run_deploy "$d"
 if [ "$RC" -eq 0 ] && ! log_has "launchctl" && log_has "daemon-restart"; then
-    pass "unchanged service binaries skip both kickstarts"
+    pass "services already on the installed binary skip both kickstarts"
 else
-    fail "unchanged service binaries skip both kickstarts" "rc=$RC log: $(cat "$STUB_LOG")"
+    fail "services already on the installed binary skip both kickstarts" "rc=$RC log: $(cat "$STUB_LOG")"
 fi
 
 # --- 3. store changed: sidecar bounces too, store first ---------------------
-d="$TMP/t3"; mkdir -p "$d/h/.cache/agent-repl/bin"
-printf 'bin-v0' > "$d/h/.cache/agent-repl/bin/shim-store"
-printf 'bin-v1' > "$d/h/.cache/agent-repl/bin/shim-claude-sidecar"
+d="$TMP/t3"
+seed_deployed "$d" shim-store bin-v0
+seed_deployed "$d" shim-claude-sidecar bin-v1
 RUN_ENV="" run_deploy "$d"
 if [ "$RC" -eq 0 ] \
    && log_before "kickstart -k gui/.*shim-store" "kickstart -k gui/.*shim-claude-sidecar"; then
@@ -186,9 +196,9 @@ else
 fi
 
 # --- 4. sidecar changed alone: store untouched ------------------------------
-d="$TMP/t4"; mkdir -p "$d/h/.cache/agent-repl/bin"
-printf 'bin-v1' > "$d/h/.cache/agent-repl/bin/shim-store"
-printf 'bin-v0' > "$d/h/.cache/agent-repl/bin/shim-claude-sidecar"
+d="$TMP/t4"
+seed_deployed "$d" shim-store bin-v1
+seed_deployed "$d" shim-claude-sidecar bin-v0
 RUN_ENV="" run_deploy "$d"
 if [ "$RC" -eq 0 ] \
    && ! log_has "kickstart -k gui/.*shim-store" \
@@ -196,6 +206,37 @@ if [ "$RC" -eq 0 ] \
     pass "a sidecar-only change leaves the store un-bounced"
 else
     fail "a sidecar-only change leaves the store un-bounced" "rc=$RC log: $(cat "$STUB_LOG")"
+fi
+
+# --- 4b. installed-but-never-deployed binary still bounces ------------------
+# The regression a live deploy hit: a prior --no-bounce run installed the new
+# binaries without restarting anything, so this run's build is "unchanged"
+# while the running processes are still on the old image. Deciding on the
+# build delta skipped the bounce silently; deciding on the deployed stamp
+# cannot.
+d="$TMP/t4b"; mkdir -p "$d/h/.cache/agent-repl/bin"
+printf 'bin-v1' > "$d/h/.cache/agent-repl/bin/shim-store"
+printf 'bin-v1' > "$d/h/.cache/agent-repl/bin/shim-claude-sidecar"
+RUN_ENV="" run_deploy "$d"
+if [ "$RC" -eq 0 ] \
+   && log_has "kickstart -k gui/.*shim-store" \
+   && log_has "kickstart -k gui/.*shim-claude-sidecar"; then
+    pass "an installed but never-kickstarted binary bounces despite an unchanged build"
+else
+    fail "an installed but never-kickstarted binary bounces despite an unchanged build" "rc=$RC log: $(cat "$STUB_LOG")"
+fi
+
+# --- 4c. --no-bounce leaves the stamps alone so the next run bounces --------
+d="$TMP/t4c"
+seed_deployed "$d" shim-store bin-v0
+seed_deployed "$d" shim-claude-sidecar bin-v0
+RUN_ENV="" run_deploy "$d" --no-bounce
+if [ "$RC" -eq 0 ] \
+   && [ "$(cat "$d/h/.cache/agent-repl/bin/.shim-store.deployed")" \
+        != "$(shasum -a 256 "$d/h/.cache/agent-repl/bin/shim-store" | cut -d' ' -f1)" ]; then
+    pass "--no-bounce installs without stamping, leaving the service marked stale"
+else
+    fail "--no-bounce installs without stamping, leaving the service marked stale" "rc=$RC"
 fi
 
 # --- 5. --no-bounce: builds only --------------------------------------------
