@@ -642,11 +642,13 @@ A binary older than the commit that supposedly fixed the bug **is** the finding.
 
 ## 7. When the evidence is too sparse — SUGGEST INSTRUMENTATION EMPHATICALLY
 
-Since file writes are now unconditional, the only way the log can be uninformative is if the suspect code path has **no `agent-repl--log` calls at all**. When that happens, Claude tends to fill the silence with speculation. **Do not do that.** If you find yourself reading the log around the timestamp of the bug and cannot find any line that corresponds to the suspect function or branch, stop and surface this emphatically.
+**This rule applies on EVERY plane, not just Emacs.** Only the primitive changes.
+
+Writes are unconditional on every plane, so the only way the evidence can be uninformative is if the suspect code path is **not instrumented at all**. When that happens, Claude tends to fill the silence with speculation. **Do not do that.** If you find yourself reading the evidence around the timestamp of the bug and cannot find any line that corresponds to the suspect function or branch, stop and surface this emphatically.
 
 Required user-facing message in that case:
 
-> ⚠️ The log around `<timestamp>` contains no entries for `<function/feature>`. I cannot confidently diagnose this from the log alone. I **strongly recommend** adding `agent-repl--log` calls at the following points before reproducing again:
+> ⚠️ The `<log/plane>` around `<timestamp>` contains no entries for `<function/feature>`. I cannot confidently diagnose this from the evidence alone. I **strongly recommend** adding `<the plane's primitive>` calls at the following points before reproducing again:
 >
 > - `<file>:<line>` — `<function>` (entry + which branch was taken)
 > - `<file>:<line>` — `<function>` (the suspected early-return)
@@ -655,12 +657,30 @@ Required user-facing message in that case:
 
 Apply this rule when **any** of the following is true:
 
-- The suspect function has zero `agent-repl--log` / `agent-repl--log-verbose` / `agent-repl--error` calls
+- The suspect function has zero logging calls on its plane
 - The conditional branch you suspect (an `if` arm, an early return, an error fallback) has no log line
-- The hot code path appears to have run but produces no log evidence of which branch was taken
-- The repro produces a visible symptom but the log between the user's action and the symptom is empty or routine
+- The hot code path appears to have run but produces no evidence of which branch was taken
+- The repro produces a visible symptom but the evidence between the user's action and the symptom is empty or routine
 
-Be **emphatic, not soft**. Say "strongly recommend", "I need more instrumentation before I can be confident", "the log is uninformative here" — do not bury the recommendation under speculation. The instrumentation is cheap, lives in the same module, and the user has explicitly chosen this debugging style. Adding three or four `agent-repl--log` calls and re-running the repro is almost always faster than guessing.
+Be **emphatic, not soft**. Say "strongly recommend", "I need more instrumentation before I can be confident", "the log is uninformative here" — do not bury the recommendation under speculation. The instrumentation is cheap, lives in the same module, and the user has explicitly chosen this debugging style. Adding three or four log calls and re-running the repro is almost always faster than guessing.
+
+### 7.0 Pick the right primitive for the plane
+
+| Plane | Primitive | Notes |
+|---|---|---|
+| **Emacs** | `agent-repl--log` / `--log-verbose` / `--do-log` / `--error` | §7.1 |
+| **Daemon (Go)** | `dlog.Tag` / `dlog.TagFunc` | Context-carrying loggers — attach ids once, get them on every line |
+| **Daemon (Go)** | `dlog.Call` | **Anything crossing a process or model boundary.** Both edges must be logged |
+| **Shim (TypeScript)** | `shimLog(component, fields, message)` | **stderr only** — never stdout, never the UDS (§3.4) |
+| **Webapp (TypeScript)** | the `wslog` forwarding logger | Pass structured `context` for ids, counters, timings (§3.5) |
+| **SSM** | a new **axis row** | See below |
+
+**On the SSM, prefer an axis row over a log line for anything that is genuinely state.** A row is durable, queryable, and survives a restart; a log line is none of those. An axis row *is* instrumentation — and a better grade of it.
+
+**Carve-outs — code you cannot instrument:**
+
+- **3rd-party Emacs code** (magit, transient, doom-core, vterm, the byte-compiler). You do not get to add `agent-repl--log` calls to magit. Use `*Messages*` via `/runtime-eval-code` instead — §9.
+- **The Claude SDK inside the shim.** Same situation, no equivalent of `*Messages*`. The shim's **own boundary logging** is the closest available vantage point, so instrument the shim's edge of the call rather than trying to see inside it.
 
 ### 7.1 Template — Emacs (elisp)
 
@@ -689,6 +709,47 @@ Prefer logging:
 - **Both arms of an `if`/`cond`** — silence on one arm is ambiguous; explicit logs on both arms remove the ambiguity.
 - **Early returns and error fallbacks** — the most common place a bug hides.
 - **Async sentinel callbacks** — log on every invocation, with the relevant state, since async paths are hardest to reason about.
+
+### 7.2 Template — daemon (Go)
+
+Attach context once with `Tag`/`TagFunc` so every downstream line carries it, in the same `{k=v}` shape the Emacs log uses (§3.2):
+
+```go
+logf := dlog.Tag(h.logf, "ws", workspace, "sid", sessionID)
+logf("myfn: entered branch=%s", branch)
+```
+
+Wrap anything crossing a **process or model boundary** with `Call`, so both edges are recorded:
+
+```go
+done := dlog.Call(logf, "classifier", "ws", workspace)
+out, err := runClassifier(ctx, prompt)
+done(out, err)   // writes duration, clamped output, and error
+```
+
+Keep the pairs matched. A `Tag` call site with an odd argument count renders `key=!MISSING`, and a `Call` whose completion never runs leaves a start line with no end — both are visible failures by design, so do not "fix" them by removing the instrumentation.
+
+### 7.3 Template — shim (TypeScript)
+
+```ts
+shimLog("session", { sid, turn }, `myfn: entered branch=${branch}`);
+```
+
+**stderr only.** stdout and the UDS carry protocol frames exclusively — writing anything else to them corrupts the stream.
+
+### 7.4 Template — webapp (TypeScript)
+
+```ts
+log.warn("seq gap detected", { expected, got, sessionId });
+```
+
+Pass ids, counters, and timings as structured `context` rather than interpolating them, and remember the forward budget (§3.5): the console always sees the line, but only 60 per minute reach the daemon log.
+
+### 7.5 Prefer state over logs on the SSM
+
+If the thing you want to observe is genuinely **state** — a condition that persists, that a later render depends on, or that must survive a restart — write an **axis row** instead of a log line. It is durable, it is queryable with §4.4, and it answers the question later without a repro.
+
+Log lines are for *transitions and reasoning*; axis rows are for *state*.
 
 ## 8. What NOT to do
 
