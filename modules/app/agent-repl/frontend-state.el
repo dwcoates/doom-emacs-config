@@ -119,19 +119,25 @@ render — `agent-repl--frontend-state->keyword' errors on it.
 `:degraded' carries the 📡 glyph in `agent-repl-ws-state-icons'
 \(workspace.el); `test-render-colors.el' asserts it exists.")
 
-(defun agent-repl--frontend-state->keyword (state)
+(defun agent-repl--frontend-state->keyword (state &optional workspace)
   "Map RenderState enum NAME STATE (a string) to a render keyword.
 Signals `error' (after a loud log) for RENDER_STATE_UNSPECIFIED, a nil
 STATE (protojson omits a default-valued enum, i.e. UNSPECIFIED), or any
 value outside `agent-repl--frontend-render-state-map' — there is no
-fallback keyword (AGENTS.md No-Silent-Fallbacks)."
+fallback keyword (AGENTS.md No-Silent-Fallbacks).  WORKSPACE, when known,
+threads per-workspace log metadata through a state-frame application."
   (let ((kw (and (stringp state)
                  (cdr (assoc state agent-repl--frontend-render-state-map)))))
     (unless kw
-      (agent-repl--log nil
+      (agent-repl--log workspace
                        "frontend-state->keyword: UNMAPPABLE RenderState=%S (UNSPECIFIED/unknown) — no fallback"
                        state)
       (error "agent-repl frontend: unmappable RenderState %S" state))
+    ;; WorkspaceState frames can arrive on each state transition, so retain
+    ;; the exact accepted mapping only in verbose traces.
+    (agent-repl--log-verbose workspace
+                             "frontend-state->keyword: state=%s keyword=%s"
+                             state kw)
     kw))
 
 ;;;; ---- WorkspaceState application --------------------------------------
@@ -174,8 +180,19 @@ known workspace name is returned as-is, so a frame that carries a name
 still works.  Returns nil when nothing owns it — the caller must then drop
 the frame rather than key state under an unresolvable id."
   (when (and workspace (not (string-empty-p workspace)))
-    (or (agent-repl--ws-dir-owner workspace)
-        (and (agent-repl--ws-known-p workspace) workspace))))
+    (let* ((owner (agent-repl--ws-dir-owner workspace))
+           (known (and (not owner)
+                       (agent-repl--ws-known-p workspace)))
+           (resolved (or owner (and known workspace))))
+      ;; This resolver runs for every WorkspaceState frame.  A verbose record
+      ;; preserves the decisive path-vs-name outcome without flooding normal
+      ;; lifecycle logs.
+      (agent-repl--log-verbose
+       resolved
+       "frontend-ws-name: wire-workspace=%s resolution=%s result=%s"
+       workspace (cond (owner :dir-owner) (known :known-name) (t :unowned))
+       resolved)
+      resolved)))
 
 (defun agent-repl--frontend-apply-workspace-state (ws-state)
   "Apply a `WorkspaceState' frame WS-STATE (a plist).
@@ -204,7 +221,7 @@ Fails loudly on a missing/blank `workspace' (invariant violation)."
     ;; for something Emacs does not have open. Dropping it is honest; keying
     ;; it under the path would STUB-CREATE an entry the renderer never reads.
     (if-let ((workspace (agent-repl--frontend-ws-name raw-workspace)))
-    (let* ((keyword (agent-repl--frontend-state->keyword state))
+    (let* ((keyword (agent-repl--frontend-state->keyword state workspace))
            (previous (agent-repl--ws-get workspace :pushed-render-state))
            ;; live_task_count / cause_seq / at_ms are proto int64/uint64,
            ;; which protojson encodes as JSON strings — stored verbatim.
@@ -250,7 +267,10 @@ Fails loudly on a missing/blank `workspace' (invariant violation)."
 One-shot per workspace: guarded by the `:agent-ready-latched' plist key so
 only the first `WorkspaceState' push arms the latch.  Loud-logged.  See
 `agent-repl-ws-fully-loaded-functions'."
-  (unless (agent-repl--ws-get workspace :agent-ready-latched)
+  (if (agent-repl--ws-get workspace :agent-ready-latched)
+      ;; This check is reached on every later WorkspaceState frame.
+      (agent-repl--log-verbose workspace
+                               "frontend-latch-agent-ready: already latched; skip :agent-ready")
     (agent-repl--ws-put workspace :agent-ready-latched t)
     (agent-repl--log workspace
                      "frontend-latch-agent-ready: first pushed state for ws=%s — setting :agent-ready"
@@ -421,11 +441,27 @@ same fact classified, so it can finally be shown."
 
 Returns the surfaced text, or nil when the session is alive, carries no
 classified death, or has already been reported."
-  (when-let* ((item (plist-get view :death))
-              ((not (gethash id agent-repl--frontend-surfaced-deaths))))
-    (puthash id t agent-repl--frontend-surfaced-deaths)
-    (agent-repl-failure-surface (plist-get view :workspace)
-                                (agent-repl-failure-from-wire item))))
+  (let ((workspace (plist-get view :workspace))
+        (item (plist-get view :death)))
+    (cond
+     ((null item)
+      ;; SessionView frames are replayed in every snapshot; absence of death
+      ;; is useful only while tracing that chatty stream.
+      (agent-repl--log-verbose workspace
+                               "frontend-surface-session-death: id=%s outcome=no-death"
+                               id)
+      nil)
+     ((gethash id agent-repl--frontend-surfaced-deaths)
+      (agent-repl--log-verbose workspace
+                               "frontend-surface-session-death: id=%s outcome=already-surfaced"
+                               id)
+      nil)
+     (t
+      (puthash id t agent-repl--frontend-surfaced-deaths)
+      (agent-repl--log workspace
+                       "frontend-surface-session-death: id=%s outcome=surface error-class=%s error-type=%s"
+                       id (plist-get item :errorClass) (plist-get item :errorType))
+      (agent-repl-failure-surface workspace (agent-repl-failure-from-wire item))))))
 
 ;;;; ---- SessionInit store (slash-command menu source) -------------------
 ;;
