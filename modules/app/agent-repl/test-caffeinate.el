@@ -152,6 +152,24 @@ handle before BODY and restores afterwards."
       (agent-repl--ws-put "ws1" :agent-state :permission)
       (should (agent-repl--caffeinate-any-active-p)))))
 
+(ert-deftest agent-repl-test-caffeinate-agent-scan-uses-workspace-api ()
+  "Agent-state scan consumes live/tombstoned workspace wrapper results."
+  (agent-repl-test--with-clean-state
+    (let ((live-state :idle))
+      (cl-letf (((symbol-function 'agent-repl--live-ws-names)
+                 (lambda () '("live")))
+                ((symbol-function 'agent-repl--ws-tombstoned-names)
+                 (lambda () '("dead")))
+                ((symbol-function 'agent-repl--ws-tombstoned-p)
+                 (lambda (ws) (equal ws "dead")))
+                ((symbol-function 'agent-repl--ws-get)
+                 (lambda (ws key)
+                   (and (eq key :agent-state)
+                        (if (equal ws "live") live-state :thinking)))))
+        (should-not (agent-repl--caffeinate-any-agent-state-active-p))
+        (setq live-state :thinking)
+        (should (agent-repl--caffeinate-any-agent-state-active-p))))))
+
 ;;;; ---- Tests: --caffeinate-any-merging-p -----------------------------------
 
 (ert-deftest agent-repl-test-caffeinate-any-merging-p-empty ()
@@ -200,6 +218,25 @@ exclusion principle as `:permission'."
     (should (agent-repl--caffeinate-any-merging-p))
     (agent-repl--ws-put "ws1" :merging nil)
     (should-not (agent-repl--caffeinate-any-merging-p))))
+
+(ert-deftest agent-repl-test-caffeinate-merge-scan-uses-workspace-api ()
+  "Merge scan consumes live/tombstoned workspace wrapper results."
+  (agent-repl-test--with-clean-state
+    (let ((live-merging-p nil))
+      (cl-letf (((symbol-function 'agent-repl--live-ws-names)
+                 (lambda () '("live")))
+                ((symbol-function 'agent-repl--ws-tombstoned-names)
+                 (lambda () '("dead")))
+                ((symbol-function 'agent-repl--ws-tombstoned-p)
+                 (lambda (ws) (equal ws "dead")))
+                ((symbol-function 'agent-repl--ws-get)
+                 (lambda (ws key)
+                   (pcase key
+                     (:merging (if (equal ws "live") live-merging-p t))
+                     (:repl-state :done)))))
+        (should-not (agent-repl--caffeinate-any-merging-p))
+        (setq live-merging-p t)
+        (should (agent-repl--caffeinate-any-merging-p))))))
 
 ;;;; ---- Tests: --caffeinate-any-active-p OR-composition --------------------
 
