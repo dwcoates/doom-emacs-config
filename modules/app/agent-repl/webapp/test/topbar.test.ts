@@ -93,7 +93,6 @@ function storeState(over: Partial<StoreState> = {}): StoreState {
     resultUsage: null,
     turnUsage: new Map(),
     modelUsage: null,
-    compacting: false,
     interrupting: false,
     turnRetracted: false,
     costUsd: null,
