@@ -421,6 +421,85 @@ describe("ingest conversation-items", () => {
     // Assert
     expect(store.state.lastSeq).toBe(9);
   });
+});
+
+// --- feed order (seq-ranked insertion) ---------------------------------------
+//
+// The connect resync replays history over the same socket that carries live
+// pushes, so arrival order interleaves low-seq history with high-seq live
+// frames. The feed is ordered by each delta's through-seq, not by arrival —
+// the bug this pins: a prompt echo landing mid-replay stranded wherever the
+// replay happened to be, permanently.
+
+describe("feed order under replay/live interleave", () => {
+  function userTurnItem(requestId: string): ConversationItem {
+    return { kind: "user-turn", requestId, content: [{ type: "text", text: "hi" }], ts: TS };
+  }
+
+  it("slots a replayed item above a live item that arrived first", () => {
+    // Arrange — the live prompt echo (seq 100) beats the replay to the socket.
+    const store = new ConversationStore();
+    store.ingest([itemsEffect([userTurnItem("live")], 100)]);
+    // Act — a history item (seq 5) arrives late.
+    store.ingest([itemsEffect([textItem({ blockId: "h1", uuid: "h1:0" })], 5)]);
+    // Assert — history above, prompt below.
+    expect(store.state.items.map((i) => i.kind)).toEqual(["text", "user-turn"]);
+  });
+
+  it("leaves a prompt echo last once a mid-replay burst completes", () => {
+    // Arrange / Act — replay chunk, then the echo, then the rest of the replay.
+    const store = new ConversationStore();
+    store.ingest([itemsEffect([textItem({ blockId: "h1", uuid: "h1:0", messageId: "mh1" })], 5)]);
+    store.ingest([itemsEffect([userTurnItem("echo")], 100)]);
+    store.ingest([itemsEffect([textItem({ blockId: "h2", uuid: "h2:0", messageId: "mh2" })], 6)]);
+    store.ingest([itemsEffect([textItem({ blockId: "h3", uuid: "h3:0", messageId: "mh3" })], 7)]);
+    // Assert — the prompt is the LAST bubble, not third-to-last.
+    expect(store.state.items.at(-1)?.kind).toBe("user-turn");
+    expect(store.state.items.map((i) => (i.kind === "text" ? i.blockId : "prompt")))
+      .toEqual(["h1", "h2", "h3", "prompt"]);
+  });
+
+  it("keeps intra-delta order for items sharing one through-seq", () => {
+    // Arrange / Act — one delta delivering two blocks.
+    const store = new ConversationStore();
+    store.ingest([
+      itemsEffect(
+        [
+          textItem({ blockId: "a", uuid: "a:0", messageId: "ma" }),
+          textItem({ blockId: "b", uuid: "b:0", messageId: "mb" }),
+        ],
+        5,
+      ),
+    ]);
+    // Assert
+    expect(store.state.items.map((i) => (i as TextItem).blockId)).toEqual(["a", "b"]);
+  });
+
+  it("a redelivered item keeps its original rank", () => {
+    // Arrange — prompt then its turn's result.
+    const store = new ConversationStore();
+    store.ingest([itemsEffect([userTurnItem("r1")], 10)]);
+    store.ingest([itemsEffect([resultItem()], 11)]);
+    // Act — a resync redelivers the prompt under a later through-seq.
+    store.ingest([itemsEffect([userTurnItem("r1")], 12)]);
+    // Assert — reconciled in place, not moved past the result.
+    expect(store.state.items.map((i) => i.kind)).toEqual(["user-turn", "result"]);
+  });
+
+  it("ranks a live typing preview at the high-water mark, above late replay", () => {
+    // Arrange — the store has seen up to seq 50; a preview opens live.
+    const store = new ConversationStore();
+    store.ingest([itemsEffect([textItem({ blockId: "h1", uuid: "h1:0", messageId: "mh1" })], 50)]);
+    store.ingest([typingEffect({ messageId: "mlive" })]);
+    // Act — older history (seq 20) arrives after the preview opened.
+    store.ingest([itemsEffect([textItem({ blockId: "h0", uuid: "h0:0", messageId: "mh0" })], 20)]);
+    // Assert — the preview stays below both history blocks.
+    expect(store.state.items.map((i) => (i as TextItem).blockId)).toEqual([
+      "h0",
+      "h1",
+      "mlive:0",
+    ]);
+  });
 
   it("reports no change for an empty item batch", () => {
     // Arrange

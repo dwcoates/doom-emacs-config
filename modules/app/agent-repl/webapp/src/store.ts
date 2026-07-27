@@ -26,7 +26,7 @@ import type {
   WebRenderState,
   WorkspaceStatusInput,
 } from "./state-adapter.js";
-import { applyStreamDelta, blockKey, settleStreamedBlock } from "./streaming.js";
+import { applyStreamDelta, blockKey, insertBySeq, settleStreamedBlock } from "./streaming.js";
 import {
   AsyncSource,
   ContentBlock,
@@ -42,7 +42,26 @@ import {
 
 // --- conversation items -------------------------------------------------------
 
-export interface UserTurnItem {
+/**
+ * The feed-order rank every conversation item carries: the session-stream seq
+ * of the `ConversationDelta` that delivered it (locally-minted items take the
+ * store's high-water mark at creation instead).
+ *
+ * Feed order is NOT arrival order. The connect resync replays history (low
+ * seqs) over the same socket that carries live pushes (high seqs), so a live
+ * item — the user's own prompt echo, most visibly — can arrive mid-replay.
+ * Appending in arrival order stranded that prompt wherever the replay
+ * happened to be, permanently. Items are instead inserted at their seq rank
+ * (`insertBySeq`), which is deterministic however the two streams interleave.
+ *
+ * Optional only for items minted before ranking existed (tests, catalogue
+ * fixtures); every store ingestion path assigns it.
+ */
+interface FeedOrderedItem {
+  seq?: number;
+}
+
+export interface UserTurnItem extends FeedOrderedItem {
   kind: "user-turn";
   requestId: string;
   content: ContentBlock[];
@@ -56,7 +75,7 @@ export interface UserTurnItem {
    */
   origin?: string;
 }
-export interface TextItem {
+export interface TextItem extends FeedOrderedItem {
   kind: "text";
   /**
    * The block's PLACE in the feed: the DOM key `render.ts` draws it under and
@@ -84,7 +103,7 @@ export interface TextItem {
    */
   ts: string;
 }
-export interface ThinkingItem {
+export interface ThinkingItem extends FeedOrderedItem {
   kind: "thinking";
   /** The block's place in the feed; see {@link TextItem.blockId}. */
   blockId: string;
@@ -97,7 +116,7 @@ export interface ThinkingItem {
   done: boolean;
   signature?: string;
 }
-export interface ToolItem {
+export interface ToolItem extends FeedOrderedItem {
   kind: "tool";
   toolUseId: string;
   toolName: string;
@@ -144,7 +163,7 @@ export interface ToolItem {
     render?: RenderHint;
   };
 }
-export interface PermissionItem {
+export interface PermissionItem extends FeedOrderedItem {
   kind: "permission";
   requestId: string;
   toolUseId: string;
@@ -162,7 +181,7 @@ export interface ResultContext {
   total: number;
   delta: number;
 }
-export interface ResultItem {
+export interface ResultItem extends FeedOrderedItem {
   kind: "result";
   subtype: ResultSubtype;
   durationMs: number;
@@ -197,7 +216,7 @@ export interface ResultItem {
    */
   context: ResultContext | null;
 }
-export interface CompactBoundaryItem {
+export interface CompactBoundaryItem extends FeedOrderedItem {
   kind: "compact-boundary";
   trigger: "auto" | "manual";
   preTokens: number;
@@ -212,7 +231,7 @@ export interface CompactBoundaryItem {
  * "api_error" and a hardcoded `recoverable` of false — neither fed by
  * anything. Every field here is the daemon's verdict, adopted unchanged.
  */
-export interface SystemFailureCard {
+export interface SystemFailureCard extends FeedOrderedItem {
   kind: "failure";
   /** SEMANTIC, never chromatic: the color comes from the shared table. */
   errorClass: ErrorClass;
@@ -233,7 +252,7 @@ export interface SystemFailureCard {
    */
   uuid: string;
 }
-export interface SystemItem {
+export interface SystemItem extends FeedOrderedItem {
   kind: "system";
   subtype: string;
 }
@@ -696,7 +715,9 @@ export class ConversationStore {
    * rather than duplicates.
    */
   addFailure(failure: SystemFailureCard): boolean {
-    this.mergeItem(failure);
+    // A locally-minted card has no delta seq; the high-water mark ranks it at
+    // the feed's live tail, where a fault report belongs.
+    this.mergeItem(failure, this.state.lastSeq);
     return true;
   }
 
@@ -705,7 +726,7 @@ export class ConversationStore {
     throughSeq: number,
   ): boolean {
     for (const item of items) {
-      this.mergeItem(item);
+      this.mergeItem(item, throughSeq);
       if (item.kind === "result") this.adoptResultUsage(item);
     }
     if (throughSeq > this.state.lastSeq) this.state.lastSeq = throughSeq;
@@ -738,15 +759,17 @@ export class ConversationStore {
   /**
    * Reconcile ONE pre-rendered conversation item onto the feed: replace the
    * existing item with the same stable id (a tool card gaining its result, a
-   * text block completing), else append. Terminal items (result, error, …)
-   * carry no id and always append.
+   * text block completing), else insert at SEQ's rank (`insertBySeq`) —
+   * arrival order is replay-vs-live interleave, not conversation order.
+   * A redelivery replaces content, never position: the standing item keeps
+   * the rank the feed first placed it at.
    */
-  private mergeItem(item: ConversationItem): void {
+  private mergeItem(item: ConversationItem, seq: number): void {
     // Streamed prose has its own lifecycle — a finished block and the preview
     // its deltas grew share no key, so pairing them is a match rather than a
     // lookup — and `streaming.ts` owns all of it.
     if (item.kind === "text" || item.kind === "thinking") {
-      settleStreamedBlock(this.state.items, item);
+      settleStreamedBlock(this.state.items, item, seq);
       return;
     }
     const key = itemKey(item);
@@ -757,14 +780,16 @@ export class ConversationStore {
         // A tool call's two items (use + result) field-merge so the result
         // never wipes the call's name/input; every other kind is a whole-item
         // replace.
-        this.state.items[idx] =
+        const merged =
           item.kind === "tool" && existing.kind === "tool"
             ? mergeToolItem(existing, item)
             : item;
+        merged.seq = existing.seq;
+        this.state.items[idx] = merged;
         return;
       }
     }
-    this.state.items.push(item);
+    insertBySeq(this.state.items, item, seq);
   }
 
   /**
@@ -835,6 +860,10 @@ export class ConversationStore {
       this.state.items,
       reveal,
       new Date(this.now()).toISOString(),
+      // The typing relay is ephemeral and carries no seq; the high-water mark
+      // ranks the preview at the live tail while replayed history (lower
+      // seqs) still slots above it.
+      this.state.lastSeq,
     );
     if (outcome.changed) return true;
     // A dropped delta is prose the user never sees, so it is reported loudly
