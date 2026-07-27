@@ -387,16 +387,15 @@ CREATE TABLE workspace_state (
 
 The table is append-only: each row is a transition, never an overwrite.
 
-### 4.2 Six axes, not one timeline
+### 4.2 Five axes, not one timeline
 
-**This is the key mental model.** A workspace's color is not one state machine — it is **six independent axes**, each contributing its LATEST row by `at`. The winner is the **min-rank candidate** across all six.
+**This is the key mental model.** A workspace's color is not one state machine — it is **five independent axes**, each contributing its LATEST row by `at`. The winner is the **min-rank candidate** across all five.
 
-The practical consequence: **a stale row on any single axis can win.** A workspace can look wrong because one axis was never cleared, while the other five are perfectly current.
+The practical consequence: **a stale row on any single axis can win.** A workspace can look wrong because one axis was never cleared, while the other four are perfectly current.
 
 | Axis | States it contributes | Clearing token |
 |---|---|---|
-| agent | `init` / `thinking` / `idle` / `ready` / `done` / `permission` / `dead` | — |
-| vendor | `vendor_blocked` | `vendor_clear` |
+| agent | `init` / `thinking` / `idle` / `ready` / `done` / `permission` / `dead` / `vendor_blocked` | — |
 | paint | `unpainted` | `painted` |
 | backfill | `backfill_failed` | `backfill_ok` |
 | degraded | `degraded` | `degraded_clear` |
@@ -457,11 +456,12 @@ sqlite3 -readonly ~/.cache/agent-repl/ssm/state.db "
 Then isolate the axis you suspect — this is the step that actually answers the question, because the winning row is often much older than the tail above:
 
 ```sh
-# vendor axis (purple)
+# agent axis (red / purple / green / dead) — LATEST row wins outright
 sqlite3 -readonly ~/.cache/agent-repl/ssm/state.db "
   SELECT datetime(at/1000,'unixepoch','localtime') t, state, cause_kind, cause_seq
   FROM workspace_state WHERE workspace='$WS'
-    AND state IN ('vendor_blocked','vendor_clear') ORDER BY at DESC LIMIT 10;"
+    AND state IN ('init','thinking','permission','done','ready','idle','dead','vendor_blocked')
+    ORDER BY at DESC LIMIT 10;"
 
 # paint axis (blue)
 #   … AND state IN ('unpainted','painted') …
@@ -489,13 +489,17 @@ Format:
 ssm: transition ws=<dir> <FROM>→<TO> cause_kind=<k> cause_seq=<n> turn_active=<bool> live_tasks=<n> merge="<phase>"
 ```
 
-### 4.6 The vendor-axis gotcha — read this before diagnosing any purple
+### 4.6 Purple is a turn OUTCOME, not a latch — read this before diagnosing any purple
 
-**The vendor axis is released ONLY by a subsequent `TurnEnded` that concludes cleanly** (`vendorBlockOf`, `ssm.go:290`).
+`vendor_blocked` sits on the **agent axis**, beside `done`. Both are reports of *how the last turn ended*; `done` says it ended normally, `vendor_blocked` says it ended at the vendor. It is written by `agentOrTaskSignal` as **exactly one row per turn end**, chosen by `VendorBlockingTurnEnd`.
 
-A **session restart does not clear it.** Restarting writes `ready` on the *agent* axis and does not touch the *vendor* axis at all — so **purple survives restarts indefinitely**, until a turn actually completes cleanly in that workspace. `ApplyVendorCleared` (`ssm.go:404`) exists as an explicit release entry point, but it currently has **zero non-test callers**.
+There is **no vendor axis, no clearing token, and no release entry point.** The purple is superseded by whatever agent-axis row comes next — a `thinking` from a retry, a `ready` from a session restart, a `done` from a turn that worked.
 
-If a user says "I restarted it and it's still purple", that is the expected behavior of this design, not a new bug.
+So **a restart DOES clear it**, and a live turn outranks it. If a user says "I restarted it and it's still purple", that is a **bug**, not the design.
+
+**Nothing gates on this state.** Prompts stay sendable while purple, and a retry that hits the same wall simply writes another `vendor_blocked` row.
+
+> **Historical note.** Until 2026-07-27 this was modeled as an independent *latched* vendor axis, released only by a subsequent clean `TurnEnded`. A session that died blocked could never emit that event, so purple survived restarts forever. Databases from before the change still contain `vendor_clear` rows — they are **inert**: no token maps them to a render state and no CTE selects them.
 
 ### 4.7 The masking effect — a color change is not proof of a new cause
 
@@ -503,7 +507,7 @@ A blue axis outranks purple. So **clearing blue** (a paint ack, say) can make a 
 
 **The color changing is not evidence that the underlying cause is new.** Always read the axis rows (§4.4) and check the `at` of the winning row, rather than trusting the transition line or the moment the user noticed.
 
-### 4.8 What actually blocks the vendor axis
+### 4.8 What actually counts as an abnormal conclusion
 
 `VendorBlockingTurnEnd` stop reasons that block:
 

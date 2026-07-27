@@ -31,4 +31,32 @@ edges rather than one:
 `paintWatermark` deliberately drops the seq on withdrawal, so a re-attestation
 after a break starts from nothing rather than inheriting the pre-break seq.
 
+## The vendor state is a turn OUTCOME, not a latch
+
+`vendor_blocked` lives on the AGENT axis beside `done`, and the two are the
+same kind of fact: a report of how the last turn ended. A `TurnEnded` writes
+exactly ONE agent-axis row — `vendor_blocked` when `VendorBlockingTurnEnd`
+says the conclusion was abnormal, `done` otherwise. There is no vendor axis,
+no clearing token, and no release entry point. Whatever the agent does next
+supersedes the row, exactly as it supersedes `done`.
+
+It was originally modeled as an independent latched axis, released only by a
+subsequent clean `TurnEnded`. That form has no correct closed version:
+
+- Some vendor blocks self-resolve with NO observable event. A usage limit
+  resets on a clock the daemon cannot see, so requiring a witnessed release
+  is wrong by construction.
+- A session that died blocked could never emit the clean turn that released
+  it, so the workspace stayed purple across every restart, forever.
+
+Nothing gates on the state — prompts stay sendable while purple, and a retry
+that hits the same wall just writes another `vendor_blocked` row. Rank 20 is
+unchanged, so purple still sits between blue and red when it competes with
+the merge, paint, backfill, and degraded axes; what changed is that a newer
+agent-axis row (`thinking`, `ready`, `done`, `dead`) now replaces it.
+
+Databases predating the remodel contain `vendor_clear` rows. No token maps
+them to a render state and no CTE selects them, so they are inert and need no
+migration.
+
 Dependencies: `proto/agentshim/` (generated Go), SQLite.
