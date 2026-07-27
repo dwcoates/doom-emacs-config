@@ -39,9 +39,13 @@ type CommandHandler interface {
 	CloseWorkspace(ctx context.Context, workspace, requestID string, cmd *frontendv1.CloseWorkspaceCmd) error
 	// OpenWorkspace (re)opens a workspace.
 	OpenWorkspace(ctx context.Context, workspace, requestID string, cmd *frontendv1.OpenWorkspaceCmd) error
-	// Resync arranges a conversation replay from the given exclusive seq. The
-	// server independently re-sends a StateSnapshot to the requesting client;
-	// this hook covers the conversation-delta replay the snapshot omits.
+	// Resync arranges a conversation replay from the given seq, INCLUSIVE (a
+	// re-push replaces by uuid, so re-sending the client's last-seen item costs
+	// nothing and re-sending one short of it would lose a bubble). The actual
+	// start is raised to the newest clear or compaction when there is one — see
+	// sessiondrv.Manager.Resync. The server independently re-sends a
+	// StateSnapshot to the requesting client; this hook covers the
+	// conversation-delta replay the snapshot omits.
 	Resync(ctx context.Context, workspace, requestID string, cmd *frontendv1.ResyncCmd) error
 	// CreateSession brings up a session for the command's cwd (the UDS
 	// replacement for POST /sessions). The daemon delivers the resulting
