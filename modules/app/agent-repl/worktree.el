@@ -15,6 +15,10 @@
 (declare-function agent-repl--drain-pending-initial-buffers "panels" (ws))
 (declare-function agent-repl--drain-pending-show-panels "panels" (ws))
 (declare-function agent-repl--ws-switch "workspace" (ws &rest args))
+(declare-function agent-repl--workspace-create-send
+                  "workspace-create-client"
+                  (requested-name git-root base-commit source-workspace source-dir
+                                  initial-prompt &optional priority model))
 (declare-function pygn-mode "pygn-mode")
 (declare-function pygn-mode-display-gui-board-at-pos "pygn-mode")
 
@@ -1676,86 +1680,67 @@ reaches the user."
                   ('head "current worktree")
                   ('master "main worktree")
                   (_ (error "Unknown worktree base %S" base)))))
-    (format "Preemptive prompt from %s (empty to name plain ws): " source)))
+    (format "Initial prompt from %s (optional): " source)))
 
 (defun agent-repl-create-worktree-workspace (base &optional source-ws)
-  "Create a new git worktree and switch to it as a project workspace.
-Prompts ONLY for the preemptive prompt; the workspace/branch name is
-generated asynchronously by a headless `claude -p --model haiku'
-invocation of the `/create-or-update-workspace create' skill.  The
-skill writes a JSON command file to ~/.claude-emacs/output/, which the
-existing file-watcher picks up to actually create the worktree.
+  "Request a daemon-owned worktree workspace from BASE.
+Prompts for a requested name and an optional initial prompt, then sends a
+`createWorkspace' command.  Emacs performs no git, session, shim, or prompt
+delivery work.  The workspace appears only after the daemon pushes
+`WorkspaceAvailable', at which point the thin client creates its perspective
+and bookkeeping and ACKs materialization.
 
-The preemptive prompt is OPTIONAL.  When it is left empty (or
-whitespace-only), name generation is skipped and a second minibuffer
-prompts for the workspace name directly; the worktree is then created
-exactly as the non-empty path would (same async git-worktree-add, same
-finalize), with two differences only: no preemptive prompt is enqueued
-and the agent is NOT auto-booted (NO-AGENT is passed to
-`agent-repl--do-create-worktree-workspace').  Focus switches to the new
-worktree.  A non-empty prompt drives the full async name-generation
-worktree-workspace flow described above.
-
-BASE selects the git ref the new branch is created from.  It is a
-symbol key in `agent-repl--worktree-base-commits':
-  `head'   — branch off the current worktree's HEAD (default; edits
-             in-flight here carry over).  The new workspace's
-             `:source-ws-dir' is the calling workspace, recording it
-             as that workspace's child.
-  `master' — branch off LOCAL `master'.  A `git fetch origin master'
-             still runs first so `origin/master' stays current; if
-             local `master' is strictly an ancestor of `origin/master'
-             (no local-only commits to lose), it is fast-forwarded to
-             match before the worktree-add.  When local `master' has
-             commits not in `origin/master', it is left alone and the
-             new worktree branches off the local tip.  The new
-             workspace's
-             `:source-ws-dir' is the master worktree path, resolved at
-             receive time in `agent-repl--create-worktree-from-command'
-             from BASE-COMMIT.  When no worktree is on master, the new
-             workspace has no `:source-ws-dir' (no recorded parent) —
-             never the calling workspace.
-
-SOURCE-WS, when non-nil, names the workspace whose repository the new
-worktree is rooted in (instead of the ambient workspace).  Interactively,
-`\\[universal-argument]' prompts for SOURCE-WS from the persp workspace list.
-
-Because name generation and worktree setup both run asynchronously,
-this command returns immediately; the new workspace materializes once
-the JSON file lands and the file-watcher dispatches it."
+BASE is `head' or `master'.  SOURCE-WS names the registered source workspace;
+with a prefix argument it is selected explicitly."
   (interactive (list 'head (agent-repl--read-source-workspace-maybe)))
   (agent-repl--log nil "create-worktree-workspace: ENTRY base=%s source-ws=%s (before minibuffer read)"
                     base (or source-ws "nil"))
   (let* ((base-commit (agent-repl--resolve-worktree-base base))
-         (effective-source-ws (or source-ws (agent-repl--ws-current-name)))
-         (source-dir (ignore-errors (agent-repl--ws-dir effective-source-ws)))
-         (git-root (or source-dir (agent-repl--resolve-current-git-root)))
-         (raw-prompt (read-string (agent-repl--worktree-preemptive-prompt base))))
-    (if (string-empty-p (string-trim (or raw-prompt "")))
-        ;; No preemptive prompt: skip name-generation, prompt for the
-        ;; workspace name directly, and create the worktree exactly as the
-        ;; non-empty path would — only without a preemptive prompt and
-        ;; without auto-booting the agent (NO-AGENT). Focus switches to it.
-        (let ((name (string-trim (read-string "Workspace name: "))))
-          (when (string-empty-p name)
-            (user-error "Workspace name is required"))
-          (let ((worktree-source-dir
-                 (if (equal base-commit agent-repl-master-branch-name)
-                     (agent-repl--master-worktree-path git-root)
-                   git-root)))
-            (agent-repl--log nil "create-worktree-workspace: empty preemptive prompt, creating worktree '%s' (claude not started) rooted at %s source-dir=%s"
-                              name git-root (or worktree-source-dir "nil"))
-            (agent-repl--do-create-worktree-workspace
-             name nil nil
-             #'agent-repl--worktree-creation-switch-callback
-             nil base-commit git-root worktree-source-dir t)))
-      (let ((prefixed-prompt (agent-repl--build-preemptive-prompt raw-prompt)))
-        (agent-repl--log nil "create-worktree-workspace: base=%s base-commit=%s source-ws=%s git-root=%s"
-                          base base-commit (or source-ws "nil") git-root)
-        (agent-repl--info nil "Generating workspace name via `claude -p --model %s'..."
-                          agent-repl-workspace-generation-model)
-        (agent-repl--spawn-workspace-generation
-         raw-prompt prefixed-prompt git-root base-commit nil)))))
+         (effective-source-ws (or source-ws (agent-repl--ws-current-name))))
+    (unless (and (stringp effective-source-ws)
+                 (not (string-empty-p effective-source-ws)))
+      (agent-repl--log nil
+                       "create-worktree-workspace: MISSING source workspace base=%s explicit=%S — aborting before input/send"
+                       base source-ws)
+      (user-error "agent-repl: no source workspace is active"))
+    (agent-repl--ws-require-known
+     effective-source-ws "create-worktree-workspace")
+    (let ((source-dir (agent-repl--ws-get effective-source-ws :project-dir)))
+      (unless (and (stringp source-dir)
+                   (not (string-empty-p source-dir)))
+        (agent-repl--log
+         effective-source-ws
+         "create-worktree-workspace: source workspace has no project-dir base=%s source=%s — aborting before input/send"
+         base effective-source-ws)
+        (user-error "agent-repl: source workspace %s has no project directory"
+                    effective-source-ws))
+      (let* ((requested-name
+              (string-trim (read-string "Workspace name: ")))
+             (_required-name
+              (when (string-empty-p requested-name)
+                (agent-repl--log
+                 effective-source-ws
+                 "create-worktree-workspace: EMPTY requested name base=%s source=%s — aborting before send"
+                 base effective-source-ws)
+                (user-error "Workspace name is required")))
+             (initial-prompt
+              (read-string (agent-repl--worktree-preemptive-prompt base)))
+             (priority (agent-repl--ws-get effective-source-ws :priority))
+             (request-id
+              (agent-repl--workspace-create-send
+               requested-name source-dir base-commit effective-source-ws
+               source-dir initial-prompt priority nil)))
+        (agent-repl--log
+         effective-source-ws
+         "create-worktree-workspace: REQUESTED request-id=%s name=%s base=%s source=%s source-dir=%s prompt=%S priority=%s"
+         request-id requested-name base-commit effective-source-ws source-dir
+         (not (string-empty-p (string-trim initial-prompt)))
+         (or priority "nil"))
+        (agent-repl--info
+         effective-source-ws
+         "Requested workspace '%s'; waiting for daemon materialization."
+         requested-name)
+        request-id))))
 
 (defconst agent-repl--oneshot-no-action-suffix ". dont take action"
   "Suffix appended to a one-shot preemptive prompt when the user dispatches
@@ -2027,15 +2012,9 @@ under `--model MODEL'."
    (agent-repl--read-oneshot-model)))
 
 (defun agent-repl-create-worktree-workspace-from-origin-master (&optional source-ws)
-  "Create a new worktree workspace branched from local `master'.
+  "Request a daemon-owned worktree workspace branched from local `master'.
 Thin wrapper around `agent-repl-create-worktree-workspace' that
 passes BASE = `master' so a keybinding can invoke it directly.
-
-A `git fetch origin master' still runs first (updates the
-`origin/master' tracking ref).  If local `master' is strictly an
-ancestor of `origin/master', it is fast-forwarded before the worktree
-is created; if local `master' has commits `origin/master' lacks, it is
-left untouched and the new branch is rooted in the local tip.
 SOURCE-WS, when non-nil, names the workspace whose repository the new
 worktree is rooted in.  Interactively, `\\[universal-argument]' prompts
 for it from the persp workspace list."
@@ -3789,8 +3768,7 @@ affect another agent's commands in the same JSON array."
                             ws (if error-string " (eval raised)" "")))))))))
 
 (defconst agent-repl--workspace-command-dispatch-table
-  '(("create"    . (agent-repl--handle-create-command    . t))
-    ("prompt"    . (agent-repl--handle-prompt-command     . nil))
+  '(("prompt"    . (agent-repl--handle-prompt-command     . nil))
     ("finish"    . (agent-repl--handle-finish-command     . nil))
     ("close"     . (agent-repl--handle-close-command      . nil))
     ("open"      . (agent-repl--handle-open-command       . nil))
@@ -3817,7 +3795,11 @@ invokes for that `type'.  STAGGERS non-nil marks a `create'-style
 handler invoked as (HANDLER CMD DELAY), after which the dispatch
 advances the create-delay by `agent-repl-worktree-stagger-seconds';
 STAGGERS nil marks a handler invoked as (HANDLER CMD) that leaves the
-delay unchanged.  Add a new workspace verb by adding a row here — the
+delay unchanged.
+
+There is intentionally no `create' row: daemon-owned workspace creation
+arrives over `createWorkspace'/`WorkspaceAvailable', never through this
+legacy file channel.  Add a new UI-only verb by adding a row here — the
 dispatcher itself needs no edit.")
 
 (defun agent-repl--dispatch-workspace-command (cmd create-delay)
@@ -3862,8 +3844,8 @@ the caller skips dispatch cleanly."
 
 (defun agent-repl--process-workspace-commands-file (file)
   "Process a workspace commands file FILE, dispatching each typed command.
-Create commands are staggered by `agent-repl-worktree-stagger-seconds' to
-avoid concurrent agent startup writes corrupting ~/.claude.json.
+Workspace `create' commands are deliberately unknown here: the daemon owns
+all git/session/shim creation through the frontend UDS protocol.
 
 Each dispatched command runs inside its own `condition-case' so a
 failure (e.g. a merge whose cherry-pick conflicts) is logged and
