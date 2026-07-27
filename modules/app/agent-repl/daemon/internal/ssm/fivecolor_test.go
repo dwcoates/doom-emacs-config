@@ -1,6 +1,9 @@
 package ssm
 
 import (
+	"database/sql"
+	"path/filepath"
+	"reflect"
 	"testing"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
@@ -239,26 +242,9 @@ func TestUserInterruptConcludesGreen(t *testing.T) {
 	}
 }
 
-func TestVendorClearedReleasesTheBlock(t *testing.T) {
-	// Arrange — blocked.
-	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(evTurnEndedReason("s1", 1, "authentication_failed", true)); err != nil {
-		t.Fatalf("turn ended: %v", err)
-	}
-	// Act — a clean auth report releases it.
-	if err := m.ApplyVendorCleared("ws1", "auth_ok"); err != nil {
-		t.Fatalf("vendor cleared: %v", err)
-	}
-	// Assert — the block is gone and the agent axis speaks again.
-	if got := mustCurrent(t, m, "ws1").State; got == frontendv1.RenderState_RENDER_STATE_VENDOR_BLOCKED {
-		t.Fatalf("state = %s, want the block released", renderName(got))
-	}
-}
-
-// A clean turn is the proof the vendor released whatever blocked the
-// account — the only evidence the daemon accepts, since our own retries are
-// not evidence of anything.
-func TestCleanTurnAfterABlockReleasesIt(t *testing.T) {
+// A clean turn simply reports its own outcome. Nothing releases anything:
+// the newer agent-axis row is the whole mechanism.
+func TestCleanTurnAfterABlockReportsDone(t *testing.T) {
 	// Arrange — blocked by an auth failure.
 	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
 	if err := m.Apply(evTurnEndedReason("s1", 1, "authentication_failed", true)); err != nil {
@@ -277,28 +263,92 @@ func TestCleanTurnAfterABlockReleasesIt(t *testing.T) {
 	}
 }
 
-// An abnormal conclusion records BOTH axes: the turn ended AND the vendor
-// blocked. Collapsing them into one row loses whichever is not written, and
-// clearing the block would then leave the workspace with no state at all.
-func TestAbnormalConclusionRecordsTheSettledTurnUnderneath(t *testing.T) {
+// ---------------------------------------------------------------------------
+// vendor_blocked as a TURN OUTCOME, not a latch
+//
+// `vendor_blocked` reports HOW the last turn ended, exactly as `done` reports
+// that it ended cleanly. It shares the agent axis with `done`, has no
+// clearing token, and is superseded by whatever the agent does next.
+//
+// Modeling it as an independent latched axis was a defect with no correct
+// closed form: a usage limit resets on a clock the daemon cannot observe, so
+// a release event that must be witnessed can never arrive. A session that
+// died blocked stayed purple across restarts forever.
+// ---------------------------------------------------------------------------
+
+// rowsFor returns every (state, cause_kind) a workspace has logged, oldest
+// first, so a test can assert on the rows WRITTEN rather than only on what
+// they resolve to.
+func rowsFor(t *testing.T, db *sql.DB, ws string) [][2]string {
+	t.Helper()
+	rs, err := db.Query(
+		`SELECT state, cause_kind FROM workspace_state WHERE workspace = ? ORDER BY at`, ws)
+	if err != nil {
+		t.Fatalf("query rows for %q: %v", ws, err)
+	}
+	defer rs.Close()
+	var out [][2]string
+	for rs.Next() {
+		var state, cause string
+		if err := rs.Scan(&state, &cause); err != nil {
+			t.Fatalf("scan row: %v", err)
+		}
+		out = append(out, [2]string{state, cause})
+	}
+	if err := rs.Err(); err != nil {
+		t.Fatalf("iterate rows: %v", err)
+	}
+	return out
+}
+
+// An abnormal turn end is ONE fact — the turn ended at the vendor — so it is
+// one row. The second, vendor-axis row it used to also write is the latch
+// that could never be opened.
+func TestAbnormalTurnEndWritesExactlyOneAgentRow(t *testing.T) {
 	// Arrange.
-	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
+	m, _, path := openTest(t, fakeResolver{"s1": "ws1"})
+	// Act.
 	if err := m.Apply(evTurnEndedReason("s1", 1, "error_max_turns", true)); err != nil {
 		t.Fatalf("turn ended: %v", err)
 	}
-	// Act — release the block out of band.
-	if err := m.ApplyVendorCleared("ws1", "user_raised_the_limit"); err != nil {
-		t.Fatalf("vendor cleared: %v", err)
+	// Assert.
+	db, err := openDB(path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
 	}
-	// Assert — the settled turn is revealed, not an absent state.
-	if got := mustCurrent(t, m, "ws1").State; got != frontendv1.RenderState_RENDER_STATE_DONE {
-		t.Fatalf("state = %s, want DONE underneath the released block", renderName(got))
+	defer db.Close()
+	got := rowsFor(t, db, "ws1")
+	want := [][2]string{{sigVendorBlocked, causeVendorBlocked}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("rows = %v, want %v", got, want)
 	}
 }
 
-// Purple outranks red: a session the vendor stopped is not going to finish
-// whatever it still looks busy doing.
-func TestVendorBlockOutranksThinking(t *testing.T) {
+// The clean counterpart: one `done` row and no vendor row of any kind.
+func TestCleanTurnEndWritesExactlyOneDoneRow(t *testing.T) {
+	// Arrange.
+	m, _, path := openTest(t, fakeResolver{"s1": "ws1"})
+	// Act.
+	if err := m.Apply(evTurnEndedReason("s1", 1, "end_turn", false)); err != nil {
+		t.Fatalf("turn ended: %v", err)
+	}
+	// Assert.
+	db, err := openDB(path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer db.Close()
+	got := rowsFor(t, db, "ws1")
+	want := [][2]string{{sigDone, causeTurnEnded}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("rows = %v, want %v", got, want)
+	}
+}
+
+// THE HEADLINE BEHAVIOR CHANGE. A turn running NOW is a newer and truer fact
+// than how the previous one ended, so red wins. Prompts were never gated on
+// the purple, so a retry has to be able to read red.
+func TestThinkingAfterAVendorBlockResolvesRed(t *testing.T) {
 	// Arrange.
 	db := newTestDB(t)
 	seedSignal(t, db, "ws", "s1", sigVendorBlocked, causeVendorBlocked, 1, 1)
@@ -309,8 +359,211 @@ func TestVendorBlockOutranksThinking(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
+	if got.state != frontendv1.RenderState_RENDER_STATE_THINKING {
+		t.Fatalf("state = %s, want THINKING", renderName(got.state))
+	}
+}
+
+// A session that comes back up is ready, whatever the previous session's last
+// turn did. This is what makes a restart heal the purple.
+func TestReadyAfterAVendorBlockResolvesGreen(t *testing.T) {
+	// Arrange.
+	db := newTestDB(t)
+	seedSignal(t, db, "ws", "s1", sigVendorBlocked, causeVendorBlocked, 1, 1)
+	seedSignal(t, db, "ws", "s2", sigReady, causeSessionStarted, 0, 2)
+	// Act.
+	got, err := resolve(db, "ws", nil)
+	// Assert.
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if got.state != frontendv1.RenderState_RENDER_STATE_READY {
+		t.Fatalf("state = %s, want READY", renderName(got.state))
+	}
+}
+
+// THE DOOM-SHAPED REGRESSION, in the shape the live database had it: a
+// workspace whose last turn ended at the vendor, then a fresh session. Before
+// the fix the latched vendor row outlived every restart and the workspace read
+// blocked indefinitely. Historical rows need no migration — they simply lose.
+func TestVendorBlockedThenASessionRestartSelfHeals(t *testing.T) {
+	// Arrange — the doom workspace's rows: a turn, its abnormal end, then two
+	// later session starts that each asserted readiness.
+	db := newTestDB(t)
+	seedSignal(t, db, "ws", "s1", sigThinking, causeTurnStarted, 1, 1)
+	seedSignal(t, db, "ws", "s1", sigVendorBlocked, causeVendorBlocked, 2, 2)
+	seedSignal(t, db, "ws", "s2", sigReady, causeSessionStarted, 0, 3)
+	seedSignal(t, db, "ws", "s3", sigReady, causeSessionStarted, 0, 4)
+	seedSignal(t, db, "ws", "", sigPainted, causePaintAck, 12612, 5)
+	// Act.
+	got, err := resolve(db, "ws", nil)
+	// Assert.
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if got.state != frontendv1.RenderState_RENDER_STATE_READY {
+		t.Fatalf("state = %s, want READY — the purple must not survive a restart", renderName(got.state))
+	}
+}
+
+// Blue outranks purple on every axis that carries it independently: a route
+// the user cannot see is a stronger claim than how the last turn ended. The
+// blue row is seeded OLDER, so only rank can make it win.
+func TestBlueOutranksVendorBlocked(t *testing.T) {
+	tests := []struct {
+		name  string
+		state string
+		cause string
+		want  frontendv1.RenderState
+	}{
+		{"no frontend attested painting", sigUnpainted, causePaintLost, frontendv1.RenderState_RENDER_STATE_INIT},
+		{"the transcript could not be read", sigBackfillFailed, "backfill:failed", frontendv1.RenderState_RENDER_STATE_INIT},
+		{"the transport went quiet", sigDegraded, "connection_degraded", frontendv1.RenderState_RENDER_STATE_DEGRADED},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			db := newTestDB(t)
+			seedSignal(t, db, "ws", "s1", tc.state, tc.cause, -1, 1)
+			seedSignal(t, db, "ws", "s1", sigVendorBlocked, causeVendorBlocked, 2, 2)
+			// Act.
+			got, err := resolve(db, "ws", nil)
+			// Assert.
+			if err != nil {
+				t.Fatalf("resolve: %v", err)
+			}
+			if got.state != tc.want {
+				t.Fatalf("state = %s, want %s", renderName(got.state), renderName(tc.want))
+			}
+		})
+	}
+}
+
+// `dead` is blue, but it shares the AGENT axis with `vendor_blocked`, so
+// recency settles it rather than rank — the same way `dead` already supersedes
+// `done`. A shim that dies after a blocked turn reads dead, which is both the
+// newer fact and the stronger claim.
+func TestShimDeathAfterAVendorBlockResolvesBlue(t *testing.T) {
+	// Arrange.
+	db := newTestDB(t)
+	seedSignal(t, db, "ws", "s1", sigVendorBlocked, causeVendorBlocked, 1, 1)
+	seedSignal(t, db, "ws", "s1", sigDead, causeSessionEnded, 2, 2)
+	// Act.
+	got, err := resolve(db, "ws", nil)
+	// Assert.
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if got.state != frontendv1.RenderState_RENDER_STATE_DEAD {
+		t.Fatalf("state = %s, want DEAD", renderName(got.state))
+	}
+}
+
+// Merge states keep their place above the whole color ladder, purple included:
+// they are workflow actionability, not agent liveness.
+func TestMergeStatesOutrankVendorBlocked(t *testing.T) {
+	tests := []struct {
+		name  string
+		state string
+		want  frontendv1.RenderState
+	}{
+		{"conflict", sigMergeConflict, frontendv1.RenderState_RENDER_STATE_MERGE_CONFLICT},
+		{"failed", sigMergeFailed, frontendv1.RenderState_RENDER_STATE_MERGE_FAILED},
+		{"merged", sigMerged, frontendv1.RenderState_RENDER_STATE_MERGED},
+		{"merging", sigMerging, frontendv1.RenderState_RENDER_STATE_MERGING},
+		{"queued", sigMergeQueued, frontendv1.RenderState_RENDER_STATE_MERGE_QUEUED},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			db := newTestDB(t)
+			seedSignal(t, db, "ws", "s1", tc.state, causeMergeTransition, -1, 1)
+			seedSignal(t, db, "ws", "s1", sigVendorBlocked, causeVendorBlocked, 2, 2)
+			// Act.
+			got, err := resolve(db, "ws", nil)
+			// Assert.
+			if err != nil {
+				t.Fatalf("resolve: %v", err)
+			}
+			if got.state != tc.want {
+				t.Fatalf("state = %s, want %s", renderName(got.state), renderName(tc.want))
+			}
+		})
+	}
+}
+
+// Rank 20 still does its job downward: with every non-agent axis CLEARED,
+// nothing competes and the purple stands. Moving it to the agent axis changed
+// which rows supersede it, never where it sits in the ladder.
+func TestVendorBlockedStandsWhenEveryOtherAxisIsClear(t *testing.T) {
+	// Arrange.
+	db := newTestDB(t)
+	seedSignal(t, db, "ws", "s1", sigVendorBlocked, causeVendorBlocked, 1, 1)
+	seedSignal(t, db, "ws", "", sigPainted, causePaintAck, 5, 2)
+	seedSignal(t, db, "ws", "", sigBackfillOK, "backfill:done", -1, 3)
+	seedSignal(t, db, "ws", "", sigDegradedClear, "connection_recovered", -1, 4)
+	seedSignal(t, db, "ws", "", sigMergeNone, causeMergeTransition, -1, 5)
+	// Act.
+	got, err := resolve(db, "ws", nil)
+	// Assert.
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
 	if got.state != frontendv1.RenderState_RENDER_STATE_VENDOR_BLOCKED {
 		t.Fatalf("state = %s, want VENDOR_BLOCKED", renderName(got.state))
+	}
+}
+
+// The yellow promotion is for GREEN winners only. A turn that ended at the
+// vendor is not green, so live background work must not repaint it yellow —
+// that would hide the outcome the purple exists to report.
+func TestBackgroundWorkDoesNotPromoteVendorBlockedToYellow(t *testing.T) {
+	// Arrange.
+	db := newTestDB(t)
+	seedSignal(t, db, "ws", "s1", sigVendorBlocked, causeVendorBlocked, 1, 1)
+	seedTaskSignal(t, db, "ws", "s1", sigTaskStarted, causeTaskStarted, 2, 2, "task-1")
+	// Act.
+	got, err := resolve(db, "ws", nil)
+	// Assert.
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if got.state != frontendv1.RenderState_RENDER_STATE_VENDOR_BLOCKED {
+		t.Fatalf("state = %s, want VENDOR_BLOCKED (idle_async is a green-only promotion)", renderName(got.state))
+	}
+	if got.liveTaskCount != 1 {
+		t.Fatalf("live_task_count = %d, want 1 — the count is still reported", got.liveTaskCount)
+	}
+}
+
+// Databases written before the remodel carry `vendor_clear` rows. No token
+// maps them to a render state and no CTE selects them, so they are inert: the
+// database opens, warms, and resolves on the rows that remain.
+func TestHistoricalVendorClearRowsAreInert(t *testing.T) {
+	// Arrange — a pre-remodel log: a block, its old clearing row, a later turn.
+	path := filepath.Join(t.TempDir(), "state.db")
+	seed, err := openDB(path)
+	if err != nil {
+		t.Fatalf("openDB: %v", err)
+	}
+	seedSignal(t, seed, "ws1", "s1", sigVendorBlocked, causeVendorBlocked, 1, 1)
+	seedSignal(t, seed, "ws1", "s1", "vendor_clear", "vendor_cleared", 2, 2)
+	seedSignal(t, seed, "ws1", "s1", sigThinking, causeTurnStarted, 3, 3)
+	if err := seed.Close(); err != nil {
+		t.Fatalf("close seed db: %v", err)
+	}
+
+	// Act — reopen through the Manager, which warms every workspace.
+	cl := &capLog{}
+	m, err := Open(Options{DBPath: path, Logf: cl.logf, Resolver: fakeResolver{}})
+	if err != nil {
+		t.Fatalf("Open over a pre-remodel database: %v", err)
+	}
+	t.Cleanup(func() { m.Close() })
+
+	// Assert — the live turn wins; the legacy row contributed nothing.
+	if got := mustCurrent(t, m, "ws1").State; got != frontendv1.RenderState_RENDER_STATE_THINKING {
+		t.Fatalf("state = %s, want THINKING", renderName(got))
 	}
 }
 
