@@ -2177,10 +2177,13 @@ func (x *SubmitPrompt) GetPermissionMode() string {
 	return ""
 }
 
+// Stop the current turn via the SDK's interrupt(). There is exactly one kind
+// of interrupt: the old `hard` flag promised a soft "end after the current
+// message" variant that no layer ever implemented (the shim always called the
+// SDK), so the flag was deleted rather than left as a dial that did nothing.
 type Interrupt struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	Hard          bool                   `protobuf:"varint,2,opt,name=hard,proto3" json:"hard,omitempty"` // hard: SDK interrupt(); soft: end after current message
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2220,13 +2223,6 @@ func (x *Interrupt) GetRequestId() string {
 		return x.RequestId
 	}
 	return ""
-}
-
-func (x *Interrupt) GetHard() bool {
-	if x != nil {
-		return x.Hard
-	}
-	return false
 }
 
 type Ack struct {
@@ -3478,11 +3474,10 @@ const file_agentshim_core_v1_core_proto_rawDesc = "" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x12\n" +
 	"\x04text\x18\x02 \x01(\tR\x04text\x12\x16\n" +
 	"\x06origin\x18\x03 \x01(\tR\x06origin\x12'\n" +
-	"\x0fpermission_mode\x18\x04 \x01(\tR\x0epermissionMode\">\n" +
+	"\x0fpermission_mode\x18\x04 \x01(\tR\x0epermissionMode\"*\n" +
 	"\tInterrupt\x12\x1d\n" +
 	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\x12\x12\n" +
-	"\x04hard\x18\x02 \x01(\bR\x04hard\"v\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\"v\n" +
 	"\x03Ack\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12P\n" +

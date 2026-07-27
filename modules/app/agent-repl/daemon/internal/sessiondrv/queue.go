@@ -437,7 +437,7 @@ func (m *Manager) beginInterject(d *driven, entryID, source string) {
 		// An interject's stop is only a failure if the shim says it could not
 		// deliver it. ALREADY_COMPLETE means the turn we were racing had
 		// already ended, which is the outcome the interject wanted.
-		outcome, err := d.client.Interrupt(m.rootCtx, true)
+		outcome, err := d.client.Interrupt(m.rootCtx)
 		if err == nil {
 			err = errclass.InterruptError(outcome)
 		}

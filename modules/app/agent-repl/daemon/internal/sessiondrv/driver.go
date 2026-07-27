@@ -99,7 +99,7 @@ type sessionClient interface {
 	SubmitPrompt(ctx context.Context, text, origin, permissionMode string) error
 	// Interrupt returns the shim's own verdict on what the stop did, which is
 	// the only place that verdict is observable.
-	Interrupt(ctx context.Context, hard bool) (corev1.InterruptOutcome, error)
+	Interrupt(ctx context.Context) (corev1.InterruptOutcome, error)
 	// Replay asks the shim for a bounded slice of persisted history, streaming
 	// it to onEvent. Its events arrive over the wire as ReplayEvent, a
 	// different type from live Events, which is what keeps replayed history
@@ -510,12 +510,12 @@ func (m *Manager) applyMetaprompt(d *driven, text string) string {
 // the turn had already finished is a success the user explicitly asked for.
 // Those two used to be indistinguishable from here, and the second was
 // reported as the first.
-func (m *Manager) Interrupt(ctx context.Context, workspace string, hard bool) error {
+func (m *Manager) Interrupt(ctx context.Context, workspace string) error {
 	d, err := m.existing(workspace)
 	if err != nil {
 		return err
 	}
-	outcome, err := d.client.Interrupt(ctx, hard)
+	outcome, err := d.client.Interrupt(ctx)
 	if err != nil {
 		return err
 	}

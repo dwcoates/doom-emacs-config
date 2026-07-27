@@ -92,10 +92,10 @@ describe("WsClient", () => {
     const ws = FakeWebSocket.instances[0];
     ws.open();
     // Act
-    const ok = client.send(`{"requestId":"r1","interrupt":{"hard":false}}`);
+    const ok = client.send(`{"requestId":"r1","interrupt":{"confirmAgents":false}}`);
     // Assert
     expect(ok).toBe(true);
-    expect(ws.sent).toEqual([`{"requestId":"r1","interrupt":{"hard":false}}`]);
+    expect(ws.sent).toEqual([`{"requestId":"r1","interrupt":{"confirmAgents":false}}`]);
   });
 
   it("send() returns false when the socket is not open", () => {

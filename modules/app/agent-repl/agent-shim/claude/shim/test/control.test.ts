@@ -19,7 +19,7 @@ import {
 interface Recorder {
   target: SdkControlTarget;
   prompts: Array<{ requestId: string; text: string; origin: string; permissionMode?: string }>;
-  interrupts: Array<{ requestId: string; hard: boolean }>;
+  interrupts: Array<{ requestId: string }>;
   throwOnPrompt?: string;
 }
 
@@ -98,15 +98,15 @@ describe("ControlDispatch.handleSubmitPrompt", () => {
 });
 
 describe("ControlDispatch.handleInterrupt", () => {
-  it("forwards the hard flag and Acks", () => {
+  it("forwards the request and Acks", () => {
     // Arrange
     const rec = recorder();
     const d = dispatch(rec, []);
     // Act
-    const receipt = d.handleInterrupt(create(InterruptSchema, { requestId: "i1", hard: true }));
+    const receipt = d.handleInterrupt(create(InterruptSchema, { requestId: "i1" }));
     // Assert
     expect(receipt.$typeName).toBe(AckSchema.typeName);
-    expect(rec.interrupts).toEqual([{ requestId: "i1", hard: true }]);
+    expect(rec.interrupts).toEqual([{ requestId: "i1" }]);
   });
 
   // --- the three-valued outcome ------------------------------------------
@@ -121,7 +121,7 @@ describe("ControlDispatch.handleInterrupt", () => {
     const rec = recorder(undefined, InterruptOutcome.INTERRUPTED);
     const d = dispatch(rec, []);
     // Act
-    const receipt = d.handleInterrupt(create(InterruptSchema, { requestId: "i1", hard: true }));
+    const receipt = d.handleInterrupt(create(InterruptSchema, { requestId: "i1" }));
     // Assert
     expect((receipt as { interruptOutcome: InterruptOutcome }).interruptOutcome)
       .toBe(InterruptOutcome.INTERRUPTED);
@@ -132,7 +132,7 @@ describe("ControlDispatch.handleInterrupt", () => {
     const rec = recorder(undefined, InterruptOutcome.ALREADY_COMPLETE);
     const d = dispatch(rec, []);
     // Act
-    const receipt = d.handleInterrupt(create(InterruptSchema, { requestId: "i1", hard: false }));
+    const receipt = d.handleInterrupt(create(InterruptSchema, { requestId: "i1" }));
     // Assert — a SUCCESS: the user asked for the turn to be over, and it is.
     expect(receipt.$typeName).toBe(AckSchema.typeName);
     expect((receipt as { interruptOutcome: InterruptOutcome }).interruptOutcome)
@@ -144,7 +144,7 @@ describe("ControlDispatch.handleInterrupt", () => {
     const rec = recorder(undefined, InterruptOutcome.FAILED);
     const d = dispatch(rec, []);
     // Act
-    const receipt = d.handleInterrupt(create(InterruptSchema, { requestId: "i1", hard: true }));
+    const receipt = d.handleInterrupt(create(InterruptSchema, { requestId: "i1" }));
     // Assert
     expect((receipt as { interruptOutcome: InterruptOutcome }).interruptOutcome)
       .toBe(InterruptOutcome.FAILED);
@@ -155,7 +155,7 @@ describe("ControlDispatch.handleInterrupt", () => {
     const rec = recorder(undefined, InterruptOutcome.INTERRUPTED, "sdk exploded");
     const d = dispatch(rec, []);
     // Act
-    const receipt = d.handleInterrupt(create(InterruptSchema, { requestId: "i1", hard: true }));
+    const receipt = d.handleInterrupt(create(InterruptSchema, { requestId: "i1" }));
     // Assert — a Nack is the stronger, established failure signal on this
     // wire; downgrading it to a successful receipt with a sad field would
     // weaken error coverage the daemon already acts on.
@@ -168,7 +168,7 @@ describe("ControlDispatch.handleInterrupt", () => {
     const rec = recorder(undefined, InterruptOutcome.ALREADY_COMPLETE);
     const d = dispatch(rec, []);
     // Act
-    const receipt = d.handleInterrupt(create(InterruptSchema, { requestId: "i9", hard: false }));
+    const receipt = d.handleInterrupt(create(InterruptSchema, { requestId: "i9" }));
     // Assert
     expect((receipt as { requestId: string }).requestId).toBe("i9");
   });

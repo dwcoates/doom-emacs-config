@@ -93,6 +93,10 @@ failure is surfaced, not hidden)."
     ("RENDER_STATE_PERMISSION"     . :permission)
     ("RENDER_STATE_DONE"           . :done)
     ("RENDER_STATE_READY"          . :ready)
+    ;; GREEN like :done — an interrupted turn is a CONCLUDED turn: the user
+    ;; asked for the stop, got it, and can prompt again immediately.  The
+    ;; word carries the distinction; the color claim is the same.
+    ("RENDER_STATE_INTERRUPTED"    . :interrupted)
     ("RENDER_STATE_VENDOR_BLOCKED" . :vendor-blocked)
     ;; DEPRECATED upstream and no longer resolved by the SSM, but still
     ;; mapped: an old daemon binary, or a state log written before the
