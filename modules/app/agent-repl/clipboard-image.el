@@ -54,22 +54,36 @@ in `agent-repl--external-boundary-functions' (core.el) so tests stub it via
 
 (defun agent-repl--image-dir (ws)
   "Return (creating) the captured-image directory for workspace WS."
-  (let ((dir (expand-file-name agent-repl--image-subdir (agent-repl--ws-dir ws))))
+  (let* ((dir (expand-file-name agent-repl--image-subdir (agent-repl--ws-dir ws)))
+         (already-exists (file-directory-p dir)))
+    (agent-repl--log ws
+                     "clipboard-image: ensure image directory path=%s already-exists=%s"
+                     dir already-exists)
     (make-directory dir t)
+    (agent-repl--log ws "clipboard-image: image directory ready path=%s" dir)
     dir))
 
-(defun agent-repl--image-new-path (dir)
+(defun agent-repl--image-new-path (dir &optional ws)
   "Return a fresh, non-created PNG path under DIR."
-  (expand-file-name
-   (format "clip-%s-%04x.png" (format-time-string "%Y%m%d-%H%M%S") (random #x10000))
-   dir))
+  (let ((path (expand-file-name
+               (format "clip-%s-%04x.png" (format-time-string "%Y%m%d-%H%M%S")
+                       (random #x10000))
+               dir)))
+    (agent-repl--log ws "clipboard-image: allocated capture destination dir=%s path=%s"
+                     dir path)
+    path))
 
-(defun agent-repl--image-nonempty-file-p (path)
+(defun agent-repl--image-nonempty-file-p (path &optional ws)
   "Return non-nil when PATH exists and holds at least one byte."
-  (and (file-exists-p path)
-       (> (or (file-attribute-size (file-attributes path)) 0) 0)))
+  (let* ((exists (file-exists-p path))
+         (size (and exists (file-attribute-size (file-attributes path))))
+         (nonempty (and size (> size 0))))
+    (agent-repl--log ws
+                     "clipboard-image: inspected captured file path=%s exists=%s size=%s nonempty=%s"
+                     path exists size nonempty)
+    nonempty))
 
-(defun agent-repl--image-write-flavor (as-class dest)
+(defun agent-repl--image-write-flavor (as-class dest &optional ws)
   "Write the clipboard's AS-CLASS flavor to DEST via AppleScript.
 AS-CLASS is an AppleScript class literal such as \"«class PNGf»\".  Return
 non-nil only when the write leaves a non-empty DEST."
@@ -80,49 +94,84 @@ non-nil only when the write leaves a non-empty DEST."
                  "set eof fp to 0\n"
                  "write theData to fp\n"
                  "close access fp")))
-    (and (eq 0 (agent-repl--image-call-process "osascript" "-e" script))
-         (agent-repl--image-nonempty-file-p dest))))
+    (agent-repl--log ws "clipboard-image: writing clipboard flavor=%s destination=%s"
+                     as-class dest)
+    (let* ((exit-code (agent-repl--image-call-process "osascript" "-e" script))
+           (nonempty (and (eq 0 exit-code)
+                          (agent-repl--image-nonempty-file-p dest ws)))
+           (written (and (eq 0 exit-code) nonempty)))
+      (agent-repl--log ws
+                       "clipboard-image: clipboard flavor write finished flavor=%s destination=%s exit=%s nonempty=%s written=%s"
+                       as-class dest exit-code nonempty written)
+      written)))
 
-(defun agent-repl--image-capture-clipboard (dest)
+(defun agent-repl--image-capture-clipboard (dest &optional ws)
   "Capture the clipboard image to DEST (a .png path); return DEST or signal.
 Tries the PNG pasteboard flavor first (what a macOS screenshot provides),
 then a TIFF flavor converted to PNG with `sips'.  Signals a `user-error'
 when the clipboard holds no image at all."
-  (cond
-   ((agent-repl--image-write-flavor "«class PNGf»" dest) dest)
-   ((let ((tiff (concat (file-name-sans-extension dest) ".tiff")))
-      (and (agent-repl--image-write-flavor "«class TIFF»" tiff)
-           (eq 0 (agent-repl--image-call-process
-                  "sips" "-s" "format" "png" tiff "--out" dest))
-           (agent-repl--image-nonempty-file-p dest)))
-    dest)
-   (t (user-error "agent-repl: no image found on the clipboard"))))
+  (agent-repl--log ws "clipboard-image: capture started destination=%s" dest)
+  (let ((png-written (agent-repl--image-write-flavor "«class PNGf»" dest ws)))
+    (cond
+     (png-written
+      (agent-repl--log ws "clipboard-image: capture selected PNG flavor destination=%s" dest)
+      dest)
+     ((let* ((tiff (concat (file-name-sans-extension dest) ".tiff"))
+             (tiff-written (agent-repl--image-write-flavor "«class TIFF»" tiff ws))
+             (sips-exit (and tiff-written
+                             (agent-repl--image-call-process
+                              "sips" "-s" "format" "png" tiff "--out" dest)))
+             (png-written (and (eq 0 sips-exit)
+                               (agent-repl--image-nonempty-file-p dest ws))))
+        (agent-repl--log ws
+                         "clipboard-image: TIFF capture branch tiff=%s tiff-written=%s sips-exit=%s png-written=%s"
+                         tiff tiff-written sips-exit png-written)
+        png-written)
+      (agent-repl--log ws "clipboard-image: capture selected TIFF conversion destination=%s" dest)
+      dest)
+     (t
+      (agent-repl--log ws "clipboard-image: capture failed destination=%s png-written=%s"
+                       dest png-written)
+      (user-error "agent-repl: no image found on the clipboard")))))
 
 ;;;; ---- Buffer insertion -----------------------------------------------------
 
-(defun agent-repl--image-thumbnail (path)
+(defun agent-repl--image-thumbnail (path &optional ws)
   "Return an image descriptor for PATH scaled to the thumbnail height, or nil.
 Nil when this frame cannot render PNG images (e.g. a TTY frame), so callers
 fall back to the plain path text."
-  (when (and (display-graphic-p) (image-type-available-p 'png))
-    (create-image path 'png nil :max-height agent-repl-image-thumbnail-max-height)))
+  (let* ((graphic (display-graphic-p))
+         (png-available (and graphic (image-type-available-p 'png)))
+         (thumbnail (and png-available
+                         (create-image path 'png nil
+                                       :max-height agent-repl-image-thumbnail-max-height))))
+    (agent-repl--log ws
+                     "clipboard-image: thumbnail decision path=%s graphic=%s png-available=%s thumbnail-created=%s max-height=%s"
+                     path graphic png-available (not (null thumbnail))
+                     agent-repl-image-thumbnail-max-height)
+    thumbnail))
 
-(defun agent-repl--image-insert-token (path)
+(defun agent-repl--image-insert-token (path &optional ws)
   "Insert PATH on its own line at point, overlaying a thumbnail when possible.
 The inserted buffer text is exactly PATH, so the normal text send carries
 it unchanged; the thumbnail is an overlay `display' that never alters the
 buffer text.  Return the overlay, or nil when no thumbnail was drawn."
-  (unless (bolp) (insert "\n"))
-  (let ((start (point)))
-    (insert path)
-    (prog1
-        (when-let ((thumb (agent-repl--image-thumbnail path)))
-          (let ((ov (make-overlay start (point))))
-            (overlay-put ov 'display thumb)
-            (overlay-put ov 'agent-repl-image path)
-            (overlay-put ov 'help-echo path)
-            ov))
-      (insert "\n"))))
+  (let ((started-at-bol (bolp)))
+    (unless started-at-bol (insert "\n"))
+    (let ((start (point)))
+      (insert path)
+      (let ((overlay
+             (when-let ((thumb (agent-repl--image-thumbnail path ws)))
+               (let ((ov (make-overlay start (point))))
+                 (overlay-put ov 'display thumb)
+                 (overlay-put ov 'agent-repl-image path)
+                 (overlay-put ov 'help-echo path)
+                 ov))))
+        (insert "\n")
+        (agent-repl--log ws
+                         "clipboard-image: inserted token path=%s started-at-bol=%s thumbnail-overlay=%s"
+                         path started-at-bol (not (null overlay)))
+        overlay))))
 
 ;;;###autoload
 (defun agent-repl-attach-clipboard-image ()
@@ -133,9 +182,10 @@ The path rides the normal text send, so the agent reads the image via its
 Read tool.  Signals a `user-error' when the clipboard holds no image."
   (interactive)
   (let* ((ws (agent-repl--ws-current-name))
-         (dest (agent-repl--image-capture-clipboard
-                (agent-repl--image-new-path (agent-repl--image-dir ws)))))
-    (agent-repl--image-insert-token dest)
+         (dir (agent-repl--image-dir ws))
+         (path (agent-repl--image-new-path dir ws))
+         (dest (agent-repl--image-capture-clipboard path ws)))
+    (agent-repl--image-insert-token dest ws)
     (agent-repl--log ws "attach-clipboard-image: wrote %s" dest)
     (message "agent-repl: attached image %s" (file-name-nondirectory dest))
     dest))
