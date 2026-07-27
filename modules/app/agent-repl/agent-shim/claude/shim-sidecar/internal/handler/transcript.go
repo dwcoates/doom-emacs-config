@@ -5,13 +5,16 @@ import (
 	datav1 "agentrepl/proto/agentshim/data/v1"
 	"agentrepl/shim-claude-sidecar/internal/convert"
 	"agentrepl/shim-claude-sidecar/internal/tail"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 // SessionTranscriptHandler converts session transcript lines into their vendor
 // file-plane twins PLUS the vendor-neutral lifecycle events the file plane owns
 // (§7.2): TaskStarted from launch results (agent/workflow/shell, constructing a
-// shell task's output path), TurnEnded from stop_hook_summary, and TaskEnded
-// (STOPPED) from TaskStop results.
+// shell task's output path), TurnEnded from stop_hook_summary, TaskEnded
+// (STOPPED) from TaskStop results, and the two context cuts (contextcut.go) —
+// ContextCleared from an expanded /clear envelope and ContextCompacted
+// coalesced across a compact_boundary and the summary line following it.
 type SessionTranscriptHandler struct {
 	conv *convert.Converter
 	log  Logf
@@ -22,34 +25,72 @@ func NewSessionTranscriptHandler(log Logf) *SessionTranscriptHandler {
 	return &SessionTranscriptHandler{conv: convert.New(log), log: log}
 }
 
+// converted is one frame's conversion result. Conversion is memoized per batch
+// because the compaction cut has to look at the line AFTER the boundary, and a
+// frame must not be converted (and so must not loud-log its unknown fields)
+// twice.
+type converted struct {
+	line   *datav1.TranscriptLine
+	extras *structpb.Struct
+	err    error
+}
+
 // Handle implements Handler.
 func (h *SessionTranscriptHandler) Handle(frames []tail.Frame, ctx *Context) []*corev1.Event {
 	var out []*corev1.Event
-	for _, f := range frames {
+	memo := make([]*converted, len(frames))
+	for i, f := range frames {
 		if f.ParseErr != nil {
 			h.log("transcript: parse failure at %s:%d: %v", ctx.Path, f.Offset, f.ParseErr)
 			out = append(out, unparsedEvent(ctx.SessionID, ctx.Path, f.Offset, f.Raw, f.ParseErr))
 			continue
 		}
-		line, extras, err := h.conv.TranscriptLine(f.Obj)
-		if err != nil {
-			h.log("transcript: conversion failure at %s:%d: %v", ctx.Path, f.Offset, err)
-			out = append(out, unparsedEvent(ctx.SessionID, ctx.Path, f.Offset, f.Raw, err))
+		c := h.convertAt(memo, frames, i)
+		if c.err != nil {
+			h.log("transcript: conversion failure at %s:%d: %v", ctx.Path, f.Offset, c.err)
+			out = append(out, unparsedEvent(ctx.SessionID, ctx.Path, f.Offset, f.Raw, c.err))
 			continue
 		}
-		if ev := vendorEvent(ctx.SessionID, line, extras, "", h.log); ev != nil {
+		if ev := vendorEvent(ctx.SessionID, c.line, c.extras, "", h.log); ev != nil {
 			out = append(out, ev)
 		}
-		out = append(out, h.lifecycle(line, ctx)...)
+		out = append(out, h.lifecycle(c.line, h.convertAt(memo, frames, i+1).line, ctx)...)
 	}
 	return out
 }
 
+// convertAt returns the memoized conversion of frames[i]. An index past the end,
+// or a frame that failed to parse, yields a zero result whose line is nil —
+// which is exactly what a lookahead past the batch's last line means.
+func (h *SessionTranscriptHandler) convertAt(memo []*converted, frames []tail.Frame, i int) *converted {
+	if i < 0 || i >= len(frames) {
+		return &converted{}
+	}
+	if memo[i] != nil {
+		return memo[i]
+	}
+	if frames[i].ParseErr != nil {
+		memo[i] = &converted{}
+		return memo[i]
+	}
+	line, extras, err := h.conv.TranscriptLine(frames[i].Obj)
+	memo[i] = &converted{line: line, extras: extras, err: err}
+	return memo[i]
+}
+
 // lifecycle emits the vendor-neutral twins derivable from one transcript line.
-func (h *SessionTranscriptHandler) lifecycle(line *datav1.TranscriptLine, ctx *Context) []*corev1.Event {
+// next is the line that FOLLOWS it in the file (nil at the end of a batch), and
+// exists solely so a compaction boundary can pick up its summary.
+func (h *SessionTranscriptHandler) lifecycle(line, next *datav1.TranscriptLine, ctx *Context) []*corev1.Event {
 	var out []*corev1.Event
 	if u := line.GetUser(); u != nil {
 		out = append(out, launchTwins(u.GetToolUseResult(), u.GetEnvelope(), ctx)...)
+		// A compaction summary is typed `user` but is the harness's text, not
+		// the user's, so it is never read as a prompt — it is consumed by the
+		// boundary that precedes it (compactSummary) and nothing else.
+		if !u.GetEnvelope().GetIsCompactSummary() && isClearCommand(u.GetMessage()) {
+			out = append(out, clearedEvent(ctx.SessionID, u.GetEnvelope().GetUuid(), h.log))
+		}
 	}
 	if s := line.GetSystem(); s != nil {
 		if sh := s.GetStopHookSummary(); sh != nil {
@@ -58,6 +99,9 @@ func (h *SessionTranscriptHandler) lifecycle(line *datav1.TranscriptLine, ctx *C
 				StopReason: sh.GetStopReason(),
 				IsError:    sh.GetPreventedContinuation(),
 			}))
+		}
+		if cb := s.GetCompactBoundary(); cb != nil {
+			out = append(out, compactedEvent(ctx.SessionID, s.GetEnvelope(), cb, next, h.log))
 		}
 	}
 	return out
