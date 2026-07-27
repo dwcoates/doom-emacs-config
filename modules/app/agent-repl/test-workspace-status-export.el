@@ -161,6 +161,17 @@ encode."
       (should (gethash "ws-dead"     workspaces))
       (should-not (gethash "ws-merged" workspaces)))))
 
+(ert-deftest agent-repl-test-workspace-status-snapshot-skips-tombstoned ()
+  "Snapshot uses the workspace API's live roster, excluding tombstones."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-set-agent-state "ws-live" :idle)
+    (agent-repl--ws-set-agent-state "ws-tombstoned" :thinking)
+    (agent-repl--ws-put "ws-tombstoned" :nuked-at "2026-07-27T00:00:00Z")
+    (let* ((snap (agent-repl--workspace-status-snapshot))
+           (workspaces (cdr (assoc "workspaces" snap))))
+      (should (gethash "ws-live" workspaces))
+      (should-not (gethash "ws-tombstoned" workspaces)))))
+
 (ert-deftest agent-repl-test-workspace-status-merged-p ()
   "`agent-repl--workspace-status-merged-p' returns t exactly for `:merged' workspaces."
   (agent-repl-test--with-clean-state
@@ -280,6 +291,35 @@ on a 111-workspace registry."
             (agent-repl--write-workspace-status)
             (should (file-exists-p tmp)))
         (when (file-directory-p root) (delete-directory root t))))))
+
+(ert-deftest agent-repl-test-write-workspace-status-logs-write-path-on-error ()
+  "A directory-creation error is logged with the configured output path."
+  (agent-repl-test--with-clean-state
+    (let* ((agent-repl-workspace-status-file
+            (expand-file-name "status-export-error/status.json" temporary-file-directory))
+           (expected-label
+            (format "write-workspace-status file=%s error"
+                    agent-repl-workspace-status-file))
+           (logged nil)
+           (warned nil))
+      (cl-letf (((symbol-function 'file-directory-p) (lambda (_path) nil))
+                ((symbol-function 'make-directory)
+                 (lambda (&rest _) (error "simulated mkdir failure")))
+                ((symbol-function 'agent-repl--log)
+                 (lambda (_ws fmt &rest args)
+                   (push (apply #'format fmt args) logged)))
+                ((symbol-function 'agent-repl--warn)
+                 (lambda (_ws fmt &rest args)
+                   (push (apply #'format fmt args) warned))))
+        (agent-repl--write-workspace-status)
+        (should (seq-some
+                 (lambda (line)
+                   (string-match-p (regexp-quote expected-label) line))
+                 logged))
+        (should (seq-some
+                 (lambda (line)
+                   (string-match-p (regexp-quote expected-label) line))
+                 warned))))))
 
 ;;;; ---- Tests: staggered write scheduler ----
 
