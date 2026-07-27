@@ -1254,3 +1254,78 @@ func TestATurnEndDoesNotReportADeath(t *testing.T) {
 		t.Fatalf("session-ended reports = %d, want 0", ended)
 	}
 }
+
+// --- the prompt round-trip receipt ------------------------------------------
+
+func TestUserTurnReceiptReadsAPromptString(t *testing.T) {
+	// Arrange — a delta carrying one string-content user prompt.
+	cd := &frontendv1.ConversationDelta{Items: []*frontendv1.ConversationItem{{
+		RequestId: "fe-9-abcd",
+		Item: &frontendv1.ConversationItem_UserMessage{UserMessage: &datav1.ApiUserMessage{
+			Content: &datav1.ApiUserMessage_ContentString{ContentString: "hello there"},
+		}},
+	}}}
+	// Act
+	requestID, textLen := userTurnReceipt(cd)
+	// Assert
+	if requestID != "fe-9-abcd" || textLen != len("hello there") {
+		t.Fatalf("receipt = (%q, %d), want (fe-9-abcd, %d)", requestID, textLen, len("hello there"))
+	}
+}
+
+func TestUserTurnReceiptSumsTextBlocks(t *testing.T) {
+	// Arrange — a block-content prompt with two text blocks.
+	cd := &frontendv1.ConversationDelta{Items: []*frontendv1.ConversationItem{{
+		RequestId: "fe-3-cafe",
+		Item: &frontendv1.ConversationItem_UserMessage{UserMessage: &datav1.ApiUserMessage{
+			Content: &datav1.ApiUserMessage_ContentBlocks{ContentBlocks: &datav1.ApiContentBlocks{
+				Blocks: []*datav1.ContentBlock{
+					{Block: &datav1.ContentBlock_Text{Text: &datav1.TextBlock{Text: "ab"}}},
+					{Block: &datav1.ContentBlock_Text{Text: &datav1.TextBlock{Text: "cde"}}},
+				},
+			}},
+		}},
+	}}}
+	// Act
+	_, textLen := userTurnReceipt(cd)
+	// Assert
+	if textLen != 5 {
+		t.Fatalf("textLen = %d, want 5", textLen)
+	}
+}
+
+func TestUserTurnReceiptIgnoresPureToolFeedback(t *testing.T) {
+	// Arrange — a user_message carrying only a tool_result block: rendered as
+	// a tool result, never a prompt bubble, so no receipt (logging one per
+	// tool call would bury the per-prompt line this exists for).
+	cd := &frontendv1.ConversationDelta{Items: []*frontendv1.ConversationItem{{
+		RequestId: "fe-4-feed",
+		Item: &frontendv1.ConversationItem_UserMessage{UserMessage: &datav1.ApiUserMessage{
+			Content: &datav1.ApiUserMessage_ContentBlocks{ContentBlocks: &datav1.ApiContentBlocks{
+				Blocks: []*datav1.ContentBlock{
+					{Block: &datav1.ContentBlock_ToolResult{ToolResult: &datav1.ToolResultBlock{}}},
+				},
+			}},
+		}},
+	}}}
+	// Act
+	_, textLen := userTurnReceipt(cd)
+	// Assert
+	if textLen != 0 {
+		t.Fatalf("textLen = %d, want 0 for pure tool feedback", textLen)
+	}
+}
+
+func TestUserTurnReceiptIgnoresNonUserItems(t *testing.T) {
+	// Arrange — an assistant-only delta.
+	cd := &frontendv1.ConversationDelta{Items: []*frontendv1.ConversationItem{{
+		RequestId: "fe-5-0000",
+		Item:      &frontendv1.ConversationItem_AssistantMessage{AssistantMessage: &datav1.ApiAssistantMessage{}},
+	}}}
+	// Act
+	_, textLen := userTurnReceipt(cd)
+	// Assert
+	if textLen != 0 {
+		t.Fatalf("textLen = %d, want 0 for a non-user delta", textLen)
+	}
+}

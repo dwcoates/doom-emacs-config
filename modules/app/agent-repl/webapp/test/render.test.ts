@@ -5473,3 +5473,69 @@ describe("failure card identity", () => {
     expect(a).not.toBe(b);
   });
 });
+
+/**
+ * The prompt round-trip's last receipt: a render that draws a user turn the
+ * previous render had not seen logs one line, carrying whether the turn ranks
+ * at the feed tail — the position a just-sent prompt must land at.
+ */
+describe("FeedRenderer: fresh user turn logs a rendering receipt", () => {
+  const NOOP_ACTIONS: Actions = {
+    decidePermission() {},
+    answerQuestions() {},
+    cancelQueued() {},
+    runQueuedNow() {},
+    acceptQueued() {},
+  };
+
+  function mount(): FeedRenderer {
+    return new FeedRenderer(document.createElement("div"), NOOP_ACTIONS);
+  }
+
+  function stateOf(items: ConversationItem[]): StoreState {
+    const state = new ConversationStore().state;
+    state.items = items;
+    return state;
+  }
+
+  function recordLines(): string[] {
+    const lines: string[] = [];
+    setLogger(new ForwardingLogger(() => true, (level, l) => lines.push(`${level}: ${l}`)));
+    return lines;
+  }
+
+  afterEach(() => resetLoggingForTests());
+
+  it("logs last=true when the fresh turn is the feed tail", () => {
+    // Arrange
+    const lines = recordLines();
+    const feed = mount();
+    // Act
+    feed.render(stateOf([text("b1"), userTurnAt(9, 0)]));
+    // Assert
+    expect(lines).toContain("info: feed: user turn rendering request_id=r1 last=true");
+  });
+
+  it("logs last=false when items rank below the fresh turn", () => {
+    // Arrange — the misorder case this receipt exists to catch.
+    const lines = recordLines();
+    const feed = mount();
+    // Act
+    feed.render(stateOf([userTurnAt(9, 0), text("b1")]));
+    // Assert
+    expect(lines).toContain("info: feed: user turn rendering request_id=r1 last=false");
+  });
+
+  it("does not re-log an already-seen turn on the next render", () => {
+    // Arrange
+    const lines = recordLines();
+    const feed = mount();
+    const state = stateOf([userTurnAt(9, 0)]);
+    feed.render(state);
+    const after = lines.length;
+    // Act
+    feed.render(state);
+    // Assert
+    expect(lines.length).toBe(after);
+  });
+});

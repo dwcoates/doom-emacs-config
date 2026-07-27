@@ -172,7 +172,7 @@ func (c *consumer) repullConversation(ev *corev1.Event) {
 	if ev.GetVendor() == nil {
 		return // only vendor payloads carry conversation content
 	}
-	c.pushConversation(ev)
+	c.pushConversation(ev, false)
 }
 
 // compile-time proof that the real client satisfies the driver's replay need.
