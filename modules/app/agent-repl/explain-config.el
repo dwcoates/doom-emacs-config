@@ -218,9 +218,21 @@ changed.  This forces the resize on every show."
     (with-selected-window window
       (setq-local window-size-fixed nil)
       (let ((delta (- target (window-total-width window))))
+        (agent-repl--log nil
+                         "explain-config: apply-width window=%S target=%d current=%d delta=%d"
+                         window target (window-total-width window) delta)
         (cond
-         ((> delta 0) (enlarge-window delta t))
-         ((< delta 0) (shrink-window (abs delta) t)))))))
+         ((> delta 0)
+          (enlarge-window delta t)
+          (agent-repl--log nil "explain-config: apply-width enlarged window=%S by=%d"
+                           window delta))
+         ((< delta 0)
+          (shrink-window (abs delta) t)
+          (agent-repl--log nil "explain-config: apply-width shrank window=%S by=%d"
+                           window (abs delta)))
+         (t
+          (agent-repl--log nil "explain-config: apply-width unchanged window=%S"
+                           window)))))))
 
 (defun agent-repl--explain-config-current-agent-output-window ()
   "Return the live agent output window in the selected frame, or nil.
@@ -230,8 +242,17 @@ existing panel-lookup key — note we do NOT introduce that name
 here, the popup itself only deals in \"agent output\").  Guards
 on `fboundp' so callers in load order before window.el (e.g. early
 test harnesses) get nil instead of a void-function error."
-  (and (fboundp 'agent-repl-window--panel-window)
-       (agent-repl-window--panel-window :view)))
+  (let ((window-api-loaded-p (fboundp 'agent-repl-window--panel-window)))
+    (if window-api-loaded-p
+        (let ((output-win (agent-repl-window--panel-window :view)))
+          (agent-repl--log nil
+                           "explain-config: resolve agent-output window api-loaded=%s result=%S"
+                           window-api-loaded-p output-win)
+          output-win)
+      (agent-repl--log nil
+                       "explain-config: resolve agent-output window api-loaded=%s result=nil"
+                       window-api-loaded-p)
+      nil)))
 
 (defun agent-repl--explain-config-take-over-agent-output-window (output-win buf)
   "Swap OUTPUT-WIN's buffer for BUF and record the original for restoration.
@@ -241,6 +262,9 @@ the swap errors.  The pre-swap buffer is stashed in
 `agent-repl--explain-config-replaced-window' so
 `agent-repl--explain-config-hide' can restore it.  Returns OUTPUT-WIN."
   (let ((prev-buf (window-buffer output-win)))
+    (agent-repl--log nil
+                     "explain-config: take over agent-output window=%S previous-buffer=%S popup-buffer=%S"
+                     output-win prev-buf buf)
     (set-window-dedicated-p output-win nil)
     (set-window-buffer output-win buf)
     (setq agent-repl--explain-config-replaced-window
@@ -255,16 +279,25 @@ hardening recipe (dedicate / width-fixed / delete-protect — the same
 recipe the agent output window is always given, whether it hosts the
 gui webview or, transiently, this popup) on success so the restored
 window matches its original recipe."
-  (when-let ((cell agent-repl--explain-config-replaced-window))
-    (setq agent-repl--explain-config-replaced-window nil)
-    (let ((win (car cell))
-          (prev (cdr cell)))
-      (when (and (window-live-p win) (buffer-live-p prev))
-        (set-window-buffer win prev)
-        (agent-repl-window--harden win
-                                   :dedicate t
-                                   :size-fix 'width
-                                   :delete-protect t)))))
+  (if-let ((cell agent-repl--explain-config-replaced-window))
+      (progn
+        (setq agent-repl--explain-config-replaced-window nil)
+        (let ((win (car cell))
+              (prev (cdr cell)))
+          (if (and (window-live-p win) (buffer-live-p prev))
+              (progn
+                (agent-repl--log nil
+                                 "explain-config: restore replaced window=%S previous-buffer=%S"
+                                 win prev)
+                (set-window-buffer win prev)
+                (agent-repl-window--harden win
+                                           :dedicate t
+                                           :size-fix 'width
+                                           :delete-protect t))
+            (agent-repl--log nil
+                             "explain-config: skip replaced-window restore window-live=%s buffer-live=%s window=%S buffer=%S"
+                             (window-live-p win) (buffer-live-p prev) win prev))))
+    (agent-repl--log nil "explain-config: no replaced window to restore")))
 
 (defun agent-repl--explain-config-show ()
   "Display the explain-config webview in the current workspace.
@@ -287,22 +320,38 @@ Display priority:
 
 Other side windows are never touched in any branch — their
 visibility is their own concern.  Returns the displayed window or nil."
-  (when-let ((buf (get-buffer agent-repl-explain-config-buffer-name)))
-    (let ((existing (get-buffer-window buf t)))
-      (cond
-       ((window-live-p existing)
-        (unless (and agent-repl--explain-config-replaced-window
-                     (eq existing (car agent-repl--explain-config-replaced-window)))
-          (agent-repl--explain-config-apply-width existing))
-        existing)
-       ((agent-repl--explain-config-current-agent-output-window)
-        (agent-repl--explain-config-take-over-agent-output-window
-         (agent-repl--explain-config-current-agent-output-window) buf))
-       (t
-        (let ((win (display-buffer buf agent-repl--explain-config-display-action)))
-          (when (window-live-p win)
-            (agent-repl--explain-config-apply-width win))
-          win))))))
+  (if-let ((buf (get-buffer agent-repl-explain-config-buffer-name)))
+      (let ((existing (get-buffer-window buf t)))
+        (cond
+         ((window-live-p existing)
+          (let ((stolen-p (and agent-repl--explain-config-replaced-window
+                               (eq existing (car agent-repl--explain-config-replaced-window)))))
+            (agent-repl--log nil
+                             "explain-config: show existing window=%S buffer=%S stolen=%s"
+                             existing buf stolen-p)
+            (unless stolen-p
+              (agent-repl--explain-config-apply-width existing))
+            existing))
+         ((agent-repl--explain-config-current-agent-output-window)
+          (let ((output-win (agent-repl--explain-config-current-agent-output-window)))
+            (agent-repl--log nil
+                             "explain-config: show taking over agent-output window=%S buffer=%S"
+                             output-win buf)
+            (agent-repl--explain-config-take-over-agent-output-window output-win buf)))
+         (t
+          (agent-repl--log nil
+                           "explain-config: show using side-window buffer=%S; agent output is absent"
+                           buf)
+          (let ((win (display-buffer buf agent-repl--explain-config-display-action)))
+            (if (window-live-p win)
+                (progn
+                  (agent-repl--explain-config-apply-width win)
+                  (agent-repl--log nil "explain-config: show side-window displayed window=%S" win))
+              (agent-repl--log nil "explain-config: show side-window returned non-live window=%S" win))
+            win))))
+    (agent-repl--log nil "explain-config: show skipped; webview buffer %S is absent"
+                     agent-repl-explain-config-buffer-name)
+    nil))
 
 (defun agent-repl--explain-config-hide ()
   "Hide the explain-config webview in the current workspace.
@@ -317,8 +366,12 @@ remaining windows still displaying the explain-config webview (e.g.
 side-window fallbacks) are deleted.  Other side windows are never
 touched."
   (agent-repl--explain-config-restore-replaced-window)
-  (when-let ((buf (get-buffer agent-repl-explain-config-buffer-name)))
-    (agent-repl-window--delete-buffer-windows buf)))
+  (if-let ((buf (get-buffer agent-repl-explain-config-buffer-name)))
+      (progn
+        (agent-repl--log nil "explain-config: hide deleting visible windows for buffer=%S" buf)
+        (agent-repl-window--delete-buffer-windows buf))
+    (agent-repl--log nil "explain-config: hide found no webview buffer name=%S"
+                     agent-repl-explain-config-buffer-name)))
 
 ;;;; ---- Session ---------------------------------------------------------------
 
@@ -329,7 +382,11 @@ so create and send MUST compute it identically — hence one helper.  It is a
 dedicated directory (`agent-repl-explain-config-dir'), never a real gui
 workspace's root, so keying the workspace-less explain-config session by
 its cwd cannot collide with another session."
-  (file-name-as-directory (expand-file-name agent-repl-explain-config-dir)))
+  (let ((cwd (file-name-as-directory
+              (expand-file-name agent-repl-explain-config-dir))))
+    (agent-repl--log nil "explain-config: resolve cwd configured=%S resolved=%S"
+                     agent-repl-explain-config-dir cwd)
+    cwd))
 
 (defun agent-repl--explain-config-ensure-session ()
   "Return the live explain-config daemon session id, creating it if needed.
@@ -340,13 +397,26 @@ daemon still lists it as live.  A newly created session is rooted at
 `agent-repl-explain-config-model', and created under
 `agent-repl-explain-config-permission-mode' — and clears the primed
 flag, so its first turn carries the read-only preamble."
+  (agent-repl--log nil
+                   "explain-config: ensure-session start recorded-session=%S primed=%s model=%S permission-mode=%S"
+                   agent-repl--explain-config-session-id
+                   agent-repl--explain-config-primed-p
+                   agent-repl-explain-config-model
+                   agent-repl-explain-config-permission-mode)
   (unless (agent-repl--ensure-frontend-daemon)
+    (agent-repl--log nil "explain-config: ensure-session FAILED; frontend daemon did not start")
     (error "agent-repl: frontend daemon not started (auto-start disabled or init inhibited)"))
   (agent-repl--frontend-wait-ready)
-  (if (and agent-repl--explain-config-session-id
-           (agent-repl--frontend-session-live-p agent-repl--explain-config-session-id))
-      agent-repl--explain-config-session-id
-    (let* ((dir (agent-repl--explain-config-cwd))
+  (let* ((recorded-id agent-repl--explain-config-session-id)
+         (live-p (and recorded-id
+                      (agent-repl--frontend-session-live-p recorded-id))))
+    (agent-repl--log nil "explain-config: ensure-session daemon-ready recorded-session=%S live=%s"
+                     recorded-id live-p)
+    (if live-p
+        (progn
+          (agent-repl--log nil "explain-config: ensure-session reusing live session=%S" recorded-id)
+          recorded-id)
+      (let* ((dir (agent-repl--explain-config-cwd))
            (agent-repl-frontend-permission-mode
             agent-repl-explain-config-permission-mode)
            ;; THE one deliberate ungated create in the tree.  The daemon
@@ -362,27 +432,35 @@ flag, so its first turn carries the read-only preamble."
                 dir agent-repl-explain-config-model)))
       (setq agent-repl--explain-config-session-id id
             agent-repl--explain-config-primed-p nil)
-      (agent-repl--log nil "explain-config: session created %s (cwd=%s model=%s)"
-                       id dir agent-repl-explain-config-model)
-      id)))
+      (agent-repl--log nil
+                       "explain-config: session created id=%S replaced=%S cwd=%S model=%S permission-mode=%S ungated-consent=%s primed=%s"
+                       id recorded-id dir agent-repl-explain-config-model
+                       agent-repl-explain-config-permission-mode
+                       agent-repl-frontend-allow-ungated
+                       agent-repl--explain-config-primed-p)
+      id))))
 
 (defun agent-repl--explain-config-release-session ()
   "Best-effort DELETE of the explain-config daemon session; clear the binding.
 Errors are LOGGED, never signalled: a reset must not abort because the
 daemon is already gone — but nothing is silently dropped, the failure
 lands in the agent-repl log."
-  (when agent-repl--explain-config-session-id
-    (condition-case err
-        (progn
-          (agent-repl--frontend-delete-session agent-repl--explain-config-session-id)
-          (agent-repl--log nil "explain-config: session released %s"
-                           agent-repl--explain-config-session-id))
-      (error
-       (agent-repl--log nil "explain-config: session release FAILED for %s: %s"
-                        agent-repl--explain-config-session-id
-                        (error-message-string err)))))
+  (if agent-repl--explain-config-session-id
+      (condition-case err
+          (progn
+            (agent-repl--log nil "explain-config: release-session deleting id=%S"
+                             agent-repl--explain-config-session-id)
+            (agent-repl--frontend-delete-session agent-repl--explain-config-session-id)
+            (agent-repl--log nil "explain-config: session released %S"
+                             agent-repl--explain-config-session-id))
+        (error
+         (agent-repl--log nil "explain-config: session release FAILED for %S: %s"
+                          agent-repl--explain-config-session-id
+                          (error-message-string err))))
+    (agent-repl--log nil "explain-config: release-session skipped; no session is bound"))
   (setq agent-repl--explain-config-session-id nil
-        agent-repl--explain-config-primed-p nil))
+        agent-repl--explain-config-primed-p nil)
+  (agent-repl--log nil "explain-config: release-session binding cleared"))
 
 ;;;; ---- Webview ---------------------------------------------------------------
 
@@ -404,9 +482,16 @@ its name, drops the browser header-line, and arms the copy chords — the
 popup is chrome, not a browser."
   (agent-repl--frontend-require-xwidget)
   (let ((existing (get-buffer agent-repl-explain-config-buffer-name)))
+    (agent-repl--log nil
+                     "explain-config: ensure-webview session=%S existing=%S existing-live=%s bound-session=%S"
+                     session-id existing (buffer-live-p existing)
+                     agent-repl--explain-config-webview-session-id)
     (if (and (buffer-live-p existing)
              (equal agent-repl--explain-config-webview-session-id session-id))
-        existing
+        (progn
+          (agent-repl--log nil "explain-config: ensure-webview reusing buffer=%S session=%S"
+                           existing session-id)
+          existing)
       (when (buffer-live-p existing)
         (agent-repl--log nil "explain-config webview rebind: session %s -> %s (killing stale webview)"
                          agent-repl--explain-config-webview-session-id session-id)
@@ -416,22 +501,32 @@ popup is chrome, not a browser."
              (name agent-repl-explain-config-buffer-name))
         (agent-repl--frontend-adopt-webview-buffer buf name)
         (setq agent-repl--explain-config-webview-session-id session-id)
-        (agent-repl--log nil "explain-config webview mounted: %s -> %s"
-                         name (agent-repl--explain-config-webview-url session-id))
+        (agent-repl--log nil "explain-config: webview mounted buffer=%S session=%S url=%S"
+                         name session-id (agent-repl--explain-config-webview-url session-id))
         buf))))
 
 (defun agent-repl--explain-config-release-webview ()
   "Kill the explain-config webview buffer and clear its session binding."
-  (when-let ((buf (get-buffer agent-repl-explain-config-buffer-name)))
-    (when (buffer-live-p buf)
-      (agent-repl--frontend-kill-webview buf)))
-  (setq agent-repl--explain-config-webview-session-id nil))
+  (if-let ((buf (get-buffer agent-repl-explain-config-buffer-name)))
+      (if (buffer-live-p buf)
+          (progn
+            (agent-repl--log nil "explain-config: release-webview killing buffer=%S session=%S"
+                             buf agent-repl--explain-config-webview-session-id)
+            (agent-repl--frontend-kill-webview buf))
+        (agent-repl--log nil "explain-config: release-webview found dead buffer=%S" buf))
+    (agent-repl--log nil "explain-config: release-webview skipped; buffer name=%S absent"
+                     agent-repl-explain-config-buffer-name))
+  (setq agent-repl--explain-config-webview-session-id nil)
+  (agent-repl--log nil "explain-config: release-webview session binding cleared"))
 
 ;;;; ---- Turns -------------------------------------------------------------------
 
 (defun agent-repl--explain-config-build-input (raw)
   "Wrap RAW with the explain-config read-only preamble."
-  (format agent-repl-explain-config-preamble raw))
+  (let ((text (format agent-repl-explain-config-preamble raw)))
+    (agent-repl--log nil "explain-config: build-input raw-length=%d rendered-length=%d"
+                     (length raw) (length text))
+    text))
 
 (defun agent-repl--explain-config-send (session-id question)
   "Send QUESTION into SESSION-ID as a user turn over the UDS `submitPrompt'.
@@ -446,8 +541,12 @@ inheriting the contract from the conversation's context."
     (agent-repl--log nil "explain-config: send session=%s primed=%s len=%d (uds submitPrompt cwd=%s)"
                      session-id agent-repl--explain-config-primed-p (length text) cwd)
     (let ((req (agent-repl--uds-send-command "submitPrompt" (list :text text) cwd)))
-      (agent-repl--uds-track-command req "submitPrompt" cwd))
-    (setq agent-repl--explain-config-primed-p t)))
+      (agent-repl--uds-track-command req "submitPrompt" cwd)
+      (agent-repl--log nil "explain-config: send submitted session=%S request=%S cwd=%S"
+                       session-id req cwd))
+    (setq agent-repl--explain-config-primed-p t)
+    (agent-repl--log nil "explain-config: send marked session=%S primed=%s"
+                     session-id agent-repl--explain-config-primed-p)))
 
 ;;;; ---- Commands ------------------------------------------------------------------
 
@@ -475,14 +574,25 @@ clarification and explanation only."
                                           :weight bold)))
          current-prefix-arg))
   (let ((trimmed (string-trim (or prompt ""))))
+    (agent-repl--log nil
+                     "explain-config: command received prompt-present=%s raw-length=%d trimmed-length=%d new-conversation=%s"
+                     (not (null prompt)) (length (or prompt "")) (length trimmed)
+                     (not (null new-conversation)))
     (when (string-empty-p trimmed)
+      (agent-repl--log nil "explain-config: command rejected empty prompt raw-length=%d"
+                       (length (or prompt "")))
       (user-error "Empty prompt"))
     (when new-conversation
+      (agent-repl--log nil "explain-config: command resetting conversation before send")
       (agent-repl-explain-config-reset))
     (let* ((session-id (agent-repl--explain-config-ensure-session))
            (buf (agent-repl--explain-config-ensure-webview session-id)))
+      (agent-repl--log nil "explain-config: command pipeline ready session=%S webview=%S"
+                       session-id buf)
       (agent-repl--explain-config-show)
       (agent-repl--explain-config-send session-id trimmed)
+      (agent-repl--log nil "explain-config: command completed session=%S webview=%S"
+                       session-id buf)
       buf)))
 
 ;;;###autoload
@@ -494,6 +604,7 @@ switch.  The conversation is preserved — re-running
 `agent-repl-explain-config' shows the same webview again with the full
 history and the new question appended."
   (interactive)
+  (agent-repl--log nil "explain-config: close command invoked")
   (agent-repl--explain-config-hide))
 
 ;;;###autoload
@@ -503,9 +614,19 @@ Hides the popup, kills the webview, and deletes the daemon session, so
 the next `agent-repl-explain-config' opens a brand-new conversation
 whose first turn re-primes the read-only contract."
   (interactive)
+  (agent-repl--log nil
+                   "explain-config: reset command start session=%S webview-session=%S primed=%s"
+                   agent-repl--explain-config-session-id
+                   agent-repl--explain-config-webview-session-id
+                   agent-repl--explain-config-primed-p)
   (agent-repl--explain-config-hide)
   (agent-repl--explain-config-release-webview)
-  (agent-repl--explain-config-release-session))
+  (agent-repl--explain-config-release-session)
+  (agent-repl--log nil
+                   "explain-config: reset command completed session=%S webview-session=%S primed=%s"
+                   agent-repl--explain-config-session-id
+                   agent-repl--explain-config-webview-session-id
+                   agent-repl--explain-config-primed-p))
 
 (provide 'explain-config)
 
