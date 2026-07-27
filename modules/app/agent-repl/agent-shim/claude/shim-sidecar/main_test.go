@@ -10,6 +10,7 @@ import (
 	"time"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
+	"agentrepl/shim-claude-sidecar/internal/discover"
 	"agentrepl/shim-claude-sidecar/internal/handler"
 	"agentrepl/shim-claude-sidecar/internal/tail"
 )
@@ -92,6 +93,178 @@ func TestPollLogsNothingWhenNothingChanged(t *testing.T) {
 	// Assert — steady state is silent.
 	if after := read(); len(after) != before {
 		t.Fatalf("unchanged poll logged %v", after[before:])
+	}
+}
+
+// --- spool ownership: one identifier, resolved by task id --------------------
+//
+// A /tmp spool path carries a session-SHAPED segment that is the harness's
+// runtime id, NOT the transcript's. These pin the replacement: a spool is
+// attributed from the launching session recorded against its task id, and an
+// unattributed spool is held and reported rather than guessed.
+
+// spoolTarget builds an unattributed spool target, exactly as discover now
+// classifies one (no SessionID).
+func spoolTarget(taskID string) discover.Target {
+	return discover.Target{
+		Path:   "/tmp/claude-501/slug/runtime-id/tasks/" + taskID + ".output",
+		Kind:   tail.KindShellSpool,
+		TaskID: taskID,
+		Raw:    true,
+	}
+}
+
+// ownerSidecar is a sidecar with no store, sufficient for the pure attribution
+// logic (resolveOwner/holdUnowned/noteOwner/seedOwners touch no connection).
+func ownerSidecar(t *testing.T) (*sidecar, func() []string) {
+	t.Helper()
+	logf, read := capturingLog()
+	return newSidecar("/nonexistent.sock", nil, t.TempDir(), logf), read
+}
+
+func TestResolveOwnerAnswersConfigTargetFromItsOwnPath(t *testing.T) {
+	// Arrange — a transcript names its own session; nothing to look up.
+	s, _ := ownerSidecar(t)
+	tgt := discover.Target{Path: "/x/S1.jsonl", Kind: tail.KindSessionTranscript, SessionID: "S1"}
+
+	// Act
+	got, ok := s.resolveOwner(tgt, 1000)
+
+	// Assert
+	if !ok || got != "S1" {
+		t.Fatalf("resolveOwner = (%q, %v), want (S1, true)", got, ok)
+	}
+}
+
+func TestResolveOwnerHoldsSpoolWhoseLaunchWasNeverSeen(t *testing.T) {
+	// Arrange
+	s, read := ownerSidecar(t)
+
+	// Act
+	got, ok := s.resolveOwner(spoolTarget("b1pi0nmip"), 1000)
+
+	// Assert — unresolved, and loudly so.
+	if ok || got != "" {
+		t.Fatalf("resolveOwner = (%q, %v), want (\"\", false)", got, ok)
+	}
+	if held := linesContaining(read(), "HELD"); len(held) != 1 {
+		t.Fatalf("hold lines = %v, want exactly 1", held)
+	}
+}
+
+func TestResolveOwnerAttributesSpoolToItsLaunchingSession(t *testing.T) {
+	// Arrange — the transcript's TaskStarted established the mapping.
+	s, _ := ownerSidecar(t)
+	s.noteOwner("b1pi0nmip", "9b6a4f2d-transcript-id")
+
+	// Act
+	got, ok := s.resolveOwner(spoolTarget("b1pi0nmip"), 1000)
+
+	// Assert — the TRANSCRIPT id, never the path's runtime id.
+	if !ok || got != "9b6a4f2d-transcript-id" {
+		t.Fatalf("resolveOwner = (%q, %v), want (9b6a4f2d-transcript-id, true)", got, ok)
+	}
+}
+
+func TestResolveOwnerClearsTheHoldOnceTheOwnerArrives(t *testing.T) {
+	// Arrange — held first, attributed after.
+	s, read := ownerSidecar(t)
+	s.resolveOwner(spoolTarget("b1pi0nmip"), 1000)
+	s.noteOwner("b1pi0nmip", "S1")
+
+	// Act
+	if _, ok := s.resolveOwner(spoolTarget("b1pi0nmip"), 1500); !ok {
+		t.Fatal("resolveOwner did not resolve after the owner was noted")
+	}
+
+	// Assert — the hold is released, not merely ignored.
+	if len(s.held) != 0 {
+		t.Fatalf("held = %v, want empty", s.held)
+	}
+	if got := linesContaining(read(), "owner resolved"); len(got) != 1 {
+		t.Fatalf("resolution lines = %v, want exactly 1", got)
+	}
+}
+
+func TestHoldReportsOnceMoreAfterTheWindowElapses(t *testing.T) {
+	// Arrange — first sight, then a rescan past the window.
+	s, read := ownerSidecar(t)
+	s.resolveOwner(spoolTarget("b1pi0nmip"), 1000)
+
+	// Act
+	s.resolveOwner(spoolTarget("b1pi0nmip"), 1000+UnownedSpoolWindow.Milliseconds())
+
+	// Assert
+	if got := linesContaining(read(), "STILL UNOWNED"); len(got) != 1 {
+		t.Fatalf("escalation lines = %v, want exactly 1", got)
+	}
+}
+
+func TestHoldDoesNotReEscalateOnEveryRescan(t *testing.T) {
+	// Arrange — already escalated once.
+	s, read := ownerSidecar(t)
+	past := 1000 + UnownedSpoolWindow.Milliseconds()
+	s.resolveOwner(spoolTarget("b1pi0nmip"), 1000)
+	s.resolveOwner(spoolTarget("b1pi0nmip"), past)
+
+	// Act — the rescan timer keeps firing.
+	s.resolveOwner(spoolTarget("b1pi0nmip"), past+60_000)
+
+	// Assert — still one line; a steady anomaly must not flood the log.
+	if got := linesContaining(read(), "STILL UNOWNED"); len(got) != 1 {
+		t.Fatalf("escalation lines = %v, want exactly 1", got)
+	}
+}
+
+func TestNoteOwnerKeepsTheFirstSessionAndReportsAConflict(t *testing.T) {
+	// Arrange — the corruption this change removes upstream, seen again.
+	s, read := ownerSidecar(t)
+	s.noteOwner("b1pi0nmip", "9b6a4f2d")
+
+	// Act
+	s.noteOwner("b1pi0nmip", "a4f52dc5")
+
+	// Assert — first wins (no flapping), and it is loud.
+	if got := s.owners["b1pi0nmip"]; got != "9b6a4f2d" {
+		t.Fatalf("owner = %q, want the first-recorded 9b6a4f2d", got)
+	}
+	if got := linesContaining(read(), "CONFLICTING owner"); len(got) != 1 {
+		t.Fatalf("conflict lines = %v, want exactly 1", got)
+	}
+}
+
+func TestSeedOwnersRestoresAttributionFromPersistedOpenTasks(t *testing.T) {
+	// Arrange — what the store hands back on every connection.
+	s, _ := ownerSidecar(t)
+	states := []*corev1.OpenTaskState{{
+		Started: &corev1.Event{
+			SessionId: "9b6a4f2d",
+			Payload:   &corev1.Event_TaskStarted{TaskStarted: &corev1.TaskStarted{TaskId: "b1pi0nmip"}},
+		},
+		LastActivityAtMs: 1,
+	}}
+
+	// Act
+	n := s.seedOwners(states)
+
+	// Assert — a restart can attribute a spool whose launch line sits behind
+	// the resumed cursor and will never be re-read.
+	if n != 1 || s.owners["b1pi0nmip"] != "9b6a4f2d" {
+		t.Fatalf("seeded %d, owners = %v", n, s.owners)
+	}
+}
+
+func TestSeedOwnersIgnoresAStateCarryingNoTaskStarted(t *testing.T) {
+	// Arrange
+	s, _ := ownerSidecar(t)
+	states := []*corev1.OpenTaskState{{Started: &corev1.Event{SessionId: "S1"}}}
+
+	// Act
+	n := s.seedOwners(states)
+
+	// Assert
+	if n != 0 || len(s.owners) != 0 {
+		t.Fatalf("seeded %d, owners = %v, want none", n, s.owners)
 	}
 }
 

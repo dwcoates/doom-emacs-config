@@ -76,6 +76,22 @@ type watched struct {
 	tailer *tail.Tailer
 }
 
+// UnownedSpoolWindow is how long a spool may sit unattributed before the hold
+// is re-logged as an anomaly. The launch line that names an owner is written
+// when the task starts, so a hold normally clears within a rescan tick; one
+// that outlives this window means the mapping is genuinely missing, and that
+// has to be visible rather than waited on forever in silence.
+const UnownedSpoolWindow = 60 * time.Second
+
+// heldSpool is one spool discovered before its owning session was known.
+type heldSpool struct {
+	firstSeenMs int64
+	// escalated keeps the past-the-window report to ONE line per spool: the
+	// rescan that notices it runs every few seconds, and re-reporting on each
+	// pass would bury the log it is meant to make legible.
+	escalated bool
+}
+
 type sidecar struct {
 	store   *storeclient.Client
 	disc    *discover.Discoverer
@@ -85,6 +101,17 @@ type sidecar struct {
 
 	handlers map[tail.Kind]tail.Handler
 	watchers map[string]*watched // by path
+
+	// owners maps a task id to the session that LAUNCHED it — the only session
+	// identifier in the system, sourced from the transcript that announced the
+	// task. A /tmp spool has no identity of its own (see internal/discover), so
+	// this is what attributes one. Seeded per connection from the store's
+	// authoritative open tasks and extended as transcripts are tailed.
+	owners map[string]string // task id -> session id
+	// held records spools discovered before their owner was known, so an
+	// attribution that never arrives is visible rather than silent. A held
+	// spool is NOT tailed: reading it would mean inventing an owner.
+	held map[string]*heldSpool // by path
 
 	// Store-link state machine (link.go). `cursors` is CONNECTION-SCOPED: it is
 	// recovered as the first act of every established connection and dropped the
@@ -113,6 +140,8 @@ func newSidecar(storeSocket string, roots []string, spoolRoot string, log handle
 			tail.KindShellSpool:        handler.NewShellOutputHandler(log),
 		},
 		watchers: map[string]*watched{},
+		owners:   map[string]string{},
+		held:     map[string]*heldSpool{},
 		// A fresh sidecar is simply a sidecar whose link is not up yet, with its
 		// first dial due immediately. That is all "boot" means here.
 		link:      linkDown,
@@ -195,12 +224,20 @@ func (s *sidecar) bootSweep() {
 // that case is honest, and it is the backfill path.
 func (s *sidecar) rescan() {
 	s.requireLinkUp("rescan")
+	now := time.Now().UnixMilli()
 	for _, tgt := range s.disc.Scan() {
 		if _, ok := s.watchers[tgt.Path]; ok {
 			continue
 		}
+		session, ok := s.resolveOwner(tgt, now)
+		if !ok {
+			// Unattributed: held, never guessed. Tailing it would mean either
+			// inventing a session or reviving the /tmp path id this change
+			// exists to delete.
+			continue
+		}
 		ctx := &tail.Context{
-			SessionID: tgt.SessionID,
+			SessionID: session,
 			Path:      tgt.Path,
 			Kind:      tgt.Kind,
 			TaskID:    tgt.TaskID,
@@ -213,6 +250,86 @@ func (s *sidecar) rescan() {
 		}
 		s.watchers[tgt.Path] = &watched{target: tgt, tailer: tr}
 	}
+}
+
+// resolveOwner returns the session a target's events belong to.
+//
+// A config-root path names its own session (the transcript IS the session's
+// record), so it answers immediately. A /tmp spool does not: its path states
+// only where the bytes live, so its owner is looked up by task id against the
+// launch the transcript announced. An unresolved spool is HELD — reported and
+// left untailed — because the alternatives are inventing a session or reading
+// the path's runtime id, and that id being mistaken for an identity is the bug
+// this whole change removes.
+func (s *sidecar) resolveOwner(tgt discover.Target, nowMs int64) (string, bool) {
+	if tgt.SessionID != "" {
+		return tgt.SessionID, true
+	}
+	session := s.owners[tgt.TaskID]
+	if session == "" {
+		s.holdUnowned(tgt, nowMs)
+		return "", false
+	}
+	if h := s.held[tgt.Path]; h != nil {
+		delete(s.held, tgt.Path)
+		s.log("spool: owner resolved for %s task=%s session=%s after %dms held",
+			tgt.Path, tgt.TaskID, session, nowMs-h.firstSeenMs)
+	}
+	return session, true
+}
+
+// holdUnowned records (and reports) a spool whose owning session is not known
+// yet. First sight is logged once; a hold outliving UnownedSpoolWindow is
+// logged once more, so a mapping that never arrives surfaces instead of the
+// file simply never being read.
+func (s *sidecar) holdUnowned(tgt discover.Target, nowMs int64) {
+	h := s.held[tgt.Path]
+	if h == nil {
+		s.held[tgt.Path] = &heldSpool{firstSeenMs: nowMs}
+		s.log("spool: HELD %s task=%s — no launching session known yet; not tailed until one is",
+			tgt.Path, tgt.TaskID)
+		return
+	}
+	if !h.escalated && nowMs-h.firstSeenMs >= UnownedSpoolWindow.Milliseconds() {
+		h.escalated = true
+		s.log("spool: STILL UNOWNED after %s: %s task=%s — its launch was never observed, so it stays unread rather than being filed under a guessed session",
+			UnownedSpoolWindow, tgt.Path, tgt.TaskID)
+	}
+}
+
+// seedOwners populates the owner index from the store's authoritative open
+// tasks, returning how many mappings it established. This is what makes the
+// index survive a restart: the launch line naming an owner may sit far behind
+// the resumed cursor and never be re-read.
+func (s *sidecar) seedOwners(states []*corev1.OpenTaskState) int {
+	n := 0
+	for _, state := range states {
+		ev := state.GetStarted()
+		if ts := ev.GetTaskStarted(); ts != nil && s.noteOwner(ts.GetTaskId(), ev.GetSessionId()) {
+			n++
+		}
+	}
+	return n
+}
+
+// noteOwner records that TASKID was launched by SESSION, reporting (never
+// silently resolving) a task that claims two different launching sessions.
+// That is precisely the corruption this change eliminates upstream, so if one
+// ever appears again it must be loud rather than absorbed. The first mapping
+// wins, so the attribution cannot flap between rescans.
+func (s *sidecar) noteOwner(taskID, session string) bool {
+	if taskID == "" || session == "" {
+		return false
+	}
+	if prior, ok := s.owners[taskID]; ok {
+		if prior != session {
+			s.log("spool: CONFLICTING owner for task=%s — already attributed to session %s, now also claimed by %s; KEEPING %s",
+				taskID, prior, session, prior)
+		}
+		return false
+	}
+	s.owners[taskID] = session
+	return true
 }
 
 // pollAll polls every watched file once, writing any batch to the store and
@@ -273,9 +390,15 @@ func (s *sidecar) writeBatch(res tail.PollResult) error {
 
 // applyLifecycle updates the stale tracker from a batch's lifecycle events: a
 // TaskStarted opens a task, a real TaskEnded closes it (so it is never LOST-swept).
+//
+// A TaskStarted also ATTRIBUTES the task: it is emitted by the handler for the
+// transcript that announced the launch, so it carries the launching session.
+// That is what later lets a bare /tmp spool be tailed without the path ever
+// being read as an identity.
 func (s *sidecar) applyLifecycle(events []*corev1.Event, nowMs int64) {
 	for _, e := range events {
 		if ts := e.GetTaskStarted(); ts != nil {
+			s.noteOwner(ts.GetTaskId(), e.GetSessionId())
 			s.tracker.Open(ts.GetTaskId(), taskKindToTail(ts.GetKind()), e.GetSessionId(), ts.GetOutputPath(), nowMs, nowMs)
 		}
 		if te := e.GetTaskEnded(); te != nil && te.GetStatus() != corev1.TerminalStatus_TERMINAL_STATUS_LOST {
