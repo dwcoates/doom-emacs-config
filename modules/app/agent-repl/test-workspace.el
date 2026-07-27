@@ -494,6 +494,46 @@ to avoid surfacing nuked workspaces."
   (agent-repl-test--with-clean-state
     (should-not (agent-repl--live-ws-names))))
 
+;;;; ---- Tests: ws-registered-names ---------------------------------------
+
+(ert-deftest agent-repl-test-ws-registered-names-includes-live-and-tombstoned ()
+  "The complete registration view includes both lifecycle states."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "live" :project-dir "/tmp/live")
+    (agent-repl--ws-put "tombstone" :project-dir "/tmp/tombstone")
+    (agent-repl--ws-del "tombstone")
+    (let ((names (agent-repl--ws-registered-names)))
+      (should (member "live" names))
+      (should (member "tombstone" names))
+      (should (= 2 (length names))))))
+
+(ert-deftest agent-repl-test-ws-registered-names-preserves-raw-hash-order ()
+  "The wrapper returns the hash's native key traversal without sorting."
+  (agent-repl-test--with-clean-state
+    (dolist (name '("charlie" "alpha" "bravo"))
+      (agent-repl--ws-put name :project-dir (concat "/tmp/" name)))
+    (should (equal (agent-repl--ws-registered-names)
+                   (hash-table-keys agent-repl--workspaces)))))
+
+(ert-deftest agent-repl-test-ws-registered-names-empty-hash ()
+  "An empty registration table returns nil."
+  (agent-repl-test--with-clean-state
+    (should-not (agent-repl--ws-registered-names))))
+
+(ert-deftest agent-repl-test-ws-registered-names-logs-verbose-snapshot ()
+  "Enumeration emits its complete key snapshot through verbose logging."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "live" :project-dir "/tmp/live")
+    (let (captured)
+      (cl-letf (((symbol-function 'agent-repl--log-verbose)
+                 (lambda (ws fmt &rest args)
+                   (setq captured
+                         (list ws (apply #'format fmt args))))))
+        (agent-repl--ws-registered-names))
+      (should-not (car captured))
+      (should (string-match-p "count=1" (cadr captured)))
+      (should (string-match-p "live" (cadr captured))))))
+
 ;;;; ---- Tests: project-pollable workspace partition ----
 
 (ert-deftest agent-repl-test-ws-project-pollable-p-requires-live-project ()
