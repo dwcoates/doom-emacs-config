@@ -90,6 +90,25 @@
         (agent-repl--close-panels-before-open)
         (should (= close-calls 1))))))
 
+(ert-deftest agent-repl-test-close-on-open-logs-close-decision-and-outcome ()
+  "Advice logs its target classification, close decision, and completion."
+  (agent-repl-test--with-clean-state
+    (let (logs)
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "log-ws"))
+                ((symbol-function 'agent-repl--panels-visible-p) (lambda () t))
+                ((symbol-function 'agent-repl--simple-hide-and-preserve-status)
+                 (lambda () nil))
+                ((symbol-function 'agent-repl--log)
+                 (lambda (ws fmt &rest args)
+                   (push (list ws fmt args) logs))))
+        (agent-repl--close-panels-before-open "some-file.txt")
+        (setq logs (nreverse logs))
+        (should (= (length logs) 3))
+        (should (equal (mapcar #'car logs) '("log-ws" "log-ws" "log-ws")))
+        (should (string-match-p "classified target" (nth 1 (nth 0 logs))))
+        (should (string-match-p "closing panels" (nth 1 (nth 1 logs))))
+        (should (string-match-p "close completed" (nth 1 (nth 2 logs))))))))
+
 ;;;; ---- Tests: agent-repl--open-target-is-panel-p ----
 
 (ert-deftest agent-repl-test-open-target-is-panel-p-filename-string ()
