@@ -24,6 +24,7 @@ import { createInterface } from "node:readline";
 import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
+import { realpathSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { UdsSession } from "./uds/uds-session.js";
@@ -401,9 +402,28 @@ function lazyQuery(queryPromise: Promise<QueryLike>): QueryLike {
   };
 }
 
+/**
+ * Was this module invoked as the program, rather than imported?
+ *
+ * `import.meta.url` is ALREADY symlink-resolved by the ESM loader, while
+ * `process.argv[1]` is whatever the spawner typed. Comparing them raw made a
+ * spawn through any symlinked directory (`/var/folders/...` on macOS, which is
+ * really `/private/var/folders/...`) compare unequal, and the shim then exited
+ * 0 having done NOTHING — the worst possible failure, silent and successful.
+ * Resolving argv[1] the same way the loader does is what makes the two
+ * comparable. realpath is best-effort: an unresolvable argv[1] falls back to
+ * the literal path rather than throwing before the fatal handler exists.
+ */
+function invokedAs(argvPath: string): string {
+  try {
+    return pathToFileURL(realpathSync(argvPath)).href;
+  } catch {
+    return pathToFileURL(argvPath).href;
+  }
+}
+
 const isDirectRun =
-  process.argv[1] !== undefined &&
-  import.meta.url === pathToFileURL(process.argv[1]).href;
+  process.argv[1] !== undefined && import.meta.url === invokedAs(process.argv[1]);
 if (isDirectRun) {
   main().catch((err: unknown) => {
     process.stderr.write(`shim fatal: ${err instanceof Error ? err.stack : String(err)}\n`);
