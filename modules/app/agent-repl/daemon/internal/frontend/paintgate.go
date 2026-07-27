@@ -69,6 +69,36 @@ func (r Role) String() string {
 	return "observer"
 }
 
+// ClientKind names the frontend product/transport behind a connection.  It is
+// intentionally independent of Role: both Emacs and GUI bootstrap are
+// observers, but only the Emacs host may receive or complete host actions.
+// The endpoint selects it at accept time; clients never self-assert it.
+type ClientKind int
+
+const (
+	ClientKindHost         ClientKind = iota // the Emacs frontend UDS host
+	ClientKindGUIBootstrap                   // unscoped /frontend bootstrap WebSocket
+	ClientKindGUIPainter                     // scoped /sessions/{id}/stream painter
+	ClientKindGUIObserver                    // scoped GUI observer/test connection
+)
+
+func (k ClientKind) String() string {
+	switch k {
+	case ClientKindHost:
+		return "host"
+	case ClientKindGUIBootstrap:
+		return "gui_bootstrap"
+	case ClientKindGUIPainter:
+		return "gui_painter"
+	case ClientKindGUIObserver:
+		return "gui_observer"
+	default:
+		return "unknown"
+	}
+}
+
+func (k ClientKind) isHost() bool { return k == ClientKindHost }
+
 // gateEntry is one workspace's delivery bookkeeping.
 type gateEntry struct {
 	// gen is the last generation stamped for this workspace, strictly
