@@ -15,7 +15,7 @@
 
 (defconst agent-repl--output-dir
   (file-name-as-directory (agent-repl--global-state-file "output"))
-  "Directory for workspace command files and other IPC output.
+  "Directory for generated workspace intent and other IPC output.
 Lives at `~/.claude-emacs/output/' (under `agent-repl--global-state-dir').")
 
 (defcustom agent-repl-debug-mock-workspace-default-slug "mock-test"
@@ -23,19 +23,6 @@ Lives at `~/.claude-emacs/output/' (under `agent-repl--global-state-dir').")
 The full branch name is built at the consumption site by prepending the
 workspace prefix from `agent-repl--workspace-prefix-slash' (derived from
 CLAUDE_WORKSPACE_PREFIX), so this holds no literal prefix."
-  :type 'string
-  :group 'agent-repl)
-
-(defcustom agent-repl-debug-mock-priority-branch-default-slug "mock-priority-test"
-  "Default bare slug used in mock workspace priority generation.
-The full branch name is built at the consumption site by prepending the
-workspace prefix from `agent-repl--workspace-prefix-slash' (derived from
-CLAUDE_WORKSPACE_PREFIX), so this holds no literal prefix."
-  :type 'string
-  :group 'agent-repl)
-
-(defcustom agent-repl-workspace-commands-file-regexp "^workspace_commands_.*\\.json$"
-  "Regexp matching workspace command files in the output directory."
   :type 'string
   :group 'agent-repl)
 
@@ -435,36 +422,6 @@ test entry."
          (file (agent-repl--write-output-json "workspace_generation.json" names)))
     (agent-repl--log (agent-repl--ws-current-name) "mock workspace-generation file written: %s names=%s" file names)
     (message "Wrote mock workspace_generation.json: %s" names)))
-
-(defun agent-repl-debug/mock-workspace-commands-with-priority ()
-  "Write a mock workspace_commands file with a priority field to test image badges."
-  (interactive)
-  (let* ((priority (completing-read "Priority: " agent-repl-priority-levels nil t))
-         (name (read-string "Branch name: "
-                            (concat (agent-repl--workspace-prefix-slash)
-                                    agent-repl-debug-mock-priority-branch-default-slug)))
-         (filename (format "workspace_commands_%s.json" (format-time-string "%s")))
-         (commands (vector `((type . "create")
-                             (name . ,name)
-                             (priority . ,priority))))
-         (file (agent-repl--write-output-json filename commands)))
-    (message "Wrote %s with priority=%s" file priority)))
-
-(defun agent-repl-debug/process-pending-commands ()
-  "Manually scan ~/.claude-emacs/output/ for workspace-command files.
-Processes any workspace_commands_*.json files found.  Use this to
-verify the processor works independently of the file watcher."
-  (interactive)
-  (let ((files (when (file-directory-p agent-repl--output-dir)
-                 (directory-files agent-repl--output-dir t
-                                  agent-repl-workspace-commands-file-regexp))))
-    (if (not files)
-        (message "No workspace_commands_*.json files found in %s"
-                 agent-repl--output-dir)
-      (message "Found %d file(s), processing..." (length files))
-      (dolist (file files)
-        (agent-repl--log (agent-repl--ws-current-name) "process-pending-commands: processing file=%s" file)
-        (agent-repl--process-workspace-commands-file file)))))
 
 (defun agent-repl-debug/workspace-states ()
   "Display all workspace states."
