@@ -35,7 +35,6 @@ import {
 } from "../src/render.js";
 import { ForwardingLogger, resetLoggingForTests, setLogger } from "../src/wslog.js";
 import { META_CLOSE, META_OPEN } from "../src/meta.js";
-import { TIMER_SLOT } from "../src/timer.js";
 import { AsyncSource } from "../src/protocol.js";
 import {
   ConversationItem,
