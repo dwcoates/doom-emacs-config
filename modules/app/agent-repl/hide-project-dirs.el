@@ -73,33 +73,72 @@ Toggle via `agent-repl-toggle-hide-project-dirs'.")
 
 ;;;; Predicate --------------------------------------------------------------
 
-(defun agent-repl--hide-project-dirs--canonical-prefixes ()
+(defun agent-repl--hide-project-dirs--canonical-directory (ws path kind)
+  "Canonicalize PATH for KIND, logging either its result or failure.
+WS supplies workspace metadata when this canonicalization belongs to a
+workspace scan.  KIND distinguishes a configured prefix from a workspace
+project directory in the trace."
+  (condition-case err
+      (let ((canonical (agent-repl--path-canonical path)))
+        (agent-repl--log-verbose
+         ws "hide-project-dirs: canonicalized kind=%s path=%S canonical=%S"
+         kind path canonical)
+        canonical)
+    (error
+     (agent-repl--log
+      ws "hide-project-dirs: canonicalization failed kind=%s path=%S error=%S"
+      kind path err)
+     nil)))
+
+(defun agent-repl--hide-project-dirs--canonical-prefixes (&optional ws)
   "Return `agent-repl-hide-project-dirs' canonicalized for prefix comparison.
 Each entry is expanded, run through `agent-repl--path-canonical' (so
 tildes / symlinks resolve consistently with `:project-dir' values),
 then has a trailing slash appended so prefix matching can't match a
 sibling directory whose name happens to share the prefix's leading
 characters (e.g. `~/workspace/ChessCom-archive' must not match the
-`~/workspace/ChessCom' prefix)."
-  (cl-loop for raw in agent-repl-hide-project-dirs
-           for canonical = (ignore-errors
-                             (agent-repl--path-canonical
-                              (expand-file-name raw)))
-           when (and canonical (not (string-empty-p canonical)))
-           collect (file-name-as-directory canonical)))
+`~/workspace/ChessCom' prefix).  WS is used only for scan diagnostics."
+  (let ((prefixes
+         (cl-loop for raw in agent-repl-hide-project-dirs
+                  for expanded = (expand-file-name raw)
+                  for canonical = (agent-repl--hide-project-dirs--canonical-directory
+                                   ws expanded "prefix")
+                  when (and canonical (not (string-empty-p canonical)))
+                  collect (file-name-as-directory canonical))))
+    (agent-repl--log-verbose
+     ws "hide-project-dirs: canonical-prefix scan configured=%S usable=%S"
+     agent-repl-hide-project-dirs prefixes)
+    prefixes))
 
 (defun agent-repl--hide-project-dirs--ws-matches-p (ws)
   "Return non-nil when workspace WS's project-dir lives under a hide prefix.
 Always returns nil when WS has no registered `:project-dir' — entries
 without a project-dir can't be classified, so they pass through the
 filter and remain visible."
-  (when-let* ((dir (agent-repl--ws-get ws :project-dir))
-              (canonical (ignore-errors
-                           (agent-repl--path-canonical dir)))
-              (with-slash (file-name-as-directory canonical)))
-    (cl-some (lambda (prefix)
-               (string-prefix-p prefix with-slash))
-             (agent-repl--hide-project-dirs--canonical-prefixes))))
+  (let ((dir (agent-repl--ws-get ws :project-dir)))
+    (if (not dir)
+        (progn
+          (agent-repl--log-verbose
+           ws "hide-project-dirs: match scan skipped reason=missing-project-dir")
+          nil)
+      (let ((canonical
+             (agent-repl--hide-project-dirs--canonical-directory
+              ws dir "project-dir")))
+        (if (not canonical)
+            (progn
+              (agent-repl--log-verbose
+               ws "hide-project-dirs: match scan skipped dir=%S reason=uncanonicalizable"
+               dir)
+              nil)
+          (let* ((with-slash (file-name-as-directory canonical))
+                 (prefixes (agent-repl--hide-project-dirs--canonical-prefixes ws))
+                 (matched (cl-find-if (lambda (prefix)
+                                        (string-prefix-p prefix with-slash))
+                                      prefixes)))
+            (agent-repl--log-verbose
+             ws "hide-project-dirs: match scan dir=%S canonical=%S prefixes=%S matched=%S"
+             dir with-slash prefixes matched)
+            matched))))))
 
 ;;;; Workspace selection ----------------------------------------------------
 
@@ -108,14 +147,31 @@ filter and remain visible."
 The current workspace is excluded — hiding never kills the workspace
 the user is sitting in.  Only live (non-tombstoned) workspaces are
 returned, since tombstones have no persp left to kill."
-  (let ((current (agent-repl--ws-current-name)))
-    (cl-remove-if-not
-     (lambda (ws)
-       (and (not (equal ws current))
-            (agent-repl--hide-project-dirs--ws-matches-p ws)))
-     (agent-repl--live-ws-names))))
+  (let* ((current (agent-repl--ws-current-name))
+         (live (agent-repl--live-ws-names))
+         (targets
+          (cl-remove-if-not
+           (lambda (ws)
+             (cond
+              ((equal ws current)
+               (agent-repl--log-verbose
+                ws "hide-project-dirs: match scan excluded reason=current-workspace")
+               nil)
+              ((agent-repl--hide-project-dirs--ws-matches-p ws)
+               (agent-repl--log-verbose
+                ws "hide-project-dirs: match scan selected")
+               t)
+              (t
+               (agent-repl--log-verbose
+                ws "hide-project-dirs: match scan excluded reason=no-prefix-match")
+               nil)))
+           live)))
+    (agent-repl--log-verbose
+     current "hide-project-dirs: live-workspace scan current=%S live=%S targets=%S"
+     current live targets)
+    targets))
 
-(defun agent-repl--hide-project-dirs--hidden-workspace-names ()
+(defun agent-repl--hide-project-dirs--hidden-workspace-names (&optional ws)
   "Return names of workspaces carrying the `:hidden-project-dir' marker.
 These are the tombstones killed by a prior hide toggle — the set that
 `agent-repl--hide-project-dirs--restore' brings back.  Returned in
@@ -125,7 +181,10 @@ Thin wrapper over `agent-repl--ws-hide-tombstoned-names' (the
 workspace.el integration boundary for hide-reason tombstones); this
 file no longer pokes `agent-repl--workspaces' directly per the
 \"Workspace state encapsulation\" rule in AGENTS.md."
-  (agent-repl--ws-hide-tombstoned-names))
+  (let ((names (agent-repl--ws-hide-tombstoned-names)))
+    (agent-repl--log-verbose
+     ws "hide-project-dirs: hidden-tombstone scan targets=%S" names)
+    names))
 
 ;;;; Hide / restore ---------------------------------------------------------
 
@@ -140,11 +199,27 @@ marker is not a runtime key so it survives the tombstone.
 
 Returns the list of workspace names that were hidden."
   (let ((targets (agent-repl--hide-project-dirs--matching-live-workspaces))
+        (origin (agent-repl--ws-current-name))
         (agent-repl--kill-cause "hide-project-dirs sweep (hide toggle)"))
+    (agent-repl--log
+     origin "hide-project-dirs: hide begin origin=%S targets=%S target-count=%d"
+     origin targets (length targets))
     (dolist (ws targets)
-      (agent-repl--log ws "hide-project-dirs: hiding ws=%s" ws)
-      (agent-repl--ws-put ws :hidden-project-dir t)
-      (agent-repl--nuke-one-workspace ws))
+      (let ((dir (agent-repl--ws-get ws :project-dir)))
+        (agent-repl--log ws "hide-project-dirs: hiding ws=%s dir=%S" ws dir)
+        (agent-repl--ws-put ws :hidden-project-dir t)
+        (condition-case err
+            (progn
+              (agent-repl--nuke-one-workspace ws)
+              (agent-repl--log
+               ws "hide-project-dirs: hide complete ws=%s marker-set=t" ws))
+          (error
+           (agent-repl--log
+            ws "hide-project-dirs: hide failed ws=%s marker-set=t error=%S" ws err)
+           (signal (car err) (cdr err))))))
+    (agent-repl--log
+     origin "hide-project-dirs: hide complete origin=%S hidden=%S hidden-count=%d"
+     origin targets (length targets))
     targets))
 
 (defun agent-repl--hide-project-dirs--restore ()
@@ -156,36 +231,92 @@ list.  Restored workspaces land at the front in name order; focus
 returns to the workspace that was active when the restore began.
 
 Returns the list of restored workspace names."
-  (let ((targets (agent-repl--hide-project-dirs--hidden-workspace-names))
-        (origin (agent-repl--ws-current-name)))
+  (let* ((origin (agent-repl--ws-current-name))
+         (targets (agent-repl--hide-project-dirs--hidden-workspace-names origin)))
+    (agent-repl--log
+     origin "hide-project-dirs: restore begin origin=%S targets=%S target-count=%d"
+     origin targets (length targets))
     (dolist (ws targets)
       (let ((dir (agent-repl--ws-get ws :project-dir)))
         (agent-repl--log ws "hide-project-dirs: restoring ws=%s dir=%s" ws dir)
-        (when dir
-          (agent-repl--establish-workspace ws dir))
-        (agent-repl--ws-put ws :hidden-project-dir nil)))
+        (if dir
+            (condition-case err
+                (progn
+                  (agent-repl--establish-workspace ws dir)
+                  (agent-repl--log
+                   ws "hide-project-dirs: restore established ws=%s dir=%S" ws dir))
+              (error
+               (agent-repl--log
+                ws "hide-project-dirs: restore failed ws=%s dir=%S error=%S" ws dir err)
+               (signal (car err) (cdr err))))
+          (agent-repl--log
+           ws "hide-project-dirs: restore skipped establishment ws=%s reason=missing-project-dir" ws))
+        (agent-repl--ws-put ws :hidden-project-dir nil)
+        (agent-repl--log
+         ws "hide-project-dirs: restore marker-cleared ws=%s dir-present=%s"
+         ws (not (null dir)))))
     ;; Move restored workspaces to the front of the tab-bar, in reverse
     ;; order so the first target ends up leftmost.
-    (when (fboundp 'agent-repl--reorder-workspace-to-front)
-      (dolist (ws (reverse targets))
-        (agent-repl--reorder-workspace-to-front ws)))
+    (if (fboundp 'agent-repl--reorder-workspace-to-front)
+        (progn
+          (agent-repl--log
+           origin "hide-project-dirs: restore reorder begin targets=%S" targets)
+          (dolist (ws (reverse targets))
+            (condition-case err
+                (progn
+                  (agent-repl--reorder-workspace-to-front ws)
+                  (agent-repl--log
+                   ws "hide-project-dirs: restore reordered-to-front ws=%s" ws))
+              (error
+               (agent-repl--log
+                ws "hide-project-dirs: restore reorder failed ws=%s error=%S" ws err)
+               (signal (car err) (cdr err))))))
+      (agent-repl--log
+       origin "hide-project-dirs: restore reorder skipped reason=reorder-helper-unavailable"))
     ;; Return focus to wherever the user was before the restore cascade
     ;; switched the frame through each re-established workspace.
-    (when origin
-      (ignore-errors (agent-repl--ws-switch origin)))
+    (if origin
+        (condition-case err
+            (progn
+              (agent-repl--ws-switch origin)
+              (agent-repl--log
+               origin "hide-project-dirs: restore focus-returned origin=%S" origin))
+          (error
+           (agent-repl--log
+            origin "hide-project-dirs: restore focus-return-failed origin=%S error=%S"
+            origin err)))
+      (agent-repl--log
+       nil "hide-project-dirs: restore focus-return skipped reason=no-origin"))
+    (agent-repl--log
+     origin "hide-project-dirs: restore complete origin=%S restored=%S restored-count=%d"
+     origin targets (length targets))
     targets))
 
 ;;;; Persistence ------------------------------------------------------------
 
-(defun agent-repl--hide-project-dirs--persist ()
+(defun agent-repl--hide-project-dirs--persist (&optional ws)
   "Persist the hide-project-dirs runtime to the workspace snapshot.
 A snapshot save writes both `agent-repl-hide-project-dirs-enabled'
 and the per-workspace `:hidden-project-dir' markers (carried on
 tombstone entries by `agent-repl--collect-snapshot-entries'), so a
 later session restore — on startup or from an archive — reconstructs
 the hidden set."
-  (when (fboundp 'agent-repl-save-workspace-snapshot)
-    (agent-repl-save-workspace-snapshot)))
+  (if (fboundp 'agent-repl-save-workspace-snapshot)
+      (condition-case err
+          (progn
+            (agent-repl--log
+             ws "hide-project-dirs: persist begin enabled=%s" agent-repl-hide-project-dirs-enabled)
+            (agent-repl-save-workspace-snapshot)
+            (agent-repl--log
+             ws "hide-project-dirs: persist complete enabled=%s" agent-repl-hide-project-dirs-enabled))
+        (error
+         (agent-repl--log
+          ws "hide-project-dirs: persist failed enabled=%s error=%S"
+          agent-repl-hide-project-dirs-enabled err)
+         (signal (car err) (cdr err))))
+    (agent-repl--log
+     ws "hide-project-dirs: persist skipped reason=snapshot-saver-unavailable enabled=%s"
+     agent-repl-hide-project-dirs-enabled)))
 
 ;;;; Toggle -----------------------------------------------------------------
 
@@ -212,20 +343,46 @@ the persp roster the loader is still rebuilding.
 Forces a tab-bar repaint so the change is visible immediately rather
 than waiting for the next 1Hz poll."
   (interactive)
-  (when (bound-and-true-p agent-repl--snapshot-load-state)
-    (user-error "agent-repl: a snapshot load is in progress — retry when it finishes"))
-  (setq agent-repl-hide-project-dirs-enabled
-        (not agent-repl-hide-project-dirs-enabled))
-  (let ((affected (if agent-repl-hide-project-dirs-enabled
-                      (agent-repl--hide-project-dirs--hide)
-                    (agent-repl--hide-project-dirs--restore))))
-    (agent-repl--hide-project-dirs--persist)
-    (when (fboundp 'agent-repl--force-tab-bar-redraw)
-      (agent-repl--force-tab-bar-redraw))
-    (message "agent-repl hide-project-dirs %s (%s %d workspace(s))"
-             (if agent-repl-hide-project-dirs-enabled "enabled" "disabled")
-             (if agent-repl-hide-project-dirs-enabled "hid" "restored")
-             (length affected))))
+  (let ((origin (agent-repl--ws-current-name)))
+    (agent-repl--log
+     origin "hide-project-dirs: toggle requested origin=%S enabled-before=%s snapshot-load-state=%S"
+     origin agent-repl-hide-project-dirs-enabled agent-repl--snapshot-load-state)
+    (when (bound-and-true-p agent-repl--snapshot-load-state)
+      (agent-repl--log
+       origin "hide-project-dirs: toggle rejected origin=%S reason=snapshot-load-in-progress state=%S"
+       origin agent-repl--snapshot-load-state)
+      (user-error "agent-repl: a snapshot load is in progress — retry when it finishes"))
+    (setq agent-repl-hide-project-dirs-enabled
+          (not agent-repl-hide-project-dirs-enabled))
+    (let ((operation (if agent-repl-hide-project-dirs-enabled "hide" "restore"))
+          (affected nil))
+      (agent-repl--log
+       origin "hide-project-dirs: toggle accepted origin=%S enabled-after=%s operation=%s"
+       origin agent-repl-hide-project-dirs-enabled operation)
+      (condition-case err
+          (setq affected (if agent-repl-hide-project-dirs-enabled
+                             (agent-repl--hide-project-dirs--hide)
+                           (agent-repl--hide-project-dirs--restore)))
+        (error
+         (agent-repl--log
+          origin "hide-project-dirs: toggle operation-failed origin=%S operation=%s enabled=%s error=%S"
+          origin operation agent-repl-hide-project-dirs-enabled err)
+         (signal (car err) (cdr err))))
+      (agent-repl--log
+       origin "hide-project-dirs: toggle operation-complete origin=%S operation=%s affected=%S affected-count=%d"
+       origin operation affected (length affected))
+      (agent-repl--hide-project-dirs--persist origin)
+      (if (fboundp 'agent-repl--force-tab-bar-redraw)
+          (progn
+            (agent-repl--force-tab-bar-redraw)
+            (agent-repl--log
+             origin "hide-project-dirs: toggle redraw-complete origin=%S" origin))
+        (agent-repl--log
+         origin "hide-project-dirs: toggle redraw-skipped reason=redraw-helper-unavailable"))
+      (message "agent-repl hide-project-dirs %s (%s %d workspace(s))"
+               (if agent-repl-hide-project-dirs-enabled "enabled" "disabled")
+               (if agent-repl-hide-project-dirs-enabled "hid" "restored")
+               (length affected)))))
 
 (provide 'agent-repl-hide-project-dirs)
 ;;; hide-project-dirs.el ends here
