@@ -72,26 +72,52 @@ first.  Skips lines that are not main-chain `type:assistant' entries
 \(sidechain lines, e.g. subagent or headless-haiku traffic, are ignored
 so the result reflects the primary conversation model), don't parse, or
 carry no string `message.model'."
-  (when (and (stringp tail) (not (string-empty-p tail)))
+  (if (not (and (stringp tail) (not (string-empty-p tail))))
+      (progn
+        ;; This is a pure tail parser; no workspace exists at this boundary.
+        (agent-repl--log-verbose nil
+                                 "model-extract-from-tail: tail-type=%S result=empty-input"
+                                 (type-of tail))
+        nil)
     (let ((lines (split-string tail "\n" t))
-          (found nil))
-      (cl-loop for line in (nreverse lines)
-               while (not found)
-               when (and (string-match-p "\"type\":\"assistant\"" line)
-                         (not (string-match-p "\"isSidechain\":true" line)))
-               do (let ((parsed (ignore-errors
-                                  (let ((json-object-type 'alist)
-                                        (json-array-type 'list)
-                                        (json-key-type 'string)
-                                        (json-false nil)
-                                        (json-null nil))
-                                    (json-read-from-string line)))))
-                    (let* ((message (and (listp parsed)
-                                         (cdr (assoc "message" parsed))))
-                           (model (and (listp message)
-                                       (cdr (assoc "model" message)))))
-                      (when (and (stringp model) (not (string-empty-p model)))
-                        (setq found model)))))
+          (found nil)
+          (candidate-count 0)
+          (sidechain-count 0)
+          (parse-error-count 0)
+          (rejected-model-count 0))
+      (dolist (line (nreverse lines))
+        (when (and (not found)
+                   (string-match-p "\"type\":\"assistant\"" line))
+          (if (string-match-p "\"isSidechain\":true" line)
+              (cl-incf sidechain-count)
+            (cl-incf candidate-count)
+            (let ((parse-error nil)
+                  (parsed
+                   (condition-case err
+                       (let ((json-object-type 'alist)
+                             (json-array-type 'list)
+                             (json-key-type 'string)
+                             (json-false nil)
+                             (json-null nil))
+                         (json-read-from-string line))
+                     (error
+                      (setq parse-error err)
+                      nil))))
+              (if parse-error
+                  (cl-incf parse-error-count)
+                (let* ((message (and (listp parsed)
+                                     (cdr (assoc "message" parsed))))
+                       (model (and (listp message)
+                                   (cdr (assoc "model" message)))))
+                  (if (and (stringp model) (not (string-empty-p model)))
+                      (setq found model)
+                    (cl-incf rejected-model-count))))))))
+      ;; A scan can accompany frequent transcript-derived lookups, so keep
+      ;; its branch-level detail behind the verbose gate.
+      (agent-repl--log-verbose nil
+                               "model-extract-from-tail: chars=%d lines=%d candidates=%d skipped-sidechains=%d parse-errors=%d rejected-models=%d result=%S"
+                               (length tail) (length lines) candidate-count sidechain-count
+                               parse-error-count rejected-model-count found)
       found)))
 
 (defun agent-repl--model-read-from-jsonl (path)
@@ -102,7 +128,17 @@ transcripts.  Returns nil on missing/unreadable file or when no
 assistant entry is present in the scanned tail."
   (let ((tail (agent-repl--transcript-read-tail
                path agent-repl-model-scan-bytes)))
-    (and tail (agent-repl--model-extract-from-tail tail))))
+    (if tail
+        (let ((model (agent-repl--model-extract-from-tail tail)))
+          ;; The backend reader contract carries only PATH, not WS.
+          (agent-repl--log-verbose nil
+                                   "model-read-from-jsonl: path=%S scan-bytes=%d tail-chars=%d model=%S"
+                                   path agent-repl-model-scan-bytes (length tail) model)
+          model)
+      (agent-repl--log-verbose nil
+                               "model-read-from-jsonl: path=%S scan-bytes=%d result=no-tail"
+                               path agent-repl-model-scan-bytes)
+      nil)))
 
 ;;;; Cached lookup
 
@@ -112,8 +148,12 @@ Delegates to `agent-repl--transcript-cached' with the `:model-cache'
 key and WS's backend TRANSCRIPT-MODEL-FN reader (this file's
 `agent-repl--model-read-from-jsonl' for the claude backend).  Returns
 nil when no model is available."
-  (agent-repl--transcript-cached
-   ws :model-cache #'agent-repl-backend-transcript-model-fn))
+  (let ((model (agent-repl--transcript-cached
+                ws :model-cache #'agent-repl-backend-transcript-model-fn)))
+    (agent-repl--log-verbose ws
+                             "model-for-ws: ws=%s cache-key=%s model=%S"
+                             ws :model-cache model)
+    model))
 
 ;;;; Persisted model resolution
 
@@ -128,8 +168,17 @@ the session has produced no assistant turn yet, and to nil when neither
 source yields a model.  Callers persist the result via
 `agent-repl--state-save' so a later restore re-launches the session
 under the same model."
-  (or (agent-repl--model-for-ws ws)
-      (agent-repl--ws-get ws :model)))
+  (let* ((transcript-model (agent-repl--model-for-ws ws))
+         (workspace-model (agent-repl--ws-get ws :model))
+         (model (or transcript-model workspace-model))
+         (source (cond
+                  (transcript-model 'transcript)
+                  (workspace-model 'workspace)
+                  (t 'none))))
+    (agent-repl--log ws
+                     "model-persist-value: ws=%s transcript-model=%S workspace-model=%S selected-model=%S source=%s"
+                     ws transcript-model workspace-model model source)
+    model))
 
 (provide 'agent-repl-model)
 ;;; model.el ends here
