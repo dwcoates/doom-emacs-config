@@ -493,33 +493,6 @@ func TestSessionHandlerCompactPairsByFileOrderNotTimestamp(t *testing.T) {
 	}
 }
 
-func TestSessionHandlerCompactResultIsSuccess(t *testing.T) {
-	// Arrange: the boundary line is the harness's completion record, so the file
-	// plane can attest to success and to nothing else.
-	h := NewSessionTranscriptHandler(quietLog)
-	frames := framesFor(t, boundaryLineJSON("b1", "2026-07-07T22:01:31.660Z", "manual", 1, 2, 3))
-	// Act
-	cc := findCompacted(h.Handle(frames, &Context{SessionID: "s1"})).GetContextCompacted()
-	// Assert
-	if cc.GetResult() != "success" {
-		t.Fatalf("result = %q, want %q", cc.GetResult(), "success")
-	}
-}
-
-func TestSessionHandlerCompactErrorIsNeverInvented(t *testing.T) {
-	// Arrange: a failed compaction writes NO boundary line and is reported on
-	// the stream plane's status message, which this plane does not read — so the
-	// sidecar never fabricates an error string.
-	h := NewSessionTranscriptHandler(quietLog)
-	frames := framesFor(t, boundaryLineJSON("b1", "2026-07-07T22:01:31.660Z", "manual", 1, 2, 3))
-	// Act
-	cc := findCompacted(h.Handle(frames, &Context{SessionID: "s1"})).GetContextCompacted()
-	// Assert
-	if cc.GetError() != "" {
-		t.Fatalf("error = %q, want empty", cc.GetError())
-	}
-}
-
 func TestSessionHandlerCompactIsPersistent(t *testing.T) {
 	// Arrange
 	h := NewSessionTranscriptHandler(quietLog)

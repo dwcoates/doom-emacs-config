@@ -1336,8 +1336,6 @@ type ContextCompacted struct {
 	PostTokens    int64                  `protobuf:"varint,3,opt,name=post_tokens,json=postTokens,proto3" json:"post_tokens,omitempty"`
 	DurationMs    int64                  `protobuf:"varint,4,opt,name=duration_ms,json=durationMs,proto3" json:"duration_ms,omitempty"`
 	Summary       string                 `protobuf:"bytes,5,opt,name=summary,proto3" json:"summary,omitempty"`
-	Result        string                 `protobuf:"bytes,6,opt,name=result,proto3" json:"result,omitempty"` // "success" | "failed"
-	Error         string                 `protobuf:"bytes,7,opt,name=error,proto3" json:"error,omitempty"`   // populated only when result is "failed"
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1403,20 +1401,6 @@ func (x *ContextCompacted) GetDurationMs() int64 {
 func (x *ContextCompacted) GetSummary() string {
 	if x != nil {
 		return x.Summary
-	}
-	return ""
-}
-
-func (x *ContextCompacted) GetResult() string {
-	if x != nil {
-		return x.Result
-	}
-	return ""
-}
-
-func (x *ContextCompacted) GetError() string {
-	if x != nil {
-		return x.Error
 	}
 	return ""
 }
@@ -3425,7 +3409,7 @@ const file_agentshim_core_v1_core_proto_rawDesc = "" +
 	"\vduration_ms\x18\x02 \x01(\x03R\n" +
 	"durationMs\x12\x19\n" +
 	"\bis_error\x18\x03 \x01(\bR\aisError\"\x10\n" +
-	"\x0eContextCleared\"\xff\x01\n" +
+	"\x0eContextCleared\"\xd1\x01\n" +
 	"\x10ContextCompacted\x12B\n" +
 	"\atrigger\x18\x01 \x01(\x0e2(.agentshim.core.v1.ContextCompactTriggerR\atrigger\x12\x1d\n" +
 	"\n" +
@@ -3434,9 +3418,7 @@ const file_agentshim_core_v1_core_proto_rawDesc = "" +
 	"postTokens\x12\x1f\n" +
 	"\vduration_ms\x18\x04 \x01(\x03R\n" +
 	"durationMs\x12\x18\n" +
-	"\asummary\x18\x05 \x01(\tR\asummary\x12\x16\n" +
-	"\x06result\x18\x06 \x01(\tR\x06result\x12\x14\n" +
-	"\x05error\x18\a \x01(\tR\x05error\"\xba\x01\n" +
+	"\asummary\x18\x05 \x01(\tR\asummary\"\xba\x01\n" +
 	"\vTaskStarted\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12/\n" +
 	"\x04kind\x18\x02 \x01(\x0e2\x1b.agentshim.core.v1.TaskKindR\x04kind\x12\x1e\n" +

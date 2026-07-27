@@ -145,10 +145,10 @@ func sidecarClearEvent(vendorSessionID, lineUUID string) *corev1.Event {
 // compact_boundary line coalesced with the summary line that follows it:
 // the same envelope as a clear, keyed "compact:<boundary uuid>"
 // (handler.compactDedupKey), carrying trigger / pre_tokens / post_tokens /
-// duration_ms off the boundary's compact_metadata, the summary text off the
-// following line, and result "success" — the only outcome the file plane can
-// attest to (handler.compactResultSuccess). `error` stays empty for the same
-// reason: the sidecar never sets it on a success.
+// duration_ms off the boundary's compact_metadata, and the summary text off
+// the following line. There is no outcome field: the boundary line's existence
+// IS the completion record, so the file plane — the sole producer — has nothing
+// but success to report.
 func sidecarCompactEvent(vendorSessionID, boundaryUUID, summary string) *corev1.Event {
 	return &corev1.Event{
 		SessionId:    vendorSessionID,
@@ -162,7 +162,6 @@ func sidecarCompactEvent(vendorSessionID, boundaryUUID, summary string) *corev1.
 			PostTokens: 18_000,
 			DurationMs: 4_200,
 			Summary:    summary,
-			Result:     "success",
 		}},
 	}
 }

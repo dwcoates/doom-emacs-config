@@ -35,8 +35,6 @@ function compacted(): ConversationItem {
     postTokens: 10,
     durationMs: 500,
     summary: "what came before",
-    result: "success",
-    error: "",
   };
 }
 
