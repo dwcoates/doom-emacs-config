@@ -245,20 +245,21 @@ the snapshot's `:workspaces' list via
 store wholesale from `:sessions' (the daemon's full roster, terminal
 sessions included — a wholesale rebuild drops entries a bounced daemon no
 longer knows, unlike an upsert), and applies `:daemon' (DaemonView) for
-boot detection.  The `:catalogs' array is the TaskCatalog handler's
-responsibility and is logged but not applied here.  Returns the count of
-workspace states applied.
+boot detection.  The `:catalogs' array belongs to the webapp's detached-task
+roster; Emacs counts it for diagnostics but deliberately applies none of it.
+Returns the count of workspace states applied.
 
-On the scoped per-session webapp connection the daemon omits `:daemon'
-\(and catalogs); a nil `:daemon' is therefore skipped, not an error.  This
-handler runs on the UNSCOPED Emacs connection, which receives all of them."
+On the scoped per-session webapp connection the daemon omits `:daemon' and
+retains only that session's catalog; a nil `:daemon' is therefore skipped,
+not an error.  This handler runs on the UNSCOPED Emacs connection, which
+receives every catalog but has no per-task roster."
   (let ((workspaces (plist-get snapshot :workspaces))
         (sessions (plist-get snapshot :sessions))
         (catalogs (plist-get snapshot :catalogs))
         (inits (plist-get snapshot :inits))
         (daemon (plist-get snapshot :daemon)))
     (agent-repl--log nil
-                     "frontend-apply-snapshot: resync — %d workspace(s), %d session(s), %d catalog(s), %d init(s), daemon=%S (catalogs deferred to their handler)"
+                     "frontend-apply-snapshot: resync — %d workspace(s), %d session(s), %d webapp-only catalog(s), %d init(s), daemon=%S"
                      (length workspaces) (length sessions) (length catalogs)
                      (length inits) (and daemon t))
     ;; Rebuild the session roster from scratch: the snapshot is authoritative,
@@ -277,8 +278,10 @@ handler runs on the UNSCOPED Emacs connection, which receives all of them."
       (agent-repl--frontend-apply-workspace-state ws-state))
     (when daemon
       (agent-repl--frontend-apply-daemon-view daemon))
-    (agent-repl--log nil "frontend-apply-snapshot: applied %d workspace state(s), %d session(s), %d init(s)"
-                     (length workspaces) (length sessions) (length inits))
+    (agent-repl--log nil
+                     "frontend-apply-snapshot: applied %d workspace state(s), %d session(s), %d init(s); ignored %d webapp-only catalog(s)"
+                     (length workspaces) (length sessions) (length inits)
+                     (length catalogs))
     (length workspaces)))
 
 ;;;; ---- DegradedNotice: RETIRED (F4, wire removed in step 11) -----------
