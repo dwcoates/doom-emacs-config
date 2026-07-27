@@ -416,12 +416,6 @@ export interface StoreState {
    */
   modelUsage: Record<string, ModelUsage> | null;
   /**
-   * Whether a context compaction is IN PROGRESS. GAP after the cutover: no
-   * compaction status in `frontend.v1`; a compaction boundary still renders as
-   * a conversation item, but the in-progress indicator stays off.
-   */
-  compacting: boolean;
-  /**
    * Whether the running turn is being INTERRUPTED. GAP after the cutover: no
    * interrupt frame in `frontend.v1`; stays false (the SSM-resolved
    * `WorkspaceState` is the daemon's place to express this now).
@@ -477,7 +471,6 @@ function initialState(): StoreState {
     resultUsage: null,
     turnUsage: new Map(),
     modelUsage: null,
-    compacting: false,
     interrupting: false,
     turnRetracted: false,
     costUsd: null,
@@ -661,19 +654,18 @@ export class ConversationStore {
   }
 
   /**
-   * Adopt the daemon-resolved progress view (F1) wholesale, and take the two
-   * facts it resolves BETTER than the store could:
+   * Adopt the daemon-resolved progress view (F1) wholesale, and take the one
+   * fact it resolves BETTER than the store could: the turn's REAL start
+   * stamp, so a tab that joins mid-turn picks the elapsed clock up where the
+   * turn actually is rather than restarting it from the moment this tab
+   * noticed.
    *
-   * - `compacting`, which had no source at all after the cutover (the store's
-   *   in-progress compaction indicator was a documented gap);
-   * - the turn's REAL start stamp, so a tab that joins mid-turn picks the
-   *   elapsed clock up where the turn actually is rather than restarting it
-   *   from the moment this tab noticed.
+   * The view's in-progress windows (including `compacting`) are read straight
+   * off the retained `ProgressView` by the footer — the store keeps no copy.
    */
   private applyProgress(p: ProgressInput): boolean {
     this.progress = p;
     const s = this.state;
-    s.compacting = p.compacting !== null;
     if (p.turnStartedAtMs > 0) {
       s.turnStartedAt = new Date(p.turnStartedAtMs).toISOString();
     }

@@ -480,8 +480,11 @@ async function boot(): Promise<void> {
     const summary = s.taskSummary ?? "";
     summaryEl.textContent = summary;
     summaryEl.title = summary;
-    // Empty string when no compaction runs, which collapses the slot.
-    compactBarEl.innerHTML = compactionBannerHtml(s.compacting);
+    // Empty string when no compaction runs, which collapses the slot. The
+    // window is read straight off the retained `ProgressView` — the same
+    // authority the footer's `compacting…` row reads — rather than off a
+    // store copy of it that could disagree with the row beside it.
+    compactBarEl.innerHTML = compactionBannerHtml(store.progress?.compacting != null);
     document.title = s.model ? `claude-repl · ${s.model}` : "claude-repl";
   };
 
