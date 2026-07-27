@@ -15,11 +15,13 @@
 #                       generated .go files live outside daemon/), so after
 #                       step 1 the daemon must be rebuilt regardless
 #   4. store/sidecar    `go build` into ~/.cache/agent-repl/bin; each service
-#                       is kickstarted ONLY when its installed binary content
-#                       actually changed (hash compare), store strictly before
-#                       sidecar with a wait on store.sock in between — the
-#                       recorded safe order (a simultaneous bounce once cost a
-#                       silent full re-read via cold cursor recovery)
+#                       is kickstarted when the installed binary is not the one
+#                       its running process was started on (a stamp written at
+#                       kickstart time, NOT "did this build change the file" —
+#                       see needs_bounce), store strictly before sidecar with a
+#                       wait on store.sock in between — the recorded safe order
+#                       (a simultaneous bounce once cost a silent full re-read
+#                       via cold cursor recovery)
 #   5. daemon bounce    `(agent-repl-frontend-daemon-restart)` via emacsclient;
 #                       the elisp side refuses while a turn is in flight, and
 #                       that refusal fails this script loudly (exit 3) rather
@@ -32,9 +34,11 @@
 # Usage:  bin/deploy-all.sh [--force] [--no-bounce] [--elisp <git-range>]
 #
 #   --force        pass --force to build-frontend.sh and kickstart both
-#                  services even when their binaries did not change
+#                  services even when they already run the installed binary
 #   --no-bounce    build everything, but skip service kickstarts, the daemon
-#                  restart, and any elisp reload (pure build mode)
+#                  restart, and any elisp reload (pure build mode). Leaves the
+#                  deployed stamps untouched, so a later real run still sees
+#                  the freshly installed binaries as un-deployed and bounces.
 #   --elisp RANGE  after a successful bounce, hot-load changed non-test .el
 #                  files from `git diff --name-only RANGE`
 #
@@ -99,25 +103,49 @@ log "daemon: done"
 # bounce. `cmp` (not mtime) decides: go build always rewrites the output file.
 mkdir -p "$CACHE_BIN"
 
-build_service() { # name module-dir -> sets CHANGED_<name>=0|1
+build_service() { # name module-dir — builds and installs when content differs
     local name="$1" dir="$2"
     local installed="$CACHE_BIN/$name" staged="$CACHE_BIN/.$name.staged"
     log "$name: building..."
     ( cd "$dir" && go build -o "$staged" . )
     if [ -f "$installed" ] && cmp -s "$staged" "$installed"; then
         rm -f "$staged"
-        log "$name: unchanged"
-        return 1
+        log "$name: build unchanged"
+        return 0
     fi
     mv -f "$staged" "$installed"
     log "$name: installed (changed)"
+}
+
+# Whether the RUNNING service is executing the installed binary, tracked by a
+# stamp written at kickstart time rather than inferred from "did this build
+# change the file". Those are different questions, and conflating them is a
+# real failure mode: a `--no-bounce` run installs a new binary without
+# restarting anything, so the next run's build is "unchanged" while the live
+# process is still on the old image — and the deploy silently skips the bounce
+# the user asked for. The stamp answers the question that actually matters.
+fingerprint() { shasum -a 256 "$1" | cut -d' ' -f1; }
+
+needs_bounce() { # name -> 0 (bounce) when the installed binary is not the deployed one
+    local name="$1"
+    # Separate statement, not a second `local` assignment: a builtin's
+    # arguments all expand before any of them are assigned, so `$name` would
+    # still be unset here and `set -u` would abort the run.
+    local stamp="$CACHE_BIN/.$name.deployed"
+    [ -f "$stamp" ] || return 0
+    [ "$(fingerprint "$CACHE_BIN/$name")" = "$(cat "$stamp")" ] && return 1
     return 0
 }
 
-STORE_CHANGED=0
-SIDECAR_CHANGED=0
-if build_service shim-store "$ROOT/agent-shim/shim-store"; then STORE_CHANGED=1; fi
-if build_service shim-claude-sidecar "$ROOT/agent-shim/claude/shim-sidecar"; then SIDECAR_CHANGED=1; fi
+record_deployed() { fingerprint "$CACHE_BIN/$1" > "$CACHE_BIN/.$1.deployed"; }
+
+build_service shim-store          "$ROOT/agent-shim/shim-store"
+build_service shim-claude-sidecar "$ROOT/agent-shim/claude/shim-sidecar"
+
+STORE_STALE=0
+SIDECAR_STALE=0
+if needs_bounce shim-store; then STORE_STALE=1; fi
+if needs_bounce shim-claude-sidecar; then SIDECAR_STALE=1; fi
 
 if [ "$NO_BOUNCE" -eq 1 ]; then
     log "--no-bounce: skipping kickstarts, daemon restart, and elisp reload"
@@ -138,24 +166,26 @@ wait_for_store_sock() {
     done
 }
 
-if [ "$STORE_CHANGED" -eq 1 ] || [ "$FORCE" -eq 1 ]; then
+if [ "$STORE_STALE" -eq 1 ] || [ "$FORCE" -eq 1 ]; then
     log "store: kickstarting $STORE_LABEL..."
-    # The store's socket is unlinked on shutdown and recreated on boot, so
-    # remove our view of it first and wait for the NEW instance's socket —
-    # the recorded safe order requires the store healthy before the sidecar
-    # bounces (cold cursor recovery on the sidecar is a silent full re-read).
+    # The store's socket is unlinked on shutdown and recreated on boot, so we
+    # wait for the NEW instance's socket — the recorded safe order requires
+    # the store healthy before the sidecar bounces (cold cursor recovery on
+    # the sidecar is a silent full re-read).
     kickstart "$STORE_LABEL"
     wait_for_store_sock
+    record_deployed shim-store
     log "store: up ($STORE_SOCK)"
-    # A store bounce always bounces the sidecar too, changed or not: the
+    # A store bounce always bounces the sidecar too, stale or not: the
     # sidecar's link recovery is connection-scoped, and a fresh pair is the
     # recorded known-good state after a store restart.
-    SIDECAR_CHANGED=1
+    SIDECAR_STALE=1
 fi
 
-if [ "$SIDECAR_CHANGED" -eq 1 ] || [ "$FORCE" -eq 1 ]; then
+if [ "$SIDECAR_STALE" -eq 1 ] || [ "$FORCE" -eq 1 ]; then
     log "sidecar: kickstarting $SIDECAR_LABEL..."
     kickstart "$SIDECAR_LABEL"
+    record_deployed shim-claude-sidecar
     log "sidecar: done"
 fi
 
