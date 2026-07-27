@@ -10,6 +10,7 @@ import (
 	"time"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
+	"agentrepl/wire"
 )
 
 // shimStoreDir walks up from the test's working directory to the sibling
@@ -93,6 +94,42 @@ func TestIntegrationRecoverCursorsEmpty(t *testing.T) {
 	}
 	if len(cursors) != 0 {
 		t.Fatalf("cursors = %d, want 0 on a fresh store", len(cursors))
+	}
+}
+
+func TestRecoverRejectsStoreWithoutAuthoritativeOpenTaskState(t *testing.T) {
+	socketDir, err := os.MkdirTemp("/tmp", "sidecar-recovery")
+	if err != nil {
+		t.Fatalf("create short socket dir: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(socketDir) })
+	sock := filepath.Join(socketDir, "s")
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+	served := make(chan error, 1)
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			served <- err
+			return
+		}
+		defer conn.Close()
+		if _, err := wire.ReadAny(conn); err != nil {
+			served <- err
+			return
+		}
+		served <- wire.WriteAny(conn, &corev1.CursorList{})
+	}()
+
+	_, err = New(sock, nil).Recover("")
+	if err == nil {
+		t.Fatal("Recover accepted a CursorList with no authoritative open-task attestation")
+	}
+	if serveErr := <-served; serveErr != nil {
+		t.Fatalf("serve recovery response: %v", serveErr)
 	}
 }
 

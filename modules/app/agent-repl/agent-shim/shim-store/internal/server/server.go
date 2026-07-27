@@ -173,6 +173,7 @@ func (s *Server) handleConn(conn net.Conn) {
 // connection is done.
 func (s *Server) serveCursorQuery(conn net.Conn, q *corev1.CursorQuery) {
 	var cursors []*corev1.CursorState
+	var openTasks []*corev1.OpenTaskState
 	if id := q.GetFileId(); id != "" {
 		c, err := s.db.Cursor(id)
 		if err != nil {
@@ -189,8 +190,19 @@ func (s *Server) serveCursorQuery(conn net.Conn, q *corev1.CursorQuery) {
 			return
 		}
 		cursors = all
+		openTasks, err = s.db.OpenTasks()
+		if err != nil {
+			s.log("cursor query failed (open tasks): %v", err)
+			return
+		}
 	}
-	if err := wire.WriteAny(conn, &corev1.CursorList{Cursors: cursors}); err != nil {
+	s.log("startup recovery snapshot: cursors=%d open_tasks=%d file_id=%q",
+		len(cursors), len(openTasks), q.GetFileId())
+	if err := wire.WriteAny(conn, &corev1.CursorList{
+		Cursors:                cursors,
+		OpenTasks:              openTasks,
+		OpenTasksAuthoritative: q.GetFileId() == "",
+	}); err != nil {
 		s.log("cursor query reply failed: %v", err)
 	}
 }
