@@ -308,6 +308,25 @@ lookup is never dropped."
                (lambda (_d) "/home/user/project")))
       (should-not (agent-repl--ws-for-dir-fast "/home/user/project/subdir")))))
 
+(ert-deftest agent-repl-test-ws-for-dir-fast-uses-registered-name-boundary ()
+  "ws-for-dir-fast obtains its complete candidate set from workspace.el.
+The registered-name API intentionally includes tombstones, preserving the
+old raw-hash iteration semantics for a sole matching historical entry."
+  (agent-repl-test--with-clean-state
+    (let ((root (agent-repl--path-canonical "/home/user/project"))
+          (registered-names-called nil))
+      (agent-repl--ws-put "tombstoned-ws" :project-dir root)
+      (agent-repl--ws-put "tombstoned-ws" :nuked-at t)
+      (cl-letf (((symbol-function 'agent-repl--git-root)
+                 (lambda (_d) root))
+                ((symbol-function 'agent-repl--ws-registered-names)
+                 (lambda ()
+                   (setq registered-names-called t)
+                   '("tombstoned-ws"))))
+        (should (equal (agent-repl--ws-for-dir-fast (concat root "/subdir"))
+                       "tombstoned-ws"))
+        (should registered-names-called)))))
+
 (ert-deftest agent-repl-test-ws-for-dir-fast-picks-correct-among-multiple ()
   "ws-for-dir-fast returns the workspace matching the target git-root among several."
   (agent-repl-test--with-clean-state

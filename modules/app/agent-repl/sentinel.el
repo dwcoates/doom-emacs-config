@@ -46,7 +46,7 @@ Only files matching this pattern are enumerated."
 ;; stop_*, prompt_submit_*.
 
 (defun agent-repl--ws-for-dir-fast (dir)
-  "Fast path for DIR: iterate `agent-repl--workspaces' and match :project-dir.
+  "Fast path for DIR: iterate registered workspaces and match :project-dir.
 Returns the workspace name whose canonicalized :project-dir equals the
 canonicalized git-root of DIR, or nil.
 
@@ -64,20 +64,18 @@ wrong perspective."
                               target-root canonical-target)
     (when canonical-target
       (let ((candidates nil))
-        (maphash
-         (lambda (ws _plist)
-           (let* ((proj (agent-repl--ws-get ws :project-dir))
-                  (canonical-proj (when proj
-                                    (agent-repl--path-canonical proj))))
-             (agent-repl--log-verbose ws "ws-for-dir-fast: check ws=%s proj=%S canonical=%S match=%s"
-                                       ws proj canonical-proj
-                                       (if (and canonical-proj
-                                                (string= canonical-target canonical-proj))
-                                           "YES" "no"))
-             (when (and canonical-proj
-                        (string= canonical-target canonical-proj))
-               (push ws candidates))))
-         agent-repl--workspaces)
+        (dolist (ws (agent-repl--ws-registered-names))
+          (let* ((proj (agent-repl--ws-get ws :project-dir))
+                 (canonical-proj (when proj
+                                   (agent-repl--path-canonical proj))))
+            (agent-repl--log-verbose ws "ws-for-dir-fast: check ws=%s proj=%S canonical=%S match=%s"
+                                      ws proj canonical-proj
+                                      (if (and canonical-proj
+                                               (string= canonical-target canonical-proj))
+                                          "YES" "no"))
+            (when (and canonical-proj
+                       (string= canonical-target canonical-proj))
+              (push ws candidates))))
         ;; Multiple entries can share one :project-dir — e.g. a no-name
         ;; `SPC TAB n' stub shadowing the real workspace.  Prefer a
         ;; fully-initialized, non-tombstoned workspace (one that ran
