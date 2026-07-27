@@ -298,7 +298,8 @@ if [ "$RC" -eq 0 ] \
    && log_has 'emacsclient --eval t' \
    && ! log_has 'daemon-restart' \
    && ! log_has 'emacsclient --eval (load' \
-   && grep -q "restart deferred; Emacs server is unavailable" "$d/stdout" \
+   && grep -q "Emacs is not running; restart deferred until Emacs starts" "$d/stdout" \
+   && ! grep -q "can't find socket" "$d/stdout" \
    && grep -q "reload deferred; Emacs will load the changed files at startup" "$d/stdout"; then
     pass "an unavailable Emacs server defers restart and hot-reload until startup"
 else
