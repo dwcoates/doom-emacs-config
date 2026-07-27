@@ -76,15 +76,23 @@ Used as `:filter-args' advice on `magit-format-ref-labels' rather than
 a `--decorate-refs-exclude' git arg so the filter applies uniformly to
 every section that decorates commits (status, log, diff inline) without
 having to thread args through each call site."
-  (if (or agent-repl-magit-show-tags-in-log
-          (null args)
-          (not (stringp (car args))))
-      args
-    (let ((s (car args)))
-      (setq s (replace-regexp-in-string
-               "\\(?:tag: [^,]+\\(?:, \\)?\\|, tag: [^,]+\\)"
-               "" s))
-      (cons s (cdr args)))))
+  (let ((ws (agent-repl--ws-current-name)))
+    (if (or agent-repl-magit-show-tags-in-log
+            (null args)
+            (not (stringp (car args))))
+        (progn
+          (agent-repl--log-verbose
+           ws "magit-strip-tag-refs: ws=%s branch=unchanged tags-shown=%s args=%S"
+           ws agent-repl-magit-show-tags-in-log args)
+          args)
+      (let* ((original (car args))
+             (s (replace-regexp-in-string
+                 "\\(?:tag: [^,]+\\(?:, \\)?\\|, tag: [^,]+\\)"
+                 "" original)))
+        (agent-repl--log-verbose
+         ws "magit-strip-tag-refs: ws=%s branch=stripped original=%s result=%s"
+         ws original s)
+        (cons s (cdr args))))))
 
 (defun +dwc/magit-toggle-tags-in-log ()
   "Toggle whether magit commit listings include tag refs.
@@ -94,8 +102,13 @@ buffer so the change becomes visible immediately."
   (interactive)
   (setq agent-repl-magit-show-tags-in-log
         (not agent-repl-magit-show-tags-in-log))
-  (when (derived-mode-p 'magit-mode)
-    (magit-refresh))
+  (let ((ws (agent-repl--ws-current-name))
+        (in-magit-mode (derived-mode-p 'magit-mode)))
+    (agent-repl--log ws "magit-toggle-tags: ws=%s shown=%s magit-mode=%s"
+                      ws agent-repl-magit-show-tags-in-log in-magit-mode)
+    (when in-magit-mode
+      (magit-refresh)
+      (agent-repl--log ws "magit-toggle-tags: ws=%s branch=refreshed" ws)))
   (message "magit commit-list tags %s"
            (if agent-repl-magit-show-tags-in-log "shown" "hidden")))
 
@@ -108,10 +121,17 @@ buffer so the change becomes visible immediately."
 Returns `agent-repl-magit-merge-base-ref' when it is a non-empty
 string; otherwise the repository's main branch via `magit-main-branch'
 \(nil when the repository has no recognizable main branch)."
-  (if (and (stringp agent-repl-magit-merge-base-ref)
-           (not (string-empty-p agent-repl-magit-merge-base-ref)))
-      agent-repl-magit-merge-base-ref
-    (magit-main-branch)))
+  (let ((ws (agent-repl--ws-current-name)))
+    (if (and (stringp agent-repl-magit-merge-base-ref)
+             (not (string-empty-p agent-repl-magit-merge-base-ref)))
+        (progn
+          (agent-repl--log-verbose ws "magit-merge-base-ref: ws=%s branch=explicit base=%s"
+                                    ws agent-repl-magit-merge-base-ref)
+          agent-repl-magit-merge-base-ref)
+      (let ((base (magit-main-branch)))
+        (agent-repl--log-verbose ws "magit-merge-base-ref: ws=%s branch=main-branch configured=%S base=%s"
+                                  ws agent-repl-magit-merge-base-ref base)
+        base))))
 
 (defun agent-repl--magit-merge-base-commit ()
   "Return (BASE . SHA) for HEAD's merge-base with BASE, or nil.
@@ -122,15 +142,30 @@ branch HEAD is already on (a branch's merge-base with itself is not
 worth showing), or when git yields no usable merge-base.  Git reads
 route through `agent-repl--git-string-quiet' so tests mock that wrapper
 rather than shelling out (see AGENTS.md)."
-  (let ((base (agent-repl--magit-merge-base-ref)))
-    (when (and base
-               (not (equal base (agent-repl--git-string-quiet
-                                 "rev-parse" "--abbrev-ref" "HEAD"))))
-      (let ((sha (agent-repl--git-string-quiet "merge-base" "HEAD" base)))
-        (when (and (stringp sha)
-                   (not (string-empty-p sha))
-                   (not (string-prefix-p "fatal" sha)))
-          (cons base sha))))))
+  (let* ((ws (agent-repl--ws-current-name))
+         (base (agent-repl--magit-merge-base-ref)))
+    (if (not base)
+        (progn
+          (agent-repl--log-verbose ws "magit-merge-base-commit: ws=%s branch=no-base no-section" ws)
+          nil)
+      (let ((head-branch (agent-repl--git-string-quiet
+                          "rev-parse" "--abbrev-ref" "HEAD")))
+        (if (equal base head-branch)
+            (progn
+              (agent-repl--log-verbose ws "magit-merge-base-commit: ws=%s branch=on-base base=%s head=%s no-section"
+                                        ws base head-branch)
+              nil)
+          (let ((sha (agent-repl--git-string-quiet "merge-base" "HEAD" base)))
+            (if (and (stringp sha)
+                     (not (string-empty-p sha))
+                     (not (string-prefix-p "fatal" sha)))
+                (progn
+                  (agent-repl--log-verbose ws "magit-merge-base-commit: ws=%s branch=resolved base=%s head=%s sha=%s"
+                                            ws base head-branch sha)
+                  (cons base sha))
+              (agent-repl--log-verbose ws "magit-merge-base-commit: ws=%s branch=invalid-sha base=%s head=%s sha=%S no-section"
+                                        ws base head-branch sha)
+              nil)))))))
 
 (defun agent-repl--magit-insert-merge-base ()
   "Insert a magit-status section showing HEAD's merge-base with the base ref.
@@ -140,15 +175,20 @@ diverged from the base) as a navigable `commit' section, so RET on it
 runs `magit-show-commit'.  Inserts nothing when
 `agent-repl--magit-merge-base-commit' returns nil.  Registered on
 `magit-status-sections-hook' after the unpushed/recent-commits section."
-  (when-let* ((pair (agent-repl--magit-merge-base-commit))
+  (let ((ws (agent-repl--ws-current-name)))
+    (if-let* ((pair (agent-repl--magit-merge-base-commit))
               (base (car pair))
               (sha (cdr pair)))
-    (magit-insert-section (commit sha)
-      (magit-insert-heading
-        (format (propertize "Merge base with %s"
-                            'font-lock-face 'magit-section-heading)
-                base))
-      (magit--insert-log nil sha '("-1")))))
+        (progn
+          (agent-repl--log-verbose ws "magit-insert-merge-base: ws=%s branch=insert base=%s sha=%s"
+                                    ws base sha)
+          (magit-insert-section (commit sha)
+            (magit-insert-heading
+              (format (propertize "Merge base with %s"
+                                  'font-lock-face 'magit-section-heading)
+                      base))
+            (magit--insert-log nil sha '("-1"))))
+      (agent-repl--log-verbose ws "magit-insert-merge-base: ws=%s branch=no-merge-base no-op" ws))))
 
 (after! magit
   (setq magit-no-confirm (append magit-no-confirm agent-repl-magit-no-confirm-extras)
@@ -190,7 +230,8 @@ runs `magit-show-commit'.  Inserts nothing when
 Routes git reads through `agent-repl--git-string' so the function
 is mockable per AGENTS.md."
   (interactive)
-  (let* ((default-directory (agent-repl--ws-dir (agent-repl--ws-current-name)))
+  (let* ((ws (agent-repl--ws-current-name))
+         (default-directory (agent-repl--ws-dir ws))
          (commit-sha (agent-repl--git-string "rev-parse" "HEAD"))
          (remote-url (agent-repl--git-string "config" "--get" "remote.origin.url"))
          (cleaned-url (replace-regexp-in-string agent-repl-magit-github-ssh-prefix-regexp agent-repl-magit-github-base-url
@@ -198,26 +239,39 @@ is mockable per AGENTS.md."
          (repo-name (progn
                       (if (string-match agent-repl-magit-github-org-regexp cleaned-url)
                           (match-string 1 cleaned-url)
-                        (error (format "Remote URL '%s' does not match expected pattern" cleaned-url)))))
+                        (agent-repl--log ws "magit-open-commit: ws=%s branch=invalid-remote dir=%s remote=%s cleaned=%s regexp=%s commit=%s"
+                                          ws default-directory remote-url cleaned-url
+                                          agent-repl-magit-github-org-regexp commit-sha)
+                        (error "Remote URL '%s' does not match expected pattern" cleaned-url))))
          (github-url (format agent-repl-magit-github-commit-url-format repo-name commit-sha)))
-    (browse-url github-url)))
+    (agent-repl--log ws "magit-open-commit: ws=%s branch=browse dir=%s remote=%s repo=%s commit=%s url=%s"
+                      ws default-directory remote-url repo-name commit-sha github-url)
+    (browse-url github-url)
+    (agent-repl--log ws "magit-open-commit: ws=%s branch=opened url=%s" ws github-url)))
 
 (defun +dwc/magit-copy-commit-link ()
   "Copy GitHub link for commit at point in magit buffer.
 Routes git reads through `agent-repl--git-string' so the function
 is mockable per AGENTS.md."
   (interactive)
-  (let* ((commit-sha (magit-commit-at-point))
-         (default-directory (agent-repl--ws-dir (agent-repl--ws-current-name)))
+  (let* ((ws (agent-repl--ws-current-name))
+         (commit-sha (magit-commit-at-point))
+         (default-directory (agent-repl--ws-dir ws))
          (remote-url (agent-repl--git-string "config" "--get" "remote.origin.url"))
          (cleaned-url (replace-regexp-in-string agent-repl-magit-github-ssh-prefix-regexp agent-repl-magit-github-base-url
                                                 (replace-regexp-in-string "\\.git$" "" remote-url)))
          (repo-name (progn
                       (if (string-match agent-repl-magit-github-org-regexp cleaned-url)
                           (match-string 1 cleaned-url)
-                        (error (format "Remote URL '%s' does not match expected pattern" cleaned-url)))))
+                        (agent-repl--log ws "magit-copy-commit-link: ws=%s branch=invalid-remote dir=%s remote=%s cleaned=%s regexp=%s commit=%s"
+                                          ws default-directory remote-url cleaned-url
+                                          agent-repl-magit-github-org-regexp commit-sha)
+                        (error "Remote URL '%s' does not match expected pattern" cleaned-url))))
          (github-url (format agent-repl-magit-github-commit-url-format repo-name commit-sha)))
+    (agent-repl--log ws "magit-copy-commit-link: ws=%s branch=copy dir=%s remote=%s repo=%s commit=%s url=%s"
+                      ws default-directory remote-url repo-name commit-sha github-url)
     (kill-new github-url)
+    (agent-repl--log ws "magit-copy-commit-link: ws=%s branch=copied url=%s" ws github-url)
     (message "GitHub commit link copied to clipboard: %s" github-url)))
 
 ;;;; --- GitHub PR resolution via gh CLI ------------------------------------
@@ -229,10 +283,14 @@ PROJECT-DIR.  Routes through `agent-repl--gh-string-quiet' (the
 external boundary for the GitHub CLI) so tests mock that wrapper
 rather than invoking real `gh' (see AGENTS.md \"No External
 Processes or External State in Tests\")."
-  (let* ((default-directory (file-name-as-directory project-dir))
+  (let* ((ws (agent-repl--ws-current-name))
+         (default-directory (file-name-as-directory project-dir))
          (output (agent-repl--gh-string-quiet
-                  "pr" "view" branch "--json" "url" "--jq" ".url")))
-    (and (string-prefix-p "http" output) output)))
+                  "pr" "view" branch "--json" "url" "--jq" ".url"))
+         (url-p (string-prefix-p "http" output)))
+    (agent-repl--log ws "gh-pr-url-for-branch: ws=%s project-dir=%s branch=%s output=%S branch-result=%s"
+                      ws project-dir branch output (if url-p "url" "no-url"))
+    (and url-p output)))
 
 (defun +dwc/open-workspace-pr-in-browser ()
   "Open the GitHub PR for the current workspace's branch in the browser.
@@ -248,8 +306,13 @@ associated with the current branch.  Routes git reads through
          (branch (agent-repl--git-string "rev-parse" "--abbrev-ref" "HEAD"))
          (pr-url (agent-repl--gh-pr-url-for-branch project-dir branch)))
     (unless pr-url
+      (agent-repl--log ws "open-workspace-pr: ws=%s branch=no-pr project-dir=%s git-branch=%s"
+                        ws project-dir branch)
       (user-error "No PR found for branch '%s' in workspace '%s'" branch ws))
+    (agent-repl--log ws "open-workspace-pr: ws=%s branch=browse project-dir=%s git-branch=%s url=%s"
+                      ws project-dir branch pr-url)
     (browse-url pr-url)
+    (agent-repl--log ws "open-workspace-pr: ws=%s branch=opened url=%s" ws pr-url)
     (message "Opened PR: %s" pr-url)))
 
 ;;;; --- magit-status-workspace ---------------------------------------------
@@ -260,7 +323,10 @@ Used as a let-bound override for `magit-display-buffer-function' so
 the top-level `magit-status' call from `+dwc/magit-status-workspace'
 replaces the current buffer rather than splitting or popping up a
 new window.  Returns the window magit should select."
-  (display-buffer buffer '(display-buffer-same-window)))
+  (let ((ws (agent-repl--ws-current-name)))
+    (agent-repl--log-verbose ws "magit-display-buffer-same-window: ws=%s buffer=%S selected-window=%S"
+                              ws buffer (selected-window))
+    (display-buffer buffer '(display-buffer-same-window))))
 
 (defun agent-repl--magit-status-same-window (dir)
   "Open `magit-status' for DIR, forcing same-window display.
@@ -294,10 +360,15 @@ and still signals loudly, so no failure is swallowed — the quiet
 require only exists to get magit's `defvar' evaluated before the
 `let'.  (In the batch test harness magit is not installable at all;
 test-helpers.el declares the variable special instead.)"
-  (require 'magit nil t)
-  (let ((magit-display-buffer-function
-         #'agent-repl--magit-display-buffer-same-window))
-    (magit-status dir)))
+  (let* ((ws (agent-repl--ws-current-name))
+         (require-result (require 'magit nil t)))
+    (agent-repl--log ws "magit-status-same-window: ws=%s dir=%s require-result=%S magit-loaded=%s selected-window=%S"
+                      ws dir require-result (featurep 'magit) (selected-window))
+    (let ((magit-display-buffer-function
+           #'agent-repl--magit-display-buffer-same-window))
+      (magit-status dir)
+      (agent-repl--log ws "magit-status-same-window: ws=%s branch=opened dir=%s selected-window=%S"
+                        ws dir (selected-window)))))
 
 (defun +dwc/magit-status-workspace ()
   "Open magit-status for the workspace in the SELECTED window.
@@ -326,30 +397,48 @@ un-dedicates the webview window before opening magit so that
 `display-buffer-same-window' can replace the webview window cleanly
 instead of splitting it."
   (interactive)
-  (when (window-parameter (selected-window) 'window-side)
-    (select-window (window-main-window)))
+  (let ((ws (agent-repl--ws-current-name)))
+    (when (window-parameter (selected-window) 'window-side)
+      (agent-repl--log ws "magit-status-workspace: ws=%s branch=side-window selected=%S main=%S"
+                        ws (selected-window) (window-main-window))
+      (select-window (window-main-window)))
   (let* ((ws (agent-repl--ws-current-name))
-         (tracked-dir (ignore-errors (agent-repl--ws-dir ws)))
+         (tracked-error nil)
+         (tracked-dir (condition-case err
+                          (agent-repl--ws-dir ws)
+                        (error
+                         (setq tracked-error err)
+                         nil)))
          (dir (or tracked-dir default-directory)))
     (when (fboundp 'agent-repl--log)
-      (agent-repl--log ws "magit-status-workspace: same-window dir=%s tracked=%s"
-                        dir (if tracked-dir "yes" "no")))
+      (agent-repl--log ws "magit-status-workspace: same-window dir=%s tracked=%s tracked-error=%S selected-window=%S"
+                        dir (if tracked-dir "yes" "no") tracked-error (selected-window)))
     (when tracked-dir
       ;; When the panels are visible, close the input window and un-dedicate
       ;; the webview window so magit can replace the webview window via
       ;; same-window display without splitting it (the webview window is
       ;; dedicated, which blocks same-window).
-      (when (agent-repl--panels-visible-p)
+      (if (agent-repl--panels-visible-p)
         (let ((input-buf (agent-repl--ws-get ws :input-buffer))
               (webview-buf (agent-repl--ws-get ws :frontend-buffer)))
+          (agent-repl--log ws "magit-status-workspace: ws=%s branch=panels-visible input=%S frontend=%S"
+                            ws input-buf webview-buf)
           (when input-buf
             (agent-repl--close-buffer-window input-buf))
           (when webview-buf
-            (when-let ((webview-win (get-buffer-window webview-buf)))
-              (set-window-dedicated-p webview-win nil)
-              (select-window webview-win)))))
+            (if-let ((webview-win (get-buffer-window webview-buf)))
+                (progn
+                  (agent-repl--log ws "magit-status-workspace: ws=%s branch=select-frontend-window frontend=%S window=%S"
+                                    ws webview-buf webview-win)
+                  (set-window-dedicated-p webview-win nil)
+                  (select-window webview-win))
+              (agent-repl--log ws "magit-status-workspace: ws=%s branch=no-frontend-window frontend=%S"
+                                ws webview-buf))))
+        (agent-repl--log ws "magit-status-workspace: ws=%s branch=panels-hidden" ws))
       (agent-repl--ws-put ws :fullscreen-config nil))
-    (agent-repl--magit-status-same-window dir)))
+    (agent-repl--magit-status-same-window dir)
+    (agent-repl--log ws "magit-status-workspace: ws=%s branch=complete dir=%s tracked=%s"
+                      ws dir (if tracked-dir "yes" "no")))))
 
 ;;;; --- Hide Claude panels before magit-status RET actions -----------------
 
@@ -379,9 +468,14 @@ so `:repl-state'/`:agent-state' are left untouched — the panels simply
 become hidden, matching the behavior of other non-user-initiated close
 paths (see `agent-repl--on-close' for the user-initiated path that
 transitions `:repl-state' to :inactive)."
-  (when (and (eq major-mode 'magit-status-mode)
-             (agent-repl--panels-visible-p))
-    (agent-repl--hide-panels)))
+  (let* ((ws (agent-repl--ws-current-name))
+         (in-status (eq major-mode 'magit-status-mode))
+         (panels-visible (and in-status (agent-repl--panels-visible-p))))
+    (agent-repl--log ws "magit-hide-panels-before-action: ws=%s mode=%S in-status=%s panels-visible=%s branch=%s"
+                      ws major-mode in-status panels-visible
+                      (if panels-visible "hide" "no-op"))
+    (when panels-visible
+      (agent-repl--hide-panels))))
 
 (dolist (fn agent-repl-magit-hide-panels-advised-fns)
   (advice-add fn :before #'agent-repl--magit-hide-panels-before-action))
