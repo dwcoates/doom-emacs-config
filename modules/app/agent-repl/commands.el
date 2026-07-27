@@ -1181,18 +1181,19 @@ restarts."
       ;; test envs without persp-mode).  Include all live entries in
       ;; hash-traversal order so nothing is silently dropped.
       (let (result)
-        (maphash (lambda (ws plist)
-                   (when-let ((dir (plist-get plist :project-dir)))
-                     (let ((tomb (plist-get plist :nuked-at))
-                           (hidden (plist-get plist :hidden-project-dir)))
-                       (push (cons ws (append
-                                       (if tomb
-                                           (append (list :project-dir dir :nuked-at tomb)
-                                                   (when hidden (list :hidden-project-dir t)))
-                                         (list :project-dir dir))
-                                       (agent-repl--worktree-snapshot-fields ws)))
-                             result))))
-                 agent-repl--workspaces)
+        (dolist (ws (agent-repl--ws-registered-names))
+          (let* ((plist (agent-repl--ws-plist ws))
+                 (dir (plist-get plist :project-dir)))
+            (when dir
+              (let ((tomb (plist-get plist :nuked-at))
+                    (hidden (plist-get plist :hidden-project-dir)))
+                (push (cons ws (append
+                                (if tomb
+                                    (append (list :project-dir dir :nuked-at tomb)
+                                            (when hidden (list :hidden-project-dir t)))
+                                  (list :project-dir dir))
+                                (agent-repl--worktree-snapshot-fields ws)))
+                      result)))))
         result)
     ;; Normal path: cache is bound.  Route all persp-mode access through
     ;; workspace.el's integration boundary.
@@ -1717,7 +1718,7 @@ the user has manually resolved before re-entering the loop)."
       (dolist (entry saved-mq)
         (let ((ws (plist-get entry :source-ws)))
           (cond
-           ((and ws (gethash ws agent-repl--workspaces))
+           ((and ws (agent-repl--ws-known-p ws))
             (push (list :source-ws ws
                         :silent (and (plist-get entry :silent) t)
                         :auto-resolve (and (plist-get entry :auto-resolve) t)
@@ -2345,7 +2346,7 @@ Keeps the `:last-file' cache fresh at zero per-switch cost so
 lookup instead of a linear `recentf-list' scan."
   (when-let* ((file buffer-file-name)
               (ws (agent-repl--ws-current-name))
-              ((gethash ws agent-repl--workspaces))
+              ((agent-repl--ws-known-p ws))
               (project-dir (ignore-errors (agent-repl--ws-dir ws)))
               ((file-in-directory-p file project-dir)))
     (agent-repl--ws-put ws :last-file file)))
@@ -2469,12 +2470,12 @@ candidate universe of the project picker — deliberately NOT
 regardless of whether an agent-repl workspace ever existed there."
   (let ((seen (make-hash-table :test #'equal))
         (result nil))
-    (maphash (lambda (ws plist)
-               (when-let ((dir (plist-get plist :project-dir)))
-                 (unless (gethash ws seen)
-                   (puthash ws t seen)
-                   (push (cons ws dir) result))))
-             agent-repl--workspaces)
+    (dolist (ws (agent-repl--ws-registered-names))
+      (let* ((plist (agent-repl--ws-plist ws))
+             (dir (plist-get plist :project-dir)))
+        (when (and dir (not (gethash ws seen)))
+          (puthash ws t seen)
+          (push (cons ws dir) result))))
     (let* ((file (agent-repl--workspace-snapshot-file-for-read))
            (raw (and file (ignore-errors
                             (agent-repl--read-sexp-file-if-exists file))))
