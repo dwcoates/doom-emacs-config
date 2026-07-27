@@ -18,8 +18,10 @@ type JobStore interface {
 	List() ([]Job, error)
 	Update(string, func(*Job) error) (Job, error)
 	EnqueueHostAction(HostAction) (action HostAction, inserted bool, err error)
+	HostActionsForDelivery() ([]HostAction, error)
 	PendingHostActions() ([]HostAction, error)
-	MarkHostActionDelivered(string) error
+	MarkHostActionPublished(string) error
+	CompleteHostAction(id string, ok bool, failure string) error
 }
 
 type diskShape struct {
@@ -156,12 +158,12 @@ func (s *FileJobStore) EnqueueHostAction(action HostAction) (HostAction, bool, e
 	return action, true, nil
 }
 
-func (s *FileJobStore) PendingHostActions() ([]HostAction, error) {
+func (s *FileJobStore) HostActionsForDelivery() ([]HostAction, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	actions := make([]HostAction, 0, len(s.doc.HostActions))
 	for _, action := range s.doc.HostActions {
-		if !action.Delivered {
+		if !action.Published && !action.Completed {
 			actions = append(actions, action)
 		}
 	}
@@ -169,24 +171,78 @@ func (s *FileJobStore) PendingHostActions() ([]HostAction, error) {
 	return actions, nil
 }
 
-func (s *FileJobStore) MarkHostActionDelivered(id string) error {
+// PendingHostActions returns actions that still require a host result.  It is
+// the reconnect snapshot source: a previously published but uncompleted action
+// remains visible until the host explicitly reports success or failure.
+func (s *FileJobStore) PendingHostActions() ([]HostAction, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	actions := make([]HostAction, 0, len(s.doc.HostActions))
+	for _, action := range s.doc.HostActions {
+		if !action.Completed {
+			actions = append(actions, action)
+		}
+	}
+	sort.Slice(actions, func(i, j int) bool { return actions[i].ID < actions[j].ID })
+	return actions, nil
+}
+
+func (s *FileJobStore) MarkHostActionPublished(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	action, ok := s.doc.HostActions[id]
 	if !ok {
 		return fmt.Errorf("workspace create: unknown host action %q", id)
 	}
-	if action.Delivered {
+	if action.Published {
 		return nil
 	}
-	action.Delivered = true
+	action.Published = true
 	s.doc.HostActions[id] = action
 	if err := s.saveLocked(); err != nil {
-		action.Delivered = false
+		action.Published = false
 		s.doc.HostActions[id] = action
 		return err
 	}
-	s.logf("workspace-create: marked host action delivered id=%s type=%s", id, action.Type)
+	s.logf("workspace-create: marked host action published id=%s type=%s", id, action.Type)
+	return nil
+}
+
+func (s *FileJobStore) CompleteHostAction(id string, ok bool, failure string) error {
+	if ok && failure != "" {
+		return fmt.Errorf("workspace create: completed host action %q cannot carry a failure", id)
+	}
+	if !ok && failure == "" {
+		return fmt.Errorf("workspace create: failed host action %q requires failure text", id)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	action, exists := s.doc.HostActions[id]
+	if !exists {
+		return fmt.Errorf("workspace create: unknown host action %q", id)
+	}
+	if action.Completed {
+		if !ok {
+			return fmt.Errorf("workspace create: host action %q was already completed successfully", id)
+		}
+		return nil
+	}
+	old := action
+	if ok {
+		action.Completed = true
+		action.Failure = ""
+	} else {
+		// A failed host action deliberately remains incomplete.  Its failure is
+		// durable diagnostic evidence and reconnect snapshots continue to show
+		// it until an explicit retry succeeds.
+		action.Failure = failure
+	}
+	s.doc.HostActions[id] = action
+	if err := s.saveLocked(); err != nil {
+		s.doc.HostActions[id] = old
+		return err
+	}
+	s.logf("workspace-create: host action completion id=%s type=%s ok=%t failure=%q", id, action.Type, ok, failure)
 	return nil
 }
 
