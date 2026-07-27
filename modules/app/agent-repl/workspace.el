@@ -24,6 +24,7 @@
 ;;   - `agent-repl--ws-del'                tombstone (preserves identity)
 ;;   - `agent-repl--ws-live-p'             entry exists AND not tombstoned
 ;;   - `agent-repl--live-ws-names'         live names (filtered)
+;;   - `agent-repl--ws-registered-names'   all keys (live + tombstoned)
 ;;   - `agent-repl--ws-project-pollable-p' live entry with project dir
 ;;   - `agent-repl--ws-project-poll-partition'
 ;;                                         pollable names + placeholder names
@@ -372,6 +373,18 @@ workspaces' — that idiom now over-includes tombstones, so route
 through this filter instead."
   (cl-remove-if-not #'agent-repl--ws-live-p
                     (hash-table-keys agent-repl--workspaces)))
+
+(defun agent-repl--ws-registered-names ()
+  "Return every registered workspace name, live and tombstoned.
+The result preserves `hash-table-keys' traversal order exactly: it is
+not sorted, filtered, or otherwise normalized.  This is the canonical
+workspace-owned API for callers that need the complete registration
+set rather than the live-only view from `agent-repl--live-ws-names'."
+  (let ((names (hash-table-keys agent-repl--workspaces)))
+    (agent-repl--log-verbose
+     nil "ws-registered-names: count=%d names=%S"
+     (length names) names)
+    names))
 
 (defun agent-repl--ws-project-pollable-p (ws)
   "Return non-nil when WS is live and owns a non-nil `:project-dir'.
