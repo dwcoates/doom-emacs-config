@@ -167,6 +167,7 @@ func (m *Manager) process(ctx context.Context, id string) error {
 					j.FinalName = result.FinalName
 					j.Branch = result.Branch
 					j.ResolvedBaseCommit = result.BaseCommit
+					j.Request.ForkSessionID = result.ForkSessionID
 					j.LastError = ""
 					return nil
 				}); err != nil {
@@ -186,6 +187,19 @@ func (m *Manager) process(ctx context.Context, id string) error {
 			}
 		case StateWorktreeReady, StateSessionCreating:
 			if job.State == StateWorktreeReady {
+				if resolver, ok := m.cfg.Sessions.(SessionMetadataResolver); ok {
+					request, err := resolver.ResolveSessionMetadata(ctx, job)
+					if err != nil {
+						return m.fail(id, "resolve session metadata", err)
+					}
+					if _, err := m.cfg.Store.Update(id, func(j *Job) error {
+						j.Request = request
+						j.LastError = ""
+						return nil
+					}); err != nil {
+						return err
+					}
+				}
 				if _, err := m.transition(id, StateSessionCreating, ""); err != nil {
 					return err
 				}
@@ -254,7 +268,11 @@ func (m *Manager) process(ctx context.Context, id string) error {
 				}
 				continue
 			}
-			m.cfg.Logf("workspace-create: submitting initial prompt id=%s name=%q session=%s prompt_len=%d", job.ID, job.Request.Name, job.SessionID, len(job.Request.Prompt))
+			// Delivery is intentionally at-least-once: if the process dies after
+			// the shim accepts this submit and before the following store update,
+			// recovery can repeat the prompt.  The inverse (marking it first) can
+			// lose a prompt, so it is forbidden.
+			m.cfg.Logf("workspace-create: submitting initial prompt id=%s name=%q session=%s prompt_len=%d origin=workspace-create:%s delivery=at-least-once checkpoint=after-shim-ack crash_window=may-duplicate-never-lose", job.ID, job.Request.Name, job.SessionID, len(job.Request.Prompt), job.ID)
 			if err := m.cfg.Prompts.SubmitInitialPrompt(ctx, job); err != nil {
 				return m.fail(id, "submit initial prompt", err)
 			}
@@ -266,6 +284,7 @@ func (m *Manager) process(ctx context.Context, id string) error {
 			}); err != nil {
 				return err
 			}
+			m.cfg.Logf("workspace-create: checkpointed initial prompt delivery id=%s session=%s", job.ID, job.SessionID)
 			return nil
 		default:
 			return m.fail(id, "read job state", fmt.Errorf("unknown state %q", job.State))
@@ -316,8 +335,9 @@ func (m *Manager) DrainHostActions(ctx context.Context) error {
 	return nil
 }
 
-// CompleteHostAction records the host's terminal verdict.  A failure remains
-// pending with its diagnostic text, while a success is terminal and idempotent.
+// CompleteHostAction records the host's terminal verdict. A failure remains
+// pending with its diagnostic text and is reset for active redelivery; a
+// success is terminal and idempotent.
 func (m *Manager) CompleteHostAction(id string, ok bool, failure string) error {
 	if err := m.cfg.Store.CompleteHostAction(id, ok, failure); err != nil {
 		return err

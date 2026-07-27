@@ -107,10 +107,11 @@ type Available struct {
 // requested name may collide, so the resolved name and branch must be durable
 // facts rather than an unrecorded choice inside a git adapter.
 type WorktreeResult struct {
-	Path       string
-	FinalName  string
-	Branch     string
-	BaseCommit string
+	Path          string
+	FinalName     string
+	Branch        string
+	BaseCommit    string
+	ForkSessionID string
 }
 
 // HostAction preserves a non-create command for the host frontend.  It is
@@ -145,6 +146,14 @@ type WorktreeCreator interface {
 // create job uses it, including jobs with no initial prompt.
 type SessionCreator interface {
 	EnsureSession(context.Context, Job) (string, error)
+}
+
+// SessionMetadataResolver derives account/permission metadata from an
+// explicitly nominated live source workspace.  The manager checkpoints the
+// returned request before CreateSession, so a restart releases the prompt and
+// advertises exactly the metadata that created the session.
+type SessionMetadataResolver interface {
+	ResolveSessionMetadata(context.Context, Job) (Request, error)
 }
 
 // SessionHealthChecker verifies the complete daemon-to-shim health chain.

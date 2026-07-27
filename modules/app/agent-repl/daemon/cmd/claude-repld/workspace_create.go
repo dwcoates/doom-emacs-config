@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -60,8 +61,38 @@ func (ExecGitRunner) RunGit(ctx context.Context, dir string, args ...string) (st
 // DaemonWorktree is the production two-phase worktree adapter.  PlanWorktree
 // is read-only; Manager checkpoints its result before EnsureWorktree mutates.
 type DaemonWorktree struct {
-	Git  GitRunner
-	Logf func(string, ...any)
+	Git      GitRunner
+	Registry *registry.Registry
+	Marker   ProjectileMarker
+	Logf     func(string, ...any)
+}
+
+// ProjectileMarker is the daemon-owned project setup boundary.  Emacs only
+// renders a workspace after this marker exists, so it cannot retain ownership
+// of project initialization.
+type ProjectileMarker interface {
+	Ensure(worktreePath, bareName string) error
+}
+
+type osProjectileMarker struct{}
+
+func (osProjectileMarker) Ensure(worktreePath, bareName string) error {
+	path := filepath.Join(worktreePath, ".projectile")
+	contents := []byte(bareName + "\n")
+	existing, err := os.ReadFile(path)
+	if err == nil {
+		if string(existing) != string(contents) {
+			return fmt.Errorf("workspace create: projectile marker %s has %q, want %q", path, strings.TrimSpace(string(existing)), bareName)
+		}
+		return nil
+	}
+	if !os.IsNotExist(err) {
+		return fmt.Errorf("workspace create: read projectile marker %s: %w", path, err)
+	}
+	if err := os.WriteFile(path, contents, 0o644); err != nil {
+		return fmt.Errorf("workspace create: write projectile marker %s: %w", path, err)
+	}
+	return nil
 }
 
 func (w DaemonWorktree) PlanWorktree(ctx context.Context, job workspacecreate.Job) (workspacecreate.WorktreeResult, error) {
@@ -75,9 +106,6 @@ func (w DaemonWorktree) PlanWorktree(ctx context.Context, job workspacecreate.Jo
 	if err != nil {
 		return workspacecreate.WorktreeResult{}, fmt.Errorf("workspace create: job %s git_root: %w", job.ID, err)
 	}
-	if job.Request.BaseCommit == "" {
-		return workspacecreate.WorktreeResult{}, fmt.Errorf("workspace create: job %s requires explicit base_commit", job.ID)
-	}
 	info, err := os.Stat(root)
 	if err != nil {
 		return workspacecreate.WorktreeResult{}, fmt.Errorf("workspace create: stat git_root %s: %w", root, err)
@@ -87,6 +115,10 @@ func (w DaemonWorktree) PlanWorktree(ctx context.Context, job workspacecreate.Jo
 	}
 	if _, err := os.Stat(filepath.Join(root, ".git")); err != nil {
 		return workspacecreate.WorktreeResult{}, fmt.Errorf("workspace create: git_root %s has no .git: %w", root, err)
+	}
+	baseCommit, forkSessionID, err := w.resolveBase(ctx, root, job)
+	if err != nil {
+		return workspacecreate.WorktreeResult{}, err
 	}
 	listing, exit, err := w.Git.RunGit(ctx, root, "worktree", "list", "--porcelain")
 	if err != nil || exit != 0 {
@@ -120,11 +152,172 @@ func (w DaemonWorktree) PlanWorktree(ctx context.Context, job workspacecreate.Jo
 		if branchExit != 1 {
 			return workspacecreate.WorktreeResult{}, fmt.Errorf("workspace create: check branch %s exit=%d: %s", branch, branchExit, strings.TrimSpace(out))
 		}
+		if err := w.checkStartTag(ctx, root, branch, baseCommit); err != nil {
+			if errors.Is(err, errStartTagCollision) {
+				w.Logf("workspace-create: start-tag collision job=%s branch=%s base=%s; trying next name", job.ID, branch, baseCommit)
+				continue
+			}
+			return workspacecreate.WorktreeResult{}, err
+		}
 		finalName := filepath.Base(branch)
-		w.Logf("workspace-create: planned job=%s requested=%q final=%q branch=%q base=%q path=%s", job.ID, job.Request.Name, finalName, branch, job.Request.BaseCommit, path)
-		return workspacecreate.WorktreeResult{Path: path, FinalName: finalName, Branch: branch, BaseCommit: job.Request.BaseCommit}, nil
+		w.Logf("workspace-create: planned job=%s requested=%q final=%q branch=%q base=%q path=%s fork_session=%q", job.ID, job.Request.Name, finalName, branch, baseCommit, path, forkSessionID)
+		return workspacecreate.WorktreeResult{Path: path, FinalName: finalName, Branch: branch, BaseCommit: baseCommit, ForkSessionID: forkSessionID}, nil
 	}
 	return workspacecreate.WorktreeResult{}, fmt.Errorf("workspace create: could not resolve a collision-free name for job %s after 20 attempts", job.ID)
+}
+
+var errStartTagCollision = errors.New("workspace create: start tag collision")
+
+func (w DaemonWorktree) resolveBase(ctx context.Context, root string, job workspacecreate.Job) (string, string, error) {
+	base := job.Request.BaseCommit
+	forkSessionID := ""
+	resolveRoot := root
+	if job.Request.ForkFrom != "" {
+		source, err := w.resolveForkSession(job)
+		if err != nil {
+			return "", "", err
+		}
+		forkSessionID = source.ClaudeSessionID
+		resolveRoot, err = normalizeWorkspacePath(source.CWD)
+		if err != nil {
+			return "", "", fmt.Errorf("workspace create: job %s fork source %q cwd: %w", job.ID, job.Request.ForkFrom, err)
+		}
+		base = "HEAD"
+		w.Logf("workspace-create: resolved fork job=%s fork_from=%q vendor_session=%q source_root=%s base=HEAD", job.ID, job.Request.ForkFrom, forkSessionID, resolveRoot)
+	}
+	if base == "" {
+		return "", "", fmt.Errorf("workspace create: job %s requires base_commit unless fork_from is set", job.ID)
+	}
+	if base == "master" {
+		if err := w.fastForwardMaster(ctx, root); err != nil {
+			return "", "", err
+		}
+	} else if strings.HasPrefix(base, "origin/") {
+		ref := strings.TrimPrefix(base, "origin/")
+		if ref == "" {
+			return "", "", fmt.Errorf("workspace create: job %s has invalid origin base %q", job.ID, base)
+		}
+		if err := w.runGitOK(ctx, root, "fetch", "origin", ref); err != nil {
+			return "", "", fmt.Errorf("workspace create: fetch %s: %w", base, err)
+		}
+	}
+	commit, err := w.resolveCommit(ctx, resolveRoot, base)
+	if err != nil {
+		return "", "", err
+	}
+	return commit, forkSessionID, nil
+}
+
+func (w DaemonWorktree) resolveForkSession(job workspacecreate.Job) (registry.Record, error) {
+	if w.Registry == nil {
+		return registry.Record{}, fmt.Errorf("workspace create: fork resolution needs a registry")
+	}
+	want := filepath.Base(job.Request.ForkFrom)
+	if want == "" || want == "." {
+		return registry.Record{}, fmt.Errorf("workspace create: job %s has invalid fork_from %q", job.ID, job.Request.ForkFrom)
+	}
+	var matches []registry.Record
+	for _, rec := range w.Registry.All() {
+		if !rec.Terminal && filepath.Base(rec.CWD) == want {
+			matches = append(matches, rec)
+		}
+	}
+	if len(matches) != 1 {
+		return registry.Record{}, fmt.Errorf("workspace create: job %s fork_from %q requires exactly one live source workspace, found %d", job.ID, job.Request.ForkFrom, len(matches))
+	}
+	rec := matches[0]
+	if rec.ClaudeSessionID == "" {
+		return registry.Record{}, fmt.Errorf("workspace create: job %s fork_from %q source session %s has no live vendor session id", job.ID, job.Request.ForkFrom, rec.SessionID)
+	}
+	if job.Request.ForkSessionID != "" && job.Request.ForkSessionID != rec.ClaudeSessionID {
+		return registry.Record{}, fmt.Errorf("workspace create: job %s fork session assertion %q disagrees with source session %s vendor id %q", job.ID, job.Request.ForkSessionID, rec.SessionID, rec.ClaudeSessionID)
+	}
+	return rec, nil
+}
+
+func (w DaemonWorktree) fastForwardMaster(ctx context.Context, root string) error {
+	if err := w.runGitOK(ctx, root, "fetch", "origin", "master"); err != nil {
+		return fmt.Errorf("workspace create: fetch origin master: %w", err)
+	}
+	out, exit, err := w.Git.RunGit(ctx, root, "merge-base", "--is-ancestor", "master", "origin/master")
+	if err != nil || (exit != 0 && exit != 1) {
+		return fmt.Errorf("workspace create: local master cannot fast-forward to origin/master exit=%d: %w (%s)", exit, err, strings.TrimSpace(out))
+	}
+	if exit == 1 {
+		w.Logf("workspace-create: keeping divergent local master root=%s; base retains local-only commits", root)
+		return nil
+	}
+	listing, exit, err := w.Git.RunGit(ctx, root, "worktree", "list", "--porcelain")
+	if err != nil || exit != 0 {
+		return fmt.Errorf("workspace create: list worktrees for master fast-forward exit=%d: %w (%s)", exit, err, strings.TrimSpace(listing))
+	}
+	masterPath := worktreePathForBranch(listing, "master")
+	if masterPath == "" {
+		if err := w.runGitOK(ctx, root, "update-ref", "refs/heads/master", "origin/master", "master"); err != nil {
+			return fmt.Errorf("workspace create: fast-forward unattached local master: %w", err)
+		}
+		w.Logf("workspace-create: fast-forwarded unattached master root=%s", root)
+		return nil
+	}
+	if err := w.runGitOK(ctx, masterPath, "merge", "--ff-only", "origin/master"); err != nil {
+		return fmt.Errorf("workspace create: fast-forward local master at %s: %w", masterPath, err)
+	}
+	w.Logf("workspace-create: fast-forwarded master root=%s master_worktree=%s", root, masterPath)
+	return nil
+}
+
+func (w DaemonWorktree) resolveCommit(ctx context.Context, root, ref string) (string, error) {
+	out, exit, err := w.Git.RunGit(ctx, root, "rev-parse", "--verify", ref+"^{commit}")
+	if err != nil || exit != 0 || strings.TrimSpace(out) == "" {
+		return "", fmt.Errorf("workspace create: resolve base %q exit=%d: %w (%s)", ref, exit, err, strings.TrimSpace(out))
+	}
+	return strings.TrimSpace(out), nil
+}
+
+func (w DaemonWorktree) runGitOK(ctx context.Context, dir string, args ...string) error {
+	out, exit, err := w.Git.RunGit(ctx, dir, args...)
+	if err != nil || exit != 0 {
+		return fmt.Errorf("git %s in %s exit=%d: %w (%s)", strings.Join(args, " "), dir, exit, err, strings.TrimSpace(out))
+	}
+	return nil
+}
+
+func (w DaemonWorktree) checkStartTag(ctx context.Context, root, branch, baseCommit string) error {
+	tag := "start/" + branch
+	out, exit, err := w.Git.RunGit(ctx, root, "rev-parse", "--verify", "refs/tags/"+tag+"^{commit}")
+	if err != nil {
+		return fmt.Errorf("workspace create: check start tag %s: %w", tag, err)
+	}
+	switch exit {
+	case 1:
+		return nil
+	case 0:
+		if strings.TrimSpace(out) != baseCommit {
+			return fmt.Errorf("%w: %s points to %s, planned base is %s", errStartTagCollision, tag, strings.TrimSpace(out), baseCommit)
+		}
+		return nil
+	default:
+		return fmt.Errorf("workspace create: check start tag %s exit=%d: %s", tag, exit, strings.TrimSpace(out))
+	}
+}
+
+func (w DaemonWorktree) ensureStartTag(ctx context.Context, root, branch, baseCommit string) error {
+	tag := "start/" + branch
+	out, exit, err := w.Git.RunGit(ctx, root, "rev-parse", "--verify", "refs/tags/"+tag+"^{commit}")
+	if err != nil {
+		return fmt.Errorf("workspace create: verify start tag %s: %w", tag, err)
+	}
+	switch exit {
+	case 0:
+		if strings.TrimSpace(out) != baseCommit {
+			return fmt.Errorf("workspace create: start tag %s points to %s, planned base is %s", tag, strings.TrimSpace(out), baseCommit)
+		}
+		return nil
+	case 1:
+		return w.runGitOK(ctx, root, "tag", tag, baseCommit)
+	default:
+		return fmt.Errorf("workspace create: verify start tag %s exit=%d: %s", tag, exit, strings.TrimSpace(out))
+	}
 }
 
 // normalizeWorkspacePath accepts the skill contract's leading ~/ spelling but
@@ -144,7 +337,7 @@ func normalizeWorkspacePath(path string) (string, error) {
 }
 
 func (w DaemonWorktree) EnsureWorktree(ctx context.Context, job workspacecreate.Job) error {
-	if w.Git == nil || w.Logf == nil {
+	if w.Git == nil || w.Marker == nil || w.Logf == nil {
 		return fmt.Errorf("workspace create: worktree creator is not fully configured")
 	}
 	if job.WorktreePath == "" || job.FinalName == "" || job.Branch == "" || job.ResolvedBaseCommit == "" {
@@ -164,7 +357,13 @@ func (w DaemonWorktree) EnsureWorktree(ctx context.Context, job workspacecreate.
 		if branch != job.Branch {
 			return fmt.Errorf("workspace create: planned path %s belongs to branch %q, not job branch %q", path, branch, job.Branch)
 		}
-		w.Logf("workspace-create: worktree already exists for job=%s path=%s branch=%s", job.ID, path, job.Branch)
+		if err := w.ensureStartTag(ctx, root, job.Branch, job.ResolvedBaseCommit); err != nil {
+			return err
+		}
+		if err := w.Marker.Ensure(path, job.FinalName); err != nil {
+			return err
+		}
+		w.Logf("workspace-create: worktree already exists for job=%s path=%s branch=%s start_tag=%q projectile=%q", job.ID, path, job.Branch, "start/"+job.Branch, job.FinalName)
 		return nil
 	}
 	if _, exists := usedBranches[job.Branch]; exists {
@@ -182,7 +381,13 @@ func (w DaemonWorktree) EnsureWorktree(ctx context.Context, job workspacecreate.
 	if addErr != nil || addExit != 0 {
 		return fmt.Errorf("workspace create: git worktree add job=%s branch=%s exit=%d: %w (%s)", job.ID, job.Branch, addExit, addErr, strings.TrimSpace(out))
 	}
-	w.Logf("workspace-create: created worktree job=%s path=%s branch=%s base=%s", job.ID, path, job.Branch, job.ResolvedBaseCommit)
+	if err := w.ensureStartTag(ctx, root, job.Branch, job.ResolvedBaseCommit); err != nil {
+		return err
+	}
+	if err := w.Marker.Ensure(path, job.FinalName); err != nil {
+		return err
+	}
+	w.Logf("workspace-create: created worktree job=%s path=%s branch=%s base=%s start_tag=%q projectile=%q", job.ID, path, job.Branch, job.ResolvedBaseCommit, "start/"+job.Branch, job.FinalName)
 	return nil
 }
 
@@ -234,6 +439,16 @@ func parseWorktreeList(output string) (map[string]string, map[string]struct{}) {
 	return paths, branches
 }
 
+func worktreePathForBranch(output, branch string) string {
+	paths, _ := parseWorktreeList(output)
+	for path, candidate := range paths {
+		if candidate == branch {
+			return path
+		}
+	}
+	return ""
+}
+
 // daemonSessionCreator uses the existing daemon create-session core.  Registry
 // lookup makes the session stage restart-idempotent after CreateSession has
 // persisted its record but before the creation job could checkpoint SessionID.
@@ -250,24 +465,9 @@ func (c daemonSessionCreator) EnsureSession(ctx context.Context, job workspacecr
 	if job.WorktreePath == "" {
 		return "", fmt.Errorf("workspace create: job %s has no worktree path for session creation", job.ID)
 	}
-	configDir, permissionMode := job.Request.ConfigDir, job.Request.PermissionMode
-	if job.Request.SourceWorkspace != "" || job.Request.SourceDir != "" {
-		if job.Request.SourceWorkspace == "" || job.Request.SourceDir == "" {
-			return "", fmt.Errorf("workspace create: job %s source workspace requires both name and directory", job.ID)
-		}
-		if configDir != "" || permissionMode != "" {
-			return "", fmt.Errorf("workspace create: job %s source workspace cannot override inherited config or permission metadata", job.ID)
-		}
-		sourceID, ok := (&server.SessionLocator{Reg: c.Registry}).Locate(job.Request.SourceDir)
-		if !ok {
-			return "", fmt.Errorf("workspace create: job %s source workspace %q has no live registered session at %s", job.ID, job.Request.SourceWorkspace, job.Request.SourceDir)
-		}
-		source, ok := c.Registry.Get(sourceID)
-		if !ok || source.Terminal || source.CWD != job.Request.SourceDir {
-			return "", fmt.Errorf("workspace create: job %s source workspace %q session %s is not live at %s", job.ID, job.Request.SourceWorkspace, sourceID, job.Request.SourceDir)
-		}
-		configDir, permissionMode = source.ConfigDir, source.PermissionMode
-		c.Logf("workspace-create: inherited job=%s source_workspace=%q source_session=%s config_dir=%q permission_mode=%q", job.ID, job.Request.SourceWorkspace, sourceID, configDir, permissionMode)
+	request, err := c.ResolveSessionMetadata(ctx, job)
+	if err != nil {
+		return "", err
 	}
 	if existing, ok := (&server.SessionLocator{Reg: c.Registry}).Locate(job.WorktreePath); ok {
 		c.Logf("workspace-create: reusing registered session job=%s session=%s cwd=%s", job.ID, existing, job.WorktreePath)
@@ -275,10 +475,11 @@ func (c daemonSessionCreator) EnsureSession(ctx context.Context, job workspacecr
 	}
 	id, err := c.Commands.CreateSession(ctx, server.CreateOpts{
 		CWD:            job.WorktreePath,
-		Model:          job.Request.Model,
-		ConfigDir:      configDir,
-		PermissionMode: permissionMode,
-		AllowUngated:   job.Request.AllowUngated,
+		Model:          request.Model,
+		ConfigDir:      request.ConfigDir,
+		PermissionMode: request.PermissionMode,
+		Resume:         request.ForkSessionID,
+		AllowUngated:   request.AllowUngated,
 	})
 	if err != nil {
 		return "", fmt.Errorf("workspace create: create session for job %s: %w", job.ID, err)
@@ -287,8 +488,38 @@ func (c daemonSessionCreator) EnsureSession(ctx context.Context, job workspacecr
 	if !ok || rec.CWD != job.WorktreePath || rec.Terminal {
 		return "", fmt.Errorf("workspace create: session %s was not durably registered for job %s cwd=%s", id, job.ID, job.WorktreePath)
 	}
-	c.Logf("workspace-create: registered session job=%s session=%s cwd=%s model=%q config_dir=%q permission_mode=%q", job.ID, id, job.WorktreePath, job.Request.Model, configDir, permissionMode)
+	c.Logf("workspace-create: registered session job=%s session=%s cwd=%s model=%q config_dir=%q permission_mode=%q", job.ID, id, job.WorktreePath, request.Model, request.ConfigDir, request.PermissionMode)
 	return id, nil
+}
+
+// ResolveSessionMetadata resolves and returns the durable request metadata
+// before CreateSession.  An empty source ConfigDir is intentionally retained:
+// it means the source uses the CLI default, not an unspecified value.
+func (c daemonSessionCreator) ResolveSessionMetadata(_ context.Context, job workspacecreate.Job) (workspacecreate.Request, error) {
+	if c.Registry == nil || c.Logf == nil {
+		return workspacecreate.Request{}, fmt.Errorf("workspace create: session metadata resolver is not fully configured")
+	}
+	request := job.Request
+	if request.SourceWorkspace == "" && request.SourceDir == "" {
+		return request, nil
+	}
+	if request.SourceWorkspace == "" || request.SourceDir == "" {
+		return workspacecreate.Request{}, fmt.Errorf("workspace create: job %s source workspace requires both name and directory", job.ID)
+	}
+	sourceID, ok := (&server.SessionLocator{Reg: c.Registry}).Locate(request.SourceDir)
+	if !ok {
+		return workspacecreate.Request{}, fmt.Errorf("workspace create: job %s source workspace %q has no live registered session at %s", job.ID, request.SourceWorkspace, request.SourceDir)
+	}
+	source, ok := c.Registry.Get(sourceID)
+	if !ok || source.Terminal || source.CWD != request.SourceDir {
+		return workspacecreate.Request{}, fmt.Errorf("workspace create: job %s source workspace %q session %s is not live at %s", job.ID, request.SourceWorkspace, sourceID, request.SourceDir)
+	}
+	if (request.ConfigDir != "" && request.ConfigDir != source.ConfigDir) || (request.PermissionMode != "" && request.PermissionMode != source.PermissionMode) {
+		return workspacecreate.Request{}, fmt.Errorf("workspace create: job %s source workspace metadata conflicts with live source session %s", job.ID, sourceID)
+	}
+	request.ConfigDir, request.PermissionMode = source.ConfigDir, source.PermissionMode
+	c.Logf("workspace-create: inherited job=%s source_workspace=%q source_session=%s config_dir=%q permission_mode=%q", job.ID, request.SourceWorkspace, sourceID, request.ConfigDir, request.PermissionMode)
+	return request, nil
 }
 
 // WorkspaceHealthProbe is deliberately stronger than a shim handshake.  Main
@@ -449,6 +680,13 @@ func (b *WorkspaceCreationBridge) CreateWorkspace(_ context.Context, requestID s
 		return err
 	}
 	request := workspacecreate.Request{Name: cmd.GetRequestedName(), GitRoot: cmd.GetGitRoot(), BaseCommit: cmd.GetBaseCommit(), SourceWorkspace: cmd.GetSourceWorkspace(), SourceDir: cmd.GetSourceDir(), ForkFrom: cmd.GetForkFrom(), ForkSessionID: cmd.GetForkSessionId(), Model: cmd.GetModel(), ConfigDir: cmd.GetConfigDir(), PermissionMode: cmd.GetPermissionMode(), AllowUngated: cmd.GetAllowUngated(), PostprocessingPrompt: cmd.GetPostprocessingPrompt(), BeforeWSMerge: cmd.GetBeforeWsMerge(), Priority: priority}
+	if request.SourceDir != "" {
+		canonical, err := normalizeWorkspacePath(request.SourceDir)
+		if err != nil {
+			return fmt.Errorf("workspace create: interactive source directory: %w", err)
+		}
+		request.SourceDir = canonical
+	}
 	if cmd.InitialPrompt != nil {
 		request.Prompt = cmd.GetInitialPrompt()
 	}
@@ -544,7 +782,7 @@ func NewWorkspaceCreateAssembly(cfg WorkspaceCreateAssemblyConfig) (*WorkspaceCr
 		return nil, err
 	}
 	forwarder := &WorkspaceCreateHostForwarder{}
-	worktrees := DaemonWorktree{Git: ExecGitRunner{}, Logf: cfg.Logf}
+	worktrees := DaemonWorktree{Git: ExecGitRunner{}, Registry: cfg.Registry, Marker: osProjectileMarker{}, Logf: cfg.Logf}
 	manager, err := workspacecreate.NewManager(workspacecreate.Config{
 		Store: store, Planner: worktrees, Worktrees: worktrees,
 		Sessions:  daemonSessionCreator{Commands: cfg.Commands, Registry: cfg.Registry, Logf: cfg.Logf},

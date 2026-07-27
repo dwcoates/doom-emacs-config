@@ -52,6 +52,15 @@ type fakeSessions struct {
 	err   error
 }
 
+type metadataSessions struct {
+	fakeSessions
+	resolved Request
+}
+
+func (f *metadataSessions) ResolveSessionMetadata(_ context.Context, _ Job) (Request, error) {
+	return f.resolved, nil
+}
+
 func (f *fakeSessions) EnsureSession(_ context.Context, _ Job) (string, error) {
 	f.calls++
 	return f.id, f.err
@@ -436,8 +445,8 @@ func TestHostActionFailureRemainsPendingUntilSuccess(t *testing.T) {
 	if err := f.manager.DrainHostActions(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if f.actions.calls != 1 {
-		t.Fatalf("failed action republished without an explicit retry: calls=%d", f.actions.calls)
+	if f.actions.calls != 2 {
+		t.Fatalf("failed action was not actively redelivered: calls=%d", f.actions.calls)
 	}
 	if err := f.manager.CompleteHostAction("a1", true, ""); err != nil {
 		t.Fatal(err)
@@ -448,6 +457,36 @@ func TestHostActionFailureRemainsPendingUntilSuccess(t *testing.T) {
 	}
 	if len(pending) != 0 {
 		t.Fatalf("successful completion still pending: %#v", pending)
+	}
+}
+
+func TestResolvedSessionMetadataPersistsBeforeCreateAndSurvivesRestart(t *testing.T) {
+	root := t.TempDir()
+	statePath := filepath.Join(root, "jobs.json")
+	f := newFixture(t, statePath)
+	sessions := &metadataSessions{fakeSessions: fakeSessions{id: "s_new"}, resolved: Request{Name: "DWC/child", GitRoot: "/repo", SourceWorkspace: "parent", SourceDir: "/parent", ConfigDir: "/cfg", PermissionMode: "plan"}}
+	manager, err := NewManager(Config{Store: f.store, Planner: f.worktrees, Worktrees: f.worktrees, Sessions: sessions, Health: f.health, Prompts: f.prompts, Available: f.available, HostActions: f.actions, Logf: func(string, ...any) {}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, _, err := f.store.Enqueue(Job{ID: "meta", Request: Request{Name: "DWC/child", GitRoot: "/repo"}, State: StateQueued})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Process(context.Background(), created.ID); err != nil {
+		t.Fatal(err)
+	}
+	stored := job(t, f.store, created.ID)
+	if stored.Request.ConfigDir != "/cfg" || stored.Request.PermissionMode != "plan" {
+		t.Fatalf("durable metadata = %#v", stored.Request)
+	}
+	reopened, err := OpenJobStore(statePath, func(string, ...any) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	afterRestart := job(t, reopened, created.ID)
+	if !reflect.DeepEqual(afterRestart.Request, stored.Request) {
+		t.Fatalf("metadata after restart = %#v, want %#v", afterRestart.Request, stored.Request)
 	}
 }
 
@@ -541,7 +580,7 @@ func TestParseCommandsAuditsEveryKnownCommandType(t *testing.T) {
 }
 
 func TestParseCommandsMapsStructuredSourceWorkspace(t *testing.T) {
-	commands, err := parseCommands([]byte(`[{"type":"create","name":"DWC/a","git_root":"/repo","source_ws":{"name":"parent","path":"/parent"}}]`))
+	commands, err := parseCommands([]byte(`[{"type":"create","name":"DWC/a","git_root":"/repo","source_ws":{"name":"parent","path":"/parent/"}}]`))
 	if err != nil {
 		t.Fatal(err)
 	}
