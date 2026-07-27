@@ -22,6 +22,17 @@
 (declare-function pygn-mode "pygn-mode")
 (declare-function pygn-mode-display-gui-board-at-pos "pygn-mode")
 
+(defvar agent-repl--workspace-generation-watch nil
+  "Legacy workspace_commands file-notify descriptor pending teardown.")
+
+;; `defvar' preserves the live descriptor installed by an older module version
+;; across hot reload.  Tear it down before defining any workspace behavior so
+;; the daemon immediately becomes the sole watcher, claimant, and deleter.
+(setq agent-repl--workspace-generation-watch
+      (agent-repl--dir-watcher-remove-legacy
+       agent-repl--workspace-generation-watch
+       "workspace_commands"))
+
 (define-error 'agent-repl-merge-conflict-error
   "Cherry-pick conflict left in tree (resolver declined or interactive abort)"
   'user-error)
@@ -36,20 +47,6 @@ the worktree root.  Files are added to the new workspace's perspective via
 `persp-add-buffer' without being displayed.  Missing files emit a warning but
 do not abort workspace creation."
   :type '(alist :key-type regexp :value-type (repeat string))
-  :group 'agent-repl)
-
-(defcustom agent-repl-workspace-commands-file-prefix "workspace_commands_"
-  "Filename prefix for workspace command files in the output directory."
-  :type 'string
-  :group 'agent-repl)
-
-(defcustom agent-repl-workspace-commands-output-dir
-  (file-name-as-directory (agent-repl--global-state-file "output"))
-  "Directory watched for workspace command files.
-Lives at `~/.claude-emacs/output/' (under `agent-repl--global-state-dir').
-Must match the write location `agent-repl--output-dir' and the path the
-managed `emit-workspace-commands.sh' skill writes to."
-  :type 'string
   :group 'agent-repl)
 
 (defcustom agent-repl-worktree-dir-suffix "-worktrees"
@@ -102,47 +99,6 @@ it to the WS perspective without displaying it."
                   (agent-repl--ws-add-buffer (find-file-noselect fullpath) persp t))
               (agent-repl--log ws "open-initial-buffers: file not found in worktree: %s" fullpath))))))))
 
-
-(defvar agent-repl--workspace-generation-watch nil)
-
-(defconst agent-repl--workspace-commands-watcher
-  '(:label "workspace-commands-watch"
-    :dir-var agent-repl-workspace-commands-output-dir
-    :prefix-var agent-repl-workspace-commands-file-prefix
-    :regexp-var agent-repl-workspace-commands-file-regexp
-    :descriptor-var agent-repl--workspace-generation-watch
-    :process-fn agent-repl--process-workspace-commands-file
-    :register-fn agent-repl--register-workspace-commands-watch
-    :drain-fn agent-repl--drain-workspace-commands-files
-    :handler-fn agent-repl--workspace-commands-watch-handler)
-  "dir-watcher spec for the workspace-commands channel.
-See dir-watcher.el for the key contract; every value is a symbol so
-defcustom edits, test `let'-bindings, and `cl-letf' stubs of the named
-functions all resolve at use time.")
-
-(defun agent-repl--drain-workspace-commands-files ()
-  "Process every workspace_commands_*.json currently in the output dir.
-Used to catch files that landed while the file-notify watch was down
-\(e.g. after the output directory was deleted and recreated, which
-invalidates the watch).  Returns the number of files processed."
-  (agent-repl--dir-watcher-drain agent-repl--workspace-commands-watcher))
-
-(defun agent-repl--workspace-commands-watch-handler (event)
-  "Handle a file-notify EVENT for the workspace commands output directory.
-Dispatches to `agent-repl--process-workspace-commands-file' when a
-workspace_commands_*.json file is created, changed, or renamed; a lost
-watch (`stopped', or `deleted' of the directory itself) re-arms and
-drains.  See `agent-repl--dir-watcher-handle-event' for the shared
-semantics."
-  (agent-repl--dir-watcher-handle-event
-   agent-repl--workspace-commands-watcher event))
-
-(defun agent-repl--register-workspace-commands-watch ()
-  "Register a file-notify watch on ~/.claude-emacs/output/ for command files.
-Tears down any existing watch first to avoid duplicates on re-eval."
-  (agent-repl--dir-watcher-register agent-repl--workspace-commands-watcher))
-
-(agent-repl--register-workspace-commands-watch)
 
 ;;; Git helpers
 
@@ -1157,11 +1113,11 @@ every log line — spawn-time summary, prompt-body dump, sentinel exit,
 and user-facing failure message — so multiple in-flight spawns can be
 disambiguated.
 
-The skill writes a JSON file to ~/.claude-emacs/output/, which the existing
-file-watcher (`agent-repl--workspace-commands-watch-handler') picks up
-and dispatches via `agent-repl--handle-create-command' — so this
-function returns immediately and the workspace materializes
-asynchronously."
+The skill writes a JSON file to ~/.claude-emacs/output/.  The daemon is the
+sole watcher and claimant for that file; it creates the workspace and later
+pushes `WorkspaceAvailable' to Emacs.  This function therefore returns
+immediately and materialization remains asynchronous without any Emacs-side
+file intake."
   (let* ((gen-id (agent-repl--workspace-generation-id))
          (out-buf (generate-new-buffer
                    (format " *agent-workspace-generation-%s*" gen-id)))
@@ -2226,14 +2182,10 @@ main-thread thunk.  CURRENT-WS labels the log lines; T0-DO is the
 merge body's start time for the elapsed fields.
 
 The reload MUST NOT run on the merge worker thread: loading module
-files re-arms file-notify watchers (`agent-repl--dir-watcher-register'
-tears down the old watch first, and `file-notify-rm-watch'
-synchronously fires the handler's `stopped' branch), whose pending-file
-drain can reach the frontend's blocking waits — and `accept-process-output'
-off the main thread lands in the `ns_select_1'/`[NSApp run]' worker-thread
-trap (AGENTS.md), which froze Emacs on 2026-07-18 (through the
-since-deleted `url-retrieve-synchronously' HTTP boundary, whose UDS
-replacement pumps through the same primitive).  The clear + drain ride in the same thunk
+files executes arbitrary load-time registration and teardown, which can
+reach frontend blocking waits.  `accept-process-output' off the main thread
+lands in the `ns_select_1'/`[NSApp run]' worker-thread trap (AGENTS.md),
+which froze Emacs on 2026-07-18.  The clear + drain ride in the same thunk
 to preserve the load -> clear -> drain ordering the inline version
 had: the drain gate must not open before the in-flight flag clears,
 and the next dispatched merge should see the reloaded code.
@@ -2731,9 +2683,8 @@ Prevents concurrent agent startups from corrupting ~/.claude.json."
 
 (defvar agent-repl--workspace-names-in-flight nil
   "Hash table of workspace names reserved by the current dispatch batch.
-Dynamically bound by `agent-repl--process-workspace-commands-file' so
-sibling `create' entries within the same JSON file can detect name
-collisions against each other before any git worktree has been added.
+Dynamically bound by callers that dispatch a local creation batch so sibling
+entries can detect name collisions before any git worktree has been added.
 Keyed by the full workspace name (e.g. \"DWC/foo\").  nil outside a
 dispatch batch — collision checks then only consult on-disk, git, and
 `agent-repl--workspaces' state.")
@@ -2777,8 +2728,8 @@ real, mkdir-creating resolver runs later as part of worktree-add."
 (defun agent-repl--workspace-name-collides-p (name git-root)
   "Return non-nil if NAME would collide with existing workspace state.
 GIT-ROOT is the target repository.  Checks (in order): the in-flight
-reservation set bound by `agent-repl--process-workspace-commands-file'
-\(keyed by full name like \"DWC/foo\"), the live `agent-repl--workspaces'
+reservation set dynamically bound by the caller (keyed by full name like
+\"DWC/foo\"), the live `agent-repl--workspaces'
 hash table (keyed by bare name like \"foo\"), the on-disk worktree
 path, the git branch named NAME, and the companion start-tag.
 Returns the first matched signal (a non-nil value), or nil when NAME
@@ -3079,14 +3030,14 @@ verbatim string that leaves \"prompt\" untouched:
 (defun agent-repl--handle-prompt-command (cmd)
   "Handle a \"prompt\" workspace command CMD."
   (let ((ws (alist-get 'workspace cmd)))
-    (agent-repl--log ws "workspace-commands-file prompt: ws=%s" ws)
+    (agent-repl--log ws "host-action legacy-command prompt: ws=%s" ws)
     (agent-repl--dispatch-prompt-command ws (alist-get 'prompt cmd))))
 
 (defun agent-repl--handle-finish-command (cmd)
   "Handle a \"finish\" workspace command CMD."
   (let ((ws (alist-get 'workspace cmd))
-        (agent-repl--kill-cause "workspace-commands-file finish verb (skill dispatch)"))
-    (agent-repl--log ws "workspace-commands-file finish: ws=%s" ws)
+        (agent-repl--kill-cause "host-action legacy-command finish"))
+    (agent-repl--log ws "host-action legacy-command finish: ws=%s" ws)
     (agent-repl--finish-workspace ws)))
 
 (defcustom agent-repl-gns-sockets-close-prompt "/gns-sockets close"
@@ -3195,12 +3146,12 @@ the workspace's agent session via `agent-repl--gns-sockets-close-then'
 and waits for `:done'/`:idle' so the agent can release any held GNS
 sockets before its session is killed."
   (let ((ws (agent-repl--bare-workspace-name (alist-get 'workspace cmd))))
-    (agent-repl--log ws "workspace-commands-file close: ws=%s" ws)
+    (agent-repl--log ws "host-action legacy-command close: ws=%s" ws)
     (agent-repl--gns-sockets-close-then
      ws (lambda ()
           ;; Bound inside the lambda: the teardown runs async after the
           ;; GNS-socket close poll, outside the dispatcher's dynamic extent.
-          (let ((agent-repl--kill-cause "workspace-commands-file close verb (skill dispatch)"))
+          (let ((agent-repl--kill-cause "host-action legacy-command close"))
             (agent-repl--close-workspace ws))))))
 
 (defun agent-repl--resolve-open-workspace-dir (name git-root)
@@ -3260,7 +3211,7 @@ it — the latter usually means the worktree was fully removed by
         (git-root (alist-get 'git_root cmd)))
     (cond
      ((or (not (stringp name)) (string-empty-p name))
-      (agent-repl--log nil "workspace-commands-file open: SKIPPED (missing/empty/non-string workspace=%S)" name)
+      (agent-repl--log nil "host-action legacy-command open: SKIPPED (missing/empty/non-string workspace=%S)" name)
       (agent-repl--warn nil "cannot open workspace — `workspace' is required and must be a non-empty string (got %S)"
                         name))
      (t
@@ -3269,13 +3220,13 @@ it — the latter usually means the worktree was fully removed by
         (cond
          ((null dir)
           (agent-repl--log bare
-                            "workspace-commands-file open: SKIPPED ws=%s — no on-disk directory resolved (git-root=%s)"
+                            "host-action legacy-command open: SKIPPED ws=%s — no on-disk directory resolved (git-root=%s)"
                             bare (or git-root "nil"))
           (agent-repl--warn bare "cannot open workspace '%s' — no on-disk worktree found (was it finished/removed?)"
                             name))
          (t
           (agent-repl--log bare
-                            "workspace-commands-file open: ws=%s dir=%s — re-establishing"
+                            "host-action legacy-command open: ws=%s dir=%s — re-establishing"
                             bare dir)
           (agent-repl--establish-workspace bare dir))))))))
 
@@ -3293,11 +3244,11 @@ annotation must not error out the whole batch."
         (note (alist-get 'note cmd)))
     (cond
      ((not ws)
-      (agent-repl--log nil "workspace-commands-file clipboard: missing workspace, skipping"))
+      (agent-repl--log nil "host-action legacy-command clipboard: missing workspace, skipping"))
      ((not text)
-      (agent-repl--log ws "workspace-commands-file clipboard: missing text, skipping"))
+      (agent-repl--log ws "host-action legacy-command clipboard: missing text, skipping"))
      (t
-      (agent-repl--log ws "workspace-commands-file clipboard: ws=%s len=%d note=%s"
+      (agent-repl--log ws "host-action legacy-command clipboard: ws=%s len=%d note=%s"
                         ws (length text) (or note "nil"))
       (agent-repl--ws-put ws :clipboard text)
       (agent-repl--info ws "%s clipboard set (%d chars)%s"
@@ -3360,7 +3311,7 @@ send is async and frequently fires while another workspace is active)."
                               (mapcar (lambda (w) (buffer-name (window-buffer w))) (window-list))))
         (agent-repl--log ws "send-pgn: deferred display+board, target=%s not active (active=%s), buffer homed for later"
                           ws (or current-ws "nil")))
-      (agent-repl--log ws "workspace-commands-file send: opened PGN buffer %s" buf-name))
+      (agent-repl--log ws "host-action legacy-command send: opened PGN buffer %s" buf-name))
     buf))
 
 (defun agent-repl--handle-send-command (cmd)
@@ -3382,12 +3333,12 @@ absent — a malformed command must not error out the whole batch."
         (data-cell (assq 'data cmd)))
     (cond
      ((not ws)
-      (agent-repl--log nil "workspace-commands-file send: missing workspace, skipping"))
+      (agent-repl--log nil "host-action legacy-command send: missing workspace, skipping"))
      ((not data-cell)
-      (agent-repl--log ws "workspace-commands-file send: missing data, skipping"))
+      (agent-repl--log ws "host-action legacy-command send: missing data, skipping"))
      (t
       (let ((data (cdr data-cell)))
-        (agent-repl--log ws "workspace-commands-file send: ws=%s data-type=%s"
+        (agent-repl--log ws "host-action legacy-command send: ws=%s data-type=%s"
                           ws (type-of data))
         (agent-repl--ws-put ws :send-data data)
         ;; Dispatch PGN sub-handler when data contains a pgn string.
@@ -3572,7 +3523,7 @@ is raised, since a missing workspace is not actionable here."
      (resolved
       (let ((repo-root (agent-repl--ws-merge-routing-root resolved)))
         (agent-repl--log ws
-                          "workspace-commands-file merge: ws=%s project_dir=%s pr_was_merged=%s resolved=%s repo-root=%s"
+                          "host-action legacy-command merge: ws=%s project_dir=%s pr_was_merged=%s resolved=%s repo-root=%s"
                           ws (or project-dir "nil") (if onto-master "t" "nil")
                           resolved (or repo-root "nil"))
         ;; If RESOLVED carries a `before_ws_merge' action, deliver it to
@@ -3583,14 +3534,14 @@ is raised, since a missing workspace is not actionable here."
         ;; session down at its very top (worktree.el `--workspace-merge-async').
         (if (agent-repl--maybe-run-before-ws-merge-prompt resolved)
             (agent-repl--log ws
-                              "workspace-commands-file merge: deferring merge of %s until its before-ws-merge action completes"
+                              "host-action legacy-command merge: deferring merge of %s until its before-ws-merge action completes"
                               resolved)
           (agent-repl--workspace-merge-async resolved repo-root onto-master))))
      (t
       (let ((tail (and (stringp ws) (string-match-p "/" ws)
                        (agent-repl--bare-workspace-name ws))))
         (agent-repl--log ws
-                          "workspace-commands-file merge: unknown workspace: %s%s%s — skipping"
+                          "host-action legacy-command merge: unknown workspace: %s%s%s — skipping"
                           ws
                           (if tail (format " (also tried tail %s)" tail) "")
                           (if (and project-dir (stringp project-dir)
@@ -3735,14 +3686,14 @@ affect another agent's commands in the same JSON array."
          (note (alist-get 'note cmd)))
     (cond
      ((not (stringp code))
-      (agent-repl--log nil "workspace-commands-file eval: missing/non-string code, skipping")
+      (agent-repl--log nil "host-action legacy-command eval: missing/non-string code, skipping")
       (agent-repl--warn nil "eval: missing/non-string code, skipping"))
      ((string-empty-p (string-trim code))
-      (agent-repl--log ws "workspace-commands-file eval: empty code, skipping (ws=%s)" ws)
+      (agent-repl--log ws "host-action legacy-command eval: empty code, skipping (ws=%s)" ws)
       (agent-repl--warn ws "eval: empty code, skipping"))
      (t
       (agent-repl--log ws
-                        "workspace-commands-file eval: ws=%s note=%s code-len=%d"
+                        "host-action legacy-command eval: ws=%s note=%s code-len=%d"
                         (or ws "nil") (or note "nil") (length code))
       (let* ((result (agent-repl--eval-code-string code))
              (printed (plist-get result :printed))
@@ -3753,134 +3704,19 @@ affect another agent's commands in the same JSON array."
         (cond
          ((not (and ws (stringp ws) (not (string-empty-p ws))))
           (agent-repl--log nil
-                            "workspace-commands-file eval: no workspace, result-len=%d not sent (error=%s)"
+                            "host-action legacy-command eval: no workspace, result-len=%d not sent (error=%s)"
                             (length prompt-text)
                             (if error-string "yes" "no"))
           (agent-repl--info nil "eval: completed (no workspace; not sending)%s"
                             (if error-string " — eval raised" "")))
          (t
           (agent-repl--log ws
-                            "workspace-commands-file eval: sending result (len=%d, error=%s) to ws=%s"
+                            "host-action legacy-command eval: sending result (len=%d, error=%s) to ws=%s"
                             (length prompt-text)
                             (if error-string "yes" "no") ws)
           (agent-repl--send prompt-text ws)
           (agent-repl--info ws "eval: result sent to %s%s"
                             ws (if error-string " (eval raised)" "")))))))))
-
-(defconst agent-repl--workspace-command-dispatch-table
-  '(("prompt"    . (agent-repl--handle-prompt-command     . nil))
-    ("finish"    . (agent-repl--handle-finish-command     . nil))
-    ("close"     . (agent-repl--handle-close-command      . nil))
-    ("open"      . (agent-repl--handle-open-command       . nil))
-    ("clipboard" . (agent-repl--handle-clipboard-command  . nil))
-    ("send"      . (agent-repl--handle-send-command       . nil))
-    ("merge"     . (agent-repl--handle-merge-command      . nil))
-    ("eval"      . (agent-repl--handle-eval-command        . nil))
-    ;; Sidebar actions (sidebar.el): row click -> switch, repo-header
-    ;; click -> fold, both arriving via the daemon's
-    ;; POST /workspace-command front door.
-    ("switch"    . (agent-repl--handle-switch-command      . nil))
-    ("fold"      . (agent-repl--handle-fold-command        . nil))
-    ;; Task-view actions (sidebar.el): the view selector, the + add-task
-    ;; button, a task checkbox / label / add-workspace button — all
-    ;; arriving via the same POST /workspace-command front door.
-    ("set-view"          . (agent-repl--handle-set-view-command          . nil))
-    ("task-create"       . (agent-repl--handle-task-create-command       . nil))
-    ("task-toggle-done"  . (agent-repl--handle-task-toggle-done-command  . nil))
-    ("task-open"         . (agent-repl--handle-task-open-command         . nil))
-    ("task-add-workspace" . (agent-repl--handle-task-add-workspace-command . nil)))
-  "Maps a workspace-command `type' string to (HANDLER . STAGGERS).
-HANDLER is the function `agent-repl--dispatch-workspace-command'
-invokes for that `type'.  STAGGERS non-nil marks a `create'-style
-handler invoked as (HANDLER CMD DELAY), after which the dispatch
-advances the create-delay by `agent-repl-worktree-stagger-seconds';
-STAGGERS nil marks a handler invoked as (HANDLER CMD) that leaves the
-delay unchanged.
-
-There is intentionally no `create' row: daemon-owned workspace creation
-arrives over `createWorkspace'/`WorkspaceAvailable', never through this
-legacy file channel.  Add a new UI-only verb by adding a row here — the
-dispatcher itself needs no edit.")
-
-(defun agent-repl--dispatch-workspace-command (cmd create-delay)
-  "Dispatch a single workspace command CMD with current CREATE-DELAY.
-Looks CMD's `type' up in `agent-repl--workspace-command-dispatch-table'
-and invokes the mapped handler.  Returns the new create-delay value:
-advanced by `agent-repl-worktree-stagger-seconds' for staggering
-handlers, unchanged otherwise.  An unknown (or missing) `type' is logged
-and skipped without error."
-  (let* ((type (alist-get 'type cmd))
-         (entry (cdr (assoc type agent-repl--workspace-command-dispatch-table)))
-         (handler (car entry))
-         (staggers (cdr entry)))
-    (cond
-     ((null entry)
-      (agent-repl--log nil "workspace-commands-file unknown type: %s" type)
-      create-delay)
-     (staggers
-      (funcall handler cmd create-delay)
-      (+ create-delay agent-repl-worktree-stagger-seconds))
-     (t
-      (funcall handler cmd)
-      create-delay))))
-
-(defun agent-repl--normalize-workspace-commands (parsed)
-  "Normalize PARSED workspace-commands JSON to a list of command alists.
-Accepts either the documented form (a JSON array of objects, parsed by
-`json-read' as a vector of alists) or a single JSON object that some
-upstream emitters produce (parsed as a single alist) — the latter
-previously crashed dispatch with `Wrong type argument: listp, (type . \"create\")'
-because `dolist' iterated the alist's cons cells.
-
-A vector is converted to a list; a single alist is wrapped in a one-element
-list; anything else (nil, scalar, malformed) yields the empty list so
-the caller skips dispatch cleanly."
-  (cond
-   ((vectorp parsed) (append parsed nil))
-   ((and (listp parsed) parsed
-         (consp (car parsed)) (symbolp (caar parsed)))
-    (list parsed))
-   (t nil)))
-
-(defun agent-repl--process-workspace-commands-file (file)
-  "Process a workspace commands file FILE, dispatching each typed command.
-Workspace `create' commands are deliberately unknown here: the daemon owns
-all git/session/shim creation through the frontend UDS protocol.
-
-Each dispatched command runs inside its own `condition-case' so a
-failure (e.g. a merge whose cherry-pick conflicts) is logged and
-surfaced as a message but does not abort sibling commands in the
-batch — sibling create/prompt/finish operations were issued by a
-distinct upstream intent and must not be lost because an earlier
-merge failed.
-
-Tolerates both the documented JSON-array form and a bare JSON object —
-the headless workspace-generation flow occasionally emits the latter."
-  (if (not (file-exists-p file))
-      (agent-repl--log nil "workspace-commands-file not found: %s" file)
-    (agent-repl--log nil "workspace-commands-file processing: %s" file)
-    (let ((commands (agent-repl--normalize-workspace-commands
-                     (json-read-file file)))
-          (create-delay 0)
-          ;; Per-batch reservation set so sibling `create' entries with
-          ;; the same desired name in this JSON file get disambiguated
-          ;; against each other before any worktree-add has fired.
-          (agent-repl--workspace-names-in-flight
-           (make-hash-table :test 'equal)))
-      (agent-repl--log nil "workspace-commands-file normalized: %d command(s)"
-                        (length commands))
-      (dolist (cmd commands)
-        (condition-case err
-            (setq create-delay
-                  (agent-repl--dispatch-workspace-command cmd create-delay))
-          (error
-           (agent-repl--log nil
-                             "workspace-commands-file dispatch error cmd=%S err=%S"
-                             cmd err)
-           (agent-repl--warn nil "Workspace command failed: %s"
-                             (error-message-string err))))))
-    (delete-file file)
-    (agent-repl--log nil "workspace-commands-file deleted: %s" file)))
 
 ;;; Workspace merging
 
@@ -5697,8 +5533,8 @@ never as a side-effect of asynchronous ancestry polling."
 ;; window is the process-wait inside `agent-repl--invoke-auto-resolve-agent'
 ;; (auto-resolve mode) — whether that's the historical
 ;; `accept-process-output' busy-wait or the worker-thread `condition-wait',
-;; the main thread is free to dispatch file-watcher callbacks (and thus
-;; another merge command) during it.  The per-target gate is the
+;; the main thread is free to dispatch frontend callbacks (and thus another
+;; merge command) during it.  The per-target gate is the
 ;; serialization point for a second merge into the same target; a second
 ;; merge into a different target proceeds in parallel.
 

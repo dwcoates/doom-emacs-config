@@ -20,10 +20,10 @@
 ;; (status.el), so the rebuild runs only when something visible changed.
 ;;
 ;; Actions flow the long way around, webview -> daemon -> Emacs: the
-;; webapp cannot call into Emacs, so a sidebar click POSTs to the
-;; daemon's /workspace-command endpoint, which drops a
-;; workspace_commands_*.json file that worktree.el's watcher drains into
-;; the "switch" / "fold" handlers here.
+;; webapp cannot call into Emacs, so the daemon persists each UI-only effect
+;; as a HostAction and pushes it over the frontend UDS connection.  The
+;; workspace-create client dispatches those durable actions into the
+;; "switch" / "fold" handlers here and acknowledges completion.
 ;;
 ;; Keyboard navigation never leaves Emacs: `C-S-n' / `C-S-p' (input.el,
 ;; from the input window — the xwidget swallows keystrokes, so the page
@@ -866,7 +866,7 @@ re-validates — the file channel is also writable by other emitters)."
   (let ((dir (alist-get 'dir cmd)))
     (unless (and (stringp dir) (not (string-empty-p dir)))
       (error "agent-repl switch command: missing dir in %S" cmd))
-    (agent-repl--log nil "workspace-commands-file switch: dir=%s" dir)
+    (agent-repl--log nil "host-action switch-workspace: dir=%s" dir)
     (agent-repl--sidebar-open-dir dir)))
 
 (defun agent-repl--sidebar-repo-key-known-p (key)
@@ -894,7 +894,7 @@ same fold set, so forcing the tab-bar redraw is the whole sync."
     (let ((desired (eq (cdr folded-cell) t)))
       (unless (eq desired (agent-repl--repo-folded-p key))
         (agent-repl--toggle-repo-fold key))
-      (agent-repl--log nil "workspace-commands-file fold: key=%s folded=%s" key desired)
+      (agent-repl--log nil "host-action set-repository-fold: key=%s folded=%s" key desired)
       (agent-repl--force-tab-bar-redraw)
       (agent-repl--sidebar-push))))
 
@@ -917,7 +917,7 @@ CMD carries `view', one of the wire strings in
   (let ((view (alist-get 'view cmd)))
     (unless (member view '("repository" "task"))
       (error "agent-repl set-view command: bad view in %S" cmd))
-    (agent-repl--log nil "workspace-commands-file set-view: view=%s" view)
+    (agent-repl--log nil "host-action set-sidebar-view: view=%s" view)
     (agent-repl--sidebar-set-view (if (equal view "task") :task :repository))))
 
 (defun agent-repl--handle-task-create-command (_cmd)
@@ -927,7 +927,7 @@ the webapp asks Emacs to create rather than carrying a title itself.  An
 empty title is a cancelled prompt and creates nothing."
   (let ((title (read-string "Task title: ")))
     (if (string-empty-p (string-trim title))
-        (agent-repl--log nil "workspace-commands-file task-create: empty title, skipping")
+        (agent-repl--log nil "host-action task-create: empty title, skipping")
       (agent-repl--task-create title)
       (agent-repl--sidebar-push))))
 
@@ -937,7 +937,7 @@ CMD carries the task `id'."
   (let ((id (alist-get 'id cmd)))
     (unless (and (stringp id) (not (string-empty-p id)))
       (error "agent-repl task-toggle-done command: missing id in %S" cmd))
-    (agent-repl--log nil "workspace-commands-file task-toggle-done: id=%s" id)
+    (agent-repl--log nil "host-action task-toggle-done: id=%s" id)
     (agent-repl--task-toggle-done id)
     (agent-repl--sidebar-push)))
 
@@ -947,7 +947,7 @@ Opens the task's org notes file in a popup (`agent-repl--task-open')."
   (let ((id (alist-get 'id cmd)))
     (unless (and (stringp id) (not (string-empty-p id)))
       (error "agent-repl task-open command: missing id in %S" cmd))
-    (agent-repl--log nil "workspace-commands-file task-open: id=%s" id)
+    (agent-repl--log nil "host-action task-open: id=%s" id)
     (agent-repl--task-open id)))
 
 (defun agent-repl--task-add-workspace-interactive (id)
@@ -978,7 +978,7 @@ CMD carries the task `id'; the workspace is chosen in the minibuffer."
   (let ((id (alist-get 'id cmd)))
     (unless (and (stringp id) (not (string-empty-p id)))
       (error "agent-repl task-add-workspace command: missing id in %S" cmd))
-    (agent-repl--log nil "workspace-commands-file task-add-workspace: id=%s" id)
+    (agent-repl--log nil "host-action task-add-workspace: id=%s" id)
     (agent-repl--task-add-workspace-interactive id)))
 
 (provide 'agent-repl-sidebar)
