@@ -40,6 +40,7 @@
 (require 'url-util)
 
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
+(declare-function agent-repl--log-verbose "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--current-ws-p "agent-repl-core" (ws))
 (declare-function agent-repl--ws-current-name "agent-repl-workspace" ())
 (declare-function agent-repl--live-ws-names "agent-repl-workspace" ())
@@ -82,6 +83,7 @@
 (declare-function evil-normalize-keymaps "evil-core" (&optional state))
 
 (defvar xwidget-webkit-buffer-name-format)
+(defvar agent-repl--owning-workspace)
 
 ;;;; ---- Customization ------------------------------------------------------
 
@@ -127,7 +129,7 @@ from-source flag."
       "  brew reinstall emacs-plus --with-xwidgets    (d12frosted/emacs-plus)\n"))
    "  ./configure --with-xwidgets                  (building from source)\n"))
 
-(defun agent-repl--frontend-require-xwidget ()
+(defun agent-repl--frontend-require-xwidget (&optional ws)
   "Signal a `user-error' unless this Emacs can host WKWebView xwidgets.
 
 The gui is the only frontend agent-repl has, so an Emacs without
@@ -136,6 +138,7 @@ back to (vterm was the fallback, and it is gone).  That makes this the
 one error in the module a user can hit with no way forward, so it hands
 back the recipe out instead of just the diagnosis."
   (unless (agent-repl--frontend-xwidget-available-p)
+    (agent-repl--log ws "gui open rejected: xwidget-unavailable")
     (user-error
      "%s"
      (concat
@@ -207,7 +210,9 @@ open."
     (when (buffer-live-p buf)
       (agent-repl--log ws "snap-webview-to-tail: buf=%s" (buffer-name buf))
       (agent-repl--frontend-webview-execute-script
-       buf (agent-repl--frontend-tail-script)))))
+       buf (agent-repl--frontend-tail-script)))
+    (unless (buffer-live-p buf)
+      (agent-repl--log-verbose ws "snap-webview-to-tail: skipped=no-live-webview"))))
 
 (defun agent-repl--frontend-kill-webview (buf)
   "Kill webview BUF without the xwidget kill-query prompt.
@@ -230,7 +235,7 @@ tests mock via `cl-letf'.  Registered in
   (require 'xwidget)
   (xwidget-webkit-get-selection callback)) ;; ALLOW-EXTERNAL-BOUNDARY
 
-(defun agent-repl--frontend-yank-selection (text)
+(defun agent-repl--frontend-yank-selection (text &optional ws)
   "Put the webview's selected TEXT on the kill ring, reporting what happened.
 The kill ring is the system clipboard's Emacs end (`select-enable-clipboard'),
 so a killed selection is pasteable outside Emacs too.  An empty or
@@ -238,8 +243,11 @@ whitespace-only TEXT means nothing was highlighted, and is NOT killed —
 clobbering the kill ring with a stray click's empty selection would be a
 silent data loss."
   (if (or (null text) (string-empty-p (string-trim text)))
-      (message "agent-repl: nothing highlighted in the webview")
+      (progn
+        (agent-repl--log ws "copy-selection: outcome=empty")
+        (message "agent-repl: nothing highlighted in the webview"))
     (kill-new text)
+    (agent-repl--log ws "copy-selection: outcome=copied chars=%d" (length text))
     (message "agent-repl: copied %d chars from the webview" (length text))))
 
 ;;;###autoload
@@ -248,7 +256,11 @@ silent data loss."
 Bound to `C-c' and `y' (the vim reflex) in the webview panel, since the
 WKWebView has no menu bar of its own to copy a mouse-made highlight with."
   (interactive)
-  (agent-repl--frontend-webview-selection #'agent-repl--frontend-yank-selection))
+  (let ((ws agent-repl--owning-workspace)
+        (buf (current-buffer)))
+    (agent-repl--log ws "copy-selection: requested buf=%s" (buffer-name buf))
+    (agent-repl--frontend-webview-selection
+     (lambda (text) (agent-repl--frontend-yank-selection text ws)))))
 
 ;;;; ---- Chess-board keyboard navigation (out-of-band) -------------------------
 
@@ -276,6 +288,8 @@ keyboard events into the page, so the webview buffer's keys drive the
 board over the execute-script channel instead.  No-op (page-side) when
 no board has been clicked."
   (interactive)
+  (agent-repl--log agent-repl--owning-workspace
+                   "chess-step: direction=back buf=%s" (buffer-name))
   (agent-repl--frontend-webview-execute-script
    (current-buffer) (agent-repl--frontend-chess-step-script "back")))
 
@@ -283,6 +297,8 @@ no board has been clicked."
   "Play one move on the current webview's active chess board.
 See `agent-repl-frontend-chess-back' for the out-of-band rationale."
   (interactive)
+  (agent-repl--log agent-repl--owning-workspace
+                   "chess-step: direction=forward buf=%s" (buffer-name))
   (agent-repl--frontend-webview-execute-script
    (current-buffer) (agent-repl--frontend-chess-step-script "forward")))
 
@@ -372,7 +388,9 @@ webview (already free of open menus) on its next open."
     (when (buffer-live-p buf)
       (agent-repl--log ws "close-topbar-menus: buf=%s" (buffer-name buf))
       (agent-repl--frontend-webview-execute-script
-       buf (agent-repl--frontend-close-menus-script)))))
+       buf (agent-repl--frontend-close-menus-script)))
+    (unless (buffer-live-p buf)
+      (agent-repl--log-verbose ws "close-topbar-menus: skipped=no-live-webview"))))
 
 (defun agent-repl--frontend-close-menus-on-input-click (_frame)
   "Close the current workspace's topbar dropdowns when its input window is clicked.
@@ -391,6 +409,8 @@ input panel all leave the webview untouched."
                (mouse-event-p last-input-event)
                (eq (selected-window)
                    (agent-repl-window--panel-window :input ws)))
+      (agent-repl--log-verbose ws "input-click: close-topbar-menus selected-window=%s"
+                               (selected-window))
       (agent-repl--frontend-close-topbar-menus ws))))
 
 (add-hook 'window-selection-change-functions
@@ -427,11 +447,14 @@ when the script ran, or nil when WS has no live webview — a closed panel
 mounts a fresh webview (default size) on its next open, so the size is a
 live-page preference rather than persistent state."
   (let ((buf (agent-repl--ws-get ws :frontend-buffer)))
-    (when (buffer-live-p buf)
-      (agent-repl--log ws "adjust-text-size: arg=%s buf=%s" arg (buffer-name buf))
-      (agent-repl--frontend-webview-execute-script
-       buf (agent-repl--frontend-text-size-script arg))
-      buf)))
+    (if (buffer-live-p buf)
+        (progn
+          (agent-repl--log ws "adjust-text-size: arg=%s buf=%s" arg (buffer-name buf))
+          (agent-repl--frontend-webview-execute-script
+           buf (agent-repl--frontend-text-size-script arg))
+          buf)
+      (agent-repl--log-verbose ws "adjust-text-size: skipped=no-live-webview arg=%s" arg)
+      nil)))
 
 (defun agent-repl--frontend-text-size-command (arg)
   "Drive the current workspace's webview text size with ARG.
@@ -442,6 +465,7 @@ current workspace, or when the current workspace has no webview open."
     (unless ws
       (user-error "agent-repl: no current workspace"))
     (unless (agent-repl--frontend-adjust-text-size ws arg)
+      (agent-repl--log ws "adjust-text-size: rejected=no-live-webview arg=%s" arg)
       (user-error "agent-repl: no webview open for workspace %s" ws))))
 
 ;;;###autoload
@@ -510,11 +534,18 @@ foreign directory the xwidget session inherited at creation."
   ;; This is the one rendering choke point: every initial mount, sync, and
   ;; remount arrives here.  Verify the daemon still has a healthy shim for
   ;; this exact session before touching an existing buffer or creating one.
+  (let ((existing (agent-repl--ws-get ws :frontend-buffer))
+        (bound-to (agent-repl--ws-get ws :frontend-buffer-session-id)))
+    (agent-repl--log ws "ensure-webview: session=%s existing-live=%s bound-session=%s"
+                     session-id (buffer-live-p existing) bound-to))
   (agent-repl--frontend-wait-session-healthy ws session-id)
   (let* ((existing (agent-repl--ws-get ws :frontend-buffer))
          (bound-to (agent-repl--ws-get ws :frontend-buffer-session-id))
          (buf (if (and (buffer-live-p existing) (equal bound-to session-id))
-                  existing
+                  (progn
+                    (agent-repl--log ws "ensure-webview: outcome=reused buf=%s session=%s"
+                                     (buffer-name existing) session-id)
+                    existing)
                 (progn
                   (when (buffer-live-p existing)
                     (agent-repl--log ws "frontend webview rebind: session %s -> %s (killing stale webview)"
@@ -561,6 +592,8 @@ windows.
 Without the clear, whatever the frame carried before the mount (magit,
 the dashboard, a previous workspace's leftovers) stayed up beside the
 panels — the extra-windows-on-first-switch bug."
+  (agent-repl--log ws "display-webview: begin buf=%s panels-visible=%s"
+                   (buffer-name buf) (agent-repl--panels-visible-p))
   (when (agent-repl--panels-visible-p)
     (agent-repl--log ws "display-webview: hiding agent panels first")
     (agent-repl--hide-panels))
@@ -572,7 +605,8 @@ panels — the extra-windows-on-first-switch bug."
   (unless (or (agent-repl--ws-get ws :fullscreen-config)
               (let ((webview (agent-repl--ws-get ws :frontend-buffer)))
                 (and (buffer-live-p webview) (get-buffer-window webview))))
-    (agent-repl--ws-put ws :fullscreen-config (current-window-configuration)))
+    (agent-repl--ws-put ws :fullscreen-config (current-window-configuration))
+    (agent-repl--log ws "display-webview: saved-fullscreen-layout"))
   (let* ((input-buf (agent-repl--ensure-input-buffer ws))
          (stale-input-win (get-buffer-window input-buf)))
     ;; A surviving input window from a previous webview mount (the
@@ -582,6 +616,8 @@ panels — the extra-windows-on-first-switch bug."
     ;; the frame's ONLY window it cannot be deleted; reclaim it as the
     ;; host by lifting its dedication instead.
     (when (window-live-p stale-input-win)
+      (agent-repl--log ws "display-webview: reclaiming-stale-input-window window=%s only-window=%s"
+                       stale-input-win (one-window-p))
       (if (one-window-p)
           (set-window-dedicated-p stale-input-win nil)
         (delete-window stale-input-win)))
@@ -604,7 +640,9 @@ panels — the extra-windows-on-first-switch bug."
                                    :size-fix       'height
                                    :delete-protect t
                                    :preserve-size  'height)
-        (select-window input-win))))
+        (select-window input-win)
+        (agent-repl--log ws "display-webview: mounted webview-window=%s input-window=%s"
+                         win input-win))))
   buf)
 
 ;;;; ---- Entry point ----------------------------------------------------------------
@@ -616,12 +654,15 @@ xwidget support, ensures the daemon (built if stale, launched if
 absent), ensures WS's daemon session (rooted at its worktree), mounts
 the webview attached to that session, and places it over the input
 panel."
-  (agent-repl--frontend-require-xwidget)
+  (agent-repl--log ws "gui-open: begin")
+  (agent-repl--frontend-require-xwidget ws)
   (agent-repl--frontend-validate-for-ws 'gui ws)
   (let* ((session-id (agent-repl--frontend-ensure-session ws))
          (url (agent-repl--frontend-webview-url ws session-id))
          (buf (agent-repl--frontend-ensure-webview-buffer ws session-id url)))
-    (agent-repl--frontend-display-webview ws buf)))
+    (agent-repl--frontend-display-webview ws buf)
+    (agent-repl--log ws "gui-open: outcome=displayed session=%s buf=%s"
+                     session-id buf)))
 
 (defun agent-repl--gui-boot (ws &optional _project-dir-hint _active-env-hint)
   "The gui frontend's boot capability (registry `:boot-fn').
@@ -650,8 +691,11 @@ The hints are unused: `agent-repl--frontend-boot-session' has already
 hydrated the environment with them, and the gui reads WS's
 `:project-dir' from the plist (`agent-repl--frontend-ensure-session')."
   (agent-repl--frontend-validate-for-ws 'gui ws)
+  (agent-repl--log ws "gui-boot: begin")
   (agent-repl--ws-set-agent-state ws :init)
-  (agent-repl--frontend-ensure-session ws))
+  (let ((session-id (agent-repl--frontend-ensure-session ws)))
+    (agent-repl--log ws "gui-boot: outcome=session-started session=%s" session-id)
+    session-id))
 
 (defun agent-repl--frontend-webview-url (ws session-id)
   "Return the webapp URL for WS's webview attached to SESSION-ID.
@@ -674,13 +718,24 @@ streams into the replacement.  No-op when no webview buffer is live
 binding already matches."
   (let ((buf (agent-repl--ws-get ws :frontend-buffer))
         (bound (agent-repl--ws-get ws :frontend-buffer-session-id)))
-    (when (and (buffer-live-p buf) (not (equal bound session-id)))
+    (cond
+     ((not (buffer-live-p buf))
+      (agent-repl--log-verbose ws "sync-webview: skipped=no-live-webview target-session=%s" session-id))
+     ((equal bound session-id)
+      (agent-repl--log-verbose ws "sync-webview: skipped=already-bound buf=%s session=%s"
+                               (buffer-name buf) session-id))
+     (t
       (agent-repl--log ws "sync-webview: displayed webview %s -> %s" bound session-id)
       (let ((win (get-buffer-window buf t))
             (new (agent-repl--frontend-ensure-webview-buffer
                   ws session-id (agent-repl--frontend-webview-url ws session-id))))
         (when (window-live-p win)
-          (set-window-buffer win new))))))
+          (set-window-buffer win new)
+          (agent-repl--log ws "sync-webview: outcome=swapped old-window=%s new-buffer=%s"
+                           win (buffer-name new)))
+        (unless (window-live-p win)
+          (agent-repl--log ws "sync-webview: outcome=remounted-not-displayed new-buffer=%s"
+                           (buffer-name new))))))))
 
 (defun agent-repl--frontend-remount-webview (ws)
   "Force WS's open webview to reload the freshly served webapp bundle.
@@ -699,7 +754,10 @@ A no-op returning nil when WS has no live webview buffer — a closed
 panel has nothing to reload, and its next open mounts fresh from the
 current bundle anyway.  Returns the new buffer when a remount happened."
   (let ((buf (agent-repl--ws-get ws :frontend-buffer)))
-    (when (buffer-live-p buf)
+    (if (not (buffer-live-p buf))
+        (progn
+          (agent-repl--log ws "remount-webview: skipped=no-live-webview")
+          nil)
       (let* ((win (get-buffer-window buf t))
              (session-id (agent-repl--frontend-ensure-session ws))
              (url (agent-repl--frontend-webview-url ws session-id)))
@@ -709,7 +767,12 @@ current bundle anyway.  Returns the new buffer when a remount happened."
         (let ((new (agent-repl--frontend-ensure-webview-buffer ws session-id url)))
           (agent-repl--log ws "remount-webview: reloaded bundle ws=%s -> %s" ws session-id)
           (when (window-live-p win)
-            (set-window-buffer win new))
+            (set-window-buffer win new)
+            (agent-repl--log ws "remount-webview: outcome=swapped window=%s new-buffer=%s"
+                             win (buffer-name new)))
+          (unless (window-live-p win)
+            (agent-repl--log ws "remount-webview: outcome=remounted-not-displayed new-buffer=%s"
+                             (buffer-name new)))
           new)))))
 
 (defun agent-repl--frontend-remount-all-webviews ()
@@ -752,8 +815,10 @@ there is no current workspace."
   (let ((ws (agent-repl--ws-current-name)))
     (unless ws
       (user-error "agent-repl: no current workspace"))
+    (agent-repl--log ws "force-fresh-conversation: begin")
     (let ((id (agent-repl--frontend-force-fresh-session ws)))
       (agent-repl--frontend-sync-webview ws id)
+      (agent-repl--log ws "force-fresh-conversation: outcome=session=%s" id)
       (message "agent-repl: started a fresh conversation (%s)" id))))
 
 (defun agent-repl--frontend-parent-ws-name (ws)
@@ -769,7 +834,10 @@ recorded value is empty."
 Remounts the live webview (or opens fresh when it died)."
   (let ((buf (agent-repl--ws-get ws :frontend-buffer)))
     (if (buffer-live-p buf)
-        (agent-repl--frontend-display-webview ws buf)
+        (progn
+          (agent-repl--log ws "gui-show: outcome=redisplay buf=%s" (buffer-name buf))
+          (agent-repl--frontend-display-webview ws buf))
+      (agent-repl--log ws "gui-show: outcome=open-fresh")
       (agent-repl--gui-open ws))))
 
 (defun agent-repl--gui-hide (ws)
@@ -793,8 +861,12 @@ now-moot saved layout is dropped so a later reopen cannot restore a
 stale configuration.  This is the window-isolation guarantee: merging
 one workspace never disturbs another workspace's windows."
   (if (not (agent-repl--current-ws-p ws))
-      (agent-repl--ws-put ws :fullscreen-config nil)
-    (unless (agent-repl--restore-fullscreen-config ws)
+      (progn
+        (agent-repl--log ws "gui-hide: outcome=background-drop-layout")
+        (agent-repl--ws-put ws :fullscreen-config nil))
+    (if (agent-repl--restore-fullscreen-config ws)
+        (agent-repl--log ws "gui-hide: outcome=restored-layout")
+      (agent-repl--log ws "gui-hide: outcome=close-buffer-windows")
       (agent-repl--close-buffer-windows
        (agent-repl--ws-get ws :frontend-buffer)
        (or (agent-repl--ws-get ws :input-buffer)
@@ -849,6 +921,7 @@ registry."
   (let ((ws (agent-repl--ws-current-name)))
     (unless ws
       (user-error "agent-repl: no current workspace"))
+    (agent-repl--log ws "open-panel: selecting gui frontend")
     (agent-repl--frontend-validate-for-ws 'gui ws)
     (agent-repl--ws-choose-frontend ws 'gui)
     (agent-repl--gui-open ws)))
@@ -861,9 +934,12 @@ it with full replayed history; session teardown belongs to the
 workspace nuke path (`agent-repl-ws-del-hook')."
   (interactive)
   (let* ((ws (agent-repl--ws-current-name))
+         (_ (unless ws (user-error "agent-repl: no current workspace")))
          (buf (agent-repl--ws-get ws :frontend-buffer)))
     (unless (buffer-live-p buf)
+      (agent-repl--log ws "close-panel: rejected=no-live-webview")
       (user-error "agent-repl: no webview open for workspace %s" ws))
+    (agent-repl--log ws "close-panel: killing buf=%s" (buffer-name buf))
     (agent-repl--frontend-kill-webview buf)
     (agent-repl--ws-put ws :frontend-buffer nil)
     (agent-repl--ws-put ws :frontend-buffer-session-id nil)
@@ -877,9 +953,11 @@ Tombstoning only nils the plist keys — without this the buffer (a live
 WKWebView holding an open WebSocket) would outlive the workspace.
 Runs pre-tombstone, while `:frontend-buffer' is still readable."
   (let ((buf (agent-repl--ws-get ws :frontend-buffer)))
-    (when (buffer-live-p buf)
-      (agent-repl--log ws "frontend webview released on nuke: %s" (buffer-name buf))
-      (agent-repl--frontend-kill-webview buf))))
+    (if (buffer-live-p buf)
+        (progn
+          (agent-repl--log ws "frontend webview released on nuke: %s" (buffer-name buf))
+          (agent-repl--frontend-kill-webview buf))
+      (agent-repl--log-verbose ws "frontend webview release: skipped=no-live-webview"))))
 
 (add-hook 'agent-repl-ws-del-hook #'agent-repl--frontend-release-workspace-webview)
 
