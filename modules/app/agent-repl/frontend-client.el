@@ -326,8 +326,10 @@ the non-terminal `SessionView' the daemon pushed for CWD
 \(`agent-repl--frontend-live-session-id-for-cwd').  The daemon pushes that
 view BEFORE the ack, so on an accepted ack the view is already stored; a
 brief extra await tolerates the reverse ordering.  Creates are serialized
-per cwd (`agent-repl--frontend-creates-in-flight') so the cwd->id
-correlation is unambiguous.
+per cwd (`agent-repl--frontend-creates-in-flight'), and the daemon stands
+down every older session on the cwd — pushing each one's terminal view —
+before it pushes the new session's, so at most one live view per cwd
+exists and the correlation is unambiguous.
 
 On a REJECTED ack the lost-workspace resume attempt is handled by
 `agent-repl--frontend-create-handle-rejection': the resume-viability
@@ -401,7 +403,7 @@ inherited."
 
 (defun agent-repl--frontend-delete-session (id &optional ws)
   "Send a `deleteSession' UDS command for session ID; return the request-id.
-WS, when known, keys the frame + logging (an orphan reap passes nil).
+WS, when known, keys the frame + logging.
 Fire-and-forget: the terminal `SessionView' the daemon pushes updates the
 store, and a rejected ack surfaces loudly via the shared ack handler."
   (let ((req (agent-repl--uds-send-command "deleteSession" (list :sessionId id) ws)))
@@ -426,15 +428,6 @@ Reads the `:turn-active' resolution input frontend-state.el stashed under
 `:pushed-render-state-meta' from the pushed frame (protojson bool -> t)."
   (eq (plist-get (agent-repl--ws-get ws :pushed-render-state-meta) :turn-active) t))
 
-(defun agent-repl--frontend-bound-session-ids ()
-  "Return the daemon session ids a live workspace is currently bound to.
-Every conversation the user is actually driving surfaces through some
-workspace's `:frontend-session-id'.  A daemon session bound to NONE of
-them is an orphan — e.g. a session a prior daemon bounce or reattach
-superseded but left behind — that no client is watching."
-  (delq nil (mapcar (lambda (ws) (agent-repl--ws-get ws :frontend-session-id))
-                    (agent-repl--live-ws-names))))
-
 (defun agent-repl--frontend-turn-active-sessions ()
   "Return workspace-bound session ids the daemon reports mid-turn.
 Sourced entirely from pushed-frame state (no daemon round-trip): a session
@@ -444,7 +437,7 @@ non-terminal (`agent-repl--frontend-session-live-p').  The daemon-stop
 guard keys on this.
 
 Iterating only live workspaces' bound ids intrinsically excludes both a
-stuck-flag ORPHAN (unbound, hence never visited) and a TERMINAL session
+stale UNBOUND session (never visited) and a TERMINAL session
 \(filtered by the live-p check) — exactly the two exclusions the old
 GET /sessions sweep spelled out."
   (let (busy)
@@ -455,55 +448,16 @@ GET /sessions sweep spelled out."
                    (agent-repl--frontend-session-live-p sid))
           (push sid busy))))))
 
-(defun agent-repl--frontend-orphan-session-ids ()
-  "Return ids of pushed SessionViews leaking a live shim for a bound conversation.
-Pure (no deletion), sourced from the pushed `SessionView' roster
-\(`agent-repl--frontend-session-views-all').  A daemon bounce/reattach can
-supersede a session (rebinding its workspace onto a fresh resume of the
-same conversation) while the old one's shim keeps running — a leaked
-`claude' process no client is watching.  A target is a session that:
-- still holds a LIVE SHIM: non-terminal (post-cutover a session is either
-  live-shim or terminal; the old hibernated/rehydratable exclusions are
-  gone — those fields are hard-false on the frontend.v1 SessionView);
-- is bound to NO live workspace
-  (`agent-repl--frontend-bound-session-ids'); and
-- shares its `claudeSessionId' with a session a workspace IS bound to,
-  making it a superseded DUPLICATE rather than an unrelated session, so a
-  uniquely-unbound live session is left alone."
-  (let* ((bound (agent-repl--frontend-bound-session-ids))
-         (views (agent-repl--frontend-session-views-all))
-         (bound-claude-ids
-          (delq nil (mapcar (lambda (v)
-                              (when (member (plist-get v :sessionId) bound)
-                                (plist-get v :claudeSessionId)))
-                            views))))
-    (delq nil
-          (mapcar
-           (lambda (v)
-             (let ((id (plist-get v :sessionId))
-                   (claude-id (plist-get v :claudeSessionId)))
-               (when (and (not (eq (plist-get v :terminal) t))
-                          (not (member id bound))
-                          claude-id (not (string-empty-p claude-id))
-                          (member claude-id bound-claude-ids))
-                 id)))
-           views))))
-
-(defun agent-repl--frontend-reap-orphan-sessions ()
-  "Delete the leaked-orphan sessions (from the pushed roster), freeing their shims.
-Targets come from `agent-repl--frontend-orphan-session-ids'.  A failed
-delete is logged and skipped rather than aborting the sweep — the next
-sweep retries it.  Returns the ids actually reaped."
-  (let (reaped)
-    (dolist (id (agent-repl--frontend-orphan-session-ids) (nreverse reaped))
-      (condition-case err
-          (progn
-            (agent-repl--frontend-delete-session id)
-            (push id reaped)
-            (agent-repl--log nil "reap: deleted orphan session %s (leaked duplicate shim)" id))
-        (error
-         (agent-repl--log nil "reap: failed to delete orphan %s: %s"
-                           id (error-message-string err)))))))
+;; The client-side orphan reaper that used to live here is GONE, on purpose.
+;; It existed because a superseded session's shim kept running with nobody
+;; attached; the daemon now stands down every displaced session itself at
+;; create time (supersede.go: terminal record + shim stop + pushed terminal
+;; view), which removes the leak at its source.  The reaper's remaining
+;; behavior was purely harmful: it keyed "orphan" off the workspace binding,
+;; so a mis-bound workspace made it delete the REAL session (the 2026-07-26
+;; every-restore mis-bind), and it looped forever on sessions whose deletes
+;; the daemon silently no-op'd.  Client-driven deletion decided from a pushed
+;; roster is the wrong layer for shim GC; do not reintroduce it.
 
 ;;;; ---- Workspace binding ---------------------------------------------------
 
@@ -646,10 +600,7 @@ boot id, so the give-up reset no longer needs a GET /sessions probe here."
             (agent-repl--ws-put ws :reattach-failed nil)
             (agent-repl--ws-put ws :reattach-failures nil))
            ((agent-repl--ws-get ws :reattach-failed) nil)
-           (t (agent-repl--frontend-reattach-ws ws bound)))))
-      ;; With bindings reconciled, reap any superseded session still running a
-      ;; leaked duplicate shim for a conversation now bound elsewhere.
-      (agent-repl--frontend-reap-orphan-sessions))))
+           (t (agent-repl--frontend-reattach-ws ws bound))))))))
 
 (defun agent-repl--frontend-note-boot-id (boot-id)
   "Record BOOT-ID; on an instance change, reset every reattach give-up.

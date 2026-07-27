@@ -437,7 +437,9 @@ Every session-routed frontend command (`submitPrompt`, `interrupt`, `permissionA
 
 ## Stand down a SPECIFIC session with `HibernateSession`, not `Hibernate`
 
-Several registry records can share one workspace cwd (a stale duplicate, a superseded resume, an orphan awaiting reap). `sessiondrv.Manager.Hibernate(cwd)` SIGTERMs whichever shim is live for that cwd, so using it to stop one record's shim kills whatever session currently owns the workspace — on 2026-07-25 reaping an orphan killed the healthy session created 175ms earlier. Delete and supersede therefore call `HibernateSession(cwd, sessionID)`, which returns `ErrNotLiveSession` and stops nothing when a different session drives the workspace. `Hibernate` stays correct only for genuinely workspace-scoped teardown (idle sweep, daemon shutdown).
+Several registry records can share one workspace cwd (junk minted by older daemons, direct registry writes; a create now stands its cwd's older records down at mint time, see `supersede.go`). `sessiondrv.Manager.Hibernate(cwd)` SIGTERMs whichever shim is live for that cwd, so using it to stop one record's shim kills whatever session currently owns the workspace — on 2026-07-25 deleting a stale duplicate killed the healthy session created 175ms earlier. Delete and supersede therefore call `HibernateSession(cwd, sessionID)`, which returns `ErrNotLiveSession` and stops nothing when a different session drives the workspace. `Hibernate` stays correct only for genuinely workspace-scoped teardown (idle sweep, daemon shutdown).
+
+Session GC is DAEMON-side, on purpose: the Emacs orphan reaper (client-driven `deleteSession`s decided from the pushed roster) was removed on 2026-07-26 after it deleted a freshly-restored real session it had mis-classified as an orphan. A displaced session is stood down by the daemon at create time — terminal record, shim stop, pushed terminal view — so no client ever needs to infer leaks from its roster. Do not reintroduce client-side session deletion sweeps.
 
 ## The protocol schema is TREATED as vendor-agnostic
 

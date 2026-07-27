@@ -838,18 +838,6 @@ keyed by the workspace CWD (no session id on the wire)."
 
 ;;;; ---- turn-active probe ------------------------------------------------------
 
-(ert-deftest agent-repl-test-frontend-bound-session-ids-collects-live-workspaces ()
-  "The bound-id set gathers every live workspace's :frontend-session-id.
-A workspace without a binding contributes nothing."
-  ;; Arrange
-  (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_1" :project-dir "/w")
-    (agent-repl-test--with-ws "ws2" '(:frontend-session-id "s_2" :project-dir "/w2")
-      (agent-repl-test--with-ws "ws3" '(:project-dir "/w3")
-        ;; Act / Assert
-        (should (equal (sort (copy-sequence (agent-repl--frontend-bound-session-ids))
-                             #'string<)
-                       '("s_1" "s_2")))))))
-
 (ert-deftest agent-repl-test-frontend-turn-active-sessions-extracts-busy-ids ()
   "A bound session whose pushed WorkspaceState is turn-active is returned; idle skipped."
   ;; Arrange — ws1's pushed state is turn-active, ws2's is not.
@@ -878,13 +866,14 @@ A workspace without a binding contributes nothing."
         ;; Act / Assert
         (should (equal (agent-repl--frontend-turn-active-sessions) '("s_live")))))))
 
-(ert-deftest agent-repl-test-frontend-turn-active-sessions-skips-unbound-orphan ()
+(ert-deftest agent-repl-test-frontend-turn-active-sessions-skips-unbound-stale ()
   "A turn-active session in the store but bound to NO live workspace is never counted.
-Iterating only live workspaces' bindings intrinsically excludes the orphan a
-prior bounce leaves behind — it must not block a future bounce."
-  ;; Arrange — s_orphan is live in the store but no workspace is bound to it.
+Iterating only live workspaces' bindings intrinsically excludes the stale
+unbound session a prior bounce leaves behind — it must not block a future
+bounce."
+  ;; Arrange — s_stale is live in the store but no workspace is bound to it.
   (agent-repl-test--with-views '((:sessionId "s_bound" :workspace "/w1")
-                                 (:sessionId "s_orphan" :workspace "/w2"))
+                                 (:sessionId "s_stale" :workspace "/w2"))
     (agent-repl-test--with-ws "ws1"
         '(:frontend-session-id "s_bound" :project-dir "/w1"
           :pushed-render-state-meta (:turn-active t))
@@ -901,65 +890,6 @@ prior bounce leaves behind — it must not block a future bounce."
       ;; Act / Assert
       (should (null (agent-repl--frontend-turn-active-sessions))))))
 
-;;;; ---- orphan-session reaper --------------------------------------------------
-
-(ert-deftest agent-repl-test-frontend-orphan-ids-selects-superseded-duplicate ()
-  "A live pushed SessionView bound nowhere, duplicating a bound conversation, is a target."
-  ;; Arrange — s_new is bound; s_old shares its claude id, is live and unbound.
-  (cl-letf (((symbol-function 'agent-repl--frontend-bound-session-ids)
-             (lambda () '("s_new"))))
-    (agent-repl-test--with-views '((:sessionId "s_new" :claudeSessionId "c1")
-                                   (:sessionId "s_old" :claudeSessionId "c1"))
-      ;; Act / Assert
-      (should (equal (agent-repl--frontend-orphan-session-ids) '("s_old"))))))
-
-(ert-deftest agent-repl-test-frontend-orphan-ids-spares-terminal-duplicate ()
-  "A TERMINAL duplicate is spared: a dead record leaks no shim."
-  ;; Arrange (post-cutover a session is either live-shim or terminal; the old
-  ;; hibernated/rehydratable exclusions are gone — those fields are hard-false).
-  (cl-letf (((symbol-function 'agent-repl--frontend-bound-session-ids)
-             (lambda () '("s_new"))))
-    (agent-repl-test--with-views '((:sessionId "s_new" :claudeSessionId "c1")
-                                   (:sessionId "s_dead" :claudeSessionId "c1" :terminal t))
-      ;; Act / Assert
-      (should (null (agent-repl--frontend-orphan-session-ids))))))
-
-(ert-deftest agent-repl-test-frontend-orphan-ids-spares-unique-unbound ()
-  "An unbound live session duplicating NO bound conversation is left alone."
-  ;; Arrange
-  (cl-letf (((symbol-function 'agent-repl--frontend-bound-session-ids)
-             (lambda () '("s_new"))))
-    (agent-repl-test--with-views '((:sessionId "s_new" :claudeSessionId "c1")
-                                   (:sessionId "s_solo" :claudeSessionId "c2"))
-      ;; Act / Assert
-      (should (null (agent-repl--frontend-orphan-session-ids))))))
-
-(ert-deftest agent-repl-test-frontend-reap-deletes-orphans ()
-  "The reaper issues a deleteSession for each orphan id and returns them."
-  ;; Arrange
-  (let ((deleted nil))
-    (cl-letf (((symbol-function 'agent-repl--frontend-orphan-session-ids)
-               (lambda () '("s_old")))
-              ((symbol-function 'agent-repl--frontend-delete-session)
-               (lambda (id &optional _ws) (push id deleted) "req")))
-      ;; Act
-      (let ((reaped (agent-repl--frontend-reap-orphan-sessions)))
-        ;; Assert
-        (should (equal reaped '("s_old")))
-        (should (equal deleted '("s_old")))))))
-
-(ert-deftest agent-repl-test-frontend-reap-skips-failed-delete ()
-  "A failed delete is skipped rather than fatal, and excluded from the reaped list."
-  ;; Arrange
-  (cl-letf (((symbol-function 'agent-repl--frontend-orphan-session-ids)
-             (lambda () '("s_bad" "s_ok")))
-            ((symbol-function 'agent-repl--frontend-delete-session)
-             (lambda (id &optional _ws) (if (equal id "s_bad") (error "boom") "req"))))
-    ;; Act
-    (let ((reaped (agent-repl--frontend-reap-orphan-sessions)))
-      ;; Assert
-      (should (equal reaped '("s_ok"))))))
-
 ;;;; ---- reattach loop -----------------------------------------------------------
 
 (ert-deftest agent-repl-test-frontend-reattach-check-no-op-when-listed ()
@@ -971,8 +901,7 @@ prior bounce leaves behind — it must not block a future bounce."
       (let ((reattached nil))
         (cl-letf (((symbol-function 'agent-repl--uds-connected-p) (lambda () t))
                   ((symbol-function 'agent-repl--frontend-reattach-ws)
-                   (lambda (&rest args) (push args reattached)))
-                  ((symbol-function 'agent-repl--frontend-reap-orphan-sessions) #'ignore))
+                   (lambda (&rest args) (push args reattached))))
           ;; Act
           (agent-repl--frontend-reattach-check)
           ;; Assert
@@ -988,8 +917,7 @@ prior bounce leaves behind — it must not block a future bounce."
       (let ((reattached nil))
         (cl-letf (((symbol-function 'agent-repl--uds-connected-p) (lambda () t))
                   ((symbol-function 'agent-repl--frontend-reattach-ws)
-                   (lambda (ws stale) (push (list ws stale) reattached)))
-                  ((symbol-function 'agent-repl--frontend-reap-orphan-sessions) #'ignore))
+                   (lambda (ws stale) (push (list ws stale) reattached))))
           ;; Act
           (agent-repl--frontend-reattach-check)
           ;; Assert
@@ -1004,8 +932,7 @@ prior bounce leaves behind — it must not block a future bounce."
       (let ((reattached nil))
         (cl-letf (((symbol-function 'agent-repl--uds-connected-p) (lambda () t))
                   ((symbol-function 'agent-repl--frontend-reattach-ws)
-                   (lambda (&rest args) (push args reattached)))
-                  ((symbol-function 'agent-repl--frontend-reap-orphan-sessions) #'ignore))
+                   (lambda (&rest args) (push args reattached))))
           ;; Act
           (agent-repl--frontend-reattach-check)
           ;; Assert
