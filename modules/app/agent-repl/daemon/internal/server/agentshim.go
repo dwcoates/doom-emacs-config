@@ -104,6 +104,51 @@ func (s *RegistrySeqStore) SetLastSeq(sessionID string, seq uint64) {
 	}
 }
 
+// NewestClearOrCompactSeq returns the durable REPLAY FLOOR for sessionID: the
+// store seq of the newest clear or compaction observed on its conversation, or
+// 0 when neither has been seen.
+//
+// It resolves through the conversation checkpoint for exactly the reason
+// LastSeq does, and the consequence of not doing so is sharper here: every
+// restart mints a fresh s_ id for the same conversation, so a floor read only
+// off this record would be 0 after every restart and the frontend would be
+// served back the whole history the clear or compaction discarded.
+func (s *RegistrySeqStore) NewestClearOrCompactSeq(sessionID string) uint64 {
+	rec, ok := s.reg.Get(sessionID)
+	if !ok {
+		return 0
+	}
+	if rec.ClaudeSessionID == "" {
+		// No conversation identity yet (a fresh session before system:init):
+		// this record's own mark is the only thing that can apply.
+		return rec.NewestClearOrCompactSeq
+	}
+	if cp, ok := s.reg.CheckpointForSession(sessionID); ok {
+		return max(rec.NewestClearOrCompactSeq, cp.NewestClearOrCompactSeq)
+	}
+	return rec.NewestClearOrCompactSeq
+}
+
+// SetNewestClearOrCompactSeq records seq as the conversation's newest clear or
+// compaction, write-through to disk.
+//
+// MONOTONIC: an older clear or compaction never lowers the floor. Events arrive
+// in seq order on one connection, but a re-delivery after a reattach can
+// present one the daemon already recorded, and lowering the floor there would
+// replay history the newer one had already made irrelevant.
+func (s *RegistrySeqStore) SetNewestClearOrCompactSeq(sessionID string, seq uint64) {
+	found, err := s.reg.Update(sessionID, func(rec *registry.Record) {
+		rec.NewestClearOrCompactSeq = max(rec.NewestClearOrCompactSeq, seq)
+	})
+	if err != nil {
+		s.logf("session %s: registry replay-floor write (newest_clear_or_compact_seq=%d) FAILED — a resync after a restart may replay the history the clear or compaction discarded: %v", sessionID, seq, err)
+		return
+	}
+	if !found {
+		s.logf("session %s: registry replay-floor write (newest_clear_or_compact_seq=%d) found no record — the session was never registered", sessionID, seq)
+	}
+}
+
 // RegistryResolver adapts the session registry to ssm.Resolver: it answers
 // "which workspace is this session bound to?" for the SSM's per-workspace
 // state log (design §9.2). The workspace is the session's working directory
