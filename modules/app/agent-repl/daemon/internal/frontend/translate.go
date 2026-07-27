@@ -26,16 +26,25 @@
 //	UserMessage / UserLine             user_message      (ApiUserMessage)
 //	ResultMessage                      result            (ResultMessage)
 //	SystemLine.ApiError (disk), terminal only  system_failure (SystemFailureItem)
+//	Event.ContextCleared               context_cleared   (core.v1 ContextCleared)
+//	Event.ContextCompacted             context_compacted (core.v1 ContextCompacted)
 //
-// CONTEXT CUTS ARE NOT PASSTHROUGH. A clear and a compaction each reach this
-// daemon as several partial records — for a compaction, a start status, a
-// boundary carrying token counts, and a summary line the vendor types as an
-// ordinary user message — arriving on both planes and, in the transcript,
-// timestamped out of order relative to each other. They therefore curate to
-// core.v1 ContextCleared / ContextCompacted, which the daemon COALESCES from
+// A CLEAR AND A COMPACTION ARE NOT PASSTHROUGH. Each reaches this daemon as
+// several partial records — for a compaction, a start status, a boundary
+// carrying token counts, and a summary line the vendor types as an ordinary
+// user message — arriving on both planes and, in the transcript, timestamped
+// out of order relative to each other. They therefore curate to core.v1
+// ContextCleared / ContextCompacted, which the shim-sidecar COALESCES from
 // those records, rather than passing any single record through. The retired
 // compact_boundary / compact_boundary_line arms were the passthrough shape,
 // and they made every frontend correlate the halves for itself.
+//
+// Those two are the ONLY non-vendor Event payloads that curate to an item, and
+// the only ones a frontend must never have to FIND for itself: the daemon
+// floors every replay at the newest clear or compaction
+// (sessiondrv.Manager.Resync), so one that arrives is always live, and the
+// string-matching a frontend used to do on prompt text has no successor here
+// by design.
 //
 // A mid-backoff SystemLine.ApiError curates to NOTHING: the retrying window
 // (internal/progress) is what covers it, and the legacy api_error passthrough
@@ -262,6 +271,10 @@ func ConversationDeltaFromEvent(workspace string, ev *corev1.Event) (*frontendv1
 			return nil, err
 		}
 		items = vitems
+	case *corev1.Event_ContextCleared:
+		items = contextClearedItems(p.ContextCleared, ev)
+	case *corev1.Event_ContextCompacted:
+		items = contextCompactedItems(p.ContextCompacted, ev)
 	default:
 		// Not a conversation-bearing payload. Task-lifecycle events
 		// (TaskStarted/TaskEnded) deliberately route nothing here — they flow
@@ -316,6 +329,69 @@ func conversationItemsFromVendor(a *anypb.Any, producedAtMs int64, requestID str
 	default:
 		return nil, nil // known data.v1 message, not rendered as conversation
 	}
+}
+
+// --- clear and compact -----------------------------------------------------
+
+// contextClearedItems curates a first-class ContextCleared into its arm,
+// carrying the core.v1 message VERBATIM.
+//
+// A clear has no fields, so everything a frontend needs is the item's envelope:
+// WHICH conversation position it lands at (the uuid, for reconciliation) and
+// WHEN (ts_ms, for the bubble). The message itself is still passed rather than
+// re-modeled — a frontend-shaped copy of an empty message would be a second
+// shape to keep in step with the first for no gain.
+func contextClearedItems(cc *corev1.ContextCleared, ev *corev1.Event) []*frontendv1.ConversationItem {
+	if cc == nil {
+		return nil
+	}
+	return []*frontendv1.ConversationItem{{
+		Uuid: clearOrCompactUUID(ev, "clear"), TsMs: ev.GetProducedAtMs(), RequestId: ev.GetRequestId(),
+		Item: &frontendv1.ConversationItem_ContextCleared{ContextCleared: cc},
+	}}
+}
+
+// contextCompactedItems curates a first-class ContextCompacted into its arm,
+// carrying the core.v1 message VERBATIM.
+//
+// The message reaching here is ALREADY the coalesced account: the shim-sidecar
+// is the sole producer and merges the vendor's start status, boundary counts
+// and separately-written summary line into one fact before it is ever an event.
+// So there is nothing left for this layer to correlate, and re-typing the
+// result into a webapp-shaped struct would only be a chance to drift from the
+// fact the daemon already resolved. That is the whole reason the retired
+// compact_boundary / compact_boundary_line arms are gone.
+func contextCompactedItems(cc *corev1.ContextCompacted, ev *corev1.Event) []*frontendv1.ConversationItem {
+	if cc == nil {
+		return nil
+	}
+	return []*frontendv1.ConversationItem{{
+		Uuid: clearOrCompactUUID(ev, "compact"), TsMs: ev.GetProducedAtMs(), RequestId: ev.GetRequestId(),
+		Item: &frontendv1.ConversationItem_ContextCompacted{ContextCompacted: cc},
+	}}
+}
+
+// clearOrCompactUUID is a clear's or a compaction's reconciliation identity.
+//
+// It is the event's DEDUP KEY (`clear:<uuid>` / `compact:<uuid>`) — the very
+// key the store merges twins on, so every replay yields one item a frontend
+// replaces in place rather than accumulating. No other field on the envelope is
+// stable across replays of the same event.
+//
+// An event that carries no dedup key was never deduped, and its identity is
+// then the position the store assigned it: seq is authoritative, gapless and
+// per-session, so the derived id is just as stable across replays. kind keeps
+// the derived form ("clear" / "compact") honest about which of the two it names,
+// matching the producer's own prefixes so the two id spaces never overlap.
+//
+// Deriving it rather than dropping the item is what keeps the event RENDERABLE:
+// an item with no uuid would leave a frontend discarding its history at a floor
+// it can show no reason for.
+func clearOrCompactUUID(ev *corev1.Event, kind string) string {
+	if key := ev.GetDedupKey(); key != "" {
+		return key
+	}
+	return fmt.Sprintf("%s:%s:%d", kind, ev.GetSessionId(), ev.GetSeq())
 }
 
 // --- transcript (file) plane -----------------------------------------------
