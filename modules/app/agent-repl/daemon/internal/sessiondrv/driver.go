@@ -534,9 +534,11 @@ func (m *Manager) Hibernate(workspace string) error {
 	return m.hibernate(workspace, "")
 }
 
-// HibernateSession suspends workspace's live session ONLY when it is sessionID,
-// returning ErrNotLiveSession (having stopped nothing) when a different session
-// drives the workspace.
+// HibernateSession suspends sessionID's shim without disturbing any different
+// session currently driving workspace. If the matching driver is already
+// evicted after a terminal client error, or a replacement now owns workspace,
+// the session-scoped stop still reaches the spawner directly: process handles
+// are keyed by session id and must not become unreachable through byWS churn.
 //
 // Several registry records can share one cwd — a stale duplicate, a superseded
 // resume, an orphan awaiting reap — so "stop THIS record's shim" is not the same
@@ -545,7 +547,25 @@ func (m *Manager) Hibernate(workspace string) error {
 // meant reaping an orphan killed the healthy session created 175ms earlier for
 // the same workspace, leaving the user with nothing to drive.
 func (m *Manager) HibernateSession(workspace, sessionID string) error {
-	return m.hibernate(workspace, sessionID)
+	m.mu.Lock()
+	d, ok := m.byWS[workspace]
+	if ok && d.sessionID != sessionID {
+		live := d.sessionID
+		m.mu.Unlock()
+		m.logf("sessiondrv: session-scoped hibernate ws=%q requested=%s live=%s; preserving live driver and stopping requested shim only",
+			workspace, sessionID, live)
+		return m.cfg.Spawner.StopShim(sessionID)
+	}
+	if ok {
+		delete(m.byWS, workspace)
+	}
+	m.mu.Unlock()
+	if ok {
+		d.cancel()
+	}
+	m.logf("sessiondrv: hibernating session-scoped ws=%q session=%s driver_present=%v (SIGTERM child shim)",
+		workspace, sessionID, ok)
+	return m.cfg.Spawner.StopShim(sessionID)
 }
 
 // hibernate is the shared teardown. An empty wantSession means "whichever
@@ -710,12 +730,15 @@ func (m *Manager) bringUp(workspace string) (*driven, error) {
 	m.mu.Unlock()
 
 	go func() {
-		if err := client.Run(runCtx); err != nil {
-			m.logf("sessiondrv: session %s driver ended: %v", sessionID, err)
+		runErr := client.Run(runCtx)
+		if runErr != nil {
+			m.logf("sessiondrv: session %s driver ended: %v", sessionID, runErr)
 		}
 		m.mu.Lock()
+		wasCurrent := false
 		if cur, ok := m.byWS[workspace]; ok && cur == d {
 			delete(m.byWS, workspace)
+			wasCurrent = true
 		}
 		// The session is gone, so its held prompts can never be delivered.
 		// Empty the queue and PUSH the empty view: a frontend that keeps
@@ -729,6 +752,19 @@ func (m *Manager) bringUp(workspace string) (*driven, error) {
 				sessionID, len(dropped), workspace)
 		}
 		m.publish(sessionID, view, nil)
+		// A terminal protocol error ends Run while this driver is still current,
+		// without going through Hibernate. That used to orphan the spawned shim
+		// and its stop handle after the byWS eviction above. A non-current Run
+		// exit was initiated by a teardown that already owns StopShim.
+		if wasCurrent {
+			if stopErr := m.cfg.Spawner.StopShim(sessionID); stopErr != nil {
+				m.logf("sessiondrv: session %s unexpected driver-exit shim stop FAILED ws=%q run_err=%v: %v",
+					sessionID, workspace, runErr, stopErr)
+			} else {
+				m.logf("sessiondrv: session %s unexpected driver-exit shim stop complete ws=%q run_err=%v",
+					sessionID, workspace, runErr)
+			}
+		}
 	}()
 	m.logf("sessiondrv: brought up session=%s ws=%q (reattach-first)", sessionID, workspace)
 	return d, nil

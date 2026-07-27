@@ -681,16 +681,7 @@ func TestAccountSwitchPushesSessionViewWithNewConfigDir(t *testing.T) {
 	// client connected AFTER create so it only observes the switch's push.
 	h := newHarnessWith(t, Config{Accounts: accountRoster()})
 	id := createSession(t, h, `{"cwd":"/w"}`)
-	feSrv := httptest.NewServer(http.HandlerFunc(h.fe.ServeWS))
-	defer feSrv.Close()
-	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(feSrv.URL, "http"), nil)
-	if err != nil {
-		t.Fatalf("ws dial: %v", err)
-	}
-	defer conn.Close()
-	if snap := readServerWSFrame(t, conn); snap.GetSnapshot() == nil {
-		t.Fatalf("first frame was not the connect snapshot: %v", snap)
-	}
+	conn := connectFrontendObserver(t, h)
 
 	// Act — the switch pushes the updated SessionView synchronously before the
 	// 202 response returns.
@@ -701,22 +692,9 @@ func TestAccountSwitchPushesSessionViewWithNewConfigDir(t *testing.T) {
 	}
 
 	// Assert — a SessionView carrying the switched config_dir reaches the client.
-	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-	for {
-		_, data, err := conn.ReadMessage()
-		if err != nil {
-			t.Fatalf("did not receive the switched SessionView: %v", err)
-		}
-		frame := &frontendv1.FrontendFrame{}
-		if err := protojson.Unmarshal(data, frame); err != nil {
-			t.Fatalf("unmarshal frame: %v", err)
-		}
-		if v := frame.GetSessionView(); v != nil && v.GetSessionId() == id {
-			if v.GetConfigDir() != "/cfg-work" {
-				t.Fatalf("pushed SessionView config_dir = %q, want /cfg-work", v.GetConfigDir())
-			}
-			return
-		}
+	view := readPushedSessionView(t, conn, id)
+	if view.GetConfigDir() != "/cfg-work" {
+		t.Fatalf("pushed SessionView config_dir = %q, want /cfg-work", view.GetConfigDir())
 	}
 }
 
@@ -735,6 +713,34 @@ func readServerWSFrame(t *testing.T, conn *websocket.Conn) *frontendv1.FrontendF
 	return frame
 }
 
+// connectFrontendObserver attaches an unscoped observer and consumes its
+// mandatory snapshot, leaving the connection positioned at the next live push.
+func connectFrontendObserver(t *testing.T, h *harness) *websocket.Conn {
+	t.Helper()
+	feSrv := httptest.NewServer(http.HandlerFunc(h.fe.ServeWS))
+	t.Cleanup(feSrv.Close)
+	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(feSrv.URL, "http"), nil)
+	if err != nil {
+		t.Fatalf("ws dial: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	if snap := readServerWSFrame(t, conn); snap.GetSnapshot() == nil {
+		t.Fatalf("first frame was not the connect snapshot: %v", snap)
+	}
+	return conn
+}
+
+// readPushedSessionView reads until SESSIONID's live SessionView arrives.
+func readPushedSessionView(t *testing.T, conn *websocket.Conn, sessionID string) *frontendv1.SessionView {
+	t.Helper()
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	for {
+		if view := readServerWSFrame(t, conn).GetSessionView(); view != nil && view.GetSessionId() == sessionID {
+			return view
+		}
+	}
+}
+
 // --- Delete (S7: the DELETE /sessions/{id} HTTP route was removed; the
 // deleteSession UDS command drives s.DeleteSession, tested directly here) -----
 
@@ -750,6 +756,108 @@ func TestDeleteSessionMarksRecordTerminal(t *testing.T) {
 	rec, _ := h.reg.Get(id)
 	if !rec.Terminal || rec.DeathReason != "delete session" {
 		t.Errorf("record = %+v, want terminal with the delete death reason", rec)
+	}
+}
+
+func TestDeleteSessionRepushesAnAlreadyTerminalRecord(t *testing.T) {
+	// Arrange: a superseded record whose stale client still believes it is live.
+	h := newHarness(t)
+	rec := registry.Record{
+		SessionID: "s_old", CWD: "/w", ClaudeSessionID: "vendor-1",
+		Terminal: true, DeathReason: errclass.DeathReasonSuperseded,
+	}
+	if err := h.reg.Put(rec); err != nil {
+		t.Fatalf("registry Put: %v", err)
+	}
+	conn := connectFrontendObserver(t, h)
+
+	// Act.
+	if err := h.srv.DeleteSession(rec.SessionID); err != nil {
+		t.Fatalf("DeleteSession: %v", err)
+	}
+
+	// Assert: idempotence preserves the first death reason while repairing the
+	// client roster and retrying the exact evicted session's process handle.
+	view := readPushedSessionView(t, conn, rec.SessionID)
+	if !view.GetTerminal() || view.GetDeath().GetErrorType() != string(errclass.TypeSessionSuperseded) {
+		t.Fatalf("pushed view = %+v, want terminal superseded", view)
+	}
+	got, _ := h.reg.Get(rec.SessionID)
+	if got.DeathReason != errclass.DeathReasonSuperseded {
+		t.Fatalf("death reason = %q, want first reason preserved", got.DeathReason)
+	}
+	if !slices.Contains(h.spawner.stoppedIDs(), rec.SessionID) {
+		t.Fatalf("stopped = %v, want %s", h.spawner.stoppedIDs(), rec.SessionID)
+	}
+}
+
+func TestCreateSessionPushesSupersededPredecessorTerminal(t *testing.T) {
+	// Arrange: an older record owns the transcript; the observer stores its
+	// non-terminal snapshot before a newer resume supersedes it.
+	h := newHarness(t)
+	cfg := t.TempDir()
+	writeTranscript(t, cfg, "vendor-1")
+	old := registry.Record{
+		SessionID: "s_old", CWD: "/w", ConfigDir: cfg,
+		ClaudeSessionID: "vendor-1", CreatedAt: "2000-01-01T00:00:00Z",
+	}
+	if err := h.reg.Put(old); err != nil {
+		t.Fatalf("registry Put: %v", err)
+	}
+	conn := connectFrontendObserver(t, h)
+
+	// Act.
+	if _, err := h.srv.CreateSession(context.Background(), CreateOpts{
+		CWD: "/w", ConfigDir: cfg, Resume: "vendor-1",
+	}); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	// Assert: the predecessor's transition lands immediately instead of waiting
+	// for an idempotent delete to repair it.
+	view := readPushedSessionView(t, conn, old.SessionID)
+	if !view.GetTerminal() || view.GetDeath().GetErrorType() != string(errclass.TypeSessionSuperseded) {
+		t.Fatalf("pushed predecessor = %+v, want terminal superseded", view)
+	}
+}
+
+func TestFreshCreateSupersedesEveryLiveRecordForItsWorkspace(t *testing.T) {
+	// Arrange: a daemon restart left a non-terminal predecessor in the durable
+	// registry, but no driver is currently attached to it.
+	h := newHarness(t)
+	old := registry.Record{
+		SessionID: "s_old", CWD: "/w", CreatedAt: "2000-01-01T00:00:00Z",
+	}
+	if err := h.reg.Put(old); err != nil {
+		t.Fatalf("registry Put: %v", err)
+	}
+	conn := connectFrontendObserver(t, h)
+
+	// Act: even a fresh conversation must replace the cwd owner; otherwise
+	// registry lookup and driver routing can select different sessions.
+	newID, err := h.srv.CreateSession(context.Background(), CreateOpts{
+		CWD: "/w", Fake: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	// Assert.
+	view := readPushedSessionView(t, conn, old.SessionID)
+	if !view.GetTerminal() || view.GetDeath().GetErrorType() != string(errclass.TypeSessionSuperseded) {
+		t.Fatalf("pushed predecessor = %+v, want terminal superseded", view)
+	}
+	var live []string
+	for _, rec := range h.reg.All() {
+		if rec.CWD == "/w" && !rec.Terminal {
+			live = append(live, rec.SessionID)
+		}
+	}
+	if !slices.Equal(live, []string{newID}) {
+		t.Fatalf("live records for /w = %v, want [%s]", live, newID)
+	}
+	if !slices.Contains(h.spawner.stoppedIDs(), old.SessionID) {
+		t.Fatalf("stopped = %v, want stale shim %s stopped", h.spawner.stoppedIDs(), old.SessionID)
 	}
 }
 
