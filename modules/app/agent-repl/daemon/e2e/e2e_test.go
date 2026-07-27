@@ -22,6 +22,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -140,6 +141,56 @@ type stubLifecycle struct{}
 func (stubLifecycle) Close(context.Context, string) error { return nil }
 func (stubLifecycle) Open(context.Context, string) error  { return nil }
 
+// emptyWorkspaceCreation is the explicit creation seam for E2E flows that do
+// not exercise workspace creation. It is deliberately strict: a create,
+// materialization acknowledgement, or host-action completion received by this
+// harness fails loudly rather than pretending the daemon performed it. The
+// non-nil typed subscriptions preserve WireAgentShim's production invariant
+// without touching disk or another process.
+type emptyWorkspaceCreation struct {
+	available chan *frontendv1.WorkspaceAvailable
+	actions   chan *frontendv1.HostAction
+	closeOnce sync.Once
+}
+
+func newEmptyWorkspaceCreation() *emptyWorkspaceCreation {
+	return &emptyWorkspaceCreation{
+		available: make(chan *frontendv1.WorkspaceAvailable),
+		actions:   make(chan *frontendv1.HostAction),
+	}
+}
+
+func (e *emptyWorkspaceCreation) CreateWorkspace(context.Context, string, *frontendv1.CreateWorkspaceCmd) error {
+	return fmt.Errorf("e2e: workspace creation is not exercised by this harness")
+}
+
+func (e *emptyWorkspaceCreation) MarkWorkspaceMaterialized(context.Context, string) error {
+	return fmt.Errorf("e2e: workspace materialization is not exercised by this harness")
+}
+
+func (e *emptyWorkspaceCreation) CompleteHostAction(context.Context, string, bool, string) error {
+	return fmt.Errorf("e2e: host actions are not exercised by this harness")
+}
+
+func (e *emptyWorkspaceCreation) SnapshotHostWork() server.WorkspaceHostWorkSnapshot {
+	return server.WorkspaceHostWorkSnapshot{}
+}
+
+func (e *emptyWorkspaceCreation) SubscribeWorkspaceAvailable() (<-chan *frontendv1.WorkspaceAvailable, func()) {
+	return e.available, e.close
+}
+
+func (e *emptyWorkspaceCreation) SubscribeHostActions() (<-chan *frontendv1.HostAction, func()) {
+	return e.actions, e.close
+}
+
+func (e *emptyWorkspaceCreation) close() {
+	e.closeOnce.Do(func() {
+		close(e.available)
+		close(e.actions)
+	})
+}
+
 type e2eHarness struct {
 	ts *httptest.Server
 }
@@ -228,16 +279,18 @@ func newUDSHarness(t *testing.T) *e2eHarness {
 	t.Cleanup(driver.Close)
 
 	binding := &server.SessionCommandBinding{Logf: t.Logf}
+	workspaceCreation := newEmptyWorkspaceCreation()
 	agentShim, err := server.WireAgentShim(server.AgentShimConfig{
-		SSM:             ssmMgr,
-		Progress:        progress.New(progress.Options{Logf: t.Logf}),
-		Prompts:         driver,
-		MergeDirs:       stubMergeDirs{},
-		Lifecycle:       stubLifecycle{},
-		Resyncer:        driver,
-		Catalogs:        driver,
-		SessionCommands: binding,
-		Logf:            t.Logf,
+		SSM:               ssmMgr,
+		Progress:          progress.New(progress.Options{Logf: t.Logf}),
+		Prompts:           driver,
+		MergeDirs:         stubMergeDirs{},
+		Lifecycle:         stubLifecycle{},
+		Resyncer:          driver,
+		Catalogs:          driver,
+		SessionCommands:   binding,
+		WorkspaceCreation: workspaceCreation,
+		Logf:              t.Logf,
 	})
 	if err != nil {
 		t.Fatalf("WireAgentShim: %v", err)
