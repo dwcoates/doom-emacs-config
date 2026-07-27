@@ -553,7 +553,9 @@ FIELD is unknown — no queuing, no silent drop.  Returns the generated
 ;; it and, on failure, surfaces loudly (log + echo area) per
 ;; No-Silent-Fallbacks — a rejected command is never dropped silently.
 
-(defun agent-repl--uds-track-command (request-id field workspace &optional on-failure on-success)
+(defun agent-repl--uds-track-command (request-id field workspace
+                                                 &optional on-failure on-success
+                                                 on-challenge)
   "Record REQUEST-ID as an in-flight FIELD command for WORKSPACE.
 Pends until its `CommandAck' arrives (see
 `agent-repl--uds-handle-command-ack').  ON-FAILURE, when non-nil, is a
@@ -561,10 +563,16 @@ function of one argument (the ack error string) run if the ack reports
 failure, IN ADDITION to the loud log + echo-area surfacing.  ON-SUCCESS,
 when non-nil, is a thunk (no args) run when the ack reports success — the
 synchronous createSession bridge uses it to unblock its await loop.
+ON-CHALLENGE, when non-nil, is a function of one argument (the ack's
+`:interruptConfirmRequired' payload plist) run when the ack carries the
+interrupt confirmation CHALLENGE — NOT a failure: the command was
+understood and deliberately not performed, so the challenge branch
+replaces the failure surfacing rather than adding to it.
 Returns REQUEST-ID."
   (puthash request-id
            (list :field field :workspace workspace
-                 :on-failure on-failure :on-success on-success)
+                 :on-failure on-failure :on-success on-success
+                 :on-challenge on-challenge)
            agent-repl--uds-pending-commands)
   (agent-repl--log workspace
                    "uds-track-command: tracking request-id=%s field=%s"
@@ -714,6 +722,15 @@ records only whether raw error text was present, so command contents never
 leak through a daemon-provided error string.
 
   ok=t   -> the command was accepted; log and drop the pending entry.
+  ok=nil + `:interruptConfirmRequired'
+         -> the interrupt confirmation CHALLENGE, not a failure: the
+            command was understood and deliberately not performed.  Runs
+            the tracked `:on-challenge' callback with the challenge
+            payload INSTEAD of the failure surfacing, so a question to
+            the user never reads as a command error.  A challenge with no
+            tracked handler is still surfaced loudly (it means an
+            interrupt went out untracked, and the daemon is waiting on a
+            confirmation nobody will send).
   ok=nil -> the command was REJECTED; loud-log AND surface an echo-area
             message (No-Silent-Fallbacks — never a silent drop), run any
             tracked `:on-failure' callback, and drop the entry.
@@ -726,6 +743,7 @@ the `:ok' flag."
          (err (plist-get ack :error))
          (failure (when-let ((item (plist-get ack :failure)))
                     (agent-repl-failure-from-wire item)))
+         (challenge (plist-get ack :interruptConfirmRequired))
          (pending (and request-id
                        (gethash request-id agent-repl--uds-pending-commands)))
          (workspace (if pending
@@ -763,6 +781,26 @@ the `:ok' flag."
            (agent-repl--log workspace
                             "uds-command-ack: on-success callback ERROR request-id=%s field=%s error-type=%s"
                             request-id field (car cb-err))))))
+     (challenge
+      (agent-repl--log workspace
+                       "uds-command-ack: CHALLENGE request-id=%s field=%s live-tasks=%S handled=%s"
+                       request-id field (plist-get challenge :liveTasks)
+                       (if (plist-get pending :on-challenge) "yes" "no"))
+      (if-let ((on-challenge (plist-get pending :on-challenge)))
+          (condition-case cb-err
+              (progn
+                (funcall on-challenge challenge)
+                (agent-repl--log workspace
+                                 "uds-command-ack: completed on-challenge request-id=%s field=%s"
+                                 request-id field))
+            (error
+             (agent-repl--log workspace
+                              "uds-command-ack: on-challenge callback ERROR request-id=%s field=%s error-type=%s"
+                              request-id field (car cb-err))))
+        ;; No handler: the daemon deliberately did not act and nobody will
+        ;; answer it.  Never a silent drop.
+        (message "agent-repl: %s command needs a confirmation this end cannot ask for"
+                 (or field "frontend"))))
      (t
       (agent-repl--log workspace
                        "uds-command-ack: REJECTED request-id=%s field=%s error-present=%s — surfacing"

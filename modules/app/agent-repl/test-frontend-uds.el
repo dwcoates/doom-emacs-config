@@ -796,6 +796,83 @@ workspace open."
         ;; Assert
         (should (equal cb-arg "boom"))))))
 
+(ert-deftest agent-repl-test-uds-command-ack-challenge-runs-on-challenge ()
+  "A challenge ack routes its payload to the tracked :on-challenge callback."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let (cb-arg)
+      (agent-repl--uds-track-command
+       "req-1" "interrupt" "ws1" nil nil
+       (lambda (challenge) (setq cb-arg challenge)))
+      ;; Act
+      (agent-repl--uds-handle-command-ack
+       '(:requestId "req-1" :interruptConfirmRequired (:liveTasks "3")))
+      ;; Assert
+      (should (equal cb-arg '(:liveTasks "3"))))))
+
+(ert-deftest agent-repl-test-uds-command-ack-challenge-skips-the-failure-path ()
+  "A challenge is not a failure: no echo, and :on-failure never runs."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let (echoed failed)
+      (agent-repl--uds-track-command
+       "req-1" "interrupt" "ws1"
+       (lambda (_err) (setq failed t)) nil #'ignore)
+      (cl-letf (((symbol-function 'message)
+                 (lambda (fmt &rest args) (setq echoed (apply #'format fmt args)))))
+        ;; Act
+        (agent-repl--uds-handle-command-ack
+         '(:requestId "req-1" :interruptConfirmRequired (:liveTasks "3")))
+        ;; Assert
+        (should-not failed)
+        (should-not echoed)))))
+
+(ert-deftest agent-repl-test-uds-command-ack-unhandled-challenge-surfaces ()
+  "A challenge nobody can answer surfaces loudly rather than dying quietly."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let (echoed)
+      (agent-repl--uds-track-command "req-1" "interrupt" "ws1")
+      (cl-letf (((symbol-function 'message)
+                 (lambda (fmt &rest args) (setq echoed (apply #'format fmt args)))))
+        ;; Act
+        (agent-repl--uds-handle-command-ack
+         '(:requestId "req-1" :interruptConfirmRequired (:liveTasks "3")))
+        ;; Assert
+        (should (string-match-p "confirmation" echoed))))))
+
+(ert-deftest agent-repl-test-uds-command-ack-ok-never-runs-on-challenge ()
+  "An accepted ack runs :on-success only; the challenge handler stays idle."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let (challenged succeeded)
+      (agent-repl--uds-track-command
+       "req-1" "interrupt" "ws1" nil
+       (lambda () (setq succeeded t))
+       (lambda (_challenge) (setq challenged t)))
+      ;; Act
+      (agent-repl--uds-handle-command-ack '(:requestId "req-1" :ok t))
+      ;; Assert
+      (should succeeded)
+      (should-not challenged))))
+
+(ert-deftest agent-repl-test-uds-command-ack-error-never-runs-on-challenge ()
+  "A genuine error ack keeps the failure path and never asks a question."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let (challenged failed)
+      (agent-repl--uds-track-command
+       "req-1" "interrupt" "ws1"
+       (lambda (err) (setq failed err)) nil
+       (lambda (_challenge) (setq challenged t)))
+      (cl-letf (((symbol-function 'message) (lambda (&rest _) nil)))
+        ;; Act
+        (agent-repl--uds-handle-command-ack
+         '(:requestId "req-1" :error "boom"))
+        ;; Assert
+        (should (equal failed "boom"))
+        (should-not challenged)))))
+
 (ert-deftest agent-repl-test-uds-command-ack-untracked-does-not-surface ()
   "An ack for an untracked request-id logs only — no echo-area surfacing."
   ;; Arrange

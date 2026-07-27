@@ -57,7 +57,7 @@
 ;; The UDS command channel + pushed-frame SessionView store (the daemon plane
 ;; that replaced the GET /sessions poller); resolved at call time.
 (declare-function agent-repl--uds-send-command "frontend-uds" (field payload &optional workspace process))
-(declare-function agent-repl--uds-track-command "frontend-uds" (request-id field workspace &optional on-failure on-success))
+(declare-function agent-repl--uds-track-command "frontend-uds" (request-id field workspace &optional on-failure on-success on-challenge))
 (declare-function agent-repl--uds-untrack-command "frontend-uds" (request-id workspace reason))
 (declare-function agent-repl--uds-track-health-response
                   "frontend-uds"
@@ -975,16 +975,67 @@ interrupt-confirmation challenge) and NO retract id, so the retract half
 of the old `C-c C-k' undo is gone (it was already a daemon no-op
 post-cutover — the daemon's HTTP interrupt always reported
 retracted=false).  Always returns t: the interrupt is dispatched, never
-`retracted'."
+`retracted'.
+
+The first send always ASKS (confirm_agents unset).  When no turn is live
+but subagent tasks are, the daemon answers with the
+`interrupt_confirm_required' CHALLENGE instead of interrupting, and
+`agent-repl--gui-interrupt-challenge' puts the question to the user; a
+yes resends the same command with `confirmAgents' set.  So the return
+value reports DISPATCH, never the eventual interrupt outcome — the
+confirmation round trip completes long after this returns."
   (let ((id (agent-repl--ws-get ws :frontend-session-id))
         (key (agent-repl--frontend-ws-command-key ws)))
     ;; nil payload -> the daemon reads InterruptCmd{} (confirm_agents=false),
     ;; a plain stop of the live turn.
     (let ((req (agent-repl--uds-send-command "interrupt" nil key)))
-      (agent-repl--uds-track-command req "interrupt" ws)
+      (agent-repl--uds-track-command
+       req "interrupt" ws nil nil
+       (lambda (challenge) (agent-repl--gui-interrupt-challenge ws key challenge)))
       (agent-repl--log ws "interrupt[gui]: ws=%s session=%s kind=%s (uds interrupt)"
                        ws id kind)
       t)))
+
+(defun agent-repl--gui-interrupt-live-task-count (challenge)
+  "Read the live subagent count off an `InterruptConfirmRequired' CHALLENGE.
+protojson renders int64 as a STRING, so `liveTasks' arrives as \"3\" from
+the daemon and as 3 from a hand-built plist; both are accepted.  Anything
+else reads as 0 — an unknown count still gets a question, just a
+countless one, rather than a fabricated number."
+  (let ((raw (plist-get challenge :liveTasks)))
+    (cond ((integerp raw) raw)
+          ((and (stringp raw) (string-match-p "\\`[0-9]+\\'" raw))
+           (string-to-number raw))
+          (t 0))))
+
+(defun agent-repl--gui-interrupt-challenge (ws key challenge)
+  "Answer the daemon's interrupt confirmation CHALLENGE for WS.
+CHALLENGE is the ack's `InterruptConfirmRequired' payload; KEY is the
+workspace wire key the original command went out on.  Puts the stakes to
+the user in the minibuffer and, on a yes, RESENDS the interrupt with
+`confirmAgents' set — the only thing that makes the daemon act.  On a no
+nothing further goes out; the decline is logged, since a swallowed
+question is indistinguishable from a lost command.
+
+The resend is tracked WITHOUT a challenge handler: a confirmed interrupt
+that is challenged again is a daemon-side contradiction, not something to
+re-ask, and re-arming here would loop the prompt."
+  (let* ((live (agent-repl--gui-interrupt-live-task-count challenge))
+         (question (if (> live 0)
+                       (format "Interrupt %d running subagent%s? "
+                               live (if (= live 1) "" "s"))
+                     "Interrupt the running subagents? ")))
+    (agent-repl--log ws "interrupt[gui]: CHALLENGE ws=%s live-tasks=%d — asking" ws live)
+    (if (y-or-n-p question)
+        (let ((req (agent-repl--uds-send-command
+                    "interrupt" (list :confirmAgents t) key)))
+          (agent-repl--uds-track-command req "interrupt" ws)
+          (agent-repl--log ws "interrupt[gui]: CONFIRMED ws=%s live-tasks=%d request-id=%s"
+                           ws live req)
+          t)
+      (agent-repl--log ws "interrupt[gui]: DECLINED ws=%s live-tasks=%d — nothing resent"
+                       ws live)
+      nil)))
 
 (defun agent-repl--gui-running-p (ws)
   "The gui frontend's liveness capability (registry `:running-p-fn').
