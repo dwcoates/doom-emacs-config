@@ -1,18 +1,18 @@
 // Single-session enforcement for a workspace, and single-writer
 // enforcement for a resumed transcript.
 //
-// A transcript JSONL is an append-only file with exactly one legitimate
-// author: the CLI that owns the conversation. Nothing structurally
-// stopped a second session from resuming an id an older session was
-// still live on, and the result is two CLIs appending to one file.
+// Driver routing is keyed by cwd, so two non-terminal records for one cwd make
+// the newest create appear live in the pushed roster while Ensure can retain
+// the predecessor's driver. A transcript JSONL also has exactly one legitimate
+// author: the CLI that owns the conversation.
 //
 // That is not a cosmetic overlap: each session's model reconciler once
 // tail-read that shared transcript and treated whatever it found as
 // truth, so two writers made the two mirrors flip against each other.
 // The conflict is removed at its source rather than tolerated
-// downstream: a resume takes sole ownership of its transcript, and any
-// older session still holding it is stood down. The newest resume is the
-// one the user just asked for, so it is the one that wins.
+// downstream: every create takes sole ownership of its workspace, a resume
+// additionally takes sole ownership of its transcript, and older holders are
+// stood down. The newest create is the one the user just requested.
 //
 // The workspace itself has the same shape of conflict WITHOUT a resume:
 // the driver runs one session per cwd and the locator resolves a cwd to
@@ -29,7 +29,7 @@
 //
 // After the agent-shim consumption cutover there is no live-session map:
 // the persistent registry is the source of truth for who holds which
-// transcript, and the per-session driver owns the live shim. Supersede
+// workspace/transcript, and the per-session driver owns the live shim. Supersede
 // therefore works entirely off the registry — it marks every non-terminal
 // record contending for the same workspace or transcript terminal, stops
 // its shim, and pushes the terminal SessionView — rather than reaching
@@ -105,14 +105,14 @@ func (s *Server) supersedeCreateConflicts(opts CreateOpts) {
 		})
 		// Stop the OLD session's shim if the driver had brought one up —
 		// session-scoped, so superseding a stale record can never SIGTERM a
-		// newer session that already owns the same cwd. A workspace with no
-		// live driver, or one driven by a different session, is an expected
-		// no-op, not a failure.
+		// newer session that already owns the same cwd.
 		if err := s.driver.HibernateSession(rec.CWD, rec.SessionID); err != nil {
-			s.logf("session %s: supersede shim stop (ws %s): %v (expected when no live shim, or another session drives it)", rec.SessionID, rec.CWD, err)
+			s.logf("session %s: supersede exact shim stop FAILED (ws %s): %v", rec.SessionID, rec.CWD, err)
 		}
 		// Deliver the stand-down to every connected frontend so their rosters
 		// mark this session terminal NOW, not at their next full resync.
 		s.pushSessionView(rec.SessionID)
+		s.logf("session %s: supersede terminal SessionView pushed {ws=%s resume=%s same_workspace=%v same_transcript=%v}",
+			rec.SessionID, rec.CWD, opts.Resume, workspaceConflict, transcriptConflict)
 	}
 }
