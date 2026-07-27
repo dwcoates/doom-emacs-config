@@ -141,16 +141,18 @@ func newHarnessWith(t *testing.T, extra Config) *harness {
 	t.Cleanup(func() { _ = mgr.Close() })
 
 	spawner := &fakeSpawner{}
+	seqStore := NewRegistrySeqStore(reg, logf)
 	driver, err := sessiondrv.New(sessiondrv.Config{
-		Push:            &PushForwarder{Logf: logf},
-		SSM:             mgr,
-		Spawner:         spawner,
-		Locator:         &SessionLocator{Reg: reg},
-		Source:          stubConnSource{},
-		SeqStore:        NewRegistrySeqStore(reg, logf),
-		DaemonVersion:   "test",
-		ProtocolVersion: "1",
-		Logf:            logf,
+		Push:              &PushForwarder{Logf: logf},
+		SSM:               mgr,
+		Spawner:           spawner,
+		Locator:           &SessionLocator{Reg: reg},
+		Source:            stubConnSource{},
+		SeqStore:          seqStore,
+		ClearCompactStore: seqStore,
+		DaemonVersion:     "test",
+		ProtocolVersion:   "1",
+		Logf:              logf,
 	})
 	if err != nil {
 		t.Fatalf("sessiondrv new: %v", err)

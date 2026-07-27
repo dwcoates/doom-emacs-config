@@ -8,6 +8,7 @@ import (
 	datav1 "agentrepl/proto/agentshim/data/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
+	"claude-repld/internal/dlog"
 	"claude-repld/internal/errclass"
 	"claude-repld/internal/frontend"
 
@@ -62,6 +63,32 @@ type ProgressResolver interface {
 	NoteTurnAccepted(workspace, sessionID string)
 }
 
+// ClearCompactStore persists the newest CLEAR-OR-COMPACTION seq per
+// conversation — the frontend REPLAY FLOOR. Satisfied by
+// *server.RegistrySeqStore, the same registry adapter that persists
+// last_seen_seq, because the floor mark is the same kind of fact: a
+// per-conversation seq high-water that must outlive the daemon.
+//
+// It is a store rather than a field on the live driver on purpose. The daemon
+// re-Subscribes each shim from its high-water mark, so a clear or compaction
+// observed before a restart is never re-delivered; an in-memory floor would
+// quietly reset to "nothing seen" on every restart and hand the frontend back
+// the entire conversation that clear or compaction discarded, which is the
+// class of bug the floor exists to end.
+//
+// It deliberately does NOT reach into the shim-store. The store's API is
+// contractually tiny — schema, seq, dedup, fan-out — and the daemon already
+// sees every clear and every compaction as it flows, so tracking the newest one
+// costs an existing registry write and asks the store for nothing.
+type ClearCompactStore interface {
+	// NewestClearOrCompactSeq returns the newest clear-or-compaction seq for the
+	// session's conversation, or 0 when neither has ever been observed on it.
+	NewestClearOrCompactSeq(sessionID string) uint64
+	// SetNewestClearOrCompactSeq records seq as the newest clear or compaction.
+	// Monotonic: an older seq never lowers a conversation's floor.
+	SetNewestClearOrCompactSeq(sessionID string, seq uint64)
+}
+
 // noopProgress is the ProgressResolver a driver built without one falls back
 // to. It exists so the progress feed is OPTIONAL for a test harness that does
 // not care about it, without every feed site growing a nil check.
@@ -91,8 +118,12 @@ type consumer struct {
 	// prog is the progress-footer resolver, fed the same stream as the SSM.
 	// Never nil (noopProgress stands in), so the feed sites stay unconditional.
 	prog ProgressResolver
-	logf func(string, ...any)
-	now  func() int64
+	// floors persists the newest clear-or-compaction seq (the replay floor).
+	// Required: Config validation rejects a Manager built without one, so a
+	// clear or a compaction can never be observed and silently forgotten.
+	floors ClearCompactStore
+	logf   func(string, ...any)
+	now    func() int64
 	// onSessionStarted fires when a SessionStarted event arrives, letting the
 	// driver arm the metaprompt re-fire for a RESUME/COMPACT_CONTINUE session.
 	onSessionStarted func(*corev1.SessionStarted)
@@ -139,7 +170,7 @@ type consumer struct {
 	backfill string
 }
 
-func newConsumer(workspace, sessionID string, push Pusher, applier StateApplier, prog ProgressResolver, logf func(string, ...any), onSessionStarted func(*corev1.SessionStarted), onTurn func(active bool), onBackfill func(state string), onSessionEnded func()) *consumer {
+func newConsumer(workspace, sessionID string, push Pusher, applier StateApplier, prog ProgressResolver, floors ClearCompactStore, logf func(string, ...any), onSessionStarted func(*corev1.SessionStarted), onTurn func(active bool), onBackfill func(state string), onSessionEnded func()) *consumer {
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
@@ -152,6 +183,7 @@ func newConsumer(workspace, sessionID string, push Pusher, applier StateApplier,
 		push:             push,
 		ssm:              applier,
 		prog:             prog,
+		floors:           floors,
 		logf:             logf,
 		now:              func() int64 { return time.Now().UnixMilli() },
 		onSessionStarted: onSessionStarted,
@@ -370,10 +402,38 @@ func (c *consumer) Consume(ev *corev1.Event) {
 			c.reconcileTasks(ev, btc)
 		}
 		c.pushConversation(ev, true)
+	case *corev1.Event_ContextCleared, *corev1.Event_ContextCompacted:
+		// A clear and a compaction each do two things at once: they render as
+		// their own bubble, and they RAISE this conversation's replay floor so no
+		// reconnecting frontend is ever served the history they discarded. The
+		// floor is recorded FIRST — one pushed but not recorded would be drawn
+		// once and then buried under a replay of everything above it.
+		c.noteClearOrCompact(ev)
+		c.pushConversation(ev, true)
 	default:
 		// UnparsedEvent / empty payloads carry no conversation content of their
 		// own; the demux already loud-logged them. Nothing to push.
 	}
+}
+
+// noteClearOrCompact records a clear or a compaction as the conversation's
+// newest replay floor.
+//
+// A seq-less one is NOT recorded: seq 0 means the event never reached the store
+// (producer → store, pre-ingest), and a floor derived from it would be no floor
+// at all. It is loud-logged instead of being taken as "nothing happened", since
+// a clear or compaction the daemon saw but cannot position is a real anomaly.
+func (c *consumer) noteClearOrCompact(ev *corev1.Event) {
+	seq := ev.GetSeq()
+	logf := dlog.Tag(dlog.Logf(c.logf),
+		"session", c.sessionID, "ws", c.workspace, "kind", stateKind(ev),
+		"seq", seq, "dedup_key", ev.GetDedupKey())
+	if seq == 0 {
+		logf("sessiondrv: replay floor NOT raised — this clear or compaction carries no store seq, so it has no position to floor at")
+		return
+	}
+	logf("sessiondrv: replay floor raised to this clear or compaction")
+	c.floors.SetNewestClearOrCompactSeq(c.sessionID, seq)
 }
 
 // reconcileTasks adopts a `BackgroundTasksChanged` snapshot as the
@@ -669,9 +729,15 @@ func (c *consumer) resync(fromSeq uint64) (floor uint64, haveFloor bool) {
 		if ev.GetSeq() < fromSeq {
 			continue
 		}
-		if ev.GetVendor() != nil {
-			c.pushConversation(ev, false)
-		}
+		// INCLUSIVE of fromSeq. When the caller raised it to a clear or a
+		// compaction, that event is the FIRST thing replayed: a frontend that
+		// discards its history at the floor and never receives the clear or the
+		// compaction has nothing to draw and no reason to have discarded.
+		//
+		// Every retained event is offered to the curator, which decides what
+		// carries conversation content. Filtering to vendor payloads here is
+		// what kept the first-class clear and compaction out of every replay.
+		c.pushConversation(ev, false)
 	}
 	// Replay the retained permission items too: they carry no store seq (they
 	// are daemon-composed, not store events), so a pending or resolved
