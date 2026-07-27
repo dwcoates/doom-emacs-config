@@ -159,6 +159,34 @@ func TestIsClearCommand(t *testing.T) {
 	}
 }
 
+func TestIsClearCommandEnvelopeWithoutArgsElement(t *testing.T) {
+	// Arrange: older harness versions write no <command-args> element at all; a
+	// missing element is an empty argument list, not a malformed envelope.
+	msg := &datav1.ApiUserMessage{Content: &datav1.ApiUserMessage_ContentString{
+		ContentString: "<command-name>/clear</command-name>\n<command-message>clear</command-message>",
+	}}
+	// Act
+	got := isClearCommand(msg)
+	// Assert
+	if !got {
+		t.Fatal("an envelope with no <command-args> element was not read as a clear")
+	}
+}
+
+func TestIsClearCommandEnvelopeTagsOutOfOrder(t *testing.T) {
+	// Arrange: the elements are matched by name, so their order on disk is not
+	// part of the contract.
+	msg := &datav1.ApiUserMessage{Content: &datav1.ApiUserMessage_ContentString{
+		ContentString: "<command-args></command-args><command-message>clear</command-message><command-name>/clear</command-name>",
+	}}
+	// Act
+	got := isClearCommand(msg)
+	// Assert
+	if !got {
+		t.Fatal("a reordered command envelope was not read as a clear")
+	}
+}
+
 func TestIsClearCommandBlocksContentIsNeverAClear(t *testing.T) {
 	// Arrange: a blocks-form user message whose single text block says "/clear".
 	msg := &datav1.ApiUserMessage{Content: &datav1.ApiUserMessage_ContentBlocks{
@@ -203,7 +231,8 @@ func TestSessionHandlerClearDedupKeyIsClearColonUUID(t *testing.T) {
 	frames := framesFor(t, userLineJSON("u-clear", clearEnvelope("/clear", "")))
 	// Act
 	ev := findCleared(h.Handle(frames, &Context{SessionID: "s1"}))
-	// Assert: the shim emits the identical key off the same transcript uuid.
+	// Assert: the sidecar is the sole producer, so the key names this line for
+	// this producer alone.
 	if ev.GetDedupKey() != "clear:u-clear" {
 		t.Fatalf("dedup_key = %q, want %q", ev.GetDedupKey(), "clear:u-clear")
 	}
@@ -221,7 +250,7 @@ func TestSessionHandlerBareTextClearEmitsContextCleared(t *testing.T) {
 	}
 }
 
-func TestSessionHandlerClearWithArgumentsEmitsNoCut(t *testing.T) {
+func TestSessionHandlerClearWithArgumentsEmitsNoClear(t *testing.T) {
 	// Arrange
 	h := NewSessionTranscriptHandler(quietLog)
 	frames := framesFor(t, userLineJSON("u-args", clearEnvelope("/clear", "history")))
@@ -229,12 +258,12 @@ func TestSessionHandlerClearWithArgumentsEmitsNoCut(t *testing.T) {
 	evs := h.Handle(frames, &Context{SessionID: "s1"})
 	// Assert
 	if findCleared(evs) != nil {
-		t.Fatal("a /clear carrying arguments was cut; arguments mean it is not a clear")
+		t.Fatal("a /clear carrying arguments cleared the context; arguments mean it is not a clear")
 	}
 }
 
 func TestSessionHandlerClearStillEmitsItsVendorTwin(t *testing.T) {
-	// Arrange: the total-ingestion mandate — the neutral cut never replaces the
+	// Arrange: the total-ingestion mandate — the neutral event never replaces the
 	// vendor record of the line.
 	h := NewSessionTranscriptHandler(quietLog)
 	frames := framesFor(t, userLineJSON("u-clear", clearEnvelope("/clear", "")))
@@ -258,9 +287,21 @@ func TestSessionHandlerClearIsPersistent(t *testing.T) {
 	frames := framesFor(t, userLineJSON("u-clear", clearEnvelope("/clear", "")))
 	// Act
 	ev := findCleared(h.Handle(frames, &Context{SessionID: "s1"}))
-	// Assert: a cut must survive for replay.
+	// Assert: a ContextCleared must survive for replay.
 	if ev.GetClass() != corev1.EventClass_EVENT_CLASS_PERSISTENT {
 		t.Fatalf("class = %v, want PERSISTENT", ev.GetClass())
+	}
+}
+
+func TestSessionHandlerClearIsOnTheFilePlane(t *testing.T) {
+	// Arrange: the sidecar is the SOLE producer, and it only ever reads files.
+	h := NewSessionTranscriptHandler(quietLog)
+	frames := framesFor(t, userLineJSON("u-clear", clearEnvelope("/clear", "")))
+	// Act
+	ev := findCleared(h.Handle(frames, &Context{SessionID: "s1"}))
+	// Assert
+	if ev.GetPlane() != corev1.Plane_PLANE_FILE {
+		t.Fatalf("plane = %v, want PLANE_FILE", ev.GetPlane())
 	}
 }
 
@@ -271,7 +312,7 @@ func TestSessionHandlerClearWithoutUUIDLoudLogsAndCarriesNoKey(t *testing.T) {
 	frames := framesFor(t, userLineJSON("", clearEnvelope("/clear", "")))
 	// Act
 	ev := findCleared(h.Handle(frames, &Context{SessionID: "s1"}))
-	// Assert: the cut is still emitted, keyless and loudly, never under a
+	// Assert: the event is still emitted, keyless and loudly, never under a
 	// fabricated key.
 	if ev == nil {
 		t.Fatal("a uuid-less clear was dropped")
@@ -394,7 +435,7 @@ func TestSessionHandlerCompactBoundaryAtBatchEndStillEmits(t *testing.T) {
 	ev := findCompacted(h.Handle(frames, &Context{SessionID: "s1"}))
 	// Assert
 	if ev == nil {
-		t.Fatal("a summary-less boundary emitted no cut; the compaction still happened")
+		t.Fatal("a summary-less boundary emitted no ContextCompacted; the compaction still happened")
 	}
 }
 
@@ -413,12 +454,14 @@ func TestSessionHandlerMissingSummaryLoudLogs(t *testing.T) {
 
 func TestSessionHandlerCompactPairsByFileOrderNotTimestamp(t *testing.T) {
 	// Arrange: two compactions whose summaries are each stamped ONE MILLISECOND
-	// BEFORE their boundary. A timestamp-ordered assembly pairs them backwards;
-	// file order is the only sequence that pairs them correctly.
+	// BEFORE their boundary — the first pair is the stamp pair recorded in the
+	// real transcript (boundary .654, summary .653). A timestamp-ordered
+	// assembly pairs them backwards; file order is the only sequence that pairs
+	// them correctly.
 	h := NewSessionTranscriptHandler(quietLog)
 	frames := framesFor(t,
-		boundaryLineJSON("b1", "2026-07-07T22:01:31.660Z", "manual", 1, 2, 3),
-		summaryLineJSON("s-1", "b1", "2026-07-07T22:01:31.659Z", "first summary"),
+		boundaryLineJSON("b1", "2026-07-07T18:05:50.654Z", "manual", 1, 2, 3),
+		summaryLineJSON("s-1", "b1", "2026-07-07T18:05:50.653Z", "first summary"),
 		boundaryLineJSON("b2", "2026-07-07T23:05:50.654Z", "auto", 4, 5, 6),
 		summaryLineJSON("s-2", "b2", "2026-07-07T23:05:50.653Z", "second summary"),
 	)
@@ -478,6 +521,36 @@ func TestSessionHandlerCompactIsPersistent(t *testing.T) {
 	}
 }
 
+func TestSessionHandlerCompactIsOnTheFilePlane(t *testing.T) {
+	// Arrange
+	h := NewSessionTranscriptHandler(quietLog)
+	frames := framesFor(t, boundaryLineJSON("b1", "2026-07-07T18:05:50.654Z", "manual", 1, 2, 3))
+	// Act
+	ev := findCompacted(h.Handle(frames, &Context{SessionID: "s1"}))
+	// Assert
+	if ev.GetPlane() != corev1.Plane_PLANE_FILE {
+		t.Fatalf("plane = %v, want PLANE_FILE", ev.GetPlane())
+	}
+}
+
+func TestSessionHandlerCompactBoundaryFollowedBySystemLineHasNoSummary(t *testing.T) {
+	// Arrange: only a user line flagged isCompactSummary is a summary; a system
+	// line following the boundary supplies nothing.
+	h := NewSessionTranscriptHandler(quietLog)
+	frames := framesFor(t,
+		boundaryLineJSON("b1", "2026-07-07T18:05:50.654Z", "auto", 1, 2, 3),
+		boundaryLineJSON("b2", "2026-07-07T18:05:51.000Z", "auto", 4, 5, 6),
+	)
+	// Act
+	evs := h.Handle(frames, &Context{SessionID: "s1"})
+	// Assert
+	for _, e := range evs {
+		if cc := e.GetContextCompacted(); cc != nil && cc.GetSummary() != "" {
+			t.Fatalf("%s summary = %q, want empty", e.GetDedupKey(), cc.GetSummary())
+		}
+	}
+}
+
 func TestSessionHandlerBoundaryWithoutUUIDCarriesNoKey(t *testing.T) {
 	// Arrange
 	var logs []string
@@ -487,22 +560,22 @@ func TestSessionHandlerBoundaryWithoutUUIDCarriesNoKey(t *testing.T) {
 	ev := findCompacted(h.Handle(frames, &Context{SessionID: "s1"}))
 	// Assert
 	if ev == nil || ev.GetDedupKey() != "" {
-		t.Fatalf("want an emitted, keyless cut; got %v", ev)
+		t.Fatalf("want an emitted, keyless ContextCompacted; got %v", ev)
 	}
 }
 
 // --- the summary must never read as a prompt --------------------------------
 
-func TestSessionHandlerSummaryLineEmitsNoContextCut(t *testing.T) {
+func TestSessionHandlerSummaryLineEmitsNoClearOrCompact(t *testing.T) {
 	// Arrange: the summary alone, as the batch's only frame.
 	h := NewSessionTranscriptHandler(quietLog)
 	frames := framesFor(t, summaryLineJSON("s-1", "b1", "2026-07-07T22:01:31.659Z", "the summary text"))
 	// Act
 	evs := h.Handle(frames, &Context{SessionID: "s1"})
-	// Assert: it is the harness's text, never the user's prompt and never a cut
-	// of its own.
+	// Assert: it is the harness's text, never the user's prompt, and it never
+	// clears or compacts anything on its own.
 	if findCleared(evs) != nil || findCompacted(evs) != nil {
-		t.Fatalf("a compaction summary line produced a context cut of its own; got %d events", len(evs))
+		t.Fatalf("a compaction summary line produced a clear or compact of its own; got %d events", len(evs))
 	}
 }
 
@@ -528,7 +601,7 @@ func TestSessionHandlerSummaryLineStillEmitsItsVendorTwin(t *testing.T) {
 	}
 }
 
-func TestSessionHandlerSummarySpelledAsAClearIsNotACut(t *testing.T) {
+func TestSessionHandlerSummarySpelledAsAClearIsNotAClear(t *testing.T) {
 	// Arrange: a summary line whose text happens to be exactly "/clear". The
 	// isCompactSummary flag, not the text, decides what the line is.
 	h := NewSessionTranscriptHandler(quietLog)
@@ -550,7 +623,7 @@ func TestSessionHandlerBoundaryConsumesEachSummaryExactlyOnce(t *testing.T) {
 	)
 	// Act
 	evs := h.Handle(frames, &Context{SessionID: "s1"})
-	// Assert: one boundary, one cut.
+	// Assert: one boundary, one ContextCompacted.
 	if n := countCompacted(evs); n != 1 {
 		t.Fatalf("ContextCompacted count = %d, want 1", n)
 	}
@@ -558,7 +631,7 @@ func TestSessionHandlerBoundaryConsumesEachSummaryExactlyOnce(t *testing.T) {
 
 // --- dedup key spellings ----------------------------------------------------
 
-func TestContextCutDedupKeys(t *testing.T) {
+func TestClearAndCompactDedupKeys(t *testing.T) {
 	tests := []struct {
 		name string
 		got  string
@@ -579,7 +652,7 @@ func TestContextCutDedupKeys(t *testing.T) {
 
 // --- corpus grounding -------------------------------------------------------
 
-func TestSessionHandlerCorpusCompactBoundaryEmitsCut(t *testing.T) {
+func TestSessionHandlerCorpusCompactBoundaryEmitsContextCompacted(t *testing.T) {
 	// Arrange: the real recorded boundary line from the golden corpus.
 	h := NewSessionTranscriptHandler(quietLog)
 	f := frameFor(t, "transcript-lines/system-compact_boundary.jsonl")
