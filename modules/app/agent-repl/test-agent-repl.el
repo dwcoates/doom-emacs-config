@@ -73,6 +73,7 @@
   (load (expand-file-name "test-rename.el" dir) nil t)
   (load (expand-file-name "test-sentinel.el" dir) nil t)
   (load (expand-file-name "test-session.el" dir) nil t)
+  (load (expand-file-name "test-services.el" dir) nil t)
   (load (expand-file-name "test-sidebar.el" dir) nil t)
   (load (expand-file-name "test-sibling-popup.el" dir) nil t)
   (load (expand-file-name "test-status.el" dir) nil t)

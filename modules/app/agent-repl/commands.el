@@ -15,6 +15,7 @@
 (declare-function agent-repl--frontend-dispatch-send "frontends")
 (declare-function agent-repl--frontend-boot-session "frontends")
 (declare-function agent-repl--frontend-ensure-session "frontend-client")
+(declare-function agent-repl--schedule-runtime-startup-bounce "services" ())
 
 ;; Forward declaration: defined in hide-project-dirs.el (loaded after
 ;; commands.el).  The snapshot writer/loader persists and restores this
@@ -1725,7 +1726,8 @@ can call finish without worrying whether a normal finish already ran."
            (skipped (plist-get state :skipped))
            (load-error (or (plist-get state :load-error) 0))
            (saved-mq (plist-get state :saved-merge-queue))
-           (saved-ifm (plist-get state :saved-in-flight-merges)))
+           (saved-ifm (plist-get state :saved-in-flight-merges))
+           (startup (plist-get state :startup)))
       (agent-repl--snapshot-restore-merge-queue saved-mq)
       (agent-repl--snapshot-restore-in-flight-merges saved-ifm)
       ;; persp-mode saved origin's window-config when the loader's first
@@ -1746,11 +1748,13 @@ can call finish without worrying whether a normal finish already ran."
                           loaded skipped load-error
                           (if (and mq-restored (> mq-restored 0))
                               (format ", merge-queue=%d" mq-restored)
-                            ""))))
-    ;; `main' is nuked at load BEGIN (see the close-main call before the
-    ;; first `--snapshot-load-step'), not here — by end-of-load it is
-    ;; already gone.
-    (setq agent-repl--snapshot-load-state nil)))
+                            "")))
+      ;; Clear the recursive-loader state before scheduling the process
+      ;; bounce: its rebind path can synchronously run workspace hooks, and
+      ;; none of them may observe a zombie load still in progress.
+      (setq agent-repl--snapshot-load-state nil)
+      (when startup
+        (agent-repl--schedule-runtime-startup-bounce)))))
 
 (defun agent-repl--snapshot-load-close-main ()
   "Nuke the `main' workspace left over from Doom's startup, if it still exists.
@@ -1969,7 +1973,7 @@ the error-routing `condition-case'."
                                   #'agent-repl--snapshot-load-timeout
                                   ws)))))))))))))))
 
-(defun agent-repl-load-workspace-snapshot (&optional file)
+(defun agent-repl-load-workspace-snapshot (&optional file startup)
   "Load workspaces from FILE (defaults to the configured snapshot path).
 When FILE is nil, reads `agent-repl-workspace-snapshot-file' (or its
 legacy module-dir fallback if the configured file is absent).  For each
@@ -1986,7 +1990,11 @@ progress even if the load barrier never fires; on timeout the loader
 synthesizes a ws-fully-loaded fire with a `:timed-out' marker so all
 hook observers see the same advance event.
 
-Returns to the workspace that was active when the load began."
+Returns to the workspace that was active when the load began.
+
+STARTUP marks the automatic Emacs-start restore.  Its completion schedules
+the coordinated daemon/shim/store/sidecar restart after the recursive loader
+has fully unwound; interactive and archive loads do not restart services."
   (interactive)
   (when agent-repl--snapshot-load-state
     (user-error "agent-repl: a snapshot load is already in progress"))
@@ -2061,7 +2069,8 @@ Returns to the workspace that was active when the load began."
                   :total (length queue)
                   :timeout-timer nil
                   :saved-merge-queue saved-mq
-                  :saved-in-flight-merges saved-ifm))
+                  :saved-in-flight-merges saved-ifm
+                  :startup startup))
       (add-hook 'agent-repl-ws-fully-loaded-functions
                 #'agent-repl--snapshot-load-on-loaded)
       (agent-repl--log nil
@@ -2070,14 +2079,16 @@ Returns to the workspace that was active when the load began."
       (agent-repl--snapshot-load-step))))
 
 (defun agent-repl--load-workspace-snapshot-on-startup ()
-  "Restore the workspace snapshot silently at Emacs startup.
-Does nothing if neither the configured snapshot file nor its legacy
-fallback is present.  Errors are logged but never propagated, so a
-corrupt snapshot can't block startup."
-  (when (file-exists-p (agent-repl--workspace-snapshot-file-for-read))
-    (condition-case err
-        (agent-repl-load-workspace-snapshot)
-      (error (agent-repl--warn nil "snapshot load failed: %S" err)))))
+  "Restore the workspace snapshot, then schedule the runtime startup bounce.
+When no snapshot exists, schedule the bounce immediately.  A corrupt
+snapshot is logged and does not suppress the required bounce."
+  (if (file-exists-p (agent-repl--workspace-snapshot-file-for-read))
+      (condition-case err
+          (agent-repl-load-workspace-snapshot nil t)
+        (error
+         (agent-repl--warn nil "snapshot load failed: %S" err)
+         (agent-repl--schedule-runtime-startup-bounce)))
+    (agent-repl--schedule-runtime-startup-bounce)))
 
 ;;;; Workspace snapshot archive picker
 

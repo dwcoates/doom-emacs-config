@@ -912,6 +912,10 @@ introducing a sibling raw `make-process' site."
     agent-repl--frontend-run-listener-probe
     agent-repl--frontend-artifact-exists-p
     agent-repl--frontend-spawn-daemon
+    agent-repl--launchctl-call
+    agent-repl--shim-service-file-sha256
+    agent-repl--shim-service-write-stamp
+    agent-repl--shim-store-socket-present-p
     agent-repl--frontend-make-webview-buffer
     agent-repl--frontend-webview-selection
     agent-repl--frontend-webview-execute-script
@@ -1226,4 +1230,3 @@ the span was injected rather than typed by the user."
 (defun agent-repl--current-ws-p (ws)
   "Return non-nil when WS is the currently active workspace name."
   (string= ws (agent-repl--ws-current-name)))
-

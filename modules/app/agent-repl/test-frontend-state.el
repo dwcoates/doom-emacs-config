@@ -266,6 +266,35 @@ daemon no longer knows."
     (should-not (agent-repl--frontend-session-view "s_stale"))
     (should (agent-repl--frontend-session-view "s_new"))))
 
+(ert-deftest agent-repl-test-unowned-workspace-state-is-retained-for-startup-safety ()
+  "A pre-restore workspace path is not rendered, but its daemon fact is retained."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl--frontend-workspace-state-views
+           (make-hash-table :test 'equal))
+          (state '(:workspace "/not-restored"
+                   :sessionId "s_busy"
+                   :state "RENDER_STATE_THINKING"
+                   :turnActive t)))
+      (should-not (agent-repl--frontend-apply-workspace-state state))
+      (should (equal (agent-repl--frontend-workspace-state-views-all)
+                     (list state))))))
+
+(ert-deftest agent-repl-test-snapshot-replaces-workspace-state-safety-store ()
+  "A reconnect snapshot drops raw states the daemon no longer reports."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl--frontend-workspace-state-views
+           (make-hash-table :test 'equal)))
+      (puthash "/stale" '(:workspace "/stale")
+               agent-repl--frontend-workspace-state-views)
+      (agent-repl--frontend-apply-snapshot
+       '(:workspaces ((:workspace "/current"
+                       :sessionId "s_1"
+                       :state "RENDER_STATE_IDLE"))))
+      (should-not (gethash "/stale"
+                           agent-repl--frontend-workspace-state-views))
+      (should (gethash "/current"
+                       agent-repl--frontend-workspace-state-views)))))
+
 (ert-deftest agent-repl-test-apply-snapshot-applies-daemon-view ()
   "A snapshot's `:daemon' member routes into the boot-id note (give-up reset)."
   ;; Arrange

@@ -16,11 +16,14 @@
 # build-frontend.sh — build the claude-repl frontend artifacts, but only
 # when they are out of date ("build-if-stale").
 #
-# Three artifacts are managed, each independently:
+# Five artifacts are managed, each independently:
 #   1. shim    — TypeScript, built with `npm run build` ->
 #               agent-shim/claude/shim/dist/main.js
 #   2. webapp  — TypeScript + Vite, built with `npm run build` -> webapp/dist/index.html
 #   3. daemon  — Go, built with `go build` -> daemon/bin/claude-repld
+#   4. store   — Go, built with `go build` -> ~/.cache/agent-repl/bin/shim-store
+#   5. sidecar — Go, built with `go build` ->
+#               ~/.cache/agent-repl/bin/shim-claude-sidecar
 #
 # Staleness rule (per artifact): rebuild iff the artifact is missing, or any
 # source file under its source set is newer (mtime) than the artifact. This is
@@ -61,7 +64,8 @@
 # collection is opportunistic and must never delay a build.
 #
 # Usage:
-#   build-frontend.sh [--force] [--dry-run] [-v] [shim|webapp|daemon|deps|gc ...]
+#   build-frontend.sh [--force] [--dry-run] [-v]
+#                     [shim|webapp|daemon|store|sidecar|deps|gc ...]
 #     --force            rebuild the selected artifacts unconditionally
 #     --dry-run          gc only: report what WOULD be collected, delete nothing
 #     -v, --verbose      gc only: also report each entry KEPT and why
@@ -88,6 +92,10 @@ ROOT="$(cd "$THIS_DIR/.." && pwd)"
 SHIM_DIR="$ROOT/agent-shim/claude/shim"
 WEBAPP_DIR="$ROOT/webapp"
 DAEMON_DIR="$ROOT/daemon"
+STORE_DIR="$ROOT/agent-shim/shim-store"
+SIDECAR_DIR="$ROOT/agent-shim/claude/shim-sidecar"
+WIRE_DIR="$ROOT/agent-shim/wire"
+PROTO_GO_DIR="$ROOT/proto/gen/go"
 
 # Where ROOT sits inside its checkout, so the same relative paths can be
 # applied to OTHER worktrees when building the gc protection set. Derived
@@ -115,6 +123,9 @@ NODE_STORE="${AGENT_REPL_NODE_STORE:-${XDG_CACHE_HOME:-$HOME/.cache}/agent-repl/
 SHIM_ARTIFACT="$SHIM_DIR/dist/main.js"
 WEBAPP_ARTIFACT="$WEBAPP_DIR/dist/index.html"
 DAEMON_ARTIFACT="$DAEMON_DIR/bin/claude-repld"
+CACHE_BIN="$HOME/.cache/agent-repl/bin"
+STORE_ARTIFACT="$CACHE_BIN/shim-store"
+SIDECAR_ARTIFACT="$CACHE_BIN/shim-claude-sidecar"
 
 GRACE_MINS="${AGENT_REPL_NODE_STORE_GRACE_MINS:-60}"
 
@@ -131,7 +142,7 @@ while [ $# -gt 0 ]; do
         --force) FORCE=1 ;;
         --dry-run) DRY_RUN=1 ;;
         -v|--verbose) VERBOSE=1 ;;
-        shim|webapp|daemon|deps|gc) TARGETS+=("$1") ;;
+        shim|webapp|daemon|store|sidecar|deps|gc) TARGETS+=("$1") ;;
         -h|--help)
             sed -n '2,60p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
             exit 0
@@ -455,6 +466,42 @@ build_daemon() {
     echo "[build-frontend] daemon: done"
 }
 
+load_service_sources() {
+    # Both services compile against repo-local proto + wire modules.  Their
+    # generated/source files are real prerequisites even though they live
+    # outside the service module, so a proto or wire edit must stale the
+    # installed launchd binary.
+    local dir="$1" source_dir f
+    SOURCES=()
+    for source_dir in "$dir" "$WIRE_DIR" "$PROTO_GO_DIR"; do
+        if [ ! -d "$source_dir" ]; then
+            echo "build-frontend.sh: required service source directory missing: $source_dir" >&2
+            exit 1
+        fi
+    done
+    while IFS= read -r -d '' f; do
+        SOURCES+=("$f")
+    done < <(find "$dir" "$WIRE_DIR" "$PROTO_GO_DIR" -type f \
+             \( -name '*.go' -o -name 'go.mod' -o -name 'go.sum' \) -print0)
+}
+
+build_service() {
+    # NAME MODULE-DIR ARTIFACT — shared build-if-stale path for the two Go
+    # launchd services.  Keeping one helper prevents their source sets and
+    # install semantics from drifting.
+    local name="$1" dir="$2" artifact="$3"
+    load_service_sources "$dir"
+    if ! is_stale "$artifact" ${SOURCES[@]+"${SOURCES[@]}"}; then
+        echo "[build-frontend] $name: fresh, skipping"
+        return 0
+    fi
+    require_bin go "install the Go toolchain"
+    echo "[build-frontend] $name: building..."
+    mkdir -p "$CACHE_BIN"
+    ( cd "$dir" && go build -o "$artifact" . )
+    echo "[build-frontend] $name: done"
+}
+
 EXPLICIT_GC=0
 for target in "${TARGETS[@]}"; do
     case "$target" in
@@ -462,6 +509,8 @@ for target in "${TARGETS[@]}"; do
         shim)   build_shim ;;
         webapp) build_webapp ;;
         daemon) build_daemon ;;
+        store)  build_service shim-store "$STORE_DIR" "$STORE_ARTIFACT" ;;
+        sidecar) build_service shim-claude-sidecar "$SIDECAR_DIR" "$SIDECAR_ARTIFACT" ;;
         gc)     EXPLICIT_GC=1 ;;
         # Unreachable: the argument parser allowlists these same names. It is
         # here so that adding a target THERE and forgetting it here fails

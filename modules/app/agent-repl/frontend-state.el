@@ -132,6 +132,18 @@ fallback keyword (AGENTS.md No-Silent-Fallbacks)."
 
 ;;;; ---- WorkspaceState application --------------------------------------
 
+(defvar agent-repl--frontend-workspace-state-views
+  (make-hash-table :test 'equal)
+  "Latest raw `WorkspaceState' plist keyed by its daemon workspace path.
+Unlike render-state application, this store retains states for workspaces
+that Emacs has not restored yet.  Startup shutdown safety reads it so an
+in-flight turn from the previous Emacs cannot be killed merely because its
+perspective has not been recreated.")
+
+(defun agent-repl--frontend-workspace-state-views-all ()
+  "Return every latest raw `WorkspaceState' plist pushed by the daemon."
+  (hash-table-values agent-repl--frontend-workspace-state-views))
+
 ;;;; ---- The inbound workspace key ---------------------------------------
 ;;
 ;; Every daemon frame names its workspace by the session CWD, because that is
@@ -179,6 +191,11 @@ Fails loudly on a missing/blank `workspace' (invariant violation)."
                        "frontend-apply-workspace-state: MISSING workspace in %S — no fallback"
                        ws-state)
       (error "agent-repl frontend: WorkspaceState missing workspace"))
+    ;; Preserve the daemon fact even before snapshot restore recreates the
+    ;; corresponding Emacs workspace.  Render application below may honestly
+    ;; drop an unowned path, but startup bounce safety must still see its
+    ;; `turnActive' bit.
+    (puthash raw-workspace ws-state agent-repl--frontend-workspace-state-views)
     ;; No live workspace owning this cwd means the daemon is reporting state
     ;; for something Emacs does not have open. Dropping it is honest; keying
     ;; it under the path would STUB-CREATE an entry the renderer never reads.
@@ -219,8 +236,9 @@ Fails loudly on a missing/blank `workspace' (invariant violation)."
       (agent-repl--frontend-run-state-transition-hook workspace keyword previous)
       keyword)
       (agent-repl--log nil
-                       "frontend-apply-workspace-state: no live workspace owns %s — dropping the frame (state=%s)"
-                       raw-workspace state)
+                       "frontend-apply-workspace-state: no live workspace owns %s — retained for restart safety, render skipped (state=%s session=%s turn-active=%S)"
+                       raw-workspace state (plist-get ws-state :sessionId)
+                       (plist-get ws-state :turnActive))
       nil)))
 
 (defun agent-repl--frontend-maybe-latch-agent-ready (workspace)
@@ -265,6 +283,7 @@ handler runs on the UNSCOPED Emacs connection, which receives all of them."
     ;; so a session absent from it (a bounced daemon never heard of) must not
     ;; linger in the store where the orphan/live-p reads would still see it.
     (clrhash agent-repl--frontend-session-views)
+    (clrhash agent-repl--frontend-workspace-state-views)
     (dolist (view sessions)
       (agent-repl--frontend-apply-session-view view))
     ;; Rebuild the retained-SystemInit roster wholesale too (same rationale):
