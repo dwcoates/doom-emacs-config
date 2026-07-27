@@ -237,6 +237,7 @@ func (s *sidecar) pollAll() {
 		if !res.Changed {
 			continue
 		}
+		writeStart := time.Now()
 		if err := s.writeBatch(res); err != nil {
 			// Honest sad path: do NOT commit; the batch replays and dedup absorbs.
 			s.log("store write failed for %s (cursor NOT advanced, %d events dropped this cycle): %v",
@@ -249,11 +250,16 @@ func (s *sidecar) pollAll() {
 			}
 			continue
 		}
+		storeWriteMs := time.Since(writeStart).Milliseconds()
 		w.tailer.Commit(res)
 		if w.target.TaskID != "" {
 			s.tracker.Activity(w.target.TaskID, now)
 		}
 		s.applyLifecycle(res.Events, now)
+		// The happy path is the one that carries the user's prompt echo to the
+		// GUI, so it gets a line too: steady state is silent, a pickup is not.
+		s.log("tail: %s picked up %d event(s) kind=%s store_write_ms=%d",
+			path, len(res.Events), kindLabel(w.target.Kind), storeWriteMs)
 	}
 }
 
@@ -301,6 +307,22 @@ func taskKindToTail(k corev1.TaskKind) tail.Kind {
 		return tail.KindWorkflowJournal
 	default:
 		return tail.KindAgentTranscript
+	}
+}
+
+// kindLabel renders a watched file's kind for the log.
+func kindLabel(k tail.Kind) string {
+	switch k {
+	case tail.KindSessionTranscript:
+		return "session"
+	case tail.KindAgentTranscript:
+		return "agent"
+	case tail.KindWorkflowJournal:
+		return "workflow"
+	case tail.KindShellSpool:
+		return "shell"
+	default:
+		return fmt.Sprintf("kind(%d)", int(k))
 	}
 }
 
