@@ -238,6 +238,93 @@ Read the rolling log file (§2.1–§2.4) instead when:
 - Stub workspaces (entries without `:project-dir`) have no snapshot — they appear in the log's `STUB-CREATE` lines instead.
 - A killed buffer renders as `#<buffer nil dead>` because Emacs clears `buffer-name` on kill — the `nil` is normal, not a bug.
 
+## 3. The daemon plane
+
+`~/.claude-emacs/claude-repld.log` is the daemon's full stderr, teed to disk. **Three planes land in this one file** — the daemon itself, the shim (§3.4), and the webapp (§3.5) — so it is the highest-yield file in the system.
+
+### 3.1 The file
+
+- Path: `~/.claude-emacs/claude-repld.log`
+- Line format: `YYYY/MM/DD HH:MM:SS.ffffff <message>`
+- **Rotation is restart-scoped.** On every boot the previous file becomes `claude-repld.log.<mtime-stamp>` (stamp format `20060102-150405`), and only the newest **5** backups survive. Implemented in `daemon/internal/replog/replog.go` (`FileName`, `KeepBackups = 5`).
+- There is also an in-run size cap (`CapBytes`) that rotates mid-run if a single run logs too heavily. So a backup file is not necessarily a previous *boot* — check timestamps before assuming.
+
+```sh
+ls -lt ~/.claude-emacs/claude-repld.log*     # find the run you want
+tail -n 300 ~/.claude-emacs/claude-repld.log
+tail -f ~/.claude-emacs/claude-repld.log     # live tail during repro
+```
+
+### 3.2 Structured tags — grep the same way as the Emacs log
+
+`daemon/internal/dlog/dlog.go` holds the logging combinators. Two conventions matter:
+
+**`Tag(logf, k, v, …)` / `TagFunc`** wrap a logger so every line it emits carries a trailing ` {k=v k2=v2}` block. This is **deliberately the same shape as the Emacs log's `{ws=… id=…}` block (§2.2), so both logs grep the same way**:
+
+```sh
+grep 'ws=/path/to/worktree' ~/.claude-emacs/claude-repld.log | tail -60
+grep 'ws=/path/to/worktree' ~/.claude-emacs/doom-agent-repl.log | tail -60
+```
+
+A mis-paired call site renders `key=!MISSING` rather than silently shifting the pairs — so if you see `!MISSING`, that is a real instrumentation bug, not a truncation artifact:
+
+```sh
+grep '=!MISSING' ~/.claude-emacs/claude-repld.log
+```
+
+### 3.3 Call-boundary logging
+
+**`Call(logf, name, kv…)`** logs BOTH edges of an external model or subprocess call — classifier, summarizer, remediation analyst, the shim. It returns a completion func that writes the duration, the output clamped to `OutputClampLen` (2000 bytes, marked ` …[clamped]`), and the error.
+
+The rationale is worth internalizing, because it is also the standard you should hold new code to:
+
+> A call that logs only its failure is unattributable; a call that logs nothing is invisible.
+
+When a model-boundary call misbehaves, look for the **pair** of lines. A start with no completion means the call never returned — a hang, not an error.
+
+### 3.4 Shim logs live here, and ONLY here
+
+`shimLog()` in `agent-shim/claude/shim/src/uds/log.ts` emits
+
+```
+HH:MM:SS.mmm [component] {k=v} message
+```
+
+to **stderr only** — stdout and the UDS carry protocol frames exclusively, so nothing else may be written to them. The daemon pumps that stderr into its own log with a `shim stderr: ` prefix (`daemon/internal/shim/proc.go:128`).
+
+**The shim has no log file of its own.** This is the only place to read it:
+
+```sh
+grep 'shim stderr:' ~/.claude-emacs/claude-repld.log | tail -100
+```
+
+### 3.5 Webapp client-logs are forwarded here too
+
+`webapp/src/wslog.ts` defines `ForwardingLogger`: every line goes to the JS console **always**, and is additionally best-effort mirrored to the daemon as a `client-log` frame (handled at `daemon/internal/frontend/commands.go:139`).
+
+Why this exists: the webapp runs inside an Emacs webview whose JS console **nobody can see and nothing persists**. Before forwarding, a delivery-path failure — a seq-gap loop, a lost replay-request, a stalled `requestAnimationFrame` — left no evidence anywhere at all.
+
+- Rate limit: `MAX_FORWARDS_PER_WINDOW = 60` per `FORWARD_WINDOW_MS = 60_000`. The console side is never limited, so a burst that exceeds the window is still visible in-page even when it is missing from the daemon log.
+- **Timestamps are stamped by the webapp**, not at daemon receipt (`HH:MM:SS.mmm` UTC — the same slice the shim's `stamp` uses). This is precisely so a webapp line and a shim line sitting in the same daemon log read on **one clock**. Stamping at receipt would have hidden the delay between the two, which is usually the thing you are trying to measure.
+
+Reach for this plane for UI-only symptoms: scroll misbehavior, render stalls, sequence gaps, replay that never arrives.
+
+### 3.6 Registry, sockets, and locks
+
+- Session registry: `~/.claude-emacs/claude-repld-sessions.json`, plus `~/.claude-emacs/claude-repld-sessions.json.checkpoints`
+- Sockets, in `~/.cache/agent-repl/sock/`:
+  - `daemon-frontend.sock` — the editor/webapp side
+  - `daemon-shim.sock` — the shim side
+  - `session-s_<hex>.sock` — one per session
+- Session locks: `~/.cache/agent-repl/run/session-s_<hex>.lock`
+
+```sh
+ls -la ~/.cache/agent-repl/sock/ ~/.cache/agent-repl/run/
+jq '.' ~/.claude-emacs/claude-repld-sessions.json
+```
+
+A session with a registry entry but no socket is a session the daemon believes in and cannot reach.
+
 ## 7. When the evidence is too sparse — SUGGEST INSTRUMENTATION EMPHATICALLY
 
 Since file writes are now unconditional, the only way the log can be uninformative is if the suspect code path has **no `agent-repl--log` calls at all**. When that happens, Claude tends to fill the silence with speculation. **Do not do that.** If you find yourself reading the log around the timestamp of the bug and cannot find any line that corresponds to the suspect function or branch, stop and surface this emphatically.
