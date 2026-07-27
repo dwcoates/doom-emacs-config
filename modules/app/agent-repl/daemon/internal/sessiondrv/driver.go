@@ -367,6 +367,23 @@ func (m *Manager) persistVendorSessionID(sessionID, csid string) {
 // the command was accepted — it was accepted into the queue. The queue's own
 // pushed QueueView is what tells the frontend where the prompt went.
 func (m *Manager) SubmitPrompt(ctx context.Context, workspace, text, permissionMode string) error {
+	return m.submitPrompt(ctx, workspace, text, permissionMode, "frontend")
+}
+
+// SubmitWorkspaceInitialPrompt submits a durable workspace-create job's initial
+// prompt.  JobID is carried as the vendor-visible origin for traceability, not
+// as an exact-once claim: after a shim accepts the prompt but before the job
+// store checkpoints it, a daemon crash may submit it again.  The creation
+// manager therefore deliberately provides at-least-once delivery and never
+// marks delivery before this call returns successfully.
+func (m *Manager) SubmitWorkspaceInitialPrompt(ctx context.Context, workspace, jobID, text, permissionMode string) error {
+	if jobID == "" {
+		return fmt.Errorf("sessiondrv: workspace initial prompt needs a job id")
+	}
+	return m.submitPrompt(ctx, workspace, text, permissionMode, "workspace-create:"+jobID)
+}
+
+func (m *Manager) submitPrompt(ctx context.Context, workspace, text, permissionMode, origin string) error {
 	d, err := m.ensure(ctx, workspace)
 	if err != nil {
 		return err
@@ -377,7 +394,7 @@ func (m *Manager) SubmitPrompt(ctx context.Context, workspace, text, permissionM
 	if !queued {
 		m.mu.Unlock()
 		text = m.applyMetaprompt(d, text)
-		if err := d.client.SubmitPrompt(ctx, text, "frontend", permissionMode); err != nil {
+		if err := d.client.SubmitPrompt(ctx, text, origin, permissionMode); err != nil {
 			return err
 		}
 		// The submit was ACCEPTED, so a turn is beginning. This is the earliest
@@ -394,8 +411,8 @@ func (m *Manager) SubmitPrompt(ctx context.Context, workspace, text, permissionM
 	view, recs := m.publishQueueLocked(d)
 	m.mu.Unlock()
 
-	m.logf("sessiondrv: queued prompt entry=%s session=%s ws=%q (turn in flight)",
-		entry.id, d.sessionID, workspace)
+	m.logf("sessiondrv: queued prompt entry=%s session=%s ws=%q origin=%q (turn in flight)",
+		entry.id, d.sessionID, workspace, origin)
 	m.publish(d.sessionID, view, recs)
 	go m.classify(d, entry.id, running, text)
 	return nil
