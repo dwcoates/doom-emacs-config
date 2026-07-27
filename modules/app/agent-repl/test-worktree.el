@@ -686,14 +686,14 @@ session (`:frontend-session-id' bound) and fails against that old body."
 ;;;; ---- Tests: dispatch-workspace-command ----
 
 (ert-deftest agent-repl-test-dispatch-workspace-command-create ()
-  "Create commands increment delay by stagger-seconds."
+  "Legacy create commands are not dispatched by Emacs."
   (let ((handled nil))
     (cl-letf (((symbol-function 'agent-repl--handle-create-command)
                (lambda (cmd delay) (push (list cmd delay) handled))))
       (let ((cmd '((type . "create") (name . "test"))))
         (let ((new-delay (agent-repl--dispatch-workspace-command cmd 0)))
-          (should (= new-delay agent-repl-worktree-stagger-seconds))
-          (should (= (length handled) 1)))))))
+          (should (= new-delay 0))
+          (should-not handled))))))
 
 (ert-deftest agent-repl-test-dispatch-workspace-command-prompt ()
   "Prompt commands do not change delay."
@@ -2026,7 +2026,7 @@ registered canonical `:project-dir'."
   (agent-repl--process-workspace-commands-file "/nonexistent/file.json"))
 
 (ert-deftest agent-repl-test-process-workspace-commands-file-creates-stagger ()
-  "Multiple create commands get staggered delays."
+  "Legacy create commands are ignored and their consumed file is deleted."
   (let ((delays nil)
         (tmpfile (make-temp-file "ws-cmd-" nil ".json")))
     (unwind-protect
@@ -2037,14 +2037,13 @@ registered canonical `:project-dir'."
           (cl-letf (((symbol-function 'agent-repl--handle-create-command)
                      (lambda (_cmd delay) (push delay delays))))
             (agent-repl--process-workspace-commands-file tmpfile))
-          ;; Delays should be 0 and stagger-seconds
-          (should (equal (reverse delays) (list 0 agent-repl-worktree-stagger-seconds)))
+          (should-not delays)
           ;; File should be deleted
           (should-not (file-exists-p tmpfile)))
       (when (file-exists-p tmpfile) (delete-file tmpfile)))))
 
 (ert-deftest agent-repl-test-process-workspace-commands-file-mixed ()
-  "Mixed create/prompt/finish commands dispatch correctly."
+  "Mixed files ignore create while retaining UI/session verbs."
   (let ((create-count 0) (prompt-count 0) (finish-count 0)
         (tmpfile (make-temp-file "ws-cmd-" nil ".json")))
     (unwind-protect
@@ -2058,7 +2057,7 @@ registered canonical `:project-dir'."
                     ((symbol-function 'agent-repl--handle-finish-command)
                      (lambda (_cmd) (cl-incf finish-count))))
             (agent-repl--process-workspace-commands-file tmpfile))
-          (should (= create-count 1))
+          (should (= create-count 0))
           (should (= prompt-count 1))
           (should (= finish-count 1)))
       (when (file-exists-p tmpfile) (delete-file tmpfile)))))
@@ -5577,39 +5576,7 @@ JSON, so it eagerly resolves at entry-point time."
 ;; git-root and source-dir on the new workspace, so source-dir threading
 ;; collapses into git-root threading at the entry-point layer.
 
-(ert-deftest agent-repl-test-create-worktree-workspace-uses-current-ws-dir ()
-  "Without explicit SOURCE-WS, git-root falls back to the current ws's :project-dir."
-  (agent-repl-test--with-clean-state
-    (let ((captured-git-root :unset))
-      (cl-letf (((symbol-function '+workspace-current-name)
-                 (lambda () "ambient-ws"))
-                ((symbol-function 'agent-repl--ws-dir)
-                 (lambda (ws)
-                   (if (equal ws "ambient-ws") "/tmp/ambient-repo/"
-                     (error "unexpected ws: %s" ws))))
-                ((symbol-function 'read-string)
-                 (lambda (&rest _) "do the thing"))
-                ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw _prefixed git-root _base _fork-from &optional _model)
-                   (setq captured-git-root git-root))))
-        (agent-repl-create-worktree-workspace 'head)
-        (should (equal captured-git-root "/tmp/ambient-repo/"))))))
-
-(ert-deftest agent-repl-test-create-worktree-workspace-uses-explicit-source-ws-dir ()
-  "With explicit SOURCE-WS, git-root is that workspace's :project-dir."
-  (agent-repl-test--with-clean-state
-    (let ((captured-git-root :unset))
-      (cl-letf (((symbol-function 'agent-repl--ws-dir)
-                 (lambda (ws)
-                   (if (equal ws "explicit-ws") "/tmp/explicit-repo/"
-                     (error "unexpected ws: %s" ws))))
-                ((symbol-function 'read-string)
-                 (lambda (&rest _) "do the thing"))
-                ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw _prefixed git-root _base _fork-from &optional _model)
-                   (setq captured-git-root git-root))))
-        (agent-repl-create-worktree-workspace 'head "explicit-ws")
-        (should (equal captured-git-root "/tmp/explicit-repo/"))))))
+;; Interactive daemon-create source routing is covered by test-workspace-create-client.el.
 
 (ert-deftest agent-repl-test-fork-worktree-workspace-uses-fork-ws-dir ()
   "Fork's git-root is the fork-ws's :project-dir."
@@ -7501,12 +7468,12 @@ passing through."
 (ert-deftest agent-repl-test-worktree-preemptive-prompt-head ()
   "BASE = `head' (`SPC TAB n') prompt names the current worktree."
   (should (equal (agent-repl--worktree-preemptive-prompt 'head)
-                 "Preemptive prompt from current worktree (empty to name plain ws): ")))
+                 "Initial prompt from current worktree (optional): ")))
 
 (ert-deftest agent-repl-test-worktree-preemptive-prompt-master ()
   "BASE = `master' (`SPC TAB N') prompt names the main worktree."
   (should (equal (agent-repl--worktree-preemptive-prompt 'master)
-                 "Preemptive prompt from main worktree (empty to name plain ws): ")))
+                 "Initial prompt from main worktree (optional): ")))
 
 (ert-deftest agent-repl-test-worktree-preemptive-prompt-differ ()
   "The `SPC TAB n' and `SPC TAB N' prompts are visibly distinct."
@@ -7517,401 +7484,7 @@ passing through."
   "An unknown base signals an error rather than a mislabeled prompt."
   (should-error (agent-repl--worktree-preemptive-prompt 'bogus)))
 
-(ert-deftest agent-repl-test-create-worktree-workspace-head-base ()
-  "BASE = `head' branches off HEAD (the current worktree)."
-  (agent-repl-test--with-clean-state
-    (let ((captured-base nil))
-      (cl-letf (((symbol-function 'agent-repl--resolve-current-git-root)
-                 (lambda () "/tmp/repo/"))
-                ((symbol-function 'read-string)
-                 (lambda (&rest _) "do the thing"))
-                ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw _prefixed _git-root base _fork-from &optional _model)
-                   (setq captured-base base))))
-        (agent-repl-create-worktree-workspace 'head)
-        (should (equal captured-base "HEAD"))))))
-
-(ert-deftest agent-repl-test-create-worktree-workspace-master-base ()
-  "BASE = `master' branches off LOCAL `master' (not `origin/master').
-The downstream worktree-creation flow still fetches `origin master' first
-as a freshness gesture, but the new branch is rooted in local master."
-  (agent-repl-test--with-clean-state
-    (let ((captured-base nil))
-      (cl-letf (((symbol-function 'agent-repl--resolve-current-git-root)
-                 (lambda () "/tmp/repo/"))
-                ((symbol-function 'agent-repl--master-worktree-path)
-                 (lambda (_root) nil))
-                ((symbol-function 'read-string)
-                 (lambda (&rest _) "do the thing"))
-                ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw _prefixed _git-root base _fork-from &optional _model)
-                   (setq captured-base base))))
-        (agent-repl-create-worktree-workspace 'master)
-        (should (equal captured-base "master"))))))
-
-(ert-deftest agent-repl-test-create-worktree-workspace-master-base-does-not-anchor-spawn-git-root ()
-  "BASE = `master' passes the calling-ws git-root to spawn (no master anchoring).
-Source-dir resolution now happens at receive time in
-`agent-repl--create-worktree-from-command' based on BASE-COMMIT, so the
-spawn-side no longer special-cases `master' for the git-root.  Keeping
-git-root anchored to calling-ws means the JSON command file's `git_root'
-reflects the user's actual context, with no master-worktree-path lookup
-to fail."
-  (agent-repl-test--with-clean-state
-    (let ((captured-git-root :unset)
-          (master-path-called nil))
-      (cl-letf (((symbol-function '+workspace-current-name)
-                 (lambda () "calling-ws"))
-                ((symbol-function 'agent-repl--ws-dir)
-                 (lambda (ws)
-                   (if (equal ws "calling-ws") "/tmp/calling-ws/"
-                     (error "unexpected ws: %s" ws))))
-                ((symbol-function 'agent-repl--master-worktree-path)
-                 (lambda (_root)
-                   (setq master-path-called t)
-                   "/tmp/master/"))
-                ((symbol-function 'read-string)
-                 (lambda (&rest _) "do the thing"))
-                ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw _prefixed git-root _base _fork-from &optional _model)
-                   (setq captured-git-root git-root))))
-        (agent-repl-create-worktree-workspace 'master)
-        (should-not master-path-called)
-        (should (equal captured-git-root "/tmp/calling-ws/"))))))
-
-(ert-deftest agent-repl-test-create-worktree-workspace-head-base-passes-calling-ws-git-root ()
-  "BASE = `head' passes calling-ws git-root and never consults master resolver."
-  (agent-repl-test--with-clean-state
-    (let ((captured-git-root :unset)
-          (master-path-called nil))
-      (cl-letf (((symbol-function '+workspace-current-name)
-                 (lambda () "calling-ws"))
-                ((symbol-function 'agent-repl--ws-dir)
-                 (lambda (ws)
-                   (if (equal ws "calling-ws") "/tmp/calling-ws/"
-                     (error "unexpected ws: %s" ws))))
-                ((symbol-function 'agent-repl--master-worktree-path)
-                 (lambda (_root)
-                   (setq master-path-called t)
-                   "/tmp/master/"))
-                ((symbol-function 'read-string)
-                 (lambda (&rest _) "do the thing"))
-                ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw _prefixed git-root _base _fork-from &optional _model)
-                   (setq captured-git-root git-root))))
-        (agent-repl-create-worktree-workspace 'head)
-        (should-not master-path-called)
-        (should (equal captured-git-root "/tmp/calling-ws/"))))))
-
-(ert-deftest agent-repl-test-create-worktree-workspace-passes-no-fork-from ()
-  "Plain create (non-fork) passes FORK-FROM = nil."
-  (agent-repl-test--with-clean-state
-    (let ((captured-fork-from :unset))
-      (cl-letf (((symbol-function 'agent-repl--resolve-current-git-root)
-                 (lambda () "/tmp/repo/"))
-                ((symbol-function 'read-string)
-                 (lambda (&rest _) "do the thing"))
-                ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw _prefixed _git-root _base fork-from &optional _model)
-                   (setq captured-fork-from fork-from))))
-        (agent-repl-create-worktree-workspace 'head)
-        (should (null captured-fork-from))))))
-
-(ert-deftest agent-repl-test-create-worktree-workspace-from-origin-master-delegates-with-master-symbol ()
-  "`SPC TAB N' wrapper delegates to the main command with BASE = `master'."
-  (let ((captured-base :unset)
-        (captured-source :unset))
-    (cl-letf (((symbol-function 'agent-repl-create-worktree-workspace)
-               (lambda (base &optional source-ws)
-                 (setq captured-base base)
-                 (setq captured-source source-ws))))
-      (agent-repl-create-worktree-workspace-from-origin-master)
-      (should (eq captured-base 'master))
-      (should (null captured-source)))))
-
-(ert-deftest agent-repl-test-create-worktree-workspace-from-origin-master-forwards-source-ws ()
-  "`SPC TAB N' wrapper forwards SOURCE-WS to the main command."
-  (let ((captured-source :unset))
-    (cl-letf (((symbol-function 'agent-repl-create-worktree-workspace)
-               (lambda (_base &optional source-ws)
-                 (setq captured-source source-ws))))
-      (agent-repl-create-worktree-workspace-from-origin-master "other-ws")
-      (should (equal captured-source "other-ws")))))
-
-(ert-deftest agent-repl-test-create-worktree-workspace-source-ws-passes-git-root ()
-  "When SOURCE-WS is given, its :project-dir is threaded through as git-root."
-  (agent-repl-test--with-clean-state
-    (let ((captured-git-root :unset))
-      (cl-letf (((symbol-function 'agent-repl--ws-dir)
-                 (lambda (ws)
-                   (if (equal ws "source-ws") "/tmp/source-repo/"
-                     (error "unexpected ws: %s" ws))))
-                ((symbol-function 'read-string)
-                 (lambda (&rest _) "do the thing"))
-                ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw _prefixed git-root _base _fork-from &optional _model)
-                   (setq captured-git-root git-root))))
-        (agent-repl-create-worktree-workspace 'head "source-ws")
-        (should (equal captured-git-root "/tmp/source-repo/"))))))
-
-(ert-deftest agent-repl-test-create-worktree-workspace-no-source-ws-resolves-ambient-git-root ()
-  "When SOURCE-WS is nil and current ws has no :project-dir, falls back to `resolve-current-git-root'."
-  (agent-repl-test--with-clean-state
-    (let ((captured-git-root :unset))
-      (cl-letf (((symbol-function '+workspace-current-name)
-                 (lambda () "ambient-ws"))
-                ((symbol-function 'agent-repl--ws-dir)
-                 (lambda (_ws) nil))
-                ((symbol-function 'agent-repl--resolve-current-git-root)
-                 (lambda () "/tmp/ambient-repo/"))
-                ((symbol-function 'read-string)
-                 (lambda (&rest _) "do the thing"))
-                ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw _prefixed git-root _base _fork-from &optional _model)
-                   (setq captured-git-root git-root))))
-        (agent-repl-create-worktree-workspace 'head nil)
-        (should (equal captured-git-root "/tmp/ambient-repo/"))))))
-
-(ert-deftest agent-repl-test-create-worktree-workspace-prefixes-preemptive-prompt ()
-  "The preemptive prompt is prefixed with the autonomous instruction before being
-handed to the spawn helper as PREFIXED-PROMPT."
-  (agent-repl-test--with-clean-state
-    (let ((captured-prefixed nil))
-      (cl-letf (((symbol-function 'agent-repl--resolve-current-git-root)
-                 (lambda () "/tmp/repo/"))
-                ((symbol-function 'read-string)
-                 (lambda (&rest _) "do the thing"))
-                ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (_raw prefixed _git-root _base _fork-from &optional _model)
-                   (setq captured-prefixed prefixed))))
-        (agent-repl-create-worktree-workspace 'head)
-        (should (string-prefix-p (agent-repl--meta-wrap agent-repl--autonomous-prompt-prefix)
-                                 captured-prefixed))
-        (should (string-suffix-p "do the thing" captured-prefixed))))))
-
-(ert-deftest agent-repl-test-create-worktree-workspace-passes-raw-prompt-unprefixed ()
-  "RAW-PROMPT given to the spawn helper is the user's original input,
-unprefixed — the prefix is reserved for the new ws session, not for naming."
-  (agent-repl-test--with-clean-state
-    (let ((captured-raw nil))
-      (cl-letf (((symbol-function 'agent-repl--resolve-current-git-root)
-                 (lambda () "/tmp/repo/"))
-                ((symbol-function 'read-string)
-                 (lambda (&rest _) "do the thing"))
-                ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (raw _prefixed _git-root _base _fork-from &optional _model)
-                   (setq captured-raw raw))))
-        (agent-repl-create-worktree-workspace 'head)
-        (should (equal captured-raw "do the thing"))
-        (should-not (string-prefix-p agent-repl--autonomous-prompt-prefix captured-raw))))))
-
-(ert-deftest agent-repl-test-create-worktree-workspace-blank-prompt-prompts-for-name ()
-  "An empty preemptive prompt prompts for the workspace name with a second
-minibuffer read rather than erroring or spawning name generation."
-  (agent-repl-test--with-clean-state
-    (let ((prompts nil))
-      (cl-letf (((symbol-function 'agent-repl--resolve-current-git-root)
-                 (lambda () "/tmp/repo/"))
-                ((symbol-function 'read-string)
-                 (lambda (prompt &rest _)
-                   (push prompt prompts)
-                   (if (= (length prompts) 1) "" "my-ws")))
-                ((symbol-function 'agent-repl--do-create-worktree-workspace)
-                 (lambda (&rest _) nil))
-                ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (&rest _) (error "should not be called"))))
-        (agent-repl-create-worktree-workspace 'head)
-        (should (= (length prompts) 2))
-        (should (string-match-p "Workspace name" (car prompts)))))))
-
-(ert-deftest agent-repl-test-create-worktree-workspace-blank-prompt-creates-worktree-no-agent ()
-  "An empty preemptive prompt creates the worktree via
-`agent-repl--do-create-worktree-workspace' with NO-AGENT = t (the agent
-not auto-booted) instead of spawning name generation."
-  (agent-repl-test--with-clean-state
-    (let ((captured-name nil)
-          (captured-no-agent :unset))
-      (cl-letf (((symbol-function 'agent-repl--resolve-current-git-root)
-                 (lambda () "/tmp/repo/"))
-                ((symbol-function 'read-string)
-                 (let ((n 0))
-                   (lambda (&rest _)
-                     (setq n (1+ n))
-                     (if (= n 1) "" "my-ws"))))
-                ((symbol-function 'agent-repl--do-create-worktree-workspace)
-                 (lambda (name &optional _fork _prompt _cb _prio _base _root _src no-agent)
-                   (setq captured-name name)
-                   (setq captured-no-agent no-agent)))
-                ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (&rest _) (error "should not be called"))))
-        (agent-repl-create-worktree-workspace 'head)
-        (should (equal captured-name "my-ws"))
-        (should (eq captured-no-agent t))))))
-
-(ert-deftest agent-repl-test-create-worktree-workspace-blank-prompt-empty-name-errors ()
-  "An empty preemptive prompt followed by an empty workspace name signals a
-`user-error' rather than creating a worktree."
-  (agent-repl-test--with-clean-state
-    (cl-letf (((symbol-function 'agent-repl--resolve-current-git-root)
-               (lambda () "/tmp/repo/"))
-              ((symbol-function 'read-string)
-               (lambda (&rest _) "   "))
-              ((symbol-function 'agent-repl--do-create-worktree-workspace)
-               (lambda (&rest _) (error "should not be called")))
-              ((symbol-function 'agent-repl--spawn-workspace-generation)
-               (lambda (&rest _) (error "should not be called"))))
-      (should-error (agent-repl-create-worktree-workspace 'head)
-                    :type 'user-error))))
-
-(ert-deftest agent-repl-test-create-worktree-workspace-blank-prompt-passes-git-root ()
-  "The empty-prompt named-worktree path roots the new worktree at the
-resolved GIT-ROOT (so a source-ws selection is honored)."
-  (agent-repl-test--with-clean-state
-    (let ((captured-root :unset))
-      (cl-letf (((symbol-function 'agent-repl--resolve-current-git-root)
-                 (lambda () "/tmp/repo/"))
-                ((symbol-function 'read-string)
-                 (let ((n 0))
-                   (lambda (&rest _)
-                     (setq n (1+ n))
-                     (if (= n 1) "" "my-ws"))))
-                ((symbol-function 'agent-repl--do-create-worktree-workspace)
-                 (lambda (_name &optional _fork _prompt _cb _prio _base git-root &rest _)
-                   (setq captured-root git-root)))
-                ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (&rest _) (error "should not be called"))))
-        (agent-repl-create-worktree-workspace 'head)
-        (should (equal captured-root "/tmp/repo/"))))))
-
-(ert-deftest agent-repl-test-create-worktree-workspace-blank-prompt-head-source-dir-is-git-root ()
-  "For BASE = `head' the empty-prompt path passes GIT-ROOT as the worktree's
-source-dir (the `:source-ws-dir' parent), never the master worktree."
-  (agent-repl-test--with-clean-state
-    (let ((captured-src :unset)
-          (master-called nil))
-      (cl-letf (((symbol-function 'agent-repl--resolve-current-git-root)
-                 (lambda () "/tmp/repo/"))
-                ((symbol-function 'agent-repl--master-worktree-path)
-                 (lambda (_root) (setq master-called t) "/tmp/master/"))
-                ((symbol-function 'read-string)
-                 (let ((n 0))
-                   (lambda (&rest _)
-                     (setq n (1+ n))
-                     (if (= n 1) "" "my-ws"))))
-                ((symbol-function 'agent-repl--do-create-worktree-workspace)
-                 (lambda (_name &optional _fork _prompt _cb _prio _base _root src &rest _)
-                   (setq captured-src src)))
-                ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (&rest _) (error "should not be called"))))
-        (agent-repl-create-worktree-workspace 'head)
-        (should-not master-called)
-        (should (equal captured-src "/tmp/repo/"))))))
-
-(ert-deftest agent-repl-test-create-worktree-workspace-blank-prompt-master-source-dir-is-master-worktree ()
-  "For BASE = `master' the empty-prompt path derives the worktree's source-dir
-from the master worktree (mirroring `--create-worktree-from-command')."
-  (agent-repl-test--with-clean-state
-    (let ((captured-src :unset))
-      (cl-letf (((symbol-function 'agent-repl--resolve-current-git-root)
-                 (lambda () "/tmp/repo/"))
-                ((symbol-function 'agent-repl--master-worktree-path)
-                 (lambda (_root) "/tmp/master/"))
-                ((symbol-function 'read-string)
-                 (let ((n 0))
-                   (lambda (&rest _)
-                     (setq n (1+ n))
-                     (if (= n 1) "" "my-ws"))))
-                ((symbol-function 'agent-repl--do-create-worktree-workspace)
-                 (lambda (_name &optional _fork _prompt _cb _prio _base _root src &rest _)
-                   (setq captured-src src)))
-                ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (&rest _) (error "should not be called"))))
-        (agent-repl-create-worktree-workspace 'master)
-        (should (equal captured-src "/tmp/master/"))))))
-
-(ert-deftest agent-repl-test-create-worktree-workspace-blank-prompt-switches-focus ()
-  "The empty-prompt path passes the switch callback so focus jumps to the
-newly created worktree."
-  (agent-repl-test--with-clean-state
-    (let ((captured-cb :unset))
-      (cl-letf (((symbol-function 'agent-repl--resolve-current-git-root)
-                 (lambda () "/tmp/repo/"))
-                ((symbol-function 'read-string)
-                 (let ((n 0))
-                   (lambda (&rest _)
-                     (setq n (1+ n))
-                     (if (= n 1) "" "my-ws"))))
-                ((symbol-function 'agent-repl--do-create-worktree-workspace)
-                 (lambda (_name &optional _fork _prompt cb &rest _)
-                   (setq captured-cb cb)))
-                ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (&rest _) (error "should not be called"))))
-        (agent-repl-create-worktree-workspace 'head)
-        (should (eq captured-cb #'agent-repl--worktree-creation-switch-callback))))))
-
-(ert-deftest agent-repl-test-create-worktree-workspace-logs-entry-before-prompt-read ()
-  "An ENTRY log line is emitted BEFORE `read-string' so a cancelled minibuffer
-or empty prompt still leaves a trace that the keybinding fired."
-  (agent-repl-test--with-clean-state
-    (let ((logs nil)
-          (read-string-called nil))
-      (cl-letf (((symbol-function 'agent-repl--log)
-                 (lambda (_ws fmt &rest args)
-                   (push (apply #'format fmt args) logs)))
-                ((symbol-function 'agent-repl--resolve-current-git-root)
-                 (lambda () "/tmp/repo/"))
-                ((symbol-function 'read-string)
-                 (lambda (&rest _)
-                   (setq read-string-called t)
-                   (signal 'quit nil)))
-                ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (&rest _) (error "should not be called"))))
-        (condition-case _err
-            (agent-repl-create-worktree-workspace 'head)
-          (quit nil))
-        (should read-string-called)
-        (should (cl-some (lambda (s)
-                           (string-match-p "create-worktree-workspace: ENTRY" s))
-                         logs))))))
-
-(ert-deftest agent-repl-test-create-worktree-workspace-logs-named-worktree-on-empty-prompt ()
-  "Empty preemptive prompt logs the named-worktree creation path, so the
-no-prompt branch is visible in the log."
-  (agent-repl-test--with-clean-state
-    (let ((logs nil))
-      (cl-letf (((symbol-function 'agent-repl--log)
-                 (lambda (_ws fmt &rest args)
-                   (push (apply #'format fmt args) logs)))
-                ((symbol-function 'agent-repl--resolve-current-git-root)
-                 (lambda () "/tmp/repo/"))
-                ((symbol-function 'read-string)
-                 (let ((n 0))
-                   (lambda (&rest _)
-                     (setq n (1+ n))
-                     (if (= n 1) "" "my-ws"))))
-                ((symbol-function 'agent-repl--do-create-worktree-workspace)
-                 (lambda (&rest _) nil))
-                ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (&rest _) (error "should not be called"))))
-        (agent-repl-create-worktree-workspace 'head)
-        (should (cl-some (lambda (s)
-                           (string-match-p "empty preemptive prompt, creating worktree" s))
-                         logs))))))
-
-(ert-deftest agent-repl-test-create-worktree-workspace-from-origin-master-logs-entry ()
-  "`SPC TAB N' wrapper logs an ENTRY line before delegating, so the keybinding
-firing is visible in the log even if the inner command bails."
-  (let ((logs nil))
-    (cl-letf (((symbol-function 'agent-repl--log)
-               (lambda (_ws fmt &rest args)
-                 (push (apply #'format fmt args) logs)))
-              ((symbol-function 'agent-repl-create-worktree-workspace)
-               (lambda (&rest _) nil)))
-      (agent-repl-create-worktree-workspace-from-origin-master)
-      (should (cl-some (lambda (s)
-                         (string-match-p
-                          "create-worktree-workspace-from-origin-master: ENTRY" s))
-                       logs)))))
+;; Retired local create/name-generation tests moved to test-workspace-create-client.el.
 
 (ert-deftest agent-repl-test-fork-worktree-workspace-prefixes-preemptive-prompt ()
   "Fork's preemptive prompt is prefixed with the autonomous instruction."
