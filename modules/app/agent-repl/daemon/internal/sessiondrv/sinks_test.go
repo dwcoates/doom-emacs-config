@@ -63,13 +63,6 @@ func (p *fakePusher) PushQueueView(q *frontendv1.QueueView) {
 	p.mu.Unlock()
 }
 
-// queueViews returns a copy of the recorded queue pushes.
-func (p *fakePusher) queueViews() []*frontendv1.QueueView {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return append([]*frontendv1.QueueView(nil), p.queues...)
-}
-
 // lastQueue returns the most recent queue push, or nil when none landed.
 func (p *fakePusher) lastQueue() *frontendv1.QueueView {
 	p.mu.Lock()
@@ -343,7 +336,7 @@ func TestBackfillDoneIsReportedOnlyOnce(t *testing.T) {
 	var states []string
 	c := backfillConsumer(&states)
 	// Act
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		c.Consume(transcriptEvent(t))
 	}
 	// Assert — the in-memory latch is what keeps this off the registry record.

@@ -109,9 +109,6 @@ func (q *promptQueue) drainAll() []*queueEntry {
 	return out
 }
 
-// empty reports whether the queue holds nothing.
-func (q *promptQueue) empty() bool { return len(q.entries) == 0 }
-
 // view renders the queue as the pushed frontend frame, front to back. An empty
 // queue renders as a QueueView with no entries rather than as no frame at all:
 // "the queue is now empty" is exactly the state a frontend needs told.
