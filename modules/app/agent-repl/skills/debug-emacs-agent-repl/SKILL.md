@@ -482,6 +482,127 @@ Plus **any `is_error` end whose stop reason is unrecognized** — unknown failur
 
 Rate limits: `allowed` and `allowed_warning` are **standing telemetry on a request the API ALLOWED**, and must not block. Anything else does.
 
+## 5. The data plane — the store, and the two producers that feed it
+
+Reach for this plane when conversation **content** is missing, garbled, or truncated.
+
+- DB: `~/.cache/agent-repl/store/events.db` — SQLite, WAL. Owned by `agent-shim/shim-store/`.
+- **This database is LARGE — currently ~1.5 GB.** A bare `SELECT *` is a bad idea. **Always filter and always `LIMIT`.**
+- Query it **read-only, always**: `sqlite3 -readonly ~/.cache/agent-repl/store/events.db "…"`
+
+### 5.1 Two planes write the same conversation
+
+**This is the core mental model of the data plane.** One conversation is written by **two independent producers**:
+
+| Producer | Path | When |
+|---|---|---|
+| **Stream plane** | shim → store | Live, during a turn |
+| **File plane** | sidecar tails `~/.claude*/projects/<slug>/<uuid>.jsonl` → store | As the transcript file grows |
+
+They deduplicate on `dedup_key`. Healthy operation has both alive.
+
+**A symptom where one plane is alive and the other is silent is directly diagnosable** — compare the `producer=` field in the store log (§5.4) against the `ssm: transition` lines in the daemon log (§4.5). Turns transitioning with no matching file-plane ingest (or vice versa) localizes the fault to one producer immediately.
+
+### 5.2 Schema
+
+```sql
+CREATE TABLE event (
+  session_id TEXT NOT NULL, seq INTEGER NOT NULL, plane INTEGER NOT NULL,
+  class INTEGER NOT NULL, kind TEXT NOT NULL, task_id TEXT, uuid TEXT,
+  dedup_key TEXT, produced_at INTEGER NOT NULL, payload BLOB NOT NULL,
+  PRIMARY KEY (session_id, seq));
+CREATE TABLE cursor (file_id TEXT PRIMARY KEY, path TEXT NOT NULL,
+  offset INTEGER NOT NULL, carry BLOB, updated_at INTEGER NOT NULL);
+CREATE TABLE schema_meta (version INTEGER NOT NULL);
+```
+
+Two properties to internalize before you query:
+
+- **`payload` is an opaque protobuf blob.** The store has no vendor knowledge and does not parse it. **Only the envelope columns are queryable** — do not waste time trying to read message content out of `payload` with `sqlite3`.
+- **`EPHEMERAL`-class events are fanned out to live subscribers but never persisted.** So **absence from the table is not proof an event never happened.**
+
+### 5.3 `session_id` is ALWAYS the vendor session id
+
+`session_id` is the **vendor session id** — Claude's uuid, which is also its transcript filename. It is **never** a daemon `s_…` id.
+
+It has to be, because the two producers (§5.1) write the same conversation and must agree on its name: the shim reads it off the SDK message (stream plane), and the sidecar derives it from `<uuid>.jsonl` (file plane).
+
+**Diagnostic red flag.** Subscribing under any other id registers a subscriber on a channel nothing publishes to. **Writes succeed, and replay and live-tail silently return nothing** — a completely silent failure. This was a real bug on 2026-07-25. If content is missing but ingest looks healthy, check the id shape first.
+
+### 5.4 Useful queries
+
+```sh
+DB=~/.cache/agent-repl/store/events.db
+SID=<vendor-uuid>
+
+# Does this session have any rows at all?
+sqlite3 -readonly $DB "SELECT count(*) FROM event WHERE session_id='$SID';"
+
+# Event count and seq range
+sqlite3 -readonly $DB "
+  SELECT count(*) n, min(seq) lo, max(seq) hi FROM event WHERE session_id='$SID';"
+
+# Recent kinds
+sqlite3 -readonly $DB "
+  SELECT datetime(produced_at/1000,'unixepoch','localtime') t, seq, kind, task_id
+  FROM event WHERE session_id='$SID' ORDER BY seq DESC LIMIT 40;"
+
+# Kind histogram for one session
+sqlite3 -readonly $DB "
+  SELECT kind, count(*) FROM event WHERE session_id='$SID'
+  GROUP BY kind ORDER BY 2 DESC LIMIT 30;"
+```
+
+A seq range with holes, or a session with zero rows while the UI showed a live turn, is the signal to go to the service logs below.
+
+### 5.5 Service logs
+
+**`~/.cache/agent-repl/log/shim-store.log`** (plus `.err.log`; `.out.log` is empty) — one line per ingest:
+
+```
+ingest: producer=<p> session=<uuid> events=<n> accepted=<n> deduped=<n> last_seq=<n> ingest_ms=<n>
+```
+
+plus periodic `health PASS request_id=…`.
+
+```sh
+grep 'ingest:' ~/.cache/agent-repl/log/shim-store.log | tail -40
+grep 'ingest:' ~/.cache/agent-repl/log/shim-store.log | grep -o 'producer=[a-z-]*' | sort | uniq -c
+```
+
+That last one is the fastest way to see whether both producers (§5.1) are actually alive.
+
+**`~/.cache/agent-repl/log/shim-claude-sidecar.log`** — per-file progress and link health:
+
+```
+tail: <path> picked up <n> event(s) kind=session store_write_ms=<n>
+store link UP
+store link DOWN
+```
+
+**The steady state to confirm is `store link UP`, not a repeating `store link DOWN`.** `KeepAlive` restarts a failing service forever, so **a broken deploy presents as a service that is "running" while doing nothing at all.** Never conclude "the service is up" from `launchctl` alone — confirm the link.
+
+```sh
+grep 'store link' ~/.cache/agent-repl/log/shim-claude-sidecar.log | tail -20
+```
+
+### 5.6 Transcript conversion failures are a real signal
+
+The sidecar emits, when it meets a transcript line shape it does not know:
+
+```
+transcript: conversion failure at <path>:<offset>: unknown transcript line type "<type>"
+```
+
+**This is not noise.** It means events were dropped and history for that session is incomplete. Currently firing for `relocated` and `worktree-state`.
+
+```sh
+grep 'conversion failure' ~/.cache/agent-repl/log/shim-claude-sidecar.log | tail -20
+grep -o 'unknown transcript line type "[^"]*"' ~/.cache/agent-repl/log/shim-claude-sidecar.log | sort | uniq -c
+```
+
+If a user reports missing history and this is firing for their session's transcript, you have your cause.
+
 ## 7. When the evidence is too sparse — SUGGEST INSTRUMENTATION EMPHATICALLY
 
 Since file writes are now unconditional, the only way the log can be uninformative is if the suspect code path has **no `agent-repl--log` calls at all**. When that happens, Claude tends to fill the silence with speculation. **Do not do that.** If you find yourself reading the log around the timestamp of the bug and cannot find any line that corresponds to the suspect function or branch, stop and surface this emphatically.
