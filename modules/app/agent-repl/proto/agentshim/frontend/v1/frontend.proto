@@ -681,6 +681,11 @@ message CreateWorkspaceCmd {
   string fork_session_id = 10;
   string postprocessing_prompt = 11;
   string before_ws_merge = 12;
+  // Explicit session account/safety posture. The daemon must not infer these
+  // from its ambient process when a host asks it to create a workspace.
+  string config_dir = 13;
+  string permission_mode = 14;
+  bool allow_ungated = 15;
 }
 
 // The daemon's authoritative account of a workspace ready for host
@@ -701,6 +706,9 @@ message WorkspaceAvailable {
   string priority = 12;
   string model = 13;
   bool initial_prompt_queued = 14;
+  string config_dir = 15;
+  string permission_mode = 16;
+  bool allow_ungated = 17;
 }
 
 // Emacs has created the perspective/local bookkeeping for the authoritative
@@ -724,6 +732,7 @@ message HostAction {
     HostTaskById task_toggle_done = 6;
     HostTaskById task_open = 7;
     HostTaskById task_add_workspace = 8;
+    HostLegacyCommand legacy_command = 9;
   }
 }
 
@@ -732,6 +741,19 @@ message HostSetRepositoryFold { string repo_key = 1; bool folded = 2; }
 message HostSetSidebarView { string view = 1; }
 message HostTaskCreate {}
 message HostTaskById { string id = 1; }
+
+// Deliberate structured handoff for the established workspace-command verbs
+// whose payloads are not stable enough to promise a field-by-field protobuf
+// schema yet. `type` MUST be exactly one of: prompt, finish, close, open,
+// clipboard, send, merge, or eval. `payload` is the JSON-object command body
+// after the type discriminator, represented as protobuf Struct rather than an
+// opaque JSON string so the daemon can validate the verb and the host can
+// inspect every supplied field. This preserves every non-create inbox command
+// while creation ownership moves to the daemon.
+message HostLegacyCommand {
+  string type = 1;
+  google.protobuf.Struct payload = 2;
+}
 
 // Completion is host-only.  `ok=false` preserves the action and records the
 // supplied error in the daemon's durable inbox rather than silently dropping
