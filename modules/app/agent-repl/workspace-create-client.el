@@ -13,15 +13,56 @@
 (require 'subr-x)
 (require 'json)
 
-(defun agent-repl--workspace-create-required-string (payload key context)
+(defun agent-repl--workspace-create-log-payload-shape (payload)
+  "Return a value-free structural summary of wire PAYLOAD for diagnostics."
+  (cond
+   ((null payload) "nil")
+   ((not (listp payload)) (format "type=%s" (type-of payload)))
+   (t
+    (let ((cursor payload)
+          fields)
+      (while (consp cursor)
+        (let ((key (car cursor)))
+          (push (if (symbolp key)
+                    key
+                  (format "<%s>" (type-of key)))
+                fields))
+        (setq cursor (cdr cursor))
+        (if (consp cursor)
+            (setq cursor (cdr cursor))
+          (when cursor
+            (push (format "<improper-tail:%s>" (type-of cursor)) fields))
+          (setq cursor nil)))
+      (format "fields=%S" (nreverse fields))))))
+
+(defun agent-repl--workspace-create-keyword-plist-p (value)
+  "Return non-nil when VALUE is an even-length keyword plist."
+  (and (listp value)
+       (keywordp (car value))
+       (condition-case nil
+           (zerop (% (length value) 2))
+         (error nil))))
+
+(defun agent-repl--workspace-create-required-string (payload key context &optional ws)
   "Return PAYLOAD's non-blank string KEY, or fail loudly for CONTEXT."
-  (let ((value (plist-get payload key)))
+  (let ((value
+         (condition-case err
+             (plist-get payload key)
+           (error
+            (agent-repl--log
+             ws
+             "%s: INVALID payload-shape=%s field=%s err-type=%s — aborting before mutation"
+             context (agent-repl--workspace-create-log-payload-shape payload)
+             key (car err))
+            (signal (car err) (cdr err))))))
     (unless (and (stringp value)
                  (not (string-empty-p (string-trim value))))
       (agent-repl--log
-       nil
-       "%s: INVALID required field=%s value=%S payload=%S — aborting before mutation"
-       context key value payload)
+       ws
+       "%s: INVALID required field=%s value-type=%s value-length=%s %s — aborting before mutation"
+       context key (type-of value)
+       (and (stringp value) (length value))
+       (agent-repl--workspace-create-log-payload-shape payload))
       (error "agent-repl: %s requires non-empty %s" context key))
     value))
 
@@ -71,32 +112,52 @@ perspective or session, starts a shim, or locally delivers INITIAL-PROMPT."
            ;; merely because a permission-mode string happens to be ungated.
            (when allow-ungated
              (list :allowUngated t))))
-         (request-id
-          (agent-repl--uds-send-command
-           "createWorkspace" payload source-workspace)))
-    (agent-repl--uds-track-command
-     request-id "createWorkspace" source-workspace)
+         (request-id nil))
     (agent-repl--log
      source-workspace
-     "workspace-create-send: SENT request-id=%s requested-name=%s git-root=%s base=%s source=%s source-dir=%s prompt=%S priority=%s model=%s config-dir=%s permission-mode=%s allow-ungated=%S"
-     request-id requested-name git-root base-commit source-workspace source-dir
+     "workspace-create-send: READY requested-name=%s git-root=%s base=%s source-dir=%s prompt-present=%S prompt-length=%s priority-present=%S model-present=%S config-dir-present=%S permission-mode-present=%S allow-ungated=%S"
+     requested-name git-root base-commit source-dir
      (and prompt (not (string-empty-p prompt)))
-     (or priority "nil") (or model "nil") (or config-dir "CLI-default")
-     (or permission-mode "SDK-default")
-     allow-ungated)
-    request-id))
+     (and prompt (length prompt))
+     (not (null priority)) (not (null model))
+     (not (null config-dir)) (not (null permission-mode)) allow-ungated)
+    (condition-case err
+        (progn
+          (setq request-id
+                (agent-repl--uds-send-command
+                 "createWorkspace" payload source-workspace))
+          (agent-repl--uds-track-command
+           request-id "createWorkspace" source-workspace)
+          (agent-repl--log
+           source-workspace
+           "workspace-create-send: SENT request-id=%s requested-name=%s git-root=%s base=%s source-dir=%s prompt-present=%S prompt-length=%s priority-present=%S model-present=%S config-dir-present=%S permission-mode-present=%S allow-ungated=%S"
+           request-id requested-name git-root base-commit source-dir
+           (and prompt (not (string-empty-p prompt)))
+           (and prompt (length prompt))
+           (not (null priority)) (not (null model))
+           (not (null config-dir)) (not (null permission-mode)) allow-ungated)
+          request-id)
+      (error
+       (agent-repl--log
+        source-workspace
+        "workspace-create-send: FAILED request-id=%s requested-name=%s git-root=%s base=%s source-dir=%s prompt-present=%S prompt-length=%s err-type=%s — aborting"
+        request-id requested-name git-root base-commit source-dir
+        (and prompt (not (string-empty-p prompt)))
+        (and prompt (length prompt)) (car err))
+       (signal (car err) (cdr err))))))
 
 (defun agent-repl--workspace-create-available-metadata (available)
   "Validate AVAILABLE and return `(WS . METADATA)' without mutating state."
   (let* ((context "WorkspaceAvailable")
+         (candidate-ws (plist-get available :finalName))
          (job-id (agent-repl--workspace-create-required-string
-                  available :jobId context))
+                  available :jobId context candidate-ws))
          (ws (agent-repl--workspace-create-required-string
-              available :finalName context))
+              available :finalName context candidate-ws))
          (raw-path (agent-repl--workspace-create-required-string
-                    available :worktreePath context))
+                    available :worktreePath context ws))
          (session-id (agent-repl--workspace-create-required-string
-                      available :sessionId context)))
+                      available :sessionId context ws)))
     (unless (file-name-absolute-p raw-path)
       (agent-repl--log
        ws
@@ -111,6 +172,17 @@ perspective or session, starts a shim, or locally delivers INITIAL-PROMPT."
       (error "agent-repl: WorkspaceAvailable directory does not exist: %s"
              raw-path))
     (let ((path (file-name-as-directory (expand-file-name raw-path))))
+      (agent-repl--log
+       ws
+       "workspace-available: METADATA READY job-id=%s path=%s session-id=%s branch-present=%S source-ws-present=%S source-dir-present=%S config-dir-present=%S permission-mode-present=%S allow-ungated=%S prompt-queued=%S"
+       job-id path session-id
+       (not (null (plist-get available :branch)))
+       (not (null (plist-get available :sourceWorkspace)))
+       (not (null (plist-get available :sourceDir)))
+       (not (null (plist-get available :configDir)))
+       (not (null (plist-get available :permissionMode)))
+       (and (plist-get available :allowUngated) t)
+       (and (plist-get available :initialPromptQueued) t))
       (cons
        ws
        (list :daemon-workspace-job-id job-id
@@ -138,16 +210,25 @@ perspective or session, starts a shim, or locally delivers INITIAL-PROMPT."
 
 (defun agent-repl--workspace-create-ack-materialized (ws job-id result)
   "ACK daemon JOB-ID after WS materialization produced RESULT."
-  (let ((request-id
-         (agent-repl--uds-send-command
-          "workspaceMaterialized" (list :jobId job-id) ws)))
-    (agent-repl--uds-track-command
-     request-id "workspaceMaterialized" ws)
-    (agent-repl--log
-     ws
-     "workspace-available: ACK SENT request-id=%s job-id=%s materialization=%s"
-     request-id job-id result)
-    request-id))
+  (let (request-id)
+    (condition-case err
+        (progn
+          (setq request-id
+                (agent-repl--uds-send-command
+                 "workspaceMaterialized" (list :jobId job-id) ws))
+          (agent-repl--uds-track-command
+           request-id "workspaceMaterialized" ws)
+          (agent-repl--log
+           ws
+           "workspace-available: ACK SENT request-id=%s job-id=%s materialization=%s"
+           request-id job-id result)
+          request-id)
+      (error
+       (agent-repl--log
+        ws
+        "workspace-available: ACK FAILED request-id=%s job-id=%s materialization=%s err-type=%s"
+        request-id job-id result (car err))
+       (signal (car err) (cdr err))))))
 
 (defun agent-repl--workspace-create-handle-available (available)
   "Handle daemon `workspaceAvailable' payload AVAILABLE.
@@ -167,8 +248,23 @@ local state."
      (plist-get metadata :frontend-session-id)
      (or (plist-get metadata :branch-name) "nil")
      (plist-get metadata :initial-prompt-queued))
+    (agent-repl--log
+     ws
+     "workspace-available: MATERIALIZE BEGIN job-id=%s path=%s session-id=%s"
+     job-id (plist-get metadata :project-dir)
+     (plist-get metadata :frontend-session-id))
     (let ((result
-           (agent-repl--ws-materialize-daemon-workspace ws metadata)))
+           (condition-case err
+               (agent-repl--ws-materialize-daemon-workspace ws metadata)
+             (error
+              (agent-repl--log
+               ws
+               "workspace-available: MATERIALIZE FAILED job-id=%s err-type=%s — ACK not sent"
+               job-id (car err))
+              (signal (car err) (cdr err))))))
+      (agent-repl--log
+       ws "workspace-available: MATERIALIZE COMPLETE job-id=%s result=%s"
+       job-id result)
       (agent-repl--workspace-create-ack-materialized ws job-id result)
       result)))
 
@@ -221,29 +317,35 @@ create the opposite lost-action failure.")
  "host-action dedupe: process-local cache ready entries=%d hot-reload-preserved=yes crash-window=action-may-replay-before-daemon-completion"
  (hash-table-count agent-repl--host-action-outcomes))
 
-(defun agent-repl--workspace-create-wire-object-to-alist (object context)
+(defun agent-repl--workspace-create-wire-object-to-alist (object context &optional ws)
   "Convert protojson Struct OBJECT to a recursively converted alist.
 CONTEXT labels loud validation failures.  Protojson decoding produces keyword
 plists, while the established host handlers consume symbol-keyed alists."
   (unless (or (null object)
-              (and (listp object)
-                   (keywordp (car object))
-                   (zerop (% (length object) 2))))
+              (agent-repl--workspace-create-keyword-plist-p object))
     (agent-repl--log
-     nil "host-action: INVALID %s struct=%S — expected keyword plist"
-     context object)
+     ws "host-action: INVALID %s struct-shape=%s — expected keyword plist"
+     context (agent-repl--workspace-create-log-payload-shape object))
     (error "agent-repl: %s must be a structured payload" context))
   (cl-labels
       ((convert (value)
          (cond
           ((and (consp value) (keywordp (car value)))
-           (unless (zerop (% (length value) 2))
+           (unless (agent-repl--workspace-create-keyword-plist-p value)
+             (agent-repl--log
+              ws
+              "host-action: INVALID %s nested-struct-shape=%s — odd field count"
+              context (agent-repl--workspace-create-log-payload-shape value))
              (error "agent-repl: %s contains a malformed object: %S"
                     context value))
            (cl-loop for (key item) on value by #'cddr
-                    unless (keywordp key)
-                    do (error "agent-repl: %s contains non-keyword key %S"
-                              context key)
+                    do (unless (keywordp key)
+                         (agent-repl--log
+                          ws
+                          "host-action: INVALID %s nested-key-type=%s — expected keyword"
+                          context (type-of key))
+                         (error "agent-repl: %s contains a non-keyword key"
+                                context))
                     collect
                     (cons (intern (substring (symbol-name key) 1))
                           (convert item))))
@@ -251,42 +353,43 @@ plists, while the established host handlers consume symbol-keyed alists."
           (t value))))
     (convert object)))
 
-(defun agent-repl--workspace-create-legacy-host-command (legacy)
+(defun agent-repl--workspace-create-legacy-host-command (legacy &optional ws)
   "Validate LEGACY and return `(TYPE HANDLER CMD WS)'.
 LEGACY is the `legacyCommand' HostAction payload.  Its structured payload is
 translated to the alist contract the existing host handlers consume."
   (unless (and (listp legacy) (keywordp (car legacy)))
     (agent-repl--log
-     nil "host-action: INVALID legacyCommand=%S — expected object"
-     legacy)
+     ws "host-action: INVALID legacyCommand-shape=%s — expected object"
+     (agent-repl--workspace-create-log-payload-shape legacy))
     (error "agent-repl: HostAction legacyCommand must be an object"))
   (let* ((type (agent-repl--workspace-create-required-string
-                legacy :type "HostAction legacyCommand"))
+                legacy :type "HostAction legacyCommand" ws))
          (entry (assoc type agent-repl--legacy-host-action-handlers))
          (_required-payload
           (unless (plist-member legacy :payload)
             (agent-repl--log
-             nil "host-action: INVALID legacy type=%s — payload missing"
+             ws "host-action: INVALID legacy type=%s — payload missing"
              type)
             (error "agent-repl: HostAction legacyCommand %s requires payload"
                    type)))
          (payload
           (agent-repl--workspace-create-wire-object-to-alist
            (plist-get legacy :payload)
-           (format "HostAction legacyCommand %s payload" type))))
+           (format "HostAction legacyCommand %s payload" type) ws)))
     (unless entry
       (agent-repl--log
-       nil
-       "host-action: INVALID legacy type=%s known=%S payload=%S — refusing"
-       type (mapcar #'car agent-repl--legacy-host-action-handlers) payload)
+       ws
+       "host-action: INVALID legacy type=%s known=%S payload-shape=%s — refusing"
+       type (mapcar #'car agent-repl--legacy-host-action-handlers)
+       (agent-repl--workspace-create-log-payload-shape payload))
       (error "agent-repl: unsupported HostAction legacyCommand type %s" type))
     (list type (cdr entry) payload (alist-get 'workspace payload))))
 
-(defun agent-repl--workspace-create-host-action-command (action)
+(defun agent-repl--workspace-create-host-action-command (action &optional ws)
   "Validate ACTION and return `(ACTION-ID TYPE HANDLER CMD WS)'.
 Exactly one UI action arm must be present."
   (let* ((action-id (agent-repl--workspace-create-required-string
-                     action :actionId "HostAction"))
+                     action :actionId "HostAction" ws))
          (present
           (cl-remove-if-not
            (lambda (entry) (plist-member action (car entry)))
@@ -294,9 +397,10 @@ Exactly one UI action arm must be present."
                    '((:legacyCommand nil nil))))))
     (unless (= (length present) 1)
       (agent-repl--log
-       nil
-       "host-action: INVALID action-id=%s present-arms=%S payload=%S"
-       action-id (mapcar #'car present) action)
+       ws
+       "host-action: INVALID action-id=%s present-arms=%S action-shape=%s"
+       action-id (mapcar #'car present)
+       (agent-repl--workspace-create-log-payload-shape action))
       (error "agent-repl: HostAction %s must select exactly one UI action"
              action-id))
     (let* ((entry (car present))
@@ -304,7 +408,7 @@ Exactly one UI action arm must be present."
       (if (eq arm :legacyCommand)
           (pcase-let ((`(,type ,handler ,cmd ,ws)
                        (agent-repl--workspace-create-legacy-host-command
-                        (plist-get action arm))))
+                        (plist-get action arm) ws)))
             (list action-id type handler cmd ws))
         (let* ((handler (cadr entry))
                (mapping (caddr entry))
@@ -320,19 +424,30 @@ Exactly one UI action arm must be present."
 (defun agent-repl--workspace-create-send-host-completion
     (action-id ok &optional error-text ws)
   "Send HostActionCompleted for ACTION-ID with OK and ERROR-TEXT."
-  (let ((request-id
-         (agent-repl--uds-send-command
-          "hostActionCompleted"
-          (append (list :actionId action-id
-                        :ok (if ok t json-false))
-                  (when error-text (list :error error-text))))))
-    (agent-repl--uds-track-command
-     request-id "hostActionCompleted" ws)
-    (agent-repl--log
-     ws
-     "host-action: COMPLETION SENT action-id=%s request-id=%s ok=%S error=%s"
-     action-id request-id ok (or error-text "nil"))
-    request-id))
+  (let (request-id)
+    (condition-case err
+        (progn
+          (setq request-id
+                (agent-repl--uds-send-command
+                 "hostActionCompleted"
+                 (append (list :actionId action-id
+                               :ok (if ok t json-false))
+                         (when error-text (list :error error-text)))))
+          (agent-repl--uds-track-command
+           request-id "hostActionCompleted" ws)
+          (agent-repl--log
+           ws
+           "host-action: COMPLETION SENT action-id=%s request-id=%s ok=%S error-present=%S error-length=%s"
+           action-id request-id ok (not (null error-text))
+           (and error-text (length error-text)))
+          request-id)
+      (error
+       (agent-repl--log
+        ws
+        "host-action: COMPLETION FAILED action-id=%s request-id=%s ok=%S error-present=%S error-length=%s err-type=%s"
+        action-id request-id ok (not (null error-text))
+        (and error-text (length error-text)) (car err))
+       (signal (car err) (cdr err))))))
 
 (defun agent-repl--workspace-create-cache-host-success
     (action-id type handler cmd ws duplicates)
@@ -347,15 +462,16 @@ Exactly one UI action arm must be present."
               (delete action-id agent-repl--host-action-success-order)))
   (while (> (length agent-repl--host-action-success-order)
             agent-repl--host-action-success-cache-limit)
-    (let ((evicted (car (last agent-repl--host-action-success-order))))
+    (let* ((evicted (car (last agent-repl--host-action-success-order)))
+           (evicted-outcome
+            (gethash evicted agent-repl--host-action-outcomes)))
       (setq agent-repl--host-action-success-order
             (butlast agent-repl--host-action-success-order))
-      (when (eq (plist-get (gethash evicted agent-repl--host-action-outcomes)
-                           :state)
+      (when (eq (plist-get evicted-outcome :state)
                 'succeeded)
         (remhash evicted agent-repl--host-action-outcomes)
         (agent-repl--log
-         nil
+         (plist-get evicted-outcome :ws)
          "host-action dedupe: EVICT success action-id=%s cache-limit=%d crash-window=unchanged"
          evicted agent-repl--host-action-success-cache-limit)))))
 
@@ -366,9 +482,10 @@ Exactly one UI action arm must be present."
         (ws (plist-get outcome :ws)))
     (agent-repl--log
      ws
-     "host-action dedupe: RESEND action-id=%s state=%s reason=%s ok=%S error=%S handler-not-run=yes"
+     "host-action dedupe: RESEND action-id=%s state=%s reason=%s ok=%S error-present=%S error-length=%s handler-not-run=yes"
      action-id state reason (plist-get outcome :ok)
-     (plist-get outcome :error))
+     (not (null (plist-get outcome :error)))
+     (and (plist-get outcome :error) (length (plist-get outcome :error))))
     (agent-repl--workspace-create-send-host-completion
      action-id (plist-get outcome :ok) (plist-get outcome :error) ws)
     (when (eq state 'failed-unsent)
@@ -382,6 +499,14 @@ Exactly one UI action arm must be present."
        action-id))
     :duplicate))
 
+(defun agent-repl--workspace-create-host-action-ws (action)
+  "Return ACTION's directly supplied legacy workspace name, if valid.
+This is diagnostic context only; HostAction validation remains authoritative."
+  (let* ((legacy (and (listp action) (plist-get action :legacyCommand)))
+         (payload (and (listp legacy) (plist-get legacy :payload)))
+         (ws (and (listp payload) (plist-get payload :workspace))))
+    (and (stringp ws) (not (string-empty-p (string-trim ws))) ws)))
+
 (defun agent-repl--workspace-create-handle-host-action (action)
   "Execute daemon ACTION through its Emacs host handler and complete it.
 Once ACTION-ID validates, parsing and handler failures are acknowledged as
@@ -389,10 +514,16 @@ Once ACTION-ID validates, parsing and handler failures are acknowledged as
 for the same action id never invokes a non-idempotent handler twice: an
 in-flight duplicate is counted for completion replay, and a completed
 duplicate resends its cached outcome."
-  (let* ((action-id (agent-repl--workspace-create-required-string
-                     action :actionId "HostAction"))
+  (let* ((action-ws (agent-repl--workspace-create-host-action-ws action))
+         (action-id (agent-repl--workspace-create-required-string
+                     action :actionId "HostAction" action-ws))
          (existing (gethash action-id agent-repl--host-action-outcomes))
          (state (plist-get existing :state)))
+    (agent-repl--log
+     (or (plist-get existing :ws) action-ws)
+     "host-action: RECEIVED action-id=%s cached-state=%s action-shape=%s"
+     action-id (or state "none")
+     (agent-repl--workspace-create-log-payload-shape action))
     (cond
      ((eq state 'in-flight)
       (let ((duplicates (1+ (or (plist-get existing :duplicates) 0))))
@@ -415,7 +546,7 @@ duplicate resends its cached outcome."
         (condition-case err
             (pcase-let ((`(,_ ,parsed-type ,parsed-handler ,parsed-cmd ,parsed-ws)
                          (agent-repl--workspace-create-host-action-command
-                          action)))
+                          action action-ws)))
               (setq type parsed-type
                     handler parsed-handler
                     cmd parsed-cmd
@@ -426,8 +557,9 @@ duplicate resends its cached outcome."
                        agent-repl--host-action-outcomes)
               (agent-repl--log
                ws
-               "host-action: DISPATCH action-id=%s type=%s handler=%s cmd=%S"
-               action-id type handler cmd)
+               "host-action: DISPATCH action-id=%s type=%s handler=%s cmd-shape=%s"
+               action-id type handler
+               (agent-repl--workspace-create-log-payload-shape cmd))
               (funcall handler cmd))
           (error (setq handler-error err)))
         (if (null handler-error)
@@ -468,14 +600,16 @@ duplicate resends its cached outcome."
             (when completion-error
               (agent-repl--log
                ws
-               "host-action: FAILURE completion send failed action-id=%s type=%s handler=%s handler-error=%S completion-error=%S retryable=no-until-completion-resend"
+               "host-action: FAILURE completion send failed action-id=%s type=%s handler=%s handler-err-type=%s handler-err-length=%d completion-err-type=%s retryable=no-until-completion-resend"
                action-id (or type "unresolved") (or handler "unresolved")
-               handler-error completion-error))
+               (car handler-error) (length text) (car completion-error)))
             (agent-repl--log
              ws
-             "host-action: FAILED action-id=%s type=%s handler=%s cmd=%S err=%S duplicates=%d outcome-retained=%s"
+             "host-action: FAILED action-id=%s type=%s handler=%s cmd-shape=%s err-type=%s err-length=%d duplicates=%d outcome-retained=%s"
              action-id (or type "unresolved") (or handler "unresolved")
-             cmd handler-error duplicates (if completion-error "yes" "no"))
+             (agent-repl--workspace-create-log-payload-shape cmd)
+             (car handler-error) (length text) duplicates
+             (if completion-error "yes" "no"))
             (signal (car handler-error) (cdr handler-error)))))))))
 
 (agent-repl--uds-register-handler
