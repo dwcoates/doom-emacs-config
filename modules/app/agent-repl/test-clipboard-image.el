@@ -223,7 +223,10 @@ into the buffer it runs in, returning the path."
                    (lambda () "ws1"))
                   ((symbol-function 'agent-repl--log) (lambda (&rest _) nil))
                   ((symbol-function 'agent-repl--image-capture-clipboard)
-                   (lambda (dest) (setq captured-dest dest) dest)))
+                   (lambda (dest &optional ws)
+                     (should (equal ws "ws1"))
+                     (setq captured-dest dest)
+                     dest)))
           (let ((result (agent-repl-attach-clipboard-image)))
             (should (equal result captured-dest))
             (should (string-prefix-p
@@ -240,7 +243,9 @@ into the buffer it runs in, returning the path."
                  (lambda () "ws1"))
                 ((symbol-function 'agent-repl--log) (lambda (&rest _) nil))
                 ((symbol-function 'agent-repl--image-capture-clipboard)
-                 (lambda (_) (user-error "agent-repl: no image found on the clipboard"))))
+                 (lambda (_ &optional ws)
+                   (should (equal ws "ws1"))
+                   (user-error "agent-repl: no image found on the clipboard"))))
         (should-error (agent-repl-attach-clipboard-image) :type 'user-error)))))
 
 (provide 'test-clipboard-image)
