@@ -10,7 +10,6 @@ import {
   anyLiveAsync,
   anyLiveThinking,
   backfillChunks,
-  clearBoundary,
   compactionBannerHtml,
   diffHtml,
   finalResponses,
@@ -37,6 +36,8 @@ import { ForwardingLogger, resetLoggingForTests, setLogger } from "../src/wslog.
 import { META_CLOSE, META_OPEN } from "../src/meta.js";
 import { AsyncSource } from "../src/protocol.js";
 import {
+  ContextClearedItem,
+  ContextCompactedItem,
   ConversationItem,
   ConversationStore,
   ResultItem,
@@ -474,35 +475,168 @@ describe("diffHtml", () => {
   });
 });
 
-describe("compact boundary", () => {
-  const boundary: ConversationItem = {
-    kind: "compact-boundary",
-    trigger: "manual",
+/** A compaction item, defaulted to a successful automatic one. */
+function compacted(over: Partial<ContextCompactedItem> = {}): ContextCompactedItem {
+  return {
+    kind: "context-compacted",
+    uuid: "k1",
+    trigger: "auto",
     preTokens: 287028,
-    postTokens: 0,
+    postTokens: 9001,
+    durationMs: 4200,
+    summary: "the story so far",
+    result: "success",
+    error: "",
+    ...over,
   };
+}
 
+describe("context clear", () => {
+  const cleared: ContextClearedItem = { kind: "context-cleared", uuid: "c1" };
+
+  it("draws the red rule as a separator", () => {
+    // Arrange + Act
+    const html = renderItem(cleared);
+    // Assert — the bar is a separator element the stylesheet paints red.
+    expect(html).toContain(`<div class="clear-divider" role="separator"`);
+  });
+
+  it("labels the rule for a screen reader", () => {
+    // Arrange + Act
+    const html = renderItem(cleared);
+    // Assert
+    expect(html).toContain(`aria-label="context cleared"`);
+  });
+
+  it("draws the rule and NOTHING else, the event carrying no other fact", () => {
+    // Arrange + Act
+    const html = renderItem(cleared);
+    // Assert
+    expect(html).toBe(
+      `<div class="clear-divider" role="separator" aria-label="context cleared"></div>`,
+    );
+  });
+
+  it("draws no bubble, since a clear carries no summary", () => {
+    // Arrange + Act
+    const html = renderItem(cleared);
+    // Assert
+    expect(html).not.toContain("bubble");
+  });
+});
+
+describe("context compaction", () => {
   it("draws the orange rule as a separator", () => {
-    // Act
-    const html = renderItem(boundary);
+    // Arrange + Act
+    const html = renderItem(compacted());
     // Assert — the bar is a separator element the stylesheet paints orange.
     expect(html).toContain(`<div class="compact-rule" role="separator"`);
   });
 
+  it("labels the rule for a screen reader", () => {
+    // Arrange + Act
+    const html = renderItem(compacted());
+    // Assert
+    expect(html).toContain(`aria-label="context compacted"`);
+  });
+
   it("seats the orange rule above the context-compacted stamp", () => {
-    // Arrange
-    const html = renderItem(boundary);
-    // Act — the rule must precede the label so it lands between the /compact
-    // prompt bubble above and the stamp below.
+    // Arrange + Act — the rule must precede the label so it opens the feed.
+    const html = renderItem(compacted());
     // Assert
     expect(html.indexOf("compact-rule")).toBeLessThan(html.indexOf("compact-divider"));
   });
 
-  it("keeps the context-compacted stamp with its trigger and pre-count", () => {
-    // Act
-    const html = renderItem(boundary);
+  it("stamps the compaction with the tokens it traded", () => {
+    // Arrange + Act
+    const html = renderItem(compacted());
     // Assert
-    expect(html).toContain("context compacted (manual, 287028 tokens before)");
+    expect(html).toContain("context compacted (287,028 → 9,001 tokens)");
+  });
+
+  it("renders the summary as a response bubble", () => {
+    // Arrange + Act
+    const html = renderItem(compacted());
+    // Assert — the class the stylesheet paints purple-on-green.
+    expect(html).toContain(`class="bubble assistant md compact-summary"`);
+  });
+
+  it("carries the summary text into that bubble", () => {
+    // Arrange + Act
+    const html = renderItem(compacted({ summary: "we fixed the flake" }));
+    // Assert
+    expect(html).toContain("we fixed the flake");
+  });
+
+  it("renders the summary as markdown, since the vendor writes prose", () => {
+    // Arrange + Act
+    const html = renderItem(compacted({ summary: "# heading" }));
+    // Assert
+    expect(html).toContain("<h1");
+  });
+
+  it("seats the summary bubble BELOW the rule it explains", () => {
+    // Arrange + Act
+    const html = renderItem(compacted());
+    // Assert
+    expect(html.indexOf("compact-rule")).toBeLessThan(html.indexOf("compact-summary"));
+  });
+
+  it("draws no bubble at all for an EMPTY summary", () => {
+    // Arrange + Act — an empty bubble would claim an account exists.
+    const html = renderItem(compacted({ summary: "" }));
+    // Assert
+    expect(html).not.toContain("compact-summary");
+  });
+
+  it("still draws the rule for an empty summary", () => {
+    // Arrange + Act
+    const html = renderItem(compacted({ summary: "" }));
+    // Assert
+    expect(html).toContain("compact-rule");
+  });
+
+  it("renders an automatic trigger and a manual one IDENTICALLY", () => {
+    // Arrange + Act — nothing in the feed branches on who asked.
+    const auto = renderItem(compacted({ trigger: "auto" }));
+    const manual = renderItem(compacted({ trigger: "manual" }));
+    // Assert
+    expect(manual).toBe(auto);
+  });
+
+  it("names neither trigger in the output", () => {
+    // Arrange + Act
+    const html = renderItem(compacted({ trigger: "manual" }));
+    // Assert
+    expect(html).not.toContain("manual");
+  });
+
+  it("says so when the compaction FAILED", () => {
+    // Arrange + Act
+    const html = renderItem(compacted({ result: "failed", error: "context window exceeded" }));
+    // Assert — the daemon's report is drawn, never swallowed.
+    expect(html).toContain("compaction failed: context window exceeded");
+  });
+
+  it("says a failure happened even when the daemon gave no reason", () => {
+    // Arrange + Act
+    const html = renderItem(compacted({ result: "failed", error: "" }));
+    // Assert
+    expect(html).toContain("compaction failed");
+  });
+
+  it("escapes a failure reason rather than injecting it as markup", () => {
+    // Arrange + Act
+    const html = renderItem(compacted({ result: "failed", error: "<img onerror=x>" }));
+    // Assert
+    expect(html).toContain("&lt;img onerror=x&gt;");
+  });
+
+  it("draws no failure line for a successful compaction", () => {
+    // Arrange + Act
+    const html = renderItem(compacted());
+    // Assert
+    expect(html).not.toContain("compact-error");
   });
 });
 
@@ -1852,46 +1986,10 @@ describe("renderItem", () => {
   });
 });
 
-describe("clear divider", () => {
-  it("draws the boundary rule beneath a /clear prompt", () => {
-    // Arrange
+describe("the chrome a clear leaves behind", () => {
+  it("draws no rule beneath an ordinary prompt, the rule being its own item now", () => {
+    // Arrange — the prompt text is no longer what draws the boundary.
     const item = userTurnAt(9, 0, "/clear");
-    // Act
-    const html = renderItem(item);
-    // Assert
-    expect(html).toContain(`<div class="clear-divider"`);
-  });
-
-  it("places the boundary rule after the /clear bubble rather than inside it", () => {
-    // Arrange
-    const item = userTurnAt(9, 0, "/clear");
-    // Act
-    const html = renderItem(item);
-    // Assert — the bubble closes before the rule opens.
-    expect(html).toMatch(/<\/div><div class="clear-divider"[^>]*><\/div>$/);
-  });
-
-  it("draws no boundary rule beneath an ordinary prompt", () => {
-    // Arrange
-    const item = userTurnAt(9, 0, "do the thing");
-    // Act
-    const html = renderItem(item);
-    // Assert
-    expect(html).not.toContain("clear-divider");
-  });
-
-  it("spots a /clear prompt padded with surrounding whitespace", () => {
-    // Arrange
-    const item = userTurnAt(9, 0, "  /clear\n");
-    // Act
-    const html = renderItem(item);
-    // Assert
-    expect(html).toContain("clear-divider");
-  });
-
-  it("draws no boundary rule for a prompt that merely mentions /clear", () => {
-    // Arrange
-    const item = userTurnAt(9, 0, "run /clear when you are done");
     // Act
     const html = renderItem(item);
     // Assert
@@ -1947,44 +2045,6 @@ describe("clear divider", () => {
     const finals = finalResponses([userTurnAt(9, 0, "/clear", "r7"), reply, closer]);
     // Act + Assert
     expect(rendersEmpty(closer, finals)).toBe(true);
-  });
-});
-
-describe("clearBoundary", () => {
-  it("names the /clear turn a cut feed opens on by its request id", () => {
-    // Arrange — an already-cut list, as itemsFromLastClear hands the renderer.
-    const items = [userTurnAt(9, 0, "/clear", "r7"), textAt(9, 1)];
-    // Act + Assert
-    expect(clearBoundary(items)).toBe("r7");
-  });
-
-  it("reports null for an uncut feed", () => {
-    // Arrange
-    const items = [userTurnAt(9, 0, "do the thing"), textAt(9, 1)];
-    // Act + Assert
-    expect(clearBoundary(items)).toBeNull();
-  });
-
-  it("reports null for an empty feed", () => {
-    // Arrange + Act + Assert
-    expect(clearBoundary([])).toBeNull();
-  });
-
-  it("reports null when a non-turn item heads the feed", () => {
-    // Arrange
-    const items = [textAt(9, 1), userTurnAt(9, 2, "/clear")];
-    // Act + Assert — a /clear that is not the head did not produce this cut.
-    expect(clearBoundary(items)).toBeNull();
-  });
-
-  it("distinguishes two /clear cuts by their request ids", () => {
-    // Arrange — the SECOND clear must read as a new boundary, or the
-    // renderer would reconcile stale nodes across it instead of rebuilding.
-    const first = clearBoundary([userTurnAt(9, 0, "/clear", "r1")]);
-    // Act
-    const second = clearBoundary([userTurnAt(10, 0, "/clear", "r2")]);
-    // Assert
-    expect(second).not.toBe(first);
   });
 });
 
@@ -3613,12 +3673,12 @@ describe("planToolReveal", () => {
     expect(planToolReveal(items, "ghost")).toBeNull();
   });
 
-  it("returns null for a subagent a /clear discarded from the feed", () => {
+  it("returns null for a subagent a clear discarded from the feed", () => {
     // Arrange — the agent precedes the clear, so it is off the current context.
-    const items = [
+    const items: ConversationItem[] = [
       userTurnAt(9, 0),
       agentTool("a1"),
-      userTurnAt(9, 1, "/clear", "r2"),
+      { kind: "context-cleared", uuid: "c1" },
     ];
     // Act + Assert
     expect(planToolReveal(items, "a1")).toBeNull();
@@ -5558,5 +5618,183 @@ describe("FeedRenderer: fresh user turn logs a rendering receipt", () => {
     feed.render(state);
     // Assert
     expect(lines.length).toBe(after);
+  });
+});
+
+/**
+ * The feed's TRUNCATION at a clear or a compaction: everything above the
+ * event leaves the screen, not merely the agent's context.
+ *
+ * The daemon floors every REPLAY at the newest of the two, so a fresh
+ * subscription arrives already truncated. These cover the LIVE case, which is
+ * why the client-side slice survives at all: an event landing over items this
+ * end has already drawn must still wipe them.
+ */
+describe("FeedRenderer: a clear or a compaction truncates the feed", () => {
+  const NOOP_ACTIONS: Actions = {
+    decidePermission() {},
+    answerQuestions() {},
+    cancelQueued() {},
+    runQueuedNow() {},
+    acceptQueued() {},
+  };
+
+  function mount(): { container: HTMLElement; feed: FeedRenderer } {
+    const container = document.createElement("div");
+    return { container, feed: new FeedRenderer(container, NOOP_ACTIONS) };
+  }
+
+  function stateOf(items: ConversationItem[]): StoreState {
+    const state = new ConversationStore().state;
+    state.items = items;
+    return state;
+  }
+
+  const cleared: ContextClearedItem = { kind: "context-cleared", uuid: "c1" };
+
+  /** A compaction item, the other truncating event. */
+  function compaction(uuid = "k1"): ContextCompactedItem {
+    return {
+      kind: "context-compacted",
+      uuid,
+      trigger: "auto",
+      preTokens: 287028,
+      postTokens: 9001,
+      durationMs: 4200,
+      summary: "the story so far",
+      result: "success",
+      error: "",
+    };
+  }
+
+  it("drops the items above a clear on a live render", () => {
+    // Arrange
+    const { container, feed } = mount();
+    // Act
+    feed.render(stateOf([userTurnAt(9, 0, "the old question"), cleared]));
+    // Assert
+    expect(container.innerHTML).not.toContain("the old question");
+  });
+
+  it("drops the items above a compaction on a live render", () => {
+    // Arrange
+    const { container, feed } = mount();
+    // Act
+    feed.render(stateOf([userTurnAt(9, 0, "the old question"), compaction()]));
+    // Assert
+    expect(container.innerHTML).not.toContain("the old question");
+  });
+
+  it("wipes items ALREADY DRAWN when the clear arrives live over them", () => {
+    // Arrange — the live case the client-side truncation exists for.
+    const { container, feed } = mount();
+    feed.render(stateOf([userTurnAt(9, 0, "the old question")]));
+    // Act
+    feed.render(stateOf([userTurnAt(9, 0, "the old question"), cleared]));
+    // Assert
+    expect(container.innerHTML).not.toContain("the old question");
+  });
+
+  it("wipes items ALREADY DRAWN when the compaction arrives live over them", () => {
+    // Arrange
+    const { container, feed } = mount();
+    feed.render(stateOf([userTurnAt(9, 0, "the old question")]));
+    // Act
+    feed.render(stateOf([userTurnAt(9, 0, "the old question"), compaction()]));
+    // Assert
+    expect(container.innerHTML).not.toContain("the old question");
+  });
+
+  it("draws the red rule the clear brought with it", () => {
+    // Arrange
+    const { container, feed } = mount();
+    // Act
+    feed.render(stateOf([userTurnAt(9, 0), cleared]));
+    // Assert
+    expect(container.innerHTML).toContain("clear-divider");
+  });
+
+  it("draws the orange rule and the summary bubble the compaction brought", () => {
+    // Arrange
+    const { container, feed } = mount();
+    // Act
+    feed.render(stateOf([userTurnAt(9, 0), compaction()]));
+    // Assert
+    expect(container.innerHTML).toContain("compact-rule");
+    expect(container.innerHTML).toContain("compact-summary");
+  });
+
+  it("keeps the turns BELOW the clear", () => {
+    // Arrange
+    const { container, feed } = mount();
+    // Act
+    feed.render(stateOf([userTurnAt(9, 0, "the old question"), cleared, userTurnAt(9, 1, "the new question")]));
+    // Assert
+    expect(container.innerHTML).toContain("the new question");
+  });
+
+  it("keeps the turns BELOW the compaction", () => {
+    // Arrange
+    const { container, feed } = mount();
+    // Act
+    feed.render(
+      stateOf([userTurnAt(9, 0, "the old question"), compaction(), userTurnAt(9, 1, "the new question")]),
+    );
+    // Assert
+    expect(container.innerHTML).toContain("the new question");
+  });
+
+  it("lets the LATER of two events win when both sit in one feed", () => {
+    // Arrange — a clear, then a compaction; only the compaction's survivors draw.
+    const { container, feed } = mount();
+    // Act
+    feed.render(
+      stateOf([
+        cleared,
+        userTurnAt(9, 1, "the middle question"),
+        compaction(),
+        userTurnAt(9, 2, "the new question"),
+      ]),
+    );
+    // Assert
+    expect(container.innerHTML).not.toContain("the middle question");
+    expect(container.innerHTML).toContain("the new question");
+  });
+
+  it("keeps the whole feed when neither event ever happened", () => {
+    // Arrange
+    const { container, feed } = mount();
+    // Act
+    feed.render(stateOf([userTurnAt(9, 0, "the only question")]));
+    // Assert
+    expect(container.innerHTML).toContain("the only question");
+  });
+
+  it("truncates a RESTORED render at the clear too", () => {
+    // Arrange
+    const { container, feed } = mount();
+    // Act
+    feed.renderRestored(stateOf([userTurnAt(9, 0, "the old question"), cleared]));
+    // Assert
+    expect(container.innerHTML).not.toContain("the old question");
+  });
+
+  it("truncates a RESTORED render at the compaction too", () => {
+    // Arrange
+    const { container, feed } = mount();
+    // Act
+    feed.renderRestored(stateOf([userTurnAt(9, 0, "the old question"), compaction()]));
+    // Assert
+    expect(container.innerHTML).not.toContain("the old question");
+  });
+
+  it("keys the clear's node by uuid, so it survives the rebuild it triggers", () => {
+    // Arrange + Act + Assert
+    expect(itemKey(cleared, 3)).toBe("context-cleared:c1");
+  });
+
+  it("keys the compaction's node by uuid too", () => {
+    // Arrange + Act + Assert
+    expect(itemKey(compaction("k7"), 3)).toBe("context-compacted:k7");
   });
 });

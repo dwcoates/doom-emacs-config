@@ -26,8 +26,12 @@
  *   turn, the tool-feedback case).
  * - toolUse (ToolUseBlock) / toolResult (ToolResultBlock) arms → the same two
  *   ToolItems, standalone; the store field-merges the pair by toolUseId.
- * - result (ResultMessage) → ResultItem; compactBoundary / compactBoundaryLine
- *   → CompactBoundaryItem; permission (core.v1.PermissionItem) →
+ * - result (ResultMessage) → ResultItem; contextCleared (core.v1.ContextCleared,
+ *   an EMPTY message) → ContextClearedItem and contextCompacted
+ *   (core.v1.ContextCompacted) → ContextCompactedItem — the CLEAR and the
+ *   COMPACTION,
+ *   coalesced and de-duplicated by the daemon so each arrives ONCE as one
+ *   complete fact; permission (core.v1.PermissionItem) →
  *   PermissionItem; systemFailure (SystemFailureItem) → the classified
  *   failure card (F4) — the ApiErrorLine `apiError` arm it superseded is
  *   RETIRED (step 11).
@@ -46,7 +50,8 @@ import type { CounterEntry, CounterStatus } from "./counter-menu.js";
 import type { ContentBlock, ModelUsage, ResultSubtype, Usage } from "./protocol.js";
 import { recordBlockIdentity } from "./streaming.js";
 import type {
-  CompactBoundaryItem,
+  ContextClearedItem,
+  ContextCompactedItem,
   ConversationItem,
   PermissionItem,
   ResultItem,
@@ -700,10 +705,12 @@ function itemsFromFrame(frame: ConversationItemFrame): { items: ConversationItem
       return { items: [], ignores: ["conversation-item:toolUseResult"] };
     case "result":
       return { items: [resultItemFrom(frame.payload)], ignores: [] };
-    case "compactBoundary":
-      return { items: [compactBoundaryItem(frame.payload)], ignores: [] };
-    case "compactBoundaryLine":
-      return { items: [compactBoundaryLineItem(frame.payload)], ignores: [] };
+    case "contextCleared":
+      // An EMPTY message: its existence and position are the whole fact, so
+      // there is nothing to read off the payload but the envelope's uuid.
+      return { items: [{ kind: "context-cleared", uuid: frame.uuid }], ignores: [] };
+    case "contextCompacted":
+      return { items: [contextCompactedItem(frame.payload, frame.uuid)], ignores: [] };
     case "permission":
       return { items: [permissionItemFrom(frame.payload, frame.uuid)], ignores: [] };
     case "systemFailure":
@@ -958,29 +965,45 @@ function modelUsageFrom(m: Obj | undefined): Record<string, ModelUsage> | undefi
   return out;
 }
 
-/** "auto"/"manual" from either a proto enum name or a disk plain string. */
-function compactTrigger(raw: string): "auto" | "manual" {
-  return raw === "manual" || raw === "COMPACT_TRIGGER_MANUAL" ? "manual" : "auto";
+/**
+ * `core.v1.ContextCompactTrigger` by its protojson name. An ABSENT field is
+ * the proto3 default (protojson omits it), which is UNSPECIFIED.
+ *
+ * An unrecognized name is an ERROR rather than a default: silently calling an
+ * unknown trigger "auto" would invent a fact the daemon never sent.
+ */
+const COMPACT_TRIGGERS: Readonly<Record<string, "auto" | "manual" | "unspecified">> = {
+  "": "unspecified",
+  CONTEXT_COMPACT_TRIGGER_UNSPECIFIED: "unspecified",
+  CONTEXT_COMPACT_TRIGGER_MANUAL: "manual",
+  CONTEXT_COMPACT_TRIGGER_AUTO: "auto",
+};
+
+function compactTrigger(raw: string): "auto" | "manual" | "unspecified" {
+  const trigger = COMPACT_TRIGGERS[raw];
+  if (trigger === undefined) {
+    throw new Error(`state-adapter: unknown ContextCompactTrigger '${raw}'`);
+  }
+  return trigger;
 }
 
-function compactBoundaryItem(c: Obj): CompactBoundaryItem {
-  // Stream-plane boundary: postTokens is unknown here (0).
+/**
+ * The COALESCED compaction. The daemon merges the vendor's separate reports
+ * (start status, token boundary, summary line) into this one message, so
+ * every field is read from one payload rather than correlated across three —
+ * which is exactly what made the summary text unreachable before.
+ */
+function contextCompactedItem(c: Obj, uuid: string): ContextCompactedItem {
   return {
-    kind: "compact-boundary",
+    kind: "context-compacted",
+    uuid,
     trigger: compactTrigger(pstr(c, "trigger")),
     preTokens: pnum(c, "preTokens"),
-    postTokens: 0,
-  };
-}
-
-function compactBoundaryLineItem(line: Obj): CompactBoundaryItem {
-  // Disk-plane boundary: the richer metadata carries pre AND post tokens.
-  const meta = pobj(line, "compactMetadata") ?? {};
-  return {
-    kind: "compact-boundary",
-    trigger: compactTrigger(pstr(meta, "trigger")),
-    preTokens: pnum(meta, "preTokens"),
-    postTokens: pnum(meta, "postTokens"),
+    postTokens: pnum(c, "postTokens"),
+    durationMs: pnum(c, "durationMs"),
+    summary: pstr(c, "summary"),
+    result: pstr(c, "result"),
+    error: pstr(c, "error"),
   };
 }
 

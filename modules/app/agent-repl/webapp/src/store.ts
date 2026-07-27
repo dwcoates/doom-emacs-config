@@ -216,11 +216,47 @@ export interface ResultItem extends FeedOrderedItem {
    */
   context: ResultContext | null;
 }
-export interface CompactBoundaryItem extends FeedOrderedItem {
-  kind: "compact-boundary";
-  trigger: "auto" | "manual";
+/**
+ * The context was CLEARED (`core.v1.ContextCleared`): discarded outright.
+ *
+ * The wire message is EMPTY — its existence and its position in the feed are
+ * the entire fact — so the item carries nothing but the envelope uuid that
+ * keys its DOM node. It is a first-class event now rather than a `/clear`
+ * prompt this end recognized by its text, which is why a replayed session
+ * draws the same boundary a live one does.
+ */
+export interface ContextClearedItem extends FeedOrderedItem {
+  kind: "context-cleared";
+  uuid: string;
+}
+/**
+ * The context was COMPACTED (`core.v1.ContextCompacted`): replaced by a
+ * summary that stands in for it.
+ *
+ * The daemon coalesces the vendor's three partial reports (a start status, a
+ * token-carrying boundary, and the summary text the vendor writes as an
+ * ordinary user message) into this one fact, so every field below is read
+ * from a single item rather than correlated across three.
+ *
+ * `summary` is load-bearing: it is the ONLY surviving account of everything
+ * the compaction discarded, which is why the feed renders it as a bubble
+ * rather than folding it away.
+ *
+ * `trigger` is carried for information only. A compaction is a compaction,
+ * and NOTHING branches on whether the system or the user asked for one.
+ */
+export interface ContextCompactedItem extends FeedOrderedItem {
+  kind: "context-compacted";
+  uuid: string;
+  trigger: "auto" | "manual" | "unspecified";
   preTokens: number;
   postTokens: number;
+  durationMs: number;
+  summary: string;
+  /** "success" | "failed", the daemon's verdict, adopted unexamined. */
+  result: string;
+  /** Populated only when `result` is "failed"; surfaced, never swallowed. */
+  error: string;
 }
 /**
  * A daemon-classified failure, as a conversation card.
@@ -331,7 +367,8 @@ export type ConversationItem =
   | ToolItem
   | PermissionItem
   | ResultItem
-  | CompactBoundaryItem
+  | ContextClearedItem
+  | ContextCompactedItem
   | SystemFailureCard
   | SystemItem;
 

@@ -12,7 +12,8 @@ import {
   type AdapterLogLevel,
 } from "../src/state-adapter.js";
 import type {
-  CompactBoundaryItem,
+  ContextClearedItem,
+  ContextCompactedItem,
   ConversationItem,
   PermissionItem,
   ResultItem,
@@ -562,17 +563,98 @@ describe("result arm", () => {
   });
 });
 
-describe("compact-boundary arms", () => {
-  it("maps a stream compactBoundary (postTokens unknown → 0)", () => {
-    const items = itemsFrom({ uuid: "m1", compactBoundary: { trigger: "COMPACT_TRIGGER_AUTO", preTokens: "100" } });
-    const expected: CompactBoundaryItem = { kind: "compact-boundary", trigger: "auto", preTokens: 100, postTokens: 0 };
+describe("contextCleared / contextCompacted arms", () => {
+  it("maps the EMPTY contextCleared message to an item carrying its envelope uuid", () => {
+    // Arrange + Act
+    const items = itemsFrom({ uuid: "m1", contextCleared: {} });
+    // Assert — existence and position are the whole fact.
+    const expected: ContextClearedItem = { kind: "context-cleared", uuid: "m1" };
     expect(items).toEqual([expected]);
   });
 
-  it("maps a disk compactBoundaryLine's pre + post tokens", () => {
-    const items = itemsFrom({ uuid: "m1", compactBoundaryLine: { compactMetadata: { trigger: "manual", preTokens: "200", postTokens: "50" } } });
-    const expected: CompactBoundaryItem = { kind: "compact-boundary", trigger: "manual", preTokens: 200, postTokens: 50 };
+  it("maps a contextCompacted's coalesced fields", () => {
+    // Arrange + Act
+    const items = itemsFrom({
+      uuid: "m1",
+      contextCompacted: {
+        trigger: "CONTEXT_COMPACT_TRIGGER_AUTO",
+        preTokens: "287028",
+        postTokens: "9001",
+        durationMs: "4200",
+        summary: "the story so far",
+        result: "success",
+      },
+    });
+    // Assert
+    const expected: ContextCompactedItem = {
+      kind: "context-compacted",
+      uuid: "m1",
+      trigger: "auto",
+      preTokens: 287028,
+      postTokens: 9001,
+      durationMs: 4200,
+      summary: "the story so far",
+      result: "success",
+      error: "",
+    };
     expect(items).toEqual([expected]);
+  });
+
+  it("maps the manual trigger", () => {
+    // Arrange + Act
+    const items = itemsFrom({
+      uuid: "m1",
+      contextCompacted: { trigger: "CONTEXT_COMPACT_TRIGGER_MANUAL" },
+    });
+    // Assert
+    expect((items[0] as ContextCompactedItem).trigger).toBe("manual");
+  });
+
+  it("reads an ABSENT trigger as unspecified, the proto3 default protojson omits", () => {
+    // Arrange + Act
+    const items = itemsFrom({ uuid: "m1", contextCompacted: { summary: "s" } });
+    // Assert
+    expect((items[0] as ContextCompactedItem).trigger).toBe("unspecified");
+  });
+
+  it("throws on an unrecognized trigger rather than defaulting it", () => {
+    // Arrange + Act + Assert — inventing a value the daemon never sent would
+    // be the adapter making a fact up.
+    expect(() =>
+      itemsFrom({ uuid: "m1", contextCompacted: { trigger: "CONTEXT_COMPACT_TRIGGER_TELEPATHY" } }),
+    ).toThrow("unknown ContextCompactTrigger");
+  });
+
+  it("carries a failed compaction's verdict and reason", () => {
+    // Arrange + Act
+    const items = itemsFrom({
+      uuid: "m1",
+      contextCompacted: { result: "failed", error: "context window exceeded" },
+    });
+    // Assert — neither half is swallowed.
+    const compaction = items[0] as ContextCompactedItem;
+    expect([compaction.result, compaction.error]).toEqual(["failed", "context window exceeded"]);
+  });
+
+  it("carries an EMPTY summary as empty rather than inventing one", () => {
+    // Arrange + Act
+    const items = itemsFrom({ uuid: "m1", contextCompacted: { preTokens: "10" } });
+    // Assert
+    expect((items[0] as ContextCompactedItem).summary).toBe("");
+  });
+
+  it("rejects the retired compactBoundary arm", () => {
+    // Arrange + Act + Assert
+    expect(() => itemsFrom({ uuid: "m1", compactBoundary: { preTokens: "1" } })).toThrow(
+      "unrecognized field(s): compactBoundary",
+    );
+  });
+
+  it("rejects the retired compactBoundaryLine arm", () => {
+    // Arrange + Act + Assert
+    expect(() => itemsFrom({ uuid: "m1", compactBoundaryLine: {} })).toThrow(
+      "unrecognized field(s): compactBoundaryLine",
+    );
   });
 });
 

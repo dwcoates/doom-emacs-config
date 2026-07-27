@@ -8,9 +8,10 @@
  * The roster is DERIVED, not tracked: every subagent the session spawned is
  * already in the feed as a tool item, so the chip's count and the overlay's
  * rows are a projection of `StoreState.items` rather than a second copy of
- * the same state that could drift from it. A `/clear` needs no reset of its
- * own — the roster reads the CONTEXT (`itemsSinceClear`), and the clear is
- * what moves where that context begins.
+ * the same state that could drift from it. A clear or a compaction needs no
+ * reset of its own — the roster reads the CONTEXT
+ * (`itemsSinceClearOrCompact`), and those two are what move where that
+ * context begins.
  */
 import {
   CounterEntry,
@@ -19,7 +20,7 @@ import {
   counterMenuHtml,
 } from "./counter-menu.js";
 import { ConversationItem, ToolItem, stringField } from "./store.js";
-import { itemsSinceClear } from "./turn.js";
+import { itemsSinceClearOrCompact } from "./clear-compact.js";
 
 /**
  * Tool names that spawn a subagent. The CLI renamed the tool from `Task`
@@ -64,13 +65,13 @@ function subagentEntry(item: ToolItem, nested: boolean): CounterEntry {
  * Every subagent the session's current context carries, in spawn order, as
  * counter entries.
  *
- * A subagent spawned before the last `/clear` is gone from that context
- * (and, since the clear cuts the feed too, off screen with it), so the
- * roster starts where the context starts (`itemsSinceClear`).
+ * A subagent spawned before the last clear or compaction is gone from that
+ * context (and, since either truncates the feed too, off screen with it), so
+ * the roster starts where the context starts (`itemsSinceClearOrCompact`).
  */
 export function sessionSubagents(items: readonly ConversationItem[]): CounterEntry[] {
   const entries: CounterEntry[] = [];
-  for (const item of itemsSinceClear(items)) {
+  for (const item of itemsSinceClearOrCompact(items)) {
     if (item.kind !== "tool" || !SUBAGENT_TOOLS.has(item.toolName)) continue;
     entries.push(subagentEntry(item, item.parentToolUseId !== undefined));
   }

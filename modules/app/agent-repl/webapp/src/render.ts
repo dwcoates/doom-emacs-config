@@ -57,12 +57,14 @@ import { AsyncSource, ModelInfo, QueuedItem } from "./protocol.js";
 import { previewFromInput } from "./permission-preview.js";
 import { navTokensForItem } from "./nav.js";
 import { freezeOnScroll, freezeOnToggle, isPinnedToBottom, parkAtTail, revealNode } from "./scroll.js";
-import { blocksToText, isClearTurn, itemsFromLastClear, userTurnText } from "./turn.js";
+import { blocksToText, userTurnText } from "./turn.js";
+import { clearOrCompactKey, itemsFromClearOrCompact } from "./clear-compact.js";
 import { gnsFolds } from "./gns.js";
 import { asyncByBubble, isWatcher, watcherRef } from "./watchers.js";
 import { TaskTail, WatcherPoller } from "./watcher-poll.js";
 import {
-  CompactBoundaryItem,
+  ContextClearedItem,
+  ContextCompactedItem,
   ConversationItem,
   PermissionItem,
   ResultItem,
@@ -240,8 +242,9 @@ function contentToText(
 
 /**
  * The compaction-in-progress banner: shown while the SDK is compacting the
- * conversation (a `compact-status` frame opened the window and the
- * `compact-boundary` closes it). The SDK reports no progress percentage, so
+ * conversation — the daemon's `ProgressView.compacting` window, opened while
+ * the work runs and closed when it lands. The SDK reports no progress
+ * percentage, so
  * the bar is INDETERMINATE — a looping sweep, mirroring the CLI's own
  * "Compacting conversation…" spinner rather than pretending to a fraction it
  * cannot know.
@@ -376,9 +379,6 @@ function Bubble(cls: string, body: string, ts: string, meta = ""): string {
  * a plain `bubble user`, the same way a running tool card ignores the pulse.
  */
 function UserTurn(item: UserTurnItem, panels?: PanelContext): string {
-  const divider = isClearTurn(item)
-    ? `<div class="clear-divider" role="separator" aria-label="context cleared"></div>`
-    : "";
   // A tools-only turn hosts its live async on its own prompt bubble (see
   // asyncByBubble), so the prompt goes amber and catalogs that work too — the
   // invariant holds even for a turn that wrote no answer to host it. The
@@ -389,7 +389,7 @@ function UserTurn(item: UserTurnItem, panels?: PanelContext): string {
   // which render as the same highlighted card the agent's own fences get
   // (see renderPromptBody). A fence-free prompt keeps its plain <pre>.
   const body = `${renderPromptBody(userTurnText(item))}${catalog}`;
-  return `${Bubble(`bubble user${stateCls}`, body, item.ts)}${divider}`;
+  return Bubble(`bubble user${stateCls}`, body, item.ts);
 }
 
 /** The fixed body of the Merge status card (see `MergeCard`). */
@@ -705,7 +705,7 @@ function childLine(item: ConversationItem): string {
       return item.resolution ? "" : `awaiting permission: ${item.toolName}`;
     default:
       // Deliberately partial: every other kind (user-turn, result, system,
-      // error, retry, compact-boundary) legitimately contributes no ticker
+      // failure, context-cleared, context-compacted) legitimately contributes no ticker
       // line, so the default is the common case, not a drift signal.
       return "";
   }
@@ -1762,8 +1762,8 @@ export function rendersEmpty(
       return item.subtype === "init";
     default:
       // Deliberately partial: only the kinds that CAN be empty are cased.
-      // Every other kind (permission, result-with-button, error, retry,
-      // compact-boundary) always renders something, so the default is the
+      // Every other kind (permission, result-with-button, failure,
+      // context-cleared, context-compacted) always renders something, so the default is the
       // common answer, not a drift signal worth logging.
       return false;
   }
@@ -1859,13 +1859,65 @@ function ResultChip(
     </div>`;
 }
 
-function CompactDivider(item: CompactBoundaryItem): string {
-  // The orange rule sits BEFORE the label, so it lands between the /compact
-  // prompt bubble above and the "context compacted" stamp, mirroring the red
-  // rule a /clear draws under its own prompt (see `UserTurn`).
+/**
+ * A CLEAR, as the feed's loudest rule.
+ *
+ * The red bar is the entire visual, because the event is the entire fact: a
+ * clear carries no summary, no token counts and no trigger. Everything above
+ * it has already left the feed (see `itemsFromClearOrCompact`), so the rule
+ * opens the
+ * conversation rather than dividing it.
+ */
+function ClearDivider(_item: ContextClearedItem): string {
+  return `<div class="clear-divider" role="separator" aria-label="context cleared"></div>`;
+}
+
+/**
+ * A COMPACTION: the orange rule, the stamp naming it, and the summary that
+ * stands in for everything the compaction discarded.
+ *
+ * The summary is a response bubble with a GREEN border on a PURPLE wash —
+ * deliberately the loudest bubble in the feed. It is the only surviving
+ * account of the conversation above it, so it is load-bearing content rather
+ * than a decorative footnote, and a reader scrolled to the top of a compacted
+ * session must be able to find it instantly. A compaction that summarized
+ * nothing renders the rule and the stamp alone; an empty bubble would claim
+ * an account exists.
+ *
+ * The TRIGGER is deliberately absent from the output. A compaction is a
+ * compaction, and whether the system or the user asked for one changes
+ * nothing a reader can act on — so `auto` and `manual` render identically.
+ *
+ * A FAILED compaction says so under the stamp, with the daemon's reason when
+ * it gave one. The daemon reports the failure on this same message, and a
+ * rule drawn with no word about it would be the feed quietly swallowing it.
+ */
+function CompactDivider(item: ContextCompactedItem): string {
+  // The orange rule sits BEFORE the label, so it lands between whatever
+  // precedes the compaction and the "context compacted" stamp, mirroring the
+  // red
+  // rule a clear draws (see `ClearDivider`).
+  const tokens = `${formatTokens(item.preTokens)} → ${formatTokens(item.postTokens)} tokens`;
+  // The daemon's OWN verdict decides this, not the presence of prose: a
+  // failure reported without an explanation still has to be said out loud,
+  // and keying off `error` alone would let that one disappear.
+  const failure =
+    item.result === "failed"
+      ? `<div class="compact-error">compaction failed${
+          item.error !== "" ? `: ${escapeHtml(item.error)}` : ""
+        }</div>`
+      : "";
+  const summary =
+    item.summary !== ""
+      ? `<div class="bubble assistant md compact-summary"><div class="bubble-body">${renderMarkdown(
+          item.summary,
+        )}</div></div>`
+      : "";
   return (
     `<div class="compact-rule" role="separator" aria-label="context compacted"></div>` +
-    `<div class="compact-divider">— context compacted (${escapeHtml(item.trigger)}, ${item.preTokens} tokens before) —</div>`
+    `<div class="compact-divider">— context compacted (${tokens}) —</div>` +
+    failure +
+    summary
   );
 }
 
@@ -1968,7 +2020,9 @@ export function renderItem(
       }
       return ResultChip(item, item.durationMs);
     }
-    case "compact-boundary":
+    case "context-cleared":
+      return ClearDivider(item);
+    case "context-compacted":
       return CompactDivider(item);
     case "failure":
       return SystemFailureBubble(item);
@@ -1991,6 +2045,11 @@ export function itemKey(item: ConversationItem, index: number): string {
     // card, and an index key would strand the two on separate DOM nodes.
     case "failure":
       return `failure:${item.uuid}`;
+    // Keyed by uuid too: the node must survive the rebuild its own
+    // arrival triggers, and an index key would move under it.
+    case "context-cleared":
+    case "context-compacted":
+      return `${item.kind}:${item.uuid}`;
     default:
       return `${item.kind}:${index}`;
   }
@@ -2108,13 +2167,13 @@ export interface ToolReveal {
  * A nested call (one a subagent made) has no top-level bubble, so the
  * plan scrolls to its outermost ancestor and opens the whole panel chain
  * down to it. Null when no live feed item carries the id — unknown, or
- * discarded by a `/clear`.
+ * discarded by a clear or a compaction.
  */
 export function planToolReveal(
   items: readonly ConversationItem[],
   toolUseId: string,
 ): ToolReveal | null {
-  const visible = itemsFromLastClear(items);
+  const visible = itemsFromClearOrCompact(items);
   const parentOf = new Map<string, string | undefined>();
   for (const item of visible) {
     if (item.kind === "tool") parentOf.set(item.toolUseId, item.parentToolUseId);
@@ -2236,21 +2295,6 @@ export function repinsToTail(opts: {
   return opts.pinned;
 }
 
-/**
- * Identity of the feed's clear-cut boundary: the request id of the
- * `/clear` turn a cut feed opens on, or null for an uncut feed. ITEMS is
- * the already-cut list (`itemsFromLastClear`), whose head is a `/clear`
- * turn exactly when a cut happened. A change between renders means a
- * `/clear` just landed, which is the renderer's cue to rebuild the feed
- * rather than reconcile it (see `lastClearKey`).
- */
-export function clearBoundary(items: readonly ConversationItem[]): string | null {
-  const first = items[0];
-  return first !== undefined && first.kind === "user-turn" && isClearTurn(first)
-    ? first.requestId
-    : null;
-}
-
 /** Items filled per backfill step during a restored-session render. */
 export const BACKFILL_CHUNK = 40;
 
@@ -2358,7 +2402,8 @@ function memberLive(item: ToolItem, panels?: PanelContext): boolean {
  * item list rather than one host's members, so a live member that outlived
  * its turn still lights the row even when its own bubble is scrolled off or
  * was never hosted (an orphan the projection could not place). ITEMS is the
- * clear-cut feed, so a member discarded by a /clear no longer counts.
+ * TRUNCATED feed, so a member a clear or a compaction discarded no longer
+ * counts.
  */
 export function anyLiveAsync(
   items: readonly ConversationItem[],
@@ -2421,13 +2466,13 @@ export class FeedRenderer {
   /** Newest user turn seen by a render, so the next one spots a fresh send. */
   private lastUserTurn: string | null = null;
   /**
-   * Request id of the /clear turn the feed last cut at, or null when it
-   * drew the whole item list. A render whose cut boundary MOVED rebuilds
-   * the feed from nothing: the cut shifts every index-based key
+   * Identity of the clear or compaction the feed last truncated at, or null
+   * when it drew the whole item list. A render whose boundary MOVED rebuilds
+   * the feed from nothing: the truncation shifts every index-based key
    * (`user-turn:N`, `result:N`, …), so reconciling against the old node
-   * map would reuse stale pre-clear elements out of position.
+   * map would reuse stale elements from above the boundary, out of position.
    */
-  private lastClearKey: string | null = null;
+  private lastClearOrCompactKey: string | null = null;
   /**
    * Polls the daemon for watcher tails while their folds are open (see
    * watcher-poll.ts). Null when no daemon fetch was wired, in which case
@@ -2706,10 +2751,11 @@ export class FeedRenderer {
       supportPhases: this.supportPhases,
       canAddSupport: this.actions.addSupport !== undefined,
       statusCard: this.statusCardHtml(),
-      // The FULL item list, not the feed's clear-cut one: the agent-scoped
+      // The FULL item list, not the feed's TRUNCATED one: the agent-scoped
       // rosters (agentSubagents / agentTasks) resolve the agent's direct
       // children and its task calls, which can sit anywhere in the session,
-      // so a cut list would drop the ones outside the current feed window.
+      // so a truncated list would drop the ones outside the current feed
+      // window.
       agentTopbar: (agent) =>
         agentTopbarHtml(
           this.lastState?.items ?? [],
@@ -2987,12 +3033,15 @@ export class FeedRenderer {
     releaseChessGames(this.container);
     this.container.innerHTML = "";
     this.nodes.clear();
-    // A /clear clears the screen: the feed opens on the /clear bubble and
-    // its boundary rule, and the discarded turns are not drawn at all.
-    // The boundary is banked so the next live render reconciles instead
-    // of pointlessly rebuilding the feed this method just built.
-    const items = itemsFromLastClear(state.items);
-    this.lastClearKey = clearBoundary(items);
+    // A clear or a compaction clears the screen: the feed opens on its own
+    // rule and the discarded turns are not drawn at all. On a REPLAY the
+    // daemon has already floored the history at the newest of the two, so this
+    // slice is usually the identity; it runs anyway because a restore can also
+    // be asked to redraw a list a live event has since moved. The boundary is
+    // banked so the next live render reconciles instead of pointlessly
+    // rebuilding the feed this method just built.
+    const items = itemsFromClearOrCompact(state.items);
+    this.lastClearOrCompactKey = clearOrCompactKey(items);
     // The gns-sockets fold: bridge upkeep leaves the top feed and every
     // turn-shaped projection (finals, watchers), so the green
     // border lands on the real answer and the folded segment renders
@@ -3154,17 +3203,18 @@ export class FeedRenderer {
       frozen: this.tailFrozen,
     });
     this.lastUserTurn = turnId;
-    // A /clear clears the screen: only the /clear bubble and what follows
-    // it render. A cut that just MOVED rebuilds the feed from nothing —
-    // the cut shifts every index-based key, so reconciling would reuse
-    // stale pre-clear elements out of position.
-    const items = itemsFromLastClear(state.items);
-    const boundary = clearBoundary(items);
-    if (boundary !== this.lastClearKey) {
+    // A clear or a compaction clears the screen: only that event and what
+    // follows it render. This is the LIVE case the truncation exists for — one
+    // landing over an already-drawn feed. A boundary that just MOVED rebuilds
+    // the feed from nothing: the truncation shifts every index-based key, so
+    // reconciling would reuse stale elements from above it, out of position.
+    const items = itemsFromClearOrCompact(state.items);
+    const boundary = clearOrCompactKey(items);
+    if (boundary !== this.lastClearOrCompactKey) {
       this.container.innerHTML = "";
       this.nodes.clear();
     }
-    this.lastClearKey = boundary;
+    this.lastClearOrCompactKey = boundary;
     // The gns-sockets fold: bridge upkeep leaves the top feed and every
     // turn-shaped projection (finals, watchers), so the green
     // border lands on the real answer and the folded segment renders

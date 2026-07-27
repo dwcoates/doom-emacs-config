@@ -114,7 +114,8 @@ function tailSegmentStart(turn: readonly ConversationItem[]): number {
 
 /**
  * Fold the session's gns-sockets bridge upkeep under its final-response
- * bubbles. ITEMS is the feed's flat item list (already clear-cut); the
+ * bubbles. ITEMS is the feed's flat item list (already truncated at any
+ * clear or compaction); the
  * renderer filters `folded` out of the top feed and its turn projections,
  * and renders each `byBubble` list inside its host bubble's fold panel.
  */
