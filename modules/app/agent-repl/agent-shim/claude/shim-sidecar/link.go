@@ -126,10 +126,17 @@ func (s *sidecar) establish() error {
 		return fmt.Errorf("restoring authoritative open tasks: %w", err)
 	}
 	s.cursors = indexCursorsByPath(recovery.Cursors)
+	// Seed the spool-owner index from the SAME authoritative snapshot. A spool
+	// carries no session of its own, and the launch line that names its owner
+	// may sit far behind this connection's resumed cursor — so without this
+	// seed a restart could leave a live task's spool unowned, and therefore
+	// unread, until its transcript happened to be re-read. The persisted
+	// TaskStarted events are exactly that mapping, already fetched.
+	seeded := s.seedOwners(recovery.OpenTasks)
 	s.link = linkUp
 	s.backoff = 0
-	s.log("store link UP: recovered %d cursor(s), %d authoritative open task(s)",
-		len(s.cursors), len(recovery.OpenTasks))
+	s.log("store link UP: recovered %d cursor(s), %d authoritative open task(s), seeded %d spool owner(s)",
+		len(s.cursors), len(recovery.OpenTasks), seeded)
 
 	// Reading may begin now, and not one statement earlier.
 	s.rescan()
