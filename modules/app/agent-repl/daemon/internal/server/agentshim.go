@@ -72,9 +72,10 @@ var _ shimclient.SeqStore = (*RegistrySeqStore)(nil)
 // "sending does nothing" while the daemon was busy re-reading the whole
 // conversation.
 //
-// So the mark is resolved across every record sharing this one's vendor uuid,
-// taking the highest. A resumed session continues where its predecessor
-// stopped instead of starting over.
+// The registry's durable checkpoint index resolves the exact conversation
+// identity (config_dir + cwd + vendor uuid). A resumed session continues where
+// its predecessor stopped without borrowing a same-uuid mark from another
+// account root or workspace.
 func (s *RegistrySeqStore) LastSeq(sessionID string) uint64 {
 	rec, ok := s.reg.Get(sessionID)
 	if !ok {
@@ -85,13 +86,10 @@ func (s *RegistrySeqStore) LastSeq(sessionID string) uint64 {
 		// this record's own mark is the only thing that can apply.
 		return rec.LastSeq
 	}
-	best := rec.LastSeq
-	for _, other := range s.reg.All() {
-		if other.ClaudeSessionID == rec.ClaudeSessionID && other.LastSeq > best {
-			best = other.LastSeq
-		}
+	if cp, ok := s.reg.CheckpointForSession(sessionID); ok {
+		return max(rec.LastSeq, cp.LastSeq)
 	}
-	return best
+	return rec.LastSeq
 }
 
 // SetLastSeq records seq as the new high-water mark, write-through to disk.
