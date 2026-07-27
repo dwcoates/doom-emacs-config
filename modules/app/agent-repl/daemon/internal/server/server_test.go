@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -220,6 +221,64 @@ func writeTranscript(t *testing.T, cfg, uuid string) {
 	}
 }
 
+// frontendConn attaches a raw UDS frontend client to the harness's frontend
+// server and returns a reader positioned AFTER the connect snapshot. Client
+// registration and the snapshot enqueue are atomic under the Broadcast lock,
+// so once the snapshot has been read, every later push reaches this reader.
+// The 5s read deadline turns a missing expected push into a loud failure
+// instead of a hung test.
+func frontendConn(t *testing.T, h *harness) *bufio.Reader {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "fes")
+	if err != nil {
+		t.Fatalf("mkdtemp: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	l, err := net.Listen("unix", filepath.Join(dir, "fe.sock"))
+	if err != nil {
+		t.Fatalf("listen unix: %v", err)
+	}
+	go func() { _ = h.fe.Serve(l) }()
+	conn, err := net.Dial("unix", l.Addr().String())
+	if err != nil {
+		t.Fatalf("dial unix: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	if err := conn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatalf("set read deadline: %v", err)
+	}
+	r := bufio.NewReader(conn)
+	nextPushedFrame(t, r) // the connect snapshot
+	return r
+}
+
+// nextPushedFrame reads one newline-delimited protojson FrontendFrame.
+func nextPushedFrame(t *testing.T, r *bufio.Reader) *frontendv1.FrontendFrame {
+	t.Helper()
+	line, err := r.ReadBytes('\n')
+	if err != nil {
+		t.Fatalf("read pushed frame: %v", err)
+	}
+	frame := &frontendv1.FrontendFrame{}
+	if err := protojson.Unmarshal(line, frame); err != nil {
+		t.Fatalf("unmarshal pushed frame: %v", err)
+	}
+	return frame
+}
+
+// nextSessionView reads pushed frames until a SessionView arrives, skipping
+// unrelated interleaved frames (workspace states, progress).
+func nextSessionView(t *testing.T, r *bufio.Reader) *frontendv1.SessionView {
+	t.Helper()
+	for range 32 {
+		if v := nextPushedFrame(t, r).GetSessionView(); v != nil {
+			return v
+		}
+	}
+	t.Fatalf("no SessionView within 32 pushed frames")
+	return nil
+}
+
 // --- Create ---------------------------------------------------------------
 
 func TestCreateSessionReturnsAnSPrefixedID(t *testing.T) {
@@ -257,6 +316,89 @@ func TestCreateSessionEagerlyBringsUpTheShim(t *testing.T) {
 	// Assert — the driver's spawner was asked to ensure exactly this session.
 	if !slices.Contains(h.spawner.ensuredIDs(), id) {
 		t.Fatalf("spawner ensured %v, want it to include %s", h.spawner.ensuredIDs(), id)
+	}
+}
+
+// --- Create supersede (one live session per workspace) ---------------------
+//
+// The driver runs one session per cwd and the locator resolves a cwd to its
+// newest non-terminal record, so a create leaves every older record on its
+// cwd unreachable-but-live: a leaked shim, and a stale roster entry frontends
+// then mis-correlate the cwd to (the every-restore mis-bind of 2026-07-26).
+// A create therefore stands its cwd's older records down and SAYS so.
+
+func TestCreateSupersedesTheWorkspacesOlderSession(t *testing.T) {
+	// Arrange: a workspace already holding a live resume-less session.
+	h := newHarness(t)
+	old := createSession(t, h, `{"cwd":"/w"}`)
+	// Act: a newer create claims the same workspace.
+	newer := createSession(t, h, `{"cwd":"/w"}`)
+	// Assert: the older record is terminal, as a planned handover.
+	rec, _ := h.reg.Get(old)
+	if !rec.Terminal || rec.DeathReason != supersedeReason {
+		t.Errorf("old record = %+v, want terminal with the supersede death reason", rec)
+	}
+	if newRec, _ := h.reg.Get(newer); newRec.Terminal {
+		t.Errorf("new record = %+v, want it live", newRec)
+	}
+}
+
+func TestCreateSupersedeStopsTheOlderSessionsShim(t *testing.T) {
+	// Arrange: the older session's shim is live (create brings it up eagerly).
+	h := newHarness(t)
+	old := createSession(t, h, `{"cwd":"/w"}`)
+	// Act
+	_ = createSession(t, h, `{"cwd":"/w"}`)
+	// Assert: the displaced shim was stopped, not left running unattached.
+	if !slices.Contains(h.spawner.stoppedIDs(), old) {
+		t.Errorf("stopped = %v, want it to contain the displaced %s", h.spawner.stoppedIDs(), old)
+	}
+}
+
+func TestCreateLeavesOtherWorkspacesSessionsAlone(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	other := createSession(t, h, `{"cwd":"/other"}`)
+	// Act
+	_ = createSession(t, h, `{"cwd":"/w"}`)
+	// Assert: only same-cwd records contend; a different workspace is not.
+	if rec, _ := h.reg.Get(other); rec.Terminal {
+		t.Errorf("other-workspace record = %+v, want it untouched", rec)
+	}
+}
+
+func TestCreateSupersedesTheOlderResumeOfATranscript(t *testing.T) {
+	// Arrange: two resumes of one uuid in one cwd — the single-writer case.
+	h := newHarness(t)
+	cfg := t.TempDir()
+	writeTranscript(t, cfg, "u-1")
+	old := createSession(t, h, fmt.Sprintf(`{"cwd":"/w","config_dir":%q,"resume":"u-1"}`, cfg))
+	// Act
+	_ = createSession(t, h, fmt.Sprintf(`{"cwd":"/w","config_dir":%q,"resume":"u-1"}`, cfg))
+	// Assert: the older writer stood down.
+	rec, _ := h.reg.Get(old)
+	if !rec.Terminal || rec.DeathReason != supersedeReason {
+		t.Errorf("old record = %+v, want terminal with the supersede death reason", rec)
+	}
+}
+
+func TestCreatePushesTheSupersededSessionsTerminalView(t *testing.T) {
+	// Arrange: a connected frontend whose roster lists the old session live.
+	h := newHarness(t)
+	old := createSession(t, h, `{"cwd":"/w"}`)
+	r := frontendConn(t, h)
+	// Act
+	newer := createSession(t, h, `{"cwd":"/w"}`)
+	// Assert: the stand-down is DELIVERED, and before the new session's view —
+	// so the roster never holds two live sessions for the cwd, which is the
+	// invariant the frontends' cwd->id create correlation keys on.
+	v := nextSessionView(t, r)
+	if v.GetSessionId() != old || !v.GetTerminal() {
+		t.Fatalf("first pushed view = %s (terminal=%v), want terminal %s", v.GetSessionId(), v.GetTerminal(), old)
+	}
+	v = nextSessionView(t, r)
+	if v.GetSessionId() != newer || v.GetTerminal() {
+		t.Fatalf("second pushed view = %s (terminal=%v), want live %s", v.GetSessionId(), v.GetTerminal(), newer)
 	}
 }
 
@@ -753,31 +895,56 @@ func TestDeleteSessionMarksRecordTerminal(t *testing.T) {
 	}
 }
 
-// Several records can share one cwd — a stale duplicate, a superseded resume,
-// an orphan awaiting reap. Deleting one of them must stop ITS shim and only
-// its shim: the workspace-keyed teardown this used to do SIGTERMed whichever
-// shim was live, so on 2026-07-25 reaping an orphan killed the healthy session
-// created 175ms earlier and every prompt after it NACKed as "no live session".
+// Several records can still share one cwd — create now supersedes its cwd's
+// older records, but junk minted by older daemons (and direct registry writes)
+// survives in the persisted registry. Deleting one of them must stop ITS shim
+// and only its shim: the workspace-keyed teardown this used to do SIGTERMed
+// whichever shim was live, so on 2026-07-25 deleting a stale duplicate killed
+// the healthy session created 175ms earlier and every prompt after it NACKed
+// as "no live session".
 func TestDeleteSessionDoesNotStopADifferentLiveSession(t *testing.T) {
-	// Arrange: an orphan record, then the session that actually drives the cwd.
+	// Arrange: the session that drives the cwd, then a stale non-terminal
+	// record sharing it — written directly, the way an older daemon left it
+	// (a create would stand it down at mint time now).
 	h := newHarness(t)
-	orphan := createSession(t, h, `{"cwd":"/w"}`)
-	// Stand the orphan's driver down (what a supersede or idle sweep does), so
-	// the NEXT create becomes the live driver for that cwd.
-	if err := h.driver.Hibernate("/w"); err != nil {
-		t.Fatalf("Hibernate: %v", err)
-	}
 	live := createSession(t, h, `{"cwd":"/w"}`)
+	if err := h.reg.Put(registry.Record{SessionID: "s_stale", CWD: "/w"}); err != nil {
+		t.Fatalf("put stale record: %v", err)
+	}
 
-	// Act: reap the orphan.
-	if err := h.srv.DeleteSession(orphan); err != nil {
+	// Act: delete the stale record.
+	if err := h.srv.DeleteSession("s_stale"); err != nil {
 		t.Fatalf("DeleteSession: %v", err)
 	}
 
 	// Assert: the live session's shim was never stopped.
 	if slices.Contains(h.spawner.stoppedIDs(), live) {
-		t.Fatalf("deleting orphan %s stopped live session %s (stopped=%v)",
-			orphan, live, h.spawner.stoppedIDs())
+		t.Fatalf("deleting stale s_stale stopped live session %s (stopped=%v)",
+			live, h.spawner.stoppedIDs())
+	}
+}
+
+func TestDeleteSessionOfATerminalRecordRepushesItsTerminalView(t *testing.T) {
+	// Arrange: a session already deleted once. A frontend that retries the
+	// delete believes the session is still live — its roster missed the first
+	// terminal transition — and the old silent no-op left it retrying forever
+	// (the observed 15s delete loop).
+	h := newHarness(t)
+	id := createSession(t, h, `{"cwd":"/w"}`)
+	if err := h.srv.DeleteSession(id); err != nil {
+		t.Fatalf("first DeleteSession: %v", err)
+	}
+	r := frontendConn(t, h)
+
+	// Act: the idempotent retry.
+	if err := h.srv.DeleteSession(id); err != nil {
+		t.Fatalf("second DeleteSession: %v", err)
+	}
+
+	// Assert: the retry re-delivers the terminal view instead of going silent.
+	v := nextSessionView(t, r)
+	if v.GetSessionId() != id || !v.GetTerminal() {
+		t.Fatalf("pushed view = %s (terminal=%v), want terminal %s", v.GetSessionId(), v.GetTerminal(), id)
 	}
 }
 

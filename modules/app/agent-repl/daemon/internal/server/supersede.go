@@ -1,4 +1,5 @@
-// Single-writer enforcement for a resumed transcript.
+// Single-session enforcement for a workspace, and single-writer
+// enforcement for a resumed transcript.
 //
 // A transcript JSONL is an append-only file with exactly one legitimate
 // author: the CLI that owns the conversation. Nothing structurally
@@ -13,12 +14,26 @@
 // older session still holding it is stood down. The newest resume is the
 // one the user just asked for, so it is the one that wins.
 //
+// The workspace itself has the same shape of conflict WITHOUT a resume:
+// the driver runs one session per cwd and the locator resolves a cwd to
+// its newest non-terminal record, so the moment a create mints a newer
+// record, every older record on that cwd stops being reachable — but its
+// shim keeps running and its registry record keeps reading as live.
+// Frontends then correlate the cwd to the WRONG (stale) session and the
+// leaked shim lingers until a daemon restart. So a create stands down
+// every older non-terminal record on its cwd, transcript or not. A
+// same-transcript contender always shares the cwd (the transcript path
+// embeds it), so the cwd sweep subsumes the transcript sweep whenever the
+// create carries a cwd; the transcript predicate still runs for the
+// degenerate workspace-less resume.
+//
 // After the agent-shim consumption cutover there is no live-session map:
 // the persistent registry is the source of truth for who holds which
 // transcript, and the per-session driver owns the live shim. Supersede
 // therefore works entirely off the registry — it marks every non-terminal
-// record contending for the same transcript terminal and stops its shim —
-// rather than reaching into a hub that no longer exists.
+// record contending for the same workspace or transcript terminal, stops
+// its shim, and pushes the terminal SessionView — rather than reaching
+// into a hub that no longer exists.
 
 package server
 
@@ -45,32 +60,43 @@ func transcriptOwner(configDir, cwd, claudeSessionID string) string {
 	return session.TranscriptPath(session.ClaudeConfigDir(configDir), cwd, claudeSessionID)
 }
 
-// supersedeResumeConflicts stands down every non-terminal registry record
-// already appending to the transcript OPTS resumes, so the newest resume
-// owns it alone. A no-op for a fresh conversation, which has no transcript
-// to contend for yet.
+// supersedeCreateConflicts stands down every non-terminal registry record
+// the create displaces: records on the same cwd (the workspace takes one
+// live session, and this create is the newest claim on it) and records
+// already appending to the transcript OPTS resumes (single writer). A
+// no-op for a workspace-less fresh conversation, which contends for
+// nothing yet.
 //
-// A record with no claude_session_id has adopted no transcript, so it
-// cannot be contending for this one. A record on a DIFFERENT resolved path
-// (same uuid, different account root) is a distinct file and is left alone.
-// For every genuine conflict the record is marked terminal (so its id stops
-// resolving and the driver never brings it up again) and its shim is stopped
-// best-effort — a shim that was never brought up is a no-op Hibernate.
-func (s *Server) supersedeResumeConflicts(opts CreateOpts) {
-	if opts.Resume == "" {
-		return
+// For every conflict the record is marked terminal (so its id stops
+// resolving and the driver never brings it up again), its shim is stopped
+// best-effort — a shim that was never brought up is a no-op Hibernate —
+// and its terminal SessionView is pushed. The push is load-bearing:
+// without it every connected frontend keeps the superseded session listed
+// live in its roster, correlates the cwd to the stale id on the next
+// create, and binds its workspace to a session that no longer exists
+// (the observed every-restore mis-bind).
+func (s *Server) supersedeCreateConflicts(opts CreateOpts) {
+	var wantTranscript string
+	if opts.Resume != "" {
+		wantTranscript = transcriptOwner(opts.ConfigDir, opts.CWD, opts.Resume)
 	}
-	want := transcriptOwner(opts.ConfigDir, opts.CWD, opts.Resume)
-
 	for _, rec := range s.registry.All() {
-		if rec.Terminal || rec.ClaudeSessionID == "" {
+		if rec.Terminal {
 			continue
 		}
-		if transcriptOwner(rec.ConfigDir, rec.CWD, rec.ClaudeSessionID) != want {
+		workspaceConflict := opts.CWD != "" && rec.CWD == opts.CWD
+		transcriptConflict := wantTranscript != "" && rec.ClaudeSessionID != "" &&
+			transcriptOwner(rec.ConfigDir, rec.CWD, rec.ClaudeSessionID) == wantTranscript
+		if !workspaceConflict && !transcriptConflict {
 			continue
 		}
-		s.logf("session %s: superseded by a newer resume of %s — standing it down so %s keeps a single writer",
-			rec.SessionID, opts.Resume, want)
+		if transcriptConflict {
+			s.logf("session %s: superseded by a newer resume of %s — standing it down so %s keeps a single writer",
+				rec.SessionID, opts.Resume, wantTranscript)
+		} else {
+			s.logf("session %s: superseded by a newer session for workspace %s — standing it down so the workspace keeps a single live session",
+				rec.SessionID, opts.CWD)
+		}
 		// Never swallowed: a supersede that fails to land leaves the very
 		// double-writer this exists to prevent.
 		s.updateRegistry(rec.SessionID, "supersede terminal", func(r *registry.Record) {
@@ -85,5 +111,8 @@ func (s *Server) supersedeResumeConflicts(opts CreateOpts) {
 		if err := s.driver.HibernateSession(rec.CWD, rec.SessionID); err != nil {
 			s.logf("session %s: supersede shim stop (ws %s): %v (expected when no live shim, or another session drives it)", rec.SessionID, rec.CWD, err)
 		}
+		// Deliver the stand-down to every connected frontend so their rosters
+		// mark this session terminal NOW, not at their next full resync.
+		s.pushSessionView(rec.SessionID)
 	}
 }
