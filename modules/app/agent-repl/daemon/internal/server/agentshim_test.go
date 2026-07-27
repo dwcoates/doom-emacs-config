@@ -1,8 +1,6 @@
 package server
 
 import (
-	"net"
-	"os"
 	"path/filepath"
 	"slices"
 	"testing"
@@ -10,10 +8,6 @@ import (
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
-	"agentrepl/wire"
-
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/anypb"
 
 	"claude-repld/internal/registry"
 	"claude-repld/internal/ssm"
@@ -32,47 +26,6 @@ func TestShimUDSArgvAppendsSocketContract(t *testing.T) {
 	if !slices.Equal(got, want) {
 		t.Fatalf("argv = %v, want %v", got, want)
 	}
-}
-
-// writeHelloFrame writes one framed google.protobuf.Any(msg) to conn, the same
-// encoding the shimclient reads.
-func writeHelloFrame(t *testing.T, conn net.Conn, msg proto.Message) {
-	t.Helper()
-	env, err := anypb.New(msg)
-	if err != nil {
-		t.Fatalf("anypb.New: %v", err)
-	}
-	payload, err := proto.Marshal(env)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	if err := wire.WriteFrame(conn, payload); err != nil {
-		t.Fatalf("write frame: %v", err)
-	}
-}
-
-// shortSocketPath returns a temp socket path short enough for the macOS
-// sun_path limit (~104 bytes), which a t.TempDir() path can exceed.
-func shortSocketPath(t *testing.T, name string) string {
-	t.Helper()
-	dir, err := os.MkdirTemp("", "sk")
-	if err != nil {
-		t.Fatalf("mkdir temp: %v", err)
-	}
-	t.Cleanup(func() { os.RemoveAll(dir) })
-	return filepath.Join(dir, name)
-}
-
-// listenUnix opens a unix listener at a temp socket path and returns both.
-func listenUnix(t *testing.T) (net.Listener, string) {
-	t.Helper()
-	path := shortSocketPath(t, "s.sock")
-	l, err := net.Listen("unix", path)
-	if err != nil {
-		t.Fatalf("listen unix: %v", err)
-	}
-	t.Cleanup(func() { l.Close() })
-	return l, path
 }
 
 // openTestRegistry opens a registry on a temp path.
