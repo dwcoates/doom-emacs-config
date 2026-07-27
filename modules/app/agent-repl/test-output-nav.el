@@ -69,6 +69,19 @@ violated invariant."
   ;; Act / Assert
   (should-error (agent-repl--output-nav-script "thinking" "next")))
 
+(ert-deftest agent-repl-test-output-nav-script-logs-an-invalid-class-and-direction ()
+  "Invalid input records the rejected class, direction, and outcome."
+  ;; Arrange
+  (let ((logs nil))
+    (cl-letf (((symbol-function 'agent-repl--log)
+               (lambda (&rest args) (push args logs))))
+      ;; Act / Assert
+      (should-error (agent-repl--output-nav-script "thinking" "next" "navws")))
+    (should (equal logs
+                   (list (list "navws"
+                               "output-nav-script: class=%S direction=%S outcome=invalid-class"
+                               "thinking" "next"))))))
+
 (ert-deftest agent-repl-test-output-nav-script-rejects-an-unknown-direction ()
   "A direction with no webapp step is a bug here, so it raises."
   ;; Act / Assert
@@ -107,6 +120,27 @@ violated invariant."
     (agent-repl-test--with-nav-ws (list :frontend-buffer buf)
       ;; Act / Assert
       (should-error (agent-repl-output-next-prompt) :type 'user-error))))
+
+(ert-deftest agent-repl-test-output-nav-logs-and-resignals-a-dispatch-error ()
+  "A failed frontend boundary is logged against its workspace then re-signaled."
+  ;; Arrange
+  (let ((buf (generate-new-buffer " *nav-webview-dispatch-error*"))
+        (logs nil))
+    (unwind-protect
+        (agent-repl-test--with-nav-ws (list :frontend-buffer buf)
+          (cl-letf (((symbol-function 'agent-repl--frontend-webview-execute-script)
+                     (lambda (&rest _) (error "frontend boundary failed")))
+                    ((symbol-function 'agent-repl--log)
+                     (lambda (&rest args) (push args logs))))
+            ;; Act / Assert
+            (should-error (agent-repl-output-next-prompt)))
+          (should
+           (cl-some
+            (lambda (entry)
+              (and (equal (car entry) "navws")
+                   (string-match-p "outcome=dispatch-error" (nth 1 entry))))
+            logs)))
+      (kill-buffer buf))))
 
 ;;;; ---- The command surface -----------------------------------------------
 
