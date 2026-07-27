@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -41,6 +42,33 @@ import (
 const shimProtocolVersion = "1"
 
 const daemonVersion = "0.1.0"
+
+// daemonReadiness is the single daemon-global readiness truth used by both
+// GET /healthz and the frontend DaemonHealth command.  It becomes true only
+// after all boot dependencies and the frontend UDS listener are live.
+type daemonReadiness struct{ ready atomic.Bool }
+
+func (r *daemonReadiness) DaemonHealth() (bool, string) {
+	if r.ready.Load() {
+		return true, ""
+	}
+	return false, "daemon initialization is incomplete"
+}
+
+func healthzHandler(r *daemonReadiness) http.Handler {
+	if r == nil {
+		panic("claude-repld: health handler requires readiness")
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		healthy, reason := r.DaemonHealth()
+		if !healthy {
+			log.Printf("claude-repld: /healthz unhealthy reason=%q", reason)
+			http.Error(w, reason, http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+}
 
 // webappHandler builds the handler mounted at "/" for the -webapp SPA
 // directory. It returns nil when dir is empty (no webapp is served).
@@ -120,6 +148,7 @@ func main() {
 	// Microsecond stamps: cross-component latency tracing needs sub-second
 	// resolution, which the default second-granularity flags cannot give.
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
+	ready := &daemonReadiness{}
 
 	// Disk log, wired before anything can log: every log.Printf line
 	// lands in both stderr (the *claude-repld* buffer Emacs captures)
@@ -375,6 +404,8 @@ func main() {
 		SSM:             ssmMgr,
 		Progress:        progressMgr,
 		Prompts:         driver,
+		Health:          driver,
+		DaemonHealth:    ready,
 		MergeDirs:       pendingMergeDirs{},
 		Lifecycle:       opener,
 		Sessions:        registrySessions{reg: sessionRegistry, driver: driver, logf: log.Printf},
@@ -421,6 +452,7 @@ func main() {
 	registrar.PushView = srv.RepushSessionView
 
 	mux := http.NewServeMux()
+	mux.Handle("/healthz", healthzHandler(ready))
 	// Mount the API at every prefix its routes live under. Driven off
 	// server.APIPrefixes rather than a hand-kept list here: anything not
 	// mounted falls through to the SPA at "/" and is answered by the file
@@ -449,9 +481,13 @@ func main() {
 	if perr != nil {
 		log.Fatalf("claude-repld: frontend socket path: %v", perr)
 	}
+	frontendListener, err := frontend.ListenUDS(sockPath)
+	if err != nil {
+		log.Fatalf("claude-repld: frontend UDS listen %s: %v", sockPath, err)
+	}
 	go func() {
 		log.Printf("claude-repld: frontend UDS listening on %s", sockPath)
-		if serveErr := agentShim.Server.ServeUDS(sockPath); serveErr != nil {
+		if serveErr := agentShim.Server.Serve(frontendListener); serveErr != nil {
 			log.Printf("claude-repld: frontend UDS serve ended: %v", serveErr)
 		}
 	}()
@@ -467,6 +503,7 @@ func main() {
 		case <-shutdownReq:
 			log.Printf("claude-repld: POST /shutdown received, shutting down sessions")
 		}
+		ready.ready.Store(false)
 		srv.ShutdownAll()
 		// Login terminals are children of THIS process, so a daemon that
 		// exits without killing them strands an orphaned claude TUI on a pty
@@ -484,7 +521,8 @@ func main() {
 		}
 	}()
 
-	log.Printf("claude-repld %s listening on %s (shim: %s)", daemonVersion, *addr, *shimScript)
+	ready.ready.Store(true)
+	log.Printf("claude-repld %s listening on %s (shim: %s; healthz ready=true)", daemonVersion, *addr, *shimScript)
 	if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("claude-repld: %v", err)
 	}

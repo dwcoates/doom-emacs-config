@@ -232,7 +232,8 @@ type activeConn struct {
 	writeMu sync.Mutex // serializes frame writes across goroutines
 
 	pendMu  sync.Mutex
-	pending map[string]chan ackResult // request_id -> Ack/Nack waiter
+	pending map[string]chan ackResult    // request_id -> Ack/Nack waiter
+	health  map[string]chan healthResult // request_id -> HealthStatus waiter
 }
 
 // ackResult carries the outcome of a correlated control request.
@@ -367,7 +368,7 @@ func (c *Client) runOnce(ctx context.Context) (retErr error) {
 		return err
 	}
 
-	ac := &activeConn{conn: conn, pending: make(map[string]chan ackResult)}
+	ac := &activeConn{conn: conn, pending: make(map[string]chan ackResult), health: make(map[string]chan healthResult)}
 
 	// The ShimHello was already read by the listener to route this connection
 	// here, so only the daemon's half of the handshake remains.
@@ -560,5 +561,9 @@ func (ac *activeConn) failPending(err error) {
 	for id, ch := range ac.pending {
 		ch <- ackResult{err: err}
 		delete(ac.pending, id)
+	}
+	for id, ch := range ac.health {
+		ch <- healthResult{err: err}
+		delete(ac.health, id)
 	}
 }

@@ -148,6 +148,16 @@ func HostActionFrame(v *frontendv1.HostAction) *frontendv1.FrontendFrame {
 	return &frontendv1.FrontendFrame{Frame: &frontendv1.FrontendFrame_HostAction{HostAction: v}}
 }
 
+// DaemonHealthFrame wraps a daemon-global correlated health assertion.
+func DaemonHealthFrame(v *frontendv1.DaemonHealthView) *frontendv1.FrontendFrame {
+	return &frontendv1.FrontendFrame{Frame: &frontendv1.FrontendFrame_DaemonHealth{DaemonHealth: v}}
+}
+
+// SessionHealthFrame wraps a session-specific correlated health assertion.
+func SessionHealthFrame(v *frontendv1.SessionHealthView) *frontendv1.FrontendFrame {
+	return &frontendv1.FrontendFrame{Frame: &frontendv1.FrontendFrame_SessionHealth{SessionHealth: v}}
+}
+
 // ---------------------------------------------------------------------------
 // ContentDelta -> TypingDelta (ephemeral live typing)
 // ---------------------------------------------------------------------------

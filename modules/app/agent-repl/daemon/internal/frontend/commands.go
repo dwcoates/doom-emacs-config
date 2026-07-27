@@ -74,6 +74,13 @@ type CommandHandler interface {
 	// the workspace stays on the compromised-route state until a frontend
 	// says otherwise. An absent ack is a meaningful, correct outcome.
 	PaintAck(ctx context.Context, workspace, requestID string, cmd *frontendv1.PaintAckCmd) error
+	// DaemonHealth proves the daemon-global ready boundary.  The returned view
+	// is delivered to the requesting connection before its command ack.
+	DaemonHealth(ctx context.Context, workspace, requestID string, cmd *frontendv1.DaemonHealthCmd) (*frontendv1.DaemonHealthView, error)
+	// SessionHealth proves the named session's live daemon-to-shim path.  A
+	// false view is a completed assertion, not a transport error, and is
+	// delivered to the requesting connection before its command ack.
+	SessionHealth(ctx context.Context, workspace, requestID string, cmd *frontendv1.SessionHealthCmd) (*frontendv1.SessionHealthView, error)
 }
 
 // Dispatch routes a FrontendCommand to the handler and returns the CommandAck to
@@ -86,17 +93,22 @@ type CommandHandler interface {
 // the only place a classifier is needed and the natural one. logf carries the
 // classifier's loud unclassified-fallthrough line.
 func Dispatch(ctx context.Context, logf dlog.Logf, h CommandHandler, cmd *frontendv1.FrontendCommand) *frontendv1.CommandAck {
-	return dispatch(ctx, logf, h, cmd)
+	ack, _ := DispatchWithResponse(ctx, logf, h, cmd)
+	return ack
 }
 
-func dispatch(ctx context.Context, logf dlog.Logf, h CommandHandler, cmd *frontendv1.FrontendCommand) *frontendv1.CommandAck {
+// DispatchWithResponse is Dispatch plus the command-specific correlated frame
+// health commands require.  Only health has a result frame today; all other
+// commands return nil so the existing CommandAck contract stays unchanged.
+func DispatchWithResponse(ctx context.Context, logf dlog.Logf, h CommandHandler, cmd *frontendv1.FrontendCommand) (*frontendv1.CommandAck, *frontendv1.FrontendFrame) {
 	if cmd == nil {
-		return failAck(logf, "", fmt.Errorf("frontend: nil command"))
+		return failAck(logf, "", fmt.Errorf("frontend: nil command")), nil
 	}
 	reqID := cmd.GetRequestId()
 	ws := cmd.GetWorkspace()
 
 	var err error
+	var response *frontendv1.FrontendFrame
 	switch c := cmd.GetCommand().(type) {
 	case *frontendv1.FrontendCommand_CreateWorkspace:
 		err = h.CreateWorkspace(ctx, ws, reqID, c.CreateWorkspace)
@@ -134,14 +146,26 @@ func dispatch(ctx context.Context, logf dlog.Logf, h CommandHandler, cmd *fronte
 		err = h.CancelQueueEntry(ctx, ws, reqID, c.QueueCancel)
 	case *frontendv1.FrontendCommand_PaintAck:
 		err = h.PaintAck(ctx, ws, reqID, c.PaintAck)
+	case *frontendv1.FrontendCommand_DaemonHealth:
+		var view *frontendv1.DaemonHealthView
+		view, err = h.DaemonHealth(ctx, ws, reqID, c.DaemonHealth)
+		if view != nil {
+			response = DaemonHealthFrame(view)
+		}
+	case *frontendv1.FrontendCommand_SessionHealth:
+		var view *frontendv1.SessionHealthView
+		view, err = h.SessionHealth(ctx, ws, reqID, c.SessionHealth)
+		if view != nil {
+			response = SessionHealthFrame(view)
+		}
 	default:
 		// Unknown/empty command oneof: fail loudly, never silently.
-		return failAck(logf, reqID, fmt.Errorf("frontend: unknown command (workspace=%q): the command oneof was empty or unrecognized", ws))
+		return failAck(logf, reqID, fmt.Errorf("frontend: unknown command (workspace=%q): the command oneof was empty or unrecognized", ws)), nil
 	}
 	if err != nil {
-		return failAck(logf, reqID, err)
+		return failAck(logf, reqID, err), nil
 	}
-	return &frontendv1.CommandAck{RequestId: reqID, Ok: true}
+	return &frontendv1.CommandAck{RequestId: reqID, Ok: true}, response
 }
 
 // failAck builds a refusal ack carrying BOTH the classified failure and the

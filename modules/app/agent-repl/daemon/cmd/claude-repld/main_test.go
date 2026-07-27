@@ -17,6 +17,26 @@ func TestWebappHandlerEmptyDirReturnsNil(t *testing.T) {
 	}
 }
 
+func TestHealthzRequiresExplicitReadiness(t *testing.T) {
+	ready := &daemonReadiness{}
+	h := healthzHandler(ready)
+
+	// Before all listeners/dependencies are live, health must reject rather
+	// than treating process existence as readiness.
+	first := httptest.NewRecorder()
+	h.ServeHTTP(first, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	if first.Code != http.StatusServiceUnavailable {
+		t.Fatalf("unready /healthz status=%d, want 503", first.Code)
+	}
+
+	ready.ready.Store(true)
+	second := httptest.NewRecorder()
+	h.ServeHTTP(second, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	if second.Code != http.StatusNoContent {
+		t.Fatalf("ready /healthz status=%d, want 204", second.Code)
+	}
+}
+
 func TestWebappHandlerServesIndexWhenPresent(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("<!doctype html>SPA"), 0o644); err != nil {
