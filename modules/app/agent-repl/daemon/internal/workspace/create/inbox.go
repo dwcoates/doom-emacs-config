@@ -214,6 +214,13 @@ func parseCommands(payload []byte) ([]parsedCommand, error) {
 				wire.SourceWorkspace = wire.SourceWS.Name
 				wire.SourceDir = wire.SourceWS.Path
 			}
+			if wire.SourceDir != "" {
+				canonical, err := canonicalSourceDir(wire.SourceDir)
+				if err != nil {
+					return nil, fmt.Errorf("entry %d create source directory: %w", index, err)
+				}
+				wire.SourceDir = canonical
+			}
 			for _, key := range []string{"type", "name", "git_root", "prompt", "priority", "fork_from", "fork_session_id", "source_workspace", "source_dir", "source_ws", "base_commit", "model", "config_dir", "permission_mode", "allow_ungated", "postprocessing_prompt", "before_ws_merge"} {
 				delete(extra, key)
 			}
@@ -238,4 +245,22 @@ func parseCommands(payload []byte) ([]parsedCommand, error) {
 		commands = append(commands, command)
 	}
 	return commands, nil
+}
+
+// canonicalSourceDir gives the registry and request store one stable identity
+// for a source worktree.  Emacs commonly emits a directory-form path ending
+// in '/', whereas registry CWD records are clean paths; accepting both without
+// canonicalization would make a valid child-from-child create look unknown.
+func canonicalSourceDir(path string) (string, error) {
+	if strings.HasPrefix(path, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("resolve home directory: %w", err)
+		}
+		path = filepath.Join(home, strings.TrimPrefix(path, "~/"))
+	}
+	if !filepath.IsAbs(path) {
+		return "", fmt.Errorf("must be absolute or begin with ~/")
+	}
+	return filepath.Clean(path), nil
 }
