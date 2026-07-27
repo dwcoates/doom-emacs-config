@@ -61,9 +61,21 @@ type Manager struct {
 	// way. Keying the push on state alone left that change unpushed, which is
 	// how a swept ghost count stayed on screen.
 	lastTasks map[string]int64
-	subs      map[int]chan *frontendv1.WorkspaceState
-	nextSub   int
-	closed    bool
+	// interruptedTurn names the workspaces whose IN-FLIGHT turn was stopped by
+	// a user-commanded interrupt the shim acknowledged as INTERRUPTED. The
+	// mark is consumed by that turn's own TurnEnded, which then reports
+	// `interrupted` instead of `done`/`vendor_blocked`.
+	//
+	// DELIBERATELY IN MEMORY, and deliberately not a row. It is not a state —
+	// it is a note about the single event that has not arrived yet, and it
+	// lives for the few hundred milliseconds between the shim's ack and the
+	// turn end it caused. Persisting it would invent a durable fact the log
+	// has no clearing token for; losing it to a restart in that window costs
+	// one turn painting `done`, which is the honest fallback.
+	interruptedTurn map[string]bool
+	subs            map[int]chan *frontendv1.WorkspaceState
+	nextSub         int
+	closed          bool
 }
 
 // Open opens the SSM database and warms the last-resolved cache from the
@@ -91,13 +103,14 @@ func Open(opts Options) (*Manager, error) {
 		return nil, err
 	}
 	m := &Manager{
-		db:        db,
-		logf:      logf,
-		resolver:  opts.Resolver,
-		clock:     clock,
-		last:      make(map[string]frontendv1.RenderState),
-		lastTasks: make(map[string]int64),
-		subs:      make(map[int]chan *frontendv1.WorkspaceState),
+		db:              db,
+		logf:            logf,
+		resolver:        opts.Resolver,
+		clock:           clock,
+		last:            make(map[string]frontendv1.RenderState),
+		lastTasks:       make(map[string]int64),
+		interruptedTurn: make(map[string]bool),
+		subs:            make(map[int]chan *frontendv1.WorkspaceState),
 	}
 	if err := m.warm(); err != nil {
 		db.Close()
@@ -200,6 +213,17 @@ func (m *Manager) Apply(ev *corev1.Event) error {
 		return nil
 	}
 
+	// THE INTERRUPTED TURN OUTCOME (I1). A user-commanded stop the shim
+	// acknowledged as INTERRUPTED marked the turn it stopped; THIS is where
+	// that mark is spent, on the very TurnEnded the stop produced.
+	//
+	// It is applied by rewriting the row this turn end would have written
+	// anyway — never by adding a second one — which is what keeps
+	// `interrupted` the same kind of fact as `done` and `vendor_blocked`: one
+	// agent-axis row naming how the turn ended, superseded by whatever the
+	// agent does next.
+	state, causeKind = m.applyInterruptMarkLocked(ws, ev, state, causeKind)
+
 	// NO-REGRESS GUARD. A readiness assertion may never knock an ACTIVE turn
 	// back to a settled state.
 	//
@@ -262,6 +286,57 @@ func (m *Manager) Apply(ev *corev1.Event) error {
 	}
 
 	return m.reresolveLocked(ws, causeKind, ev.GetSeq())
+}
+
+// MarkTurnInterrupted records that a user-commanded stop was DELIVERED to the
+// workspace's running turn (the shim acked INTERRUPTED), so that turn's own
+// TurnEnded reports `interrupted` rather than `done` or `vendor_blocked`.
+//
+// ONLY the frontend interrupt command path calls this. The queue's interject
+// sends the same Interrupt to the same shim as pure machinery — the user did
+// not ask for the turn to stop, they asked for a prompt to run sooner — so it
+// must never paint the outcome, and it reaches this method from nowhere.
+//
+// The mark is spent by the next turn end and dropped by the next turn start
+// (see applyInterruptMarkLocked); it never accumulates.
+func (m *Manager) MarkTurnInterrupted(workspace string) error {
+	if workspace == "" {
+		return fmt.Errorf("ssm: MarkTurnInterrupted got an empty workspace")
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.interruptedTurn[workspace] = true
+	m.logf("ssm: interrupt marked ws=%s — the turn this stop ended will report `interrupted`", workspace)
+	return nil
+}
+
+// applyInterruptMarkLocked spends (or drops) a workspace's interrupt mark for
+// the event being applied, returning the signal token and cause kind to
+// append.
+//
+// A TURN END spends it: that end is the one the stop caused, so the row
+// becomes `interrupted` instead of whatever the stop reason alone would have
+// said. A TURN START drops it: a new turn beginning while the mark still
+// stands means the marked turn's end was never observed, and honoring a stale
+// mark on the NEXT turn would report a stop that turn never received.
+//
+// Caller holds mu.
+func (m *Manager) applyInterruptMarkLocked(ws string, ev *corev1.Event, state, causeKind string) (string, string) {
+	if !m.interruptedTurn[ws] {
+		return state, causeKind
+	}
+	switch ev.GetPayload().(type) {
+	case *corev1.Event_TurnEnded:
+		delete(m.interruptedTurn, ws)
+		m.logf("ssm: turn end reported as `interrupted` ws=%s session=%s seq=%d (superseding %s) — a user-commanded stop was delivered to this turn",
+			ws, ev.GetSessionId(), ev.GetSeq(), state)
+		return sigInterrupted, causeInterrupted
+	case *corev1.Event_TurnStarted:
+		delete(m.interruptedTurn, ws)
+		m.logf("ssm: interrupt mark dropped ws=%s session=%s seq=%d — a new turn started before the stopped turn's end was observed",
+			ws, ev.GetSessionId(), ev.GetSeq())
+	}
+	return state, causeKind
 }
 
 // ApplyPaintAck records a frontend's attestation that it painted the
