@@ -2650,6 +2650,132 @@ func (x *Heartbeat) GetSentAtMs() int64 {
 	return 0
 }
 
+// Correlated dependency health probe for every agent-shim UDS hop.
+//
+// A live Unix socket (or even a completed transport handshake) is not a
+// health assertion: a peer can accept a connection while its dependency has
+// already failed.  The requester therefore names this probe with an opaque
+// request_id and accepts health only from the matching HealthStatus response.
+// The store answers it directly; a per-session shim answers it only after it
+// has checked the store dependency it owns.  It is deliberately control-plane
+// material, not an Event: health is an observation at one instant and must
+// never enter the durable conversation stream.
+type HealthCheck struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HealthCheck) Reset() {
+	*x = HealthCheck{}
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[28]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HealthCheck) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HealthCheck) ProtoMessage() {}
+
+func (x *HealthCheck) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[28]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HealthCheck.ProtoReflect.Descriptor instead.
+func (*HealthCheck) Descriptor() ([]byte, []int) {
+	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{28}
+}
+
+func (x *HealthCheck) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+// Reply to HealthCheck.  A responder MUST set healthy=true only after every
+// dependency in its own responsibility boundary has passed.  healthy=false
+// is an explicit failed assertion, never a soft warning; reason must explain
+// the failed dependency and is surfaced by the daemon/frontend unchanged.
+type HealthStatus struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Healthy       bool                   `protobuf:"varint,2,opt,name=healthy,proto3" json:"healthy,omitempty"`
+	Component     string                 `protobuf:"bytes,3,opt,name=component,proto3" json:"component,omitempty"`
+	Reason        string                 `protobuf:"bytes,4,opt,name=reason,proto3" json:"reason,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HealthStatus) Reset() {
+	*x = HealthStatus{}
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[29]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HealthStatus) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HealthStatus) ProtoMessage() {}
+
+func (x *HealthStatus) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[29]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HealthStatus.ProtoReflect.Descriptor instead.
+func (*HealthStatus) Descriptor() ([]byte, []int) {
+	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{29}
+}
+
+func (x *HealthStatus) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *HealthStatus) GetHealthy() bool {
+	if x != nil {
+		return x.Healthy
+	}
+	return false
+}
+
+func (x *HealthStatus) GetComponent() string {
+	if x != nil {
+		return x.Component
+	}
+	return ""
+}
+
+func (x *HealthStatus) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
 // Producer→store append. The store commits events + cursor_advance in one
 // transaction and acks with dedup accounting.
 type StoreWrite struct {
@@ -2662,7 +2788,7 @@ type StoreWrite struct {
 
 func (x *StoreWrite) Reset() {
 	*x = StoreWrite{}
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[28]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2674,7 +2800,7 @@ func (x *StoreWrite) String() string {
 func (*StoreWrite) ProtoMessage() {}
 
 func (x *StoreWrite) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[28]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2687,7 +2813,7 @@ func (x *StoreWrite) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StoreWrite.ProtoReflect.Descriptor instead.
 func (*StoreWrite) Descriptor() ([]byte, []int) {
-	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{28}
+	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *StoreWrite) GetProducer() string {
@@ -2716,7 +2842,7 @@ type StoreWriteAck struct {
 
 func (x *StoreWriteAck) Reset() {
 	*x = StoreWriteAck{}
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[29]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2728,7 +2854,7 @@ func (x *StoreWriteAck) String() string {
 func (*StoreWriteAck) ProtoMessage() {}
 
 func (x *StoreWriteAck) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[29]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2741,7 +2867,7 @@ func (x *StoreWriteAck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StoreWriteAck.ProtoReflect.Descriptor instead.
 func (*StoreWriteAck) Descriptor() ([]byte, []int) {
-	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{29}
+	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *StoreWriteAck) GetAccepted() uint64 {
@@ -2785,7 +2911,7 @@ type CursorState struct {
 
 func (x *CursorState) Reset() {
 	*x = CursorState{}
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[30]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2797,7 +2923,7 @@ func (x *CursorState) String() string {
 func (*CursorState) ProtoMessage() {}
 
 func (x *CursorState) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[30]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2810,7 +2936,7 @@ func (x *CursorState) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CursorState.ProtoReflect.Descriptor instead.
 func (*CursorState) Descriptor() ([]byte, []int) {
-	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{30}
+	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *CursorState) GetFileId() string {
@@ -2852,7 +2978,7 @@ type CursorQuery struct {
 
 func (x *CursorQuery) Reset() {
 	*x = CursorQuery{}
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[31]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2864,7 +2990,7 @@ func (x *CursorQuery) String() string {
 func (*CursorQuery) ProtoMessage() {}
 
 func (x *CursorQuery) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[31]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2877,7 +3003,7 @@ func (x *CursorQuery) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CursorQuery.ProtoReflect.Descriptor instead.
 func (*CursorQuery) Descriptor() ([]byte, []int) {
-	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{31}
+	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *CursorQuery) GetFileId() string {
@@ -2897,7 +3023,7 @@ type OpenTaskState struct {
 
 func (x *OpenTaskState) Reset() {
 	*x = OpenTaskState{}
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[32]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2909,7 +3035,7 @@ func (x *OpenTaskState) String() string {
 func (*OpenTaskState) ProtoMessage() {}
 
 func (x *OpenTaskState) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[32]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2922,7 +3048,7 @@ func (x *OpenTaskState) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenTaskState.ProtoReflect.Descriptor instead.
 func (*OpenTaskState) Descriptor() ([]byte, []int) {
-	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{32}
+	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *OpenTaskState) GetStarted() *Event {
@@ -2956,7 +3082,7 @@ type CursorList struct {
 
 func (x *CursorList) Reset() {
 	*x = CursorList{}
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[33]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2968,7 +3094,7 @@ func (x *CursorList) String() string {
 func (*CursorList) ProtoMessage() {}
 
 func (x *CursorList) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[33]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2981,7 +3107,7 @@ func (x *CursorList) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CursorList.ProtoReflect.Descriptor instead.
 func (*CursorList) Descriptor() ([]byte, []int) {
-	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{33}
+	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *CursorList) GetCursors() []*CursorState {
@@ -3185,7 +3311,16 @@ const file_agentshim_core_v1_core_proto_rawDesc = "" +
 	"\x14RESOLUTION_ABANDONED\x10\x04\")\n" +
 	"\tHeartbeat\x12\x1c\n" +
 	"\n" +
-	"sent_at_ms\x18\x01 \x01(\x03R\bsentAtMs\"]\n" +
+	"sent_at_ms\x18\x01 \x01(\x03R\bsentAtMs\",\n" +
+	"\vHealthCheck\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\"}\n" +
+	"\fHealthStatus\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12\x18\n" +
+	"\ahealthy\x18\x02 \x01(\bR\ahealthy\x12\x1c\n" +
+	"\tcomponent\x18\x03 \x01(\tR\tcomponent\x12\x16\n" +
+	"\x06reason\x18\x04 \x01(\tR\x06reason\"]\n" +
 	"\n" +
 	"StoreWrite\x12\x1a\n" +
 	"\bproducer\x18\x01 \x01(\tR\bproducer\x123\n" +
@@ -3262,7 +3397,7 @@ func file_agentshim_core_v1_core_proto_rawDescGZIP() []byte {
 }
 
 var file_agentshim_core_v1_core_proto_enumTypes = make([]protoimpl.EnumInfo, 8)
-var file_agentshim_core_v1_core_proto_msgTypes = make([]protoimpl.MessageInfo, 34)
+var file_agentshim_core_v1_core_proto_msgTypes = make([]protoimpl.MessageInfo, 36)
 var file_agentshim_core_v1_core_proto_goTypes = []any{
 	(Plane)(0),                     // 0: agentshim.core.v1.Plane
 	(EventClass)(0),                // 1: agentshim.core.v1.EventClass
@@ -3300,14 +3435,16 @@ var file_agentshim_core_v1_core_proto_goTypes = []any{
 	(*PermissionResponse)(nil),     // 33: agentshim.core.v1.PermissionResponse
 	(*PermissionItem)(nil),         // 34: agentshim.core.v1.PermissionItem
 	(*Heartbeat)(nil),              // 35: agentshim.core.v1.Heartbeat
-	(*StoreWrite)(nil),             // 36: agentshim.core.v1.StoreWrite
-	(*StoreWriteAck)(nil),          // 37: agentshim.core.v1.StoreWriteAck
-	(*CursorState)(nil),            // 38: agentshim.core.v1.CursorState
-	(*CursorQuery)(nil),            // 39: agentshim.core.v1.CursorQuery
-	(*OpenTaskState)(nil),          // 40: agentshim.core.v1.OpenTaskState
-	(*CursorList)(nil),             // 41: agentshim.core.v1.CursorList
-	(*anypb.Any)(nil),              // 42: google.protobuf.Any
-	(*structpb.Struct)(nil),        // 43: google.protobuf.Struct
+	(*HealthCheck)(nil),            // 36: agentshim.core.v1.HealthCheck
+	(*HealthStatus)(nil),           // 37: agentshim.core.v1.HealthStatus
+	(*StoreWrite)(nil),             // 38: agentshim.core.v1.StoreWrite
+	(*StoreWriteAck)(nil),          // 39: agentshim.core.v1.StoreWriteAck
+	(*CursorState)(nil),            // 40: agentshim.core.v1.CursorState
+	(*CursorQuery)(nil),            // 41: agentshim.core.v1.CursorQuery
+	(*OpenTaskState)(nil),          // 42: agentshim.core.v1.OpenTaskState
+	(*CursorList)(nil),             // 43: agentshim.core.v1.CursorList
+	(*anypb.Any)(nil),              // 44: google.protobuf.Any
+	(*structpb.Struct)(nil),        // 45: google.protobuf.Struct
 }
 var file_agentshim_core_v1_core_proto_depIdxs = []int32{
 	0,  // 0: agentshim.core.v1.Event.plane:type_name -> agentshim.core.v1.Plane
@@ -3324,10 +3461,10 @@ var file_agentshim_core_v1_core_proto_depIdxs = []int32{
 	21, // 11: agentshim.core.v1.Event.degraded_state:type_name -> agentshim.core.v1.DegradedState
 	10, // 12: agentshim.core.v1.Event.unparsed:type_name -> agentshim.core.v1.UnparsedEvent
 	20, // 13: agentshim.core.v1.Event.message_latency:type_name -> agentshim.core.v1.MessageLatency
-	42, // 14: agentshim.core.v1.Event.vendor:type_name -> google.protobuf.Any
-	43, // 15: agentshim.core.v1.Event.extras:type_name -> google.protobuf.Struct
+	44, // 14: agentshim.core.v1.Event.vendor:type_name -> google.protobuf.Any
+	45, // 15: agentshim.core.v1.Event.extras:type_name -> google.protobuf.Struct
 	8,  // 16: agentshim.core.v1.EventBatch.events:type_name -> agentshim.core.v1.Event
-	38, // 17: agentshim.core.v1.EventBatch.cursor_advance:type_name -> agentshim.core.v1.CursorState
+	40, // 17: agentshim.core.v1.EventBatch.cursor_advance:type_name -> agentshim.core.v1.CursorState
 	4,  // 18: agentshim.core.v1.SessionStarted.source:type_name -> agentshim.core.v1.SessionSource
 	2,  // 19: agentshim.core.v1.TaskStarted.kind:type_name -> agentshim.core.v1.TaskKind
 	2,  // 20: agentshim.core.v1.TaskProgress.kind:type_name -> agentshim.core.v1.TaskKind
@@ -3335,15 +3472,15 @@ var file_agentshim_core_v1_core_proto_depIdxs = []int32{
 	3,  // 22: agentshim.core.v1.TaskEnded.status:type_name -> agentshim.core.v1.TerminalStatus
 	6,  // 23: agentshim.core.v1.Ack.interrupt_outcome:type_name -> agentshim.core.v1.InterruptOutcome
 	8,  // 24: agentshim.core.v1.ReplayEvent.event:type_name -> agentshim.core.v1.Event
-	43, // 25: agentshim.core.v1.PermissionRequest.input:type_name -> google.protobuf.Struct
+	45, // 25: agentshim.core.v1.PermissionRequest.input:type_name -> google.protobuf.Struct
 	5,  // 26: agentshim.core.v1.PermissionResponse.decision:type_name -> agentshim.core.v1.PermissionDecision
-	43, // 27: agentshim.core.v1.PermissionResponse.updated_input:type_name -> google.protobuf.Struct
+	45, // 27: agentshim.core.v1.PermissionResponse.updated_input:type_name -> google.protobuf.Struct
 	32, // 28: agentshim.core.v1.PermissionItem.request:type_name -> agentshim.core.v1.PermissionRequest
 	7,  // 29: agentshim.core.v1.PermissionItem.resolution:type_name -> agentshim.core.v1.PermissionItem.Resolution
 	9,  // 30: agentshim.core.v1.StoreWrite.batch:type_name -> agentshim.core.v1.EventBatch
 	8,  // 31: agentshim.core.v1.OpenTaskState.started:type_name -> agentshim.core.v1.Event
-	38, // 32: agentshim.core.v1.CursorList.cursors:type_name -> agentshim.core.v1.CursorState
-	40, // 33: agentshim.core.v1.CursorList.open_tasks:type_name -> agentshim.core.v1.OpenTaskState
+	40, // 32: agentshim.core.v1.CursorList.cursors:type_name -> agentshim.core.v1.CursorState
+	42, // 33: agentshim.core.v1.CursorList.open_tasks:type_name -> agentshim.core.v1.OpenTaskState
 	34, // [34:34] is the sub-list for method output_type
 	34, // [34:34] is the sub-list for method input_type
 	34, // [34:34] is the sub-list for extension type_name
@@ -3383,7 +3520,7 @@ func file_agentshim_core_v1_core_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentshim_core_v1_core_proto_rawDesc), len(file_agentshim_core_v1_core_proto_rawDesc)),
 			NumEnums:      8,
-			NumMessages:   34,
+			NumMessages:   36,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

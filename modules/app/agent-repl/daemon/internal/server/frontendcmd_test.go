@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
@@ -76,6 +77,26 @@ type fakeLifecycle struct {
 	closed []string
 	opened []string
 }
+
+type fakeHealthRouter struct {
+	status    *corev1.HealthStatus
+	err       error
+	workspace string
+	sessionID string
+	requestID string
+}
+
+func (f *fakeHealthRouter) Health(_ context.Context, workspace, sessionID, requestID string) (*corev1.HealthStatus, error) {
+	f.workspace, f.sessionID, f.requestID = workspace, sessionID, requestID
+	return f.status, f.err
+}
+
+type fakeDaemonHealth struct {
+	healthy bool
+	reason  string
+}
+
+func (f fakeDaemonHealth) DaemonHealth() (bool, string) { return f.healthy, f.reason }
 
 func (f *fakeLifecycle) Close(_ context.Context, ws string) error {
 	f.closed = append(f.closed, ws)
@@ -216,6 +237,60 @@ func TestCommandHandlerPermissionRoutesToPrompts(t *testing.T) {
 	// Assert
 	if len(p.perms) != 1 || p.perms[0] != "perm-9" {
 		t.Fatalf("perms = %v", p.perms)
+	}
+}
+
+func TestCommandHandlerDaemonHealthReturnsExplicitReadiness(t *testing.T) {
+	// Arrange.
+	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil, nil, nil,
+		CommandHandlerConfig{Health: HealthConfig{Daemon: fakeDaemonHealth{healthy: false, reason: "frontend UDS not listening"}}})
+	if err != nil {
+		t.Fatalf("newCommandHandler: %v", err)
+	}
+
+	// Act.
+	view, err := h.DaemonHealth(context.Background(), "", "health-1", &frontendv1.DaemonHealthCmd{})
+
+	// Assert.
+	if err != nil || view.GetHealthy() || view.GetRequestId() != "health-1" || view.GetReason() != "frontend UDS not listening" {
+		t.Fatalf("DaemonHealth = (%+v, %v)", view, err)
+	}
+}
+
+func TestCommandHandlerSessionHealthForwardsExactIdentity(t *testing.T) {
+	// Arrange.
+	router := &fakeHealthRouter{status: &corev1.HealthStatus{RequestId: "health-2", Healthy: true, Component: "claude-shim"}}
+	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil, nil, nil,
+		CommandHandlerConfig{Health: HealthConfig{Router: router}})
+	if err != nil {
+		t.Fatalf("newCommandHandler: %v", err)
+	}
+
+	// Act.
+	view, err := h.SessionHealth(context.Background(), "/ws", "health-2", &frontendv1.SessionHealthCmd{SessionId: "s1"})
+
+	// Assert.
+	if err != nil || !view.GetHealthy() || router.workspace != "/ws" || router.sessionID != "s1" || router.requestID != "health-2" {
+		t.Fatalf("SessionHealth = (%+v, %v), routed=(%q,%q,%q)", view, err, router.workspace, router.sessionID, router.requestID)
+	}
+}
+
+func TestCommandHandlerSessionHealthMakesMissingShimExplicitlyUnhealthy(t *testing.T) {
+	// Arrange.
+	router := &fakeHealthRouter{err: errors.New("shim not connected")}
+	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil, nil, nil,
+		CommandHandlerConfig{Health: HealthConfig{Router: router}})
+	if err != nil {
+		t.Fatalf("newCommandHandler: %v", err)
+	}
+
+	// Act.
+	view, err := h.SessionHealth(context.Background(), "/ws", "health-3", &frontendv1.SessionHealthCmd{SessionId: "s1"})
+
+	// Assert: a missing live shim is the false assertion Emacs waits for, not a
+	// successful command with no health frame.
+	if err != nil || view.GetHealthy() || !strings.Contains(view.GetReason(), "shim not connected") {
+		t.Fatalf("SessionHealth = (%+v, %v)", view, err)
 	}
 }
 
@@ -416,7 +491,8 @@ func TestCommandHandlerRoutesDaemonOwnedWorkspaceWork(t *testing.T) {
 	// worktree creation or a host perspective, so the frontend ACK represents
 	// enqueue acceptance rather than eventual materialization.
 	bridge := newFakeWorkspaceCreation()
-	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil, nil, nil, bridge)
+	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil, nil, nil,
+		CommandHandlerConfig{WorkspaceCreation: bridge})
 	if err != nil {
 		t.Fatalf("newCommandHandler: %v", err)
 	}

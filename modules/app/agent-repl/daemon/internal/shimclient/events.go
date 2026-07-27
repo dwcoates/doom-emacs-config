@@ -39,6 +39,8 @@ func (c *Client) readLoop(ctx context.Context, ac *activeConn) error {
 			c.resolveAck(ac, m)
 		case *corev1.Nack:
 			c.resolveNack(ac, m)
+		case *corev1.HealthStatus:
+			c.resolveHealth(ac, m)
 		case *corev1.PermissionRequest:
 			c.dispatchPermission(ctx, ac, m)
 		// REPLAYED HISTORY. Its own arms, physically apart from the live

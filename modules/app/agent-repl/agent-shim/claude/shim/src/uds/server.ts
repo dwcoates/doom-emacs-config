@@ -30,6 +30,10 @@ import {
   DaemonHelloSchema,
   Event,
   EventSchema,
+  HealthCheck,
+  HealthCheckSchema,
+  HealthStatus,
+  HealthStatusSchema,
   Heartbeat,
   HeartbeatSchema,
   Interrupt,
@@ -71,6 +75,8 @@ export interface SessionServerHandlers {
    * subscription, and its events go back as ReplayEvent rather than Event.
    */
   onReplayRequest(msg: ReplayRequest): void;
+  /** Return a correlated readiness assertion for this live shim session. */
+  onHealthCheck(msg: HealthCheck): Promise<HealthStatus> | HealthStatus;
   /** Daemon (re)connected and completed the handshake. */
   onDaemonConnected?(hello: DaemonHello): void;
   /** Daemon connection lost (reattach possible; nothing torn down). */
@@ -317,11 +323,55 @@ export class SessionServer {
       this.handlers.onReplayRequest(replay);
       return;
     }
+    const health = unpackAs(msg, HealthCheckSchema);
+    if (health) {
+      void this.answerHealthCheck(health);
+      return;
+    }
     const hb = unpackAs(msg, HeartbeatSchema);
     if (hb) {
       return; // liveness only; nothing to do
     }
     shimLog(COMPONENT, { session: this.opts.sessionId }, `unhandled control message ${envelopeType(msg)}`);
+  }
+
+  /**
+   * Answer a daemon's correlated session-health probe.  Failure is expressed
+   * as an unhealthy status rather than leaving the caller to time out: the
+   * daemon must know precisely which session cannot be restored yet.
+   */
+  private async answerHealthCheck(check: HealthCheck): Promise<void> {
+    let status: HealthStatus;
+    try {
+      if (check.requestId === "") throw new Error("health check requires request_id");
+      status = await this.handlers.onHealthCheck(check);
+      if (status.requestId !== check.requestId) {
+        throw new Error(`health handler returned request_id=${JSON.stringify(status.requestId)}, want ${JSON.stringify(check.requestId)}`);
+      }
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      shimLog(COMPONENT, { session: this.opts.sessionId, request: check.requestId, error: reason },
+        `health FAIL: ${reason}`);
+      status = create(HealthStatusSchema, {
+        requestId: check.requestId,
+        healthy: false,
+        component: "claude-shim",
+        reason,
+      });
+    }
+    if (!this.isConnected()) {
+      shimLog(COMPONENT, { session: this.opts.sessionId, request: check.requestId },
+        `health response abandoned: daemon connection is no longer handshaked`);
+      return;
+    }
+    this.conn!.send(HealthStatusSchema, status);
+    shimLog(COMPONENT, {
+      session: this.opts.sessionId,
+      request: check.requestId,
+      healthy: status.healthy,
+      component: status.component,
+      reason: status.reason,
+    }, status.healthy ? "health PASS" : "health FAIL");
   }
 
   private sendReceipt(receipt: Receipt): void {

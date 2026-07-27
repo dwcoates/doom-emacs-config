@@ -78,7 +78,10 @@ type fakeClient struct {
 	notReady chan struct{}
 	// runResult, when non-nil, makes Run terminate with the received error.
 	// This models a protocol failure that evicts the driver without Hibernate.
-	runResult chan error
+	runResult        chan error
+	healthStatus     *corev1.HealthStatus
+	healthErr        error
+	healthRequestIDs []string
 }
 
 func (c *fakeClient) Run(ctx context.Context) error {
@@ -114,6 +117,19 @@ func (c *fakeClient) AwaitReady(ctx context.Context) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+func (c *fakeClient) Health(_ context.Context, requestID string) (*corev1.HealthStatus, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.healthRequestIDs = append(c.healthRequestIDs, requestID)
+	if c.healthErr != nil {
+		return nil, c.healthErr
+	}
+	if c.healthStatus == nil {
+		return &corev1.HealthStatus{RequestId: requestID, Healthy: true, Component: "fake-shim"}, nil
+	}
+	return c.healthStatus, nil
 }
 
 func (c *fakeClient) Interrupt(_ context.Context, _ bool) (corev1.InterruptOutcome, error) {
@@ -242,6 +258,45 @@ func TestSubmitPromptUnknownWorkspaceErrors(t *testing.T) {
 	m, _ := newTestManager(t, fakeLocator{m: map[string]string{}}, &fakeSpawner{})
 	if err := m.SubmitPrompt(context.Background(), "ghost", "x", ""); err == nil {
 		t.Fatal("prompting a workspace with no live session must error")
+	}
+}
+
+func TestHealthRequiresTheNamedExistingDriverAndForwardsCorrelation(t *testing.T) {
+	// Arrange: bring up the driver through an ordinary command, then change the
+	// fake's health result so the test proves Health inspects THAT driver rather
+	// than starting another one.
+	spawner := &fakeSpawner{}
+	m, lastClient := newTestManager(t, fakeLocator{m: map[string]string{"ws": "s1"}}, spawner)
+	if err := m.SubmitPrompt(context.Background(), "ws", "hello", ""); err != nil {
+		t.Fatalf("bring up: %v", err)
+	}
+	lastClient().healthStatus = &corev1.HealthStatus{RequestId: "health-1", Healthy: true, Component: "claude-shim"}
+
+	// Act.
+	status, err := m.Health(context.Background(), "ws", "s1", "health-1")
+
+	// Assert.
+	if err != nil || !status.GetHealthy() || status.GetRequestId() != "health-1" {
+		t.Fatalf("Health = (%+v, %v)", status, err)
+	}
+	if len(spawner.calls) != 1 {
+		t.Fatalf("health must not start another shim; EnsureShim calls=%v", spawner.calls)
+	}
+	if got := lastClient().healthRequestIDs; len(got) != 1 || got[0] != "health-1" {
+		t.Fatalf("forwarded health ids=%v", got)
+	}
+}
+
+func TestHealthRejectsNoDriverAndWrongSession(t *testing.T) {
+	m, _ := newTestManager(t, fakeLocator{m: map[string]string{"ws": "s1"}}, &fakeSpawner{})
+	if _, err := m.Health(context.Background(), "ws", "s1", "health-1"); err == nil {
+		t.Fatal("health without an existing driver must error")
+	}
+	if err := m.SubmitPrompt(context.Background(), "ws", "hello", ""); err != nil {
+		t.Fatalf("bring up: %v", err)
+	}
+	if _, err := m.Health(context.Background(), "ws", "other", "health-2"); err == nil {
+		t.Fatal("health for a different session must error")
 	}
 }
 

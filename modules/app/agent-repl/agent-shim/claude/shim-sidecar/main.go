@@ -158,12 +158,14 @@ func (s *sidecar) sweep() {
 	s.emit(s.tracker.Sweep(time.Now().UnixMilli()))
 }
 
-// heartbeat pings the store, and treats a dead connection as a lost link rather
-// than a log line.
+// heartbeat uses a correlated store health probe.  The sidecar only reads
+// files while its store link is healthy, so a socket that merely exists must
+// never keep ingestion running.
 func (s *sidecar) heartbeat() {
-	if err := s.store.Heartbeat(); err != nil {
-		s.log("heartbeat failed: %v", err)
-		s.noteStoreErr("heartbeat", err)
+	requestID := fmt.Sprintf("sidecar-health-%d", time.Now().UnixNano())
+	if err := s.store.Health(requestID); err != nil {
+		s.log("health check failed request_id=%s: %v", requestID, err)
+		s.noteStoreErr("health", err)
 	}
 }
 
@@ -225,7 +227,7 @@ func (s *sidecar) pollAll() {
 			if os.IsNotExist(err) {
 				// Vanished file: start the grace clock; stop watching it.
 				if w.target.TaskID != "" {
-					s.tracker.MarkVanished(w.target.TaskID, now)
+					s.tracker.MarkVanished(w.target.SessionID, w.target.TaskID, now)
 				}
 				delete(s.watchers, path)
 				s.log("tail: %s vanished; grace clock started", path)
@@ -253,7 +255,7 @@ func (s *sidecar) pollAll() {
 		storeWriteMs := time.Since(writeStart).Milliseconds()
 		w.tailer.Commit(res)
 		if w.target.TaskID != "" {
-			s.tracker.Activity(w.target.TaskID, now)
+			s.tracker.Activity(w.target.SessionID, w.target.TaskID, now)
 		}
 		s.applyLifecycle(res.Events, now)
 		// The happy path is the one that carries the user's prompt echo to the
@@ -277,7 +279,7 @@ func (s *sidecar) applyLifecycle(events []*corev1.Event, nowMs int64) {
 			s.tracker.Open(ts.GetTaskId(), taskKindToTail(ts.GetKind()), e.GetSessionId(), ts.GetOutputPath(), nowMs, nowMs)
 		}
 		if te := e.GetTaskEnded(); te != nil && te.GetStatus() != corev1.TerminalStatus_TERMINAL_STATUS_LOST {
-			s.tracker.Close(te.GetTaskId())
+			s.tracker.Close(e.GetSessionId(), te.GetTaskId())
 		}
 	}
 }

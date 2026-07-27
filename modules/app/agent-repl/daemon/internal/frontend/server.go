@@ -159,18 +159,29 @@ func DefaultSocketPath() (string, error) {
 // until Close. It removes a stale socket file, creates the parent directory,
 // and blocks in the accept loop; a nil return means Close was called.
 func (s *Server) ServeUDS(path string) error {
+	l, err := ListenUDS(path)
+	if err != nil {
+		return err
+	}
+	return s.Serve(l)
+}
+
+// ListenUDS binds the production frontend UDS socket without entering the
+// accept loop.  Startup uses it to make readiness depend on the socket being
+// genuinely bound, rather than on a goroutine having merely been scheduled.
+func ListenUDS(path string) (net.Listener, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return fmt.Errorf("frontend: mkdir socket dir: %w", err)
+		return nil, fmt.Errorf("frontend: mkdir socket dir: %w", err)
 	}
 	// Remove a stale socket; a live one would refuse to bind.
 	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-		s.logf("frontend: remove stale socket %s: %v", path, err)
+		return nil, fmt.Errorf("frontend: remove stale socket %s: %w", path, err)
 	}
 	l, err := net.Listen("unix", path)
 	if err != nil {
-		return fmt.Errorf("frontend: listen unix %s: %w", path, err)
+		return nil, fmt.Errorf("frontend: listen unix %s: %w", path, err)
 	}
-	return s.Serve(l)
+	return l, nil
 }
 
 // Serve accepts UDS connections on l until Close. Exposed for tests (temp-dir
@@ -529,13 +540,13 @@ func isHostOnlyCommand(cmd *frontendv1.FrontendCommand) bool {
 	return cmd.GetCreateWorkspace() != nil || cmd.GetWorkspaceMaterialized() != nil || cmd.GetHostActionCompleted() != nil
 }
 
-func (s *Server) dispatchClientCommand(cl *client, cmd *frontendv1.FrontendCommand) *frontendv1.CommandAck {
+func (s *Server) dispatchClientCommand(cl *client, cmd *frontendv1.FrontendCommand) (*frontendv1.CommandAck, *frontendv1.FrontendFrame) {
 	if isHostOnlyCommand(cmd) && !cl.kind.isHost() {
 		err := fmt.Errorf("frontend: host-only command rejected from client kind %s", cl.kind)
 		s.logf("frontend: host-only command rejected kind=%s request_id=%s", cl.kind, cmd.GetRequestId())
-		return failAck(s.logf, cmd.GetRequestId(), err)
+		return failAck(s.logf, cmd.GetRequestId(), err), nil
 	}
-	return dispatch(context.Background(), s.logf, s.handler, cmd)
+	return DispatchWithResponse(context.Background(), s.logf, s.handler, cmd)
 }
 
 // ---------------------------------------------------------------------------
@@ -662,9 +673,16 @@ func (s *Server) readLoop(c conn, cl *client) {
 		if pa := cmd.GetPaintAck(); pa != nil && settlesDelivery(pa) {
 			s.settlePaint(cmd.GetWorkspace(), pa.GetStateGeneration())
 		}
-		ack := s.dispatchClientCommand(cl, cmd)
+		ack, response := s.dispatchClientCommand(cl, cmd)
 		if !ack.GetOk() {
 			s.logf("frontend: command nack {request_id=%s ws=%s}: %s", ack.GetRequestId(), cmd.GetWorkspace(), ack.GetError())
+		}
+		if response != nil {
+			if data, err := marshalFrame(response); err != nil {
+				s.logf("frontend: marshal command response request_id=%s: %v", ack.GetRequestId(), err)
+			} else {
+				s.enqueue(cl, data)
+			}
 		}
 		if data, err := marshalFrame(CommandAckFrame(ack)); err != nil {
 			s.logf("frontend: marshal command ack: %v", err)

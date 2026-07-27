@@ -91,6 +91,10 @@ type SessionLocator interface {
 type sessionClient interface {
 	Run(ctx context.Context) error
 	AwaitReady(ctx context.Context) error
+	// Health proves the already handshaked shim's own dependency boundary.
+	// It MUST NOT cause a lazy bring-up; session readiness is false until the
+	// existing live driver can answer this probe.
+	Health(ctx context.Context, requestID string) (*corev1.HealthStatus, error)
 	SubmitPrompt(ctx context.Context, text, origin, permissionMode string) error
 	// Interrupt returns the shim's own verdict on what the stop did, which is
 	// the only place that verdict is observable.
@@ -512,6 +516,39 @@ func (m *Manager) Interrupt(ctx context.Context, workspace string, hard bool) er
 	}
 	m.logf("sessiondrv: interrupt ws=%s session=%s outcome=%s", workspace, d.sessionID, outcome)
 	return nil
+}
+
+// Health proves one named live session is connected to this daemon and that
+// its shim has passed its own dependency health check.  It deliberately uses
+// existing rather than ensure: a restore must not render because a probe
+// happened to create a new shim; it may render only after the live driver has
+// handshaked and answered the correlated check.
+func (m *Manager) Health(ctx context.Context, workspace, sessionID, requestID string) (*corev1.HealthStatus, error) {
+	if workspace == "" {
+		return nil, fmt.Errorf("sessiondrv: health requires a workspace")
+	}
+	if sessionID == "" {
+		return nil, fmt.Errorf("sessiondrv: health ws=%q requires a session_id", workspace)
+	}
+	if requestID == "" {
+		return nil, fmt.Errorf("sessiondrv: health ws=%q session=%s requires a request_id", workspace, sessionID)
+	}
+	d, err := m.existing(workspace)
+	if err != nil {
+		return nil, err
+	}
+	if d.sessionID != sessionID {
+		return nil, fmt.Errorf("sessiondrv: health ws=%q names session=%s but live driver owns session=%s", workspace, sessionID, d.sessionID)
+	}
+	m.logf("sessiondrv: health probe ws=%q session=%s request_id=%s", workspace, sessionID, requestID)
+	status, err := d.client.Health(ctx, requestID)
+	if err != nil {
+		return nil, fmt.Errorf("sessiondrv: health ws=%q session=%s request_id=%s: %w", workspace, sessionID, requestID, err)
+	}
+	if status.GetRequestId() != requestID {
+		return nil, fmt.Errorf("sessiondrv: health ws=%q session=%s request_id mismatch got=%q want=%q", workspace, sessionID, status.GetRequestId(), requestID)
+	}
+	return status, nil
 }
 
 // AnswerPermission delivers a frontend permission answer to the parked
