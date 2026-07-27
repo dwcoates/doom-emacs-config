@@ -31,5 +31,24 @@
        (agent-repl--dir-watcher-remove-legacy 'invalid "workspace_commands"))
       (should (zerop remove-calls)))))
 
+(ert-deftest agent-repl-test-dir-watcher-logs-and-propagates-removal-failure ()
+  "A failed legacy teardown is logged with its dynamic context and re-signaled."
+  (let (logs)
+    (cl-letf (((symbol-function 'file-notify-valid-p)
+               (lambda (_descriptor) t))
+              ((symbol-function 'file-notify-rm-watch)
+               (lambda (_descriptor) (error "watch removal failed")))
+              ((symbol-function 'agent-repl--log)
+               (lambda (_ws format-string &rest args)
+                 (push (apply #'format format-string args) logs))))
+      (should-error
+       (agent-repl--dir-watcher-remove-legacy
+        'legacy-descriptor "workspace_commands")
+       :type 'error)
+      (should (member (concat "dir-watcher legacy teardown: label=workspace_commands"
+                             " descriptor=legacy-descriptor outcome=remove-failed"
+                             " error=(error \"watch removal failed\")")
+                      logs)))))
+
 (provide 'agent-repl-test-dir-watcher)
 ;;; test-dir-watcher.el ends here
