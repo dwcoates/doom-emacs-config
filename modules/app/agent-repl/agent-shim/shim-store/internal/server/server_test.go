@@ -311,6 +311,76 @@ func TestEphemeralPassThroughNotPersisted(t *testing.T) {
 	}
 }
 
+// collectLogs returns a log sink plus a drain. Every line the server emits for
+// a batch is logged before its ack is written, so draining after recvAck sees
+// exactly that batch's lines with no timing assumptions.
+func collectLogs(capacity int) (Logf, func() []string) {
+	lines := make(chan string, capacity)
+	logf := func(format string, args ...any) {
+		select {
+		case lines <- fmt.Sprintf(format, args...):
+		default:
+		}
+	}
+	drain := func() []string {
+		var out []string
+		for {
+			select {
+			case l := <-lines:
+				out = append(out, l)
+			default:
+				return out
+			}
+		}
+	}
+	return logf, drain
+}
+
+func findLine(lines []string, prefix string) string {
+	for _, l := range lines {
+		if strings.HasPrefix(l, prefix) {
+			return l
+		}
+	}
+	return ""
+}
+
+func TestIngestLineLogsBatchFacts(t *testing.T) {
+	// Arrange
+	logf, drain := collectLogs(16)
+	h := start(t, 0, logf)
+	prod := h.dial(t)
+
+	// Act: a two-event persistent batch.
+	send(t, prod, write(vAssistantStream(t, "s1", "A"), vAssistantStream(t, "s1", "B")))
+	recvAck(t, prod)
+
+	// Assert: exactly one ingest line carrying the batch's facts.
+	got := findLine(drain(), "ingest: ")
+	want := "ingest: producer=test session=s1 events=2 accepted=2 deduped=0 last_seq=2 ingest_ms="
+	if !strings.HasPrefix(got, want) {
+		t.Fatalf("ingest line = %q, want prefix %q", got, want)
+	}
+}
+
+func TestIngestLineSilentForEphemeralOnlyBatch(t *testing.T) {
+	// Arrange
+	logf, drain := collectLogs(16)
+	h := start(t, 0, logf)
+	prod := h.dial(t)
+
+	// Act: a batch with nothing persistent in it.
+	eph := &corev1.Event{SessionId: "s1", Class: corev1.EventClass_EVENT_CLASS_EPHEMERAL,
+		Payload: &corev1.Event_ContentDelta{ContentDelta: &corev1.ContentDelta{Uuid: "live"}}}
+	send(t, prod, write(eph))
+	recvAck(t, prod)
+
+	// Assert: no ingest line for a batch that never touched the DB.
+	if got := findLine(drain(), "ingest: "); got != "" {
+		t.Fatalf("ephemeral-only batch logged %q, want silence", got)
+	}
+}
+
 func TestSlowConsumerHardDisconnect(t *testing.T) {
 	// Arrange: tiny buffer, a log sink that signals the disconnect on a channel.
 	disc := make(chan struct{}, 1)
@@ -338,7 +408,7 @@ func TestSlowConsumerHardDisconnect(t *testing.T) {
 	// and the store hard-disconnects — without the ingest cost of a huge batch.
 	pad := strings.Repeat("x", 1024)
 	big := make([]*corev1.Event, 0, 2000)
-	for i := 0; i < 2000; i++ {
+	for i := range 2000 {
 		big = append(big, vAssistantStream(t, "s1", fmt.Sprintf("u%04d%s", i, pad)))
 	}
 	send(t, prod, write(big...))

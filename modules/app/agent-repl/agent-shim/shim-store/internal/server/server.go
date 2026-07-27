@@ -32,6 +32,7 @@ import (
 	"net"
 	"os"
 	"sync"
+	"time"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	"agentrepl/shim-store/internal/db"
@@ -301,7 +302,9 @@ func (s *Server) ingestAndFan(sw *corev1.StoreWrite) *corev1.StoreWriteAck {
 		}
 	}
 
+	start := time.Now()
 	res, err := s.db.Ingest(sw.GetProducer(), persistent, batch.GetCursorAdvance())
+	ingestMs := time.Since(start).Milliseconds()
 	if err != nil {
 		s.log("REJECTED batch (producer=%s events=%d): %v", sw.GetProducer(), len(events), err)
 		return &corev1.StoreWriteAck{Error: err.Error()}
@@ -320,8 +323,12 @@ func (s *Server) ingestAndFan(sw *corev1.StoreWrite) *corev1.StoreWriteAck {
 		}
 	}
 
-	if res.Deduped > 0 {
-		s.log("dedup: producer=%s accepted=%d deduped=%d last_seq=%d", sw.GetProducer(), res.Accepted, res.Deduped, res.LastSeq)
+	// One line per persisted batch, so the store hop of the prompt round trip is
+	// visible end to end. Ephemeral-only batches (and heartbeats) stay silent;
+	// this line also carries what the old dedup-only line reported.
+	if len(persistent) > 0 {
+		s.log("ingest: producer=%s session=%s events=%d accepted=%d deduped=%d last_seq=%d ingest_ms=%d",
+			sw.GetProducer(), persistent[0].GetSessionId(), len(persistent), res.Accepted, res.Deduped, res.LastSeq, ingestMs)
 	}
 	return &corev1.StoreWriteAck{Accepted: res.Accepted, Deduped: res.Deduped, LastSeq: res.LastSeq}
 }
