@@ -235,6 +235,7 @@ func newUDSHarness(t *testing.T) *e2eHarness {
 		MergeDirs:       stubMergeDirs{},
 		Lifecycle:       stubLifecycle{},
 		Resyncer:        driver,
+		Catalogs:        driver,
 		SessionCommands: binding,
 		Logf:            t.Logf,
 	})

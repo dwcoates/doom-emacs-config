@@ -591,6 +591,36 @@ func TestApplyForwardsToSSMAndRefreshesTaskCatalogOnTaskEvents(t *testing.T) {
 	}
 }
 
+func TestApplyTaskProgressReachesSSMAndRingWithoutPushingCatalog(t *testing.T) {
+	// Arrange.
+	push := &fakePusher{}
+	applier := &fakeApplier{}
+	c := newTestConsumer(push, applier)
+	progress := &corev1.Event{
+		SessionId: "s1",
+		Seq:       2,
+		Payload: &corev1.Event_TaskProgress{TaskProgress: &corev1.TaskProgress{
+			TaskId: "t1",
+		}},
+	}
+
+	// Act.
+	c.Apply(progress)
+
+	// Assert — progress remains part of the ordered live event window and SSM
+	// input, but it cannot change the TaskCatalog vocabulary.
+	if len(applier.applied) != 1 || applier.applied[0] != progress {
+		t.Fatalf("SSM applied events = %v, want the TaskProgress event", applier.applied)
+	}
+	ring := c.snapshotRing()
+	if len(ring) != 1 || ring[0] != progress {
+		t.Fatalf("retained ring = %v, want the TaskProgress event", ring)
+	}
+	if len(push.catalog) != 0 {
+		t.Fatalf("task progress must not refresh the unchanged catalog; got %d pushes", len(push.catalog))
+	}
+}
+
 func TestApplyNonTaskEventDoesNotPushCatalog(t *testing.T) {
 	// Arrange.
 	push := &fakePusher{}

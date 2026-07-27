@@ -527,6 +527,11 @@ The request-id generator is stubbed deterministic (\"req-fixed\")."
   ;; Act / Assert
   (should (member "heartbeat" agent-repl--uds-ignored-frame-fields)))
 
+(ert-deftest agent-repl-test-uds-task-catalog-is-a-deliberately-ignored-frame ()
+  "`taskCatalog' is webapp-only, so Emacs declares rather than warns about it."
+  ;; Act / Assert
+  (should (member "taskCatalog" agent-repl--uds-ignored-frame-fields)))
+
 (ert-deftest agent-repl-test-uds-ignored-frames-are-all-known-frames ()
   "Every deliberately-ignored arm must also be a known arm, or dispatch signals."
   ;; Act / Assert
@@ -553,6 +558,26 @@ The request-id generator is stubbed deterministic (\"req-fixed\")."
         ;; Assert
         (should-not (seq-find (lambda (m) (string-match-p "no handler registered" m))
                               logged))))))
+
+(ert-deftest agent-repl-test-uds-dispatch-task-catalog-logs-scoped-shape-in-verbose-mode ()
+  "TaskCatalog diagnostics identify their workspace, session, and roster size."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let (logged-ws logged-text)
+      (cl-letf (((symbol-function 'agent-repl--log-verbose)
+                 (lambda (ws fmt &rest args)
+                   (setq logged-ws ws
+                         logged-text (apply #'format fmt args)))))
+        ;; Act
+        (agent-repl--uds-dispatch-frame
+         '(:taskCatalog
+           (:workspace "ws1" :sessionId "s1"
+            :tasks ((:taskId "t1") (:taskId "t2")))))
+        ;; Assert
+        (should (equal logged-ws "ws1"))
+        (should (string-match-p "field=taskCatalog" logged-text))
+        (should (string-match-p "session=s1" logged-text))
+        (should (string-match-p "task-count=2" logged-text))))))
 
 (ert-deftest agent-repl-test-uds-dispatch-unignored-gap-still-warns ()
   "A known arm that is NOT declared ignored still logs the wiring gap loudly."

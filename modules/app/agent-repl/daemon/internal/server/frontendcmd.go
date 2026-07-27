@@ -464,6 +464,9 @@ type ssmSnapshotProvider struct {
 	// so a (re)connecting frontend sources its slash-command/tools/model menus
 	// from the snapshot. Nil-safe: a nil source leaves snapshot.inits empty.
 	inits SessionInitSource
+	// catalogs supplies every live session's complete detached-task roster, so
+	// reconnect restores or clears the webapp's roster before later deltas.
+	catalogs TaskCatalogSource
 	// queues supplies each live session's held-prompt queue (E4). Nil-safe: a
 	// nil source leaves snapshot.queues empty.
 	queues QueueSource
@@ -475,6 +478,9 @@ type ssmSnapshotProvider struct {
 	// (re)connecting frontend's footer is populated before the next change
 	// pushes. Nil-safe: a nil source leaves snapshot.progress empty.
 	progress ProgressSource
+	// logf records the complete snapshot shape at the reconnect boundary. It is
+	// optional only for focused unit construction outside WireAgentShim.
+	logf dlog.Logf
 }
 
 var _ frontend.StateProvider = (*ssmSnapshotProvider)(nil)
@@ -491,6 +497,13 @@ type SessionMetaSource interface {
 // *sessiondrv.Manager. Returning an empty slice is valid (no inits yet).
 type SessionInitSource interface {
 	SessionInits() []*frontendv1.SessionInitView
+}
+
+// TaskCatalogSource supplies the authoritative detached-task roster for every
+// live session on connect/resync. Empty per-session catalogs are significant:
+// they clear stale frontend roster state.
+type TaskCatalogSource interface {
+	TaskCatalogs() []*frontendv1.TaskCatalog
 }
 
 // QueueSource supplies every live session's held-prompt queue (E4) for the
@@ -531,6 +544,9 @@ func (p *ssmSnapshotProvider) Snapshot() *frontendv1.StateSnapshot {
 	if p.inits != nil {
 		snap.Inits = p.inits.SessionInits()
 	}
+	if p.catalogs != nil {
+		snap.Catalogs = p.catalogs.TaskCatalogs()
+	}
 	if p.queues != nil {
 		snap.Queues = p.queues.QueueViews()
 	}
@@ -539,6 +555,15 @@ func (p *ssmSnapshotProvider) Snapshot() *frontendv1.StateSnapshot {
 	}
 	if p.progress != nil {
 		snap.Progress = p.progress.Snapshot()
+	}
+	if p.logf != nil {
+		taskCount := 0
+		for _, catalog := range snap.GetCatalogs() {
+			taskCount += len(catalog.GetTasks())
+		}
+		p.logf("frontend: connect snapshot workspaces=%d sessions=%d catalogs=%d tasks=%d inits=%d queues=%d progress=%d daemon=%t",
+			len(snap.GetWorkspaces()), len(snap.GetSessions()), len(snap.GetCatalogs()), taskCount,
+			len(snap.GetInits()), len(snap.GetQueues()), len(snap.GetProgress()), snap.GetDaemon() != nil)
 	}
 	return snap
 }

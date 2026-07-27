@@ -62,38 +62,36 @@ func scopeFrame(frame *frontendv1.FrontendFrame, sc Scope) (*frontendv1.Frontend
 	}
 }
 
-// filterSnapshot returns a copy of snap carrying only the workspaces and
-// sessions matching sc. The retained protos are shared (read-only downstream),
-// only the slices are new.
+type scopedView interface {
+	GetSessionId() string
+	GetWorkspace() string
+}
+
+// filterScopedViews retains the views whose session or workspace belongs to
+// sc. The protos themselves remain shared and read-only; only the slice is new.
+func filterScopedViews[T scopedView](views []T, sc Scope) []T {
+	var out []T
+	for _, view := range views {
+		if sc.matches(view.GetSessionId(), view.GetWorkspace()) {
+			out = append(out, view)
+		}
+	}
+	return out
+}
+
+// filterSnapshot returns a copy of snap carrying only the state-bearing views
+// matching sc. The retained protos are shared (read-only downstream), only the
+// slices are new.
 func filterSnapshot(snap *frontendv1.StateSnapshot, sc Scope) *frontendv1.StateSnapshot {
 	if snap == nil {
 		return &frontendv1.StateSnapshot{}
 	}
-	out := &frontendv1.StateSnapshot{}
-	for _, w := range snap.GetWorkspaces() {
-		if sc.matches(w.GetSessionId(), w.GetWorkspace()) {
-			out.Workspaces = append(out.Workspaces, w)
-		}
+	return &frontendv1.StateSnapshot{
+		Workspaces: filterScopedViews(snap.GetWorkspaces(), sc),
+		Sessions:   filterScopedViews(snap.GetSessions(), sc),
+		Catalogs:   filterScopedViews(snap.GetCatalogs(), sc),
+		Inits:      filterScopedViews(snap.GetInits(), sc),
+		Queues:     filterScopedViews(snap.GetQueues(), sc),
+		Progress:   filterScopedViews(snap.GetProgress(), sc),
 	}
-	for _, v := range snap.GetSessions() {
-		if sc.matches(v.GetSessionId(), v.GetWorkspace()) {
-			out.Sessions = append(out.Sessions, v)
-		}
-	}
-	for _, in := range snap.GetInits() {
-		if sc.matches(in.GetSessionId(), in.GetWorkspace()) {
-			out.Inits = append(out.Inits, in)
-		}
-	}
-	for _, q := range snap.GetQueues() {
-		if sc.matches(q.GetSessionId(), q.GetWorkspace()) {
-			out.Queues = append(out.Queues, q)
-		}
-	}
-	for _, p := range snap.GetProgress() {
-		if sc.matches(p.GetSessionId(), p.GetWorkspace()) {
-			out.Progress = append(out.Progress, p)
-		}
-	}
-	return out
 }
