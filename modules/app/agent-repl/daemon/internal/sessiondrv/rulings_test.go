@@ -127,14 +127,15 @@ func (f *fakeRegistrar) QueuedPromptsChanged(sessionID string, queued []registry
 func newRegistrarManager(t *testing.T, reg SessionRegistrar) *Manager {
 	t.Helper()
 	m, err := New(Config{
-		Push:            &fakePusher{},
-		SSM:             &fakeApplier{},
-		Spawner:         &fakeSpawner{},
-		Locator:         fakeLocator{m: map[string]string{}},
-		SeqStore:        &fakeSeqStore{seq: map[string]uint64{}},
-		Source:          stubSource{},
-		ProtocolVersion: "1",
-		Registrar:       reg,
+		Push:              &fakePusher{},
+		SSM:               &fakeApplier{},
+		Spawner:           &fakeSpawner{},
+		Locator:           fakeLocator{m: map[string]string{}},
+		SeqStore:          &fakeSeqStore{seq: map[string]uint64{}},
+		ClearCompactStore: newFakeClearCompactStore(),
+		Source:            stubSource{},
+		ProtocolVersion:   "1",
+		Registrar:         reg,
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)

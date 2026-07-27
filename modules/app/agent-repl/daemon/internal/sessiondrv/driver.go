@@ -35,6 +35,7 @@ import (
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
+	"claude-repld/internal/dlog"
 	"claude-repld/internal/errclass"
 	"claude-repld/internal/frontend"
 	"claude-repld/internal/registry"
@@ -123,6 +124,12 @@ type Config struct {
 	Locator SessionLocator
 	// SeqStore persists last_seen_seq (RegistrySeqStore). Required.
 	SeqStore shimclient.SeqStore
+	// ClearCompactStore persists the newest clear-or-compaction seq — the
+	// frontend replay floor (RegistrySeqStore again). Required: a driver that
+	// observed a clear or a compaction and had nowhere to record it would serve
+	// the next resync the very history that clear or compaction discarded, which
+	// is the failure the floor exists to prevent.
+	ClearCompactStore ClearCompactStore
 	// DaemonVersion / ProtocolVersion travel in DaemonHello; ProtocolVersion
 	// must equal the shim's ("1").
 	DaemonVersion   string
@@ -221,6 +228,8 @@ func New(cfg Config) (*Manager, error) {
 		return nil, fmt.Errorf("sessiondrv: New needs a SessionLocator")
 	case cfg.SeqStore == nil:
 		return nil, fmt.Errorf("sessiondrv: New needs a SeqStore")
+	case cfg.ClearCompactStore == nil:
+		return nil, fmt.Errorf("sessiondrv: New needs a ClearCompactStore (without it an observed clear or compaction cannot floor a later resync)")
 	case cfg.Source == nil:
 		return nil, fmt.Errorf("sessiondrv: New needs a ConnSource (shims dial the daemon; without it no session can be driven)")
 	}
@@ -562,6 +571,18 @@ func (m *Manager) AnswerPermission(_ context.Context, workspace, permissionReque
 // Resync replays the workspace session's retained conversation deltas from
 // fromSeq (task step 5), then closes whatever the ring could not cover.
 //
+// THE REPLAY FLOOR. What is actually replayed starts at
+// max(fromSeq, newestClearOrCompactSeq) — never at the raw client mark. A clear
+// and a compaction are each the point at which the conversation stopped
+// informing the agent, so history above one is history the frontend would only
+// discard, and serving it is both wasted work and an invitation for the
+// frontend to invent its own rule for FINDING the clear or the compaction (the
+// webapp's retired string-match on prompt text). Flooring here makes replay
+// idempotent by construction: the frontend scans for nothing, and a clear or a
+// compaction it receives is always live.
+//
+// The floor is INCLUSIVE of the clear or compaction itself — see replayFloor.
+//
 // The retained ring is a bounded live window (4,096 events) and is EMPTY after
 // a daemon restart, so a frontend asking from a seq below the ring's floor used
 // to be answered with silence — the blank-feed bug. When fromSeq falls below
@@ -580,16 +601,64 @@ func (m *Manager) Resync(workspace string, fromSeq uint64) error {
 	if err != nil {
 		return err
 	}
-	floor, haveFloor := d.consumer.resync(fromSeq)
-	if !haveFloor {
-		floor = m.cfg.SeqStore.LastSeq(d.sessionID) + 1
+	replayFrom := m.replayFloor(d, fromSeq)
+	ringFloor, haveRingFloor := d.consumer.resync(replayFrom)
+	if !haveRingFloor {
+		ringFloor = m.cfg.SeqStore.LastSeq(d.sessionID) + 1
 	}
-	if fromSeq >= floor {
+	if replayFrom >= ringFloor {
 		return nil // the ring covered the whole request
 	}
-	m.logf("sessiondrv: resync ws=%q from_seq=%d is below the retained floor %d; re-pulling the gap from the store",
-		workspace, fromSeq, floor)
-	return m.startRepull(d, fromSeq, floor)
+	m.logf("sessiondrv: resync ws=%q replay_from=%d is below the retained floor %d; re-pulling the gap from the store",
+		workspace, replayFrom, ringFloor)
+	return m.startRepull(d, exclusiveLowerBound(replayFrom), ringFloor)
+}
+
+// replayFloor is the first seq a frontend replay may start at:
+// max(clientLastSeq, newestClearOrCompactSeq), INCLUSIVE.
+//
+// Inclusive is the whole point. The clear or the compaction IS the bubble the
+// frontend draws and the rule it discards above, so a floor of
+// newestClearOrCompactSeq+1 would tell a frontend to throw away everything it
+// holds and hand it nothing to show for it. Both consumers of this value honor
+// that: consumer.resync replays every ring event with seq >= this, and the
+// store re-pull converts it to the shim's EXCLUSIVE lower bound
+// (exclusiveLowerBound) rather than passing it straight through.
+//
+// A CLEAR AND A COMPACTION BOTH FLOOR A REPLAY. A compaction discards the
+// history that preceded it just as a clear does — the summary is what stands in
+// for it — so there is no reason to floor on one and not the other. The store
+// mark is a single seq for that reason: whichever came last wins, and the older
+// one is already below the floor the newer one sets.
+func (m *Manager) replayFloor(d *driven, fromSeq uint64) uint64 {
+	floorSeq := m.cfg.ClearCompactStore.NewestClearOrCompactSeq(d.sessionID)
+	logf := dlog.Tag(dlog.Logf(m.logf),
+		"ws", d.workspace, "session", d.sessionID,
+		"from_seq", fromSeq, "newest_clear_or_compact_seq", floorSeq)
+	if floorSeq <= fromSeq {
+		logf("sessiondrv: replay floor left at the client mark replay_from=%d (the client is already at or past the newest clear or compaction)", fromSeq)
+		return fromSeq
+	}
+	logf("sessiondrv: replay floor RAISED to the newest clear or compaction replay_from=%d (inclusive: that event is itself replayed; the history above it is never sent)", floorSeq)
+	return floorSeq
+}
+
+// exclusiveLowerBound converts an INCLUSIVE first-seq-to-replay into the
+// EXCLUSIVE from_seq a core.v1 ReplayRequest carries (core.proto: "EXCLUSIVE
+// lower bound, matching Subscribe.from_seq").
+//
+// Without the conversion a re-pull floored at a clear or a compaction would
+// serve everything AFTER it and not the event itself — precisely the bubble the
+// frontend needs, missing in exactly the case that matters most: a restarted
+// daemon, whose ring is empty, so every replay goes through the store.
+//
+// A floor of 0 stays 0: there is no seq below it to be exclusive of, and
+// underflowing to MaxUint64 would ask the store to replay nothing at all.
+func exclusiveLowerBound(inclusive uint64) uint64 {
+	if inclusive == 0 {
+		return 0
+	}
+	return inclusive - 1
 }
 
 // PendingPermissions lists the request ids of the workspace's unresolved
@@ -751,7 +820,7 @@ func (m *Manager) bringUp(workspace string) (*driven, error) {
 	}
 
 	d := &driven{sessionID: sessionID, workspace: workspace}
-	cons := newConsumer(workspace, sessionID, m.cfg.Push, m.cfg.SSM, m.cfg.Progress, m.logf, func(ss *corev1.SessionStarted) {
+	cons := newConsumer(workspace, sessionID, m.cfg.Push, m.cfg.SSM, m.cfg.Progress, m.cfg.ClearCompactStore, m.logf, func(ss *corev1.SessionStarted) {
 		m.armMetaprompt(d, ss)
 		m.persistVendorSessionID(sessionID, ss.GetVendorSessionId())
 	}, func(active bool) {

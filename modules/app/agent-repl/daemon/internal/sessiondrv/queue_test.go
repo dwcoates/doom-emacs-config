@@ -91,16 +91,17 @@ func newQueueHarnessWithPusher(t *testing.T, cls *fakeClassifier, wrap func(*fak
 	var mu sync.Mutex
 	var last *fakeClient
 	cfg := Config{
-		Push:            push,
-		SSM:             &fakeApplier{},
-		Spawner:         &fakeSpawner{},
-		Locator:         fakeLocator{m: map[string]string{"ws": "s1"}},
-		SeqStore:        &fakeSeqStore{seq: map[string]uint64{}},
-		Registrar:       reg,
-		ProtocolVersion: "1",
-		Logf:            logf,
-		now:             func() int64 { return 1000 },
-		Source:          stubSource{},
+		Push:              push,
+		SSM:               &fakeApplier{},
+		Spawner:           &fakeSpawner{},
+		Locator:           fakeLocator{m: map[string]string{"ws": "s1"}},
+		SeqStore:          &fakeSeqStore{seq: map[string]uint64{}},
+		ClearCompactStore: newFakeClearCompactStore(),
+		Registrar:         reg,
+		ProtocolVersion:   "1",
+		Logf:              logf,
+		now:               func() int64 { return 1000 },
+		Source:            stubSource{},
 		newClient: func(c shimclient.Config) sessionClient {
 			fc := &fakeClient{cfg: c}
 			mu.Lock()
