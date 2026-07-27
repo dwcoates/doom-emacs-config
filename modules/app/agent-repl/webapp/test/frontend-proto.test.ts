@@ -64,6 +64,13 @@ const QUEUE = {
   ],
 };
 const SNAPSHOT = { workspaces: [WS_STATE], sessions: [SESSION_VIEW], catalogs: [TASK_CATALOG] };
+const WORKSPACE_AVAILABLE = {
+  jobId: "job-1",
+  finalName: "new-workspace",
+  worktreePath: "/worktrees/new-workspace",
+  sessionId: "session-1",
+};
+const HOST_ACTION = { actionId: "action-1", setRepositoryFold: { repoKey: "repo", folded: false } };
 
 describe("decodeFrontendFrame — every frame variant decodes", () => {
   const cases: Array<[string, unknown]> = [
@@ -78,6 +85,8 @@ describe("decodeFrontendFrame — every frame variant decodes", () => {
     ["sessionInit", { sessionInit: SESSION_INIT }],
     ["heartbeat", { heartbeat: HEARTBEAT }],
     ["queue", { queue: QUEUE }],
+    ["workspaceAvailable", { workspaceAvailable: WORKSPACE_AVAILABLE }],
+    ["hostAction", { hostAction: HOST_ACTION }],
   ];
   for (const [name, obj] of cases) {
     it(`decodes ${name}`, () => {
@@ -85,6 +94,19 @@ describe("decodeFrontendFrame — every frame variant decodes", () => {
       expect(frame.frame.case).toBe(name);
     });
   }
+});
+
+describe("decodeFrontendFrame — durable host work", () => {
+  it("decodes host-only snapshot collections", () => {
+    const frame = decode({ snapshot: { ...SNAPSHOT, workspaceAvailable: [WORKSPACE_AVAILABLE], hostActions: [HOST_ACTION] } });
+    if (frame.frame.case !== "snapshot") throw new Error("wrong variant");
+    expect(frame.frame.value.workspaceAvailable[0]?.jobId).toBe("job-1");
+    expect(frame.frame.value.hostActions[0]?.action.case).toBe("setRepositoryFold");
+  });
+
+  it("rejects a host action with no selected action arm", () => {
+    expect(() => decode({ hostAction: { actionId: "action-1" } })).toThrow(/exactly one action arm/);
+  });
 });
 
 describe("decodeFrontendFrame — protojson field coercion", () => {
@@ -543,8 +565,13 @@ describe("decodeFrontendFrame — QueueView (E4)", () => {
 });
 
 describe("UNSUPPORTED_SHAPES registry", () => {
-  it("lists commandAck and daemonView as the unsupported frontend.v1 frames", () => {
-    expect([...UNSUPPORTED_SHAPES.keys()]).toEqual(["commandAck", "daemonView"]);
+  it("lists non-rendered control and host-only frontend.v1 frames", () => {
+    expect([...UNSUPPORTED_SHAPES.keys()]).toEqual([
+      "commandAck",
+      "daemonView",
+      "workspaceAvailable",
+      "hostAction",
+    ]);
   });
 
   it("reports commandAck as visually unsupported", () => {

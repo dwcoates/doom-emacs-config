@@ -91,7 +91,8 @@ when the ack reports failure — in addition to the loud log + echo).")
 (defconst agent-repl--uds-known-frame-fields
   '("snapshot" "workspaceState" "sessionView" "conversationDelta"
     "typingDelta" "taskCatalog" "commandAck" "daemonView"
-    "sessionInit" "heartbeat" "queue" "progress")
+    "sessionInit" "heartbeat" "queue" "progress"
+    "workspaceAvailable" "hostAction")
   "The protojson (lowerCamelCase) names of every `FrontendFrame' oneof arm.
 Mirrors the `frame' oneof in proto/agentshim/frontend/v1/frontend.proto.
 A decoded frame whose sole top-level key is NOT one of these is
@@ -145,7 +146,8 @@ though there is intentionally nothing for Emacs to apply.")
 (defconst agent-repl--uds-known-command-fields
   '("submitPrompt" "interrupt" "permissionAnswer" "mergeWorkspace"
     "closeWorkspace" "openWorkspace" "resync" "createSession" "deleteSession"
-    "shutdown" "clientLog" "queueForce" "queueAccept" "queueCancel")
+    "shutdown" "clientLog" "queueForce" "queueAccept" "queueCancel"
+    "createWorkspace" "workspaceMaterialized" "hostActionCompleted")
   "The protojson names of every `FrontendCommand' oneof arm.
 Mirrors the `command' oneof in frontend.proto.  Sending an unknown
 command field is a programming error and fails loudly.

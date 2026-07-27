@@ -664,6 +664,11 @@ Reports comprehensive diagnostics."
 
 ;;; Section 4: Keybinding definitions
 
+(defconst agent-repl--workspace-create-keybindings
+  '(("n" . agent-repl-create-worktree-workspace)
+    ("N" . agent-repl-create-worktree-workspace-from-origin-master))
+  "Canonical `SPC TAB' daemon-owned workspace creation bindings.")
+
 (defconst agent-repl--scroll-output-intercept-states
   '(normal visual insert emacs operator motion replace)
   "Canonical list of every evil state.  Originally introduced so the
@@ -689,8 +694,7 @@ so a chord wins key lookup regardless of which evil state is current.")
 
 (map! :leader
       (:prefix "p"
-       :desc "Switch to workspace" "p" #'agent-repl-switch-to-project
-       :desc "Create worktree workspace" "w" #'agent-repl-create-worktree-workspace))
+       :desc "Switch to workspace" "p" #'agent-repl-switch-to-project))
 
 (map! :leader
       (:prefix "TAB"
@@ -879,4 +883,3 @@ aux maps for every state in `agent-repl--scroll-output-intercept-states'
 ;; Kill the agent session before workspace deletion so buffers/windows are cleaned
 ;; up while the workspace is still current.
 (agent-repl--ws-advise-kill-before #'agent-repl--kill-before-workspace-delete)
-
