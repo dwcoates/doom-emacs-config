@@ -730,10 +730,93 @@ quiet `agent-repl--emit-message' gate, so a fatal line always reaches the modeli
 
 ;;;; ---- Tests: log-to-file ----
 
-(ert-deftest agent-repl-test-logfile-path-returns-state-dir-path ()
-  "`agent-repl--logfile-path' should return the log under the state dir."
-  (should (equal (agent-repl--logfile-path)
-                 (agent-repl--global-state-file "doom-agent-repl.log"))))
+(ert-deftest agent-repl-test-default-log-directory-uses-os-temp-root-and-uid ()
+  "The default log directory should be UID-qualified under the OS temp root."
+  (let* ((tmpdir (make-temp-file "test-log-root-" t))
+         (temporary-file-directory (file-name-as-directory tmpdir)))
+    (unwind-protect
+        (should
+         (equal (agent-repl--default-log-directory)
+                (file-name-as-directory
+                 (expand-file-name (format "doom-agent-repl-%d" (user-uid))
+                                   temporary-file-directory))))
+      (delete-directory tmpdir t))))
+
+(ert-deftest agent-repl-test-default-log-directory-rejects-invalid-temp-root ()
+  "The default log resolver should fail loudly without an absolute temp root."
+  (dolist (bad-root '(nil "" "relative/tmp"))
+    (let ((temporary-file-directory bad-root))
+      (should-error (agent-repl--default-log-directory) :type 'error))))
+
+(ert-deftest agent-repl-test-normalize-log-file-name-redirects-retired-default ()
+  "A reload should redirect the retired default without moving its file."
+  (should
+   (equal (agent-repl--normalize-log-file-name
+           agent-repl--retired-state-log-file-name)
+          agent-repl--default-log-file-name)))
+
+(ert-deftest agent-repl-test-normalize-log-file-name-preserves-explicit-path ()
+  "An explicitly different logfile path should remain untouched."
+  (let ((custom "/tmp/agent-repl-explicit-test.log"))
+    (should (equal (agent-repl--normalize-log-file-name custom) custom))))
+
+(ert-deftest agent-repl-test-logfile-path-returns-private-temp-path ()
+  "`agent-repl--logfile-path' should create the private default temp directory."
+  (let* ((tmpdir (make-temp-file "test-log-root-" t))
+         (temporary-file-directory (file-name-as-directory tmpdir))
+         (expected-dir (agent-repl--default-log-directory))
+         (agent-repl-log-file-name
+          (expand-file-name "doom-agent-repl.log" expected-dir))
+         (agent-repl--validated-private-log-directories
+          (make-hash-table :test #'equal)))
+    (unwind-protect
+        (progn
+          (should (equal (agent-repl--logfile-path)
+                         (expand-file-name "doom-agent-repl.log" expected-dir)))
+          (should (file-directory-p expected-dir))
+          (should (= (logand (file-modes expected-dir) #o777) #o700))
+          (should (gethash expected-dir
+                           agent-repl--validated-private-log-directories)))
+      (delete-directory tmpdir t))))
+
+(ert-deftest agent-repl-test-logfile-path-revalidates-recreated-temp-directory ()
+  "Deleting the private directory should evict and rebuild its validation."
+  (let* ((tmpdir (make-temp-file "test-log-root-" t))
+         (temporary-file-directory (file-name-as-directory tmpdir))
+         (expected-dir (agent-repl--default-log-directory))
+         (agent-repl-log-file-name
+          (expand-file-name "doom-agent-repl.log" expected-dir))
+         (agent-repl--validated-private-log-directories
+          (make-hash-table :test #'equal)))
+    (unwind-protect
+        (progn
+          (agent-repl--logfile-path)
+          (delete-directory expected-dir)
+          (should (gethash expected-dir
+                           agent-repl--validated-private-log-directories))
+          (agent-repl--logfile-path)
+          (should (file-directory-p expected-dir))
+          (should (= (logand (file-modes expected-dir) #o777) #o700))
+          (should (gethash expected-dir
+                           agent-repl--validated-private-log-directories)))
+      (delete-directory tmpdir t))))
+
+(ert-deftest agent-repl-test-logfile-path-rejects-symlinked-temp-directory ()
+  "The private temporary log directory must not be a symlink."
+  (let* ((tmpdir (make-temp-file "test-log-root-" t))
+         (temporary-file-directory (file-name-as-directory tmpdir))
+         (target (expand-file-name "target" tmpdir))
+         (expected-dir (agent-repl--default-log-directory))
+         (agent-repl-log-file-name
+          (expand-file-name "doom-agent-repl.log" expected-dir))
+         (agent-repl--validated-private-log-directories
+          (make-hash-table :test #'equal)))
+    (unwind-protect
+        (progn
+          (make-directory target)
+          (make-symbolic-link target (directory-file-name expected-dir))
+          (should-error (agent-repl--logfile-path) :type 'error))
+      (delete-directory tmpdir t))))
 
 (ert-deftest agent-repl-test-logfile-path-honors-defcustom ()
   "`agent-repl--logfile-path' should expand `agent-repl-log-file-name'."
@@ -753,6 +836,7 @@ quiet `agent-repl--emit-message' gate, so a fatal line always reaches the modeli
         (cl-letf (((symbol-function 'agent-repl--logfile-path) (lambda () logpath)))
           (agent-repl--do-log-to-file "first line")
           (agent-repl--do-log-to-file "second line")
+          (should (= (logand (file-modes logpath) #o777) #o600))
           (let ((contents (with-temp-buffer
                             (insert-file-contents logpath)
                             (buffer-string))))
@@ -1859,7 +1943,8 @@ The master kill-switch overrides the always-on file-write decoupling."
         (let ((content (buffer-string)))
           (should (string-match-p "WARNING: log truncated" content))
           (should (string-match-p "cap=" content))
-          (should (string-match-p "kept last" content)))))))
+          (should (string-match-p "kept last" content))))
+    (should (= (logand (file-modes path) #o777) #o600)))))
 
 (ert-deftest agent-repl-test-size-check-fires-every-interval ()
   "`--do-log-to-file' invokes `--log-maybe-truncate' on the Nth write."

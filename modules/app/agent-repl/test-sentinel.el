@@ -526,16 +526,21 @@ old raw-hash iteration semantics for a sole matching historical entry."
 (ert-deftest agent-repl-test-poll-logs-unknown-files ()
   "poll-workspace-notifications should not error on files that match no handler."
   (agent-repl-test--with-clean-state
-    (let ((dispatched-count 0))
-      (cl-letf (((symbol-function 'file-directory-p) (lambda (_d) t))
-                ((symbol-function 'directory-files)
-                 (lambda (_dir _full _match _nosort)
-                   '("/sentinel/unknown_file")))
-                ((symbol-function 'file-exists-p) (lambda (_f) t))
-                ((symbol-function 'agent-repl--dispatch-sentinel-file)
-                 (lambda (_f) (cl-incf dispatched-count) nil)))
-        (agent-repl--poll-workspace-notifications)
-        (should (= dispatched-count 1))))))
+    (let* ((tmp (make-temp-file "sentinel-unknown-" t))
+           (agent-repl--sentinel-dir tmp)
+           (unknown-file (expand-file-name "unknown_file" tmp))
+           (dispatched-count 0))
+      (unwind-protect
+          (progn
+            (write-region "" nil unknown-file)
+            (cl-letf (((symbol-function 'agent-repl--dispatch-sentinel-file)
+                       (lambda (file)
+                         (should (equal file unknown-file))
+                         (cl-incf dispatched-count)
+                         nil)))
+              (agent-repl--poll-workspace-notifications)
+              (should (= dispatched-count 1))))
+        (ignore-errors (delete-directory tmp t))))))
 
 (ert-deftest agent-repl-test-poll-empty-directory ()
   "poll-workspace-notifications should do nothing when directory is empty."

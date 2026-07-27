@@ -4426,7 +4426,7 @@ the process exit status (integer) on completion, or the symbol
 exiting.
 
 The resolver's full stdout+stderr is logged to
-`~/.claude-emacs/doom-agent-repl.log' via `agent-repl--log' under
+`agent-repl-log-file-name' via `agent-repl--log' under
 the workspace tag (when TARGET-WS is supplied) so a failure or
 timeout can be post-mortemed from the logfile alone — no need to
 know which Emacs buffer to open, and the trace survives Emacs

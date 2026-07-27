@@ -407,7 +407,7 @@ behavior can rebind via `cl-letf'.")
 
 ;; Disable file-logging during tests so the unconditional file-write path
 ;; (always-on after the core.el log refactor) does not append every
-;; test-emitted line to the user's real `~/.claude-emacs/doom-agent-repl.log'.
+;; test-emitted line to the user's real OS-temporary agent-repl logfile.
 ;; Tests that specifically exercise the file-write path bind this back
 ;; locally and redirect `agent-repl-log-file-name' to a temp path.
 (when (and noninteractive (boundp 'agent-repl-log-to-file))
