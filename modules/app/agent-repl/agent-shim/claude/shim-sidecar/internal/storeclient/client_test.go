@@ -224,6 +224,26 @@ func TestIntegrationHeartbeat(t *testing.T) {
 	}
 }
 
+func TestIntegrationHealthCheck(t *testing.T) {
+	// Arrange: as with a heartbeat, health may be the first deliberate frame
+	// after the sidecar restores its producer connection.
+	sock := startRealStore(t)
+	c := New(sock, nil)
+	defer c.Close()
+	if err := c.Connect(); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+
+	// Act / Assert: a correlated store health response keeps the producer
+	// connection usable for the eventual first write.
+	if err := c.Health("sidecar-health-test"); err != nil {
+		t.Fatalf("Health: %v", err)
+	}
+	if _, err := c.Write("shim-claude-sidecar", &corev1.EventBatch{}); err != nil {
+		t.Fatalf("first write after health: %v", err)
+	}
+}
+
 func TestWriteErrorSurfacedOnDeadStore(t *testing.T) {
 	// Arrange: a client pointed at a socket with no server (honest sad path).
 	c := New(filepath.Join(t.TempDir(), "nonexistent.sock"), nil)
@@ -263,6 +283,33 @@ func TestHeartbeatOnADownConnectionIsAnErrorNotSilence(t *testing.T) {
 	// Act / Assert
 	if err := c.Heartbeat(); !errors.Is(err, ErrNotConnected) {
 		t.Fatalf("Heartbeat err = %v, want ErrNotConnected", err)
+	}
+}
+
+func TestHealthOnADownConnectionIsAnErrorNotSilence(t *testing.T) {
+	// Arrange: a health assertion cannot treat an absent producer connection as
+	// healthy, because that would permit the shim to render a dead session.
+	c := New(filepath.Join(t.TempDir(), "nonexistent.sock"), nil)
+
+	// Act / Assert
+	if err := c.Health("health-down"); !errors.Is(err, ErrNotConnected) {
+		t.Fatalf("Health err = %v, want ErrNotConnected", err)
+	}
+}
+
+func TestHealthRequiresCorrelationID(t *testing.T) {
+	// Arrange: connect first so the request-id invariant, rather than a missing
+	// transport, is the error this test exercises.
+	sock := startRealStore(t)
+	c := New(sock, nil)
+	defer c.Close()
+	if err := c.Connect(); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+
+	// Act / Assert
+	if err := c.Health(""); err == nil {
+		t.Fatal("Health accepted an empty request_id")
 	}
 }
 

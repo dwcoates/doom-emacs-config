@@ -442,6 +442,31 @@ message Heartbeat {
   int64 sent_at_ms = 1;
 }
 
+// Correlated dependency health probe for every agent-shim UDS hop.
+//
+// A live Unix socket (or even a completed transport handshake) is not a
+// health assertion: a peer can accept a connection while its dependency has
+// already failed.  The requester therefore names this probe with an opaque
+// request_id and accepts health only from the matching HealthStatus response.
+// The store answers it directly; a per-session shim answers it only after it
+// has checked the store dependency it owns.  It is deliberately control-plane
+// material, not an Event: health is an observation at one instant and must
+// never enter the durable conversation stream.
+message HealthCheck {
+  string request_id = 1;
+}
+
+// Reply to HealthCheck.  A responder MUST set healthy=true only after every
+// dependency in its own responsibility boundary has passed.  healthy=false
+// is an explicit failed assertion, never a soft warning; reason must explain
+// the failed dependency and is surfaced by the daemon/frontend unchanged.
+message HealthStatus {
+  string request_id = 1;
+  bool healthy = 2;
+  string component = 3;
+  string reason = 4;
+}
+
 // Producer→store append. The store commits events + cursor_advance in one
 // transaction and acks with dedup accounting.
 message StoreWrite {

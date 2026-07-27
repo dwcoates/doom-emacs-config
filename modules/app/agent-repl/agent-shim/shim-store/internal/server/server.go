@@ -20,6 +20,10 @@
 //   - Heartbeat → PRODUCER-PREAMBLE connection: the store echoes heartbeats
 //     until the first StoreWrite declares the producer. This keeps an idle
 //     sidecar link alive after startup recovery but before any file changes.
+//   - HealthCheck → PRODUCER-PREAMBLE connection: the store returns the
+//     correlated HealthStatus, then continues to await the first StoreWrite.
+//     This lets a recovered idle sidecar prove store health without losing its
+//     producer connection.
 //   - Subscribe → SUBSCRIBER connection: the store replays persisted events with
 //     seq > from_seq, then live-tails Event frames until the client disconnects
 //     or falls behind.
@@ -172,9 +176,33 @@ func (s *Server) handleConn(conn net.Conn) {
 		s.serveSubscriber(conn, m)
 	case *corev1.CursorQuery:
 		s.serveCursorQuery(conn, m)
+	case *corev1.HealthCheck:
+		s.serveHealth(conn, m)
+		s.log("producer connection opened with health check; awaiting first StoreWrite")
+		s.serveProducerPreamble(conn)
 	default:
-		s.log("first frame is %T; expected StoreWrite, Heartbeat, Subscribe, or CursorQuery", m)
+		s.log("first frame is %T; expected StoreWrite, Heartbeat, Subscribe, CursorQuery, or HealthCheck", m)
 	}
+}
+
+// serveHealth proves that the store is accepting framed protocol traffic after
+// its database-backed server has been constructed.  A socket file alone can be
+// stale or merely listening; only this correlated response is health.
+func (s *Server) serveHealth(conn net.Conn, check *corev1.HealthCheck) {
+	if check.GetRequestId() == "" {
+		s.log("health check rejected: empty request_id")
+		return
+	}
+	status := &corev1.HealthStatus{
+		RequestId: check.GetRequestId(),
+		Healthy:   true,
+		Component: "shim-store",
+	}
+	if err := wire.WriteAny(conn, status); err != nil {
+		s.log("health reply failed request_id=%s: %v", check.GetRequestId(), err)
+		return
+	}
+	s.log("health PASS request_id=%s", check.GetRequestId())
 }
 
 // serveCursorQuery answers a sidecar's startup cursor-recovery request (§7.3):
@@ -240,6 +268,8 @@ func (s *Server) serveProducerPreamble(conn net.Conn) {
 			if err := s.echoHeartbeat(conn, m); err != nil {
 				return
 			}
+		case *corev1.HealthCheck:
+			s.serveHealth(conn, m)
 		default:
 			s.log("producer preamble sent an unrecognized frame (%T); disconnecting", m)
 			return
@@ -270,6 +300,8 @@ func (s *Server) serveProducer(conn net.Conn, first *corev1.StoreWrite) {
 			if err := s.echoHeartbeat(conn, m); err != nil {
 				return
 			}
+		case *corev1.HealthCheck:
+			s.serveHealth(conn, m)
 		default:
 			s.log("producer sent an unrecognized frame (%T, producer=%s); disconnecting", m, first.GetProducer())
 			return

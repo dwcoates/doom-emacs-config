@@ -49,6 +49,8 @@ import {
   Event,
   EventBatchSchema,
   EventSchema,
+  HealthCheckSchema,
+  HealthStatusSchema,
   Heartbeat,
   HeartbeatSchema,
   StoreWriteAck,
@@ -101,6 +103,12 @@ export interface StoreClientOptions {
 }
 
 const COMPONENT = "shim-store-client";
+const HEALTH_TIMEOUT_MS = 2000;
+
+export interface StoreHealth {
+  healthy: boolean;
+  reason: string;
+}
 
 interface PendingWrite {
   resolve: (ack: StoreWriteAck) => void;
@@ -258,6 +266,69 @@ export class StoreClient {
   /** True while the store connection is live. */
   isConnected(): boolean {
     return this.connected;
+  }
+
+  /** True only after the daemon has installed a standing merged-event tail. */
+  isSubscribed(): boolean {
+    return this.lastFromSeq !== null && this.subConn !== null;
+  }
+
+  /**
+   * Assert all store dependencies needed to render this session.  The existing
+   * producer and standing subscription must both be live, then a separate
+   * correlated HealthCheck proves the store is parsing framed protocol traffic
+   * right now without disturbing either of those role-bound connections.
+   */
+  health(requestId: string): Promise<StoreHealth> {
+    if (requestId === "") return Promise.resolve({ healthy: false, reason: "health check requires request_id" });
+    if (!this.connected || this.conn === null) return Promise.resolve({ healthy: false, reason: "producer connection is not live" });
+    if (!this.isSubscribed()) return Promise.resolve({ healthy: false, reason: "standing store subscription is not live" });
+
+    return new Promise((resolve) => {
+      let settled = false;
+      let probe: MessageConn | null = null;
+      const timeout = setTimeout(() => finish(false, `store health timed out after ${HEALTH_TIMEOUT_MS}ms`), HEALTH_TIMEOUT_MS);
+      timeout.unref?.();
+      const finish = (healthy: boolean, reason: string): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        probe?.close();
+        shimLog(COMPONENT, { session: this.opts.sessionId, request: requestId, healthy, reason },
+          healthy ? "store health PASS" : "store health FAIL");
+        resolve({ healthy, reason });
+      };
+      const socket = net.connect(this.opts.socketPath);
+      const onDialError = (err: Error): void => finish(false, `cannot open store health probe: ${err.message}`);
+      socket.once("error", onDialError);
+      socket.once("connect", () => {
+        socket.removeListener("error", onDialError);
+        probe = new MessageConn(
+          socket,
+          {
+            onMessage: (msg) => {
+              const status = unpackAs(msg, HealthStatusSchema);
+              if (!status) {
+                finish(false, `expected HealthStatus, got ${envelopeType(msg)}`);
+                return;
+              }
+              if (status.requestId !== requestId) {
+                finish(false, `HealthStatus request_id=${JSON.stringify(status.requestId)}, want ${JSON.stringify(requestId)}`);
+                return;
+              }
+              if (!status.healthy) {
+                finish(false, `store reported unhealthy: ${status.reason}`);
+                return;
+              }
+              finish(true, "");
+            },
+            onClose: (err) => finish(false, err ? `store health connection lost: ${err.message}` : "store closed health connection"),
+          },
+          COMPONENT,
+        );
+        probe.send(HealthCheckSchema, create(HealthCheckSchema, { requestId }));
+      });
+    });
   }
 
   /**

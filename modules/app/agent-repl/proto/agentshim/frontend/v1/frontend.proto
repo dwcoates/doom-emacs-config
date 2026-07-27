@@ -113,6 +113,8 @@ message FrontendFrame {
     HeartbeatView heartbeat = 11;       // Additive (E4)
     QueueView queue = 12;               // Additive (E4)
     ProgressView progress = 13;         // Additive (F1)
+    DaemonHealthView daemon_health = 14;
+    SessionHealthView session_health = 15;
   }
 }
 
@@ -123,6 +125,31 @@ message DaemonView {
   string protocol_version = 2;
   int64 daemon_binary_mtime_ms = 3;
   string daemon_version = 4;
+}
+
+// Correlated result of the daemon-global health command.  A command ACK alone
+// is only a receipt that the daemon accepted a frame; this view is the
+// assertion Emacs waits for before restoring any workspace.  healthy=false is
+// always accompanied by a non-empty reason, so no client can mistake a failed
+// observation for readiness.
+message DaemonHealthView {
+  string request_id = 1;
+  bool healthy = 2;
+  string reason = 3;
+}
+
+// Correlated result of the session-specific health command.  The daemon sets
+// healthy=true only when the named live driver has a handshaked shim and that
+// shim has proved its own dependency health (including its store connection).
+// WORKSPACE is the absolute CWD, matching every session-routed frontend
+// command; SESSION_ID prevents an old response from satisfying a newer
+// restored binding.
+message SessionHealthView {
+  string request_id = 1;
+  string workspace = 2;
+  string session_id = 3;
+  bool healthy = 4;
+  string reason = 5;
 }
 
 // THE resolved per-workspace state, plus the inputs snapshot that produced
@@ -404,6 +431,8 @@ message FrontendCommand {
     QueueAcceptCmd queue_accept = 15;      // Additive (E4)
     QueueCancelCmd queue_cancel = 16;      // Additive (E4)
     PaintAckCmd paint_ack = 17;            // Additive (F3)
+    DaemonHealthCmd daemon_health = 18;
+    SessionHealthCmd session_health = 19;
   }
 }
 
@@ -591,6 +620,20 @@ message ClientLogCmd {
 // Additive (S9): graceful daemon shutdown over UDS (replaces Emacs
 // POST /shutdown).
 message ShutdownCmd {}
+
+// Ask the daemon to assert that every boot-critical global dependency is
+// operational.  The matching DaemonHealthView, not socket existence, is the
+// success criterion.  It is a frontend command because no vendor produces or
+// consumes this daemon-local fact.
+message DaemonHealthCmd {}
+
+// Ask the daemon to prove the entire session route for one restored workspace:
+// daemon registry -> current driver -> handshaked shim -> shim dependencies.
+// The command's outer workspace is authoritative and must equal the session's
+// CWD; SESSION_ID makes a stale response impossible to use after a rebind.
+message SessionHealthCmd {
+  string session_id = 1;
+}
 
 // Additive (S7): session creation over UDS (replaces Emacs POST /sessions).
 message CreateSessionCmd {
