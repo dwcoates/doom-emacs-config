@@ -15,7 +15,7 @@
 (declare-function agent-repl--frontend-dispatch-send "frontends")
 (declare-function agent-repl--frontend-boot-session "frontends")
 (declare-function agent-repl--frontend-ensure-session "frontend-client")
-(declare-function agent-repl--schedule-runtime-startup-bounce "services" ())
+(declare-function agent-repl--runtime-startup-prepare "services" ())
 
 ;; Forward declaration: defined in hide-project-dirs.el (loaded after
 ;; commands.el).  The snapshot writer/loader persists and restores this
@@ -1726,8 +1726,7 @@ can call finish without worrying whether a normal finish already ran."
            (skipped (plist-get state :skipped))
            (load-error (or (plist-get state :load-error) 0))
            (saved-mq (plist-get state :saved-merge-queue))
-           (saved-ifm (plist-get state :saved-in-flight-merges))
-           (startup (plist-get state :startup)))
+           (saved-ifm (plist-get state :saved-in-flight-merges)))
       (agent-repl--snapshot-restore-merge-queue saved-mq)
       (agent-repl--snapshot-restore-in-flight-merges saved-ifm)
       ;; persp-mode saved origin's window-config when the loader's first
@@ -1749,12 +1748,10 @@ can call finish without worrying whether a normal finish already ran."
                           (if (and mq-restored (> mq-restored 0))
                               (format ", merge-queue=%d" mq-restored)
                             "")))
-      ;; Clear the recursive-loader state before scheduling the process
-      ;; bounce: its rebind path can synchronously run workspace hooks, and
-      ;; none of them may observe a zombie load still in progress.
-      (setq agent-repl--snapshot-load-state nil)
-      (when startup
-        (agent-repl--schedule-runtime-startup-bounce)))))
+      ;; The startup backend preparation occurred before this loader read the
+      ;; snapshot.  Clear recursive state only after the final workspace hook
+      ;; has unwound; no post-restore bounce may rebind these fresh sessions.
+      (setq agent-repl--snapshot-load-state nil))))
 
 (defun agent-repl--snapshot-load-close-main ()
   "Nuke the `main' workspace left over from Doom's startup, if it still exists.
@@ -1802,32 +1799,20 @@ makes second fires for the same ws no-ops."
       (agent-repl--snapshot-load-step))))
 
 (defun agent-repl--snapshot-load-timeout (ws)
-  "Watchdog firing for WS — force ws-fully-loaded with `:timed-out' marker.
-The latch helper fires the ws-fully-loaded hook when both bits are
-set, which in turn calls `--snapshot-load-on-loaded' to advance the
-queue.  Flipping the missing bit(s) here funnels timeout through the
-same advance path as the happy case, so observers see exactly one
-ws-fully-loaded fire per entry (happy or timed-out, never both).
-
-The bits we flip:
-- `:ws-loaded' is flipped via the helper; the helper itself sets it
-  before checking the both-bits condition, so this drives the
-  emacs-side bit to t if it wasn't already.
-- `:agent-ready' is also flipped to t directly so the helper's
-  both-bits check passes even when claude never printed
-  `session_start' (the most common timeout cause)."
+  "Abort snapshot restoration when WS never becomes genuinely ready.
+The former watchdog synthesized `:agent-ready' and a fully-loaded hook,
+allowing a broken backend to render as if its session shim existed.  A
+timeout is instead an invariant failure: clean up the recursive loader and
+surface the fault; do not mutate either readiness latch."
   (let ((state agent-repl--snapshot-load-state))
     (when (and state (equal ws (plist-get state :awaiting)))
-      (agent-repl--log ws "snapshot-load: TIMEOUT awaiting ws=%s — forcing fully-loaded :timed-out" ws)
-      (agent-repl--warn ws "snapshot-load timeout awaiting ws=%s — advancing" ws)
+      (agent-repl--log ws "snapshot-load: TIMEOUT awaiting ws=%s — aborting without synthetic readiness" ws)
       (setq agent-repl--snapshot-load-state
             (plist-put agent-repl--snapshot-load-state :timeout-timer nil))
-      ;; Force both latch bits then fire via the helper.  Setting
-      ;; :agent-ready directly before the helper call means the
-      ;; helper's both-bits check will pass on its own :ws-loaded
-      ;; flip, firing ws-fully-loaded with the :timed-out marker.
-      (agent-repl--ws-put ws :agent-ready t)
-      (agent-repl--latch-and-maybe-fire-loaded ws :ws-loaded :timed-out))))
+      (agent-repl--snapshot-load-finish)
+      (agent-repl--error ws
+                         "snapshot-load timeout awaiting ws=%s; restore aborted without rendering an unverified session"
+                         ws))))
 
 (defun agent-repl--snapshot-load-step ()
   "Process the next entry in the snapshot-load queue.
@@ -1985,16 +1970,16 @@ Recursive queue driver: establishes one entry, then yields to the main
 loop until that workspace's `agent-repl-ws-fully-loaded-functions'
 hook fires (i.e., both agent-side ready and emacs-side switch-settle
 have completed), then advances.  Per-entry watchdog
-\(`agent-repl-snapshot-load-per-entry-timeout') guarantees forward
-progress even if the load barrier never fires; on timeout the loader
-synthesizes a ws-fully-loaded fire with a `:timed-out' marker so all
-hook observers see the same advance event.
+\(`agent-repl-snapshot-load-per-entry-timeout') aborts on a missing
+barrier; it never synthesizes readiness for an unverified session.
 
 Returns to the workspace that was active when the load began.
 
-STARTUP marks the automatic Emacs-start restore.  Its completion schedules
-the coordinated daemon/shim/store/sidecar restart after the recursive loader
-has fully unwound; interactive and archive loads do not restart services."
+STARTUP marks the automatic Emacs-start restore.  The startup caller has
+already rebuilt and restarted the runtime services and received correlated
+daemon initialization readiness before this function reads the snapshot;
+interactive and archive loads rely on the canonical session-health render
+gate for each live shim/store route."
   (interactive)
   (when agent-repl--snapshot-load-state
     (user-error "agent-repl: a snapshot load is already in progress"))
@@ -2079,16 +2064,23 @@ has fully unwound; interactive and archive loads do not restart services."
       (agent-repl--snapshot-load-step))))
 
 (defun agent-repl--load-workspace-snapshot-on-startup ()
-  "Restore the workspace snapshot, then schedule the runtime startup bounce.
-When no snapshot exists, schedule the bounce immediately.  A corrupt
-snapshot is logged and does not suppress the required bounce."
-  (if (file-exists-p (agent-repl--workspace-snapshot-file-for-read))
+  "Prepare runtime services, confirm daemon readiness, then restore snapshot.
+The readiness prerequisite is deliberately before even the snapshot-path
+lookup, so no workspace state is read or restored before daemon health is
+authoritative.  A failed prerequisite or malformed snapshot aborts loudly;
+there is no post-restore bounce and no degraded restore path."
+  (agent-repl--log nil "startup restore: backend preparation begins before snapshot lookup")
+  (agent-repl--runtime-startup-prepare)
+  (let ((file (agent-repl--workspace-snapshot-file-for-read)))
+    (agent-repl--log nil
+                     "startup restore: runtime prepared and daemon ready; snapshot candidate=%s"
+                     file)
+    (when (file-exists-p file)
       (condition-case err
-          (agent-repl-load-workspace-snapshot nil t)
+          (agent-repl-load-workspace-snapshot file t)
         (error
-         (agent-repl--warn nil "snapshot load failed: %S" err)
-         (agent-repl--schedule-runtime-startup-bounce)))
-    (agent-repl--schedule-runtime-startup-bounce)))
+         (agent-repl--error nil "startup restore: snapshot load aborted file=%s err=%S"
+                            file err))))))
 
 ;;;; Workspace snapshot archive picker
 

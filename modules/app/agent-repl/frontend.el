@@ -47,6 +47,7 @@
 (declare-function agent-repl--ws-put "agent-repl-workspace" (ws key val))
 (declare-function agent-repl--align-buffer-to-ws-dir "agent-repl-status" (buf ws))
 (declare-function agent-repl--frontend-ensure-session "agent-repl-frontend-client" (ws))
+(declare-function agent-repl--frontend-wait-session-healthy "agent-repl-frontend-client" (ws session-id))
 (declare-function agent-repl--frontend-force-fresh-session "agent-repl-frontend-client" (ws))
 (declare-function agent-repl--frontend-session-url "agent-repl-frontend-client" (session-id))
 (declare-function agent-repl-window--panel-window "agent-repl-window" (kind &optional ws frame))
@@ -506,6 +507,10 @@ Whichever buffer is returned — reused or freshly mounted — its
 `agent-repl--align-buffer-to-ws-dir', so `SPC .' from the webview window
 resolves against the worktree the REPL is attached to rather than the
 foreign directory the xwidget session inherited at creation."
+  ;; This is the one rendering choke point: every initial mount, sync, and
+  ;; remount arrives here.  Verify the daemon still has a healthy shim for
+  ;; this exact session before touching an existing buffer or creating one.
+  (agent-repl--frontend-wait-session-healthy ws session-id)
   (let* ((existing (agent-repl--ws-get ws :frontend-buffer))
          (bound-to (agent-repl--ws-get ws :frontend-buffer-session-id))
          (buf (if (and (buffer-live-p existing) (equal bound-to session-id))

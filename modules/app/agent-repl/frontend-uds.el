@@ -86,13 +86,20 @@ value plist carries `:field' (the command oneof name), `:workspace', and
 an optional `:on-failure' (a function of one arg, the error string, run
 when the ack reports failure — in addition to the loud log + echo).")
 
+(defvar agent-repl--uds-pending-health-responses (make-hash-table :test 'equal)
+  "Hash of health request_id -> correlation contract awaiting a health view.
+Each value carries `:field', `:workspace', `:session-id', and
+`:on-response'.  Health result frames consume these entries; CommandAck
+receipt tracking remains separate because an accepted command is not proof
+that the daemon or session is healthy.")
+
 ;;;; ---- Frame vocabulary ------------------------------------------------
 
 (defconst agent-repl--uds-known-frame-fields
   '("snapshot" "workspaceState" "sessionView" "conversationDelta"
     "typingDelta" "taskCatalog" "commandAck" "daemonView"
     "sessionInit" "heartbeat" "queue" "progress"
-    "workspaceAvailable" "hostAction")
+    "workspaceAvailable" "hostAction" "daemonHealth" "sessionHealth")
   "The protojson (lowerCamelCase) names of every `FrontendFrame' oneof arm.
 Mirrors the `frame' oneof in proto/agentshim/frontend/v1/frontend.proto.
 A decoded frame whose sole top-level key is NOT one of these is
@@ -147,7 +154,8 @@ though there is intentionally nothing for Emacs to apply.")
   '("submitPrompt" "interrupt" "permissionAnswer" "mergeWorkspace"
     "closeWorkspace" "openWorkspace" "resync" "createSession" "deleteSession"
     "shutdown" "clientLog" "queueForce" "queueAccept" "queueCancel"
-    "createWorkspace" "workspaceMaterialized" "hostActionCompleted")
+    "createWorkspace" "workspaceMaterialized" "hostActionCompleted"
+    "daemonHealth" "sessionHealth")
   "The protojson names of every `FrontendCommand' oneof arm.
 Mirrors the `command' oneof in frontend.proto.  Sending an unknown
 command field is a programming error and fails loudly.
@@ -548,6 +556,114 @@ Returns REQUEST-ID."
                    request-id field)
   request-id)
 
+(defun agent-repl--uds-untrack-command (request-id workspace reason)
+  "Remove REQUEST-ID from pending commands after a local wait aborts.
+WORKSPACE supplies log context and REASON records why the caller can no
+longer consume a later `CommandAck'.  This is the only transport-owned
+cleanup path for a synchronous command wait: retaining the callback after a
+timeout would let a delayed acknowledgement mutate stale caller state."
+  (when (gethash request-id agent-repl--uds-pending-commands)
+    (remhash request-id agent-repl--uds-pending-commands)
+    (agent-repl--log workspace
+                     "uds-untrack-command: request-id=%s reason=%s"
+                     request-id reason))
+  nil)
+
+(defun agent-repl--uds-track-health-response
+    (request-id field workspace session-id on-response)
+  "Await FIELD health result for REQUEST-ID and its expected identities.
+WORKSPACE and SESSION-ID are the exact values a `sessionHealth' response
+must carry; both are nil for `daemonHealth'.  ON-RESPONSE receives the
+validated response plist.  This registry is intentionally separate from
+CommandAck tracking: an ACK confirms command receipt, not health."
+  (unless (member field '("daemonHealth" "sessionHealth"))
+    (agent-repl--log workspace
+                     "uds-track-health: REFUSING field=%s request-id=%s"
+                     field request-id)
+    (error "agent-repl UDS: cannot track non-health response field %s" field))
+  (unless (functionp on-response)
+    (agent-repl--log workspace
+                     "uds-track-health: REFUSING non-function callback=%S request-id=%s"
+                     on-response request-id)
+    (error "agent-repl UDS: health response callback is not callable"))
+  (puthash request-id
+           (list :field field :workspace workspace :session-id session-id
+                 :on-response on-response)
+           agent-repl--uds-pending-health-responses)
+  (agent-repl--log workspace
+                   "uds-track-health: request-id=%s field=%s session-id=%s"
+                   request-id field (or session-id "nil"))
+  request-id)
+
+(defun agent-repl--uds-untrack-health-response (request-id workspace reason)
+  "Stop awaiting REQUEST-ID's health result for WORKSPACE because of REASON."
+  (when (gethash request-id agent-repl--uds-pending-health-responses)
+    (remhash request-id agent-repl--uds-pending-health-responses)
+    (agent-repl--log workspace
+                     "uds-untrack-health: request-id=%s reason=%s"
+                     request-id reason))
+  nil)
+
+(defun agent-repl--uds-handle-health-response (field response)
+  "Correlate FIELD health RESPONSE and deliver it to its awaiting caller."
+  (let* ((request-id (plist-get response :requestId))
+         (pending (and request-id
+                       (gethash request-id
+                                agent-repl--uds-pending-health-responses))))
+    (unless (and (stringp request-id) (not (string-empty-p request-id)))
+      (agent-repl--log nil
+                       "uds-health-response: MALFORMED field=%s missing request-id response=%S"
+                       field response)
+      (signal 'agent-repl-uds-malformed-frame
+              (list "health response missing requestId" response)))
+    (if (null pending)
+        (progn
+          ;; A result can legitimately arrive after a local timeout removed
+          ;; its waiter.  Record it durably, but never let it satisfy another
+          ;; request or mutate abandoned caller state.
+          (agent-repl--log nil
+                           "uds-health-response: untracked request-id=%s field=%s response=%S"
+                           request-id field response)
+          nil)
+      (let ((expected-field (plist-get pending :field))
+            (expected-workspace (plist-get pending :workspace))
+            (expected-session-id (plist-get pending :session-id))
+            (actual-workspace (plist-get response :workspace))
+            (actual-session-id (plist-get response :sessionId)))
+        (unless (equal field expected-field)
+          (remhash request-id agent-repl--uds-pending-health-responses)
+          (agent-repl--log expected-workspace
+                           "uds-health-response: FIELD MISMATCH request-id=%s expected=%s actual=%s"
+                           request-id expected-field field)
+          (signal 'agent-repl-uds-malformed-frame
+                  (list "health response field mismatch" response)))
+        (when (equal field "sessionHealth")
+          (unless (and (equal actual-workspace expected-workspace)
+                       (equal actual-session-id expected-session-id))
+            (remhash request-id agent-repl--uds-pending-health-responses)
+            (agent-repl--log expected-workspace
+                             "uds-health-response: IDENTITY MISMATCH request-id=%s expected-workspace=%S actual-workspace=%S expected-session=%S actual-session=%S"
+                             request-id expected-workspace actual-workspace
+                             expected-session-id actual-session-id)
+            (signal 'agent-repl-uds-malformed-frame
+                    (list "session health identity mismatch" response))))
+        (remhash request-id agent-repl--uds-pending-health-responses)
+        (agent-repl--log expected-workspace
+                         "uds-health-response: correlated request-id=%s field=%s healthy=%s reason=%S"
+                         request-id field
+                         (if (plist-get response :healthy) "yes" "no")
+                         (plist-get response :reason))
+        (funcall (plist-get pending :on-response) response)
+        response))))
+
+(defun agent-repl--uds-handle-daemon-health (response)
+  "Handle a correlated `daemonHealth' RESPONSE frame."
+  (agent-repl--uds-handle-health-response "daemonHealth" response))
+
+(defun agent-repl--uds-handle-session-health (response)
+  "Handle a correlated `sessionHealth' RESPONSE frame."
+  (agent-repl--uds-handle-health-response "sessionHealth" response))
+
 (defun agent-repl--uds-handle-command-ack (ack)
   "Handler for the `commandAck' FrontendFrame arm.  ACK is a plist.
 Reads `:requestId', `:ok', `:failure' and the legacy `:error'.  protojson
@@ -616,6 +732,10 @@ the `:ok' flag."
 
 (agent-repl--uds-register-handler "commandAck"
                                   #'agent-repl--uds-handle-command-ack)
+(agent-repl--uds-register-handler "daemonHealth"
+                                  #'agent-repl--uds-handle-daemon-health)
+(agent-repl--uds-register-handler "sessionHealth"
+                                  #'agent-repl--uds-handle-session-health)
 
 (provide 'frontend-uds)
 
