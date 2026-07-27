@@ -44,6 +44,9 @@ type AgentShimConfig struct {
 	// SessionInitViews for the connect snapshot (S9). Nil-safe: a nil source
 	// leaves snapshot.inits empty. Satisfied by *sessiondrv.Manager.
 	Inits SessionInitSource
+	// Catalogs supplies every live session's complete detached-task roster for
+	// connect/resync snapshots. Satisfied by *sessiondrv.Manager.
+	Catalogs TaskCatalogSource
 	// Queues is the prompt-queue backend (E4): the force/accept/cancel command
 	// half and the snapshot half. Nil makes each queue command a loud failing
 	// ack and leaves snapshot.queues empty.
@@ -155,8 +158,12 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 	}
 
 	srv := frontend.New(frontend.Config{
-		Logf:    logf,
-		State:   &ssmSnapshotProvider{ssm: mgr, sessions: cfg.Sessions, inits: cfg.Inits, queues: cfg.Queues, daemon: cfg.SessionCommands, progress: cfg.Progress},
+		Logf: logf,
+		State: &ssmSnapshotProvider{
+			ssm: mgr, sessions: cfg.Sessions, inits: cfg.Inits,
+			catalogs: cfg.Catalogs, queues: cfg.Queues, daemon: cfg.SessionCommands,
+			progress: cfg.Progress, logf: logf,
+		},
 		Handler: handler,
 		// THE PRODUCTION CALLER ApplyPaintLost never had. The withdrawal half of
 		// the paint attestation existed, was documented, and was reachable from

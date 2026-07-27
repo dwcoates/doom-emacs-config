@@ -101,12 +101,12 @@ malformed (unknown wire field) and signals loudly.
 commands, tools, skills, model list); it is the pushed-frame replacement
 for the deleted GET /commands HTTP slash-menu source.
 
-`heartbeat' (E4), `queue' (E4), and `progress' (F1) are decoded for wire
-parity and rendered by nothing here — see
+`taskCatalog', `heartbeat' (E4), `queue' (E4), and `progress' (F1) are
+decoded for wire parity and rendered by nothing here — see
 `agent-repl--uds-ignored-frame-fields'.")
 
 (defconst agent-repl--uds-ignored-frame-fields
-  '("heartbeat" "queue" "progress")
+  '("taskCatalog" "heartbeat" "queue" "progress")
   "Frame arms Emacs decodes for wire parity but DELIBERATELY renders nothing for.
 These are a subset of `agent-repl--uds-known-frame-fields'.
 
@@ -133,7 +133,14 @@ predated the frame, so every ProgressView push signalled
 `agent-repl-uds-malformed-frame' and surfaced as a user-visible error on
 workspace open.  Registering this one KNOWN arm is the fix; the
 malformed guard itself is unchanged, so a genuinely unknown future arm
-still fails loudly.")
+still fails loudly.
+
+`taskCatalog': the complete detached-task roster.  The webapp renders it
+in the progress footer's task counter; Emacs renders only the daemon's
+resolved aggregate `WorkspaceState.live_task_count' through workspace
+status and has no per-task roster.  Treating this pushed arm as an
+unfinished handler flooded the durable log on every task transition even
+though there is intentionally nothing for Emacs to apply.")
 
 (defconst agent-repl--uds-known-command-fields
   '("submitPrompt" "interrupt" "permissionAnswer" "mergeWorkspace"
@@ -434,9 +441,15 @@ not silently dropped.  Returns the handler's value, or nil."
           (agent-repl--log nil "uds-dispatch: field=%s -> handler=%s" field handler)
           (funcall handler payload))
          ((member field agent-repl--uds-ignored-frame-fields)
-          (agent-repl--log-verbose
-           nil
-           "uds-dispatch: field=%s deliberately ignored by the Emacs frontend" field)
+          (let ((workspace (plist-get payload :workspace))
+                (session-id (plist-get payload :sessionId))
+                (task-count (and (equal field "taskCatalog")
+                                 (length (plist-get payload :tasks)))))
+            (agent-repl--log-verbose
+             workspace
+             "uds-dispatch: field=%s deliberately ignored by the Emacs frontend workspace=%s session=%s task-count=%s"
+             field (or workspace "nil") (or session-id "nil")
+             (if task-count task-count "n/a")))
           nil)
          (t
           (agent-repl--log nil
