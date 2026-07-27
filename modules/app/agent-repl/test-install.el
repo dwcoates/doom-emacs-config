@@ -438,10 +438,12 @@ the defcustoms.  Returns the list of dests created."
 
 (ert-deftest agent-repl-test-managed-local-skills-nonempty ()
   "Repo-local skills list must include `runtime-eval-code' (regression guard).
-debug-logs is deliberately NOT in the list — it is project-scoped via
-the checked-in `<repo>/.claude/skills/debug-logs' symlink."
+debug-emacs-agent-repl is deliberately NOT in the list — it is
+project-scoped via the checked-in
+`<repo>/.claude/skills/debug-emacs-agent-repl' symlink."
   (should (member "runtime-eval-code" agent-repl--managed-local-skills))
-  (should-not (member "debug-logs" agent-repl--managed-local-skills)))
+  (should-not (member "debug-emacs-agent-repl"
+                      agent-repl--managed-local-skills)))
 
 (ert-deftest agent-repl-test-local-skills-src-dir-default ()
   "Default `agent-repl-local-skills-src-dir' points at this module's
@@ -483,20 +485,21 @@ checked-in `skills/' directory when install.el is loaded from a file."
                           (string-match-p "Skill symlink missing" (cdr i)))
                         (car issues))))))
 
-(ert-deftest agent-repl-test-debug-logs-skill-file-exists ()
-  "The checked-in debug-logs SKILL.md must exist with required frontmatter.
+(ert-deftest agent-repl-test-debug-emacs-agent-repl-skill-file-exists ()
+  "The checked-in debug-emacs-agent-repl SKILL.md must exist with frontmatter.
 Regression guard so the file is not silently moved or deleted —
-`/debug-logs' depends on it being discoverable at install time."
+`/debug-emacs-agent-repl' depends on it being discoverable at install time."
   (let* ((src-dir (expand-file-name
                    (or agent-repl-local-skills-src-dir
                        (error "agent-repl-local-skills-src-dir is unset"))))
-         (skill-md (expand-file-name "debug-logs/SKILL.md" src-dir)))
+         (skill-md (expand-file-name
+                    "debug-emacs-agent-repl/SKILL.md" src-dir)))
     (should (file-exists-p skill-md))
     (with-temp-buffer
       (insert-file-contents skill-md)
       (goto-char (point-min))
       (should (looking-at "^---\n"))
-      (should (re-search-forward "^name: debug-logs$" nil t))
+      (should (re-search-forward "^name: debug-emacs-agent-repl$" nil t))
       (should (re-search-forward "^description: " nil t)))))
 
 (ert-deftest agent-repl-test-managed-local-skills-includes-runtime-eval-code ()

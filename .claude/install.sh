@@ -107,10 +107,10 @@ _impl_in_nonmain_worktree() {
 # NEVER the invoking (possibly linked) worktree, so the link survives a
 # worktree prune.
 LOCAL_SKILLS_SRC="$MAIN_WORKTREE/modules/app/agent-repl/skills"
-# NOTE: debug-logs is NOT here — it is a PROJECT-scoped skill, registered
-# via the checked-in <repo>/.claude/skills/debug-logs symlink rather than
-# a ~/.claude/skills user-level link (it is doom-specific and should only
-# be discoverable when working in this repo).
+# NOTE: debug-emacs-agent-repl is NOT here — it is a PROJECT-scoped skill,
+# registered via the checked-in <repo>/.claude/skills/debug-emacs-agent-repl
+# symlink rather than a ~/.claude/skills user-level link (it is doom-specific
+# and should only be discoverable when working in this repo).
 LOCAL_SKILLS=(
   "profile"
   "runtime-eval-code"

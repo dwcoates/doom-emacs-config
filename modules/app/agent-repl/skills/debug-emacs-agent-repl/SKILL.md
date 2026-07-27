@@ -1,9 +1,9 @@
 ---
-name: debug-logs
-description: Read and interpret (a) the agent-repl debug log at ~/.claude-emacs/doom-agent-repl.log and (b) the per-workspace memory-state.el snapshot under <root>/.claude/emacs/memory-state.el, and emphatically recommend adding instrumentation when the log lacks coverage of the suspect code path. Use when the user is debugging anything in modules/app/agent-repl/ (workspaces, sentinels, REPL state, autosave, hooks, vterm panels) or invokes /debug-logs.
+name: debug-emacs-agent-repl
+description: Debug the agent-repl system across all six of its planes — Emacs, daemon, shim, webapp, the SSM state database, and the store data plane — by reading its on-disk logs and directly querying its two SQLite databases, and emphatically recommend adding instrumentation when the evidence lacks coverage of the suspect code path. Use when the user is debugging anything in modules/app/agent-repl/ (workspaces, sentinels, REPL state, autosave, hooks, vterm panels), asks why a workspace is a given color or stuck in a given state (blocked, blue, purple, spinning), reports missing or garbled conversation content, or hits daemon / shim / store / sidecar symptoms. Invoked as /debug-emacs-agent-repl (legacy: /debug-logs).
 ---
 
-# Debug Logs (agent-repl)
+# Debug agent-repl (all planes)
 
 The doom agent-repl module writes two on-disk artifacts you can read without an Emacs session:
 
