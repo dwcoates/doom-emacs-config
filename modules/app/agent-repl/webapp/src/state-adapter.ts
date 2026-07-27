@@ -389,6 +389,14 @@ export class StateAdapter {
         // Registered unsupported shape (S7): decoded for wire parity, but boot
         // detection / version warnings are an Emacs-frontend concern.
         return [this.ignore("daemonView")];
+      case "workspaceAvailable":
+        // This frame is host-only by transport contract.  Keeping a typed
+        // ignore here makes an accidental GUI delivery diagnosable rather than
+        // letting a new frame variant turn into an adapter crash.
+        return [this.ignore("workspaceAvailable")];
+      case "hostAction":
+        // Host actions are consumed by Emacs, never rendered by the GUI.
+        return [this.ignore("hostAction")];
       default: {
         // Exhaustiveness guard: a new frame variant is a compile error here,
         // never a silent skip.

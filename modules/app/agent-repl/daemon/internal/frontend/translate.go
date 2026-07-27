@@ -136,6 +136,18 @@ func ProgressViewFrame(p *frontendv1.ProgressView) *frontendv1.FrontendFrame {
 	return &frontendv1.FrontendFrame{Frame: &frontendv1.FrontendFrame_Progress{Progress: p}}
 }
 
+// WorkspaceAvailableFrame wraps the durable, host-only workspace lifecycle
+// notification.  Server routes it only to ClientKindHost connections.
+func WorkspaceAvailableFrame(v *frontendv1.WorkspaceAvailable) *frontendv1.FrontendFrame {
+	return &frontendv1.FrontendFrame{Frame: &frontendv1.FrontendFrame_WorkspaceAvailable{WorkspaceAvailable: v}}
+}
+
+// HostActionFrame wraps one durable UI-only action from the daemon inbox.
+// Server routes it only to ClientKindHost connections.
+func HostActionFrame(v *frontendv1.HostAction) *frontendv1.FrontendFrame {
+	return &frontendv1.FrontendFrame{Frame: &frontendv1.FrontendFrame_HostAction{HostAction: v}}
+}
+
 // ---------------------------------------------------------------------------
 // ContentDelta -> TypingDelta (ephemeral live typing)
 // ---------------------------------------------------------------------------
