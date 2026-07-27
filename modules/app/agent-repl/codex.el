@@ -99,9 +99,14 @@ tail suffices (same rationale as the claude segment scan caps)."
 Managed projects (see `agent-repl--managed-project-p') get
 `agent-repl-codex-managed-permission-flags'; personal projects get
 `agent-repl-codex-personal-permission-flags'."
-  (if (agent-repl--managed-project-p project-dir)
-      agent-repl-codex-managed-permission-flags
-    agent-repl-codex-personal-permission-flags))
+  (let* ((managed-p (agent-repl--managed-project-p project-dir))
+         (flags (if managed-p
+                    agent-repl-codex-managed-permission-flags
+                  agent-repl-codex-personal-permission-flags)))
+    (agent-repl--log nil
+                     "codex-perm-flags: project-dir=%s managed-p=%s flags=%s"
+                     project-dir managed-p flags)
+    flags))
 
 (defun agent-repl--codex-start-cmd (opts)
   "Build the interactive `codex' start command from OPTS.
@@ -135,7 +140,13 @@ cwd-scoped picker entirely); otherwise a fresh `codex'."
                                   (agent-repl--codex-effective-home)))
                        ""))
          (cmd (string-trim (concat env-prefix base " " flags))))
-    (agent-repl--log nil "codex-start-cmd: cmd=%s" cmd)
+    (agent-repl--log
+     nil
+     "codex-start-cmd: session-id=%s fork-session-id=%s project-dir=%s requested-model=%s configured-model=%s resolved-model=%s launch=%s codex-home=%s cmd=%s"
+     session-id fork-session-id project-dir (plist-get opts :model)
+     agent-repl-codex-interactive-model model
+     (cond (fork-session-id 'fork) (session-id 'resume) (t 'fresh))
+     agent-repl-codex-home cmd)
     cmd))
 
 ;;;; ---- Headless command ----------------------------------------------------
@@ -150,8 +161,12 @@ prompt argument reads piped stdin).  `--skip-git-repo-check' is always
 included because agent-repl's headless spawns run from
 `temporary-file-directory', which is not a git repository — codex
 refuses to run there without it."
-  (append (list "codex" "exec" "--skip-git-repo-check" "--model" model)
-          extra-args))
+  (let ((cmd (append (list "codex" "exec" "--skip-git-repo-check" "--model" model)
+                     extra-args)))
+    (agent-repl--log nil
+                     "codex-headless-cmd: model=%s extra-args=%S cmd=%S"
+                     model extra-args cmd)
+    cmd))
 
 ;;;; ---- Rollout transcript: locate -----------------------------------------
 
@@ -168,21 +183,35 @@ session id, the sessions dir is absent, or no rollout matches, so the
 mode-line eval stays safe before a session starts."
   (let* ((session-id (agent-repl--ai-title-ws-session-id ws))
          (cache (agent-repl--ws-get ws :codex-rollout-cache)))
-    (when (and (stringp session-id) (not (string-empty-p session-id)))
-      (if (and (consp cache)
-               (equal (car cache) session-id)
-               (file-exists-p (cdr cache)))
-          (cdr cache)
-        (let* ((dir (agent-repl--codex-sessions-dir))
-               (path (and (file-directory-p dir)
-                          (car (directory-files-recursively
-                                dir
-                                (concat "\\`rollout-.*-"
-                                        (regexp-quote session-id)
-                                        "\\.jsonl\\'"))))))
-          (when path
-            (agent-repl--ws-put ws :codex-rollout-cache (cons session-id path)))
-          path)))))
+    (cond
+     ((not (and (stringp session-id) (not (string-empty-p session-id))))
+      (agent-repl--log-verbose ws
+                                "codex-rollout-path: session-id=%S cache=%S outcome=no-session"
+                                session-id cache)
+      nil)
+     ((and (consp cache)
+           (equal (car cache) session-id)
+           (file-exists-p (cdr cache)))
+      (agent-repl--log-verbose ws
+                                "codex-rollout-path: session-id=%s cache=%S outcome=cache-hit path=%s"
+                                session-id cache (cdr cache))
+      (cdr cache))
+     (t
+      (let* ((dir (agent-repl--codex-sessions-dir))
+             (dir-exists-p (file-directory-p dir))
+             (path (and dir-exists-p
+                        (car (directory-files-recursively
+                              dir
+                              (concat "\\`rollout-.*-"
+                                      (regexp-quote session-id)
+                                      "\\.jsonl\\'"))))))
+        (when path
+          (agent-repl--ws-put ws :codex-rollout-cache (cons session-id path)))
+        (agent-repl--log-verbose
+         ws
+         "codex-rollout-path: session-id=%s cache=%S sessions-dir=%s dir-exists-p=%s outcome=%s path=%s"
+         session-id cache dir dir-exists-p (if path 'found 'not-found) path)
+        path)))))
 
 ;;;; ---- Rollout transcript: parse ------------------------------------------
 
@@ -190,13 +219,21 @@ mode-line eval stays safe before a session starts."
   "Parse LINE (one rollout JSON object) into a string-keyed alist, or nil.
 Unparseable lines yield nil so scanners can skip them (rollout schemas
 grow fields across codex versions; parse leniently)."
-  (ignore-errors
-    (let ((json-object-type 'alist)
-          (json-array-type 'list)
-          (json-key-type 'string)
-          (json-false nil)
-          (json-null nil))
-      (json-read-from-string line))))
+  (condition-case err
+      (let ((json-object-type 'alist)
+            (json-array-type 'list)
+            (json-key-type 'string)
+            (json-false nil)
+            (json-null nil))
+        (prog1 (json-read-from-string line)
+          (agent-repl--log-verbose nil
+                                    "codex-parse-line: chars=%d outcome=parsed"
+                                    (length line))))
+    (error
+     (agent-repl--log-verbose nil
+                               "codex-parse-line: chars=%d outcome=unparseable error=%S"
+                               (length line) err)
+     nil)))
 
 (defun agent-repl--codex-model-extract-from-tail (tail)
   "Return the most recent model id from rollout TAIL, or nil.
@@ -204,17 +241,23 @@ Walks lines bottom-up for the newest `turn_context' entry (the model
 can change mid-session) and returns its `payload.model' string."
   (when (and (stringp tail) (not (string-empty-p tail)))
     (let ((lines (split-string tail "\n" t))
-          (found nil))
+          (found nil)
+          (candidate-count 0))
       (cl-loop for line in (nreverse lines)
                while (not found)
                when (string-match-p "\"type\":\"turn_context\"" line)
-               do (let* ((parsed (agent-repl--codex-parse-line line))
+               do (progn
+                    (cl-incf candidate-count)
+                    (let* ((parsed (agent-repl--codex-parse-line line))
                          (payload (and (listp parsed)
                                        (cdr (assoc "payload" parsed))))
                          (model (and (listp payload)
                                      (cdr (assoc "model" payload)))))
                     (when (and (stringp model) (not (string-empty-p model)))
-                      (setq found model))))
+                      (setq found model)))))
+      (agent-repl--log-verbose nil
+                                "codex-model-extract-from-tail: chars=%d lines=%d candidates=%d model=%S"
+                                (length tail) (length lines) candidate-count found)
       found)))
 
 (defun agent-repl--codex-context-extract-from-tail (tail)
@@ -226,11 +269,14 @@ the input size of the most recent request, which codex reports
 cache-inclusive (no separate cache counters to sum, unlike claude's)."
   (when (and (stringp tail) (not (string-empty-p tail)))
     (let ((lines (split-string tail "\n" t))
-          (found nil))
+          (found nil)
+          (candidate-count 0))
       (cl-loop for line in (nreverse lines)
                while (not found)
                when (string-match-p "\"token_count\"" line)
-               do (let* ((parsed (agent-repl--codex-parse-line line))
+               do (progn
+                    (cl-incf candidate-count)
+                    (let* ((parsed (agent-repl--codex-parse-line line))
                          (payload (and (listp parsed)
                                        (cdr (assoc "payload" parsed))))
                          (info (and (listp payload)
@@ -242,7 +288,10 @@ cache-inclusive (no separate cache counters to sum, unlike claude's)."
                          (input (and (listp last-usage)
                                      (cdr (assoc "input_tokens" last-usage)))))
                     (when (numberp input)
-                      (setq found input))))
+                      (setq found input)))))
+      (agent-repl--log-verbose nil
+                                "codex-context-extract-from-tail: chars=%d lines=%d candidates=%d input-tokens=%S"
+                                (length tail) (length lines) candidate-count found)
       found)))
 
 (defun agent-repl--codex-model-read (path)
@@ -250,14 +299,24 @@ cache-inclusive (no separate cache counters to sum, unlike claude's)."
 This is the `codex' backend's TRANSCRIPT-MODEL-FN.  Reads only the
 trailing `agent-repl-codex-scan-bytes'."
   (let ((tail (agent-repl--transcript-read-tail path agent-repl-codex-scan-bytes)))
-    (and tail (agent-repl--codex-model-extract-from-tail tail))))
+    (let ((model (and tail (agent-repl--codex-model-extract-from-tail tail))))
+      (agent-repl--log-verbose nil
+                                "codex-model-read: path=%s scan-bytes=%d tail-chars=%s model=%S"
+                                path agent-repl-codex-scan-bytes
+                                (and tail (length tail)) model)
+      model)))
 
 (defun agent-repl--codex-context-read (path)
   "Return the most recent context-token total from the rollout at PATH, or nil.
 This is the `codex' backend's TRANSCRIPT-CONTEXT-FN.  Reads only the
 trailing `agent-repl-codex-scan-bytes'."
   (let ((tail (agent-repl--transcript-read-tail path agent-repl-codex-scan-bytes)))
-    (and tail (agent-repl--codex-context-extract-from-tail tail))))
+    (let ((context (and tail (agent-repl--codex-context-extract-from-tail tail))))
+      (agent-repl--log-verbose nil
+                                "codex-context-read: path=%s scan-bytes=%d tail-chars=%s input-tokens=%S"
+                                path agent-repl-codex-scan-bytes
+                                (and tail (length tail)) context)
+      context)))
 
 ;;;; ---- Doctor --------------------------------------------------------------
 
