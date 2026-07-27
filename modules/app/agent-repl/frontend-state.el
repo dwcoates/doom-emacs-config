@@ -37,6 +37,10 @@
 (declare-function agent-repl--latch-and-maybe-fire-loaded "sentinel" (ws key &optional marker))
 (declare-function agent-repl--ws-dir-owner "workspace" (dir &optional except))
 (declare-function agent-repl--ws-known-p "workspace" (ws))
+(declare-function agent-repl--workspace-create-handle-available
+                  "workspace-create-client" (available))
+(declare-function agent-repl--workspace-create-handle-host-action
+                  "workspace-create-client" (action))
 ;; `agent-repl--frontend-note-boot-id' lives in frontend-client.el (it owns the
 ;; reattach give-up state the boot-id change resets); resolved at call time.
 (declare-function agent-repl--frontend-note-boot-id "frontend-client" (boot-id))
@@ -275,11 +279,14 @@ receives every catalog but has no per-task roster."
         (sessions (plist-get snapshot :sessions))
         (catalogs (plist-get snapshot :catalogs))
         (inits (plist-get snapshot :inits))
+        (available (plist-get snapshot :workspaceAvailable))
+        (host-actions (plist-get snapshot :hostActions))
         (daemon (plist-get snapshot :daemon)))
     (agent-repl--log nil
-                     "frontend-apply-snapshot: resync — %d workspace(s), %d session(s), %d webapp-only catalog(s), %d init(s), daemon=%S"
+                     "frontend-apply-snapshot: resync — %d workspace(s), %d session(s), %d webapp-only catalog(s), %d init(s), %d workspace-available, %d host-action(s), daemon=%S"
                      (length workspaces) (length sessions) (length catalogs)
-                     (length inits) (and daemon t))
+                     (length inits) (length available) (length host-actions)
+                     (and daemon t))
     ;; Rebuild the session roster from scratch: the snapshot is authoritative,
     ;; so a session absent from it (a bounced daemon never heard of) must not
     ;; linger in the store where the orphan/live-p reads would still see it.
@@ -293,13 +300,23 @@ receives every catalog but has no per-task roster."
     (clrhash agent-repl--frontend-session-inits)
     (dolist (view inits)
       (agent-repl--frontend-apply-session-init view))
+    ;; Replayed daemon-owned creation jobs materialize before their ACK.  The
+    ;; handlers are defined later in load order by workspace-create-client.el;
+    ;; snapshots arrive only after the full module has loaded and connected.
+    (dolist (item available)
+      (agent-repl--workspace-create-handle-available item))
+    ;; Apply render state only AFTER WorkspaceAvailable has established the
+    ;; local perspective/bookkeeping owner for a newly-created path.
     (dolist (ws-state workspaces)
       (agent-repl--frontend-apply-workspace-state ws-state))
+    (dolist (item host-actions)
+      (agent-repl--workspace-create-handle-host-action item))
     (when daemon
       (agent-repl--frontend-apply-daemon-view daemon))
     (agent-repl--log nil
-                     "frontend-apply-snapshot: applied %d workspace state(s), %d session(s), %d init(s); ignored %d webapp-only catalog(s)"
+                     "frontend-apply-snapshot: applied %d workspace state(s), %d session(s), %d init(s), %d workspace-available, %d host-action(s); ignored %d webapp-only catalog(s)"
                      (length workspaces) (length sessions) (length inits)
+                     (length available) (length host-actions)
                      (length catalogs))
     (length workspaces)))
 

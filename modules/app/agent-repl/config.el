@@ -396,6 +396,10 @@ returns the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; worktree.el (workspace commands) registers against at load time.
 (agent-repl--load-module "dir-watcher")
 (agent-repl--load-module "worktree")
+;; The daemon owns workspace creation.  This thin-client bridge loads after
+;; worktree.el/sidebar.el so inbound HostAction can reuse the existing UI-only
+;; handlers, and after frontend-uds.el so it can register the new frame arms.
+(agent-repl--load-module "workspace-create-client")
 (agent-repl--load-module "rename")
 (agent-repl--load-module "hide-project-dirs")
 (agent-repl--load-module "keybindings")
