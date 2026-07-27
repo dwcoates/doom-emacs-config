@@ -205,19 +205,22 @@ func TestIntegrationDedupOnReplay(t *testing.T) {
 }
 
 func TestIntegrationHeartbeat(t *testing.T) {
-	// Arrange: an established producer connection.
+	// Arrange: an established producer connection before any file change has
+	// produced the StoreWrite that ordinarily declares its role.
 	sock := startRealStore(t)
 	c := New(sock, nil)
 	defer c.Close()
 	if err := c.Connect(); err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
-	if _, err := c.Write("shim-claude-sidecar", &corev1.EventBatch{}); err != nil {
-		t.Fatalf("prime write: %v", err)
-	}
-	// Act / Assert
+
+	// Act / Assert: heartbeat itself can open the producer preamble.
 	if err := c.Heartbeat(); err != nil {
 		t.Fatalf("Heartbeat: %v", err)
+	}
+	// The same connection must still accept its eventual first write.
+	if _, err := c.Write("shim-claude-sidecar", &corev1.EventBatch{}); err != nil {
+		t.Fatalf("first write after heartbeat: %v", err)
 	}
 }
 
