@@ -72,18 +72,9 @@ own `cl-letf', which shadows this one for the extent of that form.
 
 `agent-repl--frontend-run-listener-probe' is stubbed to report NO
 listener for the same hermeticity reason: the real probe runs `lsof'
-against whatever holds port 8787 on the developer's machine, and the
-first-boot pass would then judge the developer's own daemon.  No
-listener means \"nothing incompatible to replace\", which is the correct
-premise for every steady-state test here.
-
-The startup staleness one-shot is bound ALREADY-RUN
-\(`agent-repl--frontend-startup-staleness-checked' t), so this env models
-the STEADY-STATE ensure (the cheap live-process hot path).  Tests
-exercising the one-shot itself re-bind it nil in their own `let'."
+against whatever holds port 8787 on the developer's machine."
   `(let ((agent-repl-frontend-auto-start t)
-         (agent-repl--frontend-daemon-process nil)
-         (agent-repl--frontend-startup-staleness-checked t))
+         (agent-repl--frontend-daemon-process nil))
      (cl-letf (((symbol-function 'agent-repl--frontend-init-inhibited-p)
                 (lambda () nil))
                ((symbol-function 'agent-repl--frontend-artifact-exists-p)
@@ -136,6 +127,16 @@ exercising the one-shot itself re-bind it nil in their own `let'."
       ;; Assert
       (should (equal captured
                      (list agent-repl--frontend-build-script "--force"))))))
+
+(ert-deftest agent-repl-test-daemon-build-targets-selects-store-and-sidecar ()
+  "Targeted stale builds pass both launchd service names to the shared script."
+  (let (captured)
+    (cl-letf (((symbol-function 'agent-repl--frontend-run-build-script)
+               (lambda (args) (setq captured args) 0)))
+      (agent-repl--frontend-build-targets-if-stale '("store" "sidecar"))
+      (should (equal captured
+                     (list agent-repl--frontend-build-script
+                           "store" "sidecar"))))))
 
 ;;;; ---- build-if-stale: failure surfacing -----------------------------------
 
@@ -390,159 +391,6 @@ VIEW is the `DaemonView' plist the daemon last pushed (nil = none yet)."
          (should-not (agent-repl-test--fake-daemon-live old)))))))
 
 ;;;; ---- startup staleness bounce (one-shot) ---------------------------------
-
-(ert-deftest agent-repl-test-daemon-startup-bounces-stale-tracked-daemon ()
-  "On Emacs open, a stale daemon THIS Emacs tracks is stopped and respawned."
-  ;; Arrange
-  (agent-repl-test--with-daemon-env
-   (let ((old (agent-repl-test--make-live-daemon 1))
-         (new (agent-repl-test--make-live-daemon 2))
-         (built nil)
-         (agent-repl--frontend-startup-staleness-checked nil))
-     (setq agent-repl--frontend-daemon-process old)
-     (cl-letf (((symbol-function 'agent-repl--frontend-daemon-stale-p)
-                (lambda () t))
-               ((symbol-function 'agent-repl--frontend-build-if-stale)
-                (lambda (&optional _f) (setq built t) 0))
-               ((symbol-function 'agent-repl--frontend-spawn-daemon)
-                (lambda () new)))
-       ;; Act
-       (let ((result (agent-repl--ensure-frontend-daemon)))
-         ;; Assert — rebuilt, old stopped, fresh process tracked and returned.
-         (should built)
-         (should-not (agent-repl-test--fake-daemon-live old))
-         (should (eq new agent-repl--frontend-daemon-process))
-         (should (eq new result)))))))
-
-(ert-deftest agent-repl-test-daemon-startup-leaves-fresh-tracked-daemon ()
-  "A daemon that is not stale is reused with no restart on Emacs open."
-  ;; Arrange
-  (agent-repl-test--with-daemon-env
-   (let ((old (agent-repl-test--make-live-daemon 1))
-         (spawned nil)
-         (agent-repl--frontend-startup-staleness-checked nil))
-     (setq agent-repl--frontend-daemon-process old)
-     (cl-letf (((symbol-function 'agent-repl--frontend-daemon-stale-p)
-                (lambda () nil))
-               ((symbol-function 'agent-repl--frontend-build-if-stale)
-                (lambda (&optional _f) 0))
-               ((symbol-function 'agent-repl--frontend-spawn-daemon)
-                (lambda () (setq spawned t) (agent-repl-test--make-live-daemon))))
-       ;; Act
-       (let ((result (agent-repl--ensure-frontend-daemon)))
-         ;; Assert — same process, still live, nothing spawned.
-         (should (eq old result))
-         (should (agent-repl-test--fake-daemon-live old))
-         (should-not spawned))))))
-
-(ert-deftest agent-repl-test-daemon-startup-defers-bounce-during-turn ()
-  "A stale daemon is NOT bounced while a turn is in flight on Emacs open."
-  ;; Arrange
-  (agent-repl-test--with-daemon-env
-   (let ((old (agent-repl-test--make-live-daemon 1))
-         (spawned nil)
-         (agent-repl--frontend-startup-staleness-checked nil))
-     (setq agent-repl--frontend-daemon-process old)
-     (cl-letf (((symbol-function 'agent-repl--frontend-daemon-stale-p)
-                (lambda () t))
-               ((symbol-function 'agent-repl--frontend-turn-active-sessions)
-                (lambda () '("s_busy")))
-               ((symbol-function 'agent-repl--frontend-build-if-stale)
-                (lambda (&optional _f) 0))
-               ((symbol-function 'agent-repl--frontend-spawn-daemon)
-                (lambda () (setq spawned t) (agent-repl-test--make-live-daemon))))
-       ;; Act
-       (let ((result (agent-repl--ensure-frontend-daemon)))
-         ;; Assert — the live conversation survives untouched, no SIGTERM sent.
-         (should (eq old result))
-         (should (agent-repl-test--fake-daemon-live old))
-         (should-not spawned)
-         (should-not (agent-repl-test--fake-daemon-signals old)))))))
-
-(ert-deftest agent-repl-test-daemon-startup-bounces-stale-foreign-daemon ()
-  "A stale ADOPTED daemon is shut down over the UDS, then replaced once it frees."
-  ;; Arrange — no tracked process, so any running daemon is foreign/adopted.
-  (agent-repl-test--with-daemon-env
-   (let ((foreign-alive t)
-         (shutdown-called nil)
-         (spawned nil)
-         (agent-repl--frontend-startup-staleness-checked nil))
-     (cl-letf (((symbol-function 'agent-repl--frontend-daemon-responsive-p)
-                (lambda () foreign-alive))
-               ((symbol-function 'agent-repl--frontend-daemon-stale-p)
-                (lambda () t))
-               ((symbol-function 'agent-repl--frontend-request-foreign-shutdown)
-                ;; The daemon exits: the socket stops answering after the ask.
-                (lambda () (setq shutdown-called t foreign-alive nil)))
-               ((symbol-function 'agent-repl--frontend-build-if-stale)
-                (lambda (&optional _f) 0))
-               ((symbol-function 'agent-repl--frontend-spawn-daemon)
-                (lambda () (setq spawned t) (agent-repl-test--make-live-daemon))))
-       ;; Act
-       (agent-repl--ensure-frontend-daemon)
-       ;; Assert — asked to shut down, then a fresh daemon spawned in its place.
-       (should shutdown-called)
-       (should spawned)))))
-
-(ert-deftest agent-repl-test-daemon-startup-leaves-wedged-foreign-daemon ()
-  "A foreign daemon that ignores the `ShutdownCmd' is left in place, never spawned over."
-  ;; Arrange — the socket stays responsive past the (zeroed) grace window.
-  (agent-repl-test--with-daemon-env
-   (let ((shutdown-called nil)
-         (spawned nil)
-         (agent-repl--frontend-startup-staleness-checked nil)
-         (agent-repl-frontend-foreign-stop-grace-seconds 0))
-     (cl-letf (((symbol-function 'agent-repl--frontend-daemon-responsive-p)
-                (lambda () t))
-               ((symbol-function 'agent-repl--frontend-daemon-stale-p)
-                (lambda () t))
-               ((symbol-function 'agent-repl--frontend-request-foreign-shutdown)
-                (lambda () (setq shutdown-called t)))
-               ((symbol-function 'agent-repl--frontend-build-if-stale)
-                (lambda (&optional _f) 0))
-               ((symbol-function 'agent-repl--frontend-spawn-daemon)
-                (lambda () (setq spawned t) (agent-repl-test--make-live-daemon))))
-       ;; Act
-       (let ((result (agent-repl--ensure-frontend-daemon)))
-         ;; Assert — asked to exit, but never spawned next to the wedged daemon.
-         (should shutdown-called)
-         (should-not spawned)
-         ;; It stays adopted for this session.
-         (should (eq t result)))))))
-
-(ert-deftest agent-repl-test-daemon-startup-bounce-noop-when-inhibited ()
-  "The staleness bounce never runs under the batch/sandbox inhibit guard."
-  ;; Arrange
-  (let ((agent-repl-frontend-auto-start t)
-        (agent-repl--frontend-daemon-process nil)
-        (agent-repl--frontend-startup-staleness-checked nil)
-        (checked nil))
-    (cl-letf (((symbol-function 'agent-repl--frontend-init-inhibited-p)
-               (lambda () t))
-              ((symbol-function 'agent-repl--frontend-bounce-if-stale)
-               (lambda () (setq checked t))))
-      ;; Act
-      (let ((result (agent-repl--ensure-frontend-daemon)))
-        ;; Assert — inhibit short-circuits before the one-shot even fires.
-        (should (null result))
-        (should-not checked)
-        (should-not agent-repl--frontend-startup-staleness-checked)))))
-
-(ert-deftest agent-repl-test-daemon-startup-staleness-check-runs-once ()
-  "The staleness bounce fires on the first ensure only, not on later ones."
-  ;; Arrange
-  (agent-repl-test--with-daemon-env
-   (let ((old (agent-repl-test--make-live-daemon 1))
-         (bounce-calls 0)
-         (agent-repl--frontend-startup-staleness-checked nil))
-     (setq agent-repl--frontend-daemon-process old)
-     (cl-letf (((symbol-function 'agent-repl--frontend-bounce-if-stale)
-                (lambda () (cl-incf bounce-calls))))
-       ;; Act — two ensures in one session.
-       (agent-repl--ensure-frontend-daemon)
-       (agent-repl--ensure-frontend-daemon)
-       ;; Assert — the one-shot fired exactly once.
-       (should (= 1 bounce-calls))))))
 
 ;;;; ---- Daemon liveness probe (UDS) -----------------------------------------
 
@@ -976,41 +824,15 @@ whenever a real session happened to be mid-turn."
      ;; Assert
      (should (null agent-repl--frontend-daemon-process)))))
 
-;;;; ---- restart command: rebinds open workspaces ----------------------------
+;;;; ---- restart command: canonical runtime delegation ----------------------
 
-(ert-deftest agent-repl-test-daemon-restart-rebinds-after-force-restart ()
-  "Restart force-bounces the daemon FIRST, then rebinds the open workspaces.
-Order is contractual: the workspaces can only rebind onto a daemon that has
-already been restarted."
-  ;; Arrange
-  (let ((calls nil))
-    (cl-letf (((symbol-function 'agent-repl--frontend-init-inhibited-p)
-               (lambda () nil))
-              ((symbol-function 'agent-repl--ensure-frontend-daemon)
-               (lambda (&optional force) (push (cons 'ensure force) calls) t))
-              ((symbol-function 'agent-repl--frontend-rebind-workspaces-after-restart)
-               (lambda () (push 'rebind calls) 0)))
-      ;; Act
-      (agent-repl-frontend-daemon-restart)
-      ;; Assert
-      (should (equal (reverse calls) '((ensure . t) rebind))))))
-
-(ert-deftest agent-repl-test-daemon-restart-reports-rebound-count ()
-  "Restart's confirmation message reports how many workspaces were rebound."
-  ;; Arrange
-  (let ((reported nil))
-    (cl-letf (((symbol-function 'agent-repl--frontend-init-inhibited-p)
-               (lambda () nil))
-              ((symbol-function 'agent-repl--ensure-frontend-daemon)
-               (lambda (&optional _force) t))
-              ((symbol-function 'agent-repl--frontend-rebind-workspaces-after-restart)
-               (lambda () 3))
-              ((symbol-function 'message)
-               (lambda (fmt &rest args) (setq reported (apply #'format fmt args)))))
-      ;; Act
-      (agent-repl-frontend-daemon-restart)
-      ;; Assert
-      (should (string-match-p "rebound 3 open workspaces" reported)))))
+(ert-deftest agent-repl-test-daemon-restart-delegates-to-runtime-coordinator ()
+  "The legacy daemon command has one implementation: the full runtime restart."
+  (let (called)
+    (cl-letf (((symbol-function 'agent-repl-runtime-restart)
+               (lambda () (setq called t) 3)))
+      (should (= 3 (agent-repl-frontend-daemon-restart)))
+      (should called))))
 
 ;;;; ---- Widget-assets auto-discovery -----------------------------------------
 
@@ -1098,21 +920,16 @@ already been restarted."
           (should (eq 'warn (caar issues)))
           (should (string-match-p "lacks chess-widget.js" (cdar issues))))))))
 
-(provide 'test-daemon)
-
-;;; test-daemon.el ends here
-
-;;;; ---- Incompatible-daemon replacement (E4 zero-user-action boot) --------
+;;;; ---- Incompatible-daemon detection -------------------------------------
 
 (defmacro agent-repl-test--with-daemon-boot (&rest body)
-  "Run BODY with every first-boot external boundary stubbed inert.
+  "Run BODY with every incompatible-listener external boundary stubbed inert.
 Each stub is overridden per test; the defaults make an unmocked path
 obvious (no listener, no build, no spawn) rather than reaching the host."
   (declare (indent 0))
   `(let ((agent-repl-frontend-daemon-addr "127.0.0.1:8787")
          (agent-repl-frontend-incompatible-stop-grace-seconds 0.05)
-         (agent-repl--frontend-daemon-process nil)
-         (agent-repl--frontend-startup-staleness-checked nil))
+         (agent-repl--frontend-daemon-process nil))
      (cl-letf (((symbol-function 'agent-repl--frontend-run-listener-probe)
                 (lambda (&rest _) nil))
                ((symbol-function 'agent-repl--frontend-build-if-stale)
@@ -1225,202 +1042,27 @@ obvious (no listener, no build, no spawn) rather than reaching the host."
       ;; Act / Assert
       (should-not (agent-repl--frontend-incompatible-daemon)))))
 
-;; --- replacement --------------------------------------------------------
+(ert-deftest agent-repl-test-runtime-bounce-preflight-rejects-unrelated-listener ()
+  "An unrelated port owner fails before the runtime coordinator mutates state."
+  (cl-letf (((symbol-function 'agent-repl--frontend-daemon-live-p)
+             (lambda () nil))
+            ((symbol-function 'agent-repl--frontend-daemon-responsive-p)
+             (lambda () nil))
+            ((symbol-function 'agent-repl--frontend-listener-owner)
+             (lambda () '(987 . "other-server"))))
+    (should-error (agent-repl--frontend-runtime-bounce-preflight))))
 
-(ert-deftest agent-repl-test-replace-incompatible-signals-term ()
-  "The incompatible daemon is asked to exit before it is killed."
-  ;; Arrange
-  (agent-repl-test--with-daemon-boot
-    (let (signals (probes 0))
-      (cl-letf (((symbol-function 'agent-repl--frontend-run-listener-probe)
-                 (lambda (&rest _)
-                   (setq probes (1+ probes))
-                   ;; Present on the first look, gone once signalled.
-                   (when (= probes 1) "p999\ncclaude-repld\n")))
-                ((symbol-function 'agent-repl--signal-process)
-                 (lambda (pid sig) (push (cons pid sig) signals) t)))
-        ;; Act
-        (agent-repl--frontend-replace-incompatible-daemon)
-        ;; Assert
-        (should (equal signals '((999 . TERM))))))))
+(ert-deftest agent-repl-test-runtime-bounce-preflight-identifies-incompatible-daemon ()
+  "A verified pre-UDS claude-repld listener is safe to replace after builds."
+  (cl-letf (((symbol-function 'agent-repl--frontend-daemon-live-p)
+             (lambda () nil))
+            ((symbol-function 'agent-repl--frontend-daemon-responsive-p)
+             (lambda () nil))
+            ((symbol-function 'agent-repl--frontend-listener-owner)
+             (lambda () '(987 . "claude-repld"))))
+    (should (equal (agent-repl--frontend-runtime-bounce-preflight)
+                   '(:incompatible 987 . "claude-repld")))))
 
-(ert-deftest agent-repl-test-replace-incompatible-starts-the-new-daemon ()
-  "Once the port frees, a fresh daemon is started."
-  ;; Arrange
-  (agent-repl-test--with-daemon-boot
-    (let ((probes 0) started)
-      (cl-letf (((symbol-function 'agent-repl--frontend-run-listener-probe)
-                 (lambda (&rest _)
-                   (setq probes (1+ probes))
-                   (when (= probes 1) "p999\ncclaude-repld\n")))
-                ((symbol-function 'agent-repl--frontend-start-daemon)
-                 (lambda (&rest _) (setq started t) 'started)))
-        ;; Act
-        (agent-repl--frontend-replace-incompatible-daemon)
-        ;; Assert
-        (should started)))))
+(provide 'test-daemon)
 
-(ert-deftest agent-repl-test-replace-incompatible-builds-before-terminating ()
-  "Artifacts are built BEFORE the old daemon dies, so a build failure
-leaves the working daemon running rather than trading it for nothing."
-  ;; Arrange
-  (agent-repl-test--with-daemon-boot
-    (let ((probes 0) order)
-      (cl-letf (((symbol-function 'agent-repl--frontend-run-listener-probe)
-                 (lambda (&rest _)
-                   (setq probes (1+ probes))
-                   (when (= probes 1) "p999\ncclaude-repld\n")))
-                ((symbol-function 'agent-repl--frontend-build-if-stale)
-                 (lambda (&rest _) (push 'build order) 0))
-                ((symbol-function 'agent-repl--signal-process)
-                 (lambda (&rest _) (push 'signal order) t)))
-        ;; Act
-        (agent-repl--frontend-replace-incompatible-daemon)
-        ;; Assert
-        (should (equal (nreverse order) '(build signal)))))))
-
-(ert-deftest agent-repl-test-replace-incompatible-kills-a-survivor ()
-  "A daemon that ignores SIGTERM is SIGKILLed."
-  ;; Arrange
-  (agent-repl-test--with-daemon-boot
-    (let (signals)
-      (cl-letf (((symbol-function 'agent-repl--frontend-run-listener-probe)
-                 (lambda (&rest _) "p999\ncclaude-repld\n"))
-                ((symbol-function 'agent-repl--signal-process)
-                 (lambda (pid sig) (push (cons pid sig) signals) t)))
-        ;; Act
-        (agent-repl--frontend-replace-incompatible-daemon)
-        ;; Assert
-        (should (member '(999 . KILL) signals))))))
-
-(ert-deftest agent-repl-test-replace-incompatible-does-not-spawn-next-to-a-survivor ()
-  "A daemon that will not die is left in place: spawning beside it would
-only bind-fail, which is the failure this exists to prevent."
-  ;; Arrange
-  (agent-repl-test--with-daemon-boot
-    (let (started)
-      (cl-letf (((symbol-function 'agent-repl--frontend-run-listener-probe)
-                 (lambda (&rest _) "p999\ncclaude-repld\n"))
-                ((symbol-function 'agent-repl--frontend-start-daemon)
-                 (lambda (&rest _) (setq started t))))
-        ;; Act
-        (agent-repl--frontend-replace-incompatible-daemon)
-        ;; Assert
-        (should-not started)))))
-
-(ert-deftest agent-repl-test-replace-incompatible-noop-without-one ()
-  "With no incompatible daemon, nothing is signalled and nothing spawns."
-  ;; Arrange
-  (agent-repl-test--with-daemon-boot
-    (let (touched)
-      (cl-letf (((symbol-function 'agent-repl--signal-process)
-                 (lambda (&rest _) (setq touched t)))
-                ((symbol-function 'agent-repl--frontend-start-daemon)
-                 (lambda (&rest _) (setq touched t))))
-        ;; Act
-        (should-not (agent-repl--frontend-replace-incompatible-daemon))
-        ;; Assert
-        (should-not touched)))))
-
-;; --- artifact readiness -------------------------------------------------
-
-(ert-deftest agent-repl-test-missing-artifacts-lists-absent-ones ()
-  "Every absent launch artifact is reported."
-  ;; Arrange
-  (cl-letf (((symbol-function 'agent-repl--frontend-artifact-exists-p)
-             (lambda (path) (not (string-suffix-p "dist" path)))))
-    ;; Act / Assert
-    (should (equal (agent-repl--frontend-missing-artifacts)
-                   (list agent-repl--frontend-webapp-dir)))))
-
-(ert-deftest agent-repl-test-ensure-artifacts-builds-when-one-is-missing ()
-  "A missing artifact triggers a build."
-  ;; Arrange
-  (let (built)
-    (cl-letf (((symbol-function 'agent-repl--frontend-artifact-exists-p)
-               (lambda (&rest _) nil))
-              ((symbol-function 'agent-repl--frontend-build-if-stale)
-               (lambda (&rest _) (setq built t) 0)))
-      ;; Act
-      (agent-repl--frontend-ensure-artifacts)
-      ;; Assert
-      (should built))))
-
-(ert-deftest agent-repl-test-ensure-artifacts-skips-a-complete-build ()
-  "Present artifacts cost no bash at all."
-  ;; Arrange
-  (let (built)
-    (cl-letf (((symbol-function 'agent-repl--frontend-artifact-exists-p)
-               (lambda (&rest _) t))
-              ((symbol-function 'agent-repl--frontend-build-if-stale)
-               (lambda (&rest _) (setq built t) 0)))
-      ;; Act
-      (should-not (agent-repl--frontend-ensure-artifacts))
-      ;; Assert
-      (should-not built))))
-
-;; --- first-boot ordering + idempotency ----------------------------------
-
-(ert-deftest agent-repl-test-first-boot-replaces-before-anything-else ()
-  "An incompatible daemon is replaced first: it holds the port, so no
-later step could start a daemon anyway."
-  ;; Arrange
-  (agent-repl-test--with-daemon-boot
-    (let ((probes 0) order)
-      (cl-letf (((symbol-function 'agent-repl--frontend-run-listener-probe)
-                 (lambda (&rest _)
-                   (setq probes (1+ probes))
-                   (when (= probes 1) "p999\ncclaude-repld\n")))
-                ((symbol-function 'agent-repl--frontend-start-daemon)
-                 (lambda (&rest _) (push 'start order) 'started))
-                ((symbol-function 'agent-repl--frontend-bounce-if-stale)
-                 (lambda (&rest _) (push 'bounce order)))
-                ((symbol-function 'agent-repl--frontend-ensure-artifacts)
-                 (lambda (&rest _) (push 'artifacts order))))
-        ;; Act
-        (agent-repl--frontend-maybe-bounce-stale-daemon-once)
-        ;; Assert — the replacement ran, and the staleness pass did not
-        ;; (the daemon it would judge was just built from current source).
-        (should (equal (nreverse order) '(start)))))))
-
-(ert-deftest agent-repl-test-first-boot-falls-through-without-an-incompatible-daemon ()
-  "With no incompatible daemon, the artifact sweep and staleness pass run."
-  ;; Arrange
-  (agent-repl-test--with-daemon-boot
-    (let (order)
-      (cl-letf (((symbol-function 'agent-repl--frontend-ensure-artifacts)
-                 (lambda (&rest _) (push 'artifacts order)))
-                ((symbol-function 'agent-repl--frontend-bounce-if-stale)
-                 (lambda (&rest _) (push 'bounce order))))
-        ;; Act
-        (agent-repl--frontend-maybe-bounce-stale-daemon-once)
-        ;; Assert
-        (should (equal (nreverse order) '(artifacts bounce)))))))
-
-(ert-deftest agent-repl-test-first-boot-runs-once-per-session ()
-  "A repeat boot pass is a no-op: the guard makes it a genuine one-shot,
-so opening a second panel never re-probes, re-builds or re-replaces."
-  ;; Arrange
-  (agent-repl-test--with-daemon-boot
-    (let ((runs 0))
-      (cl-letf (((symbol-function 'agent-repl--frontend-ensure-artifacts)
-                 (lambda (&rest _) (setq runs (1+ runs))))
-                ((symbol-function 'agent-repl--frontend-bounce-if-stale)
-                 (lambda (&rest _) nil)))
-        ;; Act
-        (agent-repl--frontend-maybe-bounce-stale-daemon-once)
-        (agent-repl--frontend-maybe-bounce-stale-daemon-once)
-        (agent-repl--frontend-maybe-bounce-stale-daemon-once)
-        ;; Assert
-        (should (= runs 1))))))
-
-(ert-deftest agent-repl-test-first-boot-guard-set-before-the-pass ()
-  "The guard is set BEFORE the pass, so an error still leaves it one-shot."
-  ;; Arrange
-  (agent-repl-test--with-daemon-boot
-    (cl-letf (((symbol-function 'agent-repl--frontend-ensure-artifacts)
-               (lambda (&rest _) (error "build blew up"))))
-      ;; Act
-      (ignore-errors (agent-repl--frontend-maybe-bounce-stale-daemon-once))
-      ;; Assert
-      (should agent-repl--frontend-startup-staleness-checked))))
+;;; test-daemon.el ends here
