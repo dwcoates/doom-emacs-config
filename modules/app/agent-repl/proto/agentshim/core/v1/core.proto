@@ -204,10 +204,21 @@ message TurnEnded {
 // The names are `clear` and `compact` because those are the overwhelming
 // convention across vendors, not one vendor's spelling.
 //
-// BOTH PLANES PRODUCE THESE. The stream plane sees the event as it happens;
-// the file plane sees it in the transcript, where the vendor writes the same
-// clear as an expanded command envelope. They carry a common dedup_key so the
-// store merges the twins into one event rather than cutting twice.
+// THE FILE PLANE IS THE SOLE PRODUCER of both. An earlier draft of this
+// schema claimed both planes produce them and merge on a shared dedup_key;
+// that was wrong on every count, and the correction is worth recording so
+// nobody re-derives the broken version.
+//
+// The stream plane cannot see either event. The CLI handles a recognized
+// slash command internally, never yielding the command envelope back on the
+// stream, and it mints a fresh uuid for the transcript record — so a shim can
+// neither observe a clear nor predict the name the transcript will give it.
+// For a compaction the gap is content rather than identity: only the
+// transcript carries the summary text, which arrives on a line of its own.
+//
+// dedup_key is therefore PER-PRODUCER IDENTITY, not a merge contract. It
+// names a transcript line stably enough that re-reading it after a restart or
+// a cursor rewind produces one event rather than two.
 
 // The context was CLEARED: discarded outright. Nothing survives it, so there
 // is no summary to carry and no trigger to record — a clear is always the
