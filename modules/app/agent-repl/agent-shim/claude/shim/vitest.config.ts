@@ -10,4 +10,7 @@ const agentReplRoot = fileURLToPath(new URL("../../../", import.meta.url));
 
 export default defineConfig({
   server: { fs: { allow: [agentReplRoot] } },
+  // test/setup.ts sets AGENT_REPL_FORBID_VENDOR_CALLS for every test file, so
+  // no test can reach the real SDK even by mistake (see src/vendor-guard.ts).
+  test: { setupFiles: ["./test/setup.ts"] },
 });

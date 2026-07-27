@@ -30,6 +30,7 @@ import { UdsSession } from "./uds/uds-session.js";
 import { acquireSessionLock } from "./uds/session-lock.js";
 import { SessionSource } from "./uds/proto.js";
 import { FAKE_COMMANDS, createFakeQuery } from "./fake-query.js";
+import { importRealSDK } from "./vendor-guard.js";
 import {
   ModelInfo,
   PermissionMode,
@@ -180,7 +181,7 @@ async function realQueryFactory(
   prompt: AsyncIterable<SdkUserMessageLike>,
   canUseTool: CanUseToolLike,
 ): Promise<QueryLike> {
-  const sdk = await import("@anthropic-ai/claude-agent-sdk");
+  const sdk = await importRealSDK("realQueryFactory");
   return sdk.query({
     prompt: prompt as never,
     options: realQueryOptions(args, canUseTool) as never,
@@ -231,7 +232,7 @@ export function probeQueryOptions(
  * process spawn and zero model tokens.
  */
 async function realProbeCommands(args: CliArgs): Promise<SlashCommand[]> {
-  const sdk = await import("@anthropic-ai/claude-agent-sdk");
+  const sdk = await importRealSDK("realProbeCommands");
   const idle = (async function* (): AsyncGenerator<SdkUserMessageLike> {
     await new Promise<never>(() => {});
   })();
@@ -254,7 +255,7 @@ async function realProbeCommands(args: CliArgs): Promise<SlashCommand[]> {
  * {@link import("./uds/uds-session.js").UdsSessionDeps.createQuery}, so both
  * modes drive the SDK the same way.
  */
-function makeCreateQuery(args: CliArgs): SessionDeps["createQuery"] {
+export function makeCreateQuery(args: CliArgs): SessionDeps["createQuery"] {
   return (prompt, canUseTool): QueryLike => {
     if (args.fake) {
       return createFakeQuery(prompt, canUseTool, {
@@ -279,10 +280,11 @@ export async function main(): Promise<void> {
   }
 
   // The query factory is synchronous per SessionDeps; pre-resolve the SDK
-  // module (dynamic import) before constructing the session.
-  const sdkModulePromise = args.fake
-    ? null
-    : import("@anthropic-ai/claude-agent-sdk");
+  // module (dynamic import) before constructing the session. Under
+  // AGENT_REPL_FORBID_VENDOR_CALLS this is where a non-fake shim dies: the
+  // guard throws, `main()`'s caller prints it and exits nonzero. `--fake`
+  // short-circuits before the chokepoint and stays fully offline.
+  const sdkModulePromise = args.fake ? null : importRealSDK("main:preresolve");
   if (sdkModulePromise) await sdkModulePromise;
 
   const createQuery = makeCreateQuery(args);
