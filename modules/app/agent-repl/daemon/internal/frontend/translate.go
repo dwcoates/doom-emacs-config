@@ -136,6 +136,16 @@ func ProgressViewFrame(p *frontendv1.ProgressView) *frontendv1.FrontendFrame {
 	return &frontendv1.FrontendFrame{Frame: &frontendv1.FrontendFrame_Progress{Progress: p}}
 }
 
+// DaemonHealthFrame wraps a daemon-global correlated health assertion.
+func DaemonHealthFrame(v *frontendv1.DaemonHealthView) *frontendv1.FrontendFrame {
+	return &frontendv1.FrontendFrame{Frame: &frontendv1.FrontendFrame_DaemonHealth{DaemonHealth: v}}
+}
+
+// SessionHealthFrame wraps a session-specific correlated health assertion.
+func SessionHealthFrame(v *frontendv1.SessionHealthView) *frontendv1.FrontendFrame {
+	return &frontendv1.FrontendFrame{Frame: &frontendv1.FrontendFrame_SessionHealth{SessionHealth: v}}
+}
+
 // ---------------------------------------------------------------------------
 // ContentDelta -> TypingDelta (ephemeral live typing)
 // ---------------------------------------------------------------------------
