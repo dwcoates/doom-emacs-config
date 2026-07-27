@@ -759,6 +759,22 @@ Log lines are for *transitions and reasoning*; axis rows are for *state*.
 - Do not silently rotate or truncate the log unless the user explicitly asks; some bugs need historical context.
 - Do not skip §7. If the evidence lacks coverage of the suspect code path AND that path is in `modules/app/agent-repl/`, surface that emphatically and propose instrumentation — that IS the right next step. (If the path is 3rd-party, use §9 instead — you don't get to add `agent-repl--log` calls to magit.)
 
+### 8.1 Databases
+
+- **NEVER write to either SQLite database. Always `sqlite3 -readonly`.** Both have live writers using WAL, and the SSM in particular runs a **single writer connection whose ordering guarantees a second writer would break**. A stray write is not a recoverable mistake here.
+- **Never `SELECT *` without a filter and a `LIMIT` against `events.db`.** It is ~1.5 GB (§5).
+
+### 8.2 Services
+
+- **Never restart `shim-store` or `shim-claude-sidecar` as a debugging step without asking.** They carry the **file plane for every live session** — restarting them is not a free "have you tried turning it off and on again".
+- If both genuinely must be restarted: **store first**, then **WAIT for `~/.cache/agent-repl/sock/store.sock` to exist** before starting the sidecar.
+  - Restarting both at once makes the sidecar's **cursor recovery fail against a socket that is not yet listening**, and it then **silently re-reads every watched transcript from offset zero**. Observed 2026-07-25: thousands of files re-ingested.
+
+  ```sh
+  # after restarting the store, before touching the sidecar:
+  until [ -S ~/.cache/agent-repl/sock/store.sock ]; do sleep 0.2; done
+  ```
+
 ## 9. Capturing 3rd-party output via the *Messages* buffer
 
 The agent-repl log file contains ONLY messages emitted by `agent-repl--log` and friends. Output from 3rd-party packages — magit, transient, doom-core, vterm, the byte-compiler, package load failures — writes to Emacs's `*Messages*` buffer and is NOT mirrored to the log file. When a bug surfaces *through* agent-repl but is caused by 3rd-party code, the only on-host record of the upstream failure lives in `*Messages*`.
