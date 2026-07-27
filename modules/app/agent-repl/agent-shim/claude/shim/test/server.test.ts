@@ -5,6 +5,8 @@ import {
   AckSchema,
   DaemonHelloSchema,
   EventSchema,
+  HealthCheckSchema,
+  HealthStatusSchema,
   InterruptSchema,
   NackSchema,
   PermissionRequestSchema,
@@ -54,6 +56,11 @@ function harness(overrides: Partial<SessionServerHandlers> = {}): {
     onPermissionResponse: (m) => calls.perms.push(m),
     onSubscribe: (m) => calls.subs.push(m),
     onReplayRequest: (m) => calls.replays.push(m),
+    onHealthCheck: (m) => create(HealthStatusSchema, {
+      requestId: m.requestId,
+      healthy: true,
+      component: "test-shim",
+    }),
     onDaemonConnected: () => calls.connected++,
     onDaemonDisconnected: () => calls.disconnected++,
     ...overrides,
@@ -138,6 +145,40 @@ describe("SessionServer handshake", () => {
 });
 
 describe("SessionServer control dispatch", () => {
+  it("returns a correlated health assertion only after handshake", async () => {
+    // Arrange
+    const { server, socketPath } = harness();
+    track(server);
+    const peer = await handshake(server, socketPath);
+
+    // Act
+    peer.send(HealthCheckSchema, create(HealthCheckSchema, { requestId: "daemon-health-1" }));
+    const status = await peer.next(HealthStatusSchema);
+
+    // Assert
+    expect(status.requestId).toBe("daemon-health-1");
+    expect(status.healthy).toBe(true);
+    expect(status.component).toBe("test-shim");
+  });
+
+  it("reports an unhealthy status when the health handler rejects", async () => {
+    // Arrange
+    const { server, socketPath } = harness({
+      onHealthCheck: async () => { throw new Error("store subscription is down"); },
+    });
+    track(server);
+    const peer = await handshake(server, socketPath);
+
+    // Act
+    peer.send(HealthCheckSchema, create(HealthCheckSchema, { requestId: "daemon-health-2" }));
+    const status = await peer.next(HealthStatusSchema);
+
+    // Assert: a failed assertion is explicit, never a caller-side timeout.
+    expect(status.requestId).toBe("daemon-health-2");
+    expect(status.healthy).toBe(false);
+    expect(status.reason).toContain("store subscription is down");
+  });
+
   it("dispatches SubmitPrompt and Acks", async () => {
     // Arrange
     const { server, socketPath, calls } = harness();

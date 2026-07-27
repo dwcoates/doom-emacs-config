@@ -158,12 +158,14 @@ func (s *sidecar) sweep() {
 	s.emit(s.tracker.Sweep(time.Now().UnixMilli()))
 }
 
-// heartbeat pings the store, and treats a dead connection as a lost link rather
-// than a log line.
+// heartbeat uses a correlated store health probe.  The sidecar only reads
+// files while its store link is healthy, so a socket that merely exists must
+// never keep ingestion running.
 func (s *sidecar) heartbeat() {
-	if err := s.store.Heartbeat(); err != nil {
-		s.log("heartbeat failed: %v", err)
-		s.noteStoreErr("heartbeat", err)
+	requestID := fmt.Sprintf("sidecar-health-%d", time.Now().UnixNano())
+	if err := s.store.Health(requestID); err != nil {
+		s.log("health check failed request_id=%s: %v", requestID, err)
+		s.noteStoreErr("health", err)
 	}
 }
 

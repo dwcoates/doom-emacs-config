@@ -53,6 +53,8 @@ import {
   AckSchema,
   DaemonHelloSchema,
   EventSchema,
+  HealthCheckSchema,
+  HealthStatusSchema,
   InterruptSchema,
   PermissionDecision,
   InterruptOutcome,
@@ -427,6 +429,47 @@ describe("UdsSession lifecycle: shim-authoritative TurnStarted", () => {
 });
 
 describe("UdsSession lifecycle: shim-asserted readiness", () => {
+  it("reports session health only after a live subscription and correlated store probe", async () => {
+    // Arrange: the daemon's Subscribe establishes the live merged-event path
+    // that a restored frontend would depend on.
+    const { store, daemon } = await rig({ subscribe: true });
+
+    // Act: the daemon requests session health; the shim opens a separate
+    // store probe without moving its standing subscription.
+    daemon.send(HealthCheckSchema, create(HealthCheckSchema, { requestId: "session-health-1" }));
+    await until(() => store.count() === 3);
+    const probe = store.latest();
+    const check = await probe.next(HealthCheckSchema);
+    expect(check.requestId).toBe("session-health-1");
+    probe.send(HealthStatusSchema, create(HealthStatusSchema, {
+      requestId: "session-health-1",
+      healthy: true,
+      component: "shim-store",
+    }));
+
+    // Assert: this is a response from the shim's dependency gate, not merely
+    // a proof that a daemon socket exists.
+    const status = await daemon.next(HealthStatusSchema);
+    expect(status).toMatchObject({
+      requestId: "session-health-1",
+      healthy: true,
+      component: "claude-shim",
+    });
+  });
+
+  it("reports session health as unhealthy before the daemon installs a store subscription", async () => {
+    // Arrange
+    const { daemon } = await rig();
+
+    // Act
+    daemon.send(HealthCheckSchema, create(HealthCheckSchema, { requestId: "session-health-no-sub" }));
+    const status = await daemon.next(HealthStatusSchema);
+
+    // Assert: rendering would otherwise race a missing store tail.
+    expect(status.healthy).toBe(false);
+    expect(status.reason).toContain("standing store subscription is not live");
+  });
+
   // THE POINT OF THE WHOLE MECHANISM. The SDK emits system:init only on the
   // first prompt, so a session nobody has typed into never announced itself
   // and its workspace sat in bring-up waiting for a message the user had no
