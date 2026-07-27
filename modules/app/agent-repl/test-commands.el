@@ -1416,7 +1416,7 @@ are recoverable by reopening the project."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "doomed" :project-dir "/tmp/doomed")
     (let ((proc-deleted nil)
-          (fake-proc (start-process "fake" nil "true")))
+          (fake-proc 'agent-repl-test-fake-process))
       (agent-repl--ws-put "doomed" :git-proc fake-proc)
       (cl-letf (((symbol-function 'completing-read)
                  (lambda (_prompt _coll &rest _) "doomed"))
@@ -1425,13 +1425,12 @@ are recoverable by reopening the project."
                 ((symbol-function '+workspace-current-name) (lambda () "other"))
                 ((symbol-function 'persp-get-by-name) (lambda (_n) nil))
                 ((symbol-function 'force-mode-line-update) #'ignore)
-                ;; Stub `process-live-p' since "true" exits before the test
-                ;; reaches the kill check, racing us to the assertion.
+                ;; The inert handle never crosses the mocked process boundary.
                 ((symbol-function 'process-live-p) (lambda (_p) t))
                 ((symbol-function 'delete-process)
                  (lambda (p) (setq proc-deleted p))))
         (agent-repl-nuke-workspace)
-        (should proc-deleted)))))
+        (should (eq proc-deleted fake-proc))))))
 
 (ert-deftest agent-repl-cmd-test-nuke-workspace/kills-persp-workspace ()
   "nuke-workspace calls +workspace/kill to tear down the persp workspace."
@@ -2273,7 +2272,7 @@ kill so the workspace can be re-opened with its identity intact."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "doomed" :project-dir "/tmp/doomed")
     (let ((proc-deleted nil)
-          (fake-proc (start-process "fake" nil "true")))
+          (fake-proc 'agent-repl-test-fake-process))
       (agent-repl--ws-put "doomed" :git-proc fake-proc)
       (cl-letf (((symbol-function 'completing-read)
                  (lambda (_prompt _coll &rest _) "doomed"))
@@ -2286,7 +2285,7 @@ kill so the workspace can be re-opened with its identity intact."
                 ((symbol-function 'delete-process)
                  (lambda (p) (setq proc-deleted p))))
         (agent-repl-kill-workspace)
-        (should proc-deleted)))))
+        (should (eq proc-deleted fake-proc))))))
 
 (ert-deftest agent-repl-cmd-test-nuke-workspace/tabbar-only-routes-to-persp-kill ()
   "nuke-workspace on a tab-bar-only ws (agent already killed) routes
