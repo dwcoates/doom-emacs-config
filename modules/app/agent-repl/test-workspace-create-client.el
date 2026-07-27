@@ -347,6 +347,77 @@
       (should (equal (plist-get completion :error)
                      "prompt handler exploded")))))
 
+(ert-deftest agent-repl-test-host-action-overlap-runs-handler-once-and-resends ()
+  "In-flight and completed duplicates never repeat a non-idempotent handler."
+  (let ((agent-repl--host-action-outcomes (make-hash-table :test 'equal))
+        (agent-repl--host-action-success-order nil)
+        (action
+         '(:actionId "overlap-1"
+           :legacyCommand
+           (:type "clipboard" :payload (:text "one copy"))))
+        (handler-calls 0)
+        completions)
+    (cl-letf (((symbol-function 'agent-repl--handle-clipboard-command)
+               (lambda (_cmd)
+                 (cl-incf handler-calls)
+                 ;; Simulate a live delivery re-entering while the snapshot
+                 ;; copy is still executing.
+                 (agent-repl--workspace-create-handle-host-action action)))
+              ((symbol-function 'agent-repl--uds-send-command)
+               (lambda (_field payload &rest _)
+                 (push payload completions)
+                 (format "completion-%d" (length completions))))
+              ((symbol-function 'agent-repl--uds-track-command)
+               (lambda (&rest _) nil)))
+      (should
+       (agent-repl--workspace-create-handle-host-action action))
+      ;; One original completion plus one replay for the suppressed overlap.
+      (should (= (length completions) 2))
+      (should (= handler-calls 1))
+      ;; A later completed duplicate resends the same successful outcome.
+      (should
+       (eq (agent-repl--workspace-create-handle-host-action action)
+           :duplicate))
+      (should (= (length completions) 3))
+      (should (= handler-calls 1))
+      (dolist (payload completions)
+        (should (equal (plist-get payload :actionId) "overlap-1"))
+        (should (eq (plist-get payload :ok) t))))))
+
+(ert-deftest agent-repl-test-host-action-failure-completion-makes-redelivery-retryable ()
+  "After failure completion, redelivery executes the handler again."
+  (let ((agent-repl--host-action-outcomes (make-hash-table :test 'equal))
+        (agent-repl--host-action-success-order nil)
+        (action
+         '(:actionId "retry-1"
+           :legacyCommand
+           (:type "prompt" :payload (:workspace "ws1" :prompt "retry"))))
+        (handler-calls 0)
+        completions)
+    (cl-letf (((symbol-function 'agent-repl--handle-prompt-command)
+               (lambda (_cmd)
+                 (cl-incf handler-calls)
+                 (when (= handler-calls 1)
+                   (error "first attempt failed"))))
+              ((symbol-function 'agent-repl--uds-send-command)
+               (lambda (_field payload &rest _)
+                 (push payload completions)
+                 (format "completion-%d" (length completions))))
+              ((symbol-function 'agent-repl--uds-track-command)
+               (lambda (&rest _) nil)))
+      (should-error
+       (agent-repl--workspace-create-handle-host-action action))
+      (should-not
+       (gethash "retry-1" agent-repl--host-action-outcomes))
+      (should
+       (agent-repl--workspace-create-handle-host-action action))
+      (should (= handler-calls 2))
+      (should (= (length completions) 2))
+      (should (eq (plist-get (cadr completions) :ok) json-false))
+      (should (equal (plist-get (cadr completions) :error)
+                     "first attempt failed"))
+      (should (eq (plist-get (car completions) :ok) t)))))
+
 (ert-deftest agent-repl-test-snapshot-materializes-before-render-state ()
   "Reconnect snapshots never render a created workspace before Available."
   (let ((events nil))
