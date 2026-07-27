@@ -152,11 +152,13 @@ well as `agent-repl-explain' and friends."
 
 (defun agent-repl--buffer-relative-path ()
   "Return the current buffer's file path relative to the project root."
-  (let ((file (buffer-file-name)))
+  (let ((file (buffer-file-name))
+        (ws (agent-repl--ws-current-name)))
     (unless file
+      (agent-repl--log ws "buffer-relative-path: refusing non-file buffer=%s" (buffer-name))
       (user-error "Buffer %s is not visiting a file" (buffer-name)))
-    (let ((rel (file-relative-name (agent-repl--path-canonical file) (agent-repl--ws-dir (agent-repl--ws-current-name)))))
-      (agent-repl--log (agent-repl--ws-current-name) "buffer-relative-path: path=%s" rel)
+    (let ((rel (file-relative-name (agent-repl--path-canonical file) (agent-repl--ws-dir ws))))
+      (agent-repl--log ws "buffer-relative-path: path=%s" rel)
       rel)))
 
 (defun agent-repl--format-file-ref ()
@@ -274,7 +276,8 @@ FILE is run through `expand-file-name', so pass an absolute path.
 START-LINE and END-LINE are 1-indexed inclusive line numbers."
   (let* ((path (expand-file-name file))
          (buf (find-file-noselect path))
-         (win (agent-repl--link-code-display buf start-line end-line)))
+         (win (agent-repl--link-code-display buf start-line end-line))
+         (ws (or workspace (agent-repl--ws-current-name))))
     (if workspace
         (let ((persp (agent-repl--ws-resolve-persp workspace)))
           (when persp
@@ -285,7 +288,7 @@ START-LINE and END-LINE are 1-indexed inclusive line numbers."
                             (if persp "resolved" "nil")
                             (if win "displayed" "nil")))
       (when win (select-window win))
-      (agent-repl--log nil
+      (agent-repl--log ws
                         "link-code: focus path file=%s lines=%s..%s win=%s"
                         path start-line (or end-line start-line)
                         (if win "displayed+selected" "nil")))
@@ -439,7 +442,10 @@ Without region: pre-fills with file path and current line."
          (msg (read-string "Send to Claude: " ref)))
     (when (and msg (not (string-empty-p msg)))
       (agent-repl--log (agent-repl--ws-current-name) "explain-prompt %s" msg)
-      (agent-repl--send-to-agent msg))))
+      (agent-repl--send-to-agent msg))
+    (when (or (null msg) (string-empty-p msg))
+      (agent-repl--log (agent-repl--ws-current-name)
+                        "explain-prompt: empty input; no message sent"))))
 
 
 (defun agent-repl--enter-insert-mode (ws)
@@ -577,7 +583,8 @@ should immediately reflect \"finished\" rather than linger on
 the agent-shim cutover; that hook counter no longer exists.)"
   (interactive)
   (let ((ws (or ws (agent-repl--ws-current-name))))
-    (agent-repl--log ws "interrupt")
+    (agent-repl--log ws "interrupt: requested no-confirm=%s reinsert-delay=%.3fs"
+                      no-confirm agent-repl-interrupt-reinsert-delay)
     (if (and (not no-confirm)
              (not (agent-repl--confirm-cancel-running (list ws))))
         (agent-repl--log ws "interrupt: declined at confirmation, leaving agent running")
@@ -592,6 +599,9 @@ the agent-shim cutover; that hook counter no longer exists.)"
           ;; there to revise when the buffer takes insert state.
           (when (eq outcome 'retracted)
             (agent-repl--restore-retracted-prompt ws))
+          (agent-repl--log ws "interrupt: delivered outcome=%s retracted=%s scheduling-insert=%.3fs"
+                            outcome (if (eq outcome 'retracted) "t" "nil")
+                            agent-repl-interrupt-reinsert-delay)
           (run-at-time agent-repl-interrupt-reinsert-delay nil
                        #'agent-repl--enter-insert-mode ws))))))
 
@@ -638,31 +648,39 @@ error via `agent-repl--warn'."
      (lambda (ok output)
        (agent-repl--rebase-onto-origin-master-callback ws ok output)))))
 
-(defun agent-repl--exclusion-symbol-to-flag (sym)
+(defun agent-repl--exclusion-symbol-to-flag (sym &optional ws)
   "Convert exclusion SYM to the corresponding flag.
 E.g. \\='no-self-certified becomes \"--self-certified\"."
   (let ((name (symbol-name sym)))
     (unless (string-prefix-p "no-" name)
+      (agent-repl--log ws "exclusion-symbol-to-flag: invalid sym=%S name=%s" sym name)
       (error "agent-repl: exclusion symbol must start with `no-': %S" sym))
-    (concat "--" (substring name 3))))
+    (let ((flag (concat "--" (substring name 3))))
+      (agent-repl--log ws "exclusion-symbol-to-flag: sym=%S -> flag=%s" sym flag)
+      flag)))
 
-(defun agent-repl--build-create-or-update-pr-prompt (excluded)
+(defun agent-repl--build-create-or-update-pr-prompt (excluded &optional ws)
   "Build the /create-or-update-pr prompt, omitting flags for EXCLUDED.
 EXCLUDED is a list of `no-FLAG' symbols (e.g. \\='no-self-certified).  Each
 must correspond to a flag in `agent-repl-create-or-update-pr-base-flags'
 or an error is signalled."
   (let ((excluded-flags
          (mapcar (lambda (sym)
-                   (let ((flag (agent-repl--exclusion-symbol-to-flag sym)))
+                   (let ((flag (agent-repl--exclusion-symbol-to-flag sym ws)))
                      (unless (member flag agent-repl-create-or-update-pr-base-flags)
+                       (agent-repl--log ws "build-create-or-update-pr-prompt: invalid exclusion sym=%S flag=%s base-flags=%S"
+                                         sym flag agent-repl-create-or-update-pr-base-flags)
                        (error "agent-repl: %S excludes %s, not in base flags" sym flag))
                      flag))
                  excluded)))
-    (string-join
-     (cons "/create-or-update-pr"
-           (cl-remove-if (lambda (f) (member f excluded-flags))
-                         agent-repl-create-or-update-pr-base-flags))
-     " ")))
+    (let ((prompt (string-join
+                   (cons "/create-or-update-pr"
+                         (cl-remove-if (lambda (f) (member f excluded-flags))
+                                       agent-repl-create-or-update-pr-base-flags))
+                   " ")))
+      (agent-repl--log ws "build-create-or-update-pr-prompt: excluded=%S excluded-flags=%S prompt=%s"
+                        excluded excluded-flags prompt)
+      prompt)))
 
 (defun agent-repl-create-or-update-pr (&optional excluded)
   "Send /create-or-update-pr to Claude with optional EXCLUDED flags dropped.
@@ -674,7 +692,7 @@ named flag is removed from `agent-repl-create-or-update-pr-base-flags'
 before the prompt is sent."
   (interactive)
   (let* ((ws (agent-repl--ws-current-name))
-         (base (agent-repl--build-create-or-update-pr-prompt excluded))
+         (base (agent-repl--build-create-or-update-pr-prompt excluded ws))
          (input-buf (agent-repl--ws-get ws :input-buffer))
          (raw-prefix (agent-repl--read-input-buffer ws))
          (prefix (and raw-prefix (string-trim-right raw-prefix)))
@@ -684,7 +702,11 @@ before the prompt is sent."
                       (length (or prefix "")) prompt)
     (agent-repl--send-to-agent prompt)
     (when (and has-prefix input-buf (buffer-live-p input-buf))
-      (agent-repl--commit-input-buffer ws input-buf raw-prefix t))))
+      (agent-repl--commit-input-buffer ws input-buf raw-prefix t))
+    (unless (and has-prefix input-buf (buffer-live-p input-buf))
+      (agent-repl--log ws "create-or-update-pr: input not committed has-prefix=%s input-buffer=%s live=%s"
+                        (if has-prefix "t" "nil") input-buf
+                        (if (buffer-live-p input-buf) "t" "nil")))))
 
 (defun agent-repl-create-or-update-pr-no-self-certified ()
   "Send /create-or-update-pr to Claude without --self-certified."
@@ -698,8 +720,9 @@ The inserted prompt is wrapped in single backticks for inline-code
 rendering in markdown contexts.  No workspace state is touched — the
 input buffer is left intact and Claude is not contacted."
   (interactive)
-  (let ((prompt (agent-repl--build-create-or-update-pr-prompt excluded)))
-    (agent-repl--log (agent-repl--ws-current-name)
+  (let* ((ws (agent-repl--ws-current-name))
+         (prompt (agent-repl--build-create-or-update-pr-prompt excluded ws)))
+    (agent-repl--log ws
                       "create-or-update-pr-paste: prompt=%s" prompt)
     (insert "`" prompt "`")))
 
@@ -1390,6 +1413,9 @@ on every state mutation."
                           "save-workspace-snapshot: ABORTED — loader hasn't run this session and on-disk roster is larger than live (%d)"
                           (length snapshot))
       (agent-repl--write-workspace-snapshot snapshot)
+      (agent-repl--log nil "save-workspace-snapshot: wrote entries=%d interactive=%s file=%s"
+                        (length snapshot) (if (called-interactively-p 'interactive) "t" "nil")
+                        agent-repl-workspace-snapshot-file)
       (when (called-interactively-p 'interactive)
         (message "Saved %d workspace(s) to %s"
                  (length snapshot) agent-repl-workspace-snapshot-file)))))
@@ -1419,7 +1445,11 @@ without waiting for the next `--state-save' piggyback."
                (not (y-or-n-p
                      (format "On-disk snapshot has %d entries, live has %d.  Overwrite anyway? "
                              on-disk-count live-count))))
+      (agent-repl--log nil "update-workspace-snapshot: declined overwrite live=%d on-disk=%d file=%s"
+                        live-count on-disk-count file)
       (user-error "Aborted"))
+    (agent-repl--log nil "update-workspace-snapshot: accepted live=%d on-disk=%d file=%s"
+                      live-count on-disk-count file)
     (agent-repl--write-workspace-snapshot snapshot)
     (message "Updated snapshot: %d workspace(s) -> %s"
              live-count file)))
@@ -1468,7 +1498,10 @@ persp routing."
         (dolist (win (cdr foreign))
           (ignore-errors (delete-window win)))
         (when (and fallback (car foreign) (window-live-p (car foreign)))
-          (set-window-buffer (car foreign) fallback)))))))
+          (set-window-buffer (car foreign) fallback)))))
+    (unless foreign
+      (agent-repl--log ws "clean-frame-foreign-windows: ws=%s no foreign windows total=%d"
+                        ws (length all)))))
 
 (defun agent-repl--hydrate-and-reorder-on-open (ws project-root)
   "Hydrate WS's display state from PROJECT-ROOT then reseat WS by priority.
@@ -1495,11 +1528,15 @@ preservation `agent-repl--collect-snapshot-entries' encodes on save.
 
 Both inner calls are `fboundp'-guarded so a partial-load test
 environment that has not defined them does not crash here."
-  (when (fboundp 'agent-repl--load-display-state)
-    (agent-repl--load-display-state ws project-root))
-  (when (and (fboundp 'agent-repl--reorder-workspace-by-priority)
-             (not agent-repl--snapshot-load-state))
-    (agent-repl--reorder-workspace-by-priority ws)))
+  (let ((load-available (fboundp 'agent-repl--load-display-state))
+        (reorder-available (fboundp 'agent-repl--reorder-workspace-by-priority))
+        (snapshot-loading (and agent-repl--snapshot-load-state t)))
+    (agent-repl--log ws "hydrate-and-reorder-on-open: ws=%s root=%s load-available=%s reorder-available=%s snapshot-loading=%s"
+                      ws project-root load-available reorder-available snapshot-loading)
+    (when load-available
+      (agent-repl--load-display-state ws project-root))
+    (when (and reorder-available (not snapshot-loading))
+      (agent-repl--reorder-workspace-by-priority ws))))
 
 (defun agent-repl--establish-workspace (ws dir)
   "Synchronously create + activate + fully set up workspace WS for DIR.
@@ -1545,6 +1582,7 @@ Each call:
   frontend (`agent-repl--frontend-boot-session') — the vterm process for
   a vterm workspace, a background daemon session (resuming the durable
   claude session) for a gui one."
+  (agent-repl--log ws "establish-workspace: begin ws=%s dir=%s" ws dir)
   (agent-repl--with-error-logging (format "establish-workspace[%s]" ws)
     ;; Create the persp and tag it with `+workspace-project' so a later
     ;; `SPC p p' to DIR matches this workspace; see --ws-create for the
@@ -1583,9 +1621,12 @@ Each call:
         (when (and fb (buffer-live-p fb) orig-dir)
           (with-current-buffer fb
             (setq default-directory orig-dir)))))
-    (when-let ((recent-file (agent-repl--most-recent-project-file dir)))
-      (when (file-exists-p recent-file)
-        (find-file recent-file)))
+    (let ((recent-file (agent-repl--most-recent-project-file dir)))
+      (if (and recent-file (file-exists-p recent-file))
+          (progn
+            (agent-repl--log ws "establish-workspace: opening recent-file=%s" recent-file)
+            (find-file recent-file))
+        (agent-repl--log ws "establish-workspace: no existing recent-file candidate=%s" recent-file)))
     ;; Wake any pre-existing tombstone before re-asserting identity keys —
     ;; an `--establish-workspace' call is the canonical resurrection path
     ;; for snapshot-loaded entries that may have been tombstoned in a prior
@@ -1608,7 +1649,9 @@ Each call:
     ;; DELIBERATE frontend choice (`:frontend-explicit') restores under
     ;; the current default rather than under whatever it happened to boot
     ;; last time.
-    (agent-repl--frontend-boot-session ws)))
+    (agent-repl--log ws "establish-workspace: booting frontend")
+    (agent-repl--frontend-boot-session ws)
+    (agent-repl--log ws "establish-workspace: complete ws=%s dir=%s" ws dir)))
 
 (defvar agent-repl--snapshot-load-state nil
   "Plist describing an in-progress recursive snapshot load, or nil.
@@ -1791,12 +1834,16 @@ event).  Loader doesn't distinguish the marker — once a ws is loaded
 or timed out, it advances.  Idempotent: the `:awaiting' equality guard
 makes second fires for the same ws no-ops."
   (let ((state agent-repl--snapshot-load-state))
-    (when (and state (equal ws (plist-get state :awaiting)))
-      (agent-repl--log ws "snapshot-load: awaited ws=%s fully loaded — advancing" ws)
-      (agent-repl--snapshot-load-cancel-timer)
-      (setq agent-repl--snapshot-load-state
-            (plist-put agent-repl--snapshot-load-state :awaiting nil))
-      (agent-repl--snapshot-load-step))))
+    (if (and state (equal ws (plist-get state :awaiting)))
+        (progn
+          (agent-repl--log ws "snapshot-load: awaited ws=%s fully loaded marker=%s — advancing" ws _marker)
+          (agent-repl--snapshot-load-cancel-timer)
+          (setq agent-repl--snapshot-load-state
+                (plist-put agent-repl--snapshot-load-state :awaiting nil))
+          (agent-repl--snapshot-load-step))
+      (agent-repl--log ws "snapshot-load: ignoring ready event ws=%s marker=%s awaiting=%s state=%s"
+                        ws _marker (and state (plist-get state :awaiting))
+                        (if state "active" "nil")))))
 
 (defun agent-repl--snapshot-load-timeout (ws)
   "Abort snapshot restoration when WS never becomes genuinely ready.
@@ -1843,6 +1890,7 @@ the error-routing `condition-case'."
                        (or (plist-get state :load-error) 0)))))
     (cond
      ((null queue)
+      (agent-repl--log nil "snapshot-load: queue exhausted iter=%d total=%d; finishing" iter total)
       (agent-repl--snapshot-load-finish))
      (t
       (let* ((entry (car queue))
@@ -1956,7 +2004,10 @@ the error-routing `condition-case'."
                                   agent-repl-snapshot-load-per-entry-timeout
                                   nil
                                   #'agent-repl--snapshot-load-timeout
-                                  ws)))))))))))))))
+                                  ws)))
+                (agent-repl--log ws "snapshot-load: awaiting ws=%s timeout=%.3fs restored-count=%d"
+                                  ws agent-repl-snapshot-load-per-entry-timeout
+                                  (length agent-repl--restored-workspaces))))))))))))))
 
 (defun agent-repl-load-workspace-snapshot (&optional file startup)
   "Load workspaces from FILE (defaults to the configured snapshot path).
@@ -1982,6 +2033,8 @@ interactive and archive loads rely on the canonical session-health render
 gate for each live shim/store route."
   (interactive)
   (when agent-repl--snapshot-load-state
+    (agent-repl--log nil "snapshot-load: rejected concurrent request file=%s startup=%s awaiting=%s"
+                      file startup (plist-get agent-repl--snapshot-load-state :awaiting))
     (user-error "agent-repl: a snapshot load is already in progress"))
   (let* ((file (or file (agent-repl--workspace-snapshot-file-for-read)))
          (parsed (agent-repl--read-workspace-snapshot file))
@@ -1991,13 +2044,16 @@ gate for each live shim/store route."
          (saved-hide (plist-get parsed :hide-project-dirs-enabled))
          (saved-frontend (plist-get parsed :default-frontend)))
     (unless snapshot
+      (agent-repl--log nil "snapshot-load: snapshot missing-or-empty file=%s startup=%s" file startup)
       (user-error "No workspace snapshot at %s" file))
     ;; Restore the hide-project-dirs toggle BEFORE establishing entries —
     ;; the tombstone-vs-live partition below already encodes the hidden
     ;; set (hidden workspaces were saved as `:hidden-project-dir'
     ;; tombstones), so the runtime flag just needs to agree with it.
     (when (boundp 'agent-repl-hide-project-dirs-enabled)
-      (setq agent-repl-hide-project-dirs-enabled (and saved-hide t)))
+      (setq agent-repl-hide-project-dirs-enabled (and saved-hide t))
+      (agent-repl--log nil "snapshot-load: restored hide-project-dirs-enabled=%s"
+                        agent-repl-hide-project-dirs-enabled))
     ;; Restore the frontend NEW workspaces are born with.  Only when the
     ;; snapshot actually carries one: a pre-`:default-frontend' snapshot
     ;; must leave the customized `agent-repl-default-frontend' alone
@@ -2005,7 +2061,8 @@ gate for each live shim/store route."
     ;; unaffected either way — each carries its own `:frontend' in its
     ;; per-project state.el.
     (when (and saved-frontend (boundp 'agent-repl-default-frontend))
-      (setq agent-repl-default-frontend saved-frontend))
+      (setq agent-repl-default-frontend saved-frontend)
+      (agent-repl--log nil "snapshot-load: restored default-frontend=%s" saved-frontend))
     (let* ((normalized (mapcar #'agent-repl--snapshot-entry-normalize snapshot))
            ;; Partition: tombstoned entries (`:nuked-at' present) are
            ;; identity-only records — restore them directly to the hash
@@ -2042,6 +2099,7 @@ gate for each live shim/store route."
       ;; one.
       (let ((main (agent-repl--ws-main-name)))
         (when (and main (equal origin-ws main))
+          (agent-repl--log nil "snapshot-load: origin is startup-main=%s; clearing return target" main)
           (setq origin-ws nil))
         (agent-repl--snapshot-load-close-main))
       (setq agent-repl--snapshot-load-state
@@ -2075,12 +2133,13 @@ there is no post-restore bounce and no degraded restore path."
     (agent-repl--log nil
                      "startup restore: runtime prepared and daemon ready; snapshot candidate=%s"
                      file)
-    (when (file-exists-p file)
-      (condition-case err
-          (agent-repl-load-workspace-snapshot file t)
-        (error
-         (agent-repl--error nil "startup restore: snapshot load aborted file=%s err=%S"
-                            file err))))))
+    (if (file-exists-p file)
+        (condition-case err
+            (agent-repl-load-workspace-snapshot file t)
+          (error
+           (agent-repl--error nil "startup restore: snapshot load aborted file=%s err=%S"
+                              file err)))
+      (agent-repl--log nil "startup restore: no snapshot file=%s; no restore requested" file))))
 
 ;;;; Workspace snapshot archive picker
 
@@ -2607,11 +2666,18 @@ than the backend's return value."
          (header (agent-repl--picker-header-line
                   (agent-repl--picker-name-width (mapcar #'car entries))))
          (selected nil))
+    (agent-repl--log (agent-repl--ws-current-name)
+                      "workspace-picker: entries=%d candidates=%d helm=%s ivy=%s"
+                      (length entries) (length candidates)
+                      (if (fboundp 'helm) "t" "nil")
+                      (if (fboundp 'ivy-read) "t" "nil"))
     (cond
      ((null candidates)
+      (agent-repl--log (agent-repl--ws-current-name) "workspace-picker: no candidates")
       (message "No known agent-repl workspaces")
       nil)
      ((fboundp 'helm)
+      (agent-repl--log (agent-repl--ws-current-name) "workspace-picker: backend=helm")
       ;; Raw-alist helm source: no helm macros, so byte-compilation does
       ;; not require helm at build time (the `fboundp' guard defers the
       ;; call to runtime, where helm is loaded).  A cons candidate
@@ -2624,6 +2690,7 @@ than the backend's return value."
             :buffer "*helm agent-repl workspaces*")
       selected)
      ((fboundp 'ivy-read)
+      (agent-repl--log (agent-repl--ws-current-name) "workspace-picker: backend=ivy")
       (ivy-read (concat header "\nSwitch to workspace: ") candidates
                 :action (lambda (c)
                           (setq selected (cond ((consp c) (cdr c))
@@ -2634,6 +2701,7 @@ than the backend's return value."
                 :caller 'agent-repl-switch-to-project)
       selected)
      (t
+      (agent-repl--log (agent-repl--ws-current-name) "workspace-picker: backend=completing-read")
       (let* ((choice (completing-read (concat header "  |  Switch to workspace: ")
                                       (mapcar #'car candidates)
                                       nil t))
@@ -2793,8 +2861,11 @@ so `SPC p p' never polls the disk for every candidate.  No-op when DIR
 already exists (the common case — kill / nuke / merge leave the worktree
 in place); delegates to `agent-repl--picker-recreate-directory' when DIR
 is missing."
-  (when (and dir (not (file-directory-p dir)))
-    (agent-repl--picker-recreate-directory name dir)))
+  (if (and dir (not (file-directory-p dir)))
+      (progn
+        (agent-repl--log name "picker-ensure-directory: ws=%s dir=%s missing -> recreate" name dir)
+        (agent-repl--picker-recreate-directory name dir))
+    (agent-repl--log name "picker-ensure-directory: ws=%s dir=%s exists-or-nil" name dir)))
 
 (defun agent-repl--picker-revive (name dir)
   "Revive removed workspace NAME at DIR from persisted state.
@@ -2827,16 +2898,23 @@ but perspective-less; routing that on `:live-p' sent it to
 Keying on perspective existence revives it instead."
   (let ((name (plist-get payload :name))
         (dir (plist-get payload :project-dir)))
-    (when name
-      (if (agent-repl--ws-open-p name)
-          (agent-repl--ws-switch name)
-        (agent-repl--picker-ensure-directory name dir)
-        (agent-repl--picker-revive name dir))
-      (run-at-time 0 nil
-                   (lambda ()
-                     (agent-repl--hydrate-and-reorder-on-open
-                      (ignore-errors (agent-repl--ws-current-name)) dir)
-                     (agent-repl--flash-current-tab))))))
+    (if name
+        (progn
+          (agent-repl--log name "picker-open-selection: ws=%s dir=%s open=%s payload=%S"
+                            name dir (if (agent-repl--ws-open-p name) "t" "nil") payload)
+          (if (agent-repl--ws-open-p name)
+              (agent-repl--ws-switch name)
+            (agent-repl--picker-ensure-directory name dir)
+            (agent-repl--picker-revive name dir))
+          (run-at-time 0 nil
+                       (lambda ()
+                         (let ((current (ignore-errors (agent-repl--ws-current-name))))
+                           (agent-repl--log current "picker-open-selection: deferred hydrate current=%s selected=%s dir=%s"
+                                             current name dir)
+                           (agent-repl--hydrate-and-reorder-on-open current dir)
+                           (agent-repl--flash-current-tab)))))
+      (agent-repl--log (agent-repl--ws-current-name)
+                        "picker-open-selection: invalid payload without :name payload=%S" payload))))
 
 (defun agent-repl-switch-to-project (&optional project)
   "Switch to a known workspace (interactive `SPC p p'), or to PROJECT.
@@ -2864,6 +2942,7 @@ revival path that bypasses the Doom hook to preserve the exact ws name."
   (interactive)
   (if project
       (progn
+        (agent-repl--log (agent-repl--ws-current-name) "switch-to-project: project path=%s" project)
         (agent-repl--ws-switch-project project)
         ;; Defer the file open and display-state disk read so the persp switch
         ;; completes and Emacs redraws before any blocking I/O fires.  Both are
@@ -2871,15 +2950,23 @@ revival path that bypasses the Doom hook to preserve the exact ws name."
         ;; cycle rather than racing across two separate timers.
         (run-at-time 0 nil
                      (lambda ()
-                       (when-let ((recent-file (agent-repl--most-recent-project-file project)))
-                         (when (file-exists-p recent-file)
-                           (find-file recent-file)))
-                       (agent-repl--hydrate-and-reorder-on-open
-                        (ignore-errors (agent-repl--ws-current-name))
-                        project)))
+                       (let ((recent-file (agent-repl--most-recent-project-file project))
+                             (current (ignore-errors (agent-repl--ws-current-name))))
+                         (if (and recent-file (file-exists-p recent-file))
+                             (progn
+                               (agent-repl--log current "switch-to-project: deferred opening recent-file=%s project=%s"
+                                                 recent-file project)
+                               (find-file recent-file))
+                           (agent-repl--log current "switch-to-project: deferred no existing recent-file candidate=%s project=%s"
+                                             recent-file project))
+                         (agent-repl--hydrate-and-reorder-on-open current project))))
         (agent-repl--flash-current-tab))
-    (when-let ((sel (agent-repl--read-workspace-via-picker)))
-      (agent-repl--picker-open-selection sel))))
+    (let ((sel (agent-repl--read-workspace-via-picker)))
+      (if sel
+          (progn
+            (agent-repl--log (agent-repl--ws-current-name) "switch-to-project: picker selected=%S" sel)
+            (agent-repl--picker-open-selection sel))
+        (agent-repl--log (agent-repl--ws-current-name) "switch-to-project: picker cancelled-or-empty")))))
 
 ;;;; Workspace cycling (hide-mode aware)
 
