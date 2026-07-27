@@ -72,6 +72,141 @@
   (agent-repl-test--with-clean-state
     (should-error (agent-repl--ws-plist "missing") :type 'user-error)))
 
+;;;; ---- Tests: ws-rename-state -------------------------------------------
+
+(ert-deftest agent-repl-test-ws-rename-state-moves-complete-live-state ()
+  "State rename moves the full plist, rewrites its dir, and clears ws-id."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "old" :project-dir "/old/path")
+    (agent-repl--ws-put "old" :priority :p1)
+    (agent-repl--ws-put "old" :ws-id "stale")
+    (cl-letf (((symbol-function 'agent-repl--path-canonical)
+               (lambda (path) (concat "CANON:" path))))
+      (should (equal (agent-repl--ws-rename-state
+                      "old" "new" "/new/path")
+                     "new")))
+    (should-not (agent-repl--ws-known-p "old"))
+    (should (agent-repl--ws-live-p "new"))
+    (should (eq (agent-repl--ws-get "new" :priority) :p1))
+    (should (equal (agent-repl--ws-get "new" :project-dir)
+                   "CANON:/new/path"))
+    (should-not (agent-repl--ws-get "new" :ws-id))))
+
+(ert-deftest agent-repl-test-ws-rename-state-rejects-unknown-source ()
+  "State rename rejects an unregistered source without creating a target."
+  (agent-repl-test--with-clean-state
+    (should-error
+     (agent-repl--ws-rename-state "missing" "new" "/new/path")
+     :type 'user-error)
+    (should-not (agent-repl--ws-known-p "new"))))
+
+(ert-deftest agent-repl-test-ws-rename-state-rejects-tombstoned-source ()
+  "State rename does not resurrect a tombstone under a new name."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "old" :project-dir "/old/path")
+    (agent-repl--ws-del "old")
+    (should-error
+     (agent-repl--ws-rename-state "old" "new" "/new/path")
+     :type 'user-error)
+    (should (agent-repl--ws-tombstoned-p "old"))
+    (should-not (agent-repl--ws-known-p "new"))))
+
+(ert-deftest agent-repl-test-ws-rename-state-rejects-known-target-atomically ()
+  "Target collision leaves both workspace records byte-for-byte unchanged."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "old" :project-dir "/old/path")
+    (agent-repl--ws-put "new" :project-dir "/occupied/path")
+    (let ((old-before (agent-repl--ws-plist "old"))
+          (new-before (agent-repl--ws-plist "new")))
+      (should-error
+       (agent-repl--ws-rename-state "old" "new" "/new/path")
+       :type 'user-error)
+      (should (equal (agent-repl--ws-plist "old") old-before))
+      (should (equal (agent-repl--ws-plist "new") new-before)))))
+
+(ert-deftest agent-repl-test-ws-rename-state-canonicalizes-before-mutation ()
+  "A project-dir resolution error leaves the source registered and target absent."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "old" :project-dir "/old/path")
+    (cl-letf (((symbol-function 'agent-repl--path-canonical)
+               (lambda (_path) (error "cannot canonicalize"))))
+      (should-error
+       (agent-repl--ws-rename-state "old" "new" "/new/path")
+       :type 'error))
+    (should (agent-repl--ws-live-p "old"))
+    (should-not (agent-repl--ws-known-p "new"))))
+
+;;;; ---- Tests: ws-rewrite-source-back-refs -------------------------------
+
+(ert-deftest agent-repl-test-ws-rewrite-source-back-refs-targets-matches-only ()
+  "Back-ref rewrite updates matching peers, clears their cache, and returns count."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "match" :project-dir "/match")
+    (agent-repl--ws-put "match" :source-ws-dir "/source/old")
+    (agent-repl--ws-put "match" :source-ws-name "old")
+    (agent-repl--ws-put "other" :project-dir "/other")
+    (agent-repl--ws-put "other" :source-ws-dir "/source/other")
+    (agent-repl--ws-put "other" :source-ws-name "other")
+    (agent-repl--ws-put "root" :project-dir "/root")
+    (cl-letf (((symbol-function 'agent-repl--path-canonical)
+               (lambda (path) (concat "CANON:" path))))
+      (should (= 1 (agent-repl--ws-rewrite-source-back-refs
+                    "/source/old" "/source/new"))))
+    (should (equal (agent-repl--ws-get "match" :source-ws-dir)
+                   "CANON:/source/new"))
+    (should-not (agent-repl--ws-get "match" :source-ws-name))
+    (should (equal (agent-repl--ws-get "other" :source-ws-dir)
+                   "/source/other"))
+    (should (equal (agent-repl--ws-get "other" :source-ws-name)
+                   "other"))
+    (should-not (agent-repl--ws-get "root" :source-ws-dir))))
+
+(ert-deftest agent-repl-test-ws-rewrite-source-back-refs-updates-tombstones ()
+  "Historical source identity is corrected even on tombstoned peers."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "child" :project-dir "/child")
+    (agent-repl--ws-put "child" :source-ws-dir "/source/old")
+    (agent-repl--ws-del "child")
+    (should (= 1 (agent-repl--ws-rewrite-source-back-refs
+                  "/source/old" "/source/new")))
+    (should (agent-repl--ws-tombstoned-p "child"))
+    (should (equal (agent-repl--ws-get "child" :source-ws-dir)
+                   (agent-repl--path-canonical "/source/new")))))
+
+(ert-deftest agent-repl-test-ws-rewrite-source-back-refs-rejects-identical-dirs ()
+  "Canonical no-change requests fail before clearing any cached source name."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "child" :project-dir "/child")
+    (agent-repl--ws-put "child" :source-ws-dir "/source")
+    (agent-repl--ws-put "child" :source-ws-name "parent")
+    (cl-letf (((symbol-function 'agent-repl--path-canonical)
+               (lambda (_path) "SAME")))
+      (should-error
+       (agent-repl--ws-rewrite-source-back-refs "/old" "/new")
+       :type 'user-error))
+    (should (equal (agent-repl--ws-get "child" :source-ws-dir)
+                   "/source"))
+    (should (equal (agent-repl--ws-get "child" :source-ws-name)
+                   "parent"))))
+
+(ert-deftest agent-repl-test-ws-rewrite-source-back-refs-logs-peer-workspace ()
+  "Each rewrite log is scoped to the peer whose back-reference changed."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "child" :project-dir "/child")
+    (agent-repl--ws-put "child" :source-ws-dir "/source/old")
+    (let (calls)
+      (cl-letf (((symbol-function 'agent-repl--log)
+                 (lambda (ws fmt &rest args)
+                   (push (list ws (apply #'format fmt args)) calls))))
+        (agent-repl--ws-rewrite-source-back-refs
+         "/source/old" "/source/new"))
+      (should
+       (cl-find-if
+        (lambda (call)
+          (and (equal (car call) "child")
+               (string-match-p "REWROTE" (cadr call))))
+        calls)))))
+
 (ert-deftest agent-repl-test-ws-put-new-workspace ()
   "ws-put to a brand new workspace should create the entry."
   (agent-repl-test--with-clean-state
