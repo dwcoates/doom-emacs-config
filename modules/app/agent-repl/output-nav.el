@@ -30,6 +30,7 @@
 (declare-function agent-repl--ws-current-name "workspace")
 (declare-function agent-repl--ws-get "workspace")
 (declare-function agent-repl--frontend-webview-execute-script "frontend")
+(declare-function agent-repl--log "core")
 
 (defconst agent-repl-frontend-nav-hook "agentReplNavigate"
   "Name of the webapp global that cycles the feed's bubbles.
@@ -45,43 +46,78 @@ hook rather than silently cycling nothing.")
 (defconst agent-repl-output-nav-directions '("next" "prev")
   "Directions a cycle can step, mapped to the webapp's +1/-1.")
 
-(defun agent-repl--output-nav-delta (direction)
-  "Return the webapp's numeric step for DIRECTION.
+(defun agent-repl--output-nav-delta (class direction &optional ws)
+  "Return the webapp's numeric step for CLASS and DIRECTION.
 DIRECTION is one of `agent-repl-output-nav-directions'.  An unknown
 direction is a bug in this file rather than a runtime condition, so it
 raises instead of defaulting to a step the caller never asked for."
   (pcase direction
-    ("next" 1)
-    ("prev" -1)
-    (_ (error "agent-repl: unknown nav direction %S" direction))))
+    ("next"
+     (agent-repl--log ws
+                      "output-nav-delta: class=%s direction=%s delta=1 outcome=resolved"
+                      class direction)
+     1)
+    ("prev"
+     (agent-repl--log ws
+                      "output-nav-delta: class=%s direction=%s delta=-1 outcome=resolved"
+                      class direction)
+     -1)
+    (_
+     (agent-repl--log ws
+                      "output-nav-delta: class=%s direction=%S outcome=invalid-direction"
+                      class direction)
+     (error "agent-repl: unknown nav direction %S" direction))))
 
-(defun agent-repl--output-nav-script (class direction)
+(defun agent-repl--output-nav-script (class direction &optional ws)
   "Return the JavaScript that cycles the feed's CLASS bubbles DIRECTION.
 
-Guarded on the hook's presence, like `agent-repl--frontend-tail-script':
+  Guarded on the hook's presence, like `agent-repl--frontend-tail-script':
 a webview still navigating has not planted it yet, and that is an
 expected state rather than a violated invariant -- a page that has not
 booted has no feed to cycle."
   (unless (member class agent-repl-output-nav-classes)
+    (agent-repl--log ws
+                     "output-nav-script: class=%S direction=%S outcome=invalid-class"
+                     class direction)
     (error "agent-repl: unknown nav class %S" class))
-  (format "window.%s && window.%s('%s', %d);"
-          agent-repl-frontend-nav-hook
-          agent-repl-frontend-nav-hook
-          class
-          (agent-repl--output-nav-delta direction)))
+  (let* ((delta (agent-repl--output-nav-delta class direction ws))
+         (script (format "window.%s && window.%s('%s', %d);"
+                         agent-repl-frontend-nav-hook
+                         agent-repl-frontend-nav-hook
+                         class delta)))
+    (agent-repl--log ws
+                     "output-nav-script: class=%s direction=%s delta=%d outcome=built"
+                     class direction delta)
+    script))
 
 (defun agent-repl--output-navigate (class direction)
   "Cycle the current workspace's output feed by CLASS, stepping DIRECTION.
 
-Signals a `user-error' when the workspace has no live webview: a closed
+  Signals a `user-error' when the workspace has no live webview: a closed
 or never-opened output panel is an expected condition (the user can
 simply not have one), not a broken invariant."
   (let* ((ws (agent-repl--ws-current-name))
          (buf (and ws (agent-repl--ws-get ws :frontend-buffer))))
     (unless (buffer-live-p buf)
+      (agent-repl--log ws
+                       "output-navigate: class=%s direction=%s buffer=%S outcome=no-live-webview"
+                       class direction buf)
       (user-error "No output window to navigate in this workspace"))
-    (agent-repl--frontend-webview-execute-script
-     buf (agent-repl--output-nav-script class direction))))
+    (let ((script (agent-repl--output-nav-script class direction ws)))
+      (agent-repl--log ws
+                       "output-navigate: class=%s direction=%s buffer=%s script-length=%d outcome=dispatching"
+                       class direction (buffer-name buf) (length script))
+      (condition-case err
+          (progn
+            (agent-repl--frontend-webview-execute-script buf script)
+            (agent-repl--log ws
+                             "output-navigate: class=%s direction=%s buffer=%s outcome=dispatched"
+                             class direction (buffer-name buf)))
+        (error
+         (agent-repl--log ws
+                          "output-navigate: class=%s direction=%s buffer=%s outcome=dispatch-error err=%S"
+                          class direction (buffer-name buf) err)
+         (signal (car err) (cdr err)))))))
 
 (defmacro agent-repl--define-output-nav-command (class direction doc)
   "Define the interactive command cycling CLASS bubbles DIRECTION.
