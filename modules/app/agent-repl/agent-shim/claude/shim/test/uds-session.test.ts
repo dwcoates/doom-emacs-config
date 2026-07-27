@@ -14,9 +14,29 @@
  *   - canUseTool round-trips a PermissionRequest and resolves on the response;
  *   - an Interrupt cancels the pending permission and forwards to the SDK.
  */
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import net from "node:net";
 import { create } from "@bufbuild/protobuf";
+import { anyPack } from "@bufbuild/protobuf/wkt";
+import {
+  ClaudeStreamMessageSchema,
+  UserMessageSchema,
+  type ClaudeStreamMessage,
+} from "../../../../proto/gen/ts/agentshim/data/v1/stream_pb.js";
+import {
+  AssistantLineSchema,
+  TranscriptLineSchema,
+  UserLineSchema,
+  type TranscriptLine,
+} from "../../../../proto/gen/ts/agentshim/data/v1/transcript_pb.js";
+import {
+  ApiContentBlocksSchema,
+  ApiUserMessageSchema,
+  ContentBlockSchema,
+  TextBlockSchema,
+  ToolResultBlockSchema,
+  type ApiUserMessage,
+} from "../../../../proto/gen/ts/agentshim/data/v1/tools_pb.js";
 import { AsyncQueue } from "../src/input-queue.js";
 import { UdsSession } from "../src/uds/uds-session.js";
 import type {
@@ -165,6 +185,68 @@ const cleanups: Array<() => void | Promise<void>> = [];
 afterEach(async () => {
   for (const c of cleanups.splice(0)) await c();
 });
+
+/**
+ * Capture the shimLog lines written while a test runs.
+ *
+ * shimLog is the shim's ONE logging seam and it writes straight to stderr, so
+ * a spy on the stream is what "did it log?" means here. Restored via the
+ * shared cleanups so a failing assertion cannot leave the spy installed for
+ * the next test.
+ */
+function captureLog(): { find: (needle: string) => string; count: (needle: string) => number } {
+  const lines: string[] = [];
+  const spy = vi.spyOn(process.stderr, "write").mockImplementation(((chunk: unknown): boolean => {
+    lines.push(String(chunk));
+    return true;
+  }) as typeof process.stderr.write);
+  cleanups.push(() => spy.mockRestore());
+  return {
+    find: (needle) => {
+      const line = lines.find((l) => l.includes(needle));
+      // Loud on a miss: an assertion on `undefined` would report the wrong
+      // failure and hide what WAS logged.
+      if (line === undefined) throw new Error(`no shimLog line contains ${JSON.stringify(needle)}; captured: ${lines.join("")}`);
+      return line;
+    },
+    count: (needle) => lines.filter((l) => l.includes(needle)).length,
+  };
+}
+
+/** An ApiUserMessage whose content is a single text block. */
+function textMessage(text: string): ApiUserMessage {
+  return create(ApiUserMessageSchema, {
+    content: {
+      case: "contentBlocks",
+      value: create(ApiContentBlocksSchema, {
+        blocks: [create(ContentBlockSchema, { block: { case: "text", value: create(TextBlockSchema, { text }) } })],
+      }),
+    },
+  });
+}
+
+/** A file-plane transcript line for a user turn carrying `message`. */
+function userLine(message: ApiUserMessage): TranscriptLine {
+  return create(TranscriptLineSchema, { line: { case: "user", value: create(UserLineSchema, { message }) } });
+}
+
+/** A merged store Event wrapping a data.v1.TranscriptLine as its vendor payload. */
+function transcriptEvent(seq: bigint, line: TranscriptLine): Event {
+  return create(EventSchema, {
+    sessionId: "sess-1",
+    seq,
+    payload: { case: "vendor", value: anyPack(TranscriptLineSchema, line) },
+  });
+}
+
+/** A merged store Event wrapping a data.v1.ClaudeStreamMessage (stream plane). */
+function streamEvent(seq: bigint, msg: ClaudeStreamMessage): Event {
+  return create(EventSchema, {
+    sessionId: "sess-1",
+    seq,
+    payload: { case: "vendor", value: anyPack(ClaudeStreamMessageSchema, msg) },
+  });
+}
 
 /** Stand up store + session, connect a daemon, and (optionally) subscribe. */
 async function rig(
@@ -458,6 +540,79 @@ describe("UdsSession events: store round-trip and sad path", () => {
     expect(evt.payload.case).toBe("degradedState");
     if (evt.payload.case !== "degradedState") throw new Error("case");
     expect(evt.payload.value.component).toBe("shim-store-client");
+  });
+});
+
+describe("UdsSession instrumentation: prompt round-trip receipts", () => {
+  it("logs an acceptance receipt when it takes a SubmitPrompt", async () => {
+    // Arrange
+    const { daemon } = await rig();
+    const log = captureLog();
+    // Act
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "hello" }));
+    await daemon.next(AckSchema);
+    // Assert
+    expect(log.find("prompt accepted -> SDK input")).toContain("{session=sess-1 request=p1 len=5 turns_in_flight=1}");
+  });
+
+  it("logs a forward receipt for a merged TranscriptLine carrying the user's prompt", async () => {
+    // Arrange: the file-plane echo — the carrier that becomes the GUI bubble.
+    const { store, daemon } = await rig({ subscribe: true });
+    const log = captureLog();
+    // Act
+    store.latest().send(EventSchema, transcriptEvent(9n, userLine(textMessage("hi there"))));
+    await daemon.next(EventSchema);
+    // Assert
+    expect(log.find("user prompt event forwarded to daemon"))
+      .toContain("{session=sess-1 seq=9 len=8 arm=transcript_user_line}");
+  });
+
+  it("logs a forward receipt for a merged stream-plane UserMessage", async () => {
+    // Arrange: how the same turn arrives on a resume replay.
+    const { store, daemon } = await rig({ subscribe: true });
+    const log = captureLog();
+    // Act
+    store.latest().send(EventSchema, streamEvent(4n, create(ClaudeStreamMessageSchema, {
+      msg: { case: "user", value: create(UserMessageSchema, { message: textMessage("hey") }) },
+    })));
+    await daemon.next(EventSchema);
+    // Assert
+    expect(log.find("user prompt event forwarded to daemon"))
+      .toContain("{session=sess-1 seq=4 len=3 arm=user_message}");
+  });
+
+  it("stays silent for a user message carrying only tool_result blocks", async () => {
+    // Arrange: pure tool feedback rides the user role too. A receipt per tool
+    // call would bury the one receipt per prompt this instrumentation is for.
+    const { store, daemon } = await rig({ subscribe: true });
+    const log = captureLog();
+    // Act
+    store.latest().send(EventSchema, transcriptEvent(9n, userLine(create(ApiUserMessageSchema, {
+      content: {
+        case: "contentBlocks",
+        value: create(ApiContentBlocksSchema, {
+          blocks: [create(ContentBlockSchema, {
+            block: { case: "toolResult", value: create(ToolResultBlockSchema, { toolUseId: "t1" }) },
+          })],
+        }),
+      },
+    }))));
+    await daemon.next(EventSchema);
+    // Assert
+    expect(log.count("user prompt event forwarded to daemon")).toBe(0);
+  });
+
+  it("stays silent for a merged event that is not a user message at all", async () => {
+    // Arrange
+    const { store, daemon } = await rig({ subscribe: true });
+    const log = captureLog();
+    // Act: an assistant transcript line on the same vendor carrier.
+    store.latest().send(EventSchema, transcriptEvent(9n, create(TranscriptLineSchema, {
+      line: { case: "assistant", value: create(AssistantLineSchema, {}) },
+    })));
+    await daemon.next(EventSchema);
+    // Assert
+    expect(log.count("user prompt event forwarded to daemon")).toBe(0);
   });
 });
 

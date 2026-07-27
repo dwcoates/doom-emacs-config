@@ -46,6 +46,10 @@ import { ControlDispatch, type SdkControlTarget, type ToolPermissionResult } fro
 import { SessionServer, type SessionServerHandlers } from "./server.js";
 import { StoreClient, type ReplayOutcome } from "./store-client.js";
 import { shimLog } from "./log.js";
+import { envelopeIs, unpackAs, type Any } from "./framing.js";
+import { ClaudeStreamMessageSchema } from "../../../../../proto/gen/ts/agentshim/data/v1/stream_pb.js";
+import { TranscriptLineSchema } from "../../../../../proto/gen/ts/agentshim/data/v1/transcript_pb.js";
+import type { ApiUserMessage } from "../../../../../proto/gen/ts/agentshim/data/v1/tools_pb.js";
 import {
   DegradedState,
   DegradedStateSchema,
@@ -159,6 +163,13 @@ export class UdsSession {
           parent_tool_use_id: null,
           session_id: this.deps.sessionId,
         });
+        // The ACCEPT half of the prompt round-trip receipt. Its other half is
+        // the forward log below (`user prompt event forwarded to daemon`), so
+        // a prompt that reached the SDK but never came back as a bubble shows
+        // up as a receipt with no matching forward, rather than as silence.
+        // Only the FAILURE path used to say anything (control.ts).
+        shimLog(COMPONENT, { session: this.deps.sessionId, request: requestId, len: text.length, turns_in_flight: this.turnsInFlight },
+          `prompt accepted -> SDK input`);
         // Turn start is SHIM-AUTHORITATIVE (see convert.ts's header): the
         // vendor stream has no "a turn began" message, and the user-message
         // echo the converter used to derive one from never arrives for a live
@@ -343,7 +354,10 @@ export class UdsSession {
   async start(): Promise<void> {
     this.query = this.deps.createQuery(this.input, this.canUseTool);
     // The store round-trip feed: merged, seq-stamped events go to the daemon.
-    this.store.onMerged((evt) => this.server.sendEvent(evt));
+    this.store.onMerged((evt) => {
+      this.logUserPromptForward(evt);
+      this.server.sendEvent(evt);
+    });
     // Honest sad path: a store outage becomes an Event(DegradedState) forwarded
     // to the daemon (StoreClient has already loud-logged each dropped event).
     this.store.onDegraded((report) => this.server.sendEvent(this.degradedEvent(report)));
@@ -557,6 +571,27 @@ export class UdsSession {
     })));
   }
 
+  /**
+   * The RETURN half of the prompt round-trip receipt: one line when a merged
+   * store event carrying the user's own prompt text goes back to the daemon.
+   *
+   * This is the leg nothing else covers. The live user-prompt echo does NOT
+   * come back on the SDK stream (see submitPrompt) — the CLI writes a
+   * transcript line, the sidecar files it, and it reaches the daemon only
+   * through this forward. Without a line here, a prompt that was accepted but
+   * never became a bubble looked identical to one that came back fine.
+   */
+  private logUserPromptForward(evt: Event): void {
+    // Discriminator first: every lifecycle twin and every non-vendor payload
+    // is out on a single string compare, before anything is unpacked.
+    if (evt.payload.case !== "vendor") return;
+    const prompt = userPromptText(evt.payload.value);
+    if (prompt === null) return;
+    shimLog(COMPONENT,
+      { session: this.deps.sessionId, seq: evt.seq, len: prompt.len, arm: prompt.arm },
+      `user prompt event forwarded to daemon`);
+  }
+
   /** Wrap a DegradedState as a SYNTHETIC/EPHEMERAL Event for the daemon. */
   private degradedEvent(report: DegradedState): Event {
     return create(EventSchema, {
@@ -568,6 +603,58 @@ export class UdsSession {
       payload: { case: "degradedState", value: report },
     });
   }
+}
+
+/**
+ * The user-prompt text a vendor Any carries, or null when it carries none.
+ *
+ * TWO CARRIERS, deliberately both: a `data.v1.TranscriptLine` whose line is a
+ * UserLine is the FILE plane — the live echo the CLI writes and the sidecar
+ * republishes, which is what becomes the GUI bubble — while a
+ * `data.v1.UserMessage` inside a ClaudeStreamMessage is the STREAM plane, how
+ * the same turn arrives on a resume replay. Watching only one leaves the
+ * other's prompts invisible.
+ *
+ * Neither type url matching means this is some other vendor payload, and the
+ * Any is never parsed: the check is a string compare on the type url.
+ */
+function userPromptText(vendor: Any): { len: number; arm: string } | null {
+  if (envelopeIs(vendor, TranscriptLineSchema)) {
+    const line = unpackAs(vendor, TranscriptLineSchema);
+    if (line?.line.case !== "user") return null;
+    const len = userTextLen(line.line.value.message);
+    return len > 0 ? { len, arm: "transcript_user_line" } : null;
+  }
+  if (envelopeIs(vendor, ClaudeStreamMessageSchema)) {
+    const csm = unpackAs(vendor, ClaudeStreamMessageSchema);
+    if (csm?.msg.case !== "user") return null;
+    const len = userTextLen(csm.msg.value.message);
+    return len > 0 ? { len, arm: "user_message" } : null;
+  }
+  return null;
+}
+
+/**
+ * Prompt-text length of a user message, counted exactly as the daemon's
+ * userTurnReceipt counts it: the content string, or the sum of its TEXT
+ * blocks.
+ *
+ * Tool-result blocks contribute nothing on purpose. Pure tool feedback rides
+ * the user role too, and counting it would put a "prompt forwarded" line on
+ * every tool call, burying the one receipt per prompt this exists for. Such a
+ * message totals 0 and the caller drops it.
+ */
+function userTextLen(message: ApiUserMessage | undefined): number {
+  const content = message?.content;
+  if (content?.case === "contentString") return content.value.length;
+  if (content?.case === "contentBlocks") {
+    let len = 0;
+    for (const block of content.value.blocks) {
+      if (block.block.case === "text") len += block.block.value.text.length;
+    }
+    return len;
+  }
+  return 0;
 }
 
 /** Map a ControlDispatch resolution onto the SDK's PermissionResult shape. */
