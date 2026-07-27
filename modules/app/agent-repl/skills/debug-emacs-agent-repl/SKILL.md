@@ -603,6 +603,43 @@ grep -o 'unknown transcript line type "[^"]*"' ~/.cache/agent-repl/log/shim-clau
 
 If a user reports missing history and this is firing for their session's transcript, you have your cause.
 
+## 6. Deploy check — is the running code the code you're reading?
+
+*(Sourced from `modules/app/agent-repl/AGENTS.md`. Make this a standing first question in triage.)*
+
+**Every component is a built artifact, and every running process keeps serving the binary it started with. A commit deploys nothing.**
+
+The failure mode this creates is nasty:
+
+> **A merged-but-undeployed fix looks exactly like a fix that does not work** — except that the correct code sitting in `git log` makes it *harder* to diagnose, not easier, because it argues against the true explanation.
+
+So before concluding "the code is wrong", verify what is actually running.
+
+### 6.1 What `bin/build-frontend.sh` covers
+
+- Shim, webapp bundle, and daemon. Build-if-stale, so it is cheap to run.
+- **The daemon must be bounced afterward** — it will otherwise keep serving the old binary indefinitely.
+
+### 6.2 What it does NOT cover
+
+`shim-store` and `shim-claude-sidecar` are **hand-deployed launchd services**, running out of `~/.cache/agent-repl/bin/`:
+
+- `com.agentrepl.shim-store`
+- `com.agentrepl.shim-claude-sidecar`
+
+`build-frontend.sh` never touches them. If the bug is in the data plane (§5), this is very often the whole explanation.
+
+### 6.3 Verify before trusting source
+
+Compare binary mtimes against the source you are reading:
+
+```sh
+ls -l ~/.cache/agent-repl/bin/ modules/app/agent-repl/daemon/bin/
+git -C /Users/dodgecoates/.config/doom log -1 --format='%h %ci %s' -- modules/app/agent-repl
+```
+
+A binary older than the commit that supposedly fixed the bug **is** the finding. Report it rather than continuing to read source.
+
 ## 7. When the evidence is too sparse — SUGGEST INSTRUMENTATION EMPHATICALLY
 
 Since file writes are now unconditional, the only way the log can be uninformative is if the suspect code path has **no `agent-repl--log` calls at all**. When that happens, Claude tends to fill the silence with speculation. **Do not do that.** If you find yourself reading the log around the timestamp of the bug and cannot find any line that corresponds to the suspect function or branch, stop and surface this emphatically.
