@@ -30,10 +30,17 @@ workspace-command ownership active."
                        "dir-watcher legacy teardown: label=%s outcome=already-invalid"
                        label))
      (t
-      (file-notify-rm-watch descriptor)
-      (agent-repl--log nil
-                       "dir-watcher legacy teardown: label=%s outcome=removed"
-                       label)))
+      (condition-case err
+          (progn
+            (file-notify-rm-watch descriptor)
+            (agent-repl--log nil
+                             "dir-watcher legacy teardown: label=%s outcome=removed"
+                             label))
+        (error
+         (agent-repl--log nil
+                          "dir-watcher legacy teardown: label=%s descriptor=%S outcome=remove-failed error=%S"
+                          label descriptor err)
+         (signal (car err) (cdr err))))))
     nil))
 
 (provide 'agent-repl-dir-watcher)
