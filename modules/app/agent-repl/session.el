@@ -167,6 +167,15 @@ plist.  Idempotent.
 the SAVED value but fall back to whatever is already on WS's plist (e.g.
 `agent-repl-set-priority' run before any state-save happened); the
 remaining keys are written only when SAVED carries them."
+  (agent-repl--log ws
+                    "apply-display-state: ws=%s saved=%s priority=%s model=%s backend=%s explicit-frontend=%s repl-state=%s merge-completed=%s"
+                    ws (if saved "present" "absent")
+                    (and saved (plist-get saved :priority))
+                    (and saved (plist-get saved :model))
+                    (and saved (plist-get saved :backend))
+                    (and saved (plist-get saved :frontend-explicit))
+                    (and saved (plist-get saved :repl-state))
+                    (and saved (plist-get saved :merge-completed)))
   ;; Priority: prefer the saved value, fall back to whatever is already in
   ;; the plist (e.g., `agent-repl-set-priority' called before any
   ;; state-save happened for this workspace).
@@ -222,6 +231,9 @@ remaining keys are written only when SAVED carries them."
     (agent-repl--ws-put ws :frontend
                          (or (plist-get saved :frontend)
                              (agent-repl--ws-get ws :frontend))))
+  (agent-repl--log ws "apply-display-state: frontend-restore ws=%s explicit=%s restored=%s"
+                    ws (and saved (plist-get saved :frontend-explicit))
+                    (and saved (plist-get saved :frontend)))
   ;; Last-prompt-time: prefer saved value, fall back to whatever is
   ;; already in the plist.  Records when the last user prompt was
   ;; sent; survives Emacs restarts so duration-since-last-prompt
@@ -240,7 +252,10 @@ remaining keys are written only when SAVED carries them."
   ;; when the user actually arrives back on the workspace.
   (let ((saved-repl-state (and saved (plist-get saved :repl-state))))
     (when (memq saved-repl-state '(:active :inactive :hidden))
-      (agent-repl--ws-put ws :repl-state saved-repl-state)))
+      (agent-repl--ws-put ws :repl-state saved-repl-state))
+    (agent-repl--log ws "apply-display-state: repl-state ws=%s saved=%s restored=%s"
+                      ws saved-repl-state
+                      (memq saved-repl-state '(:active :inactive :hidden))))
   ;; Tab-bar slot: if the ws was deprioritized at the prior quit (i.e.
   ;; pushed to second-to-last via `SPC o C'), `:saved-tab-index' was
   ;; left non-nil pending the next reopen.  Restore it so the next
@@ -292,7 +307,9 @@ remaining keys are written only when SAVED carries them."
     ;; signal isn't lost across restart.
     (let ((mf (eq (plist-get saved :merge-failed) t)))
       (agent-repl--ws-put ws :merge-failed mf)
-      (agent-repl--ws-put ws :repl-state (if mf :merge-failed :merged)))
+      (agent-repl--ws-put ws :repl-state (if mf :merge-failed :merged))
+      (agent-repl--log ws "apply-display-state: merge-restored ws=%s outcome=%s"
+                        ws (if mf :merge-failed :merged)))
     (when-let ((mca (plist-get saved :merge-completed-at)))
       (agent-repl--ws-put ws :merge-completed-at mca))))
 
@@ -311,21 +328,31 @@ already carries its display state in memory, so re-reading the state
 file would be a redundant disk read and could clobber live in-memory
 values with staler on-disk ones.  Also a no-op when the state file is
 missing or malformed."
-  (when (and ws project-root
-             (null (agent-repl--ws-get ws :active-env)))
+  (cond
+   ((null ws)
+    (agent-repl--log nil "load-display-state: skipped reason=nil-workspace root=%s" project-root))
+   ((null project-root)
+    (agent-repl--log ws "load-display-state: skipped ws=%s reason=nil-project-root" ws))
+   ((agent-repl--ws-get ws :active-env)
+    (agent-repl--log ws "load-display-state: skipped ws=%s reason=env-initialized active-env=%s"
+                      ws (agent-repl--ws-get ws :active-env)))
+   (t
     (let* ((state-file (agent-repl--state-file-for-read project-root))
-           (saved (agent-repl--migrate-saved-state
-                   (and state-file
-                        (condition-case err
-                            (agent-repl--read-sexp-file-if-exists state-file)
-                          (error
-                           (agent-repl--log ws "load-display-state: read error file=%s err=%S"
-                                             state-file err)
-                           nil))))))
-      (when saved
-        (agent-repl--log ws "load-display-state: ws=%s root=%s" ws project-root)
-        (agent-repl--apply-display-state ws saved)
-        (force-mode-line-update t)))))
+           (saved (condition-case err
+                      (agent-repl--migrate-saved-state
+                       (agent-repl--read-sexp-file-if-exists state-file))
+                    (error
+                     (agent-repl--log ws "load-display-state: read failed ws=%s file=%s err=%S"
+                                       ws state-file err)
+                     (signal (car err) (cdr err))))))
+      (if saved
+          (progn
+            (agent-repl--log ws "load-display-state: applying ws=%s root=%s file=%s" ws project-root state-file)
+            (agent-repl--apply-display-state ws saved)
+            (force-mode-line-update t)
+            (agent-repl--log ws "load-display-state: complete ws=%s mode-line-updated=t" ws))
+        (agent-repl--log ws "load-display-state: skipped ws=%s root=%s reason=state-file-missing file=%s"
+                          ws project-root state-file))))))
 
 (defun agent-repl--initialize-ws-env (ws &optional project-dir-hint active-env-hint)
   "Initialize environment state for workspace WS (idempotent).
@@ -359,20 +386,32 @@ state-save.  Callers already guard on `agent-repl--agent-running-p'."
                              (agent-repl--git-root default-directory)))
          (root (and root-candidate (agent-repl--path-canonical root-candidate)))
          (state-file (and root (agent-repl--state-file-for-read root)))
-         (saved (agent-repl--migrate-saved-state
-                 (and state-file
-                      (file-exists-p state-file)
-                      (condition-case err
-                          (agent-repl--read-sexp-file state-file)
-                        (error
-                         (agent-repl--log ws "initialize-ws-env: state file read error file=%s err=%S"
-                                           state-file err)
-                         nil))))))
+         (state-present-p (and state-file (file-exists-p state-file)))
+         (saved (and state-present-p
+                     (condition-case err
+                         (agent-repl--migrate-saved-state
+                          (agent-repl--read-sexp-file state-file))
+                       (error
+                        (agent-repl--log ws "initialize-ws-env: state-file-read-failed ws=%s file=%s err=%S"
+                                          ws state-file err)
+                        (signal (car err) (cdr err)))))))
     (unless root
+      (agent-repl--log ws "initialize-ws-env: rejected ws=%s reason=project-dir-unresolved hint=%s existing-dir=%s"
+                        ws (not (null project-dir-hint))
+                        (agent-repl--ws-get ws :project-dir))
       (error "agent-repl--initialize-ws-env: cannot derive :project-dir for ws=%s (no hint, no prior :project-dir, no git-root for default-directory=%s)"
              ws default-directory))
-    (agent-repl--log ws "initialize-ws-env: ws=%s root=%s saved=%s hint=%s env-hint=%s"
-                      ws root (if saved "yes" "no")
+    (when state-present-p
+      (unless (and (listp saved) (plist-member saved :project-dir)
+                   (stringp (plist-get saved :project-dir)))
+        (agent-repl--log ws "initialize-ws-env: rejected ws=%s file=%s reason=invalid-persisted-state value-type=%s has-project-dir=%s project-dir-type=%s"
+                          ws state-file (type-of saved)
+                          (and (listp saved) (plist-member saved :project-dir))
+                          (if (listp saved) (type-of (plist-get saved :project-dir)) :not-a-plist))
+        (error "agent-repl--initialize-ws-env: persisted state is invalid for ws=%s file=%s (expected plist with string :project-dir)"
+               ws state-file)))
+    (agent-repl--log ws "initialize-ws-env: ws=%s root=%s state-present=%s saved=%s hint=%s env-hint=%s"
+                      ws root state-present-p (if saved "yes" "no")
                       (if project-dir-hint "yes" "no")
                       (or active-env-hint "nil"))
     ;; Clear any pre-existing `:nuked-at' tombstone before writing the
@@ -387,6 +426,8 @@ state-save.  Callers already guard on `agent-repl--agent-running-p'."
                       (agent-repl--path-canonical (plist-get saved :project-dir))
                     root)))
       (when-let ((owner (agent-repl--ws-dir-owner target ws)))
+        (agent-repl--log ws "initialize-ws-env: rejected ws=%s target=%s reason=owned-by-live-ws owner=%s"
+                          ws target owner)
         (error "agent-repl--initialize-ws-env: refusing to register ws=%s for %s — live workspace %s already owns it"
                ws target owner))
       (agent-repl--ws-put ws :nuked-at nil)
@@ -395,6 +436,11 @@ state-save.  Callers already guard on `agent-repl--agent-running-p'."
                          (or (and saved (plist-get saved :active-env))
                              active-env-hint
                              :bare-metal))
+    (agent-repl--log ws "initialize-ws-env: active-env-selected ws=%s env=%s source=%s"
+                      ws (agent-repl--ws-get ws :active-env)
+                      (cond ((and saved (plist-get saved :active-env)) :persisted)
+                            (active-env-hint :hint)
+                            (t :new)))
     ;; Display/metadata state — priority badge, repl-state lifecycle,
     ;; merge bookkeeping, last-prompt summary/time, tab slot, fork
     ;; pointer — is hydrated from the saved plist by the shared applier
@@ -407,8 +453,12 @@ state-save.  Callers already guard on `agent-repl--agent-running-p'."
                             (and saved (plist-get saved key)))))
     (agent-repl--validate-ws-env ws)
     (unless saved
-      (agent-repl--log ws "initialize-ws-env: no state file, writing initial state ws=%s root=%s" ws root)
-      (agent-repl--state-save ws))))
+      (agent-repl--log ws "initialize-ws-env: writing-initial-state ws=%s root=%s state-present=%s"
+                        ws root state-present-p)
+      (agent-repl--state-save ws))
+    (agent-repl--log ws "initialize-ws-env: complete ws=%s root=%s active-env=%s persisted-state=%s"
+                      ws (agent-repl--ws-get ws :project-dir)
+                      (agent-repl--ws-get ws :active-env) (if saved "yes" "no"))))
 
 
 ;;;; Command building
@@ -464,10 +514,13 @@ MODEL is a model alias string (e.g. \"haiku\", \"haiku-4-5\",
 \"claude-haiku-4-5\") or nil.  Matching is case-insensitive on the
 presence of the `haiku' family token so every Haiku variant counts.
 Returns nil for nil, empty, or non-Haiku models."
-  (and (stringp model)
-       (not (string-empty-p model))
-       (string-match-p "haiku" (downcase model))
-       t))
+  (let ((result (and (stringp model)
+                     (not (string-empty-p model))
+                     (string-match-p "haiku" (downcase model))
+                     t)))
+    (agent-repl--log-verbose nil "model-haiku-p: model=%s model-type=%s result=%s"
+                              model (type-of model) result)
+    result))
 
 (defun agent-repl--managed-project-p (project-dir)
   "Return non-nil when PROJECT-DIR is a managed (work) project.
@@ -477,9 +530,12 @@ pick different flag spellings for the same managed/personal split).
 Signals when PROJECT-DIR is nil, since the split cannot be resolved
 without it."
   (unless project-dir
+    (agent-repl--log nil "managed-project-p: rejected reason=nil-project-dir")
     (error "agent-repl--managed-project-p: project-dir is nil — cannot determine permission mode"))
-  (string-match-p agent-repl-managed-project-pattern
-                  (expand-file-name project-dir)))
+  (let ((result (string-match-p agent-repl-managed-project-pattern
+                                (expand-file-name project-dir))))
+    (agent-repl--log-verbose nil "managed-project-p: project-dir=%s result=%s" project-dir result)
+    result))
 
 (defun agent-repl--compute-perm-flag (project-dir &optional model)
   "Return the permission flag string for the Claude CLI, or nil.
@@ -507,8 +563,10 @@ whenever MODEL denotes Haiku."
   "Non-nil when PROJECT-DIR is DIR or lies beneath it.
 Both paths are expanded and slash-terminated before the prefix test, so
 `/a/bc' never counts as living under `/a/b'."
-  (string-prefix-p (file-name-as-directory (expand-file-name dir))
-                   (file-name-as-directory (expand-file-name project-dir))))
+  (let ((result (string-prefix-p (file-name-as-directory (expand-file-name dir))
+                                 (file-name-as-directory (expand-file-name project-dir)))))
+    (agent-repl--log-verbose nil "under-dir-p: dir=%s project-dir=%s result=%s" dir project-dir result)
+    result))
 
 (defun agent-repl--doom-config-tree-p (project-dir)
   "Non-nil when PROJECT-DIR belongs to the doom config tree.
@@ -518,9 +576,12 @@ worktrees directory agent-repl creates for it (`~/.config/doom' and
 config counts exactly like the canonical checkout."
   (let* ((root (expand-file-name agent-repl-doom-config-root))
          (worktrees (concat (directory-file-name root)
-                            agent-repl-worktree-dir-suffix)))
-    (or (agent-repl--under-dir-p root project-dir)
-        (agent-repl--under-dir-p worktrees project-dir))))
+                            agent-repl-worktree-dir-suffix))
+         (main-p (agent-repl--under-dir-p root project-dir))
+         (worktree-p (and (not main-p)
+                           (agent-repl--under-dir-p worktrees project-dir))))
+    (agent-repl--log-verbose nil "doom-config-tree-p: project-dir=%s main=%s worktree=%s" project-dir main-p worktree-p)
+    (or main-p worktree-p)))
 
 ;;;###autoload
 (define-minor-mode agent-repl-doom-multi-repo-mode
@@ -553,12 +614,16 @@ True when PROJECT-DIR lies under the directory named by the
 `agent-repl-multi-repo-root-env' environment variable, and also when
 `agent-repl-doom-multi-repo-mode' is on and PROJECT-DIR belongs to the
 doom config tree (see `agent-repl--doom-config-tree-p')."
-  (let ((root (getenv agent-repl-multi-repo-root-env)))
-    (or (and root
-             (> (length root) 0)
-             (agent-repl--under-dir-p root project-dir))
-        (and agent-repl-doom-multi-repo-mode
-             (agent-repl--doom-config-tree-p project-dir)))))
+  (let* ((root (getenv agent-repl-multi-repo-root-env))
+         (root-match-p (and root (> (length root) 0)
+                            (agent-repl--under-dir-p root project-dir)))
+         (doom-match-p (and (not root-match-p) agent-repl-doom-multi-repo-mode
+                            (agent-repl--doom-config-tree-p project-dir)))
+         (result (or root-match-p doom-match-p)))
+    (agent-repl--log-verbose nil "under-multi-repo-p: project-dir=%s root-present=%s root-match=%s doom-mode=%s doom-match=%s result=%s"
+                              project-dir (not (null root)) root-match-p
+                              agent-repl-doom-multi-repo-mode doom-match-p result)
+    result))
 
 (defun agent-repl--compute-config-dir (project-dir)
   "Return the CLAUDE_CONFIG_DIR to use for PROJECT-DIR, or nil.
@@ -579,6 +644,7 @@ when that is nil so the CLI falls back to its default ~/.claude (the
 dodge.w.coates@gmail.com account).  Signals an error when PROJECT-DIR is
 nil, since account selection cannot be resolved without it."
   (unless project-dir
+    (agent-repl--log nil "compute-config-dir: rejected reason=nil-project-dir")
     (error "agent-repl--compute-config-dir: project-dir is nil — cannot determine account"))
   (let* ((ws (agent-repl--ws-for-dir project-dir))
          (override (and ws (agent-repl--ws-get ws :config-dir-override))))
@@ -644,6 +710,8 @@ config-dir and flag-assembly helpers."
          (config-dir  (agent-repl--compute-config-dir project-dir))
          (claude-flags (agent-repl--compute-claude-flags
                         session-id fork-session-id perm-flag model)))
+    (agent-repl--log nil "claude-start-cmd: project-dir=%s session-id=%s fork-session-id=%s model=%s effective-model=%s perm-flag=%s config-dir=%s"
+                      project-dir session-id fork-session-id model effective-model perm-flag config-dir)
     (agent-repl--assemble-cmd claude-flags config-dir)))
 
 (defun agent-repl--claude-headless-cmd (model extra-args)
@@ -653,7 +721,10 @@ This is the `claude' backend's HEADLESS-CMD-FN (see
 list of additional flags appended after the standard `-p --model MODEL'
 prefix.  `-p' makes `claude' exit after a single turn; the prompt is
 delivered on the process's stdin by the caller."
-  (append (list "claude" "-p" "--model" model) extra-args))
+  (let ((argv (append (list "claude" "-p" "--model" model) extra-args)))
+    (agent-repl--log nil "claude-headless-cmd: model=%s extra-args-count=%d argv-count=%d"
+                      model (length extra-args) (length argv))
+    argv))
 
 ;;;; Session completion handling
 
@@ -664,17 +735,23 @@ focus, see `agent-repl--emacs-focused-p'), so a banner never appears
 while the user is already looking at Emacs.  Debounces per-workspace to
 avoid duplicate notifications when both the hook and title-change
 paths fire for the same turn completion."
-  (agent-repl--log ws "maybe-notify-finished ws=%s focused=%s" ws (if (agent-repl--emacs-focused-p) "yes" "no"))
   (let ((last (agent-repl--ws-get ws :last-notify-time))
-        (now  (float-time)))
-    (if (and (not (agent-repl--emacs-focused-p))
+        (now  (float-time))
+        (focused (agent-repl--emacs-focused-p)))
+    (agent-repl--log ws "maybe-notify-finished: ws=%s focused=%s last-present=%s"
+                      ws focused (not (null last)))
+    (if (and (not focused)
              (or (null last) (> (- now last) agent-repl-notify-debounce-seconds)))
         (progn
           (agent-repl--ws-put ws :last-notify-time now)
           (run-at-time agent-repl-notify-delay nil #'agent-repl--notify ws "Agent REPL"
-                       (format "%s: Agent ready" ws)))
+                       (format "%s: Agent ready" ws))
+          (agent-repl--log ws "maybe-notify-finished: scheduled ws=%s delay=%.2f"
+                            ws agent-repl-notify-delay))
       (when (and last (<= (- now last) agent-repl-notify-debounce-seconds))
-        (agent-repl--log ws "maybe-notify-finished: debounce-hit ws=%s elapsed=%.2f" ws (- now last))))))
+        (agent-repl--log ws "maybe-notify-finished: debounce-hit ws=%s elapsed=%.2f" ws (- now last)))
+      (when focused
+        (agent-repl--log ws "maybe-notify-finished: skipped ws=%s reason=emacs-focused" ws)))))
 
 (defun agent-repl--mark-agent-done (ws)
   "Mark WS's agent-state as :done.
@@ -697,8 +774,7 @@ user is focused) stay silent."
                     (agent-repl--ws-get ws :repl-state)
                     (agent-repl--ws-get ws :merge-completed-at))
   (agent-repl--ws-set-agent-state ws :done)
-  (let ((current (agent-repl--current-ws-p ws)))
-    )
+  (agent-repl--log ws "mark-agent-done: state-updated ws=%s current=%s" ws (agent-repl--current-ws-p ws))
   (agent-repl--maybe-notify-finished ws))
 
 (defun agent-repl--refresh-magit-status-for-dir (dir &optional ws)
@@ -713,8 +789,9 @@ workspace context (e.g. `agent-repl--refresh-magit-status') can keep
 the existing log prefix; directory-keyed callers (e.g. the post-merge
 refresh in `agent-repl--workspace-merge-do') pass nil and the log
 falls back to the bare directory."
-  (when-let* ((canonical (and dir (agent-repl--path-canonical dir))))
-    (dolist (buf (buffer-list))
+  (if-let* ((canonical (and dir (agent-repl--path-canonical dir))))
+      (let ((refreshed 0))
+        (dolist (buf (buffer-list))
       (when (and (buffer-live-p buf)
                  (with-current-buffer buf
                    (and (eq major-mode 'magit-status-mode)
@@ -722,7 +799,11 @@ falls back to the bare directory."
                                canonical))))
         (agent-repl--log ws "refresh-magit-status-for-dir: dir=%s refreshing buf=%s"
                           canonical (buffer-name buf))
-        (with-current-buffer buf (magit-refresh))))))
+        (with-current-buffer buf (magit-refresh))
+        (setq refreshed (1+ refreshed))))
+        (agent-repl--log ws "refresh-magit-status-for-dir: complete dir=%s refreshed-count=%d"
+                          canonical refreshed))
+    (agent-repl--log ws "refresh-magit-status-for-dir: skipped dir=%s reason=nil-directory" dir)))
 
 (defun agent-repl--refresh-magit-status (ws)
   "Refresh any magit-status buffer whose repo root matches WS's :project-dir.
@@ -747,14 +828,17 @@ notifies the user when the frame is unfocused — see
 for the workspace's repo, emits a finished-in-workspace message when the
 current workspace is different, and drains any deferred-prompt queue
 \(see `agent-repl--drain-deferred-prompts')."
-  (unless (gethash ws agent-repl--workspaces)
+  (unless (agent-repl--ws-known-p ws)
+    (agent-repl--log ws "handle-agent-finished: rejected ws=%S reason=unregistered" ws)
     (error "agent-repl--handle-agent-finished: ws=%S not registered in agent-repl--workspaces" ws))
   (agent-repl--log ws "handle-agent-finished ws=%s" ws)
   (agent-repl--mark-agent-done ws)
   (agent-repl--refresh-magit-status ws)
-  (unless (agent-repl--current-ws-p ws)
+  (if (agent-repl--current-ws-p ws)
+      (agent-repl--log ws "handle-agent-finished: ws=%s current=t notification=skipped" ws)
     (agent-repl--info ws "Agent finished in workspace: %s" ws))
-  (agent-repl--drain-deferred-prompts ws))
+  (agent-repl--drain-deferred-prompts ws)
+  (agent-repl--log ws "handle-agent-finished: complete ws=%s" ws))
 
 ;;;; Deferred prompt queue
 ;;
@@ -772,7 +856,10 @@ current workspace is different, and drains any deferred-prompt queue
 Drains are only permitted from `:done' or `:idle' — sending mid-turn
 would defeat the whole point of the deferral.  Returns nil for any
 other state (or nil)."
-  (memq (agent-repl--ws-agent-state ws) '(:done :idle)))
+  (let* ((state (agent-repl--ws-agent-state ws))
+         (eligible (memq state '(:done :idle))))
+    (agent-repl--log-verbose ws "deferred-drain-eligible-p: ws=%s state=%s eligible=%s" ws state eligible)
+    eligible))
 
 (defun agent-repl--pop-deferred-prompt (ws)
   "Pop and return the head of WS's `:deferred-prompts' queue, or nil.
@@ -785,6 +872,8 @@ queue depth so drains are easy to trace."
       (agent-repl--ws-put ws :deferred-prompts rest)
       (agent-repl--log ws "pop-deferred-prompt: ws=%s len-after=%d head-len=%d"
                         ws (length rest) (length head)))
+    (unless head
+      (agent-repl--log-verbose ws "pop-deferred-prompt: ws=%s queue-empty=t" ws))
     head))
 
 (defun agent-repl--drain-deferred-prompts (ws)
@@ -844,8 +933,11 @@ state via `--on-prompt-submit-event'), `:permission' (the agent paused
 to ask for permission), or `:done' (a fast turn already finished).
 Returns nil for `:idle' / `:init' / nil — i.e. when the prompt does
 not appear to have reached the agent."
-  (memq (agent-repl--ws-agent-state ws)
-        '(:thinking :permission :done)))
+  (let* ((state (agent-repl--ws-agent-state ws))
+         (acknowledged (memq state '(:thinking :permission :done))))
+    (agent-repl--log-verbose ws "prompt-acknowledged-p: ws=%s state=%s acknowledged=%s"
+                              ws state acknowledged)
+    acknowledged))
 
 (defun agent-repl--pending-delivery-alive-p (ws vterm-buf)
   "Return non-nil when WS can still receive queued prompt deliveries.
@@ -854,9 +946,13 @@ workspace is deliverable while it has a daemon session binding
 \(`agent-repl--gui-running-p' — VTERM-BUF is nil by design there); a
 vterm workspace is deliverable while VTERM-BUF (captured at drain
 time, pinning the delivery to that specific session) is live."
-  (if (agent-repl--ws-gui-frontend-p ws)
-      (agent-repl--gui-running-p ws)
-    (buffer-live-p vterm-buf)))
+  (let* ((gui-p (agent-repl--ws-gui-frontend-p ws))
+         (alive (if gui-p
+                    (agent-repl--gui-running-p ws)
+                  (buffer-live-p vterm-buf))))
+    (agent-repl--log-verbose ws "pending-delivery-alive-p: ws=%s gui=%s vterm-buffer-live=%s alive=%s"
+                              ws gui-p (and vterm-buf (buffer-live-p vterm-buf)) alive)
+    alive))
 
 (defun agent-repl--make-pending-prompt (text &optional origin)
   "Return a pending-prompt entry carrying TEXT and an optional ORIGIN.
@@ -899,24 +995,33 @@ buffer the panel-show path later adopts."
   (agent-repl--log ws "deliver-pending-prompts: ws=%s count=%d retries=%d"
                     ws (length pending) (or retries 0))
   (unless (agent-repl--pending-delivery-alive-p ws nil)
+    (agent-repl--log ws "deliver-pending-prompts: rejected ws=%s count=%d reason=frontend-not-live"
+                      ws (length pending))
     (error "agent-repl--deliver-pending-prompts: frontend session is gone for ws=%s — %d prompt(s) lost"
            ws (length pending)))
-  (when pending
-    (agent-repl--ensure-input-buffer ws)
-    (let* ((retries (or retries 0))
-           (head (car pending)))
+  (if pending
+      (progn
+        (agent-repl--ensure-input-buffer ws)
+        (let* ((retries (or retries 0))
+               (head (car pending))
+               (origin (agent-repl--pending-prompt-origin head)))
       ;; Re-stamp the per-prompt origin on EVERY attempt: the initial send and
       ;; each verify retry both route through here, so a retry re-arms the tag
       ;; a one-shot consumed flag would have dropped.  A bare-string entry arms
       ;; nil, clearing any stale tag so an ordinary prompt is never tagged.
-      (agent-repl--ws-put ws :next-send-origin (agent-repl--pending-prompt-origin head))
-      (agent-repl--send
-       (agent-repl--pending-prompt-text head) ws nil
-       (lambda ()
-         (run-at-time
-          agent-repl-prompt-delivery-verify-seconds nil
-          #'agent-repl--maybe-retry-or-continue
-          pending ws retries))))))
+          (agent-repl--ws-put ws :next-send-origin origin)
+          (agent-repl--log ws "deliver-pending-prompts: sending ws=%s prompt-chars=%d origin=%s retry=%d"
+                            ws (length (agent-repl--pending-prompt-text head)) origin retries)
+          (agent-repl--send
+           (agent-repl--pending-prompt-text head) ws nil
+           (lambda ()
+             (agent-repl--log ws "deliver-pending-prompts: settle ws=%s retry=%d verify-delay=%.1f"
+                               ws retries agent-repl-prompt-delivery-verify-seconds)
+             (run-at-time
+              agent-repl-prompt-delivery-verify-seconds nil
+              #'agent-repl--maybe-retry-or-continue
+              pending ws retries)))))
+    (agent-repl--log-verbose ws "deliver-pending-prompts: no-op ws=%s reason=empty-pending" ws)))
 
 (defun agent-repl--maybe-retry-or-continue (pending ws retries)
   "Verify the current preemptive prompt was acknowledged; retry or continue.
@@ -944,8 +1049,9 @@ daemon binding released), abandons silently."
     (agent-repl--log ws
                       "deliver-verify: ws=%s prompt acknowledged after %d retries — continuing"
                       ws retries)
-    (when (cdr pending)
-      (agent-repl--deliver-pending-prompts (cdr pending) ws 0)))
+    (if (cdr pending)
+        (agent-repl--deliver-pending-prompts (cdr pending) ws 0)
+      (agent-repl--log ws "deliver-verify: complete ws=%s reason=last-prompt-acknowledged" ws)))
    ((< retries agent-repl-prompt-delivery-max-retries)
     (let ((next-retries (1+ retries)))
       (agent-repl--log ws
@@ -968,18 +1074,26 @@ so the daemon session has time to settle.  Delivery liveness is judged
 by WS's daemon session binding (see
 `agent-repl--pending-delivery-alive-p')."
   (let ((pending (agent-repl--ws-get ws :pending-prompts)))
-    (when pending
-      (agent-repl--log ws "first-ready draining %d pending prompt(s) for ws=%s" (length pending) ws)
-      (agent-repl--ws-put ws :pending-prompts nil)
-      (run-at-time agent-repl-pending-prompt-deliver-delay nil
-                   #'agent-repl--deliver-pending-prompts
-                   pending ws))
+    (if pending
+        (progn
+          (agent-repl--log ws "first-ready draining %d pending prompt(s) for ws=%s" (length pending) ws)
+          (agent-repl--ws-put ws :pending-prompts nil)
+          (run-at-time agent-repl-pending-prompt-deliver-delay nil
+                       #'agent-repl--deliver-pending-prompts
+                       pending ws)
+          (agent-repl--log ws "drain-pending-prompts: scheduled ws=%s count=%d delay=%.1f"
+                            ws (length pending) agent-repl-pending-prompt-deliver-delay))
+      (agent-repl--log-verbose ws "drain-pending-prompts: no-op ws=%s reason=empty" ws))
     pending))
 
 (defun agent-repl--loading-placeholder-visible-p ()
   "Return non-nil if the loading placeholder buffer is displayed in a window."
-  (when-let ((ph (get-buffer " *agent-loading*")))
-    (get-buffer-window ph)))
+  (let* ((ph (get-buffer " *agent-loading*"))
+         (window (and ph (get-buffer-window ph))))
+    (agent-repl--log-verbose (agent-repl--ws-current-name)
+                              "loading-placeholder-visible-p: buffer-present=%s visible=%s"
+                              (not (null ph)) (not (null window)))
+    window))
 
 (defun agent-repl--show-panels-or-defer (ws)
   "Open panels if WS is the current workspace, otherwise defer until switch.
@@ -988,7 +1102,8 @@ Skip if the loading placeholder is still visible — showing panels
 here would race the placeholder's teardown and mount the frontend
 view against the wrong selected window."
   (if (agent-repl--current-ws-p ws)
-      (unless (agent-repl--loading-placeholder-visible-p)
+      (if (agent-repl--loading-placeholder-visible-p)
+          (agent-repl--log ws "show-panels-or-defer: skipped ws=%s reason=loading-placeholder-visible" ws)
         (agent-repl--log ws "show-panels-or-defer: current ws=%s — showing panels" ws)
         (agent-repl--frontend-dispatch-show ws))
     (agent-repl--log ws "show-panels-or-defer: other ws=%s — deferring" ws)
@@ -1057,8 +1172,14 @@ liveness check (e.g. `agent-repl--gui-running-p' for the gui frontend)
 rather than back at this function, or the dispatch closes a loop on
 itself."
   (let ((ws (or ws (agent-repl--ws-current-name))))
-    (unless ws (error "agent-repl--agent-running-p: no workspace specified and no current workspace"))
-    (funcall (agent-repl-frontend-running-p-fn (agent-repl--ws-frontend ws)) ws)))
+    (unless ws
+      (agent-repl--log nil "agent-running-p: rejected reason=no-workspace")
+      (error "agent-repl--agent-running-p: no workspace specified and no current workspace"))
+    (let* ((frontend (agent-repl--ws-frontend ws))
+           (running (funcall (agent-repl-frontend-running-p-fn frontend) ws)))
+      (agent-repl--log-verbose ws "agent-running-p: ws=%s frontend=%s running=%s" ws
+                                (agent-repl-frontend-name frontend) running)
+      running)))
 
 ;; Alt-account config-dir HOOK provisioning was removed in the S8/S9
 ;; sentinel endgame: Emacs manages no Claude Code hooks, so there is

@@ -1429,7 +1429,7 @@ whatever the workspace plist happens to carry."
                            (push (apply #'format format-string args) logs))))
                 (should-error (agent-repl--initialize-ws-env "ws")))
               (should (cl-find-if (lambda (line)
-                                    (string-match-p "state-save: existing-state read failed" line))
+                                    (string-match-p "initialize-ws-env: state-file-read-failed" line))
                                   logs)))
             (should (string-empty-p
                      (with-temp-buffer
@@ -1452,7 +1452,7 @@ whatever the workspace plist happens to carry."
                            (push (apply #'format format-string args) logs))))
                 (should-error (agent-repl--initialize-ws-env "ws")))
               (should (cl-find-if (lambda (line)
-                                    (string-match-p "state-save: existing-state read failed" line))
+                                    (string-match-p "initialize-ws-env: state-file-read-failed" line))
                                   logs)))
             (should (string=
                      "(unclosed paren"
