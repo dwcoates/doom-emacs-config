@@ -23,9 +23,10 @@
 #                       (a simultaneous bounce once cost a silent full re-read
 #                       via cold cursor recovery)
 #   5. daemon bounce    `(agent-repl-frontend-daemon-restart)` via emacsclient;
-#                       the elisp side refuses while a turn is in flight, and
-#                       that refusal fails this script loudly (exit 3) rather
-#                       than being swallowed
+#                       when no Emacs server is reachable the bounce is
+#                       explicitly deferred until Emacs startup. Once a server
+#                       is reachable, any restart failure still fails this
+#                       script loudly (exit 3)
 #   6. elisp reload     with `--elisp <git-range>`: hot-load every non-test
 #                       .el under modules/app/agent-repl changed in the range
 #                       into the running Emacs (test-*.el is batch-only and is
@@ -190,23 +191,48 @@ if [ "$SIDECAR_STALE" -eq 1 ] || [ "$FORCE" -eq 1 ]; then
 fi
 
 # ---- 5. daemon bounce ------------------------------------------------------
-log "daemon: restarting via emacsclient..."
-RESTART_OUT="$("$EMACSCLIENT" --eval '(agent-repl-frontend-daemon-restart)' 2>&1)" || {
-    echo "[deploy-all] daemon restart failed: $RESTART_OUT" >&2
-    exit 3
-}
-case "$RESTART_OUT" in
-    *refusing*)
-        # emacsclient exits 0 even when the elisp signals; the refusal text is
-        # the only tell. A refused bounce means the deploy is NOT complete.
-        echo "[deploy-all] daemon restart refused (turn in flight): $RESTART_OUT" >&2
+# No running Emacs means there is no live daemon to bounce and no old elisp to
+# hot-reload. The normal agent-repl startup path rebuilds/bounces the backend
+# before restoring workspaces, then loads these files from disk. Treat that
+# state as an explicit deferred deployment, not as a restart failure.
+EMACS_AVAILABLE=0
+EMACS_PROBE_OUT=""
+if ! EMACS_PROBE_OUT="$("$EMACSCLIENT" --eval t 2>&1)"; then
+    case "$EMACS_PROBE_OUT" in
+        *"can't find socket"*|*"No socket or alternate editor"*|*"Could not connect to the Emacs daemon"*|*"Connection refused"*)
+            log "daemon: Emacs server probe unavailable: $EMACS_PROBE_OUT"
+            log "daemon: restart deferred; Emacs server is unavailable"
+            log "daemon: the rebuilt backend will start when Emacs starts"
+            if [ -n "$ELISP_RANGE" ]; then
+                log "elisp: reload deferred; Emacs will load the changed files at startup"
+            fi
+            ;;
+        *)
+            echo "[deploy-all] Emacs server probe failed: $EMACS_PROBE_OUT" >&2
+            exit 3
+            ;;
+    esac
+else
+    EMACS_AVAILABLE=1
+    log "daemon: Emacs server probe succeeded: $EMACS_PROBE_OUT"
+    log "daemon: restarting via emacsclient..."
+    RESTART_OUT="$("$EMACSCLIENT" --eval '(agent-repl-frontend-daemon-restart)' 2>&1)" || {
+        echo "[deploy-all] daemon restart failed: $RESTART_OUT" >&2
         exit 3
-        ;;
-esac
-log "daemon: restarted"
+    }
+    case "$RESTART_OUT" in
+        *refusing*)
+            # emacsclient exits 0 even when the elisp signals; the refusal text
+            # is the only tell. A refused bounce means the deploy is NOT complete.
+            echo "[deploy-all] daemon restart refused (turn in flight): $RESTART_OUT" >&2
+            exit 3
+            ;;
+    esac
+    log "daemon: restarted"
+fi
 
 # ---- 6. elisp hot-reload ---------------------------------------------------
-if [ -n "$ELISP_RANGE" ]; then
+if [ -n "$ELISP_RANGE" ] && [ "$EMACS_AVAILABLE" -eq 1 ]; then
     log "elisp: reloading non-test .el changed in $ELISP_RANGE..."
     while IFS= read -r rel; do
         base="$(basename "$rel")"
