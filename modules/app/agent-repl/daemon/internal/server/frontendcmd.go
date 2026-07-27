@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"sync/atomic"
 
+	corev1 "agentrepl/proto/agentshim/core/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
 	"claude-repld/internal/dlog"
@@ -35,6 +36,21 @@ type PromptRouter interface {
 	SubmitPrompt(ctx context.Context, workspace, text, permissionMode string) error
 	Interrupt(ctx context.Context, workspace string, hard bool) error
 	AnswerPermission(ctx context.Context, workspace, permissionRequestID string, allow bool, denyMessage string, updatedInput *structpb.Struct) error
+}
+
+// SessionHealthRouter proves a named session's existing daemon-to-shim path.
+// It is intentionally separate from PromptRouter: a health probe must never
+// lazily create or revive a shim just because a frontend asked whether one is
+// ready.
+type SessionHealthRouter interface {
+	Health(ctx context.Context, workspace, sessionID, requestID string) (*corev1.HealthStatus, error)
+}
+
+// DaemonHealthChecker reports whether every daemon-global boot dependency is
+// ready.  The HTTP /healthz route and frontend command use the same checker,
+// so startup cannot have two competing definitions of operational.
+type DaemonHealthChecker interface {
+	DaemonHealth() (healthy bool, reason string)
 }
 
 // MergeRunner runs (or resumes) a workspace merge. It owns the workspace ->
@@ -164,8 +180,18 @@ type commandHandler struct {
 	// axis. Nil makes a paint-ack a loud failing ack rather than a silent
 	// no-op: an attestation the daemon quietly dropped would leave the
 	// workspace blue with nothing to explain why.
-	painters PaintAcker
-	logf     func(string, ...any)
+	painters     PaintAcker
+	health       SessionHealthRouter
+	daemonHealth DaemonHealthChecker
+	logf         func(string, ...any)
+}
+
+// HealthConfig is optional only for unit harnesses that exercise unrelated
+// commands.  Production WireAgentShim always supplies it; a health command
+// against an unwired harness is returned as an explicit unhealthy assertion.
+type HealthConfig struct {
+	Router SessionHealthRouter
+	Daemon DaemonHealthChecker
 }
 
 // PaintAcker records a frontend's attestation that it painted a workspace's
@@ -180,7 +206,7 @@ var _ frontend.CommandHandler = (*commandHandler)(nil)
 // resyncer is optional (nil-safe) and shutdown is optional (an unconfigured
 // shutdown fails the command loudly); the three routers and the
 // session-lifecycle binding are required.
-func newCommandHandler(prompts PromptRouter, merges MergeRunner, lifecycle WorkspaceLifecycle, resyncer Resyncer, sessions SessionCreateDeleter, shutdown func(), queues QueueController, painters PaintAcker, logf func(string, ...any)) (*commandHandler, error) {
+func newCommandHandler(prompts PromptRouter, merges MergeRunner, lifecycle WorkspaceLifecycle, resyncer Resyncer, sessions SessionCreateDeleter, shutdown func(), queues QueueController, painters PaintAcker, logf func(string, ...any), healthCfg ...HealthConfig) (*commandHandler, error) {
 	switch {
 	case prompts == nil:
 		return nil, fmt.Errorf("server: frontend command handler needs a PromptRouter")
@@ -194,7 +220,70 @@ func newCommandHandler(prompts PromptRouter, merges MergeRunner, lifecycle Works
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
-	return &commandHandler{prompts: prompts, merges: merges, lifecycle: lifecycle, resyncer: resyncer, sessions: sessions, shutdown: shutdown, queues: queues, painters: painters, logf: logf}, nil
+	var health HealthConfig
+	if len(healthCfg) > 1 {
+		return nil, fmt.Errorf("server: frontend command handler received %d health configs", len(healthCfg))
+	}
+	if len(healthCfg) == 1 {
+		health = healthCfg[0]
+	}
+	return &commandHandler{prompts: prompts, merges: merges, lifecycle: lifecycle, resyncer: resyncer, sessions: sessions, shutdown: shutdown, queues: queues, painters: painters, health: health.Router, daemonHealth: health.Daemon, logf: logf}, nil
+}
+
+// DaemonHealth returns the daemon-global readiness assertion.  A false answer
+// is a completed check, not a command failure: callers wait for this correlated
+// view and retry only when the daemon reports what remains unavailable.
+func (h *commandHandler) DaemonHealth(_ context.Context, _ string, requestID string, _ *frontendv1.DaemonHealthCmd) (*frontendv1.DaemonHealthView, error) {
+	if requestID == "" {
+		return nil, fmt.Errorf("frontend cmd: daemon_health requires a request_id")
+	}
+	if h.daemonHealth == nil {
+		return nil, fmt.Errorf("frontend cmd: daemon_health request_id=%s: no daemon health checker wired", requestID)
+	}
+	healthy, reason := h.daemonHealth.DaemonHealth()
+	h.logf("frontend cmd: daemon_health request_id=%s healthy=%v reason=%q", requestID, healthy, reason)
+	return &frontendv1.DaemonHealthView{RequestId: requestID, Healthy: healthy, Reason: reason}, nil
+}
+
+// SessionHealth returns a correlated assertion for precisely the session
+// carried by the command.  Any missing driver, mismatched session, transport
+// failure, or unhealthy shim is encoded as healthy=false so Emacs has one
+// honest result type to wait on during restore.
+func (h *commandHandler) SessionHealth(ctx context.Context, workspace, requestID string, cmd *frontendv1.SessionHealthCmd) (*frontendv1.SessionHealthView, error) {
+	view := &frontendv1.SessionHealthView{RequestId: requestID, Workspace: workspace, SessionId: cmd.GetSessionId()}
+	if requestID == "" {
+		return nil, fmt.Errorf("frontend cmd: session_health requires a request_id")
+	}
+	if err := checkWorkspaceKey("session_health", workspace); err != nil {
+		view.Reason = err.Error()
+		h.logf("frontend cmd: session_health request_id=%s healthy=false reason=%q", requestID, view.Reason)
+		return view, nil
+	}
+	if view.GetSessionId() == "" {
+		view.Reason = "frontend cmd: session_health requires a session_id"
+		h.logf("frontend cmd: session_health ws=%s request_id=%s healthy=false reason=%q", workspace, requestID, view.Reason)
+		return view, nil
+	}
+	if h.health == nil {
+		view.Reason = "frontend cmd: session health router is not wired"
+		h.logf("frontend cmd: session_health ws=%s session=%s request_id=%s healthy=false reason=%q", workspace, view.GetSessionId(), requestID, view.Reason)
+		return view, nil
+	}
+	actual, err := h.health.Health(ctx, workspace, view.GetSessionId(), requestID)
+	if err != nil {
+		view.Reason = err.Error()
+		h.logf("frontend cmd: session_health ws=%s session=%s request_id=%s healthy=false reason=%q", workspace, view.GetSessionId(), requestID, view.Reason)
+		return view, nil
+	}
+	if actual.GetRequestId() != requestID {
+		view.Reason = fmt.Sprintf("frontend cmd: session health response request_id mismatch got=%q want=%q", actual.GetRequestId(), requestID)
+		h.logf("frontend cmd: session_health ws=%s session=%s request_id=%s healthy=false reason=%q", workspace, view.GetSessionId(), requestID, view.Reason)
+		return view, nil
+	}
+	view.Healthy = actual.GetHealthy()
+	view.Reason = actual.GetReason()
+	h.logf("frontend cmd: session_health ws=%s session=%s request_id=%s healthy=%v component=%s reason=%q", workspace, view.GetSessionId(), requestID, view.GetHealthy(), actual.GetComponent(), view.GetReason())
+	return view, nil
 }
 
 // checkWorkspaceKey rejects a prompt-plane workspace key that is not an

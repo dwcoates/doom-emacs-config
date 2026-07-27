@@ -219,6 +219,12 @@ func (nopHandler) CancelQueueEntry(context.Context, string, string, *frontendv1.
 func (nopHandler) PaintAck(context.Context, string, string, *frontendv1.PaintAckCmd) error {
 	return nil
 }
+func (nopHandler) DaemonHealth(_ context.Context, _ string, requestID string, _ *frontendv1.DaemonHealthCmd) (*frontendv1.DaemonHealthView, error) {
+	return &frontendv1.DaemonHealthView{RequestId: requestID, Healthy: true}, nil
+}
+func (nopHandler) SessionHealth(_ context.Context, workspace, requestID string, cmd *frontendv1.SessionHealthCmd) (*frontendv1.SessionHealthView, error) {
+	return &frontendv1.SessionHealthView{RequestId: requestID, Workspace: workspace, SessionId: cmd.GetSessionId(), Healthy: true}, nil
+}
 
 // --- RegistryRegistrar.SessionDied (F4) -------------------------------------
 //
