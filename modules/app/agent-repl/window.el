@@ -62,14 +62,26 @@ liveness must check `buffer-live-p' (matches the historical lookup
 pattern this helper replaces).  Returns nil when the panel has not
 been initialized.  Signals an error for an unknown KIND so typos
 surface at call time."
-  (pcase kind
-    (:view
-     (agent-repl--ws-get (or ws (agent-repl--ws-current-name))
-                          :frontend-buffer))
-    (:input
-     (agent-repl--ws-get (or ws (agent-repl--ws-current-name))
-                          :input-buffer))
-    (_ (error "agent-repl-window--panel-buffer: unknown KIND %S" kind))))
+  (let ((resolved-ws (or ws (agent-repl--ws-current-name))))
+    (pcase kind
+      (:view
+       (let ((buf (agent-repl--ws-get resolved-ws :frontend-buffer)))
+         (agent-repl--log-verbose
+          resolved-ws
+          "window--panel-buffer: kind=%S key=:frontend-buffer buffer=%S live=%s"
+          kind buf (and buf (buffer-live-p buf)))
+         buf))
+      (:input
+       (let ((buf (agent-repl--ws-get resolved-ws :input-buffer)))
+         (agent-repl--log-verbose
+          resolved-ws
+          "window--panel-buffer: kind=%S key=:input-buffer buffer=%S live=%s"
+          kind buf (and buf (buffer-live-p buf)))
+         buf))
+      (_
+       (agent-repl--log resolved-ws
+                         "window--panel-buffer: unknown kind=%S" kind)
+       (error "agent-repl-window--panel-buffer: unknown KIND %S" kind)))))
 
 (defun agent-repl-window--panel-window (kind &optional ws frame)
   "Return the live window displaying panel KIND, or nil.
@@ -80,12 +92,19 @@ frame, t = all frames, a frame value = that frame).
 
 Guards on `buffer-live-p' so a stale buffer reference returns nil
 rather than tripping `get-buffer-window' with a dead buffer."
-  (let ((buf (agent-repl-window--panel-buffer kind ws)))
-    (and buf (buffer-live-p buf) (get-buffer-window buf frame))))
+  (let* ((resolved-ws (or ws (agent-repl--ws-current-name)))
+         (buf (agent-repl-window--panel-buffer kind resolved-ws))
+         (live (and buf (buffer-live-p buf)))
+         (win (and live (get-buffer-window buf frame))))
+    (agent-repl--log-verbose
+     resolved-ws
+     "window--panel-window: kind=%S buffer=%S live=%s frame=%S found=%S"
+     kind buf live frame win)
+    win))
 
 ;;;; --- Side-window awareness ---------------------------------------------
 
-(defun agent-repl-window--side-window-p (win)
+(defun agent-repl-window--side-window-p (win &optional ws)
   "Return non-nil if WIN is a side window.
 A side window is one created via `display-buffer-in-side-window' (or
 equivalent), distinguished by a non-nil `window-side' window
@@ -93,8 +112,13 @@ parameter.  Treat these as exempt from generic layout-clearing
 operations so commands that reset the main window tree (e.g.
 `delete-other-windows', `+dwc/magit-status-workspace') don't trample
 frame-level side-window UI elements."
-  (and (window-live-p win)
-       (window-parameter win 'window-side)))
+  (let* ((resolved-ws (or ws (agent-repl--ws-current-name)))
+         (live (window-live-p win))
+         (side (and live (window-parameter win 'window-side))))
+    (agent-repl--log-verbose resolved-ws
+                             "window--side-window-p: window=%S live=%s side=%S"
+                             win live side)
+    side))
 
 ;;;; --- Per-window hardening ----------------------------------------------
 
@@ -105,7 +129,8 @@ frame-level side-window UI elements."
          delete-protect
          preserve-size
          no-other-window
-         fringes)
+         fringes
+         ws)
   "Apply a hardening recipe to WIN.
 
 Centralizes the dedicate/size-fix/delete-protect/preserve-size
@@ -145,37 +170,66 @@ Each keyword is independent and may be omitted:
   :FRINGES         nil (leave alone) | integer N (both fringes to
                    N px) | cons cell (LEFT . RIGHT).  Common
                    shorthand: pass 0 to hide both fringes (and so
-                   the wrap-continuation glyph)."
-  (when (and (window-live-p win) dedicate)
-    (set-window-dedicated-p win t))
-  (when (and (window-live-p win) size-fix)
-    (set-window-parameter win 'window-size-fixed size-fix))
-  (when (and (window-live-p win) delete-protect)
-    (set-window-parameter win 'no-delete-other-windows t))
-  (when (and (window-live-p win) no-other-window)
-    (set-window-parameter win 'no-other-window t))
-  (when (and (window-live-p win) preserve-size)
-    (cond
-     ((eq preserve-size 'width)
-      (window-preserve-size win t t))
-     ((eq preserve-size 'height)
-      (window-preserve-size win nil t))
-     ((eq preserve-size t)
-      (window-preserve-size win t t)
-      (window-preserve-size win nil t))))
-  (when (and (window-live-p win) fringes)
-    (cond
-     ((integerp fringes)
-      (set-window-fringes win fringes fringes nil))
-     ((and (consp fringes)
-           (integerp (car fringes))
-           (integerp (cdr fringes)))
-      (set-window-fringes win (car fringes) (cdr fringes) nil)))))
+                   the wrap-continuation glyph).
+
+  :WS              Workspace used only for diagnostics.  When omitted,
+                   diagnostics use the current workspace."
+  (let* ((resolved-ws (or ws (agent-repl--ws-current-name)))
+         (live (window-live-p win)))
+    (agent-repl--log resolved-ws
+                     "window--harden: window=%S live=%s dedicate=%S size-fix=%S delete-protect=%S preserve-size=%S no-other-window=%S fringes=%S"
+                     win live dedicate size-fix delete-protect preserve-size
+                     no-other-window fringes)
+    (when (and live dedicate)
+      (set-window-dedicated-p win t))
+    (when (and live size-fix)
+      (set-window-parameter win 'window-size-fixed size-fix))
+    (when (and live delete-protect)
+      (set-window-parameter win 'no-delete-other-windows t))
+    (when (and live no-other-window)
+      (set-window-parameter win 'no-other-window t))
+    (when (and live preserve-size)
+      (cond
+       ((eq preserve-size 'width)
+        (agent-repl--log-verbose resolved-ws
+                                 "window--harden: preserve-size=width window=%S" win)
+        (window-preserve-size win t t))
+       ((eq preserve-size 'height)
+        (agent-repl--log-verbose resolved-ws
+                                 "window--harden: preserve-size=height window=%S" win)
+        (window-preserve-size win nil t))
+       ((eq preserve-size t)
+        (agent-repl--log-verbose resolved-ws
+                                 "window--harden: preserve-size=both window=%S" win)
+        (window-preserve-size win t t)
+        (window-preserve-size win nil t))
+       (t
+        (agent-repl--log-verbose resolved-ws
+                                 "window--harden: preserve-size=unrecognized value=%S window=%S"
+                                 preserve-size win))))
+    (when (and live fringes)
+      (cond
+       ((integerp fringes)
+        (agent-repl--log-verbose resolved-ws
+                                 "window--harden: fringes=uniform value=%S window=%S"
+                                 fringes win)
+        (set-window-fringes win fringes fringes nil))
+       ((and (consp fringes)
+             (integerp (car fringes))
+             (integerp (cdr fringes)))
+        (agent-repl--log-verbose resolved-ws
+                                 "window--harden: fringes=asymmetric left=%S right=%S window=%S"
+                                 (car fringes) (cdr fringes) win)
+        (set-window-fringes win (car fringes) (cdr fringes) nil))
+       (t
+        (agent-repl--log-verbose resolved-ws
+                                 "window--harden: fringes=unrecognized value=%S window=%S"
+                                 fringes win))))))
 
 ;;;; --- Subset deletion ---------------------------------------------------
 
 (cl-defun agent-repl-window--delete-where
-    (predicate &key (skip-side-windows t) frame)
+    (predicate &key (skip-side-windows t) frame ws)
   "Delete each live window for which PREDICATE returns non-nil.
 
 PREDICATE is called with the window as its single argument.  Returns
@@ -194,7 +248,9 @@ side-window UI elements.  Pass nil ONLY when the caller genuinely
 wants to clear side windows too (e.g. a full-frame fullscreen toggle
 that should reduce to a single panel).
 
-FRAME limits the scan; defaults to the selected frame.  Deletion is
+FRAME limits the scan; defaults to the selected frame.  WS is used only for
+workspace-scoped diagnostics; when omitted the current workspace is used.
+Deletion is
 wrapped in `condition-case' so one undeletable window doesn't abort
 the sweep — the error is logged via `agent-repl--warn' and iteration
 continues.
@@ -204,26 +260,44 @@ When the caller knows the target buffer ahead of time, prefer
 the call site and intentionally bypasses the side-window skip
 (because targeting a specific buffer means the caller has already
 opted into specificity)."
-  (let ((deleted '()))
-    (dolist (win (window-list frame))
-      (when (and (window-live-p win)
-                 ;; Never sweep the minibuffer window.  `window-list'
-                 ;; includes it whenever a minibuffer is active, and this
-                 ;; sweep can run mid-minibuffer — the debounced
-                 ;; `on-window-change' idle timer fires while the `SPC p p'
-                 ;; picker is open.  `delete-window' always refuses the
-                 ;; minibuffer ("Attempt to delete minibuffer or sole
-                 ;; ordinary window"), so it is never a valid layout-sweep
-                 ;; target; excluding it here protects every caller and
-                 ;; predicate rather than relying on each one to filter it.
-                 (not (window-minibuffer-p win))
-                 (or (not skip-side-windows)
-                     (not (agent-repl-window--side-window-p win)))
-                 (funcall predicate win))
+  (let* ((resolved-ws (or ws (agent-repl--ws-current-name)))
+         (windows (window-list frame))
+         (deleted '()))
+    (agent-repl--log resolved-ws
+                     "window--delete-where: begin frame=%S skip-side-windows=%S windows=%d"
+                     frame skip-side-windows (length windows))
+    (dolist (win windows)
+      (cond
+       ((not (window-live-p win))
+        (agent-repl--log-verbose resolved-ws
+                                 "window--delete-where: skip-dead window=%S" win))
+       ;; Never sweep the minibuffer window.  `window-list' includes it
+       ;; whenever a minibuffer is active, and this sweep can run
+       ;; mid-minibuffer — the debounced `on-window-change' idle timer fires
+       ;; while the `SPC p p' picker is open.  `delete-window' always refuses
+       ;; the minibuffer ("Attempt to delete minibuffer or sole ordinary
+       ;; window"), so it is never a valid layout-sweep target; excluding it
+       ;; here protects every caller and predicate rather than relying on
+       ;; each one to filter it.
+       ((window-minibuffer-p win)
+        (agent-repl--log-verbose resolved-ws
+                                 "window--delete-where: skip-minibuffer window=%S" win))
+       ((and skip-side-windows
+             (agent-repl-window--side-window-p win resolved-ws))
+        (agent-repl--log-verbose resolved-ws
+                                 "window--delete-where: skip-side window=%S" win))
+       ((not (funcall predicate win))
+        (agent-repl--log-verbose resolved-ws
+                                 "window--delete-where: predicate=false window=%S" win))
+       (t
+        (agent-repl--log-verbose resolved-ws
+                                 "window--delete-where: predicate=true deleting window=%S" win)
         (condition-case err
             (progn
               (delete-window win)
-              (push win deleted))
+              (push win deleted)
+              (agent-repl--log resolved-ws
+                               "window--delete-where: deleted window=%S" win))
           (error
            ;; Three structural delete-window errors are benign here —
            ;; they fire when prior iterations have already collapsed the
@@ -234,30 +308,45 @@ opted into specificity)."
            ;; *Messages* on every `SPC w f' that lands in this shape
            ;; (the original `SPC w f' regression).  Any other failure
            ;; is still surfaced.
-           (if (agent-repl-window--benign-undeletable-error-p err)
-               (agent-repl--log nil "window--delete-where: skip-undeletable %s: %S" win err)
-             (agent-repl--warn nil "window--delete-where: could not delete %s: %S"
-                               win err))))))
-    (nreverse deleted)))
+           (if (agent-repl-window--benign-undeletable-error-p err resolved-ws)
+               (agent-repl--log resolved-ws
+                                "window--delete-where: skip-undeletable %s: %S" win err)
+             (agent-repl--warn resolved-ws
+                               "window--delete-where: could not delete %s: %S"
+                               win err)))))))
+    (setq deleted (nreverse deleted))
+    (agent-repl--log resolved-ws
+                     "window--delete-where: complete deleted-count=%d deleted=%S"
+                     (length deleted) deleted)
+    deleted))
 
-(defun agent-repl-window--benign-undeletable-error-p (err)
+(defun agent-repl-window--benign-undeletable-error-p (err &optional ws)
   "Return non-nil when ERR is one of `delete-window's structural refusals.
 Matches the three error strings Emacs raises when a window is the sole
 remaining main/side/ordinary window of its frame — these are expected
-mid-sweep outcomes and should not be reported as failures."
-  (and (consp err)
-       (eq (car err) 'error)
-       (stringp (cadr err))
-       (or (string-prefix-p "Attempt to delete main window of frame" (cadr err))
-           (string-prefix-p "Attempt to delete sole side window of frame" (cadr err))
-           (string-prefix-p "Attempt to delete sole ordinary window of frame" (cadr err)))))
+mid-sweep outcomes and should not be reported as failures.  WS is used only
+for diagnostics."
+  (let ((benign
+         (and (consp err)
+              (eq (car err) 'error)
+              (stringp (cadr err))
+              (or (string-prefix-p "Attempt to delete main window of frame" (cadr err))
+                  (string-prefix-p "Attempt to delete sole side window of frame" (cadr err))
+                  (string-prefix-p "Attempt to delete sole ordinary window of frame" (cadr err))))))
+    (agent-repl--log-verbose ws
+                             "window--benign-undeletable-error-p: err=%S benign=%s"
+                             err benign)
+    benign))
 
-(cl-defun agent-repl-window--delete-buffer-windows (buf &key (all-frames t))
+(cl-defun agent-repl-window--delete-buffer-windows
+    (buf &key (all-frames t) ws)
   "Delete every live window currently displaying BUF.
 
 ALL-FRAMES has the same semantics as `get-buffer-window-list's
 ALL-FRAMES argument — default `t' scans every frame; `nil' scans
 only the selected frame; a frame value scans that frame's windows.
+WS is used only for workspace-scoped diagnostics; when omitted the current
+workspace is used.
 
 This helper deliberately bypasses the side-window skip that
 `--delete-where' applies, because the caller is targeting a specific
@@ -270,18 +359,35 @@ individual `delete-window' calls are caught and logged via
 sweep — typical cause is
 the buffer's window being the lone window in a frame.  Returns the
 list of windows that were actually deleted."
-  (let ((deleted '()))
-    (when (and buf (buffer-live-p buf))
-      (dolist (win (get-buffer-window-list buf nil all-frames))
-        (when (window-live-p win)
+  (let* ((resolved-ws (or ws (agent-repl--ws-current-name)))
+         (live (and buf (buffer-live-p buf)))
+         (windows (and live (get-buffer-window-list buf nil all-frames)))
+         (deleted '()))
+    (agent-repl--log resolved-ws
+                     "window--delete-buffer-windows: begin buffer=%S live=%s all-frames=%S candidates=%d"
+                     buf live all-frames (length windows))
+    (when live
+      (dolist (win windows)
+        (if (not (window-live-p win))
+            (agent-repl--log-verbose resolved-ws
+                                     "window--delete-buffer-windows: skip-dead window=%S" win)
+          (agent-repl--log-verbose resolved-ws
+                                   "window--delete-buffer-windows: deleting window=%S" win)
           (condition-case err
               (progn
                 (delete-window win)
-                (push win deleted))
+                (push win deleted)
+                (agent-repl--log resolved-ws
+                                 "window--delete-buffer-windows: deleted window=%S" win))
             (error
-             (agent-repl--warn nil "window--delete-buffer-windows: could not delete %s: %S"
+             (agent-repl--warn resolved-ws
+                               "window--delete-buffer-windows: could not delete %s: %S"
                                win err))))))
-    (nreverse deleted)))
+    (setq deleted (nreverse deleted))
+    (agent-repl--log resolved-ws
+                     "window--delete-buffer-windows: complete deleted-count=%d deleted=%S"
+                     (length deleted) deleted)
+    deleted))
 
 ;;;; --- Layout reconciliation -----------------------------------------------
 
@@ -297,7 +403,12 @@ reconciler (`agent-repl-window--ensure-layout'), the persp-switch
 restore (`agent-repl--ensure-own-panels-on-persp-switch'), and the
 frame reclaim (`agent-repl--reclaim-frame-fullscreen') — so their
 eligibility checks cannot drift."
-  (buffer-live-p (agent-repl-window--panel-buffer :view ws)))
+  (let* ((view-buf (agent-repl-window--panel-buffer :view ws))
+         (restorable (buffer-live-p view-buf)))
+    (agent-repl--log-verbose ws
+                             "window--panels-restorable-p: view-buffer=%S live=%s"
+                             view-buf restorable)
+    restorable))
 
 (defvar agent-repl-window--ensure-layout-in-progress nil
   "Non-nil while `agent-repl-window--ensure-layout' dispatches a repair.
@@ -350,21 +461,44 @@ are neither counted as panels nor touched.
 
 Returns non-nil when a repair was dispatched, nil on every no-op."
   (let ((ws (agent-repl--ws-current-name)))
-    (when (and ws
-               (not agent-repl--eager-open-in-progress)
-               (not agent-repl-window--ensure-layout-in-progress))
+    (cond
+     ((not ws)
+      (agent-repl--log-verbose nil
+                               "window--ensure-layout: noop reason=no-current-workspace")
+      nil)
+     (agent-repl--eager-open-in-progress
+      (agent-repl--log-verbose ws
+                               "window--ensure-layout: noop reason=eager-open-in-progress")
+      nil)
+     (agent-repl-window--ensure-layout-in-progress
+      (agent-repl--log-verbose ws
+                               "window--ensure-layout: noop reason=repair-in-progress")
+      nil)
+     (t
       (let ((view-win (agent-repl-window--panel-window :view ws))
             (input-win (agent-repl-window--panel-window :input ws)))
-        (when (xor view-win input-win)
-          (if (not (agent-repl-window--panels-restorable-p ws))
-              (progn
-                (agent-repl--log ws "window--ensure-layout: ws=%s input window present but view buffer dead — leaving for the next explicit show" ws)
-                nil)
-            (agent-repl--log ws "window--ensure-layout: ws=%s missing=%s — remounting panels through the frontend"
-                             ws (if view-win "input" "view"))
-            (let ((agent-repl-window--ensure-layout-in-progress t))
-              (agent-repl--frontend-dispatch-show ws))
-            t))))))
+        (cond
+         ((not (xor view-win input-win))
+          (agent-repl--log-verbose
+           ws
+           "window--ensure-layout: noop reason=panel-pair-complete view-window=%S input-window=%S"
+           view-win input-win)
+          nil)
+         ((not (agent-repl-window--panels-restorable-p ws))
+          (agent-repl--log ws
+                           "window--ensure-layout: ws=%s input window present but view buffer dead — leaving for the next explicit show"
+                           ws)
+          nil)
+         (t
+          (agent-repl--log ws
+                           "window--ensure-layout: ws=%s missing=%s — remounting panels through the frontend"
+                           ws (if view-win "input" "view"))
+          (let ((agent-repl-window--ensure-layout-in-progress t))
+            (agent-repl--frontend-dispatch-show ws))
+          (agent-repl--log ws
+                           "window--ensure-layout: repair-dispatched view-window=%S input-window=%S"
+                           view-win input-win)
+          t)))))))
 
 (provide 'agent-repl-window)
 ;;; window.el ends here
