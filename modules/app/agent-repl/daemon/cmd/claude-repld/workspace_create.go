@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -12,9 +13,12 @@ import (
 	"sync"
 	"time"
 
+	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 	"claude-repld/internal/registry"
 	"claude-repld/internal/server"
 	workspacecreate "claude-repld/internal/workspace/create"
+
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 const workspaceCreateStoreName = "workspace-create-jobs.json"
@@ -66,13 +70,13 @@ func (w DaemonWorktree) PlanWorktree(ctx context.Context, job workspacecreate.Jo
 	if w.Logf == nil {
 		return workspacecreate.WorktreeResult{}, fmt.Errorf("workspace create: worktree planner has no logger")
 	}
-	if job.Request.GitRoot == "" || !filepath.IsAbs(job.Request.GitRoot) {
-		return workspacecreate.WorktreeResult{}, fmt.Errorf("workspace create: job %s git_root must be absolute", job.ID)
+	root, err := normalizeWorkspacePath(job.Request.GitRoot)
+	if err != nil {
+		return workspacecreate.WorktreeResult{}, fmt.Errorf("workspace create: job %s git_root: %w", job.ID, err)
 	}
 	if job.Request.BaseCommit == "" {
 		return workspacecreate.WorktreeResult{}, fmt.Errorf("workspace create: job %s requires explicit base_commit", job.ID)
 	}
-	root := filepath.Clean(job.Request.GitRoot)
 	info, err := os.Stat(root)
 	if err != nil {
 		return workspacecreate.WorktreeResult{}, fmt.Errorf("workspace create: stat git_root %s: %w", root, err)
@@ -115,10 +119,27 @@ func (w DaemonWorktree) PlanWorktree(ctx context.Context, job workspacecreate.Jo
 		if branchExit != 1 {
 			return workspacecreate.WorktreeResult{}, fmt.Errorf("workspace create: check branch %s exit=%d: %s", branch, branchExit, strings.TrimSpace(out))
 		}
-		w.Logf("workspace-create: planned job=%s requested=%q final=%q branch=%q base=%q path=%s", job.ID, job.Request.Name, branch, branch, job.Request.BaseCommit, path)
-		return workspacecreate.WorktreeResult{Path: path, FinalName: branch, Branch: branch, BaseCommit: job.Request.BaseCommit}, nil
+		finalName := filepath.Base(branch)
+		w.Logf("workspace-create: planned job=%s requested=%q final=%q branch=%q base=%q path=%s", job.ID, job.Request.Name, finalName, branch, job.Request.BaseCommit, path)
+		return workspacecreate.WorktreeResult{Path: path, FinalName: finalName, Branch: branch, BaseCommit: job.Request.BaseCommit}, nil
 	}
 	return workspacecreate.WorktreeResult{}, fmt.Errorf("workspace create: could not resolve a collision-free name for job %s after 20 attempts", job.ID)
+}
+
+// normalizeWorkspacePath accepts the skill contract's leading ~/ spelling but
+// rejects every other relative path before any git operation can run.
+func normalizeWorkspacePath(path string) (string, error) {
+	if strings.HasPrefix(path, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("resolve home directory: %w", err)
+		}
+		path = filepath.Join(home, strings.TrimPrefix(path, "~/"))
+	}
+	if path == "" || !filepath.IsAbs(path) {
+		return "", fmt.Errorf("must be an absolute path or begin with ~/")
+	}
+	return filepath.Clean(path), nil
 }
 
 func (w DaemonWorktree) EnsureWorktree(ctx context.Context, job workspacecreate.Job) error {
@@ -128,7 +149,10 @@ func (w DaemonWorktree) EnsureWorktree(ctx context.Context, job workspacecreate.
 	if job.WorktreePath == "" || job.FinalName == "" || job.Branch == "" || job.ResolvedBaseCommit == "" {
 		return fmt.Errorf("workspace create: job %s has no persisted worktree plan", job.ID)
 	}
-	root := filepath.Clean(job.Request.GitRoot)
+	root, err := normalizeWorkspacePath(job.Request.GitRoot)
+	if err != nil {
+		return fmt.Errorf("workspace create: job %s git_root: %w", job.ID, err)
+	}
 	listing, exit, err := w.Git.RunGit(ctx, root, "worktree", "list", "--porcelain")
 	if err != nil || exit != 0 {
 		return fmt.Errorf("workspace create: list worktrees before create job=%s exit=%d: %w (%s)", job.ID, exit, err, strings.TrimSpace(listing))
@@ -225,6 +249,25 @@ func (c daemonSessionCreator) EnsureSession(ctx context.Context, job workspacecr
 	if job.WorktreePath == "" {
 		return "", fmt.Errorf("workspace create: job %s has no worktree path for session creation", job.ID)
 	}
+	configDir, permissionMode := job.Request.ConfigDir, job.Request.PermissionMode
+	if job.Request.SourceWorkspace != "" || job.Request.SourceDir != "" {
+		if job.Request.SourceWorkspace == "" || job.Request.SourceDir == "" {
+			return "", fmt.Errorf("workspace create: job %s source workspace requires both name and directory", job.ID)
+		}
+		if configDir != "" || permissionMode != "" {
+			return "", fmt.Errorf("workspace create: job %s source workspace cannot override inherited config or permission metadata", job.ID)
+		}
+		sourceID, ok := (&server.SessionLocator{Reg: c.Registry}).Locate(job.Request.SourceDir)
+		if !ok {
+			return "", fmt.Errorf("workspace create: job %s source workspace %q has no live registered session at %s", job.ID, job.Request.SourceWorkspace, job.Request.SourceDir)
+		}
+		source, ok := c.Registry.Get(sourceID)
+		if !ok || source.Terminal || source.CWD != job.Request.SourceDir {
+			return "", fmt.Errorf("workspace create: job %s source workspace %q session %s is not live at %s", job.ID, job.Request.SourceWorkspace, sourceID, job.Request.SourceDir)
+		}
+		configDir, permissionMode = source.ConfigDir, source.PermissionMode
+		c.Logf("workspace-create: inherited job=%s source_workspace=%q source_session=%s config_dir=%q permission_mode=%q", job.ID, job.Request.SourceWorkspace, sourceID, configDir, permissionMode)
+	}
 	if existing, ok := (&server.SessionLocator{Reg: c.Registry}).Locate(job.WorktreePath); ok {
 		c.Logf("workspace-create: reusing registered session job=%s session=%s cwd=%s", job.ID, existing, job.WorktreePath)
 		return existing, nil
@@ -232,8 +275,8 @@ func (c daemonSessionCreator) EnsureSession(ctx context.Context, job workspacecr
 	id, err := c.Commands.CreateSession(ctx, server.CreateOpts{
 		CWD:            job.WorktreePath,
 		Model:          job.Request.Model,
-		ConfigDir:      job.Request.ConfigDir,
-		PermissionMode: job.Request.PermissionMode,
+		ConfigDir:      configDir,
+		PermissionMode: permissionMode,
 		AllowUngated:   job.Request.AllowUngated,
 	})
 	if err != nil {
@@ -243,7 +286,7 @@ func (c daemonSessionCreator) EnsureSession(ctx context.Context, job workspacecr
 	if !ok || rec.CWD != job.WorktreePath || rec.Terminal {
 		return "", fmt.Errorf("workspace create: session %s was not durably registered for job %s cwd=%s", id, job.ID, job.WorktreePath)
 	}
-	c.Logf("workspace-create: registered session job=%s session=%s cwd=%s model=%q config_dir=%q permission_mode=%q", job.ID, id, job.WorktreePath, job.Request.Model, job.Request.ConfigDir, job.Request.PermissionMode)
+	c.Logf("workspace-create: registered session job=%s session=%s cwd=%s model=%q config_dir=%q permission_mode=%q", job.ID, id, job.WorktreePath, job.Request.Model, configDir, permissionMode)
 	return id, nil
 }
 
@@ -264,27 +307,29 @@ func (h daemonSessionHealth) AwaitHealthy(ctx context.Context, job workspacecrea
 	return h.Probe.CheckWorkspaceHealth(ctx, job.WorktreePath, job.SessionID, job.ID)
 }
 
-// IdempotentInitialPromptRouter is the required session/outbox seam.  Its
-// implementation must use JobID to make an acknowledged shim submit durable
-// across the manager's PromptSubmitting checkpoint boundary.
-type IdempotentInitialPromptRouter interface {
-	SubmitWorkspaceInitialPrompt(context.Context, string, string, string, string, string) error
+// InitialPromptRouter is the required session-driver seam.  The JobID is
+// carried as a vendor-visible origin, but delivery is intentionally
+// at-least-once: the job is checkpointed only after this call succeeds, so the
+// narrow process-death window after a shim acknowledgement can repeat a
+// prompt but can never silently lose one.
+type InitialPromptRouter interface {
+	SubmitWorkspaceInitialPrompt(context.Context, string, string, string, string) error
 }
 
 type daemonInitialPromptSubmitter struct {
-	Router   IdempotentInitialPromptRouter
+	Router   InitialPromptRouter
 	Registry *registry.Registry
 }
 
 func (s daemonInitialPromptSubmitter) SubmitInitialPrompt(ctx context.Context, job workspacecreate.Job) error {
 	if s.Router == nil || s.Registry == nil {
-		return fmt.Errorf("workspace create: idempotent initial-prompt router is not configured")
+		return fmt.Errorf("workspace create: initial-prompt router is not configured")
 	}
 	rec, ok := s.Registry.Get(job.SessionID)
 	if !ok || rec.Terminal || rec.CWD != job.WorktreePath {
 		return fmt.Errorf("workspace create: job %s session %s is not the live registered session for %s", job.ID, job.SessionID, job.WorktreePath)
 	}
-	return s.Router.SubmitWorkspaceInitialPrompt(ctx, job.WorktreePath, job.SessionID, job.ID, job.Request.Prompt, job.Request.PermissionMode)
+	return s.Router.SubmitWorkspaceInitialPrompt(ctx, job.WorktreePath, job.ID, job.Request.Prompt, job.Request.PermissionMode)
 }
 
 // WorkspaceCreateHostForwarder lets startup build the durable manager before
@@ -341,9 +386,119 @@ type WorkspaceCreateAssemblyConfig struct {
 	Commands       server.SessionCreateDeleter
 	Registry       *registry.Registry
 	Health         WorkspaceHealthProbe
-	InitialPrompts IdempotentInitialPromptRouter
+	InitialPrompts InitialPromptRouter
 	Logf           func(string, ...any)
 	InboxInterval  time.Duration
+}
+
+// WorkspaceCreationBridge is the concrete server-local bridge over the
+// durable create store.  It is deliberately in cmd: server stays transport
+// only while this adapter maps the wire messages to daemon lifecycle facts.
+type WorkspaceCreationBridge struct {
+	manager *workspacecreate.Manager
+	store   workspacecreate.JobStore
+	ctx     context.Context
+	mu      sync.Mutex
+	avail   map[chan *frontendv1.WorkspaceAvailable]struct{}
+	actions map[chan *frontendv1.HostAction]struct{}
+}
+
+func NewWorkspaceCreationBridge(ctx context.Context, manager *workspacecreate.Manager, store workspacecreate.JobStore) (*WorkspaceCreationBridge, error) {
+	if ctx == nil || manager == nil || store == nil {
+		return nil, fmt.Errorf("workspace create: bridge needs context, manager, and store")
+	}
+	return &WorkspaceCreationBridge{manager: manager, store: store, ctx: ctx, avail: map[chan *frontendv1.WorkspaceAvailable]struct{}{}, actions: map[chan *frontendv1.HostAction]struct{}{}}, nil
+}
+
+func (b *WorkspaceCreationBridge) CreateWorkspace(_ context.Context, requestID string, cmd *frontendv1.CreateWorkspaceCmd) error {
+	if cmd == nil {
+		return fmt.Errorf("workspace create: nil CreateWorkspaceCmd")
+	}
+	priority, err := json.Marshal(cmd.GetPriority())
+	if err != nil {
+		return err
+	}
+	request := workspacecreate.Request{Name: cmd.GetRequestedName(), GitRoot: cmd.GetGitRoot(), BaseCommit: cmd.GetBaseCommit(), SourceWorkspace: cmd.GetSourceWorkspace(), SourceDir: cmd.GetSourceDir(), ForkFrom: cmd.GetForkFrom(), ForkSessionID: cmd.GetForkSessionId(), Model: cmd.GetModel(), ConfigDir: cmd.GetConfigDir(), PermissionMode: cmd.GetPermissionMode(), AllowUngated: cmd.GetAllowUngated(), PostprocessingPrompt: cmd.GetPostprocessingPrompt(), BeforeWSMerge: cmd.GetBeforeWsMerge(), Priority: priority}
+	if cmd.InitialPrompt != nil {
+		request.Prompt = cmd.GetInitialPrompt()
+	}
+	_, _, err = b.manager.StartInteractiveCreate(b.ctx, requestID, request)
+	return err
+}
+
+func (b *WorkspaceCreationBridge) MarkWorkspaceMaterialized(ctx context.Context, jobID string) error {
+	return b.manager.MarkMaterialized(ctx, jobID)
+}
+func (b *WorkspaceCreationBridge) CompleteHostAction(_ context.Context, actionID string, ok bool, failure string) error {
+	return b.manager.CompleteHostAction(actionID, ok, failure)
+}
+
+func (b *WorkspaceCreationBridge) SnapshotHostWork() server.WorkspaceHostWorkSnapshot {
+	jobs, err := b.store.List()
+	if err != nil {
+		panic(fmt.Sprintf("workspace create: snapshot jobs: %v", err))
+	}
+	result := server.WorkspaceHostWorkSnapshot{}
+	for _, job := range jobs {
+		if job.State == workspacecreate.StateAwaitingEmacs {
+			result.WorkspaceAvailable = append(result.WorkspaceAvailable, toProtoAvailable(job))
+		}
+	}
+	actions, err := b.store.PendingHostActions()
+	if err != nil {
+		panic(fmt.Sprintf("workspace create: snapshot actions: %v", err))
+	}
+	for _, action := range actions {
+		result.HostActions = append(result.HostActions, toProtoAction(action))
+	}
+	return result
+}
+
+func (b *WorkspaceCreationBridge) SubscribeWorkspaceAvailable() (<-chan *frontendv1.WorkspaceAvailable, func()) {
+	ch := make(chan *frontendv1.WorkspaceAvailable, 32)
+	b.mu.Lock()
+	b.avail[ch] = struct{}{}
+	b.mu.Unlock()
+	return ch, func() { b.mu.Lock(); delete(b.avail, ch); close(ch); b.mu.Unlock() }
+}
+func (b *WorkspaceCreationBridge) SubscribeHostActions() (<-chan *frontendv1.HostAction, func()) {
+	ch := make(chan *frontendv1.HostAction, 32)
+	b.mu.Lock()
+	b.actions[ch] = struct{}{}
+	b.mu.Unlock()
+	return ch, func() { b.mu.Lock(); delete(b.actions, ch); close(ch); b.mu.Unlock() }
+}
+func (b *WorkspaceCreationBridge) PublishWorkspaceAvailable(_ context.Context, a workspacecreate.Available) error {
+	value := toProtoAvailable(workspacecreate.Job{ID: a.JobID, FinalName: a.Name, Branch: a.Branch, ResolvedBaseCommit: a.BaseCommit, WorktreePath: a.WorktreePath, SessionID: a.SessionID, Request: a.Request})
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for ch := range b.avail {
+		ch <- value
+	}
+	return nil
+}
+func (b *WorkspaceCreationBridge) PublishHostAction(_ context.Context, action workspacecreate.HostAction) error {
+	value := toProtoAction(action)
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for ch := range b.actions {
+		ch <- value
+	}
+	return nil
+}
+func toProtoAvailable(j workspacecreate.Job) *frontendv1.WorkspaceAvailable {
+	return &frontendv1.WorkspaceAvailable{JobId: j.ID, FinalName: j.FinalName, WorktreePath: j.WorktreePath, Branch: j.Branch, GitRoot: j.Request.GitRoot, BaseCommit: j.ResolvedBaseCommit, SourceWorkspace: j.Request.SourceWorkspace, SourceDir: j.Request.SourceDir, ForkFrom: j.Request.ForkFrom, ForkSessionId: j.Request.ForkSessionID, SessionId: j.SessionID, Priority: string(j.Request.Priority), Model: j.Request.Model, InitialPromptQueued: j.Request.Prompt != "", ConfigDir: j.Request.ConfigDir, PermissionMode: j.Request.PermissionMode, AllowUngated: j.Request.AllowUngated}
+}
+func toProtoAction(a workspacecreate.HostAction) *frontendv1.HostAction {
+	var raw map[string]any
+	if err := json.Unmarshal(a.Payload, &raw); err != nil {
+		panic(fmt.Sprintf("workspace create: action %s payload: %v", a.ID, err))
+	}
+	payload, err := structpb.NewStruct(raw)
+	if err != nil {
+		panic(fmt.Sprintf("workspace create: action %s payload struct: %v", a.ID, err))
+	}
+	return &frontendv1.HostAction{ActionId: a.ID, Action: &frontendv1.HostAction_LegacyCommand{LegacyCommand: &frontendv1.HostLegacyCommand{Type: a.Type, Payload: payload}}}
 }
 
 func NewWorkspaceCreateAssembly(cfg WorkspaceCreateAssemblyConfig) (*WorkspaceCreateAssembly, error) {

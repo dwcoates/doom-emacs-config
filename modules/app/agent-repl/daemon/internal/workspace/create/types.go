@@ -153,12 +153,10 @@ type SessionHealthChecker interface {
 }
 
 // InitialPromptSubmitter submits a job's held initial prompt after Emacs has
-// acknowledged materialization.  Implementations MUST use Job.ID as the
-// vendor-facing idempotency key and durably remember an accepted submit before
-// returning nil: a crash after the shim accepts the prompt but before this
-// manager checkpoints PromptDelivered causes Process to call again.  The
-// ordinary sessiondrv SubmitPrompt API has no such key and is therefore NOT a
-// valid production implementation of this interface.
+// acknowledged materialization.  Job.ID must be carried into the submit's
+// origin for diagnosis. Delivery is at-least-once: a crash after the shim has
+// accepted a prompt but before PromptDelivered is checkpointed can repeat it,
+// but the manager must never checkpoint delivery before the submit succeeds.
 type InitialPromptSubmitter interface {
 	SubmitInitialPrompt(context.Context, Job) error
 }
