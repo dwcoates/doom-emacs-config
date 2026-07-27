@@ -16,6 +16,7 @@ import {
   AckSchema,
   DaemonHelloSchema,
   EventSchema,
+  HealthStatusSchema,
   ShimHelloSchema,
   SubscribeSchema,
 } from "../src/uds/proto.js";
@@ -91,6 +92,11 @@ describe("daemon reattach with from_seq continuation", () => {
         // The reattach hinge: a daemon Subscribe drives a store re-subscribe.
         onSubscribe: (m) => storeClient.subscribe(m.fromSeq),
         onReplayRequest: () => {},
+        onHealthCheck: (m) => create(HealthStatusSchema, {
+          requestId: m.requestId,
+          healthy: true,
+          component: "test-shim",
+        }),
       },
     );
     cleanups.push(() => server.close());

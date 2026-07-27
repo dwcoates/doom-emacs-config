@@ -56,6 +56,9 @@ import {
   Event,
   EventClass,
   EventSchema,
+  HealthCheck,
+  HealthStatus,
+  HealthStatusSchema,
   Plane,
   ReplayDoneSchema,
   InterruptOutcome,
@@ -273,6 +276,7 @@ export class UdsSession {
       // that replays from `from_seq` (§4.4).
       onSubscribe: (m) => this.store.subscribe(m.fromSeq),
       onReplayRequest: (m) => void this.serveReplay(m),
+      onHealthCheck: (m) => this.health(m),
       // SHIM-ASSERTED READINESS, on the handshake edge.
       //
       // Not after `server.connect()`: that resolves on the first successful
@@ -303,6 +307,30 @@ export class UdsSession {
       },
       handlers,
     );
+  }
+
+  /**
+   * Answer only after the active shim has proved its required store paths.
+   * Receiving this request itself proves the daemon's UDS connection completed
+   * the SessionServer handshake; StoreClient proves the producer, standing
+   * subscription, and an independent store protocol round-trip.
+   */
+  private async health(check: HealthCheck): Promise<HealthStatus> {
+    const result = await this.store.health(check.requestId);
+    shimLog(COMPONENT, {
+      session: this.deps.sessionId,
+      request: check.requestId,
+      healthy: result.healthy,
+      store_connected: this.store.isConnected(),
+      store_subscribed: this.store.isSubscribed(),
+      reason: result.reason,
+    }, result.healthy ? "session health PASS" : "session health FAIL");
+    return create(HealthStatusSchema, {
+      requestId: check.requestId,
+      healthy: result.healthy,
+      component: "claude-shim",
+      reason: result.reason,
+    });
   }
 
   /**
