@@ -28,8 +28,6 @@ function compact(over: Partial<ContextCompactedItem> = {}): ContextCompactedItem
     postTokens: 8_000,
     durationMs: 4_200,
     summary: "the story so far",
-    result: "success",
-    error: "",
     ...over,
   };
 }

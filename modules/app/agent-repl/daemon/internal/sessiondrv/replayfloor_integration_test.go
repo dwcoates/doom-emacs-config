@@ -156,7 +156,7 @@ func historyCompact(seq uint64, dedupKey, summary string) *corev1.Event {
 	return &corev1.Event{
 		SessionId: "vendor-uuid", Seq: seq, DedupKey: dedupKey,
 		Payload: &corev1.Event_ContextCompacted{ContextCompacted: &corev1.ContextCompacted{
-			PreTokens: 180000, PostTokens: 24000, Summary: summary, Result: "success",
+			PreTokens: 180000, PostTokens: 24000, Summary: summary,
 		}},
 	}
 }

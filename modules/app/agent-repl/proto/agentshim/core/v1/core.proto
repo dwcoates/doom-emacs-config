@@ -254,8 +254,6 @@ message ContextCompacted {
   int64 post_tokens = 3;
   int64 duration_ms = 4;
   string summary = 5;
-  string result = 6;  // "success" | "failed"
-  string error = 7;   // populated only when result is "failed"
 }
 
 message TaskStarted {

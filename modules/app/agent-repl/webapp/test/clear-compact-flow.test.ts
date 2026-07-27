@@ -97,7 +97,6 @@ function compactItem(over: Record<string, unknown> = {}, uuid = "cut-compact"): 
       postTokens: "9001",
       durationMs: "4200",
       summary: "the story so far",
-      result: "success",
       ...over,
     },
   };
@@ -228,23 +227,6 @@ describe("a compaction's summary", () => {
   });
 });
 
-describe("a FAILED compaction", () => {
-  it("surfaces the daemon's reason and draws no summary bubble", () => {
-    // Arrange — the daemon reported a failure; a rule with no word about it
-    // would be the feed swallowing that report.
-    vi.spyOn(Date, "now").mockReturnValue(NOW_MS);
-    // Act
-    const f = live([
-      promptItem("u1", "/compact"),
-      compactItem({ summary: "", result: "failed", error: "context window exceeded" }),
-    ]);
-    // Assert
-    expect(f.container.querySelector(".compact-error")?.textContent).toContain(
-      "context window exceeded",
-    );
-    expect(f.container.querySelector(".compact-summary")).toBeNull();
-  });
-});
 
 describe("a clear that opens an EMPTY conversation", () => {
   it("draws the red rule alone, with no other node in the feed", () => {

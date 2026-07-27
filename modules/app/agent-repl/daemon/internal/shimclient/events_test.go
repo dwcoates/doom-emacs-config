@@ -151,7 +151,7 @@ func TestEventRouting(t *testing.T) {
 		},
 		{
 			name: "context compacted to frame sink",
-			ev:   &corev1.Event{SessionId: "s", Payload: &corev1.Event_ContextCompacted{ContextCompacted: &corev1.ContextCompacted{Result: "success"}}},
+			ev:   &corev1.Event{SessionId: "s", Payload: &corev1.Event_ContextCompacted{ContextCompacted: &corev1.ContextCompacted{}}},
 			want: "frame",
 		},
 		{

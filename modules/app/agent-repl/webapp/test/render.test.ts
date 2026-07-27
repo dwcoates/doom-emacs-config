@@ -485,8 +485,6 @@ function compacted(over: Partial<ContextCompactedItem> = {}): ContextCompactedIt
     postTokens: 9001,
     durationMs: 4200,
     summary: "the story so far",
-    result: "success",
-    error: "",
     ...over,
   };
 }
@@ -611,33 +609,6 @@ describe("context compaction", () => {
     expect(html).not.toContain("manual");
   });
 
-  it("says so when the compaction FAILED", () => {
-    // Arrange + Act
-    const html = renderItem(compacted({ result: "failed", error: "context window exceeded" }));
-    // Assert — the daemon's report is drawn, never swallowed.
-    expect(html).toContain("compaction failed: context window exceeded");
-  });
-
-  it("says a failure happened even when the daemon gave no reason", () => {
-    // Arrange + Act
-    const html = renderItem(compacted({ result: "failed", error: "" }));
-    // Assert
-    expect(html).toContain("compaction failed");
-  });
-
-  it("escapes a failure reason rather than injecting it as markup", () => {
-    // Arrange + Act
-    const html = renderItem(compacted({ result: "failed", error: "<img onerror=x>" }));
-    // Assert
-    expect(html).toContain("&lt;img onerror=x&gt;");
-  });
-
-  it("draws no failure line for a successful compaction", () => {
-    // Arrange + Act
-    const html = renderItem(compacted());
-    // Assert
-    expect(html).not.toContain("compact-error");
-  });
 });
 
 describe("renderItem", () => {
@@ -5662,8 +5633,6 @@ describe("FeedRenderer: a clear or a compaction truncates the feed", () => {
       postTokens: 9001,
       durationMs: 4200,
       summary: "the story so far",
-      result: "success",
-      error: "",
     };
   }
 

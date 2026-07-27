@@ -50,7 +50,6 @@ func TestContextCompactedCuratesIntoItsArm(t *testing.T) {
 		PostTokens: 24000,
 		DurationMs: 4200,
 		Summary:    "we were refactoring the curator",
-		Result:     "success",
 	}
 	ev := &corev1.Event{
 		SessionId: "s1", Seq: 88, ProducedAtMs: producedMs, DedupKey: "compact:b-1",
