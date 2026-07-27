@@ -581,7 +581,7 @@ title are rendered with `agent-repl-dump-section' / `agent-repl-dump-title'
 faces so they stand out visually in the help buffer."
   (interactive)
   (let* ((ws (agent-repl--read-known-workspace "Dump workspace: "))
-         (plist (gethash ws agent-repl--workspaces))
+         (plist (agent-repl--ws-plist ws))
          (alist (agent-repl--dump-plist-to-alist plist))
          (partition (agent-repl--dump-partition
                      alist agent-repl--dump-sections)))
