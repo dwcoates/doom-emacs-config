@@ -262,6 +262,29 @@ func TestSeqStoreIgnoresOtherConversations(t *testing.T) {
 	}
 }
 
+func TestSeqStoreSeparatesTheSameUUIDAcrossRootsAndWorkspaces(t *testing.T) {
+	// Arrange: vendor uuids are not globally unique across account roots, and
+	// the same uuid under another cwd names another transcript/store sequence.
+	reg := openTestRegistry(t)
+	for _, rec := range []registry.Record{
+		{SessionID: "s_a", ConfigDir: "/cfg-a", CWD: "/w", ClaudeSessionID: "shared", LastSeq: 101},
+		{SessionID: "s_b", ConfigDir: "/cfg-b", CWD: "/w", ClaudeSessionID: "shared", LastSeq: 202},
+		{SessionID: "s_c", ConfigDir: "/cfg-a", CWD: "/other", ClaudeSessionID: "shared", LastSeq: 303},
+	} {
+		if err := reg.Put(rec); err != nil {
+			t.Fatalf("Put(%s): %v", rec.SessionID, err)
+		}
+	}
+	store := NewRegistrySeqStore(reg, nil)
+
+	// Act / Assert.
+	for id, want := range map[string]uint64{"s_a": 101, "s_b": 202, "s_c": 303} {
+		if got := store.LastSeq(id); got != want {
+			t.Fatalf("LastSeq(%s) = %d, want %d", id, got, want)
+		}
+	}
+}
+
 func TestSeqStoreUsesItsOwnMarkBeforeTheConversationIsKnown(t *testing.T) {
 	// Arrange: a brand-new session has no vendor uuid until system:init.
 	reg := openTestRegistry(t)
