@@ -262,18 +262,24 @@ func (m *Manager) Ensure(workspace string) error {
 	return err
 }
 
-// SessionInits returns a SessionInitView for every live session whose SystemInit
-// has landed, sorted by workspace for a stable connect snapshot (task step 4:
-// StateSnapshot.inits). A session with no init yet contributes nothing.
-func (m *Manager) SessionInits() []*frontendv1.SessionInitView {
+// snapshotDrivers copies the currently live driver set without holding the
+// manager lock while callers inspect per-driver consumer state.
+func (m *Manager) snapshotDrivers() []*driven {
 	m.mu.Lock()
 	drivers := make([]*driven, 0, len(m.byWS))
 	for _, d := range m.byWS {
 		drivers = append(drivers, d)
 	}
 	m.mu.Unlock()
+	return drivers
+}
+
+// SessionInits returns a SessionInitView for every live session whose SystemInit
+// has landed, sorted by workspace for a stable connect snapshot (task step 4:
+// StateSnapshot.inits). A session with no init yet contributes nothing.
+func (m *Manager) SessionInits() []*frontendv1.SessionInitView {
 	var out []*frontendv1.SessionInitView
-	for _, d := range drivers {
+	for _, d := range m.snapshotDrivers() {
 		if si := d.consumer.latestSystemInit(); si != nil {
 			out = append(out, &frontendv1.SessionInitView{
 				Workspace: d.workspace,
