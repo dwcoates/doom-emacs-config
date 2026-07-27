@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyStreamDelta,
   blockKey,
+  insertBySeq,
   phaseOf,
   previewBlockId,
   recordBlockIdentity,
@@ -89,6 +90,52 @@ describe("blockKey", () => {
   });
 });
 
+// --- feed order ---------------------------------------------------------------
+
+describe("insertBySeq", () => {
+  it("slots a lower-seq item above a higher-seq one already mounted", () => {
+    // A replayed history item must pass the live item that beat it to the
+    // socket — arrival order is interleave, not conversation order.
+    const items: ConversationItem[] = [];
+    insertBySeq(items, preview({ blockId: "live" }), 100);
+    insertBySeq(items, preview({ blockId: "history" }), 5);
+    expect(items.map((i) => (i as TextItem).blockId)).toEqual(["history", "live"]);
+  });
+
+  it("keeps arrival order for equal seqs", () => {
+    // Items of one delta share its through-seq and must not reorder.
+    const items: ConversationItem[] = [];
+    insertBySeq(items, preview({ blockId: "first" }), 7);
+    insertBySeq(items, preview({ blockId: "second" }), 7);
+    expect(items.map((i) => (i as TextItem).blockId)).toEqual(["first", "second"]);
+  });
+
+  it("ranks an unranked standing item oldest", () => {
+    // A fixture item minted before ranking existed never blocks a ranked
+    // insert from landing after it.
+    const items: ConversationItem[] = [preview({ blockId: "unranked" })];
+    insertBySeq(items, preview({ blockId: "ranked" }), 1);
+    expect(items.map((i) => (i as TextItem).blockId)).toEqual(["unranked", "ranked"]);
+  });
+
+  it("stamps the rank onto the item", () => {
+    const items: ConversationItem[] = [];
+    insertBySeq(items, preview(), 42);
+    expect(items[0].seq).toBe(42);
+  });
+});
+
+describe("settle keeps the standing rank", () => {
+  it("a record claiming its preview keeps the preview's rank, not its own", () => {
+    // A settle replaces content, never position: moving the block would
+    // remount its DOM node and re-type prose already on screen.
+    const items: ConversationItem[] = [];
+    applyStreamDelta(items, delta(), TS, 3);
+    settleStreamedBlock(items, finished(), 9);
+    expect(items[0].seq).toBe(3);
+  });
+});
+
 // --- open / grow ------------------------------------------------------------
 
 describe("applyStreamDelta opens a block", () => {
@@ -96,7 +143,7 @@ describe("applyStreamDelta opens a block", () => {
     // Arrange
     const items: ConversationItem[] = [];
     // Act
-    applyStreamDelta(items, delta({ messageId: "msg_1", blockIndex: 3 }), TS);
+    applyStreamDelta(items, delta({ messageId: "msg_1", blockIndex: 3 }), TS, 0);
     // Assert
     expect((items[0] as TextItem).blockId).toBe("msg_1:3");
   });
@@ -105,7 +152,7 @@ describe("applyStreamDelta opens a block", () => {
     // Arrange
     const items: ConversationItem[] = [];
     // Act
-    applyStreamDelta(items, delta({ kind: "thinking" }), TS);
+    applyStreamDelta(items, delta({ kind: "thinking" }), TS, 0);
     // Assert
     expect(items[0]!.kind).toBe("thinking");
   });
@@ -114,7 +161,7 @@ describe("applyStreamDelta opens a block", () => {
     // Arrange
     const items: ConversationItem[] = [];
     // Act
-    applyStreamDelta(items, delta(), TS);
+    applyStreamDelta(items, delta(), TS, 0);
     // Assert
     expect((items[0] as TextItem).ts).toBe(TS);
   });
@@ -125,7 +172,7 @@ describe("applyStreamDelta grows a block", () => {
     // Arrange
     const items: ConversationItem[] = [preview({ text: "Hel" })];
     // Act
-    applyStreamDelta(items, delta({ delta: "lo" }), TS);
+    applyStreamDelta(items, delta({ delta: "lo" }), TS, 0);
     // Assert
     expect((items[0] as TextItem).text).toBe("Hello");
   });
@@ -135,7 +182,7 @@ describe("applyStreamDelta grows a block", () => {
     // Arrange
     const items: ConversationItem[] = [finished({ blockId: "msg_1:0", text: "Hel" })];
     // Act
-    applyStreamDelta(items, delta({ delta: "lo" }), TS);
+    applyStreamDelta(items, delta({ delta: "lo" }), TS, 0);
     // Assert
     expect((items[0] as TextItem).done).toBe(false);
   });
@@ -144,7 +191,7 @@ describe("applyStreamDelta grows a block", () => {
     // Arrange
     const items: ConversationItem[] = [preview()];
     // Act
-    applyStreamDelta(items, delta({ blockIndex: 1 }), TS);
+    applyStreamDelta(items, delta({ blockIndex: 1 }), TS, 0);
     // Assert
     expect(items).toHaveLength(2);
   });
@@ -170,7 +217,7 @@ describe("applyStreamDelta grows tool input", () => {
     // Arrange
     const items: ConversationItem[] = [toolItem()];
     // Act
-    applyStreamDelta(items, delta({ kind: "input_json", delta: '{"a":1}' }), TS);
+    applyStreamDelta(items, delta({ kind: "input_json", delta: '{"a":1}' }), TS, 0);
     // Assert
     expect((items[0] as ToolItem).inputJson).toBe('{"a":1}');
   });
@@ -182,7 +229,7 @@ describe("applyStreamDelta grows tool input", () => {
       toolItem({ toolUseId: "tu2" }),
     ];
     // Act
-    applyStreamDelta(items, delta({ kind: "input_json", delta: "x" }), TS);
+    applyStreamDelta(items, delta({ kind: "input_json", delta: "x" }), TS, 0);
     // Assert
     expect((items[1] as ToolItem).inputJson).toBe("x");
   });
@@ -193,7 +240,7 @@ describe("applyStreamDelta grows tool input", () => {
     // Arrange
     const items: ConversationItem[] = [];
     // Act
-    const outcome = applyStreamDelta(items, delta({ kind: "input_json", blockIndex: 4 }), TS);
+    const outcome = applyStreamDelta(items, delta({ kind: "input_json", blockIndex: 4 }), TS, 0);
     // Assert
     expect(outcome).toEqual({ changed: false, reason: "no-open-tool", blockId: "msg_1:4" });
   });
@@ -206,8 +253,7 @@ describe("settleStreamedBlock", () => {
     // Arrange
     const items: ConversationItem[] = [preview()];
     // Act
-    settleStreamedBlock(items, finished());
-    // Assert
+    settleStreamedBlock(items, finished(), 0);    // Assert
     expect(items).toHaveLength(1);
   });
 
@@ -215,8 +261,7 @@ describe("settleStreamedBlock", () => {
     // Arrange
     const items: ConversationItem[] = [preview({ blockId: "msg_1:5" })];
     // Act
-    settleStreamedBlock(items, finished());
-    // Assert
+    settleStreamedBlock(items, finished(), 0);    // Assert
     expect((items[0] as TextItem).blockId).toBe("msg_1:5");
   });
 
@@ -224,8 +269,7 @@ describe("settleStreamedBlock", () => {
     // Arrange
     const items: ConversationItem[] = [preview({ text: "Hel" })];
     // Act
-    settleStreamedBlock(items, finished({ text: "Hello" }));
-    // Assert
+    settleStreamedBlock(items, finished({ text: "Hello" }), 0);    // Assert
     expect((items[0] as TextItem).text).toBe("Hello");
   });
 
@@ -235,8 +279,7 @@ describe("settleStreamedBlock", () => {
       { kind: "thinking", blockId: "msg_1:0", messageId: "msg_1", text: "hmm", done: false },
     ];
     // Act
-    settleStreamedBlock(items, finished());
-    // Assert
+    settleStreamedBlock(items, finished(), 0);    // Assert
     expect(items).toHaveLength(2);
   });
 
@@ -244,8 +287,7 @@ describe("settleStreamedBlock", () => {
     // Arrange
     const items: ConversationItem[] = [preview({ messageId: "msg_OTHER" })];
     // Act
-    settleStreamedBlock(items, finished());
-    // Assert
+    settleStreamedBlock(items, finished(), 0);    // Assert
     expect(items).toHaveLength(2);
   });
 
@@ -253,8 +295,7 @@ describe("settleStreamedBlock", () => {
     // Arrange
     const items: ConversationItem[] = [preview({ parentToolUseId: "tu9" })];
     // Act
-    settleStreamedBlock(items, finished());
-    // Assert
+    settleStreamedBlock(items, finished(), 0);    // Assert
     expect(items).toHaveLength(2);
   });
 
@@ -264,8 +305,7 @@ describe("settleStreamedBlock", () => {
     // Arrange
     const items: ConversationItem[] = [finished({ blockId: "msg_1:0", done: false })];
     // Act
-    settleStreamedBlock(items, finished({ uuid: "env2:0" }));
-    // Assert
+    settleStreamedBlock(items, finished({ uuid: "env2:0" }), 0);    // Assert
     expect(items).toHaveLength(2);
   });
 
@@ -276,8 +316,7 @@ describe("settleStreamedBlock", () => {
       preview({ blockId: "msg_1:1", text: "b" }),
     ];
     // Act
-    settleStreamedBlock(items, finished({ text: "first" }));
-    // Assert
+    settleStreamedBlock(items, finished({ text: "first" }), 0);    // Assert
     expect((items[0] as TextItem).text).toBe("first");
   });
 
@@ -285,8 +324,7 @@ describe("settleStreamedBlock", () => {
     // Arrange
     const items: ConversationItem[] = [finished({ blockId: "msg_1:0" })];
     // Act
-    settleStreamedBlock(items, finished());
-    // Assert
+    settleStreamedBlock(items, finished(), 0);    // Assert
     expect(items).toHaveLength(1);
   });
 
@@ -294,8 +332,7 @@ describe("settleStreamedBlock", () => {
     // Arrange
     const items: ConversationItem[] = [];
     // Act
-    settleStreamedBlock(items, finished());
-    // Assert
+    settleStreamedBlock(items, finished(), 0);    // Assert
     expect(items).toHaveLength(1);
   });
 });
