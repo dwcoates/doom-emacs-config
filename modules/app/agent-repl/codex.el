@@ -327,17 +327,30 @@ carries a codex `:backend' override, or an explicit
 `agent-repl-codex-home' is configured.  The boundp guards keep this
 callable from `doom doctor''s standalone load, where the module proper
 is not loaded."
-  (or (and (boundp 'agent-repl-default-backend)
-           (eq agent-repl-default-backend 'codex))
-      (and (boundp 'agent-repl--workspaces)
-           (hash-table-p agent-repl--workspaces)
-           (catch 'found
-             (maphash (lambda (_ws plist)
-                        (when (eq (plist-get plist :backend) 'codex)
-                          (throw 'found t)))
-                      agent-repl--workspaces)
-             nil))
-      agent-repl-codex-home))
+  (let* ((default-backend (and (boundp 'agent-repl-default-backend)
+                               agent-repl-default-backend))
+         (default-codex-p (eq default-backend 'codex))
+         ;; `doom doctor' loads this file without workspace.el.  In normal
+         ;; module loads, query every registered name so tombstoned codex
+         ;; workspaces retain the exact semantics of the old registry scan.
+         (workspace-api-p (and (fboundp 'agent-repl--ws-registered-names)
+                               (fboundp 'agent-repl--ws-get)))
+         (registered-names (and workspace-api-p
+                                (agent-repl--ws-registered-names)))
+         (workspace-codex-p
+          (and workspace-api-p
+               (cl-some (lambda (ws)
+                          (eq (agent-repl--ws-get ws :backend) 'codex))
+                        registered-names)))
+         (result (or default-codex-p workspace-codex-p
+                     agent-repl-codex-home)))
+    (when (fboundp 'agent-repl--log)
+      (agent-repl--log
+       nil
+       "codex-in-use-p: default-backend=%S default-codex-p=%s workspace-api-p=%s registered-names=%S workspace-codex-p=%s codex-home=%S result=%S"
+       default-backend default-codex-p workspace-api-p registered-names
+       workspace-codex-p agent-repl-codex-home result))
+    result))
 
 (defun agent-repl--codex-doctor-issues ()
   "Return a list of (LEVEL . MESSAGE) describing codex-backend problems.

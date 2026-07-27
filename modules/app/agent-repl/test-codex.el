@@ -397,6 +397,34 @@ The git-check skip is mandatory: headless spawns run from
       (agent-repl--ws-put "ws1" :backend 'codex)
       (should (agent-repl--codex-in-use-p)))))
 
+(ert-deftest agent-repl-test-codex-doctor-in-use-via-tombstoned-ws-backend ()
+  "A tombstoned registered workspace preserves the codex in-use signal."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl-codex-home nil)
+          (agent-repl-default-backend 'claude))
+      (agent-repl--ws-put "gone" :project-dir "/tmp/p")
+      (agent-repl--ws-put "gone" :backend 'codex)
+      (agent-repl--ws-put "gone" :nuked-at 123)
+      (should (member "gone" (agent-repl--ws-registered-names)))
+      (should-not (agent-repl--ws-live-p "gone"))
+      (should (agent-repl--codex-in-use-p)))))
+
+(ert-deftest agent-repl-test-codex-in-use-queries-workspace-api ()
+  "Codex backend discovery traverses the workspace-owned query seam."
+  (let ((agent-repl-codex-home nil)
+        (agent-repl-default-backend 'claude)
+        (seen nil))
+    (cl-letf (((symbol-function 'agent-repl--ws-registered-names)
+               (lambda () '("claude-ws" "codex-ws")))
+              ((symbol-function 'agent-repl--ws-get)
+               (lambda (ws key)
+                 (push (cons ws key) seen)
+                 (if (equal ws "codex-ws") 'codex 'claude))))
+      (should (agent-repl--codex-in-use-p))
+      (should (equal (nreverse seen)
+                     '(("claude-ws" . :backend)
+                       ("codex-ws" . :backend)))))))
+
 ;;;; ---- Tests: registration ----
 
 (ert-deftest agent-repl-test-codex-backend-registered ()
