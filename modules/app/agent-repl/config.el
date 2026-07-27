@@ -132,29 +132,52 @@ separately defined so the recovery is self-contained.  Registered in
 test-time runtime guards see it and tests cannot accidentally shell
 out to real `git'."
   (with-temp-buffer
-    (let ((exit-code (apply #'call-process "git" nil t nil args))) ;; ALLOW-EXTERNAL-BOUNDARY
-      (if (zerop exit-code)
-          (string-trim (buffer-string))
-        ""))))
+    (agent-repl--boot-info "early-git-string: invoking args=%S" args)
+    (let* ((exit-code (apply #'call-process "git" nil t nil args)) ;; ALLOW-EXTERNAL-BOUNDARY
+           (stdout (string-trim (buffer-string)))
+           (success-p (zerop exit-code)))
+      (agent-repl--boot-info
+       "early-git-string: args=%S exit=%d success=%s stdout=%S"
+       args exit-code success-p stdout)
+      (if success-p stdout ""))))
 
 (defun agent-repl--early-git-exit-code (&rest args)
   "Run `git ARGS' synchronously and return its exit code (stdout discarded).
 Sibling to `agent-repl--early-git-string'; see that function's
 docstring for the architectural context.  Registered in
 `agent-repl--external-boundary-functions' (core.el)."
-  (apply #'call-process "git" nil nil nil args)) ;; ALLOW-EXTERNAL-BOUNDARY
+  (agent-repl--boot-info "early-git-exit-code: invoking args=%S" args)
+  (let ((exit-code (apply #'call-process "git" nil nil nil args))) ;; ALLOW-EXTERNAL-BOUNDARY
+    (agent-repl--boot-info "early-git-exit-code: args=%S exit=%d success=%s"
+                           args exit-code (zerop exit-code))
+    exit-code))
 
 (defun agent-repl--early-cherry-pick-head-at (target-dir)
   "Return the path to CHERRY_PICK_HEAD for TARGET-DIR's repo, or nil.
 Resolves the git dir via `git rev-parse --absolute-git-dir' so a linked
 worktree (whose `.git' is a file pointing into the parent
 `.git/worktrees/<name>') is handled correctly."
-  (when (and target-dir (file-directory-p target-dir))
+  (cond
+   ((null target-dir)
+    (agent-repl--boot-info "early-recovery: CHERRY_PICK_HEAD probe skipped; target-dir=nil")
+    nil)
+   ((not (file-directory-p target-dir))
+    (agent-repl--boot-info "early-recovery: CHERRY_PICK_HEAD probe skipped; target-dir=%S is not a directory"
+                           target-dir)
+    nil)
+   (t
     (let ((git-dir (agent-repl--early-git-string
                     "-C" target-dir "rev-parse" "--absolute-git-dir")))
-      (and (not (string-empty-p git-dir))
-           (let ((cp-head (expand-file-name "CHERRY_PICK_HEAD" git-dir)))
-             (and (file-exists-p cp-head) cp-head))))))
+      (if (string-empty-p git-dir)
+          (progn
+            (agent-repl--boot-info "early-recovery: CHERRY_PICK_HEAD probe target-dir=%S resolved no git-dir"
+                                   target-dir)
+            nil)
+        (let* ((cp-head (expand-file-name "CHERRY_PICK_HEAD" git-dir))
+               (present-p (file-exists-p cp-head)))
+          (agent-repl--boot-info "early-recovery: CHERRY_PICK_HEAD probe target-dir=%S git-dir=%S path=%S present=%s"
+                                 target-dir git-dir cp-head present-p)
+          (and present-p cp-head)))))))
 
 (defun agent-repl--early-abort-cherry-pick (target-dir)
   "Run `git -C TARGET-DIR cherry-pick --abort'; return the exit code."
@@ -167,9 +190,11 @@ Resolved with ONLY built-in Elisp because this runs before `core.el'
 defines `agent-repl--global-state-file'; the resolution must stay
 byte-for-byte equivalent to that helper (the `AGENT_REPL_STATE_DIR'
 override, else `~/.claude-emacs')."
-  (expand-file-name
-   "workspaces.el"
-   (expand-file-name (or (getenv "AGENT_REPL_STATE_DIR") "~/.claude-emacs"))))
+  (let ((path (expand-file-name
+               "workspaces.el"
+               (expand-file-name (or (getenv "AGENT_REPL_STATE_DIR") "~/.claude-emacs")))))
+    (agent-repl--boot-info "early-recovery: resolved snapshot path=%S" path)
+    path))
 
 (defun agent-repl--early-recover-orphan-cherry-picks ()
   "Process every in-flight-merge entry in the on-disk workspace snapshot.
@@ -179,14 +204,21 @@ aborts each entry whose `:target-dir' still has a `CHERRY_PICK_HEAD',
 and rewrites the snapshot with `:in-flight-merges' cleared and the
 recovered source workspaces appended to `:merge-queue' for retry."
   (let ((snap-file (agent-repl--early-workspace-snapshot-file)))
-    (when (file-exists-p snap-file)
+    (if (not (file-exists-p snap-file))
+        (agent-repl--boot-info "early-recovery: snapshot path=%S absent; nothing to recover" snap-file)
       (condition-case err
           (let* ((raw (with-temp-buffer
                         (insert-file-contents snap-file)
                         (goto-char (point-min))
                         (read (current-buffer))))
-                 (in-flight (and (consp raw) (keywordp (car raw))
+                 (valid-plist-p (and (consp raw) (keywordp (car raw))))
+                 (in-flight (and valid-plist-p
                                  (plist-get raw :in-flight-merges))))
+            (agent-repl--boot-info "early-recovery: snapshot path=%S parsed valid-plist=%s in-flight=%S"
+                                   snap-file valid-plist-p in-flight)
+            (unless valid-plist-p
+              (agent-repl--boot-warn "early-recovery: snapshot path=%S is not a keyword plist; recovery skipped"
+                                     snap-file))
             (when in-flight
               ;; Early recovery runs pre-core.el, so it emits through the
               ;; bootstrap helpers: progress lines are quiet, dropped/failed
@@ -246,7 +278,7 @@ recovered source workspaces appended to `:merge-queue' for retry."
                   (agent-repl--boot-info "early-recovery: snapshot rewritten — merge-queue=%d in-flight=0 recovered=%d"
                                          (length new-queue) (length recovered))))))
         (error
-         (agent-repl--boot-warn "early-recovery: failed err=%S" err))))))
+         (agent-repl--boot-warn "early-recovery: snapshot path=%S failed err=%S" snap-file err))))))
 
 (agent-repl--early-recover-orphan-cherry-picks)
 
@@ -285,7 +317,9 @@ config-loader top level alongside the early-recovery code."
 ;; `noninteractive' (mirroring core.el's startup log rotate) so batch ERT
 ;; runs neither shell out to real `git' nor depend on the repo state.
 (unless noninteractive
-  (setq agent-repl--version (agent-repl--compute-version)))
+  (setq agent-repl--version (agent-repl--compute-version))
+  (agent-repl--boot-info "version: refreshed config-file=%S sha=%S"
+                         agent-repl--config-file agent-repl--version))
 
 (defun agent-repl-version ()
   "Display the git SHA of the loaded doom config in the echo area.
@@ -293,6 +327,8 @@ Reads the cached `agent-repl--version', refreshed on every load, and
 returns the SHA string (or the sentinel \"unknown\" when undetermined)."
   (interactive)
   (let ((version (or agent-repl--version "unknown")))
+    (agent-repl--log nil "version command: cached-sha=%S display=%S"
+                      agent-repl--version version)
     (message "agent-repl version: %s" version)
     version))
 
@@ -415,9 +451,12 @@ returns the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; because the Doom popup module (and its `set-popup-rule!' macro) is
 ;; absent under `emacs -Q' — the batch ERT suite loads this file but has
 ;; no popup system to configure.
-(when (fboundp 'set-popup-rule!)
-  (set-popup-rule! "^task-notes-.*\\.org\\'"
-    :side 'right :size 0.33 :select t :quit t :autosave t))
+(if (fboundp 'set-popup-rule!)
+    (progn
+      (set-popup-rule! "^task-notes-.*\\.org\\'"
+        :side 'right :size 0.33 :select t :quit t :autosave t)
+      (agent-repl--boot-info "task-notes popup rule installed side=right size=0.33 autosave=t"))
+  (agent-repl--boot-info "task-notes popup rule skipped; set-popup-rule! is unavailable"))
 
 (if agent-repl--load-errors
     (progn
@@ -460,12 +499,18 @@ to disable startup-time restore entirely."
   "Schedule `--load-workspace-snapshot-on-startup' on an idle timer.
 Honours `agent-repl-snapshot-startup-load-delay'; a nil delay disables
 the auto-load entirely.  Intended to run from `emacs-startup-hook'."
-  (when agent-repl-snapshot-startup-load-delay
-    (run-with-idle-timer agent-repl-snapshot-startup-load-delay
-                         nil
-                         #'agent-repl--load-workspace-snapshot-on-startup)))
+  (if agent-repl-snapshot-startup-load-delay
+      (let ((timer (run-with-idle-timer agent-repl-snapshot-startup-load-delay
+                                         nil
+                                         #'agent-repl--load-workspace-snapshot-on-startup)))
+        (agent-repl--boot-info "snapshot-startup: scheduled delay=%S timer=%S callback=%S"
+                               agent-repl-snapshot-startup-load-delay timer
+                               #'agent-repl--load-workspace-snapshot-on-startup)
+        timer)
+    (agent-repl--boot-info "snapshot-startup: disabled delay=nil")))
 
 (add-hook 'emacs-startup-hook #'agent-repl--schedule-snapshot-startup-load)
+(agent-repl--boot-info "snapshot-startup: registered scheduler on emacs-startup-hook")
 
 (provide 'agent-repl)
 ;;; config.el ends here
