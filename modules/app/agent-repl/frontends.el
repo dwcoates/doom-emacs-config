@@ -42,6 +42,7 @@
 (require 'cl-lib)
 
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
+(declare-function agent-repl--log-verbose "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--ws-get "agent-repl-workspace" (ws key))
 (declare-function agent-repl--ws-put "agent-repl-workspace" (ws key val))
 (declare-function agent-repl--ws-backend-name "agent-repl-backend" (ws))
@@ -133,20 +134,32 @@ Signals when FRONTEND is not an `agent-repl-frontend' struct or a
 required slot is missing — a partially-defined frontend is a bug, not
 a configuration to cope with."
   (unless (agent-repl-frontend-p frontend)
+    (agent-repl--log nil "frontend-register: rejected non-frontend value=%S" frontend)
     (error "agent-repl-register-frontend: not a frontend struct: %S" frontend))
   (dolist (slot '(name open-fn boot-fn kill-fn send-fn interrupt-fn running-p-fn
                   supported-backends supported-envs))
     (unless (funcall (intern (format "agent-repl-frontend-%s" slot)) frontend)
+      (agent-repl--log nil "frontend-register: rejected frontend=%S missing-slot=%s"
+                       (agent-repl-frontend-name frontend) slot)
       (error "agent-repl-register-frontend: frontend %S is missing slot %s"
              (agent-repl-frontend-name frontend) slot)))
-  (puthash (agent-repl-frontend-name frontend) frontend agent-repl--frontends))
+  (puthash (agent-repl-frontend-name frontend) frontend agent-repl--frontends)
+  (agent-repl--log nil "frontend-register: frontend=%s backends=%S envs=%S"
+                   (agent-repl-frontend-name frontend)
+                   (agent-repl-frontend-supported-backends frontend)
+                   (agent-repl-frontend-supported-envs frontend)))
 
-(defun agent-repl-frontend-get (name)
+(defun agent-repl-frontend-get (name &optional ws)
   "Return the registered frontend named NAME (a symbol).
 Signals when no such frontend is registered — callers must never
 silently fall back to a different presentation."
-  (or (gethash name agent-repl--frontends)
-      (error "agent-repl-frontend-get: no frontend registered under `%s'" name)))
+  (let ((frontend (gethash name agent-repl--frontends)))
+    (if frontend
+        (progn
+          (agent-repl--log-verbose ws "frontend-get: frontend=%s found=t" name)
+          frontend)
+      (agent-repl--log ws "frontend-get: frontend=%s found=nil -> error" name)
+      (error "agent-repl-frontend-get: no frontend registered under `%s'" name))))
 
 (defun agent-repl--frontend-names ()
   "Return the list of registered frontend name symbols."
@@ -175,14 +188,22 @@ frontend is registered."
   :type 'symbol
   :group 'agent-repl)
 
-(defun agent-repl--frontend-supports-ws-p (fe backend env)
+(defun agent-repl--frontend-supports-ws-p (fe backend env &optional ws)
   "Return non-nil when frontend FE can drive BACKEND in ENV.
 ENV nil (the workspace's `:active-env' is not hydrated yet) constrains
 nothing — the environment axis only rules a frontend out once the
 workspace has actually declared one."
-  (and (memq backend (agent-repl-frontend-supported-backends fe))
-       (or (null env)
-           (memq env (agent-repl-frontend-supported-envs fe)))))
+  (let* ((backend-supported (memq backend (agent-repl-frontend-supported-backends fe)))
+         (env-unhydrated (null env))
+         (env-supported (or env-unhydrated
+                            (memq env (agent-repl-frontend-supported-envs fe))))
+         (supported (and backend-supported env-supported)))
+    ;; This runs once for every registry candidate during resolution.
+    (agent-repl--log-verbose
+     ws "frontend-supports: frontend=%s backend=%s backend-supported=%s env=%s env-unhydrated=%s env-supported=%s supported=%s"
+     (agent-repl-frontend-name fe) backend backend-supported env env-unhydrated
+     env-supported supported)
+    supported))
 
 (defun agent-repl--frontend-default-for-ws (ws)
   "Return the frontend name a workspace WS with no `:frontend' is presented under.
@@ -199,18 +220,23 @@ registered frontend can drive the pair, that IS a failure, and it
 signals."
   (let* ((backend (agent-repl--ws-backend-name ws))
          (env (agent-repl--ws-get ws :active-env))
-         (default (agent-repl-frontend-get agent-repl-default-frontend)))
-    (if (agent-repl--frontend-supports-ws-p default backend env)
-        (agent-repl-frontend-name default)
+         (default (agent-repl-frontend-get agent-repl-default-frontend ws)))
+    (if (agent-repl--frontend-supports-ws-p default backend env ws)
+        (let ((resolved (agent-repl-frontend-name default)))
+          (agent-repl--log ws "default-for-ws: backend=%s env=%s default=%s default-supported=t resolved=%s"
+                           backend env agent-repl-default-frontend resolved)
+          resolved)
       (let ((capable (seq-find (lambda (name)
                                  (agent-repl--frontend-supports-ws-p
-                                  (agent-repl-frontend-get name) backend env))
+                                  (agent-repl-frontend-get name ws) backend env ws))
                                (agent-repl--frontend-names))))
         (unless capable
+          (agent-repl--log ws "default-for-ws: backend=%s env=%s default=%s default-supported=nil capable=nil -> error"
+                           backend env agent-repl-default-frontend)
           (error "agent-repl: no registered frontend can drive backend `%s' in env `%s' (ws=%s)"
                  backend env ws))
-        (agent-repl--log ws "default-for-ws: %s cannot drive %s/%s — resolving to %s"
-                         agent-repl-default-frontend backend env capable)
+        (agent-repl--log ws "default-for-ws: backend=%s env=%s default=%s default-supported=nil resolved=%s"
+                         backend env agent-repl-default-frontend capable)
         capable))))
 
 (defun agent-repl--ws-frontend-name (ws)
@@ -233,36 +259,49 @@ workspace that only ever rode the default follow the default forward
 if it is ever changed, instead of being pinned to whatever it happened
 to open under once."
   (agent-repl--ws-put ws :frontend name)
-  (agent-repl--ws-put ws :frontend-explicit t))
+  (agent-repl--ws-put ws :frontend-explicit t)
+  (agent-repl--log ws "ws-choose-frontend: frontend=%s explicit=t" name))
 
 (defun agent-repl--ws-frontend (ws)
   "Return the resolved frontend struct for workspace WS.
 Signals via `agent-repl-frontend-get' when the named frontend is not
 registered."
-  (agent-repl-frontend-get (agent-repl--ws-frontend-name ws)))
+  (agent-repl-frontend-get (agent-repl--ws-frontend-name ws) ws))
 
 (defun agent-repl--ws-gui-frontend-p (ws)
   "Return non-nil when WS's frontend is the web GUI."
-  (eq (agent-repl--ws-frontend-name ws) 'gui))
+  (let* ((frontend (agent-repl--ws-frontend-name ws))
+         (gui-p (eq frontend 'gui)))
+    (agent-repl--log-verbose ws "ws-gui-frontend-p: frontend=%s gui-p=%s" frontend gui-p)
+    gui-p))
 
-(defun agent-repl--frontend-validate-pair (frontend-name backend-name &optional env)
+(defun agent-repl--frontend-validate-pair (frontend-name backend-name &optional env ws)
   "Signal `user-error' unless FRONTEND-NAME can drive BACKEND-NAME in ENV.
 ENV, when non-nil, is the workspace's `:active-env'.  Every registered
 frontend supports the sole surviving environment, so today only the
 BACKEND axis can rule a pair out; the ENV check is what a containerized
 environment would be gated on.
 Returns t when the combination is valid."
-  (let ((fe (agent-repl-frontend-get frontend-name)))
+  (let ((fe (agent-repl-frontend-get frontend-name ws)))
     (unless (memq backend-name (agent-repl-frontend-supported-backends fe))
+      (agent-repl--log ws "frontend-validate-pair: frontend=%s backend=%s env=%s backend-supported=nil supported-backends=%S -> reject"
+                       frontend-name backend-name env
+                       (agent-repl-frontend-supported-backends fe))
       (user-error "agent-repl: the %s frontend cannot drive the %s backend (supported: %s)"
                   frontend-name backend-name
                   (mapconcat #'symbol-name
                              (agent-repl-frontend-supported-backends fe) ", ")))
     (when (and env (not (memq env (agent-repl-frontend-supported-envs fe))))
+      (agent-repl--log ws "frontend-validate-pair: frontend=%s backend=%s env=%s backend-supported=t env-supported=nil supported-envs=%S -> reject"
+                       frontend-name backend-name env
+                       (agent-repl-frontend-supported-envs fe))
       (user-error "agent-repl: the %s frontend cannot run a %s session (supported: %s)"
                   frontend-name env
                   (mapconcat #'symbol-name
                              (agent-repl-frontend-supported-envs fe) ", ")))
+    (agent-repl--log ws "frontend-validate-pair: frontend=%s backend=%s env=%s backend-supported=t env-supported=%s -> accept"
+                     frontend-name backend-name env
+                     (or (null env) (memq env (agent-repl-frontend-supported-envs fe))))
     t))
 
 (defun agent-repl--frontend-validate-for-ws (frontend-name ws)
@@ -271,24 +310,45 @@ The ws-shaped form of `agent-repl--frontend-validate-pair': validates
 both capability axes (WS's backend and its `:active-env')."
   (agent-repl--frontend-validate-pair frontend-name
                                       (agent-repl--ws-backend-name ws)
-                                      (agent-repl--ws-get ws :active-env)))
+                                      (agent-repl--ws-get ws :active-env)
+                                      ws))
 
 ;;;; ---- Dispatch helpers ----------------------------------------------------------
 
 (defun agent-repl--frontend-dispatch-send (ws input raw &optional on-settle)
   "Send one prepared turn through WS's frontend."
-  (funcall (agent-repl-frontend-send-fn (agent-repl--ws-frontend ws))
-           ws input raw on-settle))
+  (let* ((fe (agent-repl--ws-frontend ws))
+         (frontend (agent-repl-frontend-name fe))
+         (result (funcall (agent-repl-frontend-send-fn fe) ws input raw on-settle)))
+    (agent-repl--log ws "frontend-dispatch-send: frontend=%s input-length=%d raw-length=%d input-equals-raw=%s on-settle-p=%s result=%S"
+                     frontend (length input) (length raw) (equal input raw)
+                     (not (null on-settle)) result)
+    result))
 
 (defun agent-repl--frontend-dispatch-interrupt (ws kind)
   "Interrupt WS's in-flight turn through its frontend.
 KIND is `ctrl-c' or `escape' (see the struct docstring)."
-  (funcall (agent-repl-frontend-interrupt-fn (agent-repl--ws-frontend ws))
-           ws kind))
+  (let* ((fe (agent-repl--ws-frontend ws))
+         (frontend (agent-repl-frontend-name fe))
+         (result (funcall (agent-repl-frontend-interrupt-fn fe) ws kind)))
+    (agent-repl--log ws "frontend-dispatch-interrupt: frontend=%s kind=%s result=%S"
+                     frontend kind result)
+    result))
+
+(defun agent-repl--frontend-dispatch-view (ws operation accessor)
+  "Run WS's frontend ACCESSOR for view OPERATION and record its outcome.
+ACCESSOR receives the resolved `agent-repl-frontend' and returns the view
+capability to invoke.  OPERATION is the diagnostic name (`show' or `hide')."
+  (let* ((fe (agent-repl--ws-frontend ws))
+         (frontend (agent-repl-frontend-name fe))
+         (result (funcall (funcall accessor fe) ws)))
+    (agent-repl--log ws "frontend-dispatch-%s: frontend=%s result=%S"
+                     operation frontend result)
+    result))
 
 (defun agent-repl--frontend-dispatch-show (ws)
   "Make WS's already-running session visible through its frontend."
-  (funcall (agent-repl-frontend-show-fn (agent-repl--ws-frontend ws)) ws))
+  (agent-repl--frontend-dispatch-view ws 'show #'agent-repl-frontend-show-fn))
 
 (defun agent-repl--frontend-dispatch-hide (ws)
   "Put WS's view away through its frontend, leaving the session running.
@@ -299,7 +359,7 @@ once for every frontend rather than leaving each frontend to remember it.
 Leaving that to the frontends is exactly how the gui came to close without
 ever marking itself `:inactive' or `:hidden', which in turn left hide-mode
 unable to sweep it."
-  (funcall (agent-repl-frontend-hide-fn (agent-repl--ws-frontend ws)) ws))
+  (agent-repl--frontend-dispatch-view ws 'hide #'agent-repl-frontend-hide-fn))
 
 (defun agent-repl--frontend-boot-session (ws &optional project-dir-hint active-env-hint)
   "Start WS's agent session under WS's own frontend, WITHOUT showing it.
@@ -327,16 +387,20 @@ the pre-hydration resolution below sees the same frontend the running
 session is on."
   (let ((running (agent-repl--ws-frontend ws)))
     (if (funcall (agent-repl-frontend-running-p-fn running) ws)
-        (agent-repl--log ws "boot-session: ws=%s already running on %s — skipping"
-                         ws (agent-repl-frontend-name running))
+        (agent-repl--log ws "boot-session: ws=%s frontend=%s running=t project-dir-hint=%S active-env-hint=%S -> skipping"
+                         ws (agent-repl-frontend-name running) project-dir-hint active-env-hint)
       (agent-repl--initialize-ws-env ws project-dir-hint active-env-hint)
       (let ((fe (agent-repl--ws-frontend ws)))
-        (agent-repl--log ws "boot-session: ws=%s booting on %s merged=%s merge-completed-at=%s"
-                         ws (agent-repl-frontend-name fe)
+        (agent-repl--log ws "boot-session: ws=%s frontend=%s running=nil project-dir-hint=%S active-env-hint=%S hydrated-env=%S merged=%s merge-completed-at=%s -> booting"
+                         ws (agent-repl-frontend-name fe) project-dir-hint active-env-hint
+                         (agent-repl--ws-get ws :active-env)
                          (or (eq (agent-repl--ws-get ws :repl-state) :merged)
                              (eq (agent-repl--ws-get ws :merge-completed) t))
                          (agent-repl--ws-get ws :merge-completed-at))
-        (funcall (agent-repl-frontend-boot-fn fe) ws project-dir-hint active-env-hint)))))
+        (let ((result (funcall (agent-repl-frontend-boot-fn fe) ws project-dir-hint active-env-hint)))
+          (agent-repl--log ws "boot-session: ws=%s frontend=%s -> booted result=%S"
+                           ws (agent-repl-frontend-name fe) result)
+          result)))))
 
 (provide 'frontends)
 
