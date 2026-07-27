@@ -40,6 +40,11 @@ type converted struct {
 func (h *SessionTranscriptHandler) Handle(frames []tail.Frame, ctx *Context) []*corev1.Event {
 	var out []*corev1.Event
 	memo := make([]*converted, len(frames))
+	// A compaction boundary at the very end of a batch is UNSETTLED: its summary
+	// is the next line in the file and may not be written yet. holdCount defers
+	// it (leaving the reader's cursor before it) rather than converting it on
+	// half the evidence — see clearcompact.go.
+	frames = frames[:h.holdCount(memo, frames, ctx)]
 	for i, f := range frames {
 		if f.ParseErr != nil {
 			h.log("transcript: parse failure at %s:%d: %v", ctx.Path, f.Offset, f.ParseErr)
