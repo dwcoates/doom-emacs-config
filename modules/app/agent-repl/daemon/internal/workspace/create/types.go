@@ -38,8 +38,14 @@ type Request struct {
 	Prompt               string          `json:"prompt,omitempty"`
 	Priority             json.RawMessage `json:"priority,omitempty"`
 	ForkFrom             string          `json:"fork_from,omitempty"`
+	ForkSessionID        string          `json:"fork_session_id,omitempty"`
+	SourceWorkspace      string          `json:"source_workspace,omitempty"`
+	SourceDir            string          `json:"source_dir,omitempty"`
 	BaseCommit           string          `json:"base_commit,omitempty"`
 	Model                string          `json:"model,omitempty"`
+	ConfigDir            string          `json:"config_dir,omitempty"`
+	PermissionMode       string          `json:"permission_mode,omitempty"`
+	AllowUngated         bool            `json:"allow_ungated,omitempty"`
 	PostprocessingPrompt string          `json:"postprocessing_prompt,omitempty"`
 	BeforeWSMerge        string          `json:"before_ws_merge,omitempty"`
 	Extra                json.RawMessage `json:"extra,omitempty"`
@@ -64,6 +70,9 @@ type Job struct {
 	Request            Request  `json:"request"`
 	State              JobState `json:"state"`
 	WorktreePath       string   `json:"worktree_path,omitempty"`
+	FinalName          string   `json:"final_name,omitempty"`
+	Branch             string   `json:"branch,omitempty"`
+	ResolvedBaseCommit string   `json:"resolved_base_commit,omitempty"`
 	SessionID          string   `json:"session_id,omitempty"`
 	AvailablePublished bool     `json:"available_published,omitempty"`
 	PromptDelivered    bool     `json:"prompt_delivered,omitempty"`
@@ -87,9 +96,21 @@ func (j Job) validate() error {
 type Available struct {
 	JobID        string
 	Name         string
+	Branch       string
+	BaseCommit   string
 	WorktreePath string
 	SessionID    string
 	Request      Request
+}
+
+// WorktreeResult is the authoritative identity chosen by the daemon.  A
+// requested name may collide, so the resolved name and branch must be durable
+// facts rather than an unrecorded choice inside a git adapter.
+type WorktreeResult struct {
+	Path       string
+	FinalName  string
+	Branch     string
+	BaseCommit string
 }
 
 // HostAction preserves a non-create command for the host frontend.  It is
@@ -100,13 +121,24 @@ type HostAction struct {
 	SourceIndex int             `json:"source_index"`
 	Type        string          `json:"type"`
 	Payload     json.RawMessage `json:"payload"`
-	Delivered   bool            `json:"delivered,omitempty"`
+	Published   bool            `json:"published,omitempty"`
+	Completed   bool            `json:"completed,omitempty"`
+	Failure     string          `json:"failure,omitempty"`
 }
 
-// WorktreeCreator must make the requested worktree exist.  It receives the
-// job ID so real adapters can make this operation idempotent across a crash.
+// WorktreePlanner resolves an immutable worktree identity before any git
+// mutation.  The manager checkpoints its result before asking WorktreeCreator
+// to add the worktree, so a crash cannot turn the job's own branch/path into a
+// fresh collision on recovery.
+type WorktreePlanner interface {
+	PlanWorktree(context.Context, Job) (WorktreeResult, error)
+}
+
+// WorktreeCreator must make the job's already-persisted worktree identity
+// exist.  It receives the job ID so real adapters can make the git operation
+// idempotent across a crash after `git worktree add` succeeds.
 type WorktreeCreator interface {
-	EnsureWorktree(context.Context, Job) (string, error)
+	EnsureWorktree(context.Context, Job) error
 }
 
 // SessionCreator registers the session and starts its waiting shim.  Every
@@ -121,7 +153,12 @@ type SessionHealthChecker interface {
 }
 
 // InitialPromptSubmitter submits a job's held initial prompt after Emacs has
-// acknowledged materialization.  Implementations deduplicate by Job.ID.
+// acknowledged materialization.  Implementations MUST use Job.ID as the
+// vendor-facing idempotency key and durably remember an accepted submit before
+// returning nil: a crash after the shim accepts the prompt but before this
+// manager checkpoints PromptDelivered causes Process to call again.  The
+// ordinary sessiondrv SubmitPrompt API has no such key and is therefore NOT a
+// valid production implementation of this interface.
 type InitialPromptSubmitter interface {
 	SubmitInitialPrompt(context.Context, Job) error
 }
