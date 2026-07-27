@@ -102,7 +102,10 @@ buffer was current when it was created, so without this realignment
 the alignment on every resolve — not only at creation — self-heals a
 buffer that was created (or session-restored) against the wrong dir."
   (let ((buf (or (let ((buf (agent-repl--ws-get ws :input-buffer)))
-                   (and (buffer-live-p buf) buf))
+                   (when (buffer-live-p buf)
+                     (agent-repl--log ws "ensure-input-buffer: ws=%s branch=recorded-live buffer=%s"
+                                       ws (buffer-name buf))
+                     buf))
                  (let ((named (get-buffer (agent-repl--buffer-name "-input" ws))))
                    (when (buffer-live-p named)
                      (agent-repl--log ws "ensure-input-buffer: ws=%s adopting live named buffer %s"
@@ -110,10 +113,16 @@ buffer that was created (or session-restored) against the wrong dir."
                      (agent-repl--ws-put ws :input-buffer named)
                      named))
                  (progn
-                   (agent-repl--log ws "ensure-input-buffer: ws=%s input buffer dead/nil — recreating" ws)
+                   (agent-repl--log ws "ensure-input-buffer: ws=%s branch=recreate recorded=%s named=%s"
+                                     ws
+                                     (agent-repl--safe-buffer-name (agent-repl--ws-get ws :input-buffer))
+                                     (agent-repl--buffer-name "-input" ws))
                    (agent-repl--initialize-input-buffer ws)
                    (agent-repl--ws-get ws :input-buffer)))))
     (agent-repl--align-buffer-to-ws-dir buf ws)
+    (agent-repl--log ws "ensure-input-buffer: ws=%s complete buffer=%s project-dir=%s"
+                      ws (agent-repl--safe-buffer-name buf)
+                      (agent-repl--ws-get ws :project-dir))
     buf))
 
 (defun agent-repl--drain-pending-show-panels (ws)
@@ -148,11 +157,14 @@ still displays magit as before."
         (agent-repl--log ws "drain-pending-magit: ws=%s branch=had-pending path=%s windowless=%s draining"
                           ws path windowless)
         (agent-repl--ws-put ws :pending-magit nil)
-        (when path
-          (if windowless
-              (save-window-excursion (agent-repl--magit-status-same-window path))
-            (agent-repl--magit-status-same-window path))
-          (agent-repl--remove-doom-dashboard)))
+        (if path
+            (progn
+              (if windowless
+                  (save-window-excursion (agent-repl--magit-status-same-window path))
+                (agent-repl--magit-status-same-window path))
+              (agent-repl--remove-doom-dashboard))
+          (agent-repl--log ws "drain-pending-magit: ws=%s branch=missing-project-dir request-cleared=t"
+                            ws)))
     (agent-repl--log-verbose ws "drain-pending-magit: ws=%s branch=no-pending no-op" ws)))
 
 (defun agent-repl--drain-pending-initial-buffers (ws)
@@ -165,18 +177,23 @@ the caller's workspace."
       (let ((path (agent-repl--ws-get ws :project-dir)))
         (agent-repl--log ws "drain-pending-initial-buffers: ws=%s branch=had-pending path=%s draining" ws path)
         (agent-repl--ws-put ws :pending-initial-buffers nil)
-        (when path
-          (agent-repl--open-initial-buffers ws path)))
+        (if path
+            (agent-repl--open-initial-buffers ws path)
+          (agent-repl--log ws "drain-pending-initial-buffers: ws=%s branch=missing-project-dir request-cleared=t"
+                            ws)))
     (agent-repl--log-verbose ws "drain-pending-initial-buffers: ws=%s branch=no-pending no-op" ws)))
 
 (defun agent-repl--maybe-autoselect-input (ws)
   "Select the agent input window for WS if visible and autoselect is enabled.
 Respects `agent-repl-autoselect-input-on-workspace-switch'.
 Window lookup delegates to `agent-repl-window--panel-window'."
-  (when agent-repl-autoselect-input-on-workspace-switch
-    (when-let ((win (agent-repl-window--panel-window :input ws)))
-      (agent-repl--log ws "maybe-autoselect-input: selecting input-win=%s" win)
-      (select-window win))))
+  (if agent-repl-autoselect-input-on-workspace-switch
+      (if-let ((win (agent-repl-window--panel-window :input ws)))
+          (progn
+            (agent-repl--log ws "maybe-autoselect-input: ws=%s branch=select input-win=%s" ws win)
+            (select-window win))
+        (agent-repl--log ws "maybe-autoselect-input: ws=%s branch=no-input-window" ws))
+    (agent-repl--log ws "maybe-autoselect-input: ws=%s branch=disabled" ws)))
 
 (defun agent-repl--stale-panel-windows ()
   "Return a list of windows showing agent panel buffers from a different workspace.
@@ -506,7 +523,9 @@ events (kill, switch, add) are traceable."
   (let* ((ws (agent-repl--ws-current-name))
          (input-buf (agent-repl--ws-get ws :input-buffer))
          (frontend-buf (agent-repl--ws-get ws :frontend-buffer)))
-    (agent-repl--log ws "hide-panels")
+    (agent-repl--log ws "hide-panels: ws=%s input=%s frontend=%s"
+                      ws (agent-repl--safe-buffer-name input-buf)
+                      (agent-repl--safe-buffer-name frontend-buf))
     (agent-repl--close-buffer-windows input-buf frontend-buf)))
 
 (defun agent-repl--save-tab-index (ws)
@@ -544,7 +563,10 @@ close BOOKKEEPING every frontend shares (see the callers,
 leaving a ws-less close somewhere safe to land rather than erroring on
 a frontend that cannot be resolved."
   (if (and ws (agent-repl--ws-gui-frontend-p ws))
-      (agent-repl--frontend-dispatch-hide ws)
+      (progn
+        (agent-repl--log ws "close-view: ws=%s branch=frontend-dispatch" ws)
+        (agent-repl--frontend-dispatch-hide ws))
+    (agent-repl--log ws "close-view: ws=%s branch=direct-teardown" ws)
     (funcall direct-teardown)))
 
 (defun agent-repl--on-simple-close (&optional ws)
@@ -616,6 +638,7 @@ the close is reversible only by an explicit panel-show."
     (let ((rstate (agent-repl--ws-get ws :repl-state)))
       (agent-repl--log ws "unhide-workspace: ws=%s repl-state=%s" ws rstate)
       (when (eq rstate :hidden)
+        (agent-repl--log ws "unhide-workspace: ws=%s branch=transition-hidden-to-active" ws)
         (agent-repl--ws-set-repl-state ws :active)))))
 
 ;;;; Window synchronization
@@ -651,15 +674,24 @@ visible — the input panel's live partner is the webview."
   (when-let ((id (agent-repl--extract-panel-id name)))
     (let* ((is-input (string-match-p agent-repl--input-buffer-re name))
            (partner (agent-repl--partner-buffer-name name id))
-           (result (and (not (one-window-p))
-                        (not (get-buffer-window partner))
+           (one-window (one-window-p))
+           (partner-window (get-buffer-window partner))
+           (loading (and is-input (get-buffer agent-repl-loading-placeholder-name)))
+           (webview-window (and is-input
+                                (get-buffer-window
+                                 (agent-repl--frontend-webview-buffer-name id))))
+           (result (and (not one-window)
+                        (not partner-window)
                         ;; Input panels are not orphaned while loading placeholder is live
                         (or (not is-input)
-                            (and (not (get-buffer agent-repl-loading-placeholder-name))
-                                 (not (get-buffer-window
-                                       (agent-repl--frontend-webview-buffer-name id))))))))
-      (when result
-        (agent-repl--log-verbose (agent-repl--ws-current-name) "orphaned-panel-p: name=%s partner=%s is-orphaned" name partner))
+                            (and (not loading)
+                                 (not webview-window))))))
+      (agent-repl--log-verbose (agent-repl--ws-current-name)
+                                "orphaned-panel-p: name=%s id=%s input=%s partner=%s one-window=%s partner-visible=%s loading=%s webview-visible=%s result=%s"
+                                name id is-input partner one-window
+                                (and partner-window t) (and loading t)
+                                (and webview-window t)
+                                (and result t))
       result)))
 
 (defun agent-repl--own-panel-p (name)
@@ -697,8 +729,13 @@ The guard lives here (and via `agent-repl--own-panel-p'), rather than
 inside `agent-repl--orphaned-panel-p', so the orphan predicate stays a
 pure partner-visibility test and the sweep policy is localized with
 the sweeper."
-  (and (agent-repl--orphaned-panel-p name)
-       (not (agent-repl--own-panel-p name))))
+  (let* ((orphaned (agent-repl--orphaned-panel-p name))
+         (own (and orphaned (agent-repl--own-panel-p name)))
+         (result (and orphaned (not own))))
+    (agent-repl--log-verbose (agent-repl--ws-current-name)
+                              "sweepable-panel-p: name=%s orphaned=%s own=%s result=%s"
+                              name (and orphaned t) (and own t) (and result t))
+    result))
 
 (defun agent-repl--sync-panels ()
   "Close any OTHER workspace's agent panel whose partner is no longer visible.
@@ -781,14 +818,24 @@ Cancels any pending timer and schedules `agent-repl--on-window-change'.")
   "Create the agent input buffer for workspace WS and enable agent-repl-input-mode.
 Errors if the buffer is already initialized (already in
 `agent-repl-input-mode')."
-  (agent-repl--log ws "initialize-input-buffer")
-  (let ((input-buf (agent-repl--create-buffer ws "-input")))
-    (agent-repl--ws-put ws :input-buffer input-buf)
-    (with-current-buffer input-buf
-      (when (eq major-mode 'agent-repl-input-mode)
-        (error "agent-repl--initialize-input-buffer: already initialized ws=%s" ws))
-      (agent-repl-input-mode)
-      (agent-repl--history-restore ws))))
+  ;; Resolve the history root before creating or recording the buffer.  Input
+  ;; initialization is atomic: a workspace without its mandatory project
+  ;; directory must not retain a half-initialized composer after history
+  ;; hydration correctly rejects that workspace.
+  (let ((project-dir (agent-repl--ws-dir ws)))
+    (agent-repl--log ws "initialize-input-buffer: ws=%s project-dir=%s precondition=validated"
+                      ws project-dir)
+    (let ((input-buf (agent-repl--create-buffer ws "-input")))
+      (agent-repl--ws-put ws :input-buffer input-buf)
+      (with-current-buffer input-buf
+        (when (eq major-mode 'agent-repl-input-mode)
+          (agent-repl--log ws "initialize-input-buffer: ws=%s buffer=%s branch=already-initialized"
+                            ws (buffer-name input-buf))
+          (error "agent-repl--initialize-input-buffer: already initialized ws=%s" ws))
+        (agent-repl-input-mode)
+        (agent-repl--log ws "initialize-input-buffer: ws=%s buffer=%s mode=enabled history=restore"
+                          ws (buffer-name input-buf))
+        (agent-repl--history-restore ws)))))
 
 ;;;; Panel show/hide strategies
 
@@ -802,8 +849,13 @@ anywhere upstream (e.g. a buffer redisplayed without the original
 action alist) leaves a side window vulnerable.
 Routing through `agent-repl-window--delete-where' makes the
 side-window skip explicit and parameter-independent."
-  (agent-repl-window--delete-where
-   (lambda (win) (not (eq win (selected-window))))))
+  (let* ((ws (agent-repl--ws-current-name))
+         (selected (selected-window))
+         (deleted (agent-repl-window--delete-where
+                   (lambda (win) (not (eq win selected))))))
+    (agent-repl--log ws "clear-main-area-for-panels: ws=%s selected=%s deleted-count=%d"
+                      ws selected (length deleted))
+    deleted))
 
 (defun agent-repl--hide-and-preserve-status ()
   "Close-and-KILL with full deprio + tab-bar shuffle (the `SPC o C' path).
@@ -897,9 +949,12 @@ push-to-back, no flash.  Bound to `SPC o c'."
 
 (defun agent-repl--sigkill-if-alive (proc)
   "Send SIGKILL to PROC if it is still alive."
-  (when (process-live-p proc)
-    (agent-repl--log (agent-repl--ws-current-name) "sigkill fallback for lingering process")
-    (signal-process proc 'SIGKILL)))
+  (if (process-live-p proc)
+      (progn
+        (agent-repl--log (agent-repl--ws-current-name) "sigkill-if-alive: branch=signal proc=%s" proc)
+        (signal-process proc 'SIGKILL))
+    (agent-repl--log-verbose (agent-repl--ws-current-name)
+                              "sigkill-if-alive: branch=already-dead proc=%s" proc)))
 
 (defun agent-repl--schedule-sigkill (proc)
   "Schedule a SIGKILL for PROC after 0.5s if it's still alive."
