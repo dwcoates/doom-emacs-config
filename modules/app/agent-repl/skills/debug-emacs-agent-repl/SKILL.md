@@ -1,6 +1,6 @@
 ---
 name: debug-emacs-agent-repl
-description: Debug the agent-repl system across all six of its planes — Emacs, daemon, shim, webapp, the SSM state database, and the store data plane — by reading its on-disk logs and directly querying its two SQLite databases, and emphatically recommend adding instrumentation when the evidence lacks coverage of the suspect code path. Use when the user is debugging anything in modules/app/agent-repl/ (workspaces, sentinels, REPL state, autosave, hooks, vterm panels), asks why a workspace is a given color or stuck in a given state (blocked, blue, purple, spinning), reports missing or garbled conversation content, or hits daemon / shim / store / sidecar symptoms. Invoked as /debug-emacs-agent-repl, or by its legacy name /debug-logs.
+description: Debug the agent-repl system across all six of its planes — Emacs, daemon, shim, webapp, the SSM state database, and the store data plane — by reading its on-disk logs and directly querying its two SQLite databases, and emphatically recommend adding instrumentation when the evidence lacks coverage of the suspect code path. Use when the user is debugging anything in modules/app/agent-repl/ (workspaces, sentinels, REPL state, autosave, hooks, frontend panels), asks why a workspace is a given color or stuck in a given state (blocked, blue, purple, spinning), reports missing or garbled conversation content, or hits daemon / shim / store / sidecar symptoms. Invoked as /debug-emacs-agent-repl, or by its legacy name /debug-logs.
 ---
 
 # Debug agent-repl (all planes)
@@ -9,7 +9,7 @@ agent-repl is not one program. It is **six planes**, each with its own evidence,
 
 | Plane | What it is | Primary evidence |
 |---|---|---|
-| **Emacs** | The editor module — workspaces, panels, sentinels, REPL state | `~/.claude-emacs/doom-agent-repl.log`, per-workspace `memory-state.el` (§2) |
+| **Emacs** | The editor module — workspaces, panels, sentinels, REPL state | OS-temporary `doom-agent-repl.log`, workspace log buffers, per-workspace `memory-state.el` (§2) |
 | **Daemon** | The Go process brokering everything | `~/.claude-emacs/claude-repld.log` (§3) |
 | **Shim** | The TypeScript process wrapping the Claude SDK | Same daemon log, prefixed `shim stderr: ` (§3.4) |
 | **Webapp** | The UI inside the Emacs webview | Same daemon log, forwarded client-logs (§3.5) |
@@ -65,28 +65,52 @@ Before concluding "the code is wrong", confirm the running artifact matches the 
 
 The doom agent-repl module writes two on-disk artifacts you can read without an Emacs session:
 
-1. A single rolling **log file** at `~/.claude-emacs/doom-agent-repl.log` (history of events).
+1. A single rolling **log file** under Emacs's OS temporary directory (history of events).
 2. A per-workspace **memory-state snapshot** at `<project-root>/.claude/emacs/memory-state.el` (current full plist).
+
+It also owns one live, in-memory log buffer per workspace (§2.4.1). Those
+buffers are filtered views of the same emitted log stream, not durable files.
 
 ### 2.1 Where the log lives
 
-- Path: `~/.claude-emacs/doom-agent-repl.log` (current Emacs session)
-- Prior session: `~/.claude-emacs/doom-agent-repl.log.prev` (one session retained — clobbered on each startup)
+- Default directory: `<temporary-file-directory>/doom-agent-repl-<uid>/`
+  - `<uid>` is the numeric Unix user ID from `(user-uid)`, not a workspace name.
+  - macOS normally resolves `temporary-file-directory` under its private `/var/folders/.../T/` tree.
+  - Linux commonly resolves it to `/tmp`.
+- Path: `<default-directory>/doom-agent-repl.log` (current module load)
+- Prior load: `<default-directory>/doom-agent-repl.log.prev` (one prior file retained — clobbered on each module load)
 - Configured by `agent-repl-log-file-name` (defcustom in `modules/app/agent-repl/core.el`)
 - Writing is ON by default (`agent-repl-log-to-file` defaults to `t`)
-- Rollover: at Emacs startup the current log is renamed to `.prev`, so the active file always reflects the current session only
+- Rollover: when `core.el` loads, the current log is renamed to `.prev`, so a module reload also rotates it
 - Size cap: 1 GiB (`agent-repl-log-size-cap-bytes`); checked every 1000 writes; over-cap files have their first 80% dropped with a `WARNING: log truncated` line appended
-- The parent directory `~/.claude-emacs/` is created on demand by `agent-repl--logfile-path`
+- The UID-qualified parent directory is created on demand by `agent-repl--logfile-path`, validated as non-symlinked/current-user-owned, and forced to mode 0700; newly created logs are mode 0600
+- Existing logs under `~/.claude-emacs/` are deliberately neither migrated nor consulted
+- On module reload, an already-bound `agent-repl-log-file-name` equal to the retired `~/.claude-emacs/doom-agent-repl.log` default is redirected to the OS-temporary default; the retired file itself remains untouched
 - Toggle at runtime with `M-x agent-repl-debug/toggle-log-to-file`
 
-If the active log is empty, no event has fired yet this session — check `.prev` for the previous session's events.
+Resolve the exact live value inside Emacs with `/runtime-eval-code`:
+
+```elisp
+(expand-file-name agent-repl-log-file-name)
+```
+
+For shell-only inspection of the default path in the same login environment:
+
+```sh
+TEMP_ROOT="${TMPDIR:-/tmp}"
+EMACS_LOG="${TEMP_ROOT%/}/doom-agent-repl-$(id -u)/doom-agent-repl.log"
+```
+
+If `agent-repl-log-file-name` was customized, use the Emacs value rather than
+the shell-derived default. If the active log is empty, no event has fired
+since the last module load — check `${EMACS_LOG}.prev`.
 
 ### 2.2 Line format
 
 Each line:
 
 ```
-HH:MM:SS.mmm [agent-repl] <message-body> {ws=<name> id=<8hex> dir=<path> cst=<claude-state> rst=<repl-state> env=<…> vt=<live|dead|-> in=<live|dead|-> cnt=<n> git=<clean|dirty|-> gproc=<run|done|-> wt=<t|-> fork=<…> rtmr=<t|-> pri=<…> pend=<n> pshow=<t|->}
+HH:MM:SS.mmm [agent-repl] <message-body> {ws=<name> id=<8hex> dir=<path> cst=<agent-state> rst=<repl-state> env=<…> fe=<live|dead|-> in=<live|dead|-> cnt=<n> git=<clean|dirty|-> gproc=<run|done|-> wt=<t|-> fork=<…> rtmr=<t|-> pri=<…> pend=<n> pshow=<t|-> defq=<n>}
 ```
 
 Workspace metadata trails the message. Keys:
@@ -94,10 +118,10 @@ Workspace metadata trails the message. Keys:
 - `ws` — workspace name (e.g. `DWC/feature-foo`)
 - `id` — 8-char hash of `:project-dir` (stable identifier across renames)
 - `dir` — expanded `:project-dir`
-- `cst` — `:claude-state` — `init` | `idle` | `thinking` | `done` | `permission` | `stop-failed` | `-`
+- `cst` — the workspace's current `:agent-state` value
 - `rst` — `:repl-state` — `active` | `inactive` | `hidden` | `dead` | `-`
 - `env` — active env keyword
-- `vt` — vterm buffer liveness (`live` / `dead` / `-`)
+- `fe` — frontend buffer liveness (`live` / `dead` / `-`)
 - `in` — input buffer liveness (`live` / `dead` / `-`)
 - `cnt` — prefix counter (metaprompt re-injection)
 - `git` — git clean/dirty for the workspace
@@ -108,6 +132,7 @@ Workspace metadata trails the message. Keys:
 - `pri` — workspace priority
 - `pend` — length of pending-prompts queue
 - `pshow` — pending-show-panels flag
+- `defq` — length of deferred-prompts queue
 
 A trailing `-` for a key means "not set / not applicable".
 
@@ -115,31 +140,73 @@ A trailing `-` for a key means "not set / not applicable".
 
 ### 2.3 What is logged automatically vs. gated
 
-**File writes are unconditional.** Every call to `agent-repl--log`, `agent-repl--log-verbose`, `agent-repl--do-log`, and `agent-repl--error` appends to the logfile whenever `agent-repl-log-to-file` is non-nil (the default). The `agent-repl-debug` toggle only controls whether the line is ALSO emitted to the minibuffer / `*Messages*` buffer:
+**Ordinary file writes are unconditional; verbose writes are explicitly
+gated.** Whenever `agent-repl-log-to-file` is non-nil (the default),
+`agent-repl--log`, `agent-repl--info`, `agent-repl--warn`,
+`agent-repl--do-log`, and `agent-repl--error` append to the logfile regardless
+of `agent-repl-debug`. `agent-repl--log-verbose` is a no-op for both file and
+`*Messages*` unless `agent-repl-debug` is exactly `'verbose`.
 
-- **`agent-repl-debug` is nil (default):** file gets everything; minibuffer is quiet (except for unconditional `--do-log` / `--error` calls, which always also `message`).
-- **`agent-repl-debug` is `t`:** file gets everything; `--log` calls also emit to minibuffer.
-- **`agent-repl-debug` is `'verbose`:** file gets everything; `--log` AND `--log-verbose` calls emit to minibuffer (high-frequency events become visible).
+- **`agent-repl-debug` is nil (default):** ordinary calls still reach the file; `--log` does not reach `*Messages*`; verbose calls do nothing.
+- **`agent-repl-debug` is `t`:** ordinary calls reach the file and `--log` additionally reaches `*Messages*`; verbose calls still do nothing.
+- **`agent-repl-debug` is `'verbose`:** ordinary and verbose calls reach both the file and `*Messages*`.
 
-Implication for diagnosis: the log file is the source of truth regardless of debug level. You do NOT need to ask the user to enable debug before reading historical evidence — it is already there.
+All non-error `*Messages*` emission is quiet and does not flash in the echo
+area/modeline. Only `agent-repl--error` signals loudly there. `--info`,
+`--warn`, and non-error `--do-log` are ungated quiet `*Messages*` entries in
+addition to their file entries.
 
-The 1 GiB size cap (truncate-first-80%-on-overflow) is the safety valve that lets us keep verbose writes always-on.
+Implication for diagnosis: ordinary historical evidence is already on disk
+without enabling debug. If the missing evidence comes from
+`agent-repl--log-verbose`, the user must enable verbose mode before reproducing
+it; it was never written while the verbose gate was off.
+
+The 1 GiB size cap (truncate-first-80%-on-overflow) bounds the active file even
+during a verbose reproduction.
 
 ### 2.4 How to read it
 
 Useful bash recipes:
 
-- Last 200 lines: `tail -n 200 ~/.claude-emacs/doom-agent-repl.log`
-- Live tail during repro: `tail -f ~/.claude-emacs/doom-agent-repl.log`
-- Filter by workspace: `grep 'ws=DWC/feature-foo' ~/.claude-emacs/doom-agent-repl.log | tail -100`
-- Errors/warnings: `grep -E 'WARNING|ERROR|STUB-CREATE|backtrace|BUG' ~/.claude-emacs/doom-agent-repl.log | tail -50`
-- Time-window: `awk '$1 >= "14:32:00" && $1 < "14:35:00"' ~/.claude-emacs/doom-agent-repl.log`
-- Top message prefixes (find hot code paths): `grep '\[agent-repl\]' ~/.claude-emacs/doom-agent-repl.log | sed -E 's/^[^[]+\[agent-repl\] ([a-z-]+).*/\1/' | sort | uniq -c | sort -rn | head -30`
-- File size sanity: `wc -l ~/.claude-emacs/doom-agent-repl.log; ls -lh ~/.claude-emacs/doom-agent-repl.log`
-- Previous session: `tail -n 200 ~/.claude-emacs/doom-agent-repl.log.prev`
-- Confirm truncation has fired: `grep -E 'WARNING: log truncated' ~/.claude-emacs/doom-agent-repl.log`
+- Last 200 lines: `tail -n 200 "$EMACS_LOG"`
+- Live tail during repro: `tail -f "$EMACS_LOG"`
+- Filter by workspace: `grep 'ws=DWC/feature-foo' "$EMACS_LOG" | tail -100`
+- Errors/warnings: `grep -E 'WARNING|ERROR|STUB-CREATE|backtrace|BUG' "$EMACS_LOG" | tail -50`
+- Time-window: `awk '$1 >= "14:32:00" && $1 < "14:35:00"' "$EMACS_LOG"`
+- Top message prefixes (find hot code paths): `grep '\[agent-repl\]' "$EMACS_LOG" | sed -E 's/^[^[]+\[agent-repl\] ([a-z-]+).*/\1/' | sort | uniq -c | sort -rn | head -30`
+- File size sanity: `wc -l "$EMACS_LOG"; ls -lh "$EMACS_LOG"`
+- Previous module load: `tail -n 200 "${EMACS_LOG}.prev"`
+- Confirm truncation has fired: `grep -E 'WARNING: log truncated' "$EMACS_LOG"`
 
 The companion buffer `*agent-repl-log-bug*` (inside Emacs) captures the first backtrace whenever `agent-repl--log-format` receives a non-string FMT. Ask the user to surface its contents if logging looks malformed.
+
+#### 2.4.1 Per-workspace live log buffers
+
+Every emitted line whose logger receives a non-nil workspace is also appended
+to that workspace's live buffer:
+
+```text
+*agent-panel-log-<sanitized-workspace-name>*
+```
+
+The buffer carries permanent-local `agent-repl--owning-workspace` and is
+attached through the workspace integration boundary, so it belongs to that
+workspace. It contains only lines routed with that workspace argument; it does
+not contain other workspaces' lines. Verbose lines appear only while the
+verbose gate described in §2.3 is enabled.
+
+This buffer is an interactive filtered view, not the durable record. It is not
+written to disk, and it can disappear when killed, during workspace teardown,
+or when Emacs exits. Use `/runtime-eval-code` to inspect it:
+
+```elisp
+(with-current-buffer
+    (agent-repl--workspace-log-buffer "DWC/feature-foo")
+  (buffer-string))
+```
+
+Prefer the aggregate file for cross-workspace chronology and post-restart
+history; prefer the workspace buffer for a live, already-filtered view.
 
 ### 2.5 The per-workspace `memory-state.el` snapshot
 
@@ -268,7 +335,7 @@ Defined in `keybindings.el`. These run **inside Emacs**, so dispatch them via `/
 | `clear-state` | Clear workspace state |
 | `obliterate` | **Destructive** — tear a workspace down |
 | `cancel-timers` | Cancel this workspace's pending timers |
-| `toggle-logging` | Toggle `agent-repl-debug` (`SPC j h D`) — minibuffer echo only, §2.3 |
+| `toggle-logging` | Toggle `agent-repl-debug` (`SPC j h D`) — quiet `*Messages*` emission plus the verbose file gate, §2.3 |
 | `toggle-log-to-file` | Toggle file writes — leave this ON |
 | `toggle-metaprompt` | Toggle metaprompt injection |
 | `prefix-counter` | Inspect the metaprompt re-injection counter |
@@ -303,7 +370,7 @@ tail -f ~/.claude-emacs/claude-repld.log     # live tail during repro
 
 ```sh
 grep 'ws=/path/to/worktree' ~/.claude-emacs/claude-repld.log | tail -60
-grep 'ws=/path/to/worktree' ~/.claude-emacs/doom-agent-repl.log | tail -60
+grep 'ws=/path/to/worktree' "$EMACS_LOG" | tail -60
 ```
 
 A mis-paired call site renders `key=!MISSING` rather than silently shifting the pairs — so if you see `!MISSING`, that is a real instrumentation bug, not a truncation artifact:
@@ -688,7 +755,16 @@ A binary older than the commit that supposedly fixed the bug **is** the finding.
 
 **This rule applies on EVERY plane, not just Emacs.** Only the primitive changes.
 
-Writes are unconditional on every plane, so the only way the evidence can be uninformative is if the suspect code path is **not instrumented at all**. When that happens, Claude tends to fill the silence with speculation. **Do not do that.** If you find yourself reading the evidence around the timestamp of the bug and cannot find any line that corresponds to the suspect function or branch, stop and surface this emphatically.
+Ordinary writes are unconditional on every plane. Emacs
+`agent-repl--log-verbose` is the deliberate exception: it requires a verbose
+reproduction (§2.3). If the expected verbose lines are absent, establish
+whether verbose mode was enabled before concluding the path lacks
+instrumentation. Once gating is ruled out, the only way the evidence can be
+uninformative is if the suspect code path is **not instrumented at all**. When
+that happens, Claude tends to fill the silence with speculation. **Do not do
+that.** If you find yourself reading the evidence around the timestamp of the
+bug and cannot find any line that corresponds to the suspect function or
+branch, stop and surface this emphatically.
 
 Required user-facing message in that case:
 
@@ -731,7 +807,7 @@ Be **emphatic, not soft**. Say "strongly recommend", "I need more instrumentatio
 When proposing new log calls, follow the module's conventions:
 
 ```elisp
-;; Default (gated on `agent-repl-debug'):
+;; Ordinary: always file-written; quiet *Messages* emission is debug-gated.
 (agent-repl--log ws "myfn: entered cond=%s key=%s" cond key)
 
 ;; Verbose (gated on `agent-repl-debug = 'verbose') — for hot/timer paths:
