@@ -34,7 +34,7 @@ import (
 // CommandAck.
 type PromptRouter interface {
 	SubmitPrompt(ctx context.Context, workspace, text, permissionMode string) error
-	Interrupt(ctx context.Context, workspace string, hard bool) error
+	Interrupt(ctx context.Context, workspace string) error
 	AnswerPermission(ctx context.Context, workspace, permissionRequestID string, allow bool, denyMessage string, updatedInput *structpb.Struct) error
 }
 
@@ -378,11 +378,11 @@ func (h *commandHandler) SubmitPrompt(ctx context.Context, workspace, requestID 
 }
 
 func (h *commandHandler) Interrupt(ctx context.Context, workspace, requestID string, cmd *frontendv1.InterruptCmd) error {
-	h.logf("frontend cmd: interrupt ws=%s request_id=%s hard=%v", workspace, requestID, cmd.GetHard())
+	h.logf("frontend cmd: interrupt ws=%s request_id=%s confirm_agents=%v", workspace, requestID, cmd.GetConfirmAgents())
 	if err := checkWorkspaceKey("interrupt", workspace); err != nil {
 		return err
 	}
-	return h.prompts.Interrupt(ctx, workspace, cmd.GetHard())
+	return h.prompts.Interrupt(ctx, workspace)
 }
 
 func (h *commandHandler) AnswerPermission(ctx context.Context, workspace, requestID string, cmd *frontendv1.PermissionAnswerCmd) error {

@@ -95,6 +95,7 @@ export type WebRenderState =
   | "thinking"
   | "permission"
   | "done"
+  | "interrupted"
   | "vendor_blocked"
   | "merging"
   | "merge_queued"
@@ -611,6 +612,7 @@ const RENDER_STATE_KEYWORD: Record<RenderState, WebRenderState | null> = {
   [RenderState.PERMISSION]: "permission",
   [RenderState.DONE]: "done",
   [RenderState.READY]: "ready",
+  [RenderState.INTERRUPTED]: "interrupted",
   [RenderState.VENDOR_BLOCKED]: "vendor_blocked",
   // DEPRECATED upstream and no longer resolved by the SSM, but still mapped:
   // an old daemon binary can push it, and erroring on a state we know how to

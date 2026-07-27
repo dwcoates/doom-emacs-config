@@ -212,10 +212,10 @@ describe("SessionServer control dispatch", () => {
     track(server);
     const peer = await handshake(server, socketPath);
     // Act
-    peer.send(InterruptSchema, create(InterruptSchema, { requestId: "i1", hard: true }));
+    peer.send(InterruptSchema, create(InterruptSchema, { requestId: "i1" }));
     await peer.next(AckSchema);
     // Assert
-    expect(calls.interrupts[0]!.hard).toBe(true);
+    expect(calls.interrupts[0]!.requestId).toBe("i1");
   });
 
   it("dispatches PermissionResponse", async () => {

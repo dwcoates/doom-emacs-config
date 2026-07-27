@@ -156,7 +156,7 @@ func (c *fakeClient) Health(_ context.Context, requestID string) (*corev1.Health
 	return c.healthStatus, nil
 }
 
-func (c *fakeClient) Interrupt(_ context.Context, _ bool) (corev1.InterruptOutcome, error) {
+func (c *fakeClient) Interrupt(_ context.Context) (corev1.InterruptOutcome, error) {
 	c.mu.Lock()
 	c.interrupts++
 	outcome := c.interruptOutcome
@@ -381,7 +381,7 @@ func TestMetapromptRefireFoldsOncePerResume(t *testing.T) {
 
 func TestInterruptRequiresLiveSession(t *testing.T) {
 	m, _ := newTestManager(t, fakeLocator{m: map[string]string{}}, &fakeSpawner{})
-	if err := m.Interrupt(context.Background(), "ws", true); err == nil {
+	if err := m.Interrupt(context.Background(), "ws"); err == nil {
 		t.Fatal("interrupt with no live session must error")
 	}
 }
@@ -401,7 +401,7 @@ func TestInterruptReportsNoErrorWhenTheTurnWasStopped(t *testing.T) {
 	lastClient().interruptOutcome = corev1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED
 
 	// Act.
-	err := m.Interrupt(context.Background(), "ws", true)
+	err := m.Interrupt(context.Background(), "ws")
 
 	// Assert.
 	if err != nil {
@@ -419,7 +419,7 @@ func TestInterruptReportsNoErrorWhenTheTurnHadAlreadyEnded(t *testing.T) {
 	lastClient().interruptOutcome = corev1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE
 
 	// Act.
-	err := m.Interrupt(context.Background(), "ws", true)
+	err := m.Interrupt(context.Background(), "ws")
 
 	// Assert.
 	if err != nil {
@@ -436,7 +436,7 @@ func TestInterruptReportsAnUndeliverableStopAsAFailure(t *testing.T) {
 	lastClient().interruptOutcome = corev1.InterruptOutcome_INTERRUPT_OUTCOME_FAILED
 
 	// Act.
-	err := m.Interrupt(context.Background(), "ws", true)
+	err := m.Interrupt(context.Background(), "ws")
 
 	// Assert.
 	if !errors.Is(err, errclass.ErrInterruptUndelivered) {

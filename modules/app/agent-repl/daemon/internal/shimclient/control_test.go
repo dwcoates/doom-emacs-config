@@ -177,7 +177,7 @@ func TestControlAckTimeout(t *testing.T) {
 func TestInterruptAckSuccess(t *testing.T) {
 	// Arrange
 	h := newHarness()
-	gotHard := make(chan bool, 1)
+	delivered := make(chan string, 1)
 	path := startFakeShim(t, func(conn net.Conn) {
 		_ = fakeServerHandshake(t, conn, "sess-1", "1", false)
 		m, err := wire.ReadAny(conn)
@@ -190,8 +190,11 @@ func TestInterruptAckSuccess(t *testing.T) {
 			t.Errorf("expected Interrupt, got %T", m)
 			return
 		}
-		gotHard <- iv.GetHard()
-		mustWriteMsg(t, conn, &corev1.Ack{RequestId: iv.GetRequestId()})
+		delivered <- iv.GetRequestId()
+		mustWriteMsg(t, conn, &corev1.Ack{
+			RequestId:        iv.GetRequestId(),
+			InterruptOutcome: corev1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED,
+		})
 		_, _ = wire.ReadAny(conn)
 	})
 	c, connected, stop := runConnectedClient(t, h.config(t, "sess-1", path))
@@ -199,14 +202,17 @@ func TestInterruptAckSuccess(t *testing.T) {
 	waitConnected(t, connected)
 
 	// Act
-	_, err := c.Interrupt(context.Background(), true)
+	outcome, err := c.Interrupt(context.Background())
 
 	// Assert
 	if err != nil {
 		t.Fatalf("Interrupt: %v", err)
 	}
-	if !<-gotHard {
-		t.Fatal("shim should have received hard=true")
+	if reqID := <-delivered; reqID == "" {
+		t.Fatal("shim should have received an Interrupt with a request id")
+	}
+	if outcome != corev1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED {
+		t.Fatalf("outcome = %v, want INTERRUPTED (the shim's ack verdict, verbatim)", outcome)
 	}
 }
 

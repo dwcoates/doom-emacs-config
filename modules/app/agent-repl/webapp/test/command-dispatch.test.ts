@@ -54,7 +54,7 @@ describe("ack-correlated commands", () => {
   it("interrupt rejects on an error ack, naming the command and reason", async () => {
     const { dispatcher, sent } = newDispatcher();
     const p = dispatcher.interrupt("/w", true);
-    expect(JSON.parse(sent[0]).interrupt).toEqual({ hard: true });
+    expect(JSON.parse(sent[0]).interrupt).toEqual({ confirmAgents: true });
     dispatcher.observe(ackFrame("r1", false, "no turn"));
     await expect(p).rejects.toThrow(/interrupt rejected: no turn/);
   });

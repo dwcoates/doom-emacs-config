@@ -357,9 +357,12 @@ message SubmitPrompt {
   string permission_mode = 4;  // optional override
 }
 
+// Stop the current turn via the SDK's interrupt(). There is exactly one kind
+// of interrupt: the old `hard` flag promised a soft "end after the current
+// message" variant that no layer ever implemented (the shim always called the
+// SDK), so the flag was deleted rather than left as a dial that did nothing.
 message Interrupt {
   string request_id = 1;
-  bool hard = 2;  // hard: SDK interrupt(); soft: end after current message
 }
 
 // The three-valued outcome of an Interrupt, decided by the SHIM.
