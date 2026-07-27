@@ -245,7 +245,7 @@ buffer and alist intact.  This guards the no-agent UX path."
       (unwind-protect
           (agent-repl-sibling-popup-test--with-mocked-panels nil nil
             (cl-letf (((symbol-function 'agent-repl-sibling-popup--fallback)
-                       (lambda (buf alist)
+                       (lambda (buf alist &optional _ws)
                          (cl-incf calls)
                          (should (eq buf popup-buf))
                          (should (equal (cdr (assq 'window-height alist)) 0.3))
@@ -255,6 +255,29 @@ buffer and alist intact.  This guards the no-agent UX path."
                popup-buf '((window-height . 0.3) (side . bottom)))
               (should (= calls 1))))
         (kill-buffer popup-buf)))))
+
+(ert-deftest agent-repl-sibling-popup-test-display-fn-threads-current-workspace ()
+  "Passes the current workspace through target selection and display handling."
+  (let ((popup-buf (generate-new-buffer " *test-popup*"))
+        (ws "test-workspace")
+        observed-target-ws
+        observed-fallback-ws)
+    (unwind-protect
+        (cl-letf (((symbol-function 'agent-repl--ws-current-name)
+                   (lambda () ws))
+                  ((symbol-function 'agent-repl-sibling-popup--target-window)
+                   (lambda (_frame target-ws)
+                     (setq observed-target-ws target-ws)
+                     nil))
+                  ((symbol-function 'agent-repl-sibling-popup--fallback)
+                   (lambda (_buffer _alist fallback-ws)
+                     (setq observed-fallback-ws fallback-ws)
+                     (selected-window))))
+          (should (window-live-p
+                   (agent-repl-sibling-popup-display-fn popup-buf nil)))
+          (should (equal observed-target-ws ws))
+          (should (equal observed-fallback-ws ws)))
+      (kill-buffer popup-buf))))
 
 (provide 'test-sibling-popup)
 ;;; test-sibling-popup.el ends here
