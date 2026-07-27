@@ -189,36 +189,40 @@ message TurnEnded {
   bool is_error = 3;
 }
 
-// How a context cut came about. Vendor-neutral because every vendor that
-// offers compaction distinguishes the user asking for one from the system
-// deciding it needs one.
-enum ContextCutTrigger {
-  CONTEXT_CUT_TRIGGER_UNSPECIFIED = 0;
-  CONTEXT_CUT_TRIGGER_MANUAL = 1;
-  CONTEXT_CUT_TRIGGER_AUTO = 2;
-}
-
-// A CONTEXT CUT: the point in a conversation before which history no longer
-// informs the agent. Two events model the two kinds of cut, and both are
-// first-class Event payloads rather than vendor extensions for one reason:
-// the store indexes `kind` off the envelope, so a cut has to BE a kind for
-// the daemon to find the newest one without reading a payload.
+// CLEAR and COMPACT are the two ways a conversation's history stops informing
+// the agent, and both are first-class Event payloads rather than vendor
+// extensions for one reason: the store indexes `kind` off the envelope, so
+// each has to BE a kind for the daemon to find the newest one without reading
+// a payload.
 //
-// Finding it is the whole point. A frontend's replay floor is the newest cut,
-// so a reconnecting frontend is served the conversation from that point
-// forward and never receives history it would only discard. Nesting the cut
-// inside a vendor payload would make that query a full scan of opaque blobs.
+// Finding it is the whole point. A frontend's replay floor is the newest
+// clear or compact, so a reconnecting frontend is served the conversation
+// from that point forward and never receives history it would only discard.
+// Nesting either inside a vendor payload would make that query a full scan of
+// opaque blobs.
 //
-// BOTH PLANES PRODUCE THESE. The stream plane sees the cut as it happens; the
-// file plane sees it in the transcript, where the vendor spells the same
+// The names are `clear` and `compact` because those are the overwhelming
+// convention across vendors, not one vendor's spelling.
+//
+// BOTH PLANES PRODUCE THESE. The stream plane sees the event as it happens;
+// the file plane sees it in the transcript, where the vendor writes the same
 // clear as an expanded command envelope. They carry a common dedup_key so the
 // store merges the twins into one event rather than cutting twice.
 
-// The context was DISCARDED outright — `/clear` and its per-vendor
-// equivalents. Nothing survives it, so there is no summary to carry: the
-// event's existence and its position are the entire fact.
-message ContextCleared {
-  ContextCutTrigger trigger = 1;
+// The context was CLEARED: discarded outright. Nothing survives it, so there
+// is no summary to carry and no trigger to record — a clear is always the
+// user asking for one, and an automatic clear is not a thing any vendor does.
+// The event's existence and its position are the entire fact.
+message ContextCleared {}
+
+// Why a compaction happened. Unlike a clear, a compaction can be the system
+// deciding it needs one, so the distinction is real and worth carrying — even
+// though nothing downstream is expected to BRANCH on it. A compaction is a
+// compaction, and consumers treat the two identically by default.
+enum ContextCompactTrigger {
+  CONTEXT_COMPACT_TRIGGER_UNSPECIFIED = 0;
+  CONTEXT_COMPACT_TRIGGER_MANUAL = 1;
+  CONTEXT_COMPACT_TRIGGER_AUTO = 2;
 }
 
 // The context was COMPACTED: replaced by a summary that stands in for it.
@@ -234,7 +238,7 @@ message ContextCleared {
 // vendor emits the summary text as a separate transcript line rather than on
 // the boundary itself.
 message ContextCompacted {
-  ContextCutTrigger trigger = 1;
+  ContextCompactTrigger trigger = 1;
   int64 pre_tokens = 2;
   int64 post_tokens = 3;
   int64 duration_ms = 4;
