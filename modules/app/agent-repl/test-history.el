@@ -1415,24 +1415,30 @@ whatever the workspace plist happens to carry."
 
 ;;;; ---- Tests: initialize-ws-env with missing/corrupt state files ----
 
-(ert-deftest agent-repl-test-initialize-ws-env-empty-file-creates-fresh ()
-  "initialize-ws-env creates fresh state when state file is empty."
+(ert-deftest agent-repl-test-initialize-ws-env-empty-file-signals-and-preserves-file ()
+  "initialize-ws-env rejects an empty state file without rewriting it."
   (agent-repl-test--with-clean-state
     (let ((tmpdir (make-temp-file "test-state-empty-" t)))
       (unwind-protect
           (progn
             (agent-repl-test--seed-file (agent-repl--state-file tmpdir) "")
             (agent-repl--ws-put "ws" :project-dir tmpdir)
-            (agent-repl--initialize-ws-env "ws")
-            (should (eq (agent-repl--ws-get "ws" :active-env) :bare-metal))
-            (should (agent-repl-instantiation-p
-                     (agent-repl--ws-get "ws" :bare-metal)))
-            (should-not (agent-repl-instantiation-session-id
-                         (agent-repl--ws-get "ws" :bare-metal))))
+            (let (logs)
+              (cl-letf (((symbol-function 'agent-repl--log)
+                         (lambda (_ws format-string &rest args)
+                           (push (apply #'format format-string args) logs))))
+                (should-error (agent-repl--initialize-ws-env "ws")))
+              (should (cl-find-if (lambda (line)
+                                    (string-match-p "state-save: existing-state read failed" line))
+                                  logs)))
+            (should (string-empty-p
+                     (with-temp-buffer
+                       (insert-file-contents (agent-repl--state-file tmpdir))
+                       (buffer-string)))))
         (delete-directory tmpdir t)))))
 
-(ert-deftest agent-repl-test-initialize-ws-env-invalid-elisp-creates-fresh ()
-  "initialize-ws-env creates fresh state when state file has unreadable elisp."
+(ert-deftest agent-repl-test-initialize-ws-env-invalid-elisp-signals-and-preserves-file ()
+  "initialize-ws-env rejects unreadable state without rewriting it."
   (agent-repl-test--with-clean-state
     (let ((tmpdir (make-temp-file "test-state-invalid-" t)))
       (unwind-protect
@@ -1440,12 +1446,19 @@ whatever the workspace plist happens to carry."
             ;; Unclosed paren triggers end-of-file error in (read ...)
             (agent-repl-test--seed-file (agent-repl--state-file tmpdir) "(unclosed paren")
             (agent-repl--ws-put "ws" :project-dir tmpdir)
-            (agent-repl--initialize-ws-env "ws")
-            (should (eq (agent-repl--ws-get "ws" :active-env) :bare-metal))
-            (should (agent-repl-instantiation-p
-                     (agent-repl--ws-get "ws" :bare-metal)))
-            (should-not (agent-repl-instantiation-session-id
-                         (agent-repl--ws-get "ws" :bare-metal))))
+            (let (logs)
+              (cl-letf (((symbol-function 'agent-repl--log)
+                         (lambda (_ws format-string &rest args)
+                           (push (apply #'format format-string args) logs))))
+                (should-error (agent-repl--initialize-ws-env "ws")))
+              (should (cl-find-if (lambda (line)
+                                    (string-match-p "state-save: existing-state read failed" line))
+                                  logs)))
+            (should (string=
+                     "(unclosed paren"
+                     (with-temp-buffer
+                       (insert-file-contents (agent-repl--state-file tmpdir))
+                       (buffer-string)))))
         (delete-directory tmpdir t)))))
 
 (ert-deftest agent-repl-test-initialize-ws-env-missing-file-writes-state ()
