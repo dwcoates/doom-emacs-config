@@ -466,6 +466,12 @@ text.  Handles the non-string-FMT bug-capture in one place."
 (defconst agent-repl--workspace-log-buffer-suffix "-log"
   "Suffix used for the workspace-owned live log buffer.")
 
+(defvar agent-repl--workspace-log-buffer-enabled t
+  "Non-nil when workspace-scoped log lines should populate live buffers.
+Production leaves this enabled.  The pure-Elisp batch harness binds it nil so
+unrelated tests that assert exact buffer or perspective effects do not acquire
+a logging side effect; the dedicated workspace-log tests bind it back to t.")
+
 (defun agent-repl--workspace-log-buffer (ws)
   "Return WS's workspace-owned live agent-repl log buffer.
 The buffer is created through `agent-repl--create-buffer', which sets its
@@ -479,7 +485,7 @@ remains the authoritative persisted record."
 Only a non-nil WS is workspace-scoped.  This helper deliberately does not
 log its own buffer creation or append work: it runs for every log entry, and
 instrumenting it through the logging ladder would recurse indefinitely."
-  (when ws
+  (when (and agent-repl--workspace-log-buffer-enabled ws)
     (with-current-buffer (agent-repl--workspace-log-buffer ws)
       (let ((inhibit-read-only t))
         (save-excursion
