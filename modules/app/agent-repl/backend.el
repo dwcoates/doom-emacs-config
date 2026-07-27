@@ -75,19 +75,37 @@ Signals an error when BACKEND is not an `agent-repl-backend' struct or
 when any required slot is missing — a partially-defined backend is a
 bug, not a configuration to cope with."
   (unless (agent-repl-backend-p backend)
+    (agent-repl--log nil "register-backend: rejected non-struct backend=%S" backend)
     (error "agent-repl-register-backend: not a backend struct: %S" backend))
   (dolist (slot '(name binary start-cmd-fn))
     (unless (funcall (intern (format "agent-repl-backend-%s" slot)) backend)
+      (agent-repl--log nil "register-backend: rejected name=%S missing-required-slot=%s"
+                       (agent-repl-backend-name backend) slot)
       (error "agent-repl-register-backend: backend %S is missing slot %s"
              (agent-repl-backend-name backend) slot)))
-  (puthash (agent-repl-backend-name backend) backend agent-repl--backends))
+  (let* ((name (agent-repl-backend-name backend))
+         (replaced (gethash name agent-repl--backends)))
+    (puthash name backend agent-repl--backends)
+    (agent-repl--log nil
+                     "register-backend: name=%s binary=%s replaced=%s headless=%s transcript=%s"
+                     name (agent-repl-backend-binary backend)
+                     (if replaced "yes" "no")
+                     (if (agent-repl-backend-headless-cmd-fn backend) "yes" "no")
+                     (if (agent-repl-backend-transcript-path-fn backend) "yes" "no"))))
 
-(defun agent-repl-backend-get (name)
+(defun agent-repl-backend-get (name &optional ws)
   "Return the registered backend named NAME (a symbol).
 Signals an error when no such backend is registered — callers must
-never silently fall back to a different CLI."
-  (or (gethash name agent-repl--backends)
-      (error "agent-repl-backend-get: no backend registered under `%s'" name)))
+never silently fall back to a different CLI.  WS is optional diagnostic
+context for a workspace-scoped lookup."
+  (let ((backend (gethash name agent-repl--backends)))
+    (if backend
+        (progn
+          ;; Backend lookup is reached from mode-line transcript readers.
+          (agent-repl--log-verbose ws "backend-get: name=%s result=registered" name)
+          backend)
+      (agent-repl--log ws "backend-get: name=%s result=unregistered" name)
+      (error "agent-repl-backend-get: no backend registered under `%s'" name))))
 
 ;;;; ---- Selection ----------------------------------------------------------
 
@@ -100,25 +118,41 @@ never silently fall back to a different CLI."
   "Return the backend name symbol for workspace WS.
 The workspace's `:backend' property wins; otherwise
 `agent-repl-default-backend'."
-  (or (agent-repl--ws-get ws :backend) agent-repl-default-backend))
+  (let ((override (agent-repl--ws-get ws :backend)))
+    ;; This can be called on every mode-line redraw, so keep it verbose-only.
+    (agent-repl--log-verbose ws "ws-backend-name: override=%s default=%s selected=%s"
+                             (or override "none") agent-repl-default-backend
+                             (or override agent-repl-default-backend))
+    (or override agent-repl-default-backend)))
 
 (defun agent-repl--ws-backend (ws)
   "Return the resolved backend struct for workspace WS.
 Signals via `agent-repl-backend-get' when the named backend is not
 registered."
-  (agent-repl-backend-get (agent-repl--ws-backend-name ws)))
+  (let* ((name (agent-repl--ws-backend-name ws))
+         (backend (agent-repl-backend-get name ws)))
+    ;; This inherits the mode-line call frequency of `--ws-backend-name'.
+    (agent-repl--log-verbose ws "ws-backend: name=%s binary=%s" name
+                             (agent-repl-backend-binary backend))
+    backend))
 
 (defun agent-repl--default-backend ()
   "Return the resolved default backend struct.
 Used by headless call sites with no workspace in scope (e.g. new-
 workspace name generation, the config-explainer)."
-  (agent-repl-backend-get agent-repl-default-backend))
+  (let ((backend (agent-repl-backend-get agent-repl-default-backend)))
+    (agent-repl--log nil "default-backend: name=%s binary=%s"
+                     agent-repl-default-backend
+                     (agent-repl-backend-binary backend))
+    backend))
 
 (defun agent-repl--backend-names ()
   "Return the list of registered backend name symbols."
   (let (names)
     (maphash (lambda (name _b) (push name names)) agent-repl--backends)
-    (nreverse names)))
+    (setq names (nreverse names))
+    (agent-repl--log nil "backend-names: count=%d names=%S" (length names) names)
+    names))
 
 (defun agent-repl--capture-backend-session-ids (ws)
   "Return a plist snapshot of WS's current per-env session ids and fork pointer.
@@ -136,6 +170,11 @@ stashed under the outgoing backend on a switch.  Round-trips through
                               (agent-repl-instantiation-session-id inst))))))
     (setq snapshot (plist-put snapshot :fork-session-id
                               (agent-repl--ws-get ws :fork-session-id)))
+    (agent-repl--log ws "capture-backend-session-ids: envs-with-session=%S fork-present=%s"
+                     (cl-loop for env in agent-repl--environment-keys
+                              when (plist-get snapshot env)
+                              collect env)
+                     (if (plist-get snapshot :fork-session-id) "yes" "no"))
     snapshot))
 
 (defun agent-repl--apply-backend-session-ids (ws saved)
@@ -150,17 +189,27 @@ skipped."
       (when (agent-repl-instantiation-p inst)
         (setf (agent-repl-instantiation-session-id inst)
               (plist-get saved env)))))
-  (agent-repl--ws-put ws :fork-session-id (plist-get saved :fork-session-id)))
+  (agent-repl--ws-put ws :fork-session-id (plist-get saved :fork-session-id))
+  (agent-repl--log ws "apply-backend-session-ids: saved=%s envs-with-session=%S fork-present=%s"
+                   (if saved "present" "nil")
+                   (cl-loop for env in agent-repl--environment-keys
+                            when (plist-get saved env)
+                            collect env)
+                   (if (plist-get saved :fork-session-id) "yes" "no")))
 
-(defun agent-repl--backend-session-ids-present-p (saved)
+(defun agent-repl--backend-session-ids-present-p (saved &optional ws)
   "Return non-nil when SAVED carries any non-empty session id or fork pointer.
 SAVED is a captured/stashed session-id plist.  Used to decide whether a
 backend switch restored resumable state (so the next start will
 `--continue'/`resume') versus started fresh."
-  (cl-some (lambda (v) (and (stringp v) (> (length v) 0)))
-           (cons (plist-get saved :fork-session-id)
-                 (mapcar (lambda (env) (plist-get saved env))
-                         agent-repl--environment-keys))))
+  (let ((present
+         (cl-some (lambda (v) (and (stringp v) (> (length v) 0)))
+                  (cons (plist-get saved :fork-session-id)
+                        (mapcar (lambda (env) (plist-get saved env))
+                                agent-repl--environment-keys)))))
+    (agent-repl--log ws "backend-session-ids-present-p: saved=%s result=%s"
+                     (if saved "present" "nil") (if present "present" "empty"))
+    present))
 
 (defun agent-repl--ws-switch-backend-session-ids (ws old-backend new-backend)
   "Stash OLD-BACKEND's session ids and restore NEW-BACKEND's for WS.
@@ -183,7 +232,7 @@ next start will resume rather than start a new session)."
     (setq stash (plist-put stash old-backend outgoing))
     (agent-repl--ws-put ws :backend-session-stash stash)
     (agent-repl--apply-backend-session-ids ws incoming)
-    (let ((restored (agent-repl--backend-session-ids-present-p incoming)))
+    (let ((restored (agent-repl--backend-session-ids-present-p incoming ws)))
       (agent-repl--log ws "ws-switch-backend-session-ids: ws=%s old=%s new=%s restored=%s"
                        ws old-backend new-backend (if restored "yes" "no"))
       restored)))
@@ -212,13 +261,18 @@ conversation via `--continue'/`resume' instead of starting fresh."
                           (if set-default "Default backend: " "Workspace backend: ")
                           (mapcar #'symbol-name names) nil t))))
     (if set-default
-        (progn
+        (let ((old-default agent-repl-default-backend))
           (setq agent-repl-default-backend choice)
+          (agent-repl--log nil "select-backend: target=default old=%s new=%s changed=%s available=%S"
+                           old-default choice (if (eq old-default choice) "no" "yes") names)
           (message "agent-repl: default backend -> %s" choice))
       (let ((ws (agent-repl--ws-current-name)))
         (unless ws
+          (agent-repl--log nil "select-backend: target=workspace choice=%s result=no-current-workspace"
+                           choice)
           (user-error "agent-repl-select-backend: no current workspace"))
         (when (agent-repl--agent-running-p ws)
+          (agent-repl--log ws "select-backend: choice=%s result=refused-agent-running" choice)
           (user-error "agent-repl-select-backend: %s has a running agent — kill it first (the backend applies at the next start)" ws))
         (let* ((old (agent-repl--ws-backend-name ws))
                (changed (not (eq old choice)))
@@ -226,6 +280,9 @@ conversation via `--continue'/`resume' instead of starting fresh."
                            (agent-repl--ws-switch-backend-session-ids ws old choice))))
           (agent-repl--ws-put ws :backend choice)
           (agent-repl--state-save ws)
+          (agent-repl--log ws "select-backend: old=%s new=%s changed=%s restored=%s state-saved=yes"
+                           old choice (if changed "yes" "no")
+                           (if restored "yes" "no"))
           (message "agent-repl: %s backend -> %s%s" ws choice
                    (cond ((not changed) "")
                          (restored " (resumed prior session)")
@@ -242,9 +299,14 @@ capability, and asking for it from a backend that lacks it is a bug,
 not a condition to paper over."
   (let ((fn (agent-repl-backend-headless-cmd-fn backend)))
     (unless fn
+      (agent-repl--log nil "backend-headless-cmd: backend=%s model=%S extra-args=%S result=unsupported"
+                       (agent-repl-backend-name backend) model extra-args)
       (error "agent-repl--backend-headless-cmd: backend `%s' has no headless-cmd-fn"
              (agent-repl-backend-name backend)))
-    (funcall fn model extra-args)))
+    (let ((command (funcall fn model extra-args)))
+      (agent-repl--log nil "backend-headless-cmd: backend=%s model=%S extra-args=%S argv=%S"
+                       (agent-repl-backend-name backend) model extra-args command)
+      command)))
 
 ;;;; ---- Transcript access (mode-line session segments) ----------------------
 
@@ -257,20 +319,38 @@ Resolves WS's backend and delegates to its TRANSCRIPT-PATH-FN.  Returns
 nil when the backend has no transcript support or the path cannot be
 resolved (no session yet, file missing)."
   (let ((fn (agent-repl-backend-transcript-path-fn (agent-repl--ws-backend ws))))
-    (and fn (funcall fn ws))))
+    (if fn
+        (let ((path (funcall fn ws)))
+          ;; Mode-line segments can ask on every redisplay.
+          (agent-repl--log-verbose ws "ws-transcript-path: capability=yes path=%S" path)
+          path)
+      (agent-repl--log-verbose ws "ws-transcript-path: capability=no path=nil")
+      nil)))
 
 (defun agent-repl--transcript-read-tail (path scan-bytes)
   "Return the trailing SCAN-BYTES bytes of PATH as a string, or nil.
 Reading only the tail keeps per-redraw transcript scans cheap on
 multi-MB files.  Returns nil for a nil PATH, an unreadable file, or an
 empty file — the segment readers all treat that as \"no value yet\"."
-  (when (and path (file-readable-p path))
-    (let* ((size (or (file-attribute-size (file-attributes path)) 0))
-           (start (max 0 (- size scan-bytes))))
-      (when (> size 0)
-        (with-temp-buffer
-          (insert-file-contents path nil start size)
-          (buffer-string))))))
+  ;; Transcript segments invoke this on redisplay; all diagnostics are verbose-only.
+  (if (and path (file-readable-p path))
+      (let* ((size (or (file-attribute-size (file-attributes path)) 0))
+             (start (max 0 (- size scan-bytes))))
+        (if (> size 0)
+            (let ((tail (with-temp-buffer
+                          (insert-file-contents path nil start size)
+                          (buffer-string))))
+              (agent-repl--log-verbose nil
+                                       "transcript-read-tail: path=%S scan-bytes=%d size=%d start=%d result-bytes=%d"
+                                       path scan-bytes size start (length tail))
+              tail)
+          (agent-repl--log-verbose nil
+                                   "transcript-read-tail: path=%S scan-bytes=%d size=0 result=empty"
+                                   path scan-bytes)
+          nil))
+    (agent-repl--log-verbose nil "transcript-read-tail: path=%S scan-bytes=%d result=unreadable"
+                             path scan-bytes)
+    nil))
 
 (defun agent-repl--transcript-cached (ws cache-key slot-accessor)
   "Return a transcript-derived value for WS via an (mtime-keyed) cache.
@@ -286,16 +366,33 @@ the file has no mtime."
          (mtime (and path (agent-repl--ai-title-mtime path)))
          (cache (agent-repl--ws-get ws cache-key)))
     (cond
-     ((null read-fn) nil)
-     ((null path) nil)
-     ((null mtime) nil)
+     ((null read-fn)
+      ;; This helper runs in mode-line redisplay; retain the branches only in verbose traces.
+      (agent-repl--log-verbose ws "transcript-cached: cache-key=%s backend=%s result=no-reader"
+                               cache-key (agent-repl-backend-name backend))
+      nil)
+     ((null path)
+      (agent-repl--log-verbose ws "transcript-cached: cache-key=%s backend=%s result=no-path"
+                               cache-key (agent-repl-backend-name backend))
+      nil)
+     ((null mtime)
+      (agent-repl--log-verbose ws "transcript-cached: cache-key=%s path=%S result=no-mtime"
+                               cache-key path)
+      nil)
      ((and (consp cache)
            (equal (nth 0 cache) path)
            (equal (nth 1 cache) mtime))
-      (nth 2 cache))
+      (let ((value (nth 2 cache)))
+        (agent-repl--log-verbose ws
+                                 "transcript-cached: cache-key=%s path=%S mtime=%S result=cache-hit value-present=%s"
+                                 cache-key path mtime (if value "yes" "no"))
+        value))
      (t
       (let ((value (funcall read-fn path)))
         (agent-repl--ws-put ws cache-key (list path mtime value))
+        (agent-repl--log-verbose ws
+                                 "transcript-cached: cache-key=%s path=%S mtime=%S result=cache-miss value-present=%s"
+                                 cache-key path mtime (if value "yes" "no"))
         value)))))
 
 ;;;; ---- Claude backend -----------------------------------------------------
