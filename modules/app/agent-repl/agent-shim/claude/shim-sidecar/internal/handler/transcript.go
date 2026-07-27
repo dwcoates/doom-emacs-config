@@ -12,9 +12,10 @@ import (
 // file-plane twins PLUS the vendor-neutral lifecycle events the file plane owns
 // (§7.2): TaskStarted from launch results (agent/workflow/shell, constructing a
 // shell task's output path), TurnEnded from stop_hook_summary, TaskEnded
-// (STOPPED) from TaskStop results, and the two context cuts (contextcut.go) —
-// ContextCleared from an expanded /clear envelope and ContextCompacted
-// coalesced across a compact_boundary and the summary line following it.
+// (STOPPED) from TaskStop results, and the two context-loss events
+// (clearcompact.go) — ContextCleared from an expanded /clear envelope and
+// ContextCompacted coalesced across a compact_boundary and the summary line
+// following it. The file plane is the sole producer of both.
 type SessionTranscriptHandler struct {
 	conv *convert.Converter
 	log  Logf
@@ -26,7 +27,7 @@ func NewSessionTranscriptHandler(log Logf) *SessionTranscriptHandler {
 }
 
 // converted is one frame's conversion result. Conversion is memoized per batch
-// because the compaction cut has to look at the line AFTER the boundary, and a
+// because a compaction has to look at the line AFTER the boundary, and a
 // frame must not be converted (and so must not loud-log its unknown fields)
 // twice.
 type converted struct {

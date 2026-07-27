@@ -1,10 +1,31 @@
 package handler
 
-// Context cuts on the file plane. A cut is one of the two ways a conversation's
-// history stops informing the agent — CLEAR and COMPACT — and both are read out
-// of the session transcript here.
+// CLEAR and COMPACT on the file plane: the two ways a conversation's history
+// stops informing the agent. Both are read out of the session transcript here.
 //
-// CLEAR. The harness never writes the literal prompt "/clear" to the
+// THE FILE PLANE IS THE ONLY PRODUCER OF BOTH. There is no stream-plane twin
+// and there will never be one:
+//
+//   - Clear. The harness recognizes `/clear` itself and handles it entirely
+//     inside the CLI. It never yields the command envelope back on the stream
+//     plane, and it mints a FRESH transcript uuid for the recognized command,
+//     so a stream-plane producer can neither observe the clear nor name it with
+//     the uuid the transcript recorded it under. The shim half of this work was
+//     cancelled on that evidence.
+//   - Compact. Only the transcript carries the compaction SUMMARY; the stream
+//     plane's boundary message has no summary text to give.
+//
+// So the sidecar coalesces the vendor's records HERE rather than leaving the
+// correlation to a consumer, and the dedup keys below are PER-PRODUCER identity
+// — a stable name for a line the sidecar may re-read after a restart or a
+// cursor rewind — rather than a cross-producer merge contract.
+//
+// Session identity is not at risk in this attribution: shim-driven and SDK
+// sessions keep ONE vendor session id across a clear (only an interactive TUI
+// session rotates it), so the transcript path the line was read from remains
+// the session it belongs to.
+//
+// CLEAR DETECTION. The harness never writes the literal prompt "/clear" to the
 // transcript. It writes the EXPANDED command envelope:
 //
 //	<command-name>/clear</command-name>
@@ -15,17 +36,14 @@ package handler
 // replayed or rehydrated session. Detection therefore unwraps the envelope
 // first and then requires "/clear" to be the ONLY non-whitespace content left:
 // an argument, or prose around the envelope, means the user asked for something
-// other than a cut.
+// else.
 //
-// COMPACT. The file plane is the ONLY plane that carries the compaction
-// SUMMARY, so the sidecar is the sole producer of ContextCompacted and
-// coalesces the vendor's two records HERE rather than leaving the correlation
-// to a consumer. The `compact_boundary` system line supplies trigger, token
-// counts and duration; the line after it supplies the summary text.
+// COMPACT COALESCING. The `compact_boundary` system line supplies trigger,
+// token counts and duration; the line after it supplies the summary text.
 //
 // ORDERING IS FILE ORDER, NEVER TIMESTAMP ORDER. Verified against a real
-// transcript: the boundary is file line N stamped 22:01:31.660 and its summary
-// is line N+1 stamped 22:01:31.659 — the summary is one millisecond EARLIER,
+// transcript: the boundary is file line N stamped 18:05:50.654 and its summary
+// is line N+1 stamped 18:05:50.653 — the summary is one millisecond EARLIER,
 // because the harness composes the summary before writing the boundary that
 // announces it. Any timestamp-ordered assembly gets the pair backwards and, in
 // a session with several compactions, pairs each boundary with the wrong
@@ -44,10 +62,10 @@ const clearCommand = "/clear"
 
 // compactResultSuccess is the only outcome the file plane can attest to. The
 // harness writes a `compact_boundary` line when a compaction has COMPLETED, so
-// the line's existence is the success record; a compaction that failed leaves
-// no boundary behind and is reported (with its reason) on the stream plane's
-// status message, which the sidecar does not read. `error` is therefore always
-// empty here — the sidecar never guesses an outcome it cannot observe.
+// the line's existence IS the success record; a compaction that failed leaves
+// no boundary behind, and a boundary that never appears is not something this
+// file can observe. `error` is therefore always empty here — the sidecar never
+// guesses an outcome it cannot see.
 const compactResultSuccess = "success"
 
 // commandEnvelopeTags are the elements the harness expands a slash command into,
@@ -84,7 +102,7 @@ func unwrapCommandEnvelope(s string) (name, args string, ok bool) {
 	for _, tag := range commandEnvelopeTags {
 		// command-args is absent on some harness versions; a missing element is
 		// not a malformed envelope, only an empty one.
-		if inner, remainder, present := cutTag(rest, tag); present {
+		if inner, remainder, present := takeTag(rest, tag); present {
 			found[tag] = inner
 			rest = remainder
 		}
@@ -92,6 +110,11 @@ func unwrapCommandEnvelope(s string) (name, args string, ok bool) {
 	if strings.TrimSpace(rest) != "" {
 		return "", "", false
 	}
+	// A retained guard, not dead weight: today the leftover check above already
+	// rejects every string that carries an unconsumable <command-name>, so this
+	// branch is not reachable — but it is the one thing standing between a
+	// future change to that check and a nameless envelope being read as a valid
+	// command, so it stays.
 	name, present := found[commandEnvelopeTags[0]]
 	if !present {
 		return "", "", false
@@ -101,10 +124,10 @@ func unwrapCommandEnvelope(s string) (name, args string, ok bool) {
 	return strings.TrimSpace(name), strings.TrimSpace(found[commandEnvelopeTags[2]]), true
 }
 
-// cutTag removes the first <tag>…</tag> element from s, returning its inner text
-// and s without it. An unterminated open tag is not an element and is left in
-// place, so the caller's leftover check rejects the string.
-func cutTag(s, tag string) (inner, rest string, found bool) {
+// takeTag removes the first <tag>…</tag> element from s, returning its inner
+// text and s without it. An unterminated open tag is not an element and is left
+// in place, so the caller's leftover check rejects the string.
+func takeTag(s, tag string) (inner, rest string, found bool) {
 	open, closing := "<"+tag+">", "</"+tag+">"
 	i := strings.Index(s, open)
 	if i < 0 {
@@ -118,19 +141,19 @@ func cutTag(s, tag string) (inner, rest string, found bool) {
 	return s[start : start+j], s[:i] + s[start+j+len(closing):], true
 }
 
-// clearedEvent builds the ContextCleared cut for a transcript line.
+// clearedEvent builds the ContextCleared event for a transcript line.
 //
-// The dedup key is `clear:<uuid>` off the TRANSCRIPT LINE's uuid, and that
-// spelling is a hard cross-producer contract: the shim sees the same clear on
-// the stream plane and emits the identical key, so the store collapses the twins
-// into one cut instead of cutting the conversation twice.
+// The dedup key is `clear:<uuid>` off the TRANSCRIPT LINE's uuid: the sidecar
+// is the sole producer, so the key names this line for THIS producer and keeps
+// a re-read of the same line (restart, cursor rewind) from clearing twice.
 func clearedEvent(sessionID, lineUUID string, log Logf) *corev1.Event {
 	e := base(sessionID, corev1.Plane_PLANE_FILE)
 	if lineUUID == "" {
-		// Without the uuid the key cannot match the shim's twin. The cut itself
-		// is still real and is never dropped; it is emitted keyless and loudly,
-		// rather than under an invented key that would silently fail to merge.
-		log("transcript: /clear line carries no uuid; emitting ContextCleared with no dedup key (the stream-plane twin will not merge)")
+		// Without the uuid there is nothing stable to name the line by. The
+		// clear itself is real and is never dropped; it is emitted keyless and
+		// loudly, rather than under an invented key that would collide with
+		// another line's.
+		log("transcript: /clear line carries no uuid; emitting ContextCleared with no dedup key (a re-read of this line cannot be deduplicated)")
 	} else {
 		e.DedupKey = clearDedupKey(lineUUID)
 	}
@@ -138,10 +161,10 @@ func clearedEvent(sessionID, lineUUID string, log Logf) *corev1.Event {
 	return e
 }
 
-// compactedEvent builds the COALESCED ContextCompacted cut for a boundary line,
-// taking its summary from next — the line that follows the boundary IN THE FILE
-// (see this file's header on why file order, not timestamp order, is the pairing
-// sequence).
+// compactedEvent builds the COALESCED ContextCompacted event for a boundary
+// line, taking its summary from next — the line that follows the boundary IN
+// THE FILE (see this file's header on why file order, not timestamp order, is
+// the pairing sequence).
 //
 // The dedup key is `compact:<uuid>` off the BOUNDARY line's uuid.
 func compactedEvent(sessionID string, env *datav1.LineEnvelope, cb *datav1.CompactBoundaryLine, next *datav1.TranscriptLine, log Logf) *corev1.Event {
@@ -149,7 +172,7 @@ func compactedEvent(sessionID string, env *datav1.LineEnvelope, cb *datav1.Compa
 	md := cb.GetCompactMetadata()
 	summary := compactSummary(next)
 	if summary == "" {
-		log("transcript: compact_boundary uuid=%q is not followed by a compaction summary line; emitting the cut without a summary", uuid)
+		log("transcript: compact_boundary uuid=%q is not followed by a compaction summary line; emitting ContextCompacted without a summary", uuid)
 	}
 	e := base(sessionID, corev1.Plane_PLANE_FILE)
 	if uuid == "" {
@@ -200,8 +223,9 @@ func compactTrigger(s, uuid string, log Logf) corev1.ContextCompactTrigger {
 	}
 }
 
-// clearDedupKey is the cross-producer dedup key for a clear cut (§6.4).
+// clearDedupKey is the dedup key for a clear, off the transcript line's uuid
+// (§6.4).
 func clearDedupKey(lineUUID string) string { return "clear:" + lineUUID }
 
-// compactDedupKey is the dedup key for a compaction cut, off the boundary uuid.
+// compactDedupKey is the dedup key for a compaction, off the boundary uuid.
 func compactDedupKey(boundaryUUID string) string { return "compact:" + boundaryUUID }
