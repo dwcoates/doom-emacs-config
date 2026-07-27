@@ -6,10 +6,12 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"flag"
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -390,6 +392,31 @@ func main() {
 	// provider need. Its *Server target does not exist until server.New below,
 	// so bind it after — the same late-bind shape as forwarder.
 	sessionCommands := &server.SessionCommandBinding{Logf: log.Printf}
+	// Workspace creation owns worktrees, waiting shims, durable job state, and
+	// retained host actions.  Build its bridge before WireAgentShim so frontend
+	// commands never see an unbound creation capability, but do not drain the
+	// inbox until the server-side SessionCommandBinding has its real target.
+	workspaceCreateCtx, cancelWorkspaceCreate := context.WithCancel(context.Background())
+	defer cancelWorkspaceCreate()
+	workspaceAssembly, err := NewWorkspaceCreateAssembly(WorkspaceCreateAssemblyConfig{
+		StateRoot:      logRoot,
+		Commands:       sessionCommands,
+		Registry:       sessionRegistry,
+		Health:         sessionDriverHealthProbe{Driver: driver, Logf: log.Printf},
+		InitialPrompts: driver,
+		Logf:           log.Printf,
+		InboxInterval:  time.Second,
+	})
+	if err != nil {
+		log.Fatalf("claude-repld: initialize workspace creation: %v", err)
+	}
+	workspaceBridge, err := NewWorkspaceCreationBridge(workspaceCreateCtx, workspaceAssembly.Manager, workspaceAssembly.Store)
+	if err != nil {
+		log.Fatalf("claude-repld: initialize workspace creation bridge: %v", err)
+	}
+	if err := workspaceAssembly.Forwarder.SetTargets(workspaceBridge, workspaceBridge); err != nil {
+		log.Fatalf("claude-repld: bind workspace creation host forwarder: %v", err)
+	}
 	// NEVER-BLUE (workspaceopen.go): bind each registered workspace to its
 	// on-disk transcript at boot, so a restart already knows every resume
 	// target before a frontend can connect, and ensure eagerly on open.
@@ -401,21 +428,22 @@ func main() {
 	}
 	opener.BindAll()
 	agentShim, err := server.WireAgentShim(server.AgentShimConfig{
-		SSM:             ssmMgr,
-		Progress:        progressMgr,
-		Prompts:         driver,
-		Health:          driver,
-		DaemonHealth:    ready,
-		MergeDirs:       pendingMergeDirs{},
-		Lifecycle:       opener,
-		Sessions:        registrySessions{reg: sessionRegistry, driver: driver, logf: log.Printf},
-		Inits:           driver,
-		Catalogs:        driver,
-		Queues:          driver,
-		SessionCommands: sessionCommands,
-		Resyncer:        driver,
-		RequestShutdown: requestShutdown,
-		Logf:            log.Printf,
+		SSM:               ssmMgr,
+		Progress:          progressMgr,
+		Prompts:           driver,
+		Health:            driver,
+		DaemonHealth:      ready,
+		MergeDirs:         pendingMergeDirs{},
+		Lifecycle:         opener,
+		Sessions:          registrySessions{reg: sessionRegistry, driver: driver, logf: log.Printf},
+		Inits:             driver,
+		Catalogs:          driver,
+		Queues:            driver,
+		SessionCommands:   sessionCommands,
+		Resyncer:          driver,
+		WorkspaceCreation: workspaceBridge,
+		RequestShutdown:   requestShutdown,
+		Logf:              log.Printf,
 	})
 	if err != nil {
 		log.Fatalf("claude-repld: frontend surface: %v", err)
@@ -446,6 +474,16 @@ func main() {
 	// Bind the session-command surface now that the *Server exists (createSession
 	// /deleteSession UDS commands and the snapshot DaemonView delegate to it).
 	sessionCommands.SetTarget(srv)
+	// Only now can a creation job invoke the daemon's real session path.  A
+	// failure to scan/drain is fatal to this daemon instance: leaving a running
+	// process that merely stopped consuming durable workspace requests would
+	// strand jobs without an operator-visible failure.
+	go func() {
+		if inboxErr := workspaceAssembly.Inbox.Run(workspaceCreateCtx); inboxErr != nil && workspaceCreateCtx.Err() == nil {
+			log.Printf("claude-repld: workspace creation inbox stopped: %v", inboxErr)
+			requestShutdown()
+		}
+	}()
 	// Same late bind for the registrar's SessionView re-push, so a backfill
 	// transition reaches a CONNECTED frontend rather than waiting for the next
 	// unrelated push (F2).
@@ -493,6 +531,10 @@ func main() {
 	}()
 
 	httpServer := &http.Server{Addr: *addr, Handler: mux}
+	httpListener, err := net.Listen("tcp", *addr)
+	if err != nil {
+		log.Fatalf("claude-repld: HTTP listen %s: %v", *addr, err)
+	}
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
@@ -504,6 +546,7 @@ func main() {
 			log.Printf("claude-repld: POST /shutdown received, shutting down sessions")
 		}
 		ready.ready.Store(false)
+		cancelWorkspaceCreate()
 		srv.ShutdownAll()
 		// Login terminals are children of THIS process, so a daemon that
 		// exits without killing them strands an orphaned claude TUI on a pty
@@ -521,9 +564,12 @@ func main() {
 		}
 	}()
 
+	// Both listeners are bound, the frontend has subscribed to the durable
+	// workspace bridge, and the inbox has a live daemon session target.  Only
+	// this completed state may report readiness.
 	ready.ready.Store(true)
-	log.Printf("claude-repld %s listening on %s (shim: %s; healthz ready=true)", daemonVersion, *addr, *shimScript)
-	if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+	log.Printf("claude-repld %s listening on %s (shim: %s; healthz ready=true; workspace-create inbox=%s)", daemonVersion, *addr, *shimScript, workspaceAssembly.Inbox.Dir)
+	if err := httpServer.Serve(httpListener); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("claude-repld: %v", err)
 	}
 }
