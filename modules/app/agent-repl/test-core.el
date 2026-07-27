@@ -398,6 +398,72 @@ environments without notification tools (terminal-notifier or osascript)."
         (agent-repl--log-verbose nil "test")
         (should message-called)))))
 
+;;;; ---- Tests: workspace-owned live log buffers ----
+
+(ert-deftest agent-repl-test-workspace-log-buffer-is-owned-and-attached ()
+  "The live log buffer is created through the workspace attachment boundary."
+  (let ((buf nil)
+        (attached nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'agent-repl--ws-resolve-persp)
+                   (lambda (_ws) 'fake-persp))
+                  ((symbol-function 'agent-repl--ws-add-buffer)
+                   (lambda (buffer persp switch)
+                     (setq attached (list buffer persp switch)))))
+          (setq buf (agent-repl--workspace-log-buffer "ws-live-log"))
+          (should (equal (buffer-name buf) "*agent-panel-log-ws-live-log*"))
+          (should (equal (agent-repl--buffer-owner buf) "ws-live-log"))
+          (should (equal attached (list buf 'fake-persp nil))))
+      (when (buffer-live-p buf)
+        (kill-buffer buf)))))
+
+(ert-deftest agent-repl-test-append-workspace-log-keeps-workspaces-isolated ()
+  "Each live log buffer contains its exact lines and no other workspace's lines."
+  (let ((first nil)
+        (second nil))
+    (unwind-protect
+        (progn
+          (agent-repl--append-workspace-log "first-log-ws" "first exact line")
+          (agent-repl--append-workspace-log "second-log-ws" "second exact line")
+          (setq first (agent-repl--workspace-log-buffer "first-log-ws")
+                second (agent-repl--workspace-log-buffer "second-log-ws"))
+          (should (equal (with-current-buffer first (buffer-string))
+                         "first exact line\n"))
+          (should (equal (with-current-buffer second (buffer-string))
+                         "second exact line\n")))
+      (dolist (buf (list first second))
+        (when (buffer-live-p buf)
+          (kill-buffer buf))))))
+
+(ert-deftest agent-repl-test-log-ladder-routes-workspace-lines-to-live-log-buffer ()
+  "Every emitted workspace log-ladder line reaches its live buffer once."
+  (let ((ws "ladder-log-ws")
+        (buf nil)
+        (agent-repl-debug nil))
+    (unwind-protect
+        (progn
+          (cl-letf (((symbol-function 'agent-repl--do-log-to-file) #'ignore))
+            (agent-repl--log ws "normal-entry")
+            (agent-repl--info ws "info-entry")
+            (agent-repl--warn ws "warn-entry")
+            (should-error (agent-repl--error ws "error-entry") :type 'error)
+            ;; Verbose is a no-op until its explicit gate is enabled.
+            (agent-repl--log-verbose ws "suppressed-verbose-entry")
+            (let ((agent-repl-debug 'verbose))
+              (agent-repl--log-verbose ws "verbose-entry")))
+          (setq buf (agent-repl--workspace-log-buffer ws))
+          (let ((contents (with-current-buffer buf (buffer-string))))
+            (dolist (line '("normal-entry" "info-entry" "WARNING: warn-entry"
+                            "error-entry" "verbose-entry"))
+              (with-temp-buffer
+                (insert contents)
+                (should (= (how-many (regexp-quote line)
+                                     (point-min) (point-max))
+                           1))))
+            (should-not (string-match-p "suppressed-verbose-entry" contents))))
+      (when (buffer-live-p buf)
+        (kill-buffer buf)))))
+
 ;;;; ---- Tests: echo-area (modeline) severity gate ----
 ;;
 ;; The invariant under test: the log file and *Messages* are the QUIET sink
@@ -1363,6 +1429,11 @@ now that vterm is gone: the input composer and the webview."
 (ert-deftest agent-repl-test-agent-panel-buffer-p-input ()
   "agent-panel-buffer-p should match input buffer names."
   (agent-repl-test--with-temp-buffer "*agent-panel-input-abcd1234*"
+    (should (agent-repl--agent-panel-buffer-p))))
+
+(ert-deftest agent-repl-test-agent-panel-buffer-p-workspace-log ()
+  "The workspace-owned live log buffer is an agent-repl buffer."
+  (agent-repl-test--with-temp-buffer "*agent-panel-log-abcd1234*"
     (should (agent-repl--agent-panel-buffer-p))))
 
 (ert-deftest agent-repl-test-agent-panel-buffer-p-regular ()
