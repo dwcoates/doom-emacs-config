@@ -386,11 +386,19 @@ and reconnects (design §4.4)."
   "Process filter: accumulate CHUNK and dispatch every complete frame.
 Frames are newline-delimited; a partial trailing frame is retained in
 `agent-repl--uds-read-accumulator' until its newline arrives."
+  ;; A filter may receive a high rate of small chunks; retain only framing
+  ;; metrics, never wire contents, in the verbose trace.
+  (agent-repl--log-verbose
+   nil "uds-filter: received bytes=%d buffered-before=%d"
+   (length chunk) (length agent-repl--uds-read-accumulator))
   (setq agent-repl--uds-read-accumulator
         (concat agent-repl--uds-read-accumulator chunk))
   (let (line)
     (while (setq line (agent-repl--uds-next-line))
-      (agent-repl--uds-handle-line line))))
+      (agent-repl--uds-handle-line line))
+    (agent-repl--log-verbose
+     nil "uds-filter: buffered-after=%d"
+     (length agent-repl--uds-read-accumulator))))
 
 (defun agent-repl--uds-next-line ()
   "Pop and return the next complete (newline-terminated) frame line.
@@ -431,8 +439,8 @@ is never silently skipped (AGENTS.md No-Silent-Fallbacks)."
                          :null-object nil)
     (json-parse-error
      (agent-repl--log nil
-                      "uds-decode-frame: MALFORMED json (%d bytes): %S — line=%s"
-                      (length line) err (agent-repl--uds-truncate line))
+                      "uds-decode-frame: MALFORMED json bytes=%d error-type=%s"
+                      (length line) (car err))
      (signal 'agent-repl-uds-malformed-frame
              (list (error-message-string err) line)))))
 
@@ -443,41 +451,48 @@ with no oneof field, or an unknown one, is loud-logged and SIGNALS
 `agent-repl-uds-malformed-frame'.  A KNOWN field with no registered
 handler is loud-logged (a not-yet-wired condition surfaced honestly),
 not silently dropped.  Returns the handler's value, or nil."
-  (unless (and (consp frame) (keywordp (car frame)))
-    (agent-repl--log nil "uds-dispatch: MALFORMED frame — no oneof key: %S" frame)
+  (unless (and (listp frame) (keywordp (car frame)) (null (cddr frame)))
+    (agent-repl--log nil
+                     "uds-dispatch: MALFORMED frame shape=%s element-count=%s — expected one oneof arm"
+                     (type-of frame) (and (listp frame) (length frame)))
     (signal 'agent-repl-uds-malformed-frame
             (list "frame carries no oneof field" frame)))
   (let* ((key (car frame))
          (field (substring (symbol-name key) 1))
-         (payload (plist-get frame key)))
+         (payload (plist-get frame key))
+         (workspace (and (listp payload) (plist-get payload :workspace)))
+         (session-id (and (listp payload) (plist-get payload :sessionId)))
+         (revision (and (listp payload)
+                        (or (plist-get payload :revision)
+                            (plist-get payload :revisionId))))
+         (state (and (listp payload) (plist-get payload :state))))
     (cond
      ((not (member field agent-repl--uds-known-frame-fields))
-      (agent-repl--log nil
-                       "uds-dispatch: MALFORMED frame — unknown oneof field=%s known=%S"
-                       field agent-repl--uds-known-frame-fields)
+      (agent-repl--log workspace
+                       "uds-dispatch: MALFORMED unknown oneof field=%s workspace=%S session-id=%S known=%S"
+                       field workspace session-id agent-repl--uds-known-frame-fields)
       (signal 'agent-repl-uds-malformed-frame
               (list (format "unknown oneof field: %s" field) frame)))
      (t
       (let ((handler (cdr (assoc field agent-repl--uds-frame-handlers))))
         (cond
          (handler
-          (agent-repl--log nil "uds-dispatch: field=%s -> handler=%s" field handler)
+          (agent-repl--log workspace
+                           "uds-dispatch: field=%s workspace=%S session-id=%S revision=%S state=%S -> handler=%s"
+                           field workspace session-id revision state handler)
           (funcall handler payload))
          ((member field agent-repl--uds-ignored-frame-fields)
-          (let ((workspace (plist-get payload :workspace))
-                (session-id (plist-get payload :sessionId))
-                (task-count (and (equal field "taskCatalog")
+          (let ((task-count (and (equal field "taskCatalog")
                                  (length (plist-get payload :tasks)))))
             (agent-repl--log-verbose
              workspace
-             "uds-dispatch: field=%s deliberately ignored by the Emacs frontend workspace=%s session=%s task-count=%s"
-             field (or workspace "nil") (or session-id "nil")
-             (if task-count task-count "n/a")))
+             "uds-dispatch: field=%s deliberately ignored workspace=%s session=%s revision=%S state=%S task-count=%S"
+             field workspace session-id revision state task-count))
           nil)
          (t
-          (agent-repl--log nil
-                           "uds-dispatch: field=%s KNOWN but no handler registered — not dispatched (register one at stitch)"
-                           field)
+          (agent-repl--log workspace
+                           "uds-dispatch: field=%s workspace=%S session-id=%S revision=%S state=%S KNOWN but no handler registered — not dispatched (register one at stitch)"
+                           field workspace session-id revision state)
           nil)))))))
 
 ;;;; ---- Outbound commands -----------------------------------------------
@@ -562,11 +577,15 @@ WORKSPACE supplies log context and REASON records why the caller can no
 longer consume a later `CommandAck'.  This is the only transport-owned
 cleanup path for a synchronous command wait: retaining the callback after a
 timeout would let a delayed acknowledgement mutate stale caller state."
-  (when (gethash request-id agent-repl--uds-pending-commands)
-    (remhash request-id agent-repl--uds-pending-commands)
-    (agent-repl--log workspace
-                     "uds-untrack-command: request-id=%s reason=%s"
-                     request-id reason))
+  (if (gethash request-id agent-repl--uds-pending-commands)
+      (progn
+        (remhash request-id agent-repl--uds-pending-commands)
+        (agent-repl--log workspace
+                         "uds-untrack-command: request-id=%s reason=%s"
+                         request-id reason))
+    (agent-repl--log-verbose workspace
+                             "uds-untrack-command: request-id=%s no pending entry reason=%s"
+                             request-id reason))
   nil)
 
 (defun agent-repl--uds-track-health-response
@@ -597,23 +616,30 @@ CommandAck tracking: an ACK confirms command receipt, not health."
 
 (defun agent-repl--uds-untrack-health-response (request-id workspace reason)
   "Stop awaiting REQUEST-ID's health result for WORKSPACE because of REASON."
-  (when (gethash request-id agent-repl--uds-pending-health-responses)
-    (remhash request-id agent-repl--uds-pending-health-responses)
-    (agent-repl--log workspace
-                     "uds-untrack-health: request-id=%s reason=%s"
-                     request-id reason))
+  (if (gethash request-id agent-repl--uds-pending-health-responses)
+      (progn
+        (remhash request-id agent-repl--uds-pending-health-responses)
+        (agent-repl--log workspace
+                         "uds-untrack-health: request-id=%s reason=%s"
+                         request-id reason))
+    (agent-repl--log-verbose workspace
+                             "uds-untrack-health: request-id=%s no pending entry reason=%s"
+                             request-id reason))
   nil)
 
 (defun agent-repl--uds-handle-health-response (field response)
   "Correlate FIELD health RESPONSE and deliver it to its awaiting caller."
   (let* ((request-id (plist-get response :requestId))
+         (response-workspace (plist-get response :workspace))
+         (response-session-id (plist-get response :sessionId))
          (pending (and request-id
                        (gethash request-id
                                 agent-repl--uds-pending-health-responses))))
     (unless (and (stringp request-id) (not (string-empty-p request-id)))
-      (agent-repl--log nil
-                       "uds-health-response: MALFORMED field=%s missing request-id response=%S"
-                       field response)
+      (agent-repl--log response-workspace
+                       "uds-health-response: MALFORMED field=%s missing request-id workspace=%S session-id=%S healthy=%S"
+                       field response-workspace response-session-id
+                       (plist-get response :healthy))
       (signal 'agent-repl-uds-malformed-frame
               (list "health response missing requestId" response)))
     (if (null pending)
@@ -621,9 +647,10 @@ CommandAck tracking: an ACK confirms command receipt, not health."
           ;; A result can legitimately arrive after a local timeout removed
           ;; its waiter.  Record it durably, but never let it satisfy another
           ;; request or mutate abandoned caller state.
-          (agent-repl--log nil
-                           "uds-health-response: untracked request-id=%s field=%s response=%S"
-                           request-id field response)
+          (agent-repl--log response-workspace
+                           "uds-health-response: untracked request-id=%s field=%s workspace=%S session-id=%S healthy=%S"
+                           request-id field response-workspace response-session-id
+                           (plist-get response :healthy))
           nil)
       (let ((expected-field (plist-get pending :field))
             (expected-workspace (plist-get pending :workspace))
@@ -649,11 +676,21 @@ CommandAck tracking: an ACK confirms command receipt, not health."
                     (list "session health identity mismatch" response))))
         (remhash request-id agent-repl--uds-pending-health-responses)
         (agent-repl--log expected-workspace
-                         "uds-health-response: correlated request-id=%s field=%s healthy=%s reason=%S"
+                         "uds-health-response: correlated request-id=%s field=%s healthy=%s reason-present=%s"
                          request-id field
                          (if (plist-get response :healthy) "yes" "no")
-                         (plist-get response :reason))
-        (funcall (plist-get pending :on-response) response)
+                         (if (plist-get response :reason) "yes" "no"))
+        (condition-case callback-err
+            (funcall (plist-get pending :on-response) response)
+          (error
+           (agent-repl--log expected-workspace
+                            "uds-health-response: callback ERROR request-id=%s field=%s workspace=%S session-id=%S error-type=%s"
+                            request-id field expected-workspace
+                            expected-session-id (car callback-err))
+           (signal (car callback-err) (cdr callback-err))))
+        (agent-repl--log expected-workspace
+                         "uds-health-response: delivered request-id=%s field=%s workspace=%S session-id=%S"
+                         request-id field expected-workspace expected-session-id)
         response))))
 
 (defun agent-repl--uds-handle-daemon-health (response)
@@ -672,8 +709,9 @@ omits a false `ok', so a failed ack decodes with `:ok' nil.
 The ECHO comes from `:failure' — the daemon's classified account — not
 from `:error', which is an `err.Error()' funnel this end used to print
 verbatim: package-prefixed Go text such as `shimclient: request nacked',
-shown to a user who has no idea what a shimclient is.  The raw text still
-rides the log line, where it is evidence rather than prose.
+shown to a user who has no idea what a shimclient is.  The durable trace
+records only whether raw error text was present, so command contents never
+leak through a daemon-provided error string.
 
   ok=t   -> the command was accepted; log and drop the pending entry.
   ok=nil -> the command was REJECTED; loud-log AND surface an echo-area
@@ -690,30 +728,45 @@ the `:ok' flag."
                     (agent-repl-failure-from-wire item)))
          (pending (and request-id
                        (gethash request-id agent-repl--uds-pending-commands)))
-         (workspace (plist-get pending :workspace))
+         (workspace (if pending
+                        (plist-get pending :workspace)
+                      (plist-get ack :workspace)))
          (field (plist-get pending :field)))
+    (unless (and (stringp request-id) (not (string-empty-p request-id)))
+      (agent-repl--log workspace
+                       "uds-command-ack: MALFORMED missing request-id workspace=%S ok=%S error-present=%s"
+                       workspace ok (if err "yes" "no"))
+      (signal 'agent-repl-uds-malformed-frame
+              (list "command ack missing requestId" ack)))
     (when request-id
       (remhash request-id agent-repl--uds-pending-commands))
     (cond
      ((null pending)
-      (agent-repl--log workspace
-                       "uds-command-ack: UNTRACKED request-id=%s ok=%S error=%s — ignoring"
-                       request-id ok (or err "nil")))
+     (agent-repl--log workspace
+                       "uds-command-ack: UNTRACKED request-id=%s ok=%S error-present=%s — ignoring"
+                       request-id ok (if err "yes" "no")))
      (ok
       (agent-repl--log workspace
                        "uds-command-ack: ACCEPTED request-id=%s field=%s"
                        request-id field)
       (when-let ((on-success (plist-get pending :on-success)))
         (condition-case cb-err
-            (funcall on-success)
+            (progn
+              (agent-repl--log workspace
+                               "uds-command-ack: running on-success request-id=%s field=%s"
+                               request-id field)
+              (funcall on-success)
+              (agent-repl--log workspace
+                               "uds-command-ack: completed on-success request-id=%s field=%s"
+                               request-id field))
           (error
            (agent-repl--log workspace
-                            "uds-command-ack: on-success callback errored: %S"
-                            cb-err)))))
+                            "uds-command-ack: on-success callback ERROR request-id=%s field=%s error-type=%s"
+                            request-id field (car cb-err))))))
      (t
       (agent-repl--log workspace
-                       "uds-command-ack: REJECTED request-id=%s field=%s error=%s — surfacing"
-                       request-id field (or err "nil"))
+                       "uds-command-ack: REJECTED request-id=%s field=%s error-present=%s — surfacing"
+                       request-id field (if err "yes" "no"))
       ;; An ack with no classified failure is an OLD daemon, not a silent
       ;; case: it still surfaces, from the raw text, so a refusal is never
       ;; invisible while the two builds are mixed.
@@ -723,11 +776,18 @@ the `:ok' flag."
                  (or field "frontend") (or err "no error detail")))
       (when-let ((on-failure (plist-get pending :on-failure)))
         (condition-case cb-err
-            (funcall on-failure (or err "command rejected"))
+            (progn
+              (agent-repl--log workspace
+                               "uds-command-ack: running on-failure request-id=%s field=%s"
+                               request-id field)
+              (funcall on-failure (or err "command rejected"))
+              (agent-repl--log workspace
+                               "uds-command-ack: completed on-failure request-id=%s field=%s"
+                               request-id field))
           (error
            (agent-repl--log workspace
-                            "uds-command-ack: on-failure callback errored: %S"
-                            cb-err))))))
+                            "uds-command-ack: on-failure callback ERROR request-id=%s field=%s error-type=%s"
+                            request-id field (car cb-err)))))))
     ok))
 
 (agent-repl--uds-register-handler "commandAck"
