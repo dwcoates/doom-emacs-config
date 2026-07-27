@@ -226,7 +226,7 @@ func turnActive(db *sql.DB, workspace string) (bool, error) {
 	err := db.QueryRow(
 		`SELECT state FROM workspace_state
 		 WHERE workspace = ?
-		   AND state IN ('init','thinking','permission','done','ready','idle','dead','vendor_blocked')
+		   AND state IN ('init','thinking','permission','done','ready','idle','dead','vendor_blocked','interrupted')
 		 ORDER BY at DESC LIMIT 1`, workspace).Scan(&state)
 	if err == sql.ErrNoRows {
 		return false, nil

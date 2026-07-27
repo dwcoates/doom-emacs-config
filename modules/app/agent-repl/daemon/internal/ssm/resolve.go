@@ -25,8 +25,14 @@ const (
 	// `done` reports that it ended cleanly. It is not a latch and has no
 	// clearing token — the next agent-axis row supersedes it.
 	sigVendorBlocked = "vendor_blocked"
-	sigUnpainted     = "unpainted" // no frontend has attested painting.
-	sigPainted       = "painted"   // paint axis cleared (attested).
+	// Another AGENT-axis turn outcome (I1): the last turn ended because a
+	// user-commanded stop was DELIVERED (the shim's ack said INTERRUPTED).
+	// Modeled exactly as `done` and `vendor_blocked` are — one row naming
+	// how the turn ended, no clearing token, superseded by the next
+	// agent-axis row — so there is nothing to latch and nothing to release.
+	sigInterrupted = "interrupted"
+	sigUnpainted   = "unpainted" // no frontend has attested painting.
+	sigPainted     = "painted"   // paint axis cleared (attested).
 	// A transcript the sidecar could not fully read: the history is
 	// incomplete, so anything painted from it is a partial account.
 	sigBackfillFailed = "backfill_failed"
@@ -56,6 +62,7 @@ const (
 	causePaintAck        = "paint_ack"
 	causePaintLost       = "paint_lost"
 	causeVendorBlocked   = "vendor_blocked"
+	causeInterrupted     = "interrupted"
 )
 
 // vendorBlockingStopReasons are the TurnEnded stop reasons that conclude a
@@ -121,11 +128,15 @@ func VendorBlockingRateLimit(status string) bool {
 // proven usable and there is no foreground turn. `permission` is green
 // because a pending permission means the agent is READY for the user to
 // view the response and answer it, not that anything is wrong.
+// `interrupted` is green for the same reason `done` is: the turn is over and
+// the route is proven usable. The user asked for the turn to stop and it
+// stopped, which is a completed request, not a fault.
 var greenTokens = map[string]bool{
-	sigIdle:       true,
-	sigReady:      true,
-	sigDone:       true,
-	sigPermission: true,
+	sigIdle:        true,
+	sigReady:       true,
+	sigDone:        true,
+	sigInterrupted: true,
+	sigPermission:  true,
 }
 
 // isGreenToken reports whether a resolved token is one of the green states,
@@ -150,6 +161,8 @@ func renderStateOf(token string) frontendv1.RenderState {
 		return frontendv1.RenderState_RENDER_STATE_PERMISSION
 	case sigDone:
 		return frontendv1.RenderState_RENDER_STATE_DONE
+	case sigInterrupted:
+		return frontendv1.RenderState_RENDER_STATE_INTERRUPTED
 	case sigReady:
 		return frontendv1.RenderState_RENDER_STATE_READY
 	case sigVendorBlocked:
@@ -229,8 +242,9 @@ func renderStateOf(token string) frontendv1.RenderState {
 //	--- green --------------------------------------------------------------
 //	40 permission       green: the agent is ready for you to view the answer
 //	41 done
-//	42 ready
-//	43 idle
+//	42 interrupted      agent axis: the last turn ended BECAUSE YOU STOPPED IT
+//	43 ready
+//	44 idle
 //
 // `merged` is no longer guarded on the agent axis. A merged workspace leaves
 // the tab-bar entirely the moment the merge lands, so there is no tab for a
@@ -257,8 +271,9 @@ WITH
     ('thinking','agent',30),
     ('permission','agent',40),
     ('done','agent',41),
-    ('ready','agent',42),
-    ('idle','agent',43)
+    ('interrupted','agent',42),
+    ('ready','agent',43),
+    ('idle','agent',44)
   ),
   rows AS (
     SELECT workspace, session_id, state, cause_kind, cause_seq, at, task_id
