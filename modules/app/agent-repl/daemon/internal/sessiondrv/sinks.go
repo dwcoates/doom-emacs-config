@@ -292,8 +292,15 @@ func (c *consumer) Apply(ev *corev1.Event) {
 	}
 	c.applyProgress(ev)
 	switch ev.GetPayload().(type) {
-	case *corev1.Event_TaskStarted, *corev1.Event_TaskProgress, *corev1.Event_TaskEnded:
-		c.push.PushTaskCatalog(frontend.BuildTaskCatalog(c.workspace, c.sessionID, c.snapshotRing()))
+	case *corev1.Event_TaskStarted, *corev1.Event_TaskEnded:
+		catalog := frontend.BuildTaskCatalog(c.workspace, c.sessionID, c.snapshotRing())
+		c.logf("sessiondrv: task catalog push session=%s ws=%s seq=%d event=%s tasks=%d",
+			c.sessionID, c.workspace, ev.GetSeq(), stateKind(ev), len(catalog.GetTasks()))
+		c.push.PushTaskCatalog(catalog)
+	case *corev1.Event_TaskProgress:
+		// TaskProgress can fire hundreds of times per second, but TaskCatalog has
+		// no progress fields and BuildTaskCatalog deliberately ignores it. Do not
+		// log or broadcast this hot no-change path.
 	case *corev1.Event_SessionEnded:
 		// The SAME event the SSM resolves to RENDER_STATE_DEAD also records
 		// WHY, so the color and its account cannot disagree. Before this the
