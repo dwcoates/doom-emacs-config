@@ -403,7 +403,8 @@ environments without notification tools (terminal-notifier or osascript)."
 (ert-deftest agent-repl-test-workspace-log-buffer-is-owned-and-attached ()
   "The live log buffer is created through the workspace attachment boundary."
   (let ((buf nil)
-        (attached nil))
+        (attached nil)
+        (agent-repl--workspace-log-buffer-enabled t))
     (unwind-protect
         (cl-letf (((symbol-function 'agent-repl--ws-resolve-persp)
                    (lambda (_ws) 'fake-persp))
@@ -420,7 +421,8 @@ environments without notification tools (terminal-notifier or osascript)."
 (ert-deftest agent-repl-test-append-workspace-log-keeps-workspaces-isolated ()
   "Each live log buffer contains its exact lines and no other workspace's lines."
   (let ((first nil)
-        (second nil))
+        (second nil)
+        (agent-repl--workspace-log-buffer-enabled t))
     (unwind-protect
         (progn
           (agent-repl--append-workspace-log "first-log-ws" "first exact line")
@@ -439,7 +441,8 @@ environments without notification tools (terminal-notifier or osascript)."
   "Every emitted workspace log-ladder line reaches its live buffer once."
   (let ((ws "ladder-log-ws")
         (buf nil)
-        (agent-repl-debug nil))
+        (agent-repl-debug nil)
+        (agent-repl--workspace-log-buffer-enabled t))
     (unwind-protect
         (progn
           (cl-letf (((symbol-function 'agent-repl--do-log-to-file) #'ignore))

@@ -413,6 +413,15 @@ behavior can rebind via `cl-letf'.")
 (when (and noninteractive (boundp 'agent-repl-log-to-file))
   (setq agent-repl-log-to-file nil))
 
+;; Workspace live-log buffers are a UI sink, analogous to the durable file
+;; sink disabled immediately above.  Suppress that sink across the generic
+;; batch harness so tests of unrelated buffer/perspective behavior observe
+;; only the side effects of their subject.  test-core.el's dedicated live-log
+;; tests bind this back to t and exercise the production path directly.
+(when (and noninteractive
+           (boundp 'agent-repl--workspace-log-buffer-enabled))
+  (setq agent-repl--workspace-log-buffer-enabled nil))
+
 ;;;; ---- External-boundary guards ----
 ;;
 ;; The production module (loaded above) defines every external-process
