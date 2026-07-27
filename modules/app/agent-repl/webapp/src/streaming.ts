@@ -137,6 +137,35 @@ export function blockKey(block: StreamedBlock): string {
   return `${block.kind}:${block.uuid === undefined ? block.blockId : `u:${block.uuid}`}`;
 }
 
+// --- feed order ---------------------------------------------------------------
+
+/**
+ * Insert `item` into the feed at its seq rank: after every item ranked at or
+ * below `seq`, before the first ranked above it.
+ *
+ * This — not appending — is what keeps the feed in conversation order. The
+ * connect resync replays history (low seqs) on the same socket as live pushes
+ * (high seqs), so arrival order interleaves the two arbitrarily; a live prompt
+ * echo used to land wherever the replay happened to be and stay there. Ties
+ * keep arrival order (items of one delta share its through-seq and must not
+ * reorder), and an unranked item — minted before ranking existed — ranks as
+ * oldest, so it never blocks a ranked insert from passing it.
+ *
+ * The scan runs from the tail because the live steady state IS an append:
+ * each new item ranks at or above everything mounted, and the loop exits
+ * immediately.
+ */
+export function insertBySeq(
+  items: ConversationItem[],
+  item: ConversationItem,
+  seq: number,
+): void {
+  item.seq = seq;
+  let idx = items.length;
+  while (idx > 0 && (items[idx - 1].seq ?? Number.MIN_SAFE_INTEGER) > seq) idx--;
+  items.splice(idx, 0, item);
+}
+
 // --- transitions ------------------------------------------------------------
 
 /**
@@ -158,6 +187,7 @@ export function applyStreamDelta(
   items: ConversationItem[],
   delta: StreamDelta,
   nowIso: string,
+  orderSeq: number,
 ): DeltaOutcome {
   if (delta.kind === "input_json") return growToolInput(items, delta);
 
@@ -170,7 +200,12 @@ export function applyStreamDelta(
     open.done = false;
     return { changed: true };
   }
-  items.push(
+  // ORDERSEQ is the store's high-water mark, not a delta seq: the typing relay
+  // is ephemeral and carries none. A preview is live by definition, so the
+  // high-water mark ranks it after everything known — while a concurrent
+  // history replay (lower seqs) still slots above it.
+  insertBySeq(
+    items,
     delta.kind === "thinking"
       ? { kind: "thinking", blockId, messageId: delta.messageId, text: delta.delta, done: false }
       : {
@@ -181,6 +216,7 @@ export function applyStreamDelta(
           done: false,
           ts: nowIso,
         },
+    orderSeq,
   );
   return { changed: true };
 }
@@ -195,7 +231,11 @@ export function applyStreamDelta(
  * 3. nowhere yet, so it is appended — a replayed message whose deltas this
  *    webapp never saw must still render.
  */
-export function settleStreamedBlock(items: ConversationItem[], block: StreamedBlock): void {
+export function settleStreamedBlock(
+  items: ConversationItem[],
+  block: StreamedBlock,
+  orderSeq: number,
+): void {
   const previewIdx = previewIndexFor(items, block);
   if (previewIdx !== -1) {
     items[previewIdx] = adopt(items[previewIdx] as StreamedBlock, block);
@@ -209,7 +249,7 @@ export function settleStreamedBlock(items: ConversationItem[], block: StreamedBl
     items[idx] = adopt(items[idx] as StreamedBlock, block);
     return;
   }
-  items.push(block);
+  insertBySeq(items, block, orderSeq);
 }
 
 /**
@@ -245,11 +285,11 @@ function previewIndexFor(items: readonly ConversationItem[], block: StreamedBloc
  * Land a finished block onto the item already standing for it.
  *
  * The finished block wins on every field it carries — it is the authoritative
- * version of the prose — EXCEPT the feed place, which stays as the standing
- * item opened it.
+ * version of the prose — EXCEPT the feed place and the feed rank, which stay
+ * as the standing item opened them: a settle replaces content, never position.
  */
 function adopt<T extends StreamedBlock>(existing: T, incoming: T): T {
-  return { ...incoming, blockId: existing.blockId };
+  return { ...incoming, blockId: existing.blockId, seq: existing.seq };
 }
 
 /** Grow the one tool call whose input is still arriving; see {@link applyStreamDelta}. */
