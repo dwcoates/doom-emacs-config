@@ -131,8 +131,8 @@ message Event {
     DegradedState degraded_state = 19;
     UnparsedEvent unparsed = 20;
     MessageLatency message_latency = 21;
-    // Context cuts. First-class payloads so the store's `kind` column names
-    // them and the daemon can find the newest cut with an envelope query.
+    // Clear and compact. First-class payloads so the store's `kind` column
+    // names them and the daemon can find the newest one with an envelope query.
     ContextCleared context_cleared = 22;
     ContextCompacted context_compacted = 23;
     // Vendor extension payload (e.g. agentshim.data.v1.* messages). The
