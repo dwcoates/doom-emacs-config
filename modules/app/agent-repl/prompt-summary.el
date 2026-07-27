@@ -354,10 +354,26 @@ chronological order.  Returns nil when context is disabled, the input
 buffer is missing/dead, or no history exists yet."
   (let ((cap agent-repl-prompt-summary-context-count)
         (buf (agent-repl--ws-get ws :input-buffer)))
-    (when (and (integerp cap) (> cap 0) buf (buffer-live-p buf))
+    (cond
+     ((not (integerp cap))
+      (agent-repl--log ws "prompt-summary: context unavailable reason=non-integer-cap cap=%S" cap)
+      nil)
+     ((<= cap 0)
+      (agent-repl--log ws "prompt-summary: context disabled cap=%d" cap)
+      nil)
+     ((not buf)
+      (agent-repl--log ws "prompt-summary: context unavailable reason=no-input-buffer cap=%d" cap)
+      nil)
+     ((not (buffer-live-p buf))
+      (agent-repl--log ws "prompt-summary: context unavailable reason=dead-input-buffer cap=%d buffer=%S" cap buf)
+      nil)
+     (t
       (let* ((hist (buffer-local-value 'agent-repl--input-history buf))
-             (recent (seq-take (or hist nil) cap)))
-        (nreverse (copy-sequence recent))))))
+             (recent (seq-take (or hist nil) cap))
+             (context (nreverse (copy-sequence recent))))
+        (agent-repl--log ws "prompt-summary: context collected cap=%d history-count=%d context-count=%d"
+                          cap (length (or hist nil)) (length context))
+        context)))))
 
 (defun agent-repl--prompt-summary-format-context (context)
   "Render CONTEXT (list of prior prompts, oldest first) for the summarizer.
@@ -433,14 +449,21 @@ update on the workspace's webview buffer so the new segment paints
 immediately."
   (let ((current-raw (agent-repl--ws-get ws :last-prompt-text)))
     (if (not (equal current-raw raw))
-        (agent-repl--log ws "prompt-summary: drop stale summary (raw mismatched)")
+        (agent-repl--log ws "prompt-summary: drop stale summary reason=raw-mismatch captured-raw-len=%d current-raw-len=%s summary-len=%d"
+                          (length raw)
+                          (if (stringp current-raw) (length current-raw) "non-string")
+                          (length summary))
+      (agent-repl--log ws "prompt-summary: apply accepted summary raw-len=%d summary-len=%d"
+                        (length raw) (length summary))
       (agent-repl--ws-put ws :last-prompt-summary summary)
       (agent-repl--ws-put ws :last-prompt-summary-pending nil)
       (agent-repl--prompt-summary-redisplay ws)
       ;; Persist so the summary survives Emacs restart — the tabline /
       ;; mode-line hint reads `:last-prompt-summary' to render the "what
       ;; is this ws working on" segment, which is otherwise lost on quit.
-      (agent-repl--state-save ws))))
+      (agent-repl--log ws "prompt-summary: persist resolved summary begin summary-len=%d" (length summary))
+      (agent-repl--state-save ws)
+      (agent-repl--log ws "prompt-summary: persist resolved summary complete summary-len=%d" (length summary)))))
 
 (defun agent-repl--prompt-summary-redisplay (ws)
   "Force a mode-line redisplay for WS's webview buffer.
@@ -452,9 +475,15 @@ Retargeted at `:frontend-buffer' (the surviving buffer) now that
 `:vterm-buffer' no longer exists, so this at least redraws a real,
 live buffer instead of always missing one."
   (let ((buf (agent-repl--ws-get ws :frontend-buffer)))
-    (when (and buf (buffer-live-p buf))
+    (cond
+     ((not buf)
+      (agent-repl--log-verbose ws "prompt-summary: redisplay skipped reason=no-frontend-buffer"))
+     ((not (buffer-live-p buf))
+      (agent-repl--log-verbose ws "prompt-summary: redisplay skipped reason=dead-frontend-buffer buffer=%S" buf))
+     (t
       (with-current-buffer buf
-        (force-mode-line-update t)))))
+        (force-mode-line-update t))
+      (agent-repl--log-verbose ws "prompt-summary: redisplay complete buffer=%S" buf)))))
 
 (defun agent-repl--prompt-summary-make-sentinel (ws raw out-buf)
   "Build a process sentinel that writes the summary for WS/RAW.
@@ -467,39 +496,62 @@ the process exits."
                  (raw-out (and (buffer-live-p out-buf)
                                (with-current-buffer out-buf (buffer-string))))
                  (cleaned (and raw-out (agent-repl--prompt-summary-clean raw-out))))
-            (agent-repl--log ws "prompt-summary: sentinel ws=%s status=%s event=%s len=%s"
-                              ws status (string-trim (or event ""))
+            (agent-repl--log ws "prompt-summary: sentinel complete status=%s proc-status=%s event=%s stdout-len=%s summary-len=%s"
+                              status (process-status proc) (string-trim (or event ""))
+                              (if raw-out (length raw-out) "nil")
                               (if cleaned (length cleaned) "nil"))
             (cond
              ((and (eq (process-status proc) 'exit)
                    (zerop status)
                    cleaned
                    (not (string-empty-p cleaned)))
+              (agent-repl--log ws "prompt-summary: sentinel accepted result summary-len=%d" (length cleaned))
               (agent-repl--prompt-summary-apply ws raw cleaned))
              (t
               ;; Failed / empty — clear pending so the segment goes back
               ;; to whatever summary was there before (or nothing).
               (let ((current-raw (agent-repl--ws-get ws :last-prompt-text)))
-                (when (equal current-raw raw)
-                  (agent-repl--ws-put ws :last-prompt-summary-pending nil)
-                  (agent-repl--prompt-summary-redisplay ws))))))
+                (if (equal current-raw raw)
+                    (progn
+                      (agent-repl--log ws "prompt-summary: sentinel rejected result; clearing pending status=%s current-raw-len=%d" status (length current-raw))
+                      (agent-repl--ws-put ws :last-prompt-summary-pending nil)
+                      (agent-repl--prompt-summary-redisplay ws)
+                      (agent-repl--log ws "prompt-summary: persist rejected result begin")
+                      (agent-repl--state-save ws)
+                      (agent-repl--log ws "prompt-summary: persist rejected result complete"))
+                  (agent-repl--log ws "prompt-summary: sentinel rejected stale result; pending unchanged captured-raw-len=%d current-raw-len=%s"
+                                    (length raw)
+                                    (if (stringp current-raw) (length current-raw) "non-string")))))))
         (when (buffer-live-p out-buf)
           (kill-buffer out-buf))))))
+
+(defun agent-repl--prompt-summary-process-start (ws out-buf cmd sentinel)
+  "Start the headless summary process for WS.
+This is the external-process boundary for prompt summaries; callers own
+command construction and error handling, while tests stub this function."
+  (make-process
+   :name (format "agent-prompt-summary-%s" ws)
+   :buffer out-buf
+   :command cmd
+   :connection-type 'pipe
+   :noquery t
+   :sentinel sentinel))
+
+(defun agent-repl--prompt-summary-process-send-input (proc input)
+  "Send INPUT to headless summary PROC, then close its standard input.
+This is the external-process boundary paired with
+`agent-repl--prompt-summary-process-start'."
+  (process-send-string proc input)
+  (process-send-eof proc))
 
 (defun agent-repl--prompt-summary-spawn (ws raw)
   "Spawn the async claude process to summarize RAW for WS.
 Returns the process, or nil when prerequisites are missing.  Separated
 from `agent-repl--kickoff-prompt-summary' so tests can stub
-`make-process' / `process-send-string' here without going through the
+the prompt-summary process-boundary wrappers without going through the
 state-mutation entry point."
-  (let* ((out-buf (generate-new-buffer
-                   (format " *agent-prompt-summary-%s*" ws)))
-         (cmd (agent-repl--backend-headless-cmd
-               (agent-repl--ws-backend ws)
-               agent-repl-prompt-summary-model nil))
-         (context (agent-repl--prompt-summary-collect-context ws))
-         (proc-input (agent-repl--prompt-summary-build-input raw context))
-         (sentinel (agent-repl--prompt-summary-make-sentinel ws raw out-buf)))
+  (let ((out-buf (generate-new-buffer
+                  (format " *agent-prompt-summary-%s*" ws))))
     (condition-case err
         ;; Spawn from a non-project cwd so the headless claude's hooks
         ;; (SessionStart / UserPromptSubmit / Stop) fire with a cwd that
@@ -507,19 +559,21 @@ state-mutation entry point."
         ;; sentinel watcher attributes them to the calling workspace and
         ;; flips :agent-state to :done while the user's interactive Claude
         ;; is still mid-turn.
-        (let* ((default-directory temporary-file-directory)
-               (proc (make-process
-                      :name (format "agent-prompt-summary-%s" ws)
-                      :buffer out-buf
-                      :command cmd
-                      :connection-type 'pipe
-                      :noquery t
-                      :sentinel sentinel)))
-          (process-send-string proc proc-input)
-          (process-send-eof proc)
-          proc)
+        (let* ((cmd (agent-repl--backend-headless-cmd
+                     (agent-repl--ws-backend ws)
+                     agent-repl-prompt-summary-model nil))
+               (context (agent-repl--prompt-summary-collect-context ws))
+               (proc-input (agent-repl--prompt-summary-build-input raw context))
+               (sentinel (agent-repl--prompt-summary-make-sentinel ws raw out-buf))
+               (default-directory temporary-file-directory))
+          (agent-repl--log ws "prompt-summary: spawn request raw-len=%d context-count=%d input-len=%d command-argc=%d"
+                            (length raw) (length context) (length proc-input) (length cmd))
+          (let ((proc (agent-repl--prompt-summary-process-start ws out-buf cmd sentinel)))
+            (agent-repl--prompt-summary-process-send-input proc proc-input)
+            (agent-repl--log ws "prompt-summary: spawn accepted process=%S" proc)
+            proc))
       (error
-       (agent-repl--log ws "prompt-summary: spawn failed err=%S" err)
+       (agent-repl--log ws "prompt-summary: spawn failed raw-len=%d err=%S" (length raw) err)
        (when (buffer-live-p out-buf) (kill-buffer out-buf))
        nil))))
 
@@ -530,11 +584,17 @@ summarize.  Bookmarks WS + RAW into the workspace state immediately so
 the mode-line shows a pending placeholder, then captures both into the
 sentinel closure so the result is written back to the right workspace
 even if the user has switched perspectives by the time it resolves."
-  (when (and agent-repl-prompt-summary-enabled
-             ws
-             (stringp raw)
-             (not (agent-repl--prompt-summary-skip-p raw)))
-    (agent-repl--log ws "prompt-summary: kickoff ws=%s raw-len=%d" ws (length raw))
+  (cond
+   ((not agent-repl-prompt-summary-enabled)
+    (agent-repl--log ws "prompt-summary: kickoff skipped reason=disabled"))
+   ((not ws)
+    (agent-repl--log nil "prompt-summary: kickoff skipped reason=no-workspace raw-type=%S" (type-of raw)))
+   ((not (stringp raw))
+    (agent-repl--log ws "prompt-summary: kickoff skipped reason=non-string-raw raw-type=%S" (type-of raw)))
+   ((agent-repl--prompt-summary-skip-p raw)
+    (agent-repl--log ws "prompt-summary: kickoff skipped reason=trivial-input raw-len=%d" (length raw)))
+   (t
+    (agent-repl--log ws "prompt-summary: kickoff accepted raw-len=%d" (length raw))
     (agent-repl--ws-put ws :last-prompt-text raw)
     (agent-repl--ws-put ws :last-prompt-summary nil)
     (agent-repl--ws-put ws :last-prompt-summary-pending t)
@@ -544,7 +604,14 @@ even if the user has switched perspectives by the time it resolves."
     ;; summarization but still updates `:last-prompt-time' inside do-send).
     (agent-repl--ws-put ws :last-prompt-summary-at (float-time))
     (agent-repl--prompt-summary-redisplay ws)
-    (agent-repl--prompt-summary-spawn ws raw)))
+    (if (agent-repl--prompt-summary-spawn ws raw)
+        (agent-repl--log ws "prompt-summary: kickoff process started raw-len=%d" (length raw))
+      (agent-repl--log ws "prompt-summary: kickoff spawn failed; clearing pending raw-len=%d" (length raw))
+      (agent-repl--ws-put ws :last-prompt-summary-pending nil)
+      (agent-repl--prompt-summary-redisplay ws)
+      (agent-repl--log ws "prompt-summary: persist spawn failure begin")
+      (agent-repl--state-save ws)
+      (agent-repl--log ws "prompt-summary: persist spawn failure complete")))))
 
 ;;;; Mode-line migration (for live buffers created before this file existed)
 
@@ -576,14 +643,14 @@ upgrades pre-existing vterm buffers (whose `mode-line-format' was
 captured before this file existed).  Also exposed interactively for
 manual recovery."
   (interactive)
-  (when (and (boundp 'agent-repl--workspaces)
-             (hash-table-p agent-repl--workspaces))
-    (maphash
-     (lambda (_ws plist)
-       (let ((buf (plist-get plist :vterm-buffer)))
-         (when (and buf (buffer-live-p buf))
-           (agent-repl--prompt-summary-attach-to-mode-line buf))))
-     agent-repl--workspaces)))
+  (let ((workspaces (agent-repl--live-ws-names)))
+    (agent-repl--log nil "prompt-summary: attach-all start workspace-count=%d" (length workspaces))
+    (dolist (ws workspaces)
+      (let ((buf (agent-repl--ws-get ws :vterm-buffer)))
+        (if (and buf (buffer-live-p buf))
+            (agent-repl--prompt-summary-attach-to-mode-line buf)
+          (agent-repl--log ws "prompt-summary: attach-all skipped reason=no-live-vterm-buffer buffer=%S" buf))))
+    (agent-repl--log nil "prompt-summary: attach-all complete workspace-count=%d" (length workspaces))))
 
 ;; The prompt-summary segment is intentionally NOT wired into the vterm
 ;; mode-line (see `agent-repl--workspace-mode-line'): it was dropped

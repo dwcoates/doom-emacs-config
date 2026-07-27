@@ -336,6 +336,19 @@ overwriting the previous summary."
         (should (equal (agent-repl--ws-get "ws1" :last-prompt-summary)
                        "Previous Summary"))))))
 
+(ert-deftest agent-repl-test-kickoff-prompt-summary-clears-pending-on-spawn-failure ()
+  "A failed process launch must not leave the workspace permanently pending."
+  (agent-repl-test--with-clean-state
+    (let ((persisted nil))
+      (cl-letf (((symbol-function 'agent-repl--prompt-summary-spawn)
+                 (lambda (&rest _) nil))
+                ((symbol-function 'agent-repl--prompt-summary-redisplay) #'ignore)
+                ((symbol-function 'agent-repl--state-save)
+                 (lambda (ws) (setq persisted ws))))
+        (agent-repl--kickoff-prompt-summary "ws1" "do the thing")
+        (should-not (agent-repl--ws-get "ws1" :last-prompt-summary-pending))
+        (should (equal persisted "ws1"))))))
+
 (ert-deftest agent-repl-test-kickoff-prompt-summary-passes-bookmarked-ws-to-spawn ()
   "Kickoff forwards the WS argument unchanged to spawn (bookmarking)."
   (agent-repl-test--with-clean-state
@@ -646,11 +659,10 @@ stdin."
       (agent-repl--ws-put "ws1" :input-buffer (current-buffer))
       (let ((captured-input nil)
             (agent-repl-prompt-summary-context-count 3))
-        (cl-letf (((symbol-function 'make-process)
-                   (lambda (&rest _plist) (make-marker)))
-                  ((symbol-function 'process-send-string)
+        (cl-letf (((symbol-function 'agent-repl--prompt-summary-process-start)
+                   (lambda (&rest _) (make-marker)))
+                  ((symbol-function 'agent-repl--prompt-summary-process-send-input)
                    (lambda (_proc s) (setq captured-input s)))
-                  ((symbol-function 'process-send-eof) (lambda (&rest _) nil))
                   ((symbol-function 'agent-repl--log) (lambda (&rest _) nil)))
           (agent-repl--prompt-summary-spawn "ws1" "current raw prompt"))
         (should (stringp captured-input))
@@ -673,12 +685,12 @@ so a codex workspace summarizes via codex rather than the claude binary."
       (agent-repl--ws-put "ws1" :backend 'ps-backend)
       (let ((captured-cmd nil)
             (agent-repl-prompt-summary-model "some-model"))
-        (cl-letf (((symbol-function 'make-process)
-                   (lambda (&rest plist)
-                     (setq captured-cmd (plist-get plist :command))
+        (cl-letf (((symbol-function 'agent-repl--prompt-summary-process-start)
+                   (lambda (_ws _out-buf cmd _sentinel)
+                     (setq captured-cmd cmd)
                      (make-marker)))
-                  ((symbol-function 'process-send-string) (lambda (&rest _) nil))
-                  ((symbol-function 'process-send-eof) (lambda (&rest _) nil))
+                  ((symbol-function 'agent-repl--prompt-summary-process-send-input)
+                   (lambda (&rest _) nil))
                   ((symbol-function 'agent-repl--log) (lambda (&rest _) nil)))
           (agent-repl--prompt-summary-spawn "ws1" "a raw prompt long enough"))
         (should (equal captured-cmd '("ps-bin" "run" "some-model")))))))
@@ -686,18 +698,18 @@ so a codex workspace summarizes via codex rather than the claude binary."
 ;;;; ---- Tests: prompt-summary-spawn cwd ----
 
 (ert-deftest agent-repl-test-prompt-summary-spawn-binds-temporary-default-directory ()
-  "Spawn must invoke `make-process' with `default-directory' rebound to
+  "Spawn must invoke the process-start wrapper with `default-directory' rebound to
 `temporary-file-directory'.  Without this, the headless claude inherits
 the calling workspace's project-dir, its hooks fire with that cwd, and
 the sentinel watcher misattributes them — flipping :agent-state to :done
 while the user's interactive Claude is still mid-turn."
   (let ((captured-cwd nil))
-    (cl-letf (((symbol-function 'make-process)
-               (lambda (&rest _plist)
+    (cl-letf (((symbol-function 'agent-repl--prompt-summary-process-start)
+               (lambda (&rest _)
                  (setq captured-cwd default-directory)
                  (make-marker)))
-              ((symbol-function 'process-send-string) (lambda (&rest _) nil))
-              ((symbol-function 'process-send-eof) (lambda (&rest _) nil))
+              ((symbol-function 'agent-repl--prompt-summary-process-send-input)
+               (lambda (&rest _) nil))
               ((symbol-function 'agent-repl--log) (lambda (&rest _) nil)))
       (agent-repl--prompt-summary-spawn "ws1" "some raw prompt that is long enough")
       (should (equal (file-name-as-directory captured-cwd)
