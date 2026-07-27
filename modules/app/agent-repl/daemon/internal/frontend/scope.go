@@ -93,5 +93,10 @@ func filterSnapshot(snap *frontendv1.StateSnapshot, sc Scope) *frontendv1.StateS
 		Inits:      filterScopedViews(snap.GetInits(), sc),
 		Queues:     filterScopedViews(snap.GetQueues(), sc),
 		Progress:   filterScopedViews(snap.GetProgress(), sc),
+		// Host-only data has no session routing key. Server strips it from every
+		// non-host client after this scope pass; preserve it here so a future
+		// host-scoped transport cannot accidentally erase durable work.
+		WorkspaceAvailable: snap.GetWorkspaceAvailable(),
+		HostActions:        snap.GetHostActions(),
 	}
 }

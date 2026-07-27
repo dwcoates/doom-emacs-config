@@ -113,6 +113,12 @@ message FrontendFrame {
     HeartbeatView heartbeat = 11;       // Additive (E4)
     QueueView queue = 12;               // Additive (E4)
     ProgressView progress = 13;         // Additive (F1)
+    // Host-only durable workspace lifecycle notification.  The daemon emits
+    // this only after the worktree and waiting shim are healthy; Emacs then
+    // materializes its perspective and acknowledges it.
+    WorkspaceAvailable workspace_available = 14;
+    // Host-only durable UI action sourced by the daemon-owned JSON inbox.
+    HostAction host_action = 15;
   }
 }
 
@@ -404,6 +410,9 @@ message FrontendCommand {
     QueueAcceptCmd queue_accept = 15;      // Additive (E4)
     QueueCancelCmd queue_cancel = 16;      // Additive (E4)
     PaintAckCmd paint_ack = 17;            // Additive (F3)
+    CreateWorkspaceCmd create_workspace = 18;
+    WorkspaceMaterializedCmd workspace_materialized = 19;
+    HostActionCompletedCmd host_action_completed = 20;
   }
 }
 
@@ -655,6 +664,84 @@ message ResyncCmd {
   uint64 from_seq = 1;
 }
 
+// Request one agent-repl workspace.  This is the sole creation ingress for
+// both host UI requests (SPC TAB n/N) and skill-produced JSON dispatches.  The
+// daemon owns name resolution, worktree creation, session startup, and initial
+// prompt delivery; a request never asks for a promptless/no-shim workspace.
+message CreateWorkspaceCmd {
+  string requested_name = 1;
+  string git_root = 2;
+  string base_commit = 3;
+  string source_workspace = 4;
+  string source_dir = 5;
+  optional string initial_prompt = 6;
+  string priority = 7;
+  string model = 8;
+  string fork_from = 9;
+  string fork_session_id = 10;
+  string postprocessing_prompt = 11;
+  string before_ws_merge = 12;
+}
+
+// The daemon's authoritative account of a workspace ready for host
+// materialization.  A `WorkspaceAvailable` is retained until Emacs sends
+// WorkspaceMaterializedCmd, so reconnecting Emacs cannot lose it.
+message WorkspaceAvailable {
+  string job_id = 1;
+  string final_name = 2;
+  string worktree_path = 3;
+  string branch = 4;
+  string git_root = 5;
+  string base_commit = 6;
+  string source_workspace = 7;
+  string source_dir = 8;
+  string fork_from = 9;
+  string fork_session_id = 10;
+  string session_id = 11;
+  string priority = 12;
+  string model = 13;
+  bool initial_prompt_queued = 14;
+}
+
+// Emacs has created the perspective/local bookkeeping for the authoritative
+// workspace descriptor.  The daemon uses this durable acknowledgement to
+// release an initial prompt that was held until a visible host workspace
+// exists.
+message WorkspaceMaterializedCmd {
+  string job_id = 1;
+}
+
+// A daemon-owned inbox may contain UI-only actions alongside creates.  These
+// typed messages hand those actions to the Emacs host without two processes
+// racing to consume the same JSON file.  They are retained until completed.
+message HostAction {
+  string action_id = 1;
+  oneof action {
+    HostSwitchWorkspace switch_workspace = 2;
+    HostSetRepositoryFold set_repository_fold = 3;
+    HostSetSidebarView set_sidebar_view = 4;
+    HostTaskCreate task_create = 5;
+    HostTaskById task_toggle_done = 6;
+    HostTaskById task_open = 7;
+    HostTaskById task_add_workspace = 8;
+  }
+}
+
+message HostSwitchWorkspace { string dir = 1; }
+message HostSetRepositoryFold { string repo_key = 1; bool folded = 2; }
+message HostSetSidebarView { string view = 1; }
+message HostTaskCreate {}
+message HostTaskById { string id = 1; }
+
+// Completion is host-only.  `ok=false` preserves the action and records the
+// supplied error in the daemon's durable inbox rather than silently dropping
+// a UI request that Emacs could not perform.
+message HostActionCompletedCmd {
+  string action_id = 1;
+  bool ok = 2;
+  string error = 3;
+}
+
 message CommandAck {
   string request_id = 1;
   bool ok = 2;
@@ -794,4 +881,8 @@ message StateSnapshot {
   repeated SessionInitView inits = 5;  // Additive (S9)
   repeated QueueView queues = 6;  // Additive (E4)
   repeated ProgressView progress = 7;  // Additive (F1)
+  // Host-only durable work.  frontend.Server strips both fields from every
+  // GUI client, regardless of observer/painter role.
+  repeated WorkspaceAvailable workspace_available = 8;
+  repeated HostAction host_actions = 9;
 }

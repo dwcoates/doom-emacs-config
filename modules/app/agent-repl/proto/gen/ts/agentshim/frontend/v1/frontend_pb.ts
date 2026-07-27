@@ -45,7 +45,7 @@ import type { JsonObject, Message } from "@bufbuild/protobuf";
  * Describes the file agentshim/frontend/v1/frontend.proto.
  */
 export const file_agentshim_frontend_v1_frontend: GenFile = /*@__PURE__*/
-  fileDesc("CiRhZ2VudHNoaW0vZnJvbnRlbmQvdjEvZnJvbnRlbmQucHJvdG8SFWFnZW50c2hpbS5mcm9udGVuZC52MSKCBgoNRnJvbnRlbmRGcmFtZRI4CghzbmFwc2hvdBgBIAEoCzIkLmFnZW50c2hpbS5mcm9udGVuZC52MS5TdGF0ZVNuYXBzaG90SAASQAoPd29ya3NwYWNlX3N0YXRlGAIgASgLMiUuYWdlbnRzaGltLmZyb250ZW5kLnYxLldvcmtzcGFjZVN0YXRlSAASOgoMc2Vzc2lvbl92aWV3GAMgASgLMiIuYWdlbnRzaGltLmZyb250ZW5kLnYxLlNlc3Npb25WaWV3SAASRgoSY29udmVyc2F0aW9uX2RlbHRhGAQgASgLMiguYWdlbnRzaGltLmZyb250ZW5kLnYxLkNvbnZlcnNhdGlvbkRlbHRhSAASOgoMdHlwaW5nX2RlbHRhGAUgASgLMiIuYWdlbnRzaGltLmZyb250ZW5kLnYxLlR5cGluZ0RlbHRhSAASOgoMdGFza19jYXRhbG9nGAYgASgLMiIuYWdlbnRzaGltLmZyb250ZW5kLnYxLlRhc2tDYXRhbG9nSAASOAoLY29tbWFuZF9hY2sYByABKAsyIS5hZ2VudHNoaW0uZnJvbnRlbmQudjEuQ29tbWFuZEFja0gAEjgKC2RhZW1vbl92aWV3GAkgASgLMiEuYWdlbnRzaGltLmZyb250ZW5kLnYxLkRhZW1vblZpZXdIABI+CgxzZXNzaW9uX2luaXQYCiABKAsyJi5hZ2VudHNoaW0uZnJvbnRlbmQudjEuU2Vzc2lvbkluaXRWaWV3SAASOQoJaGVhcnRiZWF0GAsgASgLMiQuYWdlbnRzaGltLmZyb250ZW5kLnYxLkhlYXJ0YmVhdFZpZXdIABIxCgVxdWV1ZRgMIAEoCzIgLmFnZW50c2hpbS5mcm9udGVuZC52MS5RdWV1ZVZpZXdIABI3Cghwcm9ncmVzcxgNIAEoCzIjLmFnZW50c2hpbS5mcm9udGVuZC52MS5Qcm9ncmVzc1ZpZXdIAEIHCgVmcmFtZUoECAgQCVIPZGVncmFkZWRfbm90aWNlIm8KCkRhZW1vblZpZXcSDwoHYm9vdF9pZBgBIAEoCRIYChBwcm90b2NvbF92ZXJzaW9uGAIgASgJEh4KFmRhZW1vbl9iaW5hcnlfbXRpbWVfbXMYAyABKAMSFgoOZGFlbW9uX3ZlcnNpb24YBCABKAki9wEKDldvcmtzcGFjZVN0YXRlEhEKCXdvcmtzcGFjZRgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEjEKBXN0YXRlGAMgASgOMiIuYWdlbnRzaGltLmZyb250ZW5kLnYxLlJlbmRlclN0YXRlEhMKC3R1cm5fYWN0aXZlGAQgASgIEhcKD2xpdmVfdGFza19jb3VudBgFIAEoAxITCgttZXJnZV9waGFzZRgGIAEoCRISCgpjYXVzZV9raW5kGAcgASgJEhEKCWNhdXNlX3NlcRgIIAEoBBINCgVhdF9tcxgJIAEoAxISCgpnZW5lcmF0aW9uGAogASgEIvADCgtTZXNzaW9uVmlldxIRCgl3b3Jrc3BhY2UYASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRINCgVtb2RlbBgDIAEoCRIMCgRzbHVnGAQgASgJEg0KBXRpdGxlGAUgASgJEhQKDHRvdGFsX3Rva2VucxgGIAEoAxIWCg50b3RhbF9jb3N0X3VzZBgHIAEoARIWCg5jb250ZXh0X3dpbmRvdxgIIAEoAxIXCg9wZXJtaXNzaW9uX21vZGUYCSABKAkSFQoNc2hpbV9hdHRhY2hlZBgKIAEoCBIZChFjbGF1ZGVfc2Vzc2lvbl9pZBgLIAEoCRILCgNjd2QYDCABKAkSEAoIdGVybWluYWwYDSABKAgSFAoMcmVoeWRyYXRhYmxlGA8gASgIEhIKCmhpYmVybmF0ZWQYECABKAgSGwoTcGVuZGluZ19wZXJtaXNzaW9ucxgRIAEoAxISCgpjb25maWdfZGlyGBIgASgJEjYKCGJhY2tmaWxsGBMgASgOMiQuYWdlbnRzaGltLmZyb250ZW5kLnYxLkJhY2tmaWxsU3RhdGUSNwoFZGVhdGgYFCABKAsyKC5hZ2VudHNoaW0uZnJvbnRlbmQudjEuU3lzdGVtRmFpbHVyZUl0ZW1KBAgOEA9SDGRlYXRoX3JlYXNvbiKHAQoRQ29udmVyc2F0aW9uRGVsdGESEQoJd29ya3NwYWNlGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSNgoFaXRlbXMYAyADKAsyJy5hZ2VudHNoaW0uZnJvbnRlbmQudjEuQ29udmVyc2F0aW9uSXRlbRITCgt0aHJvdWdoX3NlcRgEIAEoBCLDBQoQQ29udmVyc2F0aW9uSXRlbRIMCgR1dWlkGAEgASgJEg0KBXRzX21zGAIgASgDEhIKCnJlcXVlc3RfaWQYAyABKAkSQwoRYXNzaXN0YW50X21lc3NhZ2UYCiABKAsyJi5hZ2VudHNoaW0uZGF0YS52MS5BcGlBc3Npc3RhbnRNZXNzYWdlSAASOQoMdXNlcl9tZXNzYWdlGAsgASgLMiEuYWdlbnRzaGltLmRhdGEudjEuQXBpVXNlck1lc3NhZ2VIABIzCgh0b29sX3VzZRgMIAEoCzIfLmFnZW50c2hpbS5kYXRhLnYxLlRvb2xVc2VCbG9ja0gAEjkKC3Rvb2xfcmVzdWx0GA0gASgLMiIuYWdlbnRzaGltLmRhdGEudjEuVG9vbFJlc3VsdEJsb2NrSAASOwoPdG9vbF91c2VfcmVzdWx0GA4gASgLMiAuYWdlbnRzaGltLmRhdGEudjEuVG9vbFVzZVJlc3VsdEgAEjIKBnJlc3VsdBgPIAEoCzIgLmFnZW50c2hpbS5kYXRhLnYxLlJlc3VsdE1lc3NhZ2VIABI+ChBjb21wYWN0X2JvdW5kYXJ5GBAgASgLMiIuYWdlbnRzaGltLmRhdGEudjEuQ29tcGFjdEJvdW5kYXJ5SAASRwoVY29tcGFjdF9ib3VuZGFyeV9saW5lGBEgASgLMiYuYWdlbnRzaGltLmRhdGEudjEuQ29tcGFjdEJvdW5kYXJ5TGluZUgAEjcKCnBlcm1pc3Npb24YHiABKAsyIS5hZ2VudHNoaW0uY29yZS52MS5QZXJtaXNzaW9uSXRlbUgAEkIKDnN5c3RlbV9mYWlsdXJlGB8gASgLMiguYWdlbnRzaGltLmZyb250ZW5kLnYxLlN5c3RlbUZhaWx1cmVJdGVtSABCBgoEaXRlbUoECBIQE1IJYXBpX2Vycm9yIrIBChFTeXN0ZW1GYWlsdXJlSXRlbRI2CgtlcnJvcl9jbGFzcxgBIAEoDjIhLmFnZW50c2hpbS5mcm9udGVuZC52MS5FcnJvckNsYXNzEhIKCmVycm9yX3R5cGUYAiABKAkSDwoHbWVzc2FnZRgDIAEoCRIVCg1zb3VyY2VfZGV0YWlsGAQgASgJEhYKDnJlc29sdmVkX2F0X21zGAUgASgDEhEKCWl0ZW1fdXVpZBgGIAEoCSJkCgtUeXBpbmdEZWx0YRIRCgl3b3Jrc3BhY2UYASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIuCgVkZWx0YRgDIAEoCzIfLmFnZW50c2hpbS5jb3JlLnYxLkNvbnRlbnREZWx0YSJuCg1IZWFydGJlYXRWaWV3EhEKCXdvcmtzcGFjZRgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEjYKCHByb2dyZXNzGAMgASgLMiQuYWdlbnRzaGltLmNvcmUudjEuSGVhcnRiZWF0UHJvZ3Jlc3MiZQoPU2Vzc2lvbkluaXRWaWV3EhEKCXdvcmtzcGFjZRgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEisKBGluaXQYAyABKAsyHS5hZ2VudHNoaW0uZGF0YS52MS5TeXN0ZW1Jbml0IpABCglUYXNrRW50cnkSDwoHdGFza19pZBgBIAEoCRIMCgRraW5kGAIgASgJEhMKC2Rlc2NyaXB0aW9uGAMgASgJEg4KBnN0YXR1cxgEIAEoCRITCgtvdXRwdXRfcGF0aBgFIAEoCRIVCg1zdGFydGVkX2F0X21zGAYgASgDEhMKC2VuZGVkX2F0X21zGAcgASgDImUKC1Rhc2tDYXRhbG9nEhEKCXdvcmtzcGFjZRgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEi8KBXRhc2tzGAMgAygLMiAuYWdlbnRzaGltLmZyb250ZW5kLnYxLlRhc2tFbnRyeSL1BwoPRnJvbnRlbmRDb21tYW5kEhIKCnJlcXVlc3RfaWQYASABKAkSEQoJd29ya3NwYWNlGAIgASgJEj8KDXN1Ym1pdF9wcm9tcHQYAyABKAsyJi5hZ2VudHNoaW0uZnJvbnRlbmQudjEuU3VibWl0UHJvbXB0Q21kSAASOAoJaW50ZXJydXB0GAQgASgLMiMuYWdlbnRzaGltLmZyb250ZW5kLnYxLkludGVycnVwdENtZEgAEkcKEXBlcm1pc3Npb25fYW5zd2VyGAUgASgLMiouYWdlbnRzaGltLmZyb250ZW5kLnYxLlBlcm1pc3Npb25BbnN3ZXJDbWRIABJDCg9tZXJnZV93b3Jrc3BhY2UYBiABKAsyKC5hZ2VudHNoaW0uZnJvbnRlbmQudjEuTWVyZ2VXb3Jrc3BhY2VDbWRIABJDCg9jbG9zZV93b3Jrc3BhY2UYByABKAsyKC5hZ2VudHNoaW0uZnJvbnRlbmQudjEuQ2xvc2VXb3Jrc3BhY2VDbWRIABJBCg5vcGVuX3dvcmtzcGFjZRgIIAEoCzInLmFnZW50c2hpbS5mcm9udGVuZC52MS5PcGVuV29ya3NwYWNlQ21kSAASMgoGcmVzeW5jGAkgASgLMiAuYWdlbnRzaGltLmZyb250ZW5kLnYxLlJlc3luY0NtZEgAEkEKDmNyZWF0ZV9zZXNzaW9uGAogASgLMicuYWdlbnRzaGltLmZyb250ZW5kLnYxLkNyZWF0ZVNlc3Npb25DbWRIABJBCg5kZWxldGVfc2Vzc2lvbhgLIAEoCzInLmFnZW50c2hpbS5mcm9udGVuZC52MS5EZWxldGVTZXNzaW9uQ21kSAASNgoIc2h1dGRvd24YDCABKAsyIi5hZ2VudHNoaW0uZnJvbnRlbmQudjEuU2h1dGRvd25DbWRIABI5CgpjbGllbnRfbG9nGA0gASgLMiMuYWdlbnRzaGltLmZyb250ZW5kLnYxLkNsaWVudExvZ0NtZEgAEjsKC3F1ZXVlX2ZvcmNlGA4gASgLMiQuYWdlbnRzaGltLmZyb250ZW5kLnYxLlF1ZXVlRm9yY2VDbWRIABI9CgxxdWV1ZV9hY2NlcHQYDyABKAsyJS5hZ2VudHNoaW0uZnJvbnRlbmQudjEuUXVldWVBY2NlcHRDbWRIABI9CgxxdWV1ZV9jYW5jZWwYECABKAsyJS5hZ2VudHNoaW0uZnJvbnRlbmQudjEuUXVldWVDYW5jZWxDbWRIABI3CglwYWludF9hY2sYESABKAsyIi5hZ2VudHNoaW0uZnJvbnRlbmQudjEuUGFpbnRBY2tDbWRIAEIJCgdjb21tYW5kInIKC1BhaW50QWNrQ21kEhMKC3Rocm91Z2hfc2VxGAEgASgEEhgKEHN0YXRlX2dlbmVyYXRpb24YAiABKAQSNAoHb3V0Y29tZRgDIAEoDjIjLmFnZW50c2hpbS5mcm9udGVuZC52MS5QYWludE91dGNvbWUipQEKClF1ZXVlRW50cnkSCgoCaWQYASABKAkSDAoEdGV4dBgCIAEoCRIUCgxxdWV1ZWRfYXRfbXMYAyABKAMSQgoOY2xhc3NpZmljYXRpb24YBCABKA4yKi5hZ2VudHNoaW0uZnJvbnRlbmQudjEuUXVldWVDbGFzc2lmaWNhdGlvbhIRCglyYXRpb25hbGUYBSABKAkSEAoIYWNjZXB0ZWQYBiABKAgiZgoJUXVldWVWaWV3EhEKCXdvcmtzcGFjZRgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEjIKB2VudHJpZXMYAyADKAsyIS5hZ2VudHNoaW0uZnJvbnRlbmQudjEuUXVldWVFbnRyeSIhCg1RdWV1ZUZvcmNlQ21kEhAKCGVudHJ5X2lkGAEgASgJIiIKDlF1ZXVlQWNjZXB0Q21kEhAKCGVudHJ5X2lkGAEgASgJIiIKDlF1ZXVlQ2FuY2VsQ21kEhAKCGVudHJ5X2lkGAEgASgJIn8KDENsaWVudExvZ0NtZBI0CgVsZXZlbBgBIAEoDjIlLmFnZW50c2hpbS5mcm9udGVuZC52MS5DbGllbnRMb2dMZXZlbBIPCgdtZXNzYWdlGAIgASgJEigKB2NvbnRleHQYAyABKAsyFy5nb29nbGUucHJvdG9idWYuU3RydWN0Ig0KC1NodXRkb3duQ21kIqIBChBDcmVhdGVTZXNzaW9uQ21kEgsKA2N3ZBgBIAEoCRINCgVtb2RlbBgCIAEoCRIXCg9wZXJtaXNzaW9uX21vZGUYAyABKAkSEgoKY29uZmlnX2RpchgEIAEoCRIgChhyZXN1bWVfY2xhdWRlX3Nlc3Npb25faWQYBSABKAkSDAoEZmFrZRgGIAEoCBIVCg1hbGxvd191bmdhdGVkGAcgASgIIiYKEERlbGV0ZVNlc3Npb25DbWQSEgoKc2Vzc2lvbl9pZBgBIAEoCSI4Cg9TdWJtaXRQcm9tcHRDbWQSDAoEdGV4dBgBIAEoCRIXCg9wZXJtaXNzaW9uX21vZGUYAiABKAkiHAoMSW50ZXJydXB0Q21kEgwKBGhhcmQYASABKAgiiQEKE1Blcm1pc3Npb25BbnN3ZXJDbWQSHQoVcGVybWlzc2lvbl9yZXF1ZXN0X2lkGAEgASgJEg0KBWFsbG93GAIgASgIEi4KDXVwZGF0ZWRfaW5wdXQYAyABKAsyFy5nb29nbGUucHJvdG9idWYuU3RydWN0EhQKDGRlbnlfbWVzc2FnZRgEIAEoCSKHAQoRTWVyZ2VXb3Jrc3BhY2VDbWQSDwoHaGFuZGxlchgBIAEoCRIiChpjb25mbGljdF9yZXNvbHZlZF9jb250aW51ZRgCIAEoCBIVCg1zb3VyY2VfYnJhbmNoGAMgASgJEhIKCnNvdXJjZV9kaXIYBCABKAkSEgoKdGFyZ2V0X2RpchgFIAEoCSITChFDbG9zZVdvcmtzcGFjZUNtZCISChBPcGVuV29ya3NwYWNlQ21kIh0KCVJlc3luY0NtZBIQCghmcm9tX3NlcRgBIAEoBCJ2CgpDb21tYW5kQWNrEhIKCnJlcXVlc3RfaWQYASABKAkSCgoCb2sYAiABKAgSDQoFZXJyb3IYAyABKAkSOQoHZmFpbHVyZRgEIAEoCzIoLmFnZW50c2hpbS5mcm9udGVuZC52MS5TeXN0ZW1GYWlsdXJlSXRlbSJCCg5Qcm9ncmVzc1dpbmRvdxIOCgZhY3RpdmUYASABKAgSEAoIc2luY2VfbXMYAiABKAMSDgoGZGV0YWlsGAMgASgJIlkKD1JhdGVMaW1pdFdpbmRvdxIOCgZhY3RpdmUYASABKAgSEQoJcmVzZXRzX2F0GAIgASgDEhMKC3V0aWxpemF0aW9uGAMgASgBEg4KBnN0YXR1cxgEIAEoCSLYBQoMUHJvZ3Jlc3NWaWV3EhEKCXdvcmtzcGFjZRgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEjUKBXN0YXRlGAMgASgOMiIuYWdlbnRzaGltLmZyb250ZW5kLnYxLlJlbmRlclN0YXRlQgIYARIaChJ0dXJuX3N0YXJ0ZWRfYXRfbXMYBCABKAMSFwoPdGhpbmtpbmdfdG9rZW5zGAUgASgDEhQKDGlucHV0X3Rva2VucxgGIAEoAxIPCgd0dGZ0X21zGAcgASgDEjkKCmNvbXBhY3RpbmcYCCABKAsyJS5hZ2VudHNoaW0uZnJvbnRlbmQudjEuUHJvZ3Jlc3NXaW5kb3cSNwoIcmV0cnlpbmcYCSABKAsyJS5hZ2VudHNoaW0uZnJvbnRlbmQudjEuUHJvZ3Jlc3NXaW5kb3cSPQoOYXV0aGVudGljYXRpbmcYCiABKAsyJS5hZ2VudHNoaW0uZnJvbnRlbmQudjEuUHJvZ3Jlc3NXaW5kb3cSMwoEaG9vaxgLIAEoCzIlLmFnZW50c2hpbS5mcm9udGVuZC52MS5Qcm9ncmVzc1dpbmRvdxI8CgxyYXRlX2xpbWl0ZWQYDCABKAsyJi5hZ2VudHNoaW0uZnJvbnRlbmQudjEuUmF0ZUxpbWl0V2luZG93EjYKB2Jsb2NrZWQYEiABKAsyJS5hZ2VudHNoaW0uZnJvbnRlbmQudjEuUHJvZ3Jlc3NXaW5kb3cSOQoHZmFpbHVyZRgTIAEoCzIoLmFnZW50c2hpbS5mcm9udGVuZC52MS5TeXN0ZW1GYWlsdXJlSXRlbRIbChNwZW5kaW5nX3Blcm1pc3Npb25zGA4gASgDEhMKC3F1ZXVlX2RlcHRoGA8gASgDEhcKD2xpdmVfdGFza19jb3VudBgQIAEoA0oECA0QDkoECBEQElINZXJyb3Jfc3VtbWFyeVIPZXJyb3JfaXRlbV91dWlkIokDCg1TdGF0ZVNuYXBzaG90EjkKCndvcmtzcGFjZXMYASADKAsyJS5hZ2VudHNoaW0uZnJvbnRlbmQudjEuV29ya3NwYWNlU3RhdGUSNAoIc2Vzc2lvbnMYAiADKAsyIi5hZ2VudHNoaW0uZnJvbnRlbmQudjEuU2Vzc2lvblZpZXcSNAoIY2F0YWxvZ3MYAyADKAsyIi5hZ2VudHNoaW0uZnJvbnRlbmQudjEuVGFza0NhdGFsb2cSMQoGZGFlbW9uGAQgASgLMiEuYWdlbnRzaGltLmZyb250ZW5kLnYxLkRhZW1vblZpZXcSNQoFaW5pdHMYBSADKAsyJi5hZ2VudHNoaW0uZnJvbnRlbmQudjEuU2Vzc2lvbkluaXRWaWV3EjAKBnF1ZXVlcxgGIAMoCzIgLmFnZW50c2hpbS5mcm9udGVuZC52MS5RdWV1ZVZpZXcSNQoIcHJvZ3Jlc3MYByADKAsyIy5hZ2VudHNoaW0uZnJvbnRlbmQudjEuUHJvZ3Jlc3NWaWV3KuQDCgtSZW5kZXJTdGF0ZRIcChhSRU5ERVJfU1RBVEVfVU5TUEVDSUZJRUQQABIVChFSRU5ERVJfU1RBVEVfSU5JVBABEhUKEVJFTkRFUl9TVEFURV9JRExFEAISGwoXUkVOREVSX1NUQVRFX0lETEVfQVNZTkMQAxIZChVSRU5ERVJfU1RBVEVfVEhJTktJTkcQBBIbChdSRU5ERVJfU1RBVEVfUEVSTUlTU0lPThAFEhUKEVJFTkRFUl9TVEFURV9ET05FEAYSIAoYUkVOREVSX1NUQVRFX1NUT1BfRkFJTEVEEAcaAggBEhgKFFJFTkRFUl9TVEFURV9NRVJHSU5HEAgSHQoZUkVOREVSX1NUQVRFX01FUkdFX1FVRVVFRBAJEh8KG1JFTkRFUl9TVEFURV9NRVJHRV9DT05GTElDVBAKEh0KGVJFTkRFUl9TVEFURV9NRVJHRV9GQUlMRUQQCxIXChNSRU5ERVJfU1RBVEVfTUVSR0VEEAwSFQoRUkVOREVSX1NUQVRFX0RFQUQQDRIZChVSRU5ERVJfU1RBVEVfREVHUkFERUQQDhIWChJSRU5ERVJfU1RBVEVfUkVBRFkQDxIfChtSRU5ERVJfU1RBVEVfVkVORE9SX0JMT0NLRUQQECp/Cg1CYWNrZmlsbFN0YXRlEh4KGkJBQ0tGSUxMX1NUQVRFX1VOU1BFQ0lGSUVEEAASGgoWQkFDS0ZJTExfU1RBVEVfUEVORElORxABEhcKE0JBQ0tGSUxMX1NUQVRFX0RPTkUQAhIZChVCQUNLRklMTF9TVEFURV9GQUlMRUQQAypYCgpFcnJvckNsYXNzEhsKF0VSUk9SX0NMQVNTX1VOU1BFQ0lGSUVEEAASGAoURVJST1JfQ0xBU1NfSU5URVJOQUwQARITCg9FUlJPUl9DTEFTU19BUEkQAiplCgxQYWludE91dGNvbWUSHQoZUEFJTlRfT1VUQ09NRV9VTlNQRUNJRklFRBAAEhkKFVBBSU5UX09VVENPTUVfUEFJTlRFRBABEhsKF1BBSU5UX09VVENPTUVfU1VTUEVOREVEEAIqwAEKE1F1ZXVlQ2xhc3NpZmljYXRpb24SJAogUVVFVUVfQ0xBU1NJRklDQVRJT05fVU5TUEVDSUZJRUQQABIgChxRVUVVRV9DTEFTU0lGSUNBVElPTl9QRU5ESU5HEAESIgoeUVVFVUVfQ0xBU1NJRklDQVRJT05fSU5URVJKRUNUEAISHQoZUVVFVUVfQ0xBU1NJRklDQVRJT05fSE9MRBADEh4KGlFVRVVFX0NMQVNTSUZJQ0FUSU9OX0VSUk9SEAQqhAEKDkNsaWVudExvZ0xldmVsEiAKHENMSUVOVF9MT0dfTEVWRUxfVU5TUEVDSUZJRUQQABIZChVDTElFTlRfTE9HX0xFVkVMX0lORk8QARIZChVDTElFTlRfTE9HX0xFVkVMX1dBUk4QAhIaChZDTElFTlRfTE9HX0xFVkVMX0VSUk9SEANCMlowYWdlbnRyZXBsL3Byb3RvL2FnZW50c2hpbS9mcm9udGVuZC92MTtmcm9udGVuZHYxYgZwcm90bzM", [file_agentshim_core_v1_core, file_agentshim_data_v1_stream, file_agentshim_data_v1_tools, file_agentshim_data_v1_transcript, file_google_protobuf_struct]);
+  fileDesc("CiRhZ2VudHNoaW0vZnJvbnRlbmQvdjEvZnJvbnRlbmQucHJvdG8SFWFnZW50c2hpbS5mcm9udGVuZC52MSKGBwoNRnJvbnRlbmRGcmFtZRI4CghzbmFwc2hvdBgBIAEoCzIkLmFnZW50c2hpbS5mcm9udGVuZC52MS5TdGF0ZVNuYXBzaG90SAASQAoPd29ya3NwYWNlX3N0YXRlGAIgASgLMiUuYWdlbnRzaGltLmZyb250ZW5kLnYxLldvcmtzcGFjZVN0YXRlSAASOgoMc2Vzc2lvbl92aWV3GAMgASgLMiIuYWdlbnRzaGltLmZyb250ZW5kLnYxLlNlc3Npb25WaWV3SAASRgoSY29udmVyc2F0aW9uX2RlbHRhGAQgASgLMiguYWdlbnRzaGltLmZyb250ZW5kLnYxLkNvbnZlcnNhdGlvbkRlbHRhSAASOgoMdHlwaW5nX2RlbHRhGAUgASgLMiIuYWdlbnRzaGltLmZyb250ZW5kLnYxLlR5cGluZ0RlbHRhSAASOgoMdGFza19jYXRhbG9nGAYgASgLMiIuYWdlbnRzaGltLmZyb250ZW5kLnYxLlRhc2tDYXRhbG9nSAASOAoLY29tbWFuZF9hY2sYByABKAsyIS5hZ2VudHNoaW0uZnJvbnRlbmQudjEuQ29tbWFuZEFja0gAEjgKC2RhZW1vbl92aWV3GAkgASgLMiEuYWdlbnRzaGltLmZyb250ZW5kLnYxLkRhZW1vblZpZXdIABI+CgxzZXNzaW9uX2luaXQYCiABKAsyJi5hZ2VudHNoaW0uZnJvbnRlbmQudjEuU2Vzc2lvbkluaXRWaWV3SAASOQoJaGVhcnRiZWF0GAsgASgLMiQuYWdlbnRzaGltLmZyb250ZW5kLnYxLkhlYXJ0YmVhdFZpZXdIABIxCgVxdWV1ZRgMIAEoCzIgLmFnZW50c2hpbS5mcm9udGVuZC52MS5RdWV1ZVZpZXdIABI3Cghwcm9ncmVzcxgNIAEoCzIjLmFnZW50c2hpbS5mcm9udGVuZC52MS5Qcm9ncmVzc1ZpZXdIABJIChN3b3Jrc3BhY2VfYXZhaWxhYmxlGA4gASgLMikuYWdlbnRzaGltLmZyb250ZW5kLnYxLldvcmtzcGFjZUF2YWlsYWJsZUgAEjgKC2hvc3RfYWN0aW9uGA8gASgLMiEuYWdlbnRzaGltLmZyb250ZW5kLnYxLkhvc3RBY3Rpb25IAEIHCgVmcmFtZUoECAgQCVIPZGVncmFkZWRfbm90aWNlIm8KCkRhZW1vblZpZXcSDwoHYm9vdF9pZBgBIAEoCRIYChBwcm90b2NvbF92ZXJzaW9uGAIgASgJEh4KFmRhZW1vbl9iaW5hcnlfbXRpbWVfbXMYAyABKAMSFgoOZGFlbW9uX3ZlcnNpb24YBCABKAki9wEKDldvcmtzcGFjZVN0YXRlEhEKCXdvcmtzcGFjZRgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEjEKBXN0YXRlGAMgASgOMiIuYWdlbnRzaGltLmZyb250ZW5kLnYxLlJlbmRlclN0YXRlEhMKC3R1cm5fYWN0aXZlGAQgASgIEhcKD2xpdmVfdGFza19jb3VudBgFIAEoAxITCgttZXJnZV9waGFzZRgGIAEoCRISCgpjYXVzZV9raW5kGAcgASgJEhEKCWNhdXNlX3NlcRgIIAEoBBINCgVhdF9tcxgJIAEoAxISCgpnZW5lcmF0aW9uGAogASgEIvADCgtTZXNzaW9uVmlldxIRCgl3b3Jrc3BhY2UYASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRINCgVtb2RlbBgDIAEoCRIMCgRzbHVnGAQgASgJEg0KBXRpdGxlGAUgASgJEhQKDHRvdGFsX3Rva2VucxgGIAEoAxIWCg50b3RhbF9jb3N0X3VzZBgHIAEoARIWCg5jb250ZXh0X3dpbmRvdxgIIAEoAxIXCg9wZXJtaXNzaW9uX21vZGUYCSABKAkSFQoNc2hpbV9hdHRhY2hlZBgKIAEoCBIZChFjbGF1ZGVfc2Vzc2lvbl9pZBgLIAEoCRILCgNjd2QYDCABKAkSEAoIdGVybWluYWwYDSABKAgSFAoMcmVoeWRyYXRhYmxlGA8gASgIEhIKCmhpYmVybmF0ZWQYECABKAgSGwoTcGVuZGluZ19wZXJtaXNzaW9ucxgRIAEoAxISCgpjb25maWdfZGlyGBIgASgJEjYKCGJhY2tmaWxsGBMgASgOMiQuYWdlbnRzaGltLmZyb250ZW5kLnYxLkJhY2tmaWxsU3RhdGUSNwoFZGVhdGgYFCABKAsyKC5hZ2VudHNoaW0uZnJvbnRlbmQudjEuU3lzdGVtRmFpbHVyZUl0ZW1KBAgOEA9SDGRlYXRoX3JlYXNvbiKHAQoRQ29udmVyc2F0aW9uRGVsdGESEQoJd29ya3NwYWNlGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSNgoFaXRlbXMYAyADKAsyJy5hZ2VudHNoaW0uZnJvbnRlbmQudjEuQ29udmVyc2F0aW9uSXRlbRITCgt0aHJvdWdoX3NlcRgEIAEoBCLDBQoQQ29udmVyc2F0aW9uSXRlbRIMCgR1dWlkGAEgASgJEg0KBXRzX21zGAIgASgDEhIKCnJlcXVlc3RfaWQYAyABKAkSQwoRYXNzaXN0YW50X21lc3NhZ2UYCiABKAsyJi5hZ2VudHNoaW0uZGF0YS52MS5BcGlBc3Npc3RhbnRNZXNzYWdlSAASOQoMdXNlcl9tZXNzYWdlGAsgASgLMiEuYWdlbnRzaGltLmRhdGEudjEuQXBpVXNlck1lc3NhZ2VIABIzCgh0b29sX3VzZRgMIAEoCzIfLmFnZW50c2hpbS5kYXRhLnYxLlRvb2xVc2VCbG9ja0gAEjkKC3Rvb2xfcmVzdWx0GA0gASgLMiIuYWdlbnRzaGltLmRhdGEudjEuVG9vbFJlc3VsdEJsb2NrSAASOwoPdG9vbF91c2VfcmVzdWx0GA4gASgLMiAuYWdlbnRzaGltLmRhdGEudjEuVG9vbFVzZVJlc3VsdEgAEjIKBnJlc3VsdBgPIAEoCzIgLmFnZW50c2hpbS5kYXRhLnYxLlJlc3VsdE1lc3NhZ2VIABI+ChBjb21wYWN0X2JvdW5kYXJ5GBAgASgLMiIuYWdlbnRzaGltLmRhdGEudjEuQ29tcGFjdEJvdW5kYXJ5SAASRwoVY29tcGFjdF9ib3VuZGFyeV9saW5lGBEgASgLMiYuYWdlbnRzaGltLmRhdGEudjEuQ29tcGFjdEJvdW5kYXJ5TGluZUgAEjcKCnBlcm1pc3Npb24YHiABKAsyIS5hZ2VudHNoaW0uY29yZS52MS5QZXJtaXNzaW9uSXRlbUgAEkIKDnN5c3RlbV9mYWlsdXJlGB8gASgLMiguYWdlbnRzaGltLmZyb250ZW5kLnYxLlN5c3RlbUZhaWx1cmVJdGVtSABCBgoEaXRlbUoECBIQE1IJYXBpX2Vycm9yIrIBChFTeXN0ZW1GYWlsdXJlSXRlbRI2CgtlcnJvcl9jbGFzcxgBIAEoDjIhLmFnZW50c2hpbS5mcm9udGVuZC52MS5FcnJvckNsYXNzEhIKCmVycm9yX3R5cGUYAiABKAkSDwoHbWVzc2FnZRgDIAEoCRIVCg1zb3VyY2VfZGV0YWlsGAQgASgJEhYKDnJlc29sdmVkX2F0X21zGAUgASgDEhEKCWl0ZW1fdXVpZBgGIAEoCSJkCgtUeXBpbmdEZWx0YRIRCgl3b3Jrc3BhY2UYASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIuCgVkZWx0YRgDIAEoCzIfLmFnZW50c2hpbS5jb3JlLnYxLkNvbnRlbnREZWx0YSJuCg1IZWFydGJlYXRWaWV3EhEKCXdvcmtzcGFjZRgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEjYKCHByb2dyZXNzGAMgASgLMiQuYWdlbnRzaGltLmNvcmUudjEuSGVhcnRiZWF0UHJvZ3Jlc3MiZQoPU2Vzc2lvbkluaXRWaWV3EhEKCXdvcmtzcGFjZRgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEisKBGluaXQYAyABKAsyHS5hZ2VudHNoaW0uZGF0YS52MS5TeXN0ZW1Jbml0IpABCglUYXNrRW50cnkSDwoHdGFza19pZBgBIAEoCRIMCgRraW5kGAIgASgJEhMKC2Rlc2NyaXB0aW9uGAMgASgJEg4KBnN0YXR1cxgEIAEoCRITCgtvdXRwdXRfcGF0aBgFIAEoCRIVCg1zdGFydGVkX2F0X21zGAYgASgDEhMKC2VuZGVkX2F0X21zGAcgASgDImUKC1Rhc2tDYXRhbG9nEhEKCXdvcmtzcGFjZRgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEi8KBXRhc2tzGAMgAygLMiAuYWdlbnRzaGltLmZyb250ZW5kLnYxLlRhc2tFbnRyeSLfCQoPRnJvbnRlbmRDb21tYW5kEhIKCnJlcXVlc3RfaWQYASABKAkSEQoJd29ya3NwYWNlGAIgASgJEj8KDXN1Ym1pdF9wcm9tcHQYAyABKAsyJi5hZ2VudHNoaW0uZnJvbnRlbmQudjEuU3VibWl0UHJvbXB0Q21kSAASOAoJaW50ZXJydXB0GAQgASgLMiMuYWdlbnRzaGltLmZyb250ZW5kLnYxLkludGVycnVwdENtZEgAEkcKEXBlcm1pc3Npb25fYW5zd2VyGAUgASgLMiouYWdlbnRzaGltLmZyb250ZW5kLnYxLlBlcm1pc3Npb25BbnN3ZXJDbWRIABJDCg9tZXJnZV93b3Jrc3BhY2UYBiABKAsyKC5hZ2VudHNoaW0uZnJvbnRlbmQudjEuTWVyZ2VXb3Jrc3BhY2VDbWRIABJDCg9jbG9zZV93b3Jrc3BhY2UYByABKAsyKC5hZ2VudHNoaW0uZnJvbnRlbmQudjEuQ2xvc2VXb3Jrc3BhY2VDbWRIABJBCg5vcGVuX3dvcmtzcGFjZRgIIAEoCzInLmFnZW50c2hpbS5mcm9udGVuZC52MS5PcGVuV29ya3NwYWNlQ21kSAASMgoGcmVzeW5jGAkgASgLMiAuYWdlbnRzaGltLmZyb250ZW5kLnYxLlJlc3luY0NtZEgAEkEKDmNyZWF0ZV9zZXNzaW9uGAogASgLMicuYWdlbnRzaGltLmZyb250ZW5kLnYxLkNyZWF0ZVNlc3Npb25DbWRIABJBCg5kZWxldGVfc2Vzc2lvbhgLIAEoCzInLmFnZW50c2hpbS5mcm9udGVuZC52MS5EZWxldGVTZXNzaW9uQ21kSAASNgoIc2h1dGRvd24YDCABKAsyIi5hZ2VudHNoaW0uZnJvbnRlbmQudjEuU2h1dGRvd25DbWRIABI5CgpjbGllbnRfbG9nGA0gASgLMiMuYWdlbnRzaGltLmZyb250ZW5kLnYxLkNsaWVudExvZ0NtZEgAEjsKC3F1ZXVlX2ZvcmNlGA4gASgLMiQuYWdlbnRzaGltLmZyb250ZW5kLnYxLlF1ZXVlRm9yY2VDbWRIABI9CgxxdWV1ZV9hY2NlcHQYDyABKAsyJS5hZ2VudHNoaW0uZnJvbnRlbmQudjEuUXVldWVBY2NlcHRDbWRIABI9CgxxdWV1ZV9jYW5jZWwYECABKAsyJS5hZ2VudHNoaW0uZnJvbnRlbmQudjEuUXVldWVDYW5jZWxDbWRIABI3CglwYWludF9hY2sYESABKAsyIi5hZ2VudHNoaW0uZnJvbnRlbmQudjEuUGFpbnRBY2tDbWRIABJFChBjcmVhdGVfd29ya3NwYWNlGBIgASgLMikuYWdlbnRzaGltLmZyb250ZW5kLnYxLkNyZWF0ZVdvcmtzcGFjZUNtZEgAElEKFndvcmtzcGFjZV9tYXRlcmlhbGl6ZWQYEyABKAsyLy5hZ2VudHNoaW0uZnJvbnRlbmQudjEuV29ya3NwYWNlTWF0ZXJpYWxpemVkQ21kSAASTgoVaG9zdF9hY3Rpb25fY29tcGxldGVkGBQgASgLMi0uYWdlbnRzaGltLmZyb250ZW5kLnYxLkhvc3RBY3Rpb25Db21wbGV0ZWRDbWRIAEIJCgdjb21tYW5kInIKC1BhaW50QWNrQ21kEhMKC3Rocm91Z2hfc2VxGAEgASgEEhgKEHN0YXRlX2dlbmVyYXRpb24YAiABKAQSNAoHb3V0Y29tZRgDIAEoDjIjLmFnZW50c2hpbS5mcm9udGVuZC52MS5QYWludE91dGNvbWUipQEKClF1ZXVlRW50cnkSCgoCaWQYASABKAkSDAoEdGV4dBgCIAEoCRIUCgxxdWV1ZWRfYXRfbXMYAyABKAMSQgoOY2xhc3NpZmljYXRpb24YBCABKA4yKi5hZ2VudHNoaW0uZnJvbnRlbmQudjEuUXVldWVDbGFzc2lmaWNhdGlvbhIRCglyYXRpb25hbGUYBSABKAkSEAoIYWNjZXB0ZWQYBiABKAgiZgoJUXVldWVWaWV3EhEKCXdvcmtzcGFjZRgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEjIKB2VudHJpZXMYAyADKAsyIS5hZ2VudHNoaW0uZnJvbnRlbmQudjEuUXVldWVFbnRyeSIhCg1RdWV1ZUZvcmNlQ21kEhAKCGVudHJ5X2lkGAEgASgJIiIKDlF1ZXVlQWNjZXB0Q21kEhAKCGVudHJ5X2lkGAEgASgJIiIKDlF1ZXVlQ2FuY2VsQ21kEhAKCGVudHJ5X2lkGAEgASgJIn8KDENsaWVudExvZ0NtZBI0CgVsZXZlbBgBIAEoDjIlLmFnZW50c2hpbS5mcm9udGVuZC52MS5DbGllbnRMb2dMZXZlbBIPCgdtZXNzYWdlGAIgASgJEigKB2NvbnRleHQYAyABKAsyFy5nb29nbGUucHJvdG9idWYuU3RydWN0Ig0KC1NodXRkb3duQ21kIqIBChBDcmVhdGVTZXNzaW9uQ21kEgsKA2N3ZBgBIAEoCRINCgVtb2RlbBgCIAEoCRIXCg9wZXJtaXNzaW9uX21vZGUYAyABKAkSEgoKY29uZmlnX2RpchgEIAEoCRIgChhyZXN1bWVfY2xhdWRlX3Nlc3Npb25faWQYBSABKAkSDAoEZmFrZRgGIAEoCBIVCg1hbGxvd191bmdhdGVkGAcgASgIIiYKEERlbGV0ZVNlc3Npb25DbWQSEgoKc2Vzc2lvbl9pZBgBIAEoCSI4Cg9TdWJtaXRQcm9tcHRDbWQSDAoEdGV4dBgBIAEoCRIXCg9wZXJtaXNzaW9uX21vZGUYAiABKAkiHAoMSW50ZXJydXB0Q21kEgwKBGhhcmQYASABKAgiiQEKE1Blcm1pc3Npb25BbnN3ZXJDbWQSHQoVcGVybWlzc2lvbl9yZXF1ZXN0X2lkGAEgASgJEg0KBWFsbG93GAIgASgIEi4KDXVwZGF0ZWRfaW5wdXQYAyABKAsyFy5nb29nbGUucHJvdG9idWYuU3RydWN0EhQKDGRlbnlfbWVzc2FnZRgEIAEoCSKHAQoRTWVyZ2VXb3Jrc3BhY2VDbWQSDwoHaGFuZGxlchgBIAEoCRIiChpjb25mbGljdF9yZXNvbHZlZF9jb250aW51ZRgCIAEoCBIVCg1zb3VyY2VfYnJhbmNoGAMgASgJEhIKCnNvdXJjZV9kaXIYBCABKAkSEgoKdGFyZ2V0X2RpchgFIAEoCSITChFDbG9zZVdvcmtzcGFjZUNtZCISChBPcGVuV29ya3NwYWNlQ21kIh0KCVJlc3luY0NtZBIQCghmcm9tX3NlcRgBIAEoBCK2AgoSQ3JlYXRlV29ya3NwYWNlQ21kEhYKDnJlcXVlc3RlZF9uYW1lGAEgASgJEhAKCGdpdF9yb290GAIgASgJEhMKC2Jhc2VfY29tbWl0GAMgASgJEhgKEHNvdXJjZV93b3Jrc3BhY2UYBCABKAkSEgoKc291cmNlX2RpchgFIAEoCRIbCg5pbml0aWFsX3Byb21wdBgGIAEoCUgAiAEBEhAKCHByaW9yaXR5GAcgASgJEg0KBW1vZGVsGAggASgJEhEKCWZvcmtfZnJvbRgJIAEoCRIXCg9mb3JrX3Nlc3Npb25faWQYCiABKAkSHQoVcG9zdHByb2Nlc3NpbmdfcHJvbXB0GAsgASgJEhcKD2JlZm9yZV93c19tZXJnZRgMIAEoCUIRCg9faW5pdGlhbF9wcm9tcHQitAIKEldvcmtzcGFjZUF2YWlsYWJsZRIOCgZqb2JfaWQYASABKAkSEgoKZmluYWxfbmFtZRgCIAEoCRIVCg13b3JrdHJlZV9wYXRoGAMgASgJEg4KBmJyYW5jaBgEIAEoCRIQCghnaXRfcm9vdBgFIAEoCRITCgtiYXNlX2NvbW1pdBgGIAEoCRIYChBzb3VyY2Vfd29ya3NwYWNlGAcgASgJEhIKCnNvdXJjZV9kaXIYCCABKAkSEQoJZm9ya19mcm9tGAkgASgJEhcKD2Zvcmtfc2Vzc2lvbl9pZBgKIAEoCRISCgpzZXNzaW9uX2lkGAsgASgJEhAKCHByaW9yaXR5GAwgASgJEg0KBW1vZGVsGA0gASgJEh0KFWluaXRpYWxfcHJvbXB0X3F1ZXVlZBgOIAEoCCIqChhXb3Jrc3BhY2VNYXRlcmlhbGl6ZWRDbWQSDgoGam9iX2lkGAEgASgJIoEECgpIb3N0QWN0aW9uEhEKCWFjdGlvbl9pZBgBIAEoCRJGChBzd2l0Y2hfd29ya3NwYWNlGAIgASgLMiouYWdlbnRzaGltLmZyb250ZW5kLnYxLkhvc3RTd2l0Y2hXb3Jrc3BhY2VIABJLChNzZXRfcmVwb3NpdG9yeV9mb2xkGAMgASgLMiwuYWdlbnRzaGltLmZyb250ZW5kLnYxLkhvc3RTZXRSZXBvc2l0b3J5Rm9sZEgAEkUKEHNldF9zaWRlYmFyX3ZpZXcYBCABKAsyKS5hZ2VudHNoaW0uZnJvbnRlbmQudjEuSG9zdFNldFNpZGViYXJWaWV3SAASPAoLdGFza19jcmVhdGUYBSABKAsyJS5hZ2VudHNoaW0uZnJvbnRlbmQudjEuSG9zdFRhc2tDcmVhdGVIABI/ChB0YXNrX3RvZ2dsZV9kb25lGAYgASgLMiMuYWdlbnRzaGltLmZyb250ZW5kLnYxLkhvc3RUYXNrQnlJZEgAEjgKCXRhc2tfb3BlbhgHIAEoCzIjLmFnZW50c2hpbS5mcm9udGVuZC52MS5Ib3N0VGFza0J5SWRIABJBChJ0YXNrX2FkZF93b3Jrc3BhY2UYCCABKAsyIy5hZ2VudHNoaW0uZnJvbnRlbmQudjEuSG9zdFRhc2tCeUlkSABCCAoGYWN0aW9uIiIKE0hvc3RTd2l0Y2hXb3Jrc3BhY2USCwoDZGlyGAEgASgJIjkKFUhvc3RTZXRSZXBvc2l0b3J5Rm9sZBIQCghyZXBvX2tleRgBIAEoCRIOCgZmb2xkZWQYAiABKAgiIgoSSG9zdFNldFNpZGViYXJWaWV3EgwKBHZpZXcYASABKAkiEAoOSG9zdFRhc2tDcmVhdGUiGgoMSG9zdFRhc2tCeUlkEgoKAmlkGAEgASgJIkYKFkhvc3RBY3Rpb25Db21wbGV0ZWRDbWQSEQoJYWN0aW9uX2lkGAEgASgJEgoKAm9rGAIgASgIEg0KBWVycm9yGAMgASgJInYKCkNvbW1hbmRBY2sSEgoKcmVxdWVzdF9pZBgBIAEoCRIKCgJvaxgCIAEoCBINCgVlcnJvchgDIAEoCRI5CgdmYWlsdXJlGAQgASgLMiguYWdlbnRzaGltLmZyb250ZW5kLnYxLlN5c3RlbUZhaWx1cmVJdGVtIkIKDlByb2dyZXNzV2luZG93Eg4KBmFjdGl2ZRgBIAEoCBIQCghzaW5jZV9tcxgCIAEoAxIOCgZkZXRhaWwYAyABKAkiWQoPUmF0ZUxpbWl0V2luZG93Eg4KBmFjdGl2ZRgBIAEoCBIRCglyZXNldHNfYXQYAiABKAMSEwoLdXRpbGl6YXRpb24YAyABKAESDgoGc3RhdHVzGAQgASgJItgFCgxQcm9ncmVzc1ZpZXcSEQoJd29ya3NwYWNlGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSNQoFc3RhdGUYAyABKA4yIi5hZ2VudHNoaW0uZnJvbnRlbmQudjEuUmVuZGVyU3RhdGVCAhgBEhoKEnR1cm5fc3RhcnRlZF9hdF9tcxgEIAEoAxIXCg90aGlua2luZ190b2tlbnMYBSABKAMSFAoMaW5wdXRfdG9rZW5zGAYgASgDEg8KB3R0ZnRfbXMYByABKAMSOQoKY29tcGFjdGluZxgIIAEoCzIlLmFnZW50c2hpbS5mcm9udGVuZC52MS5Qcm9ncmVzc1dpbmRvdxI3CghyZXRyeWluZxgJIAEoCzIlLmFnZW50c2hpbS5mcm9udGVuZC52MS5Qcm9ncmVzc1dpbmRvdxI9Cg5hdXRoZW50aWNhdGluZxgKIAEoCzIlLmFnZW50c2hpbS5mcm9udGVuZC52MS5Qcm9ncmVzc1dpbmRvdxIzCgRob29rGAsgASgLMiUuYWdlbnRzaGltLmZyb250ZW5kLnYxLlByb2dyZXNzV2luZG93EjwKDHJhdGVfbGltaXRlZBgMIAEoCzImLmFnZW50c2hpbS5mcm9udGVuZC52MS5SYXRlTGltaXRXaW5kb3cSNgoHYmxvY2tlZBgSIAEoCzIlLmFnZW50c2hpbS5mcm9udGVuZC52MS5Qcm9ncmVzc1dpbmRvdxI5CgdmYWlsdXJlGBMgASgLMiguYWdlbnRzaGltLmZyb250ZW5kLnYxLlN5c3RlbUZhaWx1cmVJdGVtEhsKE3BlbmRpbmdfcGVybWlzc2lvbnMYDiABKAMSEwoLcXVldWVfZGVwdGgYDyABKAMSFwoPbGl2ZV90YXNrX2NvdW50GBAgASgDSgQIDRAOSgQIERASUg1lcnJvcl9zdW1tYXJ5Ug9lcnJvcl9pdGVtX3V1aWQiigQKDVN0YXRlU25hcHNob3QSOQoKd29ya3NwYWNlcxgBIAMoCzIlLmFnZW50c2hpbS5mcm9udGVuZC52MS5Xb3Jrc3BhY2VTdGF0ZRI0CghzZXNzaW9ucxgCIAMoCzIiLmFnZW50c2hpbS5mcm9udGVuZC52MS5TZXNzaW9uVmlldxI0CghjYXRhbG9ncxgDIAMoCzIiLmFnZW50c2hpbS5mcm9udGVuZC52MS5UYXNrQ2F0YWxvZxIxCgZkYWVtb24YBCABKAsyIS5hZ2VudHNoaW0uZnJvbnRlbmQudjEuRGFlbW9uVmlldxI1CgVpbml0cxgFIAMoCzImLmFnZW50c2hpbS5mcm9udGVuZC52MS5TZXNzaW9uSW5pdFZpZXcSMAoGcXVldWVzGAYgAygLMiAuYWdlbnRzaGltLmZyb250ZW5kLnYxLlF1ZXVlVmlldxI1Cghwcm9ncmVzcxgHIAMoCzIjLmFnZW50c2hpbS5mcm9udGVuZC52MS5Qcm9ncmVzc1ZpZXcSRgoTd29ya3NwYWNlX2F2YWlsYWJsZRgIIAMoCzIpLmFnZW50c2hpbS5mcm9udGVuZC52MS5Xb3Jrc3BhY2VBdmFpbGFibGUSNwoMaG9zdF9hY3Rpb25zGAkgAygLMiEuYWdlbnRzaGltLmZyb250ZW5kLnYxLkhvc3RBY3Rpb24q5AMKC1JlbmRlclN0YXRlEhwKGFJFTkRFUl9TVEFURV9VTlNQRUNJRklFRBAAEhUKEVJFTkRFUl9TVEFURV9JTklUEAESFQoRUkVOREVSX1NUQVRFX0lETEUQAhIbChdSRU5ERVJfU1RBVEVfSURMRV9BU1lOQxADEhkKFVJFTkRFUl9TVEFURV9USElOS0lORxAEEhsKF1JFTkRFUl9TVEFURV9QRVJNSVNTSU9OEAUSFQoRUkVOREVSX1NUQVRFX0RPTkUQBhIgChhSRU5ERVJfU1RBVEVfU1RPUF9GQUlMRUQQBxoCCAESGAoUUkVOREVSX1NUQVRFX01FUkdJTkcQCBIdChlSRU5ERVJfU1RBVEVfTUVSR0VfUVVFVUVEEAkSHwobUkVOREVSX1NUQVRFX01FUkdFX0NPTkZMSUNUEAoSHQoZUkVOREVSX1NUQVRFX01FUkdFX0ZBSUxFRBALEhcKE1JFTkRFUl9TVEFURV9NRVJHRUQQDBIVChFSRU5ERVJfU1RBVEVfREVBRBANEhkKFVJFTkRFUl9TVEFURV9ERUdSQURFRBAOEhYKElJFTkRFUl9TVEFURV9SRUFEWRAPEh8KG1JFTkRFUl9TVEFURV9WRU5ET1JfQkxPQ0tFRBAQKn8KDUJhY2tmaWxsU3RhdGUSHgoaQkFDS0ZJTExfU1RBVEVfVU5TUEVDSUZJRUQQABIaChZCQUNLRklMTF9TVEFURV9QRU5ESU5HEAESFwoTQkFDS0ZJTExfU1RBVEVfRE9ORRACEhkKFUJBQ0tGSUxMX1NUQVRFX0ZBSUxFRBADKlgKCkVycm9yQ2xhc3MSGwoXRVJST1JfQ0xBU1NfVU5TUEVDSUZJRUQQABIYChRFUlJPUl9DTEFTU19JTlRFUk5BTBABEhMKD0VSUk9SX0NMQVNTX0FQSRACKmUKDFBhaW50T3V0Y29tZRIdChlQQUlOVF9PVVRDT01FX1VOU1BFQ0lGSUVEEAASGQoVUEFJTlRfT1VUQ09NRV9QQUlOVEVEEAESGwoXUEFJTlRfT1VUQ09NRV9TVVNQRU5ERUQQAirAAQoTUXVldWVDbGFzc2lmaWNhdGlvbhIkCiBRVUVVRV9DTEFTU0lGSUNBVElPTl9VTlNQRUNJRklFRBAAEiAKHFFVRVVFX0NMQVNTSUZJQ0FUSU9OX1BFTkRJTkcQARIiCh5RVUVVRV9DTEFTU0lGSUNBVElPTl9JTlRFUkpFQ1QQAhIdChlRVUVVRV9DTEFTU0lGSUNBVElPTl9IT0xEEAMSHgoaUVVFVUVfQ0xBU1NJRklDQVRJT05fRVJST1IQBCqEAQoOQ2xpZW50TG9nTGV2ZWwSIAocQ0xJRU5UX0xPR19MRVZFTF9VTlNQRUNJRklFRBAAEhkKFUNMSUVOVF9MT0dfTEVWRUxfSU5GTxABEhkKFUNMSUVOVF9MT0dfTEVWRUxfV0FSThACEhoKFkNMSUVOVF9MT0dfTEVWRUxfRVJST1IQA0IyWjBhZ2VudHJlcGwvcHJvdG8vYWdlbnRzaGltL2Zyb250ZW5kL3YxO2Zyb250ZW5kdjFiBnByb3RvMw", [file_agentshim_core_v1_core, file_agentshim_data_v1_stream, file_agentshim_data_v1_tools, file_agentshim_data_v1_transcript, file_google_protobuf_struct]);
 
 /**
  * @generated from message agentshim.frontend.v1.FrontendFrame
@@ -136,6 +136,24 @@ export type FrontendFrame = Message<"agentshim.frontend.v1.FrontendFrame"> & {
      */
     value: ProgressView;
     case: "progress";
+  } | {
+    /**
+     * Host-only durable workspace lifecycle notification.  The daemon emits
+     * this only after the worktree and waiting shim are healthy; Emacs then
+     * materializes its perspective and acknowledges it.
+     *
+     * @generated from field: agentshim.frontend.v1.WorkspaceAvailable workspace_available = 14;
+     */
+    value: WorkspaceAvailable;
+    case: "workspaceAvailable";
+  } | {
+    /**
+     * Host-only durable UI action sourced by the daemon-owned JSON inbox.
+     *
+     * @generated from field: agentshim.frontend.v1.HostAction host_action = 15;
+     */
+    value: HostAction;
+    case: "hostAction";
   } | { case: undefined; value?: undefined };
 };
 
@@ -921,6 +939,24 @@ export type FrontendCommand = Message<"agentshim.frontend.v1.FrontendCommand"> &
      */
     value: PaintAckCmd;
     case: "paintAck";
+  } | {
+    /**
+     * @generated from field: agentshim.frontend.v1.CreateWorkspaceCmd create_workspace = 18;
+     */
+    value: CreateWorkspaceCmd;
+    case: "createWorkspace";
+  } | {
+    /**
+     * @generated from field: agentshim.frontend.v1.WorkspaceMaterializedCmd workspace_materialized = 19;
+     */
+    value: WorkspaceMaterializedCmd;
+    case: "workspaceMaterialized";
+  } | {
+    /**
+     * @generated from field: agentshim.frontend.v1.HostActionCompletedCmd host_action_completed = 20;
+     */
+    value: HostActionCompletedCmd;
+    case: "hostActionCompleted";
   } | { case: undefined; value?: undefined };
 };
 
@@ -1447,6 +1483,376 @@ export const ResyncCmdSchema: GenMessage<ResyncCmd> = /*@__PURE__*/
   messageDesc(file_agentshim_frontend_v1_frontend, 29);
 
 /**
+ * Request one agent-repl workspace.  This is the sole creation ingress for
+ * both host UI requests (SPC TAB n/N) and skill-produced JSON dispatches.  The
+ * daemon owns name resolution, worktree creation, session startup, and initial
+ * prompt delivery; a request never asks for a promptless/no-shim workspace.
+ *
+ * @generated from message agentshim.frontend.v1.CreateWorkspaceCmd
+ */
+export type CreateWorkspaceCmd = Message<"agentshim.frontend.v1.CreateWorkspaceCmd"> & {
+  /**
+   * @generated from field: string requested_name = 1;
+   */
+  requestedName: string;
+
+  /**
+   * @generated from field: string git_root = 2;
+   */
+  gitRoot: string;
+
+  /**
+   * @generated from field: string base_commit = 3;
+   */
+  baseCommit: string;
+
+  /**
+   * @generated from field: string source_workspace = 4;
+   */
+  sourceWorkspace: string;
+
+  /**
+   * @generated from field: string source_dir = 5;
+   */
+  sourceDir: string;
+
+  /**
+   * @generated from field: optional string initial_prompt = 6;
+   */
+  initialPrompt?: string | undefined;
+
+  /**
+   * @generated from field: string priority = 7;
+   */
+  priority: string;
+
+  /**
+   * @generated from field: string model = 8;
+   */
+  model: string;
+
+  /**
+   * @generated from field: string fork_from = 9;
+   */
+  forkFrom: string;
+
+  /**
+   * @generated from field: string fork_session_id = 10;
+   */
+  forkSessionId: string;
+
+  /**
+   * @generated from field: string postprocessing_prompt = 11;
+   */
+  postprocessingPrompt: string;
+
+  /**
+   * @generated from field: string before_ws_merge = 12;
+   */
+  beforeWsMerge: string;
+};
+
+/**
+ * Describes the message agentshim.frontend.v1.CreateWorkspaceCmd.
+ * Use `create(CreateWorkspaceCmdSchema)` to create a new message.
+ */
+export const CreateWorkspaceCmdSchema: GenMessage<CreateWorkspaceCmd> = /*@__PURE__*/
+  messageDesc(file_agentshim_frontend_v1_frontend, 30);
+
+/**
+ * The daemon's authoritative account of a workspace ready for host
+ * materialization.  A `WorkspaceAvailable` is retained until Emacs sends
+ * WorkspaceMaterializedCmd, so reconnecting Emacs cannot lose it.
+ *
+ * @generated from message agentshim.frontend.v1.WorkspaceAvailable
+ */
+export type WorkspaceAvailable = Message<"agentshim.frontend.v1.WorkspaceAvailable"> & {
+  /**
+   * @generated from field: string job_id = 1;
+   */
+  jobId: string;
+
+  /**
+   * @generated from field: string final_name = 2;
+   */
+  finalName: string;
+
+  /**
+   * @generated from field: string worktree_path = 3;
+   */
+  worktreePath: string;
+
+  /**
+   * @generated from field: string branch = 4;
+   */
+  branch: string;
+
+  /**
+   * @generated from field: string git_root = 5;
+   */
+  gitRoot: string;
+
+  /**
+   * @generated from field: string base_commit = 6;
+   */
+  baseCommit: string;
+
+  /**
+   * @generated from field: string source_workspace = 7;
+   */
+  sourceWorkspace: string;
+
+  /**
+   * @generated from field: string source_dir = 8;
+   */
+  sourceDir: string;
+
+  /**
+   * @generated from field: string fork_from = 9;
+   */
+  forkFrom: string;
+
+  /**
+   * @generated from field: string fork_session_id = 10;
+   */
+  forkSessionId: string;
+
+  /**
+   * @generated from field: string session_id = 11;
+   */
+  sessionId: string;
+
+  /**
+   * @generated from field: string priority = 12;
+   */
+  priority: string;
+
+  /**
+   * @generated from field: string model = 13;
+   */
+  model: string;
+
+  /**
+   * @generated from field: bool initial_prompt_queued = 14;
+   */
+  initialPromptQueued: boolean;
+};
+
+/**
+ * Describes the message agentshim.frontend.v1.WorkspaceAvailable.
+ * Use `create(WorkspaceAvailableSchema)` to create a new message.
+ */
+export const WorkspaceAvailableSchema: GenMessage<WorkspaceAvailable> = /*@__PURE__*/
+  messageDesc(file_agentshim_frontend_v1_frontend, 31);
+
+/**
+ * Emacs has created the perspective/local bookkeeping for the authoritative
+ * workspace descriptor.  The daemon uses this durable acknowledgement to
+ * release an initial prompt that was held until a visible host workspace
+ * exists.
+ *
+ * @generated from message agentshim.frontend.v1.WorkspaceMaterializedCmd
+ */
+export type WorkspaceMaterializedCmd = Message<"agentshim.frontend.v1.WorkspaceMaterializedCmd"> & {
+  /**
+   * @generated from field: string job_id = 1;
+   */
+  jobId: string;
+};
+
+/**
+ * Describes the message agentshim.frontend.v1.WorkspaceMaterializedCmd.
+ * Use `create(WorkspaceMaterializedCmdSchema)` to create a new message.
+ */
+export const WorkspaceMaterializedCmdSchema: GenMessage<WorkspaceMaterializedCmd> = /*@__PURE__*/
+  messageDesc(file_agentshim_frontend_v1_frontend, 32);
+
+/**
+ * A daemon-owned inbox may contain UI-only actions alongside creates.  These
+ * typed messages hand those actions to the Emacs host without two processes
+ * racing to consume the same JSON file.  They are retained until completed.
+ *
+ * @generated from message agentshim.frontend.v1.HostAction
+ */
+export type HostAction = Message<"agentshim.frontend.v1.HostAction"> & {
+  /**
+   * @generated from field: string action_id = 1;
+   */
+  actionId: string;
+
+  /**
+   * @generated from oneof agentshim.frontend.v1.HostAction.action
+   */
+  action: {
+    /**
+     * @generated from field: agentshim.frontend.v1.HostSwitchWorkspace switch_workspace = 2;
+     */
+    value: HostSwitchWorkspace;
+    case: "switchWorkspace";
+  } | {
+    /**
+     * @generated from field: agentshim.frontend.v1.HostSetRepositoryFold set_repository_fold = 3;
+     */
+    value: HostSetRepositoryFold;
+    case: "setRepositoryFold";
+  } | {
+    /**
+     * @generated from field: agentshim.frontend.v1.HostSetSidebarView set_sidebar_view = 4;
+     */
+    value: HostSetSidebarView;
+    case: "setSidebarView";
+  } | {
+    /**
+     * @generated from field: agentshim.frontend.v1.HostTaskCreate task_create = 5;
+     */
+    value: HostTaskCreate;
+    case: "taskCreate";
+  } | {
+    /**
+     * @generated from field: agentshim.frontend.v1.HostTaskById task_toggle_done = 6;
+     */
+    value: HostTaskById;
+    case: "taskToggleDone";
+  } | {
+    /**
+     * @generated from field: agentshim.frontend.v1.HostTaskById task_open = 7;
+     */
+    value: HostTaskById;
+    case: "taskOpen";
+  } | {
+    /**
+     * @generated from field: agentshim.frontend.v1.HostTaskById task_add_workspace = 8;
+     */
+    value: HostTaskById;
+    case: "taskAddWorkspace";
+  } | { case: undefined; value?: undefined };
+};
+
+/**
+ * Describes the message agentshim.frontend.v1.HostAction.
+ * Use `create(HostActionSchema)` to create a new message.
+ */
+export const HostActionSchema: GenMessage<HostAction> = /*@__PURE__*/
+  messageDesc(file_agentshim_frontend_v1_frontend, 33);
+
+/**
+ * @generated from message agentshim.frontend.v1.HostSwitchWorkspace
+ */
+export type HostSwitchWorkspace = Message<"agentshim.frontend.v1.HostSwitchWorkspace"> & {
+  /**
+   * @generated from field: string dir = 1;
+   */
+  dir: string;
+};
+
+/**
+ * Describes the message agentshim.frontend.v1.HostSwitchWorkspace.
+ * Use `create(HostSwitchWorkspaceSchema)` to create a new message.
+ */
+export const HostSwitchWorkspaceSchema: GenMessage<HostSwitchWorkspace> = /*@__PURE__*/
+  messageDesc(file_agentshim_frontend_v1_frontend, 34);
+
+/**
+ * @generated from message agentshim.frontend.v1.HostSetRepositoryFold
+ */
+export type HostSetRepositoryFold = Message<"agentshim.frontend.v1.HostSetRepositoryFold"> & {
+  /**
+   * @generated from field: string repo_key = 1;
+   */
+  repoKey: string;
+
+  /**
+   * @generated from field: bool folded = 2;
+   */
+  folded: boolean;
+};
+
+/**
+ * Describes the message agentshim.frontend.v1.HostSetRepositoryFold.
+ * Use `create(HostSetRepositoryFoldSchema)` to create a new message.
+ */
+export const HostSetRepositoryFoldSchema: GenMessage<HostSetRepositoryFold> = /*@__PURE__*/
+  messageDesc(file_agentshim_frontend_v1_frontend, 35);
+
+/**
+ * @generated from message agentshim.frontend.v1.HostSetSidebarView
+ */
+export type HostSetSidebarView = Message<"agentshim.frontend.v1.HostSetSidebarView"> & {
+  /**
+   * @generated from field: string view = 1;
+   */
+  view: string;
+};
+
+/**
+ * Describes the message agentshim.frontend.v1.HostSetSidebarView.
+ * Use `create(HostSetSidebarViewSchema)` to create a new message.
+ */
+export const HostSetSidebarViewSchema: GenMessage<HostSetSidebarView> = /*@__PURE__*/
+  messageDesc(file_agentshim_frontend_v1_frontend, 36);
+
+/**
+ * @generated from message agentshim.frontend.v1.HostTaskCreate
+ */
+export type HostTaskCreate = Message<"agentshim.frontend.v1.HostTaskCreate"> & {
+};
+
+/**
+ * Describes the message agentshim.frontend.v1.HostTaskCreate.
+ * Use `create(HostTaskCreateSchema)` to create a new message.
+ */
+export const HostTaskCreateSchema: GenMessage<HostTaskCreate> = /*@__PURE__*/
+  messageDesc(file_agentshim_frontend_v1_frontend, 37);
+
+/**
+ * @generated from message agentshim.frontend.v1.HostTaskById
+ */
+export type HostTaskById = Message<"agentshim.frontend.v1.HostTaskById"> & {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id: string;
+};
+
+/**
+ * Describes the message agentshim.frontend.v1.HostTaskById.
+ * Use `create(HostTaskByIdSchema)` to create a new message.
+ */
+export const HostTaskByIdSchema: GenMessage<HostTaskById> = /*@__PURE__*/
+  messageDesc(file_agentshim_frontend_v1_frontend, 38);
+
+/**
+ * Completion is host-only.  `ok=false` preserves the action and records the
+ * supplied error in the daemon's durable inbox rather than silently dropping
+ * a UI request that Emacs could not perform.
+ *
+ * @generated from message agentshim.frontend.v1.HostActionCompletedCmd
+ */
+export type HostActionCompletedCmd = Message<"agentshim.frontend.v1.HostActionCompletedCmd"> & {
+  /**
+   * @generated from field: string action_id = 1;
+   */
+  actionId: string;
+
+  /**
+   * @generated from field: bool ok = 2;
+   */
+  ok: boolean;
+
+  /**
+   * @generated from field: string error = 3;
+   */
+  error: string;
+};
+
+/**
+ * Describes the message agentshim.frontend.v1.HostActionCompletedCmd.
+ * Use `create(HostActionCompletedCmdSchema)` to create a new message.
+ */
+export const HostActionCompletedCmdSchema: GenMessage<HostActionCompletedCmd> = /*@__PURE__*/
+  messageDesc(file_agentshim_frontend_v1_frontend, 39);
+
+/**
  * @generated from message agentshim.frontend.v1.CommandAck
  */
 export type CommandAck = Message<"agentshim.frontend.v1.CommandAck"> & {
@@ -1486,7 +1892,7 @@ export type CommandAck = Message<"agentshim.frontend.v1.CommandAck"> & {
  * Use `create(CommandAckSchema)` to create a new message.
  */
 export const CommandAckSchema: GenMessage<CommandAck> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_frontend, 30);
+  messageDesc(file_agentshim_frontend_v1_frontend, 40);
 
 /**
  * An activity window: open until cleared. Each window is its own message so
@@ -1520,7 +1926,7 @@ export type ProgressWindow = Message<"agentshim.frontend.v1.ProgressWindow"> & {
  * Use `create(ProgressWindowSchema)` to create a new message.
  */
 export const ProgressWindowSchema: GenMessage<ProgressWindow> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_frontend, 31);
+  messageDesc(file_agentshim_frontend_v1_frontend, 41);
 
 /**
  * The rate-limit window, which carries structured detail no other window
@@ -1559,7 +1965,7 @@ export type RateLimitWindow = Message<"agentshim.frontend.v1.RateLimitWindow"> &
  * Use `create(RateLimitWindowSchema)` to create a new message.
  */
 export const RateLimitWindowSchema: GenMessage<RateLimitWindow> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_frontend, 32);
+  messageDesc(file_agentshim_frontend_v1_frontend, 42);
 
 /**
  * @generated from message agentshim.frontend.v1.ProgressView
@@ -1718,7 +2124,7 @@ export type ProgressView = Message<"agentshim.frontend.v1.ProgressView"> & {
  * Use `create(ProgressViewSchema)` to create a new message.
  */
 export const ProgressViewSchema: GenMessage<ProgressView> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_frontend, 33);
+  messageDesc(file_agentshim_frontend_v1_frontend, 43);
 
 /**
  * Full resync on (re)connect: current state of every workspace + open tasks.
@@ -1768,6 +2174,19 @@ export type StateSnapshot = Message<"agentshim.frontend.v1.StateSnapshot"> & {
    * @generated from field: repeated agentshim.frontend.v1.ProgressView progress = 7;
    */
   progress: ProgressView[];
+
+  /**
+   * Host-only durable work.  frontend.Server strips both fields from every
+   * GUI client, regardless of observer/painter role.
+   *
+   * @generated from field: repeated agentshim.frontend.v1.WorkspaceAvailable workspace_available = 8;
+   */
+  workspaceAvailable: WorkspaceAvailable[];
+
+  /**
+   * @generated from field: repeated agentshim.frontend.v1.HostAction host_actions = 9;
+   */
+  hostActions: HostAction[];
 };
 
 /**
@@ -1775,7 +2194,7 @@ export type StateSnapshot = Message<"agentshim.frontend.v1.StateSnapshot"> & {
  * Use `create(StateSnapshotSchema)` to create a new message.
  */
 export const StateSnapshotSchema: GenMessage<StateSnapshot> = /*@__PURE__*/
-  messageDesc(file_agentshim_frontend_v1_frontend, 34);
+  messageDesc(file_agentshim_frontend_v1_frontend, 44);
 
 /**
  * The closed render-state vocabulary (SSM-resolved).

@@ -682,6 +682,12 @@ func TestFrameWrappers(t *testing.T) {
 	if got := SessionInitViewFrame(&frontendv1.SessionInitView{Workspace: "w"}); got.GetSessionInit().GetWorkspace() != "w" {
 		t.Error("SessionInitViewFrame did not set session_init arm")
 	}
+	if got := WorkspaceAvailableFrame(&frontendv1.WorkspaceAvailable{JobId: "j"}); got.GetWorkspaceAvailable().GetJobId() != "j" {
+		t.Error("WorkspaceAvailableFrame did not set workspace_available arm")
+	}
+	if got := HostActionFrame(&frontendv1.HostAction{ActionId: "a"}); got.GetHostAction().GetActionId() != "a" {
+		t.Error("HostActionFrame did not set host_action arm")
+	}
 }
 
 // helpers that need *testing.T but are used inside table literals ------------

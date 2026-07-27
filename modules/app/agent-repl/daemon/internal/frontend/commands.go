@@ -19,6 +19,14 @@ import (
 // Every method returns an error; a non-nil error becomes a CommandAck with
 // ok=false and the error text (a loud Nack-style failure), never a silent drop.
 type CommandHandler interface {
+	// CreateWorkspace enqueues a complete daemon-owned workspace request.
+	CreateWorkspace(ctx context.Context, workspace, requestID string, cmd *frontendv1.CreateWorkspaceCmd) error
+	// WorkspaceMaterialized records the Emacs host's durable materialization
+	// acknowledgement and may release the workspace's queued initial prompt.
+	WorkspaceMaterialized(ctx context.Context, workspace, requestID string, cmd *frontendv1.WorkspaceMaterializedCmd) error
+	// HostActionCompleted records the Emacs host's completion of one durable
+	// UI-only inbox action.
+	HostActionCompleted(ctx context.Context, workspace, requestID string, cmd *frontendv1.HostActionCompletedCmd) error
 	// SubmitPrompt forwards a prompt to the workspace's session.
 	SubmitPrompt(ctx context.Context, workspace, requestID string, cmd *frontendv1.SubmitPromptCmd) error
 	// Interrupt interrupts the in-flight turn (hard = SDK interrupt).
@@ -78,6 +86,10 @@ type CommandHandler interface {
 // the only place a classifier is needed and the natural one. logf carries the
 // classifier's loud unclassified-fallthrough line.
 func Dispatch(ctx context.Context, logf dlog.Logf, h CommandHandler, cmd *frontendv1.FrontendCommand) *frontendv1.CommandAck {
+	return dispatch(ctx, logf, h, cmd)
+}
+
+func dispatch(ctx context.Context, logf dlog.Logf, h CommandHandler, cmd *frontendv1.FrontendCommand) *frontendv1.CommandAck {
 	if cmd == nil {
 		return failAck(logf, "", fmt.Errorf("frontend: nil command"))
 	}
@@ -86,6 +98,12 @@ func Dispatch(ctx context.Context, logf dlog.Logf, h CommandHandler, cmd *fronte
 
 	var err error
 	switch c := cmd.GetCommand().(type) {
+	case *frontendv1.FrontendCommand_CreateWorkspace:
+		err = h.CreateWorkspace(ctx, ws, reqID, c.CreateWorkspace)
+	case *frontendv1.FrontendCommand_WorkspaceMaterialized:
+		err = h.WorkspaceMaterialized(ctx, ws, reqID, c.WorkspaceMaterialized)
+	case *frontendv1.FrontendCommand_HostActionCompleted:
+		err = h.HostActionCompleted(ctx, ws, reqID, c.HostActionCompleted)
 	case *frontendv1.FrontendCommand_SubmitPrompt:
 		err = h.SubmitPrompt(ctx, ws, reqID, c.SubmitPrompt)
 	case *frontendv1.FrontendCommand_Interrupt:
