@@ -117,6 +117,10 @@ func launchedBinaryMTime() int64 {
 func main() {
 	bootedAt := time.Now()
 
+	// Microsecond stamps: cross-component latency tracing needs sub-second
+	// resolution, which the default second-granularity flags cannot give.
+	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
+
 	// Disk log, wired before anything can log: every log.Printf line
 	// lands in both stderr (the *claude-repld* buffer Emacs captures)
 	// and a per-run file under the state root, so daemon history
