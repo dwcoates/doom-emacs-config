@@ -508,23 +508,17 @@ change still resets the reattach give-ups.  Returns the boot id."
 (agent-repl--uds-register-handler "sessionInit"
                                   #'agent-repl--frontend-apply-session-init)
 
-;;;; ---- Module init: open the frontend UDS link -------------------------
+;;;; ---- Module init: registration only ---------------------------------
 ;;
-;; The agent-shim cutover (design §10, integration item 5) replaces the
-;; HTTP status derivation with a daemon push over the frontend UDS: this
-;; module-init side effect dials the socket once, after the handlers above
-;; are registered, so the daemon's initial StateSnapshot resync lands on a
-;; ready dispatcher.  On a failed dial `agent-repl-uds-connect' loud-logs
-;; and schedules its own reconnect (design §4.4 honest downtime) — there is
-;; no fallback here.  Gated on `agent-repl--frontend-init-inhibited-p' so
-;; batch (ert) and the agent sandbox never dial a real socket (the same
-;; guard the HTTP reattach sweep uses); this keeps the `agent-repl--uds-connect'
-;; external-boundary guard from firing at test load time.
+;; WHY: daemon startup is intentionally lazy (daemon.el) and the first
+;; session-open path owns build, launch, and readiness.  Dialing here ran
+;; before that owner and misclassified every cold Emacs start as a daemon
+;; outage.  Registration remains a load-time operation; the first session
+;; open connects only after `agent-repl--ensure-frontend-daemon' has run.
 
-(declare-function agent-repl--frontend-init-inhibited-p "daemon" ())
-
-(unless (agent-repl--frontend-init-inhibited-p)
-  (agent-repl-uds-connect))
+(agent-repl--log
+ nil
+ "frontend-state init: handlers registered; UDS dial deferred to lazy daemon readiness")
 
 (provide 'frontend-state)
 

@@ -313,6 +313,27 @@ FIELD-JSON is the already-serialized `\"field\": {...}' body."
           (should (equal (nth 0 scheduled) 2.0))
           (should (eq (nth 1 scheduled) #'agent-repl-uds-connect)))))))
 
+(ert-deftest agent-repl-test-uds-connect-readiness-failure-stays-with-owner ()
+  "A cold-start dial logs but leaves retry and final failure to readiness."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let (scheduled surfaced)
+      (cl-letf (((symbol-function 'process-live-p) (lambda (_p) nil))
+                ((symbol-function 'agent-repl--uds-connect)
+                 (lambda (&rest _) (error "connection refused")))
+                ((symbol-function 'agent-repl--uds-run-timer)
+                 (lambda (&rest args) (setq scheduled args) 'fake-timer))
+                ((symbol-function 'agent-repl-failure-surface)
+                 (lambda (&rest args) (setq surfaced args))))
+        ;; Act
+        (let ((result (agent-repl-uds-connect "/tmp/x.sock" t)))
+          ;; Assert — the synchronous readiness loop retains sole ownership.
+          (should-not result)
+          (should-not agent-repl--uds-process)
+          (should-not scheduled)
+          (should-not surfaced)
+          (should-not agent-repl--uds-reconnect-timer))))))
+
 ;;;; ---- socket liveness probe (adopted-daemon detection) ----------------
 
 (ert-deftest agent-repl-test-uds-socket-live-p-true-when-already-connected ()
