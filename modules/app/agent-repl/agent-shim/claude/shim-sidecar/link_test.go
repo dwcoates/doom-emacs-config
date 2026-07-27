@@ -306,7 +306,7 @@ func TestRescanDoesNotTreatTaskArtifactAsOpenLifecycle(t *testing.T) {
 	if _, ok := s.watchers[path]; !ok {
 		t.Fatal("rescan did not build a tailer for discovered artifact")
 	}
-	if s.tracker.IsOpen("a1") {
+	if s.tracker.IsOpen("s1", "a1") {
 		t.Fatal("artifact presence opened task a1; liveness must come only from persisted lifecycle state")
 	}
 }
