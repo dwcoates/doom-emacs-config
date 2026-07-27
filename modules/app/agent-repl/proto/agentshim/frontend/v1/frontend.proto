@@ -298,10 +298,24 @@ message ConversationItem {
     agentshim.data.v1.ToolResultBlock tool_result = 13;
     agentshim.data.v1.ToolUseResult tool_use_result = 14;
     agentshim.data.v1.ResultMessage result = 15;
+    // DEPRECATED by context_compacted below, which carries the same
+    // compaction as ONE coalesced fact instead of two plane-shaped halves.
+    // Retained until every frontend reads the replacement; retire then.
     agentshim.data.v1.CompactBoundary compact_boundary = 16;
     agentshim.data.v1.CompactBoundaryLine compact_boundary_line = 17;
     agentshim.core.v1.PermissionItem permission = 30;
     SystemFailureItem system_failure = 31;  // Additive (F3)
+    // The two CONTEXT CUTS, carried verbatim from core.v1 rather than
+    // re-modeled here: the daemon has already coalesced and de-duplicated
+    // them, so a second frontend-shaped copy would only be a chance to drift.
+    //
+    // A frontend renders a cut by discarding everything ABOVE it and drawing
+    // the cut itself. It needs no rule for FINDING the cut, because the
+    // daemon floors each replay at the newest one — an arriving cut is
+    // therefore always live, and the string-matching a frontend used to do
+    // on prompt text has no successor here by design.
+    agentshim.core.v1.ContextCleared context_cleared = 32;
+    agentshim.core.v1.ContextCompacted context_compacted = 33;
   }
 }
 
