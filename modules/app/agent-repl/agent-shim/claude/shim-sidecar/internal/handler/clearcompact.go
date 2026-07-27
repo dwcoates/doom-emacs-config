@@ -49,12 +49,24 @@ package handler
 // a session with several compactions, pairs each boundary with the wrong
 // summary. The byte order on disk is the only correct sequence, and it is what
 // this file reads.
+//
+// THE PAIR STRADDLES SCANS. The two lines are written ~1ms apart against a ~1s
+// poll, so sooner or later a scan lands between them and the boundary is the
+// last frame of its batch. That is NOT a summary-less compaction, it is a
+// compaction whose summary has not been written yet, and emitting it bare
+// throws the summary away for good. So a batch-terminal boundary is HELD:
+// left unconverted, with the reader's cursor parked before it (holdCount
+// below), until the file says what follows it. The next line in FILE ORDER
+// settles it — its summary coalesces, anything else emits it bare — and one
+// silent scan (maxHoldDeliveries) ends the wait either way, because a session
+// that genuinely stops at a boundary must still render its truncation.
 
 import (
 	"strings"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
+	"agentrepl/shim-claude-sidecar/internal/tail"
 )
 
 // clearCommand is the exact command name a cleared context is spelled with.
@@ -67,6 +79,63 @@ const clearCommand = "/clear"
 // file can observe. `error` is therefore always empty here — the sidecar never
 // guesses an outcome it cannot see.
 const compactResultSuccess = "success"
+
+// maxHoldDeliveries is the SILENCE BOUND on a held compaction boundary: the
+// number of further deliveries the handler waits for a summary that never
+// arrives before emitting the boundary bare.
+//
+// It is ONE. The two lines are written about a millisecond apart against a
+// poll interval three orders of magnitude longer, so a single further scan is
+// already an enormous margin over the gap being covered; every additional
+// scan of holding only delays the truncation render for the sessions that
+// genuinely stop at the boundary, and buys nothing for the ones that do not.
+const maxHoldDeliveries = 1
+
+// holdCount returns how many of frames may be converted NOW, and records on ctx
+// whatever it deferred (see tail.Context "deferred frames").
+//
+// It defers exactly one frame, the batch's last, and only when that frame is a
+// compaction boundary — the sole record in this transcript whose meaning
+// depends on a line that may not be written yet. Everything else is settled by
+// its own bytes and is converted the moment it is read.
+//
+// A deferral is only ever taken when the READER promises to hand the frame back
+// (ctx.Redelivers). A handler given one standalone batch has no next delivery,
+// so holding there would drop the compaction silently; that caller gets the
+// bare emit, loud log and all.
+func (h *SessionTranscriptHandler) holdCount(memo []*converted, frames []tail.Frame, ctx *Context) int {
+	n := len(frames)
+	// What was deferred LAST delivery. Both fields are rewritten below on every
+	// call, so a stale hold can never outlive the batch that took it.
+	heldOffset, heldFor := ctx.HeldOffset, ctx.HeldDeliveries
+	ctx.HeldOffset, ctx.HeldDeliveries = 0, 0
+	if n == 0 || !ctx.Redelivers {
+		return n
+	}
+	last := frames[n-1]
+	if last.ParseErr != nil {
+		// An unparsable frame is settled: it becomes an UnparsedEvent now, and
+		// no later line can change that.
+		return n
+	}
+	c := h.convertAt(memo, frames, n-1)
+	if c.err != nil || c.line.GetSystem().GetCompactBoundary() == nil {
+		return n
+	}
+	if heldOffset == last.Offset && heldFor >= maxHoldDeliveries {
+		// Held once already and the file still says nothing after it. Stop
+		// waiting: the caller emits it bare, and compactedEvent loud-logs the
+		// missing summary.
+		return n
+	}
+	if heldOffset == last.Offset {
+		ctx.HeldDeliveries = heldFor + 1
+	} else {
+		ctx.HeldDeliveries = 1
+	}
+	ctx.HeldOffset = last.Offset
+	return n - 1
+}
 
 // commandEnvelopeTags are the elements the harness expands a slash command into,
 // in the order it writes them.

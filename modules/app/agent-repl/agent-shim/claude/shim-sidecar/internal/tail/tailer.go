@@ -63,7 +63,9 @@ func (t *Tailer) Restore(c *corev1.CursorState) {
 }
 
 // PollResult is one batch: the events to write plus the cursor advance to commit
-// atomically with them. Changed is false when the file had no new bytes.
+// atomically with them. Changed is false when the batch is nothing to write:
+// the file had no new bytes, or every frame it did have was deferred by the
+// handler and so neither produced an event nor moved the cursor.
 type PollResult struct {
 	Events  []*corev1.Event
 	Next    *corev1.CursorState
@@ -126,14 +128,55 @@ func (t *Tailer) Poll() (PollResult, error) {
 	// Fill the counters the handler reports (totals through this batch).
 	t.ctx.RecordsObserved = records
 	t.ctx.BytesObserved = newOffset
+	// The tailer can re-read any byte it has not committed past, so it can hand
+	// deferred frames back (Context "deferred frames").
+	t.ctx.Redelivers = true
 	events := t.handler.Handle(frames, t.ctx)
+	newOffset, newCarry, records = t.applyHold(frames, offset, newOffset, newCarry, records)
 
 	return PollResult{
 		Events:  events,
 		Next:    &corev1.CursorState{FileId: fileID, Path: t.path, Offset: newOffset, Carry: newCarry},
 		Records: records,
-		Changed: true,
+		// A batch whose every frame was deferred moves neither the cursor nor
+		// the store, so it is not a change to write: the next poll re-reads
+		// those same bytes.
+		Changed: newOffset != t.offset || fileID != t.fileID || len(events) > 0,
 	}, nil
+}
+
+// applyHold rolls the batch's cursor advance back to the offset the handler
+// deferred, so the committed cursor NEVER moves past a frame that was not
+// converted. The deferred bytes are re-read (and re-delivered) on the next
+// poll, and a restart from the committed cursor re-reads them too — which is
+// the whole point: an unsettled record survives a crash mid-hold.
+//
+// The carry is dropped with the rewind: every carried byte precedes the held
+// frame's first byte, so it has already been consumed by a frame in this batch.
+func (t *Tailer) applyHold(frames []Frame, offset, newOffset int64, newCarry []byte, records int64) (int64, []byte, int64) {
+	if t.ctx.HeldDeliveries <= 0 {
+		return newOffset, newCarry, records
+	}
+	held := t.ctx.HeldOffset
+	if held < offset || held >= newOffset {
+		// The handler named an offset outside the batch it was just given.
+		// Honoring it would rewind the cursor over already-converted records or
+		// leave it ahead of the frame it claims to hold, so it is refused
+		// loudly rather than obeyed or silently ignored.
+		t.log("tail: handler held offset %d on %s, outside this batch's [%d,%d); ignoring the hold and advancing the cursor",
+			held, t.path, offset, newOffset)
+		t.ctx.HeldOffset, t.ctx.HeldDeliveries = 0, 0
+		return newOffset, newCarry, records
+	}
+	for _, f := range frames {
+		if f.Obj != nil && f.Offset >= held {
+			records--
+		}
+	}
+	// Re-report the totals as of the rewind, so the next Handle sees the counts
+	// for what has actually been converted.
+	t.ctx.RecordsObserved, t.ctx.BytesObserved = records, held
+	return held, nil, records
 }
 
 // Commit advances the committed cursor to a polled result (call only after the

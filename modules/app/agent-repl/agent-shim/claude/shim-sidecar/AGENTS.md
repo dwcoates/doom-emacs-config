@@ -31,6 +31,12 @@ Ever.
   undocumented extras), never a record to silently drop.
 - The zero-`UnparsedEvent` golden-corpus contract is the executable form of
   this mandate; weakening it violates this document.
+- DEFERRING a record is not skipping it. A record whose meaning depends on the
+  line after it (today: the compaction boundary and its summary) may be left
+  unconverted at the end of a batch — but only with the reader's cursor parked
+  BEFORE it, so the next scan, and a restart, both read it again. A deferral
+  that could lose the record is a violation of this mandate; see
+  `tail.Context` ("deferred frames") and `internal/handler/clearcompact.go`.
 
 ## Ingestion is connection-scoped, never boot-scoped
 

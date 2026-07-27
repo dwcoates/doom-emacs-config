@@ -427,25 +427,36 @@ func TestSessionHandlerCompactBoundaryFollowedByAnOrdinaryLineHasNoSummary(t *te
 	}
 }
 
-func TestSessionHandlerCompactBoundaryAtBatchEndStillEmits(t *testing.T) {
-	// Arrange: nothing follows the boundary in this batch.
+func TestSessionHandlerCompactBoundaryAtBatchEndIsHeldForRedelivery(t *testing.T) {
+	// Arrange: nothing follows the boundary in this batch, and the reader has
+	// promised to hand back whatever the handler defers.
 	h := NewSessionTranscriptHandler(quietLog)
 	frames := framesFor(t, boundaryLineJSON("b1", "2026-07-07T22:01:31.660Z", "manual", 10, 5, 7))
+	ctx := &Context{SessionID: "s1", Redelivers: true}
 	// Act
-	ev := findCompacted(h.Handle(frames, &Context{SessionID: "s1"}))
-	// Assert
-	if ev == nil {
-		t.Fatal("a summary-less boundary emitted no ContextCompacted; the compaction still happened")
+	evs := h.Handle(frames, ctx)
+	// Assert: the summary is the NEXT line in the file and may simply not be
+	// written yet, so the boundary waits instead of emitting without it — and
+	// the hold is recorded so the reader parks its cursor before the line.
+	if findCompacted(evs) != nil {
+		t.Fatal("a batch-terminal boundary emitted immediately; it must be held until the file says what follows it")
+	}
+	if ctx.HeldDeliveries != 1 || ctx.HeldOffset != frames[0].Offset {
+		t.Fatalf("hold = offset %d after %d deliveries, want offset %d after 1",
+			ctx.HeldOffset, ctx.HeldDeliveries, frames[0].Offset)
 	}
 }
 
 func TestSessionHandlerMissingSummaryLoudLogs(t *testing.T) {
-	// Arrange
+	// Arrange: the boundary is redelivered unchanged after being held, so the
+	// silence bound is spent and it emits bare.
 	var logs []string
 	h := NewSessionTranscriptHandler(collectLog(&logs))
 	frames := framesFor(t, boundaryLineJSON("b1", "2026-07-07T22:01:31.660Z", "manual", 10, 5, 7))
+	ctx := &Context{SessionID: "s1", Redelivers: true}
+	h.Handle(frames, ctx)
 	// Act
-	h.Handle(frames, &Context{SessionID: "s1"})
+	h.Handle(frames, ctx)
 	// Assert
 	if !strings.Contains(strings.Join(logs, "\n"), "not followed by a compaction summary") {
 		t.Fatalf("missing loud log for the summary-less boundary; got %v", logs)
