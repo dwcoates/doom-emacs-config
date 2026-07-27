@@ -76,8 +76,10 @@ the same group path; workspaces belonging to no task collect here.")
 (defun agent-repl--sidebar-view-wire ()
   "Return the wire string for the active view, signalling on an unknown one."
   (or (alist-get agent-repl--sidebar-view agent-repl--sidebar-view-wire)
-      (error "agent-repl--sidebar-view-wire: unknown view %S"
-             agent-repl--sidebar-view)))
+      (progn
+        (agent-repl--log nil "sidebar-view-wire: unknown view=%S" agent-repl--sidebar-view)
+        (error "agent-repl--sidebar-view-wire: unknown view %S"
+               agent-repl--sidebar-view))))
 
 ;;;; ---- The host-hook contract ------------------------------------------
 
@@ -153,13 +155,22 @@ Signals on an unmapped keyword: a render state missing from
 extending the sidebar contract — a violated invariant, never a silent
 default dot."
   (if (not (agent-repl--ws-open-p name))
-      "inactive"
+      (progn
+        (agent-repl--log-verbose name "sidebar-wire-status: ws=%s open=nil -> inactive" name)
+        "inactive")
     (let ((kw (agent-repl--ws-render-status name)))
       (cond
-       ((null kw) "none")
-       (t (or (alist-get kw agent-repl--sidebar-status-wire)
-              (error "agent-repl--sidebar-wire-status: unmapped render state %S for ws=%s"
-                     kw name)))))))
+       ((null kw)
+        (agent-repl--log-verbose name "sidebar-wire-status: ws=%s open=t status=nil -> none" name)
+        "none")
+       (t (if-let ((wire (alist-get kw agent-repl--sidebar-status-wire)))
+              (progn
+                (agent-repl--log-verbose name "sidebar-wire-status: ws=%s open=t status=%s -> %s"
+                                          name kw wire)
+                wire)
+            (agent-repl--log name "sidebar-wire-status: ws=%s unmapped render-status=%S" name kw)
+            (error "agent-repl--sidebar-wire-status: unmapped render state %S for ws=%s"
+                   kw name)))))))
 
 (defun agent-repl--sidebar-closed-p (name)
   "Return non-nil when live workspace NAME renders greyed (closed).
@@ -170,8 +181,13 @@ but the REPL is torn down (`:repl-state' `:inactive', or `:hidden'
 awaiting the hide-mode sweep).  A nil `:repl-state' on an OPEN
 workspace is NOT closed: that is a session that never started, which
 the \"none\" status dot already conveys."
-  (or (not (agent-repl--ws-open-p name))
-      (and (memq (agent-repl--ws-get name :repl-state) '(:inactive :hidden)) t)))
+  (let ((open (agent-repl--ws-open-p name))
+        (repl-state (agent-repl--ws-get name :repl-state)))
+    (let ((closed (or (not open)
+                      (and (memq repl-state '(:inactive :hidden)) t))))
+      (agent-repl--log-verbose name "sidebar-closed-p: ws=%s open=%s repl-state=%s -> closed=%s"
+                                name open repl-state closed)
+      closed)))
 
 ;;;; ---- The recently-merged window ---------------------------------------
 
@@ -217,7 +233,10 @@ exactly like an equally long idle stretch does.")
         (insert-file-contents file)
         (let ((data (read (current-buffer))))
           (setq agent-repl--sidebar-last-activity (plist-get data :last-activity)
-                agent-repl--sidebar-merged-epoch (plist-get data :epoch)))))))
+                agent-repl--sidebar-merged-epoch (plist-get data :epoch))
+          (agent-repl--log-verbose nil "sidebar-merged-window: loaded state last-activity=%s epoch=%s"
+                                    agent-repl--sidebar-last-activity
+                                    agent-repl--sidebar-merged-epoch))))))
 
 (defun agent-repl--sidebar-save-merged-window ()
   "Write the merged-window state to disk."
@@ -244,6 +263,7 @@ The write is throttled: this runs at 1Hz and the state changes at human
 timescales, so it hits disk only when the epoch actually moved or a
 minute has passed."
   (unless agent-repl--sidebar-last-activity
+    (agent-repl--log-verbose nil "sidebar-merged-window: no in-memory activity stamp; loading persisted state")
     (agent-repl--sidebar-load-merged-window))
   (let* ((now (float-time))
          (idle (if (current-idle-time) (float-time (current-idle-time)) 0))
@@ -258,7 +278,10 @@ minute has passed."
     (setq agent-repl--sidebar-last-activity (max last activity))
     (when (or wiped (> (- now agent-repl--sidebar-merged-persisted-at) 60))
       (setq agent-repl--sidebar-merged-persisted-at now)
-      (agent-repl--sidebar-save-merged-window))
+      (agent-repl--sidebar-save-merged-window)
+      (agent-repl--log-verbose nil "sidebar-merged-window: persisted wiped=%s last-activity=%.0f epoch=%s"
+                                wiped agent-repl--sidebar-last-activity
+                                agent-repl--sidebar-merged-epoch))
     agent-repl--sidebar-merged-epoch))
 
 (defun agent-repl--sidebar-merged-p (name)
@@ -297,6 +320,8 @@ is an organizing claim about live work, and a merged workspace has left
 that tree."
   (let ((recent (agent-repl--sidebar-merged-sorted entries)))
     (when recent
+      (agent-repl--log-verbose nil "sidebar-merged-group: entries=%d recent=%d current=%s"
+                                (length entries) (length recent) current-name)
       (list :key agent-repl--sidebar-merged-key
             :label "Recently Merged"
             :folded (if (agent-repl--repo-folded-p agent-repl--sidebar-merged-key)
@@ -428,11 +453,17 @@ loudly instead."
              (src (agent-repl--ws-get name :source-ws-dir))
              (parent-dir (and src (agent-repl--path-canonical src))))
         (when (equal parent-dir dir)
+          (agent-repl--log name "sidebar-build-sections: ws=%s self-parent dir=%s" name dir)
           (error "agent-repl--sidebar-build-sections: ws=%s is its own parent (dir=%s)"
                  name dir))
         (if (and parent-dir (gethash parent-dir by-dir))
-            (push n (gethash parent-dir children))
+            (progn
+              (agent-repl--log-verbose name "sidebar-build-sections: ws=%s parent-dir=%s -> child"
+                                        name parent-dir)
+              (push n (gethash parent-dir children)))
           (let ((key (funcall key-fn name)))
+            (agent-repl--log-verbose name "sidebar-build-sections: ws=%s parent-dir=%s key=%s -> root"
+                                      name parent-dir key)
             (unless (gethash key roots-by-key)
               (push key keys))
             (push n (gethash key roots-by-key))))))
@@ -471,8 +502,12 @@ loudly instead."
                                         (gethash key roots-by-key)))))))
               (funcall key-sort keys)))))
       (unless (= emitted (length nodes))
+        (agent-repl--log nil "sidebar-build-sections: emitted=%d nodes=%d; family cycle detected"
+                          emitted (length nodes))
         (error "agent-repl--sidebar-build-sections: emitted %d of %d rows — :source-ws-dir cycle orphaned a family"
                emitted (length nodes)))
+      (agent-repl--log-verbose nil "sidebar-build-sections: nodes=%d sections=%d emitted=%d flat=%d"
+                                (length nodes) (length sections) emitted (length flat))
       (cons sections (nreverse flat)))))
 
 (defun agent-repl--sidebar-repo-key-sort (keys)
@@ -498,7 +533,10 @@ to the bare id only when the task somehow no longer exists."
   (if (equal key agent-repl--sidebar-no-task-key)
       "No task"
     (let ((task (agent-repl--task-get key)))
-      (if task (plist-get task :title) key))))
+      (if task
+          (plist-get task :title)
+        (agent-repl--log nil "sidebar-task-label: missing task id=%s" key)
+        key))))
 
 (defun agent-repl--sidebar-task-done (key)
   "Return the JSON boolean done state for task-section KEY.
@@ -506,7 +544,11 @@ to the bare id only when the task somehow no longer exists."
   (if (equal key agent-repl--sidebar-no-task-key)
       :false
     (let ((task (agent-repl--task-get key)))
-      (if (and task (plist-get task :done)) t :false))))
+      (if (and task (plist-get task :done))
+          t
+        (when (null task)
+          (agent-repl--log nil "sidebar-task-done: missing task id=%s" key))
+        :false))))
 
 (defun agent-repl--sidebar-task-key-sort (keys)
   "Sort task-section KEYS by task creation order, the catch-all last."
@@ -574,7 +616,11 @@ invariant compares two exact counts.  They render instead in the
                            (mapcar (lambda (e)
                                      (agent-repl--path-canonical (cdr e)))
                                    (agent-repl--sidebar-merged-sorted
-                                    merged-entries)))))
+                                   merged-entries)))))
+    (agent-repl--log-verbose nil "sidebar-build: view=%s entries=%d grouped=%d merged=%d sections=%d recent=%s flat=%d"
+                              agent-repl--sidebar-view (length all-entries) (length entries)
+                              (length merged-entries) (length sections) (and recent t)
+                              (length flat))
     (cons (list :view (agent-repl--sidebar-view-wire)
                 :repos (if task-view [] sections)
                 :tasks (if task-view sections [])
@@ -612,6 +658,8 @@ survives interpolation intact."
     (dolist (name (agent-repl--live-ws-names) (nreverse bufs))
       (let ((buf (agent-repl--ws-get name :frontend-buffer)))
         (when (buffer-live-p buf)
+          (agent-repl--log-verbose name "sidebar-live-webview-buffers: ws=%s buffer=%s live=t"
+                                    name (buffer-name buf))
           (push buf bufs))))))
 
 (defun agent-repl--sidebar-push ()
@@ -697,6 +745,7 @@ visible to this very tick's compare rather than the next one."
     (if (equal sig agent-repl--sidebar-last-signature)
         (agent-repl--log-verbose nil "sidebar-tick: signature unchanged, skip")
       (setq agent-repl--sidebar-last-signature sig)
+      (agent-repl--log-verbose nil "sidebar-tick: signature changed, pushing roster")
       (agent-repl--sidebar-push))))
 
 ;;;; ---- The dot and the tab take the same value at the same moment --------
@@ -731,7 +780,10 @@ next 1Hz tick sees the state it already delivered and stays quiet."
     (agent-repl--log ws "sidebar-react-to-pushed-state: ws=%s %s -> %s — repainting the rail with the tab bar"
                      ws previous new)
     (setq agent-repl--sidebar-last-signature (agent-repl--sidebar-signature))
-    (agent-repl--sidebar-push)))
+    (agent-repl--sidebar-push))
+  (when (eq new previous)
+    (agent-repl--log-verbose ws "sidebar-react-to-pushed-state: ws=%s state=%s unchanged, skip"
+                              ws new)))
 
 ;; Registered here though the hook variable is defined in frontend-state.el:
 ;; `add-hook' auto-vivifies the unbound variable and that file's `defvar ...
@@ -748,6 +800,7 @@ The build's flat list is the navigation order; an empty cache before
 any push simply means no tick has run yet, so build once rather than
 navigate a stale nothing."
   (unless agent-repl--sidebar-flat-dirs
+    (agent-repl--log-verbose nil "sidebar-visible-dirs: cache empty; rebuilding roster")
     (setq agent-repl--sidebar-flat-dirs (cdr (agent-repl--sidebar-build))))
   agent-repl--sidebar-flat-dirs)
 
@@ -762,6 +815,7 @@ the fresh roster, so the moved highlight rides that same push and no
 separate highlight push is needed."
   (let ((dirs (agent-repl--sidebar-visible-dirs)))
     (unless dirs
+      (agent-repl--log nil "sidebar-nav-move: delta=%d no visible rows" delta)
       (user-error "agent-repl sidebar: no workspaces to navigate"))
     (let* ((cur (and agent-repl--sidebar-nav-dir
                      (cl-position agent-repl--sidebar-nav-dir dirs :test #'equal)))
@@ -792,6 +846,7 @@ webapp-owned client state, so this reaches the page through
   (interactive)
   (let ((dir agent-repl--sidebar-nav-dir))
     (unless dir
+      (agent-repl--log nil "sidebar-nav-show-info: no cursor row selected")
       (user-error "agent-repl sidebar: no row selected — C-S-n / C-S-p first"))
     (agent-repl--sidebar-expand-push dir)))
 
@@ -835,6 +890,7 @@ target needs no arming: `agent-repl--ensure-own-panels-on-persp-switch'
 restores its panels on switch."
   (let ((entry (agent-repl--sidebar-entry-for-dir dir)))
     (unless entry
+      (agent-repl--log nil "sidebar-open: no live workspace for dir=%s" dir)
       (error "agent-repl sidebar: no live workspace for dir %s" dir))
     (let* ((name (car entry))
            (closed (agent-repl--sidebar-closed-p name)))
@@ -865,6 +921,7 @@ daemon's POST /workspace-command validated presence, but this handler
 re-validates — the file channel is also writable by other emitters)."
   (let ((dir (alist-get 'dir cmd)))
     (unless (and (stringp dir) (not (string-empty-p dir)))
+      (agent-repl--log nil "host-action switch-workspace: rejected missing-or-empty dir")
       (error "agent-repl switch command: missing dir in %S" cmd))
     (agent-repl--log nil "host-action switch-workspace: dir=%s" dir)
     (agent-repl--sidebar-open-dir dir)))
@@ -886,13 +943,18 @@ same fold set, so forcing the tab-bar redraw is the whole sync."
   (let ((key (alist-get 'repo_key cmd))
         (folded-cell (assq 'folded cmd)))
     (unless (and (stringp key) (not (string-empty-p key)))
+      (agent-repl--log nil "host-action set-repository-fold: rejected missing-or-empty key")
       (error "agent-repl fold command: missing repo_key in %S" cmd))
     (unless folded-cell
+      (agent-repl--log nil "host-action set-repository-fold: rejected missing folded key=%s" key)
       (error "agent-repl fold command: missing folded in %S" cmd))
     (unless (agent-repl--sidebar-repo-key-known-p key)
+      (agent-repl--log nil "host-action set-repository-fold: rejected unknown key=%s" key)
       (error "agent-repl fold command: unknown repo key %s" key))
     (let ((desired (eq (cdr folded-cell) t)))
-      (unless (eq desired (agent-repl--repo-folded-p key))
+      (if (eq desired (agent-repl--repo-folded-p key))
+          (agent-repl--log-verbose nil "host-action set-repository-fold: key=%s already folded=%s"
+                                    key desired)
         (agent-repl--toggle-repo-fold key))
       (agent-repl--log nil "host-action set-repository-fold: key=%s folded=%s" key desired)
       (agent-repl--force-tab-bar-redraw)
@@ -905,6 +967,7 @@ same fold set, so forcing the tab-bar redraw is the whole sync."
 Signals on an unknown VIEW rather than defaulting — the caller is the
 webapp's view selector, whose value set is the same contract."
   (unless (memq view '(:repository :task))
+    (agent-repl--log nil "sidebar-set-view: rejected unknown view=%S" view)
     (error "agent-repl--sidebar-set-view: unknown view %S" view))
   (setq agent-repl--sidebar-view view)
   (agent-repl--log nil "sidebar-set-view: view=%s" view)
@@ -916,6 +979,7 @@ CMD carries `view', one of the wire strings in
 `agent-repl--sidebar-view-wire'."
   (let ((view (alist-get 'view cmd)))
     (unless (member view '("repository" "task"))
+      (agent-repl--log nil "host-action set-sidebar-view: rejected view=%S" view)
       (error "agent-repl set-view command: bad view in %S" cmd))
     (agent-repl--log nil "host-action set-sidebar-view: view=%s" view)
     (agent-repl--sidebar-set-view (if (equal view "task") :task :repository))))
@@ -929,6 +993,7 @@ empty title is a cancelled prompt and creates nothing."
     (if (string-empty-p (string-trim title))
         (agent-repl--log nil "host-action task-create: empty title, skipping")
       (agent-repl--task-create title)
+      (agent-repl--log nil "host-action task-create: created task from non-empty title")
       (agent-repl--sidebar-push))))
 
 (defun agent-repl--handle-task-toggle-done-command (cmd)
@@ -936,6 +1001,7 @@ empty title is a cancelled prompt and creates nothing."
 CMD carries the task `id'."
   (let ((id (alist-get 'id cmd)))
     (unless (and (stringp id) (not (string-empty-p id)))
+      (agent-repl--log nil "host-action task-toggle-done: rejected missing-or-empty id")
       (error "agent-repl task-toggle-done command: missing id in %S" cmd))
     (agent-repl--log nil "host-action task-toggle-done: id=%s" id)
     (agent-repl--task-toggle-done id)
@@ -946,6 +1012,7 @@ CMD carries the task `id'."
 Opens the task's org notes file in a popup (`agent-repl--task-open')."
   (let ((id (alist-get 'id cmd)))
     (unless (and (stringp id) (not (string-empty-p id)))
+      (agent-repl--log nil "host-action task-open: rejected missing-or-empty id")
       (error "agent-repl task-open command: missing id in %S" cmd))
     (agent-repl--log nil "host-action task-open: id=%s" id)
     (agent-repl--task-open id)))
@@ -959,6 +1026,7 @@ its parent is omitted — it needs no assignment.  A brand-new workspace
 for a task is made the ordinary way (or cut as a child of one already in
 the task, which inherits it), then added here."
   (unless (agent-repl--task-get id)
+    (agent-repl--log nil "task-add-workspace: rejected unknown task id=%s" id)
     (error "agent-repl--task-add-workspace-interactive: unknown task %s" id))
   (let* ((candidates
           (cl-remove-if
@@ -966,17 +1034,23 @@ the task, which inherits it), then added here."
            (agent-repl--sidebar-entries)))
          (names (mapcar #'car candidates)))
     (if (null names)
-        (message "agent-repl: no workspaces available to add to this task")
+        (progn
+          (agent-repl--log nil "task-add-workspace: task=%s no eligible workspaces" id)
+          (message "agent-repl: no workspaces available to add to this task"))
       (let ((name (completing-read "Add workspace to task: " names nil t)))
         (when (and name (not (string-empty-p name)))
+          (agent-repl--log name "task-add-workspace: task=%s assigning ws=%s" id name)
           (agent-repl--task-assign-workspace name id)
-          (agent-repl--sidebar-push))))))
+          (agent-repl--sidebar-push))
+        (when (or (null name) (string-empty-p name))
+          (agent-repl--log nil "task-add-workspace: task=%s chooser cancelled" id))))))
 
 (defun agent-repl--handle-task-add-workspace-command (cmd)
   "Handle a \"task-add-workspace\" command CMD (a task section + button).
 CMD carries the task `id'; the workspace is chosen in the minibuffer."
   (let ((id (alist-get 'id cmd)))
     (unless (and (stringp id) (not (string-empty-p id)))
+      (agent-repl--log nil "host-action task-add-workspace: rejected missing-or-empty id")
       (error "agent-repl task-add-workspace command: missing id in %S" cmd))
     (agent-repl--log nil "host-action task-add-workspace: id=%s" id)
     (agent-repl--task-add-workspace-interactive id)))
