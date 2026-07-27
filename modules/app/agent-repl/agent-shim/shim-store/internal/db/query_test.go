@@ -118,6 +118,72 @@ func TestCursorUpsertOverwrites(t *testing.T) {
 	}
 }
 
+func TestOpenTaskStartsReturnsOnlyPersistedStartsWithoutAnyEnd(t *testing.T) {
+	d := openTemp(t)
+	events := []*corev1.Event{
+		taskStarted("s1", "live", 100),
+		taskStarted("s1", "closed", 110),
+		terminalTaskEnded("s1", "closed", corev1.TerminalStatus_TERMINAL_STATUS_DONE, ""),
+		terminalTaskEnded("s1", "orphan", corev1.TerminalStatus_TERMINAL_STATUS_LOST, "task-lost:orphan"),
+		taskStarted("s1", "live", 120), // duplicate start; recovery returns one.
+		taskProgress("s1", "live", 125),
+		taskStarted("s2", "other", 130),
+	}
+	if _, err := d.Ingest("p", events, nil); err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+
+	got, err := d.OpenTasks()
+	if err != nil {
+		t.Fatalf("OpenTasks: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("open task starts = %d, want 2: %+v", len(got), got)
+	}
+	first := got[0].GetStarted()
+	if first.GetSessionId() != "s1" || first.GetTaskStarted().GetTaskId() != "live" || first.GetProducedAtMs() != 100 {
+		t.Fatalf("first recovered open task = %+v, want earliest s1/live start", got[0])
+	}
+	if got[0].GetLastActivityAtMs() != 125 {
+		t.Fatalf("live last_activity_at_ms = %d, want task progress at 125", got[0].GetLastActivityAtMs())
+	}
+	second := got[1].GetStarted()
+	if second.GetSessionId() != "s2" || second.GetTaskStarted().GetTaskId() != "other" {
+		t.Fatalf("second recovered open task = %+v, want s2/other", got[1])
+	}
+}
+
+func taskStarted(session, taskID string, at int64) *corev1.Event {
+	return &corev1.Event{
+		SessionId: session, Plane: corev1.Plane_PLANE_FILE,
+		Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, ProducedAtMs: at,
+		Payload: &corev1.Event_TaskStarted{TaskStarted: &corev1.TaskStarted{
+			TaskId: taskID, Kind: corev1.TaskKind_TASK_KIND_SHELL, OutputPath: "/tmp/" + taskID,
+		}},
+	}
+}
+
+func taskProgress(session, taskID string, at int64) *corev1.Event {
+	return &corev1.Event{
+		SessionId: session, Plane: corev1.Plane_PLANE_FILE,
+		Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, ProducedAtMs: at,
+		Payload: &corev1.Event_TaskProgress{TaskProgress: &corev1.TaskProgress{
+			TaskId: taskID, Kind: corev1.TaskKind_TASK_KIND_SHELL,
+		}},
+	}
+}
+
+func terminalTaskEnded(session, taskID string, status corev1.TerminalStatus, dedupKey string) *corev1.Event {
+	return &corev1.Event{
+		SessionId: session, Plane: corev1.Plane_PLANE_SYNTHETIC,
+		Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, ProducedAtMs: 200,
+		DedupKey: dedupKey,
+		Payload: &corev1.Event_TaskEnded{TaskEnded: &corev1.TaskEnded{
+			TaskId: taskID, Kind: corev1.TaskKind_TASK_KIND_SHELL, Status: status,
+		}},
+	}
+}
+
 func seqs(evs []*corev1.Event) []uint64 {
 	out := make([]uint64, len(evs))
 	for i, e := range evs {
