@@ -225,7 +225,7 @@ func (s *sidecar) pollAll() {
 			if os.IsNotExist(err) {
 				// Vanished file: start the grace clock; stop watching it.
 				if w.target.TaskID != "" {
-					s.tracker.MarkVanished(w.target.TaskID, now)
+					s.tracker.MarkVanished(w.target.SessionID, w.target.TaskID, now)
 				}
 				delete(s.watchers, path)
 				s.log("tail: %s vanished; grace clock started", path)
@@ -253,7 +253,7 @@ func (s *sidecar) pollAll() {
 		storeWriteMs := time.Since(writeStart).Milliseconds()
 		w.tailer.Commit(res)
 		if w.target.TaskID != "" {
-			s.tracker.Activity(w.target.TaskID, now)
+			s.tracker.Activity(w.target.SessionID, w.target.TaskID, now)
 		}
 		s.applyLifecycle(res.Events, now)
 		// The happy path is the one that carries the user's prompt echo to the
@@ -277,7 +277,7 @@ func (s *sidecar) applyLifecycle(events []*corev1.Event, nowMs int64) {
 			s.tracker.Open(ts.GetTaskId(), taskKindToTail(ts.GetKind()), e.GetSessionId(), ts.GetOutputPath(), nowMs, nowMs)
 		}
 		if te := e.GetTaskEnded(); te != nil && te.GetStatus() != corev1.TerminalStatus_TERMINAL_STATUS_LOST {
-			s.tracker.Close(te.GetTaskId())
+			s.tracker.Close(e.GetSessionId(), te.GetTaskId())
 		}
 	}
 }
