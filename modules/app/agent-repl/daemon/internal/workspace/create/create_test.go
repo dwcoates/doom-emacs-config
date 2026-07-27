@@ -539,3 +539,16 @@ func TestParseCommandsAuditsEveryKnownCommandType(t *testing.T) {
 		t.Fatal("unknown command was accepted")
 	}
 }
+
+func TestParseCommandsMapsStructuredSourceWorkspace(t *testing.T) {
+	commands, err := parseCommands([]byte(`[{"type":"create","name":"DWC/a","git_root":"/repo","source_ws":{"name":"parent","path":"/parent"}}]`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := commands[0].Create; got.SourceWorkspace != "parent" || got.SourceDir != "/parent" {
+		t.Fatalf("source workspace = %#v", got)
+	}
+	if _, err := parseCommands([]byte(`[{"type":"create","name":"DWC/a","git_root":"/repo","source_ws":{"name":"parent"}}]`)); err == nil {
+		t.Fatal("incomplete source_ws was accepted")
+	}
+}
