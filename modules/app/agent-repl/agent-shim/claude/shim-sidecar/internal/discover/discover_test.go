@@ -90,17 +90,38 @@ func TestClassifySpoolKinds(t *testing.T) {
 			p := filepath.Join(spool, "claude-501", "the-slug", "SESS", "tasks", tc.file)
 			// Act
 			got, ok := d.Classify(p)
-			// Assert: kind by a/b/w prefix; session from the PATH; spool dir set.
+			// Assert: kind by a/b/w prefix, spool dir set, task id off the
+			// filename. The session-shaped path segment is NOT read.
 			if !ok || got.Kind != tc.want || got.Raw != tc.raw {
 				t.Fatalf("%s: got %+v ok=%v", tc.name, got, ok)
-			}
-			if got.SessionID != "SESS" {
-				t.Fatalf("%s: session = %q, want SESS", tc.name, got.SessionID)
 			}
 			if got.SpoolDir != filepath.Dir(p) {
 				t.Fatalf("%s: spool dir = %q", tc.name, got.SpoolDir)
 			}
 		})
+	}
+}
+
+// A spool path embeds a session-SHAPED segment that is the harness's runtime
+// id, not the transcript's. Reading it filed one task under two session ids and
+// took the whole file plane down, so classification must leave a spool
+// unattributed and let the sidecar resolve its owner by task id.
+func TestClassifySpoolCarriesNoSessionID(t *testing.T) {
+	// Arrange
+	spool := t.TempDir()
+	d := New(nil, spool, nil)
+	p := filepath.Join(spool, "claude-501", "the-slug", "a4f52dc5-runtime-id", "tasks", "b1pi0nmip.output")
+	// Act
+	got, ok := d.Classify(p)
+	// Assert
+	if !ok {
+		t.Fatalf("classify did not recognize the spool path %s", p)
+	}
+	if got.SessionID != "" {
+		t.Fatalf("session = %q, want empty — the path segment must not be read as an identity", got.SessionID)
+	}
+	if got.TaskID != "b1pi0nmip" {
+		t.Fatalf("task id = %q, want b1pi0nmip", got.TaskID)
 	}
 }
 
