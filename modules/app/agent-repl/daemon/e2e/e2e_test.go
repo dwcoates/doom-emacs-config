@@ -5,11 +5,19 @@
 // merged stream and rendering agentshim.frontend.v1 frames onto the existing
 // GET /sessions/{id}/stream WebSocket (scope-filtered per session).
 //
+// The shim bundle is built FROM SOURCE into the harness temp dir on every run
+// (buildShim), so the suite can never exercise a stale checked-out dist/.
+//
 // Prerequisites (the test SKIPS loudly, never fails, when any is absent):
 //   - node on PATH
-//   - the shim bundle built: agent-shim/claude/shim/dist/main.js
-//     (run `npm run build` in agent-shim/claude/shim/)
+//   - the shim's deps installed: agent-shim/claude/shim/node_modules
+//     (run `npm ci` there — the harness NEVER installs anything itself)
 //   - a buildable agent-shim/shim-store (go build)
+//
+// The harness sets AGENT_REPL_FORBID_VENDOR_CALLS for the whole test binary
+// (see TestMain), and shim.Spawn inherits the daemon process environment, so
+// the node shim it spawns inherits it too: neither side can reach the real
+// Claude SDK or CLI from here.
 package e2e
 
 import (
@@ -54,13 +62,55 @@ func repoRoot(t *testing.T) string {
 	return root
 }
 
-func shimScriptPath(t *testing.T) string {
+// buildShim bundles the TS shim FROM SOURCE into this test's temp dir, the way
+// buildShimStore compiles the store. It deliberately does NOT run the
+// checked-out dist/main.js: dist/ is gitignored and rebuilt by hand, so running
+// it meant the e2e suite could silently be exercising a bundle older than the
+// source it is supposed to cover. esbuild takes milliseconds, so building per
+// run costs nothing and removes the staleness question entirely.
+//
+// It NEVER installs anything: a missing node_modules is a loud skip telling the
+// operator to run `npm ci`, not an implicit network fetch from a test.
+func buildShim(t *testing.T, node string) string {
 	t.Helper()
-	path := filepath.Join(repoRoot(t), "agent-shim", "claude", "shim", "dist", "main.js")
-	if _, err := os.Stat(path); err != nil {
-		t.Skipf("shim not built (%s missing): run `npm run build` in agent-shim/claude/shim/", path)
+	shimDir := filepath.Join(repoRoot(t), "agent-shim", "claude", "shim")
+	if _, err := os.Stat(filepath.Join(shimDir, "node_modules")); err != nil {
+		t.Skipf("shim deps not installed (%s/node_modules missing): run `npm ci` in %s",
+			shimDir, shimDir)
 	}
-	return path
+	// Build into <tmp>/dist/main.js and copy package.json to <tmp>: the bundle
+	// reads its own version via a require of "../package.json" relative to
+	// itself, and reporting "unknown" would be a needless divergence from the
+	// production layout.
+	// EvalSymlinks: t.TempDir() hands back /var/folders/... on macOS, which is a
+	// symlink to /private/var/folders/.... Node resolves a module's own URL to
+	// the real path, so spawning the bundle by the unresolved path used to make
+	// its is-this-the-program self-check compare unequal and exit 0 in silence.
+	// The bundle now resolves argv[1] itself; this keeps the harness's path
+	// canonical anyway, so a failure here is never about symlinks.
+	tmp, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("resolve shim build dir: %v", err)
+	}
+	outDir := filepath.Join(tmp, "dist")
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		t.Fatalf("make shim build dir: %v", err)
+	}
+	pkg, err := os.ReadFile(filepath.Join(shimDir, "package.json"))
+	if err != nil {
+		t.Fatalf("read shim package.json: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(outDir, "..", "package.json"), pkg, 0o644); err != nil {
+		t.Fatalf("stage shim package.json: %v", err)
+	}
+	out := filepath.Join(outDir, "main.js")
+	cmd := exec.Command(node, "build.mjs")
+	cmd.Dir = shimDir
+	cmd.Env = append(os.Environ(), "SHIM_BUILD_OUTFILE="+out)
+	if combined, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("build shim bundle: %v\n%s", err, combined)
+	}
+	return out
 }
 
 func nodePath(t *testing.T) string {
@@ -198,7 +248,7 @@ type e2eHarness struct {
 func newUDSHarness(t *testing.T) *e2eHarness {
 	t.Helper()
 	node := nodePath(t)
-	script := shimScriptPath(t)
+	script := buildShim(t, node)
 	storeBin := buildShimStore(t)
 	// The store socket cannot live under t.TempDir(): the test-name-derived
 	// path exceeds the 104-byte sun_path limit, so bind(2) fails on macOS.

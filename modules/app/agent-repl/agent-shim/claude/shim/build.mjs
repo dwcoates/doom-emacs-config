@@ -22,9 +22,15 @@ import path from "node:path";
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
 
+// SHIM_BUILD_OUTFILE redirects the bundle somewhere other than dist/main.js.
+// The daemon e2e harness sets it to build a FRESH bundle into its own temp dir
+// on every run, so the suite can never be exercising a stale (or absent —
+// dist/ is gitignored) checked-out bundle. Unset, the output is unchanged.
+const outfile = process.env.SHIM_BUILD_OUTFILE || path.join(dir, "dist/main.js");
+
 await build({
   entryPoints: [path.join(dir, "src/main.ts")],
-  outfile: path.join(dir, "dist/main.js"),
+  outfile,
   bundle: true,
   platform: "node",
   format: "esm",
