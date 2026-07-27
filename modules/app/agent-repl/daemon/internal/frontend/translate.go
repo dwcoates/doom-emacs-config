@@ -25,9 +25,17 @@
 //	AssistantMessage / AssistantLine   assistant_message (ApiAssistantMessage)
 //	UserMessage / UserLine             user_message      (ApiUserMessage)
 //	ResultMessage                      result            (ResultMessage)
-//	CompactBoundary (stream)           compact_boundary  (CompactBoundary)
-//	SystemLine.CompactBoundary (disk)  compact_boundary_line (CompactBoundaryLine)
 //	SystemLine.ApiError (disk), terminal only  system_failure (SystemFailureItem)
+//
+// CONTEXT CUTS ARE NOT PASSTHROUGH. A clear and a compaction each reach this
+// daemon as several partial records — for a compaction, a start status, a
+// boundary carrying token counts, and a summary line the vendor types as an
+// ordinary user message — arriving on both planes and, in the transcript,
+// timestamped out of order relative to each other. They therefore curate to
+// core.v1 ContextCleared / ContextCompacted, which the daemon COALESCES from
+// those records, rather than passing any single record through. The retired
+// compact_boundary / compact_boundary_line arms were the passthrough shape,
+// and they made every frontend correlate the halves for itself.
 //
 // A mid-backoff SystemLine.ApiError curates to NOTHING: the retrying window
 // (internal/progress) is what covers it, and the legacy api_error passthrough
@@ -294,8 +302,6 @@ func conversationItemsFromVendor(a *anypb.Any, producedAtMs int64, requestID str
 			return userItems(inner.User, producedAtMs, requestID), nil
 		case *datav1.ClaudeStreamMessage_Result:
 			return resultItems(inner.Result, producedAtMs, requestID), nil
-		case *datav1.ClaudeStreamMessage_CompactBoundary:
-			return compactBoundaryItems(inner.CompactBoundary, producedAtMs, requestID), nil
 		default:
 			return nil, nil // known envelope, non-conversational arm
 		}
@@ -305,8 +311,6 @@ func conversationItemsFromVendor(a *anypb.Any, producedAtMs int64, requestID str
 		return userItems(m, producedAtMs, requestID), nil
 	case *datav1.ResultMessage:
 		return resultItems(m, producedAtMs, requestID), nil
-	case *datav1.CompactBoundary:
-		return compactBoundaryItems(m, producedAtMs, requestID), nil
 	case *datav1.TranscriptLine:
 		return transcriptLineItems(m, producedAtMs, requestID), nil
 	default:
@@ -341,14 +345,6 @@ func transcriptLineItems(tl *datav1.TranscriptLine, producedAtMs int64, requestI
 func systemLineItems(sl *datav1.SystemLine, tsMs int64, requestID string) []*frontendv1.ConversationItem {
 	uuid := sl.GetEnvelope().GetUuid()
 	switch sub := sl.GetSubtype().(type) {
-	case *datav1.SystemLine_CompactBoundary:
-		if sub.CompactBoundary == nil {
-			return nil
-		}
-		return []*frontendv1.ConversationItem{{
-			Uuid: uuid, TsMs: tsMs, RequestId: requestID,
-			Item: &frontendv1.ConversationItem_CompactBoundaryLine{CompactBoundaryLine: sub.CompactBoundary},
-		}}
 	case *datav1.SystemLine_ApiError:
 		if sub.ApiError == nil {
 			return nil
@@ -467,18 +463,6 @@ func resultItems(r *datav1.ResultMessage, tsMs int64, requestID string) []*front
 	return []*frontendv1.ConversationItem{{
 		TsMs: tsMs, RequestId: requestID,
 		Item: &frontendv1.ConversationItem_Result{Result: r},
-	}}
-}
-
-// compactBoundaryItems passes a STREAM CompactBoundary through into the
-// compact_boundary arm (the on-disk twin uses the compact_boundary_line arm).
-func compactBoundaryItems(cb *datav1.CompactBoundary, tsMs int64, requestID string) []*frontendv1.ConversationItem {
-	if cb == nil {
-		return nil
-	}
-	return []*frontendv1.ConversationItem{{
-		TsMs: tsMs, RequestId: requestID,
-		Item: &frontendv1.ConversationItem_CompactBoundary{CompactBoundary: cb},
 	}}
 }
 

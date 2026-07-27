@@ -379,55 +379,56 @@ func (PermissionDecision) EnumDescriptor() ([]byte, []int) {
 	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{5}
 }
 
-// How a context cut came about. Vendor-neutral because every vendor that
-// offers compaction distinguishes the user asking for one from the system
-// deciding it needs one.
-type ContextCutTrigger int32
+// Why a compaction happened. Unlike a clear, a compaction can be the system
+// deciding it needs one, so the distinction is real and worth carrying — even
+// though nothing downstream is expected to BRANCH on it. A compaction is a
+// compaction, and consumers treat the two identically by default.
+type ContextCompactTrigger int32
 
 const (
-	ContextCutTrigger_CONTEXT_CUT_TRIGGER_UNSPECIFIED ContextCutTrigger = 0
-	ContextCutTrigger_CONTEXT_CUT_TRIGGER_MANUAL      ContextCutTrigger = 1
-	ContextCutTrigger_CONTEXT_CUT_TRIGGER_AUTO        ContextCutTrigger = 2
+	ContextCompactTrigger_CONTEXT_COMPACT_TRIGGER_UNSPECIFIED ContextCompactTrigger = 0
+	ContextCompactTrigger_CONTEXT_COMPACT_TRIGGER_MANUAL      ContextCompactTrigger = 1
+	ContextCompactTrigger_CONTEXT_COMPACT_TRIGGER_AUTO        ContextCompactTrigger = 2
 )
 
-// Enum value maps for ContextCutTrigger.
+// Enum value maps for ContextCompactTrigger.
 var (
-	ContextCutTrigger_name = map[int32]string{
-		0: "CONTEXT_CUT_TRIGGER_UNSPECIFIED",
-		1: "CONTEXT_CUT_TRIGGER_MANUAL",
-		2: "CONTEXT_CUT_TRIGGER_AUTO",
+	ContextCompactTrigger_name = map[int32]string{
+		0: "CONTEXT_COMPACT_TRIGGER_UNSPECIFIED",
+		1: "CONTEXT_COMPACT_TRIGGER_MANUAL",
+		2: "CONTEXT_COMPACT_TRIGGER_AUTO",
 	}
-	ContextCutTrigger_value = map[string]int32{
-		"CONTEXT_CUT_TRIGGER_UNSPECIFIED": 0,
-		"CONTEXT_CUT_TRIGGER_MANUAL":      1,
-		"CONTEXT_CUT_TRIGGER_AUTO":        2,
+	ContextCompactTrigger_value = map[string]int32{
+		"CONTEXT_COMPACT_TRIGGER_UNSPECIFIED": 0,
+		"CONTEXT_COMPACT_TRIGGER_MANUAL":      1,
+		"CONTEXT_COMPACT_TRIGGER_AUTO":        2,
 	}
 )
 
-func (x ContextCutTrigger) Enum() *ContextCutTrigger {
-	p := new(ContextCutTrigger)
+func (x ContextCompactTrigger) Enum() *ContextCompactTrigger {
+	p := new(ContextCompactTrigger)
 	*p = x
 	return p
 }
 
-func (x ContextCutTrigger) String() string {
+func (x ContextCompactTrigger) String() string {
 	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
 }
 
-func (ContextCutTrigger) Descriptor() protoreflect.EnumDescriptor {
+func (ContextCompactTrigger) Descriptor() protoreflect.EnumDescriptor {
 	return file_agentshim_core_v1_core_proto_enumTypes[6].Descriptor()
 }
 
-func (ContextCutTrigger) Type() protoreflect.EnumType {
+func (ContextCompactTrigger) Type() protoreflect.EnumType {
 	return &file_agentshim_core_v1_core_proto_enumTypes[6]
 }
 
-func (x ContextCutTrigger) Number() protoreflect.EnumNumber {
+func (x ContextCompactTrigger) Number() protoreflect.EnumNumber {
 	return protoreflect.EnumNumber(x)
 }
 
-// Deprecated: Use ContextCutTrigger.Descriptor instead.
-func (ContextCutTrigger) EnumDescriptor() ([]byte, []int) {
+// Deprecated: Use ContextCompactTrigger.Descriptor instead.
+func (ContextCompactTrigger) EnumDescriptor() ([]byte, []int) {
 	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{6}
 }
 
@@ -1276,12 +1277,12 @@ func (x *TurnEnded) GetIsError() bool {
 	return false
 }
 
-// The context was DISCARDED outright — `/clear` and its per-vendor
-// equivalents. Nothing survives it, so there is no summary to carry: the
-// event's existence and its position are the entire fact.
+// The context was CLEARED: discarded outright. Nothing survives it, so there
+// is no summary to carry and no trigger to record — a clear is always the
+// user asking for one, and an automatic clear is not a thing any vendor does.
+// The event's existence and its position are the entire fact.
 type ContextCleared struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Trigger       ContextCutTrigger      `protobuf:"varint,1,opt,name=trigger,proto3,enum=agentshim.core.v1.ContextCutTrigger" json:"trigger,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1316,13 +1317,6 @@ func (*ContextCleared) Descriptor() ([]byte, []int) {
 	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{7}
 }
 
-func (x *ContextCleared) GetTrigger() ContextCutTrigger {
-	if x != nil {
-		return x.Trigger
-	}
-	return ContextCutTrigger_CONTEXT_CUT_TRIGGER_UNSPECIFIED
-}
-
 // The context was COMPACTED: replaced by a summary that stands in for it.
 //
 // The fields are the COALESCED account of a compaction, which the vendor
@@ -1337,7 +1331,7 @@ func (x *ContextCleared) GetTrigger() ContextCutTrigger {
 // the boundary itself.
 type ContextCompacted struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Trigger       ContextCutTrigger      `protobuf:"varint,1,opt,name=trigger,proto3,enum=agentshim.core.v1.ContextCutTrigger" json:"trigger,omitempty"`
+	Trigger       ContextCompactTrigger  `protobuf:"varint,1,opt,name=trigger,proto3,enum=agentshim.core.v1.ContextCompactTrigger" json:"trigger,omitempty"`
 	PreTokens     int64                  `protobuf:"varint,2,opt,name=pre_tokens,json=preTokens,proto3" json:"pre_tokens,omitempty"`
 	PostTokens    int64                  `protobuf:"varint,3,opt,name=post_tokens,json=postTokens,proto3" json:"post_tokens,omitempty"`
 	DurationMs    int64                  `protobuf:"varint,4,opt,name=duration_ms,json=durationMs,proto3" json:"duration_ms,omitempty"`
@@ -1378,11 +1372,11 @@ func (*ContextCompacted) Descriptor() ([]byte, []int) {
 	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{8}
 }
 
-func (x *ContextCompacted) GetTrigger() ContextCutTrigger {
+func (x *ContextCompacted) GetTrigger() ContextCompactTrigger {
 	if x != nil {
 		return x.Trigger
 	}
-	return ContextCutTrigger_CONTEXT_CUT_TRIGGER_UNSPECIFIED
+	return ContextCompactTrigger_CONTEXT_COMPACT_TRIGGER_UNSPECIFIED
 }
 
 func (x *ContextCompacted) GetPreTokens() int64 {
@@ -3430,11 +3424,10 @@ const file_agentshim_core_v1_core_proto_rawDesc = "" +
 	"stopReason\x12\x1f\n" +
 	"\vduration_ms\x18\x02 \x01(\x03R\n" +
 	"durationMs\x12\x19\n" +
-	"\bis_error\x18\x03 \x01(\bR\aisError\"P\n" +
-	"\x0eContextCleared\x12>\n" +
-	"\atrigger\x18\x01 \x01(\x0e2$.agentshim.core.v1.ContextCutTriggerR\atrigger\"\xfb\x01\n" +
-	"\x10ContextCompacted\x12>\n" +
-	"\atrigger\x18\x01 \x01(\x0e2$.agentshim.core.v1.ContextCutTriggerR\atrigger\x12\x1d\n" +
+	"\bis_error\x18\x03 \x01(\bR\aisError\"\x10\n" +
+	"\x0eContextCleared\"\xff\x01\n" +
+	"\x10ContextCompacted\x12B\n" +
+	"\atrigger\x18\x01 \x01(\x0e2(.agentshim.core.v1.ContextCompactTriggerR\atrigger\x12\x1d\n" +
 	"\n" +
 	"pre_tokens\x18\x02 \x01(\x03R\tpreTokens\x12\x1f\n" +
 	"\vpost_tokens\x18\x03 \x01(\x03R\n" +
@@ -3630,11 +3623,11 @@ const file_agentshim_core_v1_core_proto_rawDesc = "" +
 	"\x12PermissionDecision\x12#\n" +
 	"\x1fPERMISSION_DECISION_UNSPECIFIED\x10\x00\x12\x1d\n" +
 	"\x19PERMISSION_DECISION_ALLOW\x10\x01\x12\x1c\n" +
-	"\x18PERMISSION_DECISION_DENY\x10\x02*v\n" +
-	"\x11ContextCutTrigger\x12#\n" +
-	"\x1fCONTEXT_CUT_TRIGGER_UNSPECIFIED\x10\x00\x12\x1e\n" +
-	"\x1aCONTEXT_CUT_TRIGGER_MANUAL\x10\x01\x12\x1c\n" +
-	"\x18CONTEXT_CUT_TRIGGER_AUTO\x10\x02*\x9e\x01\n" +
+	"\x18PERMISSION_DECISION_DENY\x10\x02*\x86\x01\n" +
+	"\x15ContextCompactTrigger\x12'\n" +
+	"#CONTEXT_COMPACT_TRIGGER_UNSPECIFIED\x10\x00\x12\"\n" +
+	"\x1eCONTEXT_COMPACT_TRIGGER_MANUAL\x10\x01\x12 \n" +
+	"\x1cCONTEXT_COMPACT_TRIGGER_AUTO\x10\x02*\x9e\x01\n" +
 	"\x10InterruptOutcome\x12!\n" +
 	"\x1dINTERRUPT_OUTCOME_UNSPECIFIED\x10\x00\x12!\n" +
 	"\x1dINTERRUPT_OUTCOME_INTERRUPTED\x10\x01\x12&\n" +
@@ -3662,7 +3655,7 @@ var file_agentshim_core_v1_core_proto_goTypes = []any{
 	(TerminalStatus)(0),            // 3: agentshim.core.v1.TerminalStatus
 	(SessionSource)(0),             // 4: agentshim.core.v1.SessionSource
 	(PermissionDecision)(0),        // 5: agentshim.core.v1.PermissionDecision
-	(ContextCutTrigger)(0),         // 6: agentshim.core.v1.ContextCutTrigger
+	(ContextCompactTrigger)(0),     // 6: agentshim.core.v1.ContextCompactTrigger
 	(InterruptOutcome)(0),          // 7: agentshim.core.v1.InterruptOutcome
 	(PermissionItem_Resolution)(0), // 8: agentshim.core.v1.PermissionItem.Resolution
 	(*Event)(nil),                  // 9: agentshim.core.v1.Event
@@ -3728,28 +3721,27 @@ var file_agentshim_core_v1_core_proto_depIdxs = []int32{
 	9,  // 18: agentshim.core.v1.EventBatch.events:type_name -> agentshim.core.v1.Event
 	43, // 19: agentshim.core.v1.EventBatch.cursor_advance:type_name -> agentshim.core.v1.CursorState
 	4,  // 20: agentshim.core.v1.SessionStarted.source:type_name -> agentshim.core.v1.SessionSource
-	6,  // 21: agentshim.core.v1.ContextCleared.trigger:type_name -> agentshim.core.v1.ContextCutTrigger
-	6,  // 22: agentshim.core.v1.ContextCompacted.trigger:type_name -> agentshim.core.v1.ContextCutTrigger
-	2,  // 23: agentshim.core.v1.TaskStarted.kind:type_name -> agentshim.core.v1.TaskKind
-	2,  // 24: agentshim.core.v1.TaskProgress.kind:type_name -> agentshim.core.v1.TaskKind
-	2,  // 25: agentshim.core.v1.TaskEnded.kind:type_name -> agentshim.core.v1.TaskKind
-	3,  // 26: agentshim.core.v1.TaskEnded.status:type_name -> agentshim.core.v1.TerminalStatus
-	7,  // 27: agentshim.core.v1.Ack.interrupt_outcome:type_name -> agentshim.core.v1.InterruptOutcome
-	9,  // 28: agentshim.core.v1.ReplayEvent.event:type_name -> agentshim.core.v1.Event
-	48, // 29: agentshim.core.v1.PermissionRequest.input:type_name -> google.protobuf.Struct
-	5,  // 30: agentshim.core.v1.PermissionResponse.decision:type_name -> agentshim.core.v1.PermissionDecision
-	48, // 31: agentshim.core.v1.PermissionResponse.updated_input:type_name -> google.protobuf.Struct
-	35, // 32: agentshim.core.v1.PermissionItem.request:type_name -> agentshim.core.v1.PermissionRequest
-	8,  // 33: agentshim.core.v1.PermissionItem.resolution:type_name -> agentshim.core.v1.PermissionItem.Resolution
-	10, // 34: agentshim.core.v1.StoreWrite.batch:type_name -> agentshim.core.v1.EventBatch
-	9,  // 35: agentshim.core.v1.OpenTaskState.started:type_name -> agentshim.core.v1.Event
-	43, // 36: agentshim.core.v1.CursorList.cursors:type_name -> agentshim.core.v1.CursorState
-	45, // 37: agentshim.core.v1.CursorList.open_tasks:type_name -> agentshim.core.v1.OpenTaskState
-	38, // [38:38] is the sub-list for method output_type
-	38, // [38:38] is the sub-list for method input_type
-	38, // [38:38] is the sub-list for extension type_name
-	38, // [38:38] is the sub-list for extension extendee
-	0,  // [0:38] is the sub-list for field type_name
+	6,  // 21: agentshim.core.v1.ContextCompacted.trigger:type_name -> agentshim.core.v1.ContextCompactTrigger
+	2,  // 22: agentshim.core.v1.TaskStarted.kind:type_name -> agentshim.core.v1.TaskKind
+	2,  // 23: agentshim.core.v1.TaskProgress.kind:type_name -> agentshim.core.v1.TaskKind
+	2,  // 24: agentshim.core.v1.TaskEnded.kind:type_name -> agentshim.core.v1.TaskKind
+	3,  // 25: agentshim.core.v1.TaskEnded.status:type_name -> agentshim.core.v1.TerminalStatus
+	7,  // 26: agentshim.core.v1.Ack.interrupt_outcome:type_name -> agentshim.core.v1.InterruptOutcome
+	9,  // 27: agentshim.core.v1.ReplayEvent.event:type_name -> agentshim.core.v1.Event
+	48, // 28: agentshim.core.v1.PermissionRequest.input:type_name -> google.protobuf.Struct
+	5,  // 29: agentshim.core.v1.PermissionResponse.decision:type_name -> agentshim.core.v1.PermissionDecision
+	48, // 30: agentshim.core.v1.PermissionResponse.updated_input:type_name -> google.protobuf.Struct
+	35, // 31: agentshim.core.v1.PermissionItem.request:type_name -> agentshim.core.v1.PermissionRequest
+	8,  // 32: agentshim.core.v1.PermissionItem.resolution:type_name -> agentshim.core.v1.PermissionItem.Resolution
+	10, // 33: agentshim.core.v1.StoreWrite.batch:type_name -> agentshim.core.v1.EventBatch
+	9,  // 34: agentshim.core.v1.OpenTaskState.started:type_name -> agentshim.core.v1.Event
+	43, // 35: agentshim.core.v1.CursorList.cursors:type_name -> agentshim.core.v1.CursorState
+	45, // 36: agentshim.core.v1.CursorList.open_tasks:type_name -> agentshim.core.v1.OpenTaskState
+	37, // [37:37] is the sub-list for method output_type
+	37, // [37:37] is the sub-list for method input_type
+	37, // [37:37] is the sub-list for extension type_name
+	37, // [37:37] is the sub-list for extension extendee
+	0,  // [0:37] is the sub-list for field type_name
 }
 
 func init() { file_agentshim_core_v1_core_proto_init() }
