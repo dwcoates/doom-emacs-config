@@ -94,6 +94,74 @@ type fakeSessionCmds struct {
 	err     error
 }
 
+type createCall struct {
+	requestID string
+	cmd       *frontendv1.CreateWorkspaceCmd
+}
+
+type hostActionCompletion struct {
+	actionID string
+	ok       bool
+	failure  string
+}
+
+// fakeWorkspaceCreation is the fully durable host-work seam used by server
+// tests. The two typed channels make an invalid host-work union impossible,
+// matching the production bridge contract.
+type fakeWorkspaceCreation struct {
+	snapshot     WorkspaceHostWorkSnapshot
+	available    chan *frontendv1.WorkspaceAvailable
+	actions      chan *frontendv1.HostAction
+	created      []createCall
+	materialized []string
+	completions  []hostActionCompletion
+}
+
+type fakeHostWorkPublisher struct {
+	available []*frontendv1.WorkspaceAvailable
+	actions   []*frontendv1.HostAction
+}
+
+func (f *fakeHostWorkPublisher) PushWorkspaceAvailable(available *frontendv1.WorkspaceAvailable) {
+	f.available = append(f.available, available)
+}
+
+func (f *fakeHostWorkPublisher) PushHostAction(action *frontendv1.HostAction) {
+	f.actions = append(f.actions, action)
+}
+
+func newFakeWorkspaceCreation() *fakeWorkspaceCreation {
+	return &fakeWorkspaceCreation{
+		available: make(chan *frontendv1.WorkspaceAvailable, 8),
+		actions:   make(chan *frontendv1.HostAction, 8),
+	}
+}
+
+func (f *fakeWorkspaceCreation) CreateWorkspace(_ context.Context, requestID string, cmd *frontendv1.CreateWorkspaceCmd) error {
+	f.created = append(f.created, createCall{requestID: requestID, cmd: cmd})
+	return nil
+}
+
+func (f *fakeWorkspaceCreation) MarkWorkspaceMaterialized(_ context.Context, jobID string) error {
+	f.materialized = append(f.materialized, jobID)
+	return nil
+}
+
+func (f *fakeWorkspaceCreation) CompleteHostAction(_ context.Context, actionID string, ok bool, failure string) error {
+	f.completions = append(f.completions, hostActionCompletion{actionID: actionID, ok: ok, failure: failure})
+	return nil
+}
+
+func (f *fakeWorkspaceCreation) SnapshotHostWork() WorkspaceHostWorkSnapshot { return f.snapshot }
+
+func (f *fakeWorkspaceCreation) SubscribeWorkspaceAvailable() (<-chan *frontendv1.WorkspaceAvailable, func()) {
+	return f.available, func() {}
+}
+
+func (f *fakeWorkspaceCreation) SubscribeHostActions() (<-chan *frontendv1.HostAction, func()) {
+	return f.actions, func() {}
+}
+
 func (f *fakeSessionCmds) CreateSession(_ context.Context, opts CreateOpts) (string, error) {
 	f.created = append(f.created, opts)
 	return "s_test", f.err
@@ -343,6 +411,88 @@ func TestCommandHandlerCreateSessionErrorSurfaces(t *testing.T) {
 	}
 }
 
+func TestCommandHandlerRoutesDaemonOwnedWorkspaceWork(t *testing.T) {
+	// Arrange — a create request only records durable work. It does not wait for
+	// worktree creation or a host perspective, so the frontend ACK represents
+	// enqueue acceptance rather than eventual materialization.
+	bridge := newFakeWorkspaceCreation()
+	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil, nil, nil, bridge)
+	if err != nil {
+		t.Fatalf("newCommandHandler: %v", err)
+	}
+
+	// Act.
+	if err := h.CreateWorkspace(context.Background(), "", "request-1", &frontendv1.CreateWorkspaceCmd{RequestedName: "fresh", GitRoot: "/repo", ConfigDir: "/cfg", PermissionMode: "bypassPermissions", AllowUngated: true}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if err := h.WorkspaceMaterialized(context.Background(), "", "request-2", &frontendv1.WorkspaceMaterializedCmd{JobId: "job-1"}); err != nil {
+		t.Fatalf("WorkspaceMaterialized: %v", err)
+	}
+	if err := h.HostActionCompleted(context.Background(), "", "request-3", &frontendv1.HostActionCompletedCmd{ActionId: "action-1", Ok: false, Error: "Emacs rejected it"}); err != nil {
+		t.Fatalf("HostActionCompleted: %v", err)
+	}
+
+	// Assert — all durable transitions are delegated exactly once, including a
+	// failed completion (which the bridge preserves rather than dropping).
+	if len(bridge.created) != 1 || bridge.created[0].requestID != "request-1" || bridge.created[0].cmd.GetRequestedName() != "fresh" || bridge.created[0].cmd.GetConfigDir() != "/cfg" || bridge.created[0].cmd.GetPermissionMode() != "bypassPermissions" || !bridge.created[0].cmd.GetAllowUngated() {
+		t.Fatalf("create calls = %+v", bridge.created)
+	}
+	if got := bridge.materialized; len(got) != 1 || got[0] != "job-1" {
+		t.Fatalf("materialized = %v", got)
+	}
+	if got := bridge.completions; len(got) != 1 || got[0].actionID != "action-1" || got[0].ok || got[0].failure != "Emacs rejected it" {
+		t.Fatalf("completions = %+v", got)
+	}
+}
+
+func TestSnapshotProviderIncludesDurableHostWork(t *testing.T) {
+	// Arrange.
+	bridge := newFakeWorkspaceCreation()
+	bridge.snapshot = WorkspaceHostWorkSnapshot{
+		WorkspaceAvailable: []*frontendv1.WorkspaceAvailable{{JobId: "job-1", FinalName: "fresh", WorktreePath: "/repo-worktrees/fresh"}},
+		HostActions: []*frontendv1.HostAction{{
+			ActionId: "action-1",
+			Action:   &frontendv1.HostAction_LegacyCommand{LegacyCommand: &frontendv1.HostLegacyCommand{Type: "prompt"}},
+		}},
+	}
+
+	// Act.
+	snap := (&ssmSnapshotProvider{workspaceCreation: bridge}).Snapshot()
+
+	// Assert — reconnecting Emacs receives both retained collections before
+	// relying on live subscriptions.
+	if got := snap.GetWorkspaceAvailable(); len(got) != 1 || got[0].GetJobId() != "job-1" {
+		t.Fatalf("workspace_available = %+v", got)
+	}
+	if got := snap.GetHostActions(); len(got) != 1 || got[0].GetLegacyCommand().GetType() != "prompt" {
+		t.Fatalf("host_actions = %+v", got)
+	}
+}
+
+func TestHostWorkForwardersPublishEachTypedStream(t *testing.T) {
+	// Arrange — separate typed streams make it impossible for a host action to
+	// masquerade as workspace availability or vice versa.
+	publisher := &fakeHostWorkPublisher{}
+	available := make(chan *frontendv1.WorkspaceAvailable, 1)
+	actions := make(chan *frontendv1.HostAction, 1)
+	available <- &frontendv1.WorkspaceAvailable{JobId: "job-1", FinalName: "fresh"}
+	actions <- &frontendv1.HostAction{ActionId: "action-1"}
+	close(available)
+	close(actions)
+
+	// Act.
+	forwardWorkspaceAvailable(func(string, ...any) {}, publisher, available)
+	forwardHostActions(func(string, ...any) {}, publisher, actions)
+
+	// Assert.
+	if got := publisher.available; len(got) != 1 || got[0].GetJobId() != "job-1" {
+		t.Fatalf("workspace available pushes = %+v", got)
+	}
+	if got := publisher.actions; len(got) != 1 || got[0].GetActionId() != "action-1" {
+		t.Fatalf("host action pushes = %+v", got)
+	}
+}
+
 // --- snapshot provider ----------------------------------------------------
 
 type fakeSessions struct{ views []*frontendv1.SessionView }
@@ -360,6 +510,7 @@ func (f fakeCatalogs) TaskCatalogs() []*frontendv1.TaskCatalog { return f.catalo
 func TestSnapshotProviderIncludesSessionInits(t *testing.T) {
 	// Arrange — a snapshot provider with a SessionInitSource (S9).
 	provider := &ssmSnapshotProvider{
+		workspaceCreation: newFakeWorkspaceCreation(),
 		inits: fakeInits{inits: []*frontendv1.SessionInitView{
 			{Workspace: "/w", SessionId: "s1", Init: &datav1.SystemInit{Model: "haiku"}},
 		}},
@@ -378,6 +529,7 @@ func TestSnapshotProviderIncludesTaskCatalogsAndLogsTheirShape(t *testing.T) {
 	// Arrange.
 	var logs []string
 	provider := &ssmSnapshotProvider{
+		workspaceCreation: newFakeWorkspaceCreation(),
 		catalogs: fakeCatalogs{catalogs: []*frontendv1.TaskCatalog{{
 			Workspace: "/w", SessionId: "s1",
 			Tasks: []*frontendv1.TaskEntry{{TaskId: "t1"}},
@@ -406,13 +558,14 @@ func TestSnapshotProviderCombinesSSMAndSessions(t *testing.T) {
 		t.Fatalf("put: %v", err)
 	}
 	shim, err := WireAgentShim(AgentShimConfig{
-		SSM:             openTestSSM(t, reg),
-		Progress:        progress.New(progress.Options{Logf: func(string, ...any) {}}),
-		Prompts:         &fakePrompts{},
-		MergeDirs:       fakeMergeDirs{},
-		Lifecycle:       &fakeLifecycle{},
-		Sessions:        fakeSessions{views: []*frontendv1.SessionView{{Workspace: "/w", SessionId: "s1", Model: "haiku"}}},
-		SessionCommands: &SessionCommandBinding{},
+		SSM:               openTestSSM(t, reg),
+		Progress:          progress.New(progress.Options{Logf: func(string, ...any) {}}),
+		Prompts:           &fakePrompts{},
+		MergeDirs:         fakeMergeDirs{},
+		Lifecycle:         &fakeLifecycle{},
+		Sessions:          fakeSessions{views: []*frontendv1.SessionView{{Workspace: "/w", SessionId: "s1", Model: "haiku"}}},
+		SessionCommands:   &SessionCommandBinding{},
+		WorkspaceCreation: newFakeWorkspaceCreation(),
 	})
 	if err != nil {
 		t.Fatalf("WireAgentShim: %v", err)
@@ -423,7 +576,7 @@ func TestSnapshotProviderCombinesSSMAndSessions(t *testing.T) {
 		t.Fatalf("apply merge transition: %v", err)
 	}
 	// Act
-	provider := &ssmSnapshotProvider{ssm: shim.SSM, sessions: fakeSessions{views: []*frontendv1.SessionView{{Workspace: "/w", SessionId: "s1", Model: "haiku"}}}}
+	provider := &ssmSnapshotProvider{ssm: shim.SSM, sessions: fakeSessions{views: []*frontendv1.SessionView{{Workspace: "/w", SessionId: "s1", Model: "haiku"}}}, workspaceCreation: newFakeWorkspaceCreation()}
 	snap := provider.Snapshot()
 	// Assert
 	if len(snap.GetWorkspaces()) != 1 || snap.GetWorkspaces()[0].GetWorkspace() != "/w" {
@@ -440,7 +593,7 @@ func TestSnapshotProviderCarriesTheProgressViews(t *testing.T) {
 	defer prog.Close()
 	prog.SetCounts("/w", 2, 1)
 	// Act — a (re)connecting frontend's footer must start populated.
-	provider := &ssmSnapshotProvider{progress: prog}
+	provider := &ssmSnapshotProvider{progress: prog, workspaceCreation: newFakeWorkspaceCreation()}
 	snap := provider.Snapshot()
 	// Assert
 	if len(snap.GetProgress()) != 1 || snap.GetProgress()[0].GetPendingPermissions() != 2 {
@@ -458,12 +611,13 @@ func TestWireAgentShimFeedsTheSsmTransitionIntoProgressWithoutAPhaseCopy(t *test
 	reg := openTestRegistry(t)
 	prog := progress.New(progress.Options{Logf: func(string, ...any) {}})
 	shim, err := WireAgentShim(AgentShimConfig{
-		SSM:             openTestSSM(t, reg),
-		Progress:        prog,
-		Prompts:         &fakePrompts{},
-		MergeDirs:       fakeMergeDirs{},
-		Lifecycle:       &fakeLifecycle{},
-		SessionCommands: &SessionCommandBinding{},
+		SSM:               openTestSSM(t, reg),
+		Progress:          prog,
+		Prompts:           &fakePrompts{},
+		MergeDirs:         fakeMergeDirs{},
+		Lifecycle:         &fakeLifecycle{},
+		SessionCommands:   &SessionCommandBinding{},
+		WorkspaceCreation: newFakeWorkspaceCreation(),
 	})
 	if err != nil {
 		t.Fatalf("WireAgentShim: %v", err)
@@ -501,6 +655,21 @@ func TestWireAgentShimRejectsNilProgress(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("want a construction error for a nil progress resolver")
+	}
+}
+
+func TestWireAgentShimRejectsNilWorkspaceCreation(t *testing.T) {
+	reg := openTestRegistry(t)
+	_, err := WireAgentShim(AgentShimConfig{
+		SSM:             openTestSSM(t, reg),
+		Progress:        progress.New(progress.Options{Logf: func(string, ...any) {}}),
+		Prompts:         &fakePrompts{},
+		MergeDirs:       fakeMergeDirs{},
+		Lifecycle:       &fakeLifecycle{},
+		SessionCommands: &SessionCommandBinding{},
+	})
+	if err == nil || !strings.Contains(err.Error(), "WorkspaceCreation") {
+		t.Fatalf("WireAgentShim error = %v, want missing WorkspaceCreation bridge", err)
 	}
 }
 
@@ -548,12 +717,13 @@ func TestWireAgentShimMergeTransitionReachesSSM(t *testing.T) {
 	// Arrange
 	reg := openTestRegistry(t)
 	shim, err := WireAgentShim(AgentShimConfig{
-		SSM:             openTestSSM(t, reg),
-		Progress:        progress.New(progress.Options{Logf: func(string, ...any) {}}),
-		Prompts:         &fakePrompts{},
-		MergeDirs:       fakeMergeDirs{},
-		Lifecycle:       &fakeLifecycle{},
-		SessionCommands: &SessionCommandBinding{},
+		SSM:               openTestSSM(t, reg),
+		Progress:          progress.New(progress.Options{Logf: func(string, ...any) {}}),
+		Prompts:           &fakePrompts{},
+		MergeDirs:         fakeMergeDirs{},
+		Lifecycle:         &fakeLifecycle{},
+		SessionCommands:   &SessionCommandBinding{},
+		WorkspaceCreation: newFakeWorkspaceCreation(),
 	})
 	if err != nil {
 		t.Fatalf("WireAgentShim: %v", err)
