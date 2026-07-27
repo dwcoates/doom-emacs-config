@@ -369,7 +369,7 @@ func (c *consumer) Consume(ev *corev1.Event) {
 		if btc := frontend.BackgroundTasksFromVendor(p.Vendor); btc != nil {
 			c.reconcileTasks(ev, btc)
 		}
-		c.pushConversation(ev)
+		c.pushConversation(ev, true)
 	default:
 		// UnparsedEvent / empty payloads carry no conversation content of their
 		// own; the demux already loud-logged them. Nothing to push.
@@ -534,9 +534,39 @@ func (c *consumer) applyProgress(ev *corev1.Event) {
 	}
 }
 
+// userTurnReceipt extracts the round-trip receipt a pushed delta carries for a
+// USER PROMPT: the request id and total prompt-text length across its
+// user_message items. textLen 0 means the delta carries no prompt — a pure
+// tool-result feedback message rides the user_message arm too, and logging
+// every tool result would bury the one receipt per prompt this exists for.
+func userTurnReceipt(cd *frontendv1.ConversationDelta) (requestID string, textLen int) {
+	for _, it := range cd.GetItems() {
+		um := it.GetUserMessage()
+		if um == nil {
+			continue
+		}
+		n := 0
+		switch content := um.GetContent().(type) {
+		case *datav1.ApiUserMessage_ContentString:
+			n = len(content.ContentString)
+		case *datav1.ApiUserMessage_ContentBlocks:
+			for _, b := range content.ContentBlocks.GetBlocks() {
+				if t := b.GetText(); t != nil {
+					n += len(t.GetText())
+				}
+			}
+		}
+		if n > 0 {
+			requestID = it.GetRequestId()
+			textLen += n
+		}
+	}
+	return requestID, textLen
+}
+
 // pushConversation converts a vendor event to a ConversationDelta and pushes it,
 // loud-logging (never swallowing) a translation failure.
-func (c *consumer) pushConversation(ev *corev1.Event) {
+func (c *consumer) pushConversation(ev *corev1.Event, live bool) {
 	cd, err := frontend.ConversationDeltaFromEvent(c.workspace, ev)
 	if err != nil {
 		c.logf("sessiondrv: conversation translate failed session=%s seq=%d: %v", c.sessionID, ev.GetSeq(), err)
@@ -546,6 +576,18 @@ func (c *consumer) pushConversation(ev *corev1.Event) {
 		return // known-but-non-conversational vendor payload
 	}
 	c.push.PushConversationDelta(cd)
+	// The prompt round-trip receipt: one line per LIVE user prompt reaching
+	// the frontend push, closing the gap between "control request acked" (the
+	// shim took the prompt) and the webapp's own mount log. Live only — a
+	// resync/repull replays thousands of historical user turns, and a receipt
+	// per replayed prompt would bury the one that answers "did MY prompt come
+	// back".
+	if live {
+		if requestID, textLen := userTurnReceipt(cd); textLen > 0 {
+			c.logf("sessiondrv: user turn pushed ws=%q session=%s seq=%d request_id=%s len=%d",
+				c.workspace, c.sessionID, ev.GetSeq(), requestID, textLen)
+		}
+	}
 }
 
 // connectionComponent names the daemon's own transport in a degraded card.
@@ -628,7 +670,7 @@ func (c *consumer) resync(fromSeq uint64) (floor uint64, haveFloor bool) {
 			continue
 		}
 		if ev.GetVendor() != nil {
-			c.pushConversation(ev)
+			c.pushConversation(ev, false)
 		}
 	}
 	// Replay the retained permission items too: they carry no store seq (they

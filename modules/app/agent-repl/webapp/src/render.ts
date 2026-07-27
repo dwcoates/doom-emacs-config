@@ -6,7 +6,7 @@
  */
 import { SUBAGENT_TOOLS } from "./agents.js";
 import { parseJournal } from "./async-stream.js";
-import { clearDedup, logDedup } from "./wslog.js";
+import { clearDedup, log, logDedup } from "./wslog.js";
 import {
   TOPBAR_AGENT_ATTR,
   TopbarMenu,
@@ -3134,7 +3134,19 @@ export class FeedRenderer {
     const turnId = lastUserTurnId(state.items);
     // A fresh prompt re-follows the tail: it lifts any nested-view freeze so
     // the sender watches the answer (repinsToTail lets the fresh turn win too).
-    if (turnId !== null && turnId !== this.lastUserTurn) this.tailFrozen = false;
+    if (turnId !== null && turnId !== this.lastUserTurn) {
+      this.tailFrozen = false;
+      // The prompt round-trip's LAST receipt: this render is drawing a user
+      // turn the previous one had not seen. `last` reports whether it ranks
+      // at the feed tail — the position a just-sent prompt must land at.
+      const tail = state.items[state.items.length - 1];
+      log(
+        "info",
+        `feed: user turn rendering request_id=${turnId} last=${
+          tail !== undefined && tail.kind === "user-turn" && tail.requestId === turnId
+        }`,
+      );
+    }
     const toTail = repinsToTail({
       prevTurnId: this.lastUserTurn,
       nextTurnId: turnId,
