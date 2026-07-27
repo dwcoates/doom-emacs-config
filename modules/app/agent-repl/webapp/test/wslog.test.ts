@@ -39,10 +39,13 @@ describe("ForwardingLogger", () => {
     // Act
     spy.logger.log("warn", "seq gap: have 3, got 7");
     // Assert
+    // Both copies carry the WEBAPP's clock (the spy clock reads 0), stamped
+    // once inside the helper: the daemon's own receipt stamp cannot show how
+    // long a line took to get there.
     expect(spy.forwarded).toEqual([
-      { type: "client-log", level: "warn", message: "seq gap: have 3, got 7" },
+      { type: "client-log", level: "warn", message: "00:00:00.000 seq gap: have 3, got 7" },
     ]);
-    expect(spy.consoleLines).toEqual(["warn: seq gap: have 3, got 7"]);
+    expect(spy.consoleLines).toEqual(["warn: 00:00:00.000 seq gap: have 3, got 7"]);
   });
 
   it("still echoes to the console when the socket refuses the forward", () => {
@@ -51,7 +54,7 @@ describe("ForwardingLogger", () => {
     // Act
     spy.logger.log("error", "boom");
     // Assert
-    expect(spy.consoleLines).toEqual(["error: boom"]);
+    expect(spy.consoleLines).toEqual(["error: 00:00:00.000 boom"]);
   });
 
   it("suppresses forwards past the per-window cap with one notice", () => {
@@ -102,7 +105,7 @@ describe("ForwardingLogger", () => {
     expect(spy.forwarded[spy.forwarded.length - 1]).toEqual({
       type: "client-log",
       level: "info",
-      message: "after rollover",
+      message: "00:01:00.000 after rollover",
     });
   });
 });
@@ -120,7 +123,7 @@ describe("module-level singleton", () => {
     // Act
     log("warn", "routed");
     // Assert
-    expect(spy.consoleLines).toEqual(["warn: routed"]);
+    expect(spy.consoleLines).toEqual(["warn: 00:00:00.000 routed"]);
   });
 
   it("falls back to the console before a logger is installed", () => {
@@ -141,7 +144,7 @@ describe("module-level singleton", () => {
     logDedup("feed-render", "error", "boom");
     logDedup("feed-render", "error", "boom");
     // Assert
-    expect(spy.consoleLines).toEqual(["error: boom"]);
+    expect(spy.consoleLines).toEqual(["error: 00:00:00.000 boom"]);
   });
 
   it("logDedup logs again when the message under the key changes", () => {
@@ -152,7 +155,10 @@ describe("module-level singleton", () => {
     // Act
     logDedup("k", "warn", "second error");
     // Assert
-    expect(spy.consoleLines).toEqual(["warn: first error", "warn: second error"]);
+    expect(spy.consoleLines).toEqual([
+      "warn: 00:00:00.000 first error",
+      "warn: 00:00:00.000 second error",
+    ]);
   });
 
   it("logDedup keys are independent", () => {
@@ -211,11 +217,15 @@ describe("structured context (E4 ClientLogCmd.context)", () => {
   it("still writes only the message to the console", () => {
     // Arrange — a console line is read by a human; the struct is for the log.
     const lines: string[] = [];
-    const logger = new ForwardingLogger(() => true, (_l, line) => lines.push(line));
+    const logger = new ForwardingLogger(
+      () => true,
+      (_l, line) => lines.push(line),
+      () => 0,
+    );
     // Act
     logger.log("warn", "render stall", { pendingMs: 1200 });
-    // Assert
-    expect(lines).toEqual(["render stall"]);
+    // Assert — the client stamp, and nothing of the struct.
+    expect(lines).toEqual(["00:00:00.000 render stall"]);
   });
 
   it("carries context through the module-level log()", () => {
@@ -245,11 +255,27 @@ describe("logLocalOnly (the rejected-forward path)", () => {
         return true;
       },
       (_l, line) => lines.push(line),
+      () => 0,
     );
     // Act
     logger.logLocalOnly("error", "clientLog rejected: no message");
     // Assert
-    expect(lines).toEqual(["clientLog rejected: no message"]);
+    expect(lines).toEqual(["00:00:00.000 clientLog rejected: no message"]);
     expect(sent).toEqual([]);
+  });
+
+  it("stamps the console-only line with the webapp clock", () => {
+    // Arrange — a console-only line is still evidence, so it carries the same
+    // clock a forwarded line does.
+    const lines: string[] = [];
+    const logger = new ForwardingLogger(
+      () => true,
+      (_l, line) => lines.push(line),
+      () => 3_723_004,
+    );
+    // Act
+    logger.logLocalOnly("warn", "ack rejected");
+    // Assert
+    expect(lines).toEqual(["01:02:03.004 ack rejected"]);
   });
 });

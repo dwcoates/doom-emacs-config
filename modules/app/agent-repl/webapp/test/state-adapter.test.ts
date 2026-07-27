@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import { decodeFrontendFrame } from "../src/frontend-proto.js";
 import {
   StateAdapter,
+  userTurnReceipt,
   type AdapterEffect,
   type AdapterLogLevel,
 } from "../src/state-adapter.js";
@@ -987,5 +988,95 @@ describe("progress (F1): the consolidated footer's whole input", () => {
     adapter.apply(frame(progressFrame()));
     // Assert
     expect(adapter.ignoredCounts().get("progress")).toBeUndefined();
+  });
+});
+
+describe("userTurnReceipt (ingest-time arrival receipt)", () => {
+  /** A conversation-items effect carrying ITEMS at THROUGHSEQ. */
+  function delta(throughSeq: number, items: ConversationItem[]): AdapterEffect {
+    return { kind: "conversation-items", workspace: "ws", sessionId: "s1", throughSeq, items };
+  }
+
+  function turn(requestId: string, text: string): UserTurnItem {
+    return { kind: "user-turn", requestId, content: [{ type: "text", text }], ts: "" };
+  }
+
+  it("reports a live user turn with its request id, seq and text length", () => {
+    // Arrange — the delta advances past what the store already holds.
+    const effects = [delta(7, [turn("req-1", "hello there")])];
+    // Act
+    const receipt = userTurnReceipt(effects, 6);
+    // Assert
+    expect(receipt).toEqual({ requestId: "req-1", seq: 7, len: 11, live: true });
+  });
+
+  it("marks a replayed turn not live, so the caller can withhold the forward", () => {
+    // Arrange — a connect resync replays history at or below lastSeq.
+    const effects = [delta(3, [turn("req-1", "hello")])];
+    // Act
+    const receipt = userTurnReceipt(effects, 9);
+    // Assert
+    expect(receipt?.live).toBe(false);
+  });
+
+  it("returns null for a user turn whose text blocks are empty", () => {
+    // Arrange — nothing to time when the prompt says nothing.
+    const effects = [delta(7, [turn("req-1", "")])];
+    // Act / Assert
+    expect(userTurnReceipt(effects, 6)).toBeNull();
+  });
+
+  it("returns null for a batch with no user turn at all", () => {
+    // Arrange — an assistant-only delta (the tool-feedback case yields no turn).
+    const effects = [
+      delta(7, [
+        { kind: "text", blockId: "b1", messageId: "m1", text: "hi", done: true, ts: "" } as TextItem,
+      ]),
+    ];
+    // Act / Assert
+    expect(userTurnReceipt(effects, 6)).toBeNull();
+  });
+
+  it("sums the text blocks of a multi-block turn", () => {
+    // Arrange — a turn whose prose arrived as two blocks.
+    const item: UserTurnItem = {
+      kind: "user-turn",
+      requestId: "req-1",
+      content: [
+        { type: "text", text: "abc" },
+        { type: "text", text: "de" },
+      ],
+      ts: "",
+    };
+    // Act
+    const receipt = userTurnReceipt([delta(7, [item])], 6);
+    // Assert
+    expect(receipt?.len).toBe(5);
+  });
+
+  it("ignores non-text blocks when measuring the turn", () => {
+    // Arrange — an image block carries no prompt text to time.
+    const item: UserTurnItem = {
+      kind: "user-turn",
+      requestId: "req-1",
+      content: [{ type: "image", source: {} }, { type: "text", text: "abcd" }],
+      ts: "",
+    };
+    // Act
+    const receipt = userTurnReceipt([delta(7, [item])], 6);
+    // Assert
+    expect(receipt?.len).toBe(4);
+  });
+
+  it("skips effects that are not conversation items", () => {
+    // Arrange — an ignore effect sits ahead of the delta in the batch.
+    const effects: AdapterEffect[] = [
+      { kind: "ignored", shape: "commandAck" },
+      delta(7, [turn("req-1", "hey")]),
+    ];
+    // Act
+    const receipt = userTurnReceipt(effects, 6);
+    // Assert
+    expect(receipt?.requestId).toBe("req-1");
   });
 });
