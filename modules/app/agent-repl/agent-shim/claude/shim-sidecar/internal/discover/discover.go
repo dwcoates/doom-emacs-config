@@ -1,9 +1,24 @@
 // Package discover enumerates the Claude harness's on-disk artifacts (design
-// §7.1) and classifies each path into a tail Target: its session (from the
-// PATH), file kind, task id, and codec. Discovery unions config-root globs
-// (session transcripts, agent sidechains + meta, workflow journals) with the
-// /tmp task spools (kind by a*/b*/w* filename prefix). A periodic full Scan is
-// the completeness backstop; fsnotify (Watcher) supplies latency.
+// §7.1) and classifies each path into a tail Target: file kind, task id, codec,
+// and — for CONFIG-ROOT paths only — the session that owns it. Discovery unions
+// config-root globs (session transcripts, agent sidechains + meta, workflow
+// journals) with the /tmp task spools (kind by a*/b*/w* filename prefix). A
+// periodic full Scan is the completeness backstop; fsnotify (Watcher) supplies
+// latency.
+//
+// A SPOOL PATH IS A LOCATION, NEVER AN IDENTITY. The /tmp layout embeds a
+// session-shaped segment (…/<session>/tasks/<taskid>.output), and this package
+// used to read it as the owning session. It is not one: the harness names that
+// directory with its RUNTIME session id, which differs from the id the
+// conversation's transcript carries whenever a session was resumed. Trusting it
+// filed one task under two different session ids, which is a state the store
+// accepts (it keys by session_id + task_id) but the staleness tracker treats as
+// an impossible collision — taking the whole file plane down with it.
+//
+// So a spool Target carries NO SessionID. Its owner is resolved by the sidecar
+// from the task id, against the transcript that launched it (see the owner
+// index in main.go). That leaves exactly one session identifier in the system:
+// the transcript's.
 package discover
 
 import (
@@ -18,8 +33,12 @@ type Logf = func(format string, args ...any)
 
 // Target is one discovered file plus the attribution the tailer/handler need.
 type Target struct {
-	Path      string
-	Kind      tail.Kind
+	Path string
+	Kind tail.Kind
+	// SessionID is the owning session, read from a CONFIG-ROOT path only.
+	// EMPTY for a /tmp spool: that path states where the bytes live, not whose
+	// they are (see the package comment). The sidecar resolves a spool's owner
+	// by TaskID before it is tailed.
 	SessionID string
 	TaskID    string // agent/shell/workflow files
 	RunID     string // workflow journals
@@ -140,19 +159,23 @@ func (d *Discoverer) classifySpool(path string) (Target, bool) {
 		return Target{}, false
 	}
 	// /tmp/claude-<uid>/<slug>/<session>/tasks/<taskid>.output
+	//
+	// segs[2] is session-SHAPED and is deliberately NOT read: it is the
+	// harness's runtime session id, which disagrees with the transcript's
+	// whenever a session was resumed. See the package comment — the owner is
+	// resolved from TaskID instead, so no second identifier ever enters the
+	// system.
 	rel := path[len(d.spoolRoot)+1:] // claude-<uid>/<slug>/<session>/tasks/<file>
 	segs := strings.Split(filepath.ToSlash(rel), "/")
 	if len(segs) != 5 || segs[3] != "tasks" || !strings.HasSuffix(segs[4], ".output") {
 		return Target{}, false
 	}
-	session := segs[2]
 	taskID := strings.TrimSuffix(segs[4], ".output")
 	spoolDir := filepath.Dir(path)
 	t := Target{
-		Path:      path,
-		SessionID: session,
-		TaskID:    taskID,
-		SpoolDir:  spoolDir,
+		Path:     path,
+		TaskID:   taskID,
+		SpoolDir: spoolDir,
 	}
 	switch {
 	case strings.HasPrefix(taskID, "a"):
