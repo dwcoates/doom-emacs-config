@@ -158,7 +158,9 @@ every cycle.  This runs from the file-notify / poll async context, where a
 hard error would kill the sentinel watcher, so a failed delete is surfaced
 via `agent-repl--warn' rather than rethrown."
   (condition-case err
-      (delete-file file)
+      (progn
+        (delete-file file)
+        (agent-repl--log ws "delete-sentinel-file: deleted file=%s" file))
     (error
      (agent-repl--warn ws "could not delete sentinel file %s: %S"
                        (file-name-nondirectory file) err))))
@@ -213,21 +215,33 @@ later kill-and-relaunch cycle starts clean (kill clears the whole
 plist; explicit clear here covers the case where the ws keeps
 running but its load cycle has logically ended)."
   (agent-repl--ws-put ws key t)
-  (when (and (agent-repl--ws-get ws :agent-ready)
-             (agent-repl--ws-get ws :ws-loaded))
-    (agent-repl--ws-put ws :agent-ready nil)
-    (agent-repl--ws-put ws :ws-loaded nil)
-    (agent-repl--log ws "ws-fully-loaded: ws=%s marker=%s" ws (or marker "nil"))
-    (run-hook-wrapped 'agent-repl-ws-fully-loaded-functions
-                      (lambda (fn ws marker)
-                        (condition-case err
-                            (funcall fn ws marker)
-                          (error
-                           (agent-repl--log ws
-                                             "ws-fully-loaded-hook fn=%s err=%S"
-                                             fn err)))
-                        nil)
-                      ws marker)))
+  (let ((agent-ready (agent-repl--ws-get ws :agent-ready))
+        (ws-loaded (agent-repl--ws-get ws :ws-loaded)))
+    (agent-repl--log ws "ws-fully-loaded: latch-set key=%s marker=%S agent-ready=%S ws-loaded=%S"
+                      key marker agent-ready ws-loaded)
+    (if (and agent-ready ws-loaded)
+        (progn
+          (agent-repl--ws-put ws :agent-ready nil)
+          (agent-repl--ws-put ws :ws-loaded nil)
+          (agent-repl--log ws "ws-fully-loaded: firing ws=%s marker=%S hook-count=%d"
+                            ws marker (length agent-repl-ws-fully-loaded-functions))
+          (run-hook-wrapped 'agent-repl-ws-fully-loaded-functions
+                            (lambda (fn ws marker)
+                              (condition-case err
+                                  (progn
+                                    (agent-repl--log ws "ws-fully-loaded-hook: invoke fn=%S marker=%S"
+                                                      fn marker)
+                                    (funcall fn ws marker)
+                                    (agent-repl--log ws "ws-fully-loaded-hook: completed fn=%S"
+                                                      fn))
+                                (error
+                                 (agent-repl--log ws
+                                                   "ws-fully-loaded-hook: failed fn=%S err=%S"
+                                                   fn err)))
+                              nil)
+                            ws marker))
+      (agent-repl--log ws "ws-fully-loaded: waiting key=%s agent-ready=%S ws-loaded=%S"
+                        key agent-ready ws-loaded))))
 
 ;;; Event dispatch
 
@@ -310,7 +324,8 @@ noise — same filter as the poll path."
       (agent-repl--log-verbose nil ">>> SENTINEL EVENT SKIPPED: action=%s no file in event=%S"
                         action event))
      ((string= fname agent-repl-sentinel-debug-log-filename)
-      nil)
+      (agent-repl--log-verbose nil ">>> SENTINEL EVENT SKIPPED: action=%s hook-debug-log=%s descriptor=%S"
+                                action fname descriptor))
      (t
       (let ((exists (file-exists-p file)))
         (agent-repl--log nil ">>> SENTINEL EVENT: action=%s file=%s exists=%s descriptor=%S event=%S"
@@ -333,6 +348,9 @@ by the file-notify watcher and needs processing."
                   nil))
          ;; Filter out the debug log itself
          (files (cl-remove-if (lambda (f) (string= (file-name-nondirectory f) agent-repl-sentinel-debug-log-filename)) files)))
+    ;; This runs on the 1Hz timer path, so routine scans stay verbose-only.
+    (agent-repl--log-verbose nil "poll-notifications: scan dir=%s exists=%S candidate-count=%d"
+                              agent-repl--sentinel-dir dir-exists (length files))
     (when files
       (agent-repl--log nil "poll-notifications: found %d orphaned file(s): %s"
                         (length files)
@@ -364,6 +382,7 @@ reclaims descriptors leaked across module reloads where that variable
 lost track of the old descriptor."
   (let ((target (file-truename agent-repl--sentinel-dir))
         (removed 0))
+    (agent-repl--log nil "reap-sentinel-watchers: begin target=%s" target)
     (maphash
      (lambda (desc watch)
        (let ((watch-dir (cond
@@ -371,10 +390,15 @@ lost track of the old descriptor."
                                (file-notify--watch-p watch))
                           (file-notify--watch-directory watch))
                          ((consp watch) (car watch)))))
+         (agent-repl--log-verbose nil "reap-sentinel-watchers: inspect descriptor=%S watch-dir=%S target=%S"
+                                   desc watch-dir target)
          (when (and watch-dir (string= (file-truename watch-dir) target))
            (file-notify-rm-watch desc)
-           (cl-incf removed))))
+           (cl-incf removed)
+           (agent-repl--log nil "reap-sentinel-watchers: removed descriptor=%S watch-dir=%S"
+                             desc watch-dir))))
      file-notify-descriptors)
+    (agent-repl--log nil "reap-sentinel-watchers: complete target=%s removed=%d" target removed)
     removed))
 
 (defun agent-repl-reset-sentinel-watchers ()
@@ -385,6 +409,9 @@ Interactive recovery for the reload-accumulated duplicate-watcher case."
     (setq agent-repl--sentinel-watch-descriptor
           (file-notify-add-watch agent-repl--sentinel-dir agent-repl-sentinel-watch-events
                                  #'agent-repl--dispatch-sentinel-event))
+    (agent-repl--log nil "reset-sentinel-watchers: removed=%d dir=%s events=%S descriptor=%S"
+                      removed agent-repl--sentinel-dir agent-repl-sentinel-watch-events
+                      agent-repl--sentinel-watch-descriptor)
     (message "agent-repl: removed %d stale watcher(s); new descriptor=%S"
              removed agent-repl--sentinel-watch-descriptor)))
 
@@ -396,10 +423,15 @@ Useful to verify the init-time reap logic works without restarting Emacs."
   (interactive)
   (let ((removed (agent-repl--reap-sentinel-watchers)))
     (setq agent-repl--sentinel-watch-descriptor nil)
+    (agent-repl--log nil "nuke-sentinel-watchers: removed=%d dir=%s descriptor-cleared=t"
+                      removed agent-repl--sentinel-dir)
     (message "agent-repl: nuked %d sentinel watcher(s) — no replacement registered"
              removed)))
 
+(agent-repl--log nil "sentinel-init: ensure-directory dir=%s" agent-repl--sentinel-dir)
 (make-directory agent-repl--sentinel-dir t)
+(agent-repl--log nil "sentinel-init: directory-ready dir=%s exists=%S"
+                  agent-repl--sentinel-dir (file-directory-p agent-repl--sentinel-dir))
 (let ((reaped (agent-repl--reap-sentinel-watchers)))
   (when (> reaped 0)
     (agent-repl--log nil "sentinel-init: reaped %d stale watcher(s)" reaped)))
