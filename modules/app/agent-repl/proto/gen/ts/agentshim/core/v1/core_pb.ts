@@ -47,7 +47,7 @@ import type { JsonObject, Message } from "@bufbuild/protobuf";
  * Describes the file agentshim/core/v1/core.proto.
  */
 export const file_agentshim_core_v1_core: GenFile = /*@__PURE__*/
-  fileDesc("ChxhZ2VudHNoaW0vY29yZS92MS9jb3JlLnByb3RvEhFhZ2VudHNoaW0uY29yZS52MSLSBwoFRXZlbnQSEgoKc2Vzc2lvbl9pZBgBIAEoCRILCgNzZXEYAiABKAQSJwoFcGxhbmUYAyABKA4yGC5hZ2VudHNoaW0uY29yZS52MS5QbGFuZRIsCgVjbGFzcxgEIAEoDjIdLmFnZW50c2hpbS5jb3JlLnYxLkV2ZW50Q2xhc3MSEgoKcmVxdWVzdF9pZBgFIAEoCRIWCg5wcm9kdWNlZF9hdF9tcxgGIAEoAxIRCglkZWR1cF9rZXkYByABKAkSPAoPc2Vzc2lvbl9zdGFydGVkGAogASgLMiEuYWdlbnRzaGltLmNvcmUudjEuU2Vzc2lvblN0YXJ0ZWRIABI4Cg1zZXNzaW9uX2VuZGVkGAsgASgLMh8uYWdlbnRzaGltLmNvcmUudjEuU2Vzc2lvbkVuZGVkSAASNgoMdHVybl9zdGFydGVkGAwgASgLMh4uYWdlbnRzaGltLmNvcmUudjEuVHVyblN0YXJ0ZWRIABIyCgp0dXJuX2VuZGVkGA0gASgLMhwuYWdlbnRzaGltLmNvcmUudjEuVHVybkVuZGVkSAASNgoMdGFza19zdGFydGVkGA4gASgLMh4uYWdlbnRzaGltLmNvcmUudjEuVGFza1N0YXJ0ZWRIABI4Cg10YXNrX3Byb2dyZXNzGA8gASgLMh8uYWdlbnRzaGltLmNvcmUudjEuVGFza1Byb2dyZXNzSAASMgoKdGFza19lbmRlZBgQIAEoCzIcLmFnZW50c2hpbS5jb3JlLnYxLlRhc2tFbmRlZEgAEjgKDWNvbnRlbnRfZGVsdGEYESABKAsyHy5hZ2VudHNoaW0uY29yZS52MS5Db250ZW50RGVsdGFIABJCChJoZWFydGJlYXRfcHJvZ3Jlc3MYEiABKAsyJC5hZ2VudHNoaW0uY29yZS52MS5IZWFydGJlYXRQcm9ncmVzc0gAEjoKDmRlZ3JhZGVkX3N0YXRlGBMgASgLMiAuYWdlbnRzaGltLmNvcmUudjEuRGVncmFkZWRTdGF0ZUgAEjQKCHVucGFyc2VkGBQgASgLMiAuYWdlbnRzaGltLmNvcmUudjEuVW5wYXJzZWRFdmVudEgAEjwKD21lc3NhZ2VfbGF0ZW5jeRgVIAEoCzIhLmFnZW50c2hpbS5jb3JlLnYxLk1lc3NhZ2VMYXRlbmN5SAASJgoGdmVuZG9yGB4gASgLMhQuZ29vZ2xlLnByb3RvYnVmLkFueUgAEicKBmV4dHJhcxgoIAEoCzIXLmdvb2dsZS5wcm90b2J1Zi5TdHJ1Y3RCCQoHcGF5bG9hZCJuCgpFdmVudEJhdGNoEigKBmV2ZW50cxgBIAMoCzIYLmFnZW50c2hpbS5jb3JlLnYxLkV2ZW50EjYKDmN1cnNvcl9hZHZhbmNlGAIgASgLMh4uYWdlbnRzaGltLmNvcmUudjEuQ3Vyc29yU3RhdGUiZwoNVW5wYXJzZWRFdmVudBITCgtzb3VyY2VfcGF0aBgBIAEoCRITCgtieXRlX29mZnNldBgCIAEoAxILCgNyYXcYAyABKAwSDQoFZXJyb3IYBCABKAkSEAoIcHJvZHVjZXIYBSABKAkieQoOU2Vzc2lvblN0YXJ0ZWQSMAoGc291cmNlGAEgASgOMiAuYWdlbnRzaGltLmNvcmUudjEuU2Vzc2lvblNvdXJjZRINCgVtb2RlbBgCIAEoCRILCgNjd2QYAyABKAkSGQoRdmVuZG9yX3Nlc3Npb25faWQYBCABKAkiHgoMU2Vzc2lvbkVuZGVkEg4KBnJlYXNvbhgBIAEoCSIlCgtUdXJuU3RhcnRlZBIWCg5wcm9tcHRfcHJldmlldxgBIAEoCSJHCglUdXJuRW5kZWQSEwoLc3RvcF9yZWFzb24YASABKAkSEwoLZHVyYXRpb25fbXMYAiABKAMSEAoIaXNfZXJyb3IYAyABKAgiiAEKC1Rhc2tTdGFydGVkEg8KB3Rhc2tfaWQYASABKAkSKQoEa2luZBgCIAEoDjIbLmFnZW50c2hpbS5jb3JlLnYxLlRhc2tLaW5kEhMKC3Rvb2xfdXNlX2lkGAMgASgJEhMKC2Rlc2NyaXB0aW9uGAQgASgJEhMKC291dHB1dF9wYXRoGAUgASgJInwKDFRhc2tQcm9ncmVzcxIPCgd0YXNrX2lkGAEgASgJEikKBGtpbmQYAiABKA4yGy5hZ2VudHNoaW0uY29yZS52MS5UYXNrS2luZBIWCg5ieXRlc19vYnNlcnZlZBgDIAEoAxIYChByZWNvcmRzX29ic2VydmVkGAQgASgDIrMBCglUYXNrRW5kZWQSDwoHdGFza19pZBgBIAEoCRIpCgRraW5kGAIgASgOMhsuYWdlbnRzaGltLmNvcmUudjEuVGFza0tpbmQSMQoGc3RhdHVzGAMgASgOMiEuYWdlbnRzaGltLmNvcmUudjEuVGVybWluYWxTdGF0dXMSDwoHc3VtbWFyeRgEIAEoCRITCgtvdXRwdXRfcGF0aBgFIAEoCRIRCglpbmZlcmVuY2UYBiABKAkiowEKDENvbnRlbnREZWx0YRIMCgR1dWlkGAEgASgJEhMKC2Jsb2NrX2luZGV4GAIgASgNEg4KBHRleHQYAyABKAlIABISCgh0aGlua2luZxgEIAEoCUgAEhQKCmlucHV0X2pzb24YBSABKAlIABITCglzaWduYXR1cmUYBiABKAlIABIYChBlc3RpbWF0ZWRfdG9rZW5zGAcgASgDQgcKBWRlbHRhInAKEUhlYXJ0YmVhdFByb2dyZXNzEhMKC3Rvb2xfdXNlX2lkGAEgASgJEhEKCXRvb2xfbmFtZRgCIAEoCRIaChJwYXJlbnRfdG9vbF91c2VfaWQYAyABKAkSFwoPZWxhcHNlZF9zZWNvbmRzGAQgASgBIi8KDk1lc3NhZ2VMYXRlbmN5EgwKBHV1aWQYASABKAkSDwoHdHRmdF9tcxgCIAEoAyJcCg1EZWdyYWRlZFN0YXRlEhEKCWNvbXBvbmVudBgBIAEoCRIOCgZyZWFzb24YAiABKAkSFQoNZHJvcHBlZF9jb3VudBgDIAEoBBIRCglyZWNvdmVyZWQYBCABKAgidwoJU2hpbUhlbGxvEhIKCnNlc3Npb25faWQYASABKAkSDgoGdmVuZG9yGAIgASgJEhQKDHNoaW1fdmVyc2lvbhgDIAEoCRIYChBwcm90b2NvbF92ZXJzaW9uGAQgASgJEhYKDnR1cm5faW5fZmxpZ2h0GAUgASgIIj8KC0RhZW1vbkhlbGxvEhYKDmRhZW1vbl92ZXJzaW9uGAEgASgJEhgKEHByb3RvY29sX3ZlcnNpb24YAiABKAkiWQoMU3VibWl0UHJvbXB0EhIKCnJlcXVlc3RfaWQYASABKAkSDAoEdGV4dBgCIAEoCRIOCgZvcmlnaW4YAyABKAkSFwoPcGVybWlzc2lvbl9tb2RlGAQgASgJIi0KCUludGVycnVwdBISCgpyZXF1ZXN0X2lkGAEgASgJEgwKBGhhcmQYAiABKAgiWQoDQWNrEhIKCnJlcXVlc3RfaWQYASABKAkSPgoRaW50ZXJydXB0X291dGNvbWUYAiABKA4yIy5hZ2VudHNoaW0uY29yZS52MS5JbnRlcnJ1cHRPdXRjb21lIioKBE5hY2sSEgoKcmVxdWVzdF9pZBgBIAEoCRIOCgZyZWFzb24YAiABKAkiMQoJU3Vic2NyaWJlEhIKCnNlc3Npb25faWQYASABKAkSEAoIZnJvbV9zZXEYAiABKAQiWQoNUmVwbGF5UmVxdWVzdBISCgpyZXF1ZXN0X2lkGAEgASgJEhAKCGZyb21fc2VxGAIgASgEEg4KBnRvX3NlcRgDIAEoBBISCgptYXhfZXZlbnRzGAQgASgNIkoKC1JlcGxheUV2ZW50EhIKCnJlcXVlc3RfaWQYASABKAkSJwoFZXZlbnQYAiABKAsyGC5hZ2VudHNoaW0uY29yZS52MS5FdmVudCJWCgpSZXBsYXlEb25lEhIKCnJlcXVlc3RfaWQYASABKAkSEQoJdHJ1bmNhdGVkGAIgASgIEg4KBnJlYXNvbhgDIAEoCRIRCglkZWxpdmVyZWQYBCABKAQiYgoRUGVybWlzc2lvblJlcXVlc3QSEgoKcmVxdWVzdF9pZBgBIAEoCRIRCgl0b29sX25hbWUYAiABKAkSJgoFaW5wdXQYAyABKAsyFy5nb29nbGUucHJvdG9idWYuU3RydWN0IqcBChJQZXJtaXNzaW9uUmVzcG9uc2USEgoKcmVxdWVzdF9pZBgBIAEoCRI3CghkZWNpc2lvbhgCIAEoDjIlLmFnZW50c2hpbS5jb3JlLnYxLlBlcm1pc3Npb25EZWNpc2lvbhIuCg11cGRhdGVkX2lucHV0GAMgASgLMhcuZ29vZ2xlLnByb3RvYnVmLlN0cnVjdBIUCgxkZW55X21lc3NhZ2UYBCABKAkiqwIKDlBlcm1pc3Npb25JdGVtEjUKB3JlcXVlc3QYASABKAsyJC5hZ2VudHNoaW0uY29yZS52MS5QZXJtaXNzaW9uUmVxdWVzdBJACgpyZXNvbHV0aW9uGAIgASgOMiwuYWdlbnRzaGltLmNvcmUudjEuUGVybWlzc2lvbkl0ZW0uUmVzb2x1dGlvbhIUCgxkZW55X21lc3NhZ2UYAyABKAkiiQEKClJlc29sdXRpb24SGgoWUkVTT0xVVElPTl9VTlNQRUNJRklFRBAAEhYKElJFU09MVVRJT05fUEVORElORxABEhYKElJFU09MVVRJT05fQUxMT1dFRBACEhUKEVJFU09MVVRJT05fREVOSUVEEAMSGAoUUkVTT0xVVElPTl9BQkFORE9ORUQQBCIfCglIZWFydGJlYXQSEgoKc2VudF9hdF9tcxgBIAEoAyIhCgtIZWFsdGhDaGVjaxISCgpyZXF1ZXN0X2lkGAEgASgJIlYKDEhlYWx0aFN0YXR1cxISCgpyZXF1ZXN0X2lkGAEgASgJEg8KB2hlYWx0aHkYAiABKAgSEQoJY29tcG9uZW50GAMgASgJEg4KBnJlYXNvbhgEIAEoCSJMCgpTdG9yZVdyaXRlEhAKCHByb2R1Y2VyGAEgASgJEiwKBWJhdGNoGAIgASgLMh0uYWdlbnRzaGltLmNvcmUudjEuRXZlbnRCYXRjaCJTCg1TdG9yZVdyaXRlQWNrEhAKCGFjY2VwdGVkGAEgASgEEg8KB2RlZHVwZWQYAiABKAQSEAoIbGFzdF9zZXEYAyABKAQSDQoFZXJyb3IYBCABKAkiSwoLQ3Vyc29yU3RhdGUSDwoHZmlsZV9pZBgBIAEoCRIMCgRwYXRoGAIgASgJEg4KBm9mZnNldBgDIAEoAxINCgVjYXJyeRgEIAEoDCIeCgtDdXJzb3JRdWVyeRIPCgdmaWxlX2lkGAEgASgJIlcKDU9wZW5UYXNrU3RhdGUSKQoHc3RhcnRlZBgBIAEoCzIYLmFnZW50c2hpbS5jb3JlLnYxLkV2ZW50EhsKE2xhc3RfYWN0aXZpdHlfYXRfbXMYAiABKAMilQEKCkN1cnNvckxpc3QSLwoHY3Vyc29ycxgBIAMoCzIeLmFnZW50c2hpbS5jb3JlLnYxLkN1cnNvclN0YXRlEjQKCm9wZW5fdGFza3MYAiADKAsyIC5hZ2VudHNoaW0uY29yZS52MS5PcGVuVGFza1N0YXRlEiAKGG9wZW5fdGFza3NfYXV0aG9yaXRhdGl2ZRgDIAEoCCpVCgVQbGFuZRIVChFQTEFORV9VTlNQRUNJRklFRBAAEhAKDFBMQU5FX1NUUkVBTRABEg4KClBMQU5FX0ZJTEUQAhITCg9QTEFORV9TWU5USEVUSUMQAypgCgpFdmVudENsYXNzEhsKF0VWRU5UX0NMQVNTX1VOU1BFQ0lGSUVEEAASGgoWRVZFTlRfQ0xBU1NfUEVSU0lTVEVOVBABEhkKFUVWRU5UX0NMQVNTX0VQSEVNRVJBTBACKmcKCFRhc2tLaW5kEhkKFVRBU0tfS0lORF9VTlNQRUNJRklFRBAAEhMKD1RBU0tfS0lORF9BR0VOVBABEhMKD1RBU0tfS0lORF9TSEVMTBACEhYKElRBU0tfS0lORF9XT1JLRkxPVxADKrkBCg5UZXJtaW5hbFN0YXR1cxIfChtURVJNSU5BTF9TVEFUVVNfVU5TUEVDSUZJRUQQABIYChRURVJNSU5BTF9TVEFUVVNfRE9ORRABEhkKFVRFUk1JTkFMX1NUQVRVU19FUlJPUhACEhoKFlRFUk1JTkFMX1NUQVRVU19LSUxMRUQQAxIbChdURVJNSU5BTF9TVEFUVVNfU1RPUFBFRBAEEhgKFFRFUk1JTkFMX1NUQVRVU19MT1NUEAUqiQEKDVNlc3Npb25Tb3VyY2USHgoaU0VTU0lPTl9TT1VSQ0VfVU5TUEVDSUZJRUQQABIYChRTRVNTSU9OX1NPVVJDRV9GUkVTSBABEhkKFVNFU1NJT05fU09VUkNFX1JFU1VNRRACEiMKH1NFU1NJT05fU09VUkNFX0NPTVBBQ1RfQ09OVElOVUUQAyp2ChJQZXJtaXNzaW9uRGVjaXNpb24SIwofUEVSTUlTU0lPTl9ERUNJU0lPTl9VTlNQRUNJRklFRBAAEh0KGVBFUk1JU1NJT05fREVDSVNJT05fQUxMT1cQARIcChhQRVJNSVNTSU9OX0RFQ0lTSU9OX0RFTlkQAiqeAQoQSW50ZXJydXB0T3V0Y29tZRIhCh1JTlRFUlJVUFRfT1VUQ09NRV9VTlNQRUNJRklFRBAAEiEKHUlOVEVSUlVQVF9PVVRDT01FX0lOVEVSUlVQVEVEEAESJgoiSU5URVJSVVBUX09VVENPTUVfQUxSRUFEWV9DT01QTEVURRACEhwKGElOVEVSUlVQVF9PVVRDT01FX0ZBSUxFRBADQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHNoaW0vY29yZS92MTtjb3JldjFiBnByb3RvMw", [file_google_protobuf_any, file_google_protobuf_struct]);
+  fileDesc("ChxhZ2VudHNoaW0vY29yZS92MS9jb3JlLnByb3RvEhFhZ2VudHNoaW0uY29yZS52MSLSCAoFRXZlbnQSEgoKc2Vzc2lvbl9pZBgBIAEoCRILCgNzZXEYAiABKAQSJwoFcGxhbmUYAyABKA4yGC5hZ2VudHNoaW0uY29yZS52MS5QbGFuZRIsCgVjbGFzcxgEIAEoDjIdLmFnZW50c2hpbS5jb3JlLnYxLkV2ZW50Q2xhc3MSEgoKcmVxdWVzdF9pZBgFIAEoCRIWCg5wcm9kdWNlZF9hdF9tcxgGIAEoAxIRCglkZWR1cF9rZXkYByABKAkSPAoPc2Vzc2lvbl9zdGFydGVkGAogASgLMiEuYWdlbnRzaGltLmNvcmUudjEuU2Vzc2lvblN0YXJ0ZWRIABI4Cg1zZXNzaW9uX2VuZGVkGAsgASgLMh8uYWdlbnRzaGltLmNvcmUudjEuU2Vzc2lvbkVuZGVkSAASNgoMdHVybl9zdGFydGVkGAwgASgLMh4uYWdlbnRzaGltLmNvcmUudjEuVHVyblN0YXJ0ZWRIABIyCgp0dXJuX2VuZGVkGA0gASgLMhwuYWdlbnRzaGltLmNvcmUudjEuVHVybkVuZGVkSAASNgoMdGFza19zdGFydGVkGA4gASgLMh4uYWdlbnRzaGltLmNvcmUudjEuVGFza1N0YXJ0ZWRIABI4Cg10YXNrX3Byb2dyZXNzGA8gASgLMh8uYWdlbnRzaGltLmNvcmUudjEuVGFza1Byb2dyZXNzSAASMgoKdGFza19lbmRlZBgQIAEoCzIcLmFnZW50c2hpbS5jb3JlLnYxLlRhc2tFbmRlZEgAEjgKDWNvbnRlbnRfZGVsdGEYESABKAsyHy5hZ2VudHNoaW0uY29yZS52MS5Db250ZW50RGVsdGFIABJCChJoZWFydGJlYXRfcHJvZ3Jlc3MYEiABKAsyJC5hZ2VudHNoaW0uY29yZS52MS5IZWFydGJlYXRQcm9ncmVzc0gAEjoKDmRlZ3JhZGVkX3N0YXRlGBMgASgLMiAuYWdlbnRzaGltLmNvcmUudjEuRGVncmFkZWRTdGF0ZUgAEjQKCHVucGFyc2VkGBQgASgLMiAuYWdlbnRzaGltLmNvcmUudjEuVW5wYXJzZWRFdmVudEgAEjwKD21lc3NhZ2VfbGF0ZW5jeRgVIAEoCzIhLmFnZW50c2hpbS5jb3JlLnYxLk1lc3NhZ2VMYXRlbmN5SAASPAoPY29udGV4dF9jbGVhcmVkGBYgASgLMiEuYWdlbnRzaGltLmNvcmUudjEuQ29udGV4dENsZWFyZWRIABJAChFjb250ZXh0X2NvbXBhY3RlZBgXIAEoCzIjLmFnZW50c2hpbS5jb3JlLnYxLkNvbnRleHRDb21wYWN0ZWRIABImCgZ2ZW5kb3IYHiABKAsyFC5nb29nbGUucHJvdG9idWYuQW55SAASJwoGZXh0cmFzGCggASgLMhcuZ29vZ2xlLnByb3RvYnVmLlN0cnVjdEIJCgdwYXlsb2FkIm4KCkV2ZW50QmF0Y2gSKAoGZXZlbnRzGAEgAygLMhguYWdlbnRzaGltLmNvcmUudjEuRXZlbnQSNgoOY3Vyc29yX2FkdmFuY2UYAiABKAsyHi5hZ2VudHNoaW0uY29yZS52MS5DdXJzb3JTdGF0ZSJnCg1VbnBhcnNlZEV2ZW50EhMKC3NvdXJjZV9wYXRoGAEgASgJEhMKC2J5dGVfb2Zmc2V0GAIgASgDEgsKA3JhdxgDIAEoDBINCgVlcnJvchgEIAEoCRIQCghwcm9kdWNlchgFIAEoCSJ5Cg5TZXNzaW9uU3RhcnRlZBIwCgZzb3VyY2UYASABKA4yIC5hZ2VudHNoaW0uY29yZS52MS5TZXNzaW9uU291cmNlEg0KBW1vZGVsGAIgASgJEgsKA2N3ZBgDIAEoCRIZChF2ZW5kb3Jfc2Vzc2lvbl9pZBgEIAEoCSIeCgxTZXNzaW9uRW5kZWQSDgoGcmVhc29uGAEgASgJIiUKC1R1cm5TdGFydGVkEhYKDnByb21wdF9wcmV2aWV3GAEgASgJIkcKCVR1cm5FbmRlZBITCgtzdG9wX3JlYXNvbhgBIAEoCRITCgtkdXJhdGlvbl9tcxgCIAEoAxIQCghpc19lcnJvchgDIAEoCCJHCg5Db250ZXh0Q2xlYXJlZBI1Cgd0cmlnZ2VyGAEgASgOMiQuYWdlbnRzaGltLmNvcmUudjEuQ29udGV4dEN1dFRyaWdnZXIitwEKEENvbnRleHRDb21wYWN0ZWQSNQoHdHJpZ2dlchgBIAEoDjIkLmFnZW50c2hpbS5jb3JlLnYxLkNvbnRleHRDdXRUcmlnZ2VyEhIKCnByZV90b2tlbnMYAiABKAMSEwoLcG9zdF90b2tlbnMYAyABKAMSEwoLZHVyYXRpb25fbXMYBCABKAMSDwoHc3VtbWFyeRgFIAEoCRIOCgZyZXN1bHQYBiABKAkSDQoFZXJyb3IYByABKAkiiAEKC1Rhc2tTdGFydGVkEg8KB3Rhc2tfaWQYASABKAkSKQoEa2luZBgCIAEoDjIbLmFnZW50c2hpbS5jb3JlLnYxLlRhc2tLaW5kEhMKC3Rvb2xfdXNlX2lkGAMgASgJEhMKC2Rlc2NyaXB0aW9uGAQgASgJEhMKC291dHB1dF9wYXRoGAUgASgJInwKDFRhc2tQcm9ncmVzcxIPCgd0YXNrX2lkGAEgASgJEikKBGtpbmQYAiABKA4yGy5hZ2VudHNoaW0uY29yZS52MS5UYXNrS2luZBIWCg5ieXRlc19vYnNlcnZlZBgDIAEoAxIYChByZWNvcmRzX29ic2VydmVkGAQgASgDIrMBCglUYXNrRW5kZWQSDwoHdGFza19pZBgBIAEoCRIpCgRraW5kGAIgASgOMhsuYWdlbnRzaGltLmNvcmUudjEuVGFza0tpbmQSMQoGc3RhdHVzGAMgASgOMiEuYWdlbnRzaGltLmNvcmUudjEuVGVybWluYWxTdGF0dXMSDwoHc3VtbWFyeRgEIAEoCRITCgtvdXRwdXRfcGF0aBgFIAEoCRIRCglpbmZlcmVuY2UYBiABKAkiowEKDENvbnRlbnREZWx0YRIMCgR1dWlkGAEgASgJEhMKC2Jsb2NrX2luZGV4GAIgASgNEg4KBHRleHQYAyABKAlIABISCgh0aGlua2luZxgEIAEoCUgAEhQKCmlucHV0X2pzb24YBSABKAlIABITCglzaWduYXR1cmUYBiABKAlIABIYChBlc3RpbWF0ZWRfdG9rZW5zGAcgASgDQgcKBWRlbHRhInAKEUhlYXJ0YmVhdFByb2dyZXNzEhMKC3Rvb2xfdXNlX2lkGAEgASgJEhEKCXRvb2xfbmFtZRgCIAEoCRIaChJwYXJlbnRfdG9vbF91c2VfaWQYAyABKAkSFwoPZWxhcHNlZF9zZWNvbmRzGAQgASgBIi8KDk1lc3NhZ2VMYXRlbmN5EgwKBHV1aWQYASABKAkSDwoHdHRmdF9tcxgCIAEoAyJcCg1EZWdyYWRlZFN0YXRlEhEKCWNvbXBvbmVudBgBIAEoCRIOCgZyZWFzb24YAiABKAkSFQoNZHJvcHBlZF9jb3VudBgDIAEoBBIRCglyZWNvdmVyZWQYBCABKAgidwoJU2hpbUhlbGxvEhIKCnNlc3Npb25faWQYASABKAkSDgoGdmVuZG9yGAIgASgJEhQKDHNoaW1fdmVyc2lvbhgDIAEoCRIYChBwcm90b2NvbF92ZXJzaW9uGAQgASgJEhYKDnR1cm5faW5fZmxpZ2h0GAUgASgIIj8KC0RhZW1vbkhlbGxvEhYKDmRhZW1vbl92ZXJzaW9uGAEgASgJEhgKEHByb3RvY29sX3ZlcnNpb24YAiABKAkiWQoMU3VibWl0UHJvbXB0EhIKCnJlcXVlc3RfaWQYASABKAkSDAoEdGV4dBgCIAEoCRIOCgZvcmlnaW4YAyABKAkSFwoPcGVybWlzc2lvbl9tb2RlGAQgASgJIi0KCUludGVycnVwdBISCgpyZXF1ZXN0X2lkGAEgASgJEgwKBGhhcmQYAiABKAgiWQoDQWNrEhIKCnJlcXVlc3RfaWQYASABKAkSPgoRaW50ZXJydXB0X291dGNvbWUYAiABKA4yIy5hZ2VudHNoaW0uY29yZS52MS5JbnRlcnJ1cHRPdXRjb21lIioKBE5hY2sSEgoKcmVxdWVzdF9pZBgBIAEoCRIOCgZyZWFzb24YAiABKAkiMQoJU3Vic2NyaWJlEhIKCnNlc3Npb25faWQYASABKAkSEAoIZnJvbV9zZXEYAiABKAQiWQoNUmVwbGF5UmVxdWVzdBISCgpyZXF1ZXN0X2lkGAEgASgJEhAKCGZyb21fc2VxGAIgASgEEg4KBnRvX3NlcRgDIAEoBBISCgptYXhfZXZlbnRzGAQgASgNIkoKC1JlcGxheUV2ZW50EhIKCnJlcXVlc3RfaWQYASABKAkSJwoFZXZlbnQYAiABKAsyGC5hZ2VudHNoaW0uY29yZS52MS5FdmVudCJWCgpSZXBsYXlEb25lEhIKCnJlcXVlc3RfaWQYASABKAkSEQoJdHJ1bmNhdGVkGAIgASgIEg4KBnJlYXNvbhgDIAEoCRIRCglkZWxpdmVyZWQYBCABKAQiYgoRUGVybWlzc2lvblJlcXVlc3QSEgoKcmVxdWVzdF9pZBgBIAEoCRIRCgl0b29sX25hbWUYAiABKAkSJgoFaW5wdXQYAyABKAsyFy5nb29nbGUucHJvdG9idWYuU3RydWN0IqcBChJQZXJtaXNzaW9uUmVzcG9uc2USEgoKcmVxdWVzdF9pZBgBIAEoCRI3CghkZWNpc2lvbhgCIAEoDjIlLmFnZW50c2hpbS5jb3JlLnYxLlBlcm1pc3Npb25EZWNpc2lvbhIuCg11cGRhdGVkX2lucHV0GAMgASgLMhcuZ29vZ2xlLnByb3RvYnVmLlN0cnVjdBIUCgxkZW55X21lc3NhZ2UYBCABKAkiqwIKDlBlcm1pc3Npb25JdGVtEjUKB3JlcXVlc3QYASABKAsyJC5hZ2VudHNoaW0uY29yZS52MS5QZXJtaXNzaW9uUmVxdWVzdBJACgpyZXNvbHV0aW9uGAIgASgOMiwuYWdlbnRzaGltLmNvcmUudjEuUGVybWlzc2lvbkl0ZW0uUmVzb2x1dGlvbhIUCgxkZW55X21lc3NhZ2UYAyABKAkiiQEKClJlc29sdXRpb24SGgoWUkVTT0xVVElPTl9VTlNQRUNJRklFRBAAEhYKElJFU09MVVRJT05fUEVORElORxABEhYKElJFU09MVVRJT05fQUxMT1dFRBACEhUKEVJFU09MVVRJT05fREVOSUVEEAMSGAoUUkVTT0xVVElPTl9BQkFORE9ORUQQBCIfCglIZWFydGJlYXQSEgoKc2VudF9hdF9tcxgBIAEoAyIhCgtIZWFsdGhDaGVjaxISCgpyZXF1ZXN0X2lkGAEgASgJIlYKDEhlYWx0aFN0YXR1cxISCgpyZXF1ZXN0X2lkGAEgASgJEg8KB2hlYWx0aHkYAiABKAgSEQoJY29tcG9uZW50GAMgASgJEg4KBnJlYXNvbhgEIAEoCSJMCgpTdG9yZVdyaXRlEhAKCHByb2R1Y2VyGAEgASgJEiwKBWJhdGNoGAIgASgLMh0uYWdlbnRzaGltLmNvcmUudjEuRXZlbnRCYXRjaCJTCg1TdG9yZVdyaXRlQWNrEhAKCGFjY2VwdGVkGAEgASgEEg8KB2RlZHVwZWQYAiABKAQSEAoIbGFzdF9zZXEYAyABKAQSDQoFZXJyb3IYBCABKAkiSwoLQ3Vyc29yU3RhdGUSDwoHZmlsZV9pZBgBIAEoCRIMCgRwYXRoGAIgASgJEg4KBm9mZnNldBgDIAEoAxINCgVjYXJyeRgEIAEoDCIeCgtDdXJzb3JRdWVyeRIPCgdmaWxlX2lkGAEgASgJIlcKDU9wZW5UYXNrU3RhdGUSKQoHc3RhcnRlZBgBIAEoCzIYLmFnZW50c2hpbS5jb3JlLnYxLkV2ZW50EhsKE2xhc3RfYWN0aXZpdHlfYXRfbXMYAiABKAMilQEKCkN1cnNvckxpc3QSLwoHY3Vyc29ycxgBIAMoCzIeLmFnZW50c2hpbS5jb3JlLnYxLkN1cnNvclN0YXRlEjQKCm9wZW5fdGFza3MYAiADKAsyIC5hZ2VudHNoaW0uY29yZS52MS5PcGVuVGFza1N0YXRlEiAKGG9wZW5fdGFza3NfYXV0aG9yaXRhdGl2ZRgDIAEoCCpVCgVQbGFuZRIVChFQTEFORV9VTlNQRUNJRklFRBAAEhAKDFBMQU5FX1NUUkVBTRABEg4KClBMQU5FX0ZJTEUQAhITCg9QTEFORV9TWU5USEVUSUMQAypgCgpFdmVudENsYXNzEhsKF0VWRU5UX0NMQVNTX1VOU1BFQ0lGSUVEEAASGgoWRVZFTlRfQ0xBU1NfUEVSU0lTVEVOVBABEhkKFUVWRU5UX0NMQVNTX0VQSEVNRVJBTBACKmcKCFRhc2tLaW5kEhkKFVRBU0tfS0lORF9VTlNQRUNJRklFRBAAEhMKD1RBU0tfS0lORF9BR0VOVBABEhMKD1RBU0tfS0lORF9TSEVMTBACEhYKElRBU0tfS0lORF9XT1JLRkxPVxADKrkBCg5UZXJtaW5hbFN0YXR1cxIfChtURVJNSU5BTF9TVEFUVVNfVU5TUEVDSUZJRUQQABIYChRURVJNSU5BTF9TVEFUVVNfRE9ORRABEhkKFVRFUk1JTkFMX1NUQVRVU19FUlJPUhACEhoKFlRFUk1JTkFMX1NUQVRVU19LSUxMRUQQAxIbChdURVJNSU5BTF9TVEFUVVNfU1RPUFBFRBAEEhgKFFRFUk1JTkFMX1NUQVRVU19MT1NUEAUqiQEKDVNlc3Npb25Tb3VyY2USHgoaU0VTU0lPTl9TT1VSQ0VfVU5TUEVDSUZJRUQQABIYChRTRVNTSU9OX1NPVVJDRV9GUkVTSBABEhkKFVNFU1NJT05fU09VUkNFX1JFU1VNRRACEiMKH1NFU1NJT05fU09VUkNFX0NPTVBBQ1RfQ09OVElOVUUQAyp2ChJQZXJtaXNzaW9uRGVjaXNpb24SIwofUEVSTUlTU0lPTl9ERUNJU0lPTl9VTlNQRUNJRklFRBAAEh0KGVBFUk1JU1NJT05fREVDSVNJT05fQUxMT1cQARIcChhQRVJNSVNTSU9OX0RFQ0lTSU9OX0RFTlkQAip2ChFDb250ZXh0Q3V0VHJpZ2dlchIjCh9DT05URVhUX0NVVF9UUklHR0VSX1VOU1BFQ0lGSUVEEAASHgoaQ09OVEVYVF9DVVRfVFJJR0dFUl9NQU5VQUwQARIcChhDT05URVhUX0NVVF9UUklHR0VSX0FVVE8QAiqeAQoQSW50ZXJydXB0T3V0Y29tZRIhCh1JTlRFUlJVUFRfT1VUQ09NRV9VTlNQRUNJRklFRBAAEiEKHUlOVEVSUlVQVF9PVVRDT01FX0lOVEVSUlVQVEVEEAESJgoiSU5URVJSVVBUX09VVENPTUVfQUxSRUFEWV9DT01QTEVURRACEhwKGElOVEVSUlVQVF9PVVRDT01FX0ZBSUxFRBADQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHNoaW0vY29yZS92MTtjb3JldjFiBnByb3RvMw", [file_google_protobuf_any, file_google_protobuf_struct]);
 
 /**
  * Event is THE envelope every observation travels in.
@@ -177,6 +177,21 @@ export type Event = Message<"agentshim.core.v1.Event"> & {
      */
     value: MessageLatency;
     case: "messageLatency";
+  } | {
+    /**
+     * Context cuts. First-class payloads so the store's `kind` column names
+     * them and the daemon can find the newest cut with an envelope query.
+     *
+     * @generated from field: agentshim.core.v1.ContextCleared context_cleared = 22;
+     */
+    value: ContextCleared;
+    case: "contextCleared";
+  } | {
+    /**
+     * @generated from field: agentshim.core.v1.ContextCompacted context_compacted = 23;
+     */
+    value: ContextCompacted;
+    case: "contextCompacted";
   } | {
     /**
      * Vendor extension payload (e.g. agentshim.data.v1.* messages). The
@@ -381,6 +396,91 @@ export const TurnEndedSchema: GenMessage<TurnEnded> = /*@__PURE__*/
   messageDesc(file_agentshim_core_v1_core, 6);
 
 /**
+ * The context was DISCARDED outright — `/clear` and its per-vendor
+ * equivalents. Nothing survives it, so there is no summary to carry: the
+ * event's existence and its position are the entire fact.
+ *
+ * @generated from message agentshim.core.v1.ContextCleared
+ */
+export type ContextCleared = Message<"agentshim.core.v1.ContextCleared"> & {
+  /**
+   * @generated from field: agentshim.core.v1.ContextCutTrigger trigger = 1;
+   */
+  trigger: ContextCutTrigger;
+};
+
+/**
+ * Describes the message agentshim.core.v1.ContextCleared.
+ * Use `create(ContextClearedSchema)` to create a new message.
+ */
+export const ContextClearedSchema: GenMessage<ContextCleared> = /*@__PURE__*/
+  messageDesc(file_agentshim_core_v1_core, 7);
+
+/**
+ * The context was COMPACTED: replaced by a summary that stands in for it.
+ *
+ * The fields are the COALESCED account of a compaction, which the vendor
+ * reports across as many as three separate messages (a start status, a
+ * boundary carrying token counts, and a summary line typed as an ordinary
+ * user message). Producers fill what their plane knows and the daemon merges
+ * the twins by uuid, so every consumer downstream reads one complete fact
+ * instead of correlating three partial ones.
+ *
+ * `summary` is the only field the stream plane cannot supply, because the
+ * vendor emits the summary text as a separate transcript line rather than on
+ * the boundary itself.
+ *
+ * @generated from message agentshim.core.v1.ContextCompacted
+ */
+export type ContextCompacted = Message<"agentshim.core.v1.ContextCompacted"> & {
+  /**
+   * @generated from field: agentshim.core.v1.ContextCutTrigger trigger = 1;
+   */
+  trigger: ContextCutTrigger;
+
+  /**
+   * @generated from field: int64 pre_tokens = 2;
+   */
+  preTokens: bigint;
+
+  /**
+   * @generated from field: int64 post_tokens = 3;
+   */
+  postTokens: bigint;
+
+  /**
+   * @generated from field: int64 duration_ms = 4;
+   */
+  durationMs: bigint;
+
+  /**
+   * @generated from field: string summary = 5;
+   */
+  summary: string;
+
+  /**
+   * "success" | "failed"
+   *
+   * @generated from field: string result = 6;
+   */
+  result: string;
+
+  /**
+   * populated only when result is "failed"
+   *
+   * @generated from field: string error = 7;
+   */
+  error: string;
+};
+
+/**
+ * Describes the message agentshim.core.v1.ContextCompacted.
+ * Use `create(ContextCompactedSchema)` to create a new message.
+ */
+export const ContextCompactedSchema: GenMessage<ContextCompacted> = /*@__PURE__*/
+  messageDesc(file_agentshim_core_v1_core, 8);
+
+/**
  * @generated from message agentshim.core.v1.TaskStarted
  */
 export type TaskStarted = Message<"agentshim.core.v1.TaskStarted"> & {
@@ -417,7 +517,7 @@ export type TaskStarted = Message<"agentshim.core.v1.TaskStarted"> & {
  * Use `create(TaskStartedSchema)` to create a new message.
  */
 export const TaskStartedSchema: GenMessage<TaskStarted> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 7);
+  messageDesc(file_agentshim_core_v1_core, 9);
 
 /**
  * @generated from message agentshim.core.v1.TaskProgress
@@ -453,7 +553,7 @@ export type TaskProgress = Message<"agentshim.core.v1.TaskProgress"> & {
  * Use `create(TaskProgressSchema)` to create a new message.
  */
 export const TaskProgressSchema: GenMessage<TaskProgress> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 8);
+  messageDesc(file_agentshim_core_v1_core, 10);
 
 /**
  * @generated from message agentshim.core.v1.TaskEnded
@@ -502,7 +602,7 @@ export type TaskEnded = Message<"agentshim.core.v1.TaskEnded"> & {
  * Use `create(TaskEndedSchema)` to create a new message.
  */
 export const TaskEndedSchema: GenMessage<TaskEnded> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 9);
+  messageDesc(file_agentshim_core_v1_core, 11);
 
 /**
  * EPHEMERAL live-typing delta (delta bypass; see file-top semantics).
@@ -566,7 +666,7 @@ export type ContentDelta = Message<"agentshim.core.v1.ContentDelta"> & {
  * Use `create(ContentDeltaSchema)` to create a new message.
  */
 export const ContentDeltaSchema: GenMessage<ContentDelta> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 10);
+  messageDesc(file_agentshim_core_v1_core, 12);
 
 /**
  * EPHEMERAL tool_progress relay.
@@ -600,7 +700,7 @@ export type HeartbeatProgress = Message<"agentshim.core.v1.HeartbeatProgress"> &
  * Use `create(HeartbeatProgressSchema)` to create a new message.
  */
 export const HeartbeatProgressSchema: GenMessage<HeartbeatProgress> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 11);
+  messageDesc(file_agentshim_core_v1_core, 13);
 
 /**
  * EPHEMERAL first-token-latency relay.
@@ -639,7 +739,7 @@ export type MessageLatency = Message<"agentshim.core.v1.MessageLatency"> & {
  * Use `create(MessageLatencySchema)` to create a new message.
  */
 export const MessageLatencySchema: GenMessage<MessageLatency> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 12);
+  messageDesc(file_agentshim_core_v1_core, 14);
 
 /**
  * Honest sad-path report (store unreachable, converter storm, …).
@@ -677,7 +777,7 @@ export type DegradedState = Message<"agentshim.core.v1.DegradedState"> & {
  * Use `create(DegradedStateSchema)` to create a new message.
  */
 export const DegradedStateSchema: GenMessage<DegradedState> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 13);
+  messageDesc(file_agentshim_core_v1_core, 15);
 
 /**
  * Connection handshakes. The listener speaks first with its Hello.
@@ -720,7 +820,7 @@ export type ShimHello = Message<"agentshim.core.v1.ShimHello"> & {
  * Use `create(ShimHelloSchema)` to create a new message.
  */
 export const ShimHelloSchema: GenMessage<ShimHello> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 14);
+  messageDesc(file_agentshim_core_v1_core, 16);
 
 /**
  * @generated from message agentshim.core.v1.DaemonHello
@@ -742,7 +842,7 @@ export type DaemonHello = Message<"agentshim.core.v1.DaemonHello"> & {
  * Use `create(DaemonHelloSchema)` to create a new message.
  */
 export const DaemonHelloSchema: GenMessage<DaemonHello> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 15);
+  messageDesc(file_agentshim_core_v1_core, 17);
 
 /**
  * @generated from message agentshim.core.v1.SubmitPrompt
@@ -778,7 +878,7 @@ export type SubmitPrompt = Message<"agentshim.core.v1.SubmitPrompt"> & {
  * Use `create(SubmitPromptSchema)` to create a new message.
  */
 export const SubmitPromptSchema: GenMessage<SubmitPrompt> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 16);
+  messageDesc(file_agentshim_core_v1_core, 18);
 
 /**
  * @generated from message agentshim.core.v1.Interrupt
@@ -802,7 +902,7 @@ export type Interrupt = Message<"agentshim.core.v1.Interrupt"> & {
  * Use `create(InterruptSchema)` to create a new message.
  */
 export const InterruptSchema: GenMessage<Interrupt> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 17);
+  messageDesc(file_agentshim_core_v1_core, 19);
 
 /**
  * @generated from message agentshim.core.v1.Ack
@@ -827,7 +927,7 @@ export type Ack = Message<"agentshim.core.v1.Ack"> & {
  * Use `create(AckSchema)` to create a new message.
  */
 export const AckSchema: GenMessage<Ack> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 18);
+  messageDesc(file_agentshim_core_v1_core, 20);
 
 /**
  * @generated from message agentshim.core.v1.Nack
@@ -849,7 +949,7 @@ export type Nack = Message<"agentshim.core.v1.Nack"> & {
  * Use `create(NackSchema)` to create a new message.
  */
 export const NackSchema: GenMessage<Nack> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 19);
+  messageDesc(file_agentshim_core_v1_core, 21);
 
 /**
  * Replay handshake (see file-top semantics). from_seq is EXCLUSIVE.
@@ -873,7 +973,7 @@ export type Subscribe = Message<"agentshim.core.v1.Subscribe"> & {
  * Use `create(SubscribeSchema)` to create a new message.
  */
 export const SubscribeSchema: GenMessage<Subscribe> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 20);
+  messageDesc(file_agentshim_core_v1_core, 22);
 
 /**
  * ---------------------------------------------------------------------------
@@ -938,7 +1038,7 @@ export type ReplayRequest = Message<"agentshim.core.v1.ReplayRequest"> & {
  * Use `create(ReplayRequestSchema)` to create a new message.
  */
 export const ReplayRequestSchema: GenMessage<ReplayRequest> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 21);
+  messageDesc(file_agentshim_core_v1_core, 23);
 
 /**
  * One replayed historical event.
@@ -976,7 +1076,7 @@ export type ReplayEvent = Message<"agentshim.core.v1.ReplayEvent"> & {
  * Use `create(ReplayEventSchema)` to create a new message.
  */
 export const ReplayEventSchema: GenMessage<ReplayEvent> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 22);
+  messageDesc(file_agentshim_core_v1_core, 24);
 
 /**
  * Closes a replay. Exactly one per ReplayRequest, whatever the outcome: a
@@ -1021,7 +1121,7 @@ export type ReplayDone = Message<"agentshim.core.v1.ReplayDone"> & {
  * Use `create(ReplayDoneSchema)` to create a new message.
  */
 export const ReplayDoneSchema: GenMessage<ReplayDone> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 23);
+  messageDesc(file_agentshim_core_v1_core, 25);
 
 /**
  * canUseTool round-trip. The shim BLOCKS the SDK callback on the response.
@@ -1050,7 +1150,7 @@ export type PermissionRequest = Message<"agentshim.core.v1.PermissionRequest"> &
  * Use `create(PermissionRequestSchema)` to create a new message.
  */
 export const PermissionRequestSchema: GenMessage<PermissionRequest> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 24);
+  messageDesc(file_agentshim_core_v1_core, 26);
 
 /**
  * @generated from message agentshim.core.v1.PermissionResponse
@@ -1084,7 +1184,7 @@ export type PermissionResponse = Message<"agentshim.core.v1.PermissionResponse">
  * Use `create(PermissionResponseSchema)` to create a new message.
  */
 export const PermissionResponseSchema: GenMessage<PermissionResponse> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 25);
+  messageDesc(file_agentshim_core_v1_core, 27);
 
 /**
  * Daemon-composed permission state (the request plus its resolution
@@ -1117,7 +1217,7 @@ export type PermissionItem = Message<"agentshim.core.v1.PermissionItem"> & {
  * Use `create(PermissionItemSchema)` to create a new message.
  */
 export const PermissionItemSchema: GenMessage<PermissionItem> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 26);
+  messageDesc(file_agentshim_core_v1_core, 28);
 
 /**
  * @generated from enum agentshim.core.v1.PermissionItem.Resolution
@@ -1153,7 +1253,7 @@ export enum PermissionItem_Resolution {
  * Describes the enum agentshim.core.v1.PermissionItem.Resolution.
  */
 export const PermissionItem_ResolutionSchema: GenEnum<PermissionItem_Resolution> = /*@__PURE__*/
-  enumDesc(file_agentshim_core_v1_core, 26, 0);
+  enumDesc(file_agentshim_core_v1_core, 28, 0);
 
 /**
  * @generated from message agentshim.core.v1.Heartbeat
@@ -1170,7 +1270,7 @@ export type Heartbeat = Message<"agentshim.core.v1.Heartbeat"> & {
  * Use `create(HeartbeatSchema)` to create a new message.
  */
 export const HeartbeatSchema: GenMessage<Heartbeat> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 27);
+  messageDesc(file_agentshim_core_v1_core, 29);
 
 /**
  * Correlated dependency health probe for every agent-shim UDS hop.
@@ -1198,7 +1298,7 @@ export type HealthCheck = Message<"agentshim.core.v1.HealthCheck"> & {
  * Use `create(HealthCheckSchema)` to create a new message.
  */
 export const HealthCheckSchema: GenMessage<HealthCheck> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 28);
+  messageDesc(file_agentshim_core_v1_core, 30);
 
 /**
  * Reply to HealthCheck.  A responder MUST set healthy=true only after every
@@ -1235,7 +1335,7 @@ export type HealthStatus = Message<"agentshim.core.v1.HealthStatus"> & {
  * Use `create(HealthStatusSchema)` to create a new message.
  */
 export const HealthStatusSchema: GenMessage<HealthStatus> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 29);
+  messageDesc(file_agentshim_core_v1_core, 31);
 
 /**
  * Producer→store append. The store commits events + cursor_advance in one
@@ -1262,7 +1362,7 @@ export type StoreWrite = Message<"agentshim.core.v1.StoreWrite"> & {
  * Use `create(StoreWriteSchema)` to create a new message.
  */
 export const StoreWriteSchema: GenMessage<StoreWrite> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 30);
+  messageDesc(file_agentshim_core_v1_core, 32);
 
 /**
  * @generated from message agentshim.core.v1.StoreWriteAck
@@ -1298,7 +1398,7 @@ export type StoreWriteAck = Message<"agentshim.core.v1.StoreWriteAck"> & {
  * Use `create(StoreWriteAckSchema)` to create a new message.
  */
 export const StoreWriteAckSchema: GenMessage<StoreWriteAck> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 31);
+  messageDesc(file_agentshim_core_v1_core, 33);
 
 /**
  * shim-claude-sidecar file-cursor state, persisted by the store (§6.2 cursor table).
@@ -1336,7 +1436,7 @@ export type CursorState = Message<"agentshim.core.v1.CursorState"> & {
  * Use `create(CursorStateSchema)` to create a new message.
  */
 export const CursorStateSchema: GenMessage<CursorState> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 32);
+  messageDesc(file_agentshim_core_v1_core, 34);
 
 /**
  * Cursor recovery over the socket (§7.3): the sidecar asks the store for its
@@ -1356,7 +1456,7 @@ export type CursorQuery = Message<"agentshim.core.v1.CursorQuery"> & {
  * Use `create(CursorQuerySchema)` to create a new message.
  */
 export const CursorQuerySchema: GenMessage<CursorQuery> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 33);
+  messageDesc(file_agentshim_core_v1_core, 35);
 
 /**
  * @generated from message agentshim.core.v1.OpenTaskState
@@ -1378,7 +1478,7 @@ export type OpenTaskState = Message<"agentshim.core.v1.OpenTaskState"> & {
  * Use `create(OpenTaskStateSchema)` to create a new message.
  */
 export const OpenTaskStateSchema: GenMessage<OpenTaskState> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 34);
+  messageDesc(file_agentshim_core_v1_core, 36);
 
 /**
  * @generated from message agentshim.core.v1.CursorList
@@ -1413,7 +1513,7 @@ export type CursorList = Message<"agentshim.core.v1.CursorList"> & {
  * Use `create(CursorListSchema)` to create a new message.
  */
 export const CursorListSchema: GenMessage<CursorList> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 35);
+  messageDesc(file_agentshim_core_v1_core, 37);
 
 /**
  * Which observation plane produced an event.
@@ -1627,6 +1727,36 @@ export const PermissionDecisionSchema: GenEnum<PermissionDecision> = /*@__PURE__
   enumDesc(file_agentshim_core_v1_core, 5);
 
 /**
+ * How a context cut came about. Vendor-neutral because every vendor that
+ * offers compaction distinguishes the user asking for one from the system
+ * deciding it needs one.
+ *
+ * @generated from enum agentshim.core.v1.ContextCutTrigger
+ */
+export enum ContextCutTrigger {
+  /**
+   * @generated from enum value: CONTEXT_CUT_TRIGGER_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: CONTEXT_CUT_TRIGGER_MANUAL = 1;
+   */
+  MANUAL = 1,
+
+  /**
+   * @generated from enum value: CONTEXT_CUT_TRIGGER_AUTO = 2;
+   */
+  AUTO = 2,
+}
+
+/**
+ * Describes the enum agentshim.core.v1.ContextCutTrigger.
+ */
+export const ContextCutTriggerSchema: GenEnum<ContextCutTrigger> = /*@__PURE__*/
+  enumDesc(file_agentshim_core_v1_core, 6);
+
+/**
  * The three-valued outcome of an Interrupt, decided by the SHIM.
  *
  * The shim owns turn lifecycle (it counts prompts in and results out) and
@@ -1679,5 +1809,5 @@ export enum InterruptOutcome {
  * Describes the enum agentshim.core.v1.InterruptOutcome.
  */
 export const InterruptOutcomeSchema: GenEnum<InterruptOutcome> = /*@__PURE__*/
-  enumDesc(file_agentshim_core_v1_core, 6);
+  enumDesc(file_agentshim_core_v1_core, 7);
 
