@@ -177,13 +177,17 @@ func main() {
 	// the process, so this write-through record store is what lets a
 	// restarted daemon keep resolving the s_<hex> ids its frontends
 	// still hold. A daemon that cannot even resolve WHERE the registry
-	// lives must fail loudly at startup; a registry that fails to LOAD
-	// starts empty and logs (inside Open), never refuses to boot.
+	// lives must fail loudly at startup. Checkpoint migration and terminal
+	// compaction are required durability work: any load/migration/save failure
+	// aborts startup rather than serving from fabricated empty state.
 	registryPath, err := registry.DefaultPath()
 	if err != nil {
 		log.Fatalf("claude-repld: %v", err)
 	}
 	sessionRegistry := registry.Open(registryPath, log.Printf)
+	if err := sessionRegistry.Prepare(); err != nil {
+		log.Fatalf("claude-repld: registry prepare: %v", err)
+	}
 
 	// "session gone" remediation: the frontend can only report the loss,
 	// so the daemon owns the analyst that diagnoses it and opens the
