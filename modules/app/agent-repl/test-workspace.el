@@ -45,6 +45,33 @@
     (agent-repl--ws-put "ws1" :name "")
     (should (equal (agent-repl--ws-get "ws1" :name) ""))))
 
+;;;; ---- Tests: ws-plist --------------------------------------------------
+
+(ert-deftest agent-repl-test-ws-plist-returns-complete-copy ()
+  "ws-plist returns every field without exposing the owned top-level plist."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+    (agent-repl--ws-put "ws1" :priority :p1)
+    (let ((snapshot (agent-repl--ws-plist "ws1")))
+      (should (equal (plist-get snapshot :project-dir) "/tmp/ws1"))
+      (should (eq (plist-get snapshot :priority) :p1))
+      (setf (plist-get snapshot :priority) :p9)
+      (should (eq (agent-repl--ws-get "ws1" :priority) :p1)))))
+
+(ert-deftest agent-repl-test-ws-plist-allows-known-tombstone ()
+  "ws-plist keeps identity state queryable after a workspace tombstones."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
+    (agent-repl--ws-del "ws1")
+    (let ((snapshot (agent-repl--ws-plist "ws1")))
+      (should (equal (plist-get snapshot :project-dir) "/tmp/ws1"))
+      (should (plist-get snapshot :nuked-at)))))
+
+(ert-deftest agent-repl-test-ws-plist-rejects-unknown-workspace ()
+  "ws-plist makes an invalid serialization target fail loudly."
+  (agent-repl-test--with-clean-state
+    (should-error (agent-repl--ws-plist "missing") :type 'user-error)))
+
 (ert-deftest agent-repl-test-ws-put-new-workspace ()
   "ws-put to a brand new workspace should create the entry."
   (agent-repl-test--with-clean-state
