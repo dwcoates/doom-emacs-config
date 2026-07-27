@@ -29,6 +29,7 @@ import (
 	"sync"
 
 	"claude-repld/internal/pty"
+	"claude-repld/internal/vendorguard"
 )
 
 // Default geometry for a freshly spawned login terminal.
@@ -259,6 +260,20 @@ type Config struct {
 // in a plain session the user would have to drive by hand.
 var DefaultCommand = []string{"claude", "/login"}
 
+// SpawnVendor is Spawn for the REAL Claude CLI, plus the test-mode refusal.
+//
+// Spawn itself stays ungated: it is a generic pty spawner and its tests drive
+// it with `sh -c`. The vendor-ness lives in the caller's argv, so the guard
+// lives on the wrapper the vendor call sites use.
+func SpawnVendor(command []string) StartFunc {
+	return func(account string) (Proc, error) {
+		if err := vendorguard.Check("login.SpawnVendor"); err != nil {
+			return nil, err
+		}
+		return Spawn(command)(account)
+	}
+}
+
 // NewManager returns a Manager.
 func NewManager(cfg Config) *Manager {
 	logf := cfg.Logf
@@ -267,7 +282,7 @@ func NewManager(cfg Config) *Manager {
 	}
 	start := cfg.Start
 	if start == nil {
-		start = Spawn(DefaultCommand)
+		start = SpawnVendor(DefaultCommand)
 	}
 	return &Manager{
 		start:    start,

@@ -10,6 +10,8 @@ import (
 	"time"
 
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+
+	"claude-repld/internal/vendorguard"
 )
 
 // The answer contract. The classifier must reply with EXACTLY ONE of these
@@ -239,6 +241,9 @@ func classifierEnv(configDir string) []string {
 // resolve to a registered workspace and feed the daemon events about a session
 // that is really just a classification.
 func spawnClassifier(ctx context.Context, model, configDir, prompt string) (stdout, stderr []byte, err error) {
+	if err := vendorguard.Check("sessiondrv.spawnClassifier"); err != nil {
+		return nil, nil, err
+	}
 	argv := classifierArgv(model)
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir = os.TempDir()
