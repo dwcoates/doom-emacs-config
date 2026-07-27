@@ -104,7 +104,9 @@ daemon's cwd-keyed lookup resolves it.  NEVER the persp name WS itself.
 Signals (via `agent-repl--ws-dir') when WS has no `:project-dir': a
 command with no resolvable cwd cannot be routed, and a loud failure here
 beats a daemon NACK that reads as \"no live session\"."
-  (agent-repl--ws-dir ws))
+  (let ((key (agent-repl--ws-dir ws)))
+    (agent-repl--log ws "frontend-wire-key: ws=%s cwd=%s" ws key)
+    key))
 
 ;; Signalled when the daemon HARD-FAILS a --resume because the target
 ;; session has no transcript in its config dir (§2.10 resume viability
@@ -264,12 +266,23 @@ synchronous HTTP boundary did."
         ;; wait loop owns this expected retry window; routing the dial through
         ;; ordinary outage handling produced the false startup alarms this
         ;; function exists to prevent.
+        (agent-repl--log-verbose nil
+                                 "frontend-wait-ready: attempt=%d/%d dialing socket=%s"
+                                 attempt agent-repl-frontend-ready-attempts
+                                 agent-repl-uds-socket-path)
         (agent-repl-uds-connect nil t))
       (if (agent-repl--uds-connected-p)
-          (accept-process-output agent-repl--uds-process 0.2)
+          (progn
+            (agent-repl--log-verbose nil
+                                     "frontend-wait-ready: attempt=%d/%d pumping connected UDS"
+                                     attempt agent-repl-frontend-ready-attempts)
+            (accept-process-output agent-repl--uds-process 0.2))
         ;; sleep-for, NOT sit-for: sit-for returns immediately when
         ;; input is pending, which would collapse the whole readiness
         ;; window into back-to-back failed dials while the user types.
+        (agent-repl--log-verbose nil
+                                 "frontend-wait-ready: attempt=%d/%d socket still unavailable"
+                                 attempt agent-repl-frontend-ready-attempts)
         (sleep-for 0.2))
       (setq ready (agent-repl--frontend-daemon-ready-p)))
     (unless ready
@@ -311,20 +324,30 @@ correlation (`agent-repl--frontend-live-session-id-for-cwd') stays
 unambiguous: a second create for the same cwd while one is in flight is
 refused loudly rather than racing two views onto one key.")
 
-(defun agent-repl--frontend-await-uds (predicate timeout what)
+(defun agent-repl--frontend-await-uds (predicate timeout what &optional ws)
   "Block until PREDICATE returns non-nil or TIMEOUT seconds elapse; return its value.
 Pumps the frontend UDS connection via `accept-process-output' so inbound
 frames (the CommandAck, the SessionView) are dispatched while we wait.
-WHAT names the wait for the main-thread assertion + logging.
+WHAT names the wait for the main-thread assertion + logging.  WS, when
+known, scopes the diagnostics to its workspace metadata.
 
 MAIN THREAD ONLY: `accept-process-output' routes through `ns_select_1' ->
 `[NSApp run]', which deadlocks Emacs off the main thread (the AGENTS.md
 worker-thread trap); every blocking wait in this module asserts it."
   (agent-repl--assert-main-thread (format "frontend-await-uds %s" what))
-  (let ((deadline (+ (float-time) timeout)) result)
+  (let ((started (float-time))
+        (deadline (+ (float-time) timeout))
+        result)
+    (agent-repl--log-verbose ws
+                             "frontend-await-uds: begin what=%s timeout=%.3fs"
+                             what timeout)
     (while (and (not (setq result (funcall predicate)))
                 (< (float-time) deadline))
       (accept-process-output agent-repl--uds-process 0.1))
+    (agent-repl--log-verbose ws
+                             "frontend-await-uds: complete what=%s outcome=%s elapsed=%.3fs"
+                             what (if result "resolved" "timeout")
+                             (- (float-time) started))
     result))
 
 (defun agent-repl--frontend-await-health-command
@@ -350,7 +373,8 @@ before the caller mutates UI or workspace state."
     (unless (agent-repl--frontend-await-uds
              (lambda () (or response rejection))
              agent-repl-frontend-health-timeout
-             (format "health %s" what))
+             (format "health %s" what)
+             workspace)
       (agent-repl--uds-untrack-command request-id workspace "health-timeout")
       (agent-repl--uds-untrack-health-response
        request-id workspace "health-timeout")
@@ -422,7 +446,7 @@ STRING, not the structured `searched_paths' the old HTTP 422 body did, so
 the investigation is dispatched with the resume id alone (nil paths)."
   (if (and (stringp err) resume (string-match-p "has no transcript" err))
       (progn
-        (agent-repl--log nil
+        (agent-repl--log (agent-repl--ws-name-for-dir cwd)
                          "createSession REJECTED for %s: resume %s transcript missing (%s)"
                          cwd resume err)
         (if force-fresh
@@ -442,7 +466,7 @@ Invoked by `agent-repl--frontend-create-handle-rejection' when
 the default investigation dispatch.  Logs the override, then recreates the
 session in CWD with MODEL and NO resume (which cannot re-trigger the
 lost-transcript hard-fail), and returns the fresh session id."
-  (agent-repl--log nil
+  (agent-repl--log (agent-repl--ws-name-for-dir cwd)
                    (concat "force-fresh-conversation: lost resume %s overridden — creating a "
                            "fresh conversation in %s (skipping investigation)")
                    resume-id cwd)
@@ -485,10 +509,14 @@ the daemon's own environment cannot encode a per-workspace account; without
 this field every gui session would run as whichever account the daemon
 inherited."
   (unless (and (stringp cwd) (not (string-empty-p cwd)))
+    (agent-repl--log nil "createSession: REJECTED invalid cwd=%S" cwd)
     (error "agent-repl: create-session requires a cwd (got %S)" cwd))
   (when (gethash cwd agent-repl--frontend-creates-in-flight)
+    (agent-repl--log (agent-repl--ws-name-for-dir cwd)
+                     "createSession: REJECTED cwd=%s already in flight" cwd)
     (error "agent-repl: a createSession for %s is already in flight" cwd))
-  (let* ((force-fresh (or force-fresh agent-repl--force-fresh-conversation))
+  (let* ((ws (agent-repl--ws-name-for-dir cwd))
+         (force-fresh (or force-fresh agent-repl--force-fresh-conversation))
          (model (agent-repl--effective-model model))
          (posture (agent-repl--frontend-session-posture cwd))
          (config-dir (plist-get posture :config-dir))
@@ -507,6 +535,11 @@ inherited."
          ;; Mutable outcome the ack callbacks flip; all keys pre-populated so
          ;; `plist-put' mutates in place and the closures + await loop observe it.
          (ack (list :done nil :ok nil :error nil)))
+    (agent-repl--log
+     ws
+     "createSession: begin cwd=%s model=%s resume=%s config-dir=%s permission-mode=%s allow-ungated=%s force-fresh=%s"
+     cwd (or model "none") (or resume "none") (or config-dir "CLI-default")
+     (or permission-mode "SDK-default") allow-ungated force-fresh)
     ;; Send + await the ack UNDER the in-flight guard, but handle the OUTCOME
     ;; after releasing it: the force-fresh rejection branch recreates the SAME
     ;; cwd, which the guard would otherwise refuse as "already in flight".
@@ -515,24 +548,38 @@ inherited."
         (let ((req (agent-repl--uds-send-command "createSession" payload cwd)))
           (agent-repl--uds-track-command
            req "createSession" cwd
-           (lambda (err) (plist-put ack :error err) (plist-put ack :done t))
-           (lambda () (plist-put ack :ok t) (plist-put ack :done t)))
+           (lambda (err)
+             (plist-put ack :error err)
+             (plist-put ack :done t)
+             (agent-repl--log ws
+                              "createSession: ack REJECTED cwd=%s request-id=%s error=%s"
+                              cwd req err))
+           (lambda ()
+             (plist-put ack :ok t)
+             (plist-put ack :done t)
+             (agent-repl--log ws
+                              "createSession: ack ACCEPTED cwd=%s request-id=%s"
+                              cwd req)))
           (agent-repl--frontend-await-uds
            (lambda () (plist-get ack :done))
            agent-repl-frontend-create-timeout
-           (format "createSession cwd=%s" cwd)))
+           (format "createSession cwd=%s" cwd)
+           ws))
       (remhash cwd agent-repl--frontend-creates-in-flight))
     (cond
      ((not (plist-get ack :done))
+      (agent-repl--log ws "createSession: TIMEOUT cwd=%s timeout=%ss"
+                       cwd agent-repl-frontend-create-timeout)
       (error "agent-repl: createSession for %s timed out after %ss"
              cwd agent-repl-frontend-create-timeout))
      ((plist-get ack :ok)
       (let ((id (agent-repl--frontend-await-uds
                  (lambda () (agent-repl--frontend-live-session-id-for-cwd cwd))
-                 2 (format "sessionView cwd=%s" cwd))))
+                 2 (format "sessionView cwd=%s" cwd) ws)))
         (unless id
+          (agent-repl--log ws "createSession: ACKED_WITHOUT_SESSION_VIEW cwd=%s" cwd)
           (error "agent-repl: createSession for %s acked but no SessionView arrived" cwd))
-        (agent-repl--log nil "createSession: cwd=%s -> session %s (resume=%s)"
+        (agent-repl--log ws "createSession: cwd=%s -> session %s (resume=%s)"
                          cwd id (or resume "none"))
         id))
      (t
@@ -546,6 +593,7 @@ Fire-and-forget: the terminal `SessionView' the daemon pushes updates the
 store, and a rejected ack surfaces loudly via the shared ack handler."
   (let ((req (agent-repl--uds-send-command "deleteSession" (list :sessionId id) ws)))
     (agent-repl--uds-track-command req "deleteSession" ws)
+    (agent-repl--log ws "deleteSession: dispatched session=%s request-id=%s" id req)
     req))
 
 ;; The GET /commands slash-menu fetch + POST /commands/refresh re-resolve
@@ -639,11 +687,14 @@ contract)."
   ;; the actual cause. A nil return with a LIVE daemon process cannot
   ;; happen (ensure returns the process in every acting branch).
   (unless (agent-repl--ensure-frontend-daemon)
+    (agent-repl--log ws "ensure-session: daemon unavailable auto-start-or-init-inhibited")
     (error "agent-repl: frontend daemon not started (auto-start disabled or init inhibited)"))
   (agent-repl--frontend-wait-ready)
   (let ((existing (agent-repl--ws-get ws :frontend-session-id)))
     (if (and existing (agent-repl--frontend-session-live-p existing))
-        existing
+        (progn
+          (agent-repl--log ws "ensure-session: reusing live session=%s" existing)
+          existing)
       (let ((dir (or (agent-repl--ws-get ws :project-dir)
                      (let ((root (agent-repl--resolve-current-git-root)))
                        (agent-repl--log ws "ensure-session: adopting git root %s for unregistered ws %s" root ws)
@@ -660,6 +711,7 @@ contract)."
         ;; done it.  Env presence also heals the sentinel handlers,
         ;; which error on a nil :active-env.
         (unless (agent-repl--ws-get ws :active-env)
+          (agent-repl--log ws "ensure-session: initializing environment cwd=%s" dir)
           (agent-repl--initialize-ws-env ws dir))
         ;; Resume the workspace's durable claude session so a
         ;; recreated daemon binding (daemon restart, Emacs restart,
@@ -714,12 +766,19 @@ is reset, because the failures belonged to the previous instance.")
   "Idempotently start the reattach sweep timer.
 No-op in batch/sandbox (`agent-repl--frontend-init-inhibited-p') —
 the same environments that never auto-start the daemon."
-  (when (and (not agent-repl--frontend-reattach-timer)
-             (not (agent-repl--frontend-init-inhibited-p)))
+  (cond
+   (agent-repl--frontend-reattach-timer
+    (agent-repl--log-verbose nil "reattach: timer already armed=%S"
+                             agent-repl--frontend-reattach-timer))
+   ((agent-repl--frontend-init-inhibited-p)
+    (agent-repl--log-verbose nil "reattach: timer suppressed because init is inhibited"))
+   (t
     (setq agent-repl--frontend-reattach-timer
           (run-with-timer agent-repl-frontend-reattach-interval
                           agent-repl-frontend-reattach-interval
-                          #'agent-repl--frontend-reattach-check))))
+                          #'agent-repl--frontend-reattach-check))
+    (agent-repl--log nil "reattach: timer armed interval=%ss"
+                     agent-repl-frontend-reattach-interval))))
 
 (defun agent-repl--frontend-reattach-check ()
   "Reattach gui workspaces whose bound session vanished from the pushed roster.
@@ -733,6 +792,9 @@ Boot-instance detection moved to the pushed `DaemonView'
 \(`agent-repl--frontend-apply-daemon-view' -> `agent-repl--frontend-note-boot-id'):
 a bounce drops the UDS link, and the reconnect snapshot carries the new
 boot id, so the give-up reset no longer needs a GET /sessions probe here."
+  (agent-repl--log-verbose nil "reattach: sweep connected=%s live-workspaces=%d"
+                           (agent-repl--uds-connected-p)
+                           (length (agent-repl--live-ws-names)))
   (if (not (agent-repl--uds-connected-p))
       (when (cl-some (lambda (ws) (agent-repl--ws-get ws :frontend-session-id))
                      (agent-repl--live-ws-names))
@@ -751,8 +813,12 @@ boot id, so the give-up reset no longer needs a GET /sessions probe here."
           (cond
            ((member bound listed)
             (agent-repl--ws-put ws :reattach-failed nil)
-            (agent-repl--ws-put ws :reattach-failures nil))
-           ((agent-repl--ws-get ws :reattach-failed) nil)
+            (agent-repl--ws-put ws :reattach-failures nil)
+            (agent-repl--log-verbose ws
+                                     "reattach: retained live binding session=%s" bound))
+           ((agent-repl--ws-get ws :reattach-failed)
+            (agent-repl--log-verbose ws
+                                     "reattach: skip session=%s after failure cap" bound))
            (t (agent-repl--frontend-reattach-ws ws bound))))))))
 
 (defun agent-repl--frontend-note-boot-id (boot-id)
@@ -760,7 +826,12 @@ boot id, so the give-up reset no longer needs a GET /sessions probe here."
 A give-up (`:reattach-failed') binds a failure history to ONE daemon
 instance — a fresh instance deserves fresh attempts.  Old daemons that
 predate boot ids report nil, which never triggers a reset."
-  (when (and boot-id (not (equal boot-id agent-repl--frontend-last-boot-id)))
+  (cond
+   ((null boot-id)
+    (agent-repl--log-verbose nil "reattach: daemon view has no boot id"))
+   ((equal boot-id agent-repl--frontend-last-boot-id)
+    (agent-repl--log-verbose nil "reattach: daemon boot id unchanged=%s" boot-id))
+   (t
     (when agent-repl--frontend-last-boot-id
       (agent-repl--log nil "reattach: daemon instance changed %s -> %s — resetting give-ups"
                         agent-repl--frontend-last-boot-id boot-id)
@@ -776,7 +847,9 @@ predate boot ids report nil, which never triggers a reset."
           (agent-repl--ws-put ws :switch-ensure-failed nil)
           (agent-repl--ws-put ws :switch-ensure-failures nil))
         (agent-repl--ws-put ws :switch-ensure-at nil)))
-    (setq agent-repl--frontend-last-boot-id boot-id)))
+    (unless agent-repl--frontend-last-boot-id
+      (agent-repl--log nil "reattach: recording initial daemon boot id=%s" boot-id))
+    (setq agent-repl--frontend-last-boot-id boot-id))))
 
 (defun agent-repl--frontend-reattach-ws (ws stale-id)
   "Re-ensure WS's daemon session after STALE-ID vanished; remount webview.
@@ -802,6 +875,8 @@ the workspace is marked `:reattach-failed' and a warning surfaces."
                          (error-message-string err))
        (when (>= n agent-repl-frontend-reattach-max-failures)
          (agent-repl--ws-put ws :reattach-failed t)
+         (agent-repl--log ws "reattach: giving up ws=%s stale-session=%s failures=%d"
+                          ws stale-id n)
          (display-warning
           'agent-repl
           (format (concat "workspace %s failed to reattach to the new daemon instance "
@@ -828,6 +903,7 @@ the count of open workspaces that carried a session binding to rebind."
   (agent-repl--frontend-wait-ready)
   (let ((n (cl-count-if (lambda (ws) (agent-repl--ws-get ws :frontend-session-id))
                         (agent-repl--live-ws-names))))
+    (agent-repl--log nil "reattach: explicit rebind begin bound-workspaces=%d" n)
     (agent-repl--frontend-reattach-check)
     ;; reattach-check rebinds each workspace's daemon session and, via
     ;; `agent-repl--frontend-sync-webview', remounts only those whose
@@ -838,6 +914,7 @@ the count of open workspaces that carried a session binding to rebind."
     ;; when a fresh build lands, and each remount replays history off the
     ;; live session, so nothing is lost.
     (agent-repl--frontend-remount-all-webviews)
+    (agent-repl--log nil "reattach: explicit rebind complete remounted-workspaces=%d" n)
     n))
 
 ;; The in-flight message-queue plane (§2.13) is fully retired.  It was dead
@@ -931,6 +1008,7 @@ conversation rather than aborting it)."
 Creates a fresh daemon session with resume set and binds it to WS, so
 the subsequent open attaches to the continued conversation."
   (unless (agent-repl--ensure-frontend-daemon)
+    (agent-repl--log ws "gui-adopt-session: daemon unavailable resume=%s" claude-session-id)
     (error "agent-repl: frontend daemon not started (auto-start disabled or init inhibited)"))
   (agent-repl--frontend-wait-ready)
   (let* ((dir (or (agent-repl--ws-get ws :project-dir)
@@ -951,6 +1029,7 @@ session captures its own durable id through the usual hook path once it
 runs, so a later resume continues the fresh conversation rather than the
 discarded one."
   (unless (agent-repl--ensure-frontend-daemon)
+    (agent-repl--log ws "force-fresh-conversation: daemon unavailable")
     (error "agent-repl: frontend daemon not started (auto-start disabled or init inhibited)"))
   (agent-repl--frontend-wait-ready)
   (let* ((dir (or (agent-repl--ws-get ws :project-dir)
@@ -1141,7 +1220,10 @@ guards above cannot be the only protection."
               (agent-repl--uds-track-command
                req "openWorkspace" ws
                (lambda (e) (agent-repl--frontend-note-switch-ensure-failure ws e))
-               (lambda () (agent-repl--ws-put ws :switch-ensure-failures nil)))
+               (lambda ()
+                 (agent-repl--ws-put ws :switch-ensure-failures nil)
+                 (agent-repl--log-verbose ws
+                                          "switch-ensure: ack ACCEPTED request-id=%s" req)))
               req))
         (error
          (agent-repl--log ws "switch-ensure: ws=%s send FAILED: %s"
@@ -1155,15 +1237,17 @@ and clears the key.  Errors are LOGGED, never signalled: the workspace
 nuke must not abort because the daemon is already gone — but nothing is
 silently dropped, the failure lands in the agent-repl log."
   (let ((id (agent-repl--ws-get ws :frontend-session-id)))
-    (when id
-      (condition-case err
-          (progn
-            (agent-repl--frontend-delete-session id ws)
-            (agent-repl--log ws "frontend session released: %s" id))
-        (error
-         (agent-repl--log ws "frontend session release FAILED for %s: %s"
-                          id (error-message-string err))))
-      (agent-repl--ws-put ws :frontend-session-id nil))))
+    (if id
+        (progn
+          (condition-case err
+              (progn
+                (agent-repl--frontend-delete-session id ws)
+                (agent-repl--log ws "frontend session released: %s" id))
+            (error
+             (agent-repl--log ws "frontend session release FAILED for %s: %s"
+                              id (error-message-string err))))
+        (agent-repl--ws-put ws :frontend-session-id nil))
+      (agent-repl--log-verbose ws "frontend session release skipped: no binding"))))
 
 (add-hook 'agent-repl-ws-del-hook #'agent-repl--frontend-release-workspace-session)
 
