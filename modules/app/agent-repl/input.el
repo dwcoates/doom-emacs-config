@@ -145,17 +145,21 @@ slightly blue by `agent-repl-input-background-blue-boost'."
   ;; gives the wrapping without touching cursor-motion semantics.
   (setq-local truncate-lines nil)
   (setq-local word-wrap t)
+  ;; Intentionally unlogged: `after-change-functions' runs per keystroke, so
+  ;; logging it would overwhelm the durable input/send lifecycle diagnostics.
   (add-hook 'after-change-functions #'agent-repl--history-on-change nil t))
 
 (defun agent-repl-discard-input ()
   "Save current input to history, clear the buffer, and enter insert state."
   (interactive)
-  (agent-repl--log (agent-repl--ws-current-name) "discard-input")
-  (agent-repl--history-push)
-  (agent-repl--history-reset)
-  (agent-repl--history-save (agent-repl--ws-current-name))
-  (erase-buffer)
-  (evil-insert-state))
+  (let ((ws (agent-repl--ws-current-name))
+        (input-len (buffer-size)))
+    (agent-repl--log ws "discard-input ws=%s input-len=%d" ws input-len)
+    (agent-repl--history-push)
+    (agent-repl--history-reset)
+    (agent-repl--history-save ws)
+    (erase-buffer)
+    (evil-insert-state)))
 
 (defun agent-repl-discard-or-send-interrupt ()
   "Clear Claude's prompt AND the local input buffer.
@@ -187,6 +191,7 @@ interrupting Claude's in-flight response."
   "Interrupt WS's agent through its frontend (the `ctrl-c' gesture).
 The gui frontend's single wire interrupt cancels pending prompts and
 marks the turn aborted."
+  (agent-repl--log ws "interrupt-agent gesture=ctrl-c")
   (agent-repl--frontend-dispatch-interrupt ws 'ctrl-c))
 
 ;;; Keybindings
@@ -283,7 +288,7 @@ does not, e.g. a Unix path that merely starts with `/', or a `/' preceded
 by whitespace)."
   (string-match-p agent-repl--slash-command-regexp raw))
 
-(defun agent-repl--skip-metaprompt-p (raw)
+(defun agent-repl--skip-metaprompt-p (raw &optional ws)
   "Return non-nil if RAW input should never have the metaprompt prepended.
 Skips any slash command (see `agent-repl--slash-command-p'), every entry
 of `agent-repl-metaprompt-exempt-strings', and bare numerals, ignoring
@@ -292,12 +297,15 @@ trailing whitespace.
 The slash-command clause is the load-bearing one: the metaprompt is a
 harness directive meant for free-form work, and a slash command runs a
 skill or built-in that owns its own behavior, so prepending the directive
-to it is never wanted."
+to it is never wanted.  WS, when supplied, scopes the diagnostic entry."
   (let* ((trimmed (string-trim-right raw))
-         (result (or (agent-repl--slash-command-p trimmed)
-                     (member trimmed agent-repl-metaprompt-exempt-strings)
-                     (string-match-p "^[0-9]+$" trimmed))))
-    (agent-repl--log-verbose (agent-repl--ws-current-name) "skip-metaprompt-p: result=%s" result)
+         (slash-command-p (agent-repl--slash-command-p trimmed))
+         (exempt-p (member trimmed agent-repl-metaprompt-exempt-strings))
+         (numeral-p (string-match-p "^[0-9]+$" trimmed))
+         (result (or slash-command-p exempt-p numeral-p)))
+    (agent-repl--log-verbose ws
+                              "skip-metaprompt-p raw-len=%d trimmed-len=%d slash-command=%s exempt=%s numeral=%s result=%s"
+                              (length raw) (length trimmed) slash-command-p exempt-p numeral-p result)
     result))
 
 (defvar agent-repl-send-posthooks
@@ -317,6 +325,7 @@ including the previously-prepended guidelines, so the next prompt must
 re-establish them exactly as the first prompt of a new session does.
 Resetting to 1 instead would skip a full period before re-injecting,
 leaving Claude without guidelines in the interim."
+  (agent-repl--log ws "posthook-reset-prefix-counter new-counter=0")
   (agent-repl--ws-put ws :prefix-counter 0))
 
 (defun agent-repl--posthook-mark-done (ws _raw)
@@ -324,24 +333,37 @@ leaving Claude without guidelines in the interim."
 Used by the /clear posthook: clearing Claude's context ends the current
 work cycle, so the tab should immediately reflect \"finished\" rather
 than linger on whatever state preceded the clear."
+  (agent-repl--log ws "posthook-mark-done new-agent-state=:done")
   (agent-repl--mark-agent-done ws))
 
 (defun agent-repl--run-send-posthooks (ws raw)
   "Run posthooks matching RAW input for workspace WS."
-  (let ((trimmed (string-trim-right raw)))
+  (let ((trimmed (string-trim-right raw))
+        (matched-count 0))
     (dolist (hook agent-repl-send-posthooks)
       (when (string-match-p (car hook) trimmed)
+        (cl-incf matched-count)
         (agent-repl--log ws "posthook matched pattern=%s" (car hook))
-        (funcall (cdr hook) ws raw)))))
+        (funcall (cdr hook) ws raw)))
+    (agent-repl--log ws "posthook scan raw-len=%d hook-count=%d matched-count=%d"
+                      (length raw) (length agent-repl-send-posthooks) matched-count)))
 
-(defun agent-repl--should-prepend-metaprompt-p (raw counter &optional force)
+(defun agent-repl--should-prepend-metaprompt-p (raw counter &optional force ws)
   "Return non-nil if the metaprompt prefix should be prepended to RAW.
-COUNTER is the current prefix counter.  FORCE bypasses the counter check."
-  (let ((result (and agent-repl-skip-permissions
-                     agent-repl-command-prefix
-                     (not (agent-repl--skip-metaprompt-p raw))
-                     (or force (zerop (mod counter agent-repl-prefix-period))))))
-    (agent-repl--log-verbose (agent-repl--ws-current-name) "should-prepend-metaprompt-p: result=%s counter=%d force=%s" result counter force)
+COUNTER is the current prefix counter.  FORCE bypasses the counter check.
+WS, when supplied, scopes the diagnostic entry."
+  (let* ((system-active-p (and agent-repl-skip-permissions
+                               agent-repl-command-prefix))
+         ;; Preserve short-circuiting: a disabled system, exemption, or forced
+         ;; send must not evaluate the period arithmetic.
+         (skip-p (and system-active-p (agent-repl--skip-metaprompt-p raw ws)))
+         (period-boundary-p (and system-active-p (not skip-p) (not force)
+                                 (zerop (mod counter agent-repl-prefix-period))))
+         (result (and system-active-p (not skip-p)
+                      (or force period-boundary-p))))
+    (agent-repl--log-verbose ws
+                              "should-prepend-metaprompt-p raw-len=%d counter=%d force=%s system-active=%s skip=%s period-boundary=%s result=%s"
+                              (length raw) counter force system-active-p skip-p period-boundary-p result)
     result))
 
 (defcustom agent-repl-workspace-command-prefix "/wor"
@@ -373,6 +395,7 @@ a valid git_root without it."
                      (error "agent-repl--maybe-inject-source-ws: no :project-dir for workspace %s — cannot inject path" ws))))
         (agent-repl--log ws "maybe-inject-source-ws: injecting source-ws=%s path=%s" ws dir)
         (concat raw (format " [source-ws:%s path:%s]" ws dir)))
+    (agent-repl--log-verbose ws "maybe-inject-source-ws: no workspace-command raw-len=%d" (length raw))
     raw))
 
 (defun agent-repl--metaprompt-file-for (ws)
@@ -391,10 +414,12 @@ module, so the canonical path is the only metaprompt there is."
   (let* ((root (agent-repl--ws-get ws :project-dir))
          (in-ws (and root
                      (expand-file-name "modules/app/agent-repl/metaprompt.md"
-                                       root))))
-    (if (and in-ws (file-exists-p in-ws))
-        in-ws
-      agent-repl-metaprompt-file)))
+                                       root)))
+         (worktree-copy-p (and in-ws (file-exists-p in-ws))))
+    (agent-repl--log ws "metaprompt-file-for root-present=%s worktree-copy=%s selected=%s"
+                      (not (null root)) (not (null worktree-copy-p))
+                      (if worktree-copy-p "workspace" "canonical"))
+    (if worktree-copy-p in-ws agent-repl-metaprompt-file)))
 
 (defun agent-repl--command-prefix-for (ws)
   "Read-directive string for WS, pointing at WS's own metaprompt copy.
@@ -405,6 +430,8 @@ pre-formatted `agent-repl--command-prefix' whenever WS resolves to the
 canonical file, so foreign-project workspaces (and callers that mock the
 global prefix) are byte-for-byte unchanged."
   (let ((file (agent-repl--metaprompt-file-for ws)))
+    (agent-repl--log ws "command-prefix-for selected=%s"
+                      (if (equal file agent-repl-metaprompt-file) "canonical" "workspace"))
     (if (equal file agent-repl-metaprompt-file)
         agent-repl--command-prefix
       (format agent-repl-command-prefix-template file))))
@@ -422,10 +449,12 @@ A /wor command additionally gets a source-workspace tag appended (see
 workspace-update skills know their origin.  This only affects the
 returned string; the caller's RAW (used for history and posthook
 matching) is untouched."
-  (let ((counter (or (agent-repl--ws-get ws :prefix-counter) 0))
-        (tagged (agent-repl--maybe-inject-source-ws ws raw)))
-    (agent-repl--log ws "prepare-input counter=%d period=%d" counter agent-repl-prefix-period)
-    (if (agent-repl--should-prepend-metaprompt-p raw counter force-metaprompt)
+  (let* ((counter (or (agent-repl--ws-get ws :prefix-counter) 0))
+         (tagged (agent-repl--maybe-inject-source-ws ws raw))
+         (prepend-p (agent-repl--should-prepend-metaprompt-p raw counter force-metaprompt ws)))
+    (agent-repl--log ws "prepare-input raw-len=%d tagged-len=%d counter=%d period=%d force=%s prepend=%s"
+                      (length raw) (length tagged) counter agent-repl-prefix-period force-metaprompt prepend-p)
+    (if prepend-p
         (concat (agent-repl--meta-wrap (agent-repl--command-prefix-for ws)) "\n\n" tagged)
       tagged)))
 
@@ -496,6 +525,8 @@ Offers the session's command menu (from the pushed `SessionInit') when the
 text before point is a `/name' fragment at the very start of the input, and
 returns nil everywhere else.  The workspace is resolved from the buffer's
 permanent owner so it survives the perspective drifting under a long turn."
+  ;; Intentionally unlogged: CAPF is queried on keystrokes and redisplay;
+  ;; send-pipeline logs capture the corresponding bounded user action.
   (let ((bounds (agent-repl--skill-capf-bounds))
         (ws (or agent-repl--owning-workspace (agent-repl--ws-current-name))))
     (when (and bounds ws)
@@ -517,9 +548,12 @@ of completing the highlighted selection.  Accepting a candidate is TAB's
 job (`company-complete-common-or-cycle'); RET sends exactly what was
 typed."
   (interactive)
-  (when (bound-and-true-p company-candidates)
-    (company-abort))
-  (call-interactively #'agent-repl--send))
+  (let ((ws (or agent-repl--owning-workspace (agent-repl--ws-current-name)))
+        (popup-active-p (bound-and-true-p company-candidates)))
+    (agent-repl--log ws "company-abort-and-send popup-active=%s" popup-active-p)
+    (when popup-active-p
+      (company-abort))
+    (call-interactively #'agent-repl--send)))
 
 (with-eval-after-load 'company
   ;; Company raises its keymap above the input mode's, so its RET
@@ -560,26 +594,39 @@ through unchanged so the frontend's send implementation can run
 posthooks and kick off the prompt summary against exactly what the
 user typed.  ON-SETTLE, if non-nil, is forwarded to the frontend's
 send function and called once the send is fully committed."
+  (agent-repl--log ws "do-send input-len=%d raw-len=%d on-settle=%s"
+                    (length input) (length raw) (not (null on-settle)))
   (agent-repl--frontend-dispatch-send ws input raw on-settle))
 
 (defun agent-repl--commit-input-buffer (ws input-buf raw &optional clear-p)
   "Record RAW input in history and optionally clear INPUT-BUF.
 WS is the workspace name used for history persistence.
 When CLEAR-P is non-nil, erase the input buffer after saving history."
-  (agent-repl--log ws "commit-input-buffer: ws=%s clear-p=%s" ws clear-p)
-  (when (and input-buf (buffer-live-p input-buf))
-    (with-current-buffer input-buf
-      (agent-repl--history-push raw)
-      (agent-repl--history-reset)
-      (when clear-p (erase-buffer))))
-  (agent-repl--history-save ws))
+  (let ((input-buffer-live-p (and input-buf (buffer-live-p input-buf))))
+    (agent-repl--log ws "commit-input-buffer raw-len=%d clear-p=%s input-buffer-present=%s input-buffer-live=%s"
+                      (length raw) clear-p (not (null input-buf)) (not (null input-buffer-live-p)))
+    (when input-buffer-live-p
+      (with-current-buffer input-buf
+        (agent-repl--history-push raw)
+        (agent-repl--history-reset)
+        (when clear-p (erase-buffer))))
+    (agent-repl--history-save ws)))
 
 (defun agent-repl--read-input-buffer (ws)
   "Return the text contents of the input buffer for workspace WS, or nil."
-  (agent-repl--log-verbose ws "read-input-buffer: ws=%s" ws)
-  (when-let ((buf (agent-repl--ws-get ws :input-buffer)))
-    (when (buffer-live-p buf)
-      (with-current-buffer buf (buffer-string)))))
+  (let ((buf (agent-repl--ws-get ws :input-buffer)))
+    (cond
+     ((not buf)
+      (agent-repl--log-verbose ws "read-input-buffer input-buffer-present=false result=nil")
+      nil)
+     ((not (buffer-live-p buf))
+      (agent-repl--log-verbose ws "read-input-buffer input-buffer-present=true input-buffer-live=false result=nil")
+      nil)
+     (t
+      (let ((contents (with-current-buffer buf (buffer-string))))
+        (agent-repl--log-verbose ws "read-input-buffer input-buffer-present=true input-buffer-live=true result-len=%d"
+                                  (length contents))
+        contents)))))
 
 (defun agent-repl--send (&optional prompt ws force-metaprompt on-settle)
   "Send PROMPT (or input buffer contents) to Claude in workspace WS.
@@ -590,7 +637,9 @@ ON-SETTLE, if non-nil, is called once the send is fully committed.
 Handles input preparation, sending, history, and persistence."
   (interactive)
   (let ((ws (or ws (agent-repl--ws-current-name))))
-    (unless ws (error "agent-repl--send: no active workspace"))
+    (unless ws
+      (agent-repl--error nil "send: no active workspace prompt-supplied=%s force-metaprompt=%s on-settle=%s"
+                          (not (null prompt)) force-metaprompt (not (null on-settle))))
     (agent-repl--log ws "send: ws=%s force-metaprompt=%s from-buf=%s" ws force-metaprompt (null prompt))
     (let* ((from-buf  (null prompt))
            (input-buf (agent-repl--ws-get ws :input-buffer))
@@ -599,7 +648,8 @@ Handles input preparation, sending, history, and persistence."
            ;; an empty input buffer doesn't dispatch a metaprompt-only send.
            (raw-empty (or (null raw) (string-empty-p (string-trim raw)))))
       (if raw-empty
-          (agent-repl--log ws "send: empty input -- nothing to send")
+          (agent-repl--log ws "send: empty input raw-present=%s raw-len=%d -- nothing to send"
+                            (not (null raw)) (if raw (length raw) 0))
         (let ((input (agent-repl--prepare-input ws raw force-metaprompt)))
           (agent-repl--do-send ws input raw on-settle)
           (agent-repl--commit-input-buffer ws input-buf raw from-buf))))))
@@ -655,14 +705,15 @@ read."
 
 (defun agent-repl--append-to-input-buffer (text)
   "Append TEXT to the end of the current workspace's input buffer."
-  (agent-repl--log (agent-repl--ws-current-name) "append-to-input-buffer: len=%d" (length text))
-  (let ((buf (agent-repl--ws-get (agent-repl--ws-current-name) :input-buffer)))
+  (let* ((ws (agent-repl--ws-current-name))
+         (buf (agent-repl--ws-get ws :input-buffer)))
+    (agent-repl--log ws "append-to-input-buffer: len=%d input-buffer-present=%s" (length text) (not (null buf)))
     (if buf
         (with-current-buffer buf
           (goto-char (point-max))
           (insert text))
-      (agent-repl--warn nil "no input buffer for current workspace — text not appended")
-      (agent-repl--log (agent-repl--ws-current-name) "append-to-input-buffer: no input buffer, text discarded"))))
+      (agent-repl--warn ws "no input buffer for current workspace — text not appended")
+      (agent-repl--log ws "append-to-input-buffer: no input buffer, text discarded"))))
 
 (defun agent-repl-send-with-postfix ()
   "Append `agent-repl-send-postfix' to the input buffer, then send."
@@ -673,14 +724,15 @@ read."
 
 (defun agent-repl--prepend-to-input-buffer (text)
   "Prepend TEXT to the start of the current workspace's input buffer."
-  (agent-repl--log (agent-repl--ws-current-name) "prepend-to-input-buffer: len=%d" (length text))
-  (let ((buf (agent-repl--ws-get (agent-repl--ws-current-name) :input-buffer)))
+  (let* ((ws (agent-repl--ws-current-name))
+         (buf (agent-repl--ws-get ws :input-buffer)))
+    (agent-repl--log ws "prepend-to-input-buffer: len=%d input-buffer-present=%s" (length text) (not (null buf)))
     (if buf
         (with-current-buffer buf
           (goto-char (point-min))
           (insert text))
-      (agent-repl--warn nil "no input buffer for current workspace — text not prepended")
-      (agent-repl--log (agent-repl--ws-current-name) "prepend-to-input-buffer: no input buffer, text discarded"))))
+      (agent-repl--warn ws "no input buffer for current workspace — text not prepended")
+      (agent-repl--log ws "prepend-to-input-buffer: no input buffer, text discarded"))))
 
 (defun agent-repl-send-with-prefix ()
   "Prepend `agent-repl-send-prefix' to the input buffer, then send."
