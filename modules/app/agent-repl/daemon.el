@@ -30,6 +30,7 @@
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--log-verbose "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--error "agent-repl-core" (ws fmt &rest args))
+(declare-function agent-repl--doctor-log "agent-repl-doctor" (fmt &rest args))
 (declare-function agent-repl--in-sandbox-p "agent-repl-install" ())
 (declare-function agent-repl--frontend-turn-active-sessions "agent-repl-frontend-client" ())
 (declare-function agent-repl-runtime-restart "services" ())
@@ -227,15 +228,15 @@ Only the path shapes are assembled here; the caller checks existence."
                            (directory-files worktrees t "\\`[^.]" t)))
                  (mapcar (lambda (d) (expand-file-name rel d))
                          (directory-files root t "\\`[^.]" t)))))
-          (agent-repl--log nil
-                           "widget-assets candidates: root=%s worktrees-dir=%s worktrees-exists=%s count=%s candidates=%S"
-                           root worktrees (file-directory-p worktrees)
-                           (length candidates) candidates)
+          (agent-repl--widget-doctor-log
+           "widget-assets candidates: root=%s worktrees-dir=%s worktrees-exists=%s count=%s candidates=%S"
+           root worktrees (file-directory-p worktrees)
+           (length candidates) candidates)
           candidates)
-      (agent-repl--log nil
-                       "widget-assets candidates unavailable: configured-root=%S expanded-root=%S root-exists=%s"
-                       agent-repl-frontend-widget-assets-search-root root
-                       (and root (file-directory-p root)))
+      (agent-repl--widget-doctor-log
+       "widget-assets candidates unavailable: configured-root=%S expanded-root=%S root-exists=%s"
+       agent-repl-frontend-widget-assets-search-root root
+       (and root (file-directory-p root)))
       nil)))
 
 (defun agent-repl--frontend-discover-widget-assets-dir ()
@@ -246,20 +247,35 @@ candidate (see `agent-repl--frontend-widget-assets-candidates') that
 actually holds `chess-widget.js', so a stale or empty dist is skipped."
   (if (not (string-empty-p agent-repl-frontend-widget-assets-dir))
       (let ((dir (expand-file-name agent-repl-frontend-widget-assets-dir)))
-        (agent-repl--log nil
-                         "widget-assets resolution: source=explicit configured=%S resolved=%s widget-exists=%s"
-                         agent-repl-frontend-widget-assets-dir dir
-                         (file-exists-p (expand-file-name "chess-widget.js" dir)))
+        (agent-repl--widget-doctor-log
+         "widget-assets resolution: source=explicit configured=%S resolved=%s widget-exists=%s"
+         agent-repl-frontend-widget-assets-dir dir
+         (file-exists-p (expand-file-name "chess-widget.js" dir)))
         dir)
     (let* ((candidates (agent-repl--frontend-widget-assets-candidates))
            (dir (seq-find (lambda (candidate)
                             (file-exists-p
                              (expand-file-name "chess-widget.js" candidate)))
                           candidates)))
-      (agent-repl--log nil
-                       "widget-assets resolution: source=discovery candidate-count=%s resolved=%S"
-                       (length candidates) dir)
+      (agent-repl--widget-doctor-log
+       "widget-assets resolution: source=discovery candidate-count=%s resolved=%S"
+       (length candidates) dir)
       dir)))
+
+(defun agent-repl--widget-doctor-log (fmt &rest args)
+  "Record a widget-doctor event described by FMT and ARGS.
+Use the core logger during normal module operation.  Standalone `doom
+doctor' loads `doctor.el' before this file and supplies its bootstrap-safe
+`agent-repl--doctor-log' boundary before core exists.  Signal loudly if
+neither boundary is available: silently dropping diagnostics would hide a
+broken load contract."
+  (cond
+   ((fboundp 'agent-repl--log)
+    (apply #'agent-repl--log nil fmt args))
+   ((fboundp 'agent-repl--doctor-log)
+    (apply #'agent-repl--doctor-log fmt args))
+   (t
+    (error "agent-repl: widget doctor logging boundary unavailable"))))
 
 (defun agent-repl--widget-doctor-issues ()
   "Return (LEVEL . MESSAGE) issues for the chess-widget capability.
@@ -270,14 +286,16 @@ the daemon and its assets are a host concern.  Aggregated by `doctor.el'
 alongside the install and codex checks."
   (if (agent-repl--in-sandbox-p)
       (progn
-        (agent-repl--log nil "widget doctor: sandbox=t; skipping host asset checks")
+        (agent-repl--widget-doctor-log
+         "widget doctor: sandbox=t; skipping host asset checks")
         nil)
     (let ((dir (agent-repl--frontend-discover-widget-assets-dir)))
       (cond
        ((null dir)
-        (agent-repl--log nil "widget doctor: result=missing configured-dir=%S search-root=%S"
-                         agent-repl-frontend-widget-assets-dir
-                         agent-repl-frontend-widget-assets-search-root)
+        (agent-repl--widget-doctor-log
+         "widget doctor: result=missing configured-dir=%S search-root=%S"
+         agent-repl-frontend-widget-assets-dir
+         agent-repl-frontend-widget-assets-search-root)
         (list (cons 'warn
                     (format (concat "chess-widget capability OFF: no widget-assets dir resolves"
                                     " — set agent-repl-frontend-widget-assets-dir or put a"
@@ -286,7 +304,8 @@ alongside the install and codex checks."
                             (or agent-repl-frontend-widget-assets-search-root
                                 "your explanation-engine checkout")))))
        ((not (file-exists-p (expand-file-name "chess-widget.js" dir)))
-        (agent-repl--log nil "widget doctor: result=invalid dir=%s widget-exists=nil" dir)
+        (agent-repl--widget-doctor-log
+         "widget doctor: result=invalid dir=%s widget-exists=nil" dir)
         (list (cons 'warn
                     (format (concat "chess-widget dir %s lacks chess-widget.js"
                                     " — point agent-repl-frontend-widget-assets-dir at a real"
@@ -294,7 +313,8 @@ alongside the install and codex checks."
                                     " M-x agent-repl-frontend-daemon-restart")
                             dir))))
        (t
-        (agent-repl--log nil "widget doctor: result=ready dir=%s widget-exists=t" dir)
+        (agent-repl--widget-doctor-log
+         "widget doctor: result=ready dir=%s widget-exists=t" dir)
         nil)))))
 
 ;;;; ---- State ------------------------------------------------------------
