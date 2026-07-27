@@ -141,6 +141,20 @@ func TestEventRouting(t *testing.T) {
 			want: "frame",
 		},
 		{
+			// A clear is CONVERSATION content: it renders as its own bubble and
+			// floors the frontend's replay. Nothing in the SSM's state axes moves
+			// because a conversation's history stopped informing the agent, so it
+			// belongs to the frame sink and not the lifecycle sink.
+			name: "context cleared to frame sink",
+			ev:   &corev1.Event{SessionId: "s", Payload: &corev1.Event_ContextCleared{ContextCleared: &corev1.ContextCleared{}}},
+			want: "frame",
+		},
+		{
+			name: "context compacted to frame sink",
+			ev:   &corev1.Event{SessionId: "s", Payload: &corev1.Event_ContextCompacted{ContextCompacted: &corev1.ContextCompacted{Result: "success"}}},
+			want: "frame",
+		},
+		{
 			name: "unparsed to frame sink",
 			ev:   &corev1.Event{SessionId: "s", Payload: &corev1.Event_Unparsed{Unparsed: &corev1.UnparsedEvent{Producer: "claude-shim"}}},
 			want: "frame",

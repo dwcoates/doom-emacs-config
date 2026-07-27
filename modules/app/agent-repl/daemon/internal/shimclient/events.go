@@ -65,8 +65,9 @@ func (c *Client) readLoop(ctx context.Context, ac *activeConn) error {
 // dispatchEvent routes one Event and maintains last_seen_seq. Lifecycle
 // payloads go to the StateSink (SSM), DegradedState to the DegradedReporter,
 // and everything else (data.v1 vendor Any, ContentDelta, HeartbeatProgress,
-// MessageLatency, UnparsedEvent) to the FrameSink. PERSISTENT events (seq > 0) advance the
-// monotonic high-water mark; a regression is a fatal protocol violation.
+// MessageLatency, ContextCleared, ContextCompacted, UnparsedEvent) to the
+// FrameSink. PERSISTENT events (seq > 0) advance the monotonic high-water mark;
+// a regression is a fatal protocol violation.
 func (c *Client) dispatchEvent(ev *corev1.Event) error {
 	if seq := ev.GetSeq(); seq > 0 {
 		if seq <= c.lastSeen {
@@ -99,6 +100,13 @@ func (c *Client) dispatchEvent(ev *corev1.Event) error {
 	case *corev1.Event_ContentDelta,
 		*corev1.Event_HeartbeatProgress,
 		*corev1.Event_MessageLatency,
+		// The clear and the compaction. Both are CONVERSATION content — each
+		// renders as its own bubble and floors the frontend's replay — so they
+		// belong to the frame sink, not the lifecycle sink: nothing in the SSM's
+		// state axes moves because a conversation's history stopped informing
+		// the agent.
+		*corev1.Event_ContextCleared,
+		*corev1.Event_ContextCompacted,
 		*corev1.Event_Vendor:
 		c.cfg.FrameSink.Consume(ev)
 	case nil:
