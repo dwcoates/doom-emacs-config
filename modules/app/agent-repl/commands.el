@@ -929,9 +929,9 @@ Without region: copies file:line."
 
 (defun agent-repl-paste-clipboard ()
   "Insert the current workspace's `:clipboard' text at point.
-The slot is populated by `clipboard'-typed workspace_commands files
-\(see `agent-repl--handle-clipboard-command') — a per-workspace
-clipboard, deliberately distinct from the OS clipboard.
+The slot is populated by a daemon HostAction carrying the legacy
+`clipboard' command (see `agent-repl--handle-clipboard-command') — a
+per-workspace clipboard, deliberately distinct from the OS clipboard.
 
 Signals `user-error' when no text has been set for the current
 workspace."
