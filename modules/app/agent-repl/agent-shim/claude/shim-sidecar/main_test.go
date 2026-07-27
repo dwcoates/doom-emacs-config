@@ -138,17 +138,17 @@ func TestResolveOwnerAnswersConfigTargetFromItsOwnPath(t *testing.T) {
 
 func TestResolveOwnerHoldsSpoolWhoseLaunchWasNeverSeen(t *testing.T) {
 	// Arrange
-	s, read := ownerSidecar(t)
+	s, _ := ownerSidecar(t)
 
 	// Act
 	got, ok := s.resolveOwner(spoolTarget("b1pi0nmip"), 1000)
 
-	// Assert — unresolved, and loudly so.
+	// Assert — unresolved, and recorded as held rather than tailed.
 	if ok || got != "" {
 		t.Fatalf("resolveOwner = (%q, %v), want (\"\", false)", got, ok)
 	}
-	if held := linesContaining(read(), "HELD"); len(held) != 1 {
-		t.Fatalf("hold lines = %v, want exactly 1", held)
+	if _, held := s.held[spoolTarget("b1pi0nmip").Path]; !held {
+		t.Fatal("spool was left unresolved without being recorded as held")
 	}
 }
 
@@ -186,33 +186,72 @@ func TestResolveOwnerClearsTheHoldOnceTheOwnerArrives(t *testing.T) {
 	}
 }
 
-func TestHoldReportsOnceMoreAfterTheWindowElapses(t *testing.T) {
-	// Arrange — first sight, then a rescan past the window.
+func TestReportHeldSummarizesTheBacklogInOneLine(t *testing.T) {
+	// Arrange — three spools nothing can attribute. /tmp really does hold
+	// thousands of these, so the report must not scale with them.
 	s, read := ownerSidecar(t)
-	s.resolveOwner(spoolTarget("b1pi0nmip"), 1000)
+	for _, id := range []string{"b1", "b2", "b3"} {
+		s.resolveOwner(spoolTarget(id), 1000)
+	}
 
 	// Act
-	s.resolveOwner(spoolTarget("b1pi0nmip"), 1000+UnownedSpoolWindow.Milliseconds())
+	s.reportHeld(1000)
 
 	// Assert
-	if got := linesContaining(read(), "STILL UNOWNED"); len(got) != 1 {
-		t.Fatalf("escalation lines = %v, want exactly 1", got)
+	got := linesContaining(read(), "held awaiting attribution")
+	if len(got) != 1 {
+		t.Fatalf("summary lines = %v, want exactly 1", got)
+	}
+	if !strings.Contains(got[0], "3 held") {
+		t.Fatalf("summary %q does not carry the held count", got[0])
 	}
 }
 
-func TestHoldDoesNotReEscalateOnEveryRescan(t *testing.T) {
-	// Arrange — already escalated once.
+func TestReportHeldStaysSilentWhileTheBacklogIsUnchanged(t *testing.T) {
+	// Arrange — reported once already.
 	s, read := ownerSidecar(t)
-	past := 1000 + UnownedSpoolWindow.Milliseconds()
-	s.resolveOwner(spoolTarget("b1pi0nmip"), 1000)
-	s.resolveOwner(spoolTarget("b1pi0nmip"), past)
+	s.resolveOwner(spoolTarget("b1"), 1000)
+	s.reportHeld(1000)
+	before := len(read())
 
-	// Act — the rescan timer keeps firing.
-	s.resolveOwner(spoolTarget("b1pi0nmip"), past+60_000)
+	// Act — the rescan timer keeps firing over the same backlog.
+	s.reportHeld(1000)
 
-	// Assert — still one line; a steady anomaly must not flood the log.
-	if got := linesContaining(read(), "STILL UNOWNED"); len(got) != 1 {
-		t.Fatalf("escalation lines = %v, want exactly 1", got)
+	// Assert — a permanent backlog must not be re-reported every pass.
+	if after := read(); len(after) != before {
+		t.Fatalf("unchanged backlog logged %v", after[before:])
+	}
+}
+
+func TestReportHeldCountsAHoldPastTheWindowAsStale(t *testing.T) {
+	// Arrange — one spool held long enough to be an anomaly, not a race.
+	s, read := ownerSidecar(t)
+	s.resolveOwner(spoolTarget("b1"), 1000)
+
+	// Act
+	s.reportHeld(1000 + UnownedSpoolWindow.Milliseconds())
+
+	// Assert
+	got := linesContaining(read(), "held awaiting attribution")
+	if len(got) != 1 || !strings.Contains(got[0], "(1 past ") {
+		t.Fatalf("summary = %v, want one line counting 1 past the window", got)
+	}
+}
+
+func TestReportHeldAnnouncesTheBacklogClearing(t *testing.T) {
+	// Arrange — a backlog that then gets attributed.
+	s, read := ownerSidecar(t)
+	s.resolveOwner(spoolTarget("b1"), 1000)
+	s.reportHeld(1000)
+	s.noteOwner("b1", "S1")
+	s.resolveOwner(spoolTarget("b1"), 1100)
+
+	// Act
+	s.reportHeld(1100)
+
+	// Assert — the all-clear is reported, not just silently reached.
+	if got := linesContaining(read(), "no unattributed spools remain"); len(got) != 1 {
+		t.Fatalf("all-clear lines = %v, want exactly 1", got)
 	}
 }
 
