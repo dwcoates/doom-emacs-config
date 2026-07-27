@@ -325,6 +325,163 @@ jq '.' ~/.claude-emacs/claude-repld-sessions.json
 
 A session with a registry entry but no socket is a session the daemon believes in and cannot reach.
 
+## 4. The state plane — the SSM database
+
+**This is what makes "why is my workspace this color" an answerable question.** If the symptom is a wrong color, a stuck spinner, or a workspace that reads as blocked, come here first and *query*. Do not reason about it from log lines.
+
+- DB: `~/.cache/agent-repl/ssm/state.db` — SQLite, WAL, schema version 2. Owned by `daemon/internal/ssm/`.
+- Query it **read-only, always**: `sqlite3 -readonly ~/.cache/agent-repl/ssm/state.db "…"`
+- It **replaces the Emacs-persisted `:agent-state` entirely.** State is rebuildable from the append-only log and survives an SSM reopen. **Do not look for the render state in Emacs** — §2.5's `memory-state.el` will not tell you the color.
+
+### 4.1 Schema
+
+```sql
+CREATE TABLE workspace_state (
+  workspace TEXT NOT NULL, session_id TEXT, state TEXT NOT NULL,
+  cause_kind TEXT NOT NULL, cause_seq INTEGER, at INTEGER NOT NULL, task_id TEXT,
+  PRIMARY KEY (workspace, at));
+```
+
+- `workspace` — the absolute project dir.
+- `at` — unix **millis**.
+
+The table is append-only: each row is a transition, never an overwrite.
+
+### 4.2 Six axes, not one timeline
+
+**This is the key mental model.** A workspace's color is not one state machine — it is **six independent axes**, each contributing its LATEST row by `at`. The winner is the **min-rank candidate** across all six.
+
+The practical consequence: **a stale row on any single axis can win.** A workspace can look wrong because one axis was never cleared, while the other five are perfectly current.
+
+| Axis | States it contributes | Clearing token |
+|---|---|---|
+| agent | `init` / `thinking` / `idle` / `ready` / `done` / `permission` / `dead` | — |
+| vendor | `vendor_blocked` | `vendor_clear` |
+| paint | `unpainted` | `painted` |
+| backfill | `backfill_failed` | `backfill_ok` |
+| degraded | `degraded` | `degraded_clear` |
+| merge | the merge states | `merge_none` |
+
+A clearing token means the axis contributes **no candidate at all** — the resolve query filters it out with `WHERE state <> '<clear-token>'`.
+
+### 4.3 Resolution is a SQL query, not a Go cond-ladder
+
+`resolveQuery` in `daemon/internal/ssm/resolve.go` does the whole thing in SQL. Precedence lives entirely in a `prec(state, axis, rank) VALUES` table — so the ladder below IS the implementation, not a summary of it.
+
+**Merge states sit ABOVE the color ladder.** They express workflow actionability rather than agent liveness, so they carry badges and glyphs, not colors:
+
+| Rank | State |
+|---|---|
+| 1 | `merge_conflict` |
+| 2 | `merge_failed` |
+| 3 | `merged` |
+| 4 | `merging` |
+| 5 | `merge_queued` |
+
+Then the five-color ladder (lower rank wins):
+
+| Color | Rank | State |
+|---|---|---|
+| **BLUE** | 10 | `dead` |
+| | 11 | `degraded` |
+| | 12 | `unpainted` |
+| | 13 | `backfill_failed` |
+| | 14 | `init` |
+| **PURPLE** | 20 | `vendor_blocked` |
+| **RED** | 30 | `thinking` |
+| **YELLOW** | — | `idle_async` — **derived at resolve time** from `live_task_count`, never stored |
+| **GREEN** | 40 | `permission` |
+| | 41 | `done` |
+| | 42 | `ready` |
+| | 43 | `idle` |
+
+Two pieces of the ordering rationale are worth quoting, because they explain results that otherwise look like bugs:
+
+> Blue outranks even a live turn, because **a turn running behind a route the user cannot see is not something to advertise as working.**
+
+> Purple outranks red, because **a session the vendor has stopped is not going to finish whatever it still looks busy doing.**
+
+Note `idle_async` is never in the table — if you go looking for a stored yellow row you will not find one.
+
+### 4.4 Recipe — "why is this workspace that color?"
+
+Dump the recent transitions:
+
+```sh
+WS=/Users/dodgecoates/.config/doom
+sqlite3 -readonly ~/.cache/agent-repl/ssm/state.db "
+  SELECT datetime(at/1000,'unixepoch','localtime') t, state, cause_kind, cause_seq, session_id
+  FROM workspace_state WHERE workspace='$WS' ORDER BY at DESC LIMIT 40;"
+```
+
+Then isolate the axis you suspect — this is the step that actually answers the question, because the winning row is often much older than the tail above:
+
+```sh
+# vendor axis (purple)
+sqlite3 -readonly ~/.cache/agent-repl/ssm/state.db "
+  SELECT datetime(at/1000,'unixepoch','localtime') t, state, cause_kind, cause_seq
+  FROM workspace_state WHERE workspace='$WS'
+    AND state IN ('vendor_blocked','vendor_clear') ORDER BY at DESC LIMIT 10;"
+
+# paint axis (blue)
+#   … AND state IN ('unpainted','painted') …
+# backfill axis (blue)
+#   … AND state IN ('backfill_failed','backfill_ok') …
+# degraded axis (blue)
+#   … AND state IN ('degraded','degraded_clear') …
+# merge axis (badges)
+#   … AND state IN ('merge_conflict','merge_failed','merged','merging','merge_queued','merge_none') …
+```
+
+The latest row per axis is the axis's candidate. Rank them with §4.3 and you have the color, with the causing row in hand.
+
+### 4.5 Cross-check against the daemon log
+
+Every transition is loud-logged:
+
+```sh
+grep 'ssm: transition' ~/.claude-emacs/claude-repld.log | tail -40
+```
+
+Format:
+
+```
+ssm: transition ws=<dir> <FROM>→<TO> cause_kind=<k> cause_seq=<n> turn_active=<bool> live_tasks=<n> merge="<phase>"
+```
+
+### 4.6 The vendor-axis gotcha — read this before diagnosing any purple
+
+**The vendor axis is released ONLY by a subsequent `TurnEnded` that concludes cleanly** (`vendorBlockOf`, `ssm.go:290`).
+
+A **session restart does not clear it.** Restarting writes `ready` on the *agent* axis and does not touch the *vendor* axis at all — so **purple survives restarts indefinitely**, until a turn actually completes cleanly in that workspace. `ApplyVendorCleared` (`ssm.go:404`) exists as an explicit release entry point, but it currently has **zero non-test callers**.
+
+If a user says "I restarted it and it's still purple", that is the expected behavior of this design, not a new bug.
+
+### 4.7 The masking effect — a color change is not proof of a new cause
+
+A blue axis outranks purple. So **clearing blue** (a paint ack, say) can make a **long-standing purple suddenly appear**, as though something just broke.
+
+**The color changing is not evidence that the underlying cause is new.** Always read the axis rows (§4.4) and check the `at` of the winning row, rather than trusting the transition line or the moment the user noticed.
+
+### 4.8 What actually blocks the vendor axis
+
+`VendorBlockingTurnEnd` stop reasons that block:
+
+- `error_max_turns`
+- `error_max_budget`
+- `error_during_execution`
+- `refusal`
+- `authentication_failed`
+- `billing_error`
+- `invalid_request`
+- `server_error`
+
+Plus **any `is_error` end whose stop reason is unrecognized** — unknown failures block by default.
+
+`aborted` is **deliberately NOT blocking**: a user interrupt is a normal conclusion to a turn, not a vendor stopping the session.
+
+Rate limits: `allowed` and `allowed_warning` are **standing telemetry on a request the API ALLOWED**, and must not block. Anything else does.
+
 ## 7. When the evidence is too sparse — SUGGEST INSTRUMENTATION EMPHATICALLY
 
 Since file writes are now unconditional, the only way the log can be uninformative is if the suspect code path has **no `agent-repl--log` calls at all**. When that happens, Claude tends to fill the silence with speculation. **Do not do that.** If you find yourself reading the log around the timestamp of the bug and cannot find any line that corresponds to the suspect function or branch, stop and surface this emphatically.
