@@ -57,8 +57,13 @@ appears here — that plane arrives already classified.")
 
 (defun agent-repl-failure-client-type-p (type)
   "Return non-nil when TYPE belongs to the FRONTEND namespace."
-  (and (stringp type)
-       (string-prefix-p agent-repl-failure-client-prefix type)))
+  (let ((client-type-p
+         (and (stringp type)
+              (string-prefix-p agent-repl-failure-client-prefix type))))
+    (agent-repl--log nil
+                     "failure-client-type-p: type=%S stringp=%S client-type-p=%S"
+                     type (stringp type) client-type-p)
+    client-type-p))
 
 ;;;; ---- Classes ---------------------------------------------------------
 
@@ -86,8 +91,17 @@ workspace colored beside it.  See `agent-repl-failure-class'.")
 Signals on anything outside `agent-repl-failure-class-wire' — there is no
 fallback class (AGENTS.md No-Silent-Fallbacks), because a guessed class is
 a mis-colored failure rather than a missing one."
-  (or (cdr (assoc name agent-repl-failure-class-wire))
-      (error "agent-repl failure: unrecognized error_class %S" name)))
+  (let ((class (cdr (assoc name agent-repl-failure-class-wire))))
+    (if class
+        (progn
+          (agent-repl--log nil
+                           "failure-class: error-class=%S class=%S"
+                           name class)
+          class)
+      (agent-repl--log nil
+                       "failure-class: REJECTED unrecognized-error-class=%S"
+                       name)
+      (error "agent-repl failure: unrecognized error_class %S" name))))
 
 ;;;; ---- Construction ----------------------------------------------------
 
@@ -100,12 +114,21 @@ site here consumes: `:class' `:type' `:message' `:detail' `:resolved-at'
 
 This is an ADOPTION, not a derivation.  Nothing is re-decided: the class,
 the type and the prose are the daemon's verdict."
-  (list :class (agent-repl-failure-class (plist-get item :errorClass))
-        :type (or (plist-get item :errorType) "")
-        :message (or (plist-get item :message) "")
-        :detail (or (plist-get item :sourceDetail) "")
-        :resolved-at (or (plist-get item :resolvedAtMs) 0)
-        :item-uuid (or (plist-get item :itemUuid) "")))
+  (let* ((error-class (plist-get item :errorClass))
+         (type (or (plist-get item :errorType) ""))
+         (message (or (plist-get item :message) ""))
+         (detail (or (plist-get item :sourceDetail) ""))
+         (resolved-at (or (plist-get item :resolvedAtMs) 0))
+         (item-uuid (or (plist-get item :itemUuid) "")))
+    (agent-repl--log nil
+                     "failure-from-wire: adopting error-class=%S type=%S message=%S detail=%S resolved-at=%S item-uuid=%S"
+                     error-class type message detail resolved-at item-uuid)
+    (list :class (agent-repl-failure-class error-class)
+          :type type
+          :message message
+          :detail detail
+          :resolved-at resolved-at
+          :item-uuid item-uuid)))
 
 (defun agent-repl-failure-local (type message &optional detail)
   "Build a LOCALLY-classified failure of TYPE with MESSAGE and DETAIL.
@@ -119,29 +142,54 @@ something only the daemon can see.
 Signals when TYPE is outside `agent-repl-failure-local-types', which is
 what keeps the local vocabulary closed rather than accumulating a type per
 call site."
-  (unless (member type agent-repl-failure-local-types)
-    (error "agent-repl failure: %S is not a local failure type" type))
-  (list :class :internal
-        :type type
-        :message message
-        :detail (or detail "")
-        :resolved-at 0
-        :item-uuid ""))
+  (let ((allowed (member type agent-repl-failure-local-types)))
+    (agent-repl--log nil
+                     "failure-local: requested type=%S message=%S detail=%S allowed=%S"
+                     type message detail (and allowed t))
+    (unless allowed
+      (agent-repl--log nil
+                       "failure-local: REJECTED unlisted-type=%S"
+                       type)
+      (error "agent-repl failure: %S is not a local failure type" type))
+    (let ((failure (list :class :internal
+                         :type type
+                         :message message
+                         :detail (or detail "")
+                         :resolved-at 0
+                         :item-uuid "")))
+      (agent-repl--log nil
+                       "failure-local: CREATED class=%S type=%S message=%S detail=%S"
+                       (plist-get failure :class)
+                       (plist-get failure :type)
+                       (plist-get failure :message)
+                       (plist-get failure :detail))
+      failure)))
 
 ;;;; ---- Surfacing -------------------------------------------------------
 
-(defun agent-repl-failure-text (failure)
+(defun agent-repl-failure-text (failure &optional workspace)
   "Return the one-line human account of FAILURE for the echo area.
+
+WORKSPACE carries log metadata when the caller already knows the failure's
+workspace.  Direct consumers that only format a failure leave it nil.
 
 The prose leads and the raw account follows in parens, rather than the
 raw account replacing the prose.  The two are separate fields precisely so
 a reader gets the sentence and a debugger still gets the evidence."
   (let ((message (plist-get failure :message))
         (detail (plist-get failure :detail)))
-    (cond
-     ((and (stringp detail) (not (string-empty-p detail)))
-      (format "%s (%s)" message detail))
-     (t message))))
+    (let ((text
+           (cond
+            ((and (stringp detail) (not (string-empty-p detail)))
+             (format "%s (%s)" message detail))
+            (t message))))
+      (agent-repl--log workspace
+                       "failure-text: type=%S message=%S detail=%S detail-included=%S text=%S"
+                       (plist-get failure :type)
+                       message detail
+                       (and (stringp detail) (not (string-empty-p detail)))
+                       text)
+      text)))
 
 (defun agent-repl-failure-surface (workspace failure)
   "Log FAILURE for WORKSPACE and echo it.
@@ -153,20 +201,24 @@ happening now, and announcing the end of something the user may never have
 seen the start of is noise.
 
 Returns the text echoed, or nil when the failure was resolved."
-  (let ((text (agent-repl-failure-text failure))
+  (let ((text (agent-repl-failure-text failure workspace))
         (resolved (> (or (plist-get failure :resolved-at) 0) 0)))
     (if resolved
         (progn
           (agent-repl--log workspace
-                           "failure RESOLVED class=%s type=%s: %s"
+                           "failure RESOLVED class=%s type=%s resolved-at=%S item-uuid=%S: %s"
                            (plist-get failure :class)
                            (plist-get failure :type)
+                           (plist-get failure :resolved-at)
+                           (plist-get failure :item-uuid)
                            text)
           nil)
       (agent-repl--log workspace
-                       "failure class=%s type=%s: %s"
+                       "failure OPEN class=%s type=%s resolved-at=%S item-uuid=%S: %s"
                        (plist-get failure :class)
                        (plist-get failure :type)
+                       (plist-get failure :resolved-at)
+                       (plist-get failure :item-uuid)
                        text)
       (message "agent-repl: %s" text)
       text)))

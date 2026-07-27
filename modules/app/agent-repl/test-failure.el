@@ -36,6 +36,22 @@ wire would mean a frontend's failure was laundered through the daemon."
   ;; Act / Assert
   (should-not (agent-repl-failure-client-type-p nil)))
 
+(ert-deftest agent-repl-test-failure-client-type-p-logs-its-branch-inputs ()
+  "Client-type classification records its value and both predicate outcomes."
+  ;; Arrange
+  (let (logs)
+    (cl-letf (((symbol-function 'agent-repl--log)
+               (lambda (ws fmt &rest args)
+                 (push (list ws (apply #'format fmt args)) logs))))
+      ;; Act
+      (agent-repl-failure-client-type-p "client.daemon_unreachable")
+      (agent-repl-failure-client-type-p "shim.rejected")
+      ;; Assert
+      (should (= (length logs) 2))
+      (should (cl-every (lambda (entry) (null (car entry))) logs))
+      (should (string-match-p "client-type-p=nil" (cadr (car logs))))
+      (should (string-match-p "client-type-p=t" (cadr (cadr logs)))))))
+
 ;;;; ---- Class decoding --------------------------------------------------
 
 (ert-deftest agent-repl-test-failure-class-internal ()
@@ -60,6 +76,21 @@ colored beside it."
   "A class outside the vocabulary fails loudly."
   ;; Act / Assert
   (should-error (agent-repl-failure-class "ERROR_CLASS_SOMETHING_NEW")))
+
+(ert-deftest agent-repl-test-failure-class-logs-the-accepted-and-rejected-branches ()
+  "Class validation logs both the selected class and a bad wire value."
+  ;; Arrange
+  (let (logs)
+    (cl-letf (((symbol-function 'agent-repl--log)
+               (lambda (ws fmt &rest args)
+                 (push (list ws (apply #'format fmt args)) logs))))
+      ;; Act
+      (agent-repl-failure-class "ERROR_CLASS_API")
+      (should-error (agent-repl-failure-class "ERROR_CLASS_UNKNOWN"))
+      ;; Assert
+      (should (string-match-p "REJECTED unrecognized-error-class=\\\"ERROR_CLASS_UNKNOWN\\\""
+                              (cadr (car logs))))
+      (should (string-match-p "class=:api" (cadr (cadr logs)))))))
 
 (ert-deftest agent-repl-test-failure-every-class-decodes ()
   "Every class keyword has a wire name that decodes back to it."
@@ -108,6 +139,23 @@ common case, not a malformed frame."
     ;; Assert
     (should (equal (plist-get f :resolved-at) 1700000000000))))
 
+(ert-deftest agent-repl-test-failure-from-wire-logs-all-adopted-fields ()
+  "Wire adoption logs every value that reaches the normalized failure."
+  ;; Arrange
+  (let (logs)
+    (cl-letf (((symbol-function 'agent-repl--log)
+               (lambda (ws fmt &rest args)
+                 (push (list ws (apply #'format fmt args)) logs))))
+      ;; Act
+      (agent-repl-failure-from-wire
+       '(:errorClass "ERROR_CLASS_INTERNAL" :errorType "shim.rejected"
+         :message "rejected" :sourceDetail "request nacked"
+         :resolvedAtMs 17 :itemUuid "failure-17"))
+      ;; Assert
+      (should (string-match-p "type=\\\"shim.rejected\\\"" (cadr (cadr logs))))
+      (should (string-match-p "resolved-at=17" (cadr (cadr logs))))
+      (should (string-match-p "item-uuid=\\\"failure-17\\\"" (cadr (cadr logs)))))))
+
 ;;;; ---- Local construction ----------------------------------------------
 
 (ert-deftest agent-repl-test-failure-local-is-internal-class ()
@@ -130,6 +178,22 @@ type per call site."
   "A DAEMON-owned type cannot be minted locally."
   ;; Act / Assert
   (should-error (agent-repl-failure-local "shim.rejected" "x")))
+
+(ert-deftest agent-repl-test-failure-local-logs-validation-and-creation ()
+  "Local construction records its inputs and the closed-vocabulary outcome."
+  ;; Arrange
+  (let (logs)
+    (cl-letf (((symbol-function 'agent-repl--log)
+               (lambda (ws fmt &rest args)
+                 (push (list ws (apply #'format fmt args)) logs))))
+      ;; Act
+      (agent-repl-failure-local "client.daemon_unreachable" "gone" "dial failed")
+      (should-error (agent-repl-failure-local "client.unknown" "gone"))
+      ;; Assert
+      (should (string-match-p "REJECTED unlisted-type=\\\"client.unknown\\\""
+                              (cadr (car logs))))
+      (should (string-match-p "CREATED class=:internal type=\\\"client.daemon_unreachable\\\""
+                              (cadr (caddr logs)))))))
 
 ;;;; ---- Surfacing -------------------------------------------------------
 
@@ -156,6 +220,22 @@ type per call site."
   (let ((text (agent-repl-failure-text '(:message "rejected" :detail ""))))
     ;; Assert
     (should (equal text "rejected"))))
+
+(ert-deftest agent-repl-test-failure-text-logs-detail-branch-and-rendered-text ()
+  "Text construction logs whether detail entered the human account."
+  ;; Arrange
+  (let (logs)
+    (cl-letf (((symbol-function 'agent-repl--log)
+               (lambda (ws fmt &rest args)
+                 (push (list ws (apply #'format fmt args)) logs))))
+      ;; Act
+      (agent-repl-failure-text '(:type "shim.rejected" :message "rejected"
+                                 :detail "request nacked"))
+      (agent-repl-failure-text '(:type "shim.rejected" :message "rejected"
+                                 :detail ""))
+      ;; Assert
+      (should (string-match-p "detail-included=nil" (cadr (car logs))))
+      (should (string-match-p "detail-included=t" (cadr (cadr logs)))))))
 
 (ert-deftest agent-repl-test-failure-surface-echoes-an-open-failure ()
   "An unresolved failure reaches the echo area."
@@ -190,9 +270,31 @@ something the user may never have seen the start of is noise."
   (cl-letf (((symbol-function 'message) (lambda (&rest _) nil)))
     ;; Act / Assert
     (should (equal (agent-repl-failure-surface
-                    nil '(:class :internal :type "shim.rejected"
+                   nil '(:class :internal :type "shim.rejected"
                           :message "rejected" :detail "" :resolved-at 0))
                    "rejected"))))
+
+(ert-deftest agent-repl-test-failure-surface-logs-open-and-resolved-context ()
+  "Surface logs preserve the workspace and lifecycle fields on both branches."
+  ;; Arrange
+  (let (logs)
+    (cl-letf (((symbol-function 'agent-repl--log)
+               (lambda (ws fmt &rest args)
+                 (push (list ws (apply #'format fmt args)) logs)))
+              ((symbol-function 'message) (lambda (&rest _) nil)))
+      ;; Act
+      (agent-repl-failure-surface
+       "ws-a" '(:class :internal :type "shim.rejected" :message "rejected"
+                :detail "" :resolved-at 0 :item-uuid "open-1"))
+      (agent-repl-failure-surface
+       "ws-a" '(:class :internal :type "shim.rejected" :message "rejected"
+                :detail "" :resolved-at 17 :item-uuid "resolved-17"))
+      ;; Assert
+      (should (string-match-p "RESOLVED.*resolved-at=17.*item-uuid=\\\"resolved-17\\\""
+                              (cadr (car logs))))
+      (should (string-match-p "OPEN.*resolved-at=0.*item-uuid=\\\"open-1\\\""
+                              (cadr (caddr logs))))
+      (should (cl-every (lambda (entry) (equal (car entry) "ws-a")) logs)))))
 
 (provide 'test-failure)
 ;;; test-failure.el ends here
