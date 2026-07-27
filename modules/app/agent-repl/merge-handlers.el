@@ -67,9 +67,14 @@ may register themselves in their own files.")
   "Register FN under SYMBOL in `agent-repl--merge-handler-registry'.
 Replaces any prior binding for SYMBOL so reloads pick up the new
 definition without leaving stale function references behind."
-  (setq agent-repl--merge-handler-registry
-        (cons (cons symbol fn)
-              (assq-delete-all symbol agent-repl--merge-handler-registry))))
+  (let ((replaced (assq symbol agent-repl--merge-handler-registry)))
+    (setq agent-repl--merge-handler-registry
+          (cons (cons symbol fn)
+                (assq-delete-all symbol agent-repl--merge-handler-registry)))
+    (when (fboundp 'agent-repl--log)
+      (agent-repl--log nil
+                        "register-merge-handler: symbol=%S fn=%S replaced=%s"
+                        symbol fn (if replaced "t" "nil")))))
 
 (defcustom agent-repl-workspace-merge-handler-overrides nil
   "User-side fallback merge handler config, keyed by repo root path.
@@ -108,10 +113,24 @@ REPO-ROOT is a directory; the file
 Safe by construction: uses `read', not `eval'.  Returns nil on
 missing file, IO error, or non-alist content (each case logged so
 misconfigurations are debuggable)."
-  (when (and repo-root (file-directory-p repo-root))
+  (cond
+   ((null repo-root)
+    (when (fboundp 'agent-repl--log)
+      (agent-repl--log nil
+                        "merge-handler-config: repo-root=nil; config lookup skipped")))
+   ((not (file-directory-p repo-root))
+    (when (fboundp 'agent-repl--log)
+      (agent-repl--log nil
+                        "merge-handler-config: repo-root=%s is not a directory; config lookup skipped"
+                        repo-root)))
+   (t
     (let ((path (expand-file-name agent-repl--merge-handler-config-file
                                   repo-root)))
-      (when (file-readable-p path)
+      (if (not (file-readable-p path))
+          (when (fboundp 'agent-repl--log)
+            (agent-repl--log nil
+                              "merge-handler-config: path=%s unreadable-or-absent"
+                              path))
         (condition-case err
             (with-temp-buffer
               (insert-file-contents path)
@@ -132,7 +151,7 @@ misconfigurations are debuggable)."
               nil
               "merge-handler-config: failed to read %s: %S"
               path err))
-           nil))))))
+           nil)))))))
 
 (defun agent-repl--lookup-merge-handler-override (repo-root)
   "Return the override config alist for REPO-ROOT, or nil.
@@ -175,6 +194,11 @@ cannot wedge merge dispatch."
                       raw-symbol repo-root))
                    'cherry-pick)
                   (t 'cherry-pick))))
+    (when (fboundp 'agent-repl--log)
+      (agent-repl--log nil
+                        "resolve-merge-handler: repo-root=%s config-present=%s raw-handler=%S resolved-handler=%S args-present=%s"
+                        (or repo-root "nil") (if config "t" "nil") raw-symbol
+                        symbol (if args "t" "nil")))
     (cons symbol args)))
 
 (defun agent-repl--dispatch-merge-handler (target-ws repo-root &optional onto-master)
@@ -241,8 +265,18 @@ an unloaded handler file) could leave the registry short an entry."
              (args (cdr descriptor))
              (entry (assq symbol agent-repl--merge-handler-registry))
              (fn (and entry (cdr entry))))
+        (agent-repl--log target-ws
+                          "dispatch-merge-handler: ws=%s resolved-root=%s handler=%S args-present=%s registry-entry=%s"
+                          target-ws (or resolved-root "nil") symbol
+                          (if args "t" "nil") (if entry "t" "nil"))
         (unless fn
+          (agent-repl--log target-ws
+                            "dispatch-merge-handler: ws=%s handler=%S has no registered function — aborting"
+                            target-ws symbol)
           (user-error "No merge handler registered for symbol '%s'" symbol))
+        (agent-repl--log target-ws
+                          "dispatch-merge-handler: ws=%s invoking handler=%S"
+                          target-ws symbol)
         (funcall fn target-ws args)))))
 
 (defun agent-repl--resolve-merge-handler-symbol (repo-root &optional onto-master)
@@ -254,10 +288,21 @@ Shared by `agent-repl--workspace-merge-async' (to branch the daemon-routed
 cherry-pick path off the local worker path) and
 `agent-repl--dispatch-merge-handler'."
   (if onto-master
-      'onto-master
-    (car (agent-repl--resolve-merge-handler
-          (or (and repo-root (agent-repl--main-worktree-path repo-root))
-              repo-root)))))
+      (progn
+        (when (fboundp 'agent-repl--log)
+          (agent-repl--log nil
+                            "resolve-merge-handler-symbol: repo-root=%s onto-master=t resolved-handler=onto-master"
+                            (or repo-root "nil")))
+        'onto-master)
+    (let* ((main-root (and repo-root (agent-repl--main-worktree-path repo-root)))
+           (resolved-root (or main-root repo-root))
+           (symbol (car (agent-repl--resolve-merge-handler resolved-root))))
+      (when (fboundp 'agent-repl--log)
+        (agent-repl--log nil
+                          "resolve-merge-handler-symbol: repo-root=%s main-root=%s resolved-root=%s handler=%S"
+                          (or repo-root "nil") (or main-root "nil")
+                          (or resolved-root "nil") symbol))
+      symbol)))
 
 ;;; Daemon-routed cherry-pick dispatch (design §4.6/§9.3)
 ;;
@@ -285,6 +330,9 @@ geometry)."
     (when (or (null source-branch) (and (stringp source-branch) (string-empty-p source-branch)))
       (agent-repl--log ws "merge-cherry-pick-geometry: ws=%s MISSING source-branch — aborting" ws)
       (user-error "Cannot merge '%s': could not resolve the source branch" ws))
+    (agent-repl--log ws
+                      "merge-cherry-pick-geometry: ws=%s resolved source-branch=%s source-dir=%s target-dir=%s"
+                      ws source-branch source-dir target-dir)
     (list :source-branch source-branch :source-dir source-dir :target-dir target-dir)))
 
 (defun agent-repl--merge-dispatch-cherry-pick-over-uds (ws)
@@ -315,6 +363,9 @@ callback clears the dispatch marker.  Returns the request-id."
                       :sourceDir source-dir
                       :targetDir target-dir)
                 ws)))
+      (agent-repl--log ws
+                        "merge-dispatch-cherry-pick-over-uds: ws=%s command-issued request-id=%s dispatch-marker=t"
+                        ws req)
       (agent-repl--uds-track-command
        req "mergeWorkspace" ws
        (lambda (err)
@@ -322,6 +373,9 @@ callback clears the dispatch marker.  Returns the request-id."
          (agent-repl--log ws
                            "merge-dispatch-cherry-pick-over-uds: ws=%s command REJECTED err=%s — cleared dispatch marker"
                            ws err)))
+      (agent-repl--log ws
+                        "merge-dispatch-cherry-pick-over-uds: ws=%s request-id=%s tracking-registered"
+                        ws req)
       req)))
 
 (defun agent-repl--merge-resume-over-uds (ws)
@@ -348,6 +402,9 @@ Returns the request-id."
                       :targetDir target-dir)
                 ws)))
       (agent-repl--uds-track-command req "mergeWorkspace" ws)
+      (agent-repl--log ws
+                        "merge-resume-over-uds: ws=%s command-issued request-id=%s tracking-registered"
+                        ws req)
       req)))
 
 ;;; DAEMON-PORT PENDING: PR merge-queue polling
@@ -412,7 +469,10 @@ direct call from `agent-repl--pr-poll-start'); non-blocking."
    (format "pr-poll-%s" ws)
    project-dir
    '("pr" "view" "--json" "state,mergedAt,number")
-   (lambda (_ok output)
+   (lambda (ok output)
+     (agent-repl--log-verbose
+      ws "pr-poll-tick: ws=%s gh-complete ok=%s output-bytes=%d"
+      ws (if ok "t" "nil") (length (or output "")))
      (agent-repl--pr-poll-handle-result ws project-dir main-dir output))))
 
 (defun agent-repl--pr-poll-handle-result (ws _project-dir main-dir output)
@@ -476,6 +536,9 @@ main worktree path (used for the magit refresh and the merge-target
 name); teardown still runs when it is nil.
 
 Runs on the main thread (UI ops: close-workspace + magit refresh)."
+  (agent-repl--log ws
+                    "finalize-merged-workspace: ws=%s main-dir=%s begin terminal-state transition"
+                    ws (or main-dir "nil"))
   (agent-repl--ws-put ws :merging nil)
   (agent-repl--ws-put ws :merge-completed t)
   (agent-repl--ws-put ws :merge-completed-at (float-time))
@@ -491,6 +554,9 @@ Runs on the main thread (UI ops: close-workspace + magit refresh)."
                            agent-repl-master-branch-name))
   (agent-repl--ws-put ws :repl-state :merged)
   (agent-repl--ws-put ws :agent-state nil)
+  (agent-repl--log ws
+                    "finalize-merged-workspace: ws=%s teardown-scheduled main-dir=%s"
+                    ws (or main-dir "nil"))
   (agent-repl--gns-sockets-close-then
    ws
    (lambda ()
@@ -515,7 +581,17 @@ Runs on the main thread (called from the process sentinel)."
       (agent-repl--log ws "pr-poll-on-merged: ws=%s fetch origin %s exit=%d"
                         ws agent-repl-master-branch-name ec))
     (agent-repl--maybe-fast-forward-master main-dir)
+    (agent-repl--log ws
+                      "pr-poll-on-merged: ws=%s fetch-succeeded; requesting fast-forward and checkout in %s"
+                      ws main-dir)
     (agent-repl--checkout-master-in-worktree main-dir))
+  (unless main-dir
+    (agent-repl--log ws
+                      "pr-poll-on-merged: ws=%s main-dir=nil; finalizing without local trunk update"
+                      ws))
+  (agent-repl--log ws
+                    "pr-poll-on-merged: ws=%s entering workspace finalization main-dir=%s"
+                    ws (or main-dir "nil"))
   (agent-repl--finalize-merged-workspace ws main-dir))
 
 (defun agent-repl--pr-poll-on-failed (ws)
@@ -526,6 +602,9 @@ Sets `:repl-state :merge-failed' then calls
 `workspace-merge-async' preserves via `preserve-entry').
 
 Runs on the main thread (called from the process sentinel)."
+  (agent-repl--log ws
+                    "pr-poll-on-failed: ws=%s recording merge-failed state and reopening workspace"
+                    ws)
   (agent-repl--ws-put ws :merging nil)
   (agent-repl--ws-put ws :merge-completed nil)
   (agent-repl--ws-put ws :merge-failed t)
@@ -536,7 +615,10 @@ Runs on the main thread (called from the process sentinel)."
    (format
     "The pull request for workspace '%s' was closed without merging into master. \
 The workspace has been revived — please investigate and retry the merge when ready."
-    ws)))
+    ws))
+  (agent-repl--log ws
+                    "pr-poll-on-failed: ws=%s workspace reopened and retry notification dispatched"
+                    ws))
 
 (defun agent-repl--merge-handler-refresh-master-from-origin
     (target-ws &optional _args)
@@ -569,13 +651,18 @@ previous immediate-fetch behaviour for that edge case).
 ARGS is currently unused; reserved for future tuning.
 
 SIGNALS `user-error' on a dirty main worktree (step 2)."
-  (let* ((source-dir (or (agent-repl--ws-get target-ws :project-dir)
-                         (agent-repl--ws-get target-ws :source-ws-dir)))
+  (let* ((project-dir (agent-repl--ws-get target-ws :project-dir))
+         (source-ws-dir (agent-repl--ws-get target-ws :source-ws-dir))
+         (source-dir (or project-dir source-ws-dir))
          (main-dir (and source-dir
-                        (agent-repl--main-worktree-path source-dir))))
+                        (agent-repl--main-worktree-path source-dir)))
+         (source-kind (cond
+                       (project-dir "project-dir")
+                       (source-ws-dir "source-ws-dir")
+                       (t "missing"))))
     (agent-repl--log target-ws
-                      "merge-handler-refresh-master-from-origin: ws=%s source-dir=%s main-dir=%s"
-                      target-ws (or source-dir "nil") (or main-dir "nil"))
+                      "merge-handler-refresh-master-from-origin: ws=%s source-kind=%s source-dir=%s main-dir=%s"
+                      target-ws source-kind (or source-dir "nil") (or main-dir "nil"))
     (cond
      ((not source-dir)
       (agent-repl--log target-ws
@@ -594,6 +681,9 @@ SIGNALS `user-error' on a dirty main worktree (step 2)."
       ;; from the merge worker thread.
       (agent-repl--defer-to-main-thread
        (lambda ()
+         (agent-repl--log target-ws
+                           "merge-handler-refresh-master-from-origin: ws=%s main-thread poll start source-dir=%s main-dir=%s"
+                           target-ws source-dir (or main-dir "nil"))
          (agent-repl--pr-poll-start target-ws source-dir main-dir)))))))
 
 (agent-repl--register-merge-handler
@@ -738,15 +828,21 @@ the UI teardown is deferred to the main thread via
 
 When the source dir cannot be resolved, logs and no-ops (mirroring the
 refresh handler's same edge case).  ARGS is unused."
-  (let* ((source-dir (or (agent-repl--ws-get target-ws :project-dir)
-                         (agent-repl--ws-get target-ws :source-ws-dir)))
+  (let* ((project-dir (agent-repl--ws-get target-ws :project-dir))
+         (source-ws-dir (agent-repl--ws-get target-ws :source-ws-dir))
+         (source-dir (or project-dir source-ws-dir))
          (main-dir (and source-dir
                         (agent-repl--main-worktree-path source-dir)))
          (branch agent-repl-master-branch-name)
-         (origin-ref (concat "origin/" branch)))
+         (origin-ref (concat "origin/" branch))
+         (source-kind (cond
+                       (project-dir "project-dir")
+                       (source-ws-dir "source-ws-dir")
+                       (t "missing"))))
     (agent-repl--log target-ws
-                      "merge-handler-onto-master: ws=%s source-dir=%s main-dir=%s"
-                      target-ws (or source-dir "nil") (or main-dir "nil"))
+                      "merge-handler-onto-master: ws=%s source-kind=%s source-dir=%s main-dir=%s branch=%s origin-ref=%s"
+                      target-ws source-kind (or source-dir "nil")
+                      (or main-dir "nil") branch origin-ref)
     (cond
      ((not main-dir)
       (agent-repl--log target-ws
@@ -781,6 +877,10 @@ refresh handler's same edge case).  ARGS is unused."
              (agent-repl--merge-delta-touches-dir-p
               main-dir branch origin-ref agent-repl--cee-agent-dir-prefix))
             (master-wt (agent-repl--master-worktree-path main-dir)))
+        (agent-repl--log target-ws
+                          "merge-handler-onto-master: ws=%s pre-advance branch=%s origin-ref=%s diverged=%s cee-touched=%s master-worktree=%s"
+                          target-ws branch origin-ref (if diverged "t" "nil")
+                          (if cee-touched "t" "nil") (or master-wt "nil"))
         (cond
          ;; Diverged: rebase local master onto origin (auto-resolving
          ;; orthogonal conflicts via the shared headless resolver) rather
@@ -789,6 +889,9 @@ refresh handler's same edge case).  ARGS is unused."
          ;; worst case is exactly the old refuse-and-resolve-by-hand path.
          (diverged
           (unless master-wt
+            (agent-repl--log target-ws
+                              "merge-handler-onto-master: ws=%s diverged branch=%s but no master worktree — aborting"
+                              target-ws branch)
             (user-error
              "Cannot rebase %s onto %s: no worktree has %s checked out — resolve manually"
              branch origin-ref branch))
@@ -797,6 +900,9 @@ refresh handler's same edge case).  ARGS is unused."
                             target-ws branch origin-ref master-wt)
           (unless (agent-repl--rebase-with-auto-resolve
                    target-ws master-wt origin-ref)
+            (agent-repl--log target-ws
+                              "merge-handler-onto-master: ws=%s rebase branch=%s onto=%s result=unresolved — aborting"
+                              target-ws branch origin-ref)
             (user-error
              "Cannot fast-forward %s to %s: local %s diverged and the rebase could not be auto-resolved — resolve manually"
              branch origin-ref branch)))
@@ -833,8 +939,14 @@ refresh handler's same edge case).  ARGS is unused."
           (agent-repl--onto-master-run-cee-agent-bounce
            target-ws main-dir))
         ;; Tear the workspace down on the main thread (UI ops).
+        (agent-repl--log target-ws
+                          "merge-handler-onto-master: ws=%s advance complete; scheduling main-thread finalization main-dir=%s"
+                          target-ws main-dir)
         (agent-repl--defer-to-main-thread
          (lambda ()
+           (agent-repl--log target-ws
+                             "merge-handler-onto-master: ws=%s main-thread finalization starting main-dir=%s"
+                             target-ws main-dir)
            (agent-repl--finalize-merged-workspace target-ws main-dir))))))))
 
 (agent-repl--register-merge-handler
