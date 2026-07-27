@@ -43,6 +43,8 @@ registry, and request-id counter so tests never leak into each other."
          (agent-repl--uds-frame-handlers nil)
          (agent-repl--uds-request-id-counter 0)
          (agent-repl--uds-pending-commands (make-hash-table :test 'equal))
+         (agent-repl--uds-pending-health-responses
+          (make-hash-table :test 'equal))
          (agent-repl-uds-reconnect-delay 2.0)
          (agent-repl-debug nil))
      ,@body))
@@ -796,6 +798,68 @@ workspace open."
          '(:requestId "ghost" :error "boom"))
         ;; Assert — untracked acks are not surfaced (no pending caller cares)
         (should-not echoed)))))
+
+;;;; ---- correlated health responses ------------------------------------
+
+(ert-deftest agent-repl-test-uds-health-frame-vocabulary-and-handlers ()
+  "Both health result arms are known and registered at module load."
+  (dolist (pair '(("daemonHealth" . agent-repl--uds-handle-daemon-health)
+                  ("sessionHealth" . agent-repl--uds-handle-session-health)))
+    (should (member (car pair) agent-repl--uds-known-frame-fields))
+    (should (eq (cdr (assoc (car pair) agent-repl--uds-frame-handlers))
+                (cdr pair)))))
+
+(ert-deftest agent-repl-test-uds-daemon-health-correlates-by-request-id ()
+  "A daemon health view reaches only the callback tracked under its id."
+  (agent-repl-test--with-uds
+    (let (received)
+      (agent-repl--uds-track-health-response
+       "health-1" "daemonHealth" nil nil
+       (lambda (view) (setq received view)))
+      (agent-repl--uds-handle-daemon-health
+       '(:requestId "health-1" :healthy t))
+      (should (equal received '(:requestId "health-1" :healthy t)))
+      (should-not
+       (gethash "health-1" agent-repl--uds-pending-health-responses)))))
+
+(ert-deftest agent-repl-test-uds-session-health-requires-exact-identities ()
+  "A stale session result cannot satisfy a newer workspace binding."
+  (agent-repl-test--with-uds
+    (let (received)
+      (agent-repl--uds-track-health-response
+       "health-2" "sessionHealth" "/w/tree" "s_expected"
+       (lambda (view) (setq received view)))
+      (should-error
+       (agent-repl--uds-handle-session-health
+        '(:requestId "health-2"
+          :workspace "/w/tree"
+          :sessionId "s_stale"
+          :healthy t))
+       :type 'agent-repl-uds-malformed-frame)
+      (should-not received)
+      (should-not
+       (gethash "health-2" agent-repl--uds-pending-health-responses)))))
+
+(ert-deftest agent-repl-test-uds-untracked-health-never-mutates-caller-state ()
+  "A late result after timeout is logged but cannot call an abandoned waiter."
+  (agent-repl-test--with-uds
+    (let (called)
+      (agent-repl--uds-track-health-response
+       "health-3" "daemonHealth" nil nil
+       (lambda (_view) (setq called t)))
+      (agent-repl--uds-untrack-health-response
+       "health-3" nil "test-timeout")
+      (should-not
+       (agent-repl--uds-handle-daemon-health
+        '(:requestId "health-3" :healthy t)))
+      (should-not called))))
+
+(ert-deftest agent-repl-test-uds-health-response-without-request-id-is-malformed ()
+  "A health assertion without correlation identity fails loudly."
+  (agent-repl-test--with-uds
+    (should-error
+     (agent-repl--uds-handle-daemon-health '(:healthy t))
+     :type 'agent-repl-uds-malformed-frame)))
 
 (ert-deftest agent-repl-test-uds-command-ack-handler-registered ()
   "Loading frontend-uds.el registers the commandAck handler."

@@ -201,6 +201,26 @@ local state."
 Only the daemon reads and claims `workspace_commands_*.json'; Emacs receives
 the UI effect as a durable HostAction and executes it through this table.")
 
+(defconst agent-repl--host-action-success-cache-limit 4096
+  "Maximum successful HostAction outcomes retained for duplicate suppression.")
+
+(defvar agent-repl--host-action-outcomes (make-hash-table :test 'equal)
+  "Process-local HostAction dedupe state keyed by durable action id.
+`defvar' deliberately preserves entries across module hot reload.  A full
+Emacs crash loses this cache; a durable action whose completion had not
+reached the daemon can then execute again after restart.  Closing that crash
+window requires daemon-side transactional side-effect ownership, because
+persisting an Emacs success before its non-idempotent UI effect finishes would
+create the opposite lost-action failure.")
+
+(defvar agent-repl--host-action-success-order nil
+  "Most-recent-first action ids retained in the successful outcome cache.")
+
+(agent-repl--log
+ nil
+ "host-action dedupe: process-local cache ready entries=%d hot-reload-preserved=yes crash-window=action-may-replay-before-daemon-completion"
+ (hash-table-count agent-repl--host-action-outcomes))
+
 (defun agent-repl--workspace-create-wire-object-to-alist (object context)
   "Convert protojson Struct OBJECT to a recursively converted alist.
 CONTEXT labels loud validation failures.  Protojson decoding produces keyword
@@ -314,51 +334,149 @@ Exactly one UI action arm must be present."
      action-id request-id ok (or error-text "nil"))
     request-id))
 
+(defun agent-repl--workspace-create-cache-host-success
+    (action-id type handler cmd ws duplicates)
+  "Cache ACTION-ID's successful outcome and prune old completed entries."
+  (puthash action-id
+           (list :state 'succeeded :type type :handler handler :cmd cmd :ws ws
+                 :ok t :error nil :duplicates duplicates
+                 :completed-at (float-time))
+           agent-repl--host-action-outcomes)
+  (setq agent-repl--host-action-success-order
+        (cons action-id
+              (delete action-id agent-repl--host-action-success-order)))
+  (while (> (length agent-repl--host-action-success-order)
+            agent-repl--host-action-success-cache-limit)
+    (let ((evicted (car (last agent-repl--host-action-success-order))))
+      (setq agent-repl--host-action-success-order
+            (butlast agent-repl--host-action-success-order))
+      (when (eq (plist-get (gethash evicted agent-repl--host-action-outcomes)
+                           :state)
+                'succeeded)
+        (remhash evicted agent-repl--host-action-outcomes)
+        (agent-repl--log
+         nil
+         "host-action dedupe: EVICT success action-id=%s cache-limit=%d crash-window=unchanged"
+         evicted agent-repl--host-action-success-cache-limit)))))
+
+(defun agent-repl--workspace-create-resend-host-outcome
+    (action-id outcome reason)
+  "Resend cached ACTION-ID OUTCOME without re-running its handler."
+  (let ((state (plist-get outcome :state))
+        (ws (plist-get outcome :ws)))
+    (agent-repl--log
+     ws
+     "host-action dedupe: RESEND action-id=%s state=%s reason=%s ok=%S error=%S handler-not-run=yes"
+     action-id state reason (plist-get outcome :ok)
+     (plist-get outcome :error))
+    (agent-repl--workspace-create-send-host-completion
+     action-id (plist-get outcome :ok) (plist-get outcome :error) ws)
+    (when (eq state 'failed-unsent)
+      ;; A failed handler is retryable only after its failure completion has
+      ;; actually been sent.  Remove it now so the daemon's next redelivery
+      ;; executes the handler again rather than suppressing it forever.
+      (remhash action-id agent-repl--host-action-outcomes)
+      (agent-repl--log
+       ws
+       "host-action dedupe: FAILURE OUTCOME SENT action-id=%s retryable-on-next-delivery=yes"
+       action-id))
+    :duplicate))
+
 (defun agent-repl--workspace-create-handle-host-action (action)
   "Execute daemon ACTION through its Emacs host handler and complete it.
 Once ACTION-ID validates, parsing and handler failures are acknowledged as
-`ok=false' before the original error is re-signaled."
-  (let ((action-id (agent-repl--workspace-create-required-string
-                    action :actionId "HostAction"))
-        type handler cmd ws handler-error)
-    (condition-case err
-        (pcase-let ((`(,_ ,parsed-type ,parsed-handler ,parsed-cmd ,parsed-ws)
-                     (agent-repl--workspace-create-host-action-command action)))
-          (setq type parsed-type
-                handler parsed-handler
-                cmd parsed-cmd
-                ws parsed-ws)
-          (agent-repl--log
-           ws
-           "host-action: DISPATCH action-id=%s type=%s handler=%s cmd=%S"
-           action-id type handler cmd)
-          (funcall handler cmd))
-      (error (setq handler-error err)))
-    (if (null handler-error)
-        (progn
-          (agent-repl--workspace-create-send-host-completion
-           action-id t nil ws)
-          (agent-repl--log
-           ws
-           "host-action: COMPLETE action-id=%s type=%s handler=%s"
-           action-id type handler)
-          t)
-      (let ((text (error-message-string handler-error)))
-        (condition-case completion-err
-            (agent-repl--workspace-create-send-host-completion
-             action-id nil text ws)
-          (error
-           (agent-repl--log
-            ws
-            "host-action: FAILURE completion send failed action-id=%s type=%s handler=%s handler-error=%S completion-error=%S"
-            action-id (or type "unresolved") (or handler "unresolved")
-            handler-error completion-err)))
+`ok=false' before the original error is re-signaled.  Snapshot/live overlap
+for the same action id never invokes a non-idempotent handler twice: an
+in-flight duplicate is counted for completion replay, and a completed
+duplicate resends its cached outcome."
+  (let* ((action-id (agent-repl--workspace-create-required-string
+                     action :actionId "HostAction"))
+         (existing (gethash action-id agent-repl--host-action-outcomes))
+         (state (plist-get existing :state)))
+    (cond
+     ((eq state 'in-flight)
+      (let ((duplicates (1+ (or (plist-get existing :duplicates) 0))))
+        (puthash action-id
+                 (plist-put existing :duplicates duplicates)
+                 agent-repl--host-action-outcomes)
         (agent-repl--log
-         ws
-         "host-action: FAILED action-id=%s type=%s handler=%s cmd=%S err=%S"
-         action-id (or type "unresolved") (or handler "unresolved")
-         cmd handler-error)
-        (signal (car handler-error) (cdr handler-error))))))
+         (plist-get existing :ws)
+         "host-action dedupe: SUPPRESS action-id=%s state=in-flight duplicates=%d handler-not-run=yes completion-resend=deferred"
+         action-id duplicates)
+        :duplicate-in-flight))
+     ((memq state '(succeeded failed-unsent))
+      (agent-repl--workspace-create-resend-host-outcome
+       action-id existing "duplicate-delivery"))
+     (t
+      (puthash action-id
+               (list :state 'in-flight :duplicates 0)
+               agent-repl--host-action-outcomes)
+      (let (type handler cmd ws handler-error)
+        (condition-case err
+            (pcase-let ((`(,_ ,parsed-type ,parsed-handler ,parsed-cmd ,parsed-ws)
+                         (agent-repl--workspace-create-host-action-command
+                          action)))
+              (setq type parsed-type
+                    handler parsed-handler
+                    cmd parsed-cmd
+                    ws parsed-ws)
+              (puthash action-id
+                       (list :state 'in-flight :duplicates 0 :type type
+                             :handler handler :cmd cmd :ws ws)
+                       agent-repl--host-action-outcomes)
+              (agent-repl--log
+               ws
+               "host-action: DISPATCH action-id=%s type=%s handler=%s cmd=%S"
+               action-id type handler cmd)
+              (funcall handler cmd))
+          (error (setq handler-error err)))
+        (if (null handler-error)
+            (let* ((in-flight
+                    (gethash action-id agent-repl--host-action-outcomes))
+                   (duplicates (or (plist-get in-flight :duplicates) 0)))
+              (agent-repl--workspace-create-cache-host-success
+               action-id type handler cmd ws duplicates)
+              (dotimes (_ (1+ duplicates))
+                (agent-repl--workspace-create-send-host-completion
+                 action-id t nil ws))
+              (agent-repl--log
+               ws
+               "host-action: COMPLETE action-id=%s type=%s handler=%s duplicate-completions=%d"
+               action-id type handler duplicates)
+              t)
+          (let* ((text (error-message-string handler-error))
+                 (in-flight
+                  (gethash action-id agent-repl--host-action-outcomes))
+                 (duplicates (or (plist-get in-flight :duplicates) 0))
+                 (failed
+                  (list :state 'failed-unsent :type type :handler handler
+                        :cmd cmd :ws ws :ok nil :error text
+                        :duplicates duplicates))
+                 completion-error)
+            (puthash action-id failed agent-repl--host-action-outcomes)
+            (condition-case completion-err
+                (progn
+                  (dotimes (_ (1+ duplicates))
+                    (agent-repl--workspace-create-send-host-completion
+                     action-id nil text ws))
+                  (remhash action-id agent-repl--host-action-outcomes)
+                  (agent-repl--log
+                   ws
+                   "host-action dedupe: FAILURE OUTCOME SENT action-id=%s duplicate-completions=%d retryable-on-next-delivery=yes"
+                   action-id duplicates))
+              (error (setq completion-error completion-err)))
+            (when completion-error
+              (agent-repl--log
+               ws
+               "host-action: FAILURE completion send failed action-id=%s type=%s handler=%s handler-error=%S completion-error=%S retryable=no-until-completion-resend"
+               action-id (or type "unresolved") (or handler "unresolved")
+               handler-error completion-error))
+            (agent-repl--log
+             ws
+             "host-action: FAILED action-id=%s type=%s handler=%s cmd=%S err=%S duplicates=%d outcome-retained=%s"
+             action-id (or type "unresolved") (or handler "unresolved")
+             cmd handler-error duplicates (if completion-error "yes" "no"))
+            (signal (car handler-error) (cdr handler-error)))))))))
 
 (agent-repl--uds-register-handler
  "workspaceAvailable" #'agent-repl--workspace-create-handle-available)

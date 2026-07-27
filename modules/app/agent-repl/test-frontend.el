@@ -28,7 +28,9 @@
      (unwind-protect
          (progn
            (puthash ,ws (copy-sequence ,plist) agent-repl--workspaces)
-           ,@body)
+           (cl-letf (((symbol-function 'agent-repl--frontend-wait-session-healthy)
+                      (lambda (&rest _) t)))
+             ,@body))
        (let ((buf (agent-repl--ws-get ,ws :frontend-buffer)))
          (when (buffer-live-p buf) (kill-buffer buf)))
        (remhash ,ws agent-repl--workspaces))))
@@ -90,6 +92,29 @@ agent panel it is, with no special-casing left to carve out."
                          "*agent-frontend-ws1*"))
           (should (eq (agent-repl--ws-get "ws1" :frontend-buffer) buf))
           (should (equal (agent-repl--ws-get "ws1" :frontend-buffer-session-id) "s_1")))))))
+
+(ert-deftest agent-repl-test-frontend-webview-health-gate-runs-before-render-mutation ()
+  "A failed session health gate leaves existing webview state untouched."
+  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+    (let ((existing (generate-new-buffer " *agent-health-existing*"))
+          mounted)
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "ws1" :frontend-buffer existing)
+            (agent-repl--ws-put "ws1" :frontend-buffer-session-id "s_old")
+            (cl-letf (((symbol-function 'agent-repl--frontend-wait-session-healthy)
+                       (lambda (&rest _) (error "shim unavailable")))
+                      ((symbol-function 'agent-repl--frontend-make-webview-buffer)
+                       (lambda (&rest _) (setq mounted t))))
+              (should-error
+               (agent-repl--frontend-ensure-webview-buffer
+                "ws1" "s_new" "http://x/?session=s_new"))
+              (should-not mounted)
+              (should (buffer-live-p existing))
+              (should (eq (agent-repl--ws-get "ws1" :frontend-buffer) existing))
+              (should (equal (agent-repl--ws-get "ws1" :frontend-buffer-session-id)
+                             "s_old"))))
+        (when (buffer-live-p existing) (kill-buffer existing))))))
 
 (ert-deftest agent-repl-test-frontend-webview-header-line-cleared ()
   "The mount clears `xwidget-webkit-mode's \"WebKit: <title>\" header-line."
