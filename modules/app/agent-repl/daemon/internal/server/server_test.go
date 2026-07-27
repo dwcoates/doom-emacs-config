@@ -18,8 +18,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gorilla/websocket"
-
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
@@ -823,16 +821,7 @@ func TestAccountSwitchPushesSessionViewWithNewConfigDir(t *testing.T) {
 	// client connected AFTER create so it only observes the switch's push.
 	h := newHarnessWith(t, Config{Accounts: accountRoster()})
 	id := createSession(t, h, `{"cwd":"/w"}`)
-	feSrv := httptest.NewServer(http.HandlerFunc(h.fe.ServeWS))
-	defer feSrv.Close()
-	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(feSrv.URL, "http"), nil)
-	if err != nil {
-		t.Fatalf("ws dial: %v", err)
-	}
-	defer conn.Close()
-	if snap := readServerWSFrame(t, conn); snap.GetSnapshot() == nil {
-		t.Fatalf("first frame was not the connect snapshot: %v", snap)
-	}
+	r := frontendConn(t, h)
 
 	// Act — the switch pushes the updated SessionView synchronously before the
 	// 202 response returns.
@@ -843,38 +832,13 @@ func TestAccountSwitchPushesSessionViewWithNewConfigDir(t *testing.T) {
 	}
 
 	// Assert — a SessionView carrying the switched config_dir reaches the client.
-	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-	for {
-		_, data, err := conn.ReadMessage()
-		if err != nil {
-			t.Fatalf("did not receive the switched SessionView: %v", err)
-		}
-		frame := &frontendv1.FrontendFrame{}
-		if err := protojson.Unmarshal(data, frame); err != nil {
-			t.Fatalf("unmarshal frame: %v", err)
-		}
-		if v := frame.GetSessionView(); v != nil && v.GetSessionId() == id {
-			if v.GetConfigDir() != "/cfg-work" {
-				t.Fatalf("pushed SessionView config_dir = %q, want /cfg-work", v.GetConfigDir())
-			}
-			return
-		}
+	view := nextSessionView(t, r)
+	if view.GetSessionId() != id {
+		t.Fatalf("pushed SessionView id = %q, want %q", view.GetSessionId(), id)
 	}
-}
-
-// readServerWSFrame reads and decodes one protojson FrontendFrame from a WS
-// connection (the server-package twin of the frontend package's readWSFrame).
-func readServerWSFrame(t *testing.T, conn *websocket.Conn) *frontendv1.FrontendFrame {
-	t.Helper()
-	_, data, err := conn.ReadMessage()
-	if err != nil {
-		t.Fatalf("ws read: %v", err)
+	if view.GetConfigDir() != "/cfg-work" {
+		t.Fatalf("pushed SessionView config_dir = %q, want /cfg-work", view.GetConfigDir())
 	}
-	frame := &frontendv1.FrontendFrame{}
-	if err := protojson.Unmarshal(data, frame); err != nil {
-		t.Fatalf("unmarshal frame: %v", err)
-	}
-	return frame
 }
 
 // --- Delete (S7: the DELETE /sessions/{id} HTTP route was removed; the
@@ -892,6 +856,41 @@ func TestDeleteSessionMarksRecordTerminal(t *testing.T) {
 	rec, _ := h.reg.Get(id)
 	if !rec.Terminal || rec.DeathReason != "delete session" {
 		t.Errorf("record = %+v, want terminal with the delete death reason", rec)
+	}
+}
+
+func TestDeleteSessionRepushesAnAlreadyTerminalRecord(t *testing.T) {
+	// Arrange: a superseded record whose stale client still believes it is live.
+	h := newHarness(t)
+	rec := registry.Record{
+		SessionID: "s_old", CWD: "/w", ClaudeSessionID: "vendor-1",
+		Terminal: true, DeathReason: errclass.DeathReasonSuperseded,
+	}
+	if err := h.reg.Put(rec); err != nil {
+		t.Fatalf("registry Put: %v", err)
+	}
+	r := frontendConn(t, h)
+
+	// Act.
+	if err := h.srv.DeleteSession(rec.SessionID); err != nil {
+		t.Fatalf("DeleteSession: %v", err)
+	}
+
+	// Assert: idempotence preserves the first death reason while repairing the
+	// client roster and retrying the exact evicted session's process handle.
+	view := nextSessionView(t, r)
+	if view.GetSessionId() != rec.SessionID {
+		t.Fatalf("pushed SessionView id = %q, want %q", view.GetSessionId(), rec.SessionID)
+	}
+	if !view.GetTerminal() || view.GetDeath().GetErrorType() != string(errclass.TypeSessionSuperseded) {
+		t.Fatalf("pushed view = %+v, want terminal superseded", view)
+	}
+	got, _ := h.reg.Get(rec.SessionID)
+	if got.DeathReason != errclass.DeathReasonSuperseded {
+		t.Fatalf("death reason = %q, want first reason preserved", got.DeathReason)
+	}
+	if !slices.Contains(h.spawner.stoppedIDs(), rec.SessionID) {
+		t.Fatalf("stopped = %v, want %s", h.spawner.stoppedIDs(), rec.SessionID)
 	}
 }
 

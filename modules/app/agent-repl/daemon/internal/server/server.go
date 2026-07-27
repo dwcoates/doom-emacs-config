@@ -1097,7 +1097,7 @@ var errSessionNotFound = errors.New("no such session")
 
 // CreateSession is the shared create-session core behind both POST /sessions
 // (webapp) and the createSession UDS command (Emacs): validate, apply the
-// resume-viability gate, supersede transcript conflicts, register the record,
+// resume-viability gate, supersede workspace/transcript conflicts, register the record,
 // and bring up the shim. It returns the new session id and pushes a SessionView
 // so every connected frontend learns the workspace->session binding without
 // polling GET /sessions. Typed errors (*InvalidCreateError,
@@ -1198,34 +1198,31 @@ func (s *Server) DeleteSession(id string) error {
 	if !ok {
 		return errSessionNotFound
 	}
+	wasTerminal := rec.Terminal
 	if !rec.Terminal {
 		s.updateRegistry(id, "terminal transition", func(r *registry.Record) {
 			r.Terminal = true
 			r.DeathReason = errclass.DeathReasonDeleted
 		})
-		// Best-effort stop of THIS session's shim. Session-scoped, never
-		// workspace-scoped: several records can share a cwd (a stale
-		// duplicate, a superseded resume, an orphan awaiting reap), and the
-		// workspace-keyed teardown would SIGTERM whichever shim is live —
-		// deleting an orphan would kill the healthy session that replaced it.
-		// A workspace with no live shim, or one driven by a different
-		// session, is an expected no-op, not a failure.
-		if rec.CWD != "" {
-			if err := s.driver.HibernateSession(rec.CWD, id); err != nil {
-				s.logf("session %s: delete shim stop (ws %s): %v (expected when no live shim, or another session drives it)", id, rec.CWD, err)
-			}
-		}
-		// Push the terminal SessionView so frontends drop the workspace binding
-		// (the reattach sweep re-keys on it) instead of polling.
-		s.pushSessionView(id)
-	} else {
-		// Idempotent delete of an already-terminal record: re-push its
-		// terminal view instead of going silent. A frontend that asks for
-		// this delete believes the session is still live — its roster missed
-		// the earlier transition — and a silent no-op leaves it retrying the
-		// same delete forever (the observed 15s delete loop).
-		s.pushSessionView(id)
+		rec, _ = s.registry.Get(id)
 	}
+	// Always retry this exact session's stop. A terminal transition can race a
+	// driver eviction while the spawner still owns its process handle; the
+	// session-id-scoped stop guarantees a replacement on the same cwd is untouched.
+	if rec.CWD != "" {
+		if err := s.driver.HibernateSession(rec.CWD, id); err != nil {
+			s.logf("session %s: delete exact shim stop FAILED (ws %s terminal_before=%v): %v",
+				id, rec.CWD, wasTerminal, err)
+		} else {
+			s.logf("session %s: delete shim stop complete (ws %s terminal_before=%v)",
+				id, rec.CWD, wasTerminal)
+		}
+	}
+	// Idempotent delete also repairs stale client rosters. Supersede or another
+	// client may have made the record terminal before this caller observed it.
+	s.pushSessionView(id)
+	s.logf("session %s: delete terminal SessionView pushed (ws %s terminal_before=%v death_reason=%q)",
+		id, rec.CWD, wasTerminal, rec.DeathReason)
 	return nil
 }
 
