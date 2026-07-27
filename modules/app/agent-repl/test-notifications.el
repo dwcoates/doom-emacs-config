@@ -98,7 +98,7 @@
   (let (ensured)
     (cl-letf (((symbol-function 'agent-repl--notify-spawn) (lambda (&rest _) nil))
               ((symbol-function 'agent-repl--ensure-server)
-               (lambda () (setq ensured t))))
+               (lambda (&optional _ws) (setq ensured t))))
       (agent-repl--notify-backend-terminal-notifier "ws-a" "T" "M")
       (should ensured))))
 
@@ -757,7 +757,7 @@ load-bearing."
 (ert-deftest agent-repl-test-notify-suppressed-when-emacs-focused ()
   "agent-repl--notify must NOT dispatch to the backend when Emacs is focused."
   (let ((dispatched nil))
-    (cl-letf (((symbol-function 'agent-repl--emacs-focused-p) (lambda () t))
+    (cl-letf (((symbol-function 'agent-repl--emacs-focused-p) (lambda (&optional _ws) t))
               (agent-repl--notification-backend
                (lambda (&rest _) (setq dispatched t)))
               (agent-repl-debug nil)
@@ -768,7 +768,7 @@ load-bearing."
 (ert-deftest agent-repl-test-notify-dispatches-when-emacs-unfocused ()
   "agent-repl--notify must dispatch to the backend when Emacs is not focused."
   (let ((dispatched nil))
-    (cl-letf (((symbol-function 'agent-repl--emacs-focused-p) (lambda () nil))
+    (cl-letf (((symbol-function 'agent-repl--emacs-focused-p) (lambda (&optional _ws) nil))
               (agent-repl--notification-backend
                (lambda (&rest _) (setq dispatched t)))
               (agent-repl-debug nil)
