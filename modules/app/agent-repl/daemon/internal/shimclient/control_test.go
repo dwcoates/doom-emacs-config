@@ -75,6 +75,55 @@ func TestSubmitPromptAckSuccess(t *testing.T) {
 	}
 }
 
+func TestHealthRequiresMatchingStatusFromLiveShim(t *testing.T) {
+	// Arrange: a completed handshake followed by a health response carrying the
+	// same request id proves this is the current shim connection, not merely a
+	// socket that happened to accept a write.
+	h := newHarness()
+	path := startFakeShim(t, func(conn net.Conn) {
+		_ = fakeServerHandshake(t, conn, "sess-1", "1", false)
+		m, err := wire.ReadAny(conn)
+		if err != nil {
+			t.Errorf("read HealthCheck: %v", err)
+			return
+		}
+		check, ok := m.(*corev1.HealthCheck)
+		if !ok {
+			t.Errorf("expected HealthCheck, got %T", m)
+			return
+		}
+		mustWriteMsg(t, conn, &corev1.HealthStatus{RequestId: check.GetRequestId(), Healthy: true, Component: "claude-shim"})
+		_, _ = wire.ReadAny(conn)
+	})
+	c, connected, stop := runConnectedClient(t, h.config(t, "sess-1", path))
+	defer stop()
+	waitConnected(t, connected)
+
+	// Act.
+	status, err := c.Health(context.Background(), "frontend-health-1")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Health: %v", err)
+	}
+	if !status.GetHealthy() || status.GetRequestId() != "frontend-health-1" || status.GetComponent() != "claude-shim" {
+		t.Fatalf("status = %+v", status)
+	}
+}
+
+func TestHealthFailsWithoutLiveShim(t *testing.T) {
+	// Arrange: no Run/handshake has made a connection active.
+	c := New(Config{SessionID: "sess-1"})
+
+	// Act.
+	_, err := c.Health(context.Background(), "frontend-health-1")
+
+	// Assert.
+	if !errors.Is(err, ErrNotConnected) {
+		t.Fatalf("Health error = %v, want ErrNotConnected", err)
+	}
+}
+
 func TestSubmitPromptNackIsLoudError(t *testing.T) {
 	// Arrange: shim nacks the prompt.
 	h := newHarness()
