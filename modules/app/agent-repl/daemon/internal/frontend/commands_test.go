@@ -95,6 +95,14 @@ func (m *mockHandler) PaintAck(_ context.Context, ws, rid string, _ *frontendv1.
 	m.called, m.lastWorkspace, m.lastRequestID = "paint_ack", ws, rid
 	return m.err
 }
+func (m *mockHandler) DaemonHealth(_ context.Context, ws, rid string, _ *frontendv1.DaemonHealthCmd) (*frontendv1.DaemonHealthView, error) {
+	m.called, m.lastWorkspace, m.lastRequestID = "daemon_health", ws, rid
+	return &frontendv1.DaemonHealthView{RequestId: rid, Healthy: true}, m.err
+}
+func (m *mockHandler) SessionHealth(_ context.Context, ws, rid string, cmd *frontendv1.SessionHealthCmd) (*frontendv1.SessionHealthView, error) {
+	m.called, m.lastWorkspace, m.lastRequestID = "session_health", ws, rid
+	return &frontendv1.SessionHealthView{RequestId: rid, Workspace: ws, SessionId: cmd.GetSessionId(), Healthy: true}, m.err
+}
 
 func TestDispatchRoutesEachCommand(t *testing.T) {
 	tests := []struct {
@@ -201,6 +209,16 @@ func TestDispatchRoutesEachCommand(t *testing.T) {
 			cmd:     &frontendv1.FrontendCommand{RequestId: "r14", Workspace: "ws14", Command: &frontendv1.FrontendCommand_QueueCancel{QueueCancel: &frontendv1.QueueCancelCmd{EntryId: "q_1"}}},
 			wantHit: "queue_cancel",
 		},
+		{
+			name:    "daemon health",
+			cmd:     &frontendv1.FrontendCommand{RequestId: "r19", Command: &frontendv1.FrontendCommand_DaemonHealth{DaemonHealth: &frontendv1.DaemonHealthCmd{}}},
+			wantHit: "daemon_health",
+		},
+		{
+			name:    "session health",
+			cmd:     &frontendv1.FrontendCommand{RequestId: "r20", Workspace: "/ws20", Command: &frontendv1.FrontendCommand_SessionHealth{SessionHealth: &frontendv1.SessionHealthCmd{SessionId: "s20"}}},
+			wantHit: "session_health",
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -235,6 +253,25 @@ func TestDispatchResyncCarriesSeq(t *testing.T) {
 	// Assert.
 	if h.lastResyncSeq != 99 {
 		t.Errorf("resync seq = %d, want 99", h.lastResyncSeq)
+	}
+}
+
+func TestDispatchWithResponseCarriesCorrelatedHealthView(t *testing.T) {
+	// Arrange.
+	h := &mockHandler{}
+	cmd := &frontendv1.FrontendCommand{RequestId: "health-1", Workspace: "/ws", Command: &frontendv1.FrontendCommand_SessionHealth{SessionHealth: &frontendv1.SessionHealthCmd{SessionId: "s1"}}}
+
+	// Act.
+	ack, response := DispatchWithResponse(context.Background(), nil, h, cmd)
+
+	// Assert: the response has the same correlation id and is a health frame,
+	// not merely an OK command ack that a frontend could mistake for readiness.
+	if !ack.GetOk() || response.GetSessionHealth() == nil {
+		t.Fatalf("ack=%+v response=%+v", ack, response)
+	}
+	view := response.GetSessionHealth()
+	if view.GetRequestId() != "health-1" || view.GetWorkspace() != "/ws" || view.GetSessionId() != "s1" || !view.GetHealthy() {
+		t.Fatalf("health response=%+v", view)
 	}
 }
 
