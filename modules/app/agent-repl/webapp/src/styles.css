@@ -92,13 +92,18 @@
      notice uses, since a turn the user chose to stop reads as a warning, not
      the --err red a genuine failure carries. */
   --interrupted: #ca8a04;
-  /* The rule a /clear draws under its prompt: red, the loudest thing in the
-     palette, because everything above it is context the session no longer has. */
+  /* The rule a context CLEAR draws: red, the loudest thing in the palette,
+     because everything above it is context the session no longer has. */
   --clear-divider: #dc2626;
-  /* The rule a /compact draws above its "context compacted" stamp: orange, the
-     softer sibling of the --clear-divider red, because a compaction summarizes
-     the context above rather than dropping it the way a /clear does. */
+  /* The rule a COMPACTION draws above its "context compacted" stamp: orange,
+     the softer sibling of the --clear-divider red, because a compaction
+     summarizes the context above rather than dropping it the way a clear does. */
   --compact-rule: #ea580c;
+  /* The wash behind a compaction's summary bubble: purple, a hue no other
+     bubble in the feed wears, so the ONE surviving account of everything the
+     compaction discarded cannot be mistaken for ordinary commentary. It pairs
+     with the --final-response green border the bubble also wears. */
+  --compact-summary-bg: #f3e8ff;
   /* The border around a turn's final response: green, the palette's success
      hue, so the answer a turn actually landed on is findable at a glance among
      the commentary bubbles the agent emitted between its tool calls. */
@@ -231,6 +236,7 @@
     --interrupted: #facc15;
     --clear-divider: #ef4444;
     --compact-rule: #f97316;
+    --compact-summary-bg: #3b2a5c;
     --final-response: #4ade80;
     /* Brighter amber for the dark theme, as the other state borders lift. */
     --async: #fbbf24;
@@ -1611,15 +1617,32 @@ pre {
   border-radius: 2px;
   background: var(--compact-rule);
 }
-/* The /compact boundary label ("— context compacted … —") centers within that
-   same central column so its framing em-dashes read as a symmetric separator
-   rather than a run of text hugging the column's left rail. */
+/* The compaction boundary label ("— context compacted … —") centers within
+   that same central column so its framing em-dashes read as a symmetric
+   separator rather than a run of text hugging the column's left rail. */
 .compact-divider {
   text-align: center;
 }
-/* The three context-boundary separators — the red rule a /clear draws, the
-   orange rule a /compact draws, and the "— context compacted —" label under it
-   — are confined to the CENTRAL COLUMN (the `--agent-bubble-cap` width the
+/* A FAILED compaction's reason, in the error red and centered under the
+   stamp. It is drawn rather than dropped because a rule with no word about
+   why the work failed would be the feed swallowing the daemon's report. */
+.compact-error {
+  text-align: center;
+  color: var(--err);
+  font-size: 0.85rem;
+}
+/* The compaction summary bubble: the --final-response GREEN border every
+   landed answer wears, on the purple --compact-summary-bg wash no other
+   bubble uses. The pairing is deliberate — it reads as an answer (it IS the
+   conversation above, restated) that is nonetheless not part of the ordinary
+   exchange. Nothing here varies with the compaction's trigger. */
+.bubble.assistant.compact-summary {
+  border-color: var(--final-response);
+  background: var(--compact-summary-bg);
+}
+/* The three context-boundary separators — the red rule a clear draws, the
+   orange rule a compaction draws, and the "— context compacted —" label under
+   it — are confined to the CENTRAL COLUMN (the `--agent-bubble-cap` width the
    bubbles and tool cards are framed in), NOT the full feed width. A plain block
    child of `.feed-item` would stretch edge to edge inside `#feed`'s padding,
    spilling past the column's rails toward the window; pinning the width to the
@@ -1628,6 +1651,7 @@ pre {
    column, not the window. */
 .clear-divider,
 .compact-divider,
+.compact-error,
 .compact-rule {
   width: var(--agent-bubble-cap);
   margin-left: auto;

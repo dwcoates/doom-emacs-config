@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { partitionFeed } from "../src/partition.js";
-import { ConversationItem } from "../src/store.js";
+import { ConversationItem, ToolItem } from "../src/store.js";
 
-function tool(id: string, name = "Bash", parent?: string): ConversationItem {
+function tool(id: string, name = "Bash", parent?: string): ToolItem {
   return {
     kind: "tool",
     ts: "2026-05-24T10:00:00.000Z",

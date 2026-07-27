@@ -47,6 +47,8 @@ const clearDivider = blockAfter(css, ".clear-divider");
 const dividerColumn = blockAfter(css, ".clear-divider,");
 const compactDivider = blockAfter(css, "\n.compact-divider {");
 const compactRule = blockAfter(css, "\n.compact-rule {");
+const compactSummary = blockAfter(css, ".bubble.assistant.compact-summary");
+const compactError = blockAfter(css, "\n.compact-error {");
 const scrollZone = blockAfter(css, ".scroll-zone {");
 const scrollZoneBox = blockAfter(css, ".scroll-zone-box");
 
@@ -84,6 +86,16 @@ function hue(hex: string): number {
         ? (b - r) / delta + 2
         : (r - g) / delta + 4;
   return (raw * 60 + 360) % 360;
+}
+
+/**
+ * Whether a `#rrggbb` literal reads as purple: the violet band between blue
+ * and magenta. The compaction summary's wash is the only bubble background in
+ * it, which is the point — that bubble must not read as ordinary commentary.
+ */
+function isPurple(hex: string): boolean {
+  const h = hue(hex);
+  return h >= 255 && h <= 300;
 }
 
 /**
@@ -755,6 +767,73 @@ describe("compact rule", () => {
     const orange = isOrange(token(darkTheme, "--compact-rule"));
     // Assert
     expect(orange).toBe(true);
+  });
+});
+
+describe("compaction summary bubble", () => {
+  it("wears the GREEN final-response border, since the summary IS the account", () => {
+    // Arrange / Act — the .bubble.assistant.compact-summary rule.
+    // Assert
+    expect(compactSummary).toMatch(/border-color:\s*var\(--final-response\)/);
+  });
+
+  it("wears the PURPLE wash, which no other bubble in the feed uses", () => {
+    // Arrange / Act
+    // Assert
+    expect(compactSummary).toMatch(/background:\s*var\(--compact-summary-bg\)/);
+  });
+
+  it("defines a green final-response token for the light theme", () => {
+    // Arrange / Act
+    const green = isGreen(token(lightTheme, "--final-response"));
+    // Assert
+    expect(green).toBe(true);
+  });
+
+  it("defines a purple summary token for the light theme", () => {
+    // Arrange / Act
+    const purple = isPurple(token(lightTheme, "--compact-summary-bg"));
+    // Assert
+    expect(purple).toBe(true);
+  });
+
+  it("defines a purple summary token for the dark theme", () => {
+    // Arrange / Act
+    const purple = isPurple(token(darkTheme, "--compact-summary-bg"));
+    // Assert
+    expect(purple).toBe(true);
+  });
+
+  it("claims the purple wash for the summary bubble alone", () => {
+    // Arrange / Act — one selector reads the token, so no ordinary bubble can
+    // be mistaken for the one surviving account of the discarded history.
+    const readers = css.match(/var\(--compact-summary-bg\)/g) ?? [];
+    // Assert
+    expect(readers).toHaveLength(1);
+  });
+});
+
+describe("failed-compaction line", () => {
+  it("paints the reason in the error red rather than the body color", () => {
+    // Arrange / Act — the .compact-error rule.
+    // Assert
+    expect(compactError).toMatch(/color:\s*var\(--err\)/);
+  });
+
+  it("centers the reason under the stamp it belongs to", () => {
+    // Arrange / Act
+    // Assert
+    expect(compactError).toMatch(/text-align:\s*center/);
+  });
+
+  it("rides the same central-column confinement as the two rules", () => {
+    // Arrange / Act
+    const dividerSelector = css.slice(
+      css.indexOf(".clear-divider,"),
+      css.indexOf("{", css.indexOf(".clear-divider,")),
+    );
+    // Assert
+    expect(dividerSelector).toContain(".compact-error");
   });
 });
 

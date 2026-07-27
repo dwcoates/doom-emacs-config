@@ -75,7 +75,7 @@ describe("missingBubbleNotice", () => {
   it("names the counter's noun so the notice says which roster missed", () => {
     // Arrange + Act + Assert
     expect(missingBubbleNotice(SPEC)).toBe(
-      "thing has no bubble in the current feed (discarded by /clear)",
+      "thing has no bubble in the current feed (discarded by a context clear or compaction)",
     );
   });
 });

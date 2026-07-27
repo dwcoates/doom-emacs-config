@@ -153,7 +153,8 @@ export class SmoothReveal {
       }
       return item;
     });
-    // Forget blocks that have left the feed (a `/clear` cut, an evicted
+    // Forget blocks that have left the feed (a clear or compaction truncated
+    // them away, an evicted
     // replay) so the cursor map cannot grow without bound over a session.
     for (const id of this.tracks.keys()) {
       if (!live.has(id)) this.tracks.delete(id);
