@@ -814,49 +814,60 @@ even when the full-tab background is suppressed."
 (ert-deftest agent-repl-test-git-check-in-progress-dead-proc ()
   "git-check-in-progress-p should return nil when :git-proc is a dead process."
   (agent-repl-test--with-clean-state
-    (let ((proc (start-process "dead-test" nil "true")))
-      ;; Wait for it to finish
-      (while (process-live-p proc) (accept-process-output proc 0.1))
+    (let ((proc 'dead-process-fixture))
       (agent-repl--ws-put "ws1" :git-proc proc)
-      (should-not (agent-repl--git-check-in-progress-p "ws1")))))
+      (cl-letf (((symbol-function 'process-live-p)
+                 (lambda (candidate)
+                   (should (eq candidate proc))
+                   nil)))
+        (should-not (agent-repl--git-check-in-progress-p "ws1"))))))
 
 (ert-deftest agent-repl-test-git-check-in-progress-live-proc ()
   "git-check-in-progress-p should return non-nil when :git-proc is live."
   (agent-repl-test--with-clean-state
-    (let ((proc (start-process "live-test" nil "sleep" "60")))
-      (unwind-protect
-          (progn
-            (agent-repl--ws-put "ws1" :git-proc proc)
-            (should (agent-repl--git-check-in-progress-p "ws1")))
-        (delete-process proc)))))
+    (let ((proc 'live-process-fixture))
+      (agent-repl--ws-put "ws1" :git-proc proc)
+      (cl-letf (((symbol-function 'process-live-p)
+                 (lambda (candidate)
+                   (should (eq candidate proc))
+                   t)))
+        (should (agent-repl--git-check-in-progress-p "ws1"))))))
 
 ;;;; ---- Tests: git-diff-sentinel ----
 
 (ert-deftest agent-repl-test-git-diff-sentinel-clean ()
   "git-diff-sentinel should set 'clean when process exits with 0."
   (agent-repl-test--with-clean-state
-    (let ((proc (start-process "sentinel-clean" nil "true")))
-      (while (process-live-p proc) (accept-process-output proc 0.1))
-      (progn
+    (let ((proc 'clean-process-fixture))
+      (cl-letf (((symbol-function 'process-live-p) (lambda (candidate)
+                                                     (should (eq candidate proc))
+                                                     nil))
+                ((symbol-function 'process-exit-status) (lambda (candidate)
+                                                          (should (eq candidate proc))
+                                                          0)))
         (agent-repl--git-diff-sentinel "ws1" proc "finished\n")
         (should (eq (agent-repl--ws-get "ws1" :git-clean) 'clean))))))
 
 (ert-deftest agent-repl-test-git-diff-sentinel-dirty ()
   "git-diff-sentinel should set 'dirty when process exits with non-zero."
   (agent-repl-test--with-clean-state
-    (let ((proc (start-process "sentinel-dirty" nil "false")))
-      (while (process-live-p proc) (accept-process-output proc 0.1))
-      (progn
+    (let ((proc 'dirty-process-fixture))
+      (cl-letf (((symbol-function 'process-live-p) (lambda (candidate)
+                                                     (should (eq candidate proc))
+                                                     nil))
+                ((symbol-function 'process-exit-status) (lambda (candidate)
+                                                          (should (eq candidate proc))
+                                                          1)))
         (agent-repl--git-diff-sentinel "ws1" proc "finished\n")
         (should (eq (agent-repl--ws-get "ws1" :git-clean) 'dirty))))))
 
 (ert-deftest agent-repl-test-git-diff-sentinel-clears-git-proc ()
   "git-diff-sentinel should clear :git-proc after completion."
   (agent-repl-test--with-clean-state
-    (let ((proc (start-process "sentinel-clear" nil "true")))
-      (while (process-live-p proc) (accept-process-output proc 0.1))
+    (let ((proc 'cleared-process-fixture))
       (agent-repl--ws-put "ws1" :git-proc proc)
-      (progn
+      (cl-letf (((symbol-function 'process-live-p) (lambda (_candidate) nil))
+                ((symbol-function 'process-exit-status) (lambda (_candidate) 0)))
         (agent-repl--git-diff-sentinel "ws1" proc "finished\n")
         (should-not (agent-repl--ws-get "ws1" :git-proc))))))
 
@@ -864,37 +875,48 @@ even when the full-tab background is suppressed."
   "git-diff-sentinel caches cleanliness and changes no state.
 Worktree cleanliness was only ever an input to the removed decay."
   (agent-repl-test--with-clean-state
-    (let ((proc (start-process "sentinel-update" nil "true"))
-          (called-with nil))
-      (while (process-live-p proc) (accept-process-output proc 0.1))
-      (ignore called-with)
-      (agent-repl--git-diff-sentinel "ws1" proc "finished\n")
-      (should (eq (agent-repl--ws-get "ws1" :git-clean) 'clean)))))
+    (let ((proc 'state-neutral-process-fixture))
+      (agent-repl--ws-put "ws1" :agent-state :thinking)
+      (agent-repl--ws-put "ws1" :repl-state :active)
+      (cl-letf (((symbol-function 'process-live-p) (lambda (_candidate) nil))
+                ((symbol-function 'process-exit-status) (lambda (_candidate) 0)))
+        (agent-repl--git-diff-sentinel "ws1" proc "finished\n")
+        (should (eq (agent-repl--ws-get "ws1" :git-clean) 'clean))
+        (should (eq (agent-repl--ws-get "ws1" :agent-state) :thinking))
+        (should (eq (agent-repl--ws-get "ws1" :repl-state) :active))))))
 
 (ert-deftest agent-repl-test-git-diff-sentinel-noop-when-live ()
   "git-diff-sentinel should be a no-op when the process is still live."
   (agent-repl-test--with-clean-state
-    (let ((proc (start-process "sentinel-live" nil "sleep" "60")))
-      (unwind-protect
-          (progn
-            (agent-repl--git-diff-sentinel "ws1" proc "running\n")
-            (should-not (agent-repl--ws-get "ws1" :git-clean)))
-        (delete-process proc)))))
+    (let ((proc 'live-sentinel-process-fixture)
+          (exit-status-read-p nil))
+      (cl-letf (((symbol-function 'process-live-p) (lambda (_candidate) t))
+                ((symbol-function 'process-exit-status)
+                 (lambda (_candidate)
+                   (setq exit-status-read-p t)
+                   0)))
+        (agent-repl--git-diff-sentinel "ws1" proc "running\n")
+        (should-not (agent-repl--ws-get "ws1" :git-clean))
+        (should-not exit-status-read-p)))))
 
 ;;;; ---- Tests: async-refresh-git-status ----
 
 (ert-deftest agent-repl-test-async-refresh-noop-when-in-progress ()
   "async-refresh-git-status should be a no-op when check already in progress."
   (agent-repl-test--with-clean-state
-    (let ((proc (start-process "existing-check" nil "sleep" "60")))
-      (unwind-protect
-          (progn
-            (agent-repl--ws-put "ws1" :project-dir "/tmp")
-            (agent-repl--ws-put "ws1" :git-proc proc)
-            (agent-repl--async-refresh-git-status "ws1")
-            ;; :git-proc should still be the original proc, not replaced
-            (should (eq (agent-repl--ws-get "ws1" :git-proc) proc)))
-        (delete-process proc)))))
+    (let ((proc 'existing-check-process-fixture)
+          (spawn-called-p nil))
+      (agent-repl--ws-put "ws1" :project-dir "/tmp")
+      (agent-repl--ws-put "ws1" :git-proc proc)
+      (cl-letf (((symbol-function 'process-live-p) (lambda (_candidate) t))
+                ((symbol-function 'agent-repl--make-process-git)
+                 (lambda (&rest _args)
+                   (setq spawn-called-p t)
+                   'replacement-process-fixture)))
+        (agent-repl--async-refresh-git-status "ws1")
+        ;; The external-process boundary is not reached while a check is live.
+        (should-not spawn-called-p)
+        (should (eq (agent-repl--ws-get "ws1" :git-proc) proc))))))
 
 (ert-deftest agent-repl-test-async-refresh-noop-when-no-dir ()
   "async-refresh-git-status should be a no-op when ws-dir errors."
