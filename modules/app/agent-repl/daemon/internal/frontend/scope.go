@@ -89,6 +89,7 @@ func filterSnapshot(snap *frontendv1.StateSnapshot, sc Scope) *frontendv1.StateS
 	return &frontendv1.StateSnapshot{
 		Workspaces: filterScopedViews(snap.GetWorkspaces(), sc),
 		Sessions:   filterScopedViews(snap.GetSessions(), sc),
+		Catalogs:   filterScopedViews(snap.GetCatalogs(), sc),
 		Inits:      filterScopedViews(snap.GetInits(), sc),
 		Queues:     filterScopedViews(snap.GetQueues(), sc),
 		Progress:   filterScopedViews(snap.GetProgress(), sc),

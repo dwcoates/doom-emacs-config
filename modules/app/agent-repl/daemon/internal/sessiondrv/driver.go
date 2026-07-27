@@ -298,6 +298,26 @@ func taskCatalogForDriven(d *driven) *frontendv1.TaskCatalog {
 	return frontend.BuildTaskCatalog(d.workspace, d.sessionID, d.consumer.snapshotRing())
 }
 
+// TaskCatalogs returns the complete detached-task roster for every live
+// session, sorted by workspace for deterministic connect/resync snapshots. An
+// idle session contributes an empty catalog so a reconnecting frontend is told
+// authoritatively that its previous roster is clear.
+func (m *Manager) TaskCatalogs() []*frontendv1.TaskCatalog {
+	drivers := m.snapshotDrivers()
+	catalogs := make([]*frontendv1.TaskCatalog, 0, len(drivers))
+	taskCount := 0
+	for _, d := range drivers {
+		catalog := taskCatalogForDriven(d)
+		catalogs = append(catalogs, catalog)
+		taskCount += len(catalog.GetTasks())
+	}
+	sort.Slice(catalogs, func(i, j int) bool {
+		return catalogs[i].GetWorkspace() < catalogs[j].GetWorkspace()
+	})
+	m.logf("sessiondrv: task catalog snapshot catalogs=%d tasks=%d", len(catalogs), taskCount)
+	return catalogs
+}
+
 // TaskEntry returns the frontend TaskEntry (including its output_path) for a
 // detached task on the workspace's live session, rebuilt from the retained
 // event ring. ok=false when the workspace has no live driver or no such task.
