@@ -32,9 +32,10 @@
 ;; lets us catch the merge-flow mutations (`:merging',
 ;; `:merge-completed', `:repl-state :merge-queued') performed
 ;; directly in worktree.el — those never route through the typed
-;; `:agent-state' setter.  Workspace removal (`agent-repl--ws-del')
-;; is also advised so a workspace nuked while still `:thinking' or
-;; mid-merge cannot orphan the subprocess.
+;; `:agent-state' setter.  Workspace removal is caught through the
+;; same setter when `agent-repl--ws-del' writes `:nuked-at', so the
+;; reconcile observes the completed tombstone before the canonical
+;; `ws-del:' lifecycle record closes the operation.
 
 ;;; Code:
 
@@ -275,7 +276,7 @@ resolved.  Bails on unsupported platforms."
        supported-p))))
 
 (defconst agent-repl--caffeinate-watched-keys
-  '(:agent-state :merging :merge-completed :repl-state)
+  '(:agent-state :merging :merge-completed :repl-state :nuked-at)
   "Plist keys whose mutation can change the caffeinate decision.
 - `:agent-state' — drives the `--any-agent-state-active-p' branch.
 - `:merging' — set t at cherry-pick start, nil on success/failure.
@@ -285,6 +286,8 @@ resolved.  Bails on unsupported platforms."
 - `:repl-state' — `:merge-queued' surfaces here, and terminal merge
   states (`:merged' / `:merge-failed' / `:merge-conflict' / `:dead')
   also flow through this key.
+- `:nuked-at' — tombstones a removed workspace, excluding any residual
+  active merge marker before `agent-repl--ws-del' emits its final log.
 
 A `--ws-put' call with any other key is a no-op for caffeinate and
 deliberately skipped to avoid spurious reconciles on hot paths.")
@@ -302,11 +305,6 @@ Wraps `agent-repl--caffeinate-refresh' for `:after' advice on
     (when watched-p
       (agent-repl--caffeinate-refresh))))
 
-(defun agent-repl--caffeinate-refresh-on-ws-del (ws)
-  "Reconcile caffeinate after workspace WS is removed."
-  (agent-repl--log ws "caffeinate: ws-del advice ws=%s action=refresh" ws)
-  (agent-repl--caffeinate-refresh))
-
 ;; Reconcile on every plist mutation of a watched key.  Advising
 ;; `agent-repl--ws-put' (the single central plist setter in core.el)
 ;; rather than `agent-repl--ws-set-agent-state' (status.el's typed
@@ -317,11 +315,20 @@ Wraps `agent-repl--caffeinate-refresh' for `:after' advice on
 (advice-add 'agent-repl--ws-put
             :after #'agent-repl--caffeinate-refresh-on-ws-put)
 
-;; Reconcile on workspace removal too, so nuking a workspace that
-;; happened to be `:thinking' or mid-merge doesn't leave caffeinate
-;; orphaned.
-(advice-add 'agent-repl--ws-del
-            :after #'agent-repl--caffeinate-refresh-on-ws-del)
+;; Hot reloads do not undo advice installed by an earlier module version.
+;; Remove the retired post-delete callback explicitly now that `:nuked-at'
+;; drives the reconcile from inside `agent-repl--ws-del'.
+(let ((legacy-ws-del-advice-p
+       (advice-member-p #'agent-repl--caffeinate-refresh-on-ws-del
+                        'agent-repl--ws-del)))
+  (when legacy-ws-del-advice-p
+    (advice-remove 'agent-repl--ws-del
+                   #'agent-repl--caffeinate-refresh-on-ws-del))
+  (agent-repl--log
+   nil
+   "caffeinate: legacy ws-del advice present=%s action=%s"
+   legacy-ws-del-advice-p
+   (if legacy-ws-del-advice-p 'removed 'none)))
 
 ;; Never leak a subprocess past Emacs exit.
 (add-hook 'kill-emacs-hook #'agent-repl--caffeinate-stop)
