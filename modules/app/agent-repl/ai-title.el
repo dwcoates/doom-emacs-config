@@ -112,23 +112,43 @@ TAIL is the trailing chunk of a session jsonl (one JSON object per
 line).  Walks lines bottom-up so we hit the most recent ai-title entry
 first.  Skips lines that don't parse, contain no `aiTitle' field, or
 have a non-string `aiTitle' value."
-  (when (and (stringp tail) (not (string-empty-p tail)))
+  (if (not (and (stringp tail) (not (string-empty-p tail))))
+      (progn
+        (agent-repl--log nil
+                         "ai-title extract: skipped invalid tail type=%S empty=%s"
+                         (type-of tail) (and (stringp tail) (string-empty-p tail)))
+        nil)
     (let ((lines (split-string tail "\n" t))
-          (found nil))
+          (found nil)
+          (candidate-count 0)
+          (parse-error-count 0)
+          (rejected-title-count 0))
       (cl-loop for line in (nreverse lines)
                while (not found)
                when (string-match-p "\"type\":\"ai-title\"" line)
-               do (let ((parsed (ignore-errors
-                                  (let ((json-object-type 'alist)
-                                        (json-array-type 'list)
-                                        (json-key-type 'string)
-                                        (json-false nil)
-                                        (json-null nil))
-                                    (json-read-from-string line)))))
-                    (let ((title (and (listp parsed)
-                                      (cdr (assoc "aiTitle" parsed)))))
-                      (when (and (stringp title) (not (string-empty-p title)))
-                        (setq found title)))))
+               do (progn
+                    (cl-incf candidate-count)
+                    (let ((parsed
+                           (condition-case _err
+                               (let ((json-object-type 'alist)
+                                     (json-array-type 'list)
+                                     (json-key-type 'string)
+                                     (json-false nil)
+                                     (json-null nil))
+                                 (json-read-from-string line))
+                             (error
+                              (cl-incf parse-error-count)
+                              nil))))
+                      (let ((title (and (listp parsed)
+                                        (cdr (assoc "aiTitle" parsed)))))
+                        (if (and (stringp title) (not (string-empty-p title)))
+                            (setq found title)
+                          (cl-incf rejected-title-count))))))
+      (agent-repl--log nil
+                       "ai-title extract: scanned tail-bytes=%d lines=%d candidates=%d parse-errors=%d rejected-titles=%d title-found=%s title-length=%s"
+                       (string-bytes tail) (length lines) candidate-count
+                       parse-error-count rejected-title-count (not (null found))
+                       (and found (length found)))
       found)))
 
 (defun agent-repl--ai-title-read-from-jsonl (path)
@@ -137,9 +157,15 @@ Reads only the trailing `agent-repl-ai-title-scan-bytes' (via
 `agent-repl--transcript-read-tail') so this stays cheap on large
 transcripts.  Returns nil on missing/unreadable file or when no
 ai-title entry is present in the scanned tail."
-  (let ((tail (agent-repl--transcript-read-tail
-               path agent-repl-ai-title-scan-bytes)))
-    (and tail (agent-repl--ai-title-extract-from-tail tail))))
+  (let* ((tail (agent-repl--transcript-read-tail
+                path agent-repl-ai-title-scan-bytes))
+         (title (and tail (agent-repl--ai-title-extract-from-tail tail))))
+    (agent-repl--log nil
+                     "ai-title read: path=%S scan-bytes=%d tail-present=%s tail-bytes=%s title-found=%s title-length=%s"
+                     path agent-repl-ai-title-scan-bytes (not (null tail))
+                     (and tail (string-bytes tail)) (not (null title))
+                     (and title (length title)))
+    title))
 
 ;;;; Cached lookup
 
@@ -168,6 +194,9 @@ Reads `agent-repl--owning-workspace' from the current buffer (set on
 every agent-owned vterm buffer) and pulls the workspace's aiTitle.
 Returns the empty string when disabled, the workspace is unknown, or no
 title is yet available."
+  ;; This is evaluated on every mode-line redisplay.  Its resolver and cache
+  ;; helpers therefore intentionally do not log: even `--log-verbose' would
+  ;; write once per redraw and bury lifecycle diagnostics.
   (if (not agent-repl-ai-title-enabled)
       ""
     (let ((ws (agent-repl--buffer-owner (current-buffer))))
@@ -193,15 +222,26 @@ whether a buffer's mode-line already contains it.")
   "Append the ai-title segment to BUF's `mode-line-format' if missing.
 Idempotent — does nothing when the segment is already present, the
 buffer is dead, or the buffer's mode-line is not a list."
-  (when (buffer-live-p buf)
+  (if (not (buffer-live-p buf))
+      (agent-repl--log nil "ai-title attach: skipped dead buffer=%S" buf)
     (with-current-buffer buf
-      (when (and (listp mode-line-format)
-                 (not (member agent-repl--ai-title-mode-line-spec
-                              mode-line-format)))
-        (setq-local mode-line-format
-                    (append mode-line-format
-                            (list agent-repl--ai-title-mode-line-spec)))
-        (force-mode-line-update t)))))
+      (let* ((ws (agent-repl--buffer-owner buf))
+             (format-is-list (listp mode-line-format))
+             (already-attached
+              (and format-is-list
+                   (member agent-repl--ai-title-mode-line-spec mode-line-format))))
+        (if (and format-is-list (not already-attached))
+            (progn
+              (setq-local mode-line-format
+                          (append mode-line-format
+                                  (list agent-repl--ai-title-mode-line-spec)))
+              (force-mode-line-update t)
+              (agent-repl--log ws
+                               "ai-title attach: attached buffer=%S mode-line-length=%d"
+                               (buffer-name buf) (length mode-line-format)))
+          (agent-repl--log ws
+                           "ai-title attach: skipped buffer=%S format-is-list=%s already-attached=%s"
+                           (buffer-name buf) format-is-list (not (null already-attached))))))))
 
 (defun agent-repl-ai-title-attach-all ()
   "Attach the ai-title segment to every live workspace vterm buffer.
@@ -209,14 +249,16 @@ Run automatically when this file loads so reloading agent-repl upgrades
 pre-existing vterm buffers.  Also exposed interactively for manual
 recovery."
   (interactive)
-  (when (and (boundp 'agent-repl--workspaces)
-             (hash-table-p agent-repl--workspaces))
-    (maphash
-     (lambda (_ws plist)
-       (let ((buf (plist-get plist :vterm-buffer)))
-         (when (and buf (buffer-live-p buf))
-           (agent-repl--ai-title-attach-to-mode-line buf))))
-     agent-repl--workspaces)))
+  (let ((workspaces (agent-repl--live-ws-names)))
+    (agent-repl--log nil "ai-title attach-all: live-workspaces=%S count=%d"
+                     workspaces (length workspaces))
+    (dolist (ws workspaces)
+      (let ((buf (agent-repl--ws-get ws :vterm-buffer)))
+        (if (buffer-live-p buf)
+            (agent-repl--ai-title-attach-to-mode-line buf)
+          (agent-repl--log ws
+                           "ai-title attach-all: skipped ws=%s vterm-buffer=%S live=%s"
+                           ws buf (buffer-live-p buf)))))))
 
 ;; The aiTitle segment is intentionally NOT wired into the vterm
 ;; mode-line (see `agent-repl--workspace-mode-line'): it was dropped
