@@ -262,18 +262,24 @@ func (m *Manager) Ensure(workspace string) error {
 	return err
 }
 
-// SessionInits returns a SessionInitView for every live session whose SystemInit
-// has landed, sorted by workspace for a stable connect snapshot (task step 4:
-// StateSnapshot.inits). A session with no init yet contributes nothing.
-func (m *Manager) SessionInits() []*frontendv1.SessionInitView {
+// snapshotDrivers copies the currently live driver set without holding the
+// manager lock while callers inspect per-driver consumer state.
+func (m *Manager) snapshotDrivers() []*driven {
 	m.mu.Lock()
 	drivers := make([]*driven, 0, len(m.byWS))
 	for _, d := range m.byWS {
 		drivers = append(drivers, d)
 	}
 	m.mu.Unlock()
+	return drivers
+}
+
+// SessionInits returns a SessionInitView for every live session whose SystemInit
+// has landed, sorted by workspace for a stable connect snapshot (task step 4:
+// StateSnapshot.inits). A session with no init yet contributes nothing.
+func (m *Manager) SessionInits() []*frontendv1.SessionInitView {
 	var out []*frontendv1.SessionInitView
-	for _, d := range drivers {
+	for _, d := range m.snapshotDrivers() {
 		if si := d.consumer.latestSystemInit(); si != nil {
 			out = append(out, &frontendv1.SessionInitView{
 				Workspace: d.workspace,
@@ -286,6 +292,32 @@ func (m *Manager) SessionInits() []*frontendv1.SessionInitView {
 	return out
 }
 
+// taskCatalogForDriven rebuilds one live driver's complete detached-task roster
+// from its retained event ring.
+func taskCatalogForDriven(d *driven) *frontendv1.TaskCatalog {
+	return frontend.BuildTaskCatalog(d.workspace, d.sessionID, d.consumer.snapshotRing())
+}
+
+// TaskCatalogs returns the complete detached-task roster for every live
+// session, sorted by workspace for deterministic connect/resync snapshots. An
+// idle session contributes an empty catalog so a reconnecting frontend is told
+// authoritatively that its previous roster is clear.
+func (m *Manager) TaskCatalogs() []*frontendv1.TaskCatalog {
+	drivers := m.snapshotDrivers()
+	catalogs := make([]*frontendv1.TaskCatalog, 0, len(drivers))
+	taskCount := 0
+	for _, d := range drivers {
+		catalog := taskCatalogForDriven(d)
+		catalogs = append(catalogs, catalog)
+		taskCount += len(catalog.GetTasks())
+	}
+	sort.Slice(catalogs, func(i, j int) bool {
+		return catalogs[i].GetWorkspace() < catalogs[j].GetWorkspace()
+	})
+	m.logf("sessiondrv: task catalog snapshot catalogs=%d tasks=%d", len(catalogs), taskCount)
+	return catalogs
+}
+
 // TaskEntry returns the frontend TaskEntry (including its output_path) for a
 // detached task on the workspace's live session, rebuilt from the retained
 // event ring. ok=false when the workspace has no live driver or no such task.
@@ -295,7 +327,7 @@ func (m *Manager) TaskEntry(workspace, taskID string) (*frontendv1.TaskEntry, bo
 	if err != nil {
 		return nil, false
 	}
-	cat := frontend.BuildTaskCatalog(workspace, d.sessionID, d.consumer.snapshotRing())
+	cat := taskCatalogForDriven(d)
 	for _, e := range cat.GetTasks() {
 		if e.GetTaskId() == taskID {
 			return e, true

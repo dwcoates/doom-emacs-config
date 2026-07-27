@@ -183,3 +183,20 @@ func TestFilterSnapshotKeepsOnlyTheScopedProgressView(t *testing.T) {
 		t.Fatalf("progress = %v, want only /w1", got.GetProgress())
 	}
 }
+
+func TestFilterSnapshotKeepsOnlyTheScopedTaskCatalog(t *testing.T) {
+	// Arrange.
+	sc := Scope{SessionID: "s1", Workspace: "/w1"}
+	snap := &frontendv1.StateSnapshot{Catalogs: []*frontendv1.TaskCatalog{
+		{Workspace: "/w1", SessionId: "s1", Tasks: []*frontendv1.TaskEntry{{TaskId: "mine"}}},
+		{Workspace: "/w2", SessionId: "s2", Tasks: []*frontendv1.TaskEntry{{TaskId: "theirs"}}},
+	}}
+
+	// Act.
+	got := filterSnapshot(snap, sc)
+
+	// Assert.
+	if len(got.GetCatalogs()) != 1 || got.GetCatalogs()[0].GetTasks()[0].GetTaskId() != "mine" {
+		t.Fatalf("catalogs = %v, want only s1's catalog", got.GetCatalogs())
+	}
+}
