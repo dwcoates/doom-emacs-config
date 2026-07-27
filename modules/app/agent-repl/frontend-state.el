@@ -323,10 +323,11 @@ GET /sessions for it.")
 
 (defun agent-repl--frontend-live-session-id-for-cwd (cwd)
   "Return the id of a NON-TERMINAL stored SessionView whose workspace is CWD.
-The daemon supersedes older sessions on the same transcript, so there is
-at most one live session per cwd; nil when none is known yet.  This is how
-`createSession' correlates its (ack-receipt-only) command to the id the
-daemon delivers on the pushed SessionView."
+The daemon supersedes every older session on the same cwd at create time
+and PUSHES each stood-down record's terminal view (supersede.go), so at
+most one live session per cwd exists in this store; nil when none is
+known yet.  This is how `createSession' correlates its (ack-receipt-only)
+command to the id the daemon delivers on the pushed SessionView."
   (catch 'found
     (maphash (lambda (id view)
                (when (and (equal (plist-get view :workspace) cwd)
