@@ -193,14 +193,61 @@ Longer values reduce collision risk in setups with many workspaces."
   :type 'integer
   :group 'agent-repl)
 
-(defcustom agent-repl-log-file-name (agent-repl--global-state-file "doom-agent-repl.log")
+(defun agent-repl--default-log-directory ()
+  "Return agent-repl's private directory under the OS temporary root.
+The numeric Unix user ID keeps users from colliding when
+`temporary-file-directory' names a shared directory such as /tmp on Linux.
+The directory is not created here.
+
+Do not instrument this path resolver through the logging ladder: resolving
+the logfile path is itself a prerequisite for emitting a log line."
+  (unless (and (stringp temporary-file-directory)
+               (not (string= temporary-file-directory ""))
+               (file-name-absolute-p temporary-file-directory))
+    (error "agent-repl--default-log-directory: invalid temporary-file-directory=%S"
+           temporary-file-directory))
+  (file-name-as-directory
+   (expand-file-name (format "doom-agent-repl-%d" (user-uid))
+                     temporary-file-directory)))
+
+(defconst agent-repl--default-log-file-name
+  (expand-file-name "doom-agent-repl.log"
+                    (agent-repl--default-log-directory))
+  "Default OS-temporary path for the aggregate agent-repl log.")
+
+(defconst agent-repl--retired-state-log-file-name
+  (agent-repl--global-state-file "doom-agent-repl.log")
+  "Retired pre-temp-directory default for the aggregate agent-repl log.")
+
+(defun agent-repl--normalize-log-file-name (value)
+  "Return the active logfile path for configured VALUE.
+The retired state-tree default is redirected to the new OS-temporary default
+so reloading this module updates an already-bound defcustom.  Every other
+explicit path is preserved.  No file is moved, copied, read, or deleted."
+  (if (equal (expand-file-name value)
+             (expand-file-name agent-repl--retired-state-log-file-name))
+      agent-repl--default-log-file-name
+    value))
+
+(defcustom agent-repl-log-file-name agent-repl--default-log-file-name
   "Path to the agent-repl log file.
-Defaults under `agent-repl--global-state-dir' (agent-repl's own canonical
-state tree at ~/.claude-emacs), NOT the Claude CLI config dir.  The value
-is passed through `expand-file-name', and the parent directory is created
-on demand by `agent-repl--logfile-path'."
+Defaults to `doom-agent-repl.log' in a UID-qualified private directory under
+Emacs's `temporary-file-directory'.  On macOS that is normally the per-user
+/var/folders/.../T tree; on Linux it is commonly
+/tmp/doom-agent-repl-<uid>/doom-agent-repl.log.
+
+Existing logs under ~/.claude-emacs are intentionally neither migrated nor
+deleted.  The value is passed through `expand-file-name', and the parent
+directory is created on demand by `agent-repl--logfile-path'."
   :type 'string
   :group 'agent-repl)
+
+;; `defcustom' does not reset an already-bound variable during a Doom module
+;; reload.  Redirect the exact retired default so this change takes effect
+;; without an Emacs restart.  This runs before the logging ladder exists and
+;; intentionally performs no file migration or logging.
+(setq agent-repl-log-file-name
+      (agent-repl--normalize-log-file-name agent-repl-log-file-name))
 
 ;; NOTE: agent-repl-default-workspace-name was removed as part of the
 ;; no-defaults-no-fallbacks refactor.  Buffer naming now errors when no
@@ -381,16 +428,55 @@ metadata as an argument rather than splicing it into the format."
 
 (defun agent-repl--logfile-path ()
   "Return the expanded path of `agent-repl-log-file-name'.
-The parent directory is created if it does not exist."
+The parent directory is created if it does not exist.  The default
+UID-qualified temporary directory is required to be a real directory owned by
+the current user and is forced to mode 0700.
+
+Do not instrument this helper through the logging ladder: it is called while
+constructing every file-backed log entry."
   (let* ((path (expand-file-name agent-repl-log-file-name))
          (dir (file-name-directory path)))
     (unless (file-directory-p dir)
-      (make-directory dir t))
+      (make-directory dir t)
+      (remhash dir agent-repl--validated-private-log-directories))
+    (when (equal (directory-file-name dir)
+                 (directory-file-name (agent-repl--default-log-directory)))
+      (agent-repl--validate-private-log-directory dir))
     path))
+
+(defvar agent-repl--validated-private-log-directories
+  (make-hash-table :test #'equal)
+  "Private temporary log directories validated during this Emacs process.")
+
+(defun agent-repl--validate-private-log-directory (dir)
+  "Validate ownership and permissions for private temporary log DIR once.
+Validation is cached because this path runs for every file-backed log line.
+`agent-repl--logfile-path' evicts the cache entry whenever it has to recreate
+DIR.  This helper intentionally does not log because doing so would recurse."
+  (unless (gethash dir agent-repl--validated-private-log-directories)
+    (when (file-symlink-p (directory-file-name dir))
+      (error "agent-repl--validate-private-log-directory: directory is a symlink: %s"
+             dir))
+    (let* ((attrs (file-attributes dir 'integer))
+           (owner (and attrs (file-attribute-user-id attrs))))
+      (unless (equal owner (user-uid))
+        (error "agent-repl--validate-private-log-directory: owner=%S expected=%S path=%s"
+               owner (user-uid) dir)))
+    (set-file-modes dir #o700)
+    (puthash dir t agent-repl--validated-private-log-directories)))
 
 (defvar agent-repl--log-write-counter 0
   "Monotonic counter of successful log-file writes.
 Used by `agent-repl--do-log-to-file' to decide when to size-check.")
+
+(defun agent-repl--secure-log-file-mode (path)
+  "Require PATH to be a regular file and force its permissions to 0600.
+This helper intentionally does not log: it runs inside the logfile sink, so
+using the logging ladder here would recurse."
+  (unless (file-regular-p path)
+    (error "agent-repl--secure-log-file-mode: not a regular file: %s" path))
+  (unless (= (logand (file-modes path) #o777) #o600)
+    (set-file-modes path #o600)))
 
 (defun agent-repl--log-truncate (path size)
   "Drop the first 80% of PATH (SIZE bytes) and append a WARNING line.
@@ -420,7 +506,8 @@ re-enter `agent-repl--do-log-to-file' and recurse."
                     (format-time-string "%H:%M:%S.%3N")
                     agent-repl-log-size-cap-bytes size keep-bytes)))
       (let ((coding-system-for-write 'no-conversion))
-        (write-region (concat warning "\n") nil path t 'silent)))))
+        (write-region (concat warning "\n") nil path t 'silent)))
+    (agent-repl--secure-log-file-mode path)))
 
 (defun agent-repl--log-maybe-truncate (path)
   "Truncate PATH when it exceeds `agent-repl-log-size-cap-bytes'.
@@ -447,8 +534,10 @@ and runs `agent-repl--log-maybe-truncate' once every
   (when agent-repl-log-to-file
     (when-let ((path (agent-repl--logfile-path)))
       (condition-case err
-          (progn
+          (let ((new-file (not (file-exists-p path))))
             (write-region (concat text "\n") nil path t 'silent)
+            (when new-file
+              (agent-repl--secure-log-file-mode path))
             (cl-incf agent-repl--log-write-counter)
             (when (and (> agent-repl-log-size-check-interval 0)
                        (zerop (mod agent-repl--log-write-counter
@@ -684,7 +773,7 @@ file does not exist or `agent-repl-log-to-file' is nil.  Errors are
 caught and surfaced as a message — the rollover must not block startup."
   (when agent-repl-log-to-file
     (condition-case err
-        (let* ((path (expand-file-name agent-repl-log-file-name))
+        (let* ((path (agent-repl--logfile-path))
                (prev (concat path ".prev")))
           (when (file-exists-p path)
             (when (file-exists-p prev) (delete-file prev))

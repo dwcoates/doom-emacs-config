@@ -535,7 +535,7 @@ window changes, git-diff sentinels, resolve-root, etc.)."
       (agent-repl--log (agent-repl--ws-current-name) "debug logging toggled: %s" label))))
 
 (defun agent-repl-debug/toggle-log-to-file ()
-  "Toggle writing debug log output to `~/.claude-emacs/doom-agent-repl.log'.
+  "Toggle writing debug log output to `agent-repl-log-file-name'.
 When enabled, all messages that pass through `agent-repl--do-log' are
 appended to the file regardless of the `agent-repl-debug' level."
   (interactive)
