@@ -463,6 +463,31 @@ text.  Handles the non-string-FMT bug-capture in one place."
             fmt
             (agent-repl--format-ws-metadata ws))))
 
+(defconst agent-repl--workspace-log-buffer-suffix "-log"
+  "Suffix used for the workspace-owned live log buffer.")
+
+(defun agent-repl--workspace-log-buffer (ws)
+  "Return WS's workspace-owned live agent-repl log buffer.
+The buffer is created through `agent-repl--create-buffer', which sets its
+permanent-local owner and attaches it through workspace.el's perspective
+boundary.  Its contents are an in-memory view only; the durable logfile
+remains the authoritative persisted record."
+  (agent-repl--create-buffer ws agent-repl--workspace-log-buffer-suffix))
+
+(defun agent-repl--append-workspace-log (ws text)
+  "Append the exact formatted log TEXT to WS's live log buffer.
+Only a non-nil WS is workspace-scoped.  This helper deliberately does not
+log its own buffer creation or append work: it runs for every log entry, and
+instrumenting it through the logging ladder would recurse indefinitely."
+  (when ws
+    (with-current-buffer (agent-repl--workspace-log-buffer ws)
+      (let ((inhibit-read-only t))
+        (save-excursion
+          (save-restriction
+            (widen)
+            (goto-char (point-max))
+            (insert text "\n")))))))
+
 ;;;; ---- Echo-area (modeline) severity gate ----
 ;;
 ;; agent-repl has two distinct log sinks and they are NOT the same channel:
@@ -531,6 +556,7 @@ of `agent-repl-debug'.  Debug-gated callers (`agent-repl--log',
 quietly; `agent-repl--info' is the equivalent ungated quiet-notice level."
   (let ((text (agent-repl--build-log-text ws fmt args)))
     (agent-repl--do-log-to-file text)
+    (agent-repl--append-workspace-log ws text)
     (if error-p
         (error "%s" text)
       (agent-repl--emit-message text nil))))
@@ -545,6 +571,7 @@ logging on never turns the modeline into a firehose.
 FMT and ARGS use the same format conventions as `message'."
   (let ((text (agent-repl--build-log-text ws fmt args)))
     (agent-repl--do-log-to-file text)
+    (agent-repl--append-workspace-log ws text)
     (when agent-repl-debug
       (agent-repl--emit-message text nil))))
 
@@ -562,6 +589,7 @@ with a `C-u' prefix."
   (when (eq agent-repl-debug 'verbose)
     (let ((text (agent-repl--build-log-text ws fmt args)))
       (agent-repl--do-log-to-file text)
+      (agent-repl--append-workspace-log ws text)
       (agent-repl--emit-message text nil))))
 
 (defun agent-repl--info (ws fmt &rest args)
@@ -577,6 +605,7 @@ severity (still quiet), or `agent-repl--error' to signal a genuine fatal
 condition loudly into the modeline."
   (let ((text (agent-repl--build-log-text ws fmt args)))
     (agent-repl--do-log-to-file text)
+    (agent-repl--append-workspace-log ws text)
     (agent-repl--emit-message text nil)))
 
 (defun agent-repl--warn (ws fmt &rest args)
@@ -1062,13 +1091,16 @@ which would otherwise nuke that workspace's session along with WS's own."
 ;; it from other agent-repl utility buffers (e.g. *agent-repl-dump*,
 ;; *agent-repl-log-bug*).  The webview buffer lives in its own
 ;; "agent-frontend-" namespace (see `agent-repl--frontend-buffer-re'
-;; below) — a workspace's only two buffers are the input composer and
-;; the webview, so between them these two regexes cover every agent
-;; panel buffer that exists.
+;; below).  Each workspace also has an in-memory "-log" buffer, whose
+;; ownership is set through `agent-repl--create-buffer'.
 
 (defconst agent-repl--input-buffer-re "^\\*agent-panel-input-[[:alnum:]_-]+\\*$"
   "Regexp matching agent input buffer names.
 For example, *agent-panel-input-my-workspace*.")
+
+(defconst agent-repl--workspace-log-buffer-re "^\\*agent-panel-log-[[:alnum:]_-]+\\*$"
+  "Regexp matching workspace-owned live log buffers.
+For example, *agent-panel-log-my-workspace*.")
 
 (defconst agent-repl--frontend-buffer-re "^\\*agent-frontend-[[:alnum:]_-]+\\*$"
   "Regexp matching gui webview buffer names (e.g. *agent-frontend-my-workspace*).
@@ -1131,10 +1163,11 @@ no perspective named WS exists (e.g. early in session startup)."
     buf))
 
 (defun agent-repl--agent-panel-buffer-p (&optional buf)
-  "Return non-nil if BUF (default: current buffer) is any agent panel buffer.
-Matches the input composer and the webview — the two buffers a workspace has."
+  "Return non-nil if BUF (default: current buffer) is an agent-repl buffer.
+Matches the input composer, webview, and workspace-owned live log buffer."
   (let ((name (buffer-name (or buf (current-buffer)))))
     (or (string-match-p agent-repl--input-buffer-re name)
+        (string-match-p agent-repl--workspace-log-buffer-re name)
         (string-match-p agent-repl--frontend-buffer-re name))))
 
 (defun agent-repl--agent-view-buffer-name-p (name)
