@@ -88,16 +88,21 @@ Checks `agent-repl-workspace-initial-buffers' for entries whose PATTERN
 matches PATH, then opens each listed file with `find-file-noselect' and adds
 it to the WS perspective without displaying it."
   (agent-repl--log ws "open-initial-buffers: path=%s" path)
-  (when-let ((persp (agent-repl--ws-resolve-persp ws)))
-    (dolist (entry agent-repl-workspace-initial-buffers)
-      (when (string-match-p (car entry) path)
-        (dolist (relpath (cdr entry))
-          (let ((fullpath (expand-file-name relpath path)))
-            (if (file-exists-p fullpath)
-                (progn
-                  (agent-repl--log ws "open-initial-buffers: opening file=%s" fullpath)
-                  (agent-repl--ws-add-buffer (find-file-noselect fullpath) persp t))
-              (agent-repl--log ws "open-initial-buffers: file not found in worktree: %s" fullpath))))))))
+  (if-let ((persp (agent-repl--ws-resolve-persp ws)))
+      (let ((matched nil))
+        (dolist (entry agent-repl-workspace-initial-buffers)
+          (when (string-match-p (car entry) path)
+            (setq matched t)
+            (dolist (relpath (cdr entry))
+              (let ((fullpath (expand-file-name relpath path)))
+                (if (file-exists-p fullpath)
+                    (progn
+                      (agent-repl--log ws "open-initial-buffers: opening file=%s" fullpath)
+                      (agent-repl--ws-add-buffer (find-file-noselect fullpath) persp t))
+                  (agent-repl--log ws "open-initial-buffers: file not found in worktree: %s" fullpath))))))
+        (unless matched
+          (agent-repl--log ws "open-initial-buffers: no configured pattern matched path=%s" path)))
+    (agent-repl--log ws "open-initial-buffers: no perspective resolved; skipping path=%s" path)))
 
 
 ;;; Git helpers
@@ -241,9 +246,13 @@ ROOT is any directory inside the repo.  Runs `git -C ROOT worktree list
 --porcelain' and parses for the master branch.  Returns nil if no
 worktree is on master or if git fails."
   (let* ((target-ref (concat "refs/heads/" agent-repl-master-branch-name))
-         (output (agent-repl--git-string-quiet "-C" root "worktree" "list" "--porcelain")))
-    (when (and output (not (string-empty-p output)))
-      (agent-repl--parse-worktree-porcelain output target-ref))))
+         (output (agent-repl--git-string-quiet "-C" root "worktree" "list" "--porcelain"))
+         (result (when (and output (not (string-empty-p output)))
+                   (agent-repl--parse-worktree-porcelain output target-ref))))
+    (agent-repl--log nil
+                      "master-worktree-path: root=%s target-ref=%s output-len=%s result=%s"
+                      root target-ref (if output (length output) "nil") (or result "nil"))
+    result))
 
 (defun agent-repl--main-worktree-path (root)
   "Return absolute path of the main worktree of ROOT's repo, or nil.
@@ -261,19 +270,23 @@ there — stable under `git checkout' inside the main worktree.
 Resolves via `git -C ROOT rev-parse --git-common-dir' and takes the
 parent of the returned `.git' directory.  Returns nil when git
 fails or the resolved path is not a live directory."
-  (let ((common (agent-repl--git-string-quiet
-                 "-C" root "rev-parse" "--git-common-dir")))
-    (when (and common
-               (not (string-empty-p common))
-               (not (string-prefix-p "fatal" common)))
-      (let* ((abs-common (if (file-name-absolute-p common)
-                             common
-                           (expand-file-name common root)))
-             (parent (directory-file-name
-                      (file-name-directory
-                       (directory-file-name abs-common)))))
-        (when (file-directory-p parent)
-          parent)))))
+  (let* ((common (agent-repl--git-string-quiet
+                  "-C" root "rev-parse" "--git-common-dir"))
+         (result
+          (when (and common
+                     (not (string-empty-p common))
+                     (not (string-prefix-p "fatal" common)))
+            (let* ((abs-common (if (file-name-absolute-p common)
+                                   common
+                                 (expand-file-name common root)))
+                   (parent (directory-file-name
+                            (file-name-directory
+                             (directory-file-name abs-common)))))
+              (when (file-directory-p parent)
+                parent)))))
+    (agent-repl--log nil "main-worktree-path: root=%s common=%s result=%s"
+                      root (or common "nil") (or result "nil"))
+    result))
 
 (defun agent-repl--main-worktree-p (dir)
   "Return non-nil when DIR is a git repository's MAIN worktree.
@@ -461,7 +474,7 @@ WS is used only for the error message."
       (user-error "Uncommitted changes in workspace '%s' (dir: %s) [unstaged=%s staged=%s] — stash or commit before merging"
                   ws project-root unstaged staged))))
 
-(defun agent-repl--worktree-dirty-p (project-root)
+(defun agent-repl--worktree-dirty-p (project-root &optional ws)
   "Return non-nil if PROJECT-ROOT has uncommitted changes.
 Predicate counterpart to `agent-repl--assert-clean-worktree' — same
 git probes (`diff --quiet' and `diff --cached --quiet'), but returns
@@ -469,6 +482,9 @@ nil or t instead of signaling.  Suitable for handlers that need to
 skip work on a dirty trunk rather than abort the caller."
   (let ((unstaged (/= 0 (agent-repl--git-exit-code project-root "diff" "--quiet")))
         (staged   (/= 0 (agent-repl--git-exit-code project-root "diff" "--cached" "--quiet"))))
+    (agent-repl--log ws
+                      "worktree-dirty-p: project-root=%s unstaged=%s staged=%s result=%s"
+                      project-root unstaged staged (if (or unstaged staged) "t" "nil"))
     (or unstaged staged)))
 
 ;;; Worktree registration and session setup
@@ -888,10 +904,12 @@ when the recorded workspace dirname no longer exists (e.g. user killed
 it) — surfacing the situation instead of silently dropping the prompt
 or creating ghost state."
   (when (or (null prompt) (string-empty-p (string-trim prompt)))
+    (agent-repl--log nil "oneshot-amend: rejected empty prompt flavor=%s" flavor)
     (user-error "Amended-oneshot prompt is required"))
   (let ((state (plist-get agent-repl--oneshot-last-ws flavor)))
     (cond
      ((null state)
+      (agent-repl--log nil "oneshot-amend: no tracked workspace flavor=%s" flavor)
       (user-error "No oneshot workspace tracked for flavor=%s — press `SPC j %s' first"
                   flavor (if (eq flavor :doom) "o" "O")))
      ((eq state :generating)
@@ -906,6 +924,8 @@ or creating ghost state."
       (message "Amended-oneshot prompt queued for in-flight %s workspace." flavor))
      ((stringp state)
       (unless (member state (agent-repl--ws-all-names))
+        (agent-repl--log state "oneshot-amend: tracked workspace is no longer live flavor=%s ws=%s"
+                          flavor state)
         (user-error "Tracked oneshot workspace '%s' no longer exists — press `SPC j %s' to create a new one"
                     state (if (eq flavor :doom) "o" "O")))
       (agent-repl--log state
@@ -913,6 +933,7 @@ or creating ghost state."
                         flavor state)
       (agent-repl--dispatch-prompt-command state prompt))
      (t
+      (agent-repl--log nil "oneshot-amend: invalid tracked state flavor=%s state=%S" flavor state)
       (user-error "Unexpected oneshot tracking state for flavor=%s: %S" flavor state)))))
 
 (defun agent-repl-amend-doom-oneshot-prompt ()
@@ -1483,8 +1504,10 @@ report the new path as an existing project."
   (agent-repl--log name "validate-worktree-creation: name=%s git-root=%s dirname=%s branch-name=%s path=%s"
                     name git-root dirname branch-name path)
   (when (string-empty-p name)
+    (agent-repl--log name "validate-worktree-creation: rejected empty name git-root=%s" git-root)
     (user-error "Name cannot be empty"))
   (when (file-directory-p path)
+    (agent-repl--log name "validate-worktree-creation: rejected existing path=%s dirname=%s" path dirname)
     (user-error "Worktree '%s' already exists — use SPC p p to switch to it" dirname))
   (when (agent-repl--git-branch-exists-p git-root branch-name)
     (agent-repl--log name "ERROR: branch '%s' already exists — cannot create worktree" branch-name)
@@ -1554,19 +1577,23 @@ through to `agent-repl--finalize-worktree-workspace' and stored under
       (agent-repl--info name "Creating worktree '%s' from %s..." dirname base-commit)
       (cond
        (fork-session-id
+        (agent-repl--log name "worktree-create-dispatch: branch=fork base=%s" base-commit)
         (funcall add-fn))
        ((string-prefix-p "origin/" base-commit)
+        (agent-repl--log name "worktree-create-dispatch: branch=fetch-origin base=%s" base-commit)
         (agent-repl--async-git
          "fetch" git-root
          (list "fetch" "origin" (substring base-commit (length "origin/")))
          (apply-partially #'agent-repl--worktree-fetch-callback add-fn)))
        ((equal base-commit agent-repl-master-branch-name)
+        (agent-repl--log name "worktree-create-dispatch: branch=fetch-master base=%s" base-commit)
         (agent-repl--async-git
          "fetch" git-root
          (list "fetch" "origin" base-commit)
          (apply-partially #'agent-repl--worktree-fetch-master-callback
                           add-fn git-root)))
        (t
+        (agent-repl--log name "worktree-create-dispatch: branch=add-direct base=%s" base-commit)
         (funcall add-fn))))))
 
 (defun agent-repl--remove-doom-dashboard ()
@@ -2741,19 +2768,22 @@ is safe to call against stub repo paths in tests."
   (let* ((path (agent-repl--candidate-worktree-path git-root name))
          (branch-name name)
          (bare-name (agent-repl--bare-workspace-name name))
-         (start-tag (agent-repl--start-tag-name branch-name)))
-    (or (and (hash-table-p agent-repl--workspace-names-in-flight)
-             (gethash name agent-repl--workspace-names-in-flight))
-        (and (boundp 'agent-repl--workspaces)
-             (hash-table-p agent-repl--workspaces)
-             (gethash bare-name agent-repl--workspaces)
-             :workspace-exists)
-        (and (file-directory-p path) :path-exists)
-        (and (agent-repl--git-branch-exists-p git-root branch-name)
-             :branch-exists)
-        (and start-tag
-             (agent-repl--git-tag-exists-p git-root start-tag)
-             :start-tag-exists))))
+         (start-tag (agent-repl--start-tag-name branch-name))
+         (result
+          (or (and (hash-table-p agent-repl--workspace-names-in-flight)
+                   (gethash name agent-repl--workspace-names-in-flight))
+              (and (agent-repl--ws-known-p bare-name)
+                   :workspace-exists)
+              (and (file-directory-p path) :path-exists)
+              (and (agent-repl--git-branch-exists-p git-root branch-name)
+                   :branch-exists)
+              (and start-tag
+                   (agent-repl--git-tag-exists-p git-root start-tag)
+                   :start-tag-exists))))
+    (agent-repl--log name
+                      "workspace-name-collides-p: name=%s bare=%s git-root=%s path=%s start-tag=%s result=%s"
+                      name bare-name git-root path (or start-tag "nil") (or result "nil"))
+    result))
 
 (defun agent-repl--disambiguate-workspace-name (name git-root)
   "Return NAME unchanged when collision-free, else NAME with a `-XYZ' suffix.
@@ -2764,7 +2794,10 @@ attempts.  Signals `error' when no non-colliding suffix is found
 within the cap — disambiguation must not silently succeed with a
 colliding name, since downstream `git worktree add' would fail."
   (if (not (agent-repl--workspace-name-collides-p name git-root))
-      name
+      (progn
+        (agent-repl--log name "disambiguate-workspace-name: name=%s git-root=%s collision-free"
+                          name git-root)
+        name)
     (let ((attempt 0)
           (max-attempts agent-repl-workspace-name-disambiguate-max-attempts)
           (candidate nil))
@@ -5397,8 +5430,12 @@ re-shell every poll cycle forever.  The failure is stable for the
 session (no parent dir exists to find), so the sentinel is safe."
   (let ((cached (agent-repl--ws-get ws :merge-parent-dir)))
     (cond
-     ((eq cached 'unresolved) nil)
-     (cached cached)
+     ((eq cached 'unresolved)
+      (agent-repl--log-verbose ws "ws-merge-parent-dir: ws=%s cached=unresolved" ws)
+      nil)
+     (cached
+      (agent-repl--log-verbose ws "ws-merge-parent-dir: ws=%s cached=%s" ws cached)
+      cached)
      (t
       (let* ((recorded (agent-repl--ws-get ws :source-ws-dir))
              (ws-dir (ignore-errors (agent-repl--ws-dir ws)))
@@ -5407,12 +5444,18 @@ session (no parent dir exists to find), so the sentinel is safe."
                ((and recorded (file-directory-p recorded)) recorded)
                (ws-dir (agent-repl--master-worktree-path ws-dir)))))
         (agent-repl--ws-put ws :merge-parent-dir (or resolved 'unresolved))
+        (agent-repl--log-verbose ws
+                                  "ws-merge-parent-dir: ws=%s recorded=%s ws-dir=%s resolved=%s"
+                                  ws (or recorded "nil") (or ws-dir "nil") (or resolved "nil"))
         resolved)))))
 
 (defun agent-repl--branch-merge-check-in-progress-p (ws)
   "Return non-nil when an `:branch-merged' refresh process is live for WS."
-  (when-let ((proc (agent-repl--ws-get ws :merge-proc)))
-    (process-live-p proc)))
+  (let* ((proc (agent-repl--ws-get ws :merge-proc))
+         (live (and proc (process-live-p proc))))
+    (agent-repl--log-verbose ws "branch-merge-check-in-progress-p: ws=%s proc=%s live=%s"
+                              ws (if proc (process-name proc) "nil") (if live "t" "nil"))
+    live))
 
 (defun agent-repl--detect-merge-actually-landed-p (ws)
   "Return non-nil when WS's branch tip is incorporated in its parent worktree.
@@ -6135,24 +6178,44 @@ No-op when a refresh is already in flight, when WS or its parent dir
 can't be resolved, when preconditions fail (see
 `agent-repl--merge-base-ancestor-args'), or when the previous refresh
 ran within `agent-repl-branch-merged-refresh-interval' seconds."
-  (when-let* ((ws-dir (ignore-errors (agent-repl--ws-dir ws)))
-              (parent-dir (agent-repl--ws-merge-parent-dir ws))
-              ((not (agent-repl--branch-merge-check-in-progress-p ws))))
-    (let* ((now  (float-time))
-           (last (or (agent-repl--ws-get ws :branch-merged-last-check) 0)))
-      (when (> (- now last) agent-repl-branch-merged-refresh-interval)
-        (agent-repl--ws-put ws :branch-merged-last-check now)
-        (when-let* ((branches (agent-repl--merge-base-ancestor-args
-                               ws-dir parent-dir
-                               (agent-repl--ws-get ws :branch-name)
-                               (agent-repl--ws-get ws :parent-branch-name))))
-          (let* ((default-directory ws-dir)
-                 (proc (agent-repl--make-process-git
-                        (format "agent-repl-merge-%s" ws)
-                        (list "merge-base" "--is-ancestor"
-                              (car branches) (cdr branches))
-                        (apply-partially #'agent-repl--branch-merge-sentinel ws))))
-            (agent-repl--ws-put ws :merge-proc proc)))))))
+  (let* ((ws-dir (ignore-errors (agent-repl--ws-dir ws)))
+         (parent-dir (and ws-dir (agent-repl--ws-merge-parent-dir ws)))
+         (in-flight (agent-repl--branch-merge-check-in-progress-p ws)))
+    (cond
+     (in-flight
+      (agent-repl--log-verbose ws "async-refresh-branch-merged: ws=%s skipped=in-flight" ws))
+     ((not ws-dir)
+      (agent-repl--log-verbose ws "async-refresh-branch-merged: ws=%s skipped=no-workspace-dir" ws))
+     ((not parent-dir)
+      (agent-repl--log-verbose ws "async-refresh-branch-merged: ws=%s skipped=no-parent-dir ws-dir=%s"
+                                ws ws-dir))
+     (t
+      (let* ((now (float-time))
+             (last (or (agent-repl--ws-get ws :branch-merged-last-check) 0))
+             (age (- now last)))
+        (if (<= age agent-repl-branch-merged-refresh-interval)
+            (agent-repl--log-verbose ws
+                                      "async-refresh-branch-merged: ws=%s skipped=throttled age=%.3f interval=%s"
+                                      ws age agent-repl-branch-merged-refresh-interval)
+          (agent-repl--ws-put ws :branch-merged-last-check now)
+          (let ((branches (agent-repl--merge-base-ancestor-args
+                           ws-dir parent-dir
+                           (agent-repl--ws-get ws :branch-name)
+                           (agent-repl--ws-get ws :parent-branch-name))))
+            (if (not branches)
+                (agent-repl--log-verbose ws
+                                          "async-refresh-branch-merged: ws=%s skipped=invalid-ancestry-input ws-dir=%s parent-dir=%s"
+                                          ws ws-dir parent-dir)
+              (let* ((default-directory ws-dir)
+                     (proc (agent-repl--make-process-git
+                            (format "agent-repl-merge-%s" ws)
+                            (list "merge-base" "--is-ancestor"
+                                  (car branches) (cdr branches))
+                            (apply-partially #'agent-repl--branch-merge-sentinel ws))))
+                (agent-repl--log-verbose ws
+                                          "async-refresh-branch-merged: ws=%s started source-branch=%s target-branch=%s ws-dir=%s parent-dir=%s proc=%S"
+                                          ws (car branches) (cdr branches) ws-dir parent-dir proc)
+                (agent-repl--ws-put ws :merge-proc proc))))))))))
 
 (defun agent-repl--branch-merged-into-p (source-dir target-dir)
   "Return non-nil when the branch at SOURCE-DIR is an ancestor of the
