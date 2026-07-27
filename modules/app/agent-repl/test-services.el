@@ -1,0 +1,144 @@
+;;; test-services.el --- Tests for launchd runtime coordination -*- lexical-binding: t; -*-
+
+;;; Code:
+
+(load (expand-file-name "test-helpers.el"
+                        (file-name-directory
+                         (or load-file-name buffer-file-name)))
+      nil t)
+
+(require 'cl-lib)
+
+(ert-deftest agent-repl-services-test-build-and-bounce-orders-store-before-sidecar ()
+  "Both jobs are preflighted, stale-built, then store is ready before sidecar."
+  (let (events)
+    (cl-letf (((symbol-function 'agent-repl--launchctl-call)
+               (lambda (args) (push (append '(launchctl) args) events) 0))
+              ((symbol-function 'agent-repl--frontend-build-targets-if-stale)
+               (lambda (targets &optional _force)
+                 (push (list 'build targets) events) 0))
+              ((symbol-function 'agent-repl--frontend-artifact-exists-p)
+               (lambda (_path) t))
+              ((symbol-function 'agent-repl--shim-store-socket-present-p)
+               (lambda () (push '(store-ready) events) t))
+              ((symbol-function 'agent-repl--shim-service-file-sha256)
+               (lambda (path)
+                 (push (list 'fingerprint path) events) "digest"))
+              ((symbol-function 'agent-repl--shim-service-write-stamp)
+               (lambda (path digest)
+                 (push (list 'stamp path digest) events))))
+      (agent-repl--shim-services-build-and-bounce)
+      (setq events (nreverse events))
+      (should (equal (nth 0 events)
+                     (list 'launchctl "print"
+                           (format "gui/%d/com.agentrepl.shim-store"
+                                   (user-uid)))))
+      (should (equal (nth 1 events)
+                     (list 'launchctl "print"
+                           (format "gui/%d/com.agentrepl.shim-claude-sidecar"
+                                   (user-uid)))))
+      (should (equal (nth 2 events) '(build ("store" "sidecar"))))
+      (should (equal (nth 3 events)
+                     (list 'launchctl "kickstart" "-k"
+                           (format "gui/%d/com.agentrepl.shim-store"
+                                   (user-uid)))))
+      (should (equal (nth 4 events) '(store-ready)))
+      (should (equal (nth 7 events)
+                     (list 'launchctl "kickstart" "-k"
+                           (format "gui/%d/com.agentrepl.shim-claude-sidecar"
+                                   (user-uid))))))))
+
+(ert-deftest agent-repl-services-test-preflight-failure-prevents-build-and-bounce ()
+  "A missing launchd job fails before installed files or processes change."
+  (let ((calls 0) built)
+    (cl-letf (((symbol-function 'agent-repl--launchctl-call)
+               (lambda (_args) (setq calls (1+ calls)) (if (= calls 2) 113 0)))
+              ((symbol-function 'agent-repl--frontend-build-targets-if-stale)
+               (lambda (&rest _) (setq built t))))
+      (should-error (agent-repl--shim-services-build-and-bounce))
+      (should (= calls 2))
+      (should-not built))))
+
+(ert-deftest agent-repl-services-test-invalid-launchctl-verb-fails-before-call ()
+  "An unknown lifecycle operation cannot silently become a kickstart."
+  (let (called)
+    (cl-letf (((symbol-function 'agent-repl--launchctl-call)
+               (lambda (_args) (setq called t) 0)))
+      (should-error
+       (agent-repl--shim-services-launchctl
+        "destroy" agent-repl--shim-store-label))
+      (should-not called))))
+
+(ert-deftest agent-repl-services-test-missing-build-output-prevents-kickstart ()
+  "Missing installed artifacts fail before either launchd job is restarted."
+  (let (verbs)
+    (cl-letf (((symbol-function 'agent-repl--launchctl-call)
+               (lambda (args) (push (car args) verbs) 0))
+              ((symbol-function 'agent-repl--frontend-build-targets-if-stale)
+               (lambda (&rest _) 0))
+              ((symbol-function 'agent-repl--frontend-artifact-exists-p)
+               (lambda (_path) nil)))
+      (should-error (agent-repl--shim-services-build-and-bounce))
+      (should (equal verbs '("print" "print"))))))
+
+(ert-deftest agent-repl-services-test-runtime-refuses-active-turn-before-mutation ()
+  "An active daemon turn blocks builds and every service/daemon bounce."
+  (let (mutated)
+    (cl-letf (((symbol-function 'agent-repl--frontend-runtime-bounce-preflight)
+               (lambda () :responsive))
+              ((symbol-function 'agent-repl--frontend-wait-ready)
+               (lambda () t))
+              ((symbol-function 'agent-repl--frontend-all-turn-active-session-ids)
+               (lambda () '("s_busy")))
+              ((symbol-function 'agent-repl--shim-services-assert-launchd-loaded)
+               (lambda () (setq mutated t)))
+              ((symbol-function 'agent-repl--frontend-build-if-stale)
+               (lambda (&rest _) (setq mutated t))))
+      (should-error (agent-repl-runtime-restart))
+      (should-not mutated))))
+
+(ert-deftest agent-repl-services-test-runtime-orders-build-services-daemon-rebind ()
+  "The coordinated restart preserves dependency order through shim rebind."
+  (let (events)
+    (cl-letf (((symbol-function 'agent-repl--frontend-runtime-bounce-preflight)
+               (lambda () :tracked))
+              ((symbol-function 'agent-repl--frontend-wait-ready)
+               (lambda () (push 'ready events) t))
+              ((symbol-function 'agent-repl--frontend-all-turn-active-session-ids)
+               (lambda () nil))
+              ((symbol-function 'agent-repl--shim-services-assert-launchd-loaded)
+               (lambda () (push 'preflight events) t))
+              ((symbol-function 'agent-repl--frontend-build-if-stale)
+               (lambda (&optional _force) (push 'frontend-build events) 0))
+              ((symbol-function 'agent-repl--shim-services-build-and-bounce)
+               (lambda (&optional preflight-complete)
+                 (should preflight-complete)
+                 (push 'services events)
+                 t))
+              ((symbol-function 'agent-repl--frontend-bounce-after-build)
+               (lambda (&optional preflight)
+                 (should (eq preflight :tracked))
+                 (push 'daemon events)
+                 t))
+              ((symbol-function 'agent-repl--frontend-rebind-workspaces-after-restart)
+               (lambda () (push 'rebind events) 2)))
+      (should (= 2 (agent-repl-runtime-restart)))
+      (should (equal (nreverse events)
+                     '(ready preflight frontend-build services daemon rebind))))))
+
+(ert-deftest agent-repl-services-test-startup-scheduler-arms-once ()
+  "Repeated completion signals schedule exactly one startup restart."
+  (let ((agent-repl--runtime-startup-bounce-scheduled nil)
+        (agent-repl--runtime-startup-bounce-completed nil)
+        timers)
+    (cl-letf (((symbol-function 'run-at-time)
+               (lambda (secs repeat fn &rest _args)
+                 (push (list secs repeat fn) timers))))
+      (agent-repl--schedule-runtime-startup-bounce)
+      (agent-repl--schedule-runtime-startup-bounce)
+      (should (equal timers
+                     '((0 nil agent-repl--run-runtime-startup-bounce)))))))
+
+(provide 'test-services)
+
+;;; test-services.el ends here

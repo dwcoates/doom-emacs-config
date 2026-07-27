@@ -30,6 +30,10 @@ make_tree() {
     mkdir -p "$root/bin" \
              "$root/agent-shim/claude/shim/src" \
              "$root/agent-shim/claude/shim/dist" \
+             "$root/agent-shim/claude/shim-sidecar" \
+             "$root/agent-shim/shim-store" \
+             "$root/agent-shim/wire" \
+             "$root/proto/gen/go" \
              "$root/webapp/src" "$root/webapp/dist" \
              "$root/daemon/cmd/claude-repld" "$root/daemon/bin"
     cp "$SCRIPT_UNDER_TEST" "$root/bin/build-frontend.sh"
@@ -38,9 +42,17 @@ make_tree() {
     echo "export const x = 1" > "$root/agent-shim/claude/shim/src/main.ts"
     echo "export const y = 1" > "$root/webapp/src/main.ts"
     echo "package main" > "$root/daemon/cmd/claude-repld/main.go"
+    echo "package main" > "$root/agent-shim/shim-store/main.go"
+    echo "package main" > "$root/agent-shim/claude/shim-sidecar/main.go"
+    echo "package wire" > "$root/agent-shim/wire/wire.go"
+    echo "package proto" > "$root/proto/gen/go/proto.go"
     echo '{"scripts":{"build":"true"}}' > "$root/agent-shim/claude/shim/package.json"
     echo '{"scripts":{"build":"true"}}' > "$root/webapp/package.json"
     echo "module x" > "$root/daemon/go.mod"
+    echo "module store" > "$root/agent-shim/shim-store/go.mod"
+    echo "module sidecar" > "$root/agent-shim/claude/shim-sidecar/go.mod"
+    echo "module wire" > "$root/agent-shim/wire/go.mod"
+    echo "module proto" > "$root/proto/gen/go/go.mod"
 
     # node_modules present so the stubs are never asked to `npm install`.
     mkdir -p "$root/agent-shim/claude/shim/node_modules" \
@@ -53,11 +65,16 @@ make_fresh_artifacts() {
     echo built > "$root/agent-shim/claude/shim/dist/main.js"
     echo built > "$root/webapp/dist/index.html"
     echo built > "$root/daemon/bin/claude-repld"
+    mkdir -p "$root/home/.cache/agent-repl/bin"
+    echo built > "$root/home/.cache/agent-repl/bin/shim-store"
+    echo built > "$root/home/.cache/agent-repl/bin/shim-claude-sidecar"
     # Bump artifact mtimes strictly past the sources.
     sleep 1
     touch "$root/agent-shim/claude/shim/dist/main.js" \
           "$root/webapp/dist/index.html" \
-          "$root/daemon/bin/claude-repld"
+          "$root/daemon/bin/claude-repld" \
+          "$root/home/.cache/agent-repl/bin/shim-store" \
+          "$root/home/.cache/agent-repl/bin/shim-claude-sidecar"
 }
 
 # PATH stubs for npm/go that log to $STUB_LOG and touch their artifact.
@@ -106,6 +123,7 @@ run_script() {
         AGENT_REPL_NODE_STORE="${STORE:-$root/store}" \
         AGENT_REPL_WORKTREE_ROOTS="${WORKTREE_ROOTS:-}" \
         AGENT_REPL_NODE_STORE_GRACE_MINS="${GRACE_MINS:-60}" \
+        HOME="$root/home" \
         PATH="$root/stubs:$PATH" \
         bash "$root/bin/build-frontend.sh" "$@"
 }
@@ -530,10 +548,53 @@ t_stale_empty_source_set() {
     rm -rf "$root"
 }
 
+t_services_fresh_then_shared_dependency_stales_both() {
+    local root; root="$(mktemp -d)"
+    make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
+    : > "$root/stub.log"
+    run_script "$root" store sidecar >/dev/null
+    if [ -s "$root/stub.log" ]; then
+        fail "services: fresh installed binaries skip go build" \
+             "stub.log: $(cat "$root/stub.log")"
+        rm -rf "$root"
+        return
+    fi
+    sleep 1
+    touch "$root/agent-shim/wire/wire.go"
+    run_script "$root" store sidecar >/dev/null
+    if [ "$(grep -c '^go build' "$root/stub.log")" -eq 2 ]; then
+        pass "services: shared wire edit rebuilds store and sidecar"
+    else
+        fail "services: shared wire edit rebuilds both" \
+             "stub.log: $(cat "$root/stub.log")"
+    fi
+    rm -rf "$root"
+}
+
+t_services_missing_shared_source_fails_loudly() {
+    local root rc; root="$(mktemp -d)"
+    make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
+    rm -rf "$root/agent-shim/wire"
+    set +e
+    run_script "$root" store >"$root/out" 2>"$root/err"
+    rc=$?
+    set -e
+    if [ "$rc" -ne 0 ] \
+       && grep -q "required service source directory missing" "$root/err"; then
+        pass "services: missing shared source directory fails loudly"
+    else
+        fail "services: missing shared source directory fails loudly" \
+             "rc=$rc stderr: $(cat "$root/err")"
+    fi
+    rm -rf "$root"
+}
+
 t_gc_not_run_when_nothing_minted
 t_stale_source_with_space_in_name
 t_stale_source_with_glob_chars
 t_stale_empty_source_set
+t_services_fresh_then_shared_dependency_stales_both
+t_services_missing_shared_source_fails_loudly
 
 echo "-----"
 echo "passed: $PASS  failed: $FAIL"
