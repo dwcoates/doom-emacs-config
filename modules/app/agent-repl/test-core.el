@@ -992,6 +992,30 @@ post-mortem breadcrumb."
       (should (string-match-p "git" logged))
       (should (string-match-p "fetch" logged)))))
 
+;;;; ---- Tests: async-gh terminal outcomes ----
+
+(ert-deftest agent-repl-test-async-gh-calls-callback-after-abnormal-exit ()
+  "An abnormal gh exit is a completed command, not a silently dropped callback."
+  (let ((buf nil)
+        (callback-result nil)
+        (agent-repl-log-to-file nil))
+    (unwind-protect
+        (progn
+          (setq buf (generate-new-buffer " *agent-repl-test-async-gh*"))
+          (cl-letf (((symbol-function 'process-live-p) (lambda (_proc) nil))
+                  ((symbol-function 'process-buffer) (lambda (_proc) buf))
+                  ((symbol-function 'process-exit-status) (lambda (_proc) 1))
+                  ((symbol-function 'agent-repl--kill-buffer-safely)
+                   (lambda (buffer) (kill-buffer buffer))))
+            (with-current-buffer buf (insert "network unavailable"))
+            (agent-repl--async-gh-handle-completion
+             "failed-pr-poll"
+             (lambda (ok output) (setq callback-result (list ok output)))
+             'fake-gh-process "exited abnormally with code 1\n"))
+          (should (equal callback-result '(nil "network unavailable"))))
+      (when (buffer-live-p buf)
+        (kill-buffer buf)))))
+
 (ert-deftest agent-repl-test-capture-process-output-uses-make-process-when-suppress-stderr ()
   "When SUPPRESS-STDERR is non-nil, `--capture-process-output' uses
 `make-process' with `:stderr' set to a separate buffer so stderr is

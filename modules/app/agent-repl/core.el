@@ -231,10 +231,19 @@ empty string when neither env var is set or non-empty.  This mirrors how
 the workspace-dispatch run.sh derives the branch prefix solely from the
 same env vars, so the Emacs process must be launched with one of them
 set to obtain a prefix."
-  (let ((new (getenv "AGENT_WORKSPACE_PREFIX")))
+  (let ((new (getenv "AGENT_WORKSPACE_PREFIX"))
+        (legacy (getenv "CLAUDE_WORKSPACE_PREFIX")))
     (if (and new (not (string-empty-p new)))
-        new
-      (or (getenv "CLAUDE_WORKSPACE_PREFIX") ""))))
+        (progn
+          (agent-repl--log nil
+                            "workspace-prefix: source=AGENT_WORKSPACE_PREFIX value=%S"
+                            new)
+          new)
+      (let ((result (or legacy "")))
+        (agent-repl--log nil
+                          "workspace-prefix: source=CLAUDE_WORKSPACE_PREFIX value=%S"
+                          result)
+        result))))
 
 (defun agent-repl--workspace-prefix-slash ()
   "Return the workspace-name prefix in `<prefix>/' form, or \"\" when unset.
@@ -762,6 +771,10 @@ explode."
                        :buffer stdout-buf
                        :connection-type 'pipe
                        :noquery t))))
+          (agent-repl--log-verbose
+           nil
+           "capture-process-output: spawned program=%s args=%S suppress-stderr=%s timeout=%s"
+           program args suppress-stderr timeout)
           (set-process-query-on-exit-flag proc nil)
           ;; Install a no-op sentinel BEFORE waiting.  Left alone, the
           ;; process keeps Emacs's `internal-default-process-sentinel',
@@ -789,9 +802,14 @@ explode."
               "")
              (t
               (with-current-buffer stdout-buf
-                (string-trim
-                 (buffer-substring-no-properties
-                  (point-min) (point-max))))))))
+                (let ((output (string-trim
+                               (buffer-substring-no-properties
+                                (point-min) (point-max)))))
+                  (agent-repl--log-verbose
+                   nil
+                   "capture-process-output: completed program=%s args=%S status=%S output-length=%d"
+                   program args status (length output))
+                  output))))))
       ;; Buffer cleanup MUST be thread-safe: on the timeout path the
       ;; child can still be alive (its `delete-process' was deferred to
       ;; the main thread by `agent-repl--kill-process-safely'), and a
@@ -857,20 +875,44 @@ gh (see AGENTS.md \"No External Processes or External State in Tests\")."
                       (format "agent-repl-%s" label)
                       buf
                       "gh" args)))
+    (agent-repl--log nil
+                      "async-gh: spawned label=%s dir=%s args=%S"
+                      label default-directory args)
     (set-process-query-on-exit-flag proc nil)
     (set-process-sentinel
      proc
      (lambda (p event)
-       (when (string-prefix-p "finished" event)
-         (let ((output (when (buffer-live-p (process-buffer p))
-                         (with-current-buffer (process-buffer p)
-                           (buffer-substring-no-properties
-                            (point-min) (point-max))))))
-           (when (buffer-live-p (process-buffer p))
-             (if (fboundp 'agent-repl--kill-buffer-safely)
-                 (agent-repl--kill-buffer-safely (process-buffer p))
-               (kill-buffer (process-buffer p))))
-           (funcall callback (zerop (process-exit-status p)) (or output ""))))))))
+       (agent-repl--async-gh-handle-completion label callback p event)))))
+
+(defun agent-repl--async-gh-handle-completion (label callback process event)
+  "Handle one async-gh PROCESS sentinel EVENT for LABEL and CALLBACK.
+Only terminal events invoke CALLBACK.  Both successful and abnormal exits are
+terminal: callers must receive `ok=nil' for a failed `gh' command rather than
+silently waiting forever.  This helper owns the completion branch separately
+from the external spawn boundary, so its pure Elisp behavior is directly
+testable with process fixtures."
+  (if (process-live-p process)
+      (agent-repl--log-verbose nil
+                                "async-gh: nonterminal-sentinel label=%s event=%S"
+                                label event)
+    (let* ((buffer (process-buffer process))
+           (output (when (buffer-live-p buffer)
+                     (with-current-buffer buffer
+                       (buffer-substring-no-properties
+                        (point-min) (point-max)))))
+           (status (process-exit-status process))
+           (ok (zerop status))
+           (safe-output (or output "")))
+      (when (buffer-live-p buffer)
+        ;; Sentinels may be serviced while a worker is waiting on the same
+        ;; command, so teardown must retain worktree.el's thread-safe path.
+        ;; `async-gh' can only run after the full module load, whose order
+        ;; defines `agent-repl--kill-buffer-safely' before a caller can spawn.
+        (agent-repl--kill-buffer-safely buffer))
+      (agent-repl--log nil
+                        "async-gh: completed label=%s status=%s ok=%s event=%S output-length=%d"
+                        label status ok event (length safe-output))
+      (funcall callback ok safe-output))))
 
 (defun agent-repl--signal-process (pid sig)
   "Send signal SIG to process PID (an external-state mutation).
@@ -987,21 +1029,33 @@ the resolved directory is not inside a git repository.
 Intended to be called exactly once per workspace, at creation time, so
 new worktrees are always rooted at the repository the user is currently
 working in (rather than wherever Emacs happened to be launched)."
-  (let* ((ws-dir (ignore-errors (agent-repl--ws-dir (agent-repl--ws-current-name))))
+  (let* ((ws (agent-repl--ws-current-name))
+         (ws-dir (ignore-errors (agent-repl--ws-dir ws)))
          (dir (or ws-dir default-directory))
          (default-directory dir)
          (raw (agent-repl--git-string-quiet "rev-parse" "--show-toplevel")))
+    (agent-repl--log ws
+                      "resolve-current-git-root: ws-dir=%S default-directory=%S resolved-dir=%S raw=%S"
+                      ws-dir default-directory dir raw)
     (when (string-empty-p raw)
+      (agent-repl--log ws
+                        "resolve-current-git-root: FAILED ws-dir=%S resolved-dir=%S reason=not-a-git-repository"
+                        ws-dir dir)
       (user-error "agent-repl: %s is not inside a git repository" dir))
-    (file-name-as-directory raw)))
+    (let ((root (file-name-as-directory raw)))
+      (agent-repl--log ws "resolve-current-git-root: SUCCESS root=%S" root)
+      root)))
 
 (defun agent-repl-print-git-branch ()
   "Print the git branch that was active when agent-repl config was loaded.
 Lazily computes and caches the value on first invocation."
   (interactive)
-  (unless agent-repl-git-branch
-    (setq agent-repl-git-branch
-          (agent-repl--git-string-quiet "rev-parse" "--abbrev-ref" "HEAD")))
+  (let ((cache-hit (not (null agent-repl-git-branch))))
+    (unless agent-repl-git-branch
+      (setq agent-repl-git-branch
+            (agent-repl--git-string-quiet "rev-parse" "--abbrev-ref" "HEAD")))
+    (agent-repl--log nil "print-git-branch: cache-hit=%s branch=%S"
+                      cache-hit agent-repl-git-branch))
   (message "agent-repl loaded on branch: %s" agent-repl-git-branch))
 
 (defun agent-repl--path-canonical (path)
@@ -1047,10 +1101,13 @@ missing — both must be initialized by `agent-repl--initialize-ws-env'
 before this is called."
   (let ((env (agent-repl--ws-get ws :active-env)))
     (unless env
+      (agent-repl--log ws "active-inst: FAILED env=nil reason=missing-active-env")
       (error "agent-repl--active-inst: workspace %s has no :active-env (initialize-ws-env not called?)" ws))
     (let ((inst (agent-repl--ws-get ws env)))
       (unless inst
+        (agent-repl--log ws "active-inst: FAILED env=%S reason=missing-instantiation" env)
         (error "agent-repl--active-inst: no instantiation struct for ws=%s env=%s (initialize-ws-env not called?)" ws env))
+      (agent-repl--log-verbose ws "active-inst: SUCCESS env=%S inst=%S" env inst)
       inst)))
 
 (declare-function agent-repl-instantiation-session-id "workspace")
@@ -1063,9 +1120,14 @@ session uuid the gui frontend uses as its resume currency, via POST
 returns nil instead of signaling when WS has no `:active-env' or no
 instantiation struct yet — a workspace that never booted a session
 legitimately has no durable id."
-  (when-let* ((env (agent-repl--ws-get ws :active-env))
-              (inst (agent-repl--ws-get ws env)))
-    (agent-repl-instantiation-session-id inst)))
+  (let* ((env (agent-repl--ws-get ws :active-env))
+         (inst (and env (agent-repl--ws-get ws env)))
+         (session-id (and inst (agent-repl-instantiation-session-id inst))))
+    (agent-repl--log-verbose
+     ws
+     "ws-durable-claude-session-id: env=%S inst-present=%s session-id-present=%s"
+     env (not (null inst)) (not (null session-id)))
+    session-id))
 
 (defvar-local agent-repl--owning-workspace nil
   "Workspace name that owns this agent session.
@@ -1137,6 +1199,9 @@ to delete the input panel as orphaned."
   (let* ((ws-name (or ws (agent-repl--ws-current-name)))
          (safe (agent-repl--sanitize-ws-name ws-name)))
     (when (or (null safe) (string-empty-p safe))
+      (agent-repl--log ws-name
+                        "buffer-name: FAILED suffix=%S ws=%S sanitized=%S reason=empty-workspace-name"
+                        suffix ws-name safe)
       (error "agent-repl--buffer-name: empty workspace name (ws=%S, +workspace-current-name=%S, sanitized=%S)"
              ws (agent-repl--ws-current-name) safe))
     (let ((name (format agent-repl-panel-buffer-name-format (or suffix "") safe)))
@@ -1159,7 +1224,11 @@ registers the buffer with WS's perspective so it appears in
 Idempotent — `get-buffer-create' returns an existing buffer of the
 same name, and `persp-add-buffer' internally no-ops when the buffer is
 already in the perspective.  Skips persp attachment when WS is nil or
-no perspective named WS exists (e.g. early in session startup)."
+no perspective named WS exists (e.g. early in session startup).
+
+Do not instrument this helper through the logging ladder: the workspace
+log sink calls it while servicing every workspace-scoped log line, so a
+log here would recursively create and append log lines."
   (let ((buf (get-buffer-create (agent-repl--buffer-name suffix ws))))
     (with-current-buffer buf
       (setq-local agent-repl--owning-workspace ws))
