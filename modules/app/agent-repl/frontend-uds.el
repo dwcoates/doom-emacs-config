@@ -267,14 +267,21 @@ did."
                           (error-message-string err))
          nil))))
 
-(cl-defun agent-repl-uds-connect (&optional path)
+(cl-defun agent-repl-uds-connect (&optional path readiness-p)
   "Establish (or re-establish) the frontend UDS connection.
 PATH defaults to `agent-repl-uds-socket-path'.  On success the daemon
 pushes a `StateSnapshot' first, then deltas (design §5.4) — this client
-does not poll.  On dial failure the error is loud-logged and a reconnect
-is scheduled (design §4.4 honest downtime); the connection is left nil
-and the display goes stale until the daemon is reachable.  Returns the
-process on success, nil on a failed dial."
+does not poll.
+
+On an ordinary dial failure the error is loud-logged and surfaced, and a
+reconnect is scheduled (design §4.4 honest downtime); the connection is
+left nil and the display goes stale until the daemon is reachable.
+
+When READINESS-P is non-nil, the synchronous
+`agent-repl--frontend-wait-ready' loop owns retry pacing and the final
+hard error.  A refused cold-start dial is still fully logged, but it
+neither raises a premature outage alarm nor arms a competing timer.
+Returns the process on success, nil on a failed dial."
   (interactive)
   (when (agent-repl--uds-connected-p)
     (agent-repl--log nil "uds-connect: already connected (proc=%s) — no-op"
@@ -295,19 +302,25 @@ process on success, nil on a failed dial."
       (error
        (setq agent-repl--uds-process nil)
        (agent-repl--log nil
-                        "uds-connect: FAILED dialing %s: %S — scheduling reconnect in %ss"
-                        sock err agent-repl-uds-reconnect-delay)
-       ;; Emacs's OWN classification (F4). The daemon definitionally cannot
-       ;; report that Emacs could not reach it, so this is one of the very
-       ;; few facts this end classifies for itself — and it carries the
-       ;; reserved `client.' prefix that says so.
-       (agent-repl-failure-surface
-        nil
-        (agent-repl-failure-local
-         "client.daemon_unreachable"
-         "the agent-repl daemon is unreachable; reconnecting"
-         (format "socket=%s %s" sock (error-message-string err))))
-       (agent-repl--uds-schedule-reconnect)
+                        (concat "uds-connect: FAILED dialing %s: %S "
+                                "readiness=%s action=%s")
+                        sock err readiness-p
+                        (if readiness-p
+                            "readiness-loop-retains-control"
+                          (format "surface-and-reconnect-in-%ss"
+                                  agent-repl-uds-reconnect-delay)))
+       (unless readiness-p
+         ;; Emacs's OWN classification (F4). The daemon definitionally
+         ;; cannot report that Emacs could not reach it, so this is one of
+         ;; the very few facts this end classifies for itself — and it
+         ;; carries the reserved `client.' prefix that says so.
+         (agent-repl-failure-surface
+          nil
+          (agent-repl-failure-local
+           "client.daemon_unreachable"
+           "the agent-repl daemon is unreachable; reconnecting"
+           (format "socket=%s %s" sock (error-message-string err))))
+         (agent-repl--uds-schedule-reconnect))
        nil))))
 
 (defun agent-repl-uds-disconnect ()

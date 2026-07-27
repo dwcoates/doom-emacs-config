@@ -26,9 +26,12 @@
 (load (expand-file-name "frontend-uds.el" (file-name-directory
                                             (or load-file-name buffer-file-name)))
       nil t)
-(load (expand-file-name "frontend-state.el" (file-name-directory
-                                             (or load-file-name buffer-file-name)))
-      nil t)
+(defconst agent-repl-test--frontend-state-file
+  (expand-file-name "frontend-state.el"
+                    (file-name-directory
+                     (or load-file-name buffer-file-name)))
+  "Absolute frontend-state module path captured while this test file loads.")
+(load agent-repl-test--frontend-state-file nil t)
 
 (require 'cl-lib)
 
@@ -562,6 +565,17 @@ daemon no longer knows."
        (should (string-match-p "some ancient reason" echoed))))))
 
 ;;;; ---- Handler registration wiring -------------------------------------
+
+(ert-deftest agent-repl-test-state-load-does-not-dial-before-lazy-daemon ()
+  "Loading state handlers does not race the lazy daemon's startup owner."
+  ;; Arrange
+  (let ((dials 0))
+    (cl-letf (((symbol-function 'agent-repl-uds-connect)
+               (lambda (&rest _) (cl-incf dials))))
+      ;; Act
+      (load agent-repl-test--frontend-state-file nil t))
+    ;; Assert
+    (should (= dials 0))))
 
 (ert-deftest agent-repl-test-state-registers-workspace-state-handler ()
   "Loading frontend-state.el registers the workspaceState handler."
