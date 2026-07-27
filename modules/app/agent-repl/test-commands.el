@@ -3258,39 +3258,46 @@ jump path on purpose."
 
 ;;;; ---- Tests: snapshot startup/quit wrappers ----
 
-(ert-deftest agent-repl-cmd-test-load-snapshot-on-startup/no-op-when-file-absent ()
-  "Startup wrapper returns quietly when the snapshot file does not exist."
+(ert-deftest agent-repl-cmd-test-load-snapshot-on-startup/schedules-bounce-when-file-absent ()
+  "No snapshot still schedules the required full-runtime startup bounce."
   (agent-repl-test--with-clean-state
     (let ((agent-repl-workspace-snapshot-file "/nonexistent/agent-snap.el")
-          (called nil))
+          loaded scheduled)
       (cl-letf (((symbol-function 'agent-repl-load-workspace-snapshot)
-                 (lambda () (setq called t))))
+                 (lambda (&rest _) (setq loaded t)))
+                ((symbol-function 'agent-repl--schedule-runtime-startup-bounce)
+                 (lambda () (setq scheduled t))))
         (agent-repl--load-workspace-snapshot-on-startup)
-        (should-not called)))))
+        (should-not loaded)
+        (should scheduled)))))
 
 (ert-deftest agent-repl-cmd-test-load-snapshot-on-startup/invokes-load-when-file-present ()
-  "Startup wrapper calls the real loader when the snapshot file exists."
+  "Startup wrapper marks the real snapshot load as startup-owned."
   (agent-repl-test--with-clean-state
     (let ((snapshot-file (make-temp-file "agent-snap-"))
-          (called nil))
+          captured)
       (unwind-protect
           (let ((agent-repl-workspace-snapshot-file snapshot-file))
             (cl-letf (((symbol-function 'agent-repl-load-workspace-snapshot)
-                       (lambda () (setq called t))))
+                       (lambda (&optional file startup)
+                         (setq captured (list file startup)))))
               (agent-repl--load-workspace-snapshot-on-startup)
-              (should called)))
+              (should (equal captured '(nil t)))))
         (delete-file snapshot-file)))))
 
 (ert-deftest agent-repl-cmd-test-load-snapshot-on-startup/swallows-errors ()
-  "Startup wrapper must not propagate errors from the loader."
+  "A load error is logged and still schedules the required runtime bounce."
   (agent-repl-test--with-clean-state
-    (let ((snapshot-file (make-temp-file "agent-snap-")))
+    (let ((snapshot-file (make-temp-file "agent-snap-"))
+          scheduled)
       (unwind-protect
           (let ((agent-repl-workspace-snapshot-file snapshot-file))
             (cl-letf (((symbol-function 'agent-repl-load-workspace-snapshot)
-                       (lambda () (error "boom"))))
+                       (lambda (&rest _) (error "boom")))
+                      ((symbol-function 'agent-repl--schedule-runtime-startup-bounce)
+                       (lambda () (setq scheduled t))))
               (agent-repl--load-workspace-snapshot-on-startup)
-              (should t)))
+              (should scheduled)))
         (delete-file snapshot-file)))))
 
 ;;;; ---- Tests: workspace snapshot path resolver ----

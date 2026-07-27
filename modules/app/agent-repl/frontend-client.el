@@ -60,6 +60,7 @@
 (declare-function agent-repl-uds-connect "frontend-uds" (&optional path readiness-p))
 (declare-function agent-repl--frontend-session-view "frontend-state" (session-id))
 (declare-function agent-repl--frontend-session-views-all "frontend-state" ())
+(declare-function agent-repl--frontend-workspace-state-views-all "frontend-state" ())
 (declare-function agent-repl--frontend-live-session-id-for-cwd "frontend-state" (cwd))
 (declare-function agent-repl--frontend-daemon-view "frontend-state" ())
 (declare-function agent-repl--ws-dir "agent-repl-status" (ws))
@@ -468,6 +469,21 @@ GET /sessions sweep spelled out."
       (let ((sid (agent-repl--ws-get ws :frontend-session-id)))
         (when (and sid
                    (agent-repl--frontend-ws-turn-active-p ws)
+                   (agent-repl--frontend-session-live-p sid))
+          (push sid busy))))))
+
+(defun agent-repl--frontend-all-turn-active-session-ids ()
+  "Return every live session id whose latest daemon state is turn-active.
+Unlike `agent-repl--frontend-turn-active-sessions', this startup-safety
+probe includes workspace paths Emacs has not restored yet.  A normal Emacs
+restart must never kill a turn merely because the perspective-to-path
+mapping has not been reconstructed.  Terminal sessions remain excluded."
+  (let (busy)
+    (dolist (state (agent-repl--frontend-workspace-state-views-all)
+                   (delete-dups (nreverse busy)))
+      (let ((sid (plist-get state :sessionId)))
+        (when (and sid
+                   (eq (plist-get state :turnActive) t)
                    (agent-repl--frontend-session-live-p sid))
           (push sid busy))))))
 
