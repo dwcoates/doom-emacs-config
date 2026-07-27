@@ -114,7 +114,12 @@ unconditionally via `agent-repl--do-log' so a failed desktop notification
 is never silently swallowed.  The sentinel never signals — it runs from
 Emacs's process machinery, where a hard error would simply be dropped."
   (lambda (proc event)
-    (when (memq (process-status proc) '(exit signal))
+    (let ((process-state (process-status proc)))
+      (if (not (memq process-state '(exit signal)))
+          ;; Process sentinels can receive repeated running-state events.
+          (agent-repl--log-verbose
+           ws "notify-sentinel backend=%s ignored state=%s event=%s"
+           backend process-state (string-trim (or event "")))
       (let ((status (process-exit-status proc))
             (output (and (buffer-live-p buffer)
                          (with-current-buffer buffer
@@ -136,7 +141,7 @@ Emacs's process machinery, where a hard error would simply be dropped."
            ws "notify-backend=%s FAILED status=%s event=%s output=%s"
            (list backend status (string-trim (or event "")) (or output ""))))
         (when (buffer-live-p buffer)
-          (kill-buffer buffer))))))
+          (kill-buffer buffer)))))))
 
 (defun agent-repl--notify-kill-hung (proc ws backend)
   "Kill notification process PROC when it has outlived its timeout.
@@ -148,11 +153,15 @@ deleted.
 Deleting PROC runs `agent-repl--notify-process-sentinel', which reports the
 signal termination and kills the capture buffer, so no orphan process or
 buffer survives the hang.  No-op when PROC already terminated."
-  (when (and (processp proc) (process-live-p proc))
-    (agent-repl--do-log
-     ws "notify-backend=%s HUNG timeout=%ss killing (no notification delivered)"
-     (list backend agent-repl-notify-timeout-seconds))
-    (delete-process proc)))
+  (if (and (processp proc) (process-live-p proc))
+      (progn
+        (agent-repl--do-log
+         ws "notify-backend=%s HUNG timeout=%ss killing (no notification delivered)"
+         (list backend agent-repl-notify-timeout-seconds))
+        (delete-process proc))
+    (agent-repl--log-verbose
+     ws "notify-backend=%s watchdog ignored process=%s live=%s"
+     backend proc (and (processp proc) (process-live-p proc)))))
 
 (defun agent-repl--notify-spawn (ws backend program args &optional watchdog-seconds on-activate)
   "Spawn PROGRAM with ARGS for a desktop notification, surfacing failures.
@@ -184,18 +193,25 @@ cleaned up immediately so no orphan buffer leaks."
   (let* ((buffer (generate-new-buffer
                   (format " *%s-output*" agent-repl-notify-process-name)))
          (timer-cell (list nil))
-         (proc (apply #'start-process agent-repl-notify-process-name
-                      buffer program args)))
+         (effective-watchdog (or watchdog-seconds agent-repl-notify-timeout-seconds)))
+    (agent-repl--log
+     ws "notify-spawn backend=%s program=%s args=%S watchdog=%s activate=%s"
+     backend program args effective-watchdog (not (null on-activate)))
+    (let ((proc (apply #'start-process agent-repl-notify-process-name
+                       buffer program args)))
     (if (processp proc)
         (progn
           (set-process-sentinel
            proc (agent-repl--notify-process-sentinel ws backend buffer timer-cell on-activate))
           (setcar timer-cell
-                  (run-at-time (or watchdog-seconds agent-repl-notify-timeout-seconds) nil
+                  (run-at-time effective-watchdog nil
                                #'agent-repl--notify-kill-hung proc ws backend)))
       (when (buffer-live-p buffer)
-        (kill-buffer buffer)))
-    proc))
+        (kill-buffer buffer))
+      (agent-repl--do-log
+       ws "notify-spawn backend=%s FAILED non-process-result=%S program=%s args=%S"
+       (list backend proc program args)))
+      proc)))
 
 ;; Clickable notifications
 ;;
@@ -217,14 +233,17 @@ cleaned up immediately so no orphan buffer leaks."
 ;; emacsclient call to reach us a live Emacs server must exist, so
 ;; `agent-repl--ensure-server' starts one lazily.
 
-(defun agent-repl--ensure-server ()
+(defun agent-repl--ensure-server (&optional ws)
   "Ensure the Emacs server is running so notification clicks reach Emacs.
 Clickable notifications invoke emacsclient, which needs a live server to
 evaluate the click action.  No-op under `noninteractive' (batch/ERT),
 where no server is useful and starting one would be a side effect."
-  (unless noninteractive
+  (if noninteractive
+      (agent-repl--log-verbose ws "ensure-server skipped noninteractive=t")
     (require 'server)
-    (unless (server-running-p)
+    (if (server-running-p)
+        (agent-repl--log ws "ensure-server running=t")
+      (agent-repl--log ws "ensure-server running=nil starting=t")
       (server-start))))
 
 (defun agent-repl--notification-activate (ws)
@@ -235,9 +254,11 @@ focuses the selected frame so clicking the banner brings Emacs forward.
 Guards against a nil/empty WS so a workspace-free notification click still
 focuses Emacs without attempting a bogus jump."
   (agent-repl--log ws "notification-activate ws=%s" ws)
-  (when (and ws (stringp ws) (not (string-empty-p ws)))
+  (let ((navigable (and ws (stringp ws) (not (string-empty-p ws)))))
+    (agent-repl--log ws "notification-activate navigable=%s" navigable)
+    (when navigable
     (agent-repl-jump-to-workspace ws))
-  (select-frame-set-input-focus (selected-frame)))
+    (select-frame-set-input-focus (selected-frame))))
 
 (defun agent-repl--notification-click-command (ws)
   "Return a shell command string focusing Emacs and switching to WS, or nil.
@@ -248,11 +269,17 @@ workspace-free notification stays non-clickable rather than emitting a
 malformed action.  Both the executable path and the eval form are
 `shell-quote-argument'-escaped so paths with spaces and quotes/parens in
 WS survive the shell terminal-notifier spawns the command under."
-  (when (and ws (stringp ws) (not (string-empty-p ws)))
-    (format "%s --eval %s"
-            (shell-quote-argument agent-repl-emacsclient-executable)
-            (shell-quote-argument
-             (format "(agent-repl--notification-activate %S)" ws)))))
+  (if (and ws (stringp ws) (not (string-empty-p ws)))
+      (let ((command
+             (format "%s --eval %s"
+                     (shell-quote-argument agent-repl-emacsclient-executable)
+                     (shell-quote-argument
+                      (format "(agent-repl--notification-activate %S)" ws)))))
+        (agent-repl--log ws "notification-click-command clickable=t executable=%s command=%s"
+                         agent-repl-emacsclient-executable command)
+        command)
+    (agent-repl--log-verbose ws "notification-click-command clickable=nil ws=%S" ws)
+    nil))
 
 (defun agent-repl--notify-backend-terminal-notifier (ws title message)
   "Send a desktop notification via terminal-notifier for WS.
@@ -264,8 +291,10 @@ the click can reach us.  A -sound argument preserves the audible cue that
 the osascript backend plays.  The command's exit status is captured and
 surfaced to the log via `agent-repl--notify-spawn'."
   (let ((click (agent-repl--notification-click-command ws)))
+    (agent-repl--log ws "notify-terminal-notifier clickable=%s title=%s message=%s"
+                     (not (null click)) title message)
     (when click
-      (agent-repl--ensure-server))
+      (agent-repl--ensure-server ws))
     (agent-repl--notify-spawn
      ws 'terminal-notifier agent-repl-terminal-notifier-executable
      (append (list "-title" title
@@ -279,21 +308,25 @@ TITLE and MESSAGE are the notification fields.  The command's exit status
 is captured and surfaced to the log via `agent-repl--notify-spawn', so an
 osascript invocation that exits non-zero (or whose notification the OS
 suppresses with a diagnostic) is logged instead of swallowed."
+  (agent-repl--log ws "notify-osascript title=%s message=%s" title message)
   (agent-repl--notify-spawn
-   ws 'osascript agent-repl-osascript-executable
+   ws
+   'osascript agent-repl-osascript-executable
    (list "-e" (format "display notification %S with title %S sound name %S"
                       message title agent-repl-notification-sound))))
 
-(defun agent-repl--alerter-click-p (output)
+(defun agent-repl--alerter-click-p (output &optional ws)
   "Return non-nil when alerter OUTPUT reports the banner was clicked.
 alerter prints an @-prefixed activation token on exit: `@CONTENTCLICKED'
 when the notification body is clicked and `@ACTIONCLICKED' for an action
 button, versus `@TIMEOUT'/`@CLOSED' for a self-dismiss or dismissal.  Only
 a click should focus Emacs and switch workspaces, so a dismissal returns
 nil and leaves Emacs undisturbed."
-  (let ((token (string-trim (or output ""))))
-    (or (string-prefix-p "@CONTENTCLICKED" token)
-        (string-prefix-p "@ACTIONCLICKED" token))))
+  (let* ((token (string-trim (or output "")))
+         (clicked (or (string-prefix-p "@CONTENTCLICKED" token)
+                      (string-prefix-p "@ACTIONCLICKED" token))))
+    (agent-repl--log ws "alerter-activation token=%s clicked=%s" token clicked)
+    clicked))
 
 (defun agent-repl--notify-backend-alerter (ws title message)
   "Send a clickable desktop notification via alerter for WS.
@@ -321,6 +354,8 @@ watchdog is set beyond its self-dismiss timeout so a waiting banner is not
 mistaken for a hang."
   (let* ((timeout agent-repl-notification-click-timeout-seconds)
          (keyed (and ws (stringp ws) (not (string-empty-p ws)))))
+    (agent-repl--log ws "notify-alerter keyed=%s timeout=%s title=%s message=%s"
+                     keyed timeout title message)
     (agent-repl--notify-spawn
      ws 'alerter agent-repl-alerter-executable
      (append (list "--title" title
@@ -331,7 +366,7 @@ mistaken for a hang."
              (when keyed (list "--group" (concat "agent-repl:" ws))))
      (+ timeout agent-repl-notify-timeout-seconds)
      (lambda (output)
-       (when (agent-repl--alerter-click-p output)
+       (when (agent-repl--alerter-click-p output ws)
          (agent-repl--notification-activate ws))))))
 
 (defun agent-repl--select-notification-backend ()
@@ -362,13 +397,16 @@ Signals an error if no supported notification tool is found."
     (agent-repl--log nil "select-notification-backend: backend=terminal-notifier")
     #'agent-repl--notify-backend-terminal-notifier)
    (t
-    (error "agent-repl: no notification backend available (none of alerter, osascript, terminal-notifier found)"))))
+    (agent-repl--error
+     nil "select-notification-backend FAILED alerter=%s osascript=%s terminal-notifier=%s"
+     agent-repl-alerter-executable agent-repl-osascript-executable
+     agent-repl-terminal-notifier-executable))))
 
 (defvar agent-repl--notification-backend (agent-repl--select-notification-backend)
   "Desktop notification backend function, selected at load time
 based on available platform tools.")
 
-(defun agent-repl--emacs-focused-p ()
+(defun agent-repl--emacs-focused-p (&optional ws)
   "Return non-nil when Emacs is the focused desktop application.
 Emacs owns desktop focus when ANY of its live frames holds OS input
 focus, so this scans `frame-focus-state' across every frame rather than
@@ -378,8 +416,15 @@ too, matching the conservative \"suppress when possibly focused\" stance
 the desktop-notification gate relies on (see `agent-repl--notify').
 Returns nil under `noninteractive' (batch/ERT), where no window-system
 frame can hold focus."
-  (and (not noninteractive)
-       (seq-some #'frame-focus-state (frame-list))))
+  (if noninteractive
+      (progn
+        (agent-repl--log-verbose ws "emacs-focused-p noninteractive=t focused=nil")
+        nil)
+    (let* ((frames (frame-list))
+           (focused (seq-some #'frame-focus-state frames)))
+      (agent-repl--log-verbose ws "emacs-focused-p noninteractive=nil frame-count=%s focused=%s"
+                               (length frames) focused)
+      focused)))
 
 (defun agent-repl--notify (ws title message)
   "Send a desktop notification with TITLE and MESSAGE.
@@ -389,7 +434,7 @@ the notification is suppressed when Emacs is the focused desktop
 application (see `agent-repl--emacs-focused-p').  The focus check runs
 here at emit time, so focus regained during `agent-repl-notify-delay'
 between scheduling and firing still suppresses the banner."
-  (if (agent-repl--emacs-focused-p)
+  (if (agent-repl--emacs-focused-p ws)
       (agent-repl--log ws "notify SKIPPED (emacs focused) title=%s msg=%s" title message)
     (agent-repl--log ws "notify title=%s msg=%s" title message)
     (funcall agent-repl--notification-backend ws title message)))
