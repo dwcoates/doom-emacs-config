@@ -546,9 +546,11 @@ match.")
   "PURPLE: blocked on the VENDOR or the ACCOUNT.
 Auth needed, usage limit reached, a persistent 4xx/5xx, or any other
 abnormal turn-CONCLUDING error — a user-set max-turns/max-budget stop, a
-model refusal, an execution error.  Purple means blocked until a human
-or the vendor acts, so an in-flight retry is NOT purple: retrying is the
-agent working, which is red.
+model refusal, an execution error.  Purple is a REPORT of how the last
+turn ended, the counterpart to green's \"it ended normally\", not a gate
+on anything future.  Prompting stays available throughout, and the next
+thing the agent does replaces the purple outright: an in-flight retry is
+red, and a retry that hits the same wall is purple again.
 
 A magenta-leaning purple, deliberately clear of any violet a merge or a
 retry wears: those are the system working, and confusing one with a

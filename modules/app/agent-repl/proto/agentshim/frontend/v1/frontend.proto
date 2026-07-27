@@ -48,9 +48,12 @@ option go_package = "agentrepl/proto/agentshim/frontend/v1;frontendv1";
 //          shim, bring-up, a store outage, a failed backfill, or a webview
 //          that never attested painting the history. Blue is the honest
 //          state whenever green's promise cannot be kept.
-//   PURPLE VENDOR_BLOCKED — blocked on the VENDOR or the ACCOUNT. Auth,
-//          usage limit, persistent 4xx/5xx, or any other abnormal
-//          turn-CONCLUDING error. Only a human or the vendor releases it.
+//   PURPLE VENDOR_BLOCKED — the last turn ended AT THE VENDOR or on the
+//          ACCOUNT. Auth, usage limit, persistent 4xx/5xx, or any other
+//          abnormal turn-CONCLUDING error. It is a REPORT of that
+//          conclusion, the counterpart to green's "ended normally", and
+//          gates nothing: prompting stays available, and the next thing
+//          the agent does replaces it.
 //   RED    THINKING — a turn is in flight.
 //   YELLOW IDLE_ASYNC — no foreground turn, but detached work is live.
 //   GREEN  READY, IDLE, DONE, PERMISSION — the route is proven usable
