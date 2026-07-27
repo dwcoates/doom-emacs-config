@@ -3,8 +3,8 @@
 // THE RULE: the sidecar reads a watched file only while a store connection is
 // established, and the FIRST act of every established connection — boot and
 // reconnect alike, with no distinction between them — is recovering the cursors
-// that store holds. Boot is not a case; boot is simply the first time the link
-// is not up yet.
+// and authoritative open-task set that store holds. Boot is not a case; boot is
+// simply the first time the link is not up yet.
 //
 // WHAT THIS REPLACES. Cursor recovery used to run exactly once, at process
 // boot, and its failure path was a silent cold start: if the store's socket was
@@ -104,26 +104,32 @@ func (s *sidecar) dial() {
 	}
 }
 
-// establish runs the first act of a store connection: dial, recover cursors,
-// and only then start reading. Any failure leaves the link down with nothing
-// read, which is the whole point — a half-established link that could write but
-// had no cursors is exactly the cold start this design removes.
+// establish runs the first act of a store connection: dial, recover cursors and
+// authoritative open tasks, and only then start reading. Any failure leaves the
+// link down with nothing read, which is the whole point — a half-established
+// link that could write but had no recovery state is exactly the cold start this
+// design removes.
 func (s *sidecar) establish() error {
 	if err := s.store.Connect(); err != nil {
 		return err
 	}
-	cs, err := s.store.RecoverCursors("")
+	recovery, err := s.store.Recover("")
 	if err != nil {
 		// Drop the socket: a producer connection with no recovered cursors must
 		// never survive, or a later write would ride a link that skipped
 		// recovery.
 		s.store.Close()
-		return fmt.Errorf("recovering cursors: %w", err)
+		return fmt.Errorf("recovering startup state: %w", err)
 	}
-	s.cursors = indexCursorsByPath(cs)
+	if err := s.tracker.Restore(recovery.OpenTasks); err != nil {
+		s.store.Close()
+		return fmt.Errorf("restoring authoritative open tasks: %w", err)
+	}
+	s.cursors = indexCursorsByPath(recovery.Cursors)
 	s.link = linkUp
 	s.backoff = 0
-	s.log("store link UP: recovered %d cursor(s)", len(s.cursors))
+	s.log("store link UP: recovered %d cursor(s), %d authoritative open task(s)",
+		len(s.cursors), len(recovery.OpenTasks))
 
 	// Reading may begin now, and not one statement earlier.
 	s.rescan()

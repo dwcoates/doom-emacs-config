@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"fmt"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
@@ -290,65 +289,67 @@ func TestResolveMergePhaseSurfaced(t *testing.T) {
 	}
 }
 
-// TestResolveClampsANegativeLiveTaskCount covers the unmatched-end case: a
-// `task_ended` whose `task_started` was never logged drives started-minus-ended
-// below zero. The count is clamped to 0 (a negative live-task count is not a
-// value any consumer can act on) AND reported loudly, naming the workspace and
-// the offending task id — an impossible-state signal, not a silent default.
-func TestResolveClampsANegativeLiveTaskCount(t *testing.T) {
+// TestResolveCountsTheLiveTaskSet covers orphan ends and mixed lifecycle sets.
+// Live means Starts EXCEPT Ends: an end with no observed start is an anomaly to
+// repair at ingestion/open, never a negative contribution to this projection.
+func TestResolveCountsTheLiveTaskSet(t *testing.T) {
 	tests := []struct {
 		name      string
-		ends      []string // task ids ended with no matching start
-		wantInLog []string
+		starts    []string
+		ends      []string
+		wantCount int64
 	}{
 		{
-			name:      "one unmatched end",
+			name:      "one unmatched end contributes nothing",
 			ends:      []string{"ghost-1"},
-			wantInLog: []string{"IMPOSSIBLE", "ws=ws", "ghost-1", "clamping to 0"},
+			wantCount: 0,
 		},
 		{
-			name:      "two unmatched ends name both tasks",
+			name:      "two unmatched ends contribute nothing",
 			ends:      []string{"ghost-1", "ghost-2"},
-			wantInLog: []string{"IMPOSSIBLE", "ws=ws", "ghost-1", "ghost-2"},
+			wantCount: 0,
+		},
+		{
+			name:      "mixed set counts only starts without ends",
+			starts:    []string{"live-1", "done", "live-2"},
+			ends:      []string{"done", "orphan"},
+			wantCount: 2,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Arrange — an idle base plus ends whose starts were never logged.
 			db := newTestDB(t)
 			const ws = "ws"
 			seedSignal(t, db, ws, "sess", sigIdle, causeSessionStarted, 0, 1)
-			for i, id := range tt.ends {
-				seedTaskSignal(t, db, ws, "sess", sigTaskEnded, sigTaskEnded, int64(i+1), int64(i+2), id)
+			at := int64(2)
+			for _, id := range tt.starts {
+				seedTaskSignal(t, db, ws, "sess", sigTaskStarted, sigTaskStarted, at, at, id)
+				at++
+			}
+			for _, id := range tt.ends {
+				seedTaskSignal(t, db, ws, "sess", sigTaskEnded, sigTaskEnded, at, at, id)
+				at++
 			}
 			var logged []string
 			logf := func(format string, args ...any) {
 				logged = append(logged, fmt.Sprintf(format, args...))
 			}
-			// Act
 			got, err := resolve(db, ws, logf)
-			// Assert
 			if err != nil {
 				t.Fatalf("resolve: %v", err)
 			}
-			if got.liveTaskCount != 0 {
-				t.Fatalf("liveTaskCount = %d, want 0 (clamped)", got.liveTaskCount)
+			if got.liveTaskCount != tt.wantCount {
+				t.Fatalf("liveTaskCount = %d, want %d", got.liveTaskCount, tt.wantCount)
 			}
-			if len(logged) != 1 {
-				t.Fatalf("want exactly one impossible-state log line, got %d: %v", len(logged), logged)
-			}
-			for _, want := range tt.wantInLog {
-				if !strings.Contains(logged[0], want) {
-					t.Errorf("log line %q does not name %q", logged[0], want)
-				}
+			if len(logged) != 0 {
+				t.Fatalf("resolve must be a pure projection, got logs: %v", logged)
 			}
 		})
 	}
 }
 
-// TestResolveDoesNotLogWhenTheTaskCountIsSane pins the clamp as an EXCEPTION
-// path: a well-formed start/end pair resolves to 0 without the impossible-state
-// log, so the signal keeps meaning something when it does fire.
+// TestResolveDoesNotLogWhenTheTaskCountIsSane pins resolution as a pure
+// projection. Anomaly reporting belongs to the ingestion/open repair edges.
 func TestResolveDoesNotLogWhenTheTaskCountIsSane(t *testing.T) {
 	// Arrange
 	db := newTestDB(t)

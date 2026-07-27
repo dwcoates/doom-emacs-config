@@ -167,9 +167,9 @@ func (s *sidecar) heartbeat() {
 	}
 }
 
-// bootSweep LOSTs discovered task files whose mtime predates the machine boot.
-// Runs once per process, on the first established connection — the sweep is
-// about MACHINE boot, but its LOST events need a store to land in.
+// bootSweep LOSTs persisted open tasks that predate the machine boot. The
+// tracker's set was restored from authoritative store lifecycle state before
+// this runs; discovered artifacts are deliberately not evidence of liveness.
 func (s *sidecar) bootSweep() {
 	boot := bootTimeMillis()
 	if boot == 0 {
@@ -177,14 +177,6 @@ func (s *sidecar) bootSweep() {
 		return
 	}
 	now := time.Now().UnixMilli()
-	for _, tgt := range s.disc.Scan() {
-		if tgt.TaskID == "" {
-			continue
-		}
-		if fi, err := os.Stat(tgt.Path); err == nil {
-			s.tracker.Open(tgt.TaskID, tgt.Kind, tgt.SessionID, tgt.SpoolDir, fi.ModTime().UnixMilli(), now)
-		}
-	}
 	if ev := s.tracker.BootSweep(boot, now); len(ev) > 0 {
 		s.log("boot sweep: %d pre-boot task(s) → LOST", len(ev))
 		s.emit(ev)
@@ -218,11 +210,6 @@ func (s *sidecar) rescan() {
 			tr.Restore(c)
 		}
 		s.watchers[tgt.Path] = &watched{target: tgt, tailer: tr}
-		if tgt.TaskID != "" {
-			if fi, err := os.Stat(tgt.Path); err == nil {
-				s.tracker.Open(tgt.TaskID, tgt.Kind, tgt.SessionID, tgt.SpoolDir, fi.ModTime().UnixMilli(), time.Now().UnixMilli())
-			}
-		}
 	}
 }
 
