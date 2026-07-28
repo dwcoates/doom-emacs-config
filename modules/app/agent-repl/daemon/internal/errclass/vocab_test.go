@@ -155,6 +155,21 @@ func TestTheDeprecatedStopFailedTakesTheColorItAlwaysMeant(t *testing.T) {
 	}
 }
 
+func TestTheContextCutStatesTakeTheColorThinkingTakes(t *testing.T) {
+	// Arrange: CLEARING and COMPACTING say exactly what THINKING says about
+	// what the user cannot do — the agent is busy, a prompt cannot land. Only
+	// the phase WORD distinguishes them, so a color of their own would invent
+	// a distinction the vocabulary does not have.
+	f := loadFixture(t)
+	want := f.RenderStates["RENDER_STATE_THINKING"]
+	// Act + Assert.
+	for _, name := range []string{"RENDER_STATE_CLEARING", "RENDER_STATE_COMPACTING"} {
+		if got := f.RenderStates[name]; got != want {
+			t.Errorf("%s takes %q but THINKING takes %q", name, got, want)
+		}
+	}
+}
+
 func TestTheInternalClassTakesTheSameColorAsTheStatesItDescribes(t *testing.T) {
 	// Arrange: card color IS state color. An INTERNAL failure resolves the
 	// workspace blue, so its card must be blue — a purple workspace explained
