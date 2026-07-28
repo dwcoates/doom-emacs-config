@@ -18,7 +18,7 @@ import (
 // cases do not depend on a helper another test file owns.
 func floorTestPath(t *testing.T) string {
 	t.Helper()
-	return filepath.Join(t.TempDir(), "sessions.json")
+	return filepath.Join(t.TempDir(), "state.db")
 }
 
 // floorDiscardLogf drops the registry's log lines; these cases assert on state.

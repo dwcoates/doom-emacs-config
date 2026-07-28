@@ -31,7 +31,7 @@ func TestShimUDSArgvAppendsSocketContract(t *testing.T) {
 // openTestRegistry opens a registry on a temp path.
 func openTestRegistry(t *testing.T) *registry.Registry {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "sessions.json")
+	path := filepath.Join(t.TempDir(), "sessions.db")
 	return registry.Open(path, func(string, ...any) {})
 }
 
@@ -39,7 +39,7 @@ func openTestRegistry(t *testing.T) *registry.Registry {
 // written through the adapter survives a registry reopen (daemon restart).
 func TestRegistrySeqStoreRoundTrip(t *testing.T) {
 	// Arrange
-	path := filepath.Join(t.TempDir(), "sessions.json")
+	path := filepath.Join(t.TempDir(), "sessions.db")
 	reg := registry.Open(path, func(string, ...any) {})
 	if err := reg.Put(registry.Record{SessionID: "s1", CWD: "/w"}); err != nil {
 		t.Fatalf("put: %v", err)

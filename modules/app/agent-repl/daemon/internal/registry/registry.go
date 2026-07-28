@@ -4,36 +4,49 @@
 // daemon keep resolving the s_<hex> ids its frontends still hold
 // (rehydrating each into a live --resume session on first access).
 //
-// Durability contract: every mutation writes through under a cross-process
-// lock. Each file is atomic (temp + fsync + rename); the monotonic checkpoint
-// sidecar is written before the session roster, so a crash between them can
-// leave a checkpoint ahead but can never lose replay/backfill progress.
-// Nothing depends on a shutdown hook to flush.
+// Durability contract: session IDENTITY lives in tables beside the
+// session-state manager's log, in the daemon's ONE SQLite store (see
+// internal/statedb). Every mutation is a single transaction that reads the
+// current rows, applies the caller's change, runs checkpoint maintenance and
+// terminal compaction, and rewrites both tables — so a cursor, a replay floor
+// and an identity can never land apart from each other, and a crash mid-write
+// leaves the previous state exactly as it was. Nothing depends on a shutdown
+// hook to flush.
+//
+// This replaces a JSON file plus a checkpoint sidecar, whose crash-safety came
+// from atomic renames and whose "these three fields move together" property
+// came from write-ordering discipline. The one-time import of that file lives
+// in legacy.go; after it, the tables are the sole authority.
 package registry
 
 import (
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"sort"
 	"sync"
-	"syscall"
 	"time"
+
+	"claude-repld/internal/statedb"
+	"claude-repld/internal/stateroot"
 )
 
 const (
-	// fileVersionCheckpointIndex introduced the durable conversation checkpoint
-	// index and bounded terminal-record retention.
-	fileVersionCheckpointIndex = 2
+	// schemaVersion is the registry tables' revision, stamped in
+	// registry_meta. Open refuses a database written by a NEWER schema than
+	// this binary understands (loud, no silent downgrade).
+	schemaVersion = 1
 
 	// TerminalRetention is the maximum number of terminal SessionView records
 	// retained in the registry. Live records are never pruned. Conversation
-	// replay/backfill state survives separately in Checkpoints.
+	// replay/backfill state survives separately in the checkpoint table.
 	TerminalRetention = 128
 )
 
-// Record is one session's durable registry entry.
+// Record is one session's durable registry entry. The json tags are what the
+// legacy import reads; the columns it maps onto are in schema.go.
 type Record struct {
 	// SessionID is the daemon-minted s_<hex> id — the key frontends
 	// hold, and the id under which the session rehydrates.
@@ -100,6 +113,10 @@ type Record struct {
 	// must leave a record of what it was holding rather than lose them
 	// with no trace. Empty for a session with nothing queued, which is
 	// the overwhelmingly common case.
+	//
+	// Stored as a JSON array in one column: it is an opaque held list, never
+	// a thing the registry queries BY, so giving it a table would buy joins
+	// nobody performs.
 	QueuedPrompts []QueuedPrompt `json:"queued_prompts,omitempty"`
 }
 
@@ -137,22 +154,35 @@ type QueuedPrompt struct {
 	QueuedAtMs     int64  `json:"queued_at_ms,omitempty"`
 }
 
-// fileShape is the on-disk JSON document.
-type fileShape struct {
-	Version     int                      `json:"version"`
-	Sessions    []Record                 `json:"sessions"`
-	Checkpoints []ConversationCheckpoint `json:"conversation_checkpoints,omitempty"`
+// Options configure a Registry.
+type Options struct {
+	// DB is an already-open state store, shared with its other owner (the
+	// SSM). Preferred in production: sharing the handle is what makes a
+	// registry write and a state-log write serialize instead of compete.
+	// When set, DBPath is ignored and Close leaves the handle alone.
+	DB *sql.DB
+	// DBPath opens a store this Registry owns. Used when DB is nil.
+	DBPath string
+	// LegacyJSONPath is the pre-SQLite registry file to import ONCE, on the
+	// first open of an empty database. Empty disables the import.
+	LegacyJSONPath string
+	// Logf is the loud failure/anomaly logger. Nil discards.
+	Logf func(string, ...any)
 }
 
-type checkpointFileShape struct {
-	Version     int                      `json:"version"`
-	Checkpoints []ConversationCheckpoint `json:"conversation_checkpoints"`
-}
-
-// Registry is a write-through, crash-safe session record store.
+// Registry is a write-through, crash-safe session record store over the
+// daemon's SQLite state store.
 type Registry struct {
-	path string
-	logf func(string, ...any)
+	db     *sql.DB
+	ownsDB bool
+	logf   func(string, ...any)
+
+	// writeMu serializes this process's transactions. It is deliberately NOT
+	// r.mu: r.mu guards the read cache and is taken by readers (including the
+	// SSM's resolver, mid-event), so holding it while waiting for the store's
+	// single connection would let a registry write and a state-log write
+	// deadlock on each other.
+	writeMu sync.Mutex
 
 	mu          sync.Mutex
 	records     map[string]Record
@@ -161,173 +191,84 @@ type Registry struct {
 	loadErr     error
 }
 
-// DefaultPath returns $AGENT_REPL_STATE_DIR/claude-repld-sessions.json,
-// defaulting the root to ~/.claude-emacs — the same root the sentinel
-// side channel and the hook scripts resolve.
-func DefaultPath() (string, error) {
-	root := os.Getenv("AGENT_REPL_STATE_DIR")
-	if root == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", fmt.Errorf("registry: resolve home dir: %w", err)
-		}
-		root = filepath.Join(home, ".claude-emacs")
+// DefaultDBPath returns the daemon's state store — the SAME database the SSM
+// writes its log to, which is the whole point: identity and state move in one
+// transaction only if they live in one store.
+func DefaultDBPath() (string, error) {
+	path, err := statedb.DefaultPath()
+	if err != nil {
+		return "", fmt.Errorf("registry: %w", err)
+	}
+	return path, nil
+}
+
+// LegacyJSONPath returns $AGENT_REPL_STATE_DIR/claude-repld-sessions.json,
+// the pre-SQLite registry file. It is imported once and then left on disk as
+// inert history; nothing reads it afterwards.
+func LegacyJSONPath() (string, error) {
+	root, err := stateroot.Root()
+	if err != nil {
+		return "", fmt.Errorf("registry: %w", err)
 	}
 	return filepath.Join(root, "claude-repld-sessions.json"), nil
 }
 
-// Open loads the registry at path. A missing file starts empty (first boot).
-// A file that cannot be read or parsed records a sticky load error; Prepare
-// returns it so production startup fails loudly. Corrupt bytes are copied to
-// <path>.corrupt while the original remains in place, preventing a later
-// restart from silently treating the registry as a first boot.
+// Open opens a registry over the state store at path, which this Registry
+// owns. Convenience over OpenWith for tests and one-off tools; production
+// shares the SSM's handle (see OpenWith and Options.DB).
 func Open(path string, logf func(string, ...any)) *Registry {
+	return OpenWith(Options{DBPath: path, Logf: logf})
+}
+
+// OpenWith opens a registry per opts. A store that cannot be opened, migrated,
+// imported or read records a sticky load error: Prepare returns it so
+// production startup fails loudly, and every mutation refuses rather than
+// serving from fabricated empty state.
+func OpenWith(opts Options) *Registry {
+	logf := opts.Logf
+	if logf == nil {
+		logf = func(string, ...any) {}
+	}
 	r := &Registry{
-		path: path, logf: logf,
+		db: opts.DB, logf: logf,
 		records:     map[string]Record{},
 		checkpoints: map[ConversationIdentity]ConversationCheckpoint{},
 		now:         time.Now,
 	}
-	r.records, r.checkpoints, r.loadErr = r.loadStateLocked()
+	if r.db == nil {
+		db, err := statedb.Open(opts.DBPath)
+		if err != nil {
+			r.logf("registry: CORRUPT or unopenable state store at %s — refusing to serve: %v", opts.DBPath, err)
+			r.loadErr = fmt.Errorf("registry: open state store: %w", err)
+			return r
+		}
+		r.db, r.ownsDB = db, true
+	}
+	if err := migrate(r.db); err != nil {
+		r.logf("registry: schema migration FAILED — refusing to serve: %v", err)
+		r.loadErr = err
+		return r
+	}
+	if err := r.importLegacyJSON(opts.LegacyJSONPath); err != nil {
+		r.loadErr = err
+		return r
+	}
+	records, checkpoints, err := loadState(r.db, r.logf)
+	if err != nil {
+		r.loadErr = err
+		return r
+	}
+	r.records, r.checkpoints = records, checkpoints
 	return r
 }
 
-// loadStateLocked reads the on-disk records and both checkpoint copies. A
-// missing sessions file is a first boot. Any malformed/unsupported state
-// returns an error; no partial registry is admitted.
-//
-// Callers hold r.mu (Open is pre-publication, mutate holds it).
-func (r *Registry) loadStateLocked() (map[string]Record, map[ConversationIdentity]ConversationCheckpoint, error) {
-	records := map[string]Record{}
-	checkpoints := map[ConversationIdentity]ConversationCheckpoint{}
-	data, err := os.ReadFile(r.path)
-	if err != nil {
-		if !os.IsNotExist(err) {
-			loadErr := fmt.Errorf("registry: read %s: %w", r.path, err)
-			r.logf("registry: READ FAILED for %s — refusing migration/compaction: %v", r.path, err)
-			return records, checkpoints, loadErr
-		}
-		sidecar, sidecarErr := r.loadCheckpointSidecarLocked()
-		if sidecarErr != nil {
-			return records, checkpoints, sidecarErr
-		}
-		for _, cp := range sidecar {
-			if err := mergeCheckpoint(checkpoints, cp, r.checkpointPath()); err != nil {
-				return records, checkpoints, err
-			}
-		}
-		return records, checkpoints, nil
+// Close releases a store this Registry opened. A shared handle (Options.DB)
+// belongs to its owner and is left open.
+func (r *Registry) Close() error {
+	if !r.ownsDB {
+		return nil
 	}
-	var doc fileShape
-	if err := json.Unmarshal(data, &doc); err != nil {
-		r.logf("registry: CORRUPT file at %s — refusing migration/compaction: %v", r.path, err)
-		corrupt := r.path + ".corrupt"
-		if copyErr := os.WriteFile(corrupt, data, 0o600); copyErr != nil {
-			r.logf("registry: could not preserve corrupt file at %s: %v", corrupt, copyErr)
-		} else {
-			r.logf("registry: corrupt file copied to %s; original retained so every restart still fails loudly", corrupt)
-		}
-		return records, checkpoints, fmt.Errorf("registry: parse %s: %w", r.path, err)
-	}
-	if doc.Version != 1 && doc.Version != fileVersionCheckpointIndex {
-		err := fmt.Errorf("registry: unsupported version %d in %s", doc.Version, r.path)
-		r.logf("registry: UNSUPPORTED version — refusing migration/compaction: %v", err)
-		return records, checkpoints, err
-	}
-	for _, rec := range doc.Sessions {
-		if rec.SessionID == "" {
-			err := fmt.Errorf("registry: record with empty session_id in %s", r.path)
-			r.logf("registry: INVALID record with empty session_id in %s — refusing migration/compaction", r.path)
-			return records, checkpoints, err
-		}
-		records[rec.SessionID] = rec
-	}
-	for _, cp := range doc.Checkpoints {
-		if err := mergeCheckpoint(checkpoints, cp, r.path); err != nil {
-			r.logf("registry: INVALID embedded conversation checkpoint — refusing migration/compaction: %v", err)
-			return records, checkpoints, err
-		}
-	}
-	sidecar, err := r.loadCheckpointSidecarLocked()
-	if err != nil {
-		return records, checkpoints, err
-	}
-	for _, cp := range sidecar {
-		if err := mergeCheckpoint(checkpoints, cp, r.checkpointPath()); err != nil {
-			r.logf("registry: INVALID sidecar conversation checkpoint — refusing migration/compaction: %v", err)
-			return records, checkpoints, err
-		}
-	}
-	return records, checkpoints, nil
-}
-
-func mergeCheckpoint(dst map[ConversationIdentity]ConversationCheckpoint, cp ConversationCheckpoint, source string) error {
-	id := cp.ConversationIdentity
-	if id.CWD == "" || id.ClaudeSessionID == "" {
-		return fmt.Errorf("registry: invalid conversation checkpoint in %s: config_dir=%q cwd=%q claude_session_id=%q",
-			source, id.ConfigDir, id.CWD, id.ClaudeSessionID)
-	}
-	if !validBackfill(cp.BackfillState) {
-		return fmt.Errorf("registry: checkpoint %+v in %s has invalid backfill_state %q",
-			id, source, cp.BackfillState)
-	}
-	if prior, ok := dst[id]; ok {
-		cp.LastSeq = max(cp.LastSeq, prior.LastSeq)
-		cp.NewestClearOrCompactSeq = max(cp.NewestClearOrCompactSeq, prior.NewestClearOrCompactSeq)
-		cp.BackfillState = strongerBackfill(prior.BackfillState, cp.BackfillState)
-	}
-	dst[id] = cp
-	return nil
-}
-
-func (r *Registry) checkpointPath() string { return r.path + ".checkpoints" }
-
-func (r *Registry) loadCheckpointSidecarLocked() ([]ConversationCheckpoint, error) {
-	data, err := os.ReadFile(r.checkpointPath())
-	if os.IsNotExist(err) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("registry: read checkpoint sidecar %s: %w", r.checkpointPath(), err)
-	}
-	var doc checkpointFileShape
-	if err := json.Unmarshal(data, &doc); err != nil {
-		return nil, fmt.Errorf("registry: parse checkpoint sidecar %s: %w", r.checkpointPath(), err)
-	}
-	if doc.Version != 1 {
-		return nil, fmt.Errorf("registry: unsupported checkpoint sidecar version %d in %s",
-			doc.Version, r.checkpointPath())
-	}
-	return doc.Checkpoints, nil
-}
-
-// lockFile takes the exclusive cross-process lock guarding the registry
-// and returns the release func. The lock lives on a SIDE file
-// (<path>.lock), never on the registry itself: saveLocked replaces the
-// registry by rename, so a lock held on that inode would guard a file
-// that no longer exists at the path.
-func (r *Registry) lockFile() (func(), error) {
-	if err := os.MkdirAll(filepath.Dir(r.path), 0o755); err != nil {
-		return nil, fmt.Errorf("registry: mkdir %s: %w", filepath.Dir(r.path), err)
-	}
-	f, err := os.OpenFile(r.path+".lock", os.O_CREATE|os.O_RDWR, 0o600)
-	if err != nil {
-		return nil, fmt.Errorf("registry: open lock file: %w", err)
-	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
-		if cerr := f.Close(); cerr != nil {
-			r.logf("registry: close lock file after failed flock: %v", cerr)
-		}
-		return nil, fmt.Errorf("registry: lock %s: %w", r.path+".lock", err)
-	}
-	return func() {
-		if err := syscall.Flock(int(f.Fd()), syscall.LOCK_UN); err != nil {
-			r.logf("registry: unlock %s: %v", r.path+".lock", err)
-		}
-		if err := f.Close(); err != nil {
-			r.logf("registry: close lock file: %v", err)
-		}
-	}, nil
+	return r.db.Close()
 }
 
 type registryState struct {
@@ -341,42 +282,58 @@ type maintenanceStats struct {
 	terminalPruned     int
 }
 
-// Prepare migrates/repairs the checkpoint index, hydrates retained records,
-// compacts terminal SessionViews, and writes file version 2 atomically.
-// Production calls this before serving; any load, migration, compaction, or
-// save error is returned so startup fails loudly.
+// Prepare repairs the checkpoint index, hydrates retained records, and
+// compacts terminal SessionViews in one transaction. Production calls this
+// before serving; any load, maintenance or write error is returned so startup
+// fails loudly.
 func (r *Registry) Prepare() error {
 	stats, err := r.mutate(func(*registryState) error { return nil })
 	if err != nil {
-		r.logf("registry: prepare FAILED for %s: %v", r.path, err)
+		r.logf("registry: prepare FAILED: %v", err)
 		return err
 	}
-	r.logf("registry: prepared version=%d checkpoints_created=%d records_hydrated=%d terminal_pruned=%d live=%d terminal_retained=%d",
-		fileVersionCheckpointIndex, stats.checkpointsCreated, stats.recordsHydrated,
+	r.logf("registry: prepared schema=%d checkpoints_created=%d records_hydrated=%d terminal_pruned=%d live=%d terminal_retained=%d",
+		schemaVersion, stats.checkpointsCreated, stats.recordsHydrated,
 		stats.terminalPruned, r.liveCount(), r.terminalCount())
 	return nil
 }
 
-// mutate performs one locked read-modify-maintain-write transaction against
-// the file. It intentionally does NOT overlay this process's entire cache:
+// mutate performs one read-modify-maintain-write TRANSACTION against the
+// tables. It intentionally does NOT overlay this process's entire cache:
 // doing that would let a draining daemon resurrect tombstones a replacement
-// daemon already compacted. Only FN's explicit mutation is authoritative.
+// daemon already compacted. Only fn's explicit mutation is authoritative.
+//
+// The transaction is what makes a rotation's "adopt the new uuid AND reset the
+// cursors" one indivisible write: either every row of the new state is visible
+// or none of it is, with no window in which a reader sees the new identity
+// carrying the retired seq space's cursors.
 func (r *Registry) mutate(fn func(*registryState) error) (maintenanceStats, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
 	var zero maintenanceStats
-	if r.loadErr != nil {
-		return zero, r.loadErr
-	}
-	unlock, err := r.lockFile()
-	if err != nil {
+	if err := r.sticky(); err != nil {
 		return zero, err
 	}
-	defer unlock()
+	r.writeMu.Lock()
+	defer r.writeMu.Unlock()
 
-	records, checkpoints, loadErr := r.loadStateLocked()
-	if loadErr != nil {
-		return zero, loadErr
+	// _txlock=immediate (internal/statedb): the write lock is taken here, so a
+	// second daemon over the same file waits rather than losing an update.
+	tx, err := r.db.Begin()
+	if err != nil {
+		return zero, fmt.Errorf("registry: begin transaction: %w", err)
+	}
+	committed := false
+	defer func() {
+		if committed {
+			return
+		}
+		if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
+			r.logf("registry: rollback FAILED: %v", err)
+		}
+	}()
+
+	records, checkpoints, err := loadState(tx, r.logf)
+	if err != nil {
+		return zero, err
 	}
 	state := &registryState{records: records, checkpoints: checkpoints}
 	if err := fn(state); err != nil {
@@ -386,20 +343,35 @@ func (r *Registry) mutate(fn func(*registryState) error) (maintenanceStats, erro
 	if err != nil {
 		return zero, err
 	}
-	oldRecords, oldCheckpoints := r.records, r.checkpoints
-	r.records, r.checkpoints = state.records, state.checkpoints
-	if err := r.saveLocked(); err != nil {
-		r.records, r.checkpoints = oldRecords, oldCheckpoints
+	if err := saveState(tx, state); err != nil {
 		return zero, err
 	}
+	if err := tx.Commit(); err != nil {
+		return zero, fmt.Errorf("registry: commit transaction: %w", err)
+	}
+	committed = true
+
+	r.mu.Lock()
+	r.records, r.checkpoints = state.records, state.checkpoints
+	terminalRetained := r.terminalCountLocked()
+	checkpointCount := len(r.checkpoints)
+	r.mu.Unlock()
+
 	if stats.terminalPruned > 0 {
 		r.logf("registry: compacted terminal records pruned=%d retained=%d limit=%d checkpoints=%d",
-			stats.terminalPruned, r.terminalCountLocked(), TerminalRetention, len(r.checkpoints))
+			stats.terminalPruned, terminalRetained, TerminalRetention, checkpointCount)
 	}
 	return stats, nil
 }
 
-// Put upserts rec and writes through to disk.
+// sticky returns the load error recorded at Open, if any.
+func (r *Registry) sticky() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.loadErr
+}
+
+// Put upserts rec and writes through to the store.
 func (r *Registry) Put(rec Record) error {
 	if rec.SessionID == "" {
 		return fmt.Errorf("registry: Put with empty session_id")
@@ -416,7 +388,7 @@ func (r *Registry) Put(rec Record) error {
 
 // Update mutates id's record in place and writes through. Reports
 // whether the record existed; an absent id still performs the
-// lock-and-merge cycle but changes nothing.
+// read-modify-write cycle but changes nothing.
 func (r *Registry) Update(id string, fn func(*Record)) (bool, error) {
 	found := false
 	_, err := r.mutate(func(state *registryState) error {
@@ -661,103 +633,39 @@ func (r *Registry) terminalCountLocked() int {
 	return len(r.records) - r.liveCountLocked()
 }
 
-// Flush validates, maintains, and atomically rewrites the CURRENT on-disk
-// state. It deliberately does not re-assert this process's whole cache: a
-// draining daemon must not resurrect records another daemon compacted.
-// Every actual mutation is already write-through.
+// Flush validates, maintains, and rewrites the CURRENT persisted state. It
+// deliberately does not re-assert this process's whole cache: a draining
+// daemon must not resurrect records another daemon compacted. Every actual
+// mutation is already write-through.
 func (r *Registry) Flush() error {
 	_, err := r.mutate(func(*registryState) error { return nil })
 	return err
 }
 
-// saveLocked writes the checkpoint sidecar FIRST, then the inspectable v2
-// registry document. If an old draining daemon later writes a v1 registry it
-// cannot touch the sidecar; the next v2 Prepare repairs from it before pruning.
-// Each file is atomic (temp + fsync + rename). A crash between them can leave a
-// checkpoint ahead of a record, which is safe: checkpoints are monotonic.
-func (r *Registry) saveLocked() error {
-	checkpoints := make([]ConversationCheckpoint, 0, len(r.checkpoints))
-	for _, cp := range r.checkpoints {
-		checkpoints = append(checkpoints, cp)
+// encodeQueuedPrompts renders a record's held prompts for their column. An
+// empty list is stored as an empty string rather than "null", so the common
+// case reads as plainly empty.
+func encodeQueuedPrompts(prompts []QueuedPrompt) (string, error) {
+	if len(prompts) == 0 {
+		return "", nil
 	}
-	sort.Slice(checkpoints, func(i, j int) bool {
-		a, b := checkpoints[i].ConversationIdentity, checkpoints[j].ConversationIdentity
-		if a.ConfigDir != b.ConfigDir {
-			return a.ConfigDir < b.ConfigDir
-		}
-		if a.CWD != b.CWD {
-			return a.CWD < b.CWD
-		}
-		return a.ClaudeSessionID < b.ClaudeSessionID
-	})
-	checkpointData, err := json.MarshalIndent(checkpointFileShape{
-		Version: 1, Checkpoints: checkpoints,
-	}, "", "  ")
+	data, err := json.Marshal(prompts)
 	if err != nil {
-		return fmt.Errorf("registry: marshal checkpoint sidecar: %w", err)
+		return "", fmt.Errorf("registry: encode queued prompts: %w", err)
 	}
-	if err := r.writeAtomicLocked(r.checkpointPath(), checkpointData); err != nil {
-		return err
-	}
-
-	doc := fileShape{
-		Version:     fileVersionCheckpointIndex,
-		Sessions:    make([]Record, 0, len(r.records)),
-		Checkpoints: checkpoints,
-	}
-	for _, rec := range r.records {
-		doc.Sessions = append(doc.Sessions, rec)
-	}
-	sort.Slice(doc.Sessions, func(i, j int) bool {
-		return doc.Sessions[i].SessionID < doc.Sessions[j].SessionID
-	})
-	data, err := json.MarshalIndent(doc, "", "  ")
-	if err != nil {
-		return fmt.Errorf("registry: marshal: %w", err)
-	}
-	return r.writeAtomicLocked(r.path, data)
+	return string(data), nil
 }
 
-func (r *Registry) writeAtomicLocked(path string, data []byte) error {
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("registry: mkdir %s: %w", dir, err)
+// decodeQueuedPrompts parses a queued_prompts column. Unparseable held prompts
+// are an error, never an empty list: these are things the user typed that the
+// agent has not seen, so silently dropping them is the one outcome forbidden.
+func decodeQueuedPrompts(sessionID, raw string) ([]QueuedPrompt, error) {
+	if raw == "" {
+		return nil, nil
 	}
-	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".tmp-*")
-	if err != nil {
-		return fmt.Errorf("registry: temp file in %s: %w", dir, err)
+	var prompts []QueuedPrompt
+	if err := json.Unmarshal([]byte(raw), &prompts); err != nil {
+		return nil, fmt.Errorf("registry: session %s has unparseable queued_prompts: %w", sessionID, err)
 	}
-	if _, err := tmp.Write(data); err != nil {
-		r.discardTemp(tmp)
-		return fmt.Errorf("registry: write %s: %w", tmp.Name(), err)
-	}
-	if err := tmp.Sync(); err != nil {
-		r.discardTemp(tmp)
-		return fmt.Errorf("registry: fsync %s: %w", tmp.Name(), err)
-	}
-	if err := tmp.Close(); err != nil {
-		r.removeTemp(tmp.Name())
-		return fmt.Errorf("registry: close %s: %w", tmp.Name(), err)
-	}
-	if err := os.Rename(tmp.Name(), path); err != nil {
-		r.removeTemp(tmp.Name())
-		return fmt.Errorf("registry: rename %s -> %s: %w", tmp.Name(), path, err)
-	}
-	return nil
-}
-
-// discardTemp closes and removes a temp file after a failed write; the
-// close error is logged (the write error that got us here is the one
-// the caller surfaces).
-func (r *Registry) discardTemp(tmp *os.File) {
-	if err := tmp.Close(); err != nil {
-		r.logf("registry: close temp %s: %v", tmp.Name(), err)
-	}
-	r.removeTemp(tmp.Name())
-}
-
-func (r *Registry) removeTemp(name string) {
-	if err := os.Remove(name); err != nil {
-		r.logf("registry: remove temp %s: %v", name, err)
-	}
+	return prompts, nil
 }
