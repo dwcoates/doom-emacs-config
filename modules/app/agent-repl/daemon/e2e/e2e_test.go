@@ -374,6 +374,7 @@ func newUDSHarness(t *testing.T) *e2eHarness {
 		Progress:          progressMgr,
 		Prompts:           driver,
 		Turns:             driver,
+		Health:            driver,
 		MergeDirs:         stubMergeDirs{},
 		Lifecycle:         stubLifecycle{},
 		Resyncer:          driver,
