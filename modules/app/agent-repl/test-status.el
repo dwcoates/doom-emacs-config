@@ -3155,6 +3155,34 @@ This is the regression contract for the macOS 100%-CPU livelock:
       (should (= (alist-get 'tab-bar-lines default-frame-alist)
                  agent-repl--tabline-row-count)))))
 
+;;;; ---- The two context cuts --------------------------------------------
+
+(ert-deftest agent-repl-test-state-color-clearing-is-red ()
+  ":clearing takes thinking's red: the same claim, a different word."
+  ;; Act / Assert
+  (should (equal (alist-get :clearing agent-repl--state-color) "red")))
+
+(ert-deftest agent-repl-test-state-color-compacting-is-red ()
+  ":compacting takes thinking's red: the same claim, a different word."
+  ;; Act / Assert
+  (should (equal (alist-get :compacting agent-repl--state-color) "red")))
+
+(ert-deftest agent-repl-test-display-state-clearing-panels-open-renders-clearing ()
+  ":clearing with panels visible renders :clearing (red)."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :pushed-render-state :clearing)
+    (cl-letf (((symbol-function 'agent-repl--ws-agent-open-p)
+               (lambda (_ws) t)))
+      (should (eq :clearing (agent-repl--ws-display-state "ws1"))))))
+
+(ert-deftest agent-repl-test-display-state-compacting-panels-open-renders-compacting ()
+  ":compacting with panels visible renders :compacting (red)."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :pushed-render-state :compacting)
+    (cl-letf (((symbol-function 'agent-repl--ws-agent-open-p)
+               (lambda (_ws) t)))
+      (should (eq :compacting (agent-repl--ws-display-state "ws1"))))))
+
 (provide 'test-status)
 
 ;;; test-status.el ends here

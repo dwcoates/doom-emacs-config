@@ -97,6 +97,11 @@ failure is surfaced, not hidden)."
     ;; asked for the stop, got it, and can prompt again immediately.  The
     ;; word carries the distinction; the color claim is the same.
     ("RENDER_STATE_INTERRUPTED"    . :interrupted)
+    ;; RED like :thinking — the agent is busy and a prompt cannot land yet.
+    ;; The two context cuts differ from thinking only in WHAT the agent is
+    ;; busy with, which the word carries; the color claim is the same.
+    ("RENDER_STATE_CLEARING"       . :clearing)
+    ("RENDER_STATE_COMPACTING"     . :compacting)
     ("RENDER_STATE_VENDOR_BLOCKED" . :vendor-blocked)
     ;; DEPRECATED upstream and no longer resolved by the SSM, but still
     ;; mapped: an old daemon binary, or a state log written before the

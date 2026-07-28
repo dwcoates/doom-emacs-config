@@ -670,6 +670,8 @@ Distributed evenly across `agent-repl-flash-count' on/off cycles."
     (:start-failed   . "blue")
     (:vendor-blocked . "purple")
     (:thinking       . "red")
+    (:clearing       . "red")
+    (:compacting     . "red")
     (:idle-async     . "yellow")
     (:idle           . "green")
     (:ready          . "green")
@@ -730,6 +732,31 @@ may never reorder it.")
                   :bracket-fg ,agent-repl--color-light
                   :weight ,agent-repl--tab-weight))
     (:thinking
+     :face       agent-repl-tab-thinking
+     :unselected (:bg ,agent-repl--color-thinking-red
+                  :fg ,agent-repl--color-light
+                  :bracket-fg ,agent-repl--color-default-bracket
+                  :weight ,agent-repl--tab-weight)
+     :selected   (:bg ,agent-repl--color-selected-bg
+                  :fg ,agent-repl--color-dark
+                  :bracket-bg ,agent-repl--color-thinking-red
+                  :bracket-fg ,agent-repl--color-light
+                  :weight ,agent-repl--tab-weight))
+    ;; The two context cuts borrow thinking's red rather than taking a shade
+    ;; of their own: they make the SAME claim about what the user cannot do,
+    ;; and only the phase word in the footer distinguishes them.
+    (:clearing
+     :face       agent-repl-tab-thinking
+     :unselected (:bg ,agent-repl--color-thinking-red
+                  :fg ,agent-repl--color-light
+                  :bracket-fg ,agent-repl--color-default-bracket
+                  :weight ,agent-repl--tab-weight)
+     :selected   (:bg ,agent-repl--color-selected-bg
+                  :fg ,agent-repl--color-dark
+                  :bracket-bg ,agent-repl--color-thinking-red
+                  :bracket-fg ,agent-repl--color-light
+                  :weight ,agent-repl--tab-weight))
+    (:compacting
      :face       agent-repl-tab-thinking
      :unselected (:bg ,agent-repl--color-thinking-red
                   :fg ,agent-repl--color-light
