@@ -398,6 +398,7 @@ func main() {
 		Locator:           &server.SessionLocator{Reg: sessionRegistry},
 		SeqStore:          seqStore,
 		ClearCompactStore: seqStore,
+		PermissionModes:   server.NewRegistryModeStore(sessionRegistry),
 		Registrar:         registrar,
 		DaemonVersion:     daemonVersion,
 		ProtocolVersion:   shimProtocolVersion,

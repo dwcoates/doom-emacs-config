@@ -79,6 +79,33 @@ func UngatedNote(subject, mode string, consented bool) string {
 		subject, mode, consented)
 }
 
+// DefaultSessionPermissionMode is the posture a session whose record carries
+// NO explicit permission mode runs under. THE one place that default is
+// spelled; every resolution goes through ResolvePermissionMode below.
+//
+// It must never name an ungated mode (UngatedPermissionMode): a default is by
+// definition what a caller got without asking for it, and "I did not choose a
+// posture" can never mean "run with no permission gate". TestDefaultSession
+// PermissionModeIsGated asserts exactly that, so the invariant fails a build
+// rather than a session.
+const DefaultSessionPermissionMode = PermissionModeAuto
+
+// ResolvePermissionMode resolves a session record's stored permission mode to
+// the one the session actually runs under: the record's own value when it has
+// one, DefaultSessionPermissionMode when it is empty.
+//
+// It exists because the empty record used to resolve DIFFERENTLY at different
+// hops — the daemon omitted --permission-mode, and the shim's argv parser then
+// defaulted to "default" (prompting), so a daemon-created session ran its
+// generated first prompt in a mode nobody was there to answer. One resolution
+// site, consulted by the handshake, makes that divergence unrepresentable.
+func ResolvePermissionMode(s string) string {
+	if s == "" {
+		return string(DefaultSessionPermissionMode)
+	}
+	return s
+}
+
 // ValidPermissionMode reports whether s is a member of the PermissionMode
 // enum.
 func ValidPermissionMode(s string) bool {

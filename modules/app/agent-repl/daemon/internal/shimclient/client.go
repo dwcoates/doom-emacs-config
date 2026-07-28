@@ -50,6 +50,7 @@ import (
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/errclass"
+	"claude-repld/internal/protocol"
 )
 
 // Terminal (non-retryable) protocol errors: reconnecting cannot fix them, so
@@ -76,6 +77,23 @@ type SeqStore interface {
 	// SetLastSeq records seq as the new high-water mark for sessionID. Called
 	// in strictly increasing order per session by the demux loop.
 	SetLastSeq(sessionID string, seq uint64)
+}
+
+// ModeStore supplies a session's PERMISSION POSTURE, read straight off the
+// daemon's session record at handshake time and carried to the shim on
+// DaemonHello.permission_mode.
+//
+// It is the same shape of seam as SeqStore, and for the same reason: the
+// shimclient must not import the registry, and both facts the gate needs (the
+// resume position and the posture) are the record's, not the client's. Reading
+// it per handshake rather than per spawn is also what makes a reattach pick up
+// the record's CURRENT posture instead of a stale spawn-time snapshot.
+type ModeStore interface {
+	// PermissionMode returns sessionID's stored mode, or "" for a session with
+	// none (or no record at all). The client resolves "" through
+	// protocol.ResolvePermissionMode, so an implementation must NOT invent a
+	// default of its own.
+	PermissionMode(sessionID string) string
 }
 
 // StateSink consumes lifecycle events (session/turn/task boundaries). The
@@ -141,6 +159,13 @@ type Config struct {
 	// must equal the shim's or the handshake fails with ErrVersionMismatch.
 	DaemonVersion   string
 	ProtocolVersion string
+
+	// PermissionModes supplies the session's stored permission posture for
+	// DaemonHello.permission_mode. Optional: a nil store resolves to
+	// protocol.DefaultSessionPermissionMode, which is the same answer an empty
+	// record gives, so the field can never resolve to an ungated mode by
+	// omission.
+	PermissionModes ModeStore
 
 	// Sinks and callbacks (all bound at stitch).
 	SeqStore    SeqStore
@@ -297,6 +322,22 @@ func New(cfg Config) *Client {
 	return &Client{cfg: cfg, logf: logf, ready: make(chan struct{}), replays: newReplayRegistry()}
 }
 
+// permissionMode resolves the posture this connection's DaemonHello announces:
+// the record's mode when it has one, protocol.DefaultSessionPermissionMode
+// otherwise. Never returns "" — an empty field on the wire means "a daemon too
+// old to speak it", and this daemon is not that.
+//
+// A nil ModeStore takes the same branch as an empty record deliberately: the
+// one thing a session must never acquire by omission is an ungated posture,
+// and routing both through the single resolution site is what guarantees it.
+func (c *Client) permissionMode() string {
+	stored := ""
+	if c.cfg.PermissionModes != nil {
+		stored = c.cfg.PermissionModes.PermissionMode(c.cfg.SessionID)
+	}
+	return protocol.ResolvePermissionMode(stored)
+}
+
 // markReadyLocked publishes "the session is fully wired". Caller holds c.mu.
 func (c *Client) markReadyLocked() {
 	select {
@@ -427,16 +468,21 @@ func (c *Client) runOnce(ctx context.Context) (retErr error) {
 	// rotation reconciliation above, and before any frame goes out.
 	from := c.cfg.SeqStore.LastSeq(c.cfg.SessionID)
 	c.lastSeen = from
+	// The session's posture travels with the resume position, resolved HERE so
+	// the field is never empty on the wire (core.proto DaemonHello.
+	// permission_mode). Empty is reserved for a daemon too old to speak it.
+	mode := c.permissionMode()
 	if err := ac.writeMsg(&corev1.DaemonHello{
 		DaemonVersion:   c.cfg.DaemonVersion,
 		ProtocolVersion: c.cfg.ProtocolVersion,
 		FromSeq:         from,
+		PermissionMode:  mode,
 	}); err != nil {
 		conn.Close()
 		return fmt.Errorf("sending DaemonHello: %w", err)
 	}
-	c.logf("bring-up gate: DaemonHello sent from_seq=%d turn_in_flight=%v shim_version=%s; awaiting ShimReady",
-		from, hello.GetTurnInFlight(), hello.GetShimVersion())
+	c.logf("bring-up gate: DaemonHello sent from_seq=%d permission_mode=%s turn_in_flight=%v shim_version=%s; awaiting ShimReady",
+		from, mode, hello.GetTurnInFlight(), hello.GetShimVersion())
 
 	// Publish the live connection so the read loop and control senders can use
 	// it. The READINESS latch is deliberately NOT closed here: it waits for the

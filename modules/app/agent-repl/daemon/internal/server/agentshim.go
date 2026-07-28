@@ -149,6 +149,33 @@ func (s *RegistrySeqStore) SetNewestClearOrCompactSeq(sessionID string, seq uint
 	}
 }
 
+// RegistryModeStore adapts the session registry to shimclient.ModeStore: the
+// session's stored PERMISSION POSTURE, which rides DaemonHello into the shim's
+// bring-up gate (core.proto DaemonHello.permission_mode).
+//
+// It reports the record VERBATIM, empty included, and resolves nothing. The
+// one resolution site is protocol.ResolvePermissionMode, consulted by the
+// shimclient; a second default invented here is exactly the drift that let a
+// daemon-created session run under "default" while its record said nothing.
+type RegistryModeStore struct{ reg *registry.Registry }
+
+// NewRegistryModeStore builds a ModeStore over reg (required).
+func NewRegistryModeStore(reg *registry.Registry) *RegistryModeStore {
+	return &RegistryModeStore{reg: reg}
+}
+
+var _ shimclient.ModeStore = (*RegistryModeStore)(nil)
+
+// PermissionMode returns sessionID's recorded mode, or "" when the session has
+// none or is unknown.
+func (s *RegistryModeStore) PermissionMode(sessionID string) string {
+	rec, ok := s.reg.Get(sessionID)
+	if !ok {
+		return ""
+	}
+	return rec.PermissionMode
+}
+
 // RegistryResolver adapts the session registry to ssm.Resolver: it answers
 // "which workspace is this session bound to?" for the SSM's per-workspace
 // state log (design §9.2). The workspace is the session's working directory
