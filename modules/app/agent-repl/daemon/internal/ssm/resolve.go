@@ -82,6 +82,10 @@ const (
 	// the log rather than a bare token change.
 	causeClearing   = "clearing"
 	causeCompacting = "compacting"
+	// The permission row's two edges. The detail after the colon names which
+	// edge moved it — the first pending request, the answer that emptied the
+	// set, or the bounding event (rotation, restart) that released it.
+	causePermission = "permission"
 )
 
 // vendorBlockingStopReasons are the TurnEnded stop reasons that conclude a

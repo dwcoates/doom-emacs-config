@@ -187,6 +187,11 @@ func (m *Manager) warm() error {
 	if err := m.repairPersistedOrphanTaskEndsLocked(); err != nil {
 		return err
 	}
+	// Before the cache is seeded, so a released row is what gets restored
+	// rather than the stale one it replaces.
+	if err := m.releasePersistedPermissionsLocked(); err != nil {
+		return err
+	}
 	names, err := distinctWorkspaces(m.db)
 	if err != nil {
 		return err
@@ -448,9 +453,11 @@ func (m *Manager) applyInterruptMarkLocked(ws string, ev *corev1.Event, state, c
 // is superseded normally by whatever the agent does next — including the very
 // TurnEnded that arrives moments later once the new space replays.
 //
-// A settled agent axis is left ALONE. A workspace sitting in `permission` or
-// `done` when the uuid rotated has nothing stuck to unstick, and appending
-// `idle` over it would discard a more specific true statement.
+// A settled agent axis is left ALONE. A workspace sitting in `done` when the
+// uuid rotated has nothing stuck to unstick, and appending `idle` over it would
+// discard a more specific true statement. `permission` is NOT settled in that
+// sense — it is a live turn wearing a green row — so it is released first and
+// the turn it was covering is reconciled normally.
 //
 // A STANDING INTERRUPT MARK IS DROPPED, loudly. The mark names ONE turn — the
 // one a user-commanded stop was delivered to — and spends itself on that turn's
@@ -479,6 +486,15 @@ func (m *Manager) ApplySessionRotated(workspace, previous, next string) error {
 	// ALONE for the opposite reason — a `/clear` CAUSES this rotation, and the
 	// ContextCleared it is waiting for is produced under the NEW identity.
 	m.closeCompactingLocked(workspace, causeSessionRotated)
+
+	// A PENDING PERMISSION DOES NOT SURVIVE THE ROTATION EITHER: the shim that
+	// asked the question is bounced, every waiter on it is abandoned, and the
+	// re-asked question arrives under the new identity as a fresh request. It is
+	// released FIRST so the reconciliation below sees the agent axis's real
+	// truth: the row buries the `thinking` of the turn that asked, and left
+	// standing it would make the in-flight turn this method exists to unstick
+	// look like a settled workspace with nothing stuck.
+	m.closePermissionLocked(workspace, causeSessionRotated)
 
 	active, err := turnActive(m.db, workspace)
 	if err != nil {

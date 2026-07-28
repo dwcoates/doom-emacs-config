@@ -196,20 +196,30 @@ func seqApplied(db *sql.DB, sessionID string, seq uint64) (bool, error) {
 	return true, nil
 }
 
+// agentAxisMembers is the agent axis's row membership, as one SQL list shared
+// by every reader of the axis. It is the same membership the resolution query
+// carries in its `prec` table, kept in one place here so a reader and the
+// resolver can never disagree about which rows count as agent states.
+const agentAxisMembers = `('init','thinking','permission','done','ready','idle','dead','vendor_blocked','interrupted')`
+
 // turnActive reports whether the workspace's LATEST agent-axis row is a
 // running turn. It is the no-regress guard's only input: a readiness
 // assertion arriving over a live turn must be dropped rather than appended,
 // because the agent axis resolves on its latest row and the readiness row
 // would otherwise win.
 //
-// It reads the same agent-axis membership the resolution query does, so the
-// two can never disagree about which rows count as agent states.
+// A workspace whose top row is `permission` reads FALSE, exactly as `done`
+// does. That is deliberate and predates the permission producer: the row is a
+// settled statement about what the workspace is waiting for, and every caller
+// of this (the readiness no-regress guard, the interrupt mark, the rotation
+// reconciliation) is asking whether the agent is CURRENTLY working, which it
+// is not while a human is being asked a question.
 func turnActive(db *sql.DB, workspace string) (bool, error) {
 	var state string
 	err := db.QueryRow(
 		`SELECT state FROM workspace_state
 		 WHERE workspace = ?
-		   AND state IN ('init','thinking','permission','done','ready','idle','dead','vendor_blocked','interrupted')
+		   AND state IN `+agentAxisMembers+`
 		 ORDER BY at DESC LIMIT 1`, workspace).Scan(&state)
 	if err == sql.ErrNoRows {
 		return false, nil
@@ -218,6 +228,66 @@ func turnActive(db *sql.DB, workspace string) (bool, error) {
 		return false, fmt.Errorf("ssm: turn-active check for workspace %q: %w", workspace, err)
 	}
 	return state == "thinking", nil
+}
+
+// agentAxisTop returns the workspace's newest agent-axis token, plus the newest
+// agent-axis token BENEATH any `permission` row sitting on top of it. Both are
+// "" when the axis has no such row.
+//
+// The second answer is what the permission row's CLOSING edge needs. A pending
+// permission is written as an agent-axis row that supersedes the `thinking` it
+// covers, so once it is answered the only record of whether a turn is still
+// running is the row it buried. Reading it back is how the close restores
+// `thinking` for a turn that is genuinely still in flight — and how it knows
+// NOT to, for one that is not.
+func agentAxisTop(db *sql.DB, workspace string) (top, beneath string, err error) {
+	scan := func(query string) (string, error) {
+		var state string
+		e := db.QueryRow(query, workspace).Scan(&state)
+		if e == sql.ErrNoRows {
+			return "", nil
+		}
+		if e != nil {
+			return "", fmt.Errorf("ssm: agent-axis read for workspace %q: %w", workspace, e)
+		}
+		return state, nil
+	}
+	top, err = scan(`SELECT state FROM workspace_state
+		 WHERE workspace = ? AND state IN ` + agentAxisMembers + `
+		 ORDER BY at DESC LIMIT 1`)
+	if err != nil {
+		return "", "", err
+	}
+	beneath, err = scan(`SELECT state FROM workspace_state
+		 WHERE workspace = ? AND state IN ` + agentAxisMembers + ` AND state <> 'permission'
+		 ORDER BY at DESC LIMIT 1`)
+	if err != nil {
+		return "", "", err
+	}
+	return top, beneath, nil
+}
+
+// permissionOpenWorkspaces lists every workspace whose agent axis currently
+// tops out in `permission`. It backs the release at Open: the pendings a
+// permission row stands for are in-process rendezvous that do not survive a
+// daemon restart, so a row left standing across one has nothing that could
+// answer it.
+func permissionOpenWorkspaces(db *sql.DB) ([]string, error) {
+	names, err := distinctWorkspaces(db)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, ws := range names {
+		top, _, err := agentAxisTop(db, ws)
+		if err != nil {
+			return nil, err
+		}
+		if top == sigPermission {
+			out = append(out, ws)
+		}
+	}
+	return out, nil
 }
 
 // cutOpen reports whether a context-cut axis currently stands open: its LATEST
