@@ -1874,8 +1874,9 @@ function ClearDivider(_item: ContextClearedItem): string {
 }
 
 /**
- * A COMPACTION: the orange rule, the stamp naming it, and the summary that
- * stands in for everything the compaction discarded.
+ * A COMPACTION: the summary that stands in for everything the compaction
+ * discarded, and beneath it the boundary marker — the orange rule and the
+ * stamp naming it.
  *
  * The summary is a response bubble with a GREEN border on a PURPLE wash —
  * deliberately the loudest bubble in the feed. It is the only surviving
@@ -1895,10 +1896,12 @@ function ClearDivider(_item: ContextClearedItem): string {
  * plane that produces this item structurally cannot report a failure here.
  */
 function CompactDivider(item: ContextCompactedItem): string {
-  // The orange rule sits BEFORE the label, so it lands between whatever
-  // precedes the compaction and the "context compacted" stamp, mirroring the
-  // red
-  // rule a clear draws (see `ClearDivider`).
+  // The marker — the orange rule with its stamp under it — sits AFTER the
+  // summary bubble, closing the account of the discarded history rather than
+  // introducing it: the reader meets what survived first, then the line that
+  // says where the old context ended. Within the marker the rule still
+  // precedes the label, mirroring the red rule a clear draws (see
+  // `ClearDivider`).
   const tokens = `${formatTokens(item.preTokens)} → ${formatTokens(item.postTokens)} tokens`;
   const summary =
     item.summary !== ""
@@ -1907,9 +1910,9 @@ function CompactDivider(item: ContextCompactedItem): string {
         )}</div></div>`
       : "";
   return (
+    summary +
     `<div class="compact-rule" role="separator" aria-label="context compacted"></div>` +
-    `<div class="compact-divider">— context compacted (${tokens}) —</div>` +
-    summary
+    `<div class="compact-divider">— context compacted (${tokens}) —</div>`
   );
 }
 

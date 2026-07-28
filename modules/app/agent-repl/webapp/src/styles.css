@@ -1610,11 +1610,12 @@ pre {
   background: var(--clear-divider);
 }
 /* The orange rule a /compact draws, mirroring the red /clear rule above but in
-   the softer --compact-rule orange. It is drawn ABOVE the "context compacted"
-   label so it sits between the /compact prompt bubble and that label, the way
-   the /clear rule sits under its own prompt. Same 4px bar geometry as
-   `.clear-divider`; the shared confinement rule below spans it across the
-   central column. */
+   the softer --compact-rule orange. Rule and label together form the boundary
+   MARKER, and that marker sits UNDER the compaction's summary bubble — the
+   reader meets the surviving account first and the line closing it second.
+   Within the marker the rule stays above the "context compacted" label. Same
+   4px bar geometry as `.clear-divider`; the shared confinement rule below spans
+   it across the central column. */
 .compact-rule {
   height: 4px;
   margin-top: 0.75rem;
