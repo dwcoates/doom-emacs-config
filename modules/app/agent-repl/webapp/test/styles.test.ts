@@ -2779,6 +2779,46 @@ describe("the footer's interrupt chip (I1)", () => {
   });
 });
 
+describe("the footer's grabber notch geometry", () => {
+  it("takes the notch out of normal flow so it costs the row no height", () => {
+    // Arrange + Act — as a flow sibling it ate a band off the dock's top and
+    // pushed the cell row's centering low.
+    const rule = blockAfter(css, "\n.pfooter-grab {");
+    // Assert
+    expect(rule).toContain("position: absolute");
+  });
+
+  it("centers the notch horizontally on its host rather than on the dock", () => {
+    // Arrange + Act — `margin: … auto` centered it on the whole dock, which
+    // never lined up with the activity text.
+    const rule = blockAfter(css, "\n.pfooter-grab {");
+    // Assert
+    expect(rule).toContain("left: 50%");
+  });
+
+  it("hangs the notch off the grow cell, the extent the activity text centers on", () => {
+    // Arrange + Act — the notch's containing block is the middle section.
+    const rule = blockAfter(css, "\n.pfooter-grow {");
+    // Assert
+    expect(rule).toContain("position: relative");
+  });
+
+  it("gives the cell row back the height the notch's band used to take", () => {
+    // Arrange + Act — 7px plus the ~4px per side the removed band frees, so
+    // the dock's overall height is unchanged.
+    const rule = blockAfter(css, "\n.pfooter-cell {");
+    // Assert
+    expect(rule).toContain("padding: 11px 10px");
+  });
+
+  it("keeps the notch's drawn size and rounding exactly as they were", () => {
+    // Arrange + Act — this is a geometry move, not a restyle.
+    const rule = blockAfter(css, "\n.pfooter-grab {");
+    // Assert
+    expect(rule).toContain("height: 3px");
+  });
+});
+
 describe("sidebar merge glyph size", () => {
   // The merge-family glyph (⟳) is a thin stroke, so at the disc statuses' own
   // box it reads optically smaller than a solid fill. Its font-size is bumped
