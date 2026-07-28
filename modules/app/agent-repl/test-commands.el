@@ -3228,33 +3228,6 @@ path needs to see both."
         (delete-file snapshot-file)
         (delete-directory real-dir t)))))
 
-(ert-deftest agent-repl-cmd-test-load-workspace-snapshot/does-not-flash ()
-  "load-workspace-snapshot does NOT pulse tabs during bulk restore.
-A flash storm would be noise; the loader bypasses the inherent-flash
-jump path on purpose."
-  (agent-repl-test--with-clean-state
-    (let ((snapshot-file (make-temp-file "agent-snap-"))
-          (dir-a (make-temp-file "agent-proj-a-" t))
-          (dir-b (make-temp-file "agent-proj-b-" t))
-          (flash-calls 0))
-      (unwind-protect
-          (let ((agent-repl-workspace-snapshot-file snapshot-file))
-            (agent-repl--write-sexp-file snapshot-file
-                                          `(("ws-a" . ,dir-a)
-                                            ("ws-b" . ,dir-b)))
-            (cl-letf (((symbol-function 'agent-repl--establish-workspace) #'ignore)
-                      ((symbol-function 'agent-repl--snapshot-load-ws-ready-p)
-                       (lambda (_ws) t))
-                      ((symbol-function 'agent-repl-flash-tab)
-                       (lambda (&rest _) (cl-incf flash-calls)))
-                      ((symbol-function 'agent-repl--flash-current-tab)
-                       (lambda () (cl-incf flash-calls))))
-              (agent-repl-load-workspace-snapshot)
-              (should (zerop flash-calls))))
-        (delete-file snapshot-file)
-        (delete-directory dir-a t)
-        (delete-directory dir-b t)))))
-
 ;;;; ---- Tests: snapshot startup/quit wrappers ----
 
 (ert-deftest agent-repl-cmd-test-load-snapshot-on-startup/prepares-before-snapshot-lookup ()
@@ -4570,33 +4543,10 @@ call, making deferred closures synchronous in tests."
                         ((symbol-function '+workspace-current-name)
                          (lambda () "switched-ws"))
                         ((symbol-function 'force-mode-line-update)
-                         (lambda (&optional _all) nil))
-                        ((symbol-function 'agent-repl-flash-tab)
-                         (lambda (&rest _) nil)))
+                         (lambda (&optional _all) nil)))
                 (agent-repl-switch-to-project tmp-dir)
                 (should (equal switched-with tmp-dir))
                 (should (equal (agent-repl--ws-get "switched-ws" :priority) "p2")))))
-        (delete-directory tmp-dir t)))))
-
-(ert-deftest agent-repl-cmd-test-switch-to-project/flashes-activated-ws ()
-  "switch-to-project pulses the activated workspace tab via flash-tab."
-  (agent-repl-test--with-clean-state
-    (let ((tmp-dir (file-name-as-directory (make-temp-file "agent-repl-switch-" t)))
-          flashed-ws)
-      (unwind-protect
-          (agent-repl-test--with-sync-run-at-time
-            (cl-letf (((symbol-function 'projectile-switch-project-by-name)
-                       (lambda (_p) nil))
-                      ((symbol-function 'agent-repl--most-recent-project-file)
-                       (lambda (_d) nil))
-                      ((symbol-function '+workspace-current-name)
-                       (lambda () "switched-ws"))
-                      ((symbol-function 'force-mode-line-update)
-                       (lambda (&optional _all) nil))
-                      ((symbol-function 'agent-repl-flash-tab)
-                       (lambda (ws &rest _) (setq flashed-ws ws))))
-              (agent-repl-switch-to-project tmp-dir)
-              (should (equal flashed-ws "switched-ws"))))
         (delete-directory tmp-dir t)))))
 
 (ert-deftest agent-repl-cmd-test-switch-to-project/opens-most-recent-file ()
@@ -4615,12 +4565,10 @@ call, making deferred closures synchronous in tests."
                          (lambda (_d) tmp-file))
                         ((symbol-function 'find-file)
                          (lambda (f) (setq opened f)))
-                        ((symbol-function '+workspace-current-name)
+                          ((symbol-function '+workspace-current-name)
                          (lambda () "switched-ws"))
                         ((symbol-function 'force-mode-line-update)
-                         (lambda (&optional _all) nil))
-                        ((symbol-function 'agent-repl-flash-tab)
-                         (lambda (&rest _) nil)))
+                         (lambda (&optional _all) nil)))
                 (agent-repl-switch-to-project tmp-dir)
                 (should (equal opened tmp-file)))))
         (delete-directory tmp-dir t)))))
@@ -4641,9 +4589,7 @@ call, making deferred closures synchronous in tests."
                       ((symbol-function '+workspace-current-name)
                        (lambda () "switched-ws"))
                       ((symbol-function 'force-mode-line-update)
-                       (lambda (&optional _all) nil))
-                      ((symbol-function 'agent-repl-flash-tab)
-                       (lambda (&rest _) nil)))
+                       (lambda (&optional _all) nil)))
               (agent-repl-switch-to-project tmp-dir)
               (should-not find-file-called)))
         (delete-directory tmp-dir t)))))
@@ -4668,8 +4614,6 @@ call, making deferred closures synchronous in tests."
                        (lambda () "switched-ws"))
                       ((symbol-function 'force-mode-line-update)
                        (lambda (&optional _all) nil))
-                      ((symbol-function 'agent-repl-flash-tab)
-                       (lambda (&rest _) nil))
                       ;; Capture the timer but do NOT fire it
                       ((symbol-function 'run-at-time)
                        (lambda (_time _repeat _fn &rest _args)
@@ -4700,9 +4644,7 @@ workspace lands in priority order like the snapshot/worktree restore path."
                       ((symbol-function '+workspace-current-name)
                        (lambda () "switched-ws"))
                       ((symbol-function 'force-mode-line-update)
-                       (lambda (&optional _all) nil))
-                      ((symbol-function 'agent-repl-flash-tab)
-                       (lambda (&rest _) nil)))
+                       (lambda (&optional _all) nil)))
               (let ((agent-repl--snapshot-load-state nil))
                 (agent-repl-switch-to-project tmp-dir))
               (should (equal reorder-calls '("switched-ws")))))
@@ -5075,16 +5017,16 @@ file and the archive directory the save path materialises beside it."
 ;;;; ---- Workspace cycling (agent-repl-switch-left/right) ----
 
 (defmacro agent-repl-cmd-test--with-cycle-stubs (names current hidden-set
-                                                  switched-to flashed protected-p
+                                                  switched-to protected-p
                                                   &rest body)
-  "Bind `+workspace-list-names' / `-current-name' / `-switch' / flash to
+  "Bind `+workspace-list-names' / `-current-name' / `-switch' to
 fixtures.  NAMES is a list of workspace names, CURRENT is a string,
 HIDDEN-SET is a list of names whose `:repl-state' is `:hidden' (the
 filter target since hide-mode reimpl moved to persp-level enforcement),
-SWITCHED-TO and FLASHED are place-symbols (boxed into single-cell lists)
-the stubs push to.  PROTECTED-P is a boolean controlling
+SWITCHED-TO is a place-symbol (boxed into a single-cell list) the stub
+pushes to.  PROTECTED-P is a boolean controlling
 `+workspace--protected-p'."
-  (declare (indent 7))
+  (declare (indent 6))
   `(cl-letf (((symbol-function 'agent-repl--ws-list-names) (lambda () ,names))
              ((symbol-function '+workspace-current-name) (lambda () ,current))
              ((symbol-function '+workspace--protected-p)
@@ -5092,103 +5034,87 @@ the stubs push to.  PROTECTED-P is a boolean controlling
              ((symbol-function 'agent-repl--ws-repl-state)
               (lambda (n) (when (member n ,hidden-set) :hidden)))
              ((symbol-function '+workspace-switch)
-              (lambda (name &optional _auto-create) (push name ,switched-to)))
-             ((symbol-function 'agent-repl--flash-current-tab)
-              (lambda () (push t ,flashed))))
+              (lambda (name &optional _auto-create) (push name ,switched-to))))
      ,@body))
 
 (ert-deftest agent-repl-cmd-test-switch-right/cycles-to-next ()
   "switch-right with hide-mode off cycles to the next workspace."
-  (let ((switched (list)) (flashed (list))
+  (let ((switched (list))
         (agent-repl-hide-mode-enabled nil))
     (agent-repl-cmd-test--with-cycle-stubs
-        '("a" "b" "c") "a" '() switched flashed nil
+        '("a" "b" "c") "a" '() switched nil
       (agent-repl-switch-right)
       (should (equal switched '("b"))))))
 
 (ert-deftest agent-repl-cmd-test-switch-left/cycles-to-prev ()
   "switch-left with hide-mode off cycles to the previous workspace."
-  (let ((switched (list)) (flashed (list))
+  (let ((switched (list))
         (agent-repl-hide-mode-enabled nil))
     (agent-repl-cmd-test--with-cycle-stubs
-        '("a" "b" "c") "b" '() switched flashed nil
+        '("a" "b" "c") "b" '() switched nil
       (agent-repl-switch-left)
       (should (equal switched '("a"))))))
 
 (ert-deftest agent-repl-cmd-test-switch-right/wraps-around ()
   "switch-right from the last workspace wraps to the first."
-  (let ((switched (list)) (flashed (list))
+  (let ((switched (list))
         (agent-repl-hide-mode-enabled nil))
     (agent-repl-cmd-test--with-cycle-stubs
-        '("a" "b" "c") "c" '() switched flashed nil
+        '("a" "b" "c") "c" '() switched nil
       (agent-repl-switch-right)
       (should (equal switched '("a"))))))
 
 (ert-deftest agent-repl-cmd-test-switch-left/wraps-around ()
   "switch-left from the first workspace wraps to the last."
-  (let ((switched (list)) (flashed (list))
+  (let ((switched (list))
         (agent-repl-hide-mode-enabled nil))
     (agent-repl-cmd-test--with-cycle-stubs
-        '("a" "b" "c") "a" '() switched flashed nil
+        '("a" "b" "c") "a" '() switched nil
       (agent-repl-switch-left)
       (should (equal switched '("c"))))))
 
 (ert-deftest agent-repl-cmd-test-switch-right/skips-hidden-when-hide-on ()
   "With hide-mode on, switch-right skips workspaces whose `:repl-state' is `:hidden'."
-  (let ((switched (list)) (flashed (list))
+  (let ((switched (list))
         (agent-repl-hide-mode-enabled t))
     (agent-repl-cmd-test--with-cycle-stubs
-        '("a" "b" "c") "a" '("b") switched flashed nil
+        '("a" "b" "c") "a" '("b") switched nil
       (agent-repl-switch-right)
       (should (equal switched '("c"))))))
 
 (ert-deftest agent-repl-cmd-test-switch-left/skips-hidden-when-hide-on ()
   "With hide-mode on, switch-left skips workspaces whose `:repl-state' is `:hidden'."
-  (let ((switched (list)) (flashed (list))
+  (let ((switched (list))
         (agent-repl-hide-mode-enabled t))
     (agent-repl-cmd-test--with-cycle-stubs
-        '("a" "b" "c") "c" '("b") switched flashed nil
+        '("a" "b" "c") "c" '("b") switched nil
       (agent-repl-switch-left)
       (should (equal switched '("a"))))))
 
 (ert-deftest agent-repl-cmd-test-switch-right/single-visible-no-op ()
   "When only the current workspace is visible, switch-right does not switch."
-  (let ((switched (list)) (flashed (list))
+  (let ((switched (list))
         (agent-repl-hide-mode-enabled t)
         ;; condition-case-unless-debug skips its handlers when
         ;; `debug-on-error' is set, which ert turns on by default.  Bind
         ;; it off so the user-error path is observable in tests.
         (debug-on-error nil))
     (agent-repl-cmd-test--with-cycle-stubs
-        '("a" "b" "c") "a" '("b" "c") switched flashed nil
+        '("a" "b" "c") "a" '("b" "c") switched nil
       (cl-letf (((symbol-function '+workspace-error)
                  (lambda (&rest _) nil)))
         (agent-repl-switch-right)
-        (should-not switched)
-        (should-not flashed)))))
+        (should-not switched)))))
 
 (ert-deftest agent-repl-cmd-test-switch-right/protected-goes-to-main ()
   "When current workspace is protected, switch-right routes to +workspaces-main."
-  (let ((switched (list)) (flashed (list))
+  (let ((switched (list))
         (agent-repl-hide-mode-enabled nil)
         (+workspaces-main "main"))
     (agent-repl-cmd-test--with-cycle-stubs
-        '("nil") "nil" '() switched flashed t
+        '("nil") "nil" '() switched t
       (agent-repl-switch-right)
-      (should (equal switched '("main")))
-      (should-not flashed))))
-
-(ert-deftest agent-repl-cmd-test-switch-right/does-not-flash-destination ()
-  "switch-right does NOT flash the destination tab.
-Left/right cycling is high-frequency navigation and the flash becomes
-noise; only identity-based jumps (`SPC p p', priority change,
-worktree jump) flash."
-  (let ((switched (list)) (flashed (list))
-        (agent-repl-hide-mode-enabled nil))
-    (agent-repl-cmd-test--with-cycle-stubs
-        '("a" "b") "a" '() switched flashed nil
-      (agent-repl-switch-right)
-      (should-not flashed))))
+      (should (equal switched '("main"))))))
 
 ;;;; ---- Hide-mode sweep ----
 
@@ -6304,20 +6230,16 @@ binding to invoke it via key press."
   "push-to-back moves the current workspace to the second-to-last position.
 With ws-list (a b c d) and current=b, the result should be (a c b d)."
   (agent-repl-test--with-clean-state
-    (let ((updated-names nil)
-          (flash-called 0))
+    (let ((updated-names nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "b"))
                 ((symbol-function 'persp-names-current-frame-fast-ordered)
                  (lambda () '("a" "b" "c" "d")))
                 ((symbol-function 'persp-update-names-cache)
                  (lambda (names) (setq updated-names names)))
                 ((symbol-function 'agent-repl--force-tab-bar-redraw) #'ignore)
-                ((symbol-function '+workspace-switch) #'ignore)
-                ((symbol-function 'agent-repl-flash-tab)
-                 (lambda (_ws) (cl-incf flash-called))))
+                ((symbol-function '+workspace-switch) #'ignore))
         (agent-repl-workspace-push-to-back)
-        (should (equal updated-names '("a" "c" "b" "d")))
-        (should (= flash-called 1))))))
+        (should (equal updated-names '("a" "c" "b" "d")))))))
 
 (ert-deftest agent-repl-test-workspace-push-to-back-keeps-focus-when-asked ()
   "With KEEP-FOCUS non-nil, the function does NOT switch away from current."
@@ -6329,8 +6251,7 @@ With ws-list (a b c d) and current=b, the result should be (a c b d)."
                 ((symbol-function 'persp-update-names-cache) #'ignore)
                 ((symbol-function 'agent-repl--force-tab-bar-redraw) #'ignore)
                 ((symbol-function '+workspace-switch)
-                 (lambda (ws &rest _) (setq switched-to ws)))
-                ((symbol-function 'agent-repl-flash-tab) #'ignore))
+                 (lambda (ws &rest _) (setq switched-to ws))))
         (agent-repl-workspace-push-to-back t)
         (should-not switched-to)))))
 

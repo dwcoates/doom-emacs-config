@@ -7018,35 +7018,6 @@ target stays the parent (`--merge-target-dir-for-ws')."
           (when had-binding
             (setq +doom-dashboard-buffer-name "*doom*")))))))
 
-;;;; ---- Tests: agent-repl-jump-to-workspace ----
-
-(ert-deftest agent-repl-test-jump-to-workspace-delegates-to-switch ()
-  "agent-repl-jump-to-workspace forwards WS to the raw switch primitive."
-  (let ((switched-ws nil))
-    (cl-letf (((symbol-function 'agent-repl--switch-to-workspace)
-               (lambda (ws) (setq switched-ws ws)))
-              ((symbol-function 'agent-repl--flash-current-tab) #'ignore))
-      (agent-repl-jump-to-workspace "target-ws")
-      (should (equal switched-ws "target-ws")))))
-
-(ert-deftest agent-repl-test-jump-to-workspace-flashes-by-default ()
-  "Without NO-FLASH, the jumper pulses the destination tab — flash is inherent."
-  (let ((flashed nil))
-    (cl-letf (((symbol-function 'agent-repl--switch-to-workspace) #'ignore)
-              ((symbol-function 'agent-repl--flash-current-tab)
-               (lambda () (setq flashed t))))
-      (agent-repl-jump-to-workspace "target-ws")
-      (should flashed))))
-
-(ert-deftest agent-repl-test-jump-to-workspace-no-flash-suppresses-pulse ()
-  "Passing NO-FLASH non-nil skips the pulse — escape hatch for bulk callers."
-  (let ((flashed nil))
-    (cl-letf (((symbol-function 'agent-repl--switch-to-workspace) #'ignore)
-              ((symbol-function 'agent-repl--flash-current-tab)
-               (lambda () (setq flashed t))))
-      (agent-repl-jump-to-workspace "target-ws" t)
-      (should-not flashed))))
-
 ;;;; ---- Tests: agent-repl--with-preserved-focus ----
 
 (ert-deftest agent-repl-test-with-preserved-focus-restores-after-persp-switch ()

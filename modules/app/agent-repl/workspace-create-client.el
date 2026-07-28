@@ -260,7 +260,7 @@ switch they did not initiate."
        (plist-get pending :source-workspace)
        "Workspace '%s' is ready." ws))
     (cond
-     (jump (agent-repl-jump-to-workspace ws))
+     (jump (agent-repl--switch-to-workspace ws))
      ;; A workspace nobody is being moved to still gets its panels built
      ;; now, behind a focus-restoring transient switch, so its first real
      ;; activation displays a mounted layout instead of building one.  Only

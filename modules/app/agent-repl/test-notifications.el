@@ -653,8 +653,8 @@ load-bearing."
   "Activate should jump to the given workspace."
   (let (jumped)
     (cl-letf (((symbol-function 'agent-repl--log) (lambda (&rest _) nil))
-              ((symbol-function 'agent-repl-jump-to-workspace)
-               (lambda (ws &optional _no-flash) (setq jumped ws)))
+              ((symbol-function 'agent-repl--switch-to-workspace)
+               (lambda (ws) (setq jumped ws)))
               ((symbol-function 'select-frame-set-input-focus) (lambda (&rest _) nil))
               ((symbol-function 'selected-frame) (lambda () 'frame)))
       (agent-repl--notification-activate "ws-a")
@@ -664,7 +664,7 @@ load-bearing."
   "Activate should focus the selected frame so Emacs comes forward."
   (let (focused)
     (cl-letf (((symbol-function 'agent-repl--log) (lambda (&rest _) nil))
-              ((symbol-function 'agent-repl-jump-to-workspace) (lambda (&rest _) nil))
+              ((symbol-function 'agent-repl--switch-to-workspace) (lambda (&rest _) nil))
               ((symbol-function 'selected-frame) (lambda () 'the-frame))
               ((symbol-function 'select-frame-set-input-focus)
                (lambda (frame) (setq focused frame))))
@@ -675,7 +675,7 @@ load-bearing."
   "Activate with a nil WS should focus Emacs but not attempt a jump."
   (let ((jumped nil) (focused nil))
     (cl-letf (((symbol-function 'agent-repl--log) (lambda (&rest _) nil))
-              ((symbol-function 'agent-repl-jump-to-workspace)
+              ((symbol-function 'agent-repl--switch-to-workspace)
                (lambda (&rest _) (setq jumped t)))
               ((symbol-function 'selected-frame) (lambda () 'frame))
               ((symbol-function 'select-frame-set-input-focus)
