@@ -236,13 +236,26 @@ func TestReplayFailsWhenTheShimConnectionDrops(t *testing.T) {
 		conn.Close()
 	})
 	// Act
-	res, err := rig.client.Replay(context.Background(), 0, 10, 0, func(*corev1.Event) {})
+	res, _ := rig.client.Replay(context.Background(), 0, 10, 0, func(*corev1.Event) {})
 	// Assert
-	if err != nil {
-		t.Fatalf("Replay: %v", err)
-	}
 	if !res.Truncated || !strings.Contains(res.Reason, "connection closed") {
 		t.Fatalf("result = %+v, want truncated naming the lost connection", res)
+	}
+}
+
+func TestReplayReportsALostLinkAsItsOwnError(t *testing.T) {
+	// Arrange — the shim bounces the daemon link deliberately when the vendor
+	// rotates its session uuid. Reporting that as the shim's own truncation
+	// verdict is what turned a rotation into a failure card with nothing behind
+	// it, so a lost link is its own error and the caller decides what it means.
+	rig := newReplayRig(t, func(conn net.Conn, _ *corev1.ReplayRequest) {
+		conn.Close()
+	})
+	// Act
+	_, err := rig.client.Replay(context.Background(), 0, 10, 0, func(*corev1.Event) {})
+	// Assert
+	if !errors.Is(err, ErrReplayLinkLost) {
+		t.Fatalf("err = %v, want ErrReplayLinkLost", err)
 	}
 }
 
