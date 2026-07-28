@@ -123,6 +123,20 @@ describe("phaseLabel: the SSM's verdict as the footer's anchor", () => {
     expect(got).toEqual({ word: "thinking", tone: "thinking", spinning: true });
   });
 
+  it("says clearing while the context is being discarded", () => {
+    // Arrange / Act
+    const got = phaseLabel("clearing");
+    // Assert — thinking's tone and spin: the same claim, a different word.
+    expect(got).toEqual({ word: "clearing", tone: "thinking", spinning: true });
+  });
+
+  it("says compacting while the context is being summarized", () => {
+    // Arrange / Act
+    const got = phaseLabel("compacting");
+    // Assert
+    expect(got).toEqual({ word: "compacting", tone: "thinking", spinning: true });
+  });
+
   it("does not spin once the turn is done", () => {
     // Arrange / Act
     const got = phaseLabel("done");
@@ -253,20 +267,26 @@ describe("activityDetail: exactly one account of the dead air", () => {
     expect(got.tone).toBe("tool");
   });
 
-  it("lets a compaction supersede a running tool", () => {
+  // AMENDED: this used to assert `compacting…` superseding the tool. The
+  // compaction now has its own PHASE WORD, so the detail cell no longer speaks
+  // for it — repeating the phase in the cell beside it spent the one activity
+  // slot restating the word to its left and hid the tool that was the only
+  // thing the cell could add.
+  it("leaves a running tool in the cell while a compaction holds the phase word", () => {
     // Arrange
     const i = input({
       progress: progress({ compacting: { sinceMs: NOW - 3_000, detail: "compacting" } }),
-      items: [tool()],
+      items: [tool({ progressElapsedS: 12 })],
     });
     // Act
     const got = activityDetail(i, NOW) as Activity;
     // Assert
-    expect(got.text).toBe("compacting…");
+    expect(got.text).toBe("Bash · 12s");
   });
 
-  it("lets a retry supersede a compaction", () => {
-    // Arrange — a retry is the more specific account of the same dead air.
+  it("still lets a retry speak while a compaction holds the phase word", () => {
+    // Arrange — a retry is the agent STALLED, which the phase word does not
+    // say, so it remains the cell's account of the dead air.
     const i = input({
       progress: progress({
         compacting: { sinceMs: NOW, detail: "compacting" },
@@ -277,6 +297,18 @@ describe("activityDetail: exactly one account of the dead air", () => {
     const got = activityDetail(i, NOW) as Activity;
     // Assert
     expect(got.text).toBe("retrying · attempt 3/10 · overloaded");
+  });
+
+  it("shows nothing in the cell when a compaction is the only thing live", () => {
+    // Arrange — the phase word already says `compacting`; a rung here would be
+    // the same fact twice.
+    const i = input({
+      progress: progress({ compacting: { sinceMs: NOW - 3_000, detail: "compacting" } }),
+    });
+    // Act
+    const got = activityDetail(i, NOW);
+    // Assert
+    expect(got).toBeNull();
   });
 
   it("lets a rate limit supersede a retry", () => {
