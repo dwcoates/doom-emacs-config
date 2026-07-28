@@ -135,36 +135,17 @@ default at restart and shouldn't pin behavior."
 ;; removed along with that function.  The render-state contract is
 ;; now owned by `agent-repl--ws-render-status' in workspace.el and
 ;; its tests live in test-workspace.el.  The tests below cover only
-;; the palette/label tab-bar wiring + the `--ws-display-state' panel-
+;; the palette tab-bar wiring + the `--ws-display-state' panel-
 ;; visibility layer that sits on top of the unified render-state.
 
-(ert-deftest agent-repl-test-tab-palette-has-merge-conflict-label ()
-  "Palette has a `:merge-conflict' entry that maps to the 💥 label so
-the tab-bar renders the badge when render-status yields
-`:merge-conflict'."
-  (should (equal (plist-get
-                  (alist-get :merge-conflict agent-repl--tab-palette)
-                  :label)
-                 "💥")))
+(ert-deftest agent-repl-test-tab-palette-has-no-merge-conflict-entry ()
+  "The merge states have no palette row: they take none of the five colors
+and the bracket no longer carries a glyph to distinguish them."
+  (should-not (alist-get :merge-conflict agent-repl--tab-palette)))
 
-(ert-deftest agent-repl-test-tab-palette-has-start-failed-label ()
-  "Palette has a `:start-failed' entry mapping to the 🚫 label so a
-workspace whose agent session failed to start renders a visible badge,
-distinct from `:dead' (❌)."
-  (should (equal (plist-get
-                  (alist-get :start-failed agent-repl--tab-palette)
-                  :label)
-                 "🚫")))
-
-(ert-deftest agent-repl-test-tab-palette-has-merge-failed-label ()
-  "Palette has a `:merge-failed' entry that maps to the ⛔ label so the
-tab-bar renders the badge when render-status yields `:merge-failed'.
-Distinct from `:dead' (❌) so a blocked merge is not mistaken for a
-dead session."
-  (should (equal (plist-get
-                  (alist-get :merge-failed agent-repl--tab-palette)
-                  :label)
-                 "⛔")))
+(ert-deftest agent-repl-test-tab-palette-has-no-merge-failed-entry ()
+  "`:merge-failed' likewise has no palette row."
+  (should-not (alist-get :merge-failed agent-repl--tab-palette)))
 
 (ert-deftest agent-repl-test-tab-spec-idle-async-is-yellow ()
   ":idle-async resolves to the amber background so an idle-but-working tab
@@ -438,9 +419,9 @@ workspace takes its index rather than leaving a gap."
                (lambda () "doom-a"))
               ((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) t)))
       ;; doom-b is 3rd in the raw list but 2nd once the folded repo drops
-      ;; out, so its label carries index 2.
+      ;; out, so its bracket carries index 2.
       (let ((result (agent-repl--tabline-advice)))
-        (should (string-match-p "2❓" result))))))
+        (should (string-match-p "\\[2\\]" result))))))
 
 (ert-deftest agent-repl-test-tabline-keeps-current-workspace-when-its-repo-folded ()
   "The current workspace keeps its tab even when its own repo is folded."
@@ -469,29 +450,30 @@ workspace takes its index rather than leaving a gap."
         (should (string-match-p "other-ws" result))))))
 
 (ert-deftest agent-repl-test-tabline-permission-label ()
-  "Tabline should show index and ❓ for permission state (panels visible)."
+  "Tabline shows the bare index for permission state (panels visible)."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "test-ws" :pushed-render-state :permission)
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
               ((symbol-function '+workspace-list-names) (lambda () '("test-ws")))
               ((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) t)))
       (let ((result (agent-repl--tabline-advice '("test-ws"))))
-        (should (string-match-p "1❓" result))))))
+        (should (string-match-p "\\[1\\]" result))
+        (should-not (string-match-p "❓" result))))))
 
 (ert-deftest agent-repl-test-tabline-dead-label ()
-  "Tabline should show index and ❌ for dead session (panels visible)."
+  "Tabline shows the bare index for a dead session (panels visible)."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "test-ws" :pushed-render-state :dead)
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "other-ws"))
               ((symbol-function '+workspace-list-names) (lambda () '("test-ws")))
               ((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) t)))
       (let ((result (agent-repl--tabline-advice '("test-ws"))))
-        (should (string-match-p "1❌" result))))))
+        (should (string-match-p "\\[1\\]" result))
+        (should-not (string-match-p "❌" result))))))
 
 (ert-deftest agent-repl-test-tabline-merged-label-removed ()
-  "Tabline shows index and 🔀 for a merged workspace (bracket-only,
-panels closed) — :merged uses the same palette `:label' mechanism as
-:dead but emits the merge glyph instead."
+  "Tabline shows no merge glyph for a merged workspace (bracket-only,
+panels closed)."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "test-ws" :pushed-render-state :merged)
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "other-ws"))
@@ -594,37 +576,35 @@ The ❓ glyph in the bracket (not the name background) signals permission."
         (should (equal agent-repl--color-thinking-red
                        (plist-get bracket-face :background)))))))
 
-(ert-deftest agent-repl-test-tabline-panels-closed-permission-bracket-keeps-glyph ()
-  "Panels closed for :permission — bracket label keeps the ❓ glyph
-even when the full-tab background is suppressed."
+(ert-deftest agent-repl-test-tabline-panels-closed-permission-bracket-is-index ()
+  "Panels closed for :permission — the bracket carries the index alone."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "bg-ws" :pushed-render-state :permission)
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
               ((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) nil)))
       (let ((result (agent-repl--tabline-advice '("current-ws" "bg-ws"))))
-        (should (string-match-p "\\[2❓\\]" result))))))
+        (should (string-match-p "\\[2\\]" result))))))
 
-(ert-deftest agent-repl-test-tabline-panels-closed-dead-bracket-keeps-glyph ()
-  "Panels closed for :dead — bracket label keeps the ❌ glyph."
+(ert-deftest agent-repl-test-tabline-panels-closed-dead-bracket-is-index ()
+  "Panels closed for :dead — the bracket carries the index alone."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "bg-ws" :pushed-render-state :dead)
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
               ((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) nil)))
       (let ((result (agent-repl--tabline-advice '("current-ws" "bg-ws"))))
-        (should (string-match-p "\\[2❌\\]" result))))))
+        (should (string-match-p "\\[2\\]" result))))))
 
-(ert-deftest agent-repl-test-tabline-panels-closed-vendor-blocked-bracket-keeps-glyph ()
-  "Panels closed for :vendor-blocked — bracket label keeps the ⛔ glyph."
+(ert-deftest agent-repl-test-tabline-panels-closed-vendor-blocked-bracket-is-index ()
+  "Panels closed for :vendor-blocked — the bracket carries the index alone."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "bg-ws" :pushed-render-state :vendor-blocked)
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
               ((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) nil)))
       (let ((result (agent-repl--tabline-advice '("current-ws" "bg-ws"))))
-        (should (string-match-p "\\[2⛔\\]" result))))))
+        (should (string-match-p "\\[2\\]" result))))))
 
 (ert-deftest agent-repl-test-tabline-panels-closed-thinking-bracket-stays-plain ()
-  "Panels closed for :thinking — bracket label has no glyph
-\(:thinking has no `:label' in the palette, so the index stands alone\)."
+  "Panels closed for :thinking — the bracket carries the index alone."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-set-agent-state "bg-ws" :thinking)
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
@@ -639,7 +619,7 @@ even when the full-tab background is suppressed."
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
               ((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) nil)))
       (let* ((result (agent-repl--tabline-advice '("current-ws" "bg-ws")))
-             (bracket-pos (string-match "\\[2❓\\]" result))
+             (bracket-pos (string-match "\\[2\\]" result))
              (bracket-face (and bracket-pos (get-text-property bracket-pos 'face result))))
         (should bracket-pos)
         (should (equal agent-repl--color-done-green
@@ -1087,23 +1067,31 @@ appended *after* the faced padding, not merged into it."
     (should (eq (get-text-property penultimate 'face result)
                 '+workspace-tab-face))))
 
-;;;; ---- Tests: tab-label edge cases ----
+;;;; ---- Tests: bracket label is the index alone ----
 
-(ert-deftest agent-repl-test-tab-label-zero-index ()
-  "tab-label should return \"0\" when index is 0 and state has no :label."
-  (should (equal (agent-repl--tab-label :thinking 0) "0")))
+(ert-deftest agent-repl-test-render-tab-entry-bracket-is-index-for-permission ()
+  "A :permission workspace renders [3] with no glyph beside the numeral."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :pushed-render-state :permission)
+    (cl-letf (((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) t)))
+      (should (string-match-p "\\[3\\]"
+                              (agent-repl--render-tab-entry "ws1" "current-ws" 3))))))
 
-(ert-deftest agent-repl-test-tab-label-permission-includes-index ()
-  "tab-label for :permission appends ❓ after the numeric index."
-  (should (equal (agent-repl--tab-label :permission 3) "3❓")))
+(ert-deftest agent-repl-test-render-tab-entry-bracket-is-index-for-dead ()
+  "A :dead workspace renders [2] with no glyph beside the numeral."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :pushed-render-state :dead)
+    (cl-letf (((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) t)))
+      (should (string-match-p "\\[2\\]"
+                              (agent-repl--render-tab-entry "ws1" "current-ws" 2))))))
 
-(ert-deftest agent-repl-test-tab-label-dead-includes-index ()
-  "tab-label for :dead appends ❌ after the numeric index."
-  (should (equal (agent-repl--tab-label :dead 2) "2❌")))
-
-(ert-deftest agent-repl-test-tab-label-no-suffix-for-thinking ()
-  "tab-label for :thinking returns only the numeric index (no suffix)."
-  (should (equal (agent-repl--tab-label :thinking 5) "5")))
+(ert-deftest agent-repl-test-render-tab-entry-bracket-is-index-when-panels-closed ()
+  "A closed-panel :start-failed workspace still renders only its index."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :pushed-render-state :start-failed)
+    (cl-letf (((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) nil)))
+      (should (string-match-p "\\[5\\]"
+                              (agent-repl--render-tab-entry "ws1" "current-ws" 5))))))
 
 ;;;; ---- Tests: tab-face direct tests ----
 
@@ -2568,11 +2556,6 @@ liveness — a dead workspace can still have a merge-completed parent."
     (should (equal (plist-get spec :bg) agent-repl--color-selected-bg))
     (should (equal (plist-get spec :bracket-bg)
                    agent-repl--color-vendor-blocked-purple))))
-
-(ert-deftest agent-repl-test-tab-label-vendor-blocked-includes-blocked-glyph ()
-  "tab-label for :vendor-blocked appends the ⛔ glyph after the index."
-  (let ((label (agent-repl--tab-label :vendor-blocked 3)))
-    (should (string= label (concat "3" agent-repl--label-vendor-blocked)))))
 
 ;;;; ---- Tests: hide-mode tabline (no filtering — tab-bar reflects raw list) ----
 

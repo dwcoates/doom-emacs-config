@@ -284,7 +284,7 @@ every recognized priority."
 ;;                     :active   — panels open, session running.
 ;;                     :inactive — panels closed, session preserved.
 ;;                     :dead     — agent session has died.
-;;                   Only :dead contributes to tab display (❌ badge);
+;;                   Only :dead contributes to tab display (blue);
 ;;                   other values are bookkeeping only.
 
 (defun agent-repl--ws-state (ws)
@@ -505,8 +505,6 @@ A no-op if a check is already in progress for WS."
 ;;
 ;; Palette shape (per-state):
 ;;   :face       — defface name for unselected tabs.
-;;   :label      — optional bracket content override (e.g. the permission
-;;                 glyph).
 ;;   :unselected — plist describing unselected appearance.
 ;;   :selected   — plist describing selected appearance.
 ;;
@@ -531,8 +529,8 @@ history.
 It is deliberately ONE color for all of them.  The distinctions matter
 to whoever debugs it, not to the user reading a tab: every one of them
 means the same thing to them, which is that this workspace cannot be
-relied on right now.  The badges (❌ dead, 🚫 start-failed) carry the
-distinction where it is worth having.")
+relied on right now.  The sidebar carries the distinction where it is
+worth having.")
 
 (defconst agent-repl--color-thinking-red     "#cc3333"
   "RED: a turn is in flight.
@@ -586,48 +584,10 @@ tabs; readable against `agent-repl--color-selected-bg'.")
 (defconst agent-repl--color-dark             "black"
   "Dark foreground for light state backgrounds.")
 
-(defconst agent-repl--label-permission       "❓"
-  "Bracket label shown adjacent to the numeric index when the agent is
-asking for a permission decision.")
-
-(defconst agent-repl--label-dead             "❌"
-  "Bracket label shown adjacent to the numeric index when the agent
-session has died.")
-
-(defconst agent-repl--label-vendor-blocked   "⛔"
-  "Bracket label shown adjacent to the numeric index when the session is
-blocked on the vendor or the account (auth, usage limit, a persistent
-API failure, or an abnormal turn conclusion).  Pairs with the purple
-background: the color says \"stopped\", the glyph says \"and only a human
-or the vendor restarts it\".")
-
-(defconst agent-repl--label-start-failed     "🚫"
-  "Bracket label shown adjacent to the numeric index when starting
-the agent failed.  Distinct from `:dead' (❌, a session that died) — the
-session never came up at all.  There is no `:stop-failed' glyph to be
-distinct from any more: a stop that did not land leaves the turn RUNNING,
-so the workspace stays red and the failure surfaces as a card.")
-
-(defconst agent-repl--label-merge-conflict   "💥"
-  "Bracket label shown adjacent to the numeric index when a workspace's
-merge was rejected by a cherry-pick conflict (real conflict markers
-left behind, auto-resolver declined or interactive abort).  Distinct
-from `:dead' (session died) and `:merge-failed' (silent git-aborted, no
-CHERRY_PICK_HEAD) — collision metaphor reflects the actual conflict.")
-
-(defconst agent-repl--label-merged           "🔀"
-  "Bracket label shown adjacent to the numeric index when the
-workspace's branch has been merged into its source (`:repl-state'
-`:merged').  Takes precedence over the `:dead' badge so a merged
-workspace whose session has since died still reads as merged, not
-dead.")
-
-(defconst agent-repl--label-merge-failed     "⛔"
-  "Bracket label shown adjacent to the numeric index when a workspace's
-merge dispatch failed silently (`:repl-state' `:merge-failed') —
-typically because the source repo is mid cherry-pick/rebase/merge and
-git refused the cherry-pick.  Distinct from `:dead' (❌) so a stuck
-merge does not look like a dead session at a glance.")
+;; There are no bracket-label glyphs.  The [N] bracket carries its number
+;; and the state's COLOR, nothing else: a glyph beside the numeral was a
+;; second vocabulary saying what the color already says, and the sidebar
+;; is where a state's DETAIL belongs.
 
 (defconst agent-repl--tab-weight             'bold
   "Font weight applied to every tab face.")
@@ -696,8 +656,8 @@ It names the color rather than its value: each renderer keeps its own
 hex, since a tab-bar background and a CSS dot legitimately want different
 shades of one idea.  What may never differ is the ASSIGNMENT.
 
-\"none\" is a real answer.  The merge states carry badges and glyphs
-precisely so they never spend one of the five.")
+\"none\" is a real answer.  The merge states take none of the five:
+the sidebar reports them, and the tab-bar does not.")
 
 (defconst agent-repl--color-by-name
   `(("blue"   . ,agent-repl--color-init-blue)
@@ -780,7 +740,6 @@ may never reorder it.")
                   :weight ,agent-repl--tab-weight))
     (:permission
      :face       agent-repl-tab-permission
-     :label      ,agent-repl--label-permission
      :unselected (:bg ,agent-repl--color-done-green
                   :fg ,agent-repl--color-dark
                   :bracket-fg ,agent-repl--color-default-bracket
@@ -825,7 +784,6 @@ may never reorder it.")
                   :weight ,agent-repl--tab-weight))
     (:vendor-blocked
      :face       agent-repl-tab-vendor-blocked
-     :label      ,agent-repl--label-vendor-blocked
      :unselected (:bg ,agent-repl--color-vendor-blocked-purple
                   :fg ,agent-repl--color-light
                   :bracket-fg ,agent-repl--color-default-bracket
@@ -837,12 +795,10 @@ may never reorder it.")
                   :weight ,agent-repl--tab-weight))
     ;; `:start-failed', `:dead' and `:degraded' are BLUE, not colors of
     ;; their own: a shim that never came up, one that has gone away, and a
-    ;; store outage are the same compromised route.  They keep their own
-    ;; palette rows so their BADGES survive — the color says the route is
-    ;; broken, the badge says which way.
+    ;; store outage are the same compromised route.  Which way the route is
+    ;; broken is the sidebar's to report, not the tab's.
     (:start-failed
      :face       agent-repl-tab-init
-     :label      ,agent-repl--label-start-failed
      :unselected (:bg ,agent-repl--color-init-blue
                   :fg ,agent-repl--color-light
                   :bracket-fg ,agent-repl--color-default-bracket
@@ -854,7 +810,6 @@ may never reorder it.")
                   :weight ,agent-repl--tab-weight))
     (:dead
      :face       agent-repl-tab-init
-     :label      ,agent-repl--label-dead
      :unselected (:bg ,agent-repl--color-init-blue
                   :fg ,agent-repl--color-light
                   :bracket-fg ,agent-repl--color-default-bracket
@@ -874,24 +829,17 @@ may never reorder it.")
                   :fg ,agent-repl--color-dark
                   :bracket-bg ,agent-repl--color-init-blue
                   :bracket-fg ,agent-repl--color-light
-                  :weight ,agent-repl--tab-weight))
-    ;; The merge states carry badges and NO color, deliberately: the
-    ;; sidebar's spinning recycle glyph plus these badges already say
-    ;; everything the merge pipeline needs to, and giving them colors would
-    ;; put a sixth and seventh vocabulary beside the five.
-    (:merge-conflict
-     :label      ,agent-repl--label-merge-conflict)
-    (:merge-failed
-     :label      ,agent-repl--label-merge-failed))
+                  :weight ,agent-repl--tab-weight)))
   "Per-state tab-appearance palette.
 Each entry fully describes both selected and unselected looks for a
 agent-state keyword via nested `:unselected' and `:selected' plists.
 `:repl-state :inactive' does not contribute to color (it is bookkeeping
 only).
 
-`:merged' has NO entry: a merged workspace never reaches the tab-bar
-\(`agent-repl--filter-merged-names'), so it has no appearance to
-describe here.")
+The merge states have NO entry: they take none of the five colors, and
+the tab no longer carries badges, so the merge pipeline says what it has
+to say in the sidebar.  `:merged' likewise never reaches the tab-bar at
+all (`agent-repl--filter-merged-names').")
 
 (defun agent-repl--tab-spec (state selected)
   "Return the appearance spec (plist) for STATE with SELECTED flag.
@@ -1099,16 +1047,6 @@ whenever an entry landed at a wrap (or the final row's) end."
             (propertize (format agent-repl-tab-name-padding name) 'face name-face)
             " ")))
 
-(defun agent-repl--tab-label (state index)
-  "Return the tab label for STATE and numeric INDEX.
-When the palette defines a `:label' for STATE (e.g. \"❓\" for permission,
-\"❌\" for dead), the suffix is appended after the numeric index
-\(e.g. \"1❓\").  Otherwise returns the index as a plain string."
-  (let ((suffix (plist-get (alist-get state agent-repl--tab-palette) :label)))
-    (if suffix
-        (concat (number-to-string index) suffix)
-      (number-to-string index))))
-
 (defun agent-repl--tab-face (state selected)
   "Return the face symbol for the NAME portion of a tab.
 For unselected tabs, uses the palette row's `:face' or falls back to
@@ -1132,8 +1070,8 @@ truth for visual state across the tab-bar and project
 picker), then layers panel-visibility suppression on top: when the
 render-state is non-nil AND no agent panel is present in WS's
 live-or-saved window layout, returns nil regardless of state — this
-suppresses full-tab coloring (state-colored name and label badges
-like ❓/❌/⚠) for workspaces whose panels the user has dismissed.
+suppresses full-tab coloring (the state-colored name region) for
+workspaces whose panels the user has dismissed.
 `:agent-state' is preserved on the plist so the original color
 reappears the next time the user reopens panels.  The nil-state
 shortcut avoids calling `agent-repl--ws-agent-open-p' on
@@ -1143,7 +1081,7 @@ UI-boundary tolerance: the tab-bar iterates `persp-names-cache',
 which can briefly contain names the workspace hash doesn't yet know
 about (a mid-creation persp, the `none' sentinel persp).
 `--ws-render-status' would signal `user-error' for those; here we
-short-circuit to nil so rendering proceeds without color or badge.
+short-circuit to nil so rendering proceeds without color.
 This is the documented exception to the no-fallback rule, scoped
 to the renderer-input boundary.
 
@@ -1179,11 +1117,10 @@ drives the name face.  The appearance spec is resolved via
 is nil but `agent-repl--ws-bracket-state' returns a state (i.e., panels
 dismissed for a workspace that still has agent-state), the spec is
 built via `agent-repl--tab-spec-bracket-only' so only the [N] bracket
-keeps the state's color.  The bracket label is driven by bracket-state
-when display-state is suppressed, so palette `:label' glyphs (❓ for
-:permission, ❌ for :dead, 🚫 for :start-failed) render even on
-workspaces whose agent panels are closed — only the full-tab
-background requires panels to be open.  When the workspace's
+keeps the state's color.  The bracket label is the tab's 1-based INDEX
+and nothing else: state reaches the bracket as COLOR, so a workspace
+whose panels are closed still reads its state from the bracket's
+color without any glyph beside the numeral.  When the workspace's
 `:flashing' flag is set \(see `agent-repl-flash-tab'\), the spec and
 name face are overridden to a uniform pulse so the tab stands out."
   ;; Called on every tab-bar redisplay, potentially many times per second;
@@ -1199,8 +1136,7 @@ name face are overridden to a uniform pulse so the tab stands out."
                                          bracket-state selected))
                          (t             (agent-repl--tab-spec
                                          display-state selected))))
-         (label         (agent-repl--tab-label
-                         (or display-state bracket-state) index))
+         (label         (number-to-string index))
          (face          (if flashing
                             'agent-repl-tab-flash
                           (agent-repl--tab-face display-state selected)))
@@ -2022,8 +1958,7 @@ No-op in four cases:
   Without this guard, the next poll would clobber the merge badge.
 - `:repl-state' is `:merge-failed' — the workspace was nuked after
   a silent-failure merge and `:merge-failed' is the canonical badge
-  for that state (also ❌, but routed under MERGED, not orphaned as
-  :dead).  Without this guard, the next poll would re-classify the
+  for that state (routed under MERGED, not orphaned as :dead).  Without this guard, the next poll would re-classify the
   workspace as plain `:dead' and the MERGED-section semantics would
   be lost.
 - `:agent-state' is `:init' — the agent is starting, the daemon
