@@ -202,3 +202,51 @@ func TestFirstAdoptionReconcilesNothing(t *testing.T) {
 		t.Fatalf("rotations applied = %v, want none for a first adoption", got)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// consumer.onVendorSessionID — keeping the record current off the LIVE stream.
+//
+// A rotation is detected by comparing a handshake's announcement against the
+// persisted uuid, so an empty record leaves nothing to differ from. Every
+// PERSISTENT store event names the conversation it belongs to on its envelope,
+// which is the earliest and most reliable place to read it.
+// ---------------------------------------------------------------------------
+
+func TestPersistentEventReportsItsVendorSessionID(t *testing.T) {
+	// Arrange — a seq-stamped store event: the store keys by the vendor uuid,
+	// so that is what the envelope carries.
+	var seen []string
+	c := newConsumer("ws", "s1", &fakePusher{}, &fakeApplier{}, nil, newFakeClearCompactStore(), nil, nil, nil, nil, nil)
+	c.onVendorSessionID = func(id string) { seen = append(seen, id) }
+
+	// Act.
+	c.Apply(&corev1.Event{
+		SessionId: "uuid-old", Seq: 7,
+		Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{}},
+	})
+
+	// Assert.
+	if len(seen) != 1 || seen[0] != "uuid-old" {
+		t.Fatalf("observed vendor ids = %v, want [uuid-old]", seen)
+	}
+}
+
+func TestEphemeralEventReportsNoVendorSessionID(t *testing.T) {
+	// Arrange — seq 0 is the direct shim→daemon path, whose envelope carries
+	// the DAEMON's own s_ id. Adopting that as the vendor uuid would file the
+	// conversation under an identity no store event will ever use.
+	var seen []string
+	c := newConsumer("ws", "s1", &fakePusher{}, &fakeApplier{}, nil, newFakeClearCompactStore(), nil, nil, nil, nil, nil)
+	c.onVendorSessionID = func(id string) { seen = append(seen, id) }
+
+	// Act.
+	c.Apply(&corev1.Event{
+		SessionId: "s1", Seq: 0,
+		Payload: &corev1.Event_SessionStarted{SessionStarted: &corev1.SessionStarted{}},
+	})
+
+	// Assert.
+	if len(seen) != 0 {
+		t.Fatalf("observed vendor ids = %v, want none for an ephemeral event", seen)
+	}
+}

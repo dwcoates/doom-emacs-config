@@ -952,6 +952,14 @@ func (m *Manager) bringUp(workspace string) (*driven, error) {
 	}, func() {
 		m.persistSessionDeath(sessionID, errclass.DeathReasonShimDied)
 	})
+	// Every PERSISTENT store event names the conversation it belongs to.
+	// Keeping the record current off the live stream is what gives a later
+	// handshake's announcement something to DIFFER from — a rotation is
+	// invisible against an empty record. Bound before Run, so no event can
+	// reach the consumer with this unset.
+	cons.onVendorSessionID = func(vendorSessionID string) {
+		m.persistVendorSessionID(sessionID, vendorSessionID)
+	}
 	d.consumer = cons
 	// Settle the backfill for a REOPENED session before any event flows.
 	//
