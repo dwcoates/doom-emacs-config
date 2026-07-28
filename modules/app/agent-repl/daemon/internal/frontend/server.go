@@ -537,7 +537,7 @@ func isHostOnlyCommand(cmd *frontendv1.FrontendCommand) bool {
 	if cmd == nil {
 		return false
 	}
-	return cmd.GetCreateWorkspace() != nil || cmd.GetWorkspaceMaterialized() != nil || cmd.GetHostActionCompleted() != nil
+	return cmd.GetWorkspaceMaterialized() != nil || cmd.GetHostActionCompleted() != nil
 }
 
 func (s *Server) dispatchClientCommand(cl *client, cmd *frontendv1.FrontendCommand) (*frontendv1.CommandAck, *frontendv1.FrontendFrame) {

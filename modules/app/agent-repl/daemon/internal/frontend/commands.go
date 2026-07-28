@@ -20,8 +20,6 @@ import (
 // Every method returns an error; a non-nil error becomes a CommandAck with
 // ok=false and the error text (a loud Nack-style failure), never a silent drop.
 type CommandHandler interface {
-	// CreateWorkspace enqueues a complete daemon-owned workspace request.
-	CreateWorkspace(ctx context.Context, workspace, requestID string, cmd *frontendv1.CreateWorkspaceCmd) error
 	// WorkspaceMaterialized records the Emacs host's durable materialization
 	// acknowledgement and may release the workspace's queued initial prompt.
 	WorkspaceMaterialized(ctx context.Context, workspace, requestID string, cmd *frontendv1.WorkspaceMaterializedCmd) error
@@ -116,7 +114,11 @@ func DispatchWithResponse(ctx context.Context, logf dlog.Logf, h CommandHandler,
 	var response *frontendv1.FrontendFrame
 	switch c := cmd.GetCommand().(type) {
 	case *frontendv1.FrontendCommand_CreateWorkspace:
-		err = h.CreateWorkspace(ctx, ws, reqID, c.CreateWorkspace)
+		// Workspace creation has exactly ONE ingestion point: a
+		// workspace_commands_<uuid>.json file in the daemon's inbox. A second
+		// wire path would let a caller create a workspace the durable inbox
+		// never recorded, so the arm is rejected here rather than routed.
+		err = fmt.Errorf("frontend: createWorkspace is not accepted over the wire; write a workspace_commands_<uuid>.json command file")
 	case *frontendv1.FrontendCommand_WorkspaceMaterialized:
 		err = h.WorkspaceMaterialized(ctx, ws, reqID, c.WorkspaceMaterialized)
 	case *frontendv1.FrontendCommand_HostActionCompleted:
