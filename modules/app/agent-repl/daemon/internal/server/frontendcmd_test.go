@@ -155,11 +155,6 @@ type fakeSessionCmds struct {
 	err     error
 }
 
-type createCall struct {
-	requestID string
-	cmd       *frontendv1.CreateWorkspaceCmd
-}
-
 type hostActionCompletion struct {
 	actionID string
 	ok       bool
@@ -173,7 +168,6 @@ type fakeWorkspaceCreation struct {
 	snapshot     WorkspaceHostWorkSnapshot
 	available    chan *frontendv1.WorkspaceAvailable
 	actions      chan *frontendv1.HostAction
-	created      []createCall
 	materialized []string
 	completions  []hostActionCompletion
 }
@@ -196,11 +190,6 @@ func newFakeWorkspaceCreation() *fakeWorkspaceCreation {
 		available: make(chan *frontendv1.WorkspaceAvailable, 8),
 		actions:   make(chan *frontendv1.HostAction, 8),
 	}
-}
-
-func (f *fakeWorkspaceCreation) CreateWorkspace(_ context.Context, requestID string, cmd *frontendv1.CreateWorkspaceCmd) error {
-	f.created = append(f.created, createCall{requestID: requestID, cmd: cmd})
-	return nil
 }
 
 func (f *fakeWorkspaceCreation) MarkWorkspaceMaterialized(_ context.Context, jobID string) error {
@@ -540,9 +529,8 @@ func TestCommandHandlerCreateSessionErrorSurfaces(t *testing.T) {
 }
 
 func TestCommandHandlerRoutesDaemonOwnedWorkspaceWork(t *testing.T) {
-	// Arrange — a create request only records durable work. It does not wait for
-	// worktree creation or a host perspective, so the frontend ACK represents
-	// enqueue acceptance rather than eventual materialization.
+	// Arrange — creation itself is not a wire command; what the host still
+	// drives over the wire is the durable acknowledgement pair.
 	bridge := newFakeWorkspaceCreation()
 	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil, nil, nil,
 		CommandHandlerConfig{WorkspaceCreation: bridge})
@@ -551,9 +539,6 @@ func TestCommandHandlerRoutesDaemonOwnedWorkspaceWork(t *testing.T) {
 	}
 
 	// Act.
-	if err := h.CreateWorkspace(context.Background(), "", "request-1", &frontendv1.CreateWorkspaceCmd{RequestedName: "fresh", GitRoot: "/repo", ConfigDir: "/cfg", PermissionMode: "bypassPermissions", AllowUngated: true}); err != nil {
-		t.Fatalf("CreateWorkspace: %v", err)
-	}
 	if err := h.WorkspaceMaterialized(context.Background(), "", "request-2", &frontendv1.WorkspaceMaterializedCmd{JobId: "job-1"}); err != nil {
 		t.Fatalf("WorkspaceMaterialized: %v", err)
 	}
@@ -563,9 +548,6 @@ func TestCommandHandlerRoutesDaemonOwnedWorkspaceWork(t *testing.T) {
 
 	// Assert — all durable transitions are delegated exactly once, including a
 	// failed completion (which the bridge preserves rather than dropping).
-	if len(bridge.created) != 1 || bridge.created[0].requestID != "request-1" || bridge.created[0].cmd.GetRequestedName() != "fresh" || bridge.created[0].cmd.GetConfigDir() != "/cfg" || bridge.created[0].cmd.GetPermissionMode() != "bypassPermissions" || !bridge.created[0].cmd.GetAllowUngated() {
-		t.Fatalf("create calls = %+v", bridge.created)
-	}
 	if got := bridge.materialized; len(got) != 1 || got[0] != "job-1" {
 		t.Fatalf("materialized = %v", got)
 	}

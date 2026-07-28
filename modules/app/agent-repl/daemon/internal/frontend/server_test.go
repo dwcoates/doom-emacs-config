@@ -249,20 +249,20 @@ func TestGUIRejectsHostOnlyCommand(t *testing.T) {
 
 	// Act.
 	data, err := protojson.Marshal(&frontendv1.FrontendCommand{
-		RequestId: "create-from-gui",
-		Command:   &frontendv1.FrontendCommand_CreateWorkspace{CreateWorkspace: &frontendv1.CreateWorkspaceCmd{RequestedName: "nope", GitRoot: "/repo"}},
+		RequestId: "materialized-from-gui",
+		Command:   &frontendv1.FrontendCommand_WorkspaceMaterialized{WorkspaceMaterialized: &frontendv1.WorkspaceMaterializedCmd{JobId: "job-nope"}},
 	})
 	if err != nil {
-		t.Fatalf("marshal create: %v", err)
+		t.Fatalf("marshal materialized: %v", err)
 	}
 	if err := gui.WriteMessage(websocket.TextMessage, data); err != nil {
-		t.Fatalf("write create: %v", err)
+		t.Fatalf("write materialized: %v", err)
 	}
 	ack := readWSFrame(t, gui).GetCommandAck()
 
 	// Assert.
 	if ack.GetOk() || !strings.Contains(ack.GetError(), "host-only command") {
-		t.Fatalf("GUI create ack = %+v, want loud host-only refusal", ack)
+		t.Fatalf("GUI host-only ack = %+v, want loud host-only refusal", ack)
 	}
 	if h.called != "" {
 		t.Fatalf("GUI host-only command reached handler %q", h.called)

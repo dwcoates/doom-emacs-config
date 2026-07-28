@@ -85,7 +85,6 @@ type WorkspaceLifecycle interface {
 // A nil bridge is an explicit unsupported capability: the command handler
 // returns a loud Nack rather than claiming a workspace or host action exists.
 type WorkspaceCreationBridge interface {
-	CreateWorkspace(ctx context.Context, requestID string, cmd *frontendv1.CreateWorkspaceCmd) error
 	MarkWorkspaceMaterialized(ctx context.Context, jobID string) error
 	CompleteHostAction(ctx context.Context, actionID string, ok bool, failure string) error
 	SnapshotHostWork() WorkspaceHostWorkSnapshot
@@ -286,15 +285,6 @@ type PaintAcker interface {
 }
 
 var _ frontend.CommandHandler = (*commandHandler)(nil)
-
-func (h *commandHandler) CreateWorkspace(ctx context.Context, _ string, requestID string, cmd *frontendv1.CreateWorkspaceCmd) error {
-	h.logf("frontend cmd: create_workspace request_id=%s requested_name=%s git_root=%s base_commit=%s source_workspace=%s source_dir=%s initial_prompt_present=%t priority=%s model=%s fork_from=%s fork_session_id=%s postprocessing_prompt_present=%t before_ws_merge_present=%t config_dir=%s permission_mode=%s allow_ungated=%t",
-		requestID, cmd.GetRequestedName(), cmd.GetGitRoot(), cmd.GetBaseCommit(), cmd.GetSourceWorkspace(), cmd.GetSourceDir(), cmd.InitialPrompt != nil, cmd.GetPriority(), cmd.GetModel(), cmd.GetForkFrom(), cmd.GetForkSessionId(), cmd.GetPostprocessingPrompt() != "", cmd.GetBeforeWsMerge() != "", cmd.GetConfigDir(), cmd.GetPermissionMode(), cmd.GetAllowUngated())
-	if h.workspaceCreation == nil {
-		return fmt.Errorf("server: create_workspace is unavailable: workspace creation manager is not wired")
-	}
-	return h.workspaceCreation.CreateWorkspace(ctx, requestID, cmd)
-}
 
 func (h *commandHandler) WorkspaceMaterialized(ctx context.Context, _ string, requestID string, cmd *frontendv1.WorkspaceMaterializedCmd) error {
 	h.logf("frontend cmd: workspace_materialized request_id=%s job_id=%s", requestID, cmd.GetJobId())

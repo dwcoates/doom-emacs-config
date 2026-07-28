@@ -332,6 +332,40 @@ func TestMaterializationAckIsIdempotentAndDeliversPromptOnce(t *testing.T) {
 	}
 }
 
+func TestPromptlessCreateReachesReadyWithoutSubmittingAnything(t *testing.T) {
+	// Arrange — a create with no initial prompt. Emacs' SPC TAB n emits no
+	// `prompt' field at all when the user leaves the prompt blank.
+	root := t.TempDir()
+	f := newFixture(t, filepath.Join(root, "jobs.json"))
+	if _, _, err := f.store.Enqueue(Job{ID: "quiet", Request: Request{Name: "DWC/quiet", GitRoot: "/repo"}, State: StateQueued}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act.
+	if err := f.manager.Process(context.Background(), "quiet"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.manager.MarkMaterialized(context.Background(), "quiet"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert — the workspace is fully ready, and NOTHING was submitted: an
+	// empty submit would open the session with a blank turn.
+	got := job(t, f.store, "quiet")
+	if got.State != StateReady {
+		t.Fatalf("promptless job state = %s, want %s", got.State, StateReady)
+	}
+	if f.prompts.calls != 0 {
+		t.Fatalf("promptless job submitted %d prompts, want 0", f.prompts.calls)
+	}
+	if got.PromptDelivered {
+		t.Fatal("promptless job recorded a prompt delivery")
+	}
+	if f.available.calls != 1 {
+		t.Fatalf("available published %d times, want 1", f.available.calls)
+	}
+}
+
 func TestResolvedWorktreeIdentitySurvivesRestart(t *testing.T) {
 	root := t.TempDir()
 	state := filepath.Join(root, "jobs.json")

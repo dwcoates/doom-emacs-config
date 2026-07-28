@@ -22,10 +22,6 @@ type mockHandler struct {
 	lastResyncSeq uint64
 }
 
-func (m *mockHandler) CreateWorkspace(_ context.Context, ws, rid string, _ *frontendv1.CreateWorkspaceCmd) error {
-	m.called, m.lastWorkspace, m.lastRequestID = "create_workspace", ws, rid
-	return m.err
-}
 func (m *mockHandler) WorkspaceMaterialized(_ context.Context, ws, rid string, _ *frontendv1.WorkspaceMaterializedCmd) error {
 	m.called, m.lastWorkspace, m.lastRequestID = "workspace_materialized", ws, rid
 	return m.err
@@ -104,17 +100,40 @@ func (m *mockHandler) SessionHealth(_ context.Context, ws, rid string, cmd *fron
 	return &frontendv1.SessionHealthView{RequestId: rid, Workspace: ws, SessionId: cmd.GetSessionId(), Healthy: true}, m.err
 }
 
+// TestDispatchRefusesWireWorkspaceCreation pins the single-producer rule: a
+// workspace is created by writing a workspace_commands_<uuid>.json file into
+// the daemon's inbox, and by nothing else. The arm still exists on the wire,
+// so the refusal has to be an explicit Nack — silently ignoring it would look
+// to the caller exactly like a create that succeeded.
+func TestDispatchRefusesWireWorkspaceCreation(t *testing.T) {
+	// Arrange.
+	h := &mockHandler{}
+	cmd := &frontendv1.FrontendCommand{
+		RequestId: "create-over-wire",
+		Command:   &frontendv1.FrontendCommand_CreateWorkspace{CreateWorkspace: &frontendv1.CreateWorkspaceCmd{RequestedName: "new", GitRoot: "/repo"}},
+	}
+
+	// Act.
+	ack := Dispatch(context.Background(), func(string, ...any) {}, h, cmd)
+
+	// Assert.
+	if ack.GetOk() {
+		t.Fatalf("createWorkspace ack = %+v, want refusal", ack)
+	}
+	if !strings.Contains(ack.GetError(), "workspace_commands_") {
+		t.Fatalf("refusal %q does not name the command-file ingress", ack.GetError())
+	}
+	if h.called != "" {
+		t.Fatalf("createWorkspace reached handler %q", h.called)
+	}
+}
+
 func TestDispatchRoutesEachCommand(t *testing.T) {
 	tests := []struct {
 		name    string
 		cmd     *frontendv1.FrontendCommand
 		wantHit string
 	}{
-		{
-			name:    "create workspace",
-			cmd:     &frontendv1.FrontendCommand{RequestId: "r0", Command: &frontendv1.FrontendCommand_CreateWorkspace{CreateWorkspace: &frontendv1.CreateWorkspaceCmd{RequestedName: "new", GitRoot: "/repo"}}},
-			wantHit: "create_workspace",
-		},
 		{
 			name:    "workspace materialized",
 			cmd:     &frontendv1.FrontendCommand{RequestId: "r0b", Command: &frontendv1.FrontendCommand_WorkspaceMaterialized{WorkspaceMaterialized: &frontendv1.WorkspaceMaterializedCmd{JobId: "job-1"}}},
