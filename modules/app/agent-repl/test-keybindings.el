@@ -609,39 +609,29 @@ this test doesn't pin."
 
 (ert-deftest agent-repl-test-format-diagnostics-full ()
   "format-diagnostics should include all diagnostic fields.
-DIAG's keys are `:owning-ws :has-window :agent-open :dirty' -- there is
+DIAG's keys are `:owning-ws :has-window :agent-open' -- there is
 no `:vterm-buf'/`:proc-alive' anymore now that the agent view is always
 the webview buffer, derived independently of any vterm process."
   (let* ((diag (list :owning-ws "my-ws"
                      :has-window t
-                     :agent-open t
-                     :dirty nil))
+                     :agent-open t))
          (result (agent-repl-debug/--format-diagnostics "ws1" diag :thinking :done)))
     (should (string-match-p "ws1" result))
     (should (string-match-p "owning-ws=my-ws" result))
     (should (string-match-p "has-window=yes" result))
     (should (string-match-p "agent-open=yes" result))
-    (should (string-match-p "dirty=no" result))
     (should (string-match-p ":thinking -> :done" result))))
 
 (ert-deftest agent-repl-test-format-diagnostics-nil-values ()
   "format-diagnostics should handle nil values gracefully."
   (let* ((diag (list :owning-ws nil
                      :has-window nil
-                     :agent-open nil
-                     :dirty nil))
+                     :agent-open nil))
          (result (agent-repl-debug/--format-diagnostics "ws1" diag nil nil)))
     (should (string-match-p "owning-ws=nil" result))
     (should (string-match-p "has-window=no" result))
     (should (string-match-p "agent-open=no" result))
-    (should (string-match-p "dirty=no" result))
     (should (string-match-p "nil -> nil" result))))
-
-(ert-deftest agent-repl-test-format-diagnostics-dirty ()
-  "format-diagnostics should show dirty=yes when dirty is non-nil."
-  (let* ((diag (list :owning-ws nil :has-window nil :agent-open nil :dirty t))
-         (result (agent-repl-debug/--format-diagnostics "ws1" diag nil nil)))
-    (should (string-match-p "dirty=yes" result))))
 
 ;;;; ---- Tests: agent-repl-debug/--apply-state-refresh ----
 
@@ -723,26 +713,6 @@ prior value and writes :repl-state :dead."
                  (setq msg (apply #'format fmt args)))))
       (agent-repl-debug/buffer-info)
       (should (string-match-p "(none)" msg)))))
-
-;;;; ---- Tests: agent-repl-debug/workspace-clean-p ----
-
-(ert-deftest agent-repl-test-debug-workspace-clean-p ()
-  "workspace-clean-p should report clean or dirty."
-  (let ((msg nil))
-    (cl-letf (((symbol-function 'agent-repl--workspace-clean-p) (lambda (_) t))
-              ((symbol-function 'message) (lambda (fmt &rest args)
-                                            (setq msg (apply #'format fmt args)))))
-      (agent-repl-debug/workspace-clean-p "ws1")
-      (should (string-match-p "clean" msg)))))
-
-(ert-deftest agent-repl-test-debug-workspace-dirty ()
-  "workspace-clean-p should show dirty when workspace has changes."
-  (let ((msg nil))
-    (cl-letf (((symbol-function 'agent-repl--workspace-clean-p) (lambda (_) nil))
-              ((symbol-function 'message) (lambda (fmt &rest args)
-                                            (setq msg (apply #'format fmt args)))))
-      (agent-repl-debug/workspace-clean-p "ws1")
-      (should (string-match-p "dirty" msg)))))
 
 ;;;; ---- Tests: format-buffer-info with owning set but persp nil ----
 
@@ -845,7 +815,6 @@ local process this diagnostic could observe."
       (setq-local agent-repl--owning-workspace "ws1")
       (let ((test-buf (current-buffer)))
         (cl-letf (((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_) t))
-                  ((symbol-function 'agent-repl--workspace-clean-p) (lambda (_) nil))
                   ((symbol-function 'persp-get-by-name) (lambda (_) [fake-persp]))
                   ((symbol-function 'persp-buffers) (lambda (_) (list test-buf)))
                   ((symbol-function 'agent-repl--agent-view-buffer-p)
@@ -854,8 +823,7 @@ local process this diagnostic could observe."
           (let ((diag (agent-repl-debug/--gather-ws-diagnostics "ws1")))
             (should (equal (plist-get diag :owning-ws) "ws1"))
             (should (eq (plist-get diag :has-window) 'fake-win))
-            (should (eq (plist-get diag :agent-open) t))
-            (should (eq (plist-get diag :dirty) t))))))))
+            (should (eq (plist-get diag :agent-open) t))))))))
 
 ;;;; ---- Tests: --gather-ws-diagnostics: no persp found ----
 
@@ -863,13 +831,11 @@ local process this diagnostic could observe."
   "gather-ws-diagnostics should return nil for buffer-related fields when no persp is found."
   (agent-repl-test--with-clean-state
     (cl-letf (((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_) nil))
-              ((symbol-function 'agent-repl--workspace-clean-p) (lambda (_) t))
               ((symbol-function 'persp-get-by-name) (lambda (_) nil)))
       (let ((diag (agent-repl-debug/--gather-ws-diagnostics "nonexistent")))
         (should-not (plist-get diag :owning-ws))
         (should-not (plist-get diag :has-window))
-        (should-not (plist-get diag :agent-open))
-        (should-not (plist-get diag :dirty))))))
+        (should-not (plist-get diag :agent-open))))))
 
 ;;;; ---- Tests: --gather-ws-diagnostics: persp is a symbol ----
 
@@ -877,7 +843,6 @@ local process this diagnostic could observe."
   "gather-ws-diagnostics should return nil for buffer fields when persp is a symbol."
   (agent-repl-test--with-clean-state
     (cl-letf (((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_) nil))
-              ((symbol-function 'agent-repl--workspace-clean-p) (lambda (_) t))
               ((symbol-function 'persp-get-by-name) (lambda (_) 'none)))
       (let ((diag (agent-repl-debug/--gather-ws-diagnostics "ws1")))
         ;; `persp-buffers' is unbound in this batch environment, so
@@ -915,7 +880,7 @@ local process this diagnostic could observe."
     (let ((msg nil))
       (cl-letf (((symbol-function 'agent-repl-debug/--gather-ws-diagnostics)
                  (lambda (_ws)
-                   (list :owning-ws nil :has-window nil :agent-open nil :dirty nil)))
+                   (list :owning-ws nil :has-window nil :agent-open nil)))
                 ((symbol-function 'agent-repl-debug/--apply-state-refresh)
                  (lambda (ws _open)
                    ;; Simulate clearing state (mirroring non-open + :done behavior)
