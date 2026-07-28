@@ -539,7 +539,7 @@ describe("context compaction", () => {
   });
 
   it("seats the orange rule above the context-compacted stamp", () => {
-    // Arrange + Act — the rule must precede the label so it opens the feed.
+    // Arrange + Act — inside the marker the rule still precedes its stamp.
     const html = renderItem(compacted());
     // Assert
     expect(html.indexOf("compact-rule")).toBeLessThan(html.indexOf("compact-divider"));
@@ -573,11 +573,12 @@ describe("context compaction", () => {
     expect(html).toContain("<h1");
   });
 
-  it("seats the summary bubble BELOW the rule it explains", () => {
-    // Arrange + Act
+  it("seats the summary bubble ABOVE the marker that closes it", () => {
+    // Arrange + Act — the reader meets the surviving account first, then the
+    // orange rule and its stamp underneath.
     const html = renderItem(compacted());
     // Assert
-    expect(html.indexOf("compact-rule")).toBeLessThan(html.indexOf("compact-summary"));
+    expect(html.indexOf("compact-summary")).toBeLessThan(html.indexOf("compact-rule"));
   });
 
   it("draws no bubble at all for an EMPTY summary", () => {

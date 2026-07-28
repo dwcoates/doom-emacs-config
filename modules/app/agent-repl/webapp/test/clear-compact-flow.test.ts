@@ -210,6 +210,21 @@ describe("a compaction's summary", () => {
     expect(bubble?.textContent).toContain("the story so far");
   });
 
+  it("paints above the boundary marker that survives the truncation with it", () => {
+    // Arrange — the truncation keeps the compaction item itself, and the
+    // summary rides in that same item's markup, so it stays on the visible
+    // side; what this pins is the ORDER inside it.
+    vi.spyOn(Date, "now").mockReturnValue(NOW_MS);
+    const f = live([promptItem("u1", "/compact"), compactItem()]);
+    // Act
+    const bubble = f.container.querySelector(".bubble.assistant.compact-summary");
+    const rule = f.container.querySelector(".compact-rule");
+    // Assert — DOCUMENT_POSITION_FOLLOWING: the rule comes after the bubble.
+    expect(bubble?.compareDocumentPosition(rule as Node)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+  });
+
   it("renders an automatic compaction exactly as it renders a manual one", () => {
     // Arrange — an AUTO compaction has no `/compact` prompt above it at all;
     // whether the system or the user asked changes nothing a reader can act on.
