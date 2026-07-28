@@ -178,6 +178,13 @@ type Manager struct {
 	closed   bool
 	rootCtx  context.Context
 	rootStop context.CancelFunc
+	// exits counts every driver-exit goroutine (the tail of bringUp's `go
+	// func`), so Close can JOIN them. Unjoined, that tail — which drains the
+	// queue, publishes the empty view, and persists queued_prompts through the
+	// registry — outlives Close and races whatever tears down after it; in the
+	// e2e suite it recreated registry files inside a t.TempDir mid-RemoveAll,
+	// which was the origin of the roving "directory not empty" teardown flake.
+	exits sync.WaitGroup
 }
 
 // driven is one live session's driver state.
@@ -981,7 +988,9 @@ func (m *Manager) bringUp(workspace string) (*driven, error) {
 	m.byWS[workspace] = d
 	m.mu.Unlock()
 
+	m.exits.Add(1)
 	go func() {
+		defer m.exits.Done()
 		runErr := client.Run(runCtx)
 		if runErr != nil {
 			m.logf("sessiondrv: session %s driver ended: %v", sessionID, runErr)
@@ -1048,8 +1057,11 @@ func (m *Manager) onConnected(workspace, sessionID string, hello *corev1.ShimHel
 	}
 }
 
-// Close stops every driver and abandons pending permissions (no fabricated
-// answers). Idempotent.
+// Close stops every driver, abandons pending permissions (no fabricated
+// answers), and JOINS every driver-exit goroutine before returning, so no
+// teardown work of this manager's — queue drain, empty-view publish, the
+// registry's queued_prompts persist, the orphan-shim stop — can outlive it.
+// Idempotent.
 func (m *Manager) Close() {
 	m.mu.Lock()
 	if m.closed {
@@ -1060,6 +1072,7 @@ func (m *Manager) Close() {
 	m.mu.Unlock()
 	m.rootStop()
 	m.reg.fail("manager closed")
+	m.exits.Wait()
 }
 
 // permHandler bridges a session's canUseTool round-trip to the frontend: it
