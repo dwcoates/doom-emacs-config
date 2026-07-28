@@ -53,6 +53,33 @@ const (
 	StateFailed            JobState = "failed"
 )
 
+// Priority is a workspace priority label ("p05", "p1", "p2", "p3").  It
+// decodes from either a JSON string or a bare JSON number, because the
+// command-file writers (the Emacs host and the generation skill) have both
+// spellings in the wild, and it always re-encodes as a string.  Holding it
+// decoded is what lets the daemon hand the label to the host verbatim: a
+// `json.RawMessage' would carry the quotes into `WorkspaceAvailable.priority'
+// and the host would look up an image named "\"p1\"".
+type Priority string
+
+func (p *Priority) UnmarshalJSON(data []byte) error {
+	if string(data) == "null" {
+		*p = ""
+		return nil
+	}
+	var s string
+	if err := json.Unmarshal(data, &s); err == nil {
+		*p = Priority(s)
+		return nil
+	}
+	var n json.Number
+	if err := json.Unmarshal(data, &n); err != nil {
+		return fmt.Errorf("workspace create: priority must be a string or a number, got %s", data)
+	}
+	*p = Priority(n.String())
+	return nil
+}
+
 // Request is the complete creation payload.  The fields mirror the current
 // create-or-update-workspace JSON contract; Extra retains new skill metadata
 // until a dedicated daemon consumer is introduced rather than dropping it.
@@ -60,7 +87,7 @@ type Request struct {
 	Name                 string          `json:"name"`
 	GitRoot              string          `json:"git_root"`
 	Prompt               string          `json:"prompt,omitempty"`
-	Priority             json.RawMessage `json:"priority,omitempty"`
+	Priority             Priority        `json:"priority,omitempty"`
 	ForkFrom             string          `json:"fork_from,omitempty"`
 	ForkSessionID        string          `json:"fork_session_id,omitempty"`
 	SourceWorkspace      string          `json:"source_workspace,omitempty"`

@@ -2484,92 +2484,22 @@ paint the rightmost entry's background to the right edge."
     (should (eq (get-text-property 2 'face joined)
                 '+workspace-tab-selected-face))))
 
-;;;; ---- Tests: repo-default priority resolution ----
+(ert-deftest agent-repl-test-priority-image-str-uses-the-stored-priority ()
+  "The tab renders the image for the `:priority' stored on the workspace.
+That value comes from the daemon's `WorkspaceAvailable' announcement (or
+an explicit `agent-repl-set-priority'); nothing derives one locally."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl--priority-images '(("p1" . fake-image-spec))))
+      (agent-repl--ws-put "ws1" :priority "p1")
+      (should (equal (get-text-property
+                      0 'display (agent-repl--tab-priority-image-str "ws1"))
+                     'fake-image-spec)))))
 
-(ert-deftest agent-repl-test-repo-name-for-path-nil ()
-  "`--repo-name-for-path' returns nil when PATH is nil."
-  (should-not (agent-repl--repo-name-for-path nil)))
-
-(ert-deftest agent-repl-test-repo-name-for-path-nonexistent ()
-  "`--repo-name-for-path' returns nil when PATH does not exist."
-  (should-not (agent-repl--repo-name-for-path "/tmp/does-not-exist-agent-repl-test/")))
-
-(ert-deftest agent-repl-test-repo-name-for-path-absolute-common-dir ()
-  "`--repo-name-for-path' extracts the basename of the parent of an absolute --git-common-dir."
-  (let ((tmp (make-temp-file "repo-name-test-" t)))
-    (unwind-protect
-        (cl-letf (((symbol-function 'agent-repl--git-string-quiet)
-                   (lambda (&rest _args)
-                     "/some/path/explanation-engine/.git"))
-                  ((symbol-function 'agent-repl--path-canonical) #'identity))
-          (should (equal (agent-repl--repo-name-for-path tmp)
-                         "explanation-engine")))
-      (delete-directory tmp t))))
-
-(ert-deftest agent-repl-test-repo-name-for-path-relative-common-dir ()
-  "`--repo-name-for-path' resolves a relative --git-common-dir against PATH."
-  (let ((tmp (make-temp-file "repo-name-test-" t)))
-    (unwind-protect
-        (cl-letf (((symbol-function 'agent-repl--git-string-quiet)
-                   (lambda (&rest _args) ".git"))
-                  ((symbol-function 'agent-repl--path-canonical) #'identity))
-          ;; basename(parent(<tmp>/.git)) = basename(<tmp>)
-          (should (equal (agent-repl--repo-name-for-path tmp)
-                         (file-name-nondirectory (directory-file-name tmp)))))
-      (delete-directory tmp t))))
-
-(ert-deftest agent-repl-test-repo-name-for-path-fatal ()
-  "`--repo-name-for-path' returns nil when git emits a fatal message."
-  (let ((tmp (make-temp-file "repo-name-test-" t)))
-    (unwind-protect
-        (cl-letf (((symbol-function 'agent-repl--git-string-quiet)
-                   (lambda (&rest _args)
-                     "fatal: not a git repository")))
-          (should-not (agent-repl--repo-name-for-path tmp)))
-      (delete-directory tmp t))))
-
-(ert-deftest agent-repl-test-repo-name-for-path-empty ()
-  "`--repo-name-for-path' returns nil when git emits an empty string."
-  (let ((tmp (make-temp-file "repo-name-test-" t)))
-    (unwind-protect
-        (cl-letf (((symbol-function 'agent-repl--git-string-quiet)
-                   (lambda (&rest _args) "")))
-          (should-not (agent-repl--repo-name-for-path tmp)))
-      (delete-directory tmp t))))
-
-(ert-deftest agent-repl-test-repo-default-priority-explanation-engine ()
-  "`--repo-default-priority-for-path' returns p3 for explanation-engine by default."
-  (let ((agent-repl-repo-default-priorities '(("explanation-engine" . "p3"))))
-    (cl-letf (((symbol-function 'agent-repl--repo-name-for-path)
-               (lambda (_path) "explanation-engine")))
-      (should (equal (agent-repl--repo-default-priority-for-path "/any/path")
-                     "p3")))))
-
-(ert-deftest agent-repl-test-repo-default-priority-unknown-repo ()
-  "`--repo-default-priority-for-path' returns nil for unconfigured repos."
-  (let ((agent-repl-repo-default-priorities '(("explanation-engine" . "p3"))))
-    (cl-letf (((symbol-function 'agent-repl--repo-name-for-path)
-               (lambda (_path) "doom")))
-      (should-not (agent-repl--repo-default-priority-for-path "/any/path")))))
-
-(ert-deftest agent-repl-test-repo-default-priority-nil-repo-name ()
-  "`--repo-default-priority-for-path' returns nil when repo name resolution fails."
-  (let ((agent-repl-repo-default-priorities '(("explanation-engine" . "p3"))))
-    (cl-letf (((symbol-function 'agent-repl--repo-name-for-path)
-               (lambda (_path) nil)))
-      (should-not (agent-repl--repo-default-priority-for-path "/any/path")))))
-
-(ert-deftest agent-repl-test-repo-default-priority-explicit-nil-value ()
-  "`--repo-default-priority-for-path' returns nil when an entry's value is nil."
-  (let ((agent-repl-repo-default-priorities '(("foo" . nil))))
-    (cl-letf (((symbol-function 'agent-repl--repo-name-for-path)
-               (lambda (_path) "foo")))
-      (should-not (agent-repl--repo-default-priority-for-path "/any/path")))))
-
-(ert-deftest agent-repl-test-repo-default-priority-default-value-has-explanation-engine ()
-  "Default value of `agent-repl-repo-default-priorities' assigns p1 to explanation-engine."
-  (should (equal (cdr (assoc "explanation-engine" agent-repl-repo-default-priorities))
-                 "p1")))
+(ert-deftest agent-repl-test-priority-image-str-nil-without-a-priority ()
+  "A workspace the daemon announced no priority for renders no image."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl--priority-images '(("p1" . fake-image-spec))))
+      (should-not (agent-repl--tab-priority-image-str "ws1")))))
 
 ;;;; ---- Tests: pack-width / center-width reserve room for terminator ----
 
