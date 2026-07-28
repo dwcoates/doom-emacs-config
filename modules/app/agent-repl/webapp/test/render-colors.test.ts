@@ -96,6 +96,32 @@ describe("the two-sided sidebar contract", () => {
   });
 });
 
+describe("every colored status has a dot the stylesheet actually draws", () => {
+  /** The dot rule's body for a status, or "" when no rule exists at all. */
+  function dotRule(status: string): string {
+    const at = css.indexOf(`#ws-sidebar .st-${status} {`);
+    if (at === -1) return "";
+    return css.slice(at, css.indexOf("}", at));
+  }
+
+  // Every state the fixture assigns one of the five colors, under the same two
+  // collapses the sidebar contract above declares. A status with no rule
+  // renders a colorless 9px hole, which is how `interrupted` shipped invisible.
+  const colored = Object.entries(fixture.render_states)
+    .filter(([, color]) => color !== "none")
+    .map(([name, color]) => [name.replace("RENDER_STATE_", "").toLowerCase().replace(/_/g, "-"), color])
+    .filter(([status]) => status !== "stop-failed" && status !== "idle");
+
+  for (const [status, color] of colored) {
+    it(`draws the ${status} dot in the ${color} the fixture assigns it`, () => {
+      // Arrange / Act
+      const rule = dotRule(status);
+      // Assert
+      expect(rule).toContain(`var(${COLOR_TOKENS[color]})`);
+    });
+  }
+});
+
 describe("the card's class color IS the state's color", () => {
   it("draws an INTERNAL failure with the blue the fixture assigns its states", () => {
     // Arrange / Act — the whole point of one table: a user cannot see a blue

@@ -18,6 +18,7 @@ import {
   footerClickAction,
   footerHtml,
   hasLiveCounters,
+  interruptChip,
   phaseLabel,
   runningTool,
   sheetHtml,
@@ -57,6 +58,7 @@ function progress(over: Partial<ProgressInput> = {}): ProgressInput {
     authenticating: null,
     hook: null,
     blocked: null,
+    interrupt: null,
     rateLimited: null,
     failure: null,
     pendingPermissions: 0,
@@ -671,7 +673,93 @@ describe("footerHtml: the phase comes from the workspace state (F5)", () => {
   });
 });
 
+// --- the interrupt chip (I1) -------------------------------------------------
+
+describe("interruptChip: the outcome of the stop the user asked for", () => {
+  it("says interrupted when the stop was delivered to a live turn", () => {
+    // Arrange / Act
+    const got = interruptChip(progress({ interrupt: { sinceMs: NOW, outcome: "interrupted" } }));
+    // Assert
+    expect(got?.text).toBe("interrupted");
+  });
+
+  it("keeps the delivered stop in the calm tone, not an alarm one", () => {
+    // Arrange / Act — a concluded turn the user asked for is not a fault.
+    const got = interruptChip(progress({ interrupt: { sinceMs: NOW, outcome: "interrupted" } }));
+    // Assert
+    expect(got?.tone).toBe("ok");
+  });
+
+  it("says the turn was already over for ALREADY_COMPLETE", () => {
+    // Arrange / Act — the word must not repeat `interrupted`: nothing was
+    // stopped, because there was nothing left to stop.
+    const got = interruptChip(progress({ interrupt: { sinceMs: NOW, outcome: "already_complete" } }));
+    // Assert
+    expect(got?.text).toBe("already finished");
+  });
+
+  it("treats ALREADY_COMPLETE as a success rather than an error", () => {
+    // Arrange / Act — the user asked for the turn to be over and it already
+    // is; painting that red is exactly the misread the outcome enum ends.
+    const got = interruptChip(progress({ interrupt: { sinceMs: NOW, outcome: "already_complete" } }));
+    // Assert
+    expect(got?.tone).toBe("ok");
+  });
+
+  it("says the stop failed for FAILED", () => {
+    // Arrange / Act
+    const got = interruptChip(progress({ interrupt: { sinceMs: NOW, outcome: "failed" } }));
+    // Assert
+    expect(got?.text).toBe("stop failed");
+  });
+
+  it("gives FAILED the error tone, the only outcome that reads as a failure", () => {
+    // Arrange / Act
+    const got = interruptChip(progress({ interrupt: { sinceMs: NOW, outcome: "failed" } }));
+    // Assert
+    expect(got?.tone).toBe("error");
+  });
+
+  it("shows nothing while no interrupt window is open", () => {
+    // Arrange / Act
+    const got = interruptChip(progress());
+    // Assert
+    expect(got).toBeNull();
+  });
+});
+
 describe("footerHtml: the V4 segmented dock", () => {
+  it("renders the interrupt chip beside the phase while the window is open", () => {
+    // Arrange
+    const i = input({
+      renderState: "interrupted",
+      progress: progress({ interrupt: { sinceMs: NOW, outcome: "interrupted" } }),
+    });
+    // Act
+    const got = footerHtml(i, CLOSED, NOW);
+    // Assert
+    expect(got).toContain(`<div class="pfooter-cell pfooter-interrupt ok"`);
+  });
+
+  it("drops the chip when the frame arrives with the window inactive", () => {
+    // Arrange / Act — the daemon cleared it; the webapp holds nothing of its
+    // own that could keep it on screen.
+    const got = footerHtml(input({ progress: progress({ interrupt: null }) }), CLOSED, NOW);
+    // Assert
+    expect(got).not.toContain("pfooter-interrupt");
+  });
+
+  it("leaves the activity cell to live work rather than the interrupt", () => {
+    // Arrange — the chip qualifies the phase; the grow cell stays the home of
+    // what is happening NOW.
+    const i = input({ progress: progress({ interrupt: { sinceMs: NOW, outcome: "failed" } }) });
+    // Act
+    const got = footerHtml(i, CLOSED, NOW);
+    // Assert
+    expect(got).toContain(`<div class="pfooter-cell pfooter-grow muted"></div>`);
+  });
+
+
   it("renders nothing before the daemon has resolved anything", () => {
     // Arrange / Act
     const got = footerHtml(input({ progress: null }), CLOSED, NOW);
@@ -845,6 +933,18 @@ describe("ProgressFooter", () => {
     // Assert — the tick is a paint, never a re-render.
     expect(el.querySelector("[data-task-timer]")?.textContent).toBe("1m 5s");
     expect(el.querySelector(".pfooter-phase")?.outerHTML).toBe(before);
+  });
+
+  it("leaves no chip behind when the next frame carries the window closed", () => {
+    // Arrange — the daemon clears the window on the next turn, and the webapp
+    // keeps no bookkeeping that could outlive the frame it was told in.
+    const el = document.createElement("div");
+    const footer = new ProgressFooter(el, () => NOW);
+    footer.render(input({ progress: progress({ interrupt: { sinceMs: NOW, outcome: "failed" } }) }));
+    // Act
+    footer.render(input({ progress: progress({ interrupt: null }) }));
+    // Assert
+    expect(el.querySelector(".pfooter-interrupt")).toBeNull();
   });
 
   it("opens one overlay at a time", () => {
