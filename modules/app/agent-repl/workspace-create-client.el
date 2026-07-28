@@ -237,25 +237,37 @@ requested it, a jump to the new tab.  An unsolicited creation — the
 generation skill, another agent, a daemon restart replay — is materialized
 just as completely but stays silent: the user did not ask for a context
 switch they did not initiate."
-  (let ((pending (agent-repl--workspace-create-take-request job-id)))
+  (let* ((pending (agent-repl--workspace-create-take-request job-id))
+         (jump (and pending (plist-get pending :jump))))
+    ;; The two deferred UI drains a worktree workspace has always been born
+    ;; with.  They are set OUTSIDE the daemon metadata envelope on purpose:
+    ;; they are mutable local flags the drains clear, and the envelope is the
+    ;; immutable creation fact a reconnect replay is compared against.
+    (when (eq result 'created)
+      (agent-repl--ws-put ws :pending-magit t)
+      (agent-repl--ws-put ws :pending-initial-buffers t))
     (if (null pending)
-        (progn
-          (agent-repl--log
-           ws
-           "workspace-available: UNSOLICITED ws=%s job-id=%s result=%s — materialized silently"
-           ws job-id result)
-          nil)
+        (agent-repl--log
+         ws
+         "workspace-available: UNSOLICITED ws=%s job-id=%s result=%s — materialized silently"
+         ws job-id result)
       (agent-repl--log
        ws
        "workspace-available: CORRELATED ws=%s job-id=%s command-file=%s requested-name=%s result=%s jump=%S"
        ws job-id (plist-get pending :command-file)
-       (plist-get pending :requested-name) result (plist-get pending :jump))
+       (plist-get pending :requested-name) result jump)
       (agent-repl--info
        (plist-get pending :source-workspace)
-       "Workspace '%s' is ready." ws)
-      (when (plist-get pending :jump)
-        (agent-repl-jump-to-workspace ws))
-      pending)))
+       "Workspace '%s' is ready." ws))
+    (cond
+     (jump (agent-repl-jump-to-workspace ws))
+     ;; A workspace nobody is being moved to still gets its panels built
+     ;; now, behind a focus-restoring transient switch, so its first real
+     ;; activation displays a mounted layout instead of building one.  Only
+     ;; a fresh materialization: a reconnect replay of an already-rendered
+     ;; workspace has nothing to build.
+     ((eq result 'created) (agent-repl--eager-open-panels ws)))
+    pending))
 
 (defun agent-repl--workspace-create-available-metadata (available)
   "Validate AVAILABLE and return `(WS . METADATA)' without mutating state."
