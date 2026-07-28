@@ -262,3 +262,56 @@ describe("fake query interrupt receipt", () => {
     expect(receipt).toEqual({ still_queued: [] });
   });
 });
+
+describe("createFakeQuery vendor session rotation (!rotate)", () => {
+  // The vendor retires its transcript identity mid-stream on a `/clear` and
+  // announces the new one with a fresh `system:init`; every message after that
+  // point, the turn's own `result` included, belongs to the new identity. This
+  // is the offline stand-in for that, and it is simulated vendor behavior, not
+  // a shortcut around any code under test.
+
+  /** Run one turn's worth of messages under a uuid-minting fake. */
+  async function rotateRun(prompt: string): Promise<SdkMessageLike[]> {
+    const input = new AsyncQueue<SdkUserMessageLike>();
+    let n = 0;
+    const query = createFakeQuery(input, async () => ({ behavior: "allow", updatedInput: {} }), {
+      sessionId: "s-shim",
+      newUuid: () => `u${++n}`,
+    });
+    input.push(userMsg(prompt));
+    input.end();
+    const msgs: SdkMessageLike[] = [];
+    for await (const m of query) msgs.push(m);
+    return msgs;
+  }
+
+  it("announces the new identity with a second system init", async () => {
+    // Arrange / Act
+    const msgs = await rotateRun("!rotate");
+
+    // Assert — two inits: the opening one and the rotation's own.
+    const inits = msgs.filter((m) => m.type === "system" && (m as { subtype?: string }).subtype === "init");
+    expect(inits).toHaveLength(2);
+  });
+
+  it("files everything after the rotation under the NEW uuid", async () => {
+    // Arrange / Act
+    const msgs = await rotateRun("!rotate");
+
+    // Assert — the result closing this turn belongs to the new identity, which
+    // is exactly the split that orphaned the real turn's end.
+    const result = msgs.find((m) => m.type === "result")!;
+    expect(result.session_id).not.toBe("s-shim");
+    const inits = msgs.filter((m) => m.type === "system" && (m as { subtype?: string }).subtype === "init");
+    expect(result.session_id).toBe(inits[1]!.session_id);
+  });
+
+  it("leaves an ordinary turn's identity alone", async () => {
+    // Arrange / Act
+    const msgs = await rotateRun("just a prompt");
+
+    // Assert
+    const result = msgs.find((m) => m.type === "result")!;
+    expect(result.session_id).toBe("s-shim");
+  });
+});

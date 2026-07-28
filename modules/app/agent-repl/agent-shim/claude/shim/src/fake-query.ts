@@ -7,6 +7,8 @@
  * - text starting with "!tool <command>" → one Bash tool round guarded by
  *   a `canUseTool` permission request, then a closing text block.
  * - "!md" → a streamed markdown showcase reply (webapp render demo).
+ * - "!rotate" → a VENDOR SESSION UUID ROTATION mid-turn, then an ordinary
+ *   text turn under the NEW identity (see runRotateTurn).
  * - anything else → a streamed text block echoing the input.
  * Every turn ends with a `result` message.
  */
@@ -101,13 +103,23 @@ export function createFakeQuery(
   // model the agent ANSWERS with is what moves, and the mirror follows it.
   let model = "fake-model";
   let turn = 0;
+  // The session uuid every message currently reports.
+  //
+  // MUTABLE because the real vendor mutates it: a `/clear` retires the
+  // transcript identity mid-stream and mints a new one, and every message
+  // after that point carries the new uuid. `!rotate` is how an offline run
+  // exercises that (see runRotateTurn) — it simulates the vendor's own
+  // behavior, not a precondition of the code under test.
+  //
+  // On resume it starts at the RESUMED uuid, which is what the real CLI
+  // reports on every message of a continued session, not only on its init.
+  let sessionUuid = opts.resume ?? opts.sessionId;
 
-  // Defaults first so a message may carry its own session_id (the
-  // resume-continuation init does); everything else inherits the
-  // shim-assigned id.
+  // Defaults first so a message may carry its own session_id; everything else
+  // inherits the session uuid currently in force.
   const emit = (msg: Omit<SdkMessageLike, "uuid" | "session_id"> & { session_id?: string }): void => {
     if (out.isEnded) return;
-    out.push({ uuid: opts.newUuid(), session_id: opts.sessionId, ...msg } as SdkMessageLike);
+    out.push({ uuid: opts.newUuid(), session_id: sessionUuid, ...msg } as SdkMessageLike);
   };
 
   const emitStream = (event: unknown): void => {
@@ -319,6 +331,28 @@ export function createFakeQuery(
     emitResult("success", closing);
   };
 
+  /**
+   * A turn that ROTATES the session uuid partway through, as a `/clear` does.
+   *
+   * The vendor mints a new transcript identity and announces it with a fresh
+   * `system:init`; everything after that point — this turn's own `result`
+   * included — belongs to the new identity. That split is the whole shape the
+   * rotation handling exists for, so the fake reproduces it exactly: the turn
+   * STARTED under one uuid and ENDS under another.
+   */
+  const runRotateTurn = (messageId: string, text: string): void => {
+    sessionUuid = opts.newUuid();
+    emit({
+      type: "system",
+      subtype: "init",
+      cwd: process.cwd(),
+      model,
+      permissionMode,
+      tools: ["Bash"],
+    });
+    runTextTurn(messageId, text);
+  };
+
   const main = async (): Promise<void> => {
     emit({
       type: "system",
@@ -345,6 +379,8 @@ export function createFakeQuery(
       const messageId = `msg_fake_${turn}`;
       if (text.startsWith("!tool ")) {
         await runToolTurn(messageId, text.slice("!tool ".length));
+      } else if (text.trim() === "!rotate") {
+        runRotateTurn(messageId, text);
       } else if (text.startsWith("!bg ")) {
         runBackgroundTurn(messageId, text.slice("!bg ".length));
       } else {
