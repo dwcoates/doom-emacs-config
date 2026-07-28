@@ -336,7 +336,45 @@ message ConversationItem {
     // frontend used to do on prompt text has no successor here by design.
     agentshim.core.v1.ContextCleared context_cleared = 32;
     agentshim.core.v1.ContextCompacted context_compacted = 33;
+    SkillBodyItem skill_body = 34;  // Additive (skill card)
   }
+}
+
+// Additive: the launched skill's own SKILL.md body, addressed to the Skill
+// tool card that launched it.
+//
+// WHY THIS IS ITS OWN ARM RATHER THAN A FIELD ON tool_use (12). The daemon
+// never populates arm 12: a tool call rides as a ToolUseBlock INSIDE its
+// carrying assistant_message (see internal/frontend/translate.go), and its
+// result as a tool_result block inside the following user_message. There is
+// therefore no tool item on this wire to hang a body field on, and inventing
+// one would mean emitting a second, half-populated representation of a call
+// the frontend already assembled.
+//
+// WHAT IT CORRESPONDS TO ON DISK. The harness writes a skill's body as a
+// SEPARATE transcript record — type "user", flagged isMeta, whose text is
+// "Base directory for this skill: <dir>" followed by the whole SKILL.md. It
+// is bookkeeping addressed to the model, not a prompt the person typed, so
+// rendering it as a user turn is a defect (it draws a prompt bubble nobody
+// wrote). The daemon correlates that record back to the Skill call that
+// caused it and pushes THIS instead; the user record itself reaches no
+// frontend at all.
+//
+// HOW A FRONTEND CONSUMES IT. tool_use_id is the reconciliation identity, and
+// it is deliberately the SAME identity the frontend already files the Skill
+// call under — so this item MERGES INTO the existing card rather than adding
+// one beside it. One invocation is one card, updated in place as the call,
+// the result and the body land, in whatever order they land. Replays are
+// idempotent for the same reason: re-sending it replaces the body it already
+// merged.
+message SkillBodyItem {
+  // The Skill call's tool_use id. Never empty: the daemon emits this item
+  // only once it has resolved the body to a specific call.
+  string tool_use_id = 1;
+  // The SKILL.md body VERBATIM, markdown, including the leading "Base
+  // directory for this skill:" line the harness prepends. A skill IS a
+  // markdown document, so it is carried as markdown and rendered as markdown.
+  string body_markdown = 2;
 }
 
 // The class of a system failure. SEMANTIC, not chromatic: the wire says what
