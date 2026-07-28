@@ -24,9 +24,15 @@ type Resolver interface {
 
 // Options configure a Manager.
 type Options struct {
-	// DBPath is the SSM database path. Empty uses defaultDBPath
-	// (~/.cache/agent-repl/ssm/state.db).
+	// DBPath is the state store's path. Empty uses defaultDBPath
+	// (~/.cache/agent-repl/ssm/state.db). Ignored when DB is set.
 	DBPath string
+	// DB is an already-open state store, shared with the store's other
+	// owner (the session registry, whose identity tables live in the same
+	// database so a cursor and an identity move in ONE transaction). When
+	// set, the Manager runs its migrations on the handle but does NOT own
+	// it: Close leaves it open for whoever did.
+	DB *sql.DB
 	// Logf is the loud transition/anomaly logger. Nil defaults to log.Printf.
 	Logf dlog.Logf
 	// Resolver binds session ids to workspaces. Required for Apply.
@@ -46,7 +52,11 @@ const subBufferSize = 64
 // the SELECT-then-INSERT idempotency check and the monotonic clock are
 // race-free with a single writer connection.
 type Manager struct {
-	db       *sql.DB
+	db *sql.DB
+	// ownsDB is false when the state store was handed in already open (see
+	// Options.DB): closing another owner's handle would take the session
+	// registry's tables down with the SSM.
+	ownsDB   bool
 	logf     dlog.Logf
 	resolver Resolver
 	clock    func() int64
@@ -98,12 +108,19 @@ func Open(opts Options) (*Manager, error) {
 	if clock == nil {
 		clock = func() int64 { return time.Now().UnixMilli() }
 	}
-	db, err := openDB(path)
-	if err != nil {
+	db, ownsDB := opts.DB, false
+	if db == nil {
+		opened, err := openDB(path)
+		if err != nil {
+			return nil, err
+		}
+		db, ownsDB = opened, true
+	} else if err := migrate(db); err != nil {
 		return nil, err
 	}
 	m := &Manager{
 		db:              db,
+		ownsDB:          ownsDB,
 		logf:            logf,
 		resolver:        opts.Resolver,
 		clock:           clock,
@@ -113,7 +130,9 @@ func Open(opts Options) (*Manager, error) {
 		subs:            make(map[int]chan *frontendv1.WorkspaceState),
 	}
 	if err := m.warm(); err != nil {
-		db.Close()
+		if ownsDB {
+			db.Close()
+		}
 		return nil, err
 	}
 	return m, nil
@@ -732,6 +751,9 @@ func (m *Manager) Close() error {
 		close(ch)
 	}
 	m.mu.Unlock()
+	if !m.ownsDB {
+		return nil
+	}
 	return m.db.Close()
 }
 
