@@ -305,10 +305,18 @@ synchronous HTTP boundary did."
 
 ;;;; ---- Session CRUD -------------------------------------------------------
 
-(defcustom agent-repl-frontend-create-timeout 10
+(defcustom agent-repl-frontend-create-timeout 30
   "Seconds `agent-repl--frontend-create-session' awaits its UDS outcome.
-createSession's `CommandAck' is a bare receipt; the new session id arrives
-on a pushed `SessionView'.  This bounds the synchronous await for both."
+createSession's `CommandAck' is the daemon's ESTABLISHMENT verdict: it is
+written only once the new session's shim answers a health probe healthy over
+the fully wired connection, so the ack legitimately takes as long as the
+bring-up does.
+
+This MUST stay above the daemon's own establishment bound (20s,
+`createEstablishTimeout' in daemon/internal/server/createestablish.go).
+Whichever bound fires first is the one the user reads, and the daemon's nack
+names the link that is still pending while a client-side timeout can only
+say the daemon went quiet."
   :type 'integer
   :group 'agent-repl)
 
@@ -417,10 +425,18 @@ separately validates and kickstarts the launchd jobs."
    "daemonHealth" nil nil nil "daemon"))
 
 (defun agent-repl--frontend-wait-session-healthy (ws session-id)
-  "Require WS's live shim health and identity before rendering SESSION-ID.
+  "Assert WS's live shim health and identity for SESSION-ID.
 The daemon routes the command by WS's project directory and verifies that
 its live shim is connected and healthy.  SESSION-ID correlation prevents a
-stale binding from being rendered after a restart or remount."
+stale binding from being reported after a restart or remount.
+
+DIAGNOSTIC, NOT A BRING-UP GATE.  This used to run before every webview
+mount, because `createSession' acked as soon as a spawn was issued and the
+mount had no other way to know the shim was up — a create-then-poll shape
+that lost the very races it existed to cover.  The daemon now acks a create
+only once the session is ESTABLISHED, so nothing on the bring-up path asks
+this question any more; it survives as `agent-repl-session-health', the
+answer to \"is this already-open session's shim still there\"."
   (unless (and (stringp session-id) (not (string-empty-p session-id)))
     (agent-repl--log ws
                      "frontend-health: invalid session id for session health id=%S"
@@ -431,6 +447,27 @@ stale binding from being rendered after a restart or remount."
    (agent-repl--frontend-ws-command-key ws)
    session-id
    (format "session ws=%s id=%s" ws session-id)))
+
+;;;###autoload
+(defun agent-repl-session-health (&optional ws)
+  "Report whether WS's already-open session still has a healthy live shim.
+WS defaults to the current workspace.  Interactive diagnostic only: bring-up
+no longer probes health (the `createSession' ack proves establishment), so
+this exists for the case the ack cannot speak to — a session that came up
+fine and may have lost its shim since.
+
+Signals with the daemon's own reason when the session is unhealthy,
+unreachable, or has no recorded id."
+  (interactive)
+  (let* ((ws (or ws (agent-repl--ws-current-name)))
+         (session-id (and ws (agent-repl--ws-get ws :frontend-session-id))))
+    (unless ws
+      (user-error "agent-repl: no current workspace to health-check"))
+    (unless (and (stringp session-id) (not (string-empty-p session-id)))
+      (user-error "agent-repl: workspace %s has no daemon session to health-check" ws))
+    (agent-repl--frontend-wait-session-healthy ws session-id)
+    (message "agent-repl: %s session %s is healthy" ws session-id)
+    t))
 
 (defun agent-repl--frontend-create-handle-rejection (cwd model resume force-fresh err)
   "Handle a REJECTED `createSession' for CWD; MODEL/RESUME were the request.
@@ -457,7 +494,19 @@ the investigation is dispatched with the resume id alone (nil paths)."
                                           "conversation; opened investigation workspace `%s'")
                                   resume ws-name)
                           resume ws-name)))))
-    (error "agent-repl: createSession for %s failed: %s" cwd (or err "rejected"))))
+    ;; Every other rejection is now an ESTABLISHMENT verdict: the daemon acks a
+    ;; create only when the new session's shim answered healthy over the wired
+    ;; connection, and a nack names the deepest link that failed or is still
+    ;; pending (shim never spawned / handshake incomplete / no live connection /
+    ;; probe unanswered / the shim's own unhealthy verdict and reason).  That
+    ;; text is the whole diagnosis, so it goes to BOTH surfaces — the log
+    ;; buffer, which survives, and the echo area, which a caller that traps the
+    ;; signal would otherwise leave blank.
+    (let ((reason (or err "rejected")))
+      (agent-repl--log (agent-repl--ws-name-for-dir cwd)
+                       "createSession: NOT ESTABLISHED cwd=%s reason=%s" cwd reason)
+      (message "agent-repl: session for %s did not come up: %s" cwd reason)
+      (error "agent-repl: createSession for %s failed: %s" cwd reason))))
 
 (defun agent-repl--frontend-force-fresh-on-lost-transcript (cwd model resume-id)
   "Degrade a lost-transcript resume for RESUME-ID to a FRESH conversation.
