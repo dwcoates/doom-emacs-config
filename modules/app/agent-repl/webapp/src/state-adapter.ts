@@ -837,7 +837,7 @@ function userMessageItems(frame: ConversationItemFrame): {
 
   // ApiUserMessage.content oneof: content_string | content_blocks.
   if (typeof msg.contentString === "string") {
-    items.push(userTurn(frame.requestId, [{ type: "text", text: msg.contentString }], ts));
+    items.push(userTurn(frame, [{ type: "text", text: msg.contentString }], ts));
     return { items, ignores };
   }
 
@@ -858,12 +858,24 @@ function userMessageItems(frame: ConversationItemFrame): {
     }
   }
   // A pure tool-feedback message (only tool_result blocks) yields no user-turn.
-  if (turnContent.length > 0) items.push(userTurn(frame.requestId, turnContent, ts));
+  if (turnContent.length > 0) items.push(userTurn(frame, turnContent, ts));
   return { items, ignores };
 }
 
-function userTurn(requestId: string, content: ContentBlock[], ts: string): UserTurnItem {
-  return { kind: "user-turn", requestId, content, ts };
+/**
+ * One prompt bubble off a user message. The record's UUID rides along beside
+ * the request id because the request id is EMPTY for every prompt the real
+ * pipeline delivers (a transcript `UserLine`) and for all replayed history —
+ * the uuid is what keeps two such prompts apart in the store (`userTurnKey`).
+ */
+function userTurn(
+  frame: ConversationItemFrame,
+  content: ContentBlock[],
+  ts: string,
+): UserTurnItem {
+  const item: UserTurnItem = { kind: "user-turn", requestId: frame.requestId, content, ts };
+  if (frame.uuid !== "") item.uuid = frame.uuid;
+  return item;
 }
 
 /** ToolUseBlock {id, name, input, caller} → the tool CALL item (no result). */
