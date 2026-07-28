@@ -14,7 +14,7 @@ import (
 // because the registry does not retain them.
 func TestRegistrySessionViewsPopulatesRegistryFields(t *testing.T) {
 	// Arrange.
-	reg := registry.Open(filepath.Join(t.TempDir(), "registry.json"), func(string, ...any) {})
+	reg := registry.Open(filepath.Join(t.TempDir(), "registry.db"), func(string, ...any) {})
 	if err := reg.Put(registry.Record{
 		SessionID:       "s_abc",
 		CWD:             "/work/ws",
@@ -65,7 +65,7 @@ func TestRegistrySessionViewsPopulatesRegistryFields(t *testing.T) {
 // the GET /sessions poller.
 func TestRegistrySessionViewsIncludesTerminalRecords(t *testing.T) {
 	// Arrange.
-	reg := registry.Open(filepath.Join(t.TempDir(), "registry.json"), func(string, ...any) {})
+	reg := registry.Open(filepath.Join(t.TempDir(), "registry.db"), func(string, ...any) {})
 	if err := reg.Put(registry.Record{SessionID: "s_terminal", CWD: "/work/x", Terminal: true, DeathReason: "delete session"}); err != nil {
 		t.Fatalf("registry Put terminal: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestRegistrySessionViewsIncludesTerminalRecords(t *testing.T) {
 // excluded (no workspace to key by), even though terminal records are included.
 func TestRegistrySessionViewsSkipsDirlessRecords(t *testing.T) {
 	// Arrange.
-	reg := registry.Open(filepath.Join(t.TempDir(), "registry.json"), func(string, ...any) {})
+	reg := registry.Open(filepath.Join(t.TempDir(), "registry.db"), func(string, ...any) {})
 	if err := reg.Put(registry.Record{SessionID: "s_nodir"}); err != nil {
 		t.Fatalf("registry Put dirless: %v", err)
 	}

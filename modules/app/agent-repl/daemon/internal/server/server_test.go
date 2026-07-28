@@ -128,7 +128,7 @@ func newHarness(t *testing.T) *harness {
 func newHarnessWith(t *testing.T, extra Config) *harness {
 	t.Helper()
 	logf := func(string, ...any) {}
-	reg := registry.Open(filepath.Join(t.TempDir(), "sessions.json"), logf)
+	reg := registry.Open(filepath.Join(t.TempDir(), "sessions.db"), logf)
 
 	mgr, err := ssm.Open(ssm.Options{
 		DBPath:   filepath.Join(t.TempDir(), "state.db"),

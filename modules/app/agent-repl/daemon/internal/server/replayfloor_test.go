@@ -45,7 +45,7 @@ func TestReplayFloorSurvivesADaemonRestart(t *testing.T) {
 	// Arrange — the whole reason the mark is durable rather than in-memory: the
 	// daemon re-Subscribes from last_seen_seq, so a clear observed before a
 	// restart is never re-delivered and could never be re-derived.
-	path := filepath.Join(t.TempDir(), "sessions.json")
+	path := filepath.Join(t.TempDir(), "sessions.db")
 	reg := registry.Open(path, func(string, ...any) {})
 	if err := reg.Put(registry.Record{SessionID: "s1", CWD: "/w"}); err != nil {
 		t.Fatalf("put: %v", err)

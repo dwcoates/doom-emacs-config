@@ -36,6 +36,7 @@ import (
 	"claude-repld/internal/shim"
 	"claude-repld/internal/shimlisten"
 	"claude-repld/internal/ssm"
+	"claude-repld/internal/statedb"
 	"claude-repld/internal/stateroot"
 )
 
@@ -208,18 +209,46 @@ func main() {
 		os.Exit(2)
 	}
 
+	// THE STATE STORE. One SQLite database carries both the session
+	// registry's identity tables and the SSM's state log, opened ONCE here and
+	// shared by both owners: that is what lets a cursor, a replay floor and a
+	// vendor identity move in a single transaction instead of relying on
+	// write ordering across two files.
+	statePath, err := registry.DefaultDBPath()
+	if err != nil {
+		log.Fatalf("claude-repld: %v", err)
+	}
+	stateStore, err := statedb.Open(statePath)
+	if err != nil {
+		log.Fatalf("claude-repld: open state store: %v", err)
+	}
+	defer func() {
+		if err := stateStore.Close(); err != nil {
+			log.Printf("claude-repld: close state store: %v", err)
+		}
+	}()
+
 	// Persistent session registry: the in-memory session map dies with
 	// the process, so this write-through record store is what lets a
 	// restarted daemon keep resolving the s_<hex> ids its frontends
 	// still hold. A daemon that cannot even resolve WHERE the registry
-	// lives must fail loudly at startup. Checkpoint migration and terminal
+	// lives must fail loudly at startup. Checkpoint repair and terminal
 	// compaction are required durability work: any load/migration/save failure
 	// aborts startup rather than serving from fabricated empty state.
-	registryPath, err := registry.DefaultPath()
+	//
+	// FIRST BOOT AFTER THIS MIGRATION performs a one-time import of the
+	// pre-SQLite JSON registry (and its checkpoint sidecar) into the tables,
+	// logged loudly. The file is left on disk as inert history; nothing reads
+	// it again.
+	legacyRegistryPath, err := registry.LegacyJSONPath()
 	if err != nil {
 		log.Fatalf("claude-repld: %v", err)
 	}
-	sessionRegistry := registry.Open(registryPath, log.Printf)
+	sessionRegistry := registry.OpenWith(registry.Options{
+		DB:             stateStore,
+		LegacyJSONPath: legacyRegistryPath,
+		Logf:           log.Printf,
+	})
 	if err := sessionRegistry.Prepare(); err != nil {
 		log.Fatalf("claude-repld: registry prepare: %v", err)
 	}
@@ -274,6 +303,7 @@ func main() {
 	// the frontend snapshot/merge push loop AND the per-session driver's
 	// lifecycle-event application; one owner (main) closes it once.
 	ssmMgr, err := ssm.Open(ssm.Options{
+		DB:       stateStore,
 		Resolver: server.NewRegistryResolver(sessionRegistry),
 		Logf:     log.Printf,
 	})
