@@ -139,6 +139,11 @@ type Config struct {
 	Locator SessionLocator
 	// SeqStore persists last_seen_seq (RegistrySeqStore). Required.
 	SeqStore shimclient.SeqStore
+	// PermissionModes reads each session's stored permission posture, which
+	// the bring-up gate carries to the shim on DaemonHello (RegistryModeStore).
+	// Nil resolves every session to protocol.DefaultSessionPermissionMode —
+	// never to an ungated mode — so the omission is safe rather than silent.
+	PermissionModes shimclient.ModeStore
 	// ClearCompactStore persists the newest clear-or-compaction seq — the
 	// frontend replay floor (RegistrySeqStore again). Required: a driver that
 	// observed a clear or a compaction and had nowhere to record it would serve
@@ -1203,14 +1208,16 @@ func (m *Manager) bringUp(workspace string) (*driven, error) {
 	// forever waiting for evidence that will never come again.
 	cons.settleBackfillFromStore(m.cfg.SeqStore.LastSeq(sessionID))
 	// onPermsChanged republishes the footer's pending-permission badge on both
-	// edges of a permission's life. The queue depth is read back off the live
-	// queue so the two counters are always reported together and neither can go
-	// stale behind the other.
+	// edges of a permission's life, and moves the SSM's permission row off the
+	// same count. The queue depth is read back off the live queue so the two
+	// counters are always reported together and neither can go stale behind the
+	// other.
 	ph := permHandler{reg: m.reg, cons: cons, logf: m.logf, onPermsChanged: func() {
 		m.mu.Lock()
 		depth := int64(len(d.queue.entries))
 		m.mu.Unlock()
 		m.noteProgressCounts(workspace, depth)
+		m.notePermissionState(workspace)
 	}}
 
 	runCtx, cancel := context.WithCancel(m.rootCtx)
@@ -1221,6 +1228,7 @@ func (m *Manager) bringUp(workspace string) (*driven, error) {
 		DaemonVersion:   m.cfg.DaemonVersion,
 		ProtocolVersion: m.cfg.ProtocolVersion,
 		SeqStore:        m.cfg.SeqStore,
+		PermissionModes: m.cfg.PermissionModes,
 		StateSink:       cons,
 		FrameSink:       cons,
 		Degraded:        cons,

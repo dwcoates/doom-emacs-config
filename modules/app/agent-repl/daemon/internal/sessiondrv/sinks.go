@@ -66,6 +66,12 @@ type StateApplier interface {
 	// nothing arriving to supersede it. Fed only from the shim handshake that
 	// announces the new uuid.
 	ApplySessionRotated(workspace, previous, next string) error
+	// ApplyPermission opens or closes the workspace's PERMISSION row: the agent
+	// asked the user a canUseTool question and is parked until it is answered.
+	// PENDING is this workspace's pending-permission count folded to a boolean,
+	// so the opening edge is the first pending request and the closing edge is
+	// the count returning to zero — grant, deny and abandonment alike.
+	ApplyPermission(workspace string, pending bool, reason string) error
 }
 
 // ProgressResolver is the slice of the progress-footer resolver (F1) the driver
