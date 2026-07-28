@@ -202,6 +202,54 @@
         (should (agent-repl--ws-live-p "plain"))
         (should-not (agent-repl--ws-get "plain" :initial-prompt-queued))))))
 
+(ert-deftest agent-repl-test-workspace-available-project-dir-has-no-trailing-slash ()
+  "The announced worktree is stored in `directory-file-name' spelling.
+Emacs echoes `:project-dir' back as the UDS `workspace' key, so a trailing
+slash produced a key the daemon has no session for."
+  (agent-repl-test--with-clean-state
+    (let ((available
+           '(:jobId "job-slash" :finalName "sluggish"
+             :worktreePath "/tmp/wt/sluggish/" :sessionId "session-slash")))
+      (cl-letf (((symbol-function 'file-directory-p) (lambda (_path) t))
+                ((symbol-function 'agent-repl--ws-dir-owner)
+                 (lambda (&rest _) nil))
+                ((symbol-function 'agent-repl--ws-resolve-persp)
+                 (lambda (_ws) nil))
+                ((symbol-function 'persp-add-new) (lambda (_ws) 'persp))
+                ((symbol-function 'set-persp-parameter) (lambda (&rest _) nil))
+                ((symbol-function 'persp-kill) (lambda (&rest _) nil))
+                ((symbol-function 'agent-repl--uds-send-command)
+                 (lambda (&rest _) "ack"))
+                ((symbol-function 'agent-repl--uds-track-command)
+                 (lambda (&rest _) nil)))
+        (agent-repl--workspace-create-handle-available available)
+        (should (equal (agent-repl--ws-get "sluggish" :project-dir)
+                       "/tmp/wt/sluggish"))))))
+
+(ert-deftest agent-repl-test-workspace-available-ws-id-matches-canonical-derivation ()
+  "The materialized `:ws-id' equals the shared canonical-path derivation."
+  (agent-repl-test--with-clean-state
+    (let ((available
+           '(:jobId "job-id" :finalName "ided"
+             :worktreePath "/tmp/wt/ided/" :sessionId "session-id")))
+      (cl-letf (((symbol-function 'file-directory-p) (lambda (_path) t))
+                ((symbol-function 'agent-repl--ws-dir-owner)
+                 (lambda (&rest _) nil))
+                ((symbol-function 'agent-repl--ws-resolve-persp)
+                 (lambda (_ws) nil))
+                ((symbol-function 'persp-add-new) (lambda (_ws) 'persp))
+                ((symbol-function 'set-persp-parameter) (lambda (&rest _) nil))
+                ((symbol-function 'persp-kill) (lambda (&rest _) nil))
+                ((symbol-function 'agent-repl--uds-send-command)
+                 (lambda (&rest _) "ack"))
+                ((symbol-function 'agent-repl--uds-track-command)
+                 (lambda (&rest _) nil)))
+        (agent-repl--workspace-create-handle-available available)
+        (should (equal (agent-repl--ws-get "ided" :ws-id)
+                       (substring (md5 (agent-repl--path-canonical
+                                        "/tmp/wt/ided"))
+                                  0 agent-repl-workspace-id-length)))))))
+
 (ert-deftest agent-repl-test-workspace-available-rolls-back-on-perspective-setup-error ()
   "Failure after perspective creation leaves no hash entry or perspective."
   (agent-repl-test--with-clean-state

@@ -1514,9 +1514,12 @@ the original error is re-signaled."
                       ;; so a later user priority edit cannot turn the same
                       ;; daemon job into a false conflict.
                       :daemon-workspace-metadata metadata
+                      ;; Derive the id through the SAME canonicalizer every
+                      ;; other ws-id producer uses (`agent-repl--workspace-id',
+                      ;; `--path-canonical'), or a symlinked worktree would get
+                      ;; two different ids for one directory.
                       :ws-id (substring
-                              (md5 (directory-file-name
-                                    (expand-file-name path)))
+                              (md5 (agent-repl--path-canonical path))
                               0 agent-repl-workspace-id-length))
                 metadata)
                agent-repl--workspaces)
