@@ -266,6 +266,35 @@
       (should (equal (plist-get (cadr completion) :actionId) "action-1"))
       (should (eq (plist-get (cadr completion) :ok) t)))))
 
+(ert-deftest agent-repl-test-host-action-workspace-create-failure-is-announced ()
+  "A failed creation job is logged and echoed, then completed ok."
+  (let ((logged nil)
+        (echoed nil)
+        (completion nil))
+    (cl-letf (((symbol-function 'agent-repl--log)
+               (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged)))
+              ((symbol-function 'message)
+               (lambda (fmt &rest args) (setq echoed (apply #'format fmt args))))
+              ((symbol-function 'agent-repl--uds-send-command)
+               (lambda (field payload &rest _)
+                 (setq completion (list field payload))
+                 "failure-ack"))
+              ((symbol-function 'agent-repl--uds-track-command)
+               (lambda (&rest _) nil)))
+      (should
+       (agent-repl--workspace-create-handle-host-action
+        '(:actionId "job-1:failed"
+          :workspaceCreateFailed
+          (:jobId "job-1" :requestedName "DWC/feature"
+           :error "plan worktree: exit=128"))))
+      (should (string-match-p "DWC/feature" echoed))
+      (should (string-match-p "plan worktree: exit=128" echoed))
+      (should (cl-some (lambda (line)
+                         (string-match-p "JOB FAILED job-id=job-1" line))
+                       logged))
+      (should (equal (car completion) "hostActionCompleted"))
+      (should (eq (plist-get (cadr completion) :ok) t)))))
+
 (ert-deftest agent-repl-test-host-action-legacy-command-translates-struct ()
   "legacyCommand converts its recursive Struct and ACKs handler completion."
   (let ((handled nil)

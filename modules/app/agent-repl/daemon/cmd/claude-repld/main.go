@@ -510,14 +510,15 @@ func main() {
 	// Bind the session-command surface now that the *Server exists (createSession
 	// /deleteSession UDS commands and the snapshot DaemonView delegate to it).
 	sessionCommands.SetTarget(srv)
-	// Only now can a creation job invoke the daemon's real session path.  A
-	// failure to scan/drain is fatal to this daemon instance: leaving a running
-	// process that merely stopped consuming durable workspace requests would
-	// strand jobs without an operator-visible failure.
+	// Only now can a creation job invoke the daemon's real session path.  The
+	// inbox stopping is a DEGRADED FEATURE, never a dead daemon: a single
+	// failed creation used to hibernate every live session in the editor.  Job
+	// failures are contained inside the inbox loop (durable, logged, surfaced
+	// to the host); only a structural failure ends Run, and even that leaves
+	// the daemon serving its sessions with one loud, unmissable log line.
 	go func() {
 		if inboxErr := workspaceAssembly.Inbox.Run(workspaceCreateCtx); inboxErr != nil && workspaceCreateCtx.Err() == nil {
-			log.Printf("claude-repld: workspace creation inbox stopped: %v", inboxErr)
-			requestShutdown()
+			log.Printf("claude-repld: WORKSPACE CREATION INBOX STOPPED: %v — workspace creation is DEGRADED until this daemon is restarted; every other session keeps serving (no shutdown)", inboxErr)
 		}
 	}()
 	// Same late bind for the registrar's SessionView re-push, so a backfill
