@@ -365,8 +365,7 @@ unable to sweep it."
   "Start WS's agent session under WS's own frontend, WITHOUT showing it.
 
 The single boot door for every path that brings a workspace into
-existence or back from disk — worktree creation
-\(`agent-repl--setup-worktree-session') and snapshot / project restore
+existence or back from disk — snapshot / project restore and reopen
 \(`agent-repl--establish-workspace') — so all of them agree on which
 frontend a workspace is born under, instead of each hard-wiring its
 own boot path and stranding the gui default.

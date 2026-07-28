@@ -1,9 +1,22 @@
-;;; worktree.el --- workspace creation, worktree management, merge -*- lexical-binding: t; -*-
+;;; worktree.el --- workspace creation intent, worktree management, merge -*- lexical-binding: t; -*-
+
+;;; Commentary:
+
+;; Workspace CREATION lives here only as intent.  Every flavor — `SPC TAB n',
+;; `SPC TAB N', `SPC TAB f', the one-shots, the resume investigation — ends in
+;; one `workspace_commands_<uuid>.json' file in the daemon's inbox, written
+;; either directly (`agent-repl--workspace-create-request') or by the headless
+;; generation skill this file spawns.  Emacs runs no `git worktree add', names
+;; no branch, creates no session, and preflights no collision: the daemon owns
+;; all of it and answers with `WorkspaceAvailable' or a failure host action,
+;; both handled in `workspace-create-client.el'.
+;;
+;; What remains here is everything AFTER a workspace exists: worktree
+;; management, close/finish, and the whole merge machinery.
 
 ;;; Code:
 
 (require 'cl-lib)
-(require 'filenotify)
 (require 'profiler)
 
 (declare-function agent-repl--ws-set-agent-state "status")
@@ -19,17 +32,6 @@
                   "workspace-create-client" (&rest keys))
 (declare-function pygn-mode "pygn-mode")
 (declare-function pygn-mode-display-gui-board-at-pos "pygn-mode")
-
-(defvar agent-repl--workspace-generation-watch nil
-  "Legacy workspace_commands file-notify descriptor pending teardown.")
-
-;; `defvar' preserves the live descriptor installed by an older module version
-;; across hot reload.  Tear it down before defining any workspace behavior so
-;; the daemon immediately becomes the sole watcher, claimant, and deleter.
-(setq agent-repl--workspace-generation-watch
-      (agent-repl--dir-watcher-remove-legacy
-       agent-repl--workspace-generation-watch
-       "workspace_commands"))
 
 (define-error 'agent-repl-merge-conflict-error
   "Cherry-pick conflict left in tree (resolver declined or interactive abort)"
@@ -449,66 +451,6 @@ skip work on a dirty trunk rather than abort the caller."
 
 ;;; Worktree registration and session setup
 
-(defun agent-repl--register-worktree-ws (ws-id &optional ws)
-  "Mark workspace WS as a worktree workspace.
-WS-ID is the hash identifier (used for logging/buffer naming); the state
-is stored under WS, defaulting to `+workspace-current-name'.
-Signals an error if no workspace name can be determined.  The project
-root is recorded by `agent-repl--initialize-ws-env', not here."
-  (let ((ws (or ws (agent-repl--ws-current-name))))
-    (unless ws
-      (error "agent-repl--register-worktree-ws: no workspace name provided and no current workspace"))
-    (agent-repl--log ws "register-worktree-ws ws-id=%s ws=%s" ws-id ws)
-    (agent-repl--ws-put ws :worktree-p t)))
-
-(defun agent-repl--mark-start-failed (ws err)
-  "Surface a failed agent start for WS loudly instead of letting ERR escape.
-Logs ERR, sets WS's `:agent-state' to `:start-failed' so the tab
-renders the 🚫 badge (the failure stays visible after the echo-area
-message scrolls away), and echoes an actionable message.  Used by paths
-that run inside a process sentinel — e.g. `agent-repl--setup-worktree-session'
-via `agent-repl--async-git-sentinel' — where an uncaught signal would
-otherwise crash the sentinel as an opaque \"error in process sentinel\"."
-  (let ((msg (error-message-string err)))
-    (agent-repl--log ws "mark-start-failed ws=%s err=%s" ws msg)
-    (when ws (agent-repl--ws-set-agent-state ws :start-failed))
-    (agent-repl--warn ws "Claude failed to start for %s — %s" ws msg)))
-
-(defun agent-repl--setup-worktree-session (ws-id path ws &optional no-agent)
-  "Register WS as a worktree at PATH and start its agent session.
-
-The session boots through WS's OWN FRONTEND
-\(`agent-repl--frontend-boot-session'), not through the vterm boot
-directly: a workspace born here is born under `agent-repl-default-frontend'
-like any other, so the generated / hand-created worktree comes up in the
-gui when the gui is the default.  PATH and the `:bare-metal' environment
-are passed as hints, which the boot threads into `initialize-ws-env' (the
-sole writer of `:project-dir', `:active-env', and per-env instantiation
-structs) BEFORE resolving the frontend.
-
-When NO-AGENT is non-nil, the worktree is still registered as a
-worktree workspace but the agent is NOT booted: only the env state is
-hydrated via `initialize-ws-env' (the same hints the boot would have
-threaded through), mirroring `agent-repl--new-workspace'.  This is the
-`SPC TAB n/N' empty-preemptive-prompt path — a worktree created exactly
-as usual, minus the auto-started agent session."
-  (agent-repl--register-worktree-ws ws-id ws)
-  (let ((default-directory (file-name-as-directory path)))
-    (if no-agent
-        (progn
-          (agent-repl--initialize-ws-env ws path :bare-metal)
-          (agent-repl--log ws "worktree NOT starting agent (no-agent) ws=%s" ws))
-      (condition-case err
-          (progn
-            (agent-repl--frontend-boot-session ws path :bare-metal)
-            (agent-repl--log ws "worktree pre-started agent ws=%s frontend=%s"
-                              ws (agent-repl--ws-frontend-name ws)))
-        ;; Runs from `agent-repl--async-git-sentinel'; a non-local exit here
-        ;; would crash the sentinel as an opaque "error in process sentinel".
-        ;; Surface it loudly and modeline-visibly instead of letting it escape.
-        (error
-         (agent-repl--mark-start-failed ws err))))))
-
 (defun agent-repl--async-git-sentinel (proc _event)
   "Process sentinel for `agent-repl--async-git'.
 When PROC exits or is signaled, collects output, kills the process buffer,
@@ -540,47 +482,6 @@ This IS the external-boundary wrapper — tests mock it via `cl-letf'
     (set-process-sentinel proc #'agent-repl--async-git-sentinel)))
 
 ;;; Worktree creation
-
-(defun agent-repl--resolve-worktree-paths (git-root name)
-  "Compute worktree paths for branch NAME rooted at GIT-ROOT.
-GIT-ROOT is the repository the new worktree is being created from — the
-caller resolves it once (via `agent-repl--resolve-current-git-root' or an
-explicit capture) and passes it in.
-Returns a plist with keys :git-root, :dirname, :branch-name,
-:worktree-parent, :path, and :in-worktree."
-  (let* ((git-root (agent-repl--path-canonical git-root))
-         (dirname (agent-repl--bare-workspace-name name))
-         (git-root-parent (file-name-directory git-root))
-         (in-worktree (file-regular-p (expand-file-name ".git" git-root)))
-         (worktree-parent (if in-worktree
-                              git-root-parent
-                            (let* ((repo-name (file-name-nondirectory (directory-file-name git-root)))
-                                   (wt-dir (expand-file-name (concat repo-name agent-repl-worktree-dir-suffix) git-root-parent)))
-                              (make-directory wt-dir t)
-                              wt-dir)))
-         (path (agent-repl--path-canonical (expand-file-name dirname worktree-parent))))
-    (agent-repl--log name "resolve-worktree-paths: git-root=%s dirname=%s branch-name=%s worktree-parent=%s path=%s in-worktree=%s"
-                      git-root dirname name worktree-parent path in-worktree)
-    (list :git-root git-root
-          :dirname dirname
-          :branch-name name
-          :worktree-parent worktree-parent
-          :path path
-          :in-worktree in-worktree)))
-
-(defun agent-repl--apply-workspace-properties (ws &rest plist)
-  "Apply optional properties from PLIST to workspace WS.
-PLIST is a flat property list of keyword/value pairs.  Each non-nil
-value is stored via `agent-repl--ws-put'."
-  (agent-repl--log ws "apply-workspace-properties: ws=%s plist=%S" ws plist)
-  (cl-loop for (key val) on plist by #'cddr
-           when val do (agent-repl--ws-put ws key val)))
-
-(defun agent-repl--register-projectile-project (path dirname)
-  "Write a .projectile marker and register PATH (named DIRNAME) with projectile."
-  (write-region dirname nil (expand-file-name ".projectile" path))
-  (agent-repl--log dirname "worktree wrote .projectile, adding to projectile known projects")
-  (agent-repl--ws-register-project (file-name-as-directory path)))
 
 (defconst agent-repl--autonomous-prompt-prefix
   "Do not wait for further instructions. Come up with a plan and then immediately execute on it. Here is the task:\n\n"
@@ -823,7 +724,7 @@ any prompts queued on `agent-repl--oneshot-amended-prompts' for the
 flavor onto WS's `:pending-prompts' so they ride the same delivery
 burst as the original preemptive prompt.
 
-Idempotent and safe to call from `agent-repl--finalize-worktree-workspace'
+Idempotent and safe to call for any workspace, oneshot or not,
 regardless of whether the workspace is a oneshot — it no-ops when PATH
 isn't a pinned-oneshot dir, or when the flavor isn't currently marked
 `:generating' (e.g. when a non-oneshot worktree happens to be created
@@ -989,8 +890,8 @@ caller already knows; the model is told to copy them through unchanged
 rather than re-derive them.
 MODEL, when non-nil, is the per-workspace agent model alias the spawned
 workspace's initial session should boot under; it is emitted as a
-deterministic `model' field on the create entry so
-`agent-repl--handle-create-command' threads it through as `--model'.
+deterministic `model' field on the create entry so the daemon boots the
+new session under `--model'.
 When nil, no `model' field is emitted and the workspace falls back to
 `agent-repl-interactive-model'."
   (concat
@@ -1139,54 +1040,14 @@ file intake."
        (when (buffer-live-p out-buf) (kill-buffer out-buf))
        nil))))
 
-(defun agent-repl--enqueue-preemptive-prompt (ws prompt &optional origin)
-  "Enqueue PROMPT on workspace WS for delivery once the agent is ready.
-Sets :pending-show-panels so panels open after switching to WS.  The
-panels always open filling the frame (fullscreen is the sole display
-format), so no separate maximize flag is needed.
-
-ORIGIN, when non-nil, rides WITH the parked prompt (see
-`agent-repl--make-pending-prompt') so the delivery stamps the send even
-after a dead-workspace recreation, and every verify retry re-stamps it."
-  (if (and prompt (not (string-empty-p prompt)))
-      (progn
-        (agent-repl--log ws "enqueue-preemptive-prompt: ws=%s enqueuing prompt origin=%s" ws origin)
-        (agent-repl--ws-put ws :pending-prompts
-                            (list (agent-repl--make-pending-prompt prompt origin)))
-        (agent-repl--ws-put ws :pending-show-panels t))
-    (agent-repl--log ws "enqueue-preemptive-prompt: ws=%s prompt empty, skipping" ws)))
-
-(defun agent-repl--inherit-priority-from-source (priority source-dir)
-  "Return PRIORITY, else the `:priority' of SOURCE-DIR's workspace.
-Used by `agent-repl--finalize-worktree-workspace' so a newly spawned
-child workspace inherits its parent's priority when the create command
-did not specify one of its own.  Returns nil when SOURCE-DIR is nil, does
-not resolve to a known workspace, or that workspace has no priority."
-  (or priority
-      (when source-dir
-        (when-let ((src-ws (agent-repl--ws-name-for-dir source-dir)))
-          (agent-repl--ws-get src-ws :priority)))))
-
-(defun agent-repl--inherit-config-dir-override (ws source-dir)
-  "Copy the account override from SOURCE-DIR's workspace onto WS.
-Used by `agent-repl--finalize-worktree-workspace': the account override
-travels parent -> child, so a workspace generated from a switched
-parent runs as the SAME account rather than the path-computed default
-the parent deliberately moved off.  No-op when SOURCE-DIR is nil, does
-not resolve to a known workspace, or that workspace carries no
-`:config-dir-override'."
-  (when source-dir
-    (when-let* ((parent-ws (agent-repl--ws-name-for-dir source-dir))
-                (override (agent-repl--ws-get parent-ws :config-dir-override)))
-      (agent-repl--ws-put ws :config-dir-override override))))
-
 (defun agent-repl--eager-open-panels (ws)
   "Build WS's REPL panels into WS's OWN perspective without stealing focus.
 
-Called from `agent-repl--finalize-worktree-workspace' for a workspace
-generated in the BACKGROUND (no switch callback), so the workspace's
-agent-repl is laid out and mounted the moment the workspace is
-generated rather than only when the user first switches to it.
+Called by the `WorkspaceAvailable' handler for a workspace that arrives in
+the BACKGROUND — an unsolicited creation, or one Emacs requested without
+asking to be moved to it — so the workspace's agent-repl is laid out and
+mounted the moment the daemon announces it rather than only when the user
+first switches to it.
 
 Runs the SAME drains a real workspace switch runs
 \(`agent-repl--drain-pending-magit', `agent-repl--drain-pending-initial-buffers',
@@ -1213,338 +1074,23 @@ would misfire here."
       (agent-repl--drain-pending-initial-buffers ws)
       (agent-repl--drain-pending-show-panels ws))))
 
-(defun agent-repl--worktree-generation-eager-open-callback (_path dirname)
-  "Open generated workspace DIRNAME's REPL into its OWN perspective.
-Passed as the creation CALLBACK for the BACKGROUND generation path
-\(`agent-repl--create-worktree-from-command'), where the caller's focus
-must stay put — so, unlike the interactive
-`agent-repl--worktree-creation-switch-callback', this deliberately does
-NOT switch to the new workspace; `agent-repl--eager-open-panels' builds
-its panels behind a transient, focus-restoring switch instead.  Runs
-OUTSIDE `agent-repl--finalize-worktree-workspace''s focus-preservation
-wrapper like every creation callback, which is exactly why eager-open
-carries its own `agent-repl--with-preserved-focus'.  PATH is unused —
-`agent-repl--eager-open-panels' resolves everything from the workspace
-name DIRNAME."
-  (agent-repl--eager-open-panels dirname))
+(defun agent-repl--enqueue-preemptive-prompt (ws prompt &optional origin)
+  "Enqueue PROMPT on workspace WS for delivery once the agent is ready.
+Sets :pending-show-panels so panels open after switching to WS.  The
+panels always open filling the frame (fullscreen is the sole display
+format), so no separate maximize flag is needed.
 
-(defun agent-repl--place-generated-workspace (ws source-dir)
-  "Place newly-generated workspace WS in the tab-bar.
-When SOURCE-DIR resolves to a live parent workspace that is present in
-the tab-bar, WS is inserted immediately after that parent so a child
-workspace surfaces next to the workspace it was generated from (via
-`agent-repl--reorder-workspace-next-to').
-
-Otherwise WS falls back to priority-based placement (via
-`agent-repl--reorder-workspace-by-priority').  The fallback covers a
-parentless workspace (SOURCE-DIR nil, e.g. the `SPC TAB N' origin/master
-path), a SOURCE-DIR that maps to no live workspace, and a parent that is
-no longer in the tab-bar (closed or not yet rendered).
-
-The `not-in-cache' / self guards are checked here rather than delegated
-to `agent-repl--reorder-workspace-next-to': the next-to primitive only
-no-ops on a missing anchor, so without the pre-check WS would be left at
-persp-mode's default append-at-end position instead of getting the
-priority placement it is due."
-  (let ((parent (and source-dir (agent-repl--ws-name-for-dir source-dir))))
-    (if (and parent
-             (boundp 'persp-names-cache)
-             (member parent persp-names-cache)
-             (not (equal parent ws)))
-        (progn
-          (agent-repl--log ws "place-generated-workspace: next-to parent=%s source-dir=%s"
-                            parent source-dir)
-          (agent-repl--reorder-workspace-next-to ws parent))
-      (agent-repl--log ws "place-generated-workspace: priority-fallback parent=%s source-dir=%s"
-                        (or parent "nil") (or source-dir "nil"))
-      (agent-repl--reorder-workspace-by-priority ws))))
-
-(defun agent-repl--finalize-worktree-workspace (path dirname preemptive-prompt
-                                                       priority fork-session-id
-                                                       callback &optional source-dir no-agent model
-                                                       postprocessing-prompt before-ws-merge-prompt)
-  "Finalize a new worktree workspace at PATH with directory name DIRNAME.
-Registers the project with projectile, creates a Doom workspace, applies
-optional PREEMPTIVE-PROMPT, PRIORITY, FORK-SESSION-ID, and SOURCE-DIR
-settings, starts the agent session, and invokes CALLBACK with
-(PATH DIRNAME) when done.
-SOURCE-DIR, when non-nil, is the canonical project-dir of the workspace
-this worktree was created from; stored under `:source-ws-dir' so
-`SPC TAB M' can route the merge back to its source.
-When PRIORITY is nil and SOURCE-DIR resolves to a known workspace, the
-new workspace inherits that source workspace's `:priority' (see
-`agent-repl--inherit-priority-from-source').  When neither is available,
-falls back to `agent-repl-repo-default-priorities' keyed off PATH's
-repo name (see `agent-repl--repo-default-priority-for-path').
-Sets `:pending-magit' on the new workspace so `magit-status' opens in
-its own window layout the first time the user activates it, rather than
-splitting the caller's window.  Likewise sets `:pending-initial-buffers'
-so configured initial buffers are opened in the new workspace's
-perspective rather than the caller's.
-
-The entire setup runs inside `agent-repl--with-preserved-focus' so
-any internal perspective / window / buffer change made while
-materializing the new workspace (e.g. by `+workspace-new',
-`--initialize-agent', or any persp-mode hook fired along the way)
-stays invisible to the user — the caller's workspace and window
-remain selected when finalize returns.  CALLBACK, when provided,
-runs OUTSIDE the focus-preservation wrapper so callers that
-deliberately want to switch (e.g. interactive worktree creation that
-should jump to the new ws) are not silently undone.
-
-NO-AGENT, when non-nil, is forwarded to
-`agent-repl--setup-worktree-session' so the worktree is registered
-without booting an agent session — the `SPC TAB n/N'
-empty-preemptive-prompt path.
-
-MODEL, when non-nil, is the per-workspace agent model alias (from the
-workspace-generation JSON's `model' field); stored under `:model' so
-`agent-repl--build-start-cmd' passes it as `--model' when booting the
-session.  When nil, the session falls back to
-`agent-repl-interactive-model' (default \"opus\").
-
-POSTPROCESSING-PROMPT, when non-nil, is a prompt (from the dispatch
-JSON's `postprocessing_prompt' field) stored under `:postprocessing-prompt';
-`agent-repl--maybe-run-postprocessing-prompt' delivers it to this
-workspace's source after this workspace's merge is fully finished.  It
-survives the merge tombstone (not a runtime key).
-
-BEFORE-WS-MERGE-PROMPT, when non-nil, is an action (from the dispatch
-JSON's `before_ws_merge' field) stored under `:before-ws-merge-prompt';
-`agent-repl--maybe-run-before-ws-merge-prompt' delivers it to THIS
-workspace's OWN session — before it merges — the moment its
-`/create-or-update-workspace merge' command arrives, deferring the merge
-until the action completes.  Unlike POSTPROCESSING-PROMPT (which runs in
-the SOURCE after the merge finishes), this runs in the child itself
-BEFORE the merge."
-  (agent-repl--log dirname "finalize-worktree-workspace: path=%s dirname=%s priority=%s fork-session-id=%s source-dir=%s model=%s"
-                    path dirname priority fork-session-id (or source-dir "nil") (or model "nil"))
-  (agent-repl--with-preserved-focus
-    (agent-repl--register-projectile-project path dirname)
-    (let* ((canonical (agent-repl--path-canonical path))
-           (ws-id (substring (md5 canonical) 0 agent-repl-workspace-id-length))
-           (ws dirname)
-           (effective-priority (or (agent-repl--inherit-priority-from-source priority source-dir)
-                                   (agent-repl--repo-default-priority-for-path path))))
-      (agent-repl--log ws "worktree creating workspace %s effective-priority=%s" ws (or effective-priority "nil"))
-      ;; Tag the new persp with `+workspace-project' (via --ws-create) so a
-      ;; later `SPC p p' into this worktree matches it through Doom's
-      ;; `+workspaces-switch-to-project-h' instead of falling into that hook's
-      ;; uniquify-by-parent-dir branch, which recreates the workspace under a
-      ;; parent-dir-prefixed name like `doom-worktrees/<ws>'.  See --ws-create
-      ;; for the full rationale.  --ws-new (plain `+workspace-new') left the
-      ;; parameter unset, which was the cause of the prefixed-name bug.
-      (agent-repl--ws-create ws canonical)
-      (agent-repl--ws-put ws :pending-magit t)
-      (agent-repl--ws-put ws :pending-initial-buffers t)
-      (agent-repl--enqueue-preemptive-prompt ws preemptive-prompt)
-      ;; If this finalize matches an in-flight oneshot flavor, record the
-      ;; workspace name and append any amended prompts queued by `SPC j M-o'
-      ;; / `SPC j M-O' onto `:pending-prompts'.  Must run AFTER
-      ;; `--enqueue-preemptive-prompt' (which overwrites `:pending-prompts'
-      ;; with the lone preemptive prompt) so the amended prompts ride after
-      ;; it rather than getting clobbered.
-      (agent-repl--oneshot-track-workspace path dirname)
-      (agent-repl--apply-workspace-properties ws
-        :priority effective-priority
-        :fork-session-id fork-session-id
-        :source-ws-dir source-dir
-        :model model
-        :postprocessing-prompt postprocessing-prompt
-        :before-ws-merge-prompt before-ws-merge-prompt)
-      (agent-repl--inherit-config-dir-override ws source-dir)
-      ;; Cache branch names at construction time so --merge-base-ancestor-args
-      ;; can skip the per-tick synchronous rev-parse calls on the warm path.
-      (let ((branch (agent-repl--git-string-quiet "-C" path "rev-parse" "--abbrev-ref" "HEAD")))
-        (when (and branch (not (string-empty-p branch)) (not (string-prefix-p "fatal" branch)))
-          (agent-repl--ws-put ws :branch-name branch)))
-      (when source-dir
-        (let ((parent-branch (agent-repl--git-string-quiet "-C" source-dir "rev-parse" "--abbrev-ref" "HEAD")))
-          (when (and parent-branch (not (string-empty-p parent-branch)) (not (string-prefix-p "fatal" parent-branch)))
-            (agent-repl--ws-put ws :parent-branch-name parent-branch))))
-      ;; Place the new tab next to its parent's tab when SOURCE-DIR names a
-      ;; live workspace; otherwise fall back to priority-based placement.
-      (agent-repl--place-generated-workspace ws source-dir)
-      (agent-repl--setup-worktree-session ws-id path ws no-agent)
-      (agent-repl--info ws "Worktree '%s' ready." dirname)))
-  ;; CALLBACK runs OUTSIDE the focus-preservation wrapper.  The only
-  ;; production caller (`agent-repl--worktree-creation-switch-callback')
-  ;; deliberately switches to the new workspace; wrapping it would
-  ;; silently undo that switch.  The sentinel-driven workspace-generation
-  ;; path passes CALLBACK=nil so the no-switch contract for that flow
-  ;; is already satisfied by the wrapped body above.
-  (when callback (funcall callback path dirname)))
-
-(defun agent-repl--worktree-add-callback (path dirname preemptive-prompt
-                                               priority fork-session-id
-                                               callback source-dir no-agent model
-                                               postprocessing-prompt before-ws-merge-prompt
-                                               ok output)
-  "Handle the result of an async git-worktree-add operation.
-OK and OUTPUT are the success flag and git output.  The remaining arguments
-describe the workspace being created and are forwarded to
-`agent-repl--finalize-worktree-workspace' (including SOURCE-DIR, the
-project-dir of the workspace this worktree was created from, NO-AGENT,
-which suppresses booting the agent for the new worktree, MODEL, the
-per-workspace agent model alias, POSTPROCESSING-PROMPT, the after-merge
-prompt run in the source, and BEFORE-WS-MERGE-PROMPT, the pre-merge
-action run in the child itself)."
-  (agent-repl--log dirname "worktree git result: %s" output)
-  (if ok
+ORIGIN, when non-nil, rides WITH the parked prompt (see
+`agent-repl--make-pending-prompt') so the delivery stamps the send even
+after a dead-workspace recreation, and every verify retry re-stamps it."
+  (if (and prompt (not (string-empty-p prompt)))
       (progn
-        (agent-repl--log dirname "worktree-add-callback: ok=t path=%s dirname=%s" path dirname)
-        (agent-repl--finalize-worktree-workspace
-         path dirname preemptive-prompt
-         priority fork-session-id callback source-dir no-agent model
-         postprocessing-prompt before-ws-merge-prompt))
-    (agent-repl--log dirname "worktree-add-callback: ok=nil (git worktree add failed) path=%s" path)
-    (agent-repl--warn dirname "git worktree add failed: %s" output)))
+        (agent-repl--log ws "enqueue-preemptive-prompt: ws=%s enqueuing prompt origin=%s" ws origin)
+        (agent-repl--ws-put ws :pending-prompts
+                            (list (agent-repl--make-pending-prompt prompt origin)))
+        (agent-repl--ws-put ws :pending-show-panels t))
+    (agent-repl--log ws "enqueue-preemptive-prompt: ws=%s prompt empty, skipping" ws)))
 
-(defun agent-repl--async-worktree-add (git-root branch-name path base-commit
-                                              fork-session-id
-                                              dirname preemptive-prompt
-                                              priority callback
-                                              &optional source-dir no-agent model
-                                              postprocessing-prompt before-ws-merge-prompt)
-  "Run `git worktree add' asynchronously for a new worktree.
-Creates the worktree at PATH on BRANCH-NAME off BASE-COMMIT in GIT-ROOT.
-When the git command finishes, `agent-repl--worktree-add-callback'
-finalizes the workspace.  SOURCE-DIR is the project-dir of the workspace
-this worktree was created from; threaded through to be persisted as
-`:source-ws-dir' on the new workspace.  NO-AGENT, when non-nil, is
-forwarded so the new worktree is registered without booting the agent.
-MODEL, when non-nil, is the per-workspace agent model alias forwarded
-so the booted session runs under `--model MODEL'.  POSTPROCESSING-PROMPT
-and BEFORE-WS-MERGE-PROMPT are the two passthrough merge-lifecycle
-prompts threaded through to `agent-repl--finalize-worktree-workspace'."
-  (let* ((add-args (list "worktree" "add" "-b" branch-name path base-commit))
-         (after-add (lambda (ok output)
-                      (agent-repl--worktree-add-callback
-                       path dirname preemptive-prompt
-                       priority fork-session-id callback source-dir
-                       no-agent model postprocessing-prompt before-ws-merge-prompt
-                       ok output))))
-    (agent-repl--log dirname "worktree async git add: %S" add-args)
-    (agent-repl--async-git "worktree-add" git-root add-args after-add)))
-
-(defun agent-repl--worktree-fetch-callback (add-fn _ok output)
-  "Handle the result of an async git-fetch for worktree creation.
-Logs OUTPUT and then calls ADD-FN to proceed with the worktree-add step."
-  (agent-repl--log nil "worktree fetch: %s" output)
-  (funcall add-fn))
-
-(defun agent-repl--worktree-fetch-master-callback (add-fn git-root _ok output)
-  "Handle the result of an async git-fetch for master-based worktree creation.
-Logs OUTPUT, then attempts to fast-forward local trunk to its origin
-counterpart via `agent-repl--maybe-fast-forward-master' so the new
-worktree branches off a fresh master when ff is safe.  Always calls
-ADD-FN afterward — failure to ff (e.g. local-only commits) is a no-op,
-not a blocker for worktree creation."
-  (agent-repl--log nil "worktree fetch (master): %s" output)
-  (agent-repl--maybe-fast-forward-master git-root)
-  (funcall add-fn))
-
-(defun agent-repl--validate-worktree-creation (name git-root dirname branch-name path)
-  "Validate that a worktree can be created for NAME.
-Checks that NAME is non-empty, PATH does not already exist on disk, and
-BRANCH-NAME does not already exist in GIT-ROOT.  DIRNAME is used for
-error messages.  Signals `user-error' on any failure.
-
-PATH existence is checked with `file-directory-p' rather than
-`projectile-project-p' because the latter walks up the path looking for
-project markers — for a non-existent worktree dir nested under another
-repo (e.g. a `*-worktrees/' parent inside a repo), it would incorrectly
-report the new path as an existing project."
-  (agent-repl--log name "validate-worktree-creation: name=%s git-root=%s dirname=%s branch-name=%s path=%s"
-                    name git-root dirname branch-name path)
-  (when (string-empty-p name)
-    (agent-repl--log name "validate-worktree-creation: rejected empty name git-root=%s" git-root)
-    (user-error "Name cannot be empty"))
-  (when (file-directory-p path)
-    (agent-repl--log name "validate-worktree-creation: rejected existing path=%s dirname=%s" path dirname)
-    (user-error "Worktree '%s' already exists — use SPC p p to switch to it" dirname))
-  (when (agent-repl--git-branch-exists-p git-root branch-name)
-    (agent-repl--log name "ERROR: branch '%s' already exists — cannot create worktree" branch-name)
-    (user-error "Branch '%s' already exists — delete it first or choose a different name" branch-name)))
-
-(defun agent-repl--do-create-worktree-workspace (name &optional fork-session-id preemptive-prompt callback priority base-commit git-root source-dir no-agent model postprocessing-prompt before-ws-merge-prompt)
-  "Create a git worktree and Doom workspace for NAME.
-Git fetch and worktree-add run asynchronously so Emacs is not blocked.
-When everything is ready, CALLBACK (if non-nil) is called with (PATH DIRNAME).
-
-NO-AGENT, when non-nil, creates the worktree exactly as usual but does
-NOT boot an agent session for it (only the env state is hydrated).  This
-backs the `SPC TAB n/N' empty-preemptive-prompt path, where the user
-names a plain worktree workspace and the agent is started later on demand.
-
-BASE-COMMIT is the git ref the new branch is created from.  When nil,
-defaults to \"HEAD\" if FORK-SESSION-ID is set (forks track the live
-session's tip) and `agent-repl-worktree-default-base' otherwise.  The
-interactive entry point passes \"HEAD\" explicitly so `SPC TAB n' always
-branches off the current worktree; `SPC TAB N' passes the local trunk
-branch (e.g. \"master\").
-
-The fetch step runs in two cases:
-- BASE-COMMIT has an \"origin/\" prefix — fetch the parsed remote ref.
-- BASE-COMMIT equals `agent-repl-master-branch-name' — fetch the
-  corresponding origin ref so `origin/<trunk>' stays current even
-  though the new branch is rooted in the local trunk.
-
-GIT-ROOT is the repository the new worktree is rooted in.  When nil, it
-is resolved once here via `agent-repl--resolve-current-git-root'.  The
-commands-file flow captures the git root at enqueue time and passes it
-in explicitly so the resolved value reflects the user's context at
-command-receipt, not at timer-fire.
-
-SOURCE-DIR is the project-dir of the workspace this worktree was created
-from; persisted as `:source-ws-dir' on the new workspace so
-`SPC TAB M' can route the merge back to its source.
-
-MODEL, when non-nil, is the per-workspace agent model alias threaded
-through to `agent-repl--finalize-worktree-workspace' and stored under
-`:model' so the booted session runs under `--model MODEL' (defaulting to
-`agent-repl-interactive-model' when nil)."
-  (let* ((base-commit (or base-commit (if fork-session-id "HEAD" agent-repl-worktree-default-base)))
-         (git-root (or git-root (agent-repl--resolve-current-git-root)))
-         (paths (agent-repl--resolve-worktree-paths git-root name))
-         (git-root (plist-get paths :git-root))
-         (dirname (plist-get paths :dirname))
-         (branch-name (plist-get paths :branch-name))
-         (in-worktree (plist-get paths :in-worktree))
-         (path (plist-get paths :path)))
-    (agent-repl--validate-worktree-creation name git-root dirname branch-name path)
-    (agent-repl--log name "worktree git-root=%s name=%s dirname=%s branch=%s base=%s in-worktree=%s path=%s old-ws=%s old-ws-id=%s source-dir=%s"
-             git-root name dirname (or branch-name "none") base-commit in-worktree path
-             (agent-repl--ws-current-name) (agent-repl--workspace-id) (or source-dir "nil"))
-    ;; --- kick off: fetch (if base is a remote ref) then add ---------------
-    (let ((add-fn (apply-partially #'agent-repl--async-worktree-add
-                                   git-root branch-name path base-commit
-                                   fork-session-id
-                                   dirname preemptive-prompt
-                                   priority callback source-dir
-                                   no-agent model postprocessing-prompt
-                                   before-ws-merge-prompt)))
-      (agent-repl--info name "Creating worktree '%s' from %s..." dirname base-commit)
-      (cond
-       (fork-session-id
-        (agent-repl--log name "worktree-create-dispatch: branch=fork base=%s" base-commit)
-        (funcall add-fn))
-       ((string-prefix-p "origin/" base-commit)
-        (agent-repl--log name "worktree-create-dispatch: branch=fetch-origin base=%s" base-commit)
-        (agent-repl--async-git
-         "fetch" git-root
-         (list "fetch" "origin" (substring base-commit (length "origin/")))
-         (apply-partially #'agent-repl--worktree-fetch-callback add-fn)))
-       ((equal base-commit agent-repl-master-branch-name)
-        (agent-repl--log name "worktree-create-dispatch: branch=fetch-master base=%s" base-commit)
-        (agent-repl--async-git
-         "fetch" git-root
-         (list "fetch" "origin" base-commit)
-         (apply-partially #'agent-repl--worktree-fetch-master-callback
-                          add-fn git-root)))
-       (t
-        (agent-repl--log name "worktree-create-dispatch: branch=add-direct base=%s" base-commit)
-        (funcall add-fn))))))
 
 (defun agent-repl--remove-doom-dashboard ()
   "Remove the Doom dashboard buffer from the current workspace.
@@ -1557,27 +1103,15 @@ buffer list."
                         "remove-doom-dashboard: removing buffer=%s" (buffer-name dash))
       (ignore-errors (agent-repl--ws-remove-buffer dash)))))
 
-(defun agent-repl--worktree-creation-switch-callback (path dirname)
-  "Switch to the newly created worktree workspace.
-PATH is the worktree directory; DIRNAME is the workspace name.
-Magit-status is already opened by `finalize-worktree-workspace'.
-
-Routes through `agent-repl-jump-to-workspace' so the destination tab
-flashes — symmetric with the project-picker (`SPC p p') and reopen
-paths, so every identity-based jump pulses uniformly."
-  (agent-repl--log dirname "worktree-creation-switch-callback: path=%s dirname=%s current-ws=%s target=%s"
-                    path dirname (agent-repl--ws-current-name) dirname)
-  (agent-repl-jump-to-workspace dirname))
-
 (defconst agent-repl--worktree-base-commits
   '((head   . "HEAD")
     (master . "master"))
   "Map of base-symbol to git ref for `agent-repl-create-worktree-workspace'.
 Keys are the symbols callers pass as the BASE argument; values are the
-git refs forwarded to `agent-repl--do-create-worktree-workspace'.
+git refs emitted as the create command's `base_commit'.
 The `master' entry resolves to LOCAL `master' (not `origin/master') so
-new worktrees inherit any local-only commits; the worktree-creation
-flow still runs `git fetch origin master' first as a freshness gesture,
+new worktrees inherit any local-only commits; the DAEMON still runs
+`git fetch origin master' first as a freshness gesture,
 and — when local master is strictly an ancestor of `origin/master' —
 fast-forwards local master to `origin/master' so the new worktree
 branches off the freshest commit (see
@@ -2596,71 +2130,6 @@ finalized or never preserved)."
 
 ;;; Workspace commands file processing
 
-(defun agent-repl--resolve-fork-session-id (fork-from)
-  "Resolve FORK-FROM workspace name to an agent session ID.
-FORK-FROM is a workspace name (possibly a full branch like \"DWC/foo\");
-it is normalized to the bare name (\"foo\") before lookup.
-Returns the session ID string.  Signals `error' if FORK-FROM is non-nil
-but the workspace is unknown or has no active session — callers must not
-silently degrade to the default base when forking was explicitly requested."
-  (when fork-from
-    (let* ((ws (agent-repl--bare-workspace-name fork-from))
-           (inst (ignore-errors (agent-repl--active-inst ws)))
-           (sid (and inst (agent-repl-instantiation-session-id inst))))
-      (agent-repl--log ws "resolve-fork-session-id: fork-from=%s ws=%s sid=%s" fork-from ws sid)
-      (unless sid
-        (agent-repl--log ws "resolve-fork-session-id: FAILED fork-from=%s ws=%s — no session ID found" fork-from ws)
-        (error "Cannot fork from workspace '%s': no active session ID (workspace unknown or session not started)" fork-from))
-      sid)))
-
-(defun agent-repl--create-worktree-from-command (git-root name prompt priority &optional fork-session-id base-commit model postprocessing-prompt before-ws-merge-prompt)
-  "Timer callback: create a worktree workspace for NAME with PROMPT and PRIORITY.
-GIT-ROOT is the repository captured at enqueue time (in
-`agent-repl--handle-create-command'); it is threaded through so the
-resolved root reflects the user's context at command-receipt rather than
-whatever workspace happens to be active when the timer fires.
-When FORK-SESSION-ID is non-nil, the new worktree branches from HEAD and
-resumes the fork source's agent session.
-BASE-COMMIT, when non-nil, overrides the default base ref (which is
-\"HEAD\" for forks and `agent-repl-worktree-default-base' otherwise).
-MODEL, when non-nil, is the per-workspace agent model alias forwarded so
-the booted session runs under `--model MODEL'.
-
-The new workspace's `:source-ws-dir' is derived from BASE-COMMIT:
-- When BASE-COMMIT equals `agent-repl-master-branch-name', the parent
-  is the master worktree of the repo containing GIT-ROOT, resolved via
-  `agent-repl--master-worktree-path'.  Returns nil when no worktree is
-  on master, leaving the new workspace parentless rather
-  than nested under the calling workspace.  This is the `SPC TAB N'
-  contract: a worktree branched off local master shares no commits with
-  the calling workspace, so the recorded parent must be master (or
-  nothing) — never the calling workspace.
-- Otherwise (HEAD, forks, custom refs) the parent is GIT-ROOT, which
-  represents the originating workspace's repo dir.  This is the
-  `SPC TAB n' / fork contract."
-  (let ((source-dir
-         (if (and base-commit (equal base-commit agent-repl-master-branch-name))
-             (agent-repl--master-worktree-path git-root)
-           git-root)))
-    (agent-repl--log name "create-worktree-from-command: name=%s git-root=%s priority=%s fork-session-id=%s base-commit=%s source-dir=%s model=%s"
-                      name git-root priority fork-session-id (or base-commit "nil") (or source-dir "nil")
-                      (or model "nil"))
-    ;; CALLBACK = the eager-open callback (not nil): a generated workspace
-    ;; opens its REPL into its OWN perspective the moment it is created,
-    ;; without stealing the caller's focus (`--worktree-generation-eager-open-callback'
-    ;; runs outside finalize's focus wrapper and switches back after building).
-    (agent-repl--do-create-worktree-workspace
-     name fork-session-id prompt
-     #'agent-repl--worktree-generation-eager-open-callback
-     priority base-commit git-root source-dir nil model postprocessing-prompt
-     before-ws-merge-prompt)))
-
-(defcustom agent-repl-worktree-stagger-seconds 5
-  "Seconds between staggered worktree creation timers.
-Prevents concurrent agent startups from corrupting ~/.claude.json."
-  :type 'integer
-  :group 'agent-repl)
-
 ;;; Workspace-name disambiguation (collision-only suffix)
 ;;
 ;; The workspace-generation skill emits BARE workspace names with no
@@ -2669,117 +2138,6 @@ Prevents concurrent agent startups from corrupting ~/.claude.json."
 ;; on-disk worktree, a git branch, or a
 ;; name already reserved earlier in the current dispatch batch.  When
 ;; a name is clean, it passes through verbatim.
-
-(defvar agent-repl--workspace-names-in-flight nil
-  "Hash table of workspace names reserved by the current dispatch batch.
-Dynamically bound by callers that dispatch a local creation batch so sibling
-entries can detect name collisions before any git worktree has been added.
-Keyed by the full workspace name (e.g. \"DWC/foo\").  nil outside a
-dispatch batch — collision checks then only consult on-disk, git, and
-`agent-repl--workspaces' state.")
-
-(defcustom agent-repl-workspace-name-disambiguate-max-attempts 20
-  "Max attempts to find a non-colliding suffix in
-`agent-repl--disambiguate-workspace-name'.
-Each attempt generates a fresh 3-letter lowercase suffix; 20 attempts
-is overwhelmingly sufficient since the keyspace is 17,576."
-  :type 'integer
-  :group 'agent-repl)
-
-(defun agent-repl--random-disambiguator-suffix ()
-  "Return a fresh 3-character lowercase suffix string (no leading dash).
-Used by `agent-repl--disambiguate-workspace-name' to mint a tiebreaker
-when a desired workspace name would collide."
-  (let ((chars "abcdefghijklmnopqrstuvwxyz"))
-    (concat (string (aref chars (random 26)))
-            (string (aref chars (random 26)))
-            (string (aref chars (random 26))))))
-
-(defun agent-repl--candidate-worktree-path (git-root name)
-  "Return the would-be worktree directory path for NAME rooted at GIT-ROOT.
-Side-effect-free counterpart to `agent-repl--resolve-worktree-paths' —
-does NOT create the worktree-parent directory.  Intended for collision
-detection where the only question is what path WOULD be used; the
-real, mkdir-creating resolver runs later as part of worktree-add."
-  (let* ((git-root (agent-repl--path-canonical git-root))
-         (dirname (agent-repl--bare-workspace-name name))
-         (git-root-parent (file-name-directory git-root))
-         (in-worktree (file-regular-p (expand-file-name ".git" git-root)))
-         (worktree-parent
-          (if in-worktree
-              git-root-parent
-            (let ((repo-name (file-name-nondirectory
-                              (directory-file-name git-root))))
-              (expand-file-name (concat repo-name agent-repl-worktree-dir-suffix)
-                                git-root-parent)))))
-    (agent-repl--path-canonical (expand-file-name dirname worktree-parent))))
-
-(defun agent-repl--workspace-name-collides-p (name git-root)
-  "Return non-nil if NAME would collide with existing workspace state.
-GIT-ROOT is the target repository.  Checks (in order): the in-flight
-reservation set dynamically bound by the caller (keyed by full name like
-\"DWC/foo\"), the live `agent-repl--workspaces'
-hash table (keyed by bare name like \"foo\"), the on-disk worktree
-path, and the git branch named NAME.
-Returns the first matched signal (a non-nil value), or nil when NAME
-is collision-free.
-
-The path lookup is side-effect-free
-\(`agent-repl--candidate-worktree-path' — no mkdir) so this predicate
-is safe to call against stub repo paths in tests."
-  (let* ((path (agent-repl--candidate-worktree-path git-root name))
-         (branch-name name)
-         (bare-name (agent-repl--bare-workspace-name name))
-         (result
-          (or (and (hash-table-p agent-repl--workspace-names-in-flight)
-                   (gethash name agent-repl--workspace-names-in-flight))
-              (and (agent-repl--ws-known-p bare-name)
-                   :workspace-exists)
-              (and (file-directory-p path) :path-exists)
-              (and (agent-repl--git-branch-exists-p git-root branch-name)
-                   :branch-exists))))
-    (agent-repl--log name
-                      "workspace-name-collides-p: name=%s bare=%s git-root=%s path=%s result=%s"
-                      name bare-name git-root path (or result "nil"))
-    result))
-
-(defun agent-repl--disambiguate-workspace-name (name git-root)
-  "Return NAME unchanged when collision-free, else NAME with a `-XYZ' suffix.
-A collision is detected via `agent-repl--workspace-name-collides-p'.
-On collision, appends a fresh 3-letter random lowercase suffix and
-rechecks; up to `agent-repl-workspace-name-disambiguate-max-attempts'
-attempts.  Signals `error' when no non-colliding suffix is found
-within the cap — disambiguation must not silently succeed with a
-colliding name, since downstream `git worktree add' would fail."
-  (if (not (agent-repl--workspace-name-collides-p name git-root))
-      (progn
-        (agent-repl--log name "disambiguate-workspace-name: name=%s git-root=%s collision-free"
-                          name git-root)
-        name)
-    (let ((attempt 0)
-          (max-attempts agent-repl-workspace-name-disambiguate-max-attempts)
-          (candidate nil))
-      (while (and (< attempt max-attempts) (null candidate))
-        (let ((cand (format "%s-%s" name (agent-repl--random-disambiguator-suffix))))
-          (unless (agent-repl--workspace-name-collides-p cand git-root)
-            (setq candidate cand)))
-        (cl-incf attempt))
-      (unless candidate
-        (error "Could not disambiguate workspace name '%s' in %s after %d attempts"
-               name git-root max-attempts))
-      (agent-repl--log name
-                        "disambiguate-workspace-name: '%s' collided in %s; resolved to '%s' after %d attempt(s)"
-                        name git-root candidate attempt)
-      candidate)))
-
-(defun agent-repl--reserve-workspace-name (name)
-  "Record NAME in `agent-repl--workspace-names-in-flight' if bound.
-No-op when called outside a dispatch batch (i.e., the dynamic var is
-nil).  Reservation is consulted by
-`agent-repl--workspace-name-collides-p' so a later sibling `create'
-entry in the same JSON batch is disambiguated away from NAME."
-  (when (hash-table-p agent-repl--workspace-names-in-flight)
-    (puthash name t agent-repl--workspace-names-in-flight)))
 
 ;;; Resume-transcript-missing investigation
 ;;
@@ -2829,11 +2187,17 @@ could not find; SEARCHED-PATHS is the daemon-reported list of paths it
 stat'd; CWD is the failed workspace's project dir, used to resolve the
 repository the investigation worktree branches from (off master).
 
-Returns the bare investigation workspace name.  Idempotent: a repeat
-call for the same RESUME-ID returns the previously-created workspace
-without dispatching another, so the frontend reattach loop's retries do
-not spawn a fleet of duplicates.  Signals when the repository cannot be
-resolved from CWD — the investigation must land in a real worktree."
+Returns the REQUESTED investigation workspace name; the daemon owns the
+final name and resolves any collision itself, so no name reservation or
+disambiguation happens here.  Idempotent: a repeat call for the same
+RESUME-ID returns the previously-requested name without emitting another
+command, so the frontend reattach loop's retries do not spawn a fleet of
+duplicates.  Signals when the repository cannot be resolved from CWD —
+the investigation must land in a real worktree.
+
+No source workspace is nominated: the workspace whose resume just failed
+is precisely the one the daemon cannot be asked to inherit a live
+session's posture from."
   (or (gethash resume-id agent-repl--resume-investigation-workspaces)
       (let* ((raw-root (agent-repl--git-string-quiet
                         "-C" (expand-file-name cwd) "rev-parse" "--show-toplevel"))
@@ -2841,182 +2205,20 @@ resolved from CWD — the investigation must land in a real worktree."
                             (file-name-as-directory raw-root))))
         (unless git-root
           (error "agent-repl: cannot resolve git root from %s for a resume investigation" cwd))
-        (let* ((base (format "resume-investigate-%s"
+        (let* ((name (format "resume-investigate-%s"
                              (substring resume-id 0 (min 8 (length resume-id)))))
-               (name (agent-repl--disambiguate-workspace-name base git-root))
-               (prompt (agent-repl--resume-investigation-prompt resume-id searched-paths)))
-          (agent-repl--reserve-workspace-name name)
+               (prompt (agent-repl--resume-investigation-prompt resume-id searched-paths))
+               (command-id
+                (agent-repl--workspace-create-request
+                 :name name
+                 :git-root git-root
+                 :base-commit agent-repl-master-branch-name
+                 :prompt prompt)))
           (agent-repl--log name
-                            "dispatch-resume-investigation: resume-id=%s git-root=%s -> ws=%s"
-                            resume-id git-root name)
-          ;; Defer the create off this call stack (mirrors
-          ;; `agent-repl--dispatch-merge-remediation'): the caller sits in
-          ;; the frontend create-session error path, while the create does
-          ;; persp/session work that belongs on a fresh main-loop turn.
-          (run-at-time 0 nil #'agent-repl--create-worktree-from-command
-                       git-root name prompt nil nil agent-repl-master-branch-name nil)
+                            "dispatch-resume-investigation: resume-id=%s git-root=%s requested=%s command-id=%s"
+                            resume-id git-root name command-id)
           (puthash resume-id name agent-repl--resume-investigation-workspaces)
           name))))
-
-(defvar agent-repl--pending-postprocessing-prompts (make-hash-table :test 'equal)
-  "Bare-workspace-name -> postprocessing prompt, set at create-dispatch time.
-The create dispatch may carry a `postprocessing_prompt' field — a prompt
-the frontend runs AFTER the created workspace's merge fully finishes (see
-`agent-repl--maybe-run-postprocessing-prompt').  It is stashed here keyed
-by the new workspace's bare name at dispatch time and consumed once by
-`agent-repl--finalize-worktree-workspace', which moves it onto the
-workspace's `:postprocessing-prompt' plist entry.  This side table mirrors
-the dispatch->finalize handoff `agent-repl--oneshot-track-workspace' uses,
-avoiding threading the value through the whole worktree-creation chain.")
-
-(defun agent-repl--stash-pending-postprocessing-prompt (bare-name prompt)
-  "Record PROMPT as BARE-NAME's pending postprocessing prompt."
-  (puthash bare-name prompt agent-repl--pending-postprocessing-prompts))
-
-(defun agent-repl--take-pending-postprocessing-prompt (bare-name)
-  "Return and remove BARE-NAME's pending postprocessing prompt, or nil when none."
-  (when-let ((prompt (gethash bare-name agent-repl--pending-postprocessing-prompts)))
-    (remhash bare-name agent-repl--pending-postprocessing-prompts)
-    prompt))
-
-(defun agent-repl--handle-create-command (cmd delay)
-  "Handle a \"create\" workspace command CMD after DELAY seconds.
-When CMD contains a \"fork_from\" field, resolves it to a session ID so the
-new workspace forks from the source workspace's agent session and HEAD.
-If fork_from is present but resolution fails, the workspace is NOT created
-and an error message is shown to the user.
-
-CMD MUST contain a non-empty \"git_root\" field naming the target repository;
-it is used verbatim after `expand-file-name'.  If \"git_root\" is missing or
-empty, the workspace is NOT created — callers must emit git_root explicitly
-rather than relying on the ambient Emacs context.
-
-CMD SHOULD contain a non-empty \"prompt\" field carrying the new
-workspace's first message.  A missing/empty prompt still creates the
-workspace (skill-driven creates may legitimately omit it) but is
-surfaced as a loud warning: the `/create-or-update-workspace create'
-flow always supplies a prompt, so a promptless create from that flow means the
-generation output dropped the field and the workspace would otherwise
-boot silently idle with no first message.
-
-CMD MUST also contain a non-empty string \"name\" field whose bare form
-\(after `agent-repl--bare-workspace-name') is not `persp-nil-name'
-\(default \"none\").  A missing/`null'/empty name — or one that resolves
-to the nil-perspective sentinel — would otherwise leak a phantom
-\"none\" entry into `agent-repl--workspaces' and surface in workspace
-listings and nuke prompts.  Headless
-`/create-or-update-workspace create' occasionally emits such payloads
-when the model has no slug material to work with.
-
-CMD may contain an optional \"base_commit\" field naming the git ref the
-new branch is created from (e.g. \"HEAD\", \"master\").  When absent or
-empty, the default applies (HEAD for forks,
-`agent-repl-worktree-default-base' otherwise).
-
-CMD may contain an optional \"model\" field naming the agent model alias
-(e.g. \"opus\", \"sonnet\", \"haiku\") the new workspace's initial agent
-session is launched under via `--model'.  When absent or empty, the
-session falls back to `agent-repl-interactive-model' (default \"opus\").
-
-CMD may contain two optional passthrough merge-lifecycle fields, each a
-verbatim string that leaves \"prompt\" untouched:
-  - `postprocessing_prompt' — run by the editor in the SOURCE workspace
-    AFTER this workspace's merge is fully finished (stored under
-    `:postprocessing-prompt').
-  - `before_ws_merge' — delivered by the editor to this workspace's OWN
-    session BEFORE its merge, the moment its
-    `/create-or-update-workspace merge' command arrives (stored under
-    `:before-ws-merge-prompt', delivered by
-    `agent-repl--maybe-run-before-ws-merge-prompt')."
-  (let* ((name (alist-get 'name cmd))
-         (prompt (alist-get 'prompt cmd nil))
-         (priority (alist-get 'priority cmd nil))
-         (fork-from (alist-get 'fork_from cmd nil))
-         (cmd-git-root (alist-get 'git_root cmd nil))
-         (cmd-base-commit (alist-get 'base_commit cmd nil))
-         (base-commit (and (stringp cmd-base-commit)
-                           (not (string-empty-p cmd-base-commit))
-                           cmd-base-commit))
-         (cmd-model (alist-get 'model cmd nil))
-         (model (and (stringp cmd-model)
-                     (not (string-empty-p cmd-model))
-                     cmd-model))
-         (cmd-postprocessing (alist-get 'postprocessing_prompt cmd nil))
-         (postprocessing-prompt (and (stringp cmd-postprocessing)
-                                     (not (string-empty-p cmd-postprocessing))
-                                     cmd-postprocessing))
-         (cmd-before-ws-merge (alist-get 'before_ws_merge cmd nil))
-         (before-ws-merge-prompt (and (stringp cmd-before-ws-merge)
-                                      (not (string-empty-p cmd-before-ws-merge))
-                                      cmd-before-ws-merge))
-         (nil-name (agent-repl--ws-nil-name))
-         (bare-name (and (stringp name)
-                         (not (string-empty-p name))
-                         (agent-repl--bare-workspace-name name)))
-         (fork-session-id
-          (condition-case err
-              (agent-repl--resolve-fork-session-id fork-from)
-            (error
-             (agent-repl--log name "handle-create-command: ABORTING workspace '%s' — fork resolution failed: %s"
-                              name (error-message-string err))
-             (agent-repl--warn name "cannot create workspace '%s' — %s" name (error-message-string err))
-             nil))))
-    (cond
-     ;; If fork_from was requested but resolution failed, refuse to create.
-     ((and fork-from (null fork-session-id))
-      (agent-repl--log name "handle-create-command: SKIPPED workspace '%s' (fork_from=%s failed, refusing silent fallback)"
-                        name fork-from))
-     ;; name is mandatory — must be a non-empty string and not resolve
-     ;; to `persp-nil-name'.  Without this guard a malformed
-     ;; workspace-generation payload (missing name, JSON `null', empty
-     ;; string, or literal "none") would leak a phantom entry into
-     ;; `agent-repl--workspaces' that surfaces in workspace listings /
-     ;; nuke prompts as a stray "none" workspace.
-     ((or (not (stringp name)) (string-empty-p name))
-      (agent-repl--log nil "handle-create-command: SKIPPED workspace (missing/empty/non-string name=%S)" name)
-      (agent-repl--warn nil "cannot create workspace — `name' is required and must be a non-empty string (got %S)"
-                        name))
-     ((and nil-name (equal bare-name nil-name))
-      (agent-repl--log name "handle-create-command: SKIPPED workspace '%s' (bare name '%s' equals persp-nil-name '%s')"
-                        name bare-name nil-name)
-      (agent-repl--warn name "cannot create workspace '%s' — bare name '%s' collides with `persp-nil-name'"
-                        name bare-name))
-     ;; git_root is mandatory — no ambient fallback.
-     ((or (null cmd-git-root) (string-empty-p cmd-git-root))
-      (agent-repl--log name "handle-create-command: SKIPPED workspace '%s' (missing/empty git_root, refusing silent fallback)"
-                        name)
-      (agent-repl--warn name "cannot create workspace '%s' — git_root is required and must be non-empty"
-                        name))
-     (t
-      (let* ((git-root (file-name-as-directory (expand-file-name cmd-git-root)))
-             (effective-name
-              (condition-case err
-                  (agent-repl--disambiguate-workspace-name name git-root)
-                (error
-                 (agent-repl--log name
-                                   "handle-create-command: ABORTING workspace '%s' — disambiguation failed: %s"
-                                   name (error-message-string err))
-                 (agent-repl--warn name "cannot disambiguate workspace name '%s' — %s"
-                                   name (error-message-string err))
-                 nil))))
-        (when effective-name
-          ;; A missing/empty prompt is tolerated (see docstring) but never
-          ;; silent — a generation-flow payload that dropped its `prompt'
-          ;; field would otherwise materialize as a workspace that boots
-          ;; idle with no first message and no explanation.
-          (when (or (not (stringp prompt)) (string-empty-p prompt))
-            (agent-repl--warn effective-name
-                              "workspace '%s' is being created WITHOUT an initial prompt — if this came from /create-or-update-workspace create, its output JSON dropped the `prompt' field"
-                              effective-name))
-          (agent-repl--reserve-workspace-name effective-name)
-          (agent-repl--log effective-name
-                            "workspace-commands-file create: %s (delay %.1fs, requested=%s) priority=%s fork-session-id=%s git-root=%s base-commit=%s model=%s"
-                            effective-name delay name priority fork-session-id git-root (or base-commit "nil")
-                            (or model "nil"))
-          (run-with-timer delay nil
-                          #'agent-repl--create-worktree-from-command
-                          git-root effective-name prompt priority fork-session-id base-commit model
-                          postprocessing-prompt before-ws-merge-prompt)))))))
 
 (defun agent-repl--handle-prompt-command (cmd)
   "Handle a \"prompt\" workspace command CMD."
@@ -3144,6 +2346,26 @@ sockets before its session is killed."
           ;; GNS-socket close poll, outside the dispatcher's dynamic extent.
           (let ((agent-repl--kill-cause "host-action legacy-command close"))
             (agent-repl--close-workspace ws))))))
+
+(defun agent-repl--candidate-worktree-path (git-root name)
+  "Return the worktree directory path NAME would occupy under GIT-ROOT.
+Side-effect-free and creation-free: it answers only \"where would this
+workspace's worktree live\", which is how `--resolve-open-workspace-dir'
+finds an EXISTING worktree whose registry entry did not survive.  It
+mirrors the daemon's `candidateWorktreePath'; the daemon, not this, is
+what decides where a NEW worktree actually goes."
+  (let* ((git-root (agent-repl--path-canonical git-root))
+         (dirname (agent-repl--bare-workspace-name name))
+         (git-root-parent (file-name-directory git-root))
+         (in-worktree (file-regular-p (expand-file-name ".git" git-root)))
+         (worktree-parent
+          (if in-worktree
+              git-root-parent
+            (let ((repo-name (file-name-nondirectory
+                              (directory-file-name git-root))))
+              (expand-file-name (concat repo-name agent-repl-worktree-dir-suffix)
+                                git-root-parent)))))
+    (agent-repl--path-canonical (expand-file-name dirname worktree-parent))))
 
 (defun agent-repl--resolve-open-workspace-dir (name git-root)
   "Resolve the on-disk project directory for workspace NAME.

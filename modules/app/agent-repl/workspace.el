@@ -99,9 +99,9 @@ environment, which today means one for :bare-metal."
 ;; the encapsulation contract.
 ;;
 ;; NOTE: workspace name != git branch name.
-;; `agent-repl--do-create-worktree-workspace' derives the persp name from the
-;; *last path component* of the input (e.g. "DWC/fix-login" -> persp "fix-login"),
-;; while the full input becomes the branch name ("DWC/fix-login").  Never assume
+;; The daemon derives the workspace name from the *last path component* of
+;; the requested name (e.g. "DWC/fix-login" -> workspace "fix-login"), while
+;; the full request becomes the branch name ("DWC/fix-login").  Never assume
 ;; the two are equal.  To resolve a workspace to its branch, retrieve its
 ;; :project-dir from this hash and run `git rev-parse --abbrev-ref HEAD' there.
 (defvar agent-repl--workspaces (make-hash-table :test 'equal)
@@ -1512,8 +1512,12 @@ the original error is re-signaled."
                       ;; from mutable top-level fields such as :priority.
                       ;; Reconnect replay compares this exact original value,
                       ;; so a later user priority edit cannot turn the same
-                      ;; daemon job into a false conflict.
-                      :daemon-workspace-metadata metadata
+                      ;; daemon job into a false conflict.  The copy is what
+                      ;; makes that true: `append' below SHARES METADATA's
+                      ;; cons cells as the plist tail, so without it a
+                      ;; `plist-put' on any metadata-supplied key would
+                      ;; rewrite the envelope in place.
+                      :daemon-workspace-metadata (copy-sequence metadata)
                       ;; Derive the id through the SAME canonicalizer every
                       ;; other ws-id producer uses (`agent-repl--workspace-id',
                       ;; `--path-canonical'), or a symlinked worktree would get
