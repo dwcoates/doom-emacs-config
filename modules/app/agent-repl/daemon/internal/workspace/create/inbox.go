@@ -3,6 +3,7 @@ package create
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,6 +13,13 @@ import (
 )
 
 const commandPrefix = "workspace_commands_"
+
+// errRejectedCommandFile marks a command file the daemon cannot ingest at all
+// — unreadable content or a payload that does not parse into commands.  Such a
+// file is quarantined next to the inbox as durable evidence instead of being
+// re-claimed forever, and it never stops the scan.  Store failures deliberately
+// do NOT carry this sentinel: a broken JobStore is structural.
+var errRejectedCommandFile = errors.New("workspace create: command file rejected")
 
 // Inbox owns the command-file ingress.  It atomically claims files, persists
 // every array entry, then deletes the claim only after persistence succeeds.
@@ -91,6 +99,13 @@ func (i *Inbox) ScanAndDrain(ctx context.Context) error {
 	sort.Strings(paths)
 	for _, path := range paths {
 		if err := i.claimAndPersist(ctx, path); err != nil {
+			// A command file the daemon cannot understand is that FILE's
+			// failure, not the inbox's.  It has already been quarantined and
+			// logged; the remaining files still get their turn.
+			if errors.Is(err, errRejectedCommandFile) {
+				i.Logf("workspace-create: REJECTED command file path=%s error=%v quarantined=yes inbox=continuing", path, err)
+				continue
+			}
 			return err
 		}
 	}
@@ -122,11 +137,11 @@ func (i *Inbox) claimAndPersist(ctx context.Context, path string) error {
 	}
 	payload, err := os.ReadFile(claimed)
 	if err != nil {
-		return fmt.Errorf("workspace create: read claimed command file %s: %w", claimed, err)
+		return i.quarantine(claimed, fmt.Errorf("%w: read %s: %v", errRejectedCommandFile, claimed, err))
 	}
 	commands, err := parseCommands(payload)
 	if err != nil {
-		return fmt.Errorf("workspace create: parse command file %s: %w", claimed, err)
+		return i.quarantine(claimed, fmt.Errorf("%w: parse %s: %v", errRejectedCommandFile, claimed, err))
 	}
 	fileID := commandFileID(claimed)
 	for index, command := range commands {
@@ -148,6 +163,21 @@ func (i *Inbox) claimAndPersist(ctx context.Context, path string) error {
 	}
 	i.Logf("workspace-create: ingested command file id=%s entries=%d", fileID, len(commands))
 	return nil
+}
+
+// quarantine moves an uningestible claim aside and returns CAUSE unchanged.
+// The file is preserved, never deleted: it is the only remaining evidence of
+// what the emitter asked for.  Renaming it out of the command-file namespace
+// is what stops one bad file from being re-claimed on every poll.  A failed
+// rename is structural — the returned error then does NOT wrap the rejection
+// sentinel, so the caller treats it as fatal rather than silently spinning.
+func (i *Inbox) quarantine(claimed string, cause error) error {
+	rejected := claimed + ".rejected"
+	if err := os.Rename(claimed, rejected); err != nil {
+		return fmt.Errorf("workspace create: quarantine rejected command file %s: %w (cause: %v)", claimed, err, cause)
+	}
+	i.Logf("workspace-create: QUARANTINED command file claim=%s quarantined=%s cause=%v", claimed, rejected, cause)
+	return cause
 }
 
 func commandFileID(path string) string {

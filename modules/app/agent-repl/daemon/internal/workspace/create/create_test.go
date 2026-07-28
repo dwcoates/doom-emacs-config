@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -589,5 +590,171 @@ func TestParseCommandsMapsStructuredSourceWorkspace(t *testing.T) {
 	}
 	if _, err := parseCommands([]byte(`[{"type":"create","name":"DWC/a","git_root":"/repo","source_ws":{"name":"parent"}}]`)); err == nil {
 		t.Fatal("incomplete source_ws was accepted")
+	}
+}
+
+// selectivePlanner fails PlanWorktree for exactly one requested name so a
+// single poisoned job can be observed alongside a healthy sibling.
+type selectivePlanner struct {
+	fakeWorktrees
+	failName string
+	failErr  error
+}
+
+func (s *selectivePlanner) PlanWorktree(ctx context.Context, job Job) (WorktreeResult, error) {
+	if job.Request.Name == s.failName {
+		return WorktreeResult{}, s.failErr
+	}
+	return s.fakeWorktrees.PlanWorktree(ctx, job)
+}
+
+// listErrorStore is a JobStore whose List is broken.  That is the structural
+// class: nothing about it is one job's fault, so it must keep propagating.
+type listErrorStore struct {
+	JobStore
+	err error
+}
+
+func (l listErrorStore) List() ([]Job, error) { return nil, l.err }
+
+// A poisoned job is contained: it is recorded failed, and the sibling job in
+// the same batch still reaches the host.  Before this, one failing plan step
+// returned out of Resume and stopped the entire inbox.
+func TestScanAndDrainContainsJobFailureAndKeepsDrainingSiblings(t *testing.T) {
+	root := t.TempDir()
+	f := newFixture(t, filepath.Join(root, "jobs.json"))
+	planner := &selectivePlanner{fakeWorktrees: fakeWorktrees{path: "/worktrees/new"}, failName: "DWC/poison", failErr: errors.New("check start tag exit=128")}
+	f.manager.cfg.Planner = planner
+	f.manager.cfg.Worktrees = planner
+	inboxDir := filepath.Join(root, "output")
+	writeCommandFile(t, inboxDir, "workspace_commands_mixed.json", `[
+  {"type":"create","name":"DWC/poison","git_root":"/repo"},
+  {"type":"create","name":"DWC/healthy","git_root":"/repo"}
+]`)
+
+	err := f.inbox(inboxDir).ScanAndDrain(context.Background())
+
+	if err != nil {
+		t.Fatalf("ScanAndDrain = %v, want nil: a job failure must not stop the inbox", err)
+	}
+	if failed := job(t, f.store, "workspace_commands_mixed:0"); failed.State != StateFailed || failed.LastError == "" {
+		t.Fatalf("poisoned job = %#v, want durably failed with a recorded error", failed)
+	}
+	if healthy := job(t, f.store, "workspace_commands_mixed:1"); healthy.State != StateAwaitingEmacs {
+		t.Fatalf("sibling job = %#v, want it to have reached the host anyway", healthy)
+	}
+}
+
+// The failure classification itself, stated once: only a job-level failure is
+// stepped over; a structural failure keeps propagating.
+func TestResumeClassifiesJobFailureAgainstStructuralFailure(t *testing.T) {
+	tests := []struct {
+		name      string
+		structual bool
+		wantErr   bool
+	}{
+		{name: "job failure is contained", structual: false, wantErr: false},
+		{name: "structural failure propagates", structual: true, wantErr: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			f := newFixture(t, filepath.Join(root, "jobs.json"))
+			planner := &selectivePlanner{fakeWorktrees: fakeWorktrees{path: "/worktrees/new"}, failName: "DWC/poison", failErr: errors.New("plan exploded")}
+			f.manager.cfg.Planner = planner
+			f.manager.cfg.Worktrees = planner
+			if _, _, err := f.store.Enqueue(Job{ID: "j0", Request: Request{Name: "DWC/poison", GitRoot: "/repo"}, State: StateQueued}); err != nil {
+				t.Fatal(err)
+			}
+			if test.structual {
+				f.manager.cfg.Store = listErrorStore{JobStore: f.store, err: errors.New("store is broken")}
+			}
+
+			err := f.manager.Resume(context.Background())
+
+			if (err != nil) != test.wantErr {
+				t.Fatalf("Resume = %v, wantErr %t", err, test.wantErr)
+			}
+		})
+	}
+}
+
+// A failed job must reach the user.  It rides the durable HostAction channel,
+// so it survives an Emacs restart exactly like an available workspace does.
+func TestFailedJobSurfacesDurableHostActionNamingJobAndError(t *testing.T) {
+	root := t.TempDir()
+	f := newFixture(t, filepath.Join(root, "jobs.json"))
+	planner := &selectivePlanner{fakeWorktrees: fakeWorktrees{path: "/worktrees/new"}, failName: "DWC/poison", failErr: errors.New("check start tag exit=128")}
+	f.manager.cfg.Planner = planner
+	f.manager.cfg.Worktrees = planner
+	if _, _, err := f.store.Enqueue(Job{ID: "j0", Request: Request{Name: "DWC/poison", GitRoot: "/repo"}, State: StateQueued}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := f.manager.Resume(context.Background()); err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+
+	if len(f.actions.items) != 1 {
+		t.Fatalf("published host actions = %#v, want exactly the failure notice", f.actions.items)
+	}
+	notice := f.actions.items[0]
+	if notice.ID != "j0:failed" || notice.Type != HostActionTypeWorkspaceCreateFailed {
+		t.Fatalf("notice = %#v", notice)
+	}
+	var failure WorkspaceCreateFailure
+	if err := json.Unmarshal(notice.Payload, &failure); err != nil {
+		t.Fatal(err)
+	}
+	if failure.JobID != "j0" || failure.RequestedName != "DWC/poison" {
+		t.Fatalf("failure payload = %#v", failure)
+	}
+	if !strings.Contains(failure.Error, "check start tag exit=128") {
+		t.Fatalf("failure error = %q, want the underlying cause verbatim", failure.Error)
+	}
+	// Durable, not merely broadcast: a reconnecting host must still see it.
+	pending, err := f.store.PendingHostActions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending) != 1 || pending[0].ID != "j0:failed" {
+		t.Fatalf("pending host actions = %#v, want the retained failure notice", pending)
+	}
+}
+
+// One unparseable command file cannot stop service: it is quarantined as
+// durable evidence and every other file in the same scan is still ingested.
+func TestPoisonedCommandFileIsQuarantinedAndScanContinues(t *testing.T) {
+	root := t.TempDir()
+	f := newFixture(t, filepath.Join(root, "jobs.json"))
+	inboxDir := filepath.Join(root, "output")
+	writeCommandFile(t, inboxDir, "workspace_commands_a-poison.json", `{not even an array`)
+	writeCommandFile(t, inboxDir, "workspace_commands_b-good.json", `[{"type":"create","name":"DWC/good","git_root":"/repo"}]`)
+
+	err := f.inbox(inboxDir).ScanAndDrain(context.Background())
+
+	if err != nil {
+		t.Fatalf("ScanAndDrain = %v, want nil: a poisoned file must not stop the scan", err)
+	}
+	if got := job(t, f.store, "workspace_commands_b-good:0"); got.State != StateAwaitingEmacs {
+		t.Fatalf("good job = %#v, want it to have been ingested anyway", got)
+	}
+	rejected, err := filepath.Glob(filepath.Join(inboxDir, "*.rejected"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rejected) != 1 {
+		t.Fatalf("quarantined files = %v, want exactly the poisoned one preserved", rejected)
+	}
+	// A second scan must not re-claim the quarantined file.
+	if err := f.inbox(inboxDir).ScanAndDrain(context.Background()); err != nil {
+		t.Fatalf("second ScanAndDrain: %v", err)
+	}
+	again, err := filepath.Glob(filepath.Join(inboxDir, "*.rejected"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(again, rejected) {
+		t.Fatalf("quarantined files after rescan = %v, want %v", again, rejected)
 	}
 }

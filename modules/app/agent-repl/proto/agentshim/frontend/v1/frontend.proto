@@ -822,7 +822,19 @@ message HostAction {
     HostTaskById task_open = 7;
     HostTaskById task_add_workspace = 8;
     HostLegacyCommand legacy_command = 9;
+    HostWorkspaceCreateFailed workspace_create_failed = 10;
   }
+}
+
+// A durably-failed workspace-creation job. It rides the same
+// retained-until-completed HostAction envelope every other host action uses,
+// so a creation that died is delivered, replayed across reconnects, and
+// acknowledged exactly like a creation that succeeded. A failed job is never
+// silent: the daemon records it, logs it, and hands it to the host to show.
+message HostWorkspaceCreateFailed {
+  string job_id = 1;
+  string requested_name = 2;
+  string error = 3;
 }
 
 message HostSwitchWorkspace { string dir = 1; }

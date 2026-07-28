@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -361,5 +362,26 @@ func TestSessionDriverHealthProbeRejectsUnhealthyReply(t *testing.T) {
 	probe.Driver = fakeHealthDriver{status: &corev1.HealthStatus{Healthy: true, Component: "shim"}}
 	if err := probe.CheckWorkspaceHealth(context.Background(), "/worktree", "s1", "job-1"); err != nil {
 		t.Fatalf("healthy health reply: %v", err)
+	}
+}
+
+// A failed creation job reaches Emacs on the durable HostAction channel rather
+// than dying in the daemon log.  The typed arm keeps the job id, requested
+// name, and error legible instead of hiding them in an opaque legacy payload.
+func TestToProtoActionMapsWorkspaceCreateFailure(t *testing.T) {
+	payload, err := json.Marshal(workspacecreate.WorkspaceCreateFailure{JobID: "file:0", RequestedName: "DWC/feature", Error: "plan worktree: exit=128"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	action := workspacecreate.HostAction{ID: "file:0:failed", Type: workspacecreate.HostActionTypeWorkspaceCreateFailed, Payload: payload}
+
+	got := toProtoAction(action)
+
+	failure := got.GetWorkspaceCreateFailed()
+	if failure == nil {
+		t.Fatalf("action = %#v, want the workspace_create_failed arm", got)
+	}
+	if got.GetActionId() != "file:0:failed" || failure.GetJobId() != "file:0" || failure.GetRequestedName() != "DWC/feature" || failure.GetError() != "plan worktree: exit=128" {
+		t.Fatalf("failure arm = %#v (action id %q)", failure, got.GetActionId())
 	}
 }

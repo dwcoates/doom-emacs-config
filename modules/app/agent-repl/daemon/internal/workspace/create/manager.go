@@ -2,6 +2,8 @@ package create
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 )
@@ -111,6 +113,14 @@ func (m *Manager) Resume(ctx context.Context) error {
 		}
 		m.cfg.Logf("workspace-create: resuming job id=%s state=%s name=%q", job.ID, job.State, job.Request.Name)
 		if err := m.Process(ctx, job.ID); err != nil {
+			// THE classification line: a job-level failure is already durable,
+			// logged, and surfaced to the host, so resuming the REMAINING jobs
+			// is the correct next move.  One poisoned job must never stop the
+			// subsystem.  Anything else is structural and still propagates.
+			if errors.Is(err, ErrJobFailed) {
+				m.cfg.Logf("workspace-create: CONTAINED job failure id=%s name=%q error=%v; continuing with remaining jobs", job.ID, job.Request.Name, err)
+				continue
+			}
 			return err
 		}
 	}
@@ -157,10 +167,10 @@ func (m *Manager) process(ctx context.Context, id string) error {
 			if job.WorktreePath == "" {
 				result, err := m.cfg.Planner.PlanWorktree(ctx, job)
 				if err != nil {
-					return m.fail(id, "plan worktree", err)
+					return m.fail(ctx, id, "plan worktree", err)
 				}
 				if result.Path == "" || result.FinalName == "" || result.Branch == "" || result.BaseCommit == "" {
-					return m.fail(id, "plan worktree", fmt.Errorf("planner returned incomplete worktree identity path=%q final_name=%q branch=%q base=%q", result.Path, result.FinalName, result.Branch, result.BaseCommit))
+					return m.fail(ctx, id, "plan worktree", fmt.Errorf("planner returned incomplete worktree identity path=%q final_name=%q branch=%q base=%q", result.Path, result.FinalName, result.Branch, result.BaseCommit))
 				}
 				if _, err := m.cfg.Store.Update(id, func(j *Job) error {
 					j.WorktreePath = result.Path
@@ -176,7 +186,7 @@ func (m *Manager) process(ctx context.Context, id string) error {
 				continue
 			}
 			if err := m.cfg.Worktrees.EnsureWorktree(ctx, job); err != nil {
-				return m.fail(id, "ensure worktree", err)
+				return m.fail(ctx, id, "ensure worktree", err)
 			}
 			if _, err := m.cfg.Store.Update(id, func(j *Job) error {
 				j.State = StateWorktreeReady
@@ -190,7 +200,7 @@ func (m *Manager) process(ctx context.Context, id string) error {
 				if resolver, ok := m.cfg.Sessions.(SessionMetadataResolver); ok {
 					request, err := resolver.ResolveSessionMetadata(ctx, job)
 					if err != nil {
-						return m.fail(id, "resolve session metadata", err)
+						return m.fail(ctx, id, "resolve session metadata", err)
 					}
 					if _, err := m.cfg.Store.Update(id, func(j *Job) error {
 						j.Request = request
@@ -207,10 +217,10 @@ func (m *Manager) process(ctx context.Context, id string) error {
 			}
 			sessionID, err := m.cfg.Sessions.EnsureSession(ctx, job)
 			if err != nil {
-				return m.fail(id, "ensure session", err)
+				return m.fail(ctx, id, "ensure session", err)
 			}
 			if sessionID == "" {
-				return m.fail(id, "ensure session", fmt.Errorf("creator returned an empty session id"))
+				return m.fail(ctx, id, "ensure session", fmt.Errorf("creator returned an empty session id"))
 			}
 			if _, err := m.cfg.Store.Update(id, func(j *Job) error {
 				j.SessionID = sessionID
@@ -222,7 +232,7 @@ func (m *Manager) process(ctx context.Context, id string) error {
 			}
 		case StateSessionReady:
 			if err := m.cfg.Health.AwaitHealthy(ctx, job); err != nil {
-				return m.fail(id, "await session health", err)
+				return m.fail(ctx, id, "await session health", err)
 			}
 			if _, err := m.transition(id, StateSessionHealthy, ""); err != nil {
 				return err
@@ -241,7 +251,7 @@ func (m *Manager) process(ctx context.Context, id string) error {
 			available := Available{JobID: job.ID, Name: job.FinalName, Branch: job.Branch, BaseCommit: job.ResolvedBaseCommit, WorktreePath: job.WorktreePath, SessionID: job.SessionID, Request: job.Request}
 			m.cfg.Logf("workspace-create: publishing available id=%s name=%q branch=%q base=%q worktree=%s session=%s", job.ID, job.FinalName, job.Branch, job.ResolvedBaseCommit, job.WorktreePath, job.SessionID)
 			if err := m.cfg.Available.PublishWorkspaceAvailable(ctx, available); err != nil {
-				return m.fail(id, "publish workspace available", err)
+				return m.fail(ctx, id, "publish workspace available", err)
 			}
 			if _, err := m.cfg.Store.Update(id, func(j *Job) error {
 				j.AvailablePublished = true
@@ -274,7 +284,7 @@ func (m *Manager) process(ctx context.Context, id string) error {
 			// lose a prompt, so it is forbidden.
 			m.cfg.Logf("workspace-create: submitting initial prompt id=%s name=%q session=%s prompt_len=%d origin=workspace-create:%s delivery=at-least-once checkpoint=after-shim-ack crash_window=may-duplicate-never-lose", job.ID, job.Request.Name, job.SessionID, len(job.Request.Prompt), job.ID)
 			if err := m.cfg.Prompts.SubmitInitialPrompt(ctx, job); err != nil {
-				return m.fail(id, "submit initial prompt", err)
+				return m.fail(ctx, id, "submit initial prompt", err)
 			}
 			if _, err := m.cfg.Store.Update(id, func(j *Job) error {
 				j.PromptDelivered = true
@@ -287,7 +297,7 @@ func (m *Manager) process(ctx context.Context, id string) error {
 			m.cfg.Logf("workspace-create: checkpointed initial prompt delivery id=%s session=%s", job.ID, job.SessionID)
 			return nil
 		default:
-			return m.fail(id, "read job state", fmt.Errorf("unknown state %q", job.State))
+			return m.fail(ctx, id, "read job state", fmt.Errorf("unknown state %q", job.State))
 		}
 	}
 }
@@ -354,11 +364,43 @@ func (m *Manager) transition(id string, state JobState, lastError string) (Job, 
 	})
 }
 
-func (m *Manager) fail(id, action string, cause error) error {
-	err := fmt.Errorf("workspace create: job %s %s: %w", id, action, cause)
+// fail records one job's terminal failure durably, logs it loudly, and hands
+// it to the host as a retained HostAction.  The returned error wraps
+// ErrJobFailed so callers can step over a contained job failure without
+// mistaking it for a structural one; a failure to RECORD the failure is
+// structural and deliberately does not carry the sentinel.
+func (m *Manager) fail(ctx context.Context, id, action string, cause error) error {
+	err := fmt.Errorf("workspace create: job %s %s: %w: %w", id, action, ErrJobFailed, cause)
 	m.cfg.Logf("workspace-create: FAILED id=%s action=%s error=%v", id, action, cause)
 	if _, updateErr := m.transition(id, StateFailed, err.Error()); updateErr != nil {
-		return fmt.Errorf("%w (and record failure: %v)", err, updateErr)
+		return fmt.Errorf("workspace create: job %s %s: %w (and record failure: %v)", id, action, cause, updateErr)
 	}
+	m.surfaceFailure(ctx, id, action, cause)
 	return err
+}
+
+// surfaceFailure enqueues the durable host notification for a failed job.  A
+// publish that cannot reach a host right now is not lost: the action stays
+// pending in the store and the next Resume/DrainHostActions delivers it, and
+// the reconnect snapshot carries it regardless.
+func (m *Manager) surfaceFailure(ctx context.Context, id, action string, cause error) {
+	job, ok, err := m.cfg.Store.Get(id)
+	if err != nil || !ok {
+		m.cfg.Logf("workspace-create: FAILURE NOT SURFACED id=%s action=%s reason=job-unreadable error=%v found=%t", id, action, err, ok)
+		return
+	}
+	payload, err := json.Marshal(WorkspaceCreateFailure{JobID: id, RequestedName: job.Request.Name, Error: fmt.Sprintf("%s: %v", action, cause)})
+	if err != nil {
+		m.cfg.Logf("workspace-create: FAILURE NOT SURFACED id=%s action=%s reason=payload error=%v", id, action, err)
+		return
+	}
+	notice := HostAction{ID: id + ":failed", SourceFile: job.SourceFile, SourceIndex: job.SourceIndex, Type: HostActionTypeWorkspaceCreateFailed, Payload: payload}
+	if _, _, err := m.cfg.Store.EnqueueHostAction(notice); err != nil {
+		m.cfg.Logf("workspace-create: FAILURE NOT SURFACED id=%s action=%s reason=enqueue error=%v", id, action, err)
+		return
+	}
+	m.cfg.Logf("workspace-create: FAILURE SURFACED id=%s action=%s host_action=%s name=%q", id, action, notice.ID, job.Request.Name)
+	if err := m.DrainHostActions(ctx); err != nil {
+		m.cfg.Logf("workspace-create: failure notice not delivered yet id=%s host_action=%s error=%v retained=yes", id, notice.ID, err)
+	}
 }
