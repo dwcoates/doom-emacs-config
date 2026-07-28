@@ -343,6 +343,23 @@ message ShimHello {
   string shim_version = 3;
   string protocol_version = 4;
   bool turn_in_flight = 5;    // true when the daemon reattaches mid-turn
+  // The VENDOR session id (the CLI's uuid, and its transcript filename) this
+  // shim is CURRENTLY filing events under — the key of the store seq space
+  // the daemon is about to Subscribe to. Empty while the shim has not learned
+  // it yet: a fresh session's uuid is knowable only from the SDK, so the very
+  // first hello of a fresh session carries nothing here rather than a
+  // placeholder the daemon would mistake for a real identity.
+  //
+  // WHY THE HANDSHAKE CARRIES IT. The vendor rotates this uuid mid-stream (a
+  // `/clear` mints a new transcript identity), which retires one store seq
+  // space and starts another at 1. The shim answers a rotation by re-keying
+  // its store subscription and DELIBERATELY bouncing this connection, so the
+  // hello opening the next one is the announcement: the daemon compares it
+  // with the uuid it has persisted and, when they differ, resets its store
+  // cursor to zero before subscribing. Without the announcement the daemon
+  // would resume from a high-water mark belonging to a seq space that no
+  // longer exists and read the new space's seq=1 as a regression.
+  string vendor_session_id = 6;
 }
 
 message DaemonHello {
