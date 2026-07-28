@@ -348,6 +348,22 @@ export interface CommandAck {
    * visible card instead of a console log. Absent when `ok`.
    */
   failure?: SystemFailure;
+  /**
+   * The interrupt confirmation CHALLENGE (I1). NOT a failure and NOT an error:
+   * the command was understood and deliberately not performed, because no turn
+   * was live and stopping live subagents deserves an explicit yes. Arrives
+   * with `ok` false and `failure` absent; the answer is a resent
+   * `InterruptCmd{confirmAgents: true}`.
+   */
+  interruptConfirmRequired?: InterruptConfirmRequired;
+}
+
+/**
+ * What the interrupt would actually stop (I1), so a client can ask a concrete
+ * question ("interrupt 3 running subagents?") rather than a bare are-you-sure.
+ */
+export interface InterruptConfirmRequired {
+  liveTasks: number;
 }
 
 /**
@@ -369,6 +385,36 @@ export interface RateLimitWindow {
   resetsAt: number;
   utilization: number;
   status: string;
+}
+
+/**
+ * How an interrupt turned out (I1), from `agentshim.core.v1.InterruptOutcome`.
+ *
+ * The three real answers are decided ATOMICALLY on the shim's ack, and they
+ * are deliberately distinct: `already_complete` is a SUCCESS (the user asked
+ * for the turn to be over and it already was), and only `failed` reads as a
+ * failure anywhere. Deriving this downstream is what once painted a turn that
+ * had already ended as a stop that had failed.
+ */
+export const INTERRUPT_OUTCOMES = ["interrupted", "already_complete", "failed"] as const;
+export type InterruptOutcome = (typeof INTERRUPT_OUTCOMES)[number];
+
+/** protojson enum name -> the webapp's keyword. */
+const INTERRUPT_OUTCOME_BY_NAME: Readonly<Record<string, InterruptOutcome>> = {
+  INTERRUPT_OUTCOME_INTERRUPTED: "interrupted",
+  INTERRUPT_OUTCOME_ALREADY_COMPLETE: "already_complete",
+  INTERRUPT_OUTCOME_FAILED: "failed",
+};
+
+/**
+ * The interrupt window (I1): opened by the shim's ack, cleared when the next
+ * turn starts. `outcome` rides along so ALREADY_COMPLETE and FAILED render
+ * distinctly even though neither moves the workspace's phase.
+ */
+export interface InterruptWindow {
+  active: boolean;
+  sinceMs: number;
+  outcome: InterruptOutcome | null;
 }
 
 /**
@@ -410,6 +456,11 @@ export interface ProgressView {
    * see, since a session can block on an interaction it holds no count for.
    */
   blocked?: ProgressWindow;
+  /**
+   * The interrupt window (I1). Ack-opened, next-turn-cleared, and carrying the
+   * outcome the shim's ack decided. Absent = no interrupt to speak of.
+   */
+  interrupt?: InterruptWindow;
   /**
    * The CLASSIFIED error state (F4). Persists until the next turn starts; its
    * own `itemUuid` is the feed item the error row scrolls to. Carrying the
@@ -1061,7 +1112,14 @@ export function decodeSystemFailure(v: unknown, where: string): SystemFailure {
   };
 }
 
-const COMMAND_ACK_KEYS = new Set(["requestId", "ok", "error", "failure"]);
+const COMMAND_ACK_KEYS = new Set([
+  "requestId",
+  "ok",
+  "error",
+  "failure",
+  "interruptConfirmRequired",
+]);
+const INTERRUPT_CONFIRM_KEYS = new Set(["liveTasks"]);
 function decodeCommandAck(v: unknown): CommandAck {
   const o = ensureObject(v, "CommandAck");
   rejectUnknown(o, COMMAND_ACK_KEYS, "CommandAck");
@@ -1072,6 +1130,12 @@ function decodeCommandAck(v: unknown): CommandAck {
   };
   if (o.failure !== undefined && o.failure !== null) {
     ack.failure = decodeSystemFailure(o.failure, "CommandAck.failure");
+  }
+  if (o.interruptConfirmRequired !== undefined && o.interruptConfirmRequired !== null) {
+    const where = "CommandAck.interruptConfirmRequired";
+    const c = ensureObject(o.interruptConfirmRequired, where);
+    rejectUnknown(c, INTERRUPT_CONFIRM_KEYS, where);
+    ack.interruptConfirmRequired = { liveTasks: num(c, "liveTasks", where) };
   }
   if (ack.requestId === "") {
     throw new Error("frontend-proto: CommandAck missing required `request_id`");
@@ -1127,12 +1191,14 @@ const PROGRESS_VIEW_KEYS = new Set([
   "hook",
   "rateLimited",
   "blocked",
+  "interrupt",
   "failure",
   "pendingPermissions",
   "queueDepth",
   "liveTaskCount",
 ]);
 const PROGRESS_WINDOW_KEYS = new Set(["active", "sinceMs", "detail"]);
+const INTERRUPT_WINDOW_KEYS = new Set(["active", "sinceMs", "outcome"]);
 const RATE_LIMIT_WINDOW_KEYS = new Set(["active", "resetsAt", "utilization", "status"]);
 
 function decodeProgressView(v: unknown): ProgressView {
@@ -1159,6 +1225,9 @@ function decodeProgressView(v: unknown): ProgressView {
   if (o.rateLimited !== undefined && o.rateLimited !== null) {
     pv.rateLimited = decodeRateLimitWindow(o.rateLimited);
   }
+  if (o.interrupt !== undefined && o.interrupt !== null) {
+    pv.interrupt = decodeInterruptWindow(o.interrupt);
+  }
   if (o.failure !== undefined && o.failure !== null) {
     pv.failure = decodeSystemFailure(o.failure, "ProgressView.failure");
   }
@@ -1178,6 +1247,44 @@ function decodeProgressWindow(v: unknown, ctx: string): ProgressWindow {
     sinceMs: num(o, "sinceMs", ctx),
     detail: str(o, "detail", ctx),
   };
+}
+
+/**
+ * Decode the interrupt window (I1).
+ *
+ * An OPEN window with no outcome THROWS. The outcome is decided atomically on
+ * the shim's ack — the same ack that opens the window — so there is no
+ * outcome-pending phase to represent, and `INTERRUPT_OUTCOME_UNSPECIFIED` is
+ * the proto3 zero protojson omits: absent and UNSPECIFIED are the same wire
+ * fact. Picking one of the three anyway would invent the very claim the frame
+ * declined to make, and the three read very differently to a user.
+ *
+ * A CLOSED window carries no outcome by construction, so it decodes to null
+ * rather than throwing.
+ */
+function decodeInterruptWindow(v: unknown): InterruptWindow {
+  const ctx = "ProgressView.interrupt";
+  const o = ensureObject(v, ctx);
+  rejectUnknown(o, INTERRUPT_WINDOW_KEYS, ctx);
+  const active = bool(o, "active", ctx);
+  const raw = o.outcome;
+  if (raw === undefined || raw === null || raw === "INTERRUPT_OUTCOME_UNSPECIFIED") {
+    if (active) {
+      throw new Error(
+        `frontend-proto: ${ctx} is open with no outcome ` +
+          "(absent === INTERRUPT_OUTCOME_UNSPECIFIED, which the daemon never sends on an open window)",
+      );
+    }
+    return { active, sinceMs: num(o, "sinceMs", ctx), outcome: null };
+  }
+  if (typeof raw !== "string") {
+    throw new Error(`frontend-proto: ${ctx}.outcome must be a string (got ${typeof raw})`);
+  }
+  const known = INTERRUPT_OUTCOME_BY_NAME[raw];
+  if (known === undefined) {
+    throw new Error(`frontend-proto: ${ctx}.outcome has unrecognized value '${raw}'`);
+  }
+  return { active, sinceMs: num(o, "sinceMs", ctx), outcome: known };
 }
 
 function decodeRateLimitWindow(v: unknown): RateLimitWindow {

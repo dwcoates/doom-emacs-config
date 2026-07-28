@@ -383,6 +383,25 @@ describe("decodeFrontendFrame — required-field validation is loud", () => {
     expect(() => decode({ commandAck: { ok: true } })).toThrow(/CommandAck missing required `request_id`/);
   });
 
+  it("decodes the interrupt confirmation challenge's live task count", () => {
+    // Arrange / Act — int64 arrives as a protojson numeric string.
+    const got = decode({
+      commandAck: { requestId: "r1", ok: false, interruptConfirmRequired: { liveTasks: "3" } },
+    });
+    // Assert
+    if (got.frame.case !== "commandAck") throw new Error("wrong variant");
+    expect(got.frame.value.interruptConfirmRequired).toEqual({ liveTasks: 3 });
+  });
+
+  it("leaves the challenge absent on an ordinary refusal", () => {
+    // Arrange / Act — a real refusal carries no challenge, so a reader can
+    // tell the question apart from the failure by presence alone.
+    const got = decode({ commandAck: { requestId: "r1", ok: false, error: "no session" } });
+    // Assert
+    if (got.frame.case !== "commandAck") throw new Error("wrong variant");
+    expect(got.frame.value.interruptConfirmRequired).toBeUndefined();
+  });
+
   it("rejects the retired degradedNotice frame arm (step 11)", () => {
     expect(() => decode({ degradedNotice: { component: "shim-store", reason: "down" } })).toThrow(
       /unrecognized field/,
@@ -732,6 +751,62 @@ describe("ProgressView decoding (F1)", () => {
   it("rejects an unrecognized field", () => {
     // Arrange / Act / Assert — strict decoding, never a silent drop.
     expect(() => decodeFrontendFrame(pv({ outputTokens: "9000" }))).toThrow(/unrecognized/);
+  });
+
+  it("decodes the interrupt window's active, sinceMs and outcome together", () => {
+    // Arrange / Act — all three fields ride on one message (I1).
+    const got = decodeFrontendFrame(
+      pv({ interrupt: { active: true, sinceMs: "42", outcome: "INTERRUPT_OUTCOME_INTERRUPTED" } }),
+    );
+    // Assert
+    if (got.frame.case !== "progress") throw new Error("wrong variant");
+    expect(got.frame.value.interrupt).toEqual({ active: true, sinceMs: 42, outcome: "interrupted" });
+  });
+
+  it("keeps ALREADY_COMPLETE distinct from INTERRUPTED", () => {
+    // Arrange / Act — collapsing the two is the very confusion the outcome
+    // enum exists to end.
+    const got = decodeFrontendFrame(
+      pv({ interrupt: { active: true, sinceMs: "1", outcome: "INTERRUPT_OUTCOME_ALREADY_COMPLETE" } }),
+    );
+    // Assert
+    if (got.frame.case !== "progress") throw new Error("wrong variant");
+    expect(got.frame.value.interrupt?.outcome).toBe("already_complete");
+  });
+
+  it("decodes the FAILED outcome", () => {
+    // Arrange / Act
+    const got = decodeFrontendFrame(
+      pv({ interrupt: { active: true, sinceMs: "1", outcome: "INTERRUPT_OUTCOME_FAILED" } }),
+    );
+    // Assert
+    if (got.frame.case !== "progress") throw new Error("wrong variant");
+    expect(got.frame.value.interrupt?.outcome).toBe("failed");
+  });
+
+  it("leaves a CLOSED window's outcome null rather than inventing one", () => {
+    // Arrange / Act — a closed window has no outcome to carry.
+    const got = decodeFrontendFrame(pv({ interrupt: { active: false, sinceMs: "0" } }));
+    // Assert
+    if (got.frame.case !== "progress") throw new Error("wrong variant");
+    expect(got.frame.value.interrupt).toEqual({ active: false, sinceMs: 0, outcome: null });
+  });
+
+  it("rejects an OPEN interrupt window carrying no outcome", () => {
+    // Arrange / Act / Assert — the outcome is decided atomically on the ack
+    // that opens the window, and protojson omits the UNSPECIFIED zero: an open
+    // window with no outcome is a malformed frame, and picking one of the
+    // three anyway would invent the claim the wire declined to make.
+    expect(() => decodeFrontendFrame(pv({ interrupt: { active: true, sinceMs: "3" } }))).toThrow(
+      /open with no outcome/,
+    );
+  });
+
+  it("rejects an unrecognized interrupt outcome", () => {
+    // Arrange / Act / Assert
+    expect(() =>
+      decodeFrontendFrame(pv({ interrupt: { active: true, outcome: "INTERRUPT_OUTCOME_WAT" } })),
+    ).toThrow(/unrecognized value 'INTERRUPT_OUTCOME_WAT'/);
   });
 
   it("decodes a snapshot's progress list", () => {
