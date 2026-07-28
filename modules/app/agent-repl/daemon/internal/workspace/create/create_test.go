@@ -792,3 +792,65 @@ func TestPoisonedCommandFileIsQuarantinedAndScanContinues(t *testing.T) {
 		t.Fatalf("quarantined files after rescan = %v, want %v", again, rejected)
 	}
 }
+
+func TestPriorityDecodesToTheBareLabel(t *testing.T) {
+	tests := []struct {
+		name string
+		json string
+		want Priority
+	}{
+		{name: "string", json: `{"priority":"p1"}`, want: "p1"},
+		{name: "number", json: `{"priority":1}`, want: "1"},
+		{name: "null", json: `{"priority":null}`, want: ""},
+		{name: "absent", json: `{}`, want: ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			var request Request
+
+			// Act
+			if err := json.Unmarshal([]byte(tc.json), &request); err != nil {
+				t.Fatalf("unmarshal %s: %v", tc.json, err)
+			}
+
+			// Assert
+			if request.Priority != tc.want {
+				t.Fatalf("priority = %q, want %q", request.Priority, tc.want)
+			}
+		})
+	}
+}
+
+func TestPriorityRejectsANonScalar(t *testing.T) {
+	// Arrange
+	var request Request
+
+	// Act
+	err := json.Unmarshal([]byte(`{"priority":["p1"]}`), &request)
+
+	// Assert
+	if err == nil {
+		t.Fatal("expected a decode error for a non-scalar priority")
+	}
+}
+
+func TestPriorityRoundTripsAsAString(t *testing.T) {
+	// Arrange
+	request := Request{Name: "ws", GitRoot: "/repo", Priority: "p2"}
+
+	// Act
+	encoded, err := json.Marshal(request)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var decoded Request
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	// Assert
+	if decoded.Priority != "p2" {
+		t.Fatalf("priority = %q, want %q", decoded.Priority, "p2")
+	}
+}

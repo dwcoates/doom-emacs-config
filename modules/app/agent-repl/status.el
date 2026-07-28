@@ -5,59 +5,19 @@
 ;;; Priority badge images
 ;;
 ;; Each image is a small PNG loaded from the module's images/ directory and
-;; scaled to fit the tab-bar line height.
+;; scaled to fit the tab-bar line height.  A workspace's `:priority' is
+;; whatever the daemon announced for it in `WorkspaceAvailable' (or what
+;; the user later set by hand); nothing derives one locally, so a tab
+;; showing an image is a tab whose priority the daemon actually knows.
 
 (defcustom agent-repl-priority-levels '("p05" "p1" "p2" "p3")
   "List of recognized priority level strings for workspace badges."
   :type '(repeat string)
   :group 'agent-repl)
 
-(defcustom agent-repl-repo-default-priorities '(("explanation-engine" . "p1"))
-  "Alist mapping repository names to default `:priority' values for new workspaces.
-The repository name is the basename of the parent of `git rev-parse
---git-common-dir' for a path, matching how agent-repl groups workspaces
-by repo (the fold set, tab-bar grouping).  Used by
-workspace-creation paths as a final fallback when no
-explicit priority was supplied and none was inherited from a source
-workspace.  An entry whose value is nil disables the default for that
-repo."
-  :type '(alist :key-type string
-                :value-type (choice (string :tag "Priority") (const :tag "None" nil)))
-  :group 'agent-repl)
-
-(defun agent-repl--repo-name-for-path (path)
-  "Return the repository name for PATH, or nil.
-Resolved as the basename of the parent of `git rev-parse --git-common-dir',
-the key agent-repl uses to group workspaces by repo.  Returns nil
-when PATH is nil, does not exist, is not inside a git repository, or
-git fails."
-  (when (and path
-             (stringp path)
-             (file-directory-p (expand-file-name path)))
-    (let* ((dir (expand-file-name path))
-           (raw (let ((default-directory dir))
-                  (agent-repl--git-string-quiet "rev-parse" "--git-common-dir"))))
-      (when (and raw
-                 (not (string-empty-p raw))
-                 (not (string-prefix-p "fatal" raw)))
-        (let* ((abs (if (file-name-absolute-p raw) raw
-                      (expand-file-name raw dir)))
-               (canon (agent-repl--path-canonical abs))
-               (parent (file-name-directory canon)))
-          (when parent
-            (file-name-nondirectory (directory-file-name parent))))))))
-
-(defun agent-repl--repo-default-priority-for-path (path)
-  "Return the default `:priority' string for a workspace rooted at PATH.
-Looks up the repo name (see `agent-repl--repo-name-for-path') in
-`agent-repl-repo-default-priorities'.  Returns nil when PATH has no
-recognized repo or the repo has no configured default."
-  (when-let ((name (agent-repl--repo-name-for-path path)))
-    (cdr (assoc name agent-repl-repo-default-priorities))))
-
 (defcustom agent-repl-tab-bracket-format "[%s]"
   "Format string for tab bracket labels.
-%s is replaced with the tab index number or emoji."
+%s is replaced with the tab index number."
   :type 'string
   :group 'agent-repl)
 
@@ -977,7 +937,7 @@ matching `SPC <n>' (which indexes the same list)."
              for i from 1
              collect (agent-repl--render-tab-entry name current-name i))))
 
-(defconst agent-repl--tabline-row-count 1
+(defconst agent-repl--tabline-row-count 2
   "Number of rows the workspace tab-bar ALWAYS renders.
 Fixed (never varies with workspace count), so the tab-bar's pixel
 height is constant.  A height change resizes the NSWindow on macOS,
@@ -985,32 +945,38 @@ and a clipped resize livelocks redisplay at 100% CPU
 \(`ns_change_tab_bar_height' -> `adjust_frame_size' in src/); pinning
 the row count sidesteps that entirely.
 
-Fixed at 1 because `auto-resize-tab-bars' is nil, which clamps the
-tab-bar to a SINGLE text line of frame height regardless of the
-`tab-bar-lines' value.  A larger row count renders a tabline taller
-than that one-line strip can show, so the extra rows are clipped
-vertically (the bug this constant was lowered to 1 to fix).  Entries
-beyond what the single row holds are elided behind `+N' overflow
-badges rather than wrapping to a second row (see
-`agent-repl--tabline-rows').")
+Two rows, always exactly two.  `agent-repl--tabline-rows' returns this
+many strings whatever the workspace count, and
+`agent-repl-workspace-tabline-formatted' blank-pads a row the entries
+do not fill to the full line width, so the rendered segment is always
+two full-width lines and the tab-bar's pixel height never varies.
 
-(defun agent-repl--pack-first-fit (widths caps)
-  "Greedily first-fit WIDTHS into rows sized by CAPS.
+The height contract is carried by `tab-bar-lines', which
+`agent-repl--install-fixed-height-tab-bar' pins to this value in
+`default-frame-alist' — future frames get the two-line strip at
+creation, the only path that cannot trip the resize livelock.  A
+frame that already exists keeps whatever height it was born with until
+`agent-repl-tabbar-apply-row-count' is invoked deliberately, or Emacs
+is restarted.")
+
+(defun agent-repl--pack-prefix (widths caps)
+  "Greedily first-fit as long a PREFIX of WIDTHS as fits rows sized by CAPS.
 WIDTHS is a list of entry column-widths in display order.  CAPS is a
 list of each row's maximum column budget; its length is the row count.
 Entries are placed left to right: each is appended to the current row
 when it (plus a one-column separator after the first entry already on
 that row) still fits that row's CAPS budget, otherwise the next row is
-started.  Returns a list of per-row entry COUNTS (same length as CAPS)
-when every entry is placed, or nil when the entries do not all fit in
-`(length CAPS)' rows."
+started.  Placement stops at the first entry that fits no remaining
+row.  Returns a list of per-row entry COUNTS (same length as CAPS)
+whose sum is the length of the placed prefix — which may be shorter
+than WIDTHS, and may be zero when even the first entry fits nowhere."
   (let* ((nrows (length caps))
          (counts (make-list nrows 0))
          (row 0)
          (used 0)
          (rest widths)
-         (ok t))
-    (while (and ok rest)
+         (done nil))
+    (while (and (not done) rest)
       (let* ((w (car rest))
              (sep (if (> (nth row counts) 0) 1 0)))
         (cond
@@ -1020,8 +986,18 @@ when every entry is placed, or nil when the entries do not all fit in
                 rest (cdr rest)))
          ((< row (1- nrows))
           (setq row (1+ row) used 0))
-         (t (setq ok nil)))))
-    (and ok counts)))
+         (t (setq done t)))))
+    counts))
+
+(defun agent-repl--pack-first-fit (widths caps)
+  "Greedily first-fit WIDTHS into rows sized by CAPS.
+Returns a list of per-row entry COUNTS (same length as CAPS) when
+EVERY entry is placed, or nil when the entries do not all fit in
+`(length CAPS)' rows.  The placement itself is
+`agent-repl--pack-prefix'; this is the all-or-nothing wrapper the
+no-elision fit decision uses."
+  (let ((counts (agent-repl--pack-prefix widths caps)))
+    (and (= (apply #'+ counts) (length widths)) counts)))
 
 (defun agent-repl--tabline-overflow-caps (width max-rows badge-w)
   "Return per-row column budgets for an overflowing MAX-ROWS tab-bar.

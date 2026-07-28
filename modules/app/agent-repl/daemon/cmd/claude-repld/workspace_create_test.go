@@ -385,3 +385,39 @@ func TestToProtoActionMapsWorkspaceCreateFailure(t *testing.T) {
 		t.Fatalf("failure arm = %#v (action id %q)", failure, got.GetActionId())
 	}
 }
+
+// The tab's priority image is whatever the announcement says, so the
+// announcement must carry the bare label the host looks images up by.  The
+// request's priority arrives as JSON, and a quoted "\"p1\"" reaching the host
+// would silently render no image at all.
+func TestToProtoAvailableCarriesTheBarePriorityLabel(t *testing.T) {
+	// Arrange
+	var request workspacecreate.Request
+	if err := json.Unmarshal([]byte(`{"name":"DWC/feature","git_root":"/repo","priority":"p1"}`), &request); err != nil {
+		t.Fatalf("unmarshal request: %v", err)
+	}
+	job := workspacecreate.Job{ID: "file:0", Request: request}
+
+	// Act
+	got := toProtoAvailable(job)
+
+	// Assert
+	if got.GetPriority() != "p1" {
+		t.Fatalf("priority = %q, want %q", got.GetPriority(), "p1")
+	}
+}
+
+// A creation with no priority announces none: the host then paints no image
+// rather than inventing one locally.
+func TestToProtoAvailableOmitsAnAbsentPriority(t *testing.T) {
+	// Arrange
+	job := workspacecreate.Job{ID: "file:0", Request: workspacecreate.Request{Name: "DWC/feature", GitRoot: "/repo"}}
+
+	// Act
+	got := toProtoAvailable(job)
+
+	// Assert
+	if got.GetPriority() != "" {
+		t.Fatalf("priority = %q, want empty", got.GetPriority())
+	}
+}
