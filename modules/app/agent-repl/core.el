@@ -1096,7 +1096,8 @@ introducing a sibling raw `make-process' site."
     agent-repl--uds-connect
     agent-repl--uds-probe
     agent-repl--image-call-process
-    agent-repl--run-install-script)
+    agent-repl--run-install-script
+    agent-repl--readiness-run-script)
   "Symbols of every external-process or external-state-mutation wrapper.
 Each MUST be mocked by tests that reach it via production code.  The
 test harness installs guards so unmocked invocations fail loudly.

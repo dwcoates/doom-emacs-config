@@ -413,6 +413,11 @@ returns the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; only TTY host in the system.  The daemon can open a pty of its own, so it
 ;; now runs the login and streams the terminal to the webapp — Emacs is not
 ;; in that path at all.  See daemon/internal/login.
+;; WHY: readiness.el decorates the webview modeline off frontend.el's
+;; `agent-repl-frontend-webview-adopt-hook' and faces its cells with the
+;; color constants status.el defines — both load above.  It also starts a
+;; timer, so it must come after core.el's `--cancel-all-timers'.
+(agent-repl--load-module "readiness")
 (agent-repl--load-module "prompt-summary")
 (agent-repl--load-module "ai-title")
 (agent-repl--load-module "model")

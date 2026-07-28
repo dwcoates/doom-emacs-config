@@ -498,6 +498,19 @@ no current workspace or no webview open for it."
 
 ;;;; ---- Webview buffer adoption ----------------------------------------------
 
+(defvar agent-repl-frontend-webview-adopt-hook nil
+  "Hook run with the freshly adopted webview buffer CURRENT.
+
+The seam for anything that must decorate the OUTPUT buffer specifically.
+`agent-repl--frontend-adopt-webview-buffer' is the one place every mount
+site passes through, and the input buffer never passes through it at
+all, so a consumer registered here reaches the output window and only
+the output window.
+
+Consumers run inside `with-current-buffer' and must not signal: an error
+here would abort a webview mount, which is a far worse outcome than a
+missing decoration.")
+
 (defun agent-repl--frontend-adopt-webview-buffer (buf name)
   "Make webview BUF an agent-repl panel called NAME, and return it.
 Every mount site (the workspace gui panel, the explain-config popup)
@@ -513,7 +526,15 @@ webview OURS never drift apart:
     (setq-local xwidget-webkit-buffer-name-format name)
     (setq-local header-line-format nil)
     (agent-repl-frontend-webview-mode 1)
-    (rename-buffer name t))
+    (rename-buffer name t)
+    ;; Last, so consumers see a fully adopted buffer (final name, mode armed).
+    ;; Wrapped because a decoration that fails must not cost the user a
+    ;; webview; the failure is surfaced through the log rather than swallowed.
+    (condition-case err
+        (run-hooks 'agent-repl-frontend-webview-adopt-hook)
+      (error
+       (agent-repl--log nil "frontend webview adopt-hook failed buffer=%s err=%S"
+                        name err))))
   buf)
 
 (defun agent-repl--frontend-ensure-webview-buffer (ws session-id url)
