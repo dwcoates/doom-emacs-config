@@ -259,6 +259,43 @@ func (c *consumer) retain(ev *corev1.Event) {
 	c.mu.Unlock()
 }
 
+// purgeRetained drops every retained event and reports how many were dropped
+// plus the seq ceiling that went with them.
+//
+// IT IS THE ROTATION'S PURGE, and it exists because the ring is a window onto
+// ONE store seq space. When the vendor retires a session uuid the conversation
+// starts a fresh space at 1, and every seq the ring holds becomes a number with
+// no meaning in the space this session now serves. Three things read those
+// numbers and all three were wrong until they were dropped:
+//
+//   - newestRetainedSeq, the CEILING an honest client mark is checked against
+//     (Manager.lastSeenSeq). Left standing it reports the retired space's high
+//     water, so a post-rotation mark in the new space reads as ordinary rather
+//     than as the retired-space mark it is.
+//   - ringFloor, which becomes the re-pull's stop_at. Left standing it bounds a
+//     re-pull of the NEW space at a retired-space seq — the observed
+//     `stop_at=1122` against a space that had reached 12.
+//   - resync itself, which would replay the retired conversation's items to a
+//     frontend that just discarded them.
+//
+// After this the ring is empty until new-space events arrive, which is exactly
+// the state the cursor and the replay floor are reset to in the same act. The
+// events are not lost: they are in the store under the retired key, and nothing
+// in the new space refers to them.
+func (c *consumer) purgeRetained() (dropped int, ceiling uint64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	dropped = len(c.ring)
+	for i := len(c.ring) - 1; i >= 0; i-- {
+		if seq := c.ring[i].GetSeq(); seq > 0 {
+			ceiling = seq
+			break
+		}
+	}
+	c.ring = nil
+	return dropped, ceiling
+}
+
 // snapshotRing returns a shallow copy of the retained events for catalog
 // rebuilds and resync, taken under the lock so a concurrent retain cannot race
 // the read.

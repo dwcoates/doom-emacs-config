@@ -30,6 +30,10 @@ type replayClient struct {
 	events []*corev1.Event
 	result shimclient.ReplayResult
 	err    error
+	// queuedErrs are per-call errors, popped one per Replay before `err` takes
+	// over. It is how a test scripts a replay that fails ONCE and succeeds on
+	// the retry — the shape a shim-link bounce leaves behind.
+	queuedErrs []error
 	// block, when non-nil, holds Replay open until it is closed — the
 	// in-flight shape the concurrency guard is about.
 	block chan struct{}
@@ -43,6 +47,10 @@ func (c *replayClient) Replay(_ context.Context, from, to uint64, maxEvents uint
 	events := c.events
 	result := c.result
 	err := c.err
+	if len(c.queuedErrs) > 0 {
+		err = c.queuedErrs[0]
+		c.queuedErrs = c.queuedErrs[1:]
+	}
 	c.mu.Unlock()
 	if block != nil {
 		<-block
@@ -69,9 +77,21 @@ type repullHarness struct {
 	client   *replayClient
 	seq      *fakeSeqStore
 	floors   *fakeClearCompactStore
+	// reg is the rotation-aware registrar (rotationpurge_test.go): it mirrors
+	// the production adapter by zeroing both cursors in the same act that
+	// adopts a new vendor uuid, so a rotation test cannot pass against a fake
+	// that forgot the reset.
+	reg *rotatingRegistrar
 }
 
 func newRepullHarness(t *testing.T, client *replayClient) *repullHarness {
+	t.Helper()
+	return newRepullHarnessWithLog(t, client, nil)
+}
+
+// newRepullHarnessWithLog is newRepullHarness with the daemon log captured, for
+// tests asserting on a loud line. logf may be nil (the plain harness).
+func newRepullHarnessWithLog(t *testing.T, client *replayClient, logf func(string, ...any)) *repullHarness {
 	t.Helper()
 	h := &repullHarness{
 		push:     &fakePusher{},
@@ -81,6 +101,7 @@ func newRepullHarness(t *testing.T, client *replayClient) *repullHarness {
 		seq:      &fakeSeqStore{seq: map[string]uint64{}},
 		floors:   newFakeClearCompactStore(),
 	}
+	h.reg = &rotatingRegistrar{seq: h.seq, floors: h.floors}
 	m, err := New(Config{
 		Push:              h.push,
 		SSM:               h.applier,
@@ -89,7 +110,9 @@ func newRepullHarness(t *testing.T, client *replayClient) *repullHarness {
 		Locator:           fakeLocator{m: map[string]string{"ws": "s1"}},
 		SeqStore:          h.seq,
 		ClearCompactStore: h.floors,
+		Registrar:         h.reg,
 		ProtocolVersion:   "1",
+		Logf:              logf,
 		Source:            stubSource{},
 		newClient:         func(shimclient.Config) sessionClient { return client },
 	})
