@@ -37,6 +37,11 @@ var ErrRepullTruncated = errclass.ErrRepullTruncated
 type repullState struct {
 	fromSeq uint64
 	stopAt  uint64
+	// epoch is driven.rotEpoch as it stood when this re-pull started — the
+	// generation of the seq space its bounds are expressed in. Comparing bounds
+	// across generations is comparing numbers from different spaces, so the
+	// coalescing rule refuses rather than pretends.
+	epoch uint64
 }
 
 // ---------------------------------------------------------------------------
@@ -113,18 +118,28 @@ type repullState struct {
 // report what actually happened rather than acknowledging an intent.
 func (m *Manager) startRepull(d *driven, fromSeq, stopAt uint64) error {
 	m.mu.Lock()
+	epoch := d.rotEpoch
 	if cur := d.repull; cur != nil {
-		covered := cur.fromSeq <= fromSeq
+		// A re-pull from a RETIRED seq space covers nothing in this one, however
+		// the numbers happen to compare. Coalescing across a rotation would hand
+		// this caller an in-flight pull of a conversation the vendor has retired
+		// and call it served.
+		sameSpace := cur.epoch == epoch
+		covered := sameSpace && cur.fromSeq <= fromSeq
 		m.mu.Unlock()
 		if covered {
 			m.logf("sessiondrv: coalescing re-pull ws=%q from_seq=%d onto the in-flight one (from_seq=%d stop_at=%d)",
 				d.workspace, fromSeq, cur.fromSeq, cur.stopAt)
 			return nil
 		}
+		if !sameSpace {
+			return fmt.Errorf("%w: ws=%q the in-flight re-pull (from_seq=%d stop_at=%d) counts in a RETIRED vendor seq space (epoch %d, now %d), so it cannot cover the requested from_seq=%d",
+				ErrRepullInFlight, d.workspace, cur.fromSeq, cur.stopAt, cur.epoch, epoch, fromSeq)
+		}
 		return fmt.Errorf("%w: ws=%q in-flight from_seq=%d does not cover the requested from_seq=%d",
 			ErrRepullInFlight, d.workspace, cur.fromSeq, fromSeq)
 	}
-	d.repull = &repullState{fromSeq: fromSeq, stopAt: stopAt}
+	d.repull = &repullState{fromSeq: fromSeq, stopAt: stopAt, epoch: epoch}
 	m.mu.Unlock()
 	defer func() {
 		m.mu.Lock()

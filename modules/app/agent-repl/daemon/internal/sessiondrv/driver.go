@@ -27,6 +27,7 @@ package sessiondrv
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"sync"
@@ -250,6 +251,37 @@ type driven struct {
 	// or nil. Guarded by the manager mutex; it is what keeps two frontends
 	// mounting at once from pulling the same history twice (repull.go).
 	repull *repullState
+
+	// rotEpoch counts the VENDOR SESSION ROTATIONS this driver has seen. It is
+	// the seq space's generation number: every seq the daemon holds for this
+	// session is only comparable with another seq of the same epoch.
+	//
+	// It exists for the re-pull's coalescing rule. Two requests are coalesced
+	// when the in-flight one's range covers the newcomer's, and that comparison
+	// is arithmetic on seqs — which is meaningless across a rotation, where the
+	// in-flight bounds were computed in a space that no longer exists.
+	// Guarded by the manager mutex.
+	rotEpoch uint64
+
+	// pendingResync is a frontend resync whose store re-pull was interrupted by
+	// the shim link going away, re-armed to run again once the shim reattaches.
+	// nil when nothing is pending. Guarded by the manager mutex.
+	pendingResync *pendingResync
+	// resyncRetried is the ONE-SHOT budget for that re-arm: a second
+	// consecutive lost link is reported to the frontend as the failure it is
+	// rather than retried forever. Cleared by a resync that completes, and by a
+	// rotation (which is a legitimate reason for a second interruption).
+	// Guarded by the manager mutex.
+	resyncRetried bool
+}
+
+// pendingResync is a frontend resync waiting for the shim to reattach.
+type pendingResync struct {
+	// fromSeq is the CLIENT's original mark, not the floored replay position:
+	// the re-armed attempt re-derives the floor against whatever the
+	// conversation looks like after the reattach, which after a rotation is a
+	// different seq space entirely.
+	fromSeq uint64
 }
 
 // New builds a Manager. Required collaborators missing is a construction error
@@ -724,11 +756,93 @@ func (m *Manager) Resync(workspace string, fromSeq uint64) error {
 		ringFloor = m.cfg.SeqStore.LastSeq(d.sessionID) + 1
 	}
 	if replayFrom >= ringFloor {
+		m.noteResyncSettled(d)
 		return nil // the ring covered the whole request
 	}
 	m.logf("sessiondrv: resync ws=%q replay_from=%d is below the retained floor %d; re-pulling the gap from the store",
 		workspace, replayFrom, ringFloor)
-	return m.startRepull(d, exclusiveLowerBound(replayFrom), ringFloor)
+	err = m.startRepull(d, exclusiveLowerBound(replayFrom), ringFloor)
+	if errors.Is(err, shimclient.ErrReplayLinkLost) {
+		return m.rearmResyncAfterReattach(d, fromSeq, err)
+	}
+	if err == nil {
+		m.noteResyncSettled(d)
+	}
+	return err
+}
+
+// rearmResyncAfterReattach holds a resync whose re-pull was cut short by the
+// shim link going away, to be served again the moment the shim reattaches.
+//
+// WHY THIS IS NOT A FAILURE. The shim bounces the daemon link DELIBERATELY when
+// the vendor rotates its session uuid, and a re-pull in flight across that
+// bounce comes back with zero events and a lost link. Reporting it as a
+// truncation put a red failure card in a feed that the rotation had just
+// emptied, which is the exact pair of symptoms the user saw: nothing to read,
+// and an alarm about it. The client's question was never answered, so it is
+// re-asked rather than answered wrongly.
+//
+// WHY IT RE-ARMS RATHER THAN LOOPING. There is no sleep and no retry timer: the
+// standing subscription is replayed on reattach, and onConnected is the event
+// that says the link is back. Re-running the resync there is the same request
+// against a connection that can serve it.
+//
+// THE BUDGET IS ONE. A second CONSECUTIVE lost link is reported to the frontend
+// as the failure it is — a link that will not stay up long enough to serve
+// history is a real outage, not a rotation, and hiding it behind endless
+// retries is what a fallback looks like. The budget refreshes when a resync
+// completes, and when a rotation happens (which is itself a legitimate reason
+// for the second interruption).
+func (m *Manager) rearmResyncAfterReattach(d *driven, fromSeq uint64, cause error) error {
+	m.mu.Lock()
+	if closed, retried := m.closed, d.resyncRetried; closed || retried {
+		m.mu.Unlock()
+		m.logf("sessiondrv: resync ws=%q session=%s from_seq=%d lost the shim link with no re-arm left (already retried=%v, manager closed=%v) — surfacing it rather than retrying further",
+			d.workspace, d.sessionID, fromSeq, retried, closed)
+		return cause
+	}
+	d.resyncRetried = true
+	d.pendingResync = &pendingResync{fromSeq: fromSeq}
+	m.mu.Unlock()
+	m.logf("sessiondrv: resync ws=%q session=%s from_seq=%d was INTERRUPTED by a shim-link bounce and is RE-ARMED — it will be served again as soon as the shim reattaches; this is not a truncation and no failure card is pushed: %v",
+		d.workspace, d.sessionID, fromSeq, cause)
+	return nil
+}
+
+// noteResyncSettled refreshes the one-shot re-arm budget after a resync that
+// actually completed.
+func (m *Manager) noteResyncSettled(d *driven) {
+	m.mu.Lock()
+	d.resyncRetried = false
+	m.mu.Unlock()
+}
+
+// runPendingResync re-runs a resync the shim link interrupted, now that the
+// shim has reattached. It runs on its OWN goroutine because this is called from
+// the shimclient's connection goroutine before its read loop starts, and a
+// re-pull cannot complete without that loop delivering the replayed events.
+func (m *Manager) runPendingResync(workspace, sessionID string) {
+	m.mu.Lock()
+	d, ok := m.byWS[workspace]
+	if m.closed || !ok || d.sessionID != sessionID || d.pendingResync == nil {
+		m.mu.Unlock()
+		return
+	}
+	pending := d.pendingResync
+	d.pendingResync = nil
+	// Registered with the same WaitGroup Close joins, so this cannot outlive the
+	// manager and race whatever tears down after it.
+	m.exits.Add(1)
+	m.mu.Unlock()
+	go func() {
+		defer m.exits.Done()
+		m.logf("sessiondrv: re-serving the resync a shim-link bounce interrupted ws=%q session=%s from_seq=%d (the shim has reattached)",
+			workspace, sessionID, pending.fromSeq)
+		if err := m.Resync(workspace, pending.fromSeq); err != nil {
+			m.logf("sessiondrv: the re-armed resync ws=%q session=%s from_seq=%d FAILED: %v",
+				workspace, sessionID, pending.fromSeq, err)
+		}
+	}()
 }
 
 // replayFloor is the first seq a frontend replay may start at:
@@ -1121,15 +1235,75 @@ func (m *Manager) armMetaprompt(d *driven, ss *corev1.SessionStarted) {
 //     (last_seq, and the replay floor that counts in the same space) are reset
 //     to zero — one indivisible write, because the registry re-hydrates a
 //     record's cursors from the checkpoint filed under its CURRENT uuid.
-//  2. THE QUEUE'S TURN OBSERVATION. The turn in flight when the uuid changed
+//  2. THE RETAINED CONVERSATION RING. Every item it holds is keyed to the
+//     RETIRED seq space, and so is every ceiling derived from it. See
+//     purgeRetainedOnRotation and consumer.purgeRetained.
+//  3. THE QUEUE'S TURN OBSERVATION. The turn in flight when the uuid changed
 //     will report its end under the NEW identity, so the daemon's turn-active
 //     flag is cleared rather than left standing on a boundary nothing will
 //     close. An interrupt mark riding that turn is dropped with it.
-//  3. THE SSM. Same reconciliation on the render axis (ApplySessionRotated).
+//  4. THE SSM. Same reconciliation on the render axis (ApplySessionRotated).
 //
-// Nothing else is reset: the events themselves are not lost — they are in the
-// store under the new key, and the Subscribe this precedes replays them from
-// zero, ContextCleared included.
+// The events themselves are not lost — they are in the store under the retired
+// key, and the Subscribe this precedes replays the NEW space from zero,
+// ContextCleared included.
+//
+// ---------------------------------------------------------------------------
+// THE SEQ-HOLDER INVENTORY — the checklist a new one must join
+// ---------------------------------------------------------------------------
+//
+// A store seq is only meaningful inside ONE vendor seq space. Every per-session
+// place the daemon holds, compares, or persists one is listed here, and each is
+// either RESET on a rotation or carries a stated reason why a stale value is
+// harmless. Adding a new seq holder means adding a line here.
+//
+// RESET ON ROTATION:
+//
+//   - registry Record.LastSeq — the Subscribe high-water. Zeroed inside
+//     RegistryRegistrar.AdoptVendorSessionID, in the same write that adopts the
+//     new uuid.
+//   - registry Record.NewestClearOrCompactSeq — the durable replay floor.
+//     Zeroed in that same write.
+//   - registry ConversationCheckpoint (both cursors) — re-filed under the NEW
+//     uuid by that write, so the hydrate-up on the next mutation reads a fresh
+//     checkpoint at zero rather than the retired one.
+//   - shimclient Client.lastSeen — re-read from the SeqStore on every
+//     runOnce, which is why OnHandshake (this hook) must run BEFORE the
+//     Subscribe reads it.
+//   - consumer.ring — purged here (purgeRetainedOnRotation).
+//   - consumer.newestRetainedSeq() — derived from the ring; empty after the
+//     purge, so the ceiling in Manager.lastSeenSeq falls back to the durable
+//     mark, which the registry just zeroed.
+//   - consumer.ringFloor() — derived from the ring, and it is the re-pull's
+//     stop_at. Empty after the purge, so Resync takes the floor from the
+//     durable last_seen_seq instead (repull.go).
+//   - driven.repull{fromSeq,stopAt} — an in-flight re-pull's bounds. Stamped
+//     with driven.rotEpoch, which this bumps, so a post-rotation request can
+//     never be coalesced onto a re-pull bounded in the retired space.
+//   - driven.resyncRetried — the one-shot re-arm budget, refreshed here so a
+//     re-pull that a SECOND bounce interrupts is still retried once.
+//
+// DELIBERATELY NOT RESET, and why stale values are harmless:
+//
+//   - consumer.permItems / failItems — daemon-composed items keyed by
+//     request_id and card uuid; they carry NO store seq (through_seq stays 0)
+//     and are replayed on every resync regardless of fromSeq, so no ceiling can
+//     hide them. A pending permission also survives the shim bounce and is
+//     re-asked on reattach, so dropping these would erase a live prompt.
+//   - ssm workspace_state.cause_seq (the paint watermark on the `painted` row,
+//     and the (session_id, cause_seq) idempotency key) — the KNOWN residual.
+//     The idempotency key is keyed by the event's session id, which IS the
+//     vendor uuid, so the new space gets a fresh key space for free. The paint
+//     watermark is per WORKSPACE and monotonic, so a retired-space attestation
+//     survives the rotation and swallows the new space's lower acks as
+//     superseded until it climbs past the old high water — the workspace reads
+//     painted on an attestation about a conversation that is gone. That is a
+//     KNOWN residual, deliberately left by the 045a79d8 report: it errs toward
+//     green rather than toward the permanent blue a mis-reset would produce,
+//     and it is listed here so the next reader finds it named rather than
+//     missing.
+//   - driven.metaCwd / backfill / systemInit / queue entries — carry no seq at
+//     all; a rotation does not change what they describe.
 func (m *Manager) onHandshake(workspace, sessionID string, hello *corev1.ShimHello) {
 	csid := hello.GetVendorSessionId()
 	if csid == "" {
@@ -1152,10 +1326,50 @@ func (m *Manager) onHandshake(workspace, sessionID string, hello *corev1.ShimHel
 	}
 	m.logf("sessiondrv: VENDOR SESSION ROTATION ws=%q session=%s %s -> %s — the vendor retired one transcript identity mid-stream; store cursor and replay floor reset to zero and the subscription resumes from the new seq space's beginning",
 		workspace, sessionID, previous, csid)
+	m.purgeRetainedOnRotation(workspace, sessionID, previous, csid)
 	m.clearTurnOnRotation(workspace, sessionID, previous, csid)
 	if err := m.cfg.SSM.ApplySessionRotated(workspace, previous, csid); err != nil {
 		m.logf("sessiondrv: reconciling the SSM across the rotation FAILED ws=%q session=%s %s -> %s: %v (the workspace may stay in THINKING until the next turn)",
 			workspace, sessionID, previous, csid, err)
+	}
+}
+
+// purgeRetainedOnRotation drops the retained conversation window belonging to
+// the RETIRED seq space, and every ceiling derived from it.
+//
+// THE DEFECT THIS CLOSES. The rotation reset the registry's cursors and left
+// the ring alone, so the daemon went on holding the old conversation's items
+// with their old seqs. A frontend that rebased and asked to resync from zero
+// was then served a re-pull bounded at `stop_at=1122` — a ceiling read straight
+// out of the retired space, against a space that had reached 12 — which
+// delivered nothing and reported a truncation. The feed was empty and the only
+// thing in it was a failure card.
+//
+// The epoch bump is the other half: an in-flight re-pull's bounds were computed
+// in the retired space, so a request arriving after the rotation must not be
+// coalesced onto it (startRepull), and the one-shot re-arm budget is refreshed
+// because a rotation is a legitimate reason for a second interruption.
+func (m *Manager) purgeRetainedOnRotation(workspace, sessionID, previous, next string) {
+	m.mu.Lock()
+	d, ok := m.byWS[workspace]
+	if !ok || d.sessionID != sessionID {
+		m.mu.Unlock()
+		return
+	}
+	d.rotEpoch++
+	epoch := d.rotEpoch
+	d.resyncRetried = false
+	inflight := d.repull
+	m.mu.Unlock()
+
+	dropped, ceiling := d.consumer.purgeRetained()
+	logf := dlog.Tag(dlog.Logf(m.logf),
+		"ws", workspace, "session", sessionID, "previous", previous, "next", next,
+		"purged", dropped, "retired_ceiling", ceiling, "rotation_epoch", epoch)
+	logf("sessiondrv: retained conversation ring PURGED across the vendor session rotation — every item and every seq ceiling it carried counted in the retired space; the ring is empty until the new space's events arrive")
+	if inflight != nil {
+		logf("sessiondrv: a history re-pull is IN FLIGHT across the rotation (from_seq=%d stop_at=%d, both retired-space numbers) — its bounds cannot cover the new space, so no later request will be coalesced onto it",
+			inflight.fromSeq, inflight.stopAt)
 	}
 }
 
@@ -1198,6 +1412,10 @@ func (m *Manager) onConnected(workspace, sessionID string, hello *corev1.ShimHel
 	if hello.GetTurnInFlight() {
 		m.logf("sessiondrv: reattached mid-turn ws=%s session=%s (turn_in_flight); SSM re-derives from replayed events", workspace, sessionID)
 	}
+	// A resync whose store re-pull this very reattach interrupted is served
+	// again here — the link being back IS the event it was waiting for, which is
+	// why nothing sleeps or polls for it.
+	m.runPendingResync(workspace, sessionID)
 }
 
 // Close stops every driver, abandons pending permissions (no fabricated
