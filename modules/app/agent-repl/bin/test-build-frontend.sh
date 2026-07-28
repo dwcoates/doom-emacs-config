@@ -37,6 +37,7 @@ make_tree() {
              "$root/webapp/src" "$root/webapp/dist" \
              "$root/daemon/cmd/claude-repld" "$root/daemon/bin"
     cp "$SCRIPT_UNDER_TEST" "$root/bin/build-frontend.sh"
+    cp "$THIS_DIR/lib-deploy-stamp.sh" "$root/bin/lib-deploy-stamp.sh"
 
     # Sources.
     echo "export const x = 1" > "$root/agent-shim/claude/shim/src/main.ts"
@@ -477,6 +478,79 @@ t_gc_not_run_when_nothing_minted() {
     rm -rf "$root"
 }
 
+# --- built-sha stamps -------------------------------------------------------
+
+# git_tree ROOT — turn the fixture into a real checkout, since the stamp is
+# read out of git and there is nothing to assert without one.
+git_tree() {
+    local root="$1"
+    # Mirror the real repo, where every build output is ignored
+    # (daemon/.gitignore, webapp/.gitignore, shim/.gitignore). Without this the
+    # artifact a build just produced would itself make the tree "dirty" and
+    # every stamp would carry the marker.
+    printf 'bin/\ndist/\nstore/\nstubs/\nhome/\nnode_modules/\n*.log\n' > "$root/.gitignore"
+    git -C "$root" init -q
+    git -C "$root" -c user.name=t -c user.email=t@example.com add -A
+    git -C "$root" -c user.name=t -c user.email=t@example.com commit -qm seed
+}
+
+t_stamp_written_on_build() {
+    local root sha; root="$(mktemp -d)"
+    make_tree "$root"; make_stubs "$root/stubs"; git_tree "$root"
+    sha="$(git -C "$root" rev-parse HEAD)"
+    run_script "$root" daemon >/dev/null
+    if [ "$(cat "$root/daemon/bin/.built-sha" 2>/dev/null)" = "$sha" ]; then
+        pass "stamp: a build records the source revision beside its artifact"
+    else
+        fail "stamp: a build records the source revision beside its artifact" \
+             "want=$sha got=$(cat "$root/daemon/bin/.built-sha" 2>/dev/null)"
+    fi
+    rm -rf "$root"
+}
+
+t_stamp_marks_a_dirty_tree() {
+    local root; root="$(mktemp -d)"
+    make_tree "$root"; make_stubs "$root/stubs"; git_tree "$root"
+    echo "package main // edited" > "$root/daemon/cmd/claude-repld/main.go"
+    run_script "$root" daemon >/dev/null
+    if grep -q -- '-dirty$' "$root/daemon/bin/.built-sha"; then
+        pass "stamp: a build off a dirty tree carries the -dirty marker"
+    else
+        fail "stamp: a build off a dirty tree carries the -dirty marker" \
+             "stamp=$(cat "$root/daemon/bin/.built-sha" 2>/dev/null)"
+    fi
+    rm -rf "$root"
+}
+
+t_stamp_untouched_by_a_skipped_build() {
+    local root; root="$(mktemp -d)"
+    make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
+    git_tree "$root"
+    printf 'a-previous-revision\n' > "$root/daemon/bin/.built-sha"
+    run_script "$root" daemon >/dev/null
+    if [ "$(cat "$root/daemon/bin/.built-sha")" = "a-previous-revision" ]; then
+        pass "stamp: a skipped (fresh) build leaves the existing stamp untouched"
+    else
+        fail "stamp: a skipped (fresh) build leaves the existing stamp untouched" \
+             "stamp=$(cat "$root/daemon/bin/.built-sha")"
+    fi
+    rm -rf "$root"
+}
+
+t_no_git_leaves_no_stamp() {
+    local root; root="$(mktemp -d)"
+    make_tree "$root"; make_stubs "$root/stubs"
+    printf 'a-stale-guess\n' > "$root/daemon/bin/.built-sha"
+    run_script "$root" daemon >/dev/null
+    if [ ! -e "$root/daemon/bin/.built-sha" ]; then
+        pass "stamp: a build outside a checkout drops the stamp rather than leaving a guess"
+    else
+        fail "stamp: a build outside a checkout drops the stamp rather than leaving a guess" \
+             "stamp=$(cat "$root/daemon/bin/.built-sha")"
+    fi
+    rm -rf "$root"
+}
+
 t_deps_lockfile_change_rekeys_store
 t_gc_collects_stranded_keeps_referenced
 t_gc_protects_symlink_target
@@ -590,6 +664,10 @@ t_services_missing_shared_source_fails_loudly() {
 }
 
 t_gc_not_run_when_nothing_minted
+t_stamp_written_on_build
+t_stamp_marks_a_dirty_tree
+t_stamp_untouched_by_a_skipped_build
+t_no_git_leaves_no_stamp
 t_stale_source_with_space_in_name
 t_stale_source_with_glob_chars
 t_stale_empty_source_set

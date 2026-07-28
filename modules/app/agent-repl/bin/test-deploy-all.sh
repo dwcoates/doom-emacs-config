@@ -33,6 +33,7 @@ make_tree() {
     mkdir -p "$mod/bin" "$mod/proto" "$mod/daemon/cmd/claude-repld" \
              "$mod/agent-shim/shim-store" "$mod/agent-shim/claude/shim-sidecar"
     cp "$SCRIPT_UNDER_TEST" "$mod/bin/deploy-all.sh"
+    cp "$THIS_DIR/lib-deploy-stamp.sh" "$mod/bin/lib-deploy-stamp.sh"
     chmod +x "$mod/bin/deploy-all.sh"
 
     cat > "$mod/bin/build-frontend.sh" <<'EOF'
@@ -120,6 +121,8 @@ EOF
 #!/usr/bin/env bash
 echo "git $*" >> "$STUB_LOG"
 case "$*" in
+    *"rev-parse HEAD"*)     echo "${GIT_STUB_SHA:-deadbeefcafe}" ;;
+    *"status --porcelain"*) printf '%s' "${GIT_STUB_DIRTY:-}" ;;
     *"diff --name-only"*)
         printf '%s\n' \
             "modules/app/agent-repl/status.el" \
@@ -316,6 +319,38 @@ if [ "$RC" -eq 3 ] \
 else
     fail "a non-connectivity Emacs probe error fails the deploy loudly" \
          "rc=$RC stdout: $(cat "$d/stdout") stderr: $(cat "$d/stderr") log: $(cat "$STUB_LOG")"
+fi
+
+# --- 11. built-sha stamps are written; deployed stamps stay the bounce signal
+# The two stamp families sit in the same directory and answer different
+# questions; a build writing the DEPLOYED stamp would silently suppress the
+# next bounce, so this asserts both that built-sha appears and that the
+# pre-seeded deployed fingerprint is exactly as the kickstart left it.
+d="$TMP/t11"; mkdir -p "$d"
+seed_deployed "$d" shim-store bin-v1
+BEFORE="$(cat "$d/h/.cache/agent-repl/bin/.shim-store.deployed")"
+RUN_ENV="" run_deploy "$d"
+CACHE="$d/h/.cache/agent-repl/bin"
+if [ "$RC" -eq 0 ] \
+   && [ "$(cat "$CACHE/.shim-store.built-sha" 2>/dev/null)" = "deadbeefcafe" ] \
+   && [ "$(cat "$CACHE/.shim-claude-sidecar.built-sha" 2>/dev/null)" = "deadbeefcafe" ] \
+   && [ "$(cat "$d/tree/modules/app/agent-repl/daemon/bin/.built-sha" 2>/dev/null)" = "deadbeefcafe" ] \
+   && [ "$(cat "$CACHE/.shim-store.deployed")" = "$BEFORE" ]; then
+    pass "built-sha stamps are written without disturbing the deployed-fingerprint stamps"
+else
+    fail "built-sha stamps are written without disturbing the deployed-fingerprint stamps" \
+         "rc=$RC built=$(cat "$CACHE/.shim-store.built-sha" 2>/dev/null) deployed=$(cat "$CACHE/.shim-store.deployed" 2>/dev/null) want-deployed=$BEFORE"
+fi
+
+# --- 12. a dirty tree marks the built-sha stamp -----------------------------
+d="$TMP/t12"; mkdir -p "$d"
+RUN_ENV="GIT_STUB_DIRTY=M__some_file" run_deploy "$d"
+if [ "$RC" -eq 0 ] \
+   && [ "$(cat "$d/h/.cache/agent-repl/bin/.shim-store.built-sha" 2>/dev/null)" = "deadbeefcafe-dirty" ]; then
+    pass "a deploy off a dirty tree marks the built-sha stamp -dirty"
+else
+    fail "a deploy off a dirty tree marks the built-sha stamp -dirty" \
+         "rc=$RC stamp=$(cat "$d/h/.cache/agent-repl/bin/.shim-store.built-sha" 2>/dev/null)"
 fi
 
 echo
