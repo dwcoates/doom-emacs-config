@@ -330,6 +330,32 @@ session, which is a visibly broken workspace rather than a quiet one."
                    :worktreePath "/tmp/wt/jumped" :sessionId "session-jump"))
             (should-not opened)))))))
 
+(ert-deftest agent-repl-test-available-priority-lands-on-the-workspace ()
+  "The announced priority is what the tab's badge reads.
+Nothing derives a priority locally, so a workspace whose announcement
+carries one gets exactly that string on its `:priority'."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-command-inbox
+      (cl-letf (((symbol-function 'agent-repl--eager-open-panels)
+                 (lambda (&rest _) nil)))
+        (agent-repl-test--materialize-available
+         '(:jobId "workspace_commands_pri:0" :finalName "prioritized"
+           :worktreePath "/tmp/wt/prioritized" :sessionId "session-pri"
+           :priority "p1"))
+        (should (equal (agent-repl--ws-get "prioritized" :priority) "p1"))))))
+
+(ert-deftest agent-repl-test-available-without-priority-leaves-it-nil ()
+  "An announcement carrying no priority leaves the workspace without one,
+so the tab paints no badge rather than inventing a default."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-command-inbox
+      (cl-letf (((symbol-function 'agent-repl--eager-open-panels)
+                 (lambda (&rest _) nil)))
+        (agent-repl-test--materialize-available
+         '(:jobId "workspace_commands_nopri:0" :finalName "unprioritized"
+           :worktreePath "/tmp/wt/unprioritized" :sessionId "session-nopri"))
+        (should-not (agent-repl--ws-get "unprioritized" :priority))))))
+
 (ert-deftest agent-repl-test-available-envelope-survives-a-local-plist-edit ()
   "Editing a metadata-supplied key must not rewrite the replay envelope.
 The bookkeeping plist shares METADATA's cons cells as its tail, so an
