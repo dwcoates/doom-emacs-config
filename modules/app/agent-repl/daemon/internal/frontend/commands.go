@@ -2,6 +2,7 @@ package frontend
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
@@ -167,9 +168,49 @@ func DispatchWithResponse(ctx context.Context, logf dlog.Logf, h CommandHandler,
 		return failAck(logf, reqID, fmt.Errorf("frontend: unknown command (workspace=%q): the command oneof was empty or unrecognized", ws)), nil
 	}
 	if err != nil {
+		// THE ONE NON-FAILURE REFUSAL. An interrupt confirm challenge is a
+		// command the daemon UNDERSTOOD and deliberately did not perform, so it
+		// takes the challenge arm and leaves `failure` and `error` unset — see
+		// InterruptConfirmRequired. Everything else still funnels into the one
+		// classifier below, unchanged.
+		var challenge *InterruptConfirmRequired
+		if errors.As(err, &challenge) {
+			if logf != nil {
+				logf("frontend: interrupt confirm required request_id=%s workspace=%s live_tasks=%d — refusing until the client resends with confirm_agents",
+					reqID, ws, challenge.LiveTasks)
+			}
+			return &frontendv1.CommandAck{
+				RequestId:                reqID,
+				Ok:                       false,
+				InterruptConfirmRequired: &frontendv1.InterruptConfirmRequired{LiveTasks: challenge.LiveTasks},
+			}, nil
+		}
 		return failAck(logf, reqID, err), nil
 	}
 	return &frontendv1.CommandAck{RequestId: reqID, Ok: true}, response
+}
+
+// InterruptConfirmRequired is the interrupt gate's CHALLENGE, carried on the
+// handler's error channel because that is the only channel a CommandHandler
+// method has — but it is NOT a failure.
+//
+// The distinction is the whole point of the proto's separate arm: the command
+// was understood and deliberately not performed, because no turn was live and
+// stopping live subagents deserves an explicit yes. So the ack it becomes
+// carries ok=false with `failure` and `error` UNSET, and a client answers it by
+// resending InterruptCmd{confirm_agents: true} rather than by rendering a
+// failure card.
+//
+// It is a distinct TYPE rather than a sentinel value so the payload — what the
+// stop would actually interrupt — travels with it and the client can ask a
+// concrete question instead of a bare are-you-sure.
+type InterruptConfirmRequired struct {
+	// LiveTasks is how many subagent tasks are working right now.
+	LiveTasks int64
+}
+
+func (e *InterruptConfirmRequired) Error() string {
+	return fmt.Sprintf("interrupt confirmation required: %d subagent task(s) are working", e.LiveTasks)
 }
 
 // failAck builds a refusal ack carrying BOTH the classified failure and the
