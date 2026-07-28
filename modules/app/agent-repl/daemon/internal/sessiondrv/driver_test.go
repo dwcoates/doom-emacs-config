@@ -397,6 +397,62 @@ func TestHealthWithNoDriverStillFailsImmediately(t *testing.T) {
 	}
 }
 
+// TestHealthNamesTheLinkItStoppedAt pins the sentinel each failure carries, one
+// case per link: a create nack reports the DEEPEST hop it reached, and it can
+// only do that if the hops are distinguishable by errors.Is rather than by
+// message text.
+func TestHealthNamesTheLinkItStoppedAt(t *testing.T) {
+	tests := []struct {
+		name string
+		// arrange brings the manager to the state under test and returns the
+		// context the probe runs under.
+		arrange func(t *testing.T) (*Manager, context.Context)
+		want    error
+		unwant  error
+	}{
+		{
+			name: "nothing ever drove the workspace",
+			arrange: func(t *testing.T) (*Manager, context.Context) {
+				m, _ := newTestManagerNotReady(t, fakeLocator{m: map[string]string{"ws": "s1"}}, &fakeSpawner{}, make(chan struct{}))
+				return m, context.Background()
+			},
+			want:   ErrNoLiveDriver,
+			unwant: ErrShimNotReady,
+		},
+		{
+			name: "driver exists but never completed its handshake",
+			arrange: func(t *testing.T) (*Manager, context.Context) {
+				m, _ := newTestManagerNotReady(t, fakeLocator{m: map[string]string{"ws": "s1"}}, &fakeSpawner{}, make(chan struct{}))
+				if err := m.Ensure("ws"); err != nil {
+					t.Fatalf("Ensure: %v", err)
+				}
+				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+				t.Cleanup(cancel)
+				return m, ctx
+			},
+			want:   ErrShimNotReady,
+			unwant: ErrNoLiveDriver,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			m, ctx := tc.arrange(t)
+
+			// Act.
+			_, err := m.Health(ctx, "ws", "s1", "health-1")
+
+			// Assert.
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("err = %v, want it to carry %v", err, tc.want)
+			}
+			if errors.Is(err, tc.unwant) {
+				t.Fatalf("err = %v also carries %v; the links must stay disjoint", err, tc.unwant)
+			}
+		})
+	}
+}
+
 // TestHealthSurfacesItsOwnDeadlineDuringBringUp proves the wait is bounded by
 // the PROBE'S context: a shim that never attaches ends the probe with that
 // deadline, never with a hang.
