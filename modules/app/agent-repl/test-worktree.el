@@ -126,7 +126,7 @@
 ;;;; ---- Tests: git-exit-code / git-branch-exists-p ----
 ;;
 ;; The wrappers themselves (`agent-repl--git-exit-code',
-;; `agent-repl--git-branch-exists-p', `agent-repl--git-tag-exists-p')
+;; `agent-repl--git-branch-exists-p')
 ;; are registered external boundaries; per AGENTS.md "No External
 ;; Processes or External State in Tests" / "We test lisp, not external
 ;; code", they are mocked in their callers' tests rather than exercised
@@ -1812,8 +1812,7 @@ registered canonical `:project-dir'."
 (ert-deftest agent-repl-test-workspace-name-collides-p-fresh ()
   "Fresh name in a clean repo and empty workspaces hash → no collision."
   (let ((agent-repl--workspaces (make-hash-table :test 'equal))
-        (agent-repl--workspace-names-in-flight nil)
-        (agent-repl-worktree-start-tag-prefix nil))
+        (agent-repl--workspace-names-in-flight nil))
     (cl-letf (((symbol-function 'agent-repl--candidate-worktree-path)
                (lambda (&rest _args) "/tmp/repo-worktrees/fresh"))
               ((symbol-function 'file-directory-p) (lambda (_p) nil))
@@ -1827,8 +1826,7 @@ registered canonical `:project-dir'."
         (agent-repl--workspace-names-in-flight
          (let ((h (make-hash-table :test 'equal)))
            (puthash "DWC/dup" t h)
-           h))
-        (agent-repl-worktree-start-tag-prefix nil))
+           h)))
     ;; The production function eagerly computes the candidate path in
     ;; its `let*' before any short-circuit check, so
     ;; `agent-repl--candidate-worktree-path' DOES run and must return
@@ -1846,8 +1844,7 @@ registered canonical `:project-dir'."
 (ert-deftest agent-repl-test-workspace-name-collides-p-workspaces-hash ()
   "Bare name present in `agent-repl--workspaces' → collision."
   (let ((agent-repl--workspaces (make-hash-table :test 'equal))
-        (agent-repl--workspace-names-in-flight nil)
-        (agent-repl-worktree-start-tag-prefix nil))
+        (agent-repl--workspace-names-in-flight nil))
     ;; Hash table keyed by bare name (matches `(+workspace-current-name)' style).
     (puthash "existing" '(:project-dir "/tmp/x") agent-repl--workspaces)
     (cl-letf (((symbol-function 'agent-repl--candidate-worktree-path)
@@ -1859,8 +1856,7 @@ registered canonical `:project-dir'."
 (ert-deftest agent-repl-test-workspace-name-collides-p-on-disk-path ()
   "Existing on-disk path at the resolved worktree dir → collision."
   (let ((agent-repl--workspaces (make-hash-table :test 'equal))
-        (agent-repl--workspace-names-in-flight nil)
-        (agent-repl-worktree-start-tag-prefix nil))
+        (agent-repl--workspace-names-in-flight nil))
     (cl-letf (((symbol-function 'agent-repl--candidate-worktree-path)
                (lambda (&rest _args) "/tmp/repo-worktrees/ondisk"))
               ((symbol-function 'file-directory-p)
@@ -1872,8 +1868,7 @@ registered canonical `:project-dir'."
 (ert-deftest agent-repl-test-workspace-name-collides-p-git-branch ()
   "Existing git branch in repo → collision."
   (let ((agent-repl--workspaces (make-hash-table :test 'equal))
-        (agent-repl--workspace-names-in-flight nil)
-        (agent-repl-worktree-start-tag-prefix nil))
+        (agent-repl--workspace-names-in-flight nil))
     (cl-letf (((symbol-function 'agent-repl--candidate-worktree-path)
                (lambda (&rest _args) "/tmp/repo-worktrees/existing-branch"))
               ((symbol-function 'file-directory-p) (lambda (_p) nil))
@@ -1881,38 +1876,6 @@ registered canonical `:project-dir'."
               ((symbol-function 'agent-repl--git-branch-exists-p)
                (lambda (_root _branch) t)))
       (should (agent-repl--workspace-name-collides-p "DWC/existing-branch" "/tmp/repo")))))
-
-(ert-deftest agent-repl-test-workspace-name-collides-p-start-tag ()
-  "Existing start-tag for the resolved branch → collision."
-  (let ((agent-repl--workspaces (make-hash-table :test 'equal))
-        (agent-repl--workspace-names-in-flight nil)
-        (agent-repl-worktree-start-tag-prefix "start/"))
-    (cl-letf (((symbol-function 'agent-repl--candidate-worktree-path)
-               (lambda (&rest _args) "/tmp/repo-worktrees/has-tag"))
-              ((symbol-function 'file-directory-p) (lambda (_p) nil))
-              ;; Branch does not exist.
-              ((symbol-function 'agent-repl--git-branch-exists-p)
-               (lambda (_root _branch) nil))
-              ;; Start tag DOES exist.
-              ((symbol-function 'agent-repl--git-tag-exists-p)
-               (lambda (_root _tag) t)))
-      (should (agent-repl--workspace-name-collides-p "DWC/has-tag" "/tmp/repo")))))
-
-(ert-deftest agent-repl-test-workspace-name-collides-p-tag-ignored-when-prefix-nil ()
-  "When start-tag prefix is nil, a stray `start/<branch>' tag does not flag collision."
-  (let ((agent-repl--workspaces (make-hash-table :test 'equal))
-        (agent-repl--workspace-names-in-flight nil)
-        (agent-repl-worktree-start-tag-prefix nil))
-    (cl-letf (((symbol-function 'agent-repl--candidate-worktree-path)
-               (lambda (&rest _args) "/tmp/repo-worktrees/no-tag-check"))
-              ((symbol-function 'file-directory-p) (lambda (_p) nil))
-              ;; Branch probe is the only predicate reached when prefix is nil.
-              ((symbol-function 'agent-repl--git-branch-exists-p)
-               (lambda (_root _branch) nil))
-              ((symbol-function 'agent-repl--git-tag-exists-p)
-               (lambda (&rest _args)
-                 (error "start-tag check should be skipped when prefix is nil"))))
-      (should-not (agent-repl--workspace-name-collides-p "DWC/no-tag-check" "/tmp/repo")))))
 
 ;;;; ---- Tests: disambiguate-workspace-name ----
 
@@ -1950,8 +1913,7 @@ silently return a colliding name."
   "Run BODY with `agent-repl--handle-create-command's collaborators stubbed.
 
 Binds fresh copies of the two dispatch tables (`agent-repl--workspaces',
-`agent-repl--workspace-names-in-flight') and a nil
-`agent-repl-worktree-start-tag-prefix', stubs the collision probe to
+`agent-repl--workspace-names-in-flight'), stubs the collision probe to
 \"no collision\", and stubs `run-with-timer' to capture the scheduled
 create args into the anaphoric variable `scheduled-args' — a list of
 \(git-root name prompt priority fork-session-id base-commit model).
@@ -1963,7 +1925,6 @@ override must precede the default it replaces."
   (declare (indent 1))
   `(let ((agent-repl--workspaces (make-hash-table :test 'equal))
          (agent-repl--workspace-names-in-flight (make-hash-table :test 'equal))
-         (agent-repl-worktree-start-tag-prefix nil)
          (scheduled-args nil))
      (ignore scheduled-args)
      (cl-letf (,@bindings
@@ -2069,13 +2030,12 @@ would otherwise boot silently idle."
   "Two sibling creates in the same batch with the same name yield distinct effective names."
   (let ((agent-repl--workspaces (make-hash-table :test 'equal))
         (agent-repl--workspace-names-in-flight (make-hash-table :test 'equal))
-        (agent-repl-worktree-start-tag-prefix nil)
         (scheduled-names nil))
     ;; First create: name is collision-free.  The handler reserves it in
     ;; `--workspace-names-in-flight'.  Second create with the same name
     ;; consults that table via the real `--workspace-name-collides-p',
     ;; so it MUST find the prior reservation and disambiguate.  We mock
-    ;; only the slower path probes (path/branch/start-tag) and let the
+    ;; only the slower path probes (path/branch) and let the
     ;; in-flight check fall through to the real implementation.
     (cl-letf (((symbol-function 'agent-repl--candidate-worktree-path)
                (lambda (&rest _args) "/tmp/repo-worktrees/dup"))
@@ -2453,43 +2413,13 @@ args, each carried verbatim without disturbing the other."
 
 (ert-deftest agent-repl-test-validate-worktree-creation-passes ()
   "Valid inputs do not signal."
-  (let ((agent-repl-worktree-start-tag-prefix nil))
-    (cl-letf (((symbol-function 'file-directory-p) (lambda (_p) nil))
-              ;; Branch missing → no collision.
-              ((symbol-function 'agent-repl--git-branch-exists-p)
-               (lambda (_root _branch) nil)))
-      ;; Should not error
-      (agent-repl--validate-worktree-creation
-       "new-feature" "/tmp/repo" "new-feature" "new-feature" "/nonexistent"))))
-
-(ert-deftest agent-repl-test-validate-worktree-creation-existing-start-tag ()
-  "Existing start tag (PREFIX+BRANCH) signals user-error."
-  (let ((agent-repl-worktree-start-tag-prefix "start/"))
-    (cl-letf (((symbol-function 'file-directory-p) (lambda (_p) nil))
-              ;; Branch missing.
-              ((symbol-function 'agent-repl--git-branch-exists-p)
-               (lambda (_root _branch) nil))
-              ;; Start tag EXISTS.
-              ((symbol-function 'agent-repl--git-tag-exists-p)
-               (lambda (_root _tag) t)))
-      (should-error (agent-repl--validate-worktree-creation
-                     "feature" "/tmp/repo" "feature" "feature" "/nonexistent")
-                    :type 'user-error))))
-
-(ert-deftest agent-repl-test-validate-worktree-creation-start-tag-disabled ()
-  "When start-tag prefix is nil, an existing 'start/feature' tag does not block."
-  (let ((agent-repl-worktree-start-tag-prefix nil))
-    (cl-letf (((symbol-function 'file-directory-p) (lambda (_p) nil))
-              ;; Branch missing.
-              ((symbol-function 'agent-repl--git-branch-exists-p)
-               (lambda (_root _branch) nil))
-              ;; Start-tag probe MUST NOT fire when prefix is nil.
-              ((symbol-function 'agent-repl--git-tag-exists-p)
-               (lambda (&rest _args)
-                 (error "start-tag probe should be skipped when prefix is nil"))))
-      ;; Should not error
-      (agent-repl--validate-worktree-creation
-       "feature" "/tmp/repo" "feature" "feature" "/nonexistent"))))
+  (cl-letf (((symbol-function 'file-directory-p) (lambda (_p) nil))
+            ;; Branch missing → no collision.
+            ((symbol-function 'agent-repl--git-branch-exists-p)
+             (lambda (_root _branch) nil)))
+    ;; Should not error
+    (agent-repl--validate-worktree-creation
+     "new-feature" "/tmp/repo" "new-feature" "new-feature" "/nonexistent")))
 
 (ert-deftest agent-repl-test-validate-worktree-creation-nested-under-repo ()
   "Validation passes for a non-existent path nested under another git repo.
@@ -2501,18 +2431,17 @@ existing worktree."
   ;; never walks ancestors.  Asserting that an arbitrary nested path
   ;; that does not exist passes validation is enough to pin the
   ;; non-walking behavior.
-  (let ((agent-repl-worktree-start-tag-prefix nil))
-    (cl-letf (((symbol-function 'file-directory-p)
-               (lambda (p)
-                 ;; PATH passed in does not exist; only assertion.
-                 (cond ((equal p "/tmp/outer-repo/inner/new-wt") nil)
-                       (t (error "unexpected file-directory-p arg: %S" p)))))
-              ;; Branch missing → no collision.
-              ((symbol-function 'agent-repl--git-branch-exists-p)
-               (lambda (_root _branch) nil)))
-      ;; Should not error
-      (agent-repl--validate-worktree-creation
-       "new-wt" "/tmp/outer-repo" "new-wt" "new-wt" "/tmp/outer-repo/inner/new-wt"))))
+  (cl-letf (((symbol-function 'file-directory-p)
+             (lambda (p)
+               ;; PATH passed in does not exist; only assertion.
+               (cond ((equal p "/tmp/outer-repo/inner/new-wt") nil)
+                     (t (error "unexpected file-directory-p arg: %S" p)))))
+            ;; Branch missing → no collision.
+            ((symbol-function 'agent-repl--git-branch-exists-p)
+             (lambda (_root _branch) nil)))
+    ;; Should not error
+    (agent-repl--validate-worktree-creation
+     "new-wt" "/tmp/outer-repo" "new-wt" "new-wt" "/tmp/outer-repo/inner/new-wt")))
 
 ;;;; ---- Tests: merge-fork (cherry-pick-base) ----
 ;;
@@ -7474,87 +7403,6 @@ Covers the full call the interactive `SPC TAB n' path builds up."
        nil "dirname" nil nil nil nil)
       (should (equal captured-args
                      '("worktree" "add" "-b" "my-branch" "/path" "HEAD"))))))
-
-;;;; ---- Tests: start-tag-name ----
-
-(ert-deftest agent-repl-test-start-tag-name-default-prefix ()
-  "Default prefix `start/' produces start/<branch>."
-  (let ((agent-repl-worktree-start-tag-prefix "start/"))
-    (should (equal (agent-repl--start-tag-name "DC/feature") "start/DC/feature"))))
-
-(ert-deftest agent-repl-test-start-tag-name-nil-prefix ()
-  "Nil prefix means start tags are disabled — returns nil."
-  (let ((agent-repl-worktree-start-tag-prefix nil))
-    (should (null (agent-repl--start-tag-name "any")))))
-
-(ert-deftest agent-repl-test-start-tag-name-empty-prefix ()
-  "Empty prefix is treated as disabled — returns nil."
-  (let ((agent-repl-worktree-start-tag-prefix ""))
-    (should (null (agent-repl--start-tag-name "any")))))
-
-;;;; ---- Tests: create-start-tag ----
-
-(ert-deftest agent-repl-test-create-start-tag-creates-at-base-commit ()
-  "create-start-tag invokes `git tag <prefix><branch> <base-commit>' in GIT-ROOT."
-  (let ((sha "abc123def456abc123def456abc123def4567890")
-        (agent-repl-worktree-start-tag-prefix "start/")
-        (captured-call nil))
-    (cl-letf (((symbol-function 'agent-repl--git-exit-code)
-               (lambda (root &rest args)
-                 (setq captured-call (cons root args))
-                 0)))
-      (agent-repl--create-start-tag "/tmp/repo" "feature" sha)
-      (should (equal captured-call
-                     (list "/tmp/repo" "tag" "start/feature" sha))))))
-
-(ert-deftest agent-repl-test-create-start-tag-disabled-no-op ()
-  "When prefix is nil, no tag is created (no git call)."
-  (let ((agent-repl-worktree-start-tag-prefix nil)
-        (git-called nil))
-    (cl-letf (((symbol-function 'agent-repl--git-exit-code)
-               (lambda (&rest _args) (setq git-called t) 0)))
-      (agent-repl--create-start-tag "/tmp/repo" "feature" "HEAD")
-      (should-not git-called))))
-
-(ert-deftest agent-repl-test-create-start-tag-signals-on-failure ()
-  "create-start-tag signals an error when git tag fails (non-zero exit)."
-  (let ((agent-repl-worktree-start-tag-prefix "start/"))
-    (cl-letf (((symbol-function 'agent-repl--git-exit-code)
-               (lambda (&rest _args) 128)))
-      (should-error (agent-repl--create-start-tag "/tmp/repo" "feature" "HEAD")))))
-
-;;;; ---- Tests: async-worktree-add start-tag integration ----
-
-(ert-deftest agent-repl-test-async-worktree-add-creates-start-tag-on-success ()
-  "After successful worktree add, the start tag is created."
-  (let ((captured-tag-args nil))
-    (cl-letf (((symbol-function 'agent-repl--async-git)
-               ;; Simulate immediate success: invoke callback with ok=t.
-               (lambda (_label _root _args cb) (funcall cb t "ok")))
-              ((symbol-function 'agent-repl--worktree-add-callback)
-               (lambda (&rest _args) nil))
-              ((symbol-function 'agent-repl--create-start-tag)
-               (lambda (git-root branch-name base-commit)
-                 (setq captured-tag-args (list git-root branch-name base-commit)))))
-      (agent-repl--async-worktree-add
-       "/git-root" "my-branch" "/path" "HEAD"
-       nil "dirname" nil nil nil nil)
-      (should (equal captured-tag-args '("/git-root" "my-branch" "HEAD"))))))
-
-(ert-deftest agent-repl-test-async-worktree-add-skips-start-tag-on-failure ()
-  "On worktree add failure, the start tag is NOT created."
-  (let ((tag-called nil))
-    (cl-letf (((symbol-function 'agent-repl--async-git)
-               ;; Simulate failure: invoke callback with ok=nil.
-               (lambda (_label _root _args cb) (funcall cb nil "git error")))
-              ((symbol-function 'agent-repl--worktree-add-callback)
-               (lambda (&rest _args) nil))
-              ((symbol-function 'agent-repl--create-start-tag)
-               (lambda (&rest _args) (setq tag-called t))))
-      (agent-repl--async-worktree-add
-       "/git-root" "my-branch" "/path" "HEAD"
-       nil "dirname" nil nil nil nil)
-      (should-not tag-called))))
 
 ;;;; ---- Tests: workspace-merge default selection ----
 
