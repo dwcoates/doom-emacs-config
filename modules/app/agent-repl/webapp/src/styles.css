@@ -2436,6 +2436,24 @@ pre {
 .pfooter-grow.error { color: var(--err); }
 .pfooter-grow.muted { color: var(--muted); }
 
+/* The rate-limit rung's two figures, which carry their OWN severity rather
+   than inheriting the cell's one tone: the usage percentage and the reset time
+   are what the reader acts on, and the labels around them stay muted.
+
+   Two accents, reusing the hues that already speak for these claims elsewhere:
+   the async yellow for an allowance running low, and the same error red the
+   failure row wears for an allowance actually spent. Neither is a literal —
+   both track the theme's variables, so the rung follows light and dark with
+   every other footer signal. */
+.pfooter-rl-warn {
+  color: var(--async);
+  font-weight: 600;
+}
+.pfooter-rl-limit {
+  color: var(--err);
+  font-weight: 600;
+}
+
 /* The phase spinner: the same arc the feed's progress rows wore, inheriting
    its cell's phase color so it spins in whatever hue the phase speaks in. */
 .pfooter-spin {
