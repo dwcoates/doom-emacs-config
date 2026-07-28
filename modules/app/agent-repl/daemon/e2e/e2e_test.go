@@ -247,6 +247,25 @@ type e2eHarness struct {
 
 func newUDSHarness(t *testing.T) *e2eHarness {
 	t.Helper()
+	// The LAST-RESORT shim reaper, registered before anything else so it runs
+	// AFTER every other cleanup (LIFO) — in particular after driver.Close. A
+	// per-session cleanup kills the shim it spawned, but the still-live driver
+	// RESPAWNS one ~100ms later, and driver.Close then SIGTERMs that respawn
+	// WITHOUT waiting — leaving a dying node process racing the t.TempDir
+	// RemoveAll, which fails tests from cleanup with "directory not empty".
+	// Waiting out every spawned process here closes that race.
+	var (
+		procMu sync.Mutex
+		procs  []*shim.Proc
+	)
+	t.Cleanup(func() {
+		procMu.Lock()
+		defer procMu.Unlock()
+		for _, p := range procs {
+			_ = p.Terminate()
+			_ = p.Wait()
+		}
+	})
 	node := nodePath(t)
 	script := buildShim(t, node)
 	storeBin := buildShimStore(t)
@@ -301,6 +320,9 @@ func newUDSHarness(t *testing.T) *e2eHarness {
 		if spawnErr != nil {
 			return nil, spawnErr
 		}
+		procMu.Lock()
+		procs = append(procs, proc)
+		procMu.Unlock()
 		go func() {
 			for range proc.Events() { //nolint:revive
 			}
@@ -312,9 +334,16 @@ func newUDSHarness(t *testing.T) *e2eHarness {
 		return func() error { return proc.Terminate() }, nil
 	}
 	e2eSeqStore := server.NewRegistrySeqStore(reg, t.Logf)
+	// ONE progress resolver, shared by the driver (which feeds it interrupts,
+	// permission and queue counts) and WireAgentShim (which fans its views out
+	// to frontends) — the same single-instance wiring main.go does. Two
+	// instances split the brain: the driver's notes push to nobody while the
+	// wired instance never hears them.
+	progressMgr := progress.New(progress.Options{Logf: t.Logf})
 	driver, err := sessiondrv.New(sessiondrv.Config{
 		Push:              forwarder,
 		SSM:               ssmMgr,
+		Progress:          progressMgr,
 		Spawner:           server.NewShimSpawner(reg, shimListener.Connected, udsSpawn, t.Logf),
 		Locator:           &server.SessionLocator{Reg: reg},
 		Source:            &server.ShimConnSource{Listener: shimListener},
@@ -334,7 +363,7 @@ func newUDSHarness(t *testing.T) *e2eHarness {
 	workspaceCreation := newEmptyWorkspaceCreation()
 	agentShim, err := server.WireAgentShim(server.AgentShimConfig{
 		SSM:               ssmMgr,
-		Progress:          progress.New(progress.Options{Logf: t.Logf}),
+		Progress:          progressMgr,
 		Prompts:           driver,
 		Turns:             driver,
 		MergeDirs:         stubMergeDirs{},
