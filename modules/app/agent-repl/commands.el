@@ -888,58 +888,6 @@ session — accidental invocations are easily recoverable."
                "Killed persp workspace: %s")
              ws)))
 
-;;;; Hide-mode sweep
-
-(defun agent-repl--sweep-hidden-workspaces (&optional except)
-  "Persp-kill every agent-repl workspace whose `:repl-state' is `:hidden'.
-EXCEPT names a workspace to skip (typically the just-arrived destination
-of a workspace switch — we don't want to kill the workspace the user is
-currently sitting in).  Each match is torn down via
-`agent-repl--nuke-one-workspace', which always preserves the on-disk
-state file so the workspace can be re-opened via project switch.
-
-No-op when there are no matching workspaces.  Returns the list of names
-that were actually killed (useful for tests)."
-  (let* ((current (or except (agent-repl--ws-current-name)))
-         (candidates (cl-remove-if
-                      (lambda (ws)
-                        (or (equal ws current)
-                            (not (eq (agent-repl--ws-repl-state ws) :hidden))))
-                      (agent-repl--live-ws-names))))
-    (agent-repl--log current
-                      "sweep-hidden-workspaces: except=%s candidates=%S"
-                      current candidates)
-    (let ((agent-repl--kill-cause "hidden-workspace sweep (auto, on workspace switch)"))
-      (dolist (ws candidates)
-        (condition-case err
-            (agent-repl--nuke-one-workspace ws)
-          (error
-           (agent-repl--log ws "sweep-hidden-workspaces: kill error ws=%s err=%S"
-                             ws err)))))
-    candidates))
-
-(defun agent-repl--maybe-sweep-hidden-on-switch (&optional ws)
-  "Run `agent-repl--sweep-hidden-workspaces' when hide-mode is enabled.
-WS is the just-arrived-on workspace; when nil, falls back to
-`(agent-repl--ws-current-name)'.  Callers from `--on-workspace-switch'
-pass the ws captured at hook-fire time so the reset and sweep operate
-on the workspace that was just switched to — not on whatever is
-current when this deferred call eventually runs (rapid back-to-back
-switches would otherwise leave intermediate `:hidden' workspaces
-unreset and exposed to the sweep).
-
-Hooked into `agent-repl--on-workspace-switch' (panels.el).  Also resets
-WS's `:repl-state' from `:hidden' back to `:inactive' if applicable, so
-navigating to a hidden workspace removes its hidden flag (the user is
-actively viewing it; it should not be killed)."
-  (let ((current (or ws (agent-repl--ws-current-name))))
-    (when (eq (agent-repl--ws-repl-state current) :hidden)
-      (agent-repl--log current
-                        "maybe-sweep: arriving on :hidden ws, resetting to :inactive")
-      (agent-repl--ws-set-repl-state current :inactive))
-    (when agent-repl-hide-mode-enabled
-      (agent-repl--sweep-hidden-workspaces current))))
-
 (defun agent-repl-copy-reference ()
   "Copy the current file and line reference to the clipboard.
 With active region: copies file:startline-endline.
@@ -2966,24 +2914,21 @@ revival path that bypasses the Doom hook to preserve the exact ws name."
             (agent-repl--picker-open-selection sel))
         (agent-repl--log (agent-repl--ws-current-name) "switch-to-project: picker cancelled-or-empty")))))
 
-;;;; Workspace cycling (hide-mode aware)
+;;;; Workspace cycling
 
 (defun agent-repl--workspace-cycle (n)
   "Cycle N workspaces (negative = left, positive = right).
-Reimplements `+workspace/cycle' but iterates the visible workspace
-list instead of the raw `+workspace-list-names': first the tab-bar list
-\(`agent-repl--ws-tabline-names', which drops the workspaces of
-folded repos), then the hide-mode filter
-\(`agent-repl--filter-hidden-names'), so both folded-repo workspaces and
-closed-REPL workspaces dropped from the tabline are skipped during
-s-{ / s-}.  Mirrors Doom's protected-workspace handling: when current
-is the nil-persp, switch to `+workspaces-main' instead of cycling."
+Reimplements `+workspace/cycle' but iterates the tab-bar list
+\(`agent-repl--ws-tabline-names', which drops the workspaces of folded
+repos) instead of the raw `+workspace-list-names', so a folded repo's
+workspaces are skipped during s-{ / s-}.  Mirrors Doom's
+protected-workspace handling: when current is the nil-persp, switch to
+`+workspaces-main' instead of cycling."
   (let ((current-name (agent-repl--ws-current-name)))
     (if (agent-repl--ws-protected-p current-name)
         (agent-repl--ws-switch (agent-repl--ws-main-name) t)
       (condition-case-unless-debug ex
-          (let* ((visible (agent-repl--filter-hidden-names
-                           (agent-repl--ws-tabline-names) current-name))
+          (let* ((visible (agent-repl--ws-tabline-names))
                  (perspc (length visible))
                  (index (cl-position current-name visible :test #'equal)))
             (when (= perspc 1)
@@ -2993,16 +2938,14 @@ is the nil-persp, switch to `+workspaces-main' instead of cycling."
         ('error (agent-repl--ws-error ex t))))))
 
 (defun agent-repl-switch-left ()
-  "Cycle one workspace left, skipping hide-mode-filtered workspaces.
-Drop-in replacement for `+workspace/switch-left' that honors
-`agent-repl-hide-mode-enabled'."
+  "Cycle one workspace left, skipping folded-repo workspaces.
+Drop-in replacement for `+workspace/switch-left'."
   (interactive)
   (agent-repl--workspace-cycle -1))
 
 (defun agent-repl-switch-right ()
-  "Cycle one workspace right, skipping hide-mode-filtered workspaces.
-Drop-in replacement for `+workspace/switch-right' that honors
-`agent-repl-hide-mode-enabled'."
+  "Cycle one workspace right, skipping folded-repo workspaces.
+Drop-in replacement for `+workspace/switch-right'."
   (interactive)
   (agent-repl--workspace-cycle +1))
 

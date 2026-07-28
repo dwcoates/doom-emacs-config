@@ -379,10 +379,6 @@ workspace never shows stale middle-of-history output.
 
 never causes a silent decay.
 
-Also runs `agent-repl--maybe-sweep-hidden-on-switch' so workspaces
-marked `:hidden' (via `SPC o C') are persp-killed when hide-mode is on
-— the persp-level enforcement of hide-mode.
-
 Runs `agent-repl--dequeue-merge' so a workspace parked in the merge
 queue is pulled from it on switch — activating a queued workspace is
 read as the user wanting to work on it directly rather than have its
@@ -393,7 +389,6 @@ pending merge auto-fire."
     ;; panels if they were visible before this workspace was deactivated.
     ;; Must run BEFORE autoselect so it sees the correct panel windows.
     (agent-repl--ensure-own-panels-on-persp-switch ws)
-    (agent-repl--maybe-sweep-hidden-on-switch ws)
     (agent-repl--dequeue-merge ws)
     ;; Event-driven (workspace just activated) → kick a fresh pass via
     ;; the unguarded entrypoint so the in-flight reentry guard from the
@@ -592,14 +587,12 @@ did."
 
 (defun agent-repl--on-close (&optional ws)
   "Full close: bookkeep, restore pre-panel layout, hide, deprio, save tab index.
-Sets WS's `:repl-state' to `:hidden' (NOT `:inactive' like the
-simple-close path) so the workspace becomes a kill candidate for the
-next sweep when `agent-repl-hide-mode-enabled' is on.  Restores the
-pre-panel layout via `agent-repl--restore-fullscreen-config' before
-hiding so the frame-filling panels go away cleanly (same contract as
-`agent-repl--on-simple-close').  See
-`agent-repl--ws-set-repl-state' for the `:hidden' contract.  Then
-hides panels and pushes WS to the second-to-last tab position via
+Sets WS's `:repl-state' to `:inactive', exactly like the simple-close
+path — a closed workspace stays listed, and only repo folding takes a
+workspace off the tab-bar.  Restores the pre-panel layout via
+`agent-repl--restore-fullscreen-config' before hiding so the
+frame-filling panels go away cleanly (same contract as
+`agent-repl--on-simple-close').  Then hides panels and pushes WS to the second-to-last tab position via
 `agent-repl-workspace-push-to-back', snapshotting the tab index
 first via `agent-repl--save-tab-index' so a future reopen can
 restore the position.
@@ -614,9 +607,9 @@ hides panels but skips the bookkeeping write and the tab shuffle."
     (agent-repl--log ws "on-close: CALLED this-command=%s last-command=%s"
                       this-command last-command)
     (when ws
-      (agent-repl--log ws "on-close ws=%s agent-state=%s -> repl-state=:hidden"
+      (agent-repl--log ws "on-close ws=%s agent-state=%s -> repl-state=:inactive"
                         ws (agent-repl--ws-agent-state ws))
-      (agent-repl--ws-set-repl-state ws :hidden))
+      (agent-repl--ws-set-repl-state ws :inactive))
     (agent-repl--close-view
      ws
      (lambda ()
@@ -626,20 +619,6 @@ hides panels but skips the bookkeeping write and the tab shuffle."
       (agent-repl--save-tab-index ws)
       (agent-repl--log ws "on-close: pushing ws=%s to second-to-last" ws)
       (agent-repl-workspace-push-to-back))))
-
-(defun agent-repl--unhide-workspace (ws)
-  "Reverse `agent-repl--on-close' for WS by setting `:repl-state' to `:active'.
-A no-op when WS is nil or has a `:repl-state' other than `:hidden' —
-non-hidden workspaces don't need unhiding, and overwriting
-`:inactive' / `:dead' / nil with `:active' would lie about lifecycle
-state.  Does NOT re-show panels or re-shuffle tab order; that side of
-the close is reversible only by an explicit panel-show."
-  (when ws
-    (let ((rstate (agent-repl--ws-get ws :repl-state)))
-      (agent-repl--log ws "unhide-workspace: ws=%s repl-state=%s" ws rstate)
-      (when (eq rstate :hidden)
-        (agent-repl--log ws "unhide-workspace: ws=%s branch=transition-hidden-to-active" ws)
-        (agent-repl--ws-set-repl-state ws :active)))))
 
 ;;;; Window synchronization
 
@@ -862,9 +841,10 @@ side-window skip explicit and parameter-independent."
 Runs `agent-repl--on-close' (restore layout, hide, deprio bookkeeping)
 and then KILLS the session through the workspace's frontend registry —
 `SPC o C' means \"done with this session\", unlike the plain-close
-`SPC o c' which only puts the view away.  The `:repl-state :hidden'
-marker is re-asserted after the kill so hide-mode's sweep semantics
-survive even if a frontend's kill capability resets the state axes.
+`SPC o c' which only puts the view away.  The `:repl-state :inactive'
+marker is re-asserted after the kill so a frontend's kill capability
+resetting the state axes cannot leave the workspace claiming an open
+REPL.
 
 Deliberately NOT folded into `agent-repl--on-close': its other callers
 (e.g. `agent-repl-send-and-hide') hide a session that must keep
@@ -873,7 +853,7 @@ running."
     (unless ws (error "agent-repl--hide-and-preserve-status: no active workspace"))
     (agent-repl--on-close ws)
     (funcall (agent-repl-frontend-kill-fn (agent-repl--ws-frontend ws)) ws)
-    (agent-repl--ws-put ws :repl-state :hidden)))
+    (agent-repl--ws-put ws :repl-state :inactive)))
 
 (defun agent-repl--simple-hide-and-preserve-status ()
   "Hide agent panels with NO tab-bar update (the `SPC o c' path).
@@ -896,8 +876,8 @@ When ALWAYS-CLOSE is non-nil, every non-selection branch routes to
 CLOSE-FN regardless of running / visibility state — the workspace is
 hidden even if its view isn't visible (or isn't running at all).  This
 is the `SPC o C' contract: pressing it again on a workspace that is
-already hidden / never-started should still mark it `:hidden' and push
-it to the back, not re-show or launch the agent."
+already closed / never-started should still mark it `:inactive' and
+push it to the back, not re-show or launch the agent."
   (let* ((ws (agent-repl--ws-current-name))
          (fe (agent-repl--ws-frontend ws))
          (webview (agent-repl--ws-get ws :frontend-buffer))
@@ -928,11 +908,10 @@ it to the back, not re-show or launch the agent."
 (defun agent-repl ()
   "Hide Agent REPL panels and deprio the workspace.
 If text is selected: send it directly to the agent (orthogonal to hide).
-Otherwise: mark the workspace `:repl-state :hidden', hide both panels
+Otherwise: mark the workspace `:repl-state :inactive', hide both panels
 \(no-op if already hidden), and push the workspace tab to the back.
 Always hides, regardless of whether the agent is running or panels are
-currently visible — if hide-mode is on, the next workspace switch will
-persp-kill the workspace via `agent-repl--sweep-hidden-workspaces'.
+currently visible.  The workspace stays listed on the tab-bar.
 Bound to `SPC o C'.  See `agent-repl-simple' for the no-tab-bar variant."
   (interactive)
   (agent-repl--toggle #'agent-repl--hide-and-preserve-status :always-close t))

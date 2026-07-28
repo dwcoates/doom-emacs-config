@@ -264,7 +264,7 @@ Emacs nulls out `buffer-name' for killed buffers, so the contract is
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-temp-root root
       (agent-repl--ws-put "ws1" :project-dir root)
-      ;; :dead avoids the `:active`/`:inactive`/`:hidden` --state-save side
+      ;; :dead avoids the `:active`/`:inactive` --state-save side
       ;; effect that would touch the snapshot file paths; we want to test
       ;; memory-state specifically.
       (agent-repl--ws-set-repl-state "ws1" :dead)

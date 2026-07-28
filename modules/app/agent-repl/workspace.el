@@ -751,7 +751,7 @@ Returns non-nil when GROUP is folded after the toggle."
 (defun agent-repl--filter-folded-names (names current-name)
   "Drop from NAMES every workspace whose repo is folded.
 CURRENT-NAME is always retained, so the active workspace never loses
-its tab — the same invariant `agent-repl--filter-hidden-names' keeps.
+its tab.
 
 Short-circuits to NAMES untouched when no repo is folded, so the
 common case costs no repo-key resolution (and therefore no git)."

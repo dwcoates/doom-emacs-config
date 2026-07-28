@@ -138,7 +138,7 @@ render state, since sidebar-but-not-tab-bar is the fact being conveyed."
   "Perspective-less or torn-down-REPL rows are closed; hosted ones are not."
   (agent-repl-test--with-clean-state
     (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
-    (dolist (case '((t :active nil) (t :inactive t) (t :hidden t)
+    (dolist (case '((t :active nil) (t :inactive t)
                     (t nil nil) (nil :active t)))
       (cl-destructuring-bind (open repl expected) case
         (agent-repl--ws-put "ws" :repl-state repl)

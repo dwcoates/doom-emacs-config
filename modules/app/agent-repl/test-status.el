@@ -64,23 +64,13 @@ visibility survives Emacs restart."
         (should (equal saved "ws1"))))))
 
 (ert-deftest agent-repl-test-ws-set-repl-state-persists-inactive ()
-  "ws-set-repl-state calls --state-save when STATE is :inactive so
-hide-mode survives Emacs restart."
+  "ws-set-repl-state calls --state-save when STATE is :inactive so a
+closed workspace stays closed across an Emacs restart."
   (agent-repl-test--with-clean-state
     (let ((saved nil))
       (cl-letf (((symbol-function 'agent-repl--state-save)
                  (lambda (ws) (setq saved ws))))
         (agent-repl--ws-set-repl-state "ws1" :inactive)
-        (should (equal saved "ws1"))))))
-
-(ert-deftest agent-repl-test-ws-set-repl-state-persists-hidden ()
-  "ws-set-repl-state calls --state-save when STATE is :hidden so the
-deprio-hide marker (set by `SPC o C') survives Emacs restart."
-  (agent-repl-test--with-clean-state
-    (let ((saved nil))
-      (cl-letf (((symbol-function 'agent-repl--state-save)
-                 (lambda (ws) (setq saved ws))))
-        (agent-repl--ws-set-repl-state "ws1" :hidden)
         (should (equal saved "ws1"))))))
 
 (ert-deftest agent-repl-test-ws-set-repl-state-skips-persist-for-dead ()
@@ -2231,79 +2221,16 @@ can still have a merge-completed parent."
     (should (equal (plist-get spec :bracket-bg)
                    agent-repl--color-vendor-blocked-purple))))
 
-;;;; ---- Tests: hide-mode tabline (no filtering — tab-bar reflects raw list) ----
-
-(ert-deftest agent-repl-test-hide-mode-tabline-passthrough-when-off ()
-  "When hide-mode is off, the tab-bar renders every name in the input list."
+(ert-deftest agent-repl-test-tabline-renders-a-closed-workspace ()
+  "A workspace closed via `SPC o C' stays on the tab-bar as inactive.
+Repo folding is the only mechanism that takes a workspace off the
+tab-bar."
   (agent-repl-test--with-clean-state
-    (let ((agent-repl-hide-mode-enabled nil))
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws")))
-        (let ((result (agent-repl--tabline-advice '("current-ws" "bg-ws"))))
-          (should (string-match-p "current-ws" result))
-          (should (string-match-p "bg-ws" result)))))))
-
-(ert-deftest agent-repl-test-hide-mode-tabline-passthrough-when-on ()
-  "When hide-mode is on, the tab-bar STILL renders every name — filtering
-no longer happens at the tab-bar layer (it's enforced by persp-kill on
-workspace switch).  This guards against regressing back to the old
-tabline-filter design that caused tab-bar bugs."
-  (agent-repl-test--with-clean-state
-    (let ((agent-repl-hide-mode-enabled t))
-      (agent-repl--ws-set-repl-state "bg-ws" :hidden)
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws")))
-        (let ((result (agent-repl--tabline-advice '("current-ws" "bg-ws"))))
-          (should (string-match-p "current-ws" result))
-          (should (string-match-p "bg-ws" result)))))))
-
-;;;; ---- Tests: filter-hidden-names (cycle-skip helper) ----
-
-(ert-deftest agent-repl-test-filter-hidden-names-passthrough-when-off ()
-  "filter-hidden-names returns NAMES unchanged when hide-mode is off."
-  (agent-repl-test--with-clean-state
-    (let ((agent-repl-hide-mode-enabled nil))
-      (agent-repl--ws-set-repl-state "ws-b" :hidden)
-      (should (equal (agent-repl--filter-hidden-names '("ws-a" "ws-b") "ws-a")
-                     '("ws-a" "ws-b"))))))
-
-(ert-deftest agent-repl-test-filter-hidden-names-drops-hidden ()
-  "filter-hidden-names drops non-current workspaces with `:repl-state :hidden'."
-  (agent-repl-test--with-clean-state
-    (let ((agent-repl-hide-mode-enabled t))
-      (agent-repl--ws-set-repl-state "ws-b" :hidden)
-      (should (equal (agent-repl--filter-hidden-names '("ws-a" "ws-b" "ws-c") "ws-a")
-                     '("ws-a" "ws-c"))))))
-
-(ert-deftest agent-repl-test-filter-hidden-names-keeps-current-even-if-hidden ()
-  "filter-hidden-names always retains the current workspace, even if `:hidden'."
-  (agent-repl-test--with-clean-state
-    (let ((agent-repl-hide-mode-enabled t))
-      (agent-repl--ws-set-repl-state "ws-a" :hidden)
-      (should (equal (agent-repl--filter-hidden-names '("ws-a" "ws-b") "ws-a")
-                     '("ws-a" "ws-b"))))))
-
-(ert-deftest agent-repl-test-filter-hidden-names-keeps-non-hidden-states ()
-  "filter-hidden-names retains workspaces with `:active' / `:inactive' / nil
-states — only `:hidden' is filtered."
-  (agent-repl-test--with-clean-state
-    (let ((agent-repl-hide-mode-enabled t))
-      (agent-repl--ws-set-repl-state "ws-b" :inactive)
-      (agent-repl--ws-set-repl-state "ws-c" :active)
-      (should (equal (agent-repl--filter-hidden-names '("ws-a" "ws-b" "ws-c") "ws-a")
-                     '("ws-a" "ws-b" "ws-c"))))))
-
-(ert-deftest agent-repl-test-toggle-hide-mode-flips-flag ()
-  "agent-repl-toggle-hide-mode flips the flag and triggers a tab-bar redraw."
-  (agent-repl-test--with-clean-state
-    (let ((agent-repl-hide-mode-enabled nil)
-          (redraw-called 0))
-      (cl-letf (((symbol-function 'agent-repl--force-tab-bar-redraw)
-                 (lambda () (cl-incf redraw-called))))
-        (agent-repl-toggle-hide-mode)
-        (should agent-repl-hide-mode-enabled)
-        (should (= redraw-called 1))
-        (agent-repl-toggle-hide-mode)
-        (should-not agent-repl-hide-mode-enabled)
-        (should (= redraw-called 2))))))
+    (agent-repl--ws-set-repl-state "bg-ws" :inactive)
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws")))
+      (let ((result (agent-repl--tabline-advice '("current-ws" "bg-ws"))))
+        (should (string-match-p "current-ws" result))
+        (should (string-match-p "bg-ws" result))))))
 
 ;;;; ---- Tests: tabline first-fit packing primitive ----
 

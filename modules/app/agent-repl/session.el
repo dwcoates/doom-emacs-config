@@ -242,19 +242,16 @@ remaining keys are written only when SAVED carries them."
                        (or (and saved (plist-get saved :last-prompt-time))
                            (agent-repl--ws-get ws :last-prompt-time)))
   ;; Repl-state: hydrate the *desired* panel-visibility lifecycle from the
-  ;; saved file so `:inactive' (panels closed via plain `SPC o c') and
-  ;; `:hidden' (deprio-close via `SPC o C') survive Emacs restart.  Only
-  ;; persistable values matter at restart — `:dead'/nil reduce to "no
-  ;; opinion, default to opening panels", so we only restore `:active' /
-  ;; `:inactive' / `:hidden'.
-  ;; `--maybe-sweep-hidden-on-switch' demotes `:hidden' to `:inactive'
-  ;; when the user actually arrives back on the workspace.
+  ;; saved file so `:inactive' (panels closed via `SPC o c' or `SPC o C')
+  ;; survives Emacs restart.  Only persistable values matter at restart —
+  ;; `:dead'/nil reduce to "no opinion, default to opening panels", so we
+  ;; only restore `:active' / `:inactive'.
   (let ((saved-repl-state (and saved (plist-get saved :repl-state))))
-    (when (memq saved-repl-state '(:active :inactive :hidden))
+    (when (memq saved-repl-state '(:active :inactive))
       (agent-repl--ws-put ws :repl-state saved-repl-state))
     (agent-repl--log ws "apply-display-state: repl-state ws=%s saved=%s restored=%s"
                       ws saved-repl-state
-                      (memq saved-repl-state '(:active :inactive :hidden))))
+                      (memq saved-repl-state '(:active :inactive))))
   ;; Tab-bar slot: if the ws was deprioritized at the prior quit (i.e.
   ;; pushed to second-to-last via `SPC o C'), `:saved-tab-index' was
   ;; left non-nil pending the next reopen.  Restore it so the next

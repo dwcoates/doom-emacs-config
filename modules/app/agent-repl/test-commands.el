@@ -4975,91 +4975,64 @@ file and the archive directory the save path materialises beside it."
 
 ;;;; ---- Workspace cycling (agent-repl-switch-left/right) ----
 
-(defmacro agent-repl-cmd-test--with-cycle-stubs (names current hidden-set
+(defmacro agent-repl-cmd-test--with-cycle-stubs (names current
                                                   switched-to protected-p
                                                   &rest body)
   "Bind `+workspace-list-names' / `-current-name' / `-switch' to
-fixtures.  NAMES is a list of workspace names, CURRENT is a string,
-HIDDEN-SET is a list of names whose `:repl-state' is `:hidden' (the
-filter target since hide-mode reimpl moved to persp-level enforcement),
+fixtures.  NAMES is a list of workspace names, CURRENT is a string, and
 SWITCHED-TO is a place-symbol (boxed into a single-cell list) the stub
 pushes to.  PROTECTED-P is a boolean controlling
 `+workspace--protected-p'."
-  (declare (indent 6))
+  (declare (indent 5))
   `(cl-letf (((symbol-function 'agent-repl--ws-list-names) (lambda () ,names))
              ((symbol-function '+workspace-current-name) (lambda () ,current))
              ((symbol-function '+workspace--protected-p)
               (lambda (_name) ,protected-p))
-             ((symbol-function 'agent-repl--ws-repl-state)
-              (lambda (n) (when (member n ,hidden-set) :hidden)))
              ((symbol-function '+workspace-switch)
               (lambda (name &optional _auto-create) (push name ,switched-to))))
      ,@body))
 
 (ert-deftest agent-repl-cmd-test-switch-right/cycles-to-next ()
-  "switch-right with hide-mode off cycles to the next workspace."
-  (let ((switched (list))
-        (agent-repl-hide-mode-enabled nil))
+  "switch-right cycles to the next workspace."
+  (let ((switched (list)))
     (agent-repl-cmd-test--with-cycle-stubs
-        '("a" "b" "c") "a" '() switched nil
+        '("a" "b" "c") "a" switched nil
       (agent-repl-switch-right)
       (should (equal switched '("b"))))))
 
 (ert-deftest agent-repl-cmd-test-switch-left/cycles-to-prev ()
-  "switch-left with hide-mode off cycles to the previous workspace."
-  (let ((switched (list))
-        (agent-repl-hide-mode-enabled nil))
+  "switch-left cycles to the previous workspace."
+  (let ((switched (list)))
     (agent-repl-cmd-test--with-cycle-stubs
-        '("a" "b" "c") "b" '() switched nil
+        '("a" "b" "c") "b" switched nil
       (agent-repl-switch-left)
       (should (equal switched '("a"))))))
 
 (ert-deftest agent-repl-cmd-test-switch-right/wraps-around ()
   "switch-right from the last workspace wraps to the first."
-  (let ((switched (list))
-        (agent-repl-hide-mode-enabled nil))
+  (let ((switched (list)))
     (agent-repl-cmd-test--with-cycle-stubs
-        '("a" "b" "c") "c" '() switched nil
+        '("a" "b" "c") "c" switched nil
       (agent-repl-switch-right)
       (should (equal switched '("a"))))))
 
 (ert-deftest agent-repl-cmd-test-switch-left/wraps-around ()
   "switch-left from the first workspace wraps to the last."
-  (let ((switched (list))
-        (agent-repl-hide-mode-enabled nil))
+  (let ((switched (list)))
     (agent-repl-cmd-test--with-cycle-stubs
-        '("a" "b" "c") "a" '() switched nil
+        '("a" "b" "c") "a" switched nil
       (agent-repl-switch-left)
       (should (equal switched '("c"))))))
-
-(ert-deftest agent-repl-cmd-test-switch-right/skips-hidden-when-hide-on ()
-  "With hide-mode on, switch-right skips workspaces whose `:repl-state' is `:hidden'."
-  (let ((switched (list))
-        (agent-repl-hide-mode-enabled t))
-    (agent-repl-cmd-test--with-cycle-stubs
-        '("a" "b" "c") "a" '("b") switched nil
-      (agent-repl-switch-right)
-      (should (equal switched '("c"))))))
-
-(ert-deftest agent-repl-cmd-test-switch-left/skips-hidden-when-hide-on ()
-  "With hide-mode on, switch-left skips workspaces whose `:repl-state' is `:hidden'."
-  (let ((switched (list))
-        (agent-repl-hide-mode-enabled t))
-    (agent-repl-cmd-test--with-cycle-stubs
-        '("a" "b" "c") "c" '("b") switched nil
-      (agent-repl-switch-left)
-      (should (equal switched '("a"))))))
 
 (ert-deftest agent-repl-cmd-test-switch-right/single-visible-no-op ()
-  "When only the current workspace is visible, switch-right does not switch."
+  "When the current workspace is the only one, switch-right does not switch."
   (let ((switched (list))
-        (agent-repl-hide-mode-enabled t)
         ;; condition-case-unless-debug skips its handlers when
         ;; `debug-on-error' is set, which ert turns on by default.  Bind
         ;; it off so the user-error path is observable in tests.
         (debug-on-error nil))
     (agent-repl-cmd-test--with-cycle-stubs
-        '("a" "b" "c") "a" '("b" "c") switched nil
+        '("a") "a" switched nil
       (cl-letf (((symbol-function '+workspace-error)
                  (lambda (&rest _) nil)))
         (agent-repl-switch-right)
@@ -5068,147 +5041,11 @@ pushes to.  PROTECTED-P is a boolean controlling
 (ert-deftest agent-repl-cmd-test-switch-right/protected-goes-to-main ()
   "When current workspace is protected, switch-right routes to +workspaces-main."
   (let ((switched (list))
-        (agent-repl-hide-mode-enabled nil)
         (+workspaces-main "main"))
     (agent-repl-cmd-test--with-cycle-stubs
-        '("nil") "nil" '() switched t
+        '("nil") "nil" switched t
       (agent-repl-switch-right)
       (should (equal switched '("main"))))))
-
-;;;; ---- Hide-mode sweep ----
-
-(defmacro agent-repl-cmd-test--with-sweep-stubs (current killed &rest body)
-  "Stub `+workspace-current-name' to return CURRENT and replace
-`agent-repl--nuke-one-workspace' with a recorder that pushes the named
-ws onto KILLED (a place-symbol bound to a list)."
-  (declare (indent 2))
-  `(cl-letf (((symbol-function '+workspace-current-name) (lambda () ,current))
-             ((symbol-function 'agent-repl--nuke-one-workspace)
-              (lambda (ws &rest _) (push ws ,killed))))
-     ,@body))
-
-(ert-deftest agent-repl-cmd-test-sweep-hidden/kills-non-current-hidden ()
-  "sweep-hidden-workspaces persp-kills every :hidden ws except the current one."
-  (agent-repl-test--with-clean-state
-    (let ((killed (list)))
-      (agent-repl--ws-set-repl-state "ws-a" :hidden)
-      (agent-repl--ws-set-repl-state "ws-b" :hidden)
-      (agent-repl--ws-set-repl-state "ws-c" :inactive)
-      (agent-repl-cmd-test--with-sweep-stubs "ws-c" killed
-        (agent-repl--sweep-hidden-workspaces)
-        (should (equal (sort killed #'string<) '("ws-a" "ws-b")))))))
-
-(ert-deftest agent-repl-cmd-test-sweep-hidden/skips-current ()
-  "sweep-hidden-workspaces never kills the current workspace, even if hidden."
-  (agent-repl-test--with-clean-state
-    (let ((killed (list)))
-      (agent-repl--ws-set-repl-state "ws-a" :hidden)
-      (agent-repl-cmd-test--with-sweep-stubs "ws-a" killed
-        (agent-repl--sweep-hidden-workspaces)
-        (should (null killed))))))
-
-(ert-deftest agent-repl-cmd-test-sweep-hidden/skips-non-hidden ()
-  "sweep-hidden-workspaces ignores workspaces with non-:hidden states."
-  (agent-repl-test--with-clean-state
-    (let ((killed (list)))
-      (agent-repl--ws-set-repl-state "ws-a" :inactive)
-      (agent-repl--ws-set-repl-state "ws-b" :active)
-      (agent-repl--ws-set-repl-state "ws-c" :viewed)
-      (agent-repl-cmd-test--with-sweep-stubs "ws-c" killed
-        (agent-repl--sweep-hidden-workspaces)
-        (should (null killed))))))
-
-(ert-deftest agent-repl-cmd-test-sweep-hidden/forwards-to-nuke ()
-  "sweep-hidden-workspaces calls nuke-one-workspace for each `:hidden' ws.
-nuke-one-workspace always preserves the on-disk state file, so there's
-no explicit purge flag to assert — just that nuke was called with the
-right ws name."
-  (agent-repl-test--with-clean-state
-    (let ((received-args nil))
-      (agent-repl--ws-set-repl-state "ws-a" :hidden)
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws-c"))
-                ((symbol-function 'agent-repl--nuke-one-workspace)
-                 (lambda (&rest args) (setq received-args args))))
-        (agent-repl--sweep-hidden-workspaces)
-        (should (equal received-args '("ws-a")))))))
-
-(ert-deftest agent-repl-cmd-test-sweep-hidden/except-overrides-current ()
-  "Explicit EXCEPT arg takes precedence over `+workspace-current-name'."
-  (agent-repl-test--with-clean-state
-    (let ((killed (list)))
-      (agent-repl--ws-set-repl-state "ws-a" :hidden)
-      (agent-repl--ws-set-repl-state "ws-b" :hidden)
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws-c"))
-                ((symbol-function 'agent-repl--nuke-one-workspace)
-                 (lambda (ws &rest _) (push ws killed))))
-        ;; EXCEPT="ws-a" should keep ws-a alive even though current is ws-c.
-        (agent-repl--sweep-hidden-workspaces "ws-a")
-        (should (equal killed '("ws-b")))))))
-
-;;;; ---- maybe-sweep-hidden-on-switch ----
-
-(ert-deftest agent-repl-cmd-test-maybe-sweep/runs-when-hide-on ()
-  "maybe-sweep-hidden-on-switch runs the sweep when hide-mode is enabled."
-  (agent-repl-test--with-clean-state
-    (let ((sweep-called 0)
-          (agent-repl-hide-mode-enabled t))
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws-c"))
-                ((symbol-function 'agent-repl--sweep-hidden-workspaces)
-                 (lambda (&rest _) (cl-incf sweep-called))))
-        (agent-repl--maybe-sweep-hidden-on-switch)
-        (should (= sweep-called 1))))))
-
-(ert-deftest agent-repl-cmd-test-maybe-sweep/skips-when-hide-off ()
-  "maybe-sweep-hidden-on-switch is a no-op when hide-mode is disabled."
-  (agent-repl-test--with-clean-state
-    (let ((sweep-called 0)
-          (agent-repl-hide-mode-enabled nil))
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws-c"))
-                ((symbol-function 'agent-repl--sweep-hidden-workspaces)
-                 (lambda (&rest _) (cl-incf sweep-called))))
-        (agent-repl--maybe-sweep-hidden-on-switch)
-        (should (= sweep-called 0))))))
-
-(ert-deftest agent-repl-cmd-test-maybe-sweep/resets-arrived-hidden-to-inactive ()
-  "Arriving on a `:hidden' workspace resets it to `:inactive' so the user
-actively viewing it does not get it killed.  Independent of hide-mode flag."
-  (agent-repl-test--with-clean-state
-    (let ((agent-repl-hide-mode-enabled nil))
-      (agent-repl--ws-set-repl-state "ws-a" :hidden)
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws-a"))
-                ((symbol-function 'agent-repl--sweep-hidden-workspaces)
-                 (lambda (&rest _) nil)))
-        (agent-repl--maybe-sweep-hidden-on-switch)
-        (should (eq (agent-repl--ws-repl-state "ws-a") :inactive))))))
-
-(ert-deftest agent-repl-cmd-test-maybe-sweep/leaves-non-hidden-current-alone ()
-  "maybe-sweep-hidden-on-switch does not touch repl-state if current is not :hidden."
-  (agent-repl-test--with-clean-state
-    (let ((agent-repl-hide-mode-enabled nil))
-      (agent-repl--ws-set-repl-state "ws-a" :active)
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws-a"))
-                ((symbol-function 'agent-repl--sweep-hidden-workspaces)
-                 (lambda (&rest _) nil)))
-        (agent-repl--maybe-sweep-hidden-on-switch)
-        (should (eq (agent-repl--ws-repl-state "ws-a") :active))))))
-
-(ert-deftest agent-repl-cmd-test-maybe-sweep/explicit-ws-overrides-current ()
-  "An explicit WS argument takes precedence over `+workspace-current-name'.
-This is how `--on-workspace-switch' passes the ws captured at
-hook-fire time, so the reset/sweep operate on the workspace that was
-just switched to even if another switch raced ahead first."
-  (agent-repl-test--with-clean-state
-    (let ((swept-with nil)
-          (agent-repl-hide-mode-enabled t))
-      (agent-repl--ws-set-repl-state "ws-a" :hidden)
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws-c"))
-                ((symbol-function 'agent-repl--sweep-hidden-workspaces)
-                 (lambda (&optional except) (setq swept-with except))))
-        (agent-repl--maybe-sweep-hidden-on-switch "ws-a")
-        ;; ws-a was reset because it was the explicit arg, even though
-        ;; +workspace-current-name returns "ws-c".
-        (should (eq (agent-repl--ws-repl-state "ws-a") :inactive))
-        (should (equal swept-with "ws-a"))))))
 
 ;;;; ---- nuke-one-workspace :last-killed-at stamping ----
 

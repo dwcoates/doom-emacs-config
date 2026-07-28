@@ -210,26 +210,6 @@ replace this with a bare \" \" — see the block comment above
       (propertize " " 'invisible t)
     ""))
 
-(defvar agent-repl-hide-mode-enabled nil
-  "Non-nil means persp-kill `:hidden' workspaces on workspace switch.
-A workspace becomes `:hidden' when the user invokes `SPC o C' (the
-deprio close path, `agent-repl--on-close').  The kill happens in
-`agent-repl--sweep-hidden-workspaces' from the workspace-switch
-handler via `agent-repl--nuke-one-workspace', which always preserves
-the on-disk state file so the workspace can be re-opened later via
-project switch.
-
-The tab-bar itself is NOT filtered — it reflects the raw persp list.
-Workspace cycling (`agent-repl-switch-left/right') skips `:hidden'
-workspaces while hide-mode is on so the user does not land on a
-soon-to-be-killed workspace mid-cycle.
-
-The current workspace is exempt from sweep, and arriving on a `:hidden'
-workspace resets its state to `:inactive' (so it survives the next
-sweep).  To persistently keep a hidden workspace, toggle hide-mode off.
-
-Toggle via `agent-repl-toggle-hide-mode'.")
-
 (defun agent-repl--load-priority-images ()
   "Load priority badge PNGs from the module images/ directory.
 Populates `agent-repl--priority-images' with display-ready image specs."
@@ -316,14 +296,6 @@ STATE is one of:
   nil        — freshly killed / no session
   :active    — panels displayed, session alive
   :inactive  — panels hidden, session alive (plain `SPC o c' close)
-  :hidden    — semantically `:inactive', but additionally marks the
-               workspace for persp-kill on the next workspace change
-               when `agent-repl-hide-mode-enabled' is non-nil.  Set
-               by the `SPC o C' deprio-close path; the kill happens in
-               `agent-repl--sweep-hidden-workspaces' from the
-               workspace-switch handler.  The on-disk state file is
-               always preserved by `--nuke-one-workspace' so the
-               workspace can be re-opened later via project-switch.
   :merged    — workspace's branch has been merged into its source.
                Set by `agent-repl--workspace-merge-do' on success
                (alongside `:merge-completed t').  Takes precedence
@@ -337,8 +309,8 @@ There is no viewed-acknowledgment axis any more: `:done', `:ready' and
 `:done' only ever changed the color without changing anything true.
 
 Persists the new value to disk via `agent-repl--state-save' when STATE
-is `:active', `:inactive', or `:hidden' so panel-visibility (and the
-deprio-hide marker) survives Emacs restart.  `:dead' / nil are not
+is `:active' or `:inactive' so panel-visibility survives Emacs
+restart.  `:dead' / nil are not
 persisted — they reduce to \"no opinion\" at restart, so default
 open-panels behavior applies.  `:dead' is set via `--ws-put' directly
 (in `--mark-dead'), bypassing this setter, so no special-case is
@@ -346,10 +318,10 @@ needed there."
   (unless ws (error "agent-repl--ws-set-repl-state: ws is nil"))
   (let ((previous (agent-repl--ws-get ws :repl-state)))
     (agent-repl--log ws "repl-state: ws=%s previous=%s next=%s persists=%s"
-                      ws previous state (memq state '(:active :inactive :hidden))))
+                      ws previous state (memq state '(:active :inactive))))
   (agent-repl--ws-put ws :repl-state state)
   (force-mode-line-update t)
-  (when (memq state '(:active :inactive :hidden))
+  (when (memq state '(:active :inactive))
     (agent-repl--state-save ws))
   (agent-repl--memory-state-save ws))
 
@@ -976,29 +948,6 @@ color without any glyph beside the numeral."
          (img-str       (agent-repl--tab-priority-image-str name)))
     (agent-repl--render-tab name spec label face img-str)))
 
-(defun agent-repl--filter-hidden-names (names current-name)
-  "Drop NAMES whose `:repl-state' is `:hidden' when hide-mode is on.
-CURRENT-NAME is always retained so the active workspace stays visible.
-When `agent-repl-hide-mode-enabled' is nil, returns NAMES unchanged.
-
-Used by workspace cycling (`agent-repl--workspace-cycle' in commands.el)
-to skip soon-to-be-killed `:hidden' workspaces.  The tab-bar itself is
-NOT filtered — it reflects the raw persp-names-cache, and `:hidden'
-workspaces disappear naturally once the next workspace switch triggers
-`agent-repl--sweep-hidden-workspaces'."
-  (let ((result
-         (if agent-repl-hide-mode-enabled
-             (cl-remove-if
-              (lambda (n)
-                (and (not (equal n current-name))
-                     (eq (agent-repl--ws-repl-state n) :hidden)))
-              names)
-           names)))
-    (agent-repl--log (and current-name (agent-repl--ws-known-p current-name) current-name)
-                     "filter-hidden-names: hide-mode=%s current=%s input=%S output=%S"
-                     agent-repl-hide-mode-enabled current-name names result)
-    result))
-
 (cl-defun agent-repl--tabline-rendered-entries (&optional (names nil names-supplied-p))
   "Return the list of rendered tab-entry strings for NAMES.
 
@@ -1240,20 +1189,18 @@ visible glyph is still the faced one.  Size and center rows to
 The tab-bar reflects every workspace in NAMES (defaulting to
 `agent-repl--ws-tabline-names' — the persp-mode integration wrapper
 in `workspace.el', which intersects `persp-names-cache' with
-agent-repl's own registration, then drops the workspaces of
-folded repos); no hide-mode filtering is applied here.
-Hide-mode operates at the persp level — `:hidden' workspaces
-get persp-killed by `agent-repl--sweep-hidden-workspaces' on the
-next workspace switch and disappear from `persp-names-cache' (and
-therefore the tab-bar) naturally."
+agent-repl's own registration, then drops the workspaces of folded
+repos).  Repo folding is the only mechanism that hides a workspace
+from the tab-bar; a workspace closed via `SPC o C' simply stays
+listed as inactive."
   (let* ((resolved-names (if names-supplied-p names (agent-repl--ws-tabline-names)))
          (entries (agent-repl--tabline-rendered-entries resolved-names))
          (current-name (agent-repl--ws-current-name))
          (states (mapcar (lambda (n)
                            (cons n (agent-repl--ws-display-state n)))
                          resolved-names)))
-    (agent-repl--log-verbose nil "tabline-advice: current=%s hide=%s states=%S"
-                              current-name agent-repl-hide-mode-enabled states)
+    (agent-repl--log-verbose nil "tabline-advice: current=%s states=%S"
+                              current-name states)
     (concat
      (mapconcat #'identity entries " ")
      ;; Cache-buster toggle — DO NOT REMOVE.  See the block comment
@@ -1428,22 +1375,6 @@ frame heights, and the watchdog cleanup result."
 
 ;; Install after persp-mode loads so workspace names resolve during render.
 (agent-repl--ws-after-system-load #'agent-repl--install-fixed-height-tab-bar)
-
-(defun agent-repl-toggle-hide-mode ()
-  "Toggle `agent-repl-hide-mode-enabled'.
-When toggled ON, `:hidden' workspaces (those closed via `SPC o C')
-are persp-killed on the next workspace switch.  When OFF, they remain
-in the workspace list and behave like ordinary `:inactive' workspaces.
-Forces a tab-bar repaint so cycling-skip semantics update immediately."
-  (interactive)
-  (let ((previous agent-repl-hide-mode-enabled))
-    (setq agent-repl-hide-mode-enabled (not previous))
-    (agent-repl--log (agent-repl--ws-current-name)
-                      "toggle-hide-mode: previous=%s next=%s current=%s"
-                      previous agent-repl-hide-mode-enabled (agent-repl--ws-current-name)))
-  (agent-repl--force-tab-bar-redraw)
-  (message "agent-repl hide-mode %s"
-           (if agent-repl-hide-mode-enabled "enabled" "disabled")))
 
 ;; Suppress the echo area flash when switching workspaces.
 ;; Doom calls (+workspace/display) after switch/cycle/new/load, which uses
