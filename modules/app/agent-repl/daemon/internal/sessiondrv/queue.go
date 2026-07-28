@@ -21,7 +21,12 @@ import (
 // produces the conversation item, exactly as an un-queued prompt would. If it
 // is cancelled it leaves no trace in the conversation at all.
 type queueEntry struct {
-	id             string
+	id string
+	// requestID is the frontend submit this entry is holding, carried so the
+	// prompt RECEIPT can be pushed when the entry is finally DELIVERED — the
+	// moment the prompt actually enters the conversation. Held rather than
+	// echoed at submit because a queued prompt is a chip, not a bubble.
+	requestID      string
 	text           string
 	permissionMode string
 	queuedAtMs     int64
@@ -224,7 +229,7 @@ type ClassifyResult struct {
 // no turn running the prompt still goes straight through, and it becomes the
 // LONE RUNNER whose clean end resumes the drain; with a turn running it is
 // queued as a HEAD JUMP, ahead of everything the pause retained.
-func (m *Manager) queueSubmitLocked(d *driven, text, permissionMode string) (*queueEntry, bool) {
+func (m *Manager) queueSubmitLocked(d *driven, requestID, text, permissionMode string) (*queueEntry, bool) {
 	if !d.turnActive {
 		d.runningText = text
 		if d.paused {
@@ -236,6 +241,7 @@ func (m *Manager) queueSubmitLocked(d *driven, text, permissionMode string) (*qu
 	}
 	e := &queueEntry{
 		id:             newQueueEntryID(),
+		requestID:      requestID,
 		text:           text,
 		permissionMode: permissionMode,
 		queuedAtMs:     m.now(),
@@ -371,7 +377,14 @@ func (m *Manager) onTurnBoundary(d *driven, active bool) {
 // the delivery failure as its rationale. Dropping it would lose something the
 // user typed; retrying in place would spin. Instead it is visible, keeps its
 // place, and gets another chance at the next turn end or on a user force.
+// THE HELD PROMPT'S RECEIPT is pushed HERE, at the one delivery funnel every
+// path reaches — the turn-end drain, the paused queue's head jump, and an
+// interject alike (onTurnBoundary and beginInterject both end in `go
+// m.deliver`). This is the moment the prompt stops being a chip and enters the
+// conversation, which is exactly when a bubble states the truth about the
+// order things ran in.
 func (m *Manager) deliver(d *driven, e *queueEntry) {
+	m.echo(d, e.requestID, e.text)
 	text := m.applyMetaprompt(d, e.text)
 	err := d.client.SubmitPrompt(m.rootCtx, text, "frontend", e.permissionMode)
 	if err == nil {
