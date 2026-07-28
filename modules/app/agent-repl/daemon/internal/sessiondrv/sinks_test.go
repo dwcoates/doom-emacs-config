@@ -137,6 +137,17 @@ type fakeApplier struct {
 	// two context-cut axes the driver opens and closes.
 	cuts   []cutCall
 	cutErr error
+	// permissions records one entry per ApplyPermission call — the permission
+	// row's open and close edges, driven off the workspace's pending count.
+	permissions []permissionCall
+	permErr     error
+}
+
+// permissionCall is one permission-row edge the driver applied.
+type permissionCall struct {
+	workspace string
+	pending   bool
+	reason    string
 }
 
 // cutCall is one context-cut axis edge the driver applied.
@@ -213,6 +224,24 @@ func (f *fakeApplier) ApplyCompacting(workspace string, compacting bool, reason 
 	defer f.reconcMutex.Unlock()
 	f.cuts = append(f.cuts, cutCall{axis: "compacting", workspace: workspace, open: compacting, reason: reason})
 	return f.cutErr
+}
+
+// ApplyPermission records the permission-row edges the driver applied.
+func (f *fakeApplier) ApplyPermission(workspace string, pending bool, reason string) error {
+	f.reconcMutex.Lock()
+	defer f.reconcMutex.Unlock()
+	f.permissions = append(f.permissions, permissionCall{workspace: workspace, pending: pending, reason: reason})
+	return f.permErr
+}
+
+// permissionsApplied returns the recorded permission-row edges, taken under the
+// lock so a concurrent handler goroutine cannot race the read.
+func (f *fakeApplier) permissionsApplied() []permissionCall {
+	f.reconcMutex.Lock()
+	defer f.reconcMutex.Unlock()
+	out := make([]permissionCall, len(f.permissions))
+	copy(out, f.permissions)
+	return out
 }
 
 // cutsApplied returns the recorded context-cut edges, taken under the lock.
