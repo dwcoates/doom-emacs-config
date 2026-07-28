@@ -357,8 +357,8 @@ is NOT a frontend concern — it belongs to the close commands
 \(`agent-repl--on-simple-close' and `agent-repl--on-close'), which own it
 once for every frontend rather than leaving each frontend to remember it.
 Leaving that to the frontends is exactly how the gui came to close without
-ever marking itself `:inactive' or `:hidden', which in turn left hide-mode
-unable to sweep it."
+ever marking itself `:inactive', which in turn left the sidebar showing a
+torn-down workspace as live."
   (agent-repl--frontend-dispatch-view ws 'hide #'agent-repl-frontend-hide-fn))
 
 (defun agent-repl--frontend-boot-session (ws &optional project-dir-hint active-env-hint)

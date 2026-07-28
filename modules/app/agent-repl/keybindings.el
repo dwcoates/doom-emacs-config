@@ -49,7 +49,7 @@
     ("⚡ State"
      (:agent-state :repl-state :status :pushed-render-state
       :pushed-render-state-meta
-      :hidden :dead :bogus :merged))
+      :dead :bogus :merged))
     ("🌳 Project / Git"
      (:project-dir :worktree-p :source-ws-dir :source-ws-name
       :merge-parent-dir :branch-merged :branch-merged-last-check
@@ -177,7 +177,7 @@ NAME is the workspace `+workspace/kill' was invoked on.  Only fire when
 NAME refers to the current workspace — `agent-repl--agent-running-p'
 (called here with no WS argument) inspects the CURRENT workspace's
 frontend, so applying it cross-workspace would kill the wrong session
-(e.g. when the hide-mode sweep persp-kills a background `:hidden'
+(e.g. when a background workspace is persp-killed
 workspace from inside a workspace-switch handler, the named workspace's
 session has already been torn down by the sweep and the current
 workspace's session must be left alone).  Callers that need to kill a
@@ -642,7 +642,6 @@ so a chord wins key lookup regardless of which evil state is current.")
       :desc "Copy file reference" "o r" #'agent-repl-copy-reference
       :desc "Reload webview (rebuilt bundle)" "o l" #'agent-repl-frontend-reload-webview
       :desc "Force fresh conversation" "o f" #'agent-repl-force-fresh-conversation
-      :desc "Toggle hide-mode (closed-REPL workspaces)" "o h" #'agent-repl-toggle-hide-mode
       :desc "Toggle hide-project-dirs (ChessCom workspaces)" "o H" #'agent-repl-toggle-hide-project-dirs)
 
 (map! :leader
