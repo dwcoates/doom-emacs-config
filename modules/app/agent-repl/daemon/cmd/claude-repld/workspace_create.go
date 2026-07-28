@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -152,21 +151,12 @@ func (w DaemonWorktree) PlanWorktree(ctx context.Context, job workspacecreate.Jo
 		if branchExit != 1 {
 			return workspacecreate.WorktreeResult{}, fmt.Errorf("workspace create: check branch %s exit=%d: %s", branch, branchExit, strings.TrimSpace(out))
 		}
-		if err := w.checkStartTag(ctx, root, branch, baseCommit); err != nil {
-			if errors.Is(err, errStartTagCollision) {
-				w.Logf("workspace-create: start-tag collision job=%s branch=%s base=%s; trying next name", job.ID, branch, baseCommit)
-				continue
-			}
-			return workspacecreate.WorktreeResult{}, err
-		}
 		finalName := filepath.Base(branch)
 		w.Logf("workspace-create: planned job=%s requested=%q final=%q branch=%q base=%q path=%s fork_session=%q", job.ID, job.Request.Name, finalName, branch, baseCommit, path, forkSessionID)
 		return workspacecreate.WorktreeResult{Path: path, FinalName: finalName, Branch: branch, BaseCommit: baseCommit, ForkSessionID: forkSessionID}, nil
 	}
 	return workspacecreate.WorktreeResult{}, fmt.Errorf("workspace create: could not resolve a collision-free name for job %s after 20 attempts", job.ID)
 }
-
-var errStartTagCollision = errors.New("workspace create: start tag collision")
 
 func (w DaemonWorktree) resolveBase(ctx context.Context, root string, job workspacecreate.Job) (string, string, error) {
 	base := job.Request.BaseCommit
@@ -282,44 +272,6 @@ func (w DaemonWorktree) runGitOK(ctx context.Context, dir string, args ...string
 	return nil
 }
 
-func (w DaemonWorktree) checkStartTag(ctx context.Context, root, branch, baseCommit string) error {
-	tag := "start/" + branch
-	out, exit, err := w.Git.RunGit(ctx, root, "rev-parse", "--verify", "refs/tags/"+tag+"^{commit}")
-	if err != nil {
-		return fmt.Errorf("workspace create: check start tag %s: %w", tag, err)
-	}
-	switch exit {
-	case 1:
-		return nil
-	case 0:
-		if strings.TrimSpace(out) != baseCommit {
-			return fmt.Errorf("%w: %s points to %s, planned base is %s", errStartTagCollision, tag, strings.TrimSpace(out), baseCommit)
-		}
-		return nil
-	default:
-		return fmt.Errorf("workspace create: check start tag %s exit=%d: %s", tag, exit, strings.TrimSpace(out))
-	}
-}
-
-func (w DaemonWorktree) ensureStartTag(ctx context.Context, root, branch, baseCommit string) error {
-	tag := "start/" + branch
-	out, exit, err := w.Git.RunGit(ctx, root, "rev-parse", "--verify", "refs/tags/"+tag+"^{commit}")
-	if err != nil {
-		return fmt.Errorf("workspace create: verify start tag %s: %w", tag, err)
-	}
-	switch exit {
-	case 0:
-		if strings.TrimSpace(out) != baseCommit {
-			return fmt.Errorf("workspace create: start tag %s points to %s, planned base is %s", tag, strings.TrimSpace(out), baseCommit)
-		}
-		return nil
-	case 1:
-		return w.runGitOK(ctx, root, "tag", tag, baseCommit)
-	default:
-		return fmt.Errorf("workspace create: verify start tag %s exit=%d: %s", tag, exit, strings.TrimSpace(out))
-	}
-}
-
 // normalizeWorkspacePath accepts the skill contract's leading ~/ spelling but
 // rejects every other relative path before any git operation can run.
 func normalizeWorkspacePath(path string) (string, error) {
@@ -357,13 +309,10 @@ func (w DaemonWorktree) EnsureWorktree(ctx context.Context, job workspacecreate.
 		if branch != job.Branch {
 			return fmt.Errorf("workspace create: planned path %s belongs to branch %q, not job branch %q", path, branch, job.Branch)
 		}
-		if err := w.ensureStartTag(ctx, root, job.Branch, job.ResolvedBaseCommit); err != nil {
-			return err
-		}
 		if err := w.Marker.Ensure(path, job.FinalName); err != nil {
 			return err
 		}
-		w.Logf("workspace-create: worktree already exists for job=%s path=%s branch=%s start_tag=%q projectile=%q", job.ID, path, job.Branch, "start/"+job.Branch, job.FinalName)
+		w.Logf("workspace-create: worktree already exists for job=%s path=%s branch=%s projectile=%q", job.ID, path, job.Branch, job.FinalName)
 		return nil
 	}
 	if _, exists := usedBranches[job.Branch]; exists {
@@ -381,13 +330,10 @@ func (w DaemonWorktree) EnsureWorktree(ctx context.Context, job workspacecreate.
 	if addErr != nil || addExit != 0 {
 		return fmt.Errorf("workspace create: git worktree add job=%s branch=%s exit=%d: %w (%s)", job.ID, job.Branch, addExit, addErr, strings.TrimSpace(out))
 	}
-	if err := w.ensureStartTag(ctx, root, job.Branch, job.ResolvedBaseCommit); err != nil {
-		return err
-	}
 	if err := w.Marker.Ensure(path, job.FinalName); err != nil {
 		return err
 	}
-	w.Logf("workspace-create: created worktree job=%s path=%s branch=%s base=%s start_tag=%q projectile=%q", job.ID, path, job.Branch, job.ResolvedBaseCommit, "start/"+job.Branch, job.FinalName)
+	w.Logf("workspace-create: created worktree job=%s path=%s branch=%s base=%s projectile=%q", job.ID, path, job.Branch, job.ResolvedBaseCommit, job.FinalName)
 	return nil
 }
 
