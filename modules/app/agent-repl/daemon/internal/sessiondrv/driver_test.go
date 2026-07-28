@@ -100,6 +100,9 @@ type fakeClient struct {
 	// (the default) means the connection is already usable, so tests that do
 	// not care about bring-up timing are unaffected.
 	notReady chan struct{}
+	// awaitReadyCalls counts AwaitReady round-trips, so a test can prove the
+	// readiness wait was TAKEN (rather than inferring it from timing).
+	awaitReadyCalls int
 	// runResult, when non-nil, makes Run terminate with the received error.
 	// This models a protocol failure that evicts the driver without Hibernate.
 	runResult        chan error
@@ -131,6 +134,7 @@ func (c *fakeClient) SubmitPrompt(_ context.Context, text, origin, mode string) 
 func (c *fakeClient) AwaitReady(ctx context.Context) error {
 	c.mu.Lock()
 	ch := c.notReady
+	c.awaitReadyCalls++
 	c.mu.Unlock()
 	if ch == nil {
 		return nil
@@ -323,6 +327,126 @@ func TestHealthRejectsNoDriverAndWrongSession(t *testing.T) {
 	}
 	if _, err := m.Health(context.Background(), "ws", "other", "health-2"); err == nil {
 		t.Fatal("health for a different session must error")
+	}
+}
+
+// TestHealthWaitsForABringUpAlreadyInMotion pins the race the probe used to
+// lose: createSession acks when the spawn is ISSUED, Emacs probes health a few
+// milliseconds later, and the shim attaches a few milliseconds after that.
+func TestHealthWaitsForABringUpAlreadyInMotion(t *testing.T) {
+	// Arrange: the driver EXISTS (Ensure started it) but has not handshaked.
+	notReady := make(chan struct{})
+	m, lastClient := newTestManagerNotReady(t, fakeLocator{m: map[string]string{"ws": "s1"}}, &fakeSpawner{}, notReady)
+	if err := m.Ensure("ws"); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+
+	// Act: probe while the shim is still connecting, then let it connect.
+	type answer struct {
+		status *corev1.HealthStatus
+		err    error
+	}
+	done := make(chan answer, 1)
+	go func() {
+		s, err := m.Health(context.Background(), "ws", "s1", "health-1")
+		done <- answer{s, err}
+	}()
+	select {
+	case a := <-done:
+		t.Fatalf("Health answered %+v/%v while the shim was still connecting; it must wait", a.status, a.err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(notReady)
+
+	// Assert: healthy, once the connection the probe waited for exists.
+	select {
+	case a := <-done:
+		if a.err != nil || !a.status.GetHealthy() || a.status.GetRequestId() != "health-1" {
+			t.Fatalf("Health = (%+v, %v)", a.status, a.err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Health never answered after the shim connected")
+	}
+	if got := lastClient().healthRequestIDs; len(got) != 1 || got[0] != "health-1" {
+		t.Fatalf("forwarded health ids=%v", got)
+	}
+}
+
+// TestHealthWithNoDriverStillFailsImmediately keeps the loud instant failure
+// for a workspace nothing is driving: the wait covers a bring-up in motion, and
+// there is no bring-up here to wait for.
+func TestHealthWithNoDriverStillFailsImmediately(t *testing.T) {
+	// Arrange: no Ensure, no submit — nothing has ever driven this workspace.
+	m, lastClient := newTestManagerNotReady(t, fakeLocator{m: map[string]string{"ws": "s1"}}, &fakeSpawner{}, make(chan struct{}))
+
+	// Act.
+	done := make(chan error, 1)
+	go func() { _, err := m.Health(context.Background(), "ws", "s1", "health-1"); done <- err }()
+
+	// Assert: answered at once, loudly, and no client was ever built for it.
+	select {
+	case err := <-done:
+		if err == nil || !strings.Contains(err.Error(), "no live session") {
+			t.Fatalf("err = %v, want a loud no-live-session failure", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Health hung on a workspace with no driver; it must fail at once")
+	}
+	if fc := lastClient(); fc != nil {
+		t.Fatalf("health must not have built a client, got %+v", fc)
+	}
+}
+
+// TestHealthSurfacesItsOwnDeadlineDuringBringUp proves the wait is bounded by
+// the PROBE'S context: a shim that never attaches ends the probe with that
+// deadline, never with a hang.
+func TestHealthSurfacesItsOwnDeadlineDuringBringUp(t *testing.T) {
+	// Arrange: a driver that never becomes ready.
+	m, _ := newTestManagerNotReady(t, fakeLocator{m: map[string]string{"ws": "s1"}}, &fakeSpawner{}, make(chan struct{}))
+	if err := m.Ensure("ws"); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+
+	// Act.
+	_, err := m.Health(ctx, "ws", "s1", "health-1")
+
+	// Assert: the deadline itself, named with the session it was probing.
+	if err == nil {
+		t.Fatal("Health must fail when the probe's deadline expires before readiness")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "health-1") {
+		t.Fatalf("err = %v, want the probe's deadline, correlated", err)
+	}
+}
+
+// TestHealthOnAReadyDriverAnswersWithoutBlocking pins that the wait costs an
+// already-connected session nothing: one non-blocking readiness check, then the
+// same round-trip as before.
+func TestHealthOnAReadyDriverAnswersWithoutBlocking(t *testing.T) {
+	// Arrange: a live, connected driver.
+	m, lastClient := newTestManager(t, fakeLocator{m: map[string]string{"ws": "s1"}}, &fakeSpawner{})
+	if err := m.SubmitPrompt(context.Background(), "ws", "hello", ""); err != nil {
+		t.Fatalf("bring up: %v", err)
+	}
+	fc := lastClient()
+	fc.mu.Lock()
+	before := fc.awaitReadyCalls
+	fc.mu.Unlock()
+
+	// Act.
+	status, err := m.Health(context.Background(), "ws", "s1", "health-1")
+
+	// Assert: answered, having consulted readiness exactly once more.
+	if err != nil || !status.GetHealthy() {
+		t.Fatalf("Health = (%+v, %v)", status, err)
+	}
+	fc.mu.Lock()
+	after := fc.awaitReadyCalls
+	fc.mu.Unlock()
+	if after != before+1 {
+		t.Fatalf("AwaitReady calls: got %d, want %d", after, before+1)
 	}
 }
 
