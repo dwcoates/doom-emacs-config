@@ -53,6 +53,9 @@ THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(dirname "$THIS_DIR")"              # modules/app/agent-repl
 REPO_ROOT="$(cd "$ROOT/../../.." && pwd)"  # the git checkout
 
+# shellcheck source=lib-deploy-stamp.sh
+. "$THIS_DIR/lib-deploy-stamp.sh"
+
 CACHE_BIN="$HOME/.cache/agent-repl/bin"
 STORE_SOCK="$HOME/.cache/agent-repl/sock/store.sock"
 STORE_LABEL="com.agentrepl.shim-store"
@@ -96,6 +99,7 @@ fi
 log "daemon: forced rebuild..."
 mkdir -p "$ROOT/daemon/bin"
 ( cd "$ROOT/daemon" && go build -o "$ROOT/daemon/bin/claude-repld" ./cmd/claude-repld )
+write_built_sha "$ROOT/daemon/bin/.built-sha" "$ROOT"
 log "daemon: done"
 
 # ---- 4. store + sidecar ----------------------------------------------------
@@ -109,6 +113,12 @@ build_service() { # name module-dir — builds and installs when content differs
     local installed="$CACHE_BIN/$name" staged="$CACHE_BIN/.$name.staged"
     log "$name: building..."
     ( cd "$dir" && go build -o "$staged" . )
+    # The built-sha stamp is written even when the CONTENT is unchanged: the
+    # binary is byte-identical, but the revision it was reproduced from has
+    # moved on, and that revision is what the readiness report compares
+    # against master. It is the deployed-FINGERPRINT stamp that must not be
+    # touched here — that one is bounce detection and belongs to kickstart.
+    write_built_sha "$CACHE_BIN/.$name.built-sha" "$ROOT"
     if [ -f "$installed" ] && cmp -s "$staged" "$installed"; then
         rm -f "$staged"
         log "$name: build unchanged"
@@ -118,27 +128,13 @@ build_service() { # name module-dir — builds and installs when content differs
     log "$name: installed (changed)"
 }
 
-# Whether the RUNNING service is executing the installed binary, tracked by a
-# stamp written at kickstart time rather than inferred from "did this build
-# change the file". Those are different questions, and conflating them is a
-# real failure mode: a `--no-bounce` run installs a new binary without
-# restarting anything, so the next run's build is "unchanged" while the live
-# process is still on the old image — and the deploy silently skips the bounce
-# the user asked for. The stamp answers the question that actually matters.
-fingerprint() { shasum -a 256 "$1" | cut -d' ' -f1; }
+# Whether the RUNNING service is executing the installed binary. The rule and
+# the reasoning behind it now live in lib-deploy-stamp.sh, shared with
+# readiness-report.sh so the report and the deploy can never disagree about
+# what "already deployed" means; these are the thin CACHE_BIN-bound wrappers.
+needs_bounce() { service_needs_bounce "$CACHE_BIN" "$1"; }
 
-needs_bounce() { # name -> 0 (bounce) when the installed binary is not the deployed one
-    local name="$1"
-    # Separate statement, not a second `local` assignment: a builtin's
-    # arguments all expand before any of them are assigned, so `$name` would
-    # still be unset here and `set -u` would abort the run.
-    local stamp="$CACHE_BIN/.$name.deployed"
-    [ -f "$stamp" ] || return 0
-    [ "$(fingerprint "$CACHE_BIN/$name")" = "$(cat "$stamp")" ] && return 1
-    return 0
-}
-
-record_deployed() { fingerprint "$CACHE_BIN/$1" > "$CACHE_BIN/.$1.deployed"; }
+record_deployed() { record_service_deployed "$CACHE_BIN" "$1"; }
 
 build_service shim-store          "$ROOT/agent-shim/shim-store"
 build_service shim-claude-sidecar "$ROOT/agent-shim/claude/shim-sidecar"
