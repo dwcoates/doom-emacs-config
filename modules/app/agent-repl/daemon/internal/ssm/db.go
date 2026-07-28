@@ -11,10 +11,8 @@ package ssm
 import (
 	"database/sql"
 	"fmt"
-	"os"
-	"path/filepath"
 
-	_ "modernc.org/sqlite"
+	"claude-repld/internal/statedb"
 )
 
 // schemaVersion is the current workspace_state schema revision. Bumped
@@ -23,40 +21,25 @@ import (
 // silent downgrade).
 const schemaVersion = 2
 
-// defaultDBPath is the SSM's own database, distinct from the shim-store
-// (§9.2: "own SQLite DB").
+// defaultDBPath is the daemon's ONE state store — the SSM's log and the
+// session registry's identity tables share it (§9.2: "own SQLite DB",
+// distinct from the shim-store).
 func defaultDBPath() (string, error) {
-	home, err := os.UserHomeDir()
+	path, err := statedb.DefaultPath()
 	if err != nil {
-		return "", fmt.Errorf("ssm: cannot resolve home dir for default db path: %w", err)
+		return "", fmt.Errorf("ssm: %w", err)
 	}
-	return filepath.Join(home, ".cache", "agent-repl", "ssm", "state.db"), nil
+	return path, nil
 }
 
-// openDB opens (creating parent dirs as needed) the SSM database in WAL
-// mode and runs migrations. A path of ":memory:" is rejected: the SSM
-// must be reopen-durable, and WAL is meaningless in memory.
+// openDB opens the state store (see internal/statedb for the WAL/busy-timeout/
+// immediate-transaction discipline every owner of the store shares) and runs
+// the SSM's migrations.
 func openDB(path string) (*sql.DB, error) {
-	if path == "" {
-		return nil, fmt.Errorf("ssm: empty db path")
-	}
-	if path == ":memory:" {
-		return nil, fmt.Errorf("ssm: in-memory db path %q is not allowed; the SSM must be reopen-durable", path)
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return nil, fmt.Errorf("ssm: cannot create db dir for %q: %w", path, err)
-	}
-	// modernc.org/sqlite reads PRAGMAs from _pragma query params. WAL for
-	// durable concurrent reads; busy_timeout so a momentarily locked DB
-	// waits rather than erroring.
-	dsn := path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)"
-	db, err := sql.Open("sqlite", dsn)
+	db, err := statedb.Open(path)
 	if err != nil {
-		return nil, fmt.Errorf("ssm: open %q: %w", path, err)
+		return nil, fmt.Errorf("ssm: %w", err)
 	}
-	// A single writer connection keeps append ordering and the SELECT-then-
-	// INSERT idempotency check race-free without a table lock.
-	db.SetMaxOpenConns(1)
 	if err := migrate(db); err != nil {
 		db.Close()
 		return nil, err
