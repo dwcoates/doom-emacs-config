@@ -35,6 +35,11 @@ type AgentShimConfig struct {
 	Progress *progress.Manager
 	// Prompts routes prompt/interrupt/permission to the session shim.
 	Prompts PromptRouter
+	// Turns reports whether a workspace has a turn in flight, for the interrupt
+	// confirm gate (I1). Required, and it must be the same driver fleet as
+	// Prompts: the gate decides whether there is a turn to stop, and reading a
+	// different fleet's answer would gate one session on another's liveness.
+	Turns TurnStateSource
 	// Health routes correlated session health checks to the existing live shim
 	// connection.  It must be the same driver fleet as Prompts.
 	Health SessionHealthRouter
@@ -190,6 +195,8 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 		return nil, fmt.Errorf("server: WireAgentShim needs a SessionCommands binding")
 	case cfg.WorkspaceCreation == nil:
 		return nil, fmt.Errorf("server: WireAgentShim needs a WorkspaceCreation bridge")
+	case cfg.Turns == nil:
+		return nil, fmt.Errorf("server: WireAgentShim needs a TurnStateSource (without it the interrupt confirm gate cannot tell a live turn from working subagents)")
 	}
 	mgr := cfg.SSM
 
@@ -205,6 +212,10 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 		CommandHandlerConfig{
 			WorkspaceCreation: cfg.WorkspaceCreation,
 			Health:            HealthConfig{Router: cfg.Health, Daemon: cfg.DaemonHealth},
+			// The gate reads each fact from the authority that owns it: the
+			// driver observes the turn boundary, and the progress resolver
+			// already carries the live-task count to the footer.
+			Interrupt: InterruptGateConfig{Turns: cfg.Turns, LiveTasks: cfg.Progress},
 		},
 	)
 	if err != nil {

@@ -44,6 +44,41 @@ type fakePrompts struct {
 	interrupts []string
 	perms      []string
 	err        error
+	// turnActive is what this fake reports as the workspace's observed turn
+	// state, so one double serves as both the prompt router and the interrupt
+	// gate's turn source (the production wiring binds one driver to both).
+	turnActive bool
+	turnErr    error
+}
+
+// TurnActive makes the prompt double the gate's turn source.
+func (f *fakePrompts) TurnActive(string) (bool, error) { return f.turnActive, f.turnErr }
+
+// fakeLiveTasks is the gate's live-task source: a canned count, plus the
+// explicit "this workspace is unknown" miss.
+type fakeLiveTasks struct {
+	count   int64
+	unknown bool
+}
+
+func (f fakeLiveTasks) LiveTasks(string) (int64, bool) {
+	if f.unknown {
+		return 0, false
+	}
+	return f.count, true
+}
+
+// newGatedHandler builds a handler whose interrupt confirm gate is wired with
+// the given turn state and live-task count.
+func newGatedHandler(t *testing.T, turnActive bool, tasks LiveTaskSource) (*commandHandler, *fakePrompts) {
+	t.Helper()
+	p := &fakePrompts{turnActive: turnActive}
+	h, err := newCommandHandler(p, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil, nil, nil,
+		CommandHandlerConfig{Interrupt: InterruptGateConfig{Turns: p, LiveTasks: tasks}})
+	if err != nil {
+		t.Fatalf("newCommandHandler: %v", err)
+	}
+	return h, p
 }
 
 func (f *fakePrompts) SubmitPrompt(_ context.Context, ws, text, _ string) error {
@@ -219,8 +254,8 @@ func TestCommandHandlerSubmitPromptRoutesToPrompts(t *testing.T) {
 }
 
 func TestCommandHandlerInterruptRoutesToPrompts(t *testing.T) {
-	// Arrange
-	h, p, _, _ := newTestHandler(t)
+	// Arrange — a turn is live, which the gate never challenges.
+	h, p := newGatedHandler(t, true, fakeLiveTasks{})
 	// Act
 	_ = h.Interrupt(context.Background(), "/ws1", "r1", &frontendv1.InterruptCmd{})
 	// Assert
@@ -637,6 +672,7 @@ func TestSnapshotProviderCombinesSSMAndSessions(t *testing.T) {
 		SSM:               openTestSSM(t, reg),
 		Progress:          progress.New(progress.Options{Logf: func(string, ...any) {}}),
 		Prompts:           &fakePrompts{},
+		Turns:             &fakePrompts{},
 		MergeDirs:         fakeMergeDirs{},
 		Lifecycle:         &fakeLifecycle{},
 		Sessions:          fakeSessions{views: []*frontendv1.SessionView{{Workspace: "/w", SessionId: "s1", Model: "haiku"}}},
@@ -690,6 +726,7 @@ func TestWireAgentShimFeedsTheSsmTransitionIntoProgressWithoutAPhaseCopy(t *test
 		SSM:               openTestSSM(t, reg),
 		Progress:          prog,
 		Prompts:           &fakePrompts{},
+		Turns:             &fakePrompts{},
 		MergeDirs:         fakeMergeDirs{},
 		Lifecycle:         &fakeLifecycle{},
 		SessionCommands:   &SessionCommandBinding{},
@@ -796,6 +833,7 @@ func TestWireAgentShimMergeTransitionReachesSSM(t *testing.T) {
 		SSM:               openTestSSM(t, reg),
 		Progress:          progress.New(progress.Options{Logf: func(string, ...any) {}}),
 		Prompts:           &fakePrompts{},
+		Turns:             &fakePrompts{},
 		MergeDirs:         fakeMergeDirs{},
 		Lifecycle:         &fakeLifecycle{},
 		SessionCommands:   &SessionCommandBinding{},
