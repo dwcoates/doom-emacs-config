@@ -110,7 +110,7 @@ since the last module load — check `${EMACS_LOG}.prev`.
 Each line:
 
 ```
-HH:MM:SS.mmm [agent-repl] <message-body> {ws=<name> id=<8hex> dir=<path> cst=<agent-state> rst=<repl-state> env=<…> fe=<live|dead|-> in=<live|dead|-> cnt=<n> git=<clean|dirty|-> gproc=<run|done|-> wt=<t|-> fork=<…> rtmr=<t|-> pri=<…> pend=<n> pshow=<t|-> defq=<n>}
+HH:MM:SS.mmm [agent-repl] <message-body> {ws=<name> id=<8hex> dir=<path> cst=<agent-state> rst=<repl-state> env=<…> fe=<live|dead|-> in=<live|dead|-> cnt=<n> wt=<t|-> fork=<…> rtmr=<t|-> pri=<…> pend=<n> pshow=<t|-> defq=<n>}
 ```
 
 Workspace metadata trails the message. Keys:
@@ -119,13 +119,11 @@ Workspace metadata trails the message. Keys:
 - `id` — 8-char hash of `:project-dir` (stable identifier across renames)
 - `dir` — expanded `:project-dir`
 - `cst` — the workspace's current `:agent-state` value
-- `rst` — `:repl-state` — `active` | `inactive` | `hidden` | `dead` | `-`
+- `rst` — `:repl-state` — `active` | `inactive` | `dead` | `-`
 - `env` — active env keyword
 - `fe` — frontend buffer liveness (`live` / `dead` / `-`)
 - `in` — input buffer liveness (`live` / `dead` / `-`)
 - `cnt` — prefix counter (metaprompt re-injection)
-- `git` — git clean/dirty for the workspace
-- `gproc` — live async git sentinel process (`run` / `done` / `-`)
 - `wt` — `t` if this workspace is a worktree
 - `fork` — forked session id (if any)
 - `rtmr` — ready-timer present
@@ -273,9 +271,9 @@ The header `:ws` and `:written-at` keys are prepended by the writer; everything 
 Far more than the trailing `{ws=… id=… …}` log-line metadata block in §2.2. The full plist surface (see `core.el` `agent-repl--workspaces` docstring and the keys written via `agent-repl--ws-put` across the module) includes — non-exhaustively:
 
 - Core identity: `:project-dir`, `:ws-id`, `:name`, `:active-env`, `:bare-metal`, `:sandbox`, `:fork-session-id`, `:session-id`, `:worktree-p`, `:source-ws-name`, `:source-ws-dir`, `:priority`, `:group-key`, `:type`
-- Lifecycle state: `:claude-state`, `:repl-state`, `:claude-ready`, `:done-acked`, `:done-acked-at`, `:stop-received`, `:pending-subagents`, `:viewed`, `:flashing`, `:bogus`, `:ws-loaded`
-- Buffers/processes/timers: `:vterm-buffer`, `:input-buffer`, `:ready-timer`, `:git-proc`, `:merge-proc`
-- Git/branch state: `:git-clean`, `:branch-merged`, `:branch-merged-last-check`, `:detail-branch`, `:detail-dirty-count`, `:detail-last-commit`, `:detail-last-commit-time`, `:detail-master-ahead`, `:detail-source-ahead`
+- Lifecycle state: `:claude-state`, `:repl-state`, `:claude-ready`, `:done-acked`, `:done-acked-at`, `:stop-received`, `:pending-subagents`, `:viewed`, `:bogus`, `:ws-loaded`
+- Buffers/processes/timers: `:vterm-buffer`, `:input-buffer`, `:ready-timer`, `:merge-proc`
+- Git/branch state: `:branch-merged`, `:branch-merged-last-check`, `:detail-branch`, `:detail-dirty-count`, `:detail-last-commit`, `:detail-last-commit-time`, `:detail-master-ahead`, `:detail-source-ahead`
 - Merge lifecycle: `:merge-completed`, `:merge-completed-at`, `:merge-failed`, `:merge-conflict`, `:merge-queued`, `:merge-parent-dir`, `:merging`, `:merged`
 - Prompts/UI: `:pending-prompts`, `:pending-show-panels`, `:pending-initial-buffers`, `:pending-magit`, `:deferred-prompts`, `:last-prompt-text`, `:last-prompt-time`, `:last-prompt-summary`, `:last-prompt-summary-pending`, `:last-notify-time`, `:clipboard`, `:saved-tab-index`, `:fullscreen-config`, `:ai-title-cache`
 - Counters: `:prefix-counter`, `:counter`
@@ -341,7 +339,6 @@ Defined in `keybindings.el`. These run **inside Emacs**, so dispatch them via `/
 | `prefix-counter` | Inspect the metaprompt re-injection counter |
 | `set-owning-workspace` | Reassign a buffer's owning workspace |
 | `mock-workspace-generation` | Simulate workspace generation |
-| `workspace-clean-p` | Git-clean predicate for the workspace |
 
 Ask before running `obliterate` or `clear-state` — both destroy the state you are trying to diagnose.
 
