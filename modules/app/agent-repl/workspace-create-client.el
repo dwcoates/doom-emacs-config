@@ -171,7 +171,15 @@ perspective or session, starts a shim, or locally delivers INITIAL-PROMPT."
        raw-path job-id session-id)
       (error "agent-repl: WorkspaceAvailable directory does not exist: %s"
              raw-path))
-    (let ((path (file-name-as-directory (expand-file-name raw-path))))
+    ;; Store the announced worktree in the SAME spelling every other
+    ;; `:project-dir' producer uses: absolute, no trailing slash
+    ;; (`directory-file-name' semantics).  The daemon's own identity for the
+    ;; workspace is this clean path, and Emacs echoes `:project-dir' back as
+    ;; the `workspace' field of UDS commands — a trailing slash here made
+    ;; interrupt/prompt land on an unknown key ("no live session for
+    ;; workspace .../color-semantics/").  `expand-file-name' only; NOT
+    ;; `file-truename', so the string stays byte-identical to the daemon's.
+    (let ((path (directory-file-name (expand-file-name raw-path))))
       (agent-repl--log
        ws
        "workspace-available: METADATA READY job-id=%s path=%s session-id=%s branch-present=%S source-ws-present=%S source-dir-present=%S config-dir-present=%S permission-mode-present=%S allow-ungated=%S prompt-queued=%S"
