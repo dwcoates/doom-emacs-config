@@ -838,6 +838,11 @@ func (c *consumer) pushConversation(ev *corev1.Event, live bool) {
 	if cd == nil {
 		return // known-but-non-conversational vendor payload
 	}
+	// The CLI's own slash-command bookkeeping, which it writes as unflagged
+	// "user" transcript records, goes no further than this (machinery.go).
+	// FIRST, before attribution: a machinery record claiming a real prompt's
+	// receipt would misattribute both.
+	c.withholdMachinery(cd)
 	// LIVE ONLY. A durable user turn arriving now may be the transcript's
 	// account of a submit this daemon made moments ago, and stamping it with
 	// that submit's request id is what lets the frontend reconcile it onto the
