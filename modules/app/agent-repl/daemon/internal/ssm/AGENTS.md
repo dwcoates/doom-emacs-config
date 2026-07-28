@@ -55,6 +55,32 @@ unchanged, so purple still sits between blue and red when it competes with
 the merge, paint, backfill, and degraded axes; what changed is that a newer
 agent-axis row (`thinking`, `ready`, `done`, `dead`) now replaces it.
 
+## The permission row is a covered turn, not a settled one
+
+`permission` is an agent-axis row like `done` and `vendor_blocked`, written by
+`ApplyPermission` when the workspace's pending-permission count leaves zero and
+released when it returns to zero. The count is derived from sessiondrv's
+`permRegistry` — one waiter per parked canUseTool round-trip — so a grant, a
+deny and a teardown abandonment all close it without any of them being named.
+
+What makes it unlike the other agent-axis rows is that it BURIES a live
+`thinking` rather than replacing a settled state. Two consequences follow, and
+both are load-bearing:
+
+- CLOSING reads the row beneath. `thinking` there means the turn that asked is
+  still running and gets its row back; anything else is left alone, because
+  appending a `thinking` the log has no evidence for is how a workspace wedges
+  red with nothing able to release it.
+- BOUNDING EDGES release it FIRST. A rotation abandons every waiter on the
+  bounced shim, and `ApplySessionRotated` closes the row before its own
+  turn-active check — otherwise the row hides the stuck turn that
+  reconciliation exists to unstick. `warm()` does the same at Open: the
+  rendezvous is in-process and does not survive a restart, while the shim does
+  and re-asks on reattach.
+
+A `TurnEnded` arriving over a pending permission needs no special case. Its row
+is simply later, so it wins, and the close that follows finds nothing open.
+
 Databases predating the remodel contain `vendor_clear` rows. No token maps
 them to a render state and no CTE selects them, so they are inert and need no
 migration.
