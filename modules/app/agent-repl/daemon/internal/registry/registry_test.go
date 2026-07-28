@@ -1,7 +1,7 @@
 package registry
 
 import (
-	"encoding/json"
+	"database/sql"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,11 +10,14 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"claude-repld/internal/statedb"
 )
 
+// testPath names a fresh state store for one test.
 func testPath(t *testing.T) string {
 	t.Helper()
-	return filepath.Join(t.TempDir(), "sessions.json")
+	return filepath.Join(t.TempDir(), "state.db")
 }
 
 func discardLogf(string, ...any) {}
@@ -26,7 +29,23 @@ func collectLogf(lines *[]string) func(string, ...any) {
 	}
 }
 
-func TestRoundTripThroughDisk(t *testing.T) {
+// rawStore opens the state store at path directly, with the registry's schema
+// applied, so a test can arrange rows the exported API would never write (an
+// externally edited store) or assert on what actually landed in the tables.
+func rawStore(t *testing.T, path string) *sql.DB {
+	t.Helper()
+	db, err := statedb.Open(path)
+	if err != nil {
+		t.Fatalf("open raw store: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	if err := migrate(db); err != nil {
+		t.Fatalf("migrate raw store: %v", err)
+	}
+	return db
+}
+
+func TestRoundTripThroughTheStore(t *testing.T) {
 	// Arrange — a registry with a mix of live and terminal records.
 	cases := []struct {
 		name    string
@@ -62,13 +81,35 @@ func TestRoundTripThroughDisk(t *testing.T) {
 					t.Fatalf("Put(%v): %v", rec, err)
 				}
 			}
-			// Act — reopen from disk, as a restarted daemon would.
+			// Act — reopen from the store, as a restarted daemon would.
 			reopened := Open(path, discardLogf)
 			// Assert
 			if got := reopened.All(); !reflect.DeepEqual(got, r.All()) {
 				t.Errorf("round trip: got %+v, want %+v", got, r.All())
 			}
 		})
+	}
+}
+
+func TestQueuedPromptsSurviveAReopen(t *testing.T) {
+	// Arrange — prompts the user typed that the agent has not seen yet.
+	path := testPath(t)
+	r := Open(path, discardLogf)
+	want := []QueuedPrompt{
+		{ID: "q1", Text: "first", PermissionMode: "plan", QueuedAtMs: 1700000000000},
+		{ID: "q2", Text: "second"},
+	}
+	if err := r.Put(Record{SessionID: "s_1", CWD: "/w", QueuedPrompts: want}); err != nil {
+		t.Fatal(err)
+	}
+	// Act.
+	rec, ok := Open(path, discardLogf).Get("s_1")
+	// Assert.
+	if !ok {
+		t.Fatal("record did not survive the reopen")
+	}
+	if !reflect.DeepEqual(rec.QueuedPrompts, want) {
+		t.Fatalf("queued prompts = %+v, want %+v", rec.QueuedPrompts, want)
 	}
 }
 
@@ -122,59 +163,60 @@ func TestDeleteRemovesAndPersists(t *testing.T) {
 	}
 }
 
-func TestInterruptedWriteLeavesPriorStateReadable(t *testing.T) {
-	// Arrange — a valid registry on disk, then a write that "crashed"
-	// mid-flight: the temp file exists but the rename never happened.
+func TestFailedMutationLeavesPriorStateReadable(t *testing.T) {
+	// Arrange — a valid registry, then a write that cannot complete: the
+	// maintenance pass rejects the record, so nothing may land. This is the
+	// crash-safety the JSON's temp-plus-rename used to provide, now the
+	// transaction's own guarantee.
 	path := testPath(t)
 	r := Open(path, discardLogf)
 	if err := r.Put(Record{SessionID: "s_1", ClaudeSessionID: "uuid-1"}); err != nil {
 		t.Fatal(err)
 	}
-	partial := filepath.Join(filepath.Dir(path), "sessions.json.tmp-crashed")
-	if err := os.WriteFile(partial, []byte(`{"version":1,"sessions":[{"session`), 0o600); err != nil {
-		t.Fatal(err)
-	}
 	// Act
+	err := r.Put(Record{SessionID: "s_2", BackfillState: "teleporting"})
+	// Assert — the bad write is refused loudly and the prior state stands.
+	if err == nil {
+		t.Fatal("Put with an invalid backfill_state succeeded")
+	}
 	reopened := Open(path, discardLogf)
-	// Assert — the torn temp file is inert; the prior complete state loads.
 	if rec, ok := reopened.Get("s_1"); !ok || rec.ClaudeSessionID != "uuid-1" {
-		t.Errorf("record after interrupted write = %+v, ok=%v", rec, ok)
+		t.Errorf("record after the failed write = %+v, ok=%v", rec, ok)
+	}
+	if _, ok := reopened.Get("s_2"); ok {
+		t.Error("the refused record landed anyway; the transaction did not roll back")
 	}
 }
 
-func TestCorruptFileStartsEmptyLoudlyAndIsPreserved(t *testing.T) {
-	// Arrange
+func TestUnopenableStoreStartsEmptyLoudlyAndIsPreserved(t *testing.T) {
+	// Arrange — garbage where the state store should be.
 	path := testPath(t)
-	if err := os.WriteFile(path, []byte("{not json"), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte("{not a database"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	var logged []string
 	// Act
 	r := Open(path, collectLogf(&logged))
-	// Assert — loud error, corrupt bytes preserved, and preparation refuses to
-	// serve fabricated empty state.
+	// Assert — loud error, and preparation refuses to serve fabricated empty
+	// state; the file is left in place so every restart still fails loudly.
 	if got := r.All(); len(got) != 0 {
 		t.Errorf("records = %+v, want empty", got)
 	}
 	if err := r.Prepare(); err == nil {
-		t.Fatal("Prepare succeeded after a corrupt registry load")
+		t.Fatal("Prepare succeeded after an unopenable store")
 	}
-	joined := strings.Join(logged, "\n")
-	if !strings.Contains(joined, "CORRUPT") {
-		t.Errorf("no loud corruption log; got %q", joined)
-	}
-	if _, err := os.Stat(path + ".corrupt"); err != nil {
-		t.Errorf("corrupt file not preserved: %v", err)
+	if !strings.Contains(strings.Join(logged, "\n"), "CORRUPT") {
+		t.Errorf("no loud corruption log; got %q", logged)
 	}
 	if _, err := os.Stat(path); err != nil {
-		t.Errorf("original corrupt file was removed, allowing a silent empty next boot: %v", err)
+		t.Errorf("the unreadable store was removed, allowing a silent empty next boot: %v", err)
 	}
 }
 
-func TestMissingFileStartsEmptySilently(t *testing.T) {
+func TestMissingStoreStartsEmptySilently(t *testing.T) {
 	// Arrange
 	var logged []string
-	// Act — first boot: no registry file exists yet.
+	// Act — first boot: no store exists yet.
 	r := Open(testPath(t), collectLogf(&logged))
 	// Assert
 	if got := r.All(); len(got) != 0 {
@@ -186,16 +228,18 @@ func TestMissingFileStartsEmptySilently(t *testing.T) {
 }
 
 func TestRecordWithEmptySessionIDFailsPreparationLoudly(t *testing.T) {
-	// Arrange — an externally edited file carrying a keyless record.
+	// Arrange — an externally written store carrying a keyless record.
 	path := testPath(t)
-	doc := `{"version":1,"sessions":[{"session_id":""},{"session_id":"s_ok"}]}`
-	if err := os.WriteFile(path, []byte(doc), 0o600); err != nil {
-		t.Fatal(err)
+	db := rawStore(t, path)
+	for _, id := range []string{"", "s_ok"} {
+		if _, err := db.Exec(`INSERT INTO session_record(session_id) VALUES (?)`, id); err != nil {
+			t.Fatalf("seed record %q: %v", id, err)
+		}
 	}
 	var logged []string
 	// Act
 	r := Open(path, collectLogf(&logged))
-	// Assert — migration refuses to invent a partial registry.
+	// Assert — the registry refuses to serve a partial roster.
 	if err := r.Prepare(); err == nil {
 		t.Fatal("Prepare succeeded with an invalid keyless record")
 	}
@@ -213,53 +257,75 @@ func TestPutRejectsEmptySessionID(t *testing.T) {
 	}
 }
 
-func TestFlushDoesNotResurrectARecordRemovedOnDisk(t *testing.T) {
-	// Arrange — a stale process cache still carries a record removed on disk.
+func TestFlushDoesNotResurrectARecordRemovedByAnotherWriter(t *testing.T) {
+	// Arrange — a stale process cache still carries a record another daemon
+	// removed from the store.
 	path := testPath(t)
 	r := Open(path, discardLogf)
 	if err := r.Put(Record{SessionID: "s_1"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Remove(path); err != nil {
+	if err := Open(path, discardLogf).Delete("s_1"); err != nil {
 		t.Fatal(err)
 	}
 	// Act
 	if err := r.Flush(); err != nil {
 		t.Fatalf("Flush: %v", err)
 	}
-	// Assert: stale cache is not overlaid onto current disk state.
+	// Assert: stale cache is not overlaid onto current store state.
 	if _, ok := Open(path, discardLogf).Get("s_1"); ok {
 		t.Error("Flush resurrected a record removed by another process")
 	}
 }
 
-func TestFileIsValidVersionedJSON(t *testing.T) {
+func TestTheTableIsTheAuthorityAfterAWrite(t *testing.T) {
 	// Arrange
 	path := testPath(t)
 	r := Open(path, discardLogf)
-	if err := r.Put(Record{SessionID: "s_1"}); err != nil {
+	if err := r.Put(Record{SessionID: "s_1", CWD: "/w", LastSeq: 42}); err != nil {
 		t.Fatal(err)
 	}
-	// Act
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
+	// Act — read the row exactly as any other owner of the store would.
+	db := rawStore(t, path)
+	var (
+		cwd  string
+		seq  int64
+		stmp int64
+	)
+	if err := db.QueryRow(
+		`SELECT cwd, last_seq FROM session_record WHERE session_id = 's_1'`).Scan(&cwd, &seq); err != nil {
+		t.Fatalf("read row: %v", err)
+	}
+	if err := db.QueryRow(
+		`SELECT CAST(value AS INTEGER) FROM registry_meta WHERE key = ?`, metaSchemaVersion).Scan(&stmp); err != nil {
+		t.Fatalf("read schema stamp: %v", err)
 	}
 	// Assert
-	var doc struct {
-		Version  int              `json:"version"`
-		Sessions []map[string]any `json:"sessions"`
+	if cwd != "/w" || seq != 42 {
+		t.Errorf("row = (cwd=%q, last_seq=%d), want (/w, 42)", cwd, seq)
 	}
-	if err := json.Unmarshal(data, &doc); err != nil {
-		t.Fatalf("on-disk shape unparseable: %v", err)
-	}
-	if doc.Version != fileVersionCheckpointIndex || len(doc.Sessions) != 1 {
-		t.Errorf("doc = %+v", doc)
+	if stmp != schemaVersion {
+		t.Errorf("schema stamp = %d, want %d", stmp, schemaVersion)
 	}
 }
 
-func TestTwoDaemonsRacingOnOneRegistryLoseNoRecords(t *testing.T) {
-	// Arrange — two Registry instances on ONE path, exactly as a daemon
+func TestSchemaVersionNewerThanTheBinaryRefusesToOpen(t *testing.T) {
+	// Arrange — a store written by a future build.
+	path := testPath(t)
+	db := rawStore(t, path)
+	if _, err := db.Exec(`UPDATE registry_meta SET value = ? WHERE key = ?`, schemaVersion+1, metaSchemaVersion); err != nil {
+		t.Fatalf("stamp a future schema: %v", err)
+	}
+	// Act
+	r := Open(path, discardLogf)
+	// Assert — no silent downgrade.
+	if err := r.Prepare(); err == nil {
+		t.Fatal("Prepare succeeded against a newer schema")
+	}
+}
+
+func TestTwoDaemonsRacingOnOneStoreLoseNoRecords(t *testing.T) {
+	// Arrange — two Registry instances on ONE store, exactly as a daemon
 	// that is still draining and its freshly-rebuilt replacement would
 	// hold it. Each writes its own sessions concurrently.
 	path := testPath(t)
@@ -284,18 +350,19 @@ func TestTwoDaemonsRacingOnOneRegistryLoseNoRecords(t *testing.T) {
 	}
 	// Act
 	wg.Wait()
-	// Assert — every record from BOTH daemons survives on disk. Without
-	// the locked read-modify-write, each process rewrites the file from
-	// its own map and silently drops the other's sessions.
+	// Assert — every record from BOTH daemons survives. Without the
+	// read-modify-write inside one immediate transaction, each process
+	// rewrites the tables from its own map and silently drops the other's
+	// sessions.
 	reopened := Open(path, discardLogf)
 	if got := len(reopened.All()); got != perDaemon*2 {
-		t.Fatalf("records on disk = %d, want %d (lost update: one daemon clobbered the other)", got, perDaemon*2)
+		t.Fatalf("records in the store = %d, want %d (lost update: one daemon clobbered the other)", got, perDaemon*2)
 	}
 }
 
-func TestConcurrentWritersLeaveTheFileParseable(t *testing.T) {
-	// Arrange — hammer one path from many goroutines across two
-	// registries; a torn write would surface as a corrupt-file log.
+func TestConcurrentWritersLeaveTheTableReadable(t *testing.T) {
+	// Arrange — hammer one store from many goroutines across two
+	// registries; a torn write would surface as a corrupt-read log.
 	path := testPath(t)
 	writers := []*Registry{Open(path, discardLogf), Open(path, discardLogf)}
 	var wg sync.WaitGroup
@@ -309,28 +376,30 @@ func TestConcurrentWritersLeaveTheFileParseable(t *testing.T) {
 		}()
 	}
 	wg.Wait()
-	// Act — a fresh reader parses whatever the racers left behind.
+	// Act — a fresh reader reads whatever the racers left behind.
 	var logged []string
 	reopened := Open(path, collectLogf(&logged))
 	// Assert
 	if strings.Contains(strings.Join(logged, "\n"), "CORRUPT") {
-		t.Fatalf("concurrent writers tore the file: %q", logged)
+		t.Fatalf("concurrent writers tore the store: %q", logged)
 	}
 	if got := len(reopened.All()); got != 40 {
 		t.Fatalf("records = %d, want 40", got)
 	}
 }
 
-func TestPrepareMigratesAndRepairsConversationCheckpointAcrossRestart(t *testing.T) {
-	// Arrange: a v1 registry has the checkpoint facts spread across predecessor
-	// records for one conversation.
+func TestPrepareRepairsConversationCheckpointAcrossRestart(t *testing.T) {
+	// Arrange: an externally written store has the checkpoint facts spread
+	// across predecessor records for one conversation, with no checkpoint row.
 	path := testPath(t)
-	doc := `{"version":1,"sessions":[
-	  {"session_id":"s_old","config_dir":"/cfg","cwd":"/w","claude_session_id":"uuid-1","terminal":true,"last_seq":91,"backfill_state":"done","created_at":"2026-07-01T00:00:00Z"},
-	  {"session_id":"s_live","config_dir":"/cfg","cwd":"/w","claude_session_id":"uuid-1","last_seq":7,"backfill_state":"pending","created_at":"2026-07-02T00:00:00Z"}
-	]}`
-	if err := os.WriteFile(path, []byte(doc), 0o600); err != nil {
-		t.Fatal(err)
+	db := rawStore(t, path)
+	seed := `INSERT INTO session_record(session_id, config_dir, cwd, claude_session_id, terminal,
+		last_seq, backfill_state, created_at) VALUES (?,?,?,?,?,?,?,?)`
+	if _, err := db.Exec(seed, "s_old", "/cfg", "/w", "uuid-1", 1, 91, "done", "2026-07-01T00:00:00Z"); err != nil {
+		t.Fatalf("seed s_old: %v", err)
+	}
+	if _, err := db.Exec(seed, "s_live", "/cfg", "/w", "uuid-1", 0, 7, "pending", "2026-07-02T00:00:00Z"); err != nil {
+		t.Fatalf("seed s_live: %v", err)
 	}
 	r := Open(path, discardLogf)
 
@@ -350,38 +419,6 @@ func TestPrepareMigratesAndRepairsConversationCheckpointAcrossRestart(t *testing
 	live, ok := reopened.Get("s_live")
 	if !ok || live.LastSeq != 91 || live.BackfillState != "done" {
 		t.Fatalf("live record = %+v ok=%v, want hydrated checkpoint", live, ok)
-	}
-}
-
-func TestCheckpointSidecarRepairsAnOldDaemonV1Overwrite(t *testing.T) {
-	// Arrange: v2 has already compacted a predecessor into its checkpoint.
-	path := testPath(t)
-	r := Open(path, discardLogf)
-	if err := r.Put(Record{
-		SessionID: "s_old", ConfigDir: "/cfg", CWD: "/w", ClaudeSessionID: "uuid-1",
-		Terminal: true, LastSeq: 88, BackfillState: "done",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	// A draining old daemon knows only v1 and rewrites the main file, dropping
-	// embedded checkpoints. It cannot know or touch the sidecar.
-	v1 := `{"version":1,"sessions":[
-	  {"session_id":"s_live","config_dir":"/cfg","cwd":"/w","claude_session_id":"uuid-1","last_seq":3}
-	]}`
-	if err := os.WriteFile(path, []byte(v1), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	// Act.
-	replacement := Open(path, discardLogf)
-	if err := replacement.Prepare(); err != nil {
-		t.Fatalf("Prepare after v1 overwrite: %v", err)
-	}
-
-	// Assert: the sidecar restores the checkpoint and hydrates the live record.
-	live, ok := replacement.Get("s_live")
-	if !ok || live.LastSeq != 88 || live.BackfillState != "done" {
-		t.Fatalf("live after sidecar repair = %+v ok=%v, want seq=88 done", live, ok)
 	}
 }
 
@@ -543,20 +580,23 @@ func TestTerminalCompactionRefusesToPruneUndeliveredQueuedPrompts(t *testing.T) 
 }
 
 func TestPrepareFailsOnInvalidCheckpointState(t *testing.T) {
+	// Arrange — an externally written checkpoint row with a backfill state the
+	// vocabulary does not contain.
 	path := testPath(t)
-	doc := `{"version":2,"sessions":[],"conversation_checkpoints":[
-	  {"cwd":"/w","claude_session_id":"uuid-1","backfill_state":"teleporting"}
-	]}`
-	if err := os.WriteFile(path, []byte(doc), 0o600); err != nil {
-		t.Fatal(err)
+	db := rawStore(t, path)
+	if _, err := db.Exec(`INSERT INTO conversation_checkpoint(config_dir, cwd, claude_session_id, backfill_state)
+		VALUES ('', '/w', 'uuid-1', 'teleporting')`); err != nil {
+		t.Fatalf("seed checkpoint: %v", err)
 	}
 	var logged []string
+	// Act
 	r := Open(path, collectLogf(&logged))
+	// Assert
 	if err := r.Prepare(); err == nil {
 		t.Fatal("Prepare succeeded with invalid checkpoint state")
 	}
-	if !strings.Contains(strings.Join(logged, "\n"), "prepare FAILED") {
-		t.Fatalf("migration failure was not loud: %q", logged)
+	if !strings.Contains(strings.Join(logged, "\n"), "INVALID") {
+		t.Fatalf("the invalid checkpoint was not loud: %q", logged)
 	}
 }
 

@@ -83,7 +83,7 @@ func TestDaemonWorktreePlansCollisionDeterministically(t *testing.T) {
 
 func TestDaemonWorktreeForkUsesSourceWorkspaceHeadAndVendorSession(t *testing.T) {
 	root := testGitRoot(t)
-	reg := registry.Open(filepath.Join(t.TempDir(), "registry.json"), func(string, ...any) {})
+	reg := registry.Open(filepath.Join(t.TempDir(), "registry.db"), func(string, ...any) {})
 	if err := reg.Put(registry.Record{SessionID: "source-daemon", CWD: "/source-worktree", ClaudeSessionID: "vendor-source"}); err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +182,7 @@ func (f *fakeSessionCommands) CreateSession(_ context.Context, opts server.Creat
 func (*fakeSessionCommands) DeleteSession(string) error { return nil }
 
 func TestDaemonSessionCreatorUsesExplicitAccountAndPermissionMetadata(t *testing.T) {
-	reg := registry.Open(filepath.Join(t.TempDir(), "registry.json"), func(string, ...any) {})
+	reg := registry.Open(filepath.Join(t.TempDir(), "registry.db"), func(string, ...any) {})
 	commands := &fakeSessionCommands{id: "s_new"}
 	// Match Server.CreateSession's durable registry effect without invoking the
 	// server: the adapter's contract is to verify that durable side effect.
@@ -212,7 +212,7 @@ func TestDaemonSessionCreatorUsesExplicitAccountAndPermissionMetadata(t *testing
 }
 
 func TestDaemonSessionCreatorPassesResolvedForkVendorSessionAsResume(t *testing.T) {
-	reg := registry.Open(filepath.Join(t.TempDir(), "registry.json"), func(string, ...any) {})
+	reg := registry.Open(filepath.Join(t.TempDir(), "registry.db"), func(string, ...any) {})
 	var got server.CreateOpts
 	creator := daemonSessionCreator{Registry: reg, Logf: func(string, ...any) {}}
 	creator.Commands = sessionCommandFunc(func(_ context.Context, opts server.CreateOpts) (string, error) {
@@ -231,7 +231,7 @@ func TestDaemonSessionCreatorPassesResolvedForkVendorSessionAsResume(t *testing.
 }
 
 func TestDaemonSessionCreatorSourceMetadataAssertionsAndInheritance(t *testing.T) {
-	reg := registry.Open(filepath.Join(t.TempDir(), "registry.json"), func(string, ...any) {})
+	reg := registry.Open(filepath.Join(t.TempDir(), "registry.db"), func(string, ...any) {})
 	if err := reg.Put(registry.Record{SessionID: "source", CWD: "/source", ConfigDir: "/cfg-source", PermissionMode: "plan"}); err != nil {
 		t.Fatal(err)
 	}
@@ -265,7 +265,7 @@ func (f *fakePromptRouter) SubmitWorkspaceInitialPrompt(_ context.Context, works
 }
 
 func TestInitialPromptAdapterRequiresLiveRegisteredJobSession(t *testing.T) {
-	reg := registry.Open(filepath.Join(t.TempDir(), "registry.json"), func(string, ...any) {})
+	reg := registry.Open(filepath.Join(t.TempDir(), "registry.db"), func(string, ...any) {})
 	if err := reg.Put(registry.Record{SessionID: "s1", CWD: "/worktree"}); err != nil {
 		t.Fatal(err)
 	}
