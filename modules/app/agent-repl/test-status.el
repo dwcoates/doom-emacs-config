@@ -1186,31 +1186,51 @@ mock."
                   (lambda () "ws-five")))
          ,@body))))
 
-(ert-deftest agent-repl-test-workspace-tabline-formatted-always-one-row ()
-  "The formatted tab-bar segment ALWAYS spans exactly one row.
+(ert-deftest agent-repl-test-workspace-tabline-formatted-always-two-rows ()
+  "The formatted tab-bar segment ALWAYS spans exactly two rows.
 The row count is FIXED (never varies with workspace count): a
 row-count change alters the tab-bar pixel height; on macOS
 `ns_change_tab_bar_height' then resizes the NSWindow, and a clipped
-resize livelocks redisplay at 100% CPU.  A single row carries no
-newline, and many workspaces at a narrow frame width must elide
-behind badges, never wrap to a second row."
+resize livelocks redisplay at 100% CPU.  Two rows carry exactly one
+newline, and many workspaces at a narrow frame width must elide behind
+badges, never wrap to a third row."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-eight-registered-workspaces
      (cl-letf (((symbol-function 'frame-width) (lambda () 24)))
        (dolist (agent-repl--tabline-space-toggle '(nil t))
          (let ((result (agent-repl-workspace-tabline-formatted)))
            (should (stringp result))
-           (should (= 0 (cl-count ?\n result)))))))))
+           (should (= 1 (cl-count ?\n result)))))))))
 
-(ert-deftest agent-repl-test-workspace-tabline-formatted-single-row-when-few-tabs ()
-  "With only a couple of tabs, the segment is a single row with no newline.
-The fixed one-row count keeps the tab-bar's pixel height constant."
+(ert-deftest agent-repl-test-workspace-tabline-formatted-two-rows-when-few-tabs ()
+  "With only a couple of tabs, the segment is STILL exactly two rows.
+The entries need one row, so the second renders blank — but it renders,
+because the fixed two-row count is what keeps the tab-bar's pixel
+height constant."
   (agent-repl-test--with-clean-state
     (cl-letf (((symbol-function '+workspace-list-names) (lambda () '("ws1" "ws2")))
               ((symbol-function '+workspace-current-name) (lambda () "ws1"))
               ((symbol-function 'frame-width) (lambda () 80)))
       (let ((agent-repl--tabline-space-toggle nil))
-        (should (= 0 (cl-count ?\n (agent-repl-workspace-tabline-formatted))))))))
+        (should (= 1 (cl-count ?\n (agent-repl-workspace-tabline-formatted))))))))
+
+(ert-deftest agent-repl-test-workspace-tabline-formatted-pads-unfilled-row ()
+  "The row the entries do not fill is blank-padded to the full line width.
+A zero-length second line would not occupy the pixel row the pinned
+`tab-bar-lines' reserves for it."
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function '+workspace-list-names) (lambda () '("ws1" "ws2")))
+              ((symbol-function '+workspace-current-name) (lambda () "ws1"))
+              ((symbol-function 'frame-width) (lambda () 80)))
+      (let* ((agent-repl--tabline-space-toggle nil)
+             (lines (split-string
+                     (substring-no-properties
+                      (agent-repl-workspace-tabline-formatted))
+                     "\n")))
+        (should (= 2 (length lines)))
+        ;; Second line: 79 pad columns plus the join's unfaced terminator.
+        (should (string-blank-p (nth 1 lines)))
+        (should (= 80 (length (nth 1 lines))))))))
 
 (ert-deftest agent-repl-test-workspace-tabline-formatted-overflow-shows-current ()
   "When workspaces overflow the single row, the current one stays visible."
@@ -2297,12 +2317,14 @@ newline, so the join controls the row count and thus the tab-bar height."
         (should (string-search (nth cur entries) row))))))
 
 (ert-deftest agent-repl-test-tabline-rows-single-overflow-badges ()
-  "Elided neighbors are summarized by +N badges on the matching side."
-  ;; budget = 20 - 2*(2 + 1) = 14; window around index 2 ("cccc"):
-  ;; grows right to "dddd" (9), left to "bbbb" (14), then no more fits.
+  "Elided neighbors are summarized by +N badges on the matching side.
+The window STARTS at the anchor and runs right; the two entries before
+the anchor are what the leading badge counts."
+  ;; budget = 20 - 2*(2 + 1) = 14; window from index 2 ("cccc") holds
+  ;; "cccc dddd eeee" (14) exactly, so nothing is elided on the right.
   (let ((row (agent-repl-test--single-row
               '("aaaa" "bbbb" "cccc" "dddd" "eeee") 2 20)))
-    (should (equal row "+1 bbbb cccc dddd +1"))))
+    (should (equal row "+2 cccc dddd eeee"))))
 
 (ert-deftest agent-repl-test-tabline-rows-overflow-fits-width ()
   "No packed row (window + badges) ever exceeds WIDTH columns."
@@ -2596,9 +2618,13 @@ called and verifies the advice runs cleanly."
       (should-not pre-redisplay-function))))
 
 (ert-deftest agent-repl-test-fixed-height-tab-bar-disables-native-resize ()
-  "Installation disables auto-resize and pins existing and future frames.
+  "Installation disables auto-resize and pins FUTURE frames only.
 This is the regression contract for the macOS 100%-CPU livelock:
-`redisplay_tab_bar' must never enter its dynamic height path."
+`redisplay_tab_bar' must never enter its dynamic height path, and
+installation must never change a LIVE frame's `tab-bar-lines' — that is
+the path that drives `ns_change_tab_bar_height'.  Existing frames keep
+whatever height they were born with until the user invokes
+`agent-repl-tabbar-apply-row-count'."
   (let ((auto-resize-tab-bars 'grow-only)
         (default-frame-alist '((tab-bar-lines . 1) (width . 100)))
         (frame-inhibit-implied-resize nil)
@@ -2617,9 +2643,8 @@ This is the regression contract for the macOS 100%-CPU livelock:
                  (and (eq parameter 'tab-bar-lines)
                       (alist-get frame frame-lines))))
               ((symbol-function 'set-frame-parameter)
-               (lambda (frame parameter value)
-                 (should (eq parameter 'tab-bar-lines))
-                 (setf (alist-get frame frame-lines) value)))
+               (lambda (&rest _)
+                 (error "fixed-height install must not resize a live frame")))
               ((symbol-function 'tab-bar-mode)
                (lambda (arg)
                  (setq tab-bar-mode-arg arg)
@@ -2638,10 +2663,8 @@ This is the regression contract for the macOS 100%-CPU livelock:
       (should (eq tab-bar-mode-arg 1))
       (should (= (alist-get 'tab-bar-lines default-frame-alist)
                  agent-repl--tabline-row-count))
-      (should (= (alist-get 'frame-a frame-lines)
-                 agent-repl--tabline-row-count))
-      (should (= (alist-get 'frame-b frame-lines)
-                 agent-repl--tabline-row-count))
+      ;; Live frames are left exactly as they were found.
+      (should (equal frame-lines '((frame-a . 1) (frame-b . 3))))
       (should (memq 'tab-bar-lines frame-inhibit-implied-resize))
       (should (equal tab-bar-format
                      '(agent-repl-workspace-tabline-formatted
