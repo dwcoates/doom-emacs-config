@@ -53,7 +53,9 @@ option go_package = "agentrepl/proto/agentshim/frontend/v1;frontendv1";
 //          conclusion, the counterpart to green's "ended normally", and
 //          gates nothing: prompting stays available, and the next thing
 //          the agent does replaces it.
-//   RED    THINKING — a turn is in flight.
+//   RED    THINKING, CLEARING, COMPACTING — a turn is in flight. The three
+//          share the color because they share the claim; only the phase WORD
+//          distinguishes what the agent is busy with.
 //   YELLOW IDLE_ASYNC — no foreground turn, but detached work is live.
 //   GREEN  READY, IDLE, DONE, PERMISSION — the route is proven usable
 //          WITHOUT requiring a first message and a frontend has attested
@@ -99,6 +101,18 @@ enum RenderState {
   // was delivered (core.InterruptOutcome INTERRUPTED), and the next
   // agent-axis row supersedes it. Never a latch, never needs releasing.
   RENDER_STATE_INTERRUPTED = 17;
+  // Additive: the two CONTEXT-CUT states. Both are red for the same reason
+  // THINKING is — the agent is busy and the user's prompt cannot land yet —
+  // and the WORD is the whole distinction, exactly as INTERRUPTED's green
+  // documents. They outrank thinking in the SSM's rank table because they are
+  // busy with something OTHER than the answer, which is the more specific
+  // true statement about what the session is doing.
+  //
+  // CLEARING is user-initiated (a dispatched `/clear`) and COMPACTING can be
+  // either the user's `/compact` or the vendor's automatic one; when both are
+  // somehow open, clearing wins.
+  RENDER_STATE_CLEARING = 18;
+  RENDER_STATE_COMPACTING = 19;
 }
 
 message FrontendFrame {

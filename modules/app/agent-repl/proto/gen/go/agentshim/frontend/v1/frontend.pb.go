@@ -68,7 +68,9 @@ const (
 //	       conclusion, the counterpart to green's "ended normally", and
 //	       gates nothing: prompting stays available, and the next thing
 //	       the agent does replaces it.
-//	RED    THINKING — a turn is in flight.
+//	RED    THINKING, CLEARING, COMPACTING — a turn is in flight. The three
+//	       share the color because they share the claim; only the phase WORD
+//	       distinguishes what the agent is busy with.
 //	YELLOW IDLE_ASYNC — no foreground turn, but detached work is live.
 //	GREEN  READY, IDLE, DONE, PERMISSION — the route is proven usable
 //	       WITHOUT requiring a first message and a frontend has attested
@@ -118,6 +120,18 @@ const (
 	// was delivered (core.InterruptOutcome INTERRUPTED), and the next
 	// agent-axis row supersedes it. Never a latch, never needs releasing.
 	RenderState_RENDER_STATE_INTERRUPTED RenderState = 17
+	// Additive: the two CONTEXT-CUT states. Both are red for the same reason
+	// THINKING is — the agent is busy and the user's prompt cannot land yet —
+	// and the WORD is the whole distinction, exactly as INTERRUPTED's green
+	// documents. They outrank thinking in the SSM's rank table because they are
+	// busy with something OTHER than the answer, which is the more specific
+	// true statement about what the session is doing.
+	//
+	// CLEARING is user-initiated (a dispatched `/clear`) and COMPACTING can be
+	// either the user's `/compact` or the vendor's automatic one; when both are
+	// somehow open, clearing wins.
+	RenderState_RENDER_STATE_CLEARING   RenderState = 18
+	RenderState_RENDER_STATE_COMPACTING RenderState = 19
 )
 
 // Enum value maps for RenderState.
@@ -141,6 +155,8 @@ var (
 		15: "RENDER_STATE_READY",
 		16: "RENDER_STATE_VENDOR_BLOCKED",
 		17: "RENDER_STATE_INTERRUPTED",
+		18: "RENDER_STATE_CLEARING",
+		19: "RENDER_STATE_COMPACTING",
 	}
 	RenderState_value = map[string]int32{
 		"RENDER_STATE_UNSPECIFIED":    0,
@@ -161,6 +177,8 @@ var (
 		"RENDER_STATE_READY":          15,
 		"RENDER_STATE_VENDOR_BLOCKED": 16,
 		"RENDER_STATE_INTERRUPTED":    17,
+		"RENDER_STATE_CLEARING":       18,
+		"RENDER_STATE_COMPACTING":     19,
 	}
 )
 
@@ -5647,7 +5665,7 @@ const file_agentshim_frontend_v1_frontend_proto_rawDesc = "" +
 	"\x06queues\x18\x06 \x03(\v2 .agentshim.frontend.v1.QueueViewR\x06queues\x12?\n" +
 	"\bprogress\x18\a \x03(\v2#.agentshim.frontend.v1.ProgressViewR\bprogress\x12Z\n" +
 	"\x13workspace_available\x18\b \x03(\v2).agentshim.frontend.v1.WorkspaceAvailableR\x12workspaceAvailable\x12D\n" +
-	"\fhost_actions\x18\t \x03(\v2!.agentshim.frontend.v1.HostActionR\vhostActions*\x82\x04\n" +
+	"\fhost_actions\x18\t \x03(\v2!.agentshim.frontend.v1.HostActionR\vhostActions*\xba\x04\n" +
 	"\vRenderState\x12\x1c\n" +
 	"\x18RENDER_STATE_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11RENDER_STATE_INIT\x10\x01\x12\x15\n" +
@@ -5667,7 +5685,9 @@ const file_agentshim_frontend_v1_frontend_proto_rawDesc = "" +
 	"\x15RENDER_STATE_DEGRADED\x10\x0e\x12\x16\n" +
 	"\x12RENDER_STATE_READY\x10\x0f\x12\x1f\n" +
 	"\x1bRENDER_STATE_VENDOR_BLOCKED\x10\x10\x12\x1c\n" +
-	"\x18RENDER_STATE_INTERRUPTED\x10\x11*\x7f\n" +
+	"\x18RENDER_STATE_INTERRUPTED\x10\x11\x12\x19\n" +
+	"\x15RENDER_STATE_CLEARING\x10\x12\x12\x1b\n" +
+	"\x17RENDER_STATE_COMPACTING\x10\x13*\x7f\n" +
 	"\rBackfillState\x12\x1e\n" +
 	"\x1aBACKFILL_STATE_UNSPECIFIED\x10\x00\x12\x1a\n" +
 	"\x16BACKFILL_STATE_PENDING\x10\x01\x12\x17\n" +

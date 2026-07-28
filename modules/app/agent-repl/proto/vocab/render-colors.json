@@ -40,6 +40,8 @@
     "RENDER_STATE_STOP_FAILED": "purple",
 
     "RENDER_STATE_THINKING": "red",
+    "RENDER_STATE_CLEARING": "red",
+    "RENDER_STATE_COMPACTING": "red",
 
     "RENDER_STATE_IDLE_ASYNC": "yellow",
 
