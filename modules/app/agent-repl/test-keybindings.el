@@ -325,45 +325,6 @@ already missing from the cache — that would emit the spurious
           (should (eq result 'kill))
           (should-not persp-killed))))))
 
-;;;; ---- Tests: agent-repl--write-output-json ----
-
-(ert-deftest agent-repl-test-write-output-json-creates-file ()
-  "write-output-json should write JSON content to the output directory."
-  (let* ((tmpdir (make-temp-file "agent-repl-test-" t))
-         (agent-repl--output-dir tmpdir))
-    (unwind-protect
-        (let ((file (agent-repl--write-output-json "test.json" '((key . "value")))))
-          (should (file-exists-p file))
-          (should (string= (expand-file-name "test.json" tmpdir) file))
-          (with-temp-buffer
-            (insert-file-contents file)
-            (let ((data (json-read-from-string (buffer-string))))
-              (should (equal (alist-get 'key data) "value")))))
-      (delete-directory tmpdir t))))
-
-(ert-deftest agent-repl-test-write-output-json-creates-directory ()
-  "write-output-json should create the output directory if it does not exist."
-  (let* ((tmpdir (make-temp-file "agent-repl-test-" t))
-         (subdir (expand-file-name "nested/dir" tmpdir))
-         (agent-repl--output-dir subdir))
-    (unwind-protect
-        (progn
-          (should-not (file-directory-p subdir))
-          (agent-repl--write-output-json "test.json" '((a . 1)))
-          (should (file-directory-p subdir))
-          (should (file-exists-p (expand-file-name "test.json" subdir))))
-      (delete-directory tmpdir t))))
-
-(ert-deftest agent-repl-test-write-output-json-returns-full-path ()
-  "write-output-json should return the full path of the written file."
-  (let* ((tmpdir (make-temp-file "agent-repl-test-" t))
-         (agent-repl--output-dir tmpdir))
-    (unwind-protect
-        (let ((result (agent-repl--write-output-json "out.json" [1 2 3])))
-          (should (stringp result))
-          (should (string= result (expand-file-name "out.json" tmpdir))))
-      (delete-directory tmpdir t))))
-
 ;;;; ---- Tests: agent-repl-set-priority ----
 
 (ert-deftest agent-repl-test-set-priority-stores-value ()
@@ -716,60 +677,6 @@ prior value and writes :repl-state :dead."
     (agent-repl-debug/--apply-state-refresh "ws1" nil)
     (should-not (agent-repl--ws-state "ws1"))))
 
-;;;; ---- Tests: agent-repl-debug/mock-workspace-generation ----
-
-(ert-deftest agent-repl-test-mock-workspace-generation-default ()
-  "mock-workspace-generation should write a default mock file.
-The default name is built from the workspace prefix (here stubbed to
-\"DWC\" via CLAUDE_WORKSPACE_PREFIX) plus the bare default slug."
-  (let* ((tmpdir (make-temp-file "agent-repl-test-" t))
-         (agent-repl--output-dir tmpdir))
-    (unwind-protect
-        (cl-letf (((symbol-function 'getenv)
-                   (lambda (k) (and (equal k "CLAUDE_WORKSPACE_PREFIX") "DWC"))))
-          (agent-repl-debug/mock-workspace-generation)
-          (let ((file (expand-file-name "workspace_generation.json" tmpdir)))
-            (should (file-exists-p file))
-            (with-temp-buffer
-              (insert-file-contents file)
-              (let ((data (json-read-from-string (buffer-string))))
-                (should (vectorp data))
-                (should (equal (aref data 0) "DWC/mock-test"))))))
-      (delete-directory tmpdir t))))
-
-(ert-deftest agent-repl-test-mock-workspace-generation-default-no-prefix ()
-  "mock-workspace-generation default name drops the prefix when the env
-var is unset, yielding the bare slug with no leading slash."
-  (let* ((tmpdir (make-temp-file "agent-repl-test-" t))
-         (agent-repl--output-dir tmpdir))
-    (unwind-protect
-        (cl-letf (((symbol-function 'getenv) (lambda (_) nil)))
-          (agent-repl-debug/mock-workspace-generation)
-          (let ((file (expand-file-name "workspace_generation.json" tmpdir)))
-            (should (file-exists-p file))
-            (with-temp-buffer
-              (insert-file-contents file)
-              (let ((data (json-read-from-string (buffer-string))))
-                (should (vectorp data))
-                (should (equal (aref data 0) "mock-test"))))))
-      (delete-directory tmpdir t))))
-
-(ert-deftest agent-repl-test-mock-workspace-generation-custom-names ()
-  "mock-workspace-generation should accept custom branch names."
-  (let* ((tmpdir (make-temp-file "agent-repl-test-" t))
-         (agent-repl--output-dir tmpdir))
-    (unwind-protect
-        (progn
-          (agent-repl-debug/mock-workspace-generation '("branch-a" "branch-b"))
-          (let ((file (expand-file-name "workspace_generation.json" tmpdir)))
-            (with-temp-buffer
-              (insert-file-contents file)
-              (let ((data (json-read-from-string (buffer-string))))
-                (should (equal (length data) 2))
-                (should (equal (aref data 0) "branch-a"))
-                (should (equal (aref data 1) "branch-b"))))))
-      (delete-directory tmpdir t))))
-
 ;;;; ---- Tests: agent-repl-debug/workspace-states ----
 
 (ert-deftest agent-repl-test-debug-workspace-states ()
@@ -836,13 +743,6 @@ var is unset, yielding the bare slug with no leading slash."
                                             (setq msg (apply #'format fmt args)))))
       (agent-repl-debug/workspace-clean-p "ws1")
       (should (string-match-p "dirty" msg)))))
-
-;;;; ---- Tests: agent-repl--output-dir constant ----
-
-(ert-deftest agent-repl-test-output-dir-is-absolute ()
-  "output-dir should be an absolute path under ~/.claude-emacs/output/."
-  (should (file-name-absolute-p agent-repl--output-dir))
-  (should (string-match-p "output/$" agent-repl--output-dir)))
 
 ;;;; ---- Tests: format-buffer-info with owning set but persp nil ----
 
