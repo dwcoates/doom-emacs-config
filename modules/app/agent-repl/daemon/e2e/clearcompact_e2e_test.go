@@ -296,6 +296,11 @@ func replayItems(t *testing.T, conn *websocket.Conn, workspace, requestID string
 func isClear(item *frontendv1.ConversationItem) bool   { return item.GetContextCleared() != nil }
 func isCompact(item *frontendv1.ConversationItem) bool { return item.GetContextCompacted() != nil }
 
+// isResult identifies a turn's ResultMessage item — the LAST conversation item
+// a turn produces. Awaiting it is how a test quiesces a turn before doing
+// anything that races the turn's own tail.
+func isResult(item *frontendv1.ConversationItem) bool { return item.GetResult() != nil }
+
 // seqItems drops the items a replay serves REGARDLESS of seq — the retained
 // permission items (arm 30), failure cards (arm 31), and prompt receipts
 // (sessiondrv/promptecho.go), all of which are daemon-composed, carry no store
@@ -429,13 +434,24 @@ func TestE2ELiveAndReplayAgreeFromTheFloor(t *testing.T) {
 	cwd := t.TempDir()
 	id, live, vendorID, store := liveSession(t, h, cwd)
 	writeCmd(t, live, `{"requestId":"r-before","submitPrompt":{"text":"before the clear"}}`)
+	// Quiesce the first turn before the floor goes in, so the ONLY result item
+	// left to arrive below is the after-turn's (every fake turn ends in exactly
+	// one result message, fake-query.ts).
+	awaitItem(t, live, cwd, "before-turn result item", isResult)
 
 	// Act — clear (the floor), then more real traffic above it, observed live.
 	store.write(sidecarClearEvent(vendorID, "e2e-clear-line-equiv"))
 	clearItem, _ := awaitItem(t, live, cwd, "ContextCleared item", isClear)
 	writeCmd(t, live, `{"requestId":"r-after","submitPrompt":{"text":"after the clear"}}`)
-	fromFloor := append([]*frontendv1.ConversationItem{clearItem}, collectItems(t, live, cwd, 2)...)
-	fromFloor = seqItems(fromFloor)
+	// The after-turn must be FULLY drained before the fresh connection is dialed
+	// below. The daemon pushes every newly-arriving event live to all
+	// subscribers, so a still-streaming turn would land items on the fresh conn
+	// interleaved with its replay burst — a fixture race, not a daemon
+	// misordering. The turn's result item is its last conversation item, so
+	// observing it is the quiescence point.
+	afterResult, aboveFloor := awaitItem(t, live, cwd, "after-turn result item", isResult)
+	fromFloor := append([]*frontendv1.ConversationItem{clearItem}, aboveFloor...)
+	fromFloor = seqItems(append(fromFloor, afterResult))
 
 	// Assert
 	replayed := seqItems(replayItems(t, h.dial(t, id), cwd, "r-replay"))
