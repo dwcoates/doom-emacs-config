@@ -4,16 +4,30 @@
  * The shim OWNS the `session-<id>.sock` and OUTLIVES the daemon: a dropped
  * daemon connection tears nothing down (the SDK turn keeps running, the store
  * subscription keeps landing durable events). A restarted daemon simply
- * reconnects to the same live shim, re-handshakes, and re-subscribes
+ * reconnects to the same live shim and re-runs the bring-up gate below
  * (design §4.4 REATTACH). This class therefore never ends a turn on
  * disconnect and never buffers events for an absent daemon — unsent events are
- * durable in the store and replayed on the next `Subscribe{from_seq}`.
+ * durable in the store and replayed from the from_seq the next hello carries.
  *
- * Handshake: the LISTENER speaks first (core.proto), sending `ShimHello`
- * immediately on accept; the daemon replies `DaemonHello`. Control messages
- * (`SubmitPrompt`, `Interrupt`, `PermissionResponse`, `Subscribe`) are
- * dispatched to injected handlers; `SubmitPrompt`/`Interrupt` handlers return
- * the synchronous `Ack`/`Nack` receipt this server writes back.
+ * THE BRING-UP GATE (core.proto ShimHello). One exchange, three frames:
+ *   1. `ShimHello`   — sent by this class the instant a connection is made
+ *                      (the DIALER speaks first), and what identifies the
+ *                      session to the daemon's listener.
+ *   2. `DaemonHello` — the daemon's reply, carrying the from_seq the standing
+ *                      store subscription is to be opened at. Handed to
+ *                      `onDaemonConnected`, whose owner does that wiring.
+ *   3. `ShimReady`   — written by {@link SessionServer.sendReady} once that
+ *                      wiring is done. The daemon treats this session as
+ *                      driveable only from this frame onwards.
+ *
+ * There is deliberately no daemon→shim `Subscribe` any more: it made the store
+ * subscription a stage BEYOND the handshake, and every bring-up race lived in
+ * the gap between the two.
+ *
+ * Control messages (`SubmitPrompt`, `Interrupt`, `PermissionResponse`,
+ * `ReplayRequest`, `HealthCheck`) are dispatched to injected handlers;
+ * `SubmitPrompt`/`Interrupt` handlers return the synchronous `Ack`/`Nack`
+ * receipt this server writes back.
  */
 import net from "node:net";
 import {
@@ -50,8 +64,8 @@ import {
   ReplayRequest,
   ReplayRequestSchema,
   ShimHelloSchema,
-  Subscribe,
-  SubscribeSchema,
+  ShimReady,
+  ShimReadySchema,
   SubmitPrompt,
   SubmitPromptSchema,
 } from "./proto.js";
@@ -67,17 +81,23 @@ export interface SessionServerHandlers {
   onInterrupt(msg: Interrupt): Receipt;
   /** Deliver a permission decision to the blocked canUseTool round-trip. */
   onPermissionResponse(msg: PermissionResponse): void;
-  /** (Re)start the store→daemon forward from `from_seq` (reattach replay). */
-  onSubscribe(msg: Subscribe): void;
   /**
-   * Serve a BOUNDED historical replay (core.proto ReplayRequest). Distinct
-   * from onSubscribe in the way that matters: this must NOT move the standing
-   * subscription, and its events go back as ReplayEvent rather than Event.
+   * Serve a BOUNDED historical replay (core.proto ReplayRequest). Its events
+   * go back as ReplayEvent rather than Event, and it must NOT move the
+   * standing store subscription.
    */
   onReplayRequest(msg: ReplayRequest): void;
   /** Return a correlated readiness assertion for this live shim session. */
   onHealthCheck(msg: HealthCheck): Promise<HealthStatus> | HealthStatus;
-  /** Daemon (re)connected and completed the handshake. */
+  /**
+   * The daemon answered with its DaemonHello: STAGE 2 of the bring-up gate.
+   *
+   * The implementer completes this session's wiring — the standing store
+   * subscription at `hello.fromSeq` above all — and then calls
+   * {@link SessionServer.sendReady} to close the gate. It is deliberately not
+   * this class's job: the store belongs to the session, and this class owns
+   * only the daemon link.
+   */
   onDaemonConnected?(hello: DaemonHello): void;
   /** Daemon connection lost (reattach possible; nothing torn down). */
   onDaemonDisconnected?(): void;
@@ -196,8 +216,8 @@ export class SessionServer {
   /**
    * Forward one store-merged Event to the daemon. Dropped (with a debug log)
    * when no daemon is attached — the event is durable in the store and
-   * replayed on the next Subscribe, so buffering here would be a forbidden
-   * spill path.
+   * replayed on the next gate's from_seq, so buffering here would be a
+   * forbidden spill path.
    */
   sendEvent(evt: Event): void {
     if (!this.isConnected()) {
@@ -205,6 +225,33 @@ export class SessionServer {
       return;
     }
     this.conn!.send(EventSchema, evt);
+  }
+
+  /**
+   * STAGE 3 of the bring-up gate: tell the daemon this session is fully wired.
+   *
+   * Written by the session once its store subscription is open and settled at
+   * the from_seq the DaemonHello carried. Nothing else may send it — the whole
+   * value of the frame is that its ARRIVAL is proof of the wiring, so a
+   * speculative one would be worse than none at all.
+   *
+   * A gone connection is loud and NOT retried here: the reconnect loop will
+   * re-run the entire gate on the next connection, hello and all, which is the
+   * correct way to re-establish readiness rather than replaying an ack for a
+   * connection that no longer exists.
+   */
+  sendReady(ready: ShimReady): void {
+    if (!this.isConnected()) {
+      shimLog(COMPONENT, { session: this.opts.sessionId, from_seq: ready.fromSeq },
+        `bring-up gate ack ABANDONED: the daemon connection went away before ShimReady could be written; the next connection re-runs the whole gate`);
+      return;
+    }
+    this.conn!.send(ShimReadySchema, ready);
+    shimLog(COMPONENT, {
+      session: this.opts.sessionId,
+      from_seq: ready.fromSeq,
+      store_key: ready.vendorSessionId,
+    }, `bring-up gate CLOSED: ShimReady sent; this session is fully wired`);
   }
 
   /**
@@ -248,10 +295,11 @@ export class SessionServer {
    *
    * The bounce is the shim-initiated half of a vendor session ROTATION
    * (store-client.ts rotateStoreKey). A daemon disconnect already tears
-   * nothing down and a fresh handshake already re-announces this shim, so
-   * bouncing costs one round trip and buys the one thing the daemon cannot
-   * otherwise learn in time: the new vendor uuid, carried on the ShimHello of
-   * the connection this opens.
+   * nothing down, and the connection it opens re-runs the WHOLE bring-up gate
+   * — the new uuid announced on its ShimHello, the daemon's reset from_seq
+   * returned on its DaemonHello, the store subscription reopened there, and
+   * the ShimReady closing it. The rotation therefore needs no staging of its
+   * own; it costs one round trip and re-establishes every link at once.
    *
    * The backoff is reset first — this drop is our own doing, not evidence that
    * the daemon is unwell, so the redial should not inherit a penalty earned by
@@ -273,7 +321,7 @@ export class SessionServer {
       return;
     }
     shimLog(COMPONENT, { session: this.opts.sessionId },
-      `BOUNCING the daemon link deliberately (${reason}); the re-handshake announces the current vendor session id`);
+      `BOUNCING the daemon link deliberately (${reason}); the re-handshake re-runs the whole bring-up gate under the current vendor session id`);
     // onConnClose fires from the socket's close event and re-arms the dial.
     this.conn.close();
   }
@@ -308,8 +356,8 @@ export class SessionServer {
     );
     this.conn = conn;
     this.handshaked = false;
-    // The DIALER speaks first, and this frame is also what identifies the
-    // session to the daemon's listener, which routes the connection by it.
+    // STAGE 1. The DIALER speaks first, and this frame is also what identifies
+    // the session to the daemon's listener, which routes the connection by it.
     conn.send(ShimHelloSchema, create(ShimHelloSchema, {
       sessionId: this.opts.sessionId,
       vendor: this.opts.vendor ?? "claude",
@@ -321,7 +369,8 @@ export class SessionServer {
       // announces the NEW identity.
       vendorSessionId: this.opts.vendorSessionId ? this.opts.vendorSessionId() : "",
     }));
-    shimLog(COMPONENT, { session: this.opts.sessionId }, `connected to daemon at ${this.opts.socketPath}; ShimHello sent`);
+    shimLog(COMPONENT, { session: this.opts.sessionId },
+      `bring-up gate OPENED: connected to daemon at ${this.opts.socketPath}; ShimHello sent`);
   }
 
   private onMessage(msg: Any): void {
@@ -332,9 +381,14 @@ export class SessionServer {
         shimLog(COMPONENT, { session: this.opts.sessionId }, `ignoring ${envelopeType(msg)} received before DaemonHello`);
         return;
       }
+      // Handshaked BEFORE the wiring completes, deliberately: the wiring's own
+      // sad path (a DegradedState) and its ShimReady both have to be writable
+      // on this connection. What the daemon gates on is the ShimReady, not
+      // this flag, so nothing is admitted early by it.
       this.handshaked = true;
       this.startHeartbeat();
-      shimLog(COMPONENT, { session: this.opts.sessionId }, `handshake complete (daemon ${hello.daemonVersion || "?"})`);
+      shimLog(COMPONENT, { session: this.opts.sessionId, from_seq: hello.fromSeq },
+        `bring-up gate STAGE 2: DaemonHello received (daemon ${hello.daemonVersion || "?"}); wiring the session at the from_seq it carries`);
       this.handlers.onDaemonConnected?.(hello);
       return;
     }
@@ -355,12 +409,6 @@ export class SessionServer {
     const perm = unpackAs(msg, PermissionResponseSchema);
     if (perm) {
       this.handlers.onPermissionResponse(perm);
-      return;
-    }
-    const sub = unpackAs(msg, SubscribeSchema);
-    if (sub) {
-      shimLog(COMPONENT, { session: this.opts.sessionId, from_seq: sub.fromSeq }, `daemon subscribed`);
-      this.handlers.onSubscribe(sub);
       return;
     }
     const replay = unpackAs(msg, ReplayRequestSchema);
@@ -441,7 +489,7 @@ export class SessionServer {
     }
     this.handlers.onDaemonDisconnected?.();
     // Get back to the daemon: the turn is still running and its events are
-    // durable in the store, so reconnecting replays them from last_seen_seq.
+    // durable in the store, so the next gate replays them from its from_seq.
     this.scheduleDial();
   }
 

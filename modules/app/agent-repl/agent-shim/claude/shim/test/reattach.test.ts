@@ -1,11 +1,11 @@
 /**
  * Reattach integration: a fake store peer feeds the StoreClient, whose merged
- * events the SessionServer forwards to a fake daemon peer. The daemon
- * subscribes, receives a prefix, DROPS mid-stream, reconnects, re-subscribes
- * from the last seq it saw, and receives the remainder with no loss and no
- * duplication. This exercises the whole G5 transport wired the way the stitch
- * phase will wire it (store→shim→daemon), and the §4.4 REATTACH contract: the
- * shim outlives the daemon and re-serves from `Subscribe{from_seq}`.
+ * events the SessionServer forwards to a fake daemon peer. The daemon runs the
+ * BRING-UP GATE (its DaemonHello carries from_seq), receives a prefix, DROPS
+ * mid-stream, reconnects, re-runs the gate at the last seq it saw, and receives
+ * the remainder with no loss and no duplication. This exercises the whole
+ * transport wired store→shim→daemon, and the §4.4 REATTACH contract: the shim
+ * outlives the daemon and re-serves from the from_seq the next hello carries.
  */
 import { afterEach, describe, expect, it } from "vitest";
 import net from "node:net";
@@ -18,6 +18,7 @@ import {
   EventSchema,
   HealthStatusSchema,
   ShimHelloSchema,
+  ShimReadySchema,
   SubscribeSchema,
 } from "../src/uds/proto.js";
 import { FramedPeer, acceptShim, tmpSocketPath, until } from "./uds-harness.js";
@@ -89,14 +90,19 @@ describe("daemon reattach with from_seq continuation", () => {
         onSubmitPrompt: (m): Receipt => create(AckSchema, { requestId: m.requestId }),
         onInterrupt: (m): Receipt => create(AckSchema, { requestId: m.requestId }),
         onPermissionResponse: () => {},
-        // The reattach hinge: a daemon Subscribe drives a store re-subscribe.
-        onSubscribe: (m) => storeClient.subscribe(m.fromSeq),
         onReplayRequest: () => {},
         onHealthCheck: (m) => create(HealthStatusSchema, {
           requestId: m.requestId,
           healthy: true,
           component: "test-shim",
         }),
+        // THE REATTACH HINGE, now inside the gate: the hello's from_seq drives
+        // the store subscription, and the ack follows only once it is open.
+        onDaemonConnected: (hello) => {
+          void storeClient.subscribe(hello.fromSeq).then(() => {
+            server.sendReady(create(ShimReadySchema, { sessionId: "sess-1", fromSeq: hello.fromSeq }));
+          });
+        },
       },
     );
     cleanups.push(() => server.close());
@@ -112,12 +118,12 @@ describe("daemon reattach with from_seq continuation", () => {
       }
     });
 
-    // ---- Act 1: daemon connects, handshakes, subscribes from 0 ----
+    // ---- Act 1: daemon connects and runs the gate with from_seq=0 ----
     const daemon1 = await daemonListener.next();
     await daemon1.next(ShimHelloSchema);
-    daemon1.send(DaemonHelloSchema, create(DaemonHelloSchema, { daemonVersion: "d1" }));
-    await until(() => server.isConnected());
-    daemon1.send(SubscribeSchema, create(SubscribeSchema, { sessionId: "sess-1", fromSeq: 0n }));
+    daemon1.send(DaemonHelloSchema, create(DaemonHelloSchema, { daemonVersion: "d1", fromSeq: 0n }));
+    const ready1 = await daemon1.next(ShimReadySchema);
+    expect(ready1.fromSeq).toBe(0n);
 
     // The store sees the subscribe arrive on its own subscriber connection
     // (single-role store) and streams the first two events there.
@@ -140,9 +146,9 @@ describe("daemon reattach with from_seq continuation", () => {
     // ---- Act 3: daemon reconnects and re-subscribes from the last seq ----
     const daemon2 = await daemonListener.next();
     await daemon2.next(ShimHelloSchema);
-    daemon2.send(DaemonHelloSchema, create(DaemonHelloSchema, { daemonVersion: "d2" }));
-    await until(() => server.isConnected());
-    daemon2.send(SubscribeSchema, create(SubscribeSchema, { sessionId: "sess-1", fromSeq: 2n }));
+    daemon2.send(DaemonHelloSchema, create(DaemonHelloSchema, { daemonVersion: "d2", fromSeq: 2n }));
+    const ready2 = await daemon2.next(ShimReadySchema);
+    expect(ready2.fromSeq).toBe(2n);
 
     // The store re-serves from seq>2 (from_seq is exclusive) on a FRESH
     // subscriber connection (the client deliberately replaced the old one).

@@ -608,7 +608,9 @@ describe("StoreClient vendor session rotation", () => {
   // replay the new key from seq=1 against a much higher last_seen — the
   // terminal ErrSeqRegression a mid-session `conversation_reset` produced on
   // 2026-07-25. The rotation is therefore a controlled RE-HANDSHAKE: bounce
-  // the daemon link first, then re-key and resubscribe from zero.
+  // the daemon link first, then re-key and RETIRE the retired space's
+  // subscription. The new one is opened by the bounce's re-handshake gate, at
+  // the from_seq that hello carries.
 
   /** A rotating client with one merged event already forwarded under `uuid-old`. */
   async function rotatingClient(store: FakeStore, bounces: string[][]): Promise<StoreClient> {
@@ -631,22 +633,23 @@ describe("StoreClient vendor session rotation", () => {
     return client;
   }
 
-  it("re-keys the standing subscription to the rotated uuid at from_seq=0", async () => {
+  it("re-keys to the rotated uuid and RETIRES the retired space's subscription", async () => {
     // Arrange
     const store = await fakeStore();
     stores.push(store);
     const client = await rotatingClient(store, []);
+    const retired = store.latest();
 
     // Act: the CLI reports a NEW conversation uuid.
     client.adoptStoreKey("uuid-new");
-    await until(() => store.count() === 3, "resubscribed under the rotated uuid");
+    await until(() => client.storeSessionId() === "uuid-new", "store re-keyed");
+    await until(() => retired.closed, "retired subscription closed");
 
-    // Assert: the new seq space starts fresh, so the daemon's old position
-    // (5990, counted in the RETIRED space) means nothing here.
-    const resub = await store.latest().next(SubscribeSchema);
-    expect(resub.sessionId).toBe("uuid-new");
-    expect(resub.fromSeq).toBe(0n);
-    expect(client.storeSessionId()).toBe("uuid-new");
+    // Assert: no connection to the retired seq space outlives the rotation,
+    // and no replacement is opened here — the bounce's re-handshake opens it
+    // at the from_seq that hello carries (which the daemon resets to zero).
+    expect(client.isSubscribed()).toBe(false);
+    expect(store.count()).toBe(2);
   });
 
   it("bounces the daemon link BEFORE the store key moves", async () => {
@@ -732,11 +735,11 @@ describe("StoreClient vendor session rotation", () => {
     client.adoptStoreKey("uuid-new");
     client.adoptStoreKey("uuid-new");
     client.adoptStoreKey("uuid-new");
-    await until(() => store.count() === 3, "resubscribed once");
+    await until(() => client.storeSessionId() === "uuid-new", "rotation settled");
 
-    // Assert
+    // Assert: one bounce, and no extra store connection opened by the burst.
     expect(bounces.length).toBe(1);
-    expect(store.count()).toBe(3);
+    expect(store.count()).toBe(2);
   });
 
   it("still adopts the key silently before anything has been forwarded", async () => {

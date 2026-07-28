@@ -48,7 +48,7 @@ import type {
   SdkUserMessageLike,
 } from "../src/session.js";
 import type { ModelInfo, SlashCommand } from "../src/protocol.js";
-import type { Event } from "../src/uds/proto.js";
+import type { Event, ShimReady, Subscribe } from "../src/uds/proto.js";
 import {
   AckSchema,
   DaemonHelloSchema,
@@ -65,6 +65,7 @@ import {
   ReplayEventSchema,
   ReplayRequestSchema,
   ShimHelloSchema,
+  ShimReadySchema,
   StoreWriteAckSchema,
   StoreWriteSchema,
   SubmitPromptSchema,
@@ -175,12 +176,16 @@ interface Rig {
   /**
    * The shim-asserted readiness Event, already drained off `daemon`.
    *
-   * The shim announces readiness on the handshake edge, so it is ALWAYS the
-   * first Event a handshaked daemon sees. rig() consumes it so every other
+   * The shim announces readiness inside the bring-up gate, so it is ALWAYS
+   * the first Event a gated daemon sees. rig() consumes it so every other
    * test still reads its own event as the next one; the readiness tests
    * assert on this value instead.
    */
   readiness: Event;
+  /** The ShimReady that closed the gate, already drained off `daemon`. */
+  ready: ShimReady;
+  /** The Subscribe the gate opened the standing store tail with. */
+  standingSubscribe: Subscribe;
 }
 
 const cleanups: Array<() => void | Promise<void>> = [];
@@ -250,9 +255,15 @@ function streamEvent(seq: bigint, msg: ClaudeStreamMessage): Event {
   });
 }
 
-/** Stand up store + session, connect a daemon, and (optionally) subscribe. */
+/**
+ * Stand up store + session and run the WHOLE bring-up gate: ShimHello,
+ * DaemonHello carrying `fromSeq`, the standing store subscription it drives,
+ * and the ShimReady that closes it. There is no un-subscribed variant any
+ * more — a gated session is subscribed by the time it is ready, which is the
+ * property the gate exists to establish.
+ */
 async function rig(
-  opts: { subscribe?: boolean; sessionSource?: SessionSource; storeSessionId?: string; replayIdleMs?: number } = {},
+  opts: { fromSeq?: bigint; sessionSource?: SessionSource; storeSessionId?: string; replayIdleMs?: number } = {},
 ): Promise<Rig> {
   const store = await fakeStore();
   cleanups.push(() => store.close());
@@ -295,18 +306,16 @@ async function rig(
 
   const daemon = await daemonListener.next();
   await daemon.next(ShimHelloSchema);
-  daemon.send(DaemonHelloSchema, create(DaemonHelloSchema, { daemonVersion: "d1", protocolVersion: "1" }));
-  await until(() => session.isConnected());
-
-  if (opts.subscribe) {
-    daemon.send(SubscribeSchema, create(SubscribeSchema, { sessionId: "sess-1", fromSeq: 0n }));
-    // The subscription rides its own store connection (single-role store).
-    await until(() => store.count() >= 2);
-    await store.latest().next(SubscribeSchema);
-  }
-  // Readiness rides the handshake edge, so it is already in flight by now.
+  daemon.send(DaemonHelloSchema, create(DaemonHelloSchema, {
+    daemonVersion: "d1", protocolVersion: "1", fromSeq: opts.fromSeq ?? 0n,
+  }));
+  // The gate opens the standing subscription on its OWN store connection
+  // (single-role store) before it acks.
+  await until(() => store.count() >= 2);
+  const standingSubscribe = await store.latest().next(SubscribeSchema);
   const readiness = await daemon.next(EventSchema);
-  return { session, query, store, daemon, udsSocketPath, daemonListener, readiness };
+  const ready = await daemon.next(ShimReadySchema);
+  return { session, query, store, daemon, udsSocketPath, daemonListener, readiness, ready, standingSubscribe };
 }
 
 describe("UdsSession control: prompt in → SDK", () => {
@@ -328,7 +337,7 @@ describe("UdsSession control: prompt in → SDK", () => {
 describe("UdsSession lifecycle: shim-authoritative TurnStarted", () => {
   it("writes a TurnStarted to the store when it accepts a SubmitPrompt", async () => {
     // Arrange: a resumed session already knows the vendor session id.
-    const { store, daemon } = await rig({ subscribe: true, storeSessionId: "vendor-uuid" });
+    const { store, daemon } = await rig({ storeSessionId: "vendor-uuid" });
     // Act
     daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go" }));
     const sw = await store.peer().next(StoreWriteSchema);
@@ -338,7 +347,7 @@ describe("UdsSession lifecycle: shim-authoritative TurnStarted", () => {
 
   it("bounds the TurnStarted preview to the prompt's first line", async () => {
     // Arrange
-    const { store, daemon } = await rig({ subscribe: true, storeSessionId: "vendor-uuid" });
+    const { store, daemon } = await rig({ storeSessionId: "vendor-uuid" });
     // Act
     daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "line one\nline two" }));
     const sw = await store.peer().next(StoreWriteSchema);
@@ -350,7 +359,7 @@ describe("UdsSession lifecycle: shim-authoritative TurnStarted", () => {
 
   it("correlates the TurnStarted to the SubmitPrompt's request id", async () => {
     // Arrange
-    const { store, daemon } = await rig({ subscribe: true, storeSessionId: "vendor-uuid" });
+    const { store, daemon } = await rig({ storeSessionId: "vendor-uuid" });
     // Act
     daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go" }));
     const sw = await store.peer().next(StoreWriteSchema);
@@ -361,7 +370,7 @@ describe("UdsSession lifecycle: shim-authoritative TurnStarted", () => {
   it("files the TurnStarted under the vendor session id, not the shim's own id", async () => {
     // Arrange: the store's seq space is keyed by the vendor uuid; writing
     // under `sess-1` would land in a space nothing subscribes to.
-    const { store, daemon } = await rig({ subscribe: true, storeSessionId: "vendor-uuid" });
+    const { store, daemon } = await rig({ storeSessionId: "vendor-uuid" });
     // Act
     daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go" }));
     const sw = await store.peer().next(StoreWriteSchema);
@@ -372,7 +381,7 @@ describe("UdsSession lifecycle: shim-authoritative TurnStarted", () => {
   it("holds a TurnStarted accepted before the vendor session id is known", async () => {
     // Arrange: a FRESH session has no --resume id, so the store key is still
     // the placeholder when the first prompt arrives.
-    const { store, daemon } = await rig({ subscribe: true });
+    const { store, daemon } = await rig();
     // Act
     daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go" }));
     await daemon.next(AckSchema);
@@ -383,7 +392,7 @@ describe("UdsSession lifecycle: shim-authoritative TurnStarted", () => {
 
   it("flushes a held TurnStarted under the adopted key once the SDK reveals it", async () => {
     // Arrange: a held turn from a fresh session.
-    const { query, store, daemon } = await rig({ subscribe: true });
+    const { query, store, daemon } = await rig();
     daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go" }));
     await daemon.next(AckSchema);
     // Act: the SDK reveals the vendor session id.
@@ -403,7 +412,7 @@ describe("UdsSession lifecycle: shim-authoritative TurnStarted", () => {
     // Arrange: readiness is asserted at start() now, so an init's twin would
     // re-announce a session already announced — and, arriving on the FIRST
     // PROMPT, would land after the fact.
-    const { query, store } = await rig({ subscribe: true, storeSessionId: "vendor-uuid" });
+    const { query, store } = await rig({ storeSessionId: "vendor-uuid" });
     const init = {
       type: "system",
       subtype: "init",
@@ -432,7 +441,7 @@ describe("UdsSession lifecycle: shim-asserted readiness", () => {
   it("reports session health only after a live subscription and correlated store probe", async () => {
     // Arrange: the daemon's Subscribe establishes the live merged-event path
     // that a restored frontend would depend on.
-    const { store, daemon } = await rig({ subscribe: true });
+    const { store, daemon } = await rig();
 
     // Act: the daemon requests session health; the shim opens a separate
     // store probe without moving its standing subscription.
@@ -457,9 +466,14 @@ describe("UdsSession lifecycle: shim-asserted readiness", () => {
     });
   });
 
-  it("reports session health as unhealthy before the daemon installs a store subscription", async () => {
-    // Arrange
-    const { daemon } = await rig();
+  it("reports session health as unhealthy once the standing subscription is lost", async () => {
+    // Arrange: the gate leaves this session subscribed, so the only way to
+    // reach an unsubscribed shim is to LOSE the tail. The DegradedState the
+    // loss produces is what tells this test the shim has noticed.
+    const { store, daemon } = await rig();
+    store.latest().destroy();
+    const degraded = await daemon.next(EventSchema);
+    expect(degraded.payload.case).toBe("degradedState");
 
     // Act
     daemon.send(HealthCheckSchema, create(HealthCheckSchema, { requestId: "session-health-no-sub" }));
@@ -468,6 +482,22 @@ describe("UdsSession lifecycle: shim-asserted readiness", () => {
     // Assert: rendering would otherwise race a missing store tail.
     expect(status.healthy).toBe(false);
     expect(status.reason).toContain("standing store subscription is not live");
+  });
+
+  it("acks readiness only after the standing store subscription has settled", async () => {
+    // Arrange + Act: rig() runs the gate and drains its two frames.
+    const { store, ready } = await rig({ fromSeq: 11n });
+    // Assert: the ack names the position it subscribed at, and a store
+    // subscription connection genuinely exists to carry it.
+    expect(ready.fromSeq).toBe(11n);
+    expect(store.count()).toBeGreaterThanOrEqual(2);
+  });
+
+  it("drives the store subscription from the from_seq the DaemonHello carried", async () => {
+    // Arrange + Act: a resumed session whose daemon is 42 events in.
+    const { standingSubscribe } = await rig({ fromSeq: 42n });
+    // Assert: the hello is the ONLY place that number comes from now.
+    expect(standingSubscribe.fromSeq).toBe(42n);
   });
 
   // THE POINT OF THE WHOLE MECHANISM. The SDK emits system:init only on the
@@ -528,7 +558,7 @@ describe("UdsSession lifecycle: shim-asserted readiness", () => {
 describe("UdsSession events: store-write vs ephemeral routing", () => {
   it("writes a persistent SDK message to the store, not to the daemon directly", async () => {
     // Arrange
-    const { query, store, daemon } = await rig({ subscribe: true });
+    const { query, store, daemon } = await rig();
     // Act: a persistent assistant message.
     query.emit({
       type: "assistant",
@@ -546,7 +576,7 @@ describe("UdsSession events: store-write vs ephemeral routing", () => {
 
   it("sends an ephemeral stream_event straight to the daemon, never to the store", async () => {
     // Arrange
-    const { query, store, daemon } = await rig({ subscribe: true });
+    const { query, store, daemon } = await rig();
     // Act: a live-typing delta (EPHEMERAL).
     query.emit({
       type: "stream_event",
@@ -565,7 +595,7 @@ describe("UdsSession events: store-write vs ephemeral routing", () => {
 describe("UdsSession events: store round-trip and sad path", () => {
   it("forwards a merged store Event to the daemon (onMerged)", async () => {
     // Arrange
-    const { store, daemon } = await rig({ subscribe: true });
+    const { store, daemon } = await rig();
     // Act: the store emits a merged, seq-stamped event on the subscription conn.
     store.latest().send(EventSchema, create(EventSchema, { sessionId: "sess-1", seq: 5n }));
     const evt = await daemon.next(EventSchema);
@@ -575,7 +605,7 @@ describe("UdsSession events: store round-trip and sad path", () => {
 
   it("forwards a store outage to the daemon as an Event(DegradedState)", async () => {
     // Arrange
-    const { store, daemon } = await rig({ subscribe: true });
+    const { store, daemon } = await rig();
     // Act: the store connection drops.
     store.close();
     // Assert: a DegradedState event reaches the daemon.
@@ -600,7 +630,7 @@ describe("UdsSession instrumentation: prompt round-trip receipts", () => {
 
   it("logs a forward receipt for a merged TranscriptLine carrying the user's prompt", async () => {
     // Arrange: the file-plane echo — the carrier that becomes the GUI bubble.
-    const { store, daemon } = await rig({ subscribe: true });
+    const { store, daemon } = await rig();
     const log = captureLog();
     // Act
     store.latest().send(EventSchema, transcriptEvent(9n, userLine(textMessage("hi there"))));
@@ -612,7 +642,7 @@ describe("UdsSession instrumentation: prompt round-trip receipts", () => {
 
   it("logs a forward receipt for a merged stream-plane UserMessage", async () => {
     // Arrange: how the same turn arrives on a resume replay.
-    const { store, daemon } = await rig({ subscribe: true });
+    const { store, daemon } = await rig();
     const log = captureLog();
     // Act
     store.latest().send(EventSchema, streamEvent(4n, create(ClaudeStreamMessageSchema, {
@@ -627,7 +657,7 @@ describe("UdsSession instrumentation: prompt round-trip receipts", () => {
   it("stays silent for a user message carrying only tool_result blocks", async () => {
     // Arrange: pure tool feedback rides the user role too. A receipt per tool
     // call would bury the one receipt per prompt this instrumentation is for.
-    const { store, daemon } = await rig({ subscribe: true });
+    const { store, daemon } = await rig();
     const log = captureLog();
     // Act
     store.latest().send(EventSchema, transcriptEvent(9n, userLine(create(ApiUserMessageSchema, {
@@ -647,7 +677,7 @@ describe("UdsSession instrumentation: prompt round-trip receipts", () => {
 
   it("stays silent for a merged event that is not a user message at all", async () => {
     // Arrange
-    const { store, daemon } = await rig({ subscribe: true });
+    const { store, daemon } = await rig();
     const log = captureLog();
     // Act: an assistant transcript line on the same vendor carrier.
     store.latest().send(EventSchema, transcriptEvent(9n, create(TranscriptLineSchema, {
@@ -662,7 +692,7 @@ describe("UdsSession instrumentation: prompt round-trip receipts", () => {
 describe("UdsSession lifetime: reattach", () => {
   it("a daemon disconnect ends neither the session nor the in-flight turn", async () => {
     // Arrange: a turn is in flight.
-    const { session, query, store, daemon, daemonListener } = await rig({ subscribe: true });
+    const { session, query, store, daemon, daemonListener } = await rig();
     daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go" }));
     await daemon.next(AckSchema);
     await until(() => query.prompts.length === 1);
@@ -678,17 +708,16 @@ describe("UdsSession lifetime: reattach", () => {
     cleanups.push(() => daemon2.destroy());
     const hello = await daemon2.next(ShimHelloSchema);
     expect(hello.turnInFlight).toBe(true);
-    daemon2.send(DaemonHelloSchema, create(DaemonHelloSchema, { daemonVersion: "d2" }));
-    await until(() => session.isConnected());
-    // Readiness is re-asserted to the REPLACEMENT daemon. That is the point,
-    // not a duplicate: a restarted daemon has no memory of this session and
-    // must be told it is usable exactly as the first one was.
-    const readiness2 = await daemon2.next(EventSchema);
-    expect(readiness2.payload.case).toBe("sessionStarted");
-    daemon2.send(SubscribeSchema, create(SubscribeSchema, { sessionId: "sess-1", fromSeq: 2n }));
+    daemon2.send(DaemonHelloSchema, create(DaemonHelloSchema, { daemonVersion: "d2", fromSeq: 2n }));
+    // The replacement daemon re-runs the WHOLE gate, from_seq and all. That is
+    // the point, not a duplicate: a restarted daemon has no memory of this
+    // session and must be wired to it exactly as the first one was.
     await until(() => store.count() >= 3);
     const sub2 = await store.latest().next(SubscribeSchema);
     expect(sub2.fromSeq).toBe(2n);
+    const readiness2 = await daemon2.next(EventSchema);
+    expect(readiness2.payload.case).toBe("sessionStarted");
+    expect((await daemon2.next(ShimReadySchema)).fromSeq).toBe(2n);
     store.latest().send(EventSchema, create(EventSchema, { sessionId: "sess-1", seq: 3n }));
     const e3 = await daemon2.next(EventSchema);
     expect(e3.seq).toBe(3n);
@@ -1100,7 +1129,7 @@ describe("UdsSession store subscription key", () => {
     // own uuid — which is the id the store files these events under (and the
     // id the sidecar keys the same conversation by, from its transcript
     // filename). Subscribing under `sess-1` listens to nothing.
-    const { query, store } = await rig({ subscribe: true });
+    const { query, store } = await rig();
     const initialConnections = store.count();
 
     // Act: a persistent message carrying the vendor uuid.
@@ -1124,7 +1153,7 @@ describe("UdsSession bounded historical replay (core.proto ReplayRequest)", () =
     const { store, daemon } = await rig({ storeSessionId: "vendor-uuid", replayIdleMs: 200 });
     // Act
     daemon.send(ReplayRequestSchema, create(ReplayRequestSchema, { requestId: "r1", fromSeq: 0n, toSeq: 3n }));
-    await until(() => store.count() >= 2);
+    await until(() => store.count() >= 3);
     const replayConn = store.latest();
     await replayConn.next(SubscribeSchema);
     replayConn.send(EventSchema, create(EventSchema, { sessionId: "vendor-uuid", seq: 1n }));
@@ -1139,7 +1168,7 @@ describe("UdsSession bounded historical replay (core.proto ReplayRequest)", () =
     const { store, daemon } = await rig({ storeSessionId: "vendor-uuid", replayIdleMs: 200 });
     // Act
     daemon.send(ReplayRequestSchema, create(ReplayRequestSchema, { requestId: "r1", fromSeq: 0n, toSeq: 3n }));
-    await until(() => store.count() >= 2);
+    await until(() => store.count() >= 3);
     const replayConn = store.latest();
     await replayConn.next(SubscribeSchema);
     replayConn.send(EventSchema, create(EventSchema, { sessionId: "vendor-uuid", seq: 3n }));
@@ -1154,7 +1183,7 @@ describe("UdsSession bounded historical replay (core.proto ReplayRequest)", () =
     const { store, daemon } = await rig({ storeSessionId: "vendor-uuid", replayIdleMs: 60 });
     // Act
     daemon.send(ReplayRequestSchema, create(ReplayRequestSchema, { requestId: "r1", fromSeq: 0n, toSeq: 999n }));
-    await until(() => store.count() >= 2);
+    await until(() => store.count() >= 3);
     await store.latest().next(SubscribeSchema);
     const done = await daemon.next(ReplayDoneSchema);
     // Assert
@@ -1165,7 +1194,7 @@ describe("UdsSession bounded historical replay (core.proto ReplayRequest)", () =
   it("serves a replay WITHOUT re-subscribing the standing tail", async () => {
     // Arrange: the standing subscription's position belongs to the daemon;
     // moving it would drag the daemon's own consumption backwards.
-    const { store, daemon } = await rig({ subscribe: true, storeSessionId: "vendor-uuid", replayIdleMs: 200 });
+    const { store, daemon } = await rig({ storeSessionId: "vendor-uuid", replayIdleMs: 200 });
     const standing = store.latest();
     const standingFrames: unknown[] = [];
     standing.socket.on("data", (chunk) => standingFrames.push(chunk));
@@ -1178,5 +1207,82 @@ describe("UdsSession bounded historical replay (core.proto ReplayRequest)", () =
     await daemon.next(ReplayDoneSchema);
     // Assert
     expect(standingFrames).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// THE BRING-UP GATE. Its whole value is that the ack is the LAST step, so the
+// two cases worth pinning are the one where the wiring cannot be done at all,
+// and the one where it has to be done again.
+// ---------------------------------------------------------------------------
+
+describe("UdsSession bring-up gate", () => {
+  it("withholds the ack, loudly, when the store subscription cannot be opened", async () => {
+    // Arrange: the producer link is up (start() needed it), and then the store
+    // goes away — so the gate's subscribe dial is the thing that fails.
+    const store = await fakeStore();
+    cleanups.push(() => store.close());
+    let query!: FakeQuery;
+    const udsSocketPath = tmpSocketPath();
+    const daemonListener = acceptShim(udsSocketPath);
+    cleanups.push(() => daemonListener.close());
+    const session = new UdsSession({
+      sessionId: "sess-1",
+      shimVersion: "9.9",
+      protocolVersion: "1",
+      udsSocketPath,
+      storeSocketPath: store.socketPath,
+      sessionSource: SessionSource.FRESH,
+      createQuery: (prompt, canUseTool): QueryLike => (query = new FakeQuery(prompt, canUseTool)),
+      heartbeatIntervalMs: 0,
+    });
+    const done = session.start();
+    cleanups.push(async () => {
+      await session.shutdown("test-cleanup");
+      query.endStream();
+      await done.catch(() => {});
+    });
+    const daemon = await daemonListener.next();
+    await daemon.next(ShimHelloSchema);
+    const log = captureLog();
+    store.close();
+
+    // Act: the daemon completes its half of the gate.
+    daemon.send(DaemonHelloSchema, create(DaemonHelloSchema, { daemonVersion: "d1", protocolVersion: "1" }));
+    await until(() => log.count("bring-up gate REFUSED") === 1, "the refusal was logged");
+
+    // Assert: no ack, ever — the daemon's readiness wait must fail on its own
+    // deadline rather than be told this session is usable.
+    expect(daemon.count(ShimReadySchema)).toBe(0);
+  });
+
+  it("re-runs the whole gate on the rotation bounce", async () => {
+    // Arrange: a resumed session with one merged event forwarded, so the next
+    // vendor uuid is a ROTATION rather than a first adoption.
+    const { query, store, daemon, daemonListener } = await rig({ storeSessionId: "uuid-old" });
+    store.latest().send(EventSchema, create(EventSchema, { sessionId: "uuid-old", seq: 7n }));
+    await daemon.next(EventSchema);
+
+    // Act: the vendor mints a new transcript identity mid-stream.
+    query.emit({
+      type: "assistant",
+      uuid: "u1",
+      session_id: "uuid-new",
+      message: { id: "m1", model: "claude", content: [{ type: "text", text: "hi" }], stop_reason: "end_turn", usage: {} },
+    } as unknown as SdkMessageLike);
+
+    // Assert: the bounce opens a new connection that runs the gate in full —
+    // hello announcing the rotated uuid, the daemon's reset from_seq, the
+    // store subscription in the NEW seq space, and the ack.
+    const daemon2 = await daemonListener.next();
+    cleanups.push(() => daemon2.destroy());
+    const hello2 = await daemon2.next(ShimHelloSchema);
+    expect(hello2.vendorSessionId).toBe("uuid-new");
+    daemon2.send(DaemonHelloSchema, create(DaemonHelloSchema, { daemonVersion: "d2", protocolVersion: "1", fromSeq: 0n }));
+    await until(() => store.count() >= 3, "the new seq space was subscribed");
+    const resub = await store.latest().next(SubscribeSchema);
+    expect(resub.sessionId).toBe("uuid-new");
+    expect(resub.fromSeq).toBe(0n);
+    expect((await daemon2.next(ShimReadySchema)).vendorSessionId).toBe("uuid-new");
   });
 });

@@ -51,6 +51,7 @@ import { ClaudeStreamMessageSchema } from "../../../../../proto/gen/ts/agentshim
 import { TranscriptLineSchema } from "../../../../../proto/gen/ts/agentshim/data/v1/transcript_pb.js";
 import type { ApiUserMessage } from "../../../../../proto/gen/ts/agentshim/data/v1/tools_pb.js";
 import {
+  DaemonHello,
   DegradedState,
   DegradedStateSchema,
   Event,
@@ -65,6 +66,7 @@ import {
   ReplayRequest,
   SessionSource,
   SessionStartedSchema,
+  ShimReadySchema,
   TurnStartedSchema,
 } from "./proto.js";
 
@@ -272,23 +274,16 @@ export class UdsSession {
       onSubmitPrompt: (m) => this.control.handleSubmitPrompt(m),
       onInterrupt: (m) => this.control.handleInterrupt(m),
       onPermissionResponse: (m) => this.control.handlePermissionResponse(m),
-      // The reattach hinge: a daemon Subscribe drives the store re-subscribe
-      // that replays from `from_seq` (§4.4).
-      onSubscribe: (m) => this.store.subscribe(m.fromSeq),
       onReplayRequest: (m) => void this.serveReplay(m),
       onHealthCheck: (m) => this.health(m),
-      // SHIM-ASSERTED READINESS, on the handshake edge.
+      // THE BRING-UP GATE'S WIRING STAGE. The DaemonHello carries the
+      // from_seq this session's standing store subscription is to be opened
+      // at; completeWiring opens it and only then acks with ShimReady.
       //
-      // Not after `server.connect()`: that resolves on the first successful
-      // DIAL, while sendEvent drops anything sent before the DaemonHello
-      // completes the handshake. An assertion the daemon is not yet
-      // listening for is not an assertion, so it has to ride this hook.
-      //
-      // It fires again on every REATTACH, and that is the point rather than
-      // a flaw: a restarted daemon has no memory of this session and must be
-      // told it is ready, exactly as the first one was. The SSM's no-regress
-      // guard drops a repeat that would land under a live turn.
-      onDaemonConnected: () => this.emitSessionStarted(),
+      // It runs on every REATTACH too, and that is the point rather than a
+      // flaw: a restarted daemon has no memory of this session and must be
+      // wired to it exactly as the first one was.
+      onDaemonConnected: (hello) => void this.completeWiring(hello),
       onDaemonDisconnected: () => {
         // Reattach (§4.4): the turn keeps running and nothing is torn down.
         // Pending permission waits are NOT cancelled — a reattaching daemon can
@@ -409,6 +404,55 @@ export class UdsSession {
     // sent before the DaemonHello would be dropped.
     await this.server.connect();
     return this.pump();
+  }
+
+  /**
+   * THE BRING-UP GATE, shim side (core.proto ShimHello). Finish wiring this
+   * session at the from_seq the DaemonHello carried, then — and only then —
+   * ack with ShimReady.
+   *
+   * WHAT IS ALREADY TRUE WHEN THIS RUNS, and why none of it needs doing here:
+   *   - the SESSION LOCK is held, taken in main.ts before this object exists
+   *     (a shim that could not claim its session refuses to start at all);
+   *   - the SDK QUERY is constructed, and the STORE PRODUCER link is up, both
+   *     by `start()` before it ever dials the daemon.
+   * Each is therefore a structural precondition of reaching this code, not a
+   * check performed by it.
+   *
+   * WHAT IS LEFT is the standing store subscription, which needs a from_seq
+   * only the daemon knows. Awaiting it is the whole point: subscribe()
+   * resolves when the Subscribe frame is on a live store connection, so the
+   * ack that follows is a statement about a tail that EXISTS.
+   *
+   * A FAILURE WITHHOLDS THE ACK. No ShimReady is sent, the reason is logged
+   * loudly, and a DegradedState carries it to the daemon (which the daemon can
+   * surface even though this session is not ready). The daemon's readiness
+   * wait then fails on its own deadline — the honest outcome, and far better
+   * than acking a session whose store tail does not exist.
+   */
+  private async completeWiring(hello: DaemonHello): Promise<void> {
+    const fromSeq = hello.fromSeq;
+    shimLog(COMPONENT, { session: this.deps.sessionId, from_seq: fromSeq, store_key: this.store.storeSessionId() },
+      `bring-up gate: wiring the standing store subscription before acking readiness`);
+    try {
+      await this.store.subscribe(fromSeq);
+    } catch (err) {
+      const reason = `bring-up gate REFUSED: the standing store subscription could not be opened at from_seq=${fromSeq}: ${errMsg(err)}`;
+      // reportDegraded loud-logs AND sends the DegradedState. Readiness is
+      // withheld deliberately: there is no ack to send for a session that is
+      // not wired, and the daemon must not be told otherwise.
+      this.reportDegraded("claude-shim-bringup", reason);
+      return;
+    }
+    // Readiness first, ack second, in frame order on one connection: the
+    // daemon has this session's SessionStarted in hand before the gate that
+    // releases its callers closes.
+    this.emitSessionStarted();
+    this.server.sendReady(create(ShimReadySchema, {
+      sessionId: this.deps.sessionId,
+      fromSeq,
+      vendorSessionId: this.store.storeSessionId(),
+    }));
   }
 
   /**
