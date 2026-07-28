@@ -36,6 +36,7 @@ export type WorkspaceStatus =
   | "thinking"
   | "permission"
   | "done"
+  | "interrupted"
   | "ready"
   | "idle-async"
   | "vendor-blocked"
