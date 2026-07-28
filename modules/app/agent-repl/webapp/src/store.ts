@@ -622,6 +622,27 @@ export class ConversationStore {
   }
 
   /**
+   * Drop the CONVERSATION this view holds, keeping the session it belongs to.
+   *
+   * For the vendor session uuid rotating under a live view (`session-rebase.ts`):
+   * the store seq space the feed ranks by, and that `lastSeq` is a mark in,
+   * belongs to a conversation the vendor retired. Left standing, the new space's
+   * items — which start again at 1 — rank ABOVE a thousand items that preceded
+   * them, so the clear that caused the rotation draws at the top of the feed with
+   * the discarded history still below it, and the next resync asks for history
+   * past the end of the new space.
+   *
+   * Everything the ROTATION did not invalidate stays: the daemon session id, the
+   * cwd, the model, the permission mode and the session's cumulative spend are
+   * facts about the session, which did not change. Only the conversation and its
+   * seq mark do.
+   */
+  rebaseSeqSpace(): void {
+    this.state.items = [];
+    this.state.lastSeq = 0;
+  }
+
+  /**
    * THE ingestion entry point. Folds a batch of decoded-frame adapter effects
    * onto the store, returning whether anything visible changed. An `ignored`
    * effect is not store state — the adapter already counted/logged it — so

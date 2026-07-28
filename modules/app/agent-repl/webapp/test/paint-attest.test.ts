@@ -183,3 +183,31 @@ describe("PaintAttestation — a send that fails", () => {
     expect(logged[0]).toContain("painted");
   });
 });
+
+describe("PaintAttestation — the conversation rebase", () => {
+  it("attests the rebased conversation's first low seq", () => {
+    // Arrange — the vendor rotated its session uuid, so the store seq space
+    // restarted at 1 while this end had attested through 1060. Without the
+    // rebase the `painted` gate would hold every ack of the new space.
+    const { attest, sent } = harness();
+    attest.painted({ throughSeq: 1060, generation: 7 });
+    // Act
+    attest.rebaseSeqSpace();
+    attest.painted({ throughSeq: 1, generation: 7 });
+    // Assert
+    expect(sent[1]).toEqual({ throughSeq: 1, generation: 7, outcome: "painted" });
+  });
+
+  it("keeps the generation watermark, which no rotation restarts", () => {
+    // Arrange — the state generation is the daemon's per-workspace delivery
+    // counter, not a store seq: re-answering a settled one would claim a paint
+    // for a state already accounted for.
+    const { attest, sent } = harness(() => false);
+    attest.observe({ throughSeq: 1060, generation: 7 });
+    // Act
+    attest.rebaseSeqSpace();
+    attest.observe({ throughSeq: 1, generation: 7 });
+    // Assert
+    expect(sent).toHaveLength(1);
+  });
+});

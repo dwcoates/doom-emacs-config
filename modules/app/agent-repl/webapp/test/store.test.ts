@@ -676,6 +676,45 @@ describe("reset", () => {
   });
 });
 
+// --- rebaseSeqSpace ---------------------------------------------------------
+
+describe("rebaseSeqSpace", () => {
+  it("drops the retired conversation and its seq mark", () => {
+    // Arrange — the vendor rotated its session uuid, so these items and this
+    // mark count in a store seq space that no longer exists.
+    const store = new ConversationStore();
+    store.ingest([itemsEffect([textItem()], 1060)]);
+    // Act
+    store.rebaseSeqSpace();
+    // Assert
+    expect([store.state.items.length, store.state.lastSeq]).toEqual([0, 0]);
+  });
+
+  it("keeps the session the rotation did not change", () => {
+    // Arrange — the daemon session, its cwd and its model are facts about the
+    // SESSION; only the conversation rotated.
+    const store = new ConversationStore();
+    store.ingest([sessionEffect({ model: "opus", cwd: "/ws" }), itemsEffect([textItem()], 1060)]);
+    // Act
+    store.rebaseSeqSpace();
+    // Assert
+    expect([store.state.model, store.state.cwd]).toEqual(["opus", "/ws"]);
+  });
+
+  it("ranks the new space's first item at its own low seq", () => {
+    // Arrange — the whole point of dropping the mark: the new space starts at 1,
+    // and a stale watermark would rank every arriving item beneath history that
+    // no longer exists.
+    const store = new ConversationStore();
+    store.ingest([itemsEffect([textItem()], 1060)]);
+    store.rebaseSeqSpace();
+    // Act
+    store.ingest([itemsEffect([textItem({ blockId: "b-new", messageId: "m-new" })], 1)]);
+    // Assert
+    expect([store.state.items.length, store.state.lastSeq]).toEqual([1, 1]);
+  });
+});
+
 // --- pure helpers -----------------------------------------------------------
 
 describe("contextTokens", () => {
