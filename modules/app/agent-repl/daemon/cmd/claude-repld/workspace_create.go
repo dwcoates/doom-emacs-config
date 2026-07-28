@@ -617,29 +617,6 @@ func NewWorkspaceCreationBridge(ctx context.Context, manager *workspacecreate.Ma
 	return &WorkspaceCreationBridge{manager: manager, store: store, ctx: ctx, avail: map[chan *frontendv1.WorkspaceAvailable]struct{}{}, actions: map[chan *frontendv1.HostAction]struct{}{}}, nil
 }
 
-func (b *WorkspaceCreationBridge) CreateWorkspace(_ context.Context, requestID string, cmd *frontendv1.CreateWorkspaceCmd) error {
-	if cmd == nil {
-		return fmt.Errorf("workspace create: nil CreateWorkspaceCmd")
-	}
-	priority, err := json.Marshal(cmd.GetPriority())
-	if err != nil {
-		return err
-	}
-	request := workspacecreate.Request{Name: cmd.GetRequestedName(), GitRoot: cmd.GetGitRoot(), BaseCommit: cmd.GetBaseCommit(), SourceWorkspace: cmd.GetSourceWorkspace(), SourceDir: cmd.GetSourceDir(), ForkFrom: cmd.GetForkFrom(), ForkSessionID: cmd.GetForkSessionId(), Model: cmd.GetModel(), ConfigDir: cmd.GetConfigDir(), PermissionMode: cmd.GetPermissionMode(), AllowUngated: cmd.GetAllowUngated(), PostprocessingPrompt: cmd.GetPostprocessingPrompt(), BeforeWSMerge: cmd.GetBeforeWsMerge(), Priority: priority}
-	if request.SourceDir != "" {
-		canonical, err := normalizeWorkspacePath(request.SourceDir)
-		if err != nil {
-			return fmt.Errorf("workspace create: interactive source directory: %w", err)
-		}
-		request.SourceDir = canonical
-	}
-	if cmd.InitialPrompt != nil {
-		request.Prompt = cmd.GetInitialPrompt()
-	}
-	_, _, err = b.manager.StartInteractiveCreate(b.ctx, requestID, request)
-	return err
-}
-
 func (b *WorkspaceCreationBridge) MarkWorkspaceMaterialized(ctx context.Context, jobID string) error {
 	return b.manager.MarkMaterialized(ctx, jobID)
 }

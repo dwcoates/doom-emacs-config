@@ -176,9 +176,6 @@ func (staticState) Snapshot() *frontendv1.StateSnapshot { return &frontendv1.Sta
 
 type nopHandler struct{}
 
-func (nopHandler) CreateWorkspace(context.Context, string, string, *frontendv1.CreateWorkspaceCmd) error {
-	return nil
-}
 func (nopHandler) WorkspaceMaterialized(context.Context, string, string, *frontendv1.WorkspaceMaterializedCmd) error {
 	return nil
 }
