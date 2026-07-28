@@ -9,8 +9,8 @@
 ;; Per AGENTS.md "No External Processes or External State in Tests",
 ;; every test in this file is pure elisp: the `agent-repl--git-*'
 ;; wrappers (`agent-repl--git-string', `agent-repl--git-string-quiet',
-;; `agent-repl--git-exit-code', `agent-repl--git-branch-exists-p',
-;; `agent-repl--git-tag-exists-p') are stubbed via `cl-letf' with
+;; `agent-repl--git-exit-code', `agent-repl--git-branch-exists-p')
+;; are stubbed via `cl-letf' with
 ;; fixture return values that drive the production rename logic.
 ;;
 ;; Run with:
@@ -44,13 +44,13 @@
 (ert-deftest agent-repl-test-rename-validate-empty-name-errors ()
   "Empty new-bare signals user-error."
   (should-error
-   (agent-repl--rename-validate "foo" "" "DWC/bar" nil "/tmp/x" "/tmp/foo")
+   (agent-repl--rename-validate "foo" "" "DWC/bar" "/tmp/x" "/tmp/foo")
    :type 'user-error))
 
 (ert-deftest agent-repl-test-rename-validate-same-name-errors ()
   "Identical old and new names signal user-error."
   (should-error
-   (agent-repl--rename-validate "foo" "foo" "DWC/foo" nil "/tmp/foo2" "/tmp/foo")
+   (agent-repl--rename-validate "foo" "foo" "DWC/foo" "/tmp/foo2" "/tmp/foo")
    :type 'user-error))
 
 (ert-deftest agent-repl-test-rename-validate-existing-path-errors ()
@@ -62,7 +62,7 @@
             ((symbol-function '+workspace-list-names)
              (lambda () '("other"))))
     (should-error
-     (agent-repl--rename-validate "foo" "bar" "DWC/bar" nil "/tmp/target" "/tmp/foo")
+     (agent-repl--rename-validate "foo" "bar" "DWC/bar" "/tmp/target" "/tmp/foo")
      :type 'user-error)))
 
 (ert-deftest agent-repl-test-rename-validate-existing-branch-errors ()
@@ -73,20 +73,7 @@
              (lambda () '("other"))))
     (should-error
      (agent-repl--rename-validate
-      "foo" "bar" "DWC/bar" nil "/nonexistent/path" "/tmp/foo")
-     :type 'user-error)))
-
-(ert-deftest agent-repl-test-rename-validate-existing-start-tag-errors ()
-  "Existing target start tag signals user-error."
-  (cl-letf (((symbol-function 'agent-repl--git-branch-exists-p)
-             (lambda (&rest _) nil))
-            ((symbol-function 'agent-repl--git-tag-exists-p)
-             (lambda (_root tag) (string= tag "start/DWC/bar")))
-            ((symbol-function '+workspace-list-names)
-             (lambda () '("other"))))
-    (should-error
-     (agent-repl--rename-validate
-      "foo" "bar" "DWC/bar" "start/DWC/bar" "/nonexistent/path" "/tmp/foo")
+      "foo" "bar" "DWC/bar" "/nonexistent/path" "/tmp/foo")
      :type 'user-error)))
 
 (ert-deftest agent-repl-test-rename-validate-existing-workspace-errors ()
@@ -97,19 +84,17 @@
              (lambda () '("bar"))))
     (should-error
      (agent-repl--rename-validate
-      "foo" "bar" "DWC/bar" nil "/nonexistent/path" "/tmp/foo")
+      "foo" "bar" "DWC/bar" "/nonexistent/path" "/tmp/foo")
      :type 'user-error)))
 
 (ert-deftest agent-repl-test-rename-validate-happy-path ()
   "All checks passing returns nil without error."
   (cl-letf (((symbol-function 'agent-repl--git-branch-exists-p)
              (lambda (&rest _) nil))
-            ((symbol-function 'agent-repl--git-tag-exists-p)
-             (lambda (&rest _) nil))
             ((symbol-function '+workspace-list-names)
              (lambda () '("other"))))
     (should (null (agent-repl--rename-validate
-                   "foo" "bar" "DWC/bar" "start/DWC/bar"
+                   "foo" "bar" "DWC/bar"
                    "/nonexistent/path" "/tmp/foo")))))
 
 ;;;; ---- Tests: assert-no-pending-merge ----
@@ -308,12 +293,11 @@ pair, so a renamed workspace's webview kept its old name."
 ;; effects, since no real git is invoked.
 
 (ert-deftest agent-repl-test-rename-end-to-end-renames-branch-and-dir ()
-  "Full rename pipeline rehashes state, renames branch, renames start
-tag, and moves the worktree — verified by tracking the git-wrapper
-call sequence and the resulting `agent-repl--workspaces' state."
+  "Full rename pipeline rehashes state, renames branch, and moves the
+worktree — verified by tracking the git-wrapper call sequence and the
+resulting `agent-repl--workspaces' state."
   (agent-repl-test--with-clean-state
-    (let ((agent-repl-worktree-start-tag-prefix "start/")
-          (exit-calls nil))
+    (let ((exit-calls nil))
       (agent-repl--ws-put "foo" :project-dir "/tmp/parent/foo")
       (agent-repl--ws-put "foo" :worktree-p t)
       (cl-letf (((symbol-function 'agent-repl--path-canonical)
@@ -363,14 +347,6 @@ call sequence and the resulting `agent-repl--workspaces' state."
                      ("DWC/foo" t)
                      ("DWC/bar" nil)
                      (_ (error "unmocked branch-exists-p: %S" branch)))))
-                ((symbol-function 'agent-repl--git-tag-exists-p)
-                 ;; Old tag exists (so the rename flow attempts to
-                 ;; rename it); new tag does not.
-                 (lambda (_root tag)
-                   (pcase tag
-                     ("start/DWC/foo" t)
-                     ("start/DWC/bar" nil)
-                     (_ (error "unmocked tag-exists-p: %S" tag)))))
                 ((symbol-function 'agent-repl--git-exit-code)
                  (lambda (root &rest args)
                    (push (cons root args) exit-calls)
@@ -385,25 +361,19 @@ call sequence and the resulting `agent-repl--workspaces' state."
       (should (null (gethash "foo" agent-repl--workspaces)))
       (should (equal (agent-repl--ws-get "bar" :project-dir)
                      "/tmp/parent/bar"))
-      ;; The git pipeline invoked (in order): branch rename, tag create,
-      ;; old tag delete, worktree move.  We assert on the recorded
-      ;; argument sequence rather than filesystem state.
+      ;; The git pipeline invoked (in order): branch rename, worktree
+      ;; move.  We assert on the recorded argument sequence rather than
+      ;; filesystem state.
       (let ((calls (nreverse exit-calls)))
-        (should (equal (nth 0 calls)
-                       '("/tmp/repo/" "branch" "-m" "DWC/foo" "DWC/bar")))
-        (should (equal (nth 1 calls)
-                       '("/tmp/repo/" "tag" "start/DWC/bar" "start/DWC/foo")))
-        (should (equal (nth 2 calls)
-                       '("/tmp/repo/" "tag" "-d" "start/DWC/foo")))
-        (should (equal (nth 3 calls)
-                       '("/tmp/repo/" "worktree" "move"
-                         "/tmp/parent/foo" "/tmp/parent/bar")))))))
+        (should (equal calls
+                       '(("/tmp/repo/" "branch" "-m" "DWC/foo" "DWC/bar")
+                         ("/tmp/repo/" "worktree" "move"
+                          "/tmp/parent/foo" "/tmp/parent/bar"))))))))
 
 (ert-deftest agent-repl-test-rename-end-to-end-rejects-existing-branch ()
   "Rename to a name whose branch already exists aborts before touching state."
   (agent-repl-test--with-clean-state
-    (let ((agent-repl-worktree-start-tag-prefix nil)
-          (exit-calls nil))
+    (let ((exit-calls nil))
       (agent-repl--ws-put "foo" :project-dir "/tmp/parent/foo")
       (cl-letf (((symbol-function 'agent-repl--path-canonical)
                  (lambda (p) (directory-file-name p)))
@@ -428,8 +398,6 @@ call sequence and the resulting `agent-repl--workspaces' state."
                 ;; before any rename op runs.
                 ((symbol-function 'agent-repl--git-branch-exists-p)
                  (lambda (_root branch) (string= branch "DWC/bar")))
-                ((symbol-function 'agent-repl--git-tag-exists-p)
-                 (lambda (&rest _) nil))
                 ((symbol-function 'agent-repl--git-exit-code)
                  (lambda (root &rest args)
                    (push (cons root args) exit-calls)

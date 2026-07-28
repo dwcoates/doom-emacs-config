@@ -62,52 +62,45 @@ WS, when non-nil, supplies workspace metadata for diagnostics."
        ws path branch)
       branch)))
 
-(defun agent-repl--rename-validate (old-ws new-bare new-branch new-start-tag new-path old-path)
+(defun agent-repl--rename-validate (old-ws new-bare new-branch new-path old-path)
   "Validate that OLD-WS can be renamed to NEW-BARE.
 Checks for empty/identical names, existing target path, existing target
-branch, existing target start tag, and existing target workspace name.
+branch, and existing target workspace name.
 Signals `user-error' on any conflict."
   (when (string-empty-p new-bare)
     (agent-repl--log
      old-ws
-     "rename-validate: REJECT old-ws=%S new-bare=%S new-branch=%S new-start-tag=%S new-path=%S old-path=%S reason=empty-name"
-     old-ws new-bare new-branch new-start-tag new-path old-path)
+     "rename-validate: REJECT old-ws=%S new-bare=%S new-branch=%S new-path=%S old-path=%S reason=empty-name"
+     old-ws new-bare new-branch new-path old-path)
     (user-error "New workspace name cannot be empty"))
   (when (string= old-ws new-bare)
     (agent-repl--log
      old-ws
-     "rename-validate: REJECT old-ws=%S new-bare=%S new-branch=%S new-start-tag=%S new-path=%S old-path=%S reason=identical-name"
-     old-ws new-bare new-branch new-start-tag new-path old-path)
+     "rename-validate: REJECT old-ws=%S new-bare=%S new-branch=%S new-path=%S old-path=%S reason=identical-name"
+     old-ws new-bare new-branch new-path old-path)
     (user-error "New name is identical to current name"))
   (when (file-exists-p new-path)
     (agent-repl--log
      old-ws
-     "rename-validate: REJECT old-ws=%S new-bare=%S new-branch=%S new-start-tag=%S new-path=%S old-path=%S reason=target-path-exists"
-     old-ws new-bare new-branch new-start-tag new-path old-path)
+     "rename-validate: REJECT old-ws=%S new-bare=%S new-branch=%S new-path=%S old-path=%S reason=target-path-exists"
+     old-ws new-bare new-branch new-path old-path)
     (user-error "Target path already exists: %s" new-path))
   (when (agent-repl--git-branch-exists-p old-path new-branch)
     (agent-repl--log
      old-ws
-     "rename-validate: REJECT old-ws=%S new-bare=%S new-branch=%S new-start-tag=%S new-path=%S old-path=%S reason=target-branch-exists"
-     old-ws new-bare new-branch new-start-tag new-path old-path)
+     "rename-validate: REJECT old-ws=%S new-bare=%S new-branch=%S new-path=%S old-path=%S reason=target-branch-exists"
+     old-ws new-bare new-branch new-path old-path)
     (user-error "Branch '%s' already exists" new-branch))
-  (when (and new-start-tag
-             (agent-repl--git-tag-exists-p old-path new-start-tag))
-    (agent-repl--log
-     old-ws
-     "rename-validate: REJECT old-ws=%S new-bare=%S new-branch=%S new-start-tag=%S new-path=%S old-path=%S reason=target-start-tag-exists"
-     old-ws new-bare new-branch new-start-tag new-path old-path)
-    (user-error "Start tag '%s' already exists" new-start-tag))
   (when (member new-bare (agent-repl--ws-all-names))
     (agent-repl--log
      old-ws
-     "rename-validate: REJECT old-ws=%S new-bare=%S new-branch=%S new-start-tag=%S new-path=%S old-path=%S reason=target-workspace-exists"
-     old-ws new-bare new-branch new-start-tag new-path old-path)
+     "rename-validate: REJECT old-ws=%S new-bare=%S new-branch=%S new-path=%S old-path=%S reason=target-workspace-exists"
+     old-ws new-bare new-branch new-path old-path)
     (user-error "Workspace '%s' already exists" new-bare))
   (agent-repl--log
    old-ws
-   "rename-validate: ACCEPT old-ws=%S new-bare=%S new-branch=%S new-start-tag=%S new-path=%S old-path=%S"
-   old-ws new-bare new-branch new-start-tag new-path old-path))
+   "rename-validate: ACCEPT old-ws=%S new-bare=%S new-branch=%S new-path=%S old-path=%S"
+   old-ws new-bare new-branch new-path old-path))
 
 (defun agent-repl--rename-assert-no-pending-merge (path &optional ws)
   "Signal `user-error' if PATH has an in-flight cherry-pick, merge, or rebase.
@@ -151,46 +144,6 @@ Signals `error' on failure so the orchestrator can roll back."
       (error "Failed to rename branch '%s' -> '%s' in %s (exit %d)"
              old-branch new-branch path exit-code))))
 
-(defun agent-repl--rename-git-tag (path old-tag new-tag &optional ws)
-  "Rename OLD-TAG to NEW-TAG in the repo at PATH.
-Git has no native tag-rename, so we create NEW-TAG at OLD-TAG's commit
-and then delete OLD-TAG.  If the create step fails we error out without
-deleting OLD-TAG; if the delete step fails we attempt to remove NEW-TAG
-to leave the repo unchanged before erroring."
-  (let ((create-exit (agent-repl--git-exit-code
-                      path "tag" new-tag old-tag)))
-    (agent-repl--log
-     ws
-     "rename-git-tag: ws=%S path=%S step=create old-tag=%S new-tag=%S exit=%d outcome=%s"
-     ws path old-tag new-tag create-exit
-     (if (zerop create-exit) "created" "failed"))
-    (unless (zerop create-exit)
-      (error "Failed to create tag '%s' from '%s' in %s (exit %d)"
-             new-tag old-tag path create-exit)))
-  (let ((delete-exit (agent-repl--git-exit-code
-                      path "tag" "-d" old-tag)))
-    (agent-repl--log
-     ws
-     "rename-git-tag: ws=%S path=%S step=delete-old old-tag=%S new-tag=%S exit=%d outcome=%s"
-     ws path old-tag new-tag delete-exit
-     (if (zerop delete-exit) "deleted" "failed"))
-    (unless (zerop delete-exit)
-      (condition-case cleanup-err
-          (let ((cleanup-exit
-                 (agent-repl--git-exit-code path "tag" "-d" new-tag)))
-            (agent-repl--log
-             ws
-             "rename-git-tag: ws=%S path=%S step=cleanup-new-tag old-tag=%S new-tag=%S exit=%d outcome=%s"
-             ws path old-tag new-tag cleanup-exit
-             (if (zerop cleanup-exit) "deleted" "failed")))
-        (error
-         (agent-repl--log
-          ws
-          "rename-git-tag: ws=%S path=%S step=cleanup-new-tag old-tag=%S new-tag=%S outcome=error error=%S"
-          ws path old-tag new-tag cleanup-err)))
-      (error "Failed to delete old tag '%s' in %s (exit %d)"
-             old-tag path delete-exit))))
-
 (defun agent-repl--rename-git-worktree-move (path old-path new-path &optional ws)
   "Move the worktree at OLD-PATH to NEW-PATH.
 PATH is the cwd for the git invocation — kept distinct so the caller
@@ -208,20 +161,17 @@ Signals `error' on failure."
              old-path new-path exit-code))))
 
 (defun agent-repl--rename-execute-git
-    (old-path new-path git-cwd old-branch new-branch old-start-tag new-start-tag
-              &optional ws)
-  "Perform the git-level rename: branch, optional start tag, worktree move.
+    (old-path new-path git-cwd old-branch new-branch &optional ws)
+  "Perform the git-level rename: branch, then worktree move.
 GIT-CWD is the directory passed to `git -C' — must remain valid across
 the worktree move (so we use the common-dir or a sibling, not OLD-PATH).
 On any failure mid-flight, attempts to roll back any already-applied
 rename so the repo is left in its original state."
-  (let ((branch-renamed nil)
-        (tag-renamed nil))
+  (let ((branch-renamed nil))
     (agent-repl--log
      ws
-     "rename-execute-git: begin ws=%S old-path=%S new-path=%S git-cwd=%S old-branch=%S new-branch=%S old-start-tag=%S new-start-tag=%S"
-     ws old-path new-path git-cwd old-branch new-branch
-     old-start-tag new-start-tag)
+     "rename-execute-git: begin ws=%S old-path=%S new-path=%S git-cwd=%S old-branch=%S new-branch=%S"
+     ws old-path new-path git-cwd old-branch new-branch)
     (condition-case err
         (progn
           (agent-repl--rename-git-branch
@@ -231,57 +181,18 @@ rename so the repo is left in its original state."
            ws
            "rename-execute-git: branch-step ws=%S old-branch=%S new-branch=%S outcome=renamed"
            ws old-branch new-branch)
-          (let ((old-tag-exists
-                 (and old-start-tag new-start-tag
-                      (agent-repl--git-tag-exists-p
-                       git-cwd old-start-tag))))
-            (if old-tag-exists
-                (progn
-                  (agent-repl--log
-                   ws
-                   "rename-execute-git: tag-step ws=%S old-start-tag=%S new-start-tag=%S exists=t action=rename"
-                   ws old-start-tag new-start-tag)
-                  (agent-repl--rename-git-tag
-                   git-cwd old-start-tag new-start-tag ws)
-                  (setq tag-renamed t))
-              (agent-repl--log
-               ws
-               "rename-execute-git: tag-step ws=%S old-start-tag=%S new-start-tag=%S exists=%s action=skip"
-               ws old-start-tag new-start-tag
-               (if old-tag-exists "t" "nil"))))
           (agent-repl--rename-git-worktree-move
            git-cwd old-path new-path ws)
           (agent-repl--log
            ws
-           "rename-execute-git: complete ws=%S old-path=%S new-path=%S old-branch=%S new-branch=%S tag-renamed=%s"
-           ws old-path new-path old-branch new-branch
-           (if tag-renamed "t" "nil")))
+           "rename-execute-git: complete ws=%S old-path=%S new-path=%S old-branch=%S new-branch=%S"
+           ws old-path new-path old-branch new-branch))
       (error
        (agent-repl--log
         ws
-        "rename-execute-git: rollback begin ws=%S old-path=%S new-path=%S git-cwd=%S old-branch=%S new-branch=%S old-start-tag=%S new-start-tag=%S branch-renamed=%s tag-renamed=%s original-error=%S"
+        "rename-execute-git: rollback begin ws=%S old-path=%S new-path=%S git-cwd=%S old-branch=%S new-branch=%S branch-renamed=%s original-error=%S"
         ws old-path new-path git-cwd old-branch new-branch
-        old-start-tag new-start-tag
-        (if branch-renamed "t" "nil")
-        (if tag-renamed "t" "nil") err)
-       (if tag-renamed
-           (condition-case rollback-tag-err
-               (progn
-                 (agent-repl--rename-git-tag
-                  git-cwd new-start-tag old-start-tag ws)
-                 (agent-repl--log
-                  ws
-                  "rename-execute-git: rollback-tag ws=%S from=%S to=%S outcome=restored"
-                  ws new-start-tag old-start-tag))
-             (error
-              (agent-repl--log
-               ws
-               "rename-execute-git: rollback-tag ws=%S from=%S to=%S outcome=failed error=%S"
-               ws new-start-tag old-start-tag rollback-tag-err)))
-         (agent-repl--log
-          ws
-          "rename-execute-git: rollback-tag ws=%S old-start-tag=%S new-start-tag=%S action=skip reason=not-renamed"
-          ws old-start-tag new-start-tag))
+        (if branch-renamed "t" "nil") err)
        (if branch-renamed
            (condition-case rollback-branch-err
                (progn
@@ -594,21 +505,18 @@ errors verbatim after attempting a best-effort rollback."
               (user-error "Cannot rename a detached-HEAD worktree")))
          (new-branch
           (agent-repl--rename-derive-branch old-branch new-name old-ws))
-         (old-start-tag (agent-repl--start-tag-name old-branch))
-         (new-start-tag (agent-repl--start-tag-name new-branch))
          (git-cwd
           (agent-repl--rename-git-common-cwd old-path old-ws)))
     (agent-repl--log
      old-ws
-     "rename: prepared old-ws=%S new-bare=%S old-path=%S canonical-old=%S parent=%S new-path=%S old-branch=%S new-branch=%S old-start-tag=%S new-start-tag=%S git-cwd=%S"
+     "rename: prepared old-ws=%S new-bare=%S old-path=%S canonical-old=%S parent=%S new-path=%S old-branch=%S new-branch=%S git-cwd=%S"
      old-ws new-bare old-path canonical-old parent new-path
-     old-branch new-branch old-start-tag new-start-tag git-cwd)
+     old-branch new-branch git-cwd)
     (agent-repl--rename-validate
-     old-ws new-bare new-branch new-start-tag new-path old-path)
+     old-ws new-bare new-branch new-path old-path)
     (agent-repl--rename-assert-no-pending-merge old-path old-ws)
     (agent-repl--rename-execute-git
-     old-path new-path git-cwd
-     old-branch new-branch old-start-tag new-start-tag old-ws)
+     old-path new-path git-cwd old-branch new-branch old-ws)
     (agent-repl--rename-rehash-state old-ws new-bare new-path)
     (agent-repl--rename-update-source-back-refs old-path new-path new-bare)
     (agent-repl--rename-update-buffers old-ws new-bare new-path)

@@ -188,8 +188,6 @@
                  (lambda (&rest _) nil))
                 ((symbol-function 'agent-repl--async-worktree-add)
                  (lambda (&rest _) (error "git worktree forbidden")))
-                ((symbol-function 'agent-repl--create-start-tag)
-                 (lambda (&rest _) (error "git tag forbidden")))
                 ((symbol-function 'agent-repl--frontend-create-session)
                  (lambda (&rest _) (error "session creation forbidden")))
                 ((symbol-function 'agent-repl--setup-worktree-session)
