@@ -33,7 +33,11 @@ import (
 // return a loud error, never a silent no-op — the frontend renders the failed
 // CommandAck.
 type PromptRouter interface {
-	SubmitPrompt(ctx context.Context, workspace, text, permissionMode string) error
+	// SubmitPrompt carries the COMMAND'S OWN request id through to the driver:
+	// it is what the daemon's immediate prompt receipt is keyed on, and what
+	// the durable transcript line is later stamped with, so a frontend
+	// reconciles the two onto one bubble.
+	SubmitPrompt(ctx context.Context, workspace, requestID, text, permissionMode string) error
 	Interrupt(ctx context.Context, workspace string) error
 	AnswerPermission(ctx context.Context, workspace, permissionRequestID string, allow bool, denyMessage string, updatedInput *structpb.Struct) error
 }
@@ -405,7 +409,7 @@ func (h *commandHandler) SubmitPrompt(ctx context.Context, workspace, requestID 
 	if err := checkWorkspaceKey("submit_prompt", workspace); err != nil {
 		return err
 	}
-	return h.prompts.SubmitPrompt(ctx, workspace, cmd.GetText(), cmd.GetPermissionMode())
+	return h.prompts.SubmitPrompt(ctx, workspace, requestID, cmd.GetText(), cmd.GetPermissionMode())
 }
 
 // Interrupt stops the workspace's turn, subject to THE CONFIRM GATE.

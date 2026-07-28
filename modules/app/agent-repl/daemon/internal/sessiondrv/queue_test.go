@@ -150,7 +150,7 @@ func (h *queueHarness) turn(active bool) {
 
 // submit submits a prompt for "ws".
 func (h *queueHarness) submit(text string) error {
-	return h.m.SubmitPrompt(context.Background(), "ws", text, "")
+	return h.m.SubmitPrompt(context.Background(), "ws", "", text, "")
 }
 
 // entries returns VALUE copies of the current queue entries.

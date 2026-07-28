@@ -267,7 +267,7 @@ func TestSubmitPromptBringsUpAndSends(t *testing.T) {
 	m, lastClient := newTestManager(t, fakeLocator{m: map[string]string{"ws": "s1"}}, spawner)
 
 	// Act.
-	if err := m.SubmitPrompt(context.Background(), "ws", "hello", "default"); err != nil {
+	if err := m.SubmitPrompt(context.Background(), "ws", "", "hello", "default"); err != nil {
 		t.Fatalf("SubmitPrompt: %v", err)
 	}
 
@@ -286,7 +286,7 @@ func TestSubmitPromptBringsUpAndSends(t *testing.T) {
 
 func TestSubmitPromptUnknownWorkspaceErrors(t *testing.T) {
 	m, _ := newTestManager(t, fakeLocator{m: map[string]string{}}, &fakeSpawner{})
-	if err := m.SubmitPrompt(context.Background(), "ghost", "x", ""); err == nil {
+	if err := m.SubmitPrompt(context.Background(), "ghost", "", "x", ""); err == nil {
 		t.Fatal("prompting a workspace with no live session must error")
 	}
 }
@@ -297,7 +297,7 @@ func TestHealthRequiresTheNamedExistingDriverAndForwardsCorrelation(t *testing.T
 	// than starting another one.
 	spawner := &fakeSpawner{}
 	m, lastClient := newTestManager(t, fakeLocator{m: map[string]string{"ws": "s1"}}, spawner)
-	if err := m.SubmitPrompt(context.Background(), "ws", "hello", ""); err != nil {
+	if err := m.SubmitPrompt(context.Background(), "ws", "", "hello", ""); err != nil {
 		t.Fatalf("bring up: %v", err)
 	}
 	lastClient().healthStatus = &corev1.HealthStatus{RequestId: "health-1", Healthy: true, Component: "claude-shim"}
@@ -322,7 +322,7 @@ func TestHealthRejectsNoDriverAndWrongSession(t *testing.T) {
 	if _, err := m.Health(context.Background(), "ws", "s1", "health-1"); err == nil {
 		t.Fatal("health without an existing driver must error")
 	}
-	if err := m.SubmitPrompt(context.Background(), "ws", "hello", ""); err != nil {
+	if err := m.SubmitPrompt(context.Background(), "ws", "", "hello", ""); err != nil {
 		t.Fatalf("bring up: %v", err)
 	}
 	if _, err := m.Health(context.Background(), "ws", "other", "health-2"); err == nil {
@@ -427,7 +427,7 @@ func TestHealthSurfacesItsOwnDeadlineDuringBringUp(t *testing.T) {
 func TestHealthOnAReadyDriverAnswersWithoutBlocking(t *testing.T) {
 	// Arrange: a live, connected driver.
 	m, lastClient := newTestManager(t, fakeLocator{m: map[string]string{"ws": "s1"}}, &fakeSpawner{})
-	if err := m.SubmitPrompt(context.Background(), "ws", "hello", ""); err != nil {
+	if err := m.SubmitPrompt(context.Background(), "ws", "", "hello", ""); err != nil {
 		t.Fatalf("bring up: %v", err)
 	}
 	fc := lastClient()
@@ -456,8 +456,8 @@ func TestSubmitPromptReusesLiveSession(t *testing.T) {
 	m, _ := newTestManager(t, fakeLocator{m: map[string]string{"ws": "s1"}}, spawner)
 
 	// Act: two prompts to the same workspace.
-	_ = m.SubmitPrompt(context.Background(), "ws", "a", "")
-	_ = m.SubmitPrompt(context.Background(), "ws", "b", "")
+	_ = m.SubmitPrompt(context.Background(), "ws", "", "a", "")
+	_ = m.SubmitPrompt(context.Background(), "ws", "", "b", "")
 
 	// Assert: brought up once (reused).
 	if len(spawner.calls) != 1 {
@@ -474,7 +474,7 @@ func TestMetapromptRefireFoldsOncePerResume(t *testing.T) {
 
 	// Bring the session up, then arm via a resume SessionStarted, as the
 	// consumer's onSessionStarted would on the live stream.
-	if err := m.SubmitPrompt(context.Background(), "ws", "first", ""); err != nil {
+	if err := m.SubmitPrompt(context.Background(), "ws", "", "first", ""); err != nil {
 		t.Fatalf("SubmitPrompt: %v", err)
 	}
 	d, err := m.existing("ws")
@@ -484,8 +484,8 @@ func TestMetapromptRefireFoldsOncePerResume(t *testing.T) {
 	m.armMetaprompt(d, &corev1.SessionStarted{Source: corev1.SessionSource_SESSION_SOURCE_RESUME, Cwd: cwd})
 
 	// Act: the NEXT two prompts.
-	_ = m.SubmitPrompt(context.Background(), "ws", "second", "")
-	_ = m.SubmitPrompt(context.Background(), "ws", "third", "")
+	_ = m.SubmitPrompt(context.Background(), "ws", "", "second", "")
+	_ = m.SubmitPrompt(context.Background(), "ws", "", "third", "")
 
 	// Assert: exactly the "second" prompt carries the directive; "third" does not.
 	fc := lastClient()
@@ -519,7 +519,7 @@ func TestInterruptRequiresLiveSession(t *testing.T) {
 func TestInterruptReportsNoErrorWhenTheTurnWasStopped(t *testing.T) {
 	// Arrange.
 	m, lastClient := newTestManager(t, fakeLocator{m: map[string]string{"ws": "s1"}}, &fakeSpawner{})
-	if err := m.SubmitPrompt(context.Background(), "ws", "hello", ""); err != nil {
+	if err := m.SubmitPrompt(context.Background(), "ws", "", "hello", ""); err != nil {
 		t.Fatalf("SubmitPrompt: %v", err)
 	}
 	lastClient().interruptOutcome = corev1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED
@@ -537,7 +537,7 @@ func TestInterruptReportsNoErrorWhenTheTurnHadAlreadyEnded(t *testing.T) {
 	// Arrange: the outcome that exists precisely so this stops being painted
 	// as a failed stop. The user asked for the turn to be over and it is.
 	m, lastClient := newTestManager(t, fakeLocator{m: map[string]string{"ws": "s1"}}, &fakeSpawner{})
-	if err := m.SubmitPrompt(context.Background(), "ws", "hello", ""); err != nil {
+	if err := m.SubmitPrompt(context.Background(), "ws", "", "hello", ""); err != nil {
 		t.Fatalf("SubmitPrompt: %v", err)
 	}
 	lastClient().interruptOutcome = corev1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE
@@ -554,7 +554,7 @@ func TestInterruptReportsNoErrorWhenTheTurnHadAlreadyEnded(t *testing.T) {
 func TestInterruptReportsAnUndeliverableStopAsAFailure(t *testing.T) {
 	// Arrange: the ONLY outcome that reads as a failure.
 	m, lastClient := newTestManager(t, fakeLocator{m: map[string]string{"ws": "s1"}}, &fakeSpawner{})
-	if err := m.SubmitPrompt(context.Background(), "ws", "hello", ""); err != nil {
+	if err := m.SubmitPrompt(context.Background(), "ws", "", "hello", ""); err != nil {
 		t.Fatalf("SubmitPrompt: %v", err)
 	}
 	lastClient().interruptOutcome = corev1.InterruptOutcome_INTERRUPT_OUTCOME_FAILED
@@ -593,7 +593,7 @@ func TestAnswerPermissionRoutesToRegistry(t *testing.T) {
 func TestEnsureShimFailurePropagates(t *testing.T) {
 	spawner := &fakeSpawner{err: errBringUp}
 	m, _ := newTestManager(t, fakeLocator{m: map[string]string{"ws": "s1"}}, spawner)
-	if err := m.SubmitPrompt(context.Background(), "ws", "x", ""); err == nil {
+	if err := m.SubmitPrompt(context.Background(), "ws", "", "x", ""); err == nil {
 		t.Fatal("a spawn failure must surface as a loud error, not be swallowed")
 	}
 }
@@ -719,7 +719,7 @@ func TestHibernateSessionStopsTheMatchingSession(t *testing.T) {
 	// Arrange: bring up s1 for ws.
 	spawner := &fakeSpawner{}
 	m, _ := newTestManager(t, fakeLocator{m: map[string]string{"ws": "s1"}}, spawner)
-	if err := m.SubmitPrompt(context.Background(), "ws", "hi", ""); err != nil {
+	if err := m.SubmitPrompt(context.Background(), "ws", "", "hi", ""); err != nil {
 		t.Fatalf("SubmitPrompt: %v", err)
 	}
 
@@ -738,7 +738,7 @@ func TestHibernateSessionStopsOnlyTheRequestedDifferentSession(t *testing.T) {
 	// Arrange: s1 is the live driver for ws.
 	spawner := &fakeSpawner{}
 	m, _ := newTestManager(t, fakeLocator{m: map[string]string{"ws": "s1"}}, spawner)
-	if err := m.SubmitPrompt(context.Background(), "ws", "hi", ""); err != nil {
+	if err := m.SubmitPrompt(context.Background(), "ws", "", "hi", ""); err != nil {
 		t.Fatalf("SubmitPrompt: %v", err)
 	}
 
@@ -758,7 +758,7 @@ func TestHibernateSessionStopsOnlyTheRequestedDifferentSession(t *testing.T) {
 func TestHibernateSessionKeepsTheDriverLiveOnAMismatch(t *testing.T) {
 	// Arrange: s1 live for ws.
 	m, _ := newTestManager(t, fakeLocator{m: map[string]string{"ws": "s1"}}, &fakeSpawner{})
-	if err := m.SubmitPrompt(context.Background(), "ws", "hi", ""); err != nil {
+	if err := m.SubmitPrompt(context.Background(), "ws", "", "hi", ""); err != nil {
 		t.Fatalf("SubmitPrompt: %v", err)
 	}
 
@@ -818,7 +818,7 @@ func TestTerminalDriverErrorStopsShimAfterEviction(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	t.Cleanup(m.Close)
-	if err := m.SubmitPrompt(context.Background(), "ws", "hi", ""); err != nil {
+	if err := m.SubmitPrompt(context.Background(), "ws", "", "hi", ""); err != nil {
 		t.Fatalf("SubmitPrompt: %v", err)
 	}
 
@@ -849,7 +849,7 @@ func TestHibernateStillStopsWhicheverSessionIsLive(t *testing.T) {
 	// (the idle sweep and daemon shutdown depend on it).
 	spawner := &fakeSpawner{}
 	m, _ := newTestManager(t, fakeLocator{m: map[string]string{"ws": "s1"}}, spawner)
-	if err := m.SubmitPrompt(context.Background(), "ws", "hi", ""); err != nil {
+	if err := m.SubmitPrompt(context.Background(), "ws", "", "hi", ""); err != nil {
 		t.Fatalf("SubmitPrompt: %v", err)
 	}
 
@@ -880,7 +880,7 @@ func TestSubmitPromptWaitsForTheShimToBecomeDriveable(t *testing.T) {
 
 	// Act: submit while the shim is still coming up.
 	done := make(chan error, 1)
-	go func() { done <- m.SubmitPrompt(context.Background(), "ws", "hello", "") }()
+	go func() { done <- m.SubmitPrompt(context.Background(), "ws", "", "hello", "") }()
 
 	// Assert: it must not have been rejected — it is waiting, not failing.
 	select {
@@ -913,7 +913,7 @@ func TestSubmitPromptFailsWhenTheShimNeverConnects(t *testing.T) {
 	// Act: the caller's context is the failure bound.
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
 	defer cancel()
-	err := m.SubmitPrompt(ctx, "ws", "hello", "")
+	err := m.SubmitPrompt(ctx, "ws", "", "hello", "")
 
 	// Assert: surfaced loudly, naming the workspace — never a silent drop.
 	if err == nil {

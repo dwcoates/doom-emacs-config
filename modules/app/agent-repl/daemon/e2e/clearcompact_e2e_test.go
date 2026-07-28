@@ -33,6 +33,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -296,15 +297,18 @@ func isClear(item *frontendv1.ConversationItem) bool   { return item.GetContextC
 func isCompact(item *frontendv1.ConversationItem) bool { return item.GetContextCompacted() != nil }
 
 // seqItems drops the items a replay serves REGARDLESS of seq — the retained
-// permission items (arm 30) and failure cards (arm 31), which are daemon-
-// composed, carry no store seq, and are re-pushed on every resync by contract
-// (sessiondrv/sinks.go consumer.resync). They are the only documented
-// asymmetry between a live stream and a replay, so an equivalence check names
-// and excludes exactly them.
+// permission items (arm 30), failure cards (arm 31), and prompt receipts
+// (sessiondrv/promptecho.go), all of which are daemon-composed, carry no store
+// seq, and are re-pushed on every resync by contract (sessiondrv/sinks.go
+// consumer.resync). They are the only documented asymmetry between a live
+// stream and a replay, so an equivalence check names and excludes exactly them.
 func seqItems(items []*frontendv1.ConversationItem) []*frontendv1.ConversationItem {
 	var out []*frontendv1.ConversationItem
 	for _, item := range items {
 		if item.GetPermission() != nil || item.GetSystemFailure() != nil {
+			continue
+		}
+		if strings.HasPrefix(item.GetUuid(), "prompt-echo:") {
 			continue
 		}
 		out = append(out, item)
