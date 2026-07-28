@@ -755,8 +755,12 @@ describe("footerHtml: the V4 segmented dock", () => {
     const i = input({ progress: progress({ interrupt: { sinceMs: NOW, outcome: "failed" } }) });
     // Act
     const got = footerHtml(i, CLOSED, NOW);
-    // Assert
-    expect(got).toContain(`<div class="pfooter-cell pfooter-grow muted"></div>`);
+    // Assert — the cell carries the grabber notch (its absolute-positioning
+    // host) and nothing else: no interrupt text leaked into it.
+    expect(got).toContain(
+      `<div class="pfooter-cell pfooter-grow muted">` +
+        `<div class="pfooter-grab" aria-hidden="true"></div></div>`,
+    );
   });
 
 
@@ -772,6 +776,14 @@ describe("footerHtml: the V4 segmented dock", () => {
     const got = footerHtml(input(), CLOSED, NOW);
     // Assert
     expect(got).toContain("pfooter-grab");
+  });
+
+  it("hangs the notch inside the grow cell, not above the strip", () => {
+    // Arrange / Act — the grow cell is the notch's positioning host, so the
+    // notch centers on the middle section like the activity text does.
+    const got = footerHtml(input(), CLOSED, NOW);
+    // Assert
+    expect(got).toMatch(/class="pfooter-cell pfooter-grow[^"]*">[^<]*<div class="pfooter-grab"/);
   });
 
   it("marks the one span the clock tick repaints", () => {

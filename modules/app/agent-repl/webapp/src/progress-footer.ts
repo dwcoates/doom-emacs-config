@@ -451,10 +451,16 @@ export function footerHtml(
         `${escapeHtml(chip.text)}</div>`,
     );
   }
+  // The activity cell also HOSTS the grabber notch, which is absolutely
+  // positioned against it (see `.pfooter-grab`) so the notch centers on the
+  // middle section rather than on the whole dock. This cell is pushed
+  // unconditionally, so the notch renders in every state the footer shows,
+  // including the one where the activity text is empty.
   const activity = activityDetail(input, nowMs);
   cells.push(
     `<div class="pfooter-cell pfooter-grow ${activity ? activity.tone : "muted"}">` +
-      `${activity ? escapeHtml(activity.text) : ""}</div>`,
+      `${activity ? escapeHtml(activity.text) : ""}` +
+      `<div class="pfooter-grab" aria-hidden="true"></div></div>`,
   );
   // The clock cell always renders while a turn is in flight: it owns the one
   // span the tick repaints, so dropping it would leave the tick nothing to
@@ -472,7 +478,6 @@ export function footerHtml(
 
   return (
     `<div class="pfooter" role="status" aria-live="polite">` +
-    `<div class="pfooter-grab" aria-hidden="true"></div>` +
     `<div class="pfooter-cells" ${FOOTER_STRIP_ATTR} role="button" tabindex="0" ` +
     `aria-expanded="${open.expanded}" title="click for detail">${cells.join("")}</div>` +
     errorRowHtml(p) +
