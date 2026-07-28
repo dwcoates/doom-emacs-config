@@ -2297,25 +2297,42 @@ pre {
   align-items: stretch;
   cursor: pointer;
 }
+/* Padding is SYMMETRIC on purpose: the cells stretch to the row's height, and
+   an asymmetric pair (the old 3px/6px) offsets every cell's content box from
+   the strip's true center, which is what made the whole row read high. The
+   14px total is the height the old 3px/6px pair plus the grow cell's extra
+   top padding produced, so the strip keeps exactly the height it had.
+
+   Content is centered on BOTH axes: `justify-content` for the flex cells,
+   `text-align` for the grow cell (a block, see below) and for any anonymous
+   text a cell wraps. */
 .pfooter-cell {
-  padding: 3px 10px 6px;
+  padding: 7px 10px;
   border-right: 1px solid var(--border);
   display: flex;
   align-items: center;
+  justify-content: center;
+  text-align: center;
   gap: 6px;
   white-space: nowrap;
 }
 .pfooter-cell:last-child { border-right: 0; }
 /* The activity-detail cell takes the leftover width and truncates rather than
    wrapping: a long hook name or auth line must not make the dock two lines
-   tall, which is the one shape constraint the design fixes. */
+   tall, which is the one shape constraint the design fixes. It stays a BLOCK
+   rather than a flex cell because `text-overflow: ellipsis` only applies to
+   the element that directly holds the text — inside a flex box the text
+   becomes an anonymous item and truncates as a hard clip instead.
+
+   It therefore carries no vertical padding of its own: its single line box is
+   the same height as every sibling cell's, so the symmetric cell padding
+   centers it in the strip like the rest. */
 .pfooter-grow {
   flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   display: block;
-  padding-top: 5px;
 }
 
 /* Phase tones: the footer's anchor word, colored by what the session is doing.
