@@ -182,6 +182,38 @@ func TestUngatedPermissionMode(t *testing.T) {
 	}
 }
 
+func TestDefaultSessionPermissionModeIsGated(t *testing.T) {
+	// Arrange + Act + Assert — the invariant, not a behavior: a posture nobody
+	// asked for can never be the one with no permission gate. A future edit to
+	// the constant that broke this would fail the build rather than a session.
+	if UngatedPermissionMode(string(DefaultSessionPermissionMode)) {
+		t.Fatalf("DefaultSessionPermissionMode = %q, which is UNGATED; a default must never bypass the permission gate",
+			DefaultSessionPermissionMode)
+	}
+}
+
+func TestResolvePermissionMode(t *testing.T) {
+	tests := []struct {
+		name string
+		mode string
+		want string
+	}{
+		{name: "empty record takes the session default", mode: "", want: string(DefaultSessionPermissionMode)},
+		{name: "an explicit mode is passed through", mode: "plan", want: "plan"},
+		{name: "an explicit ungated mode is still passed through", mode: "bypassPermissions", want: "bypassPermissions"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange + Act
+			got := ResolvePermissionMode(tt.mode)
+			// Assert
+			if got != tt.want {
+				t.Errorf("ResolvePermissionMode(%q) = %q, want %q", tt.mode, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestUngatedNoteAnnouncesTheAbsentGate(t *testing.T) {
 	// Arrange + Act
 	note := UngatedNote("this session", "bypassPermissions", true)
