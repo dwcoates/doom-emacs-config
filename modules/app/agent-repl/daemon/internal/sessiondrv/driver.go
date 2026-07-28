@@ -747,17 +747,55 @@ func (m *Manager) Resync(workspace string, fromSeq uint64) error {
 // for it — so there is no reason to floor on one and not the other. The store
 // mark is a single seq for that reason: whichever came last wins, and the older
 // one is already below the floor the newer one sets.
+//
+// A MARK FROM A RETIRED SEQ SPACE IS NOT TRUSTED. When the vendor rotates its
+// session uuid (a `/clear`), the conversation starts a NEW store seq space at 1
+// and every mark counted in the old one becomes a number with no meaning here —
+// a client still holding 1060 while this space has reached 12 would otherwise
+// read as "already past everything" and be served nothing at all, the clear
+// that caused the rotation included. Such a mark is impossible in-space: the
+// daemon records last_seen_seq BEFORE forwarding an event, so no frontend can
+// hold a seq this conversation has not seen. It is therefore floored at the
+// newest clear or compaction (or at zero, replaying what is retained), loudly,
+// rather than believed.
 func (m *Manager) replayFloor(d *driven, fromSeq uint64) uint64 {
 	floorSeq := m.cfg.ClearCompactStore.NewestClearOrCompactSeq(d.sessionID)
+	lastSeen := m.lastSeenSeq(d)
 	logf := dlog.Tag(dlog.Logf(m.logf),
 		"ws", d.workspace, "session", d.sessionID,
-		"from_seq", fromSeq, "newest_clear_or_compact_seq", floorSeq)
+		"from_seq", fromSeq, "newest_clear_or_compact_seq", floorSeq,
+		"last_seen_seq", lastSeen)
+	if fromSeq > lastSeen {
+		logf("sessiondrv: replay mark from a RETIRED seq space — from_seq is above every seq this conversation has produced, so it was counted under a vendor session uuid that has since rotated; replay_from=%d (the mark is NOT trusted as 'already past everything')", floorSeq)
+		return floorSeq
+	}
 	if floorSeq <= fromSeq {
 		logf("sessiondrv: replay floor left at the client mark replay_from=%d (the client is already at or past the newest clear or compaction)", fromSeq)
 		return fromSeq
 	}
 	logf("sessiondrv: replay floor RAISED to the newest clear or compaction replay_from=%d (inclusive: that event is itself replayed; the history above it is never sent)", floorSeq)
 	return floorSeq
+}
+
+// lastSeenSeq is the highest store seq this conversation has produced in its
+// CURRENT vendor seq space: the durable last_seen_seq, or the retained ring's
+// newest position when that is higher.
+//
+// Both are read because they are true at different moments. The durable mark is
+// written by shimclient before an event is forwarded anywhere, so it covers
+// everything a frontend can possibly have seen — including after a restart, when
+// the ring is empty. The ring covers a driver whose events did not come through
+// that path at all (the resync tests' direct Consume, a re-pull), where the
+// durable mark can legitimately still read zero.
+//
+// The value is a CEILING on any honest client mark, which is what makes a mark
+// above it evidence of a retired seq space rather than of a fast frontend.
+func (m *Manager) lastSeenSeq(d *driven) uint64 {
+	durable := m.cfg.SeqStore.LastSeq(d.sessionID)
+	if retained := d.consumer.newestRetainedSeq(); retained > durable {
+		return retained
+	}
+	return durable
 }
 
 // exclusiveLowerBound converts an INCLUSIVE first-seq-to-replay into the
