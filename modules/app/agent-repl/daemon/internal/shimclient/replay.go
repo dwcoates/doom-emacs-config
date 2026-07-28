@@ -21,6 +21,18 @@ import (
 // that eager-ensure already surfaces loudly (metaprompt no-fallbacks rule).
 var ErrReplayNotConnected = errors.New("shimclient: no live shim connection to replay history from")
 
+// ErrReplayLinkLost reports that the shim connection went away UNDER an
+// in-flight replay, so the range was abandoned rather than bounded.
+//
+// It is deliberately NOT the same answer as a truncation. A truncation is the
+// shim's own verdict — a cap tripped, an idle window elapsed — and means "this
+// is all you are getting". A lost link means the question was never finished
+// being asked, and the commonest cause is a DELIBERATE re-handshake: the shim
+// bounces the daemon link when the vendor rotates its session uuid. Reporting
+// that as a truncation is what turned a rotation into a failure card with zero
+// events behind it, so the two are distinct errors and the caller decides.
+var ErrReplayLinkLost = errors.New("shimclient: the shim connection was lost under an in-flight replay")
+
 // ReplayResult reports how a bounded replay ended, as the shim described it.
 // Truncated means a bound tripped before to_seq was reached, so the caller
 // received only PART of the range and must say so rather than presenting the
@@ -31,11 +43,19 @@ type ReplayResult struct {
 	Reason    string
 }
 
-// replayWaiter is one in-flight replay: the caller's event sink plus the
-// channel ReplayDone resolves.
+// replayWaiter is one in-flight replay: the caller's event sink, the channel
+// ReplayDone resolves, and the channel a LOST LINK resolves.
+//
+// The two completions are separate channels rather than one, because they are
+// different facts and the caller acts differently on each: `done` carries the
+// shim's own verdict about a bounded range, while `lost` says the connection
+// carrying the question disappeared. Folding the second into a synthetic
+// truncated ReplayDone — which is what this used to do — made a deliberate
+// re-handshake indistinguishable from the shim hitting its cap.
 type replayWaiter struct {
 	onEvent func(*corev1.Event)
 	done    chan *corev1.ReplayDone
+	lost    chan string
 }
 
 // replayRegistry tracks in-flight replays by request id.
@@ -67,9 +87,15 @@ func (r *replayRegistry) get(id string) (*replayWaiter, bool) {
 	return w, ok
 }
 
-// failAll resolves every in-flight replay as truncated with reason. Called on
+// failAll resolves every in-flight replay as LINK LOST with reason. Called on
 // connection teardown: a replay whose shim went away is not going to finish,
 // and leaving the caller blocked would be worse than telling it so.
+//
+// It resolves the `lost` channel rather than fabricating a truncated
+// ReplayDone. The shim never said this range was truncated; the connection it
+// was being asked over ended. Saying so exactly is what lets the daemon retry a
+// replay the shim's own deliberate re-handshake interrupted instead of
+// reporting a bound nobody tripped.
 func (r *replayRegistry) failAll(reason string) {
 	r.mu.Lock()
 	waiters := make([]*replayWaiter, 0, len(r.m))
@@ -80,7 +106,7 @@ func (r *replayRegistry) failAll(reason string) {
 	r.mu.Unlock()
 	for _, w := range waiters {
 		select {
-		case w.done <- &corev1.ReplayDone{Truncated: true, Reason: reason}:
+		case w.lost <- reason:
 		default:
 		}
 	}
@@ -116,7 +142,7 @@ func (c *Client) Replay(ctx context.Context, fromSeq, toSeq uint64, maxEvents ui
 	}
 
 	requestID := newReplayID()
-	w := &replayWaiter{onEvent: onEvent, done: make(chan *corev1.ReplayDone, 1)}
+	w := &replayWaiter{onEvent: onEvent, done: make(chan *corev1.ReplayDone, 1), lost: make(chan string, 1)}
 	c.replays.add(requestID, w)
 	defer c.replays.remove(requestID)
 
@@ -140,6 +166,13 @@ func (c *Client) Replay(ctx context.Context, fromSeq, toSeq uint64, maxEvents ui
 		c.logf("replay complete request_id=%s delivered=%d truncated=%v reason=%q",
 			requestID, res.Delivered, res.Truncated, res.Reason)
 		return res, nil
+	case reason := <-w.lost:
+		// The connection died under the replay. Truncated is still reported so a
+		// caller that renders whatever arrived knows the range is incomplete, but
+		// the ERROR says which kind of incomplete this is.
+		c.logf("replay link lost request_id=%s: %s", requestID, reason)
+		return ReplayResult{Truncated: true, Reason: reason},
+			fmt.Errorf("%w: request_id=%s (session %s): %s", ErrReplayLinkLost, requestID, c.cfg.SessionID, reason)
 	case <-ctx.Done():
 		// The caller's deadline. Say so rather than reporting a short answer as
 		// complete; late ReplayEvents for this id are dropped loudly by
