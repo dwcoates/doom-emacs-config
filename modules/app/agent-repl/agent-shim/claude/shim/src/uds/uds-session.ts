@@ -31,7 +31,13 @@
 import { AsyncQueue } from "../input-queue.js";
 import { create } from "@bufbuild/protobuf";
 import type { JsonObject } from "@bufbuild/protobuf";
-import { isSwitchablePermissionMode, type ContentBlock, type PermissionMode } from "../protocol.js";
+import {
+  PERMISSION_MODES,
+  isPermissionMode,
+  isSwitchablePermissionMode,
+  type ContentBlock,
+  type PermissionMode,
+} from "../protocol.js";
 import { describeInterruptSurvivors } from "../session.js";
 import type {
   CanUseToolLike,
@@ -92,6 +98,18 @@ export interface UdsSessionDeps {
    * then adopted from the first converted event.
    */
   storeSessionId?: string;
+  /**
+   * The `--permission-mode` argv value the query was CONSTRUCTED with.
+   *
+   * It is a spawn-time snapshot and the WEAKER of the two channels: the
+   * daemon's DaemonHello.permission_mode is read off the session record at
+   * handshake time and overrides this (see completeWiring). Kept anyway so the
+   * override is a comparison rather than a guess, and so a daemon too old to
+   * send the field leaves the session exactly where argv put it.
+   *
+   * Defaults to "default", which is what the argv parser itself defaults to.
+   */
+  permissionMode?: PermissionMode;
   /** Construct the SDK query over the streaming input iterable. */
   createQuery: (
     prompt: AsyncIterable<SdkUserMessageLike>,
@@ -154,10 +172,22 @@ export class UdsSession {
    * of being lost.
    */
   private readonly deferredTurnStarts: Event[] = [];
+  /**
+   * The mode this session is ACTUALLY running under: argv until the bring-up
+   * gate applies the daemon's, then the daemon's. Reported on the readiness
+   * announcement so "what posture is this session in?" is answerable from the
+   * log rather than by inference over two channels.
+   *
+   * A per-prompt SubmitPrompt.permission_mode override is deliberately NOT
+   * folded in: this is where the session STARTS, and that is a per-turn
+   * override applied on top of it.
+   */
+  private effectivePermissionMode: PermissionMode;
 
   constructor(private readonly deps: UdsSessionDeps) {
     this.storeKeyKnown = deps.storeSessionId !== undefined && deps.storeSessionId !== "";
     this.replayIdleMs = deps.replayIdleMs ?? 5000;
+    this.effectivePermissionMode = deps.permissionMode ?? "default";
     const target: SdkControlTarget = {
       submitPrompt: ({ requestId, text, permissionMode }): void => {
         this.turnsInFlight++;
@@ -430,10 +460,87 @@ export class UdsSession {
    * wait then fails on its own deadline — the honest outcome, and far better
    * than acking a session whose store tail does not exist.
    */
+  /**
+   * Apply DaemonHello.permission_mode as this session's posture, INSIDE the
+   * gate. Returns false when the gate must refuse (the caller then withholds
+   * ShimReady exactly as it does for a failed store link).
+   *
+   * WHY IT IS A SWITCH AND NOT A CONSTRUCTION ARGUMENT. `start()` builds the
+   * SDK query and only then dials the daemon, so the query already exists when
+   * the hello lands — construction is strictly earlier, and there is no
+   * ordering in which argv could be superseded at build time. Switching here,
+   * before the ack, still gets the posture in place before the first prompt
+   * can be delivered: nothing may be sent to a session that has not acked.
+   *
+   * PRECEDENCE: the handshake wins. argv is a spawn-time snapshot; this is the
+   * record read at handshake time, and every reattach re-reads it. An override
+   * of a DIFFERING argv value is logged, because a session silently running in
+   * a mode other than the one its command line named is exactly the confusion
+   * this whole change exists to end.
+   *
+   * REFUSALS ARE LOUD, NEVER FALLBACKS. An unknown mode, a missing query, a
+   * launch-only mode the CLI cannot switch into, and a rejected switch all
+   * withhold the ack and report a DegradedState. Falling back to "default"
+   * would run the session under a posture nobody chose, which is the original
+   * defect wearing a different hat.
+   */
+  private async applyHandshakePermissionMode(mode: string): Promise<boolean> {
+    // Empty means a daemon too old to speak the field (core.proto): argv
+    // stands, unchanged, for the rollout window.
+    if (mode === "") return true;
+    if (!isPermissionMode(mode)) {
+      this.refuseBringUp(`DaemonHello carried permission_mode "${mode}", which is not one of ${PERMISSION_MODES.join(", ")}`);
+      return false;
+    }
+    const argv = this.deps.permissionMode ?? "default";
+    if (!isSwitchablePermissionMode(mode)) {
+      // LAUNCH-ONLY (bypassPermissions): the CLI refuses to switch into it, so
+      // the only way a session can be in it is to have been LAUNCHED in it.
+      // Equal-to-argv is therefore the one acceptable case; anything else is a
+      // posture this shim cannot deliver, and saying so is the honest answer.
+      if (mode !== argv) {
+        this.refuseBringUp(`the handshake asked for launch-only permission_mode "${mode}", which the CLI cannot switch a running session into (argv launched it as "${argv}")`);
+        return false;
+      }
+      this.effectivePermissionMode = mode;
+      return true;
+    }
+    if (this.query === null) {
+      this.refuseBringUp(`the handshake asked for permission_mode "${mode}" but no SDK query is constructed for this session`);
+      return false;
+    }
+    // ASSERTED EVEN WHEN IT EQUALS ARGV. "the flag must already have taken" is
+    // the assumption this whole change exists to stop making — the offline fake
+    // query, for one, ignores argv entirely — so the gate STATES the posture on
+    // the live query rather than inferring it from the command line.
+    try {
+      await this.query.setPermissionMode(mode);
+    } catch (err) {
+      this.refuseBringUp(`the handshake's permission_mode "${mode}" was rejected by the CLI: ${errMsg(err)}`);
+      return false;
+    }
+    this.effectivePermissionMode = mode;
+    if (mode !== argv) {
+      shimLog(COMPONENT, { session: this.deps.sessionId, permission_mode: mode, argv_permission_mode: argv },
+        `handshake permission mode OVERRIDES the --permission-mode argv; this session runs as ${mode}`);
+    }
+    return true;
+  }
+
+  /**
+   * Refuse the bring-up gate: loud log, DegradedState to the daemon, and NO
+   * ShimReady. The daemon's readiness wait then fails on its own deadline,
+   * which is the honest outcome for a session that is not wired as asked.
+   */
+  private refuseBringUp(reason: string): void {
+    this.reportDegraded("claude-shim-bringup", `bring-up gate REFUSED: ${reason}`);
+  }
+
   private async completeWiring(hello: DaemonHello): Promise<void> {
     const fromSeq = hello.fromSeq;
     shimLog(COMPONENT, { session: this.deps.sessionId, from_seq: fromSeq, store_key: this.store.storeSessionId() },
       `bring-up gate: wiring the standing store subscription before acking readiness`);
+    if (!(await this.applyHandshakePermissionMode(hello.permissionMode))) return;
     try {
       await this.store.subscribe(fromSeq);
     } catch (err) {
@@ -491,7 +598,9 @@ export class UdsSession {
         value: create(SessionStartedSchema, { source: this.deps.sessionSource }),
       },
     }));
-    shimLog(COMPONENT, { session: this.deps.sessionId },
+    // The EFFECTIVE mode, not the argv one: the readiness announcement is the
+    // one line that says what posture this session actually came up in.
+    shimLog(COMPONENT, { session: this.deps.sessionId, permission_mode: this.effectivePermissionMode },
       `readiness asserted (lock held, SDK query built, daemon handshaked)`);
   }
 
