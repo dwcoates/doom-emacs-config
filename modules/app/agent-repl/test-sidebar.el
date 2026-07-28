@@ -970,5 +970,17 @@ render state, since sidebar-but-not-tab-bar is the fact being conveyed."
         (agent-repl--task-add-workspace-interactive id))
       (should-not chosen))))
 
+;;;; ---- The two context cuts --------------------------------------------
+
+(ert-deftest agent-repl-test-sidebar-wire-status-clearing ()
+  ":clearing carries its own wire string rather than borrowing thinking's."
+  ;; Act / Assert
+  (should (equal (alist-get :clearing agent-repl--sidebar-status-wire) "clearing")))
+
+(ert-deftest agent-repl-test-sidebar-wire-status-compacting ()
+  ":compacting carries its own wire string rather than borrowing thinking's."
+  ;; Act / Assert
+  (should (equal (alist-get :compacting agent-repl--sidebar-status-wire) "compacting")))
+
 (provide 'test-sidebar)
 ;;; test-sidebar.el ends here

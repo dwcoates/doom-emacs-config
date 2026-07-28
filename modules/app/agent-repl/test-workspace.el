@@ -2254,5 +2254,17 @@ in the same shape (still leftmost, nil-name still at head)."
                  (lambda () "doom-a")))
         (should (equal (agent-repl--ws-tabline-names) '("doom-a")))))))
 
+;;;; ---- The two context cuts --------------------------------------------
+
+(ert-deftest agent-repl-test-ws-state-icon-clearing ()
+  ":clearing has a glyph of its own in `agent-repl-ws-state-icons'."
+  ;; Act / Assert
+  (should (equal (alist-get :clearing agent-repl-ws-state-icons) "🧹")))
+
+(ert-deftest agent-repl-test-ws-state-icon-compacting ()
+  ":compacting has a glyph of its own in `agent-repl-ws-state-icons'."
+  ;; Act / Assert
+  (should (equal (alist-get :compacting agent-repl-ws-state-icons) "🗜")))
+
 (provide 'test-workspace)
 ;;; test-workspace.el ends here
