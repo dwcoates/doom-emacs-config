@@ -206,12 +206,24 @@ describe("expandedKeys", () => {
     expect(expandedKeys(sections)).toEqual(["tool-output:1"]);
   });
 
-  it("keys a multi-class section by its first capped class", () => {
-    // Arrange — the Bash output carries both tool-output and bash-output;
-    // tool-output comes first in CAPPED_CLASSES, so it names the key.
+  it("keys a multi-class section by its SPECIFIC class, not the generic wrapper", () => {
+    // Arrange — the Bash output carries both tool-output and bash-output. The
+    // specific class names the key, so a plain .tool-output appearing beside
+    // it cannot renumber it out from under an open section.
     const sections = [section("tool-output", "bash-output", EXPANDED_CLASS)];
     // Act + Assert
-    expect(expandedKeys(sections)).toEqual(["tool-output:0"]);
+    expect(expandedKeys(sections)).toEqual(["bash-output:0"]);
+  });
+
+  it("keeps a specific section's key stable when a generic one lands above it", () => {
+    // Arrange — a Skill card gaining an error result above its open body,
+    // which is the collision the ordering exists to prevent.
+    const body = section("tool-output", "skill-content", EXPANDED_CLASS);
+    const before = expandedKeys([body]);
+    // Act — the result box arrives ahead of it.
+    const after = expandedKeys([section("tool-output"), body]);
+    // Assert
+    expect(after).toEqual(before);
   });
 
   it("records nothing for an item with no expanded section", () => {

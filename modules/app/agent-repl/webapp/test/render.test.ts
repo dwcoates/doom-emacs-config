@@ -1408,7 +1408,7 @@ describe("renderItem", () => {
     expect(renderItem(item)).toContain("/debug-logs emacs crashed twice");
   });
 
-  it("renders the SKILL.md body as an expandable content section from a skill render hint", () => {
+  it("renders the SKILL.md body as an expandable content section from the daemon-attached body", () => {
     // Arrange
     const item: ToolItem = {
       kind: "tool",
@@ -1419,11 +1419,8 @@ describe("renderItem", () => {
       input: { skill: "debug-logs" },
       inputJson: `{"skill":"debug-logs"}`,
       inputDone: true,
-      result: {
-        isError: false,
-        content: "Launching skill: debug-logs",
-        render: { kind: "skill", content: "# Debug Logs\nread the log" },
-      },
+      skillBody: "# Debug Logs\nread the log",
+      result: { isError: false, content: "Launching skill: debug-logs" },
     };
     // Act
     const html = renderItem(item);
@@ -1444,11 +1441,8 @@ describe("renderItem", () => {
       input: { skill: "debug-logs" },
       inputJson: `{"skill":"debug-logs"}`,
       inputDone: true,
-      result: {
-        isError: false,
-        content: "Launching skill: debug-logs",
-        render: { kind: "skill", content: "# Debug Logs\n**read** the log" },
-      },
+      skillBody: "# Debug Logs\n**read** the log",
+      result: { isError: false, content: "Launching skill: debug-logs" },
     };
     // Act
     const html = renderItem(item);
@@ -1469,11 +1463,8 @@ describe("renderItem", () => {
       input: { skill: "debug-logs" },
       inputJson: `{"skill":"debug-logs"}`,
       inputDone: true,
-      result: {
-        isError: false,
-        content: "Launching skill: debug-logs",
-        render: { kind: "skill", content: "read the log" },
-      },
+      skillBody: "read the log",
+      result: { isError: false, content: "Launching skill: debug-logs" },
     };
     // Act + Assert
     expect(renderItem(item)).toContain(
