@@ -73,6 +73,26 @@ const (
 	// TypeShimStoreWriteRejected — the shim reported it could not write to
 	// the store, so events are being dropped. WINDOW-shaped.
 	TypeShimStoreWriteRejected Type = "shim.store_write_rejected"
+	// The establishment links, in depth order. A createSession acks only
+	// once the new session's shim answers a health probe healthy over the wired
+	// connection, so a failed create must say WHICH hop of that path it stopped
+	// at — "the session did not come up" names nothing a human can act on.
+	//
+	// TypeShimNotSpawned — no shim process was ever brought up for the
+	// workspace, so there is no connection to wait on.
+	TypeShimNotSpawned Type = "shim.not_spawned"
+	// TypeShimHandshakeIncomplete — the shim connected but never sent
+	// ShimReady, so its lock, query, producer, and standing store
+	// subscription are not all wired.
+	TypeShimHandshakeIncomplete Type = "shim.handshake_incomplete"
+	// TypeShimUnhealthy — the shim is wired and answered, and its OWN verdict
+	// on its dependencies is unhealthy. The shim's component and reason ride
+	// source_detail; the daemon never second-guesses the verdict.
+	TypeShimUnhealthy Type = "shim.unhealthy"
+	// TypeSessionNotEstablished — the establishment deadline elapsed with no
+	// verdict at all. Distinct from the links above: those name a hop that
+	// ANSWERED, this one names a wait that ran out.
+	TypeSessionNotEstablished Type = "session.not_established"
 	// TypeSessionNotLive — the command addressed a session that is no longer
 	// the workspace's live one.
 	TypeSessionNotLive Type = "session.not_live"
@@ -190,6 +210,10 @@ var prose = map[Type]string{
 	TypeShimSeqRegression:        "the agent process's event stream went backwards",
 	TypeShimDegraded:             "no traffic from the agent process",
 	TypeShimStoreWriteRejected:   "the agent process could not write to the store",
+	TypeShimNotSpawned:           "the agent process was never started for this session",
+	TypeShimHandshakeIncomplete:  "the agent process connected but never finished wiring up",
+	TypeShimUnhealthy:            "the agent process reported itself unhealthy",
+	TypeSessionNotEstablished:    "the session did not finish connecting in time",
 	TypeSessionNotLive:           "this is no longer the workspace's live session",
 	TypeSessionDeleted:           "the session was deleted",
 	TypeSessionSuperseded:        "a newer session took over this workspace",
@@ -252,8 +276,16 @@ var (
 	ErrShimVersionMismatch = errors.New("shimclient: protocol version mismatch")
 	ErrShimSeqRegression   = errors.New("shimclient: sequence regression")
 	ErrNotLiveSession      = errors.New("sessiondrv: not the live session for this workspace")
-	ErrRepullInFlight      = errors.New("sessiondrv: a history re-pull is already in flight for this workspace")
-	ErrRepullTruncated     = errors.New("sessiondrv: history re-pull truncated before reaching the retained window")
+	// The establishment ladder's anchors. They are DISJOINT by construction:
+	// exactly one may appear in any one error chain, because each names the
+	// deepest hop that hop's failure reached, and a nack that matched two
+	// would have no single deepest link to report.
+	ErrNoLiveDriver          = errors.New("sessiondrv: the workspace has no live shim driver")
+	ErrShimNotReady          = errors.New("sessiondrv: the shim connection never completed its handshake")
+	ErrShimUnhealthy         = errors.New("server: the shim reported itself unhealthy")
+	ErrSessionNotEstablished = errors.New("server: the session did not become established within the deadline")
+	ErrRepullInFlight        = errors.New("sessiondrv: a history re-pull is already in flight for this workspace")
+	ErrRepullTruncated       = errors.New("sessiondrv: history re-pull truncated before reaching the retained window")
 	// ErrInterruptUndelivered is the one interrupt outcome that is a failure.
 	// It is a sentinel rather than a special case at the ack site so that an
 	// undeliverable stop reaches a human through the SAME door as every other
@@ -275,6 +307,10 @@ var sentinelTypes = []struct {
 	{ErrShimVersionMismatch, TypeShimVersionMismatch},
 	{ErrShimSeqRegression, TypeShimSeqRegression},
 	{ErrNotLiveSession, TypeSessionNotLive},
+	{ErrNoLiveDriver, TypeShimNotSpawned},
+	{ErrShimNotReady, TypeShimHandshakeIncomplete},
+	{ErrShimUnhealthy, TypeShimUnhealthy},
+	{ErrSessionNotEstablished, TypeSessionNotEstablished},
 	{ErrRepullInFlight, TypeHistoryRepullInFlight},
 	{ErrRepullTruncated, TypeHistoryReplayTruncated},
 	{ErrInterruptUndelivered, TypeInterruptUndelivered},
@@ -570,6 +606,10 @@ func AllTypes() []Type {
 		TypeShimSeqRegression,
 		TypeShimDegraded,
 		TypeShimStoreWriteRejected,
+		TypeShimNotSpawned,
+		TypeShimHandshakeIncomplete,
+		TypeShimUnhealthy,
+		TypeSessionNotEstablished,
 		TypeSessionNotLive,
 		TypeSessionDeleted,
 		TypeSessionSuperseded,
