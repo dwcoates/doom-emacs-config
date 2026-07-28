@@ -2819,6 +2819,115 @@ describe("the footer's grabber notch geometry", () => {
   });
 });
 
+// The strip's sizing contract: slack has exactly ONE owner (the middle grow
+// cell), rigidity has the rest. Before this, every cell was elastic, so an
+// empty middle collapsed and the leftover width leaked into the readings on
+// the right — `|  ready  | |     --     |` instead of `|  ready  |    | -- |`.
+describe("the footer strip's flex-sizing contract", () => {
+  const cell = blockAfter(css, "\n.pfooter-cell {");
+  const grow = blockAfter(css, "\n.pfooter-grow {");
+  const phase = blockAfter(css, "\n.pfooter-phase {");
+  // Every fixed reading on the right of the strip, anchored on its own
+  // floor-bearing rule (`.pfooter-clock`/`.pfooter-tokens` also share an
+  // earlier tabular-figures rule, which is not the one that sizes them).
+  const fixedRight = {
+    clock: blockAfter(css, "\n.pfooter-clock { min-width"),
+    tokens: blockAfter(css, "\n.pfooter-tokens { min-width"),
+    counters: blockAfter(css, "\n.pfooter-counters { min-width"),
+  };
+
+  it("makes rigidity the default every cell inherits", () => {
+    // Arrange + Act — the base cell rule is what the fixed cells rely on; the
+    // grow cell overrides it and nothing else does.
+    // Assert
+    expect(cell).toContain("flex: 0 0 auto");
+  });
+
+  it("gives the grow cell the row's only flex-grow", () => {
+    // Arrange + Act — one owner of the slack, so an empty middle keeps it.
+    // Assert
+    expect(grow).toContain("flex: 1 1 auto");
+  });
+
+  it("leaves no other cell rule claiming a flex-grow", () => {
+    // Arrange — every `.pfooter-*` base rule's flex declaration except the
+    // grow cell's, which is the one legitimate elastic item.
+    const RIGID = new Set(["0 0 auto", "none"]);
+    const elastic = [...css.matchAll(/\n(\.pfooter-[\w-]+)\s*\{([^}]*)\}/g)]
+      .filter(([, selector]) => selector !== ".pfooter-grow")
+      .filter(([, , body]) => {
+        const declared = /(?:^|;)\s*flex:\s*([^;]+)/.exec(body)?.[1].trim();
+        return declared !== undefined && !RIGID.has(declared);
+      })
+      .map(([, selector]) => selector);
+    // Act + Assert — the spinner's `flex: none` and the cells' `flex: 0 0 auto`
+    // are both rigid, so nothing may remain.
+    expect(elastic).toEqual([]);
+  });
+
+  it("floors the grow cell at its happy-empty width instead of zero", () => {
+    // Arrange + Act — `min-width: 0` is what let the middle collapse.
+    // Assert
+    expect(grow).toContain("min-width: 20ch");
+  });
+
+  it("keeps the grow cell's floor wider than the widest fixed cell", () => {
+    // Arrange — an empty middle must still read as the strip's largest
+    // section, and the phase cell is the widest of the rigid ones.
+    const floor = Number(/min-width:\s*(\d+)ch/.exec(grow)?.[1]);
+    const widestFixed = Number(/max-width:\s*(\d+)ch/.exec(phase)?.[1]);
+    // Act + Assert
+    expect(floor).toBeGreaterThan(widestFixed);
+  });
+
+  it("pins the phase cell to one fixed width so the left edge never moves", () => {
+    // Arrange + Act — the phase vocabulary is closed, so min == max.
+    // Assert
+    expect(phase).toContain("max-width: 17ch");
+  });
+
+  it("sizes the phase cell's floor to the same fixed width", () => {
+    // Arrange + Act — a min below the max would let short words shrink it.
+    // Assert
+    expect(phase).toContain("min-width: 17ch");
+  });
+
+  it("keeps the phase cell out of the flex bargaining entirely", () => {
+    // Arrange + Act — it declares no flex of its own, so it takes the base
+    // cell rule's `flex: 0 0 auto`.
+    // Assert
+    expect(phase).not.toMatch(/flex(-grow|-shrink|-basis)?:/);
+  });
+
+  for (const [name, rule] of Object.entries(fixedRight)) {
+    it(`keeps the ${name} cell rigid, so slack can never leak into it`, () => {
+      // Arrange + Act — these readings inherit `flex: 0 0 auto` and only ever
+      // declare their own min-width floor.
+      // Assert
+      expect(rule).not.toMatch(/flex(-grow|-shrink|-basis)?:/);
+    });
+  }
+
+  it("keeps the interrupt chip rigid alongside the other fixed cells", () => {
+    // Arrange + Act — the chip is a cell like any other and must not grow.
+    const chip = blockAfter(css, "\n.pfooter-interrupt {");
+    // Assert
+    expect(chip).not.toMatch(/flex(-grow|-shrink|-basis)?:/);
+  });
+
+  it("leaves the fixed edges room for the grow cell inside the capped dock", () => {
+    // Arrange — the four rigid floors plus the grow cell's floor is the
+    // strip's narrowest honest layout.
+    const floors = [phase, ...Object.values(fixedRight), grow].map((rule) =>
+      Number(/min-width:\s*(\d+)ch/.exec(rule)?.[1]),
+    );
+    // Act
+    const total = floors.reduce((sum, ch) => sum + ch, 0);
+    // Assert — comfortably inside the docked column at ordinary widths.
+    expect(total).toBeLessThanOrEqual(70);
+  });
+});
+
 describe("sidebar merge glyph size", () => {
   // The merge-family glyph (⟳) is a thin stroke, so at the disc statuses' own
   // box it reads optically smaller than a solid fill. Its font-size is bumped
