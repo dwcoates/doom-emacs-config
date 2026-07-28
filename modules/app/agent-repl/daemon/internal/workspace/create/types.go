@@ -7,8 +7,32 @@ package create
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 )
+
+// ErrJobFailed marks an error that has ALREADY been recorded durably against
+// one job.  It is the single classification line between a failure that
+// belongs to a job and a failure that belongs to the subsystem: a job-level
+// failure is contained (recorded, logged, surfaced to the host, and stepped
+// over), while anything not wrapping this sentinel — an unreadable inbox
+// directory, a broken JobStore — is structural and keeps propagating.
+var ErrJobFailed = errors.New("workspace create: job failed")
+
+// HostActionTypeWorkspaceCreateFailed is the daemon-minted host action that
+// carries a durably-failed job to the Emacs host.  It never originates from a
+// command file: the inbox rejects unknown command types, so this type can only
+// be produced by the manager's own failure path.
+const HostActionTypeWorkspaceCreateFailed = "workspace-create-failed"
+
+// WorkspaceCreateFailure is the payload of a HostActionTypeWorkspaceCreateFailed
+// action.  It names the job and the error so the host can say exactly which
+// creation died and why.
+type WorkspaceCreateFailure struct {
+	JobID         string `json:"job_id"`
+	RequestedName string `json:"requested_name"`
+	Error         string `json:"error"`
+}
 
 // JobState is the durable lifecycle of one create command.  State is persisted
 // before every effect so a restarted daemon can resume through idempotent

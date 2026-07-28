@@ -704,6 +704,13 @@ func toProtoAvailable(j workspacecreate.Job) *frontendv1.WorkspaceAvailable {
 	return &frontendv1.WorkspaceAvailable{JobId: j.ID, FinalName: j.FinalName, WorktreePath: j.WorktreePath, Branch: j.Branch, GitRoot: j.Request.GitRoot, BaseCommit: j.ResolvedBaseCommit, SourceWorkspace: j.Request.SourceWorkspace, SourceDir: j.Request.SourceDir, ForkFrom: j.Request.ForkFrom, ForkSessionId: j.Request.ForkSessionID, SessionId: j.SessionID, Priority: string(j.Request.Priority), Model: j.Request.Model, InitialPromptQueued: j.Request.Prompt != "", ConfigDir: j.Request.ConfigDir, PermissionMode: j.Request.PermissionMode, AllowUngated: j.Request.AllowUngated}
 }
 func toProtoAction(a workspacecreate.HostAction) *frontendv1.HostAction {
+	if a.Type == workspacecreate.HostActionTypeWorkspaceCreateFailed {
+		var failure workspacecreate.WorkspaceCreateFailure
+		if err := json.Unmarshal(a.Payload, &failure); err != nil {
+			panic(fmt.Sprintf("workspace create: failure action %s payload: %v", a.ID, err))
+		}
+		return &frontendv1.HostAction{ActionId: a.ID, Action: &frontendv1.HostAction_WorkspaceCreateFailed{WorkspaceCreateFailed: &frontendv1.HostWorkspaceCreateFailed{JobId: failure.JobID, RequestedName: failure.RequestedName, Error: failure.Error}}}
+	}
 	var raw map[string]any
 	if err := json.Unmarshal(a.Payload, &raw); err != nil {
 		panic(fmt.Sprintf("workspace create: action %s payload: %v", a.ID, err))

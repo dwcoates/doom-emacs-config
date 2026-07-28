@@ -268,9 +268,30 @@ local state."
       (agent-repl--workspace-create-ack-materialized ws job-id result)
       result)))
 
+(defun agent-repl--handle-workspace-create-failed-command (cmd)
+  "Announce a daemon workspace-creation failure carried by CMD.
+CMD is the decoded `workspaceCreateFailed' HostAction payload.  The job
+already failed durably in the daemon; Emacs' whole job here is to make
+sure the user actually finds out, so this both logs and echoes.  It
+never signals: a failure notice that fails to display would be NACKed
+and redelivered forever, replacing a visible failure with a loop."
+  (let ((job-id (or (alist-get 'job_id cmd) "unknown"))
+        (name (or (alist-get 'requested_name cmd) "unknown"))
+        (text (or (alist-get 'error cmd) "no error text supplied")))
+    (agent-repl--log
+     name
+     "workspace-create: JOB FAILED job-id=%s requested-name=%s error=%s"
+     job-id name text)
+    (message "agent-repl: workspace creation FAILED for '%s' (job %s): %s"
+             name job-id text)
+    t))
+
 (defconst agent-repl--host-action-arms
   '((:switchWorkspace agent-repl--handle-switch-command
      ((dir . :dir)))
+    (:workspaceCreateFailed agent-repl--handle-workspace-create-failed-command
+     ((job_id . :jobId) (requested_name . :requestedName)
+      (error . :error)))
     (:setRepositoryFold agent-repl--handle-fold-command
      ((repo_key . :repoKey) (folded . :folded)))
     (:setSidebarView agent-repl--handle-set-view-command
