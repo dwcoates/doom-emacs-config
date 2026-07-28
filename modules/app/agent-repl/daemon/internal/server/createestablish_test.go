@@ -221,6 +221,37 @@ func TestCreateSessionNackOnTheCallersDeadline(t *testing.T) {
 	}
 }
 
+// TestCreateSessionNackOnTheEstablishmentsOwnDeadline covers the other bound: a
+// caller who waits patiently is still answered, because the ROUND has a deadline
+// of its own and a wedged bring-up must nack rather than hold every joined
+// caller forever.
+func TestCreateSessionNackOnTheEstablishmentsOwnDeadline(t *testing.T) {
+	// Arrange: a probe that never answers, under a round bounded far below the
+	// caller's own (absent) deadline.
+	router := &probeHealthRouter{healthy: true, gate: make(chan struct{})}
+	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil, nil, nil,
+		CommandHandlerConfig{Health: HealthConfig{Router: router}, EstablishTimeout: 30 * time.Millisecond})
+	if err != nil {
+		t.Fatalf("newCommandHandler: %v", err)
+	}
+
+	// Act: no caller deadline at all — only the round's bound can end this.
+	nacked := make(chan error, 1)
+	go func() {
+		nacked <- h.CreateSession(context.Background(), "/w", "r1", &frontendv1.CreateSessionCmd{Cwd: "/w"})
+	}()
+
+	// Assert.
+	select {
+	case err := <-nacked:
+		if err == nil || !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("err = %v, want the round's own deadline reported", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("a wedged establishment hung instead of nacking on its own deadline")
+	}
+}
+
 // TestCreateSessionNackWhenTheHealthRouterIsUnwired keeps the unprovable case
 // loud: a daemon that cannot ask the shim anything must not claim the session is
 // established.
