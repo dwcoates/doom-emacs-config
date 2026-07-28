@@ -300,6 +300,68 @@ func (r *RegistryRegistrar) ClaudeSessionIDChanged(sessionID, claudeSessionID st
 	}
 }
 
+// AdoptVendorSessionID adopts claudeSessionID as sessionID's vendor uuid,
+// reporting whether that ROTATED an already-adopted different one and what it
+// replaced.
+//
+// ON A ROTATION THE CONVERSATION'S CURSORS ARE RESET IN THE SAME WRITE. Both
+// of them count in the store seq space the retired uuid keyed, and the vendor
+// has just started a fresh space at 1:
+//
+//   - LastSeq is where the daemon re-Subscribes from. Left standing it would
+//     ask the new space for events past its end — nothing arrives — and then
+//     read the space's own seq=1 as a terminal ErrSeqRegression.
+//   - NewestClearOrCompactSeq is the frontend replay floor. Left standing it
+//     would sit ABOVE every seq the new space will ever produce for a long
+//     while, flooring away the whole post-rotation conversation, including the
+//     very clear that caused the rotation.
+//
+// ONE WRITE, not three, and that is load-bearing rather than tidy: registry
+// maintenance hydrates a record's cursors up from the conversation checkpoint
+// filed under its CURRENT uuid on every mutation, so a reset landing while the
+// old uuid still stood would be silently undone before the new uuid was
+// recorded. Resetting under the NEW uuid instead files a fresh checkpoint at
+// zero, which is the truth about a seq space that has just begun.
+//
+// A first adoption (no uuid yet) and a re-announcement of the SAME uuid both
+// report rotated=false and reset nothing.
+func (r *RegistryRegistrar) AdoptVendorSessionID(sessionID, claudeSessionID string) (bool, string) {
+	if r.Reg == nil || claudeSessionID == "" {
+		return false, ""
+	}
+	var (
+		previous string
+		rotated  bool
+	)
+	found, err := r.Reg.Update(sessionID, func(rec *registry.Record) {
+		previous = rec.ClaudeSessionID
+		rotated = previous != "" && previous != claudeSessionID
+		rec.ClaudeSessionID = claudeSessionID
+		if rotated {
+			rec.LastSeq = 0
+			rec.NewestClearOrCompactSeq = 0
+		}
+	})
+	if err != nil {
+		if r.Logf != nil {
+			r.Logf("server: session %s: registry vendor session adoption (uuid=%s) FAILED — a rotation's store cursor reset did not land, so the resubscribe may read the new seq space as a regression: %v",
+				sessionID, claudeSessionID, err)
+		}
+		return false, previous
+	}
+	if !found {
+		if r.Logf != nil {
+			r.Logf("server: session %s: vendor session adoption (uuid=%s) found no record (never registered)", sessionID, claudeSessionID)
+		}
+		return false, previous
+	}
+	if rotated && r.Logf != nil {
+		r.Logf("server: session %s: VENDOR SESSION ROTATED %s -> %s — last_seq and the replay floor reset to zero for the new store seq space",
+			sessionID, previous, claudeSessionID)
+	}
+	return rotated, previous
+}
+
 // QueuedPromptsChanged persists the prompts the daemon is currently holding for
 // sessionID (E4). Same loud-on-failure contract as above: these are things the
 // user typed that the agent has not seen, so losing the record silently is the

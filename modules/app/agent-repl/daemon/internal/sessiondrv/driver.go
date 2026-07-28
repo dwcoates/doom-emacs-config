@@ -50,6 +50,19 @@ import (
 // gone. Bound in main to a registry-writing adapter; nil disables the write.
 type SessionRegistrar interface {
 	ClaudeSessionIDChanged(sessionID, claudeSessionID string)
+	// AdoptVendorSessionID adopts claudeSessionID as the session's vendor uuid
+	// and reports whether that ROTATED an already-adopted, DIFFERENT one, plus
+	// what it replaced.
+	//
+	// A rotation retires the conversation's store seq space and starts a fresh
+	// one at 1, so the adoption and the CURSOR RESET that must accompany it are
+	// one indivisible act rather than two writes. Splitting them is not merely
+	// untidy: the registry hydrates a record's cursors up from the checkpoint
+	// filed under its CURRENT uuid on every write, so a reset landing while the
+	// old uuid still stood would be undone before the new uuid was recorded.
+	//
+	// Idempotent for an unchanged uuid: rotated=false, nothing reset.
+	AdoptVendorSessionID(sessionID, claudeSessionID string) (rotated bool, previous string)
 	// QueuedPromptsChanged persists the prompts the daemon is currently
 	// HOLDING for a session (E4). A daemon that dies mid-queue would otherwise
 	// lose them with no trace; the record is the honest one.
@@ -972,6 +985,7 @@ func (m *Manager) bringUp(workspace string) (*driven, error) {
 		FrameSink:       cons,
 		Degraded:        cons,
 		Permissions:     ph,
+		OnHandshake:     func(hello *corev1.ShimHello) { m.onHandshake(workspace, sessionID, hello) },
 		OnConnected:     func(hello *corev1.ShimHello) { m.onConnected(workspace, sessionID, hello) },
 		Logf:            m.logf,
 	})
@@ -1044,6 +1058,89 @@ func (m *Manager) armMetaprompt(d *driven, ss *corev1.SessionStarted) {
 	d.metaArmed = true
 	d.metaCwd = ss.GetCwd()
 	m.logf("sessiondrv: metaprompt re-fire armed session=%s source=%s cwd=%s", d.sessionID, ss.GetSource(), ss.GetCwd())
+}
+
+// onHandshake adopts the vendor session uuid a (re)handshaking shim announces,
+// and reconciles the daemon across a ROTATION of it.
+//
+// It runs BEFORE the shimclient reads its Subscribe position (shimclient
+// Config.OnHandshake), which is what makes a rotation survivable at all: the
+// shim minted a new store seq space starting at 1, and a Subscribe resuming
+// from the retired space's high-water mark would ask for events that will never
+// come and then read seq=1 as a terminal regression.
+//
+// Three things move together on a rotation, in this order:
+//
+//  1. THE REGISTRY. The new uuid is persisted and the conversation's cursors
+//     (last_seq, and the replay floor that counts in the same space) are reset
+//     to zero — one indivisible write, because the registry re-hydrates a
+//     record's cursors from the checkpoint filed under its CURRENT uuid.
+//  2. THE QUEUE'S TURN OBSERVATION. The turn in flight when the uuid changed
+//     will report its end under the NEW identity, so the daemon's turn-active
+//     flag is cleared rather than left standing on a boundary nothing will
+//     close. An interrupt mark riding that turn is dropped with it.
+//  3. THE SSM. Same reconciliation on the render axis (ApplySessionRotated).
+//
+// Nothing else is reset: the events themselves are not lost — they are in the
+// store under the new key, and the Subscribe this precedes replays them from
+// zero, ContextCleared included.
+func (m *Manager) onHandshake(workspace, sessionID string, hello *corev1.ShimHello) {
+	csid := hello.GetVendorSessionId()
+	if csid == "" {
+		// A fresh session whose shim has not learned its uuid yet. Announcing
+		// nothing is the honest shape; the SessionStarted that follows carries
+		// it (persistVendorSessionID).
+		return
+	}
+	if m.cfg.Registrar == nil {
+		m.logf("sessiondrv: shim announced vendor_session_id=%s ws=%q session=%s with NO registrar bound — a rotation cannot reset the store cursor and would be read as a seq regression",
+			csid, workspace, sessionID)
+		return
+	}
+	rotated, previous := m.cfg.Registrar.AdoptVendorSessionID(sessionID, csid)
+	m.mu.Lock()
+	m.lastCSID[sessionID] = csid
+	m.mu.Unlock()
+	if !rotated {
+		return
+	}
+	m.logf("sessiondrv: VENDOR SESSION ROTATION ws=%q session=%s %s -> %s — the vendor retired one transcript identity mid-stream; store cursor and replay floor reset to zero and the subscription resumes from the new seq space's beginning",
+		workspace, sessionID, previous, csid)
+	m.clearTurnOnRotation(workspace, sessionID, previous, csid)
+	if err := m.cfg.SSM.ApplySessionRotated(workspace, previous, csid); err != nil {
+		m.logf("sessiondrv: reconciling the SSM across the rotation FAILED ws=%q session=%s %s -> %s: %v (the workspace may stay in THINKING until the next turn)",
+			workspace, sessionID, previous, csid, err)
+	}
+}
+
+// clearTurnOnRotation drops the daemon's turn-in-flight observation for the
+// rotated session, and with it any interrupt mark riding that turn.
+//
+// It does NOT go through onTurnBoundary. That path is the TURN-END DRAIN: it
+// delivers the next held prompt, resumes a paused queue, and decides whether a
+// lone runner finished cleanly — all of it reasoning about a turn that ENDED.
+// A rotation is not an end, it is a loss of the identity the end will be
+// reported under, and the real TurnEnded is moments away in the replay the
+// Subscribe is about to open. Draining here would submit into a session
+// mid-re-handshake and then drain a second time when that end lands.
+func (m *Manager) clearTurnOnRotation(workspace, sessionID, previous, next string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	d, ok := m.byWS[workspace]
+	if !ok || d.sessionID != sessionID {
+		return
+	}
+	if d.interruptedTurn {
+		d.interruptedTurn = false
+		m.logf("sessiondrv: interrupt mark DROPPED as stale ws=%q session=%s (vendor session rotated %s -> %s) — the stopped turn's end belongs to the retired identity",
+			workspace, sessionID, previous, next)
+	}
+	if !d.turnActive {
+		return
+	}
+	d.turnActive = false
+	m.logf("sessiondrv: turn-in-flight observation CLEARED ws=%q session=%s (vendor session rotated %s -> %s) — the running turn's end will be reported under the new identity",
+		workspace, sessionID, previous, next)
 }
 
 // onConnected reconciles SSM turn state on a mid-turn reattach (task step 1):

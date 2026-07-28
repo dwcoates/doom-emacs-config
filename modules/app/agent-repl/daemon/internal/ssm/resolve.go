@@ -63,6 +63,11 @@ const (
 	causePaintLost       = "paint_lost"
 	causeVendorBlocked   = "vendor_blocked"
 	causeInterrupted     = "interrupted"
+	// The vendor retired one session uuid mid-stream and minted another, so
+	// the turn the old identity was running can never report its own end. The
+	// row is daemon-local and carries no store seq, exactly as a merge
+	// transition does. See Manager.ApplySessionRotated.
+	causeSessionRotated = "session_rotated"
 )
 
 // vendorBlockingStopReasons are the TurnEnded stop reasons that conclude a

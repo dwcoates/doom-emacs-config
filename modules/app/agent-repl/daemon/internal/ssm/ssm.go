@@ -369,6 +369,68 @@ func (m *Manager) applyInterruptMarkLocked(ws string, ev *corev1.Event, state, c
 	return state, causeKind
 }
 
+// ApplySessionRotated reconciles the workspace's agent axis across a VENDOR
+// SESSION UUID ROTATION: the vendor retired one transcript identity mid-stream
+// and minted another (a `/clear` does exactly this), so the conversation
+// continues under a new store seq space.
+//
+// A ROTATION IS A HARD BOUNDARY, and that is the whole reason this exists. The
+// turn running when the uuid changed will never report its end under the OLD
+// identity — its TurnEnded belongs to the new one — so the `thinking` row this
+// log is holding has no arriving event that can supersede it. Left alone the
+// workspace sits red forever, which is precisely the "footer stuck in THINKING"
+// this reconciliation answers.
+//
+// It appends `idle` rather than `done`: nothing is running under the retired
+// identity, and claiming a turn COMPLETED would put a conclusion on the wire
+// that no vendor message ever reported. The row is daemon-local (no store seq),
+// exactly as merge transitions and connection-degraded observations are, and it
+// is superseded normally by whatever the agent does next — including the very
+// TurnEnded that arrives moments later once the new space replays.
+//
+// A settled agent axis is left ALONE. A workspace sitting in `permission` or
+// `done` when the uuid rotated has nothing stuck to unstick, and appending
+// `idle` over it would discard a more specific true statement.
+//
+// A STANDING INTERRUPT MARK IS DROPPED, loudly. The mark names ONE turn — the
+// one a user-commanded stop was delivered to — and spends itself on that turn's
+// own end (applyInterruptMarkLocked). Across a rotation that end will never
+// arrive, so the mark can only be spent by some LATER turn's end, reporting a
+// stop that turn never received. Stale is the honest reading.
+func (m *Manager) ApplySessionRotated(workspace, previous, next string) error {
+	if workspace == "" {
+		return fmt.Errorf("ssm: ApplySessionRotated got an empty workspace")
+	}
+	if next == "" {
+		return fmt.Errorf("ssm: ApplySessionRotated got an empty rotated session id for workspace %q", workspace)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if _, marked := m.interruptedTurn[workspace]; marked {
+		delete(m.interruptedTurn, workspace)
+		m.logf("ssm: interrupt mark DROPPED as stale ws=%s (vendor session rotated %s -> %s) — the stopped turn's end belongs to the retired identity and will never arrive, so the mark could only be spent by a later turn that received no stop",
+			workspace, previous, next)
+	}
+
+	active, err := turnActive(m.db, workspace)
+	if err != nil {
+		return err
+	}
+	if !active {
+		m.logf("ssm: vendor session rotated ws=%s %s -> %s — no turn was in flight, agent axis left as it stands",
+			workspace, previous, next)
+		return nil
+	}
+	cause := causeSessionRotated + ":" + next
+	if err := appendRow(m.db, workspace, "", sigIdle, cause, sql.NullInt64{}, m.nextAt(), ""); err != nil {
+		return err
+	}
+	m.logf("ssm: vendor session rotated ws=%s %s -> %s — the in-flight turn's end belongs to the retired identity, so the agent axis is reconciled to `idle` rather than held in `thinking`",
+		workspace, previous, next)
+	return m.reresolveLocked(workspace, cause, 0)
+}
+
 // ApplyPaintAck records a frontend's attestation that it painted the
 // workspace's conversation through THROUGHSEQ.
 //
