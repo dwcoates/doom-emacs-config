@@ -1448,7 +1448,7 @@ survives restart."
 
 (ert-deftest agent-repl-test-initialize-ws-env-restores-repl-state-inactive ()
   "initialize-ws-env hydrates `:repl-state :inactive' from the saved file
-so hide-mode survives Emacs restart."
+so a closed workspace stays closed across an Emacs restart."
   (agent-repl-test--with-clean-state
     (let ((tmpdir (make-temp-file "test-init-rs-" t)))
       (unwind-protect
@@ -1461,23 +1461,6 @@ so hide-mode survives Emacs restart."
                :bare-metal nil))
             (agent-repl--initialize-ws-env "ws1" tmpdir)
             (should (eq (agent-repl--ws-get "ws1" :repl-state) :inactive)))
-        (delete-directory tmpdir t)))))
-
-(ert-deftest agent-repl-test-initialize-ws-env-restores-repl-state-hidden ()
-  "initialize-ws-env hydrates `:repl-state :hidden' from the saved file
-so the deprio-hide marker survives Emacs restart."
-  (agent-repl-test--with-clean-state
-    (let ((tmpdir (make-temp-file "test-init-rs-hidden-" t)))
-      (unwind-protect
-          (progn
-            (agent-repl--write-sexp-file
-             (agent-repl--state-file tmpdir)
-             `(:project-dir ,(agent-repl--path-canonical tmpdir)
-               :active-env :bare-metal
-               :repl-state :hidden
-               :bare-metal nil))
-            (agent-repl--initialize-ws-env "ws1" tmpdir)
-            (should (eq (agent-repl--ws-get "ws1" :repl-state) :hidden)))
         (delete-directory tmpdir t)))))
 
 (ert-deftest agent-repl-test-initialize-ws-env-restores-merge-completed-as-merged ()

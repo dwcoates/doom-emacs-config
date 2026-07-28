@@ -148,14 +148,12 @@ encode."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-set-repl-state "ws-active"   :active)
     (agent-repl--ws-set-repl-state "ws-inactive" :inactive)
-    (agent-repl--ws-set-repl-state "ws-hidden"   :hidden)
     (agent-repl--ws-set-repl-state "ws-dead"     :dead)
     (agent-repl--ws-set-repl-state "ws-merged"   :merged)
     (let* ((snap (agent-repl--workspace-status-snapshot))
            (workspaces (cdr (assoc "workspaces" snap))))
       (should (gethash "ws-active"   workspaces))
       (should (gethash "ws-inactive" workspaces))
-      (should (gethash "ws-hidden"   workspaces))
       (should (gethash "ws-dead"     workspaces))
       (should-not (gethash "ws-merged" workspaces)))))
 

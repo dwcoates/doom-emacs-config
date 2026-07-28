@@ -180,14 +180,14 @@ default dot."
 Closed means agent-repl is not actively hosting the workspace: either
 no perspective is open for it (`agent-repl--ws-open-p' nil — e.g. a
 merged-with-preserve-entry registration), or the perspective is open
-but the REPL is torn down (`:repl-state' `:inactive', or `:hidden'
-awaiting the hide-mode sweep).  A nil `:repl-state' on an OPEN
+but the REPL is torn down (`:repl-state' `:inactive').  A nil
+`:repl-state' on an OPEN
 workspace is NOT closed: that is a session that never started, which
 the \"none\" status dot already conveys."
   (let ((open (agent-repl--ws-open-p name))
         (repl-state (agent-repl--ws-get name :repl-state)))
     (let ((closed (or (not open)
-                      (and (memq repl-state '(:inactive :hidden)) t))))
+                      (eq repl-state :inactive))))
       (agent-repl--log-verbose name "sidebar-closed-p: ws=%s open=%s repl-state=%s -> closed=%s"
                                 name open repl-state closed)
       closed)))
@@ -875,7 +875,7 @@ Then boots the agent via `agent-repl--frontend-boot-session'.  Opening
 from the sidebar means \"open the workspace AND start agent-repl in
 it\", but `--picker-open-selection' boots a session only on its revive
 branch: a workspace whose perspective is still open while its REPL was
-torn down (`:repl-state' `:inactive' / `:hidden', the greyed rows
+torn down (`:repl-state' `:inactive', the greyed rows
 `agent-repl--sidebar-closed-p' marks) takes the switch branch and would
 otherwise land the user in a dead REPL.  The boot door no-ops when a
 live session already exists, so the revive branch's own boot is never

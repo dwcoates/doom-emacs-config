@@ -571,8 +571,9 @@ the gui default and tears down a webview instead."
 ;;
 ;; The bug these close: the gui branch of `--toggle' called the frontend's
 ;; hide capability directly, so a gui workspace put its view away with NONE
-;; of the bookkeeping a close carries — no `:repl-state', so hide-mode could
-;; never sweep it, and on `SPC o C' no deprio and no session kill either.
+;; of the bookkeeping a close carries — no `:repl-state', so the sidebar
+;; still read it as live, and on `SPC o C' no deprio and no session kill
+;; either.
 
 (ert-deftest agent-repl-test-panels-gui-simple-close-marks-inactive ()
   "`SPC o c' on a gui workspace records the close as `:inactive'."
@@ -583,9 +584,8 @@ the gui default and tears down a webview instead."
       (agent-repl--on-simple-close)
       (should (eq :inactive (agent-repl--ws-get "test-ws" :repl-state))))))
 
-(ert-deftest agent-repl-test-panels-gui-close-marks-hidden ()
-  "`SPC o C' on a gui workspace records the close as `:hidden'.
-Without this the workspace can never become a hide-mode sweep candidate."
+(ert-deftest agent-repl-test-panels-gui-close-marks-inactive ()
+  "`SPC o C' on a gui workspace records the close as `:inactive'."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "test-ws" :frontend 'gui)
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
@@ -593,7 +593,7 @@ Without this the workspace can never become a hide-mode sweep candidate."
               ((symbol-function 'agent-repl--save-tab-index) #'ignore)
               ((symbol-function 'agent-repl-workspace-push-to-back) #'ignore))
       (agent-repl--on-close)
-      (should (eq :hidden (agent-repl--ws-get "test-ws" :repl-state))))))
+      (should (eq :inactive (agent-repl--ws-get "test-ws" :repl-state))))))
 
 (ert-deftest agent-repl-test-panels-gui-close-tears-down-the-webview ()
   "A gui close puts the WEBVIEW away, never the vterm panels it does not have."
@@ -649,7 +649,7 @@ removed via the restored work layout rather than stranding a panel."
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ignored"))
               ((symbol-function 'agent-repl--hide-panels) (lambda () nil)))
       (agent-repl--on-close "specific-ws")
-      (should (eq (agent-repl--ws-get "specific-ws" :repl-state) :hidden))
+      (should (eq (agent-repl--ws-get "specific-ws" :repl-state) :inactive))
       (should-not (agent-repl--ws-get "ignored" :repl-state)))))
 
 (ert-deftest agent-repl-test-panels-on-close-nil-ws-still-hides ()
@@ -662,16 +662,16 @@ removed via the restored work layout rather than stranding a panel."
         (agent-repl--on-close)
         (should hide-called)))))
 
-(ert-deftest agent-repl-test-panels-on-close-sets-repl-state-hidden ()
-  "on-close (deprio path) writes :repl-state :hidden so the workspace is a
-sweep candidate when hide-mode is enabled.  Distinct from on-simple-close
-which writes :inactive."
+(ert-deftest agent-repl-test-panels-on-close-sets-repl-state-inactive ()
+  "on-close (deprio path) writes :repl-state :inactive, exactly like
+on-simple-close: the deprio close no longer marks the workspace for a
+sweep, it just closes it."
   (agent-repl-test--with-clean-state
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
               ((symbol-function 'agent-repl--hide-panels) (lambda () nil))
               ((symbol-function 'agent-repl-workspace-push-to-back) #'ignore))
       (agent-repl--on-close)
-      (should (eq (agent-repl--ws-get "test-ws" :repl-state) :hidden)))))
+      (should (eq (agent-repl--ws-get "test-ws" :repl-state) :inactive)))))
 
 (ert-deftest agent-repl-test-panels-on-close-preserves-agent-state ()
   "on-close does not touch :agent-state — mid-task :thinking survives close."
@@ -682,7 +682,7 @@ which writes :inactive."
               ((symbol-function 'agent-repl-workspace-push-to-back) #'ignore))
       (agent-repl--on-close)
       (should (eq (agent-repl--ws-agent-state "test-ws") :thinking))
-      (should (eq (agent-repl--ws-get "test-ws" :repl-state) :hidden)))))
+      (should (eq (agent-repl--ws-get "test-ws" :repl-state) :inactive)))))
 
 (ert-deftest agent-repl-test-panels-on-close-pushes-current-ws-to-back ()
   "on-close calls `agent-repl-workspace-push-to-back' when WS is the current workspace."
@@ -991,10 +991,9 @@ are the alternative if the view isn't visible)."
 
 ;;;; ---- Tests: hide-and-preserve-status ----
 
-(ert-deftest agent-repl-test-panels-hide-and-preserve-marks-hidden ()
+(ert-deftest agent-repl-test-panels-hide-and-preserve-marks-inactive ()
   "hide-and-preserve-status routes through on-close (deprio path) and sets
-:repl-state :hidden so the workspace is a sweep candidate when hide-mode
-is on."
+:repl-state :inactive, re-asserting it after the session kill."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "test-ws" :frontend 'vterm)
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "test-ws"))
@@ -1010,7 +1009,7 @@ is on."
                               :interrupt-fn #'ignore :running-p-fn #'ignore
                               :supported-backends '(claude)))))
       (agent-repl--hide-and-preserve-status)
-      (should (eq (agent-repl--ws-get "test-ws" :repl-state) :hidden)))))
+      (should (eq (agent-repl--ws-get "test-ws" :repl-state) :inactive)))))
 
 (ert-deftest agent-repl-test-panels-hide-and-preserve-no-workspace-errors ()
   "hide-and-preserve-status errors when no workspace is active."
@@ -1409,7 +1408,6 @@ foreign directory."
 on the ws plist (via `--latch-and-maybe-fire-loaded')."
   (agent-repl-test--with-clean-state
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () nil))
-              ((symbol-function 'agent-repl--maybe-sweep-hidden-on-switch) #'ignore)
               ((symbol-function 'agent-repl--update-all-workspace-states-now) #'ignore)
               ((symbol-function 'agent-repl--drain-pending-magit) #'ignore)
               ((symbol-function 'agent-repl--drain-pending-initial-buffers) #'ignore)
@@ -1427,8 +1425,7 @@ the user merely switches to stays blue despite having a transcript."
   (agent-repl-test--with-clean-state
     (let ((notified nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () nil))
-                ((symbol-function 'agent-repl--maybe-sweep-hidden-on-switch) #'ignore)
-                ((symbol-function 'agent-repl--update-all-workspace-states-now) #'ignore)
+                  ((symbol-function 'agent-repl--update-all-workspace-states-now) #'ignore)
                 ((symbol-function 'agent-repl--drain-pending-magit) #'ignore)
                 ((symbol-function 'agent-repl--drain-pending-initial-buffers) #'ignore)
                 ((symbol-function 'agent-repl--drain-pending-show-panels) #'ignore)
@@ -1447,8 +1444,7 @@ sit behind anything that could return early."
   (agent-repl-test--with-clean-state
     (let ((latched-at-notify nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () nil))
-                ((symbol-function 'agent-repl--maybe-sweep-hidden-on-switch) #'ignore)
-                ((symbol-function 'agent-repl--update-all-workspace-states-now) #'ignore)
+                  ((symbol-function 'agent-repl--update-all-workspace-states-now) #'ignore)
                 ((symbol-function 'agent-repl--drain-pending-magit) #'ignore)
                 ((symbol-function 'agent-repl--drain-pending-initial-buffers) #'ignore)
                 ((symbol-function 'agent-repl--drain-pending-show-panels) #'ignore)
@@ -1468,7 +1464,6 @@ also returns nil), the latch flip is skipped — guards against poisoning
 the ws-plist hash with a nil key in test/init environments."
   (agent-repl-test--with-clean-state
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () nil))
-              ((symbol-function 'agent-repl--maybe-sweep-hidden-on-switch) #'ignore)
               ((symbol-function 'agent-repl--update-all-workspace-states-now) #'ignore)
               ((symbol-function 'agent-repl--drain-pending-magit) #'ignore)
               ((symbol-function 'agent-repl--drain-pending-initial-buffers) #'ignore)
@@ -1484,8 +1479,7 @@ merge request is pulled from the queue on activation."
   (agent-repl-test--with-clean-state
     (let (dequeued)
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
-                ((symbol-function 'agent-repl--maybe-sweep-hidden-on-switch) #'ignore)
-                ((symbol-function 'agent-repl--dequeue-merge)
+                  ((symbol-function 'agent-repl--dequeue-merge)
                  (lambda (ws) (setq dequeued ws)))
                 ((symbol-function 'agent-repl--update-all-workspace-states-now) #'ignore)
                 ((symbol-function 'agent-repl--drain-pending-magit) #'ignore)
@@ -1501,8 +1495,7 @@ the gui counterpart of the vterm window's snap to the cursor."
   (agent-repl-test--with-clean-state
     (let (snapped)
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
-                ((symbol-function 'agent-repl--maybe-sweep-hidden-on-switch) #'ignore)
-                ((symbol-function 'agent-repl--dequeue-merge) #'ignore)
+                  ((symbol-function 'agent-repl--dequeue-merge) #'ignore)
                 ((symbol-function 'agent-repl--update-all-workspace-states-now) #'ignore)
                 ((symbol-function 'agent-repl--drain-pending-magit) #'ignore)
                 ((symbol-function 'agent-repl--drain-pending-initial-buffers) #'ignore)
@@ -1519,8 +1512,7 @@ just became visible on the switch is snapped to its tail too."
   (agent-repl-test--with-clean-state
     (let (order)
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
-                ((symbol-function 'agent-repl--maybe-sweep-hidden-on-switch) #'ignore)
-                ((symbol-function 'agent-repl--dequeue-merge) #'ignore)
+                  ((symbol-function 'agent-repl--dequeue-merge) #'ignore)
                 ((symbol-function 'agent-repl--update-all-workspace-states-now) #'ignore)
                 ((symbol-function 'agent-repl--drain-pending-magit) #'ignore)
                 ((symbol-function 'agent-repl--drain-pending-initial-buffers) #'ignore)
@@ -1543,7 +1535,6 @@ The stamp existed only to start the removed decay's dwell countdown."
   "Switching to a workspace records no viewed-acknowledgment at all."
   (agent-repl-test--with-clean-state
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
-              ((symbol-function 'agent-repl--maybe-sweep-hidden-on-switch) #'ignore)
               ((symbol-function 'agent-repl--update-all-workspace-states-now) #'ignore)
               ((symbol-function 'agent-repl--drain-pending-magit) #'ignore)
               ((symbol-function 'agent-repl--drain-pending-initial-buffers) #'ignore)
@@ -1567,8 +1558,6 @@ latest one."
   (agent-repl-test--with-clean-state
     (let ((received-ws nil))
       (cl-letf (((symbol-function '+workspace-current-name) (lambda () "racing-current"))
-                ((symbol-function 'agent-repl--maybe-sweep-hidden-on-switch)
-                 (lambda (ws) (push (cons :sweep ws) received-ws)))
                 ((symbol-function 'agent-repl--update-all-workspace-states-now) (lambda () nil))
                 ((symbol-function 'agent-repl--drain-pending-magit)
                  (lambda (ws) (push (cons :magit ws) received-ws)))
@@ -1839,8 +1828,8 @@ puts the view away."
         (agent-repl--hide-and-preserve-status)
         (should closed)
         (should killed)
-        ;; The hide-mode sweep marker survives the kill's state reset.
-        (should (eq (agent-repl--ws-get "ws1" :repl-state) :hidden))))))
+        ;; The closed marker survives the kill's state reset.
+        (should (eq (agent-repl--ws-get "ws1" :repl-state) :inactive))))))
 
 (ert-deftest agent-repl-test-panels-on-close-never-kills ()
   "on-close itself must NOT kill: send-and-hide hides sessions that
@@ -2642,27 +2631,6 @@ the function takes the agent branch (focus input, no non-agent maximize)."
               (should (window-live-p vterm-win))))
         (dolist (buf (list side-buf vterm-buf))
           (when (buffer-live-p buf) (kill-buffer buf)))))))
-
-;;;; ---- Tests: unhide-workspace ----
-
-(ert-deftest agent-repl-test-unhide-workspace-flips-hidden-to-active ()
-  "`agent-repl--unhide-workspace' resets `:hidden' to `:active'."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws" :repl-state :hidden)
-    (agent-repl--unhide-workspace "ws")
-    (should (eq (agent-repl--ws-get "ws" :repl-state) :active))))
-
-(ert-deftest agent-repl-test-unhide-workspace-noop-on-non-hidden ()
-  "`agent-repl--unhide-workspace' leaves non-hidden states alone."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws" :repl-state :inactive)
-    (agent-repl--unhide-workspace "ws")
-    (should (eq (agent-repl--ws-get "ws" :repl-state) :inactive))))
-
-(ert-deftest agent-repl-test-unhide-workspace-nil-ws-noop ()
-  "Nil WS is a no-op (matches the `:hidden'-only contract)."
-  (agent-repl-test--with-clean-state
-    (agent-repl--unhide-workspace nil)))
 
 ;;;; ---- Tests: clear-main-area-for-panels (side-window preservation) ----
 
