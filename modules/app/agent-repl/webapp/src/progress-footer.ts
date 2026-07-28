@@ -152,6 +152,53 @@ export function phaseLabel(state: WebRenderState): PhaseLabel {
   }
 }
 
+/** The interrupt window as the footer's chip beside the phase. */
+export interface InterruptChip {
+  /** The word the chip shows; the three outcomes never share one. */
+  text: string;
+  /**
+   * Accent class stem. Two of the three outcomes are SUCCESSES and take the
+   * calm `ok` green; only a stop that could not be delivered is an error.
+   */
+  tone: "ok" | "error";
+  /** The hover line, which says what the word means without abbreviating. */
+  title: string;
+}
+
+/**
+ * The interrupt chip, or null when no interrupt window is open (I1).
+ *
+ * The daemon opens the window on the shim's ack and clears it when the next
+ * turn starts, so this holds NO state of its own: a frame with the window
+ * closed renders no chip, and there is nothing left behind to clear.
+ *
+ * The three outcomes read APART on purpose. `interrupted` and
+ * `already complete` are both successes — the user asked for the turn to be
+ * over, and it is — while only a stop that could not be delivered is a
+ * failure. Painting the second as the third is exactly the confusion the
+ * outcome enum exists to end.
+ */
+export function interruptChip(p: ProgressInput): InterruptChip | null {
+  const w = p.interrupt;
+  if (w === null) return null;
+  switch (w.outcome) {
+    case "interrupted":
+      return { text: "interrupted", tone: "ok", title: "the turn was stopped" };
+    case "already_complete":
+      return {
+        text: "already finished",
+        tone: "ok",
+        title: "no turn was running — it had already finished",
+      };
+    case "failed":
+      return { text: "stop failed", tone: "error", title: "the stop could not be delivered" };
+    default: {
+      const never: never = w.outcome;
+      throw new Error(`progress-footer: unhandled interrupt outcome ${String(never)}`);
+    }
+  }
+}
+
 /** One live activity, as the detail cell shows it. */
 export interface Activity {
   text: string;
@@ -391,6 +438,17 @@ export function footerHtml(
     const spin = phase.spinning ? `<span class="pfooter-spin" aria-hidden="true"></span> ` : "";
     cells.push(
       `<div class="pfooter-cell pfooter-phase ${phase.tone}">${spin}${escapeHtml(phase.word)}</div>`,
+    );
+  }
+  // The interrupt chip sits immediately right of the phase: it qualifies the
+  // phase word rather than competing with the activity cell, which stays the
+  // home of what is happening NOW. It is a CELL like every other footer
+  // signal, and it is present exactly while the daemon's window is open.
+  const chip = interruptChip(p);
+  if (chip !== null) {
+    cells.push(
+      `<div class="pfooter-cell pfooter-interrupt ${chip.tone}" title="${escapeHtml(chip.title)}">` +
+        `${escapeHtml(chip.text)}</div>`,
     );
   }
   const activity = activityDetail(input, nowMs);
