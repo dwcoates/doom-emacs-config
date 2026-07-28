@@ -68,6 +68,7 @@ import type { CommandStruct } from "./frontend-command.js";
 import { PendingPermissionMode } from "./pending-mode.js";
 import { ungatedBannerHtml, ungatedModeOf, unswitchableModeOptionHtml } from "./ungated.js";
 import { rebindSession, rememberResumeKeys } from "./rebind.js";
+import { SessionRebase, claudeSessionIdOf } from "./session-rebase.js";
 import { remediationNotice, requestRemediation } from "./remediation.js";
 import { requestSupportWorkspace } from "./unsupported.js";
 import { statusSnapshotFromInit } from "./status.js";
@@ -112,11 +113,13 @@ async function boot(): Promise<void> {
   let activeSessionId: string = joinParam ?? "";
   let ws: WsClient;
 
-  // Resume/rebind tracking, re-fed by the SessionView plane (via the store)
-  // now that the frontend.v1 cutover routes it through the adapter. Reset on
-  // a rebind so a successor session starts fresh.
-  //   - rememberedClaudeId: last durable CLI uuid persisted for rebind.
-  let rememberedClaudeId = "";
+  // Resume/rebind tracking, re-fed by the SessionView plane now that the
+  // frontend.v1 cutover routes it through the adapter. It rules on every
+  // announced vendor session uuid: the first is ADOPTED (persist the resume
+  // keys), a changed one is a ROTATION — the conversation retired its store seq
+  // space, and this end rebases onto the new one (see session-rebase.ts).
+  // Forgotten on a rebind so a successor session starts fresh.
+  const sessionRebase = new SessionRebase({ log: (level, message) => clog(level, message) });
 
   // Delivery-path diagnostics (§2.15). The webapp→daemon log forward rode the
   // legacy `client-log` ClientCommand, which the S8/S9 outbound cutover
@@ -719,8 +722,9 @@ async function boot(): Promise<void> {
     });
     ws.close();
     activeSessionId = next;
-    // The successor is a fresh conversation view, with its own claude session id.
-    rememberedClaudeId = "";
+    // The successor is a fresh conversation view, with its own claude session
+    // id: its first announcement is an adoption, never a rotation.
+    sessionRebase.forget();
     // A paint scheduled against the dead session would render the
     // just-reset (empty) store; the successor's hello drives the next one.
     frames.cancel();
@@ -792,6 +796,23 @@ async function boot(): Promise<void> {
           );
           throw err;
         }
+        // THE CONVERSATION REBASE, ruled on BEFORE the ingest. A rotated vendor
+        // session uuid means the seqs this end holds count in a retired store
+        // seq space, and the new space starts again at 1 — so the retired
+        // space's items and marks are dropped BEFORE the new space's items land,
+        // or those items would rank above the history they follow and the feed
+        // would draw the clear at the top of a conversation it discarded.
+        const verdict = sessionRebase.observe(claudeSessionIdOf(effects));
+        if (verdict === "rotated") {
+          // The retired conversation's blocks are not this one's: drop every
+          // reveal cursor so a reused block id cannot inherit a shown length.
+          smooth.reset();
+          store.rebaseSeqSpace();
+          // The painted-through watermark counted in the retired space too, and
+          // a gate holding it would suppress the rebased conversation's first
+          // attestation.
+          attest.rebaseSeqSpace();
+        }
         // Receipt for an arriving prompt, stamped at INGEST. The feed logs a
         // turn only when the rAF-coalesced render draws it, so on its own that
         // line cannot separate a suspended animation frame from a delta that
@@ -816,24 +837,33 @@ async function boot(): Promise<void> {
         // Read AFTER ingest so the snapshot's own SessionView has supplied the
         // workspace key the daemon routes a resync by.
         connectResync.observe(isSnapshot, cmdWorkspace(), store.state.lastSeq);
-        // Resume/rebind, re-fed from the SessionView plane the store now
-        // populates (claude_session_id/cwd). Skipped entirely until a durable
-        // CLI uuid is known (pre-init frames carry none).
-        const claudeId = store.state.claudeSessionId;
-        if (claudeId !== "" && claudeId !== rememberedClaudeId) {
-          // The SessionView supplied (or updated) the durable CLI uuid:
-          // persist it + cwd so a future "session gone" can rebind this
-          // conversation instead of dead-ending at remediation.
-          rememberedClaudeId = claudeId;
+        // Resume/rebind, re-fed from the SessionView plane. A first adoption and
+        // a rotation both re-persist: the resume keys must name the conversation
+        // that is LIVE, or a later "session gone" would resume the retired one.
+        // Read AFTER ingest so the cwd rides the same SessionView that announced
+        // the uuid.
+        if (verdict !== "unchanged") {
           try {
             rememberResumeKeys(localStorage, activeSessionId, {
-              claudeSessionId: claudeId,
+              claudeSessionId: sessionRebase.claudeSessionId,
               cwd: store.state.cwd,
             });
           } catch (err) {
             clog("error", `rememberResumeKeys failed: ${String(err)}`);
             throw err;
           }
+        }
+        // The rebased view holds no history at all, and the new space's items
+        // may have been pushed before this end learned the rotation. Asking from
+        // zero has the daemon serve the new space from its own replay floor —
+        // the clear that caused the rotation, and everything since — so the
+        // recovery never depends on which frame arrived first.
+        if (verdict === "rotated") {
+          void dispatcher
+            .resync(cmdWorkspace(), 0)
+            .catch((err: unknown) =>
+              clog("error", `resync after the session rebase failed: ${String(err)}`),
+            );
         }
         if (result.changed) {
           // One paint per animation frame, however many effects land before
