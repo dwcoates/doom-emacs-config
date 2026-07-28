@@ -58,6 +58,7 @@ import {
   controlPlaneFailure,
   daemonReachableFailure,
   daemonUnreachableFailure,
+  frameUndecodableFailure,
   sessionGoneFailure,
 } from "./local-failure.js";
 import { StateAdapter, systemFailureFrom, userTurnReceipt } from "./state-adapter.js";
@@ -916,7 +917,26 @@ async function boot(): Promise<void> {
           try {
             decoded = decodeFrontendFrame(data);
           } catch (err) {
-            clog("warn", `bootstrap frame decode failed: ${String(err)}`);
+            // Skipping the frame is legitimate — this socket only waits for a
+            // snapshot to hang `createSession` off, so one unreadable frame
+            // need not abort a boot the next frame can complete. Skipping it
+            // QUIETLY is not: bootstrap frames carry StateSnapshots, progress
+            // views included, so this drop is state the user no longer has.
+            //
+            // So the refusal is reported at the same volume and with the same
+            // evidence as the session socket's (which re-throws, because there
+            // a bad frame means the store is already wrong):
+            //   - ERROR to the daemon log via `clientLog`, frame head included,
+            //     which is what the reader greps after the fact;
+            //   - a durable failure card in the feed, which is the only half a
+            //     user sees without opening a log file.
+            // Then, and only then, the boot continues.
+            clog(
+              "error",
+              `bootstrap frame decode failed: ${String(err)} — frame head: ${data.slice(0, 200)}`,
+            );
+            if (store.addFailure(frameUndecodableFailure(err, data.slice(0, 200))))
+              frames.schedule();
             return;
           }
           bootDispatcher.observe(decoded);

@@ -11,6 +11,7 @@ import {
   controlPlaneFailure,
   daemonReachableFailure,
   daemonUnreachableFailure,
+  frameUndecodableFailure,
   isClientType,
   sessionGoneFailure,
 } from "../src/local-failure.js";
@@ -173,6 +174,68 @@ describe("controlPlaneFailure", () => {
   it("opens unresolved, because nothing retries it on the user's behalf", () => {
     // Arrange / Act
     const f = controlPlaneFailure("the login request", new Error("x"));
+    // Assert
+    expect(f.resolvedAtMs).toBe(0);
+  });
+});
+
+describe("frameUndecodableFailure", () => {
+  it("says a message was skipped, without quoting the decoder at the user", () => {
+    // Arrange / Act — the prose is generic on purpose; the decoder's complaint
+    // is evidence, and evidence belongs beside the sentence, not in place of it.
+    const f = frameUndecodableFailure(new Error("unknown oneof arm"), "{}");
+    // Assert
+    expect(f.message).toBe("a message from the daemon could not be read and was skipped");
+  });
+
+  it("keeps the decoder's complaint as the raw account", () => {
+    // Arrange / Act
+    const f = frameUndecodableFailure(new Error("unknown oneof arm"), "{}");
+    // Assert
+    expect(f.sourceDetail).toContain("unknown oneof arm");
+  });
+
+  it("keeps the frame head, which is the only thing naming WHICH frame", () => {
+    // Arrange / Act
+    const f = frameUndecodableFailure(new Error("boom"), '{"frame":"snapshot"');
+    // Assert
+    expect(f.sourceDetail).toContain('{"frame":"snapshot"');
+  });
+
+  it("reads a non-Error throw rather than discarding it", () => {
+    // Arrange / Act — a decoder that throws a string still has to be quoted.
+    const f = frameUndecodableFailure("plain string", "{}");
+    // Assert
+    expect(f.sourceDetail).toContain("plain string");
+  });
+
+  it("omits the separator when there is no frame head to show", () => {
+    // Arrange / Act — an empty frame yields no bytes worth a dash.
+    const f = frameUndecodableFailure(new Error("boom"), "");
+    // Assert
+    expect(f.sourceDetail).toBe("boom");
+  });
+
+  it("classifies in the frontend's own namespace", () => {
+    // Arrange / Act — the daemon believes the frame it sent is well-formed, so
+    // only the receiver can observe that it could not read it.
+    const f = frameUndecodableFailure(new Error("boom"), "{}");
+    // Assert
+    expect(f.errorType).toBe("client.frame_undecodable");
+  });
+
+  it("reconciles every occurrence onto one card", () => {
+    // Arrange / Act — a daemon emitting a shape this build cannot read emits it
+    // repeatedly, and a card per frame would bury the feed under one fact.
+    const first = frameUndecodableFailure(new Error("a"), "{}");
+    const second = frameUndecodableFailure(new Error("b"), "{}");
+    // Assert
+    expect(first.uuid).toBe(second.uuid);
+  });
+
+  it("opens unresolved, because the skipped state never arrives late", () => {
+    // Arrange / Act
+    const f = frameUndecodableFailure(new Error("boom"), "{}");
     // Assert
     expect(f.resolvedAtMs).toBe(0);
   });
