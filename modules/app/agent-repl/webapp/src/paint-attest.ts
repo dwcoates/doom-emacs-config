@@ -110,6 +110,21 @@ export class PaintAttestation {
   }
 
   /**
+   * Forget the painted-through seq, because the conversation it counted in was
+   * retired (the vendor session uuid rotated — see session-rebase.ts).
+   *
+   * ONLY the seq watermark. The state GENERATION is the daemon's own
+   * per-workspace delivery counter and does not restart with a store seq space,
+   * so resetting it would re-answer generations already settled. The seq, by
+   * contrast, now sits above every seq the new space will produce for a long
+   * while, and a `painted` gate holding it would suppress the very first
+   * attestation of the rebased conversation.
+   */
+  rebaseSeqSpace(): void {
+    this.paintedSeq = -1;
+  }
+
+  /**
    * Send one acknowledgment, rolling the watermarks back on failure.
    *
    * The failure this whole mechanism guards against is a frontend that LOOKS
