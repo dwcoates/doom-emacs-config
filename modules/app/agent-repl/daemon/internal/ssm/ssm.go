@@ -72,7 +72,7 @@ type Manager struct {
 	// turn end it caused. Persisting it would invent a durable fact the log
 	// has no clearing token for; losing it to a restart in that window costs
 	// one turn painting `done`, which is the honest fallback.
-	interruptedTurn map[string]bool
+	interruptedTurn map[string]*interruptMark
 	subs            map[int]chan *frontendv1.WorkspaceState
 	nextSub         int
 	closed          bool
@@ -109,7 +109,7 @@ func Open(opts Options) (*Manager, error) {
 		clock:           clock,
 		last:            make(map[string]frontendv1.RenderState),
 		lastTasks:       make(map[string]int64),
-		interruptedTurn: make(map[string]bool),
+		interruptedTurn: make(map[string]*interruptMark),
 		subs:            make(map[int]chan *frontendv1.WorkspaceState),
 	}
 	if err := m.warm(); err != nil {
@@ -305,9 +305,29 @@ func (m *Manager) MarkTurnInterrupted(workspace string) error {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.interruptedTurn[workspace] = true
-	m.logf("ssm: interrupt marked ws=%s — the turn this stop ended will report `interrupted`", workspace)
+	// The shim acked INTERRUPTED, so a turn WAS live shim-side. If this log
+	// has not yet applied that turn's own TurnStarted (it is still in flight
+	// through the store), the start will arrive AFTER the mark — and dropping
+	// the mark on it would hand the stopped turn's end to vendor_blocked. So
+	// the mark tolerates exactly one late start in that case; a start arriving
+	// once the tolerance is spent is a genuinely NEW turn and drops the mark
+	// as a stale one.
+	active, err := turnActive(m.db, workspace)
+	if err != nil {
+		return fmt.Errorf("ssm: MarkTurnInterrupted read turn state for %q: %w", workspace, err)
+	}
+	m.interruptedTurn[workspace] = &interruptMark{tolerateLateStart: !active}
+	m.logf("ssm: interrupt marked ws=%s tolerate_late_start=%t — the turn this stop ended will report `interrupted`", workspace, !active)
 	return nil
+}
+
+// interruptMark is one workspace's pending interrupt outcome (see
+// interruptedTurn).
+type interruptMark struct {
+	// tolerateLateStart is set when the stop was marked BEFORE the stopped
+	// turn's own TurnStarted came back through the store: that one late start
+	// belongs to the marked turn and must not drop the mark.
+	tolerateLateStart bool
 }
 
 // applyInterruptMarkLocked spends (or drops) a workspace's interrupt mark for
@@ -322,7 +342,8 @@ func (m *Manager) MarkTurnInterrupted(workspace string) error {
 //
 // Caller holds mu.
 func (m *Manager) applyInterruptMarkLocked(ws string, ev *corev1.Event, state, causeKind string) (string, string) {
-	if !m.interruptedTurn[ws] {
+	mark := m.interruptedTurn[ws]
+	if mark == nil {
 		return state, causeKind
 	}
 	switch ev.GetPayload().(type) {
@@ -332,6 +353,15 @@ func (m *Manager) applyInterruptMarkLocked(ws string, ev *corev1.Event, state, c
 			ws, ev.GetSessionId(), ev.GetSeq(), state)
 		return sigInterrupted, causeInterrupted
 	case *corev1.Event_TurnStarted:
+		if mark.tolerateLateStart {
+			// The stopped turn's own start, arriving through the store after
+			// the stop already landed. It belongs to the marked turn: keep the
+			// mark for the end that follows it.
+			mark.tolerateLateStart = false
+			m.logf("ssm: interrupt mark kept ws=%s session=%s seq=%d — the stopped turn's own late start arrived after the stop",
+				ws, ev.GetSessionId(), ev.GetSeq())
+			return state, causeKind
+		}
 		delete(m.interruptedTurn, ws)
 		m.logf("ssm: interrupt mark dropped ws=%s session=%s seq=%d — a new turn started before the stopped turn's end was observed",
 			ws, ev.GetSessionId(), ev.GetSeq())

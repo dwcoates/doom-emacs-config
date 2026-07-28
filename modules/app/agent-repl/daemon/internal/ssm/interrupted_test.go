@@ -138,10 +138,14 @@ func TestInterruptedIsSupersededByTheNextTurnStart(t *testing.T) {
 	}
 }
 
-// A stale mark is DROPPED rather than carried onto a turn that never received
-// the stop.
-func TestAnUnspentMarkDoesNotPaintTheFollowingTurn(t *testing.T) {
-	// Arrange — the marked turn's end is never observed; a new turn starts.
+// A stop marked BEFORE the stopped turn's own TurnStarted came back through
+// the store (the shim's ack outran the event pipeline) still reports that
+// turn's end as `interrupted`: the ack guarantees a turn WAS live, so a mark
+// with no applied turn means events in flight, never a stop of nothing. This
+// is the race the e2e suite caught: without the tolerance the late start
+// dropped the mark and the stopped turn resolved `vendor_blocked`.
+func TestAStopOutrunningItsTurnsOwnStartStillResolvesInterrupted(t *testing.T) {
+	// Arrange — the mark lands first; the turn's start arrives late.
 	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
 	if err := m.MarkTurnInterrupted("ws1"); err != nil {
 		t.Fatalf("mark: %v", err)
@@ -149,13 +153,65 @@ func TestAnUnspentMarkDoesNotPaintTheFollowingTurn(t *testing.T) {
 	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
 		t.Fatalf("turn started: %v", err)
 	}
+	// Act — the stopped turn's end, aborted by the delivered stop.
+	if err := m.Apply(evTurnEndedReason("s1", 2, "aborted", true)); err != nil {
+		t.Fatalf("turn ended: %v", err)
+	}
+	// Assert.
+	if got := mustCurrent(t, m, "ws1").State; got != frontendv1.RenderState_RENDER_STATE_INTERRUPTED {
+		t.Fatalf("state = %s, want INTERRUPTED — the late start belonged to the marked turn", renderName(got))
+	}
+}
+
+// A stale mark is DROPPED rather than carried onto a turn that never received
+// the stop: when the mark was set against an ALREADY-APPLIED turn, the next
+// TurnStarted proves the marked turn's end was lost, and the new turn's end
+// must not report a stop it never received.
+func TestAnUnspentMarkDoesNotPaintTheFollowingTurn(t *testing.T) {
+	// Arrange — a turn is applied and running when the stop is marked; its end
+	// is never observed, and a NEW turn starts.
+	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
+	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+		t.Fatalf("turn started: %v", err)
+	}
+	if err := m.MarkTurnInterrupted("ws1"); err != nil {
+		t.Fatalf("mark: %v", err)
+	}
+	if err := m.Apply(evTurnStarted("s1", 2)); err != nil {
+		t.Fatalf("new turn started: %v", err)
+	}
 	// Act.
-	if err := m.Apply(evTurnEndedReason("s1", 2, "end_turn", false)); err != nil {
+	if err := m.Apply(evTurnEndedReason("s1", 3, "end_turn", false)); err != nil {
 		t.Fatalf("turn ended: %v", err)
 	}
 	// Assert.
 	if got := mustCurrent(t, m, "ws1").State; got != frontendv1.RenderState_RENDER_STATE_DONE {
 		t.Fatalf("state = %s, want DONE — the stale mark must not paint a turn it never stopped", renderName(got))
+	}
+}
+
+// The late-start tolerance is spent by exactly ONE start: a second TurnStarted
+// with the mark still unspent is a genuinely new turn, and the mark drops.
+func TestTheLateStartToleranceSpendsOnExactlyOneStart(t *testing.T) {
+	// Arrange — mark before any applied turn, then TWO starts with no end
+	// between them (the marked turn's end was lost).
+	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
+	if err := m.MarkTurnInterrupted("ws1"); err != nil {
+		t.Fatalf("mark: %v", err)
+	}
+	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+		t.Fatalf("late start: %v", err)
+	}
+	if err := m.Apply(evTurnStarted("s1", 2)); err != nil {
+		t.Fatalf("new turn started: %v", err)
+	}
+	// Act.
+	if err := m.Apply(evTurnEndedReason("s1", 3, "end_turn", false)); err != nil {
+		t.Fatalf("turn ended: %v", err)
+	}
+	// Assert.
+	if got := mustCurrent(t, m, "ws1").State; got != frontendv1.RenderState_RENDER_STATE_DONE {
+		t.Fatalf("state = %s, want DONE — one tolerated start, then the mark is stale", renderName(got))
 	}
 }
 
