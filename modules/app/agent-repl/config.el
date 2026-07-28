@@ -375,7 +375,6 @@ returns the SHA string (or the sentinel \"unknown\" when undetermined)."
 (agent-repl--load-module "session")
 (agent-repl--load-module "daemon")
 (agent-repl--load-module "frontend-client")
-(agent-repl--load-module "dir-watcher")
 ;; The classified-failure vocabulary (F4): the ONE place Emacs turns a
 ;; failure into something a human reads, and the closed `client.'-prefixed
 ;; set it is allowed to classify for itself. Loaded BEFORE the transport,

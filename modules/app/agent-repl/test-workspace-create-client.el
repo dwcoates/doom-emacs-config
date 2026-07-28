@@ -286,6 +286,73 @@ session, which is a visibly broken workspace rather than a quiet one."
             (agent-repl-test--materialize-available available)
             (should (= jumps 1))))))))
 
+(ert-deftest agent-repl-test-available-arms-the-deferred-ui-drains ()
+  "A materialized workspace is born with its magit / initial-buffer drains."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-command-inbox
+      (cl-letf (((symbol-function 'agent-repl--eager-open-panels)
+                 (lambda (&rest _) nil)))
+        (agent-repl-test--materialize-available
+         '(:jobId "workspace_commands_drains:0" :finalName "drained"
+           :worktreePath "/tmp/wt/drained" :sessionId "session-drained"))
+        (should (eq (agent-repl--ws-get "drained" :pending-magit) t))
+        (should (eq (agent-repl--ws-get "drained" :pending-initial-buffers)
+                    t))))))
+
+(ert-deftest agent-repl-test-available-background-workspace-opens-panels ()
+  "A workspace nobody is switched to still gets its panels built eagerly."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-command-inbox
+      (let (opened)
+        (cl-letf (((symbol-function 'agent-repl--eager-open-panels)
+                   (lambda (ws) (setq opened ws))))
+          (agent-repl-test--materialize-available
+           '(:jobId "workspace_commands_bg:0" :finalName "background"
+             :worktreePath "/tmp/wt/background" :sessionId "session-bg"))
+          (should (equal opened "background")))))))
+
+(ert-deftest agent-repl-test-available-jumped-workspace-skips-eager-open ()
+  "A workspace the user is moved to builds its panels on the switch itself."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-command-inbox
+      (let (opened)
+        (cl-letf (((symbol-function 'agent-repl--frontend-session-posture)
+                   (lambda (_dir) nil))
+                  ((symbol-function 'agent-repl-jump-to-workspace)
+                   (lambda (&rest _) nil))
+                  ((symbol-function 'agent-repl--eager-open-panels)
+                   (lambda (ws) (setq opened ws))))
+          (let ((id (agent-repl--workspace-create-request
+                     :name "jumped" :git-root "/tmp/source"
+                     :base-commit "master" :jump t)))
+            (agent-repl-test--materialize-available
+             (list :jobId (concat id ":0") :finalName "jumped"
+                   :worktreePath "/tmp/wt/jumped" :sessionId "session-jump"))
+            (should-not opened)))))))
+
+(ert-deftest agent-repl-test-available-envelope-survives-a-local-plist-edit ()
+  "Editing a metadata-supplied key must not rewrite the replay envelope.
+The bookkeeping plist shares METADATA's cons cells as its tail, so an
+uncopied envelope would be mutated in place by any later `--ws-put' and
+turn the next reconnect replay into a false conflict."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-command-inbox
+      (cl-letf (((symbol-function 'agent-repl--eager-open-panels)
+                 (lambda (&rest _) nil)))
+        (let ((available
+               '(:jobId "workspace_commands_alias:0" :finalName "aliased"
+                 :worktreePath "/tmp/wt/aliased" :sessionId "session-alias"
+                 :priority "p3")))
+          (agent-repl-test--materialize-available available)
+          (agent-repl--ws-put "aliased" :priority "p1")
+          (should (equal (plist-get
+                          (agent-repl--ws-get "aliased"
+                                              :daemon-workspace-metadata)
+                          :priority)
+                         "p3"))
+          (should (eq (agent-repl-test--materialize-available available)
+                      'existing)))))))
+
 (ert-deftest agent-repl-test-create-failure-releases-its-correlation ()
   "A failed job clears its pending entry so nothing waits on it forever."
   (agent-repl-test--with-clean-state
@@ -404,12 +471,10 @@ session, which is a visibly broken workspace rather than a quiet one."
                  (lambda (&rest _) "ack"))
                 ((symbol-function 'agent-repl--uds-track-command)
                  (lambda (&rest _) nil))
-                ((symbol-function 'agent-repl--async-worktree-add)
-                 (lambda (&rest _) (error "git worktree forbidden")))
+                ((symbol-function 'agent-repl--async-git)
+                 (lambda (&rest _) (error "git forbidden")))
                 ((symbol-function 'agent-repl--frontend-create-session)
                  (lambda (&rest _) (error "session creation forbidden")))
-                ((symbol-function 'agent-repl--setup-worktree-session)
-                 (lambda (&rest _) (error "session setup forbidden")))
                 ((symbol-function 'agent-repl--spawn-agent-shim)
                  (lambda (&rest _) (error "shim startup forbidden")))
                 ((symbol-function 'agent-repl--send)
