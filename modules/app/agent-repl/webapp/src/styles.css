@@ -2338,7 +2338,18 @@ pre {
 /* Phase tones: the footer's anchor word, colored by what the session is doing.
    Each reuses the hue that already speaks for that state elsewhere in the GUI,
    so the footer never invents a vocabulary. */
-.pfooter-phase { font-weight: 650; }
+/* Sized so the COMMON phase vocabulary — thinking, ready, done, interrupted,
+   monitoring, permission, starting, blocked, dead, degraded — never changes
+   the strip's geometry as the session moves between them, and so a short word
+   like `ready` reads as floating in its cell rather than shrink-wrapped by it.
+   The budget is the widest common word (`interrupted`) plus the spinner the
+   spinning phases prepend plus the cell's own 20px of border-box padding. It
+   is a MIN, so the rare longer merge words (`merge conflict`) still expand the
+   cell instead of truncating — `white-space: nowrap` is untouched. */
+.pfooter-phase {
+  font-weight: 650;
+  min-width: 15ch;
+}
 .pfooter-phase.thinking { color: var(--thinking); }
 /* The five state tones, matching the tab-bar and the sidebar dots exactly so
    a workspace never reads one way here and another there. */
@@ -2389,6 +2400,19 @@ pre {
    shifts the cells beside it. */
 .pfooter-clock,
 .pfooter-tokens { font-variant-numeric: tabular-nums; }
+/* Tabular figures hold the DIGITS still, but the label's unit pair changes
+   shape as a turn runs (`--`, `9s`, `45s`, `5m 30s`, `1h 5m`), so the cell also
+   needs a floor wide enough for the longest routine reading (`59m 59s`) plus
+   its padding. Below that floor the strip would re-lay itself out mid-turn on
+   every unit boundary. */
+.pfooter-clock { min-width: 10ch; }
+/* The turn's input figure reads `12.3k in` at its widest routine shape (the
+   thinking ticker beside it is transient and may expand the cell). */
+.pfooter-tokens { min-width: 11ch; }
+/* The counters are chips whose count digits change under them; a modest floor
+   keeps a lone `1 agent` chip centered without claiming width the grow cell
+   needs. */
+.pfooter-counters { min-width: 9ch; }
 /* The thinking ticker rides beside the turn's input figure in the muted tone:
    it is an estimate, not a billed count, and must not read as loud as the
    real token figure it sits next to. */
