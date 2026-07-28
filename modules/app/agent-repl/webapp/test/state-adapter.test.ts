@@ -1033,6 +1033,33 @@ describe("progress (F1): the consolidated footer's whole input", () => {
     });
   });
 
+  it("carries an OPEN interrupt window's age and outcome into the footer's input", () => {
+    // Arrange / Act — the daemon opened the window; the webapp keeps no
+    // bookkeeping of its own and simply carries what it was sent.
+    const got = progressOf(
+      progressFrame({
+        interrupt: { active: true, sinceMs: "42", outcome: "INTERRUPT_OUTCOME_INTERRUPTED" },
+      }),
+    );
+    // Assert
+    expect(got.interrupt).toEqual({ sinceMs: 42, outcome: "interrupted" });
+  });
+
+  it("flattens an INACTIVE interrupt window to null, leaving no residue", () => {
+    // Arrange / Act — the daemon CLEARS the window when the next turn starts,
+    // and a frame carrying it closed is the whole of the clearing.
+    const got = progressOf(progressFrame({ interrupt: { active: false, sinceMs: "42" } }));
+    // Assert
+    expect(got.interrupt).toBeNull();
+  });
+
+  it("flattens an absent interrupt window to null", () => {
+    // Arrange / Act
+    const got = progressOf(progressFrame());
+    // Assert
+    expect(got.interrupt).toBeNull();
+  });
+
   it("fans a snapshot's progress views out into per-workspace effects", () => {
     // Arrange / Act
     const effects = applyOne({

@@ -72,6 +72,8 @@ import {
   type SystemFailure,
   type FrontendFrame,
   type HeartbeatView,
+  type InterruptOutcome,
+  type InterruptWindow,
   type ProgressView,
   type ProgressWindow,
   type QueueEntry,
@@ -203,6 +205,21 @@ export interface ProgressWindowInput {
   detail: string;
 }
 
+/**
+ * The interrupt window (I1), flattened from an `InterruptWindow` exactly as the
+ * other windows are: `null` in the `ProgressInput` slot means no interrupt to
+ * speak of.
+ *
+ * The daemon OPENS it on the shim's ack and CLEARS it when the next turn
+ * starts. The webapp keeps no bookkeeping of its own — it renders the frame it
+ * was sent, so a frame with the window closed leaves nothing behind.
+ */
+export interface InterruptInput {
+  sinceMs: number;
+  /** Which of the three answers the ack decided; never absent while open. */
+  outcome: InterruptOutcome;
+}
+
 /** The rate-limit window, which carries structured detail rather than a line. */
 export interface RateLimitInput {
   /** Epoch SECONDS (the vendor event's own unit). */
@@ -239,6 +256,11 @@ export interface ProgressInput {
   rateLimited: RateLimitInput | null;
   /** The session reporting it is parked on the user. NOT a phase. */
   blocked: ProgressWindowInput | null;
+  /**
+   * The interrupt window (I1), ack-opened and next-turn-cleared BY THE DAEMON.
+   * `null` = closed, which is the whole of the webapp's bookkeeping.
+   */
+  interrupt: InterruptInput | null;
   /**
    * The CLASSIFIED error state (F4). The footer takes its color from the
    * failure's class rather than from a hardcoded red no other surface
@@ -531,6 +553,7 @@ export class StateAdapter {
         authenticating: openWindow(pv.authenticating),
         hook: openWindow(pv.hook),
         blocked: openWindow(pv.blocked),
+        interrupt: openInterrupt(pv.interrupt),
         rateLimited:
           pv.rateLimited !== undefined && pv.rateLimited.active
             ? {
@@ -1174,4 +1197,16 @@ function tsFromMs(ms: number): string {
 function openWindow(w: ProgressWindow | undefined): ProgressWindowInput | null {
   if (w === undefined || !w.active) return null;
   return { sinceMs: w.sinceMs, detail: w.detail };
+}
+
+/**
+ * The interrupt window as its open outcome, or null when it is closed (I1).
+ *
+ * Same discipline as `openWindow`: absent and inactive are one answer. The
+ * outcome cannot be absent on an OPEN window — the decoder refuses such a
+ * frame — so a live window always has one of the three answers to render.
+ */
+function openInterrupt(w: InterruptWindow | undefined): InterruptInput | null {
+  if (w === undefined || !w.active || w.outcome === null) return null;
+  return { sinceMs: w.sinceMs, outcome: w.outcome };
 }
