@@ -259,18 +259,22 @@ func SystemFailureItemFromDegradedState(ds *corev1.DegradedState, atMs int64) *f
 // It hard-errors (no silent fallback) when a vendor payload cannot be
 // unmarshaled or carries a type URL unknown to the compiled schema set — those
 // are genuine anomalies, distinct from a known-but-non-conversational payload.
-func ConversationDeltaFromEvent(workspace string, ev *corev1.Event) (*frontendv1.ConversationDelta, error) {
+//
+// The second return is the RECORD ENVELOPES of the items that came from the
+// file plane, keyed by ConversationItem.uuid — see RecordEnvelope.
+func ConversationDeltaFromEvent(workspace string, ev *corev1.Event) (*frontendv1.ConversationDelta, map[string]RecordEnvelope, error) {
 	if ev == nil {
-		return nil, nil
+		return nil, nil, nil
 	}
 	var items []*frontendv1.ConversationItem
+	var envs map[string]RecordEnvelope
 	switch p := ev.GetPayload().(type) {
 	case *corev1.Event_Vendor:
-		vitems, err := conversationItemsFromVendor(p.Vendor, ev.GetProducedAtMs(), ev.GetRequestId())
+		vitems, venvs, err := conversationItemsFromVendor(p.Vendor, ev.GetProducedAtMs(), ev.GetRequestId())
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		items = vitems
+		items, envs = vitems, venvs
 	case *corev1.Event_ContextCleared:
 		items = contextClearedItems(p.ContextCleared, ev)
 	case *corev1.Event_ContextCompacted:
@@ -279,17 +283,44 @@ func ConversationDeltaFromEvent(workspace string, ev *corev1.Event) (*frontendv1
 		// Not a conversation-bearing payload. Task-lifecycle events
 		// (TaskStarted/TaskEnded) deliberately route nothing here — they flow
 		// via TaskCatalog (the webapp has no `task` conversation kind).
-		return nil, nil
+		return nil, nil, nil
 	}
 	if len(items) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 	return &frontendv1.ConversationDelta{
 		Workspace:  workspace,
 		SessionId:  ev.GetSessionId(),
 		Items:      items,
 		ThroughSeq: ev.GetSeq(),
-	}, nil
+	}, envs, nil
+}
+
+// RecordEnvelope is the file-plane transcript envelope of one curated item:
+// the record-level facts the DAEMON's own curators need and the frontend wire
+// deliberately does not carry.
+//
+// WHY IT IS RETURNED BESIDE THE DELTA RATHER THAN CARRIED ON IT. Every field
+// here is bookkeeping the harness addressed to itself, and a frontend that
+// received it could only be tempted to re-derive a curation the daemon has
+// already made (the standing rule: frontends render, never interpret). Nor can
+// a curator recover these from the delta afterwards — ConversationItem models
+// the MESSAGE, so the moment translation runs the envelope is gone, which is
+// exactly why the slash-command curator (sessiondrv/machinery.go) has to
+// string-match record bodies instead of reading a flag.
+//
+// Only file-plane records have one. The stream plane's messages carry no
+// transcript envelope at all, so a stream item simply has no entry.
+type RecordEnvelope struct {
+	// ParentUUID is the uuid of the record this one replies to, the linkage
+	// the harness threads its synthetic records onto. Empty at a chain root.
+	ParentUUID string
+	// IsMeta marks a record the harness wrote FOR THE MODEL rather than one a
+	// person typed: a launched skill's body, a re-invocation notice, a
+	// "continue from where you left off" nudge. It is a "user" record in every
+	// other respect, so without this flag it renders as a prompt bubble the
+	// user never wrote.
+	IsMeta bool
 }
 
 // conversationItemsFromVendor unwraps the vendor Any (a data.v1 message) into
@@ -298,36 +329,40 @@ func ConversationDeltaFromEvent(workspace string, ev *corev1.Event) (*frontendv1
 // (TranscriptLine). producedAtMs stamps ts_ms on the stream plane; transcript
 // lines prefer their own on-disk envelope timestamp. requestID is the Event's
 // control-request correlation, carried onto every item's envelope.
-func conversationItemsFromVendor(a *anypb.Any, producedAtMs int64, requestID string) ([]*frontendv1.ConversationItem, error) {
+//
+// The second return carries the file plane's RecordEnvelopes; the stream plane
+// has no transcript envelope at all and returns nil.
+func conversationItemsFromVendor(a *anypb.Any, producedAtMs int64, requestID string) ([]*frontendv1.ConversationItem, map[string]RecordEnvelope, error) {
 	if a == nil {
-		return nil, nil
+		return nil, nil, nil
 	}
 	msg, err := a.UnmarshalNew()
 	if err != nil {
-		return nil, fmt.Errorf("frontend: unmarshal vendor Any (type=%q): %w", a.GetTypeUrl(), err)
+		return nil, nil, fmt.Errorf("frontend: unmarshal vendor Any (type=%q): %w", a.GetTypeUrl(), err)
 	}
 	switch m := msg.(type) {
 	case *datav1.ClaudeStreamMessage:
 		switch inner := m.GetMsg().(type) {
 		case *datav1.ClaudeStreamMessage_Assistant:
-			return assistantItems(inner.Assistant, producedAtMs, requestID), nil
+			return assistantItems(inner.Assistant, producedAtMs, requestID), nil, nil
 		case *datav1.ClaudeStreamMessage_User:
-			return userItems(inner.User, producedAtMs, requestID), nil
+			return userItems(inner.User, producedAtMs, requestID), nil, nil
 		case *datav1.ClaudeStreamMessage_Result:
-			return resultItems(inner.Result, producedAtMs, requestID), nil
+			return resultItems(inner.Result, producedAtMs, requestID), nil, nil
 		default:
-			return nil, nil // known envelope, non-conversational arm
+			return nil, nil, nil // known envelope, non-conversational arm
 		}
 	case *datav1.AssistantMessage:
-		return assistantItems(m, producedAtMs, requestID), nil
+		return assistantItems(m, producedAtMs, requestID), nil, nil
 	case *datav1.UserMessage:
-		return userItems(m, producedAtMs, requestID), nil
+		return userItems(m, producedAtMs, requestID), nil, nil
 	case *datav1.ResultMessage:
-		return resultItems(m, producedAtMs, requestID), nil
+		return resultItems(m, producedAtMs, requestID), nil, nil
 	case *datav1.TranscriptLine:
-		return transcriptLineItems(m, producedAtMs, requestID), nil
+		items, envs := transcriptLineItems(m, producedAtMs, requestID)
+		return items, envs, nil
 	default:
-		return nil, nil // known data.v1 message, not rendered as conversation
+		return nil, nil, nil // known data.v1 message, not rendered as conversation
 	}
 }
 
@@ -396,22 +431,39 @@ func clearOrCompactUUID(ev *corev1.Event, kind string) string {
 
 // --- transcript (file) plane -----------------------------------------------
 
-// transcriptLineItems curates the conversation-bearing on-disk line types.
-func transcriptLineItems(tl *datav1.TranscriptLine, producedAtMs int64, requestID string) []*frontendv1.ConversationItem {
+// transcriptLineItems curates the conversation-bearing on-disk line types, and
+// returns the RecordEnvelope of each item it produced alongside them.
+func transcriptLineItems(tl *datav1.TranscriptLine, producedAtMs int64, requestID string) ([]*frontendv1.ConversationItem, map[string]RecordEnvelope) {
 	switch line := tl.GetLine().(type) {
 	case *datav1.TranscriptLine_Assistant:
 		al := line.Assistant
 		env := al.GetEnvelope()
-		return assistantMessageItem(env.GetUuid(), transcriptTsMs(env, producedAtMs), requestID, al.GetMessage())
+		items := assistantMessageItem(env.GetUuid(), transcriptTsMs(env, producedAtMs), requestID, al.GetMessage())
+		return items, recordEnvelopes(items, env)
 	case *datav1.TranscriptLine_User:
 		ul := line.User
 		env := ul.GetEnvelope()
-		return userMessageItem(env.GetUuid(), transcriptTsMs(env, producedAtMs), requestID, ul.GetMessage())
+		items := userMessageItem(env.GetUuid(), transcriptTsMs(env, producedAtMs), requestID, ul.GetMessage())
+		return items, recordEnvelopes(items, env)
 	case *datav1.TranscriptLine_System:
-		return systemLineItems(line.System, producedAtMs, requestID)
+		return systemLineItems(line.System, producedAtMs, requestID), nil
 	default:
-		return nil // non-conversational metadata line
+		return nil, nil // non-conversational metadata line
 	}
+}
+
+// recordEnvelopes keys one on-disk line's envelope by the uuid of each item it
+// curated to, which is the only handle the curators downstream have on it.
+func recordEnvelopes(items []*frontendv1.ConversationItem, env *datav1.LineEnvelope) map[string]RecordEnvelope {
+	if len(items) == 0 {
+		return nil
+	}
+	re := RecordEnvelope{ParentUUID: env.GetParentUuid(), IsMeta: env.GetIsMeta()}
+	out := make(map[string]RecordEnvelope, len(items))
+	for _, it := range items {
+		out[it.GetUuid()] = re
+	}
+	return out
 }
 
 // systemLineItems curates the system-line subtypes the webapp renders:

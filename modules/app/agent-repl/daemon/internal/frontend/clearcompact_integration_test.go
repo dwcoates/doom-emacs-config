@@ -34,8 +34,8 @@ func TestAClearAndACompactionAtTheSamePositionGetDistinctIDs(t *testing.T) {
 	}
 
 	// Act.
-	clearDelta, clearErr := ConversationDeltaFromEvent("ws", clear)
-	compactDelta, compactErr := ConversationDeltaFromEvent("ws", compact)
+	clearDelta, _, clearErr := ConversationDeltaFromEvent("ws", clear)
+	compactDelta, _, compactErr := ConversationDeltaFromEvent("ws", compact)
 	if clearErr != nil || compactErr != nil {
 		t.Fatalf("ConversationDeltaFromEvent: clear=%v compact=%v", clearErr, compactErr)
 	}
