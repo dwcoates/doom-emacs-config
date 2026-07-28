@@ -2283,13 +2283,27 @@ pre {
 }
 
 /* The grabber notch: the affordance that says the dock opens. Purely visual —
-   the whole cell row is the click target (FOOTER_STRIP_ATTR). */
+   the whole cell row is the click target (FOOTER_STRIP_ATTR).
+
+   It is OUT OF FLOW on purpose. As a normal-flow block above the cell row it
+   ate an ~8px band off the top of the dock, so the row's content centered in
+   what was left and every cell's text rode high relative to the dock; and its
+   `margin: … auto` centered it on the DOCK while the activity text centers on
+   the grow cell, so the two never lined up. Absolutely positioning it inside
+   the grow cell fixes both: the row now owns the dock's whole height (the 8px
+   comes back as 4px on each side of the cell padding, so the dock's height is
+   unchanged) and the notch centers on the same extent the activity text does.
+
+   `top: 4px` is the old top margin, so the notch sits exactly where it did. */
 .pfooter-grab {
+  position: absolute;
+  top: 4px;
+  left: 50%;
+  transform: translateX(-50%);
   height: 3px;
   width: 40px;
   border-radius: 2px;
   background: var(--border);
-  margin: 4px auto 1px;
 }
 
 /* The cell row: segments divided by hairlines, thin by default (one line). */
@@ -2300,15 +2314,18 @@ pre {
 }
 /* Padding is SYMMETRIC on purpose: the cells stretch to the row's height, and
    an asymmetric pair (the old 3px/6px) offsets every cell's content box from
-   the strip's true center, which is what made the whole row read high. The
-   14px total is the height the old 3px/6px pair plus the grow cell's extra
-   top padding produced, so the strip keeps exactly the height it had.
+   the strip's true center, which is what made the whole row read high.
+
+   The 22px total absorbs the ~8px band the grabber notch used to occupy above
+   the row (4px on each side), so the dock keeps exactly the height it had
+   while the row now spans the dock and its content centers in the dock rather
+   than in a strip pushed below the notch.
 
    Content is centered on BOTH axes: `justify-content` for the flex cells,
    `text-align` for the grow cell (a block, see below) and for any anonymous
    text a cell wraps. */
 .pfooter-cell {
-  padding: 7px 10px;
+  padding: 11px 10px;
   border-right: 1px solid var(--border);
   display: flex;
   align-items: center;
@@ -2328,12 +2345,16 @@ pre {
    It therefore carries no vertical padding of its own: its single line box is
    the same height as every sibling cell's, so the symmetric cell padding
    centers it in the strip like the rest. */
+   It is also the grabber notch's containing block (`position: relative`): the
+   notch centers on the middle section's extent, which is the same extent the
+   activity text centers on. */
 .pfooter-grow {
   flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   display: block;
+  position: relative;
 }
 
 /* Phase tones: the footer's anchor word, colored by what the session is doing.
