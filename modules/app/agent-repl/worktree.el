@@ -72,16 +72,6 @@ when a workspace has no recorded `:source-ws-dir'."
   :type 'string
   :group 'agent-repl)
 
-(defcustom agent-repl-worktree-start-tag-prefix "start/"
-  "Prefix prepended to a worktree's branch name to form its companion start tag.
-On worktree creation, a real git tag named PREFIX+BRANCH is created at
-BASE-COMMIT, so `git diff start/<branch>..<branch>' always shows the
-worktree's full divergence from its starting point — even after the
-original base branch (e.g. master) advances.  Set to nil or the empty
-string to disable start-tag creation."
-  :type '(choice (const :tag "Disabled" nil) string)
-  :group 'agent-repl)
-
 (defun agent-repl--open-initial-buffers (ws path)
   "Open configured initial buffers for workspace WS rooted at PATH.
 Checks `agent-repl-workspace-initial-buffers' for entries whose PATTERN
@@ -196,34 +186,6 @@ Returns the exit code, or 124 on timeout, exactly as
   (let ((result (= 0 (agent-repl--git-exit-code root "rev-parse" "--verify" branch))))
     (agent-repl--log nil "git-branch-exists-p: root=%s branch=%s result=%s" root branch result)
     result))
-
-(defun agent-repl--git-tag-exists-p (root tag)
-  "Return non-nil if TAG exists as a git tag in repo at ROOT."
-  (let ((result (= 0 (agent-repl--git-exit-code
-                      root "rev-parse" "--verify" (concat "refs/tags/" tag)))))
-    (agent-repl--log nil "git-tag-exists-p: root=%s tag=%s result=%s" root tag result)
-    result))
-
-(defun agent-repl--start-tag-name (branch-name)
-  "Return the companion start-tag name for BRANCH-NAME, or nil if disabled.
-Disabled when `agent-repl-worktree-start-tag-prefix' is nil or empty."
-  (when (and agent-repl-worktree-start-tag-prefix
-             (not (string-empty-p agent-repl-worktree-start-tag-prefix)))
-    (concat agent-repl-worktree-start-tag-prefix branch-name)))
-
-(defun agent-repl--create-start-tag (git-root branch-name base-commit)
-  "Create a companion start-tag for BRANCH-NAME at BASE-COMMIT in GIT-ROOT.
-The tag name is `agent-repl-worktree-start-tag-prefix' + BRANCH-NAME.
-No-op when the prefix is nil/empty.  Signals `error' on git failure: the
-tag is the durable diff anchor for `start/<branch>..<branch>', so silent
-failure would leave the workspace without a working diff target."
-  (when-let ((tag-name (agent-repl--start-tag-name branch-name)))
-    (let ((exit-code (agent-repl--git-exit-code git-root "tag" tag-name base-commit)))
-      (agent-repl--log branch-name "create-start-tag: git-root=%s tag=%s base-commit=%s exit-code=%s"
-                        git-root tag-name base-commit exit-code)
-      (unless (zerop exit-code)
-        (error "Failed to create start tag '%s' at %s in %s (exit %d)"
-               tag-name base-commit git-root exit-code)))))
 
 (defun agent-repl--parse-worktree-porcelain (text target-ref)
   "Return the worktree path in TEXT whose branch matches TARGET-REF.
@@ -1448,9 +1410,6 @@ action run in the child itself)."
                                               postprocessing-prompt before-ws-merge-prompt)
   "Run `git worktree add' asynchronously for a new worktree.
 Creates the worktree at PATH on BRANCH-NAME off BASE-COMMIT in GIT-ROOT.
-On success, also creates the companion start tag at BASE-COMMIT (see
-`agent-repl--create-start-tag') so `start/<branch>..<branch>' diffs
-remain stable as the upstream base branch advances.
 When the git command finishes, `agent-repl--worktree-add-callback'
 finalizes the workspace.  SOURCE-DIR is the project-dir of the workspace
 this worktree was created from; threaded through to be persisted as
@@ -1462,9 +1421,6 @@ and BEFORE-WS-MERGE-PROMPT are the two passthrough merge-lifecycle
 prompts threaded through to `agent-repl--finalize-worktree-workspace'."
   (let* ((add-args (list "worktree" "add" "-b" branch-name path base-commit))
          (after-add (lambda (ok output)
-                      (when ok
-                        (agent-repl--create-start-tag
-                         git-root branch-name base-commit))
                       (agent-repl--worktree-add-callback
                        path dirname preemptive-prompt
                        priority fork-session-id callback source-dir
@@ -1511,11 +1467,7 @@ report the new path as an existing project."
     (user-error "Worktree '%s' already exists — use SPC p p to switch to it" dirname))
   (when (agent-repl--git-branch-exists-p git-root branch-name)
     (agent-repl--log name "ERROR: branch '%s' already exists — cannot create worktree" branch-name)
-    (user-error "Branch '%s' already exists — delete it first or choose a different name" branch-name))
-  (when-let ((start-tag (agent-repl--start-tag-name branch-name)))
-    (when (agent-repl--git-tag-exists-p git-root start-tag)
-      (agent-repl--log name "ERROR: start tag '%s' already exists — cannot create worktree" start-tag)
-      (user-error "Start tag '%s' already exists — delete it first or choose a different name" start-tag))))
+    (user-error "Branch '%s' already exists — delete it first or choose a different name" branch-name)))
 
 (defun agent-repl--do-create-worktree-workspace (name &optional fork-session-id preemptive-prompt callback priority base-commit git-root source-dir no-agent model postprocessing-prompt before-ws-merge-prompt)
   "Create a git worktree and Doom workspace for NAME.
@@ -2704,7 +2656,7 @@ Prevents concurrent agent startups from corrupting ~/.claude.json."
 ;; The workspace-generation skill emits BARE workspace names with no
 ;; randomized suffix.  Disambiguation is exclusively Emacs's job and
 ;; fires ONLY on actual collision against an existing workspace, an
-;; on-disk worktree, a git branch, a companion start-tag, or a
+;; on-disk worktree, a git branch, or a
 ;; name already reserved earlier in the current dispatch batch.  When
 ;; a name is clean, it passes through verbatim.
 
@@ -2758,7 +2710,7 @@ GIT-ROOT is the target repository.  Checks (in order): the in-flight
 reservation set dynamically bound by the caller (keyed by full name like
 \"DWC/foo\"), the live `agent-repl--workspaces'
 hash table (keyed by bare name like \"foo\"), the on-disk worktree
-path, the git branch named NAME, and the companion start-tag.
+path, and the git branch named NAME.
 Returns the first matched signal (a non-nil value), or nil when NAME
 is collision-free.
 
@@ -2768,7 +2720,6 @@ is safe to call against stub repo paths in tests."
   (let* ((path (agent-repl--candidate-worktree-path git-root name))
          (branch-name name)
          (bare-name (agent-repl--bare-workspace-name name))
-         (start-tag (agent-repl--start-tag-name branch-name))
          (result
           (or (and (hash-table-p agent-repl--workspace-names-in-flight)
                    (gethash name agent-repl--workspace-names-in-flight))
@@ -2776,13 +2727,10 @@ is safe to call against stub repo paths in tests."
                    :workspace-exists)
               (and (file-directory-p path) :path-exists)
               (and (agent-repl--git-branch-exists-p git-root branch-name)
-                   :branch-exists)
-              (and start-tag
-                   (agent-repl--git-tag-exists-p git-root start-tag)
-                   :start-tag-exists))))
+                   :branch-exists))))
     (agent-repl--log name
-                      "workspace-name-collides-p: name=%s bare=%s git-root=%s path=%s start-tag=%s result=%s"
-                      name bare-name git-root path (or start-tag "nil") (or result "nil"))
+                      "workspace-name-collides-p: name=%s bare=%s git-root=%s path=%s result=%s"
+                      name bare-name git-root path (or result "nil"))
     result))
 
 (defun agent-repl--disambiguate-workspace-name (name git-root)
