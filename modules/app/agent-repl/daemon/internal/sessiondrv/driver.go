@@ -1270,7 +1270,13 @@ func (m *Manager) armMetaprompt(d *driven, ss *corev1.SessionStarted) {
 //   - shimclient Client.lastSeen — re-read from the SeqStore on every
 //     runOnce, which is why OnHandshake (this hook) must run BEFORE the
 //     Subscribe reads it.
-//   - consumer.ring — purged here (purgeRetainedOnRotation).
+//   - consumer.ring — purged here (purgeRetainedOnRotation). NAMED
+//     CONSEQUENCE: the frontend TaskCatalog is rebuilt from this same ring, so
+//     a detached task whose start was only ever seen in the retired space drops
+//     off the roster until the next `BackgroundTasksChanged` — which is the
+//     AUTHORITATIVE live set and re-establishes the whole roster when it lands.
+//     Erring toward an empty roster is the right way round: the alternative is
+//     a roster keyed to seqs from a conversation that no longer exists.
 //   - consumer.newestRetainedSeq() — derived from the ring; empty after the
 //     purge, so the ceiling in Manager.lastSeenSeq falls back to the durable
 //     mark, which the registry just zeroed.
