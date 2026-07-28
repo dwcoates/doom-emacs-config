@@ -2324,7 +2324,13 @@ pre {
    Content is centered on BOTH axes: `justify-content` for the flex cells,
    `text-align` for the grow cell (a block, see below) and for any anonymous
    text a cell wraps. */
+/* RIGIDITY IS THE DEFAULT. Slack has exactly ONE owner in this row — the grow
+   cell below, which overrides this line. Every other cell (phase, interrupt
+   chip, clock, tokens, counters) neither grows nor shrinks, so leftover width
+   can never leak sideways into the edges and leave the middle collapsed, and a
+   tightening strip never squeezes a reading the user is trying to read. */
 .pfooter-cell {
+  flex: 0 0 auto;
   padding: 11px 10px;
   border-right: 1px solid var(--border);
   display: flex;
@@ -2344,13 +2350,27 @@ pre {
 
    It therefore carries no vertical padding of its own: its single line box is
    the same height as every sibling cell's, so the symmetric cell padding
-   centers it in the strip like the rest. */
+   centers it in the strip like the rest.
+
    It is also the grabber notch's containing block (`position: relative`): the
    notch centers on the middle section's extent, which is the same extent the
-   activity text centers on. */
+   activity text centers on.
+
+   It is the row's SOLE elastic cell: the only one with a flex-grow and the
+   only one with a flex-shrink. It therefore owns ALL the strip's slack (so an
+   empty middle still reads as the widest section instead of collapsing and
+   leaking the leftover width into the readings on the right), and it is the
+   first and only thing to give when the strip tightens — its ellipsis absorbs
+   any squeeze below its content width.
+
+   `min-width` is its HAPPY-EMPTY width: wide enough to out-measure the widest
+   fixed cell (the 17ch phase) at every dock width, small enough that the fixed
+   edges (17 + 10 + 11 + 9 = 47ch) still fit inside the capped dock alongside
+   it. It replaces the old `min-width: 0`, which is what let the cell collapse
+   to nothing. */
 .pfooter-grow {
-  flex: 1;
-  min-width: 0;
+  flex: 1 1 auto;
+  min-width: 20ch;
   overflow: hidden;
   text-overflow: ellipsis;
   display: block;
@@ -2360,17 +2380,23 @@ pre {
 /* Phase tones: the footer's anchor word, colored by what the session is doing.
    Each reuses the hue that already speaks for that state elsewhere in the GUI,
    so the footer never invents a vocabulary. */
-/* Sized so the COMMON phase vocabulary — thinking, ready, done, interrupted,
-   monitoring, permission, starting, blocked, dead, degraded — never changes
-   the strip's geometry as the session moves between them, and so a short word
-   like `ready` reads as floating in its cell rather than shrink-wrapped by it.
-   The budget is the widest common word (`interrupted`) plus the spinner the
-   spinning phases prepend plus the cell's own 20px of border-box padding. It
-   is a MIN, so the rare longer merge words (`merge conflict`) still expand the
-   cell instead of truncating — `white-space: nowrap` is untouched. */
+/* FIXED geometry, min == max. The phase vocabulary is CLOSED (see phaseLabel()
+   in progress-footer.ts), so the cell is sized once to the widest reading it
+   can ever hold and then never moves: the strip's left edge is identical in
+   every phase, and a short word like `ready` reads as floating in its cell
+   rather than shrink-wrapped by it.
+
+   The budget covers both worst cases at 0.78rem/650: the longest phrase,
+   `merge conflict` (14 characters, no spinner), and the longest SPINNING
+   phrase, `monitoring` plus the 0.8em arc and its 6px gap — each comfortably
+   inside 17ch minus the cell's own 20px of border-box padding, so no phrase
+   truncates and `white-space: nowrap` stays honest. It neither grows nor
+   shrinks (it inherits `flex: 0 0 auto` from `.pfooter-cell`), so the slack it
+   used to absorb now belongs entirely to the grow cell. */
 .pfooter-phase {
   font-weight: 650;
-  min-width: 15ch;
+  min-width: 17ch;
+  max-width: 17ch;
 }
 .pfooter-phase.thinking { color: var(--thinking); }
 /* The five state tones, matching the tab-bar and the sidebar dots exactly so
