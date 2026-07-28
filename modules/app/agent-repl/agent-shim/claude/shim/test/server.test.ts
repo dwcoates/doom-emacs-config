@@ -312,3 +312,97 @@ describe("SessionServer disconnect tolerance", () => {
   // Superseding a stale connection is now the daemon listener's job and is
   // covered there (shimlisten: reconnect supersedes the parked connection).
 });
+
+describe("SessionServer vendor session rotation bounce", () => {
+  // The vendor rotates its session uuid mid-stream; the store client re-keys
+  // and asks for a DELIBERATE bounce so the next handshake announces the new
+  // identity. Unlike close(), the reconnect loop stays armed.
+
+  /** A server whose hello reports whatever `vendor` currently holds. */
+  function rotatingHarness(vendor: { id: string }): { server: SessionServer; socketPath: string; calls: Calls } {
+    const built = harness();
+    const server = new SessionServer(
+      {
+        socketPath: built.socketPath, sessionId: "sess-1", shimVersion: "9.9",
+        protocolVersion: "1", heartbeatIntervalMs: 0, reconnectMinMs: 1,
+        vendorSessionId: () => vendor.id,
+      },
+      {
+        onSubmitPrompt: (m): Receipt => create(AckSchema, { requestId: m.requestId }),
+        onInterrupt: (m): Receipt => create(AckSchema, { requestId: m.requestId }),
+        onPermissionResponse: () => {},
+        onSubscribe: (m) => built.calls.subs.push(m),
+        onReplayRequest: () => {},
+        onHealthCheck: (m) => create(HealthStatusSchema, { requestId: m.requestId, healthy: true, component: "test-shim" }),
+        onDaemonConnected: () => built.calls.connected++,
+        onDaemonDisconnected: () => built.calls.disconnected++,
+      },
+    );
+    return { server, socketPath: built.socketPath, calls: built.calls };
+  }
+
+  it("announces the current vendor session id on every hello", async () => {
+    // Arrange
+    const vendor = { id: "uuid-old" };
+    const { server, socketPath } = rotatingHarness(vendor);
+    track(server);
+    const daemon = acceptShim(socketPath);
+    listeners.push(daemon.close);
+
+    // Act
+    await server.connect();
+    const peer = await daemon.next();
+
+    // Assert
+    expect((await peer.next(ShimHelloSchema)).vendorSessionId).toBe("uuid-old");
+  });
+
+  it("re-handshakes with the ROTATED uuid after a bounce", async () => {
+    // Arrange: a live, handshaked link under the old identity.
+    const vendor = { id: "uuid-old" };
+    const { server, socketPath, calls } = rotatingHarness(vendor);
+    track(server);
+    const daemon = acceptShim(socketPath);
+    listeners.push(daemon.close);
+    await server.connect();
+    const peer1 = await daemon.next();
+    await peer1.next(ShimHelloSchema);
+    peer1.send(DaemonHelloSchema, create(DaemonHelloSchema, { daemonVersion: "d1", protocolVersion: "1" }));
+    await until(() => server.isConnected());
+
+    // Act: the store client re-keys, then asks for the bounce.
+    vendor.id = "uuid-new";
+    server.bounce("vendor session rotation uuid-old -> uuid-new");
+
+    // Assert: a NEW connection whose hello carries the new identity.
+    const peer2 = await daemon.next();
+    expect((await peer2.next(ShimHelloSchema)).vendorSessionId).toBe("uuid-new");
+    peer2.send(DaemonHelloSchema, create(DaemonHelloSchema, { daemonVersion: "d1", protocolVersion: "1" }));
+    await until(() => calls.connected === 2, "re-handshaked");
+    expect(server.isConnected()).toBe(true);
+  });
+
+  it("never resurrects a deliberately closed link", async () => {
+    // Arrange: shutdown already ran; a late rotation must not undo it.
+    const vendor = { id: "uuid-old" };
+    const { server, socketPath, calls } = rotatingHarness(vendor);
+    track(server);
+    const daemon = acceptShim(socketPath);
+    listeners.push(daemon.close);
+    await server.connect();
+    const peer1 = await daemon.next();
+    await peer1.next(ShimHelloSchema);
+    peer1.send(DaemonHelloSchema, create(DaemonHelloSchema, { daemonVersion: "d1", protocolVersion: "1" }));
+    await until(() => server.isConnected());
+    await server.close();
+
+    // Act
+    vendor.id = "uuid-new";
+    server.bounce("vendor session rotation after shutdown");
+
+    // Assert
+    await until(() => true, "event loop turned");
+    expect(server.isConnected()).toBe(false);
+    expect(calls.connected).toBe(1);
+  });
+});

@@ -65,6 +65,21 @@ export type StoreSink = (evt: Event) => void;
 /** Receives an honest degraded report when the store cannot be served. */
 export type DegradedReporter = (report: DegradedState) => void;
 
+/**
+ * Bounces the DAEMON-facing connection as the second half of a vendor session
+ * ROTATION (see {@link StoreClient.adoptStoreKey}).
+ *
+ * The store client owns the store key; it does not own the daemon link, and
+ * re-keying without bouncing that link would push the new key's seq=1 down a
+ * connection whose last_seen sits in the retired key's space — the terminal
+ * ErrSeqRegression the rotation exists to avoid. So the two halves are wired
+ * together here: whoever owns the daemon connection injects the bounce.
+ *
+ * Called SYNCHRONOUSLY and BEFORE the re-key, so no event of the new seq space
+ * can reach the old connection.
+ */
+export type RotationHandler = (previous: string, next: string) => void;
+
 /** One bounded historical replay's request (see {@link StoreClient.replay}). */
 export interface ReplayOptions {
   /** EXCLUSIVE lower bound, matching Subscribe.from_seq. */
@@ -182,47 +197,148 @@ export class StoreClient {
    * that key's seq space, so switching would look like a seq regression.
    */
   private forwardedAny = false;
+  /**
+   * Whether `storeKey` is a genuine VENDOR uuid rather than the `--session-id`
+   * placeholder the constructor seeds it with. True from the start on
+   * `--resume` (the uuid was passed in), otherwise set by the first adoption.
+   *
+   * It is what {@link vendorSessionId} reports, and reporting the placeholder
+   * there would be worse than reporting nothing: the daemon compares the
+   * announced uuid with the one it has persisted, so a placeholder would look
+   * to it like a rotation away from the real conversation.
+   */
+  private vendorKnown: boolean;
+  /** The daemon-link bounce for a rotation; see {@link RotationHandler}. */
+  private rotator: RotationHandler | null = null;
+  /**
+   * The uuid an IN-FLIGHT rotation is moving to, while it waits for the
+   * already-issued writes to reach the wire.
+   *
+   * `adoptStoreKey` runs on EVERY converted event, so without this every
+   * message arriving during that wait would start a rotation of its own.
+   */
+  private rotatingTo: string | null = null;
 
   constructor(private readonly opts: StoreClientOptions) {
     this.heartbeatIntervalMs = opts.heartbeatIntervalMs ?? 5000;
     this.storeKey = opts.storeSessionId ?? opts.sessionId;
+    this.vendorKnown = (opts.storeSessionId ?? "") !== "";
+  }
+
+  /** Route the rotation's daemon-link bounce to `handler`. */
+  onRotation(handler: RotationHandler): void {
+    this.rotator = handler;
+  }
+
+  /**
+   * The VENDOR session id this client is filing events under, or "" while it
+   * is still the `--session-id` placeholder. Announced to the daemon in
+   * ShimHello.vendor_session_id.
+   */
+  vendorSessionId(): string {
+    return this.vendorKnown ? this.storeKey : "";
   }
 
   /**
    * Adopt the vendor session id events are stored under, learned from a
    * converted event's envelope. Idempotent, and a no-op when unchanged.
    *
-   * When this CHANGES an existing subscription's key, the subscription is
-   * reopened at the daemon's last `from_seq`. Nothing is lost by subscribing
-   * late: the store replays everything with `seq > from_seq` from disk, so
-   * events written before the key was known arrive on that replay.
+   * TWO DIFFERENT THINGS WEAR THIS ONE NAME, told apart by whether any merged
+   * event has been forwarded yet:
+   *
+   * 1. FIRST ADOPTION (nothing forwarded). The placeholder `--session-id` the
+   *    constructor seeded is replaced by the uuid the SDK just revealed, and
+   *    an already-open subscription is reopened at the daemon's last
+   *    `from_seq`. Nothing is lost by subscribing late: the store replays
+   *    everything with `seq > from_seq` from disk.
+   *
+   * 2. ROTATION (events already forwarded under the old uuid). The VENDOR
+   *    minted a new transcript identity mid-stream — a `/clear` does exactly
+   *    this — which retires one store seq space and starts another at 1. See
+   *    {@link rotateStoreKey}.
+   *
+   * A REPEAT of the CURRENT key is neither: it returns above, which is what
+   * keeps the same-uuid seq guarantee intact. Nothing here can move a key to
+   * itself, so nothing here can make one uuid's seqs run backwards.
    */
   adoptStoreKey(sessionId: string): void {
-    if (!sessionId || sessionId === this.storeKey) return;
-    // Each session id is its own SEQ SPACE, and the daemon tracks last_seen_seq
-    // per shim connection, not per key. Switching after events have already
-    // been forwarded therefore hands the daemon a seq that goes BACKWARDS
-    // (the new key's stream starts at 1), which it treats as
-    // ErrSeqRegression — a TERMINAL protocol error it never reconnects from.
-    // That is exactly what a mid-session `conversation_reset` did on
-    // 2026-07-25: the shim adopted the CLI's new uuid, replayed it from seq=1
-    // against last_seen=5990, and the daemon dropped the shim for good.
-    //
-    // So the key is settled by the FIRST forwarded event and never moves
-    // again. A later change is surfaced loudly rather than acted on: the
-    // conversation continues under the key the daemon is already tracking.
+    if (!sessionId || sessionId === this.storeKey || sessionId === this.rotatingTo) return;
     if (this.forwardedAny) {
-      shimLog(COMPONENT, { session: this.opts.sessionId, store_key: this.storeKey, ignored: sessionId },
-        `REFUSING to switch store session key mid-stream — the daemon tracks one seq space per connection and would read the new key's seq as a regression; events for ${sessionId} will not be tailed until the shim respawns`);
+      this.rotatingTo = sessionId;
+      void this.rotateStoreKey(sessionId);
       return;
     }
     const previous = this.storeKey;
     this.storeKey = sessionId;
+    this.vendorKnown = true;
     shimLog(COMPONENT, { session: this.opts.sessionId, store_key: sessionId },
       `adopted store session key (was ${previous})`);
     // Only reopen if the daemon has actually subscribed; otherwise recording
     // the key is enough and the next subscribe() picks it up.
     if (this.lastFromSeq !== null) this.subscribe(this.lastFromSeq);
+  }
+
+  /**
+   * A CONTROLLED RE-HANDSHAKE for a vendor session uuid rotation.
+   *
+   * WHAT ROTATION BREAKS. Each session id is its own SEQ SPACE, and the daemon
+   * tracks last_seen_seq per shim CONNECTION. Silently re-keying hands that
+   * connection the new space's seq=1 against a much higher last_seen, which it
+   * reads as ErrSeqRegression — terminal, never reconnected from. That is what
+   * a mid-session `conversation_reset` did on 2026-07-25 (seq=1 against
+   * last_seen=5990) and why this used to REFUSE the switch outright, with
+   * "until the shim respawns" as its stated remedy.
+   *
+   * Refusing cost more than it saved: every post-rotation fact — the sidecar's
+   * ContextCleared, the turn's own TurnEnded, every later turn — was filed
+   * under a uuid the daemon never subscribed to, so the clear never rendered
+   * and the footer sat in THINKING forever. This performs that same remedy
+   * DELIBERATELY and in miniature: the connection is bounced rather than the
+   * process.
+   *
+   * THE ORDER IS THE WHOLE MECHANISM:
+   *
+   * 1. WAIT for the writes already issued under the old key to reach the wire.
+   *    They carry the old uuid on their own envelopes, so they file correctly
+   *    wherever they land — but their acks are matched POSITIONALLY on the
+   *    producer connection, so they must not be interleaved with anything.
+   * 2. BOUNCE THE DAEMON LINK, before the key moves. The old connection's
+   *    last_seen belongs to the retiring space; anything from the new space
+   *    reaching it is the regression above.
+   * 3. RE-KEY and reopen the standing subscription at from_seq=0 — the new
+   *    space starts fresh, which is the point.
+   *
+   * Steps 2 and 3 are synchronous and adjacent, so no daemon Subscribe can
+   * land between them: the reconnect needs I/O and this event loop is single
+   * threaded.
+   */
+  private async rotateStoreKey(next: string): Promise<void> {
+    const previous = this.storeKey;
+    shimLog(COMPONENT, { session: this.opts.sessionId, store_key: previous, rotating_to: next },
+      `VENDOR SESSION ROTATION observed: ${previous} -> ${next} — the vendor minted a new transcript identity mid-stream; re-keying the store subscription and bouncing the daemon link`);
+    // Every send is chained (see sendChain) and already reports its own
+    // failures, so this only ever waits — it never absorbs an error.
+    await this.sendChain;
+    if (this.closed) {
+      shimLog(COMPONENT, { session: this.opts.sessionId, store_key: previous, rotating_to: next },
+        `rotation ABANDONED: the store client was closed while in-flight writes drained`);
+      this.rotatingTo = null;
+      return;
+    }
+    if (this.rotator) {
+      this.rotator(previous, next);
+    } else {
+      shimLog(COMPONENT, { session: this.opts.sessionId, store_key: previous, rotating_to: next },
+        `rotation has no daemon-link bounce bound — the daemon will keep the retired key's last_seen and read the new key's seq as a regression`);
+    }
+    this.storeKey = next;
+    this.vendorKnown = true;
+    this.rotatingTo = null;
+    shimLog(COMPONENT, { session: this.opts.sessionId, store_key: next },
+      `store re-keyed to the rotated vendor session id (was ${previous})`);
+    // from_seq=0, NOT the daemon's last position: that position counts in the
+    // RETIRED key's seq space and means nothing in this one.
+    if (this.lastFromSeq !== null) this.subscribe(0n);
   }
 
   /** The session id this client currently subscribes under. */

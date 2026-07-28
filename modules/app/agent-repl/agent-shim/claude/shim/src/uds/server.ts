@@ -92,6 +92,12 @@ export interface SessionServerOptions {
   vendor?: string;
   /** Reported in ShimHello.turn_in_flight so a reattaching daemon knows. */
   turnInFlight?: () => boolean;
+  /**
+   * The VENDOR session id this shim is CURRENTLY filing events under, read
+   * fresh for every hello (it rotates mid-stream) and reported in
+   * ShimHello.vendor_session_id. "" while the shim has not learned it yet.
+   */
+  vendorSessionId?: () => string;
   /** Heartbeat cadence on the live connection; 0 disables. Default 5000ms. */
   heartbeatIntervalMs?: number;
   /** First reconnect delay; doubles to reconnectMaxMs. Default 100ms. */
@@ -235,6 +241,43 @@ export class SessionServer {
     this.conn!.send(PermissionRequestSchema, req);
   }
 
+  /**
+   * DELIBERATELY drop the live daemon connection and immediately dial a new
+   * one. Unlike {@link close} this is not a teardown: the reconnect loop stays
+   * armed and the SDK turn is untouched.
+   *
+   * The bounce is the shim-initiated half of a vendor session ROTATION
+   * (store-client.ts rotateStoreKey). A daemon disconnect already tears
+   * nothing down and a fresh handshake already re-announces this shim, so
+   * bouncing costs one round trip and buys the one thing the daemon cannot
+   * otherwise learn in time: the new vendor uuid, carried on the ShimHello of
+   * the connection this opens.
+   *
+   * The backoff is reset first — this drop is our own doing, not evidence that
+   * the daemon is unwell, so the redial should not inherit a penalty earned by
+   * earlier failures.
+   */
+  bounce(reason: string): void {
+    if (this.closed) {
+      shimLog(COMPONENT, { session: this.opts.sessionId },
+        `daemon link bounce ignored (${reason}): the server is deliberately closed`);
+      return;
+    }
+    this.reconnectDelayMs = this.reconnectMinMs;
+    if (!this.conn) {
+      // Nothing live to drop; the reconnect loop is already trying, and the
+      // hello it eventually sends reads the CURRENT vendor id anyway.
+      shimLog(COMPONENT, { session: this.opts.sessionId },
+        `daemon link bounce (${reason}) found no live connection; the pending redial will carry the new hello`);
+      this.scheduleDial();
+      return;
+    }
+    shimLog(COMPONENT, { session: this.opts.sessionId },
+      `BOUNCING the daemon link deliberately (${reason}); the re-handshake announces the current vendor session id`);
+    // onConnClose fires from the socket's close event and re-arms the dial.
+    this.conn.close();
+  }
+
   /** Drop the connection and stop reconnecting. Does not touch the SDK turn. */
   close(): Promise<void> {
     this.closed = true;
@@ -273,6 +316,10 @@ export class SessionServer {
       shimVersion: this.opts.shimVersion,
       protocolVersion: this.opts.protocolVersion,
       turnInFlight: this.opts.turnInFlight ? this.opts.turnInFlight() : false,
+      // Read fresh on every hello: the vendor rotates this uuid mid-stream,
+      // and the whole point of a rotation bounce is that the NEXT hello
+      // announces the NEW identity.
+      vendorSessionId: this.opts.vendorSessionId ? this.opts.vendorSessionId() : "",
     }));
     shimLog(COMPONENT, { session: this.opts.sessionId }, `connected to daemon at ${this.opts.socketPath}; ShimHello sent`);
   }

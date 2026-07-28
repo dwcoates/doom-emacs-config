@@ -303,10 +303,24 @@ export class UdsSession {
         shimVersion: this.deps.shimVersion,
         protocolVersion: this.deps.protocolVersion,
         turnInFlight: () => this.turnsInFlight > 0,
+        // The daemon resets its store cursor when this differs from the uuid
+        // it has persisted, which is how a rotation's fresh seq space is
+        // subscribed from zero instead of from a retired high-water mark.
+        vendorSessionId: () => this.store.vendorSessionId(),
         ...(this.deps.heartbeatIntervalMs !== undefined ? { heartbeatIntervalMs: this.deps.heartbeatIntervalMs } : {}),
       },
       handlers,
     );
+    // THE ROTATION'S OTHER HALF. The store client detects the vendor's new
+    // transcript identity and owns the re-key; only this class can reach the
+    // daemon link, so the bounce is injected here. It runs BEFORE the re-key
+    // (store-client.ts rotateStoreKey), so no event of the new seq space can
+    // reach a connection whose last_seen belongs to the retired one.
+    this.store.onRotation((previous, next) => {
+      shimLog(COMPONENT, { session: this.deps.sessionId, store_key: previous, rotating_to: next },
+        `vendor session rotated; bouncing the daemon link so the re-handshake announces ${next}`);
+      this.server.bounce(`vendor session rotation ${previous} -> ${next}`);
+    });
   }
 
   /**
