@@ -600,17 +600,18 @@ describe("StoreClient store session key", () => {
   });
 });
 
-describe("StoreClient store key is settled by the first forwarded event", () => {
-  // Each session id is its own seq space, and the daemon tracks last_seen_seq
-  // per CONNECTION. Switching keys after events have flowed replays the new
-  // key from seq=1 against a much higher last_seen, which the daemon reads as
-  // ErrSeqRegression — terminal, never reconnected. A mid-session
-  // `conversation_reset` did exactly that on 2026-07-25.
+describe("StoreClient vendor session rotation", () => {
+  // The vendor mints a NEW transcript identity mid-stream (a `/clear` does
+  // exactly this), which retires one store seq space and starts another at 1.
+  // Each session id is its own seq space and the daemon tracks last_seen_seq
+  // per CONNECTION, so re-keying underneath a live daemon connection would
+  // replay the new key from seq=1 against a much higher last_seen — the
+  // terminal ErrSeqRegression a mid-session `conversation_reset` produced on
+  // 2026-07-25. The rotation is therefore a controlled RE-HANDSHAKE: bounce
+  // the daemon link first, then re-key and resubscribe from zero.
 
-  it("refuses to switch the key once an event has been forwarded", async () => {
-    // Arrange: subscribe, then forward one merged event.
-    const store = await fakeStore();
-    stores.push(store);
+  /** A rotating client with one merged event already forwarded under `uuid-old`. */
+  async function rotatingClient(store: FakeStore, bounces: string[][]): Promise<StoreClient> {
     const received: Event[] = [];
     const client = new StoreClient({
       socketPath: store.socketPath, sessionId: "sess-1",
@@ -619,34 +620,141 @@ describe("StoreClient store key is settled by the first forwarded event", () => 
     });
     clients.push(client);
     client.onMerged((e) => received.push(e));
+    client.onRotation((previous, next) => bounces.push([previous, next, client.storeSessionId()]));
     await client.connect();
     await until(() => store.count() >= 1, "producer accepted");
     client.subscribe(0n);
     await until(() => store.count() === 2, "subscription accepted");
     await store.latest().next(SubscribeSchema);
     store.latest().send(EventSchema, create(EventSchema, { sessionId: "uuid-old", seq: 5990n }));
-    await until(() => received.length === 1, "event forwarded");
+    await until(() => received.length === 1, "event forwarded under the old key");
+    return client;
+  }
+
+  it("re-keys the standing subscription to the rotated uuid at from_seq=0", async () => {
+    // Arrange
+    const store = await fakeStore();
+    stores.push(store);
+    const client = await rotatingClient(store, []);
 
     // Act: the CLI reports a NEW conversation uuid.
     client.adoptStoreKey("uuid-new");
+    await until(() => store.count() === 3, "resubscribed under the rotated uuid");
 
-    // Assert: key held, no reopen — the daemon keeps one seq space.
-    expect(client.storeSessionId()).toBe("uuid-old");
-    expect(store.count()).toBe(2);
+    // Assert: the new seq space starts fresh, so the daemon's old position
+    // (5990, counted in the RETIRED space) means nothing here.
+    const resub = await store.latest().next(SubscribeSchema);
+    expect(resub.sessionId).toBe("uuid-new");
+    expect(resub.fromSeq).toBe(0n);
+    expect(client.storeSessionId()).toBe("uuid-new");
   });
 
-  it("still adopts the key before anything has been forwarded", async () => {
-    // Arrange: a fresh session learns its uuid before any merged event.
+  it("bounces the daemon link BEFORE the store key moves", async () => {
+    // Arrange: the bounce records the key as it stood when it fired, because
+    // ordering is the whole mechanism — a re-key ahead of the bounce would
+    // push the new space's seq=1 down the old connection.
     const store = await fakeStore();
     stores.push(store);
+    const bounces: string[][] = [];
+    const client = await rotatingClient(store, bounces);
+
+    // Act
+    client.adoptStoreKey("uuid-new");
+    await until(() => bounces.length === 1, "daemon link bounced");
+
+    // Assert
+    expect(bounces[0]).toEqual(["uuid-old", "uuid-new", "uuid-old"]);
+  });
+
+  it("announces the rotated uuid as the vendor session id for the next hello", async () => {
+    // Arrange
+    const store = await fakeStore();
+    stores.push(store);
+    const client = await rotatingClient(store, []);
+
+    // Act
+    client.adoptStoreKey("uuid-new");
+    await until(() => client.vendorSessionId() === "uuid-new", "vendor id re-announced");
+
+    // Assert
+    expect(client.vendorSessionId()).toBe("uuid-new");
+  });
+
+  it("delivers a write issued before the rotation under the OLD key", async () => {
+    // Arrange: a batch already on the wire when the rotation starts. Its acks
+    // are matched positionally on the producer connection, so it must settle
+    // rather than be dropped or re-ordered by the re-key.
+    const store = await fakeStore();
+    stores.push(store);
+    const client = await rotatingClient(store, []);
+    const acked = client.write([create(EventSchema, { sessionId: "uuid-old", seq: 5991n })]);
+
+    // Act
+    client.adoptStoreKey("uuid-new");
+    const write = await store.peer().next(StoreWriteSchema, "the pre-rotation batch");
+    store.peer().send(StoreWriteAckSchema, create(StoreWriteAckSchema, { accepted: 1n, lastSeq: 5991n }));
+
+    // Assert
+    expect(write.batch!.events[0]!.sessionId).toBe("uuid-old");
+    expect((await acked).lastSeq).toBe(5991n);
+  });
+
+  it("neither rotates nor reopens for a re-announcement of the CURRENT uuid", async () => {
+    // Arrange: adoptStoreKey runs on EVERY converted event, so the same uuid
+    // arrives thousands of times. Nothing may move a key to itself — that is
+    // what keeps one uuid's seq space monotonic.
+    const store = await fakeStore();
+    stores.push(store);
+    const bounces: string[][] = [];
+    const client = await rotatingClient(store, bounces);
+
+    // Act
+    client.adoptStoreKey("uuid-old");
+    client.adoptStoreKey("uuid-old");
+    await until(() => true, "event loop turned");
+
+    // Assert
+    expect(bounces).toEqual([]);
+    expect(store.count()).toBe(2);
+    expect(client.storeSessionId()).toBe("uuid-old");
+  });
+
+  it("starts exactly one rotation for a burst of events carrying the new uuid", async () => {
+    // Arrange: the SDK emits many messages under the new identity, and each
+    // one calls adoptStoreKey while the first rotation is still draining its
+    // in-flight writes.
+    const store = await fakeStore();
+    stores.push(store);
+    const bounces: string[][] = [];
+    const client = await rotatingClient(store, bounces);
+
+    // Act
+    client.adoptStoreKey("uuid-new");
+    client.adoptStoreKey("uuid-new");
+    client.adoptStoreKey("uuid-new");
+    await until(() => store.count() === 3, "resubscribed once");
+
+    // Assert
+    expect(bounces.length).toBe(1);
+    expect(store.count()).toBe(3);
+  });
+
+  it("still adopts the key silently before anything has been forwarded", async () => {
+    // Arrange: a fresh session learns its uuid before any merged event. That
+    // is a FIRST ADOPTION replacing the `--session-id` placeholder, not a
+    // rotation: no bounce, and the daemon's position is kept.
+    const store = await fakeStore();
+    stores.push(store);
+    const bounces: string[][] = [];
     const client = new StoreClient({
       socketPath: store.socketPath, sessionId: "sess-1",
       producer: "claude-shim:sess-1", heartbeatIntervalMs: 0,
     });
     clients.push(client);
+    client.onRotation((previous, next) => bounces.push([previous, next]));
     await client.connect();
     await until(() => store.count() >= 1, "producer accepted");
-    client.subscribe(0n);
+    client.subscribe(9n);
     await until(() => store.count() === 2, "subscription accepted");
     await store.latest().next(SubscribeSchema);
 
@@ -655,6 +763,27 @@ describe("StoreClient store key is settled by the first forwarded event", () => 
     await until(() => store.count() === 3, "resubscribed");
 
     // Assert
-    expect((await store.latest().next(SubscribeSchema)).sessionId).toBe("uuid-new");
+    const resub = await store.latest().next(SubscribeSchema);
+    expect(resub.sessionId).toBe("uuid-new");
+    expect(resub.fromSeq).toBe(9n);
+    expect(bounces).toEqual([]);
+  });
+
+  it("reports no vendor session id while the key is still the placeholder", async () => {
+    // Arrange: a fresh session's hello must announce "" rather than the shim's
+    // own `--session-id` — the daemon would read that placeholder as a
+    // rotation away from the real conversation.
+    const store = await fakeStore();
+    stores.push(store);
+    const client = new StoreClient({
+      socketPath: store.socketPath, sessionId: "sess-1",
+      producer: "claude-shim:sess-1", heartbeatIntervalMs: 0,
+    });
+    clients.push(client);
+    await client.connect();
+
+    // Act / Assert
+    expect(client.storeSessionId()).toBe("sess-1");
+    expect(client.vendorSessionId()).toBe("");
   });
 });
