@@ -994,3 +994,49 @@ func TestQueuedCommandPromptUnmodeledTypeCaptured(t *testing.T) {
 		t.Fatalf("prompt_value arm = %T, want none set for an unmodeled type", arm)
 	}
 }
+
+// TestSkillBodyEnvelopeSurvivesIngestion pins the two envelope fields the
+// daemon's skill-card curator resolves a launched skill's SKILL.md on.
+//
+// The record is the harness's own: a "user" line flagged isMeta, parented on
+// the Skill call's tool_result record, whose text is the "Base directory for
+// this skill:" header and the SKILL.md body. Both fields reach LineEnvelope
+// through routeEnvelope's generic field lookup rather than a named case, so
+// nothing in this package mentions either one — and nothing would notice if a
+// schema change quietly stopped routing them, which is what this test is for.
+func TestSkillBodyEnvelopeSurvivesIngestion(t *testing.T) {
+	// Arrange
+	const raw = `{"parentUuid":"u-result","isSidechain":false,"type":"user","isMeta":true,` +
+		`"message":{"role":"user","content":[{"type":"text","text":"Base directory for this skill: /s/demo\n\n# Demo"}]},` +
+		`"uuid":"u-body","timestamp":"2026-07-27T10:00:00.000Z","userType":"external","sessionId":"s1","version":"2.1.215"}`
+	var obj map[string]any
+	if err := json.Unmarshal([]byte(raw), &obj); err != nil {
+		t.Fatalf("unmarshal fixture: %v", err)
+	}
+	c := New(func(string, ...any) {})
+
+	// Act
+	line, extras, err := c.TranscriptLine(obj)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("conversion error: %v", err)
+	}
+	if extras != nil {
+		t.Fatalf("expected zero extras, got %v", extras.AsMap())
+	}
+	env := line.GetUser().GetEnvelope()
+	if !env.GetIsMeta() {
+		t.Error("is_meta = false, want the harness's own flag preserved")
+	}
+	if got, want := env.GetParentUuid(), "u-result"; got != want {
+		t.Errorf("parent_uuid = %q, want the record chain's %q", got, want)
+	}
+	blocks := line.GetUser().GetMessage().GetContentBlocks().GetBlocks()
+	if len(blocks) != 1 {
+		t.Fatalf("content blocks = %d, want the body's one text block", len(blocks))
+	}
+	if !strings.HasPrefix(blocks[0].GetText().GetText(), "Base directory for this skill:") {
+		t.Errorf("body text = %q, want the harness's own header", blocks[0].GetText().GetText())
+	}
+}
