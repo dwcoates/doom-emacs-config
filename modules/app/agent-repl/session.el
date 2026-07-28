@@ -246,8 +246,7 @@ remaining keys are written only when SAVED carries them."
   ;; `:hidden' (deprio-close via `SPC o C') survive Emacs restart.  Only
   ;; persistable values matter at restart — `:dead'/nil reduce to "no
   ;; opinion, default to opening panels", so we only restore `:active' /
-  ;; `:inactive' / `:hidden'.  `--open-panels-after-ready' reads this on
-  ;; first ready and skips the panel-open call for `:inactive'/`:hidden';
+  ;; `:inactive' / `:hidden'.
   ;; `--maybe-sweep-hidden-on-switch' demotes `:hidden' to `:inactive'
   ;; when the user actually arrives back on the workspace.
   (let ((saved-repl-state (and saved (plist-get saved :repl-state))))
@@ -1095,62 +1094,12 @@ by WS's daemon session binding (see
                               (not (null ph)) (not (null window)))
     window))
 
-(defun agent-repl--show-panels-or-defer (ws)
-  "Open panels if WS is the current workspace, otherwise defer until switch.
-`agent-repl--on-workspace-switch' checks :pending-show-panels.
-Skip if the loading placeholder is still visible — showing panels
-here would race the placeholder's teardown and mount the frontend
-view against the wrong selected window."
-  (if (agent-repl--current-ws-p ws)
-      (if (agent-repl--loading-placeholder-visible-p)
-          (agent-repl--log ws "show-panels-or-defer: skipped ws=%s reason=loading-placeholder-visible" ws)
-        (agent-repl--log ws "show-panels-or-defer: current ws=%s — showing panels" ws)
-        (agent-repl--frontend-dispatch-show ws))
-    (agent-repl--log ws "show-panels-or-defer: other ws=%s — deferring" ws)
-    (agent-repl--ws-put ws :pending-show-panels t)))
-
-(defun agent-repl--open-panels-after-ready (ws)
-  "Open panels for WS after the agent becomes ready.
-If there were pending prompts, always show panels (or defer).
-Otherwise, only show panels if WS is the current workspace AND its
-persisted `:repl-state' is not `:inactive' or `:hidden' — both signal
-that the user wants panels closed (hide-mode survives restart: when
-`--initialize-ws-env' hydrated either value from the saved file, we
-honor it here by skipping the panel-open call).
-
-WS's panels may already have been shown by the workspace-switch's own
-`:pending-show-panels' drain (`agent-repl--drain-pending-show-panels'
-in panels.el), so this after-ready call is often a SECOND show attempt
-rather than the first — and re-running the show path while panels are
-already visible is not safe (it can resolve both windows onto the
-input buffer and die on its window-dedication mid-layout, leaving a
-broken input-only frame), so an already-visible current-workspace
-layout is left untouched in both branches."
-  (if (agent-repl--drain-pending-prompts ws)
-      (if (and (agent-repl--current-ws-p ws)
-               (agent-repl--panels-visible-p))
-          (agent-repl--log ws "open-panels-after-ready: pending drained, panels already visible ws=%s — no re-show" ws)
-        (agent-repl--log ws "open-panels-after-ready: had pending prompts ws=%s — show or defer" ws)
-        (agent-repl--show-panels-or-defer ws))
-    (agent-repl--log ws "first-ready no pending prompts for ws=%s" ws)
-    (cond
-     ((memq (agent-repl--ws-repl-state ws) '(:inactive :hidden))
-      (agent-repl--log ws "open-panels-after-ready: persisted %s ws=%s — skipping panel open"
-                        (agent-repl--ws-repl-state ws) ws))
-     ((and (agent-repl--current-ws-p ws)
-           (agent-repl--panels-visible-p))
-      (agent-repl--log ws "open-panels-after-ready: panels already visible ws=%s — no re-show" ws))
-     ((and (agent-repl--current-ws-p ws)
-           (not (agent-repl--loading-placeholder-visible-p)))
-      (agent-repl--log ws "open-panels-after-ready: no pending + current ws=%s — showing panels" ws)
-      (agent-repl--frontend-dispatch-show ws))
-     (t
-      (agent-repl--log ws "open-panels-after-ready: no pending + other ws=%s — no-op" ws)))))
-
-;; Readiness is handled entirely by the session_start hook via sentinel.el.
-;; The hook fires when Claude Code initializes, delivering session-id and
-;; triggering agent-repl--on-session-start-event, which sets ready state,
-;; drains pending prompts, and opens panels.  No polling is needed.
+;; Panel opening after readiness is handled entirely by the session_start
+;; hook via sentinel.el, which sets ready state, drains pending prompts, and
+;; opens panels through the workspace-switch `:pending-show-panels' drain.
+;; The two helpers that used to run a second panel-open pass off the old
+;; readiness POLL (`--show-panels-or-defer', `--open-panels-after-ready')
+;; had no caller left after that cutover and are gone.
 
 ;;;; Process state predicates
 
