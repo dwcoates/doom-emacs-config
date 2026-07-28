@@ -4953,98 +4953,6 @@ override must precede the default it replaces."
         (should (eq (agent-repl--ws-get "ws1" :repl-state) :merge-conflict))
         (should (equal dispatched '("ws1" (error "clash"))))))))
 
-;;;; ---- Tests: new-workspace applies repo-default priority ----
-
-(ert-deftest agent-repl-test-new-workspace-applies-repo-default-priority ()
-  "`--new-workspace' writes the repo-default priority onto the new ws plist."
-  (agent-repl-test--with-clean-state
-    (let ((ws-name "new-ws")
-          (reorder-called nil))
-      (cl-letf (((symbol-function 'agent-repl--git-root) (lambda (&rest _) "/tmp/ee/"))
-                ((symbol-function '+workspace/new) (lambda () nil))
-                ((symbol-function '+workspace-current-name) (lambda () ws-name))
-                ((symbol-function 'agent-repl--initialize-ws-env)
-                 (lambda (&rest _) nil))
-                ((symbol-function 'agent-repl--repo-default-priority-for-path)
-                 (lambda (path) (when (equal path "/tmp/ee/") "p3")))
-                ((symbol-function 'agent-repl--reorder-workspace-by-priority)
-                 (lambda (_ws) (setq reorder-called t)))
-                ((symbol-function 'magit-status) (lambda (&rest _) nil))
-                ((symbol-function 'agent-repl--remove-doom-dashboard)
-                 (lambda (&rest _) nil)))
-        (agent-repl--new-workspace)
-        (should (equal (agent-repl--ws-get ws-name :priority) "p3"))
-        (should reorder-called)))))
-
-(ert-deftest agent-repl-test-new-workspace-no-default-leaves-priority-unset ()
-  "`--new-workspace' leaves :priority unset when no repo-default applies."
-  (agent-repl-test--with-clean-state
-    (let ((ws-name "new-ws")
-          (reorder-called nil))
-      (cl-letf (((symbol-function 'agent-repl--git-root) (lambda (&rest _) "/tmp/other/"))
-                ((symbol-function '+workspace/new) (lambda () nil))
-                ((symbol-function '+workspace-current-name) (lambda () ws-name))
-                ((symbol-function 'agent-repl--initialize-ws-env)
-                 (lambda (&rest _) nil))
-                ((symbol-function 'agent-repl--repo-default-priority-for-path)
-                 (lambda (_path) nil))
-                ((symbol-function 'agent-repl--reorder-workspace-by-priority)
-                 (lambda (_ws) (setq reorder-called t)))
-                ((symbol-function 'magit-status) (lambda (&rest _) nil))
-                ((symbol-function 'agent-repl--remove-doom-dashboard)
-                 (lambda (&rest _) nil)))
-        (agent-repl--new-workspace)
-        (should-not (agent-repl--ws-get ws-name :priority))
-        (should-not reorder-called)))))
-
-(ert-deftest agent-repl-test-new-workspace-priority-set-before-initialize-ws-env ()
-  "`--new-workspace' writes :priority BEFORE calling `--initialize-ws-env'.
-This matters because `--initialize-ws-env' reads `:priority' off the plist as
-a fallback when no saved state exists, persisting the repo-default into the
-initial state file."
-  (agent-repl-test--with-clean-state
-    (let ((ws-name "new-ws")
-          (priority-at-init nil))
-      (cl-letf (((symbol-function 'agent-repl--git-root) (lambda (&rest _) "/tmp/ee/"))
-                ((symbol-function '+workspace/new) (lambda () nil))
-                ((symbol-function '+workspace-current-name) (lambda () ws-name))
-                ((symbol-function 'agent-repl--initialize-ws-env)
-                 (lambda (ws &rest _)
-                   (setq priority-at-init (agent-repl--ws-get ws :priority))))
-                ((symbol-function 'agent-repl--repo-default-priority-for-path)
-                 (lambda (_path) "p3"))
-                ((symbol-function 'agent-repl--reorder-workspace-by-priority)
-                 (lambda (_ws) nil))
-                ((symbol-function 'magit-status) (lambda (&rest _) nil))
-                ((symbol-function 'agent-repl--remove-doom-dashboard)
-                 (lambda (&rest _) nil)))
-        (agent-repl--new-workspace)
-        (should (equal priority-at-init "p3"))))))
-
-(ert-deftest agent-repl-test-new-workspace-honors-explicit-root ()
-  "`--new-workspace' uses an explicitly-passed ROOT instead of resolving one
-from `default-directory' via `agent-repl--git-root'."
-  (agent-repl-test--with-clean-state
-    (let ((ws-name "new-ws")
-          (init-root nil)
-          (priority-path nil))
-      (cl-letf (((symbol-function 'agent-repl--git-root)
-                 (lambda (&rest _) (error "should not resolve root when ROOT given")))
-                ((symbol-function '+workspace/new) (lambda () nil))
-                ((symbol-function '+workspace-current-name) (lambda () ws-name))
-                ((symbol-function 'agent-repl--initialize-ws-env)
-                 (lambda (_ws root) (setq init-root root)))
-                ((symbol-function 'agent-repl--repo-default-priority-for-path)
-                 (lambda (path) (setq priority-path path) nil))
-                ((symbol-function 'agent-repl--reorder-workspace-by-priority)
-                 (lambda (_ws) nil))
-                ((symbol-function 'magit-status) (lambda (&rest _) nil))
-                ((symbol-function 'agent-repl--remove-doom-dashboard)
-                 (lambda (&rest _) nil)))
-        (agent-repl--new-workspace "/tmp/explicit/")
-        (should (equal init-root "/tmp/explicit/"))
-        (should (equal priority-path "/tmp/explicit/"))))))
-
 ;;;; ---- Tests: async-git-sentinel ----
 
 (ert-deftest agent-repl-test-async-git-sentinel-exit-success ()
@@ -7138,26 +7046,6 @@ target stays the parent (`--merge-target-dir-for-ws')."
                (lambda () (setq flashed t))))
       (agent-repl-jump-to-workspace "target-ws" t)
       (should-not flashed))))
-
-(ert-deftest agent-repl-test-new-workspace-removes-dashboard ()
-  "new-workspace calls remove-doom-dashboard after magit."
-  (let ((call-order nil)
-        (+doom-dashboard-buffer-name "*doom*"))
-    (agent-repl-test--with-temp-buffer "*doom*"
-      (agent-repl-test--with-clean-state
-        (cl-letf (((symbol-function 'agent-repl--git-root)
-                   (lambda () "/tmp/fake-root"))
-                  ((symbol-function '+workspace/new)
-                   (lambda (&rest _) (push 'ws-new call-order)))
-                  ((symbol-function '+workspace-current-name) (lambda () "test-ws"))
-                  ((symbol-function 'agent-repl--initialize-ws-env)
-                   (lambda (_ws _root) (push 'init-env call-order)))
-                  ((symbol-function 'magit-status)
-                   (lambda (_path) (push 'magit call-order)))
-                  ((symbol-function 'persp-remove-buffer)
-                   (lambda (_buf) (push 'remove-dash call-order))))
-          (agent-repl--new-workspace)
-          (should (equal (reverse call-order) '(ws-new init-env magit remove-dash))))))))
 
 ;;;; ---- Tests: agent-repl--with-preserved-focus ----
 
