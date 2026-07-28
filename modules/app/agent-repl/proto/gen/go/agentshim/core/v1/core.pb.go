@@ -1988,6 +1988,23 @@ type ShimHello struct {
 	ShimVersion     string                 `protobuf:"bytes,3,opt,name=shim_version,json=shimVersion,proto3" json:"shim_version,omitempty"`
 	ProtocolVersion string                 `protobuf:"bytes,4,opt,name=protocol_version,json=protocolVersion,proto3" json:"protocol_version,omitempty"`
 	TurnInFlight    bool                   `protobuf:"varint,5,opt,name=turn_in_flight,json=turnInFlight,proto3" json:"turn_in_flight,omitempty"` // true when the daemon reattaches mid-turn
+	// The VENDOR session id (the CLI's uuid, and its transcript filename) this
+	// shim is CURRENTLY filing events under — the key of the store seq space
+	// the daemon is about to Subscribe to. Empty while the shim has not learned
+	// it yet: a fresh session's uuid is knowable only from the SDK, so the very
+	// first hello of a fresh session carries nothing here rather than a
+	// placeholder the daemon would mistake for a real identity.
+	//
+	// WHY THE HANDSHAKE CARRIES IT. The vendor rotates this uuid mid-stream (a
+	// `/clear` mints a new transcript identity), which retires one store seq
+	// space and starts another at 1. The shim answers a rotation by re-keying
+	// its store subscription and DELIBERATELY bouncing this connection, so the
+	// hello opening the next one is the announcement: the daemon compares it
+	// with the uuid it has persisted and, when they differ, resets its store
+	// cursor to zero before subscribing. Without the announcement the daemon
+	// would resume from a high-water mark belonging to a seq space that no
+	// longer exists and read the new space's seq=1 as a regression.
+	VendorSessionId string `protobuf:"bytes,6,opt,name=vendor_session_id,json=vendorSessionId,proto3" json:"vendor_session_id,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -2055,6 +2072,13 @@ func (x *ShimHello) GetTurnInFlight() bool {
 		return x.TurnInFlight
 	}
 	return false
+}
+
+func (x *ShimHello) GetVendorSessionId() string {
+	if x != nil {
+		return x.VendorSessionId
+	}
+	return ""
 }
 
 type DaemonHello struct {
@@ -3458,14 +3482,15 @@ const file_agentshim_core_v1_core_proto_rawDesc = "" +
 	"\tcomponent\x18\x01 \x01(\tR\tcomponent\x12\x16\n" +
 	"\x06reason\x18\x02 \x01(\tR\x06reason\x12#\n" +
 	"\rdropped_count\x18\x03 \x01(\x04R\fdroppedCount\x12\x1c\n" +
-	"\trecovered\x18\x04 \x01(\bR\trecovered\"\xb6\x01\n" +
+	"\trecovered\x18\x04 \x01(\bR\trecovered\"\xe2\x01\n" +
 	"\tShimHello\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x16\n" +
 	"\x06vendor\x18\x02 \x01(\tR\x06vendor\x12!\n" +
 	"\fshim_version\x18\x03 \x01(\tR\vshimVersion\x12)\n" +
 	"\x10protocol_version\x18\x04 \x01(\tR\x0fprotocolVersion\x12$\n" +
-	"\x0eturn_in_flight\x18\x05 \x01(\bR\fturnInFlight\"_\n" +
+	"\x0eturn_in_flight\x18\x05 \x01(\bR\fturnInFlight\x12*\n" +
+	"\x11vendor_session_id\x18\x06 \x01(\tR\x0fvendorSessionId\"_\n" +
 	"\vDaemonHello\x12%\n" +
 	"\x0edaemon_version\x18\x01 \x01(\tR\rdaemonVersion\x12)\n" +
 	"\x10protocol_version\x18\x02 \x01(\tR\x0fprotocolVersion\"\x82\x01\n" +
