@@ -386,7 +386,7 @@ describe("assistantMessage arm", () => {
 describe("userMessage arm", () => {
   it("maps a string user message to a user-turn item", () => {
     const items = itemsFrom({ uuid: "m1", requestId: "r1", userMessage: { contentString: "hi there" } });
-    const expected: UserTurnItem = { kind: "user-turn", requestId: "r1", content: [{ type: "text", text: "hi there" }], ts: "" };
+    const expected: UserTurnItem = { kind: "user-turn", requestId: "r1", uuid: "m1", content: [{ type: "text", text: "hi there" }], ts: "" };
     expect(items).toEqual([expected]);
   });
 
@@ -409,7 +409,7 @@ describe("userMessage arm", () => {
       resultTs: "",
       result: { isError: false, content: "done" },
     };
-    const turn: UserTurnItem = { kind: "user-turn", requestId: "r1", content: [{ type: "text", text: "and more" }], ts: "" };
+    const turn: UserTurnItem = { kind: "user-turn", requestId: "r1", uuid: "m1", content: [{ type: "text", text: "and more" }], ts: "" };
     expect(items).toEqual([tool, turn]);
   });
 

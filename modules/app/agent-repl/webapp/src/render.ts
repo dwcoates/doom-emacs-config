@@ -76,6 +76,7 @@ import {
   ToolItem,
   UserTurnItem,
   liveContextDelta,
+  userTurnKey,
 } from "./store.js";
 
 export interface Actions {
@@ -2041,22 +2042,41 @@ export function itemKey(item: ConversationItem, index: number): string {
     case "context-cleared":
     case "context-compacted":
       return `${item.kind}:${item.uuid}`;
+    // Keyed by the SAME identity the store reconciles a prompt on, so two
+    // prompts can never share a DOM node. The index fallback covers a turn
+    // carrying neither a request id nor a uuid (fixtures).
+    case "user-turn":
+      return userTurnKey(item) ?? `user-turn:${index}`;
     default:
       return `${item.kind}:${index}`;
   }
 }
 
 /**
- * Request id of the newest user turn in the feed, or null when there is
+ * Identity of the newest user turn in the feed, or null when there is
  * none. A change in this id between renders means a prompt was just
  * sent — from the webapp composer or from the Emacs host's input buffer
  * alike, since both reach the feed as the daemon's `user-turn`
  * broadcast — which is what re-pins a scrolled-up feed to its tail.
+ *
+ * The identity is the DOM key, NOT the bare request id: every prompt the real
+ * pipeline delivers has an empty request id, so reading that left this
+ * constant across a whole session — no prompt ever counted as fresh, and the
+ * feed never re-pinned to the tail on send.
  */
 export function lastUserTurnId(items: readonly ConversationItem[]): string | null {
   for (let i = items.length - 1; i >= 0; i--) {
     const item = items[i];
-    if (item.kind === "user-turn") return item.requestId;
+    if (item.kind === "user-turn") return itemKey(item, i);
+  }
+  return null;
+}
+
+/** The newest user turn ITEM in the feed, or null when there is none. */
+export function lastUserTurnItem(items: readonly ConversationItem[]): UserTurnItem | null {
+  for (let i = items.length - 1; i >= 0; i--) {
+    const item = items[i];
+    if (item.kind === "user-turn") return item;
   }
   return null;
 }
@@ -3178,12 +3198,17 @@ export class FeedRenderer {
       this.tailFrozen = false;
       // The prompt round-trip's LAST receipt: this render is drawing a user
       // turn the previous one had not seen. `last` reports whether it ranks
-      // at the feed tail — the position a just-sent prompt must land at.
+      // at the feed tail — the position a just-sent prompt must land at, and
+      // the newest user turn IS the tail exactly when the tail item is one.
+      // `request_id` stays on the line even though it is empty for every
+      // transcript-borne prompt: KEY is the identity that actually
+      // distinguishes them, and the pair is what pins the attribution gap.
       const tail = state.items[state.items.length - 1];
+      const turn = lastUserTurnItem(state.items);
       log(
         "info",
-        `feed: user turn rendering request_id=${turnId} last=${
-          tail !== undefined && tail.kind === "user-turn" && tail.requestId === turnId
+        `feed: user turn rendering request_id=${turn?.requestId ?? ""} key=${turnId} last=${
+          tail !== undefined && tail.kind === "user-turn"
         }`,
       );
     }

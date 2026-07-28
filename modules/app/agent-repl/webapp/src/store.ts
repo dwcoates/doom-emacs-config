@@ -63,7 +63,20 @@ interface FeedOrderedItem {
 
 export interface UserTurnItem extends FeedOrderedItem {
   kind: "user-turn";
+  /**
+   * The submit this prompt answers, when one is known. EMPTY for every prompt
+   * that reaches the feed off the transcript file plane (the real, non-fake
+   * pipeline: a `UserLine` the shim forwards), and for replayed history, which
+   * legitimately predates any live request. So it is NOT an identity —
+   * see `userTurnKey`.
+   */
   requestId: string;
+  /**
+   * The conversation record's own uuid, when the turn came from one. This is
+   * what makes a request-id-less transcript prompt distinguishable from the
+   * one before it; absent only for turns minted without a record (fixtures).
+   */
+  uuid?: string;
   content: ContentBlock[];
   /** When the prompt was sent, rendered on the bubble. */
   ts: string;
@@ -551,11 +564,36 @@ function mergeToolItem(existing: ToolItem, incoming: ToolItem): ToolItem {
   return merged;
 }
 
+/**
+ * The identity ONE user turn reconciles on, or null when it has none and must
+ * simply be appended.
+ *
+ * The request id comes FIRST and is authoritative when present: a prompt the
+ * webapp submitted is echoed back under that id (fake-mode e2e, optimistic
+ * echo), and those two deliveries must land on one bubble.
+ *
+ * But the real pipeline delivers a prompt as a transcript `UserLine` off the
+ * file plane, whose request id is EMPTY on every live push. Keying those on
+ * the request id gave every one of them the same key, so each new prompt
+ * REPLACED the previous turn in place instead of appending — the reader saw
+ * one stale bubble and never their own prompts. Such a turn is keyed on its
+ * record uuid, which is unique per prompt and stable across a replay
+ * redelivery, so a resync still reconciles rather than duplicating.
+ *
+ * With neither id there is nothing to reconcile on, and appending is right:
+ * a turn with no identity can only ever be its own bubble.
+ */
+export function userTurnKey(item: UserTurnItem): string | null {
+  if (item.requestId !== "") return `user-turn:req:${item.requestId}`;
+  if (item.uuid !== undefined && item.uuid !== "") return `user-turn:uuid:${item.uuid}`;
+  return null;
+}
+
 /** The stable identity a conversation item is reconciled on, or null if it has none. */
 function itemKey(item: ConversationItem): string | null {
   switch (item.kind) {
     case "user-turn":
-      return `user-turn:${item.requestId}`;
+      return userTurnKey(item);
     // Streamed prose is keyed by the ONE authority on block identity, so the
     // rule cannot drift from the one the reconciler matches on.
     case "text":
