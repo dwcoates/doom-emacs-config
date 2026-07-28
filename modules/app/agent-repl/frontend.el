@@ -48,7 +48,6 @@
 (declare-function agent-repl--ws-put "agent-repl-workspace" (ws key val))
 (declare-function agent-repl--align-buffer-to-ws-dir "agent-repl-status" (buf ws))
 (declare-function agent-repl--frontend-ensure-session "agent-repl-frontend-client" (ws))
-(declare-function agent-repl--frontend-wait-session-healthy "agent-repl-frontend-client" (ws session-id))
 (declare-function agent-repl--frontend-force-fresh-session "agent-repl-frontend-client" (ws))
 (declare-function agent-repl--frontend-session-url "agent-repl-frontend-client" (session-id))
 (declare-function agent-repl-window--panel-window "agent-repl-window" (kind &optional ws frame))
@@ -532,13 +531,19 @@ Whichever buffer is returned — reused or freshly mounted — its
 resolves against the worktree the REPL is attached to rather than the
 foreign directory the xwidget session inherited at creation."
   ;; This is the one rendering choke point: every initial mount, sync, and
-  ;; remount arrives here.  Verify the daemon still has a healthy shim for
-  ;; this exact session before touching an existing buffer or creating one.
+  ;; remount arrives here.
+  ;;
+  ;; NO HEALTH PROBE.  This used to poll session health before mounting,
+  ;; because `createSession' acked as soon as a spawn was issued and the mount
+  ;; had no other way to know the shim was up.  The daemon now acks the create
+  ;; only once the session is ESTABLISHED — its shim answered a health probe
+  ;; healthy over the fully wired connection — so by the time a session id
+  ;; reaches this function it is usable, and a probe here could only re-ask a
+  ;; question already answered (and lose the race it kept losing).
   (let ((existing (agent-repl--ws-get ws :frontend-buffer))
         (bound-to (agent-repl--ws-get ws :frontend-buffer-session-id)))
     (agent-repl--log ws "ensure-webview: session=%s existing-live=%s bound-session=%s"
                      session-id (buffer-live-p existing) bound-to))
-  (agent-repl--frontend-wait-session-healthy ws session-id)
   (let* ((existing (agent-repl--ws-get ws :frontend-buffer))
          (bound-to (agent-repl--ws-get ws :frontend-buffer-session-id))
          (buf (if (and (buffer-live-p existing) (equal bound-to session-id))

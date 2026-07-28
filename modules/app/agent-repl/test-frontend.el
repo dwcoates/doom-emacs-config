@@ -28,9 +28,7 @@
      (unwind-protect
          (progn
            (puthash ,ws (copy-sequence ,plist) agent-repl--workspaces)
-           (cl-letf (((symbol-function 'agent-repl--frontend-wait-session-healthy)
-                      (lambda (&rest _) t)))
-             ,@body))
+           ,@body)
        (let ((buf (agent-repl--ws-get ,ws :frontend-buffer)))
          (when (buffer-live-p buf) (kill-buffer buf)))
        (remhash ,ws agent-repl--workspaces))))
@@ -93,28 +91,26 @@ agent panel it is, with no special-casing left to carve out."
           (should (eq (agent-repl--ws-get "ws1" :frontend-buffer) buf))
           (should (equal (agent-repl--ws-get "ws1" :frontend-buffer-session-id) "s_1")))))))
 
-(ert-deftest agent-repl-test-frontend-webview-health-gate-runs-before-render-mutation ()
-  "A failed session health gate leaves existing webview state untouched."
-  (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
-    (let ((existing (generate-new-buffer " *agent-health-existing*"))
-          mounted)
-      (unwind-protect
-          (progn
-            (agent-repl--ws-put "ws1" :frontend-buffer existing)
-            (agent-repl--ws-put "ws1" :frontend-buffer-session-id "s_old")
-            (cl-letf (((symbol-function 'agent-repl--frontend-wait-session-healthy)
-                       (lambda (&rest _) (error "shim unavailable")))
-                      ((symbol-function 'agent-repl--frontend-make-webview-buffer)
-                       (lambda (&rest _) (setq mounted t))))
-              (should-error
-               (agent-repl--frontend-ensure-webview-buffer
-                "ws1" "s_new" "http://x/?session=s_new"))
-              (should-not mounted)
-              (should (buffer-live-p existing))
-              (should (eq (agent-repl--ws-get "ws1" :frontend-buffer) existing))
-              (should (equal (agent-repl--ws-get "ws1" :frontend-buffer-session-id)
-                             "s_old"))))
-        (when (buffer-live-p existing) (kill-buffer existing))))))
+(ert-deftest agent-repl-test-frontend-webview-mount-never-probes-health ()
+  "The render chokepoint asks the daemon nothing about the session's health.
+The probe that used to gate this mount was the create-then-poll shape: the
+daemon acked `createSession' as soon as a spawn was issued, so the mount had
+to re-ask whether the shim was up — and lost that race.  The ack now proves
+establishment, so a probe here would be a question already answered."
+  ;; Arrange
+  (defvar agent-repl-test--urls)
+  (let ((agent-repl-test--urls '())
+        probed)
+    (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+      (cl-letf (((symbol-function 'agent-repl--frontend-wait-session-healthy)
+                 (lambda (&rest _) (setq probed t)))
+                ((symbol-function 'agent-repl--frontend-make-webview-buffer)
+                 (agent-repl-test--fake-webview-factory 'agent-repl-test--urls)))
+        ;; Act
+        (agent-repl--frontend-ensure-webview-buffer
+         "ws1" "s_1" "http://x/?session=s_1")
+        ;; Assert
+        (should-not probed)))))
 
 (ert-deftest agent-repl-test-frontend-webview-header-line-cleared ()
   "The mount clears `xwidget-webkit-mode's \"WebKit: <title>\" header-line."
