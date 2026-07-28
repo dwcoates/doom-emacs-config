@@ -413,6 +413,37 @@ message DaemonHello {
   // connection's ShimHello announced, so a rotation's reset to zero is already
   // applied to the number that lands here.
   uint64 from_seq = 3;
+  // The session's PERMISSION POSTURE, taken from the daemon's session record.
+  //
+  // The daemon resolves a record carrying no mode to "auto" before it writes
+  // this field, so the field is NEVER EMPTY on the wire from a daemon that
+  // speaks it. An empty value therefore means exactly one thing: the peer is
+  // an OLDER daemon that predates this field, and the shim falls back to its
+  // --permission-mode argv (rollout compatibility only).
+  //
+  // The vocabulary is the SHIM's closed set, not a second enum invented here:
+  // see the shim's protocol.ts PERMISSION_MODES. A value outside it is a
+  // protocol error the shim REFUSES loudly — it withholds ShimReady and
+  // reports a DegradedState, exactly as it does when the store link cannot be
+  // opened. It never silently falls back to "default".
+  //
+  // The shim applies it as the session's initial mode inside the bring-up
+  // gate, before it acks, so the FIRST turn already runs under it. It TAKES
+  // PRECEDENCE over the --permission-mode argv flag: argv is a spawn-time
+  // snapshot, while this is read off the record at handshake time, and every
+  // reattach re-reads it.
+  //
+  // WHY IT RIDES THE HELLO. The daemon appended --permission-mode only when
+  // the record carried one, so a session created with no explicit mode (the
+  // workspace-generation inbox path) spawned a shim whose parser defaulted to
+  // "default" — the generated first prompt then ran in prompting mode with
+  // nobody there to answer. Carrying the resolved posture in the gate makes
+  // "the shim's mode is whatever the record says" true by construction rather
+  // than by argv assembly getting every branch right.
+  //
+  // The per-prompt SubmitPrompt.permission_mode override is unaffected: this
+  // sets where the session STARTS, that changes it mid-flight.
+  string permission_mode = 4;
 }
 
 // The shim's FINAL ACK of the gated handshake: this session is fully wired.
