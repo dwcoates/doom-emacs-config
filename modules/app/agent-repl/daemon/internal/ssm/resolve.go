@@ -31,8 +31,17 @@ const (
 	// how the turn ended, no clearing token, superseded by the next
 	// agent-axis row — so there is nothing to latch and nothing to release.
 	sigInterrupted = "interrupted"
-	sigUnpainted   = "unpainted" // no frontend has attested painting.
-	sigPainted     = "painted"   // paint axis cleared (attested).
+	// THE TWO CONTEXT CUTS, each its own transient axis. They are not agent
+	// states: the agent axis keeps saying whatever it was saying (usually
+	// `thinking`, since a cut runs inside a turn), and these ride above it to
+	// say what the agent is busy WITH. Each has a clearing token, because
+	// each is a window that opens and must be closed by something.
+	sigClearing   = "clearing"
+	sigCleared    = "cleared" // clearing axis closed.
+	sigCompacting = "compacting"
+	sigCompacted  = "compacted" // compacting axis closed.
+	sigUnpainted  = "unpainted" // no frontend has attested painting.
+	sigPainted    = "painted"   // paint axis cleared (attested).
 	// A transcript the sidecar could not fully read: the history is
 	// incomplete, so anything painted from it is a partial account.
 	sigBackfillFailed = "backfill_failed"
@@ -68,6 +77,11 @@ const (
 	// row is daemon-local and carries no store seq, exactly as a merge
 	// transition does. See Manager.ApplySessionRotated.
 	causeSessionRotated = "session_rotated"
+	// The two context cuts. The detail after the colon names the edge that
+	// moved the axis, which is what makes a wedged or expired cut readable in
+	// the log rather than a bare token change.
+	causeClearing   = "clearing"
+	causeCompacting = "compacting"
 )
 
 // vendorBlockingStopReasons are the TurnEnded stop reasons that conclude a
@@ -162,6 +176,10 @@ func renderStateOf(token string) frontendv1.RenderState {
 		return frontendv1.RenderState_RENDER_STATE_IDLE_ASYNC
 	case sigThinking:
 		return frontendv1.RenderState_RENDER_STATE_THINKING
+	case sigClearing:
+		return frontendv1.RenderState_RENDER_STATE_CLEARING
+	case sigCompacting:
+		return frontendv1.RenderState_RENDER_STATE_COMPACTING
 	case sigPermission:
 		return frontendv1.RenderState_RENDER_STATE_PERMISSION
 	case sigDone:
@@ -241,7 +259,20 @@ func renderStateOf(token string) frontendv1.RenderState {
 //	--- purple -------------------------------------------------------------
 //	20 vendor_blocked   agent axis: the last turn ended AT THE VENDOR
 //	--- red ----------------------------------------------------------------
+//	28 clearing         the agent is discarding the context
+//	29 compacting       the agent is summarizing the context
 //	30 thinking
+//
+// The two CONTEXT CUTS outrank `thinking` because they are the more specific
+// true statement: a turn is indeed in flight, and what it is doing is not
+// producing the answer. All three are red — the claim about what the user
+// cannot do is identical — so this ordering only decides the phase WORD.
+//
+// CLEARING outranks COMPACTING because a clear is USER-INITIATED and a
+// compaction can be the vendor's own automatic one. When both are somehow
+// open, reporting the edge the user asked for is the more useful answer, and
+// a clear's rotation is about to invalidate the compaction's window anyway.
+//
 //	--- yellow -------------------------------------------------------------
 //	   idle_async       DERIVED from live_task_count below, never stored
 //	--- green --------------------------------------------------------------
@@ -273,6 +304,8 @@ WITH
     ('backfill_failed','backfill',13),
     ('init','agent',14),
     ('vendor_blocked','agent',20),
+    ('clearing','clearing',28),
+    ('compacting','compacting',29),
     ('thinking','agent',30),
     ('permission','agent',40),
     ('done','agent',41),
@@ -308,6 +341,16 @@ WITH
     WHERE r.state IN ('backfill_failed','backfill_ok')
     ORDER BY r.at DESC LIMIT 1
   ),
+  latest_clearing AS (
+    SELECT r.* FROM rows r
+    WHERE r.state IN ('clearing','cleared')
+    ORDER BY r.at DESC LIMIT 1
+  ),
+  latest_compacting AS (
+    SELECT r.* FROM rows r
+    WHERE r.state IN ('compacting','compacted')
+    ORDER BY r.at DESC LIMIT 1
+  ),
   candidates AS (
     SELECT state, cause_kind, cause_seq, at, session_id FROM latest_agent
     UNION ALL
@@ -318,6 +361,10 @@ WITH
     SELECT state, cause_kind, cause_seq, at, session_id FROM latest_paint WHERE state <> 'painted'
     UNION ALL
     SELECT state, cause_kind, cause_seq, at, session_id FROM latest_backfill WHERE state <> 'backfill_ok'
+    UNION ALL
+    SELECT state, cause_kind, cause_seq, at, session_id FROM latest_clearing WHERE state <> 'cleared'
+    UNION ALL
+    SELECT state, cause_kind, cause_seq, at, session_id FROM latest_compacting WHERE state <> 'compacted'
   ),
   ranked AS (
     SELECT c.state, c.cause_kind, c.cause_seq, c.at, c.session_id, p.rank

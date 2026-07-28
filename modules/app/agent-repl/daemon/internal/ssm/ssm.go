@@ -41,6 +41,21 @@ type Options struct {
 	// time.Now. The Manager enforces per-instance monotonicity on top of it
 	// so the (workspace, at) primary key never collides.
 	Clock func() int64
+	// ClearingTimeout bounds how long the clearing axis may stand open
+	// without the ContextCleared that closes it. Zero uses
+	// defaultClearingTimeout. See Manager.ApplyClearing.
+	ClearingTimeout time.Duration
+	// AfterFunc arms the clearing watchdog. Nil uses time.AfterFunc; a test
+	// injects one that captures the callback so the expiry fires
+	// deterministically instead of being waited on.
+	AfterFunc func(time.Duration, func()) Timer
+}
+
+// Timer is the slice of *time.Timer the clearing watchdog needs, so
+// Options.AfterFunc can be faked.
+type Timer interface {
+	// Stop cancels a pending fire, reporting whether it had not yet fired.
+	Stop() bool
 }
 
 // subBufferSize bounds each subscriber's channel. A subscriber that falls
@@ -83,6 +98,12 @@ type Manager struct {
 	// has no clearing token for; losing it to a restart in that window costs
 	// one turn painting `done`, which is the honest fallback.
 	interruptedTurn map[string]*interruptMark
+	// clearingTimers holds each workspace's live clearing watchdog. The AXIS
+	// is a durable row; only the watchdog is in memory, and Open re-arms it
+	// from the log so a restart mid-clear cannot leave one unexpirable.
+	clearingTimers  map[string]Timer
+	clearingTimeout time.Duration
+	afterFunc       func(time.Duration, func()) Timer
 	subs            map[int]chan *frontendv1.WorkspaceState
 	nextSub         int
 	closed          bool
@@ -118,6 +139,14 @@ func Open(opts Options) (*Manager, error) {
 	} else if err := migrate(db); err != nil {
 		return nil, err
 	}
+	clearingTimeout := opts.ClearingTimeout
+	if clearingTimeout <= 0 {
+		clearingTimeout = defaultClearingTimeout
+	}
+	afterFunc := opts.AfterFunc
+	if afterFunc == nil {
+		afterFunc = func(d time.Duration, f func()) Timer { return time.AfterFunc(d, f) }
+	}
 	m := &Manager{
 		db:              db,
 		ownsDB:          ownsDB,
@@ -127,6 +156,9 @@ func Open(opts Options) (*Manager, error) {
 		last:            make(map[string]frontendv1.RenderState),
 		lastTasks:       make(map[string]int64),
 		interruptedTurn: make(map[string]*interruptMark),
+		clearingTimers:  make(map[string]Timer),
+		clearingTimeout: clearingTimeout,
+		afterFunc:       afterFunc,
 		subs:            make(map[int]chan *frontendv1.WorkspaceState),
 	}
 	if err := m.warm(); err != nil {
@@ -174,7 +206,7 @@ func (m *Manager) warm() error {
 	if restored > 0 {
 		m.logf("ssm: restored %d workspace(s) from %s", restored, "state log")
 	}
-	return nil
+	return m.rearmClearingWatchdogsLocked()
 }
 
 // nextAt returns a strictly-increasing per-instance timestamp in millis, so
@@ -304,6 +336,15 @@ func (m *Manager) Apply(ev *corev1.Event) error {
 		}
 	}
 
+	// A COMPACTION CANNOT OUTLIVE ITS TURN. The vendor opens the window with a
+	// status ticker and is not obliged to close it — a turn that dies mid-fold
+	// simply stops reporting — so the turn's own end is a hard bound on the
+	// window. Without it the phase word would stand over a settled agent axis
+	// with nothing arriving that could ever release it.
+	if _, ended := ev.GetPayload().(*corev1.Event_TurnEnded); ended {
+		m.closeCompactingLocked(ws, causeTurnEnded)
+	}
+
 	return m.reresolveLocked(ws, causeKind, ev.GetSeq())
 }
 
@@ -431,6 +472,13 @@ func (m *Manager) ApplySessionRotated(workspace, previous, next string) error {
 		m.logf("ssm: interrupt mark DROPPED as stale ws=%s (vendor session rotated %s -> %s) — the stopped turn's end belongs to the retired identity and will never arrive, so the mark could only be spent by a later turn that received no stop",
 			workspace, previous, next)
 	}
+
+	// A COMPACTION DOES NOT SURVIVE THE ROTATION that ends its identity: its
+	// ContextCompacted belongs to the retired session and will never arrive,
+	// exactly as the in-flight turn's end will not. THE CLEARING AXIS IS LEFT
+	// ALONE for the opposite reason — a `/clear` CAUSES this rotation, and the
+	// ContextCleared it is waiting for is produced under the NEW identity.
+	m.closeCompactingLocked(workspace, causeSessionRotated)
 
 	active, err := turnActive(m.db, workspace)
 	if err != nil {
@@ -746,6 +794,9 @@ func (m *Manager) Close() error {
 		return nil
 	}
 	m.closed = true
+	for ws := range m.clearingTimers {
+		m.disarmClearingWatchdogLocked(ws)
+	}
 	for id, ch := range m.subs {
 		delete(m.subs, id)
 		close(ch)

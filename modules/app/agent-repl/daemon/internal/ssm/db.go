@@ -220,6 +220,50 @@ func turnActive(db *sql.DB, workspace string) (bool, error) {
 	return state == "thinking", nil
 }
 
+// cutOpen reports whether a context-cut axis currently stands open: its LATEST
+// row is the opening token rather than the closing one. A workspace with no
+// row on the axis at all has never had a cut and is closed.
+//
+// It is the guard on every edge that moves one of the two axes, so a close
+// with nothing open appends no row and an open that is already open does not
+// stack a second one.
+func cutOpen(db *sql.DB, workspace, openToken, closeToken string) (bool, error) {
+	var state string
+	err := db.QueryRow(
+		`SELECT state FROM workspace_state
+		 WHERE workspace = ? AND state IN (?, ?)
+		 ORDER BY at DESC LIMIT 1`, workspace, openToken, closeToken).Scan(&state)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("ssm: %s-axis check for workspace %q: %w", openToken, workspace, err)
+	}
+	return state == openToken, nil
+}
+
+// openCutWorkspaces lists every workspace whose OPENTOKEN axis stands open. It
+// backs the clearing watchdog's re-arm at Open: the timer is in memory, so a
+// daemon restart mid-clear would otherwise leave the axis with nothing left
+// that could ever expire it.
+func openCutWorkspaces(db *sql.DB, openToken, closeToken string) ([]string, error) {
+	names, err := distinctWorkspaces(db)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, ws := range names {
+		open, err := cutOpen(db, ws, openToken, closeToken)
+		if err != nil {
+			return nil, err
+		}
+		if open {
+			out = append(out, ws)
+		}
+	}
+	return out, nil
+}
+
 // paintWatermark returns the highest seq a frontend has attested painting
 // for the workspace, and whether any attestation currently stands.
 //

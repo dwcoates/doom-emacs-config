@@ -30,6 +30,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -506,6 +507,7 @@ func (m *Manager) submitPrompt(ctx context.Context, workspace, requestID, text, 
 		// A QUEUED prompt deliberately does not reach here: the turn it would
 		// report is the one already running.
 		m.progress().NoteTurnAccepted(workspace, d.sessionID)
+		m.noteClearDispatched(workspace, text)
 		return nil
 	}
 	running := d.runningText
@@ -517,6 +519,35 @@ func (m *Manager) submitPrompt(ctx context.Context, workspace, requestID, text, 
 	m.publish(d.sessionID, view, recs)
 	go m.classify(d, entry.id, running, text)
 	return nil
+}
+
+// clearSessionCommand is the session command that discards a conversation's
+// context. Matched on the SUBMITTED text, which is where the daemon sees it:
+// the harness recognizes `/clear` itself and expands it into a command
+// envelope inside the CLI, so by the time anything is on the file plane the
+// clear has already happened.
+const clearSessionCommand = "/clear"
+
+// noteClearDispatched opens the SSM's clearing axis for a `/clear` the daemon
+// just handed to a shim.
+//
+// THIS IS THE ONLY PLACE THAT KNOWS. Nothing in the event stream announces a
+// clear as it BEGINS — the first-class ContextCleared reports one that already
+// finished — so a footer that waited for an event would say `thinking` through
+// the entire cut and then jump straight to the cleared bubble.
+//
+// An argument after the command means the user asked for something else, so
+// the text must be exactly the command. A failure is loud-logged and does not
+// fail the submit: the prompt was accepted, and losing it over a footer word
+// would be the larger harm.
+func (m *Manager) noteClearDispatched(workspace, text string) {
+	if strings.TrimSpace(text) != clearSessionCommand {
+		return
+	}
+	m.logf("sessiondrv: /clear dispatched ws=%q — opening the SSM's clearing axis until its ContextCleared lands", workspace)
+	if err := m.cfg.SSM.ApplyClearing(workspace, true, "clear_dispatched"); err != nil {
+		m.logf("sessiondrv: opening the clearing axis FAILED ws=%q: %v (the cut will render as an ordinary turn)", workspace, err)
+	}
 }
 
 // persistBackfillState writes the never-blue backfill signal (F2) through to

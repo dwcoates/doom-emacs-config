@@ -53,6 +53,13 @@ type StateApplier interface {
 	// the frontend interrupt command path — the queue's interject sends the
 	// same Interrupt as machinery and must paint no outcome.
 	MarkTurnInterrupted(workspace string) error
+	// ApplyClearing opens or closes the CLEARING axis. The daemon owns the
+	// opening edge (nothing announces a clear as it begins), and the
+	// first-class ContextCleared closes it.
+	ApplyClearing(workspace string, clearing bool, reason string) error
+	// ApplyCompacting opens or closes the COMPACTING axis, from the vendor's
+	// own status ticker and the first-class ContextCompacted.
+	ApplyCompacting(workspace string, compacting bool, reason string) error
 	// ApplySessionRotated reconciles the agent axis across a VENDOR SESSION
 	// UUID ROTATION: the turn in flight when the uuid changed can never report
 	// its end under the retired identity, so a `thinking` row held for it has
@@ -360,6 +367,29 @@ func systemInitFromVendor(a *anypb.Any) *datav1.SystemInit {
 	return csm.GetSystemInit()
 }
 
+// statusFromVendor decodes a vendor event's Any into its StatusMessage arm.
+// ok is false for every other payload, which is what keeps "no status here"
+// distinct from "a status whose text is empty" — the vendor's empty status is
+// its null, and it is the edge that CLOSES the compaction window.
+func statusFromVendor(a *anypb.Any) (status string, ok bool) {
+	if a == nil {
+		return "", false
+	}
+	msg, err := a.UnmarshalNew()
+	if err != nil {
+		return "", false
+	}
+	csm, ok := msg.(*datav1.ClaudeStreamMessage)
+	if !ok {
+		return "", false
+	}
+	sm := csm.GetStatus()
+	if sm == nil {
+		return "", false
+	}
+	return sm.GetStatus(), true
+}
+
 // commandsChangedFromVendor decodes a vendor event's Any into its
 // CommandsChanged arm, or nil when it is anything else.
 func commandsChangedFromVendor(a *anypb.Any) *datav1.CommandsChanged {
@@ -520,6 +550,10 @@ func (c *consumer) Consume(ev *corev1.Event) {
 		if btc := frontend.BackgroundTasksFromVendor(p.Vendor); btc != nil {
 			c.reconcileTasks(ev, btc)
 		}
+		// The vendor's compaction ticker. It reached the progress footer's
+		// window and nothing else, so the SSM had no way to know the agent was
+		// folding the context rather than answering.
+		c.noteCompactingStatus(ev, p.Vendor)
 		c.pushConversation(ev, true)
 	case *corev1.Event_ContextCleared, *corev1.Event_ContextCompacted:
 		// A clear and a compaction each do two things at once: they render as
@@ -528,6 +562,7 @@ func (c *consumer) Consume(ev *corev1.Event) {
 		// floor is recorded FIRST — one pushed but not recorded would be drawn
 		// once and then buried under a replay of everything above it.
 		c.noteClearOrCompact(ev)
+		c.noteCutCompleted(ev)
 		c.pushConversation(ev, true)
 	default:
 		// UnparsedEvent / empty payloads carry no conversation content of their
@@ -558,6 +593,49 @@ func (c *consumer) noteClearOrCompact(ev *corev1.Event) {
 	// discarded would replay pre-clear text back above the floor.
 	if dropped := c.dropEchoes(); dropped > 0 {
 		logf("sessiondrv: dropped %d unclaimed prompt receipt(s) with the history this floor hides", dropped)
+	}
+}
+
+// noteCutCompleted closes the SSM axis the arrived context cut was the
+// completion of, so the footer's phase word stops naming work that is done.
+//
+// The two events are the ONLY first-class report that a cut finished (the
+// vendor announces neither as it begins), which is what makes them the natural
+// closing edge for the two axes the daemon and the vendor status opened.
+//
+// A close for an axis that was never open is not an error — a compaction can
+// be reported by the file plane on a daemon that never saw its status ticker —
+// and the SSM logs that case rather than acting on it.
+func (c *consumer) noteCutCompleted(ev *corev1.Event) {
+	var err error
+	switch ev.GetPayload().(type) {
+	case *corev1.Event_ContextCleared:
+		err = c.ssm.ApplyClearing(c.workspace, false, "context_cleared")
+	case *corev1.Event_ContextCompacted:
+		err = c.ssm.ApplyCompacting(c.workspace, false, "context_compacted")
+	}
+	if err != nil {
+		c.logf("sessiondrv: closing the context-cut axis FAILED session=%s ws=%s seq=%d kind=%s: %v (the workspace may hold its phase word until the next bounding edge)",
+			c.sessionID, c.workspace, ev.GetSeq(), stateKind(ev), err)
+	}
+}
+
+// noteCompactingStatus moves the SSM's compacting axis from the vendor's own
+// status ticker — the same signal the progress footer's compaction window is
+// folded from, which until now reached only the footer.
+//
+// An EMPTY status is the vendor's null and closes the window; that is the
+// contract progress.applyStreamLocked already reads it under, and the two must
+// agree or the footer's window and the phase word would disagree about the
+// same fact.
+func (c *consumer) noteCompactingStatus(ev *corev1.Event, a *anypb.Any) {
+	status, ok := statusFromVendor(a)
+	if !ok {
+		return
+	}
+	if err := c.ssm.ApplyCompacting(c.workspace, status == "compacting", "vendor_status:"+status); err != nil {
+		c.logf("sessiondrv: applying the vendor compaction status FAILED session=%s ws=%s seq=%d status=%q: %v",
+			c.sessionID, c.workspace, ev.GetSeq(), status, err)
 	}
 }
 
