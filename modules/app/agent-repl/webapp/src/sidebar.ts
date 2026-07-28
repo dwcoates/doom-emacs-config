@@ -34,6 +34,8 @@ import { log } from "./wslog.js";
  */
 export type WorkspaceStatus =
   | "thinking"
+  | "clearing"
+  | "compacting"
   | "permission"
   | "done"
   | "interrupted"
@@ -65,6 +67,8 @@ export type WorkspaceStatus =
  */
 export const WORKSPACE_STATUSES: ReadonlySet<string> = new Set([
   "thinking",
+  "clearing",
+  "compacting",
   "permission",
   "done",
   "interrupted",

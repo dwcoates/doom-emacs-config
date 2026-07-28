@@ -103,6 +103,14 @@ export function phaseLabel(state: WebRenderState): PhaseLabel {
   switch (state) {
     case "thinking":
       return { word: "thinking", tone: "thinking", spinning: true };
+    // RED like thinking, and spinning for the same reason: the agent is busy
+    // and a prompt cannot land. The word is the whole distinction — it says
+    // the turn is doing something OTHER than producing the answer, which is
+    // why these outrank thinking in the SSM's rank table.
+    case "clearing":
+      return { word: "clearing", tone: "thinking", spinning: true };
+    case "compacting":
+      return { word: "compacting", tone: "thinking", spinning: true };
     case "permission":
       return { word: "permission", tone: "retry", spinning: false };
     case "done":
@@ -236,9 +244,12 @@ export function activityDetail(input: FooterInput, nowMs: number): Activity | nu
   if (p.retrying !== null) {
     return { text: `retrying · ${p.retrying.detail}`, tone: "retry" };
   }
-  if (p.compacting !== null) {
-    return { text: "compacting…", tone: "thinking" };
-  }
+  // NO COMPACTION RUNG. The compaction has its own PHASE WORD now
+  // (phaseLabel's `compacting`), and the detail cell's job is to say what is
+  // live BESIDES the phase — repeating it here spent the one activity slot
+  // restating the word immediately to its left, and buried the hook or tool
+  // that was the only thing the cell could have added.
+  // ProgressView.compacting stays on the wire and in the expansion sheet.
   if (p.hook !== null) {
     return { text: `hook · ${p.hook.detail}`, tone: "muted" };
   }

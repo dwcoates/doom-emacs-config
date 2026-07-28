@@ -488,6 +488,11 @@ body::after {
    alignment invisibly. */
 #ws-sidebar .st { flex: 0 0 auto; width: 9px; height: 9px; border-radius: 50%; }
 #ws-sidebar .st-thinking { background: var(--err); animation: ws-pulse 1.3s ease-in-out infinite; }
+/* The two context cuts breathe exactly as thinking does: the agent is busy
+   and a prompt cannot land, which is the same claim. Only the footer's phase
+   word says WHAT it is busy with. */
+#ws-sidebar .st-clearing { background: var(--err); animation: ws-pulse 1.3s ease-in-out infinite; }
+#ws-sidebar .st-compacting { background: var(--err); animation: ws-pulse 1.3s ease-in-out infinite; }
 /* The session-local monitoring overlay: the current row's quiescent dot
    breathes the async amber while background work continues — the sidebar
    home of the signal the topbar `monitoring…` datapoint used to carry. */

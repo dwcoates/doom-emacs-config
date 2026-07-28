@@ -95,6 +95,8 @@ export type WebRenderState =
   | "ready"
   | "idle_async"
   | "thinking"
+  | "clearing"
+  | "compacting"
   | "permission"
   | "done"
   | "interrupted"
@@ -632,6 +634,10 @@ const RENDER_STATE_KEYWORD: Record<RenderState, WebRenderState | null> = {
   [RenderState.IDLE]: "idle",
   [RenderState.IDLE_ASYNC]: "idle_async",
   [RenderState.THINKING]: "thinking",
+  // The two CONTEXT CUTS. Red like thinking — the agent is busy and a prompt
+  // cannot land yet — and only the phase word distinguishes them.
+  [RenderState.CLEARING]: "clearing",
+  [RenderState.COMPACTING]: "compacting",
   [RenderState.PERMISSION]: "permission",
   [RenderState.DONE]: "done",
   [RenderState.READY]: "ready",

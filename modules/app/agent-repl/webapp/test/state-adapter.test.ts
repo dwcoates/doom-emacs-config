@@ -71,6 +71,25 @@ describe("WorkspaceState mapping", () => {
     ]);
   });
 
+  it("decodes RENDER_STATE_CLEARING into its own keyword", () => {
+    // Arrange / Act — the two context cuts share thinking's color, so only the
+    // keyword can carry the distinction through to the footer's phase word.
+    const effects = applyOne({
+      workspaceState: { workspace: "ws-a", sessionId: "s1", state: "RENDER_STATE_CLEARING" },
+    });
+    // Assert
+    expect(effects[0]).toMatchObject({ kind: "workspace-state", value: { state: "clearing" } });
+  });
+
+  it("decodes RENDER_STATE_COMPACTING into its own keyword", () => {
+    // Arrange / Act
+    const effects = applyOne({
+      workspaceState: { workspace: "ws-a", sessionId: "s1", state: "RENDER_STATE_COMPACTING" },
+    });
+    // Assert
+    expect(effects[0]).toMatchObject({ kind: "workspace-state", value: { state: "compacting" } });
+  });
+
   it("carries the delivery generation, which the paint ack names (F5)", () => {
     // Arrange / Act — uint64 arrives as a protojson numeric string.
     const effects = applyOne({
