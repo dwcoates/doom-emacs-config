@@ -38,6 +38,29 @@ import {
  */
 const MAX_TRACKED_CLIENT_LOGS = 256;
 
+/**
+ * The interrupt confirmation CHALLENGE (I1), as a rejection a caller can tell
+ * apart from a failure.
+ *
+ * A `CommandAck` carrying `interruptConfirmRequired` is NOT an error: the
+ * daemon understood the interrupt and deliberately did not perform it, because
+ * no turn was live and stopping working subagents is worth a deliberate second
+ * keystroke. It still rejects the promise — the command did not happen, and a
+ * resolve would say it did — but as a TYPED rejection carrying `liveTasks`, so
+ * an affordance can ask the concrete question ("interrupt 3 running
+ * subagents?") and resend `interrupt(workspace, true)`.
+ *
+ * A generic "interrupt rejected" string could not be distinguished from a real
+ * refusal without parsing prose, which is exactly what the typed challenge
+ * field exists to avoid.
+ */
+export class InterruptConfirmRequiredError extends Error {
+  constructor(readonly liveTasks: number) {
+    super(`interrupt needs confirmation: ${liveTasks} live task${liveTasks === 1 ? "" : "s"}`);
+    this.name = "InterruptConfirmRequiredError";
+  }
+}
+
 /** The default local-only sink for a rejected clientLog ack. */
 function defaultLocalLog(message: string): void {
   console.warn(message);
@@ -265,6 +288,13 @@ export class CommandDispatcher {
     this.pending.delete(ack.requestId);
     if (ack.ok) {
       p.resolve();
+      return;
+    }
+    // The CHALLENGE arm, checked before the failure path: it is not a failure
+    // and must not reach the failure sink, which would show the user a refusal
+    // card for a question the daemon is asking them.
+    if (ack.interruptConfirmRequired !== undefined) {
+      p.reject(new InterruptConfirmRequiredError(ack.interruptConfirmRequired.liveTasks));
       return;
     }
     // Surface BEFORE rejecting: every caller of these promises swallows the

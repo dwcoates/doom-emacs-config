@@ -3,7 +3,11 @@
  * commands and the SessionView-correlated createSession. One edge per test.
  */
 import { describe, expect, it } from "vitest";
-import { CommandDispatcher, type CreateSessionArgs } from "../src/command-dispatch.js";
+import {
+  CommandDispatcher,
+  InterruptConfirmRequiredError,
+  type CreateSessionArgs,
+} from "../src/command-dispatch.js";
 import { decodeFrontendFrame, type FrontendFrame } from "../src/frontend-proto.js";
 
 function newDispatcher(sendReturns = true) {
@@ -23,6 +27,15 @@ function newDispatcher(sendReturns = true) {
 
 function ackFrame(requestId: string, ok: boolean, error = ""): FrontendFrame {
   return decodeFrontendFrame(JSON.stringify({ commandAck: { requestId, ok, ...(error !== "" ? { error } : {}) } }));
+}
+
+/** The interrupt confirmation CHALLENGE: ok=false, no failure, live tasks. */
+function challengeFrame(requestId: string, liveTasks: number): FrontendFrame {
+  return decodeFrontendFrame(
+    JSON.stringify({
+      commandAck: { requestId, ok: false, interruptConfirmRequired: { liveTasks: String(liveTasks) } },
+    }),
+  );
 }
 
 function sessionViewFrame(over: Record<string, unknown>): FrontendFrame {
@@ -57,6 +70,55 @@ describe("ack-correlated commands", () => {
     expect(JSON.parse(sent[0]).interrupt).toEqual({ confirmAgents: true });
     dispatcher.observe(ackFrame("r1", false, "no turn"));
     await expect(p).rejects.toThrow(/interrupt rejected: no turn/);
+  });
+
+  it("interrupt rejects a confirmation challenge as its own typed error", async () => {
+    // Arrange — the daemon understood the command and deliberately did not
+    // perform it; a generic "rejected" string could not be told from a real
+    // refusal without parsing prose.
+    const { dispatcher } = newDispatcher();
+    const p = dispatcher.interrupt("/w");
+    // Act
+    dispatcher.observe(challengeFrame("r1", 3));
+    // Assert
+    await expect(p).rejects.toBeInstanceOf(InterruptConfirmRequiredError);
+  });
+
+  it("carries the challenge's live task count to whoever asks the question", async () => {
+    // Arrange
+    const { dispatcher } = newDispatcher();
+    const p = dispatcher.interrupt("/w");
+    // Act
+    dispatcher.observe(challengeFrame("r1", 3));
+    // Assert — enough to ask "interrupt 3 running subagents?" concretely.
+    await expect(p).rejects.toMatchObject({ liveTasks: 3 });
+  });
+
+  it("keeps a genuinely failed ack a plain error, not a challenge", async () => {
+    // Arrange — the challenge arm must not weaken the refusal path.
+    const { dispatcher } = newDispatcher();
+    const p = dispatcher.interrupt("/w");
+    // Act
+    dispatcher.observe(ackFrame("r1", false, "no session"));
+    // Assert
+    await expect(p).rejects.not.toBeInstanceOf(InterruptConfirmRequiredError);
+  });
+
+  it("does not route a challenge to the classified-failure sink", async () => {
+    // Arrange — a challenge is a question, and a failure card would answer it
+    // with an alarm the user never earned.
+    const failures: unknown[] = [];
+    const dispatcher = new CommandDispatcher({
+      send: () => true,
+      newRequestId: () => "r1",
+      onFailure: (f) => failures.push(f),
+    });
+    const p = dispatcher.interrupt("/w");
+    // Act
+    dispatcher.observe(challengeFrame("r1", 2));
+    await p.catch(() => {});
+    // Assert
+    expect(failures).toEqual([]);
   });
 
   it("permissionAnswer carries the allow-with-edits Struct", async () => {
