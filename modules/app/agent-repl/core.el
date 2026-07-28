@@ -365,8 +365,6 @@ structs) are represented compactly (live/dead, running/nil, present/nil)."
                (fbuf     (plist-get plist :frontend-buffer))
                (ibuf     (plist-get plist :input-buffer))
                (pcnt     (plist-get plist :prefix-counter))
-               (gclean   (plist-get plist :git-clean))
-               (gproc    (plist-get plist :git-proc))
                (wt       (plist-get plist :worktree-p))
                (fork     (plist-get plist :fork-session-id))
                (rtimer   (plist-get plist :ready-timer))
@@ -376,7 +374,7 @@ structs) are represented compactly (live/dead, running/nil, present/nil)."
                (dprompts (plist-get plist :deferred-prompts)))
           (format (concat " {ws=%s id=%s dir=%s cst=%s rst=%s env=%s"
                           " fe=%s in=%s cnt=%s"
-                          " git=%s gproc=%s wt=%s fork=%s"
+                          " wt=%s fork=%s"
                           " rtmr=%s pri=%s pend=%s pshow=%s defq=%s}")
                   ws
                   (or id "-")
@@ -387,8 +385,6 @@ structs) are represented compactly (live/dead, running/nil, present/nil)."
                   (if fbuf (if (buffer-live-p fbuf) "live" "dead") "-")
                   (if ibuf (if (buffer-live-p ibuf) "live" "dead") "-")
                   (or pcnt "-")
-                  (or gclean "-")
-                  (if gproc (if (process-live-p gproc) "run" "done") "-")
                   (if wt "t" "-")
                   (or fork "-")
                   (if rtimer "t" "-")

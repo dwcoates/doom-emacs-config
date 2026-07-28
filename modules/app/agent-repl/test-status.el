@@ -765,149 +765,6 @@ The ❓ glyph in the bracket (not the name background) signals permission."
       ;; Must not error on a dead buffer.
       (should-not (agent-repl--align-buffer-to-ws-dir buf "ws1")))))
 
-;;;; ---- Tests: workspace-clean-p ----
-
-(ert-deftest agent-repl-test-workspace-clean-p-clean ()
-  "workspace-clean-p should return non-nil when :git-clean is 'clean."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :git-clean 'clean)
-    (should (agent-repl--workspace-clean-p "ws1"))))
-
-(ert-deftest agent-repl-test-workspace-clean-p-dirty ()
-  "workspace-clean-p should return nil when :git-clean is 'dirty."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :git-clean 'dirty)
-    (should-not (agent-repl--workspace-clean-p "ws1"))))
-
-(ert-deftest agent-repl-test-workspace-clean-p-default-nil ()
-  "workspace-clean-p should signal an error when :git-clean is unset."
-  (agent-repl-test--with-clean-state
-    (should-error (agent-repl--workspace-clean-p "ws1") :type 'error)))
-
-;;;; ---- Tests: git-check-in-progress-p ----
-
-(ert-deftest agent-repl-test-git-check-in-progress-no-proc ()
-  "git-check-in-progress-p should return nil when no :git-proc is set."
-  (agent-repl-test--with-clean-state
-    (should-not (agent-repl--git-check-in-progress-p "ws1"))))
-
-(ert-deftest agent-repl-test-git-check-in-progress-dead-proc ()
-  "git-check-in-progress-p should return nil when :git-proc is a dead process."
-  (agent-repl-test--with-clean-state
-    (let ((proc 'dead-process-fixture))
-      (agent-repl--ws-put "ws1" :git-proc proc)
-      (cl-letf (((symbol-function 'process-live-p)
-                 (lambda (candidate)
-                   (should (eq candidate proc))
-                   nil)))
-        (should-not (agent-repl--git-check-in-progress-p "ws1"))))))
-
-(ert-deftest agent-repl-test-git-check-in-progress-live-proc ()
-  "git-check-in-progress-p should return non-nil when :git-proc is live."
-  (agent-repl-test--with-clean-state
-    (let ((proc 'live-process-fixture))
-      (agent-repl--ws-put "ws1" :git-proc proc)
-      (cl-letf (((symbol-function 'process-live-p)
-                 (lambda (candidate)
-                   (should (eq candidate proc))
-                   t)))
-        (should (agent-repl--git-check-in-progress-p "ws1"))))))
-
-;;;; ---- Tests: git-diff-sentinel ----
-
-(ert-deftest agent-repl-test-git-diff-sentinel-clean ()
-  "git-diff-sentinel should set 'clean when process exits with 0."
-  (agent-repl-test--with-clean-state
-    (let ((proc 'clean-process-fixture))
-      (cl-letf (((symbol-function 'process-live-p) (lambda (candidate)
-                                                     (should (eq candidate proc))
-                                                     nil))
-                ((symbol-function 'process-exit-status) (lambda (candidate)
-                                                          (should (eq candidate proc))
-                                                          0)))
-        (agent-repl--git-diff-sentinel "ws1" proc "finished\n")
-        (should (eq (agent-repl--ws-get "ws1" :git-clean) 'clean))))))
-
-(ert-deftest agent-repl-test-git-diff-sentinel-dirty ()
-  "git-diff-sentinel should set 'dirty when process exits with non-zero."
-  (agent-repl-test--with-clean-state
-    (let ((proc 'dirty-process-fixture))
-      (cl-letf (((symbol-function 'process-live-p) (lambda (candidate)
-                                                     (should (eq candidate proc))
-                                                     nil))
-                ((symbol-function 'process-exit-status) (lambda (candidate)
-                                                          (should (eq candidate proc))
-                                                          1)))
-        (agent-repl--git-diff-sentinel "ws1" proc "finished\n")
-        (should (eq (agent-repl--ws-get "ws1" :git-clean) 'dirty))))))
-
-(ert-deftest agent-repl-test-git-diff-sentinel-clears-git-proc ()
-  "git-diff-sentinel should clear :git-proc after completion."
-  (agent-repl-test--with-clean-state
-    (let ((proc 'cleared-process-fixture))
-      (agent-repl--ws-put "ws1" :git-proc proc)
-      (cl-letf (((symbol-function 'process-live-p) (lambda (_candidate) nil))
-                ((symbol-function 'process-exit-status) (lambda (_candidate) 0)))
-        (agent-repl--git-diff-sentinel "ws1" proc "finished\n")
-        (should-not (agent-repl--ws-get "ws1" :git-proc))))))
-
-(ert-deftest agent-repl-test-git-diff-sentinel-drives-no-state-transition ()
-  "git-diff-sentinel caches cleanliness and changes no state.
-Worktree cleanliness was only ever an input to the removed decay."
-  (agent-repl-test--with-clean-state
-    (let ((proc 'state-neutral-process-fixture))
-      (agent-repl--ws-put "ws1" :agent-state :thinking)
-      (agent-repl--ws-put "ws1" :repl-state :active)
-      (cl-letf (((symbol-function 'process-live-p) (lambda (_candidate) nil))
-                ((symbol-function 'process-exit-status) (lambda (_candidate) 0)))
-        (agent-repl--git-diff-sentinel "ws1" proc "finished\n")
-        (should (eq (agent-repl--ws-get "ws1" :git-clean) 'clean))
-        (should (eq (agent-repl--ws-get "ws1" :agent-state) :thinking))
-        (should (eq (agent-repl--ws-get "ws1" :repl-state) :active))))))
-
-(ert-deftest agent-repl-test-git-diff-sentinel-noop-when-live ()
-  "git-diff-sentinel should be a no-op when the process is still live."
-  (agent-repl-test--with-clean-state
-    (let ((proc 'live-sentinel-process-fixture)
-          (exit-status-read-p nil))
-      (cl-letf (((symbol-function 'process-live-p) (lambda (_candidate) t))
-                ((symbol-function 'process-exit-status)
-                 (lambda (_candidate)
-                   (setq exit-status-read-p t)
-                   0)))
-        (agent-repl--git-diff-sentinel "ws1" proc "running\n")
-        (should-not (agent-repl--ws-get "ws1" :git-clean))
-        (should-not exit-status-read-p)))))
-
-;;;; ---- Tests: async-refresh-git-status ----
-
-(ert-deftest agent-repl-test-async-refresh-noop-when-in-progress ()
-  "async-refresh-git-status should be a no-op when check already in progress."
-  (agent-repl-test--with-clean-state
-    (let ((proc 'existing-check-process-fixture)
-          (spawn-called-p nil))
-      (agent-repl--ws-put "ws1" :project-dir "/tmp")
-      (agent-repl--ws-put "ws1" :git-proc proc)
-      (cl-letf (((symbol-function 'process-live-p) (lambda (_candidate) t))
-                ((symbol-function 'agent-repl--make-process-git)
-                 (lambda (&rest _args)
-                   (setq spawn-called-p t)
-                   'replacement-process-fixture)))
-        (agent-repl--async-refresh-git-status "ws1")
-        ;; The external-process boundary is not reached while a check is live.
-        (should-not spawn-called-p)
-        (should (eq (agent-repl--ws-get "ws1" :git-proc) proc))))))
-
-(ert-deftest agent-repl-test-async-refresh-noop-when-no-dir ()
-  "async-refresh-git-status should be a no-op when ws-dir errors."
-  (agent-repl-test--with-clean-state
-    ;; No :project-dir set, so ws-dir will error
-    ;; The function uses when-let which handles nil returns,
-    ;; but ws-dir errors. We stub ws-dir to return nil.
-    (cl-letf (((symbol-function 'agent-repl--ws-dir) (lambda (_ws) nil)))
-      (agent-repl--async-refresh-git-status "ws1")
-      (should-not (agent-repl--ws-get "ws1" :git-proc)))))
-
 ;;;; ---- Tests: tab-spec ----
 
 (ert-deftest agent-repl-test-tab-spec-unselected-known-state ()
@@ -1610,16 +1467,16 @@ It was a sixth vocabulary word for a condition purple already covers."
       (cl-letf (((symbol-function 'agent-repl--poll-workspace-notifications) #'ignore)
                 ;; sidebar.el's roster tick rides update-all too; out of scope here.
                 ((symbol-function 'agent-repl--sidebar-tick) #'ignore)
-                ((symbol-function 'agent-repl--async-refresh-git-status)
+                ((symbol-function 'agent-repl--async-refresh-branch-merged)
                  (lambda (_ws) (setq update-called t))))
         (agent-repl--update-all-workspace-states)
         (should-not update-called)))))
 
 (ert-deftest agent-repl-test-update-all-running-agent ()
-  "update-all should call async-refresh for a ws with a running agent.
+  "update-all refreshes merged-ness for a ws with a running agent.
 Binds `agent-repl-state-git-tick-modulus' to 1 so every tick is a git tick;
-otherwise the mod-N gate would suppress `--async-refresh-git-status' on the
-first call (counter increments to 1, `(mod 1 5)' is non-zero)."
+otherwise the mod-N gate would suppress the refresh on the first call
+(counter increments to 1, `(mod 1 5)' is non-zero)."
   (agent-repl-test--with-clean-state
     (let ((refreshed-ws nil)
           (agent-repl-state-git-tick-modulus 1))
@@ -1629,9 +1486,8 @@ first call (counter increments to 1, `(mod 1 5)' is non-zero)."
                 ;; sidebar.el's roster tick rides update-all too; out of scope here.
                 ((symbol-function 'agent-repl--sidebar-tick) #'ignore)
                 ((symbol-function 'agent-repl--agent-running-p) (lambda (_ws) t))
-                ((symbol-function 'agent-repl--async-refresh-git-status)
-                 (lambda (ws) (setq refreshed-ws ws)))
-                ((symbol-function 'agent-repl--async-refresh-branch-merged) #'ignore))
+                ((symbol-function 'agent-repl--async-refresh-branch-merged)
+                 (lambda (ws) (setq refreshed-ws ws))))
         (agent-repl--update-all-workspace-states)
         (should (equal refreshed-ws "ws1"))))))
 
@@ -1696,18 +1552,17 @@ meaningless and the daemon owns death via session_dead_* sentinels."
 (ert-deftest agent-repl-test-update-one-gui-takes-the-alive-branch ()
   "A gui workspace takes the alive branch even when agent-running-p is nil.
 Liveness for a gui workspace is the daemon's to report (a pushed DEAD
-WorkspaceState), so the poll never marks one dead — it only refreshes
-git for it."
+WorkspaceState), so the poll never marks one dead."
   (agent-repl-test--with-clean-state
-    (let ((refreshed-ws nil))
+    (let ((dead-ws nil))
       (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
       (agent-repl--ws-put "ws1" :frontend 'gui)
       (cl-letf (((symbol-function 'agent-repl--agent-running-p) (lambda (_ws) nil))
                 ((symbol-function 'agent-repl--async-refresh-branch-merged) #'ignore)
-                ((symbol-function 'agent-repl--async-refresh-git-status)
-                 (lambda (ws) (setq refreshed-ws ws))))
+                ((symbol-function 'agent-repl--mark-dead)
+                 (lambda (ws) (setq dead-ws ws))))
         (agent-repl--update-one-workspace-state "ws1" t)
-        (should (equal refreshed-ws "ws1"))))))
+        (should-not dead-ws)))))
 
 (ert-deftest agent-repl-test-update-one-gui-preserves-sentinel-state ()
   "The poll must not clobber sentinel-driven agent-state on a gui workspace.
@@ -1936,18 +1791,18 @@ of the stubbed `agent-repl--agent-running-p' answer below."
                 ((symbol-function 'agent-repl--sidebar-tick) #'ignore)
                 ((symbol-function 'agent-repl--agent-running-p)
                  (lambda (ws) (equal ws "running-ws")))
-                ((symbol-function 'agent-repl--async-refresh-git-status)
+                ((symbol-function 'agent-repl--async-refresh-branch-merged)
                  (lambda (ws) (push ws refreshed)))
-                ((symbol-function 'agent-repl--async-refresh-branch-merged) #'ignore)
                 ((symbol-function 'agent-repl--mark-dead)
                  (lambda (ws) (push ws cleared))))
         (agent-repl--update-all-workspace-states)
-        ;; running-ws should get update + refresh
-        (should (member "running-ws" refreshed))
+        ;; running-ws is left alone
         (should-not (member "running-ws" cleared))
-        ;; dead-ws should get clear, not update
+        ;; dead-ws should get cleared
         (should (member "dead-ws" cleared))
-        (should-not (member "dead-ws" refreshed))))))
+        ;; merged-ness is refreshed for both, alive or not
+        (should (member "running-ws" refreshed))
+        (should (member "dead-ws" refreshed))))))
 
 ;;;; ---- Tests: mod-N git tick gate ----
 
@@ -1956,20 +1811,16 @@ of the stubbed `agent-repl--agent-running-p' answer below."
 With modulus=5 and counter starting at 0, the first tick post-increment is
 counter=1, `(mod 1 5)' = 1, so the gate is closed."
   (agent-repl-test--with-clean-state
-    (let ((git-refreshed nil)
-          (merge-refreshed nil)
+    (let ((merge-refreshed nil)
           (agent-repl-state-git-tick-modulus 5))
       (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
       (cl-letf (((symbol-function 'agent-repl--poll-workspace-notifications) #'ignore)
                 ;; sidebar.el's roster tick rides update-all too; out of scope here.
                 ((symbol-function 'agent-repl--sidebar-tick) #'ignore)
                 ((symbol-function 'agent-repl--agent-running-p) (lambda (_ws) t))
-                ((symbol-function 'agent-repl--async-refresh-git-status)
-                 (lambda (_ws) (setq git-refreshed t)))
                 ((symbol-function 'agent-repl--async-refresh-branch-merged)
                  (lambda (_ws) (setq merge-refreshed t))))
         (agent-repl--update-all-workspace-states)
-        (should-not git-refreshed)
         (should-not merge-refreshed)))))
 
 (ert-deftest agent-repl-test-update-all-git-gate-fires-on-modulus-tick ()
@@ -1977,8 +1828,7 @@ counter=1, `(mod 1 5)' = 1, so the gate is closed."
 Pre-seeding the counter to (modulus - 1) means the in-function increment
 lands on a multiple of modulus, opening the gate."
   (agent-repl-test--with-clean-state
-    (let ((git-refreshed nil)
-          (merge-refreshed nil)
+    (let ((merge-refreshed nil)
           (agent-repl-state-git-tick-modulus 5)
           (agent-repl--update-tick-counter 4))
       (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
@@ -1986,12 +1836,9 @@ lands on a multiple of modulus, opening the gate."
                 ;; sidebar.el's roster tick rides update-all too; out of scope here.
                 ((symbol-function 'agent-repl--sidebar-tick) #'ignore)
                 ((symbol-function 'agent-repl--agent-running-p) (lambda (_ws) t))
-                ((symbol-function 'agent-repl--async-refresh-git-status)
-                 (lambda (_ws) (setq git-refreshed t)))
                 ((symbol-function 'agent-repl--async-refresh-branch-merged)
                  (lambda (_ws) (setq merge-refreshed t))))
         (agent-repl--update-all-workspace-states)
-        (should git-refreshed)
         (should merge-refreshed)))))
 
 (ert-deftest agent-repl-test-update-all-increments-tick-counter ()
@@ -2184,42 +2031,33 @@ threshold fires (5s of dead timer ticks)."
 ;;;; ---- Tests: per-workspace step ----
 
 (ert-deftest agent-repl-test-update-one-ws-no-git-when-gate-closed ()
-  "`--update-one-workspace-state' with DO-GIT-P nil skips git refreshes.
+  "`--update-one-workspace-state' with DO-GIT-P nil skips the git refresh.
 The cheap state-machine work still runs."
   (agent-repl-test--with-clean-state
-    (let ((git-fired nil)
-          (merge-fired nil)
-          (state-fired nil))
+    (let ((merge-fired nil))
       (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
       (cl-letf (((symbol-function 'agent-repl--agent-running-p) (lambda (_ws) t))
-                ((symbol-function 'agent-repl--async-refresh-git-status)
-                 (lambda (_ws) (setq git-fired t)))
                 ((symbol-function 'agent-repl--async-refresh-branch-merged)
                  (lambda (_ws) (setq merge-fired t))))
         (agent-repl--update-one-workspace-state "ws1" nil)
-        (should-not git-fired)
         (should-not merge-fired)))))
 
 (ert-deftest agent-repl-test-update-one-ws-fires-git-when-gate-open ()
-  "`--update-one-workspace-state' with DO-GIT-P non-nil fires both git refreshes."
+  "`--update-one-workspace-state' with DO-GIT-P non-nil fires the git refresh."
   (agent-repl-test--with-clean-state
-    (let ((git-fired nil)
-          (merge-fired nil))
+    (let ((merge-fired nil))
       (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
       (cl-letf (((symbol-function 'agent-repl--agent-running-p) (lambda (_ws) t))
-                ((symbol-function 'agent-repl--async-refresh-git-status)
-                 (lambda (_ws) (setq git-fired t)))
                 ((symbol-function 'agent-repl--async-refresh-branch-merged)
                  (lambda (_ws) (setq merge-fired t))))
         (agent-repl--update-one-workspace-state "ws1" t)
-        (should git-fired)
         (should merge-fired)))))
 
 (ert-deftest agent-repl-test-update-one-ws-dead-agent-skips-state-update ()
   "When a non-gui workspace's agent is not running, `--update-one-workspace-state'
-calls `--mark-dead' and skips the git refresh.  Merge refresh still
-fires when DO-GIT-P is on because merged-ness is independent of agent
-liveness — a dead workspace can still have a merge-completed parent."
+calls `--mark-dead'.  The merge refresh still fires when DO-GIT-P is on
+because merged-ness is independent of agent liveness — a dead workspace
+can still have a merge-completed parent."
   (agent-repl-test--with-clean-state
     (let ((dead-called nil)
           (merge-called nil))

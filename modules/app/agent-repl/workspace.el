@@ -108,7 +108,7 @@ environment, which today means one for :bare-metal."
   "Hash table mapping workspace name -> state plist.
 Keys: :frontend-buffer :input-buffer
       :prefix-counter :agent-state :repl-state
-      :git-clean :git-proc :worktree-p :project-dir
+      :worktree-p :project-dir
       :active-env :bare-metal :fork-session-id
       :ready-timer :priority
       :pending-prompts :pending-show-panels :deferred-prompts
@@ -333,7 +333,7 @@ debug logging on."
 
 (defconst agent-repl--ws-runtime-keys
   '(:agent-state :repl-state :input-buffer
-    :ready-timer :git-proc :pending-show-panels
+    :ready-timer :pending-show-panels
     :fork-session-id :fullscreen-config :active-env :bare-metal
     :deferred-input-queue :done-ack :permission-prompt-active
     :done-ack-pending :source-ws-name :frontend-session-id
@@ -992,17 +992,6 @@ finish-workspace path."
     (error (agent-repl--log ws "nuke-one-workspace: pre-teardown state-save error: %S" err)))
   (unwind-protect
       (progn
-        (let ((proc (agent-repl--ws-get ws :git-proc)))
-          (cond
-           ((null proc)
-            (agent-repl--log ws "nuke-one-workspace: git-proc decision=none"))
-           ((not (process-live-p proc))
-            (agent-repl--log ws "nuke-one-workspace: git-proc decision=already-dead proc=%S" proc))
-           (t
-            (agent-repl--log ws "nuke-one-workspace: git-proc decision=kill proc=%S" proc)
-            (condition-case err
-                (delete-process proc)
-              (error (agent-repl--log ws "nuke-one-workspace: git-proc kill error: %S" err))))))
         (agent-repl--log ws "nuke-one-workspace: calling frontend kill-fn ws=%s" ws)
         (condition-case err
             (funcall (agent-repl-frontend-kill-fn (agent-repl--ws-frontend ws)) ws)

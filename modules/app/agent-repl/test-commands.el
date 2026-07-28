@@ -1411,27 +1411,6 @@ are recoverable by reopening the project."
         (should-not (agent-repl--ws-live-p "doomed"))
         (should (agent-repl--ws-get "doomed" :nuked-at))))))
 
-(ert-deftest agent-repl-cmd-test-nuke-workspace/kills-git-proc ()
-  "nuke-workspace kills an in-flight git-diff process."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "doomed" :project-dir "/tmp/doomed")
-    (let ((proc-deleted nil)
-          (fake-proc 'agent-repl-test-fake-process))
-      (agent-repl--ws-put "doomed" :git-proc fake-proc)
-      (cl-letf (((symbol-function 'completing-read)
-                 (lambda (_prompt _coll &rest _) "doomed"))
-                ((symbol-function 'y-or-n-p) (lambda (_prompt) t))
-                ((symbol-function 'agent-repl--gui-kill) #'ignore)
-                ((symbol-function '+workspace-current-name) (lambda () "other"))
-                ((symbol-function 'persp-get-by-name) (lambda (_n) nil))
-                ((symbol-function 'force-mode-line-update) #'ignore)
-                ;; The inert handle never crosses the mocked process boundary.
-                ((symbol-function 'process-live-p) (lambda (_p) t))
-                ((symbol-function 'delete-process)
-                 (lambda (p) (setq proc-deleted p))))
-        (agent-repl-nuke-workspace)
-        (should (eq proc-deleted fake-proc))))))
-
 (ert-deftest agent-repl-cmd-test-nuke-workspace/kills-persp-workspace ()
   "nuke-workspace calls +workspace/kill to tear down the persp workspace."
   (agent-repl-test--with-clean-state
@@ -2266,26 +2245,6 @@ kill so the workspace can be re-opened with its identity intact."
                 ((symbol-function 'force-mode-line-update) #'ignore))
         (agent-repl-kill-workspace)
         (should (equal kwb-arg "doomed"))))))
-
-(ert-deftest agent-repl-cmd-test-kill-workspace/kills-git-proc ()
-  "kill-workspace kills an in-flight git-diff process."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "doomed" :project-dir "/tmp/doomed")
-    (let ((proc-deleted nil)
-          (fake-proc 'agent-repl-test-fake-process))
-      (agent-repl--ws-put "doomed" :git-proc fake-proc)
-      (cl-letf (((symbol-function 'completing-read)
-                 (lambda (_prompt _coll &rest _) "doomed"))
-                ((symbol-function 'y-or-n-p) (lambda (_prompt) t))
-                ((symbol-function 'agent-repl--gui-kill) #'ignore)
-                ((symbol-function '+workspace-current-name) (lambda () "other"))
-                ((symbol-function 'persp-get-by-name) (lambda (_n) nil))
-                ((symbol-function 'force-mode-line-update) #'ignore)
-                ((symbol-function 'process-live-p) (lambda (_p) t))
-                ((symbol-function 'delete-process)
-                 (lambda (p) (setq proc-deleted p))))
-        (agent-repl-kill-workspace)
-        (should (eq proc-deleted fake-proc))))))
 
 (ert-deftest agent-repl-cmd-test-nuke-workspace/tabbar-only-routes-to-persp-kill ()
   "nuke-workspace on a tab-bar-only ws (agent already killed) routes

@@ -30,7 +30,7 @@
   (should (equal "vendor-blocked" (agent-repl--ws-keyword-to-string :vendor-blocked))))
 
 (ert-deftest agent-repl-test-ws-keyword-to-string-symbol ()
-  "Plain symbols (e.g. `clean'/`dirty' from :git-clean) serialize as their name."
+  "Plain symbols serialize as their name."
   (should (equal "clean" (agent-repl--ws-keyword-to-string 'clean)))
   (should (equal "dirty" (agent-repl--ws-keyword-to-string 'dirty))))
 
@@ -49,7 +49,6 @@
     (agent-repl--ws-put "ws1" :source-ws-dir "/tmp/src")
     (agent-repl--ws-put "ws1" :priority "p1")
     (agent-repl--ws-put "ws1" :last-prompt-summary "Fix the bug")
-    (agent-repl--ws-put "ws1" :git-clean 'dirty)
     (agent-repl--ws-put "ws1" :done-acked t)
     (let ((entry (agent-repl--workspace-status-entry "ws1")))
       (should (equal (cdr (assoc "agent_state" entry)) "thinking"))
@@ -58,7 +57,6 @@
       (should (equal (cdr (assoc "source_ws_dir" entry)) "/tmp/src"))
       (should (equal (cdr (assoc "priority" entry)) "p1"))
       (should (equal (cdr (assoc "last_prompt_summary" entry)) "Fix the bug"))
-      (should (equal (cdr (assoc "git_clean" entry)) "dirty"))
       (should (eq    (cdr (assoc "done_acked" entry)) t)))))
 
 (ert-deftest agent-repl-test-workspace-status-entry-legacy-claude-state-key ()

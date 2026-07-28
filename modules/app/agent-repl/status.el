@@ -74,14 +74,13 @@ recognized repo or the repo has no configured default."
 (defcustom agent-repl-state-git-tick-modulus 5
   "Per-workspace git refreshes fire once every N timer ticks.
 The 1Hz `agent-repl--update-all-workspace-states' timer drives both
-the cheap state-machine work (agent-running-p,
-mark-dead) and the expensive git work
-\(`agent-repl--async-refresh-git-status' and
-`agent-repl--async-refresh-branch-merged').  Cheap work runs every
-tick so transitions like `:done' -> `:idle' stay snappy.  Git work
-runs only when `(mod tick-counter N) == 0' so the per-ws fork load is
-amortized to one-in-N ticks; the on-disk reality git observes does
-not change at 1Hz, so polling that fast is wasteful.
+the cheap state-machine work (agent-running-p, mark-dead) and the
+expensive git work (`agent-repl--async-refresh-branch-merged').
+Cheap work runs every tick so transitions like `:done' -> `:idle'
+stay snappy.  Git work runs only when `(mod tick-counter N) == 0' so
+the per-ws fork load is amortized to one-in-N ticks; the on-disk
+reality git observes does not change at 1Hz, so polling that fast is
+wasteful.
 
 Lower values mean fresher cached git state at higher CPU cost;
 higher values do the inverse.  The default of 5 yields one git
@@ -429,66 +428,6 @@ exist before its workspace directory is known."
           (agent-repl--log ws
                             "align-buffer-to-ws-dir: ws=%s buffer=%s previous=%s next=%s"
                             ws (buffer-name buf) previous resolved)))))))
-
-;;; Git status (async) -------------------------------------------------------
-
-(defun agent-repl--workspace-clean-p (ws)
-  "Return non-nil if workspace WS has no unstaged changes to tracked files.
-Reads from a cached value updated asynchronously by
-`agent-repl--async-refresh-git-status'.  Signals an error if the cache
-has not yet been populated — callers must ensure the async git check has
-completed before consulting this predicate."
-  (let ((status (agent-repl--ws-get ws :git-clean)))
-    (unless status
-      (error "agent-repl--workspace-clean-p: :git-clean not populated for workspace %s" ws))
-    (let ((result (eq status 'clean)))
-      (agent-repl--log-verbose ws "workspace-clean-p ws=%s status=%s result=%s" ws status result)
-      result)))
-
-(defun agent-repl--git-check-in-progress-p (ws)
-  "Return non-nil if a git-diff process is already running for workspace WS."
-  (let ((result (when-let ((proc (agent-repl--ws-get ws :git-proc)))
-                  (process-live-p proc))))
-    (agent-repl--log-verbose ws "git-check-in-progress-p ws=%s result=%s" ws result)
-    result))
-
-(defun agent-repl--git-diff-sentinel (ws proc _event)
-  "Process sentinel for `git diff --quiet' in workspace WS.
-When PROC finishes, records `:git-clean' as `clean' or `dirty' and
-_EVENT is ignored.
-
-The result is cached for callers that want to know whether a workspace
-has uncommitted work; it drives no state transition, since worktree
-cleanliness was only ever an input to the removed :done->:idle decay."
-  (unless (process-live-p proc)
-    (let* ((exit-code (process-exit-status proc))
-           (clean-result (cond
-                          ((= 0 exit-code) 'clean)
-                          ((= 1 exit-code) 'dirty)
-                          (t (agent-repl--warn ws "git diff --quiet exited with code %d for ws=%s (git error, not dirty)"
-                                               exit-code ws)
-                             (agent-repl--log ws "git-diff-sentinel: unexpected exit-code=%d for ws=%s" exit-code ws)
-                             nil))))
-      (agent-repl--log-verbose ws "git-diff-sentinel: ws=%s exit-code=%s result=%s" ws exit-code clean-result)
-      (when clean-result
-        (agent-repl--ws-put ws :git-clean clean-result))
-      (agent-repl--ws-put ws :git-proc nil))))
-
-(defun agent-repl--async-refresh-git-status (ws)
-  "Asynchronously refresh the git cleanliness cache for workspace WS.
-Starts `git diff --quiet' in WS's directory.  On exit, sets `:git-clean'
-to `clean' or `dirty' in the workspace plist and calls
-A no-op if a check is already in progress for WS."
-  (when-let ((dir (agent-repl--ws-dir ws)))
-    (if (agent-repl--git-check-in-progress-p ws)
-        (agent-repl--log-verbose ws "async-refresh-git-status: ws=%s skipped (already in progress)" ws)
-      (agent-repl--log-verbose ws "async-refresh-git-status: ws=%s starting git diff" ws)
-      (let* ((default-directory dir)
-             (proc (agent-repl--make-process-git
-                    (format "agent-repl-git-%s" ws)
-                    '("diff" "--quiet")
-                    (apply-partially #'agent-repl--git-diff-sentinel ws))))
-        (agent-repl--ws-put ws :git-proc proc)))))
 
 ;;; Tab-bar rendering ---------------------------------------------------------
 ;;
@@ -1644,9 +1583,9 @@ caller is told to proceed."
   "Run the per-workspace state-update body for WS.
 The cheap parts (`agent-repl--agent-running-p',
 `agent-repl--mark-dead') run every tick.  DO-GIT-P gates the
-expensive git refreshes (`agent-repl--async-refresh-git-status' and
-`agent-repl--async-refresh-branch-merged') so they fire only on the
-mod-N tick selected by `agent-repl-state-git-tick-modulus'.
+expensive git refresh (`agent-repl--async-refresh-branch-merged') so
+it fires only on the mod-N tick selected by
+`agent-repl-state-git-tick-modulus'.
 
 A gui-frontend workspace always takes the alive branch here,
 regardless of what `agent-repl--agent-running-p' would separately
@@ -1657,7 +1596,7 @@ that are not a death (e.g. mid-reattach after a daemon restart).
 Liveness/death for a gui workspace is owned exclusively by the daemon
 \(pushed DEAD `WorkspaceState' — see
 `agent-repl--status-react-to-pushed-death'), so this poll deliberately
-never marks a gui workspace dead; it only runs the git refresh for it."
+never marks a gui workspace dead."
   (let* ((gui-p (agent-repl--ws-gui-frontend-p ws))
          (running-p (and (not gui-p) (agent-repl--agent-running-p ws))))
     ;; Per-workspace timer body: record detailed branch inputs only in
@@ -1665,16 +1604,14 @@ never marks a gui workspace dead; it only runs the git refresh for it."
     (agent-repl--log-verbose ws
                               "update-one-workspace-state: ws=%s gui=%s running=%s do-git=%s"
                               ws gui-p running-p do-git-p)
-    (if (or gui-p running-p)
-        (when do-git-p
-          (agent-repl--async-refresh-git-status ws))
+    (unless (or gui-p running-p)
       ;; No live agent session → clear non-thinking state.
       (agent-repl--mark-dead ws)))
   ;; Merged-ness is independent of agent liveness — refresh for every
   ;; workspace so `agent-repl--ws-merged-p' always reads a
   ;; fresh `:branch-merged' value.  Gated on DO-GIT-P because the
-  ;; refresh's preconditions and process spawn are comparable in cost
-  ;; to the diff refresh above.
+  ;; refresh's preconditions and process spawn are the reason the
+  ;; whole pass is gated at all.
   (when (and do-git-p
              (fboundp 'agent-repl--async-refresh-branch-merged))
     (agent-repl--async-refresh-branch-merged ws)))
@@ -1834,7 +1771,7 @@ the in-flight slot."
       (agent-repl--log-verbose nil "update-all-workspace-states: skipped reason=in-flight")
     (agent-repl--update-all-workspace-states-now)))
 
-;; Periodically update all workspace states (catches git changes, etc.)
+;; Periodically update all workspace states.
 (push (run-with-timer agent-repl-state-poll-interval agent-repl-state-poll-interval #'agent-repl--update-all-workspace-states)
       agent-repl--timers)
 

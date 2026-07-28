@@ -67,7 +67,7 @@ they emit as `null'."
   "Return an alist of JSON-serializable status fields for workspace WS.
 Fields mirror the plist keys most useful to a peer consumer: the two
 state axes, the project locations, the user-set priority, the latest
-prompt summary, the cached git-clean status, and the done-acked flag.
+prompt summary, and the done-acked flag.
 Nil values are routed through `agent-repl--json-null-if-nil' so they
 serialize as JSON `null' instead of `{}'."
   (let ((priority (agent-repl--ws-get ws :priority))
@@ -78,15 +78,13 @@ serialize as JSON `null' instead of `{}'."
                    (agent-repl--ws-agent-state ws)))
         (repl     (agent-repl--ws-keyword-to-string
                    (agent-repl--ws-repl-state ws)))
-        (git      (agent-repl--ws-keyword-to-string
-                   (agent-repl--ws-get ws :git-clean)))
         (acked    (if (agent-repl--ws-get ws :done-acked) t json-false)))
     ;; A snapshot scans every live workspace on each write, so retain
     ;; field-level evidence only while verbose logging is enabled.
     (agent-repl--log-verbose
      ws
-     "workspace-status-entry: ws=%s agent=%S repl=%S project-dir=%S source-ws-dir=%S priority=%S summary-present=%s git=%S done-acked=%s"
-     ws claude repl proj src priority (if summary "t" "nil") git
+     "workspace-status-entry: ws=%s agent=%S repl=%S project-dir=%S source-ws-dir=%S priority=%S summary-present=%s done-acked=%s"
+     ws claude repl proj src priority (if summary "t" "nil")
      (if (eq acked t) "t" "nil"))
     `(("agent_state"         . ,(agent-repl--json-null-if-nil claude))
       ;; Legacy duplicate of agent_state from before the claude-repl ->
@@ -99,7 +97,6 @@ serialize as JSON `null' instead of `{}'."
       ("source_ws_dir"       . ,(agent-repl--json-null-if-nil src))
       ("priority"            . ,(agent-repl--json-null-if-nil priority))
       ("last_prompt_summary" . ,(agent-repl--json-null-if-nil summary))
-      ("git_clean"           . ,(agent-repl--json-null-if-nil git))
       ("done_acked"          . ,acked))))
 
 (defun agent-repl--workspace-status-merged-p (ws)
