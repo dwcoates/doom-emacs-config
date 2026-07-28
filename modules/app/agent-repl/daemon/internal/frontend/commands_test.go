@@ -481,3 +481,51 @@ func TestDispatchNeverEmitsAClientPrefixedType(t *testing.T) {
 		t.Fatalf("daemon emitted %q, which is frontend-reserved", ack.GetFailure().GetErrorType())
 	}
 }
+
+// --- the interrupt confirm challenge (I1) -----------------------------------
+//
+// The challenge is the ONE refusal that is not a failure: the command was
+// understood and deliberately not performed. These assert the ack takes the
+// challenge arm and leaves both failure channels alone.
+
+func TestDispatchInterruptChallengeTakesTheChallengeArm(t *testing.T) {
+	// Arrange.
+	h := &mockHandler{err: &InterruptConfirmRequired{LiveTasks: 3}}
+	cmd := &frontendv1.FrontendCommand{RequestId: "r", Command: &frontendv1.FrontendCommand_Interrupt{Interrupt: &frontendv1.InterruptCmd{}}}
+
+	// Act.
+	ack := Dispatch(context.Background(), nil, h, cmd)
+
+	// Assert.
+	if ack.GetOk() || ack.GetInterruptConfirmRequired().GetLiveTasks() != 3 {
+		t.Fatalf("ack = %v, want ok=false carrying the 3-task challenge", ack)
+	}
+}
+
+func TestDispatchInterruptChallengeCarriesNoClassifiedFailure(t *testing.T) {
+	// Arrange.
+	h := &mockHandler{err: &InterruptConfirmRequired{LiveTasks: 1}}
+	cmd := &frontendv1.FrontendCommand{RequestId: "r", Command: &frontendv1.FrontendCommand_Interrupt{Interrupt: &frontendv1.InterruptCmd{}}}
+
+	// Act.
+	ack := Dispatch(context.Background(), nil, h, cmd)
+
+	// Assert — a challenge is not a failure, so nothing may render it as one.
+	if ack.GetFailure() != nil {
+		t.Fatalf("challenge ack carried a classified failure: %v", ack.GetFailure())
+	}
+}
+
+func TestDispatchInterruptChallengeCarriesNoErrorString(t *testing.T) {
+	// Arrange.
+	h := &mockHandler{err: &InterruptConfirmRequired{LiveTasks: 1}}
+	cmd := &frontendv1.FrontendCommand{RequestId: "r", Command: &frontendv1.FrontendCommand_Interrupt{Interrupt: &frontendv1.InterruptCmd{}}}
+
+	// Act.
+	ack := Dispatch(context.Background(), nil, h, cmd)
+
+	// Assert — Emacs echoes `error`, and there is nothing here to echo.
+	if ack.GetError() != "" {
+		t.Fatalf("challenge ack carried an error string %q", ack.GetError())
+	}
+}

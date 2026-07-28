@@ -213,7 +213,28 @@ type commandHandler struct {
 	workspaceCreation WorkspaceCreationBridge
 	health            SessionHealthRouter
 	daemonHealth      DaemonHealthChecker
-	logf              func(string, ...any)
+	// turns and liveTasks are the interrupt confirm gate's two facts (I1),
+	// each read from the authority that already owns it rather than
+	// re-derived here. Both required for the interrupt command; an unwired one
+	// makes it a loud failing ack instead of an unchallenged stop.
+	turns     TurnStateSource
+	liveTasks LiveTaskSource
+	logf      func(string, ...any)
+}
+
+// TurnStateSource reports whether a workspace's session has a turn IN FLIGHT,
+// as observed off the shim's own TurnStarted/TurnEnded stream. Satisfied by
+// *sessiondrv.Manager, which is where that observation already lives.
+type TurnStateSource interface {
+	TurnActive(workspace string) (bool, error)
+}
+
+// LiveTaskSource reports a workspace's live subagent-task count, and whether
+// the workspace is known at all. Satisfied by *progress.Manager, which already
+// adopts the count off the SSM's WorkspaceState and carries it to
+// ProgressView — so the gate and the footer answer with the same number.
+type LiveTaskSource interface {
+	LiveTasks(workspace string) (int64, bool)
 }
 
 // CommandHandlerConfig collects the independently optional capabilities used
@@ -221,6 +242,15 @@ type commandHandler struct {
 type CommandHandlerConfig struct {
 	WorkspaceCreation WorkspaceCreationBridge
 	Health            HealthConfig
+	Interrupt         InterruptGateConfig
+}
+
+// InterruptGateConfig supplies the interrupt confirm gate's two facts. Both
+// are required for the interrupt command to run at all; a harness that omits
+// them gets a loud failing ack rather than a stop that skipped the gate.
+type InterruptGateConfig struct {
+	Turns     TurnStateSource
+	LiveTasks LiveTaskSource
 }
 
 type HealthConfig struct {
@@ -290,7 +320,8 @@ func newCommandHandler(prompts PromptRouter, merges MergeRunner, lifecycle Works
 		prompts: prompts, merges: merges, lifecycle: lifecycle, resyncer: resyncer,
 		sessions: sessions, shutdown: shutdown, queues: queues, painters: painters,
 		workspaceCreation: config.WorkspaceCreation,
-		health:            config.Health.Router, daemonHealth: config.Health.Daemon, logf: logf,
+		health:            config.Health.Router, daemonHealth: config.Health.Daemon,
+		turns: config.Interrupt.Turns, liveTasks: config.Interrupt.LiveTasks, logf: logf,
 	}, nil
 }
 
@@ -377,12 +408,75 @@ func (h *commandHandler) SubmitPrompt(ctx context.Context, workspace, requestID 
 	return h.prompts.SubmitPrompt(ctx, workspace, cmd.GetText(), cmd.GetPermissionMode())
 }
 
+// Interrupt stops the workspace's turn, subject to THE CONFIRM GATE.
+//
+// Interrupting a LIVE TURN never asks: the user can see the turn running and
+// asked for it to stop. What deserves a second keystroke is the other case —
+// no turn in flight, but subagent tasks still working — because there the
+// visible thing the user meant to stop is already over and the thing they
+// would actually stop is work they may not have in mind at all.
+//
+// The challenge is returned as a TYPED error rather than as a refusal: it is
+// not a failure, and the ack it becomes carries neither `failure` nor `error`
+// (see frontend.InterruptConfirmRequired). NOTHING is delivered to the shim on
+// that path; the client asks the user and resends with confirm_agents.
+//
+// No turn and no live tasks DELIVERS anyway. The shim answers
+// ALREADY_COMPLETE atomically and remains the sole authority on the verdict —
+// the daemon's view of "no turn" is an observation, not a ruling, and refusing
+// on it would let a stale observation swallow a stop.
 func (h *commandHandler) Interrupt(ctx context.Context, workspace, requestID string, cmd *frontendv1.InterruptCmd) error {
 	h.logf("frontend cmd: interrupt ws=%s request_id=%s confirm_agents=%v", workspace, requestID, cmd.GetConfirmAgents())
 	if err := checkWorkspaceKey("interrupt", workspace); err != nil {
 		return err
 	}
+	if !cmd.GetConfirmAgents() {
+		challenge, err := h.interruptChallenge(workspace, requestID)
+		if err != nil {
+			return err
+		}
+		if challenge != nil {
+			return challenge
+		}
+	}
 	return h.prompts.Interrupt(ctx, workspace)
+}
+
+// interruptChallenge decides whether an unconfirmed interrupt must be
+// challenged, returning the challenge or nil to deliver.
+//
+// Both facts come from the daemon's EXISTING authorities and neither is
+// re-derived here: the turn boundary from the driver that observes it off the
+// shim's own stream, and the live-task count from the resolver that already
+// carries it to ProgressView. An unwired source is a construction bug and
+// fails loudly rather than silently skipping the gate — a skipped gate would
+// stop working subagents with no question asked, which is precisely what it
+// exists to prevent.
+func (h *commandHandler) interruptChallenge(workspace, requestID string) (error, error) {
+	if h.turns == nil || h.liveTasks == nil {
+		return nil, fmt.Errorf("server: interrupt confirm gate is not wired (turn source=%t live-task source=%t); refusing to stop workspace %q without the check the contract requires",
+			h.turns != nil, h.liveTasks != nil, workspace)
+	}
+	active, err := h.turns.TurnActive(workspace)
+	if err != nil {
+		return nil, err
+	}
+	if active {
+		return nil, nil
+	}
+	tasks, known := h.liveTasks.LiveTasks(workspace)
+	if !known {
+		// Nothing has ever reported this workspace's task count, so there is no
+		// live work on record to ask about. Loud, because the alternative
+		// reading — silently treating an unknown as zero — is how a gate stops
+		// engaging without anyone noticing.
+		h.logf("frontend cmd: interrupt ws=%s request_id=%s has no progress view; no live subagent work on record, delivering unchallenged", workspace, requestID)
+		return nil, nil
+	}
+	if tasks <= 0 {
+		return nil, nil
+	}
+	return &frontend.InterruptConfirmRequired{LiveTasks: tasks}, nil
 }
 
 func (h *commandHandler) AnswerPermission(ctx context.Context, workspace, requestID string, cmd *frontendv1.PermissionAnswerCmd) error {

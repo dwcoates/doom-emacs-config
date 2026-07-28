@@ -436,6 +436,7 @@ func main() {
 		SSM:               ssmMgr,
 		Progress:          progressMgr,
 		Prompts:           driver,
+		Turns:             driver,
 		Health:            driver,
 		DaemonHealth:      ready,
 		MergeDirs:         pendingMergeDirs{},
