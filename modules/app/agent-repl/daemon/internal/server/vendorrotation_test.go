@@ -149,3 +149,41 @@ func TestAdoptVendorSessionIDOnAnUnknownSessionIsLoud(t *testing.T) {
 		t.Fatal("an adoption for an unknown session passed SILENTLY")
 	}
 }
+
+func TestAdoptVendorSessionIDRepushesTheViewOnARotation(t *testing.T) {
+	// Arrange — the conversation identity on the record just changed, and a
+	// connected frontend should not wait for an unrelated event to learn it.
+	reg := openTestRegistry(t)
+	if err := reg.Put(registry.Record{SessionID: "s1", CWD: "/w", ClaudeSessionID: "uuid-old"}); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+	var pushed []string
+	r := &RegistryRegistrar{Reg: reg, PushView: func(id string) { pushed = append(pushed, id) }}
+
+	// Act.
+	r.AdoptVendorSessionID("s1", "uuid-new")
+
+	// Assert.
+	if len(pushed) != 1 || pushed[0] != "s1" {
+		t.Fatalf("pushed = %v, want [s1]", pushed)
+	}
+}
+
+func TestAdoptVendorSessionIDRepushesNothingWithoutARotation(t *testing.T) {
+	// Arrange — every re-handshake re-announces the same uuid; pushing a view
+	// for each would be churn describing no change at all.
+	reg := openTestRegistry(t)
+	if err := reg.Put(registry.Record{SessionID: "s1", CWD: "/w", ClaudeSessionID: "uuid-old"}); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+	var pushed []string
+	r := &RegistryRegistrar{Reg: reg, PushView: func(id string) { pushed = append(pushed, id) }}
+
+	// Act.
+	r.AdoptVendorSessionID("s1", "uuid-old")
+
+	// Assert.
+	if len(pushed) != 0 {
+		t.Fatalf("pushed = %v, want none", pushed)
+	}
+}
