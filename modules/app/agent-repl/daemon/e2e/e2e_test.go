@@ -47,6 +47,7 @@ import (
 	"claude-repld/internal/shim"
 	"claude-repld/internal/shimlisten"
 	"claude-repld/internal/ssm"
+	"claude-repld/internal/statedb"
 	"claude-repld/internal/workspace/merge"
 )
 
@@ -291,9 +292,16 @@ func newUDSHarness(t *testing.T) *e2eHarness {
 	}
 	startShimStore(t, storeBin, storeSock)
 
-	reg := registry.Open(filepath.Join(t.TempDir(), "reg.json"), t.Logf)
+	// ONE state store, as production opens it: the registry's identity tables
+	// and the SSM's state log share a database and a connection.
+	stateStore, err := statedb.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatalf("open state store: %v", err)
+	}
+	t.Cleanup(func() { _ = stateStore.Close() })
+	reg := registry.OpenWith(registry.Options{DB: stateStore, Logf: t.Logf})
 	ssmMgr, err := ssm.Open(ssm.Options{
-		DBPath:   filepath.Join(t.TempDir(), "ssm.db"),
+		DB:       stateStore,
 		Resolver: server.NewRegistryResolver(reg),
 		Logf:     t.Logf,
 	})
