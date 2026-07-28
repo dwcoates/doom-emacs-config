@@ -134,7 +134,7 @@ func TestStreamContractRecordKeepsEnvelopeUUID(t *testing.T) {
 					Message: item.GetAssistantMessage(),
 				})},
 			}
-			got, err := ConversationDeltaFromEvent(fx.Workspace, ev)
+			got, _, err := ConversationDeltaFromEvent(fx.Workspace, ev)
 			if err != nil {
 				t.Fatalf("ConversationDeltaFromEvent: %v", err)
 			}
