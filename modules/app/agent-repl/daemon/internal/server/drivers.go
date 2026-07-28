@@ -355,9 +355,15 @@ func (r *RegistryRegistrar) AdoptVendorSessionID(sessionID, claudeSessionID stri
 		}
 		return false, previous
 	}
-	if rotated && r.Logf != nil {
-		r.Logf("server: session %s: VENDOR SESSION ROTATED %s -> %s — last_seq and the replay floor reset to zero for the new store seq space",
-			sessionID, previous, claudeSessionID)
+	if rotated {
+		if r.Logf != nil {
+			r.Logf("server: session %s: VENDOR SESSION ROTATED %s -> %s — last_seq and the replay floor reset to zero for the new store seq space",
+				sessionID, previous, claudeSessionID)
+		}
+		// The session's conversation IDENTITY just changed, which is exactly
+		// the kind of record change a connected frontend should not have to
+		// wait for an unrelated event to learn.
+		r.repush(sessionID)
 	}
 	return rotated, previous
 }
