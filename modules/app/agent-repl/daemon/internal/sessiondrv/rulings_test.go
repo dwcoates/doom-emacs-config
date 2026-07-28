@@ -1,6 +1,7 @@
 package sessiondrv
 
 import (
+	"fmt"
 	"sync"
 	"testing"
 
@@ -88,10 +89,37 @@ type fakeRegistrar struct {
 	queued    map[string][]registry.QueuedPrompt
 	backfills []string
 	deaths    []string
+	// adopted is the vendor uuid currently standing per session, which is what
+	// AdoptVendorSessionID compares a handshake's announcement against.
+	adopted map[string]string
+	// adoptions records one entry per AdoptVendorSessionID call.
+	adoptions []string
 }
 
 func (f *fakeRegistrar) ClaudeSessionIDChanged(sessionID, csid string) {
 	f.writes = append(f.writes, sessionID+"="+csid)
+}
+
+// AdoptVendorSessionID mirrors the registry adapter: a DIFFERENT uuid over an
+// already-adopted one is a rotation, anything else is a plain adoption.
+func (f *fakeRegistrar) AdoptVendorSessionID(sessionID, csid string) (bool, string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.adopted == nil {
+		f.adopted = map[string]string{}
+	}
+	previous := f.adopted[sessionID]
+	rotated := previous != "" && previous != csid
+	f.adopted[sessionID] = csid
+	f.adoptions = append(f.adoptions, fmt.Sprintf("%s=%s rotated=%t previous=%s", sessionID, csid, rotated, previous))
+	return rotated, previous
+}
+
+// adoptionWrites returns the recorded adoptions, taken under the lock.
+func (f *fakeRegistrar) adoptionWrites() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.adoptions...)
 }
 
 // BackfillStateChanged records the never-blue backfill transitions (F2).

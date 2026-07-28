@@ -53,6 +53,12 @@ type StateApplier interface {
 	// the frontend interrupt command path — the queue's interject sends the
 	// same Interrupt as machinery and must paint no outcome.
 	MarkTurnInterrupted(workspace string) error
+	// ApplySessionRotated reconciles the agent axis across a VENDOR SESSION
+	// UUID ROTATION: the turn in flight when the uuid changed can never report
+	// its end under the retired identity, so a `thinking` row held for it has
+	// nothing arriving to supersede it. Fed only from the shim handshake that
+	// announces the new uuid.
+	ApplySessionRotated(workspace, previous, next string) error
 }
 
 // ProgressResolver is the slice of the progress-footer resolver (F1) the driver

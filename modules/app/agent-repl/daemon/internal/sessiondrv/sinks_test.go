@@ -129,6 +129,17 @@ type fakeApplier struct {
 	// user-commanded stops that will paint their turn's end `interrupted`.
 	interruptMarks   []string
 	interruptMarkErr error
+	// rotations records one entry per ApplySessionRotated call — the vendor
+	// session uuid rotations the driver reconciled onto the agent axis.
+	rotations   []rotationCall
+	rotationErr error
+}
+
+// rotationCall is one vendor session rotation the driver reconciled.
+type rotationCall struct {
+	workspace string
+	previous  string
+	next      string
 }
 
 // backfillCall is one backfill outcome the driver applied to the SSM.
@@ -165,6 +176,22 @@ func (f *fakeApplier) MarkTurnInterrupted(workspace string) error {
 	defer f.reconcMutex.Unlock()
 	f.interruptMarks = append(f.interruptMarks, workspace)
 	return f.interruptMarkErr
+}
+
+// ApplySessionRotated records the vendor session rotations reconciled onto the
+// agent axis.
+func (f *fakeApplier) ApplySessionRotated(workspace, previous, next string) error {
+	f.reconcMutex.Lock()
+	defer f.reconcMutex.Unlock()
+	f.rotations = append(f.rotations, rotationCall{workspace: workspace, previous: previous, next: next})
+	return f.rotationErr
+}
+
+// rotationsApplied returns the recorded rotations, taken under the lock.
+func (f *fakeApplier) rotationsApplied() []rotationCall {
+	f.reconcMutex.Lock()
+	defer f.reconcMutex.Unlock()
+	return append([]rotationCall(nil), f.rotations...)
 }
 
 // interruptMarked returns the recorded marks, taken under the lock.
