@@ -133,6 +133,18 @@ type fakeApplier struct {
 	// session uuid rotations the driver reconciled onto the agent axis.
 	rotations   []rotationCall
 	rotationErr error
+	// cuts records one entry per ApplyClearing / ApplyCompacting call — the
+	// two context-cut axes the driver opens and closes.
+	cuts   []cutCall
+	cutErr error
+}
+
+// cutCall is one context-cut axis edge the driver applied.
+type cutCall struct {
+	axis      string // "clearing" | "compacting"
+	workspace string
+	open      bool
+	reason    string
 }
 
 // rotationCall is one vendor session rotation the driver reconciled.
@@ -185,6 +197,29 @@ func (f *fakeApplier) ApplySessionRotated(workspace, previous, next string) erro
 	defer f.reconcMutex.Unlock()
 	f.rotations = append(f.rotations, rotationCall{workspace: workspace, previous: previous, next: next})
 	return f.rotationErr
+}
+
+// ApplyClearing records the clearing-axis edges the driver applied.
+func (f *fakeApplier) ApplyClearing(workspace string, clearing bool, reason string) error {
+	f.reconcMutex.Lock()
+	defer f.reconcMutex.Unlock()
+	f.cuts = append(f.cuts, cutCall{axis: "clearing", workspace: workspace, open: clearing, reason: reason})
+	return f.cutErr
+}
+
+// ApplyCompacting records the compacting-axis edges the driver applied.
+func (f *fakeApplier) ApplyCompacting(workspace string, compacting bool, reason string) error {
+	f.reconcMutex.Lock()
+	defer f.reconcMutex.Unlock()
+	f.cuts = append(f.cuts, cutCall{axis: "compacting", workspace: workspace, open: compacting, reason: reason})
+	return f.cutErr
+}
+
+// cutsApplied returns the recorded context-cut edges, taken under the lock.
+func (f *fakeApplier) cutsApplied() []cutCall {
+	f.reconcMutex.Lock()
+	defer f.reconcMutex.Unlock()
+	return append([]cutCall(nil), f.cuts...)
 }
 
 // rotationsApplied returns the recorded rotations, taken under the lock.
