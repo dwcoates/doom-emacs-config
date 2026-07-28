@@ -15,9 +15,10 @@
 //   streamed preview with the store-delivered final message. Cross-path
 //   ordering is therefore irrelevant. Ephemeral events are never persisted
 //   and never replayed.
-// - Replay handshake: the connecting side (daemon→shim, shim→store) sends
-//   Subscribe{session_id, from_seq}; the serving side replays persisted
-//   events with seq > from_seq, then live-tails. Same message both hops.
+// - Replay handshake: the shim sends the store Subscribe{session_id,
+//   from_seq}; the store replays persisted events with seq > from_seq, then
+//   live-tails. The daemon does NOT send this: its resume position rides
+//   DaemonHello.from_seq, inside the one bring-up gate (see ShimHello).
 // - Bounded historical replay: ReplayRequest{from_seq, to_seq} asks for a
 //   one-shot RANGE without moving the standing subscription. Its events come
 //   back wrapped in ReplayEvent, a distinct message type so replayed history
@@ -336,7 +337,37 @@ message DegradedState {
 // Control plane (daemon↔shim; Subscribe/StoreWrite also shim↔store)
 // ---------------------------------------------------------------------------
 
-// Connection handshakes. The listener speaks first with its Hello.
+// Connection handshakes on the daemon↔shim hop. The DIALER (the shim) speaks
+// first with its Hello.
+//
+// THE HANDSHAKE IS THE WHOLE BRING-UP GATE, not merely a version check. One
+// gated exchange — ShimHello, DaemonHello, ShimReady — and its final ack means
+// "this session is FULLY WIRED", store subscription included:
+//
+//   1. ShimHello    shim→daemon: identity, version, turn_in_flight, and the
+//                   vendor session id this shim is filing under (the rotation
+//                   announcement).
+//   2. DaemonHello  daemon→shim: version PLUS the resume position (from_seq)
+//                   the daemon wants this session's standing store
+//                   subscription opened at.
+//   3. ShimReady    shim→daemon: sent ONLY after the shim holds its session
+//                   lock, has built its SDK query, has its store producer link
+//                   up, and has opened the standing store subscription at that
+//                   from_seq and seen it settle.
+//
+// WHY ONE GATE. Bring-up used to complete in stages — connect, hello, an
+// inferred readiness, a separate daemon→shim Subscribe, and only then the
+// shim's own store subscription — and everything racing those stages (health
+// probes, first prompts) failed in the gaps between them. Each gap patched
+// moved the race one link deeper. A single gate whose final ack is the LAST
+// step makes the whole class unrepresentable: anything the daemon does after
+// the ack is talking to a fully wired session, by construction.
+//
+// EVERY (RE)CONNECT RE-RUNS IT. A reattach, a daemon restart, and the shim's
+// deliberate rotation bounce are all just "a new connection", so each gets its
+// from_seq from the hello of the connection it opens. That is why the separate
+// daemon→shim Subscribe frame no longer exists on this hop; Subscribe remains
+// the shim↔store message it always was.
 message ShimHello {
   string session_id = 1;
   string vendor = 2;          // "claude"
@@ -365,6 +396,54 @@ message ShimHello {
 message DaemonHello {
   string daemon_version = 1;
   string protocol_version = 2;
+  // The EXCLUSIVE store seq the daemon resumes this session's standing
+  // subscription from — its durable last_seen_seq, or 0 for a session it has
+  // never consumed (and for the fresh seq space a rotation just minted). The
+  // shim opens its store subscription at exactly this position before acking
+  // with ShimReady.
+  //
+  // WHY IT RIDES THE HELLO. It used to travel in a separate daemon→shim
+  // Subscribe frame sent after the handshake, which made the store
+  // subscription a stage BEYOND the handshake — so a daemon that considered
+  // itself attached could probe a shim whose store tail did not exist yet, and
+  // be told store_subscribed=false about a session it had just brought up.
+  // Carrying it here is what lets the shim finish that wiring INSIDE the gate.
+  //
+  // The daemon reads it AFTER it has reconciled the vendor session id this
+  // connection's ShimHello announced, so a rotation's reset to zero is already
+  // applied to the number that lands here.
+  uint64 from_seq = 3;
+}
+
+// The shim's FINAL ACK of the gated handshake: this session is fully wired.
+//
+// It is an explicit wire message rather than an inference, because everything
+// a daemon could infer readiness from is true too early. A completed TCP/UDS
+// connect proves only a dialer; a DaemonHello reply proves only that versions
+// match; a first event proves only that the vendor said something. None of
+// them says the standing store subscription exists, which is precisely the
+// dependency the daemon's next act (a health probe, a prompt) needs.
+//
+// Sending it is the shim asserting, in order: the session lock is held, the
+// SDK query is constructed, the store producer link is up, and the standing
+// store subscription is open at DaemonHello.from_seq and settled. A shim that
+// cannot complete any of those sends NOTHING and reports the failure loudly
+// (a DegradedState plus its own log); the daemon's readiness wait then fails
+// on its own deadline, which is the honest outcome — never a shim admitted as
+// ready with a dependency missing.
+message ShimReady {
+  string session_id = 1;
+  // Echo of DaemonHello.from_seq: the position the standing subscription was
+  // actually opened at. An echo rather than a fresh number so the daemon can
+  // see the two agree.
+  uint64 from_seq = 2;
+  // The store key the subscription was opened under — the VENDOR session id
+  // when it is known, else the shim's own placeholder id (a fresh session
+  // learns the vendor uuid only from the SDK, so its first gate necessarily
+  // subscribes under the placeholder and re-keys later). Diagnostic: it is
+  // what makes "subscribed to a channel nothing publishes to" visible in the
+  // daemon log rather than only as silence.
+  string vendor_session_id = 3;
 }
 
 message SubmitPrompt {
@@ -422,6 +501,10 @@ message Nack {
 }
 
 // Replay handshake (see file-top semantics). from_seq is EXCLUSIVE.
+//
+// A SHIM→STORE message. The daemon↔shim hop carries its resume position on
+// DaemonHello.from_seq instead, so the standing subscription is opened inside
+// the bring-up gate rather than as a stage after it.
 message Subscribe {
   string session_id = 1;
   uint64 from_seq = 2;
