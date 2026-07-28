@@ -681,6 +681,20 @@ func (m *Manager) TurnActive(workspace string) (bool, error) {
 // existing rather than ensure: a restore must not render because a probe
 // happened to create a new shim; it may render only after the live driver has
 // handshaked and answered the correlated check.
+//
+// IT WAITS ON A BRING-UP ALREADY IN MOTION, under the PROBE'S OWN context.
+// createSession acks the instant the spawn is ISSUED, and Emacs probes health
+// immediately after: timed from production logs, the probe lands ~26ms after
+// the ack and the shim attaches ~20ms after THAT, so the probe used to fail
+// with "shimclient: no live shim connection" against a connection that was
+// milliseconds away, and the retry always succeeded. Awaiting the existing
+// driver's readiness first turns that instant-fail into the answer the probe
+// was asking for.
+//
+// The wait creates NOTHING: a workspace with no driver still fails loudly and
+// immediately (existing, above), and the deadline stays the caller's — a probe
+// whose context ends before readiness surfaces that deadline as its own loud
+// error rather than hanging.
 func (m *Manager) Health(ctx context.Context, workspace, sessionID, requestID string) (*corev1.HealthStatus, error) {
 	if workspace == "" {
 		return nil, fmt.Errorf("sessiondrv: health requires a workspace")
@@ -699,6 +713,10 @@ func (m *Manager) Health(ctx context.Context, workspace, sessionID, requestID st
 		return nil, fmt.Errorf("sessiondrv: health ws=%q names session=%s but live driver owns session=%s", workspace, sessionID, d.sessionID)
 	}
 	m.logf("sessiondrv: health probe ws=%q session=%s request_id=%s", workspace, sessionID, requestID)
+	if err := d.client.AwaitReady(ctx); err != nil {
+		return nil, fmt.Errorf("sessiondrv: health ws=%q session=%s request_id=%s: the live driver never became connected within the probe's deadline: %w",
+			workspace, sessionID, requestID, err)
+	}
 	status, err := d.client.Health(ctx, requestID)
 	if err != nil {
 		return nil, fmt.Errorf("sessiondrv: health ws=%q session=%s request_id=%s: %w", workspace, sessionID, requestID, err)
