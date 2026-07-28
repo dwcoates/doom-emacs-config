@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -24,6 +25,7 @@ type gitCall struct {
 
 type fakeGitRunner struct {
 	calls []gitCall
+	seen  [][]string
 }
 
 type fakeProjectileMarker struct{ calls [][2]string }
@@ -34,6 +36,7 @@ func (f *fakeProjectileMarker) Ensure(path, name string) error {
 }
 
 func (f *fakeGitRunner) RunGit(_ context.Context, _ string, args ...string) (string, int, error) {
+	f.seen = append(f.seen, args)
 	if len(f.calls) == 0 {
 		return "", -1, fmt.Errorf("unexpected git call %q", args)
 	}
@@ -65,7 +68,6 @@ func TestDaemonWorktreePlansCollisionDeterministically(t *testing.T) {
 		{args: []string{"rev-parse", "--verify", "HEAD^{commit}"}, out: "abc123\n"},
 		{args: []string{"worktree", "list", "--porcelain"}, out: "worktree /tmp/other\nbranch refs/heads/DWC/feature\n\n"},
 		{args: []string{"show-ref", "--verify", "--quiet", "refs/heads/" + candidateBranch(job.Request.Name, job.ID, 1)}, exit: 1},
-		{args: []string{"rev-parse", "--verify", "refs/tags/start/" + candidateBranch(job.Request.Name, job.ID, 1) + "^{commit}"}, exit: 1},
 	}}
 	worktree := DaemonWorktree{Git: git, Marker: &fakeProjectileMarker{}, Logf: func(string, ...any) {}}
 	plan, err := worktree.PlanWorktree(context.Background(), job)
@@ -92,7 +94,6 @@ func TestDaemonWorktreeForkUsesSourceWorkspaceHeadAndVendorSession(t *testing.T)
 		{args: []string{"rev-parse", "--verify", "HEAD^{commit}"}, out: "source-head\n"},
 		{args: []string{"worktree", "list", "--porcelain"}},
 		{args: []string{"show-ref", "--verify", "--quiet", "refs/heads/DWC/child"}, exit: 1},
-		{args: []string{"rev-parse", "--verify", "refs/tags/start/DWC/child^{commit}"}, exit: 1},
 	}}
 	plan, err := (DaemonWorktree{Git: git, Registry: reg, Marker: &fakeProjectileMarker{}, Logf: func(string, ...any) {}}).PlanWorktree(context.Background(), job)
 	if err != nil {
@@ -138,8 +139,6 @@ func TestDaemonWorktreeResumesPersistedPlanWithoutSecondAdd(t *testing.T) {
 	job := workspacecreate.Job{ID: "j", Request: workspacecreate.Request{Name: "DWC/feature", GitRoot: root}, WorktreePath: path, FinalName: "DWC/feature", Branch: "DWC/feature", ResolvedBaseCommit: "HEAD"}
 	git := &fakeGitRunner{calls: []gitCall{
 		{args: []string{"worktree", "list", "--porcelain"}, out: "worktree " + path + "\nbranch refs/heads/DWC/feature\n\n"},
-		{args: []string{"rev-parse", "--verify", "refs/tags/start/DWC/feature^{commit}"}, exit: 1},
-		{args: []string{"tag", "start/DWC/feature", "HEAD"}},
 	}}
 	if err := (DaemonWorktree{Git: git, Marker: &fakeProjectileMarker{}, Logf: func(string, ...any) {}}).EnsureWorktree(context.Background(), job); err != nil {
 		t.Fatal(err)
@@ -156,14 +155,68 @@ func TestDaemonWorktreeAddsPersistedPlan(t *testing.T) {
 	git := &fakeGitRunner{calls: []gitCall{
 		{args: []string{"worktree", "list", "--porcelain"}},
 		{args: []string{"worktree", "add", "-b", "DWC/feature", path, "HEAD"}},
-		{args: []string{"rev-parse", "--verify", "refs/tags/start/DWC/feature^{commit}"}, exit: 1},
-		{args: []string{"tag", "start/DWC/feature", "HEAD"}},
 	}}
 	if err := (DaemonWorktree{Git: git, Marker: &fakeProjectileMarker{}, Logf: func(string, ...any) {}}).EnsureWorktree(context.Background(), job); err != nil {
 		t.Fatal(err)
 	}
 	if len(git.calls) != 0 {
 		t.Fatalf("unexpected remaining git calls: %#v", git.calls)
+	}
+}
+
+// The start tag is no longer daemon business: Emacs creates it when it
+// registers the daemon-created workspace.  Both worktree phases must therefore
+// touch refs/tags not at all — reading one was the source of the exit=128
+// planning failure that used to poison the whole inbox.
+func TestDaemonWorktreeNeverTouchesStartTags(t *testing.T) {
+	root := testGitRoot(t)
+	path := filepath.Join(filepath.Dir(root), "repo-worktrees", "feature")
+	tests := []struct {
+		name  string
+		calls []gitCall
+		run   func(DaemonWorktree) error
+	}{
+		{
+			name: "plan",
+			calls: []gitCall{
+				{args: []string{"rev-parse", "--verify", "HEAD^{commit}"}, out: "abc123\n"},
+				{args: []string{"worktree", "list", "--porcelain"}},
+				{args: []string{"show-ref", "--verify", "--quiet", "refs/heads/DWC/feature"}, exit: 1},
+			},
+			run: func(w DaemonWorktree) error {
+				_, err := w.PlanWorktree(context.Background(), workspacecreate.Job{ID: "j", Request: workspacecreate.Request{Name: "DWC/feature", GitRoot: root, BaseCommit: "HEAD"}})
+				return err
+			},
+		},
+		{
+			name: "ensure",
+			calls: []gitCall{
+				{args: []string{"worktree", "list", "--porcelain"}},
+				{args: []string{"worktree", "add", "-b", "DWC/feature", path, "abc123"}},
+			},
+			run: func(w DaemonWorktree) error {
+				return w.EnsureWorktree(context.Background(), workspacecreate.Job{ID: "j", Request: workspacecreate.Request{Name: "DWC/feature", GitRoot: root}, WorktreePath: path, FinalName: "DWC/feature", Branch: "DWC/feature", ResolvedBaseCommit: "abc123"})
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			git := &fakeGitRunner{calls: test.calls}
+			worktree := DaemonWorktree{Git: git, Marker: &fakeProjectileMarker{}, Logf: func(string, ...any) {}}
+
+			err := test.run(worktree)
+
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, args := range git.seen {
+				for _, arg := range args {
+					if arg == "tag" || strings.Contains(arg, "refs/tags/") {
+						t.Fatalf("daemon invoked git %q, but start tags belong to Emacs", args)
+					}
+				}
+			}
+		})
 	}
 }
 
