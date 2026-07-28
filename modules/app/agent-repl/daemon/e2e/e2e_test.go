@@ -388,6 +388,7 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 		Source:            &server.ShimConnSource{Listener: shimListener},
 		SeqStore:          e2eSeqStore,
 		ClearCompactStore: e2eSeqStore,
+		PermissionModes:   server.NewRegistryModeStore(reg),
 		Registrar:         &server.RegistryRegistrar{Reg: reg, Logf: t.Logf},
 		DaemonVersion:     "0.1.0-e2e",
 		ProtocolVersion:   "1",
@@ -454,6 +455,16 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 // silent retry: the session genuinely did not come up.
 func (h *e2eHarness) createSession(t *testing.T, cwd string) string {
 	t.Helper()
+	// The DEFECT'S OWN SHAPE: no permission_mode at all, exactly as the
+	// workspace-generation inbox path creates one.
+	return h.createSessionWithMode(t, cwd, "")
+}
+
+// createSessionWithMode is createSession with an explicit permission_mode —
+// the Emacs-style create. An empty mode omits the field entirely, which is what
+// makes the two callers cover both halves of the posture contract.
+func (h *e2eHarness) createSessionWithMode(t *testing.T, cwd, permissionMode string) string {
+	t.Helper()
 	conn := h.dialFrontend(t)
 	defer conn.Close()
 
@@ -467,7 +478,11 @@ func (h *e2eHarness) createSession(t *testing.T, cwd string) string {
 	}
 
 	const requestID = "e2e-create-1"
-	writeCmd(t, conn, fmt.Sprintf(`{"requestId":%q,"createSession":{"cwd":%q,"fake":true}}`, requestID, cwd))
+	modeField := ""
+	if permissionMode != "" {
+		modeField = fmt.Sprintf(`,"permissionMode":%q`, permissionMode)
+	}
+	writeCmd(t, conn, fmt.Sprintf(`{"requestId":%q,"createSession":{"cwd":%q,"fake":true%s}}`, requestID, cwd, modeField))
 
 	deadline := time.Now().Add(frameTimeout)
 	for time.Now().Before(deadline) {
