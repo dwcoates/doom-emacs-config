@@ -84,6 +84,12 @@ func (h *commandHandler) CreateSession(ctx context.Context, workspace, requestID
 		Fake:           cmd.GetFake(),
 		AllowUngated:   cmd.GetAllowUngated(),
 	}
+	// A create is keyed by its cwd, and the frame's workspace field is optional
+	// on this command — so diagnostics fall back to the cwd rather than naming
+	// an empty workspace in every line a failed create leaves behind.
+	if workspace == "" {
+		workspace = opts.CWD
+	}
 	est, leader, err := h.beginEstablishment(ctx, opts)
 	if err != nil {
 		return fmt.Errorf("frontend cmd: create_session ws=%s request_id=%s: %w", workspace, requestID, err)
@@ -174,7 +180,11 @@ func (h *commandHandler) runEstablishment(est *sessionEstablishment, workspace, 
 	// The establishment runs under its OWN deadline rather than the leader's
 	// context: every joined caller is waiting on this one result, and letting
 	// the first caller's cancellation end it would strand the rest.
-	ctx, cancel := context.WithTimeout(context.Background(), createEstablishTimeout)
+	bound := h.establishTimeout
+	if bound <= 0 {
+		bound = createEstablishTimeout
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), bound)
 	defer cancel()
 
 	id, err := h.sessions.CreateSession(ctx, est.opts)

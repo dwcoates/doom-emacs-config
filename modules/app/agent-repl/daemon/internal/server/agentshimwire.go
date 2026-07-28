@@ -9,6 +9,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"time"
 
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
@@ -41,8 +42,14 @@ type AgentShimConfig struct {
 	// different fleet's answer would gate one session on another's liveness.
 	Turns TurnStateSource
 	// Health routes correlated session health checks to the existing live shim
-	// connection.  It must be the same driver fleet as Prompts.
+	// connection.  It must be the same driver fleet as Prompts. It is also what
+	// createSession's establishment gate proves the new session on, so an
+	// unwired Health makes every create a loud nack rather than an unprovable
+	// ok (see createestablish.go).
 	Health SessionHealthRouter
+	// EstablishTimeout bounds one createSession establishment round. Zero takes
+	// the package default; only a harness sets it.
+	EstablishTimeout time.Duration
 	// DaemonHealth supplies the one daemon-global readiness assertion shared by
 	// the HTTP health route and frontend health command.
 	DaemonHealth DaemonHealthChecker
@@ -215,7 +222,8 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 			// The gate reads each fact from the authority that owns it: the
 			// driver observes the turn boundary, and the progress resolver
 			// already carries the live-task count to the footer.
-			Interrupt: InterruptGateConfig{Turns: cfg.Turns, LiveTasks: cfg.Progress},
+			Interrupt:        InterruptGateConfig{Turns: cfg.Turns, LiveTasks: cfg.Progress},
+			EstablishTimeout: cfg.EstablishTimeout,
 		},
 	)
 	if err != nil {

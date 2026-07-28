@@ -246,8 +246,34 @@ type e2eHarness struct {
 	ts *httptest.Server
 }
 
-func newUDSHarness(t *testing.T) *e2eHarness {
+// harnessTuning is the small set of knobs a test may bend on the otherwise
+// production-shaped stack. Every field is zero for a normal harness, so the
+// default path stays exactly what production runs.
+type harnessTuning struct {
+	// wedgeShim replaces the spawned shim with a process that never dials the
+	// daemon, so the bring-up handshake can never complete. It is the only way
+	// to observe a stuck link end to end: a shim that is merely slow eventually
+	// arrives and proves nothing about the failure path.
+	wedgeShim bool
+	// establishTimeout bounds one createSession establishment round. Zero takes
+	// the daemon's own bound.
+	establishTimeout time.Duration
+}
+
+type harnessOption func(*harnessTuning)
+
+func withWedgedShim() harnessOption { return func(o *harnessTuning) { o.wedgeShim = true } }
+
+func withEstablishTimeout(d time.Duration) harnessOption {
+	return func(o *harnessTuning) { o.establishTimeout = d }
+}
+
+func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 	t.Helper()
+	var tuning harnessTuning
+	for _, opt := range options {
+		opt(&tuning)
+	}
 	// The LAST-RESORT shim reaper, registered before anything else so it runs
 	// AFTER every other cleanup (LIFO) — in particular after driver.Close. A
 	// per-session cleanup kills the shim it spawned, but the still-live driver
@@ -324,6 +350,11 @@ func newUDSHarness(t *testing.T) *e2eHarness {
 	udsSpawn := func(sessionID string, opts server.CreateOpts) (func() error, error) {
 		argv := server.ShimUDSArgv(node, script, sessionID, true /*forceFake*/, opts, shimSock)
 		argv = append(argv, "--store-socket", storeSock)
+		if tuning.wedgeShim {
+			// Spawns cleanly, holds no session lock, and never dials the daemon:
+			// the process exists, so nothing upstream of the handshake fails.
+			argv = []string{node, "-e", "setInterval(() => {}, 1000)"}
+		}
 		proc, spawnErr := shim.Spawn(shim.Options{Argv: argv, Dir: opts.CWD, Logf: t.Logf})
 		if spawnErr != nil {
 			return nil, spawnErr
@@ -381,6 +412,7 @@ func newUDSHarness(t *testing.T) *e2eHarness {
 		Catalogs:          driver,
 		SessionCommands:   binding,
 		WorkspaceCreation: workspaceCreation,
+		EstablishTimeout:  tuning.establishTimeout,
 		Logf:              t.Logf,
 	})
 	if err != nil {

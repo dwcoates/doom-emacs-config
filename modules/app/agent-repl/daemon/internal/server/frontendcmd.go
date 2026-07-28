@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
@@ -232,6 +233,9 @@ type commandHandler struct {
 	// See createestablish.go.
 	establishMu  sync.Mutex
 	establishing map[string]*sessionEstablishment
+	// establishTimeout bounds one create-plus-establish round. Zero means
+	// createEstablishTimeout.
+	establishTimeout time.Duration
 }
 
 // TurnStateSource reports whether a workspace's session has a turn IN FLIGHT,
@@ -255,6 +259,11 @@ type CommandHandlerConfig struct {
 	WorkspaceCreation WorkspaceCreationBridge
 	Health            HealthConfig
 	Interrupt         InterruptGateConfig
+	// EstablishTimeout bounds one createSession establishment round. Zero takes
+	// createEstablishTimeout, which is the only value production uses; it is
+	// injectable so a harness can prove the DEADLINE nack without waiting out a
+	// bound sized for a loaded machine.
+	EstablishTimeout time.Duration
 }
 
 // InterruptGateConfig supplies the interrupt confirm gate's two facts. Both
@@ -334,6 +343,7 @@ func newCommandHandler(prompts PromptRouter, merges MergeRunner, lifecycle Works
 		workspaceCreation: config.WorkspaceCreation,
 		health:            config.Health.Router, daemonHealth: config.Health.Daemon,
 		turns: config.Interrupt.Turns, liveTasks: config.Interrupt.LiveTasks, logf: logf,
+		establishTimeout: config.EstablishTimeout,
 	}, nil
 }
 
