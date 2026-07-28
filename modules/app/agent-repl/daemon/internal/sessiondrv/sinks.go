@@ -198,6 +198,11 @@ type consumer struct {
 	// registry documented was never written by anything.
 	onSessionEnded func()
 
+	// skills correlates a launched skill's SKILL.md body back to the Skill
+	// call that launched it (skillbody.go). Locked internally, so it sits
+	// outside the ring's mutex rather than under it.
+	skills *skillCorrelator
+
 	mu   sync.Mutex
 	ring []*corev1.Event
 	// systemInit is the last SDK system:init snapshot seen on this session's
@@ -248,6 +253,7 @@ func newConsumer(workspace, sessionID string, push Pusher, applier StateApplier,
 		onTurn:           onTurn,
 		onBackfill:       onBackfill,
 		onSessionEnded:   onSessionEnded,
+		skills:           newSkillCorrelator(),
 	}
 }
 
@@ -309,6 +315,10 @@ func (c *consumer) purgeRetained() (dropped int, ceiling uint64) {
 		}
 	}
 	c.ring = nil
+	// The correlator names records in the RETIRED conversation's uuid space,
+	// which nothing in the new one refers to. Left standing it could only
+	// answer a new-space parent uuid by coincidence.
+	c.skills.reset()
 	return dropped, ceiling
 }
 
@@ -836,7 +846,7 @@ func userTurnReceipt(cd *frontendv1.ConversationDelta) (requestID string, textLe
 // pushConversation converts a vendor event to a ConversationDelta and pushes it,
 // loud-logging (never swallowing) a translation failure.
 func (c *consumer) pushConversation(ev *corev1.Event, live bool) {
-	cd, err := frontend.ConversationDeltaFromEvent(c.workspace, ev)
+	cd, envs, err := frontend.ConversationDeltaFromEvent(c.workspace, ev)
 	if err != nil {
 		c.logf("sessiondrv: conversation translate failed session=%s seq=%d: %v", c.sessionID, ev.GetSeq(), err)
 		return
@@ -844,6 +854,10 @@ func (c *consumer) pushConversation(ev *corev1.Event, live bool) {
 	if cd == nil {
 		return // known-but-non-conversational vendor payload
 	}
+	// The harness's isMeta records — a launched skill's body and the notices
+	// around it — become the skill card they belong to, or nothing at all
+	// (skillbody.go).
+	c.curateMetaRecords(cd, envs)
 	// The CLI's own slash-command bookkeeping, which it writes as unflagged
 	// "user" transcript records, goes no further than this (machinery.go).
 	// FIRST, before attribution: a machinery record claiming a real prompt's
