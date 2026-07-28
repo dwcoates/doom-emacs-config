@@ -2274,6 +2274,42 @@ tab-bar."
   (let ((counts (agent-repl--pack-first-fit '(4 4 4 4) '(9 9))))
     (should (= 4 (apply #'+ counts)))))
 
+;;;; ---- Tests: pack-prefix (partial placement) ----
+
+(ert-deftest agent-repl-test-pack-prefix-places-all-when-they-fit ()
+  "When every entry fits, the prefix is the whole list."
+  ;; Arrange / Act / Assert
+  (should (equal (agent-repl--pack-prefix '(3 3 3) '(80 80)) '(3 0))))
+
+(ert-deftest agent-repl-test-pack-prefix-stops-at-overflow ()
+  "Entries past what the rows hold are simply not placed — unlike
+`agent-repl--pack-first-fit', which discards the whole placement."
+  ;; Arrange / Act
+  (let ((counts (agent-repl--pack-prefix '(4 4 4 4 4) '(9 9))))
+    ;; Assert: two rows of two, the fifth entry left unplaced.
+    (should (equal counts '(2 2)))
+    (should (= 4 (apply #'+ counts)))))
+
+(ert-deftest agent-repl-test-pack-prefix-zero-when-nothing-fits ()
+  "An entry too wide for every row places nothing at all."
+  ;; Arrange / Act / Assert
+  (should (equal (agent-repl--pack-prefix '(40) '(9 9)) '(0 0))))
+
+;;;; ---- Tests: unfilled-row padding ----
+
+(ert-deftest agent-repl-test-pad-tabline-row-pads-empty-row ()
+  "An empty row is padded out to WIDTH columns of spaces so it actually
+occupies the pixel row that the pinned `tab-bar-lines' reserves."
+  ;; Arrange / Act / Assert
+  (should (equal (agent-repl--pad-tabline-row "" 5) "     ")))
+
+(ert-deftest agent-repl-test-pad-tabline-row-leaves-filled-row-alone ()
+  "A row with entries is returned untouched: its width is measured in
+PIXELS for image-bearing entries, so padding it to WIDTH character
+columns could overflow the frame and wrap to a further physical row."
+  ;; Arrange / Act / Assert
+  (should (equal (agent-repl--pad-tabline-row "abc" 40) "abc")))
+
 ;;;; ---- Tests: tabline row packing (livelock guard) ----
 ;;
 ;; `agent-repl--tabline-rows' returns a LIST of exactly MAX-ROWS
@@ -2884,6 +2920,25 @@ whatever height they were born with until the user invokes
       (should-not auto-resize-tab-bars)
       (should (= (alist-get 'tab-bar-lines default-frame-alist)
                  agent-repl--tabline-row-count)))))
+
+(ert-deftest agent-repl-test-tabbar-apply-row-count-sets-selected-frame ()
+  "The interactive command applies the row count to the SELECTED frame.
+This is the one path that deliberately drives `ns_change_tab_bar_height'
+on a live frame; installation never does it on its own initiative."
+  ;; Arrange
+  (let ((applied nil))
+    (cl-letf (((symbol-function 'set-frame-parameter)
+               (lambda (frame parameter value)
+                 (setq applied (list frame parameter value))))
+              ((symbol-function 'agent-repl--log) #'ignore)
+              ((symbol-function 'message) #'ignore))
+      ;; Act
+      (let ((result (agent-repl-tabbar-apply-row-count)))
+        ;; Assert
+        (should (= agent-repl--tabline-row-count result))
+        (should (equal applied
+                       (list nil 'tab-bar-lines
+                             agent-repl--tabline-row-count)))))))
 
 ;;;; ---- The two context cuts --------------------------------------------
 
