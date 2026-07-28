@@ -64,6 +64,73 @@ describe("inbound frame handling", () => {
   });
 });
 
+/** The sole handler that MAY skip an unreadable frame: the bootstrap socket's. */
+const bootstrapHandler = onlyHandlerSaying("bootstrap frame decode failed");
+/** The live session's handler, whose decode refusal must stay fatal. */
+const sessionHandler = onlyHandlerSaying("frontend frame decode/adapt threw");
+/** The bootstrap handler's decode-refusal branch. */
+const bootstrapCatch = blocksAfter(bootstrapHandler, "catch (err) {")[0]!;
+/** The same branch with its prose removed, for assertions about control flow. */
+const bootstrapCatchCode = stripLineComments(bootstrapCatch);
+
+/** `source` minus its `//` lines, so a comment cannot answer a code question. */
+function stripLineComments(source: string): string {
+  return source
+    .split("\n")
+    .filter((line) => !line.trimStart().startsWith("//"))
+    .join("\n");
+}
+
+/** The one inbound handler whose body carries `phrase`. */
+function onlyHandlerSaying(phrase: string): string {
+  const found = inboundHandlers.filter((body) => body.includes(phrase));
+  if (found.length !== 1) throw new Error(`main.ts has ${found.length} handlers saying ${phrase}`);
+  return found[0]!;
+}
+
+// A bootstrap frame carries StateSnapshots (progress views included), so a
+// frame this end drops is state the user is missing. Skipping it is allowed;
+// skipping it quietly is the defect these pin shut.
+describe("a bootstrap frame that will not decode", () => {
+  it("is reported at error level, not as a warning", () => {
+    // Assert — it used to log at "warn", the level a reader filters out.
+    expect(bootstrapCatch).toMatch(/clog\(\s*"error"/);
+  });
+
+  it("records the frame head, the same evidence the session socket keeps", () => {
+    // Assert — the decoder's complaint alone does not say WHICH frame.
+    expect(bootstrapCatch).toContain("data.slice(0, 200)");
+  });
+
+  it("mints a durable failure card, not only a log line", () => {
+    // Assert — the daemon log is not a surface a user reads unprompted.
+    expect(bootstrapCatch).toContain("frameUndecodableFailure(");
+  });
+
+  it("schedules the paint that puts the card on screen", () => {
+    // Assert — a card merged into the store nobody re-renders is still silent.
+    expect(bootstrapCatch).toContain("frames.schedule()");
+  });
+
+  it("skips the frame rather than aborting the boot", () => {
+    // Assert — resilience is the point of the branch: the next frame can still
+    // carry the snapshot `createSession` is waiting for.
+    expect(bootstrapCatchCode).toContain("return;");
+  });
+
+  it("never re-throws, which would strand the boot on one bad frame", () => {
+    // Assert — read past the prose, which is allowed to say "re-throws".
+    expect(bootstrapCatchCode).not.toContain("throw");
+  });
+});
+
+describe("a session frame that will not decode", () => {
+  it("stays fatal, because the store it feeds is already wrong", () => {
+    // Assert — the bootstrap socket's tolerance must never spread to this one.
+    expect(blocksAfter(sessionHandler, "catch (err) {")[0]!).toContain("throw err;");
+  });
+});
+
 describe("mid-task memory", () => {
   it("is kept by no webapp module", () => {
     // Act — the mid-task flag was localStorage-keyed, so scan every module.

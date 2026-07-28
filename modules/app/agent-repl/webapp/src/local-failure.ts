@@ -44,6 +44,23 @@ export const CLIENT_FAILURE_TYPES = [
    * would be this end deciding something the daemon already decided.
    */
   "client.control_plane_failed",
+  /**
+   * An inbound `frontend.v1` frame could not be decoded, and this end skipped
+   * it to keep going.
+   *
+   * The bootstrap socket is the one place a decode refusal is SURVIVABLE: the
+   * live session socket re-throws, because a frame it cannot read means the
+   * store it feeds is already a lie. The bootstrap connection only waits for a
+   * snapshot to hang `createSession` off, so skipping a bad frame and waiting
+   * for the next one is legitimate — but the skip is not free. Bootstrap
+   * frames carry StateSnapshots, progress views included, so a frame this end
+   * silently dropped is state the user is now missing with no sign of it.
+   *
+   * The refusal is classified HERE and not by the daemon because the daemon
+   * sent a frame it believes is well-formed; only the receiver can observe
+   * that it could not read it.
+   */
+  "client.frame_undecodable",
 ] as const;
 export type ClientFailureType = (typeof CLIENT_FAILURE_TYPES)[number];
 
@@ -129,6 +146,27 @@ export function daemonReachableFailure(atMs: number): SystemFailureCard {
     "reconnected to the daemon",
     "",
     atMs,
+  );
+}
+
+/**
+ * Classify a frame this end could not decode as the frontend's own failure.
+ *
+ * The message is GENERIC on purpose: the reader is being told that a frame was
+ * dropped, and the decoder's own complaint is evidence, not prose. The frame
+ * head goes in `sourceDetail` beside it, so the debugger gets the bytes and
+ * the user gets the sentence.
+ *
+ * One uuid for every occurrence, inherited from `clientFailure`: a daemon
+ * emitting a shape this build cannot read will emit it repeatedly, and a card
+ * per frame would bury the feed under the same fact.
+ */
+export function frameUndecodableFailure(err: unknown, frameHead: string): SystemFailureCard {
+  const cause = err instanceof Error ? err.message : String(err);
+  return clientFailure(
+    "client.frame_undecodable",
+    "a message from the daemon could not be read and was skipped",
+    frameHead === "" ? cause : `${cause} — frame head: ${frameHead}`,
   );
 }
 
