@@ -805,12 +805,23 @@ export class ConversationStore {
     return true;
   }
 
+  /**
+   * `throughSeq` 0 means the delta is DAEMON-COMPOSED — a permission card, a
+   * failure card, a prompt receipt — and carries no store seq because nothing
+   * in the store produced it. Such items rank at the high-water mark, the same
+   * place a locally-minted card goes: they describe what is happening NOW.
+   *
+   * Ranking them at 0 instead filed them at the very TOP of the feed, above
+   * every item the session has ever produced — a user's own prompt receipt
+   * would appear above the history they had just been reading.
+   */
   private applyConversationItems(
     items: readonly ConversationItem[],
     throughSeq: number,
   ): boolean {
+    const rank = throughSeq > 0 ? throughSeq : this.state.lastSeq;
     for (const item of items) {
-      this.mergeItem(item, throughSeq);
+      this.mergeItem(item, rank);
       if (item.kind === "result") this.adoptResultUsage(item);
     }
     if (throughSeq > this.state.lastSeq) this.state.lastSeq = throughSeq;
