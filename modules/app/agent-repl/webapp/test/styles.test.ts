@@ -2729,6 +2729,56 @@ describe("sidebar init dot", () => {
   });
 });
 
+describe("sidebar interrupted dot (I1)", () => {
+  it("fills the interrupted dot with the green rather than leaving it colorless", () => {
+    // Arrange + Act — a status with no rule of its own renders a 9px hole,
+    // which is exactly what an unstyled `interrupted` shipped as.
+    const dot = blockAfter(css, "#ws-sidebar .st-interrupted {");
+    // Assert
+    expect(dot).toContain("var(--ok)");
+  });
+
+  it("gives it the same token done wears, since the WORD is the distinction", () => {
+    // Arrange + Act — an interrupted turn is a concluded turn; the color claim
+    // it makes is done's, and two tokens that agree today would drift.
+    const interrupted = blockAfter(css, "#ws-sidebar .st-interrupted {");
+    const done = blockAfter(css, "#ws-sidebar .st-done {");
+    // Assert
+    expect(interrupted.trim()).toBe(done.trim());
+  });
+
+  it("leaves the interrupted dot still, because nothing is in progress", () => {
+    // Arrange + Act — the breath means live work, and an interrupted turn has
+    // none.
+    const dot = blockAfter(css, "#ws-sidebar .st-interrupted {");
+    // Assert
+    expect(dot).not.toContain("ws-pulse");
+  });
+});
+
+describe("the footer's interrupt chip (I1)", () => {
+  it("paints a delivered stop in the same green the phase word takes", () => {
+    // Arrange + Act — a concluded turn the user asked for is not a fault.
+    const rule = blockAfter(css, ".pfooter-interrupt.ok {");
+    // Assert
+    expect(rule).toContain("var(--ok)");
+  });
+
+  it("paints an undeliverable stop in the error red", () => {
+    // Arrange + Act — the one outcome that reads as a failure anywhere.
+    const rule = blockAfter(css, ".pfooter-interrupt.error {");
+    // Assert
+    expect(rule).toContain("var(--err)");
+  });
+
+  it("sets the chip smaller than the phase word it qualifies", () => {
+    // Arrange + Act — it reports what just happened, not what the session is.
+    const rule = blockAfter(css, "\n.pfooter-interrupt {");
+    // Assert
+    expect(Number(rule.match(/font-size:\s*([\d.]+)rem/)?.[1])).toBeLessThan(1);
+  });
+});
+
 describe("sidebar merge glyph size", () => {
   // The merge-family glyph (⟳) is a thin stroke, so at the disc statuses' own
   // box it reads optically smaller than a solid fill. Its font-size is bumped

@@ -501,6 +501,11 @@ body::after {
    waiting on you" from "ready"; the color says it is not a fault. */
 #ws-sidebar .st-permission { background: var(--ok); animation: ws-pulse 1.3s ease-in-out infinite; }
 #ws-sidebar .st-done { background: var(--ok); }
+/* GREEN, filled, exactly as done: an interrupted turn is a CONCLUDED turn —
+   the user asked for the stop, got it, and can prompt again immediately. The
+   WORD in the footer and the tab bar carries the distinction; the dot's color
+   claim is the same one done makes. */
+#ws-sidebar .st-interrupted { background: var(--ok); }
 /* GREEN, filled: a ready workspace is as available as a done one, and the
    hollow ring said "nothing here" about a session ready to be used. */
 #ws-sidebar .st-ready { background: var(--ok); }
@@ -2326,6 +2331,20 @@ pre {
 .pfooter-phase.error { color: var(--err); }
 .pfooter-phase.ok { color: var(--ok); }
 .pfooter-phase.muted { color: var(--muted); }
+
+/* The interrupt chip (I1): the outcome of the stop the user asked for, sitting
+   immediately right of the phase it qualifies. Set smaller and lighter than the
+   phase word — it reports what JUST happened, not what the session is.
+
+   Two tones, not three: `interrupted` and `already finished` are both
+   SUCCESSES and take the calm green, and only a stop that could not be
+   delivered takes the error red. The words carry the rest of the distinction. */
+.pfooter-interrupt {
+  font-size: 0.74rem;
+  font-weight: 600;
+}
+.pfooter-interrupt.ok { color: var(--ok); }
+.pfooter-interrupt.error { color: var(--err); }
 
 /* Activity-detail tones: one accent per window, so which kind of dead air the
    session is in reads at a glance without parsing the words. */
