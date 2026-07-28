@@ -270,6 +270,29 @@ func (c *consumer) snapshotRing() []*corev1.Event {
 	return out
 }
 
+// newestRetainedSeq is the highest store seq the retained ring holds, or 0 when
+// it holds no PERSISTENT event at all.
+//
+// It exists so a client's replay mark can be checked against the seq space this
+// conversation is actually in (Manager.replayFloor). The durable last_seen_seq
+// is the same fact for a session whose events came through shimclient, but the
+// ring is the one place that is true even before the durable mark is written,
+// so the two are read together and the higher wins.
+//
+// The scan runs BACKWARDS and stops at the first positive seq: the ring is in
+// arrival order and seq is monotonic across PERSISTENT events, while ephemeral
+// ones (seq 0, the daemon's own id on the envelope) carry no position at all.
+func (c *consumer) newestRetainedSeq() uint64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for i := len(c.ring) - 1; i >= 0; i-- {
+		if seq := c.ring[i].GetSeq(); seq > 0 {
+			return seq
+		}
+	}
+	return 0
+}
+
 // latestSystemInit returns the last SDK system:init snapshot seen on this
 // session's stream, or nil before the first init lands.
 func (c *consumer) latestSystemInit() *datav1.SystemInit {
