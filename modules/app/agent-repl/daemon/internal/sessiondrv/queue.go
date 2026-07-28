@@ -30,6 +30,12 @@ type queueEntry struct {
 	rationale      string
 	accepted       bool
 
+	// headJump marks an entry submitted while the queue was PAUSED by a user
+	// interrupt (I1). It jumps the retained entries and runs ALONE: the user
+	// stopped the agent and then typed something, so what they typed is the
+	// only thing they want run.
+	headJump bool
+
 	// interjecting marks an entry that is waiting for the running turn to
 	// actually END so it can be delivered immediately after (an INTERJECT
 	// verdict, or a user force). It is the flag the turn-end handler looks for
@@ -86,6 +92,37 @@ func (q *promptQueue) popFront() *queueEntry {
 // its claim on the next delivery slot rather than going to the back.
 func (q *promptQueue) pushFront(e *queueEntry) {
 	q.entries = append([]*queueEntry{e}, q.entries...)
+}
+
+// addHeadJump inserts an entry AHEAD of every retained entry but BEHIND any
+// head-jump already waiting (I1).
+//
+// Ahead of the retained ones because that is the whole point: the user
+// stopped the agent and typed something new, and the queue they paused must
+// not run first. Behind the earlier head-jumps because two prompts typed
+// during one pause are still two prompts typed in an order, and reversing
+// them would be a second surprise on top of the first.
+func (q *promptQueue) addHeadJump(e *queueEntry) {
+	e.headJump = true
+	at := 0
+	for at < len(q.entries) && q.entries[at].headJump {
+		at++
+	}
+	q.entries = append(q.entries, nil)
+	copy(q.entries[at+1:], q.entries[at:])
+	q.entries[at] = e
+}
+
+// takeHeadJump removes and returns the first head-jump entry, or nil when
+// none is waiting. It is the ONLY delivery a paused queue makes.
+func (q *promptQueue) takeHeadJump() *queueEntry {
+	for i, e := range q.entries {
+		if e.headJump {
+			q.entries = append(q.entries[:i], q.entries[i+1:]...)
+			return e
+		}
+	}
+	return nil
 }
 
 // takeInterjecting removes and returns the first entry flagged for interjection,
@@ -182,9 +219,19 @@ type ClassifyResult struct {
 // The queue forms ONLY while a turn is running. With the session idle there is
 // nothing to hold the prompt behind, so it goes straight through and no queue
 // entry is ever created — which is why an idle session never shows chips.
+//
+// A PAUSED queue does not change that rule, only what the prompt means. With
+// no turn running the prompt still goes straight through, and it becomes the
+// LONE RUNNER whose clean end resumes the drain; with a turn running it is
+// queued as a HEAD JUMP, ahead of everything the pause retained.
 func (m *Manager) queueSubmitLocked(d *driven, text, permissionMode string) (*queueEntry, bool) {
 	if !d.turnActive {
 		d.runningText = text
+		if d.paused {
+			// It runs ALONE: the pause still stands, so the turn-end handler
+			// will deliver nothing behind it until this turn ends cleanly.
+			d.pausedRunner = true
+		}
 		return nil, false
 	}
 	e := &queueEntry{
@@ -193,6 +240,10 @@ func (m *Manager) queueSubmitLocked(d *driven, text, permissionMode string) (*qu
 		permissionMode: permissionMode,
 		queuedAtMs:     m.now(),
 		classification: frontendv1.QueueClassification_QUEUE_CLASSIFICATION_PENDING,
+	}
+	if d.paused {
+		d.queue.addHeadJump(e)
+		return e, true
 	}
 	d.queue.add(e)
 	return e, true
@@ -255,17 +306,54 @@ func (m *Manager) onTurnBoundary(d *driven, active bool) {
 		m.mu.Unlock()
 		return
 	}
-	// An entry that has been waiting to interject goes first — it asked for
-	// exactly this moment. Otherwise the ordinary FIFO drain applies.
-	e := d.queue.takeInterjecting()
-	reason := "interject"
-	if e == nil {
-		e = d.queue.popFront()
-		reason = "turn-end drain"
+	// The turn that just ended: was it one a user-commanded stop was delivered
+	// to, and was it the lone prompt running against a paused queue? Both are
+	// consumed here, whatever the boundary goes on to decide.
+	wasInterrupted, wasLoneRunner := d.interruptedTurn, d.pausedRunner
+	d.interruptedTurn, d.pausedRunner = false, false
+
+	// THE PAUSE RESUMES on the clean end of a prompt that ran alone. The user
+	// stopped the agent, ran one thing, and that thing finished — which is the
+	// signal that the work they stopped may continue. An interrupted lone
+	// runner is the opposite signal, so the pause stands.
+	if d.paused && wasLoneRunner && !wasInterrupted {
+		d.paused = false
+		m.logf("sessiondrv: queue RESUMED session=%s ws=%q — the prompt that ran alone finished cleanly; draining %d retained entr(ies) in their original order",
+			d.sessionID, d.workspace, len(d.queue.entries))
+	}
+
+	var e *queueEntry
+	var reason string
+	switch {
+	case d.paused:
+		// A PAUSED queue delivers exactly one kind of entry: a head jump, the
+		// prompt the user typed after stopping the agent. Everything else is
+		// retained — including an entry mid-interject, whose stop was
+		// machinery the user's own stop has since overruled.
+		e = d.queue.takeHeadJump()
+		reason = "paused head jump"
+	default:
+		// An entry that has been waiting to interject goes first — it asked for
+		// exactly this moment. Otherwise the ordinary FIFO drain applies.
+		e = d.queue.takeInterjecting()
+		reason = "interject"
+		if e == nil {
+			e = d.queue.popFront()
+			reason = "turn-end drain"
+		}
 	}
 	if e == nil {
+		if d.paused {
+			m.logf("sessiondrv: queue PAUSED at a turn boundary session=%s ws=%q — %d entr(ies) retained, none delivered",
+				d.sessionID, d.workspace, len(d.queue.entries))
+		}
 		m.mu.Unlock()
 		return
+	}
+	if e.headJump {
+		// It runs ALONE against the still-paused queue, and its clean end is
+		// what will resume the drain.
+		d.pausedRunner = true
 	}
 	view, recs := m.publishQueueLocked(d)
 	m.mu.Unlock()
@@ -299,6 +387,11 @@ func (m *Manager) deliver(d *driven, e *queueEntry) {
 	e.interjecting = false
 	e.classification = frontendv1.QueueClassification_QUEUE_CLASSIFICATION_ERROR
 	e.rationale = fmt.Sprintf("delivery failed: %v", err)
+	// No turn started, so nothing is running alone against the paused queue.
+	// Leaving the flag set would make the pause wait on a turn end that can
+	// never arrive. The entry keeps its head-jump claim and gets another
+	// chance at the next boundary.
+	d.pausedRunner = false
 	d.queue.pushFront(e)
 	view, recs := m.publishQueueLocked(d)
 	m.mu.Unlock()
@@ -398,6 +491,14 @@ func (m *Manager) beginInterject(d *driven, entryID, source string) {
 		// into a turn that IS running, which is precisely what the queue
 		// exists to prevent. So the turn state is re-verified under the
 		// RE-TAKEN lock before the entry is committed to delivery.
+		if taken != nil && d.paused && !d.turnActive {
+			// The queue is PAUSED, so this delivery is the one prompt running
+			// alone against it and its clean end is what resumes the drain.
+			// Marked as a head jump too, so a boundary arriving before it
+			// lands still treats it as the paused queue's one deliverable.
+			taken.headJump = true
+			d.pausedRunner = true
+		}
 		if taken != nil && d.turnActive {
 			// Back to the head, keeping its classification and its interjecting
 			// flag: the entry still wants to go first, and the turn that just
@@ -423,6 +524,20 @@ func (m *Manager) beginInterject(d *driven, entryID, source string) {
 	e.classification = frontendv1.QueueClassification_QUEUE_CLASSIFICATION_INTERJECT
 	if source == "user" {
 		e.rationale = "run now, requested by the user"
+	}
+	if d.paused {
+		// The user has stopped this session, and the turn now running is the
+		// one prompt they allowed through. An interject's stop is MACHINERY —
+		// it interrupts on a held prompt's behalf — and it must not overrule
+		// the stop the user commanded, so it becomes a head jump and waits for
+		// the boundary instead of sending an Interrupt of its own.
+		e.headJump = true
+		view, recs := m.publishQueueLocked(d)
+		m.mu.Unlock()
+		m.logf("sessiondrv: queue interject entry=%s (%s) session=%s NOT interrupting — the queue is paused by a user interrupt; the entry jumps the head and runs at the next boundary",
+			entryID, source, d.sessionID)
+		m.publish(d.sessionID, view, recs)
+		return
 	}
 	view, recs := m.publishQueueLocked(d)
 	m.mu.Unlock()

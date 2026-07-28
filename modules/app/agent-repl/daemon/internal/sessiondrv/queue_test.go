@@ -56,12 +56,14 @@ func (c *failingClient) SubmitPrompt(_ context.Context, _, _, _ string) error { 
 
 // queueHarness is one workspace's driver plus the doubles around it.
 type queueHarness struct {
-	t      *testing.T
-	m      *Manager
-	push   *fakePusher
-	client *fakeClient
-	cls    *fakeClassifier
-	reg    *fakeRegistrar
+	t       *testing.T
+	m       *Manager
+	push    *fakePusher
+	client  *fakeClient
+	cls     *fakeClassifier
+	reg     *fakeRegistrar
+	applier *fakeApplier
+	prog    *fakeProgress
 }
 
 // newQueueHarness brings a session up for workspace "ws" and returns the
@@ -88,11 +90,14 @@ func newQueueHarnessWithPusher(t *testing.T, cls *fakeClassifier, wrap func(*fak
 		push = wrap(rec)
 	}
 	reg := &fakeRegistrar{}
+	applier := &fakeApplier{}
+	prog := &fakeProgress{}
 	var mu sync.Mutex
 	var last *fakeClient
 	cfg := Config{
 		Push:              push,
-		SSM:               &fakeApplier{},
+		Progress:          prog,
+		SSM:               applier,
 		Spawner:           &fakeSpawner{},
 		Locator:           fakeLocator{m: map[string]string{"ws": "s1"}},
 		SeqStore:          &fakeSeqStore{seq: map[string]uint64{}},
@@ -124,7 +129,7 @@ func newQueueHarnessWithPusher(t *testing.T, cls *fakeClassifier, wrap func(*fak
 	mu.Lock()
 	client := last
 	mu.Unlock()
-	return &queueHarness{t: t, m: m, push: rec, client: client, cls: cls, reg: reg}
+	return &queueHarness{t: t, m: m, push: rec, client: client, cls: cls, reg: reg, applier: applier, prog: prog}
 }
 
 // driver returns the live driver for "ws".

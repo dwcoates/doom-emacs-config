@@ -203,6 +203,24 @@ type driven struct {
 	// it, not on a resolved view of it.
 	turnActive bool
 	queue      promptQueue
+	// paused stops the queue DRAINING while retaining every entry (I1). Set by
+	// a user-commanded interrupt: the user asked for work to stop, and
+	// delivering the next held prompt the moment the stopped turn ends would
+	// start exactly the work they just stopped.
+	//
+	// NOT PERSISTED, matching what the queue already persists: the registry
+	// record carries the held prompts themselves and nothing else about the
+	// queue's posture (see publishQueueLocked). A daemon restart therefore
+	// resumes draining, which is the same answer it gives for turnActive.
+	paused bool
+	// interruptedTurn marks the turn now in flight as one a user-commanded
+	// stop was delivered to. Consumed at that turn's boundary, where it
+	// decides whether a lone paused runner resumes the drain.
+	interruptedTurn bool
+	// pausedRunner marks the turn now in flight as the prompt that jumped the
+	// paused queue and is running ALONE. Its clean end resumes the drain; its
+	// interrupted end leaves the queue paused.
+	pausedRunner bool
 	// runningText is the prompt that started the turn now in flight, as far as
 	// this daemon saw it. It is the classifier's "what is already running"
 	// context, and is empty when the turn predates this daemon.
@@ -404,6 +422,13 @@ func (m *Manager) submitPrompt(ctx context.Context, workspace, text, permissionM
 		m.mu.Unlock()
 		text = m.applyMetaprompt(d, text)
 		if err := d.client.SubmitPrompt(ctx, text, origin, permissionMode); err != nil {
+			// The prompt never reached the shim, so no turn is beginning — and
+			// with a paused queue that matters: the lone-runner flag set on the
+			// way in would otherwise leave the pause waiting for a turn end
+			// that can never arrive.
+			m.mu.Lock()
+			d.pausedRunner = false
+			m.mu.Unlock()
 			return err
 		}
 		// The submit was ACCEPTED, so a turn is beginning. This is the earliest
@@ -510,6 +535,15 @@ func (m *Manager) applyMetaprompt(d *driven, text string) string {
 // the turn had already finished is a success the user explicitly asked for.
 // Those two used to be indistinguishable from here, and the second was
 // reported as the first.
+//
+// THIS IS THE USER-COMMANDED STOP, and the only one. It is reached from
+// exactly one place — the frontend interrupt command handler, via
+// PromptRouter — which is what makes it the right and sufficient place to
+// route the three consequences a user's stop has and an interject's stop must
+// not have: the interrupt window, the `interrupted` turn outcome, and the
+// queue pause. The queue's own interject calls d.client.Interrupt DIRECTLY
+// (see beginInterject) and therefore reaches none of them structurally,
+// rather than by remembering to pass a flag.
 func (m *Manager) Interrupt(ctx context.Context, workspace string) error {
 	d, err := m.existing(workspace)
 	if err != nil {
@@ -519,12 +553,75 @@ func (m *Manager) Interrupt(ctx context.Context, workspace string) error {
 	if err != nil {
 		return err
 	}
+	m.noteUserInterrupt(d, outcome)
 	if failed := errclass.InterruptError(outcome); failed != nil {
 		m.logf("sessiondrv: interrupt undeliverable ws=%s session=%s outcome=%s", workspace, d.sessionID, outcome)
 		return failed
 	}
 	m.logf("sessiondrv: interrupt ws=%s session=%s outcome=%s", workspace, d.sessionID, outcome)
 	return nil
+}
+
+// noteUserInterrupt applies a user-commanded stop's consequences from the
+// shim's ack.
+//
+// The WINDOW opens on every outcome: two of the three move no workspace phase,
+// so the footer's window is the only place they are reported at all — a FAILED
+// stop keeps its ordinary errclass failure path unchanged on top of it.
+//
+// The TURN OUTCOME is marked only on INTERRUPTED, because that is the only
+// outcome under which a turn was actually stopped; the other two stopped
+// nothing and have no turn to name.
+//
+// The PAUSE holds on both successful outcomes. ALREADY_COMPLETE pauses too:
+// the turn being over already does not make the user's "stop" mean less, and
+// the queue would otherwise deliver the next held prompt into the silence they
+// just asked for. FAILED changes nothing — no stop was delivered, so nothing
+// about the session moved.
+func (m *Manager) noteUserInterrupt(d *driven, outcome corev1.InterruptOutcome) {
+	m.progress().NoteInterrupt(d.workspace, d.sessionID, outcome)
+
+	if outcome == corev1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED {
+		if err := m.cfg.SSM.MarkTurnInterrupted(d.workspace); err != nil {
+			// Loud, never swallowed: the turn's end will report `done` instead
+			// of `interrupted`, and this line is the only account of why.
+			m.logf("sessiondrv: marking the interrupted turn on the SSM FAILED ws=%s session=%s: %v (the stopped turn will report `done`)",
+				d.workspace, d.sessionID, err)
+		}
+	}
+	if errclass.InterruptError(outcome) != nil {
+		return
+	}
+
+	m.mu.Lock()
+	d.paused = true
+	if outcome == corev1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED {
+		d.interruptedTurn = true
+	}
+	held := len(d.queue.entries)
+	m.mu.Unlock()
+	m.logf("sessiondrv: queue PAUSED by a user interrupt ws=%s session=%s outcome=%s held=%d (every entry retained; a newly submitted prompt runs alone and its clean end resumes the drain)",
+		d.workspace, d.sessionID, outcome, held)
+}
+
+// TurnActive reports whether the workspace's session has a turn IN FLIGHT, as
+// the driver observed it off the shim's own TurnStarted/TurnEnded stream.
+//
+// It is the same fact the queue acts on (driven.turnActive), deliberately
+// rather than the SSM's resolved turn_active: the interrupt confirm gate is
+// deciding whether there is a turn to stop RIGHT NOW, which is a question
+// about what the session reported, not about how a workspace resolves.
+//
+// A workspace with no live driver is a loud error, the same one Interrupt
+// itself would return a moment later.
+func (m *Manager) TurnActive(workspace string) (bool, error) {
+	d, err := m.existing(workspace)
+	if err != nil {
+		return false, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return d.turnActive, nil
 }
 
 // Health proves one named live session is connected to this daemon and that

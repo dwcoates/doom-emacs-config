@@ -47,6 +47,12 @@ type StateApplier interface {
 	// events already reached the degraded axis; this transport-level miss did
 	// not, so it produced a banner and no workspace color at all.
 	ApplyConnectionDegraded(workspace string, degraded bool, reason string) error
+	// MarkTurnInterrupted records that a USER-COMMANDED stop was delivered to
+	// the workspace's running turn, so that turn's own TurnEnded reports
+	// `interrupted` instead of `done` or `vendor_blocked` (I1). Fed ONLY from
+	// the frontend interrupt command path — the queue's interject sends the
+	// same Interrupt as machinery and must paint no outcome.
+	MarkTurnInterrupted(workspace string) error
 }
 
 // ProgressResolver is the slice of the progress-footer resolver (F1) the driver
@@ -61,6 +67,13 @@ type ProgressResolver interface {
 	Apply(workspace string, ev *corev1.Event) error
 	SetCounts(workspace string, pendingPermissions, queueDepth int64)
 	NoteTurnAccepted(workspace, sessionID string)
+	// NoteInterrupt opens the interrupt window on the shim's ack of a
+	// USER-COMMANDED stop (I1), carrying the ack's outcome verbatim. Fed ONLY
+	// from the frontend interrupt command path, for the same reason
+	// MarkTurnInterrupted is: an interject's stop is machinery, not a user
+	// action, and opening a window for it would report a stop nobody asked
+	// for.
+	NoteInterrupt(workspace, sessionID string, outcome corev1.InterruptOutcome)
 }
 
 // ClearCompactStore persists the newest CLEAR-OR-COMPACTION seq per
@@ -94,9 +107,10 @@ type ClearCompactStore interface {
 // not care about it, without every feed site growing a nil check.
 type noopProgress struct{}
 
-func (noopProgress) Apply(string, *corev1.Event) error { return nil }
-func (noopProgress) SetCounts(string, int64, int64)    {}
-func (noopProgress) NoteTurnAccepted(string, string)   {}
+func (noopProgress) Apply(string, *corev1.Event) error                     { return nil }
+func (noopProgress) SetCounts(string, int64, int64)                        {}
+func (noopProgress) NoteTurnAccepted(string, string)                       {}
+func (noopProgress) NoteInterrupt(string, string, corev1.InterruptOutcome) {}
 
 // ringCap bounds the per-session retained event ring the daemon keeps for the
 // live TaskCatalog rebuild and for resync replay. It is a bounded window: older
