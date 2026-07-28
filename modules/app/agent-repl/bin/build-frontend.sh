@@ -30,6 +30,14 @@
 # the same prerequisite-newer-than-target rule `make` uses, done by hand so no
 # Makefile is required and so Emacs can invoke a single entrypoint.
 #
+# Every successful build also writes a `.built-sha` stamp beside its artifact
+# (dist/.built-sha, daemon/bin/.built-sha, ~/.cache/agent-repl/bin/.<name>.built-sha)
+# recording the source revision it was compiled from, which is what
+# readiness-report.sh reads to say how far behind master a deployed artifact
+# is. A skipped ("fresh") build leaves the stamp untouched. See
+# lib-deploy-stamp.sh — and note these are NOT the `.<name>.deployed`
+# fingerprint stamps deploy-all.sh uses for bounce detection.
+#
 # Exit codes:
 #   0  every artifact is fresh or was rebuilt successfully
 #   1  a build step failed (message on stderr)
@@ -89,6 +97,9 @@ set -euo pipefail
 THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$THIS_DIR/.." && pwd)"
 
+# shellcheck source=lib-deploy-stamp.sh
+. "$THIS_DIR/lib-deploy-stamp.sh"
+
 SHIM_DIR="$ROOT/agent-shim/claude/shim"
 WEBAPP_DIR="$ROOT/webapp"
 DAEMON_DIR="$ROOT/daemon"
@@ -126,6 +137,20 @@ DAEMON_ARTIFACT="$DAEMON_DIR/bin/claude-repld"
 CACHE_BIN="$HOME/.cache/agent-repl/bin"
 STORE_ARTIFACT="$CACHE_BIN/shim-store"
 SIDECAR_ARTIFACT="$CACHE_BIN/shim-claude-sidecar"
+
+# Built-sha stamps, written beside each artifact after a SUCCESSFUL build so
+# readiness-report.sh can say which source revision the deployed artifact is
+# compiled from. A skipped ("fresh") build leaves the existing stamp alone —
+# the artifact did not change, so neither did the revision it came from.
+#
+# The two service stamps sit next to the pre-existing `.<name>.deployed`
+# fingerprint stamps but are a different family entirely; see
+# lib-deploy-stamp.sh. Never write one from the other's code path.
+SHIM_SHA_STAMP="$SHIM_DIR/dist/.built-sha"
+WEBAPP_SHA_STAMP="$WEBAPP_DIR/dist/.built-sha"
+DAEMON_SHA_STAMP="$DAEMON_DIR/bin/.built-sha"
+STORE_SHA_STAMP="$CACHE_BIN/.shim-store.built-sha"
+SIDECAR_SHA_STAMP="$CACHE_BIN/.shim-claude-sidecar.built-sha"
 
 GRACE_MINS="${AGENT_REPL_NODE_STORE_GRACE_MINS:-60}"
 
@@ -436,6 +461,7 @@ build_shim() {
     require_bin npm "install Node.js"
     echo "[build-frontend] shim: building..."
     ( cd "$SHIM_DIR" && npm run build )
+    write_built_sha "$SHIM_SHA_STAMP" "$ROOT"
     echo "[build-frontend] shim: done"
 }
 
@@ -449,6 +475,7 @@ build_webapp() {
     require_bin npm "install Node.js"
     echo "[build-frontend] webapp: building..."
     ( cd "$WEBAPP_DIR" && npm run build )
+    write_built_sha "$WEBAPP_SHA_STAMP" "$ROOT"
     echo "[build-frontend] webapp: done"
 }
 
@@ -463,6 +490,7 @@ build_daemon() {
     echo "[build-frontend] daemon: building..."
     mkdir -p "$DAEMON_DIR/bin"
     ( cd "$DAEMON_DIR" && go build -o "$DAEMON_ARTIFACT" ./cmd/claude-repld )
+    write_built_sha "$DAEMON_SHA_STAMP" "$ROOT"
     echo "[build-frontend] daemon: done"
 }
 
@@ -489,7 +517,7 @@ build_service() {
     # NAME MODULE-DIR ARTIFACT — shared build-if-stale path for the two Go
     # launchd services.  Keeping one helper prevents their source sets and
     # install semantics from drifting.
-    local name="$1" dir="$2" artifact="$3"
+    local name="$1" dir="$2" artifact="$3" sha_stamp="$4"
     load_service_sources "$dir"
     if ! is_stale "$artifact" ${SOURCES[@]+"${SOURCES[@]}"}; then
         echo "[build-frontend] $name: fresh, skipping"
@@ -499,6 +527,7 @@ build_service() {
     echo "[build-frontend] $name: building..."
     mkdir -p "$CACHE_BIN"
     ( cd "$dir" && go build -o "$artifact" . )
+    write_built_sha "$sha_stamp" "$ROOT"
     echo "[build-frontend] $name: done"
 }
 
@@ -509,8 +538,8 @@ for target in "${TARGETS[@]}"; do
         shim)   build_shim ;;
         webapp) build_webapp ;;
         daemon) build_daemon ;;
-        store)  build_service shim-store "$STORE_DIR" "$STORE_ARTIFACT" ;;
-        sidecar) build_service shim-claude-sidecar "$SIDECAR_DIR" "$SIDECAR_ARTIFACT" ;;
+        store)  build_service shim-store "$STORE_DIR" "$STORE_ARTIFACT" "$STORE_SHA_STAMP" ;;
+        sidecar) build_service shim-claude-sidecar "$SIDECAR_DIR" "$SIDECAR_ARTIFACT" "$SIDECAR_SHA_STAMP" ;;
         gc)     EXPLICIT_GC=1 ;;
         # Unreachable: the argument parser allowlists these same names. It is
         # here so that adding a target THERE and forgetting it here fails
