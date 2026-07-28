@@ -147,6 +147,19 @@ type Config struct {
 	Degraded    DegradedReporter
 	Permissions PermissionHandler
 
+	// OnHandshake fires after the handshake completes and BEFORE the Subscribe
+	// reads its from_seq off the SeqStore. Optional.
+	//
+	// THAT ORDERING IS THE WHOLE REASON IT EXISTS, and it is why this is not
+	// folded into OnConnected. A shim announcing a ROTATED vendor session id
+	// (ShimHello.vendor_session_id) is telling the daemon that the store seq
+	// space its high-water mark counts in has been retired; the mark must be
+	// reset before it is read, or this connection subscribes from a position
+	// that means nothing in the new space and then reads its seq=1 as a
+	// terminal regression. A hook that ran after the Subscribe could only
+	// correct the NEXT connection.
+	OnHandshake func(hello *corev1.ShimHello)
+
 	// OnConnected fires after each successful handshake + Subscribe, carrying
 	// the shim's ShimHello (so stitch sees turn_in_flight for mid-turn
 	// reattach). Optional; primarily a test synchronization hook.
@@ -375,6 +388,13 @@ func (c *Client) runOnce(ctx context.Context) (retErr error) {
 	if err := c.completeHandshake(ac, hello); err != nil {
 		conn.Close()
 		return err
+	}
+
+	// BEFORE the high-water mark is read: a shim announcing a rotated vendor
+	// session id resets it here, so the Subscribe below asks the NEW seq space
+	// for everything rather than resuming at a retired space's position.
+	if c.cfg.OnHandshake != nil {
+		c.cfg.OnHandshake(hello)
 	}
 
 	// Subscribe, resuming from the daemon-tracked high-water mark.
