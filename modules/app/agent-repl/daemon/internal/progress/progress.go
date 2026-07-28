@@ -236,6 +236,63 @@ func (m *Manager) NoteTurnAccepted(workspace, sessionID string) {
 	m.pushLocked(workspace, wp)
 }
 
+// NoteInterrupt opens the INTERRUPT WINDOW on the shim's ack of a
+// USER-COMMANDED stop (I1).
+//
+// The outcome is decided ATOMICALLY on that ack (core.proto InterruptOutcome:
+// the shim's single-threaded liveness check IS the answer), so the window
+// opens already carrying its verdict and there is no outcome-pending phase to
+// represent. All three outcomes open it: ALREADY_COMPLETE and FAILED move no
+// workspace phase, and the window is the only surface that reports them at
+// all.
+//
+// IT CLEARS WHEN THE NEXT TURN STARTS, never on a timer — see
+// openTurnLocked, which is the one place that clears it.
+//
+// ONLY THE COMMAND PATH CALLS THIS. The queue's interject sends the same
+// Interrupt to the same shim as machinery (a held prompt asked to run sooner,
+// not a user asking for the turn to stop), and it reaches this resolver from
+// nowhere: sessiondrv's interject calls the shim client directly, while the
+// frontend command's Interrupt is the sole caller here.
+func (m *Manager) NoteInterrupt(workspace, sessionID string, outcome corev1.InterruptOutcome) {
+	if workspace == "" {
+		m.logf("progress: NoteInterrupt with no workspace (session=%s outcome=%s); ignoring", sessionID, outcome)
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	wp := m.forLocked(workspace)
+	if sessionID != "" {
+		wp.view.SessionId = sessionID
+	}
+	wp.view.Interrupt = &frontendv1.InterruptWindow{
+		Active:  true,
+		SinceMs: m.clock(),
+		Outcome: outcome,
+	}
+	// STRUCTURAL: a stop landing is exactly the kind of latency the footer
+	// exists to show, so it goes out at once rather than riding a window.
+	m.pushLocked(workspace, wp)
+}
+
+// LiveTasks returns the workspace's live subagent-task count as this resolver
+// last adopted it from the SSM's WorkspaceState, and whether the workspace has
+// a view at all.
+//
+// The miss is reported rather than defaulted because the two answers differ:
+// "this workspace has no live tasks" and "nothing has ever told this resolver
+// about this workspace" are different facts, and the interrupt confirm gate
+// (the caller) must be able to say which one it acted on.
+func (m *Manager) LiveTasks(workspace string) (int64, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	wp, ok := m.views[workspace]
+	if !ok {
+		return 0, false
+	}
+	return wp.view.GetLiveTaskCount(), true
+}
+
 // SetCounts adopts the daemon-local ephemeral counters: how many permission
 // prompts are waiting on the user and how deep the held-prompt queue is.
 // Neither is a store fact — both live only in the daemon — so they are set
@@ -571,6 +628,11 @@ func (m *Manager) openTurnLocked(wp *workspaceProgress, atMs int64) bool {
 	wp.view.Failure = nil
 	wp.view.Retrying = nil
 	wp.retryDetailRich = false
+	// The interrupt window persists until the NEXT turn starts, for the same
+	// reason the failure does: it reports what happened to the turn that just
+	// stopped, and a new turn beginning is the moment that report stops being
+	// the news. Nothing else clears it — never a timer.
+	wp.view.Interrupt = nil
 	return true
 }
 
