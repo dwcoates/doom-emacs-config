@@ -320,6 +320,75 @@ is dispatched with the resume id and nil paths (a documented S7 constraint)."
       (should-not (eq (car err) 'agent-repl-resume-transcript-missing))
       (should (string-match-p "no live shim" (error-message-string err))))))
 
+;;;; ---- establishment nack surfacing ------------------------------------------
+
+(ert-deftest agent-repl-test-frontend-create-nack-reaches-the-echo-area ()
+  "The daemon's establishment nack is echoed, not only signalled.
+The nack names the deepest link that failed, and a caller that traps the
+signal would otherwise leave the user with nothing on screen."
+  ;; Arrange
+  (let (echoed)
+    (cl-letf (((symbol-function 'message)
+               (lambda (fmt &rest args) (setq echoed (apply #'format fmt args)))))
+      (agent-repl-test--with-uds-create
+          '(:error "session s_1 is not established — the shim never completed its handshake")
+        ;; Act
+        (should-error (agent-repl--frontend-create-session "/w"))
+        ;; Assert
+        (should (string-match-p "never completed its handshake" echoed))))))
+
+(ert-deftest agent-repl-test-frontend-create-nack-reaches-the-log ()
+  "The same nack is written to the agent-repl log, which survives the echo area."
+  ;; Arrange
+  (let (logged)
+    (cl-letf (((symbol-function 'message) (lambda (&rest _) nil))
+              ((symbol-function 'agent-repl--log)
+               (lambda (_ws fmt &rest args)
+                 (push (apply #'format fmt args) logged))))
+      (agent-repl-test--with-uds-create
+          '(:error "session s_1 is not established — the shim reported itself unhealthy")
+        ;; Act
+        (should-error (agent-repl--frontend-create-session "/w"))
+        ;; Assert
+        (should (seq-find (lambda (line)
+                            (string-match-p "NOT ESTABLISHED.*reported itself unhealthy" line))
+                          logged))))))
+
+(ert-deftest agent-repl-test-frontend-create-timeout-outlives-the-daemon-bound ()
+  "The client waits longer than the daemon's own establishment bound.
+Whichever bound fires first is the one the user reads, and only the daemon's
+nack can name the link that is still pending."
+  ;; Arrange / Act / Assert
+  (should (> agent-repl-frontend-create-timeout 20)))
+
+;;;; ---- session health as a diagnostic ----------------------------------------
+
+(ert-deftest agent-repl-test-session-health-probes-the-recorded-session ()
+  "The diagnostic command probes exactly the workspace's recorded session."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_live" :project-dir "/w")
+    (let (probed)
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
+                ((symbol-function 'message) (lambda (&rest _) nil))
+                ((symbol-function 'agent-repl--frontend-wait-session-healthy)
+                 (lambda (ws id) (setq probed (list ws id)) t)))
+        ;; Act
+        (should (agent-repl-session-health))
+        ;; Assert
+        (should (equal probed '("ws1" "s_live")))))))
+
+(ert-deftest agent-repl-test-session-health-refuses-a-workspace-with-no-session ()
+  "A workspace with no recorded session id is a loud refusal, never a pass."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+    (let (probed)
+      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
+                ((symbol-function 'agent-repl--frontend-wait-session-healthy)
+                 (lambda (&rest _) (setq probed t) t)))
+        ;; Act / Assert
+        (should-error (agent-repl-session-health) :type 'user-error)
+        (should-not probed)))))
+
 ;;;; ---- force-fresh override of the lost-transcript hard-fail ----------------
 
 (ert-deftest agent-repl-test-frontend-create-force-fresh-var-degrades-to-fresh ()
