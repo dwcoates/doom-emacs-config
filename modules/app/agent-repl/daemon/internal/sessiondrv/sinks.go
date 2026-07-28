@@ -147,6 +147,28 @@ type consumer struct {
 	// onSessionStarted fires when a SessionStarted event arrives, letting the
 	// driver arm the metaprompt re-fire for a RESUME/COMPACT_CONTINUE session.
 	onSessionStarted func(*corev1.SessionStarted)
+	// onVendorSessionID reports the VENDOR session uuid observed on a
+	// PERSISTENT store event's envelope. Assigned after construction (the
+	// driver binds it before any event can flow) rather than taken as a
+	// constructor argument, which is already long enough that one more
+	// positional nil would be a hazard rather than a clarification.
+	// PERSISTENT store event's envelope, so the durable record tracks the
+	// conversation this session is actually filing under.
+	//
+	// The envelope's session_id IS that uuid for anything the store stamped a
+	// seq onto — the shim reads it off the SDK message and the sidecar derives
+	// it from `<uuid>.jsonl`, and the two must agree or the store's dedup could
+	// not merge them. EPHEMERAL events (seq 0) carry the daemon's own s_ id
+	// instead, which is why the seq is the discriminator rather than the
+	// payload kind.
+	//
+	// WHY THE REGISTRY NEEDS THE LIVE STREAM AS A SOURCE. The uuid is what
+	// binds a rotated conversation's events to a workspace, and what a shim
+	// (re)handshake's announcement is COMPARED AGAINST to notice a rotation at
+	// all. Learning it only from a discovered transcript leaves the record
+	// empty for a session that has not been rehydrated, and an empty record has
+	// nothing for the announcement to differ from.
+	onVendorSessionID func(vendorSessionID string)
 	// onTurn reports an observed turn boundary (true = TurnStarted, false =
 	// TurnEnded). It drives the prompt queue's interception and drain (E4).
 	// Called on the shim read-loop goroutine, so the handler must not block on
@@ -214,6 +236,18 @@ func newConsumer(workspace, sessionID string, push Pusher, applier StateApplier,
 }
 
 // retain appends ev to the bounded ring, dropping the oldest past ringCap.
+// observeVendorSessionID reports a PERSISTENT event's envelope session id as
+// the conversation's vendor uuid. Seq 0 (ephemeral) carries the daemon's own
+// id and is skipped; see onVendorSessionID.
+func (c *consumer) observeVendorSessionID(ev *corev1.Event) {
+	if c.onVendorSessionID == nil || ev.GetSeq() == 0 {
+		return
+	}
+	if sid := ev.GetSessionId(); sid != "" {
+		c.onVendorSessionID(sid)
+	}
+}
+
 func (c *consumer) retain(ev *corev1.Event) {
 	c.mu.Lock()
 	c.ring = append(c.ring, ev)
@@ -322,6 +356,7 @@ func (c *consumer) applyCommandsChanged(cc *datav1.CommandsChanged) *datav1.Syst
 // its own cause).
 func (c *consumer) Apply(ev *corev1.Event) {
 	c.retain(ev)
+	c.observeVendorSessionID(ev)
 	if ss := ev.GetSessionStarted(); ss != nil && c.onSessionStarted != nil {
 		c.onSessionStarted(ss)
 	}
@@ -370,6 +405,7 @@ func (c *consumer) Apply(ev *corev1.Event) {
 // silent drop.
 func (c *consumer) Consume(ev *corev1.Event) {
 	c.retain(ev)
+	c.observeVendorSessionID(ev)
 	c.applyProgress(ev)
 	c.observeBackfill(ev)
 	switch p := ev.GetPayload().(type) {
