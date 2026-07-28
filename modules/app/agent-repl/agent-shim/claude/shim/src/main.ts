@@ -358,6 +358,10 @@ async function runUdsMode(args: CliArgs, createQuery: SessionDeps["createQuery"]
     // SessionStarted.source: RESUME when respawned to resume an on-disk
     // session, FRESH for a brand-new one (design §5.2 SessionSource).
     sessionSource: args.resume !== undefined ? SessionSource.RESUME : SessionSource.FRESH,
+    // The argv posture the query is CONSTRUCTED with. The daemon's
+    // DaemonHello.permission_mode overrides it inside the bring-up gate; this
+    // is passed so the override is a comparison rather than a guess.
+    permissionMode: args.permissionMode,
     // `--resume <uuid>` IS the vendor session id the store keys events by, so
     // a resumed session can subscribe correctly from its very first Subscribe
     // instead of waiting for the SDK to reveal the uuid.

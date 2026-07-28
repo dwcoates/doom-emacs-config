@@ -47,7 +47,7 @@ import type {
   SdkMessageLike,
   SdkUserMessageLike,
 } from "../src/session.js";
-import type { ModelInfo, SlashCommand } from "../src/protocol.js";
+import type { ModelInfo, PermissionMode, SlashCommand } from "../src/protocol.js";
 import type { Event, ShimReady, Subscribe } from "../src/uds/proto.js";
 import {
   AckSchema,
@@ -263,7 +263,16 @@ function streamEvent(seq: bigint, msg: ClaudeStreamMessage): Event {
  * property the gate exists to establish.
  */
 async function rig(
-  opts: { fromSeq?: bigint; sessionSource?: SessionSource; storeSessionId?: string; replayIdleMs?: number } = {},
+  opts: {
+    fromSeq?: bigint;
+    sessionSource?: SessionSource;
+    storeSessionId?: string;
+    replayIdleMs?: number;
+    /** The `--permission-mode` argv the session is constructed with. */
+    permissionMode?: PermissionMode;
+    /** DaemonHello.permission_mode; omitted models a daemon predating it. */
+    handshakeMode?: string;
+  } = {},
 ): Promise<Rig> {
   const store = await fakeStore();
   cleanups.push(() => store.close());
@@ -287,6 +296,7 @@ async function rig(
     udsSocketPath,
     storeSocketPath: store.socketPath,
     sessionSource: opts.sessionSource ?? SessionSource.FRESH,
+    ...(opts.permissionMode !== undefined ? { permissionMode: opts.permissionMode } : {}),
     ...(opts.storeSessionId !== undefined ? { storeSessionId: opts.storeSessionId } : {}),
     createQuery,
     heartbeatIntervalMs: 0,
@@ -308,6 +318,7 @@ async function rig(
   await daemon.next(ShimHelloSchema);
   daemon.send(DaemonHelloSchema, create(DaemonHelloSchema, {
     daemonVersion: "d1", protocolVersion: "1", fromSeq: opts.fromSeq ?? 0n,
+    ...(opts.handshakeMode !== undefined ? { permissionMode: opts.handshakeMode } : {}),
   }));
   // The gate opens the standing subscription on its OWN store connection
   // (single-role store) before it acks.
@@ -1284,5 +1295,156 @@ describe("UdsSession bring-up gate", () => {
     expect(resub.sessionId).toBe("uuid-new");
     expect(resub.fromSeq).toBe(0n);
     expect((await daemon2.next(ShimReadySchema)).vendorSessionId).toBe("uuid-new");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// HANDSHAKE-BORNE PERMISSION MODE (core.proto DaemonHello.permission_mode).
+// The daemon's session record decides the posture; argv is only a spawn-time
+// snapshot. These pin precedence, the refusal, and the readiness report.
+// ---------------------------------------------------------------------------
+
+describe("UdsSession handshake permission mode", () => {
+  it("applies the mode the DaemonHello carried to the SDK query", async () => {
+    // Arrange + Act: the gate runs with a handshake mode differing from argv.
+    const { query } = await rig({ permissionMode: "default", handshakeMode: "auto" });
+    // Assert
+    expect(query.permissionModes).toEqual(["auto"]);
+  });
+
+  it("logs the override when the handshake mode differs from argv", async () => {
+    // Arrange
+    const log = captureLog();
+    // Act
+    await rig({ permissionMode: "default", handshakeMode: "auto" });
+    // Assert
+    expect(log.find("handshake permission mode OVERRIDES")).toContain("permission_mode=auto");
+  });
+
+  it("applies the mode BEFORE the readiness ack, so no turn can run in the old one", async () => {
+    // Arrange + Act
+    const { query, ready } = await rig({ permissionMode: "default", handshakeMode: "plan" });
+    // Assert: the ack exists, and the switch had already happened when it was
+    // written (rig drains the ack, so a mode applied after it would be absent).
+    expect(ready.sessionId).toBe("sess-1");
+    expect(query.permissionModes).toEqual(["plan"]);
+  });
+
+  it("falls back to argv when the field is absent (a daemon predating it)", async () => {
+    // Arrange + Act: no handshakeMode at all — the rollout-compatibility case.
+    const { query } = await rig({ permissionMode: "acceptEdits" });
+    // Assert: nothing switched; the query stays as argv constructed it.
+    expect(query.permissionModes).toEqual([]);
+  });
+
+  it("asserts the mode on the query even when the handshake echoes argv", async () => {
+    // Arrange + Act
+    const { query } = await rig({ permissionMode: "auto", handshakeMode: "auto" });
+    // Assert: the gate STATES the posture rather than trusting that argv took
+    // — the offline fake query ignores argv entirely, and "the flag must have
+    // applied" is the assumption this whole change exists to stop making.
+    expect(query.permissionModes).toEqual(["auto"]);
+  });
+
+  it("accepts a launch-only mode that argv already launched the session in", async () => {
+    // Arrange + Act: bypassPermissions cannot be switched INTO, so matching
+    // argv is the only way a session can legitimately be in it.
+    const { query, ready } = await rig({
+      permissionMode: "bypassPermissions",
+      handshakeMode: "bypassPermissions",
+    });
+    // Assert: acked, and no doomed switch attempted.
+    expect(ready.sessionId).toBe("sess-1");
+    expect(query.permissionModes).toEqual([]);
+  });
+
+  it("refuses a launch-only mode the session was NOT launched in", async () => {
+    // Arrange
+    const log = captureLog();
+    const store = await fakeStore();
+    cleanups.push(() => store.close());
+    let query!: FakeQuery;
+    const udsSocketPath = tmpSocketPath();
+    const daemonListener = acceptShim(udsSocketPath);
+    cleanups.push(() => daemonListener.close());
+    const session = new UdsSession({
+      sessionId: "sess-1",
+      shimVersion: "9.9",
+      protocolVersion: "1",
+      udsSocketPath,
+      storeSocketPath: store.socketPath,
+      sessionSource: SessionSource.FRESH,
+      permissionMode: "default",
+      createQuery: (prompt, canUseTool): QueryLike => (query = new FakeQuery(prompt, canUseTool)),
+      heartbeatIntervalMs: 0,
+    });
+    const done = session.start();
+    cleanups.push(async () => {
+      await session.shutdown("test-cleanup");
+      query.endStream();
+      await done.catch(() => {});
+    });
+    const daemon = await daemonListener.next();
+    await daemon.next(ShimHelloSchema);
+
+    // Act
+    daemon.send(DaemonHelloSchema, create(DaemonHelloSchema, {
+      daemonVersion: "d1", protocolVersion: "1", permissionMode: "bypassPermissions",
+    }));
+    await until(() => log.count("bring-up gate REFUSED") === 1, "the refusal was logged");
+
+    // Assert: no ack, and no doomed switch attempted either.
+    expect(daemon.count(ShimReadySchema)).toBe(0);
+    expect(query.permissionModes).toEqual([]);
+  });
+
+  it("reports the EFFECTIVE mode on the readiness announcement", async () => {
+    // Arrange
+    const log = captureLog();
+    // Act
+    await rig({ permissionMode: "default", handshakeMode: "auto" });
+    // Assert
+    expect(log.find("readiness asserted")).toContain("permission_mode=auto");
+  });
+
+  it("refuses loudly and withholds the ack for a mode outside the vocabulary", async () => {
+    // Arrange: a full session whose store is healthy, so the ONLY thing that
+    // can refuse the gate is the mode.
+    const store = await fakeStore();
+    cleanups.push(() => store.close());
+    let query!: FakeQuery;
+    const udsSocketPath = tmpSocketPath();
+    const daemonListener = acceptShim(udsSocketPath);
+    cleanups.push(() => daemonListener.close());
+    const session = new UdsSession({
+      sessionId: "sess-1",
+      shimVersion: "9.9",
+      protocolVersion: "1",
+      udsSocketPath,
+      storeSocketPath: store.socketPath,
+      sessionSource: SessionSource.FRESH,
+      permissionMode: "default",
+      createQuery: (prompt, canUseTool): QueryLike => (query = new FakeQuery(prompt, canUseTool)),
+      heartbeatIntervalMs: 0,
+    });
+    const done = session.start();
+    cleanups.push(async () => {
+      await session.shutdown("test-cleanup");
+      query.endStream();
+      await done.catch(() => {});
+    });
+    const daemon = await daemonListener.next();
+    await daemon.next(ShimHelloSchema);
+    const log = captureLog();
+
+    // Act
+    daemon.send(DaemonHelloSchema, create(DaemonHelloSchema, {
+      daemonVersion: "d1", protocolVersion: "1", permissionMode: "yolo",
+    }));
+    await until(() => log.count("bring-up gate REFUSED") === 1, "the refusal was logged");
+
+    // Assert: no ack, and no silent fallback to "default" either.
+    expect(daemon.count(ShimReadySchema)).toBe(0);
+    expect(query.permissionModes).toEqual([]);
   });
 });
