@@ -212,6 +212,7 @@ export const CONVERSATION_ITEM_ARMS = [
   "contextCompacted",
   "permission",
   "systemFailure",
+  "skillBody",
 ] as const;
 export type ConversationItemArm = (typeof CONVERSATION_ITEM_ARMS)[number];
 

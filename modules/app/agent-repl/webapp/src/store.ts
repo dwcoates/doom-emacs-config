@@ -170,6 +170,13 @@ export interface ToolItem extends FeedOrderedItem {
   asyncSource?: AsyncSource;
   /** Streamed output of the detached task this call spawned. */
   taskOutput?: string;
+  /**
+   * A launched skill's own SKILL.md, markdown, as the daemon addressed it to
+   * this call (`frontend.v1.SkillBodyItem`). Present only on a `Skill` call,
+   * and only once the harness has written the body — the card renders without
+   * it until then, which is why it is a merged field rather than a second item.
+   */
+  skillBody?: string;
   result?: {
     isError: boolean;
     content: string | Array<{ type: "text"; text: string }>;
@@ -560,6 +567,7 @@ function mergeToolItem(existing: ToolItem, incoming: ToolItem): ToolItem {
   if (incoming.resultTs !== undefined) merged.resultTs = incoming.resultTs;
   if (incoming.asyncSource !== undefined) merged.asyncSource = incoming.asyncSource;
   if (incoming.taskOutput !== undefined) merged.taskOutput = incoming.taskOutput;
+  if (incoming.skillBody !== undefined) merged.skillBody = incoming.skillBody;
   if (incoming.result !== undefined) merged.result = incoming.result;
   return merged;
 }

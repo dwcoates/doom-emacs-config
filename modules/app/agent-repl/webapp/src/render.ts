@@ -933,16 +933,6 @@ function ToolCard(
   ).length;
   const permBadge =
     pendingPerms > 0 ? `<span class="badge perm">needs permission</span>` : "";
-  // The member's bodies render as stacked folds in Shape A order (child
-  // feed above the detached stream), each through the one MemberFold.
-  const folds =
-    member !== null
-      ? member.bodies.map((spec) => MemberFold(member, spec, panels)).join("")
-      : "";
-  // A subagent's card carries its own live topbar right under the head:
-  // the session strip's renderer scoped to THIS agent (see topbar.ts).
-  const agentTopbar =
-    SUBAGENT_TOOLS.has(item.toolName) ? panels?.agentTopbar?.(item) ?? "" : "";
   // TABBAR, when a consecutive-run group hands one in, is the row of member
   // chips — rendered as the card's FIRST child so the tabs sit INSIDE the
   // bubble at its top, rather than floating above it (see groupHtml).
@@ -950,13 +940,104 @@ function ToolCard(
     <div class="tool-card tool-${variant.toLowerCase()}">
       ${tabBar}
       <div class="tool-head"><span class="tool-name">${escapeHtml(item.toolName)}</span>${status}${permBadge}${faceSide(member)}</div>
-      ${agentTopbar}
-      ${toolInput(item)}
-      ${progress}
-      ${folds}
-      ${toolResult(item)}
-      ${agentComposer(item, panels)}
+      ${cardContent(item, { item, member, progress, panels })}
     </div>`;
+}
+
+// ---------------------------------------------------------------------------
+// Card content presenters
+// ---------------------------------------------------------------------------
+//
+// EVERY async card wears the SAME chrome and differs only in what it puts
+// under it. ToolCard above owns the chrome — the variant class, the tab bar,
+// the name, the status badge, the permission badge, the face — and nothing
+// below this line may add to it. What varies is CONTENT, and each kind's
+// content is one pure function of the card's inputs, looked up by tool name.
+//
+// The registry is what makes the family a family. Before it, "what does an
+// agent card show that a skill card does not" was answerable only by reading
+// one 60-line function for the conditionals sprinkled through it, and adding a
+// kind meant adding another conditional to the middle of the shared body. Here
+// a kind is an entry, its content is its own function, and a kind that adds
+// nothing says so by not appearing.
+
+/** Everything a content presenter is given. Pure in, HTML out. */
+interface CardContext {
+  item: ToolItem;
+  /** The stream member backing this card, when the call streams one. */
+  member: StreamMember | null;
+  /** The pre-rendered progress line (chrome-adjacent, but content-placed). */
+  progress: string;
+  panels?: PanelContext;
+}
+
+type CardPresenter = (c: CardContext) => string;
+
+/**
+ * The content every card has: its input, its progress line, its member's
+ * stacked folds, its result, and the composer for any agent it spawned.
+ *
+ * The folds render in Shape A order (child feed above the detached stream),
+ * each through the one MemberFold — this is where an agent's panels and a
+ * watcher's subfeeds actually come from, for every kind, not just subagents.
+ */
+function baseCardContent(c: CardContext): string {
+  const folds =
+    c.member !== null
+      ? c.member.bodies.map((spec) => MemberFold(c.member as StreamMember, spec, c.panels)).join("")
+      : "";
+  return `${toolInput(c.item)}
+      ${c.progress}
+      ${folds}
+      ${toolResult(c.item)}
+      ${agentComposer(c.item, c.panels)}`;
+}
+
+/**
+ * A subagent's card (Task / Agent): the base content, preceded by the agent's
+ * own live topbar — the session strip's renderer scoped to THIS agent (see
+ * topbar.ts) — sitting right under the head.
+ */
+function subagentCardContent(c: CardContext): string {
+  const topbar = c.panels?.agentTopbar?.(c.item) ?? "";
+  return `${topbar}
+      ${baseCardContent(c)}`;
+}
+
+/**
+ * A skill's card: the base content, followed by the skill's own SKILL.md.
+ *
+ * The body is FOLDED BY DEFAULT and click-expandable, through the one capped
+ * -section mechanic every long card section uses (`skill-content` is a
+ * CAPPED_CLASSES entry, so expand.ts caps it, the click handler toggles it,
+ * and FeedRenderer.render re-applies the open state after every reconcile —
+ * which is what keeps a reader's expansion from collapsing under them when
+ * the card updates).
+ *
+ * It renders as MARKDOWN rather than escaped text because a skill IS a
+ * markdown document; the same renderer draws assistant prose and markdown Read
+ * previews.
+ */
+function skillCardContent(c: CardContext): string {
+  const body = c.item.skillBody;
+  if (body === undefined || body === "") return baseCardContent(c);
+  return `${baseCardContent(c)}
+      <div class="tool-output skill-content skill-content-md">${renderMarkdown(body)}</div>`;
+}
+
+/**
+ * Content presenter per tool name. A kind absent here has no content of its
+ * own and renders the base content — which is the honest statement that it
+ * adds nothing, rather than an entry that forwards.
+ */
+const CARD_PRESENTERS: ReadonlyMap<string, CardPresenter> = new Map<string, CardPresenter>([
+  ...[...SUBAGENT_TOOLS].map((name) => [name, subagentCardContent] as const),
+  ["Skill", skillCardContent],
+]);
+
+/** Dispatch one card's content to its kind's presenter. */
+function cardContent(item: ToolItem, c: CardContext): string {
+  return (CARD_PRESENTERS.get(item.toolName) ?? baseCardContent)(c);
 }
 
 /** The agent ids a card's spawn result announced (background agents). */
@@ -1304,8 +1385,8 @@ function toolInput(item: ToolItem): string {
   // Skill's input section IS its invocation: the skill name and, when the
   // call carried them, the args it was handed — the "/skill args" a user
   // would type. Capped and click-expandable like a Bash command, since the
-  // args can run long. The skill's full SKILL.md body is the separate
-  // content section the result renders (see toolResult).
+  // args can run long. The skill's full SKILL.md body is a separate content
+  // section the skill presenter draws (see skillCardContent).
   if (item.toolName === "Skill" && item.input && typeof item.input.skill === "string") {
     const args =
       typeof item.input.args === "string" && item.input.args !== "" ? ` ${item.input.args}` : "";
@@ -1347,15 +1428,6 @@ function toolResult(item: ToolItem): string {
         // there; on the TaskUpdate's own card it would be noise, and that
         // card is suppressed anyway (SUPPRESSED_TOOLS).
         return "";
-      case "skill":
-        // The launched skill's full SKILL.md body, the content section
-        // paired with the invocation the input renders. Capped and
-        // click-expandable like a Bash output. A skill IS a markdown file,
-        // so its body renders formatted like a markdown Read preview
-        // (readResultHtml's .tool-read-md) rather than escaped plain text.
-        return `<div class="tool-output skill-content skill-content-md">${renderMarkdown(
-          r.content,
-        )}</div>`;
     }
   }
   if (item.toolName === "Read" && !item.result.isError) {
@@ -1373,12 +1445,11 @@ function toolResult(item: ToolItem): string {
   if (item.toolName === "TaskUpdate" && !item.result.isError) {
     return "";
   }
-  // A Skill result with a skill render hint rendered its SKILL.md body as
-  // the content section above. Without one — a skill the daemon could not
-  // resolve to a SKILL.md (a plugin skill, a missing file) — the raw
-  // "Launching skill: <name>" echo adds nothing over the invocation the
-  // input already shows, so it is suppressed. Errors fall through below so
-  // a skill that failed to launch stays loud.
+  // A Skill's raw "Launching skill: <name>" echo adds nothing over the
+  // invocation the input already shows, so it is suppressed. The skill's own
+  // SKILL.md is a separate section the skill presenter draws from the
+  // daemon-correlated body (skillCardContent), not from this echo. Errors
+  // fall through below so a skill that failed to launch stays loud.
   if (item.toolName === "Skill" && !item.result.isError) {
     return "";
   }

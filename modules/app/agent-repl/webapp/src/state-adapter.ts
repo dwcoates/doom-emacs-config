@@ -746,6 +746,8 @@ function itemsFromFrame(frame: ConversationItemFrame): { items: ConversationItem
       return { items: [permissionItemFrom(frame.payload, frame.uuid)], ignores: [] };
     case "systemFailure":
       return { items: [systemFailureCard(frame.payload, frame.uuid)], ignores: [] };
+    case "skillBody":
+      return { items: [skillBodyToolItem(frame.payload, frame.uuid, tsFromMs(frame.tsMs))], ignores: [] };
     default: {
       const never: never = arm;
       throw new Error(`state-adapter: unhandled conversation item arm ${JSON.stringify(never)}`);
@@ -919,6 +921,31 @@ function toolItemFromResult(res: Obj, messageUuid: string, ts: string): ToolItem
       isError: pbool(res, "isError"),
       content: toolResultContent(res),
     },
+  };
+}
+
+/**
+ * SkillBodyItem {toolUseId, bodyMarkdown} → a PARTIAL tool item carrying only
+ * the body.
+ *
+ * The daemon addresses a launched skill's SKILL.md to the tool_use_id of the
+ * Skill call that launched it, which is the identity the store already files
+ * that call's card under — so this merges INTO the existing card exactly the
+ * way a tool_result does, and one invocation stays one card however its three
+ * pieces interleave. Empty toolName by the same contract as
+ * `toolItemFromResult`: the name lives on the call item, and the store
+ * field-merges the pair rather than replacing it.
+ */
+function skillBodyToolItem(body: Obj, messageUuid: string, ts: string): ToolItem {
+  return {
+    kind: "tool",
+    toolUseId: pstr(body, "toolUseId"),
+    toolName: "",
+    messageId: messageUuid,
+    ts,
+    inputJson: "",
+    inputDone: true,
+    skillBody: pstr(body, "bodyMarkdown"),
   };
 }
 

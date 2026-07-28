@@ -22,16 +22,28 @@ import { ancestorMatching } from "./dom.js";
  * Classes that mark a height-capped section. One entry per cap rule in
  * styles.css — a section is expandable exactly when the stylesheet caps
  * it, and styles.test.ts holds the two lists to each other.
+ *
+ * ORDER IS LOAD-BEARING: it is the precedence `primaryClass` keys a section
+ * by, so the SPECIFIC classes come first and the two generic wrappers
+ * (`tool-input`, `tool-output`) come last. A section usually carries both —
+ * a skill body is `tool-output skill-content`, a Bash output is
+ * `tool-output bash-output` — and keying those on the generic class is what
+ * makes their `class:occurrence` identity collide with any plain
+ * `.tool-output` that appears beside them. That collision is exactly the
+ * failure `expandedKeys` exists to prevent: a Skill card whose result box
+ * lands ABOVE its already-expanded body renumbered the body from
+ * `tool-output:0` to `tool-output:1`, so the reconcile re-opened the result
+ * and collapsed the body under the reader.
  */
 export const CAPPED_CLASSES = [
-  "tool-input",
-  "tool-output",
   "tool-read-output",
   "bash-input",
   "bash-output",
   "diff-output",
   "skill-input",
   "skill-content",
+  "tool-input",
+  "tool-output",
 ] as const;
 
 /** Selector matching every capped section (an element may carry several). */
