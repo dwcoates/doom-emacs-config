@@ -445,8 +445,12 @@ func (m *Manager) persistVendorSessionID(sessionID, csid string) {
 // forwarded at all: the daemon queues it (E4) and this returns nil, because
 // the command was accepted — it was accepted into the queue. The queue's own
 // pushed QueueView is what tells the frontend where the prompt went.
-func (m *Manager) SubmitPrompt(ctx context.Context, workspace, text, permissionMode string) error {
-	return m.submitPrompt(ctx, workspace, text, permissionMode, "frontend")
+// requestID is the frontend command's own id. It is what the daemon's prompt
+// RECEIPT is keyed on (promptecho.go) and what the durable transcript line is
+// later stamped with, so the two reconcile onto one bubble. An empty one (a
+// caller with no frontend request behind it) simply pushes no receipt.
+func (m *Manager) SubmitPrompt(ctx context.Context, workspace, requestID, text, permissionMode string) error {
+	return m.submitPrompt(ctx, workspace, requestID, text, permissionMode, "frontend")
 }
 
 // SubmitWorkspaceInitialPrompt submits a durable workspace-create job's initial
@@ -459,19 +463,30 @@ func (m *Manager) SubmitWorkspaceInitialPrompt(ctx context.Context, workspace, j
 	if jobID == "" {
 		return fmt.Errorf("sessiondrv: workspace initial prompt needs a job id")
 	}
-	return m.submitPrompt(ctx, workspace, text, permissionMode, "workspace-create:"+jobID)
+	return m.submitPrompt(ctx, workspace, "workspace-create:"+jobID, text, permissionMode, "workspace-create:"+jobID)
 }
 
-func (m *Manager) submitPrompt(ctx context.Context, workspace, text, permissionMode, origin string) error {
+func (m *Manager) submitPrompt(ctx context.Context, workspace, requestID, text, permissionMode, origin string) error {
 	d, err := m.ensure(ctx, workspace)
 	if err != nil {
 		return err
 	}
 
 	m.mu.Lock()
-	entry, queued := m.queueSubmitLocked(d, text, permissionMode)
+	entry, queued := m.queueSubmitLocked(d, requestID, text, permissionMode)
 	if !queued {
 		m.mu.Unlock()
+		// THE RECEIPT, pushed before the forward rather than after it: the send
+		// is what the bubble reports, and the shim's Ack can be hundreds of
+		// milliseconds away. A submit that then FAILS keeps its bubble — the
+		// user did send that text, the failure surfaces as its own card, and
+		// silently retracting what they typed would be the worse report.
+		//
+		// A QUEUED prompt deliberately reaches none of this: it renders as a
+		// queue chip until it is DELIVERED, and a bubble drawn now would claim
+		// an execution order the session is not going to follow. Its receipt is
+		// pushed at the delivery site instead (queue.go, deliver).
+		m.echo(d, requestID, text)
 		text = m.applyMetaprompt(d, text)
 		if err := d.client.SubmitPrompt(ctx, text, origin, permissionMode); err != nil {
 			// The prompt never reached the shim, so no turn is beginning — and

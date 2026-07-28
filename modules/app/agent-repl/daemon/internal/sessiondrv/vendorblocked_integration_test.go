@@ -151,7 +151,7 @@ func TestAVendorBlockedWorkspaceStillAcceptsTheNextPrompt(t *testing.T) {
 	// succeeds.
 	rig.apply(&corev1.TurnEnded{StopReason: "authentication_failed", IsError: true})
 	blocked := rig.state()
-	submitErr := rig.m.SubmitPrompt(context.Background(), vendorBlockedWorkspace, "try again", "")
+	submitErr := rig.m.SubmitPrompt(context.Background(), vendorBlockedWorkspace, "", "try again", "")
 	delivered := rig.client.promptTexts()
 	rig.apply(&corev1.TurnStarted{})
 	rig.apply(&corev1.TurnEnded{StopReason: "end_turn"})

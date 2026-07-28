@@ -40,10 +40,14 @@ func openTestSSM(t *testing.T, reg *registry.Registry) *ssm.Manager {
 // --- fakes ----------------------------------------------------------------
 
 type fakePrompts struct {
-	prompted   []string
-	interrupts []string
-	perms      []string
-	err        error
+	prompted []string
+	// promptRequestIDs records the request id each submit was routed WITH: it
+	// is what the daemon keys the prompt receipt on, so dropping it would be
+	// invisible to a test that only watched the text.
+	promptRequestIDs []string
+	interrupts       []string
+	perms            []string
+	err              error
 	// turnActive is what this fake reports as the workspace's observed turn
 	// state, so one double serves as both the prompt router and the interrupt
 	// gate's turn source (the production wiring binds one driver to both).
@@ -81,8 +85,9 @@ func newGatedHandler(t *testing.T, turnActive bool, tasks LiveTaskSource) (*comm
 	return h, p
 }
 
-func (f *fakePrompts) SubmitPrompt(_ context.Context, ws, text, _ string) error {
+func (f *fakePrompts) SubmitPrompt(_ context.Context, ws, requestID, text, _ string) error {
 	f.prompted = append(f.prompted, ws+":"+text)
+	f.promptRequestIDs = append(f.promptRequestIDs, requestID)
 	return f.err
 }
 func (f *fakePrompts) Interrupt(_ context.Context, ws string) error {
@@ -250,6 +255,22 @@ func TestCommandHandlerSubmitPromptRoutesToPrompts(t *testing.T) {
 	}
 	if len(p.prompted) != 1 || p.prompted[0] != "/ws1:hi" {
 		t.Fatalf("prompted = %v", p.prompted)
+	}
+}
+
+// TestCommandHandlerSubmitPromptCarriesTheRequestID pins the correlation the
+// prompt receipt is built on: the driver cannot key a bubble on an id the
+// handler kept to itself.
+func TestCommandHandlerSubmitPromptCarriesTheRequestID(t *testing.T) {
+	// Arrange
+	h, p, _, _ := newTestHandler(t)
+	// Act
+	if err := h.SubmitPrompt(context.Background(), "/ws1", "r1", &frontendv1.SubmitPromptCmd{Text: "hi"}); err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	// Assert
+	if len(p.promptRequestIDs) != 1 || p.promptRequestIDs[0] != "r1" {
+		t.Fatalf("routed request ids = %v, want [r1]", p.promptRequestIDs)
 	}
 }
 

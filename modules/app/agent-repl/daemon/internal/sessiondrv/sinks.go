@@ -206,6 +206,9 @@ type consumer struct {
 	// resync replays that rather than re-opening the alarm.
 	failItems map[string]*frontendv1.ConversationItem
 	failOrder []string
+	// echoes are the prompt receipts this daemon has pushed and the durable
+	// transcript has not yet claimed, OLDEST FIRST. See pushUserEcho.
+	echoes []*promptEcho
 	// backfill is the last never-blue state reported for this session (F2).
 	// In-memory latch: it is what keeps a long transcript from writing the
 	// registry record once per line.
@@ -550,6 +553,12 @@ func (c *consumer) noteClearOrCompact(ev *corev1.Event) {
 	}
 	logf("sessiondrv: replay floor raised to this clear or compaction")
 	c.floors.SetNewestClearOrCompactSeq(c.sessionID, seq)
+	// Outstanding prompt receipts go with it. They carry no seq, so nothing
+	// else would ever floor them, and a receipt for a prompt the clear just
+	// discarded would replay pre-clear text back above the floor.
+	if dropped := c.dropEchoes(); dropped > 0 {
+		logf("sessiondrv: dropped %d unclaimed prompt receipt(s) with the history this floor hides", dropped)
+	}
 }
 
 // reconcileTasks adopts a `BackgroundTasksChanged` snapshot as the
@@ -751,6 +760,14 @@ func (c *consumer) pushConversation(ev *corev1.Event, live bool) {
 	if cd == nil {
 		return // known-but-non-conversational vendor payload
 	}
+	// LIVE ONLY. A durable user turn arriving now may be the transcript's
+	// account of a submit this daemon made moments ago, and stamping it with
+	// that submit's request id is what lets the frontend reconcile it onto the
+	// receipt already on screen (promptecho.go). Replayed history has no live
+	// submit behind it, and claiming a receipt for one would misattribute both.
+	if live {
+		c.attributeUserTurn(cd)
+	}
 	c.push.PushConversationDelta(cd)
 	// The prompt round-trip receipt: one line per LIVE user prompt reaching
 	// the frontend push, closing the gap between "control request acked" (the
@@ -860,13 +877,20 @@ func (c *consumer) resync(fromSeq uint64) (floor uint64, haveFloor bool) {
 	// permission is re-presented on reconnect regardless of fromSeq. Idempotent
 	// by uuid (the permission request_id) — a re-push REPLACES.
 	for _, item := range c.snapshotPermItems() {
-		c.pushPermissionDelta(item)
+		c.pushLocalItem(item)
 	}
 	// Same for the retained failure cards (F4): they carry no store seq
 	// either, and a reconnecting frontend that could not see WHY its
 	// workspace is off-green is the gap the cards exist to close.
 	for _, item := range c.snapshotFailItems() {
-		c.pushPermissionDelta(item)
+		c.pushLocalItem(item)
+	}
+	// And the prompt receipts the durable transcript has not claimed yet
+	// (promptecho.go). Same reasoning once more: no store seq, so no fromSeq
+	// covers them — and a frontend that reconnects between a submit and its
+	// transcript line would otherwise find the user's own prompt missing.
+	for _, item := range c.snapshotEchoes() {
+		c.pushLocalItem(item)
 	}
 	return c.ringFloor()
 }
@@ -907,12 +931,13 @@ func (c *consumer) pushPermission(item *frontendv1.ConversationItem) {
 	}
 	c.permItems[item.GetUuid()] = item
 	c.mu.Unlock()
-	c.pushPermissionDelta(item)
+	c.pushLocalItem(item)
 }
 
-// pushPermissionDelta wraps a single permission item in a ConversationDelta and
-// pushes it (no store seq: through_seq stays 0, daemon-local).
-func (c *consumer) pushPermissionDelta(item *frontendv1.ConversationItem) {
+// pushLocalItem wraps a single DAEMON-COMPOSED item (a permission, a failure
+// card, a prompt receipt) in a ConversationDelta and pushes it. No store seq:
+// through_seq stays 0, because nothing in the store produced it.
+func (c *consumer) pushLocalItem(item *frontendv1.ConversationItem) {
 	c.push.PushConversationDelta(&frontendv1.ConversationDelta{
 		Workspace: c.workspace,
 		SessionId: c.sessionID,
@@ -949,7 +974,7 @@ func (c *consumer) pushFailure(uuid string, failure *frontendv1.SystemFailureIte
 
 	c.logf("sessiondrv: system failure session=%s uuid=%s type=%s resolved=%v: %s",
 		c.sessionID, uuid, failure.GetErrorType(), failure.GetResolvedAtMs() != 0, failure.GetSourceDetail())
-	c.pushPermissionDelta(item)
+	c.pushLocalItem(item)
 }
 
 // snapshotFailItems returns the retained failure items in first-seen order,

@@ -216,7 +216,7 @@ func (r *interruptFlowRig) interrupt() error {
 // submit submits a prompt for the workspace.
 func (r *interruptFlowRig) submit(text string) error {
 	r.t.Helper()
-	return r.m.SubmitPrompt(context.Background(), interruptFlowWorkspace, text, "")
+	return r.m.SubmitPrompt(context.Background(), interruptFlowWorkspace, "", text, "")
 }
 
 // lastView returns the newest ProgressView a subscriber was sent, or nil.
