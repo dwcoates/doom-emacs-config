@@ -467,6 +467,30 @@ describe("feed order under replay/live interleave", () => {
       .toEqual(["h1", "h2", "h3", "prompt"]);
   });
 
+  it("ranks a seq-less daemon push at the feed tail", () => {
+    // Arrange — history up to seq 10.
+    const store = new ConversationStore();
+    store.ingest([itemsEffect([textItem({ blockId: "h1", uuid: "h1:0" })], 10)]);
+    // Act — a daemon-composed delta (through-seq 0: a prompt receipt, a
+    // permission card, a failure card — none of them store facts).
+    store.ingest([itemsEffect([userTurnItem("r1")], 0)]);
+    // Assert — it describes what is happening NOW, so it belongs at the tail;
+    // rank 0 would file it above every item the session ever produced.
+    expect(store.state.items.map((i) => i.kind)).toEqual(["text", "user-turn"]);
+  });
+
+  it("leaves a seq-less item where it landed when its durable twin arrives", () => {
+    // Arrange — history, then the daemon's seq-less prompt receipt.
+    const store = new ConversationStore();
+    store.ingest([itemsEffect([textItem({ blockId: "h1", uuid: "h1:0" })], 10)]);
+    store.ingest([itemsEffect([userTurnItem("r1")], 0)]);
+    // Act — the durable transcript line, stamped with the same request id.
+    store.ingest([itemsEffect([userTurnItem("r1")], 11)]);
+    // Assert — one bubble, still at the tail: a redelivery replaces content,
+    // never position.
+    expect(store.state.items.map((i) => i.kind)).toEqual(["text", "user-turn"]);
+  });
+
   it("keeps intra-delta order for items sharing one through-seq", () => {
     // Arrange / Act — one delta delivering two blocks.
     const store = new ConversationStore();
