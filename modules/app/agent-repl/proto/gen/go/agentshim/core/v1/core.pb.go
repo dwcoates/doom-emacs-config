@@ -2132,9 +2132,40 @@ type DaemonHello struct {
 	// The daemon reads it AFTER it has reconciled the vendor session id this
 	// connection's ShimHello announced, so a rotation's reset to zero is already
 	// applied to the number that lands here.
-	FromSeq       uint64 `protobuf:"varint,3,opt,name=from_seq,json=fromSeq,proto3" json:"from_seq,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	FromSeq uint64 `protobuf:"varint,3,opt,name=from_seq,json=fromSeq,proto3" json:"from_seq,omitempty"`
+	// The session's PERMISSION POSTURE, taken from the daemon's session record.
+	//
+	// The daemon resolves a record carrying no mode to "auto" before it writes
+	// this field, so the field is NEVER EMPTY on the wire from a daemon that
+	// speaks it. An empty value therefore means exactly one thing: the peer is
+	// an OLDER daemon that predates this field, and the shim falls back to its
+	// --permission-mode argv (rollout compatibility only).
+	//
+	// The vocabulary is the SHIM's closed set, not a second enum invented here:
+	// see the shim's protocol.ts PERMISSION_MODES. A value outside it is a
+	// protocol error the shim REFUSES loudly — it withholds ShimReady and
+	// reports a DegradedState, exactly as it does when the store link cannot be
+	// opened. It never silently falls back to "default".
+	//
+	// The shim applies it as the session's initial mode inside the bring-up
+	// gate, before it acks, so the FIRST turn already runs under it. It TAKES
+	// PRECEDENCE over the --permission-mode argv flag: argv is a spawn-time
+	// snapshot, while this is read off the record at handshake time, and every
+	// reattach re-reads it.
+	//
+	// WHY IT RIDES THE HELLO. The daemon appended --permission-mode only when
+	// the record carried one, so a session created with no explicit mode (the
+	// workspace-generation inbox path) spawned a shim whose parser defaulted to
+	// "default" — the generated first prompt then ran in prompting mode with
+	// nobody there to answer. Carrying the resolved posture in the gate makes
+	// "the shim's mode is whatever the record says" true by construction rather
+	// than by argv assembly getting every branch right.
+	//
+	// The per-prompt SubmitPrompt.permission_mode override is unaffected: this
+	// sets where the session STARTS, that changes it mid-flight.
+	PermissionMode string `protobuf:"bytes,4,opt,name=permission_mode,json=permissionMode,proto3" json:"permission_mode,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *DaemonHello) Reset() {
@@ -2186,6 +2217,13 @@ func (x *DaemonHello) GetFromSeq() uint64 {
 		return x.FromSeq
 	}
 	return 0
+}
+
+func (x *DaemonHello) GetPermissionMode() string {
+	if x != nil {
+		return x.PermissionMode
+	}
+	return ""
 }
 
 // The shim's FINAL ACK of the gated handshake: this session is fully wired.
@@ -3634,11 +3672,12 @@ const file_agentshim_core_v1_core_proto_rawDesc = "" +
 	"\fshim_version\x18\x03 \x01(\tR\vshimVersion\x12)\n" +
 	"\x10protocol_version\x18\x04 \x01(\tR\x0fprotocolVersion\x12$\n" +
 	"\x0eturn_in_flight\x18\x05 \x01(\bR\fturnInFlight\x12*\n" +
-	"\x11vendor_session_id\x18\x06 \x01(\tR\x0fvendorSessionId\"z\n" +
+	"\x11vendor_session_id\x18\x06 \x01(\tR\x0fvendorSessionId\"\xa3\x01\n" +
 	"\vDaemonHello\x12%\n" +
 	"\x0edaemon_version\x18\x01 \x01(\tR\rdaemonVersion\x12)\n" +
 	"\x10protocol_version\x18\x02 \x01(\tR\x0fprotocolVersion\x12\x19\n" +
-	"\bfrom_seq\x18\x03 \x01(\x04R\afromSeq\"q\n" +
+	"\bfrom_seq\x18\x03 \x01(\x04R\afromSeq\x12'\n" +
+	"\x0fpermission_mode\x18\x04 \x01(\tR\x0epermissionMode\"q\n" +
 	"\tShimReady\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x19\n" +
