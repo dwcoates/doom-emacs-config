@@ -2883,8 +2883,8 @@ A workspace that still has a live perspective switches in place via
 `agent-repl--ws-switch'.  One WITHOUT a live perspective is revived
 from persisted state via `agent-repl--picker-revive', after
 `agent-repl--picker-ensure-directory' recreates its worktree/directory
-when missing.  Then hydrates the priority badge and flashes the tab on
-a deferred timer, mirroring the PROJECT-arg path of
+when missing.  Then hydrates the priority badge on a deferred timer,
+mirroring the PROJECT-arg path of
 `agent-repl-switch-to-project'.  Re-activating the workspace stamps its
 `:last-viewed-at' via the persp-activated hook, so the picker reorders
 it to the front next time.
@@ -2912,8 +2912,7 @@ Keying on perspective existence revives it instead."
                          (let ((current (ignore-errors (agent-repl--ws-current-name))))
                            (agent-repl--log current "picker-open-selection: deferred hydrate current=%s selected=%s dir=%s"
                                              current name dir)
-                           (agent-repl--hydrate-and-reorder-on-open current dir)
-                           (agent-repl--flash-current-tab)))))
+                           (agent-repl--hydrate-and-reorder-on-open current dir)))))
       (agent-repl--log (agent-repl--ws-current-name)
                         "picker-open-selection: invalid payload without :name payload=%S" payload))))
 
@@ -2933,8 +2932,7 @@ worktree.el's callers rely on), switches via
 `+workspaces-switch-to-project-h' creates/activates the persp keyed on
 the project basename), opens the most-recently-accessed file under
 PROJECT, hydrates the saved display state and reseats by priority via
-the shared `agent-repl--hydrate-and-reorder-on-open' step, and flashes
-the activated tab.
+the shared `agent-repl--hydrate-and-reorder-on-open' step.
 
 Distinct from `agent-repl--switch-to-workspace': that primitive is
 name-keyed and assumes the persp already exists.  Both differ from
@@ -2960,8 +2958,7 @@ revival path that bypasses the Doom hook to preserve the exact ws name."
                                (find-file recent-file))
                            (agent-repl--log current "switch-to-project: deferred no existing recent-file candidate=%s project=%s"
                                              recent-file project))
-                         (agent-repl--hydrate-and-reorder-on-open current project))))
-        (agent-repl--flash-current-tab))
+                         (agent-repl--hydrate-and-reorder-on-open current project)))))
     (let ((sel (agent-repl--read-workspace-via-picker)))
       (if sel
           (progn
@@ -2980,11 +2977,7 @@ folded repos), then the hide-mode filter
 \(`agent-repl--filter-hidden-names'), so both folded-repo workspaces and
 closed-REPL workspaces dropped from the tabline are skipped during
 s-{ / s-}.  Mirrors Doom's protected-workspace handling: when current
-is the nil-persp, switch to `+workspaces-main' instead of cycling.
-Does NOT flash the destination tab — left/right cycling is
-high-frequency navigation and the flash becomes noise; identity-based
-jumps (`SPC p p', priority change, worktree jump) keep the flash since
-they're discrete attention cues."
+is the nil-persp, switch to `+workspaces-main' instead of cycling."
   (let ((current-name (agent-repl--ws-current-name)))
     (if (agent-repl--ws-protected-p current-name)
         (agent-repl--ws-switch (agent-repl--ws-main-name) t)
@@ -3037,7 +3030,7 @@ Drop-in replacement for `+workspace/switch-right' that honors
 (defun agent-repl--workspace-switch-by-index (index)
   "Switch to workspace at zero-based INDEX in `agent-repl--ws-tabline-names'.
 Signals `user-error' if INDEX is out of range.  Pure persp wrapper —
-does not consult `current-prefix-arg' and does not flash the tab.
+does not consult `current-prefix-arg'.
 
 Indexes the TAB-BAR list (`--ws-tabline-names'), not the raw workspace
 list, so a folded repo takes its workspaces out of the
@@ -3169,8 +3162,7 @@ slot — the `SPC TAB p' UX, where the user keeps navigating the slot
 they were sitting on.  When KEEP-FOCUS is non-nil, focus stays on the
 moved workspace; this is what the on-close auto-deprio path wants,
 since the user just closed claude in this workspace and shouldn't get
-yanked away from it.  Pulses the moved tab via `agent-repl-flash-tab'
-so the user can visually track it to its new home."
+yanked away from it."
   (interactive)
   (let* ((current (agent-repl--ws-current-name))
          (names (agent-repl--ws-frame-ordered-names))
@@ -3187,7 +3179,6 @@ so the user can visually track it to its new home."
     (agent-repl--force-tab-bar-redraw)
     (when (and next-name (not keep-focus))
       (agent-repl--ws-switch next-name))
-    (agent-repl-flash-tab current)
     (if keep-focus
         (message "Pushed '%s' to second-to-last." current)
       (message "Pushed '%s' to second-to-last; switched to '%s'."

@@ -293,13 +293,13 @@ producer of the leak can be identified from the message alone."
 
 (ert-deftest agent-repl-test-ws-del-clears-runtime-key ()
   "ws-del clears every key listed in `agent-repl--ws-runtime-keys'.
-Asserts a representative runtime key (`:flashing') is reset to nil so
-post-nuke render passes don't paint a stale flash on a tombstoned tab."
+Asserts a representative runtime key (`:pending-show-panels') is reset to
+nil so post-nuke passes don't act on stale runtime intent."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
-    (agent-repl--ws-put "ws1" :flashing t)
+    (agent-repl--ws-put "ws1" :pending-show-panels t)
     (agent-repl--ws-del "ws1")
-    (should-not (agent-repl--ws-get "ws1" :flashing))))
+    (should-not (agent-repl--ws-get "ws1" :pending-show-panels))))
 
 (ert-deftest agent-repl-test-ws-del-clears-pushed-render-state ()
   "ws-del clears `:pushed-render-state' — a daemon-pushed runtime key tied

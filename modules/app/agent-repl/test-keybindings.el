@@ -1409,35 +1409,6 @@ asserts only one happened."
         (agent-repl-set-priority "p1")
         (should (equal reordered-ws "ws1"))))))
 
-(ert-deftest agent-repl-test-set-priority-flashes-target-ws ()
-  "set-priority pulses the target workspace's tab via flash-tab so the
-user can spot the slot whose priority just shifted."
-  (agent-repl-test--with-clean-state
-    (let (flashed-ws)
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
-                ((symbol-function 'agent-repl--state-save) (lambda (_) nil))
-                ((symbol-function 'agent-repl--reorder-workspace-by-priority) (lambda (_) nil))
-                ((symbol-function 'force-mode-line-update) (lambda (&rest _) nil))
-                ((symbol-function 'message) (lambda (&rest _) nil))
-                ((symbol-function 'agent-repl-flash-tab)
-                 (lambda (ws &rest _) (setq flashed-ws ws))))
-        (agent-repl-set-priority "p1")
-        (should (equal flashed-ws "ws1"))))))
-
-(ert-deftest agent-repl-test-set-priority-flashes-explicit-ws ()
-  "set-priority flashes the explicit WS target, not the current workspace."
-  (agent-repl-test--with-clean-state
-    (let (flashed-ws)
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "current-ws"))
-                ((symbol-function 'agent-repl--state-save) (lambda (_) nil))
-                ((symbol-function 'agent-repl--reorder-workspace-by-priority) (lambda (_) nil))
-                ((symbol-function 'force-mode-line-update) (lambda (&rest _) nil))
-                ((symbol-function 'message) (lambda (&rest _) nil))
-                ((symbol-function 'agent-repl-flash-tab)
-                 (lambda (ws &rest _) (setq flashed-ws ws))))
-        (agent-repl-set-priority "p2" "other-ws")
-        (should (equal flashed-ws "other-ws"))))))
-
 (ert-deftest agent-repl-test-set-priority-logs-old-to-new-transition ()
   "set-priority logs the old -> new priority transition."
   (agent-repl-test--with-clean-state

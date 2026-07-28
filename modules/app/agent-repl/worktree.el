@@ -356,23 +356,11 @@ Signals an error if the switch fails — downstream code assumes the
 switch succeeded, so silent failure would operate on the wrong
 workspace.
 
-This is the raw primitive — prefer `agent-repl-jump-to-workspace' for
-user-facing identity-based jumps so the destination tab flashes.
 Routes through `agent-repl--ws-switch' (workspace.el integration
 boundary); callers must not call `+workspace-switch' directly."
   (agent-repl--log ws "switch-to-workspace: ws=%s" ws)
   (agent-repl--ws-switch ws)
   (agent-repl--log ws "switch-to-workspace: switched ws=%s" ws))
-
-(defun agent-repl-jump-to-workspace (ws &optional no-flash)
-  "Jump to workspace WS and pulse its tab via `agent-repl-flash-tab'.
-The flash is inherent — every identity-based jump that goes through this
-function draws the eye to the destination tab.  Pass NO-FLASH non-nil to
-suppress the pulse for bulk paths (e.g., snapshot restore) where a flash
-storm would be noise."
-  (agent-repl--switch-to-workspace ws)
-  (unless no-flash
-    (agent-repl--flash-current-tab)))
 
 (defun agent-repl--restore-focus (orig-persp orig-window orig-buffer)
   "Restore perspective to ORIG-PERSP and select ORIG-WINDOW / ORIG-BUFFER.
@@ -1056,7 +1044,7 @@ perspective switch that `agent-repl--with-preserved-focus' unwinds, so
 the caller's active workspace / window / buffer are all restored when
 this returns.  The whole switch-in / build / switch-back is one
 synchronous execution, so Emacs never redisplays the intermediate frame
-and the caller sees no flash; persp-mode saves WS's now-panel-bearing
+and the caller sees no switch; persp-mode saves WS's now-panel-bearing
 window configuration when the unwind switches away from WS, so the first
 real switch to WS displays the built layout (with its webview already
 mounted) instead of mounting it then.

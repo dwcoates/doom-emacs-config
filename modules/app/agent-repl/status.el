@@ -592,24 +592,6 @@ tabs; readable against `agent-repl--color-selected-bg'.")
 (defconst agent-repl--tab-weight             'bold
   "Font weight applied to every tab face.")
 
-(defconst agent-repl--color-flash-bg         "#3b82f6"
-  "Saturated blue used for the transient flash face — see `agent-repl-flash-tab'.
-Distinct from `agent-repl--color-init-blue' so a flash is not confused
-with the :init agent-state at a glance.")
-
-(defcustom agent-repl-flash-count 2
-  "Number of on/off cycles when `agent-repl-flash-tab' pulses a tab."
-  :type 'integer
-  :group 'agent-repl)
-
-(defcustom agent-repl-flash-duration 1.0
-  "Total duration of a `agent-repl-flash-tab' pulse, in seconds.
-Distributed evenly across `agent-repl-flash-count' on/off cycles."
-  :type 'number
-  :group 'agent-repl)
-
-;; --- Appearance palette --- ;;
-
 (defconst agent-repl--tab-default
   `(:unselected (:bg unspecified
                  :fg unspecified
@@ -918,106 +900,25 @@ background work (yellow).")
 \(purple + ⛔): auth, usage limit, a persistent API failure, or an
 abnormal turn conclusion.")
 
-(defface agent-repl-tab-flash
-  `((t :background ,agent-repl--color-flash-bg
-       :foreground ,agent-repl--color-light
-       :weight ,agent-repl--tab-weight))
-  "Transient face applied while a workspace is in a `agent-repl-flash-tab'
-pulse — solid blue background regardless of the underlying state.")
-
-(defun agent-repl--ws-flashing-p (ws)
-  "Return non-nil if workspace WS is currently in a flash pulse."
-  (agent-repl--ws-get ws :flashing))
-
-(defun agent-repl--ws-set-flashing (ws val)
-  "Set workspace WS's :flashing flag to VAL.
-The tab renderer treats non-nil as an instruction to paint the tab with
-the flash face/spec on the next refresh."
-  (let ((previous (agent-repl--ws-get ws :flashing)))
-    (agent-repl--ws-put ws :flashing val)
-    ;; Flash steps are timer-driven and can be frequent; retain their state
-    ;; transitions only in verbose traces.
-    (agent-repl--log-verbose ws "ws-set-flashing: ws=%s previous=%s next=%s" ws previous val)))
-
-(defun agent-repl--flash-spec ()
-  "Return the appearance spec plist used for a flashing tab.
-Mirrors a normal palette row (see `agent-repl--tab-palette' docstring)
-but paints both the bracket and the name region in a uniform blue."
-  `(:bg ,agent-repl--color-flash-bg
-    :fg ,agent-repl--color-light
-    :bracket-bg ,agent-repl--color-flash-bg
-    :bracket-fg ,agent-repl--color-light
-    :weight ,agent-repl--tab-weight))
-
 (defun agent-repl--force-tab-bar-redraw ()
   "Force the tab-bar to repaint NOW, bypassing its string-equality cache.
 Tab-bar rendering caches by string equality, and `equal' on propertized
-strings ignores text properties — so changes that only differ in face
-\(e.g. a `:flashing' toggle\) won't trigger a repaint via
+strings ignores text properties — so a change that only differs in face
+\(e.g. a state color going from red to green\) won't trigger a repaint via
 `force-mode-line-update' alone.  This helper flips the load-bearing
 `agent-repl--tabline-space-toggle' so the next tabline render appends
 a different cache-buster suffix (`agent-repl--tabline-cache-buster')
 and produces a different string, then drives the tab-bar update
 primitives.  See the block comment above the toggle's defvar for the
 rationale."
-  ;; This runs on the 1Hz status timer and is also called by flash timers;
-  ;; logging each redraw would bury actionable lifecycle records.
+  ;; This runs on the 1Hz status timer; logging each redraw would bury
+  ;; actionable lifecycle records.
   (setq agent-repl--tabline-space-toggle (not agent-repl--tabline-space-toggle))
   (when (fboundp 'tab-bar-tabs-set)
     (tab-bar-tabs-set (tab-bar-tabs)))
   (when (fboundp 'tab-bar--update-tab-bar-lines)
     (tab-bar--update-tab-bar-lines t))
   (force-mode-line-update t))
-
-(defun agent-repl--flash-step (ws step total-steps interval)
-  "Drive step STEP of WS's flash, then chain the next step via `run-at-time'.
-STEP is 0-based.  TOTAL-STEPS is `(1+ (* 2 COUNT))' — one entry for
-each on/off toggle plus a final cleanup.  Even STEPs paint the flash
-on, odd STEPs paint it off.  The terminal step (STEP == TOTAL-STEPS-1)
-clears `:flashing' and stops the chain — it does NOT schedule a
-successor.  Every step calls `agent-repl--force-tab-bar-redraw' so
-the tab repaints at flash speed instead of waiting for the 1-Hz poll."
-  (agent-repl--log-verbose ws "flash-step: ws=%s step=%d total=%d interval=%.3fs terminal=%s"
-                            ws step total-steps interval (>= step (1- total-steps)))
-  (if (>= step (1- total-steps))
-      (progn
-        (agent-repl--ws-set-flashing ws nil)
-        (agent-repl--force-tab-bar-redraw))
-    (agent-repl--ws-set-flashing ws (cl-evenp step))
-    (agent-repl--force-tab-bar-redraw)
-    (run-at-time interval nil
-                 #'agent-repl--flash-step ws (1+ step) total-steps interval)))
-
-(defun agent-repl-flash-tab (ws &optional count duration)
-  "Pulse the tab for workspace WS COUNT times across DURATION seconds.
-COUNT defaults to `agent-repl-flash-count'; DURATION defaults to
-`agent-repl-flash-duration'.  Used to draw the user's attention to a
-workspace whose tab-bar position just changed (e.g., after a deprio
-push-to-back), so the eye can track it to its new home.
-
-Drives the sequence via `agent-repl--flash-step', which runs the
-first step synchronously and then chains each subsequent step from
-the previous one via `run-at-time'.  Versus scheduling every toggle
-up-front, the chain gives uniform real-time spacing when Emacs is
-busy, makes mid-sequence cancellation easy (only one timer is ever
-pending), and avoids the closure-capture pitfalls of shared loop
-variables."
-  (let* ((count (or count agent-repl-flash-count))
-         (duration (or duration agent-repl-flash-duration))
-         (interval (/ duration (* 2.0 count)))
-         (total-steps (1+ (* 2 count))))
-    (agent-repl--log ws "flash-tab ws=%s count=%d duration=%s" ws count duration)
-    (agent-repl--flash-step ws 0 total-steps interval)))
-
-(defun agent-repl--flash-current-tab ()
-  "Pulse the current workspace's tab via `agent-repl-flash-tab'.
-Centralizes the post-jump flash so every identity-based workspace jump
-draws the eye to the destination tab uniformly.  No-op when
-`agent-repl-flash-tab' is unbound or when `agent-repl--ws-current-name'
-returns nil — those come from optional layers that may not be loaded yet
-at startup."
-  (when (fboundp 'agent-repl-flash-tab)
-    (agent-repl-flash-tab (agent-repl--ws-current-name))))
 
 (defun agent-repl--render-tab (name spec label name-face img-str)
   "Render a tab string for workspace NAME from SPEC.
@@ -1120,26 +1021,19 @@ built via `agent-repl--tab-spec-bracket-only' so only the [N] bracket
 keeps the state's color.  The bracket label is the tab's 1-based INDEX
 and nothing else: state reaches the bracket as COLOR, so a workspace
 whose panels are closed still reads its state from the bracket's
-color without any glyph beside the numeral.  When the workspace's
-`:flashing' flag is set \(see `agent-repl-flash-tab'\), the spec and
-name face are overridden to a uniform pulse so the tab stands out."
+color without any glyph beside the numeral."
   ;; Called on every tab-bar redisplay, potentially many times per second;
   ;; renderer branch traces would overwhelm even verbose diagnostics.
   (let* ((selected      (equal current-name name))
-         (flashing      (agent-repl--ws-flashing-p name))
          (display-state (agent-repl--ws-display-state name))
          (bracket-state (and (null display-state)
                              (agent-repl--ws-bracket-state name)))
-         (spec          (cond
-                         (flashing      (agent-repl--flash-spec))
-                         (bracket-state (agent-repl--tab-spec-bracket-only
-                                         bracket-state selected))
-                         (t             (agent-repl--tab-spec
-                                         display-state selected))))
+         (spec          (if bracket-state
+                            (agent-repl--tab-spec-bracket-only
+                             bracket-state selected)
+                          (agent-repl--tab-spec display-state selected)))
          (label         (number-to-string index))
-         (face          (if flashing
-                            'agent-repl-tab-flash
-                          (agent-repl--tab-face display-state selected)))
+         (face          (agent-repl--tab-face display-state selected))
          (img-str       (agent-repl--tab-priority-image-str name)))
     (agent-repl--render-tab name spec label face img-str)))
 
