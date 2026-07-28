@@ -2100,6 +2100,13 @@ The master kill-switch overrides the always-on file-write decoupling."
   (cl-letf (((symbol-function 'getenv) (lambda (_) nil)))
     (should (equal (agent-repl--workspace-prefix-slash) ""))))
 
+;;;; ---- Tests: agent-repl--output-dir constant ----
+
+(ert-deftest agent-repl-test-output-dir-is-absolute ()
+  "output-dir should be an absolute path under ~/.claude-emacs/output/."
+  (should (file-name-absolute-p agent-repl--output-dir))
+  (should (string-match-p "output/$" agent-repl--output-dir)))
+
 ;;;; ---- Tests: Buffer background color (moved from overlay.el) ----
 
 (ert-deftest agent-repl-test-grey-hex-format ()

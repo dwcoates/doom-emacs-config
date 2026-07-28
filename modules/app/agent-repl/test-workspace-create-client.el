@@ -14,38 +14,6 @@
           '(("n" . agent-repl-create-worktree-workspace)
             ("N" . agent-repl-create-worktree-workspace-from-origin-master)))))
 
-(ert-deftest agent-repl-test-workspace-create-send-promptless-still-daemon-owned ()
-  "A blank initial prompt sends createWorkspace; it never selects no-agent."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "source" :project-dir "/tmp/source/")
-    (let ((sent nil)
-          (tracked nil)
-          (reads '("requested-name" "")))
-      (cl-letf (((symbol-function 'read-string)
-                 (lambda (&rest _) (pop reads)))
-                ((symbol-function 'agent-repl--ws-current-name)
-                 (lambda () "source"))
-                ((symbol-function 'agent-repl--uds-send-command)
-                 (lambda (field payload &optional workspace _process)
-                   (setq sent (list field payload workspace))
-                   "req-1"))
-                ((symbol-function 'agent-repl--uds-track-command)
-                 (lambda (&rest args) (setq tracked args)))
-                ((symbol-function 'agent-repl--do-create-worktree-workspace)
-                 (lambda (&rest _) (error "local worktree creation forbidden")))
-                ((symbol-function 'agent-repl--setup-worktree-session)
-                 (lambda (&rest _) (error "local session creation forbidden")))
-                ((symbol-function 'agent-repl--spawn-workspace-generation)
-                 (lambda (&rest _) (error "headless name generation forbidden"))))
-        (should (equal (agent-repl-create-worktree-workspace 'head) "req-1"))
-        (should (equal (car sent) "createWorkspace"))
-        (should (equal (plist-get (cadr sent) :requestedName)
-                       "requested-name"))
-        (should-not (plist-member (cadr sent) :initialPrompt))
-        (should (equal (caddr sent) "source"))
-        (should (equal tracked
-                       '("req-1" "createWorkspace" "source")))))))
-
 (ert-deftest agent-repl-test-workspace-create-master-wrapper-dispatches-master ()
   "`SPC TAB N' delegates to the same thin client with BASE `master'."
   (let ((seen nil))
@@ -55,51 +23,301 @@
       (agent-repl-create-worktree-workspace-from-origin-master "source")
       (should (equal seen '(master "source"))))))
 
-(ert-deftest agent-repl-test-workspace-create-send-includes-nonblank-prompt ()
-  "Creation carries prompt, account, permission posture, and consent."
-  (let ((sent nil))
-    (let ((agent-repl-frontend-permission-mode "auto")
-          (agent-repl-frontend-allow-ungated t))
-      (cl-letf (((symbol-function 'agent-repl--compute-config-dir)
-                 (lambda (dir)
-                   (should (equal dir "/tmp/source"))
-                   "/tmp/account"))
-                ((symbol-function 'agent-repl--uds-send-command)
-               (lambda (field payload &optional workspace _process)
-                 (setq sent (list field payload workspace))
-                 "req-2"))
-                ((symbol-function 'agent-repl--uds-track-command)
-                 (lambda (&rest _) nil)))
-        (agent-repl--workspace-create-send
-         "new" "/tmp/source" "master" "source" "/tmp/source"
-         "  investigate this  " "p1" "opus")
-        (should (equal (plist-get (cadr sent) :initialPrompt)
-                       "investigate this"))
-        (should (equal (plist-get (cadr sent) :baseCommit) "master"))
-        (should (equal (plist-get (cadr sent) :priority) "p1"))
-        (should (equal (plist-get (cadr sent) :model) "opus"))
-        (should (equal (plist-get (cadr sent) :configDir) "/tmp/account"))
-        (should (equal (plist-get (cadr sent) :permissionMode) "auto"))
-        (should (eq (plist-get (cadr sent) :allowUngated) t))))))
+;;;; ---- Tests: request composition (the single ingestion point) ----
 
-(ert-deftest agent-repl-test-workspace-create-send-explicit-default-posture ()
-  "Nil account/mode become explicit empty wire values without consent."
-  (let ((sent nil)
-        (agent-repl-frontend-permission-mode nil)
-        (agent-repl-frontend-allow-ungated nil))
-    (cl-letf (((symbol-function 'agent-repl--compute-config-dir)
-               (lambda (_dir) nil))
-              ((symbol-function 'agent-repl--uds-send-command)
-               (lambda (_field payload &rest _)
-                 (setq sent payload)
-                 "req-default"))
-              ((symbol-function 'agent-repl--uds-track-command)
-               (lambda (&rest _) nil)))
-      (agent-repl--workspace-create-send
-       "new" "/tmp/source" "master" "source" "/tmp/source" nil)
-      (should (equal (plist-get sent :configDir) ""))
-      (should (equal (plist-get sent :permissionMode) ""))
-      (should-not (plist-member sent :allowUngated)))))
+(defmacro agent-repl-test--with-command-inbox (&rest body)
+  "Run BODY with `agent-repl--output-dir' bound to a fresh temp inbox."
+  (declare (indent 0))
+  `(let* ((agent-repl--output-dir
+           (file-name-as-directory (make-temp-file "agent-repl-inbox" t)))
+          (agent-repl--workspace-create-requests
+           (make-hash-table :test 'equal)))
+     (unwind-protect (progn ,@body)
+       (delete-directory (directory-file-name agent-repl--output-dir) t))))
+
+(defun agent-repl-test--sole-command-entry ()
+  "Return the sole create entry written into the temp inbox, as an alist."
+  (let ((files (directory-files agent-repl--output-dir t
+                                "\\`workspace_commands_.*\\.json\\'")))
+    (should (= (length files) 1))
+    (let ((parsed (with-temp-buffer
+                    (insert-file-contents (car files))
+                    (json-parse-buffer :object-type 'alist
+                                       :array-type 'list))))
+      (should (= (length parsed) 1))
+      (car parsed))))
+
+(ert-deftest agent-repl-test-create-request-writes-one-command-file ()
+  "`SPC TAB n' emits exactly one create command file and no wire command."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-command-inbox
+      (agent-repl--ws-put "source" :project-dir "/tmp/source")
+      (let ((reads '("requested-name" "look into it")))
+        (cl-letf (((symbol-function 'read-string)
+                   (lambda (&rest _) (pop reads)))
+                  ((symbol-function 'agent-repl--ws-current-name)
+                   (lambda () "source"))
+                  ((symbol-function 'agent-repl--frontend-session-posture)
+                   (lambda (_dir) nil))
+                  ((symbol-function 'agent-repl--uds-send-command)
+                   (lambda (&rest _)
+                     (error "workspace creation must not use the wire"))))
+          (let ((id (agent-repl-create-worktree-workspace 'head))
+                (entry (agent-repl-test--sole-command-entry)))
+            (should (string-prefix-p "workspace_commands_" id))
+            (should (equal (alist-get 'type entry) "create"))
+            (should (equal (alist-get 'name entry) "requested-name"))
+            (should (equal (alist-get 'prompt entry) "look into it"))))))))
+
+(ert-deftest agent-repl-test-create-request-from-current-carries-head-base ()
+  "The from-current flavor pins `base_commit' to HEAD."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-command-inbox
+      (agent-repl--ws-put "source" :project-dir "/tmp/source")
+      (let ((reads '("wsname" "")))
+        (cl-letf (((symbol-function 'read-string)
+                   (lambda (&rest _) (pop reads)))
+                  ((symbol-function 'agent-repl--ws-current-name)
+                   (lambda () "source"))
+                  ((symbol-function 'agent-repl--frontend-session-posture)
+                   (lambda (_dir) nil)))
+          (agent-repl-create-worktree-workspace 'head)
+          (should (equal (alist-get 'base_commit
+                                    (agent-repl-test--sole-command-entry))
+                         "HEAD")))))))
+
+(ert-deftest agent-repl-test-create-request-from-master-carries-master-base ()
+  "The from-master flavor pins `base_commit' to the local trunk."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-command-inbox
+      (agent-repl--ws-put "source" :project-dir "/tmp/source")
+      (let ((reads '("wsname" "")))
+        (cl-letf (((symbol-function 'read-string)
+                   (lambda (&rest _) (pop reads)))
+                  ((symbol-function 'agent-repl--ws-current-name)
+                   (lambda () "source"))
+                  ((symbol-function 'agent-repl--frontend-session-posture)
+                   (lambda (_dir) nil)))
+          (agent-repl-create-worktree-workspace-from-origin-master)
+          (should (equal (alist-get 'base_commit
+                                    (agent-repl-test--sole-command-entry))
+                         "master")))))))
+
+(ert-deftest agent-repl-test-create-request-carries-source-workspace-fields ()
+  "The source workspace is nominated so the daemon inherits its posture."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-command-inbox
+      (agent-repl--ws-put "source" :project-dir "/tmp/source")
+      (let ((reads '("wsname" "")))
+        (cl-letf (((symbol-function 'read-string)
+                   (lambda (&rest _) (pop reads)))
+                  ((symbol-function 'agent-repl--ws-current-name)
+                   (lambda () "source"))
+                  ((symbol-function 'agent-repl--frontend-session-posture)
+                   (lambda (_dir) nil)))
+          (agent-repl-create-worktree-workspace 'head)
+          (let ((entry (agent-repl-test--sole-command-entry)))
+            (should (equal (alist-get 'source_workspace entry) "source"))
+            (should (equal (alist-get 'source_dir entry) "/tmp/source"))))))))
+
+(ert-deftest agent-repl-test-create-request-omits-blank-prompt ()
+  "A blank initial prompt emits NO `prompt' field.
+An empty string would make the daemon submit a blank turn into the fresh
+session, which is a visibly broken workspace rather than a quiet one."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-command-inbox
+      (agent-repl--ws-put "source" :project-dir "/tmp/source")
+      (let ((reads '("wsname" "   ")))
+        (cl-letf (((symbol-function 'read-string)
+                   (lambda (&rest _) (pop reads)))
+                  ((symbol-function 'agent-repl--ws-current-name)
+                   (lambda () "source"))
+                  ((symbol-function 'agent-repl--frontend-session-posture)
+                   (lambda (_dir) nil)))
+          (agent-repl-create-worktree-workspace 'head)
+          (should-not (assq 'prompt
+                            (agent-repl-test--sole-command-entry))))))))
+
+(ert-deftest agent-repl-test-create-request-emits-fork-from ()
+  "A fork request carries `fork_from' and needs no base commit."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-command-inbox
+      (cl-letf (((symbol-function 'agent-repl--frontend-session-posture)
+                 (lambda (_dir) nil)))
+        (agent-repl--workspace-create-request
+         :name "forked" :git-root "/tmp/source" :fork-from "parent"
+         :source-workspace "parent" :source-dir "/tmp/source")
+        (let ((entry (agent-repl-test--sole-command-entry)))
+          (should (equal (alist-get 'fork_from entry) "parent"))
+          (should-not (assq 'base_commit entry)))))))
+
+(ert-deftest agent-repl-test-create-request-carries-model-and-priority ()
+  "Optional model and priority ride the same entry when supplied."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-command-inbox
+      (cl-letf (((symbol-function 'agent-repl--frontend-session-posture)
+                 (lambda (_dir) nil)))
+        (agent-repl--workspace-create-request
+         :name "tuned" :git-root "/tmp/source" :base-commit "master"
+         :model "opus" :priority "p1")
+        (let ((entry (agent-repl-test--sole-command-entry)))
+          (should (equal (alist-get 'model entry) "opus"))
+          (should (equal (alist-get 'priority entry) "p1")))))))
+
+(ert-deftest agent-repl-test-create-request-carries-ungated-consent ()
+  "Ungated consent is call-site state and still crosses the request."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-command-inbox
+      (cl-letf (((symbol-function 'agent-repl--frontend-session-posture)
+                 (lambda (_dir) '(:allow-ungated t))))
+        (agent-repl--workspace-create-request
+         :name "ungated" :git-root "/tmp/source" :base-commit "master"
+         :source-dir "/tmp/source")
+        (should (eq (alist-get 'allow_ungated
+                               (agent-repl-test--sole-command-entry))
+                    t))))))
+
+(ert-deftest agent-repl-test-create-request-writes-atomically ()
+  "The payload is renamed into place; no partial file is ever claimable."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-command-inbox
+      (let ((renamed nil))
+        (cl-letf (((symbol-function 'agent-repl--frontend-session-posture)
+                   (lambda (_dir) nil))
+                  ((symbol-function 'rename-file)
+                   (lambda (from to &optional ok)
+                     (setq renamed (list from to ok)))))
+          (agent-repl--workspace-create-request
+           :name "atomic" :git-root "/tmp/source" :base-commit "master")
+          (should renamed)
+          ;; The staged name is dot-prefixed, so the daemon's inbox scanner
+          ;; (prefix `workspace_commands_') cannot see it mid-write.
+          (should (string-prefix-p
+                   ".workspace_commands_"
+                   (file-name-nondirectory (nth 0 renamed))))
+          (should (string-prefix-p
+                   "workspace_commands_"
+                   (file-name-nondirectory (nth 1 renamed)))))))))
+
+(ert-deftest agent-repl-test-create-request-rejects-missing-name ()
+  "A nameless request writes nothing at all."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-command-inbox
+      (should-error
+       (agent-repl--workspace-create-request
+        :name "  " :git-root "/tmp/source" :base-commit "master"))
+      (should-not (directory-files agent-repl--output-dir nil
+                                   "\\`workspace_commands_")))))
+
+(ert-deftest agent-repl-test-create-request-rejects-missing-base-without-fork ()
+  "A non-fork request with no base commit writes nothing at all."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-command-inbox
+      (should-error
+       (agent-repl--workspace-create-request
+        :name "based" :git-root "/tmp/source"))
+      (should-not (directory-files agent-repl--output-dir nil
+                                   "\\`workspace_commands_")))))
+
+;;;; ---- Tests: request correlation ----
+
+(defun agent-repl-test--materialize-available (available)
+  "Run the announcement handler for AVAILABLE with persp/wire stubbed."
+  (cl-letf (((symbol-function 'file-directory-p) (lambda (_path) t))
+            ((symbol-function 'agent-repl--ws-dir-owner) (lambda (&rest _) nil))
+            ((symbol-function 'agent-repl--ws-resolve-persp) (lambda (_ws) nil))
+            ((symbol-function 'persp-add-new) (lambda (_ws) 'persp))
+            ((symbol-function 'set-persp-parameter) (lambda (&rest _) nil))
+            ((symbol-function 'persp-kill) (lambda (&rest _) nil))
+            ((symbol-function 'agent-repl--uds-send-command) (lambda (&rest _) "ack"))
+            ((symbol-function 'agent-repl--uds-track-command) (lambda (&rest _) nil)))
+    (agent-repl--workspace-create-handle-available available)))
+
+(ert-deftest agent-repl-test-available-correlated-to-own-request-jumps ()
+  "A creation Emacs asked for jumps to the new tab and confirms it."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-command-inbox
+      (let (jumped announced)
+        (cl-letf (((symbol-function 'agent-repl--frontend-session-posture)
+                   (lambda (_dir) nil))
+                  ((symbol-function 'agent-repl-jump-to-workspace)
+                   (lambda (ws &optional _flash) (setq jumped ws)))
+                  ((symbol-function 'agent-repl--info)
+                   (lambda (_ws fmt &rest args)
+                     (setq announced (apply #'format fmt args)))))
+          (let ((id (agent-repl--workspace-create-request
+                     :name "mine" :git-root "/tmp/source"
+                     :base-commit "master" :jump t)))
+            (agent-repl-test--materialize-available
+             (list :jobId (concat id ":0") :finalName "mine"
+                   :worktreePath "/tmp/wt/mine" :sessionId "session-mine"))
+            (should (equal jumped "mine"))
+            (should (string-match-p "mine" announced))))))))
+
+(ert-deftest agent-repl-test-available-unsolicited-materializes-silently ()
+  "An unsolicited creation is materialized but never steals focus."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-command-inbox
+      (let (jumped)
+        (cl-letf (((symbol-function 'agent-repl-jump-to-workspace)
+                   (lambda (&rest _) (setq jumped t))))
+          (agent-repl-test--materialize-available
+           '(:jobId "workspace_commands_other:0" :finalName "theirs"
+             :worktreePath "/tmp/wt/theirs" :sessionId "session-theirs"))
+          (should (agent-repl--ws-live-p "theirs"))
+          (should-not jumped))))))
+
+(ert-deftest agent-repl-test-available-correlation-is-claimed-once ()
+  "A replayed announcement does not jump a second time."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-command-inbox
+      (let ((jumps 0))
+        (cl-letf (((symbol-function 'agent-repl--frontend-session-posture)
+                   (lambda (_dir) nil))
+                  ((symbol-function 'agent-repl-jump-to-workspace)
+                   (lambda (&rest _) (cl-incf jumps))))
+          (let* ((id (agent-repl--workspace-create-request
+                      :name "once" :git-root "/tmp/source"
+                      :base-commit "master" :jump t))
+                 (available (list :jobId (concat id ":0") :finalName "once"
+                                  :worktreePath "/tmp/wt/once"
+                                  :sessionId "session-once")))
+            (agent-repl-test--materialize-available available)
+            (agent-repl-test--materialize-available available)
+            (should (= jumps 1))))))))
+
+(ert-deftest agent-repl-test-create-failure-releases-its-correlation ()
+  "A failed job clears its pending entry so nothing waits on it forever."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-command-inbox
+      (cl-letf (((symbol-function 'agent-repl--frontend-session-posture)
+                 (lambda (_dir) nil))
+                ((symbol-function 'message) (lambda (&rest _) nil)))
+        (let ((id (agent-repl--workspace-create-request
+                   :name "doomed" :git-root "/tmp/source"
+                   :base-commit "master" :jump t)))
+          (should (= (hash-table-count agent-repl--workspace-create-requests) 1))
+          (agent-repl--handle-workspace-create-failed-command
+           `((job_id . ,(concat id ":0")) (requested_name . "doomed")
+             (error . "branch exists")))
+          (should
+           (= (hash-table-count agent-repl--workspace-create-requests) 0)))))))
+
+(ert-deftest agent-repl-test-create-failure-is-always-announced ()
+  "A failure Emacs did not request is still surfaced loudly."
+  (let (echoed)
+    (cl-letf (((symbol-function 'message)
+               (lambda (fmt &rest args) (setq echoed (apply #'format fmt args)))))
+      (agent-repl--handle-workspace-create-failed-command
+       '((job_id . "workspace_commands_x:0") (requested_name . "orphan")
+         (error . "git_root has no .git")))
+      (should (string-match-p "orphan" echoed))
+      (should (string-match-p "git_root has no .git" echoed)))))
+
+(ert-deftest agent-repl-test-create-workspace-has-no-wire-command ()
+  "Emacs cannot send `createWorkspace': the inbox is the only ingress."
+  (should-not (fboundp 'agent-repl--workspace-create-send))
+  (should-not (member "createWorkspace" agent-repl--uds-known-command-fields)))
 
 (ert-deftest agent-repl-test-workspace-available-validates-before-mutation ()
   "A missing authoritative field causes no materialization and no ACK."

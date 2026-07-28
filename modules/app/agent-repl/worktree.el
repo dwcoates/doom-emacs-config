@@ -15,10 +15,8 @@
 (declare-function agent-repl--drain-pending-initial-buffers "panels" (ws))
 (declare-function agent-repl--drain-pending-show-panels "panels" (ws))
 (declare-function agent-repl--ws-switch "workspace" (ws &rest args))
-(declare-function agent-repl--workspace-create-send
-                  "workspace-create-client"
-                  (requested-name git-root base-commit source-workspace source-dir
-                                  initial-prompt &optional priority model))
+(declare-function agent-repl--workspace-create-request
+                  "workspace-create-client" (&rest keys))
 (declare-function pygn-mode "pygn-mode")
 (declare-function pygn-mode-display-gui-board-at-pos "pygn-mode")
 
@@ -1619,11 +1617,17 @@ reaches the user."
 
 (defun agent-repl-create-worktree-workspace (base &optional source-ws)
   "Request a daemon-owned worktree workspace from BASE.
-Prompts for a requested name and an optional initial prompt, then sends a
-`createWorkspace' command.  Emacs performs no git, session, shim, or prompt
-delivery work.  The workspace appears only after the daemon pushes
-`WorkspaceAvailable', at which point the thin client creates its perspective
-and bookkeeping and ACKs materialization.
+Prompts for a requested name and an optional initial prompt, then writes ONE
+`workspace_commands_<uuid>.json' command file into the daemon's inbox — the
+same ingestion point the generation skill and out-of-band agents use.  Emacs
+performs no git, session, shim, or prompt delivery work, and runs no
+branch/path collision preflight: the daemon owns naming and reports a
+collision back as a `workspaceCreateFailed' host action.
+
+The workspace appears only after the daemon pushes `WorkspaceAvailable', at
+which point the thin client creates its perspective and bookkeeping, ACKs
+materialization, and — because this request is correlated by the command-file
+id chosen here — jumps to the new tab.
 
 BASE is `head' or `master'.  SOURCE-WS names the registered source workspace;
 with a prefix argument it is selected explicitly."
@@ -1661,21 +1665,27 @@ with a prefix argument it is selected explicitly."
              (initial-prompt
               (read-string (agent-repl--worktree-preemptive-prompt base)))
              (priority (agent-repl--ws-get effective-source-ws :priority))
-             (request-id
-              (agent-repl--workspace-create-send
-               requested-name source-dir base-commit effective-source-ws
-               source-dir initial-prompt priority nil)))
+             (command-id
+              (agent-repl--workspace-create-request
+               :name requested-name
+               :git-root source-dir
+               :base-commit base-commit
+               :source-workspace effective-source-ws
+               :source-dir source-dir
+               :prompt initial-prompt
+               :priority priority
+               :jump t)))
         (agent-repl--log
          effective-source-ws
-         "create-worktree-workspace: REQUESTED request-id=%s name=%s base=%s source=%s source-dir=%s prompt=%S priority=%s"
-         request-id requested-name base-commit effective-source-ws source-dir
+         "create-worktree-workspace: REQUESTED command-id=%s name=%s base=%s source=%s source-dir=%s prompt=%S priority=%s"
+         command-id requested-name base-commit effective-source-ws source-dir
          (not (string-empty-p (string-trim initial-prompt)))
          (or priority "nil"))
         (agent-repl--info
          effective-source-ws
          "Requested workspace '%s'; waiting for daemon materialization."
          requested-name)
-        request-id))))
+        command-id))))
 
 (defconst agent-repl--oneshot-no-action-suffix ". dont take action"
   "Suffix appended to a one-shot preemptive prompt when the user dispatches

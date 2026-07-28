@@ -13,19 +13,6 @@
 
 ;;; Section 1: Internal helpers
 
-(defconst agent-repl--output-dir
-  (file-name-as-directory (agent-repl--global-state-file "output"))
-  "Directory for generated workspace intent and other IPC output.
-Lives at `~/.claude-emacs/output/' (under `agent-repl--global-state-dir').")
-
-(defcustom agent-repl-debug-mock-workspace-default-slug "mock-test"
-  "Default bare slug used in mock workspace generation.
-The full branch name is built at the consumption site by prepending the
-workspace prefix from `agent-repl--workspace-prefix-slash' (derived from
-CLAUDE_WORKSPACE_PREFIX), so this holds no literal prefix."
-  :type 'string
-  :group 'agent-repl)
-
 (defcustom agent-repl-dump-buffer-name "*agent-repl-dump*"
   "Buffer name for workspace state dump output."
   :type 'string
@@ -279,21 +266,6 @@ candidates exist."
                         prompt current default (length known) selected)
       selected)))
 
-(defun agent-repl--write-output-json (filename content)
-  "Write CONTENT as JSON to FILENAME inside `agent-repl--output-dir'.
-Ensures the output directory exists.  Returns the full path of the written file."
-  (make-directory agent-repl--output-dir t)
-  (let ((file (expand-file-name filename agent-repl--output-dir)))
-    (agent-repl--log (agent-repl--ws-current-name)
-                      "write-output-json: filename=%s dir=%s content=%S"
-                      filename agent-repl--output-dir content)
-    (with-temp-file file
-      (insert (json-encode content)))
-    (agent-repl--log (agent-repl--ws-current-name)
-                      "write-output-json: wrote file=%s bytes=%d"
-                      file (nth 7 (file-attributes file)))
-    file))
-
 ;;; Section 2: Utility commands used by keybindings
 
 ;; TODO: agent-repl-set-priority belongs in commands.el rather than
@@ -433,18 +405,6 @@ doom-config worktree reloads its own checkout."
                     "debug/cancel-timers: requested")
   (agent-repl--cancel-all-timers)
   (message "Cancelled all agent-repl timers."))
-
-(defun agent-repl-debug/mock-workspace-generation (&optional names)
-  "Write a mock workspace_generation.json to trigger the file watcher.
-NAMES is an optional list of branch name strings; defaults to a single
-test entry."
-  (interactive)
-  (let* ((names (or names
-                     (list (concat (agent-repl--workspace-prefix-slash)
-                                   agent-repl-debug-mock-workspace-default-slug))))
-         (file (agent-repl--write-output-json "workspace_generation.json" names)))
-    (agent-repl--log (agent-repl--ws-current-name) "mock workspace-generation file written: %s names=%s" file names)
-    (message "Wrote mock workspace_generation.json: %s" names)))
 
 (defun agent-repl-debug/workspace-states ()
   "Display all workspace states."
