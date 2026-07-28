@@ -125,6 +125,10 @@ type fakeApplier struct {
 	// the transport-level miss that used to reach no state axis at all.
 	degradations []degradedCall
 	degradedErr  error
+	// interruptMarks records one workspace per MarkTurnInterrupted call — the
+	// user-commanded stops that will paint their turn's end `interrupted`.
+	interruptMarks   []string
+	interruptMarkErr error
 }
 
 // backfillCall is one backfill outcome the driver applied to the SSM.
@@ -152,6 +156,22 @@ func (f *fakeApplier) ApplyConnectionDegraded(workspace string, degraded bool, r
 	defer f.reconcMutex.Unlock()
 	f.degradations = append(f.degradations, degradedCall{workspace: workspace, degraded: degraded, reason: reason})
 	return f.degradedErr
+}
+
+// MarkTurnInterrupted records the workspaces whose running turn a
+// user-commanded stop was delivered to (I1).
+func (f *fakeApplier) MarkTurnInterrupted(workspace string) error {
+	f.reconcMutex.Lock()
+	defer f.reconcMutex.Unlock()
+	f.interruptMarks = append(f.interruptMarks, workspace)
+	return f.interruptMarkErr
+}
+
+// interruptMarked returns the recorded marks, taken under the lock.
+func (f *fakeApplier) interruptMarked() []string {
+	f.reconcMutex.Lock()
+	defer f.reconcMutex.Unlock()
+	return append([]string(nil), f.interruptMarks...)
 }
 
 // degradedCalls returns the recorded transitions, taken under the lock.
@@ -194,9 +214,20 @@ func newTestConsumer(push Pusher, applier StateApplier) *consumer {
 
 // fakeProgress records what the consumer folds into the progress resolver.
 type fakeProgress struct {
+	mu         sync.Mutex
 	applied    []*corev1.Event
 	workspaces []string
 	err        error
+	// interrupts records one entry per NoteInterrupt call — the interrupt
+	// windows a USER-COMMANDED stop opened.
+	interrupts []interruptNote
+}
+
+// interruptNote is one opened interrupt window.
+type interruptNote struct {
+	workspace string
+	sessionID string
+	outcome   corev1.InterruptOutcome
 }
 
 func (p *fakeProgress) Apply(workspace string, ev *corev1.Event) error {
@@ -206,6 +237,19 @@ func (p *fakeProgress) Apply(workspace string, ev *corev1.Event) error {
 }
 func (p *fakeProgress) SetCounts(string, int64, int64)  {}
 func (p *fakeProgress) NoteTurnAccepted(string, string) {}
+
+func (p *fakeProgress) NoteInterrupt(workspace, sessionID string, outcome corev1.InterruptOutcome) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.interrupts = append(p.interrupts, interruptNote{workspace: workspace, sessionID: sessionID, outcome: outcome})
+}
+
+// interruptNotes returns the recorded windows, taken under the lock.
+func (p *fakeProgress) interruptNotes() []interruptNote {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]interruptNote(nil), p.interrupts...)
+}
 
 func newProgressConsumer(prog ProgressResolver) *consumer {
 	c := newConsumer("ws", "s1", &fakePusher{}, &fakeApplier{}, prog, newFakeClearCompactStore(), nil, nil, nil, nil, nil)
