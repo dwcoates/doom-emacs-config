@@ -54,6 +54,9 @@ func (c *Client) readLoop(ctx context.Context, ac *activeConn) error {
 		case *corev1.Heartbeat:
 			// Liveness only (already recorded via markRecv). No reply: our own
 			// heartbeatSender covers the reverse direction.
+		case *corev1.ShimReady:
+			// GATE STAGE 3. Nothing else releases AwaitReady.
+			c.dispatchShimReady(ac, m)
 		case *corev1.ShimHello:
 			c.logf("unexpected ShimHello after handshake; ignoring")
 		default:
