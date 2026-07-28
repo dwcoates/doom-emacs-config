@@ -154,11 +154,17 @@ though there is intentionally nothing for Emacs to apply.")
   '("submitPrompt" "interrupt" "permissionAnswer" "mergeWorkspace"
     "closeWorkspace" "openWorkspace" "resync" "createSession" "deleteSession"
     "shutdown" "clientLog" "queueForce" "queueAccept" "queueCancel"
-    "createWorkspace" "workspaceMaterialized" "hostActionCompleted"
+    "workspaceMaterialized" "hostActionCompleted"
     "daemonHealth" "sessionHealth")
-  "The protojson names of every `FrontendCommand' oneof arm.
+  "The protojson names of every SENDABLE `FrontendCommand' oneof arm.
 Mirrors the `command' oneof in frontend.proto.  Sending an unknown
 command field is a programming error and fails loudly.
+
+`createWorkspace' is deliberately ABSENT even though the proto arm still
+exists.  Workspace creation has exactly one ingestion point — a
+`workspace_commands_<uuid>.json' file in the daemon's inbox — and the
+daemon rejects the wire command outright, so omitting it here turns a
+stray send into a loud Emacs-side failure instead of a daemon NACK.
 
 `shutdown' (S9) is the graceful-daemon-shutdown command (`ShutdownCmd')
 that replaces the Emacs POST /shutdown HTTP call.

@@ -3,9 +3,19 @@
 ;;; Commentary:
 
 ;; The daemon owns workspace creation end to end: git worktree/branch/tag,
-;; session creation, healthy waiting shim, and initial-prompt queueing.  Emacs
-;; sends creation intent, then materializes only local perspective/bookkeeping
-;; state after the daemon pushes WorkspaceAvailable.
+;; session creation, healthy waiting shim, and initial-prompt queueing.
+;;
+;; There is exactly ONE ingestion point for creation intent — the daemon's
+;; inbox of `workspace_commands_<uuid>.json' files under
+;; `agent-repl--output-dir'.  Every flavor writes such a file: an Emacs chord,
+;; the headless generation skill, an out-of-band agent.  Emacs never runs git,
+;; never creates a session, and never invents a workspace of its own.
+;;
+;; Emacs materializes its perspective/bookkeeping SOLELY from the daemon's
+;; `WorkspaceAvailable' announcement, identically for a creation it requested
+;; and one it did not.  A requested creation is recognized only by the
+;; command-file id Emacs chose, which the daemon carries back as the leading
+;; segment of the job id — correlation buys a toast and a jump, nothing else.
 
 ;;; Code:
 
@@ -66,85 +76,186 @@
       (error "agent-repl: %s requires non-empty %s" context key))
     value))
 
-(defun agent-repl--workspace-create-send
-    (requested-name git-root base-commit source-workspace source-dir
-                    initial-prompt &optional priority model)
-  "Send daemon-owned workspace creation intent and return its request id.
-All inputs are read-only intent.  This function never runs git, creates a
-perspective or session, starts a shim, or locally delivers INITIAL-PROMPT."
-  (dolist (pair `((requested-name . ,requested-name)
-                  (git-root . ,git-root)
-                  (base-commit . ,base-commit)
-                  (source-workspace . ,source-workspace)
-                  (source-dir . ,source-dir)))
-    (unless (and (stringp (cdr pair))
-                 (not (string-empty-p (string-trim (cdr pair)))))
-      (agent-repl--log
-       source-workspace
-       "workspace-create-send: INVALID %s=%S name=%S root=%S base=%S source=%S dir=%S — aborting"
-       (car pair) (cdr pair) requested-name git-root base-commit
-       source-workspace source-dir)
-      (user-error "agent-repl: workspace creation requires %s" (car pair))))
-  (let* ((prompt (and (stringp initial-prompt)
-                      (string-trim initial-prompt)))
-         ;; The daemon creates the child session, so the source workspace's
-         ;; account and the GUI session permission posture must cross the same
-         ;; request boundary as the git intent.  Empty configDir deliberately
-         ;; means the CLI's own account root.
-         (posture (agent-repl--frontend-session-posture source-dir))
-         (config-dir (plist-get posture :config-dir))
-         (permission-mode (plist-get posture :permission-mode))
-         (allow-ungated (plist-get posture :allow-ungated))
-         (payload
-          (append
-           (list :requestedName (string-trim requested-name)
-                 :gitRoot (file-name-as-directory (expand-file-name git-root))
-                 :baseCommit base-commit
-                 :sourceWorkspace source-workspace
-                 :sourceDir (file-name-as-directory (expand-file-name source-dir))
-                 :configDir (or config-dir "")
-                 :permissionMode (or permission-mode ""))
-           (when (and prompt (not (string-empty-p prompt)))
-             (list :initialPrompt prompt))
-           (when priority (list :priority priority))
-           (when model (list :model model))
-           ;; Consent is call-site state, not a preference; never synthesize it
-           ;; merely because a permission-mode string happens to be ungated.
-           (when allow-ungated
-             (list :allowUngated t))))
-         (request-id nil))
-    (agent-repl--log
-     source-workspace
-     "workspace-create-send: READY requested-name=%s git-root=%s base=%s source-dir=%s prompt-present=%S prompt-length=%s priority-present=%S model-present=%S config-dir-present=%S permission-mode-present=%S allow-ungated=%S"
-     requested-name git-root base-commit source-dir
-     (and prompt (not (string-empty-p prompt)))
-     (and prompt (length prompt))
-     (not (null priority)) (not (null model))
-     (not (null config-dir)) (not (null permission-mode)) allow-ungated)
+(defconst agent-repl--workspace-command-prefix "workspace_commands_"
+  "Filename prefix the daemon's inbox scanner recognizes.
+Mirrors `commandPrefix' in `daemon/internal/workspace/create/inbox.go'.")
+
+(defvar agent-repl--workspace-create-requests (make-hash-table :test 'equal)
+  "Command-file ids Emacs itself emitted, mapped to their request plist.
+Purely a correlation aid for post-materialization UX (toast, jump): a
+creation is materialized identically whether or not it is found here, so
+losing this table across a restart costs a jump, never a workspace.
+`defvar' keeps in-flight requests across module hot reload.")
+
+(defun agent-repl--workspace-create-command-id ()
+  "Return a fresh, unique `workspace_commands_<uuid>' file id."
+  (let ((hex (md5 (format "%s-%s-%s-%s"
+                          (emacs-pid) (float-time) (random most-positive-fixnum)
+                          (recent-keys)))))
+    (concat agent-repl--workspace-command-prefix
+            (substring hex 0 8) "-" (substring hex 8 12) "-"
+            (substring hex 12 16) "-" (substring hex 16 20) "-"
+            (substring hex 20 32))))
+
+(defun agent-repl--workspace-create-command-job-file (job-id)
+  "Return the command-file id JOB-ID was ingested from, or nil.
+The daemon mints `<command-file-id>:<array-index>'; the leading segment
+is exactly the id Emacs chose when it wrote the file."
+  (when (and (stringp job-id) (string-match "\\`\\([^:]+\\):[0-9]+\\'" job-id))
+    (match-string 1 job-id)))
+
+(defun agent-repl--workspace-create-write-command (entry id ws)
+  "Atomically write command ENTRY as command file ID for logging owner WS.
+ENTRY is one alist-shaped `create' command; it is written as a
+single-element top-level ARRAY, which is the only shape the daemon's
+inbox parses.  The payload lands under a dot-prefixed temporary name
+that the inbox scanner ignores and is then renamed into place, so the
+daemon can never claim a half-written file.  Returns the final path."
+  (let* ((dir agent-repl--output-dir)
+         (final (expand-file-name (concat id ".json") dir))
+         (temp (expand-file-name (concat "." id ".json.partial") dir))
+         (json (json-encode (vector entry))))
+    (make-directory dir t)
     (condition-case err
         (progn
-          (setq request-id
-                (agent-repl--uds-send-command
-                 "createWorkspace" payload source-workspace))
-          (agent-repl--uds-track-command
-           request-id "createWorkspace" source-workspace)
-          (agent-repl--log
-           source-workspace
-           "workspace-create-send: SENT request-id=%s requested-name=%s git-root=%s base=%s source-dir=%s prompt-present=%S prompt-length=%s priority-present=%S model-present=%S config-dir-present=%S permission-mode-present=%S allow-ungated=%S"
-           request-id requested-name git-root base-commit source-dir
-           (and prompt (not (string-empty-p prompt)))
-           (and prompt (length prompt))
-           (not (null priority)) (not (null model))
-           (not (null config-dir)) (not (null permission-mode)) allow-ungated)
-          request-id)
+          (with-temp-file temp (insert json))
+          (rename-file temp final t))
       (error
        (agent-repl--log
-        source-workspace
-        "workspace-create-send: FAILED request-id=%s requested-name=%s git-root=%s base=%s source-dir=%s prompt-present=%S prompt-length=%s err-type=%s — aborting"
-        request-id requested-name git-root base-commit source-dir
-        (and prompt (not (string-empty-p prompt)))
-        (and prompt (length prompt)) (car err))
-       (signal (car err) (cdr err))))))
+        ws
+        "workspace-create-request: WRITE FAILED id=%s temp=%s final=%s err-type=%s — no command reached the daemon"
+        id temp final (car err))
+       (when (file-exists-p temp) (ignore-errors (delete-file temp)))
+       (signal (car err) (cdr err))))
+    (agent-repl--log
+     ws "workspace-create-request: WROTE id=%s file=%s bytes=%d"
+     id final (length json))
+    final))
+
+(cl-defun agent-repl--workspace-create-request
+    (&key name git-root base-commit source-workspace source-dir
+          prompt priority model fork-from jump)
+  "Emit one daemon-owned workspace creation command and return its file id.
+All inputs are read-only intent.  This function never runs git, creates a
+perspective or session, starts a shim, or locally delivers PROMPT — it
+writes one `workspace_commands_<uuid>.json' file into the daemon's inbox
+and returns the id it chose, which correlates the eventual
+`WorkspaceAvailable' back to this request.
+
+NAME and GIT-ROOT are required; BASE-COMMIT is required unless FORK-FROM
+is set (the daemon resolves a fork's base from the live source session).
+SOURCE-WORKSPACE and SOURCE-DIR nominate the live parent whose account and
+permission mode the daemon inherits — deliberately NOT re-derived here, so
+Emacs' idea of the parent's posture can never disagree with the session
+the daemon actually finds.  JUMP, when non-nil, asks the announcement
+handler to switch to the workspace once it arrives."
+  (unless (and (stringp name) (not (string-empty-p (string-trim name))))
+    (agent-repl--log
+     source-workspace
+     "workspace-create-request: INVALID name=%S root=%S base=%S — aborting before write"
+     name git-root base-commit)
+    (user-error "agent-repl: workspace creation requires a name"))
+  (unless (and (stringp git-root) (not (string-empty-p (string-trim git-root))))
+    (agent-repl--log
+     source-workspace
+     "workspace-create-request: INVALID git-root=%S name=%S — aborting before write"
+     git-root name)
+    (user-error "agent-repl: workspace creation requires a git root"))
+  (unless (or fork-from
+              (and (stringp base-commit)
+                   (not (string-empty-p (string-trim base-commit)))))
+    (agent-repl--log
+     source-workspace
+     "workspace-create-request: INVALID base-commit=%S name=%S fork-from=%S — aborting before write"
+     base-commit name fork-from)
+    (user-error "agent-repl: workspace creation requires a base commit"))
+  (let* ((trimmed-prompt (and (stringp prompt) (string-trim prompt)))
+         ;; An absent prompt must stay absent: an empty `prompt' field would
+         ;; make the daemon submit a blank turn into a fresh session.
+         (effective-prompt (and trimmed-prompt
+                                (not (string-empty-p trimmed-prompt))
+                                trimmed-prompt))
+         ;; Consent is call-site state, not a preference; it does not travel
+         ;; with the source session's permission mode, so it is the one posture
+         ;; field the request still carries.
+         (allow-ungated
+          (and source-dir
+               (plist-get (agent-repl--frontend-session-posture source-dir)
+                          :allow-ungated)))
+         (id (agent-repl--workspace-create-command-id))
+         (entry
+          (append
+           (list (cons "type" "create")
+                 (cons "name" (string-trim name))
+                 (cons "git_root"
+                       (directory-file-name (expand-file-name git-root))))
+           (when base-commit (list (cons "base_commit" base-commit)))
+           (when effective-prompt (list (cons "prompt" effective-prompt)))
+           (when fork-from (list (cons "fork_from" fork-from)))
+           (when source-workspace
+             (list (cons "source_workspace" source-workspace)))
+           (when source-dir
+             (list (cons "source_dir"
+                         (directory-file-name (expand-file-name source-dir)))))
+           (when priority (list (cons "priority" priority)))
+           (when model (list (cons "model" model)))
+           (when allow-ungated (list (cons "allow_ungated" t))))))
+    (agent-repl--log
+     source-workspace
+     "workspace-create-request: READY id=%s name=%s git-root=%s base=%s fork-from=%s source=%s source-dir=%s prompt-present=%S prompt-length=%s priority-present=%S model-present=%S allow-ungated=%S jump=%S"
+     id name git-root (or base-commit "nil") (or fork-from "nil")
+     (or source-workspace "nil") (or source-dir "nil")
+     (not (null effective-prompt))
+     (and effective-prompt (length effective-prompt))
+     (not (null priority)) (not (null model)) (and allow-ungated t)
+     (and jump t))
+    (agent-repl--workspace-create-write-command entry id source-workspace)
+    (puthash id
+             (list :requested-name (string-trim name)
+                   :source-workspace source-workspace
+                   :jump (and jump t)
+                   :requested-at (float-time))
+             agent-repl--workspace-create-requests)
+    (agent-repl--log
+     source-workspace
+     "workspace-create-request: PENDING id=%s outstanding=%d"
+     id (hash-table-count agent-repl--workspace-create-requests))
+    id))
+
+(defun agent-repl--workspace-create-take-request (job-id)
+  "Claim and return the pending request plist JOB-ID belongs to, or nil."
+  (when-let* ((file-id (agent-repl--workspace-create-command-job-file job-id))
+              (pending (gethash file-id
+                                agent-repl--workspace-create-requests)))
+    (remhash file-id agent-repl--workspace-create-requests)
+    (append (list :command-file file-id) pending)))
+
+(defun agent-repl--workspace-create-settle-request (ws job-id result)
+  "Apply post-materialization UX for WS after JOB-ID materialized as RESULT.
+A creation Emacs asked for gets its confirmation and, when the flavor
+requested it, a jump to the new tab.  An unsolicited creation — the
+generation skill, another agent, a daemon restart replay — is materialized
+just as completely but stays silent: the user did not ask for a context
+switch they did not initiate."
+  (let ((pending (agent-repl--workspace-create-take-request job-id)))
+    (if (null pending)
+        (progn
+          (agent-repl--log
+           ws
+           "workspace-available: UNSOLICITED ws=%s job-id=%s result=%s — materialized silently"
+           ws job-id result)
+          nil)
+      (agent-repl--log
+       ws
+       "workspace-available: CORRELATED ws=%s job-id=%s command-file=%s requested-name=%s result=%s jump=%S"
+       ws job-id (plist-get pending :command-file)
+       (plist-get pending :requested-name) result (plist-get pending :jump))
+      (agent-repl--info
+       (plist-get pending :source-workspace)
+       "Workspace '%s' is ready." ws)
+      (when (plist-get pending :jump)
+        (agent-repl-jump-to-workspace ws))
+      pending)))
 
 (defun agent-repl--workspace-create-available-metadata (available)
   "Validate AVAILABLE and return `(WS . METADATA)' without mutating state."
@@ -274,6 +385,10 @@ local state."
        ws "workspace-available: MATERIALIZE COMPLETE job-id=%s result=%s"
        job-id result)
       (agent-repl--workspace-create-ack-materialized ws job-id result)
+      ;; The ACK is what releases the daemon's initial prompt, so it comes
+      ;; first; the toast/jump below is pure local UX and must never be able
+      ;; to hold up delivery.
+      (agent-repl--workspace-create-settle-request ws job-id result)
       result)))
 
 (defun agent-repl--handle-workspace-create-failed-command (cmd)
@@ -283,13 +398,19 @@ already failed durably in the daemon; Emacs' whole job here is to make
 sure the user actually finds out, so this both logs and echoes.  It
 never signals: a failure notice that fails to display would be NACKed
 and redelivered forever, replacing a visible failure with a loop."
-  (let ((job-id (or (alist-get 'job_id cmd) "unknown"))
-        (name (or (alist-get 'requested_name cmd) "unknown"))
-        (text (or (alist-get 'error cmd) "no error text supplied")))
+  (let* ((job-id (or (alist-get 'job_id cmd) "unknown"))
+         (name (or (alist-get 'requested_name cmd) "unknown"))
+         (text (or (alist-get 'error cmd) "no error text supplied"))
+         ;; Claim the correlation entry so a dead request cannot sit in the
+         ;; pending table forever waiting for an announcement that will never
+         ;; come.  The failure is announced either way — the daemon's report
+         ;; IS the collision/validation preflight Emacs no longer runs.
+         (pending (agent-repl--workspace-create-take-request job-id)))
     (agent-repl--log
      name
-     "workspace-create: JOB FAILED job-id=%s requested-name=%s error=%s"
-     job-id name text)
+     "workspace-create: JOB FAILED job-id=%s requested-name=%s requested-by-emacs=%S command-file=%s error=%s"
+     job-id name (not (null pending))
+     (or (plist-get pending :command-file) "nil") text)
     (message "agent-repl: workspace creation FAILED for '%s' (job %s): %s"
              name job-id text)
     t))

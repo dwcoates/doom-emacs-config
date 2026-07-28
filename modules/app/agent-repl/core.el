@@ -90,6 +90,15 @@ empty string yields the state dir itself.  The parent directory is NOT
 created here."
   (expand-file-name relative (agent-repl--global-state-dir)))
 
+(defconst agent-repl--output-dir
+  (file-name-as-directory (agent-repl--global-state-file "output"))
+  "The daemon's workspace-command inbox at `~/.claude-emacs/output/'.
+Every workspace-creation flavor — an Emacs chord, the generation skill, an
+out-of-band agent — reaches the daemon by dropping a
+`workspace_commands_<uuid>.json' file here.  Emacs writes into this
+directory and never reads from it: the daemon is the sole watcher,
+claimant, and deleter.")
+
 (defconst agent-repl--legacy-state-migrations
   '(("~/.claude/emacs"                  . "")
     ("~/.claude/output"                 . "output")
