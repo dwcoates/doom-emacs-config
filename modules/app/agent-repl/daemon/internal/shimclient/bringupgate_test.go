@@ -2,6 +2,7 @@ package shimclient
 
 import (
 	"context"
+	"errors"
 	"net"
 	"testing"
 	"time"
@@ -107,3 +108,50 @@ func TestHealthProbeImmediatelyAfterAwaitReadyAnswersOnTheFirstTry(t *testing.T)
 	cancel()
 	<-errCh
 }
+
+func TestVersionMismatchRefusesBeforeAnyOtherGateStageRuns(t *testing.T) {
+	// Arrange — an incompatible shim. The refusal has to land before the
+	// handshake hook (which MUTATES the registry's cursors on a rotation) and
+	// before the DaemonHello, or an unusable shim would move daemon state and
+	// be told a resume position it can never honour.
+	h := newHarness()
+	frames := make(chan any, 4)
+	path := startFakeShim(t, func(conn net.Conn) {
+		mustWriteMsg(t, conn, &corev1.ShimHello{
+			SessionId: "sess-1", Vendor: "claude", ShimVersion: "test-shim", ProtocolVersion: "999",
+		})
+		msg, err := wire.ReadAny(conn)
+		if err != nil {
+			return // the expected shape: the daemon hung up without answering
+		}
+		frames <- msg
+	})
+	cfg := h.config(t, "sess-1", path)
+	hooked := make(chan struct{}, 1)
+	cfg.OnHandshake = func(*corev1.ShimHello) { hooked <- struct{}{} }
+	c := New(cfg)
+
+	// Act
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	err := c.Run(ctx)
+
+	// Assert
+	if err == nil || !errorsIsVersionMismatch(err) {
+		t.Fatalf("Run err = %v, want ErrVersionMismatch", err)
+	}
+	select {
+	case msg := <-frames:
+		t.Fatalf("the daemon sent %T to a version-incompatible shim; nothing may go out before the version is accepted", msg)
+	default:
+	}
+	select {
+	case <-hooked:
+		t.Fatal("OnHandshake ran for a version-incompatible shim; the registry must not be touched before the version is accepted")
+	default:
+	}
+}
+
+// errorsIsVersionMismatch keeps the assertion above readable without importing
+// errors for a single call.
+func errorsIsVersionMismatch(err error) bool { return errors.Is(err, ErrVersionMismatch) }
