@@ -10,61 +10,61 @@ import (
 	"agentrepl/wire"
 )
 
-// Config.OnHandshake — the hook that must run BEFORE the Subscribe reads its
-// from_seq.
+// Config.OnHandshake — the hook that must run BEFORE the DaemonHello reads its
+// from_seq off the SeqStore.
 //
 // A shim announcing a ROTATED vendor session id is telling the daemon its
 // high-water mark counts in a store seq space that no longer exists. The reset
-// therefore has to land ahead of the read, or this connection subscribes at a
-// meaningless position and then reads the new space's seq=1 as a terminal
-// regression. A hook running after the Subscribe could only fix the NEXT
-// connection, which is why this is not folded into OnConnected.
+// therefore has to land ahead of the read, or this connection tells the shim to
+// subscribe at a meaningless position and then reads the new space's seq=1 as a
+// terminal regression. A hook running after the hello could only fix the NEXT
+// connection, which is why this is not folded into OnConnected — and the
+// ordering survived the move of from_seq onto the hello unchanged.
 
-// helloThenSubscribe stands up a fake shim that opens with hello, answers the
-// DaemonHello, and reports the Subscribe the client sends.
-func helloThenSubscribe(t *testing.T, hello *corev1.ShimHello) (string, chan *corev1.Subscribe) {
+// helloThenDaemonHello stands up a fake shim that opens with hello, reports the
+// DaemonHello the client answers with, and closes the gate with a ShimReady.
+func helloThenDaemonHello(t *testing.T, hello *corev1.ShimHello) (string, chan *corev1.DaemonHello) {
 	t.Helper()
-	subs := make(chan *corev1.Subscribe, 1)
+	hellos := make(chan *corev1.DaemonHello, 1)
 	path := startFakeShim(t, func(conn net.Conn) {
 		mustWriteMsg(t, conn, hello)
-		if _, err := wire.ReadAny(conn); err != nil {
+		msg, err := wire.ReadAny(conn)
+		if err != nil {
 			t.Errorf("read DaemonHello: %v", err)
 			return
 		}
-		msg, err := wire.ReadAny(conn)
-		if err != nil {
-			t.Errorf("read Subscribe: %v", err)
-			return
-		}
-		sub, ok := msg.(*corev1.Subscribe)
+		dh, ok := msg.(*corev1.DaemonHello)
 		if !ok {
-			t.Errorf("expected Subscribe, got %T", msg)
+			t.Errorf("expected DaemonHello, got %T", msg)
 			return
 		}
-		subs <- sub
+		// Ack BEFORE publishing: the test cancels as soon as it has the hello,
+		// and a write racing that cancel would fail on a closed connection.
+		mustWriteMsg(t, conn, &corev1.ShimReady{SessionId: hello.GetSessionId(), FromSeq: dh.GetFromSeq()})
+		hellos <- dh
 		_, _ = wire.ReadAny(conn) // hold the connection open
 	})
-	return path, subs
+	return path, hellos
 }
 
-// awaitSubscribe takes the Subscribe the client sent, or fails at the deadline.
-func awaitSubscribe(t *testing.T, subs chan *corev1.Subscribe) *corev1.Subscribe {
+// awaitDaemonHello takes the DaemonHello the client sent, or fails at the deadline.
+func awaitDaemonHello(t *testing.T, hellos chan *corev1.DaemonHello) *corev1.DaemonHello {
 	t.Helper()
 	select {
-	case sub := <-subs:
-		return sub
+	case dh := <-hellos:
+		return dh
 	case <-time.After(2 * time.Second):
-		t.Fatal("the client never sent a Subscribe")
+		t.Fatal("the client never sent a DaemonHello")
 		return nil
 	}
 }
 
-func TestOnHandshakeRunsBeforeTheSubscribeReadsItsPosition(t *testing.T) {
+func TestOnHandshakeRunsBeforeTheDaemonHelloReadsItsPosition(t *testing.T) {
 	// Arrange — a mark of 5990 counted in the RETIRED seq space, and a hook
 	// that resets it exactly as the rotation path does.
 	h := newHarness()
 	h.seq.SetLastSeq("sess-1", 5990)
-	path, subs := helloThenSubscribe(t, &corev1.ShimHello{
+	path, hellos := helloThenDaemonHello(t, &corev1.ShimHello{
 		SessionId: "sess-1", Vendor: "claude", ShimVersion: "test-shim",
 		ProtocolVersion: "1", VendorSessionId: "uuid-new",
 	})
@@ -81,12 +81,12 @@ func TestOnHandshakeRunsBeforeTheSubscribeReadsItsPosition(t *testing.T) {
 	go func() { errCh <- c.Run(ctx) }()
 
 	// Act
-	sub := awaitSubscribe(t, subs)
+	dh := awaitDaemonHello(t, hellos)
 
-	// Assert — THIS connection subscribed from the reset position, not the
-	// retired space's mark.
-	if sub.GetFromSeq() != 0 {
-		t.Fatalf("Subscribe from_seq = %d, want 0: the handshake hook's reset must land before the position is read", sub.GetFromSeq())
+	// Assert — THIS connection told the shim to subscribe from the reset
+	// position, not the retired space's mark.
+	if dh.GetFromSeq() != 0 {
+		t.Fatalf("DaemonHello from_seq = %d, want 0: the handshake hook's reset must land before the position is read", dh.GetFromSeq())
 	}
 	cancel()
 	<-errCh
@@ -96,7 +96,7 @@ func TestOnHandshakeCarriesTheAnnouncedVendorSessionID(t *testing.T) {
 	// Arrange — the announcement is the ONLY thing that tells the daemon which
 	// seq space it is about to serve.
 	h := newHarness()
-	path, subs := helloThenSubscribe(t, &corev1.ShimHello{
+	path, hellos := helloThenDaemonHello(t, &corev1.ShimHello{
 		SessionId: "sess-1", Vendor: "claude", ShimVersion: "test-shim",
 		ProtocolVersion: "1", VendorSessionId: "uuid-new",
 	})
@@ -116,7 +116,7 @@ func TestOnHandshakeCarriesTheAnnouncedVendorSessionID(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("OnHandshake never fired")
 	}
-	awaitSubscribe(t, subs)
+	awaitDaemonHello(t, hellos)
 
 	// Assert
 	if got != "uuid-new" {
@@ -126,12 +126,12 @@ func TestOnHandshakeCarriesTheAnnouncedVendorSessionID(t *testing.T) {
 	<-errCh
 }
 
-func TestSubscribeKeepsItsPositionWhenTheHookResetsNothing(t *testing.T) {
+func TestDaemonHelloKeepsItsPositionWhenTheHookResetsNothing(t *testing.T) {
 	// Arrange — an ordinary reattach: the shim re-announces the uuid it always
 	// had, so the mark stands and the tail resumes where it left off.
 	h := newHarness()
 	h.seq.SetLastSeq("sess-1", 5990)
-	path, subs := helloThenSubscribe(t, &corev1.ShimHello{
+	path, hellos := helloThenDaemonHello(t, &corev1.ShimHello{
 		SessionId: "sess-1", Vendor: "claude", ShimVersion: "test-shim",
 		ProtocolVersion: "1", VendorSessionId: "uuid-old",
 	})
@@ -148,11 +148,11 @@ func TestSubscribeKeepsItsPositionWhenTheHookResetsNothing(t *testing.T) {
 	go func() { errCh <- c.Run(ctx) }()
 
 	// Act
-	sub := awaitSubscribe(t, subs)
+	dh := awaitDaemonHello(t, hellos)
 
 	// Assert
-	if sub.GetFromSeq() != 5990 {
-		t.Fatalf("Subscribe from_seq = %d, want 5990 preserved", sub.GetFromSeq())
+	if dh.GetFromSeq() != 5990 {
+		t.Fatalf("DaemonHello from_seq = %d, want 5990 preserved", dh.GetFromSeq())
 	}
 	cancel()
 	<-errCh

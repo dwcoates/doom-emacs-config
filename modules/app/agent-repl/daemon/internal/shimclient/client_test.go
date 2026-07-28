@@ -212,9 +212,13 @@ func mustWriteMsg(t *testing.T, conn net.Conn, msg proto.Message) {
 	}
 }
 
-// fakeServerHandshake performs the shim side of the handshake and returns the
-// daemon's Subscribe. The listener speaks first (ShimHello).
-func fakeServerHandshake(t *testing.T, conn net.Conn, sessionID, protoVer string, turnInFlight bool) *corev1.Subscribe {
+// fakeServerHandshake runs the SHIM side of the whole bring-up gate — hello,
+// the daemon's hello, and the ShimReady that closes it — and returns the
+// DaemonHello, whose from_seq is the daemon's resume position.
+//
+// Acking is what makes this a usable session: nothing else releases
+// AwaitReady, so a fake that skipped it would hang every caller.
+func fakeServerHandshake(t *testing.T, conn net.Conn, sessionID, protoVer string, turnInFlight bool) *corev1.DaemonHello {
 	t.Helper()
 	mustWriteMsg(t, conn, &corev1.ShimHello{
 		SessionId:       sessionID,
@@ -227,18 +231,12 @@ func fakeServerHandshake(t *testing.T, conn net.Conn, sessionID, protoVer string
 	if err != nil {
 		t.Fatalf("shim reading DaemonHello: %v", err)
 	}
-	if _, ok := m.(*corev1.DaemonHello); !ok {
+	dh, ok := m.(*corev1.DaemonHello)
+	if !ok {
 		t.Fatalf("shim expected DaemonHello, got %T", m)
 	}
-	m2, err := wire.ReadAny(conn)
-	if err != nil {
-		t.Fatalf("shim reading Subscribe: %v", err)
-	}
-	sub, ok := m2.(*corev1.Subscribe)
-	if !ok {
-		t.Fatalf("shim expected Subscribe, got %T", m2)
-	}
-	return sub
+	mustWriteMsg(t, conn, &corev1.ShimReady{SessionId: sessionID, FromSeq: dh.GetFromSeq()})
+	return dh
 }
 
 // recvEvent waits for one event on ch or fails.
@@ -261,7 +259,6 @@ func TestHandshakeHappyPath(t *testing.T) {
 	// Arrange
 	h := newHarness()
 	gotHello := make(chan *corev1.DaemonHello, 1)
-	gotSub := make(chan *corev1.Subscribe, 1)
 	path := startFakeShim(t, func(conn net.Conn) {
 		mustWriteMsg(t, conn, &corev1.ShimHello{
 			SessionId: "sess-1", Vendor: "claude", ShimVersion: "test-shim",
@@ -278,12 +275,7 @@ func TestHandshakeHappyPath(t *testing.T) {
 			return
 		}
 		gotHello <- dh
-		m2, err := wire.ReadAny(conn)
-		if err != nil {
-			t.Errorf("read Subscribe: %v", err)
-			return
-		}
-		gotSub <- m2.(*corev1.Subscribe)
+		mustWriteMsg(t, conn, &corev1.ShimReady{SessionId: "sess-1", FromSeq: dh.GetFromSeq()})
 		// Hold the connection open.
 		_, _ = wire.ReadAny(conn)
 	})
@@ -309,9 +301,8 @@ func TestHandshakeHappyPath(t *testing.T) {
 	if dh.GetProtocolVersion() != "1" || dh.GetDaemonVersion() != "test-daemon" {
 		t.Fatalf("DaemonHello mismatch: %+v", dh)
 	}
-	sub := <-gotSub
-	if sub.GetSessionId() != "sess-1" || sub.GetFromSeq() != 0 {
-		t.Fatalf("Subscribe mismatch: %+v", sub)
+	if dh.GetFromSeq() != 0 {
+		t.Fatalf("DaemonHello from_seq = %d, want 0 for a session never consumed", dh.GetFromSeq())
 	}
 	if !hello.GetTurnInFlight() {
 		t.Fatal("OnConnected should carry turn_in_flight=true")
@@ -359,7 +350,7 @@ func TestReconnectAndResumeMidStream(t *testing.T) {
 		attempt++
 		n := attempt
 		mu.Unlock()
-		sub := fakeServerHandshake(t, conn, "sess-1", "1", false)
+		dh := fakeServerHandshake(t, conn, "sess-1", "1", false)
 		if n == 1 {
 			for seq := uint64(1); seq <= 3; seq++ {
 				mustWriteMsg(t, conn, persistentTurnEnd("sess-1", seq))
@@ -370,7 +361,7 @@ func TestReconnectAndResumeMidStream(t *testing.T) {
 			return
 		}
 		// Second connection: report the resumed from_seq and serve 4..5.
-		secondSubFrom <- sub.GetFromSeq()
+		secondSubFrom <- dh.GetFromSeq()
 		for seq := uint64(4); seq <= 5; seq++ {
 			mustWriteMsg(t, conn, persistentTurnEnd("sess-1", seq))
 		}
@@ -473,9 +464,11 @@ func TestAwaitReadyBlocksUntilConnected(t *testing.T) {
 	case <-time.After(20 * time.Millisecond):
 	}
 
-	// Act: publish a connection exactly as the attach path does.
+	// Act: publish a connection AND the shim's ack, exactly as the attach path
+	// and the gate's closing frame do.
 	c.mu.Lock()
 	c.active = &activeConn{}
+	c.wired = true
 	c.markReadyLocked()
 	c.mu.Unlock()
 
@@ -495,6 +488,7 @@ func TestAwaitReadyReturnsImmediatelyWhenAlreadyConnected(t *testing.T) {
 	c := New(Config{SessionID: "s1"})
 	c.mu.Lock()
 	c.active = &activeConn{}
+	c.wired = true
 	c.markReadyLocked()
 	c.mu.Unlock()
 
@@ -514,11 +508,13 @@ func TestAwaitReadyBlocksAgainAfterDisconnect(t *testing.T) {
 	ac := &activeConn{}
 	c.mu.Lock()
 	c.active = ac
+	c.wired = true
 	c.markReadyLocked()
 	c.mu.Unlock()
 
 	c.mu.Lock()
 	c.active = nil
+	c.wired = false
 	c.markNotReadyLocked()
 	c.mu.Unlock()
 

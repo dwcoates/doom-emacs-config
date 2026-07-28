@@ -13,14 +13,14 @@ import (
 )
 
 func TestReplayContinuationFromLastSeq(t *testing.T) {
-	// Arrange: the daemon has durably seen through seq 4; on attach it must
-	// Subscribe{from_seq:4} and the shim replays 5..9.
+	// Arrange: the daemon has durably seen through seq 4; on attach its
+	// DaemonHello must carry from_seq=4 and the shim replays 5..9.
 	h := newHarness()
 	h.seq.SetLastSeq("sess-1", 4)
 	gotFrom := make(chan uint64, 1)
 	path := startFakeShim(t, func(conn net.Conn) {
-		sub := fakeServerHandshake(t, conn, "sess-1", "1", false)
-		gotFrom <- sub.GetFromSeq()
+		dh := fakeServerHandshake(t, conn, "sess-1", "1", false)
+		gotFrom <- dh.GetFromSeq()
 		for seq := uint64(5); seq <= 9; seq++ {
 			mustWriteMsg(t, conn, persistentTurnEnd("sess-1", seq))
 		}
@@ -34,10 +34,10 @@ func TestReplayContinuationFromLastSeq(t *testing.T) {
 	select {
 	case from := <-gotFrom:
 		if from != 4 {
-			t.Fatalf("Subscribe from_seq: got %d want 4", from)
+			t.Fatalf("DaemonHello from_seq: got %d want 4", from)
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("no Subscribe observed")
+		t.Fatal("no DaemonHello observed")
 	}
 	for want := uint64(5); want <= 9; want++ {
 		if got := recvEvent(t, h.state.ch).GetSeq(); got != want {

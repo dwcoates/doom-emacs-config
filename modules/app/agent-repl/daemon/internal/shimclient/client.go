@@ -8,8 +8,10 @@
 // Responsibilities:
 //   - Connection lifecycle: take the next connection for this session from the
 //     injected ConnSource (already identified by its ShimHello), reply
-//     DaemonHello, then Subscribe{session_id, from_seq} resuming from the
-//     daemon-tracked last_seen_seq.
+//     DaemonHello carrying the resume from_seq read off the SeqStore, and wait
+//     for the shim's ShimReady ack before treating the session as driveable.
+//     That one gated exchange IS the bring-up: there is no separate Subscribe
+//     step, and nothing between the hello and the ack is a usable session.
 //   - Heartbeats both ways with a missed-heartbeat window that surfaces a
 //     degraded callback (and self-heals when traffic resumes).
 //   - Reconnect: on a disconnect the client waits at the ConnSource for the
@@ -160,9 +162,9 @@ type Config struct {
 	// correct the NEXT connection.
 	OnHandshake func(hello *corev1.ShimHello)
 
-	// OnConnected fires after each successful handshake + Subscribe, carrying
-	// the shim's ShimHello (so stitch sees turn_in_flight for mid-turn
-	// reattach). Optional; primarily a test synchronization hook.
+	// OnConnected fires when the bring-up gate CLOSES — the shim's ShimReady,
+	// not merely a completed handshake — carrying the ShimHello that opened it
+	// (so stitch sees turn_in_flight for mid-turn reattach). Optional.
 	OnConnected func(hello *corev1.ShimHello)
 
 	// Logf is the daemon's printf-style logging closure. Nil discards.
@@ -205,9 +207,9 @@ type Client struct {
 	mu     sync.Mutex
 	active *activeConn
 
-	// ready is the readiness latch AwaitReady blocks on: CLOSED while active is
-	// non-nil, replaced with a fresh open channel when the connection drops.
-	// Guarded by the same mu as active, so the two can never disagree.
+	// ready is the readiness latch AwaitReady blocks on: CLOSED while `wired`
+	// holds, replaced with a fresh open channel when the connection drops.
+	// Guarded by the same mu as active/wired, so they can never disagree.
 	//
 	// This exists because bring-up is asynchronous: the daemon spawns the shim
 	// process and starts connecting in a goroutine, so for a few hundred
@@ -217,6 +219,17 @@ type Client struct {
 	// a timeout tuned to "probably long enough" is a guess that is wrong on
 	// both sides (too short under load, needless latency otherwise).
 	ready chan struct{}
+
+	// wired is the shim's ShimReady ack: the session is fully wired, standing
+	// store subscription included (core.proto ShimReady). Guarded by mu.
+	//
+	// IT IS A SEPARATE FACT FROM `active`, and that separation is the point. A
+	// live connection means only that frames can be written; it says nothing
+	// about whether the shim finished subscribing to the store. Latching
+	// readiness on the connection is what let a health probe fire the instant
+	// the daemon attached and be told store_subscribed=false about a session it
+	// had itself just brought up.
+	wired bool
 
 	// lastSeen mirrors the SeqStore high-water mark for this session, tracked
 	// in memory so the demux can detect regressions cheaply.
@@ -241,7 +254,10 @@ type Client struct {
 
 // activeConn is the mutable per-connection state.
 type activeConn struct {
-	conn    net.Conn
+	conn net.Conn
+	// hello is the ShimHello this connection opened with, kept so the
+	// ShimReady that closes the gate can hand it to OnConnected.
+	hello   *corev1.ShimHello
 	writeMu sync.Mutex // serializes frame writes across goroutines
 
 	pendMu  sync.Mutex
@@ -281,7 +297,7 @@ func New(cfg Config) *Client {
 	return &Client{cfg: cfg, logf: logf, ready: make(chan struct{}), replays: newReplayRegistry()}
 }
 
-// markReadyLocked publishes "the connection is usable". Caller holds c.mu.
+// markReadyLocked publishes "the session is fully wired". Caller holds c.mu.
 func (c *Client) markReadyLocked() {
 	select {
 	case <-c.ready: // already closed; nothing to publish
@@ -301,19 +317,27 @@ func (c *Client) markNotReadyLocked() {
 	}
 }
 
-// AwaitReady blocks until this client's shim connection is usable, or ctx ends.
+// AwaitReady blocks until this session is FULLY WIRED, or ctx ends.
 //
-// It returns as soon as the handshake completes — not after a fixed delay — so
-// callers get the connection at the earliest instant it exists. ctx supplies
-// the FAILURE bound: its expiry means the shim genuinely did not come up, and
-// the caller surfaces that loudly rather than sending into a dead connection.
+// WHAT IT NOW MEANS. It resolves on the shim's ShimReady — the last frame of
+// the bring-up gate — so everything the gate covers is proven when it returns:
+// the shim holds its session lock, its SDK query is built, its store producer
+// link is up, and its standing store subscription is open at the from_seq this
+// daemon asked for. It used to resolve on the CONNECTION, which proved only
+// that frames could be written; a health probe issued immediately after was
+// then racing the shim's own store subscription and lost.
+//
+// It still returns at the earliest instant that is true — an event, never a
+// duration. ctx supplies the FAILURE bound: its expiry means the shim did not
+// finish coming up, and the caller surfaces that loudly rather than driving a
+// session that is not wired.
 //
 // The loop re-checks under the lock because the connection can drop again
 // between the latch closing and this goroutine being scheduled.
 func (c *Client) AwaitReady(ctx context.Context) error {
 	for {
 		c.mu.Lock()
-		if c.active != nil {
+		if c.active != nil && c.wired {
 			c.mu.Unlock()
 			return nil
 		}
@@ -381,46 +405,50 @@ func (c *Client) runOnce(ctx context.Context) (retErr error) {
 		return err
 	}
 
-	ac := &activeConn{conn: conn, pending: make(map[string]chan ackResult), health: make(map[string]chan healthResult)}
+	ac := &activeConn{conn: conn, hello: hello, pending: make(map[string]chan ackResult), health: make(map[string]chan healthResult)}
 
-	// The ShimHello was already read by the listener to route this connection
-	// here, so only the daemon's half of the handshake remains.
-	if err := c.completeHandshake(ac, hello); err != nil {
+	// GATE STAGE 1 was the ShimHello, already read by the listener to route
+	// this connection here. Refuse an incompatible shim before anything else
+	// happens — no registry mutation, no hello, no streaming.
+	if err := c.checkVersion(hello); err != nil {
 		conn.Close()
 		return err
 	}
 
 	// BEFORE the high-water mark is read: a shim announcing a rotated vendor
-	// session id resets it here, so the Subscribe below asks the NEW seq space
+	// session id resets it here, so the from_seq below asks the NEW seq space
 	// for everything rather than resuming at a retired space's position.
 	if c.cfg.OnHandshake != nil {
 		c.cfg.OnHandshake(hello)
 	}
 
-	// Subscribe, resuming from the daemon-tracked high-water mark.
+	// GATE STAGE 2: answer with the resume position. This is what the shim
+	// opens its standing store subscription at, so it is read here — after the
+	// rotation reconciliation above, and before any frame goes out.
 	from := c.cfg.SeqStore.LastSeq(c.cfg.SessionID)
 	c.lastSeen = from
-	if err := ac.writeMsg(&corev1.Subscribe{SessionId: c.cfg.SessionID, FromSeq: from}); err != nil {
+	if err := ac.writeMsg(&corev1.DaemonHello{
+		DaemonVersion:   c.cfg.DaemonVersion,
+		ProtocolVersion: c.cfg.ProtocolVersion,
+		FromSeq:         from,
+	}); err != nil {
 		conn.Close()
-		return fmt.Errorf("sending Subscribe: %w", err)
+		return fmt.Errorf("sending DaemonHello: %w", err)
 	}
-	c.logf("attached: subscribed from_seq=%d turn_in_flight=%v shim_version=%s",
+	c.logf("bring-up gate: DaemonHello sent from_seq=%d turn_in_flight=%v shim_version=%s; awaiting ShimReady",
 		from, hello.GetTurnInFlight(), hello.GetShimVersion())
 
-	// Publish the live connection so control senders can write on it, and
-	// release anything blocked in AwaitReady.
+	// Publish the live connection so the read loop and control senders can use
+	// it. The READINESS latch is deliberately NOT closed here: it waits for the
+	// ShimReady this connection is about to carry (dispatchShimReady).
 	c.mu.Lock()
 	c.active = ac
-	c.markReadyLocked()
 	c.mu.Unlock()
 
 	// Seed liveness and clear any prior degraded window (fresh connection).
 	c.markRecv()
 	if c.degraded.CompareAndSwap(true, false) {
 		c.reportRecovered()
-	}
-	if c.cfg.OnConnected != nil {
-		c.cfg.OnConnected(hello)
 	}
 
 	connCtx, cancel := context.WithCancel(ctx)
@@ -442,8 +470,10 @@ func (c *Client) runOnce(ctx context.Context) (retErr error) {
 	c.mu.Lock()
 	if c.active == ac {
 		c.active = nil
-		// Re-arm the latch: a later send must wait for the RECONNECT rather
-		// than sail through on a latch left closed by the dead connection.
+		// Re-arm the latch: a later send must wait for the RECONNECT — and for
+		// the whole gate it re-runs — rather than sail through on a latch left
+		// closed by the dead connection.
+		c.wired = false
 		c.markNotReadyLocked()
 	}
 	c.mu.Unlock()
@@ -455,16 +485,14 @@ func (c *Client) runOnce(ctx context.Context) (retErr error) {
 	return retErr
 }
 
-// handshake receives the shim's ShimHello and replies with DaemonHello. A
-// protocol-version mismatch is terminal.
-// completeHandshake finishes the exchange for a connection the listener has
-// already identified. It checks the shim's protocol version and answers with
-// DaemonHello.
+// checkVersion refuses an incompatible shim BEFORE any other stage of the gate
+// runs: no registry reconciliation, no DaemonHello, no streaming. Reconnecting
+// cannot make a version mismatch compatible, so Run treats it as terminal.
 //
 // The ShimHello is passed in rather than read here because the listener had to
 // read it to know which session the connection belonged to — reading it twice
 // would consume the first real frame instead.
-func (c *Client) completeHandshake(ac *activeConn, hello *corev1.ShimHello) error {
+func (c *Client) checkVersion(hello *corev1.ShimHello) error {
 	if hello == nil {
 		return fmt.Errorf("shimclient: handshake got no ShimHello")
 	}
@@ -472,13 +500,35 @@ func (c *Client) completeHandshake(ac *activeConn, hello *corev1.ShimHello) erro
 		return fmt.Errorf("%w: shim=%q daemon=%q", ErrVersionMismatch,
 			hello.GetProtocolVersion(), c.cfg.ProtocolVersion)
 	}
-	if err := ac.writeMsg(&corev1.DaemonHello{
-		DaemonVersion:   c.cfg.DaemonVersion,
-		ProtocolVersion: c.cfg.ProtocolVersion,
-	}); err != nil {
-		return fmt.Errorf("sending DaemonHello: %w", err)
-	}
 	return nil
+}
+
+// dispatchShimReady closes the bring-up gate: GATE STAGE 3, the shim's
+// assertion that this session is fully wired. It is the ONLY thing that
+// releases AwaitReady, and OnConnected fires from here for the same reason —
+// a reattach consumer (the pending-resync re-arm) needs a shim that can serve,
+// not merely one that has connected.
+func (c *Client) dispatchShimReady(ac *activeConn, ready *corev1.ShimReady) {
+	if got := ready.GetSessionId(); got != "" && got != c.cfg.SessionID {
+		c.logf("ShimReady names session=%s on session=%s's connection; ignoring", got, c.cfg.SessionID)
+		return
+	}
+	c.mu.Lock()
+	current := c.active == ac
+	if current {
+		c.wired = true
+		c.markReadyLocked()
+	}
+	c.mu.Unlock()
+	if !current {
+		c.logf("ShimReady arrived on a superseded connection; ignoring")
+		return
+	}
+	c.logf("bring-up gate CLOSED: shim fully wired from_seq=%d store_key=%s; this session is now driveable",
+		ready.GetFromSeq(), ready.GetVendorSessionId())
+	if c.cfg.OnConnected != nil {
+		c.cfg.OnConnected(ac.hello)
+	}
 }
 
 // heartbeatSender emits a Heartbeat on every interval until the connection
