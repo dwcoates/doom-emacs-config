@@ -15,6 +15,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
@@ -224,6 +225,13 @@ type commandHandler struct {
 	turns     TurnStateSource
 	liveTasks LiveTaskSource
 	logf      func(string, ...any)
+	// establishMu guards establishing, the in-flight create-plus-establish
+	// round per workspace cwd. This is the NARROWEST point the coalescing can
+	// sit at: the create core is shared with POST /sessions, and the frontend
+	// command is the only caller whose contract is "acked means established".
+	// See createestablish.go.
+	establishMu  sync.Mutex
+	establishing map[string]*sessionEstablishment
 }
 
 // TurnStateSource reports whether a workspace's session has a turn IN FLIGHT,
@@ -563,29 +571,9 @@ func (h *commandHandler) Resync(_ context.Context, workspace, requestID string, 
 	return h.resyncer.Resync(workspace, cmd.GetFromSeq())
 }
 
-// CreateSession runs the shared create core for the command's cwd and reports
-// its outcome via the CommandAck (the resulting session identity reaches the
-// frontend as the SessionView the create core pushes). A typed create failure
-// (invalid mode / resume-missing) or a bring-up error surfaces loudly.
-func (h *commandHandler) CreateSession(ctx context.Context, workspace, requestID string, cmd *frontendv1.CreateSessionCmd) error {
-	h.logf("frontend cmd: create_session ws=%s request_id=%s model=%s config_dir=%s resume=%q fake=%v permission_mode=%q allow_ungated=%v",
-		workspace, requestID, cmd.GetModel(), cmd.GetConfigDir(), cmd.GetResumeClaudeSessionId(), cmd.GetFake(),
-		cmd.GetPermissionMode(), cmd.GetAllowUngated())
-	id, err := h.sessions.CreateSession(ctx, CreateOpts{
-		CWD:            cmd.GetCwd(),
-		Model:          cmd.GetModel(),
-		PermissionMode: cmd.GetPermissionMode(),
-		ConfigDir:      cmd.GetConfigDir(),
-		Resume:         cmd.GetResumeClaudeSessionId(),
-		Fake:           cmd.GetFake(),
-		AllowUngated:   cmd.GetAllowUngated(),
-	})
-	if err != nil {
-		return err
-	}
-	h.logf("frontend cmd: create_session ws=%s request_id=%s -> session=%s", workspace, requestID, id)
-	return nil
-}
+// CreateSession lives in createestablish.go: the command is the daemon's
+// establishment gate, and its ack condition is the whole reason that file
+// exists.
 
 // DeleteSession marks the command's session terminal and stops its shim.
 func (h *commandHandler) DeleteSession(_ context.Context, workspace, requestID string, cmd *frontendv1.DeleteSessionCmd) error {

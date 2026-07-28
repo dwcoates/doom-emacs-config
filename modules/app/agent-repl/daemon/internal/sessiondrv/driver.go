@@ -698,18 +698,20 @@ func (m *Manager) TurnActive(workspace string) (bool, error) {
 // handshaked and answered the correlated check.
 //
 // IT WAITS ON A BRING-UP ALREADY IN MOTION, under the PROBE'S OWN context.
-// createSession acks the instant the spawn is ISSUED, and Emacs probes health
-// immediately after: timed from production logs, the probe lands ~26ms after
-// the ack and the shim attaches ~20ms after THAT, so the probe used to fail
-// with "shimclient: no live shim connection" against a connection that was
-// milliseconds away, and the retry always succeeded. Awaiting the existing
-// driver's readiness first turns that instant-fail into the answer the probe
-// was asking for.
+// AwaitReady resolves only on ShimReady, i.e. once the shim has completed ALL
+// of its wiring (lock, query, producer, standing store subscription), so
+// waiting on it is what makes a probe issued the instant after a spawn answer
+// the question it was asking instead of failing against a connection that was
+// milliseconds away. This is also the gate createSession's ack rides on.
 //
 // The wait creates NOTHING: a workspace with no driver still fails loudly and
 // immediately (existing, above), and the deadline stays the caller's — a probe
 // whose context ends before readiness surfaces that deadline as its own loud
 // error rather than hanging.
+//
+// Each failure carries the LINK it stopped at as a sentinel (ErrNoLiveDriver,
+// ErrShimNotReady, or the shimclient sentinels the round-trip returns), which
+// is what lets a create nack name the deepest hop rather than the whole path.
 func (m *Manager) Health(ctx context.Context, workspace, sessionID, requestID string) (*corev1.HealthStatus, error) {
 	if workspace == "" {
 		return nil, fmt.Errorf("sessiondrv: health requires a workspace")
@@ -729,8 +731,11 @@ func (m *Manager) Health(ctx context.Context, workspace, sessionID, requestID st
 	}
 	m.logf("sessiondrv: health probe ws=%q session=%s request_id=%s", workspace, sessionID, requestID)
 	if err := d.client.AwaitReady(ctx); err != nil {
-		return nil, fmt.Errorf("sessiondrv: health ws=%q session=%s request_id=%s: the live driver never became connected within the probe's deadline: %w",
-			workspace, sessionID, requestID, err)
+		// BOTH causes stay in the chain: the link (which hop is pending) and the
+		// transport error (why the wait ended). Dropping either would cost a
+		// caller one of the two questions it has to answer.
+		return nil, fmt.Errorf("sessiondrv: health ws=%q session=%s request_id=%s: %w within the probe's deadline: %w",
+			workspace, sessionID, requestID, ErrShimNotReady, err)
 	}
 	status, err := d.client.Health(ctx, requestID)
 	if err != nil {
@@ -977,6 +982,17 @@ func (m *Manager) PendingPermissions(workspace string) []string {
 // internal/errclass beside its classification; this is the historic name.
 var ErrNotLiveSession = errclass.ErrNotLiveSession
 
+// The two establishment-link anchors this package is the deepest holder of:
+// there is no driver at all for the workspace, and there is one whose
+// connection never completed the handshake. Together with the shimclient
+// sentinels and the shim's own health verdict they let a createSession nack
+// name the deepest link that failed instead of reporting a bare bring-up
+// error. Their values live in internal/errclass beside their classifications.
+var (
+	ErrNoLiveDriver = errclass.ErrNoLiveDriver
+	ErrShimNotReady = errclass.ErrShimNotReady
+)
+
 // Hibernate suspends the workspace's live session, WHICHEVER session that is:
 // it stops consuming the stream and SIGTERMs the child shim (the redefined
 // hibernation, §4.4). The registry record stays non-terminal (the caller owns
@@ -1090,7 +1106,7 @@ func (m *Manager) existing(workspace string) (*driven, error) {
 	if d, ok := m.byWS[workspace]; ok {
 		return d, nil
 	}
-	return nil, fmt.Errorf("sessiondrv: no live session for workspace %q", workspace)
+	return nil, fmt.Errorf("sessiondrv: no live session for workspace %q: %w", workspace, ErrNoLiveDriver)
 }
 
 // ensure returns the live driver for workspace, bringing it up (reattach-first

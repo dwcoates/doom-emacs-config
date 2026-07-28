@@ -416,12 +416,11 @@ func TestNewCommandHandlerRejectsNilSessions(t *testing.T) {
 func TestCommandHandlerCreateSessionRoutesToSessions(t *testing.T) {
 	// Arrange
 	sc := &fakeSessionCmds{}
-	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, sc, nil, nil, nil, nil)
-	if err != nil {
-		t.Fatalf("newCommandHandler: %v", err)
-	}
+	// The create acks only on an established session, so an opts-passthrough
+	// assertion needs a shim that answers healthy.
+	h := establishHandler(t, sc, &probeHealthRouter{healthy: true})
 	// Act
-	err = h.CreateSession(context.Background(), "/w", "r1", &frontendv1.CreateSessionCmd{Cwd: "/w", Model: "haiku"})
+	err := h.CreateSession(context.Background(), "/w", "r1", &frontendv1.CreateSessionCmd{Cwd: "/w", Model: "haiku"})
 	// Assert — the create routes with its opts, never a silent drop.
 	if err != nil {
 		t.Fatalf("err: %v", err)
@@ -436,12 +435,11 @@ func TestCommandHandlerCarriesTheUngatedConsent(t *testing.T) {
 	// so dropping it in the dispatch would turn every such create into a
 	// refusal (or, worse, admit one nobody consented to).
 	sc := &fakeSessionCmds{}
-	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, sc, nil, nil, nil, nil)
-	if err != nil {
-		t.Fatalf("newCommandHandler: %v", err)
-	}
+	// The create acks only on an established session, so an opts-passthrough
+	// assertion needs a shim that answers healthy.
+	h := establishHandler(t, sc, &probeHealthRouter{healthy: true})
 	// Act
-	err = h.CreateSession(context.Background(), "/w", "r1", &frontendv1.CreateSessionCmd{
+	err := h.CreateSession(context.Background(), "/w", "r1", &frontendv1.CreateSessionCmd{
 		Cwd:            "/w",
 		PermissionMode: "bypassPermissions",
 		AllowUngated:   true,
@@ -458,12 +456,11 @@ func TestCommandHandlerCarriesTheUngatedConsent(t *testing.T) {
 func TestCommandHandlerWithholdsAnUnsetUngatedConsent(t *testing.T) {
 	// Arrange
 	sc := &fakeSessionCmds{}
-	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, sc, nil, nil, nil, nil)
-	if err != nil {
-		t.Fatalf("newCommandHandler: %v", err)
-	}
+	// The create acks only on an established session, so an opts-passthrough
+	// assertion needs a shim that answers healthy.
+	h := establishHandler(t, sc, &probeHealthRouter{healthy: true})
 	// Act
-	err = h.CreateSession(context.Background(), "/w", "r1", &frontendv1.CreateSessionCmd{Cwd: "/w"})
+	err := h.CreateSession(context.Background(), "/w", "r1", &frontendv1.CreateSessionCmd{Cwd: "/w"})
 	// Assert — an ordinary create never fabricates the consent.
 	if err != nil {
 		t.Fatalf("err: %v", err)
