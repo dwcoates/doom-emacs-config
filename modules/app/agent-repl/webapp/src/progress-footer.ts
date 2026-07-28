@@ -212,6 +212,14 @@ export interface Activity {
   text: string;
   /** Accent class stem, one per window so they read apart at a glance. */
   tone: "tool" | "thinking" | "blocked" | "retry" | "error" | "muted";
+  /**
+   * Pre-escaped markup for the cell, when the rung needs MORE than one color
+   * across its line. Only the rate-limit rung uses it: the usage figure and the
+   * reset time each carry their own severity accent, which a single cell-wide
+   * tone cannot say. Absent means the plain `text` is escaped and shown, which
+   * is every other rung.
+   */
+  html?: string;
 }
 
 /**
@@ -236,7 +244,7 @@ export function activityDetail(input: FooterInput, nowMs: number): Activity | nu
     return { text: authText(p.authenticating.detail), tone: "error" };
   }
   if (p.rateLimited !== null) {
-    return { text: rateLimitText(p.rateLimited), tone: "error" };
+    return rateLimitActivity(p.rateLimited);
   }
   if (p.blocked !== null) {
     return { text: p.blocked.detail, tone: "retry" };
@@ -260,20 +268,83 @@ export function activityDetail(input: FooterInput, nowMs: number): Activity | nu
   return null;
 }
 
+/**
+ * An activity as the cell's inner markup: the rung's own markup when it carries
+ * per-part accents, else its plain text escaped. The escaping stays here so a
+ * rung that ships no markup can never leak one.
+ */
+export function activityBody(a: Activity): string {
+  return a.html ?? escapeHtml(a.text);
+}
+
 /** The auth window's line, or a bare label when it carries no detail. */
 function authText(detail: string): string {
   return detail === "" ? "authenticating…" : `auth · ${detail}`;
 }
 
 /**
- * The rate-limit line: when the cap lifts, since that is the only part a
- * reader can act on. The utilization rides along when the vendor reported one.
+ * The rate-limit rung's severity accent.
+ *
+ * The window opens on ANY status other than a plain "allowed", which lumps two
+ * very different claims together: `allowed_warning` is the vendor saying the
+ * request SUCCEEDED while the allowance runs low, and anything else on the wire
+ * (`rejected`, or the pre-status empty string) is the vendor refusing. The old
+ * line painted both an outright red "rate-limited", which read a working
+ * session as stopped.
+ *
+ *   an outright limit (not `allowed`/`allowed_warning`)  RED, always
+ *   utilization >= 90%                                   RED
+ *   anything else with the window open                   YELLOW
+ *
+ * There is no green rung: the window being open at all is advisory, so its
+ * quietest reading is still a warning.
  */
-function rateLimitText(r: NonNullable<ProgressInput["rateLimited"]>): string {
-  const parts = ["rate-limited"];
-  if (r.resetsAt > 0) parts.push(`until ${clockTime(r.resetsAt * 1000)}`);
-  if (r.utilization > 0) parts.push(`${Math.round(r.utilization * 100)}%`);
-  return parts.join(" ");
+const WARNING_RATE_LIMIT_STATUSES = new Set(["allowed", "allowed_warning"]);
+
+/** The separator between the two rate-limit facts, exactly as specified. */
+const RATE_LIMIT_SEP = " • ";
+
+/** The utilization at which the reading turns from advisory to red. */
+const RATE_LIMIT_RED_AT = 0.9;
+
+export function rateLimitAccent(
+  r: NonNullable<ProgressInput["rateLimited"]>,
+): "pfooter-rl-limit" | "pfooter-rl-warn" {
+  if (!WARNING_RATE_LIMIT_STATUSES.has(r.status)) return "pfooter-rl-limit";
+  if (r.utilization >= RATE_LIMIT_RED_AT) return "pfooter-rl-limit";
+  // Everything else is yellow, INCLUDING a utilization under the 75% advisory
+  // floor: the window is open, which is the news, and there is nothing quieter
+  // this rung is allowed to say. So the floor draws no line of its own — it is
+  // the ceiling at 90% that changes the reading.
+  return "pfooter-rl-warn";
+}
+
+/**
+ * The rate-limit rung: how much of the session's allowance is spent and when
+ * the window resets — the two facts a reader can actually act on.
+ *
+ * Each figure carries its OWN accent (see `rateLimitAccent`), which is why this
+ * rung ships markup rather than a single cell-wide tone. The labels stay muted
+ * so the two figures are what the eye lands on.
+ *
+ * Either part drops out when the vendor did not report it; with both missing
+ * the rung falls back to a worded line, since an empty cell would drop the fact
+ * that a rate-limit window is open at all.
+ */
+export function rateLimitActivity(r: NonNullable<ProgressInput["rateLimited"]>): Activity {
+  const accent = rateLimitAccent(r);
+  const parts: Array<[string, string]> = [];
+  if (r.utilization > 0) parts.push(["Session usage: ", `${Math.round(r.utilization * 100)}%`]);
+  if (r.resetsAt > 0) parts.push(["Session reset: ", clockTime(r.resetsAt * 1000)]);
+  if (parts.length === 0) {
+    const text = "Session rate limit reported";
+    return { text, tone: "muted", html: `<span class="${accent}">${escapeHtml(text)}</span>` };
+  }
+  const text = parts.map(([label, value]) => `${label}${value}`).join(RATE_LIMIT_SEP);
+  const html = parts
+    .map((p) => `${escapeHtml(p[0])}<span class="${accent}">${escapeHtml(p[1])}</span>`)
+    .join(escapeHtml(RATE_LIMIT_SEP));
+  return { text, tone: "muted", html };
 }
 
 /** An epoch-millis instant as the reader's own local `HH:MM`. */
@@ -388,8 +459,11 @@ export function sheetHtml(input: FooterInput, nowMs: number): string {
     const detail = w.detail === "" ? "" : ` — ${w.detail}`;
     rows.push(`<span>${escapeHtml(`${name}${age}${detail}`)}</span>`);
   }
+  // The sheet says the rate limit in the SAME words and the same accents as the
+  // strip's rung: one fact reading two ways in one footer is how the old
+  // "rate-limited" line survived a rewording of the cell above it.
   if (p.rateLimited !== null) {
-    rows.push(`<span>${escapeHtml(rateLimitText(p.rateLimited))}</span>`);
+    rows.push(`<span>${activityBody(rateLimitActivity(p.rateLimited))}</span>`);
   }
   if (p.liveTaskCount > 0) {
     rows.push(`<span>${p.liveTaskCount} live task${p.liveTaskCount === 1 ? "" : "s"}</span>`);
@@ -470,7 +544,7 @@ export function footerHtml(
   const activity = activityDetail(input, nowMs);
   cells.push(
     `<div class="pfooter-cell pfooter-grow ${activity ? activity.tone : "muted"}">` +
-      `${activity ? escapeHtml(activity.text) : ""}` +
+      `${activity ? activityBody(activity) : ""}` +
       `<div class="pfooter-grab" aria-hidden="true"></div></div>`,
   );
   // The clock cell always renders while a turn is in flight: it owns the one
