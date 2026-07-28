@@ -55,7 +55,7 @@
       :merge-parent-dir :branch-merged :branch-merged-last-check
       :detail-branch :detail-dirty-count :detail-last-commit
       :detail-last-commit-time :detail-master-ahead :detail-source-ahead
-      :detail-source-branch :git-clean :git-proc))
+      :detail-source-branch))
     ("🧠 Session"
      (:session-id :fork-session-id :frontend-buffer :active-env
       :bare-metal :agent-ready :ws-loaded :ready-timer))
@@ -553,25 +553,15 @@ faces so they stand out visually in the help buffer."
         (dolist (section partition)
           (agent-repl--dump-insert-section (car section) (cdr section)))))))
 
-(defun agent-repl-debug/workspace-clean-p (ws-name)
-  "Show whether workspace WS-NAME has unstaged changes to tracked files.
-Uses `agent-repl--workspace-clean-p' -- the same function used in production."
-  (interactive (list (agent-repl--read-workspace-with-default "Workspace: ")))
-  (let ((clean (agent-repl--workspace-clean-p ws-name)))
-    (agent-repl--log ws-name "debug/workspace-clean-p: ws=%s clean=%s"
-                      ws-name (if clean "t" "nil"))
-    (message "Workspace %s: %s" ws-name (if clean "clean" "dirty"))))
-
 (defun agent-repl-debug/--gather-ws-diagnostics (ws-name)
   "Gather diagnostic information about workspace WS-NAME.
-Returns a plist with keys :owning-ws :has-window :agent-open :dirty.
+Returns a plist with keys :owning-ws :has-window :agent-open.
 `:owning-ws' and `:has-window' are derived from WS-NAME's agent view
 \(webview) buffer, independently re-derived from the persp's actual
 buffer list rather than trusted from the `:frontend-buffer' plist
 entry — this is a diagnostic tool for exactly the buffer-ownership
 drift it would otherwise be trying to take on faith."
   (let* ((open (agent-repl--ws-agent-open-p ws-name))
-         (dirty (not (agent-repl--workspace-clean-p ws-name)))
          (persp (agent-repl--ws-resolve-persp ws-name))
          (persp-bufs (agent-repl--ws-buffers persp))
          (view-buf (cl-loop for buf in persp-bufs
@@ -581,7 +571,7 @@ drift it would otherwise be trying to take on faith."
          (owning-ws (agent-repl--buffer-owner view-buf))
          (has-window (and view-buf (get-buffer-window view-buf t))))
     (list :owning-ws owning-ws :has-window has-window
-          :agent-open open :dirty dirty)))
+          :agent-open open)))
 
 (defun agent-repl-debug/--apply-state-refresh (ws-name agent-open)
   "Apply a state refresh for WS-NAME given whether AGENT-OPEN is non-nil.
@@ -596,28 +586,26 @@ DIAG is the plist from `agent-repl-debug/--gather-ws-diagnostics'.
 BEFORE and AFTER are the workspace states before and after refresh."
   (format (concat "Workspace %s:\n"
                   "  owning-ws=%s has-window=%s\n"
-                  "  agent-open=%s dirty=%s\n"
+                  "  agent-open=%s\n"
                   "  state=%s -> %s")
           ws-name
           (or (plist-get diag :owning-ws) "nil")
           (if (plist-get diag :has-window) "yes" "no")
           (if (plist-get diag :agent-open) "yes" "no")
-          (if (plist-get diag :dirty) "yes" "no")
           (or before "nil") (or after "nil")))
 
 (defun agent-repl-debug/refresh-state (ws-name)
   "Force a full state refresh for workspace WS-NAME.
 Runs the same logic as the periodic `update-all-workspace-states' timer:
-checks agent visibility, git dirty status, and applies the state table.
+checks agent visibility and applies the state table.
 Reports comprehensive diagnostics."
   (interactive (list (agent-repl--read-workspace-with-default "Workspace: ")))
   (let* ((before (agent-repl--ws-agent-state ws-name))
          (diag (agent-repl-debug/--gather-ws-diagnostics ws-name)))
     (agent-repl--log ws-name
-                      "debug/refresh-state: ws=%s before=%S agent-open=%s dirty=%s owning-ws=%S has-window=%s"
+                      "debug/refresh-state: ws=%s before=%S agent-open=%s owning-ws=%S has-window=%s"
                       ws-name before
                       (if (plist-get diag :agent-open) "t" "nil")
-                      (if (plist-get diag :dirty) "t" "nil")
                       (plist-get diag :owning-ws)
                       (if (plist-get diag :has-window) "t" "nil"))
     (agent-repl-debug/--apply-state-refresh ws-name (plist-get diag :agent-open))
