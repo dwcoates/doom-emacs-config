@@ -64,9 +64,7 @@
 |----------|---------|-------|
 | `agent-repl--deliver-pending-prompts` | Yes | live buf, dead buf |
 | `agent-repl--drain-pending-prompts` | Yes | empty, sends |
-| `agent-repl--show-panels-or-defer` | Yes | current ws, other ws |
 | `agent-repl--finalize-ready-state` | Yes | cancels timer + captures session |
-| `agent-repl--open-panels-after-ready` | Yes | with pending, no pending current, no pending other |
 | `agent-repl--handle-first-ready` | Yes | idempotent, with owning ws, without owning ws |
 | `agent-repl--on-vterm-title-set` | Yes | non-claude buffer, claude buffer |
 
