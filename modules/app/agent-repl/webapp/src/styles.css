@@ -952,13 +952,11 @@ body::after {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
-  /* The grey full-width tool cards (Bash, Read, Skill, Agent, …) sit at 98.5%
-     of the agent column rather than filling it, so they read as centered
-     BETWEEN the purple response's left rail and the prompt's right rail
-     instead of spanning the whole rail-to-rail width. Derived from the cap
-     above so it tracks any retune of it: 0.985 of the column, still centered
-     in the same column by the equal auto margins on the tool-card rule. */
-  --tool-card-cap: calc(var(--agent-bubble-cap) * 0.985);
+  /* There is no second, narrower card cap here any more: every feed card —
+     grey tool card, permission prompt, thinking fold, status chip, failure
+     card, system note — shares the ONE `--agent-bubble-cap` the response
+     bubble is capped at (see the feed-card rule below), so no kind of card
+     may be wider or narrower at its ceiling than the answer above it. */
 }
 
 pre {
@@ -1105,22 +1103,29 @@ pre {
   padding: 0 0.2rem;
   border-radius: 4px;
 }
-/* Agent-side tool cards center: every top-level async tool card — a lone
-   `.tool-card`, or a consecutive-run `.feed-group` wrapping one — is capped
-   at `--tool-card-cap` (0.985 of the agent column, so 0.985 × 0.75 of the feed)
-   and pushed to the middle by equal auto margins. That inset span reads as
-   centered BETWEEN the purple response's left rail and the prompt's right
-   rail rather than flush with them. Scoped to direct `.feed-item` children,
-   so a tool card NESTED inside a bubble's activity panel keeps its full
-   width. The AskUserQuestion Q&A card (`.permission.question`, in both its
-   pending "Question" and its resolved "answered" state) rides the same rail:
-   it is a top-level prompt card like the tool cards, so it centers with them
-   rather than spanning the full column. The assistant's own response bubble
-   is NOT centered — it fits its text and hugs the left rail (see below). */
+/* THE feed-card rule: one maximum width for every full-width card the feed
+   draws, and it is the SAME `--agent-bubble-cap` the assistant's response
+   bubble is capped at. A permission request, the resolved card that replaces
+   it, an AskUserQuestion Q&A, an unsupported-command or /status panel (all
+   `.permission`), a lone `.tool-card`, a consecutive-run `.feed-group`
+   wrapping one, and a thinking fold now all stop at the response's right
+   edge — no card kind is allowed a wider or a narrower ceiling than the
+   answer it sits beside, so the feed reads as one column rather than a stack
+   of subtly different widths. Equal auto margins center each card in that
+   column; at the cap that lands its left edge exactly on the response's left
+   rail and its right edge on the prompt's right rail. Cards still shrink to
+   fit short content wherever their own rule says `width: fit-content` (the
+   result chip, failure card, system note, queued card) — only the CEILING is
+   normalized here. Scoped to direct `.feed-item` children, so a tool card or
+   permission prompt NESTED inside a bubble's activity panel keeps its full
+   width. The narrower 0.985 inset the tool cards used to carry, and the token
+   that expressed it, are gone. The assistant's response bubble and the prompt
+   are NOT centered — each fits its text and hugs its own rail (see below). */
 .feed-item > .tool-card,
 .feed-item > .feed-group,
-.feed-item > .permission.question {
-  max-width: var(--tool-card-cap);
+.feed-item > .permission,
+.feed-item > .thinking {
+  max-width: var(--agent-bubble-cap);
   margin-left: auto;
   margin-right: auto;
 }
