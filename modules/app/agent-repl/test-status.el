@@ -2374,6 +2374,199 @@ the anchor are what the leading badge counts."
     (should-not (string-prefix-p "+" (car rows)))
     (should (string-match-p "\\+[0-9]+\\'" (cadr rows)))))
 
+;;;; ---- Tests: anchored tab-bar view window ----
+;;
+;; The rendered window STARTS at an anchor workspace and runs right; it
+;; is never recentered on the current workspace.  Fixture below: eight
+;; 4-column entries at WIDTH 12 over two rows.  Badge reserve is
+;; `2 + (length "8")' = 3, so each row's budget is 9 and holds exactly
+;; two entries — every window is exactly FOUR entries wide, whatever it
+;; is anchored at, which makes the anchor arithmetic readable.
+;;
+;; NSWindow geometry (`ns_change_tab_bar_height', the clipped-resize
+;; livelock, the actual pixel height of the tab-bar strip) cannot be
+;; exercised in batch: there is no graphical frame.  These tests pin the
+;; STRING contract only — which entries render, in which order, in how
+;; many rows.  The height contract is covered indirectly, by pinning
+;; that installation never touches a live frame's `tab-bar-lines'.
+
+(defconst agent-repl-test--anchor-names
+  '("n1" "n2" "n3" "n4" "n5" "n6" "n7" "n8")
+  "Eight workspace names for the anchored-window fixture.")
+
+(defun agent-repl-test--anchor-widths (&optional n)
+  "Return N (default 8) uniform 4-column entry widths."
+  (make-list (or n 8) 4))
+
+(defun agent-repl-test--anchor-at (current anchor &optional names width)
+  "Return the window anchor index for CURRENT given a previous ANCHOR.
+NAMES defaults to the eight-name fixture and WIDTH to 12; the previous
+name list is NAMES, i.e. no membership change."
+  (let ((names (or names agent-repl-test--anchor-names)))
+    (agent-repl--tabline-window-anchor
+     names current anchor names
+     (agent-repl-test--anchor-widths (length names))
+     (or width 12) 2)))
+
+(ert-deftest agent-repl-test-tabline-anchor-inside-window-does-not-move ()
+  "A current workspace already inside the window moves the anchor NOT AT ALL.
+This is the invariant the whole redesign exists for: switching between
+two visible tabs must not reshuffle the view."
+  ;; Arrange: anchored at n1, the window covers n1..n4.
+  (dolist (current '("n1" "n2" "n3" "n4"))
+    ;; Act / Assert
+    (should (= 0 (agent-repl-test--anchor-at current "n1")))))
+
+(ert-deftest agent-repl-test-tabline-anchor-left-of-window-becomes-current ()
+  "A current workspace LEFT of the window makes the anchor the current one."
+  ;; Arrange: anchored at n5, the window covers n5..n8.
+  (dolist (case '(("n1" . 0) ("n2" . 1) ("n3" . 2) ("n4" . 3)))
+    ;; Act
+    (let ((lo (agent-repl-test--anchor-at (car case) "n5")))
+      ;; Assert
+      (should (= (cdr case) lo)))))
+
+(ert-deftest agent-repl-test-tabline-anchor-past-window-advances-minimally ()
+  "A current workspace past the window's end advances the anchor the
+SMALLEST number of positions that brings it back into view — never more."
+  ;; Arrange: anchored at n1 (window n1..n4); each window holds four.
+  (dolist (case '(("n5" . 1) ("n6" . 2) ("n7" . 3) ("n8" . 4)))
+    ;; Act
+    (let ((lo (agent-repl-test--anchor-at (car case) "n1")))
+      ;; Assert
+      (should (= (cdr case) lo)))))
+
+(ert-deftest agent-repl-test-tabline-anchor-all-entries-fit-anchors-at-head ()
+  "With nothing to elide the window is the whole list, anchored at index 0,
+whatever stale anchor was carried in."
+  ;; Arrange / Act / Assert
+  (should (= 0 (agent-repl-test--anchor-at "n8" "n5" nil 80))))
+
+(ert-deftest agent-repl-test-tabline-surviving-anchor-keeps-live-anchor ()
+  "A membership change that spares the anchor workspace keeps it."
+  ;; Arrange / Act / Assert
+  (should (equal "n3" (agent-repl--tabline-surviving-anchor
+                       "n3" '("n1" "n2" "n3" "n4") '("n1" "n3" "n4")))))
+
+(ert-deftest agent-repl-test-tabline-surviving-anchor-prefers-right-neighbor ()
+  "When the anchor dies and both neighbors survive, the RIGHT one takes
+its place — that is the entry that slides into the leftmost slot."
+  ;; Arrange / Act / Assert
+  (should (equal "n4" (agent-repl--tabline-surviving-anchor
+                       "n3" '("n1" "n2" "n3" "n4") '("n1" "n2" "n4")))))
+
+(ert-deftest agent-repl-test-tabline-surviving-anchor-falls-back-left ()
+  "When the anchor dies with no surviving entry to its right, the nearest
+surviving entry to its LEFT takes over."
+  ;; Arrange / Act / Assert
+  (should (equal "n2" (agent-repl--tabline-surviving-anchor
+                       "n4" '("n1" "n2" "n3" "n4") '("n1" "n2")))))
+
+(ert-deftest agent-repl-test-tabline-surviving-anchor-unknown-anchor-heads-list ()
+  "An anchor absent from BOTH name lists falls back to the first entry."
+  ;; Arrange / Act / Assert
+  (should (equal "n1" (agent-repl--tabline-surviving-anchor
+                       "gone" '("n2" "n3") '("n1" "n2" "n3")))))
+
+(ert-deftest agent-repl-test-tabline-anchor-index-records-state ()
+  "The stateful wrapper records the anchor NAME, the width it was computed
+at, and the name list it was computed against."
+  ;; Arrange
+  (let ((agent-repl--tabline-anchor "n5")
+        (agent-repl--tabline-anchor-width nil)
+        (agent-repl--tabline-anchor-names agent-repl-test--anchor-names))
+    ;; Act
+    (let ((lo (agent-repl--tabline-anchor-index
+               (agent-repl-test--anchor-widths)
+               agent-repl-test--anchor-names "n6" 12 2)))
+      ;; Assert
+      (should (= 4 lo))
+      (should (equal "n5" agent-repl--tabline-anchor))
+      (should (= 12 agent-repl--tabline-anchor-width))
+      (should (equal agent-repl-test--anchor-names
+                     agent-repl--tabline-anchor-names)))))
+
+(ert-deftest agent-repl-test-tabline-anchor-resize-recomputes-from-anchor ()
+  "A width change recomputes the window FROM the anchor: the anchor
+workspace does not teleport, only the recorded width changes."
+  ;; Arrange: twelve entries, overflowing at both widths under test.
+  (let* ((names (mapcar (lambda (i) (format "e%03d" i)) (number-sequence 1 12)))
+         (widths (agent-repl-test--anchor-widths 12))
+         (agent-repl--tabline-anchor "e005")
+         (agent-repl--tabline-anchor-width 12)
+         (agent-repl--tabline-anchor-names names))
+    ;; Act
+    (let ((narrow (agent-repl--tabline-anchor-index widths names "e005" 12 2))
+          (narrow-anchor agent-repl--tabline-anchor)
+          (wide (agent-repl--tabline-anchor-index widths names "e005" 20 2)))
+      ;; Assert
+      (should (= 4 narrow))
+      (should (= 4 wide))
+      (should (equal "e005" narrow-anchor))
+      (should (equal "e005" agent-repl--tabline-anchor))
+      (should (= 20 agent-repl--tabline-anchor-width)))))
+
+(ert-deftest agent-repl-test-tabline-rows-identical-across-visible-tab-switch ()
+  "Switching between two tabs that are both already visible renders a
+LITERALLY identical set of rows — same entries, same order, same string."
+  ;; Arrange: twelve entries anchored at e005; e006 and e007 are both
+  ;; inside the six-wide window the 20-column frame renders.
+  (let* ((names (mapcar (lambda (i) (format "e%03d" i)) (number-sequence 1 12)))
+         (widths (agent-repl-test--anchor-widths 12))
+         (agent-repl--tabline-anchor "e005")
+         (agent-repl--tabline-anchor-width 20)
+         (agent-repl--tabline-anchor-names names)
+         (render (lambda (current)
+                   (agent-repl--tabline-rows
+                    names
+                    (agent-repl--tabline-anchor-index widths names current 20 2)
+                    20 2 widths))))
+    ;; Act
+    (let ((before (funcall render "e006"))
+          (after (funcall render "e007")))
+      ;; Assert
+      (should (equal before after))
+      (should (equal "e005" agent-repl--tabline-anchor)))))
+
+(ert-deftest agent-repl-test-tabline-rows-badges-on-both-ends ()
+  "Entries elided on EITHER side of the window get their own badge: the
+leading count on the first row, the trailing count on the last."
+  ;; Arrange
+  (let ((entries (mapcar (lambda (i) (format "e%03d" i)) (number-sequence 1 12))))
+    ;; Act
+    (let ((rows (agent-repl--tabline-rows entries 4 20 2)))
+      ;; Assert
+      (should (string-prefix-p "+4 " (nth 0 rows)))
+      (should (string-suffix-p " +2" (nth 1 rows))))))
+
+(ert-deftest agent-repl-test-tabline-rows-no-leading-badge-at-head-anchor ()
+  "An anchor at index 0 elides nothing on the left, so no leading badge."
+  ;; Arrange
+  (let ((entries (mapcar (lambda (i) (format "e%03d" i)) (number-sequence 1 12))))
+    ;; Act
+    (let ((rows (agent-repl--tabline-rows entries 0 20 2)))
+      ;; Assert
+      (should-not (string-prefix-p "+" (nth 0 rows)))
+      (should (string-suffix-p " +6" (nth 1 rows))))))
+
+(ert-deftest agent-repl-test-tabline-rows-labels-stay-globally-numbered ()
+  "The [N] jump labels are GLOBAL positions in the full visible list, not
+positions within the window — `SPC <n>' indexes the same list, so an
+anchored window must NOT renumber from 1."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (let* ((names (mapcar (lambda (i) (format "e%03d" i)) (number-sequence 1 12)))
+           (entries (agent-repl--tabline-rendered-entries names))
+           (widths (mapcar #'agent-repl--tabline-entry-width entries)))
+      ;; Act: anchor at index 4, i.e. the fifth workspace.
+      (let ((text (substring-no-properties
+                   (mapconcat #'identity
+                              (agent-repl--tabline-rows entries 4 40 2 widths)
+                              " "))))
+        ;; Assert
+        (should (string-search "[5]" text))
+        (should-not (string-search "[1]" text))))))
+
 (ert-deftest agent-repl-test-tabline-rendered-entries-count ()
   "rendered-entries returns one element per workspace name."
   (agent-repl-test--with-clean-state
