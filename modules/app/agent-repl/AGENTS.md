@@ -6,7 +6,48 @@ browser GUI (`webapp/`), and two OS-managed services carrying the file plane
 (`agent-shim/shim-store/`, `agent-shim/claude/shim-sidecar/`).
 
 The repo-wide rules in the top-level `AGENTS.md` apply here in full; this file
-covers only deploying and running THIS module.
+covers deploying and running THIS module, plus the color vocabulary every one
+of its surfaces shares.
+
+## Purple means the vendor, blue means the local environment
+
+Every surface that carries color here — the Emacs tab-bar, the sidebar dots,
+the feed bubbles, the failure cards — splits the same way, and a new element
+picks its hue from that split before it picks a shade:
+
+- **Purple: the llm/agent vendor.** The vendor's api, the account, and the
+  model's own work. `vendor_blocked` and `ERROR_CLASS_API` (auth, a usage
+  limit, a persistent 4xx/5xx), the assistant text bubble, the tool-card titles
+  and the subagent chip (work the agent itself issued), the wash behind a
+  compaction summary, and the arc drawn while a failed api request is being
+  auto-retried.
+- **Blue: the local environment.** Everything on the Emacs→daemon→shim→store
+  route and the machine it runs on. `starting`, `dormant` (no session is wired
+  to the workspace), `dead`, `degraded` and `ERROR_CLASS_INTERNAL` (shim down,
+  store outage, a refused command), the backfill-failed gate, and the user's
+  own prompt bubble.
+
+`proto/vocab/render-colors.json` is where the split is executable: a failure
+card takes its class's color from the same table the workspace dot takes, so a
+purple workspace can never be explained by a blue card or the reverse. Reach
+for a third hue only once you are sure the thing is neither side's — the tree
+carried three answers about one api failure before this rule existed.
+
+Within a hue the shade still carries meaning:
+
+- The magenta-leaning `--blocked` (`#a21caf`,
+  `agent-repl--color-vendor-blocked-purple`) is reserved for stopped at the
+  vendor, needing a human. The violets (`--retry`, `--info-agents`,
+  `--tool-title`) are the vendor working, and a retry mistaken for a dead
+  session is the misread the two leans exist to prevent.
+- Blue is deliberately one color for every local fault. Which part of the route
+  broke matters to whoever debugs it, not to the user reading a tab, so the
+  failure cards carry that distinction instead.
+
+The merge lifecycle is outside the split by design: merge states wear glyphs
+rather than colors so they never spend one of the five, and the Recently Merged
+disc borrows the `--info-agents` violet as a section tint, not as a claim about
+the vendor.
 
 ## Committing to master means bouncing what you changed
 
