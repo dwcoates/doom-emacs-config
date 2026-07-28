@@ -1004,10 +1004,10 @@ describe("framed column: tool cards center, prompt right-flushes, response left-
     expect(toolCentered).toMatch(/margin-right:\s*auto/);
   });
 
-  it("caps the tool-card column at the narrower --tool-card-cap token", () => {
-    // Arrange / Act — the grey cards inset within the agent column, not filling it.
+  it("caps the tool-card column at the SAME token the response bubble uses", () => {
+    // Arrange / Act — the grey cards fill the agent column now, no inset of their own.
     // Assert
-    expect(toolCentered).toMatch(/max-width:\s*var\(--tool-card-cap\)/);
+    expect(toolCentered).toMatch(/max-width:\s*var\(--agent-bubble-cap\)/);
   });
 
   it("sets the agent bubble cap to 75% on the column so the tail slot inherits it", () => {
@@ -1017,10 +1017,10 @@ describe("framed column: tool cards center, prompt right-flushes, response left-
     expect(mainCol).toMatch(/--agent-bubble-cap:\s*75%/);
   });
 
-  it("derives the tool-card cap as 0.985 of the agent column on the feed", () => {
-    // Arrange / Act — grey cards centered between the response and prompt rails.
+  it("declares no second, narrower card cap on the feed", () => {
+    // Arrange / Act — the retired --tool-card-cap token, gone from the sheet entirely.
     // Assert
-    expect(feed).toMatch(/--tool-card-cap:\s*calc\(var\(--agent-bubble-cap\)\s*\*\s*0\.985\)/);
+    expect(css).not.toContain("--tool-card-cap");
   });
 
   it("folds lone top-level async tool cards into the agent center", () => {
@@ -1035,10 +1035,18 @@ describe("framed column: tool cards center, prompt right-flushes, response left-
     expect(toolSelector).toContain(".feed-item > .feed-group");
   });
 
-  it("folds the top-level AskUserQuestion Q&A card into the agent center", () => {
-    // Arrange / Act — the Q&A prompt card rides the same rail as the tool cards.
+  it("folds every top-level permission card into the agent center, not just the Q&A", () => {
+    // Arrange / Act — the unqualified `.permission` selector covers the plain
+    // request, its resolved card, the AskUserQuestion Q&A, and the
+    // unsupported-command and /status panels alike.
     // Assert
-    expect(toolSelector).toContain(".feed-item > .permission.question");
+    expect(toolSelector).toContain(".feed-item > .permission,");
+  });
+
+  it("folds the top-level thinking card into the agent center", () => {
+    // Arrange / Act — the `<details class="thinking">` fold, previously uncapped.
+    // Assert
+    expect(toolSelector).toContain(".feed-item > .thinking");
   });
 
   it("shrinks the response bubble to fit its own text", () => {
@@ -3102,5 +3110,68 @@ describe("the retired error chrome", () => {
     // unused by it, which is the drift the one table now prevents.
     // Assert
     expect(css).not.toContain(".retry-badge {");
+  });
+});
+
+/**
+ * Visual-width normalization. The agent's RESPONSE bubble sets the feed's
+ * one maximum width, and every other card kind the feed draws must stop at
+ * the same rail — a permission prompt no wider than the answer above it, a
+ * tool card no narrower. The inventory below is `itemKey`'s switch in
+ * render.ts (the exhaustive list of feed item kinds), plus the queued card
+ * the composer parks. Only the CEILING is pinned here: a card whose own rule
+ * says `width: fit-content` still shrinks to its content, exactly as the
+ * response bubble does.
+ *
+ * The user's own PROMPT bubble is deliberately excluded — it keeps its own
+ * narrower convention, asserted at the bottom.
+ */
+describe("visual-width normalization: every feed card kind stops at the response cap", () => {
+  const feedCardRule = blockAfter(css, ".feed-item > .tool-card,");
+  const responseBubble = blockAfter(css, ".bubble.assistant {");
+  const badgeRule = blockAfter(css, ".result,");
+  const queuedRule = blockAfter(css, "\n.queued-card {");
+  const separatorRule = blockAfter(css, ".clear-divider,");
+  const summaryRule = blockAfter(css, ".bubble.assistant.compact-summary");
+  const promptBubble = blockAfter(css, ".bubble.user {");
+
+  /** One feed item kind, and the rule block that decides its width ceiling. */
+  const kinds: ReadonlyArray<{
+    kind: string;
+    rule: string;
+    prop: "max-width" | "width";
+  }> = [
+    { kind: "text — the response bubble, the reference", rule: responseBubble, prop: "max-width" },
+    { kind: "thinking", rule: feedCardRule, prop: "max-width" },
+    { kind: "tool", rule: feedCardRule, prop: "max-width" },
+    { kind: "permission", rule: feedCardRule, prop: "max-width" },
+    { kind: "result — the unsupported-command and /status panels", rule: feedCardRule, prop: "max-width" },
+    { kind: "user-turn — the merge card, a tool card", rule: feedCardRule, prop: "max-width" },
+    { kind: "result — the standalone chip", rule: badgeRule, prop: "max-width" },
+    { kind: "failure", rule: badgeRule, prop: "max-width" },
+    { kind: "system", rule: badgeRule, prop: "max-width" },
+    { kind: "context-cleared and context-compacted markers", rule: separatorRule, prop: "width" },
+    { kind: "the parked queued message", rule: queuedRule, prop: "max-width" },
+  ];
+
+  for (const { kind, rule, prop } of kinds) {
+    it(`stops the ${kind} card at the shared cap`, () => {
+      // Arrange / Act — the rule that owns this kind's width ceiling.
+      // Assert — the cap is the response bubble's own token, never a literal.
+      expect(rule).toContain(`${prop}: var(--agent-bubble-cap)`);
+    });
+  }
+
+  it("leaves the compaction summary on the response bubble's cap it already inherits", () => {
+    // Arrange / Act — the summary IS an assistant bubble, so its own rule
+    // must not restate (or contradict) the cap.
+    // Assert
+    expect(summaryRule).not.toContain("max-width");
+  });
+
+  it("leaves the user's prompt bubble on its own narrower convention", () => {
+    // Arrange — the one card kind this normalization deliberately skips.
+    // Act / Assert — still its own literal percentage, not the shared cap.
+    expect(promptBubble).toMatch(/max-width:\s*60%/);
   });
 });
