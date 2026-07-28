@@ -3043,14 +3043,30 @@ describe("lastUserTurnId", () => {
     done: true,
   });
 
-  it("returns the newest user turn's request id", () => {
+  /** A user turn off the transcript file plane: a uuid, and NO request id. */
+  const transcriptTurn = (uuid: string): ConversationItem => ({
+    kind: "user-turn",
+    requestId: "",
+    uuid,
+    content: [{ type: "text", text: "hi" }],
+    ts: new Date(2026, 4, 24, 10, 0).toISOString(),
+  });
+
+  it("returns the newest user turn's identity", () => {
     // Arrange + Act + Assert
-    expect(lastUserTurnId([turn("r1"), text("b1"), turn("r2")])).toBe("r2");
+    expect(lastUserTurnId([turn("r1"), text("b1"), turn("r2")])).toBe("user-turn:req:r2");
   });
 
   it("returns the user turn's id across the items answering it", () => {
     // Arrange — a send stays the newest user turn under its own replies.
-    expect(lastUserTurnId([turn("r1"), text("b1"), text("b2")])).toBe("r1");
+    expect(lastUserTurnId([turn("r1"), text("b1"), text("b2")])).toBe("user-turn:req:r1");
+  });
+
+  it("distinguishes two request-id-less transcript turns by their uuids", () => {
+    // Arrange — the live shape: every prompt arrives with an empty request id.
+    const items = [transcriptTurn("u1"), text("b1"), transcriptTurn("u2")];
+    // Act + Assert — the second is a FRESH turn, not the first one again.
+    expect(lastUserTurnId(items)).toBe("user-turn:uuid:u2");
   });
 
   it("returns null for a feed carrying no user turn", () => {
@@ -5565,7 +5581,9 @@ describe("FeedRenderer: fresh user turn logs a rendering receipt", () => {
     // Act
     feed.render(stateOf([text("b1"), userTurnAt(9, 0)]));
     // Assert
-    expect(lines).toContain("info: feed: user turn rendering request_id=r1 last=true");
+    expect(lines).toContain(
+      "info: feed: user turn rendering request_id=r1 key=user-turn:req:r1 last=true",
+    );
   });
 
   it("logs last=false when items rank below the fresh turn", () => {
@@ -5575,7 +5593,9 @@ describe("FeedRenderer: fresh user turn logs a rendering receipt", () => {
     // Act
     feed.render(stateOf([userTurnAt(9, 0), text("b1")]));
     // Assert
-    expect(lines).toContain("info: feed: user turn rendering request_id=r1 last=false");
+    expect(lines).toContain(
+      "info: feed: user turn rendering request_id=r1 key=user-turn:req:r1 last=false",
+    );
   });
 
   it("does not re-log an already-seen turn on the next render", () => {

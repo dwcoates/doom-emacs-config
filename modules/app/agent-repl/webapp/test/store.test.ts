@@ -436,6 +436,14 @@ describe("feed order under replay/live interleave", () => {
     return { kind: "user-turn", requestId, content: [{ type: "text", text: "hi" }], ts: TS };
   }
 
+  /**
+   * A prompt as the REAL pipeline delivers it: a transcript user line, whose
+   * request id is empty and whose only identity is the record uuid.
+   */
+  function transcriptTurn(uuid: string, text: string): ConversationItem {
+    return { kind: "user-turn", requestId: "", uuid, content: [{ type: "text", text }], ts: TS };
+  }
+
   it("slots a replayed item above a live item that arrived first", () => {
     // Arrange — the live prompt echo (seq 100) beats the replay to the socket.
     const store = new ConversationStore();
@@ -484,6 +492,26 @@ describe("feed order under replay/live interleave", () => {
     store.ingest([itemsEffect([userTurnItem("r1")], 12)]);
     // Assert — reconciled in place, not moved past the result.
     expect(store.state.items.map((i) => i.kind)).toEqual(["user-turn", "result"]);
+  });
+
+  it("keeps two request-id-less prompts apart on their uuids", () => {
+    // Arrange — the LIVE shape: transcript-borne prompts, empty request ids.
+    const store = new ConversationStore();
+    store.ingest([itemsEffect([transcriptTurn("u1", "first prompt")], 10)]);
+    // Act — a second prompt lands under the same (empty) request id.
+    store.ingest([itemsEffect([transcriptTurn("u2", "second prompt")], 11)]);
+    // Assert — two bubbles, not one overwritten by the other.
+    expect(store.state.items.map((i) => i.kind)).toEqual(["user-turn", "user-turn"]);
+  });
+
+  it("reconciles a redelivered request-id-less prompt on its uuid", () => {
+    // Arrange — a resync replays the very same transcript line.
+    const store = new ConversationStore();
+    store.ingest([itemsEffect([transcriptTurn("u1", "only prompt")], 10)]);
+    // Act
+    store.ingest([itemsEffect([transcriptTurn("u1", "only prompt")], 12)]);
+    // Assert — one bubble, not a duplicate.
+    expect(store.state.items).toHaveLength(1);
   });
 
   it("ranks a live typing preview at the high-water mark, above late replay", () => {
