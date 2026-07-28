@@ -1537,42 +1537,6 @@ SOURCE-WS from the persp workspace list."
         (agent-repl--spawn-workspace-generation
          raw-prompt prefixed-prompt git-root "HEAD" fork-ws)))))
 
-(defun agent-repl--new-workspace (&optional root)
-  "Create a new workspace and open magit-status in it, mirroring
-the behavior of `+workspaces-switch-project-function'.
-Signals an error if not inside a git repository.
-
-ROOT, when non-nil, is the absolute git root the new workspace is rooted
-in; otherwise it is resolved from `default-directory' via
-`agent-repl--git-root'.  Callers that have already resolved a root
-(e.g. the empty-prompt path of `agent-repl-create-worktree-workspace')
-pass it here so the new workspace honors the same source repository.
-
-Applies `agent-repl-repo-default-priorities' for ROOT's repo: the
-default priority is written onto the workspace plist before
-`--initialize-ws-env' so it survives the initial state-save (and is
-overridden by any saved priority for the same project)."
-  (interactive)
-  (let ((root (or root (agent-repl--git-root))))
-    (unless root
-      (error "agent-repl--new-workspace: not in a git repository"))
-    (agent-repl--log (agent-repl--ws-current-name) "new-workspace: root=%s" root)
-    (agent-repl--ws-new)
-    (let ((ws (agent-repl--ws-current-name))
-          (default-priority (agent-repl--repo-default-priority-for-path root)))
-      (when default-priority
-        (agent-repl--log ws "new-workspace: applying repo-default priority=%s root=%s"
-                          default-priority root)
-        (agent-repl--ws-put ws :priority default-priority))
-      ;; Hydrate the new workspace's env state (writes :project-dir from ROOT
-      ;; via the sole writer, `initialize-ws-env'). `magit-status' only needs
-      ;; a directory — we don't start the agent yet.
-      (agent-repl--initialize-ws-env ws root)
-      (when default-priority
-        (agent-repl--reorder-workspace-by-priority ws)))
-    (agent-repl--magit-status-same-window root)
-    (agent-repl--remove-doom-dashboard)))
-
 ;;; Prompt dispatch
 
 (defun agent-repl--dispatch-prompt-command (ws prompt)

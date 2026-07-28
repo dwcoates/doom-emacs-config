@@ -336,8 +336,7 @@ replaces the selected window's buffer rather than splitting.
 
 This is the canonical door every workspace-bring-up path opens magit
 through (restore via `+workspaces-switch-project-function', worktree
-create via `agent-repl--drain-pending-magit', plain new workspace via
-`agent-repl--new-workspace').  Without the same-window binding, Doom's
+create via `agent-repl--drain-pending-magit').  Without the same-window binding, Doom's
 `+magit-display-buffer-fn' routes a `magit-status-mode' buffer through
 `+magit--display-buffer-in-direction' (a SPLIT) whenever the selected
 window already shows a DIFFERENT repo's `magit-status' buffer — so a
