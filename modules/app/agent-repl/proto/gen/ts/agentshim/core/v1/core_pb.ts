@@ -15,9 +15,10 @@
 //   streamed preview with the store-delivered final message. Cross-path
 //   ordering is therefore irrelevant. Ephemeral events are never persisted
 //   and never replayed.
-// - Replay handshake: the connecting side (daemon→shim, shim→store) sends
-//   Subscribe{session_id, from_seq}; the serving side replays persisted
-//   events with seq > from_seq, then live-tails. Same message both hops.
+// - Replay handshake: the shim sends the store Subscribe{session_id,
+//   from_seq}; the store replays persisted events with seq > from_seq, then
+//   live-tails. The daemon does NOT send this: its resume position rides
+//   DaemonHello.from_seq, inside the one bring-up gate (see ShimHello).
 // - Bounded historical replay: ReplayRequest{from_seq, to_seq} asks for a
 //   one-shot RANGE without moving the standing subscription. Its events come
 //   back wrapped in ReplayEvent, a distinct message type so replayed history
@@ -47,7 +48,7 @@ import type { JsonObject, Message } from "@bufbuild/protobuf";
  * Describes the file agentshim/core/v1/core.proto.
  */
 export const file_agentshim_core_v1_core: GenFile = /*@__PURE__*/
-  fileDesc("ChxhZ2VudHNoaW0vY29yZS92MS9jb3JlLnByb3RvEhFhZ2VudHNoaW0uY29yZS52MSLSCAoFRXZlbnQSEgoKc2Vzc2lvbl9pZBgBIAEoCRILCgNzZXEYAiABKAQSJwoFcGxhbmUYAyABKA4yGC5hZ2VudHNoaW0uY29yZS52MS5QbGFuZRIsCgVjbGFzcxgEIAEoDjIdLmFnZW50c2hpbS5jb3JlLnYxLkV2ZW50Q2xhc3MSEgoKcmVxdWVzdF9pZBgFIAEoCRIWCg5wcm9kdWNlZF9hdF9tcxgGIAEoAxIRCglkZWR1cF9rZXkYByABKAkSPAoPc2Vzc2lvbl9zdGFydGVkGAogASgLMiEuYWdlbnRzaGltLmNvcmUudjEuU2Vzc2lvblN0YXJ0ZWRIABI4Cg1zZXNzaW9uX2VuZGVkGAsgASgLMh8uYWdlbnRzaGltLmNvcmUudjEuU2Vzc2lvbkVuZGVkSAASNgoMdHVybl9zdGFydGVkGAwgASgLMh4uYWdlbnRzaGltLmNvcmUudjEuVHVyblN0YXJ0ZWRIABIyCgp0dXJuX2VuZGVkGA0gASgLMhwuYWdlbnRzaGltLmNvcmUudjEuVHVybkVuZGVkSAASNgoMdGFza19zdGFydGVkGA4gASgLMh4uYWdlbnRzaGltLmNvcmUudjEuVGFza1N0YXJ0ZWRIABI4Cg10YXNrX3Byb2dyZXNzGA8gASgLMh8uYWdlbnRzaGltLmNvcmUudjEuVGFza1Byb2dyZXNzSAASMgoKdGFza19lbmRlZBgQIAEoCzIcLmFnZW50c2hpbS5jb3JlLnYxLlRhc2tFbmRlZEgAEjgKDWNvbnRlbnRfZGVsdGEYESABKAsyHy5hZ2VudHNoaW0uY29yZS52MS5Db250ZW50RGVsdGFIABJCChJoZWFydGJlYXRfcHJvZ3Jlc3MYEiABKAsyJC5hZ2VudHNoaW0uY29yZS52MS5IZWFydGJlYXRQcm9ncmVzc0gAEjoKDmRlZ3JhZGVkX3N0YXRlGBMgASgLMiAuYWdlbnRzaGltLmNvcmUudjEuRGVncmFkZWRTdGF0ZUgAEjQKCHVucGFyc2VkGBQgASgLMiAuYWdlbnRzaGltLmNvcmUudjEuVW5wYXJzZWRFdmVudEgAEjwKD21lc3NhZ2VfbGF0ZW5jeRgVIAEoCzIhLmFnZW50c2hpbS5jb3JlLnYxLk1lc3NhZ2VMYXRlbmN5SAASPAoPY29udGV4dF9jbGVhcmVkGBYgASgLMiEuYWdlbnRzaGltLmNvcmUudjEuQ29udGV4dENsZWFyZWRIABJAChFjb250ZXh0X2NvbXBhY3RlZBgXIAEoCzIjLmFnZW50c2hpbS5jb3JlLnYxLkNvbnRleHRDb21wYWN0ZWRIABImCgZ2ZW5kb3IYHiABKAsyFC5nb29nbGUucHJvdG9idWYuQW55SAASJwoGZXh0cmFzGCggASgLMhcuZ29vZ2xlLnByb3RvYnVmLlN0cnVjdEIJCgdwYXlsb2FkIm4KCkV2ZW50QmF0Y2gSKAoGZXZlbnRzGAEgAygLMhguYWdlbnRzaGltLmNvcmUudjEuRXZlbnQSNgoOY3Vyc29yX2FkdmFuY2UYAiABKAsyHi5hZ2VudHNoaW0uY29yZS52MS5DdXJzb3JTdGF0ZSJnCg1VbnBhcnNlZEV2ZW50EhMKC3NvdXJjZV9wYXRoGAEgASgJEhMKC2J5dGVfb2Zmc2V0GAIgASgDEgsKA3JhdxgDIAEoDBINCgVlcnJvchgEIAEoCRIQCghwcm9kdWNlchgFIAEoCSJ5Cg5TZXNzaW9uU3RhcnRlZBIwCgZzb3VyY2UYASABKA4yIC5hZ2VudHNoaW0uY29yZS52MS5TZXNzaW9uU291cmNlEg0KBW1vZGVsGAIgASgJEgsKA2N3ZBgDIAEoCRIZChF2ZW5kb3Jfc2Vzc2lvbl9pZBgEIAEoCSIeCgxTZXNzaW9uRW5kZWQSDgoGcmVhc29uGAEgASgJIiUKC1R1cm5TdGFydGVkEhYKDnByb21wdF9wcmV2aWV3GAEgASgJIkcKCVR1cm5FbmRlZBITCgtzdG9wX3JlYXNvbhgBIAEoCRITCgtkdXJhdGlvbl9tcxgCIAEoAxIQCghpc19lcnJvchgDIAEoCCIQCg5Db250ZXh0Q2xlYXJlZCKcAQoQQ29udGV4dENvbXBhY3RlZBI5Cgd0cmlnZ2VyGAEgASgOMiguYWdlbnRzaGltLmNvcmUudjEuQ29udGV4dENvbXBhY3RUcmlnZ2VyEhIKCnByZV90b2tlbnMYAiABKAMSEwoLcG9zdF90b2tlbnMYAyABKAMSEwoLZHVyYXRpb25fbXMYBCABKAMSDwoHc3VtbWFyeRgFIAEoCSKIAQoLVGFza1N0YXJ0ZWQSDwoHdGFza19pZBgBIAEoCRIpCgRraW5kGAIgASgOMhsuYWdlbnRzaGltLmNvcmUudjEuVGFza0tpbmQSEwoLdG9vbF91c2VfaWQYAyABKAkSEwoLZGVzY3JpcHRpb24YBCABKAkSEwoLb3V0cHV0X3BhdGgYBSABKAkifAoMVGFza1Byb2dyZXNzEg8KB3Rhc2tfaWQYASABKAkSKQoEa2luZBgCIAEoDjIbLmFnZW50c2hpbS5jb3JlLnYxLlRhc2tLaW5kEhYKDmJ5dGVzX29ic2VydmVkGAMgASgDEhgKEHJlY29yZHNfb2JzZXJ2ZWQYBCABKAMiswEKCVRhc2tFbmRlZBIPCgd0YXNrX2lkGAEgASgJEikKBGtpbmQYAiABKA4yGy5hZ2VudHNoaW0uY29yZS52MS5UYXNrS2luZBIxCgZzdGF0dXMYAyABKA4yIS5hZ2VudHNoaW0uY29yZS52MS5UZXJtaW5hbFN0YXR1cxIPCgdzdW1tYXJ5GAQgASgJEhMKC291dHB1dF9wYXRoGAUgASgJEhEKCWluZmVyZW5jZRgGIAEoCSKjAQoMQ29udGVudERlbHRhEgwKBHV1aWQYASABKAkSEwoLYmxvY2tfaW5kZXgYAiABKA0SDgoEdGV4dBgDIAEoCUgAEhIKCHRoaW5raW5nGAQgASgJSAASFAoKaW5wdXRfanNvbhgFIAEoCUgAEhMKCXNpZ25hdHVyZRgGIAEoCUgAEhgKEGVzdGltYXRlZF90b2tlbnMYByABKANCBwoFZGVsdGEicAoRSGVhcnRiZWF0UHJvZ3Jlc3MSEwoLdG9vbF91c2VfaWQYASABKAkSEQoJdG9vbF9uYW1lGAIgASgJEhoKEnBhcmVudF90b29sX3VzZV9pZBgDIAEoCRIXCg9lbGFwc2VkX3NlY29uZHMYBCABKAEiLwoOTWVzc2FnZUxhdGVuY3kSDAoEdXVpZBgBIAEoCRIPCgd0dGZ0X21zGAIgASgDIlwKDURlZ3JhZGVkU3RhdGUSEQoJY29tcG9uZW50GAEgASgJEg4KBnJlYXNvbhgCIAEoCRIVCg1kcm9wcGVkX2NvdW50GAMgASgEEhEKCXJlY292ZXJlZBgEIAEoCCKSAQoJU2hpbUhlbGxvEhIKCnNlc3Npb25faWQYASABKAkSDgoGdmVuZG9yGAIgASgJEhQKDHNoaW1fdmVyc2lvbhgDIAEoCRIYChBwcm90b2NvbF92ZXJzaW9uGAQgASgJEhYKDnR1cm5faW5fZmxpZ2h0GAUgASgIEhkKEXZlbmRvcl9zZXNzaW9uX2lkGAYgASgJIj8KC0RhZW1vbkhlbGxvEhYKDmRhZW1vbl92ZXJzaW9uGAEgASgJEhgKEHByb3RvY29sX3ZlcnNpb24YAiABKAkiWQoMU3VibWl0UHJvbXB0EhIKCnJlcXVlc3RfaWQYASABKAkSDAoEdGV4dBgCIAEoCRIOCgZvcmlnaW4YAyABKAkSFwoPcGVybWlzc2lvbl9tb2RlGAQgASgJIh8KCUludGVycnVwdBISCgpyZXF1ZXN0X2lkGAEgASgJIlkKA0FjaxISCgpyZXF1ZXN0X2lkGAEgASgJEj4KEWludGVycnVwdF9vdXRjb21lGAIgASgOMiMuYWdlbnRzaGltLmNvcmUudjEuSW50ZXJydXB0T3V0Y29tZSIqCgROYWNrEhIKCnJlcXVlc3RfaWQYASABKAkSDgoGcmVhc29uGAIgASgJIjEKCVN1YnNjcmliZRISCgpzZXNzaW9uX2lkGAEgASgJEhAKCGZyb21fc2VxGAIgASgEIlkKDVJlcGxheVJlcXVlc3QSEgoKcmVxdWVzdF9pZBgBIAEoCRIQCghmcm9tX3NlcRgCIAEoBBIOCgZ0b19zZXEYAyABKAQSEgoKbWF4X2V2ZW50cxgEIAEoDSJKCgtSZXBsYXlFdmVudBISCgpyZXF1ZXN0X2lkGAEgASgJEicKBWV2ZW50GAIgASgLMhguYWdlbnRzaGltLmNvcmUudjEuRXZlbnQiVgoKUmVwbGF5RG9uZRISCgpyZXF1ZXN0X2lkGAEgASgJEhEKCXRydW5jYXRlZBgCIAEoCBIOCgZyZWFzb24YAyABKAkSEQoJZGVsaXZlcmVkGAQgASgEImIKEVBlcm1pc3Npb25SZXF1ZXN0EhIKCnJlcXVlc3RfaWQYASABKAkSEQoJdG9vbF9uYW1lGAIgASgJEiYKBWlucHV0GAMgASgLMhcuZ29vZ2xlLnByb3RvYnVmLlN0cnVjdCKnAQoSUGVybWlzc2lvblJlc3BvbnNlEhIKCnJlcXVlc3RfaWQYASABKAkSNwoIZGVjaXNpb24YAiABKA4yJS5hZ2VudHNoaW0uY29yZS52MS5QZXJtaXNzaW9uRGVjaXNpb24SLgoNdXBkYXRlZF9pbnB1dBgDIAEoCzIXLmdvb2dsZS5wcm90b2J1Zi5TdHJ1Y3QSFAoMZGVueV9tZXNzYWdlGAQgASgJIqsCCg5QZXJtaXNzaW9uSXRlbRI1CgdyZXF1ZXN0GAEgASgLMiQuYWdlbnRzaGltLmNvcmUudjEuUGVybWlzc2lvblJlcXVlc3QSQAoKcmVzb2x1dGlvbhgCIAEoDjIsLmFnZW50c2hpbS5jb3JlLnYxLlBlcm1pc3Npb25JdGVtLlJlc29sdXRpb24SFAoMZGVueV9tZXNzYWdlGAMgASgJIokBCgpSZXNvbHV0aW9uEhoKFlJFU09MVVRJT05fVU5TUEVDSUZJRUQQABIWChJSRVNPTFVUSU9OX1BFTkRJTkcQARIWChJSRVNPTFVUSU9OX0FMTE9XRUQQAhIVChFSRVNPTFVUSU9OX0RFTklFRBADEhgKFFJFU09MVVRJT05fQUJBTkRPTkVEEAQiHwoJSGVhcnRiZWF0EhIKCnNlbnRfYXRfbXMYASABKAMiIQoLSGVhbHRoQ2hlY2sSEgoKcmVxdWVzdF9pZBgBIAEoCSJWCgxIZWFsdGhTdGF0dXMSEgoKcmVxdWVzdF9pZBgBIAEoCRIPCgdoZWFsdGh5GAIgASgIEhEKCWNvbXBvbmVudBgDIAEoCRIOCgZyZWFzb24YBCABKAkiTAoKU3RvcmVXcml0ZRIQCghwcm9kdWNlchgBIAEoCRIsCgViYXRjaBgCIAEoCzIdLmFnZW50c2hpbS5jb3JlLnYxLkV2ZW50QmF0Y2giUwoNU3RvcmVXcml0ZUFjaxIQCghhY2NlcHRlZBgBIAEoBBIPCgdkZWR1cGVkGAIgASgEEhAKCGxhc3Rfc2VxGAMgASgEEg0KBWVycm9yGAQgASgJIksKC0N1cnNvclN0YXRlEg8KB2ZpbGVfaWQYASABKAkSDAoEcGF0aBgCIAEoCRIOCgZvZmZzZXQYAyABKAMSDQoFY2FycnkYBCABKAwiHgoLQ3Vyc29yUXVlcnkSDwoHZmlsZV9pZBgBIAEoCSJXCg1PcGVuVGFza1N0YXRlEikKB3N0YXJ0ZWQYASABKAsyGC5hZ2VudHNoaW0uY29yZS52MS5FdmVudBIbChNsYXN0X2FjdGl2aXR5X2F0X21zGAIgASgDIpUBCgpDdXJzb3JMaXN0Ei8KB2N1cnNvcnMYASADKAsyHi5hZ2VudHNoaW0uY29yZS52MS5DdXJzb3JTdGF0ZRI0CgpvcGVuX3Rhc2tzGAIgAygLMiAuYWdlbnRzaGltLmNvcmUudjEuT3BlblRhc2tTdGF0ZRIgChhvcGVuX3Rhc2tzX2F1dGhvcml0YXRpdmUYAyABKAgqVQoFUGxhbmUSFQoRUExBTkVfVU5TUEVDSUZJRUQQABIQCgxQTEFORV9TVFJFQU0QARIOCgpQTEFORV9GSUxFEAISEwoPUExBTkVfU1lOVEhFVElDEAMqYAoKRXZlbnRDbGFzcxIbChdFVkVOVF9DTEFTU19VTlNQRUNJRklFRBAAEhoKFkVWRU5UX0NMQVNTX1BFUlNJU1RFTlQQARIZChVFVkVOVF9DTEFTU19FUEhFTUVSQUwQAipnCghUYXNrS2luZBIZChVUQVNLX0tJTkRfVU5TUEVDSUZJRUQQABITCg9UQVNLX0tJTkRfQUdFTlQQARITCg9UQVNLX0tJTkRfU0hFTEwQAhIWChJUQVNLX0tJTkRfV09SS0ZMT1cQAyq5AQoOVGVybWluYWxTdGF0dXMSHwobVEVSTUlOQUxfU1RBVFVTX1VOU1BFQ0lGSUVEEAASGAoUVEVSTUlOQUxfU1RBVFVTX0RPTkUQARIZChVURVJNSU5BTF9TVEFUVVNfRVJST1IQAhIaChZURVJNSU5BTF9TVEFUVVNfS0lMTEVEEAMSGwoXVEVSTUlOQUxfU1RBVFVTX1NUT1BQRUQQBBIYChRURVJNSU5BTF9TVEFUVVNfTE9TVBAFKokBCg1TZXNzaW9uU291cmNlEh4KGlNFU1NJT05fU09VUkNFX1VOU1BFQ0lGSUVEEAASGAoUU0VTU0lPTl9TT1VSQ0VfRlJFU0gQARIZChVTRVNTSU9OX1NPVVJDRV9SRVNVTUUQAhIjCh9TRVNTSU9OX1NPVVJDRV9DT01QQUNUX0NPTlRJTlVFEAMqdgoSUGVybWlzc2lvbkRlY2lzaW9uEiMKH1BFUk1JU1NJT05fREVDSVNJT05fVU5TUEVDSUZJRUQQABIdChlQRVJNSVNTSU9OX0RFQ0lTSU9OX0FMTE9XEAESHAoYUEVSTUlTU0lPTl9ERUNJU0lPTl9ERU5ZEAIqhgEKFUNvbnRleHRDb21wYWN0VHJpZ2dlchInCiNDT05URVhUX0NPTVBBQ1RfVFJJR0dFUl9VTlNQRUNJRklFRBAAEiIKHkNPTlRFWFRfQ09NUEFDVF9UUklHR0VSX01BTlVBTBABEiAKHENPTlRFWFRfQ09NUEFDVF9UUklHR0VSX0FVVE8QAiqeAQoQSW50ZXJydXB0T3V0Y29tZRIhCh1JTlRFUlJVUFRfT1VUQ09NRV9VTlNQRUNJRklFRBAAEiEKHUlOVEVSUlVQVF9PVVRDT01FX0lOVEVSUlVQVEVEEAESJgoiSU5URVJSVVBUX09VVENPTUVfQUxSRUFEWV9DT01QTEVURRACEhwKGElOVEVSUlVQVF9PVVRDT01FX0ZBSUxFRBADQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHNoaW0vY29yZS92MTtjb3JldjFiBnByb3RvMw", [file_google_protobuf_any, file_google_protobuf_struct]);
+  fileDesc("ChxhZ2VudHNoaW0vY29yZS92MS9jb3JlLnByb3RvEhFhZ2VudHNoaW0uY29yZS52MSLSCAoFRXZlbnQSEgoKc2Vzc2lvbl9pZBgBIAEoCRILCgNzZXEYAiABKAQSJwoFcGxhbmUYAyABKA4yGC5hZ2VudHNoaW0uY29yZS52MS5QbGFuZRIsCgVjbGFzcxgEIAEoDjIdLmFnZW50c2hpbS5jb3JlLnYxLkV2ZW50Q2xhc3MSEgoKcmVxdWVzdF9pZBgFIAEoCRIWCg5wcm9kdWNlZF9hdF9tcxgGIAEoAxIRCglkZWR1cF9rZXkYByABKAkSPAoPc2Vzc2lvbl9zdGFydGVkGAogASgLMiEuYWdlbnRzaGltLmNvcmUudjEuU2Vzc2lvblN0YXJ0ZWRIABI4Cg1zZXNzaW9uX2VuZGVkGAsgASgLMh8uYWdlbnRzaGltLmNvcmUudjEuU2Vzc2lvbkVuZGVkSAASNgoMdHVybl9zdGFydGVkGAwgASgLMh4uYWdlbnRzaGltLmNvcmUudjEuVHVyblN0YXJ0ZWRIABIyCgp0dXJuX2VuZGVkGA0gASgLMhwuYWdlbnRzaGltLmNvcmUudjEuVHVybkVuZGVkSAASNgoMdGFza19zdGFydGVkGA4gASgLMh4uYWdlbnRzaGltLmNvcmUudjEuVGFza1N0YXJ0ZWRIABI4Cg10YXNrX3Byb2dyZXNzGA8gASgLMh8uYWdlbnRzaGltLmNvcmUudjEuVGFza1Byb2dyZXNzSAASMgoKdGFza19lbmRlZBgQIAEoCzIcLmFnZW50c2hpbS5jb3JlLnYxLlRhc2tFbmRlZEgAEjgKDWNvbnRlbnRfZGVsdGEYESABKAsyHy5hZ2VudHNoaW0uY29yZS52MS5Db250ZW50RGVsdGFIABJCChJoZWFydGJlYXRfcHJvZ3Jlc3MYEiABKAsyJC5hZ2VudHNoaW0uY29yZS52MS5IZWFydGJlYXRQcm9ncmVzc0gAEjoKDmRlZ3JhZGVkX3N0YXRlGBMgASgLMiAuYWdlbnRzaGltLmNvcmUudjEuRGVncmFkZWRTdGF0ZUgAEjQKCHVucGFyc2VkGBQgASgLMiAuYWdlbnRzaGltLmNvcmUudjEuVW5wYXJzZWRFdmVudEgAEjwKD21lc3NhZ2VfbGF0ZW5jeRgVIAEoCzIhLmFnZW50c2hpbS5jb3JlLnYxLk1lc3NhZ2VMYXRlbmN5SAASPAoPY29udGV4dF9jbGVhcmVkGBYgASgLMiEuYWdlbnRzaGltLmNvcmUudjEuQ29udGV4dENsZWFyZWRIABJAChFjb250ZXh0X2NvbXBhY3RlZBgXIAEoCzIjLmFnZW50c2hpbS5jb3JlLnYxLkNvbnRleHRDb21wYWN0ZWRIABImCgZ2ZW5kb3IYHiABKAsyFC5nb29nbGUucHJvdG9idWYuQW55SAASJwoGZXh0cmFzGCggASgLMhcuZ29vZ2xlLnByb3RvYnVmLlN0cnVjdEIJCgdwYXlsb2FkIm4KCkV2ZW50QmF0Y2gSKAoGZXZlbnRzGAEgAygLMhguYWdlbnRzaGltLmNvcmUudjEuRXZlbnQSNgoOY3Vyc29yX2FkdmFuY2UYAiABKAsyHi5hZ2VudHNoaW0uY29yZS52MS5DdXJzb3JTdGF0ZSJnCg1VbnBhcnNlZEV2ZW50EhMKC3NvdXJjZV9wYXRoGAEgASgJEhMKC2J5dGVfb2Zmc2V0GAIgASgDEgsKA3JhdxgDIAEoDBINCgVlcnJvchgEIAEoCRIQCghwcm9kdWNlchgFIAEoCSJ5Cg5TZXNzaW9uU3RhcnRlZBIwCgZzb3VyY2UYASABKA4yIC5hZ2VudHNoaW0uY29yZS52MS5TZXNzaW9uU291cmNlEg0KBW1vZGVsGAIgASgJEgsKA2N3ZBgDIAEoCRIZChF2ZW5kb3Jfc2Vzc2lvbl9pZBgEIAEoCSIeCgxTZXNzaW9uRW5kZWQSDgoGcmVhc29uGAEgASgJIiUKC1R1cm5TdGFydGVkEhYKDnByb21wdF9wcmV2aWV3GAEgASgJIkcKCVR1cm5FbmRlZBITCgtzdG9wX3JlYXNvbhgBIAEoCRITCgtkdXJhdGlvbl9tcxgCIAEoAxIQCghpc19lcnJvchgDIAEoCCIQCg5Db250ZXh0Q2xlYXJlZCKcAQoQQ29udGV4dENvbXBhY3RlZBI5Cgd0cmlnZ2VyGAEgASgOMiguYWdlbnRzaGltLmNvcmUudjEuQ29udGV4dENvbXBhY3RUcmlnZ2VyEhIKCnByZV90b2tlbnMYAiABKAMSEwoLcG9zdF90b2tlbnMYAyABKAMSEwoLZHVyYXRpb25fbXMYBCABKAMSDwoHc3VtbWFyeRgFIAEoCSKIAQoLVGFza1N0YXJ0ZWQSDwoHdGFza19pZBgBIAEoCRIpCgRraW5kGAIgASgOMhsuYWdlbnRzaGltLmNvcmUudjEuVGFza0tpbmQSEwoLdG9vbF91c2VfaWQYAyABKAkSEwoLZGVzY3JpcHRpb24YBCABKAkSEwoLb3V0cHV0X3BhdGgYBSABKAkifAoMVGFza1Byb2dyZXNzEg8KB3Rhc2tfaWQYASABKAkSKQoEa2luZBgCIAEoDjIbLmFnZW50c2hpbS5jb3JlLnYxLlRhc2tLaW5kEhYKDmJ5dGVzX29ic2VydmVkGAMgASgDEhgKEHJlY29yZHNfb2JzZXJ2ZWQYBCABKAMiswEKCVRhc2tFbmRlZBIPCgd0YXNrX2lkGAEgASgJEikKBGtpbmQYAiABKA4yGy5hZ2VudHNoaW0uY29yZS52MS5UYXNrS2luZBIxCgZzdGF0dXMYAyABKA4yIS5hZ2VudHNoaW0uY29yZS52MS5UZXJtaW5hbFN0YXR1cxIPCgdzdW1tYXJ5GAQgASgJEhMKC291dHB1dF9wYXRoGAUgASgJEhEKCWluZmVyZW5jZRgGIAEoCSKjAQoMQ29udGVudERlbHRhEgwKBHV1aWQYASABKAkSEwoLYmxvY2tfaW5kZXgYAiABKA0SDgoEdGV4dBgDIAEoCUgAEhIKCHRoaW5raW5nGAQgASgJSAASFAoKaW5wdXRfanNvbhgFIAEoCUgAEhMKCXNpZ25hdHVyZRgGIAEoCUgAEhgKEGVzdGltYXRlZF90b2tlbnMYByABKANCBwoFZGVsdGEicAoRSGVhcnRiZWF0UHJvZ3Jlc3MSEwoLdG9vbF91c2VfaWQYASABKAkSEQoJdG9vbF9uYW1lGAIgASgJEhoKEnBhcmVudF90b29sX3VzZV9pZBgDIAEoCRIXCg9lbGFwc2VkX3NlY29uZHMYBCABKAEiLwoOTWVzc2FnZUxhdGVuY3kSDAoEdXVpZBgBIAEoCRIPCgd0dGZ0X21zGAIgASgDIlwKDURlZ3JhZGVkU3RhdGUSEQoJY29tcG9uZW50GAEgASgJEg4KBnJlYXNvbhgCIAEoCRIVCg1kcm9wcGVkX2NvdW50GAMgASgEEhEKCXJlY292ZXJlZBgEIAEoCCKSAQoJU2hpbUhlbGxvEhIKCnNlc3Npb25faWQYASABKAkSDgoGdmVuZG9yGAIgASgJEhQKDHNoaW1fdmVyc2lvbhgDIAEoCRIYChBwcm90b2NvbF92ZXJzaW9uGAQgASgJEhYKDnR1cm5faW5fZmxpZ2h0GAUgASgIEhkKEXZlbmRvcl9zZXNzaW9uX2lkGAYgASgJIlEKC0RhZW1vbkhlbGxvEhYKDmRhZW1vbl92ZXJzaW9uGAEgASgJEhgKEHByb3RvY29sX3ZlcnNpb24YAiABKAkSEAoIZnJvbV9zZXEYAyABKAQiTAoJU2hpbVJlYWR5EhIKCnNlc3Npb25faWQYASABKAkSEAoIZnJvbV9zZXEYAiABKAQSGQoRdmVuZG9yX3Nlc3Npb25faWQYAyABKAkiWQoMU3VibWl0UHJvbXB0EhIKCnJlcXVlc3RfaWQYASABKAkSDAoEdGV4dBgCIAEoCRIOCgZvcmlnaW4YAyABKAkSFwoPcGVybWlzc2lvbl9tb2RlGAQgASgJIh8KCUludGVycnVwdBISCgpyZXF1ZXN0X2lkGAEgASgJIlkKA0FjaxISCgpyZXF1ZXN0X2lkGAEgASgJEj4KEWludGVycnVwdF9vdXRjb21lGAIgASgOMiMuYWdlbnRzaGltLmNvcmUudjEuSW50ZXJydXB0T3V0Y29tZSIqCgROYWNrEhIKCnJlcXVlc3RfaWQYASABKAkSDgoGcmVhc29uGAIgASgJIjEKCVN1YnNjcmliZRISCgpzZXNzaW9uX2lkGAEgASgJEhAKCGZyb21fc2VxGAIgASgEIlkKDVJlcGxheVJlcXVlc3QSEgoKcmVxdWVzdF9pZBgBIAEoCRIQCghmcm9tX3NlcRgCIAEoBBIOCgZ0b19zZXEYAyABKAQSEgoKbWF4X2V2ZW50cxgEIAEoDSJKCgtSZXBsYXlFdmVudBISCgpyZXF1ZXN0X2lkGAEgASgJEicKBWV2ZW50GAIgASgLMhguYWdlbnRzaGltLmNvcmUudjEuRXZlbnQiVgoKUmVwbGF5RG9uZRISCgpyZXF1ZXN0X2lkGAEgASgJEhEKCXRydW5jYXRlZBgCIAEoCBIOCgZyZWFzb24YAyABKAkSEQoJZGVsaXZlcmVkGAQgASgEImIKEVBlcm1pc3Npb25SZXF1ZXN0EhIKCnJlcXVlc3RfaWQYASABKAkSEQoJdG9vbF9uYW1lGAIgASgJEiYKBWlucHV0GAMgASgLMhcuZ29vZ2xlLnByb3RvYnVmLlN0cnVjdCKnAQoSUGVybWlzc2lvblJlc3BvbnNlEhIKCnJlcXVlc3RfaWQYASABKAkSNwoIZGVjaXNpb24YAiABKA4yJS5hZ2VudHNoaW0uY29yZS52MS5QZXJtaXNzaW9uRGVjaXNpb24SLgoNdXBkYXRlZF9pbnB1dBgDIAEoCzIXLmdvb2dsZS5wcm90b2J1Zi5TdHJ1Y3QSFAoMZGVueV9tZXNzYWdlGAQgASgJIqsCCg5QZXJtaXNzaW9uSXRlbRI1CgdyZXF1ZXN0GAEgASgLMiQuYWdlbnRzaGltLmNvcmUudjEuUGVybWlzc2lvblJlcXVlc3QSQAoKcmVzb2x1dGlvbhgCIAEoDjIsLmFnZW50c2hpbS5jb3JlLnYxLlBlcm1pc3Npb25JdGVtLlJlc29sdXRpb24SFAoMZGVueV9tZXNzYWdlGAMgASgJIokBCgpSZXNvbHV0aW9uEhoKFlJFU09MVVRJT05fVU5TUEVDSUZJRUQQABIWChJSRVNPTFVUSU9OX1BFTkRJTkcQARIWChJSRVNPTFVUSU9OX0FMTE9XRUQQAhIVChFSRVNPTFVUSU9OX0RFTklFRBADEhgKFFJFU09MVVRJT05fQUJBTkRPTkVEEAQiHwoJSGVhcnRiZWF0EhIKCnNlbnRfYXRfbXMYASABKAMiIQoLSGVhbHRoQ2hlY2sSEgoKcmVxdWVzdF9pZBgBIAEoCSJWCgxIZWFsdGhTdGF0dXMSEgoKcmVxdWVzdF9pZBgBIAEoCRIPCgdoZWFsdGh5GAIgASgIEhEKCWNvbXBvbmVudBgDIAEoCRIOCgZyZWFzb24YBCABKAkiTAoKU3RvcmVXcml0ZRIQCghwcm9kdWNlchgBIAEoCRIsCgViYXRjaBgCIAEoCzIdLmFnZW50c2hpbS5jb3JlLnYxLkV2ZW50QmF0Y2giUwoNU3RvcmVXcml0ZUFjaxIQCghhY2NlcHRlZBgBIAEoBBIPCgdkZWR1cGVkGAIgASgEEhAKCGxhc3Rfc2VxGAMgASgEEg0KBWVycm9yGAQgASgJIksKC0N1cnNvclN0YXRlEg8KB2ZpbGVfaWQYASABKAkSDAoEcGF0aBgCIAEoCRIOCgZvZmZzZXQYAyABKAMSDQoFY2FycnkYBCABKAwiHgoLQ3Vyc29yUXVlcnkSDwoHZmlsZV9pZBgBIAEoCSJXCg1PcGVuVGFza1N0YXRlEikKB3N0YXJ0ZWQYASABKAsyGC5hZ2VudHNoaW0uY29yZS52MS5FdmVudBIbChNsYXN0X2FjdGl2aXR5X2F0X21zGAIgASgDIpUBCgpDdXJzb3JMaXN0Ei8KB2N1cnNvcnMYASADKAsyHi5hZ2VudHNoaW0uY29yZS52MS5DdXJzb3JTdGF0ZRI0CgpvcGVuX3Rhc2tzGAIgAygLMiAuYWdlbnRzaGltLmNvcmUudjEuT3BlblRhc2tTdGF0ZRIgChhvcGVuX3Rhc2tzX2F1dGhvcml0YXRpdmUYAyABKAgqVQoFUGxhbmUSFQoRUExBTkVfVU5TUEVDSUZJRUQQABIQCgxQTEFORV9TVFJFQU0QARIOCgpQTEFORV9GSUxFEAISEwoPUExBTkVfU1lOVEhFVElDEAMqYAoKRXZlbnRDbGFzcxIbChdFVkVOVF9DTEFTU19VTlNQRUNJRklFRBAAEhoKFkVWRU5UX0NMQVNTX1BFUlNJU1RFTlQQARIZChVFVkVOVF9DTEFTU19FUEhFTUVSQUwQAipnCghUYXNrS2luZBIZChVUQVNLX0tJTkRfVU5TUEVDSUZJRUQQABITCg9UQVNLX0tJTkRfQUdFTlQQARITCg9UQVNLX0tJTkRfU0hFTEwQAhIWChJUQVNLX0tJTkRfV09SS0ZMT1cQAyq5AQoOVGVybWluYWxTdGF0dXMSHwobVEVSTUlOQUxfU1RBVFVTX1VOU1BFQ0lGSUVEEAASGAoUVEVSTUlOQUxfU1RBVFVTX0RPTkUQARIZChVURVJNSU5BTF9TVEFUVVNfRVJST1IQAhIaChZURVJNSU5BTF9TVEFUVVNfS0lMTEVEEAMSGwoXVEVSTUlOQUxfU1RBVFVTX1NUT1BQRUQQBBIYChRURVJNSU5BTF9TVEFUVVNfTE9TVBAFKokBCg1TZXNzaW9uU291cmNlEh4KGlNFU1NJT05fU09VUkNFX1VOU1BFQ0lGSUVEEAASGAoUU0VTU0lPTl9TT1VSQ0VfRlJFU0gQARIZChVTRVNTSU9OX1NPVVJDRV9SRVNVTUUQAhIjCh9TRVNTSU9OX1NPVVJDRV9DT01QQUNUX0NPTlRJTlVFEAMqdgoSUGVybWlzc2lvbkRlY2lzaW9uEiMKH1BFUk1JU1NJT05fREVDSVNJT05fVU5TUEVDSUZJRUQQABIdChlQRVJNSVNTSU9OX0RFQ0lTSU9OX0FMTE9XEAESHAoYUEVSTUlTU0lPTl9ERUNJU0lPTl9ERU5ZEAIqhgEKFUNvbnRleHRDb21wYWN0VHJpZ2dlchInCiNDT05URVhUX0NPTVBBQ1RfVFJJR0dFUl9VTlNQRUNJRklFRBAAEiIKHkNPTlRFWFRfQ09NUEFDVF9UUklHR0VSX01BTlVBTBABEiAKHENPTlRFWFRfQ09NUEFDVF9UUklHR0VSX0FVVE8QAiqeAQoQSW50ZXJydXB0T3V0Y29tZRIhCh1JTlRFUlJVUFRfT1VUQ09NRV9VTlNQRUNJRklFRBAAEiEKHUlOVEVSUlVQVF9PVVRDT01FX0lOVEVSUlVQVEVEEAESJgoiSU5URVJSVVBUX09VVENPTUVfQUxSRUFEWV9DT01QTEVURRACEhwKGElOVEVSUlVQVF9PVVRDT01FX0ZBSUxFRBADQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHNoaW0vY29yZS92MTtjb3JldjFiBnByb3RvMw", [file_google_protobuf_any, file_google_protobuf_struct]);
 
 /**
  * Event is THE envelope every observation travels in.
@@ -763,7 +764,37 @@ export const DegradedStateSchema: GenMessage<DegradedState> = /*@__PURE__*/
   messageDesc(file_agentshim_core_v1_core, 15);
 
 /**
- * Connection handshakes. The listener speaks first with its Hello.
+ * Connection handshakes on the daemon↔shim hop. The DIALER (the shim) speaks
+ * first with its Hello.
+ *
+ * THE HANDSHAKE IS THE WHOLE BRING-UP GATE, not merely a version check. One
+ * gated exchange — ShimHello, DaemonHello, ShimReady — and its final ack means
+ * "this session is FULLY WIRED", store subscription included:
+ *
+ *   1. ShimHello    shim→daemon: identity, version, turn_in_flight, and the
+ *                   vendor session id this shim is filing under (the rotation
+ *                   announcement).
+ *   2. DaemonHello  daemon→shim: version PLUS the resume position (from_seq)
+ *                   the daemon wants this session's standing store
+ *                   subscription opened at.
+ *   3. ShimReady    shim→daemon: sent ONLY after the shim holds its session
+ *                   lock, has built its SDK query, has its store producer link
+ *                   up, and has opened the standing store subscription at that
+ *                   from_seq and seen it settle.
+ *
+ * WHY ONE GATE. Bring-up used to complete in stages — connect, hello, an
+ * inferred readiness, a separate daemon→shim Subscribe, and only then the
+ * shim's own store subscription — and everything racing those stages (health
+ * probes, first prompts) failed in the gaps between them. Each gap patched
+ * moved the race one link deeper. A single gate whose final ack is the LAST
+ * step makes the whole class unrepresentable: anything the daemon does after
+ * the ack is talking to a fully wired session, by construction.
+ *
+ * EVERY (RE)CONNECT RE-RUNS IT. A reattach, a daemon restart, and the shim's
+ * deliberate rotation bounce are all just "a new connection", so each gets its
+ * from_seq from the hello of the connection it opens. That is why the separate
+ * daemon→shim Subscribe frame no longer exists on this hop; Subscribe remains
+ * the shim↔store message it always was.
  *
  * @generated from message agentshim.core.v1.ShimHello
  */
@@ -840,6 +871,28 @@ export type DaemonHello = Message<"agentshim.core.v1.DaemonHello"> & {
    * @generated from field: string protocol_version = 2;
    */
   protocolVersion: string;
+
+  /**
+   * The EXCLUSIVE store seq the daemon resumes this session's standing
+   * subscription from — its durable last_seen_seq, or 0 for a session it has
+   * never consumed (and for the fresh seq space a rotation just minted). The
+   * shim opens its store subscription at exactly this position before acking
+   * with ShimReady.
+   *
+   * WHY IT RIDES THE HELLO. It used to travel in a separate daemon→shim
+   * Subscribe frame sent after the handshake, which made the store
+   * subscription a stage BEYOND the handshake — so a daemon that considered
+   * itself attached could probe a shim whose store tail did not exist yet, and
+   * be told store_subscribed=false about a session it had just brought up.
+   * Carrying it here is what lets the shim finish that wiring INSIDE the gate.
+   *
+   * The daemon reads it AFTER it has reconciled the vendor session id this
+   * connection's ShimHello announced, so a rotation's reset to zero is already
+   * applied to the number that lands here.
+   *
+   * @generated from field: uint64 from_seq = 3;
+   */
+  fromSeq: bigint;
 };
 
 /**
@@ -848,6 +901,61 @@ export type DaemonHello = Message<"agentshim.core.v1.DaemonHello"> & {
  */
 export const DaemonHelloSchema: GenMessage<DaemonHello> = /*@__PURE__*/
   messageDesc(file_agentshim_core_v1_core, 17);
+
+/**
+ * The shim's FINAL ACK of the gated handshake: this session is fully wired.
+ *
+ * It is an explicit wire message rather than an inference, because everything
+ * a daemon could infer readiness from is true too early. A completed TCP/UDS
+ * connect proves only a dialer; a DaemonHello reply proves only that versions
+ * match; a first event proves only that the vendor said something. None of
+ * them says the standing store subscription exists, which is precisely the
+ * dependency the daemon's next act (a health probe, a prompt) needs.
+ *
+ * Sending it is the shim asserting, in order: the session lock is held, the
+ * SDK query is constructed, the store producer link is up, and the standing
+ * store subscription is open at DaemonHello.from_seq and settled. A shim that
+ * cannot complete any of those sends NOTHING and reports the failure loudly
+ * (a DegradedState plus its own log); the daemon's readiness wait then fails
+ * on its own deadline, which is the honest outcome — never a shim admitted as
+ * ready with a dependency missing.
+ *
+ * @generated from message agentshim.core.v1.ShimReady
+ */
+export type ShimReady = Message<"agentshim.core.v1.ShimReady"> & {
+  /**
+   * @generated from field: string session_id = 1;
+   */
+  sessionId: string;
+
+  /**
+   * Echo of DaemonHello.from_seq: the position the standing subscription was
+   * actually opened at. An echo rather than a fresh number so the daemon can
+   * see the two agree.
+   *
+   * @generated from field: uint64 from_seq = 2;
+   */
+  fromSeq: bigint;
+
+  /**
+   * The store key the subscription was opened under — the VENDOR session id
+   * when it is known, else the shim's own placeholder id (a fresh session
+   * learns the vendor uuid only from the SDK, so its first gate necessarily
+   * subscribes under the placeholder and re-keys later). Diagnostic: it is
+   * what makes "subscribed to a channel nothing publishes to" visible in the
+   * daemon log rather than only as silence.
+   *
+   * @generated from field: string vendor_session_id = 3;
+   */
+  vendorSessionId: string;
+};
+
+/**
+ * Describes the message agentshim.core.v1.ShimReady.
+ * Use `create(ShimReadySchema)` to create a new message.
+ */
+export const ShimReadySchema: GenMessage<ShimReady> = /*@__PURE__*/
+  messageDesc(file_agentshim_core_v1_core, 18);
 
 /**
  * @generated from message agentshim.core.v1.SubmitPrompt
@@ -883,7 +991,7 @@ export type SubmitPrompt = Message<"agentshim.core.v1.SubmitPrompt"> & {
  * Use `create(SubmitPromptSchema)` to create a new message.
  */
 export const SubmitPromptSchema: GenMessage<SubmitPrompt> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 18);
+  messageDesc(file_agentshim_core_v1_core, 19);
 
 /**
  * Stop the current turn via the SDK's interrupt(). There is exactly one kind
@@ -905,7 +1013,7 @@ export type Interrupt = Message<"agentshim.core.v1.Interrupt"> & {
  * Use `create(InterruptSchema)` to create a new message.
  */
 export const InterruptSchema: GenMessage<Interrupt> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 19);
+  messageDesc(file_agentshim_core_v1_core, 20);
 
 /**
  * @generated from message agentshim.core.v1.Ack
@@ -930,7 +1038,7 @@ export type Ack = Message<"agentshim.core.v1.Ack"> & {
  * Use `create(AckSchema)` to create a new message.
  */
 export const AckSchema: GenMessage<Ack> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 20);
+  messageDesc(file_agentshim_core_v1_core, 21);
 
 /**
  * @generated from message agentshim.core.v1.Nack
@@ -952,10 +1060,14 @@ export type Nack = Message<"agentshim.core.v1.Nack"> & {
  * Use `create(NackSchema)` to create a new message.
  */
 export const NackSchema: GenMessage<Nack> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 21);
+  messageDesc(file_agentshim_core_v1_core, 22);
 
 /**
  * Replay handshake (see file-top semantics). from_seq is EXCLUSIVE.
+ *
+ * A SHIM→STORE message. The daemon↔shim hop carries its resume position on
+ * DaemonHello.from_seq instead, so the standing subscription is opened inside
+ * the bring-up gate rather than as a stage after it.
  *
  * @generated from message agentshim.core.v1.Subscribe
  */
@@ -976,7 +1088,7 @@ export type Subscribe = Message<"agentshim.core.v1.Subscribe"> & {
  * Use `create(SubscribeSchema)` to create a new message.
  */
 export const SubscribeSchema: GenMessage<Subscribe> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 22);
+  messageDesc(file_agentshim_core_v1_core, 23);
 
 /**
  * ---------------------------------------------------------------------------
@@ -1041,7 +1153,7 @@ export type ReplayRequest = Message<"agentshim.core.v1.ReplayRequest"> & {
  * Use `create(ReplayRequestSchema)` to create a new message.
  */
 export const ReplayRequestSchema: GenMessage<ReplayRequest> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 23);
+  messageDesc(file_agentshim_core_v1_core, 24);
 
 /**
  * One replayed historical event.
@@ -1079,7 +1191,7 @@ export type ReplayEvent = Message<"agentshim.core.v1.ReplayEvent"> & {
  * Use `create(ReplayEventSchema)` to create a new message.
  */
 export const ReplayEventSchema: GenMessage<ReplayEvent> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 24);
+  messageDesc(file_agentshim_core_v1_core, 25);
 
 /**
  * Closes a replay. Exactly one per ReplayRequest, whatever the outcome: a
@@ -1124,7 +1236,7 @@ export type ReplayDone = Message<"agentshim.core.v1.ReplayDone"> & {
  * Use `create(ReplayDoneSchema)` to create a new message.
  */
 export const ReplayDoneSchema: GenMessage<ReplayDone> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 25);
+  messageDesc(file_agentshim_core_v1_core, 26);
 
 /**
  * canUseTool round-trip. The shim BLOCKS the SDK callback on the response.
@@ -1153,7 +1265,7 @@ export type PermissionRequest = Message<"agentshim.core.v1.PermissionRequest"> &
  * Use `create(PermissionRequestSchema)` to create a new message.
  */
 export const PermissionRequestSchema: GenMessage<PermissionRequest> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 26);
+  messageDesc(file_agentshim_core_v1_core, 27);
 
 /**
  * @generated from message agentshim.core.v1.PermissionResponse
@@ -1187,7 +1299,7 @@ export type PermissionResponse = Message<"agentshim.core.v1.PermissionResponse">
  * Use `create(PermissionResponseSchema)` to create a new message.
  */
 export const PermissionResponseSchema: GenMessage<PermissionResponse> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 27);
+  messageDesc(file_agentshim_core_v1_core, 28);
 
 /**
  * Daemon-composed permission state (the request plus its resolution
@@ -1220,7 +1332,7 @@ export type PermissionItem = Message<"agentshim.core.v1.PermissionItem"> & {
  * Use `create(PermissionItemSchema)` to create a new message.
  */
 export const PermissionItemSchema: GenMessage<PermissionItem> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 28);
+  messageDesc(file_agentshim_core_v1_core, 29);
 
 /**
  * @generated from enum agentshim.core.v1.PermissionItem.Resolution
@@ -1256,7 +1368,7 @@ export enum PermissionItem_Resolution {
  * Describes the enum agentshim.core.v1.PermissionItem.Resolution.
  */
 export const PermissionItem_ResolutionSchema: GenEnum<PermissionItem_Resolution> = /*@__PURE__*/
-  enumDesc(file_agentshim_core_v1_core, 28, 0);
+  enumDesc(file_agentshim_core_v1_core, 29, 0);
 
 /**
  * @generated from message agentshim.core.v1.Heartbeat
@@ -1273,7 +1385,7 @@ export type Heartbeat = Message<"agentshim.core.v1.Heartbeat"> & {
  * Use `create(HeartbeatSchema)` to create a new message.
  */
 export const HeartbeatSchema: GenMessage<Heartbeat> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 29);
+  messageDesc(file_agentshim_core_v1_core, 30);
 
 /**
  * Correlated dependency health probe for every agent-shim UDS hop.
@@ -1301,7 +1413,7 @@ export type HealthCheck = Message<"agentshim.core.v1.HealthCheck"> & {
  * Use `create(HealthCheckSchema)` to create a new message.
  */
 export const HealthCheckSchema: GenMessage<HealthCheck> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 30);
+  messageDesc(file_agentshim_core_v1_core, 31);
 
 /**
  * Reply to HealthCheck.  A responder MUST set healthy=true only after every
@@ -1338,7 +1450,7 @@ export type HealthStatus = Message<"agentshim.core.v1.HealthStatus"> & {
  * Use `create(HealthStatusSchema)` to create a new message.
  */
 export const HealthStatusSchema: GenMessage<HealthStatus> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 31);
+  messageDesc(file_agentshim_core_v1_core, 32);
 
 /**
  * Producer→store append. The store commits events + cursor_advance in one
@@ -1365,7 +1477,7 @@ export type StoreWrite = Message<"agentshim.core.v1.StoreWrite"> & {
  * Use `create(StoreWriteSchema)` to create a new message.
  */
 export const StoreWriteSchema: GenMessage<StoreWrite> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 32);
+  messageDesc(file_agentshim_core_v1_core, 33);
 
 /**
  * @generated from message agentshim.core.v1.StoreWriteAck
@@ -1401,7 +1513,7 @@ export type StoreWriteAck = Message<"agentshim.core.v1.StoreWriteAck"> & {
  * Use `create(StoreWriteAckSchema)` to create a new message.
  */
 export const StoreWriteAckSchema: GenMessage<StoreWriteAck> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 33);
+  messageDesc(file_agentshim_core_v1_core, 34);
 
 /**
  * shim-claude-sidecar file-cursor state, persisted by the store (§6.2 cursor table).
@@ -1439,7 +1551,7 @@ export type CursorState = Message<"agentshim.core.v1.CursorState"> & {
  * Use `create(CursorStateSchema)` to create a new message.
  */
 export const CursorStateSchema: GenMessage<CursorState> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 34);
+  messageDesc(file_agentshim_core_v1_core, 35);
 
 /**
  * Cursor recovery over the socket (§7.3): the sidecar asks the store for its
@@ -1459,7 +1571,7 @@ export type CursorQuery = Message<"agentshim.core.v1.CursorQuery"> & {
  * Use `create(CursorQuerySchema)` to create a new message.
  */
 export const CursorQuerySchema: GenMessage<CursorQuery> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 35);
+  messageDesc(file_agentshim_core_v1_core, 36);
 
 /**
  * @generated from message agentshim.core.v1.OpenTaskState
@@ -1481,7 +1593,7 @@ export type OpenTaskState = Message<"agentshim.core.v1.OpenTaskState"> & {
  * Use `create(OpenTaskStateSchema)` to create a new message.
  */
 export const OpenTaskStateSchema: GenMessage<OpenTaskState> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 36);
+  messageDesc(file_agentshim_core_v1_core, 37);
 
 /**
  * @generated from message agentshim.core.v1.CursorList
@@ -1516,7 +1628,7 @@ export type CursorList = Message<"agentshim.core.v1.CursorList"> & {
  * Use `create(CursorListSchema)` to create a new message.
  */
 export const CursorListSchema: GenMessage<CursorList> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 37);
+  messageDesc(file_agentshim_core_v1_core, 38);
 
 /**
  * Which observation plane produced an event.

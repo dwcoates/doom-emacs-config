@@ -15,9 +15,10 @@
 //   streamed preview with the store-delivered final message. Cross-path
 //   ordering is therefore irrelevant. Ephemeral events are never persisted
 //   and never replayed.
-// - Replay handshake: the connecting side (daemon→shim, shim→store) sends
-//   Subscribe{session_id, from_seq}; the serving side replays persisted
-//   events with seq > from_seq, then live-tails. Same message both hops.
+// - Replay handshake: the shim sends the store Subscribe{session_id,
+//   from_seq}; the store replays persisted events with seq > from_seq, then
+//   live-tails. The daemon does NOT send this: its resume position rides
+//   DaemonHello.from_seq, inside the one bring-up gate (see ShimHello).
 // - Bounded historical replay: ReplayRequest{from_seq, to_seq} asks for a
 //   one-shot RANGE without moving the standing subscription. Its events come
 //   back wrapped in ReplayEvent, a distinct message type so replayed history
@@ -556,7 +557,7 @@ func (x PermissionItem_Resolution) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use PermissionItem_Resolution.Descriptor instead.
 func (PermissionItem_Resolution) EnumDescriptor() ([]byte, []int) {
-	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{28, 0}
+	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{29, 0}
 }
 
 // Event is THE envelope every observation travels in.
@@ -1980,7 +1981,37 @@ func (x *DegradedState) GetRecovered() bool {
 	return false
 }
 
-// Connection handshakes. The listener speaks first with its Hello.
+// Connection handshakes on the daemon↔shim hop. The DIALER (the shim) speaks
+// first with its Hello.
+//
+// THE HANDSHAKE IS THE WHOLE BRING-UP GATE, not merely a version check. One
+// gated exchange — ShimHello, DaemonHello, ShimReady — and its final ack means
+// "this session is FULLY WIRED", store subscription included:
+//
+//  1. ShimHello    shim→daemon: identity, version, turn_in_flight, and the
+//     vendor session id this shim is filing under (the rotation
+//     announcement).
+//  2. DaemonHello  daemon→shim: version PLUS the resume position (from_seq)
+//     the daemon wants this session's standing store
+//     subscription opened at.
+//  3. ShimReady    shim→daemon: sent ONLY after the shim holds its session
+//     lock, has built its SDK query, has its store producer link
+//     up, and has opened the standing store subscription at that
+//     from_seq and seen it settle.
+//
+// WHY ONE GATE. Bring-up used to complete in stages — connect, hello, an
+// inferred readiness, a separate daemon→shim Subscribe, and only then the
+// shim's own store subscription — and everything racing those stages (health
+// probes, first prompts) failed in the gaps between them. Each gap patched
+// moved the race one link deeper. A single gate whose final ack is the LAST
+// step makes the whole class unrepresentable: anything the daemon does after
+// the ack is talking to a fully wired session, by construction.
+//
+// EVERY (RE)CONNECT RE-RUNS IT. A reattach, a daemon restart, and the shim's
+// deliberate rotation bounce are all just "a new connection", so each gets its
+// from_seq from the hello of the connection it opens. That is why the separate
+// daemon→shim Subscribe frame no longer exists on this hop; Subscribe remains
+// the shim↔store message it always was.
 type ShimHello struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	SessionId       string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
@@ -2085,8 +2116,25 @@ type DaemonHello struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	DaemonVersion   string                 `protobuf:"bytes,1,opt,name=daemon_version,json=daemonVersion,proto3" json:"daemon_version,omitempty"`
 	ProtocolVersion string                 `protobuf:"bytes,2,opt,name=protocol_version,json=protocolVersion,proto3" json:"protocol_version,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// The EXCLUSIVE store seq the daemon resumes this session's standing
+	// subscription from — its durable last_seen_seq, or 0 for a session it has
+	// never consumed (and for the fresh seq space a rotation just minted). The
+	// shim opens its store subscription at exactly this position before acking
+	// with ShimReady.
+	//
+	// WHY IT RIDES THE HELLO. It used to travel in a separate daemon→shim
+	// Subscribe frame sent after the handshake, which made the store
+	// subscription a stage BEYOND the handshake — so a daemon that considered
+	// itself attached could probe a shim whose store tail did not exist yet, and
+	// be told store_subscribed=false about a session it had just brought up.
+	// Carrying it here is what lets the shim finish that wiring INSIDE the gate.
+	//
+	// The daemon reads it AFTER it has reconciled the vendor session id this
+	// connection's ShimHello announced, so a rotation's reset to zero is already
+	// applied to the number that lands here.
+	FromSeq       uint64 `protobuf:"varint,3,opt,name=from_seq,json=fromSeq,proto3" json:"from_seq,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *DaemonHello) Reset() {
@@ -2133,6 +2181,98 @@ func (x *DaemonHello) GetProtocolVersion() string {
 	return ""
 }
 
+func (x *DaemonHello) GetFromSeq() uint64 {
+	if x != nil {
+		return x.FromSeq
+	}
+	return 0
+}
+
+// The shim's FINAL ACK of the gated handshake: this session is fully wired.
+//
+// It is an explicit wire message rather than an inference, because everything
+// a daemon could infer readiness from is true too early. A completed TCP/UDS
+// connect proves only a dialer; a DaemonHello reply proves only that versions
+// match; a first event proves only that the vendor said something. None of
+// them says the standing store subscription exists, which is precisely the
+// dependency the daemon's next act (a health probe, a prompt) needs.
+//
+// Sending it is the shim asserting, in order: the session lock is held, the
+// SDK query is constructed, the store producer link is up, and the standing
+// store subscription is open at DaemonHello.from_seq and settled. A shim that
+// cannot complete any of those sends NOTHING and reports the failure loudly
+// (a DegradedState plus its own log); the daemon's readiness wait then fails
+// on its own deadline, which is the honest outcome — never a shim admitted as
+// ready with a dependency missing.
+type ShimReady struct {
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	SessionId string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	// Echo of DaemonHello.from_seq: the position the standing subscription was
+	// actually opened at. An echo rather than a fresh number so the daemon can
+	// see the two agree.
+	FromSeq uint64 `protobuf:"varint,2,opt,name=from_seq,json=fromSeq,proto3" json:"from_seq,omitempty"`
+	// The store key the subscription was opened under — the VENDOR session id
+	// when it is known, else the shim's own placeholder id (a fresh session
+	// learns the vendor uuid only from the SDK, so its first gate necessarily
+	// subscribes under the placeholder and re-keys later). Diagnostic: it is
+	// what makes "subscribed to a channel nothing publishes to" visible in the
+	// daemon log rather than only as silence.
+	VendorSessionId string `protobuf:"bytes,3,opt,name=vendor_session_id,json=vendorSessionId,proto3" json:"vendor_session_id,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *ShimReady) Reset() {
+	*x = ShimReady{}
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ShimReady) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ShimReady) ProtoMessage() {}
+
+func (x *ShimReady) ProtoReflect() protoreflect.Message {
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ShimReady.ProtoReflect.Descriptor instead.
+func (*ShimReady) Descriptor() ([]byte, []int) {
+	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *ShimReady) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *ShimReady) GetFromSeq() uint64 {
+	if x != nil {
+		return x.FromSeq
+	}
+	return 0
+}
+
+func (x *ShimReady) GetVendorSessionId() string {
+	if x != nil {
+		return x.VendorSessionId
+	}
+	return ""
+}
+
 type SubmitPrompt struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	RequestId      string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
@@ -2145,7 +2285,7 @@ type SubmitPrompt struct {
 
 func (x *SubmitPrompt) Reset() {
 	*x = SubmitPrompt{}
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[18]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2157,7 +2297,7 @@ func (x *SubmitPrompt) String() string {
 func (*SubmitPrompt) ProtoMessage() {}
 
 func (x *SubmitPrompt) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[18]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2170,7 +2310,7 @@ func (x *SubmitPrompt) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubmitPrompt.ProtoReflect.Descriptor instead.
 func (*SubmitPrompt) Descriptor() ([]byte, []int) {
-	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{18}
+	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *SubmitPrompt) GetRequestId() string {
@@ -2214,7 +2354,7 @@ type Interrupt struct {
 
 func (x *Interrupt) Reset() {
 	*x = Interrupt{}
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[19]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2226,7 +2366,7 @@ func (x *Interrupt) String() string {
 func (*Interrupt) ProtoMessage() {}
 
 func (x *Interrupt) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[19]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2239,7 +2379,7 @@ func (x *Interrupt) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Interrupt.ProtoReflect.Descriptor instead.
 func (*Interrupt) Descriptor() ([]byte, []int) {
-	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{19}
+	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *Interrupt) GetRequestId() string {
@@ -2261,7 +2401,7 @@ type Ack struct {
 
 func (x *Ack) Reset() {
 	*x = Ack{}
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[20]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2273,7 +2413,7 @@ func (x *Ack) String() string {
 func (*Ack) ProtoMessage() {}
 
 func (x *Ack) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[20]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2286,7 +2426,7 @@ func (x *Ack) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Ack.ProtoReflect.Descriptor instead.
 func (*Ack) Descriptor() ([]byte, []int) {
-	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{20}
+	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *Ack) GetRequestId() string {
@@ -2313,7 +2453,7 @@ type Nack struct {
 
 func (x *Nack) Reset() {
 	*x = Nack{}
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[21]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2325,7 +2465,7 @@ func (x *Nack) String() string {
 func (*Nack) ProtoMessage() {}
 
 func (x *Nack) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[21]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2338,7 +2478,7 @@ func (x *Nack) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Nack.ProtoReflect.Descriptor instead.
 func (*Nack) Descriptor() ([]byte, []int) {
-	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{21}
+	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *Nack) GetRequestId() string {
@@ -2356,6 +2496,10 @@ func (x *Nack) GetReason() string {
 }
 
 // Replay handshake (see file-top semantics). from_seq is EXCLUSIVE.
+//
+// A SHIM→STORE message. The daemon↔shim hop carries its resume position on
+// DaemonHello.from_seq instead, so the standing subscription is opened inside
+// the bring-up gate rather than as a stage after it.
 type Subscribe struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
@@ -2366,7 +2510,7 @@ type Subscribe struct {
 
 func (x *Subscribe) Reset() {
 	*x = Subscribe{}
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[22]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2378,7 +2522,7 @@ func (x *Subscribe) String() string {
 func (*Subscribe) ProtoMessage() {}
 
 func (x *Subscribe) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[22]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2391,7 +2535,7 @@ func (x *Subscribe) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Subscribe.ProtoReflect.Descriptor instead.
 func (*Subscribe) Descriptor() ([]byte, []int) {
-	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{22}
+	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *Subscribe) GetSessionId() string {
@@ -2449,7 +2593,7 @@ type ReplayRequest struct {
 
 func (x *ReplayRequest) Reset() {
 	*x = ReplayRequest{}
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[23]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2461,7 +2605,7 @@ func (x *ReplayRequest) String() string {
 func (*ReplayRequest) ProtoMessage() {}
 
 func (x *ReplayRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[23]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2474,7 +2618,7 @@ func (x *ReplayRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReplayRequest.ProtoReflect.Descriptor instead.
 func (*ReplayRequest) Descriptor() ([]byte, []int) {
-	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{23}
+	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *ReplayRequest) GetRequestId() string {
@@ -2530,7 +2674,7 @@ type ReplayEvent struct {
 
 func (x *ReplayEvent) Reset() {
 	*x = ReplayEvent{}
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[24]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2542,7 +2686,7 @@ func (x *ReplayEvent) String() string {
 func (*ReplayEvent) ProtoMessage() {}
 
 func (x *ReplayEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[24]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2555,7 +2699,7 @@ func (x *ReplayEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReplayEvent.ProtoReflect.Descriptor instead.
 func (*ReplayEvent) Descriptor() ([]byte, []int) {
-	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{24}
+	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *ReplayEvent) GetRequestId() string {
@@ -2593,7 +2737,7 @@ type ReplayDone struct {
 
 func (x *ReplayDone) Reset() {
 	*x = ReplayDone{}
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[25]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2605,7 +2749,7 @@ func (x *ReplayDone) String() string {
 func (*ReplayDone) ProtoMessage() {}
 
 func (x *ReplayDone) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[25]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2618,7 +2762,7 @@ func (x *ReplayDone) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReplayDone.ProtoReflect.Descriptor instead.
 func (*ReplayDone) Descriptor() ([]byte, []int) {
-	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{25}
+	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *ReplayDone) GetRequestId() string {
@@ -2661,7 +2805,7 @@ type PermissionRequest struct {
 
 func (x *PermissionRequest) Reset() {
 	*x = PermissionRequest{}
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[26]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2673,7 +2817,7 @@ func (x *PermissionRequest) String() string {
 func (*PermissionRequest) ProtoMessage() {}
 
 func (x *PermissionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[26]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2686,7 +2830,7 @@ func (x *PermissionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PermissionRequest.ProtoReflect.Descriptor instead.
 func (*PermissionRequest) Descriptor() ([]byte, []int) {
-	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{26}
+	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *PermissionRequest) GetRequestId() string {
@@ -2722,7 +2866,7 @@ type PermissionResponse struct {
 
 func (x *PermissionResponse) Reset() {
 	*x = PermissionResponse{}
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[27]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2734,7 +2878,7 @@ func (x *PermissionResponse) String() string {
 func (*PermissionResponse) ProtoMessage() {}
 
 func (x *PermissionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[27]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2747,7 +2891,7 @@ func (x *PermissionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PermissionResponse.ProtoReflect.Descriptor instead.
 func (*PermissionResponse) Descriptor() ([]byte, []int) {
-	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{27}
+	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *PermissionResponse) GetRequestId() string {
@@ -2792,7 +2936,7 @@ type PermissionItem struct {
 
 func (x *PermissionItem) Reset() {
 	*x = PermissionItem{}
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[28]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2804,7 +2948,7 @@ func (x *PermissionItem) String() string {
 func (*PermissionItem) ProtoMessage() {}
 
 func (x *PermissionItem) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[28]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2817,7 +2961,7 @@ func (x *PermissionItem) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PermissionItem.ProtoReflect.Descriptor instead.
 func (*PermissionItem) Descriptor() ([]byte, []int) {
-	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{28}
+	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *PermissionItem) GetRequest() *PermissionRequest {
@@ -2850,7 +2994,7 @@ type Heartbeat struct {
 
 func (x *Heartbeat) Reset() {
 	*x = Heartbeat{}
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[29]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2862,7 +3006,7 @@ func (x *Heartbeat) String() string {
 func (*Heartbeat) ProtoMessage() {}
 
 func (x *Heartbeat) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[29]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2875,7 +3019,7 @@ func (x *Heartbeat) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Heartbeat.ProtoReflect.Descriptor instead.
 func (*Heartbeat) Descriptor() ([]byte, []int) {
-	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{29}
+	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *Heartbeat) GetSentAtMs() int64 {
@@ -2904,7 +3048,7 @@ type HealthCheck struct {
 
 func (x *HealthCheck) Reset() {
 	*x = HealthCheck{}
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[30]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2916,7 +3060,7 @@ func (x *HealthCheck) String() string {
 func (*HealthCheck) ProtoMessage() {}
 
 func (x *HealthCheck) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[30]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2929,7 +3073,7 @@ func (x *HealthCheck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthCheck.ProtoReflect.Descriptor instead.
 func (*HealthCheck) Descriptor() ([]byte, []int) {
-	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{30}
+	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *HealthCheck) GetRequestId() string {
@@ -2955,7 +3099,7 @@ type HealthStatus struct {
 
 func (x *HealthStatus) Reset() {
 	*x = HealthStatus{}
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[31]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2967,7 +3111,7 @@ func (x *HealthStatus) String() string {
 func (*HealthStatus) ProtoMessage() {}
 
 func (x *HealthStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[31]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2980,7 +3124,7 @@ func (x *HealthStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthStatus.ProtoReflect.Descriptor instead.
 func (*HealthStatus) Descriptor() ([]byte, []int) {
-	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{31}
+	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *HealthStatus) GetRequestId() string {
@@ -3023,7 +3167,7 @@ type StoreWrite struct {
 
 func (x *StoreWrite) Reset() {
 	*x = StoreWrite{}
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[32]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3035,7 +3179,7 @@ func (x *StoreWrite) String() string {
 func (*StoreWrite) ProtoMessage() {}
 
 func (x *StoreWrite) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[32]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3048,7 +3192,7 @@ func (x *StoreWrite) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StoreWrite.ProtoReflect.Descriptor instead.
 func (*StoreWrite) Descriptor() ([]byte, []int) {
-	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{32}
+	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *StoreWrite) GetProducer() string {
@@ -3077,7 +3221,7 @@ type StoreWriteAck struct {
 
 func (x *StoreWriteAck) Reset() {
 	*x = StoreWriteAck{}
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[33]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3089,7 +3233,7 @@ func (x *StoreWriteAck) String() string {
 func (*StoreWriteAck) ProtoMessage() {}
 
 func (x *StoreWriteAck) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[33]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3102,7 +3246,7 @@ func (x *StoreWriteAck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StoreWriteAck.ProtoReflect.Descriptor instead.
 func (*StoreWriteAck) Descriptor() ([]byte, []int) {
-	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{33}
+	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *StoreWriteAck) GetAccepted() uint64 {
@@ -3146,7 +3290,7 @@ type CursorState struct {
 
 func (x *CursorState) Reset() {
 	*x = CursorState{}
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[34]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3158,7 +3302,7 @@ func (x *CursorState) String() string {
 func (*CursorState) ProtoMessage() {}
 
 func (x *CursorState) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[34]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3171,7 +3315,7 @@ func (x *CursorState) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CursorState.ProtoReflect.Descriptor instead.
 func (*CursorState) Descriptor() ([]byte, []int) {
-	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{34}
+	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *CursorState) GetFileId() string {
@@ -3213,7 +3357,7 @@ type CursorQuery struct {
 
 func (x *CursorQuery) Reset() {
 	*x = CursorQuery{}
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[35]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3225,7 +3369,7 @@ func (x *CursorQuery) String() string {
 func (*CursorQuery) ProtoMessage() {}
 
 func (x *CursorQuery) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[35]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3238,7 +3382,7 @@ func (x *CursorQuery) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CursorQuery.ProtoReflect.Descriptor instead.
 func (*CursorQuery) Descriptor() ([]byte, []int) {
-	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{35}
+	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *CursorQuery) GetFileId() string {
@@ -3258,7 +3402,7 @@ type OpenTaskState struct {
 
 func (x *OpenTaskState) Reset() {
 	*x = OpenTaskState{}
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[36]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3270,7 +3414,7 @@ func (x *OpenTaskState) String() string {
 func (*OpenTaskState) ProtoMessage() {}
 
 func (x *OpenTaskState) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[36]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3283,7 +3427,7 @@ func (x *OpenTaskState) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenTaskState.ProtoReflect.Descriptor instead.
 func (*OpenTaskState) Descriptor() ([]byte, []int) {
-	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{36}
+	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *OpenTaskState) GetStarted() *Event {
@@ -3317,7 +3461,7 @@ type CursorList struct {
 
 func (x *CursorList) Reset() {
 	*x = CursorList{}
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[37]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3329,7 +3473,7 @@ func (x *CursorList) String() string {
 func (*CursorList) ProtoMessage() {}
 
 func (x *CursorList) ProtoReflect() protoreflect.Message {
-	mi := &file_agentshim_core_v1_core_proto_msgTypes[37]
+	mi := &file_agentshim_core_v1_core_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3342,7 +3486,7 @@ func (x *CursorList) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CursorList.ProtoReflect.Descriptor instead.
 func (*CursorList) Descriptor() ([]byte, []int) {
-	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{37}
+	return file_agentshim_core_v1_core_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *CursorList) GetCursors() []*CursorState {
@@ -3490,10 +3634,16 @@ const file_agentshim_core_v1_core_proto_rawDesc = "" +
 	"\fshim_version\x18\x03 \x01(\tR\vshimVersion\x12)\n" +
 	"\x10protocol_version\x18\x04 \x01(\tR\x0fprotocolVersion\x12$\n" +
 	"\x0eturn_in_flight\x18\x05 \x01(\bR\fturnInFlight\x12*\n" +
-	"\x11vendor_session_id\x18\x06 \x01(\tR\x0fvendorSessionId\"_\n" +
+	"\x11vendor_session_id\x18\x06 \x01(\tR\x0fvendorSessionId\"z\n" +
 	"\vDaemonHello\x12%\n" +
 	"\x0edaemon_version\x18\x01 \x01(\tR\rdaemonVersion\x12)\n" +
-	"\x10protocol_version\x18\x02 \x01(\tR\x0fprotocolVersion\"\x82\x01\n" +
+	"\x10protocol_version\x18\x02 \x01(\tR\x0fprotocolVersion\x12\x19\n" +
+	"\bfrom_seq\x18\x03 \x01(\x04R\afromSeq\"q\n" +
+	"\tShimReady\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x19\n" +
+	"\bfrom_seq\x18\x02 \x01(\x04R\afromSeq\x12*\n" +
+	"\x11vendor_session_id\x18\x03 \x01(\tR\x0fvendorSessionId\"\x82\x01\n" +
 	"\fSubmitPrompt\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x12\n" +
@@ -3649,7 +3799,7 @@ func file_agentshim_core_v1_core_proto_rawDescGZIP() []byte {
 }
 
 var file_agentshim_core_v1_core_proto_enumTypes = make([]protoimpl.EnumInfo, 9)
-var file_agentshim_core_v1_core_proto_msgTypes = make([]protoimpl.MessageInfo, 38)
+var file_agentshim_core_v1_core_proto_msgTypes = make([]protoimpl.MessageInfo, 39)
 var file_agentshim_core_v1_core_proto_goTypes = []any{
 	(Plane)(0),                     // 0: agentshim.core.v1.Plane
 	(EventClass)(0),                // 1: agentshim.core.v1.EventClass
@@ -3678,28 +3828,29 @@ var file_agentshim_core_v1_core_proto_goTypes = []any{
 	(*DegradedState)(nil),          // 24: agentshim.core.v1.DegradedState
 	(*ShimHello)(nil),              // 25: agentshim.core.v1.ShimHello
 	(*DaemonHello)(nil),            // 26: agentshim.core.v1.DaemonHello
-	(*SubmitPrompt)(nil),           // 27: agentshim.core.v1.SubmitPrompt
-	(*Interrupt)(nil),              // 28: agentshim.core.v1.Interrupt
-	(*Ack)(nil),                    // 29: agentshim.core.v1.Ack
-	(*Nack)(nil),                   // 30: agentshim.core.v1.Nack
-	(*Subscribe)(nil),              // 31: agentshim.core.v1.Subscribe
-	(*ReplayRequest)(nil),          // 32: agentshim.core.v1.ReplayRequest
-	(*ReplayEvent)(nil),            // 33: agentshim.core.v1.ReplayEvent
-	(*ReplayDone)(nil),             // 34: agentshim.core.v1.ReplayDone
-	(*PermissionRequest)(nil),      // 35: agentshim.core.v1.PermissionRequest
-	(*PermissionResponse)(nil),     // 36: agentshim.core.v1.PermissionResponse
-	(*PermissionItem)(nil),         // 37: agentshim.core.v1.PermissionItem
-	(*Heartbeat)(nil),              // 38: agentshim.core.v1.Heartbeat
-	(*HealthCheck)(nil),            // 39: agentshim.core.v1.HealthCheck
-	(*HealthStatus)(nil),           // 40: agentshim.core.v1.HealthStatus
-	(*StoreWrite)(nil),             // 41: agentshim.core.v1.StoreWrite
-	(*StoreWriteAck)(nil),          // 42: agentshim.core.v1.StoreWriteAck
-	(*CursorState)(nil),            // 43: agentshim.core.v1.CursorState
-	(*CursorQuery)(nil),            // 44: agentshim.core.v1.CursorQuery
-	(*OpenTaskState)(nil),          // 45: agentshim.core.v1.OpenTaskState
-	(*CursorList)(nil),             // 46: agentshim.core.v1.CursorList
-	(*anypb.Any)(nil),              // 47: google.protobuf.Any
-	(*structpb.Struct)(nil),        // 48: google.protobuf.Struct
+	(*ShimReady)(nil),              // 27: agentshim.core.v1.ShimReady
+	(*SubmitPrompt)(nil),           // 28: agentshim.core.v1.SubmitPrompt
+	(*Interrupt)(nil),              // 29: agentshim.core.v1.Interrupt
+	(*Ack)(nil),                    // 30: agentshim.core.v1.Ack
+	(*Nack)(nil),                   // 31: agentshim.core.v1.Nack
+	(*Subscribe)(nil),              // 32: agentshim.core.v1.Subscribe
+	(*ReplayRequest)(nil),          // 33: agentshim.core.v1.ReplayRequest
+	(*ReplayEvent)(nil),            // 34: agentshim.core.v1.ReplayEvent
+	(*ReplayDone)(nil),             // 35: agentshim.core.v1.ReplayDone
+	(*PermissionRequest)(nil),      // 36: agentshim.core.v1.PermissionRequest
+	(*PermissionResponse)(nil),     // 37: agentshim.core.v1.PermissionResponse
+	(*PermissionItem)(nil),         // 38: agentshim.core.v1.PermissionItem
+	(*Heartbeat)(nil),              // 39: agentshim.core.v1.Heartbeat
+	(*HealthCheck)(nil),            // 40: agentshim.core.v1.HealthCheck
+	(*HealthStatus)(nil),           // 41: agentshim.core.v1.HealthStatus
+	(*StoreWrite)(nil),             // 42: agentshim.core.v1.StoreWrite
+	(*StoreWriteAck)(nil),          // 43: agentshim.core.v1.StoreWriteAck
+	(*CursorState)(nil),            // 44: agentshim.core.v1.CursorState
+	(*CursorQuery)(nil),            // 45: agentshim.core.v1.CursorQuery
+	(*OpenTaskState)(nil),          // 46: agentshim.core.v1.OpenTaskState
+	(*CursorList)(nil),             // 47: agentshim.core.v1.CursorList
+	(*anypb.Any)(nil),              // 48: google.protobuf.Any
+	(*structpb.Struct)(nil),        // 49: google.protobuf.Struct
 }
 var file_agentshim_core_v1_core_proto_depIdxs = []int32{
 	0,  // 0: agentshim.core.v1.Event.plane:type_name -> agentshim.core.v1.Plane
@@ -3718,10 +3869,10 @@ var file_agentshim_core_v1_core_proto_depIdxs = []int32{
 	23, // 13: agentshim.core.v1.Event.message_latency:type_name -> agentshim.core.v1.MessageLatency
 	16, // 14: agentshim.core.v1.Event.context_cleared:type_name -> agentshim.core.v1.ContextCleared
 	17, // 15: agentshim.core.v1.Event.context_compacted:type_name -> agentshim.core.v1.ContextCompacted
-	47, // 16: agentshim.core.v1.Event.vendor:type_name -> google.protobuf.Any
-	48, // 17: agentshim.core.v1.Event.extras:type_name -> google.protobuf.Struct
+	48, // 16: agentshim.core.v1.Event.vendor:type_name -> google.protobuf.Any
+	49, // 17: agentshim.core.v1.Event.extras:type_name -> google.protobuf.Struct
 	9,  // 18: agentshim.core.v1.EventBatch.events:type_name -> agentshim.core.v1.Event
-	43, // 19: agentshim.core.v1.EventBatch.cursor_advance:type_name -> agentshim.core.v1.CursorState
+	44, // 19: agentshim.core.v1.EventBatch.cursor_advance:type_name -> agentshim.core.v1.CursorState
 	4,  // 20: agentshim.core.v1.SessionStarted.source:type_name -> agentshim.core.v1.SessionSource
 	6,  // 21: agentshim.core.v1.ContextCompacted.trigger:type_name -> agentshim.core.v1.ContextCompactTrigger
 	2,  // 22: agentshim.core.v1.TaskStarted.kind:type_name -> agentshim.core.v1.TaskKind
@@ -3730,15 +3881,15 @@ var file_agentshim_core_v1_core_proto_depIdxs = []int32{
 	3,  // 25: agentshim.core.v1.TaskEnded.status:type_name -> agentshim.core.v1.TerminalStatus
 	7,  // 26: agentshim.core.v1.Ack.interrupt_outcome:type_name -> agentshim.core.v1.InterruptOutcome
 	9,  // 27: agentshim.core.v1.ReplayEvent.event:type_name -> agentshim.core.v1.Event
-	48, // 28: agentshim.core.v1.PermissionRequest.input:type_name -> google.protobuf.Struct
+	49, // 28: agentshim.core.v1.PermissionRequest.input:type_name -> google.protobuf.Struct
 	5,  // 29: agentshim.core.v1.PermissionResponse.decision:type_name -> agentshim.core.v1.PermissionDecision
-	48, // 30: agentshim.core.v1.PermissionResponse.updated_input:type_name -> google.protobuf.Struct
-	35, // 31: agentshim.core.v1.PermissionItem.request:type_name -> agentshim.core.v1.PermissionRequest
+	49, // 30: agentshim.core.v1.PermissionResponse.updated_input:type_name -> google.protobuf.Struct
+	36, // 31: agentshim.core.v1.PermissionItem.request:type_name -> agentshim.core.v1.PermissionRequest
 	8,  // 32: agentshim.core.v1.PermissionItem.resolution:type_name -> agentshim.core.v1.PermissionItem.Resolution
 	10, // 33: agentshim.core.v1.StoreWrite.batch:type_name -> agentshim.core.v1.EventBatch
 	9,  // 34: agentshim.core.v1.OpenTaskState.started:type_name -> agentshim.core.v1.Event
-	43, // 35: agentshim.core.v1.CursorList.cursors:type_name -> agentshim.core.v1.CursorState
-	45, // 36: agentshim.core.v1.CursorList.open_tasks:type_name -> agentshim.core.v1.OpenTaskState
+	44, // 35: agentshim.core.v1.CursorList.cursors:type_name -> agentshim.core.v1.CursorState
+	46, // 36: agentshim.core.v1.CursorList.open_tasks:type_name -> agentshim.core.v1.OpenTaskState
 	37, // [37:37] is the sub-list for method output_type
 	37, // [37:37] is the sub-list for method input_type
 	37, // [37:37] is the sub-list for extension type_name
@@ -3780,7 +3931,7 @@ func file_agentshim_core_v1_core_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentshim_core_v1_core_proto_rawDesc), len(file_agentshim_core_v1_core_proto_rawDesc)),
 			NumEnums:      9,
-			NumMessages:   38,
+			NumMessages:   39,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
