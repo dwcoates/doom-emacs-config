@@ -784,3 +784,27 @@ than a settled no-op."
      '(:workspace "doom" :state "RENDER_STATE_IDLE"))
     ;; Assert
     (should (eq (agent-repl--ws-get "doom" :pushed-render-state) :idle))))
+
+;;;; ---- The two context cuts --------------------------------------------
+
+(ert-deftest agent-repl-test-apply-workspace-state-decodes-clearing ()
+  "RENDER_STATE_CLEARING decodes to the :clearing keyword."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--register-ws "ws1")
+    ;; Act
+    (agent-repl--frontend-apply-workspace-state
+     '(:workspace "ws1" :state "RENDER_STATE_CLEARING"))
+    ;; Assert
+    (should (eq (agent-repl--ws-get "ws1" :pushed-render-state) :clearing))))
+
+(ert-deftest agent-repl-test-apply-workspace-state-decodes-compacting ()
+  "RENDER_STATE_COMPACTING decodes to the :compacting keyword."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--register-ws "ws1")
+    ;; Act
+    (agent-repl--frontend-apply-workspace-state
+     '(:workspace "ws1" :state "RENDER_STATE_COMPACTING"))
+    ;; Assert
+    (should (eq (agent-repl--ws-get "ws1" :pushed-render-state) :compacting))))

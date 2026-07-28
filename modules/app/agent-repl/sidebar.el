@@ -102,6 +102,8 @@ rather than a roster rebuild.")
 
 (defconst agent-repl--sidebar-status-wire
   '((:thinking       . "thinking")
+    (:clearing       . "clearing")
+    (:compacting     . "compacting")
     (:permission     . "permission")
     (:init           . "init")
     (:done           . "done")
