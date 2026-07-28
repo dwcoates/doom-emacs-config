@@ -333,7 +333,7 @@ debug logging on."
 
 (defconst agent-repl--ws-runtime-keys
   '(:agent-state :repl-state :input-buffer
-    :ready-timer :git-proc :flashing :pending-show-panels
+    :ready-timer :git-proc :pending-show-panels
     :fork-session-id :fullscreen-config :active-env :bare-metal
     :deferred-input-queue :done-ack :permission-prompt-active
     :done-ack-pending :source-ws-name :frontend-session-id
@@ -797,13 +797,13 @@ when the teardown that follows it finishes.
 The teardown is asynchronous and multi-step — a socket-close round-trip
 to the agent, then the workspace close, then a magit refresh — and the
 session dies partway through it.  The old design kept the tab and
-painted a 🔀 badge on it purely so the tab would not flash `:dead'
+painted a 🔀 badge on it purely so the tab would not read `:dead'
 during that window.  That made the badge a workaround for a visible tab
 with no reason to be visible: the work has landed, the user is done
 with the workspace, and nothing they can do to the tab is useful.
 
-Filtering here makes the flash structurally impossible rather than
-merely covered up — there is no tab to flash — and the teardown proceeds
+Filtering here makes the misread structurally impossible rather than
+merely covered up — there is no tab at all — and the teardown proceeds
 detached.  A teardown that stalls or dies cannot resurrect the tab
 either: the filter reads the merge state, which never un-sets, not the
 teardown's progress.

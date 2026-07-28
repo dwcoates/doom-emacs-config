@@ -240,8 +240,8 @@ session, which is a visibly broken workspace rather than a quiet one."
       (let (jumped announced)
         (cl-letf (((symbol-function 'agent-repl--frontend-session-posture)
                    (lambda (_dir) nil))
-                  ((symbol-function 'agent-repl-jump-to-workspace)
-                   (lambda (ws &optional _flash) (setq jumped ws)))
+                  ((symbol-function 'agent-repl--switch-to-workspace)
+                   (lambda (ws) (setq jumped ws)))
                   ((symbol-function 'agent-repl--info)
                    (lambda (_ws fmt &rest args)
                      (setq announced (apply #'format fmt args)))))
@@ -259,7 +259,7 @@ session, which is a visibly broken workspace rather than a quiet one."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-command-inbox
       (let (jumped)
-        (cl-letf (((symbol-function 'agent-repl-jump-to-workspace)
+        (cl-letf (((symbol-function 'agent-repl--switch-to-workspace)
                    (lambda (&rest _) (setq jumped t))))
           (agent-repl-test--materialize-available
            '(:jobId "workspace_commands_other:0" :finalName "theirs"
@@ -274,7 +274,7 @@ session, which is a visibly broken workspace rather than a quiet one."
       (let ((jumps 0))
         (cl-letf (((symbol-function 'agent-repl--frontend-session-posture)
                    (lambda (_dir) nil))
-                  ((symbol-function 'agent-repl-jump-to-workspace)
+                  ((symbol-function 'agent-repl--switch-to-workspace)
                    (lambda (&rest _) (cl-incf jumps))))
           (let* ((id (agent-repl--workspace-create-request
                       :name "once" :git-root "/tmp/source"
@@ -318,7 +318,7 @@ session, which is a visibly broken workspace rather than a quiet one."
       (let (opened)
         (cl-letf (((symbol-function 'agent-repl--frontend-session-posture)
                    (lambda (_dir) nil))
-                  ((symbol-function 'agent-repl-jump-to-workspace)
+                  ((symbol-function 'agent-repl--switch-to-workspace)
                    (lambda (&rest _) nil))
                   ((symbol-function 'agent-repl--eager-open-panels)
                    (lambda (ws) (setq opened ws))))

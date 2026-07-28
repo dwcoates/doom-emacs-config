@@ -574,7 +574,7 @@ a frontend that cannot be resolved."
 Sets `:repl-state :inactive' on WS (`:agent-state' untouched so an
 in-flight :thinking / :permission survives the close), then puts the view
 away through WS's own frontend.  No save-tab-index, no push-to-back, no
-flash — this is the simple-close audit point that `SPC o c' is bound to.
+this is the simple-close audit point that `SPC o c' is bound to.
 
 The teardown is frontend-dispatched rather than hard-wired to a single
 mechanism, so a gui workspace closes its actual view AND records that it
@@ -879,7 +879,7 @@ running."
   "Hide agent panels with NO tab-bar update (the `SPC o c' path).
 Thin wrapper around `agent-repl--on-simple-close' that enforces the
 invariant that a workspace is active.  See
-`agent-repl--hide-and-preserve-status' for the deprio + flash variant
+`agent-repl--hide-and-preserve-status' for the deprio variant
 bound to `SPC o C'."
   (let ((ws (agent-repl--ws-current-name)))
     (unless ws (error "agent-repl--simple-hide-and-preserve-status: no active workspace"))
@@ -941,7 +941,7 @@ Bound to `SPC o C'.  See `agent-repl-simple' for the no-tab-bar variant."
   "Toggle Agent REPL panels with a plain close (no tab-bar update).
 Same dispatch as `agent-repl' except the close branch only hides the
 panels and sets `:repl-state :inactive' — no save-tab-index, no
-push-to-back, no flash.  Bound to `SPC o c'."
+push-to-back.  Bound to `SPC o c'."
   (interactive)
   (agent-repl--toggle #'agent-repl--simple-hide-and-preserve-status))
 

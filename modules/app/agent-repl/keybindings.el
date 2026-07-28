@@ -49,7 +49,7 @@
     ("⚡ State"
      (:agent-state :repl-state :status :pushed-render-state
       :pushed-render-state-meta
-      :flashing :hidden :dead :bogus :merged))
+      :hidden :dead :bogus :merged))
     ("🌳 Project / Git"
      (:project-dir :worktree-p :source-ws-dir :source-ws-name
       :merge-parent-dir :branch-merged :branch-merged-last-check
@@ -324,10 +324,7 @@ WS defaults to the current workspace.  PRIORITY is one of the strings
 in `agent-repl-priority-levels', or \"\" to clear.  Persists through
 `agent-repl--state-save' so the badge survives restarts, reorders the
 workspace in the tab-bar by its new priority, and forces a mode-line
-repaint so the glyph updates immediately.  Pulses the workspace's tab
-via `agent-repl-flash-tab' so the user can spot the slot whose
-priority just shifted (matches the `SPC p p' / worktree-jump flash
-semantic).
+repaint so the glyph updates immediately.
 
 Interactively, always targets the current workspace and prompts only
 for the priority (defaulting to the workspace's current priority, if
@@ -354,8 +351,6 @@ image so the visual mapping between key and glyph is obvious."
     (agent-repl--state-save ws)
     (agent-repl--reorder-workspace-by-priority ws)
     (force-mode-line-update t)
-    (when (fboundp 'agent-repl-flash-tab)
-      (agent-repl-flash-tab ws))
     (message "Workspace '%s' priority: %s" ws (if (string-empty-p priority) "cleared" priority))))
 
 ;; SPC b R -- revert buffer from disk then eval as Elisp (fast config reload)

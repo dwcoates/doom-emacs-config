@@ -257,7 +257,7 @@ focuses Emacs without attempting a bogus jump."
   (let ((navigable (and ws (stringp ws) (not (string-empty-p ws)))))
     (agent-repl--log ws "notification-activate navigable=%s" navigable)
     (when navigable
-    (agent-repl-jump-to-workspace ws))
+    (agent-repl--switch-to-workspace ws))
     (select-frame-set-input-focus (selected-frame))))
 
 (defun agent-repl--notification-click-command (ws)
