@@ -273,9 +273,11 @@ export class StoreClient {
     this.vendorKnown = true;
     shimLog(COMPONENT, { session: this.opts.sessionId, store_key: sessionId },
       `adopted store session key (was ${previous})`);
-    // Only reopen if the daemon has actually subscribed; otherwise recording
-    // the key is enough and the next subscribe() picks it up.
-    if (this.lastFromSeq !== null) this.subscribe(this.lastFromSeq);
+    // Only reopen if a standing subscription position exists; otherwise
+    // recording the key is enough and the next subscribe() picks it up. The
+    // rejection is dropped deliberately: subscribe() already degraded, and
+    // this reopen has no caller waiting on it.
+    if (this.lastFromSeq !== null) void this.subscribe(this.lastFromSeq).catch(() => {});
   }
 
   /**
@@ -305,12 +307,22 @@ export class StoreClient {
    * 2. BOUNCE THE DAEMON LINK, before the key moves. The old connection's
    *    last_seen belongs to the retiring space; anything from the new space
    *    reaching it is the regression above.
-   * 3. RE-KEY and reopen the standing subscription at from_seq=0 — the new
-   *    space starts fresh, which is the point.
+   * 3. RE-KEY, and RETIRE the standing subscription rather than reopening it
+   *    here.
    *
-   * Steps 2 and 3 are synchronous and adjacent, so no daemon Subscribe can
-   * land between them: the reconnect needs I/O and this event loop is single
-   * threaded.
+   * STEP 3 USED TO REOPEN AT from_seq=0 ITSELF, and no longer needs to: the
+   * bounce's re-handshake IS the gate, and the DaemonHello opening the next
+   * connection carries the daemon's own from_seq — zero, because the hello's
+   * announcement of the new uuid is what makes the daemon reset the cursor
+   * before it reads it (core.proto DaemonHello.from_seq). Reopening here as
+   * well raced that gate with a second subscription it would immediately
+   * replace. What the retirement keeps is the property the reopen provided:
+   * no connection to the RETIRED seq space outlives the rotation, so the
+   * re-handshaked daemon cannot be handed an event counted in a space that is
+   * gone.
+   *
+   * Steps 2 and 3 are synchronous and adjacent, so nothing can land between
+   * them: the reconnect needs I/O and this event loop is single threaded.
    */
   private async rotateStoreKey(next: string): Promise<void> {
     const previous = this.storeKey;
@@ -336,9 +348,12 @@ export class StoreClient {
     this.rotatingTo = null;
     shimLog(COMPONENT, { session: this.opts.sessionId, store_key: next },
       `store re-keyed to the rotated vendor session id (was ${previous})`);
-    // from_seq=0, NOT the daemon's last position: that position counts in the
-    // RETIRED key's seq space and means nothing in this one.
-    if (this.lastFromSeq !== null) this.subscribe(0n);
+    // The standing subscription belongs to the RETIRED seq space. Retire it
+    // with the key; the bounce's re-handshake opens the new one at the
+    // daemon's from_seq, which that handshake resets to zero.
+    this.dropStandingSubscription();
+    shimLog(COMPONENT, { session: this.opts.sessionId, store_key: next },
+      `retired the standing subscription of the old seq space; the re-handshake gate opens the new one at the daemon's from_seq`);
   }
 
   /** The session id this client currently subscribes under. */
@@ -455,45 +470,75 @@ export class StoreClient {
    * The subscription rides its OWN connection whose first frame is the
    * Subscribe: the store's single-role protocol rejects a Subscribe sent down
    * the producer connection.
+   *
+   * IT RESOLVES ONLY WHEN THE SUBSCRIPTION HAS SETTLED — the connection is up
+   * and its Subscribe frame is on the wire — and REJECTS when it cannot be
+   * opened. That is what lets the bring-up gate (uds-session.ts) hold its
+   * readiness ack until the standing tail genuinely exists, instead of acking
+   * on an intent to subscribe. The dial failure is still degraded here, so a
+   * caller that only wants the fire-and-forget behaviour may drop the
+   * rejection without losing the report.
    */
-  subscribe(fromSeq: bigint): void {
+  subscribe(fromSeq: bigint): Promise<void> {
     // Retained so adoptStoreKey can reopen here once the vendor uuid is
     // known: a fresh session only learns it from the SDK, which can be AFTER
-    // the daemon's first Subscribe. Nothing is lost by that late reopen — the
-    // store replays every event with seq > from_seq from disk.
+    // the daemon's hello. Nothing is lost by that late reopen — the store
+    // replays every event with seq > from_seq from disk.
     this.lastFromSeq = fromSeq;
-    if (this.subConn) {
-      // Reopen: replace the old subscription deliberately. Nulling the field
-      // first lets onSubClose tell replacement from a genuine drop.
-      const old = this.subConn;
-      this.subConn = null;
-      old.close();
-    }
-    const socket = net.connect(this.opts.socketPath);
-    const onDialError = (err: Error) => {
-      this.degrade(`cannot subscribe: ${err.message}`, 0);
-    };
-    socket.once("error", onDialError);
-    socket.once("connect", () => {
-      socket.removeListener("error", onDialError);
-      const conn: MessageConn = new MessageConn(
-        socket,
-        {
-          onMessage: (msg) => this.onSubMessage(msg),
-          onClose: (err) => this.onSubClose(conn, err),
-        },
-        COMPONENT,
-      );
-      this.subConn = conn;
-      // storeKey, NOT opts.sessionId: the store keys events by the vendor
-      // uuid on the Event envelope, so subscribing under this shim's
-      // `--session-id` registers on a channel nothing publishes to.
-      conn.send(SubscribeSchema, create(SubscribeSchema, {
-        sessionId: this.storeKey,
-        fromSeq,
-      }));
-      shimLog(COMPONENT, { session: this.opts.sessionId, store_key: this.storeKey, from_seq: fromSeq }, `subscribed to store`);
+    this.dropStandingSubscription();
+    return new Promise((resolve, reject) => {
+      const socket = net.connect(this.opts.socketPath);
+      const onDialError = (err: Error) => {
+        const reason = `cannot subscribe: ${err.message}`;
+        this.degrade(reason, 0);
+        reject(new Error(`store-client: ${reason}`));
+      };
+      socket.once("error", onDialError);
+      socket.once("connect", () => {
+        socket.removeListener("error", onDialError);
+        const conn: MessageConn = new MessageConn(
+          socket,
+          {
+            onMessage: (msg) => this.onSubMessage(msg),
+            onClose: (err) => this.onSubClose(conn, err),
+          },
+          COMPONENT,
+        );
+        this.subConn = conn;
+        // storeKey, NOT opts.sessionId: the store keys events by the vendor
+        // uuid on the Event envelope, so subscribing under this shim's
+        // `--session-id` registers on a channel nothing publishes to.
+        try {
+          conn.send(SubscribeSchema, create(SubscribeSchema, {
+            sessionId: this.storeKey,
+            fromSeq,
+          }));
+        } catch (err) {
+          const reason = `cannot subscribe: ${err instanceof Error ? err.message : String(err)}`;
+          this.degrade(reason, 0);
+          reject(new Error(`store-client: ${reason}`));
+          return;
+        }
+        shimLog(COMPONENT, { session: this.opts.sessionId, store_key: this.storeKey, from_seq: fromSeq }, `subscribed to store`);
+        resolve();
+      });
     });
+  }
+
+  /**
+   * Close the standing subscription without reporting an outage.
+   *
+   * Nulling the field FIRST is what lets onSubClose tell this deliberate
+   * retirement from a genuine drop — the guard there compares identity, so the
+   * closed connection reports nothing. Used both by a reopen (subscribe) and
+   * by a rotation, which retires the subscription of a seq space that no
+   * longer exists and leaves the next handshake gate to open the new one.
+   */
+  private dropStandingSubscription(): void {
+    if (!this.subConn) return;
+    const old = this.subConn;
+    this.subConn = null;
+    old.close();
   }
 
   /**

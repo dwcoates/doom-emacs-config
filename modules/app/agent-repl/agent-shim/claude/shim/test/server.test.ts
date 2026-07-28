@@ -15,15 +15,15 @@ import {
   ReplayEventSchema,
   ReplayRequestSchema,
   ShimHelloSchema,
+  ShimReadySchema,
   SubmitPromptSchema,
-  SubscribeSchema,
 } from "../src/uds/proto.js";
 import type {
+  DaemonHello,
   Interrupt,
   PermissionResponse,
   ReplayRequest,
   SubmitPrompt,
-  Subscribe,
 } from "../src/uds/proto.js";
 import { FramedPeer, acceptShim, tmpSocketPath, until } from "./uds-harness.js";
 
@@ -31,7 +31,8 @@ interface Calls {
   prompts: SubmitPrompt[];
   interrupts: Interrupt[];
   perms: PermissionResponse[];
-  subs: Subscribe[];
+  /** Every DaemonHello the bring-up gate handed to onDaemonConnected. */
+  hellos: DaemonHello[];
   replays: ReplayRequest[];
   connected: number;
   disconnected: number;
@@ -43,7 +44,7 @@ function harness(overrides: Partial<SessionServerHandlers> = {}): {
   calls: Calls;
 } {
   const socketPath = tmpSocketPath();
-  const calls: Calls = { prompts: [], interrupts: [], perms: [], subs: [], replays: [], connected: 0, disconnected: 0 };
+  const calls: Calls = { prompts: [], interrupts: [], perms: [], hellos: [], replays: [], connected: 0, disconnected: 0 };
   const handlers: SessionServerHandlers = {
     onSubmitPrompt: (m): Receipt => {
       calls.prompts.push(m);
@@ -54,14 +55,16 @@ function harness(overrides: Partial<SessionServerHandlers> = {}): {
       return create(AckSchema, { requestId: m.requestId });
     },
     onPermissionResponse: (m) => calls.perms.push(m),
-    onSubscribe: (m) => calls.subs.push(m),
     onReplayRequest: (m) => calls.replays.push(m),
     onHealthCheck: (m) => create(HealthStatusSchema, {
       requestId: m.requestId,
       healthy: true,
       component: "test-shim",
     }),
-    onDaemonConnected: () => calls.connected++,
+    onDaemonConnected: (hello) => {
+      calls.hellos.push(hello);
+      calls.connected++;
+    },
     onDaemonDisconnected: () => calls.disconnected++,
     ...overrides,
   };
@@ -87,14 +90,14 @@ afterEach(async () => {
  * Stand up a fake daemon, let the shim dial in, and complete the
  * ShimHello/DaemonHello handshake. The shim speaks first, as the dialer.
  */
-async function handshake(server: SessionServer, socketPath: string): Promise<FramedPeer> {
+async function handshake(server: SessionServer, socketPath: string, fromSeq = 0n): Promise<FramedPeer> {
   const daemon = acceptShim(socketPath);
   listeners.push(daemon.close);
   await server.connect();
   const peer = await daemon.next();
   const hello = await peer.next(ShimHelloSchema);
   expect(hello.sessionId).toBe("sess-1");
-  peer.send(DaemonHelloSchema, create(DaemonHelloSchema, { daemonVersion: "d1", protocolVersion: "1" }));
+  peer.send(DaemonHelloSchema, create(DaemonHelloSchema, { daemonVersion: "d1", protocolVersion: "1", fromSeq }));
   return peer;
 }
 
@@ -230,16 +233,46 @@ describe("SessionServer control dispatch", () => {
     expect(calls.perms[0]!.requestId).toBe("perm-1");
   });
 
-  it("dispatches Subscribe", async () => {
-    // Arrange
+});
+
+describe("SessionServer bring-up gate", () => {
+  it("hands the DaemonHello's from_seq to the wiring stage", async () => {
+    // Arrange: from_seq is the daemon's resume position, and the ONLY place
+    // the shim learns it now that the separate Subscribe frame is gone.
     const { server, socketPath, calls } = harness();
     track(server);
-    const peer = await handshake(server, socketPath);
     // Act
-    peer.send(SubscribeSchema, create(SubscribeSchema, { sessionId: "sess-1", fromSeq: 7n }));
-    await until(() => calls.subs.length === 1);
+    await handshake(server, socketPath, 7n);
+    await until(() => calls.hellos.length === 1);
     // Assert
-    expect(calls.subs[0]!.fromSeq).toBe(7n);
+    expect(calls.hellos[0]!.fromSeq).toBe(7n);
+  });
+
+  it("writes the ShimReady ack that closes the gate", async () => {
+    // Arrange
+    const { server, socketPath } = harness();
+    track(server);
+    const peer = await handshake(server, socketPath, 4n);
+    await until(() => server.isConnected());
+    // Act: the owner finished its wiring.
+    server.sendReady(create(ShimReadySchema, { sessionId: "sess-1", fromSeq: 4n, vendorSessionId: "uuid-1" }));
+    const ready = await peer.next(ShimReadySchema);
+    // Assert
+    expect(ready).toMatchObject({ sessionId: "sess-1", fromSeq: 4n, vendorSessionId: "uuid-1" });
+  });
+
+  it("abandons the ack when the daemon went away before the wiring finished", async () => {
+    // Arrange: the connection drops mid-wiring, which is exactly when a
+    // speculative ack would be worst — the next gate re-runs in full instead.
+    const { server, socketPath } = harness();
+    track(server);
+    const peer = await handshake(server, socketPath, 0n);
+    await until(() => server.isConnected());
+    peer.destroy();
+    await until(() => !server.isConnected());
+    // Act + Assert: no throw, and nothing to send it on.
+    server.sendReady(create(ShimReadySchema, { sessionId: "sess-1" }));
+    expect(server.isConnected()).toBe(false);
   });
 });
 
@@ -331,7 +364,6 @@ describe("SessionServer vendor session rotation bounce", () => {
         onSubmitPrompt: (m): Receipt => create(AckSchema, { requestId: m.requestId }),
         onInterrupt: (m): Receipt => create(AckSchema, { requestId: m.requestId }),
         onPermissionResponse: () => {},
-        onSubscribe: (m) => built.calls.subs.push(m),
         onReplayRequest: () => {},
         onHealthCheck: (m) => create(HealthStatusSchema, { requestId: m.requestId, healthy: true, component: "test-shim" }),
         onDaemonConnected: () => built.calls.connected++,
