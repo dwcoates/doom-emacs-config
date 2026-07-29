@@ -538,3 +538,49 @@ func TestTheBlueBandOutranksHibernated(t *testing.T) {
 		t.Fatalf("state = %s, want DEGRADED — a real fault outranks a benign sleep", renderName(got.state))
 	}
 }
+
+// A teal tab OVER A LIVE TURN is unreachable by construction — sessiondrv's
+// hibernate() refuses any workspace whose resolved state is not settled — so the
+// resolver treats it as an INVARIANT VIOLATION rather than a case to handle.
+//
+// The log is what makes it findable at all. `hibernated` outranks every agent row
+// on purpose, so this combination paints an ordinary teal tab with nothing
+// anywhere to say the agent is working underneath it; without the line, the only
+// symptom is a user staring at a sleeping workspace that will not answer.
+func TestHibernatedOverALiveTurnLogsAnInvariantViolation(t *testing.T) {
+	// Arrange — the impossible pair, seeded directly because no writer can make it.
+	db := newTestDB(t)
+	seedSignal(t, db, "ws", "s1", sigThinking, causeTurnStarted, 1, 1)
+	seedSignal(t, db, "ws", "", sigHibernated, causeWired, -1, 2)
+	cl := &capLog{}
+	// Act.
+	got, err := resolve(db, "ws", cl.logf)
+	// Assert.
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if got.state != frontendv1.RenderState_RENDER_STATE_HIBERNATED {
+		t.Fatalf("state = %s, want HIBERNATED — the rank table still decides", renderName(got.state))
+	}
+	if !cl.contains("INVARIANT VIOLATION") {
+		t.Fatalf("the impossible pair was resolved silently: %v", cl.lines)
+	}
+}
+
+// And an ORDINARY hibernation logs nothing. A violation line that fired on the
+// routine case would be noise, and noise is how a real violation goes unread.
+func TestAnOrdinaryHibernationLogsNoViolation(t *testing.T) {
+	// Arrange — asleep after a turn that ended, which is the normal shape.
+	db := newTestDB(t)
+	seedSignal(t, db, "ws", "s1", sigDone, causeTurnEnded, 1, 1)
+	seedSignal(t, db, "ws", "", sigHibernated, causeWired, -1, 2)
+	cl := &capLog{}
+	// Act.
+	if _, err := resolve(db, "ws", cl.logf); err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	// Assert.
+	if cl.contains("INVARIANT VIOLATION") {
+		t.Fatalf("an ordinary hibernation logged a violation: %v", cl.lines)
+	}
+}
