@@ -390,6 +390,9 @@ func awaitShimStopped(sessionID string) error {
 type RegistryRegistrar struct {
 	Reg  *registry.Registry
 	Logf func(string, ...any)
+	// ModelCatalogs retains query-owned menus and feeds frontend reconnect
+	// snapshots through the same SessionView shaping as ordinary pushes.
+	ModelCatalogs *SessionModelCatalogs
 	// PushView re-pushes a session's SessionView after a record write, so a
 	// CONNECTED frontend sees the change rather than waiting for whatever
 	// unrelated event next happens to push one. Late-bound by main (the Server
@@ -397,6 +400,23 @@ type RegistryRegistrar struct {
 	// is held by pointer. Nil-safe: the connect snapshot still carries the
 	// record, so a nil pusher costs freshness, never correctness.
 	PushView func(sessionID string)
+}
+
+// SessionModelCatalogObserved accepts a shim-published menu, then re-pushes
+// the session view. Model selection remains owned by the shim; this only
+// preserves the SDK's offered choices for frontend rendering.
+func (r *RegistryRegistrar) SessionModelCatalogObserved(sessionID string, models []*corev1.ModelOption) {
+	if r.ModelCatalogs == nil {
+		if r.Logf != nil {
+			r.Logf("server: session %s: model catalog received without a catalog store", sessionID)
+		}
+		return
+	}
+	r.ModelCatalogs.Set(sessionID, models)
+	if r.Logf != nil {
+		r.Logf("server: session %s: model catalog updated models=%d", sessionID, len(models))
+	}
+	r.repush(sessionID)
 }
 
 // repush delivers the post-write SessionView push, if one is wired.

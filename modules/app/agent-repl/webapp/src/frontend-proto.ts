@@ -149,6 +149,8 @@ export interface SessionView {
    * account identity for a daemon-executed, webapp-initiated switch.
    */
   configDir: string;
+  /** The live SDK's selectable-model menu; it does not select a model. */
+  modelOptions: ModelOption[];
   /**
    * Whether this session's on-disk transcript has been read into the store
    * (F2, the never-blue completion signal). Daemon-resolved; the webapp
@@ -164,6 +166,12 @@ export interface SessionView {
    * SystemFailureItem.
    */
   death?: SystemFailure;
+}
+
+export interface ModelOption {
+  value: string;
+  displayName: string;
+  description: string;
 }
 
 /**
@@ -338,6 +346,8 @@ export interface CommandAck {
   requestId: string;
   ok: boolean;
   error: string;
+  /** Shim-confirmed current model for a SetModel receipt, including rejection. */
+  selectedModel: string;
   /**
    * The CLASSIFIED refusal (F4). `error` above is the raw handler text this
    * end never rendered at all; this is the same failure run through the
@@ -745,6 +755,7 @@ const SESSION_VIEW_KEYS = new Set([
   "configDir",
   "backfill",
   "death",
+	"modelOptions",
 ]);
 function decodeSessionView(v: unknown): SessionView {
   const o = ensureObject(v, "SessionView");
@@ -772,6 +783,9 @@ function decodeSessionView(v: unknown): SessionView {
     pendingPermissions: num(o, "pendingPermissions", "SessionView"),
     // S8 account identity: "" when the daemon has not resolved a config dir.
     configDir: str(o, "configDir", "SessionView"),
+	modelOptions: o.modelOptions === undefined || o.modelOptions === null
+	  ? []
+	  : ensureArray(o.modelOptions, "SessionView.modelOptions").map((model, i) => decodeModelOption(model, i)),
     // F2 never-blue signal; absent on a pre-F2 daemon, which reads as
     // `unspecified` — the same "nothing to backfill" a fresh workspace has.
     backfill: decodeBackfillState(o.backfill),
@@ -786,6 +800,19 @@ function decodeSessionView(v: unknown): SessionView {
     throw new Error("frontend-proto: SessionView missing required `session_id`");
   }
   return sv;
+}
+
+const MODEL_OPTION_KEYS = new Set(["value", "displayName", "description"]);
+function decodeModelOption(v: unknown, i: number): ModelOption {
+  const o = ensureObject(v, `SessionView.modelOptions[${i}]`);
+  rejectUnknown(o, MODEL_OPTION_KEYS, `SessionView.modelOptions[${i}]`);
+  const model = {
+    value: str(o, "value", `SessionView.modelOptions[${i}]`),
+    displayName: str(o, "displayName", `SessionView.modelOptions[${i}]`),
+    description: str(o, "description", `SessionView.modelOptions[${i}]`),
+  };
+  if (model.value === "") throw new Error(`frontend-proto: SessionView.modelOptions[${i}] missing value`);
+  return model;
 }
 
 const CONVERSATION_DELTA_KEYS = new Set(["workspace", "sessionId", "items", "throughSeq"]);
@@ -1113,6 +1140,7 @@ const COMMAND_ACK_KEYS = new Set([
   "error",
   "failure",
   "interruptConfirmRequired",
+	"selectedModel",
 ]);
 const INTERRUPT_CONFIRM_KEYS = new Set(["liveTasks"]);
 function decodeCommandAck(v: unknown): CommandAck {
@@ -1122,6 +1150,7 @@ function decodeCommandAck(v: unknown): CommandAck {
     requestId: str(o, "requestId", "CommandAck"),
     ok: bool(o, "ok", "CommandAck"),
     error: str(o, "error", "CommandAck"),
+    selectedModel: str(o, "selectedModel", "CommandAck"),
   };
   if (o.failure !== undefined && o.failure !== null) {
     ack.failure = decodeSystemFailure(o.failure, "CommandAck.failure");

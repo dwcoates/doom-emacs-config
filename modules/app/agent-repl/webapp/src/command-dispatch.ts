@@ -347,7 +347,7 @@ export class CommandDispatcher {
     const requestId = this.newId();
     log("info", "command dispatcher dispatching session creation", {
       operation: "command-dispatch.create-session",
-      context: { request_id: requestId, workspace: args.cwd, model: args.model, permission_mode: args.permissionMode, fake: args.fake, known_session_count: this.knownSessions.size },
+      context: { request_id: requestId, workspace: args.cwd, permission_mode: args.permissionMode, fake: args.fake, known_session_count: this.knownSessions.size },
     });
     return new Promise<string>((resolve, reject) => {
       const waiter: CreateWaiter = {

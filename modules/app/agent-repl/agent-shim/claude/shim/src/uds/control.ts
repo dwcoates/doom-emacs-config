@@ -153,7 +153,7 @@ export class ControlDispatch {
   async handleSetModel(msg: SetModel): Promise<Ack | Nack> {
     if (msg.model === "") {
       const reason = "set-model requires a non-empty model id";
-      shimLog(COMPONENT, { request: msg.requestId }, reason);
+      LOGGER.log({ level: "error", request_id: msg.requestId }, reason);
       return create(NackSchema, { requestId: msg.requestId, reason });
     }
     try {
@@ -162,7 +162,7 @@ export class ControlDispatch {
     } catch (err) {
       const reason = errMsg(err);
       const selectedModel = err instanceof ModelSelectionError ? err.selectedModel : "";
-      shimLog(COMPONENT, { request: msg.requestId, model: msg.model, selected_model: selectedModel }, `set-model failed: ${reason}`);
+      LOGGER.log({ level: "error", request_id: msg.requestId, model: msg.model, selected_model: selectedModel }, `set-model failed: ${reason}`);
       return create(NackSchema, { requestId: msg.requestId, reason, selectedModel });
     }
   }

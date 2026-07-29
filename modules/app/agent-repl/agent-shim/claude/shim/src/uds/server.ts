@@ -53,6 +53,8 @@ import {
   HeartbeatSchema,
   Interrupt,
   InterruptSchema,
+  ModelCatalog,
+  ModelCatalogSchema,
   Nack,
   NackSchema,
   PermissionRequest,
@@ -232,6 +234,18 @@ export class SessionServer {
       return;
     }
     this.conn!.send(EventSchema, evt);
+  }
+
+  /** Publish the SDK's selectable-model menu to the attached daemon. */
+  sendModelCatalog(catalog: ModelCatalog): void {
+    if (!this.isConnected()) {
+      LOGGER.log({ agent_repl_session_id: this.opts.sessionId, model_count: catalog.models.length },
+        "no daemon attached; model catalog not forwarded");
+      return;
+    }
+    this.conn!.send(ModelCatalogSchema, catalog);
+    LOGGER.log({ agent_repl_session_id: this.opts.sessionId, model_count: catalog.models.length },
+      "model catalog forwarded to daemon");
   }
 
   /**

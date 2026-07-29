@@ -48,7 +48,7 @@ import type { JsonObject, Message } from "@bufbuild/protobuf";
  * Describes the file agentshim/core/v1/core.proto.
  */
 export const file_agentshim_core_v1_core: GenFile = /*@__PURE__*/
-  fileDesc("ChxhZ2VudHNoaW0vY29yZS92MS9jb3JlLnByb3RvEhFhZ2VudHNoaW0uY29yZS52MSKbCQoFRXZlbnQSEgoKc2Vzc2lvbl9pZBgBIAEoCRILCgNzZXEYAiABKAQSJwoFcGxhbmUYAyABKA4yGC5hZ2VudHNoaW0uY29yZS52MS5QbGFuZRIsCgVjbGFzcxgEIAEoDjIdLmFnZW50c2hpbS5jb3JlLnYxLkV2ZW50Q2xhc3MSEgoKcmVxdWVzdF9pZBgFIAEoCRIWCg5wcm9kdWNlZF9hdF9tcxgGIAEoAxIRCglkZWR1cF9rZXkYByABKAkSPAoPc2Vzc2lvbl9zdGFydGVkGAogASgLMiEuYWdlbnRzaGltLmNvcmUudjEuU2Vzc2lvblN0YXJ0ZWRIABI4Cg1zZXNzaW9uX2VuZGVkGAsgASgLMh8uYWdlbnRzaGltLmNvcmUudjEuU2Vzc2lvbkVuZGVkSAASNgoMdHVybl9zdGFydGVkGAwgASgLMh4uYWdlbnRzaGltLmNvcmUudjEuVHVyblN0YXJ0ZWRIABIyCgp0dXJuX2VuZGVkGA0gASgLMhwuYWdlbnRzaGltLmNvcmUudjEuVHVybkVuZGVkSAASNgoMdGFza19zdGFydGVkGA4gASgLMh4uYWdlbnRzaGltLmNvcmUudjEuVGFza1N0YXJ0ZWRIABI4Cg10YXNrX3Byb2dyZXNzGA8gASgLMh8uYWdlbnRzaGltLmNvcmUudjEuVGFza1Byb2dyZXNzSAASMgoKdGFza19lbmRlZBgQIAEoCzIcLmFnZW50c2hpbS5jb3JlLnYxLlRhc2tFbmRlZEgAEjgKDWNvbnRlbnRfZGVsdGEYESABKAsyHy5hZ2VudHNoaW0uY29yZS52MS5Db250ZW50RGVsdGFIABJCChJoZWFydGJlYXRfcHJvZ3Jlc3MYEiABKAsyJC5hZ2VudHNoaW0uY29yZS52MS5IZWFydGJlYXRQcm9ncmVzc0gAEjoKDmRlZ3JhZGVkX3N0YXRlGBMgASgLMiAuYWdlbnRzaGltLmNvcmUudjEuRGVncmFkZWRTdGF0ZUgAEjQKCHVucGFyc2VkGBQgASgLMiAuYWdlbnRzaGltLmNvcmUudjEuVW5wYXJzZWRFdmVudEgAEjwKD21lc3NhZ2VfbGF0ZW5jeRgVIAEoCzIhLmFnZW50c2hpbS5jb3JlLnYxLk1lc3NhZ2VMYXRlbmN5SAASPAoPY29udGV4dF9jbGVhcmVkGBYgASgLMiEuYWdlbnRzaGltLmNvcmUudjEuQ29udGV4dENsZWFyZWRIABJAChFjb250ZXh0X2NvbXBhY3RlZBgXIAEoCzIjLmFnZW50c2hpbS5jb3JlLnYxLkNvbnRleHRDb21wYWN0ZWRIABJHChVmaWxlX3BsYW5lX2RpYWdub3N0aWMYGCABKAsyJi5hZ2VudHNoaW0uY29yZS52MS5GaWxlUGxhbmVEaWFnbm9zdGljSAASJgoGdmVuZG9yGB4gASgLMhQuZ29vZ2xlLnByb3RvYnVmLkFueUgAEicKBmV4dHJhcxgoIAEoCzIXLmdvb2dsZS5wcm90b2J1Zi5TdHJ1Y3RCCQoHcGF5bG9hZCJuCgpFdmVudEJhdGNoEigKBmV2ZW50cxgBIAMoCzIYLmFnZW50c2hpbS5jb3JlLnYxLkV2ZW50EjYKDmN1cnNvcl9hZHZhbmNlGAIgASgLMh4uYWdlbnRzaGltLmNvcmUudjEuQ3Vyc29yU3RhdGUiZwoNVW5wYXJzZWRFdmVudBITCgtzb3VyY2VfcGF0aBgBIAEoCRITCgtieXRlX29mZnNldBgCIAEoAxILCgNyYXcYAyABKAwSDQoFZXJyb3IYBCABKAkSEAoIcHJvZHVjZXIYBSABKAkieQoOU2Vzc2lvblN0YXJ0ZWQSMAoGc291cmNlGAEgASgOMiAuYWdlbnRzaGltLmNvcmUudjEuU2Vzc2lvblNvdXJjZRINCgVtb2RlbBgCIAEoCRILCgNjd2QYAyABKAkSGQoRdmVuZG9yX3Nlc3Npb25faWQYBCABKAkiHgoMU2Vzc2lvbkVuZGVkEg4KBnJlYXNvbhgBIAEoCSIlCgtUdXJuU3RhcnRlZBIWCg5wcm9tcHRfcHJldmlldxgBIAEoCSJHCglUdXJuRW5kZWQSEwoLc3RvcF9yZWFzb24YASABKAkSEwoLZHVyYXRpb25fbXMYAiABKAMSEAoIaXNfZXJyb3IYAyABKAgiEAoOQ29udGV4dENsZWFyZWQinAEKEENvbnRleHRDb21wYWN0ZWQSOQoHdHJpZ2dlchgBIAEoDjIoLmFnZW50c2hpbS5jb3JlLnYxLkNvbnRleHRDb21wYWN0VHJpZ2dlchISCgpwcmVfdG9rZW5zGAIgASgDEhMKC3Bvc3RfdG9rZW5zGAMgASgDEhMKC2R1cmF0aW9uX21zGAQgASgDEg8KB3N1bW1hcnkYBSABKAkiiAEKC1Rhc2tTdGFydGVkEg8KB3Rhc2tfaWQYASABKAkSKQoEa2luZBgCIAEoDjIbLmFnZW50c2hpbS5jb3JlLnYxLlRhc2tLaW5kEhMKC3Rvb2xfdXNlX2lkGAMgASgJEhMKC2Rlc2NyaXB0aW9uGAQgASgJEhMKC291dHB1dF9wYXRoGAUgASgJInwKDFRhc2tQcm9ncmVzcxIPCgd0YXNrX2lkGAEgASgJEikKBGtpbmQYAiABKA4yGy5hZ2VudHNoaW0uY29yZS52MS5UYXNrS2luZBIWCg5ieXRlc19vYnNlcnZlZBgDIAEoAxIYChByZWNvcmRzX29ic2VydmVkGAQgASgDIrMBCglUYXNrRW5kZWQSDwoHdGFza19pZBgBIAEoCRIpCgRraW5kGAIgASgOMhsuYWdlbnRzaGltLmNvcmUudjEuVGFza0tpbmQSMQoGc3RhdHVzGAMgASgOMiEuYWdlbnRzaGltLmNvcmUudjEuVGVybWluYWxTdGF0dXMSDwoHc3VtbWFyeRgEIAEoCRITCgtvdXRwdXRfcGF0aBgFIAEoCRIRCglpbmZlcmVuY2UYBiABKAkiowEKDENvbnRlbnREZWx0YRIMCgR1dWlkGAEgASgJEhMKC2Jsb2NrX2luZGV4GAIgASgNEg4KBHRleHQYAyABKAlIABISCgh0aGlua2luZxgEIAEoCUgAEhQKCmlucHV0X2pzb24YBSABKAlIABITCglzaWduYXR1cmUYBiABKAlIABIYChBlc3RpbWF0ZWRfdG9rZW5zGAcgASgDQgcKBWRlbHRhInAKEUhlYXJ0YmVhdFByb2dyZXNzEhMKC3Rvb2xfdXNlX2lkGAEgASgJEhEKCXRvb2xfbmFtZRgCIAEoCRIaChJwYXJlbnRfdG9vbF91c2VfaWQYAyABKAkSFwoPZWxhcHNlZF9zZWNvbmRzGAQgASgBIi8KDk1lc3NhZ2VMYXRlbmN5EgwKBHV1aWQYASABKAkSDwoHdHRmdF9tcxgCIAEoAyJcCg1EZWdyYWRlZFN0YXRlEhEKCWNvbXBvbmVudBgBIAEoCRIOCgZyZWFzb24YAiABKAkSFQoNZHJvcHBlZF9jb3VudBgDIAEoBBIRCglyZWNvdmVyZWQYBCABKAgisgEKCVNoaW1IZWxsbxISCgpzZXNzaW9uX2lkGAEgASgJEg4KBnZlbmRvchgCIAEoCRIUCgxzaGltX3ZlcnNpb24YAyABKAkSGAoQcHJvdG9jb2xfdmVyc2lvbhgEIAEoCRIWCg50dXJuX2luX2ZsaWdodBgFIAEoCBIZChF2ZW5kb3Jfc2Vzc2lvbl9pZBgGIAEoCRILCgNwaWQYByABKAUSEQoJYnVpbGRfc2hhGAggASgJImoKC0RhZW1vbkhlbGxvEhYKDmRhZW1vbl92ZXJzaW9uGAEgASgJEhgKEHByb3RvY29sX3ZlcnNpb24YAiABKAkSEAoIZnJvbV9zZXEYAyABKAQSFwoPcGVybWlzc2lvbl9tb2RlGAQgASgJIkwKCVNoaW1SZWFkeRISCgpzZXNzaW9uX2lkGAEgASgJEhAKCGZyb21fc2VxGAIgASgEEhkKEXZlbmRvcl9zZXNzaW9uX2lkGAMgASgJIlkKDFN1Ym1pdFByb21wdBISCgpyZXF1ZXN0X2lkGAEgASgJEgwKBHRleHQYAiABKAkSDgoGb3JpZ2luGAMgASgJEhcKD3Blcm1pc3Npb25fbW9kZRgEIAEoCSIfCglJbnRlcnJ1cHQSEgoKcmVxdWVzdF9pZBgBIAEoCSJZCgNBY2sSEgoKcmVxdWVzdF9pZBgBIAEoCRI+ChFpbnRlcnJ1cHRfb3V0Y29tZRgCIAEoDjIjLmFnZW50c2hpbS5jb3JlLnYxLkludGVycnVwdE91dGNvbWUiKgoETmFjaxISCgpyZXF1ZXN0X2lkGAEgASgJEg4KBnJlYXNvbhgCIAEoCSIxCglTdWJzY3JpYmUSEgoKc2Vzc2lvbl9pZBgBIAEoCRIQCghmcm9tX3NlcRgCIAEoBCJZCg1SZXBsYXlSZXF1ZXN0EhIKCnJlcXVlc3RfaWQYASABKAkSEAoIZnJvbV9zZXEYAiABKAQSDgoGdG9fc2VxGAMgASgEEhIKCm1heF9ldmVudHMYBCABKA0iSgoLUmVwbGF5RXZlbnQSEgoKcmVxdWVzdF9pZBgBIAEoCRInCgVldmVudBgCIAEoCzIYLmFnZW50c2hpbS5jb3JlLnYxLkV2ZW50IlYKClJlcGxheURvbmUSEgoKcmVxdWVzdF9pZBgBIAEoCRIRCgl0cnVuY2F0ZWQYAiABKAgSDgoGcmVhc29uGAMgASgJEhEKCWRlbGl2ZXJlZBgEIAEoBCJiChFQZXJtaXNzaW9uUmVxdWVzdBISCgpyZXF1ZXN0X2lkGAEgASgJEhEKCXRvb2xfbmFtZRgCIAEoCRImCgVpbnB1dBgDIAEoCzIXLmdvb2dsZS5wcm90b2J1Zi5TdHJ1Y3QipwEKElBlcm1pc3Npb25SZXNwb25zZRISCgpyZXF1ZXN0X2lkGAEgASgJEjcKCGRlY2lzaW9uGAIgASgOMiUuYWdlbnRzaGltLmNvcmUudjEuUGVybWlzc2lvbkRlY2lzaW9uEi4KDXVwZGF0ZWRfaW5wdXQYAyABKAsyFy5nb29nbGUucHJvdG9idWYuU3RydWN0EhQKDGRlbnlfbWVzc2FnZRgEIAEoCSKrAgoOUGVybWlzc2lvbkl0ZW0SNQoHcmVxdWVzdBgBIAEoCzIkLmFnZW50c2hpbS5jb3JlLnYxLlBlcm1pc3Npb25SZXF1ZXN0EkAKCnJlc29sdXRpb24YAiABKA4yLC5hZ2VudHNoaW0uY29yZS52MS5QZXJtaXNzaW9uSXRlbS5SZXNvbHV0aW9uEhQKDGRlbnlfbWVzc2FnZRgDIAEoCSKJAQoKUmVzb2x1dGlvbhIaChZSRVNPTFVUSU9OX1VOU1BFQ0lGSUVEEAASFgoSUkVTT0xVVElPTl9QRU5ESU5HEAESFgoSUkVTT0xVVElPTl9BTExPV0VEEAISFQoRUkVTT0xVVElPTl9ERU5JRUQQAxIYChRSRVNPTFVUSU9OX0FCQU5ET05FRBAEIh8KCUhlYXJ0YmVhdBISCgpzZW50X2F0X21zGAEgASgDIiEKC0hlYWx0aENoZWNrEhIKCnJlcXVlc3RfaWQYASABKAkiVgoMSGVhbHRoU3RhdHVzEhIKCnJlcXVlc3RfaWQYASABKAkSDwoHaGVhbHRoeRgCIAEoCBIRCgljb21wb25lbnQYAyABKAkSDgoGcmVhc29uGAQgASgJIkwKClN0b3JlV3JpdGUSEAoIcHJvZHVjZXIYASABKAkSLAoFYmF0Y2gYAiABKAsyHS5hZ2VudHNoaW0uY29yZS52MS5FdmVudEJhdGNoIlMKDVN0b3JlV3JpdGVBY2sSEAoIYWNjZXB0ZWQYASABKAQSDwoHZGVkdXBlZBgCIAEoBBIQCghsYXN0X3NlcRgDIAEoBBINCgVlcnJvchgEIAEoCSJLCgtDdXJzb3JTdGF0ZRIPCgdmaWxlX2lkGAEgASgJEgwKBHBhdGgYAiABKAkSDgoGb2Zmc2V0GAMgASgDEg0KBWNhcnJ5GAQgASgMIh4KC0N1cnNvclF1ZXJ5Eg8KB2ZpbGVfaWQYASABKAkiVwoNT3BlblRhc2tTdGF0ZRIpCgdzdGFydGVkGAEgASgLMhguYWdlbnRzaGltLmNvcmUudjEuRXZlbnQSGwoTbGFzdF9hY3Rpdml0eV9hdF9tcxgCIAEoAyKVAQoKQ3Vyc29yTGlzdBIvCgdjdXJzb3JzGAEgAygLMh4uYWdlbnRzaGltLmNvcmUudjEuQ3Vyc29yU3RhdGUSNAoKb3Blbl90YXNrcxgCIAMoCzIgLmFnZW50c2hpbS5jb3JlLnYxLk9wZW5UYXNrU3RhdGUSIAoYb3Blbl90YXNrc19hdXRob3JpdGF0aXZlGAMgASgIIvIBChNGaWxlUGxhbmVEaWFnbm9zdGljEkIKDnNvdXJjZV9ydW50aW1lGAEgASgOMiouYWdlbnRzaGltLmNvcmUudjEuRGlhZ25vc3RpY1NvdXJjZVJ1bnRpbWUSDQoFbGV2ZWwYAiABKAkSEQoJdmVyYm9zaXR5GAMgASgJEhEKCW9wZXJhdGlvbhgEIAEoCRIPCgdtZXNzYWdlGAUgASgJEigKB2NvbnRleHQYBiABKAsyFy5nb29nbGUucHJvdG9idWYuU3RydWN0EhIKCnNvdXJjZV9waWQYByABKAMSEwoLc291cmNlX3BhdGgYCCABKAkqVQoFUGxhbmUSFQoRUExBTkVfVU5TUEVDSUZJRUQQABIQCgxQTEFORV9TVFJFQU0QARIOCgpQTEFORV9GSUxFEAISEwoPUExBTkVfU1lOVEhFVElDEAMqYAoKRXZlbnRDbGFzcxIbChdFVkVOVF9DTEFTU19VTlNQRUNJRklFRBAAEhoKFkVWRU5UX0NMQVNTX1BFUlNJU1RFTlQQARIZChVFVkVOVF9DTEFTU19FUEhFTUVSQUwQAipnCghUYXNrS2luZBIZChVUQVNLX0tJTkRfVU5TUEVDSUZJRUQQABITCg9UQVNLX0tJTkRfQUdFTlQQARITCg9UQVNLX0tJTkRfU0hFTEwQAhIWChJUQVNLX0tJTkRfV09SS0ZMT1cQAyq5AQoOVGVybWluYWxTdGF0dXMSHwobVEVSTUlOQUxfU1RBVFVTX1VOU1BFQ0lGSUVEEAASGAoUVEVSTUlOQUxfU1RBVFVTX0RPTkUQARIZChVURVJNSU5BTF9TVEFUVVNfRVJST1IQAhIaChZURVJNSU5BTF9TVEFUVVNfS0lMTEVEEAMSGwoXVEVSTUlOQUxfU1RBVFVTX1NUT1BQRUQQBBIYChRURVJNSU5BTF9TVEFUVVNfTE9TVBAFKokBCg1TZXNzaW9uU291cmNlEh4KGlNFU1NJT05fU09VUkNFX1VOU1BFQ0lGSUVEEAASGAoUU0VTU0lPTl9TT1VSQ0VfRlJFU0gQARIZChVTRVNTSU9OX1NPVVJDRV9SRVNVTUUQAhIjCh9TRVNTSU9OX1NPVVJDRV9DT01QQUNUX0NPTlRJTlVFEAMqdgoSUGVybWlzc2lvbkRlY2lzaW9uEiMKH1BFUk1JU1NJT05fREVDSVNJT05fVU5TUEVDSUZJRUQQABIdChlQRVJNSVNTSU9OX0RFQ0lTSU9OX0FMTE9XEAESHAoYUEVSTUlTU0lPTl9ERUNJU0lPTl9ERU5ZEAIqhgEKFUNvbnRleHRDb21wYWN0VHJpZ2dlchInCiNDT05URVhUX0NPTVBBQ1RfVFJJR0dFUl9VTlNQRUNJRklFRBAAEiIKHkNPTlRFWFRfQ09NUEFDVF9UUklHR0VSX01BTlVBTBABEiAKHENPTlRFWFRfQ09NUEFDVF9UUklHR0VSX0FVVE8QAiqeAQoQSW50ZXJydXB0T3V0Y29tZRIhCh1JTlRFUlJVUFRfT1VUQ09NRV9VTlNQRUNJRklFRBAAEiEKHUlOVEVSUlVQVF9PVVRDT01FX0lOVEVSUlVQVEVEEAESJgoiSU5URVJSVVBUX09VVENPTUVfQUxSRUFEWV9DT01QTEVURRACEhwKGElOVEVSUlVQVF9PVVRDT01FX0ZBSUxFRBADKmsKF0RpYWdub3N0aWNTb3VyY2VSdW50aW1lEikKJURJQUdOT1NUSUNfU09VUkNFX1JVTlRJTUVfVU5TUEVDSUZJRUQQABIlCiFESUFHTk9TVElDX1NPVVJDRV9SVU5USU1FX1NJREVDQVIQAUIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRzaGltL2NvcmUvdjE7Y29yZXYxYgZwcm90bzM", [file_google_protobuf_any, file_google_protobuf_struct]);
+  fileDesc("ChxhZ2VudHNoaW0vY29yZS92MS9jb3JlLnByb3RvEhFhZ2VudHNoaW0uY29yZS52MSKbCQoFRXZlbnQSEgoKc2Vzc2lvbl9pZBgBIAEoCRILCgNzZXEYAiABKAQSJwoFcGxhbmUYAyABKA4yGC5hZ2VudHNoaW0uY29yZS52MS5QbGFuZRIsCgVjbGFzcxgEIAEoDjIdLmFnZW50c2hpbS5jb3JlLnYxLkV2ZW50Q2xhc3MSEgoKcmVxdWVzdF9pZBgFIAEoCRIWCg5wcm9kdWNlZF9hdF9tcxgGIAEoAxIRCglkZWR1cF9rZXkYByABKAkSPAoPc2Vzc2lvbl9zdGFydGVkGAogASgLMiEuYWdlbnRzaGltLmNvcmUudjEuU2Vzc2lvblN0YXJ0ZWRIABI4Cg1zZXNzaW9uX2VuZGVkGAsgASgLMh8uYWdlbnRzaGltLmNvcmUudjEuU2Vzc2lvbkVuZGVkSAASNgoMdHVybl9zdGFydGVkGAwgASgLMh4uYWdlbnRzaGltLmNvcmUudjEuVHVyblN0YXJ0ZWRIABIyCgp0dXJuX2VuZGVkGA0gASgLMhwuYWdlbnRzaGltLmNvcmUudjEuVHVybkVuZGVkSAASNgoMdGFza19zdGFydGVkGA4gASgLMh4uYWdlbnRzaGltLmNvcmUudjEuVGFza1N0YXJ0ZWRIABI4Cg10YXNrX3Byb2dyZXNzGA8gASgLMh8uYWdlbnRzaGltLmNvcmUudjEuVGFza1Byb2dyZXNzSAASMgoKdGFza19lbmRlZBgQIAEoCzIcLmFnZW50c2hpbS5jb3JlLnYxLlRhc2tFbmRlZEgAEjgKDWNvbnRlbnRfZGVsdGEYESABKAsyHy5hZ2VudHNoaW0uY29yZS52MS5Db250ZW50RGVsdGFIABJCChJoZWFydGJlYXRfcHJvZ3Jlc3MYEiABKAsyJC5hZ2VudHNoaW0uY29yZS52MS5IZWFydGJlYXRQcm9ncmVzc0gAEjoKDmRlZ3JhZGVkX3N0YXRlGBMgASgLMiAuYWdlbnRzaGltLmNvcmUudjEuRGVncmFkZWRTdGF0ZUgAEjQKCHVucGFyc2VkGBQgASgLMiAuYWdlbnRzaGltLmNvcmUudjEuVW5wYXJzZWRFdmVudEgAEjwKD21lc3NhZ2VfbGF0ZW5jeRgVIAEoCzIhLmFnZW50c2hpbS5jb3JlLnYxLk1lc3NhZ2VMYXRlbmN5SAASPAoPY29udGV4dF9jbGVhcmVkGBYgASgLMiEuYWdlbnRzaGltLmNvcmUudjEuQ29udGV4dENsZWFyZWRIABJAChFjb250ZXh0X2NvbXBhY3RlZBgXIAEoCzIjLmFnZW50c2hpbS5jb3JlLnYxLkNvbnRleHRDb21wYWN0ZWRIABJHChVmaWxlX3BsYW5lX2RpYWdub3N0aWMYGCABKAsyJi5hZ2VudHNoaW0uY29yZS52MS5GaWxlUGxhbmVEaWFnbm9zdGljSAASJgoGdmVuZG9yGB4gASgLMhQuZ29vZ2xlLnByb3RvYnVmLkFueUgAEicKBmV4dHJhcxgoIAEoCzIXLmdvb2dsZS5wcm90b2J1Zi5TdHJ1Y3RCCQoHcGF5bG9hZCJuCgpFdmVudEJhdGNoEigKBmV2ZW50cxgBIAMoCzIYLmFnZW50c2hpbS5jb3JlLnYxLkV2ZW50EjYKDmN1cnNvcl9hZHZhbmNlGAIgASgLMh4uYWdlbnRzaGltLmNvcmUudjEuQ3Vyc29yU3RhdGUiZwoNVW5wYXJzZWRFdmVudBITCgtzb3VyY2VfcGF0aBgBIAEoCRITCgtieXRlX29mZnNldBgCIAEoAxILCgNyYXcYAyABKAwSDQoFZXJyb3IYBCABKAkSEAoIcHJvZHVjZXIYBSABKAkieQoOU2Vzc2lvblN0YXJ0ZWQSMAoGc291cmNlGAEgASgOMiAuYWdlbnRzaGltLmNvcmUudjEuU2Vzc2lvblNvdXJjZRINCgVtb2RlbBgCIAEoCRILCgNjd2QYAyABKAkSGQoRdmVuZG9yX3Nlc3Npb25faWQYBCABKAkiHgoMU2Vzc2lvbkVuZGVkEg4KBnJlYXNvbhgBIAEoCSIlCgtUdXJuU3RhcnRlZBIWCg5wcm9tcHRfcHJldmlldxgBIAEoCSJHCglUdXJuRW5kZWQSEwoLc3RvcF9yZWFzb24YASABKAkSEwoLZHVyYXRpb25fbXMYAiABKAMSEAoIaXNfZXJyb3IYAyABKAgiEAoOQ29udGV4dENsZWFyZWQinAEKEENvbnRleHRDb21wYWN0ZWQSOQoHdHJpZ2dlchgBIAEoDjIoLmFnZW50c2hpbS5jb3JlLnYxLkNvbnRleHRDb21wYWN0VHJpZ2dlchISCgpwcmVfdG9rZW5zGAIgASgDEhMKC3Bvc3RfdG9rZW5zGAMgASgDEhMKC2R1cmF0aW9uX21zGAQgASgDEg8KB3N1bW1hcnkYBSABKAkiiAEKC1Rhc2tTdGFydGVkEg8KB3Rhc2tfaWQYASABKAkSKQoEa2luZBgCIAEoDjIbLmFnZW50c2hpbS5jb3JlLnYxLlRhc2tLaW5kEhMKC3Rvb2xfdXNlX2lkGAMgASgJEhMKC2Rlc2NyaXB0aW9uGAQgASgJEhMKC291dHB1dF9wYXRoGAUgASgJInwKDFRhc2tQcm9ncmVzcxIPCgd0YXNrX2lkGAEgASgJEikKBGtpbmQYAiABKA4yGy5hZ2VudHNoaW0uY29yZS52MS5UYXNrS2luZBIWCg5ieXRlc19vYnNlcnZlZBgDIAEoAxIYChByZWNvcmRzX29ic2VydmVkGAQgASgDIrMBCglUYXNrRW5kZWQSDwoHdGFza19pZBgBIAEoCRIpCgRraW5kGAIgASgOMhsuYWdlbnRzaGltLmNvcmUudjEuVGFza0tpbmQSMQoGc3RhdHVzGAMgASgOMiEuYWdlbnRzaGltLmNvcmUudjEuVGVybWluYWxTdGF0dXMSDwoHc3VtbWFyeRgEIAEoCRITCgtvdXRwdXRfcGF0aBgFIAEoCRIRCglpbmZlcmVuY2UYBiABKAkiowEKDENvbnRlbnREZWx0YRIMCgR1dWlkGAEgASgJEhMKC2Jsb2NrX2luZGV4GAIgASgNEg4KBHRleHQYAyABKAlIABISCgh0aGlua2luZxgEIAEoCUgAEhQKCmlucHV0X2pzb24YBSABKAlIABITCglzaWduYXR1cmUYBiABKAlIABIYChBlc3RpbWF0ZWRfdG9rZW5zGAcgASgDQgcKBWRlbHRhInAKEUhlYXJ0YmVhdFByb2dyZXNzEhMKC3Rvb2xfdXNlX2lkGAEgASgJEhEKCXRvb2xfbmFtZRgCIAEoCRIaChJwYXJlbnRfdG9vbF91c2VfaWQYAyABKAkSFwoPZWxhcHNlZF9zZWNvbmRzGAQgASgBIi8KDk1lc3NhZ2VMYXRlbmN5EgwKBHV1aWQYASABKAkSDwoHdHRmdF9tcxgCIAEoAyJcCg1EZWdyYWRlZFN0YXRlEhEKCWNvbXBvbmVudBgBIAEoCRIOCgZyZWFzb24YAiABKAkSFQoNZHJvcHBlZF9jb3VudBgDIAEoBBIRCglyZWNvdmVyZWQYBCABKAgisgEKCVNoaW1IZWxsbxISCgpzZXNzaW9uX2lkGAEgASgJEg4KBnZlbmRvchgCIAEoCRIUCgxzaGltX3ZlcnNpb24YAyABKAkSGAoQcHJvdG9jb2xfdmVyc2lvbhgEIAEoCRIWCg50dXJuX2luX2ZsaWdodBgFIAEoCBIZChF2ZW5kb3Jfc2Vzc2lvbl9pZBgGIAEoCRILCgNwaWQYByABKAUSEQoJYnVpbGRfc2hhGAggASgJImoKC0RhZW1vbkhlbGxvEhYKDmRhZW1vbl92ZXJzaW9uGAEgASgJEhgKEHByb3RvY29sX3ZlcnNpb24YAiABKAkSEAoIZnJvbV9zZXEYAyABKAQSFwoPcGVybWlzc2lvbl9tb2RlGAQgASgJIkwKCVNoaW1SZWFkeRISCgpzZXNzaW9uX2lkGAEgASgJEhAKCGZyb21fc2VxGAIgASgEEhkKEXZlbmRvcl9zZXNzaW9uX2lkGAMgASgJIlkKDFN1Ym1pdFByb21wdBISCgpyZXF1ZXN0X2lkGAEgASgJEgwKBHRleHQYAiABKAkSDgoGb3JpZ2luGAMgASgJEhcKD3Blcm1pc3Npb25fbW9kZRgEIAEoCSItCghTZXRNb2RlbBISCgpyZXF1ZXN0X2lkGAEgASgJEg0KBW1vZGVsGAIgASgJIkcKC01vZGVsT3B0aW9uEg0KBXZhbHVlGAEgASgJEhQKDGRpc3BsYXlfbmFtZRgCIAEoCRITCgtkZXNjcmlwdGlvbhgDIAEoCSJSCgxNb2RlbENhdGFsb2cSEgoKc2Vzc2lvbl9pZBgBIAEoCRIuCgZtb2RlbHMYAiADKAsyHi5hZ2VudHNoaW0uY29yZS52MS5Nb2RlbE9wdGlvbiIfCglJbnRlcnJ1cHQSEgoKcmVxdWVzdF9pZBgBIAEoCSJxCgNBY2sSEgoKcmVxdWVzdF9pZBgBIAEoCRI+ChFpbnRlcnJ1cHRfb3V0Y29tZRgCIAEoDjIjLmFnZW50c2hpbS5jb3JlLnYxLkludGVycnVwdE91dGNvbWUSFgoOc2VsZWN0ZWRfbW9kZWwYAyABKAkiQgoETmFjaxISCgpyZXF1ZXN0X2lkGAEgASgJEg4KBnJlYXNvbhgCIAEoCRIWCg5zZWxlY3RlZF9tb2RlbBgDIAEoCSIxCglTdWJzY3JpYmUSEgoKc2Vzc2lvbl9pZBgBIAEoCRIQCghmcm9tX3NlcRgCIAEoBCJZCg1SZXBsYXlSZXF1ZXN0EhIKCnJlcXVlc3RfaWQYASABKAkSEAoIZnJvbV9zZXEYAiABKAQSDgoGdG9fc2VxGAMgASgEEhIKCm1heF9ldmVudHMYBCABKA0iSgoLUmVwbGF5RXZlbnQSEgoKcmVxdWVzdF9pZBgBIAEoCRInCgVldmVudBgCIAEoCzIYLmFnZW50c2hpbS5jb3JlLnYxLkV2ZW50IlYKClJlcGxheURvbmUSEgoKcmVxdWVzdF9pZBgBIAEoCRIRCgl0cnVuY2F0ZWQYAiABKAgSDgoGcmVhc29uGAMgASgJEhEKCWRlbGl2ZXJlZBgEIAEoBCJiChFQZXJtaXNzaW9uUmVxdWVzdBISCgpyZXF1ZXN0X2lkGAEgASgJEhEKCXRvb2xfbmFtZRgCIAEoCRImCgVpbnB1dBgDIAEoCzIXLmdvb2dsZS5wcm90b2J1Zi5TdHJ1Y3QipwEKElBlcm1pc3Npb25SZXNwb25zZRISCgpyZXF1ZXN0X2lkGAEgASgJEjcKCGRlY2lzaW9uGAIgASgOMiUuYWdlbnRzaGltLmNvcmUudjEuUGVybWlzc2lvbkRlY2lzaW9uEi4KDXVwZGF0ZWRfaW5wdXQYAyABKAsyFy5nb29nbGUucHJvdG9idWYuU3RydWN0EhQKDGRlbnlfbWVzc2FnZRgEIAEoCSKrAgoOUGVybWlzc2lvbkl0ZW0SNQoHcmVxdWVzdBgBIAEoCzIkLmFnZW50c2hpbS5jb3JlLnYxLlBlcm1pc3Npb25SZXF1ZXN0EkAKCnJlc29sdXRpb24YAiABKA4yLC5hZ2VudHNoaW0uY29yZS52MS5QZXJtaXNzaW9uSXRlbS5SZXNvbHV0aW9uEhQKDGRlbnlfbWVzc2FnZRgDIAEoCSKJAQoKUmVzb2x1dGlvbhIaChZSRVNPTFVUSU9OX1VOU1BFQ0lGSUVEEAASFgoSUkVTT0xVVElPTl9QRU5ESU5HEAESFgoSUkVTT0xVVElPTl9BTExPV0VEEAISFQoRUkVTT0xVVElPTl9ERU5JRUQQAxIYChRSRVNPTFVUSU9OX0FCQU5ET05FRBAEIh8KCUhlYXJ0YmVhdBISCgpzZW50X2F0X21zGAEgASgDIiEKC0hlYWx0aENoZWNrEhIKCnJlcXVlc3RfaWQYASABKAkiVgoMSGVhbHRoU3RhdHVzEhIKCnJlcXVlc3RfaWQYASABKAkSDwoHaGVhbHRoeRgCIAEoCBIRCgljb21wb25lbnQYAyABKAkSDgoGcmVhc29uGAQgASgJIkwKClN0b3JlV3JpdGUSEAoIcHJvZHVjZXIYASABKAkSLAoFYmF0Y2gYAiABKAsyHS5hZ2VudHNoaW0uY29yZS52MS5FdmVudEJhdGNoIlMKDVN0b3JlV3JpdGVBY2sSEAoIYWNjZXB0ZWQYASABKAQSDwoHZGVkdXBlZBgCIAEoBBIQCghsYXN0X3NlcRgDIAEoBBINCgVlcnJvchgEIAEoCSJLCgtDdXJzb3JTdGF0ZRIPCgdmaWxlX2lkGAEgASgJEgwKBHBhdGgYAiABKAkSDgoGb2Zmc2V0GAMgASgDEg0KBWNhcnJ5GAQgASgMIh4KC0N1cnNvclF1ZXJ5Eg8KB2ZpbGVfaWQYASABKAkiVwoNT3BlblRhc2tTdGF0ZRIpCgdzdGFydGVkGAEgASgLMhguYWdlbnRzaGltLmNvcmUudjEuRXZlbnQSGwoTbGFzdF9hY3Rpdml0eV9hdF9tcxgCIAEoAyKVAQoKQ3Vyc29yTGlzdBIvCgdjdXJzb3JzGAEgAygLMh4uYWdlbnRzaGltLmNvcmUudjEuQ3Vyc29yU3RhdGUSNAoKb3Blbl90YXNrcxgCIAMoCzIgLmFnZW50c2hpbS5jb3JlLnYxLk9wZW5UYXNrU3RhdGUSIAoYb3Blbl90YXNrc19hdXRob3JpdGF0aXZlGAMgASgIIvIBChNGaWxlUGxhbmVEaWFnbm9zdGljEkIKDnNvdXJjZV9ydW50aW1lGAEgASgOMiouYWdlbnRzaGltLmNvcmUudjEuRGlhZ25vc3RpY1NvdXJjZVJ1bnRpbWUSDQoFbGV2ZWwYAiABKAkSEQoJdmVyYm9zaXR5GAMgASgJEhEKCW9wZXJhdGlvbhgEIAEoCRIPCgdtZXNzYWdlGAUgASgJEigKB2NvbnRleHQYBiABKAsyFy5nb29nbGUucHJvdG9idWYuU3RydWN0EhIKCnNvdXJjZV9waWQYByABKAMSEwoLc291cmNlX3BhdGgYCCABKAkqVQoFUGxhbmUSFQoRUExBTkVfVU5TUEVDSUZJRUQQABIQCgxQTEFORV9TVFJFQU0QARIOCgpQTEFORV9GSUxFEAISEwoPUExBTkVfU1lOVEhFVElDEAMqYAoKRXZlbnRDbGFzcxIbChdFVkVOVF9DTEFTU19VTlNQRUNJRklFRBAAEhoKFkVWRU5UX0NMQVNTX1BFUlNJU1RFTlQQARIZChVFVkVOVF9DTEFTU19FUEhFTUVSQUwQAipnCghUYXNrS2luZBIZChVUQVNLX0tJTkRfVU5TUEVDSUZJRUQQABITCg9UQVNLX0tJTkRfQUdFTlQQARITCg9UQVNLX0tJTkRfU0hFTEwQAhIWChJUQVNLX0tJTkRfV09SS0ZMT1cQAyq5AQoOVGVybWluYWxTdGF0dXMSHwobVEVSTUlOQUxfU1RBVFVTX1VOU1BFQ0lGSUVEEAASGAoUVEVSTUlOQUxfU1RBVFVTX0RPTkUQARIZChVURVJNSU5BTF9TVEFUVVNfRVJST1IQAhIaChZURVJNSU5BTF9TVEFUVVNfS0lMTEVEEAMSGwoXVEVSTUlOQUxfU1RBVFVTX1NUT1BQRUQQBBIYChRURVJNSU5BTF9TVEFUVVNfTE9TVBAFKokBCg1TZXNzaW9uU291cmNlEh4KGlNFU1NJT05fU09VUkNFX1VOU1BFQ0lGSUVEEAASGAoUU0VTU0lPTl9TT1VSQ0VfRlJFU0gQARIZChVTRVNTSU9OX1NPVVJDRV9SRVNVTUUQAhIjCh9TRVNTSU9OX1NPVVJDRV9DT01QQUNUX0NPTlRJTlVFEAMqdgoSUGVybWlzc2lvbkRlY2lzaW9uEiMKH1BFUk1JU1NJT05fREVDSVNJT05fVU5TUEVDSUZJRUQQABIdChlQRVJNSVNTSU9OX0RFQ0lTSU9OX0FMTE9XEAESHAoYUEVSTUlTU0lPTl9ERUNJU0lPTl9ERU5ZEAIqhgEKFUNvbnRleHRDb21wYWN0VHJpZ2dlchInCiNDT05URVhUX0NPTVBBQ1RfVFJJR0dFUl9VTlNQRUNJRklFRBAAEiIKHkNPTlRFWFRfQ09NUEFDVF9UUklHR0VSX01BTlVBTBABEiAKHENPTlRFWFRfQ09NUEFDVF9UUklHR0VSX0FVVE8QAiqeAQoQSW50ZXJydXB0T3V0Y29tZRIhCh1JTlRFUlJVUFRfT1VUQ09NRV9VTlNQRUNJRklFRBAAEiEKHUlOVEVSUlVQVF9PVVRDT01FX0lOVEVSUlVQVEVEEAESJgoiSU5URVJSVVBUX09VVENPTUVfQUxSRUFEWV9DT01QTEVURRACEhwKGElOVEVSUlVQVF9PVVRDT01FX0ZBSUxFRBADKmsKF0RpYWdub3N0aWNTb3VyY2VSdW50aW1lEikKJURJQUdOT1NUSUNfU09VUkNFX1JVTlRJTUVfVU5TUEVDSUZJRUQQABIlCiFESUFHTk9TVElDX1NPVVJDRV9SVU5USU1FX1NJREVDQVIQAUIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRzaGltL2NvcmUvdjE7Y29yZXYxYgZwcm90bzM", [file_google_protobuf_any, file_google_protobuf_struct]);
 
 /**
  * Event is THE envelope every observation travels in.
@@ -1079,6 +1079,86 @@ export const SubmitPromptSchema: GenMessage<SubmitPrompt> = /*@__PURE__*/
   messageDesc(file_agentshim_core_v1_core, 19);
 
 /**
+ * Request a deliberate mid-session model change.  Model selection is a shim
+ * operation because only the shim owns the live SDK query.  The daemon forwards
+ * this request and commits the model the shim reports in its Ack; frontends
+ * never treat a requested value as selected.
+ *
+ * @generated from message agentshim.core.v1.SetModel
+ */
+export type SetModel = Message<"agentshim.core.v1.SetModel"> & {
+  /**
+   * @generated from field: string request_id = 1;
+   */
+  requestId: string;
+
+  /**
+   * @generated from field: string model = 2;
+   */
+  model: string;
+};
+
+/**
+ * Describes the message agentshim.core.v1.SetModel.
+ * Use `create(SetModelSchema)` to create a new message.
+ */
+export const SetModelSchema: GenMessage<SetModel> = /*@__PURE__*/
+  messageDesc(file_agentshim_core_v1_core, 20);
+
+/**
+ * The shim's SDK-provided model menu.  This is published rather than inferred
+ * by a frontend, because the live query is the only authority on selectable
+ * model ids for this session/account.
+ *
+ * @generated from message agentshim.core.v1.ModelOption
+ */
+export type ModelOption = Message<"agentshim.core.v1.ModelOption"> & {
+  /**
+   * @generated from field: string value = 1;
+   */
+  value: string;
+
+  /**
+   * @generated from field: string display_name = 2;
+   */
+  displayName: string;
+
+  /**
+   * @generated from field: string description = 3;
+   */
+  description: string;
+};
+
+/**
+ * Describes the message agentshim.core.v1.ModelOption.
+ * Use `create(ModelOptionSchema)` to create a new message.
+ */
+export const ModelOptionSchema: GenMessage<ModelOption> = /*@__PURE__*/
+  messageDesc(file_agentshim_core_v1_core, 21);
+
+/**
+ * @generated from message agentshim.core.v1.ModelCatalog
+ */
+export type ModelCatalog = Message<"agentshim.core.v1.ModelCatalog"> & {
+  /**
+   * @generated from field: string session_id = 1;
+   */
+  sessionId: string;
+
+  /**
+   * @generated from field: repeated agentshim.core.v1.ModelOption models = 2;
+   */
+  models: ModelOption[];
+};
+
+/**
+ * Describes the message agentshim.core.v1.ModelCatalog.
+ * Use `create(ModelCatalogSchema)` to create a new message.
+ */
+export const ModelCatalogSchema: GenMessage<ModelCatalog> = /*@__PURE__*/
+  messageDesc(file_agentshim_core_v1_core, 22);
+
+/**
  * Stop the current turn via the SDK's interrupt(). There is exactly one kind
  * of interrupt: the old `hard` flag promised a soft "end after the current
  * message" variant that no layer ever implemented (the shim always called the
@@ -1098,7 +1178,7 @@ export type Interrupt = Message<"agentshim.core.v1.Interrupt"> & {
  * Use `create(InterruptSchema)` to create a new message.
  */
 export const InterruptSchema: GenMessage<Interrupt> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 20);
+  messageDesc(file_agentshim_core_v1_core, 23);
 
 /**
  * @generated from message agentshim.core.v1.Ack
@@ -1116,6 +1196,14 @@ export type Ack = Message<"agentshim.core.v1.Ack"> & {
    * @generated from field: agentshim.core.v1.InterruptOutcome interrupt_outcome = 2;
    */
   interruptOutcome: InterruptOutcome;
+
+  /**
+   * Set only on a SetModel receipt.  This is the shim's own post-operation
+   * selected model, not an echo assembled by the daemon.
+   *
+   * @generated from field: string selected_model = 3;
+   */
+  selectedModel: string;
 };
 
 /**
@@ -1123,7 +1211,7 @@ export type Ack = Message<"agentshim.core.v1.Ack"> & {
  * Use `create(AckSchema)` to create a new message.
  */
 export const AckSchema: GenMessage<Ack> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 21);
+  messageDesc(file_agentshim_core_v1_core, 24);
 
 /**
  * @generated from message agentshim.core.v1.Nack
@@ -1138,6 +1226,14 @@ export type Nack = Message<"agentshim.core.v1.Nack"> & {
    * @generated from field: string reason = 2;
    */
   reason: string;
+
+  /**
+   * Set on a rejected SetModel request so the daemon can return the live
+   * selection to the frontend without guessing or changing it optimistically.
+   *
+   * @generated from field: string selected_model = 3;
+   */
+  selectedModel: string;
 };
 
 /**
@@ -1145,7 +1241,7 @@ export type Nack = Message<"agentshim.core.v1.Nack"> & {
  * Use `create(NackSchema)` to create a new message.
  */
 export const NackSchema: GenMessage<Nack> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 22);
+  messageDesc(file_agentshim_core_v1_core, 25);
 
 /**
  * Replay handshake (see file-top semantics). from_seq is EXCLUSIVE.
@@ -1173,7 +1269,7 @@ export type Subscribe = Message<"agentshim.core.v1.Subscribe"> & {
  * Use `create(SubscribeSchema)` to create a new message.
  */
 export const SubscribeSchema: GenMessage<Subscribe> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 23);
+  messageDesc(file_agentshim_core_v1_core, 26);
 
 /**
  * ---------------------------------------------------------------------------
@@ -1238,7 +1334,7 @@ export type ReplayRequest = Message<"agentshim.core.v1.ReplayRequest"> & {
  * Use `create(ReplayRequestSchema)` to create a new message.
  */
 export const ReplayRequestSchema: GenMessage<ReplayRequest> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 24);
+  messageDesc(file_agentshim_core_v1_core, 27);
 
 /**
  * One replayed historical event.
@@ -1276,7 +1372,7 @@ export type ReplayEvent = Message<"agentshim.core.v1.ReplayEvent"> & {
  * Use `create(ReplayEventSchema)` to create a new message.
  */
 export const ReplayEventSchema: GenMessage<ReplayEvent> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 25);
+  messageDesc(file_agentshim_core_v1_core, 28);
 
 /**
  * Closes a replay. Exactly one per ReplayRequest, whatever the outcome: a
@@ -1321,7 +1417,7 @@ export type ReplayDone = Message<"agentshim.core.v1.ReplayDone"> & {
  * Use `create(ReplayDoneSchema)` to create a new message.
  */
 export const ReplayDoneSchema: GenMessage<ReplayDone> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 26);
+  messageDesc(file_agentshim_core_v1_core, 29);
 
 /**
  * canUseTool round-trip. The shim BLOCKS the SDK callback on the response.
@@ -1350,7 +1446,7 @@ export type PermissionRequest = Message<"agentshim.core.v1.PermissionRequest"> &
  * Use `create(PermissionRequestSchema)` to create a new message.
  */
 export const PermissionRequestSchema: GenMessage<PermissionRequest> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 27);
+  messageDesc(file_agentshim_core_v1_core, 30);
 
 /**
  * @generated from message agentshim.core.v1.PermissionResponse
@@ -1384,7 +1480,7 @@ export type PermissionResponse = Message<"agentshim.core.v1.PermissionResponse">
  * Use `create(PermissionResponseSchema)` to create a new message.
  */
 export const PermissionResponseSchema: GenMessage<PermissionResponse> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 28);
+  messageDesc(file_agentshim_core_v1_core, 31);
 
 /**
  * Daemon-composed permission state (the request plus its resolution
@@ -1417,7 +1513,7 @@ export type PermissionItem = Message<"agentshim.core.v1.PermissionItem"> & {
  * Use `create(PermissionItemSchema)` to create a new message.
  */
 export const PermissionItemSchema: GenMessage<PermissionItem> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 29);
+  messageDesc(file_agentshim_core_v1_core, 32);
 
 /**
  * @generated from enum agentshim.core.v1.PermissionItem.Resolution
@@ -1453,7 +1549,7 @@ export enum PermissionItem_Resolution {
  * Describes the enum agentshim.core.v1.PermissionItem.Resolution.
  */
 export const PermissionItem_ResolutionSchema: GenEnum<PermissionItem_Resolution> = /*@__PURE__*/
-  enumDesc(file_agentshim_core_v1_core, 29, 0);
+  enumDesc(file_agentshim_core_v1_core, 32, 0);
 
 /**
  * @generated from message agentshim.core.v1.Heartbeat
@@ -1470,7 +1566,7 @@ export type Heartbeat = Message<"agentshim.core.v1.Heartbeat"> & {
  * Use `create(HeartbeatSchema)` to create a new message.
  */
 export const HeartbeatSchema: GenMessage<Heartbeat> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 30);
+  messageDesc(file_agentshim_core_v1_core, 33);
 
 /**
  * Correlated dependency health probe for every agent-shim UDS hop.
@@ -1498,7 +1594,7 @@ export type HealthCheck = Message<"agentshim.core.v1.HealthCheck"> & {
  * Use `create(HealthCheckSchema)` to create a new message.
  */
 export const HealthCheckSchema: GenMessage<HealthCheck> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 31);
+  messageDesc(file_agentshim_core_v1_core, 34);
 
 /**
  * Reply to HealthCheck.  A responder MUST set healthy=true only after every
@@ -1535,7 +1631,7 @@ export type HealthStatus = Message<"agentshim.core.v1.HealthStatus"> & {
  * Use `create(HealthStatusSchema)` to create a new message.
  */
 export const HealthStatusSchema: GenMessage<HealthStatus> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 32);
+  messageDesc(file_agentshim_core_v1_core, 35);
 
 /**
  * Producer→store append. The store commits events + cursor_advance in one
@@ -1562,7 +1658,7 @@ export type StoreWrite = Message<"agentshim.core.v1.StoreWrite"> & {
  * Use `create(StoreWriteSchema)` to create a new message.
  */
 export const StoreWriteSchema: GenMessage<StoreWrite> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 33);
+  messageDesc(file_agentshim_core_v1_core, 36);
 
 /**
  * @generated from message agentshim.core.v1.StoreWriteAck
@@ -1598,7 +1694,7 @@ export type StoreWriteAck = Message<"agentshim.core.v1.StoreWriteAck"> & {
  * Use `create(StoreWriteAckSchema)` to create a new message.
  */
 export const StoreWriteAckSchema: GenMessage<StoreWriteAck> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 34);
+  messageDesc(file_agentshim_core_v1_core, 37);
 
 /**
  * shim-claude-sidecar file-cursor state, persisted by the store (§6.2 cursor table).
@@ -1636,7 +1732,7 @@ export type CursorState = Message<"agentshim.core.v1.CursorState"> & {
  * Use `create(CursorStateSchema)` to create a new message.
  */
 export const CursorStateSchema: GenMessage<CursorState> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 35);
+  messageDesc(file_agentshim_core_v1_core, 38);
 
 /**
  * Cursor recovery over the socket (§7.3): the sidecar asks the store for its
@@ -1656,7 +1752,7 @@ export type CursorQuery = Message<"agentshim.core.v1.CursorQuery"> & {
  * Use `create(CursorQuerySchema)` to create a new message.
  */
 export const CursorQuerySchema: GenMessage<CursorQuery> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 36);
+  messageDesc(file_agentshim_core_v1_core, 39);
 
 /**
  * @generated from message agentshim.core.v1.OpenTaskState
@@ -1678,7 +1774,7 @@ export type OpenTaskState = Message<"agentshim.core.v1.OpenTaskState"> & {
  * Use `create(OpenTaskStateSchema)` to create a new message.
  */
 export const OpenTaskStateSchema: GenMessage<OpenTaskState> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 37);
+  messageDesc(file_agentshim_core_v1_core, 40);
 
 /**
  * @generated from message agentshim.core.v1.CursorList
@@ -1713,7 +1809,7 @@ export type CursorList = Message<"agentshim.core.v1.CursorList"> & {
  * Use `create(CursorListSchema)` to create a new message.
  */
 export const CursorListSchema: GenMessage<CursorList> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 38);
+  messageDesc(file_agentshim_core_v1_core, 41);
 
 /**
  * Canonical diagnostic record emitted by the file-plane sidecar. It is valid
@@ -1788,7 +1884,7 @@ export type FilePlaneDiagnostic = Message<"agentshim.core.v1.FilePlaneDiagnostic
  * Use `create(FilePlaneDiagnosticSchema)` to create a new message.
  */
 export const FilePlaneDiagnosticSchema: GenMessage<FilePlaneDiagnostic> = /*@__PURE__*/
-  messageDesc(file_agentshim_core_v1_core, 39);
+  messageDesc(file_agentshim_core_v1_core, 42);
 
 /**
  * Which observation plane produced an event.
