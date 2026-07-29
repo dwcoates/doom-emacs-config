@@ -108,3 +108,37 @@ export function formatAge(ms: number): string {
   if (minutes > 0) return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
   return `${seconds}s`;
 }
+
+/**
+ * Time REMAINING until a deadline, in whole days/hours/minutes: `0m`, `45m`,
+ * `3h 20m`, `2d 4h 10m`.
+ *
+ * This is what a deadline the reader is WAITING OUT wants, and it is why the
+ * rate-limit rung stopped printing the deadline as a wall-clock reading: a
+ * reset five days out reads as a time of day that says nothing about how long
+ * the wait is, and one tomorrow morning reads as a time that has already
+ * passed today.
+ *
+ * Every unit that reaches 1 is shown and every unit that does not is DROPPED
+ * rather than printed as a zero, so 2d 0h 15m reads `2d 15m` and 2d 3h 0m
+ * reads `2d 3h`. Unlike `formatAge` this goes three levels deep: the coarse
+ * pair alone would round a two-day wait to the nearest hour, which is a
+ * legitimate thing to want for an "ago" label and useless for a countdown the
+ * reader is timing.
+ *
+ * TRUNCATED, so a figure never claims more time remains than actually does.
+ * Under a minute — and a deadline already past, which is a stale report the
+ * next vendor event corrects — floors to `0m` rather than counting backwards.
+ */
+export function formatCountdown(ms: number): string {
+  const totalMinutes = Math.max(0, Math.floor(ms / 60_000));
+  const minutes = totalMinutes % 60;
+  const hours = Math.floor(totalMinutes / 60) % 24;
+  const days = Math.floor(totalMinutes / 1440);
+  const parts: string[] = [];
+  if (days > 0) parts.push(`${days}d`);
+  if (hours > 0) parts.push(`${hours}h`);
+  if (minutes > 0) parts.push(`${minutes}m`);
+  // Nothing reached a whole minute, and an empty string is not a duration.
+  return parts.length === 0 ? "0m" : parts.join(" ");
+}
