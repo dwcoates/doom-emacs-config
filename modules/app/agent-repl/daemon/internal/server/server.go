@@ -1250,7 +1250,7 @@ func (s *Server) DaemonView() *frontendv1.DaemonView {
 // outside the known set. A record written by an earlier build may hold an
 // arbitrary string, and passing one through silently is precisely what the
 // backfillState precedent below exists to avoid.
-func SessionViewFromRecord(logf dlog.Logf, rec registry.Record, pendingPermissions []string) *frontendv1.SessionView {
+func SessionViewFromRecord(logf dlog.Logf, rec registry.Record, pendingPermissions []string, shimAttached bool) *frontendv1.SessionView {
 	return &frontendv1.SessionView{
 		Workspace:       rec.CWD,
 		SessionId:       rec.SessionID,
@@ -1259,6 +1259,13 @@ func SessionViewFromRecord(logf dlog.Logf, rec registry.Record, pendingPermissio
 		ClaudeSessionId: rec.ClaudeSessionID,
 		Cwd:             rec.CWD,
 		Terminal:        rec.Terminal,
+		// The one NON-DURABLE fact on this message: whether THIS daemon holds a
+		// live driver for the workspace. See the field's proto comment — a
+		// frontend that answers "is this workspace already up?" from the durable
+		// fields alone says yes about a workspace a restarted daemon has never
+		// brought up, which is how a dormant workspace stopped bootstrapping on
+		// a perspective switch.
+		ShimAttached: shimAttached,
 		// The TYPED death (F4), superseding the free-string death_reason
 		// (RETIRED, step 11): it had two producers and zero readers because a
 		// frontend could not tell what class of failure the string described;
@@ -1312,10 +1319,12 @@ func (s *Server) pushSessionView(id string) {
 		return
 	}
 	var pending []string
+	live := false
 	if !rec.Terminal && rec.CWD != "" && s.driver != nil {
 		pending = s.driver.PendingPermissions(rec.CWD)
+		live = s.driver.Live(rec.CWD)
 	}
-	s.frontend.PushSessionView(SessionViewFromRecord(s.logf, rec, pending))
+	s.frontend.PushSessionView(SessionViewFromRecord(s.logf, rec, pending, live))
 }
 
 func (s *Server) handleListSessions(w http.ResponseWriter, _ *http.Request) {

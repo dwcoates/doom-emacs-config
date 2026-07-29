@@ -613,7 +613,7 @@ func TestSessionViewFromRecordShapesParityFields(t *testing.T) {
 		DeathReason:     "delete session",
 	}
 	// Act
-	v := SessionViewFromRecord(nil, rec, []string{"p1", "p2"})
+	v := SessionViewFromRecord(nil, rec, []string{"p1", "p2"}, false)
 	// Assert — the S7 parity fields plus the pending-permission COUNT.
 	if !v.GetTerminal() || v.GetDeath().GetErrorType() != string(errclass.TypeSessionDeleted) {
 		t.Errorf("terminal/death = %v/%q", v.GetTerminal(), v.GetDeath().GetErrorType())
@@ -640,7 +640,7 @@ func TestSessionViewClassifiesADeletedSession(t *testing.T) {
 	rec := registry.Record{SessionID: "s1", CWD: "/w", Terminal: true, DeathReason: errclass.DeathReasonDeleted}
 
 	// Act.
-	v := SessionViewFromRecord(nil, rec, nil)
+	v := SessionViewFromRecord(nil, rec, nil, false)
 
 	// Assert.
 	if got := v.GetDeath().GetErrorType(); got != string(errclass.TypeSessionDeleted) {
@@ -653,7 +653,7 @@ func TestSessionViewClassifiesASupersededSession(t *testing.T) {
 	rec := registry.Record{SessionID: "s1", CWD: "/w", Terminal: true, DeathReason: errclass.DeathReasonSuperseded}
 
 	// Act.
-	v := SessionViewFromRecord(nil, rec, nil)
+	v := SessionViewFromRecord(nil, rec, nil, false)
 
 	// Assert.
 	if got := v.GetDeath().GetErrorType(); got != string(errclass.TypeSessionSuperseded) {
@@ -667,7 +667,7 @@ func TestSessionViewClassifiesAShimDeath(t *testing.T) {
 	rec := registry.Record{SessionID: "s1", CWD: "/w", Terminal: true, DeathReason: errclass.DeathReasonShimDied}
 
 	// Act.
-	v := SessionViewFromRecord(nil, rec, nil)
+	v := SessionViewFromRecord(nil, rec, nil, false)
 
 	// Assert.
 	if got := v.GetDeath().GetErrorType(); got != string(errclass.TypeSessionShimDied) {
@@ -682,7 +682,7 @@ func TestSessionViewClassifiesALegacyDeathReasonLoudly(t *testing.T) {
 	rec := registry.Record{SessionID: "s1", CWD: "/w", Terminal: true, DeathReason: "some ancient reason"}
 
 	// Act.
-	v := SessionViewFromRecord(logf, rec, nil)
+	v := SessionViewFromRecord(logf, rec, nil, false)
 
 	// Assert.
 	if got := v.GetDeath().GetErrorType(); got != string(errclass.TypeSessionEndedUnclassified) {
@@ -698,7 +698,7 @@ func TestSessionViewCarriesNoDeathWhileTheSessionLives(t *testing.T) {
 	rec := registry.Record{SessionID: "s1", CWD: "/w"}
 
 	// Act.
-	v := SessionViewFromRecord(nil, rec, nil)
+	v := SessionViewFromRecord(nil, rec, nil, false)
 
 	// Assert.
 	if v.GetDeath() != nil {
@@ -711,7 +711,7 @@ func TestSessionViewFromRecordCarriesConfigDir(t *testing.T) {
 	rec := registry.Record{SessionID: "s1", CWD: "/w", ConfigDir: "/cfg-work"}
 
 	// Act.
-	v := SessionViewFromRecord(nil, rec, nil)
+	v := SessionViewFromRecord(nil, rec, nil, false)
 
 	// Assert — the account root rides on the SessionView (S8).
 	if v.GetConfigDir() != "/cfg-work" {
@@ -733,7 +733,7 @@ func TestSessionViewCarriesTheBackfillState(t *testing.T) {
 	}
 	for _, c := range cases {
 		rec := registry.Record{SessionID: "s1", CWD: "/w", BackfillState: c.stored}
-		if got := SessionViewFromRecord(nil, rec, nil).GetBackfill(); got != c.want {
+		if got := SessionViewFromRecord(nil, rec, nil, false).GetBackfill(); got != c.want {
 			t.Fatalf("stored %q -> %v, want %v", c.stored, got, c.want)
 		}
 	}
@@ -744,7 +744,7 @@ func TestAnUnrecognizedBackfillTokenReadsAsUnspecified(t *testing.T) {
 	rec := registry.Record{SessionID: "s1", CWD: "/w", BackfillState: "teleporting"}
 
 	// Act
-	got := SessionViewFromRecord(nil, rec, nil).GetBackfill()
+	got := SessionViewFromRecord(nil, rec, nil, false).GetBackfill()
 
 	// Assert — UNSPECIFIED is the SAFE direction: it makes the switch-ensure
 	// retry rather than skip, so an unreadable token cannot leave a workspace
