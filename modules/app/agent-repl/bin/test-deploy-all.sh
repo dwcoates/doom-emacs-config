@@ -31,14 +31,25 @@ make_tree() {
     local root="$1"
     local mod="$root/modules/app/agent-repl"
     mkdir -p "$mod/bin" "$mod/proto" "$mod/daemon/cmd/claude-repld" \
-             "$mod/agent-shim/shim-store" "$mod/agent-shim/claude/shim-sidecar"
+             "$mod/agent-shim/shim-store" "$mod/agent-shim/claude/shim-sidecar" \
+             "$mod/agent-shim/claude/shim/dist"
     cp "$SCRIPT_UNDER_TEST" "$mod/bin/deploy-all.sh"
     cp "$THIS_DIR/lib-deploy-stamp.sh" "$mod/bin/lib-deploy-stamp.sh"
     chmod +x "$mod/bin/deploy-all.sh"
 
+    # BF_STUB_SHIM_CONTENT makes the stub behave like a real shim build: it
+    # writes the bundle and its built-sha stamp, which is what deploy-all reads
+    # to decide the bounce's stop-shims mode. Unset leaves both absent, so
+    # every pre-existing case sees an unchanged (absent) bundle.
     cat > "$mod/bin/build-frontend.sh" <<'EOF'
 #!/usr/bin/env bash
 echo "build-frontend $*" >> "$STUB_LOG"
+if [ -n "${BF_STUB_SHIM_CONTENT:-}" ]; then
+    dist="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/agent-shim/claude/shim/dist"
+    mkdir -p "$dist"
+    printf '%s' "$BF_STUB_SHIM_CONTENT" > "$dist/main.js"
+    printf '%s\n' "${BF_STUB_SHIM_SHA:-deadbeefcafe}" > "$dist/.built-sha"
+fi
 EOF
     chmod +x "$mod/bin/build-frontend.sh"
 
@@ -351,6 +362,44 @@ if [ "$RC" -eq 0 ] \
 else
     fail "a deploy off a dirty tree marks the built-sha stamp -dirty" \
          "rc=$RC stamp=$(cat "$d/h/.cache/agent-repl/bin/.shim-store.built-sha" 2>/dev/null)"
+fi
+
+# --- 13. a moved shim bundle makes the bounce STOP surviving shims ----------
+# A survivor from before the deploy would keep running the previous bundle's
+# code, so this is the one case that must not preserve.
+d="$TMP/t13"; mkdir -p "$d"
+RUN_ENV="BF_STUB_SHIM_CONTENT=bundle-v2" run_deploy "$d"
+if [ "$RC" -eq 0 ] && log_has "daemon-restart t"; then
+    pass "a changed shim bundle bounces the daemon in stop-shims mode"
+else
+    fail "a changed shim bundle bounces the daemon in stop-shims mode" \
+         "rc=$RC restart=$(grep -o 'daemon-restart[^)]*' "$STUB_LOG" | tail -1)"
+fi
+
+# --- 14. an unchanged shim bundle PRESERVES surviving shims -----------------
+# The second deploy rebuilds the identical bundle, which is the ordinary case:
+# preserving is what makes the bounce a reattach rather than a rebuild.
+d="$TMP/t14"; mkdir -p "$d"
+RUN_ENV="BF_STUB_SHIM_CONTENT=bundle-v1" run_deploy "$d"
+RUN_ENV="BF_STUB_SHIM_CONTENT=bundle-v1" run_deploy "$d"
+if [ "$RC" -eq 0 ] && log_has "daemon-restart)" && ! log_has "daemon-restart t"; then
+    pass "an unchanged shim bundle leaves the daemon bounce preserving shims"
+else
+    fail "an unchanged shim bundle leaves the daemon bounce preserving shims" \
+         "rc=$RC restart=$(grep -o 'daemon-restart[^)]*' "$STUB_LOG" | tail -1)"
+fi
+
+# --- 15. a bundle changed WITHIN one revision still stops the shims ---------
+# The dirty-tree case: the built-sha stamp reads the same "<sha>-dirty" before
+# and after, so only the bundle's own content can report the change.
+d="$TMP/t15"; mkdir -p "$d"
+RUN_ENV="BF_STUB_SHIM_CONTENT=bundle-v1 GIT_STUB_DIRTY=M__x" run_deploy "$d"
+RUN_ENV="BF_STUB_SHIM_CONTENT=bundle-v2 GIT_STUB_DIRTY=M__x" run_deploy "$d"
+if [ "$RC" -eq 0 ] && log_has "daemon-restart t"; then
+    pass "a bundle that moved within one revision still stops the shims"
+else
+    fail "a bundle that moved within one revision still stops the shims" \
+         "rc=$RC restart=$(grep -o 'daemon-restart[^)]*' "$STUB_LOG" | tail -1)"
 fi
 
 echo

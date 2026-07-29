@@ -830,9 +830,45 @@ whenever a real session happened to be mid-turn."
   "The legacy daemon command has one implementation: the full runtime restart."
   (let (called)
     (cl-letf (((symbol-function 'agent-repl-runtime-restart)
-               (lambda () (setq called t) 3)))
+               (lambda (&optional _stop-shims) (setq called t) 3)))
       (should (= 3 (agent-repl-frontend-daemon-restart)))
       (should called))))
+
+(ert-deftest agent-repl-test-daemon-restart-preserves-shims-by-default ()
+  "A plain restart asks the coordinator to LEAVE the session shims running."
+  (let (arg)
+    (cl-letf (((symbol-function 'agent-repl-runtime-restart)
+               (lambda (&optional stop-shims) (setq arg (list stop-shims)) 0)))
+      (agent-repl-frontend-daemon-restart)
+      (should (equal arg (list nil))))))
+
+(ert-deftest agent-repl-test-daemon-restart-forwards-stop-shims ()
+  "The prefix argument reaches the coordinator as the stop-shims mode."
+  (let (arg)
+    (cl-letf (((symbol-function 'agent-repl-runtime-restart)
+               (lambda (&optional stop-shims) (setq arg (list stop-shims)) 0)))
+      (agent-repl-frontend-daemon-restart '(4))
+      (should (equal arg (list t))))))
+
+(ert-deftest agent-repl-test-foreign-shutdown-omits-stop-shims-by-default ()
+  "`ShutdownCmd' carries no payload unless stop-shims was asked for."
+  (let (sent)
+    (cl-letf (((symbol-function 'agent-repl--uds-connected-p) (lambda () t))
+              ((symbol-function 'agent-repl--uds-send-command)
+               (lambda (field payload &rest _) (setq sent (list field payload)) "req-1"))
+              ((symbol-function 'agent-repl--uds-track-command) (lambda (&rest _) nil)))
+      (agent-repl--frontend-request-foreign-shutdown)
+      (should (equal sent (list "shutdown" nil))))))
+
+(ert-deftest agent-repl-test-foreign-shutdown-sets-stop-shims ()
+  "A stop-shims request sets `ShutdownCmd.stop_shims' on the wire."
+  (let (sent)
+    (cl-letf (((symbol-function 'agent-repl--uds-connected-p) (lambda () t))
+              ((symbol-function 'agent-repl--uds-send-command)
+               (lambda (field payload &rest _) (setq sent (list field payload)) "req-1"))
+              ((symbol-function 'agent-repl--uds-track-command) (lambda (&rest _) nil)))
+      (agent-repl--frontend-request-foreign-shutdown t)
+      (should (equal sent (list "shutdown" (list :stopShims t)))))))
 
 ;;;; ---- Widget-assets auto-discovery -----------------------------------------
 
