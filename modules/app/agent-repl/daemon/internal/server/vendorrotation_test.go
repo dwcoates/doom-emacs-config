@@ -25,7 +25,7 @@ func TestAdoptVendorSessionIDReportsARotation(t *testing.T) {
 	r := &RegistryRegistrar{Reg: reg}
 
 	// Act.
-	rotated, previous := r.AdoptVendorSessionID("s1", "uuid-new")
+	rotated, previous, _ := r.AdoptVendorSessionID("s1", "uuid-new", false)
 
 	// Assert.
 	if !rotated || previous != "uuid-old" {
@@ -43,7 +43,7 @@ func TestAdoptVendorSessionIDPersistsTheRotatedUUID(t *testing.T) {
 	r := &RegistryRegistrar{Reg: reg}
 
 	// Act.
-	r.AdoptVendorSessionID("s1", "uuid-new")
+	r.AdoptVendorSessionID("s1", "uuid-new", false)
 
 	// Assert.
 	rec, _ := reg.Get("s1")
@@ -63,7 +63,7 @@ func TestAdoptVendorSessionIDResetsTheStoreCursorOnARotation(t *testing.T) {
 	r := &RegistryRegistrar{Reg: reg}
 
 	// Act.
-	r.AdoptVendorSessionID("s1", "uuid-new")
+	r.AdoptVendorSessionID("s1", "uuid-new", false)
 
 	// Assert — read through the SAME adapter the resubscribe reads through, so
 	// a checkpoint hydrating the mark back up would be caught here.
@@ -84,7 +84,7 @@ func TestAdoptVendorSessionIDResetsTheReplayFloorOnARotation(t *testing.T) {
 	r := &RegistryRegistrar{Reg: reg}
 
 	// Act.
-	r.AdoptVendorSessionID("s1", "uuid-new")
+	r.AdoptVendorSessionID("s1", "uuid-new", false)
 
 	// Assert.
 	if got := NewRegistrySeqStore(reg, nil).NewestClearOrCompactSeq("s1"); got != 0 {
@@ -102,7 +102,7 @@ func TestAdoptVendorSessionIDResetsNothingForTheSameUUID(t *testing.T) {
 	r := &RegistryRegistrar{Reg: reg}
 
 	// Act.
-	rotated, _ := r.AdoptVendorSessionID("s1", "uuid-old")
+	rotated, _, _ := r.AdoptVendorSessionID("s1", "uuid-old", false)
 
 	// Assert.
 	if rotated {
@@ -123,7 +123,7 @@ func TestAdoptVendorSessionIDIsNoRotationForAFirstAdoption(t *testing.T) {
 	r := &RegistryRegistrar{Reg: reg}
 
 	// Act.
-	rotated, previous := r.AdoptVendorSessionID("s1", "uuid-first")
+	rotated, previous, _ := r.AdoptVendorSessionID("s1", "uuid-first", true)
 
 	// Assert.
 	if rotated || previous != "" {
@@ -142,7 +142,7 @@ func TestAdoptVendorSessionIDOnAnUnknownSessionIsLoud(t *testing.T) {
 	r := &RegistryRegistrar{Reg: reg, Logf: func(f string, a ...any) { logged = append(logged, f) }}
 
 	// Act.
-	r.AdoptVendorSessionID("ghost", "uuid-new")
+	r.AdoptVendorSessionID("ghost", "uuid-new", true)
 
 	// Assert.
 	if len(logged) == 0 {
@@ -161,7 +161,7 @@ func TestAdoptVendorSessionIDRepushesTheViewOnARotation(t *testing.T) {
 	r := &RegistryRegistrar{Reg: reg, PushView: func(id string) { pushed = append(pushed, id) }}
 
 	// Act.
-	r.AdoptVendorSessionID("s1", "uuid-new")
+	r.AdoptVendorSessionID("s1", "uuid-new", false)
 
 	// Assert.
 	if len(pushed) != 1 || pushed[0] != "s1" {
@@ -180,7 +180,7 @@ func TestAdoptVendorSessionIDRepushesNothingWithoutARotation(t *testing.T) {
 	r := &RegistryRegistrar{Reg: reg, PushView: func(id string) { pushed = append(pushed, id) }}
 
 	// Act.
-	r.AdoptVendorSessionID("s1", "uuid-old")
+	r.AdoptVendorSessionID("s1", "uuid-old", false)
 
 	// Assert.
 	if len(pushed) != 0 {

@@ -51,11 +51,29 @@ import (
 // SessionStarted carries (vendor_session_id), so --resume and cross-restart
 // rehydration keep working after the L2 stdio plane that used to write it is
 // gone. Bound in main to a registry-writing adapter; nil disables the write.
+// # ADOPT LATE
+//
+// Both writes below take `durable`: the daemon's evidence that the conversation
+// this uuid names EXISTS ON DISK, which for a first adoption means a turn has
+// run under it. Until then the uuid is a name the SDK minted and nothing has
+// written a transcript for, and persisting it is what produced the incident
+// this gate closes: a session was created, never ran a turn, and died — leaving
+// a record pointing at a transcript that never existed, so every later bring-up
+// ran `claude --resume <uuid>`, the CLI exited 1, and the workspace sat in
+// `starting` with nothing to explain it.
+//
+// The gate applies to the FIRST adoption ONLY. A record that already carries a
+// uuid names a conversation the vendor demonstrably wrote, so a ROTATION off it
+// is a different fact with a different proof and is unaffected.
 type SessionRegistrar interface {
-	ClaudeSessionIDChanged(sessionID, claudeSessionID string)
+	// ClaudeSessionIDChanged persists claudeSessionID, reporting whether it was
+	// ADOPTED. A first adoption without durable evidence is REFUSED (adopted
+	// false) rather than written; the caller holds the uuid and offers it again
+	// when the evidence arrives.
+	ClaudeSessionIDChanged(sessionID, claudeSessionID string, durable bool) (adopted bool)
 	// AdoptVendorSessionID adopts claudeSessionID as the session's vendor uuid
 	// and reports whether that ROTATED an already-adopted, DIFFERENT one, plus
-	// what it replaced.
+	// what it replaced and whether anything was written at all.
 	//
 	// A rotation retires the conversation's store seq space and starts a fresh
 	// one at 1, so the adoption and the CURSOR RESET that must accompany it are
@@ -65,7 +83,7 @@ type SessionRegistrar interface {
 	// old uuid still stood would be undone before the new uuid was recorded.
 	//
 	// Idempotent for an unchanged uuid: rotated=false, nothing reset.
-	AdoptVendorSessionID(sessionID, claudeSessionID string) (rotated bool, previous string)
+	AdoptVendorSessionID(sessionID, claudeSessionID string, durable bool) (rotated bool, previous string, adopted bool)
 	// QueuedPromptsChanged persists the prompts the daemon is currently
 	// HOLDING for a session (E4). A daemon that dies mid-queue would otherwise
 	// lose them with no trace; the record is the honest one.
@@ -213,6 +231,18 @@ type Manager struct {
 	mu       sync.Mutex
 	byWS     map[string]*driven // workspace -> live driver
 	lastCSID map[string]string  // session id -> last-persisted claude session uuid
+	// heldCSID is the vendor uuid a session ANNOUNCED but the registry refused
+	// to adopt, because no turn has yet proved the conversation it names exists
+	// on disk (SessionRegistrar's ADOPT LATE contract). It is offered again the
+	// moment turnEvidence arrives, and a session that dies before that leaves
+	// no pointer behind — which is the whole point.
+	heldCSID map[string]string
+	// turnEvidence records the sessions whose vendor conversation is DURABLE:
+	// a turn has started under it, so the vendor has written its transcript.
+	// Not persisted, and it does not need to be — a session that ran a turn
+	// under an earlier daemon already carries the uuid on its record, which is
+	// the same proof in durable form.
+	turnEvidence map[string]bool
 	// shimPID is the pid each session's shim announced on its ShimHello. It is
 	// the ONLY way to stop a shim this daemon did not spawn, and it is kept in
 	// memory rather than persisted deliberately: it is trustworthy exactly
@@ -359,6 +389,8 @@ func New(cfg Config) (*Manager, error) {
 		now:          now,
 		byWS:         make(map[string]*driven),
 		lastCSID:     make(map[string]string),
+		heldCSID:     make(map[string]string),
+		turnEvidence: make(map[string]bool),
 		shimPID:      make(map[string]int32),
 		buildBounced: make(map[string]bool),
 		rootCtx:      rootCtx,
@@ -475,23 +507,67 @@ func (m *Manager) TaskEntry(workspace, taskID string) (*frontendv1.TaskEntry, bo
 	return nil, false
 }
 
-// persistVendorSessionID writes a session's CLI uuid through to the registry
-// via the injected Registrar, deduped per session so a repeated SessionStarted
-// (a reattach replay) does not re-write the same value. No-op when no registrar
+// persistVendorSessionID offers a session's CLI uuid to the registry via the
+// injected Registrar, deduped per session so a repeated SessionStarted (a
+// reattach replay) does not re-write the same value. No-op when no registrar
 // is wired or the uuid is empty.
+//
+// A FIRST adoption the registry REFUSES — no turn has yet proved the vendor
+// wrote this conversation to disk — is HELD rather than dropped, and offered
+// again from noteTurnEvidence. See SessionRegistrar's ADOPT LATE contract.
 func (m *Manager) persistVendorSessionID(sessionID, csid string) {
 	if m.cfg.Registrar == nil || csid == "" {
 		return
 	}
 	m.mu.Lock()
-	if m.lastCSID[sessionID] == csid {
+	if m.lastCSID[sessionID] == csid || m.heldCSID[sessionID] == csid {
 		m.mu.Unlock()
 		return
 	}
+	durable := m.turnEvidence[sessionID]
+	m.mu.Unlock()
+
+	if !m.cfg.Registrar.ClaudeSessionIDChanged(sessionID, csid, durable) {
+		m.holdVendorSessionID(sessionID, csid)
+		return
+	}
+	m.mu.Lock()
 	m.lastCSID[sessionID] = csid
+	delete(m.heldCSID, sessionID)
 	m.mu.Unlock()
 	m.logf("sessiondrv: persisting claude_session_id session=%s uuid=%s", sessionID, csid)
-	m.cfg.Registrar.ClaudeSessionIDChanged(sessionID, csid)
+}
+
+// holdVendorSessionID parks a uuid the registry refused to adopt.
+func (m *Manager) holdVendorSessionID(sessionID, csid string) {
+	m.mu.Lock()
+	m.heldCSID[sessionID] = csid
+	m.mu.Unlock()
+	m.logf("sessiondrv: HOLDING claude_session_id session=%s uuid=%s — no turn has produced durable evidence this conversation exists on disk, so the record keeps no pointer to it; it is adopted at the first turn",
+		sessionID, csid)
+}
+
+// noteTurnEvidence records the FIRST turn observed for a session — the proof
+// that the vendor really wrote the conversation its uuid names — and adopts
+// whatever uuid was held waiting for it.
+//
+// TurnStarted is the evidence because it is a durable store event of an ACTUAL
+// turn, as opposed to the SDK's startup announcement, which names a
+// conversation the vendor has not written and may never write.
+func (m *Manager) noteTurnEvidence(sessionID string) {
+	m.mu.Lock()
+	if m.turnEvidence[sessionID] {
+		m.mu.Unlock()
+		return
+	}
+	m.turnEvidence[sessionID] = true
+	held := m.heldCSID[sessionID]
+	delete(m.heldCSID, sessionID)
+	m.mu.Unlock()
+	m.logf("sessiondrv: first turn observed session=%s — the vendor conversation now durably exists", sessionID)
+	if held != "" {
+		m.persistVendorSessionID(sessionID, held)
+	}
 }
 
 // SubmitPrompt brings the workspace's session up (lazily, reattach-first) and
@@ -1505,9 +1581,21 @@ func (m *Manager) onHandshake(workspace, sessionID string, hello *corev1.ShimHel
 			csid, workspace, sessionID)
 		return
 	}
-	rotated, previous := m.cfg.Registrar.AdoptVendorSessionID(sessionID, csid)
+	m.mu.Lock()
+	durable := m.turnEvidence[sessionID]
+	m.mu.Unlock()
+	rotated, previous, adopted := m.cfg.Registrar.AdoptVendorSessionID(sessionID, csid, durable)
+	if !adopted {
+		// ADOPT LATE. A first announcement with no turn behind it names a
+		// conversation the vendor has not written; the uuid is held here and
+		// adopted at the first turn. A ROTATION is never refused (it has a
+		// non-empty previous), so nothing below this line changes for one.
+		m.holdVendorSessionID(sessionID, csid)
+		return
+	}
 	m.mu.Lock()
 	m.lastCSID[sessionID] = csid
+	delete(m.heldCSID, sessionID)
 	m.mu.Unlock()
 	if !rotated {
 		return
