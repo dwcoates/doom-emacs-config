@@ -287,6 +287,22 @@ test_missing_typescript_package_is_loud() {
     fi
 }
 
+test_typescript_packages_guard_coverage_dependency() {
+    local webapp_package="$THIS_DIR/../webapp/package.json"
+    local shim_package="$THIS_DIR/../agent-shim/claude/shim/package.json"
+    local package
+
+    for package in "$webapp_package" "$shim_package"; do
+        if ! grep -Fq '"ensure-deps": "[ -x node_modules/.bin/vitest ] && [ -f node_modules/@vitest/coverage-v8/package.json ] || npm ci"' "$package" ||
+            ! grep -Fq '"precoverage": "npm run ensure-deps"' "$package" ||
+            ! grep -Fq '"pretypecheck": "npm run ensure-deps"' "$package"; then
+            fail "TypeScript packages repair incomplete coverage dependencies"
+            return
+        fi
+    done
+    pass "TypeScript packages repair incomplete coverage dependencies"
+}
+
 test_proto_validation_failure_is_loud() {
     local tree="$TMP/proto-validation-failure"
     make_tree "$tree"
@@ -330,6 +346,7 @@ test_missing_go_module_is_loud
 test_typescript_typecheck_failure_is_loud
 test_typescript_coverage_failure_is_loud
 test_missing_typescript_package_is_loud
+test_typescript_packages_guard_coverage_dependency
 test_proto_validation_failure_is_loud
 test_missing_proto_makefile_is_loud
 

@@ -6,9 +6,14 @@
   "type": "module",
   "main": "dist/main.js",
   "scripts": {
+    "ensure-deps": "[ -x node_modules/.bin/vitest ] && [ -f node_modules/@vitest/coverage-v8/package.json ] || npm ci",
+    "prebuild": "npm run ensure-deps",
     "build": "node build.mjs",
+    "pretest": "npm run ensure-deps",
     "test": "vitest run",
+    "precoverage": "npm run ensure-deps",
     "coverage": "vitest run --coverage",
+    "pretypecheck": "npm run ensure-deps",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
