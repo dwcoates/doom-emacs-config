@@ -26,7 +26,15 @@
 #                       when no Emacs server is reachable the bounce is
 #                       explicitly deferred until Emacs startup. Once a server
 #                       is reachable, any restart failure still fails this
-#                       script loudly (exit 3)
+#                       script loudly (exit 3).
+#
+#                       The bounce PRESERVES the session shims — they outlive
+#                       their daemon and the replacement reattaches — EXCEPT
+#                       when step 2 moved the shim bundle, in which case the
+#                       restart is asked to stop them (STOP-SHIMS) so no
+#                       survivor keeps running the previous build's code. That
+#                       is belt-and-braces beside the daemon's own version-
+#                       driven stale-shim refresh, not the only guard
 #   6. elisp reload     with `--elisp <git-range>`: hot-load every non-test
 #                       .el under modules/app/agent-repl changed in the range
 #                       into the running Emacs (test-*.el is batch-only and is
@@ -89,10 +97,38 @@ make -C "$ROOT/proto" all
 log "proto: done"
 
 # ---- 2. build-frontend (shim bundle, webapp, daemon) -----------------------
+# Whether the SHIM BUNDLE moved decides the daemon bounce's stop-shims mode
+# below. Two signals, because neither alone is sufficient:
+#
+#   - the built-sha stamp, which moves whenever the source revision does; and
+#   - the bundle's own content fingerprint, which is the only signal that moves
+#     within one revision — the common case of a DIRTY tree, where the stamp
+#     reads "<sha>-dirty" both before and after a rebuild that changed the code.
+#
+# Either differing means a surviving shim would now be running superseded code.
+SHIM_BUNDLE="$ROOT/agent-shim/claude/shim/dist/main.js"
+SHIM_STAMP="$ROOT/agent-shim/claude/shim/dist/.built-sha"
+
+shim_identity() {
+    read_built_sha "$SHIM_STAMP" 2>/dev/null || echo "no-stamp"
+    if [ -f "$SHIM_BUNDLE" ]; then binary_fingerprint "$SHIM_BUNDLE"; else echo "no-bundle"; fi
+}
+
+SHIM_BEFORE="$(shim_identity)"
+
 if [ "$FORCE" -eq 1 ]; then
     "$THIS_DIR/build-frontend.sh" --force
 else
     "$THIS_DIR/build-frontend.sh"
+fi
+
+SHIM_AFTER="$(shim_identity)"
+SHIM_CHANGED=0
+if [ "$SHIM_BEFORE" != "$SHIM_AFTER" ]; then
+    SHIM_CHANGED=1
+    log "shim: bundle moved since the last deploy — the daemon bounce will STOP surviving shims"
+else
+    log "shim: bundle unchanged — the daemon bounce will preserve surviving shims"
 fi
 
 # ---- 3. daemon, forced (staleness cannot see proto regen) ------------------
@@ -210,8 +246,14 @@ if ! EMACS_PROBE_OUT="$("$EMACSCLIENT" --eval t 2>&1)"; then
 else
     EMACS_AVAILABLE=1
     log "daemon: Emacs server probe succeeded: $EMACS_PROBE_OUT"
-    log "daemon: restarting via emacsclient..."
-    RESTART_OUT="$("$EMACSCLIENT" --eval '(agent-repl-frontend-daemon-restart)' 2>&1)" || {
+    if [ "$SHIM_CHANGED" -eq 1 ]; then
+        RESTART_FORM='(agent-repl-frontend-daemon-restart t)'
+        log "daemon: restarting via emacsclient (stop-shims: the bundle changed)..."
+    else
+        RESTART_FORM='(agent-repl-frontend-daemon-restart)'
+        log "daemon: restarting via emacsclient..."
+    fi
+    RESTART_OUT="$("$EMACSCLIENT" --eval "$RESTART_FORM" 2>&1)" || {
         echo "[deploy-all] daemon restart failed: $RESTART_OUT" >&2
         exit 3
     }
