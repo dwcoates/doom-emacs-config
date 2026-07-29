@@ -1194,8 +1194,17 @@ message ProgressWindow {
   string detail = 3;
 }
 
-// The rate-limit window, which carries structured detail no other window
-// needs (a reset deadline and a utilization fraction).
+// One ALLOWANCE's rate-limit window, which carries structured detail no other
+// window needs (a reset deadline and a utilization fraction).
+//
+// PRESENT means the vendor has reported this allowance at all, and the figures
+// are the last report's. `active` is the narrower claim that the report was
+// NEWSWORTHY — anything other than a plain "allowed" — which is what decides
+// whether the rung outranks the ordinary activity the footer would otherwise
+// show. The two are deliberately separate: an allowance sitting at 12% is not
+// news, but it is exactly the figure a reader needs beside the allowance that
+// IS, and dropping the message for it is what left the footer unable to say
+// which of the two allowances the percentage it showed belonged to.
 message RateLimitWindow {
   bool active = 1;
   int64 resets_at = 2;    // epoch SECONDS (the vendor event's own unit)
@@ -1255,7 +1264,20 @@ message ProgressView {
                                        // retry family (see §retry sourcing)
   ProgressWindow authenticating = 10;  // data.AuthStatus
   ProgressWindow hook = 11;            // data.HookStarted / HookResponse
-  RateLimitWindow rate_limited = 12;   // data.RateLimitEvent
+
+  // The vendor bills TWO independent allowances and reports them through the
+  // SAME data.RateLimitEvent, distinguished only by its `rate_limit_type`:
+  // the rolling five-hour session window, and the seven-day weekly window
+  // (whose per-model and overage-included variants are the same allowance
+  // reported with a narrower scope).
+  //
+  // They get a field each because they are separate facts with separate
+  // deadlines and separate severities. Folding both into one window meant the
+  // last event won, so a weekly figure deep into its allowance was displayed
+  // under the session's name — a reader saw "91% of your session" for a number
+  // that was really the week's, and had no way to tell the two apart.
+  RateLimitWindow rate_limited = 12;          // rate_limit_type "five_hour"
+  RateLimitWindow rate_limited_weekly = 21;   // rate_limit_type "seven_day*"
 
   // The session itself reporting it is parked on the USER
   // (data.SessionStateChanged state="requires_action").

@@ -27,7 +27,7 @@
  */
 import { AGENTS_SPEC, agentsMenuHtml } from "./agents.js";
 import { CounterEntry, CounterSpec, isActive } from "./counter-menu.js";
-import { formatElapsed } from "./duration.js";
+import { formatCountdown, formatElapsed } from "./duration.js";
 import { escapeHtml } from "./highlight.js";
 import type {
   InterruptInput,
@@ -276,10 +276,10 @@ export interface Activity {
   tone: "tool" | "thinking" | "blocked" | "retry" | "error" | "muted";
   /**
    * Pre-escaped markup for the cell, when the rung needs MORE than one color
-   * across its line. Only the rate-limit rung uses it: the usage figure and the
-   * reset time each carry their own severity accent, which a single cell-wide
-   * tone cannot say. Absent means the plain `text` is escaped and shown, which
-   * is every other rung.
+   * across its line. Only the rate-limit rung uses it: each allowance's figures
+   * carry their own severity accent, which a single cell-wide tone cannot say.
+   * Absent means the plain `text` is escaped and shown, which is every other
+   * rung.
    */
   html?: string;
 }
@@ -305,8 +305,8 @@ export function activityDetail(input: FooterInput, nowMs: number): Activity | nu
   if (p.authenticating !== null) {
     return { text: authText(p.authenticating.detail), tone: "error" };
   }
-  if (p.rateLimited !== null) {
-    return rateLimitActivity(p.rateLimited);
+  if (rateLimitIsNews(p)) {
+    return rateLimitActivity(p, nowMs);
   }
   if (p.blocked !== null) {
     return { text: p.blocked.detail, tone: "retry" };
@@ -345,74 +345,151 @@ function authText(detail: string): string {
 }
 
 /**
- * The rate-limit rung's severity accent.
+ * The statuses that are the vendor ALLOWING the request. Everything else on the
+ * wire (`rejected`, or a pre-status empty string) is the vendor refusing.
  *
- * The window opens on ANY status other than a plain "allowed", which lumps two
- * very different claims together: `allowed_warning` is the vendor saying the
- * request SUCCEEDED while the allowance runs low, and anything else on the wire
- * (`rejected`, or the pre-status empty string) is the vendor refusing. The old
+ * `allowed_warning` is the vendor saying the request SUCCEEDED while the
+ * allowance runs low, which is a very different claim from a refusal — the old
  * line painted both an outright red "rate-limited", which read a working
  * session as stopped.
- *
- *   an outright limit (not `allowed`/`allowed_warning`)  RED, always
- *   utilization >= 90%                                   RED
- *   anything else with the window open                   YELLOW
- *
- * There is no green rung: the window being open at all is advisory, so its
- * quietest reading is still a warning.
  */
 const WARNING_RATE_LIMIT_STATUSES = new Set(["allowed", "allowed_warning"]);
 
-/** The separator between the two rate-limit facts, exactly as specified. */
+/** The separator between one allowance's two facts, exactly as specified. */
 const RATE_LIMIT_SEP = " • ";
 
-/** The utilization at which the reading turns from advisory to red. */
-const RATE_LIMIT_RED_AT = 0.9;
+/** The separator BETWEEN the two allowances, which are separate readings. */
+const RATE_LIMIT_GROUP_SEP = "  |  ";
 
-export function rateLimitAccent(
-  r: NonNullable<ProgressInput["rateLimited"]>,
-): "pfooter-rl-limit" | "pfooter-rl-warn" {
+/**
+ * The severity ladder, floors ascending. An allowance is read at the HIGHEST
+ * floor it has reached, so the rung escalates through four colors on the way to
+ * spent rather than being either "fine" or "alarming":
+ *
+ *   <= 50%             green   plenty left
+ *   > 50%, <= 75%      yellow  past the halfway mark
+ *   > 75%, < 90%       orange  running low
+ *   >= 90%             red     effectively spent
+ *
+ * A refusal (a status outside `WARNING_RATE_LIMIT_STATUSES`) is red regardless
+ * of the figure: the vendor has stopped the session, which outranks whatever
+ * the utilization says.
+ */
+export type RateLimitAccent =
+  | "pfooter-rl-ok"
+  | "pfooter-rl-warn"
+  | "pfooter-rl-high"
+  | "pfooter-rl-limit";
+
+/** The accent an allowance that has reached no floor wears. */
+const RATE_LIMIT_ACCENT_OK: RateLimitAccent = "pfooter-rl-ok";
+
+const RATE_LIMIT_ACCENTS: ReadonlyArray<{
+  reached: (utilization: number) => boolean;
+  accent: RateLimitAccent;
+}> = [
+  // The one INCLUSIVE floor: an allowance sitting exactly on 90% is spent, not
+  // merely running low.
+  { reached: (u) => u >= 0.9, accent: "pfooter-rl-limit" },
+  { reached: (u) => u > 0.75, accent: "pfooter-rl-high" },
+  { reached: (u) => u > 0.5, accent: "pfooter-rl-warn" },
+];
+
+export function rateLimitAccent(r: NonNullable<ProgressInput["rateLimited"]>): RateLimitAccent {
   if (!WARNING_RATE_LIMIT_STATUSES.has(r.status)) return "pfooter-rl-limit";
-  if (r.utilization >= RATE_LIMIT_RED_AT) return "pfooter-rl-limit";
-  // Everything else is yellow, INCLUDING a utilization under the 75% advisory
-  // floor: the window is open, which is the news, and there is nothing quieter
-  // this rung is allowed to say. So the floor draws no line of its own — it is
-  // the ceiling at 90% that changes the reading.
-  return "pfooter-rl-warn";
+  return RATE_LIMIT_ACCENTS.find((rung) => rung.reached(r.utilization))?.accent ?? RATE_LIMIT_ACCENT_OK;
+}
+
+/** The ladder as an ORDER, quietest first, for picking the loudest of several. */
+const RATE_LIMIT_SEVERITY: readonly RateLimitAccent[] = [
+  RATE_LIMIT_ACCENT_OK,
+  "pfooter-rl-warn",
+  "pfooter-rl-high",
+  "pfooter-rl-limit",
+];
+
+/** The loudest accent any reported allowance wears, for a figure-less rung. */
+function worstRateLimitAccent(p: ProgressInput): RateLimitAccent {
+  let worst = RATE_LIMIT_ACCENT_OK;
+  for (const { key } of RATE_LIMIT_ALLOWANCES) {
+    const r = p[key];
+    if (r === null) continue;
+    const accent = rateLimitAccent(r);
+    if (RATE_LIMIT_SEVERITY.indexOf(accent) > RATE_LIMIT_SEVERITY.indexOf(worst)) worst = accent;
+  }
+  return worst;
+}
+
+/** The two allowances the vendor bills, in the order the rung names them. */
+const RATE_LIMIT_ALLOWANCES = [
+  { key: "rateLimited", label: "Session" },
+  { key: "rateLimitedWeekly", label: "Weekly" },
+] as const;
+
+/**
+ * Whether the rate-limit rung has NEWS — a report the reader should be shown
+ * ahead of the ordinary activity the cell would otherwise carry.
+ *
+ * Only an ACTIVE window counts. A quiet allowance still ships its figures (so
+ * the rung can name both readings side by side once one of them speaks up), but
+ * on its own it is not a reason to displace the running tool from the cell.
+ */
+export function rateLimitIsNews(p: ProgressInput): boolean {
+  return RATE_LIMIT_ALLOWANCES.some((a) => p[a.key]?.active === true);
 }
 
 /**
- * The rate-limit rung: how much of the session's allowance is spent and when
- * the window resets — the two facts a reader can actually act on.
+ * The rate-limit rung: for EACH allowance the vendor bills, how much of it is
+ * spent and how long until it resets — the facts a reader can actually act on.
  *
- * Each figure carries its OWN accent (see `rateLimitAccent`), which is why this
- * rung ships markup rather than a single cell-wide tone. The labels stay muted
- * so the two figures are what the eye lands on.
+ * The two allowances are named APART. They used to share one line labeled
+ * "Session", so a weekly figure deep into its allowance read as the session's:
+ * a reader saw "91%" against a session they had barely touched, with no way to
+ * tell which of the two the number belonged to.
  *
- * Either part drops out when the vendor did not report it; with both missing
- * the rung falls back to a worded line, since an empty cell would drop the fact
- * that a rate-limit window is open at all.
+ * Each allowance's figures carry their OWN accent (see `rateLimitAccent`),
+ * which is why this rung ships markup rather than a single cell-wide tone — the
+ * whole point is that the two can read very differently at the same moment. The
+ * labels stay muted so the figures are what the eye lands on.
+ *
+ * An allowance the vendor never reported is absent entirely, and either of a
+ * reported allowance's parts drops out when its own figure is missing. With
+ * nothing left to say the rung falls back to a worded line, since an empty cell
+ * would drop the fact that a rate-limit window is open at all.
  */
-export function rateLimitActivity(r: NonNullable<ProgressInput["rateLimited"]>): Activity {
-  const accent = rateLimitAccent(r);
-  const parts: Array<[string, string]> = [];
-  if (r.utilization > 0) parts.push(["Session usage: ", `${Math.round(r.utilization * 100)}%`]);
-  if (r.resetsAt > 0) parts.push(["Session reset: ", clockTime(r.resetsAt * 1000)]);
-  if (parts.length === 0) {
-    const text = "Session rate limit reported";
+export function rateLimitActivity(p: ProgressInput, nowMs: number): Activity {
+  const groups: Array<{ accent: RateLimitAccent; parts: Array<[string, string]> }> = [];
+  for (const { key, label } of RATE_LIMIT_ALLOWANCES) {
+    const r = p[key];
+    if (r === null) continue;
+    const parts: Array<[string, string]> = [];
+    if (r.utilization > 0) parts.push([`${label} usage: `, `${Math.round(r.utilization * 100)}%`]);
+    // The deadline is a COUNTDOWN, not a wall-clock reading: the weekly window
+    // can be days out, where a time of day says nothing about the wait.
+    if (r.resetsAt > 0) {
+      parts.push([`${label} reset: `, formatCountdown(r.resetsAt * 1000 - nowMs)]);
+    }
+    if (parts.length > 0) groups.push({ accent: rateLimitAccent(r), parts });
+  }
+  if (groups.length === 0) {
+    // The LOUDEST accent among the reported allowances, not a neutral one: a
+    // refusal that carries no figures is still a session stopped dead, and
+    // painting it green would say the opposite of what it means.
+    const accent = worstRateLimitAccent(p);
+    const text = "Rate limit reported";
     return { text, tone: "muted", html: `<span class="${accent}">${escapeHtml(text)}</span>` };
   }
-  const text = parts.map(([label, value]) => `${label}${value}`).join(RATE_LIMIT_SEP);
-  const html = parts
-    .map((p) => `${escapeHtml(p[0])}<span class="${accent}">${escapeHtml(p[1])}</span>`)
-    .join(escapeHtml(RATE_LIMIT_SEP));
+  const text = groups
+    .map((g) => g.parts.map(([label, value]) => `${label}${value}`).join(RATE_LIMIT_SEP))
+    .join(RATE_LIMIT_GROUP_SEP);
+  const html = groups
+    .map((g) =>
+      g.parts
+        .map(([label, value]) => `${escapeHtml(label)}<span class="${g.accent}">${escapeHtml(value)}</span>`)
+        .join(escapeHtml(RATE_LIMIT_SEP)),
+    )
+    .join(escapeHtml(RATE_LIMIT_GROUP_SEP));
   return { text, tone: "muted", html };
-}
-
-/** An epoch-millis instant as the reader's own local `HH:MM`. */
-export function clockTime(ms: number): string {
-  const at = new Date(ms);
-  return `${String(at.getHours()).padStart(2, "0")}:${String(at.getMinutes()).padStart(2, "0")}`;
 }
 
 /**
@@ -524,8 +601,13 @@ export function sheetHtml(input: FooterInput, nowMs: number): string {
   // The sheet says the rate limit in the SAME words and the same accents as the
   // strip's rung: one fact reading two ways in one footer is how the old
   // "rate-limited" line survived a rewording of the cell above it.
-  if (p.rateLimited !== null) {
-    rows.push(`<span>${activityBody(rateLimitActivity(p.rateLimited))}</span>`);
+  //
+  // It shows BOTH allowances whenever either has been reported, including the
+  // quiet case the strip's rung declines to displace a running tool for — the
+  // sheet is where the detail the thin strip drops belongs, and "how much of my
+  // week is left" is exactly what a reader opens it to find out.
+  if (p.rateLimited !== null || p.rateLimitedWeekly !== null) {
+    rows.push(`<span>${activityBody(rateLimitActivity(p, nowMs))}</span>`);
   }
   if (p.liveTaskCount > 0) {
     rows.push(`<span>${p.liveTaskCount} live task${p.liveTaskCount === 1 ? "" : "s"}</span>`);

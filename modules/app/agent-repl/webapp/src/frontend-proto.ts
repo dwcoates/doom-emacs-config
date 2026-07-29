@@ -449,7 +449,14 @@ export interface ProgressWindow {
   detail: string;
 }
 
-/** The rate-limit window, which carries structured detail (F1). */
+/**
+ * One ALLOWANCE's rate-limit window, which carries structured detail (F1).
+ *
+ * Present means the vendor has reported this allowance; `active` is the
+ * narrower claim that the report was newsworthy (anything other than a plain
+ * "allowed"). A quiet allowance still ships its figures, because they are what
+ * the reader needs beside the allowance that is not quiet.
+ */
 export interface RateLimitWindow {
   active: boolean;
   /** Epoch SECONDS (the vendor event's own unit), not millis. */
@@ -520,7 +527,14 @@ export interface ProgressView {
   retrying?: ProgressWindow;
   authenticating?: ProgressWindow;
   hook?: ProgressWindow;
+  /**
+   * The vendor's TWO allowances, each with its own deadline and its own
+   * severity: the rolling five-hour session window, and the seven-day weekly
+   * one. They were a single field until a reader saw a weekly figure named as
+   * the session's, with no way to tell which allowance the percentage meant.
+   */
   rateLimited?: RateLimitWindow;
+  rateLimitedWeekly?: RateLimitWindow;
   /**
    * The session reporting it is parked on the USER. NOT a phase — `state`
    * above remains the SSM's verdict — but a fact the daemon cannot otherwise
@@ -1331,6 +1345,7 @@ const PROGRESS_VIEW_KEYS = new Set([
   "authenticating",
   "hook",
   "rateLimited",
+  "rateLimitedWeekly",
   "blocked",
   "interrupt",
   "failure",
@@ -1364,7 +1379,10 @@ function decodeProgressView(v: unknown): ProgressView {
     }
   }
   if (o.rateLimited !== undefined && o.rateLimited !== null) {
-    pv.rateLimited = decodeRateLimitWindow(o.rateLimited);
+    pv.rateLimited = decodeRateLimitWindow(o.rateLimited, "ProgressView.rateLimited");
+  }
+  if (o.rateLimitedWeekly !== undefined && o.rateLimitedWeekly !== null) {
+    pv.rateLimitedWeekly = decodeRateLimitWindow(o.rateLimitedWeekly, "ProgressView.rateLimitedWeekly");
   }
   if (o.interrupt !== undefined && o.interrupt !== null) {
     pv.interrupt = decodeInterruptWindow(o.interrupt);
@@ -1428,8 +1446,7 @@ function decodeInterruptWindow(v: unknown): InterruptWindow {
   return { active, sinceMs: num(o, "sinceMs", ctx), outcome: known };
 }
 
-function decodeRateLimitWindow(v: unknown): RateLimitWindow {
-  const ctx = "ProgressView.rateLimited";
+function decodeRateLimitWindow(v: unknown, ctx: string): RateLimitWindow {
   const o = ensureObject(v, ctx);
   rejectUnknown(o, RATE_LIMIT_WINDOW_KEYS, ctx);
   return {

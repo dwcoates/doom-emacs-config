@@ -715,6 +715,131 @@ func TestPlainAllowedClosesTheRateLimitWindow(t *testing.T) {
 	}
 }
 
+// rateLimit is one vendor rate-limit report, as a stream event.
+func rateLimit(t *testing.T, info *datav1.RateLimitInfo) *datav1.ClaudeStreamMessage {
+	t.Helper()
+	return &datav1.ClaudeStreamMessage{
+		Msg: &datav1.ClaudeStreamMessage_RateLimitEvent{RateLimitEvent: &datav1.RateLimitEvent{
+			RateLimitInfo: info,
+		}},
+	}
+}
+
+func TestQuietAllowanceKeepsItsFiguresRatherThanBeingDropped(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	// Act — a plain "allowed" is not news, but the figures are still what the
+	// footer needs beside the allowance that IS news.
+	h.apply(streamEvent(t, rateLimit(t, &datav1.RateLimitInfo{
+		Status: "allowed", RateLimitType: "five_hour", Utilization: 0.12,
+	})))
+	// Assert
+	w := h.last().GetRateLimited()
+	if w.GetActive() || w.GetUtilization() != 0.12 {
+		t.Fatalf("session window = %+v, want inactive but carrying 0.12", w)
+	}
+}
+
+func TestWeeklyReportLandsInTheWeeklyWindow(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	// Act
+	h.apply(streamEvent(t, rateLimit(t, &datav1.RateLimitInfo{
+		Status: "allowed_warning", RateLimitType: "seven_day", Utilization: 0.91,
+	})))
+	// Assert
+	w := h.last().GetRateLimitedWeekly()
+	if !w.GetActive() || w.GetUtilization() != 0.91 {
+		t.Fatalf("weekly window = %+v, want the warning carried through", w)
+	}
+}
+
+func TestWeeklyReportLeavesTheSessionWindowAlone(t *testing.T) {
+	// Arrange — the reported bug: a weekly figure displayed as the session's.
+	h := newHarness(t)
+	// Act
+	h.apply(streamEvent(t, rateLimit(t, &datav1.RateLimitInfo{
+		Status: "allowed_warning", RateLimitType: "seven_day", Utilization: 0.91,
+	})))
+	// Assert
+	if w := h.last().GetRateLimited(); w != nil {
+		t.Fatalf("session window = %+v, want untouched by a weekly report", w)
+	}
+}
+
+func TestBothAllowancesStandTogether(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.apply(streamEvent(t, rateLimit(t, &datav1.RateLimitInfo{
+		Status: "allowed", RateLimitType: "five_hour", Utilization: 0.12,
+	})))
+	h.drain()
+	// Act
+	h.apply(streamEvent(t, rateLimit(t, &datav1.RateLimitInfo{
+		Status: "allowed_warning", RateLimitType: "seven_day", Utilization: 0.91,
+	})))
+	// Assert — neither report evicts the other.
+	v := h.last()
+	if v.GetRateLimited().GetUtilization() != 0.12 || v.GetRateLimitedWeekly().GetUtilization() != 0.91 {
+		t.Fatalf("windows = %+v / %+v, want both figures standing",
+			v.GetRateLimited(), v.GetRateLimitedWeekly())
+	}
+}
+
+func TestPerModelWeeklyTypeSharesTheWeeklyWindow(t *testing.T) {
+	// Arrange — seven_day_opus is the same allowance with a narrower scope.
+	h := newHarness(t)
+	// Act
+	h.apply(streamEvent(t, rateLimit(t, &datav1.RateLimitInfo{
+		Status: "allowed_warning", RateLimitType: "seven_day_opus", Utilization: 0.8,
+	})))
+	// Assert
+	if w := h.last().GetRateLimitedWeekly(); w.GetUtilization() != 0.8 {
+		t.Fatalf("weekly window = %+v, want the per-model report folded in", w)
+	}
+}
+
+func TestOverageTypeSharesTheWeeklyWindow(t *testing.T) {
+	// Arrange — overage is what a user buys once the WEEK's allowance is spent.
+	h := newHarness(t)
+	// Act
+	h.apply(streamEvent(t, rateLimit(t, &datav1.RateLimitInfo{
+		Status: "allowed_warning", RateLimitType: "overage", Utilization: 0.4,
+	})))
+	// Assert
+	if w := h.last().GetRateLimitedWeekly(); w.GetUtilization() != 0.4 {
+		t.Fatalf("weekly window = %+v, want the overage report folded in", w)
+	}
+}
+
+func TestTypelessReportKeepsItsOldHomeInTheSessionWindow(t *testing.T) {
+	// Arrange — a vendor that reports no type is reporting the session window,
+	// which is what the field's absence has always meant downstream.
+	h := newHarness(t)
+	// Act
+	h.apply(streamEvent(t, rateLimit(t, &datav1.RateLimitInfo{
+		Status: "allowed_warning", Utilization: 0.3,
+	})))
+	// Assert
+	if w := h.last().GetRateLimited(); w.GetUtilization() != 0.3 {
+		t.Fatalf("session window = %+v, want the typeless report filed here", w)
+	}
+}
+
+func TestUnknownRateLimitTypeIsFiledRatherThanDropped(t *testing.T) {
+	// Arrange — a report the reader never sees is worse than one filed under
+	// the wrong heading, and the daemon logs which happened.
+	h := newHarness(t)
+	// Act
+	h.apply(streamEvent(t, rateLimit(t, &datav1.RateLimitInfo{
+		Status: "allowed_warning", RateLimitType: "one_fortnight", Utilization: 0.7,
+	})))
+	// Assert
+	if w := h.last().GetRateLimited(); w.GetUtilization() != 0.7 {
+		t.Fatalf("session window = %+v, want the unknown-type report filed here", w)
+	}
+}
+
 // --- the API error family ---------------------------------------------------
 
 func TestRetryableApiErrorOpensTheRetryingWindow(t *testing.T) {
