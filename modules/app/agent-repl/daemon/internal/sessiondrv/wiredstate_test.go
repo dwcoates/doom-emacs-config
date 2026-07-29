@@ -139,7 +139,12 @@ func TestASecondEnsureDoesNotReopenTheAxis(t *testing.T) {
 
 // HIBERNATION closes it at the teardown itself, which is the earlier and
 // already-known instant, rather than waiting for the driver exit that follows.
-func TestHibernateReportsDormant(t *testing.T) {
+//
+// It reports HIBERNATED, not severed: this is a stop WE issued to reclaim ~500MB
+// from a workspace nobody was using, so nothing broke. The earlier instant is
+// exactly why the benign answer is available at all — by the time the driver-exit
+// tail runs, the reason is gone.
+func TestHibernateReportsHibernated(t *testing.T) {
 	// Arrange.
 	m, applier, _ := newWiredRig(t)
 	if err := m.Ensure("ws"); err != nil {
@@ -155,16 +160,17 @@ func TestHibernateReportsDormant(t *testing.T) {
 
 	// Assert.
 	got := lastWiring(t, applier, "ws")
-	if got.wiring != ssm.WiringSevered {
-		t.Fatalf("wiring = %s, want dormant", got.wiring)
+	if got.wiring != ssm.WiringHibernated {
+		t.Fatalf("wiring = %s, want hibernated", got.wiring)
 	}
 	if got.reason != "hibernated" {
 		t.Fatalf("reason = %q, want the hibernation named", got.reason)
 	}
 }
 
-// The SESSION-SCOPED stop is hibernation's twin and closes for the same reason.
-func TestHibernateSessionReportsDormant(t *testing.T) {
+// The SESSION-SCOPED stop is hibernation's twin and closes for the same reason,
+// benign for the same reason, and therefore teal for the same reason.
+func TestHibernateSessionReportsHibernated(t *testing.T) {
 	// Arrange.
 	m, applier, _ := newWiredRig(t)
 	if err := m.Ensure("ws"); err != nil {
@@ -179,8 +185,8 @@ func TestHibernateSessionReportsDormant(t *testing.T) {
 	}
 
 	// Assert.
-	if got := lastWiring(t, applier, "ws"); got.wiring != ssm.WiringSevered {
-		t.Fatalf("wiring = %s, want dormant", got.wiring)
+	if got := lastWiring(t, applier, "ws"); got.wiring != ssm.WiringHibernated {
+		t.Fatalf("wiring = %s, want hibernated", got.wiring)
 	}
 }
 
@@ -209,9 +215,11 @@ func TestASessionScopedStopOfAnotherRecordLeavesTheAxisAlone(t *testing.T) {
 	}
 }
 
-// DRIVER EXIT is the catch-all: whatever ended Run — a terminal protocol error
-// here — takes the wiring with it.
-func TestDriverExitReportsDormant(t *testing.T) {
+// DRIVER EXIT reports SEVERED, and only for a NON-NIL runErr. `client.Run` loops
+// forever across benign disconnects and returns non-nil only for a terminal
+// protocol error, so a non-nil answer is genuine evidence the substrate failed —
+// which is exactly what blue is for.
+func TestDriverExitOnATerminalErrorReportsSevered(t *testing.T) {
 	// Arrange — a client whose Run can be made to return.
 	runResult := make(chan error, 1)
 	m, err := New(Config{
@@ -246,7 +254,7 @@ func TestDriverExitReportsDormant(t *testing.T) {
 	// Assert.
 	got := lastWiring(t, applier, "ws")
 	if got.wiring != ssm.WiringSevered {
-		t.Fatalf("wiring = %s, want dormant", got.wiring)
+		t.Fatalf("wiring = %s, want severed", got.wiring)
 	}
 	if got.reason != "driver_exit" {
 		t.Fatalf("reason = %q, want driver_exit", got.reason)
@@ -447,4 +455,35 @@ func contains(haystack, needle string) bool {
 		}
 	}
 	return false
+}
+
+// THE TRAP THIS WHOLE DESIGN TURNS ON: a hibernation's own cancel ends
+// client.Run, so the driver-exit tail fires on the SAME workspace milliseconds
+// after the teal row lands. A tail that wrote `severed` unconditionally
+// therefore repainted every single hibernation blue immediately after it went
+// teal — the entire split undone by one write.
+//
+// The discriminator is runErr. A hibernation's cancel ends Run with nil, and nil
+// is positive evidence that nothing broke, so the tail writes nothing and the
+// benign answer recorded at the earlier instant stands.
+func TestAHibernationSurvivesItsOwnDriverExit(t *testing.T) {
+	// Arrange — a live, wired driver.
+	m, applier, _ := newWiredRig(t)
+	if err := m.Ensure("ws"); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	waitForWirings(applier, 1)
+	m.onConnected("ws", "s1", &corev1.ShimHello{})
+
+	// Act — hibernate, then join the exit goroutine the cancel released.
+	if err := m.Hibernate("ws"); err != nil {
+		t.Fatalf("Hibernate: %v", err)
+	}
+	m.Close()
+
+	// Assert — the axis still reads the hibernation, not a driver-exit severance.
+	if got := lastWiring(t, applier, "ws"); got.wiring != ssm.WiringHibernated {
+		t.Fatalf("wiring after the exit tail = %s/%q, want hibernated — the tail repainted a hibernation blue",
+			got.wiring, got.reason)
+	}
 }

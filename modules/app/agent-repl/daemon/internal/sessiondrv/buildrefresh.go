@@ -138,7 +138,7 @@ func (m *Manager) noteUnknownBuild(workspace, sessionID, reported, want string) 
 // that shim announced on its ShimHello.
 //
 // A workspace with NO live driver is not an error: there is nothing to stop, so
-// the restart is exactly the bring-up, and a user asking to restart a dormant
+// the restart is exactly the bring-up, and a user asking to restart an unwired
 // workspace gets a running one.
 func (m *Manager) RestartSession(ctx context.Context, workspace string) error {
 	sessionID, ok := m.cfg.Locator.Locate(workspace)
