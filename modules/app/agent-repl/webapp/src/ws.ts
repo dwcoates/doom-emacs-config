@@ -4,6 +4,7 @@
  * inbound frames to `onMessage` and sends pre-encoded outbound frames (the
  * caller encodes `FrontendCommand` protojson via command-dispatch.ts).
  */
+import { log, logVerbose } from "./wslog.js";
 
 export interface WsClientOptions {
   url: string;
@@ -36,14 +37,6 @@ export interface WsClientOptions {
    * reports a recovery from nothing.
    */
   onReachable?: () => void;
-  /**
-   * Diagnostic sink. The one caller today is the dropped-reply branch:
-   * a store-generated command (typically a gap's replay-request) that
-   * could not be sent because the socket was not OPEN previously
-   * vanished without a trace — and an unsent replay-request is a feed
-   * that never un-wedges.
-   */
-  log?: (message: string) => void;
 }
 
 const DEFAULT_BACKOFF_MS = [250, 500, 1000, 2000, 5000];
@@ -72,6 +65,10 @@ export class WsClient {
   connect(): void {
     this.epoch++;
     this.closedByUser = false;
+    log("info", "websocket connection attempt started", {
+      operation: "ws.connect",
+      context: { url: this.opts.url, epoch: this.epoch, reconnect_attempt_count: this.attempts },
+    });
     const factory = this.opts.wsFactory ?? ((url: string) => new WebSocket(url));
     const ws = factory(this.opts.url);
     this.ws = ws;
@@ -80,23 +77,43 @@ export class WsClient {
       // A reconnect CLOSES the unreachable window rather than leaving its
       // card standing: the route works again, and a permanent alarm about a
       // fault that ended is the thing the resolution stamp exists to stop.
-      if (this.attempts > 0) this.opts.onReachable?.();
+      const reconnected = this.attempts > 0;
+      if (reconnected) this.opts.onReachable?.();
       this.attempts = 0;
+      log("info", "websocket connection opened", {
+        operation: "ws.open",
+        context: { url: this.opts.url, epoch: this.epoch, reconnected },
+      });
       this.opts.onStatusChange?.(true);
     };
     ws.onmessage = (event: MessageEvent) => {
+      // WebSocket frames can arrive many times per second during replay.
+      logVerbose("info", "websocket received frame", {
+        operation: "ws.message",
+        context: { epoch: this.epoch, byte_length: String(event.data).length },
+      });
       this.opts.onMessage(String(event.data));
     };
     ws.onclose = (event: CloseEvent) => {
       this.opts.onStatusChange?.(false);
       this.ws = null;
-      if (this.closedByUser) return;
+      if (this.closedByUser) {
+        log("info", "websocket closed by user", {
+          operation: "ws.close-user",
+          context: { epoch: this.epoch, code: event.code, reason: event.reason },
+        });
+        return;
+      }
       // The close CODE and REASON are the only evidence separating a daemon
       // that restarted from a network drop, and this handler used to read
       // neither — which is how "reconnecting…" became the webapp's single
       // answer to every transport fault. A user-initiated close is not a
       // failure and is deliberately above this line.
       this.opts.onUnreachable?.(event.code, event.reason);
+      log("warn", "websocket closed unexpectedly and will reconnect", {
+        operation: "ws.close-unexpected",
+        context: { epoch: this.epoch, code: event.code, reason: event.reason, reconnect_attempt_count: this.attempts },
+      });
       this.scheduleReconnect();
     };
     ws.onerror = () => {
@@ -110,13 +127,23 @@ export class WsClient {
     const delay = this.backoff[Math.min(this.attempts, this.backoff.length - 1)];
     this.attempts++;
     const epoch = this.epoch;
+    log("info", "websocket reconnect scheduled", {
+      operation: "ws.reconnect-scheduled",
+      context: { epoch, delay_ms: delay, reconnect_attempt_count: this.attempts },
+    });
     this.reconnectTimer = setTimeout(() => {
       void this.reconnectIfSessionExists(epoch);
     }, delay);
   }
 
   private async reconnectIfSessionExists(epoch: number): Promise<void> {
-    if (this.epoch !== epoch || this.closedByUser) return;
+    if (this.epoch !== epoch || this.closedByUser) {
+      logVerbose("info", "websocket reconnect abandoned after connection state changed", {
+        operation: "ws.reconnect-abandoned",
+        context: { scheduled_epoch: epoch, current_epoch: this.epoch, closed_by_user: this.closedByUser },
+      });
+      return;
+    }
     if (this.opts.sessionExists) {
       let exists = true;
       try {
@@ -124,16 +151,26 @@ export class WsClient {
       } catch (err) {
         // Probe unreachable (daemon briefly down?): treat as unknown
         // and keep retrying — only a definitive "not listed" stops us.
-        this.opts.log?.(
-          `ws: session-exists probe failed: ${String(err)} — treating as unknown, will retry`,
-        );
+        log("error", "websocket session-exists probe failed before reconnect", {
+          operation: "ws.session-exists-probe-failed",
+          context: { scheduled_epoch: epoch, cause: err },
+        });
       }
       // Re-check after the await: a close()/connect() during the probe
       // moves the epoch, and acting on the stale result would open a
       // duplicate socket (or fire onGone against a fresh connection).
-      if (this.epoch !== epoch || this.closedByUser) return;
+      if (this.epoch !== epoch || this.closedByUser) {
+        logVerbose("info", "websocket reconnect probe result became stale", {
+          operation: "ws.reconnect-probe-stale",
+          context: { scheduled_epoch: epoch, current_epoch: this.epoch, closed_by_user: this.closedByUser, session_exists: exists },
+        });
+        return;
+      }
       if (!exists) {
-        this.opts.log?.("ws: session gone — stopping reconnect");
+        log("warn", "websocket session no longer exists and reconnect stopped", {
+          operation: "ws.session-gone",
+          context: { scheduled_epoch: epoch },
+        });
         this.opts.onGone?.();
         return;
       }
@@ -143,9 +180,12 @@ export class WsClient {
 
   /** Send one pre-encoded frame; false when the socket is not open. */
   send(raw: string): boolean {
-    if (this.ws === null || this.ws.readyState !== WebSocket.OPEN) {
-      return false;
-    }
+    // STRUCTURAL NO-REENTRY BOUNDARY. Canonical logs are themselves encoded
+    // commands sent through this method. Logging either branch here would call
+    // ForwardingLogger -> CommandDispatcher.clientLog -> WsClient.send again.
+    // The command owner records an ordinary send refusal. The logger retains
+    // its own refused frame in its bounded forwarding queue.
+    if (this.ws === null || this.ws.readyState !== WebSocket.OPEN) return false;
     this.ws.send(raw);
     return true;
   }
@@ -153,6 +193,10 @@ export class WsClient {
   close(): void {
     this.epoch++;
     this.closedByUser = true;
+    log("info", "websocket close requested", {
+      operation: "ws.close-requested",
+      context: { epoch: this.epoch, had_socket: this.ws !== null, had_reconnect_timer: this.reconnectTimer !== null },
+    });
     if (this.reconnectTimer !== null) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;

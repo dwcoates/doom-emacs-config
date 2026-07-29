@@ -354,35 +354,48 @@ export interface ConvertResult {
  */
 export function convert(message: unknown, opts?: ConvertOptions): ConvertResult {
   if (!isObject(message)) {
+    const reason = "message is not a JSON object";
+    logUnparsed("<non-object>", "", "", reason, { input_kind: message === null ? "null" : typeof message });
     return {
-      vendor: unparsedEvent(safeStringify(message), "message is not a JSON object"),
+      vendor: unparsedEvent(safeStringify(message), reason, { log: false }),
       lifecycle: [],
       loggedExtras: [],
     };
   }
   const type = message["type"];
   if (typeof type !== "string" || type === "") {
+    const reason = "message has no string `type` discriminator";
+    logUnparsed(
+      "<missing>",
+      strOf(pick(message, "session_id", "sessionId")),
+      strOf(pick(message, "request_id", "requestId")),
+      reason,
+    );
     return {
-      vendor: unparsedEvent(safeStringify(message), "message has no string `type` discriminator"),
+      vendor: unparsedEvent(safeStringify(message), reason, { log: false }),
       lifecycle: [],
       loggedExtras: [],
     };
   }
 
   const envelope = readEnvelope(message, opts);
+  LOGGER.logVerbose({ ...(envelope.sessionId === "" ? {} : { claude_session_id: envelope.sessionId }), ...(envelope.requestId === "" ? {} : { request_id: envelope.requestId }), sdk_type: type }, "converting persistent SDK message");
   try {
     const built = build(type, message, envelope.reader, opts);
     const extras = envelope.reader.finish(built.typeLabel);
     const vendor = vendorEvent(built.csm, envelope, extras, built.ephemeral);
     const lifecycle = built.lifecyclePayloads.map((p) => lifecycleEvent(envelope, p));
+    LOGGER.logVerbose({ ...(envelope.sessionId === "" ? {} : { claude_session_id: envelope.sessionId }), ...(envelope.requestId === "" ? {} : { request_id: envelope.requestId }), sdk_type: type, lifecycle_count: lifecycle.length, extra_count: extras.logged.length, event_class: built.ephemeral ? "ephemeral" : "persistent" }, "converted SDK message into vendor and lifecycle events");
     return { vendor, lifecycle, loggedExtras: extras.logged };
   } catch (err) {
     if (err instanceof MissingFieldError) {
+      logUnparsed(type, envelope.sessionId, envelope.requestId, err.message);
       return {
         vendor: unparsedEvent(safeStringify(message), err.message, {
           sessionId: envelope.sessionId,
           requestId: envelope.requestId,
           producedAtMs: envelope.producedAtMs,
+          log: false,
         }),
         lifecycle: [],
         loggedExtras: [],
@@ -390,6 +403,24 @@ export function convert(message: unknown, opts?: ConvertOptions): ConvertResult 
     }
     throw err;
   }
+}
+
+/** Record one converter-owned malformed-record cause without copying raw data. */
+function logUnparsed(
+  sdkType: string,
+  sessionId: string,
+  requestId: string,
+  reason: string,
+  context: Record<string, unknown> = {},
+): void {
+  LOGGER.log({
+    level: "error",
+    sdk_type: sdkType,
+    reason,
+    ...(sessionId === "" ? {} : { claude_session_id: sessionId }),
+    ...(requestId === "" ? {} : { request_id: requestId }),
+    ...context,
+  }, "SDK message emitted as UnparsedEvent");
 }
 
 // ---------------------------------------------------------------------------

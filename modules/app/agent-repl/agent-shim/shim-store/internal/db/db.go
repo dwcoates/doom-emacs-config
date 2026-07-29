@@ -30,6 +30,7 @@ func Open(path string, log *logging.Logger) (*DB, error) {
 	if log == nil {
 		panic("shim-store db: nil logger")
 	}
+	log.LogVerbose(logging.Fields{Operation: "open", DatabasePath: path, Table: "schema_meta"}, "opening SQLite database")
 	// modernc.org/sqlite takes PRAGMAs as _pragma query params. WAL for
 	// concurrent readers during live-tail; NORMAL sync is durable under WAL;
 	// busy_timeout guards the brief window a checkpoint holds the writer.
@@ -74,15 +75,18 @@ func Open(path string, log *logging.Logger) (*DB, error) {
 		log.Log(logging.Fields{Operation: "migrate", DatabasePath: path, Table: "schema_meta", Level: "error"}, "schema migration failed: %v", err)
 		return nil, err
 	}
+	log.Log(logging.Fields{Operation: "open", DatabasePath: path, Table: "event"}, "SQLite database ready")
 	return d, nil
 }
 
 // Close closes the underlying handle.
 func (d *DB) Close() error {
+	d.log.LogVerbose(logging.Fields{Operation: "close"}, "closing SQLite database")
 	if err := d.sql.Close(); err != nil {
 		d.log.Log(logging.Fields{Operation: "close", Level: "error"}, "closing SQLite database failed: %v", err)
 		return err
 	}
+	d.log.Log(logging.Fields{Operation: "close"}, "SQLite database closed")
 	return nil
 }
 
@@ -116,6 +120,7 @@ CREATE TABLE IF NOT EXISTS schema_meta (version INTEGER NOT NULL);
 
 // migrate brings the database to SchemaVersion, loud-logging the transition.
 func (d *DB) migrate() error {
+	d.log.LogVerbose(logging.Fields{Operation: "migrate", Table: "schema_meta"}, "checking schema target_version=%d", SchemaVersion)
 	if _, err := d.sql.Exec(schemaDDL); err != nil {
 		return fmt.Errorf("shim-store db: applying schema: %w", err)
 	}
@@ -137,6 +142,7 @@ func (d *DB) migrate() error {
 			// never a silent reset.
 			return fmt.Errorf("shim-store db: schema version %d needs migration to %d, but no migration is registered", version, SchemaVersion)
 		}
+		d.log.LogVerbose(logging.Fields{Operation: "migrate", Table: "schema_meta"}, "schema already current version=%d", version)
 	default:
 		return fmt.Errorf("shim-store db: reading schema_meta: %w", err)
 	}

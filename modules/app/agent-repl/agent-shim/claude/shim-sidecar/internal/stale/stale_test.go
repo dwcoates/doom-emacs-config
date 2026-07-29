@@ -1,7 +1,9 @@
 package stale
 
 import (
+	"bytes"
 	"io"
+	"strings"
 	"testing"
 	"time"
 
@@ -55,6 +57,26 @@ func TestVanishGraceEmitsLostAfterWindow(t *testing.T) {
 	if tr.IsOpen("s1", "b1") {
 		t.Fatalf("task should be closed after LOST")
 	}
+}
+
+func TestOpenRejectsIncompleteTaskIdentityLoudly(t *testing.T) {
+	var logs bytes.Buffer
+	log := logging.New(&logs, io.Discard).With(logging.Context{Component: "test"})
+	log.SetDiagnosticSink(func(logging.Diagnostic) {})
+	tr := New(Options{}, log)
+	defer func() {
+		recovered := recover()
+		message, ok := recovered.(string)
+		if !ok || !strings.Contains(message, "task identity is required") {
+			t.Fatalf("Open panic = %v, want task identity invariant", recovered)
+		}
+		if !strings.Contains(logs.String(), `"operation":"stale-open"`) ||
+			!strings.Contains(logs.String(), `"level":"error"`) ||
+			!strings.Contains(logs.String(), "task identity is required") {
+			t.Fatalf("canonical invariant log = %q", logs.String())
+		}
+	}()
+	tr.Open("", tail.KindAgentTranscript, "s1", "/tmp/agent.jsonl", 1, 1)
 }
 
 func TestVanishThenPresentDoesNotLose(t *testing.T) {
@@ -137,6 +159,123 @@ func TestRestoreRejectsMalformedSnapshotWithoutMutatingTracker(t *testing.T) {
 	}
 	if !tr.IsOpen("s1", "prior") {
 		t.Fatal("failed Restore mutated prior tracker state")
+	}
+}
+
+func TestRestoreValidationErrorsAreLoggedWithoutMutatingTracker(t *testing.T) {
+	duplicate := recoveredStart("s2", "duplicate", corev1.TaskKind_TASK_KIND_AGENT, 50_000, 50_000)
+	cases := []struct {
+		name    string
+		states  []*corev1.OpenTaskState
+		session string
+		task    string
+		cause   string
+	}{
+		{
+			name:   "missing start event",
+			states: []*corev1.OpenTaskState{{}},
+			cause:  "no start event",
+		},
+		{
+			name: "non TaskStarted payload",
+			states: []*corev1.OpenTaskState{{Started: &corev1.Event{
+				SessionId: "s2",
+				Seq:       7,
+				Payload:   &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{}},
+			}}},
+			session: "s2",
+			cause:   "not TaskStarted",
+		},
+		{
+			name:    "duplicate task identity",
+			states:  []*corev1.OpenTaskState{duplicate, duplicate},
+			session: "s2",
+			task:    "duplicate",
+			cause:   "duplicate recovered task",
+		},
+		{
+			name: "unsupported task kind",
+			states: []*corev1.OpenTaskState{
+				recoveredStart("s2", "bad-kind", corev1.TaskKind_TASK_KIND_UNSPECIFIED, 50_000, 50_000),
+			},
+			session: "s2",
+			task:    "bad-kind",
+			cause:   "unsupported task kind",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var global bytes.Buffer
+			var diagnostics []logging.Diagnostic
+			log := logging.New(&global, &global).With(logging.Context{Component: "test"})
+			log.SetDiagnosticSink(func(d logging.Diagnostic) {
+				diagnostics = append(diagnostics, d)
+			})
+			tr := New(Options{}, log)
+			tr.Open("prior", tail.KindShellSpool, "s1", "", 10, 10)
+			global.Reset()
+			diagnostics = nil
+
+			err := tr.Restore(tc.states)
+			if err == nil || !strings.Contains(err.Error(), tc.cause) {
+				t.Fatalf("Restore err = %v, want cause %q", err, tc.cause)
+			}
+			if !tr.IsOpen("s1", "prior") {
+				t.Fatal("failed Restore mutated prior tracker state")
+			}
+			if tc.session == "" {
+				if !strings.Contains(global.String(), `"operation":"restore-open-tasks"`) ||
+					!strings.Contains(global.String(), tc.cause) {
+					t.Fatalf("canonical global validation log = %q", global.String())
+				}
+				return
+			}
+			if len(diagnostics) != 1 {
+				t.Fatalf("diagnostics = %d, want one canonical validation record", len(diagnostics))
+			}
+			got := diagnostics[0]
+			if got.Operation != "restore-open-tasks" || got.Session != tc.session ||
+				!strings.Contains(got.Message, tc.cause) {
+				t.Fatalf("canonical validation diagnostic = %+v", got)
+			}
+			if tc.task != "" && got.Context["task"] != tc.task {
+				t.Fatalf("validation task context = %v, want %q", got.Context["task"], tc.task)
+			}
+		})
+	}
+}
+
+func TestRestoreRepeatedIdenticalFailureIsLoggedOnceUntilSuccess(t *testing.T) {
+	var diagnostics []logging.Diagnostic
+	log := logging.New(io.Discard, io.Discard).With(logging.Context{Component: "test"})
+	log.SetDiagnosticSink(func(d logging.Diagnostic) {
+		diagnostics = append(diagnostics, d)
+	})
+	tr := New(Options{}, log)
+	invalid := []*corev1.OpenTaskState{{Started: &corev1.Event{
+		SessionId: "s2",
+		Seq:       7,
+		Payload:   &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{}},
+	}}}
+
+	for attempt := 0; attempt < 4; attempt++ {
+		if err := tr.Restore(invalid); err == nil {
+			t.Fatalf("Restore attempt %d accepted invalid snapshot", attempt)
+		}
+	}
+	if len(diagnostics) != 1 {
+		t.Fatalf("repeated invalid snapshot queued %d diagnostics, want 1", len(diagnostics))
+	}
+
+	valid := recoveredStart("s2", "task-1", corev1.TaskKind_TASK_KIND_AGENT, 50_000, 50_000)
+	if err := tr.Restore([]*corev1.OpenTaskState{valid}); err != nil {
+		t.Fatalf("valid Restore: %v", err)
+	}
+	if err := tr.Restore(invalid); err == nil {
+		t.Fatal("Restore accepted invalid snapshot after successful recovery")
+	}
+	if len(diagnostics) != 2 {
+		t.Fatalf("new failure after success left diagnostics=%d, want 2 distinct occurrences", len(diagnostics))
 	}
 }
 

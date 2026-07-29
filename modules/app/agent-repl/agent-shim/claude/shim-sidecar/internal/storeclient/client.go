@@ -52,6 +52,7 @@ type Client struct {
 
 // New builds a Client for the store at socket.
 func New(socket string, log *logging.Bound) *Client {
+	log.With(logging.Context{Operation: "storeclient-new", StoreSocket: socket}).LogVerbose("constructing store client")
 	return &Client{socket: socket, log: log}
 }
 
@@ -62,9 +63,11 @@ func New(socket string, log *logging.Bound) *Client {
 // here: the socket is merely established, and the first Write is what declares
 // this a producer connection.
 func (c *Client) Connect() error {
+	c.log.With(logging.Context{Operation: "storeclient-connect", StoreSocket: c.socket}).LogVerbose("connect requested")
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.conn != nil {
+		c.log.With(logging.Context{Operation: "storeclient-connect", StoreSocket: c.socket}).LogVerbose("producer connection already established")
 		return nil
 	}
 	conn, err := net.Dial("unix", c.socket)
@@ -72,6 +75,7 @@ func (c *Client) Connect() error {
 		return fmt.Errorf("storeclient: dial %s: %w", c.socket, err)
 	}
 	c.conn = conn
+	c.log.With(logging.Context{Operation: "storeclient-connect", StoreSocket: c.socket}).Log("producer connection established")
 	return nil
 }
 
@@ -95,6 +99,7 @@ type RecoveryState struct {
 // recovers all cursors plus authoritative open tasks. It uses a dedicated
 // short-lived connection (CursorQuery is its own connection role).
 func (c *Client) Recover(fileID string) (RecoveryState, error) {
+	c.log.With(logging.Context{Operation: "storeclient-recover", StoreSocket: c.socket}).LogVerbose("recover requested file_id=%q", fileID)
 	conn, err := net.Dial("unix", c.socket)
 	if err != nil {
 		return RecoveryState{}, fmt.Errorf("storeclient: dial %s: %w", c.socket, err)
@@ -114,6 +119,7 @@ func (c *Client) Recover(fileID string) (RecoveryState, error) {
 	if fileID == "" && !list.GetOpenTasksAuthoritative() {
 		return RecoveryState{}, fmt.Errorf("storeclient: CursorList lacks authoritative open-task state; refusing startup against an incompatible store")
 	}
+	c.log.With(logging.Context{Operation: "storeclient-recover", StoreSocket: c.socket}).Log("recovered file_id=%q cursors=%d open_tasks=%d authoritative=%t", fileID, len(list.GetCursors()), len(list.GetOpenTasks()), list.GetOpenTasksAuthoritative())
 	return RecoveryState{
 		Cursors:   list.GetCursors(),
 		OpenTasks: list.GetOpenTasks(),
@@ -137,6 +143,11 @@ func (c *Client) RecoverCursors(fileID string) ([]*corev1.CursorState, error) {
 // goes false and the state machine redials); the error is returned to the
 // caller, never swallowed.
 func (c *Client) Write(producer string, batch *corev1.EventBatch) (*corev1.StoreWriteAck, error) {
+	eventCount := 0
+	if batch != nil {
+		eventCount = len(batch.GetEvents())
+	}
+	c.log.With(logging.Context{Operation: "storeclient-write", StoreSocket: c.socket, Producer: producer}).LogVerbose("write requested events=%d cursor_advance=%t", eventCount, batch != nil && batch.GetCursorAdvance() != nil)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	conn := c.conn
@@ -163,6 +174,7 @@ func (c *Client) Write(producer string, batch *corev1.EventBatch) (*corev1.Store
 		// session-owned rejection into the global sidecar file.
 		return ack, fmt.Errorf("storeclient: batch rejected: %s", ack.GetError())
 	}
+	c.log.With(logging.Context{Operation: "storeclient-write", StoreSocket: c.socket, Producer: producer}).LogVerbose("StoreWrite acknowledged events=%d", eventCount)
 	return ack, nil
 }
 
@@ -172,17 +184,21 @@ func (c *Client) Write(producer string, batch *corev1.EventBatch) (*corev1.Store
 // answering "fine" for a connection that does not exist would hide the outage
 // this ping exists to find.
 func (c *Client) Heartbeat() error {
+	c.log.With(logging.Context{Operation: "storeclient-heartbeat", StoreSocket: c.socket}).LogVerbose("heartbeat requested")
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.conn == nil {
+		c.log.With(logging.Context{Operation: "storeclient-heartbeat", StoreSocket: c.socket, Level: "error"}).Log("heartbeat rejected because producer connection is down")
 		return ErrNotConnected
 	}
 	if err := wire.WriteAny(c.conn, &corev1.Heartbeat{SentAtMs: time.Now().UnixMilli()}); err != nil {
 		c.dropConn()
+		c.log.With(logging.Context{Operation: "storeclient-heartbeat", StoreSocket: c.socket, Level: "error"}).Log("Heartbeat send failed: %v", err)
 		return fmt.Errorf("storeclient: sending Heartbeat: %w", err)
 	}
 	if _, err := wire.ReadAny(c.conn); err != nil {
 		c.dropConn()
+		c.log.With(logging.Context{Operation: "storeclient-heartbeat", StoreSocket: c.socket, Level: "error"}).Log("heartbeat echo read failed: %v", err)
 		return fmt.Errorf("storeclient: reading Heartbeat echo: %w", err)
 	}
 	return nil
@@ -194,12 +210,14 @@ func (c *Client) Heartbeat() error {
 // drops the connection so link.go repeats its mandatory recovery before this
 // sidecar reads another file.
 func (c *Client) Health(requestID string) error {
+	c.log.With(logging.Context{Operation: "storeclient-health", StoreSocket: c.socket, RequestID: requestID}).LogVerbose("health requested")
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.conn == nil {
 		return ErrNotConnected
 	}
 	if requestID == "" {
+		c.log.With(logging.Context{Operation: "storeclient-health", StoreSocket: c.socket, Level: "error"}).Log("health rejected because request_id is empty")
 		return errors.New("storeclient: health check requires request_id")
 	}
 	if err := wire.WriteAny(c.conn, &corev1.HealthCheck{RequestId: requestID}); err != nil {
@@ -224,16 +242,23 @@ func (c *Client) Health(requestID string) error {
 		c.dropConn()
 		return fmt.Errorf("storeclient: store health failed: %s", status.GetReason())
 	}
+	c.log.With(logging.Context{Operation: "storeclient-health", StoreSocket: c.socket, RequestID: requestID}).LogVerbose("store reported healthy")
 	return nil
 }
 
 // Close closes the producer connection.
 func (c *Client) Close() error {
+	c.log.With(logging.Context{Operation: "storeclient-close", StoreSocket: c.socket}).LogVerbose("close requested")
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.conn != nil {
 		err := c.conn.Close()
 		c.conn = nil
+		if err != nil {
+			c.log.With(logging.Context{Operation: "storeclient-close", StoreSocket: c.socket, Level: "error"}).Log("producer close failed: %v", err)
+		} else {
+			c.log.With(logging.Context{Operation: "storeclient-close", StoreSocket: c.socket}).Log("producer connection closed")
+		}
 		return err
 	}
 	return nil

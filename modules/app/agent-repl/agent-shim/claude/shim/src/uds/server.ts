@@ -493,7 +493,9 @@ export class SessionServer {
     this.handshaked = false;
     this.stopHeartbeat();
     if (err) {
-      LOGGER.log({ level: "error", agent_repl_session_id: this.opts.sessionId, cause: err }, `daemon connection lost: ${err.message} (turn survives; awaiting reattach)`);
+      // MessageConn owns and already recorded the causal transport failure.
+      // This layer records only the semantic state transition.
+      LOGGER.log({ agent_repl_session_id: this.opts.sessionId, close_outcome: "transport_error" }, "daemon transport closed; turn survives and awaits reattach");
     } else {
       LOGGER.log({ agent_repl_session_id: this.opts.sessionId }, `daemon disconnected cleanly (turn survives; awaiting reattach)`);
     }

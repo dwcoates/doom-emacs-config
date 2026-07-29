@@ -1,12 +1,14 @@
 package storeclient
 
 import (
+	"bytes"
 	"errors"
 	"io"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -130,7 +132,7 @@ func TestRecoverRejectsStoreWithoutAuthoritativeOpenTaskState(t *testing.T) {
 		served <- wire.WriteAny(conn, &corev1.CursorList{})
 	}()
 
-	_, err = New(sock, nil).Recover("")
+	_, err = New(sock, testLog()).Recover("")
 	if err == nil {
 		t.Fatal("Recover accepted a CursorList with no authoritative open-task attestation")
 	}
@@ -234,7 +236,7 @@ func TestIntegrationHealthCheck(t *testing.T) {
 	// Arrange: as with a heartbeat, health may be the first deliberate frame
 	// after the sidecar restores its producer connection.
 	sock := startRealStore(t)
-	c := New(sock, nil)
+	c := New(sock, testLog())
 	defer c.Close()
 	if err := c.Connect(); err != nil {
 		t.Fatalf("Connect: %v", err)
@@ -252,12 +254,17 @@ func TestIntegrationHealthCheck(t *testing.T) {
 
 func TestWriteErrorSurfacedOnDeadStore(t *testing.T) {
 	// Arrange: a client pointed at a socket with no server (honest sad path).
-	c := New(filepath.Join(t.TempDir(), "nonexistent.sock"), testLog())
+	socket := filepath.Join(t.TempDir(), "nonexistent.sock")
+	var logs bytes.Buffer
+	c := New(socket, logging.New(&logs, &logs).With(logging.Context{Component: "test"}))
 	// Act
 	_, err := c.Write("shim-claude-sidecar", &corev1.EventBatch{})
 	// Assert: the failure is surfaced, never swallowed.
 	if err == nil {
 		t.Fatal("expected an error writing to a dead store")
+	}
+	if strings.Contains(logs.String(), `"level":"error"`) {
+		t.Fatalf("storeclient globally logged caller-owned write error: %q", logs.String())
 	}
 }
 
@@ -295,7 +302,7 @@ func TestHeartbeatOnADownConnectionIsAnErrorNotSilence(t *testing.T) {
 func TestHealthOnADownConnectionIsAnErrorNotSilence(t *testing.T) {
 	// Arrange: a health assertion cannot treat an absent producer connection as
 	// healthy, because that would permit the shim to render a dead session.
-	c := New(filepath.Join(t.TempDir(), "nonexistent.sock"), nil)
+	c := New(filepath.Join(t.TempDir(), "nonexistent.sock"), testLog())
 
 	// Act / Assert
 	if err := c.Health("health-down"); !errors.Is(err, ErrNotConnected) {
@@ -307,7 +314,7 @@ func TestHealthRequiresCorrelationID(t *testing.T) {
 	// Arrange: connect first so the request-id invariant, rather than a missing
 	// transport, is the error this test exercises.
 	sock := startRealStore(t)
-	c := New(sock, nil)
+	c := New(sock, testLog())
 	defer c.Close()
 	if err := c.Connect(); err != nil {
 		t.Fatalf("Connect: %v", err)
@@ -316,6 +323,125 @@ func TestHealthRequiresCorrelationID(t *testing.T) {
 	// Act / Assert
 	if err := c.Health(""); err == nil {
 		t.Fatal("Health accepted an empty request_id")
+	}
+}
+
+func TestHealthRejectsMismatchedResponseAndLogsContext(t *testing.T) {
+	var logs bytes.Buffer
+	c := New("/tmp/test-store.sock", logging.New(&logs, &logs).With(logging.Context{Component: "test"}))
+	client, server := net.Pipe()
+	c.conn = client
+	t.Cleanup(func() {
+		_ = c.Close()
+		_ = server.Close()
+	})
+	served := make(chan error, 1)
+	go func() {
+		msg, err := wire.ReadAny(server)
+		if err != nil {
+			served <- err
+			return
+		}
+		if _, ok := msg.(*corev1.HealthCheck); !ok {
+			served <- errors.New("expected HealthCheck")
+			return
+		}
+		served <- wire.WriteAny(server, &corev1.HealthStatus{
+			RequestId: "wrong-request",
+			Healthy:   true,
+		})
+	}()
+
+	err := c.Health("expected-request")
+	if err == nil || !strings.Contains(err.Error(), "request_id") {
+		t.Fatalf("Health err = %v, want request_id mismatch", err)
+	}
+	if c.Connected() {
+		t.Fatal("mismatched HealthStatus left the producer connection established")
+	}
+	if serveErr := <-served; serveErr != nil {
+		t.Fatalf("serve HealthStatus: %v", serveErr)
+	}
+	if strings.Contains(logs.String(), `"level":"error"`) || strings.Contains(logs.String(), "wrong-request") {
+		t.Fatalf("storeclient globally logged caller-owned health mismatch: %q", logs.String())
+	}
+}
+
+func TestHealthRejectsUnhealthyResponseAndLogsReason(t *testing.T) {
+	var logs bytes.Buffer
+	c := New("/tmp/test-store.sock", logging.New(&logs, &logs).With(logging.Context{Component: "test"}))
+	client, server := net.Pipe()
+	c.conn = client
+	t.Cleanup(func() {
+		_ = c.Close()
+		_ = server.Close()
+	})
+	served := make(chan error, 1)
+	go func() {
+		if _, err := wire.ReadAny(server); err != nil {
+			served <- err
+			return
+		}
+		served <- wire.WriteAny(server, &corev1.HealthStatus{
+			RequestId: "health-unhealthy",
+			Healthy:   false,
+			Reason:    "database unavailable",
+		})
+	}()
+
+	err := c.Health("health-unhealthy")
+	if err == nil || !strings.Contains(err.Error(), "database unavailable") {
+		t.Fatalf("Health err = %v, want store health reason", err)
+	}
+	if c.Connected() {
+		t.Fatal("unhealthy HealthStatus left the producer connection established")
+	}
+	if serveErr := <-served; serveErr != nil {
+		t.Fatalf("serve HealthStatus: %v", serveErr)
+	}
+	if strings.Contains(logs.String(), `"level":"error"`) || strings.Contains(logs.String(), "database unavailable") {
+		t.Fatalf("storeclient globally logged caller-owned unhealthy response: %q", logs.String())
+	}
+}
+
+func TestWriteRejectionKeepsConnectionAndLogsStoreReason(t *testing.T) {
+	var logs bytes.Buffer
+	c := New("/tmp/test-store.sock", logging.New(&logs, &logs).With(logging.Context{Component: "test"}))
+	client, server := net.Pipe()
+	c.conn = client
+	t.Cleanup(func() {
+		_ = c.Close()
+		_ = server.Close()
+	})
+	served := make(chan error, 1)
+	go func() {
+		msg, err := wire.ReadAny(server)
+		if err != nil {
+			served <- err
+			return
+		}
+		if _, ok := msg.(*corev1.StoreWrite); !ok {
+			served <- errors.New("expected StoreWrite")
+			return
+		}
+		served <- wire.WriteAny(server, &corev1.StoreWriteAck{Error: "cursor conflict"})
+	}()
+
+	ack, err := c.Write("shim-claude-sidecar", &corev1.EventBatch{})
+	if err == nil || !strings.Contains(err.Error(), "cursor conflict") {
+		t.Fatalf("Write err = %v, want store rejection", err)
+	}
+	if ack.GetError() != "cursor conflict" {
+		t.Fatalf("ack error = %q, want cursor conflict", ack.GetError())
+	}
+	if !c.Connected() {
+		t.Fatal("store rejection dropped a healthy producer connection")
+	}
+	if serveErr := <-served; serveErr != nil {
+		t.Fatalf("serve StoreWriteAck: %v", serveErr)
+	}
+	if strings.Contains(logs.String(), `"level":"error"`) || strings.Contains(logs.String(), "cursor conflict") {
+		t.Fatalf("storeclient leaked session-owned rejection into global log: %q", logs.String())
 	}
 }
 

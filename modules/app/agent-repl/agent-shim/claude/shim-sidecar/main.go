@@ -128,8 +128,9 @@ func isBootstrapError(err error) bool {
 // ---------------------------------------------------------------------------
 
 type watched struct {
-	target discover.Target
-	tailer *tail.Tailer
+	target    discover.Target
+	sessionID string
+	tailer    *tail.Tailer
 }
 
 // UnownedSpoolWindow is how long a spool may sit unattributed before it counts
@@ -308,12 +309,12 @@ func (s *sidecar) rescan() {
 			SpoolDir:  tgt.SpoolDir,
 			RunID:     tgt.RunID,
 		}
-		bound := s.log.With(logging.Context{Component: "tail", Path: tgt.Path, Session: tgt.SessionID, Task: tgt.TaskID})
+		bound := s.log.With(logging.Context{Component: "tail", Path: tgt.Path, Session: session, Task: tgt.TaskID})
 		tr := tail.New(tgt.Path, tgt.Codec(), s.newHandler(tgt.Kind, bound), ctx, bound)
 		if c := s.cursors[tgt.Path]; c != nil {
 			tr.Restore(c)
 		}
-		s.watchers[tgt.Path] = &watched{target: tgt, tailer: tr}
+		s.watchers[tgt.Path] = &watched{target: tgt, sessionID: session, tailer: tr}
 	}
 	s.reportHeld(now)
 }
@@ -428,13 +429,13 @@ func (s *sidecar) pollAll() {
 			if os.IsNotExist(err) {
 				// Vanished file: start the grace clock; stop watching it.
 				if w.target.TaskID != "" {
-					s.tracker.MarkVanished(w.target.SessionID, w.target.TaskID, now)
+					s.tracker.MarkVanished(w.sessionID, w.target.TaskID, now)
 				}
 				delete(s.watchers, path)
-				s.log.With(logging.Context{Operation: "vanished", Path: path, Session: w.target.SessionID, Task: w.target.TaskID}).Log("tail vanished, grace clock started")
+				s.log.With(logging.Context{Operation: "vanished", Path: path, Session: w.sessionID, Task: w.target.TaskID}).Log("tail vanished, grace clock started")
 				continue
 			}
-			s.log.With(logging.Context{Operation: "poll", Path: path, Session: w.target.SessionID, Task: w.target.TaskID, Level: "error"}).Log("tail poll failed: %v", err)
+			s.log.With(logging.Context{Operation: "poll", Path: path, Session: w.sessionID, Task: w.target.TaskID, Level: "error"}).Log("tail poll failed: %v", err)
 			continue
 		}
 		if !res.Changed {
@@ -443,7 +444,7 @@ func (s *sidecar) pollAll() {
 		writeStart := time.Now()
 		if err := s.writeBatch(res); err != nil {
 			// Honest sad path: do NOT commit; the batch replays and dedup absorbs.
-			s.log.With(logging.Context{Operation: "store-write", Path: path, Session: w.target.SessionID, Task: w.target.TaskID, Level: "error", SinkEmergency: true}).Log("cursor not advanced after %d events: %v", len(res.Events), err)
+			s.log.With(logging.Context{Operation: "store-write", Path: path, Session: w.sessionID, Task: w.target.TaskID, Level: "error", SinkEmergency: true}).Log("cursor not advanced after %d events: %v", len(res.Events), err)
 			if s.link != linkUp {
 				// The write did not merely fail, it revealed a dead link. Abandon
 				// the pass rather than reading the remaining files with nowhere
@@ -455,12 +456,12 @@ func (s *sidecar) pollAll() {
 		storeWriteMs := time.Since(writeStart).Milliseconds()
 		w.tailer.Commit(res)
 		if w.target.TaskID != "" {
-			s.tracker.Activity(w.target.SessionID, w.target.TaskID, now)
+			s.tracker.Activity(w.sessionID, w.target.TaskID, now)
 		}
 		s.applyLifecycle(res.Events, now)
 		// The happy path is the one that carries the user's prompt echo to the
 		// GUI, so it gets a line too: steady state is silent, a pickup is not.
-		s.log.With(logging.Context{Operation: "tail-pickup", Path: path, Session: w.target.SessionID, Task: w.target.TaskID}).Log(
+		s.log.With(logging.Context{Operation: "tail-pickup", Path: path, Session: w.sessionID, Task: w.target.TaskID}).Log(
 			"picked up %d event(s) kind=%s store_write_ms=%d",
 			len(res.Events), kindLabel(w.target.Kind), storeWriteMs)
 	}

@@ -2,12 +2,14 @@ package main
 
 import (
 	"errors"
+	"io"
 	"sync"
 	"testing"
 	"time"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	"agentrepl/shim-claude-sidecar/internal/logging"
+	"agentrepl/shim-claude-sidecar/internal/stale"
 )
 
 func TestDiagnosticOutboxRetainsExactEventUntilAcknowledged(t *testing.T) {
@@ -111,5 +113,56 @@ func TestDiagnosticOutboxFailedFlushNeverGrowsQueue(t *testing.T) {
 		if len(queued) != 1 || queued[0] != first {
 			t.Fatalf("attempt %d queue changed after failed flush: %#v", attempt, queued)
 		}
+	}
+}
+
+func TestRetainedRestoreDiagnosticFlushesAfterRecoveryBecomesValid(t *testing.T) {
+	var out diagnosticOutbox
+	log := logging.New(io.Discard, io.Discard).With(logging.Context{Component: "test"})
+	log.SetDiagnosticSink(out.enqueue)
+	tracker := stale.New(stale.Options{}, log)
+	invalid := []*corev1.OpenTaskState{{Started: &corev1.Event{
+		SessionId: "s1",
+		Seq:       9,
+		Payload:   &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{}},
+	}}}
+	for attempt := 0; attempt < 3; attempt++ {
+		if err := tracker.Restore(invalid); err == nil {
+			t.Fatalf("Restore attempt %d accepted invalid snapshot", attempt)
+		}
+	}
+	queued := out.snapshot()
+	if len(queued) != 1 {
+		t.Fatalf("repeated recovery failure queued %d diagnostics, want 1", len(queued))
+	}
+	retained := queued[0]
+
+	valid := &corev1.OpenTaskState{
+		Started: &corev1.Event{
+			SessionId:    "s1",
+			ProducedAtMs: 10,
+			Payload: &corev1.Event_TaskStarted{TaskStarted: &corev1.TaskStarted{
+				TaskId: "task-1",
+				Kind:   corev1.TaskKind_TASK_KIND_AGENT,
+			}},
+		},
+		LastActivityAtMs: 10,
+	}
+	if err := tracker.Restore([]*corev1.OpenTaskState{valid}); err != nil {
+		t.Fatalf("valid Restore: %v", err)
+	}
+	var delivered []*corev1.Event
+	event, err := out.flush(func(ev *corev1.Event) error {
+		delivered = append(delivered, ev)
+		return nil
+	})
+	if err != nil || event != nil {
+		t.Fatalf("flush result event=%p err=%v, want complete success", event, err)
+	}
+	if len(delivered) != 1 || delivered[0] != retained {
+		t.Fatalf("delivered diagnostics = %#v, want exact retained event %p", delivered, retained)
+	}
+	if got := len(out.snapshot()); got != 0 {
+		t.Fatalf("successful flush retained %d diagnostics", got)
 	}
 }

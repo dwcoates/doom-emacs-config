@@ -156,7 +156,7 @@ func (s *sidecar) establish() error {
 // linkLost tears the link down and schedules an immediate redial. It is
 // idempotent, because a single poll pass can surface the same dead connection
 // through several failed writes.
-func (s *sidecar) linkLost(reason string) {
+func (s *sidecar) linkLost(operation string) {
 	if s.link == linkDown {
 		return
 	}
@@ -166,7 +166,10 @@ func (s *sidecar) linkLost(reason string) {
 	s.downSince = time.Now()
 	s.dialFailures = 0
 	s.backoff = 0
-	s.log.With(logging.Context{Operation: "link-lost"}).Log("store link lost: %s; reading no files until it returns", reason)
+	// The caller owns the causal error with the session or request context it
+	// alone knows. This record owns only the link-state transition so the same
+	// error is not copied into both narratives.
+	s.log.With(logging.Context{Operation: "link-lost"}).Log("store link lost after operation=%s; reading no files until it returns", operation)
 	s.armDial(0)
 }
 
@@ -177,7 +180,7 @@ func (s *sidecar) noteStoreErr(what string, err error) {
 	if err == nil || s.store.Connected() {
 		return
 	}
-	s.linkLost(fmt.Sprintf("%s: %v", what, err))
+	s.linkLost(what)
 }
 
 // reportOutageClosed surfaces the window the sidecar just spent unable to
@@ -210,7 +213,7 @@ func (s *sidecar) watchedSessions() []string {
 	seen := map[string]bool{}
 	var out []string
 	for _, w := range s.watchers {
-		id := w.target.SessionID
+		id := w.sessionID
 		if id == "" || seen[id] {
 			continue
 		}

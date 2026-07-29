@@ -1,9 +1,11 @@
 package server
 
 import (
+	"fmt"
 	"sync"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
+	"agentrepl/shim-store/internal/logging"
 )
 
 // defaultSubBuffer bounds per-subscriber server-side buffering before a slow
@@ -35,15 +37,21 @@ type fanout struct {
 	nextID uint64
 	subs   map[string]map[uint64]*subscriber
 	buffer int
+	log    *logging.Logger
 }
 
-func newFanout(buffer int) *fanout {
+func newFanout(buffer int, log *logging.Logger) *fanout {
+	if log == nil {
+		panic("shim-store fanout: nil logger")
+	}
 	if buffer <= 0 {
 		buffer = defaultSubBuffer
 	}
+	log.Log(logging.Fields{Operation: "fanout-init"}, "live-tail registry initialized buffer=%d", buffer)
 	return &fanout{
 		subs:   make(map[string]map[uint64]*subscriber),
 		buffer: buffer,
+		log:    log,
 	}
 }
 
@@ -64,15 +72,18 @@ func (f *fanout) subscribe(sessionID string) *subscriber {
 		f.subs[sessionID] = m
 	}
 	m[s.id] = s
+	f.log.LogVerbose(logging.Fields{Operation: "subscribe", Session: sessionID, Subscriber: subscriberName(s.id)}, "live-tail subscriber registered buffer=%d", f.buffer)
 	return s
 }
 
 // unsubscribe removes a subscriber and closes its done channel.
 func (f *fanout) unsubscribe(s *subscriber) {
+	removed := false
 	f.mu.Lock()
 	if m := f.subs[s.sessionID]; m != nil {
 		if _, ok := m[s.id]; ok {
 			delete(m, s.id)
+			removed = true
 			if len(m) == 0 {
 				delete(f.subs, s.sessionID)
 			}
@@ -80,6 +91,9 @@ func (f *fanout) unsubscribe(s *subscriber) {
 	}
 	f.mu.Unlock()
 	s.close()
+	if removed {
+		f.log.LogVerbose(logging.Fields{Operation: "unsubscribe", Session: s.sessionID, Subscriber: subscriberName(s.id)}, "live-tail subscriber removed")
+	}
 }
 
 // publish broadcasts ev to every subscriber of its session in arrival order.
@@ -100,6 +114,7 @@ func (f *fanout) publish(ev *corev1.Event) {
 	f.mu.Unlock()
 
 	for _, s := range slow {
+		f.log.Log(logging.Fields{Operation: "slow-consumer", Session: sid, Subscriber: subscriberName(s.id), Level: "warn"}, "live-tail subscriber disconnected after buffer overflow buffer=%d event_seq=%d event_class=%s", f.buffer, ev.GetSeq(), ev.GetClass())
 		f.unsubscribe(s)
 	}
 }
@@ -111,3 +126,5 @@ func (f *fanout) subscriberCount(sessionID string) int {
 	defer f.mu.Unlock()
 	return len(f.subs[sessionID])
 }
+
+func subscriberName(id uint64) string { return fmt.Sprintf("%d", id) }

@@ -134,9 +134,9 @@ async function boot(): Promise<void> {
     | null = null;
   const wslog = new ForwardingLogger(
     (cmd) => {
-      if (clientLogSink === null) {
-        throw new Error("client-log sink is not installed");
-      }
+      // Startup and reconnect legitimately precede an open command socket.
+      // Returning false keeps the record in ForwardingLogger's bounded queue.
+      if (clientLogSink === null) return false;
       return clientLogSink(cmd.level, cmd.message, cmd.context);
     },
   );
@@ -150,7 +150,6 @@ async function boot(): Promise<void> {
   const clog = loggerFor("webapp.main");
   const storeLog = loggerFor("conversation-store");
   const adapterLog = loggerFor("state-adapter");
-  const dispatcherLog = loggerFor("command-dispatch");
   // Deep modules (render walk, pollers) log through the module-level
   // singleton; install the real forwarder before anything renders.
   setLogger(wslog);
@@ -175,7 +174,6 @@ async function boot(): Promise<void> {
   // correlate CommandAcks by requestId and a createSession's pushed SessionView.
   const dispatcher = new CommandDispatcher({
     send: (raw) => (ws as WsClient | undefined)?.send(raw) ?? false,
-    log: (level, message) => dispatcherLog(level, message),
     // A REJECTED clientLog cannot be reported through `log`: that forwards
     // another clientLog, earns another rejection, and loops. It still has to be
     // SEEN, so it goes to the logger's local-only path — the same injected
@@ -212,6 +210,10 @@ async function boot(): Promise<void> {
   // rides the protobuf command plane into the daemon's log.
   clientLogSink = (level, message, context) =>
     dispatcher.clientLog(cmdWorkspace(), level, message, context as CommandStruct | undefined);
+  // CommandDispatcher owns and canonically logs every command rejection before
+  // rejecting its Promise. UI call sites consume that already-owned rejection
+  // without writing a duplicate record.
+  const consumeOwnedDispatchFailure = (_err: unknown): void => {};
 
   // The permission mode the user picked that no prompt has carried yet:
   // frontend.v1 has no standalone set-permission-mode command, so the mode
@@ -224,10 +226,10 @@ async function boot(): Promise<void> {
    * SessionView reports it in force, so a failed submit does not silently
    * drop the user's choice.
    */
-  const submitPrompt = (text: string, what: string): void => {
+  const submitPrompt = (text: string): void => {
     void dispatcher
       .submitPrompt(cmdWorkspace(), text, pendingMode.outbound)
-      .catch((err: unknown) => clog("error", `${what} failed: ${String(err)}`));
+      .catch(consumeOwnedDispatchFailure);
   };
   const feedEl = must("feed");
   // RETIRED (F4): the degraded-state banner. It was chrome that scrolled
@@ -308,7 +310,7 @@ async function boot(): Promise<void> {
           allow: behavior === "allow",
           denyMessage: behavior === "allow" ? "" : "denied from webapp",
         })
-        .catch((err: unknown) => clog("error", `permission answer failed: ${String(err)}`));
+        .catch(consumeOwnedDispatchFailure);
     },
     answerQuestions: (requestId, updatedInput) => {
       // AskUserQuestion contract: allow with the tool input echoed back
@@ -320,29 +322,29 @@ async function boot(): Promise<void> {
           updatedInput: updatedInput as Record<string, unknown>,
           denyMessage: "",
         })
-        .catch((err: unknown) => clog("error", `question answer failed: ${String(err)}`));
+        .catch(consumeOwnedDispatchFailure);
     },
     // Held-prompt queue controls (E4). These were loud no-ops between the
     // cutover and the queue's return; they now drive the real command arms.
     cancelQueued: (entryId) => {
       void dispatcher
         .queueCancel(cmdWorkspace(), entryId)
-        .catch((err: unknown) => clog("error", `queue cancel failed: ${String(err)}`));
+        .catch(consumeOwnedDispatchFailure);
     },
     runQueuedNow: (entryId) => {
       void dispatcher
         .queueForce(cmdWorkspace(), entryId)
-        .catch((err: unknown) => clog("error", `queue run-now failed: ${String(err)}`));
+        .catch(consumeOwnedDispatchFailure);
     },
     acceptQueued: (entryId) => {
       void dispatcher
         .queueAccept(cmdWorkspace(), entryId)
-        .catch((err: unknown) => clog("error", `queue accept failed: ${String(err)}`));
+        .catch(consumeOwnedDispatchFailure);
     },
     sendPrompt: (text) => {
       // Card controls (stop task) are prompt-mediated: the button sends an
       // ordinary user message through the same command the composer uses.
-      submitPrompt(text, "card prompt");
+      submitPrompt(text);
     },
     // Watcher folds poll this while open (§ watcher-bubble expansion),
     // targeting the CURRENT session so a rebind moves the polls with it.
@@ -759,7 +761,6 @@ async function boot(): Promise<void> {
     });
     return new WsClient({
       url: `${wsBase}/sessions/${sessionId}/stream`,
-      log: (message) => clog("warn", message),
       onMessage: (data) => {
         // The one path: decode the protojson `frontend.v1` frame, let the
         // command dispatcher correlate its CommandAcks + a createSession's
@@ -837,9 +838,7 @@ async function boot(): Promise<void> {
         if (verdict === "rotated") {
           void dispatcher
             .resync(cmdWorkspace(), 0)
-            .catch((err: unknown) =>
-              clog("error", `resync after the session rebase failed: ${String(err)}`),
-            );
+            .catch(consumeOwnedDispatchFailure);
         }
         if (result.changed) {
           // One paint per animation frame, however many effects land before
@@ -851,14 +850,12 @@ async function boot(): Promise<void> {
         return undefined;
       },
       onStatusChange: (connected) => {
+        if (connected) wslog.flush();
         // Every socket owes its own history request; a dropped one owes none.
         if (connected) connectResync.onConnect();
         else connectResync.onDisconnect();
         statusEl.textContent = connected ? "connected" : "disconnected";
         statusEl.classList.toggle("ok", connected);
-        // Socket lifecycle in the daemon log: pairs with the daemon's
-        // own attach/detach lines to show WHICH side went quiet.
-        clog(connected ? "info" : "warn", `ws: ${connected ? "connected" : "disconnected"}`);
       },
       sessionExists: makeSessionExistsProbe(httpBase, sessionId),
       // The daemon-unreachable window (F4). It is the ONE fact the daemon
@@ -910,11 +907,14 @@ async function boot(): Promise<void> {
     new Promise<string>((resolve, reject) => {
       let created = false;
       let settled = false;
+      const previousClientLogSink = clientLogSink;
+      let bootClientLogSink: typeof clientLogSink = null;
       const finish = (fn: () => void): void => {
         if (settled) return;
         settled = true;
         clearTimeout(timeout);
         bootWs.close();
+        if (clientLogSink === bootClientLogSink) clientLogSink = previousClientLogSink;
         fn();
       };
       const bootWs = new WsClient({
@@ -964,7 +964,6 @@ async function boot(): Promise<void> {
               );
           }
         },
-        log: (message) => clog("warn", message),
       });
       // Its OWN dispatcher, bound to this socket: the live session's
       // dispatcher must not be re-pointed at a socket that is about to close
@@ -972,8 +971,14 @@ async function boot(): Promise<void> {
       // other command rides).
       const bootDispatcher = new CommandDispatcher({
         send: (raw) => bootWs.send(raw),
-        log: (level, message) => dispatcherLog(level, message),
+        logLocal: (message) => log("error", message, { operation: "webapp.bootstrap-client-log-rejected", localOnly: true }),
       });
+      // Before a session socket exists, the bootstrap socket is the canonical
+      // forwarding route. Installing it before connect lets connection-attempt
+      // records queue, then the open transition flushes them in order.
+      bootClientLogSink = (level, message, context) =>
+        bootDispatcher.clientLog(args.cwd, level, message, context as CommandStruct | undefined);
+      clientLogSink = bootClientLogSink;
       const timeout = setTimeout(
         () => finish(() => reject(new Error("create session: no daemon snapshot within 15s"))),
         15_000,
@@ -995,7 +1000,7 @@ async function boot(): Promise<void> {
     const submit = (): void => {
       const text = input.value.trim();
       if (text === "") return;
-      submitPrompt(text, "submit prompt");
+      submitPrompt(text);
       input.value = "";
     };
     must<HTMLButtonElement>("send-btn").addEventListener("click", submit);

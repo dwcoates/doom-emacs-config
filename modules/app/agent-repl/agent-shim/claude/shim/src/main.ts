@@ -306,6 +306,7 @@ export async function main(): Promise<void> {
   if (args.daemonSocket === undefined) throw new Error("shim requires --daemon-socket");
   validateUdsLoggingArgs(args);
   configureLog({ fd: args.logFd, cwd: args.cwd, agentReplSessionId: args.sessionId });
+  LOGGER.log({ agent_repl_session_id: args.sessionId, fake: args.fake, daemon_socket: args.daemonSocket, store_socket: args.storeSocket ?? defaultStoreSocket(), permission_mode: args.permissionMode, model: args.model ?? "", resumed: args.resume !== undefined }, "validated shim startup arguments and configured durable logging");
 
   // The query factory is synchronous per SessionDeps; pre-resolve the SDK
   // module (dynamic import) before constructing the session. Under
@@ -313,6 +314,7 @@ export async function main(): Promise<void> {
   // guard throws, `main()`'s caller prints it and exits nonzero. `--fake`
   // short-circuits before the chokepoint and stays fully offline.
   const sdkModulePromise = args.fake ? null : importRealSDK("main:preresolve");
+  LOGGER.log({ agent_repl_session_id: args.sessionId, query_source: args.fake ? "fake" : "vendor-sdk" }, "selecting shim query implementation");
   if (sdkModulePromise) await sdkModulePromise;
 
   const createQuery = makeCreateQuery(args);
@@ -335,6 +337,7 @@ async function runUdsMode(args: CliArgs, createQuery: SessionDeps["createQuery"]
   //
   // Failure to claim is a refusal to start: another shim owns this session.
   const releaseLock = acquireSessionLock(args.sessionId);
+  LOGGER.log({ agent_repl_session_id: args.sessionId }, "exclusive session lock acquired");
   process.on("exit", releaseLock);
 
   const session = new UdsSession({
@@ -361,6 +364,7 @@ async function runUdsMode(args: CliArgs, createQuery: SessionDeps["createQuery"]
   const stop = (sig: string): void => {
     if (stopping) return;
     stopping = true;
+    LOGGER.log({ agent_repl_session_id: args.sessionId, signal: sig }, "received shutdown signal");
     void session.shutdown(sig).finally(() => process.exit(0));
   };
   process.on("SIGTERM", () => stop("SIGTERM"));

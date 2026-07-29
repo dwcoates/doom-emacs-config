@@ -397,14 +397,17 @@ func enumValue(ed protoreflect.EnumDescriptor, v any) (protoreflect.EnumNumber, 
 // "type" is a hard error (→ UnparsedEvent per §5.1).
 func (c *Converter) TranscriptLine(obj map[string]any) (*datav1.TranscriptLine, *structpb.Struct, error) {
 	typ, _ := obj["type"].(string)
+	c.log.With(logging.Context{Operation: "convert-transcript-line"}).LogVerbose("converting transcript line type=%q keys=%d", typ, len(obj))
 	if typ == "" {
-		return nil, nil, fmt.Errorf("transcript line missing required %q field", "type")
+		err := fmt.Errorf("transcript line missing required %q field", "type")
+		return nil, nil, err
 	}
 	line := &datav1.TranscriptLine{}
 	lm := line.ProtoReflect()
 	fd := oneofMemberByCanon(lm.Descriptor(), "line", canon(typ))
 	if fd == nil {
-		return nil, nil, fmt.Errorf("unknown transcript line type %q", typ)
+		err := fmt.Errorf("unknown transcript line type %q", typ)
+		return nil, nil, err
 	}
 	cap := c.newCapture()
 	sub := lm.NewField(fd)
@@ -428,6 +431,7 @@ func (c *Converter) TranscriptLine(obj map[string]any) (*datav1.TranscriptLine, 
 		c.assign(sub.Message(), obj, string(fd.Name()), cap, map[string]bool{"type": true})
 	}
 	lm.Set(fd, sub)
+	c.log.With(logging.Context{Operation: "convert-transcript-line"}).LogVerbose("converted transcript line type=%q extras=%t", typ, len(cap.fields) > 0)
 	return line, cap.toStruct(), nil
 }
 
@@ -732,24 +736,30 @@ func (c *Converter) toolResultBlock(m protoreflect.Message, obj map[string]any, 
 // block from an assistant line). An absent/unknown "type" is a hard error.
 func (c *Converter) ContentBlock(obj map[string]any) (*datav1.ContentBlock, *structpb.Struct, error) {
 	typ, _ := obj["type"].(string)
+	c.log.With(logging.Context{Operation: "convert-content-block"}).LogVerbose("converting content block type=%q keys=%d", typ, len(obj))
 	if typ == "" {
-		return nil, nil, fmt.Errorf("content block missing required %q field", "type")
+		err := fmt.Errorf("content block missing required %q field", "type")
+		return nil, nil, err
 	}
 	block := &datav1.ContentBlock{}
 	bm := block.ProtoReflect()
 	if oneofMemberByCanon(bm.Descriptor(), "block", canon(typ)) == nil {
-		return nil, nil, fmt.Errorf("unknown content block type %q", typ)
+		err := fmt.Errorf("unknown content block type %q", typ)
+		return nil, nil, err
 	}
 	cap := c.newCapture()
 	c.contentBlock(bm, obj, "block", cap)
+	c.log.With(logging.Context{Operation: "convert-content-block"}).LogVerbose("converted content block type=%q extras=%t", typ, len(cap.fields) > 0)
 	return block, cap.toStruct(), nil
 }
 
 // ToolUseResult exposes the toolUseResult union conversion for handler reuse.
 func (c *Converter) ToolUseResult(v any) (*datav1.ToolUseResult, *structpb.Struct) {
+	c.log.With(logging.Context{Operation: "convert-tool-use-result"}).LogVerbose("converting tool-use result value_type=%T", v)
 	cap := c.newCapture()
 	tur := &datav1.ToolUseResult{}
 	c.toolUseResult(tur.ProtoReflect(), v, cap)
+	c.log.With(logging.Context{Operation: "convert-tool-use-result"}).LogVerbose("converted tool-use result extras=%t", len(cap.fields) > 0)
 	return tur, cap.toStruct()
 }
 
@@ -913,14 +923,17 @@ func sortedKeys(o map[string]any) []string {
 // JournalRecord converts one workflow-journal object (started|result).
 func (c *Converter) JournalRecord(obj map[string]any) (*datav1.JournalRecord, *structpb.Struct, error) {
 	typ, _ := obj["type"].(string)
+	c.log.With(logging.Context{Operation: "convert-journal-record"}).LogVerbose("converting journal record type=%q keys=%d", typ, len(obj))
 	if typ == "" {
-		return nil, nil, fmt.Errorf("journal record missing required %q field", "type")
+		err := fmt.Errorf("journal record missing required %q field", "type")
+		return nil, nil, err
 	}
 	rec := &datav1.JournalRecord{}
 	rm := rec.ProtoReflect()
 	fd := oneofMemberByCanon(rm.Descriptor(), "record", canon(typ))
 	if fd == nil {
-		return nil, nil, fmt.Errorf("unknown journal record type %q", typ)
+		err := fmt.Errorf("unknown journal record type %q", typ)
+		return nil, nil, err
 	}
 	cap := c.newCapture()
 	payload := rm.NewField(fd)
@@ -956,14 +969,17 @@ func (c *Converter) JournalRecord(obj map[string]any) (*datav1.JournalRecord, *s
 		cap.add(joinPath(string(fd.Name()), k), v)
 	}
 	rm.Set(fd, payload)
+	c.log.With(logging.Context{Operation: "convert-journal-record"}).LogVerbose("converted journal record type=%q extras=%t", typ, len(cap.fields) > 0)
 	return rec, cap.toStruct(), nil
 }
 
 // AgentMeta converts a sidechain agent-<id>.meta.json object.
 func (c *Converter) AgentMeta(obj map[string]any) (*datav1.AgentMetaJson, *structpb.Struct) {
+	c.log.With(logging.Context{Operation: "convert-agent-meta"}).LogVerbose("converting agent metadata keys=%d", len(obj))
 	cap := c.newCapture()
 	meta := &datav1.AgentMetaJson{}
 	c.assign(meta.ProtoReflect(), obj, "meta", cap, nil)
+	c.log.With(logging.Context{Operation: "convert-agent-meta"}).LogVerbose("converted agent metadata extras=%t", len(cap.fields) > 0)
 	return meta, cap.toStruct()
 }
 

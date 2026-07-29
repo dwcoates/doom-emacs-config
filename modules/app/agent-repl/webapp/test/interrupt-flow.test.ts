@@ -31,7 +31,7 @@
  * delivers it: a hand-built adapter input would skip the very decode step half
  * of this contract lives in.
  */
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { sessionSubagents } from "../src/agents.js";
 import { CommandDispatcher, InterruptConfirmRequiredError } from "../src/command-dispatch.js";
@@ -40,6 +40,9 @@ import { ProgressFooter } from "../src/progress-footer.js";
 import { WorkspaceSidebar } from "../src/sidebar.js";
 import { StateAdapter } from "../src/state-adapter.js";
 import { ConversationStore } from "../src/store.js";
+import { ForwardingLogger, resetLoggingForTests, setLogger } from "../src/wslog.js";
+
+afterEach(() => resetLoggingForTests());
 import type { SystemFailure } from "../src/frontend-proto.js";
 
 import mainSource from "../src/main.ts?raw";
@@ -368,12 +371,14 @@ describe("the interrupt confirmation challenge as one arriving frame", () => {
     // the user an error for a question.
     const sent: string[] = [];
     const failures: SystemFailure[] = [];
+    setLogger(new ForwardingLogger(() => true, () => {}));
     const dispatcher = new CommandDispatcher({
       send: (raw) => {
         sent.push(raw);
         return true;
       },
       newRequestId: () => "req-1",
+      logLocal: () => {},
       onFailure: (f) => failures.push(f),
     });
     const rejected = dispatcher.interrupt(WS).catch((err: unknown) => err);

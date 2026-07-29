@@ -370,6 +370,9 @@ func TestRescanTailsASpoolOnceItsLaunchingSessionIsKnown(t *testing.T) {
 	if w.target.SessionID != "" {
 		t.Fatalf("target session = %q, want empty — identity must not come from the path", w.target.SessionID)
 	}
+	if w.sessionID != "9b6a4f2d-transcript-id" {
+		t.Fatalf("resolved watched session = %q, want transcript owner", w.sessionID)
+	}
 }
 
 // launchLine is a transcript line whose tool result reports a background bash
@@ -730,8 +733,8 @@ func TestDegradedEventsAreEphemeralAndSynthetic(t *testing.T) {
 func TestWatchedSessionsAreDeduplicated(t *testing.T) {
 	// Arrange — two files of the same session, plus one with no session id.
 	s := &sidecar{watchers: map[string]*watched{
-		"/a": {target: discover.Target{SessionID: "s1"}},
-		"/b": {target: discover.Target{SessionID: "s1"}},
+		"/a": {target: discover.Target{SessionID: "s1"}, sessionID: "s1"},
+		"/b": {target: discover.Target{SessionID: "s1"}, sessionID: "s1"},
 		"/c": {target: discover.Target{}},
 	}}
 

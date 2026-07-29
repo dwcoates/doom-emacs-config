@@ -62,12 +62,14 @@ type Discoverer struct {
 
 // New builds a Discoverer.
 func New(configRoots []string, spoolRoot string, log *logging.Bound) *Discoverer {
+	log.With(logging.Context{Operation: "discover-new"}).LogVerbose("constructing discoverer config_roots=%d spool_root=%q", len(configRoots), spoolRoot)
 	return &Discoverer{configRoots: configRoots, spoolRoot: spoolRoot, log: log}
 }
 
 // Scan performs a full glob-based discovery across all roots (§7.1). It is the
 // backstop that catches files that appeared while fsnotify was down.
 func (d *Discoverer) Scan() []Target {
+	d.log.With(logging.Context{Operation: "discover-scan"}).LogVerbose("scan start config_roots=%d spool_root=%q", len(d.configRoots), d.spoolRoot)
 	var out []Target
 	seen := map[string]bool{}
 	add := func(t Target, ok bool) {
@@ -89,6 +91,7 @@ func (d *Discoverer) Scan() []Target {
 	for _, m := range globAll(filepath.Join(d.spoolRoot, "claude-*", "*", "*", "tasks", "*.output")) {
 		add(d.Classify(m))
 	}
+	d.log.With(logging.Context{Operation: "discover-scan"}).LogVerbose("scan complete targets=%d", len(out))
 	return out
 }
 
@@ -96,10 +99,18 @@ func (d *Discoverer) Scan() []Target {
 // matches none of the §7.1 shapes (e.g. a meta.json companion, which is not
 // tailed on its own).
 func (d *Discoverer) Classify(path string) (Target, bool) {
+	d.log.With(logging.Context{Operation: "discover-classify", Path: path}).LogVerbose("classify requested")
 	if t, ok := d.classifyConfig(path); ok {
+		d.log.With(logging.Context{Operation: "discover-classify", Path: path, Task: t.TaskID}).LogVerbose("classified config target kind=%d", t.Kind)
 		return t, true
 	}
-	return d.classifySpool(path)
+	t, ok := d.classifySpool(path)
+	if ok {
+		d.log.With(logging.Context{Operation: "discover-classify", Path: path, Task: t.TaskID}).LogVerbose("classified spool target kind=%d raw=%t", t.Kind, t.Raw)
+	} else {
+		d.log.With(logging.Context{Operation: "discover-classify", Path: path}).LogVerbose("path does not match a watched artifact")
+	}
+	return t, ok
 }
 
 func (d *Discoverer) classifyConfig(path string) (Target, bool) {

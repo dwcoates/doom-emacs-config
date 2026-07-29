@@ -181,6 +181,7 @@ export class MessageConn {
     private readonly component: string,
   ) {
     this.logger = bindLog({ component, operation: "shim.framing.message-connection" });
+    this.logger.logVerbose({ remote_address: socket.remoteAddress ?? "", remote_port: socket.remotePort ?? 0 }, "framed message connection attached");
     socket.on("data", (chunk: Buffer) => this.onData(chunk));
     socket.on("end", () => this.onEnd());
     socket.on("error", (err: Error) => this.onError(err));
@@ -193,11 +194,14 @@ export class MessageConn {
       this.logger.log({ level: "error" }, `dropping outbound message: connection not writable`);
       return;
     }
-    this.socket.write(encodeMessage(schema, message));
+    const encoded = encodeMessage(schema, message);
+    this.logger.logVerbose({ message_type: schema.typeName, frame_bytes: encoded.length }, "writing framed outbound message");
+    this.socket.write(encoded);
   }
 
   /** Tear down the connection (a deliberate local close, not an error). */
   close(): void {
+    this.logger.logVerbose({}, "closing framed message connection");
     this.socket.destroy();
   }
 
@@ -211,6 +215,7 @@ export class MessageConn {
       this.socket.destroy();
       return;
     }
+    this.logger.logVerbose({ chunk_bytes: chunk.length, frame_count: frames.length }, "decoded inbound socket chunk");
     for (const frame of frames) {
       let any: Any;
       try {
@@ -221,6 +226,7 @@ export class MessageConn {
         this.socket.destroy();
         return;
       }
+      this.logger.logVerbose({ message_type: envelopeType(any), frame_bytes: frame.length }, "dispatching framed inbound message");
       this.handlers.onMessage(any);
     }
   }
@@ -238,12 +244,19 @@ export class MessageConn {
 
   private onError(err: Error): void {
     // ECONNRESET etc. Recorded (not thrown): 'close' delivers the verdict.
-    if (this.closeErr === null) this.closeErr = err;
+    if (this.closeErr === null) {
+      this.logger.log({ level: "error", cause: err }, `socket error: ${err.message}`);
+      this.closeErr = err;
+    }
   }
 
   private onCloseEvent(): void {
     if (this.closed) return;
     this.closed = true;
+    // The data/end/error handler that discovered a transport cause already
+    // owns its canonical error record. Close is only the terminal notification
+    // for that same cause, so repeating it here would double-count one fault.
+    this.logger.logVerbose({ close_outcome: this.closeErr === null ? "clean" : "transport_error" }, "framed message connection closed");
     this.handlers.onClose(this.closeErr);
   }
 }

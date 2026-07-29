@@ -2,17 +2,29 @@
  * command-dispatch — the webapp's FrontendCommand plane: ack-correlated
  * commands and the SessionView-correlated createSession. One edge per test.
  */
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   CommandDispatcher,
   InterruptConfirmRequiredError,
   type CreateSessionArgs,
 } from "../src/command-dispatch.js";
 import { decodeFrontendFrame, type FrontendFrame } from "../src/frontend-proto.js";
+import { ForwardingLogger, resetLoggingForTests, setLogger } from "../src/wslog.js";
+
+function installLogging(): Array<Record<string, unknown>> {
+  const records: Array<Record<string, unknown>> = [];
+  setLogger(new ForwardingLogger((cmd) => {
+    records.push(cmd.context as Record<string, unknown>);
+    return true;
+  }, () => {}));
+  return records;
+}
+
+afterEach(() => resetLoggingForTests());
 
 function newDispatcher(sendReturns = true) {
   const sent: string[] = [];
-  const logs: Array<[string, string]> = [];
+  const records = installLogging();
   let n = 0;
   const dispatcher = new CommandDispatcher({
     send: (raw) => {
@@ -20,9 +32,9 @@ function newDispatcher(sendReturns = true) {
       return sendReturns;
     },
     newRequestId: () => `r${++n}`,
-    log: (level, message) => logs.push([level, message]),
+    logLocal: (message) => records.push({ local_only: message }),
   });
-  return { dispatcher, sent, logs };
+  return { dispatcher, sent, records };
 }
 
 function ackFrame(requestId: string, ok: boolean, error = ""): FrontendFrame {
@@ -65,11 +77,16 @@ describe("ack-correlated commands", () => {
   });
 
   it("interrupt rejects on an error ack, naming the command and reason", async () => {
-    const { dispatcher, sent } = newDispatcher();
+    const { dispatcher, sent, records } = newDispatcher();
     const p = dispatcher.interrupt("/w", true);
     expect(JSON.parse(sent[0]).interrupt).toEqual({ confirmAgents: true });
     dispatcher.observe(ackFrame("r1", false, "no turn"));
     await expect(p).rejects.toThrow(/interrupt rejected: no turn/);
+    expect(records).toContainEqual(expect.objectContaining({
+      operation: "command-dispatch.ack-rejected",
+      request_id: "r1",
+      context: expect.objectContaining({ command: "interrupt", error: "no turn", has_classified_failure: false }),
+    }));
   });
 
   it("interrupt rejects a confirmation challenge as its own typed error", async () => {
@@ -108,9 +125,11 @@ describe("ack-correlated commands", () => {
     // Arrange — a challenge is a question, and a failure card would answer it
     // with an alarm the user never earned.
     const failures: unknown[] = [];
+    const records = installLogging();
     const dispatcher = new CommandDispatcher({
       send: () => true,
       newRequestId: () => "r1",
+      logLocal: (message) => records.push({ local_only: message }),
       onFailure: (f) => failures.push(f),
     });
     const p = dispatcher.interrupt("/w");
@@ -148,18 +167,34 @@ describe("ack-correlated commands", () => {
   });
 
   it("rejects when the socket refuses the frame", async () => {
-    const { dispatcher } = newDispatcher(false);
+    const { dispatcher, records } = newDispatcher(false);
     await expect(dispatcher.interrupt("/w")).rejects.toThrow(/socket not open/);
+    expect(records).toContainEqual(expect.objectContaining({
+      operation: "command-dispatch.dispatch-rejected",
+      context: expect.objectContaining({ command: "interrupt", workspace: "/w", cause: "socket not open" }),
+    }));
   });
 
-  it("logs a commandAck for an unknown request rather than throwing", () => {
-    const { dispatcher, logs } = newDispatcher();
+  it("logs structured context for a commandAck for an unknown request", () => {
+    const { dispatcher, records } = newDispatcher();
     dispatcher.observe(ackFrame("ghost", true));
-    expect(logs).toEqual([["warn", "commandAck for unknown request 'ghost'"]]);
+    expect(records).toContainEqual(expect.objectContaining({
+      operation: "command-dispatch.ack-unknown-request",
+      request_id: "ghost",
+      context: expect.objectContaining({ ok: true, pending_count: 0 }),
+    }));
   });
 });
 
 describe("createSession — SessionView correlation", () => {
+  it("logs snapshot selection without mutating a create waiter", () => {
+    const { dispatcher, records } = newDispatcher();
+
+    dispatcher.observe(decodeFrontendFrame(JSON.stringify({ snapshot: { sessions: [] } })));
+
+    expect(records).toContainEqual(expect.objectContaining({ operation: "command-dispatch.observe-snapshot" }));
+  });
+
   it("resolves with the id of a newly pushed non-terminal SessionView", async () => {
     const { dispatcher, sent } = newDispatcher();
     const p = dispatcher.createSession(CREATE_ARGS);
@@ -250,6 +285,16 @@ describe("clientLog (E4)", () => {
     expect(dispatcher.clientLog("/w", "info", "m")).toBe(false);
   });
 
+  it("logs the bounded client-log acknowledgement eviction", () => {
+    const { dispatcher, records } = newDispatcher();
+    for (let i = 0; i < 257; i++) dispatcher.clientLog("/w", "info", `line ${i}`);
+
+    expect(dispatcher.trackedClientLogCount()).toBe(256);
+    expect(records).toContainEqual(expect.objectContaining({
+      local_only: expect.stringContaining("evicted request r1"),
+    }));
+  });
+
   it("carries a structured context when one is supplied", () => {
     // Arrange
     const { dispatcher, sent } = newDispatcher();
@@ -262,27 +307,28 @@ describe("clientLog (E4)", () => {
   it("does not report its own ack as an unknown request", () => {
     // Arrange — the ack MUST be recognized: reporting it would log, which
     // forwards another clientLog, which acks, which logs…
-    const { dispatcher, logs } = newDispatcher();
+    const { dispatcher, records } = newDispatcher();
     dispatcher.clientLog("/w", "info", "m");
     // Act
     dispatcher.observe(ackFrame("r1", true));
     // Assert
-    expect(logs).toEqual([]);
+    expect(records.some((record) => record.operation === "command-dispatch.ack-unknown-request")).toBe(false);
   });
 
   it("does not route a rejected clientLog ack through the forwarding logger", () => {
     // Arrange — routing it there would re-send a clientLog and loop.
-    const { dispatcher, logs } = newDispatcher();
+    const { dispatcher, records } = newDispatcher();
     dispatcher.clientLog("/w", "info", "m");
     // Act
     dispatcher.observe(ackFrame("r1", false, "no message"));
     // Assert
-    expect(logs).toEqual([]);
+    expect(records.some((record) => record.operation === "command-dispatch.ack-unknown-request")).toBe(false);
   });
 
   it("reports a rejected clientLog ack on the local-only sink", () => {
     // Arrange
     const local: string[] = [];
+    installLogging();
     const dispatcher = new CommandDispatcher({
       send: () => true,
       newRequestId: () => "r1",
@@ -297,22 +343,22 @@ describe("clientLog (E4)", () => {
 
   it("still reports a genuinely unknown ack as an anomaly", () => {
     // Arrange — the clientLog carve-out must not blanket-silence onAck.
-    const { dispatcher, logs } = newDispatcher();
+    const { dispatcher, records } = newDispatcher();
     // Act
     dispatcher.observe(ackFrame("never-sent", true));
     // Assert
-    expect(logs[0][1]).toContain("unknown request");
+    expect(records).toContainEqual(expect.objectContaining({ operation: "command-dispatch.ack-unknown-request" }));
   });
 
   it("tracks no ack id for a frame the socket refused", () => {
     // Arrange — an undelivered log can never be acked, so remembering its id
     // would leak it.
-    const { dispatcher, logs } = newDispatcher(false);
+    const { dispatcher, records } = newDispatcher(false);
     dispatcher.clientLog("/w", "info", "m");
     // Act
     dispatcher.observe(ackFrame("r1", true));
     // Assert — the id was never tracked, so this reads as an unknown ack.
-    expect(logs[0][1]).toContain("unknown request");
+    expect(records).toContainEqual(expect.objectContaining({ operation: "command-dispatch.ack-unknown-request" }));
   });
 });
 

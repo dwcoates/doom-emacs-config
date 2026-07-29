@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { writeSync } from "node:fs";
 import { FAKE_MODELS, MARKDOWN_SHOWCASE, createFakeQuery } from "../src/fake-query.js";
 import { AsyncQueue } from "../src/input-queue.js";
 import {
@@ -7,6 +8,13 @@ import {
   SdkMessageLike,
   SdkUserMessageLike,
 } from "../src/session.js";
+
+function persistedLogs(): Array<Record<string, unknown>> {
+  const calls = vi.mocked(writeSync).mock.calls as unknown as Array<[number, Buffer, number, number]>;
+  return calls.map(([, bytes, offset, length]) =>
+    JSON.parse(bytes.subarray(offset, offset + length).toString("utf8")) as Record<string, unknown>,
+  );
+}
 
 function userMsg(text: string): SdkUserMessageLike {
   return {
@@ -126,6 +134,50 @@ describe("createFakeQuery", () => {
       type: "tool_result",
       is_error: true,
       content: expect.stringContaining("not today"),
+    });
+  });
+
+  it("propagates canUseTool rejection as one logged iterator failure without a clean result", async () => {
+    vi.mocked(writeSync).mockClear();
+    const input = new AsyncQueue<SdkUserMessageLike>();
+    const failure = new Error("permission transport failed");
+    const query = createFakeQuery(
+      input,
+      async () => {
+        throw failure;
+      },
+      { sessionId: "s-failing", newUuid: () => "u-failing" },
+    );
+    input.push(userMsg("!tool ls"));
+    input.end();
+
+    const messages: SdkMessageLike[] = [];
+    const iterator = query[Symbol.asyncIterator]();
+    let caught: unknown;
+    for (;;) {
+      try {
+        const next = await iterator.next();
+        if (next.done) break;
+        messages.push(next.value);
+      } catch (err) {
+        caught = err;
+        break;
+      }
+    }
+
+    expect(caught).toBe(failure);
+    expect(messages.some((message) => message.type === "result")).toBe(false);
+    const errors = persistedLogs().filter((record) =>
+      record["level"] === "error" &&
+      record["operation"] === "shim.fake-query.lifecycle",
+    );
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatchObject({
+      agent_repl_session_id: "test-agent-session",
+      message: "fake SDK producer failed: permission transport failed",
+      context: expect.objectContaining({
+        cause: expect.objectContaining({ message: "permission transport failed" }),
+      }),
     });
   });
 

@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { writeSync } from "node:fs";
 import { create } from "@bufbuild/protobuf";
 import {
   ControlDispatch,
@@ -63,6 +64,13 @@ function dispatch(rec: Recorder, sent: PermissionRequest[], ids: string[] = []):
   );
 }
 
+function persistedLogs(): Array<Record<string, unknown>> {
+  const calls = vi.mocked(writeSync).mock.calls as unknown as Array<[number, Buffer, number, number]>;
+  return calls.map(([, bytes, offset, length]) =>
+    JSON.parse(bytes.subarray(offset, offset + length).toString("utf8")) as Record<string, unknown>,
+  );
+}
+
 describe("ControlDispatch.handleSubmitPrompt", () => {
   it("pushes the prompt into the SDK target and Acks", () => {
     // Arrange
@@ -94,6 +102,19 @@ describe("ControlDispatch.handleSubmitPrompt", () => {
     // Assert
     expect(receipt.$typeName).toBe(NackSchema.typeName);
     expect((receipt as { reason: string }).reason).toBe("boom");
+  });
+
+  it("records canonical accepted and rejected prompt dispatches with request context", () => {
+    vi.mocked(writeSync).mockClear();
+    const accepted = dispatch(recorder(), []);
+    accepted.handleSubmitPrompt(create(SubmitPromptSchema, { requestId: "accepted-1", text: "hello", origin: "human" }));
+    const rejected = dispatch(recorder("target failed"), []);
+    rejected.handleSubmitPrompt(create(SubmitPromptSchema, { requestId: "rejected-1", text: "bye", origin: "human" }));
+
+    expect(persistedLogs()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ operation: "shim.control.dispatch", request_id: "accepted-1", message: "SubmitPrompt accepted by SDK session" }),
+      expect.objectContaining({ level: "error", operation: "shim.control.dispatch", request_id: "rejected-1", message: expect.stringContaining("submit-prompt failed") }),
+    ]));
   });
 });
 
@@ -186,6 +207,34 @@ describe("ControlDispatch.requestPermission round-trip", () => {
     expect(sent[0]!.requestId).toBe("req-1");
     expect(sent[0]!.toolName).toBe("Bash");
     expect(sent[0]!.input).toEqual({ command: "ls" });
+  });
+
+  it("rejects and removes pending state when sending the request throws synchronously", async () => {
+    vi.mocked(writeSync).mockClear();
+    const failure = new Error("daemon send failed");
+    const d = new ControlDispatch(
+      recorder().target,
+      () => {
+        throw failure;
+      },
+      { newRequestId: () => "req-send-failure" },
+    );
+
+    await expect(d.requestPermission("Bash", { command: "ls" })).rejects.toBe(failure);
+    expect(d.pendingCount()).toBe(0);
+    const errors = persistedLogs().filter((record) =>
+      record["level"] === "error" &&
+      record["operation"] === "shim.control.dispatch",
+    );
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatchObject({
+      request_id: "req-send-failure",
+      message: "permission request send failed: daemon send failed",
+      context: expect.objectContaining({
+        tool_name: "Bash",
+        pending_count: 0,
+      }),
+    });
   });
 
   it("blocks until the matching PermissionResponse arrives", async () => {

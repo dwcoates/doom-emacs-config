@@ -89,6 +89,7 @@ export class ControlDispatch {
 
   /** Handle a SubmitPrompt; push into the SDK turn and Ack (Nack on throw). */
   handleSubmitPrompt(msg: SubmitPrompt): Ack | Nack {
+    LOGGER.log({ request_id: msg.requestId, origin: msg.origin, text_length: msg.text.length, permission_mode: msg.permissionMode || undefined }, "dispatching SubmitPrompt to SDK session");
     try {
       this.target.submitPrompt({
         requestId: msg.requestId,
@@ -96,6 +97,7 @@ export class ControlDispatch {
         origin: msg.origin,
         ...(msg.permissionMode !== "" ? { permissionMode: msg.permissionMode } : {}),
       });
+      LOGGER.log({ request_id: msg.requestId }, "SubmitPrompt accepted by SDK session");
       return create(AckSchema, { requestId: msg.requestId });
     } catch (err) {
       LOGGER.log({ level: "error", request_id: msg.requestId, cause: err }, `submit-prompt failed: ${errMsg(err)}`);
@@ -122,8 +124,10 @@ export class ControlDispatch {
    * the case the target can prove undeliverable while still answering.
    */
   handleInterrupt(msg: Interrupt): Ack | Nack {
+    LOGGER.log({ request_id: msg.requestId }, "dispatching Interrupt to SDK session");
     try {
       const outcome = this.target.interrupt({ requestId: msg.requestId });
+      LOGGER.log({ request_id: msg.requestId, interrupt_outcome: outcome }, "Interrupt resolved by SDK session");
       return create(AckSchema, { requestId: msg.requestId, interruptOutcome: outcome });
     } catch (err) {
       LOGGER.log({ level: "error", request_id: msg.requestId, cause: err }, `interrupt failed: ${errMsg(err)}`);
@@ -138,13 +142,20 @@ export class ControlDispatch {
    */
   requestPermission(toolName: string, input: JsonObject): Promise<ToolPermissionResult> {
     const requestId = this.newRequestId();
-    return new Promise<ToolPermissionResult>((resolve) => {
+    return new Promise<ToolPermissionResult>((resolve, reject) => {
       this.pending.set(requestId, { resolve, input });
-      this.sendPermissionRequest(create(PermissionRequestSchema, {
-        requestId,
-        toolName,
-        input,
-      }));
+      LOGGER.log({ request_id: requestId, tool_name: toolName, pending_count: this.pending.size, input_keys: Object.keys(input) }, "permission request opened for daemon decision");
+      try {
+        this.sendPermissionRequest(create(PermissionRequestSchema, {
+          requestId,
+          toolName,
+          input,
+        }));
+      } catch (err) {
+        this.pending.delete(requestId);
+        LOGGER.log({ level: "error", request_id: requestId, tool_name: toolName, input_keys: Object.keys(input), pending_count: this.pending.size, cause: err }, `permission request send failed: ${errMsg(err)}`);
+        reject(err);
+      }
     });
   }
 
@@ -159,8 +170,10 @@ export class ControlDispatch {
     if (msg.decision === PermissionDecision.ALLOW) {
       // Allow-with-edits: updated_input, when present, replaces the input.
       const updatedInput = msg.updatedInput ?? pending.input;
+      LOGGER.log({ request_id: msg.requestId, decision: "allow", edited: msg.updatedInput !== undefined, pending_count: this.pending.size }, "permission request resolved");
       pending.resolve({ behavior: "allow", updatedInput });
     } else {
+      LOGGER.log({ request_id: msg.requestId, decision: "deny", pending_count: this.pending.size }, "permission request resolved");
       pending.resolve({
         behavior: "deny",
         message: msg.denyMessage !== "" ? msg.denyMessage : "permission denied",
@@ -173,6 +186,9 @@ export class ControlDispatch {
    * shutdown), resolving each as a deny so no SDK callback hangs forever.
    */
   cancelAll(reason: string): void {
+    if (this.pending.size > 0) {
+      LOGGER.log({ pending_count: this.pending.size, reason }, "cancelling outstanding permission requests");
+    }
     for (const [id, pending] of this.pending) {
       this.pending.delete(id);
       pending.resolve({ behavior: "deny", message: reason });

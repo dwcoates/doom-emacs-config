@@ -151,10 +151,71 @@ func TestOpenRejectsNewerSchema(t *testing.T) {
 		Message   string         `json:"message"`
 		Context   map[string]any `json:"context"`
 	}
-	if decodeErr := json.Unmarshal(logs.Bytes(), &record); decodeErr != nil {
-		t.Fatalf("newer-schema record is not JSON: %v", decodeErr)
+	found := false
+	for _, line := range bytes.Split(bytes.TrimSpace(logs.Bytes()), []byte("\n")) {
+		var candidate struct {
+			Operation string         `json:"operation"`
+			Level     string         `json:"level"`
+			Message   string         `json:"message"`
+			Context   map[string]any `json:"context"`
+		}
+		if decodeErr := json.Unmarshal(line, &candidate); decodeErr != nil {
+			t.Fatalf("newer-schema record is not JSON: %v", decodeErr)
+		}
+		if candidate.Operation == "migrate" && candidate.Level == "error" {
+			record = candidate
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("newer-schema error record missing: %s", logs.String())
 	}
 	if record.Operation != "migrate" || record.Level != "error" || !strings.Contains(record.Message, "schema migration failed") || record.Context["db"] != path || record.Context["table"] != "schema_meta" {
 		t.Fatalf("newer-schema error was not canonically logged with context: %#v", record)
+	}
+}
+
+func TestOpenTasksFailureUsesCanonicalQueryLogger(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "events.db")
+	var logs bytes.Buffer
+	log := logging.New(&logs, io.Discard, false).With(logging.Fields{
+		Component:    "db",
+		DatabasePath: path,
+	})
+	d, err := Open(path, log)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if err := d.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	logs.Reset()
+
+	if _, err := d.OpenTasks(); err == nil {
+		t.Fatal("OpenTasks on closed database returned nil error")
+	}
+
+	var record struct {
+		Operation string         `json:"operation"`
+		Level     string         `json:"level"`
+		Message   string         `json:"message"`
+		Context   map[string]any `json:"context"`
+	}
+	found := false
+	for _, line := range bytes.Split(bytes.TrimSpace(logs.Bytes()), []byte("\n")) {
+		if err := json.Unmarshal(line, &record); err != nil {
+			t.Fatalf("OpenTasks failure record is not JSON: %v", err)
+		}
+		if record.Operation == "open-tasks" && record.Level == "error" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("OpenTasks canonical error record missing: %s", logs.String())
+	}
+	if record.Context["component"] != "db" || record.Context["db"] != path || record.Context["table"] != "event" ||
+		!strings.Contains(record.Message, "database query failed") {
+		t.Fatalf("OpenTasks error lacks canonical query context: %#v", record)
 	}
 }

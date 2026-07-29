@@ -24,6 +24,7 @@ type SessionTranscriptHandler struct {
 
 // NewSessionTranscriptHandler builds a handler with its own converter.
 func NewSessionTranscriptHandler(log *logging.Bound) *SessionTranscriptHandler {
+	log.With(logging.Context{Operation: "transcript-handler-new"}).LogVerbose("constructing session transcript handler")
 	return &SessionTranscriptHandler{conv: convert.New(log), log: log}
 }
 
@@ -39,13 +40,18 @@ type converted struct {
 
 // Handle implements Handler.
 func (h *SessionTranscriptHandler) Handle(frames []tail.Frame, ctx *Context) []*corev1.Event {
+	h.log.With(logging.Context{Operation: "transcript-handle", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).LogVerbose("handling frames=%d records_observed=%d", len(frames), ctx.RecordsObserved)
 	var out []*corev1.Event
 	memo := make([]*converted, len(frames))
 	// A compaction boundary at the very end of a batch is UNSETTLED: its summary
 	// is the next line in the file and may not be written yet. holdCount defers
 	// it (leaving the reader's cursor before it) rather than converting it on
 	// half the evidence — see clearcompact.go.
+	originalCount := len(frames)
 	frames = frames[:h.holdCount(memo, frames, ctx)]
+	if len(frames) != originalCount {
+		h.log.With(logging.Context{Operation: "transcript-handle", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).Log("deferred compact boundary frames=%d processed=%d held_deliveries=%d held_offset=%d", originalCount, len(frames), ctx.HeldDeliveries, ctx.HeldOffset)
+	}
 	for i, f := range frames {
 		if f.ParseErr != nil {
 			h.log.With(logging.Context{Operation: "parse", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).Log("parse failure at offset=%d: %v", f.Offset, f.ParseErr)
@@ -63,6 +69,7 @@ func (h *SessionTranscriptHandler) Handle(frames []tail.Frame, ctx *Context) []*
 		}
 		out = append(out, h.lifecycle(c.line, h.convertAt(memo, frames, i+1).line, ctx)...)
 	}
+	h.log.With(logging.Context{Operation: "transcript-handle", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).LogVerbose("handled frames=%d events=%d", len(frames), len(out))
 	return out
 }
 

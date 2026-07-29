@@ -115,7 +115,7 @@ func TestClassifySpoolKinds(t *testing.T) {
 func TestClassifySpoolCarriesNoSessionID(t *testing.T) {
 	// Arrange
 	spool := t.TempDir()
-	d := New(nil, spool, nil)
+	d := New(nil, spool, testLog())
 	p := filepath.Join(spool, "claude-501", "the-slug", "a4f52dc5-runtime-id", "tasks", "b1pi0nmip.output")
 	// Act
 	got, ok := d.Classify(p)

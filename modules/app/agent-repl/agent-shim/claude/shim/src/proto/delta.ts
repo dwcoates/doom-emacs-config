@@ -45,6 +45,9 @@ import {
   Plane,
   type Event,
 } from "../uds/proto.js";
+import { bindLog } from "../uds/log.js";
+
+const LOGGER = bindLog({ component: "claude-shim-delta", operation: "shim.delta.convert" });
 
 /** Wall-clock injection for deterministic tests. */
 export interface DeltaOptions {
@@ -83,9 +86,11 @@ export class StreamMessageTracker {
       case "message_start": {
         const message = event["message"];
         this.messageId = isObject(message) && typeof message["id"] === "string" ? message["id"] : "";
+        LOGGER.logVerbose({ message_id: this.messageId }, "stream message tracker opened assistant message");
         break;
       }
       case "message_stop":
+        LOGGER.logVerbose({ message_id: this.messageId }, "stream message tracker closed assistant message");
         this.messageId = "";
         break;
       default:
@@ -171,7 +176,7 @@ export function streamEventToContentDelta(
       ? BigInt(Math.trunc(delta["estimated_tokens"] as number))
       : 0n;
 
-  return ephemeralEvent(sessionOf(msg), producedAt(opts), {
+  const event = ephemeralEvent(sessionOf(msg), producedAt(opts), {
     case: "contentDelta",
     value: create(ContentDeltaSchema, {
       uuid,
@@ -180,6 +185,8 @@ export function streamEventToContentDelta(
       estimatedTokens,
     }),
   });
+  LOGGER.logVerbose({ claude_session_id: sessionOf(msg), message_id: uuid, block_index: index, delta_arm: arm.case, delta_length: arm.value.length }, "converted ephemeral content delta");
+  return event;
 }
 
 /**
@@ -211,7 +218,7 @@ export function streamEventToMessageLatency(
   const ttft = msg["ttft_ms"];
   if (typeof ttft !== "number" || !Number.isFinite(ttft) || ttft <= 0) return null;
 
-  return ephemeralEvent(sessionOf(msg), producedAt(opts), {
+  const event = ephemeralEvent(sessionOf(msg), producedAt(opts), {
     case: "messageLatency",
     value: create(MessageLatencySchema, {
       // The message this stamp measures, keyed exactly as ContentDelta keys
@@ -220,6 +227,8 @@ export function streamEventToMessageLatency(
       ttftMs: BigInt(Math.trunc(ttft)),
     }),
   });
+  LOGGER.logVerbose({ claude_session_id: sessionOf(msg), message_id: opts?.messageId ?? "", ttft_ms: ttft }, "converted ephemeral message latency");
+  return event;
 }
 
 /** The ContentDelta oneof arm for one `content_block_delta.delta`, or null. */
@@ -255,7 +264,7 @@ export function toolProgressToHeartbeat(
 ): Event {
   const sessionId = firstString(msg["session_id"], msg["sessionId"]);
   const elapsed = firstNumber(msg["elapsed_time_seconds"], msg["elapsedTimeSeconds"], msg["elapsed_seconds"]);
-  return ephemeralEvent(sessionId, producedAt(opts), {
+  const event = ephemeralEvent(sessionId, producedAt(opts), {
     case: "heartbeatProgress",
     value: create(HeartbeatProgressSchema, {
       toolUseId: firstString(msg["tool_use_id"], msg["toolUseId"]),
@@ -264,6 +273,8 @@ export function toolProgressToHeartbeat(
       elapsedSeconds: elapsed,
     }),
   });
+  LOGGER.logVerbose({ claude_session_id: sessionId, elapsed_seconds: elapsed }, "converted ephemeral tool heartbeat");
+  return event;
 }
 
 /**
@@ -275,7 +286,11 @@ export function toEphemeralEvent(msg: unknown, opts?: DeltaOptions): Event | nul
   if (!isObject(msg)) return null;
   switch (msg["type"]) {
     case "stream_event":
-      return streamEventToContentDelta(msg, opts) ?? streamEventToMessageLatency(msg, opts);
+      {
+        const event = streamEventToContentDelta(msg, opts) ?? streamEventToMessageLatency(msg, opts);
+        if (event === null) LOGGER.logVerbose({ stream_frame_type: isObject(msg["event"]) ? msg["event"]["type"] : "" }, "stream event has no ephemeral payload");
+        return event;
+      }
     case "tool_progress":
       return toolProgressToHeartbeat(msg, opts);
     default:

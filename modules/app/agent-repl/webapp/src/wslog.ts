@@ -56,13 +56,23 @@ interface WebappLogRecord {
 
 export class ForwardingLogger {
   /**
+   * Logging shares the frontend WebSocket with ordinary commands. Startup and
+   * reconnect therefore have a real interval where records exist before their
+   * transport does. Retain those records in-order and flush them when the send
+   * path becomes writable. The bound is fail-hard: exhausting it is a logging
+   * subsystem failure, never permission to discard the oldest evidence.
+   */
+  private readonly pending: ClientLogCmd[] = [];
+
+  /**
    * SEND pushes one frame toward the daemon. A rejected send is a failure of
-   * the canonical persistence path and must be surfaced loudly. CONSOLE_FN is
-   * injectable for tests.
+   * the currently available transport, so the record remains queued for the
+   * next successful send. CONSOLE_FN is injectable for tests.
    */
   constructor(
     private readonly send: (cmd: ClientLogCmd) => boolean,
     private readonly consoleFn: (level: ClientLogLevel, line: string) => void = defaultConsole,
+    private readonly maximumPending = 1024,
   ) {}
 
   /**
@@ -79,10 +89,54 @@ export class ForwardingLogger {
   ): void {
     if (consoleEnabled) this.consoleFn(level, JSON.stringify(context));
     if (!forward) return;
-    const sent = this.send({ type: "client-log", level, message, context });
-    if (!sent) throw new Error("webapp log forward was rejected");
+    const command: ClientLogCmd = { type: "client-log", level, message, context };
+    let flushed: boolean;
+    try {
+      flushed = this.flush();
+    } catch (err) {
+      // A throw means the transport failed between its availability check and
+      // send. Preserve the new record alongside any queue head flush() left in
+      // place, then surface the transport failure unchanged.
+      this.enqueue(command);
+      throw err;
+    }
+    if (!flushed) {
+      this.enqueue(command);
+      return;
+    }
+    let sent: boolean;
+    try {
+      sent = this.send(command);
+    } catch (err) {
+      this.enqueue(command);
+      throw err;
+    }
+    if (!sent) this.enqueue(command);
   }
 
+  /**
+   * Flush queued records in original emission order. False means the transport
+   * is still unavailable and the first unsent record remains at the head.
+   */
+  flush(): boolean {
+    while (this.pending.length > 0) {
+      if (!this.send(this.pending[0])) return false;
+      this.pending.shift();
+    }
+    return true;
+  }
+
+  /** Number of durable records awaiting an available forwarding transport. */
+  pendingCount(): number {
+    return this.pending.length;
+  }
+
+  private enqueue(command: ClientLogCmd): void {
+    if (this.pending.length >= this.maximumPending) {
+      throw new Error(`webapp log forwarding queue exhausted its ${this.maximumPending}-record bound`);
+    }
+    this.pending.push(command);
+  }
 }
 
 function defaultConsole(level: ClientLogLevel, line: string): void {
@@ -176,7 +230,6 @@ function buildRecord(level: ClientLogLevel, message: string, context: Record<str
 function emit(level: ClientLogLevel, message: string, options: LogOptions, verbose: boolean): void {
   if (options.dedupKey !== undefined) {
     if (dedupLast.get(options.dedupKey) === message) return;
-    dedupLast.set(options.dedupKey, message);
   }
   if (active === null) throw new Error("wslog logger is not installed");
   const localContext = options.context ?? {};
@@ -194,6 +247,8 @@ function emit(level: ClientLogLevel, message: string, options: LogOptions, verbo
     !verbose || verboseConsoleEnabled(),
     !options.localOnly,
   );
+  // A failed write must not arm dedup and silently suppress a later attempt.
+  if (options.dedupKey !== undefined) dedupLast.set(options.dedupKey, message);
 }
 
 /** Emit a normal diagnostic to the console and daemon persistence path. */

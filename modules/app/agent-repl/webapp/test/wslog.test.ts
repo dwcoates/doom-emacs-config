@@ -73,13 +73,59 @@ describe("ForwardingLogger", () => {
     expect(consoleRecord(spy.consoleLines[0])).toEqual(record);
   });
 
-  it("fails loudly when the socket refuses the forward", () => {
-    // Arrange — send reports not-open.
-    const spy = spyLogger(false);
-    // Act
-    expect(() => spy.logger.write("error", "boom", canonicalRecord("error", "boom"))).toThrow("forward was rejected");
-    // Assert
-    expect(consoleRecord(spy.consoleLines[0])).toMatchObject({ level: "error", message: "boom" });
+  it("retains a refused forward and flushes it when the socket becomes available", () => {
+    let available = false;
+    const forwarded: ClientLogCmd[] = [];
+    const consoleLines: string[] = [];
+    const logger = new ForwardingLogger((cmd) => {
+      if (!available) return false;
+      forwarded.push(cmd);
+      return true;
+    }, (level, line) => consoleLines.push(`${level}: ${line}`));
+
+    logger.write("error", "boom", canonicalRecord("error", "boom"));
+    expect(logger.pendingCount()).toBe(1);
+    expect(forwarded).toEqual([]);
+    expect(consoleRecord(consoleLines[0])).toMatchObject({ level: "error", message: "boom" });
+
+    available = true;
+    expect(logger.flush()).toBe(true);
+    expect(logger.pendingCount()).toBe(0);
+    expect(forwarded).toHaveLength(1);
+  });
+
+  it("fails loudly instead of dropping a record when the forwarding queue is full", () => {
+    const logger = new ForwardingLogger(() => false, () => {}, 1);
+    logger.write("error", "first", canonicalRecord("error", "first"));
+
+    expect(() => logger.write("error", "second", canonicalRecord("error", "second")))
+      .toThrow("queue exhausted");
+    expect(logger.pendingCount()).toBe(1);
+  });
+
+  it("retains a record when a writable transport throws during send", () => {
+    const failure = new Error("socket send raced close");
+    const logger = new ForwardingLogger(() => {
+      throw failure;
+    }, () => {});
+
+    expect(() => logger.write("error", "raced", canonicalRecord("error", "raced")))
+      .toThrow(failure);
+    expect(logger.pendingCount()).toBe(1);
+  });
+
+  it("retains the current record when flushing an older record throws", () => {
+    let transport: "closed" | "throw" = "closed";
+    const logger = new ForwardingLogger(() => {
+      if (transport === "throw") throw new Error("flush raced close");
+      return false;
+    }, () => {});
+    logger.write("warn", "older", canonicalRecord("warn", "older"));
+    transport = "throw";
+
+    expect(() => logger.write("error", "current", canonicalRecord("error", "current")))
+      .toThrow("flush raced close");
+    expect(logger.pendingCount()).toBe(2);
   });
 
   it("persists every normal record without rate-limit suppression", () => {

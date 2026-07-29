@@ -18,6 +18,7 @@ func nowMillis() int64 { return time.Now().UnixMilli() }
 // order. from_seq is EXCLUSIVE (core.proto Subscribe semantics). Only
 // PERSISTENT events are stored, so replay never yields ephemeral events.
 func (d *DB) ReplayFrom(sessionID string, fromSeq uint64) ([]*corev1.Event, error) {
+	d.log.LogVerbose(logging.Fields{Operation: "replay", Table: "event", Session: sessionID}, "querying replay from_seq=%d", fromSeq)
 	rows, err := d.sql.Query(
 		`SELECT payload FROM event WHERE session_id = ? AND seq > ? ORDER BY seq ASC`,
 		sessionID, fromSeq)
@@ -41,22 +42,26 @@ func (d *DB) ReplayFrom(sessionID string, fromSeq uint64) ([]*corev1.Event, erro
 	if err := rows.Err(); err != nil {
 		return nil, d.queryError("replay-iterate", "event", sessionID, fmt.Errorf("shim-store query: iterating replay rows (session=%q): %w", sessionID, err))
 	}
+	d.log.LogVerbose(logging.Fields{Operation: "replay", Table: "event", Session: sessionID}, "replay returned events=%d from_seq=%d", len(out), fromSeq)
 	return out, nil
 }
 
 // MaxSeq returns the highest assigned seq for a session (0 if none).
 func (d *DB) MaxSeq(sessionID string) (uint64, error) {
+	d.log.LogVerbose(logging.Fields{Operation: "max-seq", Table: "event", Session: sessionID}, "querying highest sequence")
 	var v uint64
 	row := d.sql.QueryRow(`SELECT COALESCE(MAX(seq), 0) FROM event WHERE session_id = ?`, sessionID)
 	if err := row.Scan(&v); err != nil {
 		return 0, d.queryError("max-seq", "event", sessionID, fmt.Errorf("shim-store query: max seq (session=%q): %w", sessionID, err))
 	}
+	d.log.LogVerbose(logging.Fields{Operation: "max-seq", Table: "event", Session: sessionID}, "highest sequence=%d", v)
 	return v, nil
 }
 
 // EventsByTask returns a session's events for one extracted task_id, seq order.
 // It exercises the event_task index and is used for task-scoped queries.
 func (d *DB) EventsByTask(sessionID, taskID string) ([]*corev1.Event, error) {
+	d.log.LogVerbose(logging.Fields{Operation: "by-task", Table: "event", Session: sessionID}, "querying task_id=%q", taskID)
 	rows, err := d.sql.Query(
 		`SELECT payload FROM event WHERE session_id = ? AND task_id = ? ORDER BY seq ASC`,
 		sessionID, taskID)
@@ -80,6 +85,7 @@ func (d *DB) EventsByTask(sessionID, taskID string) ([]*corev1.Event, error) {
 	if err := rows.Err(); err != nil {
 		return nil, d.queryError("by-task-iterate", "event", sessionID, fmt.Errorf("shim-store query: iterating by-task rows: %w", err))
 	}
+	d.log.LogVerbose(logging.Fields{Operation: "by-task", Table: "event", Session: sessionID}, "task query returned events=%d task_id=%q", len(out), taskID)
 	return out, nil
 }
 
@@ -89,6 +95,7 @@ func (d *DB) EventsByTask(sessionID, taskID string) ([]*corev1.Event, error) {
 // lifecycle state; payloads remain opaque except for unmarshalling the selected
 // start events back onto the wire.
 func (d *DB) OpenTasks() ([]*corev1.OpenTaskState, error) {
+	d.log.LogVerbose(logging.Fields{Operation: "open-tasks", Table: "event"}, "querying persisted task lifecycle state")
 	rows, err := d.sql.Query(`
 		SELECT started.payload, (
 		  SELECT active.produced_at
@@ -116,7 +123,7 @@ func (d *DB) OpenTasks() ([]*corev1.OpenTaskState, error) {
 		  )
 		ORDER BY started.session_id, started.task_id`)
 	if err != nil {
-		return nil, fmt.Errorf("shim-store query: open tasks: %w", err)
+		return nil, d.queryError("open-tasks", "event", "", fmt.Errorf("shim-store query: open tasks: %w", err))
 	}
 	defer rows.Close()
 	var out []*corev1.OpenTaskState
@@ -124,11 +131,11 @@ func (d *DB) OpenTasks() ([]*corev1.OpenTaskState, error) {
 		var blob []byte
 		var lastActivityAtMs int64
 		if err := rows.Scan(&blob, &lastActivityAtMs); err != nil {
-			return nil, fmt.Errorf("shim-store query: scanning open task: %w", err)
+			return nil, d.queryError("open-tasks-scan", "event", "", fmt.Errorf("shim-store query: scanning open task: %w", err))
 		}
 		ev := &corev1.Event{}
 		if err := proto.Unmarshal(blob, ev); err != nil {
-			return nil, fmt.Errorf("shim-store query: unmarshaling open task start: %w", err)
+			return nil, d.queryError("open-tasks-unmarshal", "event", "", fmt.Errorf("shim-store query: unmarshaling open task start: %w", err))
 		}
 		out = append(out, &corev1.OpenTaskState{
 			Started:          ev,
@@ -136,14 +143,16 @@ func (d *DB) OpenTasks() ([]*corev1.OpenTaskState, error) {
 		})
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("shim-store query: iterating open tasks: %w", err)
+		return nil, d.queryError("open-tasks-iterate", "event", "", fmt.Errorf("shim-store query: iterating open tasks: %w", err))
 	}
+	d.log.LogVerbose(logging.Fields{Operation: "open-tasks", Table: "event"}, "open task query returned tasks=%d", len(out))
 	return out, nil
 }
 
 // Cursors returns all persisted file cursors for the sidecar's startup
 // recovery (§7.3). The sidecar resumes each file from its stored offset/carry.
 func (d *DB) Cursors() ([]*corev1.CursorState, error) {
+	d.log.LogVerbose(logging.Fields{Operation: "list-cursors", Table: "cursor"}, "querying all persisted cursors")
 	rows, err := d.sql.Query(`SELECT file_id, path, offset, carry FROM cursor`)
 	if err != nil {
 		return nil, d.queryError("list-cursors", "cursor", "", fmt.Errorf("shim-store query: listing cursors: %w", err))
@@ -163,19 +172,23 @@ func (d *DB) Cursors() ([]*corev1.CursorState, error) {
 	if err := rows.Err(); err != nil {
 		return nil, d.queryError("list-cursors-iterate", "cursor", "", fmt.Errorf("shim-store query: iterating cursor rows: %w", err))
 	}
+	d.log.LogVerbose(logging.Fields{Operation: "list-cursors", Table: "cursor"}, "cursor query returned cursors=%d", len(out))
 	return out, nil
 }
 
 // Cursor returns one file's persisted cursor, or (nil, nil) if absent.
 func (d *DB) Cursor(fileID string) (*corev1.CursorState, error) {
+	d.log.LogVerbose(logging.Fields{Operation: "cursor", Table: "cursor"}, "querying file_id=%q", fileID)
 	c := &corev1.CursorState{}
 	var carry []byte
 	row := d.sql.QueryRow(`SELECT file_id, path, offset, carry FROM cursor WHERE file_id = ?`, fileID)
 	switch err := row.Scan(&c.FileId, &c.Path, &c.Offset, &carry); {
 	case err == nil:
 		c.Carry = carry
+		d.log.LogVerbose(logging.Fields{Operation: "cursor", Table: "cursor"}, "cursor found file_id=%q offset=%d", fileID, c.GetOffset())
 		return c, nil
 	case errors.Is(err, sql.ErrNoRows):
+		d.log.LogVerbose(logging.Fields{Operation: "cursor", Table: "cursor"}, "cursor absent file_id=%q", fileID)
 		return nil, nil
 	default:
 		return nil, d.queryError("cursor", "cursor", "", fmt.Errorf("shim-store query: reading cursor (file_id=%q): %w", fileID, err))
