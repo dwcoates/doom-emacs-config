@@ -372,8 +372,8 @@ environments without notification tools (terminal-notifier or osascript)."
 
 ;;;; ---- Tests: log-verbose ----
 
-(ert-deftest agent-repl-test-log-verbose-nil-no-log ()
-  "`agent-repl--log-verbose' should NOT log when debug is nil."
+(ert-deftest agent-repl-test-log-verbose-nil-no-message ()
+  "`agent-repl--log-verbose' should not emit to *Messages* when debug is nil."
   (let ((message-called nil))
     (cl-letf (((symbol-function 'message)
                (lambda (&rest _args) (setq message-called t))))
@@ -381,8 +381,8 @@ environments without notification tools (terminal-notifier or osascript)."
         (agent-repl--log-verbose nil "test")
         (should-not message-called)))))
 
-(ert-deftest agent-repl-test-log-verbose-t-no-log ()
-  "`agent-repl--log-verbose' should NOT log when debug is t (only logs for 'verbose)."
+(ert-deftest agent-repl-test-log-verbose-t-no-message ()
+  "`agent-repl--log-verbose' should not emit to *Messages* when debug is t."
   (let ((message-called nil))
     (cl-letf (((symbol-function 'message)
                (lambda (&rest _args) (setq message-called t))))
@@ -390,8 +390,8 @@ environments without notification tools (terminal-notifier or osascript)."
         (agent-repl--log-verbose nil "test")
         (should-not message-called)))))
 
-(ert-deftest agent-repl-test-log-verbose-verbose-logs ()
-  "`agent-repl--log-verbose' should log when debug is 'verbose."
+(ert-deftest agent-repl-test-log-verbose-verbose-emits-message ()
+  "`agent-repl--log-verbose' should emit to *Messages* when debug is `verbose'."
   (let ((message-called nil))
     (cl-letf (((symbol-function 'message)
                (lambda (&rest _args) (setq message-called t))))
@@ -2190,9 +2190,7 @@ record; `agent-repl-debug' now only gates the *Messages* emit."
         (should (> (nth 7 (file-attributes path)) 0))))))
 
 (ert-deftest agent-repl-test-log-verbose-writes-file-when-debug-verbose ()
-  "`agent-repl--log-verbose' MUST write to file when debug is `verbose'.
-Positive case for the gating change — verbose mode is the opt-in
-configuration that re-enables the file write."
+  "`agent-repl--log-verbose' writes to file when debug is `verbose'."
   (agent-repl-test--with-temp-logfile path
     (cl-letf (((symbol-function 'message) #'ignore))
       (let ((agent-repl-debug 'verbose))

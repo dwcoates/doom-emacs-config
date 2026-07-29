@@ -152,12 +152,12 @@ swallowed, and does not abort the remaining migrations."
   (agent-repl--migrate-legacy-state))
 
 (defcustom agent-repl-debug nil
-  "Controls debug logging level.
-nil means no logging; t means standard logging; \\='verbose also enables
-high-frequency events (window changes, resolve-root, process-alive
-predicates, sentinel re-entry).  Verbose mode also gates
-`agent-repl--log-verbose's file writes: when debug is anything other
-than \\='verbose, those calls are a no-op.  Use
+  "Controls debug visibility without changing durable persistence.
+nil suppresses debug output from *Messages*; t shows standard debug output;
+\\='verbose also shows high-frequency events (window changes, resolve-root,
+process-alive predicates, sentinel re-entry).  Normal and verbose records
+still persist through their canonical JSONL sinks whenever
+`agent-repl-log-to-file' is non-nil.  Use
 \\[agent-repl-debug/toggle-logging] (with `C-u' prefix for verbose) to
 flip at runtime."
   :type '(choice (const :tag "Off" nil)
@@ -169,13 +169,12 @@ flip at runtime."
   "Master kill-switch for file-writing of agent-repl log lines.
 When non-nil (the default), every call to `agent-repl--log',
 `agent-repl--info', `agent-repl--warn', `agent-repl--do-log', or
-`agent-repl--error' appends its formatted line to
-`agent-repl-log-file-name' — REGARDLESS of `agent-repl-debug'.
-`agent-repl--log-verbose' is the exception: it ADDITIONALLY requires
-`agent-repl-debug' to be \\='verbose, because its hot-path callers
-(timer ticks, alive predicates) would otherwise spend ~25% of Emacs CPU
-in `write-region'.  Use `agent-repl-debug/toggle-log-to-file' to flip
-the kill-switch at runtime."
+`agent-repl--error' appends its JSONL record to the workspace's canonical
+sink, or to `agent-repl-log-file-name' when the call is genuinely
+workspace-agnostic, REGARDLESS of `agent-repl-debug'.
+`agent-repl--log-verbose' persists as well; verbose controls only
+*Messages* visibility.  Use `agent-repl-debug/toggle-log-to-file' to
+flip the kill-switch at runtime."
   :type 'boolean
   :group 'agent-repl)
 
@@ -222,11 +221,11 @@ the logfile path is itself a prerequisite for emitting a log line."
 (defconst agent-repl--default-log-file-name
   (expand-file-name "doom-agent-repl.log"
                     (agent-repl--default-log-directory))
-  "Default OS-temporary path for the aggregate agent-repl log.")
+  "Default OS-temporary path for workspace-agnostic agent-repl records.")
 
 (defconst agent-repl--retired-state-log-file-name
   (agent-repl--global-state-file "doom-agent-repl.log")
-  "Retired pre-temp-directory default for the aggregate agent-repl log.")
+  "Retired pre-temp-directory default for workspace-agnostic records.")
 
 (defun agent-repl--normalize-log-file-name (value)
   "Return the active logfile path for configured VALUE.
@@ -239,11 +238,14 @@ explicit path is preserved.  No file is moved, copied, read, or deleted."
     value))
 
 (defcustom agent-repl-log-file-name agent-repl--default-log-file-name
-  "Path to the agent-repl log file.
+  "Path to the workspace-agnostic agent-repl log file.
 Defaults to `doom-agent-repl.log' in a UID-qualified private directory under
 Emacs's `temporary-file-directory'.  On macOS that is normally the per-user
 /var/folders/.../T tree; on Linux it is commonly
 /tmp/doom-agent-repl-<uid>/doom-agent-repl.log.
+
+Workspace-owned records do not use this path.  They persist through the
+workspace's canonical .claude/emacs/emacs.log symlink.
 
 Existing logs under ~/.claude-emacs are intentionally neither migrated nor
 deleted.  The value is passed through `expand-file-name', and the parent
@@ -820,7 +822,7 @@ instrumenting it through the logging ladder would recurse indefinitely."
 ;;
 ;; Pick a level, do not reach for `message' directly:
 ;;
-;;   `agent-repl--log-verbose'  hot-path chatter   file (verbose only), quiet
+;;   `agent-repl--log-verbose'  hot-path chatter   file always, terminal verbose
 ;;   `agent-repl--log'          debug chatter      file always, quiet
 ;;   `agent-repl--info'         background notice  file + *Messages*, quiet
 ;;   `agent-repl--warn'         recorded warning   file + *Messages*, quiet

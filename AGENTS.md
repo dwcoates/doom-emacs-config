@@ -113,9 +113,9 @@ Pre-existing call sites are grandfathered until they migrate. New ones are not, 
 
 New code added to the agent-repl module must include instrumentation via `agent-repl--log`. Every dynamic aspect of the call site must be included in the log message — variable values, resolved paths, computed flags, branch outcomes, etc. The goal is that a log trace alone should be sufficient to diagnose any behavioral issue without needing to add instrumentation after the fact.
 
-**Always thread WS through `agent-repl--log` / `agent-repl--log-verbose`.** If a workspace is in lexical scope, or derivable via `(+workspace-current-name)` or the buffer-local `agent-repl--owning-workspace`, pass it as the first argument. `nil` WS silently drops the `{ws=... id=... dir=... cst=... rst=... env=... vt=... in=... ...}` metadata block — that block is exactly what disambiguates 30 identical flood lines across N workspaces. Only pass `nil` when the call site is genuinely workspace-agnostic (load-time sentinel init, workspace-resolving helpers, pure file/directory utilities). If threading WS into a function changes its signature, do it — add an optional `ws` parameter dedicated to diagnostics if purity needs to be preserved otherwise.
+**Always thread WS through `agent-repl--log` / `agent-repl--log-verbose`.** If a workspace is in lexical scope, or derivable via `(+workspace-current-name)` or the buffer-local `agent-repl--owning-workspace`, pass it as the first argument. `nil` WS omits the canonical workspace and session identity fields that disambiguate identical records across workspaces. Only pass `nil` when the call site is genuinely workspace-agnostic (load-time sentinel init, workspace-resolving helpers, pure file/directory utilities). If threading WS into a function changes its signature, do it — add an optional `ws` parameter dedicated to diagnostics if purity needs to be preserved otherwise.
 
-**Diagnostic output must land in the logfile, never in a dedicated buffer as the sole record.** Route subprocess stdout/stderr, captured shell output, resolver responses, and any other instrumentation through `agent-repl--log` / `agent-repl--log-verbose` so it inherits the standard timestamp + `{ws=...}` metadata and survives session restarts. Side buffers are not greppable from `~/.claude/emacs/doom-agent-repl.log`, do not persist after Emacs exits, and require a human to already know the buffer name to inspect them. A side buffer is acceptable *in addition* for live interactive inspection — never *instead of* a log entry. If you find yourself writing `(get-buffer-create "*agent-repl-...*")` to hold diagnostics, stop and log instead.
+**Diagnostic output must land in the canonical logfile, never in a dedicated buffer as the sole record.** Route subprocess stdout/stderr, captured shell output, resolver responses, and any other instrumentation through `agent-repl--log` / `agent-repl--log-verbose` so it inherits the canonical structured identity fields and survives session restarts. Side buffers are not durable or available to the log-discovery workflow, and they require a human to already know the buffer name to inspect them. A side buffer is acceptable *in addition* for live interactive inspection — never *instead of* a log entry. If you find yourself writing `(get-buffer-create "*agent-repl-...*")` to hold diagnostics, stop and log instead.
 
 **Every bug fix MUST add instrumentation.** A bug that reached production is itself proof the existing logging could not pinpoint it, so any fix must leave behind the `agent-repl--log` coverage (decision inputs, computed flags, branch taken, error captured) that would have isolated the root cause from a trace alone — never fix a bug without also closing the instrumentation gap it exposed.
 
@@ -134,35 +134,20 @@ The workspace-command skills (`workspace-merge`, `workspace-status`, `workspace-
 
 ## Debugging skills: when to use each
 
-The doom-agent-repl ecosystem ships several Claude Code skills for debugging. Pick by the *kind* of evidence you need.
+The complete agent-repl investigation workflow lives in
+`<current-repository-root>/modules/app/agent-repl/skills/debug-emacs-agent-repl/SKILL.md`.
+Invoke `/debug-emacs-agent-repl` immediately for
+any question about current or historical editor, workspace, daemon, shim,
+webapp, sidecar, store, state, deployment, logging, or coverage behavior. The
+skill owns evidence routing, health and readiness checks, identity correlation,
+SQL investigation, log discovery, and telemetry-deficiency review. Do not
+duplicate its paths or procedures here and do not replace them with ad hoc
+`grep`, `cat`, `sqlite3`, or `emacsclient` probes.
 
-**Proactive on any state question — no prompting required.** The moment the user asks anything about the *current* state of the editor, a workspace, the daemon, or the REPL — "what's going on with X", "why is Y stuck/dead", "what state is Z in", "is the session alive" — reach for these two skills *immediately and without being asked*. A state question IS the trigger; invoking them is the first step of answering, never a follow-up you offer. Do not hand-roll ad-hoc `grep`/`cat`/`emacsclient` probes when a skill covers the evidence.
-
-- `/debug-logs` — **read state/history that already exists on disk.** Reads `~/.claude/emacs/doom-agent-repl.log` and per-workspace `memory-state.el` snapshots. Reach for it first whenever the moment of interest has already passed (a workspace that went stuck, a crash-restart loop, a recorded agent/repl state) — anything answerable from what was already logged or snapshotted.
-- `/runtime-eval-code` — **inspect or mutate *live* editor state** by sending elisp to the running Emacs, scoped to the current workspace. Reach for it when the answer is a value/predicate/buffer-state no logger captured, when you need to confirm what the editor believes *right now*, or when the log is silent because the signal lives in `*Messages*` or 3rd-party output.
-
-The two compose: `/debug-logs` establishes what happened, `/runtime-eval-code` confirms the live state now. The fuller reference for each skill (plus the profiling skills) follows.
-
-- `/debug-logs` — read history that already exists.
-  - Use for any agent-repl logic/state bug whose timestamp you can pin down.
-  - Reads `~/.claude/emacs/doom-agent-repl.log` and per-workspace `memory-state.el` snapshots.
-  - First stop for reproducible bugs originating in `modules/app/agent-repl/`.
-
-- `/runtime-eval-code` — inspect or mutate live editor state by sending elisp to the running Emacs, scoped to the current workspace.
-  - Use when you need a value, predicate, or state inspection not captured by any logger.
-  - Use to dump `*Messages*` to disk when the bug is signaled by 3rd-party output that the agent-repl log does NOT capture (magit/transient/doom-core warnings, byte-compile errors during refactor or dep bumps, package-init failures). The dump snippet and its grep recipes live in the `/runtime-eval-code` skill itself; `debug-logs` §9 just points there.
-  - Use to drive a specific elisp snippet during a profiling session.
-
-- `/profile` — capture a fresh sample with auto-stop.
-  - Use when the symptom is performance (slow, hitching, hot path suspected).
-  - Schedules a wakeup so the profiler stops automatically; analysis lands as a follow-up message.
-
-- `/workspace-profile` — manual profiler toggle.
-  - Use when you want to start/stop on your own cadence rather than time-boxed.
-
-Rule of thumb: read first (`/debug-logs`), then inspect live (`/runtime-eval-code`), then measure (`/profile`).
-
-When build or compilation errors surface during refactor or dep-bump work, the failing output typically lives in `*Messages*` — not in the agent-repl log file. Use `/runtime-eval-code` to dump `*Messages*` (its SKILL.md has the snippet and grep recipes), then read the dump.
+Use `/runtime-eval-code` when the debug skill routes the investigation to live
+Emacs state or third-party `*Messages*` output. Use `/profile` for time-boxed
+performance capture and `/workspace-profile` when the user needs manual
+profiler control.
 
 ## No Silent Fallbacks — Fail Hard on Invariant Violations
 
@@ -520,47 +505,13 @@ The consolidated architecture behind every such element is three orthogonal piec
 
 Membership rulings from the deliberation: a `TaskCreate` card's update history is a member via its child-feed body (task-id claims, `partition.ts`); the gns-sockets fold shares the fold dress with a rehosted-items body (`gns.ts`); an announcement-less tail is a raw member wearing the same dress (nothing renders zero-click inline); a thinking disclosure is NOT a member (it streams the model's own turn, not a detached process). The standing regression gallery for all of this is the catalogue page (`webapp/catalogue.html`, scenarios in `webapp/src/catalogue.ts`).
 
-## Debugging Vexing / Non-Obvious Bugs
+## Debugging vexing or non-obvious bugs
 
-When facing a bug that resists immediate root-cause identification, **do not speculate indefinitely**. Instead, shift to an instrumentation-first approach:
-
-1. **Ask: "What logging can I add to narrow the root cause after reproduction?"**
-   Design targeted log statements that distinguish between competing hypotheses. Each log point should eliminate at least one theory.
-
-2. **Always use the existing logging helper.**
-   All debug logging must go through `agent-repl--log` (defined in `core.el`). Never use raw `(message ...)` for debug instrumentation. The helper provides:
-   - Timestamped output (`HH:MM:SS.mmm [agent-repl] {ws=... id=... ...} ...`)
-   - Automatic workspace metadata (all plist keys) when `ws` is non-nil
-   - Gated by `agent-repl-debug` (nil = off, t = on, 'verbose = high-frequency)
-   - Use `agent-repl--log-verbose` for high-frequency events (per-keystroke, per-timer-tick, git-diff sentinels)
-   - Signature: `(agent-repl--log WS "context: key=%s" value)` — WS is the workspace name string, or nil for workspace-free contexts
-   - When a function has `ws` in scope (parameter or local), always pass it. Pure helpers with no ws pass nil.
-
-3. **Prioritize "smoking gun" instrumentation.**
-   Identify the single log point that would most directly distinguish between hypotheses. Add that first. For example, if the question is "is function A or function B being called?", a log at the top of each immediately resolves it.
-
-4. **Wrap risky calls with `condition-case` logging.**
-   When a theory involves a call erroring and preventing cleanup, wrap it:
-   ```elisp
-   (condition-case err
-       (risky-call)
-     (error (agent-repl--log ws "context: risky-call failed: %S" err)))
-   ```
-   This both catches the error for logging and prevents it from silently breaking downstream cleanup.
-
-5. **Log buffer and state context.**
-   For bugs involving wrong-buffer or stale-state theories, log `(current-buffer)`, relevant buffer-local variables, and mode states at the instrumentation point.
-
-6. **Toggling logging at runtime.**
-   Use `M-x agent-repl-debug/toggle-logging` to cycle standard logging on/off. With a prefix argument (`C-u M-x agent-repl-debug/toggle-logging`), it toggles verbose mode instead. Verbose mode includes high-frequency events (1-second timer ticks, git-diff sentinels, window changes, resolve-root). Standard mode logs only meaningful state transitions and user-initiated actions.
-
-   **Suggest verbose mode to the user when investigating hot-path issues** (vterm redraws, overlay churn, mode-line refresh, window-config changes, async refresh ticks). Some call sites are *fully* gated on verbose (file write and echo both skipped) because they fire too often to leave on by default — notably `vterm-color-advice` in `overlay.el`, which previously emitted ~88% of the entire logfile. If the log appears silent for a suspected hot path, that gating is usually why; ask the user to enable verbose with `C-u M-x agent-repl-debug/toggle-logging` and reproduce.
-
-7. **Persistent logfile (`~/.claude/doom-agent-repl.log`).**
-   By default, all log output is also appended to `~/.claude/doom-agent-repl.log`. This file persists across Emacs sessions and is the primary artifact for debugging and coordinating with the user. When investigating a bug or answering a user question about recent behavior, **read `~/.claude/doom-agent-repl.log` first** — it contains the full timestamped trace of agent-repl activity. Use `M-x agent-repl-debug/toggle-log-to-file` to disable or re-enable file logging at runtime. Ensure that the user is cognizant of it's existence during tricky debug problems, and of how to enable/disable it. 
-
-8. **Choosing standard vs verbose.**
-   Events that fire on every timer tick, every window change, or every keystroke MUST use `agent-repl--log-verbose`. Events that fire on discrete user actions or state transitions use `agent-repl--log`. Rule of thumb: if it fires more than once per second across all workspaces, it's verbose.
+Use `/debug-emacs-agent-repl` and follow its evidence plan rather than adding
+ad hoc probes or speculating from silence. Its mandatory observability audit
+owns the procedure for identifying and surfacing missing telemetry. The
+contributor instrumentation requirements remain in the earlier "Claude REPL
+instrumentation" section.
 
 ## Worker-thread AppKit trap — nothing that reaches AppKit may run off the main thread on macOS
 

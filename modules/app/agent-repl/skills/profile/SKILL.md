@@ -26,7 +26,10 @@ Use plain `/runtime-eval-code` instead when:
 - The user wants to start/stop the profiler manually with no automation (dispatch the start/stop snippets yourself).
 - The agent has no way to schedule a wakeup (rare; if `ScheduleWakeup` is unavailable, start via `/runtime-eval-code` and tell the user to ask for the stop when ready).
 
-`/debug-logs` covers a different problem (reading existing logs / recommending instrumentation). If the suspect is performance and you want fresh sampling data, use `/profile`. If the suspect is logic or state and you want history, use `/debug-logs`.
+`/debug-emacs-agent-repl` covers a different problem (reading existing
+evidence and identifying missing observability). If the suspect is performance
+and you want fresh sampling data, use `/profile`. If the suspect is logic or
+state and you want history, use `/debug-emacs-agent-repl`.
 
 ## Pairing with /runtime-eval-code to profile a specific snippet
 
