@@ -118,11 +118,6 @@ export interface WorkspaceStatusInput {
   turnActive: boolean;
   liveTaskCount: number;
   mergePhase: string;
-  /**
-   * The emission's delivery identity (F5). This end acknowledges it once it has
-   * drawn the state, which is what releases the state to the Emacs tab bar.
-   */
-  generation: number;
 }
 
 /** SessionView → topbar / session-info input. */
@@ -453,7 +448,6 @@ export class StateAdapter {
         turnActive: ws.turnActive,
         liveTaskCount: Number(ws.liveTaskCount),
         mergePhase: ws.mergePhase,
-        generation: Number(ws.generation),
       },
     };
   }

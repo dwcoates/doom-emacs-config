@@ -187,15 +187,12 @@ func (r *interruptFlowRig) apply(payload any) {
 }
 
 // settleReady brings the workspace up to a resolved, non-blue baseline: a
-// started session, a settled backfill and an attested paint.
+// started session and a settled backfill.
 func (r *interruptFlowRig) settleReady() {
 	r.t.Helper()
 	r.apply(&corev1.SessionStarted{Model: "test-model", Cwd: interruptFlowWorkspace})
 	if err := r.ssm.ApplyBackfillState(interruptFlowWorkspace, BackfillDone); err != nil {
 		r.t.Fatalf("apply backfill done: %v", err)
-	}
-	if err := r.ssm.ApplyPaintAck(interruptFlowWorkspace, 0); err != nil {
-		r.t.Fatalf("apply paint ack: %v", err)
 	}
 }
 

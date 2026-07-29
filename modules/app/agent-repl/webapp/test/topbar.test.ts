@@ -99,7 +99,6 @@ function storeState(over: Partial<StoreState> = {}): StoreState {
     taskSummary: null,
     lastSeq: 0,
     renderState: null,
-    renderGeneration: 0,
     ...over,
   };
 }

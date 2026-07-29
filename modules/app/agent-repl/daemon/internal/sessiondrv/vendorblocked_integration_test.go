@@ -136,9 +136,6 @@ func (r *vendorBlockedRig) settleReady() {
 	if err := r.mgr.ApplyBackfillState(vendorBlockedWorkspace, BackfillDone); err != nil {
 		r.t.Fatalf("apply backfill done: %v", err)
 	}
-	if err := r.mgr.ApplyPaintAck(vendorBlockedWorkspace, 0); err != nil {
-		r.t.Fatalf("apply paint ack: %v", err)
-	}
 }
 
 func TestAVendorBlockedWorkspaceStillAcceptsTheNextPrompt(t *testing.T) {

@@ -111,9 +111,7 @@ func TestApplyLifecycleTransitions(t *testing.T) {
 		ev   *corev1.Event
 		want frontendv1.RenderState
 	}{
-		// Readiness opens the paint axis alongside the agent axis, so a session
-		// that just came up is blue until a frontend attests drawing it.
-		{"session started -> unattested blue", evSessionStarted("s1", 1), frontendv1.RenderState_RENDER_STATE_INIT},
+		{"session started -> ready", evSessionStarted("s1", 1), frontendv1.RenderState_RENDER_STATE_READY},
 		{"turn started -> thinking", evTurnStarted("s1", 1), frontendv1.RenderState_RENDER_STATE_THINKING},
 		{"clean turn end -> done", evTurnEnded("s1", 1, false), frontendv1.RenderState_RENDER_STATE_DONE},
 		{"errored turn end -> vendor_blocked", evTurnEnded("s1", 1, true), frontendv1.RenderState_RENDER_STATE_VENDOR_BLOCKED},
@@ -160,15 +158,10 @@ func TestApplyIdempotentReapply(t *testing.T) {
 // TestLiveTaskCounting covers task started/ended/lost accounting and the
 // idle_async promotion it drives.
 func TestLiveTaskCounting(t *testing.T) {
-	// Arrange: an idle, ATTESTED session — yellow is a promotion of a green
-	// base, so the paint axis has to be settled for the promotion to be visible
-	// at all.
+	// Arrange: an idle session — yellow is a promotion of a green.
 	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
 	if err := m.Apply(evSessionStarted("s1", 1)); err != nil {
 		t.Fatalf("session start: %v", err)
-	}
-	if err := m.ApplyPaintAck("ws1", 0); err != nil {
-		t.Fatalf("paint ack: %v", err)
 	}
 	// Act + Assert, step by step (each step is one counting edge).
 	steps := []struct {
@@ -259,9 +252,6 @@ func TestPersistenceAcrossReopen(t *testing.T) {
 	}
 	if err := m1.Apply(evSessionStarted("s1", 1)); err != nil {
 		t.Fatalf("session start: %v", err)
-	}
-	if err := m1.ApplyPaintAck("ws1", 0); err != nil {
-		t.Fatalf("paint ack: %v", err)
 	}
 	if err := m1.Apply(evTaskStarted("s1", 2, "a1")); err != nil {
 		t.Fatalf("task start: %v", err)
@@ -461,9 +451,6 @@ func TestSnapshotAllWorkspaces(t *testing.T) {
 	if err := m.Apply(evSessionStarted("s2", 1)); err != nil {
 		t.Fatalf("Apply s2: %v", err)
 	}
-	if err := m.ApplyPaintAck("wsB", 0); err != nil {
-		t.Fatalf("paint ack wsB: %v", err)
-	}
 	// Act.
 	snap, err := m.Snapshot()
 	if err != nil {
@@ -536,12 +523,9 @@ func TestLiveTaskCountNeverGoesNegativeOnDuplicateEnds(t *testing.T) {
 }
 
 func TestLiveTaskCountKeepsADuplicateEndFromResurrectingIdleAsync(t *testing.T) {
-	// Arrange — two live tasks on an attested session; one of them ends twice.
+	// Arrange — two live tasks on a live session; one of them ends twice.
 	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
 	mustApply(t, m, evSessionStarted("s1", 1))
-	if err := m.ApplyPaintAck("ws1", 0); err != nil {
-		t.Fatalf("paint ack: %v", err)
-	}
 	mustApply(t, m, evTaskStarted("s1", 2, "a1"))
 	mustApply(t, m, evTaskStarted("s1", 3, "a2"))
 

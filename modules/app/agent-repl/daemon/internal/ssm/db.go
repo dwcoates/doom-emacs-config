@@ -334,38 +334,6 @@ func openCutWorkspaces(db *sql.DB, openToken, closeToken string) ([]string, erro
 	return out, nil
 }
 
-// paintWatermark returns the highest seq a frontend has attested painting
-// for the workspace, and whether any attestation currently stands.
-//
-// The two answers are separate on purpose: seq 0 is a REAL attestation of an
-// empty history, so "attested at 0" and "never attested" are different facts
-// that a single integer could not distinguish. Without the boolean, the
-// never-prompted session this whole mechanism exists to make ready could
-// never be told apart from one that had reported nothing.
-func paintWatermark(db *sql.DB, workspace string) (uint64, bool, error) {
-	var (
-		state string
-		seq   sql.NullInt64
-	)
-	err := db.QueryRow(
-		`SELECT state, cause_seq FROM workspace_state
-		 WHERE workspace = ? AND state IN ('painted','unpainted')
-		 ORDER BY at DESC LIMIT 1`, workspace).Scan(&state, &seq)
-	if err == sql.ErrNoRows {
-		return 0, false, nil
-	}
-	if err != nil {
-		return 0, false, fmt.Errorf("ssm: paint watermark for workspace %q: %w", workspace, err)
-	}
-	if state != "painted" {
-		// The latest paint-axis row withdrew the attestation, so the
-		// watermark is gone with it: a re-attestation after a route break
-		// starts from nothing rather than inheriting the pre-break seq.
-		return 0, false, nil
-	}
-	return uint64(seq.Int64), true, nil
-}
-
 // distinctWorkspaces lists every workspace that has any logged signal, in
 // stable order, for Snapshot.
 func distinctWorkspaces(db *sql.DB) ([]string, error) {

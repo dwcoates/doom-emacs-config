@@ -92,53 +92,6 @@ export interface ResyncBody {
   fromSeq: number;
 }
 
-/**
- * PaintAckCmd — attest that this frontend PAINTED the workspace's
- * conversation through `throughSeq`.
- *
- * The daemon tracks STATE; a frontend decides when that state is
- * RENDERABLE. Nothing on the daemon's side can distinguish a webview that
- * received every item and drew them from one that received every item and
- * drew nothing, so it withholds "ready" until a frontend says it drew.
- *
- * `throughSeq` 0 is a REAL attestation of an EMPTY history — "there was
- * nothing to paint and I painted it" — which is what lets a never-prompted
- * session read as ready.
- */
-export interface PaintAckBody {
-  case: "paintAck";
-  throughSeq: number;
-  /**
-   * The `WorkspaceState.generation` this render drew (F5).
-   *
-   * The second identity of one render pass: `throughSeq` addresses the
-   * CONVERSATION drawn, this addresses the STATE drawn. The daemon withholds a
-   * state from Emacs until a painting frontend answers for its generation, so
-   * an ack minted against an older emission can never release a newer one.
-   */
-  stateGeneration: number;
-  /** What the render attempt actually produced. */
-  outcome: PaintOutcome;
-}
-
-/**
- * What a render attempt produced (`frontend.v1.PaintOutcome`).
- *
- * `suspended` is the honest answer from a webview whose rendering is stopped —
- * a hidden xwidget has no requestAnimationFrame, and a 13.6-second stall was
- * measured directly. It settles the state's DELIVERY, so a webview nobody can
- * see never wedges the tab bar, while attesting no paint at all. There is no
- * default: the daemon refuses an ack that names neither.
- */
-export const PAINT_OUTCOMES = ["painted", "suspended"] as const;
-export type PaintOutcome = (typeof PAINT_OUTCOMES)[number];
-
-/** The `PaintOutcome` enum values, as their canonical protojson names. */
-const PAINT_OUTCOME_NAME: Readonly<Record<PaintOutcome, string>> = {
-  painted: "PAINT_OUTCOME_PAINTED",
-  suspended: "PAINT_OUTCOME_SUSPENDED",
-};
-
 /** The `ClientLogLevel` enum values, as their canonical protojson names. */
 const CLIENT_LOG_LEVEL_NAME = {
   info: "CLIENT_LOG_LEVEL_INFO",
@@ -191,8 +144,7 @@ export type FrontendCommandBody =
   | ClientLogBody
   | QueueForceBody
   | QueueAcceptBody
-  | QueueCancelBody
-  | PaintAckBody;
+  | QueueCancelBody;
 
 /** The command envelope: correlation id + workspace + exactly one command arm. */
 export interface FrontendCommand {
@@ -215,7 +167,6 @@ const ARM_KEY: Record<FrontendCommandBody["case"], string> = {
   queueForce: "queueForce",
   queueAccept: "queueAccept",
   queueCancel: "queueCancel",
-  paintAck: "paintAck",
 };
 
 /** Build the nested protojson command message for one body arm. */
@@ -250,13 +201,6 @@ function encodeBody(b: FrontendCommandBody): Record<string, unknown> {
     case "resync":
       // uint64 renders as a JSON string in protojson.
       return { fromSeq: String(b.fromSeq) };
-    case "paintAck":
-      // uint64 renders as a JSON string, an enum as its proto NAME.
-      return {
-        throughSeq: String(b.throughSeq),
-        stateGeneration: String(b.stateGeneration),
-        outcome: PAINT_OUTCOME_NAME[b.outcome],
-      };
     case "clientLog": {
       // An enum renders as its proto NAME in canonical protojson.
       const arm: Record<string, unknown> = {

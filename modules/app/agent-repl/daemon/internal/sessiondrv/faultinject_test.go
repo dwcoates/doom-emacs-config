@@ -162,16 +162,12 @@ func (r *faultRig) retainedCards() []*frontendv1.ConversationItem {
 }
 
 // settleGreen brings the workspace to green the way a real bring-up does: the
-// shim asserts readiness, the transcript backfill settles, and a frontend
-// attests it painted the (empty) history.
+// shim asserts readiness and the transcript backfill settles.
 func (r *faultRig) settleGreen() {
 	r.t.Helper()
 	r.apply(&corev1.SessionStarted{Model: "test-model", Cwd: r.ws})
 	if err := r.mgr.ApplyBackfillState(r.ws, BackfillDone); err != nil {
 		r.t.Fatalf("apply backfill done: %v", err)
-	}
-	if err := r.mgr.ApplyPaintAck(r.ws, 0); err != nil {
-		r.t.Fatalf("apply paint ack: %v", err)
 	}
 	r.wantState(frontendv1.RenderState_RENDER_STATE_READY, "after bring-up")
 }
@@ -673,9 +669,6 @@ func TestFailedBackfillHoldsTheWorkspaceBlue(t *testing.T) {
 	// Arrange
 	rig := newFaultRig(t)
 	rig.apply(&corev1.SessionStarted{Model: "test-model", Cwd: rig.ws})
-	if err := rig.mgr.ApplyPaintAck(rig.ws, 0); err != nil {
-		t.Fatalf("apply paint ack: %v", err)
-	}
 
 	// Act
 	if err := rig.mgr.ApplyBackfillState(rig.ws, BackfillFailed); err != nil {
@@ -686,15 +679,11 @@ func TestFailedBackfillHoldsTheWorkspaceBlue(t *testing.T) {
 	rig.wantState(frontendv1.RenderState_RENDER_STATE_INIT, "with a failed backfill")
 }
 
-// Settling the backfill releases the axis, letting the workspace reach green
-// (the paint axis is attested in Arrange, so backfill is the one gate left).
+// Settling the backfill releases the axis, letting the workspace reach green.
 func TestBackfillSettlingReleasesTowardGreen(t *testing.T) {
 	// Arrange
 	rig := newFaultRig(t)
 	rig.apply(&corev1.SessionStarted{Model: "test-model", Cwd: rig.ws})
-	if err := rig.mgr.ApplyPaintAck(rig.ws, 0); err != nil {
-		t.Fatalf("apply paint ack: %v", err)
-	}
 	if err := rig.mgr.ApplyBackfillState(rig.ws, BackfillFailed); err != nil {
 		t.Fatalf("apply backfill failed: %v", err)
 	}
@@ -707,84 +696,6 @@ func TestBackfillSettlingReleasesTowardGreen(t *testing.T) {
 
 	// Assert
 	rig.wantState(frontendv1.RenderState_RENDER_STATE_READY, "after the backfill settled")
-}
-
-// A withdrawn paint attestation resolves blue: a frontend that has not
-// attested painting is indistinguishable from one that cannot paint, so the
-// honest answer is the compromised-route color.
-func TestWithdrawnPaintAttestationHoldsBlue(t *testing.T) {
-	// Arrange
-	rig := newFaultRig(t)
-	rig.settleGreen()
-
-	// Act
-	if err := rig.mgr.ApplyPaintLost(rig.ws, "frontend disconnected"); err != nil {
-		t.Fatalf("apply paint lost: %v", err)
-	}
-
-	// Assert
-	rig.wantState(frontendv1.RenderState_RENDER_STATE_INIT, "with the attestation withdrawn")
-}
-
-// A fresh paint ack re-attests the route and returns the workspace to green.
-func TestFreshPaintAckReturnsToGreen(t *testing.T) {
-	// Arrange
-	rig := newFaultRig(t)
-	rig.settleGreen()
-	if err := rig.mgr.ApplyPaintLost(rig.ws, "frontend disconnected"); err != nil {
-		t.Fatalf("apply paint lost: %v", err)
-	}
-	rig.wantState(frontendv1.RenderState_RENDER_STATE_INIT, "with the attestation withdrawn")
-
-	// Act
-	if err := rig.mgr.ApplyPaintAck(rig.ws, 1); err != nil {
-		t.Fatalf("apply paint ack: %v", err)
-	}
-
-	// Assert
-	rig.wantState(frontendv1.RenderState_RENDER_STATE_READY, "after re-attestation")
-}
-
-// --- The paint clause of the green definition ------------------------------
-//
-// The settled vocabulary defines green as: route provably usable AND backfill
-// settled AND the GUI painted (paint ack) AND input ready. Two of the gaps the
-// fault matrix originally pinned here (green without any paint attestation,
-// and shim death not withdrawing it) were closed by the delivery-pipeline
-// change: readiness now opens the paint axis with an `unpainted` row, and the
-// painter's connect/disconnect withdraw the attestation. The tests below
-// assert the closed behavior; the rate-limit gap further down remains a pin.
-
-// A workspace with no paint attestation stays blue: readiness opens the paint
-// axis, and the documented blue gate (ssm.go: "the workspace stays on the
-// unpainted (blue) token until a frontend says otherwise") holds until a
-// frontend attests.
-func TestWorkspaceWithNoPaintAttestationStaysBlue(t *testing.T) {
-	// Arrange
-	rig := newFaultRig(t)
-
-	// Act — readiness only; no paint ack, no paint loss, no backfill row.
-	rig.apply(&corev1.SessionStarted{Model: "test-model", Cwd: rig.ws})
-
-	// Assert — blue's token: nothing has attested a paint.
-	rig.wantState(frontendv1.RenderState_RENDER_STATE_INIT, "with zero paint rows")
-}
-
-// A shim death withdraws the paint attestation, so a revived session stays
-// blue until some frontend re-attests — the pre-break attestation never
-// re-greens the workspace on its own.
-func TestShimDeathWithdrawsThePaintAttestation(t *testing.T) {
-	// Arrange
-	rig := newFaultRig(t)
-	rig.settleGreen()
-	rig.apply(&corev1.SessionEnded{})
-	rig.wantState(frontendv1.RenderState_RENDER_STATE_DEAD, "after shim death")
-
-	// Act — the session comes back; no frontend re-attests a paint.
-	rig.apply(&corev1.SessionStarted{Model: "test-model", Cwd: rig.ws})
-
-	// Assert — blue until re-attestation, not green on the stale attestation.
-	rig.wantState(frontendv1.RenderState_RENDER_STATE_INIT, "after revival without re-attestation")
 }
 
 // GAP: a `rejected` rate-limit report does not reach the vendor axis.

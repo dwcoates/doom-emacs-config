@@ -497,12 +497,6 @@ export interface StoreState {
    * the footer of an already-green tab.
    */
   renderState: WebRenderState | null;
-  /**
-   * The delivery generation of `renderState` — what this end acknowledges once
-   * it has drawn that state. Emacs is not sent a state until this end answers
-   * for its generation, so the two surfaces cannot show different states.
-   */
-  renderGeneration: number;
 }
 
 function initialState(): StoreState {
@@ -530,7 +524,6 @@ function initialState(): StoreState {
     taskSummary: null,
     lastSeq: 0,
     renderState: null,
-    renderGeneration: 0,
   };
 }
 
@@ -739,10 +732,8 @@ export class ConversationStore {
     const s = this.state;
     if (ws.sessionId !== "") s.sessionId = ws.sessionId;
     // THE workspace's phase, kept so the footer reads the same authority the
-    // tab bar does. The generation rides with it because acknowledging the
-    // state is how this end releases it to Emacs.
+    // tab bar does.
     s.renderState = ws.state;
-    s.renderGeneration = ws.generation;
     const wasActive = s.turnInFlight;
     s.turnInFlight = ws.turnActive;
     if (ws.turnActive && !wasActive) {

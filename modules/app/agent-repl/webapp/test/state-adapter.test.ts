@@ -52,7 +52,6 @@ describe("WorkspaceState mapping", () => {
         turnActive: true,
         liveTaskCount: "2",
         mergePhase: "cherry-pick",
-        generation: "7",
       },
     });
     expect(effects).toEqual([
@@ -65,7 +64,6 @@ describe("WorkspaceState mapping", () => {
           turnActive: true,
           liveTaskCount: 2,
           mergePhase: "cherry-pick",
-          generation: 7,
         },
       },
     ]);
@@ -88,17 +86,6 @@ describe("WorkspaceState mapping", () => {
     });
     // Assert
     expect(effects[0]).toMatchObject({ kind: "workspace-state", value: { state: "compacting" } });
-  });
-
-  it("carries the delivery generation, which the paint ack names (F5)", () => {
-    // Arrange / Act — uint64 arrives as a protojson numeric string.
-    const effects = applyOne({
-      workspaceState: { workspace: "ws-a", state: "RENDER_STATE_READY", generation: "42" },
-    });
-    // Assert
-    const eff = effects[0];
-    if (eff.kind !== "workspace-state") throw new Error("expected a workspace-state effect");
-    expect(eff.value.generation).toBe(42);
   });
 
   const keywordCases: Array<[string, string]> = [

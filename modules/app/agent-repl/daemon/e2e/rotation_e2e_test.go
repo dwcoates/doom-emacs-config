@@ -24,9 +24,8 @@
 // These tests share e2e_test.go's package and reuse its helpers READ-ONLY
 // (newUDSHarness, dial, readFrame, writeCmd, frameTimeout), clearcompact's
 // liveSession / deltaItems / isClear / dialStoreProducer / sidecarClearEvent /
-// clearDedupKey, and interrupt_e2e_test.go's painter / awaitAll / assistantText
-// / echoOf / workspaceStateFor. Paint attestation is REQUIRED: an unattested
-// paint axis holds every workspace blue no matter what the agent does.
+// clearDedupKey, and interrupt_e2e_test.go's awaitAll / assistantText /
+// echoOf / workspaceStateFor.
 package e2e
 
 import (
@@ -100,12 +99,12 @@ type rotated struct {
 // `!rotate` and returns once the rotated turn's own reply — written under the
 // NEW identity, and therefore only reachable through a reset cursor and a fresh
 // subscription — has arrived on the frontend.
-func rotateSession(t *testing.T, h *e2eHarness, conn *websocket.Conn, p *painter, sessionID, cwd string) rotated {
+func rotateSession(t *testing.T, h *e2eHarness, conn *websocket.Conn, sessionID, cwd string) rotated {
 	t.Helper()
 	// A turn's worth of PERSISTENT store events is what teaches the daemon the
 	// conversation's uuid off the live stream.
 	writeCmd(t, conn, `{"requestId":"r-warmup","submitPrompt":{"text":"warmup"}}`)
-	awaitAll(t, conn, p, nil, map[string]func(*frontendv1.FrontendFrame) bool{
+	awaitAll(t, conn, nil, map[string]func(*frontendv1.FrontendFrame) bool{
 		"the warmup turn's reply": func(frame *frontendv1.FrontendFrame) bool {
 			for _, item := range deltaItems(frame, cwd) {
 				if strings.Contains(assistantText(item), echoOf("warmup")) {
@@ -118,7 +117,7 @@ func rotateSession(t *testing.T, h *e2eHarness, conn *websocket.Conn, p *painter
 	previous := vendorSessionID(t, h, sessionID, func(id string) bool { return id != "" }, "any conversation identity")
 
 	writeCmd(t, conn, `{"requestId":"r-rotate","submitPrompt":{"text":"!rotate"}}`)
-	awaitAll(t, conn, p, nil, map[string]func(*frontendv1.FrontendFrame) bool{
+	awaitAll(t, conn, nil, map[string]func(*frontendv1.FrontendFrame) bool{
 		"the rotated turn's own reply": func(frame *frontendv1.FrontendFrame) bool {
 			for _, item := range deltaItems(frame, cwd) {
 				if strings.Contains(assistantText(item), echoOf("!rotate")) {
@@ -151,10 +150,9 @@ func TestE2ERotationDeliversTheRotatedTurnsOwnReply(t *testing.T) {
 	cwd := t.TempDir()
 	h := newUDSHarness(t)
 	id, conn, _, _ := liveSession(t, h, cwd)
-	p := newPainter(t, conn, cwd)
 
 	// Act
-	rot := rotateSession(t, h, conn, p, id, cwd)
+	rot := rotateSession(t, h, conn, id, cwd)
 
 	// Assert — the identity really moved, which is what makes the reply above
 	// evidence of a resubscribe rather than of nothing having happened.
@@ -174,15 +172,13 @@ func TestE2ERotationDeliversTheRotatedTurnsOwnReply(t *testing.T) {
 // the resolution CHANGES, and the rotation may legitimately settle the turn
 // before the rotated reply this test arranges after — so waiting for a push
 // would be waiting for a frame the contract does not promise. The snapshot is
-// the same fact, asked for directly. The original connection stays open
-// throughout: closing it drops the paint attestation and would repaint the
-// workspace blue underneath the read.
+// the same fact, asked for directly.
 func TestE2ERotationLeavesThinking(t *testing.T) {
 	// Arrange — see the cleanup-order note in the first test.
 	cwd := t.TempDir()
 	h := newUDSHarness(t)
 	id, live, _, _ := liveSession(t, h, cwd)
-	rotateSession(t, h, live, newPainter(t, live, cwd), id, cwd)
+	rotateSession(t, h, live, id, cwd)
 
 	// Act
 	fresh := h.dial(t, id)
@@ -218,14 +214,13 @@ func TestE2EPromptAfterRotationRoundTrips(t *testing.T) {
 	cwd := t.TempDir()
 	h := newUDSHarness(t)
 	id, conn, _, _ := liveSession(t, h, cwd)
-	p := newPainter(t, conn, cwd)
-	rotateSession(t, h, conn, p, id, cwd)
+	rotateSession(t, h, conn, id, cwd)
 
 	// Act
 	writeCmd(t, conn, `{"requestId":"r-after","submitPrompt":{"text":"after-the-rotation"}}`)
 
 	// Assert
-	awaitAll(t, conn, p, nil, map[string]func(*frontendv1.FrontendFrame) bool{
+	awaitAll(t, conn, nil, map[string]func(*frontendv1.FrontendFrame) bool{
 		"the post-rotation turn's reply": func(frame *frontendv1.FrontendFrame) bool {
 			for _, item := range deltaItems(frame, cwd) {
 				if strings.Contains(assistantText(item), echoOf("after-the-rotation")) {
@@ -248,15 +243,14 @@ func TestE2EClearUnderTheRotatedIdentityReachesTheFrontend(t *testing.T) {
 	cwd := t.TempDir()
 	h := newUDSHarness(t)
 	id, conn, _, store := liveSession(t, h, cwd)
-	p := newPainter(t, conn, cwd)
-	rot := rotateSession(t, h, conn, p, id, cwd)
+	rot := rotateSession(t, h, conn, id, cwd)
 	const lineUUID = "e2e-rotated-clear-1"
 
 	// Act
 	store.write(sidecarClearEvent(rot.next, lineUUID))
 
 	// Assert
-	awaitAll(t, conn, p, nil, map[string]func(*frontendv1.FrontendFrame) bool{
+	awaitAll(t, conn, nil, map[string]func(*frontendv1.FrontendFrame) bool{
 		"a ContextCleared item under the rotated identity": func(frame *frontendv1.FrontendFrame) bool {
 			for _, item := range deltaItems(frame, cwd) {
 				if isClear(item) && item.GetUuid() == clearDedupKey(lineUUID) {

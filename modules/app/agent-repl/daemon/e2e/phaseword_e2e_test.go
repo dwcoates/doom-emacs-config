@@ -24,7 +24,7 @@
 // This file shares e2e_test.go's package and reuses its helpers READ-ONLY
 // (newUDSHarness, dial, readFrame, writeCmd, frameTimeout), plus
 // clearcompact_e2e_test.go's liveSession / dialStoreProducer /
-// sidecarClearEvent / sidecarCompactEvent and interrupt_e2e_test.go's painter /
+// sidecarClearEvent / sidecarCompactEvent and interrupt_e2e_test.go's
 // awaitAll / workspaceStateFor.
 //
 // NOT COVERED — the clearing watchdog's expiry. Its bound is a Manager option
@@ -42,6 +42,7 @@ import (
 	datav1 "agentrepl/proto/agentshim/data/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
+	"github.com/gorilla/websocket"
 	"google.golang.org/protobuf/types/known/anypb"
 )
 
@@ -67,12 +68,10 @@ func vendorStatusEvent(t *testing.T, vendorSessionID, dedupKey, status string) *
 	}
 }
 
-// awaitRenderState reads frames until the workspace resolves to want, keeping
-// the paint attestation current so the SSM's paint axis never holds the
-// workspace blue while the test waits.
-func awaitRenderState(t *testing.T, p *painter, workspace string, want frontendv1.RenderState) {
+// awaitRenderState reads frames until the workspace resolves to want.
+func awaitRenderState(t *testing.T, conn *websocket.Conn, workspace string, want frontendv1.RenderState) {
 	t.Helper()
-	awaitAll(t, p.conn, p, nil, map[string]func(*frontendv1.FrontendFrame) bool{
+	awaitAll(t, conn, nil, map[string]func(*frontendv1.FrontendFrame) bool{
 		"a WorkspaceState resolving to " + want.String(): func(frame *frontendv1.FrontendFrame) bool {
 			return workspaceStateFor(frame, workspace).GetState() == want
 		},
@@ -83,9 +82,9 @@ func awaitRenderState(t *testing.T, p *painter, workspace string, want frontendv
 // OTHER than unwanted. It is the closing assertion: what the workspace lands on
 // afterwards is the other axes' business, and pinning it here would assert the
 // agent axis rather than the cut.
-func awaitRenderStateLeaves(t *testing.T, p *painter, workspace string, unwanted frontendv1.RenderState) {
+func awaitRenderStateLeaves(t *testing.T, conn *websocket.Conn, workspace string, unwanted frontendv1.RenderState) {
 	t.Helper()
-	awaitAll(t, p.conn, p, nil, map[string]func(*frontendv1.FrontendFrame) bool{
+	awaitAll(t, conn, nil, map[string]func(*frontendv1.FrontendFrame) bool{
 		"a WorkspaceState off " + unwanted.String(): func(frame *frontendv1.FrontendFrame) bool {
 			state := workspaceStateFor(frame, workspace)
 			return state != nil && state.GetState() != unwanted
@@ -94,25 +93,23 @@ func awaitRenderStateLeaves(t *testing.T, p *painter, workspace string, unwanted
 }
 
 func TestE2ECompactingPhaseWordOpensOnTheVendorStatusAndClosesOnTheEvent(t *testing.T) {
-	// Arrange — a live session with a painting frontend, so the paint axis
-	// cannot hold the workspace blue over the cut.
+	// Arrange — a live session.
 	h := newUDSHarness(t)
 	cwd := t.TempDir()
 	_, conn, vendorID, store := liveSession(t, h, cwd)
-	p := newPainter(t, conn, cwd)
 
 	// Act — the vendor opens its compaction window.
 	store.write(vendorStatusEvent(t, vendorID, "e2e-status-compacting", "compacting"))
 
 	// Assert — the phase word, not merely the color.
-	awaitRenderState(t, p, cwd, frontendv1.RenderState_RENDER_STATE_COMPACTING)
+	awaitRenderState(t, conn, cwd, frontendv1.RenderState_RENDER_STATE_COMPACTING)
 
 	// Act — the file plane reports the compaction that actually happened.
 	store.write(sidecarCompactEvent(vendorID, "e2e-compact-phaseword", "what the discarded history said"))
 
 	// Assert — the window closed on its own completion, with no timeout and no
 	// turn boundary needed.
-	awaitRenderStateLeaves(t, p, cwd, frontendv1.RenderState_RENDER_STATE_COMPACTING)
+	awaitRenderStateLeaves(t, conn, cwd, frontendv1.RenderState_RENDER_STATE_COMPACTING)
 }
 
 func TestE2EClearingPhaseWordOpensOnDispatchAndClosesOnTheEvent(t *testing.T) {
@@ -120,7 +117,6 @@ func TestE2EClearingPhaseWordOpensOnDispatchAndClosesOnTheEvent(t *testing.T) {
 	h := newUDSHarness(t)
 	cwd := t.TempDir()
 	_, conn, vendorID, store := liveSession(t, h, cwd)
-	p := newPainter(t, conn, cwd)
 
 	// Act — the user dispatches the clear over the real command surface. The
 	// daemon is the ONLY place that knows a clear has begun: nothing in the
@@ -128,11 +124,11 @@ func TestE2EClearingPhaseWordOpensOnDispatchAndClosesOnTheEvent(t *testing.T) {
 	writeCmd(t, conn, `{"requestId":"r-clear","submitPrompt":{"text":"/clear"}}`)
 
 	// Assert.
-	awaitRenderState(t, p, cwd, frontendv1.RenderState_RENDER_STATE_CLEARING)
+	awaitRenderState(t, conn, cwd, frontendv1.RenderState_RENDER_STATE_CLEARING)
 
 	// Act — the clear completes and the file plane says so.
 	store.write(sidecarClearEvent(vendorID, "e2e-clear-phaseword"))
 
 	// Assert — released by its own event rather than by the watchdog.
-	awaitRenderStateLeaves(t, p, cwd, frontendv1.RenderState_RENDER_STATE_CLEARING)
+	awaitRenderStateLeaves(t, conn, cwd, frontendv1.RenderState_RENDER_STATE_CLEARING)
 }

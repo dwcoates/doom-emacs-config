@@ -180,7 +180,7 @@ func TestServeWSSnapshotThenCommandAck(t *testing.T) {
 
 func TestHostOnlyWorkspaceWorkReachesUDSButNotGUI(t *testing.T) {
 	// Arrange.  Both connections are observers, so this proves delivery is
-	// controlled by ClientKind rather than by the paint role they share.
+	// controlled by ClientKind alone.
 	h := &mockHandler{}
 	s := New(Config{Logf: testLogf(t), State: staticState{snap: &frontendv1.StateSnapshot{
 		WorkspaceAvailable: []*frontendv1.WorkspaceAvailable{{JobId: "job-1", FinalName: "new"}},
@@ -278,9 +278,8 @@ func TestServeWSScopedCommandStrictRoutesCommand(t *testing.T) {
 	s, h := newTestServer(t, 0)
 	defer s.Close()
 	httpSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// nil translator = command-strict; observer role keeps this case about
-		// command routing rather than about delivery sequencing.
-		s.ServeWSScoped(w, r, Scope{Workspace: "ws"}, RoleObserver, nil)
+		// nil translator = command-strict.
+		s.ServeWSScoped(w, r, Scope{Workspace: "ws"}, ClientKindGUIObserver, nil)
 	}))
 	defer httpSrv.Close()
 

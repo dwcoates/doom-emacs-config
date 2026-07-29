@@ -77,7 +77,7 @@ func (f fakeLiveTasks) LiveTasks(string) (int64, bool) {
 func newGatedHandler(t *testing.T, turnActive bool, tasks LiveTaskSource) (*commandHandler, *fakePrompts) {
 	t.Helper()
 	p := &fakePrompts{turnActive: turnActive}
-	h, err := newCommandHandler(p, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil, nil, nil,
+	h, err := newCommandHandler(p, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil, nil,
 		CommandHandlerConfig{Interrupt: InterruptGateConfig{Turns: p, LiveTasks: tasks}})
 	if err != nil {
 		t.Fatalf("newCommandHandler: %v", err)
@@ -224,7 +224,7 @@ func (f *fakeSessionCmds) DeleteSession(id string) error {
 func newTestHandler(t *testing.T) (*commandHandler, *fakePrompts, *fakeMerges, *fakeLifecycle) {
 	t.Helper()
 	p, m, l := &fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}
-	h, err := newCommandHandler(p, m, l, nil, &fakeSessionCmds{}, nil, nil, nil, nil)
+	h, err := newCommandHandler(p, m, l, nil, &fakeSessionCmds{}, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("newCommandHandler: %v", err)
 	}
@@ -287,7 +287,7 @@ func TestCommandHandlerPermissionRoutesToPrompts(t *testing.T) {
 
 func TestCommandHandlerDaemonHealthReturnsExplicitReadiness(t *testing.T) {
 	// Arrange.
-	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil, nil, nil,
+	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil, nil,
 		CommandHandlerConfig{Health: HealthConfig{Daemon: fakeDaemonHealth{healthy: false, reason: "frontend UDS not listening"}}})
 	if err != nil {
 		t.Fatalf("newCommandHandler: %v", err)
@@ -305,7 +305,7 @@ func TestCommandHandlerDaemonHealthReturnsExplicitReadiness(t *testing.T) {
 func TestCommandHandlerSessionHealthForwardsExactIdentity(t *testing.T) {
 	// Arrange.
 	router := &fakeHealthRouter{status: &corev1.HealthStatus{RequestId: "health-2", Healthy: true, Component: "claude-shim"}}
-	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil, nil, nil,
+	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil, nil,
 		CommandHandlerConfig{Health: HealthConfig{Router: router}})
 	if err != nil {
 		t.Fatalf("newCommandHandler: %v", err)
@@ -323,7 +323,7 @@ func TestCommandHandlerSessionHealthForwardsExactIdentity(t *testing.T) {
 func TestCommandHandlerSessionHealthMakesMissingShimExplicitlyUnhealthy(t *testing.T) {
 	// Arrange.
 	router := &fakeHealthRouter{err: errors.New("shim not connected")}
-	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil, nil, nil,
+	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil, nil,
 		CommandHandlerConfig{Health: HealthConfig{Router: router}})
 	if err != nil {
 		t.Fatalf("newCommandHandler: %v", err)
@@ -376,7 +376,7 @@ func TestCommandHandlerCloseOpenRouteToLifecycle(t *testing.T) {
 func TestCommandHandlerPromptErrorSurfaces(t *testing.T) {
 	// Arrange — the prompt router fails.
 	p := &fakePrompts{err: errors.New("no live shim")}
-	h, err := newCommandHandler(p, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil, nil, nil)
+	h, err := newCommandHandler(p, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("newCommandHandler: %v", err)
 	}
@@ -390,14 +390,14 @@ func TestCommandHandlerPromptErrorSurfaces(t *testing.T) {
 
 func TestNewCommandHandlerRejectsNilDeps(t *testing.T) {
 	// Arrange / Act / Assert
-	if _, err := newCommandHandler(nil, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil, nil, nil); err == nil {
+	if _, err := newCommandHandler(nil, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil, nil); err == nil {
 		t.Fatal("want error for nil PromptRouter")
 	}
 }
 
 func TestNewCommandHandlerRejectsNilSessions(t *testing.T) {
 	// Arrange / Act / Assert — the session-lifecycle binding is required.
-	if _, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, nil, nil, nil, nil, nil); err == nil {
+	if _, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, nil, nil, nil, nil); err == nil {
 		t.Fatal("want error for nil SessionCreateDeleter")
 	}
 }
@@ -462,7 +462,7 @@ func TestCommandHandlerWithholdsAnUnsetUngatedConsent(t *testing.T) {
 func TestCommandHandlerDeleteSessionRoutesToSessions(t *testing.T) {
 	// Arrange
 	sc := &fakeSessionCmds{}
-	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, sc, nil, nil, nil, nil)
+	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, sc, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("newCommandHandler: %v", err)
 	}
@@ -481,7 +481,7 @@ func TestCommandHandlerShutdownRoutesToShutdownFunc(t *testing.T) {
 	// Arrange — a shutdown func that signals when invoked.
 	fired := make(chan struct{}, 1)
 	newHandlerWithShutdown := func(shutdown func()) *commandHandler {
-		h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, shutdown, nil, nil, nil)
+		h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, shutdown, nil, nil)
 		if err != nil {
 			t.Fatalf("newCommandHandler: %v", err)
 		}
@@ -504,7 +504,7 @@ func TestCommandHandlerShutdownRoutesToShutdownFunc(t *testing.T) {
 
 func TestCommandHandlerShutdownUnconfiguredErrors(t *testing.T) {
 	// Arrange — no shutdown func wired.
-	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil, nil, nil)
+	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("newCommandHandler: %v", err)
 	}
@@ -518,7 +518,7 @@ func TestCommandHandlerShutdownUnconfiguredErrors(t *testing.T) {
 func TestCommandHandlerCreateSessionErrorSurfaces(t *testing.T) {
 	// Arrange — the session core fails.
 	sc := &fakeSessionCmds{err: errors.New("bring up shim failed")}
-	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, sc, nil, nil, nil, nil)
+	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, sc, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("newCommandHandler: %v", err)
 	}
@@ -532,7 +532,7 @@ func TestCommandHandlerRoutesDaemonOwnedWorkspaceWork(t *testing.T) {
 	// Arrange — creation itself is not a wire command; what the host still
 	// drives over the wire is the durable acknowledgement pair.
 	bridge := newFakeWorkspaceCreation()
-	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil, nil, nil,
+	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil, nil,
 		CommandHandlerConfig{WorkspaceCreation: bridge})
 	if err != nil {
 		t.Fatalf("newCommandHandler: %v", err)
@@ -864,7 +864,7 @@ func TestWireAgentShimMergeTransitionReachesSSM(t *testing.T) {
 // client-log mirroring can be asserted on its ONLY observable effect.
 func newLoggingHandler(t *testing.T, lines *[]string) *commandHandler {
 	t.Helper()
-	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil, nil,
+	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil,
 		func(format string, args ...any) { *lines = append(*lines, fmt.Sprintf(format, args...)) })
 	if err != nil {
 		t.Fatalf("newCommandHandler: %v", err)
@@ -1002,7 +1002,7 @@ func TestCommandHandlerClientLogChangesNoDaemonState(t *testing.T) {
 	p := &fakePrompts{}
 	m := &fakeMerges{}
 	l := &fakeLifecycle{}
-	h, err := newCommandHandler(p, m, l, nil, &fakeSessionCmds{}, nil, nil, nil, nil)
+	h, err := newCommandHandler(p, m, l, nil, &fakeSessionCmds{}, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("newCommandHandler: %v", err)
 	}
@@ -1013,90 +1013,6 @@ func TestCommandHandlerClientLogChangesNoDaemonState(t *testing.T) {
 	// Assert.
 	if len(p.prompted) != 0 || len(p.interrupts) != 0 {
 		t.Fatal("a client log must not drive the prompt router")
-	}
-}
-
-// --- PaintAck outcomes (F5) --------------------------------------------------
-
-// fakePainters records the attestations the handler forwards to the SSM.
-type fakePainters struct{ acked []uint64 }
-
-func (f *fakePainters) ApplyPaintAck(_ string, throughSeq uint64) error {
-	f.acked = append(f.acked, throughSeq)
-	return nil
-}
-
-func newPaintHandler(t *testing.T, p *fakePainters) *commandHandler {
-	t.Helper()
-	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{},
-		nil, nil, p, func(string, ...any) {})
-	if err != nil {
-		t.Fatalf("newCommandHandler: %v", err)
-	}
-	return h
-}
-
-// A PAINTED ack is the attestation: it advances the SSM's paint watermark.
-func TestPaintAckPaintedAttestsToTheSsm(t *testing.T) {
-	// Arrange.
-	p := &fakePainters{}
-	h := newPaintHandler(t, p)
-
-	// Act.
-	if err := h.PaintAck(context.Background(), "/w", "r1", &frontendv1.PaintAckCmd{
-		ThroughSeq: 7, StateGeneration: 3,
-		Outcome: frontendv1.PaintOutcome_PAINT_OUTCOME_PAINTED,
-	}); err != nil {
-		t.Fatalf("PaintAck: %v", err)
-	}
-
-	// Assert.
-	if len(p.acked) != 1 || p.acked[0] != 7 {
-		t.Fatalf("attestations = %v, want [7]", p.acked)
-	}
-}
-
-// A SUSPENDED ack attests NOTHING. The webview holds the state and cannot draw
-// it, so greening the workspace on that would be the exact lie the attestation
-// exists to prevent. Its delivery half runs on the frontend server's read loop.
-func TestPaintAckSuspendedAttestsNothing(t *testing.T) {
-	// Arrange.
-	p := &fakePainters{}
-	h := newPaintHandler(t, p)
-
-	// Act.
-	if err := h.PaintAck(context.Background(), "/w", "r1", &frontendv1.PaintAckCmd{
-		ThroughSeq: 7, StateGeneration: 3,
-		Outcome: frontendv1.PaintOutcome_PAINT_OUTCOME_SUSPENDED,
-	}); err != nil {
-		t.Fatalf("PaintAck: %v", err)
-	}
-
-	// Assert.
-	if len(p.acked) != 0 {
-		t.Fatalf("attestations = %v, want none (nothing was painted)", p.acked)
-	}
-}
-
-// An ack that names no outcome is a malformed frame, refused loudly rather
-// than read as whichever claim the zero value happens to encode.
-func TestPaintAckWithoutAnOutcomeIsRefused(t *testing.T) {
-	// Arrange.
-	p := &fakePainters{}
-	h := newPaintHandler(t, p)
-
-	// Act.
-	err := h.PaintAck(context.Background(), "/w", "r1", &frontendv1.PaintAckCmd{ThroughSeq: 7})
-
-	// Assert.
-	if err == nil {
-		t.Fatal("expected a refusal for a paint ack with no outcome")
-	}
-	if !strings.Contains(err.Error(), "names no paint outcome") {
-		t.Fatalf("error = %v, want it to name the missing outcome", err)
-	}
-	if len(p.acked) != 0 {
-		t.Fatalf("attestations = %v, want none", p.acked)
 	}
 }
 

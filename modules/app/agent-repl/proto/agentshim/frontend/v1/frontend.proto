@@ -43,10 +43,10 @@ option go_package = "agentrepl/proto/agentshim/frontend/v1;frontendv1";
 // the sidebar dots, and the progress footer can never disagree:
 //
 //   BLUE   INIT, DEAD, DEGRADED — the route Emacs→daemon→shim→SDK is
-//          compromised on OUR side. No session yet, a dead or unspawned
-//          shim, bring-up, a store outage, a failed backfill, or a webview
-//          that never attested painting the history. Blue is the honest
-//          state whenever green's promise cannot be kept.
+//          compromised on OUR side, or there is no live backend session for
+//          this workspace at all. No session yet, a dead or unspawned shim,
+//          bring-up, a store outage, or a failed backfill. Blue is the
+//          honest state whenever green's promise cannot be kept.
 //   PURPLE VENDOR_BLOCKED — the last turn ended AT THE VENDOR or on the
 //          ACCOUNT. Auth, usage limit, persistent 4xx/5xx, or any other
 //          abnormal turn-CONCLUDING error. It is a REPORT of that
@@ -58,9 +58,15 @@ option go_package = "agentrepl/proto/agentshim/frontend/v1;frontendv1";
 //          distinguishes what the agent is busy with.
 //   YELLOW IDLE_ASYNC — no foreground turn, but detached work is live.
 //   GREEN  READY, IDLE, DONE, PERMISSION — the route is proven usable
-//          WITHOUT requiring a first message and a frontend has attested
-//          painting. A pending permission is GREEN: the agent is ready for
-//          the user to view the response and answer.
+//          WITHOUT requiring a first message. A pending permission is
+//          GREEN: the agent is ready for the user to view the response and
+//          answer.
+//
+// A WORKSPACE'S COLOR IS CONNECTION TRUTH. Blue means there is no live
+// backend session for this workspace. Every non-blue color is a GUARANTEE
+// that the session substrate is fully wired — shim live, handshake complete,
+// store link settled — so selecting a non-blue workspace involves no
+// connection bootstrapping whatsoever.
 //
 // Precedence is blue > purple > red > yellow > green, resolved in the SSM's
 // SQL rank table (daemon/internal/ssm/resolve.go) rather than any Go or
@@ -90,8 +96,8 @@ enum RenderState {
   // Additive (F3): the five-color remap.
   //
   // READY is the green a session reaches WITHOUT being prompted: the shim
-  // asserted its own readiness, the backfill settled, and a frontend
-  // attested painting. IDLE remains for a session that went quiet after
+  // asserted its own readiness and the backfill settled, with the session
+  // wired. IDLE remains for a session that went quiet after
   // working; both are green, and the split is kept only because the SSM's
   // cause chain distinguishes "never ran" from "ran and finished".
   RENDER_STATE_READY = 15;
@@ -192,19 +198,12 @@ message WorkspaceState {
   string cause_kind = 7;  // event kind that caused this transition
   uint64 cause_seq = 8;   // store seq when event-caused (0 = daemon-local)
   int64 at_ms = 9;
-  // Additive (F5): the DELIVERY identity of this state for this workspace.
-  //
-  // Stamped by the daemon's frontend delivery layer, not by the resolver:
-  // it names an EMISSION of a state rather than the resolution behind it,
-  // which is what a paint acknowledgment has to be able to address. Strictly
-  // increasing per workspace, so "the ack names an older emission" is a
-  // comparison rather than a guess, and a stale ack can never settle a newer
-  // state (see PaintAckCmd.state_generation).
-  //
-  // It is deliberately NOT at_ms: at_ms is the winning LOG ROW's timestamp,
-  // so two different emissions can legitimately carry the same one, and an
-  // identity that repeats is not an identity.
-  uint64 generation = 10;
+  // (The retired `generation` field lived at field 10: the per-workspace
+  // delivery identity a paint acknowledgment addressed. Paint attestation
+  // is gone — every frontend now receives every emission immediately — so
+  // nothing addresses an emission any more. Deleted rather than reserved,
+  // in this repo's established style for retired frontend surface, because
+  // no live frontend commitment survives the same change.)
 }
 
 message SessionView {
@@ -511,7 +510,6 @@ message FrontendCommand {
     QueueForceCmd queue_force = 14;        // Additive (E4)
     QueueAcceptCmd queue_accept = 15;      // Additive (E4)
     QueueCancelCmd queue_cancel = 16;      // Additive (E4)
-    PaintAckCmd paint_ack = 17;            // Additive (F3)
     CreateWorkspaceCmd create_workspace = 18;
     WorkspaceMaterializedCmd workspace_materialized = 19;
     HostActionCompletedCmd host_action_completed = 20;
@@ -520,74 +518,22 @@ message FrontendCommand {
   }
 }
 
-// Additive (F3): a frontend's attestation that it PAINTED this workspace's
-// conversation through `through_seq`.
+// (The retired PaintAckCmd rode the command oneof at field 17, with its
+// PaintOutcome enum beside it: a frontend's attestation that it had drawn a
+// workspace's history and its render state, which the daemon required before
+// it would resolve that workspace green and before it would forward the state
+// to Emacs.
 //
-// The daemon tracks STATE; a frontend decides when that state is
-// RENDERABLE. Nothing on the daemon's side of the wire can distinguish a
-// webview that received every item and drew them from one that received
-// every item and drew nothing — so the daemon withholds green until a
-// frontend says it drew, and an absent ack simply leaves the workspace
-// blue. Silence is a meaningful, correct outcome here, not a gap to be
-// papered over with a timeout.
+// It is GONE, and so is the whole viewer-based attestation model behind it. A
+// workspace's color is CONNECTION TRUTH: blue means no live backend session,
+// and every non-blue color is a guarantee that the session substrate is fully
+// wired. What a viewer has or has not drawn says nothing about that, so it can
+// no longer hold a workspace blue or hold a state back from Emacs.
 //
-// It rides the command channel rather than a side HTTP route because it IS
-// a frontend→daemon statement about a workspace, which is exactly what this
-// channel carries — and because it must be ordered against the resync that
-// delivered the history it attests to.
-//
-// Emacs never sends this: it renders no conversation, so it has nothing to
-// attest to. The webapp sends it from the completion of a render that
-// actually drew, never from the arrival of the frames describing one.
-message PaintAckCmd {
-  // The ConversationDelta.through_seq the frontend has painted through.
-  //
-  // ZERO IS A REAL ATTESTATION, not a null: an empty history is genuinely
-  // paintable, and "there was nothing to draw and I drew it" is what lets a
-  // never-prompted session reach READY. The daemon versions acks by this
-  // value so a stale one cannot green a newer gap.
-  uint64 through_seq = 1;
-  // Additive (F5): the WorkspaceState.generation this ack settles.
-  //
-  // The second identity dimension of one render pass. through_seq addresses
-  // the CONVERSATION the frontend drew; this addresses the STATE it drew,
-  // which is what the delivery sequencer withholds from Emacs until a
-  // painting frontend has caught up. The daemon settles a held state only on
-  // an ack whose generation is at least the held one's, so an ack minted
-  // against an older emission can never release a newer one.
-  uint64 state_generation = 2;
-  // Additive (F5): what the render attempt actually produced.
-  //
-  // Required. The daemon rejects an ack that names no outcome rather than
-  // assuming one: "I drew it" and "I cannot draw" are opposite claims about
-  // the same generation, and only the first may attest paint to the SSM.
-  PaintOutcome outcome = 3;
-}
-
-// What a frontend's render attempt produced for one WorkspaceState (F5).
-//
-// A mounted webview whose rendering is suspended (a hidden xwidget has no
-// requestAnimationFrame, a stall of 13.6 seconds was measured directly) can
-// still RECEIVE frames and still answer on its socket. So it answers
-// honestly — "I have this generation and I cannot draw it" — instead of
-// going silent and wedging Emacs behind a webview nobody is looking at. That
-// is the structural alternative to a delivery timeout: the frontend reports
-// the fact it alone knows, rather than the daemon guessing from elapsed time.
-enum PaintOutcome {
-  // Never sent. A paint ack that names no outcome is a malformed frame, not
-  // an ack with a default: the two real outcomes are opposite claims and
-  // must not share an encoding with "the field was absent".
-  PAINT_OUTCOME_UNSPECIFIED = 0;
-  // The frontend DREW this state. Attests paint to the SSM (through_seq) and
-  // settles the state for delivery to Emacs.
-  PAINT_OUTCOME_PAINTED = 1;
-  // The frontend HAS this state and cannot draw it, because its rendering is
-  // suspended. It settles the state for delivery to Emacs — a webview nobody
-  // can see has no divergence to cause — but attests NOTHING to the SSM,
-  // because nothing was painted. The frontend repaints and re-acks PAINTED
-  // when it becomes visible again.
-  PAINT_OUTCOME_SUSPENDED = 2;
-}
+// Deleted rather than reserved, following this repo's established style for
+// retired frontend surface — the same treatment InterruptCmd.hard and
+// ContextCompacted.result received — because no live frontend commitment
+// survives the same change.)
 
 // ---------------------------------------------------------------------------
 // The daemon-held prompt queue (E4).

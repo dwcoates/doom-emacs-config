@@ -95,7 +95,6 @@ function workspaceStateView(state: string, turnActive = false): Record<string, u
     state,
     ...(turnActive ? { turnActive: true } : {}),
     atMs: String(NOW_MS),
-    generation: 7,
   };
 }
 

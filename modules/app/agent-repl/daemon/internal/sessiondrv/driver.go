@@ -1384,18 +1384,12 @@ func (m *Manager) armMetaprompt(d *driven, ss *corev1.SessionStarted) {
 //     and are replayed on every resync regardless of fromSeq, so no ceiling can
 //     hide them. A pending permission also survives the shim bounce and is
 //     re-asked on reattach, so dropping these would erase a live prompt.
-//   - ssm workspace_state.cause_seq (the paint watermark on the `painted` row,
-//     and the (session_id, cause_seq) idempotency key) — the KNOWN residual.
-//     The idempotency key is keyed by the event's session id, which IS the
-//     vendor uuid, so the new space gets a fresh key space for free. The paint
-//     watermark is per WORKSPACE and monotonic, so a retired-space attestation
-//     survives the rotation and swallows the new space's lower acks as
-//     superseded until it climbs past the old high water — the workspace reads
-//     painted on an attestation about a conversation that is gone. That is a
-//     KNOWN residual, deliberately left by the 045a79d8 report: it errs toward
-//     green rather than toward the permanent blue a mis-reset would produce,
-//     and it is listed here so the next reader finds it named rather than
-//     missing.
+//   - ssm workspace_state.cause_seq (the (session_id, cause_seq) idempotency
+//     key) — the key is keyed by the event's session id, which IS the vendor
+//     uuid, so the new space gets a fresh key space for free. (The paint
+//     watermark that used to be the KNOWN residual here is gone with the whole
+//     attestation model; nothing per-workspace holds a seq across a rotation
+//     any more.)
 //   - driven.metaCwd / backfill / systemInit / queue entries — carry no seq at
 //     all; a rotation does not change what they describe.
 func (m *Manager) onHandshake(workspace, sessionID string, hello *corev1.ShimHello) {

@@ -391,11 +391,12 @@ exist before its workspace directory is known."
 ;; --- Named color / style constants --- ;;
 
 (defconst agent-repl--color-init-blue        "#3366cc"
-  "BLUE: the route Emacs→daemon→shim→SDK is compromised on OUR side.
-Covers every way green's promise cannot be kept — no session yet, the
-shim dead or unspawned, bring-up in progress, a store outage, a
-backfill that failed, and a webview that never attested painting the
-history.
+  "BLUE: no live backend session for this workspace.
+A workspace\='s color is CONNECTION TRUTH: blue is every way green\='s
+promise cannot be kept — no session yet, the shim dead or unspawned,
+bring-up in progress, a hibernated or never-opened workspace, a store
+outage, or a backfill that failed.  Every non-blue color is a GUARANTEE
+that the session substrate is fully wired.
 
 It is deliberately ONE color for all of them.  The distinctions matter
 to whoever debugs it, not to the user reading a tab: every one of them
@@ -412,8 +413,8 @@ about a session that was still working.")
 
 (defconst agent-repl--color-done-green       "#1a7a1a"
   "GREEN: ready.
-The route is proven usable WITHOUT requiring a first message, the
-backfill has settled, and a frontend has attested painting the history.
+The session is wired, the route is proven usable WITHOUT requiring a
+first message, and the backfill has settled.
 Covers `:ready', `:idle', `:done', and `:permission' alike — a pending
 permission means the agent is ready for the user to view the response
 and answer it.")

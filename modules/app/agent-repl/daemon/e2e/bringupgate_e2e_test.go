@@ -10,8 +10,8 @@
 //
 // These share e2e_test.go's package and reuse its helpers READ-ONLY
 // (newUDSHarness, createSession, dial, readFrame, writeCmd, frameTimeout),
-// clearcompact's waitAttachedSession, interrupt_e2e_test.go's newPainter /
-// assistantText / echoOf, and rotation_e2e_test.go's rotateSession.
+// clearcompact's waitAttachedSession, interrupt_e2e_test.go's assistantText /
+// echoOf, and rotation_e2e_test.go's rotateSession.
 package e2e
 
 import (
@@ -109,10 +109,9 @@ func TestE2ERotationResubscribesAndKeepsTheConversationFlowing(t *testing.T) {
 		t.Fatalf("first frame = %T, want a StateSnapshot", first.GetFrame())
 	}
 	waitAttachedSession(t, conn, id, cwd)
-	p := newPainter(t, conn, cwd)
 
 	// Act — rotate mid-session, then prompt across the bounce.
-	rot := rotateSession(t, h, conn, p, id, cwd)
+	rot := rotateSession(t, h, conn, id, cwd)
 
 	// Assert — the re-handshaked session still carries a turn, which is the
 	// part of the gate this harness can prove end to end today.
@@ -120,7 +119,6 @@ func TestE2ERotationResubscribesAndKeepsTheConversationFlowing(t *testing.T) {
 	deadline := time.Now().Add(frameTimeout)
 	for time.Now().Before(deadline) {
 		frame := readFrame(t, conn)
-		p.observe(frame)
 		for _, item := range deltaItems(frame, cwd) {
 			if strings.Contains(assistantText(item), echoOf("after the rotation")) {
 				return
@@ -143,7 +141,7 @@ func TestE2EHealthProbeAfterRotationIsHealthy(t *testing.T) {
 		t.Fatalf("first frame = %T, want a StateSnapshot", first.GetFrame())
 	}
 	waitAttachedSession(t, conn, id, cwd)
-	rot := rotateSession(t, h, conn, newPainter(t, conn, cwd), id, cwd)
+	rot := rotateSession(t, h, conn, id, cwd)
 
 	// Act
 	view := awaitSessionHealth(t, conn, cwd, id, "e2e-rotated-health-1")

@@ -223,9 +223,6 @@ func (nopHandler) AcceptQueueEntry(context.Context, string, string, *frontendv1.
 func (nopHandler) CancelQueueEntry(context.Context, string, string, *frontendv1.QueueCancelCmd) error {
 	return nil
 }
-func (nopHandler) PaintAck(context.Context, string, string, *frontendv1.PaintAckCmd) error {
-	return nil
-}
 func (nopHandler) DaemonHealth(_ context.Context, _ string, requestID string, _ *frontendv1.DaemonHealthCmd) (*frontendv1.DaemonHealthView, error) {
 	return &frontendv1.DaemonHealthView{RequestId: requestID, Healthy: true}, nil
 }

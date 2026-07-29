@@ -28,7 +28,7 @@
 //
 // These tests share e2e_test.go's package and reuse its helpers READ-ONLY
 // (newUDSHarness, dial, readFrame, writeCmd), plus clearcompact_e2e_test.go's
-// liveSession and interrupt_e2e_test.go's painter / awaitAll / isPendingPermission.
+// liveSession and interrupt_e2e_test.go's awaitAll / isPendingPermission.
 package e2e
 
 import (
@@ -52,11 +52,11 @@ func ssmResolved(frame *frontendv1.FrontendFrame, workspace string, state fronte
 // askQuestion submits a `!tool` prompt and returns once the shim's canUseTool
 // has reached the frontend as a PENDING permission item, handing back that
 // item's uuid — which IS the permission request id the answer is keyed by.
-func askQuestion(t *testing.T, conn *websocket.Conn, p *painter, workspace, requestID, command string) string {
+func askQuestion(t *testing.T, conn *websocket.Conn, workspace, requestID, command string) string {
 	t.Helper()
 	var permID string
 	writeCmd(t, conn, fmt.Sprintf(`{"requestId":%q,"submitPrompt":{"text":"!tool %s"}}`, requestID, command))
-	awaitAll(t, conn, p, nil, map[string]func(*frontendv1.FrontendFrame) bool{
+	awaitAll(t, conn, nil, map[string]func(*frontendv1.FrontendFrame) bool{
 		"a PENDING permission item (the parked question)": func(frame *frontendv1.FrontendFrame) bool {
 			for _, item := range deltaItems(frame, workspace) {
 				if isPendingPermission(item) {
@@ -82,13 +82,12 @@ func TestE2EPendingPermissionResolvesThePermissionState(t *testing.T) {
 	cwd := t.TempDir()
 	h := newUDSHarness(t)
 	_, conn, _, _ := liveSession(t, h, cwd)
-	p := newPainter(t, conn, cwd)
 
 	// Act — a turn that stops to ask.
-	askQuestion(t, conn, p, cwd, "r-ask", "ls e2e-permission")
+	askQuestion(t, conn, cwd, "r-ask", "ls e2e-permission")
 
 	// Assert — green, and the agent is waiting on the user.
-	awaitAll(t, conn, p, nil, map[string]func(*frontendv1.FrontendFrame) bool{
+	awaitAll(t, conn, nil, map[string]func(*frontendv1.FrontendFrame) bool{
 		"a WorkspaceState the SSM resolved to PERMISSION": func(frame *frontendv1.FrontendFrame) bool {
 			return ssmResolved(frame, cwd, frontendv1.RenderState_RENDER_STATE_PERMISSION, "permission")
 		},
@@ -104,9 +103,8 @@ func TestE2EAnsweredPermissionReturnsToThinking(t *testing.T) {
 	cwd := t.TempDir()
 	h := newUDSHarness(t)
 	_, conn, _, _ := liveSession(t, h, cwd)
-	p := newPainter(t, conn, cwd)
-	permID := askQuestion(t, conn, p, cwd, "r-ask", "ls e2e-permission")
-	awaitAll(t, conn, p, nil, map[string]func(*frontendv1.FrontendFrame) bool{
+	permID := askQuestion(t, conn, cwd, "r-ask", "ls e2e-permission")
+	awaitAll(t, conn, nil, map[string]func(*frontendv1.FrontendFrame) bool{
 		"a WorkspaceState the SSM resolved to PERMISSION": func(frame *frontendv1.FrontendFrame) bool {
 			return ssmResolved(frame, cwd, frontendv1.RenderState_RENDER_STATE_PERMISSION, "permission")
 		},
@@ -117,7 +115,7 @@ func TestE2EAnsweredPermissionReturnsToThinking(t *testing.T) {
 		`{"requestId":"r-answer","workspace":%q,"permissionAnswer":{"permissionRequestId":%q,"allow":true}}`, cwd, permID))
 
 	// Assert — the turn resumes under its own row, and runs to completion.
-	awaitAll(t, conn, p, nil, map[string]func(*frontendv1.FrontendFrame) bool{
+	awaitAll(t, conn, nil, map[string]func(*frontendv1.FrontendFrame) bool{
 		"a WorkspaceState back in THINKING with the turn active": func(frame *frontendv1.FrontendFrame) bool {
 			st := workspaceStateFor(frame, cwd)
 			return st.GetState() == frontendv1.RenderState_RENDER_STATE_THINKING && st.GetTurnActive()

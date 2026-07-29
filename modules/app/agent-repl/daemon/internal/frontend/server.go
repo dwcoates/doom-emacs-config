@@ -50,22 +50,6 @@ type Config struct {
 	Handler CommandHandler
 	// BufSize is the per-client outbound buffer; <=0 uses defaultClientBuffer.
 	BufSize int
-	// WithdrawPaint retracts a workspace's paint attestation because the
-	// renderer that made it is no longer the one on screen (F5).
-	//
-	// It is what makes the paint axis a LATCH THAT RE-ARMS rather than a
-	// one-time flag. Attestation is a claim by one renderer about one
-	// connection: a painter that departs takes its claim with it, and a
-	// painter that arrives has made none yet. Both edges call this, so a
-	// workspace can only be green while some CURRENT renderer has said it drew
-	// the history — which is what the five-color contract has always
-	// documented and what nothing previously enforced.
-	//
-	// Called with the server's lock RELEASED, because the withdrawal resolves a
-	// new state that comes straight back in through PushWorkspaceState. Nil
-	// leaves the paint axis untouched, which is what every test that is not
-	// about attestation wants.
-	WithdrawPaint func(workspace, reason string)
 }
 
 // Server serves agentshim.frontend.v1 frames as protojson over a UDS listener
@@ -73,11 +57,10 @@ type Config struct {
 // message). Every connected frontend receives every broadcast frame (workspace
 // entitlement is "all" for now; the fan-out list is the future filter point).
 type Server struct {
-	logf     dlog.Logf
-	state    StateProvider
-	handler  CommandHandler
-	bufSize  int
-	withdraw func(workspace, reason string)
+	logf    dlog.Logf
+	state   StateProvider
+	handler CommandHandler
+	bufSize int
 
 	upgrader websocket.Upgrader
 
@@ -85,11 +68,6 @@ type Server struct {
 	clients  map[*client]struct{}
 	listener net.Listener
 	closed   bool
-	// gate sequences WorkspaceState delivery: painters first, observers only
-	// once a painter has acknowledged (see paintgate.go). It is guarded by mu
-	// rather than owning a lock, so "who is connected" and "what is held" are
-	// always read at the same instant.
-	gate *paintGate
 }
 
 // client is one connected frontend's outbound state. send is never closed
@@ -100,15 +78,13 @@ type Server struct {
 // per-session GET /sessions/{id}/stream view); nil is the unfiltered /frontend
 // consumer that sees every workspace.
 //
-// role says whether this connection PAINTS the workspace states it is sent (and
-// therefore acknowledges them) or merely observes them. It is fixed at accept
-// and never reassigned — see Role.
+// kind names the frontend product behind the connection. It is fixed at accept
+// and never reassigned — see ClientKind.
 type client struct {
 	send      chan []byte
 	done      chan struct{}
 	closeOnce sync.Once
 	scope     *Scope
-	role      Role
 	kind      ClientKind
 }
 
@@ -130,11 +106,10 @@ func New(cfg Config) *Server {
 		buf = defaultClientBuffer
 	}
 	return &Server{
-		logf:     cfg.Logf,
-		state:    cfg.State,
-		handler:  cfg.Handler,
-		bufSize:  buf,
-		withdraw: cfg.WithdrawPaint,
+		logf:    cfg.Logf,
+		state:   cfg.State,
+		handler: cfg.Handler,
+		bufSize: buf,
 		upgrader: websocket.Upgrader{
 			// Local-loopback developer tool; the webview origin is app-scoped,
 			// so origin checks are permissive by design (mirrors the existing
@@ -142,7 +117,6 @@ func New(cfg Config) *Server {
 			CheckOrigin: func(*http.Request) bool { return true },
 		},
 		clients: map[*client]struct{}{},
-		gate:    newPaintGate(cfg.Logf),
 	}
 }
 
@@ -206,10 +180,9 @@ func (s *Server) Serve(l net.Listener) error {
 			}
 			return fmt.Errorf("frontend: accept: %w", err)
 		}
-		// The UDS endpoint is Emacs: it renders no conversation and draws no
-		// state it must attest to, so it is an observer and the sequencer holds
-		// states back from it until a painter has caught up.
-		go s.serveClient(newUDSConn(conn), nil, RoleObserver, ClientKindHost)
+		// The UDS endpoint is Emacs, the host frontend: it is entitled to the
+		// host-only frames no GUI transport may see.
+		go s.serveClient(newUDSConn(conn), nil, ClientKindHost)
 	}
 }
 
@@ -218,18 +191,15 @@ func (s *Server) Serve(l net.Listener) error {
 // on the daemon's HTTP mux. It blocks for the connection's lifetime (the reader
 // loop runs on this goroutine).
 //
-// OBSERVER, deliberately. This endpoint's only production consumer is the
-// webapp's bootstrap socket, which exists to create a session and close before
-// any page has rendered — it draws nothing and would acknowledge nothing.
-// Counting it as a painter would hold every workspace's state back from Emacs
-// for the life of a socket that was never going to answer.
+// Its only production consumer is the webapp's bootstrap socket, which exists
+// to create a session and close before any page has rendered.
 func (s *Server) ServeWS(w http.ResponseWriter, r *http.Request) {
 	conn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		s.logf("frontend: websocket upgrade: %v", err)
 		return
 	}
-	s.serveClient(newWSConn(conn), nil, RoleObserver, ClientKindGUIBootstrap)
+	s.serveClient(newWSConn(conn), nil, ClientKindGUIBootstrap)
 }
 
 // CommandTranslator converts one raw inbound message on a scoped connection
@@ -248,12 +218,10 @@ type CommandTranslator func(raw []byte) (cmd *frontendv1.FrontendCommand, dispat
 // bridge uses it to stamp the connection's workspace); a nil translate parses
 // frontend.v1 commands directly. This backs GET /sessions/{id}/stream.
 //
-// role is the caller's declaration of what this connection does with the states
-// it receives; it is fixed here, at accept, and the sequencer reads it for the
-// life of the connection. The daemon's route table names it, so the whole
-// painter/observer partition is one readable place rather than an inference
-// from transport or scope.
-func (s *Server) ServeWSScoped(w http.ResponseWriter, r *http.Request, scope Scope, role Role, translate CommandTranslator) {
+// kind is the caller's declaration of which frontend product this connection
+// is, fixed here at accept. The daemon's route table names it, so the client
+// partition is one readable place rather than an inference from transport.
+func (s *Server) ServeWSScoped(w http.ResponseWriter, r *http.Request, scope Scope, kind ClientKind, translate CommandTranslator) {
 	conn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		s.logf("frontend: websocket upgrade: %v", err)
@@ -262,11 +230,7 @@ func (s *Server) ServeWSScoped(w http.ResponseWriter, r *http.Request, scope Sco
 	wc := newWSConn(conn)
 	wc.translate = translate
 	wc.logf = s.logf
-	kind := ClientKindGUIObserver
-	if role == RolePainter {
-		kind = ClientKindGUIPainter
-	}
-	s.serveClient(wc, &scope, role, kind)
+	s.serveClient(wc, &scope, kind)
 }
 
 // Close stops accepting, disconnects every client, and closes the listener.
@@ -302,9 +266,9 @@ func (s *Server) Close() error {
 // if it matches its scope (a StateSnapshot is scope-filtered), marshaled per
 // connection. A client whose bounded buffer is full is hard-disconnected.
 //
-// A WorkspaceState frame is NOT broadcast: it is routed through the delivery
-// sequencer instead, here rather than only at the convenience helper, so the
-// gate cannot be bypassed by reaching for the general fan-out.
+// A WorkspaceState frame is routed through PushWorkspaceState, here rather than
+// only at the convenience helper, so its one delivery path cannot be bypassed
+// by reaching for the general fan-out.
 func (s *Server) Broadcast(frame *frontendv1.FrontendFrame) {
 	if ws := frame.GetWorkspaceState(); ws != nil {
 		s.PushWorkspaceState(ws)
@@ -353,55 +317,26 @@ func (s *Server) Broadcast(frame *frontendv1.FrontendFrame) {
 	}
 }
 
-// PushWorkspaceState delivers a resolved state in sequence: to every painting
-// frontend now, and to the observers only once a painter has acknowledged the
-// emission (or once there is no painter left to wait for).
+// PushWorkspaceState delivers a resolved state to EVERY connected frontend at
+// once — same order, same content, no frontend waiting on another.
 //
-// The decision and the delivery both happen under mu, so an emission, an
-// acknowledgment, a connect and a disconnect are serialized against each other
-// and the observers' queues carry states in exactly the order the sequencer
-// settled them.
+// It used to be sequenced: the rendering webview received it first, and the
+// Emacs tab bar only once that webview acknowledged having drawn it. That
+// ordering existed to stop two surfaces disagreeing about a state one of them
+// had not painted yet, and it bought that at the cost of a whole viewer-based
+// attestation model — which could also OMIT a workspace from an observer's
+// reconnect snapshot entirely when its first emission was still held. A
+// workspace's color is connection truth now; a viewer's render pace has no
+// claim on it.
+//
+// The delivery happens under mu, so an emission, a connect and a disconnect are
+// serialized against each other and every client's queue carries states in
+// exactly the order the resolver produced them.
 func (s *Server) PushWorkspaceState(w *frontendv1.WorkspaceState) {
 	s.mu.Lock()
-	painting := s.paintersForLocked(w.GetWorkspace(), w.GetSessionId())
-	stamped, settled := s.gate.emitLocked(w, painting)
-	frame := WorkspaceStateFrame(stamped)
-	slow := s.deliverLocked(frame, func(cl *client) bool {
-		return settled || cl.role == RolePainter
-	})
+	slow := s.deliverLocked(WorkspaceStateFrame(w), func(*client) bool { return true })
 	s.mu.Unlock()
 	s.disconnectAll(slow)
-}
-
-// settlePaint releases a workspace's held state to the observers on a paint
-// acknowledgment covering generation. A stale acknowledgment settles nothing.
-func (s *Server) settlePaint(workspace string, generation uint64) {
-	s.mu.Lock()
-	var slow []*client
-	if st := s.gate.settleLocked(workspace, generation); st != nil {
-		slow = s.deliverLocked(WorkspaceStateFrame(st), func(cl *client) bool {
-			return cl.role == RoleObserver
-		})
-	}
-	s.mu.Unlock()
-	s.disconnectAll(slow)
-}
-
-// paintersForLocked reports whether any connected client will paint this
-// workspace's state and acknowledge it. An unscoped painter answers for every
-// workspace; a scoped one only for the session/workspace it is bound to, which
-// is what makes "no GUI is mounted for THIS workspace" a fact rather than an
-// approximation. Caller holds mu.
-func (s *Server) paintersForLocked(workspace, sessionID string) bool {
-	for cl := range s.clients {
-		if cl.role != RolePainter {
-			continue
-		}
-		if cl.scope == nil || cl.scope.matches(sessionID, workspace) {
-			return true
-		}
-	}
-	return false
 }
 
 // deliverLocked enqueues frame into every client want selects, returning the
@@ -444,7 +379,7 @@ func (s *Server) deliverLocked(frame *frontendv1.FrontendFrame, want func(*clien
 		}
 		if !enqueueLocked(cl, data) {
 			s.logf("frontend: slow consumer (%s), outbound buffer full (%d frames), hard-disconnecting; reconnect replays snapshot",
-				cl.role, cap(cl.send))
+				cl.kind, cap(cl.send))
 			slow = append(slow, cl)
 		}
 	}
@@ -499,8 +434,8 @@ func (s *Server) PushWorkspaceAvailable(v *frontendv1.WorkspaceAvailable) {
 func (s *Server) PushHostAction(v *frontendv1.HostAction) { s.Broadcast(HostActionFrame(v)) }
 
 // isHostOnlyFrame marks daemon-to-host work that must never cross into either
-// GUI transport.  ClientKind, not RoleObserver, is the authority: GUI
-// bootstrap is also an observer and must not receive an Emacs action.
+// GUI transport.  ClientKind is the authority: every GUI connection is barred,
+// bootstrap and session stream alike.
 func isHostOnlyFrame(frame *frontendv1.FrontendFrame) bool {
 	if frame == nil {
 		return false
@@ -509,10 +444,9 @@ func isHostOnlyFrame(frame *frontendv1.FrontendFrame) bool {
 }
 
 // snapshotForClient applies the two independent views of a snapshot.  Scope
-// limits a GUI painter to its session; host-only durable work is then removed
-// from every non-host client regardless of whether it happens to be an
-// observer.  The clone prevents a reconnect's filtering from mutating the
-// state provider's retained snapshot.
+// limits a GUI connection to its session; host-only durable work is then
+// removed from every non-host client.  The clone prevents a reconnect's
+// filtering from mutating the state provider's retained snapshot.
 func snapshotForClient(snapshot *frontendv1.StateSnapshot, scope *Scope, kind ClientKind) *frontendv1.StateSnapshot {
 	if scope != nil {
 		snapshot = filterSnapshot(snapshot, *scope)
@@ -531,8 +465,8 @@ func snapshotForClient(snapshot *frontendv1.StateSnapshot, scope *Scope, kind Cl
 
 // isHostOnlyCommand identifies commands whose authority belongs exclusively
 // to the Emacs UDS host.  They mutate durable creation/inbox state, so letting
-// a GUI bootstrap or painter submit one would make an unrelated webview able
-// to release prompts or consume host work.
+// any GUI connection submit one would make an unrelated webview able to
+// release prompts or consume host work.
 func isHostOnlyCommand(cmd *frontendv1.FrontendCommand) bool {
 	if cmd == nil {
 		return false
@@ -553,12 +487,11 @@ func (s *Server) dispatchClientCommand(cl *client, cmd *frontendv1.FrontendComma
 // Per-connection lifecycle
 // ---------------------------------------------------------------------------
 
-func (s *Server) serveClient(c conn, scope *Scope, role Role, kind ClientKind) {
+func (s *Server) serveClient(c conn, scope *Scope, kind ClientKind) {
 	cl := &client{
 		send:  make(chan []byte, s.bufSize),
 		done:  make(chan struct{}),
 		scope: scope,
-		role:  role,
 		kind:  kind,
 	}
 
@@ -572,9 +505,11 @@ func (s *Server) serveClient(c conn, scope *Scope, role Role, kind ClientKind) {
 		_ = c.close()
 		return
 	}
-	// The sequencer's view first, so an observer's reconnect cannot hand it a
-	// state no painter has settled, then the connection's own scope filter.
-	snapshot := snapshotForClient(s.gate.snapshotLocked(s.state.Snapshot(), role), scope, kind)
+	// THE SNAPSHOT CARRIES EVERY WORKSPACE the provider knows about. It used to
+	// be filtered down to the states a painter had settled, which could omit a
+	// workspace from Emacs entirely; nothing filters it now but the connection's
+	// own scope.
+	snapshot := snapshotForClient(s.state.Snapshot(), scope, kind)
 	snap, err := marshalFrame(SnapshotFrame(snapshot))
 	if err != nil {
 		s.mu.Unlock()
@@ -584,42 +519,10 @@ func (s *Server) serveClient(c conn, scope *Scope, role Role, kind ClientKind) {
 	}
 	cl.send <- snap // buffer is empty here; non-blocking
 	s.clients[cl] = struct{}{}
-	painted := snapshotWorkspaces(snapshot)
 	s.mu.Unlock()
-
-	// A NEW painter has attested nothing. Retract whatever the previous
-	// renderer claimed, so this connection has to earn green by drawing the
-	// history it was just handed rather than inheriting a claim made by a
-	// webview that is no longer on screen. Outside the lock: the withdrawal
-	// resolves a state that re-enters through PushWorkspaceState.
-	if role == RolePainter {
-		s.withdrawPaint(painted, "painter_connect")
-	}
 
 	go s.writeLoop(c, cl)
 	s.readLoop(c, cl)
-}
-
-// snapshotWorkspaces names every workspace a snapshot carries state for.
-func snapshotWorkspaces(snap *frontendv1.StateSnapshot) []string {
-	out := make([]string, 0, len(snap.GetWorkspaces()))
-	for _, w := range snap.GetWorkspaces() {
-		if name := w.GetWorkspace(); name != "" {
-			out = append(out, name)
-		}
-	}
-	return out
-}
-
-// withdrawPaint retracts the paint attestation of each workspace, if a
-// withdrawal sink is wired. Must be called with mu RELEASED.
-func (s *Server) withdrawPaint(workspaces []string, reason string) {
-	if s.withdraw == nil || len(workspaces) == 0 {
-		return
-	}
-	for _, ws := range workspaces {
-		s.withdraw(ws, reason)
-	}
 }
 
 func (s *Server) writeLoop(c conn, cl *client) {
@@ -656,22 +559,12 @@ func (s *Server) readLoop(c conn, cl *client) {
 		// scope-filtered for a scoped connection. The handler covers the
 		// conversation-delta replay the snapshot omits.
 		if cmd.GetResync() != nil {
-			s.mu.Lock()
-			snapshot := s.gate.snapshotLocked(s.state.Snapshot(), cl.role)
-			s.mu.Unlock()
-			snapshot = snapshotForClient(snapshot, cl.scope, cl.kind)
+			snapshot := snapshotForClient(s.state.Snapshot(), cl.scope, cl.kind)
 			if snap, err := marshalFrame(SnapshotFrame(snapshot)); err != nil {
 				s.logf("frontend: marshal resync snapshot: %v", err)
 			} else {
 				s.enqueue(cl, snap)
 			}
-		}
-		// The delivery half of a paint acknowledgment, taken BEFORE dispatch:
-		// the attestation the handler applies can itself resolve a NEW state,
-		// and settling the acknowledged emission first is what keeps the
-		// observer's queue in generation order.
-		if pa := cmd.GetPaintAck(); pa != nil && settlesDelivery(pa) {
-			s.settlePaint(cmd.GetWorkspace(), pa.GetStateGeneration())
 		}
 		ack, response := s.dispatchClientCommand(cl, cmd)
 		if !ack.GetOk() {
@@ -713,35 +606,13 @@ func (s *Server) enqueue(cl *client, data []byte) {
 // disconnect removes a client from the fan-out set and signals its writer to
 // stop. Idempotent: safe to call from the reader, the writer, enqueue, or Close.
 //
-// Removing a PAINTER also settles every state that was being held for it and
-// for no one else. That happens under the same lock the removal does, so a
-// state emitted an instant before the disconnect is neither stranded (the
-// removal sees it held) nor delivered twice (the entry is cleared before the
-// delivery) — the fall back to direct observer delivery is race-free by
-// construction rather than by timing.
+// It holds no per-connection delivery state to unwind: nothing is ever withheld
+// from one frontend on account of another, so a departure strands nothing.
 func (s *Server) disconnect(cl *client) {
 	s.mu.Lock()
-	_, registered := s.clients[cl]
 	delete(s.clients, cl)
-	var (
-		slow      []*client
-		unpainted []string
-	)
-	if registered && cl.role == RolePainter {
-		for _, st := range s.gate.orphanedLocked(s.paintersForLocked) {
-			slow = append(slow, s.deliverLocked(WorkspaceStateFrame(st), func(c *client) bool {
-				return c.role == RoleObserver
-			})...)
-		}
-		unpainted = s.gate.unpaintedLocked(cl.scope, s.paintersForLocked)
-	}
 	s.mu.Unlock()
 	cl.closeOnce.Do(func() { close(cl.done) })
-	s.disconnectAll(slow)
-	// The renderer that attested is gone, so its claim goes with it: the next
-	// webview to attach must draw the history before the workspace can be green
-	// again. Outside the lock, for the same reason the connect edge is.
-	s.withdrawPaint(unpainted, "painter_disconnect")
 }
 
 // clientCount reports the number of connected clients (test/introspection aid).

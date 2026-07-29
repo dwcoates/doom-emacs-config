@@ -72,7 +72,7 @@ func (r *probeHealthRouter) probeCount() int {
 // are the two things under test here.
 func establishHandler(t *testing.T, sessions *fakeSessionCmds, router SessionHealthRouter) *commandHandler {
 	t.Helper()
-	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, sessions, nil, nil, nil, nil,
+	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, sessions, nil, nil, nil,
 		CommandHandlerConfig{Health: HealthConfig{Router: router}})
 	if err != nil {
 		t.Fatalf("newCommandHandler: %v", err)
@@ -229,7 +229,7 @@ func TestCreateSessionNackOnTheEstablishmentsOwnDeadline(t *testing.T) {
 	// Arrange: a probe that never answers, under a round bounded far below the
 	// caller's own (absent) deadline.
 	router := &probeHealthRouter{healthy: true, gate: make(chan struct{})}
-	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil, nil, nil,
+	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil, nil,
 		CommandHandlerConfig{Health: HealthConfig{Router: router}, EstablishTimeout: 30 * time.Millisecond})
 	if err != nil {
 		t.Fatalf("newCommandHandler: %v", err)

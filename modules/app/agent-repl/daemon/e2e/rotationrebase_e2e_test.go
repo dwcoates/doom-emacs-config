@@ -16,10 +16,9 @@
 // These tests share e2e_test.go's package and reuse its helpers READ-ONLY
 // (newUDSHarness, readFrame, writeCmd, frameTimeout), clearcompact's
 // liveSession / deltaItems / isClear / sidecarClearEvent / clearDedupKey,
-// interrupt_e2e_test.go's painter / awaitAll / assistantText / echoOf,
+// interrupt_e2e_test.go's awaitAll / assistantText / echoOf,
 // rotation_e2e_test.go's rotateSession, and rotationresync_e2e_test.go's
-// replayItemsFrom. Paint attestation is REQUIRED: an unattested paint axis
-// holds every workspace blue no matter what the agent does.
+// replayItemsFrom.
 package e2e
 
 import (
@@ -59,11 +58,10 @@ func TestE2ERebasedResyncAfterARotationRendersTheClear(t *testing.T) {
 	cwd := t.TempDir()
 	h := newUDSHarness(t)
 	id, conn, _, store := liveSession(t, h, cwd)
-	p := newPainter(t, conn, cwd)
-	rot := rotateSession(t, h, conn, p, id, cwd)
+	rot := rotateSession(t, h, conn, id, cwd)
 	const lineUUID = "e2e-rebased-clear-1"
 	store.write(sidecarClearEvent(rot.next, lineUUID))
-	awaitAll(t, conn, p, nil, map[string]func(*frontendv1.FrontendFrame) bool{
+	awaitAll(t, conn, nil, map[string]func(*frontendv1.FrontendFrame) bool{
 		"the clear's live push": func(frame *frontendv1.FrontendFrame) bool {
 			for _, item := range deltaItems(frame, cwd) {
 				if isClear(item) && item.GetUuid() == clearDedupKey(lineUUID) {
@@ -75,7 +73,7 @@ func TestE2ERebasedResyncAfterARotationRendersTheClear(t *testing.T) {
 	})
 
 	// Act — the rebased client asks for the whole new conversation.
-	items := replayItemsFrom(t, conn, p, cwd, "r-rebased", rebasedMark)
+	items := replayItemsFrom(t, conn, cwd, "r-rebased", rebasedMark)
 
 	// Assert — arm 32, replayed, exactly once.
 	var clears int
@@ -103,11 +101,10 @@ func TestE2ERebasedResyncReplaysNoRetiredSpaceItem(t *testing.T) {
 	cwd := t.TempDir()
 	h := newUDSHarness(t)
 	id, conn, _, _ := liveSession(t, h, cwd)
-	p := newPainter(t, conn, cwd)
-	rotateSession(t, h, conn, p, id, cwd)
+	rotateSession(t, h, conn, id, cwd)
 
 	// Act
-	items := replayItemsFrom(t, conn, p, cwd, "r-rebased-purged", rebasedMark)
+	items := replayItemsFrom(t, conn, cwd, "r-rebased-purged", rebasedMark)
 
 	// Assert
 	for _, item := range items {
@@ -127,18 +124,17 @@ func TestE2ERebasedResyncPushesNoFailureCard(t *testing.T) {
 	cwd := t.TempDir()
 	h := newUDSHarness(t)
 	id, conn, _, store := liveSession(t, h, cwd)
-	p := newPainter(t, conn, cwd)
-	rot := rotateSession(t, h, conn, p, id, cwd)
+	rot := rotateSession(t, h, conn, id, cwd)
 	const lineUUID = "e2e-rebased-clear-2"
 	store.write(sidecarClearEvent(rot.next, lineUUID))
 
 	// Act — the from-zero resync, and a turn after it so the connection is
 	// still being watched for frames once the replay has settled.
-	replayItemsFrom(t, conn, p, cwd, "r-rebased-nocard", rebasedMark)
+	replayItemsFrom(t, conn, cwd, "r-rebased-nocard", rebasedMark)
 	writeCmd(t, conn, `{"requestId":"r-after-rebase","submitPrompt":{"text":"after-the-rebase"}}`)
 
 	// Assert
-	awaitAll(t, conn, p,
+	awaitAll(t, conn,
 		func(frame *frontendv1.FrontendFrame) string { return failureCard(frame, cwd) },
 		map[string]func(*frontendv1.FrontendFrame) bool{
 			"the post-rebase turn's reply": func(frame *frontendv1.FrontendFrame) bool {

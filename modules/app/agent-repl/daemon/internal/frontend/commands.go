@@ -68,15 +68,6 @@ type CommandHandler interface {
 	AcceptQueueEntry(ctx context.Context, workspace, requestID string, cmd *frontendv1.QueueAcceptCmd) error
 	// CancelQueueEntry drops a held prompt; it is never delivered.
 	CancelQueueEntry(ctx context.Context, workspace, requestID string, cmd *frontendv1.QueueCancelCmd) error
-	// PaintAck records a frontend's attestation that it PAINTED the
-	// workspace's conversation through the carried seq.
-	//
-	// The daemon tracks STATE; a frontend decides when that state is
-	// RENDERABLE. Nothing on this side of the wire can distinguish a webview
-	// that drew the history from one that received it and drew nothing, so
-	// the workspace stays on the compromised-route state until a frontend
-	// says otherwise. An absent ack is a meaningful, correct outcome.
-	PaintAck(ctx context.Context, workspace, requestID string, cmd *frontendv1.PaintAckCmd) error
 	// DaemonHealth proves the daemon-global ready boundary.  The returned view
 	// is delivered to the requesting connection before its command ack.
 	DaemonHealth(ctx context.Context, workspace, requestID string, cmd *frontendv1.DaemonHealthCmd) (*frontendv1.DaemonHealthView, error)
@@ -151,8 +142,6 @@ func DispatchWithResponse(ctx context.Context, logf dlog.Logf, h CommandHandler,
 		err = h.AcceptQueueEntry(ctx, ws, reqID, c.QueueAccept)
 	case *frontendv1.FrontendCommand_QueueCancel:
 		err = h.CancelQueueEntry(ctx, ws, reqID, c.QueueCancel)
-	case *frontendv1.FrontendCommand_PaintAck:
-		err = h.PaintAck(ctx, ws, reqID, c.PaintAck)
 	case *frontendv1.FrontendCommand_DaemonHealth:
 		var view *frontendv1.DaemonHealthView
 		view, err = h.DaemonHealth(ctx, ws, reqID, c.DaemonHealth)
