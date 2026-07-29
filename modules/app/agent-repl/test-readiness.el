@@ -440,5 +440,15 @@
           (should (member agent-repl--readiness-mode-line-spec mode-line-format)))
       (kill-buffer buf))))
 
+(ert-deftest agent-repl-test-readiness-script-resolves-to-an-existing-file ()
+  "The polled script path must name a file that exists.
+`bin/' is a sibling of `readiness.el'.  Climbing one directory further
+resolved to `modules/app/bin/', so every poll exited 127 and readiness
+never reported — a defect no test could see because nothing asserted the
+resolved path was real."
+  (should (file-exists-p agent-repl-readiness-script))
+  (should (string-suffix-p "agent-repl/bin/readiness-report.sh"
+                           agent-repl-readiness-script)))
+
 (provide 'test-readiness)
 ;;; test-readiness.el ends here
