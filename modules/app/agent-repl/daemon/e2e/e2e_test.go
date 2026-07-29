@@ -31,6 +31,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -72,7 +73,7 @@ func repoRoot(t *testing.T) string {
 //
 // It NEVER installs anything: a missing node_modules is a loud skip telling the
 // operator to run `npm ci`, not an implicit network fetch from a test.
-func buildShim(t *testing.T, node string) string {
+func buildShim(t *testing.T, node, buildSHA string) string {
 	t.Helper()
 	shimDir := filepath.Join(repoRoot(t), "agent-shim", "claude", "shim")
 	if _, err := os.Stat(filepath.Join(shimDir, "node_modules")); err != nil {
@@ -107,7 +108,11 @@ func buildShim(t *testing.T, node string) string {
 	out := filepath.Join(outDir, "main.js")
 	cmd := exec.Command(node, "build.mjs")
 	cmd.Dir = shimDir
-	cmd.Env = append(os.Environ(), "SHIM_BUILD_OUTFILE="+out)
+	// SHIM_BUILD_SHA is the bundle's BUILD IDENTITY, baked in by build.mjs
+	// exactly as bin/build-frontend.sh does it. A test bakes a stale one to
+	// exercise the daemon's stale-shim refresh against a real bundle rather
+	// than a stubbed hello.
+	cmd.Env = append(os.Environ(), "SHIM_BUILD_OUTFILE="+out, "SHIM_BUILD_SHA="+buildSHA)
 	if combined, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("build shim bundle: %v\n%s", err, combined)
 	}
@@ -244,6 +249,8 @@ func (e *emptyWorkspaceCreation) close() {
 
 type e2eHarness struct {
 	ts *httptest.Server
+	// shimSpawns reports how many shim processes this harness has exec'd.
+	shimSpawns func() int64
 	// sweepIdle fires the daemon's idle sweeper, which is the production
 	// hibernation trigger. Non-nil only for a harness built with
 	// withIdleSweeper; a test that never asks for one cannot accidentally
@@ -263,6 +270,13 @@ type harnessTuning struct {
 	// establishTimeout bounds one createSession establishment round. Zero takes
 	// the daemon's own bound.
 	establishTimeout time.Duration
+	// shimBuildSHA is baked into the bundle this harness builds, and
+	// currentBuildSHA is what the daemon believes the CURRENT bundle to be.
+	// Setting them differently is a shim that survived a deploy — the exact
+	// condition the stale-shim refresh exists for — with both halves real: a
+	// genuinely built bundle reporting a genuinely injected identity.
+	shimBuildSHA    string
+	currentBuildSHA string
 	// idleSweeper hands the daemon's idle sweeper a clock the TEST drives, so
 	// a hibernation is provoked by an event rather than waited out. It is the
 	// production trigger — sweepIdle calls driver.Hibernate — so what it
@@ -273,6 +287,12 @@ type harnessTuning struct {
 type harnessOption func(*harnessTuning)
 
 func withWedgedShim() harnessOption { return func(o *harnessTuning) { o.wedgeShim = true } }
+
+// withStaleShimBuild bakes `baked` into the bundle while telling the daemon the
+// current bundle is `current` — a shim that outlived a deploy.
+func withStaleShimBuild(baked, current string) harnessOption {
+	return func(o *harnessTuning) { o.shimBuildSHA, o.currentBuildSHA = baked, current }
+}
 
 // withIdleSweeper gives the harness a test-driven idle-sweep clock.
 func withIdleSweeper() harnessOption { return func(o *harnessTuning) { o.idleSweeper = true } }
@@ -297,6 +317,10 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 	var (
 		procMu sync.Mutex
 		procs  []*shim.Proc
+		// spawnCount counts shim EXECS. A stale-shim refresh is visible as a
+		// second exec for one session, and its once-only latch as the absence
+		// of a third.
+		spawnCount atomic.Int64
 	)
 	t.Cleanup(func() {
 		procMu.Lock()
@@ -307,7 +331,7 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 		}
 	})
 	node := nodePath(t)
-	script := buildShim(t, node)
+	script := buildShim(t, node, tuning.shimBuildSHA)
 	storeBin := buildShimStore(t)
 	// The store socket cannot live under t.TempDir(): the test-name-derived
 	// path exceeds the 104-byte sun_path limit, so bind(2) fails on macOS.
@@ -372,6 +396,7 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 		if spawnErr != nil {
 			return nil, spawnErr
 		}
+		spawnCount.Add(1)
 		procMu.Lock()
 		procs = append(procs, proc)
 		procMu.Unlock()
@@ -405,6 +430,7 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 		Registrar:         &server.RegistryRegistrar{Reg: reg, Logf: t.Logf},
 		DaemonVersion:     "0.1.0-e2e",
 		ProtocolVersion:   "1",
+		ShimBuildSHA:      func() string { return tuning.currentBuildSHA },
 		Logf:              t.Logf,
 	})
 	if err != nil {
@@ -458,7 +484,7 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 	mux.HandleFunc("/frontend", agentShim.Server.ServeWS)
 	ts := httptest.NewServer(mux)
 	t.Cleanup(ts.Close)
-	h := &e2eHarness{ts: ts}
+	h := &e2eHarness{ts: ts, shimSpawns: spawnCount.Load}
 	if sweepTicks != nil {
 		h.sweepIdle = sweepTicks
 	}
