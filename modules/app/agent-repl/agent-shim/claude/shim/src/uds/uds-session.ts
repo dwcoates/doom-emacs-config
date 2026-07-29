@@ -56,6 +56,7 @@ import { ClaudeStreamMessageSchema } from "../../../../../proto/gen/ts/agentshim
 import { TranscriptLineSchema } from "../../../../../proto/gen/ts/agentshim/data/v1/transcript_pb.js";
 import type { ApiUserMessage } from "../../../../../proto/gen/ts/agentshim/data/v1/tools_pb.js";
 import { bindLog, setClaudeSessionId } from "./log.js";
+import { normalizeModel } from "../model.js";
 import {
   DaemonHello,
   DegradedState,
@@ -326,18 +327,20 @@ export class UdsSession {
         return wasLive ? InterruptOutcome.INTERRUPTED : InterruptOutcome.ALREADY_COMPLETE;
       },
       setModel: async ({ requestId, model }): Promise<string> => {
+        const normalized = normalizeModel(model);
+        if (normalized === "") throw new Error("set-model cannot send an empty or <synthetic> model to the SDK");
         if (this.query === null) {
           throw new Error("set-model cannot run before the SDK query exists");
         }
         try {
-          await this.query.setModel(model);
+          await this.query.setModel(normalized);
         } catch (err) {
           // The SDK rejected the mutation.  Return the selection this shim
           // actually knows, so the daemon can reset the UI from authority.
           throw new ModelSelectionError(errMsg(err), this.effectiveModel);
         }
-        this.effectiveModel = model;
-        LOGGER.log({ agent_repl_session_id: this.deps.sessionId, request_id: requestId, model },
+        this.effectiveModel = normalized;
+        LOGGER.log({ agent_repl_session_id: this.deps.sessionId, request_id: requestId, model: normalized },
           "model change confirmed by SDK");
         return this.effectiveModel;
       },
@@ -640,10 +643,18 @@ export class UdsSession {
     }
     void this.query.supportedModels()
       .then((models) => {
-        this.server.sendModelCatalog(create(ModelCatalogSchema, {
+        const options = models.map((option) => ({ ...option, value: normalizeModel(option.value) }));
+        const malformed = options.find((option) => option.value === "");
+        if (malformed !== undefined) {
+          throw new Error(`supportedModels returned an empty or <synthetic> option (display_name=${JSON.stringify(malformed.displayName)})`);
+        }
+        const forwarded = this.server.sendModelCatalog(create(ModelCatalogSchema, {
           sessionId: this.deps.sessionId,
-          models: models.map((model) => create(ModelOptionSchema, model)),
+          models: options.map((option) => create(ModelOptionSchema, option)),
         }));
+        if (!forwarded) {
+          this.reportDegraded("claude-shim-model-catalog", "model catalog publication failed because the daemon link was not live");
+        }
       })
       .catch((err: unknown) => {
         const reason = `supportedModels failed: ${errMsg(err)}`;
@@ -787,12 +798,14 @@ export class UdsSession {
       }
     }
     // The direct readiness SessionStarted closes the lifecycle gate before the
-    // SDK emits its first system:init. Record the SDK selection independently
-    // so a later rejected SetModel can report the currently active model.
-    if (msg.type === "system" && msg.subtype === "init" && typeof msg.model === "string" && msg.model !== "") {
-      this.effectiveModel = msg.model;
-      LOGGER.log({ agent_repl_session_id: this.deps.sessionId, model: this.effectiveModel },
-        "model observed from SDK system-init");
+    // SDK emits its first system:init. Observe that raw SDK authority here so a
+    // later rejected SetModel can name the currently selected model even though
+    // the duplicate lifecycle twin is deliberately suppressed.
+    if (msg.type === "system" && msg.subtype === "init" && typeof msg.model === "string") {
+      const model = normalizeModel(msg.model);
+      this.effectiveModel = model;
+      LOGGER.log({ agent_repl_session_id: this.deps.sessionId, model, raw_model: msg.model },
+        model === "" ? "system-init model normalized to empty" : "model observed from SDK system-init");
     }
     const { vendor, lifecycle } = convert(msg, {
       sessionSource: this.deps.sessionSource,

@@ -405,18 +405,21 @@ type RegistryRegistrar struct {
 // SessionModelCatalogObserved accepts a shim-published menu, then re-pushes
 // the session view. Model selection remains owned by the shim; this only
 // preserves the SDK's offered choices for frontend rendering.
-func (r *RegistryRegistrar) SessionModelCatalogObserved(sessionID string, models []*corev1.ModelOption) {
+func (r *RegistryRegistrar) SessionModelCatalogObserved(sessionID string, models []*corev1.ModelOption) error {
 	if r.ModelCatalogs == nil {
-		if r.Logf != nil {
-			r.Logf("server: session %s: model catalog received without a catalog store", sessionID)
-		}
-		return
+		return fmt.Errorf("server: session %s: model catalog received without a catalog store", sessionID)
 	}
-	r.ModelCatalogs.Set(sessionID, models)
+	if err := r.ModelCatalogs.Set(sessionID, models); err != nil {
+		if r.Logf != nil {
+			r.Logf("server: session %s: REFUSING malformed model catalog: %v", sessionID, err)
+		}
+		return err
+	}
 	if r.Logf != nil {
 		r.Logf("server: session %s: model catalog updated models=%d", sessionID, len(models))
 	}
 	r.repush(sessionID)
+	return nil
 }
 
 // repush delivers the post-write SessionView push, if one is wired.

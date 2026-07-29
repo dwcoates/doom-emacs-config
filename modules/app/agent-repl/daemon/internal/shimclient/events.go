@@ -44,7 +44,9 @@ func (c *Client) readLoop(ctx context.Context, ac *activeConn) error {
 		case *corev1.PermissionRequest:
 			c.dispatchPermission(ctx, ac, m)
 		case *corev1.ModelCatalog:
-			c.dispatchModelCatalog(m)
+			if err := c.dispatchModelCatalog(m); err != nil {
+				return err
+			}
 		// REPLAYED HISTORY. Its own arms, physically apart from the live
 		// *corev1.Event case above: a replayed event cannot reach dispatchEvent
 		// (and so cannot reach the SSM, the task catalog, or the progress
@@ -67,17 +69,33 @@ func (c *Client) readLoop(ctx context.Context, ac *activeConn) error {
 	}
 }
 
-func (c *Client) dispatchModelCatalog(catalog *corev1.ModelCatalog) {
+func (c *Client) dispatchModelCatalog(catalog *corev1.ModelCatalog) error {
 	if catalog.GetSessionId() != c.cfg.SessionID {
-		c.logf("received ModelCatalog for session=%s on session=%s connection; ignoring protocol violation", catalog.GetSessionId(), c.cfg.SessionID)
-		return
+		return c.modelCatalogInvariant("model catalog session=%s arrived on session=%s connection", catalog.GetSessionId(), c.cfg.SessionID)
 	}
 	if c.cfg.Models == nil {
-		c.logf("received ModelCatalog session=%s models=%d with no daemon sink", catalog.GetSessionId(), len(catalog.GetModels()))
-		return
+		return c.modelCatalogInvariant("model catalog session=%s models=%d has no configured sink", catalog.GetSessionId(), len(catalog.GetModels()))
 	}
 	c.logf("received ModelCatalog session=%s models=%d", catalog.GetSessionId(), len(catalog.GetModels()))
-	c.cfg.Models.ModelCatalog(c.cfg.SessionID, catalog)
+	if err := c.cfg.Models.ModelCatalog(c.cfg.SessionID, catalog); err != nil {
+		return c.modelCatalogInvariant("model catalog session=%s rejected by sink: %v", catalog.GetSessionId(), err)
+	}
+	return nil
+}
+
+// modelCatalogInvariant makes a broken capability channel visible before the
+// read loop aborts and reconnects.  The error remains terminal for THIS link;
+// the card is not a substitute for a correct catalog sink.
+func (c *Client) modelCatalogInvariant(format string, args ...any) error {
+	reason := fmt.Sprintf(format, args...)
+	c.logf("MODEL CATALOG INVARIANT VIOLATION: %s", reason)
+	if c.cfg.Degraded != nil {
+		c.cfg.Degraded.Degraded(c.cfg.SessionID, &corev1.DegradedState{
+			Component: "daemon-model-catalog",
+			Reason:    reason,
+		})
+	}
+	return fmt.Errorf("shimclient: %s", reason)
 }
 
 // dispatchEvent routes one Event and maintains last_seen_seq. Lifecycle
