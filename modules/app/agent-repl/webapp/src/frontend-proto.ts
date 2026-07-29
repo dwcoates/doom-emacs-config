@@ -783,9 +783,13 @@ function decodeSessionView(v: unknown): SessionView {
     pendingPermissions: num(o, "pendingPermissions", "SessionView"),
     // S8 account identity: "" when the daemon has not resolved a config dir.
     configDir: str(o, "configDir", "SessionView"),
-    modelOptions: o.modelOptions === undefined || o.modelOptions === null
-      ? []
-      : ensureArray(o.modelOptions, "SessionView.modelOptions").map((model, i) => decodeModelOption(model, i)),
+    modelOptions: (() => {
+      if (o.modelOptions === undefined || o.modelOptions === null) {
+        throw new Error("frontend-proto: SessionView missing required `modelOptions`");
+      }
+      return ensureArray(o.modelOptions, "SessionView.modelOptions")
+        .map((model, i) => decodeModelOption(model, i));
+    })(),
     // F2 never-blue signal; absent on a pre-F2 daemon, which reads as
     // `unspecified` — the same "nothing to backfill" a fresh workspace has.
     backfill: decodeBackfillState(o.backfill),

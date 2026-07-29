@@ -61,7 +61,7 @@ import {
   sessionGoneFailure,
 } from "./local-failure.js";
 import { StateAdapter, systemFailureFrom, userTurnReceipt } from "./state-adapter.js";
-import { CommandDispatcher } from "./command-dispatch.js";
+import { CommandDispatcher, ModelSelectionRejectedError } from "./command-dispatch.js";
 import { ConnectResync } from "./connect-resync.js";
 import type { CommandStruct } from "./frontend-command.js";
 import { PendingPermissionMode } from "./pending-mode.js";
@@ -1034,15 +1034,27 @@ async function boot(): Promise<void> {
 
   // The selector never owns model state. Browser select controls move their
   // visual value before this handler runs, so restore the daemon-rendered
-  // selection immediately and wait for the daemon's SessionView push to paint
-  // any confirmed change. A rejection reaches the normal failure-card path.
+  // selection immediately. Only the daemon's correlated receipt can paint a
+  // new selection; the subsequent SessionView remains the durable snapshot.
   modelEl.addEventListener("change", () => {
     const requested = modelEl.value;
     modelEl.value = store.state.model;
     if (requested === store.state.model) return;
     void dispatcher.setModel(store.state.cwd, requested).then(
-      () => clog("info", `model switch acknowledged request=${requested}; awaiting authoritative SessionView`),
-      (err: unknown) => clog("error", `model switch rejected request=${requested}: ${String(err)}`),
+      (selected) => {
+        if (store.applyAcknowledgedModel(selected)) rerender();
+        modelEl.value = selected;
+        clog("info", `model switch acknowledged request=${requested} selected=${selected}`);
+      },
+      (err: unknown) => {
+        if (err instanceof ModelSelectionRejectedError) {
+          if (store.applyAcknowledgedModel(err.selectedModel)) rerender();
+          modelEl.value = err.selectedModel;
+          clog("error", `model switch rejected request=${requested} selected=${err.selectedModel}: ${err.message}`);
+          return;
+        }
+        clog("error", `model switch rejected request=${requested}: ${String(err)}`);
+      },
     );
   });
 

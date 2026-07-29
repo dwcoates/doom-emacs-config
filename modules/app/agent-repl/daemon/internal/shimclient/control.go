@@ -8,6 +8,7 @@ import (
 	corev1 "agentrepl/proto/agentshim/core/v1"
 
 	"claude-repld/internal/errclass"
+	"claude-repld/internal/registry"
 
 	"google.golang.org/protobuf/proto"
 )
@@ -67,27 +68,29 @@ func (c *Client) Interrupt(ctx context.Context) (corev1.InterruptOutcome, error)
 // SetModel asks the live shim to change its SDK model and returns the model the
 // shim confirmed. Callers persist only this value, never their requested one.
 func (c *Client) SetModel(ctx context.Context, model string) (string, error) {
-	if model == "" {
+	requested := registry.NormalizeModel(model)
+	if requested == "" {
 		return "", fmt.Errorf("set model: model id is empty")
 	}
 	reqID := c.newRequestID("set-model")
-	ack, nack, err := c.sendAwaitReceipt(ctx, &corev1.SetModel{RequestId: reqID, Model: model})
+	ack, nack, err := c.sendAwaitReceipt(ctx, &corev1.SetModel{RequestId: reqID, Model: requested})
 	if err != nil {
 		return "", err
 	}
 	if nack != nil {
-		selected := nack.GetSelectedModel()
+		selected := registry.NormalizeModel(nack.GetSelectedModel())
 		if selected == "" {
 			return "", fmt.Errorf("set model: shim rejected request_id=%s without its current selected_model: %w", reqID, ErrNack)
 		}
-		c.logf("set-model REJECTED request_id=%s requested=%q selected=%q reason=%q", reqID, model, selected, nack.GetReason())
+		c.logf("set-model REJECTED request_id=%s requested=%q selected=%q reason=%q", reqID, requested, selected, nack.GetReason())
 		return selected, fmt.Errorf("%w: request_id=%s reason=%q", ErrNack, reqID, nack.GetReason())
 	}
-	if ack.GetSelectedModel() == "" {
+	selected := registry.NormalizeModel(ack.GetSelectedModel())
+	if selected == "" {
 		return "", fmt.Errorf("set model: shim ack request_id=%s omitted selected_model", reqID)
 	}
-	c.logf("set-model request_id=%s requested=%q selected=%q", reqID, model, ack.GetSelectedModel())
-	return ack.GetSelectedModel(), nil
+	c.logf("set-model request_id=%s requested=%q selected=%q", reqID, requested, selected)
+	return selected, nil
 }
 
 // PermissionResponse sends the answer to an inbound PermissionRequest,

@@ -52,6 +52,7 @@ type fakePrompts struct {
 	promptRequestIDs []string
 	interrupts       []string
 	perms            []string
+	models           []string
 	err              error
 	// turnActive is what this fake reports as the workspace's observed turn
 	// state, so one double serves as both the prompt router and the interrupt
@@ -103,7 +104,8 @@ func (f *fakePrompts) AnswerPermission(_ context.Context, _, permReqID string, _
 	f.perms = append(f.perms, permReqID)
 	return f.err
 }
-func (f *fakePrompts) SetModel(_ context.Context, _ string, _ string) (string, error) {
+func (f *fakePrompts) SetModel(_ context.Context, _ string, model string) (string, error) {
+	f.models = append(f.models, model)
 	return "opus", f.err
 }
 
@@ -240,6 +242,26 @@ func newTestHandler(t *testing.T) (*commandHandler, *fakePrompts, *fakeMerges, *
 }
 
 // --- dispatch tests -------------------------------------------------------
+
+func TestCommandHandlerSetModelRejectsSyntheticWithoutCallingPromptRouter(t *testing.T) {
+	// Arrange: the CLI marker means "no override", never a selectable model.
+	h, prompts, _, _ := newTestHandler(t)
+
+	// Act
+	selected, err := h.SetModel(context.Background(), "/workspace", "request-1", &frontendv1.SetModelCmd{Model: "<synthetic>"})
+
+	// Assert: no daemon-to-shim request is made and no fictional selection is
+	// returned to the correlated frontend receipt.
+	if err == nil || !strings.Contains(err.Error(), "empty model") {
+		t.Fatalf("SetModel(<synthetic>) error = %v, want empty-model refusal", err)
+	}
+	if selected != "" {
+		t.Fatalf("SetModel(<synthetic>) selected = %q, want empty", selected)
+	}
+	if len(prompts.models) != 0 {
+		t.Fatalf("SetModel(<synthetic>) called prompt router with %#v", prompts.models)
+	}
+}
 
 func TestCommandHandlerSubmitPromptRoutesToPrompts(t *testing.T) {
 	// Arrange
