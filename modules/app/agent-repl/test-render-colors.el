@@ -4,7 +4,7 @@
 
 ;; Emacs's corner of the contract in proto/vocab/render-colors.json.
 ;;
-;; That file is the ONE table naming which of the five colors each
+;; That file is the ONE table naming which of the six colors each
 ;; RenderState and each ErrorClass takes.  Go asserts against it, TypeScript
 ;; asserts against it, and this file is the third corner — which is what
 ;; makes a divergence between the three fail loudly instead of quietly.
@@ -79,7 +79,7 @@ renderers disagree about which color a state takes, this fails."
                  (cdr (assoc "precedence" agent-repl-test--color-fixture)))))
 
 (ert-deftest agent-repl-test-colors-every-named-color-has-a-value ()
-  "Each of the five names resolves to a constant this renderer draws with.
+  "Each of the six names resolves to a constant this renderer draws with.
 A color the fixture ranks but Emacs cannot draw is an assignment nothing
 can honor."
   ;; Act / Assert
@@ -125,7 +125,7 @@ test above proves the row is there; this proves it is right."
           (should (equal bg (alist-get name agent-repl--color-by-name nil nil #'equal))))))))
 
 (ert-deftest agent-repl-test-colors-merge-states-spend-no-color ()
-  "The merge states carry badges, never one of the five."
+  "The merge states carry badges, never one of the six."
   ;; Act / Assert
   (dolist (keyword '(:merging :merge-queued :merge-conflict :merge-failed :merged))
     (should (equal (alist-get keyword agent-repl--state-color) "none"))))
@@ -173,7 +173,7 @@ makes their agreement structural rather than coincidental."
 (ert-deftest agent-repl-test-colors-the-dot-and-the-tab-take-the-same-color ()
   "For every state, the rail's dot and the tab bar resolve the same color.
 Each renderer keeps its own shade; what may never differ is WHICH of the
-five a state gets, and that is what the shared fixture pins."
+six a state gets, and that is what the shared fixture pins."
   ;; Act / Assert
   (dolist (entry agent-repl--frontend-render-state-map)
     (let* ((keyword (cdr entry))
@@ -184,6 +184,26 @@ five a state gets, and that is what the shared fixture pins."
       (should (equal (alist-get keyword agent-repl--state-color) fixture-color)))))
 
 ;;;; ---- Error classes ---------------------------------------------------
+
+;;;; ---- The sixth color ------------------------------------------------
+
+(ert-deftest agent-repl-test-colors-hibernated-and-severed-differ-in-the-fixture ()
+  "The fixture itself keeps the two halves of the old DORMANT apart.
+Asserted on the fixture rather than on Emacs\='s table, so a change that
+re-merges them at the CONTRACT level fails here in all three languages
+rather than only wherever it happened to be noticed."
+  ;; Arrange
+  (let ((states (agent-repl-test--fixture "render_states")))
+    ;; Act / Assert
+    (should-not (equal (cdr (assoc "RENDER_STATE_HIBERNATED" states))
+                       (cdr (assoc "RENDER_STATE_SEVERED" states))))))
+
+(ert-deftest agent-repl-test-colors-teal-is-ranked-in-the-fixture ()
+  "Teal is a RANKED color, not an unranked sixth hue.
+A color declared but never ranked has no defined behavior when it meets
+another, which is the whole job of the precedence list."
+  ;; Act / Assert
+  (should (member "teal" (cdr (assoc "precedence" agent-repl-test--color-fixture)))))
 
 (ert-deftest agent-repl-test-colors-every-error-class-has-a-fixture-row ()
   "Every class Emacs decodes has a color assignment."

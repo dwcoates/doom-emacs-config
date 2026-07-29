@@ -48,13 +48,21 @@ row and SQL precedence chooses the winning candidate:
 | Axis | States | Clear token |
 |---|---|---|
 | Agent | `thinking`, `permission`, `done`, `interrupted`, `ready`, `idle`, `dead`, `vendor_blocked` | none |
-| Wired | `dormant`, `starting` | `wired` |
+| Wired | `severed`, `hibernated`, `starting`, and the legacy `dormant` | `wired` |
 | Backfill | `backfill_failed` | `backfill_ok` |
 | Degraded | `degraded` | `degraded_clear` |
 | Merge | `merge_conflict`, `merge_failed`, `merged`, `merging`, `merge_queued` | `merge_none` |
 
-An absent wired row resolves as dormant. A clear token contributes no
-candidate for its axis.
+An absent wired row resolves as `hibernated` — nothing was ever wired here, so
+there is no evidence of a live session AND none of a breakage. A clear token
+contributes no candidate for its axis.
+
+The wired axis's closed half is TWO states, and it used to be one. `severed`
+means the substrate broke (a bring-up that could not be completed, a driver that
+died on a terminal protocol error); `hibernated` means nothing is wrong (we
+SIGTERMed the shim on purpose to reclaim ~500MB, or a daemon has just booted).
+`dormant` is the PRE-SPLIT spelling and still appears in rows written before the
+split; it resolves as an alias for `severed` and must never be migrated away.
 
 Merge states outrank the color ladder:
 
@@ -66,11 +74,15 @@ Merge states outrank the color ladder:
 
 The color precedence is:
 
-1. Blue: `dead`, `degraded`, `dormant`, `backfill_failed`, `starting`.
-2. Purple: `vendor_blocked`.
-3. Red: `thinking`.
-4. Yellow: `idle_async`, derived from live task count rather than stored.
-5. Green: `permission`, `done`, `interrupted`, `ready`, `idle`.
+1. Blue: `dead`, `degraded`, `severed` (and the legacy `dormant`),
+   `backfill_failed`, `starting`.
+2. Teal: `hibernated`. Ranked here — directly below blue and above purple —
+   rather than below green, because it makes the same actionability claim blue
+   does and only its reason is benign.
+3. Purple: `vendor_blocked`.
+4. Red: `thinking`.
+5. Yellow: `idle_async`, derived from live task count rather than stored.
+6. Green: `permission`, `done`, `interrupted`, `ready`, `idle`.
 
 Read the current implementation in `daemon/internal/ssm/resolve.go` when the
 exact precedence is under investigation. The SQL query is authoritative.
@@ -106,7 +118,8 @@ sqlite3 -readonly ~/.cache/agent-repl/ssm/state.db "
   WHERE workspace='$WS'
     AND state IN (
       'thinking','permission','done','interrupted','ready','idle','dead',
-      'vendor_blocked','wired','starting','dormant','backfill_failed',
+      'vendor_blocked','wired','starting','severed','hibernated','dormant',
+      'backfill_failed',
       'backfill_ok','degraded','degraded_clear','merge_conflict',
       'merge_failed','merged','merging','merge_queued','merge_none'
     )

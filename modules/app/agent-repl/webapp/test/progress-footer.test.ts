@@ -147,29 +147,55 @@ describe("phaseLabel: the SSM's verdict as the footer's anchor", () => {
     expect(got.spinning).toBe(false);
   });
 
-  it("names a workspace nothing is wired to dormant", () => {
+  it("names a workspace whose route broke severed", () => {
     // Arrange / Act
-    const got = phaseLabel("dormant");
+    const got = phaseLabel("severed");
     // Assert
-    expect(got.word).toBe("dormant");
+    expect(got.word).toBe("severed");
   });
 
-  it("does NOT spin while dormant", () => {
+  it("does NOT spin while severed", () => {
     // Arrange / Act — `starting` spins because a bring-up is really under way;
-    // dormant is the opposite claim, and a spinner would say work is happening.
-    const got = phaseLabel("dormant");
+    // severed is the opposite claim, and a spinner would say work is happening.
+    const got = phaseLabel("severed");
     // Assert
     expect(got.spinning).toBe(false);
   });
 
-  it("takes the blue tone while dormant", () => {
-    // Arrange / Act — the same blue every no-live-session state wears.
-    const got = phaseLabel("dormant");
+  it("takes the blue tone while severed", () => {
+    // Arrange / Act — the same blue every broken-route state wears.
+    const got = phaseLabel("severed");
     // Assert
     expect(got.tone).toBe("error");
   });
 
-  it("still spins while starting, which dormant is the opposite of", () => {
+  it("names a workspace asleep on purpose hibernated", () => {
+    // Arrange / Act
+    const got = phaseLabel("hibernated");
+    // Assert
+    expect(got.word).toBe("hibernated");
+  });
+
+  it("does NOT spin while hibernated", () => {
+    // Arrange / Act — nothing is wired and nothing is coming until the next
+    // prompt pays a bring-up, so a spinner would say work is happening.
+    const got = phaseLabel("hibernated");
+    // Assert
+    expect(got.spinning).toBe(false);
+  });
+
+  it("takes a BENIGN tone while hibernated, never the error tone", () => {
+    // Arrange / Act — this is the correction the split exists for. This state
+    // inherited `dormant`'s error tone, which put an error-shaped word in the
+    // footer of a workspace whose only sin was being asleep on purpose. Nothing
+    // here needs acting on.
+    const got = phaseLabel("hibernated");
+    // Assert
+    expect(got.tone).toBe("hibernated");
+    expect(got.tone).not.toBe("error");
+  });
+
+  it("still spins while starting, which severed is the opposite of", () => {
     // Arrange / Act — the contrast the two blues exist to draw.
     const got = phaseLabel("init");
     // Assert

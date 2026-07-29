@@ -26,7 +26,7 @@ func newTestDB(t *testing.T) *sql.DB {
 //
 // Almost every resolution test is about an axis ABOVE the wiring — which agent
 // row wins, whether purple outranks red, how the merge states sit. None of them
-// can be asked at all of an unwired workspace, because `dormant` (rank 12)
+// can be asked at all of an unwired workspace, because `severed` (rank 12)
 // outranks every one of those candidates by construction: that is the whole
 // point of the connection-truth law. So the wiring is arranged, once, here, and
 // the tests that are genuinely ABOUT the wired axis use newTestDB directly.
@@ -138,15 +138,16 @@ func TestResolvePrecedence(t *testing.T) {
 		},
 		{
 			// The wired axis's own two blue tokens. `starting` says a bring-up
-			// is in flight; `dormant` says nothing is, and nothing is wired.
+			// is in flight; `severed` says nothing is, nothing is wired, and
+			// something broke.
 			name: "starting is bring-up",
 			sigs: []sig{{sigStarting, causeWired, 5}},
 			want: frontendv1.RenderState_RENDER_STATE_INIT,
 		},
 		{
-			name: "dormant when the wiring went away",
-			sigs: []sig{{sigDormant, causeWired, 5}},
-			want: frontendv1.RenderState_RENDER_STATE_DORMANT,
+			name: "severed when the wiring broke",
+			sigs: []sig{{sigSevered, causeWired, 5}},
+			want: frontendv1.RenderState_RENDER_STATE_SEVERED,
 		},
 		{
 			name: "idle when available and no other signal",

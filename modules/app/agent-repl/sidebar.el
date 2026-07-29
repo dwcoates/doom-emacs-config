@@ -110,7 +110,8 @@ rather than a roster rebuild.")
     (:compacting     . "compacting")
     (:permission     . "permission")
     (:init           . "init")
-    (:dormant        . "dormant")
+    (:severed        . "severed")
+    (:hibernated     . "hibernated")
     (:done           . "done")
     (:interrupted    . "interrupted")
     (:ready          . "ready")
@@ -126,7 +127,7 @@ rather than a roster rebuild.")
     (:merge-failed   . "merge-failed")
     (:merged         . "merged"))
   "Maps `agent-repl--ws-render-status' keywords onto sidebar wire strings.
-The dots speak the SAME five-color vocabulary the tab-bar does, so a
+The dots speak the SAME six-color vocabulary the tab-bar does, so a
 workspace can never read one way in the rail and another in the tabs.
 Nothing coarsens any more: `:idle-async' is its own yellow dot rather
 than borrowing idle's ring, and `:vendor-blocked' is its own purple dot

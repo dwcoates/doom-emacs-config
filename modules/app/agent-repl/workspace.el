@@ -901,7 +901,13 @@ Returns:
 
 (defcustom agent-repl-ws-state-icons
   '((:init           . "⏳")
-    (:dormant        . "💤")
+    ;; 💤 belongs to HIBERNATED: it is the glyph for asleep-on-purpose, and it
+    ;; was always the wrong glyph for the broken half of the old `:dormant'.
+    (:hibernated     . "💤")
+    ;; SEVERED gets the unplugged cord.  The substrate between us and the shim
+    ;; is gone, which is a different thing from a nap, and the glyph is the only
+    ;; distinction the tab-bar carries once the color says "something is wrong".
+    (:severed        . "🔌")
     (:thinking       . "⌛")
     (:clearing       . "🧹")
     (:compacting     . "🗜")

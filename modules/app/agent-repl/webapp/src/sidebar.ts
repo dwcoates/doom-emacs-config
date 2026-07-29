@@ -43,7 +43,8 @@ export type WorkspaceStatus =
   | "idle-async"
   | "vendor-blocked"
   | "init"
-  | "dormant"
+  | "severed"
+  | "hibernated"
   | "start-failed"
   | "degraded"
   | "dead"
@@ -77,7 +78,8 @@ export const WORKSPACE_STATUSES: ReadonlySet<string> = new Set([
   "idle-async",
   "vendor-blocked",
   "init",
-  "dormant",
+  "severed",
+  "hibernated",
   "start-failed",
   "degraded",
   "dead",

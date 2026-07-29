@@ -171,7 +171,7 @@ func (m *Manager) resolveStartFailed(workspace string, d *driven, cause error) {
 	if d.consumer != nil {
 		d.consumer.pushFailure(d.consumer.startFailedUUID(), errclass.StartFailed(cause.Error()))
 	}
-	m.noteWiring(workspace, ssm.WiringDormant, "bring_up_failed")
+	m.noteWiring(workspace, ssm.WiringSevered, "bring_up_failed")
 }
 
 // pushHistoryMissingNote tells the user, in their own feed, that the

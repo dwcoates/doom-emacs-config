@@ -1336,7 +1336,7 @@ func (m *Manager) HibernateSession(workspace, sessionID string) error {
 	// driving this workspace leaves the axis alone: a replacement session may
 	// already own it, and closing then would blue out a live one.
 	if ok {
-		m.noteWiring(workspace, ssm.WiringDormant, "hibernate_session")
+		m.noteWiring(workspace, ssm.WiringSevered, "hibernate_session")
 	}
 	return m.cfg.Spawner.StopShim(sessionID, m.shimPIDFor(sessionID))
 }
@@ -1360,7 +1360,7 @@ func (m *Manager) hibernate(workspace, wantSession string) error {
 	m.mu.Unlock()
 	d.cancel() // stop consuming; the shimclient Run ends
 	m.logf("sessiondrv: hibernating ws=%q session=%s (SIGTERM child shim)", workspace, d.sessionID)
-	m.noteWiring(workspace, ssm.WiringDormant, "hibernated")
+	m.noteWiring(workspace, ssm.WiringSevered, "hibernated")
 	return m.cfg.Spawner.StopShim(d.sessionID, m.shimPIDFor(d.sessionID))
 }
 
@@ -1581,7 +1581,7 @@ func (m *Manager) bringUp(workspace string) (*driven, error) {
 		// says nothing about the replacement that now owns the workspace, and
 		// blueing that replacement out would be a lie about a live session.
 		if wasCurrent {
-			m.noteWiring(workspace, ssm.WiringDormant, "driver_exit")
+			m.noteWiring(workspace, ssm.WiringSevered, "driver_exit")
 		}
 		// A MANAGER CLOSE IS NOT A DEAD DRIVER, and stopping the shim here on
 		// one would silently defeat the daemon's preserve-on-shutdown contract:
