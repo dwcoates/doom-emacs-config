@@ -9,6 +9,18 @@ The repo-wide rules in the top-level `AGENTS.md` apply here in full; this file
 covers deploying and running THIS module, plus the color vocabulary every one
 of its surfaces shares.
 
+## Runtime investigations go through one skill
+
+For any current or historical agent-repl behavior, use the complete controller
+at
+`<current-repository-root>/modules/app/agent-repl/skills/debug-emacs-agent-repl/SKILL.md`
+through `/debug-emacs-agent-repl`. The skill
+derives the relevant evidence playbooks and owns operational procedures for
+health, readiness, identity correlation, structured logs, SSM and store SQL,
+testing and coverage, and observability-gap reporting. Keep implementation
+mandates in the scoped `AGENTS.md` files and keep diagnostic recipes in the
+skill.
+
 ## Purple means the vendor, blue means the local environment
 
 Every surface that carries color here — the Emacs tab-bar, the sidebar dots,

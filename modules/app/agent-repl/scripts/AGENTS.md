@@ -15,5 +15,6 @@ temporary directory.
 Run `test-agent-repl-log-discovery.sh` after changing the resolver, then run
 `modules/app/agent-repl/bin/test-all.sh` before handoff. Dependencies include
 the running services' sockets under `~/.cache/agent-repl/sock/`, global logs
-under `~/.cache/agent-repl/log/` and `~/.claude-emacs/`, and workspace
-symlinks under `<workspace>/.claude/emacs/`.
+under `~/.cache/agent-repl/log/`, `~/.claude-emacs/`, and Emacs's
+UID-qualified OS-temporary log directory, plus workspace symlinks under
+`<workspace>/.claude/emacs/`.

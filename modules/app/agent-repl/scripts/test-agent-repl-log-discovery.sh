@@ -17,6 +17,7 @@ workspace="$TMP/workspace"
 targets="$TMP/targets"
 state="$TMP/state"
 cache="$TMP/cache"
+emacs_global="$TMP/emacs-global.log"
 mkdir -p "$workspace/.claude/emacs" "$targets" "$state" "$cache/agent-repl/log"
 workspace_real="$(cd "$workspace" && pwd -P)"
 targets_real="$(cd "$targets" && pwd -P)"
@@ -27,6 +28,7 @@ cat >"$targets/daemon.log" <<'EOF'
 EOF
 ln -s "$targets/daemon.log" "$workspace/.claude/emacs/daemon.log"
 printf '%s\n' '{"timestamp":"2026-07-28T12:00:02Z","runtime":"store","pid":303,"level":"info","verbosity":"normal","operation":"store.test","message":"global","context":{}}' >"$cache/agent-repl/log/shim-store.log"
+printf '%s\n' '{"timestamp":"2026-07-28T12:00:03Z","runtime":"emacs","pid":404,"level":"info","verbosity":"normal","operation":"emacs.test","message":"global-emacs","context":{}}' >"$emacs_global"
 
 out="$(HOME="$TMP/home" AGENT_REPL_STATE_DIR="$state" XDG_CACHE_HOME="$cache" "$DISCOVER" --workspace "$workspace" --runtime daemon)"
 case "$out" in
@@ -56,6 +58,12 @@ out="$(HOME="$TMP/home" AGENT_REPL_STATE_DIR="$state" XDG_CACHE_HOME="$cache" "$
 case "$out" in
   *'"message":"global"'*) ;;
   *) fail "global query output: $out" ;;
+esac
+
+out="$(HOME="$TMP/home" AGENT_REPL_STATE_DIR="$state" AGENT_REPL_EMACS_GLOBAL_LOG="$emacs_global" XDG_CACHE_HOME="$cache" "$DISCOVER" --global --runtime emacs --pid 404)"
+case "$out" in
+  *'"message":"global-emacs"'*) ;;
+  *) fail "global Emacs query output: $out" ;;
 esac
 
 if HOME="$TMP/home" AGENT_REPL_STATE_DIR="$state" XDG_CACHE_HOME="$cache" "$DISCOVER" --workspace "$workspace" --runtime shim --pid 1 >/dev/null 2>&1; then
