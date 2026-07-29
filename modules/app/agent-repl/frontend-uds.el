@@ -42,6 +42,19 @@
 (define-error 'agent-repl-uds-malformed-frame
   "Malformed agent-shim frontend UDS frame")
 
+;;;; ---- Wire workspace -> workspace name --------------------------------
+;;
+;; The daemon names a workspace by its session CWD, and this file's own
+;; wire key helper says so outright: the `workspace' field on a frame or a
+;; command "is WS's `:project-dir' ... NEVER the persp name WS itself".  A
+;; CWD can never index `agent-repl--workspaces', so handing one to the
+;; logging ladder makes `agent-repl--workspace-log-identity' signal — inside
+;; the connection's process filter, for inbound frames.  Every wire
+;; workspace is therefore resolved to a NAME once, at its binding site,
+;; before it reaches a log call.  The raw wire value stays in the message
+;; TEXT so an operator can still correlate an unowned path.
+(declare-function agent-repl--frontend-ws-name "frontend-state" (workspace))
+
 ;;;; ---- Configuration ---------------------------------------------------
 
 (defcustom agent-repl-uds-socket-path
@@ -467,6 +480,9 @@ not silently dropped.  Returns the handler's value, or nil."
          (field (substring (symbol-name key) 1))
          (payload (plist-get frame key))
          (workspace (and (listp payload) (plist-get payload :workspace)))
+         ;; Every frame arm carries the wire CWD here, so this is the
+         ;; single hottest place a path could reach the log sink.
+         (log-workspace (agent-repl--frontend-ws-name workspace))
          (session-id (and (listp payload) (plist-get payload :sessionId)))
          (revision (and (listp payload)
                         (or (plist-get payload :revision)
@@ -474,7 +490,7 @@ not silently dropped.  Returns the handler's value, or nil."
          (state (and (listp payload) (plist-get payload :state))))
     (cond
      ((not (member field agent-repl--uds-known-frame-fields))
-      (agent-repl--log workspace
+      (agent-repl--log log-workspace
                        "uds-dispatch: MALFORMED unknown oneof field=%s workspace=%S session-id=%S known=%S"
                        field workspace session-id agent-repl--uds-known-frame-fields)
       (signal 'agent-repl-uds-malformed-frame
@@ -483,7 +499,7 @@ not silently dropped.  Returns the handler's value, or nil."
       (let ((handler (cdr (assoc field agent-repl--uds-frame-handlers))))
         (cond
          (handler
-          (agent-repl--log workspace
+          (agent-repl--log log-workspace
                            "uds-dispatch: field=%s workspace=%S session-id=%S revision=%S state=%S -> handler=%s"
                            field workspace session-id revision state handler)
           (funcall handler payload))
@@ -491,12 +507,12 @@ not silently dropped.  Returns the handler's value, or nil."
           (let ((task-count (and (equal field "taskCatalog")
                                  (length (plist-get payload :tasks)))))
             (agent-repl--log-verbose
-             workspace
+             log-workspace
              "uds-dispatch: field=%s deliberately ignored workspace=%s session=%s revision=%S state=%S task-count=%S"
              field workspace session-id revision state task-count))
           nil)
          (t
-          (agent-repl--log workspace
+          (agent-repl--log log-workspace
                            "uds-dispatch: field=%s workspace=%S session-id=%S revision=%S state=%S KNOWN but no handler registered — not dispatched (register one at stitch)"
                            field workspace session-id revision state)
           nil)))))))
@@ -524,16 +540,20 @@ to the live connection.
 Fails loudly (`user-error' + log) when there is no live connection or
 FIELD is unknown — no queuing, no silent drop.  Returns the generated
 `request_id'."
-  (let ((proc (or process agent-repl--uds-process)))
+  (let ((proc (or process agent-repl--uds-process))
+        ;; WORKSPACE goes ON THE WIRE verbatim below — the daemon routes by
+        ;; cwd — so it must not be rewritten.  LOG-WORKSPACE is a separate
+        ;; binding used only for the log sink.
+        (log-workspace (agent-repl--frontend-ws-name workspace)))
     (unless (process-live-p proc)
-      (agent-repl--log workspace
-                       "uds-send-command: NO live connection (field=%s) — aborting"
-                       field)
+      (agent-repl--log log-workspace
+                       "uds-send-command: NO live connection (field=%s ws=%s) — aborting"
+                       field workspace)
       (user-error "agent-repl UDS: not connected; cannot send %s" field))
     (unless (member field agent-repl--uds-known-command-fields)
-      (agent-repl--log workspace
-                       "uds-send-command: unknown command field=%s known=%S — aborting"
-                       field agent-repl--uds-known-command-fields)
+      (agent-repl--log log-workspace
+                       "uds-send-command: unknown command field=%s ws=%s known=%S — aborting"
+                       field workspace agent-repl--uds-known-command-fields)
       (user-error "agent-repl UDS: unknown command field %s" field))
     (let* ((request-id (agent-repl--uds-generate-request-id))
            ;; An empty message serializes as `{}', not `null': a nil
@@ -544,7 +564,7 @@ FIELD is unknown — no queuing, no silent drop.  Returns the generated
                           (when workspace (list :workspace workspace))
                           (list (intern (concat ":" field)) value)))
            (json (json-encode frame)))
-      (agent-repl--log workspace
+      (agent-repl--log log-workspace
                        "uds-send-command: field=%s request-id=%s ws=%s bytes=%d"
                        field request-id workspace (length json))
       (process-send-string proc (concat json "\n"))
@@ -575,14 +595,16 @@ interrupt confirmation CHALLENGE — NOT a failure: the command was
 understood and deliberately not performed, so the challenge branch
 replaces the failure surfacing rather than adding to it.
 Returns REQUEST-ID."
+  ;; The RETAINED `:workspace' stays raw: it is the identity the ack path
+  ;; correlates against, and callers hand it whatever they put on the wire.
   (puthash request-id
            (list :field field :workspace workspace
                  :on-failure on-failure :on-success on-success
                  :on-challenge on-challenge)
            agent-repl--uds-pending-commands)
-  (agent-repl--log workspace
-                   "uds-track-command: tracking request-id=%s field=%s"
-                   request-id field)
+  (agent-repl--log (agent-repl--frontend-ws-name workspace)
+                   "uds-track-command: tracking request-id=%s field=%s ws=%s"
+                   request-id field workspace)
   request-id)
 
 (defun agent-repl--uds-untrack-command (request-id workspace reason)
@@ -591,15 +613,16 @@ WORKSPACE supplies log context and REASON records why the caller can no
 longer consume a later `CommandAck'.  This is the only transport-owned
 cleanup path for a synchronous command wait: retaining the callback after a
 timeout would let a delayed acknowledgement mutate stale caller state."
-  (if (gethash request-id agent-repl--uds-pending-commands)
-      (progn
-        (remhash request-id agent-repl--uds-pending-commands)
-        (agent-repl--log workspace
-                         "uds-untrack-command: request-id=%s reason=%s"
-                         request-id reason))
-    (agent-repl--log-verbose workspace
-                             "uds-untrack-command: request-id=%s no pending entry reason=%s"
-                             request-id reason))
+  (let ((log-workspace (agent-repl--frontend-ws-name workspace)))
+    (if (gethash request-id agent-repl--uds-pending-commands)
+        (progn
+          (remhash request-id agent-repl--uds-pending-commands)
+          (agent-repl--log log-workspace
+                           "uds-untrack-command: request-id=%s ws=%s reason=%s"
+                           request-id workspace reason))
+      (agent-repl--log-verbose log-workspace
+                               "uds-untrack-command: request-id=%s ws=%s no pending entry reason=%s"
+                               request-id workspace reason)))
   nil)
 
 (defun agent-repl--uds-track-health-response
@@ -609,48 +632,57 @@ WORKSPACE and SESSION-ID are the exact values a `sessionHealth' response
 must carry; both are nil for `daemonHealth'.  ON-RESPONSE receives the
 validated response plist.  This registry is intentionally separate from
 CommandAck tracking: an ACK confirms command receipt, not health."
-  (unless (member field '("daemonHealth" "sessionHealth"))
-    (agent-repl--log workspace
-                     "uds-track-health: REFUSING field=%s request-id=%s"
-                     field request-id)
-    (error "agent-repl UDS: cannot track non-health response field %s" field))
-  (unless (functionp on-response)
-    (agent-repl--log workspace
-                     "uds-track-health: REFUSING non-function callback=%S request-id=%s"
-                     on-response request-id)
-    (error "agent-repl UDS: health response callback is not callable"))
-  (puthash request-id
-           (list :field field :workspace workspace :session-id session-id
-                 :on-response on-response)
-           agent-repl--uds-pending-health-responses)
-  (agent-repl--log workspace
-                   "uds-track-health: request-id=%s field=%s session-id=%s"
-                   request-id field (or session-id "nil"))
+  ;; The RETAINED `:workspace' stays raw: the response handler compares it
+  ;; byte-for-byte against the `workspace' the daemon echoes back, so
+  ;; rewriting it here would turn every session-health reply into an
+  ;; identity mismatch.
+  (let ((log-workspace (agent-repl--frontend-ws-name workspace)))
+    (unless (member field '("daemonHealth" "sessionHealth"))
+      (agent-repl--log log-workspace
+                       "uds-track-health: REFUSING field=%s request-id=%s ws=%s"
+                       field request-id workspace)
+      (error "agent-repl UDS: cannot track non-health response field %s" field))
+    (unless (functionp on-response)
+      (agent-repl--log log-workspace
+                       "uds-track-health: REFUSING non-function callback=%S request-id=%s ws=%s"
+                       on-response request-id workspace)
+      (error "agent-repl UDS: health response callback is not callable"))
+    (puthash request-id
+             (list :field field :workspace workspace :session-id session-id
+                   :on-response on-response)
+             agent-repl--uds-pending-health-responses)
+    (agent-repl--log log-workspace
+                     "uds-track-health: request-id=%s field=%s ws=%s session-id=%s"
+                     request-id field workspace (or session-id "nil")))
   request-id)
 
 (defun agent-repl--uds-untrack-health-response (request-id workspace reason)
   "Stop awaiting REQUEST-ID's health result for WORKSPACE because of REASON."
-  (if (gethash request-id agent-repl--uds-pending-health-responses)
-      (progn
-        (remhash request-id agent-repl--uds-pending-health-responses)
-        (agent-repl--log workspace
-                         "uds-untrack-health: request-id=%s reason=%s"
-                         request-id reason))
-    (agent-repl--log-verbose workspace
-                             "uds-untrack-health: request-id=%s no pending entry reason=%s"
-                             request-id reason))
+  (let ((log-workspace (agent-repl--frontend-ws-name workspace)))
+    (if (gethash request-id agent-repl--uds-pending-health-responses)
+        (progn
+          (remhash request-id agent-repl--uds-pending-health-responses)
+          (agent-repl--log log-workspace
+                           "uds-untrack-health: request-id=%s ws=%s reason=%s"
+                           request-id workspace reason))
+      (agent-repl--log-verbose log-workspace
+                               "uds-untrack-health: request-id=%s ws=%s no pending entry reason=%s"
+                               request-id workspace reason)))
   nil)
 
 (defun agent-repl--uds-handle-health-response (field response)
   "Correlate FIELD health RESPONSE and deliver it to its awaiting caller."
   (let* ((request-id (plist-get response :requestId))
          (response-workspace (plist-get response :workspace))
+         ;; Both the echoed and the retained workspace are wire cwds; the
+         ;; comparisons below need them raw, the log sink needs a name.
+         (log-workspace (agent-repl--frontend-ws-name response-workspace))
          (response-session-id (plist-get response :sessionId))
          (pending (and request-id
                        (gethash request-id
                                 agent-repl--uds-pending-health-responses))))
     (unless (and (stringp request-id) (not (string-empty-p request-id)))
-      (agent-repl--log response-workspace
+      (agent-repl--log log-workspace
                        "uds-health-response: MALFORMED field=%s missing request-id workspace=%S session-id=%S healthy=%S"
                        field response-workspace response-session-id
                        (plist-get response :healthy))
@@ -661,19 +693,21 @@ CommandAck tracking: an ACK confirms command receipt, not health."
           ;; A result can legitimately arrive after a local timeout removed
           ;; its waiter.  Record it durably, but never let it satisfy another
           ;; request or mutate abandoned caller state.
-          (agent-repl--log response-workspace
+          (agent-repl--log log-workspace
                            "uds-health-response: untracked request-id=%s field=%s workspace=%S session-id=%S healthy=%S"
                            request-id field response-workspace response-session-id
                            (plist-get response :healthy))
           nil)
-      (let ((expected-field (plist-get pending :field))
-            (expected-workspace (plist-get pending :workspace))
-            (expected-session-id (plist-get pending :session-id))
-            (actual-workspace (plist-get response :workspace))
-            (actual-session-id (plist-get response :sessionId)))
+      (let* ((expected-field (plist-get pending :field))
+             (expected-workspace (plist-get pending :workspace))
+             (expected-log-workspace
+              (agent-repl--frontend-ws-name expected-workspace))
+             (expected-session-id (plist-get pending :session-id))
+             (actual-workspace (plist-get response :workspace))
+             (actual-session-id (plist-get response :sessionId)))
         (unless (equal field expected-field)
           (remhash request-id agent-repl--uds-pending-health-responses)
-          (agent-repl--log expected-workspace
+          (agent-repl--log expected-log-workspace
                            "uds-health-response: FIELD MISMATCH request-id=%s expected=%s actual=%s"
                            request-id expected-field field)
           (signal 'agent-repl-uds-malformed-frame
@@ -682,14 +716,14 @@ CommandAck tracking: an ACK confirms command receipt, not health."
           (unless (and (equal actual-workspace expected-workspace)
                        (equal actual-session-id expected-session-id))
             (remhash request-id agent-repl--uds-pending-health-responses)
-            (agent-repl--log expected-workspace
+            (agent-repl--log expected-log-workspace
                              "uds-health-response: IDENTITY MISMATCH request-id=%s expected-workspace=%S actual-workspace=%S expected-session=%S actual-session=%S"
                              request-id expected-workspace actual-workspace
                              expected-session-id actual-session-id)
             (signal 'agent-repl-uds-malformed-frame
                     (list "session health identity mismatch" response))))
         (remhash request-id agent-repl--uds-pending-health-responses)
-        (agent-repl--log expected-workspace
+        (agent-repl--log expected-log-workspace
                          "uds-health-response: correlated request-id=%s field=%s healthy=%s reason-present=%s"
                          request-id field
                          (if (plist-get response :healthy) "yes" "no")
@@ -697,12 +731,12 @@ CommandAck tracking: an ACK confirms command receipt, not health."
         (condition-case callback-err
             (funcall (plist-get pending :on-response) response)
           (error
-           (agent-repl--log expected-workspace
+           (agent-repl--log expected-log-workspace
                             "uds-health-response: callback ERROR request-id=%s field=%s workspace=%S session-id=%S error-type=%s"
                             request-id field expected-workspace
                             expected-session-id (car callback-err))
            (signal (car callback-err) (cdr callback-err))))
-        (agent-repl--log expected-workspace
+        (agent-repl--log expected-log-workspace
                          "uds-health-response: delivered request-id=%s field=%s workspace=%S session-id=%S"
                          request-id field expected-workspace expected-session-id)
         response))))
@@ -752,14 +786,18 @@ the `:ok' flag."
          (challenge (plist-get ack :interruptConfirmRequired))
          (pending (and request-id
                        (gethash request-id agent-repl--uds-pending-commands)))
-         (workspace (if pending
-                        (plist-get pending :workspace)
-                      (plist-get ack :workspace)))
+         (raw-workspace (if pending
+                            (plist-get pending :workspace)
+                          (plist-get ack :workspace)))
+         ;; The tracked and the echoed workspace are both wire cwds.  This
+         ;; value reaches every log call below AND `agent-repl-failure-surface',
+         ;; which logs with it too, so one resolution covers both.
+         (workspace (agent-repl--frontend-ws-name raw-workspace))
          (field (plist-get pending :field)))
     (unless (and (stringp request-id) (not (string-empty-p request-id)))
       (agent-repl--log workspace
                        "uds-command-ack: MALFORMED missing request-id workspace=%S ok=%S error-present=%s"
-                       workspace ok (if err "yes" "no"))
+                       raw-workspace ok (if err "yes" "no"))
       (signal 'agent-repl-uds-malformed-frame
               (list "command ack missing requestId" ack)))
     (when request-id
@@ -767,8 +805,8 @@ the `:ok' flag."
     (cond
      ((null pending)
      (agent-repl--log workspace
-                       "uds-command-ack: UNTRACKED request-id=%s ok=%S error-present=%s — ignoring"
-                       request-id ok (if err "yes" "no")))
+                       "uds-command-ack: UNTRACKED request-id=%s ws=%s ok=%S error-present=%s — ignoring"
+                       request-id raw-workspace ok (if err "yes" "no")))
      (ok
       (agent-repl--log workspace
                        "uds-command-ack: ACCEPTED request-id=%s field=%s"
@@ -809,8 +847,8 @@ the `:ok' flag."
                  (or field "frontend"))))
      (t
       (agent-repl--log workspace
-                       "uds-command-ack: REJECTED request-id=%s field=%s error-present=%s — surfacing"
-                       request-id field (if err "yes" "no"))
+                       "uds-command-ack: REJECTED request-id=%s field=%s ws=%s error-present=%s — surfacing"
+                       request-id field raw-workspace (if err "yes" "no"))
       ;; An ack with no classified failure is an OLD daemon, not a silent
       ;; case: it still surfaces, from the raw text, so a refusal is never
       ;; invisible while the two builds are mixed.
