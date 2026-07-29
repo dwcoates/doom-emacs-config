@@ -317,7 +317,7 @@ func TestConcurrentIdenticalCreatesCoalesce(t *testing.T) {
 	enrolled := enrollments(t)
 	sessions := &fakeSessionCmds{}
 	h := establishHandler(t, sessions, router)
-	cmd := &frontendv1.CreateSessionCmd{Cwd: "/w", Model: "haiku"}
+	cmd := &frontendv1.CreateSessionCmd{Cwd: "/w"}
 
 	// Act: the second caller joins while the first is still establishing. Both
 	// orderings are OBSERVED — the leader's probe arriving, then the follower's
@@ -351,7 +351,7 @@ func TestConcurrentIdenticalCreatesCoalesce(t *testing.T) {
 }
 
 // TestConcurrentCreatesWithDifferentOptsDoNotCoalesce is the other half of the
-// rule: a create asking for a DIFFERENT model, account, or resume target is not
+// rule: a create asking for a DIFFERENT account or resume target is not
 // the same request, and answering it with the in-flight one's result would
 // silently discard what it asked for.
 func TestConcurrentCreatesWithDifferentOptsDoNotCoalesce(t *testing.T) {
@@ -365,17 +365,17 @@ func TestConcurrentCreatesWithDifferentOptsDoNotCoalesce(t *testing.T) {
 	// Act.
 	first := make(chan error, 1)
 	go func() {
-		first <- h.CreateSession(context.Background(), "/w", "r1", &frontendv1.CreateSessionCmd{Cwd: "/w", Model: "haiku"})
+		first <- h.CreateSession(context.Background(), "/w", "r1", &frontendv1.CreateSessionCmd{Cwd: "/w", ConfigDir: "/cfg-a"})
 	}()
 	awaitEnrollment(t, enrolled)
 	awaitProbe(t, router)
 	second := make(chan error, 1)
 	go func() {
-		second <- h.CreateSession(context.Background(), "/w", "r2", &frontendv1.CreateSessionCmd{Cwd: "/w", Model: "opus"})
+		second <- h.CreateSession(context.Background(), "/w", "r2", &frontendv1.CreateSessionCmd{Cwd: "/w", ConfigDir: "/cfg-b"})
 	}()
 	close(release)
 
-	// Assert: two creates, each with the model it asked for.
+	// Assert: two creates, each with the account root it asked for.
 	for _, ch := range []chan error{first, second} {
 		select {
 		case err := <-ch:
@@ -389,12 +389,12 @@ func TestConcurrentCreatesWithDifferentOptsDoNotCoalesce(t *testing.T) {
 	if len(sessions.created) != 2 {
 		t.Fatalf("created = %v, want both distinct creates to have run", sessions.created)
 	}
-	models := map[string]bool{}
+	configs := map[string]bool{}
 	for _, o := range sessions.created {
-		models[o.Model] = true
+		configs[o.ConfigDir] = true
 	}
-	if !models["haiku"] || !models["opus"] {
-		t.Fatalf("created = %v, want one haiku and one opus create", sessions.created)
+	if !configs["/cfg-a"] || !configs["/cfg-b"] {
+		t.Fatalf("created = %v, want one /cfg-a and one /cfg-b create", sessions.created)
 	}
 }
 

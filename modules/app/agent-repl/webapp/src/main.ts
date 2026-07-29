@@ -952,7 +952,6 @@ async function boot(): Promise<void> {
             void bootDispatcher
               .createSession({
                 cwd: args.cwd,
-                model: "",
                 permissionMode: "",
                 configDir: "",
                 resumeClaudeSessionId: args.resumeClaudeSessionId,
@@ -1033,18 +1032,18 @@ async function boot(): Promise<void> {
     clog("info", `permission mode "${modeEl.value}" will ride the next prompt`);
   });
 
-  // GAP (flagged for the coordinator): frontend.v1 carries a model ONLY on
-  // CreateSessionCmd, so there is no mid-session model switch to send, and
-  // SessionView carries no model catalog (store.models is therefore always
-  // empty, leaving this control with nothing to offer in the first place).
-  // Refuse loudly and put the picker back on the model actually in force,
-  // rather than leave it displaying one the session never adopted.
+  // The selector never owns model state. Browser select controls move their
+  // visual value before this handler runs, so restore the daemon-rendered
+  // selection immediately and wait for the daemon's SessionView push to paint
+  // any confirmed change. A rejection reaches the normal failure-card path.
   modelEl.addEventListener("change", () => {
-    clog(
-      "warn",
-      `model switch to "${modelEl.value}" not sent: frontend.v1 has no set-model command`,
-    );
+    const requested = modelEl.value;
     modelEl.value = store.state.model;
+    if (requested === store.state.model) return;
+    void dispatcher.setModel(store.state.cwd, requested).then(
+      () => clog("info", `model switch acknowledged request=${requested}; awaiting authoritative SessionView`),
+      (err: unknown) => clog("error", `model switch rejected request=${requested}: ${String(err)}`),
+    );
   });
 
   // Which account this session runs as, plus the roster that names its root.

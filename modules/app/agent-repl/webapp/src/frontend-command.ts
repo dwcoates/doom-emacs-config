@@ -71,13 +71,18 @@ export interface PermissionAnswerBody {
 export interface CreateSessionBody {
   case: "createSession";
   cwd: string;
-  model: string;
   permissionMode: string;
   configDir: string;
   /** "" = fresh; else resume this durable CLI conversation uuid. */
   resumeClaudeSessionId: string;
   /** Test-harness sessions against the offline fake SDK. */
   fake: boolean;
+}
+
+/** A deliberate model-update request. Bootstrap and rebind cannot encode it. */
+export interface SetModelBody {
+  case: "setModel";
+  model: string;
 }
 
 /** DeleteSessionCmd — tear down a session. */
@@ -139,6 +144,7 @@ export type FrontendCommandBody =
   | InterruptBody
   | PermissionAnswerBody
   | CreateSessionBody
+  | SetModelBody
   | DeleteSessionBody
   | ResyncBody
   | ClientLogBody
@@ -166,6 +172,7 @@ export const ARM_KEY: Record<FrontendCommandBody["case"], string> = {
   interrupt: "interrupt",
   permissionAnswer: "permissionAnswer",
   createSession: "createSession",
+  setModel: "setModel",
   deleteSession: "deleteSession",
   resync: "resync",
   clientLog: "clientLog",
@@ -195,12 +202,13 @@ function encodeBody(b: FrontendCommandBody): Record<string, unknown> {
     case "createSession":
       return {
         cwd: b.cwd,
-        model: b.model,
         permissionMode: b.permissionMode,
         configDir: b.configDir,
         resumeClaudeSessionId: b.resumeClaudeSessionId,
         fake: b.fake,
       };
+    case "setModel":
+      return { model: b.model };
     case "deleteSession":
       return { sessionId: b.sessionId };
     case "resync":
