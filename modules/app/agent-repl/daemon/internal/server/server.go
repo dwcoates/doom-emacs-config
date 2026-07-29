@@ -1218,6 +1218,18 @@ func (s *Server) DeleteSession(id string) error {
 				id, rec.CWD, wasTerminal)
 		}
 	}
+	// THE TURN CLAIM DIES WITH THE SESSION. A delete landing mid-turn stops the
+	// shim, so the TurnEnded that would have superseded the workspace's
+	// `thinking` row is never produced by anyone. Left standing it holds the
+	// workspace THINKING forever and suppresses the readiness of the next
+	// session to drive it — which is exactly what survived a
+	// delete-and-recreate as "readiness suppressed (turn in flight)".
+	if rec.CWD != "" && s.ssm != nil {
+		if err := s.ssm.InvalidateTurnClaim(rec.CWD, id, "session_deleted"); err != nil {
+			s.logf("session %s: releasing the workspace's turn claim FAILED (ws %s) — the workspace may stay THINKING until another session supersedes it: %v",
+				id, rec.CWD, err)
+		}
+	}
 	// Idempotent delete also repairs stale client rosters. Supersede or another
 	// client may have made the record terminal before this caller observed it.
 	s.pushSessionView(id)
