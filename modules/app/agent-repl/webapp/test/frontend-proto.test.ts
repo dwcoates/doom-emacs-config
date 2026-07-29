@@ -815,6 +815,47 @@ describe("ProgressView decoding (F1)", () => {
     expect(() => decodeFrontendFrame(pv({ outputTokens: "9000" }))).toThrow(/unrecognized/);
   });
 
+  it("decodes the session allowance's rate-limit window", () => {
+    // Arrange / Act
+    const got = decodeFrontendFrame(
+      pv({ rateLimited: { active: true, resetsAt: "1700000900", utilization: 0.91, status: "allowed_warning" } }),
+    );
+    // Assert
+    if (got.frame.case !== "progress") throw new Error("wrong variant");
+    expect(got.frame.value.rateLimited).toEqual({
+      active: true,
+      resetsAt: 1700000900,
+      utilization: 0.91,
+      status: "allowed_warning",
+    });
+  });
+
+  it("decodes the WEEKLY allowance into its own field", () => {
+    // Arrange / Act — the two allowances are separate facts on the wire.
+    const got = decodeFrontendFrame(
+      pv({ rateLimitedWeekly: { active: true, resetsAt: "1700500000", utilization: 0.5, status: "allowed_warning" } }),
+    );
+    // Assert
+    if (got.frame.case !== "progress") throw new Error("wrong variant");
+    expect(got.frame.value.rateLimitedWeekly?.resetsAt).toBe(1700500000);
+  });
+
+  it("names the weekly allowance in its decode errors, not the session's", () => {
+    // Arrange / Act / Assert — a shared context string would send a reader
+    // debugging one allowance to the other one's field.
+    expect(() => decodeFrontendFrame(pv({ rateLimitedWeekly: { utilization: "lots" } }))).toThrow(
+      /ProgressView\.rateLimitedWeekly/,
+    );
+  });
+
+  it("leaves an unreported allowance undefined rather than defaulting it to zero", () => {
+    // Arrange / Act
+    const got = decodeFrontendFrame(pv());
+    // Assert
+    if (got.frame.case !== "progress") throw new Error("wrong variant");
+    expect(got.frame.value.rateLimitedWeekly).toBeUndefined();
+  });
+
   it("decodes the interrupt window's active, sinceMs and outcome together", () => {
     // Arrange / Act — all three fields ride on one message (I1).
     const got = decodeFrontendFrame(

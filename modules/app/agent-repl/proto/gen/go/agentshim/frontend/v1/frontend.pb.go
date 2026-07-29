@@ -5525,8 +5525,17 @@ func (x *ProgressWindow) GetDetail() string {
 	return ""
 }
 
-// The rate-limit window, which carries structured detail no other window
-// needs (a reset deadline and a utilization fraction).
+// One ALLOWANCE's rate-limit window, which carries structured detail no other
+// window needs (a reset deadline and a utilization fraction).
+//
+// PRESENT means the vendor has reported this allowance at all, and the figures
+// are the last report's. `active` is the narrower claim that the report was
+// NEWSWORTHY — anything other than a plain "allowed" — which is what decides
+// whether the rung outranks the ordinary activity the footer would otherwise
+// show. The two are deliberately separate: an allowance sitting at 12% is not
+// news, but it is exactly the figure a reader needs beside the allowance that
+// IS, and dropping the message for it is what left the footer unable to say
+// which of the two allowances the percentage it showed belonged to.
 type RateLimitWindow struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Active        bool                   `protobuf:"varint,1,opt,name=active,proto3" json:"active,omitempty"`
@@ -5693,9 +5702,21 @@ type ProgressView struct {
 	Compacting *ProgressWindow `protobuf:"bytes,8,opt,name=compacting,proto3" json:"compacting,omitempty"` // data.StatusMessage status="compacting"
 	Retrying   *ProgressWindow `protobuf:"bytes,9,opt,name=retrying,proto3" json:"retrying,omitempty"`     // data.ApiRetry, else the ApiErrorLine
 	// retry family (see §retry sourcing)
-	Authenticating *ProgressWindow  `protobuf:"bytes,10,opt,name=authenticating,proto3" json:"authenticating,omitempty"`              // data.AuthStatus
-	Hook           *ProgressWindow  `protobuf:"bytes,11,opt,name=hook,proto3" json:"hook,omitempty"`                                  // data.HookStarted / HookResponse
-	RateLimited    *RateLimitWindow `protobuf:"bytes,12,opt,name=rate_limited,json=rateLimited,proto3" json:"rate_limited,omitempty"` // data.RateLimitEvent
+	Authenticating *ProgressWindow `protobuf:"bytes,10,opt,name=authenticating,proto3" json:"authenticating,omitempty"` // data.AuthStatus
+	Hook           *ProgressWindow `protobuf:"bytes,11,opt,name=hook,proto3" json:"hook,omitempty"`                     // data.HookStarted / HookResponse
+	// The vendor bills TWO independent allowances and reports them through the
+	// SAME data.RateLimitEvent, distinguished only by its `rate_limit_type`:
+	// the rolling five-hour session window, and the seven-day weekly window
+	// (whose per-model and overage-included variants are the same allowance
+	// reported with a narrower scope).
+	//
+	// They get a field each because they are separate facts with separate
+	// deadlines and separate severities. Folding both into one window meant the
+	// last event won, so a weekly figure deep into its allowance was displayed
+	// under the session's name — a reader saw "91% of your session" for a number
+	// that was really the week's, and had no way to tell the two apart.
+	RateLimited       *RateLimitWindow `protobuf:"bytes,12,opt,name=rate_limited,json=rateLimited,proto3" json:"rate_limited,omitempty"`                     // rate_limit_type "five_hour"
+	RateLimitedWeekly *RateLimitWindow `protobuf:"bytes,21,opt,name=rate_limited_weekly,json=rateLimitedWeekly,proto3" json:"rate_limited_weekly,omitempty"` // rate_limit_type "seven_day*"
 	// The session itself reporting it is parked on the USER
 	// (data.SessionStateChanged state="requires_action").
 	//
@@ -5836,6 +5857,13 @@ func (x *ProgressView) GetHook() *ProgressWindow {
 func (x *ProgressView) GetRateLimited() *RateLimitWindow {
 	if x != nil {
 		return x.RateLimited
+	}
+	return nil
+}
+
+func (x *ProgressView) GetRateLimitedWeekly() *RateLimitWindow {
+	if x != nil {
+		return x.RateLimitedWeekly
 	}
 	return nil
 }
@@ -6376,7 +6404,7 @@ const file_agentshim_frontend_v1_frontend_proto_rawDesc = "" +
 	"\x0fInterruptWindow\x12\x16\n" +
 	"\x06active\x18\x01 \x01(\bR\x06active\x12\x19\n" +
 	"\bsince_ms\x18\x02 \x01(\x03R\asinceMs\x12=\n" +
-	"\aoutcome\x18\x03 \x01(\x0e2#.agentshim.core.v1.InterruptOutcomeR\aoutcome\"\xeb\a\n" +
+	"\aoutcome\x18\x03 \x01(\x0e2#.agentshim.core.v1.InterruptOutcomeR\aoutcome\"\xc3\b\n" +
 	"\fProgressView\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12\x1d\n" +
 	"\n" +
@@ -6393,7 +6421,8 @@ const file_agentshim_frontend_v1_frontend_proto_rawDesc = "" +
 	"\x0eauthenticating\x18\n" +
 	" \x01(\v2%.agentshim.frontend.v1.ProgressWindowR\x0eauthenticating\x129\n" +
 	"\x04hook\x18\v \x01(\v2%.agentshim.frontend.v1.ProgressWindowR\x04hook\x12I\n" +
-	"\frate_limited\x18\f \x01(\v2&.agentshim.frontend.v1.RateLimitWindowR\vrateLimited\x12?\n" +
+	"\frate_limited\x18\f \x01(\v2&.agentshim.frontend.v1.RateLimitWindowR\vrateLimited\x12V\n" +
+	"\x13rate_limited_weekly\x18\x15 \x01(\v2&.agentshim.frontend.v1.RateLimitWindowR\x11rateLimitedWeekly\x12?\n" +
 	"\ablocked\x18\x12 \x01(\v2%.agentshim.frontend.v1.ProgressWindowR\ablocked\x12D\n" +
 	"\tinterrupt\x18\x14 \x01(\v2&.agentshim.frontend.v1.InterruptWindowR\tinterrupt\x12B\n" +
 	"\afailure\x18\x13 \x01(\v2(.agentshim.frontend.v1.SystemFailureItemR\afailure\x12/\n" +
@@ -6665,23 +6694,24 @@ var file_agentshim_frontend_v1_frontend_proto_depIdxs = []int32{
 	60, // 83: agentshim.frontend.v1.ProgressView.authenticating:type_name -> agentshim.frontend.v1.ProgressWindow
 	60, // 84: agentshim.frontend.v1.ProgressView.hook:type_name -> agentshim.frontend.v1.ProgressWindow
 	61, // 85: agentshim.frontend.v1.ProgressView.rate_limited:type_name -> agentshim.frontend.v1.RateLimitWindow
-	60, // 86: agentshim.frontend.v1.ProgressView.blocked:type_name -> agentshim.frontend.v1.ProgressWindow
-	62, // 87: agentshim.frontend.v1.ProgressView.interrupt:type_name -> agentshim.frontend.v1.InterruptWindow
-	19, // 88: agentshim.frontend.v1.ProgressView.failure:type_name -> agentshim.frontend.v1.SystemFailureItem
-	13, // 89: agentshim.frontend.v1.StateSnapshot.workspaces:type_name -> agentshim.frontend.v1.WorkspaceState
-	14, // 90: agentshim.frontend.v1.StateSnapshot.sessions:type_name -> agentshim.frontend.v1.SessionView
-	24, // 91: agentshim.frontend.v1.StateSnapshot.catalogs:type_name -> agentshim.frontend.v1.TaskCatalog
-	10, // 92: agentshim.frontend.v1.StateSnapshot.daemon:type_name -> agentshim.frontend.v1.DaemonView
-	22, // 93: agentshim.frontend.v1.StateSnapshot.inits:type_name -> agentshim.frontend.v1.SessionInitView
-	27, // 94: agentshim.frontend.v1.StateSnapshot.queues:type_name -> agentshim.frontend.v1.QueueView
-	63, // 95: agentshim.frontend.v1.StateSnapshot.progress:type_name -> agentshim.frontend.v1.ProgressView
-	47, // 96: agentshim.frontend.v1.StateSnapshot.workspace_available:type_name -> agentshim.frontend.v1.WorkspaceAvailable
-	49, // 97: agentshim.frontend.v1.StateSnapshot.host_actions:type_name -> agentshim.frontend.v1.HostAction
-	98, // [98:98] is the sub-list for method output_type
-	98, // [98:98] is the sub-list for method input_type
-	98, // [98:98] is the sub-list for extension type_name
-	98, // [98:98] is the sub-list for extension extendee
-	0,  // [0:98] is the sub-list for field type_name
+	61, // 86: agentshim.frontend.v1.ProgressView.rate_limited_weekly:type_name -> agentshim.frontend.v1.RateLimitWindow
+	60, // 87: agentshim.frontend.v1.ProgressView.blocked:type_name -> agentshim.frontend.v1.ProgressWindow
+	62, // 88: agentshim.frontend.v1.ProgressView.interrupt:type_name -> agentshim.frontend.v1.InterruptWindow
+	19, // 89: agentshim.frontend.v1.ProgressView.failure:type_name -> agentshim.frontend.v1.SystemFailureItem
+	13, // 90: agentshim.frontend.v1.StateSnapshot.workspaces:type_name -> agentshim.frontend.v1.WorkspaceState
+	14, // 91: agentshim.frontend.v1.StateSnapshot.sessions:type_name -> agentshim.frontend.v1.SessionView
+	24, // 92: agentshim.frontend.v1.StateSnapshot.catalogs:type_name -> agentshim.frontend.v1.TaskCatalog
+	10, // 93: agentshim.frontend.v1.StateSnapshot.daemon:type_name -> agentshim.frontend.v1.DaemonView
+	22, // 94: agentshim.frontend.v1.StateSnapshot.inits:type_name -> agentshim.frontend.v1.SessionInitView
+	27, // 95: agentshim.frontend.v1.StateSnapshot.queues:type_name -> agentshim.frontend.v1.QueueView
+	63, // 96: agentshim.frontend.v1.StateSnapshot.progress:type_name -> agentshim.frontend.v1.ProgressView
+	47, // 97: agentshim.frontend.v1.StateSnapshot.workspace_available:type_name -> agentshim.frontend.v1.WorkspaceAvailable
+	49, // 98: agentshim.frontend.v1.StateSnapshot.host_actions:type_name -> agentshim.frontend.v1.HostAction
+	99, // [99:99] is the sub-list for method output_type
+	99, // [99:99] is the sub-list for method input_type
+	99, // [99:99] is the sub-list for extension type_name
+	99, // [99:99] is the sub-list for extension extendee
+	0,  // [0:99] is the sub-list for field type_name
 }
 
 func init() { file_agentshim_frontend_v1_frontend_proto_init() }
