@@ -4,12 +4,16 @@
 
 ;; Feeds the webapp's workspaces sidebar and services its actions.
 ;;
-;; The roster universe is the LIVE workspaces — every registered,
-;; non-tombstoned entry (`agent-repl--live-ws-names'), whether or not
-;; a perspective is currently open for it.  Tombstoned registrations
-;; and snapshot-only history do not render.  A live row agent-repl is
-;; not actively hosting — no open perspective, or an open one whose
-;; REPL is torn down — greys out (`agent-repl--sidebar-closed-p').
+;; The roster universe is the LIVE workspaces that still hold a
+;; perspective: registered, non-tombstoned (`agent-repl--live-ws-names')
+;; AND present in the tab bar (`agent-repl--sidebar-rostered-p').
+;; Tombstoned registrations, snapshot-only history, and workspaces whose
+;; perspective was killed do not render — a workspace that is GONE loses
+;; its row outright.  Greying (`agent-repl--sidebar-closed-p') is
+;; reserved for the opposite case: a workspace that still exists, tab and
+;; all, whose agent-repl panes the user dismissed.  Merged workspaces are
+;; the one perspective-less exception; they outlive their tab inside the
+;; Recently Merged section and keep receding there.
 ;;
 ;; Data flows one way, Emacs -> webview: Emacs owns the workspace model
 ;; (workspace.el), so it builds the roster — repos, family-nested rows,
@@ -177,20 +181,27 @@ default dot."
                    kw name)))))))
 
 (defun agent-repl--sidebar-closed-p (name)
-  "Return non-nil when live workspace NAME renders greyed (closed).
-Closed means agent-repl is not actively hosting the workspace: either
-no perspective is open for it (`agent-repl--ws-open-p' nil — e.g. a
-merged-with-preserve-entry registration), or the perspective is open
-but the REPL is torn down (`:repl-state' `:inactive').  A nil
-`:repl-state' on an OPEN
-workspace is NOT closed: that is a session that never started, which
-the \"none\" status dot already conveys."
-  (let ((open (agent-repl--ws-open-p name))
-        (repl-state (agent-repl--ws-get name :repl-state)))
-    (let ((closed (or (not open)
-                      (eq repl-state :inactive))))
-      (agent-repl--log-verbose name "sidebar-closed-p: ws=%s open=%s repl-state=%s -> closed=%s"
-                                name open repl-state closed)
+  "Return non-nil when roster workspace NAME renders greyed (closed).
+Greyed is RESERVED for the panels-dismissed condition: the workspace
+still exists — it has its tab — but its agent-repl panes are closed, so
+`:repl-state' reads `:inactive' (close-panels-on-open.el is what puts
+it there).  A nil `:repl-state' is NOT closed: that is a session that
+never started, which the \"none\" status dot already conveys.
+
+Explicitly NOT keyed on perspective-lessness any more.  A workspace
+whose perspective is gone is gone, and `agent-repl--sidebar-entries'
+drops its row outright rather than greying it — greying a row for a
+workspace the user can no longer switch to was the confusion this
+predicate used to produce.
+
+`:merged' is the one perspective-less state that still greys, because
+merged rows deliberately outlive their tab in the Recently Merged
+section and must keep receding there exactly as before."
+  (let ((repl-state (agent-repl--ws-get name :repl-state))
+        (merged (agent-repl--sidebar-merged-p name)))
+    (let ((closed (or merged (eq repl-state :inactive))))
+      (agent-repl--log-verbose name "sidebar-closed-p: ws=%s merged=%s repl-state=%s -> closed=%s"
+                                name merged repl-state closed)
       closed)))
 
 ;;;; ---- The recently-merged window ---------------------------------------
@@ -357,22 +368,53 @@ rows in, so `C-S-n' / `C-S-p' walk what the user actually sees.  Rows
 of folded repos are excluded (they are hidden); greyed closed-REPL
 rows are included (they are visible and selectable).")
 
+(defun agent-repl--sidebar-rostered-p (name)
+  "Return non-nil when live workspace NAME still belongs in the roster.
+A workspace that has left the tab bar is GONE, and a gone workspace
+gets no row at all: its perspective was killed, its entry nuked, or
+both, and the sidebar must not keep offering a row the user cannot
+switch to.  Membership is therefore `agent-repl--ws-open-p' —
+perspective presence — not mere registration.
+
+Two deliberate exemptions:
+
+  - `:merged' workspaces.  A completed merge kills the perspective but
+    keeps the registration (the merge path's `preserve-entry'), because
+    the row is supposed to survive its tab inside the Recently Merged
+    section.  Dropping it here would empty that section.
+
+  - Every row, when the persp system has nothing to say.  With
+    `agent-repl--ws-names-cache-usable-p' nil (persp-mode not loaded,
+    or the cache not yet populated during startup) `--ws-open-p'
+    answers nil for EVERYTHING, which is an absence of evidence rather
+    than evidence of absence.  The roster falls back to plain live
+    registration there, exactly as `--collect-snapshot-entries' does."
+  (or (not (agent-repl--ws-names-cache-usable-p))
+      (agent-repl--ws-open-p name)
+      (agent-repl--sidebar-merged-p name)))
+
 (defun agent-repl--sidebar-entries ()
-  "Return the roster entries (NAME . DIR): live workspaces only.
-The universe is `agent-repl--live-ws-names' — every registered,
-non-tombstoned workspace, whether or not a perspective is open for it
-\(perspective-less rows render greyed via
-`agent-repl--sidebar-closed-p'; folds render as collapsed sections,
-not drops).  Tombstoned registrations and snapshot-only history do
-not render.  A live workspace without a `:project-dir' cannot be
-keyed by dir; it is skipped with a log entry rather than silently,
-since every normally-created workspace records one."
+  "Return the roster entries (NAME . DIR): rostered live workspaces only.
+The universe is `agent-repl--live-ws-names' narrowed by
+`agent-repl--sidebar-rostered-p': a registered, non-tombstoned
+workspace that still holds its perspective (plus merged rows, which
+outlive theirs on purpose).  Tombstoned registrations, snapshot-only
+history, and workspaces whose perspective has been killed do not
+render at all — greying is reserved for a workspace that still exists
+with its panes dismissed (`agent-repl--sidebar-closed-p'), and folds
+render as collapsed sections rather than drops.  A live workspace
+without a `:project-dir' cannot be keyed by dir; it is skipped with a
+log entry rather than silently, since every normally-created workspace
+records one."
   (let (entries)
     (dolist (name (agent-repl--live-ws-names) (nreverse entries))
-      (let ((dir (agent-repl--ws-get name :project-dir)))
-        (if dir
-            (push (cons name dir) entries)
-          (agent-repl--log name "sidebar-entries: skipping live ws=%s with no :project-dir" name))))))
+      (cond
+       ((not (agent-repl--sidebar-rostered-p name))
+        (agent-repl--log name "sidebar-entries: dropping ws=%s — no perspective (gone)" name))
+       ((agent-repl--ws-get name :project-dir)
+        (push (cons name (agent-repl--ws-get name :project-dir)) entries))
+       (t
+        (agent-repl--log name "sidebar-entries: skipping live ws=%s with no :project-dir" name))))))
 
 (defun agent-repl--sidebar-entry-created-at (name)
   "Return NAME's `:created-at' as a float for sibling ordering.
@@ -882,10 +924,15 @@ otherwise land the user in a dead REPL.  The boot door no-ops when a
 live session already exists, so the revive branch's own boot is never
 doubled.
 
-Booting alone leaves the session running but HEADLESS — a closed target
-\(`agent-repl--sidebar-closed-p') would land the user in bare windows
-with the agent panels hidden.  So its `:pending-show-panels' flag is
-armed BEFORE the switch, and the switch's own
+Booting alone leaves the session running but HEADLESS — a target that
+is not currently hosting panels would land the user in bare windows
+with the agent panels hidden.  That is the greyed rows
+`agent-repl--sidebar-closed-p' marks, PLUS any perspective-less target
+that reaches here (a merged row being revived out of Recently Merged).
+The perspective-less arm is named explicitly rather than inherited from
+`--sidebar-closed-p', which is now keyed on the panes-dismissed
+condition alone and no longer speaks for perspective membership.  The
+`:pending-show-panels' flag is armed BEFORE the switch, and the switch's own
 `agent-repl--on-workspace-switch' drain then shows the panels the
 instant the workspace activates — the same door workspace generation
 comes up visible through.  This is the keyboard / click equivalent of
@@ -897,17 +944,19 @@ restores its panels on switch."
       (agent-repl--log nil "sidebar-open: no live workspace for dir=%s" dir)
       (error "agent-repl sidebar: no live workspace for dir %s" dir))
     (let* ((name (car entry))
-           (closed (agent-repl--sidebar-closed-p name)))
-      (agent-repl--log name "sidebar-open: name=%s dir=%s live=%s closed=%s merged=%s"
+           (closed (agent-repl--sidebar-closed-p name))
+           (perspless (not (agent-repl--ws-open-p name)))
+           (headless (or closed perspless)))
+      (agent-repl--log name "sidebar-open: name=%s dir=%s live=%s closed=%s perspless=%s merged=%s"
                         name (cdr entry)
                         (and (agent-repl--ws-live-p name) t)
-                        closed
+                        closed perspless
                         (or (eq (agent-repl--ws-get name :repl-state) :merged)
                             (eq (agent-repl--ws-get name :merge-completed) t)))
-      ;; Arm the panel show BEFORE switching so a closed target comes up
+      ;; Arm the panel show BEFORE switching so a headless target comes up
       ;; running AND open rather than running-but-headless.  Drained by
       ;; `agent-repl--on-workspace-switch' once the workspace activates.
-      (when closed
+      (when headless
         (agent-repl--ws-put name :pending-show-panels t))
       (agent-repl--picker-open-selection
        (list :name name

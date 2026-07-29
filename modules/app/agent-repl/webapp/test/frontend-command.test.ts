@@ -3,12 +3,29 @@
  * canonical protojson. One edge per test (AAA).
  */
 import { describe, expect, it } from "vitest";
-import { encodeFrontendCommand, type FrontendCommand } from "../src/frontend-command.js";
+import { ARM_KEY, encodeFrontendCommand, type FrontendCommand } from "../src/frontend-command.js";
 
 /** Encode and parse back, so assertions read the wire object, not a string. */
 function wire(cmd: FrontendCommand): Record<string, unknown> {
   return JSON.parse(encodeFrontendCommand(cmd)) as Record<string, unknown>;
 }
+
+describe("the command vocabulary is closed", () => {
+  it("carries no paint acknowledgment", () => {
+    // Arrange / Act — attestation is gone end to end: this end no longer tells
+    // the daemon what it drew, because a workspace's color is connection truth
+    // and a render pass says nothing about that.
+    // Assert
+    expect(Object.keys(ARM_KEY)).not.toContain("paintAck");
+  });
+
+  it("names every arm it can encode", () => {
+    // Arrange / Act — a body case with no arm key would serialize to an
+    // envelope with no command at all.
+    // Assert
+    expect(Object.values(ARM_KEY).every((v) => v.length > 0)).toBe(true);
+  });
+});
 
 describe("encodeFrontendCommand — envelope", () => {
   it("carries requestId and workspace on every frame", () => {

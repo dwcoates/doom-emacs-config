@@ -18,10 +18,10 @@ const (
 	// verdict, and it is what makes a workspace's color CONNECTION TRUTH:
 	// `wired` clears the axis and lets the agent axis speak, and neither other
 	// token does.
-	sigWired    = "wired"    // the bring-up gate CLOSED (ShimReady).
-	sigStarting = "starting" // a bring-up is actively in flight.
-	sigDormant  = "dormant"  // not wired and not starting.
-	sigThinking = "thinking"
+	sigWired      = "wired"    // the bring-up gate CLOSED (ShimReady).
+	sigStarting   = "starting" // a bring-up is actively in flight.
+	sigDormant    = "dormant"  // not wired and not starting.
+	sigThinking   = "thinking"
 	sigDone       = "done"
 	sigPermission = "permission"
 	sigIdle       = "idle"
@@ -75,9 +75,9 @@ const (
 	// The wired axis's edges. The detail after the colon names which one moved
 	// it — the bring-up that started, the ShimReady that closed the gate, or the
 	// exit/hibernation/rotation that took the wiring away.
-	causeWired = "wired"
-	causeVendorBlocked   = "vendor_blocked"
-	causeInterrupted     = "interrupted"
+	causeWired         = "wired"
+	causeVendorBlocked = "vendor_blocked"
+	causeInterrupted   = "interrupted"
 	// The vendor retired one session uuid mid-stream and minted another, so
 	// the turn the old identity was running can never report its own end. The
 	// row is daemon-local and carries no store seq, exactly as a merge
@@ -245,12 +245,14 @@ func renderStateOf(token string) frontendv1.RenderState {
 //   - BLUE outranks everything, INCLUDING a live turn. A turn running behind
 //     a route the user cannot see is not something to advertise as working,
 //     it is something to advertise as broken.
+//
 //   - PURPLE outranks red for the mirror of that reason, but only ever
 //     among rows of the SAME vintage: `vendor_blocked` is an AGENT-axis
 //     turn OUTCOME, so it competes with the non-agent axes at rank 20 and
 //     is superseded outright by whatever the agent does next. A `thinking`
 //     row appended after it means a new turn is genuinely running, and red
 //     is then the true answer.
+//
 //   - YELLOW sits between red and green because "something is still running"
 //     is a weaker claim than "a turn is running" and a stronger one than
 //     "nothing is running".

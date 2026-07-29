@@ -244,6 +244,11 @@ func (e *emptyWorkspaceCreation) close() {
 
 type e2eHarness struct {
 	ts *httptest.Server
+	// sweepIdle fires the daemon's idle sweeper, which is the production
+	// hibernation trigger. Non-nil only for a harness built with
+	// withIdleSweeper; a test that never asks for one cannot accidentally
+	// hibernate its own session.
+	sweepIdle chan<- time.Time
 }
 
 // harnessTuning is the small set of knobs a test may bend on the otherwise
@@ -258,11 +263,19 @@ type harnessTuning struct {
 	// establishTimeout bounds one createSession establishment round. Zero takes
 	// the daemon's own bound.
 	establishTimeout time.Duration
+	// idleSweeper hands the daemon's idle sweeper a clock the TEST drives, so
+	// a hibernation is provoked by an event rather than waited out. It is the
+	// production trigger — sweepIdle calls driver.Hibernate — so what it
+	// exercises is the real edge and not a stand-in for one.
+	idleSweeper bool
 }
 
 type harnessOption func(*harnessTuning)
 
 func withWedgedShim() harnessOption { return func(o *harnessTuning) { o.wedgeShim = true } }
+
+// withIdleSweeper gives the harness a test-driven idle-sweep clock.
+func withIdleSweeper() harnessOption { return func(o *harnessTuning) { o.idleSweeper = true } }
 
 func withEstablishTimeout(d time.Duration) harnessOption {
 	return func(o *harnessTuning) { o.establishTimeout = d }
@@ -422,13 +435,18 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 	forwarder.SetTarget(agentShim.Server)
 	t.Cleanup(func() { _ = agentShim.Close() })
 
+	var sweepTicks chan time.Time
+	if tuning.idleSweeper {
+		sweepTicks = make(chan time.Time)
+	}
 	srv := server.New(server.Config{
-		DaemonVersion: "0.1.0-e2e",
-		Registry:      reg,
-		Driver:        driver,
-		SSM:           ssmMgr,
-		Frontend:      agentShim.Server,
-		Logf:          t.Logf,
+		DaemonVersion:  "0.1.0-e2e",
+		Registry:       reg,
+		Driver:         driver,
+		SSM:            ssmMgr,
+		Frontend:       agentShim.Server,
+		IdleSweepTicks: sweepTicks,
+		Logf:           t.Logf,
 	})
 	binding.SetTarget(srv)
 	// Mirror main.go's mux: the session routes plus the UNFILTERED /frontend
@@ -440,7 +458,11 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 	mux.HandleFunc("/frontend", agentShim.Server.ServeWS)
 	ts := httptest.NewServer(mux)
 	t.Cleanup(ts.Close)
-	return &e2eHarness{ts: ts}
+	h := &e2eHarness{ts: ts}
+	if sweepTicks != nil {
+		h.sweepIdle = sweepTicks
+	}
+	return h
 }
 
 // createSession brings a session up over the STRICT command path — the same
