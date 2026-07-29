@@ -72,7 +72,7 @@ func TestShimSpawnerDoesNotSpawnWhenTheShimIsConnected(t *testing.T) {
 		nil)
 
 	// Act
-	err := sp.EnsureShim(context.Background(), "s1")
+	_, err := sp.EnsureShim(context.Background(), "s1")
 
 	// Assert
 	if err != nil {
@@ -87,9 +87,11 @@ func TestShimSpawnerSpawnsFromRegistryRecordWhenNothingIsAlive(t *testing.T) {
 	// Arrange — nothing connected and no lock held; the record supplies the
 	// spawn's CreateOpts.
 	reg := openTestRegistry(t)
+	cfg := t.TempDir()
+	writeTranscript(t, cfg, "cli-uuid")
 	if err := reg.Put(registry.Record{
 		SessionID: "s1", CWD: "/w", Model: "haiku",
-		ConfigDir: "/cfg", ClaudeSessionID: "cli-uuid",
+		ConfigDir: cfg, ClaudeSessionID: "cli-uuid",
 	}); err != nil {
 		t.Fatalf("put: %v", err)
 	}
@@ -103,14 +105,14 @@ func TestShimSpawnerSpawnsFromRegistryRecordWhenNothingIsAlive(t *testing.T) {
 		nil)
 
 	// Act
-	err := sp.EnsureShim(context.Background(), "s1")
+	_, err := sp.EnsureShim(context.Background(), "s1")
 
 	// Assert — CreateOpts reconstructed from the record (resume = the CLI uuid).
 	if err != nil {
 		t.Fatalf("EnsureShim: %v", err)
 	}
 	if gotOpts.CWD != "/w" || gotOpts.Model != "haiku" ||
-		gotOpts.ConfigDir != "/cfg" || gotOpts.Resume != "cli-uuid" {
+		gotOpts.ConfigDir != cfg || gotOpts.Resume != "cli-uuid" {
 		t.Fatalf("spawn opts = %+v", gotOpts)
 	}
 }
@@ -125,7 +127,7 @@ func TestShimSpawnerErrorsWhenNoRecordToSpawnFrom(t *testing.T) {
 		nil)
 
 	// Act
-	err := sp.EnsureShim(context.Background(), "ghost")
+	_, err := sp.EnsureShim(context.Background(), "ghost")
 
 	// Assert
 	if err == nil {

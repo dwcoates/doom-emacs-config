@@ -189,6 +189,10 @@ type consumer struct {
 	// empty for a session that has not been rehydrated, and an empty record has
 	// nothing for the announcement to differ from.
 	onVendorSessionID func(vendorSessionID string)
+	// onDegraded reports a shim-sourced DegradedState to the driver, which is
+	// what lets a bring-up still waiting on the handshake learn that the shim
+	// has already given up. Assigned after construction, like the hook above.
+	onDegraded func(*corev1.DegradedState)
 	// onTurn reports an observed turn boundary (true = TurnStarted, false =
 	// TurnEnded). It drives the prompt queue's interception and drain (E4).
 	// Called on the shim read-loop goroutine, so the handler must not block on
@@ -904,6 +908,11 @@ const connectionComponent = "shim-connection"
 // workspace changed color needs to find out why from the conversation itself,
 // so the account lives there now.
 func (c *consumer) Degraded(_ string, ds *corev1.DegradedState) {
+	// A shim reporting its SDK dead BEFORE the bring-up gate closed is the one
+	// account the daemon ever gets of why a resume died (bringupescape.go).
+	if c.onDegraded != nil {
+		c.onDegraded(ds)
+	}
 	item := frontend.SystemFailureItemFromDegradedState(ds, c.now())
 	if item == nil {
 		return
@@ -953,6 +962,22 @@ func (c *consumer) degradedUUID(component string) string {
 		component = connectionComponent
 	}
 	return "degraded:" + c.sessionID + ":" + component
+}
+
+// startFailedUUID is the stable card identity for this session's start-failed
+// report. One per session, so a retried-and-failed-again bring-up updates the
+// same card instead of stacking a second account of one failure.
+func (c *consumer) startFailedUUID() string {
+	return "start_failed:" + c.sessionID
+}
+
+// historyMissingUUID is the stable card identity for the note about ONE
+// dropped vendor conversation. Keyed by the dropped uuid rather than by the
+// session, because that is what the note is about — and because the same
+// session re-reporting the same loss must reconcile in place rather than
+// accumulate.
+func (c *consumer) historyMissingUUID(droppedUUID string) string {
+	return "history_missing:" + droppedUUID
 }
 
 // resync replays the retained conversation deltas from fromSeq (0 = from the

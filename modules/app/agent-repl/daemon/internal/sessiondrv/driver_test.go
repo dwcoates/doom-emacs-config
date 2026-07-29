@@ -58,13 +58,42 @@ type fakeSpawner struct {
 	err      error
 	// stopErr, when set, makes every stop fail.
 	stopErr error
+	// resume is the vendor conversation pointer each session would be spawned
+	// with; DropResume clears it, which is how a test arranges "this bring-up
+	// was a resume" versus "this one was already fresh".
+	resume map[string]string
+	// staleDropped is reported by the NEXT EnsureShim, standing in for the
+	// spawner's validate-before-resume repair.
+	staleDropped string
+	// drops records every DropResume call.
+	drops []string
+	// dropErr, when set, makes every drop fail.
+	dropErr error
 }
 
-func (s *fakeSpawner) EnsureShim(_ context.Context, sessionID string) error {
+func (s *fakeSpawner) EnsureShim(_ context.Context, sessionID string) (SpawnResult, error) {
 	s.mu.Lock()
 	s.calls = append(s.calls, sessionID)
+	res := SpawnResult{StaleResumeDropped: s.staleDropped, Resumed: s.resume[sessionID]}
+	s.staleDropped = ""
 	s.mu.Unlock()
-	return s.err
+	return res, s.err
+}
+
+// DropResume clears the fake's resume pointer, reporting what it dropped —
+// which is what the escape ladder classifies a failed bring-up by.
+func (s *fakeSpawner) DropResume(sessionID string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.dropErr != nil {
+		return "", s.dropErr
+	}
+	dropped := s.resume[sessionID]
+	s.drops = append(s.drops, sessionID)
+	if s.resume != nil {
+		delete(s.resume, sessionID)
+	}
+	return dropped, nil
 }
 
 func (s *fakeSpawner) StopShim(sessionID string, hintPID int32) error {
@@ -73,6 +102,13 @@ func (s *fakeSpawner) StopShim(sessionID string, hintPID int32) error {
 	s.stopPIDs = append(s.stopPIDs, hintPID)
 	s.mu.Unlock()
 	return s.stopErr
+}
+
+// dropCalls returns every DropResume the escape ladder made.
+func (s *fakeSpawner) dropCalls() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.drops...)
 }
 
 // stopHints returns the announced pids each stop was told about, so a test can
@@ -113,6 +149,9 @@ type fakeClient struct {
 	// (the default) means the connection is already usable, so tests that do
 	// not care about bring-up timing are unaffected.
 	notReady chan struct{}
+	// awaitErr, when set, fails AwaitReady immediately — a handshake that dies
+	// rather than one that is merely slow.
+	awaitErr error
 	// awaitReadyCalls counts AwaitReady round-trips, so a test can prove the
 	// readiness wait was TAKEN (rather than inferring it from timing).
 	awaitReadyCalls int
@@ -147,8 +186,12 @@ func (c *fakeClient) SubmitPrompt(_ context.Context, text, origin, mode string) 
 func (c *fakeClient) AwaitReady(ctx context.Context) error {
 	c.mu.Lock()
 	ch := c.notReady
+	awaitErr := c.awaitErr
 	c.awaitReadyCalls++
 	c.mu.Unlock()
+	if awaitErr != nil {
+		return awaitErr
+	}
 	if ch == nil {
 		return nil
 	}

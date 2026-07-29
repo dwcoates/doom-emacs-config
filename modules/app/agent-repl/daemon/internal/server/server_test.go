@@ -47,13 +47,21 @@ type fakeSpawner struct {
 	mu      sync.Mutex
 	ensured []string
 	stopped []string
+	dropped []string
 }
 
-func (f *fakeSpawner) EnsureShim(_ context.Context, sessionID string) error {
+func (f *fakeSpawner) EnsureShim(_ context.Context, sessionID string) (sessiondrv.SpawnResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.ensured = append(f.ensured, sessionID)
-	return nil
+	return sessiondrv.SpawnResult{}, nil
+}
+
+func (f *fakeSpawner) DropResume(sessionID string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.dropped = append(f.dropped, sessionID)
+	return "", nil
 }
 
 func (f *fakeSpawner) StopShim(sessionID string, _ int32) error {

@@ -1139,10 +1139,9 @@ func (s *Server) CreateSession(_ context.Context, opts CreateOpts) (string, erro
 	// HARD-FAIL the create before bringing anything up. Fake sessions skip the
 	// gate — the scripted SDK has no transcripts by design.
 	if opts.Resume != "" && !opts.Fake && !s.forceFake {
-		path := session.TranscriptPath(session.ClaudeConfigDir(opts.ConfigDir), opts.CWD, opts.Resume)
-		if _, statErr := os.Stat(path); statErr != nil {
-			s.logf("session create REJECTED: resume target %s has no transcript at %s — hard-failing so the client opens an investigation workspace: %v",
-				opts.Resume, path, statErr)
+		if path, ok := session.TranscriptExists(opts.ConfigDir, opts.CWD, opts.Resume); !ok {
+			s.logf("session create REJECTED: resume target %s has no transcript at %s — hard-failing so the client opens an investigation workspace",
+				opts.Resume, path)
 			return "", &ResumeTranscriptMissingError{ResumeID: opts.Resume, SearchedPaths: []string{path}}
 		}
 	}
