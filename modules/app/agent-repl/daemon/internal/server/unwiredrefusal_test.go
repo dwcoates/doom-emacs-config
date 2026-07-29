@@ -13,21 +13,21 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// A DORMANT WORKSPACE IS CLASSIFIED BY CALLER.
+// AN UNWIRED WORKSPACE IS CLASSIFIED BY CALLER.
 //
 // Emacs fans background machinery — resyncs, kept health probes, sweep passes —
 // across every workspace it knows about, and after a daemon bounce most of them
-// are legitimately dormant. Reporting each of those refusals as a failure put
+// are legitimately unwired. Reporting each of those refusals as a failure put
 // dozens of error-shaped lines and nacks in front of a user with nothing to act
 // on. Direct user-initiated commands keep the loud nack, because there the
 // refusal IS the feedback.
 // ---------------------------------------------------------------------------
 
-// dormantResyncer refuses with the no-live-driver sentinel, exactly as
+// unwiredResyncer refuses with the no-live-driver sentinel, exactly as
 // sessiondrv does for a workspace that has not been brought up.
-type dormantResyncer struct{}
+type unwiredResyncer struct{}
 
-func (dormantResyncer) Resync(string, uint64) error { return errclass.ErrNoLiveDriver }
+func (unwiredResyncer) Resync(string, uint64) error { return errclass.ErrNoLiveDriver }
 
 // brokenResyncer fails for a reason that is nobody's routine expectation.
 type brokenResyncer struct{}
@@ -47,36 +47,36 @@ func newResyncHandler(t *testing.T, r Resyncer, lines *[]string) *commandHandler
 	return h
 }
 
-func TestResyncOnADormantWorkspaceIsCalm(t *testing.T) {
+func TestResyncOnAnUnwiredWorkspaceIsCalm(t *testing.T) {
 	// Arrange — a BACKGROUND caller: Emacs re-syncing every workspace it knows
 	// about after a bounce.
 	var logged []string
-	h := newResyncHandler(t, dormantResyncer{}, &logged)
+	h := newResyncHandler(t, unwiredResyncer{}, &logged)
 
 	// Act.
 	err := h.Resync(context.Background(), "/w", "r1", &frontendv1.ResyncCmd{FromSeq: 1})
 
 	// Assert — no nack, so no failure card and no error-shaped ack.
 	if err != nil {
-		t.Fatalf("Resync on a dormant workspace = %v, want a calm no-op", err)
+		t.Fatalf("Resync on an unwired workspace = %v, want a calm no-op", err)
 	}
 }
 
-func TestResyncOnADormantWorkspaceSaysSoPlainly(t *testing.T) {
+func TestResyncOnAnUnwiredWorkspaceSaysSoPlainly(t *testing.T) {
 	// Arrange — calm is not silent: the skip is still accounted for.
 	var logged []string
-	h := newResyncHandler(t, dormantResyncer{}, &logged)
+	h := newResyncHandler(t, unwiredResyncer{}, &logged)
 
 	// Act.
 	h.Resync(context.Background(), "/w", "r1", &frontendv1.ResyncCmd{FromSeq: 1})
 
 	// Assert.
 	for _, l := range logged {
-		if strings.Contains(l, "workspace is dormant") {
+		if strings.Contains(l, "the workspace has no live driver") {
 			return
 		}
 	}
-	t.Fatalf("no calm dormant line logged; lines=%v", logged)
+	t.Fatalf("no calm skip line logged; lines=%v", logged)
 }
 
 func TestAGenuineResyncFailureStaysLoud(t *testing.T) {
@@ -93,7 +93,7 @@ func TestAGenuineResyncFailureStaysLoud(t *testing.T) {
 	}
 }
 
-func TestInterruptOnADormantWorkspaceStaysLoud(t *testing.T) {
+func TestInterruptOnAnUnwiredWorkspaceStaysLoud(t *testing.T) {
 	// Arrange — a DIRECT user action. The user pressed stop; a silent no-op
 	// would leave a pressed control doing nothing with no explanation.
 	p := &fakePrompts{err: errclass.ErrNoLiveDriver}
@@ -107,6 +107,6 @@ func TestInterruptOnADormantWorkspaceStaysLoud(t *testing.T) {
 
 	// Assert.
 	if err == nil {
-		t.Fatal("a user-commanded interrupt on a dormant workspace returned no error")
+		t.Fatal("a user-commanded interrupt on an unwired workspace returned no error")
 	}
 }

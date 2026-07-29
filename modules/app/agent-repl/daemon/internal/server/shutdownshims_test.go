@@ -53,7 +53,7 @@ func TestShutdownStopShimsModeStopsThem(t *testing.T) {
 }
 
 // A shutdown NEVER marks a record terminal, in either mode: a stopped shim's
-// session is dormant, not dead, and the next boot must still find it.
+// session is merely unwired, not dead, and the next boot must still find it.
 func TestShutdownLeavesRecordsNonTerminal(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
@@ -71,6 +71,6 @@ func TestShutdownLeavesRecordsNonTerminal(t *testing.T) {
 		t.Fatalf("session %s vanished from the registry across a shutdown", id)
 	}
 	if rec.Terminal {
-		t.Fatal("shutdown marked the record terminal; the session is dormant, not dead")
+		t.Fatal("shutdown marked the record terminal; the session is merely unwired, not dead")
 	}
 }

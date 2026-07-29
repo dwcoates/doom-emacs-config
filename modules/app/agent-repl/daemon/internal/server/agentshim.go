@@ -183,7 +183,7 @@ func (s *RegistryModeStore) PermissionMode(sessionID string) string {
 // falls straight out of the record the create path already persists, with no
 // separate table.
 //
-// A live session's CWD is preferred over the dormant record's, but they are
+// A live session's CWD is preferred over the unwired record's, but they are
 // the same value in practice; consulting the registry alone keeps the resolver
 // free of the live session map's lock.
 type RegistryResolver struct{ reg *registry.Registry }

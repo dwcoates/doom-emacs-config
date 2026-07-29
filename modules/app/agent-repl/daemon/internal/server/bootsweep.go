@@ -32,7 +32,7 @@
 // test drives it as an event.
 //
 // A session that is NEITHER connected nor locked has no shim. It is left
-// DORMANT for the on-demand path (workspaceopen's ensure, or the first
+// UNWIRED for the on-demand path (workspaceopen's ensure, or the first
 // prompt) rather than spawned here: booting the daemon is not a reason to
 // start every conversation the user has ever had.
 //
@@ -165,7 +165,7 @@ func (s *BootSweeper) reconcile(label string, rec registry.Record) (registry.Rec
 	if s.Connected(rec.SessionID) {
 		s.Logf("server: %s sweep: session %s (ws %s) has a PARKED shim connection; reattaching", label, rec.SessionID, rec.CWD)
 		if err := s.Ensurer.Ensure(rec.CWD); err != nil {
-			s.Logf("server: %s sweep: session %s (ws %s) reattach FAILED — the workspace stays dormant until it is opened: %v",
+			s.Logf("server: %s sweep: session %s (ws %s) reattach FAILED — the workspace stays unwired until it is opened: %v",
 				label, rec.SessionID, rec.CWD, err)
 			return registry.Record{}, false
 		}
@@ -174,9 +174,9 @@ func (s *BootSweeper) reconcile(label string, rec registry.Record) (registry.Rec
 	}
 	held, err := s.Held(rec.SessionID)
 	if err != nil {
-		// "I could not tell" is never read as free: reporting it as dormant
+		// "I could not tell" is never read as free: reporting the shim as gone
 		// would be a claim the probe did not make.
-		s.Logf("server: %s sweep: session %s (ws %s) lock probe FAILED, so whether a shim is alive is UNKNOWN; leaving it dormant: %v",
+		s.Logf("server: %s sweep: session %s (ws %s) lock probe FAILED, so whether a shim is alive is UNKNOWN; leaving it unwired: %v",
 			label, rec.SessionID, rec.CWD, err)
 		return registry.Record{}, false
 	}
@@ -193,7 +193,7 @@ func (s *BootSweeper) reconcile(label string, rec registry.Record) (registry.Rec
 			label, rec.SessionID, rec.CWD)
 		return registry.Record{}, false
 	}
-	s.Logf("server: %s sweep: session %s (ws %s) has no live shim; leaving it DORMANT for the on-demand bring-up",
+	s.Logf("server: %s sweep: session %s (ws %s) has no live shim; leaving it UNWIRED for the on-demand bring-up",
 		label, rec.SessionID, rec.CWD)
 	return registry.Record{}, false
 }

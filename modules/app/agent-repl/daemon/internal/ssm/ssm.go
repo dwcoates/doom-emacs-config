@@ -193,7 +193,7 @@ func (m *Manager) warm() error {
 	}
 	// NOTHING IS WIRED TO A DAEMON THAT HAS JUST STARTED. The agent-axis
 	// history survives the restart and the shim connections do not, so every
-	// restored workspace is dormant until something wires it again — which is
+	// restored workspace is hibernated until something wires it again — which is
 	// exactly what the connection-truth law says a tab with no live session
 	// must claim. Same placement, and the same reason, as the permission
 	// release above.

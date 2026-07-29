@@ -5117,7 +5117,7 @@ non-live 📁 fallback branch."
   "Without a live workspace the picker returns the neutral 📁 — the
 status ladder collapses to live-vs-not-live because the picker does
 NOT read the on-disk state file to distinguish historical kill /
-dormant / never-opened.  Persisted kill/has-state hints on the summary
+hibernated / never-opened.  Persisted kill/has-state hints on the summary
 are ignored when no live workspace is present."
   (let ((summary '(:workspace-name nil :live-p nil
                    :last-killed-at (1 2 3))))

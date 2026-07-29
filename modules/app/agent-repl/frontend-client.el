@@ -1269,7 +1269,7 @@ non-terminal, and `agent-repl--frontend-backfill-settled-p\=' answers
 whether its history finished arriving.  Both are DURABLE, so both keep
 answering yes across a daemon restart — about a daemon that has no driver for the
 workspace at all.  The switch-ensure skipped on exactly that pair, so
-after every restart a switch to a dormant workspace sent no
+after every restart a switch to an unwired workspace sent no
 `openWorkspace\=', nothing brought the session up, and the workspace sat
 blue until the user typed.
 

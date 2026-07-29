@@ -13,7 +13,7 @@ import (
 // Every field on a SessionView except shim_attached is read back off the
 // durable registry record, so after a daemon restart a workspace with no
 // driver at all still reported non-terminal and fully backfilled. Emacs's
-// switch-ensure skipped on exactly that pair, so switching to a dormant
+// switch-ensure skipped on exactly that pair, so switching to an unwired
 // workspace sent no openWorkspace and nothing ever brought it up.
 //
 // These pin the daemon's half: the shaping must carry driver liveness as a

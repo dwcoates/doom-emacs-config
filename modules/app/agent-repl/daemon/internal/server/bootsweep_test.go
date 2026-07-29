@@ -189,7 +189,7 @@ func TestBootSweepNeverSpawnsAgainstAStuckLock(t *testing.T) {
 
 // NEITHER connected nor locked means there is no shim. Booting the daemon is
 // not a reason to start every conversation the user has ever had.
-func TestBootSweepLeavesADormantWorkspaceAlone(t *testing.T) {
+func TestBootSweepLeavesAnUnwiredWorkspaceAlone(t *testing.T) {
 	// Arrange — the rig's defaults are exactly this case.
 	s, ens, lines := sweepRig(t, "/w")
 
@@ -200,8 +200,8 @@ func TestBootSweepLeavesADormantWorkspaceAlone(t *testing.T) {
 	if got := ens.ensured(); len(got) != 0 {
 		t.Fatalf("ensured = %v, want nothing for a workspace with no shim", got)
 	}
-	if !logged(lines, "leaving it DORMANT") {
-		t.Fatalf("the dormant classification was not logged; lines: %v", *lines)
+	if !logged(lines, "leaving it UNWIRED") {
+		t.Fatalf("the unwired classification was not logged; lines: %v", *lines)
 	}
 }
 

@@ -403,9 +403,9 @@ func (h *commandHandler) SessionHealth(ctx context.Context, workspace, requestID
 		return view, nil
 	}
 	actual, err := h.health.Health(ctx, workspace, view.GetSessionId(), requestID)
-	if isDormantWorkspace(err) {
+	if isUnwiredWorkspace(err) {
 		view.Reason = err.Error()
-		h.logf("frontend cmd: session_health ws=%s session=%s request_id=%s — workspace is dormant; skipping the probe (healthy=false, nothing to act on)",
+		h.logf("frontend cmd: session_health ws=%s session=%s request_id=%s — the workspace has no live driver; skipping the probe (healthy=false, nothing to act on)",
 			workspace, view.GetSessionId(), requestID)
 		return view, nil
 	}
@@ -595,22 +595,28 @@ func (h *commandHandler) Resync(_ context.Context, workspace, requestID string, 
 	}
 	h.logf("frontend cmd: resync ws=%s request_id=%s from_seq=%d", workspace, requestID, cmd.GetFromSeq())
 	err := h.resyncer.Resync(workspace, cmd.GetFromSeq())
-	if isDormantWorkspace(err) {
-		h.logf("frontend cmd: resync ws=%s request_id=%s from_seq=%d — workspace is dormant; skipping the conversation replay (the snapshot half is served regardless)",
+	if isUnwiredWorkspace(err) {
+		h.logf("frontend cmd: resync ws=%s request_id=%s from_seq=%d — the workspace has no live driver; skipping the conversation replay (the snapshot half is served regardless)",
 			workspace, requestID, cmd.GetFromSeq())
 		return nil
 	}
 	return err
 }
 
-// isDormantWorkspace reports whether err is the "this workspace has no live
+// isUnwiredWorkspace reports whether err is the "this workspace has no live
 // shim driver" refusal.
+//
+// It reads UNWIRED rather than the word it used to carry. `dormant` is no longer
+// a state: the render vocabulary split it into `severed` (the substrate broke)
+// and `hibernated` (nothing is wrong), and this predicate deliberately covers
+// BOTH plus every other reason a driver might be absent. It is a fact about the
+// driver, not a claim about which of the two closed halves the workspace is on.
 //
 // IT IS CLASSIFIED BY CALLER, not by shape. The refusal is the same fact
 // either way, but what it MEANS to the user is not: Emacs fans background
 // machinery — resyncs, kept health probes, sweep passes — across every
 // workspace it knows about, and after a daemon bounce most of them are
-// legitimately dormant. Reporting each of those as a failure put dozens of
+// legitimately unwired. Reporting each of those as a failure put dozens of
 // error-shaped lines and nacks in front of a user with nothing to act on.
 //
 // So BACKGROUND callers treat it as the calm, expected answer it is, and
@@ -618,7 +624,7 @@ func (h *commandHandler) Resync(_ context.Context, workspace, requestID string, 
 // nack — there the refusal IS the user's feedback, and quieting it would leave
 // a pressed control doing nothing with no explanation. Nothing here weakens the
 // loud path for a genuine caller error: any other failure still propagates.
-func isDormantWorkspace(err error) bool {
+func isUnwiredWorkspace(err error) bool {
 	return err != nil && errors.Is(err, errclass.ErrNoLiveDriver)
 }
 
