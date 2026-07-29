@@ -727,6 +727,52 @@ Distinct failure mode from an unreachable socket, and the error says so."
         (should (equal tracked-health
                        '("health-2" "sessionHealth" "/w/tree" "s_expected")))))))
 
+(ert-deftest agent-repl-test-frontend-health-unowned-cwd-does-not-signal ()
+  "A health check whose cwd no live workspace owns must not abort on a log line.
+WORKSPACE here is `agent-repl--frontend-ws-command-key''s cwd, which cannot
+index the workspace hash.  The durable sink must be ENABLED for this to test
+anything: with it off the logging ladder never resolves an identity at all."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-log-sink-on
+      (cl-letf (((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t))
+                ((symbol-function 'agent-repl--uds-send-command)
+                 (lambda (&rest _) "health-3"))
+                ((symbol-function 'agent-repl--uds-track-health-response)
+                 (lambda (_id _field _ws _sid callback)
+                   (funcall callback '(:requestId "health-3" :healthy t))))
+                ((symbol-function 'agent-repl--uds-track-command)
+                 (lambda (&rest _) "health-3"))
+                ((symbol-function 'agent-repl--frontend-await-uds)
+                 (lambda (predicate &rest _) (funcall predicate))))
+        ;; Act / Assert
+        (should (agent-repl--frontend-await-health-command
+                 "sessionHealth" '(:sessionId "s1")
+                 "/nowhere/unowned" "s1" "session ws=gone"))))))
+
+(ert-deftest agent-repl-test-frontend-health-keeps-the-raw-cwd-on-the-wire ()
+  "Resolving for the log must not change the cwd the daemon routes health by."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" (list :project-dir temporary-file-directory)
+    (let (sent)
+      (cl-letf (((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t))
+                ((symbol-function 'agent-repl--uds-send-command)
+                 (lambda (_field _payload workspace &rest _)
+                   (setq sent workspace) "health-4"))
+                ((symbol-function 'agent-repl--uds-track-health-response)
+                 (lambda (_id _field _ws _sid callback)
+                   (funcall callback '(:requestId "health-4" :healthy t))))
+                ((symbol-function 'agent-repl--uds-track-command)
+                 (lambda (&rest _) "health-4"))
+                ((symbol-function 'agent-repl--frontend-await-uds)
+                 (lambda (predicate &rest _) (funcall predicate))))
+        ;; Act
+        (agent-repl--frontend-await-health-command
+         "sessionHealth" '(:sessionId "s1")
+         temporary-file-directory "s1" "session ws=ws1")
+        ;; Assert
+        (should (equal sent temporary-file-directory))))))
+
 (ert-deftest agent-repl-test-frontend-health-accepted-ack-alone-times-out ()
   "A successful command receipt cannot satisfy a health wait."
   (let (command-tracked)
