@@ -1,0 +1,204 @@
+package logging
+
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"strings"
+	"testing"
+	"time"
+)
+
+type failingWriter struct{ err error }
+
+func (w failingWriter) Write([]byte) (int, error) { return 0, w.err }
+
+type shortWriter struct{ writes int }
+
+func (w *shortWriter) Write(p []byte) (int, error) {
+	w.writes++
+	if len(p) > 3 {
+		return 3, nil
+	}
+	return len(p), nil
+}
+
+func TestLogFormatsBoundAndRecordContext(t *testing.T) {
+	var file, stderr bytes.Buffer
+	log := New(&file, &stderr, false).With(Fields{
+		Component: "db", DatabasePath: "/tmp/events.db", Table: "event",
+	})
+	log.clock = func() time.Time { return time.Date(2026, 7, 28, 12, 34, 56, 789000000, time.UTC) }
+	log.pid = func() int { return 84 }
+
+	log.Log(Fields{Session: "vendor-session", Producer: "sidecar", Operation: "ingest"}, "accepted=%d", 2)
+
+	var got record
+	if err := json.Unmarshal(file.Bytes(), &got); err != nil {
+		t.Fatalf("persistent record is not JSON: %v\n%s", err, file.String())
+	}
+	if got.Timestamp != "2026-07-28T12:34:56.789Z" || got.Runtime != "store" || got.PID != 84 {
+		t.Fatalf("runtime identity = %#v", got)
+	}
+	if got.Level != "info" || got.Verbosity != "normal" || got.Operation != "ingest" || got.Message != "accepted=2" {
+		t.Fatalf("record fields = %#v", got)
+	}
+	if got.ClaudeSessionID != "vendor-session" || got.Context["component"] != "db" || got.Context["db"] != "/tmp/events.db" || got.Context["table"] != "event" || got.Context["producer"] != "sidecar" {
+		t.Fatalf("record attribution = %#v", got)
+	}
+	if stderr.String() != file.String() {
+		t.Fatalf("normal routing differs: file=%q stderr=%q", file.String(), stderr.String())
+	}
+}
+
+func TestLogVerboseAlwaysWritesFileAndGatesStderr(t *testing.T) {
+	var file, stderr bytes.Buffer
+	log := New(&file, &stderr, false)
+	log.LogVerbose(Fields{Operation: "tail"}, "queued=%d", 4)
+	var verboseRecord record
+	if err := json.Unmarshal(file.Bytes(), &verboseRecord); err != nil {
+		t.Fatalf("persistent verbose record is not JSON: %v", err)
+	}
+	if verboseRecord.Verbosity != "verbose" || verboseRecord.Operation != "tail" || verboseRecord.Message != "queued=4" {
+		t.Fatalf("persistent verbose record = %#v", verboseRecord)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr received verbose record while disabled: %q", stderr.String())
+	}
+
+	file.Reset()
+	stderr.Reset()
+	New(&file, &stderr, true).LogVerbose(Fields{Operation: "tail"}, "queued=%d", 4)
+	if file.String() != stderr.String() {
+		t.Fatalf("enabled verbose routing differs: file=%q stderr=%q", file.String(), stderr.String())
+	}
+}
+
+func TestLogRejectsMissingOperationAndInvalidLevel(t *testing.T) {
+	var file, stderr bytes.Buffer
+	log := New(&file, &stderr, false)
+	got := capturePanic(t, func() {
+		log.Log(Fields{}, "record")
+	})
+	if !strings.Contains(fmt.Sprint(got), "operation is required") {
+		t.Fatalf("panic = %v, want missing operation", got)
+	}
+	got = capturePanic(t, func() {
+		log.Log(Fields{Operation: "write", Level: "fatal"}, "record")
+	})
+	if !strings.Contains(fmt.Sprint(got), "invalid level") {
+		t.Fatalf("panic = %v, want invalid level", got)
+	}
+	if file.Len() != 0 || stderr.Len() != 0 {
+		t.Fatalf("invalid records mutated sinks: file=%q stderr=%q", file.String(), stderr.String())
+	}
+}
+
+func TestLogFailsLoudlyWhenPersistentSinkCannotWrite(t *testing.T) {
+	err := errors.New("disk full")
+	var stderr bytes.Buffer
+	got := capturePanic(t, func() {
+		New(failingWriter{err}, &stderr, false).Log(Fields{Operation: "write", Level: "error"}, "critical")
+	})
+	var emergency record
+	if err := json.Unmarshal(stderr.Bytes(), &emergency); err != nil {
+		t.Fatalf("emergency stderr is not JSON: %v: %q", err, stderr.String())
+	}
+	if emergency.Operation != "store.logging.sink-failure" || emergency.Level != "error" {
+		t.Fatalf("emergency stderr record = %#v", emergency)
+	}
+	if !strings.Contains(fmt.Sprint(got), "disk full") {
+		t.Fatalf("panic = %v, want persistent sink failure", got)
+	}
+}
+
+func TestLogFailsLoudlyWhenStderrCannotWrite(t *testing.T) {
+	var file bytes.Buffer
+	err := errors.New("terminal closed")
+	got := capturePanic(t, func() {
+		New(&file, failingWriter{err}, false).Log(Fields{Operation: "write", Level: "error"}, "critical")
+	})
+	if !strings.Contains(file.String(), "critical") {
+		t.Fatalf("persistent record missing before stderr failure: %q", file.String())
+	}
+	if !strings.Contains(fmt.Sprint(got), "terminal closed") {
+		t.Fatalf("panic = %v, want stderr sink failure", got)
+	}
+}
+
+func TestLogReportsBothSinkFailures(t *testing.T) {
+	fileErr := errors.New("disk full")
+	stderrErr := errors.New("terminal closed")
+	got := capturePanic(t, func() {
+		New(failingWriter{fileErr}, failingWriter{stderrErr}, false).Log(Fields{Operation: "write", Level: "error"}, "critical")
+	})
+	message := fmt.Sprint(got)
+	if !strings.Contains(message, "disk full") || !strings.Contains(message, "terminal closed") {
+		t.Fatalf("panic = %v, want both sink failures", got)
+	}
+}
+
+func TestLogCompletesShortPersistentWritesAcrossBoundLoggers(t *testing.T) {
+	file := &shortWriter{}
+	var stderr bytes.Buffer
+	log := New(file, &stderr, false)
+	bound := log.With(Fields{Component: "db"})
+	log.Log(Fields{Operation: "write", Level: "error"}, "critical")
+	if file.writes <= 1 {
+		t.Fatalf("persistent writes = %d, want multiple writes", file.writes)
+	}
+	firstWrites := file.writes
+	bound.Log(Fields{Operation: "write", Level: "error"}, "later critical")
+	if file.writes <= firstWrites {
+		t.Fatalf("bound logger did not complete another record: writes=%d", file.writes)
+	}
+}
+
+func TestLogCompletesShortTerminalWrite(t *testing.T) {
+	var file bytes.Buffer
+	stderr := &shortWriter{}
+	New(&file, stderr, false).Log(Fields{Operation: "write", Level: "error"}, "critical")
+	if stderr.writes <= 1 {
+		t.Fatalf("terminal writes = %d, want multiple writes", stderr.writes)
+	}
+	var record record
+	if err := json.Unmarshal(file.Bytes(), &record); err != nil {
+		t.Fatalf("durable error record is not JSON: %v", err)
+	}
+	if record.Level != "error" || record.Message != "critical" {
+		t.Fatalf("durable critical record = %#v", record)
+	}
+}
+
+func TestLoggerRejectsMissingDependencies(t *testing.T) {
+	assertPanics := func(name string, call func()) {
+		t.Helper()
+		defer func() {
+			if recover() == nil {
+				t.Errorf("%s did not panic", name)
+			}
+		}()
+		call()
+	}
+	assertPanics("nil file", func() { New(nil, io.Discard, false) })
+	assertPanics("nil stderr", func() { New(io.Discard, nil, false) })
+	var logger *Logger
+	assertPanics("nil With", func() { logger.With(Fields{}) })
+	assertPanics("nil Log", func() { logger.Log(Fields{}, "record") })
+	assertPanics("nil LogVerbose", func() { logger.LogVerbose(Fields{}, "record") })
+}
+
+func capturePanic(t *testing.T, call func()) any {
+	t.Helper()
+	var got any
+	func() {
+		defer func() { got = recover() }()
+		call()
+	}()
+	if got == nil {
+		t.Fatal("call did not panic")
+	}
+	return got
+}

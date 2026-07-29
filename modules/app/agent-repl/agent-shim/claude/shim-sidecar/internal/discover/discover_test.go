@@ -1,13 +1,19 @@
 package discover
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"agentrepl/shim-claude-sidecar/internal/logging"
 	"agentrepl/shim-claude-sidecar/internal/tail"
 )
+
+func testLog() *logging.Bound {
+	return logging.New(io.Discard, io.Discard).With(logging.Context{Component: "test"})
+}
 
 // mkfile creates path (and parents) with some content.
 func mkfile(t *testing.T, path string) {
@@ -24,7 +30,7 @@ func TestClassifySessionTranscript(t *testing.T) {
 	// Arrange
 	root := t.TempDir()
 	p := filepath.Join(root, "projects", "-proj", "sess-abc.jsonl")
-	d := New([]string{root}, "/tmp", nil)
+	d := New([]string{root}, "/tmp", testLog())
 	// Act
 	got, ok := d.Classify(p)
 	// Assert
@@ -40,7 +46,7 @@ func TestClassifyAgentSidechain(t *testing.T) {
 	// Arrange
 	root := t.TempDir()
 	p := filepath.Join(root, "projects", "-proj", "S1", "subagents", "agent-abc123.jsonl")
-	d := New([]string{root}, "/tmp", nil)
+	d := New([]string{root}, "/tmp", testLog())
 	// Act
 	got, ok := d.Classify(p)
 	// Assert: session from the PATH segment; task id from the filename; meta companion.
@@ -59,7 +65,7 @@ func TestClassifyWorkflowJournal(t *testing.T) {
 	// Arrange
 	root := t.TempDir()
 	p := filepath.Join(root, "projects", "-proj", "S2", "subagents", "workflows", "wf_deadbeef", "journal.jsonl")
-	d := New([]string{root}, "/tmp", nil)
+	d := New([]string{root}, "/tmp", testLog())
 	// Act
 	got, ok := d.Classify(p)
 	// Assert
@@ -74,7 +80,7 @@ func TestClassifyWorkflowJournal(t *testing.T) {
 func TestClassifySpoolKinds(t *testing.T) {
 	// Arrange
 	spool := t.TempDir()
-	d := New(nil, spool, nil)
+	d := New(nil, spool, testLog())
 	cases := []struct {
 		name string
 		file string
@@ -128,7 +134,7 @@ func TestClassifySpoolCarriesNoSessionID(t *testing.T) {
 func TestClassifyRejectsUnknownSpoolPrefix(t *testing.T) {
 	// Arrange: a task id whose first char is not a/b/w.
 	spool := t.TempDir()
-	d := New(nil, spool, nil)
+	d := New(nil, spool, testLog())
 	p := filepath.Join(spool, "claude-501", "slug", "SESS", "tasks", "x999.output")
 	// Act
 	_, ok := d.Classify(p)
@@ -142,7 +148,7 @@ func TestClassifyMetaJsonNotTailed(t *testing.T) {
 	// Arrange: the sidechain meta.json companion is not a tail target.
 	root := t.TempDir()
 	p := filepath.Join(root, "projects", "-proj", "S1", "subagents", "agent-abc.meta.json")
-	d := New([]string{root}, "/tmp", nil)
+	d := New([]string{root}, "/tmp", testLog())
 	// Act
 	_, ok := d.Classify(p)
 	// Assert
@@ -159,7 +165,7 @@ func TestScanUnionsRootsAndSpools(t *testing.T) {
 	mkfile(t, filepath.Join(root, "projects", "-p", "S", "subagents", "agent-a1.jsonl"))
 	mkfile(t, filepath.Join(root, "projects", "-p", "S", "subagents", "workflows", "wf_x", "journal.jsonl"))
 	mkfile(t, filepath.Join(spool, "claude-501", "sl", "S", "tasks", "b7.output"))
-	d := New([]string{root}, spool, nil)
+	d := New([]string{root}, spool, testLog())
 	// Act
 	got := d.Scan()
 	// Assert: all four shapes discovered.

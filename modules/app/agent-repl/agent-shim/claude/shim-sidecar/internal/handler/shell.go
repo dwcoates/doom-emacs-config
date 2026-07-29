@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
+	"agentrepl/shim-claude-sidecar/internal/logging"
 	"agentrepl/shim-claude-sidecar/internal/tail"
 )
 
@@ -32,11 +33,11 @@ const maxExitMarkerDigits = 3
 // Completion is still never GUESSED: absent the marker this handler infers
 // nothing and the staleness policy owns the outcome exactly as before (§7.4).
 type ShellOutputHandler struct {
-	log Logf
+	log *logging.Bound
 }
 
 // NewShellOutputHandler builds a handler.
-func NewShellOutputHandler(log Logf) *ShellOutputHandler {
+func NewShellOutputHandler(log *logging.Bound) *ShellOutputHandler {
 	return &ShellOutputHandler{log: log}
 }
 
@@ -59,7 +60,7 @@ func (h *ShellOutputHandler) Handle(frames []tail.Frame, ctx *Context) []*corev1
 	if code != 0 {
 		status = corev1.TerminalStatus_TERMINAL_STATUS_ERROR
 	}
-	h.log("shell: task=%s EXIT=%d -> %s (exit-marker)", ctx.TaskID, code, status)
+	h.log.With(logging.Context{Operation: "exit-marker", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).Log("EXIT=%d status=%s", code, status)
 	return append(events, taskEndedEvent(ctx.SessionID, corev1.Plane_PLANE_FILE, &corev1.TaskEnded{
 		TaskId:     ctx.TaskID,
 		Kind:       corev1.TaskKind_TASK_KIND_SHELL,

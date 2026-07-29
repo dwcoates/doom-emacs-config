@@ -1,11 +1,16 @@
 package db
 
 import (
+	"bytes"
+	"encoding/json"
+	"io"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
+	"agentrepl/shim-store/internal/logging"
 	"google.golang.org/protobuf/types/known/anypb"
 )
 
@@ -16,7 +21,7 @@ import (
 func openTemp(t *testing.T) *DB {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "events.db")
-	d, err := Open(path, nil)
+	d, err := Open(path, logging.New(io.Discard, io.Discard, false))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -101,13 +106,13 @@ func TestOpenSeedsSchemaMeta(t *testing.T) {
 func TestReopenIsIdempotent(t *testing.T) {
 	// Arrange
 	path := filepath.Join(t.TempDir(), "events.db")
-	d1, err := Open(path, nil)
+	d1, err := Open(path, logging.New(io.Discard, io.Discard, false))
 	if err != nil {
 		t.Fatalf("first Open: %v", err)
 	}
 	d1.Close()
 	// Act
-	d2, err := Open(path, nil)
+	d2, err := Open(path, logging.New(io.Discard, io.Discard, false))
 	// Assert
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
@@ -125,7 +130,7 @@ func TestReopenIsIdempotent(t *testing.T) {
 func TestOpenRejectsNewerSchema(t *testing.T) {
 	// Arrange: a database stamped with a future version.
 	path := filepath.Join(t.TempDir(), "events.db")
-	d, err := Open(path, nil)
+	d, err := Open(path, logging.New(io.Discard, io.Discard, false))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -134,9 +139,22 @@ func TestOpenRejectsNewerSchema(t *testing.T) {
 	}
 	d.Close()
 	// Act
-	_, err = Open(path, nil)
+	var logs bytes.Buffer
+	_, err = Open(path, logging.New(&logs, io.Discard, false).With(logging.Fields{Component: "db", DatabasePath: path}))
 	// Assert
 	if err == nil {
 		t.Fatal("expected Open to reject a newer on-disk schema, got nil")
+	}
+	var record struct {
+		Operation string         `json:"operation"`
+		Level     string         `json:"level"`
+		Message   string         `json:"message"`
+		Context   map[string]any `json:"context"`
+	}
+	if decodeErr := json.Unmarshal(logs.Bytes(), &record); decodeErr != nil {
+		t.Fatalf("newer-schema record is not JSON: %v", decodeErr)
+	}
+	if record.Operation != "migrate" || record.Level != "error" || !strings.Contains(record.Message, "schema migration failed") || record.Context["db"] != path || record.Context["table"] != "schema_meta" {
+		t.Fatalf("newer-schema error was not canonically logged with context: %#v", record)
 	}
 }

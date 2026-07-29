@@ -45,3 +45,45 @@ store-client drops it — no spill, no retry). The DSN therefore carries
 begins DEFERRED.
 
 Dependencies: `proto/agentshim/` (generated Go), SQLite.
+
+## Logging
+
+- The store owns one canonical JSON logging API in `internal/logging`, divided
+  between normal and verbose emission functions. New or changed store code
+  uses that API only.
+- Store records are genuinely global and persist in
+  `~/.cache/agent-repl/log/shim-store.log`. The store must not narrate
+  successful session activity that is already owned by a producer or consumer.
+  It logs its own lifecycle, storage, transaction, protocol, and error outcomes
+  with the relevant identifiers as structured context.
+- Every new or materially changed nontrivial function logs its entry. Every
+  meaningful branch that selects a different nontrivial block, call, state
+  transition, or outcome logs its selection.
+- The normal helper persists and emits to the terminal. The verbose helper
+  always persists and gates terminal output through the store verbose setting.
+- Each error is logged exactly once by its owning layer with database path,
+  table, session, producer or subscriber, transaction, operation, branch
+  outcome, and cause. Error-path tests assert the canonical record and context.
+- Frequent or hot diagnostics use the verbose helper. Do not bypass logging.
+  Direct diagnostic output through `fmt`, `log`, `slog`, or an ad hoc logger is
+  forbidden except a documented pre-logger bootstrap failure or logger-sink
+  emergency path.
+
+## Verification
+
+- Run `make coverage` after every store Go change. It exercises every package
+  with `-coverpkg=./...` and prints `go tool cover -func` statement output.
+  The command must pass.
+- Before handoff, run `modules/app/agent-repl/bin/test-all.sh` from the
+  repository root. Every tracked suite must pass.
+- Maintain at least 90% statement coverage. Until the measured store baseline
+  reaches that target, never reduce it, report the gap explicitly, and add
+  focused tests for every critical branch and every error path changed.
+- Run `modules/app/agent-repl/bin/report-logging-density.sh store` and report
+  its source-line and canonical-call counts as a rough review aid. It is not
+  semantic logging coverage, so directly audit all critical branches and
+  errors even when the ratio rises.
+- After a commit lands on `master`, run
+  `modules/app/agent-repl/bin/test-all.sh --record`, inspect
+  `modules/app/agent-repl/test_time.csv`, and surface every reported timing
+  regression.

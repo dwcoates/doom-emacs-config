@@ -23,3 +23,43 @@ When `AGENT_REPL_FORBID_VENDOR_CALLS` is set to any non-empty value the guard
 throws and the shim exits nonzero — never a silent no-op, never a fake
 fallback. `test/setup.ts` sets it for the whole vitest suite, so a test that
 needs offline behavior must pass `--fake`. Production must never set it.
+
+## Logging
+
+- The Claude shim owns one canonical JSON logging API in `src/uds/log.ts`,
+  divided between normal and verbose emission functions. New or changed shim
+  code uses that API only.
+- Every shim has `--cwd`, so every durable shim record is workspace-bound and
+  persists through `<workspace>/.claude/emacs/shim.log`. Every record carries
+  the shim `pid` and every known agent-repl and Claude session identifier. A
+  failed workspace binding is an invariant violation, never a global record.
+- Every new or materially changed nontrivial function logs its entry. Every
+  meaningful branch that selects a different nontrivial block, call, state
+  transition, or outcome logs its selection.
+- The normal helper persists through the daemon's captured shim log and emits
+  to stderr. The verbose helper always persists and gates terminal visibility
+  through the owning runtime's verbose setting.
+- Each error is logged exactly once by its owning layer with session, store key,
+  socket, request, operation, resolved inputs, branch outcome, and cause.
+  Error-path tests assert the canonical record and its context.
+- Frequent or hot diagnostics use the verbose helper. Do not bypass logging.
+  Direct `console`, `process.stderr`, or ad hoc logger aliases are forbidden
+  except a documented pre-logger bootstrap failure or logger-sink emergency path.
+
+## Verification
+
+- Before completing changes, run `npm run typecheck` and `npm run coverage`.
+  Both commands must pass. Coverage measures authored `src/**/*.ts`, including
+  branch data, and excludes declarations and generated sources.
+- Before handoff, run `modules/app/agent-repl/bin/test-all.sh` from the
+  repository root. Every tracked suite must pass.
+- Maintain at least 90% statement coverage. Never reduce the measured baseline,
+  and add focused tests for every critical branch and every error path changed.
+- Run `modules/app/agent-repl/bin/report-logging-density.sh shim` and report
+  its source-line and canonical-call counts as a rough review aid. It is not
+  semantic logging coverage, so directly audit all critical branches and
+  errors even when the ratio rises.
+- After a commit lands on `master`, run
+  `modules/app/agent-repl/bin/test-all.sh --record`, inspect
+  `modules/app/agent-repl/test_time.csv`, and surface every reported timing
+   regression.

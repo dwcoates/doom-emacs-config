@@ -39,7 +39,7 @@ func TestSpawnPassesTheForbidVariableToTheChild(t *testing.T) {
 			argv := []string{sh, "-c", "printf '%s' \"$" + vendorguard.EnvVar + "\" > " + out}
 
 			// Act
-			p, err := Spawn(Options{Argv: argv, Dir: dir, ExtraEnv: tc.extraEnv, Logf: t.Logf})
+			p, err := Spawn(Options{Argv: argv, Dir: dir, ExtraEnv: tc.extraEnv, Logger: &recordingLogger{}})
 			if err != nil {
 				t.Fatalf("Spawn: %v", err)
 			}

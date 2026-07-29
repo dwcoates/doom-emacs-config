@@ -7,6 +7,7 @@ import (
 	"time"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
+	"agentrepl/shim-store/internal/logging"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -21,7 +22,7 @@ func (d *DB) ReplayFrom(sessionID string, fromSeq uint64) ([]*corev1.Event, erro
 		`SELECT payload FROM event WHERE session_id = ? AND seq > ? ORDER BY seq ASC`,
 		sessionID, fromSeq)
 	if err != nil {
-		return nil, fmt.Errorf("shim-store query: replay (session=%q from_seq=%d): %w", sessionID, fromSeq, err)
+		return nil, d.queryError("replay", "event", sessionID, fmt.Errorf("shim-store query: replay (session=%q from_seq=%d): %w", sessionID, fromSeq, err))
 	}
 	defer rows.Close()
 
@@ -29,16 +30,16 @@ func (d *DB) ReplayFrom(sessionID string, fromSeq uint64) ([]*corev1.Event, erro
 	for rows.Next() {
 		var blob []byte
 		if err := rows.Scan(&blob); err != nil {
-			return nil, fmt.Errorf("shim-store query: scanning replay row (session=%q): %w", sessionID, err)
+			return nil, d.queryError("replay-scan", "event", sessionID, fmt.Errorf("shim-store query: scanning replay row (session=%q): %w", sessionID, err))
 		}
 		ev := &corev1.Event{}
 		if err := proto.Unmarshal(blob, ev); err != nil {
-			return nil, fmt.Errorf("shim-store query: unmarshaling replay payload (session=%q): %w", sessionID, err)
+			return nil, d.queryError("replay-unmarshal", "event", sessionID, fmt.Errorf("shim-store query: unmarshaling replay payload (session=%q): %w", sessionID, err))
 		}
 		out = append(out, ev)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("shim-store query: iterating replay rows (session=%q): %w", sessionID, err)
+		return nil, d.queryError("replay-iterate", "event", sessionID, fmt.Errorf("shim-store query: iterating replay rows (session=%q): %w", sessionID, err))
 	}
 	return out, nil
 }
@@ -48,7 +49,7 @@ func (d *DB) MaxSeq(sessionID string) (uint64, error) {
 	var v uint64
 	row := d.sql.QueryRow(`SELECT COALESCE(MAX(seq), 0) FROM event WHERE session_id = ?`, sessionID)
 	if err := row.Scan(&v); err != nil {
-		return 0, fmt.Errorf("shim-store query: max seq (session=%q): %w", sessionID, err)
+		return 0, d.queryError("max-seq", "event", sessionID, fmt.Errorf("shim-store query: max seq (session=%q): %w", sessionID, err))
 	}
 	return v, nil
 }
@@ -60,7 +61,7 @@ func (d *DB) EventsByTask(sessionID, taskID string) ([]*corev1.Event, error) {
 		`SELECT payload FROM event WHERE session_id = ? AND task_id = ? ORDER BY seq ASC`,
 		sessionID, taskID)
 	if err != nil {
-		return nil, fmt.Errorf("shim-store query: by-task (session=%q task=%q): %w", sessionID, taskID, err)
+		return nil, d.queryError("by-task", "event", sessionID, fmt.Errorf("shim-store query: by-task (session=%q task=%q): %w", sessionID, taskID, err))
 	}
 	defer rows.Close()
 
@@ -68,16 +69,16 @@ func (d *DB) EventsByTask(sessionID, taskID string) ([]*corev1.Event, error) {
 	for rows.Next() {
 		var blob []byte
 		if err := rows.Scan(&blob); err != nil {
-			return nil, fmt.Errorf("shim-store query: scanning by-task row: %w", err)
+			return nil, d.queryError("by-task-scan", "event", sessionID, fmt.Errorf("shim-store query: scanning by-task row: %w", err))
 		}
 		ev := &corev1.Event{}
 		if err := proto.Unmarshal(blob, ev); err != nil {
-			return nil, fmt.Errorf("shim-store query: unmarshaling by-task payload: %w", err)
+			return nil, d.queryError("by-task-unmarshal", "event", sessionID, fmt.Errorf("shim-store query: unmarshaling by-task payload: %w", err))
 		}
 		out = append(out, ev)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("shim-store query: iterating by-task rows: %w", err)
+		return nil, d.queryError("by-task-iterate", "event", sessionID, fmt.Errorf("shim-store query: iterating by-task rows: %w", err))
 	}
 	return out, nil
 }
@@ -145,7 +146,7 @@ func (d *DB) OpenTasks() ([]*corev1.OpenTaskState, error) {
 func (d *DB) Cursors() ([]*corev1.CursorState, error) {
 	rows, err := d.sql.Query(`SELECT file_id, path, offset, carry FROM cursor`)
 	if err != nil {
-		return nil, fmt.Errorf("shim-store query: listing cursors: %w", err)
+		return nil, d.queryError("list-cursors", "cursor", "", fmt.Errorf("shim-store query: listing cursors: %w", err))
 	}
 	defer rows.Close()
 
@@ -154,13 +155,13 @@ func (d *DB) Cursors() ([]*corev1.CursorState, error) {
 		c := &corev1.CursorState{}
 		var carry []byte
 		if err := rows.Scan(&c.FileId, &c.Path, &c.Offset, &carry); err != nil {
-			return nil, fmt.Errorf("shim-store query: scanning cursor row: %w", err)
+			return nil, d.queryError("list-cursors-scan", "cursor", "", fmt.Errorf("shim-store query: scanning cursor row: %w", err))
 		}
 		c.Carry = carry
 		out = append(out, c)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("shim-store query: iterating cursor rows: %w", err)
+		return nil, d.queryError("list-cursors-iterate", "cursor", "", fmt.Errorf("shim-store query: iterating cursor rows: %w", err))
 	}
 	return out, nil
 }
@@ -177,6 +178,11 @@ func (d *DB) Cursor(fileID string) (*corev1.CursorState, error) {
 	case errors.Is(err, sql.ErrNoRows):
 		return nil, nil
 	default:
-		return nil, fmt.Errorf("shim-store query: reading cursor (file_id=%q): %w", fileID, err)
+		return nil, d.queryError("cursor", "cursor", "", fmt.Errorf("shim-store query: reading cursor (file_id=%q): %w", fileID, err))
 	}
+}
+
+func (d *DB) queryError(operation, table, session string, err error) error {
+	d.log.Log(logging.Fields{Operation: operation, Table: table, Session: session, Level: "error"}, "database query failed: %v", err)
+	return err
 }

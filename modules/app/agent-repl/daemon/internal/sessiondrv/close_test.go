@@ -26,6 +26,7 @@ func newClosingRig(t *testing.T) (*Manager, *fakeSpawner, *fakeApplier) {
 		ProtocolVersion:   "1",
 		now:               func() int64 { return 1000 },
 		Source:            stubSource{},
+		FileDiagnostics:   fakeFileDiagnosticPersister{},
 		newClient:         func(c shimclient.Config) sessionClient { return &fakeClient{cfg: c} },
 	}
 	m, err := New(cfg)
@@ -108,6 +109,7 @@ func TestAnUnexpectedDriverExitStillStopsTheShim(t *testing.T) {
 		ProtocolVersion:   "1",
 		now:               func() int64 { return 1000 },
 		Source:            stubSource{},
+		FileDiagnostics:   fakeFileDiagnosticPersister{},
 		newClient:         func(c shimclient.Config) sessionClient { return &fakeClient{cfg: c, runResult: runResult} },
 	})
 	if err != nil {

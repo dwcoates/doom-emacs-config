@@ -197,7 +197,7 @@ function fail(path: string, want: string, got: unknown): never {
   // A malformed push only throws inside Emacs's script eval, which the
   // operator reading the daemon log never sees — so the breach is logged
   // here too, immediately before the throw that stays the enforcement.
-  log("error", `workspace roster: ${path} must be ${want}, got ${describeBreach(got)}`);
+  log("error", `workspace roster: ${path} must be ${want}, got ${describeBreach(got)}`, { operation: "sidebar.roster-contract-breach", context: { path, expected: want, received: got } });
   throw new Error(
     `workspace roster: ${path} must be ${want}, got ${JSON.stringify(got) ?? String(got)}`,
   );
@@ -237,6 +237,7 @@ function validateRow(value: unknown, path: string): WorkspaceRow {
     log(
       "error",
       `workspace roster: unknown status ${JSON.stringify(status)} at ${path}.status — row: ${describeBreach(value)}`,
+      { operation: "sidebar.roster-status-invalid", context: { path, status, row: value } },
     );
     throw new Error(`workspace roster: unknown status ${JSON.stringify(status)} at ${path}.status`);
   }
@@ -280,7 +281,7 @@ export function validateWorkspaceRoster(value: unknown): WorkspaceRoster {
   // Emacs-side grouping must be taught here, not silently painted as one
   // the webapp already knows.
   if (!SIDEBAR_VIEWS.has(view)) {
-    log("error", `workspace roster: unknown view ${JSON.stringify(view)} — roster: ${describeBreach(value)}`);
+    log("error", `workspace roster: unknown view ${JSON.stringify(view)} — roster: ${describeBreach(value)}`, { operation: "sidebar.roster-view-invalid", context: { view, roster: value } });
     throw new Error(`workspace roster: unknown view ${JSON.stringify(view)} at roster.view`);
   }
   return {
@@ -729,7 +730,7 @@ export class WorkspaceSidebar {
       .catch((err: unknown) => {
         // A command that did not land must say so: the user just clicked
         // expecting Emacs to move, and silence would read as a dead rail.
-        console.error("workspace command failed", err);
+        log("error", `workspace command failed: ${String(err)}`, { operation: "sidebar.workspace-command-failed", context: { cause: err } });
         this.showError(COMMAND_FAILED_NOTICE);
       });
   }

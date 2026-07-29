@@ -44,7 +44,8 @@ const (
 type CLIClassifier struct {
 	// Model is the model to pin; empty pins defaultClassifierModel.
 	Model string
-	// Logf is the daemon logger. Nil discards.
+	// Logf is the daemon logger. It is required so classification outcomes and
+	// errors enter the daemon's canonical log.
 	Logf func(string, ...any)
 	// run executes the classification and returns stdout/stderr. Injected only
 	// by tests, so the parsing and the token contract are testable without
@@ -60,7 +61,7 @@ func NewCLIClassifier(model string, logf func(string, ...any)) *CLIClassifier {
 		model = defaultClassifierModel
 	}
 	if logf == nil {
-		logf = func(string, ...any) {}
+		panic("sessiondrv: CLIClassifier Logf is required")
 	}
 	return &CLIClassifier{Model: model, Logf: logf, run: spawnClassifier}
 }
@@ -73,6 +74,9 @@ func NewCLIClassifier(model string, logf func(string, ...any)) *CLIClassifier {
 // from a real HOLD verdict in the UI, and the whole point of the ERROR state is
 // that the user can see nothing actually decided their prompt.
 func (c *CLIClassifier) Classify(ctx context.Context, req ClassifyRequest) (ClassifyResult, error) {
+	if c == nil || c.Logf == nil {
+		panic("sessiondrv: CLIClassifier Logf is required")
+	}
 	runCtx, cancel := context.WithTimeout(ctx, classifyTimeout)
 	defer cancel()
 
@@ -92,12 +96,11 @@ func (c *CLIClassifier) Classify(ctx context.Context, req ClassifyRequest) (Clas
 	return ClassifyResult{Classification: cls, Rationale: rationaleFor(cls)}, nil
 }
 
-// logf logs through Logf, discarding when the classifier was built as a struct
-// literal without one. NewCLIClassifier always sets it; this keeps a direct
-// construction from nil-derefing on its first verdict.
+// logf logs through Logf. A direct struct literal is invalid without the
+// required logger dependency, so reject it loudly instead of losing evidence.
 func (c *CLIClassifier) logf(format string, args ...any) {
 	if c.Logf == nil {
-		return
+		panic("sessiondrv: CLIClassifier Logf is required")
 	}
 	c.Logf(format, args...)
 }

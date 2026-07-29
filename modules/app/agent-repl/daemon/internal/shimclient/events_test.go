@@ -10,7 +10,21 @@ import (
 	"agentrepl/wire"
 
 	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/protobuf/types/known/structpb"
 )
+
+type recordingFileDiagnostics struct{ got chan *corev1.Event }
+
+func (s *recordingFileDiagnostics) PersistFileDiagnostic(ev *corev1.Event, _ *corev1.FilePlaneDiagnostic) error {
+	s.got <- ev
+	return nil
+}
+
+type failingFileDiagnostics struct{}
+
+func (failingFileDiagnostics) PersistFileDiagnostic(*corev1.Event, *corev1.FilePlaneDiagnostic) error {
+	return errors.New("durable sink failed")
+}
 
 func TestReplayContinuationFromLastSeq(t *testing.T) {
 	// Arrange: the daemon has durably seen through seq 4; on attach its
@@ -92,6 +106,77 @@ func TestEphemeralSeqZeroDoesNotAdvanceHighWater(t *testing.T) {
 	<-h.frame.ch // routed to frame sink
 	if last := h.seq.LastSeq("sess-1"); last != 7 {
 		t.Fatalf("ephemeral must not touch high-water: got %d want 7", last)
+	}
+}
+
+func TestFilePlaneDiagnosticPersistsWithoutEnteringOtherSinks(t *testing.T) {
+	h := newHarness()
+	diagnostics := &recordingFileDiagnostics{got: make(chan *corev1.Event, 1)}
+	cfg := h.config(t, "agent-session", "/unused.sock")
+	cfg.FileDiagnostics = diagnostics
+	c := New(cfg)
+	context, err := structpb.NewStruct(map[string]any{"file": "events.jsonl"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ev := &corev1.Event{SessionId: "claude-session", Seq: 9, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, Plane: corev1.Plane_PLANE_FILE, ProducedAtMs: 1234,
+		Payload: &corev1.Event_FilePlaneDiagnostic{FilePlaneDiagnostic: &corev1.FilePlaneDiagnostic{
+			SourceRuntime: corev1.DiagnosticSourceRuntime_DIAGNOSTIC_SOURCE_RUNTIME_SIDECAR,
+			Level:         "error", Verbosity: "normal", Operation: "sidecar.ingest.failed", Message: "ingest failed", Context: context, SourcePid: 42, SourcePath: "/tmp/events.jsonl",
+		}}}
+	if err := c.dispatchEvent(ev); err != nil {
+		t.Fatalf("dispatch file-plane diagnostic: %v", err)
+	}
+	assertRecv(t, diagnostics.got)
+	if got := h.seq.LastSeq("agent-session"); got != 9 {
+		t.Fatalf("last sequence=%d, want 9", got)
+	}
+	for name, channel := range map[string]chan *corev1.Event{"state": h.state.ch, "frame": h.frame.ch} {
+		select {
+		case <-channel:
+			t.Fatalf("file-plane diagnostic entered %s sink", name)
+		default:
+		}
+	}
+}
+
+func TestFilePlaneDiagnosticRejectsWrongPlane(t *testing.T) {
+	h := newHarness()
+	cfg := h.config(t, "agent-session", "/unused.sock")
+	cfg.FileDiagnostics = &recordingFileDiagnostics{got: make(chan *corev1.Event, 1)}
+	c := New(cfg)
+	err := c.dispatchEvent(&corev1.Event{SessionId: "claude-session", Seq: 1, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, Plane: corev1.Plane_PLANE_STREAM, ProducedAtMs: 1,
+		Payload: &corev1.Event_FilePlaneDiagnostic{FilePlaneDiagnostic: &corev1.FilePlaneDiagnostic{SourceRuntime: corev1.DiagnosticSourceRuntime_DIAGNOSTIC_SOURCE_RUNTIME_SIDECAR, Level: "info", Verbosity: "normal", Operation: "sidecar.x", Message: "x", Context: &structpb.Struct{}, SourcePid: 1, SourcePath: "/tmp/x"}}})
+	if err == nil {
+		t.Fatal("wrong-plane file diagnostic was accepted")
+	}
+}
+
+func TestFilePlaneDiagnosticDoesNotAdvanceSequenceUntilPersisted(t *testing.T) {
+	h := newHarness()
+	context, err := structpb.NewStruct(map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ev := &corev1.Event{SessionId: "claude-session", Seq: 7, Class: corev1.EventClass_EVENT_CLASS_PERSISTENT, Plane: corev1.Plane_PLANE_FILE, ProducedAtMs: 1,
+		Payload: &corev1.Event_FilePlaneDiagnostic{FilePlaneDiagnostic: &corev1.FilePlaneDiagnostic{SourceRuntime: corev1.DiagnosticSourceRuntime_DIAGNOSTIC_SOURCE_RUNTIME_SIDECAR, Level: "error", Verbosity: "normal", Operation: "sidecar.x", Message: "x", Context: context, SourcePid: 1}}}
+	failingConfig := h.config(t, "agent-session", "/unused.sock")
+	failingConfig.FileDiagnostics = failingFileDiagnostics{}
+	failing := New(failingConfig)
+	if err := failing.dispatchEvent(ev); err == nil {
+		t.Fatal("failed persistence was accepted")
+	}
+	if got := h.seq.LastSeq("agent-session"); got != 0 || failing.lastSeen != 0 {
+		t.Fatalf("failed persistence advanced sequence: store=%d client=%d", got, failing.lastSeen)
+	}
+	successConfig := h.config(t, "agent-session", "/unused.sock")
+	successConfig.FileDiagnostics = &recordingFileDiagnostics{got: make(chan *corev1.Event, 1)}
+	success := New(successConfig)
+	if err := success.dispatchEvent(ev); err != nil {
+		t.Fatalf("successful retry: %v", err)
+	}
+	if got := h.seq.LastSeq("agent-session"); got != 7 {
+		t.Fatalf("successful retry sequence=%d, want 7", got)
 	}
 }
 

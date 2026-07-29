@@ -163,6 +163,12 @@ type fakeClient struct {
 	healthRequestIDs []string
 }
 
+type fakeFileDiagnosticPersister struct{}
+
+func (fakeFileDiagnosticPersister) PersistFileDiagnostic(string, string, *corev1.Event, *corev1.FilePlaneDiagnostic) error {
+	return nil
+}
+
 func (c *fakeClient) Run(ctx context.Context) error {
 	if c.runResult != nil {
 		select {
@@ -264,6 +270,7 @@ func newTestManager(t *testing.T, locator SessionLocator, spawner Spawner) (*Man
 		ClearCompactStore: newFakeClearCompactStore(),
 		ProtocolVersion:   "1",
 		Source:            stubSource{},
+		FileDiagnostics:   fakeFileDiagnosticPersister{},
 		newClient: func(cfg shimclient.Config) sessionClient {
 			fc := &fakeClient{cfg: cfg}
 			mu.Lock()
@@ -295,6 +302,7 @@ func newTestManagerNotReady(t *testing.T, locator SessionLocator, spawner Spawne
 		ClearCompactStore: newFakeClearCompactStore(),
 		ProtocolVersion:   "1",
 		Source:            stubSource{},
+		FileDiagnostics:   fakeFileDiagnosticPersister{},
 		newClient: func(cfg shimclient.Config) sessionClient {
 			fc := &fakeClient{cfg: cfg, notReady: notReady}
 			mu.Lock()
@@ -921,6 +929,7 @@ func TestTerminalDriverErrorStopsShimAfterEviction(t *testing.T) {
 		ClearCompactStore: newFakeClearCompactStore(),
 		ProtocolVersion:   "1",
 		Source:            stubSource{},
+		FileDiagnostics:   fakeFileDiagnosticPersister{},
 		newClient: func(cfg shimclient.Config) sessionClient {
 			client = &fakeClient{cfg: cfg, runResult: runResult}
 			return client

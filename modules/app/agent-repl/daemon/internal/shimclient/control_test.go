@@ -113,7 +113,7 @@ func TestHealthRequiresMatchingStatusFromLiveShim(t *testing.T) {
 
 func TestHealthFailsWithoutLiveShim(t *testing.T) {
 	// Arrange: no Run/handshake has made a connection active.
-	c := New(Config{SessionID: "sess-1"})
+	c := New(Config{SessionID: "sess-1", Logf: t.Logf})
 
 	// Act.
 	_, err := c.Health(context.Background(), "frontend-health-1")

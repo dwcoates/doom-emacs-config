@@ -470,6 +470,170 @@ DIR.  This helper intentionally does not log because doing so would recurse."
     (set-file-modes dir #o700)
     (puthash dir t agent-repl--validated-private-log-directories)))
 
+(defvar agent-repl--workspace-log-targets (make-hash-table :test #'equal)
+  "Runtime-owned external targets for workspace `emacs.log' symlinks.")
+
+(defconst agent-repl--emacs-log-target-prefix "agent-repl-emacs-"
+  "Filename prefix that identifies an Emacs-owned external log target.")
+
+(define-error 'agent-repl-log-truncate-failure "agent-repl log truncation failure")
+
+(defun agent-repl--json-object (&rest pairs)
+  "Return PAIRS as a JSON object with string keys.
+Each member of PAIRS is a cons whose car is the field name and whose cdr is
+already JSON-serializable.  A hash table avoids the nil/empty-alist ambiguity
+in `json-serialize'."
+  (let ((object (make-hash-table :test #'equal)))
+    (dolist (pair pairs object)
+      (puthash (car pair) (cdr pair) object))))
+
+(defun agent-repl--log-rfc3339-timestamp ()
+  "Return the current time as an RFC 3339 timestamp with microseconds."
+  (format-time-string "%FT%T.%6N%:z"))
+
+(defun agent-repl--log-operation (fmt)
+  "Return the stable operation name represented by FMT.
+The public logging APIs retain their format-string signatures, so the format
+template itself is normalized into a deterministic machine-readable name.
+Runtime values in ARGS never participate in the operation name."
+  (let* ((source (if (stringp fmt) fmt (format "%S" fmt)))
+         (normalized (replace-regexp-in-string
+                      "[^[:alnum:]]+" "-" (downcase source))))
+    (setq normalized (replace-regexp-in-string "\\`-+\\|-+\\'" "" normalized))
+    (concat "agent-repl." (if (string-empty-p normalized)
+                                "log"
+                              normalized))))
+
+(defun agent-repl--workspace-log-identity (ws)
+  "Return WS's registered canonical directory and stable workspace identity.
+The logging boundary deliberately refuses to derive either value from ambient
+state because a non-nil WS must identify one specific workspace sink."
+  (let ((dir (and (fboundp 'agent-repl--ws-get)
+                  (agent-repl--ws-get ws :project-dir))))
+    (unless (and (stringp dir) (file-directory-p dir))
+      (error "agent-repl log routing invariant violated: workspace %S has no registered project directory" ws))
+    (list :project-dir (directory-file-name (file-truename dir))
+          :workspace-id (or (agent-repl--ws-id-cached ws)
+                            (error "agent-repl log routing invariant violated: workspace %S has no workspace ID" ws)))))
+
+(defun agent-repl--log-add-workspace-identity (record ws)
+  "Add WS identity and known session fields to JSON RECORD when WS is non-nil."
+  (when ws
+    (let ((identity (agent-repl--workspace-log-identity ws)))
+      (puthash "workspace_dir" (plist-get identity :project-dir) record)
+      (puthash "workspace_id" (plist-get identity :workspace-id) record)
+      (dolist (field-value
+               `(("agent_repl_session_id" . ,(agent-repl--ws-get ws :frontend-session-id))
+                 ("claude_session_id" . ,(agent-repl--ws-durable-claude-session-id ws))))
+        (let ((field (car field-value))
+              (value (cdr field-value)))
+          (cond
+           ((null value))
+           ((and (stringp value) (not (string-empty-p value)))
+           (puthash field value record))
+           (t
+            (error "agent-repl log routing invariant violated: workspace %S has invalid %s: %S"
+                   ws field value)))))))
+  record)
+
+(defun agent-repl--log-record (ws level verbosity fmt args)
+  "Serialize WS / LEVEL / VERBOSITY / FMT / ARGS as one JSONL record."
+  (let* ((message (if (stringp fmt)
+                      (apply #'format fmt args)
+                    (agent-repl--log-format-capture-bug fmt)
+                    (format "[BUG non-string-fmt=%S]" fmt)))
+         (context (agent-repl--json-object
+                   (cons "format" (if (stringp fmt) fmt (format "%S" fmt)))
+                   (cons "arguments" (vconcat (mapcar #'prin1-to-string args))))
+                   )
+         (record (agent-repl--json-object
+                  (cons "timestamp" (agent-repl--log-rfc3339-timestamp))
+                  (cons "runtime" "emacs")
+                  (cons "pid" (emacs-pid))
+                  (cons "level" level)
+                  (cons "verbosity" verbosity)
+                  (cons "operation" (agent-repl--log-operation fmt))
+                  (cons "message" message)
+                  (cons "context" context))))
+    (agent-repl--log-add-workspace-identity record ws)
+    (json-serialize record)))
+
+(defun agent-repl--workspace-emacs-log-path (project-dir)
+  "Return the canonical `emacs.log' symlink path below PROJECT-DIR."
+  (expand-file-name ".claude/emacs/emacs.log" project-dir))
+
+(defun agent-repl--ensure-real-log-directory (path)
+  "Ensure PATH is a real directory without following a hostile symlink."
+  ;; A trailing slash makes Emacs resolve a symlink before `file-symlink-p'
+  ;; sees it, so normalize before every safety check.
+  (let ((component (directory-file-name path)))
+    (when (file-symlink-p component)
+      (error "agent-repl log routing invariant violated: directory component is a symlink: %s" component))
+    (cond
+     ((file-exists-p component)
+      (unless (file-directory-p component)
+        (error "agent-repl log routing invariant violated: directory component is not a directory: %s" component)))
+     (t
+      (make-directory component)))
+    ;; Recheck after creation because the path is workspace-controlled.
+    (when (or (file-symlink-p component) (not (file-directory-p component)))
+      (error "agent-repl log routing invariant violated: unsafe directory component: %s" component))
+    component))
+
+(defun agent-repl--workspace-emacs-log-target (ws)
+  "Return WS's runtime-owned external target and atomically install its link.
+WS must have a registered project directory.  Workspace-controlled paths are
+never opened for writing: the durable target is created in
+`temporary-file-directory' and the workspace path is only an atomic symlink."
+  (let* ((identity (agent-repl--workspace-log-identity ws))
+         (cached (gethash ws agent-repl--workspace-log-targets)))
+    (if cached
+        (let ((target (plist-get cached :target)))
+          (unless (and (equal (plist-get cached :project-dir) (plist-get identity :project-dir))
+                       (equal (plist-get cached :workspace-id) (plist-get identity :workspace-id)))
+            (error "agent-repl log routing invariant violated: workspace %S retained a target after identity rebinding" ws))
+          (unless (file-regular-p target)
+            (error "agent-repl log routing invariant violated: owned target vanished: %s" target))
+          target)
+      (let ((project-dir (plist-get identity :project-dir)))
+        (let* ((canonical (agent-repl--workspace-emacs-log-path project-dir))
+               (canonical-dir (file-name-directory canonical)))
+               ;; On a new Emacs runtime, the workspace path is untrusted even
+               ;; when it names an old temporary file.  Only this in-memory
+               ;; registry authorizes target reuse, which makes link poisoning
+               ;; structurally unable to redirect a durable write.
+          (agent-repl--ensure-real-log-directory (expand-file-name ".claude" project-dir))
+          (agent-repl--ensure-real-log-directory canonical-dir)
+          (when (file-directory-p canonical)
+            (error "agent-repl log routing invariant violated: canonical log path is a directory: %s" canonical))
+          ;; Target creation happens only after both workspace-controlled
+          ;; directory components are proven real, so a hostile parent leaves
+          ;; no runtime-owned temporary artifact behind.
+          (let ((target (make-temp-file agent-repl--emacs-log-target-prefix nil ".log"))
+                (link-tmp nil)
+                (installed nil))
+            (unwind-protect
+                (progn
+                  (setq link-tmp (make-temp-file
+                                  (expand-file-name ".emacs.log-link-" canonical-dir)))
+                  ;; Reserving first gives a collision-proof name.  Removing
+                  ;; that reservation immediately before a non-overwriting
+                  ;; symlink creation ensures an interloper causes failure.
+                  (delete-file link-tmp)
+                  (make-symbolic-link target link-tmp)
+                  ;; `rename-file' makes the canonical-link replacement atomic.
+                  (rename-file link-tmp canonical t)
+                  (puthash ws (append (list :target target) identity)
+                           agent-repl--workspace-log-targets)
+                  (setq installed t)
+                  target)
+              (when (and link-tmp
+                         (or (file-exists-p link-tmp) (file-symlink-p link-tmp)))
+                (delete-file link-tmp))
+              (unless installed
+                (when (file-exists-p target)
+                  (delete-file target))))))))))
+
 (defvar agent-repl--log-write-counter 0
   "Monotonic counter of successful log-file writes.
 Used by `agent-repl--do-log-to-file' to decide when to size-check.")
@@ -483,17 +647,18 @@ using the logging ladder here would recurse."
   (unless (= (logand (file-modes path) #o777) #o600)
     (set-file-modes path #o600)))
 
-(defun agent-repl--log-truncate (path size)
+(defun agent-repl--log-truncate (path size &optional ws)
   "Drop the first 80% of PATH (SIZE bytes) and append a WARNING line.
 Reads the last 20% of the file as raw bytes, aligns to the next
-newline (so we don't keep a partial first line), atomically replaces
-PATH, then appends a single line noting the truncation.
+newline (so we don't keep a partial first line), then overwrites PATH in
+place so readers holding the target open retain its inode.
 
 Pure side-effect — no logging facilities are called here so we cannot
 re-enter `agent-repl--do-log-to-file' and recurse."
   (let* ((keep-bytes (max 1 (- size (floor (* 0.8 size)))))
          (start (- size keep-bytes))
-         (tmp (concat path ".trunc-tmp")))
+         (warning nil)
+         (needs-newline nil))
     (with-temp-buffer
       (set-buffer-multibyte nil)
       (let ((coding-system-for-read 'no-conversion)
@@ -504,17 +669,27 @@ re-enter `agent-repl--do-log-to-file' and recurse."
         (goto-char (point-min))
         (when (search-forward "\n" nil t)
           (delete-region (point-min) (point)))
-        (write-region (point-min) (point-max) tmp nil 'silent)))
-    (rename-file tmp path t)
-    (let ((warning (format
-                    "%s [agent-repl] WARNING: log truncated — file exceeded cap=%d bytes (was %d bytes); dropped first 80%%, kept last %d bytes"
-                    (format-time-string "%H:%M:%S.%3N")
-                    agent-repl-log-size-cap-bytes size keep-bytes)))
-      (let ((coding-system-for-write 'no-conversion))
-        (write-region (concat warning "\n") nil path t 'silent)))
+        (setq needs-newline
+              (and (> (point-max) (point-min))
+                   (not (eq (char-before (point-max)) ?\n))))
+        (write-region (point-min) (point-max) path nil 'silent)))
+    (setq warning
+          (agent-repl--json-object
+            (cons "timestamp" (agent-repl--log-rfc3339-timestamp))
+            (cons "runtime" "emacs") (cons "pid" (emacs-pid))
+            (cons "level" "warn") (cons "verbosity" "normal")
+            (cons "operation" "agent-repl.log.truncate")
+            (cons "message" "log truncated after size cap exceeded")
+            (cons "context" (agent-repl--json-object
+                              (cons "cap_bytes" agent-repl-log-size-cap-bytes)
+                              (cons "size_bytes" size)
+                              (cons "kept_bytes" keep-bytes)))))
+    (agent-repl--log-add-workspace-identity warning ws)
+    (setq warning (json-serialize warning))
+    (write-region (concat (if needs-newline "\n" "") warning "\n") nil path t 'silent)
     (agent-repl--secure-log-file-mode path)))
 
-(defun agent-repl--log-maybe-truncate (path)
+(defun agent-repl--log-maybe-truncate (path &optional ws)
   "Truncate PATH when it exceeds `agent-repl-log-size-cap-bytes'.
 Called periodically from `agent-repl--do-log-to-file'."
   (let ((attrs (file-attributes path)))
@@ -522,22 +697,24 @@ Called periodically from `agent-repl--do-log-to-file'."
       (let ((size (file-attribute-size attrs)))
         (when (and size (> size agent-repl-log-size-cap-bytes))
           (condition-case err
-              (agent-repl--log-truncate path size)
+              (agent-repl--log-truncate path size ws)
             (error
-             (message "[agent-repl] WARNING: log truncate failed for %s: %S"
-                      path err))))))))
+             (message "[agent-repl] LOG SINK FAILURE operation=truncate path=%s workspace=%S error=%S"
+                      path ws err)
+             (signal 'agent-repl-log-truncate-failure (list path ws err)))))))))
 
-(defun agent-repl--do-log-to-file (text)
+(defun agent-repl--do-log-to-file (text &optional ws)
   "Append TEXT as a line to the logfile when `agent-repl-log-to-file' is non-nil.
-No-ops when the logfile path cannot be determined.  Displays a warning
-if a write error occurs (e.g. read-only filesystem) but does not signal
-an error — logging must not break the caller.
+Sink failures, including truncation failures, emit the emergency diagnostic and
+signal an error; persistence must never silently degrade.
 
 Increments `agent-repl--log-write-counter' on every successful write
 and runs `agent-repl--log-maybe-truncate' once every
 `agent-repl-log-size-check-interval' writes."
   (when agent-repl-log-to-file
-    (when-let ((path (agent-repl--logfile-path)))
+    (let ((path (if ws
+                    (agent-repl--workspace-emacs-log-target ws)
+                  (agent-repl--logfile-path))))
       (condition-case err
           (let ((new-file (not (file-exists-p path))))
             (write-region (concat text "\n") nil path t 'silent)
@@ -547,8 +724,14 @@ and runs `agent-repl--log-maybe-truncate' once every
             (when (and (> agent-repl-log-size-check-interval 0)
                        (zerop (mod agent-repl--log-write-counter
                                    agent-repl-log-size-check-interval)))
-              (agent-repl--log-maybe-truncate path)))
-        (error (message "[agent-repl] WARNING: log write failed to %s: %S" path err))))))
+              (agent-repl--log-maybe-truncate path ws)))
+        (agent-repl-log-truncate-failure
+         (signal (car err) (cdr err)))
+        (error
+         ;; Sink failure cannot enter its own failed sink.  This emergency
+         ;; message is therefore the sole permitted alternate output channel.
+         (message "[agent-repl] LOG SINK FAILURE path=%s error=%S" path err)
+         (error "agent-repl log sink failure for %s: %S" path err))))))
 
 (defun agent-repl--build-log-text (ws fmt args)
   "Build the formatted log line for WS / FMT / ARGS.
@@ -597,6 +780,15 @@ instrumenting it through the logging ladder would recurse indefinitely."
             (goto-char (point-max))
             (insert text "\n")))))))
 
+(defun agent-repl--persist-log-record (ws level verbosity fmt args)
+  "Persist one JSONL record for WS without changing caller-facing signatures."
+  ;; Tests deliberately bind the explicit file sink kill-switch off.  Do not
+  ;; construct or route a record when persistence itself was opted out of.
+  (let ((record (agent-repl--log-record ws level verbosity fmt args)))
+    (when agent-repl-log-to-file
+      (agent-repl--do-log-to-file record ws))
+    (agent-repl--append-workspace-log ws record)))
+
 ;;;; ---- Echo-area (modeline) severity gate ----
 ;;
 ;; agent-repl has two distinct log sinks and they are NOT the same channel:
@@ -644,6 +836,14 @@ agent-repl's quiet sink from its loud one."
   (let ((inhibit-message (not echo)))
     (message "%s" text)))
 
+(defun agent-repl--do-log-level (ws fmt args level &optional error-p)
+  "Persist and emit WS / FMT / ARGS at LEVEL without changing public APIs."
+  (let ((text (agent-repl--build-log-text ws fmt args)))
+    (agent-repl--persist-log-record ws level "normal" fmt args)
+    (if error-p
+        (error "%s" text)
+      (agent-repl--emit-message text nil))))
+
 (defun agent-repl--do-log (ws fmt args &optional error-p)
   "Unconditional log entry: ALWAYS write to file AND emit to message/error.
 WS is the workspace name for context (or nil).  When ERROR-P is non-nil,
@@ -663,12 +863,7 @@ This is the entry point for log calls that MUST be captured regardless
 of `agent-repl-debug'.  Debug-gated callers (`agent-repl--log',
 `agent-repl--log-verbose') use the file-write path directly and emit
 quietly; `agent-repl--info' is the equivalent ungated quiet-notice level."
-  (let ((text (agent-repl--build-log-text ws fmt args)))
-    (agent-repl--do-log-to-file text)
-    (agent-repl--append-workspace-log ws text)
-    (if error-p
-        (error "%s" text)
-      (agent-repl--emit-message text nil))))
+  (agent-repl--do-log-level ws fmt args (if error-p "error" "info") error-p))
 
 (defun agent-repl--log (ws fmt &rest args)
   "Log a timestamped message for WS, always to file, conditionally to *Messages*.
@@ -679,26 +874,17 @@ quietly (into *Messages* only, never the echo area), so turning debug
 logging on never turns the modeline into a firehose.
 FMT and ARGS use the same format conventions as `message'."
   (let ((text (agent-repl--build-log-text ws fmt args)))
-    (agent-repl--do-log-to-file text)
-    (agent-repl--append-workspace-log ws text)
+    (agent-repl--persist-log-record ws "debug" "normal" fmt args)
     (when agent-repl-debug
       (agent-repl--emit-message text nil))))
 
 (defun agent-repl--log-verbose (ws fmt &rest args)
-  "Log a high-frequency message for WS, gated on verbose-mode for BOTH sinks.
-No-op unless `agent-repl-debug' is `verbose'.  The file write (which
-profiling showed dominated Emacs CPU when this was always-on) and the
-*Messages* emit are both behind the same gate, so hot-path callbacks
-(timer ticks, window changes, resolve-root, async git sentinels) cost
-nothing in the default-off configuration.  The `agent-repl-log-to-file'
-kill-switch still wins — when it is nil, no file write occurs even in
-verbose mode.  The *Messages* emit is quiet: hot-path chatter never
-reaches the echo area.  Toggle via \\[agent-repl-debug/toggle-logging]
-with a `C-u' prefix."
-  (when (eq agent-repl-debug 'verbose)
-    (let ((text (agent-repl--build-log-text ws fmt args)))
-      (agent-repl--do-log-to-file text)
-      (agent-repl--append-workspace-log ws text)
+  "Persist a high-frequency message and show it only in verbose mode.
+Verbose affects terminal and *Messages* visibility only.  Its JSONL record is
+always persisted through the same durable sink as normal logging."
+  (let ((text (agent-repl--build-log-text ws fmt args)))
+    (agent-repl--persist-log-record ws "debug" "verbose" fmt args)
+    (when (eq agent-repl-debug 'verbose)
       (agent-repl--emit-message text nil))))
 
 (defun agent-repl--info (ws fmt &rest args)
@@ -713,8 +899,7 @@ Use `agent-repl--warn' instead to tag a recorded line with `WARNING:'
 severity (still quiet), or `agent-repl--error' to signal a genuine fatal
 condition loudly into the modeline."
   (let ((text (agent-repl--build-log-text ws fmt args)))
-    (agent-repl--do-log-to-file text)
-    (agent-repl--append-workspace-log ws text)
+    (agent-repl--persist-log-record ws "info" "normal" fmt args)
     (agent-repl--emit-message text nil)))
 
 (defun agent-repl--warn (ws fmt &rest args)
@@ -731,13 +916,13 @@ the `WARNING: ' severity that a plain `agent-repl--info' notice lacks:
 use it for failed writes, dropped state, broken invariants, and degraded
 functionality that are worth flagging in the log but are not fatal."
   (if (stringp fmt)
-      (agent-repl--do-log ws (concat "WARNING: " fmt) args)
+      (agent-repl--do-log-level ws (concat "WARNING: " fmt) args "warn")
     ;; A non-string FMT is a caller bug.  Hand it through untouched rather
     ;; than `concat'-ing it (which would raise a wrong-type-argument here and
     ;; bury the real culprit): `agent-repl--build-log-text' already captures a
     ;; backtrace to *agent-repl-log-bug* for exactly this case, and ARGS is
     ;; preserved so nothing about the offending call is lost.
-    (agent-repl--do-log ws fmt args)))
+    (agent-repl--do-log-level ws fmt args "warn")))
 
 (defun agent-repl--error (ws fmt &rest args)
   "Signal an error with a [agent-repl] tag, timestamp, and workspace metadata.

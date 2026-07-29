@@ -51,11 +51,11 @@ import { isEphemeral, toEphemeralEvent, StreamMessageTracker } from "../proto/de
 import { ControlDispatch, type SdkControlTarget, type ToolPermissionResult } from "./control.js";
 import { SessionServer, type SessionServerHandlers } from "./server.js";
 import { StoreClient, type ReplayOutcome } from "./store-client.js";
-import { shimLog } from "./log.js";
 import { envelopeIs, unpackAs, type Any } from "./framing.js";
 import { ClaudeStreamMessageSchema } from "../../../../../proto/gen/ts/agentshim/data/v1/stream_pb.js";
 import { TranscriptLineSchema } from "../../../../../proto/gen/ts/agentshim/data/v1/transcript_pb.js";
 import type { ApiUserMessage } from "../../../../../proto/gen/ts/agentshim/data/v1/tools_pb.js";
+import { bindLog, setClaudeSessionId } from "./log.js";
 import {
   DaemonHello,
   DegradedState,
@@ -77,6 +77,7 @@ import {
 } from "./proto.js";
 
 const COMPONENT = "uds-session";
+const LOGGER = bindLog({ component: COMPONENT, operation: "shim.uds-session.lifecycle" });
 
 export interface UdsSessionDeps {
   sessionId: string;
@@ -203,7 +204,7 @@ export class UdsSession {
         // a prompt that reached the SDK but never came back as a bubble shows
         // up as a receipt with no matching forward, rather than as silence.
         // Only the FAILURE path used to say anything (control.ts).
-        shimLog(COMPONENT, { session: this.deps.sessionId, request: requestId, len: text.length, turns_in_flight: this.turnsInFlight },
+        LOGGER.log({ agent_repl_session_id: this.deps.sessionId, request_id: requestId, len: text.length, turns_in_flight: this.turnsInFlight },
           `prompt accepted -> SDK input`);
         // Turn start is SHIM-AUTHORITATIVE (see convert.ts's header): the
         // vendor stream has no "a turn began" message, and the user-message
@@ -318,7 +319,7 @@ export class UdsSession {
         // Reattach (§4.4): the turn keeps running and nothing is torn down.
         // Pending permission waits are NOT cancelled — a reattaching daemon can
         // still answer them; cancelAll fires only on interrupt/shutdown.
-        shimLog(COMPONENT, { session: this.deps.sessionId, turn_in_flight: this.turnsInFlight > 0 }, `daemon detached; session and turn survive (awaiting reattach)`);
+        LOGGER.log({ agent_repl_session_id: this.deps.sessionId, turn_in_flight: this.turnsInFlight > 0 }, `daemon detached; session and turn survive (awaiting reattach)`);
       },
     };
     this.server = new SessionServer(
@@ -342,7 +343,7 @@ export class UdsSession {
     // (store-client.ts rotateStoreKey), so no event of the new seq space can
     // reach a connection whose last_seen belongs to the retired one.
     this.store.onRotation((previous, next) => {
-      shimLog(COMPONENT, { session: this.deps.sessionId, store_key: previous, rotating_to: next },
+      LOGGER.log({ agent_repl_session_id: this.deps.sessionId, store_key: previous, rotating_to: next },
         `vendor session rotated; bouncing the daemon link so the re-handshake announces ${next}`);
       this.server.bounce(`vendor session rotation ${previous} -> ${next}`);
     });
@@ -356,9 +357,9 @@ export class UdsSession {
    */
   private async health(check: HealthCheck): Promise<HealthStatus> {
     const result = await this.store.health(check.requestId);
-    shimLog(COMPONENT, {
-      session: this.deps.sessionId,
-      request: check.requestId,
+    LOGGER.log({
+      agent_repl_session_id: this.deps.sessionId,
+      request_id: check.requestId,
       healthy: result.healthy,
       store_connected: this.store.isConnected(),
       store_subscribed: this.store.isSubscribed(),
@@ -397,7 +398,7 @@ export class UdsSession {
       });
     } catch (err) {
       outcome = { delivered: 0, truncated: true, reason: `replay failed: ${errMsg(err)}` };
-      shimLog(COMPONENT, { session: this.deps.sessionId, request: req.requestId }, outcome.reason);
+      LOGGER.log({ level: "error", agent_repl_session_id: this.deps.sessionId, request_id: req.requestId }, outcome.reason);
     }
     this.server.sendReplayDone(create(ReplayDoneSchema, {
       requestId: req.requestId,
@@ -521,7 +522,7 @@ export class UdsSession {
     }
     this.effectivePermissionMode = mode;
     if (mode !== argv) {
-      shimLog(COMPONENT, { session: this.deps.sessionId, permission_mode: mode, argv_permission_mode: argv },
+      LOGGER.log({ agent_repl_session_id: this.deps.sessionId, permission_mode: mode, argv_permission_mode: argv },
         `handshake permission mode OVERRIDES the --permission-mode argv; this session runs as ${mode}`);
     }
     return true;
@@ -538,7 +539,7 @@ export class UdsSession {
 
   private async completeWiring(hello: DaemonHello): Promise<void> {
     const fromSeq = hello.fromSeq;
-    shimLog(COMPONENT, { session: this.deps.sessionId, from_seq: fromSeq, store_key: this.store.storeSessionId() },
+    LOGGER.log({ agent_repl_session_id: this.deps.sessionId, from_seq: fromSeq, store_key: this.store.storeSessionId() },
       `bring-up gate: wiring the standing store subscription before acking readiness`);
     if (!(await this.applyHandshakePermissionMode(hello.permissionMode))) return;
     try {
@@ -600,7 +601,10 @@ export class UdsSession {
     }));
     // The EFFECTIVE mode, not the argv one: the readiness announcement is the
     // one line that says what posture this session actually came up in.
-    shimLog(COMPONENT, { session: this.deps.sessionId, permission_mode: this.effectivePermissionMode },
+    LOGGER.log({
+      agent_repl_session_id: this.deps.sessionId,
+      permission_mode: this.effectivePermissionMode,
+    },
       `readiness asserted (lock held, SDK query built, daemon handshaked)`);
   }
 
@@ -622,7 +626,7 @@ export class UdsSession {
   async shutdown(reason = "shutdown"): Promise<void> {
     if (this.closed) return;
     this.closed = true;
-    shimLog(COMPONENT, { session: this.deps.sessionId }, `shutdown (${reason})`);
+    LOGGER.log({ agent_repl_session_id: this.deps.sessionId }, `shutdown (${reason})`);
     this.control.cancelAll(reason);
     this.input.end();
     await this.server.close();
@@ -635,7 +639,7 @@ export class UdsSession {
         this.routeSdkMessage(msg);
       }
     } catch (err) {
-      shimLog(COMPONENT, { session: this.deps.sessionId }, `SDK stream failed: ${errMsg(err)}`);
+      LOGGER.log({ level: "error", agent_repl_session_id: this.deps.sessionId, cause: err }, `SDK stream failed: ${errMsg(err)}`);
       // A dead SDK turn is honest downtime: report it to the daemon, then tear
       // the session down (unlike a daemon disconnect, the turn itself is gone).
       this.server.sendEvent(this.degradedEvent(create(DegradedStateSchema, {
@@ -647,7 +651,7 @@ export class UdsSession {
       await this.shutdown("sdk_error");
       return;
     }
-    shimLog(COMPONENT, { session: this.deps.sessionId }, `SDK stream ended`);
+    LOGGER.log({ agent_repl_session_id: this.deps.sessionId }, `SDK stream ended`);
     await this.shutdown("sdk_end");
   }
 
@@ -678,6 +682,7 @@ export class UdsSession {
     // and subscribing under this shim's `--session-id` listens on a channel
     // nothing publishes to.
     this.store.adoptStoreKey(vendor.sessionId);
+    setClaudeSessionId(vendor.sessionId);
     this.settleStoreKey(vendor.sessionId);
     void this.store.write([vendor, ...lifecycle]).catch(() => {
       // The honest sad path lives INSIDE StoreClient (loud-log per dropped
@@ -713,7 +718,7 @@ export class UdsSession {
       // `--session-id`, which nothing subscribes to, so the daemon would never
       // see the turn it just asked for. It waits for the real key instead.
       this.deferredTurnStarts.push(evt);
-      shimLog(COMPONENT, { session: this.deps.sessionId, request: requestId },
+      LOGGER.log({ level: "warn", agent_repl_session_id: this.deps.sessionId, request_id: requestId },
         `turn accepted before the vendor session id was known; TurnStarted held until the store key settles`);
       return;
     }
@@ -734,7 +739,7 @@ export class UdsSession {
     const key = this.store.storeSessionId();
     const held = this.deferredTurnStarts.splice(0);
     for (const evt of held) evt.sessionId = key;
-    shimLog(COMPONENT, { session: this.deps.sessionId, store_key: key },
+    LOGGER.log({ agent_repl_session_id: this.deps.sessionId, claude_session_id: key, store_key: key },
       `store key settled; flushing ${held.length} held TurnStarted event(s)`);
     void this.store.write(held).catch(() => {
       // See emitTurnStarted: StoreClient reports the drop.
@@ -754,10 +759,10 @@ export class UdsSession {
    *
    * The one channel this session has for "something the user asked for did
    * not happen": a loud log PLUS a DegradedState the daemon can surface. A
-   * bare `shimLog` is not enough — nobody watching the UI ever sees it.
+   * bare `log` is not enough — nobody watching the UI ever sees it.
    */
   private reportDegraded(component: string, reason: string): void {
-    shimLog(COMPONENT, { session: this.deps.sessionId }, reason);
+    LOGGER.log({ level: "error", agent_repl_session_id: this.deps.sessionId }, reason);
     this.server.sendEvent(this.degradedEvent(create(DegradedStateSchema, {
       component,
       reason,
@@ -782,8 +787,8 @@ export class UdsSession {
     if (evt.payload.case !== "vendor") return;
     const prompt = userPromptText(evt.payload.value);
     if (prompt === null) return;
-    shimLog(COMPONENT,
-      { session: this.deps.sessionId, seq: evt.seq, len: prompt.len, arm: prompt.arm },
+    LOGGER.log(
+      { agent_repl_session_id: this.deps.sessionId, seq: evt.seq, len: prompt.len, arm: prompt.arm },
       `user prompt event forwarded to daemon`);
   }
 

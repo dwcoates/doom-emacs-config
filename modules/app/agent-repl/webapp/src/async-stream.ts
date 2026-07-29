@@ -18,7 +18,7 @@
  */
 import { AsyncSource } from "./protocol.js";
 import { ConversationItem, TextItem, ThinkingItem, ToolItem } from "./store.js";
-import { logDedup } from "./wslog.js";
+import { log } from "./wslog.js";
 
 /**
  * Most items rendered from one parsed stream. A settled agent's transcript
@@ -75,11 +75,7 @@ function jsonlObjects(text: string, context: string): Record<string, unknown>[] 
     }
   });
   if (interiorSkipped > 0) {
-    logDedup(
-      `jsonlObjects:${context}`,
-      "warn",
-      `${context}: ${skipped}/${lines.length} JSONL line(s) failed to parse (${interiorSkipped} interior) — more than a truncated edge explains`,
-    );
+    log("warn", `${context}: ${skipped}/${lines.length} JSONL line(s) failed to parse (${interiorSkipped} interior) — more than a truncated edge explains`, { operation: "async-stream.jsonl-parse", dedupKey: `jsonlObjects:${context}`, context: { parser_context: context, skipped, line_count: lines.length, interior_skipped: interiorSkipped } });
   }
   return out;
 }

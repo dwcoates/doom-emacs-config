@@ -251,7 +251,7 @@ export class CommandDispatcher {
     if (this.clientLogAcks.delete(ack.requestId)) {
       // A rejected client log is reported LOCALLY ONLY — see `logLocal`.
       if (!ack.ok) {
-        (this.opts.logLocal ?? defaultLocalLog)(`clientLog rejected: ${ack.error}`);
+        this.opts.logLocal?.(`clientLog rejected: ${ack.error}`);
       }
       return;
     }

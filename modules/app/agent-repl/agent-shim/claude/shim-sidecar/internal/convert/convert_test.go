@@ -1,8 +1,9 @@
 package convert
 
 import (
+	"bytes"
 	"encoding/json"
-	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -10,7 +11,12 @@ import (
 	"testing"
 
 	datav1 "agentrepl/proto/agentshim/data/v1"
+	"agentrepl/shim-claude-sidecar/internal/logging"
 )
+
+func testLog() *logging.Bound {
+	return logging.New(io.Discard, io.Discard).With(logging.Context{Component: "test"})
+}
 
 // whichResultArm returns the set ToolUseResult oneof arm's field name, or "" if
 // none is set (the empty/unset case; the unclassified arm reports "unclassified").
@@ -171,7 +177,7 @@ func TestGoldenTranscriptLines(t *testing.T) {
 		for _, f := range files {
 			name := d + "/" + filepath.Base(f)
 			t.Run(name, func(t *testing.T) {
-				c := New(func(string, ...any) {})
+				c := New(testLog())
 				for _, obj := range readLines(t, f) {
 					line, extras, err := c.TranscriptLine(obj)
 					if err != nil {
@@ -199,7 +205,7 @@ func TestGoldenToolInputs(t *testing.T) {
 	for _, f := range files {
 		name := "tool-inputs/" + filepath.Base(f)
 		t.Run(name, func(t *testing.T) {
-			c := New(func(string, ...any) {})
+			c := New(testLog())
 			for _, obj := range readLines(t, f) {
 				block, extras, err := c.ContentBlock(obj)
 				if err != nil {
@@ -226,7 +232,7 @@ func TestGoldenJournals(t *testing.T) {
 	for _, f := range files {
 		name := "journals/" + filepath.Base(f)
 		t.Run(name, func(t *testing.T) {
-			c := New(func(string, ...any) {})
+			c := New(testLog())
 			for _, obj := range readLines(t, f) {
 				rec, extras, err := c.JournalRecord(obj)
 				if err != nil {
@@ -252,7 +258,7 @@ func TestGoldenSidechain(t *testing.T) {
 	for _, f := range append(jsonl, jsonl2...) {
 		name := filepath.Base(filepath.Dir(f)) + "/" + filepath.Base(f)
 		t.Run(name, func(t *testing.T) {
-			c := New(func(string, ...any) {})
+			c := New(testLog())
 			for _, obj := range readLines(t, f) {
 				line, extras, err := c.TranscriptLine(obj)
 				if err != nil {
@@ -272,7 +278,7 @@ func TestGoldenSidechain(t *testing.T) {
 	for _, f := range metas {
 		name := "sidechain/" + filepath.Base(f)
 		t.Run(name, func(t *testing.T) {
-			c := New(func(string, ...any) {})
+			c := New(testLog())
 			data, err := os.ReadFile(f)
 			if err != nil {
 				t.Fatalf("read: %v", err)
@@ -294,7 +300,7 @@ func TestGoldenSidechain(t *testing.T) {
 // no extras, rather than being captured verbatim.
 func TestListValueFieldAbsorbsArray(t *testing.T) {
 	// Arrange
-	c := New(nil)
+	c := New(testLog())
 	obj := map[string]any{
 		"type": "assistant",
 		"message": map[string]any{
@@ -329,7 +335,7 @@ func TestListValueFieldAbsorbsArray(t *testing.T) {
 // keys populate the wrapped HookSuccessAttachment, with no extras.
 func TestHookBlockingErrorRoutesOuterDetail(t *testing.T) {
 	// Arrange
-	c := New(nil)
+	c := New(testLog())
 	obj := map[string]any{
 		"type": "attachment",
 		"attachment": map[string]any{
@@ -368,7 +374,7 @@ func TestHookBlockingErrorRoutesOuterDetail(t *testing.T) {
 // "permission-rule" now resolves to the typed ToolDenialKind rather than extras.
 func TestPermissionRuleDenialKind(t *testing.T) {
 	// Arrange
-	c := New(nil)
+	c := New(testLog())
 	obj := map[string]any{
 		"type":           "user",
 		"toolDenialKind": "permission-rule",
@@ -394,7 +400,7 @@ func TestPermissionRuleDenialKind(t *testing.T) {
 // transcripts (27 occurrences) before it was added.
 func TestAutomodeUnavailableDenialKind(t *testing.T) {
 	// Arrange
-	c := New(nil)
+	c := New(testLog())
 	obj := map[string]any{
 		"type":           "user",
 		"toolDenialKind": "automode-unavailable",
@@ -496,7 +502,7 @@ func TestSidecarLoggedFieldsNowTyped(t *testing.T) {
 			for k, v := range tc.populate {
 				obj[k] = v
 			}
-			c := New(nil)
+			c := New(testLog())
 			// Act
 			res, extras := c.ToolUseResult(obj)
 			// Assert
@@ -509,7 +515,7 @@ func TestSidecarLoggedFieldsNowTyped(t *testing.T) {
 		})
 		t.Run(tc.name+"/absent", func(t *testing.T) {
 			// Arrange
-			c := New(nil)
+			c := New(testLog())
 			// Act
 			res, extras := c.ToolUseResult(tc.result)
 			// Assert
@@ -597,7 +603,7 @@ func TestRetypedFieldsNowDecode(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
-			c := New(nil)
+			c := New(testLog())
 			// Act
 			line, extras, err := c.TranscriptLine(userLine(tc.envelope))
 			// Assert
@@ -704,7 +710,7 @@ func TestGitOperationDecodes(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
-			c := New(nil)
+			c := New(testLog())
 			// Act
 			res, extras := c.ToolUseResult(bash(tc.op))
 			// Assert
@@ -765,7 +771,7 @@ func TestClassifyToolResultArms(t *testing.T) {
 			if !ok {
 				t.Fatalf("%s: fixture has no toolUseResult", base)
 			}
-			c := New(func(string, ...any) {})
+			c := New(testLog())
 			// Act
 			res, _ := c.ToolUseResult(tur)
 			// Assert
@@ -847,7 +853,7 @@ func TestTypedToolResultShapes(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
 			objs := readLines(t, filepath.Join(root, "tool-results", tc.fixture))
-			c := New(func(string, ...any) {})
+			c := New(testLog())
 			// Act
 			res, extras := c.ToolUseResult(objs[0]["toolUseResult"])
 			// Assert
@@ -866,7 +872,7 @@ func TestFileAttachmentContentTyped(t *testing.T) {
 	// Arrange
 	root := corpusRoot(t)
 	objs := readLines(t, filepath.Join(root, "attachments", "file.jsonl"))
-	c := New(func(string, ...any) {})
+	c := New(testLog())
 	// Act
 	line, extras, err := c.TranscriptLine(objs[0])
 	// Assert
@@ -899,7 +905,7 @@ func TestQueuedCommandPromptStringArm(t *testing.T) {
 	// Arrange
 	root := corpusRoot(t)
 	objs := readLines(t, filepath.Join(root, "attachments", "queued_command.jsonl"))
-	c := New(func(string, ...any) {})
+	c := New(testLog())
 	// Act
 	line, extras, err := c.TranscriptLine(objs[0])
 	// Assert
@@ -926,7 +932,7 @@ func TestQueuedCommandPromptBlocksArm(t *testing.T) {
 	// Arrange
 	root := corpusRoot(t)
 	objs := readLines(t, filepath.Join(root, "attachments", "queued_command.jsonl"))
-	c := New(func(string, ...any) {})
+	c := New(testLog())
 	// Act
 	line, extras, err := c.TranscriptLine(objs[1])
 	// Assert
@@ -953,14 +959,14 @@ func TestQueuedCommandPromptArrayLogsNoUnknownField(t *testing.T) {
 	// Arrange
 	root := corpusRoot(t)
 	objs := readLines(t, filepath.Join(root, "attachments", "queued_command.jsonl"))
-	var logs []string
-	c := New(func(f string, a ...any) { logs = append(logs, fmt.Sprintf(f, a...)) })
+	var logs bytes.Buffer
+	c := New(logging.New(&logs, &logs).With(logging.Context{Component: "convert"}))
 	// Act
 	if _, _, err := c.TranscriptLine(objs[1]); err != nil {
 		t.Fatalf("conversion error: %v", err)
 	}
 	// Assert
-	for _, l := range logs {
+	for _, l := range strings.Split(logs.String(), "\n") {
 		if strings.Contains(l, "unknown field") {
 			t.Fatalf("array-form prompt still loud-logged: %s", l)
 		}
@@ -980,7 +986,7 @@ func TestQueuedCommandPromptUnmodeledTypeCaptured(t *testing.T) {
 			"commandMode": "prompt",
 		},
 	}
-	c := New(func(string, ...any) {})
+	c := New(testLog())
 	// Act
 	line, extras, err := c.TranscriptLine(obj)
 	// Assert
@@ -1013,7 +1019,7 @@ func TestSkillBodyEnvelopeSurvivesIngestion(t *testing.T) {
 	if err := json.Unmarshal([]byte(raw), &obj); err != nil {
 		t.Fatalf("unmarshal fixture: %v", err)
 	}
-	c := New(func(string, ...any) {})
+	c := New(testLog())
 
 	// Act
 	line, extras, err := c.TranscriptLine(obj)

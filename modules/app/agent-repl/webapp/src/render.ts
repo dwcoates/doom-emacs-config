@@ -6,7 +6,7 @@
  */
 import { SUBAGENT_TOOLS } from "./agents.js";
 import { parseJournal } from "./async-stream.js";
-import { clearDedup, log, logDedup } from "./wslog.js";
+import { clearLogDedup, log } from "./wslog.js";
 import {
   TOPBAR_AGENT_ATTR,
   TopbarMenu,
@@ -504,9 +504,7 @@ function warnTreeMisfire(blockId: string, done: boolean, segText: string): void 
   if (!looksLikeIntendedTree(segText)) return;
   if (warnedTreeMisfires.has(blockId)) return;
   warnedTreeMisfires.add(blockId);
-  console.warn(
-    `metaprompt-tree: postprocessing did not fire for a header-led response (block ${blockId})`,
-  );
+  log("warn", `metaprompt-tree: postprocessing did not fire for a header-led response (block ${blockId})`, { operation: "render.metaprompt-tree-postprocess-missed", context: { block_id: blockId } });
 }
 
 /**
@@ -777,7 +775,7 @@ export function memberBadge(status: MemberStatus, inputDone = true): string {
     case "killed":
       return `<span class="badge err">stopped</span>`;
     default:
-      logDedup("member-badge-status", "warn", `memberBadge: unexpected status ${String(status)}`);
+      log("warn", `memberBadge: unexpected status ${String(status)}`, { operation: "render.member-badge-status-invalid", dedupKey: "member-badge-status", context: { status } });
       return "";
   }
 }
@@ -3102,10 +3100,10 @@ export class FeedRenderer {
     try {
       this.renderRestoredImpl(state);
     } catch (err) {
-      logDedup("feed-render-restored", "error", String(err));
+      log("error", String(err), { operation: "render.restored-failed", dedupKey: "feed-render-restored", context: { cause: err } });
       throw err;
     }
-    clearDedup("feed-render-restored");
+    clearLogDedup("feed-render-restored");
   }
 
   private renderRestoredImpl(state: StoreState): void {
@@ -3252,10 +3250,10 @@ export class FeedRenderer {
     try {
       this.renderImpl(state);
     } catch (err) {
-      logDedup("feed-render", "error", String(err));
+      log("error", String(err), { operation: "render.feed-failed", dedupKey: "feed-render", context: { cause: err } });
       throw err;
     }
-    clearDedup("feed-render");
+    clearLogDedup("feed-render");
   }
 
   private renderImpl(state: StoreState): void {
@@ -3284,6 +3282,7 @@ export class FeedRenderer {
         `feed: user turn rendering request_id=${turn?.requestId ?? ""} key=${turnId} last=${
           tail !== undefined && tail.kind === "user-turn"
         }`,
+        { operation: "webapp.render.user-turn" },
       );
     }
     const toTail = repinsToTail({

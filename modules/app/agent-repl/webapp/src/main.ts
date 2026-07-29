@@ -83,7 +83,9 @@ import { ConversationStore } from "./store.js";
 import { IDLE_LABEL, TIMER_SLOT, TaskTimer, windowHost } from "./timer.js";
 import { WsClient, composerEnabled, makeSessionExistsProbe } from "./ws.js";
 import {
+  bindLogContext,
   ForwardingLogger,
+  log,
   setLogger,
   type ClientLogContext,
   type ClientLogLevel,
@@ -125,29 +127,46 @@ async function boot(): Promise<void> {
   // deleted; E4's additive `client_log` FrontendCommand arm restores it on the
   // protobuf channel rather than reviving a second transport.
   //
-  // The sink is assigned a few lines below rather than closed over directly,
-  // because the dispatcher it needs is built AFTER this logger (the dispatcher
-  // logs through it). Until then a line is console-only — exactly the pre-boot
-  // behavior `setLogger` already documents, not a fallback hiding a failure.
+  // The sink is assigned after the dispatcher exists. Logger bootstrap happens
+  // first, so every normal runtime emission has the canonical delivery path.
   let clientLogSink:
     | ((level: ClientLogLevel, message: string, context?: ClientLogContext) => boolean)
     | null = null;
   const wslog = new ForwardingLogger(
-    (cmd) => clientLogSink?.(cmd.level, cmd.message, cmd.context) ?? false,
+    (cmd) => {
+      if (clientLogSink === null) {
+        throw new Error("client-log sink is not installed");
+      }
+      return clientLogSink(cmd.level, cmd.message, cmd.context);
+    },
   );
-  const clog = wslog.log.bind(wslog);
+  // A page instance exists before the first socket. Binding its initial
+  // generation now guarantees even bootstrap diagnostics meet the webapp
+  // record identity contract; each session socket advances the generation.
+  const pageLogInstance = crypto.randomUUID();
+  const loggerFor = (operation: string) =>
+    (level: ClientLogLevel, message: string, context: ClientLogContext = {}): void =>
+      log(level, message, { operation, context });
+  const clog = loggerFor("webapp.main");
+  const storeLog = loggerFor("conversation-store");
+  const adapterLog = loggerFor("state-adapter");
+  const dispatcherLog = loggerFor("command-dispatch");
   // Deep modules (render walk, pollers) log through the module-level
   // singleton; install the real forwarder before anything renders.
   setLogger(wslog);
+  bindLogContext({
+    connection_id: `${pageLogInstance}:0`,
+    ...(activeSessionId !== "" ? { agent_repl_session_id: activeSessionId } : {}),
+  });
 
-  const store = new ConversationStore((level, message) => clog(level, message));
+  const store = new ConversationStore((level, message) => storeLog(level, message));
   // The one-change cutover seam: the daemon pushes `agentshim.frontend.v1`
   // protojson frames, which decode (frontend-proto.ts) into effects
   // (state-adapter.ts) the store ingests. The adapter's explicit-ignore path
   // logs once per unsupported shape at debug — mapped to `info` here since the
   // client-log channel has no debug level.
   const adapter = new StateAdapter((level, message) =>
-    wslog.log(level === "debug" ? "info" : level, message),
+    adapterLog(level === "debug" ? "info" : level, message),
   );
   // The frontend→daemon command plane (§task 4): every outbound command is a
   // FrontendCommand protojson frame over the CURRENT socket (read lazily, like
@@ -156,14 +175,14 @@ async function boot(): Promise<void> {
   // correlate CommandAcks by requestId and a createSession's pushed SessionView.
   const dispatcher = new CommandDispatcher({
     send: (raw) => (ws as WsClient | undefined)?.send(raw) ?? false,
-    log: (level, message) => clog(level, message),
+    log: (level, message) => dispatcherLog(level, message),
     // A REJECTED clientLog cannot be reported through `log`: that forwards
     // another clientLog, earns another rejection, and loops. It still has to be
     // SEEN, so it goes to the logger's local-only path — the same injected
     // console sink every other line uses, at error level because a forward that
     // the daemon refused is a real failure of the diagnostics channel, not a
-    // quiet fallback. The forward itself still happened and still failed loudly.
-    logLocal: (message) => wslog.logLocalOnly("error", message),
+    // quiet failure. The forward itself still happened and still failed loudly.
+    logLocal: (message) => log("error", message, { operation: "webapp.client-log-rejected", localOnly: true }),
     // A refused command lands as a failure card IN THE FEED (F4). Before
     // this it reached a human through nothing at all: the ack's text went to
     // a local log and the promise it rejected was swallowed by every caller,
@@ -731,8 +750,14 @@ async function boot(): Promise<void> {
       });
   };
 
-  const makeClient = (sessionId: string): WsClient =>
-    new WsClient({
+  let logConnectionGeneration = 0;
+  const makeClient = (sessionId: string): WsClient => {
+    logConnectionGeneration++;
+    bindLogContext({
+      agent_repl_session_id: sessionId,
+      connection_id: `${pageLogInstance}:${logConnectionGeneration}`,
+    });
+    return new WsClient({
       url: `${wsBase}/sessions/${sessionId}/stream`,
       log: (message) => clog("warn", message),
       onMessage: (data) => {
@@ -782,7 +807,7 @@ async function boot(): Promise<void> {
         if (receipt !== null) {
           const line = `feed: user turn received request_id=${receipt.requestId} seq=${receipt.seq} len=${receipt.len} live=${receipt.live}`;
           if (receipt.live) clog("info", line);
-          else wslog.logLocalOnly("info", line);
+          else log("info", line, { operation: "webapp.main.user-turn-receipt", localOnly: true });
         }
         const result = store.ingest(effects);
         // Ask for the conversation history this connection has not been told.
@@ -790,11 +815,10 @@ async function boot(): Promise<void> {
         // workspace key the daemon routes a resync by.
         connectResync.observe(isSnapshot, cmdWorkspace(), store.state.lastSeq);
         // Resume/rebind, re-fed from the SessionView plane. A first adoption and
-        // a rotation both re-persist: the resume keys must name the conversation
-        // that is LIVE, or a later "session gone" would resume the retired one.
-        // Read AFTER ingest so the cwd rides the same SessionView that announced
-        // the uuid.
+        // a rotation both re-persist: the resume keys and logging context must
+        // name the conversation that is live.
         if (verdict !== "unchanged") {
+          bindLogContext({ claude_session_id: sessionRebase.claudeSessionId });
           try {
             rememberResumeKeys(localStorage, activeSessionId, {
               claudeSessionId: sessionRebase.claudeSessionId,
@@ -871,6 +895,7 @@ async function boot(): Promise<void> {
           });
       },
     });
+  };
   // Session creation (replaces POST /sessions), used both to open the first
   // session and to rebind a gone one: a short-lived connection to the unscoped
   // /frontend WS — the daemon has no session-scoped socket to offer before the
@@ -947,7 +972,7 @@ async function boot(): Promise<void> {
       // other command rides).
       const bootDispatcher = new CommandDispatcher({
         send: (raw) => bootWs.send(raw),
-        log: (level, message) => clog(level, message),
+        log: (level, message) => dispatcherLog(level, message),
       });
       const timeout = setTimeout(
         () => finish(() => reject(new Error("create session: no daemon snapshot within 15s"))),

@@ -114,6 +114,12 @@ type FrameSink interface {
 	Consume(ev *corev1.Event)
 }
 
+// FileDiagnosticSink consumes a persistent file-plane diagnostic before it can
+// enter frontend, retained, progress, or SSM paths.
+type FileDiagnosticSink interface {
+	PersistFileDiagnostic(ev *corev1.Event, diagnostic *corev1.FilePlaneDiagnostic) error
+}
+
 // DegradedReporter receives sad-path signals. DegradedState events come from
 // the shim (store unreachable, converter storm, …); ConnectionDegraded /
 // ConnectionRecovered are transport-level, detected by this client's
@@ -168,11 +174,12 @@ type Config struct {
 	PermissionModes ModeStore
 
 	// Sinks and callbacks (all bound at stitch).
-	SeqStore    SeqStore
-	StateSink   StateSink
-	FrameSink   FrameSink
-	Degraded    DegradedReporter
-	Permissions PermissionHandler
+	SeqStore        SeqStore
+	StateSink       StateSink
+	FrameSink       FrameSink
+	FileDiagnostics FileDiagnosticSink
+	Degraded        DegradedReporter
+	Permissions     PermissionHandler
 
 	// OnHandshake fires after the handshake completes and BEFORE the Subscribe
 	// reads its from_seq off the SeqStore. Optional.
@@ -207,7 +214,8 @@ type Config struct {
 	// reports from racing each other over one teardown.
 	OnLinkLost func(cause error)
 
-	// Logf is the daemon's printf-style logging closure. Nil discards.
+	// Logf is the daemon's printf-style logging closure. It is required so
+	// protocol and transport failures always reach the daemon's canonical log.
 	Logf dlog.Logf
 
 	// Tunables. Zero uses the defaults below.
@@ -315,7 +323,7 @@ type ackResult struct {
 // New constructs a Client, applying defaults for any zero-value Config field.
 func New(cfg Config) *Client {
 	if cfg.Logf == nil {
-		cfg.Logf = func(string, ...any) {}
+		panic("shimclient: Config.Logf is required")
 	}
 	if cfg.HeartbeatInterval == 0 {
 		cfg.HeartbeatInterval = DefaultHeartbeatInterval

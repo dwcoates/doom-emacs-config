@@ -40,17 +40,15 @@ import (
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	"agentrepl/shim-store/internal/db"
+	"agentrepl/shim-store/internal/logging"
 	"agentrepl/wire"
 )
-
-// Logf is the loud-logging sink (§12), injected for test capture.
-type Logf = func(format string, args ...any)
 
 // Server serves the shim-store protocol over a UDS listener.
 type Server struct {
 	db  *db.DB
 	fan *fanout
-	log Logf
+	log *logging.Logger
 
 	mu     sync.Mutex
 	ln     net.Listener
@@ -60,25 +58,30 @@ type Server struct {
 }
 
 // New builds a Server over an open db. buffer<=0 uses the default fanout buffer.
-func New(database *db.DB, log Logf, buffer int) *Server {
-	if log == nil {
-		log = func(string, ...any) {}
+func New(database *db.DB, log *logging.Logger, buffer int) *Server {
+	if database == nil || log == nil {
+		panic("shim-store server: nil database or logger")
 	}
 	return &Server{
 		db:    database,
-		fan:   newFanout(log, buffer),
+		fan:   newFanout(buffer),
 		log:   log,
 		conns: make(map[net.Conn]struct{}),
 	}
 }
 
 // Listen removes any stale socket file and opens a UDS listener at path.
-func Listen(path string) (net.Listener, error) {
+func Listen(path string, log *logging.Logger) (net.Listener, error) {
+	if log == nil {
+		panic("shim-store server: nil logger")
+	}
 	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		log.Log(logging.Fields{Operation: "remove-stale-socket", Socket: path, Level: "error"}, "removing stale socket failed: %v", err)
 		return nil, fmt.Errorf("shim-store server: removing stale socket %q: %w", path, err)
 	}
 	ln, err := net.Listen("unix", path)
 	if err != nil {
+		log.Log(logging.Fields{Operation: "listen", Socket: path, Level: "error"}, "opening UDS listener failed: %v", err)
 		return nil, fmt.Errorf("shim-store server: listening on %q: %w", path, err)
 	}
 	return ln, nil
@@ -159,7 +162,7 @@ func (s *Server) handleConn(conn net.Conn) {
 	msg, err := wire.ReadAny(conn)
 	if err != nil {
 		if !errors.Is(err, io.EOF) {
-			s.log("connection dropped before first frame: %v", err)
+			s.log.Log(logging.Fields{Operation: "read-first-frame", Level: "error"}, "protocol frame read failed: %v", err)
 		}
 		return
 	}
@@ -170,7 +173,7 @@ func (s *Server) handleConn(conn net.Conn) {
 		if err := s.echoHeartbeat(conn, m); err != nil {
 			return
 		}
-		s.log("producer connection opened with heartbeat; awaiting first StoreWrite")
+		s.log.Log(logging.Fields{Operation: "producer-preamble"}, "connection opened with heartbeat; awaiting first StoreWrite")
 		s.serveProducerPreamble(conn)
 	case *corev1.Subscribe:
 		s.serveSubscriber(conn, m)
@@ -178,10 +181,11 @@ func (s *Server) handleConn(conn net.Conn) {
 		s.serveCursorQuery(conn, m)
 	case *corev1.HealthCheck:
 		s.serveHealth(conn, m)
-		s.log("producer connection opened with health check; awaiting first StoreWrite")
+		s.log.Log(logging.Fields{Operation: "producer-preamble", RequestID: m.GetRequestId()}, "connection opened with health check; awaiting first StoreWrite")
 		s.serveProducerPreamble(conn)
 	default:
-		s.log("first frame is %T; expected StoreWrite, Heartbeat, Subscribe, CursorQuery, or HealthCheck", m)
+		s.log.Log(logging.Fields{Operation: "classify-connection", Level: "error"},
+			"protocol frame is %T; expected StoreWrite, Heartbeat, Subscribe, CursorQuery, or HealthCheck", m)
 	}
 }
 
@@ -190,7 +194,7 @@ func (s *Server) handleConn(conn net.Conn) {
 // stale or merely listening; only this correlated response is health.
 func (s *Server) serveHealth(conn net.Conn, check *corev1.HealthCheck) {
 	if check.GetRequestId() == "" {
-		s.log("health check rejected: empty request_id")
+		s.log.Log(logging.Fields{Operation: "health", Level: "error"}, "health check rejected: empty request_id")
 		return
 	}
 	status := &corev1.HealthStatus{
@@ -199,10 +203,10 @@ func (s *Server) serveHealth(conn net.Conn, check *corev1.HealthCheck) {
 		Component: "shim-store",
 	}
 	if err := wire.WriteAny(conn, status); err != nil {
-		s.log("health reply failed request_id=%s: %v", check.GetRequestId(), err)
+		s.log.Log(logging.Fields{Operation: "health-reply", RequestID: check.GetRequestId(), Level: "error"}, "health reply failed: %v", err)
 		return
 	}
-	s.log("health PASS request_id=%s", check.GetRequestId())
+	s.log.Log(logging.Fields{Operation: "health", RequestID: check.GetRequestId()}, "health PASS")
 }
 
 // serveCursorQuery answers a sidecar's startup cursor-recovery request (§7.3):
@@ -215,7 +219,6 @@ func (s *Server) serveCursorQuery(conn net.Conn, q *corev1.CursorQuery) {
 	if id := q.GetFileId(); id != "" {
 		c, err := s.db.Cursor(id)
 		if err != nil {
-			s.log("cursor query failed (file_id=%s): %v", id, err)
 			return
 		}
 		if c != nil {
@@ -224,24 +227,23 @@ func (s *Server) serveCursorQuery(conn net.Conn, q *corev1.CursorQuery) {
 	} else {
 		all, err := s.db.Cursors()
 		if err != nil {
-			s.log("cursor query failed (all): %v", err)
 			return
 		}
 		cursors = all
 		openTasks, err = s.db.OpenTasks()
 		if err != nil {
-			s.log("cursor query failed (open tasks): %v", err)
+			s.log.Log(logging.Fields{Operation: "cursor-query-open-tasks", Level: "error"}, "query failed: %v", err)
 			return
 		}
 	}
-	s.log("startup recovery snapshot: cursors=%d open_tasks=%d file_id=%q",
-		len(cursors), len(openTasks), q.GetFileId())
+	s.log.Log(logging.Fields{Operation: "cursor-query"},
+		"startup recovery snapshot: cursors=%d open_tasks=%d file_id=%q", len(cursors), len(openTasks), q.GetFileId())
 	if err := wire.WriteAny(conn, &corev1.CursorList{
 		Cursors:                cursors,
 		OpenTasks:              openTasks,
 		OpenTasksAuthoritative: q.GetFileId() == "",
 	}); err != nil {
-		s.log("cursor query reply failed: %v", err)
+		s.log.Log(logging.Fields{Operation: "cursor-query-reply", Subscriber: conn.RemoteAddr().String(), Level: "error"}, "protocol cursor reply write failed: %v", err)
 	}
 }
 
@@ -256,7 +258,7 @@ func (s *Server) serveProducerPreamble(conn net.Conn) {
 		msg, err := wire.ReadAny(conn)
 		if err != nil {
 			if !errors.Is(err, io.EOF) {
-				s.log("producer preamble connection dropped: %v", err)
+				s.log.Log(logging.Fields{Operation: "producer-preamble-read", Level: "error"}, "connection dropped: %v", err)
 			}
 			return
 		}
@@ -271,7 +273,7 @@ func (s *Server) serveProducerPreamble(conn net.Conn) {
 		case *corev1.HealthCheck:
 			s.serveHealth(conn, m)
 		default:
-			s.log("producer preamble sent an unrecognized frame (%T); disconnecting", m)
+			s.log.Log(logging.Fields{Operation: "producer-preamble-read", Level: "error"}, "unrecognized frame %T; disconnecting", m)
 			return
 		}
 	}
@@ -279,21 +281,19 @@ func (s *Server) serveProducerPreamble(conn net.Conn) {
 
 func (s *Server) serveProducer(conn net.Conn, first *corev1.StoreWrite) {
 	if err := s.processWrite(conn, first); err != nil {
-		s.log("producer write failed (producer=%s): %v", first.GetProducer(), err)
 		return
 	}
 	for {
 		msg, err := wire.ReadAny(conn)
 		if err != nil {
 			if !errors.Is(err, io.EOF) {
-				s.log("producer connection dropped (producer=%s): %v", first.GetProducer(), err)
+				s.log.Log(logging.Fields{Operation: "producer-read", Producer: first.GetProducer(), Level: "error"}, "protocol producer frame read failed: %v", err)
 			}
 			return
 		}
 		switch m := msg.(type) {
 		case *corev1.StoreWrite:
 			if err := s.processWrite(conn, m); err != nil {
-				s.log("producer write failed (producer=%s): %v", m.GetProducer(), err)
 				return
 			}
 		case *corev1.Heartbeat:
@@ -303,7 +303,7 @@ func (s *Server) serveProducer(conn net.Conn, first *corev1.StoreWrite) {
 		case *corev1.HealthCheck:
 			s.serveHealth(conn, m)
 		default:
-			s.log("producer sent an unrecognized frame (%T, producer=%s); disconnecting", m, first.GetProducer())
+			s.log.Log(logging.Fields{Operation: "producer-read", Producer: first.GetProducer(), Level: "error"}, "protocol frame is %T; disconnecting producer", m)
 			return
 		}
 	}
@@ -338,7 +338,6 @@ func (s *Server) ingestAndFan(sw *corev1.StoreWrite) *corev1.StoreWriteAck {
 	res, err := s.db.Ingest(sw.GetProducer(), persistent, batch.GetCursorAdvance())
 	ingestMs := time.Since(start).Milliseconds()
 	if err != nil {
-		s.log("REJECTED batch (producer=%s events=%d): %v", sw.GetProducer(), len(events), err)
 		return &corev1.StoreWriteAck{Error: err.Error()}
 	}
 
@@ -359,8 +358,10 @@ func (s *Server) ingestAndFan(sw *corev1.StoreWrite) *corev1.StoreWriteAck {
 	// visible end to end. Ephemeral-only batches (and heartbeats) stay silent;
 	// this line also carries what the old dedup-only line reported.
 	if len(persistent) > 0 {
-		s.log("ingest: producer=%s session=%s events=%d accepted=%d deduped=%d last_seq=%d ingest_ms=%d",
-			sw.GetProducer(), persistent[0].GetSessionId(), len(persistent), res.Accepted, res.Deduped, res.LastSeq, ingestMs)
+		s.log.Log(logging.Fields{
+			Operation: "ingest", Producer: sw.GetProducer(), Session: persistent[0].GetSessionId(),
+		}, "persisted batch events=%d accepted=%d deduped=%d last_seq=%d ingest_ms=%d",
+			len(persistent), res.Accepted, res.Deduped, res.LastSeq, ingestMs)
 	}
 	return &corev1.StoreWriteAck{Accepted: res.Accepted, Deduped: res.Deduped, LastSeq: res.LastSeq}
 }
@@ -370,10 +371,9 @@ func (s *Server) ingestAndFan(sw *corev1.StoreWrite) *corev1.StoreWriteAck {
 func (s *Server) serveSubscriber(conn net.Conn, sub *corev1.Subscribe) {
 	sessionID := sub.GetSessionId()
 	if sessionID == "" {
-		s.log("subscribe rejected: empty session_id")
+		s.log.Log(logging.Fields{Operation: "subscribe", Subscriber: conn.RemoteAddr().String(), Level: "error"}, "protocol subscription rejected: empty session_id")
 		return
 	}
-	s.log("subscribe: session=%s from_seq=%d", sessionID, sub.GetFromSeq())
 
 	subr := s.fan.subscribe(sessionID)
 	defer s.fan.unsubscribe(subr)
@@ -390,13 +390,11 @@ func (s *Server) serveSubscriber(conn net.Conn, sub *corev1.Subscribe) {
 	// buffered, then de-overlapped by seq afterwards.
 	replayed, err := s.db.ReplayFrom(sessionID, sub.GetFromSeq())
 	if err != nil {
-		s.log("subscribe replay failed: session=%s: %v", sessionID, err)
 		return
 	}
 	var lastReplaySeq uint64
 	for _, ev := range replayed {
 		if err := wire.WriteAny(conn, ev); err != nil {
-			s.log("subscribe replay write failed: session=%s: %v", sessionID, err)
 			return
 		}
 		if ev.GetSeq() > lastReplaySeq {
@@ -419,7 +417,6 @@ func (s *Server) serveSubscriber(conn net.Conn, sub *corev1.Subscribe) {
 				continue
 			}
 			if err := wire.WriteAny(conn, ev); err != nil {
-				s.log("subscriber write failed: session=%s: %v", sessionID, err)
 				return
 			}
 		}
