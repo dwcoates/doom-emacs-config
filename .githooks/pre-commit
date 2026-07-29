@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# pre-commit — enforce the agent-repl ERT suite (and the external-boundary
-# lint) whenever agent-repl source/test files are staged.
+# pre-commit — enforce the unified agent-repl test and coverage suite whenever
+# agent-repl source, test, protocol, or local verification files are staged.
 #
 # Per AGENTS.md zero-tolerance rule, ANY failing test blocks the commit.
 # Do not bypass with --no-verify; fix the failures.
@@ -34,31 +34,21 @@ for _name in agent-repl claude-repl; do
   fi
 done
 
-# Skip the test gate entirely during cherry-picks.  The commit being
-# replayed was already tested on its source branch; re-running ERT here
-# adds noise with no benefit and blocks automated cherry-pick workflows.
+# Skip the test gate entirely during cherry-picks.  The commit being replayed
+# was already tested on its source branch, and workspace merge uses automated
+# cherry-picks to land that exact commit.
 GIT_DIR_PATH="$(git rev-parse --git-dir)"
 if [ -f "$GIT_DIR_PATH/CHERRY_PICK_HEAD" ]; then
-  echo "[pre-commit] Cherry-pick detected — skipping ERT gate."
+  echo "[pre-commit] Cherry-pick detected — skipping unified agent-repl gate."
   exit 0
 fi
 
-# Only gate when module source or test files are staged (either module
-# name, so the rename commit itself — which stages deletions under the
-# old path — is gated too).
-if ! git diff --cached --name-only | grep -qE '^modules/app/(agent|claude)-repl/.*\.el$'; then
-  exit 0
-fi
-
-# Skip the ERT gate on the master branch.  Workspace-merge handling
-# replays a workspace's commits onto its source branch via automated
-# cherry-picks; for workspaces cut from master those land on master and
-# were already tested on the workspace branch, so re-running ERT here
-# only adds noise and can block the merge.  The gate exists for normal
-# feature-branch commits, so restrict it to non-master branches.
-CURRENT_BRANCH="$(git symbolic-ref --short HEAD 2>/dev/null || echo "")"
-if [ "$CURRENT_BRANCH" = "master" ]; then
-  echo "[pre-commit] On master branch — skipping ERT gate."
+# Gate every authored runtime and its local verification infrastructure.  The
+# module-name alternation keeps the shared hook valid in older sibling
+# worktrees that still carry the pre-rename path.
+STAGED_FILES="$(git diff --cached --name-only)"
+if ! printf '%s\n' "$STAGED_FILES" | grep -qE \
+  '^(modules/app/(agent|claude)-repl/.*(\.(el|go|ts|tsx|proto)$|(^|/)(go\.(mod|sum)|package(-lock)?\.json|tsconfig[^/]*\.json|Makefile)$|/bin/(test-all|test-test-all|report-nonlisp-coverage|test-report-nonlisp-coverage|report-logging-density|test-report-logging-density)\.sh$)|\.githooks/(pre-commit|test-pre-commit\.sh)$)'; then
   exit 0
 fi
 
@@ -79,36 +69,31 @@ if [ -x "$BOUNDARY_LINT" ]; then
   fi
 fi
 
-TEST_FILE="$REPO_ROOT/modules/app/$MODULE_NAME/test-$MODULE_NAME.el"
-
-if [ ! -f "$TEST_FILE" ]; then
-  echo "[pre-commit] $TEST_FILE not found — refusing to commit." >&2
+UNIFIED_RUNNER="$REPO_ROOT/modules/app/$MODULE_NAME/bin/test-all.sh"
+if [ ! -x "$UNIFIED_RUNNER" ]; then
+  echo "[pre-commit] unified runner is missing or not executable: $UNIFIED_RUNNER — refusing to commit." >&2
   exit 1
 fi
 
-echo "[pre-commit] $MODULE_NAME files staged — running ERT suite..."
+echo "[pre-commit] $MODULE_NAME files staged — running unified tests and coverage..."
 
-# Run from repo root so relative `modules/...` paths in test loader resolve.
+# Run from repo root so every suite sees the same repository-relative paths.
 cd "$REPO_ROOT"
 
-# Capture output to a temp file; only show the failure tail on error
-# (full output is enormous because of per-test STUB-CREATE log lines).
+# Capture output because ERT and Go per-function coverage are intentionally
+# verbose.  Print the failure tail, or the concise timing summary on success.
 TMP_OUT="$(mktemp -t agent-repl-precommit.XXXXXX)"
 trap 'rm -f "$TMP_OUT"' EXIT
 
-if ! emacs -batch -Q -l ert \
-       -l "modules/app/$MODULE_NAME/test-$MODULE_NAME.el" \
-       -f ert-run-tests-batch-and-exit \
-       >"$TMP_OUT" 2>&1; then
-  echo "[pre-commit] ✗ ERT tests failed — refusing commit." >&2
+if ! "$UNIFIED_RUNNER" >"$TMP_OUT" 2>&1; then
+  echo "[pre-commit] ✗ unified agent-repl suite failed — refusing commit." >&2
   echo "[pre-commit] Failure tail:" >&2
   echo "---" >&2
-  tail -50 "$TMP_OUT" >&2
+  tail -80 "$TMP_OUT" >&2
   echo "---" >&2
   echo "[pre-commit] Per AGENTS.md zero-tolerance: fix the failures. Do not use --no-verify." >&2
   exit 1
 fi
 
-# Trim noise; only print the final summary line.
-grep -E "^Ran [0-9]+ tests" "$TMP_OUT" >&2 || true
-echo "[pre-commit] ✓ $MODULE_NAME tests pass."
+grep -E '^\[agent-repl-tests\] (timing:|all agent-repl tests)' "$TMP_OUT" >&2 || true
+echo "[pre-commit] ✓ $MODULE_NAME unified tests and coverage pass."
