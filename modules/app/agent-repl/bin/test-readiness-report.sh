@@ -22,6 +22,11 @@
 
 set -euo pipefail
 
+# A pre-commit hook exports its live index to children. This harness owns only
+# scratch repositories, so inheriting that binding would let fixture `git add`
+# and `git commit` rewrite the caller's real staging index.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX
+
 THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_UNDER_TEST="$THIS_DIR/readiness-report.sh"
 LIB_UNDER_TEST="$THIS_DIR/lib-deploy-stamp.sh"
@@ -38,7 +43,12 @@ fail() { FAIL=$((FAIL + 1)); echo "FAIL - $1"; [ -n "${2:-}" ] && echo "       $
 
 # --- fixture ----------------------------------------------------------------
 
-git_c() { git -c user.name=t -c user.email=t@example.com -C "$1" "${@:2}"; }
+git_c() {
+    # Scratch commits are fixture construction, not authored repository
+    # changes. Isolate them from the parent checkout's absolute shared hook.
+    git -c user.name=t -c user.email=t@example.com \
+        -c core.hooksPath=/dev/null -C "$1" "${@:2}"
+}
 
 # make_repo ROOT — a scratch git repo whose top level IS the module root, with
 # one commit per system directory so every pathspec has distinct history.
