@@ -1432,15 +1432,53 @@ guarantees each webview reloads the freshly built bundle."
         (should (equal ws "/w"))))))
 
 (ert-deftest agent-repl-test-frontend-switch-ensure-skips-when-session-live ()
-  "A workspace already driving a live session has nothing to ensure."
+  "A workspace this daemon is already DRIVING has nothing to ensure."
   ;; Arrange
   (agent-repl-test--with-ws "ws1" '(:project-dir "/w" :frontend-session-id "s_1")
-    (cl-letf (((symbol-function 'agent-repl--frontend-session-live-p) (lambda (_id) t)))
+    (cl-letf (((symbol-function 'agent-repl--frontend-session-live-p) (lambda (_id) t))
+              ((symbol-function 'agent-repl--frontend-session-driver-live-p) (lambda (_id) t)))
       (agent-repl-test--with-switch-ensure
         ;; Act
         (agent-repl--frontend-notify-workspace-switch "ws1")
         ;; Assert — this is THE common case; a send here is pure daemon rescan.
         (should (null uds-commands))))))
+
+;;;; ---- never-blue: the DAEMON-RESTART shape ------------------------------
+;;
+;; The dead perspective switch.  Every fact the skip used to consult is read
+;; back off the durable registry record, so after a daemon restart a workspace
+;; with no driver at all still looked live-and-backfilled — every switch
+;; skipped, nothing ever bootstrapped, and the workspace sat blue until the
+;; user typed.  `SessionView.shim_attached' is the non-durable half.
+
+(ert-deftest agent-repl-test-frontend-driver-live-reads-shim-attached ()
+  "The driver-liveness read is the pushed `shim_attached', nothing derived."
+  (cl-letf (((symbol-function 'agent-repl--frontend-session-view)
+             (lambda (_id) (list :sessionId "s_1" :shimAttached t))))
+    (should (agent-repl--frontend-session-driver-live-p "s_1"))))
+
+(ert-deftest agent-repl-test-frontend-driver-live-nil-without-the-field ()
+  "A daemon that sends no field reads as NOT live, so the switch ensures."
+  (cl-letf (((symbol-function 'agent-repl--frontend-session-view)
+             (lambda (_id) (list :sessionId "s_1"))))
+    (should-not (agent-repl--frontend-session-driver-live-p "s_1"))))
+
+(ert-deftest agent-repl-test-frontend-switch-ensure-sends-after-a-daemon-restart ()
+  "THE restart shape: a durable live+backfilled record with NO live driver.
+Every durable fact says the workspace is up; only `shim_attached' knows the
+daemon has never brought it up.  A missing driver must ALWAYS ensure."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w" :frontend-session-id "s_1")
+    (cl-letf (((symbol-function 'agent-repl--uds-connected-p) (lambda () t))
+              ((symbol-function 'agent-repl--frontend-session-live-p) (lambda (_id) t))
+              ((symbol-function 'agent-repl--frontend-session-view)
+               (lambda (_id) (list :sessionId "s_1"
+                                   :backfill "BACKFILL_STATE_DONE"))))
+      (agent-repl-test--with-uds
+        ;; Act
+        (agent-repl--frontend-notify-workspace-switch "ws1")
+        ;; Assert
+        (should (equal (car (car uds-commands)) "openWorkspace"))))))
 
 ;;;; ---- never-blue: the backfill-completion gate (F2) --------------------
 ;;
@@ -1454,7 +1492,11 @@ STATE nil stands for a pre-F2 daemon that sends no field at all."
   `(cl-letf (((symbol-function 'agent-repl--uds-connected-p) (lambda () t))
              ((symbol-function 'agent-repl--frontend-session-live-p) (lambda (_id) t))
              ((symbol-function 'agent-repl--frontend-session-view)
-              (lambda (_id) (and ,state (list :sessionId "s_1" :backfill ,state)))))
+              (lambda (_id) (and ,state (list :sessionId "s_1" :backfill ,state
+                                              ;; The daemon is DRIVING this
+                                              ;; workspace: these cases isolate
+                                              ;; the backfill axis.
+                                              :shimAttached t)))))
      (agent-repl-test--with-uds ,@body)))
 
 (ert-deftest agent-repl-test-frontend-backfill-settled-when-done ()

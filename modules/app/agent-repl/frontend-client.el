@@ -1239,6 +1239,27 @@ cannot backfill on switch either, so retrying would loop for nothing."
     (or (null state)
         (member state '("BACKFILL_STATE_DONE" "BACKFILL_STATE_UNSPECIFIED")))))
 
+(defun agent-repl--frontend-session-driver-live-p (session-id)
+  "Return non-nil when the daemon holds a LIVE DRIVER for SESSION-ID.
+Reads `SessionView.shim_attached\=' off the pushed-frame store — the one
+field on that message that is NOT read back from the durable registry
+record.
+
+WHY LIVENESS CANNOT BE READ OFF THE RECORD (the dead perspective switch).
+`agent-repl--frontend-session-live-p\=' answers whether this record is
+non-terminal, and `agent-repl--frontend-backfill-settled-p\=' answers
+whether its history finished arriving.  Both are DURABLE, so both keep
+answering yes across a daemon restart — about a daemon that has no driver for the
+workspace at all.  The switch-ensure skipped on exactly that pair, so
+after every restart a switch to a dormant workspace sent no
+`openWorkspace\=', nothing brought the session up, and the workspace sat
+blue until the user typed.
+
+A daemon too old to send the field reports nil, which reads as NOT live
+and therefore sends: the cooldown bounds the cost, and an unnecessary
+ensure is idempotent while a skipped one is the bug above."
+  (eq (plist-get (agent-repl--frontend-session-view session-id) :shimAttached) t))
+
 (defun agent-repl--frontend-switch-ensure-skip-reason (ws)
   "Return a string naming why WS's switch must not send, or nil to send.
 Ordered cheapest-first.  Every arm is a genuine no-op rather than a
@@ -1251,21 +1272,34 @@ that would have retried it is the retry."
    ((not (agent-repl--uds-connected-p)) "uds link down")
    ;; No cwd means no routable wire key, and the daemon routes purely by cwd.
    ((null (agent-repl--ws-get ws :project-dir)) "no project-dir")
-   ;; THE common case: a workspace already driving a live session WHOSE
-   ;; HISTORY ARRIVED has nothing to ensure, so the send would be pure
+   ;; THE common case: a workspace the daemon is ALREADY DRIVING, whose
+   ;; HISTORY ARRIVED, has nothing to ensure — so the send would be pure
    ;; daemon-side rescan.
    ;;
-   ;; Liveness alone is NOT enough (F2). A session the daemon bound and brought
-   ;; up, but whose transcript the sidecar never delivered, is live and blue at
-   ;; the same time — and that is precisely the workspace the never-blue
-   ;; contract is about. So the skip additionally requires the daemon's
-   ;; backfill verdict to be settled; `pending' and `failed' both fall through
-   ;; to a send, bounded by the cooldown and give-up below.
+   ;; All three conditions are load-bearing, and each one closes a distinct
+   ;; way the skip was wrong:
+   ;;
+   ;;   - A non-terminal record (F2's `live') alone is not enough: a session
+   ;;     the daemon bound and brought up, but whose transcript the sidecar
+   ;;     never delivered, is live and blue at the same time.
+   ;;   - A settled backfill alone is not enough for the same reason in
+   ;;     reverse; `pending' and `failed' both fall through to a send.
+   ;;   - AND NEITHER OF THOSE IS A FACT ABOUT THIS DAEMON. Both are read back
+   ;;     off the durable registry record, so both survive a daemon restart and
+   ;;     go on describing a workspace the new daemon has never brought up.
+   ;;     That is the dead perspective switch: after a restart every workspace
+   ;;     looked live-and-backfilled, every switch skipped, and no workspace
+   ;;     ever bootstrapped. `agent-repl--frontend-session-driver-live-p' is
+   ;;     the non-durable half, so a missing driver ALWAYS ensures.
+   ;;
+   ;; Everything that falls through is bounded by the cooldown and give-up
+   ;; below.
    ((let ((id (agent-repl--ws-get ws :frontend-session-id)))
       (and id
            (agent-repl--frontend-session-live-p id)
+           (agent-repl--frontend-session-driver-live-p id)
            (agent-repl--frontend-backfill-settled-p id)))
-    "session already live and backfilled")
+    "session already live, driven and backfilled")
    ((agent-repl--ws-get ws :switch-ensure-failed) "gave up after repeated failures")
    ((let ((at (agent-repl--ws-get ws :switch-ensure-at)))
       (and at (< (- (float-time) at) agent-repl-frontend-switch-ensure-cooldown)))

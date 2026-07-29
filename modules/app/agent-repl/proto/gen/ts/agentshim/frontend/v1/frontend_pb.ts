@@ -409,6 +409,20 @@ export type SessionView = Message<"agentshim.frontend.v1.SessionView"> & {
   permissionMode: string;
 
   /**
+   * Whether the daemon holds a LIVE DRIVER for this session's workspace —
+   * i.e. a shim is attached, or its client is reconnecting to one.
+   *
+   * IT IS THE ONE FIELD ON THIS MESSAGE THAT IS NOT DURABLE, and that is
+   * exactly why it exists. Every other field here is read off the registry
+   * record, which survives a daemon restart; a frontend that judges "is this
+   * workspace already up?" from those sees a non-terminal, fully-backfilled
+   * record and concludes YES against a daemon that has no driver for it at
+   * all. Emacs's switch-ensure did precisely that, so after a daemon restart
+   * switching to a dormant workspace skipped its openWorkspace and the
+   * workspace never bootstrapped.
+   *
+   * The field had NO producer before that bug; the name always meant this.
+   *
    * @generated from field: bool shim_attached = 10;
    */
   shimAttached: boolean;

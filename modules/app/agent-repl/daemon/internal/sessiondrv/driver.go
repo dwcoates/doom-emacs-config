@@ -352,6 +352,25 @@ func (m *Manager) Ensure(workspace string) error {
 	return err
 }
 
+// Live reports whether this manager holds a live driver for workspace — i.e.
+// whether Ensure would be a no-op.
+//
+// It is the ONE session fact that does not survive a daemon restart, which is
+// exactly why a frontend has to be told it rather than infer it. Every durable
+// field a frontend can see (non-terminal, backfilled) is equally true of a
+// workspace this daemon has never brought up, so a frontend judging "already
+// up?" from the record alone answers YES about a workspace with no driver at
+// all.
+func (m *Manager) Live(workspace string) bool {
+	if workspace == "" {
+		return false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	_, ok := m.byWS[workspace]
+	return ok
+}
+
 // snapshotDrivers copies the currently live driver set without holding the
 // manager lock while callers inspect per-driver consumer state.
 func (m *Manager) snapshotDrivers() []*driven {
