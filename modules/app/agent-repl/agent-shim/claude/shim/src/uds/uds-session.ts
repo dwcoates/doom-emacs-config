@@ -48,7 +48,7 @@ import type {
 } from "../session.js";
 import { SessionStartGate, convert, promptPreview } from "../proto/convert.js";
 import { isEphemeral, toEphemeralEvent, StreamMessageTracker } from "../proto/delta.js";
-import { ControlDispatch, type SdkControlTarget, type ToolPermissionResult } from "./control.js";
+import { ControlDispatch, ModelSelectionError, type SdkControlTarget, type ToolPermissionResult } from "./control.js";
 import { SessionServer, type SessionServerHandlers } from "./server.js";
 import { StoreClient, type ReplayOutcome } from "./store-client.js";
 import { envelopeIs, unpackAs, type Any } from "./framing.js";
@@ -205,6 +205,8 @@ export class UdsSession {
    * override applied on top of it.
    */
   private effectivePermissionMode: PermissionMode;
+  /** The only model this shim has observed or confirmed as selected. */
+  private effectiveModel = "";
 
   constructor(private readonly deps: UdsSessionDeps) {
     this.storeKeyKnown = deps.storeSessionId !== undefined && deps.storeSessionId !== "";
@@ -321,6 +323,22 @@ export class UdsSession {
           });
         return wasLive ? InterruptOutcome.INTERRUPTED : InterruptOutcome.ALREADY_COMPLETE;
       },
+      setModel: async ({ requestId, model }): Promise<string> => {
+        if (this.query === null) {
+          throw new Error("set-model cannot run before the SDK query exists");
+        }
+        try {
+          await this.query.setModel(model);
+        } catch (err) {
+          // The SDK rejected the mutation.  Return the selection this shim
+          // actually knows, so the daemon can reset the UI from authority.
+          throw new ModelSelectionError(errMsg(err), this.effectiveModel);
+        }
+        this.effectiveModel = model;
+        shimLog(COMPONENT, { session: this.deps.sessionId, request: requestId, model },
+          "model change confirmed by SDK");
+        return this.effectiveModel;
+      },
     };
     this.control = new ControlDispatch(
       target,
@@ -339,6 +357,7 @@ export class UdsSession {
     const handlers: SessionServerHandlers = {
       onSubmitPrompt: (m) => this.control.handleSubmitPrompt(m),
       onInterrupt: (m) => this.control.handleInterrupt(m),
+      onSetModel: (m) => this.control.handleSetModel(m),
       onPermissionResponse: (m) => this.control.handlePermissionResponse(m),
       onReplayRequest: (m) => void this.serveReplay(m),
       onHealthCheck: (m) => this.health(m),
@@ -746,6 +765,17 @@ export class UdsSession {
       ...(turnId !== undefined ? { turnId } : {}),
       ...this.convertOpts(),
     });
+    for (const event of lifecycle) {
+      // `Event.payload` is a protobuf oneof and can be absent on a malformed
+      // envelope.  Do not let diagnostic model observation turn that already
+      // loud protocol violation into an SDK-stream crash.
+      const model = event.payload.case === "sessionStarted" ? event.payload.value?.model ?? "" : "";
+      if (model !== "") {
+        this.effectiveModel = model;
+        shimLog(COMPONENT, { session: this.deps.sessionId, model: this.effectiveModel },
+          "model observed from SDK system-init");
+      }
+    }
     // The converted envelope carries the VENDOR session id (read off the SDK
     // message), which is the id the store files these events under. Adopt it
     // as the subscription key: a fresh session has no other way to learn it,

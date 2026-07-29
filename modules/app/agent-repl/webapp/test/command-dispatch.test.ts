@@ -56,7 +56,6 @@ function sessionViewFrame(over: Record<string, unknown>): FrontendFrame {
 
 const CREATE_ARGS: CreateSessionArgs = {
   cwd: "",
-  model: "",
   permissionMode: "",
   configDir: "",
   resumeClaudeSessionId: "",
@@ -162,6 +161,14 @@ describe("ack-correlated commands", () => {
     const { dispatcher, sent } = newDispatcher();
     const p = dispatcher.resync("/w", 42);
     expect(JSON.parse(sent[0]).resync).toEqual({ fromSeq: "42" });
+    dispatcher.observe(ackFrame("r1", true));
+    await expect(p).resolves.toBeUndefined();
+  });
+
+  it("sends a model change only as an explicit request", async () => {
+    const { dispatcher, sent } = newDispatcher();
+    const p = dispatcher.setModel("/w", "opus");
+    expect(JSON.parse(sent[0])).toEqual({ requestId: "r1", workspace: "/w", setModel: { model: "opus" } });
     dispatcher.observe(ackFrame("r1", true));
     await expect(p).resolves.toBeUndefined();
   });

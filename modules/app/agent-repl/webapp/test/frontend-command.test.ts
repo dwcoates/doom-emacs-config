@@ -118,7 +118,6 @@ describe("encodeFrontendCommand — createSession", () => {
       body: {
         case: "createSession",
         cwd: "/work/ws",
-        model: "opus",
         permissionMode: "default",
         configDir: "/home/u/.claude",
         resumeClaudeSessionId: "cli-uuid",
@@ -127,12 +126,27 @@ describe("encodeFrontendCommand — createSession", () => {
     });
     expect(w.createSession).toEqual({
       cwd: "/work/ws",
-      model: "opus",
       permissionMode: "default",
       configDir: "/home/u/.claude",
       resumeClaudeSessionId: "cli-uuid",
       fake: true,
     });
+  });
+
+  it("cannot make creation choose a model", () => {
+    const w = wire({
+      requestId: "r1",
+      workspace: "",
+      body: {
+        case: "createSession",
+        cwd: "/work/ws",
+        permissionMode: "default",
+        configDir: "",
+        resumeClaudeSessionId: "",
+        fake: false,
+      },
+    });
+    expect(w.createSession).not.toHaveProperty("model");
   });
 
   it("never encodes the ungated-session consent the daemon gates on", () => {
@@ -145,7 +159,6 @@ describe("encodeFrontendCommand — createSession", () => {
       body: {
         case: "createSession",
         cwd: "/work/ws",
-        model: "opus",
         permissionMode: "bypassPermissions",
         configDir: "",
         resumeClaudeSessionId: "",
@@ -154,6 +167,13 @@ describe("encodeFrontendCommand — createSession", () => {
     });
     // Assert
     expect(w.createSession).not.toHaveProperty("allowUngated");
+  });
+});
+
+describe("encodeFrontendCommand — setModel", () => {
+  it("encodes only an explicit model-update request", () => {
+    const w = wire({ requestId: "r1", workspace: "/work/ws", body: { case: "setModel", model: "opus" } });
+    expect(w.setModel).toEqual({ model: "opus" });
   });
 });
 

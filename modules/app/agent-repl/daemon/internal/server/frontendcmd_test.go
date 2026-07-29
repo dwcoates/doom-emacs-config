@@ -103,6 +103,9 @@ func (f *fakePrompts) AnswerPermission(_ context.Context, _, permReqID string, _
 	f.perms = append(f.perms, permReqID)
 	return f.err
 }
+func (f *fakePrompts) SetModel(_ context.Context, _ string, _ string) (string, error) {
+	return "opus", f.err
+}
 
 type fakeMerges struct {
 	merged  []string
@@ -414,12 +417,12 @@ func TestCommandHandlerCreateSessionRoutesToSessions(t *testing.T) {
 	// assertion needs a shim that answers healthy.
 	h := establishHandler(t, sc, &probeHealthRouter{healthy: true})
 	// Act
-	err := h.CreateSession(context.Background(), "/w", "r1", &frontendv1.CreateSessionCmd{Cwd: "/w", Model: "haiku"})
+	err := h.CreateSession(context.Background(), "/w", "r1", &frontendv1.CreateSessionCmd{Cwd: "/w"})
 	// Assert — the create routes with its opts, never a silent drop.
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if len(sc.created) != 1 || sc.created[0].CWD != "/w" || sc.created[0].Model != "haiku" {
+	if len(sc.created) != 1 || sc.created[0].CWD != "/w" || sc.created[0].Model != "" {
 		t.Fatalf("created = %v", sc.created)
 	}
 }
