@@ -413,6 +413,27 @@ behavior can rebind via `cl-letf'.")
 (when (and noninteractive (boundp 'agent-repl-log-to-file))
   (setq agent-repl-log-to-file nil))
 
+(defmacro agent-repl-test--with-log-sink-on (&rest body)
+  "Run BODY with the durable log sink ENABLED, writing to a throwaway file.
+The `setq' immediately above turns `agent-repl-log-to-file' off for every
+noninteractive run, and `agent-repl--persist-log-record' then skips
+workspace-identity resolution ENTIRELY.  A test that leaves it off
+therefore never exercises log routing at all — which is precisely how log
+calls handing a wire CWD to `agent-repl--workspace-log-identity' shipped
+green while crashing Emacs boot and the frontend process filter.
+
+Any test asserting that some code path does not violate the log routing
+invariant MUST wrap itself in this."
+  (declare (indent 0))
+  `(let ((sink (make-temp-file "agent-repl-test-log-sink-")))
+     (unwind-protect
+         (let ((agent-repl-log-to-file t)
+               (agent-repl-log-file-name sink)
+               (agent-repl--log-write-counter 0))
+           (cl-letf (((symbol-function 'message) #'ignore))
+             ,@body))
+       (when (file-exists-p sink) (delete-file sink)))))
+
 ;; Workspace live-log buffers are a UI sink, analogous to the durable file
 ;; sink disabled immediately above.  Suppress that sink across the generic
 ;; batch harness so tests of unrelated buffer/perspective behavior observe
