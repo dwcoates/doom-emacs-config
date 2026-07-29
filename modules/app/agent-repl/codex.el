@@ -235,31 +235,6 @@ grow fields across codex versions; parse leniently)."
                                (length line) err)
      nil)))
 
-(defun agent-repl--codex-model-extract-from-tail (tail)
-  "Return the most recent model id from rollout TAIL, or nil.
-Walks lines bottom-up for the newest `turn_context' entry (the model
-can change mid-session) and returns its `payload.model' string."
-  (when (and (stringp tail) (not (string-empty-p tail)))
-    (let ((lines (split-string tail "\n" t))
-          (found nil)
-          (candidate-count 0))
-      (cl-loop for line in (nreverse lines)
-               while (not found)
-               when (string-match-p "\"type\":\"turn_context\"" line)
-               do (progn
-                    (cl-incf candidate-count)
-                    (let* ((parsed (agent-repl--codex-parse-line line))
-                         (payload (and (listp parsed)
-                                       (cdr (assoc "payload" parsed))))
-                         (model (and (listp payload)
-                                     (cdr (assoc "model" payload)))))
-                    (when (and (stringp model) (not (string-empty-p model)))
-                      (setq found model)))))
-      (agent-repl--log-verbose nil
-                                "codex-model-extract-from-tail: chars=%d lines=%d candidates=%d model=%S"
-                                (length tail) (length lines) candidate-count found)
-      found)))
-
 (defun agent-repl--codex-context-extract-from-tail (tail)
   "Return the most recent context-token total from rollout TAIL, or nil.
 Walks lines bottom-up for the newest `token_count' event whose
@@ -293,18 +268,6 @@ cache-inclusive (no separate cache counters to sum, unlike claude's)."
                                 "codex-context-extract-from-tail: chars=%d lines=%d candidates=%d input-tokens=%S"
                                 (length tail) (length lines) candidate-count found)
       found)))
-
-(defun agent-repl--codex-model-read (path)
-  "Return the most recent model id from the rollout at PATH, or nil.
-This is the `codex' backend's TRANSCRIPT-MODEL-FN.  Reads only the
-trailing `agent-repl-codex-scan-bytes'."
-  (let ((tail (agent-repl--transcript-read-tail path agent-repl-codex-scan-bytes)))
-    (let ((model (and tail (agent-repl--codex-model-extract-from-tail tail))))
-      (agent-repl--log-verbose nil
-                                "codex-model-read: path=%s scan-bytes=%d tail-chars=%s model=%S"
-                                path agent-repl-codex-scan-bytes
-                                (and tail (length tail)) model)
-      model)))
 
 (defun agent-repl--codex-context-read (path)
   "Return the most recent context-token total from the rollout at PATH, or nil.
@@ -391,7 +354,6 @@ pre-exist)."
     :transcript-path-fn #'agent-repl--codex-rollout-path
     ;; No TRANSCRIPT-TITLE-FN: codex rollouts carry no conversation
     ;; title, so the aiTitle segment renders empty for codex workspaces.
-    :transcript-model-fn #'agent-repl--codex-model-read
     :transcript-context-fn #'agent-repl--codex-context-read)))
 
 (provide 'agent-repl-codex)

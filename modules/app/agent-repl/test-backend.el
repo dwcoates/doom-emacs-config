@@ -541,8 +541,6 @@ OVERRIDES is a plist of slot keywords accepted by
                 #'agent-repl--ai-title-jsonl-path))
     (should (eq (agent-repl-backend-transcript-title-fn b)
                 #'agent-repl--ai-title-read-from-jsonl))
-    (should (eq (agent-repl-backend-transcript-model-fn b)
-                #'agent-repl--model-read-from-jsonl))
     (should (eq (agent-repl-backend-transcript-context-fn b)
                 #'agent-repl--context-read-from-jsonl))))
 
