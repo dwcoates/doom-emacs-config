@@ -55,6 +55,37 @@ type Server struct {
 	conns  map[net.Conn]struct{}
 	closed bool
 	wg     sync.WaitGroup
+
+	// ingestMu serializes the whole ASSIGN-THEN-ANNOUNCE region of
+	// ingestAndFan, so a session's fan-out order is its seq order.
+	//
+	// It is DELIBERATELY NOT `mu`. That one guards the listener/conns/closed
+	// lifecycle, and a batch ingest holding it would block every accept and
+	// close for the duration of a SQLite transaction; the two critical sections
+	// share nothing and must not be conflated.
+	//
+	// WHY IT IS NEEDED. Seq assignment is already totally ordered — db.Ingest
+	// runs under BEGIN IMMEDIATE (see internal/db/db.go), which serializes every
+	// writer globally. The PUBLISH was not: it ran after the transaction, on the
+	// producer's own goroutine, holding nothing. Every session has two
+	// concurrent producers (the shim's stream plane and the sidecar's file
+	// plane, merged by the (session_id, dedup_key) index), so two goroutines
+	// could commit as 1043-then-1044 and publish as 1044-then-1043. The daemon
+	// reads a non-increasing seq as a terminal protocol violation and kills the
+	// session — observed twice on 2026-07-29, both mid-turn.
+	//
+	// MUTUAL EXCLUSION, not a narrowed race window: while one batch holds this,
+	// no other batch can be between its own commit and its own publish, so the
+	// inversion is UNREPRESENTABLE rather than merely unlikely.
+	//
+	// It is nearly free for the same reason it is correct: BEGIN IMMEDIATE
+	// already serialized the expensive half, so the only contention this adds
+	// covers a loop of non-blocking channel sends (fanout.publish).
+	//
+	// STORE-WIDE rather than per-session, because one batch may span sessions
+	// (db.Ingest's per-session seq map), and a per-session scheme would need to
+	// hold several locks per batch with the lock-ordering hazard that implies.
+	ingestMu sync.Mutex
 }
 
 // New builds a Server over an open db. buffer<=0 uses the default fanout buffer.
@@ -394,17 +425,34 @@ func (s *Server) ingestAndFan(sw *corev1.StoreWrite) (*corev1.StoreWriteAck, boo
 		// EPHEMERAL batches are a hot live-tail path. They neither persist nor
 		// change a cursor, so a store log would bury the durable outcomes the
 		// store owns without adding diagnostic value.
+		//
+		// It still takes ingestMu, even holding no seq of its own: this path is
+		// what makes the "fan out in arrival position" claim above true. Without
+		// the lock an ephemeral batch could publish between another batch's
+		// commit and that batch's publish, landing ahead of a persistent event
+		// that was assigned before it.
+		s.ingestMu.Lock()
 		for _, ev := range events {
 			s.fan.publish(ev)
 		}
+		s.ingestMu.Unlock()
 		return &corev1.StoreWriteAck{}, false
 	}
 	s.log.LogVerbose(logging.Fields{Operation: "ingest-classify", Producer: sw.GetProducer()}, "classified batch total_events=%d persistent_events=%d ephemeral_events=%d", len(events), len(persistent), len(events)-len(persistent))
 
+	// ASSIGN THEN ANNOUNCE, as one indivisible step (see Server.ingestMu). The
+	// lock opens here rather than after the Ingest because it is the ORDER of
+	// the two that must hold: a publish that overtakes an earlier batch's
+	// publish is exactly the seq inversion the daemon reads as fatal.
+	s.ingestMu.Lock()
 	start := time.Now()
 	res, err := s.db.Ingest(sw.GetProducer(), persistent, batch.GetCursorAdvance())
 	ingestMs := time.Since(start).Milliseconds()
 	if err != nil {
+		// The rejected-batch path is unchanged: a loud non-empty ack error, and
+		// the batch counted as durable-intent. Only the unlock is added, so a
+		// rejection cannot wedge every later write behind a held lock.
+		s.ingestMu.Unlock()
 		return &corev1.StoreWriteAck{Error: err.Error()}, true
 	}
 
@@ -420,6 +468,10 @@ func (s *Server) ingestAndFan(sw *corev1.StoreWrite) (*corev1.StoreWriteAck, boo
 			s.fan.publish(ev)
 		}
 	}
+	// The announce is complete, so the ordering guarantee is discharged. The log
+	// below is deliberately outside: it reports what already happened and no
+	// other batch's correctness depends on it.
+	s.ingestMu.Unlock()
 
 	// One line per persisted batch, so the store hop of the prompt round trip is
 	// visible end to end. Ephemeral-only batches (and heartbeats) stay silent;
