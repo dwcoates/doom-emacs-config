@@ -187,7 +187,7 @@ func main() {
 		claudeBin      = flag.String("claude-bin", "", "path to the claude CLI the SDK drives (empty = the SDK's bundled native Claude Code binary)")
 		shimScript     = flag.String("shim", "", "path to the shim entrypoint (agent-shim/claude/shim/dist/main.js)")
 		fake           = flag.Bool("fake", false, "force --fake (offline scripted SDK) on every session")
-		idleTimeout    = flag.Duration("idle-timeout", 30*time.Minute, "hibernate a session (SIGTERM its UDS shim; keep the record rehydratable) after this long without a real act; 0 disables. A hibernated session costs a full shim bring-up on the next act, so the window is generous rather than tight")
+		idleTimeout    = flag.Duration("idle-timeout", time.Hour, "hibernate a session (SIGTERM its UDS shim; keep the record rehydratable) after this long with nothing happening to its workspace; 0 disables. Measured from the newest row on the workspace's state log, so a finished turn starts the clock rather than arming an immediate sweep. A hibernated session costs a full shim bring-up on the next act, so the window is generous rather than tight")
 		webappDir      = flag.String("webapp", "", "optional directory of webapp static files to serve at /")
 		widgetAssets   = flag.String("widget-assets", envStr("AGENT_REPL_WIDGET_ASSETS", ""), "optional directory of embeddable-widget assets (e.g. a chess-widget dist) to serve at /widget-assets/; empty = capability off")
 		remediationDir = flag.String("remediation-dir", "", "checkout the \"session gone\" analyst diagnoses and opens a resilience workspace against (empty = remediation disabled)")

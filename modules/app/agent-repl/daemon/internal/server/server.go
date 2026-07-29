@@ -1456,31 +1456,73 @@ func (s *Server) runIdleSweeper() {
 	}
 }
 
-// sweepIdle stops the shim of every non-turn-active session best-effort.
+// sweepIdle stops the shim of every session that has actually gone idle,
+// best-effort.
 //
-// SIMPLIFICATION (post-cutover): the daemon no longer tracks a per-session
-// lastActive stamp — the driver owns liveness and the shim outlives a
-// hibernation via reattach on the next act. Without a lastActive signal the
-// sweeper cannot gate on a real idle duration, so it gates ONLY on
-// !turn_active (never hibernate a session mid-turn) and calls Hibernate
-// best-effort. A workspace whose shim is already stopped returns a "no live
-// session" error, which is expected and skipped, not a failure.
+// A workspace whose shim is already stopped returns a "no live session" error
+// from Hibernate, which is expected and skipped, not a failure.
 func (s *Server) sweepIdle() {
+	nowMs := s.now().UnixMilli()
 	for _, rec := range s.registry.All() {
 		if rec.Terminal || rec.CWD == "" {
 			continue
 		}
-		if st, found, err := s.ssm.Current(rec.CWD); err != nil {
-			s.logf("session %s: idle sweep state read (ws %s): %v", rec.SessionID, rec.CWD, err)
+		if !s.sweepable(rec.SessionID, rec.CWD, nowMs) {
 			continue
-		} else if found && st.GetTurnActive() {
-			continue // never hibernate a turn-active session
 		}
 		if err := s.driver.Hibernate(rec.CWD); err != nil {
 			// Expected for an already-hibernated / never-brought-up workspace.
 			s.logf("session %s: idle sweep skipped (ws %s): %v", rec.SessionID, rec.CWD, err)
 		}
 	}
+}
+
+// sweepable reports whether a workspace has been quiet long enough to hibernate.
+//
+// TWO GATES, AND THE SECOND ONE IS THE POINT. `!turn_active` alone says only
+// that no turn is running THIS INSTANT, which every workspace satisfies the
+// moment its turn ends — so a sweeper gated on it hibernated healthy sessions
+// within one tick of them finishing work, roughly every seven minutes in
+// practice. The elapsed-idle gate is what makes the configured window mean
+// anything: the shim survives until the workspace has genuinely been left alone
+// for idleTimeout.
+//
+// EVERY UNKNOWN ANSWERS NO. A workspace with no resolved state, or none the log
+// can date, is a workspace this sweeper knows nothing about, and reaping on
+// absent evidence is precisely how a bring-up in flight got hibernated before
+// its first event landed. Only a positive, dated measurement licenses a
+// teardown.
+func (s *Server) sweepable(sessionID, workspace string, nowMs int64) bool {
+	st, found, err := s.ssm.Current(workspace)
+	if err != nil {
+		s.logf("session %s: idle sweep state read (ws %s): %v", sessionID, workspace, err)
+		return false
+	}
+	if !found {
+		s.logf("session %s: idle sweep HELD (ws %s): no resolved state, and an unknown workspace is not a quiet one",
+			sessionID, workspace)
+		return false
+	}
+	if st.GetTurnActive() {
+		return false
+	}
+	atMs, dated, err := s.ssm.LastActivityMs(workspace)
+	if err != nil {
+		s.logf("session %s: idle sweep activity read (ws %s): %v", sessionID, workspace, err)
+		return false
+	}
+	if !dated {
+		s.logf("session %s: idle sweep HELD (ws %s): no state history to date the workspace by",
+			sessionID, workspace)
+		return false
+	}
+	idle := time.Duration(nowMs-atMs) * time.Millisecond
+	if idle < s.idleTimeout {
+		return false
+	}
+	s.logf("session %s: idle sweep hibernating (ws %s): quiet for %s, threshold %s",
+		sessionID, workspace, idle.Round(time.Second), s.idleTimeout)
+	return true
 }
 
 // ShutdownAll ends the daemon's session work (daemon teardown). The registry
