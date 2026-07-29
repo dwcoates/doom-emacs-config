@@ -70,6 +70,25 @@ func TranscriptPath(configDir, cwd, claudeSessionID string) string {
 	return filepath.Join(ProjectDir(configDir, cwd), claudeSessionID+".jsonl")
 }
 
+// TranscriptExists reports whether the transcript naming claudeSessionID is on
+// disk, and the path it looked at (so a caller can name it in the refusal).
+//
+// It is the ONE resume-viability question, shared by the two places that ask
+// it: the create gate, which hard-fails a client asking to resume something
+// gone, and the spawner, which must never hand `--resume <uuid>` to a CLI that
+// will exit 1 on it. Two copies of this stat would be two chances to disagree
+// about which root or which encoding the uuid resolves under.
+//
+// A stat error of any kind is a MISS. The question is "can the CLI resume
+// this", and an unreadable path answers that as decisively as a missing one.
+func TranscriptExists(configDir, cwd, claudeSessionID string) (path string, exists bool) {
+	path = TranscriptPath(ClaudeConfigDir(configDir), cwd, claudeSessionID)
+	if _, err := os.Stat(path); err != nil {
+		return path, false
+	}
+	return path, true
+}
+
 // Transcript is one session transcript found on disk.
 type Transcript struct {
 	// ConfigDir is the `~/.claude*` root the transcript was found under.

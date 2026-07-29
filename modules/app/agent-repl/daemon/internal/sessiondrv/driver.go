@@ -100,13 +100,36 @@ type SessionRegistrar interface {
 	SessionDied(sessionID, reason string)
 }
 
+// SpawnResult reports what a bring-up had to REPAIR to get the session up, and
+// what it started it as. Both facts are the driver's, not the spawner's: the
+// spawner owns the record and the process, and the driver owns the feed note
+// and the escape ladder that read this.
+type SpawnResult struct {
+	// StaleResumeDropped is the vendor conversation uuid the spawner refused
+	// to resume — the record named one and no transcript for it exists — and
+	// cleared off the record before spawning FRESH. Empty when nothing was
+	// dropped. A non-empty value owes the user a feed note: their history is
+	// not coming back and saying so is the whole repair.
+	StaleResumeDropped string
+	// Resumed is the vendor conversation uuid this spawn actually resumed, or
+	// "" for a fresh start.
+	Resumed string
+}
+
 // Spawner makes sure a session has exactly one live shim: it leaves an existing
 // one alone (connected, or merely holding its session lock — the shim outlives
 // a dead daemon, §4.4) or spawns a fresh one via ShimUDSArgv. The
 // concrete impl lives in the server package (it owns the liveness checks and
 // the spawn plumbing); injected here so the driver stays IO-narrow and testable.
 type Spawner interface {
-	EnsureShim(ctx context.Context, sessionID string) error
+	EnsureShim(ctx context.Context, sessionID string) (SpawnResult, error)
+	// DropResume clears the session's vendor conversation pointer so the NEXT
+	// spawn starts fresh, reporting what it dropped ("" when there was none).
+	//
+	// It is the escape ladder's classifier as much as its repair: a bring-up
+	// that failed WITH a pointer is a bad-pointer failure worth one fresh
+	// retry, and one that failed WITHOUT a pointer has nothing left to try.
+	DropResume(sessionID string) (dropped string, err error)
 	// StopShim asks the session's shim to stop cleanly (the daemon SIGTERMs
 	// its child shim on hibernation, §4.4 redefined). A stop failure is
 	// surfaced, never swallowed.
@@ -273,6 +296,22 @@ type driven struct {
 	client    sessionClient
 	consumer  *consumer
 	cancel    context.CancelFunc
+
+	// Bring-up gate state (bringupescape.go), guarded by the manager mutex
+	// except for faulted, which is a one-shot broadcast channel.
+	//
+	// wired is set the moment the handshake lands, and is what distinguishes a
+	// shim that died BEFORE it was ever driveable — an escapable bring-up
+	// failure — from one that degrades mid-session, which is an ordinary
+	// degraded card and no business of the ladder's.
+	wired bool
+	// faultReason is the shim's own account of why its SDK died during
+	// bring-up. It is the ONLY detail the daemon ever learns about that death:
+	// the shim's exit carries nothing on the wire, and this DegradedState is
+	// sent immediately before it.
+	faultReason string
+	// faulted is closed once, by the first bring-up fault, to wake the wait.
+	faulted chan struct{}
 
 	// metaprompt re-fire state, guarded by the manager mutex: armed when a
 	// RESUME/COMPACT_CONTINUE SessionStarted arrived; fired once the directive
@@ -1260,10 +1299,11 @@ func (m *Manager) ensure(ctx context.Context, workspace string) (*driven, error)
 	if err != nil {
 		return nil, err
 	}
-	waitCtx, cancel := context.WithTimeout(ctx, bringUpTimeout)
-	defer cancel()
-	if err := d.client.AwaitReady(waitCtx); err != nil {
-		return nil, fmt.Errorf("sessiondrv: session %s for workspace %q never became driveable: %w", d.sessionID, workspace, err)
+	if err := m.awaitDriveable(ctx, d); err != nil {
+		// EVERY bring-up resolves — see bringupescape.go. The ladder either
+		// returns a driver that really is wired, or a loud error whose failure
+		// card and closed axis have already been published.
+		return m.escapeFailedBringUp(ctx, workspace, d, err)
 	}
 	return d, nil
 }
@@ -1304,11 +1344,12 @@ func (m *Manager) bringUp(workspace string) (*driven, error) {
 	if !ok {
 		return nil, fmt.Errorf("sessiondrv: workspace %q has no live session to drive", workspace)
 	}
-	if err := m.cfg.Spawner.EnsureShim(m.rootCtx, sessionID); err != nil {
+	spawn, err := m.cfg.Spawner.EnsureShim(m.rootCtx, sessionID)
+	if err != nil {
 		return nil, fmt.Errorf("sessiondrv: ensure shim for session %s (ws %q): %w", sessionID, workspace, err)
 	}
 
-	d := &driven{sessionID: sessionID, workspace: workspace}
+	d := &driven{sessionID: sessionID, workspace: workspace, faulted: make(chan struct{})}
 	cons := newConsumer(workspace, sessionID, m.cfg.Push, m.cfg.SSM, m.cfg.Progress, m.cfg.ClearCompactStore, m.logf, func(ss *corev1.SessionStarted) {
 		m.armMetaprompt(d, ss)
 		m.persistVendorSessionID(sessionID, ss.GetVendorSessionId())
@@ -1332,6 +1373,7 @@ func (m *Manager) bringUp(workspace string) (*driven, error) {
 	cons.onVendorSessionID = func(vendorSessionID string) {
 		m.persistVendorSessionID(sessionID, vendorSessionID)
 	}
+	cons.onDegraded = func(ds *corev1.DegradedState) { m.noteBringUpFault(d, ds) }
 	d.consumer = cons
 	// Settle the backfill for a REOPENED session before any event flows.
 	//
@@ -1399,6 +1441,14 @@ func (m *Manager) bringUp(workspace string) (*driven, error) {
 	// which is a process exec; the window the user actually waits through is the
 	// handshake, and that is entirely after this point.
 	m.noteWiring(workspace, ssm.WiringStarting, "bring_up")
+
+	// The spawner dropped a pointer to a conversation that does not exist, so
+	// this session is starting FRESH where the user expected continuity. Said
+	// in their feed, because a silently emptied workspace is indistinguishable
+	// from lost data. Pushed after registration so a resync can replay it.
+	if spawn.StaleResumeDropped != "" {
+		m.pushHistoryMissingNote(d, spawn.StaleResumeDropped, "no transcript exists for the recorded conversation")
+	}
 
 	m.exits.Add(1)
 	go func() {
@@ -1697,6 +1747,9 @@ func (m *Manager) onConnected(workspace, sessionID string, hello *corev1.ShimHel
 	// store producer link up, standing subscription open. It is the ONE opening
 	// edge of the axis, and nothing weaker may write it.
 	m.noteWiring(workspace, ssm.WiringWired, "shim_ready")
+	// THE BRING-UP GATE IS CLOSED. Anything that fails from here is a
+	// mid-session fault, never an escapable bring-up failure.
+	m.noteWired(workspace, sessionID)
 	// The pid and the build identity are BOTH only trustworthy on a live
 	// connection, and this is the moment the connection is proven usable. A
 	// shim running a superseded bundle is bounced from here onto the current
