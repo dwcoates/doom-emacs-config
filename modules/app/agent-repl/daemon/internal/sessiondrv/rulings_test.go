@@ -96,23 +96,46 @@ type fakeRegistrar struct {
 	adoptions []string
 }
 
-func (f *fakeRegistrar) ClaudeSessionIDChanged(sessionID, csid string) {
+// ClaudeSessionIDChanged mirrors the registry adapter, ADOPT LATE gate
+// included: a FIRST adoption without durable turn evidence is refused and
+// nothing is recorded, so a turn-less session leaves no pointer behind.
+func (f *fakeRegistrar) ClaudeSessionIDChanged(sessionID, csid string, durable bool) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.adopted == nil {
+		f.adopted = map[string]string{}
+	}
+	if f.adopted[sessionID] == "" && !durable {
+		return false
+	}
+	f.adopted[sessionID] = csid
 	f.writes = append(f.writes, sessionID+"="+csid)
+	return true
 }
 
 // AdoptVendorSessionID mirrors the registry adapter: a DIFFERENT uuid over an
 // already-adopted one is a rotation, anything else is a plain adoption.
-func (f *fakeRegistrar) AdoptVendorSessionID(sessionID, csid string) (bool, string) {
+func (f *fakeRegistrar) AdoptVendorSessionID(sessionID, csid string, durable bool) (bool, string, bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.adopted == nil {
 		f.adopted = map[string]string{}
 	}
 	previous := f.adopted[sessionID]
+	if previous == "" && !durable {
+		return false, previous, false
+	}
 	rotated := previous != "" && previous != csid
 	f.adopted[sessionID] = csid
 	f.adoptions = append(f.adoptions, fmt.Sprintf("%s=%s rotated=%t previous=%s", sessionID, csid, rotated, previous))
-	return rotated, previous
+	return rotated, previous, true
+}
+
+// writeThroughs returns the recorded claude_session_id writes, under the lock.
+func (f *fakeRegistrar) writeThroughs() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.writes...)
 }
 
 // adoptionWrites returns the recorded adoptions, taken under the lock.
@@ -200,6 +223,7 @@ func TestPersistVendorSessionIDWritesThroughOncePerValue(t *testing.T) {
 	// Arrange
 	reg := &fakeRegistrar{}
 	m := newRegistrarManager(t, reg)
+	m.noteTurnEvidence("s1")
 
 	// Act — same value twice, then a new value.
 	m.persistVendorSessionID("s1", "cli-uuid-1")
