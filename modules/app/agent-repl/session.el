@@ -467,11 +467,11 @@ is a session UUID to fork from (used when a new worktree/env needs to
 carry a conversation across from another env — the target env has no
 local history yet, so `--continue' won't find anything).  PERM-FLAG is
 the permission flag string or nil.  MODEL, when non-nil, is the
-per-workspace model from the `:model' workspace property — either the
-workspace-generation JSON's `model' alias or, once a session has run, the
-current model captured from the config dir and persisted across restarts
-\(see `agent-repl--model-persist-value') — and overrides the global
-default; when nil, `agent-repl-interactive-model' supplies the model
+per-workspace model from the `:model' workspace property — the
+workspace-generation JSON's `model' alias, or whatever a model-picking
+variant like `SPC j C-o' supplied — and overrides the global default.  It
+is ALWAYS the model that was ASKED FOR and never one read back off a live
+session; when nil, `agent-repl-interactive-model' supplies the model
 \(which itself defaults to \"opus\").  A `--model' flag is appended whenever the resolved
 model is non-nil, and a `--system-prompt' flag when `agent-repl-system-prompt'
 is non-nil.  Returns a trimmed flags string."

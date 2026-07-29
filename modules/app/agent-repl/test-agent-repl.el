@@ -62,7 +62,6 @@
   (load (expand-file-name "test-magit.el" dir) nil t)
   (load (expand-file-name "test-memory-state.el" dir) nil t)
   (load (expand-file-name "test-merge-handlers.el" dir) nil t)
-  (load (expand-file-name "test-model.el" dir) nil t)
   (load (expand-file-name "test-notifications.el" dir) nil t)
   (load (expand-file-name "test-output-nav.el" dir) nil t)
   (load (expand-file-name "test-panels.el" dir) nil t)

@@ -867,33 +867,16 @@ regressing to the clean :merged 🔀 badge."
               (should (eq (plist-get data :repl-state) :inactive))))
         (delete-directory tmpdir t)))))
 
-(ert-deftest agent-repl-test-state-save-includes-model-from-config-dir ()
-  "state-save serializes the session's current model resolved from the
-config dir, overriding the generation `:model' (opus generated, switched
-to fable mid-session), so a restore re-launches under fable."
+(ert-deftest agent-repl-test-state-save-keeps-the-requested-model ()
+  "state-save serializes the model the USER ASKED FOR and never one read
+back off a live session.  A session that drifted onto fable mid-life must
+still persist the requested opus, because which model a running session
+ended up on is the daemon's business and Emacs tracking it meant the
+user's own choice was silently overwritten on the next save."
   (agent-repl-test--with-clean-state
     (let ((tmpdir (make-temp-file "test-state-model-" t)))
       (unwind-protect
-          (cl-letf (((symbol-function 'agent-repl--model-for-ws)
-                     (lambda (_ws) "claude-fable-5")))
-            (agent-repl--ws-put "ws" :project-dir tmpdir)
-            (agent-repl--ws-put "ws" :active-env :bare-metal)
-            (agent-repl--ws-put "ws" :model "opus")
-            (agent-repl--ws-put "ws" :bare-metal (make-agent-repl-instantiation))
-            (agent-repl--state-save "ws")
-            (let* ((file (agent-repl--state-file tmpdir))
-                   (data (agent-repl--read-sexp-file file)))
-              (should (equal (plist-get data :model) "claude-fable-5"))))
-        (delete-directory tmpdir t)))))
-
-(ert-deftest agent-repl-test-state-save-model-falls-back-to-generation ()
-  "state-save persists the generation `:model' when the config dir yields
-no session model yet (no assistant turn produced)."
-  (agent-repl-test--with-clean-state
-    (let ((tmpdir (make-temp-file "test-state-model-" t)))
-      (unwind-protect
-          (cl-letf (((symbol-function 'agent-repl--model-for-ws)
-                     (lambda (_ws) nil)))
+          (progn
             (agent-repl--ws-put "ws" :project-dir tmpdir)
             (agent-repl--ws-put "ws" :active-env :bare-metal)
             (agent-repl--ws-put "ws" :model "opus")
@@ -905,13 +888,11 @@ no session model yet (no assistant turn produced)."
         (delete-directory tmpdir t)))))
 
 (ert-deftest agent-repl-test-state-save-nil-model ()
-  "state-save writes `:model' nil when neither the config dir nor the
-generation `:model' yields a model."
+  "state-save writes `:model' nil when the workspace was never given one."
   (agent-repl-test--with-clean-state
     (let ((tmpdir (make-temp-file "test-state-model-" t)))
       (unwind-protect
-          (cl-letf (((symbol-function 'agent-repl--model-for-ws)
-                     (lambda (_ws) nil)))
+          (progn
             (agent-repl--ws-put "ws" :project-dir tmpdir)
             (agent-repl--ws-put "ws" :active-env :bare-metal)
             (agent-repl--ws-put "ws" :bare-metal (make-agent-repl-instantiation))

@@ -61,7 +61,6 @@ nil."
   headless-cmd-fn
   transcript-path-fn
   transcript-title-fn
-  transcript-model-fn
   transcript-context-fn)
 
 ;;;; ---- Registry -----------------------------------------------------------
@@ -355,7 +354,7 @@ empty file — the segment readers all treat that as \"no value yet\"."
 (defun agent-repl--transcript-cached (ws cache-key slot-accessor)
   "Return a transcript-derived value for WS via an (mtime-keyed) cache.
 SLOT-ACCESSOR is the backend-struct accessor for the reader slot (e.g.
-`agent-repl-backend-transcript-model-fn'); the resolved reader is
+`agent-repl-backend-transcript-title-fn'); the resolved reader is
 called with the transcript path and its result cached on WS's plist
 under CACHE-KEY as (PATH MTIME VALUE).  Returns nil (without caching)
 when WS's backend lacks the capability, the path is unresolvable, or
@@ -406,11 +405,10 @@ the file has no mtime."
   :binary "claude"
   :start-cmd-fn #'agent-repl--claude-start-cmd
   :headless-cmd-fn #'agent-repl--claude-headless-cmd
-  ;; Transcript readers live in ai-title.el / model.el / context.el
+  ;; Transcript readers live in ai-title.el / context.el
   ;; (the mode-line segment files, which predate the backend seam).
   :transcript-path-fn #'agent-repl--ai-title-jsonl-path
   :transcript-title-fn #'agent-repl--ai-title-read-from-jsonl
-  :transcript-model-fn #'agent-repl--model-read-from-jsonl
   :transcript-context-fn #'agent-repl--context-read-from-jsonl))
 
 (provide 'agent-repl-backend)
