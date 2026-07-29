@@ -76,19 +76,14 @@ func (h *commandHandler) CreateSession(ctx context.Context, workspace, requestID
 	h.logf("frontend cmd: create_session ws=%s request_id=%s model=%s config_dir=%s resume=%q fake=%v permission_mode=%q allow_ungated=%v",
 		workspace, requestID, cmd.GetModel(), cmd.GetConfigDir(), cmd.GetResumeClaudeSessionId(), cmd.GetFake(),
 		cmd.GetPermissionMode(), cmd.GetAllowUngated())
-	// THE PLACEHOLDER IS NOT A MODEL, and a create carrying it is refused here
-	// rather than absorbed. Accepting it wrote `<synthetic>` onto the record,
-	// which was then replayed onto the spawn argv on every respawn forever
-	// after. Failing the command is what puts the problem in front of the user
-	// at the moment it is caused, instead of leaving a session pinned to a
-	// value nothing can be launched under.
-	if registry.IsPlaceholderModel(cmd.GetModel()) {
-		return fmt.Errorf("create_session for %q carries the CLI placeholder %q as its model, which is a marker rather than a model id; send a real model or none at all",
-			cmd.GetCwd(), cmd.GetModel())
+	model := registry.NormalizeModel(cmd.GetModel())
+	if model != cmd.GetModel() {
+		h.logf("frontend cmd: create_session ws=%s request_id=%s normalized model marker %q to empty (shim chooses)",
+			workspace, requestID, cmd.GetModel())
 	}
 	opts := CreateOpts{
 		CWD:            cmd.GetCwd(),
-		Model:          cmd.GetModel(),
+		Model:          model,
 		PermissionMode: cmd.GetPermissionMode(),
 		ConfigDir:      cmd.GetConfigDir(),
 		Resume:         cmd.GetResumeClaudeSessionId(),

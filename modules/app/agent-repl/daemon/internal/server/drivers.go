@@ -228,16 +228,14 @@ func (s *ShimSpawner) EnsureShim(ctx context.Context, sessionID string) (session
 			resume = ""
 		}
 	}
-	// A RECORD WRITTEN BEFORE THE CREATE-SIDE GUARD still carries the CLI's
-	// placeholder as its model, and spawning with it is not possible. Dropping
-	// it silently would hand the user a different model than the record claims,
-	// so the respawn fails loudly and the record gets corrected instead.
-	if registry.IsPlaceholderModel(rec.Model) {
-		return res, fmt.Errorf("server: session %s: the record's model is the CLI placeholder %q rather than a model id, so it cannot be spawned; set a real model or clear it", sessionID, rec.Model)
+	model := registry.NormalizeModel(rec.Model)
+	if model != rec.Model {
+		s.logf("server: session %s: normalized legacy record model marker %q to empty for respawn (shim chooses)",
+			sessionID, rec.Model)
 	}
 	opts := CreateOpts{
 		CWD:            rec.CWD,
-		Model:          rec.Model,
+		Model:          model,
 		PermissionMode: rec.PermissionMode,
 		ConfigDir:      rec.ConfigDir,
 		Resume:         resume,

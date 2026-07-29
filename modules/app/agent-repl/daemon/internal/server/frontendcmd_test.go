@@ -424,6 +424,24 @@ func TestCommandHandlerCreateSessionRoutesToSessions(t *testing.T) {
 	}
 }
 
+func TestCommandHandlerNormalizesThePlaceholderBeforeCreateCoalescing(t *testing.T) {
+	// Arrange
+	sc := &fakeSessionCmds{}
+	h := establishHandler(t, sc, &probeHealthRouter{healthy: true})
+	// Act
+	err := h.CreateSession(context.Background(), "/w", "r1", &frontendv1.CreateSessionCmd{
+		Cwd: "/w", Model: "<synthetic>",
+	})
+	// Assert — the marker and an omitted model are the same request before the
+	// establishment fingerprint or shared create core sees either.
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if len(sc.created) != 1 || sc.created[0].Model != "" {
+		t.Fatalf("created = %+v, want an empty model", sc.created)
+	}
+}
+
 func TestCommandHandlerCarriesTheUngatedConsent(t *testing.T) {
 	// Arrange — the consent is what admits a session with no permission gate,
 	// so dropping it in the dispatch would turn every such create into a
