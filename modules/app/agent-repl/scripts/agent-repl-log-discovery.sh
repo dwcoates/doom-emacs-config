@@ -20,6 +20,9 @@ before JSON filtering, so it is suitable for active, large logs.
 
 Workspace runtimes: emacs, daemon, shim, webapp, sidecar
 Global runtimes:    emacs, daemon, store, sidecar
+
+The global Emacs default follows TMPDIR.  If agent-repl-log-file-name is
+customized, set AGENT_REPL_EMACS_GLOBAL_LOG to that exact live path.
 EOF
 }
 
@@ -113,6 +116,7 @@ fi
 
 state_root="${AGENT_REPL_STATE_DIR:-$HOME/.claude-emacs}"
 cache_root="${XDG_CACHE_HOME:-$HOME/.cache}/agent-repl"
+emacs_global_log="${AGENT_REPL_EMACS_GLOBAL_LOG:-${TMPDIR:-/tmp}/doom-agent-repl-$(id -u)/doom-agent-repl.log}"
 
 runtime_path() {
   local runtime="$1"
@@ -121,7 +125,7 @@ runtime_path() {
     return 0
   fi
   case "$runtime" in
-    emacs) printf '%s/doom-agent-repl.log' "$state_root" ;;
+    emacs) printf '%s' "$emacs_global_log" ;;
     daemon) printf '%s/claude-repld.log' "$state_root" ;;
     store) printf '%s/log/shim-store.log' "$cache_root" ;;
     sidecar) printf '%s/log/shim-claude-sidecar.log' "$cache_root" ;;
