@@ -100,6 +100,11 @@ failure is surfaced, not hidden)."
     ;; RED like :thinking — the agent is busy and a prompt cannot land yet.
     ;; The two context cuts differ from thinking only in WHAT the agent is
     ;; busy with, which the word carries; the color claim is the same.
+    ;; BLUE like :init, and the opposite claim: :init says a bring-up is in
+    ;; flight, :dormant says nothing is wired and nothing is coming.  A
+    ;; hibernated workspace, one never opened, or every workspace of a daemon
+    ;; that has just restarted.
+    ("RENDER_STATE_DORMANT"        . :dormant)
     ("RENDER_STATE_CLEARING"       . :clearing)
     ("RENDER_STATE_COMPACTING"     . :compacting)
     ("RENDER_STATE_VENDOR_BLOCKED" . :vendor-blocked)

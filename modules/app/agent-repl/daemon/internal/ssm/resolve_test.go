@@ -21,6 +21,22 @@ func newTestDB(t *testing.T) *sql.DB {
 	return db
 }
 
+// newWiredTestDB is newTestDB with WORKSPACE already on the WIRED axis, at an
+// `at` below every seed a test appends.
+//
+// Almost every resolution test is about an axis ABOVE the wiring — which agent
+// row wins, whether purple outranks red, how the merge states sit. None of them
+// can be asked at all of an unwired workspace, because `dormant` (rank 12)
+// outranks every one of those candidates by construction: that is the whole
+// point of the connection-truth law. So the wiring is arranged, once, here, and
+// the tests that are genuinely ABOUT the wired axis use newTestDB directly.
+func newWiredTestDB(t *testing.T, workspace string) *sql.DB {
+	t.Helper()
+	db := newTestDB(t)
+	seedSignal(t, db, workspace, "", sigWired, causeWired, -1, 0)
+	return db
+}
+
 // seedSignal appends one raw signal row at a caller-chosen `at`, so tests
 // can control latest-per-axis ordering deterministically. The row carries no
 // task id; use seedTaskSignal for the live-task counter.
@@ -121,9 +137,16 @@ func TestResolvePrecedence(t *testing.T) {
 			want: frontendv1.RenderState_RENDER_STATE_VENDOR_BLOCKED,
 		},
 		{
-			name: "init is the earliest agent state",
-			sigs: []sig{{sigInit, causeSessionStarted, 1}},
+			// The wired axis's own two blue tokens. `starting` says a bring-up
+			// is in flight; `dormant` says nothing is, and nothing is wired.
+			name: "starting is bring-up",
+			sigs: []sig{{sigStarting, causeWired, 5}},
 			want: frontendv1.RenderState_RENDER_STATE_INIT,
+		},
+		{
+			name: "dormant when the wiring went away",
+			sigs: []sig{{sigDormant, causeWired, 5}},
+			want: frontendv1.RenderState_RENDER_STATE_DORMANT,
 		},
 		{
 			name: "idle when available and no other signal",
@@ -151,7 +174,7 @@ func TestResolvePrecedence(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange.
-			db := newTestDB(t)
+			db := newWiredTestDB(t, "ws")
 			const ws = "ws"
 			for i, s := range tt.sigs {
 				seedSignal(t, db, ws, "sess", s.state, s.cause, int64(i), s.at)
@@ -188,7 +211,7 @@ func TestResolveIdleAsyncPromotion(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange.
-			db := newTestDB(t)
+			db := newWiredTestDB(t, "ws")
 			const ws = "ws"
 			seedSignal(t, db, ws, "sess", sigIdle, causeSessionStarted, 0, 1)
 			for i, ts := range tt.tasks {
@@ -225,7 +248,7 @@ func TestResolveTurnActive(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			db := newTestDB(t)
+			db := newWiredTestDB(t, "ws")
 			seedSignal(t, db, "ws", "sess", tt.state, tt.cause, 0, 1)
 			got, err := resolve(db, "ws", nil)
 			if err != nil {
@@ -242,7 +265,7 @@ func TestResolveTurnActive(t *testing.T) {
 // agent/merge axis) has no resolved render state — matching the elisp nil.
 func TestResolveNoRenderBearingSignal(t *testing.T) {
 	// Arrange.
-	db := newTestDB(t)
+	db := newWiredTestDB(t, "ws")
 	seedSignal(t, db, "ws", "sess", sigTaskStarted, causeTaskStarted, 0, 1)
 	// Act.
 	got, err := resolve(db, "ws", nil)
@@ -258,7 +281,7 @@ func TestResolveNoRenderBearingSignal(t *testing.T) {
 // TestResolveUnknownWorkspace: an unknown workspace resolves found=false
 // (explicit miss, no silent default).
 func TestResolveUnknownWorkspace(t *testing.T) {
-	db := newTestDB(t)
+	db := newWiredTestDB(t, "ws")
 	got, err := resolve(db, "never-seen", nil)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
@@ -272,7 +295,7 @@ func TestResolveUnknownWorkspace(t *testing.T) {
 // even when an agent state wins the render precedence.
 func TestResolveMergePhaseSurfaced(t *testing.T) {
 	// Arrange: an in-flight merge_queued plus a live thinking agent.
-	db := newTestDB(t)
+	db := newWiredTestDB(t, "ws")
 	seedSignal(t, db, "ws", "sess", sigThinking, causeTurnStarted, 0, 2)
 	seedSignal(t, db, "ws", "", sigMergeQueued, causeMergeTransition, -1, 1)
 	// Act.
@@ -318,7 +341,7 @@ func TestResolveCountsTheLiveTaskSet(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			db := newTestDB(t)
+			db := newWiredTestDB(t, "ws")
 			const ws = "ws"
 			seedSignal(t, db, ws, "sess", sigIdle, causeSessionStarted, 0, 1)
 			at := int64(2)
@@ -352,7 +375,7 @@ func TestResolveCountsTheLiveTaskSet(t *testing.T) {
 // projection. Anomaly reporting belongs to the ingestion/open repair edges.
 func TestResolveDoesNotLogWhenTheTaskCountIsSane(t *testing.T) {
 	// Arrange
-	db := newTestDB(t)
+	db := newWiredTestDB(t, "ws")
 	const ws = "ws"
 	seedSignal(t, db, ws, "sess", sigIdle, causeSessionStarted, 0, 1)
 	seedTaskSignal(t, db, ws, "sess", sigTaskStarted, sigTaskStarted, 1, 2, "t1")

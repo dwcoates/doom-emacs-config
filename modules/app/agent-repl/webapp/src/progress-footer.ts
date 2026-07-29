@@ -139,6 +139,11 @@ export function phaseLabel(state: WebRenderState): PhaseLabel {
     // would say the opposite of what it means.
     case "vendor_blocked":
       return { word: "blocked", tone: "blocked", spinning: false };
+    // BLUE, and pointedly NOT spinning. `starting` spins because a bring-up is
+    // really under way; dormant is the opposite claim — nothing is wired and
+    // nothing is coming — and a spinner would say work is happening.
+    case "dormant":
+      return { word: "dormant", tone: "error", spinning: false };
     case "dead":
       return { word: "dead", tone: "error", spinning: false };
     case "degraded":

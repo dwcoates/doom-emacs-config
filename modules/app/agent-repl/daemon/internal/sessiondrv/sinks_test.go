@@ -11,6 +11,7 @@ import (
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
 	"claude-repld/internal/errclass"
+	"claude-repld/internal/ssm"
 
 	"google.golang.org/protobuf/types/known/anypb"
 )
@@ -141,6 +142,18 @@ type fakeApplier struct {
 	// row's open and close edges, driven off the workspace's pending count.
 	permissions []permissionCall
 	permErr     error
+	// wirings records one entry per ApplyWired call — every edge of the WIRED
+	// axis this package produces (bring-up, ShimReady, exit, hibernation,
+	// rotation bounce).
+	wirings  []wiringCall
+	wiredErr error
+}
+
+// wiringCall is one WIRED-axis edge the driver applied.
+type wiringCall struct {
+	workspace string
+	wiring    ssm.Wiring
+	reason    string
 }
 
 // permissionCall is one permission-row edge the driver applied.
@@ -232,6 +245,23 @@ func (f *fakeApplier) ApplyPermission(workspace string, pending bool, reason str
 	defer f.reconcMutex.Unlock()
 	f.permissions = append(f.permissions, permissionCall{workspace: workspace, pending: pending, reason: reason})
 	return f.permErr
+}
+
+func (f *fakeApplier) ApplyWired(workspace string, wiring ssm.Wiring, reason string) error {
+	f.reconcMutex.Lock()
+	defer f.reconcMutex.Unlock()
+	f.wirings = append(f.wirings, wiringCall{workspace: workspace, wiring: wiring, reason: reason})
+	return f.wiredErr
+}
+
+// wiringsApplied returns the recorded WIRED-axis edges, taken under the lock so
+// a driver goroutine cannot race the read.
+func (f *fakeApplier) wiringsApplied() []wiringCall {
+	f.reconcMutex.Lock()
+	defer f.reconcMutex.Unlock()
+	out := make([]wiringCall, len(f.wirings))
+	copy(out, f.wirings)
+	return out
 }
 
 // permissionsApplied returns the recorded permission-row edges, taken under the

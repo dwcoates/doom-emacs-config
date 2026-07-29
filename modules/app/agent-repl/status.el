@@ -479,6 +479,7 @@ tabs; readable against `agent-repl--color-selected-bg'.")
 
 (defconst agent-repl--state-color
   '((:init           . "blue")
+    (:dormant        . "blue")
     (:dead           . "blue")
     (:degraded       . "blue")
     (:start-failed   . "blue")
@@ -535,6 +536,20 @@ may never reorder it.")
 
 (defconst agent-repl--tab-palette
   `((:init
+     :face       agent-repl-tab-init
+     :unselected (:bg ,agent-repl--color-init-blue
+                  :fg ,agent-repl--color-light
+                  :bracket-fg ,agent-repl--color-default-bracket
+                  :weight ,agent-repl--tab-weight)
+     :selected   (:bg ,agent-repl--color-selected-bg
+                  :fg ,agent-repl--color-dark
+                  :bracket-bg ,agent-repl--color-init-blue
+                  :bracket-fg ,agent-repl--color-light
+                  :weight ,agent-repl--tab-weight))
+    ;; DORMANT borrows init's blue: the claim about what the user can do is
+    ;; identical — this workspace has no live session — and only the word and
+    ;; the glyph distinguish "coming up" from "nothing is coming".
+    (:dormant
      :face       agent-repl-tab-init
      :unselected (:bg ,agent-repl--color-init-blue
                   :fg ,agent-repl--color-light

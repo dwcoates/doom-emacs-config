@@ -92,7 +92,7 @@ func TestInterruptedTurnEndWritesExactlyOneAgentRow(t *testing.T) {
 		t.Fatalf("reopen: %v", err)
 	}
 	defer db.Close()
-	got := rowsFor(t, db, "ws1")
+	got := agentRowsOnly(rowsFor(t, db, "ws1"))
 	want := [][2]string{{sigInterrupted, causeInterrupted}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("rows = %v, want %v", got, want)
@@ -124,7 +124,7 @@ func TestTheNextTurnAfterAnInterruptReportsItsOwnOutcome(t *testing.T) {
 // `done`: red is the true answer while a turn runs.
 func TestInterruptedIsSupersededByTheNextTurnStart(t *testing.T) {
 	// Arrange.
-	db := newTestDB(t)
+	db := newWiredTestDB(t, "ws")
 	seedSignal(t, db, "ws", "s1", sigInterrupted, causeInterrupted, 1, 1)
 	seedSignal(t, db, "ws", "s1", sigThinking, causeTurnStarted, 2, 2)
 	// Act.
@@ -219,7 +219,7 @@ func TestTheLateStartToleranceSpendsOnExactlyOneStart(t *testing.T) {
 // `done` — the interrupted turn is over and detached work is the news.
 func TestBackgroundWorkPromotesInterruptedToYellow(t *testing.T) {
 	// Arrange.
-	db := newTestDB(t)
+	db := newWiredTestDB(t, "ws")
 	seedSignal(t, db, "ws", "s1", sigInterrupted, causeInterrupted, 1, 1)
 	seedTaskSignal(t, db, "ws", "s1", sigTaskStarted, causeTaskStarted, 2, 2, "task-1")
 	// Act.
@@ -238,7 +238,7 @@ func TestBackgroundWorkPromotesInterruptedToYellow(t *testing.T) {
 // real transition, not a suppressed one over a live turn.
 func TestTurnActiveReadsAnInterruptedRowAsIdle(t *testing.T) {
 	// Arrange.
-	db := newTestDB(t)
+	db := newWiredTestDB(t, "ws")
 	seedSignal(t, db, "ws", "s1", sigThinking, causeTurnStarted, 1, 1)
 	seedSignal(t, db, "ws", "s1", sigInterrupted, causeInterrupted, 2, 2)
 	// Act.
@@ -270,7 +270,7 @@ func TestMarkTurnInterruptedRejectsAnEmptyWorkspace(t *testing.T) {
 // check.
 func TestInterruptedIsRankedInThePrecedenceTable(t *testing.T) {
 	// Arrange.
-	db := newTestDB(t)
+	db := newWiredTestDB(t, "ws")
 	seedSignal(t, db, "ws", "s1", sigInterrupted, causeInterrupted, 1, 1)
 	// Act.
 	got, err := resolve(db, "ws", nil)
