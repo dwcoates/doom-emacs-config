@@ -30,6 +30,7 @@ func openPermTest(t *testing.T, resolver Resolver) (*Manager, *capLog, string) {
 		t.Fatalf("Open: %v", err)
 	}
 	t.Cleanup(func() { m.Close() })
+	wireAll(t, m, resolver)
 	return m, cl, path
 }
 
@@ -239,6 +240,10 @@ func TestReopenReleasesAPersistedPendingPermission(t *testing.T) {
 		t.Fatalf("reopen: %v", err)
 	}
 	t.Cleanup(func() { reopened.Close() })
+	// The restart also marked the workspace dormant — nothing is wired to a
+	// daemon that has just started — which would hide the agent axis this test
+	// is asking after. Re-wiring is what Phase B's reattach sweep will do.
+	wireAll(t, reopened, fakeResolver{"s1": "ws1"})
 
 	// Assert — the rendezvous did not survive, so neither does the row; the
 	// turn beneath it does, because the shim did not die with the daemon.

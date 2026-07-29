@@ -42,6 +42,7 @@ import (
 	"claude-repld/internal/frontend"
 	"claude-repld/internal/registry"
 	"claude-repld/internal/shimclient"
+	"claude-repld/internal/ssm"
 
 	"google.golang.org/protobuf/types/known/structpb"
 )
@@ -1074,6 +1075,14 @@ func (m *Manager) HibernateSession(workspace, sessionID string) error {
 	}
 	m.logf("sessiondrv: hibernating session-scoped ws=%q session=%s driver_present=%v (SIGTERM child shim)",
 		workspace, sessionID, ok)
+	// The wiring goes with the shim. Reported HERE rather than left to the
+	// driver-exit tail, because the teardown is the earlier instant and the
+	// answer is already known at it. A stop that reached a record no longer
+	// driving this workspace leaves the axis alone: a replacement session may
+	// already own it, and closing then would blue out a live one.
+	if ok {
+		m.noteWiring(workspace, ssm.WiringDormant, "hibernate_session")
+	}
 	return m.cfg.Spawner.StopShim(sessionID)
 }
 
@@ -1096,6 +1105,7 @@ func (m *Manager) hibernate(workspace, wantSession string) error {
 	m.mu.Unlock()
 	d.cancel() // stop consuming; the shimclient Run ends
 	m.logf("sessiondrv: hibernating ws=%q session=%s (SIGTERM child shim)", workspace, d.sessionID)
+	m.noteWiring(workspace, ssm.WiringDormant, "hibernated")
 	return m.cfg.Spawner.StopShim(d.sessionID)
 }
 
@@ -1245,10 +1255,24 @@ func (m *Manager) bringUp(workspace string) (*driven, error) {
 	if existing, ok := m.byWS[workspace]; ok {
 		m.mu.Unlock()
 		cancel()
+		// The winner owns the axis: this loser's teardown must not report the
+		// workspace unwired while a live driver holds it.
 		return existing, nil
 	}
 	m.byWS[workspace] = d
 	m.mu.Unlock()
+
+	// A BRING-UP IS NOW IN FLIGHT, and that is what `starting` means — not that
+	// a session is wanted, which is a wish rather than a fact.
+	//
+	// Written AFTER the registration above rather than before the spawn, and
+	// that placement is the whole guard on the concurrent-first-prompt race: the
+	// loser of that race returns early with the winner's driver and never
+	// touches the axis, so a `starting` can never land on top of a `wired` the
+	// winner has already earned. What is left uncovered is the spawn itself,
+	// which is a process exec; the window the user actually waits through is the
+	// handshake, and that is entirely after this point.
+	m.noteWiring(workspace, ssm.WiringStarting, "bring_up")
 
 	m.exits.Add(1)
 	go func() {
@@ -1275,6 +1299,14 @@ func (m *Manager) bringUp(workspace string) (*driven, error) {
 				sessionID, len(dropped), workspace)
 		}
 		m.publish(sessionID, view, nil)
+		// THE WIRING IS GONE with the driver, whatever ended it — a terminal
+		// protocol error, a cancelled root context, or the cancel a hibernation
+		// issued. Only the CURRENT driver reports it: a superseded one exiting
+		// says nothing about the replacement that now owns the workspace, and
+		// blueing that replacement out would be a lie about a live session.
+		if wasCurrent {
+			m.noteWiring(workspace, ssm.WiringDormant, "driver_exit")
+		}
 		// A terminal protocol error ends Run while this driver is still current,
 		// without going through Hibernate. That used to orphan the spawned shim
 		// and its stop handle after the byWS eviction above. A non-current Run
@@ -1414,6 +1446,12 @@ func (m *Manager) onHandshake(workspace, sessionID string, hello *corev1.ShimHel
 	}
 	m.logf("sessiondrv: VENDOR SESSION ROTATION ws=%q session=%s %s -> %s — the vendor retired one transcript identity mid-stream; store cursor and replay floor reset to zero and the subscription resumes from the new seq space's beginning",
 		workspace, sessionID, previous, csid)
+	// THE ROTATION IS A BOUNCE, so the wiring is genuinely absent for the window
+	// between this announcement and the new ShimReady. Reporting it closes the
+	// axis honestly rather than letting a rotating workspace keep claiming a
+	// substrate that is mid-re-handshake; the ShimReady that follows re-opens it
+	// through onConnected.
+	m.noteWiring(workspace, ssm.WiringStarting, "session_rotating")
 	m.purgeRetainedOnRotation(workspace, sessionID, previous, csid)
 	m.clearTurnOnRotation(workspace, sessionID, previous, csid)
 	if err := m.cfg.SSM.ApplySessionRotated(workspace, previous, csid); err != nil {
@@ -1497,6 +1535,12 @@ func (m *Manager) clearTurnOnRotation(workspace, sessionID, previous, next strin
 // state from the replayed TurnStarted; this hook loud-logs the observation so a
 // reconciliation gap is visible rather than silent.
 func (m *Manager) onConnected(workspace, sessionID string, hello *corev1.ShimHello) {
+	// THE BRING-UP GATE CLOSED. This hook fires from the shim's ShimReady, the
+	// same frame AwaitReady resolves on, so "wired" here means exactly what
+	// "driveable" means everywhere else: session lock held, SDK query built,
+	// store producer link up, standing subscription open. It is the ONE opening
+	// edge of the axis, and nothing weaker may write it.
+	m.noteWiring(workspace, ssm.WiringWired, "shim_ready")
 	if hello.GetTurnInFlight() {
 		m.logf("sessiondrv: reattached mid-turn ws=%s session=%s (turn_in_flight); SSM re-derives from replayed events", workspace, sessionID)
 	}

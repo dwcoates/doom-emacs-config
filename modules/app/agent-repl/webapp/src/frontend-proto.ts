@@ -74,6 +74,7 @@ export enum RenderState {
   INTERRUPTED = 17,
   CLEARING = 18,
   COMPACTING = 19,
+  DORMANT = 20,
 }
 
 const RENDER_STATE_BY_NAME: Readonly<Record<string, RenderState>> = {
@@ -86,6 +87,7 @@ const RENDER_STATE_BY_NAME: Readonly<Record<string, RenderState>> = {
   RENDER_STATE_INTERRUPTED: RenderState.INTERRUPTED,
   RENDER_STATE_CLEARING: RenderState.CLEARING,
   RENDER_STATE_COMPACTING: RenderState.COMPACTING,
+  RENDER_STATE_DORMANT: RenderState.DORMANT,
   RENDER_STATE_THINKING: RenderState.THINKING,
   RENDER_STATE_PERMISSION: RenderState.PERMISSION,
   RENDER_STATE_DONE: RenderState.DONE,

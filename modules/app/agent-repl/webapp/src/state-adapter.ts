@@ -107,7 +107,8 @@ export type WebRenderState =
   | "merge_failed"
   | "merged"
   | "dead"
-  | "degraded";
+  | "degraded"
+  | "dormant";
 
 /** WorkspaceState → status/tail-row input. */
 export interface WorkspaceStatusInput {
@@ -650,6 +651,7 @@ const RENDER_STATE_KEYWORD: Record<RenderState, WebRenderState | null> = {
   [RenderState.MERGED]: "merged",
   [RenderState.DEAD]: "dead",
   [RenderState.DEGRADED]: "degraded",
+  [RenderState.DORMANT]: "dormant",
 };
 
 function renderStateKeyword(state: RenderState): WebRenderState {

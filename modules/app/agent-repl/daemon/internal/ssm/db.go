@@ -200,7 +200,7 @@ func seqApplied(db *sql.DB, sessionID string, seq uint64) (bool, error) {
 // by every reader of the axis. It is the same membership the resolution query
 // carries in its `prec` table, kept in one place here so a reader and the
 // resolver can never disagree about which rows count as agent states.
-const agentAxisMembers = `('init','thinking','permission','done','ready','idle','dead','vendor_blocked','interrupted')`
+const agentAxisMembers = `('thinking','permission','done','ready','idle','dead','vendor_blocked','interrupted')`
 
 // turnActive reports whether the workspace's LATEST agent-axis row is a
 // running turn. It is the no-regress guard's only input: a readiness
