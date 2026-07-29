@@ -108,7 +108,8 @@ export type WebRenderState =
   | "merged"
   | "dead"
   | "degraded"
-  | "dormant";
+  | "severed"
+  | "hibernated";
 
 /** WorkspaceState → status/tail-row input. */
 export interface WorkspaceStatusInput {
@@ -658,7 +659,13 @@ const RENDER_STATE_KEYWORD: Record<RenderState, WebRenderState | null> = {
   [RenderState.MERGED]: "merged",
   [RenderState.DEAD]: "dead",
   [RenderState.DEGRADED]: "degraded",
-  [RenderState.DORMANT]: "dormant",
+  // THE CLOSED HALF OF THE WIRED AXIS IS TWO STATES, and it used to be one. A
+  // single DORMANT meant both "asleep on purpose, to reclaim ~500MB" and "the
+  // backend substrate is broken", so the most ordinary event in the system
+  // rendered identically to a dead shim. Severed keeps the blue and the field
+  // number; hibernated took the benign half and a teal of its own.
+  [RenderState.SEVERED]: "severed",
+  [RenderState.HIBERNATED]: "hibernated",
 };
 
 function renderStateKeyword(state: RenderState): WebRenderState {

@@ -155,7 +155,7 @@ func TestHibernateReportsDormant(t *testing.T) {
 
 	// Assert.
 	got := lastWiring(t, applier, "ws")
-	if got.wiring != ssm.WiringDormant {
+	if got.wiring != ssm.WiringSevered {
 		t.Fatalf("wiring = %s, want dormant", got.wiring)
 	}
 	if got.reason != "hibernated" {
@@ -179,7 +179,7 @@ func TestHibernateSessionReportsDormant(t *testing.T) {
 	}
 
 	// Assert.
-	if got := lastWiring(t, applier, "ws"); got.wiring != ssm.WiringDormant {
+	if got := lastWiring(t, applier, "ws"); got.wiring != ssm.WiringSevered {
 		t.Fatalf("wiring = %s, want dormant", got.wiring)
 	}
 }
@@ -245,7 +245,7 @@ func TestDriverExitReportsDormant(t *testing.T) {
 
 	// Assert.
 	got := lastWiring(t, applier, "ws")
-	if got.wiring != ssm.WiringDormant {
+	if got.wiring != ssm.WiringSevered {
 		t.Fatalf("wiring = %s, want dormant", got.wiring)
 	}
 	if got.reason != "driver_exit" {

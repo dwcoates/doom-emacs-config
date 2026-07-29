@@ -37,7 +37,7 @@ func loadFixture(t *testing.T) colorFixture {
 	return f
 }
 
-// validColor reports whether c is one of the five, or the explicit "none".
+// validColor reports whether c is one of the six, or the explicit "none".
 func validColor(f colorFixture, c string) bool {
 	if c == "none" {
 		return true
@@ -90,19 +90,22 @@ func TestEveryErrorClassHasAFixtureRow(t *testing.T) {
 	}
 }
 
-func TestEveryFixtureColorIsOneOfTheFive(t *testing.T) {
-	// Arrange: a sixth color would be a sixth vocabulary, which is the thing
-	// the five-color contract exists to stop.
+func TestEveryFixtureColorIsOneOfTheSix(t *testing.T) {
+	// Arrange: a SEVENTH color would be a seventh vocabulary, which is the
+	// thing the color contract exists to stop. Teal was added as the sixth
+	// only because blue was carrying two incompatible jobs — "asleep on
+	// purpose" and "the substrate is broken" — and a color that fires on both
+	// means neither.
 	f := loadFixture(t)
 	// Act + Assert.
 	for name, color := range f.RenderStates {
 		if !validColor(f, color) {
-			t.Errorf("RenderState %s takes %q, which is not one of the five (or none)", name, color)
+			t.Errorf("RenderState %s takes %q, which is not one of the six (or none)", name, color)
 		}
 	}
 	for name, color := range f.ErrorClasses {
 		if !validColor(f, color) {
-			t.Errorf("ErrorClass %s takes %q, which is not one of the five (or none)", name, color)
+			t.Errorf("ErrorClass %s takes %q, which is not one of the six (or none)", name, color)
 		}
 	}
 }
@@ -112,7 +115,7 @@ func TestTheFixturePrecedenceMatchesTheSSMRanks(t *testing.T) {
 	// color fixture may restate it but never reorder it. Divergence here means
 	// a frontend would paint a weaker claim over a stronger one.
 	f := loadFixture(t)
-	want := []string{"blue", "purple", "red", "yellow", "green"}
+	want := []string{"blue", "teal", "purple", "red", "yellow", "green"}
 	// Act + Assert.
 	if len(f.Precedence) != len(want) {
 		t.Fatalf("precedence = %v, want %v", f.Precedence, want)
@@ -124,7 +127,7 @@ func TestTheFixturePrecedenceMatchesTheSSMRanks(t *testing.T) {
 	}
 }
 
-func TestThePrecedenceCoversExactlyTheFiveColors(t *testing.T) {
+func TestThePrecedenceCoversExactlyTheSixColors(t *testing.T) {
 	// Arrange: a color declared but never ranked has no defined behavior when
 	// it meets another.
 	f := loadFixture(t)
@@ -167,6 +170,53 @@ func TestTheContextCutStatesTakeTheColorThinkingTakes(t *testing.T) {
 		if got := f.RenderStates[name]; got != want {
 			t.Errorf("%s takes %q but THINKING takes %q", name, got, want)
 		}
+	}
+}
+
+func TestHibernatedDoesNotTakeTheColorSeveredTakes(t *testing.T) {
+	// Arrange: the two used to be ONE state, and the whole reason for the split
+	// is that they must never render alike. A hibernation is a choice we made
+	// to reclaim memory; a severance is evidence the substrate broke. If this
+	// ever passes by taking the same color, blue is back to meaning nothing.
+	f := loadFixture(t)
+	// Act + Assert.
+	if hib, sev := f.RenderStates["RENDER_STATE_HIBERNATED"], f.RenderStates["RENDER_STATE_SEVERED"]; hib == sev {
+		t.Fatalf("HIBERNATED and SEVERED both take %q; the split exists precisely so they differ", hib)
+	}
+}
+
+func TestHibernatedRanksBetweenBlueAndPurple(t *testing.T) {
+	// Arrange: teal's rank restates the SSM's `hibernated` at 15 — below the
+	// blue band (severed 12, starting 14) and above purple's 20. Below GREEN
+	// would be the tempting mistake, and it would let a stale `thinking` row
+	// from the turn a workspace was hibernated after mask a workspace that is
+	// genuinely asleep.
+	f := loadFixture(t)
+	rank := map[string]int{}
+	for i, c := range f.Precedence {
+		rank[c] = i
+	}
+	// Act + Assert.
+	teal := f.RenderStates["RENDER_STATE_HIBERNATED"]
+	if !(rank[f.RenderStates["RENDER_STATE_SEVERED"]] < rank[teal] && rank[teal] < rank[f.RenderStates["RENDER_STATE_VENDOR_BLOCKED"]]) {
+		t.Fatalf("hibernated's color %q ranks %d, not strictly between severed's %d and vendor-blocked's %d",
+			teal, rank[teal], rank[f.RenderStates["RENDER_STATE_SEVERED"]], rank[f.RenderStates["RENDER_STATE_VENDOR_BLOCKED"]])
+	}
+}
+
+func TestHibernatedOutranksEveryGreenState(t *testing.T) {
+	// Arrange: the actionability claim teal makes is blue's, not green's — you
+	// cannot interact with a hibernated workspace without paying a bring-up
+	// first, which is exactly what green promises you do not have to do.
+	f := loadFixture(t)
+	rank := map[string]int{}
+	for i, c := range f.Precedence {
+		rank[c] = i
+	}
+	teal := rank[f.RenderStates["RENDER_STATE_HIBERNATED"]]
+	// Act + Assert.
+	if green := rank[f.RenderStates["RENDER_STATE_IDLE"]]; teal >= green {
+		t.Fatalf("hibernated ranks %d and green ranks %d; a hibernated workspace must never be masked by a green claim", teal, green)
 	}
 }
 

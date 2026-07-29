@@ -258,7 +258,7 @@ func agentRowsOnly(rows [][2]string) [][2]string {
 	out := make([][2]string, 0, len(rows))
 	for _, r := range rows {
 		switch r[0] {
-		case sigWired, sigStarting, sigDormant:
+		case sigWired, sigStarting, sigSevered:
 			continue
 		}
 		out = append(out, r)
@@ -524,7 +524,7 @@ func TestHistoricalVendorClearRowsAreInert(t *testing.T) {
 		t.Fatalf("Open over a pre-remodel database: %v", err)
 	}
 	t.Cleanup(func() { m.Close() })
-	// The reopen marked the restored workspace dormant; the legacy row's
+	// The reopen marked the restored workspace hibernated; the legacy row's
 	// inertness is what is under test, so the wiring is restored.
 	if err := m.ApplyWired("ws1", WiringWired, "test arrangement"); err != nil {
 		t.Fatalf("ApplyWired: %v", err)

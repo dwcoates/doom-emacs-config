@@ -2940,6 +2940,64 @@ on a live frame; installation never does it on its own initiative."
                        (list nil 'tab-bar-lines
                              agent-repl--tabline-row-count)))))))
 
+;;;; ---- The hibernation split --------------------------------------------
+
+(ert-deftest agent-repl-test-state-color-hibernated-is-teal ()
+  ":hibernated takes TEAL, which is the entire point of the split.
+The benign half of the old `:dormant\=' — a session we put to sleep to
+reclaim its ~500MB, or a workspace nothing was ever wired to — must not
+wear the color that means something is broken."
+  ;; Act / Assert
+  (should (equal (alist-get :hibernated agent-repl--state-color) "teal")))
+
+(ert-deftest agent-repl-test-state-color-severed-is-blue ()
+  ":severed keeps the blue the old `:dormant\=' had.
+It is the half that really is evidence of breakage — a bring-up that
+failed, or a driver that died on a terminal protocol error."
+  ;; Act / Assert
+  (should (equal (alist-get :severed agent-repl--state-color) "blue")))
+
+(ert-deftest agent-repl-test-state-color-hibernated-and-severed-differ ()
+  "The two halves of the old `:dormant\=' never render alike.
+Asserted independently of both hexes: whatever the two colors are, a
+change that quietly re-merges them puts the system back where a dead
+shim and a routine hibernation looked identical."
+  ;; Act / Assert
+  (should-not (equal (alist-get :hibernated agent-repl--state-color)
+                     (alist-get :severed agent-repl--state-color))))
+
+(ert-deftest agent-repl-test-teal-ranks-between-blue-and-purple ()
+  "TEAL ranks below the blue band and above purple, never below green.
+Hibernation makes the SAME actionability claim blue does — you cannot
+interact without paying a bring-up — and only the reason is benign.
+Below green, a stale `:thinking\=' row from the turn a workspace was
+hibernated after would mask a workspace that is genuinely asleep."
+  ;; Arrange
+  (let ((blue   (cl-position "blue"   agent-repl--color-precedence :test #'equal))
+        (teal   (cl-position "teal"   agent-repl--color-precedence :test #'equal))
+        (purple (cl-position "purple" agent-repl--color-precedence :test #'equal))
+        (green  (cl-position "green"  agent-repl--color-precedence :test #'equal)))
+    ;; Act / Assert
+    (should (< blue teal))
+    (should (< teal purple))
+    (should (< teal green))))
+
+(ert-deftest agent-repl-test-teal-has-a-drawable-value ()
+  "TEAL resolves to a hex this renderer can actually paint.
+A ranked color with no constant behind it is an assignment nothing can
+honor, which is how a colorless tab shipped once already."
+  ;; Act / Assert
+  (should (stringp (alist-get "teal" agent-repl--color-by-name nil nil #'equal))))
+
+(ert-deftest agent-repl-test-teal-is-not-the-init-blue ()
+  "TEAL is a distinct value, not a shade of the init blue.
+The two states were ONE before the split, so a teal that reads as
+\"bluish\" would re-merge them in the only place it matters: a glance at
+the tab bar."
+  ;; Act / Assert
+  (should-not (equal agent-repl--color-hibernated-teal
+                     agent-repl--color-init-blue)))
+
 ;;;; ---- The two context cuts --------------------------------------------
 
 (ert-deftest agent-repl-test-state-color-clearing-is-red ()

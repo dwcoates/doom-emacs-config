@@ -74,7 +74,12 @@ export enum RenderState {
   INTERRUPTED = 17,
   CLEARING = 18,
   COMPACTING = 19,
-  DORMANT = 20,
+  /* Field number 20, held while this was named DORMANT. The rename is
+     wire-compatible on purpose: an append-only state log written by an older
+     daemon still carries the literal text `dormant`, which the SSM resolves
+     onto this state forever. */
+  SEVERED = 20,
+  HIBERNATED = 21,
 }
 
 const RENDER_STATE_BY_NAME: Readonly<Record<string, RenderState>> = {
@@ -87,7 +92,8 @@ const RENDER_STATE_BY_NAME: Readonly<Record<string, RenderState>> = {
   RENDER_STATE_INTERRUPTED: RenderState.INTERRUPTED,
   RENDER_STATE_CLEARING: RenderState.CLEARING,
   RENDER_STATE_COMPACTING: RenderState.COMPACTING,
-  RENDER_STATE_DORMANT: RenderState.DORMANT,
+  RENDER_STATE_SEVERED: RenderState.SEVERED,
+  RENDER_STATE_HIBERNATED: RenderState.HIBERNATED,
   RENDER_STATE_THINKING: RenderState.THINKING,
   RENDER_STATE_PERMISSION: RenderState.PERMISSION,
   RENDER_STATE_DONE: RenderState.DONE,

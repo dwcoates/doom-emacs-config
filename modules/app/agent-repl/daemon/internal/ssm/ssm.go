@@ -197,7 +197,7 @@ func (m *Manager) warm() error {
 	// exactly what the connection-truth law says a tab with no live session
 	// must claim. Same placement, and the same reason, as the permission
 	// release above.
-	if err := m.dormantEveryWorkspaceLocked(); err != nil {
+	if err := m.hibernateEveryWorkspaceLocked(); err != nil {
 		return err
 	}
 	names, err := distinctWorkspaces(m.db)

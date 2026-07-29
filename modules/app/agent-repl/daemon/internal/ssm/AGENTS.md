@@ -18,10 +18,10 @@ opened by readiness, closed by a webview's paint acknowledgment, re-opened when
 a painter connected or left. It is deleted, tokens, rank row, watermark and
 entry points alike.
 
-A workspace's color is CONNECTION TRUTH. Blue means there is no live backend
-session for this workspace; every non-blue color is a GUARANTEE that the session
-substrate is fully wired. What a viewer has or has not drawn says nothing about
-that, so it can no longer hold a workspace blue.
+A workspace's color is CONNECTION TRUTH. Blue and teal both mean there is no
+live backend session for this workspace; every OTHER color is a GUARANTEE that
+the session substrate is fully wired. What a viewer has or has not drawn says
+nothing about that, so it can no longer hold a workspace blue.
 
 The WIRED axis is the fact that does answer the question, and sessiondrv
 produces it (see internal/sessiondrv/wiredstate.go):
@@ -32,19 +32,45 @@ produces it (see internal/sessiondrv/wiredstate.go):
   the workspace renders.
 - `starting` — a bring-up is actively in flight. Blue, rendering
   RENDER_STATE_INIT, the same word bring-up has always had.
-- `dormant` — not wired and not starting: hibernated, never opened, or a daemon
-  that has just restarted. Blue, rendering RENDER_STATE_DORMANT.
+- `severed` — not wired, not starting, and there is EVIDENCE THAT SOMETHING
+  BROKE: a bring-up that could not be completed, or a driver whose `client.Run`
+  returned a terminal protocol error. Blue, rendering RENDER_STATE_SEVERED.
+  Rank 12.
+- `hibernated` — not wired, not starting, and NOTHING IS WRONG: the shim was
+  SIGTERMed on purpose to reclaim its ~500MB, or nothing has ever been wired
+  here. TEAL, rendering RENDER_STATE_HIBERNATED. Rank 15.
+- `dormant` — the PRE-SPLIT spelling of the closed half, and load-bearing
+  forever. `workspace_state` is append-only, so rows carrying this literal text
+  still exist and must keep resolving; it is an alias for `severed`, ranked
+  identically at 12. Never migrate, rewrite or delete those rows.
 
-ABSENCE OF A ROW IS DORMANT, not "unknown". A workspace with agent-axis rows and
-no wired row at all has no evidence of a live session behind it, and inventing
-one from the agent axis is precisely the lie the law forbids. The resolution
-query synthesizes the `dormant` candidate for that case rather than letting the
-agent axis answer unopposed.
+THE CLOSED HALF IS TWO TOKENS, AND IT USED TO BE ONE. `dormant` meant both
+"asleep on purpose" and "the substrate is broken", so the idle sweeper reclaiming
+memory from an untouched workspace rendered exactly like a dead shim. A color
+that fires on both means neither, which is why blue was worth nothing until the
+split. Now blue means something is actually wrong.
+
+TEAL'S RANK IS THE LOAD-BEARING PART. `hibernated` sits directly below the blue
+band and above purple, NOT below green, because hibernation makes the SAME
+actionability claim blue does — you cannot interact without paying a bring-up —
+and only its REASON is benign. Below green, a stale `thinking` row from the turn
+a workspace was hibernated after would mask a workspace that is genuinely
+asleep. That combination is therefore unreachable by construction, and a
+resolver that ever detects it must log an INVARIANT VIOLATION rather than
+treating it as expected.
+
+ABSENCE OF A ROW IS HIBERNATED, not "unknown" and not "severed". A workspace with
+agent-axis rows and no wired row at all has no evidence of a live session behind
+it, and inventing one from the agent axis is precisely the lie the law forbids —
+but it has no evidence of a BREAKAGE either, so the honest answer is teal. The
+resolution query synthesizes the `hibernated` candidate for that case rather
+than letting the agent axis answer unopposed.
 
 `warm()` CLOSES the axis for every restored workspace, the same way it releases
 persisted permission rows and for the same reason: the wiring is in-process and
-does not survive a restart, while the agent-axis history does. A restored
-workspace is therefore dormant until something wires it again.
+does not survive a restart, while the agent-axis history does. It closes to
+`hibernated`: a daemon that has just booted is not a broken one, and the
+bootsweep is about to reattach every shim that survived the bounce.
 
 ## The vendor state is a turn OUTCOME, not a latch
 

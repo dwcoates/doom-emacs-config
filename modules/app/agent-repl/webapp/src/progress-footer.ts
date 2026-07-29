@@ -75,17 +75,23 @@ export interface FooterInput {
 export interface PhaseLabel {
   word: string;
   /**
-   * Accent class stem. The five state tones map onto the five colors the
-   * tab-bar and the sidebar dots speak, so a workspace never reads one way
-   * here and another there:
-   *   `thinking` red    a turn is in flight
-   *   `blocked`  purple the vendor or the account has stopped this session
-   *   `async`    yellow no foreground turn, live detached work
-   *   `ok`       green  ready
-   *   `error`    blue   the route is compromised on our side
-   *   `muted`    quiet chrome (merge phases), which spend no color
+   * Accent class stem. The state tones map onto the colors the tab-bar and the
+   * sidebar dots speak, so a workspace never reads one way here and another
+   * there:
+   *   `thinking`   red    a turn is in flight
+   *   `blocked`    purple the vendor or the account has stopped this session
+   *   `async`      yellow no foreground turn, live detached work
+   *   `ok`         green  ready
+   *   `error`      blue   the route is compromised on our side
+   *   `hibernated` teal   nothing is wired, and NOTHING IS WRONG
+   *   `muted`      quiet chrome (merge phases), which spend no color
+   *
+   * `hibernated` is a tone of its own rather than a reuse of `error`, and that
+   * is the correction the split exists for: a deliberately sleeping workspace
+   * was wearing the same error-red word as a dead shim, so the footer told the
+   * user to act on the single most routine event in the system.
    */
-  tone: "thinking" | "blocked" | "async" | "retry" | "error" | "ok" | "muted";
+  tone: "thinking" | "blocked" | "async" | "retry" | "error" | "ok" | "hibernated" | "muted";
   /** Whether the phase spins (the agent is actively working). */
   spinning: boolean;
 }
@@ -140,10 +146,18 @@ export function phaseLabel(state: WebRenderState): PhaseLabel {
     case "vendor_blocked":
       return { word: "blocked", tone: "blocked", spinning: false };
     // BLUE, and pointedly NOT spinning. `starting` spins because a bring-up is
-    // really under way; dormant is the opposite claim — nothing is wired and
-    // nothing is coming — and a spinner would say work is happening.
-    case "dormant":
-      return { word: "dormant", tone: "error", spinning: false };
+    // really under way; severed is the opposite claim — nothing is wired,
+    // nothing is coming, and something on our side broke — and a spinner would
+    // say work is happening.
+    case "severed":
+      return { word: "severed", tone: "error", spinning: false };
+    // TEAL, still, and BENIGN. The tone is the whole point of this arm: this
+    // state inherited `dormant`'s "error" tone, which put an error-shaped word
+    // in the footer of a workspace whose only sin was being asleep on purpose.
+    // Nothing here needs acting on — the next prompt pays one bring-up and
+    // everything comes back.
+    case "hibernated":
+      return { word: "hibernated", tone: "hibernated", spinning: false };
     case "dead":
       return { word: "dead", tone: "error", spinning: false };
     case "degraded":

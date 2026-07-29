@@ -97,7 +97,8 @@ describe("WorkspaceState mapping", () => {
     ["RENDER_STATE_MERGED", "merged"],
     ["RENDER_STATE_DEAD", "dead"],
     ["RENDER_STATE_DEGRADED", "degraded"],
-    ["RENDER_STATE_DORMANT", "dormant"],
+    ["RENDER_STATE_SEVERED", "severed"],
+    ["RENDER_STATE_HIBERNATED", "hibernated"],
   ];
   for (const [proto, keyword] of keywordCases) {
     it(`maps ${proto} to '${keyword}'`, () => {

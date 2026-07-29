@@ -2335,5 +2335,21 @@ in the same shape (still leftmost, nil-name still at head)."
   ;; Act / Assert
   (should (equal (alist-get :compacting agent-repl-ws-state-icons) "🗜")))
 
+(ert-deftest agent-repl-test-ws-hibernated-keeps-the-sleep-glyph ()
+  "The 💤 glyph belongs to `:hibernated\=', which is what it always described.
+It named a nap while the state it sat on also covered a dead shim; after
+the split it sits on the half it was actually about."
+  ;; Act / Assert
+  (should (equal (alist-get :hibernated agent-repl-ws-state-icons) "💤")))
+
+(ert-deftest agent-repl-test-ws-severed-takes-a-glyph-of-its-own ()
+  "`:severed\=' gets its OWN glyph, never the sleep one.
+Color and glyph are the only two things a tab carries, so reusing 💤 for
+a broken substrate would undo half the split at the glance that matters."
+  ;; Act / Assert
+  (let ((severed (alist-get :severed agent-repl-ws-state-icons)))
+    (should (stringp severed))
+    (should-not (equal severed (alist-get :hibernated agent-repl-ws-state-icons)))))
+
 (provide 'test-workspace)
 ;;; test-workspace.el ends here

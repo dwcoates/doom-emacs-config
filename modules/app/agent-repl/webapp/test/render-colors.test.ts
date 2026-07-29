@@ -1,7 +1,7 @@
 /**
  * The cross-language color contract, asserted from the TypeScript side.
  *
- * `proto/vocab/render-colors.json` is the ONE table naming which of the five
+ * `proto/vocab/render-colors.json` is the ONE table naming which of the six
  * colors each RenderState and each ErrorClass takes. Go asserts against it,
  * elisp asserts against it, and this file is the third corner — which is what
  * makes a divergence between the three fail loudly instead of quietly.
@@ -28,9 +28,10 @@ interface ColorFixture {
 
 const fixture: ColorFixture = JSON.parse(fixtureRaw) as ColorFixture;
 
-/** The CSS variable each of the five colors is drawn with in this renderer. */
+/** The CSS variable each of the six colors is drawn with in this renderer. */
 const COLOR_TOKENS: Record<string, string> = {
   blue: "--init",
+  teal: "--hibernated",
   purple: "--blocked",
   red: "--err",
   yellow: "--async",
@@ -58,7 +59,7 @@ describe("the shared color fixture", () => {
     expect(missing).toEqual([]);
   });
 
-  it("names a token this stylesheet actually defines for each of the five", () => {
+  it("names a token this stylesheet actually defines for each of the six", () => {
     // Arrange / Act — a color the fixture ranks but this renderer cannot draw
     // is an assignment nothing can honor.
     const undefinedTokens = fixture.colors.filter(
@@ -68,11 +69,35 @@ describe("the shared color fixture", () => {
     expect(undefinedTokens).toEqual([]);
   });
 
-  it("ranks the five colors strongest-claim-first, matching the SSM", () => {
+  it("ranks the six colors strongest-claim-first, matching the SSM", () => {
     // Arrange / Act — the SSM is the sole precedence authority; this restates
-    // its order and may never reorder it.
+    // its order and may never reorder it. Teal sits between blue and purple:
+    // the SSM ranks `hibernated` at 15, directly below the blue band and above
+    // purple's 20, because hibernation makes the same actionability claim blue
+    // does and only its reason is benign.
     // Assert
-    expect(fixture.precedence).toEqual(["blue", "purple", "red", "yellow", "green"]);
+    expect(fixture.precedence).toEqual(["blue", "teal", "purple", "red", "yellow", "green"]);
+  });
+
+  it("keeps hibernated and severed on DIFFERENT colors", () => {
+    // Arrange / Act — the two used to be one RENDER_STATE_DORMANT, which meant
+    // both "asleep on purpose to reclaim ~500MB" and "the substrate is broken".
+    // A color that fires on both means neither.
+    // Assert
+    expect(fixture.render_states.RENDER_STATE_HIBERNATED).not.toBe(
+      fixture.render_states.RENDER_STATE_SEVERED,
+    );
+  });
+
+  it("ranks hibernated above every green state", () => {
+    // Arrange — the tempting mistake is to rank a benign state below green.
+    // That would let a stale `thinking` row from the turn a workspace was
+    // hibernated after mask a workspace that is genuinely asleep.
+    const rank = (color: string) => fixture.precedence.indexOf(color);
+    // Act / Assert
+    expect(rank(fixture.render_states.RENDER_STATE_HIBERNATED)).toBeLessThan(
+      rank(fixture.render_states.RENDER_STATE_IDLE),
+    );
   });
 });
 

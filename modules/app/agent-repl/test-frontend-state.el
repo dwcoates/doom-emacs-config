@@ -75,6 +75,21 @@
  agent-repl-test-state-map-dead "RENDER_STATE_DEAD" :dead)
 (agent-repl-test--deftest-state-map
  agent-repl-test-state-map-degraded "RENDER_STATE_DEGRADED" :degraded)
+(agent-repl-test--deftest-state-map
+ agent-repl-test-state-map-severed "RENDER_STATE_SEVERED" :severed)
+(agent-repl-test--deftest-state-map
+ agent-repl-test-state-map-hibernated "RENDER_STATE_HIBERNATED" :hibernated)
+
+(ert-deftest agent-repl-test-state-map-severed-and-hibernated-are-distinct ()
+  "The two halves of the old RENDER_STATE_DORMANT decode to DIFFERENT keywords.
+A single state used to mean both \"we put this session to sleep on
+purpose\" and \"the backend substrate is broken\", so the idle sweeper
+reclaiming memory from an untouched workspace was indistinguishable from
+a dead shim.  Collapsing them back onto one keyword here would restore
+that exactly, whatever the color tables said."
+  ;; Act / Assert
+  (should-not (eq (agent-repl--frontend-state->keyword "RENDER_STATE_SEVERED")
+                  (agent-repl--frontend-state->keyword "RENDER_STATE_HIBERNATED"))))
 
 (ert-deftest agent-repl-test-state-map-unspecified-errors ()
   "RENDER_STATE_UNSPECIFIED is unresolved and errors (no fallback keyword)."

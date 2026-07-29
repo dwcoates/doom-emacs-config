@@ -100,11 +100,23 @@ failure is surfaced, not hidden)."
     ;; RED like :thinking — the agent is busy and a prompt cannot land yet.
     ;; The two context cuts differ from thinking only in WHAT the agent is
     ;; busy with, which the word carries; the color claim is the same.
+    ;; THE CLOSED HALF OF THE WIRED AXIS IS TWO STATES, and it used to be one.
+    ;; A single RENDER_STATE_DORMANT meant both "we put this session to sleep on
+    ;; purpose to reclaim its ~500MB" and "the backend substrate is broken", so
+    ;; the most ordinary event in the system painted a tab exactly like a dead
+    ;; shim did.  A color that fires on both means neither.
+    ;;
     ;; BLUE like :init, and the opposite claim: :init says a bring-up is in
-    ;; flight, :dormant says nothing is wired and nothing is coming.  A
-    ;; hibernated workspace, one never opened, or every workspace of a daemon
-    ;; that has just restarted.
-    ("RENDER_STATE_DORMANT"        . :dormant)
+    ;; flight, :severed says nothing is wired, nothing is coming, and something
+    ;; on our side broke — a bring-up that failed, or a driver that died on a
+    ;; terminal protocol error.
+    ("RENDER_STATE_SEVERED"        . :severed)
+    ;; TEAL, and pointedly not blue.  Nothing is wired here and nothing is
+    ;; wrong: the shim was SIGTERMed on purpose, or nothing was ever wired to
+    ;; this workspace at all.  Its PRECEDENCE is still the blue band's, because
+    ;; the actionability claim is identical — you cannot interact without paying
+    ;; a bring-up — and only the reason is benign.
+    ("RENDER_STATE_HIBERNATED"     . :hibernated)
     ("RENDER_STATE_CLEARING"       . :clearing)
     ("RENDER_STATE_COMPACTING"     . :compacting)
     ("RENDER_STATE_VENDOR_BLOCKED" . :vendor-blocked)

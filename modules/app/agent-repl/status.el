@@ -391,18 +391,46 @@ exist before its workspace directory is known."
 ;; --- Named color / style constants --- ;;
 
 (defconst agent-repl--color-init-blue        "#3366cc"
-  "BLUE: no live backend session for this workspace.
+  "BLUE: no live backend session, and SOMETHING IS WRONG.
 A workspace\='s color is CONNECTION TRUTH: blue is every way green\='s
-promise cannot be kept — no session yet, the shim dead or unspawned,
-bring-up in progress, a hibernated or never-opened workspace, a store
-outage, or a backfill that failed.  Every non-blue color is a GUARANTEE
-that the session substrate is fully wired.
+promise cannot be kept AND there is evidence of a breakage — no session
+yet, the shim dead or unspawned, bring-up in progress, a bring-up that
+failed or a driver that died on a terminal protocol error, a store
+outage, or a backfill that failed.
 
 It is deliberately ONE color for all of them.  The distinctions matter
 to whoever debugs it, not to the user reading a tab: every one of them
 means the same thing to them, which is that this workspace cannot be
 relied on right now.  The sidebar carries the distinction where it is
-worth having.")
+worth having.
+
+WHAT BLUE NO LONGER COVERS is the benign half it used to.  A single
+`:dormant\=' state meant both \"we put this session to sleep on purpose to
+reclaim its ~500MB\" and \"the backend substrate is broken\", so the most
+ordinary event in the system — the idle sweeper reaping a workspace
+nobody had touched for an hour — painted a tab exactly like a dead shim
+did.  A color that fires on both means neither, and a user who watches
+every workspace go blue after an ordinary daemon bounce learns to ignore
+blue.  `agent-repl--color-hibernated-teal\=' took that half, and blue
+finally means something is actually wrong.")
+
+(defconst agent-repl--color-hibernated-teal  "#0d9488"
+  "TEAL: no live backend session, and NOTHING IS WRONG.
+The session was deliberately put to sleep to reclaim its memory, or
+nothing has ever been wired to this workspace.  No bring-up failed and
+no driver died — there is simply nobody home, on purpose.
+
+It is NOT green, and its precedence is the blue band\='s rather than
+green\='s: a teal workspace cannot be interacted with until a bring-up is
+paid for, which is exactly the claim green exists to deny.  Only the
+REASON is benign.  Ranked below green instead, a stale `:thinking\=' row
+from the turn a workspace was hibernated after would mask a workspace
+that is genuinely asleep.
+
+Deliberately far from `agent-repl--color-init-blue\=' rather than a shade
+of it: the two states were ONE before the split, and a teal that reads as
+\"bluish\" would re-merge them in the only place it matters, which is a
+glance at the tab bar.")
 
 (defconst agent-repl--color-thinking-red     "#cc3333"
   "RED: a turn is in flight.
@@ -475,14 +503,18 @@ tabs; readable against `agent-repl--color-selected-bg'.")
                  :weight ,agent-repl--tab-weight))
   "Default tab-appearance spec for states absent from `agent-repl--tab-palette'.")
 
-;; --- The five-color assignment --- ;;
+;; --- The six-color assignment --- ;;
 
 (defconst agent-repl--state-color
   '((:init           . "blue")
-    (:dormant        . "blue")
+    (:severed        . "blue")
     (:dead           . "blue")
     (:degraded       . "blue")
     (:start-failed   . "blue")
+    ;; TEAL, alone.  It is the benign half of the state `:dormant' used to be,
+    ;; and the whole reason it is not blue is that blue was firing on both an
+    ;; intentional teardown and a broken substrate.
+    (:hibernated     . "teal")
     (:vendor-blocked . "purple")
     (:thinking       . "red")
     (:clearing       . "red")
@@ -498,7 +530,7 @@ tabs; readable against `agent-repl--color-selected-bg'.")
     (:merge-conflict . "none")
     (:merge-failed   . "none")
     (:merged         . "none"))
-  "Which of the five colors each render state takes, BY NAME.
+  "Which of the six colors each render state takes, BY NAME.
 
 This is Emacs\='s corner of the cross-language contract in
 proto/vocab/render-colors.json.  Go, TypeScript and this table each
@@ -511,28 +543,34 @@ It names the color rather than its value: each renderer keeps its own
 hex, since a tab-bar background and a CSS dot legitimately want different
 shades of one idea.  What may never differ is the ASSIGNMENT.
 
-\"none\" is a real answer.  The merge states take none of the five:
+\"none\" is a real answer.  The merge states take none of the six:
 the sidebar reports them, and the tab-bar does not.")
 
 (defconst agent-repl--color-by-name
   `(("blue"   . ,agent-repl--color-init-blue)
+    ("teal"   . ,agent-repl--color-hibernated-teal)
     ("purple" . ,agent-repl--color-vendor-blocked-purple)
     ("red"    . ,agent-repl--color-thinking-red)
     ("yellow" . ,agent-repl--color-idle-async-yellow)
     ("green"  . ,agent-repl--color-done-green))
-  "Map each of the five color NAMES to the constant this renderer draws it with.
+  "Map each of the six color NAMES to the constant this renderer draws it with.
 
 The indirection is what lets `agent-repl--state-color\=' speak the shared
 vocabulary while the palette keeps painting with Emacs\='s own values.")
 
 (defconst agent-repl--color-precedence
-  '("blue" "purple" "red" "yellow" "green")
-  "The five-color precedence, strongest claim first.
+  '("blue" "teal" "purple" "red" "yellow" "green")
+  "The six-color precedence, strongest claim first.
 
 Each color is a strictly stronger claim about what the user CANNOT do
 than the one beneath it.  The SSM\='s SQL `prec\=' ranks are the sole
 authority; this restates that order for the cross-language assertion and
-may never reorder it.")
+may never reorder it.
+
+TEAL SITS BETWEEN BLUE AND PURPLE, which is the SSM\='s `hibernated\=' at
+rank 15 — directly below the blue band (severed 12, starting 14) and
+above purple\='s 20.  Emphatically NOT below green: hibernation makes the
+same actionability claim blue does, and only the reason is benign.")
 
 (defconst agent-repl--tab-palette
   `((:init
@@ -546,10 +584,11 @@ may never reorder it.")
                   :bracket-bg ,agent-repl--color-init-blue
                   :bracket-fg ,agent-repl--color-light
                   :weight ,agent-repl--tab-weight))
-    ;; DORMANT borrows init's blue: the claim about what the user can do is
-    ;; identical — this workspace has no live session — and only the word and
-    ;; the glyph distinguish "coming up" from "nothing is coming".
-    (:dormant
+    ;; SEVERED borrows init's blue: the claim about what the user can do is
+    ;; identical — this workspace has no live session and something on our side
+    ;; broke — and only the word and the glyph distinguish "coming up" from
+    ;; "the substrate is gone".
+    (:severed
      :face       agent-repl-tab-init
      :unselected (:bg ,agent-repl--color-init-blue
                   :fg ,agent-repl--color-light
@@ -558,6 +597,22 @@ may never reorder it.")
      :selected   (:bg ,agent-repl--color-selected-bg
                   :fg ,agent-repl--color-dark
                   :bracket-bg ,agent-repl--color-init-blue
+                  :bracket-fg ,agent-repl--color-light
+                  :weight ,agent-repl--tab-weight))
+    ;; HIBERNATED takes a color of its OWN, which is the one place in this
+    ;; palette where a borrowed shade was not enough.  Every other borrow above
+    ;; shares a hue because the two states share a claim; these two shared a
+    ;; claim about ACTIONABILITY and disagreed completely about FAULT, and
+    ;; painting them alike is what made blue unreadable.
+    (:hibernated
+     :face       agent-repl-tab-hibernated
+     :unselected (:bg ,agent-repl--color-hibernated-teal
+                  :fg ,agent-repl--color-light
+                  :bracket-fg ,agent-repl--color-default-bracket
+                  :weight ,agent-repl--tab-weight)
+     :selected   (:bg ,agent-repl--color-selected-bg
+                  :fg ,agent-repl--color-dark
+                  :bracket-bg ,agent-repl--color-hibernated-teal
                   :bracket-fg ,agent-repl--color-light
                   :weight ,agent-repl--tab-weight))
     (:thinking
@@ -720,7 +775,7 @@ agent-state keyword via nested `:unselected' and `:selected' plists.
 `:repl-state :inactive' does not contribute to color (it is bookkeeping
 only).
 
-The merge states have NO entry: they take none of the five colors, and
+The merge states have NO entry: they take none of the six colors, and
 the tab no longer carries badges, so the merge pipeline says what it has
 to say in the sidebar.  `:merged' likewise never reaches the tab-bar at
 all (`agent-repl--filter-merged-names').")
@@ -761,6 +816,14 @@ falls back to the default appearance."
        :foreground ,agent-repl--color-light
        :weight ,agent-repl--tab-weight))
   "Face for workspace tabs where the agent is initializing (blue).")
+
+(defface agent-repl-tab-hibernated
+  `((t :background ,agent-repl--color-hibernated-teal
+       :foreground ,agent-repl--color-light
+       :weight ,agent-repl--tab-weight))
+  "Face for workspace tabs put to sleep on purpose (teal + 💤).
+Not blue: nothing is wrong here, and blue\='s only job now is to mean
+that something is.")
 
 (defface agent-repl-tab-thinking
   `((t :background ,agent-repl--color-thinking-red

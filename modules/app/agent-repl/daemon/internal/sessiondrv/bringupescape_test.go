@@ -247,7 +247,7 @@ func TestStartFailedClosesTheWiredAxis(t *testing.T) {
 
 	// Assert.
 	for _, w := range h.applier.wiringsApplied() {
-		if w.workspace == "ws" && w.wiring == ssm.WiringDormant && w.reason == "bring_up_failed" {
+		if w.workspace == "ws" && w.wiring == ssm.WiringSevered && w.reason == "bring_up_failed" {
 			return
 		}
 	}

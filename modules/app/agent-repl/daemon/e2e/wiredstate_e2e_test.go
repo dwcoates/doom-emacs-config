@@ -67,7 +67,7 @@ func TestE2EAFreshSessionGoesStartingThenWiredThenItsRealState(t *testing.T) {
 	// Assert — the green is the guarantee, and nothing dormant preceded it: a
 	// bring-up actually in flight reports INIT, never the resting blue.
 	for _, st := range seen {
-		if st == frontendv1.RenderState_RENDER_STATE_DORMANT {
+		if st == frontendv1.RenderState_RENDER_STATE_SEVERED {
 			t.Fatalf("a session coming up reported DORMANT; the bring-up window is INIT. saw %v", seen)
 		}
 	}
@@ -101,5 +101,5 @@ func TestE2EHibernationDropsTheWorkspaceToDormant(t *testing.T) {
 
 	// Assert — the workspace reports the absence of its session, not the last
 	// thing the agent happened to say before it went away.
-	observedStates(t, conn, cwd, frontendv1.RenderState_RENDER_STATE_DORMANT)
+	observedStates(t, conn, cwd, frontendv1.RenderState_RENDER_STATE_SEVERED)
 }

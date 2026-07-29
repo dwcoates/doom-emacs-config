@@ -89,7 +89,7 @@ func TestPushesArriveInResolutionOrder(t *testing.T) {
 	want := []frontendv1.RenderState{
 		frontendv1.RenderState_RENDER_STATE_THINKING,
 		frontendv1.RenderState_RENDER_STATE_DONE,
-		frontendv1.RenderState_RENDER_STATE_DORMANT,
+		frontendv1.RenderState_RENDER_STATE_SEVERED,
 	}
 
 	// Act.
@@ -140,7 +140,7 @@ func TestTheConnectSnapshotOmitsNoWorkspace(t *testing.T) {
 		State: staticState{snap: &frontendv1.StateSnapshot{
 			Workspaces: []*frontendv1.WorkspaceState{
 				{Workspace: "w1", SessionId: "s1", State: frontendv1.RenderState_RENDER_STATE_THINKING},
-				{Workspace: "w2", SessionId: "s2", State: frontendv1.RenderState_RENDER_STATE_DORMANT},
+				{Workspace: "w2", SessionId: "s2", State: frontendv1.RenderState_RENDER_STATE_SEVERED},
 			},
 		}},
 	})
@@ -167,7 +167,7 @@ func TestTheConnectSnapshotOmitsNoWorkspace(t *testing.T) {
 	if seen["w1"] != frontendv1.RenderState_RENDER_STATE_THINKING {
 		t.Fatalf("w1 = %s, want THINKING", seen["w1"])
 	}
-	if seen["w2"] != frontendv1.RenderState_RENDER_STATE_DORMANT {
+	if seen["w2"] != frontendv1.RenderState_RENDER_STATE_SEVERED {
 		t.Fatalf("w2 = %s, want DORMANT", seen["w2"])
 	}
 }
@@ -183,7 +183,7 @@ func TestTheResyncSnapshotOmitsNoWorkspace(t *testing.T) {
 		State: staticState{snap: &frontendv1.StateSnapshot{
 			Workspaces: []*frontendv1.WorkspaceState{
 				{Workspace: "w1", SessionId: "s1", State: frontendv1.RenderState_RENDER_STATE_READY},
-				{Workspace: "w2", SessionId: "s2", State: frontendv1.RenderState_RENDER_STATE_DORMANT},
+				{Workspace: "w2", SessionId: "s2", State: frontendv1.RenderState_RENDER_STATE_SEVERED},
 			},
 		}},
 	})

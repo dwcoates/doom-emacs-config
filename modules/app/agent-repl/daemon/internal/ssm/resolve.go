@@ -18,15 +18,30 @@ const (
 	// verdict, and it is what makes a workspace's color CONNECTION TRUTH:
 	// `wired` clears the axis and lets the agent axis speak, and neither other
 	// token does.
-	sigWired      = "wired"    // the bring-up gate CLOSED (ShimReady).
-	sigStarting   = "starting" // a bring-up is actively in flight.
-	sigDormant    = "dormant"  // not wired and not starting.
-	sigThinking   = "thinking"
-	sigDone       = "done"
-	sigPermission = "permission"
-	sigIdle       = "idle"
-	sigReady      = "ready"
-	sigIdleAsync  = "idle_async" // DERIVED at resolve time; never stored.
+	sigWired    = "wired"    // the bring-up gate CLOSED (ShimReady).
+	sigStarting = "starting" // a bring-up is actively in flight.
+	// THE AXIS'S CLOSED HALF IS TWO TOKENS, and it used to be one. `dormant`
+	// meant both "we deliberately put this session to sleep to reclaim its
+	// ~500MB" and "the backend substrate is broken", so the most ordinary event
+	// in the system — the idle sweeper reaping a workspace nobody touched for an
+	// hour — rendered exactly like a dead shim. A color that fires on both means
+	// neither, so the split gives blue back its meaning.
+	sigSevered    = "severed"    // not wired, and there is EVIDENCE of breakage.
+	sigHibernated = "hibernated" // not wired, and nothing is wrong.
+	// LEGACY, AND LOAD-BEARING FOREVER. `workspace_state` is append-only, and
+	// rows written before the split literally contain the text `dormant`. It is
+	// resolved as an ALIAS for `severed` — it must keep ranking, it must keep
+	// closing the axis, and it must never be migrated, rewritten or deleted.
+	// Severed is the conservative reading: an old row cannot tell us whether the
+	// teardown behind it was benign, and claiming "nothing is wrong" on absent
+	// evidence is the one direction that can mislead.
+	sigDormantLegacy = "dormant"
+	sigThinking      = "thinking"
+	sigDone          = "done"
+	sigPermission    = "permission"
+	sigIdle          = "idle"
+	sigReady         = "ready"
+	sigIdleAsync     = "idle_async" // DERIVED at resolve time; never stored.
 	// An AGENT-axis token: it reports HOW the last turn ended, exactly as
 	// `done` reports that it ended cleanly. It is not a latch and has no
 	// clearing token — the next agent-axis row supersedes it.
@@ -180,8 +195,13 @@ func renderStateOf(token string) frontendv1.RenderState {
 	switch token {
 	case sigStarting:
 		return frontendv1.RenderState_RENDER_STATE_INIT
-	case sigDormant:
-		return frontendv1.RenderState_RENDER_STATE_DORMANT
+	case sigSevered, sigDormantLegacy:
+		// The legacy token resolves HERE and nowhere else. A pre-split row says
+		// only "the axis was closed"; it cannot say the teardown was benign, and
+		// severed is the reading that does not claim more than the row knows.
+		return frontendv1.RenderState_RENDER_STATE_SEVERED
+	case sigHibernated:
+		return frontendv1.RenderState_RENDER_STATE_HIBERNATED
 	case sigIdle:
 		return frontendv1.RenderState_RENDER_STATE_IDLE
 	case sigIdleAsync:
@@ -229,22 +249,36 @@ func renderStateOf(token string) frontendv1.RenderState {
 // lives ENTIRELY in the `prec` VALUES table below — changing precedence is
 // editing this query, never a Go cond-ladder.
 //
-// THE FIVE-COLOR PRECEDENCE is blue > purple > red > yellow > green, and the
-// ranks below are that order made executable. Each color is a strictly
+// THE SIX-COLOR PRECEDENCE is blue > teal > purple > red > yellow > green, and
+// the ranks below are that order made executable. Each color is a strictly
 // stronger claim about what the user CANNOT do than the one beneath it, so
 // the strongest true claim wins:
 //
 //   - THE WIRED AXIS IS WHY BLUE OUTRANKS EVERYTHING. A workspace's color is
 //     CONNECTION TRUTH: blue means there is no live backend session for it,
 //     and every non-blue color is a guarantee that the substrate is wired.
-//     `dormant` (12) and `starting` (14) therefore sit above every agent-axis
+//     `severed` (12) and `starting` (14) therefore sit above every agent-axis
 //     row and above `vendor_blocked`, so the agent's last word is visible only
-//     while the axis reads `wired`. Nothing in Go decides this; the two ranks
-//     do.
+//     while the axis reads `wired`. Nothing in Go decides this; the ranks do.
 //
 //   - BLUE outranks everything, INCLUDING a live turn. A turn running behind
 //     a route the user cannot see is not something to advertise as working,
 //     it is something to advertise as broken.
+//
+//   - TEAL sits directly beneath blue, and its placement is the load-bearing
+//     part of the hibernation split. `hibernated` (15) is not wired either, so
+//     it makes the SAME actionability claim blue does — you cannot interact
+//     without paying a bring-up — and only its REASON is benign. Ranking it
+//     below green, the tempting reading of "benign", would let a stale
+//     `thinking` row from the turn a workspace was hibernated after mask a
+//     workspace that is genuinely asleep. It ranks BELOW the blue band for the
+//     mirror reason: a workspace that is both asleep and degraded has something
+//     to act on, and teal says the opposite.
+//
+//     A consequence worth naming: `hibernated` winning while `turn_active` is
+//     true is UNREACHABLE BY CONSTRUCTION, because hibernate() refuses a
+//     workspace that is not settled. Where it is detectable it is logged as an
+//     INVARIANT VIOLATION, never as expected.
 //
 //   - PURPLE outranks red for the mirror of that reason, but only ever
 //     among rows of the SAME vintage: `vendor_blocked` is an AGENT-axis
@@ -259,7 +293,7 @@ func renderStateOf(token string) frontendv1.RenderState {
 //
 // Merge states keep their place ABOVE the color ladder: they are workflow
 // actionability, not agent liveness, and they carry badges/glyphs rather
-// than colors so they never spend one of the five.
+// than colors so they never spend one of the six.
 //
 //	 1 merge_conflict   most actionable
 //	 2 merge_failed
@@ -269,9 +303,12 @@ func renderStateOf(token string) frontendv1.RenderState {
 //	--- blue ---------------------------------------------------------------
 //	10 dead             the shim is gone
 //	11 degraded         a store/transport outage
-//	12 dormant          nothing is wired to this workspace
+//	12 severed          nothing is wired, and the substrate BROKE
+//	12 dormant          the pre-split spelling of severed; a legacy alias
 //	13 backfill_failed  the transcript could not be fully read
 //	14 starting         a bring-up is in flight
+//	--- teal ---------------------------------------------------------------
+//	15 hibernated       nothing is wired, and NOTHING IS WRONG
 //	--- purple -------------------------------------------------------------
 //	20 vendor_blocked   agent axis: the last turn ended AT THE VENDOR
 //	--- red ----------------------------------------------------------------
@@ -316,9 +353,21 @@ WITH
     ('merge_queued','merge',5),
     ('dead','agent',10),
     ('degraded','degraded',11),
+    ('severed','wired',12),
+    -- THE LEGACY ALIAS, ranked identically to severed because that is what it
+    -- resolves to. workspace_state is append-only and pre-split rows carry the
+    -- literal text 'dormant'; dropping this row would silently stop ranking them
+    -- and every such workspace would resolve off its stale agent axis instead.
     ('dormant','wired',12),
     ('backfill_failed','backfill',13),
     ('starting','wired',14),
+    -- TEAL, and its rank is the load-bearing part of the hibernation split.
+    -- Directly below the blue band and above purple: hibernation makes the SAME
+    -- actionability claim blue does — you cannot interact without paying a
+    -- bring-up — and only the REASON is benign. Ranked below green instead, a
+    -- stale 'thinking' row from the turn a workspace was hibernated after would
+    -- mask a workspace that is genuinely asleep.
+    ('hibernated','wired',15),
     ('vendor_blocked','agent',20),
     ('clearing','clearing',28),
     ('compacting','compacting',29),
@@ -349,7 +398,12 @@ WITH
   ),
   latest_wired AS (
     SELECT r.* FROM rows r
-    WHERE r.state IN ('wired','starting','dormant')
+    -- 'dormant' STAYS IN THIS LIST FOREVER. It is the pre-split spelling of the
+    -- axis's closed half, and dropping it would make a workspace whose newest
+    -- wired row is a legacy one look like a workspace with NO wired row at all —
+    -- which the synthesized branch below then answers 'hibernated' for, quietly
+    -- repainting an old failure benign.
+    WHERE r.state IN ('wired','starting','severed','hibernated','dormant')
     ORDER BY r.at DESC LIMIT 1
   ),
   latest_backfill AS (
@@ -376,13 +430,19 @@ WITH
     UNION ALL
     SELECT state, cause_kind, cause_seq, at, session_id FROM latest_wired WHERE state <> 'wired'
     UNION ALL
-    -- ABSENCE OF A WIRED ROW IS DORMANT, not "unknown". A workspace with agent
-    -- history and no wired row has no evidence of a live session behind it, and
-    -- letting the agent axis answer unopposed would advertise an agent nobody
-    -- is connected to. The synthesized row borrows the agent axis's timestamp
-    -- and session id so the emitted state still names the conversation it is
-    -- about.
-    SELECT 'dormant', 'wired:absent', cause_seq, at, session_id FROM latest_agent
+    -- ABSENCE OF A WIRED ROW IS HIBERNATED, not "unknown" and not "severed". A
+    -- workspace with agent history and no wired row has no evidence of a live
+    -- session behind it, and letting the agent axis answer unopposed would
+    -- advertise an agent nobody is connected to. The synthesized row borrows the
+    -- agent axis's timestamp and session id so the emitted state still names the
+    -- conversation it is about.
+    --
+    -- TEAL, because the absence of a wired row is the absence of EVIDENCE OF
+    -- BREAKAGE. Nothing was ever wired to this workspace: no bring-up failed and
+    -- no driver died. It resolved to the old blue dormant before the split, which
+    -- meant a workspace whose only sin was never having been opened stood there
+    -- accusing the local substrate of being broken.
+    SELECT 'hibernated', 'wired:absent', cause_seq, at, session_id FROM latest_agent
       WHERE NOT EXISTS (SELECT 1 FROM latest_wired)
     UNION ALL
     SELECT state, cause_kind, cause_seq, at, session_id FROM latest_backfill WHERE state <> 'backfill_ok'
