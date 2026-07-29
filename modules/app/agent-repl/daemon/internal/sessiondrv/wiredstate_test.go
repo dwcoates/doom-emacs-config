@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
+	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
 	"claude-repld/internal/shimclient"
 
@@ -485,5 +486,164 @@ func TestAHibernationSurvivesItsOwnDriverExit(t *testing.T) {
 	if got := lastWiring(t, applier, "ws"); got.wiring != ssm.WiringHibernated {
 		t.Fatalf("wiring after the exit tail = %s/%q, want hibernated — the tail repainted a hibernation blue",
 			got.wiring, got.reason)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// The settled guard: hibernating a working workspace is mechanically impossible
+// ---------------------------------------------------------------------------
+
+// hibernateGuardRig brings a workspace up and wires it, returning the manager and
+// the applier whose resolved state the guard reads.
+func hibernateGuardRig(t *testing.T) (*Manager, *fakeApplier) {
+	t.Helper()
+	m, applier, _ := newWiredRig(t)
+	if err := m.Ensure("ws"); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	waitForWirings(applier, 1)
+	m.onConnected("ws", "s1", &corev1.ShimHello{})
+	return m, applier
+}
+
+// A LIVE TURN IS REFUSED. The guard is inside the shared teardown rather than in
+// the idle sweeper, which is what makes this hold for the frontend command and
+// every future caller too and not only for the sweeper that happens to gate
+// itself.
+func TestHibernateRefusesALiveTurn(t *testing.T) {
+	// Arrange.
+	m, applier := hibernateGuardRig(t)
+	applier.setCurrent("ws", &frontendv1.WorkspaceState{
+		State:      frontendv1.RenderState_RENDER_STATE_THINKING,
+		TurnActive: true,
+	})
+
+	// Act.
+	err := m.Hibernate("ws")
+
+	// Assert.
+	if !errors.Is(err, ErrNotSettled) {
+		t.Fatalf("Hibernate over a live turn = %v, want ErrNotSettled", err)
+	}
+}
+
+// AND IT REFUSES BEFORE TOUCHING ANYTHING. A refusal that had already evicted the
+// driver or SIGTERMed the shim would be a hibernation with an error attached
+// rather than a hibernation that did not happen.
+func TestARefusedHibernationLeavesTheSessionRunning(t *testing.T) {
+	// Arrange.
+	m, applier := hibernateGuardRig(t)
+	applier.setCurrent("ws", &frontendv1.WorkspaceState{
+		State:      frontendv1.RenderState_RENDER_STATE_THINKING,
+		TurnActive: true,
+	})
+	before := len(wiringsFor(applier, "ws"))
+
+	// Act.
+	if err := m.Hibernate("ws"); !errors.Is(err, ErrNotSettled) {
+		t.Fatalf("Hibernate = %v, want ErrNotSettled", err)
+	}
+
+	// Assert — the axis never moved, so nothing was torn down.
+	if after := len(wiringsFor(applier, "ws")); after != before {
+		t.Fatalf("edges = %d, want %d — a refused hibernation must not move the axis", after, before)
+	}
+}
+
+// A CONTEXT CUT IS REFUSED for the same reason a plain turn is: both are red,
+// both mean a turn is in flight, and only the word distinguishes what the agent
+// is busy with.
+func TestHibernateRefusesAContextCut(t *testing.T) {
+	// Arrange.
+	m, applier := hibernateGuardRig(t)
+	applier.setCurrent("ws", &frontendv1.WorkspaceState{State: frontendv1.RenderState_RENDER_STATE_CLEARING})
+
+	// Act.
+	err := m.Hibernate("ws")
+
+	// Assert.
+	if !errors.Is(err, ErrNotSettled) {
+		t.Fatalf("Hibernate over a clearing workspace = %v, want ErrNotSettled", err)
+	}
+}
+
+// A VENDOR BLOCK IS REFUSED, which is the less obvious half. Nothing is running
+// under purple — it is a turn OUTCOME — but it is the one state whose whole
+// purpose is to tell the user something needs their attention, and reaping the
+// session replaces that with a teal tab claiming everything is fine and asleep.
+func TestHibernateRefusesAVendorBlockedWorkspace(t *testing.T) {
+	// Arrange.
+	m, applier := hibernateGuardRig(t)
+	applier.setCurrent("ws", &frontendv1.WorkspaceState{State: frontendv1.RenderState_RENDER_STATE_VENDOR_BLOCKED})
+
+	// Act.
+	err := m.Hibernate("ws")
+
+	// Assert.
+	if !errors.Is(err, ErrNotSettled) {
+		t.Fatalf("Hibernate over a vendor-blocked workspace = %v, want ErrNotSettled", err)
+	}
+}
+
+// A SETTLED WORKSPACE IS HIBERNATED, which is the whole point of the knob: a
+// guard that refused everything would just disable hibernation.
+func TestHibernateAllowsASettledWorkspace(t *testing.T) {
+	// Arrange.
+	m, applier := hibernateGuardRig(t)
+	applier.setCurrent("ws", &frontendv1.WorkspaceState{State: frontendv1.RenderState_RENDER_STATE_READY})
+
+	// Act.
+	err := m.Hibernate("ws")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Hibernate over a settled workspace = %v, want it allowed", err)
+	}
+	if got := lastWiring(t, applier, "ws"); got.wiring != ssm.WiringHibernated {
+		t.Fatalf("wiring = %s, want hibernated", got.wiring)
+	}
+}
+
+// A STATE READ FAILURE ALLOWS THE TEARDOWN, and this is the one place in the
+// hibernation path where an unknown answers YES. This guard only VETOES a
+// teardown somebody already decided on, so turning a read outage into a refusal
+// would silently disable hibernation daemon-wide — and memory exhaustion is a
+// worse failure than one shim reaped a moment early. The failure is logged
+// loudly either way.
+func TestHibernateProceedsWhenTheStateReadFails(t *testing.T) {
+	// Arrange.
+	m, applier := hibernateGuardRig(t)
+	applier.reconcMutex.Lock()
+	applier.currentErr = errors.New("the state log is unreadable")
+	applier.reconcMutex.Unlock()
+
+	// Act.
+	err := m.Hibernate("ws")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Hibernate with an unreadable state = %v, want it allowed", err)
+	}
+}
+
+// THE SESSION-SCOPED STOP IS NOT GUARDED, and the asymmetry is deliberate.
+// Hibernate is a memory optimization nobody asked for, so it must never cost a
+// live turn; HibernateSession serves DeleteSession and the supersede sweep, where
+// the caller has decided this exact record must go and a mid-turn refusal would
+// leave an orphan shim running forever.
+func TestHibernateSessionIsNotGatedOnSettledness(t *testing.T) {
+	// Arrange — a workspace mid-turn.
+	m, applier := hibernateGuardRig(t)
+	applier.setCurrent("ws", &frontendv1.WorkspaceState{
+		State:      frontendv1.RenderState_RENDER_STATE_THINKING,
+		TurnActive: true,
+	})
+
+	// Act.
+	err := m.HibernateSession("ws", "s1")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("HibernateSession over a live turn = %v, want it delivered", err)
 	}
 }

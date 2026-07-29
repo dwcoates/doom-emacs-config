@@ -91,6 +91,17 @@ type StateApplier interface {
 	// nothing else can observe the bring-up gate — so wiredstate.go holds every
 	// edge that moves it.
 	ApplyWired(workspace string, wiring ssm.Wiring, reason string) error
+	// Current resolves the workspace's state, which this package needs for
+	// exactly one purpose: REFUSING a hibernation of a workspace that has not
+	// settled (see refuseUnsettledHibernation).
+	//
+	// It is the only READ on this otherwise write-only interface, and it is here
+	// rather than in the sweeper because the guard has to be mechanical. "Never
+	// hibernate mid-turn" was a rule each caller remembered separately, so it
+	// held only for the callers that did; moving the check into the shared
+	// teardown means there is no ungated path left to find. found=false is a
+	// workspace the log knows nothing about, which has no turn to interrupt.
+	Current(workspace string) (*frontendv1.WorkspaceState, bool, error)
 }
 
 // ProgressResolver is the slice of the progress-footer resolver (F1) the driver

@@ -1492,8 +1492,17 @@ func (s *Server) sweepIdle() {
 			continue
 		}
 		if err := s.driver.Hibernate(rec.CWD); err != nil {
-			// Expected for an already-hibernated / never-brought-up workspace.
-			s.logf("session %s: idle sweep skipped (ws %s): %v", rec.SessionID, rec.CWD, err)
+			// Expected for an already-hibernated / never-brought-up workspace, and
+			// now also for one that started working between sweepable's read and
+			// this call. That race is exactly why the settled check is inside
+			// hibernate() as well as here: this gate can go stale, and the one
+			// inside the teardown cannot.
+			if errors.Is(err, sessiondrv.ErrNotSettled) {
+				s.logf("session %s: idle sweep HELD after the gate (ws %s): the workspace started working between the check and the teardown: %v",
+					rec.SessionID, rec.CWD, err)
+			} else {
+				s.logf("session %s: idle sweep skipped (ws %s): %v", rec.SessionID, rec.CWD, err)
+			}
 		}
 	}
 }
@@ -1567,7 +1576,7 @@ func (s *Server) sweepable(sessionID, workspace string, nowMs int64) bool {
 // refresh, never the only guard.
 //
 // Nothing here marks a record terminal in either mode: a stopped shim's
-// session is dormant, not dead.
+// session is merely unwired, not dead.
 func (s *Server) ShutdownAll(stopShims bool) {
 	s.stopOnce.Do(func() { close(s.stopped) })
 	if !stopShims {
@@ -1581,7 +1590,18 @@ func (s *Server) ShutdownAll(stopShims bool) {
 		}
 		s.logf("server: shutdown stop-shims mode: stopping the shim for session %s (ws %s)", rec.SessionID, rec.CWD)
 		if err := s.driver.Hibernate(rec.CWD); err != nil {
-			s.logf("server: shutdown stop shim (ws %s): %v", rec.CWD, err)
+			// A MID-TURN WORKSPACE IS NOW REFUSED here too, because the settled
+			// check lives inside the shared teardown rather than in each caller.
+			// That is the right trade for this caller as well: a shim left running
+			// on the previous bundle is a stale binary, while a shim SIGTERMed
+			// mid-turn is lost work, and the version-driven stale-shim refresh
+			// already bounces the survivor the moment it reconnects.
+			if errors.Is(err, sessiondrv.ErrNotSettled) {
+				s.logf("server: shutdown stop-shims mode PRESERVING the shim for session %s (ws %s): it has not settled, and the stale-shim refresh will bounce it after the turn: %v",
+					rec.SessionID, rec.CWD, err)
+			} else {
+				s.logf("server: shutdown stop shim (ws %s): %v", rec.CWD, err)
+			}
 		}
 	}
 }

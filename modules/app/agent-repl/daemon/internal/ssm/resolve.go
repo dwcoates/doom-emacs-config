@@ -538,10 +538,34 @@ func resolve(db *sql.DB, workspace string, logf dlog.Logf) (resolved, error) {
 		mergePhase = mergeState.String
 	}
 
+	turnActive := agentCause.Valid && agentCause.String == causeTurnStarted
+
+	// AN INVARIANT VIOLATION, never a benign combination. A hibernation is
+	// something WE do on purpose, and sessiondrv's hibernate() refuses any
+	// workspace whose resolved state is not settled — so a workspace reading
+	// `hibernated` with a turn still active is a state no code path is supposed to
+	// be able to produce.
+	//
+	// It is worth a line precisely because the rank table makes it INVISIBLE.
+	// `hibernated` outranks every agent row deliberately, so that a stale
+	// `thinking` cannot mask a workspace that is genuinely asleep — which means
+	// this combination paints an ordinary teal tab with nothing anywhere to say
+	// the agent is working underneath it. Without this log the only symptom is a
+	// user watching a sleeping workspace that will not answer.
+	//
+	// Logged rather than corrected: the resolution query is the sole authority on
+	// precedence, and a Go branch that overrode it here would be a second,
+	// invisible precedence rule. The repair belongs at whichever writer produced
+	// the impossible pair.
+	if winner == sigHibernated && turnActive && logf != nil {
+		logf("ssm: INVARIANT VIOLATION ws=%s resolved hibernated WITH A TURN ACTIVE (cause=%s seq=%d session=%s) — hibernate() refuses an unsettled workspace, so some writer closed the axis behind a live turn; the tab reads asleep while the agent works",
+			workspace, causeKind.String, causeSeq.Int64, sessionID.String)
+	}
+
 	return resolved{
 		found:         true,
 		state:         renderStateOf(winner),
-		turnActive:    agentCause.Valid && agentCause.String == causeTurnStarted,
+		turnActive:    turnActive,
 		liveTaskCount: taskCount,
 		mergePhase:    mergePhase,
 		causeKind:     causeKind.String,

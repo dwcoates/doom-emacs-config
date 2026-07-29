@@ -1,6 +1,13 @@
 package sessiondrv
 
-import "claude-repld/internal/ssm"
+import (
+	"errors"
+	"fmt"
+
+	"claude-repld/internal/ssm"
+
+	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+)
 
 // wiredstate.go — this package's production of the SSM's WIRED axis.
 //
@@ -110,4 +117,80 @@ func (m *Manager) onLinkLost(workspace, sessionID string, cause error) {
 	m.logf("sessiondrv: shim link LOST session=%s ws=%q — reconnecting, workspace is starting again: %v",
 		sessionID, workspace, cause)
 	m.noteWiring(workspace, ssm.WiringStarting, "link_lost")
+}
+
+// ErrNotSettled reports that a workspace was asked to hibernate while it was
+// still WORKING: a turn in flight, a context cut running, or a turn that ended
+// on the vendor and has not been superseded.
+//
+// It is a sentinel rather than an ad-hoc error because refusing a hibernation is
+// a routine, expected answer for a caller that sweeps broadly — the idle sweeper
+// walks every registry record — and a caller has to be able to tell "not now"
+// apart from "the teardown failed" without matching on message text.
+//
+// It lives here rather than in errclass because nothing classifies it into a
+// user-facing failure card: it names a refusal of a daemon-internal operation,
+// not a break in the route to the agent, and the workspace it refuses is by
+// definition still perfectly usable.
+var ErrNotSettled = errors.New("sessiondrv: the workspace has not settled; refusing to hibernate it")
+
+// unsettledStates are the resolved states that mean the workspace is not done
+// working, keyed by RenderState so the check reads off the SSM's own verdict
+// rather than re-deriving anything.
+//
+// THE RED BAND, because each of the three is a turn in flight: `thinking` plus
+// the two context cuts, which differ from it only in WHAT the agent is busy
+// with. Hibernating any of them SIGTERMs a shim mid-turn and throws the work
+// away.
+//
+// AND PURPLE, which is the less obvious half. `vendor_blocked` is a turn OUTCOME
+// rather than a live turn, so nothing is running — but it is a report the user
+// has not seen through yet, and it is the ONE state whose whole purpose is to
+// tell them something needs their attention. Reaping the session under it
+// replaces that report with a teal tab claiming everything is fine and asleep,
+// which is the exact opposite of what the purple was saying.
+var unsettledStates = map[frontendv1.RenderState]bool{
+	frontendv1.RenderState_RENDER_STATE_THINKING:       true,
+	frontendv1.RenderState_RENDER_STATE_CLEARING:       true,
+	frontendv1.RenderState_RENDER_STATE_COMPACTING:     true,
+	frontendv1.RenderState_RENDER_STATE_VENDOR_BLOCKED: true,
+	// DEPRECATED upstream and no longer resolved, but still refused: an older
+	// daemon's log can resolve it, and it always meant what vendor_blocked means.
+	frontendv1.RenderState_RENDER_STATE_STOP_FAILED: true,
+}
+
+// refuseUnsettledHibernation returns ErrNotSettled when the workspace's resolved
+// state says it is still working, loud-logging the refusal.
+//
+// A READ FAILURE ALLOWS THE HIBERNATION, and this is the one place in the
+// hibernation path where an unknown answers YES rather than NO. It is the
+// opposite of the idle sweeper's elapsed-quiet gate, deliberately, because the
+// two guard different things: the sweeper decides whether to hibernate a
+// workspace nobody asked about, so absent evidence must not license a teardown,
+// while this only VETOES a teardown somebody already decided on. Turning a state
+// read failure into a refusal here would make an SSM outage silently disable
+// hibernation across the whole daemon, and memory exhaustion is a worse failure
+// than one shim reaped a moment early. The failure is surfaced loudly either
+// way, never swallowed.
+//
+// A workspace with NO resolved state is likewise allowed through: it has no turn
+// to interrupt, and hibernate's own no-live-driver error is the honest refusal
+// for a workspace nothing is driving.
+func (m *Manager) refuseUnsettledHibernation(workspace string) error {
+	st, found, err := m.cfg.SSM.Current(workspace)
+	if err != nil {
+		m.logf("sessiondrv: hibernation settled-check FAILED ws=%q: %v — ALLOWING the teardown, because a state read outage must not disable hibernation daemon-wide",
+			workspace, err)
+		return nil
+	}
+	if !found {
+		return nil
+	}
+	state := st.GetState()
+	if !st.GetTurnActive() && !unsettledStates[state] {
+		return nil
+	}
+	m.logf("sessiondrv: REFUSING to hibernate ws=%q — it has not settled (state=%s turn_active=%v). Hibernating it would SIGTERM a shim that is still working and paint the workspace asleep over a live turn",
+		workspace, state, st.GetTurnActive())
+	return fmt.Errorf("%w: workspace %q reads %s (turn_active=%v)", ErrNotSettled, workspace, state, st.GetTurnActive())
 }

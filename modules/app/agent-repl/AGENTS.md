@@ -97,6 +97,27 @@ The window is measured from the newest row on the workspace's own state log
 appended by something that actually happened, and nothing appends on a timer.
 So a turn ending STARTS the clock rather than arming an immediate sweep.
 
+AND THE SWEEPER IS NO LONGER THE ONLY GUARD. `sessiondrv.hibernate()` itself
+refuses any workspace whose resolved state is not SETTLED — the red band (a turn
+in flight, either context cut) and purple (a vendor block the user has not seen
+through yet) — with the typed `sessiondrv.ErrNotSettled`. The rule used to be
+"never call Hibernate mid-turn", left to each caller, so it held only for the
+callers that remembered it; inside the shared teardown it is mechanical, and the
+frontend command and every future caller hit it too.
+
+That also protects the vocabulary. `hibernated` is ranked in the blue band
+precisely so a stale agent row cannot mask it, which means a teal tab over a live
+turn would look exactly like a teal tab over a settled one — the user sees
+"asleep" while the agent works, with no color anywhere to correct it. The guard
+is what makes that combination unreachable by construction, and the resolver logs
+it as an INVARIANT VIOLATION wherever it can still detect it.
+
+One asymmetry is deliberate: `HibernateSession` is NOT gated. Hibernation is a
+memory optimization nobody asked for, so it must never cost a live turn, whereas
+the session-scoped stop serves `DeleteSession` and the supersede sweep, where the
+caller has decided this exact record must go and a refusal would leave an orphan
+shim running forever.
+
 Both gates in `Server.sweepable` are load-bearing, and neither is redundant:
 
 - `!turn_active` alone is satisfied the instant a turn ends, so a sweeper gated
