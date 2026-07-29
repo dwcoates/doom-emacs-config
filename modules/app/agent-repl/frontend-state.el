@@ -454,12 +454,12 @@ claiming the detail rides the pushed `SessionView' — because a free string
 gave no way to know what class of failure it described.  `:death' is that
 same fact classified, so it can finally be shown."
   (let ((id (agent-repl--frontend-store-session-view view)))
-    ;; A `SessionView''s `:workspace' is the wire's workspace DIRECTORY, not a
-    ;; workspace name, so it can never index the workspace hash.  Resolve it to
-    ;; the owning name for sink routing and keep printing the raw directory in
-    ;; the message, which is the field an operator correlates against the
-    ;; daemon.  An unowned directory resolves to nil and logs globally.
-    (agent-repl--log (agent-repl--ws-name-for-dir (plist-get view :workspace))
+    ;; A `SessionView''s `:workspace' is the wire's session CWD, not a
+    ;; workspace name, so it can never index the workspace hash.  Route through
+    ;; the file's own resolver, which also passes a frame that already carries
+    ;; a name.  The raw wire value stays in the message text, since that is the
+    ;; field an operator correlates against the daemon.
+    (agent-repl--log (agent-repl--frontend-ws-name (plist-get view :workspace))
                      "frontend-apply-session-view: id=%s ws=%s terminal=%S claude-id=%s pending=%s"
                      id (plist-get view :workspace) (plist-get view :terminal)
                      (or (plist-get view :claudeSessionId) "nil")
@@ -534,10 +534,10 @@ Upserts its retained `SystemInit' into `agent-repl--frontend-session-inits'
 and logs the slash-command count the completion menu consumes.  Returns the
 id."
   (let ((id (agent-repl--frontend-store-session-init view)))
-    ;; `:workspace' is a directory on the wire — see
+    ;; `:workspace' is a session CWD on the wire — see
     ;; `agent-repl--frontend-apply-session-view' for why it must be resolved
     ;; to a name before it can select a workspace log sink.
-    (agent-repl--log (agent-repl--ws-name-for-dir (plist-get view :workspace))
+    (agent-repl--log (agent-repl--frontend-ws-name (plist-get view :workspace))
                      "frontend-apply-session-init: id=%s ws=%s slash-commands=%d skills=%d model=%s"
                      id (plist-get view :workspace)
                      (length (plist-get (plist-get view :init) :slashCommands))
