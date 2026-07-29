@@ -608,8 +608,12 @@ nothing is ever bounced on a guess."
                        disk running (if stale "t" "nil"))
       stale)))
 
-(defun agent-repl--frontend-request-foreign-shutdown ()
+(defun agent-repl--frontend-request-foreign-shutdown (&optional stop-shims)
   "Ask the daemon on the frontend UDS to shut down (`ShutdownCmd').
+STOP-SHIMS sets `ShutdownCmd.stop_shims', asking the daemon to SIGTERM its
+session shims on the way out.  Nil -- the default -- PRESERVES them: a shim
+outlives its daemon, redials this same socket and is parked by the
+replacement's listener, so preserving is what makes a bounce cheap.
 The S9 replacement for the deleted `POST /shutdown' call: the graceful
 teardown the daemon ran for that route is now reachable as a
 `FrontendCommand' arm, so this needs no HTTP.  Dials first when the link
@@ -625,13 +629,18 @@ through to the liveness poll, which is the real exit signal."
                      connected agent-repl-frontend-daemon-addr)
     (unless connected
     (agent-repl-uds-connect))
-    (let ((req (agent-repl--uds-send-command "shutdown" nil)))
+    (let ((req (agent-repl--uds-send-command
+                "shutdown" (and stop-shims (list :stopShims t)))))
       (agent-repl--uds-track-command req "shutdown" nil)
-      (agent-repl--log nil "foreign daemon shutdown: command accepted request-id=%S" req)
+      (agent-repl--log nil
+                       "foreign daemon shutdown: command accepted request-id=%S stop-shims=%s"
+                       req (if stop-shims "t" "nil"))
       req)))
 
-(defun agent-repl--frontend-bounce-foreign-daemon ()
+(defun agent-repl--frontend-bounce-foreign-daemon (&optional stop-shims)
   "Bounce an ADOPTED daemon this Emacs does not track, via `ShutdownCmd'.
+STOP-SHIMS rides the command; see
+`agent-repl--frontend-request-foreign-shutdown'.
 Asks the foreign daemon to exit gracefully (it runs the same shutdown path
 SIGTERM triggers), waits for its listener to free the socket, then starts a
 fresh daemon from the already-rebuilt on-disk binary.
@@ -646,7 +655,7 @@ and is left in place; spawning next to it would only bind-fail."
                    agent-repl-frontend-daemon-addr
                    agent-repl-frontend-foreign-stop-grace-seconds)
   (condition-case err
-      (agent-repl--frontend-request-foreign-shutdown)
+      (agent-repl--frontend-request-foreign-shutdown stop-shims)
     (error
      (agent-repl--log nil "startup: foreign daemon shutdown request errored (%s) — polling the socket anyway"
                        (error-message-string err))))
@@ -692,8 +701,11 @@ bounces can change anything."
                      state agent-repl-frontend-daemon-addr owner)
     state))
 
-(defun agent-repl--frontend-bounce-after-build (&optional preflight)
+(defun agent-repl--frontend-bounce-after-build (&optional preflight stop-shims)
   "Bounce the current daemon after all required artifacts are built.
+STOP-SHIMS asks the outgoing daemon to stop its session shims rather than
+leave them running for the replacement to reattach to; see
+`agent-repl--frontend-stop-daemon'.
 Starts a daemon when none exists, gracefully replaces a tracked or adopted
 daemon, and handles an incompatible pre-UDS generation by terminating only
 the verified claude-repld listener.  The caller must reject active turns
@@ -707,10 +719,10 @@ this function resolves it before acting."
                      state agent-repl-frontend-daemon-addr)
     (cond
      ((eq state :tracked)
-      (agent-repl--frontend-stop-daemon)
+      (agent-repl--frontend-stop-daemon nil stop-shims)
       (agent-repl--frontend-start-daemon))
      ((eq state :responsive)
-      (agent-repl--frontend-bounce-foreign-daemon))
+      (agent-repl--frontend-bounce-foreign-daemon stop-shims))
      ((and (consp state) (eq (car state) :incompatible))
       (unless (agent-repl--frontend-terminate-incompatible-daemon
                (cadr state))
@@ -924,8 +936,16 @@ remains the cheap idempotent session-open ensure."
       (agent-repl--frontend-build-if-stale force)
       (agent-repl--frontend-start-daemon)))))))
 
-(defun agent-repl--frontend-stop-daemon (&optional force)
+(defun agent-repl--frontend-stop-daemon (&optional force stop-shims)
   "Stop the tracked `claude-repld' process, gracefully first.
+STOP-SHIMS asks the daemon to SIGTERM its session shims on the way out.
+A SIGNAL CANNOT CARRY A MODE, so that request has to travel as a
+`ShutdownCmd' over the UDS link before any signal is sent; the daemon
+serves the first shutdown request it receives and ignores the rest, so
+the TERM below stays the fallback rather than a competing request.  Nil --
+the default -- PRESERVES the shims: they redial this same socket and are
+parked by the replacement daemon\='s listener, which is what makes a bounce
+a reattach instead of a rebuild.
 Refuses while any daemon session reports an in-flight turn — stopping
 then would kill a live conversation mid-generation (the repeated
 daemon-bounce incidents) — unless FORCE is non-nil.  An unreachable
@@ -950,9 +970,21 @@ inherited-pipe EOF."
           (agent-repl--log nil "frontend stop: refused force=nil active-sessions=%S" busy)
           (error "agent-repl: refusing daemon stop — turn in flight in %s; retry when idle or pass FORCE"
                  busy)))
+    (when stop-shims
+      (condition-case err
+          (agent-repl--frontend-request-foreign-shutdown t)
+        (error
+         ;; The link can be down while the tracked process is alive. The TERM
+         ;; below still stops the daemon; it simply cannot carry the mode, so
+         ;; the shims are preserved. Loud, because the caller asked for the
+         ;; opposite and is entitled to know it did not happen.
+         (agent-repl--log nil
+                          "frontend stop: stop-shims request FAILED (%s) — the daemon will preserve its shims"
+                          (error-message-string err)))))
     (let ((proc agent-repl--frontend-daemon-process))
-      (agent-repl--log nil "frontend stop: sending TERM pid=%S grace-seconds=%s"
-                       (process-id proc) agent-repl-frontend-stop-grace-seconds)
+      (agent-repl--log nil "frontend stop: sending TERM pid=%S grace-seconds=%s stop-shims=%s"
+                       (process-id proc) agent-repl-frontend-stop-grace-seconds
+                       (if stop-shims "t" "nil"))
       (signal-process proc 'TERM)
       (if (agent-repl--frontend-poll-until
            (lambda () (process-live-p proc))
@@ -992,13 +1024,21 @@ Refuses while a turn is in flight; with prefix arg FORCE, stops anyway."
   (message "claude-repld stopped."))
 
 ;;;###autoload
-(defun agent-repl-frontend-daemon-restart ()
+(defun agent-repl-frontend-daemon-restart (&optional stop-shims)
   "Restart the complete runtime through the canonical coordinator.
 This compatibility command now includes stale builds plus launchd-managed
-store/sidecar bounces; restarting the daemon also replaces every session
-shim and immediately rebinds open panels."
-  (interactive)
-  (agent-repl-runtime-restart))
+store/sidecar bounces, and immediately rebinds open panels.
+
+It no longer replaces every session shim.  A shim outlives its daemon by
+design -- it redials the daemon socket and is parked by the replacement\='s
+listener -- so the default bounce PRESERVES them and the new daemon
+reattaches instead of rebuilding, leaving every conversation running.
+
+STOP-SHIMS (the interactive prefix argument) restores the old behavior for
+the one caller that needs it: a deploy that changed the shim BUNDLE, whose
+survivors would otherwise keep running the previous build\='s code."
+  (interactive "P")
+  (agent-repl-runtime-restart (and stop-shims t)))
 
 (provide 'daemon)
 

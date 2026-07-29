@@ -16,7 +16,7 @@
 (declare-function agent-repl--error "core" (ws fmt &rest args))
 (declare-function agent-repl--frontend-all-turn-active-session-ids "frontend-client" ())
 (declare-function agent-repl--frontend-artifact-exists-p "daemon" (path))
-(declare-function agent-repl--frontend-bounce-after-build "daemon" (&optional preflight))
+(declare-function agent-repl--frontend-bounce-after-build "daemon" (&optional preflight stop-shims))
 (declare-function agent-repl--frontend-build-if-stale "daemon" (&optional force))
 (declare-function agent-repl--frontend-build-targets-if-stale "daemon" (targets &optional force))
 (declare-function agent-repl--frontend-init-inhibited-p "daemon" ())
@@ -227,11 +227,18 @@ validated both jobs before building any runtime artifact."
                    agent-repl--shim-store-label agent-repl--shim-sidecar-label)
   t)
 
-(defun agent-repl--runtime-prepare (rebind)
+(defun agent-repl--runtime-prepare (rebind &optional stop-shims)
   "Bounce backend dependencies, require daemon health, and optionally REBIND.
 REBIND is non-nil only for an explicit runtime restart with workspaces
 already loaded.  Startup passes nil so the backend becomes healthy before
-the snapshot reader can establish, restore, or render any workspace."
+the snapshot reader can establish, restore, or render any workspace.
+
+STOP-SHIMS asks the outgoing daemon to SIGTERM its session shims instead of
+leaving them to redial and park for the replacement.  Nil -- the default --
+PRESERVES them, which is what makes a bounce cheap: a surviving shim is
+reattached rather than rebuilt, and its conversation is never interrupted.
+Only a deploy that changed the shim BUNDLE has a reason to pass it, because
+a survivor would otherwise keep running the previous build's code."
   (agent-repl--assert-main-thread "runtime-restart")
   (let* ((daemon-state (agent-repl--frontend-runtime-bounce-preflight))
          (daemon-present (memq daemon-state '(:tracked :responsive))))
@@ -265,7 +272,7 @@ the snapshot reader can establish, restore, or render any workspace."
                        "runtime-prepare: frontend build completed result=%S"
                        frontend-build-result))
     (agent-repl--shim-services-build-and-bounce t)
-    (agent-repl--frontend-bounce-after-build daemon-state)
+    (agent-repl--frontend-bounce-after-build daemon-state stop-shims)
     ;; The new daemon can accept a UDS connection before it can service
     ;; requests.  Require both the link/snapshot readiness and the daemon's
     ;; correlated initialization readiness before a caller can continue.
@@ -284,15 +291,21 @@ the snapshot reader can establish, restore, or render any workspace."
                        agent-repl--shim-sidecar-label)
       t)))
 
-(defun agent-repl-runtime-restart ()
+(defun agent-repl-runtime-restart (&optional stop-shims)
   "Rebuild, bounce, verify, then rebind the complete agent-repl runtime.
 Refuses before any build or bounce when any daemon workspace reports an
-active turn."
-  (interactive)
+active turn.
+
+STOP-SHIMS (the interactive prefix argument) asks the outgoing daemon to
+stop its session shims rather than leave them running for the replacement
+to reattach to.  The default PRESERVES them; see
+`agent-repl--runtime-prepare'."
+  (interactive "P")
   (agent-repl--log nil
-                   "runtime-restart command: invoked interactive=%s"
-                   (if (called-interactively-p 'interactive) "t" "nil"))
-  (let ((rebound (agent-repl--runtime-prepare t)))
+                   "runtime-restart command: invoked interactive=%s stop-shims=%s"
+                   (if (called-interactively-p 'interactive) "t" "nil")
+                   (if stop-shims "t" "nil"))
+  (let ((rebound (agent-repl--runtime-prepare t (and stop-shims t))))
     (when (called-interactively-p 'interactive)
       (agent-repl--log nil
                        "runtime-restart command: presenting interactive completion rebound=%d"
