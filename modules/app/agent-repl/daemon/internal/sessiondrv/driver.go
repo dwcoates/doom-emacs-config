@@ -107,7 +107,7 @@ type SessionRegistrar interface {
 // ModelCatalogRegistrar receives the live SDK's model menu. It is separate
 // from SessionRegistrar because query capability is not transcript identity.
 type ModelCatalogRegistrar interface {
-	SessionModelCatalogObserved(sessionID string, models []*corev1.ModelOption)
+	SessionModelCatalogObserved(sessionID string, models []*corev1.ModelOption) error
 }
 
 // SpawnResult reports what a bring-up had to REPAIR to get the session up, and
@@ -809,17 +809,18 @@ func (m *Manager) persistObservedModel(sessionID, model string) {
 // SessionView, so one shim cannot alter another workspace's picker.
 type modelCatalogReporter struct{ m *Manager }
 
-func (r modelCatalogReporter) ModelCatalog(sessionID string, catalog *corev1.ModelCatalog) {
+func (r modelCatalogReporter) ModelCatalog(sessionID string, catalog *corev1.ModelCatalog) error {
 	if catalog.GetSessionId() != sessionID {
-		r.m.logf("sessiondrv: refusing model catalog frame_session=%s expected_session=%s", catalog.GetSessionId(), sessionID)
-		return
+		return fmt.Errorf("sessiondrv: refusing model catalog frame_session=%s expected_session=%s", catalog.GetSessionId(), sessionID)
 	}
 	if r.m.cfg.ModelCatalogs == nil {
-		r.m.logf("sessiondrv: model catalog session=%s models=%d has no registrar", sessionID, len(catalog.GetModels()))
-		return
+		return fmt.Errorf("sessiondrv: model catalog session=%s models=%d has no registrar", sessionID, len(catalog.GetModels()))
 	}
 	r.m.logf("sessiondrv: model catalog observed session=%s models=%d", sessionID, len(catalog.GetModels()))
-	r.m.cfg.ModelCatalogs.SessionModelCatalogObserved(sessionID, catalog.GetModels())
+	if err := r.m.cfg.ModelCatalogs.SessionModelCatalogObserved(sessionID, catalog.GetModels()); err != nil {
+		return fmt.Errorf("sessiondrv: model catalog session=%s registrar rejected it: %w", sessionID, err)
+	}
+	return nil
 }
 
 // persistSessionDeath marks the session's record terminal with the reason its

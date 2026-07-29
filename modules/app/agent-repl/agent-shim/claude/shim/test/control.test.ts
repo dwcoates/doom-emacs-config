@@ -14,6 +14,7 @@ import {
   PermissionDecision,
   PermissionRequest,
   PermissionResponseSchema,
+  SetModelSchema,
   SubmitPromptSchema,
 } from "../src/uds/proto.js";
 
@@ -21,6 +22,7 @@ interface Recorder {
   target: SdkControlTarget;
   prompts: Array<{ requestId: string; text: string; origin: string; permissionMode?: string }>;
   interrupts: Array<{ requestId: string }>;
+  models: Array<{ requestId: string; model: string }>;
   throwOnPrompt?: string;
 }
 
@@ -37,9 +39,11 @@ function recorder(
 ): Recorder {
   const prompts: Recorder["prompts"] = [];
   const interrupts: Recorder["interrupts"] = [];
+  const models: Recorder["models"] = [];
   return {
     prompts,
     interrupts,
+    models,
     throwOnPrompt,
     target: {
       submitPrompt: (input) => {
@@ -50,6 +54,10 @@ function recorder(
         if (throwOnInterrupt) throw new Error(throwOnInterrupt);
         interrupts.push(input);
         return outcome;
+      },
+      setModel: async (input) => {
+        models.push(input);
+        return input.model;
       },
     },
   };
@@ -115,6 +123,29 @@ describe("ControlDispatch.handleSubmitPrompt", () => {
       expect.objectContaining({ operation: "shim.control.dispatch", request_id: "accepted-1", message: "SubmitPrompt accepted by SDK session" }),
       expect.objectContaining({ level: "error", operation: "shim.control.dispatch", request_id: "rejected-1", message: expect.stringContaining("submit-prompt failed") }),
     ]));
+  });
+});
+
+describe("ControlDispatch.handleSetModel", () => {
+  it("forwards a real model and acknowledges only the SDK-confirmed selection", async () => {
+    const rec = recorder();
+    const receipt = await dispatch(rec, []).handleSetModel(
+      create(SetModelSchema, { requestId: "model-1", model: "opus" }),
+    );
+    expect(receipt.$typeName).toBe(AckSchema.typeName);
+    expect(receipt.selectedModel).toBe("opus");
+    expect(rec.models).toEqual([{ requestId: "model-1", model: "opus" }]);
+  });
+
+  it("rejects <synthetic> without calling the SDK", async () => {
+    const rec = recorder();
+    const receipt = await dispatch(rec, []).handleSetModel(
+      create(SetModelSchema, { requestId: "model-synthetic", model: " <synthetic> " }),
+    );
+    expect(receipt.$typeName).toBe(NackSchema.typeName);
+    if (receipt.$typeName !== NackSchema.typeName) throw new Error("expected a Nack");
+    expect(receipt.reason).toContain("not selectable");
+    expect(rec.models).toEqual([]);
   });
 });
 

@@ -137,7 +137,7 @@ type FrameSink interface {
 // ModelCatalogSink receives the live query's selectable models.  A catalogue
 // is session state, not conversation content a frontend may infer.
 type ModelCatalogSink interface {
-	ModelCatalog(sessionID string, catalog *corev1.ModelCatalog)
+	ModelCatalog(sessionID string, catalog *corev1.ModelCatalog) error
 }
 
 // FileDiagnosticSink consumes a persistent file-plane diagnostic before it can
