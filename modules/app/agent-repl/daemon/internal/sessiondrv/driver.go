@@ -1790,6 +1790,23 @@ func (m *Manager) onConnected(workspace, sessionID string, hello *corev1.ShimHel
 	// THE BRING-UP GATE IS CLOSED. Anything that fails from here is a
 	// mid-session fault, never an escapable bring-up failure.
 	m.noteWired(workspace, sessionID)
+	m.mu.Lock()
+	d, ok := m.byWS[workspace]
+	m.mu.Unlock()
+	if !ok || d.sessionID != sessionID {
+		m.logf("sessiondrv: turn handshake rejected ws=%s session=%s decision=no_matching_driver active_turn_ids=%v",
+			workspace, sessionID, hello.GetActiveTurnIds())
+		if err := m.cfg.SSM.ApplyConnectionDegraded(workspace, true, "turn handshake has no matching live driver"); err != nil {
+			m.logf("sessiondrv: surfacing unmatched turn handshake failed ws=%s session=%s: %v", workspace, sessionID, err)
+		}
+	} else if err := d.consumer.reconcileTurnHandshake(hello); err != nil {
+		reason := fmt.Sprintf("turn handshake correlation failed: %v", err)
+		m.logf("sessiondrv: %s ws=%s session=%s", reason, workspace, sessionID)
+		if applyErr := m.cfg.SSM.ApplyConnectionDegraded(workspace, true, reason); applyErr != nil {
+			m.logf("sessiondrv: surfacing turn handshake correlation failure failed ws=%s session=%s: %v",
+				workspace, sessionID, applyErr)
+		}
+	}
 	// The pid and the build identity are BOTH only trustworthy on a live
 	// connection, and this is the moment the connection is proven usable. A
 	// shim running a superseded bundle is bounced from here onto the current
@@ -1798,7 +1815,7 @@ func (m *Manager) onConnected(workspace, sessionID string, hello *corev1.ShimHel
 	m.noteShimPID(sessionID, hello.GetPid())
 	m.refreshStaleShim(workspace, sessionID, hello.GetBuildSha())
 	if hello.GetTurnInFlight() {
-		m.logf("sessiondrv: reattached mid-turn ws=%s session=%s (turn_in_flight); SSM re-derives from replayed events", workspace, sessionID)
+		m.logf("sessiondrv: reattached mid-turn ws=%s session=%s turn_in_flight=true active_turn_ids=%v; SSM state is durable and replay closes any unseen boundary", workspace, sessionID, hello.GetActiveTurnIds())
 	}
 	// A resync whose store re-pull this very reattach interrupted is served
 	// again here — the link being back IS the event it was waiting for, which is

@@ -319,6 +319,11 @@ export class SessionStartGate {
 export interface ConvertOptions {
   nowMs?: number;
   /**
+   * Identity of the accepted input turn an SDK result closes. UdsSession owns
+   * the FIFO of accepted request ids and supplies this only for `result`.
+   */
+  turnId?: string;
+  /**
    * The `SessionStarted.source` a `system:init` should carry. The stitch
    * phase (main.ts) passes SESSION_SOURCE_RESUME when the shim was spawned
    * with `--resume`, FRESH otherwise. Absent → FRESH, which is exactly the
@@ -470,12 +475,16 @@ function vendorEvent(
 }
 
 function lifecycleEvent(env: Envelope, payload: Event["payload"]): Event {
+  const turnId = payload.case === "turnEnded" ? payload.value.turnId : "";
   return create(EventSchema, {
     sessionId: env.sessionId,
     seq: 0n,
     plane: Plane.STREAM,
     class: EventClass.PERSISTENT,
-    requestId: env.requestId,
+    // The SDK result currently omits request_id, but UdsSession owns the
+    // accepted-prompt FIFO and stamps TurnEnded.turn_id before this wrapper is
+    // built. Keep the envelope correlation identical to that authoritative id.
+    requestId: turnId !== "" ? turnId : env.requestId,
     producedAtMs: BigInt(env.producedAtMs),
     payload,
   });
@@ -514,7 +523,7 @@ function build(type: string, message: Record<string, unknown>, r: Reader, opts?:
     case "assistant":
       return buildAssistant(message, r);
     case "result":
-      return buildResult(message, r);
+      return buildResult(message, r, opts);
     case "stream_event":
       return buildStreamEvent(message, r);
     case "tool_progress":
@@ -774,7 +783,7 @@ function buildAssistant(message: Record<string, unknown>, r: Reader): Built {
   return { csm: csm({ case: "assistant", value: assistantMsg }), lifecyclePayloads: [], typeLabel: "assistant", ephemeral: false };
 }
 
-function buildResult(message: Record<string, unknown>, r: Reader): Built {
+function buildResult(message: Record<string, unknown>, r: Reader, opts?: ConvertOptions): Built {
   const apiErrorStatusSet = r.has("api_error_status", "apiErrorStatus") && r.val("api_error_status", "apiErrorStatus") !== null;
   const result = create(ResultMessageSchema, {
     subtype: resultSubtypeEnum(r.str("subtype")),
@@ -813,6 +822,7 @@ function buildResult(message: Record<string, unknown>, r: Reader): Built {
     stopReason: result.stopReason,
     durationMs: result.durationMs,
     isError: result.isError,
+    turnId: opts?.turnId ?? "",
   });
   return {
     csm: csm({ case: "result", value: result }),

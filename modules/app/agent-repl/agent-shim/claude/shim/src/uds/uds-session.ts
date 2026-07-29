@@ -137,12 +137,15 @@ export class UdsSession {
   private readonly server: SessionServer;
   private query: QueryLike | null = null;
   /**
-   * Outstanding-turn COUNTER (prompts submitted minus results seen). A counter
-   * not a boolean for the same reason ShimSession keeps one: streaming input
-   * queues turns, so a boolean would misreport a queued turn. Read by the
-   * server's ShimHello.turn_in_flight so a reattaching daemon knows.
+   * Ordered identities of accepted prompts awaiting SDK results.
+   *
+   * The queue replaces the old count because liveness alone cannot say WHICH
+   * turn a result closes. Streaming input is FIFO, so the next result must
+   * consume the first id. The same ids ride TurnStarted, TurnEnded, and every
+   * reattach ShimHello, making an older result incapable of closing a newer
+   * turn at the daemon.
    */
-  private turnsInFlight = 0;
+  private readonly activeTurnIds: string[] = [];
   private closed = false;
   /** Idle bound for a bounded replay's store subscription (see deps). */
   private readonly replayIdleMs: number;
@@ -192,7 +195,7 @@ export class UdsSession {
     LOGGER.log({ agent_repl_session_id: deps.sessionId, uds_socket: deps.udsSocketPath, store_socket: deps.storeSocketPath, session_source: deps.sessionSource, store_key_known: this.storeKeyKnown, permission_mode: this.effectivePermissionMode }, "constructed UDS shim session");
     const target: SdkControlTarget = {
       submitPrompt: ({ requestId, text, permissionMode }): void => {
-        this.turnsInFlight++;
+        this.activeTurnIds.push(requestId);
         const content: ContentBlock[] = [{ type: "text", text }];
         this.input.push({
           type: "user",
@@ -205,8 +208,15 @@ export class UdsSession {
         // a prompt that reached the SDK but never came back as a bubble shows
         // up as a receipt with no matching forward, rather than as silence.
         // Only the FAILURE path used to say anything (control.ts).
-        LOGGER.log({ agent_repl_session_id: this.deps.sessionId, request_id: requestId, len: text.length, turns_in_flight: this.turnsInFlight },
-          `prompt accepted -> SDK input`);
+        LOGGER.log({
+          agent_repl_session_id: this.deps.sessionId,
+          request_id: requestId,
+          plane: "stream",
+          turn_id: requestId,
+          len: text.length,
+          turns_in_flight: this.activeTurnIds.length,
+          decision: "turn_started",
+        }, `prompt accepted -> SDK input`);
         // Turn start is SHIM-AUTHORITATIVE (see convert.ts's header): the
         // vendor stream has no "a turn began" message, and the user-message
         // echo the converter used to derive one from never arrives for a live
@@ -254,8 +264,13 @@ export class UdsSession {
         // Deciding it downstream is what made it ambiguous: an observer
         // watching for the turn's `aborted` result sees the stop and the
         // turn end as two unordered events.
-        const wasLive = this.turnsInFlight > 0;
-        LOGGER.log({ agent_repl_session_id: this.deps.sessionId, turns_in_flight: this.turnsInFlight, interrupt_outcome: wasLive ? "interrupted" : "already_complete" }, "processing daemon interrupt request");
+        const wasLive = this.activeTurnIds.length > 0;
+        LOGGER.log({
+          agent_repl_session_id: this.deps.sessionId,
+          active_turn_ids: this.activeTurnIds,
+          turns_in_flight: this.activeTurnIds.length,
+          interrupt_outcome: wasLive ? "interrupted" : "already_complete",
+        }, "processing daemon interrupt request");
         // Interrupt cancels every blocked permission wait so no SDK callback
         // hangs, then forwards to the SDK (a no-op when idle).
         this.control.cancelAll("interrupt");
@@ -321,7 +336,11 @@ export class UdsSession {
         // Reattach (§4.4): the turn keeps running and nothing is torn down.
         // Pending permission waits are NOT cancelled — a reattaching daemon can
         // still answer them; cancelAll fires only on interrupt/shutdown.
-        LOGGER.log({ agent_repl_session_id: this.deps.sessionId, turn_in_flight: this.turnsInFlight > 0 }, `daemon detached; session and turn survive (awaiting reattach)`);
+        LOGGER.log({
+          agent_repl_session_id: this.deps.sessionId,
+          turn_in_flight: this.activeTurnIds.length > 0,
+          active_turn_ids: this.activeTurnIds,
+        }, `daemon detached; session and turn survive (awaiting reattach)`);
       },
     };
     this.server = new SessionServer(
@@ -330,7 +349,8 @@ export class UdsSession {
         sessionId: this.deps.sessionId,
         shimVersion: this.deps.shimVersion,
         protocolVersion: this.deps.protocolVersion,
-        turnInFlight: () => this.turnsInFlight > 0,
+        turnInFlight: () => this.activeTurnIds.length > 0,
+        activeTurnIds: () => [...this.activeTurnIds],
         // The daemon resets its store cursor when this differs from the uuid
         // it has persisted, which is how a rotation's fresh seq space is
         // subscribed from zero instead of from a retired high-water mark.
@@ -625,7 +645,7 @@ export class UdsSession {
 
   /** Outstanding-turn count (test/diagnostics). */
   turnCount(): number {
-    return this.turnsInFlight;
+    return this.activeTurnIds.length;
   }
 
   /**
@@ -683,11 +703,24 @@ export class UdsSession {
       }
       return;
     }
-    // A result closes the turn it belongs to.
-    if (msg.type === "result" && this.turnsInFlight > 0) this.turnsInFlight--;
+    // A result closes the oldest accepted input turn. Claim its id BEFORE
+    // conversion so the TurnEnded payload and envelope carry one correlation.
+    // A result without a claim is an invariant violation: persist the vendor
+    // evidence, report degraded state, and emit no fabricated lifecycle end.
+    let turnId: string | undefined;
+    if (msg.type === "result") {
+      turnId = this.activeTurnIds.shift();
+      if (turnId === undefined) {
+        this.reportDegraded(
+          "claude-shim-turn-lifecycle",
+          "SDK result has no accepted prompt turn to close",
+        );
+      }
+    }
     const { vendor, lifecycle } = convert(msg, {
       sessionSource: this.deps.sessionSource,
       sessionGate: this.sessionGate,
+      ...(turnId !== undefined ? { turnId } : {}),
       ...this.convertOpts(),
     });
     // The converted envelope carries the VENDOR session id (read off the SDK
@@ -698,8 +731,28 @@ export class UdsSession {
     this.store.adoptStoreKey(vendor.sessionId);
     setClaudeSessionId(vendor.sessionId);
     this.settleStoreKey(vendor.sessionId);
-    LOGGER.logVerbose({ agent_repl_session_id: this.deps.sessionId, sdk_type: msg.type, claude_session_id: vendor.sessionId, lifecycle_count: lifecycle.length, store_key: this.store.storeSessionId() }, "writing persistent SDK event batch to store");
-    void this.store.write([vendor, ...lifecycle]).catch(() => {
+    const authoritativeLifecycle = msg.type === "result" && turnId === undefined
+      ? lifecycle.filter((event) => event.payload.case !== "turnEnded")
+      : lifecycle;
+    if (msg.type === "result" && turnId !== undefined) {
+      LOGGER.log({
+        agent_repl_session_id: this.deps.sessionId,
+        request_id: turnId,
+        plane: "stream",
+        turn_id: turnId,
+        turns_in_flight: this.activeTurnIds.length,
+        decision: "turn_ended",
+      }, `SDK result correlated to accepted turn`);
+    }
+    LOGGER.logVerbose({
+      agent_repl_session_id: this.deps.sessionId,
+      sdk_type: msg.type,
+      claude_session_id: vendor.sessionId,
+      lifecycle_count: authoritativeLifecycle.length,
+      store_key: this.store.storeSessionId(),
+      turn_id: turnId,
+    }, "writing persistent SDK event batch to store");
+    void this.store.write([vendor, ...authoritativeLifecycle]).catch(() => {
       // The honest sad path lives INSIDE StoreClient (loud-log per dropped
       // event + DegradedState to onDegraded). Nothing to add here; we only
       // keep the rejected promise from going unhandled.
@@ -723,7 +776,10 @@ export class UdsSession {
       producedAtMs: BigInt(this.now()),
       payload: {
         case: "turnStarted",
-        value: create(TurnStartedSchema, { promptPreview: promptPreview(text) }),
+        value: create(TurnStartedSchema, {
+          promptPreview: promptPreview(text),
+          turnId: requestId,
+        }),
       },
     });
     if (!this.storeKeyKnown) {

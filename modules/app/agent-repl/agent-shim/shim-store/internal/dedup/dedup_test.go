@@ -90,11 +90,6 @@ func TestDerive(t *testing.T) {
 		{name: "disk tool result (content block) keys on tool_use_id", ev: diskToolResultBlock, want: "tur:T1"},
 		{name: "disk tool result (envelope fallback) keys on tool_use_id", ev: diskToolResultEnvelope, want: "tur:T1"},
 		{
-			name: "producer-set turn key wins",
-			ev:   &corev1.Event{DedupKey: "turn:s1:turnuuid", Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{}}},
-			want: "turn:s1:turnuuid",
-		},
-		{
 			name: "producer-set journal key wins over derivable payload",
 			ev:   withKey(mustVendor(t, &datav1.ClaudeStreamMessage{Msg: &datav1.ClaudeStreamMessage_Assistant{Assistant: &datav1.AssistantMessage{Uuid: "A9"}}}), "wf:run7:v2:abc:result"),
 			want: "wf:run7:v2:abc:result",

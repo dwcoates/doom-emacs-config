@@ -27,6 +27,13 @@
 // - Correlation: any control message carries request_id; asynchronous
 //   consequences echo it in Event.request_id where attributable. Ack/Nack is
 //   the synchronous receipt on the connection the request arrived on.
+// - Turn lifecycle authority: only the live shim's STREAM plane emits
+//   TurnStarted / TurnEnded. File-plane stop-hook records remain vendor
+//   evidence and never move lifecycle state. Each newly produced turn boundary
+//   carries the same non-empty turn_id, equal to the accepted SubmitPrompt's
+//   request_id, so an end can close only the turn it names. Historical
+//   persisted boundaries produced before turn_id existed have it empty and
+//   retain their original ordered-replay semantics.
 // - Sad path: a producer that cannot reach the store hard-fails the write,
 //   loud-logs every dropped event, and reports DegradedState. No spill
 //   buffers, no fallbacks (metaprompt no-fallbacks rule).
@@ -1246,6 +1253,11 @@ func (x *SessionEnded) GetReason() string {
 type TurnStarted struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	PromptPreview string                 `protobuf:"bytes,1,opt,name=prompt_preview,json=promptPreview,proto3" json:"prompt_preview,omitempty"` // first line, bounded
+	// Stable identity of this accepted prompt's turn. Equal to the
+	// SubmitPrompt.request_id and Event.request_id. Non-empty on every newly
+	// produced event; empty only on historical events persisted before this
+	// field existed.
+	TurnId        string `protobuf:"bytes,2,opt,name=turn_id,json=turnId,proto3" json:"turn_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1287,11 +1299,22 @@ func (x *TurnStarted) GetPromptPreview() string {
 	return ""
 }
 
+func (x *TurnStarted) GetTurnId() string {
+	if x != nil {
+		return x.TurnId
+	}
+	return ""
+}
+
 type TurnEnded struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	StopReason    string                 `protobuf:"bytes,1,opt,name=stop_reason,json=stopReason,proto3" json:"stop_reason,omitempty"`
-	DurationMs    int64                  `protobuf:"varint,2,opt,name=duration_ms,json=durationMs,proto3" json:"duration_ms,omitempty"`
-	IsError       bool                   `protobuf:"varint,3,opt,name=is_error,json=isError,proto3" json:"is_error,omitempty"`
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	StopReason string                 `protobuf:"bytes,1,opt,name=stop_reason,json=stopReason,proto3" json:"stop_reason,omitempty"`
+	DurationMs int64                  `protobuf:"varint,2,opt,name=duration_ms,json=durationMs,proto3" json:"duration_ms,omitempty"`
+	IsError    bool                   `protobuf:"varint,3,opt,name=is_error,json=isError,proto3" json:"is_error,omitempty"`
+	// Must equal the TurnStarted.turn_id this result closes. The daemon rejects
+	// a non-empty mismatch, so a delayed fact about an older turn cannot settle
+	// a newer live turn.
+	TurnId        string `protobuf:"bytes,4,opt,name=turn_id,json=turnId,proto3" json:"turn_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1345,6 +1368,13 @@ func (x *TurnEnded) GetIsError() bool {
 		return x.IsError
 	}
 	return false
+}
+
+func (x *TurnEnded) GetTurnId() string {
+	if x != nil {
+		return x.TurnId
+	}
+	return ""
 }
 
 // The context was CLEARED: discarded outright. Nothing survives it, so there
@@ -2131,7 +2161,12 @@ type ShimHello struct {
 	// Empty means a bundle built before this field existed, or a build with no
 	// resolvable revision. Neither is a bounce: an unknown identity is not a
 	// mismatch, and treating it as one is how a refresh becomes a loop.
-	BuildSha      string `protobuf:"bytes,8,opt,name=build_sha,json=buildSha,proto3" json:"build_sha,omitempty"`
+	BuildSha string `protobuf:"bytes,8,opt,name=build_sha,json=buildSha,proto3" json:"build_sha,omitempty"`
+	// Ordered identities of every accepted prompt still awaiting its SDK result.
+	// The first id is the turn whose next result must close. This is the
+	// identity-bearing source of truth; turn_in_flight remains its compatibility
+	// projection for peers built before this field existed.
+	ActiveTurnIds []string `protobuf:"bytes,9,rep,name=active_turn_ids,json=activeTurnIds,proto3" json:"active_turn_ids,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2220,6 +2255,13 @@ func (x *ShimHello) GetBuildSha() string {
 		return x.BuildSha
 	}
 	return ""
+}
+
+func (x *ShimHello) GetActiveTurnIds() []string {
+	if x != nil {
+		return x.ActiveTurnIds
+	}
+	return nil
 }
 
 type DaemonHello struct {
@@ -3827,15 +3869,17 @@ const file_agentshim_core_v1_core_proto_rawDesc = "" +
 	"\x03cwd\x18\x03 \x01(\tR\x03cwd\x12*\n" +
 	"\x11vendor_session_id\x18\x04 \x01(\tR\x0fvendorSessionId\"&\n" +
 	"\fSessionEnded\x12\x16\n" +
-	"\x06reason\x18\x01 \x01(\tR\x06reason\"4\n" +
+	"\x06reason\x18\x01 \x01(\tR\x06reason\"M\n" +
 	"\vTurnStarted\x12%\n" +
-	"\x0eprompt_preview\x18\x01 \x01(\tR\rpromptPreview\"h\n" +
+	"\x0eprompt_preview\x18\x01 \x01(\tR\rpromptPreview\x12\x17\n" +
+	"\aturn_id\x18\x02 \x01(\tR\x06turnId\"\x81\x01\n" +
 	"\tTurnEnded\x12\x1f\n" +
 	"\vstop_reason\x18\x01 \x01(\tR\n" +
 	"stopReason\x12\x1f\n" +
 	"\vduration_ms\x18\x02 \x01(\x03R\n" +
 	"durationMs\x12\x19\n" +
-	"\bis_error\x18\x03 \x01(\bR\aisError\"\x10\n" +
+	"\bis_error\x18\x03 \x01(\bR\aisError\x12\x17\n" +
+	"\aturn_id\x18\x04 \x01(\tR\x06turnId\"\x10\n" +
 	"\x0eContextCleared\"\xd1\x01\n" +
 	"\x10ContextCompacted\x12B\n" +
 	"\atrigger\x18\x01 \x01(\x0e2(.agentshim.core.v1.ContextCompactTriggerR\atrigger\x12\x1d\n" +
@@ -3889,7 +3933,7 @@ const file_agentshim_core_v1_core_proto_rawDesc = "" +
 	"\tcomponent\x18\x01 \x01(\tR\tcomponent\x12\x16\n" +
 	"\x06reason\x18\x02 \x01(\tR\x06reason\x12#\n" +
 	"\rdropped_count\x18\x03 \x01(\x04R\fdroppedCount\x12\x1c\n" +
-	"\trecovered\x18\x04 \x01(\bR\trecovered\"\x91\x02\n" +
+	"\trecovered\x18\x04 \x01(\bR\trecovered\"\xb9\x02\n" +
 	"\tShimHello\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x16\n" +
@@ -3899,7 +3943,8 @@ const file_agentshim_core_v1_core_proto_rawDesc = "" +
 	"\x0eturn_in_flight\x18\x05 \x01(\bR\fturnInFlight\x12*\n" +
 	"\x11vendor_session_id\x18\x06 \x01(\tR\x0fvendorSessionId\x12\x10\n" +
 	"\x03pid\x18\a \x01(\x05R\x03pid\x12\x1b\n" +
-	"\tbuild_sha\x18\b \x01(\tR\bbuildSha\"\xa3\x01\n" +
+	"\tbuild_sha\x18\b \x01(\tR\bbuildSha\x12&\n" +
+	"\x0factive_turn_ids\x18\t \x03(\tR\ractiveTurnIds\"\xa3\x01\n" +
 	"\vDaemonHello\x12%\n" +
 	"\x0edaemon_version\x18\x01 \x01(\tR\rdaemonVersion\x12)\n" +
 	"\x10protocol_version\x18\x02 \x01(\tR\x0fprotocolVersion\x12\x19\n" +

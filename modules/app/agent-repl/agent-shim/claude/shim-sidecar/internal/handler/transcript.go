@@ -12,11 +12,16 @@ import (
 // SessionTranscriptHandler converts session transcript lines into their vendor
 // file-plane twins PLUS the vendor-neutral lifecycle events the file plane owns
 // (§7.2): TaskStarted from launch results (agent/workflow/shell, constructing a
-// shell task's output path), TurnEnded from stop_hook_summary, TaskEnded
-// (STOPPED) from TaskStop results, and the two context-loss events
+// shell task's output path), TaskEnded (STOPPED) from TaskStop results, and the
+// two context-loss events
 // (clearcompact.go) — ContextCleared from an expanded /clear envelope and
 // ContextCompacted coalesced across a compact_boundary and the summary line
 // following it. The file plane is the sole producer of both.
+//
+// A stop_hook_summary is NOT a turn boundary. It is written after the turn's
+// SDK result and can be delayed past the next accepted prompt. The transcript
+// line is still ingested in full as vendor evidence, but only the live shim's
+// stream plane owns TurnStarted / TurnEnded.
 type SessionTranscriptHandler struct {
 	conv *convert.Converter
 	log  *logging.Bound
@@ -109,10 +114,8 @@ func (h *SessionTranscriptHandler) lifecycle(line, next *datav1.TranscriptLine, 
 	if s := line.GetSystem(); s != nil {
 		if sh := s.GetStopHookSummary(); sh != nil {
 			uuid := s.GetEnvelope().GetUuid()
-			out = append(out, turnEndedEvent(ctx.SessionID, turnDedupKey(ctx.SessionID, uuid), &corev1.TurnEnded{
-				StopReason: sh.GetStopReason(),
-				IsError:    sh.GetPreventedContinuation(),
-			}))
+			h.log("transcript: plane=file kind=stop_hook_summary session=%s identity=%s seq=unassigned correlation=none decision=vendor_only stop_reason=%q prevented_continuation=%v",
+				ctx.SessionID, uuid, sh.GetStopReason(), sh.GetPreventedContinuation())
 		}
 		if cb := s.GetCompactBoundary(); cb != nil {
 			out = append(out, compactedEvent(ctx.SessionID, s.GetEnvelope(), cb, next, h.log))

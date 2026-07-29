@@ -390,7 +390,30 @@ describe("UdsSession lifecycle: shim-authoritative TurnStarted", () => {
     daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go" }));
     const sw = await store.peer().next(StoreWriteSchema);
     // Assert
-    expect(sw.batch!.events[0]!.requestId).toBe("p1");
+    const event = sw.batch!.events[0]!;
+    expect(event.requestId).toBe("p1");
+    if (event.payload.case !== "turnStarted") throw new Error("case");
+    expect(event.payload.value.turnId).toBe("p1");
+  });
+
+  it("correlates the SDK result to the accepted turn it closes", async () => {
+    // Arrange: consume the start write for p1.
+    const { query, store, daemon } = await rig({ storeSessionId: "vendor-uuid" });
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go" }));
+    await store.peer().next(StoreWriteSchema);
+    // Act.
+    query.emit({
+      type: "result",
+      uuid: "r1",
+      session_id: "vendor-uuid",
+      subtype: "success",
+    } as unknown as SdkMessageLike);
+    const sw = await store.peer().next(StoreWriteSchema);
+    // Assert: vendor evidence plus exactly one identity-bearing lifecycle end.
+    const ended = sw.batch!.events.find((event) => event.payload.case === "turnEnded");
+    expect(ended?.requestId).toBe("p1");
+    if (ended?.payload.case !== "turnEnded") throw new Error("case");
+    expect(ended.payload.value.turnId).toBe("p1");
   });
 
   it("files the TurnStarted under the vendor session id, not the shim's own id", async () => {
@@ -688,7 +711,13 @@ describe("UdsSession instrumentation: prompt round-trip receipts", () => {
       operation: "shim.uds-session.lifecycle",
       claude_session_id: "sess-1",
       request_id: "p1",
-      context: { len: 5, turns_in_flight: 1 },
+      context: {
+        plane: "stream",
+        turn_id: "p1",
+        len: 5,
+        turns_in_flight: 1,
+        decision: "turn_started",
+      },
     });
   });
 
@@ -778,6 +807,7 @@ describe("UdsSession lifetime: reattach", () => {
     cleanups.push(() => daemon2.destroy());
     const hello = await daemon2.next(ShimHelloSchema);
     expect(hello.turnInFlight).toBe(true);
+    expect(hello.activeTurnIds).toEqual(["p1"]);
     daemon2.send(DaemonHelloSchema, create(DaemonHelloSchema, { daemonVersion: "d2", fromSeq: 2n }));
     // The replacement daemon re-runs the WHOLE gate, from_seq and all. That is
     // the point, not a duplicate: a restarted daemon has no memory of this

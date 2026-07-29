@@ -27,6 +27,13 @@
 // - Correlation: any control message carries request_id; asynchronous
 //   consequences echo it in Event.request_id where attributable. Ack/Nack is
 //   the synchronous receipt on the connection the request arrived on.
+// - Turn lifecycle authority: only the live shim's STREAM plane emits
+//   TurnStarted / TurnEnded. File-plane stop-hook records remain vendor
+//   evidence and never move lifecycle state. Each newly produced turn boundary
+//   carries the same non-empty turn_id, equal to the accepted SubmitPrompt's
+//   request_id, so an end can close only the turn it names. Historical
+//   persisted boundaries produced before turn_id existed have it empty and
+//   retain their original ordered-replay semantics.
 // - Sad path: a producer that cannot reach the store hard-fails the write,
 //   loud-logs every dropped event, and reports DegradedState. No spill
 //   buffers, no fallbacks (metaprompt no-fallbacks rule).
@@ -188,12 +195,21 @@ message SessionEnded {
 
 message TurnStarted {
   string prompt_preview = 1;  // first line, bounded
+  // Stable identity of this accepted prompt's turn. Equal to the
+  // SubmitPrompt.request_id and Event.request_id. Non-empty on every newly
+  // produced event; empty only on historical events persisted before this
+  // field existed.
+  string turn_id = 2;
 }
 
 message TurnEnded {
   string stop_reason = 1;
   int64 duration_ms = 2;
   bool is_error = 3;
+  // Must equal the TurnStarted.turn_id this result closes. The daemon rejects
+  // a non-empty mismatch, so a delayed fact about an older turn cannot settle
+  // a newer live turn.
+  string turn_id = 4;
 }
 
 // CLEAR and COMPACT are the two ways a conversation's history stops informing
@@ -425,6 +441,11 @@ message ShimHello {
   // resolvable revision. Neither is a bounce: an unknown identity is not a
   // mismatch, and treating it as one is how a refresh becomes a loop.
   string build_sha = 8;
+  // Ordered identities of every accepted prompt still awaiting its SDK result.
+  // The first id is the turn whose next result must close. This is the
+  // identity-bearing source of truth; turn_in_flight remains its compatibility
+  // projection for peers built before this field existed.
+  repeated string active_turn_ids = 9;
 }
 
 message DaemonHello {

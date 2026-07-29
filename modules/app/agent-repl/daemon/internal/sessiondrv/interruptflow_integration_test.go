@@ -174,8 +174,10 @@ func (r *interruptFlowRig) apply(payload any) {
 	case *corev1.SessionStarted:
 		ev.Payload = &corev1.Event_SessionStarted{SessionStarted: p}
 	case *corev1.TurnStarted:
+		ev.Plane = corev1.Plane_PLANE_STREAM
 		ev.Payload = &corev1.Event_TurnStarted{TurnStarted: p}
 	case *corev1.TurnEnded:
+		ev.Plane = corev1.Plane_PLANE_STREAM
 		ev.Payload = &corev1.Event_TurnEnded{TurnEnded: p}
 	default:
 		r.t.Fatalf("interruptFlowRig.apply: unsupported payload %T", payload)

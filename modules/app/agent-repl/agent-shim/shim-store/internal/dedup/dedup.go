@@ -10,19 +10,18 @@
 //   - claude messages with a uuid → "uuid:<uuid>"
 //   - tool results             → "tur:<tool_use_id>"
 //   - journal records          → "wf:<run>:<key>:<type>"
-//   - turn ends                → "turn:<session>:<turn-uuid>"
 //
-// Two of these four (uuid, tur) are derivable from the payload the store
+// Two of these three (uuid, tur) are derivable from the payload the store
 // already holds: the same claude message uuid and the same tool_use_id appear
 // on both the stream twin (ClaudeStreamMessage) and the disk twin
 // (TranscriptLine), so the store computes them directly via a type switch over
-// the Event payload oneof and the vendor Any. The other two (wf, turn) depend
-// on context the payload alone does NOT carry — the workflow run_id lives in
-// the journal file PATH (not the JournalRecord), and a turn has no stable id
-// on core.TurnEnded. Those keys are therefore supplied by the producer on the
-// Event.dedup_key envelope field (the producer has the path/turn context), and
-// the store honors a producer-set key verbatim. A producer-set key always wins
-// so the store never second-guesses context it cannot see.
+// the Event payload oneof and the vendor Any. The workflow key depends on
+// context the payload alone does NOT carry — the workflow run_id lives in the
+// journal file PATH (not the JournalRecord). That key is therefore supplied by
+// the producer on the Event.dedup_key envelope field, and the store honors a
+// producer-set key verbatim. Turn lifecycle has no cross-plane twin: only the
+// stream shim emits it, with the turn_id fields carrying correlation instead
+// of a store dedup key.
 //
 // An empty result means "no dedup identity" → the event is never deduped
 // (Event.dedup_key stays empty, the partial unique index skips it), matching
@@ -39,8 +38,8 @@ func Derive(ev *corev1.Event) string {
 	if ev == nil {
 		return ""
 	}
-	// A producer-set key is authoritative: it carries run_id / turn-uuid
-	// context (wf:… and turn:… keys) that the payload alone cannot supply.
+	// A producer-set key is authoritative: it carries workflow run_id context
+	// (wf:… keys) that the payload alone cannot supply.
 	if k := ev.GetDedupKey(); k != "" {
 		return k
 	}

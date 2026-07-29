@@ -218,6 +218,9 @@ type consumer struct {
 	// call that launched it (skillbody.go). Locked internally, so it sits
 	// outside the ring's mutex rather than under it.
 	skills *skillCorrelator
+	// turns is the single lifecycle authority gate. Every turn boundary passes
+	// it before the queue, SSM, or progress resolver can mutate.
+	turns turnLifecycle
 
 	mu   sync.Mutex
 	ring []*corev1.Event
@@ -486,24 +489,26 @@ func (c *consumer) Apply(ev *corev1.Event) {
 	if ss := ev.GetSessionStarted(); ss != nil && c.onSessionStarted != nil {
 		c.onSessionStarted(ss)
 	}
-	// The prompt queue keys entirely off the observed turn boundary (E4): a
-	// prompt is intercepted while a turn is running, and delivered when one
-	// actually ends. Reading it from the event stream — rather than from the
-	// SSM's derived turn_active, or from "we just sent an interrupt" — is what
-	// makes the interject sequence evented instead of a race against teardown.
-	if c.onTurn != nil {
-		switch ev.GetPayload().(type) {
-		case *corev1.Event_TurnStarted:
-			c.onTurn(true)
-		case *corev1.Event_TurnEnded:
-			c.onTurn(false)
+	applyState := true
+	switch ev.GetPayload().(type) {
+	case *corev1.Event_TurnStarted, *corev1.Event_TurnEnded:
+		res := c.turns.resolve(ev)
+		c.logf("sessiondrv: turn lifecycle plane=%s kind=%s session=%s seq=%d turn_id=%q request_id=%q dedup_key=%q active_before=%s active_after=%s decision=%s apply=%v notify=%v",
+			ev.GetPlane().String(), stateKind(ev), c.sessionID, ev.GetSeq(),
+			res.correlation, ev.GetRequestId(), ev.GetDedupKey(), res.before,
+			res.after, res.decision, res.apply, res.notify)
+		applyState = res.apply
+		if res.notify && c.onTurn != nil {
+			c.onTurn(res.active)
 		}
 	}
-	if err := c.ssm.Apply(ev); err != nil {
-		c.logf("sessiondrv: ssm apply failed session=%s seq=%d kind=%s: %v",
-			c.sessionID, ev.GetSeq(), stateKind(ev), err)
+	if applyState {
+		if err := c.ssm.Apply(ev); err != nil {
+			c.logf("sessiondrv: ssm apply failed session=%s seq=%d kind=%s: %v",
+				c.sessionID, ev.GetSeq(), stateKind(ev), err)
+		}
+		c.applyProgress(ev)
 	}
-	c.applyProgress(ev)
 	switch ev.GetPayload().(type) {
 	case *corev1.Event_TaskStarted, *corev1.Event_TaskEnded:
 		catalog := frontend.BuildTaskCatalog(c.workspace, c.sessionID, c.snapshotRing())

@@ -113,6 +113,8 @@ export interface SessionServerOptions {
   vendor?: string;
   /** Reported in ShimHello.turn_in_flight so a reattaching daemon knows. */
   turnInFlight?: () => boolean;
+  /** Ordered turn identities reported on every reattach handshake. */
+  activeTurnIds?: () => string[];
   /**
    * The VENDOR session id this shim is CURRENTLY filing events under, read
    * fresh for every hello (it rotates mid-stream) and reported in
@@ -366,6 +368,7 @@ export class SessionServer {
       shimVersion: this.opts.shimVersion,
       protocolVersion: this.opts.protocolVersion,
       turnInFlight: this.opts.turnInFlight ? this.opts.turnInFlight() : false,
+      activeTurnIds: this.opts.activeTurnIds ? this.opts.activeTurnIds() : [],
       // Read fresh on every hello: the vendor rotates this uuid mid-stream,
       // and the whole point of a rotation bounce is that the NEXT hello
       // announces the NEW identity.
