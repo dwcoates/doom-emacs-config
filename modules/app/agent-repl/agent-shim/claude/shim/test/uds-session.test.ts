@@ -195,29 +195,42 @@ afterEach(async () => {
   for (const c of cleanups.splice(0)) await c();
 });
 
+type CapturedLogRecord = {
+  operation?: string;
+  message?: string;
+  context?: Record<string, unknown>;
+  claude_session_id?: string;
+  request_id?: string;
+};
+
 /**
- * Capture the shimLog lines written while a test runs.
+ * Capture the canonical JSON records written by the shim logging API.
  *
- * shimLog is the shim's ONE logging seam and it writes straight to stderr, so
- * a spy on the stream is what "did it log?" means here. Restored via the
- * shared cleanups so a failing assertion cannot leave the spy installed for
- * the next test.
+ * The public logger writes straight to stderr, so a spy on the stream is what
+ * "did it log?" means here. Restored via the shared cleanups so a failing
+ * assertion cannot leave the spy installed for the next test.
  */
-function captureLog(): { find: (needle: string) => string; count: (needle: string) => number } {
+function captureLog(): {
+  find: (needle: string) => string;
+  record: (needle: string) => CapturedLogRecord;
+  count: (needle: string) => number;
+} {
   const lines: string[] = [];
   const spy = vi.spyOn(process.stderr, "write").mockImplementation(((chunk: unknown): boolean => {
     lines.push(String(chunk));
     return true;
   }) as typeof process.stderr.write);
   cleanups.push(() => spy.mockRestore());
+  const find = (needle: string): string => {
+    const line = lines.find((candidate) => candidate.includes(needle));
+    // Loud on a miss: an assertion on `undefined` would report the wrong
+    // failure and hide what WAS logged.
+    if (line === undefined) throw new Error(`no shim log record contains ${JSON.stringify(needle)}; captured: ${lines.join("")}`);
+    return line;
+  };
   return {
-    find: (needle) => {
-      const line = lines.find((l) => l.includes(needle));
-      // Loud on a miss: an assertion on `undefined` would report the wrong
-      // failure and hide what WAS logged.
-      if (line === undefined) throw new Error(`no shimLog line contains ${JSON.stringify(needle)}; captured: ${lines.join("")}`);
-      return line;
-    },
+    find,
+    record: (needle) => JSON.parse(find(needle)) as CapturedLogRecord,
     count: (needle) => lines.filter((l) => l.includes(needle)).length,
   };
 }
@@ -671,7 +684,12 @@ describe("UdsSession instrumentation: prompt round-trip receipts", () => {
     daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "hello" }));
     await daemon.next(AckSchema);
     // Assert
-    expect(log.find("prompt accepted -> SDK input")).toContain("{session=sess-1 request=p1 len=5 turns_in_flight=1}");
+    expect(log.record("prompt accepted -> SDK input")).toMatchObject({
+      operation: "shim.uds-session.lifecycle",
+      claude_session_id: "sess-1",
+      request_id: "p1",
+      context: { len: 5, turns_in_flight: 1 },
+    });
   });
 
   it("logs a forward receipt for a merged TranscriptLine carrying the user's prompt", async () => {
@@ -682,8 +700,11 @@ describe("UdsSession instrumentation: prompt round-trip receipts", () => {
     store.latest().send(EventSchema, transcriptEvent(9n, userLine(textMessage("hi there"))));
     await daemon.next(EventSchema);
     // Assert
-    expect(log.find("user prompt event forwarded to daemon"))
-      .toContain("{session=sess-1 seq=9 len=8 arm=transcript_user_line}");
+    expect(log.record("user prompt event forwarded to daemon")).toMatchObject({
+      operation: "shim.uds-session.lifecycle",
+      claude_session_id: "sess-1",
+      context: { seq: "9", len: 8, arm: "transcript_user_line" },
+    });
   });
 
   it("logs a forward receipt for a merged stream-plane UserMessage", async () => {
@@ -696,8 +717,11 @@ describe("UdsSession instrumentation: prompt round-trip receipts", () => {
     })));
     await daemon.next(EventSchema);
     // Assert
-    expect(log.find("user prompt event forwarded to daemon"))
-      .toContain("{session=sess-1 seq=4 len=3 arm=user_message}");
+    expect(log.record("user prompt event forwarded to daemon")).toMatchObject({
+      operation: "shim.uds-session.lifecycle",
+      claude_session_id: "sess-1",
+      context: { seq: "4", len: 3, arm: "user_message" },
+    });
   });
 
   it("stays silent for a user message carrying only tool_result blocks", async () => {
@@ -1232,7 +1256,7 @@ describe("UdsSession bounded historical replay (core.proto ReplayRequest)", () =
 
     // Act
     daemon.send(ReplayRequestSchema, create(ReplayRequestSchema, { requestId: "r-diagnostic", fromSeq: 0n, toSeq: 3n }));
-    await until(() => store.count() >= 2);
+    await until(() => store.count() >= 3);
     const replayConn = store.latest();
     await replayConn.next(SubscribeSchema);
     replayConn.send(EventSchema, persisted);
@@ -1389,7 +1413,10 @@ describe("UdsSession handshake permission mode", () => {
     // Act
     await rig({ permissionMode: "default", handshakeMode: "auto" });
     // Assert
-    expect(log.find("handshake permission mode OVERRIDES")).toContain("permission_mode=auto");
+    expect(log.record("handshake permission mode OVERRIDES")).toMatchObject({
+      operation: "shim.uds-session.lifecycle",
+      context: { permission_mode: "auto", argv_permission_mode: "default" },
+    });
   });
 
   it("applies the mode BEFORE the readiness ack, so no turn can run in the old one", async () => {
@@ -1475,7 +1502,10 @@ describe("UdsSession handshake permission mode", () => {
     // Act
     await rig({ permissionMode: "default", handshakeMode: "auto" });
     // Assert
-    expect(log.find("readiness asserted")).toContain("permission_mode=auto");
+    expect(log.record("readiness asserted")).toMatchObject({
+      operation: "shim.uds-session.lifecycle",
+      context: { permission_mode: "auto" },
+    });
   });
 
   it("refuses loudly and withholds the ack for a mode outside the vocabulary", async () => {

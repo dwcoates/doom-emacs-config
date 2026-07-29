@@ -2,6 +2,11 @@
 # test-pre-commit.sh — hermetic tests for .githooks/pre-commit.
 set -euo pipefail
 
+# This harness creates scratch repositories and is itself run by pre-commit.
+# Clear the caller's live Git bindings before any fixture command can mutate
+# the real staging index.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX
+
 THIS_DIR="$(cd "$(dirname "$0")" && pwd)"
 HOOK_SRC="$THIS_DIR/pre-commit"
 PASS=0
@@ -184,6 +189,20 @@ test_hook_change_runs_unified_gate() {
   rm -rf "$repo"
 }
 
+test_shell_harness_change_runs_unified_gate() {
+  local repo
+  repo="$(mkrepo)"
+  stage_module_file "$repo" "bin/test-readiness-report.sh"
+  run_commit "$repo"
+
+  if [ "$RUN_RC" -eq 0 ] && [ -f "$RUN_LOG" ]; then
+    pass "shell harness change runs the unified gate"
+  else
+    fail "shell harness change runs the unified gate" "exit=$RUN_RC" "$RUN_OUT"
+  fi
+  rm -rf "$repo"
+}
+
 test_unrelated_docs_skip_unified_gate() {
   local repo
   repo="$(mkrepo)"
@@ -197,6 +216,35 @@ test_unrelated_docs_skip_unified_gate() {
     fail "unrelated documentation skips the unified gate" "exit=$RUN_RC" "$RUN_OUT"
   fi
   rm -rf "$repo"
+}
+
+test_foreign_repo_skips_shared_hook() {
+  local owner foreign shared_hook
+  owner="$(mkrepo)"
+  foreign="$(mktemp -d)"
+  shared_hook="$owner/.git/hooks/pre-commit"
+  git -C "$foreign" init -q
+  git -C "$foreign" config user.email "test@example.com"
+  git -C "$foreign" config user.name "Test"
+  mkdir -p "$foreign/modules/app/agent-repl"
+  printf 'foreign fixture\n' >"$foreign/modules/app/agent-repl/dummy.ts"
+  git -C "$foreign" add modules/app/agent-repl/dummy.ts
+
+  RUN_LOG="$foreign/unified-called"
+  set +e
+  RUN_OUT="$(
+    HOOK_TEST_RUN_LOG="$RUN_LOG" \
+      git -C "$foreign" -c core.hooksPath="$owner/.git/hooks" commit -m "foreign fixture" 2>&1
+  )"
+  RUN_RC=$?
+  set -e
+
+  if [ "$RUN_RC" -eq 0 ] && [ ! -f "$RUN_LOG" ]; then
+    pass "foreign repository skips an inherited shared hook"
+  else
+    fail "foreign repository skips an inherited shared hook" "exit=$RUN_RC" "$RUN_OUT"
+  fi
+  rm -rf "$owner" "$foreign"
 }
 
 test_unified_failure_blocks_commit() {
@@ -242,7 +290,9 @@ test_go_change_runs_unified_gate
 test_proto_change_runs_unified_gate
 test_package_manifest_runs_unified_gate
 test_hook_change_runs_unified_gate
+test_shell_harness_change_runs_unified_gate
 test_unrelated_docs_skip_unified_gate
+test_foreign_repo_skips_shared_hook
 test_unified_failure_blocks_commit
 test_missing_unified_runner_blocks_commit
 

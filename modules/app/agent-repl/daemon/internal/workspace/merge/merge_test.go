@@ -9,6 +9,16 @@ import (
 	"testing"
 )
 
+func TestMain(m *testing.M) {
+	// The package executes both fixture Git commands and the production merge
+	// engine. A parent pre-commit hook exports its live repository bindings,
+	// which must never escape into either path.
+	for _, key := range []string{"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_PREFIX"} {
+		_ = os.Unsetenv(key)
+	}
+	os.Exit(m.Run())
+}
+
 // --- fakes & fixtures ---------------------------------------------------
 
 // recordingSink captures every transition the engine emits, in order. When
@@ -60,12 +70,33 @@ func newTestEngine(t *testing.T, sink StateSink) *Engine {
 // git only; the engine runs its own git.
 func gitRun(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	gitArgs := append([]string{"-c", "core.hooksPath=/dev/null", "-C", dir}, args...)
+	cmd := exec.Command("git", gitArgs...)
+	cmd.Env = gitFixtureEnv()
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %v in %s: %v\n%s", args, dir, err, out)
 	}
 	return string(out)
+}
+
+// gitFixtureEnv removes repository bindings exported by a parent Git hook.
+// Without this boundary, scratch `git add` and `git commit` commands can
+// rewrite the caller's real staging index instead of the temporary repo.
+func gitFixtureEnv() []string {
+	env := make([]string, 0, len(os.Environ()))
+	for _, entry := range os.Environ() {
+		switch {
+		case strings.HasPrefix(entry, "GIT_DIR="),
+			strings.HasPrefix(entry, "GIT_WORK_TREE="),
+			strings.HasPrefix(entry, "GIT_INDEX_FILE="),
+			strings.HasPrefix(entry, "GIT_PREFIX="):
+			continue
+		default:
+			env = append(env, entry)
+		}
+	}
+	return env
 }
 
 // writeFile writes content to a file under dir.
@@ -85,6 +116,10 @@ func initTarget(t *testing.T) string {
 	gitRun(t, dir, "config", "user.email", "test@example.com")
 	gitRun(t, dir, "config", "user.name", "Test")
 	gitRun(t, dir, "config", "commit.gpgsign", "false")
+	// Engine.Merge runs production Git commands directly. Persist the fixture
+	// hook isolation so cherry-pick commits cannot recurse into the parent
+	// repository's pre-commit suite.
+	gitRun(t, dir, "config", "core.hooksPath", "/dev/null")
 	writeFile(t, dir, "base.txt", "base\n")
 	gitRun(t, dir, "add", ".")
 	gitRun(t, dir, "commit", "-q", "-m", "A")

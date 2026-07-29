@@ -22,6 +22,27 @@ set -euo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 
+# An absolute core.hooksPath can be inherited by nested fixture repositories.
+# Scope an installed common-dir hook to the repository that owns it, while
+# also supporting the documented checkout-local `.githooks` configuration.
+HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+COMMON_DIR="$(git rev-parse --git-common-dir)"
+if [[ "$COMMON_DIR" != /* ]]; then
+  COMMON_DIR="$REPO_ROOT/$COMMON_DIR"
+fi
+COMMON_DIR="$(cd "$COMMON_DIR" && pwd -P)"
+if [ "$(basename "$HOOK_DIR")" = ".githooks" ]; then
+  MANAGED_REPO_ROOT="$(cd "$HOOK_DIR/.." && pwd -P)"
+  if [ "$REPO_ROOT" != "$MANAGED_REPO_ROOT" ]; then
+    exit 0
+  fi
+elif [ "$(basename "$HOOK_DIR")" = "hooks" ]; then
+  MANAGED_COMMON_DIR="$(cd "$HOOK_DIR/.." && pwd -P)"
+  if [ "$COMMON_DIR" != "$MANAGED_COMMON_DIR" ]; then
+    exit 0
+  fi
+fi
+
 # The module was renamed claude-repl -> agent-repl.  This hook is shared
 # across ALL worktrees (core.hooksPath points at the common git dir), and
 # sibling worktrees may still carry the old module name — resolve whichever
@@ -48,7 +69,7 @@ fi
 # worktrees that still carry the pre-rename path.
 STAGED_FILES="$(git diff --cached --name-only)"
 if ! printf '%s\n' "$STAGED_FILES" | grep -qE \
-  '^(modules/app/(agent|claude)-repl/.*(\.(el|go|ts|tsx|proto)$|(^|/)(go\.(mod|sum)|package(-lock)?\.json|tsconfig[^/]*\.json|Makefile)$|/bin/(test-all|test-test-all|report-nonlisp-coverage|test-report-nonlisp-coverage|report-logging-density|test-report-logging-density)\.sh$)|\.githooks/(pre-commit|test-pre-commit\.sh)$)'; then
+  '^(modules/app/(agent|claude)-repl/(.*\.(el|go|ts|tsx|proto)|(.*/)?(go\.(mod|sum)|package(-lock)?\.json|tsconfig[^/]*\.json|Makefile)|bin/(test-[^/]+|report-nonlisp-coverage|report-logging-density)\.sh)|\.githooks/(pre-commit|test-pre-commit\.sh))$'; then
   exit 0
 fi
 
