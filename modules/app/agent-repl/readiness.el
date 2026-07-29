@@ -81,14 +81,17 @@ skip (see `agent-repl--readiness-poll')."
 
 (defcustom agent-repl-readiness-script
   (expand-file-name "bin/readiness-report.sh"
-                    (file-name-directory
-                     (directory-file-name
-                      (file-name-directory (or load-file-name buffer-file-name
-                                               default-directory)))))
+                    (file-name-directory (or load-file-name buffer-file-name
+                                             default-directory)))
   "Absolute path of the readiness report script.
 Resolved from this file's own location so a worktree reports on ITSELF
 rather than on whatever checkout happens to be first on PATH — the whole
-point is to describe the tree the user is looking at."
+point is to describe the tree the user is looking at.
+
+`bin/' is a sibling of this file, so the containing directory is the base.
+An earlier `directory-file-name'/`file-name-directory' pair climbed one
+level further and resolved to `modules/app/bin/', which does not exist, so
+every poll exited 127 and readiness never reported at all."
   :type 'string
   :group 'agent-repl-readiness)
 
