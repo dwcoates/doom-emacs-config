@@ -15,6 +15,11 @@
 
 set -euo pipefail
 
+# A pre-commit hook exports its live index to children. This harness owns only
+# scratch repositories, so inheriting that binding would let fixture `git add`
+# and `git commit` rewrite the caller's real staging index.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX
+
 THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_UNDER_TEST="$THIS_DIR/build-frontend.sh"
 
@@ -491,7 +496,11 @@ git_tree() {
     printf 'bin/\ndist/\nstore/\nstubs/\nhome/\nnode_modules/\n*.log\n' > "$root/.gitignore"
     git -C "$root" init -q
     git -C "$root" -c user.name=t -c user.email=t@example.com add -A
-    git -C "$root" -c user.name=t -c user.email=t@example.com commit -qm seed
+    # The parent checkout installs an absolute shared hooksPath. Scratch
+    # fixture commits must not inherit and recursively run that repository's
+    # pre-commit suite.
+    git -C "$root" -c user.name=t -c user.email=t@example.com \
+        -c core.hooksPath=/dev/null commit -qm seed
 }
 
 t_stamp_written_on_build() {
