@@ -8,7 +8,7 @@ package handler
 // NEXT scan does with the held line, and what survives losing the process.
 
 import (
-	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,6 +16,7 @@ import (
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	"agentrepl/shim-claude-sidecar/internal/discover"
+	"agentrepl/shim-claude-sidecar/internal/logging"
 	"agentrepl/shim-claude-sidecar/internal/tail"
 )
 
@@ -31,6 +32,7 @@ type hbRig struct {
 	path string
 	uuid string
 	logs []string
+	log  *logging.Bound
 	// last is the most recent poll result, whose Next IS the cursor the rig
 	// committed (scan commits every poll, as the sidecar does on a store ack).
 	last tail.PollResult
@@ -48,6 +50,8 @@ func hbNewRig(t *testing.T, vendorUUID string) *hbRig {
 		t.Fatalf("creating the transcript: %v", err)
 	}
 	r := &hbRig{t: t, path: path, uuid: vendorUUID}
+	r.log = logging.New(io.Discard, io.Discard).With(logging.Context{Component: "test"})
+	r.log.SetDiagnosticSink(func(d logging.Diagnostic) { r.logs = append(r.logs, d.Message) })
 	tgt, ok := discover.New([]string{root}, filepath.Join(root, "spool"), r.log).Classify(path)
 	if !ok {
 		t.Fatalf("discover did not classify %s as a tailable target", path)
@@ -55,11 +59,6 @@ func hbNewRig(t *testing.T, vendorUUID string) *hbRig {
 	r.ctx = &tail.Context{SessionID: tgt.SessionID, Path: tgt.Path, Kind: tgt.Kind}
 	r.tr = tail.New(path, tgt.Codec(), NewSessionTranscriptHandler(r.log), r.ctx, r.log)
 	return r
-}
-
-// log is the rig's loud-log sink, shared by the tailer and the handler.
-func (r *hbRig) log(format string, args ...any) {
-	r.logs = append(r.logs, fmt.Sprintf(format, args...))
 }
 
 // write appends JSONL lines in file order and returns the file's size after the

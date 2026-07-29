@@ -193,7 +193,7 @@ func TestReplayReportsTruncationFromTheShim(t *testing.T) {
 func TestReplayFailsWithNoLiveShimConnection(t *testing.T) {
 	// Arrange — the shim IS the session's transport, and there is deliberately
 	// no second route to its history.
-	c := New(Config{SessionID: "s1"})
+	c := New(Config{SessionID: "s1", Logf: shimclientTestLogf(t)})
 	// Act
 	_, err := c.Replay(context.Background(), 0, 10, 0, func(*corev1.Event) {})
 	// Assert
@@ -204,7 +204,7 @@ func TestReplayFailsWithNoLiveShimConnection(t *testing.T) {
 
 func TestReplayRejectsANilSink(t *testing.T) {
 	// Arrange
-	c := New(Config{SessionID: "s1"})
+	c := New(Config{SessionID: "s1", Logf: shimclientTestLogf(t)})
 	// Act
 	_, err := c.Replay(context.Background(), 0, 10, 0, nil)
 	// Assert

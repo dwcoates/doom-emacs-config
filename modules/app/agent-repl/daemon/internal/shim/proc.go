@@ -4,13 +4,17 @@ package shim
 
 import (
 	"bufio"
+	"crypto/md5"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"claude-repld/internal/protocol"
 )
@@ -43,22 +47,40 @@ type Options struct {
 	// the shim, which is how the AGENT_REPL_OWNED ownership marker
 	// reaches the hook scripts.
 	ExtraEnv []string
-	// Logf receives shim stderr lines and protocol decode complaints.
-	// Defaults to log.Printf.
-	Logf func(format string, args ...any)
+	// Logger receives shim stderr lines and protocol decode complaints. Required.
+	// The spawning runtime binds session and process context before injection.
+	Logger Logger
+	// Stderr bypasses daemon parsing when the shim owns durable persistence via
+	// an inherited log fd. The shim itself selects terminal verbosity.
+	Stderr io.Writer
+	// ExtraFiles are inherited verbatim by the child. UDS launchers use fd 3
+	// for the already-open shim log target and never hand the child a pathname.
+	ExtraFiles []*os.File
 }
+
+// Logger is the per-process diagnostic boundary supplied by the daemon runtime.
+// It deliberately contains only the canonical normal and verbose emission paths.
+type Logger interface {
+	Log(format string, args ...any)
+	LogVerbose(format string, args ...any)
+}
+
+// stderrMirror receives canonical shim JSON for terminal-only display when the
+// shim owns the durable fd. Malformed stderr remains a daemon-owned error.
+type stderrMirror interface{ MirrorShimRecord(line string) }
 
 // Spawn starts the shim subprocess and its stdout/stderr pumps.
 func Spawn(opts Options) (*Proc, error) {
 	if len(opts.Argv) == 0 {
 		return nil, fmt.Errorf("shim: empty argv")
 	}
-	logf := opts.Logf
-	if logf == nil {
-		logf = log.Printf
+	if opts.Logger == nil {
+		return nil, fmt.Errorf("shim: Logger is required")
 	}
+	logger := opts.Logger
 	cmd := exec.Command(opts.Argv[0], opts.Argv[1:]...)
 	cmd.Dir = opts.Dir
+	cmd.ExtraFiles = opts.ExtraFiles
 	if len(opts.ExtraEnv) > 0 {
 		cmd.Env = append(os.Environ(), opts.ExtraEnv...)
 	}
@@ -70,9 +92,14 @@ func Spawn(opts Options) (*Proc, error) {
 	if err != nil {
 		return nil, fmt.Errorf("shim: stdout pipe: %w", err)
 	}
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		return nil, fmt.Errorf("shim: stderr pipe: %w", err)
+	var stderr io.ReadCloser
+	if opts.Stderr != nil {
+		cmd.Stderr = opts.Stderr
+	} else {
+		stderr, err = cmd.StderrPipe()
+		if err != nil {
+			return nil, fmt.Errorf("shim: stderr pipe: %w", err)
+		}
 	}
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("shim: start %q: %w", opts.Argv[0], err)
@@ -85,12 +112,14 @@ func Spawn(opts Options) (*Proc, error) {
 		stdinOK: true,
 	}
 
-	go p.pumpStdout(stdout, logf)
-	go pumpStderr(stderr, logf)
+	go p.pumpStdout(stdout, logger)
+	if stderr != nil {
+		go pumpStderr(stderr, logger)
+	}
 	return p, nil
 }
 
-func (p *Proc) pumpStdout(stdout io.Reader, logf func(string, ...any)) {
+func (p *Proc) pumpStdout(stdout io.Reader, logger Logger) {
 	defer close(p.events)
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 64*1024), maxEventLine)
@@ -103,7 +132,7 @@ func (p *Proc) pumpStdout(stdout io.Reader, logf func(string, ...any)) {
 		if err != nil {
 			// A malformed line is a shim bug; surface it loudly as a
 			// synthetic transport error event rather than dropping it.
-			logf("shim: undecodable event line: %v", err)
+			logger.Log("shim: undecodable event line: %v", err)
 			p.events <- &protocol.L1Event{
 				Type:    "error",
 				Code:    "transport",
@@ -117,16 +146,63 @@ func (p *Proc) pumpStdout(stdout io.Reader, logf func(string, ...any)) {
 		p.events <- evt
 	}
 	if err := scanner.Err(); err != nil {
-		logf("shim: stdout scan error: %v", err)
+		logger.Log("shim: stdout scan error: %v", err)
 	}
 }
 
-func pumpStderr(stderr io.Reader, logf func(string, ...any)) {
+func pumpStderr(stderr io.Reader, logger Logger) {
 	scanner := bufio.NewScanner(stderr)
 	scanner.Buffer(make([]byte, 64*1024), maxEventLine)
 	for scanner.Scan() {
-		logf("shim stderr: %s", scanner.Text())
+		line := scanner.Text()
+		verbose, valid := shimRecord(line)
+		if valid {
+			if mirror, ok := logger.(stderrMirror); ok {
+				mirror.MirrorShimRecord(line)
+			} else if verbose {
+				logger.LogVerbose("shim stderr: %s", line)
+			} else {
+				logger.Log("shim stderr: %s", line)
+			}
+			continue
+		}
+		logger.Log("shim stderr malformed: %s", line)
 	}
+	if err := scanner.Err(); err != nil {
+		logger.Log("shim: stderr scan error: %v", err)
+	}
+}
+
+// shimVerboseRecord recognizes only the shim runtime's stable, field-shaped
+// verbosity marker. All unmarked or malformed records remain normal diagnostics.
+func shimRecord(line string) (bool, bool) {
+	var record struct {
+		Timestamp          string          `json:"timestamp"`
+		Runtime            string          `json:"runtime"`
+		Level              string          `json:"level"`
+		Verbosity          string          `json:"verbosity"`
+		Operation          string          `json:"operation"`
+		Message            json.RawMessage `json:"message"`
+		Context            json.RawMessage `json:"context"`
+		PID                int             `json:"pid"`
+		WorkspaceDirectory string          `json:"workspace_dir"`
+		WorkspaceID        string          `json:"workspace_id"`
+		AgentReplSessionID string          `json:"agent_repl_session_id"`
+		ClaudeSessionID    string          `json:"claude_session_id"`
+		RequestID          string          `json:"request_id"`
+	}
+	if err := json.Unmarshal([]byte(line), &record); err != nil {
+		return false, false
+	}
+	parsedTimestamp, timestampErr := time.Parse(time.RFC3339Nano, record.Timestamp)
+	workspaceSum := md5.Sum([]byte(record.WorkspaceDirectory))
+	expectedWorkspaceID := hex.EncodeToString(workspaceSum[:])[:8]
+	var message string
+	var context map[string]json.RawMessage
+	if timestampErr != nil || parsedTimestamp.IsZero() || !strings.Contains(record.Timestamp, ".") || record.Runtime != "shim" || (record.Level != "debug" && record.Level != "info" && record.Level != "warn" && record.Level != "error") || (record.Verbosity != "normal" && record.Verbosity != "verbose") || record.Operation == "" || json.Unmarshal(record.Message, &message) != nil || message == "" || json.Unmarshal(record.Context, &context) != nil || context == nil || record.PID <= 0 || record.WorkspaceDirectory == "" || record.WorkspaceID != expectedWorkspaceID || record.AgentReplSessionID == "" {
+		return false, false
+	}
+	return record.Verbosity == "verbose", true
 }
 
 // Events returns the shim's decoded event stream. Closed when the shim's

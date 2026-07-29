@@ -454,7 +454,8 @@ func newRestartHarness(t *testing.T, floors *fakeClearCompactStore, client *repl
 		Push: h.push, SSM: h.applier, Progress: h.progress, Spawner: &fakeSpawner{},
 		Locator: fakeLocator{m: map[string]string{"ws": "s1"}}, SeqStore: h.seq,
 		ClearCompactStore: floors, ProtocolVersion: "1", Source: stubSource{},
-		newClient: func(shimclient.Config) sessionClient { return client },
+		FileDiagnostics: fakeFileDiagnosticPersister{},
+		newClient:       func(shimclient.Config) sessionClient { return client },
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)

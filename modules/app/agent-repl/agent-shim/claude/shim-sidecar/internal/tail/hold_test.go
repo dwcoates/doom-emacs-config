@@ -6,13 +6,22 @@ package tail
 // to defer belongs to the handler package.
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
+	"agentrepl/shim-claude-sidecar/internal/logging"
 )
+
+type sliceWriter struct{ lines *[]string }
+
+func (w sliceWriter) Write(p []byte) (int, error) {
+	*w.lines = append(*w.lines, string(p))
+	return len(p), nil
+}
 
 // holdStub defers whatever offset hold returns, and emits one event per frame
 // it did convert — the same shape a real handler's hold has.
@@ -61,7 +70,7 @@ func newHoldTailer(t *testing.T, content string, hold func([]Frame) (int64, bool
 	writeFile(t, p, content)
 	h := &holdStub{hold: hold}
 	var logs []string
-	log := func(format string, args ...any) { logs = append(logs, format) }
+	log := logging.New(sliceWriter{lines: &logs}, io.Discard).With(logging.Context{Component: "test"})
 	return New(p, JSONLCodec{}, h, &Context{SessionID: "s1"}, log), h, &logs, p
 }
 

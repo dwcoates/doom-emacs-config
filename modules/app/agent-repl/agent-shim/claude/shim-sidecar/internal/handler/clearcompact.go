@@ -66,6 +66,7 @@ import (
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
+	"agentrepl/shim-claude-sidecar/internal/logging"
 	"agentrepl/shim-claude-sidecar/internal/tail"
 )
 
@@ -207,14 +208,15 @@ func takeTag(s, tag string) (inner, rest string, found bool) {
 // The dedup key is `clear:<uuid>` off the TRANSCRIPT LINE's uuid: the sidecar
 // is the sole producer, so the key names this line for THIS producer and keeps
 // a re-read of the same line (restart, cursor rewind) from clearing twice.
-func clearedEvent(sessionID, lineUUID string, log Logf) *corev1.Event {
+func clearedEvent(sessionID, lineUUID string, log *logging.Bound) *corev1.Event {
 	e := base(sessionID, corev1.Plane_PLANE_FILE)
 	if lineUUID == "" {
 		// Without the uuid there is nothing stable to name the line by. The
 		// clear itself is real and is never dropped; it is emitted keyless and
 		// loudly, rather than under an invented key that would collide with
 		// another line's.
-		log("transcript: /clear line carries no uuid; emitting ContextCleared with no dedup key (a re-read of this line cannot be deduplicated)")
+		log.With(logging.Context{Operation: "context-cleared", Session: sessionID, Level: "warn"}).Log(
+			"/clear line carries no uuid; emitting ContextCleared with no dedup key (a re-read cannot be deduplicated)")
 	} else {
 		e.DedupKey = clearDedupKey(lineUUID)
 	}
@@ -228,21 +230,23 @@ func clearedEvent(sessionID, lineUUID string, log Logf) *corev1.Event {
 // the pairing sequence).
 //
 // The dedup key is `compact:<uuid>` off the BOUNDARY line's uuid.
-func compactedEvent(sessionID string, env *datav1.LineEnvelope, cb *datav1.CompactBoundaryLine, next *datav1.TranscriptLine, log Logf) *corev1.Event {
+func compactedEvent(sessionID string, env *datav1.LineEnvelope, cb *datav1.CompactBoundaryLine, next *datav1.TranscriptLine, log *logging.Bound) *corev1.Event {
 	uuid := env.GetUuid()
 	md := cb.GetCompactMetadata()
 	summary := compactSummary(next)
 	if summary == "" {
-		log("transcript: compact_boundary uuid=%q is not followed by a compaction summary line; emitting ContextCompacted without a summary", uuid)
+		log.With(logging.Context{Operation: "context-compacted", Session: sessionID, Level: "warn"}).Log(
+			"compact_boundary uuid=%q is not followed by a compaction summary line; emitting without a summary", uuid)
 	}
 	e := base(sessionID, corev1.Plane_PLANE_FILE)
 	if uuid == "" {
-		log("transcript: compact_boundary carries no uuid; emitting ContextCompacted with no dedup key")
+		log.With(logging.Context{Operation: "context-compacted", Session: sessionID, Level: "warn"}).Log(
+			"compact_boundary carries no uuid; emitting with no dedup key")
 	} else {
 		e.DedupKey = compactDedupKey(uuid)
 	}
 	e.Payload = &corev1.Event_ContextCompacted{ContextCompacted: &corev1.ContextCompacted{
-		Trigger:    compactTrigger(md.GetTrigger(), uuid, log),
+		Trigger:    compactTrigger(md.GetTrigger(), uuid, sessionID, log),
 		PreTokens:  md.GetPreTokens(),
 		PostTokens: md.GetPostTokens(),
 		DurationMs: md.GetDurationMs(),
@@ -269,7 +273,7 @@ func compactSummary(next *datav1.TranscriptLine) string {
 
 // compactTrigger maps the disk's trigger string onto the neutral enum. An
 // unmodeled value stays UNSPECIFIED and is loud-logged rather than guessed.
-func compactTrigger(s, uuid string, log Logf) corev1.ContextCompactTrigger {
+func compactTrigger(s, uuid, sessionID string, log *logging.Bound) corev1.ContextCompactTrigger {
 	switch s {
 	case "manual":
 		return corev1.ContextCompactTrigger_CONTEXT_COMPACT_TRIGGER_MANUAL
@@ -278,7 +282,8 @@ func compactTrigger(s, uuid string, log Logf) corev1.ContextCompactTrigger {
 	case "":
 		return corev1.ContextCompactTrigger_CONTEXT_COMPACT_TRIGGER_UNSPECIFIED
 	default:
-		log("transcript: compact_boundary uuid=%q has unmodeled trigger %q; leaving the trigger UNSPECIFIED", uuid, s)
+		log.With(logging.Context{Operation: "compact-trigger", Session: sessionID, Level: "warn"}).Log(
+			"compact_boundary uuid=%q has unmodeled trigger %q; leaving trigger UNSPECIFIED", uuid, s)
 		return corev1.ContextCompactTrigger_CONTEXT_COMPACT_TRIGGER_UNSPECIFIED
 	}
 }

@@ -77,11 +77,19 @@ func (c *Client) dispatchEvent(ev *corev1.Event) error {
 			return fmt.Errorf("%w: session=%s got seq=%d after last_seen=%d",
 				ErrSeqRegression, ev.GetSessionId(), seq, c.lastSeen)
 		}
-		c.lastSeen = seq
-		c.cfg.SeqStore.SetLastSeq(c.cfg.SessionID, seq)
 	}
 
 	switch p := ev.GetPayload().(type) {
+	case *corev1.Event_FilePlaneDiagnostic:
+		if err := validateFilePlaneDiagnostic(ev, p.FilePlaneDiagnostic); err != nil {
+			return err
+		}
+		if c.cfg.FileDiagnostics == nil {
+			return errors.New("shimclient: file-plane diagnostic sink is not wired")
+		}
+		if err := c.cfg.FileDiagnostics.PersistFileDiagnostic(ev, p.FilePlaneDiagnostic); err != nil {
+			return fmt.Errorf("shimclient: persist file-plane diagnostic: %w", err)
+		}
 	case *corev1.Event_SessionStarted,
 		*corev1.Event_SessionEnded,
 		*corev1.Event_TurnStarted,
@@ -118,6 +126,45 @@ func (c *Client) dispatchEvent(ev *corev1.Event) error {
 	default:
 		c.logf("received Event with unhandled payload %T; forwarding to frame sink", p)
 		c.cfg.FrameSink.Consume(ev)
+	}
+	if seq := ev.GetSeq(); seq > 0 {
+		c.lastSeen = seq
+		c.cfg.SeqStore.SetLastSeq(c.cfg.SessionID, seq)
+	}
+	return nil
+}
+
+func validateFilePlaneDiagnostic(ev *corev1.Event, diagnostic *corev1.FilePlaneDiagnostic) error {
+	if ev.GetSeq() == 0 {
+		return errors.New("shimclient: file-plane diagnostic must be persistent")
+	}
+	if ev.GetClass() != corev1.EventClass_EVENT_CLASS_PERSISTENT {
+		return fmt.Errorf("shimclient: file-plane diagnostic class %s is not persistent", ev.GetClass())
+	}
+	if ev.GetPlane() != corev1.Plane_PLANE_FILE {
+		return fmt.Errorf("shimclient: file-plane diagnostic has plane %s, want PLANE_FILE", ev.GetPlane())
+	}
+	if ev.GetProducedAtMs() <= 0 {
+		return errors.New("shimclient: file-plane diagnostic source timestamp is required")
+	}
+	if diagnostic == nil {
+		return errors.New("shimclient: file-plane diagnostic payload is required")
+	}
+	if diagnostic.GetSourceRuntime() != corev1.DiagnosticSourceRuntime_DIAGNOSTIC_SOURCE_RUNTIME_SIDECAR {
+		return fmt.Errorf("shimclient: unsupported file-plane diagnostic source runtime %s", diagnostic.GetSourceRuntime())
+	}
+	if diagnostic.GetSourcePid() <= 0 || diagnostic.GetOperation() == "" || diagnostic.GetMessage() == "" || diagnostic.GetContext() == nil {
+		return errors.New("shimclient: file-plane diagnostic is missing required source fields")
+	}
+	switch diagnostic.GetLevel() {
+	case "debug", "info", "warn", "error":
+	default:
+		return fmt.Errorf("shimclient: file-plane diagnostic has invalid level %q", diagnostic.GetLevel())
+	}
+	switch diagnostic.GetVerbosity() {
+	case "normal", "verbose":
+	default:
+		return fmt.Errorf("shimclient: file-plane diagnostic has invalid verbosity %q", diagnostic.GetVerbosity())
 	}
 	return nil
 }

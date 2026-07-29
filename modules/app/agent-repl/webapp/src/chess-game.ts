@@ -17,7 +17,7 @@
  */
 
 import { animatedEllipsis, escapeHtml } from "./highlight.js";
-import { log, logDedup } from "./wslog.js";
+import { log } from "./wslog.js";
 
 /** Line prefix the skill emits; everything after it is the file path. */
 export const CHESS_GAME_MARKER = "---> agent-repl-chess-game-file: ";
@@ -326,7 +326,7 @@ export function hydrateChessGames(root: ChessGameRoot): void {
       // container is left showing its "processing" spinner forever with no
       // evidence anywhere of why hydration never continued.
       const feedKey = el.closest(".feed-item")?.getAttribute("data-key") ?? "";
-      log("warn", `chess-game container missing its game-file path (feedKey=${feedKey}, idx=${idx})`);
+      log("warn", `chess-game container missing its game-file path (feedKey=${feedKey}, idx=${idx})`, { operation: "chess-game.path-missing", context: { feed_key: feedKey, index: idx } });
       return;
     }
     if (config === null) {
@@ -357,11 +357,7 @@ export function hydrateChessGames(root: ChessGameRoot): void {
           // the previously serialized state to a re-mount" test) — a slow
           // load can lose this race on several of them in a row for the
           // same board, so dedup by stateKey rather than flooding the log.
-          logDedup(
-            `chess-game-detached:${stateKey}`,
-            "warn",
-            `chess-game payload loaded but its container detached before mount (path=${path}, session=${cfg.session()})`,
-          );
+          log("warn", `chess-game payload loaded but its container detached before mount (path=${path}, session=${cfg.session()})`, { operation: "chess-game.container-detached", dedupKey: `chess-game-detached:${stateKey}`, context: { path, claude_session_id: cfg.session(), state_key: stateKey } });
           return;
         }
         opts.onStateChange = (s) => gameStates.set(stateKey, s);
@@ -380,6 +376,7 @@ export function hydrateChessGames(root: ChessGameRoot): void {
           `chess-game hydration failed (path=${path}, session=${cfg.session()}): ${
             err instanceof Error ? err.message : String(err)
           }`,
+          { operation: "chess-game.hydration-failed", context: { path, claude_session_id: cfg.session(), cause: err } },
         );
         if (el.isConnected) {
           el.innerHTML = errorHtml(err instanceof Error ? err.message : String(err));

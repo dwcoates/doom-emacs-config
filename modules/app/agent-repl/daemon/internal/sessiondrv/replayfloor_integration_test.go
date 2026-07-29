@@ -88,6 +88,7 @@ func newFloorHarness(t *testing.T, client sessionClient) *floorHarness {
 		ClearCompactStore: h.floors,
 		ProtocolVersion:   "1",
 		Source:            stubSource{},
+		FileDiagnostics:   fakeFileDiagnosticPersister{},
 		newClient:         func(shimclient.Config) sessionClient { return client },
 	})
 	if err != nil {

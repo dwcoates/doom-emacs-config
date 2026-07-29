@@ -15,6 +15,8 @@ import (
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	"agentrepl/wire"
 
+	"claude-repld/internal/dlog"
+
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 )
@@ -100,6 +102,11 @@ func newHarness() *harness {
 	}
 }
 
+func shimclientTestLogf(t *testing.T) dlog.Logf {
+	t.Helper()
+	return func(format string, args ...any) { t.Logf("[shimclient] "+format, args...) }
+}
+
 func (h *harness) config(t *testing.T, sessionID, path string) Config {
 	t.Helper()
 	return Config{
@@ -112,7 +119,7 @@ func (h *harness) config(t *testing.T, sessionID, path string) Config {
 		FrameSink:         h.frame,
 		Degraded:          h.deg,
 		Permissions:       h.perm,
-		Logf:              func(f string, a ...any) { t.Logf("[shimclient] "+f, a...) },
+		Logf:              shimclientTestLogf(t),
 		HeartbeatInterval: time.Hour, // no spurious heartbeats unless a test wants them
 		HeartbeatTimeout:  time.Hour,
 		AckTimeout:        2 * time.Second,
@@ -453,7 +460,7 @@ func persistentTurnEnd(session string, seq uint64) *corev1.Event {
 
 func TestAwaitReadyBlocksUntilConnected(t *testing.T) {
 	// Arrange: a client that has never connected.
-	c := New(Config{SessionID: "s1"})
+	c := New(Config{SessionID: "s1", Logf: shimclientTestLogf(t)})
 
 	// Act: waiting must not return while there is no connection.
 	done := make(chan error, 1)
@@ -485,7 +492,7 @@ func TestAwaitReadyBlocksUntilConnected(t *testing.T) {
 
 func TestAwaitReadyReturnsImmediatelyWhenAlreadyConnected(t *testing.T) {
 	// Arrange
-	c := New(Config{SessionID: "s1"})
+	c := New(Config{SessionID: "s1", Logf: shimclientTestLogf(t)})
 	c.mu.Lock()
 	c.active = &activeConn{}
 	c.wired = true
@@ -504,7 +511,7 @@ func TestAwaitReadyBlocksAgainAfterDisconnect(t *testing.T) {
 	// Arrange: connect, then drop — the reconnect window a workspace already
 	// in byWS can sit in, where a send would otherwise sail through on a latch
 	// left closed by the dead connection.
-	c := New(Config{SessionID: "s1"})
+	c := New(Config{SessionID: "s1", Logf: shimclientTestLogf(t)})
 	ac := &activeConn{}
 	c.mu.Lock()
 	c.active = ac
@@ -528,7 +535,7 @@ func TestAwaitReadyBlocksAgainAfterDisconnect(t *testing.T) {
 
 func TestAwaitReadyFailsOnContextExpiry(t *testing.T) {
 	// Arrange: a shim that never comes up.
-	c := New(Config{SessionID: "s1"})
+	c := New(Config{SessionID: "s1", Logf: shimclientTestLogf(t)})
 
 	// Act
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
@@ -542,4 +549,13 @@ func TestAwaitReadyFailsOnContextExpiry(t *testing.T) {
 	if !strings.Contains(err.Error(), "s1") {
 		t.Fatalf("err = %v, want it to name the session", err)
 	}
+}
+
+func TestNewRejectsMissingLogger(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Fatal("New accepted missing Config.Logf")
+		}
+	}()
+	New(Config{SessionID: "s1"})
 }

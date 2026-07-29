@@ -3,6 +3,7 @@ package handler
 import (
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	"agentrepl/shim-claude-sidecar/internal/convert"
+	"agentrepl/shim-claude-sidecar/internal/logging"
 	"agentrepl/shim-claude-sidecar/internal/tail"
 )
 
@@ -14,11 +15,11 @@ import (
 // become their own TaskStarted). Parse failures still surface as UnparsedEvents.
 type AgentTranscriptHandler struct {
 	conv *convert.Converter
-	log  Logf
+	log  *logging.Bound
 }
 
 // NewAgentTranscriptHandler builds a handler with its own converter.
-func NewAgentTranscriptHandler(log Logf) *AgentTranscriptHandler {
+func NewAgentTranscriptHandler(log *logging.Bound) *AgentTranscriptHandler {
 	return &AgentTranscriptHandler{conv: convert.New(log), log: log}
 }
 
@@ -28,14 +29,14 @@ func (h *AgentTranscriptHandler) Handle(frames []tail.Frame, ctx *Context) []*co
 	sawRecord := false
 	for _, f := range frames {
 		if f.ParseErr != nil {
-			h.log("agent: parse failure at %s:%d: %v", ctx.Path, f.Offset, f.ParseErr)
+			h.log.With(logging.Context{Operation: "parse", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).Log("parse failure at offset=%d: %v", f.Offset, f.ParseErr)
 			out = append(out, unparsedEvent(ctx.SessionID, ctx.Path, f.Offset, f.Raw, f.ParseErr))
 			continue
 		}
 		sawRecord = true
 		line, _, err := h.conv.TranscriptLine(f.Obj)
 		if err != nil {
-			h.log("agent: conversion failure at %s:%d: %v", ctx.Path, f.Offset, err)
+			h.log.With(logging.Context{Operation: "convert", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).Log("conversion failure at offset=%d: %v", f.Offset, err)
 			out = append(out, unparsedEvent(ctx.SessionID, ctx.Path, f.Offset, f.Raw, err))
 			continue
 		}

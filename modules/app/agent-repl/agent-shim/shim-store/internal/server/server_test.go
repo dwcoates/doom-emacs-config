@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
 	"agentrepl/shim-store/internal/db"
+	"agentrepl/shim-store/internal/logging"
 	"agentrepl/wire"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -27,7 +29,7 @@ type harness struct {
 
 // start brings up a server on a short UDS path (macOS sun_path limit) with the
 // given fanout buffer and log sink.
-func start(t *testing.T, buffer int, log Logf) *harness {
+func start(t *testing.T, buffer int, log *logging.Logger) *harness {
 	t.Helper()
 	dir, err := os.MkdirTemp("/tmp", "sst")
 	if err != nil {
@@ -36,13 +38,13 @@ func start(t *testing.T, buffer int, log Logf) *harness {
 	t.Cleanup(func() { os.RemoveAll(dir) })
 	sockPath := filepath.Join(dir, "s")
 
-	database, err := db.Open(filepath.Join(t.TempDir(), "events.db"), nil)
+	database, err := db.Open(filepath.Join(t.TempDir(), "events.db"), log.With(logging.Fields{Component: "db"}))
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}
 	t.Cleanup(func() { database.Close() })
 
-	ln, err := Listen(sockPath)
+	ln, err := Listen(sockPath, log.With(logging.Fields{Component: "server", Socket: sockPath}))
 	if err != nil {
 		t.Fatalf("Listen: %v", err)
 	}
@@ -51,6 +53,8 @@ func start(t *testing.T, buffer int, log Logf) *harness {
 	t.Cleanup(func() { srv.Close() })
 	return &harness{srv: srv, db: database, path: sockPath}
 }
+
+func testLogger() *logging.Logger { return logging.New(io.Discard, io.Discard, false) }
 
 func (h *harness) dial(t *testing.T) net.Conn {
 	t.Helper()
@@ -145,7 +149,7 @@ func write(events ...*corev1.Event) *corev1.StoreWrite {
 
 func TestRoundTripWriteAckSubscribeReplay(t *testing.T) {
 	// Arrange
-	h := start(t, 0, func(string, ...any) {})
+	h := start(t, 0, testLogger())
 	prod := h.dial(t)
 	// Act: write a two-event batch.
 	send(t, prod, write(vAssistantStream(t, "s1", "A"), vAssistantStream(t, "s1", "B")))
@@ -169,7 +173,7 @@ func TestHeartbeatCanPrecedeTheFirstProducerWrite(t *testing.T) {
 	// Arrange: startup recovery established the producer socket, but no source
 	// file changed yet, so the sidecar has no StoreWrite with which to declare
 	// the connection's role.
-	h := start(t, 0, func(string, ...any) {})
+	h := start(t, 0, testLogger())
 	prod := h.dial(t)
 
 	// Act: idle liveness traffic arrives first, then a real producer batch.
@@ -193,7 +197,7 @@ func TestHeartbeatCanPrecedeTheFirstProducerWrite(t *testing.T) {
 func TestHealthCheckCanPrecedeTheFirstProducerWrite(t *testing.T) {
 	// Arrange: health is the first intentional frame on the recovered producer
 	// socket, before a file change provides a StoreWrite.
-	h := start(t, 0, func(string, ...any) {})
+	h := start(t, 0, testLogger())
 	prod := h.dial(t)
 
 	// Act: assert a correlated health reply, then write on the same connection.
@@ -216,7 +220,7 @@ func TestHealthCheckCanPrecedeTheFirstProducerWrite(t *testing.T) {
 
 func TestReplayFromMidSeq(t *testing.T) {
 	// Arrange
-	h := start(t, 0, func(string, ...any) {})
+	h := start(t, 0, testLogger())
 	prod := h.dial(t)
 	send(t, prod, write(vAssistantStream(t, "s1", "A"), vAssistantStream(t, "s1", "B"), vAssistantStream(t, "s1", "C")))
 	recvAck(t, prod)
@@ -233,7 +237,7 @@ func TestReplayFromMidSeq(t *testing.T) {
 
 func TestDedupCollisionAcrossPlanes(t *testing.T) {
 	// Arrange
-	h := start(t, 0, func(string, ...any) {})
+	h := start(t, 0, testLogger())
 	prod := h.dial(t)
 	// Act: the stream twin then the file twin of the same uuid.
 	send(t, prod, write(vAssistantStream(t, "s1", "X")))
@@ -259,7 +263,7 @@ func TestDedupCollisionAcrossPlanes(t *testing.T) {
 
 func TestCrashReplayIdempotency(t *testing.T) {
 	// Arrange
-	h := start(t, 0, func(string, ...any) {})
+	h := start(t, 0, testLogger())
 	prod := h.dial(t)
 	batch := func() *corev1.StoreWrite {
 		return write(vAssistantStream(t, "s1", "A"), vAssistantStream(t, "s1", "B"))
@@ -287,7 +291,7 @@ func TestCrashReplayIdempotency(t *testing.T) {
 
 func TestEphemeralPassThroughNotPersisted(t *testing.T) {
 	// Arrange
-	h := start(t, 0, func(string, ...any) {})
+	h := start(t, 0, testLogger())
 	prod := h.dial(t)
 	sub := h.dial(t)
 	send(t, sub, &corev1.Subscribe{SessionId: "s1", FromSeq: 0})
@@ -338,14 +342,19 @@ func TestEphemeralPassThroughNotPersisted(t *testing.T) {
 // collectLogs returns a log sink plus a drain. Every line the server emits for
 // a batch is logged before its ack is written, so draining after recvAck sees
 // exactly that batch's lines with no timing assumptions.
-func collectLogs(capacity int) (Logf, func() []string) {
-	lines := make(chan string, capacity)
-	logf := func(format string, args ...any) {
-		select {
-		case lines <- fmt.Sprintf(format, args...):
-		default:
-		}
+type channelWriter chan string
+
+func (w channelWriter) Write(p []byte) (int, error) {
+	select {
+	case w <- strings.TrimSpace(string(p)):
+	default:
 	}
+	return len(p), nil
+}
+
+func collectLogs(capacity int) (*logging.Logger, func() []string) {
+	lines := make(chan string, capacity)
+	logf := logging.New(channelWriter(lines), io.Discard, false)
 	drain := func() []string {
 		var out []string
 		for {
@@ -360,9 +369,9 @@ func collectLogs(capacity int) (Logf, func() []string) {
 	return logf, drain
 }
 
-func findLine(lines []string, prefix string) string {
+func findLine(lines []string, operation string) string {
 	for _, l := range lines {
-		if strings.HasPrefix(l, prefix) {
+		if strings.Contains(l, `"operation":"`+operation+`"`) {
 			return l
 		}
 	}
@@ -380,10 +389,10 @@ func TestIngestLineLogsBatchFacts(t *testing.T) {
 	recvAck(t, prod)
 
 	// Assert: exactly one ingest line carrying the batch's facts.
-	got := findLine(drain(), "ingest: ")
-	want := "ingest: producer=test session=s1 events=2 accepted=2 deduped=0 last_seq=2 ingest_ms="
-	if !strings.HasPrefix(got, want) {
-		t.Fatalf("ingest line = %q, want prefix %q", got, want)
+	got := findLine(drain(), "ingest")
+	want := "persisted batch events=2 accepted=2 deduped=0 last_seq=2 ingest_ms="
+	if !strings.Contains(got, want) {
+		t.Fatalf("ingest line = %q, want message containing %q", got, want)
 	}
 }
 
@@ -400,23 +409,15 @@ func TestIngestLineSilentForEphemeralOnlyBatch(t *testing.T) {
 	recvAck(t, prod)
 
 	// Assert: no ingest line for a batch that never touched the DB.
-	if got := findLine(drain(), "ingest: "); got != "" {
+	if got := findLine(drain(), "ingest"); got != "" {
 		t.Fatalf("ephemeral-only batch logged %q, want silence", got)
 	}
 }
 
 func TestSlowConsumerHardDisconnect(t *testing.T) {
-	// Arrange: tiny buffer, a log sink that signals the disconnect on a channel.
-	disc := make(chan struct{}, 1)
-	logf := func(format string, args ...any) {
-		if strings.Contains(fmt.Sprintf(format, args...), "slow subscriber disconnected") {
-			select {
-			case disc <- struct{}{}:
-			default:
-			}
-		}
-	}
-	h := start(t, 1, logf)
+	// Arrange: a tiny buffer and a subscriber that stops reading. The
+	// workspace-aware requester owns this session-specific disconnect.
+	h := start(t, 1, testLogger())
 	prod := h.dial(t)
 	sub := h.dial(t)
 	send(t, sub, &corev1.Subscribe{SessionId: "s1", FromSeq: 0})
@@ -438,11 +439,15 @@ func TestSlowConsumerHardDisconnect(t *testing.T) {
 	send(t, prod, write(big...))
 	recvAck(t, prod)
 
-	// Assert: the slow consumer was disconnected (channel signal, no polling).
-	select {
-	case <-disc:
-	case <-time.After(5 * time.Second):
-		t.Fatal("slow consumer was not hard-disconnected")
+	// Assert: the slow consumer is disconnected. No store narrative record is
+	// expected because the requester can attribute and report the session.
+	if err := sub.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatalf("setting subscriber read deadline: %v", err)
+	}
+	for {
+		if _, err := wire.ReadAny(sub); err != nil {
+			return
+		}
 	}
 }
 
@@ -458,7 +463,7 @@ func recvCursorList(t *testing.T, conn net.Conn) *corev1.CursorList {
 
 func TestCursorQueryReturnsAllPersistedCursors(t *testing.T) {
 	// Arrange: a producer commits a batch carrying a cursor advance.
-	h := start(t, 0, func(string, ...any) {})
+	h := start(t, 0, testLogger())
 	prod := h.dial(t)
 	sw := write(vAssistantStream(t, "s1", "A"))
 	sw.Batch.CursorAdvance = &corev1.CursorState{FileId: "10:20", Path: "/x/y.jsonl", Offset: 42, Carry: []byte("tail")}
@@ -481,7 +486,7 @@ func TestCursorQueryReturnsAllPersistedCursors(t *testing.T) {
 }
 
 func TestCursorQueryReturnsAuthoritativeOpenTaskStarts(t *testing.T) {
-	h := start(t, 0, func(string, ...any) {})
+	h := start(t, 0, testLogger())
 	started := func(taskID string) *corev1.Event {
 		return &corev1.Event{
 			SessionId: "s1", Plane: corev1.Plane_PLANE_FILE,
@@ -520,7 +525,7 @@ func TestCursorQueryReturnsAuthoritativeOpenTaskStarts(t *testing.T) {
 
 func TestCursorQueryByFileID(t *testing.T) {
 	// Arrange: two persisted cursors.
-	h := start(t, 0, func(string, ...any) {})
+	h := start(t, 0, testLogger())
 	prod := h.dial(t)
 	for _, fid := range []string{"1:1", "2:2"} {
 		sw := write(vAssistantStream(t, "s1", "E"+fid))
@@ -540,7 +545,7 @@ func TestCursorQueryByFileID(t *testing.T) {
 
 func TestCursorQueryEmptyWhenAbsent(t *testing.T) {
 	// Arrange: nothing persisted.
-	h := start(t, 0, func(string, ...any) {})
+	h := start(t, 0, testLogger())
 	// Act
 	cq := h.dial(t)
 	send(t, cq, &corev1.CursorQuery{FileId: "nope"})
@@ -553,7 +558,7 @@ func TestCursorQueryEmptyWhenAbsent(t *testing.T) {
 
 func TestCloseDisconnectsLiveConnections(t *testing.T) {
 	// Arrange: an established subscriber connection.
-	h := start(t, 0, func(string, ...any) {})
+	h := start(t, 0, testLogger())
 	sub := h.dial(t)
 	send(t, sub, &corev1.Subscribe{SessionId: "s1", FromSeq: 0})
 	// Give the handler a moment to register by round-tripping a write so we

@@ -59,6 +59,7 @@ func newStaleEpochHarness(t *testing.T, client *replayClient) *staleEpochHarness
 		ClearCompactStore: h.floors,
 		ProtocolVersion:   "1",
 		Source:            stubSource{},
+		FileDiagnostics:   fakeFileDiagnosticPersister{},
 		Logf: func(format string, args ...any) {
 			h.mu.Lock()
 			h.logged = append(h.logged, fmt.Sprintf(format, args...))

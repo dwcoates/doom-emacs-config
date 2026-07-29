@@ -13,6 +13,7 @@ package main
 
 import (
 	"encoding/json"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -22,11 +23,12 @@ import (
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	"agentrepl/shim-claude-sidecar/internal/discover"
+	"agentrepl/shim-claude-sidecar/internal/logging"
 	"agentrepl/shim-claude-sidecar/internal/storeclient"
 	"agentrepl/wire"
 )
 
-func quietLog(string, ...any) {}
+var quietLog = logging.New(io.Discard, io.Discard).With(logging.Context{Component: "test"})
 
 // probeComponent labels the events used to prove a store subscription is live,
 // so the real degraded report can be told apart from the handshake.
@@ -66,7 +68,7 @@ func subscribeEvents(t *testing.T, sock, session string) <-chan *corev1.Event {
 // is the only in-band proof that a later publish will actually be delivered.
 func awaitSubscriberRegistered(t *testing.T, sock, session string, ch <-chan *corev1.Event) {
 	t.Helper()
-	probe := storeclient.New(sock, nil)
+	probe := storeclient.New(sock, quietLog)
 	defer probe.Close()
 	if err := probe.Connect(); err != nil {
 		t.Fatalf("probe connect: %v", err)
@@ -222,7 +224,7 @@ func (h *storeHarness) sidecarOver(root string) *sidecar {
 // cursorFor returns the store's persisted cursor for path, or nil.
 func (h *storeHarness) cursorFor(path string) *corev1.CursorState {
 	h.t.Helper()
-	c := storeclient.New(h.sock, nil)
+	c := storeclient.New(h.sock, quietLog)
 	defer c.Close()
 	cs, err := c.RecoverCursors("")
 	if err != nil {

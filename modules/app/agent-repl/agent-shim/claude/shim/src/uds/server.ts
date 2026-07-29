@@ -36,7 +36,7 @@ import {
   unpackAs,
 } from "./framing.js";
 import type { Any } from "./framing.js";
-import { shimLog } from "./log.js";
+import { bindLog } from "./log.js";
 import { shimBuildSha } from "../build-identity.js";
 import {
   Ack,
@@ -128,6 +128,7 @@ export interface SessionServerOptions {
 }
 
 const COMPONENT = "shim-server";
+const LOGGER = bindLog({ component: COMPONENT, operation: "shim.server.daemon-connection" });
 
 export class SessionServer {
   private conn: MessageConn | null = null;
@@ -182,7 +183,7 @@ export class SessionServer {
     const onError = (err: Error) => {
       socket.destroy();
       if (this.closed) return;
-      shimLog(COMPONENT, { session: this.opts.sessionId },
+      LOGGER.log({ agent_repl_session_id: this.opts.sessionId },
         `daemon not reachable at ${this.opts.socketPath} (${err.message}); retrying in ${this.reconnectDelayMs}ms`);
       this.scheduleDial();
     };
@@ -222,7 +223,7 @@ export class SessionServer {
    */
   sendEvent(evt: Event): void {
     if (!this.isConnected()) {
-      shimLog(COMPONENT, { session: this.opts.sessionId, seq: evt.seq }, `no daemon attached; event not forwarded (durable in store, replays on resubscribe)`);
+      LOGGER.log({ agent_repl_session_id: this.opts.sessionId, seq: evt.seq }, `no daemon attached; event not forwarded (durable in store, replays on resubscribe)`);
       return;
     }
     this.conn!.send(EventSchema, evt);
@@ -243,13 +244,13 @@ export class SessionServer {
    */
   sendReady(ready: ShimReady): void {
     if (!this.isConnected()) {
-      shimLog(COMPONENT, { session: this.opts.sessionId, from_seq: ready.fromSeq },
+      LOGGER.log({ agent_repl_session_id: this.opts.sessionId, from_seq: ready.fromSeq },
         `bring-up gate ack ABANDONED: the daemon connection went away before ShimReady could be written; the next connection re-runs the whole gate`);
       return;
     }
     this.conn!.send(ShimReadySchema, ready);
-    shimLog(COMPONENT, {
-      session: this.opts.sessionId,
+    LOGGER.log({
+      agent_repl_session_id: this.opts.sessionId,
       from_seq: ready.fromSeq,
       store_key: ready.vendorSessionId,
     }, `bring-up gate CLOSED: ShimReady sent; this session is fully wired`);
@@ -265,7 +266,7 @@ export class SessionServer {
    */
   sendReplayEvent(requestId: string, evt: Event): void {
     if (!this.isConnected()) {
-      shimLog(COMPONENT, { session: this.opts.sessionId, request: requestId, seq: evt.seq }, `no daemon attached; replay event not forwarded`);
+      LOGGER.log({ agent_repl_session_id: this.opts.sessionId, request_id: requestId, seq: evt.seq }, `no daemon attached; replay event not forwarded`);
       return;
     }
     this.conn!.send(ReplayEventSchema, create(ReplayEventSchema, { requestId, event: evt }));
@@ -274,7 +275,7 @@ export class SessionServer {
   /** Close a replay. Exactly one per ReplayRequest, whatever the outcome. */
   sendReplayDone(done: ReplayDone): void {
     if (!this.isConnected()) {
-      shimLog(COMPONENT, { session: this.opts.sessionId, request: done.requestId }, `no daemon attached; replay completion not forwarded`);
+      LOGGER.log({ agent_repl_session_id: this.opts.sessionId, request_id: done.requestId }, `no daemon attached; replay completion not forwarded`);
       return;
     }
     this.conn!.send(ReplayDoneSchema, done);
@@ -283,7 +284,7 @@ export class SessionServer {
   /** Send a canUseTool PermissionRequest to the daemon. */
   sendPermissionRequest(req: PermissionRequest): void {
     if (!this.isConnected()) {
-      shimLog(COMPONENT, { session: this.opts.sessionId, request: req.requestId }, `no daemon attached; permission request cannot be delivered`);
+      LOGGER.log({ level: "error", agent_repl_session_id: this.opts.sessionId, request_id: req.requestId }, `no daemon attached; permission request cannot be delivered`);
       return;
     }
     this.conn!.send(PermissionRequestSchema, req);
@@ -308,7 +309,7 @@ export class SessionServer {
    */
   bounce(reason: string): void {
     if (this.closed) {
-      shimLog(COMPONENT, { session: this.opts.sessionId },
+      LOGGER.log({ agent_repl_session_id: this.opts.sessionId },
         `daemon link bounce ignored (${reason}): the server is deliberately closed`);
       return;
     }
@@ -316,12 +317,12 @@ export class SessionServer {
     if (!this.conn) {
       // Nothing live to drop; the reconnect loop is already trying, and the
       // hello it eventually sends reads the CURRENT vendor id anyway.
-      shimLog(COMPONENT, { session: this.opts.sessionId },
+      LOGGER.log({ agent_repl_session_id: this.opts.sessionId },
         `daemon link bounce (${reason}) found no live connection; the pending redial will carry the new hello`);
       this.scheduleDial();
       return;
     }
-    shimLog(COMPONENT, { session: this.opts.sessionId },
+    LOGGER.log({ agent_repl_session_id: this.opts.sessionId },
       `BOUNCING the daemon link deliberately (${reason}); the re-handshake re-runs the whole bring-up gate under the current vendor session id`);
     // onConnClose fires from the socket's close event and re-arms the dial.
     this.conn.close();
@@ -378,7 +379,7 @@ export class SessionServer {
       // current build stamp and bounces a superseded shim onto the new code.
       buildSha: shimBuildSha(),
     }));
-    shimLog(COMPONENT, { session: this.opts.sessionId },
+    LOGGER.log({ agent_repl_session_id: this.opts.sessionId },
       `bring-up gate OPENED: connected to daemon at ${this.opts.socketPath}; ShimHello sent`);
   }
 
@@ -387,7 +388,7 @@ export class SessionServer {
       const hello = unpackAs(msg, DaemonHelloSchema);
       if (!hello) {
         // Anything before the DaemonHello is a protocol error; loud, ignored.
-        shimLog(COMPONENT, { session: this.opts.sessionId }, `ignoring ${envelopeType(msg)} received before DaemonHello`);
+        LOGGER.log({ level: "warn", agent_repl_session_id: this.opts.sessionId }, `ignoring ${envelopeType(msg)} received before DaemonHello`);
         return;
       }
       // Handshaked BEFORE the wiring completes, deliberately: the wiring's own
@@ -396,7 +397,7 @@ export class SessionServer {
       // this flag, so nothing is admitted early by it.
       this.handshaked = true;
       this.startHeartbeat();
-      shimLog(COMPONENT, { session: this.opts.sessionId, from_seq: hello.fromSeq },
+      LOGGER.log({ agent_repl_session_id: this.opts.sessionId, from_seq: hello.fromSeq },
         `bring-up gate STAGE 2: DaemonHello received (daemon ${hello.daemonVersion || "?"}); wiring the session at the from_seq it carries`);
       this.handlers.onDaemonConnected?.(hello);
       return;
@@ -422,7 +423,7 @@ export class SessionServer {
     }
     const replay = unpackAs(msg, ReplayRequestSchema);
     if (replay) {
-      shimLog(COMPONENT, { session: this.opts.sessionId, request: replay.requestId, from_seq: replay.fromSeq, to_seq: replay.toSeq },
+      LOGGER.log({ agent_repl_session_id: this.opts.sessionId, request_id: replay.requestId, from_seq: replay.fromSeq, to_seq: replay.toSeq },
         `daemon requested a bounded history replay`);
       this.handlers.onReplayRequest(replay);
       return;
@@ -436,7 +437,7 @@ export class SessionServer {
     if (hb) {
       return; // liveness only; nothing to do
     }
-    shimLog(COMPONENT, { session: this.opts.sessionId }, `unhandled control message ${envelopeType(msg)}`);
+    LOGGER.log({ level: "warn", agent_repl_session_id: this.opts.sessionId }, `unhandled control message ${envelopeType(msg)}`);
   }
 
   /**
@@ -454,7 +455,7 @@ export class SessionServer {
       }
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
-      shimLog(COMPONENT, { session: this.opts.sessionId, request: check.requestId, error: reason },
+      LOGGER.log({ level: "error", agent_repl_session_id: this.opts.sessionId, request_id: check.requestId, error: reason },
         `health FAIL: ${reason}`);
       status = create(HealthStatusSchema, {
         requestId: check.requestId,
@@ -464,14 +465,14 @@ export class SessionServer {
       });
     }
     if (!this.isConnected()) {
-      shimLog(COMPONENT, { session: this.opts.sessionId, request: check.requestId },
+      LOGGER.log({ agent_repl_session_id: this.opts.sessionId, request_id: check.requestId },
         `health response abandoned: daemon connection is no longer handshaked`);
       return;
     }
     this.conn!.send(HealthStatusSchema, status);
-    shimLog(COMPONENT, {
-      session: this.opts.sessionId,
-      request: check.requestId,
+    LOGGER.log({
+      agent_repl_session_id: this.opts.sessionId,
+      request_id: check.requestId,
       healthy: status.healthy,
       component: status.component,
       reason: status.reason,
@@ -492,9 +493,9 @@ export class SessionServer {
     this.handshaked = false;
     this.stopHeartbeat();
     if (err) {
-      shimLog(COMPONENT, { session: this.opts.sessionId }, `daemon connection lost: ${err.message} (turn survives; awaiting reattach)`);
+      LOGGER.log({ level: "error", agent_repl_session_id: this.opts.sessionId, cause: err }, `daemon connection lost: ${err.message} (turn survives; awaiting reattach)`);
     } else {
-      shimLog(COMPONENT, { session: this.opts.sessionId }, `daemon disconnected cleanly (turn survives; awaiting reattach)`);
+      LOGGER.log({ agent_repl_session_id: this.opts.sessionId }, `daemon disconnected cleanly (turn survives; awaiting reattach)`);
     }
     this.handlers.onDaemonDisconnected?.();
     // Get back to the daemon: the turn is still running and its events are

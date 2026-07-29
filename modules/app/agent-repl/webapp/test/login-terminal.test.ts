@@ -92,7 +92,6 @@ function spyLogger(): { logger: ForwardingLogger; consoleLines: string[] } {
   const logger = new ForwardingLogger(
     () => true,
     (level, line) => consoleLines.push(`${level}: ${line}`),
-    () => 0,
   );
   return { logger, consoleLines };
 }

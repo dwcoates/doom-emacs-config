@@ -34,17 +34,15 @@ type fanout struct {
 	mu     sync.Mutex
 	nextID uint64
 	subs   map[string]map[uint64]*subscriber
-	log    Logf
 	buffer int
 }
 
-func newFanout(log Logf, buffer int) *fanout {
+func newFanout(buffer int) *fanout {
 	if buffer <= 0 {
 		buffer = defaultSubBuffer
 	}
 	return &fanout{
 		subs:   make(map[string]map[uint64]*subscriber),
-		log:    log,
 		buffer: buffer,
 	}
 }
@@ -85,8 +83,8 @@ func (f *fanout) unsubscribe(s *subscriber) {
 }
 
 // publish broadcasts ev to every subscriber of its session in arrival order.
-// A subscriber whose buffer is full is disconnected (loud log) rather than
-// blocking the publisher; it will reconnect and replay.
+// A subscriber whose buffer is full is disconnected rather than blocking the
+// publisher; the workspace-aware requester reconnects and replays.
 func (f *fanout) publish(ev *corev1.Event) {
 	sid := ev.GetSessionId()
 
@@ -102,7 +100,6 @@ func (f *fanout) publish(ev *corev1.Event) {
 	f.mu.Unlock()
 
 	for _, s := range slow {
-		f.log("slow subscriber disconnected: session=%s sub=%d buffer=%d overflowed", s.sessionID, s.id, f.buffer)
 		f.unsubscribe(s)
 	}
 }

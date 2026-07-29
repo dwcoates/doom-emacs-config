@@ -7,7 +7,7 @@
  * scripted fake query.
  */
 import { AsyncQueue } from "./input-queue.js";
-import { shimLog } from "./uds/log.js";
+import { bindLog } from "./uds/log.js";
 import {
   AssistantMessageError,
   ContentBlock,
@@ -29,6 +29,7 @@ import {
 
 /** Log component for this session's loud anomaly lines. */
 const LOG_COMPONENT = "claude-shim-session";
+const LOGGER = bindLog({ component: LOG_COMPONENT, operation: "shim.session.interrupt-anomaly" });
 
 // ---------------------------------------------------------------------------
 // SDK boundary types (structural, so tests can inject fakes)
@@ -461,7 +462,7 @@ export class ShimSession {
   ): void {
     const anomaly = describeInterruptSurvivors(receipt);
     if (anomaly === null) return;
-    shimLog(LOG_COMPONENT, { session: this.deps.sessionId }, anomaly);
+    LOGGER.log({ level: "error", agent_repl_session_id: this.deps.sessionId, request_id: requestId }, anomaly);
     this.emitError("sdk_throw", anomaly, requestId);
   }
 

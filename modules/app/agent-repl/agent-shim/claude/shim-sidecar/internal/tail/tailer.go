@@ -7,10 +7,8 @@ import (
 	"syscall"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
+	"agentrepl/shim-claude-sidecar/internal/logging"
 )
-
-// Logf is the loud-logging sink (§12).
-type Logf = func(format string, args ...any)
 
 // defaultMaxRead bounds one Poll's physical read so a huge appended chunk (or a
 // full re-read after truncation) is drained across several bounded batches
@@ -27,7 +25,7 @@ type Tailer struct {
 	codec   Codec
 	handler Handler
 	ctx     *Context
-	log     Logf
+	log     *logging.Bound
 	maxRead int
 
 	// committed cursor state
@@ -39,10 +37,7 @@ type Tailer struct {
 
 // New builds a Tailer over path with the given codec, handler, and attribution
 // context. A recovered cursor (from the store) may be applied via Restore.
-func New(path string, codec Codec, h Handler, ctx *Context, log Logf) *Tailer {
-	if log == nil {
-		log = func(string, ...any) {}
-	}
+func New(path string, codec Codec, h Handler, ctx *Context, log *logging.Bound) *Tailer {
 	if ctx == nil {
 		ctx = &Context{Path: path}
 	}
@@ -90,10 +85,10 @@ func (t *Tailer) Poll() (PollResult, error) {
 	offset, carry, records := t.offset, t.carry, t.records
 	switch {
 	case t.fileID != "" && fileID != t.fileID:
-		t.log("tail: ROTATION on %s (file_id %s → %s); resetting cursor to 0", t.path, t.fileID, fileID)
+		t.log.With(logging.Context{Operation: "rotation", Path: t.path}).Log("file_id %s -> %s, resetting cursor to 0", t.fileID, fileID)
 		offset, carry, records = 0, nil, 0
 	case size < offset:
-		t.log("tail: TRUNCATION on %s (size %d < offset %d); resetting cursor to 0", t.path, size, offset)
+		t.log.With(logging.Context{Operation: "truncation", Path: t.path}).Log("size %d < offset %d, resetting cursor to 0", size, offset)
 		offset, carry, records = 0, nil, 0
 	}
 
@@ -163,8 +158,9 @@ func (t *Tailer) applyHold(frames []Frame, offset, newOffset int64, newCarry []b
 		// Honoring it would rewind the cursor over already-converted records or
 		// leave it ahead of the frame it claims to hold, so it is refused
 		// loudly rather than obeyed or silently ignored.
-		t.log("tail: handler held offset %d on %s, outside this batch's [%d,%d); ignoring the hold and advancing the cursor",
-			held, t.path, offset, newOffset)
+		t.log.With(logging.Context{Operation: "hold-offset", Path: t.path, Level: "error"}).Log(
+			"handler held offset %d outside this batch's [%d,%d); ignoring the hold and advancing the cursor",
+			held, offset, newOffset)
 		t.ctx.HeldOffset, t.ctx.HeldDeliveries = 0, 0
 		return newOffset, newCarry, records
 	}

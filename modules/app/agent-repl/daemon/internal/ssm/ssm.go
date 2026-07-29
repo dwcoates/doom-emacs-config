@@ -3,7 +3,6 @@ package ssm
 import (
 	"database/sql"
 	"fmt"
-	"log"
 	"sync"
 	"time"
 
@@ -33,7 +32,7 @@ type Options struct {
 	// set, the Manager runs its migrations on the handle but does NOT own
 	// it: Close leaves it open for whoever did.
 	DB *sql.DB
-	// Logf is the loud transition/anomaly logger. Nil defaults to log.Printf.
+	// Logf is the loud transition/anomaly logger. Required.
 	Logf dlog.Logf
 	// Resolver binds session ids to workspaces. Required for Apply.
 	Resolver Resolver
@@ -121,10 +120,10 @@ func Open(opts Options) (*Manager, error) {
 		}
 		path = p
 	}
-	logf := opts.Logf
-	if logf == nil {
-		logf = log.Printf
+	if opts.Logf == nil {
+		return nil, fmt.Errorf("ssm: Options.Logf is required")
 	}
+	logf := opts.Logf
 	clock := opts.Clock
 	if clock == nil {
 		clock = func() int64 { return time.Now().UnixMilli() }

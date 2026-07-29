@@ -7,6 +7,7 @@ import (
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	"agentrepl/shim-store/internal/dedup"
+	"agentrepl/shim-store/internal/logging"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -27,8 +28,15 @@ type Result struct {
 // to fan out (accepted → seq>0). EPHEMERAL events must never reach here (the
 // server routes them straight to fan-out); one arriving is a loud invariant
 // violation that rejects the whole batch.
-func (d *DB) Ingest(producer string, events []*corev1.Event, cursor *corev1.CursorState) (Result, error) {
-	var res Result
+func (d *DB) Ingest(producer string, events []*corev1.Event, cursor *corev1.CursorState) (res Result, resultErr error) {
+	defer func() {
+		if resultErr != nil {
+			d.log.Log(logging.Fields{
+				Operation: "ingest", Producer: producer, Table: "event",
+				Transaction: "BEGIN IMMEDIATE", Level: "error",
+			}, "transaction rejected: %v", resultErr)
+		}
+	}()
 
 	tx, err := d.sql.Begin()
 	if err != nil {
@@ -165,6 +173,8 @@ func kindOf(ev *corev1.Event) string {
 		return "DegradedState"
 	case *corev1.Event_Unparsed:
 		return "UnparsedEvent"
+	case *corev1.Event_FilePlaneDiagnostic:
+		return "FilePlaneDiagnostic"
 	default:
 		return "Unknown"
 	}

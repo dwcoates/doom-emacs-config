@@ -156,6 +156,12 @@ type SessionLocator interface {
 	Locate(workspace string) (sessionID string, ok bool)
 }
 
+// FileDiagnosticPersister owns workspace-specific sidecar diagnostics after
+// the driver resolves the session to its authoritative workspace.
+type FileDiagnosticPersister interface {
+	PersistFileDiagnostic(workspace, agentReplSessionID string, ev *corev1.Event, diagnostic *corev1.FilePlaneDiagnostic) error
+}
+
 // sessionClient is the slice of *shimclient.Client the driver drives. An
 // interface so the manager's routing is unit-testable with a fake.
 type sessionClient interface {
@@ -239,6 +245,9 @@ type Config struct {
 	// listening socket and the listener routes each connection to the client
 	// that owns that session. Required.
 	Source shimclient.ConnSource
+	// FileDiagnostics persists sidecar file-plane evidence. It is required in
+	// production and a received diagnostic fails loudly if it is absent.
+	FileDiagnostics FileDiagnosticPersister
 
 	// newClient is injected only by tests; production uses a real shimclient.
 	newClient func(cfg shimclient.Config) sessionClient
@@ -401,6 +410,19 @@ type pendingResync struct {
 	fromSeq uint64
 }
 
+type fileDiagnosticSink struct {
+	persister          FileDiagnosticPersister
+	workspace          string
+	agentReplSessionID string
+}
+
+func (s fileDiagnosticSink) PersistFileDiagnostic(ev *corev1.Event, diagnostic *corev1.FilePlaneDiagnostic) error {
+	if s.persister == nil {
+		return fmt.Errorf("sessiondrv: file-plane diagnostic persister is not wired for workspace %q", s.workspace)
+	}
+	return s.persister.PersistFileDiagnostic(s.workspace, s.agentReplSessionID, ev, diagnostic)
+}
+
 // New builds a Manager. Required collaborators missing is a construction error
 // (surfaced, never a nil-deref at dispatch).
 func New(cfg Config) (*Manager, error) {
@@ -419,6 +441,8 @@ func New(cfg Config) (*Manager, error) {
 		return nil, fmt.Errorf("sessiondrv: New needs a ClearCompactStore (without it an observed clear or compaction cannot floor a later resync)")
 	case cfg.Source == nil:
 		return nil, fmt.Errorf("sessiondrv: New needs a ConnSource (shims dial the daemon; without it no session can be driven)")
+	case cfg.FileDiagnostics == nil:
+		return nil, fmt.Errorf("sessiondrv: New needs a FileDiagnosticPersister")
 	}
 	logf := cfg.Logf
 	if logf == nil {
@@ -1416,6 +1440,7 @@ func (m *Manager) bringUp(workspace string) (*driven, error) {
 		PermissionModes: m.cfg.PermissionModes,
 		StateSink:       cons,
 		FrameSink:       cons,
+		FileDiagnostics: fileDiagnosticSink{persister: m.cfg.FileDiagnostics, workspace: workspace, agentReplSessionID: sessionID},
 		Degraded:        cons,
 		Permissions:     ph,
 		OnHandshake:     func(hello *corev1.ShimHello) { m.onHandshake(workspace, sessionID, hello) },

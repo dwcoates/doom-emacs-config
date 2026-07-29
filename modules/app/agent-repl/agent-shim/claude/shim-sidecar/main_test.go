@@ -1,7 +1,10 @@
 package main
 
 import (
-	"fmt"
+	"bytes"
+	"encoding/json"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,27 +14,34 @@ import (
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	"agentrepl/shim-claude-sidecar/internal/discover"
-	"agentrepl/shim-claude-sidecar/internal/handler"
+	"agentrepl/shim-claude-sidecar/internal/logging"
 	"agentrepl/shim-claude-sidecar/internal/tail"
 )
 
-// capturingLog returns a Logf that records every formatted line, plus a reader
+type captureWriter struct {
+	mu    sync.Mutex
+	lines []string
+}
+
+func (w *captureWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.lines = append(w.lines, string(p))
+	return len(p), nil
+}
+
+// capturingLog returns a logger that records every JSON line, plus a reader
 // for what it has seen. It is mutex-guarded because the sidecar's logger is.
-func capturingLog() (handler.Logf, func() []string) {
-	var (
-		mu    sync.Mutex
-		lines []string
-	)
-	logf := func(format string, args ...any) {
-		msg := fmt.Sprintf(format, args...)
-		mu.Lock()
-		lines = append(lines, msg)
-		mu.Unlock()
-	}
+func capturingLog() (*logging.Bound, func() []string) {
+	writer := &captureWriter{}
+	logf := logging.New(writer, io.Discard).With(logging.Context{Component: "test"})
+	logf.SetDiagnosticSink(func(d logging.Diagnostic) {
+		writer.Write([]byte(d.Message))
+	})
 	return logf, func() []string {
-		mu.Lock()
-		defer mu.Unlock()
-		return append([]string(nil), lines...)
+		writer.mu.Lock()
+		defer writer.mu.Unlock()
+		return append([]string(nil), writer.lines...)
 	}
 }
 
@@ -396,5 +406,61 @@ func TestBootTimeMillisIsPast(t *testing.T) {
 func TestExpandHomeLeavesAbsolute(t *testing.T) {
 	if got := expandHome("/absolute/path"); got != "/absolute/path" {
 		t.Fatalf("expandHome mangled an absolute path: %q", got)
+	}
+}
+
+func TestOpenLoggerReturnsBootstrapErrorBeforePersistentSinkExists(t *testing.T) {
+	parent := t.TempDir()
+	blocked := filepath.Join(parent, "blocked")
+	if err := os.WriteFile(blocked, []byte("not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, _, err := openLogger("/tmp/store.sock", filepath.Join(blocked, "sidecar.log"))
+	if err == nil {
+		t.Fatal("openLogger succeeded with a non-directory parent")
+	}
+	if !isBootstrapError(err) {
+		t.Fatalf("error %T = %v, want bootstrap error", err, err)
+	}
+	var stderr bytes.Buffer
+	reportFatal(err, &stderr)
+	var record map[string]any
+	if decodeErr := json.Unmarshal(stderr.Bytes(), &record); decodeErr != nil {
+		t.Fatalf("bootstrap failure is not JSON: %v: %q", decodeErr, stderr.String())
+	}
+	if record["operation"] != "sidecar.bootstrap" || record["level"] != "error" {
+		t.Fatalf("bootstrap failure record = %#v", record)
+	}
+	stderr.Reset()
+	reportFatal(errors.New("runtime failure"), &stderr)
+	if stderr.Len() != 0 {
+		t.Fatalf("post-bootstrap failure bypassed canonical logger: %q", stderr.String())
+	}
+}
+
+func TestRunLoggedRecordsPostBootstrapErrorExactlyOnce(t *testing.T) {
+	var stderr, file bytes.Buffer
+	log := logging.New(&stderr, &file).With(logging.Context{Component: "sidecar", StoreSocket: "/tmp/store.sock"})
+	want := errors.New("close failed")
+
+	err := runLogged(log, func() error { return want })
+	if !errors.Is(err, want) {
+		t.Fatalf("runLogged error = %v, want %v", err, want)
+	}
+	for sink, got := range map[string]string{"stderr": stderr.String(), "file": file.String()} {
+		if count := strings.Count(got, "sidecar stopped with error: close failed"); count != 1 {
+			t.Fatalf("%s error record count = %d, output=%q", sink, count, got)
+		}
+		var record struct {
+			Operation string         `json:"operation"`
+			Context   map[string]any `json:"context"`
+		}
+		if err := json.Unmarshal([]byte(got), &record); err != nil {
+			t.Fatalf("%s record is not JSON: %v", sink, err)
+		}
+		if record.Operation != "run" || record.Context["store_socket"] != "/tmp/store.sock" {
+			t.Fatalf("%s missing canonical runtime context: %#v", sink, record)
+		}
 	}
 }

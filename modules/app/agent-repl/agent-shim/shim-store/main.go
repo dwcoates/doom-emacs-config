@@ -12,17 +12,19 @@
 package main
 
 import (
+	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
-	"sync"
 	"syscall"
 	"time"
 
 	"agentrepl/shim-store/internal/db"
+	"agentrepl/shim-store/internal/logging"
 	"agentrepl/shim-store/internal/server"
 )
 
@@ -34,8 +36,27 @@ func main() {
 	flag.Parse()
 
 	if err := run(*socketPath, *dbPath, *logPath); err != nil {
-		fmt.Fprintln(os.Stderr, "shim-store:", err)
+		reportFatal(err, os.Stderr)
 		os.Exit(1)
+	}
+}
+
+// reportFatal writes only bootstrap failures because all post-bootstrap errors
+// have already reached the canonical logger and its stderr sink.
+func reportFatal(err error, stderr io.Writer) {
+	if isBootstrapError(err) {
+		payload, encodeErr := json.Marshal(map[string]any{
+			"timestamp": time.Now().UTC().Format(time.RFC3339Nano),
+			"runtime":   "store", "pid": os.Getpid(), "level": "error", "verbosity": "normal",
+			"operation": "store.bootstrap", "message": "shim-store bootstrap failed",
+			"context": map[string]any{"error": err.Error()},
+		})
+		if encodeErr != nil {
+			panic(fmt.Sprintf("shim-store bootstrap log encode failed: %v", encodeErr))
+		}
+		if _, writeErr := stderr.Write(append(payload, '\n')); writeErr != nil {
+			panic(fmt.Sprintf("shim-store bootstrap log write failed: %v", writeErr))
+		}
 	}
 }
 
@@ -43,58 +64,81 @@ func main() {
 // termination signal or a fatal serve error. Factored out of main so its wiring
 // is exercised with temp paths in tests.
 func run(socketPath, dbPath, logPath string) error {
+	log, closeLog, err := openLogger(socketPath, dbPath, logPath)
+	if err != nil {
+		return err
+	}
+	defer closeLog()
+	return runWithLogger(socketPath, dbPath, log)
+}
+
+// openLogger creates shim-store's only persistent diagnostic sink. Directory
+// and file-open failures occur before that sink exists and are bootstrap-only.
+func openLogger(socketPath, dbPath, logPath string) (*logging.Logger, func(), error) {
 	for _, p := range []string{socketPath, dbPath, logPath} {
 		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-			return fmt.Errorf("creating dir for %q: %w", p, err)
+			return nil, nil, bootstrapError{fmt.Errorf("creating dir for %q: %w", p, err)}
 		}
 	}
 
 	lf, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
-		return fmt.Errorf("opening log %q: %w", logPath, err)
+		return nil, nil, bootstrapError{fmt.Errorf("opening log %q: %w", logPath, err)}
 	}
-	defer lf.Close()
-	logf := newLogger(io.MultiWriter(os.Stderr, lf))
+	log := logging.New(lf, os.Stderr, os.Getenv("AGENT_REPL_LOG_VERBOSE") != "")
+	log = log.With(logging.Fields{Component: "store", DatabasePath: dbPath, Socket: socketPath})
+	return log, func() { _ = lf.Close() }, nil
+}
 
-	database, err := db.Open(dbPath, logf)
+// runWithLogger owns errors that reach the process orchestration after logging
+// is available. db.Open and server.Listen retain their lower-layer ownership.
+func runWithLogger(socketPath, dbPath string, log *logging.Logger) error {
+	database, err := db.Open(dbPath, log.With(logging.Fields{Component: "db", Table: "event"}))
 	if err != nil {
 		return err
 	}
 	defer database.Close()
 
-	ln, err := server.Listen(socketPath)
+	ln, err := server.Listen(socketPath, log.With(logging.Fields{Component: "server"}))
 	if err != nil {
 		return err
 	}
-	srv := server.New(database, logf, 0)
+	srv := server.New(database, log.With(logging.Fields{Component: "server"}), 0)
 
 	sigc := make(chan os.Signal, 1)
 	signal.Notify(sigc, syscall.SIGINT, syscall.SIGTERM)
 
 	errc := make(chan error, 1)
 	go func() { errc <- srv.Serve(ln) }()
-	logf("listening: socket=%s db=%s", socketPath, dbPath)
+	log.Log(logging.Fields{Operation: "serve"}, "listening")
 
 	select {
 	case sig := <-sigc:
-		logf("received %s; shutting down", sig)
-		return srv.Close()
+		log.Log(logging.Fields{Operation: "shutdown"}, "received signal=%s", sig)
+		return runLogged(log, "shutdown", srv.Close)
 	case err := <-errc:
-		return err
+		return runLogged(log, "serve", func() error { return err })
 	}
 }
 
-// newLogger returns a §12 loud-logging sink: one line per call, prefixed with
-// a millisecond wall-clock time and the component tag.
-func newLogger(w io.Writer) server.Logf {
-	var mu sync.Mutex
-	return func(format string, args ...any) {
-		ts := time.Now().Format("15:04:05.000")
-		msg := fmt.Sprintf(format, args...)
-		mu.Lock()
-		fmt.Fprintf(w, "%s [shim-store] %s\n", ts, msg)
-		mu.Unlock()
+func runLogged(log *logging.Logger, operation string, execute func() error) error {
+	if err := execute(); err != nil {
+		log.Log(logging.Fields{Operation: operation}, "runtime operation failed: %v", err)
+		return err
 	}
+	return nil
+}
+
+// bootstrapError marks the only failures that may be reported before the
+// canonical logger exists.
+type bootstrapError struct{ err error }
+
+func (e bootstrapError) Error() string { return e.err.Error() }
+func (e bootstrapError) Unwrap() error { return e.err }
+
+func isBootstrapError(err error) bool {
+	var target bootstrapError
+	return errors.As(err, &target)
 }
 
 // defaultCacheDir resolves the agent-repl cache base (~/.cache/agent-repl,

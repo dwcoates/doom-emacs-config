@@ -42,6 +42,7 @@ import (
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	"agentrepl/shim-claude-sidecar/internal/handler"
+	"agentrepl/shim-claude-sidecar/internal/logging"
 )
 
 // linkState is the sidecar's store-connection state. There are exactly two, and
@@ -97,8 +98,7 @@ func (s *sidecar) dial() {
 	if err := s.establish(); err != nil {
 		s.dialFailures++
 		s.backoff = nextBackoff(s.backoff)
-		s.log("store link DOWN: dial attempt %d failed, retrying in %s (reading no files meanwhile): %v",
-			s.dialFailures, s.backoff, err)
+		s.log.With(logging.Context{Operation: "dial"}).Log("dial attempt %d failed, retrying in %s while reading no files: %v", s.dialFailures, s.backoff, err)
 		s.armDial(s.backoff)
 		return
 	}
@@ -135,7 +135,8 @@ func (s *sidecar) establish() error {
 	seeded := s.seedOwners(recovery.OpenTasks)
 	s.link = linkUp
 	s.backoff = 0
-	s.log("store link UP: recovered %d cursor(s), %d authoritative open task(s), seeded %d spool owner(s)",
+	s.log.With(logging.Context{Operation: "recover-startup-state"}).Log(
+		"store link up, recovered %d cursor(s), %d authoritative open task(s), seeded %d spool owner(s)",
 		len(s.cursors), len(recovery.OpenTasks), seeded)
 
 	// Reading may begin now, and not one statement earlier.
@@ -165,7 +166,7 @@ func (s *sidecar) linkLost(reason string) {
 	s.downSince = time.Now()
 	s.dialFailures = 0
 	s.backoff = 0
-	s.log("store link LOST (%s); reading no files until it returns", reason)
+	s.log.With(logging.Context{Operation: "link-lost"}).Log("store link lost: %s; reading no files until it returns", reason)
 	s.armDial(0)
 }
 
@@ -197,7 +198,7 @@ func (s *sidecar) reportOutageClosed() {
 	downMs := time.Since(s.downSince).Milliseconds()
 	reason := fmt.Sprintf("store unreachable for %dms across %d failed dial attempt(s); no files were read during the outage",
 		downMs, s.dialFailures)
-	s.log("store link recovered: %s", reason)
+	s.log.With(logging.Context{Operation: "link-recovered"}).Log("store link recovered: %s", reason)
 	s.emit(degradedEvents(s.watchedSessions(), reason))
 	s.dialFailures = 0
 }

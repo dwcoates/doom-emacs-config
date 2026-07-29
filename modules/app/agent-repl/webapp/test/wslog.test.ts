@@ -1,12 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ClientLogCmd } from "../src/protocol.js";
+import { ClientLogCmd, ClientLogContext } from "../src/protocol.js";
 import {
-  FORWARD_WINDOW_MS,
   ForwardingLogger,
-  MAX_FORWARDS_PER_WINDOW,
-  clearDedup,
+  bindLogContext,
+  clearLogDedup,
   log,
-  logDedup,
+  logVerbose,
   resetLoggingForTests,
   setLogger,
 } from "../src/wslog.js";
@@ -16,20 +15,48 @@ function spyLogger(sendResult = true): {
   logger: ForwardingLogger;
   forwarded: ClientLogCmd[];
   consoleLines: string[];
-  setClock(t: number): void;
 } {
   const forwarded: ClientLogCmd[] = [];
   const consoleLines: string[] = [];
-  let clock = 0;
   const logger = new ForwardingLogger(
     (cmd) => {
       forwarded.push(cmd);
       return sendResult;
     },
     (level, line) => consoleLines.push(`${level}: ${line}`),
-    () => clock,
   );
-  return { logger, forwarded, consoleLines, setClock: (t) => (clock = t) };
+  return { logger, forwarded, consoleLines };
+}
+
+function canonicalRecord(
+  level: ClientLogCmd["level"],
+  message: string,
+  context: Record<string, unknown> = {},
+): ClientLogContext {
+  return {
+    timestamp: "2026-07-28T12:00:00.000Z",
+    runtime: "webapp",
+    level,
+    verbosity: "normal",
+    operation: "test.forwarding",
+    message,
+    context,
+    connection_id: "test-connection",
+  };
+}
+
+function consoleRecord(line: string): Record<string, unknown> {
+  return JSON.parse(line.slice(line.indexOf(": ") + 2)) as Record<string, unknown>;
+}
+
+function installCanonicalLogger(logger: ForwardingLogger): void {
+  setLogger(logger);
+  bindLogContext({
+    workspace_dir: "/repo/workspace",
+    workspace_id: "workspace-1",
+    connection_id: "connection-1",
+    agent_repl_session_id: "session-1",
+  });
 }
 
 describe("ForwardingLogger", () => {
@@ -37,76 +64,31 @@ describe("ForwardingLogger", () => {
     // Arrange
     const spy = spyLogger();
     // Act
-    spy.logger.log("warn", "seq gap: have 3, got 7");
+    const record = canonicalRecord("warn", "seq gap: have 3, got 7");
+    spy.logger.write("warn", "seq gap: have 3, got 7", record);
     // Assert
-    // Both copies carry the WEBAPP's clock (the spy clock reads 0), stamped
-    // once inside the helper: the daemon's own receipt stamp cannot show how
-    // long a line took to get there.
     expect(spy.forwarded).toEqual([
-      { type: "client-log", level: "warn", message: "00:00:00.000 seq gap: have 3, got 7" },
+      { type: "client-log", level: "warn", message: "seq gap: have 3, got 7", context: record },
     ]);
-    expect(spy.consoleLines).toEqual(["warn: 00:00:00.000 seq gap: have 3, got 7"]);
+    expect(consoleRecord(spy.consoleLines[0])).toEqual(record);
   });
 
-  it("still echoes to the console when the socket refuses the forward", () => {
+  it("fails loudly when the socket refuses the forward", () => {
     // Arrange — send reports not-open.
     const spy = spyLogger(false);
     // Act
-    spy.logger.log("error", "boom");
+    expect(() => spy.logger.write("error", "boom", canonicalRecord("error", "boom"))).toThrow("forward was rejected");
     // Assert
-    expect(spy.consoleLines).toEqual(["error: 00:00:00.000 boom"]);
+    expect(consoleRecord(spy.consoleLines[0])).toMatchObject({ level: "error", message: "boom" });
   });
 
-  it("suppresses forwards past the per-window cap with one notice", () => {
-    // Arrange
+  it("persists every normal record without rate-limit suppression", () => {
     const spy = spyLogger();
-    // Act — one more line than the budget allows.
-    for (let i = 0; i < MAX_FORWARDS_PER_WINDOW + 1; i++) {
-      spy.logger.log("info", `line ${i}`);
+    for (let i = 0; i < 80; i++) {
+      spy.logger.write("info", `line ${i}`, canonicalRecord("info", `line ${i}`));
     }
-    // Assert — cap forwards, then exactly one rate-limit notice.
-    expect(spy.forwarded).toHaveLength(MAX_FORWARDS_PER_WINDOW + 1);
-    expect(spy.forwarded[MAX_FORWARDS_PER_WINDOW].message).toContain("rate limit");
-  });
-
-  it("emits the suppression notice only once per window", () => {
-    // Arrange — a runaway loop far past the cap.
-    const spy = spyLogger();
-    // Act
-    for (let i = 0; i < MAX_FORWARDS_PER_WINDOW + 50; i++) {
-      spy.logger.log("info", `line ${i}`);
-    }
-    // Assert
-    const notices = spy.forwarded.filter((c) => c.message.includes("rate limit"));
-    expect(notices).toHaveLength(1);
-  });
-
-  it("keeps the console stream unlimited while forwards are suppressed", () => {
-    // Arrange
-    const spy = spyLogger();
-    // Act
-    for (let i = 0; i < MAX_FORWARDS_PER_WINDOW + 50; i++) {
-      spy.logger.log("info", `line ${i}`);
-    }
-    // Assert
-    expect(spy.consoleLines).toHaveLength(MAX_FORWARDS_PER_WINDOW + 50);
-  });
-
-  it("resets the forwarding budget when the window rolls over", () => {
-    // Arrange — a window exhausted to suppression.
-    const spy = spyLogger();
-    for (let i = 0; i < MAX_FORWARDS_PER_WINDOW + 1; i++) {
-      spy.logger.log("info", `line ${i}`);
-    }
-    // Act — the next line lands in a fresh window.
-    spy.setClock(FORWARD_WINDOW_MS);
-    spy.logger.log("info", "after rollover");
-    // Assert
-    expect(spy.forwarded[spy.forwarded.length - 1]).toEqual({
-      type: "client-log",
-      level: "info",
-      message: "00:01:00.000 after rollover",
-    });
+    expect(spy.forwarded).toHaveLength(80);
+    expect(spy.consoleLines).toHaveLength(80);
   });
 });
 
@@ -119,67 +101,105 @@ describe("module-level singleton", () => {
   it("routes log() through the installed ForwardingLogger", () => {
     // Arrange
     const spy = spyLogger();
-    setLogger(spy.logger);
+    installCanonicalLogger(spy.logger);
     // Act
-    log("warn", "routed");
+    log("warn", "routed", { operation: "test.route" });
     // Assert
-    expect(spy.consoleLines).toEqual(["warn: 00:00:00.000 routed"]);
+    expect(consoleRecord(spy.consoleLines[0])).toMatchObject({ level: "warn", message: "routed", operation: "test.route" });
   });
 
-  it("falls back to the console before a logger is installed", () => {
-    // Arrange
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    // Act
-    log("warn", "early line");
-    // Assert
-    expect(warn).toHaveBeenCalledWith("early line");
+  it("fails loudly before a logger is installed", () => {
+    resetLoggingForTests();
+    expect(() => log("warn", "early line", { operation: "test.early" })).toThrow("wslog logger is not installed");
   });
 
-  it("logDedup suppresses a repeated message under the same key", () => {
-    // Arrange
+  it.each([
+    ["workspace_id", { workspace_id: "workspace-1", connection_id: "connection-1" }, "workspace_dir"],
+    ["workspace_dir", { workspace_dir: "/repo/workspace", connection_id: "connection-1" }, "workspace_id"],
+  ])("fails before forwarding when %s is supplied without complete workspace routing", (_field, context, expected) => {
     const spy = spyLogger();
     setLogger(spy.logger);
+    bindLogContext(context);
+
+    expect(() => log("warn", "missing workspace", { operation: "test.missing-workspace" }))
+      .toThrow(expected);
+    expect(spy.forwarded).toEqual([]);
+    expect(spy.consoleLines).toEqual([]);
+  });
+
+  it.each([
+    ["invalid level", "trace" as ClientLogCmd["level"], { operation: "test.invalid-level" }, "invalid level"],
+    ["empty operation", "warn" as ClientLogCmd["level"], { operation: "" }, "operation"],
+    ["invalid identity", "warn" as ClientLogCmd["level"], { operation: "test.invalid-identity", context: { request_id: 3 } }, "request_id"],
+    ["operation override", "warn" as ClientLogCmd["level"], { operation: "test.operation", context: { operation: "wrong" } }, "must not override operation"],
+    ["bound identity conflict", "warn" as ClientLogCmd["level"], { operation: "test.identity", context: { agent_repl_session_id: "wrong" } }, "conflicts with bound identity"],
+  ])("rejects %s without forwarding or console mutation", (_name, level, context, expected) => {
+    const spy = spyLogger();
+    installCanonicalLogger(spy.logger);
+
+    expect(() => log(level, "must not persist", context)).toThrow(expected);
+    expect(spy.forwarded).toEqual([]);
+    expect(spy.consoleLines).toEqual([]);
+  });
+
+  it("forwards a JSON-safe record when context contains an Error and a cycle", () => {
+    const spy = spyLogger();
+    installCanonicalLogger(spy.logger);
+    const cycle: Record<string, unknown> = {};
+    cycle.self = cycle;
+
+    log("error", "serialization failed", { operation: "test.serialize", context: { cause: new Error("broken"), cycle } });
+
+    const record = spy.forwarded[0].context;
+    expect(() => JSON.stringify(record)).not.toThrow();
+    expect(record).toMatchObject({
+      context: { cause: { name: "Error", message: "broken" }, cycle: { self: "[Circular]" } },
+    });
+  });
+
+  it("dedupKey suppresses a repeated message", () => {
+    // Arrange
+    const spy = spyLogger();
+    installCanonicalLogger(spy.logger);
     // Act — a per-frame guard fires three times with the same error.
-    logDedup("feed-render", "error", "boom");
-    logDedup("feed-render", "error", "boom");
-    logDedup("feed-render", "error", "boom");
+    log("error", "boom", { operation: "test.dedup", dedupKey: "feed-render" });
+    log("error", "boom", { operation: "test.dedup", dedupKey: "feed-render" });
+    log("error", "boom", { operation: "test.dedup", dedupKey: "feed-render" });
     // Assert
-    expect(spy.consoleLines).toEqual(["error: 00:00:00.000 boom"]);
+    expect(spy.consoleLines).toHaveLength(1);
+    expect(consoleRecord(spy.consoleLines[0])).toMatchObject({ level: "error", message: "boom" });
   });
 
-  it("logDedup logs again when the message under the key changes", () => {
+  it("dedupKey logs again when its message changes", () => {
     // Arrange
     const spy = spyLogger();
-    setLogger(spy.logger);
-    logDedup("k", "warn", "first error");
+    installCanonicalLogger(spy.logger);
+    log("warn", "first error", { operation: "test.changed", dedupKey: "k" });
     // Act
-    logDedup("k", "warn", "second error");
+    log("warn", "second error", { operation: "test.changed", dedupKey: "k" });
     // Assert
-    expect(spy.consoleLines).toEqual([
-      "warn: 00:00:00.000 first error",
-      "warn: 00:00:00.000 second error",
-    ]);
+    expect(spy.consoleLines.map((line) => consoleRecord(line).message)).toEqual(["first error", "second error"]);
   });
 
-  it("logDedup keys are independent", () => {
+  it("dedup keys are independent", () => {
     // Arrange
     const spy = spyLogger();
-    setLogger(spy.logger);
+    installCanonicalLogger(spy.logger);
     // Act
-    logDedup("a", "info", "same");
-    logDedup("b", "info", "same");
+    log("info", "same", { operation: "test.independent", dedupKey: "a" });
+    log("info", "same", { operation: "test.independent", dedupKey: "b" });
     // Assert
     expect(spy.consoleLines).toHaveLength(2);
   });
 
-  it("clearDedup re-arms a key for an identical message", () => {
+  it("clearLogDedup re-arms a key for an identical message", () => {
     // Arrange
     const spy = spyLogger();
-    setLogger(spy.logger);
-    logDedup("poll:t1", "warn", "tail fetch failed");
+    installCanonicalLogger(spy.logger);
+    log("warn", "tail fetch failed", { operation: "test.rearm", dedupKey: "poll:t1" });
     // Act — recovery observed, then the same failure returns.
-    clearDedup("poll:t1");
-    logDedup("poll:t1", "warn", "tail fetch failed");
+    clearLogDedup("poll:t1");
+    log("warn", "tail fetch failed", { operation: "test.rearm", dedupKey: "poll:t1" });
     // Assert
     expect(spy.consoleLines).toHaveLength(2);
   });
@@ -194,38 +214,30 @@ describe("structured context (E4 ClientLogCmd.context)", () => {
       return true;
     }, () => {});
     // Act
-    logger.log("warn", "render stall", { pendingMs: 1200, visibility: "visible" });
+    const record = canonicalRecord("warn", "render stall", { pendingMs: 1200, visibility: "visible" });
+    logger.write("warn", "render stall", record);
     // Assert
     expect(sent).toHaveLength(1);
-    expect(sent[0].context).toEqual({ pendingMs: 1200, visibility: "visible" });
+    expect(sent[0].context).toEqual(record);
   });
 
-  it("omits context entirely when the call site has none", () => {
-    // Arrange — an absent Struct must stay absent, not become {}.
+  it("always forwards the canonical record context", () => {
     const sent: ClientLogCmd[] = [];
     const logger = new ForwardingLogger((cmd) => {
       sent.push(cmd);
       return true;
     }, () => {});
-    // Act
-    logger.log("info", "plain line");
-    // Assert
-    expect(sent[0].context).toBeUndefined();
-    expect("context" in sent[0]).toBe(false);
+    const record = canonicalRecord("info", "plain line");
+    logger.write("info", "plain line", record);
+    expect(sent[0].context).toEqual(record);
   });
 
-  it("still writes only the message to the console", () => {
-    // Arrange — a console line is read by a human; the struct is for the log.
+  it("writes the full canonical record as JSON to the console", () => {
     const lines: string[] = [];
-    const logger = new ForwardingLogger(
-      () => true,
-      (_l, line) => lines.push(line),
-      () => 0,
-    );
-    // Act
-    logger.log("warn", "render stall", { pendingMs: 1200 });
-    // Assert — the client stamp, and nothing of the struct.
-    expect(lines).toEqual(["00:00:00.000 render stall"]);
+    const logger = new ForwardingLogger(() => true, (_l, line) => lines.push(line));
+    const record = canonicalRecord("warn", "render stall", { pendingMs: 1200 });
+    logger.write("warn", "render stall", record);
+    expect(JSON.parse(lines[0])).toEqual(record);
   });
 
   it("carries context through the module-level log()", () => {
@@ -235,15 +247,77 @@ describe("structured context (E4 ClientLogCmd.context)", () => {
       sent.push(cmd);
       return true;
     }, () => {});
-    setLogger(logger);
+    installCanonicalLogger(logger);
     // Act
-    log("error", "poll failed", { taskId: "bg1" });
+    log("error", "poll failed", { operation: "test.context", context: { taskId: "bg1" } });
     // Assert
-    expect(sent[0].context).toEqual({ taskId: "bg1" });
+    expect(sent[0].context).toMatchObject({ operation: "test.context", context: { taskId: "bg1" } });
   });
 });
 
-describe("logLocalOnly (the rejected-forward path)", () => {
+describe("verbose and bound runtime context", () => {
+  const verboseStorage = new Map<string, string>();
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  afterEach(() => {
+    verboseStorage.clear();
+    resetLoggingForTests();
+  });
+
+  it("always forwards verbose logs while gating their console output", () => {
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => verboseStorage.get(key) ?? null,
+      setItem: (key: string, value: string) => verboseStorage.set(key, value),
+    });
+    const spy = spyLogger();
+    installCanonicalLogger(spy.logger);
+    logVerbose("info", "hidden locally", { operation: "test.verbose" });
+    expect(spy.forwarded).toHaveLength(1);
+    expect(spy.consoleLines).toEqual([]);
+    verboseStorage.set("agent-repl-log-verbose", "true");
+    logVerbose("info", "visible locally", { operation: "test.verbose" });
+    expect(spy.forwarded).toHaveLength(2);
+    expect(consoleRecord(spy.consoleLines[0])).toMatchObject({
+      level: "info",
+      message: "visible locally",
+      verbosity: "verbose",
+    });
+  });
+
+  it("always forwards verbose logs after the normal forwarding budget is exhausted", () => {
+    vi.stubGlobal("localStorage", { getItem: () => null });
+    const spy = spyLogger();
+    installCanonicalLogger(spy.logger);
+    for (let i = 0; i < 65; i++) {
+      log("info", `normal ${i}`, { operation: "test.normal" });
+    }
+
+    logVerbose("info", "durable verbose record", { operation: "test.verbose" });
+
+    expect(spy.forwarded.at(-1)).toMatchObject({
+      type: "client-log",
+      level: "info",
+      message: "durable verbose record",
+      context: { verbosity: "verbose", operation: "test.verbose" },
+    });
+  });
+
+  it("merges bound runtime identity with call-specific context", () => {
+    const spy = spyLogger();
+    installCanonicalLogger(spy.logger);
+    bindLogContext({ agent_repl_session_id: "s1", connection_id: "c1" });
+    log("error", "request failed", { operation: "submit", context: { request_id: "r1" } });
+    expect(spy.forwarded[0].context).toMatchObject({
+      runtime: "webapp", operation: "submit", workspace_dir: "/repo/workspace", workspace_id: "workspace-1",
+      connection_id: "c1", agent_repl_session_id: "s1", request_id: "r1",
+    });
+  });
+});
+
+describe("local-only canonical option", () => {
   it("writes to the console without forwarding", () => {
     // Arrange — forwarding a clientLog-rejection report would earn another
     // rejection and loop, so this path must never send.
@@ -255,27 +329,12 @@ describe("logLocalOnly (the rejected-forward path)", () => {
         return true;
       },
       (_l, line) => lines.push(line),
-      () => 0,
     );
     // Act
-    logger.logLocalOnly("error", "clientLog rejected: no message");
+    const record = canonicalRecord("error", "clientLog rejected: no message");
+    logger.write("error", "clientLog rejected: no message", record, true, false);
     // Assert
-    expect(lines).toEqual(["00:00:00.000 clientLog rejected: no message"]);
+    expect(JSON.parse(lines[0])).toEqual(record);
     expect(sent).toEqual([]);
-  });
-
-  it("stamps the console-only line with the webapp clock", () => {
-    // Arrange — a console-only line is still evidence, so it carries the same
-    // clock a forwarded line does.
-    const lines: string[] = [];
-    const logger = new ForwardingLogger(
-      () => true,
-      (_l, line) => lines.push(line),
-      () => 3_723_004,
-    );
-    // Act
-    logger.logLocalOnly("warn", "ack rejected");
-    // Assert
-    expect(lines).toEqual(["01:02:03.004 ack rejected"]);
   });
 });

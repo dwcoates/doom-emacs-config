@@ -3,12 +3,14 @@ package handler
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
+	"agentrepl/shim-claude-sidecar/internal/logging"
 	"agentrepl/shim-claude-sidecar/internal/tail"
 )
 
@@ -50,7 +52,9 @@ func frameFor(t *testing.T, rel string) tail.Frame {
 	return tail.Frame{}
 }
 
-func quietLog(string, ...any) {}
+var quietLog = logging.New(io.Discard, io.Discard).With(logging.Context{Component: "test"})
+
+func init() { quietLog.SetDiagnosticSink(func(logging.Diagnostic) {}) }
 
 // findTaskStarted returns the first TaskStarted payload in events, or nil.
 func findTaskStarted(evs []*corev1.Event) *corev1.TaskStarted {

@@ -32,48 +32,40 @@
 
 ## Testing
 
-### There is no such thing as a "pre-existing" failing test
+### Every repository-tracked test failure is mine
 
-- A failing test is a failing test, and the fact that it was already failing before my change NEVER excuses leaving it failing.
-  - "Pre-existing", "not introduced by me", "already broken on the base branch", and similar framings are NOT valid reasons to ignore a failure.
-  - When I encounter any failing test while working, I must drive it to passing, not dismiss it.
-- The ONLY permitted alternative to fixing a failing test is surfacing it to the user, and only when there is genuine ambiguity.
-  - Genuine ambiguity means the correct fix depends on a decision that is mine to make only with the user's input.
-  - In that case I surface the failure and the ambiguity explicitly rather than silently leaving it failing.
-  - Absent such ambiguity, I fix the failure outright.
-- At WORST a failing test is escalated to the user, and at no point is it silently tolerated because of its provenance.
+- Every failure in a unit or integration test tracked by the repository is assumed confidently to have been introduced by my work.
+  - This applies wherever the tracked test runs: locally, in a commit hook, or in CICD.
+  - I NEVER consider such a failure "pre-existing", investigate its provenance, compare it against an earlier revision, or use history to decide whether I own it.
+  - I fix the failing test or the production defect directly and drive the entire tracked suite to green.
+- The ONLY permitted alternative to fixing a tracked test failure is surfacing it to the user when the correct fix genuinely depends on a decision that is the user's to make.
+  - I state the failure and the decision explicitly; I do not perform provenance analysis or silently tolerate the failure.
+- This automatic attribution rule is specific to repository-tracked unit and integration tests.
+  - An ad hoc smoke test is diagnostic evidence, not a repository-tracked test, and its failure does not by itself establish who introduced the underlying defect.
+  - Any defect exposed by a smoke test is still investigated and fixed; the distinction affects attribution, not whether the defect may be ignored.
 
-### Any "pre-existing" claim MUST be adversarially vetted
+### New and changed code must test critical cases
 
-- Any temptation to declare an issue "pre-existing" MUST trigger an adversarial agent team to vet the claim before the claim is accepted.
-  - This applies to ANY issue, not just failing tests.
-    - Build breaks, lint errors, runtime bugs, regressions, and any other defect all count.
-  - "Pre-existing", "not introduced by me", "already broken on the base branch", and similar framings ALL count as the triggering claim.
-  - This vetting is MANDATORY and happens EVERY time such a claim arises, with no exception.
-- The adversarial agent team's job is to disprove the "pre-existing" claim.
-  - Spawn the team to independently investigate whether the issue truly predates my changes.
-  - Treat the "pre-existing" claim as guilty until proven innocent.
-    - The burden of proof rests on showing the issue is genuinely pre-existing.
-- The investigation's outcome MUST be surfaced in the response.
-  - Both the fact that the adversarial investigation took place AND the investigation's results are reported.
-  - Both are surfaced under the TLDR bullet carrying the "is pre-existing" claim (see "Pre-existing claims in the tree" rule below).
-- **The canonical reproduction procedure is MANDATORY: empirically reproduce the issue at the prior commit, isolated from the working tree, via these EXACT steps.**
-  1. Stash all pending work (`git stash -u`), so the working tree is clean and the in-progress changes are safely preserved.
-  2. Check out, on a DETACHED HEAD (`git checkout <sha>`), the first commit that PRECEDES the changes I did not make (i.e. the last commit before the suspected-culprit commit).
-  3. Run the failing tests/build/lint there and record the result.
-  4. Return to the original commit (`git checkout -`, or the original branch tip) and restore the stash (`git stash pop`).
-  - The verdict is "genuinely pre-existing" ONLY when the issue reproduces at that prior commit with my changes absent; if it does not reproduce there, the claim is disproven and the issue is mine.
-  - This also pinpoints the introducing commit: reproducing at a commit but not at its parent isolates exactly which commit introduced the issue.
-- **NEVER run this procedure by moving the active branch in the target workspace.** Always use a detached HEAD (or a throwaway temp branch) plus the stash/unstash dance.
-  - Other worktrees of the same repository may have that branch checked out or reference its tip, so moving the branch would disrupt them.
-  - In-place file overwrites (`git show <sha>:file > file`) or temp-dir copies are NOT an acceptable substitute, because they do not exercise the real historical commit state cleanly and can mask interactions with the live working tree.
+- Every new or materially changed function and codepath MUST have unit tests covering its critical behavior.
+  - Cover the successful path, meaningful branches, boundary conditions, state transitions, and interactions whose failure would affect correctness.
+  - Do not rely on ad hoc smoke tests, manual verification, or broad integration coverage in place of focused unit tests.
+- Every error case MUST be covered by a unit test.
+  - Assert the error surfaced to the caller or user, the canonical log record, and the absence of partial state mutation where the operation must abort.
+  - If an error path cannot be exercised deterministically in a unit test, restructure the code around an injectable or mockable boundary until it can be.
 
-### CICD failures are never pre-existing, so never vet them
+## Error Logging
 
-- A failure surfaced by CICD on my branch or PR is NEVER "pre-existing" in any exculpatory sense, and the adversarial-vetting requirement above does NOT apply to it.
-  - The check is red on MY PR, so it is mine to drive to green regardless of when or how it started failing.
-  - There is simply no possibility worth investigating, so I NEVER launch adversarial subagents for a CICD failure.
-- For any CICD failure I skip provenance analysis entirely and fix the failing check directly.
+### Every error uses the unified logging path
+
+- Every error MUST be recorded through the owning module, service, or component's canonical logging helper.
+  - Never use an ad hoc print, message, side buffer, direct file write, or one-off logger as the sole error record.
+  - When no canonical helper exists, introduce one at the module boundary and route all error reporting in that module through it.
+- Each error log MUST include enough structured context to diagnose the failure from the shared log alone.
+  - Include the operation, relevant identifiers and resolved inputs, the concrete cause, and the branch or outcome that failed.
+  - Dynamic context belongs in structured fields or the shared helper's established format, not in an incompatible per-call convention.
+- Define a clear ownership point so an error enters the canonical log at least once without being redundantly re-logged at every propagation layer.
+  - Propagating or surfacing an error never replaces logging it.
+  - Unit tests for error paths MUST verify that the canonical logging helper receives the expected diagnostic context.
 
 ## Invariants
 
@@ -299,15 +291,6 @@ I will NEVER ask a rhetorical question -- if I ask 'why does X happen?' or 'is Y
 - If complexity or complication was noticed, a top-level section should be included for this
 - If questio are needed for the user, a top-level section should be included for this 
   - In otherwords, consolidate questions in a top-level section (with a paralelel recursive structure) rather than dispersed across top-level entries
-
-### Pre-existing claims in the tree
-
-- Any TLDR bullet asserting that an issue is "pre-existing" MUST carry the adversarial vetting of that claim as its subbullets.
-  - One subbullet records that the adversarial agent team investigation took place.
-  - Another subbullet records the investigation's verdict.
-    - The verdict is either that the issue was confirmed genuinely pre-existing or that the "pre-existing" claim was disproven.
-- This surfacing requirement holds even against the brevity and node-count preferences elsewhere in this spec.
-  - The vetting subbullets are never omitted for the sake of a smaller tree when an "is pre-existing" claim appears.
 
 ### Per-bullet constraints
 

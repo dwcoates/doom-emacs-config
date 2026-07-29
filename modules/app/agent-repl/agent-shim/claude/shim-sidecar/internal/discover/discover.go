@@ -25,11 +25,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	"agentrepl/shim-claude-sidecar/internal/logging"
 	"agentrepl/shim-claude-sidecar/internal/tail"
 )
-
-// Logf is the loud-logging sink (§12).
-type Logf = func(format string, args ...any)
 
 // Target is one discovered file plus the attribution the tailer/handler need.
 type Target struct {
@@ -59,14 +57,11 @@ func (t Target) Codec() tail.Codec {
 type Discoverer struct {
 	configRoots []string // e.g. ~/.claude, ~/.claude-chesscom
 	spoolRoot   string   // e.g. /tmp (resolves /tmp/claude-<uid>/… itself)
-	log         Logf
+	log         *logging.Bound
 }
 
 // New builds a Discoverer.
-func New(configRoots []string, spoolRoot string, log Logf) *Discoverer {
-	if log == nil {
-		log = func(string, ...any) {}
-	}
+func New(configRoots []string, spoolRoot string, log *logging.Bound) *Discoverer {
 	return &Discoverer{configRoots: configRoots, spoolRoot: spoolRoot, log: log}
 }
 
@@ -186,7 +181,7 @@ func (d *Discoverer) classifySpool(path string) (Target, bool) {
 	case strings.HasPrefix(taskID, "w"):
 		t.Kind = tail.KindWorkflowJournal
 	default:
-		d.log("discover: spool task id %q has no a/b/w kind prefix (%s)", taskID, path)
+		d.log.With(logging.Context{Operation: "classify-spool", Path: path, Task: taskID}).Log("spool task has no a/b/w kind prefix")
 		return Target{}, false
 	}
 	return t, true

@@ -2936,7 +2936,13 @@ describe("TextStream metaprompt trees", () => {
 
   it("warns once when a header-led response yields no tree region", () => {
     // Arrange — the mandated header with no tree beneath it is a misfire.
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const warn = vi.fn();
+    setLogger(new ForwardingLogger(
+      () => true,
+      (level, line) => {
+        if (level === "warn") warn(line);
+      },
+    ));
     const item: ConversationItem = {
       kind: "text",
       ts: TEXT_TS,
@@ -2950,12 +2956,17 @@ describe("TextStream metaprompt trees", () => {
     renderItem(item);
     // Assert
     expect(warn).toHaveBeenCalledTimes(1);
-    warn.mockRestore();
   });
 
   it("does not warn while a header-led response is still streaming", () => {
     // Arrange — a partial tree mid-stream must not log a misfire.
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const warn = vi.fn();
+    setLogger(new ForwardingLogger(
+      () => true,
+      (level, line) => {
+        if (level === "warn") warn(line);
+      },
+    ));
     const item: ConversationItem = {
       kind: "text",
       ts: TEXT_TS,
@@ -2968,7 +2979,6 @@ describe("TextStream metaprompt trees", () => {
     renderItem(item);
     // Assert
     expect(warn).not.toHaveBeenCalled();
-    warn.mockRestore();
   });
 });
 
@@ -5243,6 +5253,10 @@ describe("panelSeedsOnOpen", () => {
 const CLIENT_STAMP = /^\d{2}:\d{2}:\d{2}\.\d{3} /;
 
 describe("off-enum status/kind logging", () => {
+  function record(line: string): Record<string, unknown> {
+    return JSON.parse(line.slice(line.indexOf(": ") + 2)) as Record<string, unknown>;
+  }
+
   function spyLines(): string[] {
     const lines: string[] = [];
     setLogger(
@@ -5262,7 +5276,11 @@ describe("off-enum status/kind logging", () => {
     const html = memberBadge("teleporting" as unknown as Parameters<typeof memberBadge>[0]);
     // Assert
     expect(html).toBe("");
-    expect(lines).toContain("warn: memberBadge: unexpected status teleporting");
+    expect(record(lines[0])).toMatchObject({
+      level: "warn",
+      message: "memberBadge: unexpected status teleporting",
+      operation: "render.member-badge-status-invalid",
+    });
   });
 
   it("memberBadge dedups a repeated off-enum status", () => {
@@ -5307,6 +5325,12 @@ describe("FeedRenderer.render/renderRestored: logs then rethrows a mid-reconcile
     "---> agent-repl-chess-game-file: /ws/.claude/emacs/cee-web-widget/chess-game-ab.pgn <---";
   const THROW_MSG = "Error: chess-game hydrator is not configured";
 
+  function messages(lines: string[]): unknown[] {
+    return lines.map((line) =>
+      (JSON.parse(line.slice(line.indexOf(": ") + 2)) as Record<string, unknown>).message
+    );
+  }
+
   /** A session whose only response is an unconfigured chess-game marker. */
   function throwingState(): StoreState {
     const state = new ConversationStore().state;
@@ -5331,7 +5355,7 @@ describe("FeedRenderer.render/renderRestored: logs then rethrows a mid-reconcile
     // Act / Assert — the throw propagates unchanged...
     expect(() => feed.render(throwingState())).toThrow("chess-game hydrator is not configured");
     // ...and the daemon-log evidence is there too.
-    expect(lines).toContain(`error: ${THROW_MSG}`);
+    expect(messages(lines)).toContain(THROW_MSG);
   });
 
   it("render() dedups a repeated identical throw (hot rAF path)", () => {
@@ -5342,7 +5366,7 @@ describe("FeedRenderer.render/renderRestored: logs then rethrows a mid-reconcile
     expect(() => feed.render(throwingState())).toThrow();
     expect(() => feed.render(throwingState())).toThrow();
     // Assert — one line despite two throws.
-    expect(lines.filter((l) => l === `error: ${THROW_MSG}`)).toHaveLength(1);
+    expect(messages(lines).filter((message) => message === THROW_MSG)).toHaveLength(1);
   });
 
   it("render() re-arms feed-render after a clean render, so a later recurrence logs again", () => {
@@ -5354,7 +5378,7 @@ describe("FeedRenderer.render/renderRestored: logs then rethrows a mid-reconcile
     feed.render(cleanState()); // completes without throwing — clears the dedup key
     expect(() => feed.render(throwingState())).toThrow();
     // Assert — both throws logged, since the clean render re-armed the key.
-    expect(lines.filter((l) => l === `error: ${THROW_MSG}`)).toHaveLength(2);
+    expect(messages(lines).filter((message) => message === THROW_MSG)).toHaveLength(2);
   });
 
   it("renderRestored() logs once via feed-render-restored and still throws", () => {
@@ -5365,7 +5389,7 @@ describe("FeedRenderer.render/renderRestored: logs then rethrows a mid-reconcile
     expect(() => feed.renderRestored(throwingState())).toThrow(
       "chess-game hydrator is not configured",
     );
-    expect(lines).toContain(`error: ${THROW_MSG}`);
+    expect(messages(lines)).toContain(THROW_MSG);
   });
 
   it("renderRestored() re-arms feed-render-restored after a clean render", () => {
@@ -5377,7 +5401,7 @@ describe("FeedRenderer.render/renderRestored: logs then rethrows a mid-reconcile
     feed.renderRestored(cleanState());
     expect(() => feed.renderRestored(throwingState())).toThrow();
     // Assert
-    expect(lines.filter((l) => l === `error: ${THROW_MSG}`)).toHaveLength(2);
+    expect(messages(lines).filter((message) => message === THROW_MSG)).toHaveLength(2);
   });
 });
 

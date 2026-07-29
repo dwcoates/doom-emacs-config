@@ -53,7 +53,7 @@
 import { create, fromJson } from "@bufbuild/protobuf";
 import type { JsonObject, JsonValue } from "@bufbuild/protobuf";
 import { anyPack, ListValueSchema, type ListValue } from "@bufbuild/protobuf/wkt";
-import { shimLog } from "../uds/log.js";
+import { bindLog } from "../uds/log.js";
 import {
   EventClass,
   EventSchema,
@@ -252,6 +252,7 @@ import {
 } from "../../../../../proto/gen/ts/agentshim/data/v1/tools_pb.js";
 
 const COMPONENT = "claude-shim-convert";
+const LOGGER = bindLog({ component: COMPONENT, operation: "shim.convert.vendor-message" });
 
 /** How far a TurnStarted prompt preview is bounded (first line, then chars). */
 const PROMPT_PREVIEW_CAP = 200;
@@ -1057,7 +1058,7 @@ function buildSystemInit(message: Record<string, unknown>, r: Reader, label: str
       }),
     });
   } else {
-    shimLog(COMPONENT, { session: init.sessionId }, `system:init re-announced an already-started session; SessionStarted twin suppressed`);
+    LOGGER.log({ claude_session_id: init.sessionId }, `system:init re-announced an already-started session; SessionStarted twin suppressed`);
   }
   return {
     csm: csm({ case: "systemInit", value: init }),
@@ -1593,7 +1594,7 @@ export function convertToolUseResult(raw: unknown, sessionId = ""): ToolUseResul
   }
   const arm = classifyToolResult(raw);
   if (arm) return create(ToolUseResultSchema, { result: arm });
-  shimLog(COMPONENT, { session: sessionId, keys: Object.keys(raw).slice(0, 8).join(",") }, `unclassified toolUseResult object captured verbatim`);
+  LOGGER.log({ ...(sessionId === "" ? {} : { claude_session_id: sessionId }), keys: Object.keys(raw).slice(0, 8).join(",") }, `unclassified toolUseResult object captured verbatim`);
   return create(ToolUseResultSchema, { result: { case: "unclassified", value: raw as JsonObject } });
 }
 
@@ -2383,4 +2384,3 @@ function safeStringify(v: unknown): string {
     return String(v);
   }
 }
-

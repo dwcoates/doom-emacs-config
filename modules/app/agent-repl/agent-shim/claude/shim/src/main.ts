@@ -1,9 +1,7 @@
 /**
  * claude-repl shim entrypoint.
  *
- * stdin:  Layer-1 commands (NDJSON) from the Go daemon.
- * stdout: Layer-1 events (NDJSON) to the Go daemon.
- * stderr: free-form logs, never protocol frames.
+ * UDS-only process entrypoint for one daemon-owned Claude session.
  *
  * Flags:
  *   --fake                    use the offline scripted query (no API key)
@@ -14,19 +12,19 @@
  *   --resume <session>        resume an on-disk claude session
  *   --claude-bin <path>       claude CLI for the SDK to drive (system
  *                             binary for vterm parity; default: bundled)
- *   --daemon-socket <path>    enable UDS mode: dial <path> to reach the daemon
- *                             instead of speaking Layer-1 NDJSON over stdio
+ *   --daemon-socket <path>    required UDS endpoint to reach the daemon
+ *   --log-fd 3                inherited, already-open durable shim.log sink
  *   --store-socket <path>     shim-store socket (UDS mode; default
  *                             ~/.cache/agent-repl/sock/store.sock)
  *   --version                 print the shim version and exit
  */
-import { createInterface } from "node:readline";
 import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import { realpathSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { bindLog, configureLog, emergencyStderr } from "./uds/log.js";
 import { UdsSession } from "./uds/uds-session.js";
 import { acquireSessionLock } from "./uds/session-lock.js";
 import { SessionSource } from "./uds/proto.js";
@@ -35,9 +33,7 @@ import { importRealSDK } from "./vendor-guard.js";
 import {
   ModelInfo,
   PermissionMode,
-  ShimEvent,
   SlashCommand,
-  encodeEvent,
   isPermissionMode,
 } from "./protocol.js";
 import {
@@ -46,8 +42,20 @@ import {
   QueryLike,
   SdkUserMessageLike,
   SessionDeps,
-  ShimSession,
 } from "./session.js";
+
+const LOGGER = bindLog({ component: "shim-main", operation: "shim.main.fatal" });
+
+/** Log an unrecoverable entrypoint failure before ending the shim process. */
+export function reportFatal(err: unknown): void {
+  const message = `fatal: ${err instanceof Error ? err.stack ?? err.message : String(err)}`;
+  try {
+    LOGGER.log({ level: "error", cause: err }, message);
+  } catch (logErr) {
+    // The logger is not configured only during CLI/bootstrap failure, or its sink failed.
+    emergencyStderr(`${message}; logger failure: ${logErr instanceof Error ? logErr.message : String(logErr)}`);
+  }
+}
 
 interface CliArgs {
   fake: boolean;
@@ -67,6 +75,8 @@ interface CliArgs {
   claudeBin?: string;
   /** UDS-mode listener path (session-<id>.sock). Present => UDS mode. */
   daemonSocket?: string;
+  /** Already-open durable shim.log descriptor inherited from the daemon. */
+  logFd?: number;
   /** shim-store socket path (UDS mode only). Defaults under ~/.cache. */
   storeSocket?: string;
   /** Print the version and exit (a node-runnable smoke of the bundle). */
@@ -122,6 +132,12 @@ export function parseArgs(argv: string[]): CliArgs {
       case "--daemon-socket":
         args.daemonSocket = next();
         break;
+      case "--log-fd": {
+        const value = next();
+        if (!/^\d+$/.test(value) || Number(value) !== 3) throw new Error(`invalid --log-fd: ${value}; UDS mode requires inherited fd 3`);
+        args.logFd = 3;
+        break;
+      }
       case "--store-socket":
         args.storeSocket = next();
         break;
@@ -133,6 +149,13 @@ export function parseArgs(argv: string[]): CliArgs {
     }
   }
   return args;
+}
+
+/** Validate the daemon's UDS primary-writer spawn contract before startup mutates state. */
+export function validateUdsLoggingArgs(args: CliArgs): asserts args is CliArgs & { daemonSocket: string; cwd: string; logFd: 3 } {
+  if (args.daemonSocket === undefined) throw new Error("UDS logging validation requires --daemon-socket");
+  if (args.cwd === undefined) throw new Error("UDS mode requires --cwd");
+  if (args.logFd === undefined) throw new Error("UDS mode requires --log-fd 3");
 }
 
 function packageVersion(spec: string): string {
@@ -280,6 +303,10 @@ export async function main(): Promise<void> {
     return;
   }
 
+  if (args.daemonSocket === undefined) throw new Error("shim requires --daemon-socket");
+  validateUdsLoggingArgs(args);
+  configureLog({ fd: args.logFd, cwd: args.cwd, agentReplSessionId: args.sessionId });
+
   // The query factory is synchronous per SessionDeps; pre-resolve the SDK
   // module (dynamic import) before constructing the session. Under
   // AGENT_REPL_FORBID_VENDOR_CALLS this is where a non-fake shim dies: the
@@ -290,46 +317,7 @@ export async function main(): Promise<void> {
 
   const createQuery = makeCreateQuery(args);
 
-  // ── UDS mode (design §8, §4.4) ────────────────────────────────────────────
-  // The daemon spawns the shim with `--daemon-socket <path>` and the shim
-  // DIALS it; the shim OWNS lifetime and OUTLIVES the daemon, redialling until
-  // it returns (design-shim-transport-inversion.md). This supersedes stdio.
-  if (args.daemonSocket !== undefined) {
-    await runUdsMode(args, createQuery);
-    return;
-  }
-
-  // ── SUPERSEDED: stdio Layer-1 NDJSON transport ─────────────────────────────
-  // This entire branch DIES when the daemon flips its spawn contract from
-  // ShimArgv to ShimUDSArgv (daemon/internal/server/agentshim.go): the daemon's
-  // consumption cutover is a separate final-assembly task that deletes the
-  // stdio path wholesale. It is retained ONLY because the resident daemon and
-  // the daemon e2e harness still spawn the shim over stdio; do not remove it
-  // until that cutover lands. New behavior belongs in UDS mode above.
-  const deps: SessionDeps = {
-    sessionId: args.sessionId,
-    shimVersion: packageVersion("../package.json"),
-    sdkVersion: args.fake
-      ? "fake"
-      : packageVersion("@anthropic-ai/claude-agent-sdk/package.json"),
-    initialPermissionMode: args.permissionMode,
-    createQuery,
-    probeCommands: (): Promise<SlashCommand[]> =>
-      args.fake ? Promise.resolve(FAKE_COMMANDS) : realProbeCommands(args),
-    emit: (evt: ShimEvent): void => {
-      process.stdout.write(encodeEvent(evt));
-    },
-    exit: (code: number): void => {
-      process.exit(code);
-    },
-    newRequestId: randomUUID,
-  };
-
-  const session = new ShimSession(deps);
-  const rl = createInterface({ input: process.stdin, crlfDelay: Infinity });
-  rl.on("line", (line) => session.handleLine(line));
-  rl.on("close", () => session.handleStdinEnd());
-  await session.start();
+  await runUdsMode(args, createQuery);
 }
 
 /**
@@ -430,7 +418,7 @@ const isDirectRun =
   process.argv[1] !== undefined && import.meta.url === invokedAs(process.argv[1]);
 if (isDirectRun) {
   main().catch((err: unknown) => {
-    process.stderr.write(`shim fatal: ${err instanceof Error ? err.stack : String(err)}\n`);
+    reportFatal(err);
     process.exit(1);
   });
 }

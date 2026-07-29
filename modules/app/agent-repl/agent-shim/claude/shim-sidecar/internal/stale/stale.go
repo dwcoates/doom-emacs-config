@@ -21,11 +21,9 @@ import (
 	"time"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
+	"agentrepl/shim-claude-sidecar/internal/logging"
 	"agentrepl/shim-claude-sidecar/internal/tail"
 )
-
-// Logf is the loud-logging sink (§12).
-type Logf = func(format string, args ...any)
 
 // Default grace / silence windows (§7.4), overridable via Options.
 const (
@@ -68,14 +66,11 @@ type Tracker struct {
 	mu    sync.Mutex
 	tasks map[taskKey]*task
 	opt   Options
-	log   Logf
+	log   *logging.Bound
 }
 
 // New builds a Tracker.
-func New(opt Options, log Logf) *Tracker {
-	if log == nil {
-		log = func(string, ...any) {}
-	}
+func New(opt Options, log *logging.Bound) *Tracker {
 	if opt.Grace == 0 {
 		opt.Grace = DefaultGrace
 	}
@@ -153,7 +148,8 @@ func (t *Tracker) Restore(states []*corev1.OpenTaskState) error {
 	t.mu.Lock()
 	t.tasks = restored
 	t.mu.Unlock()
-	t.log("stale: restored %d authoritative open task(s) with persisted activity from store", len(restored))
+	t.log.With(logging.Context{Operation: "restore-open-tasks"}).Log(
+		"restored %d authoritative open task(s) with persisted activity from store", len(restored))
 	return nil
 }
 
@@ -239,7 +235,7 @@ func (t *Tracker) BootSweep(bootMs, nowMs int64) []*corev1.Event {
 
 // lost builds the synthetic-plane LOST TaskEnded and loud-logs the transition.
 func (t *Tracker) lost(tk *task, inference string) *corev1.Event {
-	t.log("stale: LOST task=%s kind=%d session=%s inference=%s (never DONE)", tk.id, tk.kind, tk.session, inference)
+	t.log.With(logging.Context{Operation: "infer-lost", Task: tk.id, Session: tk.session}).Log("LOST kind=%d inference=%s never DONE", tk.kind, inference)
 	return &corev1.Event{
 		SessionId:    tk.session,
 		Plane:        corev1.Plane_PLANE_SYNTHETIC,
