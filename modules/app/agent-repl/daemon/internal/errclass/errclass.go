@@ -103,6 +103,20 @@ const (
 	// TypeSessionShimDied — the session's shim process died, which is what
 	// makes the session terminal.
 	TypeSessionShimDied Type = "session.shim_died"
+	// TypeSessionHistoryMissing — the record named a previous vendor
+	// conversation and no transcript for it exists, so the session started
+	// FRESH with the pointer dropped. INTERNAL rather than API: nothing at
+	// the vendor refused anything, the daemon's own pointer was wrong.
+	//
+	// EVENT-shaped: the history is gone and stays gone, so the card never
+	// resolves. It is the user's whole account of why their conversation is
+	// empty, and the alternative — a silent fresh start — is the thing the
+	// note exists to prevent.
+	TypeSessionHistoryMissing Type = "session.history_missing"
+	// TypeSessionStartFailed — a bring-up ended without wiring, and the
+	// FRESH retry ended the same way. It is what makes `starting` non-terminal:
+	// every bring-up now closes on wired or on this.
+	TypeSessionStartFailed Type = "session.start_failed"
 	// TypeSessionEndedUnclassified — a persisted death reason from an older
 	// build that predates this vocabulary. The raw string rides source_detail
 	// rather than being guessed at.
@@ -218,6 +232,8 @@ var prose = map[Type]string{
 	TypeSessionDeleted:           "the session was deleted",
 	TypeSessionSuperseded:        "a newer session took over this workspace",
 	TypeSessionShimDied:          "the agent process exited",
+	TypeSessionHistoryMissing:    "the previous conversation's history could not be found, so this session started fresh",
+	TypeSessionStartFailed:       "the session could not be started",
 	TypeSessionEndedUnclassified: "the session ended",
 	TypeHistoryRepullInFlight:    "a history re-pull is already running",
 	TypeHistoryReplayTruncated:   "the history re-pull ended before it reached the live window",
@@ -548,6 +564,43 @@ func Death(logf dlog.Logf, reason string) *frontendv1.SystemFailureItem {
 	}
 }
 
+// HistoryMissing classifies the daemon's own repair of a stale vendor
+// conversation pointer: the record named a conversation with no transcript, so
+// the session started fresh and the pointer was dropped.
+//
+// The dropped uuid rides source_detail rather than being discarded — it is the
+// only handle anyone has on what was lost, and the first thing a human looking
+// for the transcript by hand needs.
+func HistoryMissing(droppedUUID, detail string) *frontendv1.SystemFailureItem {
+	parts := make([]string, 0, 2)
+	if droppedUUID != "" {
+		parts = append(parts, "conversation="+droppedUUID)
+	}
+	if detail != "" {
+		parts = append(parts, detail)
+	}
+	return &frontendv1.SystemFailureItem{
+		ErrorClass:   frontendv1.ErrorClass_ERROR_CLASS_INTERNAL,
+		ErrorType:    string(TypeSessionHistoryMissing),
+		Message:      prose[TypeSessionHistoryMissing],
+		SourceDetail: strings.Join(parts, " "),
+	}
+}
+
+// StartFailed classifies a bring-up that never wired and could not be retried
+// into one. reason is the deepest account the daemon holds of WHY — the shim's
+// own degraded report where there is one, the wait's error where there is not —
+// and it rides source_detail verbatim so the card names the failure rather than
+// merely announcing one.
+func StartFailed(reason string) *frontendv1.SystemFailureItem {
+	return &frontendv1.SystemFailureItem{
+		ErrorClass:   frontendv1.ErrorClass_ERROR_CLASS_INTERNAL,
+		ErrorType:    string(TypeSessionStartFailed),
+		Message:      prose[TypeSessionStartFailed],
+		SourceDetail: reason,
+	}
+}
+
 // Degraded classifies a shim-reported DegradedState — the store-write
 // rejection path, whose reason is a StoreWriteAck error the shim wrapped.
 //
@@ -614,6 +667,8 @@ func AllTypes() []Type {
 		TypeSessionDeleted,
 		TypeSessionSuperseded,
 		TypeSessionShimDied,
+		TypeSessionHistoryMissing,
+		TypeSessionStartFailed,
 		TypeSessionEndedUnclassified,
 		TypeHistoryRepullInFlight,
 		TypeHistoryReplayTruncated,

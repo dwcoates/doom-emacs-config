@@ -25,6 +25,8 @@ import (
 
 	"claude-repld/internal/frontend"
 	"claude-repld/internal/registry"
+	"claude-repld/internal/session"
+	"claude-repld/internal/sessiondrv"
 	"claude-repld/internal/sessionlock"
 	"claude-repld/internal/shimclient"
 	"claude-repld/internal/shimlisten"
@@ -160,46 +162,97 @@ func NewShimSpawner(reg *registry.Registry, connected ConnectedFunc, spawn ShimS
 // alive but not talking, which is a bug to surface rather than a state to
 // paper over. Spawning a second one is the exact duplicate this prevents, and
 // killing the holder would destroy the in-flight turn §4.4 protects.
-func (s *ShimSpawner) EnsureShim(ctx context.Context, sessionID string) error {
+//
+// VALIDATE BEFORE RESUME. A record can name a conversation that does not
+// exist — a uuid adopted before the vendor wrote anything, a transcript
+// deleted underneath us, a config dir that moved. Handing that to the CLI is
+// an immediate exit 1, and the shim's death during bring-up used to leave the
+// workspace in `starting` with nothing to explain it. So the pointer is
+// checked against the disk here, and a missing transcript starts the session
+// FRESH with the pointer dropped and the drop reported to the caller, which
+// owes the user a feed note about the history that is not coming back.
+func (s *ShimSpawner) EnsureShim(ctx context.Context, sessionID string) (sessiondrv.SpawnResult, error) {
+	var res sessiondrv.SpawnResult
 	if s.reg == nil {
-		return fmt.Errorf("server: ShimSpawner has no registry; cannot resolve session %s", sessionID)
+		return res, fmt.Errorf("server: ShimSpawner has no registry; cannot resolve session %s", sessionID)
 	}
 	if s.spawn == nil {
-		return fmt.Errorf("server: ShimSpawner has no spawn func; cannot bring up session %s", sessionID)
+		return res, fmt.Errorf("server: ShimSpawner has no spawn func; cannot bring up session %s", sessionID)
 	}
 	if s.connected != nil && s.connected(sessionID) {
 		s.logf("server: session %s: shim already connected (no spawn)", sessionID)
-		return nil
+		return res, nil
 	}
 	held, err := sessionlock.Held(sessionID)
 	if err != nil {
-		return fmt.Errorf("server: session %s: cannot determine whether a shim holds its lock: %w", sessionID, err)
+		return res, fmt.Errorf("server: session %s: cannot determine whether a shim holds its lock: %w", sessionID, err)
 	}
 	if held {
-		return fmt.Errorf("server: session %s: a shim holds the session lock but has not connected — refusing to spawn a duplicate; the holder is alive and may be mid-turn", sessionID)
+		return res, fmt.Errorf("server: session %s: a shim holds the session lock but has not connected — refusing to spawn a duplicate; the holder is alive and may be mid-turn", sessionID)
 	}
 	rec, ok := s.reg.Get(sessionID)
 	if !ok {
-		return fmt.Errorf("server: session %s has no registry record; cannot spawn its UDS shim", sessionID)
+		return res, fmt.Errorf("server: session %s has no registry record; cannot spawn its UDS shim", sessionID)
+	}
+	resume := rec.ClaudeSessionID
+	if resume != "" {
+		if path, exists := session.TranscriptExists(rec.ConfigDir, rec.CWD, resume); !exists {
+			s.logf("server: session %s: STALE RESUME POINTER — the record names vendor conversation %s but no transcript exists at %s; dropping the pointer and starting FRESH rather than handing the CLI a --resume it will exit 1 on",
+				sessionID, resume, path)
+			dropped, dropErr := s.DropResume(sessionID)
+			if dropErr != nil {
+				return res, dropErr
+			}
+			res.StaleResumeDropped = dropped
+			resume = ""
+		}
 	}
 	opts := CreateOpts{
 		CWD:            rec.CWD,
 		Model:          rec.Model,
 		PermissionMode: rec.PermissionMode,
 		ConfigDir:      rec.ConfigDir,
-		Resume:         rec.ClaudeSessionID,
+		Resume:         resume,
 	}
-	s.logf("server: session %s: no live shim — spawning fresh UDS shim (resume=%q)", sessionID, rec.ClaudeSessionID)
+	res.Resumed = resume
+	s.logf("server: session %s: no live shim — spawning fresh UDS shim (resume=%q)", sessionID, resume)
 	stop, err := s.spawn(sessionID, opts)
 	if err != nil {
-		return err
+		return res, err
 	}
 	if stop != nil {
 		s.mu.Lock()
 		s.stops[sessionID] = stop
 		s.mu.Unlock()
 	}
-	return nil
+	return res, nil
+}
+
+// DropResume clears the session's vendor conversation pointer so the next spawn
+// starts fresh, reporting what it dropped.
+//
+// A write failure is SURFACED rather than swallowed: leaving a pointer standing
+// that the daemon has already decided not to honour would make the next
+// bring-up repeat the same failed resume, which is the loop this exists to end.
+func (s *ShimSpawner) DropResume(sessionID string) (string, error) {
+	if s.reg == nil {
+		return "", fmt.Errorf("server: ShimSpawner has no registry; cannot drop session %s's resume pointer", sessionID)
+	}
+	var dropped string
+	found, err := s.reg.Update(sessionID, func(rec *registry.Record) {
+		dropped = rec.ClaudeSessionID
+		rec.ClaudeSessionID = ""
+	})
+	if err != nil {
+		return "", fmt.Errorf("server: session %s: dropping the stale resume pointer FAILED — the next bring-up would repeat the same failed resume: %w", sessionID, err)
+	}
+	if !found {
+		return "", fmt.Errorf("server: session %s: dropping the resume pointer found no record (never registered)", sessionID)
+	}
+	if dropped != "" {
+		s.logf("server: session %s: vendor conversation pointer %s DROPPED from the record", sessionID, dropped)
+	}
+	return dropped, nil
 }
 
 // StopShim SIGTERMs the session's shim (hibernation's clean stop, and the stop
