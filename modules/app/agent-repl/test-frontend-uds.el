@@ -593,24 +593,30 @@ The request-id generator is stubbed deterministic (\"req-fixed\")."
                               logged))))))
 
 (ert-deftest agent-repl-test-uds-dispatch-task-catalog-logs-scoped-shape-in-verbose-mode ()
-  "TaskCatalog diagnostics identify their workspace, session, and roster size."
+  "TaskCatalog diagnostics identify their workspace, session, and roster size.
+The frame names its workspace by cwd; the SINK is scoped by the resolved
+persp name, and the raw cwd stays in the message text."
   ;; Arrange
-  (agent-repl-test--with-uds
-    (let (logged-ws logged-text)
-      (cl-letf (((symbol-function 'agent-repl--log-verbose)
-                 (lambda (ws fmt &rest args)
-                   (setq logged-ws ws
-                         logged-text (apply #'format fmt args)))))
-        ;; Act
-        (agent-repl--uds-dispatch-frame
-         '(:taskCatalog
-           (:workspace "ws1" :sessionId "s1"
-            :tasks ((:taskId "t1") (:taskId "t2")))))
-        ;; Assert
-        (should (equal logged-ws "ws1"))
-        (should (string-match-p "field=taskCatalog" logged-text))
-        (should (string-match-p "session=s1" logged-text))
-        (should (string-match-p "task-count=2" logged-text))))))
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-uds
+      (agent-repl--ws-put "ws1" :project-dir temporary-file-directory)
+      (let (logged-ws logged-text)
+        (cl-letf (((symbol-function 'agent-repl--log-verbose)
+                   (lambda (ws fmt &rest args)
+                     (setq logged-ws ws
+                           logged-text (apply #'format fmt args)))))
+          ;; Act
+          (agent-repl--uds-dispatch-frame
+           (list :taskCatalog
+                 (list :workspace temporary-file-directory :sessionId "s1"
+                       :tasks '((:taskId "t1") (:taskId "t2")))))
+          ;; Assert
+          (should (equal logged-ws "ws1"))
+          (should (string-match-p "field=taskCatalog" logged-text))
+          (should (string-match-p (regexp-quote temporary-file-directory)
+                                  logged-text))
+          (should (string-match-p "session=s1" logged-text))
+          (should (string-match-p "task-count=2" logged-text)))))))
 
 (ert-deftest agent-repl-test-uds-dispatch-unignored-gap-still-warns ()
   "A known arm that is NOT declared ignored still logs the wiring gap loudly."
@@ -961,6 +967,202 @@ workspace open."
   "Loading frontend-uds.el registers the commandAck handler."
   (should (eq (cdr (assoc "commandAck" agent-repl--uds-frame-handlers))
               #'agent-repl--uds-handle-command-ack)))
+
+;;;; ---- Wire CWDs never reach the workspace log sink --------------------
+;;
+;; Every `workspace' field on this transport — inbound frame, outbound
+;; command, tracking registry — is a session CWD, never a persp name.  A CWD
+;; cannot index `agent-repl--workspaces', so handing one to the logging
+;; ladder makes `agent-repl--workspace-log-identity' signal.  Inbound frames
+;; are dispatched from the connection's process filter, where that signal
+;; kills the filter.
+;;
+;; These tests are meaningful ONLY with the durable sink enabled: with it off
+;; `agent-repl--persist-log-record' skips identity resolution entirely, which
+;; is why this file passed for the whole life of the defect.  Hence
+;; `agent-repl-test--with-log-sink-on' (test-helpers.el) around each one.
+
+(defmacro agent-repl-test--with-uds-log-sink (&rest body)
+  "Run BODY under a clean workspace hash, a clean transport, and a live sink."
+  (declare (indent 0))
+  `(agent-repl-test--with-clean-state
+     (agent-repl-test--with-uds
+       (agent-repl-test--with-log-sink-on
+         ,@body))))
+
+(ert-deftest agent-repl-test-uds-dispatch-unowned-cwd-does-not-signal ()
+  "Dispatching a frame whose workspace no live workspace owns must not signal."
+  ;; Arrange
+  (agent-repl-test--with-uds-log-sink
+    ;; Act / Assert — a known arm with no handler still logs, loudly
+    (should-not (agent-repl--uds-dispatch-frame
+                 '(:conversationDelta (:workspace "/nowhere/unowned"))))))
+
+(ert-deftest agent-repl-test-uds-dispatch-resolves-owned-cwd-to-its-name ()
+  "A frame naming an OWNED cwd routes its log line to that workspace's NAME."
+  ;; Arrange
+  (agent-repl-test--with-uds-log-sink
+    (agent-repl--ws-put "ws1" :project-dir temporary-file-directory)
+    (let (logged-ws)
+      (cl-letf (((symbol-function 'agent-repl--log)
+                 (lambda (ws &rest _) (setq logged-ws ws))))
+        ;; Act
+        (agent-repl--uds-dispatch-frame
+         (list :conversationDelta (list :workspace temporary-file-directory)))
+        ;; Assert
+        (should (equal logged-ws "ws1"))))))
+
+(ert-deftest agent-repl-test-uds-send-command-keeps-the-raw-cwd-on-the-wire ()
+  "Resolving for the log must NOT rewrite the cwd the daemon routes by."
+  ;; Arrange
+  (agent-repl-test--with-uds-log-sink
+    (agent-repl--ws-put "ws1" :project-dir temporary-file-directory)
+    (let (sent)
+      (agent-repl-test--capturing-send sent
+        ;; Act
+        (agent-repl--uds-send-command
+         "submitPrompt" '(:text "hi") temporary-file-directory 'fake-proc)
+        ;; Assert
+        (should (equal (plist-get (json-parse-string (string-trim-right sent)
+                                                     :object-type 'plist
+                                                     :array-type 'list)
+                                  :workspace)
+                       temporary-file-directory))))))
+
+(ert-deftest agent-repl-test-uds-send-command-unowned-cwd-does-not-signal ()
+  "Sending for a cwd nothing owns logs globally rather than aborting the send."
+  ;; Arrange
+  (agent-repl-test--with-uds-log-sink
+    (let (sent)
+      (agent-repl-test--capturing-send sent
+        ;; Act / Assert
+        (should (equal (agent-repl--uds-send-command
+                        "submitPrompt" '(:text "hi") "/nowhere/unowned" 'fake-proc)
+                       "req-fixed"))))))
+
+(ert-deftest agent-repl-test-uds-track-command-unowned-cwd-does-not-signal ()
+  "Tracking a command issued for an unowned cwd must not signal."
+  ;; Arrange
+  (agent-repl-test--with-uds-log-sink
+    ;; Act / Assert
+    (should (equal (agent-repl--uds-track-command
+                    "req-1" "submitPrompt" "/nowhere/unowned")
+                   "req-1"))))
+
+(ert-deftest agent-repl-test-uds-track-command-retains-the-raw-cwd ()
+  "The retained `:workspace' stays raw — the ack path correlates against it."
+  ;; Arrange
+  (agent-repl-test--with-uds-log-sink
+    (agent-repl--ws-put "ws1" :project-dir temporary-file-directory)
+    ;; Act
+    (agent-repl--uds-track-command "req-1" "submitPrompt" temporary-file-directory)
+    ;; Assert
+    (should (equal (plist-get (gethash "req-1" agent-repl--uds-pending-commands)
+                              :workspace)
+                   temporary-file-directory))))
+
+(ert-deftest agent-repl-test-uds-untrack-command-unowned-cwd-does-not-signal ()
+  "Untracking after a local timeout must not signal on an unowned cwd."
+  ;; Arrange
+  (agent-repl-test--with-uds-log-sink
+    (agent-repl--uds-track-command "req-1" "submitPrompt" "/nowhere/unowned")
+    ;; Act / Assert
+    (should-not (agent-repl--uds-untrack-command
+                 "req-1" "/nowhere/unowned" "health-timeout"))))
+
+(ert-deftest agent-repl-test-uds-track-health-unowned-cwd-does-not-signal ()
+  "Registering a health waiter for an unowned cwd must not signal."
+  ;; Arrange
+  (agent-repl-test--with-uds-log-sink
+    ;; Act / Assert
+    (should (equal (agent-repl--uds-track-health-response
+                    "req-1" "sessionHealth" "/nowhere/unowned" "s1" #'ignore)
+                   "req-1"))))
+
+(ert-deftest agent-repl-test-uds-track-health-retains-the-raw-cwd ()
+  "The retained health `:workspace' stays raw — the reply is compared to it."
+  ;; Arrange
+  (agent-repl-test--with-uds-log-sink
+    (agent-repl--ws-put "ws1" :project-dir temporary-file-directory)
+    ;; Act
+    (agent-repl--uds-track-health-response
+     "req-1" "sessionHealth" temporary-file-directory "s1" #'ignore)
+    ;; Assert
+    (should (equal (plist-get (gethash "req-1"
+                                       agent-repl--uds-pending-health-responses)
+                              :workspace)
+                   temporary-file-directory))))
+
+(ert-deftest agent-repl-test-uds-untrack-health-unowned-cwd-does-not-signal ()
+  "Dropping a health waiter for an unowned cwd must not signal."
+  ;; Arrange
+  (agent-repl-test--with-uds-log-sink
+    (agent-repl--uds-track-health-response
+     "req-1" "sessionHealth" "/nowhere/unowned" "s1" #'ignore)
+    ;; Act / Assert
+    (should-not (agent-repl--uds-untrack-health-response
+                 "req-1" "/nowhere/unowned" "health-timeout"))))
+
+(ert-deftest agent-repl-test-uds-health-response-untracked-cwd-does-not-signal ()
+  "A health reply arriving after its waiter timed out must not signal."
+  ;; Arrange
+  (agent-repl-test--with-uds-log-sink
+    ;; Act / Assert
+    (should-not (agent-repl--uds-handle-health-response
+                 "sessionHealth"
+                 '(:requestId "req-gone" :workspace "/nowhere/unowned"
+                   :sessionId "s1" :healthy t)))))
+
+(ert-deftest agent-repl-test-uds-health-response-correlated-cwd-does-not-signal ()
+  "A correlated health reply logs under the resolved name, not the cwd."
+  ;; Arrange
+  (agent-repl-test--with-uds-log-sink
+    (agent-repl--uds-track-health-response
+     "req-1" "sessionHealth" "/nowhere/unowned" "s1" #'ignore)
+    ;; Act / Assert
+    (should (agent-repl--uds-handle-health-response
+             "sessionHealth"
+             '(:requestId "req-1" :workspace "/nowhere/unowned"
+               :sessionId "s1" :healthy t)))))
+
+(ert-deftest agent-repl-test-uds-command-ack-untracked-cwd-does-not-signal ()
+  "An ack for a request nobody tracked carries the ack's own wire cwd."
+  ;; Arrange
+  (agent-repl-test--with-uds-log-sink
+    ;; Act / Assert
+    (should-not (agent-repl--uds-handle-command-ack
+                 '(:requestId "req-gone" :workspace "/nowhere/unowned")))))
+
+(ert-deftest agent-repl-test-uds-command-ack-accepted-cwd-does-not-signal ()
+  "An ACCEPTED ack logs under the tracked cwd and must not signal."
+  ;; Arrange
+  (agent-repl-test--with-uds-log-sink
+    (agent-repl--uds-track-command "req-1" "submitPrompt" "/nowhere/unowned")
+    ;; Act / Assert
+    (should (agent-repl--uds-handle-command-ack
+             '(:requestId "req-1" :ok t)))))
+
+(ert-deftest agent-repl-test-uds-command-ack-rejected-cwd-does-not-signal ()
+  "A REJECTED ack also routes its classified failure through the log sink."
+  ;; Arrange
+  (agent-repl-test--with-uds-log-sink
+    (agent-repl--uds-track-command "req-1" "submitPrompt" "/nowhere/unowned")
+    ;; Act / Assert
+    (should-not (agent-repl--uds-handle-command-ack
+                 '(:requestId "req-1" :error "nope"
+                   :failure (:errorClass "ERROR_CLASS_INTERNAL"
+                             :errorType "shim.nack"
+                             :message "the daemon refused"))))))
+
+(ert-deftest agent-repl-test-uds-command-ack-challenge-cwd-does-not-signal ()
+  "The interrupt-confirmation CHALLENGE branch logs with the same cwd."
+  ;; Arrange
+  (agent-repl-test--with-uds-log-sink
+    (agent-repl--uds-track-command "req-1" "interrupt" "/nowhere/unowned")
+    ;; Act / Assert
+    (should-not (agent-repl--uds-handle-command-ack
+                 '(:requestId "req-1"
+                   :interruptConfirmRequired (:liveTasks 2))))))
 
 (provide 'test-frontend-uds)
 
