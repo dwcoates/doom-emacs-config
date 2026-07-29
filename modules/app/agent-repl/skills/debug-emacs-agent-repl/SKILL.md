@@ -453,14 +453,20 @@ The table is append-only: each row is a transition, never an overwrite.
 
 ### 4.2 Five axes, not one timeline
 
-**This is the key mental model.** A workspace's color is not one state machine — it is **five independent axes**, each contributing its LATEST row by `at`. The winner is the **min-rank candidate** across all five.
+**This is the key mental model.** A workspace's color is not one state machine — it is **several independent axes**, each contributing its LATEST row by `at`. The winner is the **min-rank candidate** across all of them.
+
+**Start with the WIRED axis.** A workspace's color is CONNECTION TRUTH: blue means there is no live backend session for it, and every non-blue color is a *guarantee* that the substrate is wired (shim live, handshake complete, store link settled). The agent axis and the vendor outcome are visible ONLY while the wired axis reads `wired`, so a workspace that looks "stuck blue" is usually not a stuck agent row — it is `dormant` (hibernated, never opened, or a daemon that has just restarted, which marks every restored workspace dormant) or `starting` (a bring-up genuinely in flight). Its sole producer is `daemon/internal/sessiondrv/wiredstate.go`.
+
+An **absent** wired row resolves `dormant` too — there is no "unknown".
+
+> **Historical note.** Until 2026-07-28 there was also a **paint axis** (`unpainted` / `painted`), fed by a webview's paint acknowledgment, and a frontend delivery gate that withheld each state from Emacs until that acknowledgment arrived. Both are **gone**, along with the `PaintAckCmd` wire surface. If a database still holds `unpainted` / `painted` rows they are inert: no token maps them to a render state and no CTE selects them.
 
 The practical consequence: **a stale row on any single axis can win.** A workspace can look wrong because one axis was never cleared, while the other four are perfectly current.
 
 | Axis | States it contributes | Clearing token |
 |---|---|---|
-| agent | `init` / `thinking` / `idle` / `ready` / `done` / `permission` / `dead` / `vendor_blocked` | — |
-| paint | `unpainted` | `painted` |
+| agent | `thinking` / `idle` / `ready` / `done` / `interrupted` / `permission` / `dead` / `vendor_blocked` | — |
+| wired | `dormant` / `starting` | `wired` |
 | backfill | `backfill_failed` | `backfill_ok` |
 | degraded | `degraded` | `degraded_clear` |
 | merge | the merge states | `merge_none` |
@@ -487,16 +493,17 @@ Then the five-color ladder (lower rank wins):
 |---|---|---|
 | **BLUE** | 10 | `dead` |
 | | 11 | `degraded` |
-| | 12 | `unpainted` |
+| | 12 | `dormant` |
 | | 13 | `backfill_failed` |
-| | 14 | `init` |
+| | 14 | `starting` |
 | **PURPLE** | 20 | `vendor_blocked` |
 | **RED** | 30 | `thinking` |
 | **YELLOW** | — | `idle_async` — **derived at resolve time** from `live_task_count`, never stored |
 | **GREEN** | 40 | `permission` |
 | | 41 | `done` |
-| | 42 | `ready` |
-| | 43 | `idle` |
+| | 42 | `interrupted` |
+| | 43 | `ready` |
+| | 44 | `idle` |
 
 Two pieces of the ordering rationale are worth quoting, because they explain results that otherwise look like bugs:
 
@@ -524,11 +531,11 @@ Then isolate the axis you suspect — this is the step that actually answers the
 sqlite3 -readonly ~/.cache/agent-repl/ssm/state.db "
   SELECT datetime(at/1000,'unixepoch','localtime') t, state, cause_kind, cause_seq
   FROM workspace_state WHERE workspace='$WS'
-    AND state IN ('init','thinking','permission','done','ready','idle','dead','vendor_blocked')
+    AND state IN ('thinking','permission','done','interrupted','ready','idle','dead','vendor_blocked')
     ORDER BY at DESC LIMIT 10;"
 
-# paint axis (blue)
-#   … AND state IN ('unpainted','painted') …
+# wired axis (blue) — THE FIRST ONE TO CHECK for any blue workspace
+#   … AND state IN ('wired','starting','dormant') …
 # backfill axis (blue)
 #   … AND state IN ('backfill_failed','backfill_ok') …
 # degraded axis (blue)
@@ -567,7 +574,7 @@ So **a restart DOES clear it**, and a live turn outranks it. If a user says "I r
 
 ### 4.7 The masking effect — a color change is not proof of a new cause
 
-A blue axis outranks purple. So **clearing blue** (a paint ack, say) can make a **long-standing purple suddenly appear**, as though something just broke.
+A blue axis outranks purple. So **clearing blue** (a workspace becoming wired, say) can make a **long-standing purple suddenly appear**, as though something just broke.
 
 **The color changing is not evidence that the underlying cause is new.** Always read the axis rows (§4.4) and check the `at` of the winning row, rather than trusting the transition line or the moment the user noticed.
 
