@@ -159,12 +159,19 @@ func (m *Manager) tearDownFailedBringUp(workspace string, d *driven) {
 // resolveStartFailed is the close edge `starting` never had: the axis reports
 // the wiring GONE and the feed gets a card naming the error.
 //
-// The axis closes to `dormant` rather than to a token of its own. Dormant means
-// "no session is wired to this workspace", which is exactly true after a
-// bring-up that failed, and the CARD is where the distinction between "nothing
-// was asked for" and "something was asked for and could not be started" lives —
-// the same division of labour the color vocabulary already makes for every
-// other local fault.
+// The axis closes to `severed` rather than to a token of its own, and severed
+// rather than hibernated is the load-bearing half of that. A bring-up we asked
+// for and could not complete is EVIDENCE THAT SOMETHING BROKE, which is the one
+// thing that separates the two closed halves of the axis: teal would claim this
+// workspace is merely asleep, when in fact a spawn or a handshake failed and the
+// user is owed a blue tab. The CARD is where the finer distinction between
+// "nothing was asked for" and "something was asked for and could not be started"
+// lives — the same division of labour the color vocabulary already makes for
+// every other local fault.
+//
+// This is also why the driver-exit tail can stay silent on a clean exit: the
+// teardown here cancels the driver ctx, ending Run with nil, and this row is
+// already the truer answer that tail would otherwise overwrite.
 func (m *Manager) resolveStartFailed(workspace string, d *driven, cause error) {
 	m.logf("sessiondrv: START FAILED ws=%q session=%s — the wiring is resolved rather than left in `starting`: %v",
 		workspace, d.sessionID, cause)

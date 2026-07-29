@@ -1335,8 +1335,12 @@ func (m *Manager) HibernateSession(workspace, sessionID string) error {
 	// answer is already known at it. A stop that reached a record no longer
 	// driving this workspace leaves the axis alone: a replacement session may
 	// already own it, and closing then would blue out a live one.
+	//
+	// HIBERNATED, never severed. This is a stop WE issued, so nothing broke —
+	// and it is the earlier instant precisely so the benign answer is the one
+	// recorded, before the driver-exit tail can only guess.
 	if ok {
-		m.noteWiring(workspace, ssm.WiringSevered, "hibernate_session")
+		m.noteWiring(workspace, ssm.WiringHibernated, "hibernate_session")
 	}
 	return m.cfg.Spawner.StopShim(sessionID, m.shimPIDFor(sessionID))
 }
@@ -1360,7 +1364,14 @@ func (m *Manager) hibernate(workspace, wantSession string) error {
 	m.mu.Unlock()
 	d.cancel() // stop consuming; the shimclient Run ends
 	m.logf("sessiondrv: hibernating ws=%q session=%s (SIGTERM child shim)", workspace, d.sessionID)
-	m.noteWiring(workspace, ssm.WiringSevered, "hibernated")
+	// HIBERNATED, and this ORDERING is what makes the answer stick. The cancel
+	// above ends client.Run, so the driver-exit tail fires on this same workspace
+	// milliseconds from now; writing the benign answer FIRST is what leaves it
+	// standing, and the tail's silence on a clean exit (see bringUp) is what
+	// keeps it from being overwritten. Reversing the two would repaint every
+	// hibernation blue immediately after it went teal, which is the whole split
+	// undone.
+	m.noteWiring(workspace, ssm.WiringHibernated, "hibernated")
 	return m.cfg.Spawner.StopShim(d.sessionID, m.shimPIDFor(d.sessionID))
 }
 
@@ -1575,13 +1586,47 @@ func (m *Manager) bringUp(workspace string) (*driven, error) {
 				sessionID, len(dropped), workspace)
 		}
 		m.publish(sessionID, view, nil)
-		// THE WIRING IS GONE with the driver, whatever ended it — a terminal
-		// protocol error, a cancelled root context, or the cancel a hibernation
-		// issued. Only the CURRENT driver reports it: a superseded one exiting
-		// says nothing about the replacement that now owns the workspace, and
-		// blueing that replacement out would be a lie about a live session.
-		if wasCurrent {
+		// THE WIRING IS GONE with the driver, and `runErr` is what says whether
+		// that is a FAULT or a teardown we asked for. Only the CURRENT driver
+		// reports it at all: a superseded one exiting says nothing about the
+		// replacement that now owns the workspace, and unwiring that replacement
+		// would be a lie about a live session.
+		//
+		// A NON-NIL runErr IS THE ONLY THING THAT MEANS BROKEN. `client.Run`
+		// loops forever across benign disconnects and returns non-nil only for a
+		// terminal protocol error (see internal/shimclient/client.go), so a
+		// non-nil answer here is genuine evidence the substrate failed.
+		//
+		// A NIL runErr WRITES NOTHING, and the silence is load-bearing rather
+		// than an omission. This tail fires on the SAME workspace milliseconds
+		// after a hibernation, because the hibernation's own cancel is what ended
+		// Run — so a tail that wrote `severed` unconditionally would repaint
+		// every hibernation blue the instant after it went teal, which is the
+		// whole split undone. Every clean cancel of a driver ctx has already
+		// recorded a truer answer than this tail could:
+		//
+		//   - HIBERNATION (Manager.hibernate) and its session-scoped twin
+		//     (HibernateSession) each write `hibernated` BEFORE issuing the
+		//     cancel, at the earlier instant where the reason is still known.
+		//   - A FAILED BRING-UP's escape (bringupescape.go) tears the driver down
+		//     and writes `severed` itself, naming the bring-up that failed.
+		//   - A MANAGER CLOSE cancels the root ctx. The axis it leaves behind is
+		//     rewritten for every workspace by the next boot's
+		//     hibernateEveryWorkspaceLocked, so nothing this tail wrote would
+		//     survive to be read.
+		//   - THE CONCURRENT-FIRST-PROMPT LOSER cancels before this goroutine is
+		//     ever launched, so it produces no tail at all.
+		//
+		// That enumeration is exhaustive over the cancels of a driver ctx, which
+		// is why no `hibernating` flag is needed to discriminate here: the axis is
+		// already correct on every clean path, and re-stating it can only be
+		// wrong.
+		if wasCurrent && runErr != nil {
 			m.noteWiring(workspace, ssm.WiringSevered, "driver_exit")
+		}
+		if wasCurrent && runErr == nil {
+			m.logf("sessiondrv: session %s driver exited CLEANLY ws=%q; leaving the wired axis to whoever asked for the teardown (a hibernation already recorded `hibernated`, a failed bring-up already recorded `severed`)",
+				sessionID, workspace)
 		}
 		// A MANAGER CLOSE IS NOT A DEAD DRIVER, and stopping the shim here on
 		// one would silently defeat the daemon's preserve-on-shutdown contract:
