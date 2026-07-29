@@ -34,6 +34,7 @@ import (
 	"time"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
+	datav1 "agentrepl/proto/agentshim/data/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
 	"claude-repld/internal/dlog"
@@ -97,6 +98,10 @@ type SessionRegistrar interface {
 	// leaving the SSM's dead state and the record's death reason on two
 	// disconnected axes.
 	SessionDied(sessionID, reason string)
+	// SessionModelObserved persists the model a LIVE session reports itself to
+	// be running, which is the only model a respawn should ever be pinned to.
+	// The requested-at-create model is a seed and nothing more.
+	SessionModelObserved(sessionID, model string)
 }
 
 // SpawnResult reports what a bring-up had to REPAIR to get the session up, and
@@ -707,6 +712,32 @@ func (m *Manager) persistBackfillState(sessionID, state string) {
 		return
 	}
 	m.cfg.Registrar.BackfillStateChanged(sessionID, state)
+}
+
+// persistObservedModel writes the model a live session reports through to its
+// registry record, so the next respawn is pinned to what the session IS rather
+// than what was asked for when it was created.
+//
+// THE RECORD USED TO FREEZE AT CREATE. rec.Model was written once, from the
+// frontend's CreateSessionCmd, and read back on every respawn forever after.
+// A session whose model changed mid-life was therefore relaunched as the
+// original model after each hibernation, silently undoing the change.
+//
+// THE PLACEHOLDER IS NEVER ADOPTED. The CLI reports `<synthetic>` when it has
+// no real model to name, and writing that down would poison the record with a
+// value nothing can be spawned under. An unusable answer is dropped loudly
+// rather than persisted (see registry.IsPlaceholderModel).
+//
+// No-op without a registrar (a test harness).
+func (m *Manager) persistObservedModel(sessionID, model string) {
+	if m.cfg.Registrar == nil || model == "" {
+		return
+	}
+	if registry.IsPlaceholderModel(model) {
+		m.logf("sessiondrv: session %s reported model %q — the CLI's placeholder, NOT a model; leaving the record's model alone", sessionID, model)
+		return
+	}
+	m.cfg.Registrar.SessionModelObserved(sessionID, model)
 }
 
 // persistSessionDeath marks the session's record terminal with the reason its
@@ -1337,6 +1368,8 @@ func (m *Manager) bringUp(workspace string) (*driven, error) {
 		if err := m.cfg.SSM.ApplyBackfillState(workspace, state); err != nil {
 			m.logf("sessiondrv: applying backfill %s to the SSM (ws %q): %v", state, workspace, err)
 		}
+	}, func(si *datav1.SystemInit) {
+		m.persistObservedModel(sessionID, si.GetModel())
 	}, func() {
 		m.persistSessionDeath(sessionID, errclass.DeathReasonShimDied)
 	})
