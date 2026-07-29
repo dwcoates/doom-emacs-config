@@ -2056,8 +2056,8 @@ an event-driven signal that the user is back and wants fresh data, so
 it should kick a refresh regardless of the in-flight reentry guard."
   (if (frame-focus-state)
       (progn
-        (agent-repl--log (agent-repl--ws-current-name) "on-frame-focus: focused")
+        (agent-repl--log (agent-repl--ws-current-log-name) "on-frame-focus: focused")
         (agent-repl--update-all-workspace-states-now))
-    (agent-repl--log-verbose (agent-repl--ws-current-name) "on-frame-focus: not focused")))
+    (agent-repl--log-verbose (agent-repl--ws-current-log-name) "on-frame-focus: not focused")))
 
 (add-function :after after-focus-change-function #'agent-repl--on-frame-focus)

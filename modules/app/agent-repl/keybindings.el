@@ -357,7 +357,7 @@ image so the visual mapping between key and glyph is obvious."
 (defun agent-repl-revert-and-eval-buffer ()
   "Revert the current buffer from disk, then evaluate it as Elisp."
   (interactive)
-  (agent-repl--log (agent-repl--ws-current-name) "revert-and-eval-buffer: entry buffer=%s" (buffer-name))
+  (agent-repl--log (agent-repl--ws-current-log-name) "revert-and-eval-buffer: entry buffer=%s" (buffer-name))
   (revert-buffer :ignore-auto :noconfirm)
   (eval-buffer))
 
@@ -386,7 +386,7 @@ Resolves the config path via `agent-repl--reload-config-file' so a
 doom-config worktree reloads its own checkout."
   (interactive)
   (let ((file (agent-repl--reload-config-file)))
-    (agent-repl--log (agent-repl--ws-current-name) "reload-config: file=%s" file)
+    (agent-repl--log (agent-repl--ws-current-log-name) "reload-config: file=%s" file)
     (load-file file)
     (message "[agent-repl] Reloaded %s" file)))
 
@@ -396,7 +396,7 @@ doom-config worktree reloads its own checkout."
 (defun agent-repl-debug/cancel-timers ()
   "Cancel all agent-repl timers."
   (interactive)
-  (agent-repl--log (agent-repl--ws-current-name)
+  (agent-repl--log (agent-repl--ws-current-log-name)
                     "debug/cancel-timers: requested")
   (agent-repl--cancel-all-timers)
   (message "Cancelled all agent-repl timers."))
@@ -405,7 +405,7 @@ doom-config worktree reloads its own checkout."
   "Display all workspace states."
   (interactive)
   (let ((states (mapcar #'agent-repl--cons-name-state (agent-repl--ws-list-names))))
-    (agent-repl--log (agent-repl--ws-current-name)
+    (agent-repl--log (agent-repl--ws-current-log-name)
                       "debug/workspace-states: count=%d states=%S"
                       (length states) states)
     (message "Workspace states:\n%s"
@@ -416,7 +416,7 @@ doom-config worktree reloads its own checkout."
   (interactive)
   (let* ((bufs (cl-remove-if-not #'agent-repl--agent-view-buffer-p (buffer-list)))
          (lines (mapcar #'agent-repl--format-buffer-info bufs)))
-    (agent-repl--log (agent-repl--ws-current-name)
+    (agent-repl--log (agent-repl--ws-current-log-name)
                       "debug/buffer-info: agent-view-count=%d buffers=%S"
                       (length bufs) (mapcar #'buffer-name bufs))
     (message "Claude buffers:\n%s"
@@ -487,7 +487,7 @@ window changes, git-diff sentinels, resolve-root, etc.)."
     (message "[agent-repl] debug logging: %s" label)
     ;; Also emit via the log system so it appears in the log stream.
     (when agent-repl-debug
-      (agent-repl--log (agent-repl--ws-current-name) "debug logging toggled: %s" label))))
+      (agent-repl--log (agent-repl--ws-current-log-name) "debug logging toggled: %s" label))))
 
 (defun agent-repl-debug/toggle-log-to-file ()
   "Toggle writing debug log output to `agent-repl-log-file-name'.
@@ -505,7 +505,7 @@ appended to the file regardless of the `agent-repl-debug' level."
   "Toggle the metaprompt prefix injection."
   (interactive)
   (setq agent-repl-skip-permissions (not agent-repl-skip-permissions))
-  (agent-repl--log (agent-repl--ws-current-name)
+  (agent-repl--log (agent-repl--ws-current-log-name)
                     "debug/toggle-metaprompt: skip-permissions=%s"
                     (if agent-repl-skip-permissions "t" "nil"))
   (message "Agent REPL metaprompt: %s" (if agent-repl-skip-permissions "ON" "OFF")))

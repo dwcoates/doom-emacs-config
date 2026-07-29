@@ -1086,7 +1086,7 @@ by WS's daemon session binding (see
   "Return non-nil if the loading placeholder buffer is displayed in a window."
   (let* ((ph (get-buffer " *agent-loading*"))
          (window (and ph (get-buffer-window ph))))
-    (agent-repl--log-verbose (agent-repl--ws-current-name)
+    (agent-repl--log-verbose (agent-repl--ws-current-log-name)
                               "loading-placeholder-visible-p: buffer-present=%s visible=%s"
                               (not (null ph)) (not (null window)))
     window))

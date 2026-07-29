@@ -506,10 +506,36 @@ Runtime values in ARGS never participate in the operation name."
                                 "log"
                               normalized))))
 
+(defun agent-repl--ws-log-routable-p (ws)
+  "Return non-nil when WS can be resolved to a durable workspace log sink.
+This is the predicate form of `agent-repl--workspace-log-identity''s
+precondition, and the two must agree: passing a WS that satisfies this
+predicate must never make the identity resolver signal.  A test pins that
+equivalence so the two cannot drift apart.
+
+A nil WS is deliberately NOT routable.  nil is the logging ladder's explicit
+global-sink value, not a workspace, and callers pass it directly rather than
+asking this predicate about it.
+
+This exists so a caller holding a name of UNKNOWN provenance — a persp-mode
+perspective, a wire field, a workspace mid-teardown — can ask whether that
+name owns a sink before handing it to the ladder.  It never suppresses the
+invariant; it lets a caller avoid violating it."
+  (and ws
+       (fboundp 'agent-repl--ws-get)
+       (let ((dir (agent-repl--ws-get ws :project-dir)))
+         (and (stringp dir)
+              (file-directory-p dir)
+              (agent-repl--ws-id-cached ws)
+              t))))
+
 (defun agent-repl--workspace-log-identity (ws)
   "Return WS's registered canonical directory and stable workspace identity.
 The logging boundary deliberately refuses to derive either value from ambient
-state because a non-nil WS must identify one specific workspace sink."
+state because a non-nil WS must identify one specific workspace sink.
+
+Callers that cannot guarantee WS names a registered workspace must screen it
+through `agent-repl--ws-log-routable-p' first and pass nil when it does not."
   (let ((dir (and (fboundp 'agent-repl--ws-get)
                   (agent-repl--ws-get ws :project-dir))))
     (unless (and (stringp dir) (file-directory-p dir))

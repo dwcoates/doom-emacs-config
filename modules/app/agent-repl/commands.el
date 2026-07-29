@@ -170,9 +170,9 @@ Without region: returns file:line."
         (let ((start-line (line-number-at-pos (region-beginning)))
               (end-line (line-number-at-pos (region-end))))
           (deactivate-mark)
-          (agent-repl--log (agent-repl--ws-current-name) "format-file-ref: region branch start=%d end=%d" start-line end-line)
+          (agent-repl--log (agent-repl--ws-current-log-name) "format-file-ref: region branch start=%d end=%d" start-line end-line)
           (format "%s:%d-%d" rel start-line end-line))
-      (agent-repl--log (agent-repl--ws-current-name) "format-file-ref: single-line branch line=%d" (line-number-at-pos (point)))
+      (agent-repl--log (agent-repl--ws-current-log-name) "format-file-ref: single-line branch line=%d" (line-number-at-pos (point)))
       (format "%s:%d" rel (line-number-at-pos (point))))))
 
 (eval-when-compile
@@ -194,7 +194,7 @@ Returns a \"file:startline-endline\" string based on the hunk's to-range."
                (agent-repl--path-canonical (expand-file-name file (magit-toplevel)))
                (agent-repl--ws-dir (agent-repl--ws-current-name))))
          (ref (format "%s:%d-%d" rel start end)))
-    (agent-repl--log (agent-repl--ws-current-name) "format-magit-hunk-ref: ref=%s" ref)
+    (agent-repl--log (agent-repl--ws-current-log-name) "format-magit-hunk-ref: ref=%s" ref)
     ref))
 
 (defun agent-repl--context-reference ()
@@ -206,9 +206,9 @@ both active region and point-at-line cases)."
                            'magit-revision-mode)
            (magit-section-match 'hunk))
       (progn
-        (agent-repl--log (agent-repl--ws-current-name) "context-reference: magit-hunk branch")
+        (agent-repl--log (agent-repl--ws-current-log-name) "context-reference: magit-hunk branch")
         (agent-repl--format-magit-hunk-ref))
-    (agent-repl--log (agent-repl--ws-current-name) "context-reference: standard branch")
+    (agent-repl--log (agent-repl--ws-current-log-name) "context-reference: standard branch")
     (agent-repl--format-file-ref)))
 
 ;;;; Code linking (open file + select line range in a left window)
@@ -301,7 +301,7 @@ START-LINE and END-LINE are 1-indexed inclusive line numbers."
 CHANGE-SPEC describes which changes (e.g. \"unstaged changes (git diff)\").
 PROMPT is the analysis instruction."
   (let ((msg (format agent-repl-diff-analysis-message-template change-spec prompt)))
-    (agent-repl--log (agent-repl--ws-current-name) "diff-analysis: %s" change-spec)
+    (agent-repl--log (agent-repl--ws-current-log-name) "diff-analysis: %s" change-spec)
     (agent-repl--send-to-agent msg)))
 
 ;; The whole cluster below — the scope tables and the two helpers — is
@@ -428,7 +428,7 @@ Without region: sends file path and current line."
   (interactive)
   (let* ((ref (agent-repl--context-reference))
          (msg (format agent-repl-explain-prompt-template ref)))
-    (agent-repl--log (agent-repl--ws-current-name) "explain %s" msg)
+    (agent-repl--log (agent-repl--ws-current-log-name) "explain %s" msg)
     (agent-repl--send-to-agent msg)))
 
 (defun agent-repl-explain-prompt ()
@@ -441,10 +441,10 @@ Without region: pre-fills with file path and current line."
   (let* ((ref (agent-repl--context-reference))
          (msg (read-string "Send to Claude: " ref)))
     (when (and msg (not (string-empty-p msg)))
-      (agent-repl--log (agent-repl--ws-current-name) "explain-prompt %s" msg)
+      (agent-repl--log (agent-repl--ws-current-log-name) "explain-prompt %s" msg)
       (agent-repl--send-to-agent msg))
     (when (or (null msg) (string-empty-p msg))
-      (agent-repl--log (agent-repl--ws-current-name)
+      (agent-repl--log (agent-repl--ws-current-log-name)
                         "explain-prompt: empty input; no message sent"))))
 
 
@@ -614,7 +614,7 @@ the agent-shim cutover; that hook counter no longer exists.)"
 (defun agent-repl-update-pr ()
   "Ask Claude to update the PR description for the current branch."
   (interactive)
-  (agent-repl--log (agent-repl--ws-current-name) "update-pr: sending update-pr prompt")
+  (agent-repl--log (agent-repl--ws-current-log-name) "update-pr: sending update-pr prompt")
   (agent-repl--send-to-agent agent-repl-update-pr-prompt))
 
 (defun agent-repl--rebase-onto-origin-master-callback (ws ok output)
@@ -823,7 +823,7 @@ Prompts once with the count before proceeding."
     (unless (y-or-n-p (format "Nuke ALL %d agent-repl workspace(s)? This kills processes and buffers but preserves on-disk state. "
                               count))
       (user-error "Aborted"))
-    (agent-repl--log (agent-repl--ws-current-name) "nuke-all-workspaces: count=%d" count)
+    (agent-repl--log (agent-repl--ws-current-log-name) "nuke-all-workspaces: count=%d" count)
     ;; Snapshot keys before iterating; each call mutates the hash.
     (let ((agent-repl--kill-cause "interactive nuke-all command (agent-repl-nuke-all-workspaces)"))
       (dolist (ws known)
@@ -851,7 +851,7 @@ proceeding.  Same per-workspace teardown as
     (unless (y-or-n-p (format "Nuke %d restored agent-repl workspace(s)? This kills processes and buffers but preserves on-disk state. "
                               count))
       (user-error "Aborted"))
-    (agent-repl--log (agent-repl--ws-current-name)
+    (agent-repl--log (agent-repl--ws-current-log-name)
                       "nuke-restored-workspaces: count=%d" count)
     (let ((agent-repl--kill-cause "interactive nuke-restored command (agent-repl-nuke-restored-workspaces)"))
       (dolist (ws restored)
@@ -893,7 +893,7 @@ session — accidental invocations are easily recoverable."
 With active region: copies file:startline-endline.
 Without region: copies file:line."
   (interactive)
-  (agent-repl--log (agent-repl--ws-current-name) "copy-reference: copying file reference")
+  (agent-repl--log (agent-repl--ws-current-log-name) "copy-reference: copying file reference")
   (let ((ref (agent-repl--format-file-ref)))
     (kill-new ref)
     (message "Copied: %s" ref)))
@@ -2615,18 +2615,18 @@ than the backend's return value."
          (header (agent-repl--picker-header-line
                   (agent-repl--picker-name-width (mapcar #'car entries))))
          (selected nil))
-    (agent-repl--log (agent-repl--ws-current-name)
+    (agent-repl--log (agent-repl--ws-current-log-name)
                       "workspace-picker: entries=%d candidates=%d helm=%s ivy=%s"
                       (length entries) (length candidates)
                       (if (fboundp 'helm) "t" "nil")
                       (if (fboundp 'ivy-read) "t" "nil"))
     (cond
      ((null candidates)
-      (agent-repl--log (agent-repl--ws-current-name) "workspace-picker: no candidates")
+      (agent-repl--log (agent-repl--ws-current-log-name) "workspace-picker: no candidates")
       (message "No known agent-repl workspaces")
       nil)
      ((fboundp 'helm)
-      (agent-repl--log (agent-repl--ws-current-name) "workspace-picker: backend=helm")
+      (agent-repl--log (agent-repl--ws-current-log-name) "workspace-picker: backend=helm")
       ;; Raw-alist helm source: no helm macros, so byte-compilation does
       ;; not require helm at build time (the `fboundp' guard defers the
       ;; call to runtime, where helm is loaded).  A cons candidate
@@ -2639,7 +2639,7 @@ than the backend's return value."
             :buffer "*helm agent-repl workspaces*")
       selected)
      ((fboundp 'ivy-read)
-      (agent-repl--log (agent-repl--ws-current-name) "workspace-picker: backend=ivy")
+      (agent-repl--log (agent-repl--ws-current-log-name) "workspace-picker: backend=ivy")
       (ivy-read (concat header "\nSwitch to workspace: ") candidates
                 :action (lambda (c)
                           (setq selected (cond ((consp c) (cdr c))
@@ -2650,7 +2650,7 @@ than the backend's return value."
                 :caller 'agent-repl-switch-to-project)
       selected)
      (t
-      (agent-repl--log (agent-repl--ws-current-name) "workspace-picker: backend=completing-read")
+      (agent-repl--log (agent-repl--ws-current-log-name) "workspace-picker: backend=completing-read")
       (let* ((choice (completing-read (concat header "  |  Switch to workspace: ")
                                       (mapcar #'car candidates)
                                       nil t))
@@ -2861,7 +2861,7 @@ Keying on perspective existence revives it instead."
                            (agent-repl--log current "picker-open-selection: deferred hydrate current=%s selected=%s dir=%s"
                                              current name dir)
                            (agent-repl--hydrate-and-reorder-on-open current dir)))))
-      (agent-repl--log (agent-repl--ws-current-name)
+      (agent-repl--log (agent-repl--ws-current-log-name)
                         "picker-open-selection: invalid payload without :name payload=%S" payload))))
 
 (defun agent-repl-switch-to-project (&optional project)
@@ -2889,7 +2889,7 @@ revival path that bypasses the Doom hook to preserve the exact ws name."
   (interactive)
   (if project
       (progn
-        (agent-repl--log (agent-repl--ws-current-name) "switch-to-project: project path=%s" project)
+        (agent-repl--log (agent-repl--ws-current-log-name) "switch-to-project: project path=%s" project)
         (agent-repl--ws-switch-project project)
         ;; Defer the file open and display-state disk read so the persp switch
         ;; completes and Emacs redraws before any blocking I/O fires.  Both are
@@ -2910,9 +2910,9 @@ revival path that bypasses the Doom hook to preserve the exact ws name."
     (let ((sel (agent-repl--read-workspace-via-picker)))
       (if sel
           (progn
-            (agent-repl--log (agent-repl--ws-current-name) "switch-to-project: picker selected=%S" sel)
+            (agent-repl--log (agent-repl--ws-current-log-name) "switch-to-project: picker selected=%S" sel)
             (agent-repl--picker-open-selection sel))
-        (agent-repl--log (agent-repl--ws-current-name) "switch-to-project: picker cancelled-or-empty")))))
+        (agent-repl--log (agent-repl--ws-current-log-name) "switch-to-project: picker cancelled-or-empty")))))
 
 ;;;; Workspace cycling
 

@@ -657,14 +657,14 @@ Handles input preparation, sending, history, and persistence."
 (defun agent-repl-send-and-hide ()
   "Send input to Claude and hide both panels."
   (interactive)
-  (agent-repl--log (agent-repl--ws-current-name) "send-and-hide")
+  (agent-repl--log (agent-repl--ws-current-log-name) "send-and-hide")
   (agent-repl--send)
   (agent-repl--on-close))
 
 (defun agent-repl-send-with-metaprompt ()
   "Send input with the metaprompt prefix, bypassing the counter."
   (interactive)
-  (agent-repl--log (agent-repl--ws-current-name) "send-with-metaprompt")
+  (agent-repl--log (agent-repl--ws-current-log-name) "send-with-metaprompt")
   (agent-repl--send nil nil t))
 
 (defun agent-repl--fire-metaprompt-read (ws)
@@ -718,7 +718,7 @@ read."
 (defun agent-repl-send-with-postfix ()
   "Append `agent-repl-send-postfix' to the input buffer, then send."
   (interactive)
-  (agent-repl--log (agent-repl--ws-current-name) "send-with-postfix")
+  (agent-repl--log (agent-repl--ws-current-log-name) "send-with-postfix")
   (agent-repl--append-to-input-buffer agent-repl-send-postfix)
   (agent-repl--send))
 
@@ -737,7 +737,7 @@ read."
 (defun agent-repl-send-with-prefix ()
   "Prepend `agent-repl-send-prefix' to the input buffer, then send."
   (interactive)
-  (agent-repl--log (agent-repl--ws-current-name) "send-with-prefix")
+  (agent-repl--log (agent-repl--ws-current-log-name) "send-with-prefix")
   (agent-repl--prepend-to-input-buffer agent-repl-send-prefix)
   (agent-repl--send))
 

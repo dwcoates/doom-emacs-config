@@ -472,7 +472,7 @@ Skips empty strings and duplicates of the most recent entry."
 
 (defun agent-repl--history-reset ()
   "Reset history browsing index to the default (not browsing) state."
-  (agent-repl--log-verbose (agent-repl--ws-current-name) "history-reset: index=%d -> -1" agent-repl--history-index)
+  (agent-repl--log-verbose (agent-repl--ws-current-log-name) "history-reset: index=%d -> -1" agent-repl--history-index)
   (setq agent-repl--history-index -1))
 
 (defun agent-repl--history-replace-buffer-text (text)
@@ -485,7 +485,7 @@ Binds `agent-repl--history-navigating' to suppress `history-on-change'."
 (defun agent-repl--history-show-entry (index)
   "Display the history entry at INDEX, or the stash when INDEX is negative.
 Updates `agent-repl--history-index' and replaces the buffer contents."
-  (agent-repl--log (agent-repl--ws-current-name) "history-show-entry: index=%d history-count=%d source=%s"
+  (agent-repl--log (agent-repl--ws-current-log-name) "history-show-entry: index=%d history-count=%d source=%s"
                    index (length agent-repl--input-history) (if (< index 0) :stash :history))
   (setq agent-repl--history-index index)
   (agent-repl--history-replace-buffer-text
@@ -548,7 +548,7 @@ Index is the position into `agent-repl--input-history' (0 = most recent)."
   (let ((candidates (cl-loop for entry in agent-repl--input-history
                              for i from 0
                              collect (cons (agent-repl--history-format-candidate entry i) i))))
-    (agent-repl--log-verbose (agent-repl--ws-current-name) "history-search-candidates: history-count=%d candidate-count=%d" (length agent-repl--input-history) (length candidates))
+    (agent-repl--log-verbose (agent-repl--ws-current-log-name) "history-search-candidates: history-count=%d candidate-count=%d" (length agent-repl--input-history) (length candidates))
     candidates))
 
 (defun agent-repl-history-search ()
@@ -559,24 +559,24 @@ the selection.  Stashes the in-progress text on first navigation so
 arrow-key navigation flow.  No-op (with a message) when history is
 empty."
   (interactive)
-  (agent-repl--log (agent-repl--ws-current-name) "history-search: entries=%d"
+  (agent-repl--log (agent-repl--ws-current-log-name) "history-search: entries=%d"
                     (length agent-repl--input-history))
   (if (null agent-repl--input-history)
       (progn
-        (agent-repl--log (agent-repl--ws-current-name) "history-search: no-op empty-history")
+        (agent-repl--log (agent-repl--ws-current-log-name) "history-search: no-op empty-history")
         (message "[agent-repl] input history is empty"))
     (let* ((candidates (agent-repl--history-search-candidates))
            (choice (condition-case err
                        (completing-read "Claude history: " (mapcar #'car candidates) nil t)
                      (quit
-                      (agent-repl--log (agent-repl--ws-current-name) "history-search: cancelled entries=%d" (length candidates))
+                      (agent-repl--log (agent-repl--ws-current-log-name) "history-search: cancelled entries=%d" (length candidates))
                       (signal (car err) (cdr err)))))
            (index (cdr (assoc choice candidates))))
       (unless index
-        (agent-repl--log (agent-repl--ws-current-name) "history-search: invalid selection candidate-count=%d" (length candidates))
+        (agent-repl--log (agent-repl--ws-current-log-name) "history-search: invalid selection candidate-count=%d" (length candidates))
         (error "agent-repl: history search selection was not a candidate"))
       (when (= agent-repl--history-index -1)
         (setq agent-repl--history-stash (buffer-string))
-        (agent-repl--log (agent-repl--ws-current-name) "history-search: stashed draft draft-chars=%d" (length agent-repl--history-stash)))
-      (agent-repl--log (agent-repl--ws-current-name) "history-search: selected index=%d candidate-count=%d" index (length candidates))
+        (agent-repl--log (agent-repl--ws-current-log-name) "history-search: stashed draft draft-chars=%d" (length agent-repl--history-stash)))
+      (agent-repl--log (agent-repl--ws-current-log-name) "history-search: selected index=%d candidate-count=%d" index (length candidates))
       (agent-repl--history-show-entry index))))
