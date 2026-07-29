@@ -128,7 +128,10 @@ func TestVersionMismatchRefusesBeforeAnyOtherGateStageRuns(t *testing.T) {
 	})
 	cfg := h.config(t, "sess-1", path)
 	hooked := make(chan struct{}, 1)
-	cfg.OnHandshake = func(*corev1.ShimHello) { hooked <- struct{}{} }
+	cfg.OnHandshake = func(*corev1.ShimHello) error {
+		hooked <- struct{}{}
+		return nil
+	}
 	c := New(cfg)
 
 	// Act

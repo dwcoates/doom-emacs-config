@@ -2,6 +2,7 @@ package shimclient
 
 import (
 	"context"
+	"errors"
 	"net"
 	"testing"
 	"time"
@@ -69,10 +70,11 @@ func TestOnHandshakeRunsBeforeTheDaemonHelloReadsItsPosition(t *testing.T) {
 		ProtocolVersion: "1", VendorSessionId: "uuid-new",
 	})
 	cfg := h.config(t, "sess-1", path)
-	cfg.OnHandshake = func(hello *corev1.ShimHello) {
+	cfg.OnHandshake = func(hello *corev1.ShimHello) error {
 		if hello.GetVendorSessionId() == "uuid-new" {
 			h.seq.SetLastSeq("sess-1", 0)
 		}
+		return nil
 	}
 	c := New(cfg)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -102,7 +104,10 @@ func TestOnHandshakeCarriesTheAnnouncedVendorSessionID(t *testing.T) {
 	})
 	cfg := h.config(t, "sess-1", path)
 	seen := make(chan string, 1)
-	cfg.OnHandshake = func(hello *corev1.ShimHello) { seen <- hello.GetVendorSessionId() }
+	cfg.OnHandshake = func(hello *corev1.ShimHello) error {
+		seen <- hello.GetVendorSessionId()
+		return nil
+	}
 	c := New(cfg)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -136,10 +141,11 @@ func TestDaemonHelloKeepsItsPositionWhenTheHookResetsNothing(t *testing.T) {
 		ProtocolVersion: "1", VendorSessionId: "uuid-old",
 	})
 	cfg := h.config(t, "sess-1", path)
-	cfg.OnHandshake = func(hello *corev1.ShimHello) {
+	cfg.OnHandshake = func(hello *corev1.ShimHello) error {
 		if hello.GetVendorSessionId() != "uuid-old" {
 			h.seq.SetLastSeq("sess-1", 0)
 		}
+		return nil
 	}
 	c := New(cfg)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -156,4 +162,52 @@ func TestDaemonHelloKeepsItsPositionWhenTheHookResetsNothing(t *testing.T) {
 	}
 	cancel()
 	<-errCh
+}
+
+func TestRejectedHandshakeIsTerminalBeforeDaemonHelloAndReady(t *testing.T) {
+	h := newHarness()
+	frames := make(chan any, 1)
+	closed := make(chan error, 1)
+	path := startFakeShim(t, func(conn net.Conn) {
+		mustWriteMsg(t, conn, &corev1.ShimHello{
+			SessionId: "sess-1", Vendor: "claude", ShimVersion: "test-shim",
+			ProtocolVersion: "1", ActiveTurnIds: []string{"turn-other"},
+		})
+		msg, err := wire.ReadAny(conn)
+		if err != nil {
+			closed <- err
+			return
+		}
+		frames <- msg
+	})
+	cfg := h.config(t, "sess-1", path)
+	reconcileErr := errors.New("active turn identities disagree")
+	cfg.OnHandshake = func(*corev1.ShimHello) error { return reconcileErr }
+	connected := make(chan struct{}, 1)
+	cfg.OnConnected = func(*corev1.ShimHello) { connected <- struct{}{} }
+	c := New(cfg)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	err := c.Run(ctx)
+	if !errors.Is(err, ErrHandshakeRejected) {
+		t.Fatalf("Run err = %v, want ErrHandshakeRejected", err)
+	}
+	select {
+	case msg := <-frames:
+		t.Fatalf("rejected handshake sent %T; want connection closed before DaemonHello", msg)
+	case <-closed:
+	case <-time.After(time.Second):
+		t.Fatal("shim did not observe the rejected connection close")
+	}
+	select {
+	case <-connected:
+		t.Fatal("OnConnected ran for a rejected handshake")
+	default:
+	}
+	readyCtx, readyCancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer readyCancel()
+	if err := c.AwaitReady(readyCtx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("AwaitReady err = %v, want deadline: rejected handshake must not close ready gate", err)
+	}
 }

@@ -66,11 +66,12 @@ func (c *Client) readLoop(ctx context.Context, ac *activeConn) error {
 }
 
 // dispatchEvent routes one Event and maintains last_seen_seq. Lifecycle
-// payloads go to the StateSink (SSM), DegradedState to the DegradedReporter,
-// and everything else (data.v1 vendor Any, ContentDelta, HeartbeatProgress,
-// MessageLatency, ContextCleared, ContextCompacted, UnparsedEvent) to the
-// FrameSink. PERSISTENT events (seq > 0) advance the monotonic high-water mark;
-// a regression is a fatal protocol violation.
+// payloads go to the StateSink (SSM), TurnClaimBridge goes only to its durable
+// ledger sink, DegradedState to the DegradedReporter, and everything else
+// (data.v1 vendor Any, ContentDelta, HeartbeatProgress, MessageLatency,
+// ContextCleared, ContextCompacted, UnparsedEvent) to the FrameSink. PERSISTENT
+// events (seq > 0) advance the monotonic high-water mark; a regression is a
+// fatal protocol violation.
 func (c *Client) dispatchEvent(ev *corev1.Event) error {
 	if seq := ev.GetSeq(); seq > 0 {
 		if seq <= c.lastSeen {
@@ -90,6 +91,16 @@ func (c *Client) dispatchEvent(ev *corev1.Event) error {
 		if err := c.cfg.FileDiagnostics.PersistFileDiagnostic(ev, p.FilePlaneDiagnostic); err != nil {
 			return fmt.Errorf("shimclient: persist file-plane diagnostic: %w", err)
 		}
+	case *corev1.Event_TurnClaimBridge:
+		if c.cfg.TurnClaims == nil {
+			return fmt.Errorf("%w session=%s seq=%d: sink is not wired",
+				ErrTurnClaimRejected, ev.GetSessionId(), ev.GetSeq())
+		}
+		if err := c.cfg.TurnClaims.ApplyTurnClaimBridge(ev); err != nil {
+			return fmt.Errorf("%w session=%s seq=%d turn_id=%q: %v",
+				ErrTurnClaimRejected, ev.GetSessionId(), ev.GetSeq(),
+				p.TurnClaimBridge.GetTurnId(), err)
+		}
 	case *corev1.Event_SessionStarted,
 		*corev1.Event_SessionEnded,
 		*corev1.Event_TurnStarted,
@@ -97,7 +108,10 @@ func (c *Client) dispatchEvent(ev *corev1.Event) error {
 		*corev1.Event_TaskStarted,
 		*corev1.Event_TaskProgress,
 		*corev1.Event_TaskEnded:
-		c.cfg.StateSink.Apply(ev)
+		if err := c.cfg.StateSink.Apply(ev); err != nil {
+			return fmt.Errorf("%w session=%s seq=%d kind=%T: %v",
+				ErrLifecycleRejected, ev.GetSessionId(), ev.GetSeq(), p, err)
+		}
 	case *corev1.Event_DegradedState:
 		c.logf("shim reported DegradedState component=%s reason=%q dropped=%d recovered=%v",
 			p.DegradedState.GetComponent(), p.DegradedState.GetReason(),

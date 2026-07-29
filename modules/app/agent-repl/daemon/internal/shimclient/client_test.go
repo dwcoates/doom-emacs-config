@@ -46,10 +46,30 @@ func (s *memSeqStore) SetLastSeq(id string, seq uint64) {
 
 // chanState / chanFrame capture routed events on buffered channels so tests
 // synchronize on delivery instead of sleeping.
-type chanState struct{ ch chan *corev1.Event }
+type chanState struct {
+	ch  chan *corev1.Event
+	err error
+}
 
-func newChanState() *chanState              { return &chanState{ch: make(chan *corev1.Event, 256)} }
-func (s *chanState) Apply(ev *corev1.Event) { s.ch <- ev }
+func newChanState() *chanState { return &chanState{ch: make(chan *corev1.Event, 256)} }
+func (s *chanState) Apply(ev *corev1.Event) error {
+	s.ch <- ev
+	return s.err
+}
+
+type chanTurnClaims struct {
+	ch  chan *corev1.Event
+	err error
+}
+
+func newChanTurnClaims() *chanTurnClaims {
+	return &chanTurnClaims{ch: make(chan *corev1.Event, 256)}
+}
+
+func (s *chanTurnClaims) ApplyTurnClaimBridge(ev *corev1.Event) error {
+	s.ch <- ev
+	return s.err
+}
 
 type chanFrame struct{ ch chan *corev1.Event }
 
@@ -83,19 +103,21 @@ func (f funcPerm) HandlePermission(id string, req *corev1.PermissionRequest) *co
 
 // harness bundles the doubles and builds a Config with test-friendly tunables.
 type harness struct {
-	seq   *memSeqStore
-	state *chanState
-	frame *chanFrame
-	deg   *chanDegraded
-	perm  PermissionHandler
+	seq    *memSeqStore
+	state  *chanState
+	claims *chanTurnClaims
+	frame  *chanFrame
+	deg    *chanDegraded
+	perm   PermissionHandler
 }
 
 func newHarness() *harness {
 	return &harness{
-		seq:   newMemSeqStore(),
-		state: newChanState(),
-		frame: newChanFrame(),
-		deg:   newChanDegraded(),
+		seq:    newMemSeqStore(),
+		state:  newChanState(),
+		claims: newChanTurnClaims(),
+		frame:  newChanFrame(),
+		deg:    newChanDegraded(),
 		perm: funcPerm(func(_ string, req *corev1.PermissionRequest) *corev1.PermissionResponse {
 			return &corev1.PermissionResponse{RequestId: req.GetRequestId(), Decision: corev1.PermissionDecision_PERMISSION_DECISION_ALLOW}
 		}),
@@ -116,6 +138,7 @@ func (h *harness) config(t *testing.T, sessionID, path string) Config {
 		ProtocolVersion:   "1",
 		SeqStore:          h.seq,
 		StateSink:         h.state,
+		TurnClaims:        h.claims,
 		FrameSink:         h.frame,
 		Degraded:          h.deg,
 		Permissions:       h.perm,

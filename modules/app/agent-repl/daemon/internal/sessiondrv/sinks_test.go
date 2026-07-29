@@ -114,8 +114,13 @@ func lastPermissionDenyMessage(p *fakePusher, uuid string) string {
 
 // fakeApplier records applied events and optionally returns an error.
 type fakeApplier struct {
-	applied []*corev1.Event
-	err     error
+	applied   []*corev1.Event
+	err       error
+	turns     []string
+	starts    map[string]uint64
+	ends      map[string]uint64
+	bridges   []*corev1.Event
+	bridgeErr error
 	// reconciled records one entry per ReconcileTasks call, as
 	// (sessionID, liveTaskIDs).
 	reconciled  []reconcileCall
@@ -315,6 +320,73 @@ func (a *fakeApplier) Apply(ev *corev1.Event) error {
 	return a.err
 }
 
+func (a *fakeApplier) ResolveTurnLifecycle(_ string, _ string, ev *corev1.Event) (before, after []string, replayed bool, err error) {
+	a.reconcMutex.Lock()
+	defer a.reconcMutex.Unlock()
+	if a.starts == nil {
+		a.starts = make(map[string]uint64)
+		a.ends = make(map[string]uint64)
+	}
+	before = append([]string(nil), a.turns...)
+	id := turnID(ev)
+	key := fmt.Sprintf("%s:%d", id, ev.GetSeq())
+	switch ev.GetPayload().(type) {
+	case *corev1.Event_TurnStarted:
+		if prior, ok := a.starts[key]; ok && prior == ev.GetSeq() {
+			return before, before, true, nil
+		}
+		for _, active := range a.turns {
+			if id != "" && active == id {
+				return before, before, false, fmt.Errorf("duplicate active turn %q", id)
+			}
+		}
+		a.starts[key] = ev.GetSeq()
+		a.turns = append(a.turns, id)
+	case *corev1.Event_TurnEnded:
+		if prior, ok := a.ends[key]; ok && prior == ev.GetSeq() {
+			return before, before, true, nil
+		}
+		if len(a.turns) == 0 || a.turns[0] != id {
+			return before, before, false, fmt.Errorf("turn end %q has no matching durable claim", id)
+		}
+		a.ends[key] = ev.GetSeq()
+		a.turns = append([]string(nil), a.turns[1:]...)
+	}
+	return before, append([]string(nil), a.turns...), false, nil
+}
+
+func (a *fakeApplier) ResolveTurnClaimBridge(_ string, _ string, ev *corev1.Event) (bool, error) {
+	a.reconcMutex.Lock()
+	defer a.reconcMutex.Unlock()
+	a.bridges = append(a.bridges, ev)
+	if a.bridgeErr != nil {
+		return false, a.bridgeErr
+	}
+	id := ev.GetTurnClaimBridge().GetTurnId()
+	for _, active := range a.turns {
+		if active == id {
+			return false, nil
+		}
+	}
+	a.turns = append(a.turns, id)
+	return false, nil
+}
+
+func (a *fakeApplier) ReconcileTurnHandshake(_ string, _ string, ids []string, legacyActive bool) (before, after []string, err error) {
+	a.reconcMutex.Lock()
+	defer a.reconcMutex.Unlock()
+	before = append([]string(nil), a.turns...)
+	switch {
+	case len(ids) > 0 && len(a.turns) == 0:
+		a.turns = append([]string(nil), ids...)
+	case len(ids) > 0 && !reflect.DeepEqual(ids, a.turns):
+		return before, before, fmt.Errorf("handshake ids %v disagree with durable ids %v", ids, a.turns)
+	case legacyActive && len(a.turns) == 0:
+		a.turns = []string{""}
+	}
+	return before, append([]string(nil), a.turns...), nil
+}
+
 func (a *fakeApplier) ReconcileTasks(sessionID string, liveTaskIDs []string) error {
 	a.reconcMutex.Lock()
 	a.reconciled = append(a.reconciled, reconcileCall{sessionID: sessionID, taskIDs: liveTaskIDs})
@@ -333,6 +405,60 @@ func newTestConsumer(push Pusher, applier StateApplier) *consumer {
 	c := newConsumer("ws", "s1", push, applier, nil, newFakeClearCompactStore(), nil, nil, nil, nil, nil, nil)
 	c.now = func() int64 { return 1000 }
 	return c
+}
+
+func TestTurnClaimBridgeTouchesOnlyDurableLedger(t *testing.T) {
+	push := &fakePusher{}
+	applier := &fakeApplier{}
+	progress := &fakeProgress{}
+	turnNotifications := 0
+	c := newConsumer(
+		"ws", "s1", push, applier, progress, newFakeClearCompactStore(),
+		func(string, ...any) {}, nil,
+		func(bool) { turnNotifications++ }, nil, nil, nil,
+	)
+	bridge := &corev1.Event{
+		SessionId: "vendor-new",
+		Seq:       2,
+		Plane:     corev1.Plane_PLANE_STREAM,
+		Class:     corev1.EventClass_EVENT_CLASS_PERSISTENT,
+		RequestId: "turn-1",
+		Payload: &corev1.Event_TurnClaimBridge{TurnClaimBridge: &corev1.TurnClaimBridge{
+			TurnId: "turn-1", PreviousSessionId: "vendor-old",
+		}},
+	}
+
+	if err := c.ApplyTurnClaimBridge(bridge); err != nil {
+		t.Fatalf("ApplyTurnClaimBridge: %v", err)
+	}
+	if len(applier.bridges) != 1 || applier.bridges[0] != bridge {
+		t.Fatalf("durable bridge calls = %v, want exactly the proof event", applier.bridges)
+	}
+	if len(applier.applied) != 0 {
+		t.Fatalf("SSM Apply received bridge: %v", applier.applied)
+	}
+	if len(progress.applied) != 0 {
+		t.Fatalf("progress received bridge: %v", progress.applied)
+	}
+	if turnNotifications != 0 {
+		t.Fatalf("onTurn calls = %d, want 0", turnNotifications)
+	}
+	if len(c.ring) != 0 {
+		t.Fatalf("retained ring length = %d, want 0", len(c.ring))
+	}
+	if len(push.convo)+len(push.typing)+len(push.catalog)+len(push.state)+
+		len(push.inits)+len(push.heartbeats)+len(push.queues) != 0 {
+		t.Fatal("frontend received a push from turn claim proof")
+	}
+
+	if err := c.Apply(bridge); err == nil ||
+		!strings.Contains(err.Error(), "must use ApplyTurnClaimBridge") {
+		t.Fatalf("misrouted bridge error = %v", err)
+	}
+	if len(applier.applied) != 0 || len(progress.applied) != 0 ||
+		turnNotifications != 0 || len(c.ring) != 0 {
+		t.Fatal("misrouted bridge mutated an outward lifecycle consumer")
+	}
 }
 
 // fakeProgress records what the consumer folds into the progress resolver.

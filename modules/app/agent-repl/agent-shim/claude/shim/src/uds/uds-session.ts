@@ -73,6 +73,7 @@ import {
   SessionSource,
   SessionStartedSchema,
   ShimReadySchema,
+  TurnClaimBridgeSchema,
   TurnStartedSchema,
 } from "./proto.js";
 
@@ -144,8 +145,25 @@ export class UdsSession {
    * consume the first id. The same ids ride TurnStarted, TurnEnded, and every
    * reattach ShimHello, making an older result incapable of closing a newer
    * turn at the daemon.
-   */
+  */
   private readonly activeTurnIds: string[] = [];
+  /**
+   * The persistent TurnStarted receipt for each active identity.
+   *
+   * Prompt acceptance can precede a vendor UUID rotation: the start is then
+   * filed in the retiring seq space while the SDK result/end belongs to the
+   * new one. Keeping the receipt lets routeSdkMessage bridge that same stable
+   * turn into the new batch before its end, so a daemon that missed the old
+   * tail never sees an unproved completion.
+   */
+  private readonly activeTurnStarts = new Map<string, Event>();
+  /**
+   * Result-correlated turns whose TurnEnded batch has not received its durable
+   * StoreWriteAck yet. They remain handshake claims across a rotation bounce:
+   * removing the id when the SDK merely emits `result` creates a window where
+   * ShimHello says idle while the daemon has not observed any end.
+   */
+  private readonly pendingTurnEndIds: string[] = [];
   private closed = false;
   /** Idle bound for a bounded replay's store subscription (see deps). */
   private readonly replayIdleMs: number;
@@ -338,8 +356,8 @@ export class UdsSession {
         // still answer them; cancelAll fires only on interrupt/shutdown.
         LOGGER.log({
           agent_repl_session_id: this.deps.sessionId,
-          turn_in_flight: this.activeTurnIds.length > 0,
-          active_turn_ids: this.activeTurnIds,
+          turn_in_flight: this.handshakeTurnIds().length > 0,
+          active_turn_ids: this.handshakeTurnIds(),
         }, `daemon detached; session and turn survive (awaiting reattach)`);
       },
     };
@@ -349,8 +367,8 @@ export class UdsSession {
         sessionId: this.deps.sessionId,
         shimVersion: this.deps.shimVersion,
         protocolVersion: this.deps.protocolVersion,
-        turnInFlight: () => this.activeTurnIds.length > 0,
-        activeTurnIds: () => [...this.activeTurnIds],
+        turnInFlight: () => this.handshakeTurnIds().length > 0,
+        activeTurnIds: () => this.handshakeTurnIds(),
         // The daemon resets its store cursor when this differs from the uuid
         // it has persisted, which is how a rotation's fresh seq space is
         // subscribed from zero instead of from a retired high-water mark.
@@ -708,6 +726,7 @@ export class UdsSession {
     // A result without a claim is an invariant violation: persist the vendor
     // evidence, report degraded state, and emit no fabricated lifecycle end.
     let turnId: string | undefined;
+    let turnStart: Event | undefined;
     if (msg.type === "result") {
       turnId = this.activeTurnIds.shift();
       if (turnId === undefined) {
@@ -715,6 +734,10 @@ export class UdsSession {
           "claude-shim-turn-lifecycle",
           "SDK result has no accepted prompt turn to close",
         );
+      } else {
+        turnStart = this.activeTurnStarts.get(turnId);
+        this.activeTurnStarts.delete(turnId);
+        this.pendingTurnEndIds.push(turnId);
       }
     }
     const { vendor, lifecycle } = convert(msg, {
@@ -731,6 +754,39 @@ export class UdsSession {
     this.store.adoptStoreKey(vendor.sessionId);
     setClaudeSessionId(vendor.sessionId);
     this.settleStoreKey(vendor.sessionId);
+    let turnClaimBridge: Event | undefined;
+    if (turnId !== undefined && turnStart !== undefined && turnStart.sessionId !== vendor.sessionId) {
+      if (turnStart.payload.case !== "turnStarted") {
+        throw new Error(
+          `active turn ${JSON.stringify(turnId)} retained ${turnStart.payload.case || "empty"} instead of TurnStarted`,
+        );
+      }
+      turnClaimBridge = create(EventSchema, {
+        sessionId: vendor.sessionId,
+        seq: 0n,
+        plane: turnStart.plane,
+        class: turnStart.class,
+        requestId: turnId,
+        producedAtMs: turnStart.producedAtMs,
+        payload: {
+          case: "turnClaimBridge",
+          value: create(TurnClaimBridgeSchema, {
+            turnId,
+            previousSessionId: turnStart.sessionId,
+          }),
+        },
+      });
+    }
+    if (turnClaimBridge !== undefined) {
+      LOGGER.log({
+        agent_repl_session_id: this.deps.sessionId,
+        request_id: turnId,
+        turn_id: turnId,
+        previous_session_id: turnStart!.sessionId,
+        claude_session_id: vendor.sessionId,
+        decision: "emit_turn_claim_bridge",
+      }, "writing non-lifecycle turn correlation proof in rotated vendor seq space");
+    }
     const authoritativeLifecycle = msg.type === "result" && turnId === undefined
       ? lifecycle.filter((event) => event.payload.case !== "turnEnded")
       : lifecycle;
@@ -752,10 +808,40 @@ export class UdsSession {
       store_key: this.store.storeSessionId(),
       turn_id: turnId,
     }, "writing persistent SDK event batch to store");
-    void this.store.write([vendor, ...authoritativeLifecycle]).catch(() => {
+    const write = this.store.write([
+      vendor,
+      ...(turnClaimBridge !== undefined ? [turnClaimBridge] : []),
+      ...authoritativeLifecycle,
+    ]);
+    void write.then((ack) => {
+      if (turnId === undefined) return;
+      const index = this.pendingTurnEndIds.indexOf(turnId);
+      if (index < 0) {
+        LOGGER.log({
+          level: "error",
+          agent_repl_session_id: this.deps.sessionId,
+          request_id: turnId,
+          turn_id: turnId,
+          store_last_seq: ack.lastSeq,
+          pending_turn_end_ids: this.pendingTurnEndIds,
+          decision: "reject_missing_pending_end_claim",
+        }, "StoreWriteAck for TurnEnded had no pending handshake claim");
+        return;
+      }
+      this.pendingTurnEndIds.splice(index, 1);
+      LOGGER.log({
+        agent_repl_session_id: this.deps.sessionId,
+        request_id: turnId,
+        turn_id: turnId,
+        store_last_seq: ack.lastSeq,
+        pending_turn_end_ids: this.pendingTurnEndIds,
+        decision: "retire_durable_turn_end_claim",
+      }, "TurnEnded is durably observable; retired its handshake claim");
+    }).catch(() => {
       // The honest sad path lives INSIDE StoreClient (loud-log per dropped
       // event + DegradedState to onDegraded). Nothing to add here; we only
-      // keep the rejected promise from going unhandled.
+      // keep the rejected promise from going unhandled. Its pending handshake
+      // claim deliberately remains: no durable TurnEnded exists to retire it.
     });
   }
 
@@ -782,6 +868,7 @@ export class UdsSession {
         }),
       },
     });
+    this.activeTurnStarts.set(requestId, evt);
     if (!this.storeKeyKnown) {
       // The vendor session id is genuinely unknown until the SDK reveals it
       // (a fresh session carries no `--resume` id), and the store keys its seq
@@ -823,6 +910,11 @@ export class UdsSession {
 
   private now(): number {
     return this.deps.nowMs !== undefined ? this.deps.nowMs() : Date.now();
+  }
+
+  /** Stable turn claims to announce on ShimHello, in acceptance order. */
+  private handshakeTurnIds(): string[] {
+    return [...this.pendingTurnEndIds, ...this.activeTurnIds];
   }
 
   /**

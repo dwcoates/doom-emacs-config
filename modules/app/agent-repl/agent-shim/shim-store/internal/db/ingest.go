@@ -165,6 +165,8 @@ func kindOf(ev *corev1.Event) string {
 		return "TurnStarted"
 	case *corev1.Event_TurnEnded:
 		return "TurnEnded"
+	case *corev1.Event_TurnClaimBridge:
+		return "TurnClaimBridge"
 	case *corev1.Event_TaskStarted:
 		return "TaskStarted"
 	case *corev1.Event_TaskProgress:

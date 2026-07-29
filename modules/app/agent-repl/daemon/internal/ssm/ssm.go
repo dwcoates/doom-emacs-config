@@ -254,6 +254,9 @@ func (m *Manager) Apply(ev *corev1.Event) error {
 				ev.GetPlane().String(), sid, ev.GetSeq(), payloadKind(ev),
 				turnCorrelation(ev), ev.GetRequestId(), ev.GetDedupKey())
 		}
+	case *corev1.Event_TurnClaimBridge:
+		return fmt.Errorf("ssm: TurnClaimBridge must use the durable turn-claim ledger, never Apply (session=%s seq=%d turn_id=%q)",
+			sid, ev.GetSeq(), ev.GetTurnClaimBridge().GetTurnId())
 	}
 
 	state, causeKind, ok := agentOrTaskSignal(ev)
@@ -364,6 +367,9 @@ func turnCorrelation(ev *corev1.Event) string {
 	}
 	if ended := ev.GetTurnEnded(); ended != nil {
 		return ended.GetTurnId()
+	}
+	if bridge := ev.GetTurnClaimBridge(); bridge != nil {
+		return bridge.GetTurnId()
 	}
 	return ""
 }

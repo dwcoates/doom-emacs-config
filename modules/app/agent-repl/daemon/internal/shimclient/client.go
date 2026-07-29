@@ -64,6 +64,19 @@ var (
 	// event goes backwards on a session — a protocol violation that means the
 	// merged stream can no longer be trusted.
 	ErrSeqRegression = errclass.ErrShimSeqRegression
+	// ErrHandshakeRejected means daemon-owned reconciliation found the shim's
+	// pre-subscription snapshot contradictory. Retrying the same hello cannot
+	// repair durable state, so Run must fail the bring-up instead of looping.
+	ErrHandshakeRejected = errors.New("shimclient: handshake rejected")
+	// ErrLifecycleRejected means daemon state refused a persistent lifecycle
+	// event. Reconnecting would replay the same unaccepted seq forever, so the
+	// session fails loudly with its high-water still behind that event.
+	ErrLifecycleRejected = errors.New("shimclient: lifecycle event rejected")
+	// ErrTurnClaimRejected means the dedicated durable-ledger sink refused a
+	// non-lifecycle rotation proof. It is terminal for the same replay reason,
+	// but remains a distinct type so no caller can mistake proof for an SSM
+	// lifecycle transition.
+	ErrTurnClaimRejected = errors.New("shimclient: turn claim bridge rejected")
 )
 
 // SeqStore supplies and consumes the daemon-tracked last_seen_seq per session.
@@ -101,7 +114,14 @@ type ModeStore interface {
 type StateSink interface {
 	// Apply feeds one lifecycle Event to the SSM. Called on the demux
 	// goroutine in strict arrival order; must not block indefinitely.
-	Apply(ev *corev1.Event)
+	Apply(ev *corev1.Event) error
+}
+
+// TurnClaimSink consumes only TurnClaimBridge correlation proof. The stitch
+// phase binds it directly to the durable turn ledger; it is deliberately
+// separate from StateSink and FrameSink so proof cannot paint or render.
+type TurnClaimSink interface {
+	ApplyTurnClaimBridge(ev *corev1.Event) error
 }
 
 // FrameSink consumes every non-lifecycle, non-degraded event: the data.v1
@@ -176,6 +196,7 @@ type Config struct {
 	// Sinks and callbacks (all bound at stitch).
 	SeqStore        SeqStore
 	StateSink       StateSink
+	TurnClaims      TurnClaimSink
 	FrameSink       FrameSink
 	FileDiagnostics FileDiagnosticSink
 	Degraded        DegradedReporter
@@ -192,7 +213,7 @@ type Config struct {
 	// that means nothing in the new space and then reads its seq=1 as a
 	// terminal regression. A hook that ran after the Subscribe could only
 	// correct the NEXT connection.
-	OnHandshake func(hello *corev1.ShimHello)
+	OnHandshake func(hello *corev1.ShimHello) error
 
 	// OnConnected fires when the bring-up gate CLOSES — the shim's ShimReady,
 	// not merely a completed handshake — carrying the ShimHello that opened it
@@ -420,7 +441,8 @@ func (c *Client) AwaitReady(ctx context.Context) error {
 // Run attaches to the shim and keeps the connection alive until ctx is
 // cancelled, reconnecting with exponential backoff after benign disconnects.
 // It returns nil on clean ctx cancellation and a terminal protocol error
-// (ErrVersionMismatch, ErrSeqRegression) that reconnecting cannot fix.
+// (ErrVersionMismatch, ErrSeqRegression, ErrHandshakeRejected,
+// ErrLifecycleRejected, ErrTurnClaimRejected) that reconnecting cannot fix.
 func (c *Client) Run(ctx context.Context) error {
 	backoff := c.cfg.BackoffMin
 	for {
@@ -433,7 +455,9 @@ func (c *Client) Run(ctx context.Context) error {
 			if ctx.Err() != nil {
 				return nil
 			}
-		case errors.Is(err, ErrVersionMismatch), errors.Is(err, ErrSeqRegression):
+		case errors.Is(err, ErrVersionMismatch), errors.Is(err, ErrSeqRegression),
+			errors.Is(err, ErrHandshakeRejected), errors.Is(err, ErrLifecycleRejected),
+			errors.Is(err, ErrTurnClaimRejected):
 			c.logf("terminal protocol error, not reconnecting: %v", err)
 			return err
 		default:
@@ -483,7 +507,10 @@ func (c *Client) runOnce(ctx context.Context) (retErr error) {
 	// session id resets it here, so the from_seq below asks the NEW seq space
 	// for everything rather than resuming at a retired space's position.
 	if c.cfg.OnHandshake != nil {
-		c.cfg.OnHandshake(hello)
+		if err := c.cfg.OnHandshake(hello); err != nil {
+			conn.Close()
+			return fmt.Errorf("%w before DaemonHello: %v", ErrHandshakeRejected, err)
+		}
 	}
 
 	// GATE STAGE 2: answer with the resume position. This is what the shim

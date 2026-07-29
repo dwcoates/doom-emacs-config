@@ -19,7 +19,7 @@ import (
 // whenever the on-disk shape changes; migrate() refuses to open a DB
 // written by a NEWER schema than this binary understands (loud, no
 // silent downgrade).
-const schemaVersion = 2
+const schemaVersion = 3
 
 // defaultDBPath is the daemon's ONE state store — the SSM's log and the
 // session registry's identity tables share it (§9.2: "own SQLite DB",
@@ -67,6 +67,23 @@ func migrate(db *sql.DB) error {
 		);
 		CREATE INDEX IF NOT EXISTS workspace_state_ws ON workspace_state(workspace, at);
 		CREATE INDEX IF NOT EXISTS workspace_state_seq ON workspace_state(session_id, cause_seq);
+		CREATE TABLE IF NOT EXISTS turn_lifecycle_claim (
+			claim_id             INTEGER PRIMARY KEY AUTOINCREMENT,
+			workspace            TEXT    NOT NULL,
+			claimant_session_id  TEXT    NOT NULL,
+			turn_id              TEXT    NOT NULL,
+			start_seq            INTEGER NOT NULL DEFAULT 0,
+			start_event_session_id TEXT  NOT NULL DEFAULT '',
+			bridge_seq           INTEGER,
+			bridge_event_session_id TEXT NOT NULL DEFAULT '',
+			end_seq              INTEGER,
+			end_event_session_id TEXT NOT NULL DEFAULT ''
+		);
+		CREATE INDEX IF NOT EXISTS turn_lifecycle_claim_active
+			ON turn_lifecycle_claim(workspace, claimant_session_id, end_seq, claim_id);
+		CREATE UNIQUE INDEX IF NOT EXISTS turn_lifecycle_claim_identity
+			ON turn_lifecycle_claim(workspace, claimant_session_id, turn_id)
+			WHERE turn_id <> '';
 	`); err != nil {
 		return fmt.Errorf("ssm: create schema: %w", err)
 	}
@@ -79,6 +96,9 @@ func migrate(db *sql.DB) error {
 	// idempotent in SQLite; an existing column is the migration's success
 	// condition, not an error.
 	if err := addTaskIDColumn(db); err != nil {
+		return err
+	}
+	if err := addTurnClaimColumns(db); err != nil {
 		return err
 	}
 
@@ -103,6 +123,38 @@ func migrate(db *sql.DB) error {
 		// it stale would make the version meaningless as a guard.
 		if _, err := db.Exec(`UPDATE schema_meta SET version = ?`, schemaVersion); err != nil {
 			return fmt.Errorf("ssm: record schema version %d: %w", schemaVersion, err)
+		}
+	}
+	return nil
+}
+
+// addTurnClaimColumns installs the receipt coordinates used to distinguish the
+// real TurnStarted from a non-lifecycle TurnClaimBridge in a rotated vendor seq
+// space. Each ALTER is independently idempotent so a daemon can safely open a
+// DB left between migration statements by a crash.
+func addTurnClaimColumns(db *sql.DB) error {
+	columns := []struct {
+		name string
+		ddl  string
+	}{
+		{"start_event_session_id", `TEXT NOT NULL DEFAULT ''`},
+		{"bridge_seq", `INTEGER`},
+		{"bridge_event_session_id", `TEXT NOT NULL DEFAULT ''`},
+		{"end_event_session_id", `TEXT NOT NULL DEFAULT ''`},
+	}
+	for _, column := range columns {
+		has, err := hasColumn(db, "turn_lifecycle_claim", column.name)
+		if err != nil {
+			return err
+		}
+		if has {
+			continue
+		}
+		if _, err := db.Exec(fmt.Sprintf(
+			`ALTER TABLE turn_lifecycle_claim ADD COLUMN %s %s`,
+			column.name, column.ddl,
+		)); err != nil {
+			return fmt.Errorf("ssm: add turn_lifecycle_claim.%s: %w", column.name, err)
 		}
 	}
 	return nil

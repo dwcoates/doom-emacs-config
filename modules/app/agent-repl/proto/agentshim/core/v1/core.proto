@@ -33,7 +33,9 @@
 //   carries the same non-empty turn_id, equal to the accepted SubmitPrompt's
 //   request_id, so an end can close only the turn it names. Historical
 //   persisted boundaries produced before turn_id existed have it empty and
-//   retain their original ordered-replay semantics.
+//   retain their original ordered-replay semantics. A vendor-session rotation
+//   may emit TurnClaimBridge as persistent correlation evidence; it is not a
+//   lifecycle boundary and its only consumer is the durable turn ledger.
 // - Sad path: a producer that cannot reach the store hard-fails the write,
 //   loud-logs every dropped event, and reports DegradedState. No spill
 //   buffers, no fallbacks (metaprompt no-fallbacks rule).
@@ -149,6 +151,11 @@ message Event {
     // Consumers must never render it as conversation material or apply it to
     // SSM.
     FilePlaneDiagnostic file_plane_diagnostic = 24;
+    // Durable correlation evidence for a turn whose accepted start and result
+    // landed in different vendor-session seq spaces. This is deliberately NOT
+    // a TurnStarted: it is consumed only by the daemon's turn-claim ledger and
+    // can never create an SSM/progress/frontend lifecycle edge.
+    TurnClaimBridge turn_claim_bridge = 25;
     // Vendor extension payload (e.g. agentshim.data.v1.* messages). The
     // daemon treats it opaquely except for frontend translation; the store
     // treats it fully opaquely apart from dedup-key extraction.
@@ -200,6 +207,16 @@ message TurnStarted {
   // produced event; empty only on historical events persisted before this
   // field existed.
   string turn_id = 2;
+}
+
+message TurnClaimBridge {
+  // Stable accepted-prompt identity shared with TurnStarted.turn_id,
+  // TurnEnded.turn_id, and Event.request_id.
+  string turn_id = 1;
+  // Vendor session whose seq space contains the real TurnStarted. The
+  // envelope session_id names the new seq space containing this proof and its
+  // paired TurnEnded; the two session ids must be non-empty and different.
+  string previous_session_id = 2;
 }
 
 message TurnEnded {

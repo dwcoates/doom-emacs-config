@@ -1,6 +1,7 @@
 package sessiondrv
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
@@ -34,6 +35,17 @@ type Pusher interface {
 // Satisfied by *ssm.Manager.
 type StateApplier interface {
 	Apply(ev *corev1.Event) error
+	// ResolveTurnLifecycle durably validates and records a STREAM turn boundary
+	// before any derived state mutates. The returned queues are ordered active
+	// identities before and after the boundary; replayed is true only for an
+	// exact identity+seq receipt from a partially committed prior delivery.
+	ResolveTurnLifecycle(workspace, claimantSessionID string, ev *corev1.Event) (before, after []string, replayed bool, err error)
+	// ResolveTurnClaimBridge persists cross-session correlation proof without
+	// applying lifecycle state. This is the only route for TurnClaimBridge.
+	ResolveTurnClaimBridge(workspace, claimantSessionID string, ev *corev1.Event) (replayed bool, err error)
+	// ReconcileTurnHandshake validates/persists the shim's active-turn snapshot
+	// before DaemonHello opens its standing store subscription.
+	ReconcileTurnHandshake(workspace, claimantSessionID string, ids []string, legacyActive bool) (before, after []string, err error)
 	// ReconcileTasks adopts an AUTHORITATIVE live-task set for the session's
 	// workspace, so live_task_count becomes exactly len(liveTaskIDs). Fed from
 	// data.BackgroundTasksChanged, the only event carrying the whole live set.
@@ -274,6 +286,7 @@ func newConsumer(workspace, sessionID string, push Pusher, applier StateApplier,
 		onSystemInit:     onSystemInit,
 		onSessionEnded:   onSessionEnded,
 		skills:           newSkillCorrelator(),
+		turns:            newTurnLifecycle(applier, workspace, sessionID),
 	}
 }
 
@@ -480,33 +493,48 @@ func (c *consumer) applyCommandsChanged(cc *datav1.CommandsChanged) *datav1.Syst
 
 // Apply feeds a lifecycle event to the SSM and refreshes the TaskCatalog on
 // task-lifecycle transitions (design step 1). It also fires onSessionStarted so
-// the driver can arm the metaprompt re-fire. An SSM apply error is loud-logged,
-// never swallowed — but it does not stop the stream (the SSM has already logged
-// its own cause).
-func (c *consumer) Apply(ev *corev1.Event) {
-	c.retain(ev)
-	c.observeVendorSessionID(ev)
-	if ss := ev.GetSessionStarted(); ss != nil && c.onSessionStarted != nil {
-		c.onSessionStarted(ss)
-	}
+// the driver can arm the metaprompt re-fire. A lifecycle rejection or SSM
+// apply error is loud-logged and aborts this delivery, so shimclient cannot
+// advance last_seen_seq past state the daemon did not accept.
+func (c *consumer) Apply(ev *corev1.Event) error {
 	applyState := true
+	var turnResult *turnResolution
 	switch ev.GetPayload().(type) {
+	case *corev1.Event_TurnClaimBridge:
+		err := fmt.Errorf("sessiondrv: TurnClaimBridge must use ApplyTurnClaimBridge, never lifecycle Apply")
+		c.logf("sessiondrv: turn bridge decision=reject_misroute session=%s seq=%d turn_id=%q request_id=%q error=%v",
+			c.sessionID, ev.GetSeq(), ev.GetTurnClaimBridge().GetTurnId(), ev.GetRequestId(), err)
+		return err
 	case *corev1.Event_TurnStarted, *corev1.Event_TurnEnded:
-		res := c.turns.resolve(ev)
-		c.logf("sessiondrv: turn lifecycle plane=%s kind=%s session=%s seq=%d turn_id=%q request_id=%q dedup_key=%q active_before=%s active_after=%s decision=%s apply=%v notify=%v",
+		res, turnErr := c.turns.resolve(ev)
+		c.logf("sessiondrv: turn lifecycle plane=%s kind=%s session=%s seq=%d turn_id=%q request_id=%q dedup_key=%q active_before=%s active_after=%s decision=%s apply=%v notify=%v replayed=%v error=%v",
 			ev.GetPlane().String(), stateKind(ev), c.sessionID, ev.GetSeq(),
 			res.correlation, ev.GetRequestId(), ev.GetDedupKey(), res.before,
-			res.after, res.decision, res.apply, res.notify)
-		applyState = res.apply
-		if res.notify && c.onTurn != nil {
-			c.onTurn(res.active)
+			res.after, res.decision, res.apply, res.notify, res.replayed, turnErr)
+		if turnErr != nil {
+			return fmt.Errorf("sessiondrv: turn lifecycle rejected: %w", turnErr)
 		}
+		turnResult = &res
+		applyState = res.apply
 	}
 	if applyState {
 		if err := c.ssm.Apply(ev); err != nil {
 			c.logf("sessiondrv: ssm apply failed session=%s seq=%d kind=%s: %v",
 				c.sessionID, ev.GetSeq(), stateKind(ev), err)
+			return fmt.Errorf("sessiondrv: ssm apply failed: %w", err)
 		}
+	}
+	// Nothing user-visible or replay-retained mutates before both the durable
+	// turn ledger and the SSM accept the event.
+	c.retain(ev)
+	c.observeVendorSessionID(ev)
+	if ss := ev.GetSessionStarted(); ss != nil && c.onSessionStarted != nil {
+		c.onSessionStarted(ss)
+	}
+	if turnResult != nil && turnResult.notify && c.onTurn != nil {
+		c.onTurn(turnResult.active)
+	}
+	if applyState {
 		c.applyProgress(ev)
 	}
 	switch ev.GetPayload().(type) {
@@ -527,6 +555,30 @@ func (c *consumer) Apply(ev *corev1.Event) {
 			c.onSessionEnded()
 		}
 	}
+	return nil
+}
+
+// ApplyTurnClaimBridge is the sole consumer route for non-lifecycle rotation
+// proof. It touches only the durable claim ledger: no retain, SSM Apply,
+// onTurn, progress, task catalog, or frontend push occurs on this path.
+func (c *consumer) ApplyTurnClaimBridge(ev *corev1.Event) error {
+	replayed, err := c.ssm.ResolveTurnClaimBridge(c.workspace, c.sessionID, ev)
+	c.logf("sessiondrv: turn bridge plane=%s session=%s seq=%d turn_id=%q previous_session=%q request_id=%q decision=%s replayed=%v error=%v",
+		ev.GetPlane().String(), c.sessionID, ev.GetSeq(),
+		ev.GetTurnClaimBridge().GetTurnId(),
+		ev.GetTurnClaimBridge().GetPreviousSessionId(), ev.GetRequestId(),
+		turnBridgeDecision(err), replayed, err)
+	if err != nil {
+		return fmt.Errorf("sessiondrv: turn bridge rejected: %w", err)
+	}
+	return nil
+}
+
+func turnBridgeDecision(err error) string {
+	if err != nil {
+		return "reject_durable_bridge"
+	}
+	return "accept_durable_bridge_without_lifecycle_edge"
 }
 
 // Consume translates a data/ephemeral event into a frontend push (design step
@@ -1179,6 +1231,8 @@ func stateKind(ev *corev1.Event) string {
 		return "turn_started"
 	case *corev1.Event_TurnEnded:
 		return "turn_ended"
+	case *corev1.Event_TurnClaimBridge:
+		return "turn_claim_bridge"
 	case *corev1.Event_TaskStarted:
 		return "task_started"
 	case *corev1.Event_TaskProgress:
