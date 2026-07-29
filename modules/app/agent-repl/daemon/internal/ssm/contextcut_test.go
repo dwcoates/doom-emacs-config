@@ -433,7 +433,7 @@ func TestClearingSurvivesTheRotationItsOwnClearCauses(t *testing.T) {
 
 	// Assert — the axis closed on the event, not on a timeout, so the
 	// workspace resolves on its other axes again. The re-handshake opened the
-	// paint axis, which is blue until a frontend attests.
+	// blue axes above it.
 	if got := mustCurrent(t, m, "ws1").State; got == frontendv1.RenderState_RENDER_STATE_CLEARING {
 		t.Fatal("state is still CLEARING: the ContextCleared did not close the axis across the rotation")
 	}

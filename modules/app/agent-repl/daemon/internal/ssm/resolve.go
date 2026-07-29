@@ -40,8 +40,6 @@ const (
 	sigCleared    = "cleared" // clearing axis closed.
 	sigCompacting = "compacting"
 	sigCompacted  = "compacted" // compacting axis closed.
-	sigUnpainted  = "unpainted" // no frontend has attested painting.
-	sigPainted    = "painted"   // paint axis cleared (attested).
 	// A transcript the sidecar could not fully read: the history is
 	// incomplete, so anything painted from it is a partial account.
 	sigBackfillFailed = "backfill_failed"
@@ -68,8 +66,6 @@ const (
 	causeTaskStarted     = "task_started"
 	causeTaskEnded       = "task_ended"
 	causeMergeTransition = "merge_transition"
-	causePaintAck        = "paint_ack"
-	causePaintLost       = "paint_lost"
 	causeVendorBlocked   = "vendor_blocked"
 	causeInterrupted     = "interrupted"
 	// The vendor retired one session uuid mid-stream and minted another, so
@@ -198,12 +194,6 @@ func renderStateOf(token string) frontendv1.RenderState {
 		// Blue, like every other compromised route: an incomplete history
 		// cannot be the basis of a "ready" claim.
 		return frontendv1.RenderState_RENDER_STATE_INIT
-	case sigUnpainted:
-		// An unattested route is BLUE, and INIT is blue's token. A frontend
-		// that never reported painting is indistinguishable from one that
-		// cannot paint, so the honest answer is the compromised-route state
-		// rather than a color of its own.
-		return frontendv1.RenderState_RENDER_STATE_INIT
 	case sigMerging:
 		return frontendv1.RenderState_RENDER_STATE_MERGING
 	case sigMergeQueued:
@@ -257,7 +247,6 @@ func renderStateOf(token string) frontendv1.RenderState {
 //	--- blue ---------------------------------------------------------------
 //	10 dead             the shim is gone
 //	11 degraded         a store/transport outage
-//	12 unpainted        no frontend has attested painting the history
 //	13 backfill_failed  the transcript could not be fully read
 //	14 init             bring-up
 //	--- purple -------------------------------------------------------------
@@ -304,7 +293,6 @@ WITH
     ('merge_queued','merge',5),
     ('dead','agent',10),
     ('degraded','degraded',11),
-    ('unpainted','paint',12),
     ('backfill_failed','backfill',13),
     ('init','agent',14),
     ('vendor_blocked','agent',20),
@@ -335,11 +323,6 @@ WITH
     WHERE r.state IN ('degraded','degraded_clear')
     ORDER BY r.at DESC LIMIT 1
   ),
-  latest_paint AS (
-    SELECT r.* FROM rows r
-    WHERE r.state IN ('unpainted','painted')
-    ORDER BY r.at DESC LIMIT 1
-  ),
   latest_backfill AS (
     SELECT r.* FROM rows r
     WHERE r.state IN ('backfill_failed','backfill_ok')
@@ -361,8 +344,6 @@ WITH
     SELECT state, cause_kind, cause_seq, at, session_id FROM latest_merge WHERE state <> 'merge_none'
     UNION ALL
     SELECT state, cause_kind, cause_seq, at, session_id FROM latest_degraded WHERE state <> 'degraded_clear'
-    UNION ALL
-    SELECT state, cause_kind, cause_seq, at, session_id FROM latest_paint WHERE state <> 'painted'
     UNION ALL
     SELECT state, cause_kind, cause_seq, at, session_id FROM latest_backfill WHERE state <> 'backfill_ok'
     UNION ALL

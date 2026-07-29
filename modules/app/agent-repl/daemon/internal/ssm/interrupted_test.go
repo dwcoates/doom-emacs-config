@@ -233,24 +233,6 @@ func TestBackgroundWorkPromotesInterruptedToYellow(t *testing.T) {
 	}
 }
 
-// Blue outranks it, as it outranks every green: an unattested route is the
-// stronger claim about what the user cannot do.
-func TestBlueOutranksInterrupted(t *testing.T) {
-	// Arrange — the blue row is OLDER, so only rank can make it win.
-	db := newTestDB(t)
-	seedSignal(t, db, "ws", "", sigUnpainted, causePaintLost, -1, 1)
-	seedSignal(t, db, "ws", "s1", sigInterrupted, causeInterrupted, 2, 2)
-	// Act.
-	got, err := resolve(db, "ws", nil)
-	// Assert.
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
-	}
-	if got.state != frontendv1.RenderState_RENDER_STATE_INIT {
-		t.Fatalf("state = %s, want INIT (blue)", renderName(got.state))
-	}
-}
-
 // The readiness no-regress guard reads the agent axis, so `interrupted` must
 // be a member of it: a readiness assertion after an interrupted turn is a
 // real transition, not a suppressed one over a live turn.

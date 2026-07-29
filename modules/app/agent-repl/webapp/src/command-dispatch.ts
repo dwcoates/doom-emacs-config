@@ -29,7 +29,6 @@ import {
   type ClientLogBodyLevel,
   type CommandStruct,
   type FrontendCommandBody,
-  type PaintOutcome,
 } from "./frontend-command.js";
 
 /**
@@ -174,30 +173,6 @@ export class CommandDispatcher {
 
   resync(workspace: string, fromSeq: number): Promise<void> {
     return this.dispatch(workspace, { case: "resync", fromSeq });
-  }
-
-  /**
-   * Answer for one render pass: the conversation painted through `throughSeq`
-   * and the workspace state `stateGeneration` identifies.
-   *
-   * A `painted` outcome is sent from the completion of a render that actually
-   * drew, never from the arrival of the frames describing one: receiving the
-   * history and drawing it are different facts, and only the second earns the
-   * ready state.
-   *
-   * A `suspended` outcome is what a webview sends when its rendering is
-   * stopped. It settles the state's delivery to Emacs — a webview nobody can
-   * see has no divergence to cause — while attesting no paint, so the
-   * workspace stays on the compromised-route state until this end can really
-   * draw again.
-   */
-  paintAck(
-    workspace: string,
-    throughSeq: number,
-    stateGeneration: number,
-    outcome: PaintOutcome,
-  ): Promise<void> {
-    return this.dispatch(workspace, { case: "paintAck", throughSeq, stateGeneration, outcome });
   }
 
   deleteSession(sessionId: string): Promise<void> {

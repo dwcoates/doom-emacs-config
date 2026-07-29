@@ -67,7 +67,6 @@ function state(items: ConversationItem[]): StoreState {
     taskSummary: null,
     lastSeq: 0,
     renderState: null,
-    renderGeneration: 0,
   };
 }
 

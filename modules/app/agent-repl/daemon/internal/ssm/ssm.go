@@ -319,28 +319,6 @@ func (m *Manager) Apply(ev *corev1.Event) error {
 		}
 	}
 
-	// OPEN THE PAINT AXIS on a fresh route.
-	//
-	// READY's promise is "the route is proven usable AND a frontend has
-	// attested painting the history". The second half was documented and never
-	// enforced: the paint axis only contributed a candidate once a row existed,
-	// the sole writer was the attestation itself, and so a workspace with no
-	// paint rows at all resolved green without any frontend ever having drawn
-	// anything. The blue gate was unreachable.
-	//
-	// This is the opening edge that makes it reachable. A newly ready session is
-	// a NEW route — a fresh shim, a relaunch, a re-handshake — and no renderer
-	// has attested to it yet, so the paint axis opens unpainted and holds the
-	// workspace blue until one does. It rides the same branch `ready` does, so
-	// the no-regress guard above covers it too: a mid-turn re-handshake writes
-	// neither row and the running turn stands.
-	if state == sigReady {
-		if err := appendRow(m.db, ws, sid, sigUnpainted, causePaintLost+":"+causeSessionStarted,
-			sql.NullInt64{}, m.nextAt(), ""); err != nil {
-			return err
-		}
-	}
-
 	// A COMPACTION CANNOT OUTLIVE ITS TURN. The vendor opens the window with a
 	// status ticker and is not obliged to close it — a turn that dies mid-fold
 	// simply stops reporting — so the turn's own end is a hard bound on the
@@ -514,68 +492,6 @@ func (m *Manager) ApplySessionRotated(workspace, previous, next string) error {
 	return m.reresolveLocked(workspace, cause, 0)
 }
 
-// ApplyPaintAck records a frontend's attestation that it painted the
-// workspace's conversation through THROUGHSEQ.
-//
-// The daemon tracks STATE; a frontend decides when that state is
-// RENDERABLE. Nothing here can distinguish a webview that drew the history
-// from one that received it and drew nothing, so the workspace stays on the
-// unpainted (blue) token until a frontend says otherwise.
-//
-// Versioned by THROUGHSEQ: an ack that does not advance the watermark is
-// dropped, so an ack minted before a route break cannot re-green the
-// workspace after it, and a slow frontend's stale ack cannot green a gap a
-// faster one already reported. A seq of 0 is a REAL attestation of an empty
-// history, which is what lets a never-prompted session reach green.
-func (m *Manager) ApplyPaintAck(workspace string, throughSeq uint64) error {
-	if workspace == "" {
-		return fmt.Errorf("ssm: ApplyPaintAck got an empty workspace")
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	prev, attested, err := paintWatermark(m.db, workspace)
-	if err != nil {
-		return err
-	}
-	if attested && throughSeq <= prev {
-		m.logf("ssm: paint ack superseded ws=%s through_seq=%d watermark=%d — attestation unchanged",
-			workspace, throughSeq, prev)
-		return nil
-	}
-
-	at := m.nextAt()
-	if err := appendRow(m.db, workspace, "", sigPainted, causePaintAck,
-		sql.NullInt64{Int64: int64(throughSeq), Valid: true}, at, ""); err != nil {
-		return err
-	}
-	return m.reresolveLocked(workspace, causePaintAck, throughSeq)
-}
-
-// ApplyPaintLost withdraws a workspace's paint attestation because the route
-// broke — a shim death, a hibernation, a frontend disconnect.
-//
-// Disconnect resolves BLUE, never to a terminal color: a workspace whose
-// session went away is not "done", it is unreachable, and the next frontend
-// to attach must re-attest before green can be claimed again.
-func (m *Manager) ApplyPaintLost(workspace, reason string) error {
-	if workspace == "" {
-		return fmt.Errorf("ssm: ApplyPaintLost got an empty workspace")
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	at := m.nextAt()
-	cause := causePaintLost
-	if reason != "" {
-		cause = causePaintLost + ":" + reason
-	}
-	if err := appendRow(m.db, workspace, "", sigUnpainted, cause, sql.NullInt64{}, at, ""); err != nil {
-		return err
-	}
-	return m.reresolveLocked(workspace, cause, 0)
-}
-
 // ApplyBackfillState records the workspace's transcript-backfill outcome.
 //
 // A FAILED backfill compromises the route and resolves BLUE: the workspace's
@@ -588,8 +504,8 @@ func (m *Manager) ApplyPaintLost(workspace, reason string) error {
 // unknown, so it must not hold the workspace blue.
 //
 // STATE is the sessiondrv token ("pending" | "done" | "failed"). `pending` is
-// deliberately NOT blue on its own: a session mid-backfill is covered by the
-// paint axis (no frontend has attested yet), and treating pending as a
+// deliberately NOT blue on its own: a session mid-backfill has not been wired
+// yet and the WIRED axis already holds it blue, and treating pending as a
 // separate blue would mean a REOPENED session whose history is already in the
 // store — and which therefore never emits a fresh transition — could never
 // leave it. See sessiondrv.settleBackfillFromStore for the other half of that.
