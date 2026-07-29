@@ -17,6 +17,7 @@ import { randomUUID } from "node:crypto";
 import { create } from "@bufbuild/protobuf";
 import type { JsonObject } from "@bufbuild/protobuf";
 import { bindLog } from "./log.js";
+import { normalizeModel } from "../model.js";
 import {
   Ack,
   AckSchema,
@@ -151,18 +152,22 @@ export class ControlDispatch {
 
   /** Apply a deliberate model request only after the SDK settles it. */
   async handleSetModel(msg: SetModel): Promise<Ack | Nack> {
-    if (msg.model === "") {
-      const reason = "set-model requires a non-empty model id";
-      LOGGER.log({ level: "error", request_id: msg.requestId }, reason);
+    const model = normalizeModel(msg.model);
+    if (model === "") {
+      const reason = "set-model requires a non-empty model id; <synthetic> is not selectable";
+      LOGGER.log({ level: "error", request_id: msg.requestId, requested_model: msg.model }, reason);
       return create(NackSchema, { requestId: msg.requestId, reason });
     }
     try {
-      const selectedModel = await this.target.setModel({ requestId: msg.requestId, model: msg.model });
+      const selectedModel = normalizeModel(await this.target.setModel({ requestId: msg.requestId, model }));
+      if (selectedModel === "") {
+        throw new Error("SDK acknowledged SetModel without a real selected model");
+      }
       return create(AckSchema, { requestId: msg.requestId, selectedModel });
     } catch (err) {
       const reason = errMsg(err);
-      const selectedModel = err instanceof ModelSelectionError ? err.selectedModel : "";
-      LOGGER.log({ level: "error", request_id: msg.requestId, model: msg.model, selected_model: selectedModel }, `set-model failed: ${reason}`);
+      const selectedModel = err instanceof ModelSelectionError ? normalizeModel(err.selectedModel) : "";
+      LOGGER.log({ level: "error", request_id: msg.requestId, model, selected_model: selectedModel }, `set-model failed: ${reason}`);
       return create(NackSchema, { requestId: msg.requestId, reason, selectedModel });
     }
   }

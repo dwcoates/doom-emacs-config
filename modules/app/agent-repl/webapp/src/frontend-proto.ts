@@ -755,7 +755,7 @@ const SESSION_VIEW_KEYS = new Set([
   "configDir",
   "backfill",
   "death",
-	"modelOptions",
+  "modelOptions",
 ]);
 function decodeSessionView(v: unknown): SessionView {
   const o = ensureObject(v, "SessionView");
@@ -783,9 +783,9 @@ function decodeSessionView(v: unknown): SessionView {
     pendingPermissions: num(o, "pendingPermissions", "SessionView"),
     // S8 account identity: "" when the daemon has not resolved a config dir.
     configDir: str(o, "configDir", "SessionView"),
-	modelOptions: o.modelOptions === undefined || o.modelOptions === null
-	  ? []
-	  : ensureArray(o.modelOptions, "SessionView.modelOptions").map((model, i) => decodeModelOption(model, i)),
+    modelOptions: o.modelOptions === undefined || o.modelOptions === null
+      ? []
+      : ensureArray(o.modelOptions, "SessionView.modelOptions").map((model, i) => decodeModelOption(model, i)),
     // F2 never-blue signal; absent on a pre-F2 daemon, which reads as
     // `unspecified` — the same "nothing to backfill" a fresh workspace has.
     backfill: decodeBackfillState(o.backfill),
@@ -811,7 +811,9 @@ function decodeModelOption(v: unknown, i: number): ModelOption {
     displayName: str(o, "displayName", `SessionView.modelOptions[${i}]`),
     description: str(o, "description", `SessionView.modelOptions[${i}]`),
   };
-  if (model.value === "") throw new Error(`frontend-proto: SessionView.modelOptions[${i}] missing value`);
+  if (model.value === "" || model.value.trim() === "<synthetic>") {
+    throw new Error(`frontend-proto: SessionView.modelOptions[${i}] has no selectable model value`);
+  }
   return model;
 }
 
@@ -1140,7 +1142,7 @@ const COMMAND_ACK_KEYS = new Set([
   "error",
   "failure",
   "interruptConfirmRequired",
-	"selectedModel",
+  "selectedModel",
 ]);
 const INTERRUPT_CONFIRM_KEYS = new Set(["liveTasks"]);
 function decodeCommandAck(v: unknown): CommandAck {
