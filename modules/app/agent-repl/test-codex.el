@@ -265,28 +265,6 @@ The git-check skip is mandatory: headless spawns run from
           "\"payload\":{\"turn_id\":\"t1\",\"cwd\":\"/p\",\"model\":\"gpt-5.4\"}}")
   "A realistic rollout turn_context line.")
 
-(ert-deftest agent-repl-test-codex-model-extract-latest-turn-context ()
-  "The newest turn_context line wins (model can change mid-session)."
-  (let ((tail (concat
-               "{\"type\":\"turn_context\",\"payload\":{\"model\":\"gpt-old\"}}\n"
-               agent-repl-test--codex-turn-context-line "\n"
-               "{\"type\":\"event_msg\",\"payload\":{\"type\":\"agent_message\"}}\n")))
-    (should (equal (agent-repl--codex-model-extract-from-tail tail) "gpt-5.4"))))
-
-(ert-deftest agent-repl-test-codex-model-extract-skips-unparseable ()
-  "A truncated turn_context line (tail-window cut) is skipped for an older one."
-  (let ((tail (concat
-               "{\"type\":\"turn_context\",\"payload\":{\"model\":\"gpt-old\"}}\n"
-               "{\"type\":\"turn_context\",\"payload\":{\"model\":\"gpt-cut")))
-    (should (equal (agent-repl--codex-model-extract-from-tail tail) "gpt-old"))))
-
-(ert-deftest agent-repl-test-codex-model-extract-nil-cases ()
-  "Empty / titleless tails yield nil."
-  (should-not (agent-repl--codex-model-extract-from-tail nil))
-  (should-not (agent-repl--codex-model-extract-from-tail ""))
-  (should-not (agent-repl--codex-model-extract-from-tail
-               "{\"type\":\"event_msg\",\"payload\":{\"type\":\"agent_message\"}}")))
-
 ;;;; ---- Tests: rollout parsing — context usage ----
 
 (defun agent-repl-test--codex-token-line (input &optional cached output)
@@ -322,16 +300,6 @@ The git-check skip is mandatory: headless spawns run from
                agent-repl-test--codex-turn-context-line)))
 
 ;;;; ---- Tests: readers wire tail reading to parsers ----
-
-(ert-deftest agent-repl-test-codex-model-read-from-file ()
-  "The model reader reads the file tail and extracts the model."
-  (let ((path (make-temp-file "agent-codex-rollout-")))
-    (unwind-protect
-        (progn
-          (with-temp-file path
-            (insert agent-repl-test--codex-turn-context-line "\n"))
-          (should (equal (agent-repl--codex-model-read path) "gpt-5.4")))
-      (delete-file path))))
 
 (ert-deftest agent-repl-test-codex-context-read-from-file ()
   "The context reader reads the file tail and extracts the usage."
@@ -437,8 +405,6 @@ The git-check skip is mandatory: headless spawns run from
                 #'agent-repl--codex-headless-cmd))
     (should (eq (agent-repl-backend-transcript-path-fn b)
                 #'agent-repl--codex-rollout-path))
-    (should (eq (agent-repl-backend-transcript-model-fn b)
-                #'agent-repl--codex-model-read))
     (should (eq (agent-repl-backend-transcript-context-fn b)
                 #'agent-repl--codex-context-read))))
 

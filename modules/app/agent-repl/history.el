@@ -332,11 +332,11 @@ stamped on the persp-activated chokepoint and, like `:last-killed-at',
 prefers the live plist value then the previously-persisted one so a
 stray save never clobbers it.  The project picker sorts on this key.
 
-`:model' records the session's current model, resolved from the
-workspace's Claude config dir via `agent-repl--model-persist-value' so
-a mid-session `/model' switch (e.g. `opus' to `fable') survives restart;
+`:model' records the model the USER ASKED FOR — the workspace-generation
+alias, or whatever a model-picking variant like `SPC j C-o' supplied — and
+never the model a live session happens to be running.
 `agent-repl--apply-display-state' restores it so the re-booted session
-launches under the same model."
+launches under the same request."
   (let* ((root (agent-repl--ws-get ws :project-dir))
          (file (agent-repl--state-file root)))
     (agent-repl--log ws "state-save ws=%s file=%s" ws file)
@@ -361,23 +361,27 @@ launches under the same model."
              ;; project picker sorts most-recently-viewed first on this key.
              (last-viewed-at (or (agent-repl--ws-get ws :last-viewed-at)
                                  (plist-get existing :last-viewed-at)))
-             ;; The session's *current* model, resolved from the workspace's
-             ;; Claude config dir (its session jsonl) so a mid-session
-             ;; `/model' switch survives restart; falls back to the
-             ;; workspace-generation `:model' when no session model is
-             ;; available yet.  `agent-repl--apply-display-state' restores
-             ;; this onto `:model' so `agent-repl--build-start-cmd' passes
+             ;; The model the USER ASKED FOR, and only that: the
+             ;; workspace-generation alias, or whatever a model-picking
+             ;; variant like `SPC j C-o' supplied.  `agent-repl--apply-display-state'
+             ;; restores it onto `:model' so `agent-repl--build-start-cmd' passes
              ;; `--model' when re-booting the session.
-             (model (if (fboundp 'agent-repl--model-persist-value)
-                        (agent-repl--model-persist-value ws)
-                      (agent-repl--ws-get ws :model))))
-        (agent-repl--log ws "state-save: inputs ws=%s existing-file=%s existing-state=%s created-at-source=%s last-killed-at-present=%s last-viewed-at-present=%s model-resolver=%s"
+             ;;
+             ;; NEVER INFERRED FROM A LIVE SESSION.  This used to resolve the
+             ;; session's CURRENT model by scraping the workspace's session
+             ;; jsonl, so a mid-session switch overwrote the user's request and
+             ;; then relaunched under the scraped value forever after.  Which
+             ;; model a running session drifted onto is the daemon's business,
+             ;; and Emacs asking the transcript was a second, weaker answer to a
+             ;; question it should not have been asking at all.
+             (model (agent-repl--ws-get ws :model)))
+        (agent-repl--log ws "state-save: inputs ws=%s existing-file=%s existing-state=%s created-at-source=%s last-killed-at-present=%s last-viewed-at-present=%s model=%S"
                          ws (file-exists-p file) (not (null existing))
                          (cond ((agent-repl--ws-get ws :created-at) :workspace)
                                ((plist-get existing :created-at) :persisted)
                                (t :current-time))
                          (not (null last-killed-at)) (not (null last-viewed-at))
-                         (if (fboundp 'agent-repl--model-persist-value) :persist-value :workspace-value))
+                         model)
         (agent-repl--ws-put ws :created-at created-at)
         (when last-killed-at
           (agent-repl--ws-put ws :last-killed-at last-killed-at))

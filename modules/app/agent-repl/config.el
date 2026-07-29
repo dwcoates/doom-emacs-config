@@ -420,7 +420,6 @@ returns the SHA string (or the sentinel \"unknown\" when undetermined)."
 (agent-repl--load-module "readiness")
 (agent-repl--load-module "prompt-summary")
 (agent-repl--load-module "ai-title")
-(agent-repl--load-module "model")
 (agent-repl--load-module "context")
 (agent-repl--load-module "window")
 (agent-repl--load-module "sibling-popup")
