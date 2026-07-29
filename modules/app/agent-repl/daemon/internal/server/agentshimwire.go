@@ -82,9 +82,11 @@ type AgentShimConfig struct {
 	// no-op (the server still re-sends the StateSnapshot independently).
 	Resyncer Resyncer
 	// RequestShutdown begins the daemon's graceful teardown, backing the
-	// shutdown FrontendCommand (the same func POST /shutdown drives). Nil makes
-	// the shutdown command a loud failing ack (the capability is unconfigured).
-	RequestShutdown func()
+	// shutdown FrontendCommand. Its argument is ShutdownCmd.stop_shims: false
+	// (the default) PRESERVES the session shims so the next daemon reattaches
+	// to them. Nil makes the shutdown command a loud failing ack (the
+	// capability is unconfigured).
+	RequestShutdown func(stopShims bool)
 	// WorkspaceCreation owns durable workspace-create jobs and retained host
 	// actions. Required: it receives create/materialized/completion commands
 	// and supplies/publishes the host-only work that Emacs renders. It is kept

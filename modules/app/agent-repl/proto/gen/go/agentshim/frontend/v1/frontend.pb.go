@@ -2973,7 +2973,22 @@ func (x *ClientLogCmd) GetContext() *structpb.Struct {
 // Additive (S9): graceful daemon shutdown over UDS (replaces Emacs
 // POST /shutdown).
 type ShutdownCmd struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// stop_shims asks the daemon to SIGTERM every session shim on its way out.
+	//
+	// The DEFAULT (false) PRESERVES them. A shim outlives its daemon by design:
+	// it redials the daemon socket forever with backoff and is auto-parked by
+	// the next daemon's listener, so killing it on an orderly shutdown threw
+	// away a live, mid-conversation process the very next boot could have
+	// reattached to for free. Preserving is what makes a daemon bounce cheap.
+	//
+	// The mode exists for the one caller that genuinely needs the old behavior:
+	// a deploy that changed the shim BUNDLE, whose surviving shims would
+	// otherwise keep running the previous build's code (bin/deploy-all.sh
+	// passes it when its stamps show the bundle moved). It is belt-and-braces
+	// alongside the daemon's own version-driven stale-shim refresh, never the
+	// only thing standing between a deploy and stale shims.
+	StopShims     bool `protobuf:"varint,1,opt,name=stop_shims,json=stopShims,proto3" json:"stop_shims,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3006,6 +3021,13 @@ func (x *ShutdownCmd) ProtoReflect() protoreflect.Message {
 // Deprecated: Use ShutdownCmd.ProtoReflect.Descriptor instead.
 func (*ShutdownCmd) Descriptor() ([]byte, []int) {
 	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *ShutdownCmd) GetStopShims() bool {
+	if x != nil {
+		return x.StopShims
+	}
+	return false
 }
 
 // Ask the daemon to assert that every boot-critical global dependency is
@@ -5487,8 +5509,10 @@ const file_agentshim_frontend_v1_frontend_proto_rawDesc = "" +
 	"\fClientLogCmd\x12;\n" +
 	"\x05level\x18\x01 \x01(\x0e2%.agentshim.frontend.v1.ClientLogLevelR\x05level\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x121\n" +
-	"\acontext\x18\x03 \x01(\v2\x17.google.protobuf.StructR\acontext\"\r\n" +
-	"\vShutdownCmd\"\x11\n" +
+	"\acontext\x18\x03 \x01(\v2\x17.google.protobuf.StructR\acontext\",\n" +
+	"\vShutdownCmd\x12\x1d\n" +
+	"\n" +
+	"stop_shims\x18\x01 \x01(\bR\tstopShims\"\x11\n" +
 	"\x0fDaemonHealthCmd\"1\n" +
 	"\x10SessionHealthCmd\x12\x1d\n" +
 	"\n" +
