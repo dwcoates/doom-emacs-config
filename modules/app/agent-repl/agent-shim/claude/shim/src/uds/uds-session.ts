@@ -66,6 +66,8 @@ import {
   HealthCheck,
   HealthStatus,
   HealthStatusSchema,
+  ModelCatalogSchema,
+  ModelOptionSchema,
   Plane,
   ReplayDoneSchema,
   InterruptOutcome,
@@ -335,7 +337,7 @@ export class UdsSession {
           throw new ModelSelectionError(errMsg(err), this.effectiveModel);
         }
         this.effectiveModel = model;
-        shimLog(COMPONENT, { session: this.deps.sessionId, request: requestId, model },
+        LOGGER.log({ agent_repl_session_id: this.deps.sessionId, request_id: requestId, model },
           "model change confirmed by SDK");
         return this.effectiveModel;
       },
@@ -628,6 +630,31 @@ export class UdsSession {
       fromSeq,
       vendorSessionId: this.store.storeSessionId(),
     }));
+    this.publishModelCatalog();
+  }
+
+  /** Publish the query-owned selectable-model menu after the daemon gate closes. */
+  private publishModelCatalog(): void {
+    if (this.query === null) {
+      throw new Error("model catalog cannot publish before the SDK query exists");
+    }
+    void this.query.supportedModels()
+      .then((models) => {
+        this.server.sendModelCatalog(create(ModelCatalogSchema, {
+          sessionId: this.deps.sessionId,
+          models: models.map((model) => create(ModelOptionSchema, model)),
+        }));
+      })
+      .catch((err: unknown) => {
+        const reason = `supportedModels failed: ${errMsg(err)}`;
+        LOGGER.log({ level: "error", agent_repl_session_id: this.deps.sessionId }, reason);
+        this.server.sendEvent(this.degradedEvent(create(DegradedStateSchema, {
+          component: "claude-shim-model-catalog",
+          reason,
+          droppedCount: 0n,
+          recovered: false,
+        })));
+      });
   }
 
   /**
@@ -759,23 +786,20 @@ export class UdsSession {
         this.pendingTurnEndIds.push(turnId);
       }
     }
+    // The direct readiness SessionStarted closes the lifecycle gate before the
+    // SDK emits its first system:init. Record the SDK selection independently
+    // so a later rejected SetModel can report the currently active model.
+    if (msg.type === "system" && msg.subtype === "init" && typeof msg.model === "string" && msg.model !== "") {
+      this.effectiveModel = msg.model;
+      LOGGER.log({ agent_repl_session_id: this.deps.sessionId, model: this.effectiveModel },
+        "model observed from SDK system-init");
+    }
     const { vendor, lifecycle } = convert(msg, {
       sessionSource: this.deps.sessionSource,
       sessionGate: this.sessionGate,
       ...(turnId !== undefined ? { turnId } : {}),
       ...this.convertOpts(),
     });
-    for (const event of lifecycle) {
-      // `Event.payload` is a protobuf oneof and can be absent on a malformed
-      // envelope.  Do not let diagnostic model observation turn that already
-      // loud protocol violation into an SDK-stream crash.
-      const model = event.payload.case === "sessionStarted" ? event.payload.value?.model ?? "" : "";
-      if (model !== "") {
-        this.effectiveModel = model;
-        shimLog(COMPONENT, { session: this.deps.sessionId, model: this.effectiveModel },
-          "model observed from SDK system-init");
-      }
-    }
     // The converted envelope carries the VENDOR session id (read off the SDK
     // message), which is the id the store files these events under. Adopt it
     // as the subscription key: a fresh session has no other way to learn it,

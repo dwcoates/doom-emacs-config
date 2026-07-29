@@ -40,8 +40,9 @@ import (
 // records are included too (the orphan/reattach sweep re-keys on them), whereas
 // a workspace-less record (empty cwd) has no workspace to key by and is skipped.
 type registrySessions struct {
-	reg    *registry.Registry
-	driver *sessiondrv.Manager
+	reg           *registry.Registry
+	driver        *sessiondrv.Manager
+	modelCatalogs *server.SessionModelCatalogs
 	// logf carries the death-reason classifier's loud default for a record
 	// written by a build that predates the failure vocabulary. Nil is
 	// tolerated (the classifier checks) so a unit harness need not supply one.
@@ -69,7 +70,11 @@ func (r registrySessions) SessionViews() []*frontendv1.SessionView {
 			// nothing to bootstrap.
 			live = r.driver.Live(rec.CWD)
 		}
-		out = append(out, server.SessionViewFromRecord(r.logf, rec, pending, live))
+		var modelOptions []*frontendv1.ModelOption
+		if r.modelCatalogs != nil {
+			modelOptions = r.modelCatalogs.Get(rec.SessionID)
+		}
+		out = append(out, server.SessionViewFromRecordWithModels(r.logf, rec, pending, live, modelOptions))
 	}
 	return out
 }

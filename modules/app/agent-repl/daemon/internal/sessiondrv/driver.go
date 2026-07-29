@@ -104,6 +104,12 @@ type SessionRegistrar interface {
 	SessionModelObserved(sessionID, model string)
 }
 
+// ModelCatalogRegistrar receives the live SDK's model menu. It is separate
+// from SessionRegistrar because query capability is not transcript identity.
+type ModelCatalogRegistrar interface {
+	SessionModelCatalogObserved(sessionID string, models []*corev1.ModelOption)
+}
+
 // SpawnResult reports what a bring-up had to REPAIR to get the session up, and
 // what it started it as. Both facts are the driver's, not the spawner's: the
 // spawner owns the record and the process, and the driver owns the feed note
@@ -227,6 +233,9 @@ type Config struct {
 	// Registrar persists SessionStarted.vendor_session_id (the CLI session uuid)
 	// through to the durable registry record; nil disables the write.
 	Registrar SessionRegistrar
+	// ModelCatalogs records the live query-owned menu for frontend rendering.
+	// Nil is allowed only in focused driver tests.
+	ModelCatalogs ModelCatalogRegistrar
 	// Logf is the daemon logger. Nil discards.
 	Logf func(string, ...any)
 	// Classifier judges prompts queued during a running turn (E4). Nil leaves
@@ -793,6 +802,24 @@ func (m *Manager) persistObservedModel(sessionID, model string) {
 		return
 	}
 	m.cfg.Registrar.SessionModelObserved(sessionID, normalized)
+}
+
+// modelCatalogReporter is the shimclient boundary for query-supported model
+// menus. It validates the session binding before the registrar republishes a
+// SessionView, so one shim cannot alter another workspace's picker.
+type modelCatalogReporter struct{ m *Manager }
+
+func (r modelCatalogReporter) ModelCatalog(sessionID string, catalog *corev1.ModelCatalog) {
+	if catalog.GetSessionId() != sessionID {
+		r.m.logf("sessiondrv: refusing model catalog frame_session=%s expected_session=%s", catalog.GetSessionId(), sessionID)
+		return
+	}
+	if r.m.cfg.ModelCatalogs == nil {
+		r.m.logf("sessiondrv: model catalog session=%s models=%d has no registrar", sessionID, len(catalog.GetModels()))
+		return
+	}
+	r.m.logf("sessiondrv: model catalog observed session=%s models=%d", sessionID, len(catalog.GetModels()))
+	r.m.cfg.ModelCatalogs.SessionModelCatalogObserved(sessionID, catalog.GetModels())
 }
 
 // persistSessionDeath marks the session's record terminal with the reason its
@@ -1472,6 +1499,7 @@ func (m *Manager) bringUp(workspace string) (*driven, error) {
 		StateSink:       cons,
 		TurnClaims:      cons,
 		FrameSink:       cons,
+		Models:          modelCatalogReporter{m: m},
 		FileDiagnostics: fileDiagnosticSink{persister: m.cfg.FileDiagnostics, workspace: workspace, agentReplSessionID: sessionID},
 		Degraded:        cons,
 		Permissions:     ph,

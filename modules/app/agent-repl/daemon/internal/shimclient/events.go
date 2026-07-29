@@ -43,6 +43,8 @@ func (c *Client) readLoop(ctx context.Context, ac *activeConn) error {
 			c.resolveHealth(ac, m)
 		case *corev1.PermissionRequest:
 			c.dispatchPermission(ctx, ac, m)
+		case *corev1.ModelCatalog:
+			c.dispatchModelCatalog(m)
 		// REPLAYED HISTORY. Its own arms, physically apart from the live
 		// *corev1.Event case above: a replayed event cannot reach dispatchEvent
 		// (and so cannot reach the SSM, the task catalog, or the progress
@@ -63,6 +65,19 @@ func (c *Client) readLoop(ctx context.Context, ac *activeConn) error {
 			c.logf("unexpected inbound message type %T; ignoring", m)
 		}
 	}
+}
+
+func (c *Client) dispatchModelCatalog(catalog *corev1.ModelCatalog) {
+	if catalog.GetSessionId() != c.cfg.SessionID {
+		c.logf("received ModelCatalog for session=%s on session=%s connection; ignoring protocol violation", catalog.GetSessionId(), c.cfg.SessionID)
+		return
+	}
+	if c.cfg.Models == nil {
+		c.logf("received ModelCatalog session=%s models=%d with no daemon sink", catalog.GetSessionId(), len(catalog.GetModels()))
+		return
+	}
+	c.logf("received ModelCatalog session=%s models=%d", catalog.GetSessionId(), len(catalog.GetModels()))
+	c.cfg.Models.ModelCatalog(c.cfg.SessionID, catalog)
 }
 
 // dispatchEvent routes one Event and maintains last_seen_seq. Lifecycle

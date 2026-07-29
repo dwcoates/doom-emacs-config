@@ -123,6 +123,7 @@ describe("SessionView mapping", () => {
         contextWindow: "200000",
         permissionMode: "default",
         shimAttached: true,
+		modelOptions: [{ value: "claude-opus", displayName: "Opus", description: "highest capability" }],
         claudeSessionId: "cli-uuid-1",
         cwd: "/work/ws",
         configDir: "/home/u/.claude",
@@ -145,6 +146,7 @@ describe("SessionView mapping", () => {
           claudeSessionId: "cli-uuid-1",
           cwd: "/work/ws",
           configDir: "/home/u/.claude",
+		  models: [{ value: "claude-opus", displayName: "Opus", description: "highest capability" }],
         },
       },
     ]);
@@ -254,7 +256,7 @@ describe("StateSnapshot mapping", () => {
     const effects = applyOne({
       snapshot: {
         workspaces: [{ workspace: "w", sessionId: "s", state: "RENDER_STATE_IDLE" }],
-        sessions: [{ workspace: "w", sessionId: "s", model: "m" }],
+		sessions: [{ workspace: "w", sessionId: "s", model: "m", modelOptions: [] }],
         catalogs: [{ workspace: "w", sessionId: "s", tasks: [] }],
         inits: [{ workspace: "w", sessionId: "s", init: { model: "m" } }],
       },

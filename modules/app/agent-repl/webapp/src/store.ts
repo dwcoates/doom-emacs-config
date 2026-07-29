@@ -767,6 +767,10 @@ export class ConversationStore {
     const s = this.state;
     if (sv.sessionId !== "") s.sessionId = sv.sessionId;
     if (sv.model !== "") s.model = sv.model;
+	// The model list is daemon/shim-published capability. Replacing it only
+	// from SessionView prevents a local dropdown interaction from inventing
+	// selectable models or changing authority.
+	s.models = sv.models;
     if (sv.permissionMode !== "") s.permissionMode = sv.permissionMode as PermissionMode;
     s.costUsd = sv.totalCostUsd;
     s.contextTokens = sv.totalTokens > 0 ? sv.totalTokens : null;

@@ -19,6 +19,7 @@ function sessionView(claudeSessionId: string): AdapterEffect {
     claudeSessionId,
     cwd: "/ws",
     configDir: "",
+    models: [],
   };
   return { kind: "session-view", value };
 }

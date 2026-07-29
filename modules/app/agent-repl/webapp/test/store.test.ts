@@ -64,6 +64,7 @@ function sessionEffect(over: Partial<SessionViewInput> = {}): AdapterEffect {
       claudeSessionId: "",
       cwd: "",
       configDir: "",
+      models: [],
       ...over,
     },
   };
