@@ -13,8 +13,10 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
@@ -28,7 +30,6 @@ import (
 	"claude-repld/internal/frontend"
 	"claude-repld/internal/ssm"
 
-	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -242,6 +243,24 @@ type commandHandler struct {
 	// establishTimeout bounds one create-plus-establish round. Zero means
 	// createEstablishTimeout.
 	establishTimeout time.Duration
+	clientLogs       ClientLogWriter
+}
+
+// ClientLogWriter owns persistence of a canonical browser source record. The
+// command handler deliberately knows neither targets nor file paths.
+type ClientLogWriter interface {
+	PersistClientLog(workspace, requestID string, cmd *frontendv1.ClientLogCmd) error
+}
+
+type ClientLogSessionIdentity struct {
+	AgentReplSessionID string
+	ClaudeSessionID    string
+}
+
+// ClientLogIdentityResolver supplies daemon-authoritative session identity for
+// a workspace when the browser record carries session attribution.
+type ClientLogIdentityResolver interface {
+	ResolveClientLogIdentity(workspace string) (ClientLogSessionIdentity, bool)
 }
 
 // TurnStateSource reports whether a workspace's session has a turn IN FLIGHT,
@@ -617,27 +636,8 @@ func (h *commandHandler) Shutdown(_ context.Context, workspace, requestID string
 	return nil
 }
 
-// clientLogMessageCap bounds ONE mirrored client-log line's message text. The
-// frontend already caps how MANY lines it forwards per window; this caps how
-// big each one may be, so neither dimension of a pathological log loop can run
-// away with the daemon's disk.
-const clientLogMessageCap = 4000
-
-// clientLogContextCap bounds the rendered structured context of one line.
-const clientLogContextCap = 2000
-
-// ClientLog mirrors a frontend-side diagnostic line into the daemon's own log.
-//
-// The line is EVIDENCE, never a control signal: this records it and touches no
-// daemon state. It is tagged `frontend client-log` so a line that originated in
-// a webview can never be misread as one the daemon produced itself — the whole
-// point is to make an invisible webview's failures greppable next to the daemon
-// events around them.
-//
-// A log with no message carries no evidence and is a caller bug, so it fails
-// loudly rather than writing a blank line. An UNSPECIFIED level, by contrast,
-// is recorded AS unspecified: the level is metadata, and discarding real
-// evidence over missing metadata would defeat the purpose.
+// ClientLog persists frontend evidence only in the workspace's webapp.log. It
+// never mutates daemon state or duplicates the record into daemon.log.
 // QueueController is the queue half of the frontend command surface (E4).
 // Satisfied by *sessiondrv.Manager. Every method reports an unknown entry id
 // as an error: the user asked for something specific, and pretending to have
@@ -676,45 +676,174 @@ func (h *commandHandler) CancelQueueEntry(_ context.Context, workspace, requestI
 }
 
 func (h *commandHandler) ClientLog(_ context.Context, workspace, requestID string, cmd *frontendv1.ClientLogCmd) error {
-	if cmd.GetMessage() == "" {
-		return fmt.Errorf("server: client log carries no message (ws=%q request_id=%q)", workspace, requestID)
+	if h.clientLogs == nil {
+		return fmt.Errorf("server: client-log persistence is not wired")
 	}
-	h.logf("frontend client-log: level=%s ws=%s request_id=%s message=%s%s",
-		clientLogLevelName(cmd.GetLevel()), workspace, requestID,
-		dlog.Clamp(cmd.GetMessage(), clientLogMessageCap),
-		clientLogContextSuffix(cmd.GetContext()))
+	if err := h.clientLogs.PersistClientLog(workspace, requestID, cmd); err != nil {
+		return fmt.Errorf("server: persist client log: %w", err)
+	}
 	return nil
 }
 
-// clientLogLevelName renders a level for the log. An unrecognized or unset
-// level is rendered honestly rather than defaulted to info, so a frontend that
-// forgets to set one is visible in the log instead of masquerading as info.
-func clientLogLevelName(l frontendv1.ClientLogLevel) string {
-	switch l {
+// targetClientLogWriter is the daemon-owned browser persistence boundary. It
+// validates the complete browser record before daemon attribution overwrites
+// workspace and request facts the browser cannot authoritatively know.
+type targetClientLogWriter struct {
+	targets  *dlog.TargetManager
+	identity ClientLogIdentityResolver
+	terminal io.Writer
+	verbose  bool
+}
+
+// NewTargetClientLogWriter constructs the explicit runtime target dependency.
+func NewTargetClientLogWriter(targets *dlog.TargetManager, identity ClientLogIdentityResolver, terminal io.Writer, verbose bool) (ClientLogWriter, error) {
+	if targets == nil {
+		return nil, fmt.Errorf("server: client log writer needs target manager")
+	}
+	if identity == nil {
+		return nil, fmt.Errorf("server: client log writer needs session identity resolver")
+	}
+	if terminal == nil {
+		return nil, fmt.Errorf("server: client log writer needs terminal")
+	}
+	return &targetClientLogWriter{targets: targets, identity: identity, terminal: terminal, verbose: verbose}, nil
+}
+
+func (w *targetClientLogWriter) PersistClientLog(workspace, requestID string, cmd *frontendv1.ClientLogCmd) error {
+	if cmd == nil {
+		return errors.New("client log command is required")
+	}
+	if err := checkWorkspaceKey("client_log", workspace); err != nil {
+		return err
+	}
+	if requestID == "" {
+		return errors.New("client log request ID is required")
+	}
+	if cmd.GetContext() == nil {
+		return errors.New("client log canonical record context is required")
+	}
+	raw, err := json.Marshal(cmd.GetContext().AsMap())
+	if err != nil {
+		return fmt.Errorf("encode client log canonical record: %w", err)
+	}
+	record, err := dlog.ParseForwardedRecord(raw)
+	if err != nil {
+		return err
+	}
+	if record.Runtime != dlog.RuntimeWebapp {
+		return fmt.Errorf("client log runtime must be webapp, got %q", record.Runtime)
+	}
+	if record.ConnectionID == "" {
+		return errors.New("client log webapp connection ID is required")
+	}
+	if record.Message != cmd.GetMessage() {
+		return errors.New("client log command message does not match canonical record")
+	}
+	if record.Level != clientLogLevel(cmd.GetLevel()) {
+		return fmt.Errorf("client log command level does not match canonical record")
+	}
+	ws, err := dlog.WorkspaceFromDirectory(workspace)
+	if err != nil {
+		return fmt.Errorf("resolve client log workspace: %w", err)
+	}
+	if (record.WorkspaceDirectory == "") != (record.WorkspaceID == "") {
+		return errors.New("client log source workspace attribution is incomplete")
+	}
+	if record.WorkspaceDirectory != "" && (record.WorkspaceDirectory != ws.Directory || record.WorkspaceID != ws.ID) {
+		return fmt.Errorf("client log source workspace attribution disagrees with command workspace")
+	}
+	identity, identityKnown := w.identity.ResolveClientLogIdentity(workspace)
+	if record.AgentReplSessionID != "" || record.ClaudeSessionID != "" {
+		if !identityKnown {
+			return errors.New("client log source session attribution cannot be verified for command workspace")
+		}
+		if record.AgentReplSessionID != "" && record.AgentReplSessionID != identity.AgentReplSessionID {
+			return errors.New("client log source agent-repl session ID disagrees with daemon registry")
+		}
+		if record.ClaudeSessionID != "" && record.ClaudeSessionID != identity.ClaudeSessionID {
+			return errors.New("client log source Claude session ID disagrees with daemon registry")
+		}
+	}
+	logger, err := w.targets.OpenWorkspaceRuntimeLogger(ws, dlog.RuntimeWebapp, w.terminal, w.verbose)
+	if err != nil {
+		return fmt.Errorf("open webapp target: %w", err)
+	}
+	forwarded := dlog.ForwardedIdentity{RequestID: requestID}
+	if identityKnown {
+		forwarded.AgentReplSessionID = identity.AgentReplSessionID
+		forwarded.ClaudeSessionID = identity.ClaudeSessionID
+	}
+	return logger.PersistForwarded(ws, dlog.RuntimeWebapp, record, forwarded)
+}
+
+func clientLogLevel(level frontendv1.ClientLogLevel) dlog.Level {
+	switch level {
 	case frontendv1.ClientLogLevel_CLIENT_LOG_LEVEL_INFO:
-		return "info"
+		return dlog.LevelInfo
 	case frontendv1.ClientLogLevel_CLIENT_LOG_LEVEL_WARN:
-		return "warn"
+		return dlog.LevelWarn
 	case frontendv1.ClientLogLevel_CLIENT_LOG_LEVEL_ERROR:
-		return "error"
+		return dlog.LevelError
 	default:
-		return fmt.Sprintf("unspecified(%d)", int32(l))
+		return ""
 	}
 }
 
-// clientLogContextSuffix renders the optional structured context as compact
-// JSON. An absent context contributes nothing; a context that cannot be
-// rendered is reported inline rather than dropped, since the failure is itself
-// diagnostic information about the reporting frontend.
-func clientLogContextSuffix(ctx *structpb.Struct) string {
-	if ctx == nil || len(ctx.GetFields()) == 0 {
-		return ""
+// FileDiagnosticPersister is injected into the session driver without making
+// it depend on daemon target management.
+type FileDiagnosticPersister interface {
+	PersistFileDiagnostic(workspace, agentReplSessionID string, ev *corev1.Event, diagnostic *corev1.FilePlaneDiagnostic) error
+}
+
+type targetFileDiagnosticPersister struct {
+	targets  *dlog.TargetManager
+	terminal io.Writer
+	verbose  bool
+}
+
+// NewTargetFileDiagnosticPersister builds the daemon-owned sidecar routing
+// boundary. Its targets are distinct from daemon, shim, and webapp targets.
+func NewTargetFileDiagnosticPersister(targets *dlog.TargetManager, terminal io.Writer, verbose bool) (FileDiagnosticPersister, error) {
+	if targets == nil {
+		return nil, errors.New("server: file diagnostic persister needs target manager")
 	}
-	raw, err := protojson.Marshal(ctx)
+	if terminal == nil {
+		return nil, errors.New("server: file diagnostic persister needs terminal")
+	}
+	return &targetFileDiagnosticPersister{targets: targets, terminal: terminal, verbose: verbose}, nil
+}
+
+func (p *targetFileDiagnosticPersister) PersistFileDiagnostic(workspace, agentReplSessionID string, ev *corev1.Event, diagnostic *corev1.FilePlaneDiagnostic) error {
+	if ev == nil || diagnostic == nil {
+		return errors.New("sidecar diagnostic event and payload are required")
+	}
+	if ev.GetSessionId() == "" {
+		return errors.New("sidecar diagnostic Claude session ID is required")
+	}
+	ws, err := dlog.WorkspaceFromDirectory(workspace)
 	if err != nil {
-		return fmt.Sprintf(" context=<unrenderable: %v>", err)
+		return fmt.Errorf("resolve sidecar diagnostic workspace: %w", err)
 	}
-	return " context=" + dlog.Clamp(string(raw), clientLogContextCap)
+	logger, err := p.targets.OpenWorkspaceRuntimeLogger(ws, dlog.RuntimeSidecar, p.terminal, p.verbose)
+	if err != nil {
+		return fmt.Errorf("open sidecar target: %w", err)
+	}
+	context := make(map[string]any, len(diagnostic.GetContext().GetFields())+1)
+	for key, value := range diagnostic.GetContext().AsMap() {
+		context[key] = value
+	}
+	if diagnostic.GetSourcePath() != "" {
+		context["source_path"] = diagnostic.GetSourcePath()
+	}
+	record := dlog.Record{
+		Timestamp: time.UnixMilli(ev.GetProducedAtMs()).UTC(), Runtime: dlog.RuntimeSidecar,
+		Level: dlog.Level(diagnostic.GetLevel()), Verbosity: dlog.Verbosity(diagnostic.GetVerbosity()),
+		Operation: diagnostic.GetOperation(), Message: diagnostic.GetMessage(), Context: context,
+		PID: int(diagnostic.GetSourcePid()),
+	}
+	return logger.PersistForwarded(ws, dlog.RuntimeSidecar, record, dlog.ForwardedIdentity{
+		AgentReplSessionID: agentReplSessionID, ClaudeSessionID: ev.GetSessionId(), RequestID: ev.GetRequestId(),
+	})
 }
 
 // ssmSnapshotProvider implements frontend.StateProvider from the SSM's

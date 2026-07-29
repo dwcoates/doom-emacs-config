@@ -25,9 +25,6 @@ import (
 
 // --- rig --------------------------------------------------------------------
 
-// ccintQuietLog discards loud logs for tests that do not inspect them.
-func ccintQuietLog(string, ...any) {}
-
 // ccintRig is one live session transcript plus the tailer that reads it, wired
 // the way the sidecar wires a discovered file: discover classifies the path
 // (which is what supplies the session id), the target picks the codec, and the
@@ -55,7 +52,7 @@ func ccintNewRig(t *testing.T, vendorUUID string) *ccintRig {
 	if err := os.WriteFile(path, nil, 0o644); err != nil {
 		t.Fatalf("creating the transcript: %v", err)
 	}
-	tgt, ok := discover.New([]string{root}, filepath.Join(root, "spool"), ccintQuietLog).Classify(path)
+	tgt, ok := discover.New([]string{root}, filepath.Join(root, "spool"), quietLog).Classify(path)
 	if !ok {
 		t.Fatalf("discover did not classify %s as a tailable target", path)
 	}
@@ -65,7 +62,7 @@ func ccintNewRig(t *testing.T, vendorUUID string) *ccintRig {
 		path: path,
 		uuid: vendorUUID,
 	}
-	r.tr = tail.New(path, tgt.Codec(), NewSessionTranscriptHandler(ccintQuietLog), r.ctx, ccintQuietLog)
+	r.tr = tail.New(path, tgt.Codec(), NewSessionTranscriptHandler(quietLog), r.ctx, quietLog)
 	return r
 }
 
@@ -119,7 +116,7 @@ func (r *ccintRig) scanAll() []*corev1.Event {
 // again from byte 0.
 func (r *ccintRig) reopen() {
 	r.t.Helper()
-	r.tr = tail.New(r.path, tail.JSONLCodec{}, NewSessionTranscriptHandler(ccintQuietLog), r.ctx, ccintQuietLog)
+	r.tr = tail.New(r.path, tail.JSONLCodec{}, NewSessionTranscriptHandler(quietLog), r.ctx, quietLog)
 }
 
 // --- fixtures ---------------------------------------------------------------

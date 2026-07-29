@@ -1,12 +1,18 @@
 package tail
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
+	"agentrepl/shim-claude-sidecar/internal/logging"
 )
+
+func testLog() *logging.Bound {
+	return logging.New(io.Discard, io.Discard).With(logging.Context{Component: "test"})
+}
 
 // stubHandler records the frames it saw and emits one event per decoded object.
 type stubHandler struct {
@@ -48,7 +54,7 @@ func appendFile(t *testing.T, path, content string) {
 func newTailer(t *testing.T, path string) (*Tailer, *stubHandler) {
 	t.Helper()
 	h := &stubHandler{}
-	return New(path, JSONLCodec{}, h, &Context{SessionID: "s1"}, nil), h
+	return New(path, JSONLCodec{}, h, &Context{SessionID: "s1"}, testLog()), h
 }
 
 func TestTailerReadsAppendedLines(t *testing.T) {

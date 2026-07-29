@@ -82,7 +82,7 @@ func TestClassifySurfacesTheGuardError(t *testing.T) {
 	// Arrange
 	fakeClaudeOnPath(t)
 	t.Setenv(vendorguard.EnvVar, "1")
-	c := NewCLIClassifier("haiku", nil)
+	c := NewCLIClassifier("haiku", t.Logf)
 	// Act
 	res, err := c.Classify(context.Background(), ClassifyRequest{QueuedPrompt: "hi"})
 	// Assert

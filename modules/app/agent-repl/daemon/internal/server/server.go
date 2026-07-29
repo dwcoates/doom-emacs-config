@@ -19,7 +19,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -240,10 +239,10 @@ type Account struct {
 
 // New builds a Server.
 func New(cfg Config) *Server {
-	logf := cfg.Logf
-	if logf == nil {
-		logf = log.Printf
+	if cfg.Logf == nil {
+		panic("server: Config.Logf is required")
 	}
+	logf := cfg.Logf
 	now := cfg.Now
 	if now == nil {
 		now = time.Now

@@ -33,7 +33,6 @@ package progress
 
 import (
 	"fmt"
-	"log"
 	"sort"
 	"strconv"
 	"strings"
@@ -81,7 +80,7 @@ func (realScheduler) AfterFunc(d time.Duration, f func()) func() bool {
 
 // Options configure a Manager.
 type Options struct {
-	// Logf is the loud anomaly logger. Nil defaults to log.Printf.
+	// Logf is the loud anomaly logger. Required.
 	Logf dlog.Logf
 	// Clock returns wall-clock unix millis. Nil uses time.Now.
 	Clock func() int64
@@ -140,10 +139,10 @@ type workspaceProgress struct {
 
 // New builds a Manager.
 func New(opts Options) *Manager {
-	logf := opts.Logf
-	if logf == nil {
-		logf = log.Printf
+	if opts.Logf == nil {
+		panic("progress: Options.Logf is required")
 	}
+	logf := opts.Logf
 	clock := opts.Clock
 	if clock == nil {
 		clock = func() int64 { return time.Now().UnixMilli() }

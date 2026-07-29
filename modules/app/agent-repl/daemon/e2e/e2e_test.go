@@ -21,8 +21,10 @@
 package e2e
 
 import (
+	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -40,6 +42,7 @@ import (
 	"github.com/gorilla/websocket"
 	"google.golang.org/protobuf/encoding/protojson"
 
+	"claude-repld/internal/dlog"
 	"claude-repld/internal/progress"
 	"claude-repld/internal/registry"
 	"claude-repld/internal/server"
@@ -184,6 +187,12 @@ func (w *testLogWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+type testShimLogger struct{ t *testing.T }
+
+func (l testShimLogger) Log(format string, args ...any) { l.t.Logf(format, args...) }
+
+func (l testShimLogger) LogVerbose(format string, args ...any) { l.t.Logf(format, args...) }
+
 // --- minimal WireAgentShim stubs (merge/lifecycle unused here) --------------
 
 type stubMergeDirs struct{}
@@ -301,6 +310,40 @@ func withEstablishTimeout(d time.Duration) harnessOption {
 	return func(o *harnessTuning) { o.establishTimeout = d }
 }
 
+func assertCanonicalShimLog(t *testing.T, path string, workspace dlog.Workspace, sessionID string) {
+	t.Helper()
+	file, err := os.Open(path)
+	if err != nil {
+		t.Errorf("open inherited shim log target: %v", err)
+		return
+	}
+	defer file.Close()
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		var record struct {
+			Timestamp          string         `json:"timestamp"`
+			Runtime            string         `json:"runtime"`
+			Level              string         `json:"level"`
+			Verbosity          string         `json:"verbosity"`
+			Operation          string         `json:"operation"`
+			Message            string         `json:"message"`
+			Context            map[string]any `json:"context"`
+			PID                int            `json:"pid"`
+			WorkspaceDirectory string         `json:"workspace_dir"`
+			WorkspaceID        string         `json:"workspace_id"`
+			AgentReplSessionID string         `json:"agent_repl_session_id"`
+		}
+		if json.Unmarshal(scanner.Bytes(), &record) == nil && strings.Contains(record.Timestamp, ".") && record.Runtime == "shim" && record.Level != "" && record.Verbosity != "" && record.Operation != "" && record.Message != "" && record.Context != nil && record.PID > 0 && record.WorkspaceDirectory == workspace.Directory && record.WorkspaceID == workspace.ID && record.AgentReplSessionID == sessionID {
+			return
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		t.Errorf("scan inherited shim log target: %v", err)
+		return
+	}
+	t.Errorf("inherited shim log target %q contained no canonical shim record", path)
+}
+
 func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 	t.Helper()
 	var tuning harnessTuning
@@ -384,15 +427,28 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 	if err := sessionlock.EnsureDir(); err != nil {
 		t.Fatalf("make session lock dir: %v", err)
 	}
+	targets := dlog.NewTargetManager()
+	t.Cleanup(func() { _ = targets.Close() })
 	udsSpawn := func(sessionID string, opts server.CreateOpts) (func() error, error) {
-		argv := server.ShimUDSArgv(node, script, sessionID, true /*forceFake*/, opts, shimSock)
+		workspace, err := dlog.WorkspaceFromDirectory(opts.CWD)
+		if err != nil {
+			return nil, err
+		}
+		shimTarget, err := targets.OpenWorkspaceRuntime(workspace, dlog.RuntimeShim)
+		if err != nil {
+			return nil, err
+		}
+		canonicalOpts := opts
+		canonicalOpts.CWD = workspace.Directory
+		argv := server.ShimUDSArgv(node, script, sessionID, true /*forceFake*/, canonicalOpts, shimSock)
+		argv = append(argv, "--log-fd", "3")
 		argv = append(argv, "--store-socket", storeSock)
 		if tuning.wedgeShim {
 			// Spawns cleanly, holds no session lock, and never dials the daemon:
 			// the process exists, so nothing upstream of the handshake fails.
 			argv = []string{node, "-e", "setInterval(() => {}, 1000)"}
 		}
-		proc, spawnErr := shim.Spawn(shim.Options{Argv: argv, Dir: opts.CWD, Logf: t.Logf})
+		proc, spawnErr := shim.Spawn(shim.Options{Argv: argv, Dir: workspace.Directory, ExtraFiles: []*os.File{shimTarget}, Logger: testShimLogger{t: t}})
 		if spawnErr != nil {
 			return nil, spawnErr
 		}
@@ -407,6 +463,9 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 		t.Cleanup(func() {
 			_ = proc.Terminate()
 			_ = proc.Wait()
+			if !tuning.wedgeShim {
+				assertCanonicalShimLog(t, shimTarget.Name(), workspace, sessionID)
+			}
 		})
 		return func() error { return proc.Terminate() }, nil
 	}
@@ -417,6 +476,10 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 	// instances split the brain: the driver's notes push to nobody while the
 	// wired instance never hears them.
 	progressMgr := progress.New(progress.Options{Logf: t.Logf})
+	fileDiagnostics, err := server.NewTargetFileDiagnosticPersister(targets, os.Stderr, false)
+	if err != nil {
+		t.Fatalf("build file diagnostic persister: %v", err)
+	}
 	driver, err := sessiondrv.New(sessiondrv.Config{
 		Push:              forwarder,
 		SSM:               ssmMgr,
@@ -424,6 +487,7 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 		Spawner:           server.NewShimSpawner(reg, shimListener.Connected, udsSpawn, t.Logf),
 		Locator:           &server.SessionLocator{Reg: reg},
 		Source:            &server.ShimConnSource{Listener: shimListener},
+		FileDiagnostics:   fileDiagnostics,
 		SeqStore:          e2eSeqStore,
 		ClearCompactStore: e2eSeqStore,
 		PermissionModes:   server.NewRegistryModeStore(reg),

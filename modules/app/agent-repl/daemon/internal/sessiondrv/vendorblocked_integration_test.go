@@ -71,6 +71,7 @@ func newVendorBlockedRig(t *testing.T) *vendorBlockedRig {
 		ClearCompactStore: newFakeClearCompactStore(),
 		ProtocolVersion:   "1",
 		Source:            stubSource{},
+		FileDiagnostics:   fakeFileDiagnosticPersister{},
 		newClient: func(cfg shimclient.Config) sessionClient {
 			fc := &fakeClient{cfg: cfg}
 			mu.Lock()

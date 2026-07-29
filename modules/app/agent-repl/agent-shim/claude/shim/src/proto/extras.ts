@@ -27,7 +27,7 @@
  */
 import { create } from "@bufbuild/protobuf";
 import type { JsonObject } from "@bufbuild/protobuf";
-import { shimLog } from "../uds/log.js";
+import { bindLog } from "../uds/log.js";
 import {
   EventClass,
   EventSchema,
@@ -43,6 +43,7 @@ export const PRODUCER = "claude-shim";
 export const RAW_CAP_BYTES = 64 * 1024;
 
 const COMPONENT = "claude-shim-convert";
+const LOGGER = bindLog({ component: COMPONENT, operation: "shim.extras.capture" });
 
 /**
  * Distinct `<type>.<field>` paths already loud-logged, so the "once per
@@ -81,8 +82,7 @@ export function logUnknownDiscriminator(
   const key = parentType === "" ? discriminator : `${parentType}:${discriminator}`;
   if (seenDiscriminators.has(key)) return false;
   seenDiscriminators.add(key);
-  shimLog(
-    COMPONENT,
+  LOGGER.log(
     { discriminator: key },
     `unmodeled discriminator captured verbatim into UnknownRecord: ${key}`,
   );
@@ -237,7 +237,7 @@ export class Reader {
       if (!seenFieldPaths.has(path)) {
         seenFieldPaths.add(path);
         logged.push(path);
-        shimLog(COMPONENT, { type: typeLabel, field: k }, `unknown field captured into Event.extras: ${path}`);
+        LOGGER.log({ type: typeLabel, field: k }, `unknown field captured into Event.extras: ${path}`);
       }
     }
     const keys = Object.keys(this.extras);
@@ -257,7 +257,7 @@ export function unparsedEvent(
 ): Event {
   const bytes = typeof raw === "string" ? new TextEncoder().encode(raw) : raw;
   const capped = bytes.length > RAW_CAP_BYTES ? bytes.subarray(0, RAW_CAP_BYTES) : bytes;
-  shimLog(COMPONENT, { session: fields.sessionId ?? "" }, `UNPARSED event (${error}); ${bytes.length} raw bytes preserved`);
+  LOGGER.log({ level: "error", ...(fields.sessionId === undefined ? {} : { claude_session_id: fields.sessionId }), error, raw_bytes: bytes.length }, `UNPARSED event (${error}); ${bytes.length} raw bytes preserved`);
   return create(EventSchema, {
     sessionId: fields.sessionId ?? "",
     seq: 0n,

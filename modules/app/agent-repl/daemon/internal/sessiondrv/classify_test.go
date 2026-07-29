@@ -253,10 +253,15 @@ func stubRun(stdout string, err error, seen *[]string) func(context.Context, str
 	}
 }
 
+func classifierTestLogf(t *testing.T) func(string, ...any) {
+	t.Helper()
+	return func(format string, args ...any) { t.Logf(format, args...) }
+}
+
 func TestCLIClassifierReturnsTheVerdict(t *testing.T) {
 	// Arrange
 	var seen []string
-	c := &CLIClassifier{Model: "haiku", run: stubRun(tokenJump+"\n", nil, &seen)}
+	c := &CLIClassifier{Model: "haiku", Logf: classifierTestLogf(t), run: stubRun(tokenJump+"\n", nil, &seen)}
 	// Act
 	got, err := c.Classify(context.Background(), ClassifyRequest{QueuedPrompt: "stop"})
 	// Assert
@@ -268,7 +273,7 @@ func TestCLIClassifierReturnsTheVerdict(t *testing.T) {
 func TestCLIClassifierSurfacesARunFailure(t *testing.T) {
 	// Arrange — a failed run is NOT a HOLD.
 	var seen []string
-	c := &CLIClassifier{Model: "haiku", run: stubRun("", errors.New("exit 1"), &seen)}
+	c := &CLIClassifier{Model: "haiku", Logf: classifierTestLogf(t), run: stubRun("", errors.New("exit 1"), &seen)}
 	// Act
 	_, err := c.Classify(context.Background(), ClassifyRequest{})
 	// Assert
@@ -280,7 +285,7 @@ func TestCLIClassifierSurfacesARunFailure(t *testing.T) {
 func TestCLIClassifierSurfacesAnUnreadableAnswer(t *testing.T) {
 	// Arrange
 	var seen []string
-	c := &CLIClassifier{Model: "haiku", run: stubRun("I'd wait, personally.", nil, &seen)}
+	c := &CLIClassifier{Model: "haiku", Logf: classifierTestLogf(t), run: stubRun("I'd wait, personally.", nil, &seen)}
 	// Act
 	_, err := c.Classify(context.Background(), ClassifyRequest{})
 	// Assert
@@ -292,7 +297,7 @@ func TestCLIClassifierSurfacesAnUnreadableAnswer(t *testing.T) {
 func TestCLIClassifierPassesTheConfigDirThrough(t *testing.T) {
 	// Arrange
 	var seen []string
-	c := &CLIClassifier{Model: "haiku", run: stubRun(tokenHold, nil, &seen)}
+	c := &CLIClassifier{Model: "haiku", Logf: classifierTestLogf(t), run: stubRun(tokenHold, nil, &seen)}
 	// Act
 	_, _ = c.Classify(context.Background(), ClassifyRequest{ConfigDir: "/cfg"})
 	// Assert
@@ -304,7 +309,7 @@ func TestCLIClassifierPassesTheConfigDirThrough(t *testing.T) {
 func TestCLIClassifierDefaultsTheModelWhenUnset(t *testing.T) {
 	// Arrange
 	var seen []string
-	c := &CLIClassifier{run: stubRun(tokenHold, nil, &seen)}
+	c := &CLIClassifier{Logf: classifierTestLogf(t), run: stubRun(tokenHold, nil, &seen)}
 	// Act
 	_, _ = c.Classify(context.Background(), ClassifyRequest{})
 	// Assert
@@ -316,7 +321,7 @@ func TestCLIClassifierDefaultsTheModelWhenUnset(t *testing.T) {
 func TestCLIClassifierStatesAVerdictRationale(t *testing.T) {
 	// Arrange
 	var seen []string
-	c := &CLIClassifier{run: stubRun(tokenHold, nil, &seen)}
+	c := &CLIClassifier{Logf: classifierTestLogf(t), run: stubRun(tokenHold, nil, &seen)}
 	// Act
 	got, _ := c.Classify(context.Background(), ClassifyRequest{})
 	// Assert — the token carries the decision, so the rationale is ours, not
@@ -328,7 +333,23 @@ func TestCLIClassifierStatesAVerdictRationale(t *testing.T) {
 
 func TestNewCLIClassifierDefaultsTheModel(t *testing.T) {
 	// Arrange / Act / Assert
-	if got := NewCLIClassifier("", nil).Model; got != defaultClassifierModel {
+	if got := NewCLIClassifier("", classifierTestLogf(t)).Model; got != defaultClassifierModel {
 		t.Fatalf("model = %q, want %q", got, defaultClassifierModel)
 	}
+}
+
+func TestCLIClassifierRejectsMissingLogger(t *testing.T) {
+	assertPanics := func(name string, call func()) {
+		t.Helper()
+		defer func() {
+			if recover() == nil {
+				t.Fatalf("%s did not panic", name)
+			}
+		}()
+		call()
+	}
+	assertPanics("constructor", func() { NewCLIClassifier("haiku", nil) })
+	assertPanics("direct construction invocation", func() {
+		(&CLIClassifier{run: stubRun(tokenHold, nil, &[]string{})}).Classify(context.Background(), ClassifyRequest{})
+	})
 }

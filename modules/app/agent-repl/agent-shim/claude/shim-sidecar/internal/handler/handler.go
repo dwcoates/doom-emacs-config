@@ -11,6 +11,7 @@ import (
 	"time"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
+	"agentrepl/shim-claude-sidecar/internal/logging"
 	"agentrepl/shim-claude-sidecar/internal/tail"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -19,9 +20,6 @@ import (
 
 // Producer is the fixed StoreWrite producer identity for the sidecar (§5.2).
 const Producer = "shim-claude-sidecar"
-
-// Logf is the loud-logging sink (§12).
-type Logf = func(format string, args ...any)
 
 // Context / Kind live in the tail package (tailer-owned attribution); aliased
 // here so handler code reads naturally.
@@ -33,12 +31,12 @@ var nowMillis = func() int64 { return time.Now().UnixMilli() }
 // vendorEvent wraps a data.v1 vendor message as a PERSISTENT file-plane Event.
 // dedupKey is set only where the store cannot derive it (journal/turn); "" lets
 // the store derive uuid:/tur: keys itself.
-func vendorEvent(sessionID string, vendor proto.Message, extras *structpb.Struct, dedupKey string, log Logf) *corev1.Event {
+func vendorEvent(sessionID string, vendor proto.Message, extras *structpb.Struct, dedupKey string, log *logging.Bound) *corev1.Event {
 	a, err := anypb.New(vendor)
 	if err != nil {
 		// A generated data.v1 message always marshals into Any; a failure is a
 		// build-time impossibility, surfaced loudly rather than dropped.
-		log("handler: wrapping %T in Any failed: %v", vendor, err)
+		log.With(logging.Context{Operation: "wrap-any", Session: sessionID}).Log("wrapping %T in Any failed: %v", vendor, err)
 		return nil
 	}
 	return &corev1.Event{

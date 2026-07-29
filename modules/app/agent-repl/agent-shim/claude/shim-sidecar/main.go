@@ -14,6 +14,8 @@
 package main
 
 import (
+	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -21,13 +23,13 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	"agentrepl/shim-claude-sidecar/internal/discover"
 	"agentrepl/shim-claude-sidecar/internal/handler"
+	"agentrepl/shim-claude-sidecar/internal/logging"
 	"agentrepl/shim-claude-sidecar/internal/stale"
 	"agentrepl/shim-claude-sidecar/internal/storeclient"
 	"agentrepl/shim-claude-sidecar/internal/tail"
@@ -43,28 +45,82 @@ func main() {
 	flag.Parse()
 
 	if err := run(*storeSocket, parseRoots(*configRoots), *spoolRoot, *logPath); err != nil {
-		fmt.Fprintln(os.Stderr, "shim-claude-sidecar:", err)
+		reportFatal(err, os.Stderr)
 		os.Exit(1)
 	}
 }
 
-func run(storeSocket string, roots []string, spoolRoot, logPath string) error {
-	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
-		return fmt.Errorf("creating log dir: %w", err)
+// reportFatal writes only bootstrap failures because all post-bootstrap errors
+// have already reached the canonical logger and its stderr sink.
+func reportFatal(err error, stderr io.Writer) {
+	if isBootstrapError(err) {
+		payload, encodeErr := json.Marshal(map[string]any{
+			"timestamp": time.Now().UTC().Format(time.RFC3339Nano),
+			"runtime":   "sidecar", "pid": os.Getpid(), "level": "error", "verbosity": "normal",
+			"operation": "sidecar.bootstrap", "message": "sidecar bootstrap failed",
+			"context": map[string]any{"error": err.Error()},
+		})
+		if encodeErr != nil {
+			panic(fmt.Sprintf("shim-claude-sidecar bootstrap log encode failed: %v", encodeErr))
+		}
+		if _, writeErr := stderr.Write(append(payload, '\n')); writeErr != nil {
+			panic(fmt.Sprintf("shim-claude-sidecar bootstrap log write failed: %v", writeErr))
+		}
 	}
-	lf, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	if err != nil {
-		return fmt.Errorf("opening log %q: %w", logPath, err)
-	}
-	defer lf.Close()
-	logf := newLogger(io.MultiWriter(os.Stderr, lf))
+}
 
-	sc := newSidecar(storeSocket, roots, spoolRoot, logf)
-	logf("starting: store=%s roots=%v spool=%s", storeSocket, roots, spoolRoot)
+func run(storeSocket string, roots []string, spoolRoot, logPath string) error {
+	logf, closeLog, err := openLogger(storeSocket, logPath)
+	if err != nil {
+		return err
+	}
+	defer closeLog()
 
 	sigc := make(chan os.Signal, 1)
 	signal.Notify(sigc, syscall.SIGINT, syscall.SIGTERM)
-	return sc.Run(sigc)
+	return runWithLogger(storeSocket, roots, spoolRoot, logf, sigc)
+}
+
+// openLogger creates the sidecar's only persistent diagnostic sink. Failures
+// here are bootstrap failures because no canonical logger can exist yet.
+func openLogger(storeSocket, logPath string) (*logging.Bound, func(), error) {
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
+		return nil, nil, bootstrapError{fmt.Errorf("creating log dir: %w", err)}
+	}
+	lf, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return nil, nil, bootstrapError{fmt.Errorf("opening log %q: %w", logPath, err)}
+	}
+	logf := logging.New(os.Stderr, lf).With(logging.Context{Component: "sidecar", StoreSocket: storeSocket})
+	return logf, func() { _ = lf.Close() }, nil
+}
+
+// runWithLogger owns process-level sidecar failures after canonical logging is
+// available. Lower layers retain ownership of errors they log themselves.
+func runWithLogger(storeSocket string, roots []string, spoolRoot string, logf *logging.Bound, stop <-chan os.Signal) error {
+	sc := newSidecar(storeSocket, roots, spoolRoot, logf)
+	logf.With(logging.Context{Operation: "start"}).Log("roots=%v spool=%s", roots, spoolRoot)
+	return runLogged(logf, func() error { return sc.Run(stop) })
+}
+
+func runLogged(logf *logging.Bound, execute func() error) error {
+	if err := execute(); err != nil {
+		logf.With(logging.Context{Operation: "run"}).Log("sidecar stopped with error: %v", err)
+		return err
+	}
+	return nil
+}
+
+// bootstrapError marks the only failures that may be reported before the
+// canonical logger exists.
+type bootstrapError struct{ err error }
+
+func (e bootstrapError) Error() string { return e.err.Error() }
+func (e bootstrapError) Unwrap() error { return e.err }
+
+func isBootstrapError(err error) bool {
+	var target bootstrapError
+	return errors.As(err, &target)
 }
 
 // ---------------------------------------------------------------------------
@@ -100,9 +156,8 @@ type sidecar struct {
 	disc    *discover.Discoverer
 	tracker *stale.Tracker
 	roots   []string
-	log     handler.Logf
+	log     *logging.Bound
 
-	handlers map[tail.Kind]tail.Handler
 	watchers map[string]*watched // by path
 
 	// owners maps a task id to the session that LAUNCHED it — the only session
@@ -130,21 +185,16 @@ type sidecar struct {
 	dialFailures int
 	downSince    time.Time
 	bootSwept    bool
+	diagnostics  diagnosticOutbox
 }
 
-func newSidecar(storeSocket string, roots []string, spoolRoot string, log handler.Logf) *sidecar {
-	return &sidecar{
-		store:   storeclient.New(storeSocket, log),
-		disc:    discover.New(roots, spoolRoot, log),
-		tracker: stale.New(stale.Options{}, log),
-		roots:   roots,
-		log:     log,
-		handlers: map[tail.Kind]tail.Handler{
-			tail.KindSessionTranscript: handler.NewSessionTranscriptHandler(log),
-			tail.KindAgentTranscript:   handler.NewAgentTranscriptHandler(log),
-			tail.KindWorkflowJournal:   handler.NewWorkflowJournalHandler(log),
-			tail.KindShellSpool:        handler.NewShellOutputHandler(log),
-		},
+func newSidecar(storeSocket string, roots []string, spoolRoot string, log *logging.Bound) *sidecar {
+	s := &sidecar{
+		store:    storeclient.New(storeSocket, log.With(logging.Context{Component: "storeclient"})),
+		disc:     discover.New(roots, spoolRoot, log.With(logging.Context{Component: "discover"})),
+		tracker:  stale.New(stale.Options{}, log.With(logging.Context{Component: "stale"})),
+		roots:    roots,
+		log:      log,
 		watchers: map[string]*watched{},
 		owners:   map[string]string{},
 		held:     map[string]int64{},
@@ -154,6 +204,11 @@ func newSidecar(storeSocket string, roots []string, spoolRoot string, log handle
 		downSince: time.Now(),
 		dialT:     time.NewTimer(0),
 	}
+	// Delivery only appends to an in-memory outbox. The event loop owns all
+	// store I/O, so a log created while processing a store operation cannot
+	// recursively write to the store.
+	log.SetDiagnosticSink(s.diagnostics.enqueue)
+	return s
 }
 
 // Run drives the store-link state machine and, while that link is up, the
@@ -172,14 +227,17 @@ func (s *sidecar) Run(stop <-chan os.Signal) error {
 	for {
 		select {
 		case <-stop:
-			s.log("received signal; shutting down")
+			s.log.With(logging.Context{Operation: "shutdown"}).Log("received signal")
 			return s.store.Close()
 		case <-s.dialT.C:
 			s.dial()
 		case <-rescanT.C:
 			s.whenUp(s.rescan)
 		case <-pollT.C:
-			s.whenUp(s.pollAll)
+			s.whenUp(func() {
+				s.pollAll()
+				s.flushDiagnostics()
+			})
 		case <-sweepT.C:
 			s.whenUp(s.sweep)
 		case <-beatT.C:
@@ -199,7 +257,7 @@ func (s *sidecar) sweep() {
 func (s *sidecar) heartbeat() {
 	requestID := fmt.Sprintf("sidecar-health-%d", time.Now().UnixNano())
 	if err := s.store.Health(requestID); err != nil {
-		s.log("health check failed request_id=%s: %v", requestID, err)
+		s.log.With(logging.Context{Operation: "health", RequestID: requestID}).Log("health check failed: %v", err)
 		s.noteStoreErr("health", err)
 	}
 }
@@ -210,12 +268,12 @@ func (s *sidecar) heartbeat() {
 func (s *sidecar) bootSweep() {
 	boot := bootTimeMillis()
 	if boot == 0 {
-		s.log("boot time unavailable; skipping boot sweep")
+		s.log.With(logging.Context{Operation: "boot-sweep"}).Log("boot time unavailable")
 		return
 	}
 	now := time.Now().UnixMilli()
 	if ev := s.tracker.BootSweep(boot, now); len(ev) > 0 {
-		s.log("boot sweep: %d pre-boot task(s) → LOST", len(ev))
+		s.log.With(logging.Context{Operation: "boot-sweep"}).Log("%d pre-boot task(s) inferred LOST", len(ev))
 		s.emit(ev)
 	}
 }
@@ -250,7 +308,8 @@ func (s *sidecar) rescan() {
 			SpoolDir:  tgt.SpoolDir,
 			RunID:     tgt.RunID,
 		}
-		tr := tail.New(tgt.Path, tgt.Codec(), s.handlers[tgt.Kind], ctx, s.log)
+		bound := s.log.With(logging.Context{Component: "tail", Path: tgt.Path, Session: tgt.SessionID, Task: tgt.TaskID})
+		tr := tail.New(tgt.Path, tgt.Codec(), s.newHandler(tgt.Kind, bound), ctx, bound)
 		if c := s.cursors[tgt.Path]; c != nil {
 			tr.Restore(c)
 		}
@@ -281,8 +340,8 @@ func (s *sidecar) resolveOwner(tgt discover.Target, nowMs int64) (string, bool) 
 		delete(s.held, tgt.Path)
 		// Per-spool, because a hold that CLEARS is rare and is the interesting
 		// half: it says attribution arrived, and how long it took.
-		s.log("spool: owner resolved for %s task=%s session=%s after %dms held",
-			tgt.Path, tgt.TaskID, session, nowMs-firstSeenMs)
+		s.log.With(logging.Context{Operation: "resolve-spool-owner", Path: tgt.Path, Session: session, Task: tgt.TaskID}).Log(
+			"owner resolved after %dms held", nowMs-firstSeenMs)
 	}
 	return session, true
 }
@@ -313,10 +372,11 @@ func (s *sidecar) reportHeld(nowMs int64) {
 	}
 	s.lastHeldReport = report
 	if report.held == 0 {
-		s.log("spool: no unattributed spools remain")
+		s.log.With(logging.Context{Operation: "report-held-spools"}).Log("no unattributed spools remain")
 		return
 	}
-	s.log("spool: %d held awaiting attribution (%d past %s) — not tailed rather than filed under a guessed session",
+	s.log.With(logging.Context{Operation: "report-held-spools", Level: "warn"}).Log(
+		"%d held awaiting attribution (%d past %s) — not tailed rather than filed under a guessed session",
 		report.held, report.stale, UnownedSpoolWindow)
 }
 
@@ -346,7 +406,8 @@ func (s *sidecar) noteOwner(taskID, session string) bool {
 	}
 	if prior, ok := s.owners[taskID]; ok {
 		if prior != session {
-			s.log("spool: CONFLICTING owner for task=%s — already attributed to session %s, now also claimed by %s; KEEPING %s",
+			s.log.With(logging.Context{Operation: "record-spool-owner", Session: prior, Task: taskID, Level: "error"}).Log(
+				"spool: CONFLICTING owner for task=%s — already attributed to session %s, now also claimed by %s; KEEPING %s",
 				taskID, prior, session, prior)
 		}
 		return false
@@ -370,10 +431,10 @@ func (s *sidecar) pollAll() {
 					s.tracker.MarkVanished(w.target.SessionID, w.target.TaskID, now)
 				}
 				delete(s.watchers, path)
-				s.log("tail: %s vanished; grace clock started", path)
+				s.log.With(logging.Context{Operation: "vanished", Path: path, Session: w.target.SessionID, Task: w.target.TaskID}).Log("tail vanished, grace clock started")
 				continue
 			}
-			s.log("tail: poll %s failed: %v", path, err)
+			s.log.With(logging.Context{Operation: "poll", Path: path, Session: w.target.SessionID, Task: w.target.TaskID, Level: "error"}).Log("tail poll failed: %v", err)
 			continue
 		}
 		if !res.Changed {
@@ -382,8 +443,7 @@ func (s *sidecar) pollAll() {
 		writeStart := time.Now()
 		if err := s.writeBatch(res); err != nil {
 			// Honest sad path: do NOT commit; the batch replays and dedup absorbs.
-			s.log("store write failed for %s (cursor NOT advanced, %d events dropped this cycle): %v",
-				path, len(res.Events), err)
+			s.log.With(logging.Context{Operation: "store-write", Path: path, Session: w.target.SessionID, Task: w.target.TaskID, Level: "error", SinkEmergency: true}).Log("cursor not advanced after %d events: %v", len(res.Events), err)
 			if s.link != linkUp {
 				// The write did not merely fail, it revealed a dead link. Abandon
 				// the pass rather than reading the remaining files with nowhere
@@ -400,15 +460,58 @@ func (s *sidecar) pollAll() {
 		s.applyLifecycle(res.Events, now)
 		// The happy path is the one that carries the user's prompt echo to the
 		// GUI, so it gets a line too: steady state is silent, a pickup is not.
-		s.log("tail: %s picked up %d event(s) kind=%s store_write_ms=%d",
-			path, len(res.Events), kindLabel(w.target.Kind), storeWriteMs)
+		s.log.With(logging.Context{Operation: "tail-pickup", Path: path, Session: w.target.SessionID, Task: w.target.TaskID}).Log(
+			"picked up %d event(s) kind=%s store_write_ms=%d",
+			len(res.Events), kindLabel(w.target.Kind), storeWriteMs)
 	}
 }
 
 // writeBatch sends one tailer batch (events + cursor advance) as a StoreWrite.
 func (s *sidecar) writeBatch(res tail.PollResult) error {
-	batch := &corev1.EventBatch{Events: res.Events, CursorAdvance: res.Next}
-	return s.storeWrite("tailer batch", batch)
+	diagnostics := s.diagnostics.snapshot()
+	events := make([]*corev1.Event, 0, len(res.Events)+len(diagnostics))
+	events = append(events, res.Events...)
+	events = append(events, diagnostics...)
+	batch := &corev1.EventBatch{Events: events, CursorAdvance: res.Next}
+	if err := s.storeWrite("tailer batch", batch); err != nil {
+		return err
+	}
+	s.diagnostics.acknowledge(len(diagnostics))
+	return nil
+}
+
+// flushDiagnostics sends records not naturally piggy-backed on a tail batch.
+// Failed writes retain the exact event objects for retry and store dedup.
+func (s *sidecar) flushDiagnostics() {
+	diagnostic, err := s.diagnostics.flush(func(event *corev1.Event) error {
+		return s.storeWrite("diagnostic outbox", &corev1.EventBatch{Events: []*corev1.Event{event}})
+	})
+	if err != nil {
+		s.log.With(logging.Context{
+			Operation:     "diagnostic-flush",
+			Level:         "error",
+			Session:       diagnostic.GetSessionId(),
+			RequestID:     diagnostic.GetRequestId(),
+			Path:          diagnostic.GetFilePlaneDiagnostic().GetSourcePath(),
+			SinkEmergency: true,
+		}).Log("diagnostic outbox write failed: %v", err)
+	}
+}
+
+func (s *sidecar) newHandler(kind tail.Kind, log *logging.Bound) tail.Handler {
+	handlerLog := log.With(logging.Context{Component: "handler"})
+	switch kind {
+	case tail.KindSessionTranscript:
+		return handler.NewSessionTranscriptHandler(handlerLog)
+	case tail.KindAgentTranscript:
+		return handler.NewAgentTranscriptHandler(handlerLog)
+	case tail.KindWorkflowJournal:
+		return handler.NewWorkflowJournalHandler(handlerLog)
+	case tail.KindShellSpool:
+		return handler.NewShellOutputHandler(handlerLog)
+	default:
+		panic(fmt.Sprintf("sidecar: unsupported tail kind %d", kind))
+	}
 }
 
 // applyLifecycle updates the stale tracker from a batch's lifecycle events: a
@@ -437,7 +540,19 @@ func (s *sidecar) emit(events []*corev1.Event) {
 		return
 	}
 	if err := s.storeWrite("synthetic events", &corev1.EventBatch{Events: events}); err != nil {
-		s.log("store write failed for %d synthetic event(s): %v", len(events), err)
+		seenSessions := map[string]bool{}
+		for _, event := range events {
+			if event.GetSessionId() != "" {
+				seenSessions[event.GetSessionId()] = true
+			}
+		}
+		if len(seenSessions) == 0 {
+			s.log.With(logging.Context{Operation: "store-write", Level: "error", SinkEmergency: true}).Log("synthetic event write failed for %d events: %v", len(events), err)
+			return
+		}
+		for session := range seenSessions {
+			s.log.With(logging.Context{Operation: "store-write", Level: "error", Session: session, SinkEmergency: true}).Log("synthetic event write failed for %d events: %v", len(events), err)
+		}
 	}
 }
 
@@ -526,15 +641,4 @@ func defaultCacheDir() string {
 		home = os.TempDir()
 	}
 	return filepath.Join(home, ".cache", "agent-repl")
-}
-
-func newLogger(w io.Writer) handler.Logf {
-	var mu sync.Mutex
-	return func(format string, args ...any) {
-		ts := time.Now().Format("15:04:05.000")
-		msg := fmt.Sprintf(format, args...)
-		mu.Lock()
-		fmt.Fprintf(w, "%s [shim-claude-sidecar] %s\n", ts, msg)
-		mu.Unlock()
-	}
 }

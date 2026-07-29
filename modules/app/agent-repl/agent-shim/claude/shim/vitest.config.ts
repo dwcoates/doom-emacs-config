@@ -10,7 +10,20 @@ const agentReplRoot = fileURLToPath(new URL("../../../", import.meta.url));
 
 export default defineConfig({
   server: { fs: { allow: [agentReplRoot] } },
-  // test/setup.ts sets AGENT_REPL_FORBID_VENDOR_CALLS for every test file, so
-  // no test can reach the real SDK even by mistake (see src/vendor-guard.ts).
-  test: { setupFiles: ["./test/setup.ts"] },
+  test: {
+    // The vendor guard keeps every test offline. The log setup installs a
+    // deterministic inherited sink for canonical JSON logging assertions.
+    setupFiles: ["./test/setup.ts", "./test/log-setup.ts"],
+    coverage: {
+      provider: "v8",
+      all: true,
+      include: ["src/**/*.ts"],
+      exclude: [
+        "src/**/*.d.ts",
+        "src/**/__generated__/**",
+        "src/**/*.generated.ts",
+      ],
+      reporter: ["text", "json", "json-summary", "html"],
+    },
+  },
 });

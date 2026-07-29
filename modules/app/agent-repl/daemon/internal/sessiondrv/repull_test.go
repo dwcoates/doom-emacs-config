@@ -114,6 +114,7 @@ func newRepullHarnessWithLog(t *testing.T, client *replayClient, logf func(strin
 		ProtocolVersion:   "1",
 		Logf:              logf,
 		Source:            stubSource{},
+		FileDiagnostics:   fakeFileDiagnosticPersister{},
 		newClient:         func(shimclient.Config) sessionClient { return client },
 	})
 	if err != nil {

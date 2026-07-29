@@ -3,11 +3,13 @@ package handler
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 	"testing"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
+	"agentrepl/shim-claude-sidecar/internal/logging"
 	"agentrepl/shim-claude-sidecar/internal/tail"
 )
 
@@ -117,8 +119,10 @@ func countCompacted(evs []*corev1.Event) int {
 }
 
 // collectLog captures the loud-log lines a handler emits.
-func collectLog(dst *[]string) Logf {
-	return func(format string, args ...any) { *dst = append(*dst, fmt.Sprintf(format, args...)) }
+func collectLog(dst *[]string) *logging.Bound {
+	log := logging.New(io.Discard, io.Discard).With(logging.Context{Component: "test"})
+	log.SetDiagnosticSink(func(d logging.Diagnostic) { *dst = append(*dst, d.Message) })
+	return log
 }
 
 // --- clear detection --------------------------------------------------------

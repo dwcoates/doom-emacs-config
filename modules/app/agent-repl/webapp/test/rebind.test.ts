@@ -42,7 +42,6 @@ function spyLogger(): { logger: ForwardingLogger; forwarded: ClientLogCmd[]; con
       return true;
     },
     (level, line) => consoleLines.push(`${level}: ${line}`),
-    () => 0,
   );
   return { logger, forwarded, consoleLines };
 }

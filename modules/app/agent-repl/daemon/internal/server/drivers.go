@@ -42,6 +42,27 @@ type SessionLocator struct {
 	Reg *registry.Registry
 }
 
+// RegistryClientLogIdentityResolver validates browser session attribution
+// against the newest live registry record for the command workspace.
+type RegistryClientLogIdentityResolver struct {
+	Reg *registry.Registry
+}
+
+func (r *RegistryClientLogIdentityResolver) ResolveClientLogIdentity(workspace string) (ClientLogSessionIdentity, bool) {
+	if r == nil || r.Reg == nil {
+		return ClientLogSessionIdentity{}, false
+	}
+	sessionID, ok := (&SessionLocator{Reg: r.Reg}).Locate(workspace)
+	if !ok {
+		return ClientLogSessionIdentity{}, false
+	}
+	record, ok := r.Reg.Get(sessionID)
+	if !ok {
+		return ClientLogSessionIdentity{}, false
+	}
+	return ClientLogSessionIdentity{AgentReplSessionID: record.SessionID, ClaudeSessionID: record.ClaudeSessionID}, true
+}
+
 // Locate returns the id of the newest non-terminal session whose CWD is
 // workspace, and whether one exists. Newest is by CreatedAt (RFC3339); a record
 // whose timestamp cannot be parsed is treated as the zero time so it never

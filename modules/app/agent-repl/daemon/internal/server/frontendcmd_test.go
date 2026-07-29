@@ -2,8 +2,11 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -13,6 +16,7 @@ import (
 	datav1 "agentrepl/proto/agentshim/data/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
+	"claude-repld/internal/dlog"
 	"claude-repld/internal/progress"
 	"claude-repld/internal/registry"
 	"claude-repld/internal/ssm"
@@ -29,6 +33,7 @@ func openTestSSM(t *testing.T, reg *registry.Registry) *ssm.Manager {
 	mgr, err := ssm.Open(ssm.Options{
 		DBPath:   filepath.Join(t.TempDir(), "state.db"),
 		Resolver: NewRegistryResolver(reg),
+		Logf:     func(string, ...any) {},
 	})
 	if err != nil {
 		t.Fatalf("open ssm: %v", err)
@@ -912,155 +917,151 @@ func TestWireAgentShimMergeTransitionReachesSSM(t *testing.T) {
 
 // --- ClientLog (E4) ---------------------------------------------------------
 
-// newLoggingHandler returns a handler whose log lines are captured, so the
-// client-log mirroring can be asserted on its ONLY observable effect.
-func newLoggingHandler(t *testing.T, lines *[]string) *commandHandler {
+type fakeClientLogWriter struct {
+	workspace string
+	requestID string
+	cmd       *frontendv1.ClientLogCmd
+	err       error
+}
+
+type fakeClientLogIdentityResolver struct {
+	identity ClientLogSessionIdentity
+	known    bool
+}
+
+func (f fakeClientLogIdentityResolver) ResolveClientLogIdentity(string) (ClientLogSessionIdentity, bool) {
+	return f.identity, f.known
+}
+
+func (f *fakeClientLogWriter) PersistClientLog(workspace, requestID string, cmd *frontendv1.ClientLogCmd) error {
+	f.workspace, f.requestID, f.cmd = workspace, requestID, cmd
+	return f.err
+}
+
+func newLoggingHandler(t *testing.T, writer ClientLogWriter) *commandHandler {
 	t.Helper()
 	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil,
-		func(format string, args ...any) { *lines = append(*lines, fmt.Sprintf(format, args...)) })
+		t.Logf)
 	if err != nil {
 		t.Fatalf("newCommandHandler: %v", err)
 	}
+	h.clientLogs = writer
 	return h
 }
 
-func TestCommandHandlerClientLogWritesTheMessage(t *testing.T) {
-	// Arrange.
-	var lines []string
-	h := newLoggingHandler(t, &lines)
+func TestCommandHandlerClientLogForwardsOnlyToDedicatedWriter(t *testing.T) {
+	writer := &fakeClientLogWriter{}
+	h := newLoggingHandler(t, writer)
+	ctx, err := structpb.NewStruct(map[string]any{"runtime": "webapp"})
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	// Act.
-	if err := h.ClientLog(context.Background(), "/w", "r1",
-		&frontendv1.ClientLogCmd{Level: frontendv1.ClientLogLevel_CLIENT_LOG_LEVEL_WARN, Message: "seq gap at 42"}); err != nil {
+	if err := h.ClientLog(context.Background(), "/w", "r1", &frontendv1.ClientLogCmd{Level: frontendv1.ClientLogLevel_CLIENT_LOG_LEVEL_WARN, Message: "seq gap at 42", Context: ctx}); err != nil {
 		t.Fatalf("ClientLog: %v", err)
 	}
-
-	// Assert.
-	if len(lines) != 1 || !strings.Contains(lines[0], "seq gap at 42") {
-		t.Fatalf("client log lines = %v, want one carrying the message", lines)
+	if writer.workspace != "/w" || writer.requestID != "r1" || writer.cmd.GetMessage() != "seq gap at 42" {
+		t.Fatalf("writer got workspace=%q request=%q cmd=%+v", writer.workspace, writer.requestID, writer.cmd)
 	}
 }
 
-func TestCommandHandlerClientLogTagsTheFrontendOrigin(t *testing.T) {
-	// Arrange — a mirrored line must never read as one the daemon produced.
-	var lines []string
-	h := newLoggingHandler(t, &lines)
-
-	// Act.
-	_ = h.ClientLog(context.Background(), "/w", "r1", &frontendv1.ClientLogCmd{Message: "x"})
-
-	// Assert.
-	if !strings.Contains(lines[0], "client-log") {
-		t.Fatalf("line %q carries no client-log tag", lines[0])
-	}
-}
-
-func TestCommandHandlerClientLogRendersTheLevel(t *testing.T) {
-	// Arrange.
-	var lines []string
-	h := newLoggingHandler(t, &lines)
-
-	// Act.
-	_ = h.ClientLog(context.Background(), "/w", "r1",
-		&frontendv1.ClientLogCmd{Level: frontendv1.ClientLogLevel_CLIENT_LOG_LEVEL_ERROR, Message: "x"})
-
-	// Assert.
-	if !strings.Contains(lines[0], "level=error") {
-		t.Fatalf("line %q does not render the level", lines[0])
-	}
-}
-
-func TestCommandHandlerClientLogDoesNotDefaultAnUnsetLevelToInfo(t *testing.T) {
-	// Arrange — a frontend that forgets the level must be visible as such, not
-	// silently promoted into a level it never claimed.
-	var lines []string
-	h := newLoggingHandler(t, &lines)
-
-	// Act.
-	_ = h.ClientLog(context.Background(), "/w", "r1", &frontendv1.ClientLogCmd{Message: "x"})
-
-	// Assert.
-	if !strings.Contains(lines[0], "level=unspecified") {
-		t.Fatalf("line %q defaulted an unset level instead of reporting it", lines[0])
-	}
-}
-
-func TestCommandHandlerClientLogRendersTheStructuredContext(t *testing.T) {
-	// Arrange.
-	var lines []string
-	h := newLoggingHandler(t, &lines)
-	ctx, err := structpb.NewStruct(map[string]any{"seq": float64(42)})
-	if err != nil {
-		t.Fatalf("structpb.NewStruct: %v", err)
-	}
-
-	// Act.
-	_ = h.ClientLog(context.Background(), "/w", "r1", &frontendv1.ClientLogCmd{Message: "x", Context: ctx})
-
-	// Assert.
-	if !strings.Contains(lines[0], `"seq"`) {
-		t.Fatalf("line %q dropped the structured context", lines[0])
-	}
-}
-
-func TestCommandHandlerClientLogOmitsAnEmptyContext(t *testing.T) {
-	// Arrange — an absent context must add no noise to the line.
-	var lines []string
-	h := newLoggingHandler(t, &lines)
-
-	// Act.
-	_ = h.ClientLog(context.Background(), "/w", "r1", &frontendv1.ClientLogCmd{Message: "x"})
-
-	// Assert.
-	if strings.Contains(lines[0], "context=") {
-		t.Fatalf("line %q rendered an absent context", lines[0])
-	}
-}
-
-func TestCommandHandlerClientLogClampsAHugeMessage(t *testing.T) {
-	// Arrange — a pathological line must not run away with the daemon's disk.
-	var lines []string
-	h := newLoggingHandler(t, &lines)
-
-	// Act.
-	_ = h.ClientLog(context.Background(), "/w", "r1",
-		&frontendv1.ClientLogCmd{Message: strings.Repeat("x", clientLogMessageCap*3)})
-
-	// Assert.
-	if len(lines[0]) > clientLogMessageCap*2 {
-		t.Fatalf("line length %d exceeds the clamp", len(lines[0]))
-	}
-}
-
-func TestCommandHandlerClientLogRejectsAnEmptyMessage(t *testing.T) {
-	// Arrange — a log with no message carries no evidence; it is a caller bug.
-	var lines []string
-	h := newLoggingHandler(t, &lines)
-
-	// Act.
+func TestCommandHandlerClientLogFailsWhenPersistenceIsUnwired(t *testing.T) {
+	h := newLoggingHandler(t, nil)
 	err := h.ClientLog(context.Background(), "/w", "r1", &frontendv1.ClientLogCmd{})
-
-	// Assert — a loud failing ack, and no blank line written.
 	if err == nil {
-		t.Fatal("want a loud error for a message-less client log")
+		t.Fatal("want a loud error when client-log persistence is unwired")
 	}
-	if len(lines) != 0 {
-		t.Fatalf("wrote %d lines for a message-less log, want 0", len(lines))
+}
+
+func TestTargetClientLogWriterPersistsCanonicalWebappRecord(t *testing.T) {
+	workspace := t.TempDir()
+	targets := dlog.NewTargetManager()
+	writer, err := NewTargetClientLogWriter(targets, fakeClientLogIdentityResolver{
+		identity: ClientLogSessionIdentity{AgentReplSessionID: "session-1", ClaudeSessionID: "claude-1"},
+		known:    true,
+	}, io.Discard, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	context, err := structpb.NewStruct(map[string]any{
+		"timestamp": "2026-07-28T12:00:00.123Z", "runtime": "webapp", "level": "warn", "verbosity": "normal",
+		"operation": "webapp.render.failed", "message": "render failed", "context": map[string]any{"cause": "x"}, "connection_id": "connection-1",
+		"agent_repl_session_id": "session-1", "claude_session_id": "claude-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.PersistClientLog(workspace, "request-1", &frontendv1.ClientLogCmd{Level: frontendv1.ClientLogLevel_CLIENT_LOG_LEVEL_WARN, Message: "render failed", Context: context}); err != nil {
+		t.Fatal(err)
+	}
+	ws, err := dlog.WorkspaceFromDirectory(workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(workspace, ".claude", "emacs", "webapp.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var record dlog.Record
+	if err := json.Unmarshal(raw, &record); err != nil {
+		t.Fatal(err)
+	}
+	if record.WorkspaceDirectory != ws.Directory || record.WorkspaceID != ws.ID || record.RequestID != "request-1" || record.ConnectionID != "connection-1" ||
+		record.AgentReplSessionID != "session-1" || record.ClaudeSessionID != "claude-1" {
+		t.Fatalf("persisted record=%+v", record)
+	}
+	if err := targets.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestTargetClientLogWriterRejectsMismatchedCommandMetadata(t *testing.T) {
+	writer, err := NewTargetClientLogWriter(dlog.NewTargetManager(), fakeClientLogIdentityResolver{}, io.Discard, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	context, err := structpb.NewStruct(map[string]any{
+		"timestamp": "2026-07-28T12:00:00Z", "runtime": "webapp", "level": "info", "verbosity": "normal",
+		"operation": "webapp.x", "message": "source", "context": map[string]any{}, "connection_id": "connection-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.PersistClientLog(t.TempDir(), "request-1", &frontendv1.ClientLogCmd{Level: frontendv1.ClientLogLevel_CLIENT_LOG_LEVEL_WARN, Message: "command", Context: context}); err == nil {
+		t.Fatal("mismatched source record was accepted")
+	}
+}
+
+func TestTargetClientLogWriterRejectsMismatchedSourceWorkspace(t *testing.T) {
+	writer, err := NewTargetClientLogWriter(dlog.NewTargetManager(), fakeClientLogIdentityResolver{}, io.Discard, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	context, err := structpb.NewStruct(map[string]any{
+		"timestamp": "2026-07-28T12:00:00Z", "runtime": "webapp", "level": "info", "verbosity": "normal",
+		"operation": "webapp.x", "message": "source", "context": map[string]any{}, "connection_id": "connection-1",
+		"workspace_dir": "/not-the-command-workspace", "workspace_id": "wrong-id",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.PersistClientLog(t.TempDir(), "request-1", &frontendv1.ClientLogCmd{Level: frontendv1.ClientLogLevel_CLIENT_LOG_LEVEL_INFO, Message: "source", Context: context}); err == nil {
+		t.Fatal("mismatched source workspace was accepted")
 	}
 }
 
 func TestCommandHandlerClientLogChangesNoDaemonState(t *testing.T) {
 	// Arrange — a client log is EVIDENCE, never a control signal.
 	p := &fakePrompts{}
-	m := &fakeMerges{}
-	l := &fakeLifecycle{}
-	h, err := newCommandHandler(p, m, l, nil, &fakeSessionCmds{}, nil, nil, nil)
+	writer := &fakeClientLogWriter{}
+	h, err := newCommandHandler(p, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil, t.Logf)
 	if err != nil {
-		t.Fatalf("newCommandHandler: %v", err)
+		t.Fatal(err)
 	}
+	h.clientLogs = writer
 
 	// Act.
-	_ = h.ClientLog(context.Background(), "/w", "r1", &frontendv1.ClientLogCmd{Message: "x"})
+	_ = h.ClientLog(context.Background(), "/w", "r1", &frontendv1.ClientLogCmd{})
 
 	// Assert.
 	if len(p.prompted) != 0 || len(p.interrupts) != 0 {

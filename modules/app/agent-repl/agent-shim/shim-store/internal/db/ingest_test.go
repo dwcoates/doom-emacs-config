@@ -1,11 +1,16 @@
 package db
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"io"
+	"path/filepath"
 	"sync"
 	"testing"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
+	"agentrepl/shim-store/internal/logging"
 )
 
 func TestIngestAssignsGaplessSeq(t *testing.T) {
@@ -161,6 +166,50 @@ func TestIngestRejectsEmptySession(t *testing.T) {
 	// Assert
 	if err == nil {
 		t.Fatal("expected Ingest to reject an empty session_id, got nil")
+	}
+}
+
+func TestIngestLogsRejectedTransactionWithStoreContext(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "events.db")
+	var logs bytes.Buffer
+	d, err := Open(path, logging.New(&logs, io.Discard, false).With(logging.Fields{
+		Component: "db", DatabasePath: path, Table: "event",
+	}))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { d.Close() })
+
+	_, err = d.Ingest("sidecar", []*corev1.Event{{
+		SessionId: "s1",
+		Class:     corev1.EventClass_EVENT_CLASS_EPHEMERAL,
+	}}, nil)
+	if err == nil {
+		t.Fatal("expected ephemeral event rejection")
+	}
+
+	lines := bytes.Split(bytes.TrimSpace(logs.Bytes()), []byte("\n"))
+	var record struct {
+		Level     string         `json:"level"`
+		Operation string         `json:"operation"`
+		Context   map[string]any `json:"context"`
+	}
+	if err := json.Unmarshal(lines[len(lines)-1], &record); err != nil {
+		t.Fatalf("rejection record is not JSON: %v", err)
+	}
+	if record.Level != "error" || record.Operation != "ingest" || record.Context["db"] != path || record.Context["table"] != "event" || record.Context["producer"] != "sidecar" || record.Context["transaction"] != "BEGIN IMMEDIATE" {
+		t.Fatalf("rejection record lacks canonical store context: %#v", record)
+	}
+}
+
+func TestKindOfNamesFilePlaneDiagnostic(t *testing.T) {
+	ev := &corev1.Event{
+		Payload: &corev1.Event_FilePlaneDiagnostic{
+			FilePlaneDiagnostic: &corev1.FilePlaneDiagnostic{},
+		},
+	}
+	if got := kindOf(ev); got != "FilePlaneDiagnostic" {
+		t.Fatalf("kindOf(FilePlaneDiagnostic) = %q, want FilePlaneDiagnostic", got)
 	}
 }
 

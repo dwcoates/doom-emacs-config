@@ -42,7 +42,7 @@ import net from "node:net";
 import { create } from "@bufbuild/protobuf";
 import { MessageConn, envelopeType, unpackAs } from "./framing.js";
 import type { Any } from "./framing.js";
-import { shimLog } from "./log.js";
+import { bindLog } from "./log.js";
 import {
   DegradedState,
   DegradedStateSchema,
@@ -124,6 +124,7 @@ export interface StoreHealth {
   healthy: boolean;
   reason: string;
 }
+const LOGGER = bindLog({ component: COMPONENT, operation: "shim.store-client.connection" });
 
 interface PendingWrite {
   resolve: (ack: StoreWriteAck) => void;
@@ -265,13 +266,19 @@ export class StoreClient {
     if (!sessionId || sessionId === this.storeKey || sessionId === this.rotatingTo) return;
     if (this.forwardedAny) {
       this.rotatingTo = sessionId;
+      LOGGER.log({
+        agent_repl_session_id: this.opts.sessionId,
+        claude_session_id: sessionId,
+        store_key: this.storeKey,
+        rotating_to: sessionId,
+      }, "vendor session rotation detected, beginning controlled store re-key");
       void this.rotateStoreKey(sessionId);
       return;
     }
     const previous = this.storeKey;
     this.storeKey = sessionId;
     this.vendorKnown = true;
-    shimLog(COMPONENT, { session: this.opts.sessionId, store_key: sessionId },
+    LOGGER.log({ agent_repl_session_id: this.opts.sessionId, claude_session_id: sessionId, store_key: sessionId },
       `adopted store session key (was ${previous})`);
     // Only reopen if a standing subscription position exists; otherwise
     // recording the key is enough and the next subscribe() picks it up. The
@@ -326,13 +333,13 @@ export class StoreClient {
    */
   private async rotateStoreKey(next: string): Promise<void> {
     const previous = this.storeKey;
-    shimLog(COMPONENT, { session: this.opts.sessionId, store_key: previous, rotating_to: next },
+    LOGGER.log({ agent_repl_session_id: this.opts.sessionId, store_key: previous, rotating_to: next },
       `VENDOR SESSION ROTATION observed: ${previous} -> ${next} — the vendor minted a new transcript identity mid-stream; re-keying the store subscription and bouncing the daemon link`);
     // Every send is chained (see sendChain) and already reports its own
     // failures, so this only ever waits — it never absorbs an error.
     await this.sendChain;
     if (this.closed) {
-      shimLog(COMPONENT, { session: this.opts.sessionId, store_key: previous, rotating_to: next },
+      LOGGER.log({ agent_repl_session_id: this.opts.sessionId, store_key: previous, rotating_to: next },
         `rotation ABANDONED: the store client was closed while in-flight writes drained`);
       this.rotatingTo = null;
       return;
@@ -340,19 +347,19 @@ export class StoreClient {
     if (this.rotator) {
       this.rotator(previous, next);
     } else {
-      shimLog(COMPONENT, { session: this.opts.sessionId, store_key: previous, rotating_to: next },
+      LOGGER.log({ level: "error", agent_repl_session_id: this.opts.sessionId, store_key: previous, rotating_to: next },
         `rotation has no daemon-link bounce bound — the daemon will keep the retired key's last_seen and read the new key's seq as a regression`);
     }
     this.storeKey = next;
     this.vendorKnown = true;
     this.rotatingTo = null;
-    shimLog(COMPONENT, { session: this.opts.sessionId, store_key: next },
+    LOGGER.log({ agent_repl_session_id: this.opts.sessionId, store_key: next },
       `store re-keyed to the rotated vendor session id (was ${previous})`);
     // The standing subscription belongs to the RETIRED seq space. Retire it
     // with the key; the bounce's re-handshake opens the new one at the
     // daemon's from_seq, which that handshake resets to zero.
     this.dropStandingSubscription();
-    shimLog(COMPONENT, { session: this.opts.sessionId, store_key: next },
+    LOGGER.log({ agent_repl_session_id: this.opts.sessionId, store_key: next },
       `retired the standing subscription of the old seq space; the re-handshake gate opens the new one at the daemon's from_seq`);
   }
 
@@ -388,7 +395,7 @@ export class StoreClient {
         );
         this.connected = true;
         this.startHeartbeat();
-        shimLog(COMPONENT, { session: this.opts.sessionId }, `connected to store at ${this.opts.socketPath}`);
+        LOGGER.log({ agent_repl_session_id: this.opts.sessionId }, `connected to store at ${this.opts.socketPath}`);
         resolve();
       });
     });
@@ -425,7 +432,7 @@ export class StoreClient {
         settled = true;
         clearTimeout(timeout);
         probe?.close();
-        shimLog(COMPONENT, { session: this.opts.sessionId, request: requestId, healthy, reason },
+        LOGGER.log({ agent_repl_session_id: this.opts.sessionId, request_id: requestId, healthy, reason },
           healthy ? "store health PASS" : "store health FAIL");
         resolve({ healthy, reason });
       };
@@ -519,7 +526,12 @@ export class StoreClient {
           reject(new Error(`store-client: ${reason}`));
           return;
         }
-        shimLog(COMPONENT, { session: this.opts.sessionId, store_key: this.storeKey, from_seq: fromSeq }, `subscribed to store`);
+        LOGGER.log({
+          agent_repl_session_id: this.opts.sessionId,
+          claude_session_id: this.storeKey,
+          store_key: this.storeKey,
+          from_seq: fromSeq,
+        }, "subscribed to store");
         resolve();
       });
     });
@@ -624,7 +636,7 @@ export class StoreClient {
       return Promise.reject(new Error("store client is closed"));
     }
     if (!this.redialing) {
-      shimLog(COMPONENT, { session: this.opts.sessionId }, `producer connection down — redialing ${this.opts.socketPath}`);
+      LOGGER.log({ level: "error", agent_repl_session_id: this.opts.sessionId }, `producer connection down — redialing ${this.opts.socketPath}`);
       this.redialing = this.connect().finally(() => {
         this.redialing = null;
       });
@@ -655,7 +667,7 @@ export class StoreClient {
       return;
     }
     if (unpackAs(msg, HeartbeatSchema)) return; // liveness only
-    shimLog(COMPONENT, { session: this.opts.sessionId }, `unhandled store message ${envelopeType(msg)}`);
+    LOGGER.log({ level: "error", agent_repl_session_id: this.opts.sessionId }, `unhandled store message ${envelopeType(msg)}`);
   }
 
   private onSubMessage(msg: Any): void {
@@ -666,12 +678,12 @@ export class StoreClient {
         this.forwardedAny = true;
         this.sink(evt);
       } else {
-        shimLog(COMPONENT, { session: this.opts.sessionId, seq: evt.seq }, `merged event dropped: no sink bound`);
+        LOGGER.log({ level: "error", agent_repl_session_id: this.opts.sessionId, claude_session_id: evt.sessionId, seq: evt.seq }, `merged event dropped: no sink bound`);
       }
       return;
     }
     if (unpackAs(msg, HeartbeatSchema)) return; // liveness only
-    shimLog(COMPONENT, { session: this.opts.sessionId }, `unhandled store subscription message ${envelopeType(msg)}`);
+    LOGGER.log({ level: "error", agent_repl_session_id: this.opts.sessionId }, `unhandled store subscription message ${envelopeType(msg)}`);
   }
 
   private onSubClose(conn: MessageConn, err: Error | null): void {
@@ -685,7 +697,7 @@ export class StoreClient {
   private onAck(ack: StoreWriteAck): void {
     const pending = this.pendingWrites.shift();
     if (!pending) {
-      shimLog(COMPONENT, { session: this.opts.sessionId }, `received StoreWriteAck with no pending write`);
+      LOGGER.log({ level: "warn", agent_repl_session_id: this.opts.sessionId }, `received StoreWriteAck with no pending write`);
       return;
     }
     if (ack.error !== "") {
@@ -696,7 +708,7 @@ export class StoreClient {
     }
     if (ack.deduped > 0n) {
       // Expected overlap with the file plane; debug-level, not an anomaly.
-      shimLog(COMPONENT, { session: this.opts.sessionId, accepted: ack.accepted, deduped: ack.deduped, last_seq: ack.lastSeq }, `batch acked`);
+      LOGGER.log({ agent_repl_session_id: this.opts.sessionId, accepted: ack.accepted, deduped: ack.deduped, last_seq: ack.lastSeq }, `batch acked`);
     }
     pending.resolve(ack);
   }
@@ -720,7 +732,7 @@ export class StoreClient {
   /** Loud-log each dropped event and report a DegradedState. */
   private dropBatch(events: Event[], reason: string): void {
     for (const evt of events) {
-      shimLog(COMPONENT, { session: this.opts.sessionId, seq: evt.seq, kind: envelopeKind(evt) }, `DROPPED event: ${reason}`);
+      LOGGER.log({ level: "error", agent_repl_session_id: this.opts.sessionId, claude_session_id: evt.sessionId, seq: evt.seq, kind: envelopeKind(evt), reason }, `DROPPED event: ${reason}`);
     }
     this.degrade(reason, events.length);
   }
@@ -766,7 +778,7 @@ export class StoreClient {
         settled = true;
         if (idleTimer) clearTimeout(idleTimer);
         conn?.close();
-        shimLog(COMPONENT, { session: this.opts.sessionId, store_key: this.storeKey, delivered, truncated },
+        LOGGER.log({ level: truncated ? "error" : "info", agent_repl_session_id: this.opts.sessionId, claude_session_id: this.storeKey, store_key: this.storeKey, delivered, truncated },
           truncated ? `replay TRUNCATED: ${reason}` : `replay complete`);
         resolve({ delivered, truncated, reason: truncated ? reason : "" });
       };
@@ -818,7 +830,7 @@ export class StoreClient {
           sessionId: this.storeKey,
           fromSeq: opts.fromSeq,
         }));
-        shimLog(COMPONENT, { session: this.opts.sessionId, store_key: this.storeKey, from_seq: opts.fromSeq, to_seq: opts.toSeq },
+        LOGGER.log({ agent_repl_session_id: this.opts.sessionId, claude_session_id: this.storeKey, store_key: this.storeKey, from_seq: opts.fromSeq, to_seq: opts.toSeq },
           `opened throwaway replay subscription (standing subscription untouched)`);
         armIdle();
       });
@@ -835,7 +847,7 @@ export class StoreClient {
     if (this.reporter) {
       this.reporter(report);
     } else {
-      shimLog(COMPONENT, { session: this.opts.sessionId }, `DEGRADED (no reporter bound): ${reason}`);
+      LOGGER.log({ level: "error", agent_repl_session_id: this.opts.sessionId, reason }, `DEGRADED (no reporter bound): ${reason}`);
     }
   }
 

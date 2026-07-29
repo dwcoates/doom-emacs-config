@@ -22,6 +22,8 @@ Begin the persistence message with ✅ if the changes are not persistent after r
 
 ## Claude REPL
 
+Before starting any work under `modules/app/agent-repl/`, read and follow the complete metaprompt at `<current-repository-root>/modules/app/agent-repl/metaprompt.md` (full repository-relative path: `modules/app/agent-repl/metaprompt.md`). Always resolve it from the current worktree's repository root so the instructions match the revision being changed.
+
 ### HARD GATE: never edit the top-level doomdir `config.el` without explicit permission
 
 **Top-level `config.el` (i.e. `$DOOMDIR/config.el`, the file at the repo root) is off-limits to agents by default.** Before making ANY edit to that file — even a one-character edit, even refactoring an existing block, even "while you're already in there" — STOP and ask the user for explicit permission, in this turn, for this specific edit. Implicit permission (e.g. a previous session, a related task, a generic "fix this bug") does not count. Permission must be explicit and per-edit.
@@ -188,14 +190,53 @@ When in doubt: fail loudly. When a precondition fails: abort entirely. When temp
 
 ## Testing
 
-After any changes to `modules/app/agent-repl/`, always run the agent-repl test suite. Prefer the safety-net wrapper:
+After any changes to `modules/app/agent-repl/`, run the single full local
+verification entry point:
 
 ```bash
-.claude/safe-test-run.sh           # full suite
-.claude/safe-test-run.sh "^foo"    # ert selector regex
+modules/app/agent-repl/bin/test-all.sh
 ```
 
-The wrapper drops a checkpoint tag at `HEAD` before invoking ert, then diffs the pre/post git state (HEAD, all refs/heads, all refs/tags, working-tree status). On any drift the checkpoint tag is **preserved** and the script prints the exact `git reset --hard <tag>` command to roll back; on a clean run the tag is auto-removed. Exit codes: `0` clean, `1` test failures, `2` drift detected, `3` environment error.
+It runs the shell harnesses, the full ERT safety wrapper, every authored Go
+module with statement coverage, both TypeScript projects with statement and
+branch coverage, and proto validation. It reports wall-clock duration for each
+suite. Every suite must pass.
+
+The ERT safety wrapper remains available for a focused selector:
+
+```bash
+.claude/safe-test-run.sh "^foo"
+```
+
+The wrapper drops a checkpoint tag at `HEAD` before invoking ert, then diffs
+the pre/post git state (HEAD, all refs/heads, all refs/tags, working-tree
+status). On any drift the checkpoint tag is **preserved** and the script
+prints the exact `git reset --hard <tag>` command to roll back; on a clean run
+the tag is auto-removed. Exit codes: `0` clean, `1` test failures, `2` drift
+detected, `3` environment error.
+
+### Canonical test timing history
+
+`modules/app/agent-repl/test_time.csv` is the canonical per-suite timing
+history. Normal feature-branch verification must not mutate it. After a commit
+lands on `master`, run:
+
+```bash
+modules/app/agent-repl/bin/test-all.sh --record
+```
+
+The command appends timings only after every suite passes and only if the
+branch and commit remain unchanged throughout the run. Commit the resulting
+`test_time.csv` update as a follow-up timing record.
+
+Review the command's regression report and the newest CSV rows before
+declaring the master work complete. A big regression means the current suite
+is both at least 25% slower and at least 1.0 second slower than the average of
+its five most recent entries on the same branch. The script prints
+`TIMING REGRESSION` for that condition once at least three prior entries exist.
+Surface every such regression to the user with the current duration, recent
+average, percentage increase, and absolute increase. Investigate and fix it
+unless the correct resolution requires a user decision.
 
 You may invoke ert directly if you have a specific reason:
 

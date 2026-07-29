@@ -2,6 +2,7 @@ package storeclient
 
 import (
 	"errors"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -10,8 +11,13 @@ import (
 	"time"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
+	"agentrepl/shim-claude-sidecar/internal/logging"
 	"agentrepl/wire"
 )
+
+func testLog() *logging.Bound {
+	return logging.New(io.Discard, io.Discard).With(logging.Context{Component: "test"})
+}
 
 // shimStoreDir walks up from the test's working directory to the sibling
 // shim-store module (…/agent-shim/shim-store).
@@ -84,7 +90,7 @@ func startRealStore(t *testing.T) string {
 func TestIntegrationRecoverCursorsEmpty(t *testing.T) {
 	// Arrange
 	sock := startRealStore(t)
-	c := New(sock, nil)
+	c := New(sock, testLog())
 	defer c.Close()
 	// Act
 	cursors, err := c.RecoverCursors("")
@@ -136,7 +142,7 @@ func TestRecoverRejectsStoreWithoutAuthoritativeOpenTaskState(t *testing.T) {
 func TestIntegrationWriteAckThenCursorRecovery(t *testing.T) {
 	// Arrange
 	sock := startRealStore(t)
-	c := New(sock, nil)
+	c := New(sock, testLog())
 	defer c.Close()
 	if err := c.Connect(); err != nil {
 		t.Fatalf("Connect: %v", err)
@@ -175,7 +181,7 @@ func TestIntegrationWriteAckThenCursorRecovery(t *testing.T) {
 func TestIntegrationDedupOnReplay(t *testing.T) {
 	// Arrange: the same producer-keyed batch written twice (a crash-replay).
 	sock := startRealStore(t)
-	c := New(sock, nil)
+	c := New(sock, testLog())
 	defer c.Close()
 	if err := c.Connect(); err != nil {
 		t.Fatalf("Connect: %v", err)
@@ -208,7 +214,7 @@ func TestIntegrationHeartbeat(t *testing.T) {
 	// Arrange: an established producer connection before any file change has
 	// produced the StoreWrite that ordinarily declares its role.
 	sock := startRealStore(t)
-	c := New(sock, nil)
+	c := New(sock, testLog())
 	defer c.Close()
 	if err := c.Connect(); err != nil {
 		t.Fatalf("Connect: %v", err)
@@ -246,7 +252,7 @@ func TestIntegrationHealthCheck(t *testing.T) {
 
 func TestWriteErrorSurfacedOnDeadStore(t *testing.T) {
 	// Arrange: a client pointed at a socket with no server (honest sad path).
-	c := New(filepath.Join(t.TempDir(), "nonexistent.sock"), nil)
+	c := New(filepath.Join(t.TempDir(), "nonexistent.sock"), testLog())
 	// Act
 	_, err := c.Write("shim-claude-sidecar", &corev1.EventBatch{})
 	// Assert: the failure is surfaced, never swallowed.
@@ -260,7 +266,7 @@ func TestWriteNeverDialsImplicitly(t *testing.T) {
 	// would succeed, which is exactly why the write must not attempt one: a
 	// connection born under a write skipped cursor recovery.
 	sock := startRealStore(t)
-	c := New(sock, nil)
+	c := New(sock, testLog())
 	defer c.Close()
 
 	// Act
@@ -278,7 +284,7 @@ func TestWriteNeverDialsImplicitly(t *testing.T) {
 func TestHeartbeatOnADownConnectionIsAnErrorNotSilence(t *testing.T) {
 	// Arrange: never connected. A heartbeat exists to detect a dead link, so
 	// answering "fine" here would hide the very outage it is asked about.
-	c := New(filepath.Join(t.TempDir(), "nonexistent.sock"), nil)
+	c := New(filepath.Join(t.TempDir(), "nonexistent.sock"), testLog())
 
 	// Act / Assert
 	if err := c.Heartbeat(); !errors.Is(err, ErrNotConnected) {
@@ -316,7 +322,7 @@ func TestHealthRequiresCorrelationID(t *testing.T) {
 func TestConnectedGoesFalseAfterTheStoreDies(t *testing.T) {
 	// Arrange: an established producer connection to a real store.
 	sock := startRealStore(t)
-	c := New(sock, nil)
+	c := New(sock, testLog())
 	defer c.Close()
 	if err := c.Connect(); err != nil {
 		t.Fatalf("Connect: %v", err)

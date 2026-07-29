@@ -4,6 +4,7 @@ import (
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
 	"agentrepl/shim-claude-sidecar/internal/convert"
+	"agentrepl/shim-claude-sidecar/internal/logging"
 	"agentrepl/shim-claude-sidecar/internal/tail"
 	"google.golang.org/protobuf/types/known/structpb"
 )
@@ -18,11 +19,11 @@ import (
 // following it. The file plane is the sole producer of both.
 type SessionTranscriptHandler struct {
 	conv *convert.Converter
-	log  Logf
+	log  *logging.Bound
 }
 
 // NewSessionTranscriptHandler builds a handler with its own converter.
-func NewSessionTranscriptHandler(log Logf) *SessionTranscriptHandler {
+func NewSessionTranscriptHandler(log *logging.Bound) *SessionTranscriptHandler {
 	return &SessionTranscriptHandler{conv: convert.New(log), log: log}
 }
 
@@ -47,13 +48,13 @@ func (h *SessionTranscriptHandler) Handle(frames []tail.Frame, ctx *Context) []*
 	frames = frames[:h.holdCount(memo, frames, ctx)]
 	for i, f := range frames {
 		if f.ParseErr != nil {
-			h.log("transcript: parse failure at %s:%d: %v", ctx.Path, f.Offset, f.ParseErr)
+			h.log.With(logging.Context{Operation: "parse", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).Log("parse failure at offset=%d: %v", f.Offset, f.ParseErr)
 			out = append(out, unparsedEvent(ctx.SessionID, ctx.Path, f.Offset, f.Raw, f.ParseErr))
 			continue
 		}
 		c := h.convertAt(memo, frames, i)
 		if c.err != nil {
-			h.log("transcript: conversion failure at %s:%d: %v", ctx.Path, f.Offset, c.err)
+			h.log.With(logging.Context{Operation: "convert", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).Log("conversion failure at offset=%d: %v", f.Offset, c.err)
 			out = append(out, unparsedEvent(ctx.SessionID, ctx.Path, f.Offset, f.Raw, c.err))
 			continue
 		}

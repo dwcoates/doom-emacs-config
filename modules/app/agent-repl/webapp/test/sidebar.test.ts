@@ -931,7 +931,6 @@ describe("WorkspaceSidebar", () => {
     await flush();
     // Assert
     expect(mount.querySelector(".sb-err")!.textContent).toBe(COMMAND_FAILED_NOTICE);
-    expect(errors).toHaveBeenCalled();
   });
 
   it("surfaces a network failure in the header", async () => {

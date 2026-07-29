@@ -136,6 +136,12 @@ message Event {
     // names them and the daemon can find the newest one with an envelope query.
     ContextCleared context_cleared = 22;
     ContextCompacted context_compacted = 23;
+    // Canonical persistent file-plane runtime diagnostic. The store persists
+    // it opaquely and the shim forwards it. The daemon resolves session_id to
+    // a workspace and writes the record to that workspace's sidecar.log.
+    // Consumers must never render it as conversation material or apply it to
+    // SSM.
+    FilePlaneDiagnostic file_plane_diagnostic = 24;
     // Vendor extension payload (e.g. agentshim.data.v1.* messages). The
     // daemon treats it opaquely except for frontend translation; the store
     // treats it fully opaquely apart from dedup-key extraction.
@@ -743,4 +749,37 @@ message CursorList {
   // authoritative lifecycle query. Distinguishes an empty set from an older
   // store that does not understand field 2.
   bool open_tasks_authoritative = 3;
+}
+
+// Runtime that originated a FilePlaneDiagnostic. File-plane diagnostics come
+// from the sidecar; other runtimes use their own canonical logging paths.
+enum DiagnosticSourceRuntime {
+  DIAGNOSTIC_SOURCE_RUNTIME_UNSPECIFIED = 0;
+  DIAGNOSTIC_SOURCE_RUNTIME_SIDECAR = 1;
+}
+
+// Canonical diagnostic record emitted by the file-plane sidecar. It is valid
+// only on a PERSISTENT Event with plane = PLANE_FILE. session_id identifies
+// the vendor session, produced_at_ms is the source timestamp, and request_id
+// remains the dedicated control-request correlation field on Event. The
+// sidecar does not know workspace identity, so this payload must not duplicate
+// workspace fields. source_runtime must be
+// DIAGNOSTIC_SOURCE_RUNTIME_SIDECAR.
+message FilePlaneDiagnostic {
+  DiagnosticSourceRuntime source_runtime = 1;
+  // One of: debug, info, warn, error.
+  string level = 2;
+  // One of: normal, verbose. Verbosity controls live visibility, never
+  // persistence.
+  string verbosity = 3;
+  // Stable machine-readable operation name.
+  string operation = 4;
+  // Concise human-readable description.
+  string message = 5;
+  // Structured operation-specific evidence.
+  google.protobuf.Struct context = 6;
+  // PID of the sidecar process that emitted the source record.
+  int64 source_pid = 7;
+  // Source file path when context alone cannot identify the relevant file.
+  string source_path = 8;
 }

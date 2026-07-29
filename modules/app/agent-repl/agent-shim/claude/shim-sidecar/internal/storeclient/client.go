@@ -32,6 +32,7 @@ import (
 	"time"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
+	"agentrepl/shim-claude-sidecar/internal/logging"
 	"agentrepl/wire"
 )
 
@@ -40,23 +41,17 @@ import (
 // (which arrives on a healthy connection) to decide whether the link is lost.
 var ErrNotConnected = errors.New("storeclient: no producer connection to the store")
 
-// Logf is the loud-logging sink (§12).
-type Logf = func(format string, args ...any)
-
 // Client holds the (lazily-opened) producer connection to the store.
 type Client struct {
 	socket string
-	log    Logf
+	log    *logging.Bound
 
 	mu   sync.Mutex
 	conn net.Conn
 }
 
 // New builds a Client for the store at socket.
-func New(socket string, log Logf) *Client {
-	if log == nil {
-		log = func(string, ...any) {}
-	}
+func New(socket string, log *logging.Bound) *Client {
 	return &Client{socket: socket, log: log}
 }
 
@@ -163,8 +158,9 @@ func (c *Client) Write(producer string, batch *corev1.EventBatch) (*corev1.Store
 		return nil, fmt.Errorf("storeclient: expected StoreWriteAck, got %T", msg)
 	}
 	if ack.GetError() != "" {
-		// A rejected batch is a loud, surfaced failure, not a silent drop.
-		c.log("storeclient: store REJECTED batch (producer=%s): %s", producer, ack.GetError())
+		// The caller owns the diagnostic because it alone knows whether this
+		// batch belongs to a Claude session. Logging here would leak a
+		// session-owned rejection into the global sidecar file.
 		return ack, fmt.Errorf("storeclient: batch rejected: %s", ack.GetError())
 	}
 	return ack, nil

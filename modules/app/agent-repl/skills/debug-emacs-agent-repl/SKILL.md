@@ -9,16 +9,33 @@ agent-repl is not one program. It is **six planes**, each with its own evidence,
 
 | Plane | What it is | Primary evidence |
 |---|---|---|
-| **Emacs** | The editor module — workspaces, panels, sentinels, REPL state | OS-temporary `doom-agent-repl.log`, workspace log buffers, per-workspace `memory-state.el` (§2) |
-| **Daemon** | The Go process brokering everything | `~/.claude-emacs/claude-repld.log` (§3) |
-| **Shim** | The TypeScript process wrapping the Claude SDK | Same daemon log, prefixed `shim stderr: ` (§3.4) |
-| **Webapp** | The UI inside the Emacs webview | Same daemon log, forwarded client-logs (§3.5) |
+| **Emacs** | The editor module — workspaces, panels, sentinels, REPL state | `<workspace>/.claude/emacs/emacs.log`, per-workspace `memory-state.el` (§2) |
+| **Daemon** | The Go process brokering everything | `<workspace>/.claude/emacs/daemon.log` (§3) |
+| **Shim** | The TypeScript process wrapping the Claude SDK | `<workspace>/.claude/emacs/shim.log` (§3.4) |
+| **Webapp** | The UI inside the Emacs webview | `<workspace>/.claude/emacs/webapp.log` (§3.5) |
 | **State** | The SSM database that decides every workspace's color | `~/.cache/agent-repl/ssm/state.db` (§4) |
-| **Data** | The event store holding conversation content | `~/.cache/agent-repl/store/events.db` (§5) |
+| **Data** | The event store holding conversation content | `~/.cache/agent-repl/store/events.db` and `<workspace>/.claude/emacs/sidecar.log` (§5) |
 
 Two of those planes are **SQLite databases you can query directly**. That is the single biggest lever in this skill: "why is this workspace purple" and "why is this conversation missing content" are *queries*, not guesses. Use them.
 
 Treat this evidence as more authoritative than your memory of what the code does.
+
+All runtime logs are JSONL, one object per line. Workspace paths are canonical
+symlinks to runtime-owned temporary targets, so resolve them through the
+workspace rather than searching a centralized service file:
+
+```sh
+modules/app/agent-repl/scripts/agent-repl-log-discovery.sh --workspace /absolute/worktree/path
+modules/app/agent-repl/scripts/agent-repl-log-discovery.sh --workspace /absolute/worktree/path --runtime shim
+modules/app/agent-repl/scripts/agent-repl-log-discovery.sh --workspace /absolute/worktree/path --session "$CLAUDE_SESSION_ID" --tail 2000
+modules/app/agent-repl/scripts/agent-repl-log-discovery.sh --workspace /absolute/worktree/path --runtime shim --pid 12345
+modules/app/agent-repl/scripts/agent-repl-log-discovery.sh --global
+```
+
+The global form is only for records that are conceptually workspace-agnostic.
+A missing workspace log means that runtime has not emitted for that workspace.
+It is never permission to substitute a global log. The resolver parses JSON
+and fails loudly if a selected nonempty log contains malformed records.
 
 **Before trusting any of it, ask whether the code you are reading is the code that is running** — every component is a built artifact, so a merged fix that was never deployed looks exactly like a fix that does not work. See §6.
 

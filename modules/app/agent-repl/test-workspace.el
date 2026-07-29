@@ -301,6 +301,26 @@ nil so post-nuke passes don't act on stale runtime intent."
     (agent-repl--ws-del "ws1")
     (should-not (agent-repl--ws-get "ws1" :pending-show-panels))))
 
+(ert-deftest agent-repl-test-ws-del-forgets-emacs-log-target-without-deleting-history ()
+  "Tombstoning forgets only in-memory target ownership for a workspace name."
+  (agent-repl-test--with-clean-state
+    (let* ((target (make-temp-file "agent-repl-ws-history-"))
+           (canonical (make-temp-file "agent-repl-ws-link-"))
+           (agent-repl--workspace-log-targets (make-hash-table :test #'equal)))
+      (unwind-protect
+          (progn
+            (delete-file canonical)
+            (make-symbolic-link target canonical)
+            (agent-repl--ws-put "ws1" :project-dir temporary-file-directory)
+            (puthash "ws1" (list :target target) agent-repl--workspace-log-targets)
+            (cl-letf (((symbol-function 'agent-repl--log) (lambda (&rest _) nil)))
+              (agent-repl--ws-del "ws1"))
+            (should-not (gethash "ws1" agent-repl--workspace-log-targets))
+            (should (file-exists-p target))
+            (should (file-symlink-p canonical)))
+        (when (file-symlink-p canonical) (delete-file canonical))
+        (when (file-exists-p target) (delete-file target))))))
+
 (ert-deftest agent-repl-test-ws-del-clears-pushed-render-state ()
   "ws-del clears `:pushed-render-state' — a daemon-pushed runtime key tied
 to the session, so it must not outlive the tombstone.

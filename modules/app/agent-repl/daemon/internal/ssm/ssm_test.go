@@ -279,7 +279,7 @@ func TestPersistenceAcrossReopen(t *testing.T) {
 	// Arrange: idle session with a live task, on a stable path.
 	path := filepath.Join(t.TempDir(), "state.db")
 	res := fakeResolver{"s1": "ws1"}
-	m1, err := Open(Options{DBPath: path, Resolver: res})
+	m1, err := Open(Options{DBPath: path, Logf: func(string, ...any) {}, Resolver: res})
 	if err != nil {
 		t.Fatalf("Open 1: %v", err)
 	}
@@ -664,7 +664,7 @@ func TestMigrateAddsTaskIDToAV1Database(t *testing.T) {
 	writeV1DB(t, path)
 
 	// Act.
-	m, err := Open(Options{DBPath: path, Resolver: fakeResolver{"s1": "ws1"}})
+	m, err := Open(Options{DBPath: path, Logf: func(string, ...any) {}, Resolver: fakeResolver{"s1": "ws1"}})
 	if err != nil {
 		t.Fatalf("Open a v1 db: %v", err)
 	}
@@ -683,7 +683,7 @@ func TestMigrateRecordsTheNewSchemaVersion(t *testing.T) {
 	// Arrange — leaving the stamp at 1 would make the version guard meaningless.
 	path := filepath.Join(t.TempDir(), "state.db")
 	writeV1DB(t, path)
-	m, err := Open(Options{DBPath: path, Resolver: fakeResolver{}})
+	m, err := Open(Options{DBPath: path, Logf: func(string, ...any) {}, Resolver: fakeResolver{}})
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -711,14 +711,14 @@ func TestMigrateIsIdempotentAcrossReopens(t *testing.T) {
 	// second open must not try to re-add the column.
 	path := filepath.Join(t.TempDir(), "state.db")
 	writeV1DB(t, path)
-	first, err := Open(Options{DBPath: path, Resolver: fakeResolver{}})
+	first, err := Open(Options{DBPath: path, Logf: func(string, ...any) {}, Resolver: fakeResolver{}})
 	if err != nil {
 		t.Fatalf("first Open: %v", err)
 	}
 	first.Close()
 
 	// Act.
-	second, err := Open(Options{DBPath: path, Resolver: fakeResolver{}})
+	second, err := Open(Options{DBPath: path, Logf: func(string, ...any) {}, Resolver: fakeResolver{}})
 
 	// Assert.
 	if err != nil {
@@ -746,7 +746,7 @@ func TestMigratedV1RowsStillCountIndividually(t *testing.T) {
 	db.Close()
 
 	// Act.
-	m, err := Open(Options{DBPath: path, Resolver: fakeResolver{"s1": "ws1"}})
+	m, err := Open(Options{DBPath: path, Logf: func(string, ...any) {}, Resolver: fakeResolver{"s1": "ws1"}})
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}

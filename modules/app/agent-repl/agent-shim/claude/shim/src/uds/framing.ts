@@ -33,7 +33,7 @@ import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
 import type { DescMessage, Message, MessageShape } from "@bufbuild/protobuf";
 import { AnySchema, anyIs, anyPack, anyUnpack } from "@bufbuild/protobuf/wkt";
 import type { Any } from "@bufbuild/protobuf/wkt";
-import { shimLog } from "./log.js";
+import { bindLog, type ShimLogger } from "./log.js";
 
 /** Maximum single-frame payload. Identical to wire.go's `MaxFrame`. */
 export const MAX_FRAME = 32 << 20; // 32 MiB
@@ -171,6 +171,7 @@ export interface MessageConnHandlers {
  */
 export class MessageConn {
   private readonly decoder = new FrameDecoder();
+  private readonly logger: ShimLogger;
   private closeErr: Error | null = null;
   private closed = false;
 
@@ -179,6 +180,7 @@ export class MessageConn {
     private readonly handlers: MessageConnHandlers,
     private readonly component: string,
   ) {
+    this.logger = bindLog({ component, operation: "shim.framing.message-connection" });
     socket.on("data", (chunk: Buffer) => this.onData(chunk));
     socket.on("end", () => this.onEnd());
     socket.on("error", (err: Error) => this.onError(err));
@@ -188,7 +190,7 @@ export class MessageConn {
   /** Serialize and write one message. No-op with a loud log if not writable. */
   send<Desc extends DescMessage>(schema: Desc, message: MessageShape<Desc>): void {
     if (this.closed || this.socket.destroyed || !this.socket.writable) {
-      shimLog(this.component, {}, `dropping outbound message: connection not writable`);
+      this.logger.log({ level: "error" }, `dropping outbound message: connection not writable`);
       return;
     }
     this.socket.write(encodeMessage(schema, message));
@@ -204,7 +206,7 @@ export class MessageConn {
     try {
       frames = this.decoder.push(chunk);
     } catch (err) {
-      shimLog(this.component, {}, `frame decode failed (stream poisoned): ${errMsg(err)}`);
+      this.logger.log({ level: "error", cause: err }, `frame decode failed (stream poisoned): ${errMsg(err)}`);
       this.closeErr = asError(err);
       this.socket.destroy();
       return;
@@ -214,7 +216,7 @@ export class MessageConn {
       try {
         any = decodeEnvelope(frame);
       } catch (err) {
-        shimLog(this.component, {}, `envelope decode failed on a ${frame.length}-byte frame: ${errMsg(err)}`);
+        this.logger.log({ level: "error", cause: err, frame_bytes: frame.length }, `envelope decode failed on a ${frame.length}-byte frame: ${errMsg(err)}`);
         this.closeErr = asError(err);
         this.socket.destroy();
         return;
@@ -229,7 +231,7 @@ export class MessageConn {
     try {
       this.decoder.end();
     } catch (err) {
-      shimLog(this.component, {}, `stream truncated mid-frame: ${errMsg(err)}`);
+      this.logger.log({ level: "error", cause: err }, `stream truncated mid-frame: ${errMsg(err)}`);
       this.closeErr = asError(err);
     }
   }

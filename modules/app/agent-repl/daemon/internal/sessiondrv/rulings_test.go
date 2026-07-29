@@ -197,6 +197,7 @@ func newRegistrarManager(t *testing.T, reg SessionRegistrar) *Manager {
 		Source:            stubSource{},
 		ProtocolVersion:   "1",
 		Registrar:         reg,
+		FileDiagnostics:   fakeFileDiagnosticPersister{},
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)

@@ -96,6 +96,9 @@ type AgentShimConfig struct {
 	// behind the server-local bridge so this transport package never imports the
 	// workspace creation implementation or store.
 	WorkspaceCreation WorkspaceCreationBridge
+	// ClientLogs persists canonical browser records to the webapp workspace
+	// target. A missing writer makes that command fail loudly.
+	ClientLogs ClientLogWriter
 	// Logf is the daemon logger. Nil discards.
 	Logf func(string, ...any)
 }
@@ -247,6 +250,7 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 		cancelWorkspaceAvailable()
 		return nil, fmt.Errorf("server: workspace creation bridge returned an invalid host-action subscription")
 	}
+	handler.clientLogs = cfg.ClientLogs
 
 	srv := frontend.New(frontend.Config{
 		Logf: logf,

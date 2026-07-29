@@ -26,25 +26,20 @@ import (
 	"strings"
 
 	datav1 "agentrepl/proto/agentshim/data/v1"
+	"agentrepl/shim-claude-sidecar/internal/logging"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
-// Logf is the loud-logging sink (§12), injected for test capture.
-type Logf = func(format string, args ...any)
-
 // Converter holds the once-per-distinct-field-name log-dedup set. It is NOT safe
 // for concurrent use; each tailer owns its own converter.
 type Converter struct {
-	log  Logf
+	log  *logging.Bound
 	seen map[string]bool
 }
 
 // New builds a Converter. A nil log is tolerated (discarded).
-func New(log Logf) *Converter {
-	if log == nil {
-		log = func(string, ...any) {}
-	}
+func New(log *logging.Bound) *Converter {
 	return &Converter{log: log, seen: make(map[string]bool)}
 }
 
@@ -66,7 +61,7 @@ func (cap *capture) add(path string, v any) {
 	}
 	if !cap.c.seen[leaf] {
 		cap.c.seen[leaf] = true
-		cap.c.log("convert: unknown field %q (path=%s) captured into extras", leaf, path)
+		cap.c.log.With(logging.Context{Operation: "capture-extra"}).Log("unknown field %q path=%s captured into extras", leaf, path)
 	}
 }
 
@@ -79,7 +74,7 @@ func (cap *capture) toStruct() *structpb.Struct {
 	if err != nil {
 		// A non-representable extras value should never happen (the inputs came
 		// straight from encoding/json), but never drop it silently.
-		cap.c.log("convert: failed to build extras struct: %v", err)
+		cap.c.log.With(logging.Context{Operation: "build-extras"}).Log("failed to build extras struct: %v", err)
 		return nil
 	}
 	return s
@@ -776,7 +771,7 @@ func (c *Converter) toolUseResult(m protoreflect.Message, v any, cap *capture) {
 	if arm == "" {
 		// Unclassifiable object: preserve verbatim into the unclassified Struct
 		// arm and loud-log (capture, never silent classification).
-		c.log("convert: unclassified toolUseResult object keys=%v → unclassified arm", sortedKeys(obj))
+		c.log.With(logging.Context{Operation: "classify-tool-use-result"}).Log("unclassified toolUseResult object keys=%v", sortedKeys(obj))
 		s, err := structpb.NewStruct(obj)
 		if err != nil {
 			cap.add("toolUseResult", obj)

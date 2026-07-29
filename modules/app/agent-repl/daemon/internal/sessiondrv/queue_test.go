@@ -107,6 +107,7 @@ func newQueueHarnessWithPusher(t *testing.T, cls *fakeClassifier, wrap func(*fak
 		Logf:              logf,
 		now:               func() int64 { return 1000 },
 		Source:            stubSource{},
+		FileDiagnostics:   fakeFileDiagnosticPersister{},
 		newClient: func(c shimclient.Config) sessionClient {
 			fc := &fakeClient{cfg: c}
 			mu.Lock()

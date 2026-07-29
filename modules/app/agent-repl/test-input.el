@@ -1176,34 +1176,73 @@ the file means a stale variable that won't reflect file edits."
                         (buffer-string))))
     (should (equal agent-repl-command-prefix file-content))))
 
-(ert-deftest agent-repl-test-metaprompt-preexisting-claim-requires-adversarial-team ()
-  "The metaprompt must mandate an adversarial agent team to vet any \"pre-existing\" claim.
-Any temptation to declare an issue pre-existing has to trigger an
-independent adversarial investigation before the claim is accepted."
-  (should (string-match-p "adversarial agent team to vet"
+(ert-deftest agent-repl-test-metaprompt-tracked-test-failures-are-owned ()
+  "The metaprompt must assign every repository-tracked test failure to the agent.
+The rule applies consistently to local, hook, and CICD execution."
+  (should (string-match-p "Every repository-tracked test failure is mine"
                           agent-repl-command-prefix))
-  (should (string-match-p "disprove the \"pre-existing\" claim"
+  (should (string-match-p "locally, in a commit hook, or in CICD"
+                          agent-repl-command-prefix))
+  (should (string-match-p "drive the entire tracked suite to green"
                           agent-repl-command-prefix)))
 
-(ert-deftest agent-repl-test-metaprompt-preexisting-vetting-is-mandatory ()
-  "The metaprompt must make the pre-existing vetting unconditional.
-The adversarial investigation happens every time such a claim arises,
-not just for failing tests."
-  (should (string-match-p "MANDATORY and happens EVERY time"
-                          agent-repl-command-prefix))
-  (should (string-match-p "ANY issue, not just failing tests"
+(ert-deftest agent-repl-test-metaprompt-forbids-test-provenance-investigation ()
+  "The metaprompt must forbid provenance investigation for tracked test failures.
+Historical reproduction and adversarial-vetting instructions must not
+remain elsewhere in the prompt."
+  (should (string-match-p
+           "NEVER consider such a failure \"pre-existing\", investigate its provenance"
+           agent-repl-command-prefix))
+  (should-not (string-match-p "adversarial agent team"
+                              agent-repl-command-prefix))
+  (should-not (string-match-p "canonical reproduction procedure"
+                              agent-repl-command-prefix))
+  (should-not (string-match-p "Pre-existing claims in the tree"
+                              agent-repl-command-prefix)))
+
+(ert-deftest agent-repl-test-metaprompt-scopes-automatic-attribution-to-tracked-tests ()
+  "The metaprompt must distinguish tracked tests from ad hoc smoke tests.
+Smoke-test failures remain actionable evidence without automatically
+establishing who introduced the defect."
+  (should (string-match-p
+           "automatic attribution rule is specific to repository-tracked unit and integration tests"
+           agent-repl-command-prefix))
+  (should (string-match-p
+           "ad hoc smoke test is diagnostic evidence, not a repository-tracked test"
+           agent-repl-command-prefix))
+  (should (string-match-p "defect exposed by a smoke test is still investigated and fixed"
                           agent-repl-command-prefix)))
 
-(ert-deftest agent-repl-test-metaprompt-preexisting-claim-surfaced-in-tldr ()
-  "The metaprompt must require surfacing the vetting under the TLDR pre-existing bullet.
-Both the fact that the investigation took place and its verdict must
-appear as subbullets of the \"is pre-existing\" claim."
-  (should (string-match-p "Pre-existing claims in the tree"
+(ert-deftest agent-repl-test-metaprompt-requires-critical-and-error-case-unit-tests ()
+  "The metaprompt must require focused coverage for critical behavior and every error.
+The required coverage includes branches, boundaries, state transitions,
+error surfacing, canonical logging, and atomic failure."
+  (should (string-match-p
+           "Every new or materially changed function and codepath MUST have unit tests"
+           agent-repl-command-prefix))
+  (should (string-match-p
+           "successful path, meaningful branches, boundary conditions, state transitions"
+           agent-repl-command-prefix))
+  (should (string-match-p "Every error case MUST be covered by a unit test"
                           agent-repl-command-prefix))
-  (should (string-match-p "adversarial agent team investigation took place"
+  (should (string-match-p
+           "canonical log record, and the absence of partial state mutation"
+           agent-repl-command-prefix)))
+
+(ert-deftest agent-repl-test-metaprompt-requires-unified-error-logging ()
+  "The metaprompt must route every error through a shared canonical helper.
+Ad hoc output cannot be the sole record, and error tests must verify the
+structured diagnostic context passed to that helper."
+  (should (string-match-p "Every error uses the unified logging path"
                           agent-repl-command-prefix))
-  (should (string-match-p "records the investigation's verdict"
-                          agent-repl-command-prefix)))
+  (should (string-match-p
+           "Every error MUST be recorded through the owning module, service, or component's canonical logging helper"
+           agent-repl-command-prefix))
+  (should (string-match-p "Never use an ad hoc print, message, side buffer"
+                          agent-repl-command-prefix))
+  (should (string-match-p
+           "Unit tests for error paths MUST verify that the canonical logging helper receives"
+           agent-repl-command-prefix)))
 
 ;;;; ---- Tests: should-prepend-metaprompt-p ----
 

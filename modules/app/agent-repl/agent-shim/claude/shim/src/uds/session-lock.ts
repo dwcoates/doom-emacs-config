@@ -37,9 +37,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { shimLog } from "./log.js";
+import { bindLog } from "./log.js";
 
 const COMPONENT = "shim-session-lock";
+const LOGGER = bindLog({ component: COMPONENT, operation: "shim.session-lock.lifecycle" });
 
 /**
  * `O_EXLOCK` from `<sys/fcntl.h>`: take an exclusive advisory lock as part of
@@ -103,7 +104,7 @@ export function acquireSessionLock(sessionId: string): () => void {
     throw new Error(`${COMPONENT}: cannot take the session lock ${file}: ${(err as Error).message}`);
   }
 
-  shimLog(COMPONENT, { session: sessionId }, `holding session lock ${file}`);
+  LOGGER.log({ agent_repl_session_id: sessionId }, `holding session lock ${file}`);
   let released = false;
   return () => {
     if (released) return;
@@ -111,7 +112,7 @@ export function acquireSessionLock(sessionId: string): () => void {
     try {
       fs.closeSync(fd); // closing drops the flock
     } catch (err) {
-      shimLog(COMPONENT, { session: sessionId }, `releasing session lock failed: ${(err as Error).message}`);
+      LOGGER.log({ level: "error", agent_repl_session_id: sessionId, cause: err }, `releasing session lock failed: ${(err as Error).message}`);
     }
   };
 }

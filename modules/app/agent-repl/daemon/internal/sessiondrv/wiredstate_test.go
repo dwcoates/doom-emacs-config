@@ -223,6 +223,7 @@ func TestDriverExitReportsDormant(t *testing.T) {
 		ClearCompactStore: newFakeClearCompactStore(),
 		ProtocolVersion:   "1",
 		Source:            stubSource{},
+		FileDiagnostics:   fakeFileDiagnosticPersister{},
 		newClient: func(cfg shimclient.Config) sessionClient {
 			return &fakeClient{cfg: cfg, runResult: runResult}
 		},

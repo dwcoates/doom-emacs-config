@@ -123,7 +123,7 @@ func historyLine(t *testing.T, i int) []byte {
 // transcript once.
 func pollTranscript(t *testing.T, sock, root string) (*sidecar, tail.PollResult, string) {
 	t.Helper()
-	s := newSidecar(sock, []string{root}, t.TempDir(), func(string, ...any) {})
+	s := newSidecar(sock, []string{root}, t.TempDir(), quietLog)
 	t.Cleanup(func() { s.store.Close() })
 	if err := s.establish(); err != nil {
 		t.Fatalf("establish: %v", err)

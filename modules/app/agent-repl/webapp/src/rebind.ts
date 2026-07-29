@@ -41,7 +41,7 @@ export function recallResumeKeys(storage: Storage, sessionId: string): ResumeKey
     // Normal/expected: nothing was ever stored for this id (or it was
     // never a resumable session). The caller escalates straight to
     // remediation — this is just a breadcrumb for WHY.
-    log("info", `rebind: no resume record for ${sessionId} — nothing to rebind with`);
+    log("info", `rebind: no resume record for ${sessionId} — nothing to rebind with`, { operation: "rebind.resume-record-missing", context: { agent_repl_session_id: sessionId } });
     return null;
   }
   let parsed: Partial<ResumeKeys>;
@@ -54,6 +54,7 @@ export function recallResumeKeys(storage: Storage, sessionId: string): ResumeKey
     log(
       "error",
       `rebind: corrupt resume record for ${sessionId} (${String(err)}) — falling through to remediation`,
+      { operation: "rebind.resume-record-corrupt", context: { agent_repl_session_id: sessionId, cause: err } },
     );
     return null;
   }
@@ -61,6 +62,7 @@ export function recallResumeKeys(storage: Storage, sessionId: string): ResumeKey
     log(
       "error",
       `rebind: resume record for ${sessionId} lacks claudeSessionId (parsed=${JSON.stringify(parsed)}) — falling through to remediation`,
+      { operation: "rebind.resume-record-invalid", context: { agent_repl_session_id: sessionId, parsed } },
     );
     return null;
   }

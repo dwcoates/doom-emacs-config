@@ -15,7 +15,9 @@
 package replog
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -92,40 +94,39 @@ type CappedWriter struct {
 	dir     string
 	file    *os.File
 	written int64
+	prune   func(string) []string
 	// Cap is the byte threshold that triggers a rotation. Exported so
 	// tests can force a rotation with a tiny cap instead of writing a
 	// gigabyte of log lines; production callers should go through
-	// NewCappedWriter, which defaults it to CapBytes.
+	// NewCappedWriter with an explicit positive cap.
 	Cap int64
 }
 
 // NewCappedWriter wraps f — the file at DIR/FileName as returned by
-// Open — with a mid-run rotation cap. capBytes <= 0 falls back to
-// CapBytes.
+// Open — with a mid-run rotation cap. A nonpositive cap violates the
+// constructor invariant and fails immediately.
 func NewCappedWriter(dir string, f *os.File, capBytes int64) *CappedWriter {
 	if capBytes <= 0 {
-		capBytes = CapBytes
+		panic("replog: capped writer cap must be positive")
 	}
-	return &CappedWriter{dir: dir, file: f, Cap: capBytes}
+	return &CappedWriter{dir: dir, file: f, Cap: capBytes, prune: prune}
 }
 
-// Write appends p to the current log file, then rotates mid-run once
-// this run's running total has crossed Cap. The bytes the caller handed
-// in are always durably written before the cap check runs, so a
-// rotation failure — reported to stderr, since the log sink itself is
-// what just failed — can never turn into a lost log line, only a log
-// file that keeps growing past its cap.
+// Write appends all of p to the current log file, then rotates mid-run once
+// this run's running total has crossed Cap. Rotation failures are returned to
+// dlog, whose canonical sink-failure path emits JSON emergency output and
+// poisons the logger.
 func (w *CappedWriter) Write(p []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	n, err := w.file.Write(p)
+	n, err := writeFileFull(w.file, p)
 	w.written += int64(n)
 	if err != nil {
 		return n, err
 	}
 	if w.written >= w.Cap {
 		if rotErr := w.rotateLocked(); rotErr != nil {
-			fmt.Fprintf(os.Stderr, "replog: mid-run rotation: %v\n", rotErr)
+			return n, rotErr
 		}
 	}
 	return n, nil
@@ -134,7 +135,6 @@ func (w *CappedWriter) Write(p []byte) (int, error) {
 // rotateLocked performs the mid-run rotation described on CappedWriter.
 // Called with mu held.
 func (w *CappedWriter) rotateLocked() error {
-	reached := w.written
 	if err := w.file.Close(); err != nil {
 		return fmt.Errorf("replog: close for mid-run rotation: %w", err)
 	}
@@ -142,18 +142,39 @@ func (w *CappedWriter) rotateLocked() error {
 	if err := rotate(current, time.Now().Format(stampLayout)); err != nil {
 		return fmt.Errorf("replog: mid-run rotate: %w", err)
 	}
-	warnings := prune(w.dir)
+	warnings := w.prune(w.dir)
 	f, err := os.OpenFile(current, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		return fmt.Errorf("replog: reopen after mid-run rotation: %w", err)
 	}
 	w.file = f
 	w.written = 0
-	fmt.Fprintf(f, "replog: mid-run rotation: previous file reached %d bytes (cap %d)\n", reached, w.Cap)
-	for _, warn := range warnings {
-		fmt.Fprintf(f, "replog: %s\n", warn)
+	if len(warnings) > 0 {
+		// Pruning is part of the cap invariant. The record that crossed the cap
+		// is already safe in the rotated file, but continuing after retention
+		// failed would permit unbounded disk growth. Return the error so dlog
+		// emits one JSON emergency record and poisons this writer.
+		return fmt.Errorf("replog: prune after mid-run rotation: %s", strings.Join(warnings, "; "))
 	}
 	return nil
+}
+
+func writeFileFull(w io.Writer, p []byte) (int, error) {
+	total := 0
+	for total < len(p) {
+		n, err := w.Write(p[total:])
+		if n < 0 || n > len(p)-total {
+			return total, fmt.Errorf("replog: invalid write count %d", n)
+		}
+		total += n
+		if err != nil {
+			return total, err
+		}
+		if n == 0 {
+			return total, errors.New("replog: writer made no progress")
+		}
+	}
+	return total, nil
 }
 
 // Close closes the current log file. Safe to call at shutdown even if a

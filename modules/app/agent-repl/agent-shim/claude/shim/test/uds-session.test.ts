@@ -52,9 +52,11 @@ import type { Event, ShimReady, Subscribe } from "../src/uds/proto.js";
 import {
   AckSchema,
   DaemonHelloSchema,
+  DiagnosticSourceRuntime,
   EventSchema,
   HealthCheckSchema,
   HealthStatusSchema,
+  FilePlaneDiagnosticSchema,
   InterruptSchema,
   PermissionDecision,
   InterruptOutcome,
@@ -612,6 +614,39 @@ describe("UdsSession events: store round-trip and sad path", () => {
     const evt = await daemon.next(EventSchema);
     // Assert
     expect(evt.seq).toBe(5n);
+  });
+
+  it("forwards a live persistent file-plane diagnostic field-faithfully without conversation conversion", async () => {
+    // Arrange: this diagnostic has already been persisted by shim-store. The
+    // shim is intentionally an opaque transport for this event family.
+    const { store, daemon } = await rig();
+    const diagnostic = create(FilePlaneDiagnosticSchema, {
+      sourceRuntime: DiagnosticSourceRuntime.SIDECAR,
+      level: "error",
+      verbosity: "normal",
+      operation: "sidecar.store.write",
+      message: "store write failed",
+      context: { table: "events", retryable: false, attempt: 3 },
+      sourcePid: 4123n,
+      sourcePath: "/tmp/sidecar.sock",
+    });
+    const persisted = create(EventSchema, {
+      sessionId: "sess-1",
+      seq: 5n,
+      producedAtMs: 1720000000000n,
+      requestId: "request-live-1",
+      payload: { case: "filePlaneDiagnostic", value: diagnostic },
+    });
+
+    // Act
+    store.latest().send(EventSchema, persisted);
+    const forwarded = await daemon.next(EventSchema);
+
+    // Assert: it remains the diagnostic payload and every durable field
+    // reaches the daemon unchanged, rather than becoming conversation data.
+    expect(forwarded).toEqual(persisted);
+    expect(forwarded.payload.case).toBe("filePlaneDiagnostic");
+    expect(forwarded.payload.case === "filePlaneDiagnostic" && forwarded.payload.value).toEqual(diagnostic);
   });
 
   it("forwards a store outage to the daemon as an Event(DegradedState)", async () => {
@@ -1172,6 +1207,42 @@ describe("UdsSession bounded historical replay (core.proto ReplayRequest)", () =
     // Assert
     expect(replayed.requestId).toBe("r1");
     expect(replayed.event?.seq).toBe(1n);
+  });
+
+  it("forwards a replayed persistent file-plane diagnostic field-faithfully without conversation conversion", async () => {
+    // Arrange
+    const { store, daemon } = await rig({ storeSessionId: "vendor-uuid", replayIdleMs: 200 });
+    const diagnostic = create(FilePlaneDiagnosticSchema, {
+      sourceRuntime: DiagnosticSourceRuntime.SIDECAR,
+      level: "warn",
+      verbosity: "verbose",
+      operation: "sidecar.replay.read",
+      message: "replayed diagnostic",
+      context: { cursor: "42", retained: true },
+      sourcePid: 9988n,
+      sourcePath: "/tmp/sidecar-replay.sock",
+    });
+    const persisted = create(EventSchema, {
+      sessionId: "vendor-uuid",
+      seq: 1n,
+      producedAtMs: 1720000001000n,
+      requestId: "request-replay-1",
+      payload: { case: "filePlaneDiagnostic", value: diagnostic },
+    });
+
+    // Act
+    daemon.send(ReplayRequestSchema, create(ReplayRequestSchema, { requestId: "r-diagnostic", fromSeq: 0n, toSeq: 3n }));
+    await until(() => store.count() >= 2);
+    const replayConn = store.latest();
+    await replayConn.next(SubscribeSchema);
+    replayConn.send(EventSchema, persisted);
+    const replayed = await daemon.next(ReplayEventSchema);
+
+    // Assert
+    expect(replayed.requestId).toBe("r-diagnostic");
+    expect(replayed.event).toEqual(persisted);
+    expect(replayed.event?.payload.case).toBe("filePlaneDiagnostic");
+    expect(replayed.event?.payload.case === "filePlaneDiagnostic" && replayed.event.payload.value).toEqual(diagnostic);
   });
 
   it("closes a served replay with exactly one ReplayDone", async () => {

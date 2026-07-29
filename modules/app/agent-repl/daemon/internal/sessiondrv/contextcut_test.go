@@ -141,6 +141,7 @@ func newClearTestManager(t *testing.T) (*Manager, *fakeApplier) {
 		ClearCompactStore: newFakeClearCompactStore(),
 		ProtocolVersion:   "1",
 		Source:            stubSource{},
+		FileDiagnostics:   fakeFileDiagnosticPersister{},
 		newClient:         func(cfg shimclient.Config) sessionClient { return &fakeClient{cfg: cfg} },
 	})
 	if err != nil {

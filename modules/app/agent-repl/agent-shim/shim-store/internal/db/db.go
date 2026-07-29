@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/url"
 
+	"agentrepl/shim-store/internal/logging"
 	_ "modernc.org/sqlite"
 )
 
@@ -16,21 +17,18 @@ import (
 // migration step in migrate() for any schema change.
 const SchemaVersion = 1
 
-// Logf is the loud-logging sink (§12). Injected so tests can capture output.
-type Logf = func(format string, args ...any)
-
 // DB wraps the SQLite handle plus the store's logger.
 type DB struct {
 	sql *sql.DB
-	log Logf
+	log *logging.Logger
 }
 
 // Open opens (creating if absent) the event database at path with WAL enabled
 // and runs migrations to SchemaVersion. path may be an on-disk file; callers
 // running tests pass a temp-dir path so WAL is genuinely exercised.
-func Open(path string, log Logf) (*DB, error) {
+func Open(path string, log *logging.Logger) (*DB, error) {
 	if log == nil {
-		log = func(string, ...any) {}
+		panic("shim-store db: nil logger")
 	}
 	// modernc.org/sqlite takes PRAGMAs as _pragma query params. WAL for
 	// concurrent readers during live-tail; NORMAL sync is durable under WAL;
@@ -62,22 +60,31 @@ func Open(path string, log Logf) (*DB, error) {
 
 	sqldb, err := sql.Open("sqlite", dsn)
 	if err != nil {
+		log.Log(logging.Fields{Operation: "open", DatabasePath: path, Level: "error"}, "opening SQLite connection failed: %v", err)
 		return nil, fmt.Errorf("shim-store db: opening %q: %w", path, err)
 	}
 	if err := sqldb.Ping(); err != nil {
 		sqldb.Close()
+		log.Log(logging.Fields{Operation: "ping", DatabasePath: path, Level: "error"}, "SQLite ping failed: %v", err)
 		return nil, fmt.Errorf("shim-store db: pinging %q: %w", path, err)
 	}
 	d := &DB{sql: sqldb, log: log}
 	if err := d.migrate(); err != nil {
 		sqldb.Close()
+		log.Log(logging.Fields{Operation: "migrate", DatabasePath: path, Table: "schema_meta", Level: "error"}, "schema migration failed: %v", err)
 		return nil, err
 	}
 	return d, nil
 }
 
 // Close closes the underlying handle.
-func (d *DB) Close() error { return d.sql.Close() }
+func (d *DB) Close() error {
+	if err := d.sql.Close(); err != nil {
+		d.log.Log(logging.Fields{Operation: "close", Level: "error"}, "closing SQLite database failed: %v", err)
+		return err
+	}
+	return nil
+}
 
 const schemaDDL = `
 CREATE TABLE IF NOT EXISTS event (
@@ -119,7 +126,7 @@ func (d *DB) migrate() error {
 		if _, err := d.sql.Exec(`INSERT INTO schema_meta(version) VALUES (?)`, SchemaVersion); err != nil {
 			return fmt.Errorf("shim-store db: seeding schema_meta: %w", err)
 		}
-		d.log("schema initialized at version %d", SchemaVersion)
+		d.log.Log(logging.Fields{Operation: "migrate", Table: "schema_meta"}, "schema initialized at version=%d", SchemaVersion)
 	case nil:
 		if version > SchemaVersion {
 			return fmt.Errorf("shim-store db: on-disk schema version %d is newer than this binary's %d", version, SchemaVersion)

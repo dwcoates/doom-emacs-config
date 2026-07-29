@@ -4,6 +4,7 @@ import (
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	datav1 "agentrepl/proto/agentshim/data/v1"
 	"agentrepl/shim-claude-sidecar/internal/convert"
+	"agentrepl/shim-claude-sidecar/internal/logging"
 	"agentrepl/shim-claude-sidecar/internal/tail"
 )
 
@@ -13,11 +14,11 @@ import (
 // wf:<run_id>:<key>:<type> on the envelope (§6.4).
 type WorkflowJournalHandler struct {
 	conv *convert.Converter
-	log  Logf
+	log  *logging.Bound
 }
 
 // NewWorkflowJournalHandler builds a handler with its own converter.
-func NewWorkflowJournalHandler(log Logf) *WorkflowJournalHandler {
+func NewWorkflowJournalHandler(log *logging.Bound) *WorkflowJournalHandler {
 	return &WorkflowJournalHandler{conv: convert.New(log), log: log}
 }
 
@@ -26,13 +27,13 @@ func (h *WorkflowJournalHandler) Handle(frames []tail.Frame, ctx *Context) []*co
 	var out []*corev1.Event
 	for _, f := range frames {
 		if f.ParseErr != nil {
-			h.log("journal: parse failure at %s:%d: %v", ctx.Path, f.Offset, f.ParseErr)
+			h.log.With(logging.Context{Operation: "parse", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).Log("parse failure at offset=%d: %v", f.Offset, f.ParseErr)
 			out = append(out, unparsedEvent(ctx.SessionID, ctx.Path, f.Offset, f.Raw, f.ParseErr))
 			continue
 		}
 		rec, extras, err := h.conv.JournalRecord(f.Obj)
 		if err != nil {
-			h.log("journal: conversion failure at %s:%d: %v", ctx.Path, f.Offset, err)
+			h.log.With(logging.Context{Operation: "convert", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).Log("conversion failure at offset=%d: %v", f.Offset, err)
 			out = append(out, unparsedEvent(ctx.SessionID, ctx.Path, f.Offset, f.Raw, err))
 			continue
 		}

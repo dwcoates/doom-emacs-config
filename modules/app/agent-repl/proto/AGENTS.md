@@ -48,3 +48,18 @@ user-facing representation of an interject, whose MECHANISM (`Interrupt` then
 syntax-checks without emitting.
 
 Dependencies: protoc, protoc-gen-go, @bufbuild/protoc-gen-es.
+
+## Validation and coverage
+
+For every `.proto` or `gen/` change, run:
+
+```bash
+make coverage
+```
+
+`make coverage` first runs `make validate`, which lints, regenerates, and
+rejects stale committed or untracked stubs. It then runs the downstream daemon,
+shim-store, shim-sidecar, wire, Claude shim, and webapp coverage suites. The
+command must pass. Generated `gen/go` and `gen/ts` files are contract artifacts,
+never coverage subjects or threshold inputs; coverage applies only to
+handwritten downstream Go and TypeScript source.

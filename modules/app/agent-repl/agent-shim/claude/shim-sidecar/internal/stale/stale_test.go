@@ -1,12 +1,20 @@
 package stale
 
 import (
+	"io"
 	"testing"
 	"time"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
+	"agentrepl/shim-claude-sidecar/internal/logging"
 	"agentrepl/shim-claude-sidecar/internal/tail"
 )
+
+func testLog() *logging.Bound {
+	log := logging.New(io.Discard, io.Discard).With(logging.Context{Component: "test"})
+	log.SetDiagnosticSink(func(logging.Diagnostic) {})
+	return log
+}
 
 const min = int64(60_000) // one minute in ms
 
@@ -30,7 +38,7 @@ func onlyLost(t *testing.T, evs []*corev1.Event) *corev1.TaskEnded {
 
 func TestVanishGraceEmitsLostAfterWindow(t *testing.T) {
 	// Arrange
-	tr := New(Options{Grace: 30 * time.Second}, nil)
+	tr := New(Options{Grace: 30 * time.Second}, testLog())
 	tr.Open("b1", tail.KindShellSpool, "s1", "/p/b1.output", 1000, 1000)
 	tr.MarkVanished("s1", "b1", 10_000)
 	// Act: sweep before grace elapses.
@@ -51,7 +59,7 @@ func TestVanishGraceEmitsLostAfterWindow(t *testing.T) {
 
 func TestVanishThenPresentDoesNotLose(t *testing.T) {
 	// Arrange
-	tr := New(Options{Grace: 30 * time.Second}, nil)
+	tr := New(Options{Grace: 30 * time.Second}, testLog())
 	tr.Open("a1", tail.KindAgentTranscript, "s1", "", 1000, 1000)
 	tr.MarkVanished("s1", "a1", 10_000)
 	// Act: the file reappears, then a sweep well past the grace window.
@@ -66,7 +74,7 @@ func TestVanishThenPresentDoesNotLose(t *testing.T) {
 
 func TestSilenceTimeoutPerKind(t *testing.T) {
 	// Arrange: shell (30m) and agent (60m) tasks both silent for 40 minutes.
-	tr := New(Options{}, nil)
+	tr := New(Options{}, testLog())
 	tr.Open("b1", tail.KindShellSpool, "s1", "", 0, 0)
 	tr.Open("a1", tail.KindAgentTranscript, "s1", "", 0, 0)
 	now := 40 * min
@@ -85,7 +93,7 @@ func TestSilenceTimeoutPerKind(t *testing.T) {
 
 func TestBootSweepLosesPreBootTasks(t *testing.T) {
 	// Arrange: one task started before boot, one after.
-	tr := New(Options{}, nil)
+	tr := New(Options{}, testLog())
 	boot := int64(100_000)
 	tr.Open("old", tail.KindAgentTranscript, "s1", "", 50_000, 50_000)   // pre-boot
 	tr.Open("new", tail.KindAgentTranscript, "s1", "", 150_000, 150_000) // post-boot
@@ -102,7 +110,7 @@ func TestBootSweepLosesPreBootTasks(t *testing.T) {
 }
 
 func TestRestoreReplacesArtifactDerivedStateWithPersistedOpenTasks(t *testing.T) {
-	tr := New(Options{}, nil)
+	tr := New(Options{}, testLog())
 	tr.Open("artifact-only", tail.KindAgentTranscript, "s1", "/old", 10, 10)
 	start := recoveredStart("s2", "persisted-open", corev1.TaskKind_TASK_KIND_WORKFLOW, 50_000, 55_000)
 
@@ -118,7 +126,7 @@ func TestRestoreReplacesArtifactDerivedStateWithPersistedOpenTasks(t *testing.T)
 }
 
 func TestRestoreRejectsMalformedSnapshotWithoutMutatingTracker(t *testing.T) {
-	tr := New(Options{}, nil)
+	tr := New(Options{}, testLog())
 	tr.Open("prior", tail.KindShellSpool, "s1", "", 10, 10)
 
 	err := tr.Restore([]*corev1.OpenTaskState{
@@ -133,7 +141,7 @@ func TestRestoreRejectsMalformedSnapshotWithoutMutatingTracker(t *testing.T) {
 }
 
 func TestRestoreUsesPersistedLastActivityForSilence(t *testing.T) {
-	tr := New(Options{}, nil)
+	tr := New(Options{}, testLog())
 	state := recoveredStart("s1", "b1", corev1.TaskKind_TASK_KIND_SHELL, 1, 25*min)
 	if err := tr.Restore([]*corev1.OpenTaskState{state}); err != nil {
 		t.Fatalf("Restore: %v", err)
@@ -144,7 +152,7 @@ func TestRestoreUsesPersistedLastActivityForSilence(t *testing.T) {
 }
 
 func TestLostCarriesStableSyntheticDedupIdentity(t *testing.T) {
-	tr := New(Options{Grace: time.Second}, nil)
+	tr := New(Options{Grace: time.Second}, testLog())
 	tr.Open("b1", tail.KindShellSpool, "s1", "", 10, 10)
 	tr.MarkVanished("s1", "b1", 20)
 	evs := tr.Sweep(2_000)
@@ -169,7 +177,7 @@ func recoveredStart(session, taskID string, kind corev1.TaskKind, startedAt, las
 
 func TestCloseRemovesTaskFromSweep(t *testing.T) {
 	// Arrange: a task that reached a real terminal elsewhere.
-	tr := New(Options{Grace: time.Second}, nil)
+	tr := New(Options{Grace: time.Second}, testLog())
 	tr.Open("b1", tail.KindShellSpool, "s1", "", 0, 0)
 	tr.MarkVanished("s1", "b1", 0)
 	tr.Close("s1", "b1")
@@ -183,7 +191,7 @@ func TestCloseRemovesTaskFromSweep(t *testing.T) {
 
 func TestActivityResetsSilence(t *testing.T) {
 	// Arrange: a shell task kept alive by activity just under the window.
-	tr := New(Options{}, nil)
+	tr := New(Options{}, testLog())
 	tr.Open("b1", tail.KindShellSpool, "s1", "", 0, 0)
 	tr.Activity("s1", "b1", 20*min)
 	// Act: sweep at 40m — only 20m since the last activity (< 30m window).
@@ -195,7 +203,7 @@ func TestActivityResetsSilence(t *testing.T) {
 }
 
 func TestRestoreKeepsSameTaskIDInSeparateSessions(t *testing.T) {
-	tr := New(Options{Grace: time.Second}, nil)
+	tr := New(Options{Grace: time.Second}, testLog())
 	states := []*corev1.OpenTaskState{
 		recoveredStart("session-a", "shared-id", corev1.TaskKind_TASK_KIND_SHELL, 1, 1),
 		recoveredStart("session-b", "shared-id", corev1.TaskKind_TASK_KIND_AGENT, 1, 1),

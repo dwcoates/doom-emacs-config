@@ -11,11 +11,14 @@
     "build": "tsc -p tsconfig.json --noEmit && vite build",
     "pretest": "npm run ensure-deps",
     "test": "vitest run",
+    "precoverage": "npm run ensure-deps",
+    "coverage": "vitest run --coverage",
     "pretypecheck": "npm run ensure-deps",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {
     "@types/markdown-it": "^14.1.2",
+    "@vitest/coverage-v8": "^2.1.9",
     "jsdom": "^29.1.1",
     "typescript": "^5.6.0",
     "vite": "^5.4.0",

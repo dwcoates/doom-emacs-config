@@ -26,7 +26,7 @@ func ephemeralEvent(session string) *corev1.Event {
 
 func TestFanoutDeliversToSessionSubscriber(t *testing.T) {
 	// Arrange
-	f := newFanout(func(string, ...any) {}, 4)
+	f := newFanout(4)
 	sub := f.subscribe("s1")
 	// Act
 	f.publish(persistentEvent("s1", 1))
@@ -43,7 +43,7 @@ func TestFanoutDeliversToSessionSubscriber(t *testing.T) {
 
 func TestFanoutIsSessionScoped(t *testing.T) {
 	// Arrange
-	f := newFanout(func(string, ...any) {}, 4)
+	f := newFanout(4)
 	sub := f.subscribe("s1")
 	// Act: publish for a different session.
 	f.publish(persistentEvent("other", 1))
@@ -57,7 +57,7 @@ func TestFanoutIsSessionScoped(t *testing.T) {
 
 func TestFanoutEphemeralPassesThrough(t *testing.T) {
 	// Arrange
-	f := newFanout(func(string, ...any) {}, 4)
+	f := newFanout(4)
 	sub := f.subscribe("s1")
 	// Act: the fanout is class-agnostic; ephemeral events reach live subscribers.
 	f.publish(ephemeralEvent("s1"))
@@ -74,14 +74,14 @@ func TestFanoutEphemeralPassesThrough(t *testing.T) {
 
 func TestFanoutSlowConsumerDisconnected(t *testing.T) {
 	// Arrange: buffer of 2, a subscriber that never drains.
-	var logged int
-	f := newFanout(func(string, ...any) { logged++ }, 2)
+	f := newFanout(2)
 	sub := f.subscribe("s1")
 	// Act: overflow the bounded buffer.
 	f.publish(persistentEvent("s1", 1))
 	f.publish(persistentEvent("s1", 2))
 	f.publish(persistentEvent("s1", 3)) // buffer full → disconnect
-	// Assert: the subscriber is dropped (done closed) and deregistered, loudly.
+	// Assert: the subscriber is dropped and deregistered; the requester owns
+	// its session-specific reconnect diagnostic.
 	select {
 	case <-sub.done:
 	case <-time.After(time.Second):
@@ -90,14 +90,11 @@ func TestFanoutSlowConsumerDisconnected(t *testing.T) {
 	if f.subscriberCount("s1") != 0 {
 		t.Fatalf("subscriberCount = %d, want 0 after disconnect", f.subscriberCount("s1"))
 	}
-	if logged == 0 {
-		t.Fatal("slow-consumer disconnect was not loud-logged")
-	}
 }
 
 func TestFanoutUnsubscribeStopsDelivery(t *testing.T) {
 	// Arrange
-	f := newFanout(func(string, ...any) {}, 4)
+	f := newFanout(4)
 	sub := f.subscribe("s1")
 	// Act
 	f.unsubscribe(sub)

@@ -56,6 +56,7 @@ func newEscapeHarness(t *testing.T, clients ...*fakeClient) *escapeHarness {
 		Registrar:         &fakeRegistrar{},
 		ProtocolVersion:   "1",
 		Source:            stubSource{},
+		FileDiagnostics:   fakeFileDiagnosticPersister{},
 		Logf:              h.log.logf,
 		newClient: func(c shimclient.Config) sessionClient {
 			h.mu.Lock()

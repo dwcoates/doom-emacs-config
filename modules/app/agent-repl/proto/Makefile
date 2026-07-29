@@ -15,7 +15,7 @@ PROTOS := \
   agentshim/data/v1/journal.proto \
   agentshim/frontend/v1/frontend.proto
 
-.PHONY: all go ts lint clean
+.PHONY: all go ts lint test-check-generated check-generated validate coverage clean
 
 all: go ts
 
@@ -33,6 +33,28 @@ ts:
 # Syntax-check every proto without emitting code.
 lint:
 	protoc -I . --descriptor_set_out=/dev/null $(PROTOS)
+
+# Regenerate and compare with the exact pre-generation bytes. Comparing with
+# HEAD rejects a correct uncommitted schema edit, which makes the pre-commit
+# validation gate impossible to satisfy.
+check-generated:
+	test -d gen
+	@before="$$(mktemp -d "$${TMPDIR:-/tmp}/agent-repl-proto-gen.XXXXXX")"; \
+	trap 'rm -rf "$$before"' EXIT; \
+	cp -R gen/. "$$before"/; \
+	$(MAKE) all; \
+	diff -ru "$$before" gen
+
+test-check-generated:
+	./test-check-generated.sh
+
+# Validate both the source schema and the checked-in Go/TS generated artifacts.
+validate: lint test-check-generated check-generated
+
+# Generated stubs are dependencies, not coverage subjects.  Each consumer's
+# own coverage configuration scopes measurement to handwritten package source.
+coverage: validate
+	../bin/report-nonlisp-coverage.sh daemon sidecar store wire webapp shim
 
 clean:
 	rm -rf gen

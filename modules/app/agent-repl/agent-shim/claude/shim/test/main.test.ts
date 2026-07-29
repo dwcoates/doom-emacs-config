@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseArgs, probeQueryOptions, realQueryOptions } from "../src/main.js";
+import { parseArgs, probeQueryOptions, realQueryOptions, validateUdsLoggingArgs } from "../src/main.js";
 
 describe("parseArgs", () => {
   it("defaults to real SDK mode with a generated session id and default mode", () => {
@@ -134,5 +134,23 @@ describe("CLI-era flags", () => {
     // Assert
     expect(withBin.pathToClaudeCodeExecutable).toBe("/usr/local/bin/claude");
     expect("pathToClaudeCodeExecutable" in withoutBin).toBe(false);
+  });
+});
+
+describe("UDS durable-log CLI contract", () => {
+  it("accepts inherited fd 3 only", () => {
+    const args = parseArgs(["--daemon-socket", "/tmp/daemon.sock", "--cwd", "/canonical", "--log-fd", "3"]);
+    expect(args.logFd).toBe(3);
+    expect(() => validateUdsLoggingArgs(args)).not.toThrow();
+  });
+
+  it.each([
+    [["--log-fd", "4"], "invalid --log-fd"],
+    [["--log-fd", "wat"], "invalid --log-fd"],
+    [["--daemon-socket", "/tmp/daemon.sock", "--log-fd", "3"], "requires --cwd"],
+    [["--daemon-socket", "/tmp/daemon.sock", "--cwd", "/canonical"], "requires --log-fd 3"],
+  ])("rejects UDS logging configuration %j", (argv, expected) => {
+    if (expected === "invalid --log-fd") expect(() => parseArgs(argv)).toThrow(expected);
+    else expect(() => validateUdsLoggingArgs(parseArgs(argv))).toThrow(expected);
   });
 });

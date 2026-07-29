@@ -1,12 +1,15 @@
 package replog
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"claude-repld/internal/dlog"
 )
 
 // backups lists the rotated log files in dir, sorted by ReadDir's name
@@ -24,6 +27,25 @@ func backups(t *testing.T, dir string) []string {
 		}
 	}
 	return names
+}
+
+func TestNewCappedWriterRejectsNonpositiveCap(t *testing.T) {
+	for _, capBytes := range []int64{0, -1} {
+		t.Run(fmt.Sprintf("cap=%d", capBytes), func(t *testing.T) {
+			dir := t.TempDir()
+			f, _, err := Open(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer f.Close()
+			defer func() {
+				if recovered := recover(); recovered == nil {
+					t.Fatalf("NewCappedWriter accepted cap %d", capBytes)
+				}
+			}()
+			NewCappedWriter(dir, f, capBytes)
+		})
+	}
 }
 
 func TestOpenCreatesLogFileInFreshDir(t *testing.T) {
@@ -184,8 +206,8 @@ func TestCappedWriterRotatesAtCapBoundary(t *testing.T) {
 	if string(backupData) != string(preRotation) {
 		t.Fatalf("backup content = %q, want the pre-rotation bytes %q", backupData, preRotation)
 	}
-	// Assert — the new current file holds the post-rotation bytes plus
-	// the mid-run rotation note, not the pre-rotation bytes.
+	// Assert — the new current file holds only post-rotation JSONL bytes,
+	// never a plaintext rotation diagnostic.
 	currentData, err := os.ReadFile(filepath.Join(dir, FileName))
 	if err != nil {
 		t.Fatal(err)
@@ -196,8 +218,8 @@ func TestCappedWriterRotatesAtCapBoundary(t *testing.T) {
 	if !strings.Contains(string(currentData), "ok\n") {
 		t.Fatalf("current log %q missing post-rotation bytes", currentData)
 	}
-	if !strings.Contains(string(currentData), "mid-run rotation") {
-		t.Fatalf("current log %q missing the mid-run rotation note", currentData)
+	if strings.Contains(string(currentData), "replog:") {
+		t.Fatalf("current log contains plaintext replog diagnostic: %q", currentData)
 	}
 }
 
@@ -268,6 +290,38 @@ func TestCappedWriterResetsCountAfterRotation(t *testing.T) {
 	// Assert — exactly one rotation happened, not two.
 	if got := backups(t, dir); len(got) != 1 {
 		t.Fatalf("backups = %v, want exactly one rotation", got)
+	}
+}
+
+func TestCappedWriterPruneFailurePoisonsDlogAndEmitsJSONEmergency(t *testing.T) {
+	dir := t.TempDir()
+	f, _, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer := NewCappedWriter(dir, f, 1)
+	writer.prune = func(string) []string { return []string{"replog: injected prune failure"} }
+	var terminal strings.Builder
+	logger := dlog.New(writer, &terminal, false)
+	event := dlog.Event{
+		Runtime: dlog.RuntimeDaemon, Level: dlog.LevelInfo,
+		Operation: "daemon.test", Message: "cross cap", Context: map[string]any{},
+	}
+	if err := logger.EmitNormal(dlog.GlobalScope(), event); err == nil || !strings.Contains(err.Error(), "injected prune failure") {
+		t.Fatalf("first emit error=%v", err)
+	}
+	var emergency dlog.Record
+	if err := json.Unmarshal([]byte(strings.TrimSpace(terminal.String())), &emergency); err != nil {
+		t.Fatalf("emergency is not canonical JSON: %v output=%q", err, terminal.String())
+	}
+	if emergency.Operation != "daemon.logging.sink-failure" || emergency.Level != dlog.LevelError {
+		t.Fatalf("emergency=%#v", emergency)
+	}
+	if err := logger.EmitNormal(dlog.GlobalScope(), event); err == nil || !strings.Contains(err.Error(), "poisoned") {
+		t.Fatalf("second emit did not fail from poison: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
 	}
 }
 

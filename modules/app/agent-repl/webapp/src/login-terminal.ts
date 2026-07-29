@@ -25,7 +25,7 @@ import {
   loginTerminalUrl,
   resizeFrame,
 } from "./login.js";
-import { logDedup } from "./wslog.js";
+import { log } from "./wslog.js";
 
 /** A live login terminal. */
 export interface LoginTerminal {
@@ -80,11 +80,7 @@ export function attachLoginTerminal(
       // after, so the daemon still learns the real geometry. But a window
       // resize firing while the socket is still CONNECTING is real signal
       // worth a trace if the geometry ever looks wrong downstream.
-      logDedup(
-        "login-terminal:resize-not-open",
-        "warn",
-        "login terminal: dropped a resize report — socket not open",
-      );
+      log("warn", "login terminal: dropped a resize report — socket not open", { operation: "login-terminal.resize-not-open", dedupKey: "login-terminal:resize-not-open" });
       return;
     }
     socket.send(resizeFrame(term.rows, term.cols));
@@ -105,11 +101,7 @@ export function attachLoginTerminal(
     // hint anything went wrong — this is the hint. Deduped per observed
     // type so a burst of the same unexpected frame logs once.
     const kind = describeChunkType(e.data);
-    logDedup(
-      `login-terminal:drop-chunk:${kind}`,
-      "warn",
-      `login terminal: dropped a screen chunk of unexpected type (${kind}) — the OAuth screen may be stuck half-drawn`,
-    );
+    log("warn", `login terminal: dropped a screen chunk of unexpected type (${kind}) — the OAuth screen may be stuck half-drawn`, { operation: "login-terminal.drop-chunk", dedupKey: `login-terminal:drop-chunk:${kind}`, context: { chunk_kind: kind } });
   });
 
   socket.addEventListener("close", () => deps.onClosed?.());
@@ -118,11 +110,7 @@ export function attachLoginTerminal(
     // The WS spec carries no detail on an "error" event; the "close" that
     // follows is what tells the caller (onClosed) the child is gone. This
     // is the only trace of WHY, so it must not be silently dropped.
-    logDedup(
-      "login-terminal:socket-error",
-      "warn",
-      "login terminal: socket error",
-    );
+    log("warn", "login terminal: socket error", { operation: "login-terminal.socket-error", dedupKey: "login-terminal:socket-error" });
   });
 
   term.onData((chunk) => {
@@ -130,11 +118,7 @@ export function attachLoginTerminal(
       // A keystroke typed before the socket opens (or after it starts
       // closing) never reaches the pty — surfaced rather than eaten, since
       // the user would otherwise wonder why their input did nothing.
-      logDedup(
-        "login-terminal:input-not-open",
-        "warn",
-        "login terminal: dropped keyboard input — socket not open",
-      );
+      log("warn", "login terminal: dropped keyboard input — socket not open", { operation: "login-terminal.input-not-open", dedupKey: "login-terminal:input-not-open" });
       return;
     }
     socket.send(encodeKeystrokes(chunk));

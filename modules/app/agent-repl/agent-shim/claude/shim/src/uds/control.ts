@@ -16,7 +16,7 @@
 import { randomUUID } from "node:crypto";
 import { create } from "@bufbuild/protobuf";
 import type { JsonObject } from "@bufbuild/protobuf";
-import { shimLog } from "./log.js";
+import { bindLog } from "./log.js";
 import {
   Ack,
   AckSchema,
@@ -73,6 +73,7 @@ interface PendingPermission {
 }
 
 const COMPONENT = "shim-control";
+const LOGGER = bindLog({ component: COMPONENT, operation: "shim.control.dispatch" });
 
 export class ControlDispatch {
   private readonly newRequestId: () => string;
@@ -97,7 +98,7 @@ export class ControlDispatch {
       });
       return create(AckSchema, { requestId: msg.requestId });
     } catch (err) {
-      shimLog(COMPONENT, { request: msg.requestId }, `submit-prompt failed: ${errMsg(err)}`);
+      LOGGER.log({ level: "error", request_id: msg.requestId, cause: err }, `submit-prompt failed: ${errMsg(err)}`);
       return create(NackSchema, { requestId: msg.requestId, reason: errMsg(err) });
     }
   }
@@ -125,7 +126,7 @@ export class ControlDispatch {
       const outcome = this.target.interrupt({ requestId: msg.requestId });
       return create(AckSchema, { requestId: msg.requestId, interruptOutcome: outcome });
     } catch (err) {
-      shimLog(COMPONENT, { request: msg.requestId }, `interrupt failed: ${errMsg(err)}`);
+      LOGGER.log({ level: "error", request_id: msg.requestId, cause: err }, `interrupt failed: ${errMsg(err)}`);
       return create(NackSchema, { requestId: msg.requestId, reason: errMsg(err) });
     }
   }
@@ -151,7 +152,7 @@ export class ControlDispatch {
   handlePermissionResponse(msg: PermissionResponse): void {
     const pending = this.pending.get(msg.requestId);
     if (!pending) {
-      shimLog(COMPONENT, { request: msg.requestId }, `permission-response for unknown request_id (ignored)`);
+      LOGGER.log({ level: "warn", request_id: msg.requestId }, `permission-response for unknown request_id (ignored)`);
       return;
     }
     this.pending.delete(msg.requestId);

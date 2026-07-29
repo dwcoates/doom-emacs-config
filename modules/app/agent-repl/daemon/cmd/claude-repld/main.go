@@ -7,10 +7,10 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"os"
@@ -58,14 +58,14 @@ func (r *daemonReadiness) DaemonHealth() (bool, string) {
 	return false, "daemon initialization is incomplete"
 }
 
-func healthzHandler(r *daemonReadiness) http.Handler {
-	if r == nil {
-		panic("claude-repld: health handler requires readiness")
+func healthzHandler(r *daemonReadiness, logf func(string, ...any)) http.Handler {
+	if r == nil || logf == nil {
+		panic("claude-repld: health handler requires readiness and logger")
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		healthy, reason := r.DaemonHealth()
 		if !healthy {
-			log.Printf("claude-repld: /healthz unhealthy reason=%q", reason)
+			logf("claude-repld: /healthz unhealthy reason=%q", reason)
 			http.Error(w, reason, http.StatusServiceUnavailable)
 			return
 		}
@@ -131,55 +131,136 @@ daemon from a checkout whose webapp/dist exists
 // binary and bounce only when the build has moved ahead of this process.
 // A resolution or stat failure is logged and reported as 0 (staleness
 // never asserted) rather than aborting boot over a diagnostic field.
-func launchedBinaryMTime() int64 {
+func launchedBinaryMTime(logger *dlog.Logger) int64 {
 	exe, err := os.Executable()
 	if err != nil {
-		log.Printf("claude-repld: cannot resolve own executable for staleness reporting: %v", err)
+		logger.With("operation", "stat-daemon-binary").Log("claude-repld: cannot resolve own executable for staleness reporting: %v", err)
 		return 0
 	}
 	info, err := os.Stat(exe)
 	if err != nil {
-		log.Printf("claude-repld: cannot stat own executable %q for staleness reporting: %v", exe, err)
+		logger.With("operation", "stat-daemon-binary", "executable", exe).Log("claude-repld: cannot stat own executable: %v", err)
 		return 0
 	}
 	return info.ModTime().Unix()
 }
 
+// bootFatal is the sole bootstrap emergency stderr path. The durable sink does
+// not exist yet, so recording this failure anywhere else is impossible.
+func bootFatal(format string, args ...any) {
+	line := bootFatalLine(fmt.Sprintf(format, args...))
+	for len(line) > 0 {
+		n, err := os.Stderr.Write(line)
+		if err != nil || n <= 0 || n > len(line) {
+			break
+		}
+		line = line[n:]
+	}
+	os.Exit(1)
+}
+
+func bootFatalLine(message string) []byte {
+	line, err := json.Marshal(dlog.Record{
+		Timestamp: time.Now().UTC(), Runtime: dlog.RuntimeDaemon, PID: os.Getpid(),
+		Level: dlog.LevelError, Verbosity: dlog.Normal,
+		Operation: "daemon.bootstrap.fatal", Message: message, Context: map[string]any{},
+	})
+	if err != nil {
+		panic(fmt.Sprintf("claude-repld: encode bootstrap fatal JSON: %v", err))
+	}
+	return append(line, '\n')
+}
+
+func daemonFatal(logger *dlog.Logger, format string, args ...any) {
+	logger.Log(format, args...)
+	os.Exit(1)
+}
+
+// canonicalShimCreateOpts makes the child process and shim protocol use the
+// exact canonical path whose MD5 identifies the workspace log targets.
+func canonicalShimCreateOpts(opts server.CreateOpts) (dlog.Workspace, server.CreateOpts, error) {
+	workspace, err := dlog.WorkspaceFromDirectory(opts.CWD)
+	if err != nil {
+		return dlog.Workspace{}, server.CreateOpts{}, err
+	}
+	canonical := opts
+	canonical.CWD = workspace.Directory
+	return workspace, canonical, nil
+}
+
+// udsShimLogger keeps daemon-owned errors in daemon.log while direct shim JSON
+// records remain single-writer records in the inherited shim.log descriptor.
+type udsShimLogger struct {
+	workspace dlog.Workspace
+	daemon    *dlog.Logger
+	terminal  io.Writer
+	sessionID string
+}
+
+func (l *udsShimLogger) emit(level dlog.Level, verbosity dlog.Verbosity, message string) {
+	event := dlog.Event{Runtime: dlog.RuntimeDaemon, Level: level, Operation: "shim.stderr", Message: message, Context: map[string]any{"session_id": l.sessionID}, AgentReplSessionID: l.sessionID}
+	var err error
+	if verbosity == dlog.Verbose {
+		err = l.daemon.EmitWorkspaceVerbose(l.workspace, event)
+	} else {
+		err = l.daemon.EmitWorkspaceNormal(l.workspace, event)
+	}
+	if err != nil {
+		fmt.Fprintf(l.terminal, "claude-repld: workspace shim diagnostic persistence failed: %v\n", err)
+	}
+}
+
+func (l *udsShimLogger) Log(format string, args ...any) {
+	l.emit(dlog.LevelError, dlog.Normal, fmt.Sprintf(format, args...))
+}
+func (l *udsShimLogger) LogVerbose(format string, args ...any) {
+	l.emit(dlog.LevelInfo, dlog.Verbose, fmt.Sprintf(format, args...))
+}
+func (l *udsShimLogger) MirrorShimRecord(line string) { fmt.Fprintln(l.terminal, line) }
 func main() {
 	bootedAt := time.Now()
 
-	// Microsecond stamps: cross-component latency tracing needs sub-second
-	// resolution, which the default second-granularity flags cannot give.
-	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 	ready := &daemonReadiness{}
 
-	// Disk log, wired before anything can log: every log.Printf line
+	// Disk log, wired before daemon logging begins: every dlog record
 	// lands in both stderr (the *claude-repld* buffer Emacs captures)
 	// and a per-run file under the state root, so daemon history
 	// survives the buffer and stays readable without a live editor.
 	// An unresolvable root or unopenable file is fatal — a daemon whose
 	// evidence trail cannot exist is exactly the failure this log is
-	// for, and Fatalf still reaches stderr.
+	// for. bootFatal is intentionally the only emergency stderr path before
+	// that sink exists.
 	logRoot, err := stateroot.Root()
 	if err != nil {
-		log.Fatalf("claude-repld: %v", err)
+		bootFatal("claude-repld: %v", err)
 	}
 	logFile, logWarnings, err := replog.Open(logRoot)
 	if err != nil {
-		log.Fatalf("claude-repld: %v", err)
+		bootFatal("claude-repld: %v", err)
 	}
 	// CappedWriter, not the bare file: a long-lived run that logs
 	// unexpectedly heavily would otherwise grow claude-repld.log without
 	// bound between restarts.
 	cappedLog := replog.NewCappedWriter(logRoot, logFile, replog.CapBytes)
 	defer cappedLog.Close()
-	log.SetOutput(io.MultiWriter(os.Stderr, cappedLog))
-	log.Printf("claude-repld: booted (pid %d); logging to %s", os.Getpid(), cappedLog.Name())
+	daemonLog := dlog.New(cappedLog, os.Stderr, os.Getenv("AGENT_REPL_LOG_VERBOSE") != "")
+	targets := dlog.NewTargetManager()
+	defer func() {
+		if err := targets.Close(); err != nil {
+			daemonLog.With("operation", "close-workspace-log-targets").Log("claude-repld: close workspace log targets: %v", err)
+		}
+	}()
+	stopWorkspaceLogMaintenance := startWorkspaceLogMaintenance(
+		targets, os.Stderr, os.Getenv("AGENT_REPL_LOG_VERBOSE") != "",
+	)
+	defer stopWorkspaceLogMaintenance()
+	legacyLog := dlog.Legacy(daemonLog)
+	daemonLog.With("operation", "boot", "pid", os.Getpid(), "log_path", cappedLog.Name()).Log("claude-repld: booted")
 	for _, w := range logWarnings {
-		log.Printf("claude-repld: %s", w)
+		daemonLog.With("operation", "boot").Log("claude-repld: %s", w)
 	}
 
-	binaryMTime := launchedBinaryMTime()
+	binaryMTime := launchedBinaryMTime(daemonLog)
 
 	var (
 		addr           = flag.String("addr", "127.0.0.1:8787", "listen address")
@@ -200,12 +281,12 @@ func main() {
 
 	accounts, err := parseAccounts(*accountsFlag)
 	if err != nil {
-		log.Printf("claude-repld: -accounts: %v", err)
+		daemonLog.With("operation", "parse-accounts").Log("claude-repld: -accounts: %v", err)
 		os.Exit(2)
 	}
 
 	if *shimScript == "" {
-		log.Printf("claude-repld: --shim is required (path to agent-shim/claude/shim/dist/main.js)")
+		daemonLog.With("operation", "validate-config").Log("claude-repld: --shim is required (path to agent-shim/claude/shim/dist/main.js)")
 		os.Exit(2)
 	}
 
@@ -216,15 +297,15 @@ func main() {
 	// write ordering across two files.
 	statePath, err := registry.DefaultDBPath()
 	if err != nil {
-		log.Fatalf("claude-repld: %v", err)
+		daemonFatal(daemonLog, "claude-repld: %v", err)
 	}
 	stateStore, err := statedb.Open(statePath)
 	if err != nil {
-		log.Fatalf("claude-repld: open state store: %v", err)
+		daemonFatal(daemonLog, "claude-repld: open state store: %v", err)
 	}
 	defer func() {
 		if err := stateStore.Close(); err != nil {
-			log.Printf("claude-repld: close state store: %v", err)
+			daemonLog.With("operation", "close-state-store").Log("claude-repld: close state store: %v", err)
 		}
 	}()
 
@@ -242,15 +323,15 @@ func main() {
 	// it again.
 	legacyRegistryPath, err := registry.LegacyJSONPath()
 	if err != nil {
-		log.Fatalf("claude-repld: %v", err)
+		daemonFatal(daemonLog, "claude-repld: %v", err)
 	}
 	sessionRegistry := registry.OpenWith(registry.Options{
 		DB:             stateStore,
 		LegacyJSONPath: legacyRegistryPath,
-		Logf:           log.Printf,
+		Logf:           legacyLog,
 	})
 	if err := sessionRegistry.Prepare(); err != nil {
-		log.Fatalf("claude-repld: registry prepare: %v", err)
+		daemonFatal(daemonLog, "claude-repld: registry prepare: %v", err)
 	}
 
 	// "session gone" remediation: the frontend can only report the loss,
@@ -263,11 +344,13 @@ func main() {
 			Dir:            *remediationDir,
 			PermissionMode: *remediationPM,
 			AllowUngated:   *remediationUngated,
-			Start:          startAnalyst,
-			Logf:           log.Printf,
+			Start: func(argv []string, dir string) error {
+				return startAnalyst(daemonLog.With("operation", "remediation-analyst", "cwd", dir), argv, dir)
+			},
+			Logf: legacyLog,
 		}, bootedAt)
 		if err != nil {
-			log.Fatalf("claude-repld: %v", err)
+			daemonFatal(daemonLog, "claude-repld: %v", err)
 		}
 		remediator = runner
 	}
@@ -286,7 +369,7 @@ func main() {
 	}
 	logins := login.NewManager(login.Config{
 		Start: login.SpawnVendor([]string{loginBin, "/login"}),
-		Logf:  log.Printf,
+		Logf:  legacyLog,
 	})
 	defer logins.CloseAll()
 
@@ -311,17 +394,17 @@ func main() {
 	ssmMgr, err := ssm.Open(ssm.Options{
 		DB:       stateStore,
 		Resolver: server.NewRegistryResolver(sessionRegistry),
-		Logf:     log.Printf,
+		Logf:     legacyLog,
 	})
 	if err != nil {
-		log.Fatalf("claude-repld: open SSM: %v", err)
+		daemonFatal(daemonLog, "claude-repld: open SSM: %v", err)
 	}
 	defer ssmMgr.Close()
 
 	// The progress-footer resolver (F1) is the SSM's sibling and is owned here
 	// for the same reason: both the frontend push loop and the per-session
 	// driver feed it, so one owner closes it once.
-	progressMgr := progress.New(progress.Options{Logf: log.Printf})
+	progressMgr := progress.New(progress.Options{Logf: legacyLog})
 	defer progressMgr.Close()
 
 	// Shims dial US. One listening socket serves every session; each shim
@@ -331,46 +414,65 @@ func main() {
 	// somewhere to reconnect to the instant this one boots.
 	shimSocketPath, err := shimlisten.DefaultSocketPath()
 	if err != nil {
-		log.Fatalf("claude-repld: resolve shim socket path: %v", err)
+		daemonFatal(daemonLog, "claude-repld: resolve shim socket path: %v", err)
 	}
-	shimListener := shimlisten.New(log.Printf)
+	shimListener := shimlisten.New(legacyLog)
 	if err := shimListener.Listen(shimSocketPath); err != nil {
-		log.Fatalf("claude-repld: listen for shims: %v", err)
+		daemonFatal(daemonLog, "claude-repld: listen for shims: %v", err)
 	}
 	defer shimListener.Close()
 	// The shim takes its session lock here; it must exist before any spawn.
 	if err := sessionlock.EnsureDir(); err != nil {
-		log.Fatalf("claude-repld: create session lock dir: %v", err)
+		daemonFatal(daemonLog, "claude-repld: create session lock dir: %v", err)
 	}
 
 	// The per-session shim-driver consumes each session's UDS shim stream and
 	// renders it onto the frontend surface + SSM. Its push target (the
 	// frontend.Server) does not exist until WireAgentShim returns, so it pushes
 	// through a late-bound forwarder whose target is set below.
-	forwarder := &server.PushForwarder{Logf: log.Printf}
+	forwarder := &server.PushForwarder{Logf: legacyLog}
 	// The driver spawns a fresh UDS-mode shim when no live one is listening. The
 	// exec stays here (main owns node/shim paths); production omits
 	// --store-socket so the shim defaults to the launchd singleton store. The
 	// returned stop func SIGTERMs the shim on hibernation.
 	udsSpawn := func(sessionID string, opts server.CreateOpts) (func() error, error) {
-		argv := server.ShimUDSArgv(*nodeBin, *shimScript, sessionID, *fake, opts, shimSocketPath)
+		workspace, canonicalOpts, workspaceErr := canonicalShimCreateOpts(opts)
+		if workspaceErr != nil {
+			return nil, fmt.Errorf("resolve UDS shim workspace for %q: %w", opts.CWD, workspaceErr)
+		}
+		workspaceLog, targetErr := targets.OpenWorkspaceLogger(workspace, os.Stderr, os.Getenv("AGENT_REPL_LOG_VERBOSE") != "")
+		if targetErr != nil {
+			return nil, fmt.Errorf("open daemon workspace logger for %q: %w", workspace.Directory, targetErr)
+		}
+		shimTarget, targetErr := targets.OpenWorkspaceRuntime(workspace, dlog.RuntimeShim)
+		if targetErr != nil {
+			return nil, fmt.Errorf("open shim log target for workspace %q: %w", workspace.Directory, targetErr)
+		}
+		argv := append(server.ShimUDSArgv(*nodeBin, *shimScript, sessionID, *fake, canonicalOpts, shimSocketPath), "--log-fd", "3")
 		if *claudeBin != "" {
 			argv = append(argv, "--claude-bin", *claudeBin)
 		}
-		done := dlog.Call(log.Printf, "uds shim spawn",
-			"session", sessionID, "cwd", opts.CWD, "model", opts.Model,
-			"config_dir", opts.ConfigDir, "daemon_socket", shimSocketPath)
+		spawnEvent := func(level dlog.Level, message string, context map[string]any) {
+			// EmitWorkspaceNormal owns its JSON emergency path when durable
+			// persistence fails. A second plaintext stderr line would duplicate
+			// the error and violate the all-JSON logging contract.
+			if err := workspaceLog.EmitWorkspaceNormal(workspace, dlog.Event{Runtime: dlog.RuntimeDaemon, Level: level, Operation: "shim.spawn", Message: message, Context: context, AgentReplSessionID: sessionID}); err != nil {
+				panic(err)
+			}
+		}
+		spawnEvent(dlog.LevelInfo, "spawning UDS shim", map[string]any{"cwd": workspace.Directory, "model": opts.Model, "config_dir": opts.ConfigDir, "daemon_socket": shimSocketPath})
 		proc, spawnErr := shim.Spawn(shim.Options{
-			Argv:     argv,
-			Dir:      opts.CWD,
-			ExtraEnv: server.ShimEnv(opts, *addr),
-			Logf:     dlog.Tag(log.Printf, "session", sessionID, "cwd", opts.CWD),
+			Argv:       argv,
+			Dir:        workspace.Directory,
+			ExtraEnv:   server.ShimEnv(opts, *addr),
+			ExtraFiles: []*os.File{shimTarget},
+			Logger:     &udsShimLogger{workspace: workspace, daemon: workspaceLog, terminal: os.Stderr, sessionID: sessionID},
 		})
 		if spawnErr != nil {
-			done("", spawnErr)
+			spawnEvent(dlog.LevelError, "UDS shim spawn failed", map[string]any{"error": spawnErr.Error(), "cwd": workspace.Directory})
 			return nil, spawnErr
 		}
-		done(strings.Join(argv, " "), nil)
+		spawnEvent(dlog.LevelInfo, "UDS shim spawned", map[string]any{"argv": strings.Join(argv, " "), "cwd": workspace.Directory})
 		// In UDS mode the shim streams over its socket, not stdout, so its
 		// stdout event channel stays empty — drain it so the stdout pump never
 		// blocks, and reap the process when it exits.
@@ -380,18 +482,22 @@ func main() {
 		}()
 		go func() {
 			if werr := proc.Wait(); werr != nil {
-				log.Printf("claude-repld: UDS shim for session %s exited: %v", sessionID, werr)
+				spawnEvent(dlog.LevelError, "UDS shim exited", map[string]any{"error": werr.Error(), "cwd": workspace.Directory})
 			}
 		}()
 		return func() error { return proc.Terminate() }, nil
 	}
 	// Held by pointer so its SessionView re-push can be late-bound below: the
 	// Server it pushes through does not exist yet (same shape as forwarder).
-	registrar := &server.RegistryRegistrar{Reg: sessionRegistry, Logf: log.Printf}
+	registrar := &server.RegistryRegistrar{Reg: sessionRegistry, Logf: legacyLog}
 	// One registry adapter serves both durable seq marks: last_seen_seq (the
 	// shimclient replay high-water) and newest_clear_or_compact_seq (the
 	// frontend replay floor).
-	seqStore := server.NewRegistrySeqStore(sessionRegistry, log.Printf)
+	seqStore := server.NewRegistrySeqStore(sessionRegistry, legacyLog)
+	fileDiagnostics, err := server.NewTargetFileDiagnosticPersister(targets, os.Stderr, os.Getenv("AGENT_REPL_LOG_VERBOSE") != "")
+	if err != nil {
+		daemonFatal(daemonLog, "claude-repld: build sidecar diagnostic persister: %v", err)
+	}
 	// The below-floor history re-pull needs no wiring of its own: it rides the
 	// session's existing shim connection as a ReplayRequest, so the store stays
 	// behind the agent-shim facade (sessiondrv/repull.go).
@@ -399,8 +505,9 @@ func main() {
 		Push:              forwarder,
 		SSM:               ssmMgr,
 		Progress:          progressMgr,
-		Spawner:           server.NewShimSpawner(sessionRegistry, shimListener.Connected, udsSpawn, log.Printf),
+		Spawner:           server.NewShimSpawner(sessionRegistry, shimListener.Connected, udsSpawn, legacyLog),
 		Source:            &server.ShimConnSource{Listener: shimListener},
+		FileDiagnostics:   fileDiagnostics,
 		Locator:           &server.SessionLocator{Reg: sessionRegistry},
 		SeqStore:          seqStore,
 		ClearCompactStore: seqStore,
@@ -408,7 +515,7 @@ func main() {
 		Registrar:         registrar,
 		DaemonVersion:     daemonVersion,
 		ProtocolVersion:   shimProtocolVersion,
-		Logf:              log.Printf,
+		Logf:              legacyLog,
 		// The prompt queue's classifier (E4). A queued prompt is judged by a
 		// cheap headless run under the SESSION's own account, so the
 		// classification cannot land on a different account's quota or config.
@@ -416,7 +523,7 @@ func main() {
 		// this daemon would spawn today, read fresh on every comparison so a
 		// deploy that lands WHILE the daemon runs is seen without a restart.
 		ShimBuildSHA: shimBuildSHA(*shimScript),
-		Classifier:   sessiondrv.NewCLIClassifier("", log.Printf),
+		Classifier:   sessiondrv.NewCLIClassifier("", legacyLog),
 		SessionConfigDir: func(sessionID string) string {
 			rec, ok := sessionRegistry.Get(sessionID)
 			if !ok {
@@ -426,7 +533,7 @@ func main() {
 		},
 	})
 	if err != nil {
-		log.Fatalf("claude-repld: build session driver: %v", err)
+		daemonFatal(daemonLog, "claude-repld: build session driver: %v", err)
 	}
 	defer driver.Close()
 
@@ -437,7 +544,7 @@ func main() {
 	// create/delete + DaemonView) the frontend command handler and snapshot
 	// provider need. Its *Server target does not exist until server.New below,
 	// so bind it after — the same late-bind shape as forwarder.
-	sessionCommands := &server.SessionCommandBinding{Logf: log.Printf}
+	sessionCommands := &server.SessionCommandBinding{Logf: legacyLog}
 	// Workspace creation owns worktrees, waiting shims, durable job state, and
 	// retained host actions.  Build its bridge before WireAgentShim so frontend
 	// commands never see an unbound creation capability, but do not drain the
@@ -448,20 +555,29 @@ func main() {
 		StateRoot:      logRoot,
 		Commands:       sessionCommands,
 		Registry:       sessionRegistry,
-		Health:         sessionDriverHealthProbe{Driver: driver, Logf: log.Printf},
+		Health:         sessionDriverHealthProbe{Driver: driver, Logf: legacyLog},
 		InitialPrompts: driver,
-		Logf:           log.Printf,
+		Logf:           legacyLog,
 		InboxInterval:  time.Second,
 	})
 	if err != nil {
-		log.Fatalf("claude-repld: initialize workspace creation: %v", err)
+		daemonFatal(daemonLog, "claude-repld: initialize workspace creation: %v", err)
 	}
 	workspaceBridge, err := NewWorkspaceCreationBridge(workspaceCreateCtx, workspaceAssembly.Manager, workspaceAssembly.Store)
 	if err != nil {
-		log.Fatalf("claude-repld: initialize workspace creation bridge: %v", err)
+		daemonFatal(daemonLog, "claude-repld: initialize workspace creation bridge: %v", err)
 	}
 	if err := workspaceAssembly.Forwarder.SetTargets(workspaceBridge, workspaceBridge); err != nil {
-		log.Fatalf("claude-repld: bind workspace creation host forwarder: %v", err)
+		daemonFatal(daemonLog, "claude-repld: bind workspace creation host forwarder: %v", err)
+	}
+	clientLogs, err := server.NewTargetClientLogWriter(
+		targets,
+		&server.RegistryClientLogIdentityResolver{Reg: sessionRegistry},
+		os.Stderr,
+		os.Getenv("AGENT_REPL_LOG_VERBOSE") != "",
+	)
+	if err != nil {
+		daemonFatal(daemonLog, "claude-repld: build client log writer: %v", err)
 	}
 	// NEVER-BLUE (workspaceopen.go): bind each registered workspace to its
 	// on-disk transcript at boot, so a restart already knows every resume
@@ -470,7 +586,7 @@ func main() {
 		Reg:        sessionRegistry,
 		Ensurer:    driver,
 		ConfigDirs: knownConfigDirs(accounts),
-		Logf:       log.Printf,
+		Logf:       legacyLog,
 	}
 	opener.BindAll()
 	agentShim, err := server.WireAgentShim(server.AgentShimConfig{
@@ -483,7 +599,7 @@ func main() {
 		DaemonHealth:      ready,
 		MergeDirs:         pendingMergeDirs{},
 		Lifecycle:         opener,
-		Sessions:          registrySessions{reg: sessionRegistry, driver: driver, logf: log.Printf},
+		Sessions:          registrySessions{reg: sessionRegistry, driver: driver, logf: legacyLog},
 		Inits:             driver,
 		Catalogs:          driver,
 		Queues:            driver,
@@ -491,20 +607,22 @@ func main() {
 		Resyncer:          driver,
 		WorkspaceCreation: workspaceBridge,
 		RequestShutdown:   requestShutdown,
-		Logf:              log.Printf,
+		ClientLogs:        clientLogs,
+		Logf:              legacyLog,
 	})
 	if err != nil {
-		log.Fatalf("claude-repld: frontend surface: %v", err)
+		daemonFatal(daemonLog, "claude-repld: frontend surface: %v", err)
 	}
 	// Bind the driver's push target now that the frontend server exists.
 	forwarder.SetTarget(agentShim.Server)
 	defer func() {
 		if cerr := agentShim.Close(); cerr != nil {
-			log.Printf("claude-repld: frontend surface close: %v", cerr)
+			daemonLog.With("operation", "close-frontend-surface").Log("claude-repld: frontend surface close: %v", cerr)
 		}
 	}()
 
 	srv := server.New(server.Config{
+		Logf:            legacyLog,
 		DaemonVersion:   daemonVersion,
 		BinaryMTime:     binaryMTime,
 		ForceFake:       *fake,
@@ -530,7 +648,8 @@ func main() {
 	// the daemon serving its sessions with one loud, unmissable log line.
 	go func() {
 		if inboxErr := workspaceAssembly.Inbox.Run(workspaceCreateCtx); inboxErr != nil && workspaceCreateCtx.Err() == nil {
-			log.Printf("claude-repld: WORKSPACE CREATION INBOX STOPPED: %v — workspace creation is DEGRADED until this daemon is restarted; every other session keeps serving (no shutdown)", inboxErr)
+			daemonLog.With("operation", "workspace-creation-inbox", "level", "error").
+				Log("claude-repld: workspace creation inbox stopped: %v", inboxErr)
 		}
 	}()
 	// Same late bind for the registrar's SessionView re-push, so a backfill
@@ -539,7 +658,7 @@ func main() {
 	registrar.PushView = srv.RepushSessionView
 
 	mux := http.NewServeMux()
-	mux.Handle("/healthz", healthzHandler(ready))
+	mux.Handle("/healthz", healthzHandler(ready, legacyLog))
 	// Mount the API at every prefix its routes live under. Driven off
 	// server.APIPrefixes rather than a hand-kept list here: anything not
 	// mounted falls through to the SPA at "/" and is answered by the file
@@ -549,7 +668,7 @@ func main() {
 	for _, prefix := range server.APIPrefixes {
 		mux.Handle(prefix, api)
 	}
-	if h := webappHandler(*webappDir, log.Printf); h != nil {
+	if h := webappHandler(*webappDir, legacyLog); h != nil {
 		mux.Handle("/", h)
 	}
 	// Widget assets are served in place from wherever they were built
@@ -566,23 +685,23 @@ func main() {
 	mux.HandleFunc("/frontend", agentShim.Server.ServeWS)
 	sockPath, perr := frontend.DefaultSocketPath()
 	if perr != nil {
-		log.Fatalf("claude-repld: frontend socket path: %v", perr)
+		daemonFatal(daemonLog, "claude-repld: frontend socket path: %v", perr)
 	}
 	frontendListener, err := frontend.ListenUDS(sockPath)
 	if err != nil {
-		log.Fatalf("claude-repld: frontend UDS listen %s: %v", sockPath, err)
+		daemonFatal(daemonLog, "claude-repld: frontend UDS listen %s: %v", sockPath, err)
 	}
 	go func() {
-		log.Printf("claude-repld: frontend UDS listening on %s", sockPath)
+		daemonLog.With("operation", "serve-frontend-uds", "socket", sockPath).Log("claude-repld: frontend UDS listening")
 		if serveErr := agentShim.Server.Serve(frontendListener); serveErr != nil {
-			log.Printf("claude-repld: frontend UDS serve ended: %v", serveErr)
+			daemonLog.With("operation", "serve-frontend-uds", "socket", sockPath).Log("claude-repld: frontend UDS serve ended: %v", serveErr)
 		}
 	}()
 
 	httpServer := &http.Server{Addr: *addr, Handler: mux}
 	httpListener, err := net.Listen("tcp", *addr)
 	if err != nil {
-		log.Fatalf("claude-repld: HTTP listen %s: %v", *addr, err)
+		daemonFatal(daemonLog, "claude-repld: HTTP listen %s: %v", *addr, err)
 	}
 
 	sigCh := make(chan os.Signal, 1)
@@ -591,9 +710,9 @@ func main() {
 		stopShims := false
 		select {
 		case sig := <-sigCh:
-			log.Printf("claude-repld: %v received, shutting down (shims preserved)", sig)
+			daemonLog.With("operation", "shutdown", "signal", sig).Log("claude-repld: signal received, shutting down with shims preserved")
 		case stopShims = <-shutdownReq:
-			log.Printf("claude-repld: shutdown command received, shutting down (stop_shims=%v)", stopShims)
+			daemonLog.With("operation", "shutdown", "source", "frontend", "stop_shims", stopShims).Log("claude-repld: shutdown command received")
 		}
 		ready.ready.Store(false)
 		cancelWorkspaceCreate()
@@ -607,10 +726,10 @@ func main() {
 		// re-asserts the on-disk state after the drain, never the
 		// mechanism durability depends on.
 		if err := sessionRegistry.Flush(); err != nil {
-			log.Printf("claude-repld: registry flush on shutdown: %v", err)
+			daemonLog.With("operation", "shutdown-flush-registry").Log("claude-repld: registry flush on shutdown: %v", err)
 		}
 		if err := httpServer.Close(); err != nil {
-			log.Printf("claude-repld: http close: %v", err)
+			daemonLog.With("operation", "shutdown-close-http").Log("claude-repld: http close: %v", err)
 		}
 	}()
 
@@ -632,11 +751,59 @@ func main() {
 		Connected: shimListener.Connected,
 		Held:      sessionlock.Held,
 		Ensurer:   driver,
-		Logf:      log.Printf,
+		Logf:      legacyLog,
 	}).Run(sweepCtx)
-	log.Printf("claude-repld %s listening on %s (shim: %s; healthz ready=true; workspace-create inbox=%s)", daemonVersion, *addr, *shimScript, workspaceAssembly.Inbox.Dir)
+	daemonLog.With("operation", "serve-http", "version", daemonVersion, "address", *addr,
+		"shim", *shimScript, "workspace_create_inbox", workspaceAssembly.Inbox.Dir).
+		Log("claude-repld listening with healthz ready")
 	if err := httpServer.Serve(httpListener); err != nil && err != http.ErrServerClosed {
-		log.Fatalf("claude-repld: %v", err)
+		daemonFatal(daemonLog, "claude-repld: %v", err)
+	}
+}
+
+func startWorkspaceLogMaintenance(targets *dlog.TargetManager, terminal io.Writer, verbose bool) func() {
+	return startWorkspaceLogMaintenanceAtInterval(
+		targets, terminal, verbose, dlog.WorkspaceRuntimeCapInterval,
+	)
+}
+
+func startWorkspaceLogMaintenanceAtInterval(targets *dlog.TargetManager, terminal io.Writer, verbose bool, interval time.Duration) func() {
+	if interval <= 0 {
+		panic("claude-repld: workspace log maintenance interval must be positive")
+	}
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				maintainWorkspaceLogTargets(targets, terminal, verbose)
+			case <-stop:
+				return
+			}
+		}
+	}()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			close(stop)
+			<-done
+		})
+	}
+}
+
+func maintainWorkspaceLogTargets(targets *dlog.TargetManager, terminal io.Writer, verbose bool) {
+	for _, failure := range targets.MaintainSizeCaps() {
+		// Reporting first tries the affected workspace daemon logger, then
+		// canonical JSON emergency output. An error means durable workspace
+		// persistence failed, so continuing would silently lose the canonical
+		// per-workspace record even when emergency output succeeded.
+		if err := targets.ReportTargetCapError(failure, terminal, verbose); err != nil {
+			panic(fmt.Sprintf("claude-repld: workspace log maintenance reporting failed: %v", err))
+		}
 	}
 }
 
@@ -670,7 +837,7 @@ func parseAccounts(raw string) ([]server.Account, error) {
 	return accounts, nil
 }
 
-func startAnalyst(argv []string, dir string) error {
+func startAnalyst(logger *dlog.Logger, argv []string, dir string) error {
 	// An os.Pipe (rather than Cmd.StdoutPipe) hands the child a raw fd
 	// for both streams, so the reader below is independent of Wait's
 	// pipe bookkeeping and the two cannot race.
@@ -683,27 +850,27 @@ func startAnalyst(argv []string, dir string) error {
 	cmd.Stdout = pw
 	cmd.Stderr = pw
 	if err := cmd.Start(); err != nil {
-		closeOrLog(pr, "analyst pipe read end")
-		closeOrLog(pw, "analyst pipe write end")
+		closeOrLog(logger, pr, "analyst pipe read end")
+		closeOrLog(logger, pw, "analyst pipe write end")
 		return fmt.Errorf("start %s: %w", argv[0], err)
 	}
 	// The child owns its dup of the write end now; dropping ours is what
 	// lets the reader see EOF when the analyst exits.
-	closeOrLog(pw, "analyst pipe write end")
-	go pumpAnalystOutput(pr)
+	closeOrLog(logger, pw, "analyst pipe write end")
+	go pumpAnalystOutput(logger, pr)
 	go func() {
 		if err := cmd.Wait(); err != nil {
-			log.Printf("claude-repld: remediation analyst exited: %v", err)
+			logger.Log("claude-repld: remediation analyst exited: %v", err)
 			return
 		}
-		log.Printf("claude-repld: remediation analyst finished")
+		logger.Log("claude-repld: remediation analyst finished")
 	}()
 	return nil
 }
 
-func closeOrLog(c io.Closer, what string) {
+func closeOrLog(logger *dlog.Logger, c io.Closer, what string) {
 	if err := c.Close(); err != nil {
-		log.Printf("claude-repld: close %s: %v", what, err)
+		logger.With("operation", "close", "resource", what).Log("claude-repld: close failed: %v", err)
 	}
 }
 
@@ -717,16 +884,16 @@ func envStr(name, def string) string {
 }
 
 // pumpAnalystOutput mirrors the analyst's output into the daemon log.
-func pumpAnalystOutput(out io.Reader) {
+func pumpAnalystOutput(logger *dlog.Logger, out io.Reader) {
 	scanner := bufio.NewScanner(out)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for scanner.Scan() {
 		if line := strings.TrimSpace(scanner.Text()); line != "" {
-			log.Printf("claude-repld: remediation: %s", line)
+			logger.LogVerbose("claude-repld: remediation: %s", line)
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		log.Printf("claude-repld: remediation output: %v", err)
+		logger.Log("claude-repld: remediation output: %v", err)
 	}
 }
 

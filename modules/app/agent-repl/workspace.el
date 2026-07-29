@@ -128,6 +128,20 @@ activation.  Read by the rename and workspace-merge paths and by
 this session, so repeated invocations cycle through history instead of
 returning the same workspace twice.")
 
+(defvar agent-repl--workspace-log-targets)
+
+(defun agent-repl--ws-forget-emacs-log-target (ws reason)
+  "Forget WS's in-memory Emacs log target for REASON.
+The target and canonical symlink deliberately remain on disk: their history
+is useful after an ordinary workspace teardown.  Forgetting ownership lets a
+future workspace reusing WS establish a fresh runtime-owned target."
+  (let ((target (gethash ws agent-repl--workspace-log-targets)))
+    (when target
+      ;; Emit before forgetting so this lifecycle record remains in the
+      ;; existing workspace-owned history rather than recreating a target.
+      (agent-repl--log ws "ws-forget-emacs-log-target: ws=%s reason=%s" ws reason)
+      (remhash ws agent-repl--workspace-log-targets))))
+
 (defun agent-repl--ws-get (ws key)
   "Get KEY from workspace WS's plist."
   (plist-get (gethash ws agent-repl--workspaces) key))
@@ -320,8 +334,14 @@ filter that shape out entirely, so the log line is a producer
 diagnostic rather than a user-visible-bug warning.  Includes a
 caller trace so the producer can be identified without first turning
 debug logging on."
-  (let ((stub-create (and (null (gethash ws agent-repl--workspaces))
-                          (not (eq key :project-dir)))))
+  (let* ((existing (gethash ws agent-repl--workspaces))
+         (stub-create (and (null existing) (not (eq key :project-dir))))
+         (old-value (plist-get existing key)))
+    (when (and (memq key '(:project-dir :ws-id))
+               old-value
+               (not (equal old-value val)))
+      (agent-repl--ws-forget-emacs-log-target
+       ws (format "%s changed from %S to %S" key old-value val)))
     (puthash ws (plist-put (gethash ws agent-repl--workspaces) key val)
              agent-repl--workspaces)
     (when stub-create
@@ -459,6 +479,7 @@ log line preserves the pre-existing diagnostic shape."
                  (agent-repl--ws-put peer :source-ws-name nil)))
              agent-repl--workspaces)
     (when had-entry
+      (agent-repl--ws-forget-emacs-log-target ws "workspace deletion")
       ;; Pre-tombstone hook: runs while the runtime keys are still
       ;; readable (e.g. frontend-client's session release needs
       ;; :frontend-session-id before the clear below wipes it).

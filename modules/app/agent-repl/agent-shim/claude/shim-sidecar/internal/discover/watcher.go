@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"agentrepl/shim-claude-sidecar/internal/logging"
 	"github.com/fsnotify/fsnotify"
 )
 
@@ -14,15 +15,12 @@ import (
 // the completeness backstop (watch events drop; files appear while down).
 type Watcher struct {
 	fsw *fsnotify.Watcher
-	log Logf
+	log *logging.Bound
 }
 
 // NewWatcher creates a Watcher and adds a recursive set of directory watches
 // rooted at each dir in roots that exists.
-func NewWatcher(roots []string, log Logf) (*Watcher, error) {
-	if log == nil {
-		log = func(string, ...any) {}
-	}
+func NewWatcher(roots []string, log *logging.Bound) (*Watcher, error) {
 	fsw, err := fsnotify.NewWatcher()
 	if err != nil {
 		return nil, err
@@ -43,7 +41,7 @@ func (w *Watcher) addTree(root string) {
 		}
 		if d.IsDir() {
 			if aerr := w.fsw.Add(path); aerr != nil {
-				w.log("discover/watch: add %s failed: %v", path, aerr)
+				w.log.With(logging.Context{Operation: "watch-add", Path: path}).Log("watch add failed: %v", aerr)
 			}
 		}
 		return nil
@@ -62,7 +60,7 @@ func (w *Watcher) Errors() <-chan error { return w.fsw.Errors }
 func (w *Watcher) AddDir(dir string) {
 	if fi, err := os.Stat(dir); err == nil && fi.IsDir() {
 		if aerr := w.fsw.Add(dir); aerr != nil {
-			w.log("discover/watch: add %s failed: %v", dir, aerr)
+			w.log.With(logging.Context{Operation: "watch-add", Path: dir}).Log("watch add failed: %v", aerr)
 		}
 	}
 }
