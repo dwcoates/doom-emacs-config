@@ -304,15 +304,26 @@ func (m *Manager) Apply(ev *corev1.Event) error {
 	// which a running turn already proves more strongly. So the row is
 	// dropped rather than appended, and the running turn stands. The turn's
 	// own TurnEnded still moves the workspace off thinking normally.
+	//
+	// THE CLAIM BELONGS TO A SESSION, and only that session can keep it. A
+	// `thinking` row is a promise that the session which wrote it will report
+	// the turn's end; a DIFFERENT session now driving the workspace means that
+	// promise can never be kept, so the row is a dead claim rather than a
+	// stronger one. Falling through appends the readiness row, which supersedes
+	// it — the invalidation IS the write, not a separate deletion.
 	if state == sigReady {
-		active, err := turnActive(m.db, ws)
+		active, claimant, err := turnClaim(m.db, ws)
 		if err != nil {
 			return err
 		}
-		if active {
+		switch {
+		case active && (claimant == "" || claimant == sid):
 			m.logf("ssm: readiness suppressed (turn in flight) ws=%s session=%s seq=%d — the running turn is the stronger claim",
 				ws, sid, ev.GetSeq())
 			return nil
+		case active:
+			m.logf("ssm: turn claim INVALIDATED ws=%s stale_session=%s new_session=%s seq=%d — the session holding `thinking` no longer drives this workspace and can never report that turn's end, so readiness supersedes it rather than being suppressed by it",
+				ws, claimant, sid, ev.GetSeq())
 		}
 	}
 
@@ -498,6 +509,54 @@ func (m *Manager) ApplySessionRotated(workspace, previous, next string) error {
 	}
 	m.logf("ssm: vendor session rotated ws=%s %s -> %s — the in-flight turn's end belongs to the retired identity, so the agent axis is reconciled to `idle` rather than held in `thinking`",
 		workspace, previous, next)
+	return m.reresolveLocked(workspace, cause, 0)
+}
+
+// InvalidateTurnClaim releases a workspace's standing turn-in-flight claim when
+// the session that made it can no longer end it — today, a session the user
+// deleted mid-turn.
+//
+// A TURN CLAIM DIES WITH ITS SESSION. `thinking` is a promise that the session
+// which wrote it will report the turn's end; a deleted session's shim is
+// stopped and its stream is over, so nothing will ever supersede the row. Left
+// standing it does two visible harms: the workspace resolves THINKING forever,
+// and the readiness of whatever session comes next is suppressed by a claim
+// that outlived its claimant.
+//
+// It is deliberately NARROW. The row is released only when the axis really
+// tops out in `thinking` AND that row names staleSessionID — an unattributed
+// claim, or one belonging to some other session, is not this session's to
+// spend. A settled axis is left alone, exactly as ApplySessionRotated leaves it.
+func (m *Manager) InvalidateTurnClaim(workspace, staleSessionID, reason string) error {
+	if workspace == "" {
+		return fmt.Errorf("ssm: InvalidateTurnClaim got an empty workspace")
+	}
+	if staleSessionID == "" {
+		return fmt.Errorf("ssm: InvalidateTurnClaim for workspace %q got an empty session id; a claim can only be released on behalf of the session that made it", workspace)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	active, claimant, err := turnClaim(m.db, workspace)
+	if err != nil {
+		return err
+	}
+	if !active {
+		m.logf("ssm: turn claim release ws=%s session=%s reason=%q — no turn was in flight, agent axis left as it stands",
+			workspace, staleSessionID, reason)
+		return nil
+	}
+	if claimant != staleSessionID {
+		m.logf("ssm: turn claim release ws=%s session=%s reason=%q DECLINED — the standing `thinking` is held by session=%q, which is not this one's to spend",
+			workspace, staleSessionID, reason, claimant)
+		return nil
+	}
+	cause := causeSessionEnded + ":" + reason
+	if err := appendRow(m.db, workspace, staleSessionID, sigIdle, cause, sql.NullInt64{}, m.nextAt(), ""); err != nil {
+		return err
+	}
+	m.logf("ssm: turn claim INVALIDATED ws=%s session=%s reason=%q — the session holding `thinking` is gone and its turn's end will never arrive, so the agent axis is reconciled to `idle` rather than held in `thinking`",
+		workspace, staleSessionID, reason)
 	return m.reresolveLocked(workspace, cause, 0)
 }
 
