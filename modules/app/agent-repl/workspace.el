@@ -879,6 +879,7 @@ Returns:
 
 (defcustom agent-repl-ws-state-icons
   '((:init           . "⏳")
+    (:dormant        . "💤")
     (:thinking       . "⌛")
     (:clearing       . "🧹")
     (:compacting     . "🗜")

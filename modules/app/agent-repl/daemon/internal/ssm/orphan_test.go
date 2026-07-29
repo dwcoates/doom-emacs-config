@@ -81,7 +81,8 @@ func TestApplyRejectsTaskEndWithoutIdentity(t *testing.T) {
 		t.Fatal("TaskEnded without task_id must fail")
 	}
 	var rows int
-	if scanErr := m.db.QueryRow(`SELECT COUNT(*) FROM workspace_state`).Scan(&rows); scanErr != nil {
+	if scanErr := m.db.QueryRow(
+		`SELECT COUNT(*) FROM workspace_state WHERE state NOT IN ('wired','starting','dormant')`).Scan(&rows); scanErr != nil {
 		t.Fatalf("count rows: %v", scanErr)
 	}
 	if rows != 0 {

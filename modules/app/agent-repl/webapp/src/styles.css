@@ -525,6 +525,9 @@ body::after {
 /* BLUE: a dead or never-started session is a compromised ROUTE, not a
    terminal outcome, so it wears the same blue as bring-up — without the
    breath, because nothing is in progress. */
+/* DORMANT: blue like init, and STILL — init pulses because a bring-up is in
+   flight, and dormant means nothing is. */
+#ws-sidebar .st-dormant { background: var(--init); }
 #ws-sidebar .st-dead { background: var(--init); }
 #ws-sidebar .st-start-failed { background: var(--init); }
 #ws-sidebar .st-degraded { background: var(--init); }

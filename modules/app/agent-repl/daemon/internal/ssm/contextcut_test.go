@@ -77,6 +77,7 @@ func openCutTest(t *testing.T, resolver Resolver) (*Manager, *capLog, *timerFact
 		t.Fatalf("Open: %v", err)
 	}
 	t.Cleanup(func() { m.Close() })
+	wireAll(t, m, resolver)
 	return m, cl, tf, path
 }
 
@@ -342,6 +343,9 @@ func TestAnOpenClearingAxisIsRewatchedAcrossAReopen(t *testing.T) {
 		t.Fatalf("reopen: %v", err)
 	}
 	t.Cleanup(func() { reopened.Close() })
+	// The reopen marked every workspace dormant (nothing is wired to a daemon
+	// that has just started), which is orthogonal to the watchdog under test.
+	wireAll(t, reopened, fakeResolver{"s1": "ws1"})
 
 	// Assert — re-armed, and firing it still releases the axis.
 	tf.last(t).fire()

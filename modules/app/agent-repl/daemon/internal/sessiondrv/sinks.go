@@ -11,6 +11,7 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/errclass"
 	"claude-repld/internal/frontend"
+	"claude-repld/internal/ssm"
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -72,6 +73,12 @@ type StateApplier interface {
 	// so the opening edge is the first pending request and the closing edge is
 	// the count returning to zero — grant, deny and abandonment alike.
 	ApplyPermission(workspace string, pending bool, reason string) error
+	// ApplyWired moves the workspace's WIRED axis, the axis every non-blue color
+	// now stands on: blue means no live backend session, and every other color
+	// guarantees the substrate is wired. THIS PACKAGE IS THE SOLE PRODUCER —
+	// nothing else can observe the bring-up gate — so wiredstate.go holds every
+	// edge that moves it.
+	ApplyWired(workspace string, wiring ssm.Wiring, reason string) error
 }
 
 // ProgressResolver is the slice of the progress-footer resolver (F1) the driver

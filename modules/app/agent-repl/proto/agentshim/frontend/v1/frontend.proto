@@ -42,11 +42,12 @@ option go_package = "agentrepl/proto/agentshim/frontend/v1;frontendv1";
 // internals. Frontends key their render tables on the color, so the tab-bar,
 // the sidebar dots, and the progress footer can never disagree:
 //
-//   BLUE   INIT, DEAD, DEGRADED — the route Emacs→daemon→shim→SDK is
+//   BLUE   INIT, DORMANT, DEAD, DEGRADED — the route Emacs→daemon→shim→SDK is
 //          compromised on OUR side, or there is no live backend session for
-//          this workspace at all. No session yet, a dead or unspawned shim,
-//          bring-up, a store outage, or a failed backfill. Blue is the
-//          honest state whenever green's promise cannot be kept.
+//          this workspace at all. A bring-up in flight (INIT), a workspace
+//          nothing is wired to (DORMANT), a dead or unspawned shim, a store
+//          outage, or a failed backfill. Blue is the honest state whenever
+//          green's promise cannot be kept.
 //   PURPLE VENDOR_BLOCKED — the last turn ended AT THE VENDOR or on the
 //          ACCOUNT. Auth, usage limit, persistent 4xx/5xx, or any other
 //          abnormal turn-CONCLUDING error. It is a REPORT of that
@@ -119,6 +120,21 @@ enum RenderState {
   // somehow open, clearing wins.
   RENDER_STATE_CLEARING = 18;
   RENDER_STATE_COMPACTING = 19;
+  // Additive: NOT WIRED, and not coming up either — a hibernated workspace,
+  // one that has never been opened, or every workspace of a daemon that has
+  // just restarted.
+  //
+  // It is the resting half of the connection-truth law above. INIT already
+  // says "a bring-up is in flight"; this says the opposite, that nothing is
+  // in flight and nothing is wired, which INIT's spinner would misreport as
+  // work in progress. Both are BLUE — the claim about what the user can do
+  // is identical — and the WORD and the (non-spinning) glyph are the whole
+  // distinction, exactly as CLEARING and COMPACTING split THINKING.
+  //
+  // Nothing about the agent shows through it. A dormant workspace may have a
+  // `thinking` row from the turn it was hibernated during; reporting that
+  // would advertise an agent nobody is connected to.
+  RENDER_STATE_DORMANT = 20;
 }
 
 message FrontendFrame {

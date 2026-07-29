@@ -57,11 +57,12 @@ const (
 // internals. Frontends key their render tables on the color, so the tab-bar,
 // the sidebar dots, and the progress footer can never disagree:
 //
-//	BLUE   INIT, DEAD, DEGRADED — the route Emacs→daemon→shim→SDK is
+//	BLUE   INIT, DORMANT, DEAD, DEGRADED — the route Emacs→daemon→shim→SDK is
 //	       compromised on OUR side, or there is no live backend session for
-//	       this workspace at all. No session yet, a dead or unspawned shim,
-//	       bring-up, a store outage, or a failed backfill. Blue is the
-//	       honest state whenever green's promise cannot be kept.
+//	       this workspace at all. A bring-up in flight (INIT), a workspace
+//	       nothing is wired to (DORMANT), a dead or unspawned shim, a store
+//	       outage, or a failed backfill. Blue is the honest state whenever
+//	       green's promise cannot be kept.
 //	PURPLE VENDOR_BLOCKED — the last turn ended AT THE VENDOR or on the
 //	       ACCOUNT. Auth, usage limit, persistent 4xx/5xx, or any other
 //	       abnormal turn-CONCLUDING error. It is a REPORT of that
@@ -138,6 +139,21 @@ const (
 	// somehow open, clearing wins.
 	RenderState_RENDER_STATE_CLEARING   RenderState = 18
 	RenderState_RENDER_STATE_COMPACTING RenderState = 19
+	// Additive: NOT WIRED, and not coming up either — a hibernated workspace,
+	// one that has never been opened, or every workspace of a daemon that has
+	// just restarted.
+	//
+	// It is the resting half of the connection-truth law above. INIT already
+	// says "a bring-up is in flight"; this says the opposite, that nothing is
+	// in flight and nothing is wired, which INIT's spinner would misreport as
+	// work in progress. Both are BLUE — the claim about what the user can do
+	// is identical — and the WORD and the (non-spinning) glyph are the whole
+	// distinction, exactly as CLEARING and COMPACTING split THINKING.
+	//
+	// Nothing about the agent shows through it. A dormant workspace may have a
+	// `thinking` row from the turn it was hibernated during; reporting that
+	// would advertise an agent nobody is connected to.
+	RenderState_RENDER_STATE_DORMANT RenderState = 20
 )
 
 // Enum value maps for RenderState.
@@ -163,6 +179,7 @@ var (
 		17: "RENDER_STATE_INTERRUPTED",
 		18: "RENDER_STATE_CLEARING",
 		19: "RENDER_STATE_COMPACTING",
+		20: "RENDER_STATE_DORMANT",
 	}
 	RenderState_value = map[string]int32{
 		"RENDER_STATE_UNSPECIFIED":    0,
@@ -185,6 +202,7 @@ var (
 		"RENDER_STATE_INTERRUPTED":    17,
 		"RENDER_STATE_CLEARING":       18,
 		"RENDER_STATE_COMPACTING":     19,
+		"RENDER_STATE_DORMANT":        20,
 	}
 )
 
@@ -5651,7 +5669,7 @@ const file_agentshim_frontend_v1_frontend_proto_rawDesc = "" +
 	"\x06queues\x18\x06 \x03(\v2 .agentshim.frontend.v1.QueueViewR\x06queues\x12?\n" +
 	"\bprogress\x18\a \x03(\v2#.agentshim.frontend.v1.ProgressViewR\bprogress\x12Z\n" +
 	"\x13workspace_available\x18\b \x03(\v2).agentshim.frontend.v1.WorkspaceAvailableR\x12workspaceAvailable\x12D\n" +
-	"\fhost_actions\x18\t \x03(\v2!.agentshim.frontend.v1.HostActionR\vhostActions*\xba\x04\n" +
+	"\fhost_actions\x18\t \x03(\v2!.agentshim.frontend.v1.HostActionR\vhostActions*\xd4\x04\n" +
 	"\vRenderState\x12\x1c\n" +
 	"\x18RENDER_STATE_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11RENDER_STATE_INIT\x10\x01\x12\x15\n" +
@@ -5673,7 +5691,8 @@ const file_agentshim_frontend_v1_frontend_proto_rawDesc = "" +
 	"\x1bRENDER_STATE_VENDOR_BLOCKED\x10\x10\x12\x1c\n" +
 	"\x18RENDER_STATE_INTERRUPTED\x10\x11\x12\x19\n" +
 	"\x15RENDER_STATE_CLEARING\x10\x12\x12\x1b\n" +
-	"\x17RENDER_STATE_COMPACTING\x10\x13*\x7f\n" +
+	"\x17RENDER_STATE_COMPACTING\x10\x13\x12\x18\n" +
+	"\x14RENDER_STATE_DORMANT\x10\x14*\x7f\n" +
 	"\rBackfillState\x12\x1e\n" +
 	"\x1aBACKFILL_STATE_UNSPECIFIED\x10\x00\x12\x1a\n" +
 	"\x16BACKFILL_STATE_PENDING\x10\x01\x12\x17\n" +

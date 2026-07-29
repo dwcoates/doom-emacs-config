@@ -155,6 +155,16 @@ func (r *faultRig) cardUUIDs() []string {
 	return out
 }
 
+// wire opens the workspace's WIRED axis, which in production is sessiondrv's
+// own report of the bring-up gate closing. Every color above blue stands on it,
+// so a test about any other axis has to arrange it.
+func (r *faultRig) wire() {
+	r.t.Helper()
+	if err := r.mgr.ApplyWired(r.ws, ssm.WiringWired, "test arrangement"); err != nil {
+		r.t.Fatalf("apply wired: %v", err)
+	}
+}
+
 // retainedCards returns the consumer's retained failure items — what a resync
 // would replay — as distinct from the full push history.
 func (r *faultRig) retainedCards() []*frontendv1.ConversationItem {
@@ -162,9 +172,11 @@ func (r *faultRig) retainedCards() []*frontendv1.ConversationItem {
 }
 
 // settleGreen brings the workspace to green the way a real bring-up does: the
-// shim asserts readiness and the transcript backfill settles.
+// bring-up gate closes (the WIRED axis opens), the shim asserts readiness, and
+// the transcript backfill settles.
 func (r *faultRig) settleGreen() {
 	r.t.Helper()
+	r.wire()
 	r.apply(&corev1.SessionStarted{Model: "test-model", Cwd: r.ws})
 	if err := r.mgr.ApplyBackfillState(r.ws, BackfillDone); err != nil {
 		r.t.Fatalf("apply backfill done: %v", err)
@@ -668,6 +680,7 @@ func TestTurnStartFlipsToRed(t *testing.T) {
 func TestFailedBackfillHoldsTheWorkspaceBlue(t *testing.T) {
 	// Arrange
 	rig := newFaultRig(t)
+	rig.wire()
 	rig.apply(&corev1.SessionStarted{Model: "test-model", Cwd: rig.ws})
 
 	// Act
@@ -683,6 +696,7 @@ func TestFailedBackfillHoldsTheWorkspaceBlue(t *testing.T) {
 func TestBackfillSettlingReleasesTowardGreen(t *testing.T) {
 	// Arrange
 	rig := newFaultRig(t)
+	rig.wire()
 	rig.apply(&corev1.SessionStarted{Model: "test-model", Cwd: rig.ws})
 	if err := rig.mgr.ApplyBackfillState(rig.ws, BackfillFailed); err != nil {
 		t.Fatalf("apply backfill failed: %v", err)

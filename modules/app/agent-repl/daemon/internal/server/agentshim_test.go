@@ -86,6 +86,12 @@ func TestRegistryResolverBindsSSMToWorkspace(t *testing.T) {
 		t.Fatalf("ssm open: %v", err)
 	}
 	defer mgr.Close()
+	// The workspace has to be WIRED for anything the agent reports to show
+	// through: blue means no live session, and this test is about the RESOLVER
+	// binding a session to a workspace, not about the wiring.
+	if err := mgr.ApplyWired("/w", ssm.WiringWired, "test arrangement"); err != nil {
+		t.Fatalf("apply wired: %v", err)
+	}
 	// Act — a turn-started event for s1 (seq 1).
 	ev := &corev1.Event{SessionId: "s1", Seq: 1, Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{}}}
 	if err := mgr.Apply(ev); err != nil {

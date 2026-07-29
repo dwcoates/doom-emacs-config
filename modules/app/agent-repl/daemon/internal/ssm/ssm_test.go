@@ -78,8 +78,41 @@ func evTaskEnded(sid string, seq uint64, taskID string, status corev1.TerminalSt
 	return &corev1.Event{SessionId: sid, Seq: seq, Payload: &corev1.Event_TaskEnded{TaskEnded: &corev1.TaskEnded{TaskId: taskID, Status: status}}}
 }
 
-// openTest opens a Manager on a temp DB with a capturing logger.
+// openTest opens a Manager on a temp DB with a capturing logger, and WIRES
+// every workspace the resolver names.
+//
+// The wiring is arrangement, not subject. It is sessiondrv's fact, produced off
+// the bring-up gate's own verdict, and until it stands the connection-truth law
+// holds every workspace `dormant` no matter what the agent reports — so a test
+// about the agent axis, the context cuts, or the backfill cannot be asked at all
+// of an unwired workspace. Tests that are ABOUT the axis call ApplyWired
+// themselves, and openUnwiredTest exists for the ones that must start from
+// nothing.
 func openTest(t *testing.T, resolver Resolver) (*Manager, *capLog, string) {
+	t.Helper()
+	m, cl, path := openUnwiredTest(t, resolver)
+	wireAll(t, m, resolver)
+	return m, cl, path
+}
+
+// wireAll puts every workspace RESOLVER names on the WIRED axis. See openTest
+// for why this is arrangement rather than subject.
+func wireAll(t *testing.T, m *Manager, resolver Resolver) {
+	t.Helper()
+	fake, ok := resolver.(fakeResolver)
+	if !ok {
+		return
+	}
+	for _, ws := range fake {
+		if err := m.ApplyWired(ws, WiringWired, "test arrangement"); err != nil {
+			t.Fatalf("ApplyWired(%s): %v", ws, err)
+		}
+	}
+}
+
+// openUnwiredTest opens a Manager with NO workspace wired — the honest state of
+// a daemon that has just come up.
+func openUnwiredTest(t *testing.T, resolver Resolver) (*Manager, *capLog, string) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "state.db")
 	cl := &capLog{}
@@ -250,6 +283,7 @@ func TestPersistenceAcrossReopen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open 1: %v", err)
 	}
+	wireAll(t, m1, res)
 	if err := m1.Apply(evSessionStarted("s1", 1)); err != nil {
 		t.Fatalf("session start: %v", err)
 	}
@@ -272,7 +306,26 @@ func TestPersistenceAcrossReopen(t *testing.T) {
 	}
 	t.Cleanup(func() { m2.Close() })
 
-	// Assert: state (including live_task_count) survived.
+	// Assert, FIRST HALF: the WIRING did not survive. Nothing is connected to a
+	// daemon that has just started, and the connection-truth law makes that the
+	// only honest thing a restored tab can claim — so the restored workspace is
+	// dormant however green its log reads. Phase B's reattach sweep re-wires the
+	// working set; until then this is correct rather than merely tolerated.
+	if got := mustCurrent(t, m2, "ws1").State; got != frontendv1.RenderState_RENDER_STATE_DORMANT {
+		t.Fatalf("post-reopen state = %s, want DORMANT (nothing is wired to a fresh daemon)", renderName(got))
+	}
+	// The reopen restores silently — no transition line for the restore. Checked
+	// BEFORE the re-wire below, which is a real transition rather than a restore.
+	if cl.contains("transition ws=ws1") {
+		t.Fatalf("reopen logged a transition; want a silent restore. lines: %v", cl.lines)
+	}
+	if !cl.contains("restored 1 workspace") {
+		t.Fatalf("expected a restore-count log line, got: %v", cl.lines)
+	}
+	wireAll(t, m2, res)
+
+	// Assert, SECOND HALF: the LOG survived. Re-wire, and the state (including
+	// live_task_count) is exactly what it was.
 	after := mustCurrent(t, m2, "ws1")
 	if after.State != frontendv1.RenderState_RENDER_STATE_IDLE_ASYNC {
 		t.Fatalf("post-reopen state = %s, want IDLE_ASYNC", renderName(after.State))
@@ -280,14 +333,6 @@ func TestPersistenceAcrossReopen(t *testing.T) {
 	if after.LiveTaskCount != 1 {
 		t.Fatalf("post-reopen live_task_count = %d, want 1", after.LiveTaskCount)
 	}
-	// The reopen restores silently — no transition line for the restore.
-	if cl.contains("transition ws=ws1") {
-		t.Fatalf("reopen logged a transition; want a silent restore. lines: %v", cl.lines)
-	}
-	if !cl.contains("restored 1 workspace") {
-		t.Fatalf("expected a restore-count log line, got: %v", cl.lines)
-	}
-
 	// And a subsequent real change on m2 still resolves correctly.
 	if err := m2.Apply(evTaskEnded("s1", 3, "a1", corev1.TerminalStatus_TERMINAL_STATUS_DONE)); err != nil {
 		t.Fatalf("task end: %v", err)
@@ -624,6 +669,9 @@ func TestMigrateAddsTaskIDToAV1Database(t *testing.T) {
 		t.Fatalf("Open a v1 db: %v", err)
 	}
 	t.Cleanup(func() { m.Close() })
+	// The Open marked the restored workspace dormant (nothing is wired to a
+	// daemon that has just started); the migration is what is under test.
+	wireAll(t, m, fakeResolver{"s1": "ws1"})
 
 	// Assert — the workspace still resolves, which it cannot without the column.
 	if got := mustCurrent(t, m, "ws1").State; got != frontendv1.RenderState_RENDER_STATE_IDLE {

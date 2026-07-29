@@ -251,6 +251,20 @@ func rowsFor(t *testing.T, db *sql.DB, ws string) [][2]string {
 	return out
 }
 
+// agentRowsOnly drops the WIRED-axis rows a test's arrangement wrote, so a
+// row-exactness assertion stays about the axis it is asking after.
+func agentRowsOnly(rows [][2]string) [][2]string {
+	out := make([][2]string, 0, len(rows))
+	for _, r := range rows {
+		switch r[0] {
+		case sigWired, sigStarting, sigDormant:
+			continue
+		}
+		out = append(out, r)
+	}
+	return out
+}
+
 // An abnormal turn end is ONE fact — the turn ended at the vendor — so it is
 // one row. The second, vendor-axis row it used to also write is the latch
 // that could never be opened.
@@ -267,7 +281,9 @@ func TestAbnormalTurnEndWritesExactlyOneAgentRow(t *testing.T) {
 		t.Fatalf("reopen: %v", err)
 	}
 	defer db.Close()
-	got := rowsFor(t, db, "ws1")
+	// The wiring arrangement's own row is dropped: this asserts what the TURN
+	// END wrote, and the wired axis is a different axis entirely.
+	got := agentRowsOnly(rowsFor(t, db, "ws1"))
 	want := [][2]string{{sigVendorBlocked, causeVendorBlocked}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("rows = %v, want %v", got, want)
@@ -288,7 +304,7 @@ func TestCleanTurnEndWritesExactlyOneDoneRow(t *testing.T) {
 		t.Fatalf("reopen: %v", err)
 	}
 	defer db.Close()
-	got := rowsFor(t, db, "ws1")
+	got := agentRowsOnly(rowsFor(t, db, "ws1"))
 	want := [][2]string{{sigDone, causeTurnEnded}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("rows = %v, want %v", got, want)
@@ -300,7 +316,7 @@ func TestCleanTurnEndWritesExactlyOneDoneRow(t *testing.T) {
 // the purple, so a retry has to be able to read red.
 func TestThinkingAfterAVendorBlockResolvesRed(t *testing.T) {
 	// Arrange.
-	db := newTestDB(t)
+	db := newWiredTestDB(t, "ws")
 	seedSignal(t, db, "ws", "s1", sigVendorBlocked, causeVendorBlocked, 1, 1)
 	seedSignal(t, db, "ws", "s1", sigThinking, causeTurnStarted, 2, 2)
 	// Act.
@@ -318,7 +334,7 @@ func TestThinkingAfterAVendorBlockResolvesRed(t *testing.T) {
 // turn did. This is what makes a restart heal the purple.
 func TestReadyAfterAVendorBlockResolvesGreen(t *testing.T) {
 	// Arrange.
-	db := newTestDB(t)
+	db := newWiredTestDB(t, "ws")
 	seedSignal(t, db, "ws", "s1", sigVendorBlocked, causeVendorBlocked, 1, 1)
 	seedSignal(t, db, "ws", "s2", sigReady, causeSessionStarted, 0, 2)
 	// Act.
@@ -339,7 +355,7 @@ func TestReadyAfterAVendorBlockResolvesGreen(t *testing.T) {
 func TestVendorBlockedThenASessionRestartSelfHeals(t *testing.T) {
 	// Arrange — the doom workspace's rows: a turn, its abnormal end, then two
 	// later session starts that each asserted readiness.
-	db := newTestDB(t)
+	db := newWiredTestDB(t, "ws")
 	seedSignal(t, db, "ws", "s1", sigThinking, causeTurnStarted, 1, 1)
 	seedSignal(t, db, "ws", "s1", sigVendorBlocked, causeVendorBlocked, 2, 2)
 	seedSignal(t, db, "ws", "s2", sigReady, causeSessionStarted, 0, 3)
@@ -371,7 +387,7 @@ func TestBlueOutranksVendorBlocked(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange.
-			db := newTestDB(t)
+			db := newWiredTestDB(t, "ws")
 			seedSignal(t, db, "ws", "s1", tc.state, tc.cause, -1, 1)
 			seedSignal(t, db, "ws", "s1", sigVendorBlocked, causeVendorBlocked, 2, 2)
 			// Act.
@@ -393,7 +409,7 @@ func TestBlueOutranksVendorBlocked(t *testing.T) {
 // newer fact and the stronger claim.
 func TestShimDeathAfterAVendorBlockResolvesBlue(t *testing.T) {
 	// Arrange.
-	db := newTestDB(t)
+	db := newWiredTestDB(t, "ws")
 	seedSignal(t, db, "ws", "s1", sigVendorBlocked, causeVendorBlocked, 1, 1)
 	seedSignal(t, db, "ws", "s1", sigDead, causeSessionEnded, 2, 2)
 	// Act.
@@ -424,7 +440,7 @@ func TestMergeStatesOutrankVendorBlocked(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange.
-			db := newTestDB(t)
+			db := newWiredTestDB(t, "ws")
 			seedSignal(t, db, "ws", "s1", tc.state, causeMergeTransition, -1, 1)
 			seedSignal(t, db, "ws", "s1", sigVendorBlocked, causeVendorBlocked, 2, 2)
 			// Act.
@@ -445,7 +461,7 @@ func TestMergeStatesOutrankVendorBlocked(t *testing.T) {
 // which rows supersede it, never where it sits in the ladder.
 func TestVendorBlockedStandsWhenEveryOtherAxisIsClear(t *testing.T) {
 	// Arrange.
-	db := newTestDB(t)
+	db := newWiredTestDB(t, "ws")
 	seedSignal(t, db, "ws", "s1", sigVendorBlocked, causeVendorBlocked, 1, 1)
 	seedSignal(t, db, "ws", "", sigBackfillOK, "backfill:done", -1, 3)
 	seedSignal(t, db, "ws", "", sigDegradedClear, "connection_recovered", -1, 4)
@@ -466,7 +482,7 @@ func TestVendorBlockedStandsWhenEveryOtherAxisIsClear(t *testing.T) {
 // that would hide the outcome the purple exists to report.
 func TestBackgroundWorkDoesNotPromoteVendorBlockedToYellow(t *testing.T) {
 	// Arrange.
-	db := newTestDB(t)
+	db := newWiredTestDB(t, "ws")
 	seedSignal(t, db, "ws", "s1", sigVendorBlocked, causeVendorBlocked, 1, 1)
 	seedTaskSignal(t, db, "ws", "s1", sigTaskStarted, causeTaskStarted, 2, 2, "task-1")
 	// Act.
@@ -507,6 +523,11 @@ func TestHistoricalVendorClearRowsAreInert(t *testing.T) {
 		t.Fatalf("Open over a pre-remodel database: %v", err)
 	}
 	t.Cleanup(func() { m.Close() })
+	// The reopen marked the restored workspace dormant; the legacy row's
+	// inertness is what is under test, so the wiring is restored.
+	if err := m.ApplyWired("ws1", WiringWired, "test arrangement"); err != nil {
+		t.Fatalf("ApplyWired: %v", err)
+	}
 
 	// Assert — the live turn wins; the legacy row contributed nothing.
 	if got := mustCurrent(t, m, "ws1").State; got != frontendv1.RenderState_RENDER_STATE_THINKING {
@@ -531,7 +552,7 @@ func TestGreenStatesPromoteToIdleAsync(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange.
-			db := newTestDB(t)
+			db := newWiredTestDB(t, "ws")
 			seedSignal(t, db, "ws", "s1", tc.token, causeSessionStarted, 1, 1)
 			seedTaskSignal(t, db, "ws", "s1", sigTaskStarted, causeTaskStarted, 2, 2, "a1")
 			// Act.
@@ -551,7 +572,7 @@ func TestGreenStatesPromoteToIdleAsync(t *testing.T) {
 // work, so thinking stays thinking.
 func TestThinkingIsNotPromotedToIdleAsync(t *testing.T) {
 	// Arrange.
-	db := newTestDB(t)
+	db := newWiredTestDB(t, "ws")
 	seedSignal(t, db, "ws", "s1", sigThinking, causeTurnStarted, 1, 1)
 	seedTaskSignal(t, db, "ws", "s1", sigTaskStarted, causeTaskStarted, 2, 2, "a1")
 	// Act.

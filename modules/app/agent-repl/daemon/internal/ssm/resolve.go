@@ -14,8 +14,14 @@ import (
 // signals (merge_none, degraded_clear, task_started, task_ended) that the
 // resolution query interprets but never emits as a resolved state.
 const (
-	sigInit       = "init"
-	sigThinking   = "thinking"
+	// THE WIRED AXIS. sessiondrv produces it off the bring-up gate's own
+	// verdict, and it is what makes a workspace's color CONNECTION TRUTH:
+	// `wired` clears the axis and lets the agent axis speak, and neither other
+	// token does.
+	sigWired    = "wired"    // the bring-up gate CLOSED (ShimReady).
+	sigStarting = "starting" // a bring-up is actively in flight.
+	sigDormant  = "dormant"  // not wired and not starting.
+	sigThinking = "thinking"
 	sigDone       = "done"
 	sigPermission = "permission"
 	sigIdle       = "idle"
@@ -66,6 +72,10 @@ const (
 	causeTaskStarted     = "task_started"
 	causeTaskEnded       = "task_ended"
 	causeMergeTransition = "merge_transition"
+	// The wired axis's edges. The detail after the colon names which one moved
+	// it — the bring-up that started, the ShimReady that closed the gate, or the
+	// exit/hibernation/rotation that took the wiring away.
+	causeWired = "wired"
 	causeVendorBlocked   = "vendor_blocked"
 	causeInterrupted     = "interrupted"
 	// The vendor retired one session uuid mid-stream and minted another, so
@@ -168,8 +178,10 @@ func isGreenToken(token string) bool { return greenTokens[token] }
 // calling this.
 func renderStateOf(token string) frontendv1.RenderState {
 	switch token {
-	case sigInit:
+	case sigStarting:
 		return frontendv1.RenderState_RENDER_STATE_INIT
+	case sigDormant:
+		return frontendv1.RenderState_RENDER_STATE_DORMANT
 	case sigIdle:
 		return frontendv1.RenderState_RENDER_STATE_IDLE
 	case sigIdleAsync:
@@ -222,6 +234,14 @@ func renderStateOf(token string) frontendv1.RenderState {
 // stronger claim about what the user CANNOT do than the one beneath it, so
 // the strongest true claim wins:
 //
+//   - THE WIRED AXIS IS WHY BLUE OUTRANKS EVERYTHING. A workspace's color is
+//     CONNECTION TRUTH: blue means there is no live backend session for it,
+//     and every non-blue color is a guarantee that the substrate is wired.
+//     `dormant` (12) and `starting` (14) therefore sit above every agent-axis
+//     row and above `vendor_blocked`, so the agent's last word is visible only
+//     while the axis reads `wired`. Nothing in Go decides this; the two ranks
+//     do.
+//
 //   - BLUE outranks everything, INCLUDING a live turn. A turn running behind
 //     a route the user cannot see is not something to advertise as working,
 //     it is something to advertise as broken.
@@ -247,8 +267,9 @@ func renderStateOf(token string) frontendv1.RenderState {
 //	--- blue ---------------------------------------------------------------
 //	10 dead             the shim is gone
 //	11 degraded         a store/transport outage
+//	12 dormant          nothing is wired to this workspace
 //	13 backfill_failed  the transcript could not be fully read
-//	14 init             bring-up
+//	14 starting         a bring-up is in flight
 //	--- purple -------------------------------------------------------------
 //	20 vendor_blocked   agent axis: the last turn ended AT THE VENDOR
 //	--- red ----------------------------------------------------------------
@@ -293,8 +314,9 @@ WITH
     ('merge_queued','merge',5),
     ('dead','agent',10),
     ('degraded','degraded',11),
+    ('dormant','wired',12),
     ('backfill_failed','backfill',13),
-    ('init','agent',14),
+    ('starting','wired',14),
     ('vendor_blocked','agent',20),
     ('clearing','clearing',28),
     ('compacting','compacting',29),
@@ -323,6 +345,11 @@ WITH
     WHERE r.state IN ('degraded','degraded_clear')
     ORDER BY r.at DESC LIMIT 1
   ),
+  latest_wired AS (
+    SELECT r.* FROM rows r
+    WHERE r.state IN ('wired','starting','dormant')
+    ORDER BY r.at DESC LIMIT 1
+  ),
   latest_backfill AS (
     SELECT r.* FROM rows r
     WHERE r.state IN ('backfill_failed','backfill_ok')
@@ -344,6 +371,17 @@ WITH
     SELECT state, cause_kind, cause_seq, at, session_id FROM latest_merge WHERE state <> 'merge_none'
     UNION ALL
     SELECT state, cause_kind, cause_seq, at, session_id FROM latest_degraded WHERE state <> 'degraded_clear'
+    UNION ALL
+    SELECT state, cause_kind, cause_seq, at, session_id FROM latest_wired WHERE state <> 'wired'
+    UNION ALL
+    -- ABSENCE OF A WIRED ROW IS DORMANT, not "unknown". A workspace with agent
+    -- history and no wired row has no evidence of a live session behind it, and
+    -- letting the agent axis answer unopposed would advertise an agent nobody
+    -- is connected to. The synthesized row borrows the agent axis's timestamp
+    -- and session id so the emitted state still names the conversation it is
+    -- about.
+    SELECT 'dormant', 'wired:absent', cause_seq, at, session_id FROM latest_agent
+      WHERE NOT EXISTS (SELECT 1 FROM latest_wired)
     UNION ALL
     SELECT state, cause_kind, cause_seq, at, session_id FROM latest_backfill WHERE state <> 'backfill_ok'
     UNION ALL

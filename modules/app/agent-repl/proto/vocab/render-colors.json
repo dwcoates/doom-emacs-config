@@ -33,6 +33,7 @@
     "RENDER_STATE_UNSPECIFIED": "none",
 
     "RENDER_STATE_INIT": "blue",
+    "RENDER_STATE_DORMANT": "blue",
     "RENDER_STATE_DEAD": "blue",
     "RENDER_STATE_DEGRADED": "blue",
 
