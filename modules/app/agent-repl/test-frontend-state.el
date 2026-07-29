@@ -745,6 +745,62 @@ than a settled no-op."
         ;; Assert — latch fired exactly once
         (should (= (length calls) 1))))))
 
+;;;; ---- Tests: wire CWDs never reach the workspace log sink ----
+
+(defmacro agent-repl-test--with-log-sink-on (&rest body)
+  "Run BODY with the durable log sink ENABLED, writing to a throwaway file.
+test-helpers.el turns `agent-repl-log-to-file' off for every noninteractive
+run, and `agent-repl--persist-log-record' skips workspace-identity
+resolution entirely when both sinks are disabled.  A frame test that leaves
+it off therefore never exercises log routing at all — which is exactly how a
+wire CWD reaching the sink stayed invisible to this file."
+  (declare (indent 0))
+  `(let ((sink (make-temp-file "agent-repl-test-wire-log-")))
+     (unwind-protect
+         (let ((agent-repl-log-to-file t)
+               (agent-repl-log-file-name sink)
+               (agent-repl--log-write-counter 0))
+           (cl-letf (((symbol-function 'message) #'ignore))
+             ,@body))
+       (when (file-exists-p sink) (delete-file sink)))))
+
+(ert-deftest agent-repl-test-apply-session-view-with-unowned-cwd-does-not-signal ()
+  "A SessionView naming a CWD no live workspace owns must not abort the filter.
+Frame handlers run inside the connection's process filter, and a wire CWD can
+never index the workspace hash, so routing one into the logging ladder made
+the daemon's own snapshot replay kill the filter.  The sink must be ENABLED
+for this to mean anything: with it off the ladder never resolves an identity
+at all, which is why the existing frame tests could not see this."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-log-sink-on
+      (clrhash agent-repl--frontend-session-views)
+      ;; Act / Assert
+      (should (agent-repl--frontend-apply-session-view
+               '(:sessionId "s_unowned" :workspace "/nowhere/unowned"))))))
+
+(ert-deftest agent-repl-test-surface-session-death-with-unowned-cwd-does-not-signal ()
+  "The no-death branch runs for every replayed frame and must stay silent.
+It is the chattiest path in the handler, so it is the one a wire CWD reaches
+first."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-log-sink-on
+      ;; Act / Assert
+      (should-not (agent-repl--frontend-surface-session-death
+                   "s_unowned" '(:workspace "/nowhere/unowned"))))))
+
+(ert-deftest agent-repl-test-apply-session-init-with-unowned-cwd-does-not-signal ()
+  "The sessionInit handler carries the same wire CWD field as sessionView."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-log-sink-on
+      (clrhash agent-repl--frontend-session-inits)
+      ;; Act / Assert
+      (should (agent-repl--frontend-apply-session-init
+               '(:sessionId "s_init_unowned" :workspace "/nowhere/unowned"
+                 :init (:slashCommands nil :skills nil)))))))
+
 (provide 'test-frontend-state)
 
 ;;; test-frontend-state.el ends here

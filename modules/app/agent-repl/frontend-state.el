@@ -472,7 +472,11 @@ same fact classified, so it can finally be shown."
 
 Returns the surfaced text, or nil when the session is alive, carries no
 classified death, or has already been reported."
-  (let ((workspace (plist-get view :workspace))
+  ;; Resolved to a workspace NAME once, up front.  This runs for every
+  ;; replayed SessionView frame — including the no-death verbose path — so
+  ;; carrying the wire CWD any further would make the chattiest branch in the
+  ;; frame handler signal inside the connection's process filter.
+  (let ((workspace (agent-repl--frontend-ws-name (plist-get view :workspace)))
         (item (plist-get view :death)))
     (cond
      ((null item)
