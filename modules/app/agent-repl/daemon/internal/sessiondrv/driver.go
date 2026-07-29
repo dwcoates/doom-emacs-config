@@ -887,7 +887,9 @@ func (m *Manager) applyMetaprompt(d *driven, text string) string {
 }
 
 // Interrupt interrupts the workspace's live turn. A workspace with no live
-// session is a loud error (the frontend renders the failed CommandAck).
+// session is a loud error (the frontend renders the failed CommandAck) UNLESS
+// the log says a turn is still in flight behind it, in which case the bring-up
+// is paid first and the stop is delivered — see recoverDriverForInterrupt.
 //
 // The shim's OUTCOME decides whether the stop failed, not the absence of an
 // error: an undeliverable stop is a failure, while a stop that arrived after
@@ -906,7 +908,10 @@ func (m *Manager) applyMetaprompt(d *driven, text string) string {
 func (m *Manager) Interrupt(ctx context.Context, workspace string) error {
 	d, err := m.existing(workspace)
 	if err != nil {
-		return err
+		d, err = m.recoverDriverForInterrupt(ctx, workspace, err)
+		if err != nil {
+			return err
+		}
 	}
 	outcome, err := d.client.Interrupt(ctx)
 	if err != nil {
@@ -919,6 +924,64 @@ func (m *Manager) Interrupt(ctx context.Context, workspace string) error {
 	}
 	m.logf("sessiondrv: interrupt ws=%s session=%s outcome=%s", workspace, d.sessionID, outcome)
 	return nil
+}
+
+// recoverDriverForInterrupt brings a workspace up so a user's stop can reach a
+// turn that is still running behind a driver that is gone, returning ABSENT
+// unchanged when there is nothing to stop.
+//
+// THE STATE IT RECOVERS FROM SHOULD NOT EXIST. `hibernate()` refuses any
+// workspace that has not settled, so a live turn with no driver behind it means
+// some writer closed the axis behind work in flight. The user, meanwhile, is
+// looking at a tab that says nothing is happening and pressing stop on it, and
+// the old behavior answered with "no live session for this workspace" — a nack
+// about the interrupt, which tells them nothing about the turn that is still
+// burning tokens somewhere.
+//
+// THE ORDER IS BRING UP, THEN INTERRUPT, and it is the order the user asked for
+// rather than a convenience. Bringing the session up first re-establishes the
+// stream, so the moment the stop lands its consequences — the turn's `interrupted`
+// outcome, the queue pause, the footer's window — flow to a frontend that can
+// see them. Interrupting first would deliver a stop into a route with nothing on
+// the other end.
+//
+// WHAT IT REFUSES TO DO is spawn a shim to stop nothing. A genuinely settled
+// workspace with no driver — hibernated after a clean turn, never opened, merely
+// severed — keeps the ORIGINAL ErrNoLiveDriver, because paying a 500MB bring-up
+// and a several-hundred-millisecond handshake to deliver a stop to an idle
+// session is a worse answer than the honest error. `turn_active` is what
+// separates the two, and it is deliberately read INSTEAD of the resolved state:
+// the violated case resolves `hibernated`, since teal outranks the agent axis by
+// design, so "reads red" would never fire on the very state this exists for. The
+// red band is accepted too, for a driverless workspace whose log never got the
+// hibernation row at all.
+//
+// A STATE READ FAILURE KEEPS THE ORIGINAL ERROR. The absence of a driver is a
+// fact we already have; the recovery is a discretionary extra that needs positive
+// evidence of a turn, and spawning a shim on an unreadable log would be acting on
+// a guess. Logged loudly, never swallowed.
+func (m *Manager) recoverDriverForInterrupt(ctx context.Context, workspace string, absent error) (*driven, error) {
+	if !errors.Is(absent, ErrNoLiveDriver) {
+		return nil, absent
+	}
+	st, found, err := m.cfg.SSM.Current(workspace)
+	if err != nil {
+		m.logf("sessiondrv: interrupt recovery state read FAILED ws=%s: %v — keeping the no-live-driver refusal rather than spawning a shim on a guess",
+			workspace, err)
+		return nil, absent
+	}
+	if !found || (!st.GetTurnActive() && !redStates[st.GetState()]) {
+		return nil, absent
+	}
+	m.logf("sessiondrv: INVARIANT VIOLATION RECOVERY ws=%s — a user-commanded stop arrived for a workspace with NO live driver whose log still shows a turn in flight (state=%s turn_active=%v). Bringing the session up FIRST so the stop has somewhere to land, then interrupting",
+		workspace, st.GetState(), st.GetTurnActive())
+	d, err := m.ensure(ctx, workspace)
+	if err != nil {
+		m.logf("sessiondrv: interrupt recovery bring-up FAILED ws=%s: %v — the turn in flight cannot be reached", workspace, err)
+		return nil, err
+	}
+	m.logf("sessiondrv: interrupt recovery brought up ws=%s session=%s; delivering the stop", workspace, d.sessionID)
+	return d, nil
 }
 
 // noteUserInterrupt applies a user-commanded stop's consequences from the

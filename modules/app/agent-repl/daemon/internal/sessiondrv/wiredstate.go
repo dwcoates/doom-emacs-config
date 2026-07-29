@@ -134,14 +134,21 @@ func (m *Manager) onLinkLost(workspace, sessionID string, cause error) {
 // definition still perfectly usable.
 var ErrNotSettled = errors.New("sessiondrv: the workspace has not settled; refusing to hibernate it")
 
+// redStates are the resolved states that mean A TURN IS IN FLIGHT: `thinking`
+// plus the two context cuts, which differ from it only in WHAT the agent is busy
+// with. All three make one claim, so all three are treated as one fact here.
+var redStates = map[frontendv1.RenderState]bool{
+	frontendv1.RenderState_RENDER_STATE_THINKING:   true,
+	frontendv1.RenderState_RENDER_STATE_CLEARING:   true,
+	frontendv1.RenderState_RENDER_STATE_COMPACTING: true,
+}
+
 // unsettledStates are the resolved states that mean the workspace is not done
 // working, keyed by RenderState so the check reads off the SSM's own verdict
 // rather than re-deriving anything.
 //
-// THE RED BAND, because each of the three is a turn in flight: `thinking` plus
-// the two context cuts, which differ from it only in WHAT the agent is busy
-// with. Hibernating any of them SIGTERMs a shim mid-turn and throws the work
-// away.
+// THE RED BAND, because each of those is a turn in flight, and hibernating one
+// SIGTERMs a shim mid-turn and throws the work away.
 //
 // AND PURPLE, which is the less obvious half. `vendor_blocked` is a turn OUTCOME
 // rather than a live turn, so nothing is running — but it is a report the user
@@ -149,15 +156,19 @@ var ErrNotSettled = errors.New("sessiondrv: the workspace has not settled; refus
 // tell them something needs their attention. Reaping the session under it
 // replaces that report with a teal tab claiming everything is fine and asleep,
 // which is the exact opposite of what the purple was saying.
-var unsettledStates = map[frontendv1.RenderState]bool{
-	frontendv1.RenderState_RENDER_STATE_THINKING:       true,
-	frontendv1.RenderState_RENDER_STATE_CLEARING:       true,
-	frontendv1.RenderState_RENDER_STATE_COMPACTING:     true,
-	frontendv1.RenderState_RENDER_STATE_VENDOR_BLOCKED: true,
-	// DEPRECATED upstream and no longer resolved, but still refused: an older
-	// daemon's log can resolve it, and it always meant what vendor_blocked means.
-	frontendv1.RenderState_RENDER_STATE_STOP_FAILED: true,
-}
+var unsettledStates = func() map[frontendv1.RenderState]bool {
+	m := map[frontendv1.RenderState]bool{
+		frontendv1.RenderState_RENDER_STATE_VENDOR_BLOCKED: true,
+		// DEPRECATED upstream and no longer resolved, but still refused: an older
+		// daemon's log can resolve it, and it always meant what vendor_blocked
+		// means.
+		frontendv1.RenderState_RENDER_STATE_STOP_FAILED: true,
+	}
+	for state := range redStates {
+		m[state] = true
+	}
+	return m
+}()
 
 // refuseUnsettledHibernation returns ErrNotSettled when the workspace's resolved
 // state says it is still working, loud-logging the refusal.

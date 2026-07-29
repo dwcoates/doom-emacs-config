@@ -2,9 +2,14 @@ package sessiondrv
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"strings"
+	"sync"
 	"testing"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
+	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 )
 
 // --- helpers ----------------------------------------------------------------
@@ -427,5 +432,211 @@ func TestTurnActiveOnAnUndrivenWorkspaceIsAnError(t *testing.T) {
 	// Assert.
 	if err == nil {
 		t.Fatal("want an error for a workspace with no live session")
+	}
+}
+
+// --- recovering a stop for a turn whose driver went away --------------------
+//
+// A state that should not exist: `hibernate()` refuses any workspace that has not
+// settled, so a live turn with no driver behind it means some writer closed the
+// axis behind work in flight. The user is looking at a tab that says nothing is
+// happening, pressing stop on it, and the old behavior answered with a nack about
+// the interrupt that said nothing about the turn still burning tokens.
+
+// undrivenHarness returns a harness whose workspace has no live driver, plus the
+// applier whose resolved state the recovery reads.
+func undrivenHarness(t *testing.T) *queueHarness {
+	t.Helper()
+	h := newQueueHarness(t, nil)
+	// Evict the driver WITHOUT hibernating: the point is a workspace nothing is
+	// driving, arrived at by the same shape as the writer bug this recovers from.
+	h.m.mu.Lock()
+	delete(h.m.byWS, "ws")
+	h.m.mu.Unlock()
+	return h
+}
+
+func TestInterruptBringsUpAWorkspaceWhoseTurnOutlivedItsDriver(t *testing.T) {
+	// Arrange — no driver, but the log still shows a turn in flight.
+	h := undrivenHarness(t)
+	h.applier.setCurrent("ws", &frontendv1.WorkspaceState{
+		State:      frontendv1.RenderState_RENDER_STATE_HIBERNATED,
+		TurnActive: true,
+	})
+
+	// Act.
+	err := h.interrupt()
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Interrupt = %v, want the bring-up paid and the stop delivered", err)
+	}
+	if _, err := h.m.existing("ws"); err != nil {
+		t.Fatalf("the workspace has no driver after the recovery: %v", err)
+	}
+}
+
+// THE ORDER IS BRING UP, THEN INTERRUPT, which is the order the user asked for:
+// the stream is re-established first, so the stop's consequences flow to a
+// frontend that can see them the moment it lands.
+func TestInterruptRecoveryStopsTheTurnAfterBringingItUp(t *testing.T) {
+	// Arrange.
+	h := undrivenHarness(t)
+	h.applier.setCurrent("ws", &frontendv1.WorkspaceState{
+		State:      frontendv1.RenderState_RENDER_STATE_HIBERNATED,
+		TurnActive: true,
+	})
+
+	// Act.
+	if err := h.interrupt(); err != nil {
+		t.Fatalf("Interrupt: %v", err)
+	}
+
+	// Assert — the freshly brought-up client actually received the stop.
+	d := h.driver()
+	fc, ok := d.client.(*fakeClient)
+	if !ok {
+		t.Fatalf("driver client is %T, want the fake", d.client)
+	}
+	if got := fc.interruptCount(); got != 1 {
+		t.Fatalf("interrupts = %d, want 1 — the recovery brought the session up but never delivered the stop", got)
+	}
+}
+
+// A RED resolved state recovers too, for a driverless workspace whose log never
+// received the hibernation row at all. `turn_active` is the discriminator that
+// catches the teal case (teal outranks the agent axis, so the violated state
+// resolves `hibernated` and never reads red), and this is the other direction.
+func TestInterruptRecoversAWorkspaceStillReadingRed(t *testing.T) {
+	// Arrange — no driver, and the resolved state is the turn itself.
+	h := undrivenHarness(t)
+	h.applier.setCurrent("ws", &frontendv1.WorkspaceState{State: frontendv1.RenderState_RENDER_STATE_THINKING})
+
+	// Act.
+	err := h.interrupt()
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Interrupt = %v, want the stop delivered to the turn the log still shows", err)
+	}
+}
+
+// The recovery is announced as an INVARIANT VIOLATION, never silently. A bring-up
+// nobody asked for, paid on the way to a stop, is exactly the kind of thing that
+// must be findable in a log afterwards.
+func TestInterruptRecoveryLogsTheInvariantViolation(t *testing.T) {
+	// Arrange.
+	var mu sync.Mutex
+	var lines []string
+	h := newQueueHarnessWithPusher(t, nil, nil, func(format string, args ...any) {
+		mu.Lock()
+		defer mu.Unlock()
+		lines = append(lines, fmt.Sprintf(format, args...))
+	})
+	h.m.mu.Lock()
+	delete(h.m.byWS, "ws")
+	h.m.mu.Unlock()
+	h.applier.setCurrent("ws", &frontendv1.WorkspaceState{
+		State:      frontendv1.RenderState_RENDER_STATE_HIBERNATED,
+		TurnActive: true,
+	})
+
+	// Act.
+	if err := h.interrupt(); err != nil {
+		t.Fatalf("Interrupt: %v", err)
+	}
+
+	// Assert.
+	mu.Lock()
+	defer mu.Unlock()
+	for _, l := range lines {
+		if strings.Contains(l, "INVARIANT VIOLATION RECOVERY") {
+			return
+		}
+	}
+	t.Fatalf("the recovery bring-up was not announced: %v", lines)
+}
+
+// A SETTLED workspace keeps the ORIGINAL error. Paying a ~500MB bring-up and a
+// handshake to deliver a stop to a session with nothing running is a worse answer
+// than the honest refusal, so an interrupt must never spuriously spawn a shim to
+// stop nothing.
+func TestInterruptOnASettledHibernatedWorkspaceKeepsTheError(t *testing.T) {
+	// Arrange — asleep after a clean turn: no driver, and nothing to stop.
+	h := undrivenHarness(t)
+	h.applier.setCurrent("ws", &frontendv1.WorkspaceState{
+		State: frontendv1.RenderState_RENDER_STATE_HIBERNATED,
+	})
+
+	// Act.
+	err := h.interrupt()
+
+	// Assert.
+	if !errors.Is(err, ErrNoLiveDriver) {
+		t.Fatalf("Interrupt on a settled hibernated workspace = %v, want ErrNoLiveDriver", err)
+	}
+	if _, existsErr := h.m.existing("ws"); existsErr == nil {
+		t.Fatal("the interrupt spawned a shim to stop nothing")
+	}
+}
+
+// A workspace the log knows NOTHING about keeps the original error too: there is
+// no positive evidence of a turn, and the recovery acts only on evidence.
+func TestInterruptOnAnUnknownWorkspaceKeepsTheError(t *testing.T) {
+	// Arrange — no driver, no resolved state at all.
+	h := undrivenHarness(t)
+
+	// Act.
+	err := h.interrupt()
+
+	// Assert.
+	if !errors.Is(err, ErrNoLiveDriver) {
+		t.Fatalf("Interrupt on an unknown workspace = %v, want ErrNoLiveDriver", err)
+	}
+}
+
+// A STATE READ FAILURE keeps the original error. The absent driver is a fact we
+// already have; the recovery is a discretionary extra needing positive evidence,
+// and spawning a shim on an unreadable log would be acting on a guess.
+func TestInterruptKeepsTheErrorWhenTheStateReadFails(t *testing.T) {
+	// Arrange.
+	h := undrivenHarness(t)
+	h.applier.reconcMutex.Lock()
+	h.applier.currentErr = errors.New("the state log is unreadable")
+	h.applier.reconcMutex.Unlock()
+
+	// Act.
+	err := h.interrupt()
+
+	// Assert.
+	if !errors.Is(err, ErrNoLiveDriver) {
+		t.Fatalf("Interrupt with an unreadable state = %v, want ErrNoLiveDriver", err)
+	}
+}
+
+// THE INTERJECT PATH IS STRUCTURALLY SEPARATE and must stay that way. The queue
+// calls d.client.Interrupt DIRECTLY, so it reaches none of this — no recovery, no
+// window, no turn outcome, no pause — by construction rather than by remembering
+// to pass a flag. A queue that could trigger a bring-up on its own machinery stop
+// would spawn shims behind the user's back.
+func TestTheInterjectStopDoesNotRouteThroughTheRecovery(t *testing.T) {
+	// Arrange — an undriven workspace whose log shows a turn in flight, which is
+	// exactly the shape the user-commanded path recovers from.
+	h := undrivenHarness(t)
+	h.applier.setCurrent("ws", &frontendv1.WorkspaceState{
+		State:      frontendv1.RenderState_RENDER_STATE_HIBERNATED,
+		TurnActive: true,
+	})
+
+	// Act — the queue's own interject sequence, reached the way the frontend
+	// reaches it, which resolves its driver through the UNRECOVERED m.existing.
+	err := h.m.ForceQueueEntry("ws", "any-entry")
+
+	// Assert — it refuses rather than bringing anything up.
+	if err == nil {
+		t.Fatal("the interject path was served through a recovery bring-up; it must reach the live driver or nothing")
+	}
+	if _, existsErr := h.m.existing("ws"); existsErr == nil {
+		t.Fatal("the interject stop spawned a shim; only the user-commanded path may")
 	}
 }
