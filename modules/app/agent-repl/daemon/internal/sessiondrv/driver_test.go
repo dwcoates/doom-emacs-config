@@ -53,7 +53,11 @@ type fakeSpawner struct {
 	mu      sync.Mutex
 	calls   []string
 	stopped []string
-	err     error
+	// stopPIDs records the announced pid each StopShim was handed (0 = none).
+	stopPIDs []int32
+	err      error
+	// stopErr, when set, makes every stop fail.
+	stopErr error
 }
 
 func (s *fakeSpawner) EnsureShim(_ context.Context, sessionID string) error {
@@ -63,11 +67,20 @@ func (s *fakeSpawner) EnsureShim(_ context.Context, sessionID string) error {
 	return s.err
 }
 
-func (s *fakeSpawner) StopShim(sessionID string) error {
+func (s *fakeSpawner) StopShim(sessionID string, hintPID int32) error {
 	s.mu.Lock()
 	s.stopped = append(s.stopped, sessionID)
+	s.stopPIDs = append(s.stopPIDs, hintPID)
 	s.mu.Unlock()
-	return nil
+	return s.stopErr
+}
+
+// stopHints returns the announced pids each stop was told about, so a test can
+// prove the surviving-shim handle actually reaches the spawner.
+func (s *fakeSpawner) stopHints() []int32 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]int32(nil), s.stopPIDs...)
 }
 
 // stubSource satisfies the required ConnSource. The fake clients never use it

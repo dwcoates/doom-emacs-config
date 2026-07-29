@@ -69,6 +69,26 @@ write_built_sha() {
     printf '%s\n' "$value" > "$stamp"
 }
 
+# write_built_sha_value STAMP_FILE VALUE — record an ALREADY-COMPUTED revision.
+#
+# This exists so a build that BAKES its revision into the artifact can stamp the
+# very same value it baked, instead of computing the revision a second time and
+# hoping the two agree. They can genuinely disagree: `source_revision` reports
+# `-dirty` off a live working tree, which a build can enter and leave.
+#
+# An empty VALUE means "no revision", and any existing stamp is removed for the
+# same reason write_built_sha removes one — an old stamp now describes a
+# revision the artifact is not built from.
+write_built_sha_value() {
+    local stamp="$1" value="$2"
+    if [ -z "$value" ]; then
+        rm -f "$stamp"
+        return 0
+    fi
+    mkdir -p "$(dirname "$stamp")"
+    printf '%s\n' "$value" > "$stamp"
+}
+
 # read_built_sha STAMP_FILE — echo the recorded revision, or return 1 when the
 # stamp is missing or empty.
 read_built_sha() {

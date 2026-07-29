@@ -1140,3 +1140,70 @@ func TestSubmitPromptAcceptsAnAbsoluteWorkspaceKey(t *testing.T) {
 		t.Fatalf("prompted = %v, want the cwd-keyed prompt forwarded", p.prompted)
 	}
 }
+
+// --- restartSession -------------------------------------------------------
+//
+// The command is SYNCHRONOUS on purpose: the ack is the user's only report of
+// whether their session came back, so a failed restart must nack.
+
+type fakeRestarter struct {
+	calls []string
+	err   error
+}
+
+func (f *fakeRestarter) RestartSession(_ context.Context, workspace string) error {
+	f.calls = append(f.calls, workspace)
+	return f.err
+}
+
+func TestCommandHandlerRestartSessionRoutesToTheRestarter(t *testing.T) {
+	// Arrange.
+	r := &fakeRestarter{}
+	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil, nil,
+		CommandHandlerConfig{Restarts: r})
+	if err != nil {
+		t.Fatalf("newCommandHandler: %v", err)
+	}
+
+	// Act.
+	if err := h.RestartSession(context.Background(), "/w", "r1", &frontendv1.RestartSessionCmd{}); err != nil {
+		t.Fatalf("RestartSession: %v", err)
+	}
+
+	// Assert.
+	if len(r.calls) != 1 || r.calls[0] != "/w" {
+		t.Fatalf("restart calls = %v, want exactly one for /w", r.calls)
+	}
+}
+
+func TestCommandHandlerRestartSessionNacksAFailedRestart(t *testing.T) {
+	// Arrange.
+	r := &fakeRestarter{err: errors.New("the shim never came back")}
+	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil, nil,
+		CommandHandlerConfig{Restarts: r})
+	if err != nil {
+		t.Fatalf("newCommandHandler: %v", err)
+	}
+
+	// Act.
+	err = h.RestartSession(context.Background(), "/w", "r1", &frontendv1.RestartSessionCmd{})
+
+	// Assert — silence here would tell the user a dead workspace came back.
+	if err == nil {
+		t.Fatal("a failed restart returned ok")
+	}
+}
+
+func TestCommandHandlerRestartSessionUnconfiguredErrors(t *testing.T) {
+	// Arrange — no restarter wired.
+	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("newCommandHandler: %v", err)
+	}
+
+	// Act / Assert — an unconfigured capability is a loud failing ack, never a
+	// success-shaped no-op.
+	if err := h.RestartSession(context.Background(), "/w", "r1", &frontendv1.RestartSessionCmd{}); err == nil {
+		t.Fatal("an unwired restart capability reported success")
+	}
+}

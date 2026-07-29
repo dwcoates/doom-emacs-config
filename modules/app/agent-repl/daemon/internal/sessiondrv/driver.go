@@ -90,10 +90,18 @@ type SessionRegistrar interface {
 type Spawner interface {
 	EnsureShim(ctx context.Context, sessionID string) error
 	// StopShim asks the session's shim to stop cleanly (the daemon SIGTERMs
-	// its child shim on hibernation, §4.4 redefined). A shim the daemon never
-	// spawned (a reattached one that outlived a prior daemon) is a no-op. A
-	// stop failure is surfaced, never swallowed.
-	StopShim(sessionID string) error
+	// its child shim on hibernation, §4.4 redefined). A stop failure is
+	// surfaced, never swallowed.
+	//
+	// hintPID is the pid the shim announced on its ShimHello, or 0 when this
+	// daemon has never seen one. It is what makes a shim the daemon did NOT
+	// spawn stoppable at all: a survivor of a previous daemon leaves no
+	// process handle behind, so StopShim was a permanent no-op for exactly the
+	// shims a restart-driven bounce needs to reach. It is consulted ONLY when
+	// there is no handle, and only while the connection that carried it is
+	// live — which is what makes killing by pid safe here rather than a
+	// pid-reuse hazard.
+	StopShim(sessionID string, hintPID int32) error
 }
 
 // SessionLocator maps a workspace to the live session id bound to it. The
@@ -155,6 +163,15 @@ type Config struct {
 	// must equal the shim's ("1").
 	DaemonVersion   string
 	ProtocolVersion string
+	// ShimBuildSHA reports the build identity of the shim bundle this daemon
+	// would spawn TODAY — the `dist/.built-sha` stamp beside the entrypoint.
+	// A shim announcing a different identity is running superseded code and is
+	// bounced onto the current bundle (buildrefresh.go).
+	//
+	// Nil, or an empty return, disables the refresh: an unknown identity is
+	// not a mismatch, and treating it as one turns a missing stamp into a
+	// bounce loop.
+	ShimBuildSHA func() string
 	// Registrar persists SessionStarted.vendor_session_id (the CLI session uuid)
 	// through to the durable registry record; nil disables the write.
 	Registrar SessionRegistrar
@@ -196,9 +213,20 @@ type Manager struct {
 	mu       sync.Mutex
 	byWS     map[string]*driven // workspace -> live driver
 	lastCSID map[string]string  // session id -> last-persisted claude session uuid
-	closed   bool
-	rootCtx  context.Context
-	rootStop context.CancelFunc
+	// shimPID is the pid each session's shim announced on its ShimHello. It is
+	// the ONLY way to stop a shim this daemon did not spawn, and it is kept in
+	// memory rather than persisted deliberately: it is trustworthy exactly
+	// while the connection that carried it is live, and a pid outliving its
+	// connection is a pid-reuse hazard rather than a stop handle.
+	shimPID map[string]int32
+	// buildBounced remembers the sessions already bounced for a stale bundle,
+	// so a shim that comes back still reporting a mismatched build (a bundle
+	// whose identity cannot move, a stamp that is wrong) is loud ONCE instead
+	// of bouncing forever.
+	buildBounced map[string]bool
+	closed       bool
+	rootCtx      context.Context
+	rootStop     context.CancelFunc
 	// exits counts every driver-exit goroutine (the tail of bringUp's `go
 	// func`), so Close can JOIN them. Unjoined, that tail — which drains the
 	// queue, publishes the empty view, and persists queued_prompts through the
@@ -324,15 +352,17 @@ func New(cfg Config) (*Manager, error) {
 		now = func() int64 { return time.Now().UnixMilli() }
 	}
 	return &Manager{
-		cfg:       cfg,
-		logf:      logf,
-		reg:       newPermRegistry(logf),
-		newClient: newClient,
-		now:       now,
-		byWS:      make(map[string]*driven),
-		lastCSID:  make(map[string]string),
-		rootCtx:   rootCtx,
-		rootStop:  rootStop,
+		cfg:          cfg,
+		logf:         logf,
+		reg:          newPermRegistry(logf),
+		newClient:    newClient,
+		now:          now,
+		byWS:         make(map[string]*driven),
+		lastCSID:     make(map[string]string),
+		shimPID:      make(map[string]int32),
+		buildBounced: make(map[string]bool),
+		rootCtx:      rootCtx,
+		rootStop:     rootStop,
 	}, nil
 }
 
@@ -1083,7 +1113,7 @@ func (m *Manager) HibernateSession(workspace, sessionID string) error {
 		m.mu.Unlock()
 		m.logf("sessiondrv: session-scoped hibernate ws=%q requested=%s live=%s; preserving live driver and stopping requested shim only",
 			workspace, sessionID, live)
-		return m.cfg.Spawner.StopShim(sessionID)
+		return m.cfg.Spawner.StopShim(sessionID, m.shimPIDFor(sessionID))
 	}
 	if ok {
 		delete(m.byWS, workspace)
@@ -1102,7 +1132,7 @@ func (m *Manager) HibernateSession(workspace, sessionID string) error {
 	if ok {
 		m.noteWiring(workspace, ssm.WiringDormant, "hibernate_session")
 	}
-	return m.cfg.Spawner.StopShim(sessionID)
+	return m.cfg.Spawner.StopShim(sessionID, m.shimPIDFor(sessionID))
 }
 
 // hibernate is the shared teardown. An empty wantSession means "whichever
@@ -1125,7 +1155,7 @@ func (m *Manager) hibernate(workspace, wantSession string) error {
 	d.cancel() // stop consuming; the shimclient Run ends
 	m.logf("sessiondrv: hibernating ws=%q session=%s (SIGTERM child shim)", workspace, d.sessionID)
 	m.noteWiring(workspace, ssm.WiringDormant, "hibernated")
-	return m.cfg.Spawner.StopShim(d.sessionID)
+	return m.cfg.Spawner.StopShim(d.sessionID, m.shimPIDFor(d.sessionID))
 }
 
 // bringUpTimeout bounds how long ensure waits for a spawned shim to connect
@@ -1347,7 +1377,7 @@ func (m *Manager) bringUp(workspace string) (*driven, error) {
 		// and its stop handle after the byWS eviction above. A non-current Run
 		// exit was initiated by a teardown that already owns StopShim.
 		if wasCurrent && !managerClosing {
-			if stopErr := m.cfg.Spawner.StopShim(sessionID); stopErr != nil {
+			if stopErr := m.cfg.Spawner.StopShim(sessionID, m.shimPIDFor(sessionID)); stopErr != nil {
 				m.logf("sessiondrv: session %s unexpected driver-exit shim stop FAILED ws=%q run_err=%v: %v",
 					sessionID, workspace, runErr, stopErr)
 			} else {
@@ -1460,6 +1490,9 @@ func (m *Manager) armMetaprompt(d *driven, ss *corev1.SessionStarted) {
 //   - driven.metaCwd / backfill / systemInit / queue entries — carry no seq at
 //     all; a rotation does not change what they describe.
 func (m *Manager) onHandshake(workspace, sessionID string, hello *corev1.ShimHello) {
+	// The pid rides EVERY hello, so a reconnect refreshes it and a bounce onto
+	// a fresh process never carries the retired one's number forward.
+	m.noteShimPID(sessionID, hello.GetPid())
 	csid := hello.GetVendorSessionId()
 	if csid == "" {
 		// A fresh session whose shim has not learned its uuid yet. Announcing
@@ -1576,6 +1609,13 @@ func (m *Manager) onConnected(workspace, sessionID string, hello *corev1.ShimHel
 	// store producer link up, standing subscription open. It is the ONE opening
 	// edge of the axis, and nothing weaker may write it.
 	m.noteWiring(workspace, ssm.WiringWired, "shim_ready")
+	// The pid and the build identity are BOTH only trustworthy on a live
+	// connection, and this is the moment the connection is proven usable. A
+	// shim running a superseded bundle is bounced from here onto the current
+	// one (buildrefresh.go); everything below still runs, because the bounce is
+	// asynchronous and this connection remains the live one until it lands.
+	m.noteShimPID(sessionID, hello.GetPid())
+	m.refreshStaleShim(workspace, sessionID, hello.GetBuildSha())
 	if hello.GetTurnInFlight() {
 		m.logf("sessiondrv: reattached mid-turn ws=%s session=%s (turn_in_flight); SSM re-derives from replayed events", workspace, sessionID)
 	}

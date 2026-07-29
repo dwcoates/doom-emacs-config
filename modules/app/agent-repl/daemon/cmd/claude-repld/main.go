@@ -412,7 +412,11 @@ func main() {
 		// The prompt queue's classifier (E4). A queued prompt is judged by a
 		// cheap headless run under the SESSION's own account, so the
 		// classification cannot land on a different account's quota or config.
-		Classifier: sessiondrv.NewCLIClassifier("", log.Printf),
+		// THE STALE-SHIM REFRESH's other half: the build identity of the bundle
+		// this daemon would spawn today, read fresh on every comparison so a
+		// deploy that lands WHILE the daemon runs is seen without a restart.
+		ShimBuildSHA: shimBuildSHA(*shimScript),
+		Classifier:   sessiondrv.NewCLIClassifier("", log.Printf),
 		SessionConfigDir: func(sessionID string) string {
 			rec, ok := sessionRegistry.Get(sessionID)
 			if !ok {
@@ -475,6 +479,7 @@ func main() {
 		Prompts:           driver,
 		Turns:             driver,
 		Health:            driver,
+		Restarts:          driver,
 		DaemonHealth:      ready,
 		MergeDirs:         pendingMergeDirs{},
 		Lifecycle:         opener,
@@ -722,5 +727,28 @@ func pumpAnalystOutput(out io.Reader) {
 	}
 	if err := scanner.Err(); err != nil {
 		log.Printf("claude-repld: remediation output: %v", err)
+	}
+}
+
+// shimBuildSHA returns a reader for the build identity of the shim bundle at
+// shimScript: the `.built-sha` stamp bin/build-frontend.sh writes beside it
+// from the very value it injected into the bundle.
+//
+// It is read PER CALL rather than captured at boot, because a deploy can land
+// while this daemon runs — that is the ordinary case, since build-frontend
+// rebuilds before the bounce — and a boot-time snapshot would compare every
+// surviving shim against the bundle that was current when the daemon started.
+//
+// An unreadable or absent stamp reports "", which the driver reads as UNKNOWN
+// and never as a mismatch: a checkout with no stamp must not bounce every shim
+// it meets.
+func shimBuildSHA(shimScript string) func() string {
+	stamp := filepath.Join(filepath.Dir(shimScript), ".built-sha")
+	return func() string {
+		b, err := os.ReadFile(stamp)
+		if err != nil {
+			return ""
+		}
+		return strings.TrimSpace(string(b))
 	}
 }
