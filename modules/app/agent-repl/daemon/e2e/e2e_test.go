@@ -470,6 +470,8 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 		return func() error { return proc.Terminate() }, nil
 	}
 	e2eSeqStore := server.NewRegistrySeqStore(reg, t.Logf)
+	modelCatalogs := server.NewSessionModelCatalogs()
+	registrar := &server.RegistryRegistrar{Reg: reg, Logf: t.Logf, ModelCatalogs: modelCatalogs}
 	// ONE progress resolver, shared by the driver (which feeds it interrupts,
 	// permission and queue counts) and WireAgentShim (which fans its views out
 	// to frontends) — the same single-instance wiring main.go does. Two
@@ -491,7 +493,8 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 		SeqStore:          e2eSeqStore,
 		ClearCompactStore: e2eSeqStore,
 		PermissionModes:   server.NewRegistryModeStore(reg),
-		Registrar:         &server.RegistryRegistrar{Reg: reg, Logf: t.Logf},
+		Registrar:         registrar,
+		ModelCatalogs:     registrar,
 		DaemonVersion:     "0.1.0-e2e",
 		ProtocolVersion:   "1",
 		ShimBuildSHA:      func() string { return tuning.currentBuildSHA },
@@ -532,6 +535,7 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 	srv := server.New(server.Config{
 		DaemonVersion:  "0.1.0-e2e",
 		Registry:       reg,
+		ModelCatalogs:  modelCatalogs,
 		Driver:         driver,
 		SSM:            ssmMgr,
 		Frontend:       agentShim.Server,

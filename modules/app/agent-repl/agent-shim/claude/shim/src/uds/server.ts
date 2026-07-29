@@ -237,15 +237,16 @@ export class SessionServer {
   }
 
   /** Publish the SDK's selectable-model menu to the attached daemon. */
-  sendModelCatalog(catalog: ModelCatalog): void {
+  sendModelCatalog(catalog: ModelCatalog): boolean {
     if (!this.isConnected()) {
-      LOGGER.log({ agent_repl_session_id: this.opts.sessionId, model_count: catalog.models.length },
+      LOGGER.log({ level: "error", agent_repl_session_id: this.opts.sessionId, model_count: catalog.models.length },
         "no daemon attached; model catalog not forwarded");
-      return;
+      return false;
     }
     this.conn!.send(ModelCatalogSchema, catalog);
     LOGGER.log({ agent_repl_session_id: this.opts.sessionId, model_count: catalog.models.length },
       "model catalog forwarded to daemon");
+    return true;
   }
 
   /**
