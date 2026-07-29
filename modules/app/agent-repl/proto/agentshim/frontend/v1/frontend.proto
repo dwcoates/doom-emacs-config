@@ -37,17 +37,25 @@ option go_package = "agentrepl/proto/agentshim/frontend/v1;frontendv1";
 
 // The closed render-state vocabulary (SSM-resolved).
 //
-// Every state maps onto ONE of five colors, and the colors are a promise to
+// Every state maps onto ONE of six colors, and the colors are a promise to
 // the user about what they can do rather than a description of daemon
 // internals. Frontends key their render tables on the color, so the tab-bar,
 // the sidebar dots, and the progress footer can never disagree:
 //
-//   BLUE   INIT, DORMANT, DEAD, DEGRADED — the route Emacs→daemon→shim→SDK is
-//          compromised on OUR side, or there is no live backend session for
-//          this workspace at all. A bring-up in flight (INIT), a workspace
-//          nothing is wired to (DORMANT), a dead or unspawned shim, a store
-//          outage, or a failed backfill. Blue is the honest state whenever
-//          green's promise cannot be kept.
+//   BLUE   INIT, SEVERED, DEAD, DEGRADED — the route Emacs→daemon→shim→SDK is
+//          compromised on OUR side, and there is EVIDENCE of the breakage. A
+//          bring-up in flight (INIT), a bring-up that failed or a driver that
+//          died on a terminal protocol error (SEVERED), a dead or unspawned
+//          shim, a store outage, or a failed backfill. Blue is the honest
+//          state whenever green's promise cannot be kept AND something is
+//          actually wrong.
+//   TEAL   HIBERNATED — nothing is wired, and nothing is wrong. We put the
+//          session to sleep on purpose to reclaim its ~500MB, or nothing has
+//          ever been wired to this workspace. It makes the SAME actionability
+//          claim blue does (you cannot interact without a bring-up) and the
+//          REASON is benign, which is exactly why it is not blue: blue's job
+//          is to mean "something is broken", and a hibernation rendered blue
+//          spent that meaning on the most ordinary event in the system.
 //   PURPLE VENDOR_BLOCKED — the last turn ended AT THE VENDOR or on the
 //          ACCOUNT. Auth, usage limit, persistent 4xx/5xx, or any other
 //          abnormal turn-CONCLUDING error. It is a REPORT of that
@@ -63,11 +71,12 @@ option go_package = "agentrepl/proto/agentshim/frontend/v1;frontendv1";
 //          GREEN: the agent is ready for the user to view the response and
 //          answer.
 //
-// A WORKSPACE'S COLOR IS CONNECTION TRUTH. Blue means there is no live
-// backend session for this workspace. Every non-blue color is a GUARANTEE
-// that the session substrate is fully wired — shim live, handshake complete,
-// store link settled — so selecting a non-blue workspace involves no
-// connection bootstrapping whatsoever.
+// A WORKSPACE'S COLOR IS CONNECTION TRUTH. Blue and teal both mean there is
+// no live backend session for this workspace; they differ only on whether
+// that is a fault or a choice. Every OTHER color is a GUARANTEE that the
+// session substrate is fully wired — shim live, handshake complete, store
+// link settled — so selecting a green, red, yellow or purple workspace
+// involves no connection bootstrapping whatsoever.
 //
 // Precedence is blue > purple > red > yellow > green, resolved in the SSM's
 // SQL rank table (daemon/internal/ssm/resolve.go) rather than any Go or
@@ -120,21 +129,48 @@ enum RenderState {
   // somehow open, clearing wins.
   RENDER_STATE_CLEARING = 18;
   RENDER_STATE_COMPACTING = 19;
-  // Additive: NOT WIRED, and not coming up either — a hibernated workspace,
-  // one that has never been opened, or every workspace of a daemon that has
-  // just restarted.
+  // NOT WIRED, and the SUBSTRATE IS BROKEN. A bring-up that could not be
+  // completed, or a driver whose `client.Run` returned a terminal protocol
+  // error.
   //
   // It is the resting half of the connection-truth law above. INIT already
   // says "a bring-up is in flight"; this says the opposite, that nothing is
   // in flight and nothing is wired, which INIT's spinner would misreport as
   // work in progress. Both are BLUE — the claim about what the user can do
-  // is identical — and the WORD and the (non-spinning) glyph are the whole
-  // distinction, exactly as CLEARING and COMPACTING split THINKING.
+  // is identical, and so is the claim that something on our side went wrong —
+  // and the WORD and the (non-spinning) glyph are the whole distinction,
+  // exactly as CLEARING and COMPACTING split THINKING.
   //
-  // Nothing about the agent shows through it. A dormant workspace may have a
-  // `thinking` row from the turn it was hibernated during; reporting that
+  // Nothing about the agent shows through it. A severed workspace may have a
+  // `thinking` row from the turn it was driving when it broke; reporting that
   // would advertise an agent nobody is connected to.
-  RENDER_STATE_DORMANT = 20;
+  //
+  // KEEPS FIELD NUMBER 20, which it held while it was named
+  // RENDER_STATE_DORMANT. The rename is deliberately wire-compatible: an
+  // append-only state log written by an older daemon still carries the literal
+  // text `dormant`, and the SSM resolves that alias onto this state forever.
+  // What changed is only that the benign half of the old DORMANT — the
+  // deliberate hibernation, the never-wired workspace — moved to HIBERNATED
+  // below, so that BLUE finally means "something is actually wrong".
+  RENDER_STATE_SEVERED = 20;
+  // Additive: NOT WIRED, and NOTHING IS WRONG — the session was deliberately
+  // put to sleep to reclaim its memory, or nothing has ever been wired to this
+  // workspace.
+  //
+  // TEAL, and the reason it is not blue is the whole point of the split. The
+  // old single DORMANT state conflated "asleep on purpose" with "the backend
+  // is broken", so the most ordinary event in the system — the idle sweeper
+  // reclaiming ~500MB from a workspace nobody has touched for an hour —
+  // rendered identically to a dead shim. A color that fires on both cannot
+  // mean either.
+  //
+  // Its PRECEDENCE is nonetheless the blue band's, NOT green's: it makes the
+  // same actionability claim (you cannot interact without paying a bring-up),
+  // and only the reason is benign. Ranking it below green would let a stale
+  // `thinking` row from the turn a workspace was hibernated after mask a
+  // workspace that is genuinely asleep. See the SSM's `prec` table, where it
+  // sits at 15 — directly below the blue band and above purple's 20.
+  RENDER_STATE_HIBERNATED = 21;
 }
 
 message FrontendFrame {
@@ -246,7 +282,7 @@ message SessionView {
   // workspace already up?" from those sees a non-terminal, fully-backfilled
   // record and concludes YES against a daemon that has no driver for it at
   // all. Emacs's switch-ensure did precisely that, so after a daemon restart
-  // switching to a dormant workspace skipped its openWorkspace and the
+  // switching to an unwired workspace skipped its openWorkspace and the
   // workspace never bootstrapped.
   //
   // The field had NO producer before that bug; the name always meant this.
@@ -718,8 +754,8 @@ message ShutdownCmd {
 // rebuilding under a conversation worth keeping.
 //
 // A workspace with no live session is a loud nack; a workspace whose session is
-// merely dormant is brought up, because "restart" and "start" are the same
-// request when nothing is running.
+// merely hibernated or severed is brought up, because "restart" and "start" are
+// the same request when nothing is running.
 message RestartSessionCmd {}
 
 // Ask the daemon to assert that every boot-critical global dependency is

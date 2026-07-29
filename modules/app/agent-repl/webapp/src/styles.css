@@ -49,6 +49,16 @@
      (`agent-repl--color-init-blue'), so a starting workspace reads as one
      state across both renderers instead of red in one and blue in the other. */
   --init: #3366cc;
+  /* Hibernation: the same teal the Emacs tab-bar paints the hibernated state
+     (`agent-repl--color-hibernated-teal'), and the sixth color in the shared
+     vocabulary.
+     A single DORMANT state used to mean both "we put this session to sleep on
+     purpose to reclaim its ~500MB" and "the backend substrate is broken", so
+     the idle sweeper reclaiming memory from an untouched workspace rendered
+     exactly like a dead shim. A color that fires on both means neither, which
+     is why this is a hue of its own and not a shade of --init: the two states
+     WERE one, and a teal that reads as bluish re-merges them at a glance. */
+  --hibernated: #0d9488;
   /* Tool card titles: matches the Emacs modeline "Agent Input" ai-title
      purple (X11 medium purple); mid-lightness, so one shade reads fine
      in both themes. */
@@ -240,6 +250,8 @@
     --final-response: #4ade80;
     /* Brighter amber for the dark theme, as the other state borders lift. */
     --async: #fbbf24;
+    /* Brighter teal for the dark theme, for the same reason --async lifts. */
+    --hibernated: #2dd4bf;
     --blocked: #e879f9;
     --q-border: #facc15;
     --async-card: #09433b;
@@ -525,9 +537,16 @@ body::after {
 /* BLUE: a dead or never-started session is a compromised ROUTE, not a
    terminal outcome, so it wears the same blue as bring-up — without the
    breath, because nothing is in progress. */
-/* DORMANT: blue like init, and STILL — init pulses because a bring-up is in
-   flight, and dormant means nothing is. */
-#ws-sidebar .st-dormant { background: var(--init); }
+/* SEVERED: blue like init, and STILL — init pulses because a bring-up is in
+   flight, and a severed route means nothing is. Blue because it is the half of
+   the old DORMANT that really is evidence of breakage: a bring-up that could
+   not be completed, or a driver that died on a terminal protocol error. */
+#ws-sidebar .st-severed { background: var(--init); }
+/* HIBERNATED: TEAL, and still. The benign half — asleep on purpose, or never
+   wired at all. Its own hue rather than a shade of --init, because these two
+   states were ONE and painting them alike is exactly what spent blue's
+   meaning. */
+#ws-sidebar .st-hibernated { background: var(--hibernated); }
 #ws-sidebar .st-dead { background: var(--init); }
 #ws-sidebar .st-start-failed { background: var(--init); }
 #ws-sidebar .st-degraded { background: var(--init); }
@@ -2419,6 +2438,9 @@ pre {
 .pfooter-phase.retry { color: var(--retry); }
 .pfooter-phase.error { color: var(--err); }
 .pfooter-phase.ok { color: var(--ok); }
+/* TEAL, and pointedly not --err: a workspace asleep on purpose is not a fault,
+   and the word beside it is not something to act on. */
+.pfooter-phase.hibernated { color: var(--hibernated); }
 .pfooter-phase.muted { color: var(--muted); }
 
 /* The interrupt chip (I1): the outcome of the stop the user asked for, sitting

@@ -83,7 +83,8 @@ func evTaskEnded(sid string, seq uint64, taskID string, status corev1.TerminalSt
 //
 // The wiring is arrangement, not subject. It is sessiondrv's fact, produced off
 // the bring-up gate's own verdict, and until it stands the connection-truth law
-// holds every workspace `dormant` no matter what the agent reports — so a test
+// holds every workspace on the axis's closed half no matter what the agent
+// reports — so a test
 // about the agent axis, the context cuts, or the backfill cannot be asked at all
 // of an unwired workspace. Tests that are ABOUT the axis call ApplyWired
 // themselves, and openUnwiredTest exists for the ones that must start from
@@ -309,10 +310,10 @@ func TestPersistenceAcrossReopen(t *testing.T) {
 	// Assert, FIRST HALF: the WIRING did not survive. Nothing is connected to a
 	// daemon that has just started, and the connection-truth law makes that the
 	// only honest thing a restored tab can claim — so the restored workspace is
-	// dormant however green its log reads. Phase B's reattach sweep re-wires the
+	// asleep however green its log reads. Phase B's reattach sweep re-wires the
 	// working set; until then this is correct rather than merely tolerated.
-	if got := mustCurrent(t, m2, "ws1").State; got != frontendv1.RenderState_RENDER_STATE_DORMANT {
-		t.Fatalf("post-reopen state = %s, want DORMANT (nothing is wired to a fresh daemon)", renderName(got))
+	if got := mustCurrent(t, m2, "ws1").State; got != frontendv1.RenderState_RENDER_STATE_HIBERNATED {
+		t.Fatalf("post-reopen state = %s, want HIBERNATED (nothing is wired to a fresh daemon, and a fresh daemon is not a broken one)", renderName(got))
 	}
 	// The reopen restores silently — no transition line for the restore. Checked
 	// BEFORE the re-wire below, which is a real transition rather than a restore.
@@ -691,7 +692,7 @@ func TestMigrateAddsTaskIDToAV1Database(t *testing.T) {
 		t.Fatalf("Open a v1 db: %v", err)
 	}
 	t.Cleanup(func() { m.Close() })
-	// The Open marked the restored workspace dormant (nothing is wired to a
+	// The Open marked the restored workspace hibernated (nothing is wired to a
 	// daemon that has just started); the migration is what is under test.
 	wireAll(t, m, fakeResolver{"s1": "ws1"})
 

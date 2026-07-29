@@ -21,7 +21,7 @@ testing and coverage, and observability-gap reporting. Keep implementation
 mandates in the scoped `AGENTS.md` files and keep diagnostic recipes in the
 skill.
 
-## Purple means the vendor, blue means the local environment
+## Purple means the vendor, blue means the local environment, teal means nothing is wrong
 
 Every surface that carries color here — the Emacs tab-bar, the sidebar dots,
 the feed bubbles, the failure cards — splits the same way, and a new element
@@ -33,17 +33,38 @@ picks its hue from that split before it picks a shade:
   and the subagent chip (work the agent itself issued), the wash behind a
   compaction summary, and the arc drawn while a failed api request is being
   auto-retried.
-- **Blue: the local environment.** Everything on the Emacs→daemon→shim→store
-  route and the machine it runs on. `starting`, `dormant` (no session is wired
-  to the workspace), `dead`, `degraded` and `ERROR_CLASS_INTERNAL` (shim down,
-  store outage, a refused command), the backfill-failed gate, and the user's
-  own prompt bubble.
+- **Blue: the local environment, BROKEN.** Everything on the
+  Emacs→daemon→shim→store route and the machine it runs on, when there is
+  EVIDENCE something failed. `starting`, `severed` (a bring-up that could not be
+  completed, or a driver that died on a terminal protocol error), `dead`,
+  `degraded` and `ERROR_CLASS_INTERNAL` (shim down, store outage, a refused
+  command), the backfill-failed gate, and the user's own prompt bubble.
+- **Teal: nothing is wired, and nothing is wrong.** `hibernated` alone — a
+  session we SIGTERMed on purpose to reclaim its ~500MB, or a workspace nothing
+  has ever been wired to.
+
+  It is the correction to a conflation that cost blue its meaning. A single
+  `dormant` state used to say both "asleep by choice" and "the substrate is
+  broken", so the most routine event in the system — the idle sweeper reaping a
+  workspace nobody touched for an hour — painted a tab exactly like a dead shim
+  did. A user who watches every workspace go blue after an ordinary daemon
+  bounce learns to ignore blue, and then misses the one that is really severed.
+
+  Teal's PRECEDENCE is still the blue band's, not green's (rank 15, directly
+  below `starting` at 14 and above purple's 20): a teal workspace cannot be
+  interacted with until a bring-up is paid for, which is exactly the claim green
+  exists to deny. Only the reason is benign. Consequently a teal tab over a live
+  turn is unreachable by construction — `hibernate()` refuses a workspace that
+  is not settled — and anywhere it is detectable it is logged as an invariant
+  violation, never as expected.
 
 `proto/vocab/render-colors.json` is where the split is executable: a failure
 card takes its class's color from the same table the workspace dot takes, so a
 purple workspace can never be explained by a blue card or the reverse. Reach
-for a third hue only once you are sure the thing is neither side's — the tree
-carried three answers about one api failure before this rule existed.
+for a NEW hue only once you are sure the thing is neither side's — the tree
+carried three answers about one api failure before this rule existed, and teal
+was added only because one existing color was answering two incompatible
+questions.
 
 Within a hue the shade still carries meaning:
 
@@ -54,10 +75,11 @@ Within a hue the shade still carries meaning:
   session is the misread the two leans exist to prevent.
 - Blue is deliberately one color for every local fault. Which part of the route
   broke matters to whoever debugs it, not to the user reading a tab, so the
-  failure cards carry that distinction instead.
+  failure cards carry that distinction instead. What blue does NOT cover is the
+  absence of a fault, which is the teal split above.
 
 The merge lifecycle is outside the split by design: merge states wear glyphs
-rather than colors so they never spend one of the five, and the Recently Merged
+rather than colors so they never spend one of the six, and the Recently Merged
 disc borrows the `--info-agents` violet as a section tint, not as a claim about
 the vendor.
 

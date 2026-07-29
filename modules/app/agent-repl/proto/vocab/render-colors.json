@@ -5,7 +5,7 @@
     "mechanism that makes a divergence between the three fail loudly instead",
     "of quietly.",
     "",
-    "It pins WHICH of the five colors a state or an error class takes, not",
+    "It pins WHICH of the six colors a state or an error class takes, not",
     "what that color's value is: each renderer keeps its own hex, because a",
     "tab-bar background and a CSS dot legitimately want different shades of",
     "the same idea. What may never differ is the ASSIGNMENT — a workspace",
@@ -14,28 +14,47 @@
     "",
     "'none' is a real answer, not a gap. The merge states deliberately carry",
     "badges and glyphs instead of colors so they never spend one of the",
-    "five, and UNSPECIFIED is the absence of a verdict rather than a verdict",
-    "of its own."
+    "six, and UNSPECIFIED is the absence of a verdict rather than a verdict",
+    "of its own.",
+    "",
+    "TEAL IS THE SIXTH, and it exists because blue was carrying two",
+    "incompatible jobs. A single DORMANT state meant both 'we put this",
+    "session to sleep on purpose to reclaim ~500MB' and 'the backend",
+    "substrate is broken', so the most ordinary event in the system rendered",
+    "identically to a dead shim. HIBERNATED took the benign half, SEVERED",
+    "kept blue and the field number, and blue now means something is",
+    "actually wrong."
   ],
 
-  "colors": ["blue", "purple", "red", "yellow", "green"],
+  "colors": ["blue", "teal", "purple", "red", "yellow", "green"],
 
   "_precedence_comment": [
-    "The five-color precedence, strongest claim first. Each color is a",
+    "The six-color precedence, strongest claim first. Each color is a",
     "strictly stronger claim about what the user CANNOT do than the one",
     "beneath it, so the strongest true claim wins. This order is the SSM's",
     "SQL prec ranks made readable; the SSM stays the sole precedence",
-    "authority and this must not reorder it."
+    "authority and this must not reorder it.",
+    "",
+    "TEAL SITS BETWEEN BLUE AND PURPLE — `hibernated` is rank 15 in the",
+    "SSM's prec table, directly below the blue band (severed 12, starting",
+    "14) and above purple's 20. That is deliberately NOT below green:",
+    "hibernation makes the SAME actionability claim blue does (you cannot",
+    "interact without paying a bring-up) and only its REASON is benign.",
+    "Ranking it below green would let a stale `thinking` row from the turn a",
+    "workspace was hibernated after mask a workspace that is genuinely",
+    "asleep."
   ],
-  "precedence": ["blue", "purple", "red", "yellow", "green"],
+  "precedence": ["blue", "teal", "purple", "red", "yellow", "green"],
 
   "render_states": {
     "RENDER_STATE_UNSPECIFIED": "none",
 
     "RENDER_STATE_INIT": "blue",
-    "RENDER_STATE_DORMANT": "blue",
+    "RENDER_STATE_SEVERED": "blue",
     "RENDER_STATE_DEAD": "blue",
     "RENDER_STATE_DEGRADED": "blue",
+
+    "RENDER_STATE_HIBERNATED": "teal",
 
     "RENDER_STATE_VENDOR_BLOCKED": "purple",
     "RENDER_STATE_STOP_FAILED": "purple",
@@ -63,6 +82,8 @@
     "A failure card takes the color of the state its class resolves the",
     "workspace to — card color IS state color, from this one table, so a",
     "user cannot see a purple workspace explained by a red card. INTERNAL",
+    "resolves BLUE and never teal: an error class is by definition evidence",
+    "that something broke, which is precisely what teal denies.",
     "resolves blue (agent-repl's own machinery is compromised) and API",
     "resolves purple (the vendor or the account has stopped the work)."
   ],

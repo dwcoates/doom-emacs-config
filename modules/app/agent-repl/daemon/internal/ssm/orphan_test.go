@@ -82,7 +82,7 @@ func TestApplyRejectsTaskEndWithoutIdentity(t *testing.T) {
 	}
 	var rows int
 	if scanErr := m.db.QueryRow(
-		`SELECT COUNT(*) FROM workspace_state WHERE state NOT IN ('wired','starting','dormant')`).Scan(&rows); scanErr != nil {
+		`SELECT COUNT(*) FROM workspace_state WHERE state NOT IN ('wired','starting','severed','hibernated','dormant')`).Scan(&rows); scanErr != nil {
 		t.Fatalf("count rows: %v", scanErr)
 	}
 	if rows != 0 {
