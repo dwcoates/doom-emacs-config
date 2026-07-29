@@ -440,33 +440,42 @@ environments without notification tools (terminal-notifier or osascript)."
 
 (ert-deftest agent-repl-test-log-ladder-routes-workspace-lines-to-live-log-buffer ()
   "Every emitted workspace log-ladder line reaches its live buffer once."
-  (let ((ws "ladder-log-ws")
-        (buf nil)
-        (agent-repl-debug nil)
-        (agent-repl--workspace-log-buffer-enabled t))
-    (unwind-protect
-        (progn
-          (cl-letf (((symbol-function 'agent-repl--do-log-to-file) #'ignore))
-            (agent-repl--log ws "normal-entry")
-            (agent-repl--info ws "info-entry")
-            (agent-repl--warn ws "warn-entry")
-            (should-error (agent-repl--error ws "error-entry") :type 'error)
-            ;; Verbose is a no-op until its explicit gate is enabled.
-            (agent-repl--log-verbose ws "suppressed-verbose-entry")
-            (let ((agent-repl-debug 'verbose))
-              (agent-repl--log-verbose ws "verbose-entry")))
-          (setq buf (agent-repl--workspace-log-buffer ws))
-          (let ((contents (with-current-buffer buf (buffer-string))))
-            (dolist (line '("normal-entry" "info-entry" "WARNING: warn-entry"
-                            "error-entry" "verbose-entry"))
-              (with-temp-buffer
-                (insert contents)
-                (should (= (how-many (regexp-quote line)
-                                     (point-min) (point-max))
-                           1))))
-            (should-not (string-match-p "suppressed-verbose-entry" contents))))
-      (when (buffer-live-p buf)
-        (kill-buffer buf)))))
+  (agent-repl-test--with-clean-state
+    (let ((ws "ladder-log-ws")
+          (project (make-temp-file "agent-repl-live-ladder-" t))
+          (buf nil)
+          (agent-repl-debug nil)
+          (agent-repl-log-to-file nil)
+          (agent-repl--workspace-log-buffer-enabled nil))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put ws :project-dir project)
+            (let ((agent-repl--workspace-log-buffer-enabled t))
+              (agent-repl--log ws "normal-entry")
+              (agent-repl--info ws "info-entry")
+              (agent-repl--warn ws "warn-entry")
+              (should-error (agent-repl--error ws "error-entry") :type 'error)
+              ;; Verbose records persist even when terminal visibility is off.
+              (agent-repl--log-verbose ws "terminal-hidden-verbose-entry")
+              (let ((agent-repl-debug 'verbose))
+                (agent-repl--log-verbose ws "terminal-visible-verbose-entry")))
+            (setq buf (agent-repl--workspace-log-buffer ws))
+            (let* ((contents (with-current-buffer buf (buffer-string)))
+                   (records (mapcar
+                             (lambda (line)
+                               (json-parse-string line :object-type 'alist))
+                             (split-string contents "\n" t)))
+                   (messages (mapcar
+                              (lambda (record) (alist-get 'message record))
+                              records)))
+              (should (equal messages
+                             '("normal-entry" "info-entry"
+                               "WARNING: warn-entry" "error-entry"
+                               "terminal-hidden-verbose-entry"
+                               "terminal-visible-verbose-entry")))))
+        (when (buffer-live-p buf)
+          (kill-buffer buf))
+        (delete-directory project t)))))
 
 ;;;; ---- Tests: echo-area (modeline) severity gate ----
 ;;
@@ -900,13 +909,14 @@ quiet `agent-repl--emit-message' gate, so a fatal line always reaches the modeli
   (agent-repl-test--with-clean-state
     (let* ((project (make-temp-file "agent-repl-workspace-log-" t))
            (ws "json-ws")
-           (agent-repl-log-to-file t)
+           (agent-repl-log-to-file nil)
            (agent-repl--workspace-log-targets (make-hash-table :test #'equal)))
       (unwind-protect
           (progn
             (agent-repl--ws-put ws :project-dir project)
-            (cl-letf (((symbol-function 'message) #'ignore))
-              (agent-repl--log ws "started request %s" "r-1"))
+            (let ((agent-repl-log-to-file t))
+              (cl-letf (((symbol-function 'message) #'ignore))
+                (agent-repl--log ws "started request %s" "r-1")))
             (let* ((canonical (expand-file-name ".claude/emacs/emacs.log" project))
                    (target (plist-get (gethash ws agent-repl--workspace-log-targets) :target))
                    (record (with-temp-buffer
@@ -929,7 +939,7 @@ quiet `agent-repl--emit-message' gate, so a fatal line always reaches the modeli
   (agent-repl-test--with-clean-state
     (let* ((project (make-temp-file "agent-repl-identity-log-" t))
            (ws "identity-ws")
-           (agent-repl-log-to-file t)
+           (agent-repl-log-to-file nil)
            (agent-repl--workspace-log-targets (make-hash-table :test #'equal)))
       (unwind-protect
           (progn
@@ -938,8 +948,9 @@ quiet `agent-repl--emit-message' gate, so a fatal line always reaches the modeli
             (agent-repl--ws-put ws :active-env :bare-metal)
             (agent-repl--ws-put ws :bare-metal
                                 (make-agent-repl-instantiation :session-id "claude-session-1"))
-            (cl-letf (((symbol-function 'message) #'ignore))
-              (agent-repl--log ws "identity test"))
+            (let ((agent-repl-log-to-file t))
+              (cl-letf (((symbol-function 'message) #'ignore))
+                (agent-repl--log ws "identity test")))
             (let* ((target (plist-get (gethash ws agent-repl--workspace-log-targets) :target))
                    (record (with-temp-buffer
                              (insert-file-contents target)
@@ -948,17 +959,42 @@ quiet `agent-repl--emit-message' gate, so a fatal line always reaches the modeli
               (should (equal (alist-get 'claude_session_id record) "claude-session-1"))))
         (delete-directory project t)))))
 
+(ert-deftest agent-repl-test-log-session-identity-does-not-reenter-persistence ()
+  "Resolving a session identity while logging produces exactly one record."
+  (agent-repl-test--with-clean-state
+    (let* ((project (make-temp-file "agent-repl-nonrecursive-log-" t))
+           (ws "nonrecursive-ws")
+           (agent-repl-log-to-file nil)
+           (agent-repl--workspace-log-targets (make-hash-table :test #'equal))
+           (original-persist (symbol-function 'agent-repl--persist-log-record))
+           (persist-calls 0))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put ws :project-dir project)
+            (agent-repl--ws-put ws :active-env :bare-metal)
+            (agent-repl--ws-put ws :bare-metal
+                                (make-agent-repl-instantiation :session-id "claude-session-1"))
+            (let ((agent-repl-log-to-file t))
+              (cl-letf (((symbol-function 'agent-repl--persist-log-record)
+                         (lambda (&rest args)
+                           (cl-incf persist-calls)
+                           (apply original-persist args))))
+                (agent-repl--log ws "one record")
+                (should (= persist-calls 1)))))
+        (delete-directory project t)))))
+
 (ert-deftest agent-repl-test-log-workspace-record-omits-missing-session-identities ()
   "Absent optional session identities are not serialized as null fields."
   (agent-repl-test--with-clean-state
     (let* ((project (make-temp-file "agent-repl-missing-identity-" t))
            (ws "missing-identity-ws")
-           (agent-repl-log-to-file t)
+           (agent-repl-log-to-file nil)
            (agent-repl--workspace-log-targets (make-hash-table :test #'equal)))
       (unwind-protect
           (progn
             (agent-repl--ws-put ws :project-dir project)
-            (agent-repl--log ws "missing identities")
+            (let ((agent-repl-log-to-file t))
+              (agent-repl--log ws "missing identities"))
             (let* ((target (plist-get (gethash ws agent-repl--workspace-log-targets) :target))
                    (record (with-temp-buffer
                              (insert-file-contents target)
@@ -972,18 +1008,20 @@ quiet `agent-repl--emit-message' gate, so a fatal line always reaches the modeli
   (agent-repl-test--with-clean-state
     (let* ((project (make-temp-file "agent-repl-invalid-identity-" t))
            (ws "invalid-identity-ws")
-           (agent-repl-log-to-file t)
+           (agent-repl-log-to-file nil)
            (agent-repl--workspace-log-targets (make-hash-table :test #'equal)))
       (unwind-protect
           (progn
             (agent-repl--ws-put ws :project-dir project)
             (agent-repl--ws-put ws :frontend-session-id 42)
-            (should-error (agent-repl--log ws "invalid identity"))
+            (let ((agent-repl-log-to-file t))
+              (should-error (agent-repl--log ws "invalid identity")))
             (agent-repl--ws-put ws :frontend-session-id nil)
             (agent-repl--ws-put ws :active-env :bare-metal)
             (agent-repl--ws-put ws :bare-metal
                                 (make-agent-repl-instantiation :session-id 99))
-            (should-error (agent-repl--log ws "invalid claude identity"))
+            (let ((agent-repl-log-to-file t))
+              (should-error (agent-repl--log ws "invalid claude identity")))
             (should-not (gethash ws agent-repl--workspace-log-targets)))
         (delete-directory project t)))))
 
@@ -1026,7 +1064,7 @@ quiet `agent-repl--emit-message' gate, so a fatal line always reaches the modeli
            (foreign (make-temp-file "agent-repl-foreign-log-"))
            (canonical (expand-file-name ".claude/emacs/emacs.log" project))
            (ws "hostile-link")
-           (agent-repl-log-to-file t)
+           (agent-repl-log-to-file nil)
            (agent-repl--workspace-log-targets (make-hash-table :test #'equal)))
       (unwind-protect
           (progn
@@ -1034,8 +1072,9 @@ quiet `agent-repl--emit-message' gate, so a fatal line always reaches the modeli
             (make-directory (file-name-directory canonical) t)
             (make-symbolic-link foreign canonical)
             (agent-repl--ws-put ws :project-dir project)
-            (cl-letf (((symbol-function 'message) #'ignore))
-              (agent-repl--log ws "safe write"))
+            (let ((agent-repl-log-to-file t))
+              (cl-letf (((symbol-function 'message) #'ignore))
+                (agent-repl--log ws "safe write")))
             (should (equal (with-temp-buffer (insert-file-contents foreign) (buffer-string))
                            "foreign content\n"))
             (should-not (equal (file-symlink-p canonical) foreign)))
@@ -1048,15 +1087,16 @@ quiet `agent-repl--emit-message' gate, so a fatal line always reaches the modeli
     (let* ((project (make-temp-file "agent-repl-hostile-file-" t))
            (canonical (expand-file-name ".claude/emacs/emacs.log" project))
            (ws "hostile-file")
-           (agent-repl-log-to-file t)
+           (agent-repl-log-to-file nil)
            (agent-repl--workspace-log-targets (make-hash-table :test #'equal)))
       (unwind-protect
           (progn
             (make-directory (file-name-directory canonical) t)
             (with-temp-file canonical (insert "hostile content\n"))
             (agent-repl--ws-put ws :project-dir project)
-            (cl-letf (((symbol-function 'message) #'ignore))
-              (agent-repl--log ws "safe write"))
+            (let ((agent-repl-log-to-file t))
+              (cl-letf (((symbol-function 'message) #'ignore))
+                (agent-repl--log ws "safe write")))
             (should (file-symlink-p canonical)))
         (delete-directory project t)))))
 
@@ -1066,13 +1106,14 @@ quiet `agent-repl--emit-message' gate, so a fatal line always reaches the modeli
     (let* ((project (make-temp-file "agent-repl-hostile-claude-" t))
            (external (make-temp-file "agent-repl-external-claude-" t))
            (ws "hostile-claude")
-           (agent-repl-log-to-file t)
+           (agent-repl-log-to-file nil)
            (agent-repl--workspace-log-targets (make-hash-table :test #'equal)))
       (unwind-protect
           (progn
             (make-symbolic-link external (expand-file-name ".claude" project))
             (agent-repl--ws-put ws :project-dir project)
-            (should-error (agent-repl--log ws "must fail"))
+            (let ((agent-repl-log-to-file t))
+              (should-error (agent-repl--log ws "must fail")))
             (should-not (file-exists-p (expand-file-name "emacs/emacs.log" external)))
             (should-not (gethash ws agent-repl--workspace-log-targets)))
         (delete-directory project t)
@@ -1085,14 +1126,15 @@ quiet `agent-repl--emit-message' gate, so a fatal line always reaches the modeli
            (external (make-temp-file "agent-repl-external-emacs-" t))
            (claude (expand-file-name ".claude" project))
            (ws "hostile-emacs")
-           (agent-repl-log-to-file t)
+           (agent-repl-log-to-file nil)
            (agent-repl--workspace-log-targets (make-hash-table :test #'equal)))
       (unwind-protect
           (progn
             (make-directory claude)
             (make-symbolic-link external (expand-file-name "emacs" claude))
             (agent-repl--ws-put ws :project-dir project)
-            (should-error (agent-repl--log ws "must fail"))
+            (let ((agent-repl-log-to-file t))
+              (should-error (agent-repl--log ws "must fail")))
             (should-not (file-exists-p (expand-file-name "emacs.log" external)))
             (should-not (gethash ws agent-repl--workspace-log-targets)))
         (delete-directory project t)
@@ -1105,13 +1147,14 @@ quiet `agent-repl--emit-message' gate, so a fatal line always reaches the modeli
            (external (make-temp-file "agent-repl-unsafe-external-" t))
            (ws "unsafe-no-target")
            (before (directory-files temporary-file-directory t "\\`agent-repl-emacs-"))
-           (agent-repl-log-to-file t)
+           (agent-repl-log-to-file nil)
            (agent-repl--workspace-log-targets (make-hash-table :test #'equal)))
       (unwind-protect
           (progn
             (make-symbolic-link external (expand-file-name ".claude" project))
             (agent-repl--ws-put ws :project-dir project)
-            (should-error (agent-repl--log ws "must fail"))
+            (let ((agent-repl-log-to-file t))
+              (should-error (agent-repl--log ws "must fail")))
             (should (equal before (directory-files temporary-file-directory t "\\`agent-repl-emacs-")))
             (should-not (file-exists-p (expand-file-name "emacs/emacs.log" external))))
         (delete-directory project t)
@@ -1123,16 +1166,18 @@ quiet `agent-repl--emit-message' gate, so a fatal line always reaches the modeli
     (let* ((first (make-temp-file "agent-repl-first-project-" t))
            (second (make-temp-file "agent-repl-second-project-" t))
            (ws "rebound-ws")
-           (agent-repl-log-to-file t)
+           (agent-repl-log-to-file nil)
            (agent-repl--workspace-log-targets (make-hash-table :test #'equal)))
       (unwind-protect
           (progn
             (agent-repl--ws-put ws :project-dir first)
-            (agent-repl--log ws "first")
+            (let ((agent-repl-log-to-file t))
+              (agent-repl--log ws "first"))
             (let ((target (plist-get (gethash ws agent-repl--workspace-log-targets) :target)))
               (agent-repl--ws-put ws :project-dir second)
               (should-not (gethash ws agent-repl--workspace-log-targets))
-              (agent-repl--log ws "second")
+              (let ((agent-repl-log-to-file t))
+                (agent-repl--log ws "second"))
               (let ((rebound (plist-get (gethash ws agent-repl--workspace-log-targets) :target)))
                 (should-not (equal target rebound))
                 (should (file-symlink-p (expand-file-name ".claude/emacs/emacs.log" second))))))
@@ -1144,14 +1189,15 @@ quiet `agent-repl--emit-message' gate, so a fatal line always reaches the modeli
   (agent-repl-test--with-clean-state
     (let* ((project (make-temp-file "agent-repl-staging-failure-" t))
            (ws "staging-failure")
-           (agent-repl-log-to-file t)
+           (agent-repl-log-to-file nil)
            (agent-repl--workspace-log-targets (make-hash-table :test #'equal)))
       (unwind-protect
           (progn
             (agent-repl--ws-put ws :project-dir project)
             (cl-letf (((symbol-function 'make-symbolic-link)
                        (lambda (&rest _) (error "simulated staging failure"))))
-              (should-error (agent-repl--log ws "must fail")))
+              (let ((agent-repl-log-to-file t))
+                (should-error (agent-repl--log ws "must fail"))))
             (should-not (gethash ws agent-repl--workspace-log-targets))
             (should-not (directory-files-recursively project "\\.emacs\\.log-link-")))
         (delete-directory project t)))))
@@ -1162,14 +1208,15 @@ quiet `agent-repl--emit-message' gate, so a fatal line always reaches the modeli
     (let* ((project (make-temp-file "agent-repl-rename-failure-" t))
            (ws "rename-failure")
            (before (directory-files temporary-file-directory t "\\`agent-repl-emacs-"))
-           (agent-repl-log-to-file t)
+           (agent-repl-log-to-file nil)
            (agent-repl--workspace-log-targets (make-hash-table :test #'equal)))
       (unwind-protect
           (progn
             (agent-repl--ws-put ws :project-dir project)
             (cl-letf (((symbol-function 'rename-file)
                        (lambda (&rest _) (error "simulated rename failure"))))
-              (should-error (agent-repl--log ws "must fail")))
+              (let ((agent-repl-log-to-file t))
+                (should-error (agent-repl--log ws "must fail"))))
             (should-not (gethash ws agent-repl--workspace-log-targets))
             (should (equal before (directory-files temporary-file-directory t "\\`agent-repl-emacs-")))
             (should-not (directory-files-recursively project "\\.emacs\\.log-link-"))
@@ -1181,12 +1228,13 @@ quiet `agent-repl--emit-message' gate, so a fatal line always reaches the modeli
   (agent-repl-test--with-clean-state
     (let* ((project (make-temp-file "agent-repl-truncate-ws-" t))
            (ws "truncate-ws")
-           (agent-repl-log-to-file t)
+           (agent-repl-log-to-file nil)
            (agent-repl--workspace-log-targets (make-hash-table :test #'equal)))
       (unwind-protect
           (progn
             (agent-repl--ws-put ws :project-dir project)
-            (agent-repl--log ws "seed")
+            (let ((agent-repl-log-to-file t))
+              (agent-repl--log ws "seed"))
             (let* ((target (plist-get (gethash ws agent-repl--workspace-log-targets) :target)))
               (with-temp-file target (insert (make-string 5000 ?x)))
               (agent-repl--log-truncate target (file-attribute-size (file-attributes target)) ws)
@@ -2180,6 +2228,19 @@ The master kill-switch overrides the always-on file-write decoupling."
             (should (= initial-size (nth 7 (file-attributes path))))))
       (when (file-exists-p path) (delete-file path)))))
 
+(ert-deftest agent-repl-test-log-disabled-sinks-do-not-resolve-workspace ()
+  "Disabled persistence sinks do not demand a workspace routing identity."
+  (let ((agent-repl-log-to-file nil)
+        (agent-repl--workspace-log-buffer-enabled nil)
+        (identity-calls 0))
+    (cl-letf (((symbol-function 'agent-repl--workspace-log-identity)
+               (lambda (&rest _)
+                 (cl-incf identity-calls)
+                 (error "identity resolver must remain idle")))
+              ((symbol-function 'message) #'ignore))
+      (agent-repl--log "workspace-without-state" "persistence disabled")
+      (should (zerop identity-calls)))))
+
 ;;;; ---- Tests: startup rollover ----
 
 (ert-deftest agent-repl-test-rotate-renames-existing-log-to-prev ()
@@ -2277,7 +2338,7 @@ The master kill-switch overrides the always-on file-write decoupling."
                  (context (alist-get 'context warning)))
              (should (equal (alist-get 'level warning) "warn"))
              (should (numberp (alist-get 'cap_bytes context)))
-             (should (numberp (alist-get 'kept_bytes context)))))))
+             (should (numberp (alist-get 'kept_bytes context))))))
     (should (= (logand (file-modes path) #o777) #o600)))))
 
 (ert-deftest agent-repl-test-size-check-fires-every-interval ()
