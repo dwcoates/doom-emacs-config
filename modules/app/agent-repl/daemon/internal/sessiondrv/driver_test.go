@@ -232,6 +232,7 @@ func (c *fakeClient) Interrupt(_ context.Context) (corev1.InterruptOutcome, erro
 	}
 	return outcome, nil
 }
+func (c *fakeClient) SetModel(_ context.Context, model string) (string, error) { return model, nil }
 
 // Replay is the shim-mediated bounded history replay. The default fake serves
 // an empty, complete one; the replay-specific harness (repull_test.go) swaps in

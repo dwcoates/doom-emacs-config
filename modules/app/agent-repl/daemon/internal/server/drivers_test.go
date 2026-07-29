@@ -228,6 +228,9 @@ func (nopHandler) Interrupt(context.Context, string, string, *frontendv1.Interru
 func (nopHandler) AnswerPermission(context.Context, string, string, *frontendv1.PermissionAnswerCmd) error {
 	return nil
 }
+func (nopHandler) SetModel(context.Context, string, string, *frontendv1.SetModelCmd) (string, error) {
+	return "opus", nil
+}
 func (nopHandler) MergeWorkspace(context.Context, string, string, *frontendv1.MergeWorkspaceCmd) error {
 	return nil
 }

@@ -28,6 +28,7 @@ import {
   PermissionRequest,
   PermissionRequestSchema,
   PermissionResponse,
+  SetModel,
   SubmitPrompt,
 } from "./proto.js";
 
@@ -52,6 +53,19 @@ export interface SdkControlTarget {
    * uds-session.ts for why that read must precede every await.
    */
   interrupt(input: { requestId: string }): InterruptOutcome;
+  /** Set a model and return the SDK-confirmed selection. */
+  setModel(input: { requestId: string; model: string }): Promise<string>;
+}
+
+/**
+ * A rejected model mutation can still report the SDK's current selection.
+ * That value is authoritative state, not an optimistic echo of the request.
+ */
+export class ModelSelectionError extends Error {
+  constructor(message: string, readonly selectedModel: string) {
+    super(message);
+    this.name = "ModelSelectionError";
+  }
 }
 
 /** The shim's own resolution of a canUseTool request. */
@@ -132,6 +146,24 @@ export class ControlDispatch {
     } catch (err) {
       LOGGER.log({ level: "error", request_id: msg.requestId, cause: err }, `interrupt failed: ${errMsg(err)}`);
       return create(NackSchema, { requestId: msg.requestId, reason: errMsg(err) });
+    }
+  }
+
+  /** Apply a deliberate model request only after the SDK settles it. */
+  async handleSetModel(msg: SetModel): Promise<Ack | Nack> {
+    if (msg.model === "") {
+      const reason = "set-model requires a non-empty model id";
+      shimLog(COMPONENT, { request: msg.requestId }, reason);
+      return create(NackSchema, { requestId: msg.requestId, reason });
+    }
+    try {
+      const selectedModel = await this.target.setModel({ requestId: msg.requestId, model: msg.model });
+      return create(AckSchema, { requestId: msg.requestId, selectedModel });
+    } catch (err) {
+      const reason = errMsg(err);
+      const selectedModel = err instanceof ModelSelectionError ? err.selectedModel : "";
+      shimLog(COMPONENT, { request: msg.requestId, model: msg.model, selected_model: selectedModel }, `set-model failed: ${reason}`);
+      return create(NackSchema, { requestId: msg.requestId, reason, selectedModel });
     }
   }
 

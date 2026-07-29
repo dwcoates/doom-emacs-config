@@ -64,6 +64,32 @@ func (c *Client) Interrupt(ctx context.Context) (corev1.InterruptOutcome, error)
 	return ack.GetInterruptOutcome(), nil
 }
 
+// SetModel asks the live shim to change its SDK model and returns the model the
+// shim confirmed. Callers persist only this value, never their requested one.
+func (c *Client) SetModel(ctx context.Context, model string) (string, error) {
+	if model == "" {
+		return "", fmt.Errorf("set model: model id is empty")
+	}
+	reqID := c.newRequestID("set-model")
+	ack, nack, err := c.sendAwaitReceipt(ctx, &corev1.SetModel{RequestId: reqID, Model: model})
+	if err != nil {
+		return "", err
+	}
+	if nack != nil {
+		selected := nack.GetSelectedModel()
+		if selected == "" {
+			return "", fmt.Errorf("set model: shim rejected request_id=%s without its current selected_model: %w", reqID, ErrNack)
+		}
+		c.logf("set-model REJECTED request_id=%s requested=%q selected=%q reason=%q", reqID, model, selected, nack.GetReason())
+		return selected, fmt.Errorf("%w: request_id=%s reason=%q", ErrNack, reqID, nack.GetReason())
+	}
+	if ack.GetSelectedModel() == "" {
+		return "", fmt.Errorf("set model: shim ack request_id=%s omitted selected_model", reqID)
+	}
+	c.logf("set-model request_id=%s requested=%q selected=%q", reqID, model, ack.GetSelectedModel())
+	return ack.GetSelectedModel(), nil
+}
+
 // PermissionResponse sends the answer to an inbound PermissionRequest,
 // correlated by the SAME request_id the shim used. It is fire-and-forget on
 // the control plane (the shim uses it to unblock canUseTool); it is NOT
@@ -96,10 +122,24 @@ func (c *Client) currentConn() *activeConn {
 // only process that can see that verdict in the position of having to guess
 // at it later.
 func (c *Client) sendAwait(ctx context.Context, msg protoControl) (*corev1.Ack, error) {
+	ack, nack, err := c.sendAwaitReceipt(ctx, msg)
+	if err != nil {
+		return nil, err
+	}
+	if nack != nil {
+		return nil, fmt.Errorf("%w: request_id=%s reason=%q", ErrNack, nack.GetRequestId(), nack.GetReason())
+	}
+	return ack, nil
+}
+
+// sendAwaitReceipt is the shared correlated-control exchange.  SetModel needs
+// a rejected receipt's shim-confirmed selected_model; legacy controls retain
+// sendAwait's simpler Ack-or-error contract above.
+func (c *Client) sendAwaitReceipt(ctx context.Context, msg protoControl) (*corev1.Ack, *corev1.Nack, error) {
 	reqID := msg.GetRequestId()
 	ac := c.currentConn()
 	if ac == nil {
-		return nil, ErrNotConnected
+		return nil, nil, ErrNotConnected
 	}
 
 	ch := make(chan ackResult, 1)
@@ -113,7 +153,7 @@ func (c *Client) sendAwait(ctx context.Context, msg protoControl) (*corev1.Ack, 
 	}()
 
 	if err := ac.writeMsg(msg); err != nil {
-		return nil, fmt.Errorf("sending control request (request_id=%s): %w", reqID, err)
+		return nil, nil, fmt.Errorf("sending control request (request_id=%s): %w", reqID, err)
 	}
 	c.logf("sent control request request_id=%s, awaiting ack (timeout=%s)", reqID, c.cfg.AckTimeout)
 
@@ -121,18 +161,18 @@ func (c *Client) sendAwait(ctx context.Context, msg protoControl) (*corev1.Ack, 
 	defer timer.Stop()
 	select {
 	case <-ctx.Done():
-		return nil, fmt.Errorf("control request %s cancelled: %w", reqID, ctx.Err())
+		return nil, nil, fmt.Errorf("control request %s cancelled: %w", reqID, ctx.Err())
 	case <-timer.C:
-		return nil, fmt.Errorf("%w: request_id=%s after %s", ErrAckTimeout, reqID, c.cfg.AckTimeout)
+		return nil, nil, fmt.Errorf("%w: request_id=%s after %s", ErrAckTimeout, reqID, c.cfg.AckTimeout)
 	case res := <-ch:
 		if res.err != nil {
-			return nil, res.err
+			return nil, nil, res.err
 		}
 		if res.nack != nil {
-			return nil, fmt.Errorf("%w: request_id=%s reason=%q", ErrNack, reqID, res.nack.GetReason())
+			return nil, res.nack, nil
 		}
 		c.logf("control request request_id=%s acked outcome=%s", reqID, res.ack.GetInterruptOutcome())
-		return res.ack, nil
+		return res.ack, nil, nil
 	}
 }
 
