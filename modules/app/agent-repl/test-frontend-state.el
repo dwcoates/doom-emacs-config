@@ -747,22 +747,10 @@ than a settled no-op."
 
 ;;;; ---- Tests: wire CWDs never reach the workspace log sink ----
 
-(defmacro agent-repl-test--with-log-sink-on (&rest body)
-  "Run BODY with the durable log sink ENABLED, writing to a throwaway file.
-test-helpers.el turns `agent-repl-log-to-file' off for every noninteractive
-run, and `agent-repl--persist-log-record' skips workspace-identity
-resolution entirely when both sinks are disabled.  A frame test that leaves
-it off therefore never exercises log routing at all — which is exactly how a
-wire CWD reaching the sink stayed invisible to this file."
-  (declare (indent 0))
-  `(let ((sink (make-temp-file "agent-repl-test-wire-log-")))
-     (unwind-protect
-         (let ((agent-repl-log-to-file t)
-               (agent-repl-log-file-name sink)
-               (agent-repl--log-write-counter 0))
-           (cl-letf (((symbol-function 'message) #'ignore))
-             ,@body))
-       (when (file-exists-p sink) (delete-file sink)))))
+;; `agent-repl-test--with-log-sink-on' lives in test-helpers.el: every suite
+;; that asserts a path cannot violate the log routing invariant needs it,
+;; because the batch harness disables the sink and the ladder then skips
+;; identity resolution altogether.
 
 (ert-deftest agent-repl-test-apply-session-view-with-unowned-cwd-does-not-signal ()
   "A SessionView naming a CWD no live workspace owns must not abort the filter.
