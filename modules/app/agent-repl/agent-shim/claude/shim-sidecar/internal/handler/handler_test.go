@@ -1,9 +1,9 @@
 package handler
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -143,9 +143,10 @@ func TestSessionHandlerTaskStopTwin(t *testing.T) {
 func TestSessionHandlerStopHookRemainsVendorEvidenceOnly(t *testing.T) {
 	// Arrange
 	var logs []string
-	h := NewSessionTranscriptHandler(func(format string, args ...any) {
-		logs = append(logs, fmt.Sprintf(format, args...))
-	})
+	var sink bytes.Buffer
+	log := logging.New(&sink, &sink).With(logging.Context{Component: "test"})
+	log.SetDiagnosticSink(func(d logging.Diagnostic) { logs = append(logs, d.Message) })
+	h := NewSessionTranscriptHandler(log)
 	f := frameFor(t, "transcript-lines/system-stop_hook_summary.jsonl")
 	// Act
 	evs := h.Handle([]tail.Frame{f}, &Context{SessionID: "sess"})

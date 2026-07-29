@@ -171,7 +171,9 @@ func TestRegistryAndStateLogInterleaveOnOneSharedStore(t *testing.T) {
 			if err := mgr.Apply(&corev1.Event{
 				SessionId: "uuid-1",
 				Seq:       uint64(i + 1),
-				Payload:   &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{}},
+				Plane:     corev1.Plane_PLANE_STREAM,
+				RequestId: "turn",
+				Payload:   &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "turn"}},
 			}); err != nil {
 				ssmErrs <- err
 			}

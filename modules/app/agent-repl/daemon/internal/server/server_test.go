@@ -807,7 +807,16 @@ func TestAccountSwitchGuardsTurnActive(t *testing.T) {
 	// Arrange — a session with a turn in flight (the SSM guard).
 	h := newHarnessWith(t, Config{Accounts: accountRoster()})
 	id := createSession(t, h, `{"cwd":"/w"}`)
-	if err := h.ssm.Apply(&corev1.Event{SessionId: id, Seq: 1, Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{PromptPreview: "go"}}}); err != nil {
+	if err := h.ssm.Apply(&corev1.Event{
+		SessionId: id,
+		Seq:       1,
+		Plane:     corev1.Plane_PLANE_STREAM,
+		RequestId: "turn-1",
+		Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{
+			PromptPreview: "go",
+			TurnId:        "turn-1",
+		}},
+	}); err != nil {
 		t.Fatalf("apply turn started: %v", err)
 	}
 

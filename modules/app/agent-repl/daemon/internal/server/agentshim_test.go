@@ -93,7 +93,13 @@ func TestRegistryResolverBindsSSMToWorkspace(t *testing.T) {
 		t.Fatalf("apply wired: %v", err)
 	}
 	// Act — a turn-started event for s1 (seq 1).
-	ev := &corev1.Event{SessionId: "s1", Seq: 1, Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{}}}
+	ev := &corev1.Event{
+		SessionId: "s1",
+		Seq:       1,
+		Plane:     corev1.Plane_PLANE_STREAM,
+		RequestId: "turn-1",
+		Payload:   &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "turn-1"}},
+	}
 	if err := mgr.Apply(ev); err != nil {
 		t.Fatalf("apply: %v", err)
 	}

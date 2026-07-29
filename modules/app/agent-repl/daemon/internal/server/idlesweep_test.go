@@ -78,7 +78,12 @@ func TestATurnActiveWorkspaceIsHeldHoweverOldItsLogIs(t *testing.T) {
 	h, id, quietFor := sweptWorkspace(t, time.Hour)
 	if err := h.ssm.Apply(&corev1.Event{
 		SessionId: id, Seq: 1,
-		Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{PromptPreview: "go"}},
+		Plane:     corev1.Plane_PLANE_STREAM,
+		RequestId: "turn-1",
+		Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{
+			PromptPreview: "go",
+			TurnId:        "turn-1",
+		}},
 	}); err != nil {
 		t.Fatalf("apply turn started: %v", err)
 	}

@@ -21,7 +21,9 @@ func TestDeleteSessionReleasesTheWorkspacesTurnClaim(t *testing.T) {
 	turn := &corev1.Event{
 		SessionId: id,
 		Seq:       1,
-		Payload:   &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{}},
+		Plane:     corev1.Plane_PLANE_STREAM,
+		RequestId: "turn-1",
+		Payload:   &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "turn-1"}},
 	}
 	if err := h.ssm.ApplyWired("/w", ssm.WiringWired, "test arrangement"); err != nil {
 		t.Fatalf("ApplyWired: %v", err)
