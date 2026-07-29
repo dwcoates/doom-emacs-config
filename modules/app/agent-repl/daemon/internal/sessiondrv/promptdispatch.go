@@ -1,0 +1,197 @@
+package sessiondrv
+
+import (
+	"context"
+	"strings"
+)
+
+// This file is the daemon's whole reading of a submitted prompt: the one place
+// that looks at what the user typed and decides what it MEANS, and the one
+// place that acts on the answer.
+//
+// It is one file rather than three because the consequences of that reading are
+// not independent of each other. A `/clear` is not a prompt at all — it is an
+// instruction to the CLI to discard the conversation — so it must not be
+// echoed as a purple bubble, must not have the metaprompt directive folded into
+// it, and must open the SSM's clearing axis. Those three used to be decided in
+// three different places from three different readings of the string (one of
+// them the POST-metaprompt string), and they disagreed:
+//
+//   - the receipt was pushed before anything was recognized, so `/clear` drew a
+//     bubble reading "/clear" beside the red divider that reported the very same
+//     cut;
+//   - the clearing axis was opened from text the metaprompt had already
+//     rewritten, so an armed session's `/clear` opened no axis;
+//   - the queue's delivery path recognized nothing at all, so a `/clear` held
+//     behind a running turn was cut with no axis open either.
+//
+// Deciding all of it from a single classification at a single site is what makes
+// those disagreements unrepresentable rather than merely fixed.
+
+// clearSessionCommand is the session command that discards a conversation's
+// context. Matched on the SUBMITTED text, which is where the daemon sees it:
+// the harness recognizes `/clear` itself and expands it into a command
+// envelope inside the CLI, so by the time anything is on the file plane the
+// clear has already happened.
+const clearSessionCommand = "/clear"
+
+// sessionCommand is what the daemon RECOGNIZED in one submitted prompt's text:
+// a command it has its own consequences for, beyond handing the text along.
+//
+// A zero value is the ordinary prompt — text meant for the agent and nothing
+// else — which is what the overwhelming majority of submits are.
+type sessionCommand struct {
+	// clear is a bare `/clear`, the command that cuts the conversation.
+	clear bool
+}
+
+// classifyPrompt reads a submitted prompt's text for meaning. THE ONLY PLACE
+// the daemon does so.
+//
+// Matched on the whole trimmed string: an argument after the command means the
+// user asked for something else entirely ("/clear the build cache" is a prompt),
+// and the CLI's own expansion is just as literal — it recognizes the command
+// only when the command is the entire prompt.
+func classifyPrompt(text string) sessionCommand {
+	return sessionCommand{clear: strings.TrimSpace(text) == clearSessionCommand}
+}
+
+// recognized reports whether the daemon found a command it handles itself.
+func (c sessionCommand) recognized() bool { return c.clear }
+
+// echoes reports whether the prompt earns a receipt bubble in the frontend.
+//
+// A recognized command earns none. `/clear` is not something the user SAID to
+// the agent, it is something they DID to the conversation, and the cut already
+// draws its own divider exactly where it happened. A bubble beside that divider
+// reading "/clear" is the machinery narrating itself, and it is worse than
+// noise: it sits above the divider, which is the region the clear exists to
+// discard.
+func (c sessionCommand) echoes() bool { return !c.recognized() }
+
+// foldsMetaprompt reports whether the armed read-directive may be prepended.
+//
+// Never onto a recognized command. The CLI expands `/clear` only when the
+// command is the whole prompt, so a directive prepended to one destroys the
+// command — the conversation is never cut — and spends the single-shot
+// directive on a prompt no agent will read. Leaving it armed costs nothing: the
+// next ordinary prompt takes it.
+func (c sessionCommand) foldsMetaprompt() bool { return !c.recognized() }
+
+// forwardPrompt hands one submitted prompt to its shim.
+//
+// BOTH SUBMIT FUNNELS END HERE — the immediate submit (submitPrompt) and the
+// queue's delivery (deliver) — and that is the point of it. The recognition and
+// the receipt are decided together, from a single reading of a single string, so
+// a command the daemon handles specially can never also be echoed to the
+// frontend as though it were ordinary prompt text.
+//
+// requestID is the frontend command's own id, empty for a caller with no
+// frontend request behind it. origin is the vendor-visible provenance.
+//
+// Must be called with m.mu RELEASED: the receipt reaches the frontend server and
+// applyMetaprompt takes the mutex itself.
+func (m *Manager) forwardPrompt(ctx context.Context, d *driven, requestID, text, origin, permissionMode string) error {
+	cmd := classifyPrompt(text)
+
+	// THE RECEIPT, pushed before the forward rather than after it: the send is
+	// what the bubble reports, and the shim's Ack can be hundreds of
+	// milliseconds away. A submit that then FAILS keeps its bubble — the user
+	// did send that text, the failure surfaces as its own card, and silently
+	// retracting what they typed would be the worse report.
+	if cmd.echoes() {
+		m.echo(d, requestID, text)
+	}
+
+	wire := text
+	if cmd.foldsMetaprompt() {
+		wire = m.applyMetaprompt(d, text)
+	}
+	if err := d.client.SubmitPrompt(ctx, wire, origin, permissionMode); err != nil {
+		return err
+	}
+
+	// AFTER THE ACCEPT, never before: an axis opened for a prompt that never
+	// reached the shim would be waiting on a cut that is not coming, and would
+	// hold the phase word until the watchdog expired it.
+	m.noteClearDispatched(d.workspace, cmd)
+	if cmd.clear {
+		m.refireMetapromptAfterClear(ctx, d, permissionMode)
+	}
+	return nil
+}
+
+// metapromptRefireOrigin is the vendor-visible provenance of the daemon's own
+// read-directive, so a transcript reader can tell it from anything a human sent.
+const metapromptRefireOrigin = "daemon:metaprompt-refire"
+
+// refireMetapromptAfterClear sends the read-directive as its OWN prompt, right
+// behind the `/clear` that just went out.
+//
+// WHY IT MUST FOLLOW RATHER THAN RIDE ALONG. A clear discards the conversation's
+// context, and the guidelines the session was operating under go with it — the
+// agent comes back knowing nothing about how it is meant to answer. Folding the
+// directive into the `/clear` cannot fix that: the CLI expands the command only
+// when the command is the entire prompt, so a directive prepended to one means
+// nothing is cleared at all. Two sequential prompts is the only shape that both
+// cuts the context and restores the guidelines.
+//
+// UNDER THE HOOD ON BOTH DELIVERIES. No receipt is pushed — the user did not
+// type this — and the durable transcript line it produces is withheld from the
+// feed alongside the CLI's own slash-command bookkeeping (machinery.go,
+// withheldReason). The user asked for a clear; they get a divider, and none of
+// the plumbing that follows it.
+//
+// A failure is loud-logged and swallowed. The clear itself already succeeded, so
+// there is nothing to fail back to the caller, and reporting the user's command
+// as failed over a follow-up they never asked for would be the worse account.
+func (m *Manager) refireMetapromptAfterClear(ctx context.Context, d *driven, permissionMode string) {
+	m.mu.Lock()
+	cwd := d.cwd
+	m.mu.Unlock()
+
+	directive, ok := metapromptDirective(cwd)
+	if !ok {
+		// Not an error: most checkouts are not this repo, and a session with no
+		// metaprompt file simply has no guidelines to restore.
+		m.logf("sessiondrv: post-/clear metaprompt re-fire skipped ws=%q session=%s — no %s under cwd=%q",
+			d.workspace, d.sessionID, metapromptRelPath, cwd)
+		return
+	}
+	m.logf("sessiondrv: post-/clear metaprompt re-fire ws=%q session=%s — resending the read-directive the cut discarded",
+		d.workspace, d.sessionID)
+	if err := d.client.SubmitPrompt(ctx, directive, metapromptRefireOrigin, permissionMode); err != nil {
+		m.logf("sessiondrv: post-/clear metaprompt re-fire FAILED ws=%q session=%s: %v (the cleared session continues without its guidelines)",
+			d.workspace, d.sessionID, err)
+		return
+	}
+	// The session has now been told to read the file, so an ARMED fold has
+	// nothing left to do: leaving it armed would prepend the same directive to
+	// the user's next prompt and say all of it a second time.
+	m.mu.Lock()
+	d.metaFired = true
+	m.mu.Unlock()
+}
+
+// noteClearDispatched opens the SSM's clearing axis for a `/clear` the daemon
+// just handed to a shim.
+//
+// THE DAEMON IS THE ONLY THING THAT KNOWS. Nothing in the event stream announces
+// a clear as it BEGINS — the first-class ContextCleared reports one that already
+// finished — so a footer that waited for an event would say `thinking` through
+// the entire cut and then jump straight to the cleared bubble.
+//
+// Takes the CLASSIFICATION rather than the text, which is what keeps the
+// recognition in one place: there is no second reading here to drift from the
+// one the receipt was decided by. A failure is loud-logged and does not fail the
+// submit — the prompt was accepted, and losing it over a footer word would be
+// the larger harm.
+func (m *Manager) noteClearDispatched(workspace string, cmd sessionCommand) {
+	if !cmd.clear {
+		return
+	}
+	m.logf("sessiondrv: /clear dispatched ws=%q — opening the SSM's clearing axis until its ContextCleared lands", workspace)
+	if err := m.cfg.SSM.ApplyClearing(workspace, true, "clear_dispatched"); err != nil {
+		m.logf("sessiondrv: opening the clearing axis FAILED ws=%q: %v (the cut will render as an ordinary turn)", workspace, err)
+	}
+}

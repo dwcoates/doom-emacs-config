@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
 )
@@ -42,6 +43,33 @@ func metapromptDirective(cwd string) (string, bool) {
 		return "", false
 	}
 	return fmt.Sprintf(metapromptDirectiveTemplate, path), true
+}
+
+// metapromptDirectiveHead and metapromptDirectiveTail are the two fixed halves
+// of the directive template, split at its single substitution. Derived from the
+// template rather than restated, so wording changes cannot drift them apart.
+var metapromptDirectiveHead, metapromptDirectiveTail = func() (string, string) {
+	parts := strings.SplitN(metapromptDirectiveTemplate, "%s", 2)
+	return parts[0], parts[1]
+}()
+
+// isMetapromptDirectiveText reports whether a user record's body is the daemon's
+// own STANDALONE read-directive — the follow-up prompt a `/clear` fires — rather
+// than anything a human typed.
+//
+// HEAD AND TAIL BOTH, which is precisely what keeps a FOLDED directive out of
+// this. prependMetaprompt puts the user's real prompt after the directive, so
+// that text fails the tail match and its bubble is drawn — correctly, because
+// the user did type the prompt inside it. Only the directive standing entirely
+// alone is the daemon talking to itself.
+//
+// Matched on the text rather than on some flag because the transcript carries no
+// flag: the CLI records the daemon's follow-up as an ordinary "user" line,
+// indistinguishable in the envelope from a prompt (the same problem, and the
+// same shape of answer, as the CLI's own machinery records in machinery.go).
+func isMetapromptDirectiveText(text string) bool {
+	t := strings.TrimSpace(text)
+	return strings.HasPrefix(t, metapromptDirectiveHead) && strings.HasSuffix(t, metapromptDirectiveTail)
 }
 
 // wantsMetapromptRefire reports whether a SessionStarted event should arm the

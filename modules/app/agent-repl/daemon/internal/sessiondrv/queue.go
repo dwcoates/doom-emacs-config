@@ -381,16 +381,18 @@ func (m *Manager) onTurnBoundary(d *driven, active bool) {
 // the delivery failure as its rationale. Dropping it would lose something the
 // user typed; retrying in place would spin. Instead it is visible, keeps its
 // place, and gets another chance at the next turn end or on a user force.
-// THE HELD PROMPT'S RECEIPT is pushed HERE, at the one delivery funnel every
-// path reaches — the turn-end drain, the paused queue's head jump, and an
-// interject alike (onTurnBoundary and beginInterject both end in `go
-// m.deliver`). This is the moment the prompt stops being a chip and enters the
-// conversation, which is exactly when a bubble states the truth about the
-// order things ran in.
+// THE HELD PROMPT'S RECEIPT is pushed from HERE (through forwardPrompt), at the
+// one delivery funnel every path reaches — the turn-end drain, the paused
+// queue's head jump, and an interject alike (onTurnBoundary and beginInterject
+// both end in `go m.deliver`). This is the moment the prompt stops being a chip
+// and enters the conversation, which is exactly when a bubble states the truth
+// about the order things ran in.
+//
+// Routing through forwardPrompt is also what gives a HELD `/clear` the same
+// reading an immediate one gets: it is recognized, echoed to nobody, and opens
+// the clearing axis. This path used to recognize nothing at all.
 func (m *Manager) deliver(d *driven, e *queueEntry) {
-	m.echo(d, e.requestID, e.text)
-	text := m.applyMetaprompt(d, e.text)
-	err := d.client.SubmitPrompt(m.rootCtx, text, "frontend", e.permissionMode)
+	err := m.forwardPrompt(m.rootCtx, d, e.requestID, e.text, "frontend", e.permissionMode)
 	if err == nil {
 		m.mu.Lock()
 		d.runningText = e.text
