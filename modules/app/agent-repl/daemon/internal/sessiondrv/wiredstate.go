@@ -34,6 +34,14 @@ import "claude-repld/internal/ssm"
 //     shim re-handshakes. The window between the announcement and the new
 //     ShimReady is a real gap in the wiring, so it is reported as one; the
 //     re-handshake's own `onConnected` re-opens the axis.
+//   - A LINK LOSS WITHOUT A DRIVER EXIT — the shim connection dropped and the
+//     shimclient's reconnect loop took over. This was the one closing edge the
+//     list was missing, and its absence was not cosmetic: the driver lives on
+//     across a reconnect, so nothing else in this package ever hears about the
+//     drop, and the workspace kept claiming to be fully wired for the whole
+//     reconnect. It is reported as `starting` rather than `dormant` because a
+//     bring-up genuinely IS in flight — the reconnect loop re-runs the entire
+//     gate — and the re-handshake's `onConnected` closes it again.
 //
 // `starting` is written at BRING-UP, and it means strictly that a bring-up is in
 // flight — not that a session is wanted. That is what keeps INIT's spinner
@@ -56,4 +64,31 @@ func (m *Manager) noteWiring(workspace string, wiring ssm.Wiring, reason string)
 		m.logf("sessiondrv: applying the wired axis to the SSM FAILED ws=%q wiring=%s reason=%s: %v",
 			workspace, wiring, reason, err)
 	}
+}
+
+// onLinkLost reports the FIFTH closing edge: the shim link dropped while this
+// driver lives on, so the shimclient's reconnect loop is re-running the whole
+// bring-up gate.
+//
+// It fires ONLY for a genuine loss — the shimclient withholds it for a
+// teardown-initiated close, where the driver exit is the honest edge — so this
+// never races the dormant a hibernation or a manager close writes.
+//
+// The workspace is only moved when this driver still OWNS it. A superseded
+// driver's link dying says nothing about the replacement now driving the
+// workspace, and re-spinning that replacement would be a lie about a live
+// session — the same guard the driver-exit tail keeps.
+func (m *Manager) onLinkLost(workspace, sessionID string, cause error) {
+	m.mu.Lock()
+	d, ok := m.byWS[workspace]
+	current := ok && d.sessionID == sessionID
+	m.mu.Unlock()
+	if !current {
+		m.logf("sessiondrv: shim link lost on a superseded session=%s ws=%q; leaving the wired axis to the live driver: %v",
+			sessionID, workspace, cause)
+		return
+	}
+	m.logf("sessiondrv: shim link LOST session=%s ws=%q — reconnecting, workspace is starting again: %v",
+		sessionID, workspace, cause)
+	m.noteWiring(workspace, ssm.WiringStarting, "link_lost")
 }
