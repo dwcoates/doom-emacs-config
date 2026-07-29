@@ -79,6 +79,21 @@ describe("realQueryOptions", () => {
     expect(full.model).toBe("haiku");
     expect(full.resume).toBe("cli-1");
   });
+
+  it("omits empty and synthetic model overrides identically", () => {
+    // Arrange / Act
+    const empty = realQueryOptions(
+      parseArgs(["--session-id", "s1", "--model", ""]),
+      noopCanUse,
+    );
+    const synthetic = realQueryOptions(
+      parseArgs(["--session-id", "s1", "--model", "<synthetic>"]),
+      noopCanUse,
+    );
+    // Assert
+    expect("model" in empty).toBe(false);
+    expect("model" in synthetic).toBe(false);
+  });
 });
 
 describe("probeQueryOptions", () => {

@@ -151,6 +151,18 @@ describe("decodeCommandLine", () => {
     expect(() => decodeCommandLine(line)).toThrow(/non-empty model/);
   });
 
+  it("throws the same ProtocolError on a synthetic model update", () => {
+    // Arrange — updates require a real target. The marker has the same
+    // invalid-update semantics as the empty string.
+    const line = JSON.stringify({
+      type: "set-model",
+      request_id: "r1",
+      model: "<synthetic>",
+    });
+    // Act + Assert
+    expect(() => decodeCommandLine(line)).toThrow(/non-empty model/);
+  });
+
   it("throws ProtocolError on set-model with no model field", () => {
     // Arrange
     const line = JSON.stringify({ type: "set-model", request_id: "r1" });

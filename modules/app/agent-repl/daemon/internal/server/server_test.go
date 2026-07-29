@@ -322,6 +322,22 @@ func TestCreateSessionRegistersARecord(t *testing.T) {
 	}
 }
 
+func TestCreateSessionStoresThePlaceholderAsAnEmptyModel(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	// Act
+	id := createSession(t, h, `{"cwd":"/w","model":"<synthetic>"}`)
+	// Assert — every create path reaches the shared core, so the marker cannot
+	// enter durable session state even when the caller bypasses the frontend.
+	rec, ok := h.reg.Get(id)
+	if !ok {
+		t.Fatalf("no registry record for %s", id)
+	}
+	if rec.Model != "" {
+		t.Fatalf("record model = %q, want empty", rec.Model)
+	}
+}
+
 func TestCreateSessionEagerlyBringsUpTheShim(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
@@ -1000,6 +1016,15 @@ func TestShimArgvAssemblesAllCreateOpts(t *testing.T) {
 		"--cwd", "/w", "--model", "haiku", "--resume", "uuid-1"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("argv = %v, want %v", got, want)
+	}
+}
+
+func TestShimArgvTreatsThePlaceholderLikeAnEmptyModel(t *testing.T) {
+	// Arrange / Act
+	got := ShimArgv("node", "shim.js", "s1", false, CreateOpts{Model: "<synthetic>"})
+	// Assert
+	if slices.Contains(got, "--model") {
+		t.Fatalf("argv = %v, want no --model for the empty-equivalent marker", got)
 	}
 }
 

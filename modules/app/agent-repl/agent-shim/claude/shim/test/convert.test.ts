@@ -160,6 +160,14 @@ describe("assistant", () => {
     expect(m.msg.value.message!.usage!.inputTokens).toBe(10n);
   });
 
+  it("normalizes a synthetic assistant model to empty", () => {
+    const raw = loadStream("assistant");
+    raw.message = { ...(raw.message as Record<string, unknown>), model: "<synthetic>" };
+    const m = vendor(convert(raw));
+    if (m.msg.case !== "assistant") throw new Error("case");
+    expect(m.msg.value.message!.model).toBe("");
+  });
+
   it("carries the top-level request_id onto the Event envelope", () => {
     expect(convert(loadStream("assistant")).vendor.requestId).toBe("req_011CdKQJZD99Dyyq53xXHGai");
   });
@@ -226,6 +234,12 @@ describe("system_init", () => {
     return m.msg.value;
   };
   it("maps cwd", () => expect(csm().cwd).toBe("/private/tmp/sdk-probe"));
+  it("normalizes a synthetic session model to empty", () => {
+    const raw = { ...loadStream("system_init"), model: "<synthetic>" };
+    const m = vendor(convert(raw));
+    if (m.msg.case !== "systemInit") throw new Error("case");
+    expect(m.msg.value.model).toBe("");
+  });
   it("maps camelCase permissionMode", () => expect(csm().permissionMode).toBe("default"));
   it("maps apiKeySource 'none' → NONE", () => expect(csm().apiKeySource).toBe(ApiKeySource.NONE));
   it("maps tools list", () => expect(csm().tools).toContain("Bash"));

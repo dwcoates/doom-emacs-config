@@ -52,3 +52,23 @@ func TestIsPlaceholderModel(t *testing.T) {
 		})
 	}
 }
+
+func TestNormalizeModel(t *testing.T) {
+	tests := []struct {
+		name  string
+		model string
+		want  string
+	}{
+		{name: "empty stays empty", model: "", want: ""},
+		{name: "placeholder becomes empty", model: "<synthetic>", want: ""},
+		{name: "whitespace-wrapped placeholder becomes empty", model: " \t<synthetic>\n", want: ""},
+		{name: "real model is preserved", model: "claude-opus-5", want: "claude-opus-5"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := NormalizeModel(tc.model); got != tc.want {
+				t.Fatalf("NormalizeModel(%q) = %q, want %q", tc.model, got, tc.want)
+			}
+		})
+	}
+}

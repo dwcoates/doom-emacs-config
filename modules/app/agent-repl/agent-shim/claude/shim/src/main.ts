@@ -30,6 +30,7 @@ import { acquireSessionLock } from "./uds/session-lock.js";
 import { SessionSource } from "./uds/proto.js";
 import { FAKE_COMMANDS, createFakeQuery } from "./fake-query.js";
 import { importRealSDK } from "./vendor-guard.js";
+import { normalizeOptionalModel } from "./model.js";
 import {
   ModelInfo,
   PermissionMode,
@@ -185,6 +186,7 @@ export function realQueryOptions(
   args: CliArgs,
   canUseTool: CanUseToolLike,
 ): Record<string, unknown> {
+  const model = normalizeOptionalModel(args.model);
   return {
     canUseTool: canUseTool as never,
     includePartialMessages: true,
@@ -195,7 +197,7 @@ export function realQueryOptions(
       ? { pathToClaudeCodeExecutable: args.claudeBin }
       : {}),
     ...(args.cwd !== undefined ? { cwd: args.cwd } : {}),
-    ...(args.model !== undefined ? { model: args.model } : {}),
+    ...(model !== undefined ? { model } : {}),
     ...(args.resume !== undefined ? { resume: args.resume } : {}),
   };
 }
@@ -306,6 +308,23 @@ export async function main(): Promise<void> {
   if (args.daemonSocket === undefined) throw new Error("shim requires --daemon-socket");
   validateUdsLoggingArgs(args);
   configureLog({ fd: args.logFd, cwd: args.cwd, agentReplSessionId: args.sessionId });
+  const requestedModel = args.model;
+  const normalizedModel = normalizeOptionalModel(requestedModel);
+  if (normalizedModel === undefined) {
+    delete args.model;
+  } else {
+    args.model = normalizedModel;
+  }
+  if (requestedModel !== undefined && normalizedModel !== requestedModel) {
+    LOGGER.log(
+      {
+        agent_repl_session_id: args.sessionId,
+        requested_model: requestedModel,
+        effective_model: normalizedModel ?? "",
+      },
+      "normalized empty-equivalent launch model before constructing SDK options",
+    );
+  }
   LOGGER.log({ agent_repl_session_id: args.sessionId, fake: args.fake, daemon_socket: args.daemonSocket, store_socket: args.storeSocket ?? defaultStoreSocket(), permission_mode: args.permissionMode, model: args.model ?? "", resumed: args.resume !== undefined }, "validated shim startup arguments and configured durable logging");
 
   // The query factory is synchronous per SessionDeps; pre-resolve the SDK

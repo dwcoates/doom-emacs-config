@@ -84,8 +84,8 @@ func ShimArgv(node, script, sessionID string, forceFake bool, opts CreateOpts) [
 	if opts.CWD != "" {
 		argv = append(argv, "--cwd", opts.CWD)
 	}
-	if opts.Model != "" {
-		argv = append(argv, "--model", opts.Model)
+	if model := registry.NormalizeModel(opts.Model); model != "" {
+		argv = append(argv, "--model", model)
 	}
 	if opts.Resume != "" {
 		argv = append(argv, "--resume", opts.Resume)
@@ -1101,6 +1101,12 @@ var errSessionNotFound = errors.New("no such session")
 // *ResumeTranscriptMissingError) let callers map to their transport; any other
 // error is an internal bring-up failure surfaced loudly.
 func (s *Server) CreateSession(_ context.Context, opts CreateOpts) (string, error) {
+	requestedModel := opts.Model
+	opts.Model = registry.NormalizeModel(opts.Model)
+	if opts.Model != requestedModel {
+		s.logf("session create normalized model marker %q to empty before validation, persistence, and spawn (cwd=%s)",
+			requestedModel, opts.CWD)
+	}
 	if opts.PermissionMode != "" && !protocol.ValidPermissionMode(opts.PermissionMode) {
 		return "", &InvalidCreateError{msg: fmt.Sprintf("invalid permission_mode %q", opts.PermissionMode)}
 	}
