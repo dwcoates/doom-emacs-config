@@ -152,9 +152,10 @@ type Server struct {
 	// list and idle-sweep read.
 	ssm *ssm.Manager
 	// frontend fans frontend.v1 frames to the per-session /stream WebSocket.
-	frontend   *frontend.Server
-	remediator Remediator
-	registry   *registry.Registry
+	frontend      *frontend.Server
+	remediator    Remediator
+	registry      *registry.Registry
+	modelCatalogs *SessionModelCatalogs
 	// logins owns the interactive Claude login terminals, at most one per
 	// account; nil makes the login routes report the capability unconfigured.
 	logins *login.Manager
@@ -204,7 +205,8 @@ type Config struct {
 	Remediator Remediator
 	// Registry persists session records across daemon restarts. Required: it
 	// is the source of truth for which sessions exist.
-	Registry *registry.Registry
+	Registry      *registry.Registry
+	ModelCatalogs *SessionModelCatalogs
 	// Logins owns the interactive Claude login terminals; nil disables the
 	// login routes.
 	Logins *login.Manager
@@ -263,6 +265,7 @@ func New(cfg Config) *Server {
 		accounts:        cfg.Accounts,
 		remediator:      cfg.Remediator,
 		registry:        cfg.Registry,
+		modelCatalogs:   cfg.ModelCatalogs,
 		idleTimeout:     cfg.IdleTimeout,
 		idleSweepTicks:  cfg.IdleSweepTicks,
 		stopped:         make(chan struct{}),
@@ -1265,6 +1268,13 @@ func (s *Server) DaemonView() *frontendv1.DaemonView {
 // arbitrary string, and passing one through silently is precisely what the
 // backfillState precedent below exists to avoid.
 func SessionViewFromRecord(logf dlog.Logf, rec registry.Record, pendingPermissions []string, shimAttached bool) *frontendv1.SessionView {
+	return SessionViewFromRecordWithModels(logf, rec, pendingPermissions, shimAttached, nil)
+}
+
+// SessionViewFromRecordWithModels is the canonical SessionView shaper with a
+// query-published model menu. The menu does not select a model; rec.Model is
+// still the one authoritative current selection.
+func SessionViewFromRecordWithModels(logf dlog.Logf, rec registry.Record, pendingPermissions []string, shimAttached bool, modelOptions []*frontendv1.ModelOption) *frontendv1.SessionView {
 	return &frontendv1.SessionView{
 		Workspace:       rec.CWD,
 		SessionId:       rec.SessionID,
@@ -1293,7 +1303,8 @@ func SessionViewFromRecord(logf dlog.Logf, rec registry.Record, pendingPermissio
 		// webapp-initiated, daemon-executed, and reflected in pushed state.
 		ConfigDir: rec.ConfigDir,
 		// The never-blue backfill signal (F2), mapped off the durable record.
-		Backfill: backfillState(rec.BackfillState),
+		Backfill:     backfillState(rec.BackfillState),
+		ModelOptions: modelOptions,
 	}
 }
 
@@ -1338,7 +1349,11 @@ func (s *Server) pushSessionView(id string) {
 		pending = s.driver.PendingPermissions(rec.CWD)
 		live = s.driver.Live(rec.CWD)
 	}
-	s.frontend.PushSessionView(SessionViewFromRecord(s.logf, rec, pending, live))
+	var modelOptions []*frontendv1.ModelOption
+	if s.modelCatalogs != nil {
+		modelOptions = s.modelCatalogs.Get(id)
+	}
+	s.frontend.PushSessionView(SessionViewFromRecordWithModels(s.logf, rec, pending, live, modelOptions))
 }
 
 func (s *Server) handleListSessions(w http.ResponseWriter, _ *http.Request) {
