@@ -274,6 +274,15 @@ message SessionView {
   // render it the way every other failure renders. Unset while the session
   // lives.
   SystemFailureItem death = 20;
+  // The SDK-published set this session can deliberately select.  A frontend
+  // only renders these choices; it never invents or owns a model selection.
+  repeated ModelOption model_options = 21;
+}
+
+message ModelOption {
+  string value = 1;
+  string display_name = 2;
+  string description = 3;
 }
 
 // Whether a session's on-disk transcript has been backfilled into the store.
@@ -545,6 +554,7 @@ message FrontendCommand {
     DaemonHealthCmd daemon_health = 21;
     SessionHealthCmd session_health = 22;
     RestartSessionCmd restart_session = 23;
+    SetModelCmd set_model = 24;
   }
 }
 
@@ -729,7 +739,6 @@ message SessionHealthCmd {
 // Additive (S7): session creation over UDS (replaces Emacs POST /sessions).
 message CreateSessionCmd {
   string cwd = 1;
-  string model = 2;
   string permission_mode = 3;
   string config_dir = 4;
   string resume_claude_session_id = 5;  // "" = fresh
@@ -748,6 +757,14 @@ message CreateSessionCmd {
   // still rehydrates after a daemon restart, since refusing there would
   // silently change a live session's posture.
   bool allow_ungated = 7;
+}
+
+// A deliberate request to change an already-live session's model.  The daemon
+// forwards this to the shim and only publishes the shim-confirmed selection.
+// Bootstrap, rebind, and creation intentionally have no model field: they
+// observe session state rather than choosing it.
+message SetModelCmd {
+  string model = 1;
 }
 
 // Additive (S7): session teardown over UDS (replaces DELETE /sessions/{id}).
@@ -930,6 +947,10 @@ message CommandAck {
   // explicit yes. Set with ok=false and `failure` unset; the client asks the
   // user and resends InterruptCmd{confirm_agents: true}.
   InterruptConfirmRequired interrupt_confirm_required = 5;
+  // Present only for SetModelCmd.  It is the shim-confirmed current model on
+  // both success and rejection, so a frontend never needs an optimistic model
+  // state or a local recovery guess.
+  string selected_model = 6;
 }
 
 // The challenge payload: what the interrupt would actually stop, so the

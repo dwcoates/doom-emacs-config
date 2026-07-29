@@ -69,17 +69,22 @@ import {
   ShimReadySchema,
   SubmitPrompt,
   SubmitPromptSchema,
+  SetModel,
+  SetModelSchema,
 } from "./proto.js";
 import { create } from "@bufbuild/protobuf";
 
 /** A synchronous control receipt: either an Ack or a Nack. */
 export type Receipt = Ack | Nack;
+export type AsyncReceipt = Receipt | Promise<Receipt>;
 
 export interface SessionServerHandlers {
   /** Push a prompt into the SDK turn; return the sync receipt. */
   onSubmitPrompt(msg: SubmitPrompt): Receipt;
   /** Interrupt the SDK turn; return the sync receipt. */
   onInterrupt(msg: Interrupt): Receipt;
+  /** Set the live SDK model and return a receipt after the SDK settles. */
+  onSetModel(msg: SetModel): AsyncReceipt;
   /** Deliver a permission decision to the blocked canUseTool round-trip. */
   onPermissionResponse(msg: PermissionResponse): void;
   /**
@@ -416,6 +421,11 @@ export class SessionServer {
       this.sendReceipt(this.handlers.onInterrupt(interrupt));
       return;
     }
+    const setModel = unpackAs(msg, SetModelSchema);
+    if (setModel) {
+      this.sendAsyncReceipt(this.handlers.onSetModel(setModel));
+      return;
+    }
     const perm = unpackAs(msg, PermissionResponseSchema);
     if (perm) {
       this.handlers.onPermissionResponse(perm);
@@ -438,6 +448,20 @@ export class SessionServer {
       return; // liveness only; nothing to do
     }
     LOGGER.log({ level: "warn", agent_repl_session_id: this.opts.sessionId }, `unhandled control message ${envelopeType(msg)}`);
+  }
+
+  private sendAsyncReceipt(receipt: AsyncReceipt): void {
+    // Existing synchronous controls retain their same-turn ordering with SDK
+    // events. Only set-model is asynchronous because the SDK's setter itself
+    // is asynchronous; always wrapping every receipt in Promise.resolve would
+    // make an interrupt ack race an immediately-following turn result.
+    if (!(receipt instanceof Promise)) {
+      this.sendReceipt(receipt);
+      return;
+    }
+    void receipt.then((resolved) => this.sendReceipt(resolved), (err: unknown) => {
+      throw new Error(`shim control handler rejected without a receipt: ${String(err)}`);
+    });
   }
 
   /**

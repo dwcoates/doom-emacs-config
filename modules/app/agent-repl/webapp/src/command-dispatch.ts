@@ -63,7 +63,6 @@ export class InterruptConfirmRequiredError extends Error {
 
 export interface CreateSessionArgs {
   cwd: string;
-  model: string;
   permissionMode: string;
   configDir: string;
   /** "" = fresh; else resume this durable CLI conversation uuid. */
@@ -194,6 +193,11 @@ export class CommandDispatcher {
 
   deleteSession(sessionId: string): Promise<void> {
     return this.dispatch("", { case: "deleteSession", sessionId });
+  }
+
+  /** Request a model switch. The selected value remains daemon-owned. */
+  setModel(workspace: string, model: string): Promise<void> {
+    return this.dispatch(workspace, { case: "setModel", model });
   }
 
   // The held-prompt queue controls (E4). Ack-correlated, unlike clientLog:

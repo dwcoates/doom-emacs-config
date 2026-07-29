@@ -175,6 +175,7 @@ type sessionClient interface {
 	// Interrupt returns the shim's own verdict on what the stop did, which is
 	// the only place that verdict is observable.
 	Interrupt(ctx context.Context) (corev1.InterruptOutcome, error)
+	SetModel(ctx context.Context, model string) (string, error)
 	// Replay asks the shim for a bounded slice of persisted history, streaming
 	// it to onEvent. Its events arrive over the wire as ReplayEvent, a
 	// different type from live Events, which is what keeps replayed history
@@ -659,6 +660,34 @@ func (m *Manager) noteTurnEvidence(sessionID string) {
 // caller with no frontend request behind it) simply pushes no receipt.
 func (m *Manager) SubmitPrompt(ctx context.Context, workspace, requestID, text, permissionMode string) error {
 	return m.submitPrompt(ctx, workspace, requestID, text, permissionMode, "frontend")
+}
+
+// SetModel forwards a deliberate model request to the live shim, then persists
+// the shim-confirmed selection so the next respawn preserves the choice.
+func (m *Manager) SetModel(ctx context.Context, workspace, model string) (string, error) {
+	if model == "" {
+		return "", fmt.Errorf("sessiondrv: set model for workspace %q needs a non-empty model id", workspace)
+	}
+	d, err := m.ensure(ctx, workspace)
+	if err != nil {
+		return "", err
+	}
+	selected, err := d.client.SetModel(ctx, model)
+	if err != nil {
+		if selected != "" {
+			m.persistObservedModel(d.sessionID, selected)
+			m.logf("sessiondrv: model request REJECTED session=%s ws=%q requested=%q shim_selected=%q: %v", d.sessionID, workspace, model, selected, err)
+			return selected, err
+		}
+		m.logf("sessiondrv: model request FAILED session=%s ws=%q requested=%q without a shim-selected model: %v", d.sessionID, workspace, model, err)
+		return "", err
+	}
+	if selected == "" {
+		return "", fmt.Errorf("sessiondrv: shim acknowledged model request for %q without a selected model", workspace)
+	}
+	m.logf("sessiondrv: model request CONFIRMED session=%s ws=%q requested=%q selected=%q", d.sessionID, workspace, model, selected)
+	m.persistObservedModel(d.sessionID, selected)
+	return selected, nil
 }
 
 // SubmitWorkspaceInitialPrompt submits a durable workspace-create job's initial

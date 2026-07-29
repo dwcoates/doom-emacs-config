@@ -34,7 +34,6 @@ import (
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
 	"claude-repld/internal/errclass"
-	"claude-repld/internal/registry"
 )
 
 // createEstablishTimeout bounds the whole create-plus-establish round for one
@@ -73,17 +72,11 @@ type sessionEstablishment struct {
 // ends first is told so, and the establishment it was waiting on continues for
 // whoever else is waiting.
 func (h *commandHandler) CreateSession(ctx context.Context, workspace, requestID string, cmd *frontendv1.CreateSessionCmd) error {
-	h.logf("frontend cmd: create_session ws=%s request_id=%s model=%s config_dir=%s resume=%q fake=%v permission_mode=%q allow_ungated=%v",
-		workspace, requestID, cmd.GetModel(), cmd.GetConfigDir(), cmd.GetResumeClaudeSessionId(), cmd.GetFake(),
+	h.logf("frontend cmd: create_session ws=%s request_id=%s config_dir=%s resume=%q fake=%v permission_mode=%q allow_ungated=%v",
+		workspace, requestID, cmd.GetConfigDir(), cmd.GetResumeClaudeSessionId(), cmd.GetFake(),
 		cmd.GetPermissionMode(), cmd.GetAllowUngated())
-	model := registry.NormalizeModel(cmd.GetModel())
-	if model != cmd.GetModel() {
-		h.logf("frontend cmd: create_session ws=%s request_id=%s normalized model marker %q to empty (shim chooses)",
-			workspace, requestID, cmd.GetModel())
-	}
 	opts := CreateOpts{
 		CWD:            cmd.GetCwd(),
-		Model:          model,
 		PermissionMode: cmd.GetPermissionMode(),
 		ConfigDir:      cmd.GetConfigDir(),
 		Resume:         cmd.GetResumeClaudeSessionId(),

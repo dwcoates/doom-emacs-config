@@ -43,6 +43,10 @@ func (m *mockHandler) AnswerPermission(_ context.Context, ws, rid string, _ *fro
 	m.called, m.lastWorkspace, m.lastRequestID = "permission_answer", ws, rid
 	return m.err
 }
+func (m *mockHandler) SetModel(_ context.Context, ws, rid string, _ *frontendv1.SetModelCmd) (string, error) {
+	m.called, m.lastWorkspace, m.lastRequestID = "set_model", ws, rid
+	return "opus", m.err
+}
 func (m *mockHandler) MergeWorkspace(_ context.Context, ws, rid string, _ *frontendv1.MergeWorkspaceCmd) error {
 	m.called, m.lastWorkspace, m.lastRequestID = "merge_workspace", ws, rid
 	return m.err

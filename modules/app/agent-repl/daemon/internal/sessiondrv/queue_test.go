@@ -53,6 +53,7 @@ type failingClient struct {
 }
 
 func (c *failingClient) SubmitPrompt(_ context.Context, _, _, _ string) error { return c.err }
+func (c *failingClient) SetModel(_ context.Context, _ string) (string, error) { return "", c.err }
 
 // queueHarness is one workspace's driver plus the doubles around it.
 type queueHarness struct {

@@ -45,6 +45,7 @@ type PromptRouter interface {
 	SubmitPrompt(ctx context.Context, workspace, requestID, text, permissionMode string) error
 	Interrupt(ctx context.Context, workspace string) error
 	AnswerPermission(ctx context.Context, workspace, permissionRequestID string, allow bool, denyMessage string, updatedInput *structpb.Struct) error
+	SetModel(ctx context.Context, workspace, model string) (string, error)
 }
 
 // SessionRestarter hard-restarts one workspace's session: stop its shim, bring
@@ -528,6 +529,32 @@ func (h *commandHandler) AnswerPermission(ctx context.Context, workspace, reques
 		return err
 	}
 	return h.prompts.AnswerPermission(ctx, workspace, cmd.GetPermissionRequestId(), cmd.GetAllow(), cmd.GetDenyMessage(), cmd.GetUpdatedInput())
+}
+
+// SetModel relays the user's explicit request to the live shim.  It returns
+// only the shim-confirmed selection so the frontend ack cannot echo intent as
+// state.
+func (h *commandHandler) SetModel(ctx context.Context, workspace, requestID string, cmd *frontendv1.SetModelCmd) (string, error) {
+	h.logf("frontend cmd: set_model ws=%s request_id=%s requested=%q", workspace, requestID, cmd.GetModel())
+	if err := checkWorkspaceKey("set_model", workspace); err != nil {
+		return "", err
+	}
+	if cmd.GetModel() == "" {
+		return "", fmt.Errorf("frontend cmd: set_model ws=%s request_id=%s has an empty model", workspace, requestID)
+	}
+	selected, err := h.prompts.SetModel(ctx, workspace, cmd.GetModel())
+	if err != nil {
+		if selected != "" {
+			h.logf("frontend cmd: set_model REJECTED ws=%s request_id=%s requested=%q shim_selected=%q: %v", workspace, requestID, cmd.GetModel(), selected, err)
+			return selected, err
+		}
+		return "", err
+	}
+	if selected == "" {
+		return "", fmt.Errorf("frontend cmd: set_model ws=%s request_id=%s got an empty shim-confirmed model", workspace, requestID)
+	}
+	h.logf("frontend cmd: set_model CONFIRMED ws=%s request_id=%s requested=%q selected=%q", workspace, requestID, cmd.GetModel(), selected)
+	return selected, nil
 }
 
 // MergeWorkspace runs a merge, or resumes one on the conflict_resolved_continue

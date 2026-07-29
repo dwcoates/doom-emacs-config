@@ -32,6 +32,9 @@ type CommandHandler interface {
 	Interrupt(ctx context.Context, workspace, requestID string, cmd *frontendv1.InterruptCmd) error
 	// AnswerPermission answers a pending canUseTool permission request.
 	AnswerPermission(ctx context.Context, workspace, requestID string, cmd *frontendv1.PermissionAnswerCmd) error
+	// SetModel applies a user-requested model change and returns the live shim's
+	// confirmed selection for the correlated CommandAck.
+	SetModel(ctx context.Context, workspace, requestID string, cmd *frontendv1.SetModelCmd) (string, error)
 	// MergeWorkspace runs (or resumes, on conflict_resolved_continue) a merge.
 	MergeWorkspace(ctx context.Context, workspace, requestID string, cmd *frontendv1.MergeWorkspaceCmd) error
 	// CloseWorkspace closes/discards a workspace.
@@ -107,6 +110,7 @@ func DispatchWithResponse(ctx context.Context, logf dlog.Logf, h CommandHandler,
 	ws := cmd.GetWorkspace()
 
 	var err error
+	var selectedModel string
 	var response *frontendv1.FrontendFrame
 	switch c := cmd.GetCommand().(type) {
 	case *frontendv1.FrontendCommand_CreateWorkspace:
@@ -141,6 +145,8 @@ func DispatchWithResponse(ctx context.Context, logf dlog.Logf, h CommandHandler,
 		err = h.Shutdown(ctx, ws, reqID, c.Shutdown)
 	case *frontendv1.FrontendCommand_RestartSession:
 		err = h.RestartSession(ctx, ws, reqID, c.RestartSession)
+	case *frontendv1.FrontendCommand_SetModel:
+		selectedModel, err = h.SetModel(ctx, ws, reqID, c.SetModel)
 	case *frontendv1.FrontendCommand_ClientLog:
 		err = h.ClientLog(ctx, ws, reqID, c.ClientLog)
 	case *frontendv1.FrontendCommand_QueueForce:
@@ -183,9 +189,13 @@ func DispatchWithResponse(ctx context.Context, logf dlog.Logf, h CommandHandler,
 				InterruptConfirmRequired: &frontendv1.InterruptConfirmRequired{LiveTasks: challenge.LiveTasks},
 			}, nil
 		}
-		return failAck(logf, reqID, err), nil
+		ack := failAck(logf, reqID, err)
+		// A rejected SetModel carries the shim's current selection.  It is
+		// state authority for the frontend to render after its failed request.
+		ack.SelectedModel = selectedModel
+		return ack, nil
 	}
-	return &frontendv1.CommandAck{RequestId: reqID, Ok: true}, response
+	return &frontendv1.CommandAck{RequestId: reqID, Ok: true, SelectedModel: selectedModel}, response
 }
 
 // InterruptConfirmRequired is the interrupt gate's CHALLENGE, carried on the
