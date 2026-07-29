@@ -569,6 +569,14 @@ guard's UNMOCKED error if not `cl-letf'-ed)."
                (emoji (nth 1 (split-string result " "))))
           (should (equal emoji allowed)))))))
 
+(ert-deftest agent-repl-test-emoji-log-ws-nil-outside-any-workspace ()
+  "Committing from a plain Git context yields a global diagnostic, not a signal.
+The docstring already promised nil here; persp-mode's \"none\" placeholder
+was being returned instead, which owns no log sink."
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "none")))
+      (should-not (agent-repl--emoji-log-ws)))))
+
 (provide 'test-emoji)
 
 ;;; test-emoji.el ends here

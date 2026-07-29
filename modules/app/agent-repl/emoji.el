@@ -33,8 +33,13 @@ The `wildcard' category provides maximum variety for any commit type.")
 
 Magit commit buffers do not carry `agent-repl--owning-workspace', so use the
 workspace integration boundary rather than buffer ownership.  Plain Git
-contexts legitimately return nil and produce global diagnostics."
-  (agent-repl--ws-current-name))
+contexts legitimately return nil and produce global diagnostics.
+
+Screened through `agent-repl--ws-current-log-name' because this value only
+ever feeds the logging ladder: committing from outside any workspace leaves
+persp-mode's \"none\" placeholder current, which owns no log sink and would
+otherwise make the diagnostic signal instead of being recorded globally."
+  (agent-repl--ws-current-log-name))
 
 (defun agent-repl--current-branch ()
   "Return the current git branch name (string), or nil if unresolvable.

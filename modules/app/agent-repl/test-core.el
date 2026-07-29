@@ -2615,6 +2615,77 @@ unattributed teardown is visible in the log rather than silently blank."
     (should (stringp outcome))
     (should (string-match-p "REFUSING op-x off the main thread" outcome))))
 
+;;;; ---- Tests: log-sink routability ----
+
+(ert-deftest agent-repl-test-log-routable-rejects-nil-workspace ()
+  "nil is the ladder's global-sink value, never a routable workspace."
+  (agent-repl-test--with-clean-state
+    (should-not (agent-repl--ws-log-routable-p nil))))
+
+(ert-deftest agent-repl-test-log-routable-rejects-unregistered-name ()
+  "A name absent from the workspace hash owns no durable sink."
+  (agent-repl-test--with-clean-state
+    (should-not (agent-repl--ws-log-routable-p "never-registered"))))
+
+(ert-deftest agent-repl-test-log-routable-rejects-persp-placeholder ()
+  "A registered entry without `:project-dir' is a placeholder, not a sink."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "none" :repl-state :inactive)
+    (should-not (agent-repl--ws-log-routable-p "none"))))
+
+(ert-deftest agent-repl-test-log-routable-rejects-vanished-project-dir ()
+  "A registered `:project-dir' that no longer exists owns no sink."
+  (agent-repl-test--with-clean-state
+    (let ((project (make-temp-file "agent-repl-routable-gone-" t)))
+      (agent-repl--ws-put "gone-ws" :project-dir project)
+      (delete-directory project t)
+      (should-not (agent-repl--ws-log-routable-p "gone-ws")))))
+
+(ert-deftest agent-repl-test-log-routable-accepts-registered-workspace ()
+  "A registered workspace with an existing project directory owns a sink."
+  (agent-repl-test--with-clean-state
+    (let ((project (make-temp-file "agent-repl-routable-ok-" t)))
+      (unwind-protect
+          (should (agent-repl--ws-log-routable-p
+                   (progn (agent-repl--ws-put "real-ws" :project-dir project)
+                          "real-ws")))
+        (delete-directory project t)))))
+
+(ert-deftest agent-repl-test-log-routable-refusal-matches-identity-signal ()
+  "A non-nil ws the predicate refuses is one the identity resolver signals on.
+Pins the two against drift: the predicate exists so callers can avoid
+violating the invariant, which only holds while they agree."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "placeholder-ws" :repl-state :inactive)
+    (should-not (agent-repl--ws-log-routable-p "placeholder-ws"))
+    (should-error (agent-repl--workspace-log-identity "placeholder-ws"))))
+
+(ert-deftest agent-repl-test-log-routable-acceptance-matches-identity-success ()
+  "A ws the predicate accepts never makes the identity resolver signal."
+  (agent-repl-test--with-clean-state
+    (let ((project (make-temp-file "agent-repl-routable-agree-" t)))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "agree-ws" :project-dir project)
+            (should (agent-repl--ws-log-routable-p "agree-ws"))
+            (should (plist-get (agent-repl--workspace-log-identity "agree-ws")
+                               :workspace-id)))
+        (delete-directory project t)))))
+
+(ert-deftest agent-repl-test-log-from-persp-placeholder-reaches-global-sink ()
+  "A log line emitted while a persp placeholder is current must not signal.
+Regression for the boot failure: `agent-repl--ws-current-name' answers
+persp-mode's \"none\" outside any workspace, and routing that name into the
+ladder made a debug line abort `doom-init-ui-hook'."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-temp-logfile path
+      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "none"))
+                ((symbol-function 'message) #'ignore))
+        (agent-repl--log (agent-repl--ws-current-log-name) "placeholder probe")
+        (with-temp-buffer
+          (insert-file-contents path)
+          (should (string-match-p "placeholder probe" (buffer-string))))))))
+
 (provide 'test-core)
 
 ;;; test-core.el ends here
