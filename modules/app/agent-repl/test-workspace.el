@@ -1390,6 +1390,55 @@ identity-distinct string injected by `agent-repl-set-priority' from
     (fmakunbound '+workspace/kill)
     (should-not (agent-repl--ws-kill "doomed"))))
 
+;;;; ---- Tests: sidebar repaint on tab-bar departure ----
+;;
+;; A killed workspace loses its sidebar row, so the roster must be
+;; re-pushed at the kill rather than at the next 1Hz signature tick.
+
+(ert-deftest agent-repl-test-ws-kill-repaints-the-sidebar ()
+  "`--ws-kill' pushes a fresh roster after the persp is gone."
+  (agent-repl-test--with-clean-state
+    (let (pushed)
+      (cl-letf (((symbol-function '+workspace/kill) (lambda (_ws)))
+                ((symbol-function 'agent-repl--sidebar-push)
+                 (lambda () (setq pushed t))))
+        (agent-repl--ws-kill "doomed")
+        (should (eq pushed t))))))
+
+(ert-deftest agent-repl-test-ws-kill-repaints-after-the-persp-is-gone ()
+  "The repaint runs AFTER `+workspace/kill', so the roster sees the removal."
+  (agent-repl-test--with-clean-state
+    (let ((order nil))
+      (cl-letf (((symbol-function '+workspace/kill)
+                 (lambda (_ws) (push :killed order)))
+                ((symbol-function 'agent-repl--sidebar-push)
+                 (lambda () (push :pushed order))))
+        (agent-repl--ws-kill "doomed")
+        (should (equal (nreverse order) '(:killed :pushed)))))))
+
+(ert-deftest agent-repl-test-ws-persp-kill-repaints-the-sidebar ()
+  "`--ws-persp-kill' repaints too — it is the other tab-bar exit."
+  (agent-repl-test--with-clean-state
+    (let (pushed)
+      (cl-letf (((symbol-function 'persp-kill) (lambda (_ws)))
+                ((symbol-function 'agent-repl--sidebar-push)
+                 (lambda () (setq pushed t))))
+        (agent-repl--ws-persp-kill "doomed")
+        (should (eq pushed t))))))
+
+(ert-deftest agent-repl-test-ws-repaint-sidebar-survives-a-push-error ()
+  "A failing roster push never turns a teardown into an error."
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'agent-repl--sidebar-push)
+               (lambda () (error "boom"))))
+      (should-not (agent-repl--ws-repaint-sidebar "doomed" "test")))))
+
+(ert-deftest agent-repl-test-ws-repaint-sidebar-noop-without-sidebar ()
+  "The repaint is skipped when sidebar.el is not loaded."
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'agent-repl--sidebar-push) nil))
+      (should-not (agent-repl--ws-repaint-sidebar "doomed" "test")))))
+
 ;;;; ---- Tests: --ws-main-name ----
 
 (ert-deftest agent-repl-test-ws-main-name-returns-value ()

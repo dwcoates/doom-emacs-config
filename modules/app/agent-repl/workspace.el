@@ -75,6 +75,7 @@
 (declare-function magit-status "ext:magit" (&optional directory cache))
 (declare-function agent-repl--magit-status-same-window "agent-repl-magit" (dir))
 (declare-function agent-repl--path-canonical "agent-repl-core" (path))
+(declare-function agent-repl--sidebar-push "sidebar" ())
 (declare-function doom-real-buffer-list "ext:doom" (&optional buffer-list))
 (defvar persp-nil-name)
 (defvar persp-names-cache)
@@ -1061,6 +1062,11 @@ finish-workspace path."
           (agent-repl--log ws "nuke-one-workspace: post-persp-kill ws=%s in-cache=%s cache=%S"
                             ws (if (member ws persp-names-cache) "t" "nil") persp-names-cache)))
       (error (agent-repl--log ws "nuke-one-workspace: workspace-kill error: %S" err)))
+    ;; The workspace is now gone from both the hash (tombstoned, unless
+    ;; PRESERVE-ENTRY) and the tab bar, so its sidebar row is gone too.
+    ;; Repaint immediately rather than letting the row outlive its tab
+    ;; until the 1Hz signature tick notices.
+    (agent-repl--ws-repaint-sidebar ws "nuke-one-workspace")
     (agent-repl--log ws "nuke-one-workspace: DONE ws=%s all-cleanup-complete" ws)))
 
 (defun agent-repl--reorder-workspace-by-priority (ws)
@@ -1323,17 +1329,39 @@ directly or wrapping it themselves with `fboundp'."
   (and (fboundp '+workspace-exists-p)
        (+workspace-exists-p ws)))
 
+(defun agent-repl--ws-repaint-sidebar (ws reason)
+  "Push a fresh sidebar roster after WS left the tab bar, tagged REASON.
+Killing a perspective REMOVES that workspace's sidebar row
+\(`agent-repl--sidebar-rostered-p'), and a removal the user triggered
+must land at once rather than waiting on the 1Hz signature tick — the
+row would otherwise linger for up to a second after its tab vanished.
+Guarded with `fboundp' and `condition-case': the repaint is a courtesy
+on top of the tick that would eventually notice anyway, so it must
+never turn a teardown into an error."
+  (if (not (fboundp 'agent-repl--sidebar-push))
+      (agent-repl--log ws "ws-repaint-sidebar: skip ws=%s reason=%s (sidebar not loaded)" ws reason)
+    (agent-repl--log ws "ws-repaint-sidebar: pushing ws=%s reason=%s" ws reason)
+    (condition-case err
+        (agent-repl--sidebar-push)
+      (error (agent-repl--log ws "ws-repaint-sidebar: push error ws=%s reason=%s err=%S"
+                               ws reason err)))))
+
 (defun agent-repl--ws-kill (ws)
   "Kill workspace WS via `+workspace/kill'.
 No-op when `+workspace/kill' is unbound (e.g. persp-mode not loaded).
 Any error from the underlying call propagates to the caller — wrap at
 the call site with `condition-case' when teardown must stay robust.
 
+Repaints the sidebar afterwards (`agent-repl--ws-repaint-sidebar'), so
+the row this kill just removed from the roster disappears with the tab
+instead of a tick later.
+
 This is the persp-mode kill boundary owned by `workspace.el'.
 Callers must use this function instead of calling `+workspace/kill'
 directly or wrapping it themselves with `fboundp'."
   (when (fboundp '+workspace/kill)
-    (+workspace/kill ws)))
+    (prog1 (+workspace/kill ws)
+      (agent-repl--ws-repaint-sidebar ws "workspace-kill"))))
 
 (defun agent-repl--ws-main-name ()
   "Return the name of Doom's main workspace, or nil.
@@ -1751,11 +1779,16 @@ No-op when `persp-kill' is unbound.  Distinct from `--ws-kill'
 (`+workspace/kill'): this is the lower-level persp-mode kill used when
 the caller has already decided the persp should be dropped.
 
+Repaints the sidebar afterwards (`agent-repl--ws-repaint-sidebar') for
+the same reason `agent-repl--ws-kill' does: the workspace just left the
+tab bar, so its roster row is gone and the webview should say so now.
+
 This is the persp-mode low-level kill boundary owned by `workspace.el'.
 Callers must use this function instead of calling `persp-kill' directly
 or wrapping it themselves with `fboundp'."
   (when (fboundp 'persp-kill)
-    (persp-kill ws)))
+    (prog1 (persp-kill ws)
+      (agent-repl--ws-repaint-sidebar ws "persp-kill"))))
 
 (defun agent-repl--ws-remove-buffer (buffer)
   "Detach BUFFER from its perspective via `persp-remove-buffer'.

@@ -155,8 +155,13 @@ export interface FrontendCommand {
   body: FrontendCommandBody;
 }
 
-/** The protojson arm key for each command body case. */
-const ARM_KEY: Record<FrontendCommandBody["case"], string> = {
+/** The protojson arm key for each command body case.
+ *
+ * EXPORTED so a test can assert the vocabulary is CLOSED — specifically that
+ * no paint acknowledgment can be sent. Viewer-based attestation is gone: a
+ * workspace's color is connection truth, so nothing this end draws is a
+ * statement the daemon wants back. */
+export const ARM_KEY: Record<FrontendCommandBody["case"], string> = {
   submitPrompt: "submitPrompt",
   interrupt: "interrupt",
   permissionAnswer: "permissionAnswer",

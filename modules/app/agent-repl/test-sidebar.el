@@ -135,16 +135,31 @@ render state, since sidebar-but-not-tab-bar is the fact being conveyed."
 ;;;; ---- The closed (greyed) predicate ---------------------------------------
 
 (ert-deftest agent-repl-test-sidebar-closed-p-table ()
-  "Perspective-less or torn-down-REPL rows are closed; hosted ones are not."
+  "Only a torn-down REPL greys a row; perspective presence is irrelevant.
+Amended per the user's ruling that greying is RESERVED for the
+panels-dismissed condition: the `(nil :active)' row used to expect
+`t' (perspective-less was closed) and now expects nil, because a
+perspective-less workspace loses its row entirely instead of greying."
   (agent-repl-test--with-clean-state
     (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
     (dolist (case '((t :active nil) (t :inactive t)
-                    (t nil nil) (nil :active t)))
+                    (t nil nil) (nil :active nil)
+                    (nil :inactive t) (nil nil nil)))
       (cl-destructuring-bind (open repl expected) case
         (agent-repl--ws-put "ws" :repl-state repl)
         (cl-letf (((symbol-function 'agent-repl--ws-open-p)
                    (lambda (_ws) open)))
           (should (eq (agent-repl--sidebar-closed-p "ws") expected)))))))
+
+(ert-deftest agent-repl-test-sidebar-closed-p-merged-stays-greyed ()
+  "A merged workspace greys even though its REPL is not `:inactive'.
+Merged rows outlive their tab inside Recently Merged, and the ruling
+keeps that section's rendering unchanged."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws" :repl-state :merged)
+    (cl-letf (((symbol-function 'agent-repl--ws-open-p) (lambda (_ws) nil))
+              ((symbol-function 'agent-repl--ws-render-status) (lambda (_ws) :merged)))
+      (should (eq (agent-repl--sidebar-closed-p "ws") t)))))
 
 ;;;; ---- The roster universe -------------------------------------------------
 
@@ -163,6 +178,133 @@ render state, since sidebar-but-not-tab-bar is the fact being conveyed."
     (agent-repl--ws-put "dirless" :prefix-counter 1)
     (should (equal (agent-repl--sidebar-entries)
                    '(("ws" . "/tmp/ws"))))))
+
+;;;; ---- Roster membership per workspace state -------------------------------
+;;
+;; The membership axis the user's ruling settled: a workspace that left
+;; the tab bar loses its row, a workspace that still has its tab keeps
+;; one (greyed when its panes are dismissed), and merged rows are
+;; exempt.  Each test below pins exactly one of those states.  The
+;; fixtures bind `persp-names-cache' so the roster consults perspective
+;; membership rather than falling back to plain registration.
+
+(defmacro agent-repl-test--sidebar-with-persps (names &rest body)
+  "Run BODY with `persp-names-cache' bound to NAMES (a list of strings)."
+  (declare (indent 1))
+  `(let ((persp-names-cache ,names))
+     ,@body))
+
+(ert-deftest agent-repl-test-sidebar-entries-drops-perspective-less-workspace ()
+  "A live registration whose perspective was killed leaves the roster."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "kept" "/tmp/kept")
+    (agent-repl-test--sidebar-ws "gone" "/tmp/gone")
+    (agent-repl-test--sidebar-with-persps '("kept")
+      (should (equal (agent-repl--sidebar-entries)
+                     '(("kept" . "/tmp/kept")))))))
+
+(ert-deftest agent-repl-test-sidebar-entries-drops-tombstoned-workspace ()
+  "A tombstoned (nuked) registration leaves the roster even with a persp."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "kept" "/tmp/kept")
+    (agent-repl-test--sidebar-ws "tomb" "/tmp/tomb" :nuked-at 1.0)
+    (agent-repl-test--sidebar-with-persps '("kept" "tomb")
+      (should (equal (agent-repl--sidebar-entries)
+                     '(("kept" . "/tmp/kept")))))))
+
+(ert-deftest agent-repl-test-sidebar-entries-keeps-panes-closed-workspace ()
+  "A workspace that still has its tab but no panes stays in the roster."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws" :repl-state :inactive)
+    (agent-repl-test--sidebar-with-persps '("ws")
+      (should (equal (agent-repl--sidebar-entries)
+                     '(("ws" . "/tmp/ws")))))))
+
+(ert-deftest agent-repl-test-sidebar-panes-closed-workspace-renders-greyed ()
+  "The panes-closed row that survives is the one that renders greyed."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws" :repl-state :inactive)
+    (agent-repl-test--sidebar-with-persps '("ws")
+      (let* ((roster (car (agent-repl--sidebar-build)))
+             (repo (agent-repl-test--sidebar-repo roster "/repos/doom/.git"))
+             (row (agent-repl-test--sidebar-row (plist-get repo :rows) "ws")))
+        (should (eq (plist-get row :closed) t))))))
+
+(ert-deftest agent-repl-test-sidebar-entries-keeps-closed-session-live-workspace ()
+  "A tabbed workspace whose session never started keeps an ungreyed row."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws" :repl-state nil)
+    (agent-repl-test--sidebar-with-persps '("ws")
+      (let* ((roster (car (agent-repl--sidebar-build)))
+             (repo (agent-repl-test--sidebar-repo roster "/repos/doom/.git"))
+             (row (agent-repl-test--sidebar-row (plist-get repo :rows) "ws")))
+        (should row)
+        (should (eq (plist-get row :closed) :false))))))
+
+(ert-deftest agent-repl-test-sidebar-entries-keeps-perspective-less-merged ()
+  "A merged workspace survives losing its perspective — the ruling's exemption."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "merged" "/tmp/merged" :repl-state :merged)
+    (cl-letf (((symbol-function 'agent-repl--ws-render-status) (lambda (_ws) :merged)))
+      (agent-repl-test--sidebar-with-persps '("other")
+        (should (equal (agent-repl--sidebar-entries)
+                       '(("merged" . "/tmp/merged"))))))))
+
+(ert-deftest agent-repl-test-sidebar-merged-section-survives-perspective-kill ()
+  "The Recently Merged section still renders a merged, perspective-less row."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "merged" "/tmp/merged"
+                                 :repl-state :merged :merge-completed-at 100.0)
+    (cl-letf (((symbol-function 'agent-repl--ws-render-status) (lambda (_ws) :merged)))
+      (agent-repl-test--sidebar-with-persps '("other")
+        (let* ((roster (car (agent-repl--sidebar-build)))
+               (recent (plist-get roster :recentlyMerged))
+               (row (agent-repl-test--sidebar-row (plist-get recent :rows) "merged")))
+          (should row)
+          (should (eq (plist-get row :closed) t)))))))
+
+(ert-deftest agent-repl-test-sidebar-folded-repo-keeps-its-rows ()
+  "Folding a repo collapses the section without dropping its rows."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
+    (puthash "/repos/doom/.git" t agent-repl--folded-repos)
+    (agent-repl-test--sidebar-with-persps '("ws")
+      (let* ((roster (car (agent-repl--sidebar-build)))
+             (repo (agent-repl-test--sidebar-repo roster "/repos/doom/.git")))
+        (should (eq (plist-get repo :folded) t))
+        (should (agent-repl-test--sidebar-row (plist-get repo :rows) "ws"))))))
+
+(ert-deftest agent-repl-test-sidebar-kill-repaints-without-the-killed-row ()
+  "Killing a workspace pushes a roster that no longer carries its row.
+The push fires from the kill itself (`agent-repl--ws-repaint-sidebar'),
+so the row goes with the tab rather than lingering until the next tick."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "kept" "/tmp/kept")
+    (agent-repl-test--sidebar-ws "doomed" "/tmp/doomed")
+    (let ((persp-names-cache '("kept" "doomed"))
+          (scripts nil))
+      (agent-repl--ws-put "kept" :frontend-buffer (current-buffer))
+      (cl-letf (((symbol-function 'agent-repl--frontend-webview-execute-script)
+                 (lambda (_buf script) (push script scripts)))
+                ;; The kill: the persp leaves the cache, exactly as
+                ;; `+workspace/kill' would make it.
+                ((symbol-function '+workspace/kill)
+                 (lambda (ws) (setq persp-names-cache (delete ws persp-names-cache)))))
+        (agent-repl--ws-kill "doomed"))
+      (should (= (length scripts) 1))
+      (should (string-match-p "/tmp/kept" (car scripts)))
+      (should-not (string-match-p "/tmp/doomed" (car scripts))))))
+
+(ert-deftest agent-repl-test-sidebar-entries-keeps-all-when-persp-cache-unusable ()
+  "With no usable persp cache the roster falls back to plain registration.
+Absence of evidence is not evidence of absence: a nil cache would
+otherwise answer `not open' for every workspace and empty the sidebar."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "a" "/tmp/a")
+    (agent-repl-test--sidebar-ws "b" "/tmp/b")
+    (agent-repl-test--sidebar-with-persps nil
+      (should (equal (sort (mapcar #'car (agent-repl--sidebar-entries)) #'string<)
+                     '("a" "b"))))))
 
 ;;;; ---- Roster building ---------------------------------------------------
 
@@ -370,13 +512,18 @@ render state, since sidebar-but-not-tab-bar is the fact being conveyed."
       (let ((row (agent-repl--sidebar-row-plist "ws" "/tmp/ws" nil (vector))))
         (should (eq (plist-get row :closed) t))))))
 
-(ert-deftest agent-repl-test-sidebar-row-closed-when-perspective-less ()
-  "A live workspace with no open perspective serializes closed."
+(ert-deftest agent-repl-test-sidebar-row-not-closed-when-perspective-less ()
+  "A perspective-less workspace no longer serializes closed.
+Amended per the user's ruling: this test previously asserted
+closed=true for a perspective-less row.  Such a row is now dropped from
+the roster entirely (see the roster-membership tests), so the greyed
+flag it used to carry would be a contradiction — the row does not exist
+to be greyed."
   (agent-repl-test--with-clean-state
     (agent-repl-test--sidebar-ws "ws" "/tmp/ws" :repl-state :active)
     (cl-letf (((symbol-function 'agent-repl--ws-open-p) (lambda (_ws) nil)))
       (let ((row (agent-repl--sidebar-row-plist "ws" "/tmp/ws" nil (vector))))
-        (should (eq (plist-get row :closed) t))))))
+        (should (eq (plist-get row :closed) :false))))))
 
 (ert-deftest agent-repl-test-sidebar-row-hosted-not-closed ()
   "An open workspace with an `:active' REPL serializes closed=false."
