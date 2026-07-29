@@ -114,8 +114,13 @@ func (h *SessionTranscriptHandler) lifecycle(line, next *datav1.TranscriptLine, 
 	if s := line.GetSystem(); s != nil {
 		if sh := s.GetStopHookSummary(); sh != nil {
 			uuid := s.GetEnvelope().GetUuid()
-			h.log("transcript: plane=file kind=stop_hook_summary session=%s identity=%s seq=unassigned correlation=none decision=vendor_only stop_reason=%q prevented_continuation=%v",
-				ctx.SessionID, uuid, sh.GetStopReason(), sh.GetPreventedContinuation())
+			h.log.With(logging.Context{
+				Operation: "stop-hook-summary",
+				Path:      ctx.Path,
+				Session:   ctx.SessionID,
+				Task:      ctx.TaskID,
+			}).Log("plane=file kind=stop_hook_summary identity=%s seq=unassigned correlation=none decision=vendor_only stop_reason=%q prevented_continuation=%v",
+				uuid, sh.GetStopReason(), sh.GetPreventedContinuation())
 		}
 		if cb := s.GetCompactBoundary(); cb != nil {
 			out = append(out, compactedEvent(ctx.SessionID, s.GetEnvelope(), cb, next, h.log))
