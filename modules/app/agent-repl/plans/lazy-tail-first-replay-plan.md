@@ -698,3 +698,30 @@ shape that only production traffic can settle.
 3. **Whether to keep `renderRestored` for one release** rather than deleting it
    in step 6. The plan deletes it and argues why; keeping it is defensible if
    there is a rollback path that would want it.
+
+---
+
+## AMENDMENT — paint attestation has been REMOVED (Phase A)
+
+This plan predates the removal of viewer-based paint attestation, and every
+section that reasons about it is now describing machinery that no longer
+exists. Deleted end to end: the SSM's `unpainted`/`painted` tokens, its rank
+row and paint watermark, `ApplyPaintAck`/`ApplyPaintLost`, the frontend
+delivery sequencer (`frontend/paintgate.go`), the `PaintAckCmd`/`PaintOutcome`
+wire surface and `WorkspaceState.generation`, and the webapp's
+`PaintAttestation`.
+
+The law that replaced it: a workspace's color is CONNECTION TRUTH. Blue means
+there is no live backend session for this workspace; every non-blue color is a
+guarantee that the session substrate is fully wired. The SSM's WIRED axis
+(produced by sessiondrv off the bring-up gate's own ShimReady verdict) decides
+that, and no viewer's render pace has any claim on it.
+
+**What this plan needs before it is implemented:** every "painted enough"
+readiness section — the *Early ready* headline, §2's attestation walk-through,
+the paint-watermark risk row (#6), and any step whose completion condition is
+"a frontend has attested a screenful" — has to be REWORKED. Tail-first serving
+and lazy backward replay are unaffected and still stand on their own; what is
+gone is the mechanism this plan used to signal "enough has been drawn", so the
+readiness half needs a new answer (or needs to be dropped, since readiness is
+now settled by wiring rather than by rendering) before any of it is built.
