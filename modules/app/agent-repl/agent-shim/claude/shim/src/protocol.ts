@@ -8,6 +8,8 @@
  * `type` discriminator; unknown `type` values are ignored by receivers.
  */
 
+import { normalizeModel } from "./model.js";
+
 // ---------------------------------------------------------------------------
 // Common shared types
 // ---------------------------------------------------------------------------
@@ -551,7 +553,7 @@ export function decodeCommandLine(line: string): ShimCommand | null {
       // Empty is not "the default model" here, it is a caller who forgot
       // to say which model — and silently reading it as "default" would
       // switch the session to a model nobody asked for.
-      if (typeof frame.model !== "string" || frame.model === "") {
+      if (typeof frame.model !== "string" || normalizeModel(frame.model) === "") {
         throw new ProtocolError("set-model requires a non-empty model id");
       }
       break;

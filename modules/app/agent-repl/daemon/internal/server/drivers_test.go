@@ -117,6 +117,35 @@ func TestShimSpawnerSpawnsFromRegistryRecordWhenNothingIsAlive(t *testing.T) {
 	}
 }
 
+func TestShimSpawnerTreatsALegacyPlaceholderRecordLikeAnEmptyModel(t *testing.T) {
+	// Arrange — a row written by an older daemon still carries the marker.
+	reg := openTestRegistry(t)
+	if err := reg.Put(registry.Record{
+		SessionID: "s1", CWD: "/w", Model: "<synthetic>",
+	}); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+	var gotOpts CreateOpts
+	sp := NewShimSpawner(reg,
+		func(string) bool { return false },
+		func(_ string, opts CreateOpts) (func() error, error) {
+			gotOpts = opts
+			return nil, nil
+		},
+		nil)
+
+	// Act
+	_, err := sp.EnsureShim(context.Background(), "s1")
+
+	// Assert — legacy poison has exactly the same spawn semantics as empty.
+	if err != nil {
+		t.Fatalf("EnsureShim: %v", err)
+	}
+	if gotOpts.Model != "" {
+		t.Fatalf("spawn model = %q, want empty", gotOpts.Model)
+	}
+}
+
 func TestShimSpawnerErrorsWhenNoRecordToSpawnFrom(t *testing.T) {
 	// Arrange — no listener AND no registry record: nothing to reconstruct
 	// CreateOpts from, so it is a loud error.

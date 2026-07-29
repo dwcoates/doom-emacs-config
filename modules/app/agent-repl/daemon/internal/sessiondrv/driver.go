@@ -747,21 +747,23 @@ func (m *Manager) persistBackfillState(sessionID, state string) {
 // A session whose model changed mid-life was therefore relaunched as the
 // original model after each hibernation, silently undoing the change.
 //
-// THE PLACEHOLDER IS NEVER ADOPTED. The CLI reports `<synthetic>` when it has
-// no real model to name, and writing that down would poison the record with a
-// value nothing can be spawned under. An unusable answer is dropped loudly
-// rather than persisted (see registry.IsPlaceholderModel).
+// THE PLACEHOLDER MEANS EMPTY. The CLI reports `<synthetic>` when it has no
+// real model to name. Normalize it to the same empty representation and do not
+// overwrite a record that may already hold the last real observed model.
 //
 // No-op without a registrar (a test harness).
 func (m *Manager) persistObservedModel(sessionID, model string) {
-	if m.cfg.Registrar == nil || model == "" {
+	if m.cfg.Registrar == nil {
 		return
 	}
-	if registry.IsPlaceholderModel(model) {
-		m.logf("sessiondrv: session %s reported model %q — the CLI's placeholder, NOT a model; leaving the record's model alone", sessionID, model)
+	normalized := registry.NormalizeModel(model)
+	if normalized == "" {
+		if model != "" {
+			m.logf("sessiondrv: session %s reported model marker %q — normalized to empty; leaving the record's model alone", sessionID, model)
+		}
 		return
 	}
-	m.cfg.Registrar.SessionModelObserved(sessionID, model)
+	m.cfg.Registrar.SessionModelObserved(sessionID, normalized)
 }
 
 // persistSessionDeath marks the session's record terminal with the reason its

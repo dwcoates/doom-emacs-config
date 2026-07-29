@@ -53,6 +53,7 @@
 import { create, fromJson } from "@bufbuild/protobuf";
 import type { JsonObject, JsonValue } from "@bufbuild/protobuf";
 import { anyPack, ListValueSchema, type ListValue } from "@bufbuild/protobuf/wkt";
+import { normalizeModel } from "../model.js";
 import { bindLog } from "../uds/log.js";
 import {
   EventClass,
@@ -1048,6 +1049,19 @@ function buildAuthStatus(message: Record<string, unknown>, r: Reader): Built {
 // ---------------------------------------------------------------------------
 
 function buildSystemInit(message: Record<string, unknown>, r: Reader, label: string, opts?: ConvertOptions): Built {
+  const rawModel = r.str("model");
+  const model = normalizeModel(rawModel);
+  const sessionId = r.str("session_id", "sessionId");
+  if (model !== rawModel) {
+    LOGGER.log(
+      {
+        ...(sessionId === "" ? {} : { claude_session_id: sessionId }),
+        reported_model: rawModel,
+        normalized_model: model,
+      },
+      "normalized empty-equivalent system:init model",
+    );
+  }
   const init = create(SystemInitSchema, {
     agents: r.strList("agents"),
     apiKeySource: apiKeySourceEnum(r.str("api_key_source", "apiKeySource")),
@@ -1056,14 +1070,14 @@ function buildSystemInit(message: Record<string, unknown>, r: Reader, label: str
     cwd: r.str("cwd"),
     tools: r.strList("tools"),
     mcpServers: convertMcpServers(r.arr("mcp_servers", "mcpServers")),
-    model: r.str("model"),
+    model,
     permissionMode: r.str("permission_mode", "permissionMode"),
     slashCommands: r.strList("slash_commands", "slashCommands"),
     outputStyle: r.str("output_style", "outputStyle"),
     skills: r.strList("skills"),
     plugins: convertPlugins(r.arr("plugins")),
     uuid: uuidOf(message),
-    sessionId: r.str("session_id", "sessionId"),
+    sessionId,
     fastModeState: r.str("fast_mode_state", "fastModeState"),
     // Corpus-observed init fields the SystemInit proto now models as typed data.
     capabilities: r.strList("capabilities"),
@@ -1458,9 +1472,17 @@ function convertApiUserMessage(raw: Record<string, unknown>) {
 
 function convertApiAssistantMessage(raw: Record<string, unknown>) {
   const content = Array.isArray(raw["content"]) ? convertBlocks(raw["content"]) : [];
+  const rawModel = strOf(raw["model"]);
+  const model = normalizeModel(rawModel);
+  if (model !== rawModel) {
+    LOGGER.log(
+      { message_id: strOf(raw["id"]), reported_model: rawModel, normalized_model: model },
+      "normalized empty-equivalent assistant model",
+    );
+  }
   return create(ApiAssistantMessageSchema, {
     id: strOf(raw["id"]),
-    model: strOf(raw["model"]),
+    model,
     content,
     stopReason: strOf(raw["stop_reason"]),
     stopSequence: strOf(raw["stop_sequence"]),
