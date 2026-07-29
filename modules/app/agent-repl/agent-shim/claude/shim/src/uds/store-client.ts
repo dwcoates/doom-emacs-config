@@ -460,7 +460,8 @@ export class StoreClient {
               }
               finish(true, "");
             },
-            onClose: (err) => finish(false, err ? `store health connection lost: ${err.message}` : "store closed health connection"),
+            // MessageConn already owns any causal framing/socket error.
+            onClose: (err) => finish(false, err ? "store health transport closed after a framing failure" : "store closed health connection"),
           },
           COMPONENT,
         );
@@ -568,6 +569,7 @@ export class StoreClient {
    * fails drops the batch exactly as a down connection always did.
    */
   write(events: Event[]): Promise<StoreWriteAck> {
+    LOGGER.logVerbose({ agent_repl_session_id: this.opts.sessionId, store_key: this.storeKey, event_count: events.length, event_kinds: events.map(envelopeKind) }, "queueing persistent event batch for store write");
     // The ack promise is built HERE and handed to the send, because the two
     // settle on different clocks: the send chains (so batches reach the wire in
     // call order even when the first is waiting on a redial), while the ack
@@ -619,6 +621,7 @@ export class StoreClient {
       pending.reject(new Error(`store-client: write failed to send: ${why}`));
       return;
     }
+    LOGGER.logVerbose({ agent_repl_session_id: this.opts.sessionId, store_key: this.storeKey, event_count: pending.events.length, pending_acks: this.pendingWrites.length + 1 }, "persistent event batch issued to store");
     this.pendingWrites.push(pending);
   }
 
@@ -689,7 +692,9 @@ export class StoreClient {
   private onSubClose(conn: MessageConn, err: Error | null): void {
     if (this.subConn !== conn) return; // superseded or deliberately closed
     this.subConn = null;
-    const reason = err ? `store subscription lost: ${err.message}` : `store subscription closed`;
+    // MessageConn already owns any causal framing/socket error. This reason
+    // describes the semantic loss of the subscription without re-recording it.
+    const reason = err ? "store subscription lost after a framing failure" : "store subscription closed";
     // The daemon's view goes stale without the tail; report honestly.
     this.degrade(reason, 0);
   }
@@ -710,6 +715,9 @@ export class StoreClient {
       // Expected overlap with the file plane; debug-level, not an anomaly.
       LOGGER.log({ agent_repl_session_id: this.opts.sessionId, accepted: ack.accepted, deduped: ack.deduped, last_seq: ack.lastSeq }, `batch acked`);
     }
+    if (ack.deduped === 0n) {
+      LOGGER.logVerbose({ agent_repl_session_id: this.opts.sessionId, accepted: ack.accepted, last_seq: ack.lastSeq, pending_acks: this.pendingWrites.length }, "store accepted persistent event batch");
+    }
     pending.resolve(ack);
   }
 
@@ -717,7 +725,8 @@ export class StoreClient {
     this.stopHeartbeat();
     this.connected = false;
     this.conn = null;
-    const reason = err ? `store connection lost: ${err.message}` : `store connection closed`;
+    // MessageConn already owns any causal framing/socket error.
+    const reason = err ? "store producer connection lost after a framing failure" : "store connection closed";
     // Every in-flight write is now a dropped batch (no spill, no retry).
     const pending = this.pendingWrites.splice(0);
     for (const p of pending) {
@@ -819,7 +828,8 @@ export class StoreClient {
                 finish(true, `hit the ${opts.maxEvents}-event cap before reaching seq ${opts.toSeq}`);
               }
             },
-            onClose: (err) => finish(true, err ? `replay subscription lost: ${err.message}` : `store closed the replay subscription`),
+            // MessageConn owns the causal error; replay owns only truncation.
+            onClose: (err) => finish(true, err ? "replay subscription lost after a framing failure" : "store closed the replay subscription"),
           },
           COMPONENT,
         );

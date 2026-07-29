@@ -1,6 +1,9 @@
 package server
 
 import (
+	"bytes"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -25,6 +28,7 @@ type harness struct {
 	srv  *Server
 	db   *db.DB
 	path string
+	done <-chan struct{}
 }
 
 // start brings up a server on a short UDS path (macOS sun_path limit) with the
@@ -49,9 +53,16 @@ func start(t *testing.T, buffer int, log *logging.Logger) *harness {
 		t.Fatalf("Listen: %v", err)
 	}
 	srv := New(database, log, buffer)
-	go srv.Serve(ln)
-	t.Cleanup(func() { srv.Close() })
-	return &harness{srv: srv, db: database, path: sockPath}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = srv.Serve(ln)
+	}()
+	t.Cleanup(func() {
+		_ = srv.Close()
+		<-done
+	})
+	return &harness{srv: srv, db: database, path: sockPath, done: done}
 }
 
 func testLogger() *logging.Logger { return logging.New(io.Discard, io.Discard, false) }
@@ -218,6 +229,61 @@ func TestHealthCheckCanPrecedeTheFirstProducerWrite(t *testing.T) {
 	}
 }
 
+func TestEmptySubscribeLogsCanonicalProtocolRejection(t *testing.T) {
+	var logs bytes.Buffer
+	h := start(t, 0, logging.New(&logs, io.Discard, false).With(logging.Fields{Component: "server", Socket: "store.sock"}))
+	conn := h.dial(t)
+	send(t, conn, &corev1.Subscribe{})
+	conn.SetReadDeadline(time.Now().Add(time.Second))
+	if _, err := wire.ReadAny(conn); err == nil {
+		t.Fatal("empty subscription unexpectedly received a response")
+	}
+	if err := h.srv.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	<-h.done
+
+	record, found := findLoggedRecord(t, logs.Bytes(), "subscribe", "error")
+	if !found {
+		t.Fatalf("empty-subscribe rejection log missing: %s", logs.String())
+	}
+	if record.Context["component"] != "server" || record.Context["socket"] != "store.sock" || record.Context["subscriber"] == "" {
+		t.Fatalf("empty-subscribe rejection lacks canonical connection context: %#v", record)
+	}
+}
+
+func TestCloseLogsListenerFailure(t *testing.T) {
+	var logs bytes.Buffer
+	closeErr := errors.New("listener close failed")
+	srv := &Server{
+		log:   logging.New(&logs, io.Discard, false).With(logging.Fields{Component: "server", Socket: "store.sock"}),
+		ln:    failingListener{err: closeErr},
+		conns: make(map[net.Conn]struct{}),
+	}
+	if err := srv.Close(); !errors.Is(err, closeErr) {
+		t.Fatalf("Close error = %v, want listener failure", err)
+	}
+
+	record, found := findLoggedRecord(t, logs.Bytes(), "close-listener", "error")
+	if !found {
+		t.Fatalf("listener-close error record missing: %s", logs.String())
+	}
+	if record.Level != "error" || record.Context["component"] != "server" || record.Context["socket"] != "store.sock" {
+		t.Fatalf("listener-close error lacks canonical context: %#v", record)
+	}
+}
+
+type failingListener struct{ err error }
+
+func (l failingListener) Accept() (net.Conn, error) { return nil, l.err }
+func (l failingListener) Close() error              { return l.err }
+func (l failingListener) Addr() net.Addr            { return fakeAddr("store.sock") }
+
+type fakeAddr string
+
+func (a fakeAddr) Network() string { return "unix" }
+func (a fakeAddr) String() string  { return string(a) }
+
 func TestReplayFromMidSeq(t *testing.T) {
 	// Arrange
 	h := start(t, 0, testLogger())
@@ -378,9 +444,39 @@ func findLine(lines []string, operation string) string {
 	return ""
 }
 
+func findLineContaining(lines []string, operation, message string) string {
+	for _, l := range lines {
+		if strings.Contains(l, `"operation":"`+operation+`"`) && strings.Contains(l, message) {
+			return l
+		}
+	}
+	return ""
+}
+
+type loggedRecord struct {
+	Level     string         `json:"level"`
+	Operation string         `json:"operation"`
+	Session   string         `json:"claude_session_id"`
+	Context   map[string]any `json:"context"`
+}
+
+func findLoggedRecord(t *testing.T, logs []byte, operation, level string) (loggedRecord, bool) {
+	t.Helper()
+	for _, line := range bytes.Split(bytes.TrimSpace(logs), []byte("\n")) {
+		var record loggedRecord
+		if err := json.Unmarshal(line, &record); err != nil {
+			t.Fatalf("server record is not JSON: %v", err)
+		}
+		if record.Operation == operation && record.Level == level {
+			return record, true
+		}
+	}
+	return loggedRecord{}, false
+}
+
 func TestIngestLineLogsBatchFacts(t *testing.T) {
 	// Arrange
-	logf, drain := collectLogs(16)
+	logf, drain := collectLogs(64)
 	h := start(t, 0, logf)
 	prod := h.dial(t)
 
@@ -388,9 +484,9 @@ func TestIngestLineLogsBatchFacts(t *testing.T) {
 	send(t, prod, write(vAssistantStream(t, "s1", "A"), vAssistantStream(t, "s1", "B")))
 	recvAck(t, prod)
 
-	// Assert: exactly one ingest line carrying the batch's facts.
-	got := findLine(drain(), "ingest")
+	// Assert: the server's durable-batch outcome carries the batch's facts.
 	want := "persisted batch events=2 accepted=2 deduped=0 last_seq=2 ingest_ms="
+	got := findLineContaining(drain(), "ingest", want)
 	if !strings.Contains(got, want) {
 		t.Fatalf("ingest line = %q, want message containing %q", got, want)
 	}
@@ -398,7 +494,7 @@ func TestIngestLineLogsBatchFacts(t *testing.T) {
 
 func TestIngestLineSilentForEphemeralOnlyBatch(t *testing.T) {
 	// Arrange
-	logf, drain := collectLogs(16)
+	logf, drain := collectLogs(64)
 	h := start(t, 0, logf)
 	prod := h.dial(t)
 

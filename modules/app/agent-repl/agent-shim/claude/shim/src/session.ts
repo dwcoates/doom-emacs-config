@@ -29,7 +29,7 @@ import {
 
 /** Log component for this session's loud anomaly lines. */
 const LOG_COMPONENT = "claude-shim-session";
-const LOGGER = bindLog({ component: LOG_COMPONENT, operation: "shim.session.interrupt-anomaly" });
+const LOGGER = bindLog({ component: LOG_COMPONENT, operation: "shim.session.lifecycle" });
 
 // ---------------------------------------------------------------------------
 // SDK boundary types (structural, so tests can inject fakes)
@@ -187,6 +187,7 @@ export class ShimSession {
    * caller decides whether to await it.
    */
   start(): Promise<void> {
+    LOGGER.log({ agent_repl_session_id: this.deps.sessionId, permission_mode: this.deps.initialPermissionMode, shim_version: this.deps.shimVersion, sdk_version: this.deps.sdkVersion }, "starting SDK session pump");
     this.query = this.deps.createQuery(this.input, this.canUseTool);
     this.deps.emit({
       type: "ready",
@@ -206,6 +207,7 @@ export class ShimSession {
   /** Handle one raw NDJSON line from the daemon. */
   handleLine(line: string): void {
     if (line.trim() === "") return;
+    LOGGER.logVerbose({ agent_repl_session_id: this.deps.sessionId, line_length: line.length }, "received daemon command line");
     let cmd: ShimCommand | null;
     try {
       cmd = decodeCommandLine(line);
@@ -226,11 +228,13 @@ export class ShimSession {
    */
   handleStdinEnd(): void {
     if (this.closed || this.shutdownRequestId !== null) return;
+    LOGGER.log({ agent_repl_session_id: this.deps.sessionId }, "stdin ended; beginning SDK session shutdown");
     this.shutdownRequestId = "";
     this.input.end();
   }
 
   private handleCommand(cmd: ShimCommand): void {
+    LOGGER.log({ agent_repl_session_id: this.deps.sessionId, request_id: cmd.request_id, command: cmd.type, turns_in_flight: this.turnsInFlight }, "dispatching daemon command");
     if (this.shutdownRequestId !== null) {
       this.emitError(
         "shutdown_in_progress",
@@ -254,6 +258,7 @@ export class ShimSession {
         if (this.turnsInFlight > 0) {
           this.interruptRequested = true;
         }
+        LOGGER.log({ agent_repl_session_id: this.deps.sessionId, request_id: cmd.request_id, turns_in_flight: this.turnsInFlight, marks_current_turn_aborted: this.turnsInFlight > 0 }, "forwarding interrupt to SDK");
         this.cancelPendingPermissions();
         void this.query!.interrupt()
           .then((receipt) => {
@@ -297,6 +302,7 @@ export class ShimSession {
   private ackOnSettled(type: string, requestId: RequestId, call: Promise<void>): void {
     void call
       .then(() => {
+        LOGGER.log({ agent_repl_session_id: this.deps.sessionId, request_id: requestId, command: type }, "SDK command completed");
         this.deps.emit({
           type: "ack",
           session_id: this.deps.sessionId,
@@ -375,6 +381,7 @@ export class ShimSession {
   }
 
   private emitCommands(commands: SlashCommand[]): void {
+    LOGGER.log({ agent_repl_session_id: this.deps.sessionId, command_count: commands.length }, "publishing supported commands");
     this.deps.emit({
       type: "commands",
       session_id: this.deps.sessionId,
@@ -388,6 +395,7 @@ export class ShimSession {
       typeof cmd.content === "string"
         ? [{ type: "text", text: cmd.content }]
         : cmd.content;
+    LOGGER.log({ agent_repl_session_id: this.deps.sessionId, request_id: cmd.request_id, content_kind: typeof cmd.content === "string" ? "text" : "blocks", content_blocks: content.length, turns_in_flight: this.turnsInFlight }, "accepted user prompt into SDK input queue");
     this.input.push({
       type: "user",
       message: { role: "user", content },
@@ -407,6 +415,7 @@ export class ShimSession {
       return;
     }
     this.pendingPermissions.delete(cmd.request_id);
+    LOGGER.log({ agent_repl_session_id: this.deps.sessionId, request_id: cmd.request_id, decision: cmd.decision.behavior, pending_count: this.pendingPermissions.size }, "received daemon permission decision");
     if (cmd.decision.behavior === "allow") {
       pending.resolve({
         behavior: "allow",
@@ -429,6 +438,7 @@ export class ShimSession {
     const requestId = this.deps.newRequestId();
     return new Promise<PermissionResultLike>((resolve) => {
       this.pendingPermissions.set(requestId, { resolve, input });
+      LOGGER.log({ agent_repl_session_id: this.deps.sessionId, request_id: requestId, tool_name: toolName, tool_use_id: options.toolUseID ?? "", input_keys: Object.keys(input), pending_count: this.pendingPermissions.size }, "SDK tool permission request opened");
       options.signal.addEventListener("abort", () => {
         if (this.pendingPermissions.delete(requestId)) {
           resolve({ behavior: "deny", message: "permission request aborted" });
@@ -462,12 +472,14 @@ export class ShimSession {
   ): void {
     const anomaly = describeInterruptSurvivors(receipt);
     if (anomaly === null) return;
-    LOGGER.log({ level: "error", agent_repl_session_id: this.deps.sessionId, request_id: requestId }, anomaly);
     this.emitError("sdk_throw", anomaly, requestId);
   }
 
   /** Unblock any pending SDK permission waits (interrupt/shutdown). */
   private cancelPendingPermissions(): void {
+    if (this.pendingPermissions.size > 0) {
+      LOGGER.log({ agent_repl_session_id: this.deps.sessionId, pending_count: this.pendingPermissions.size }, "cancelling pending SDK permission requests");
+    }
     for (const [id, pending] of this.pendingPermissions) {
       this.pendingPermissions.delete(id);
       pending.resolve({ behavior: "deny", message: "permission request cancelled" });
@@ -490,6 +502,7 @@ export class ShimSession {
   private close(reason: "shutdown" | "sdk_end" | "fatal_error", exitCode: number): void {
     if (this.closed) return;
     this.closed = true;
+    LOGGER.log({ agent_repl_session_id: this.deps.sessionId, reason, exit_code: exitCode, turns_in_flight: this.turnsInFlight }, "closing SDK session");
     this.cancelPendingPermissions();
     this.deps.emit({
       type: "closed",
@@ -506,6 +519,7 @@ export class ShimSession {
   // -------------------------------------------------------------------------
 
   private mapSdkMessage(msg: SdkMessageLike): void {
+    LOGGER.logVerbose({ agent_repl_session_id: this.deps.sessionId, sdk_type: msg.type, sdk_uuid: msg.uuid ?? "" }, "mapping SDK message to Layer-1 event");
     switch (msg.type) {
       case "stream_event":
         this.deps.emit({
@@ -568,6 +582,7 @@ export class ShimSession {
       default:
         // Unknown SDK message types are dropped: Layer 1 has no frame for
         // them and receivers must not see undefined shapes.
+        LOGGER.log({ level: "warn", agent_repl_session_id: this.deps.sessionId, sdk_type: msg.type }, "dropping SDK message with no Layer-1 mapping");
         break;
     }
   }
@@ -682,6 +697,7 @@ export class ShimSession {
     if (subtype === "success" && typeof msg.result === "string") {
       evt.result = msg.result;
     }
+    LOGGER.log({ agent_repl_session_id: this.deps.sessionId, result_subtype: subtype, is_error: evt.is_error, turns_in_flight: this.turnsInFlight }, "mapped SDK result event");
     this.deps.emit(evt);
   }
 
@@ -715,6 +731,7 @@ export class ShimSession {
     requestId?: RequestId,
     stack?: string,
   ): void {
+    LOGGER.log({ level: "error", agent_repl_session_id: this.deps.sessionId, ...(requestId ? { request_id: requestId } : {}), code, stack }, `emitting shim error event: ${message}`);
     this.deps.emit({
       type: "error",
       session_id: this.deps.sessionId,

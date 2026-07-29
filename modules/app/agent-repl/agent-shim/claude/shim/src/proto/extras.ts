@@ -253,11 +253,19 @@ export class Reader {
 export function unparsedEvent(
   raw: string | Uint8Array,
   error: string,
-  fields: { sessionId?: string; requestId?: string; producedAtMs?: number } = {},
+  fields: {
+    sessionId?: string;
+    requestId?: string;
+    producedAtMs?: number;
+    /** False when the converter already emitted the owning causal record. */
+    log?: boolean;
+  } = {},
 ): Event {
   const bytes = typeof raw === "string" ? new TextEncoder().encode(raw) : raw;
   const capped = bytes.length > RAW_CAP_BYTES ? bytes.subarray(0, RAW_CAP_BYTES) : bytes;
-  LOGGER.log({ level: "error", ...(fields.sessionId === undefined ? {} : { claude_session_id: fields.sessionId }), error, raw_bytes: bytes.length }, `UNPARSED event (${error}); ${bytes.length} raw bytes preserved`);
+  if (fields.log !== false) {
+    LOGGER.log({ level: "error", ...(fields.sessionId === undefined ? {} : { claude_session_id: fields.sessionId }), error, raw_bytes: bytes.length }, `UNPARSED event (${error}); ${bytes.length} raw bytes preserved`);
+  }
   return create(EventSchema, {
     sessionId: fields.sessionId ?? "",
     seq: 0n,

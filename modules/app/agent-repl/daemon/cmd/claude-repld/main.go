@@ -368,8 +368,8 @@ func main() {
 		loginBin = "claude"
 	}
 	logins := login.NewManager(login.Config{
-		Start: login.SpawnVendor([]string{loginBin, "/login"}),
-		Logf:  legacyLog,
+		Start:  login.SpawnVendor([]string{loginBin, "/login"}),
+		Logger: daemonLog,
 	})
 	defer logins.CloseAll()
 

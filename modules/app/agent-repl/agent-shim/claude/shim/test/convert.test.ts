@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it } from "vitest";
-import { readFileSync, readdirSync } from "node:fs";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { readFileSync, readdirSync, writeSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { toJson } from "@bufbuild/protobuf";
 import type { JsonObject, JsonValue } from "@bufbuild/protobuf";
@@ -35,6 +35,20 @@ function loadStream(name: string): Record<string, unknown> {
 function loadToolResult(name: string): unknown {
   const line = readFileSync(new URL(`../../../../testdata/corpus/tool-results/${name}.jsonl`, import.meta.url), "utf8").split("\n")[0]!;
   return (JSON.parse(line) as Record<string, unknown>)["toolUseResult"];
+}
+
+function persistedLogs(): Array<Record<string, unknown>> {
+  const calls = vi.mocked(writeSync).mock.calls as unknown as Array<[number, Buffer, number, number]>;
+  return calls.map(([, bytes, offset, length]) =>
+    JSON.parse(bytes.subarray(offset, offset + length).toString("utf8")) as Record<string, unknown>,
+  );
+}
+
+function converterErrors(): Array<Record<string, unknown>> {
+  return persistedLogs().filter((record) =>
+    record["level"] === "error" &&
+    record["operation"] === "shim.convert.vendor-message",
+  );
 }
 
 /** Unpack the vendor Any of a convert() result into a ClaudeStreamMessage. */
@@ -894,27 +908,70 @@ describe("SDK 0.3.220 stream families", () => {
  * UnknownRecord passthrough is for an unrecognized DISCRIMINATOR.
  */
 describe("UnparsedEvent hard-error path (known shape, failed conversion)", () => {
-  it("a message with no type is unparsed", () => {
-    const result = convert({ foo: "bar" });
+  it("a non-object is unparsed with one safe canonical error", () => {
+    vi.mocked(writeSync).mockClear();
+    const result = convert("sensitive raw payload");
     expect(result.vendor.payload.case).toBe("unparsed");
+    expect(result.lifecycle).toEqual([]);
+    expect(converterErrors()).toHaveLength(1);
+    expect(converterErrors()[0]).toMatchObject({
+      message: "SDK message emitted as UnparsedEvent",
+      context: expect.objectContaining({
+        sdk_type: "<non-object>",
+        reason: "message is not a JSON object",
+        input_kind: "string",
+      }),
+    });
+    expect(JSON.stringify(converterErrors()[0])).not.toContain("sensitive raw payload");
+  });
+
+  it("a message with no type is unparsed", () => {
+    vi.mocked(writeSync).mockClear();
+    const result = convert({ foo: "bar", session_id: "s-missing", request_id: "r-missing" });
+    expect(result.vendor.payload.case).toBe("unparsed");
+    expect(result.lifecycle).toEqual([]);
+    expect(converterErrors()).toHaveLength(1);
+    expect(converterErrors()[0]).toMatchObject({
+      claude_session_id: "s-missing",
+      request_id: "r-missing",
+      context: expect.objectContaining({
+        sdk_type: "<missing>",
+        reason: "message has no string `type` discriminator",
+      }),
+    });
+    expect(JSON.stringify(converterErrors()[0])).not.toContain("\"foo\"");
   });
 
   it("a user message missing `message` is unparsed with the producer stamped", () => {
     // `user` IS a modeled type, so its shape is an expectation the record
     // violated — a hard error, never the passthrough arm.
-    const result = convert({ type: "user", session_id: "s" });
+    vi.mocked(writeSync).mockClear();
+    const result = convert({ type: "user", session_id: "s", request_id: "r-user" });
     expect(result.vendor.payload.case).toBe("unparsed");
     if (result.vendor.payload.case !== "unparsed") throw new Error("case");
     expect(result.vendor.payload.value.producer).toBe("claude-shim");
+    expect(result.lifecycle).toEqual([]);
+    expect(converterErrors()).toHaveLength(1);
+    expect(converterErrors()[0]).toMatchObject({
+      claude_session_id: "s",
+      request_id: "r-user",
+      context: expect.objectContaining({
+        sdk_type: "user",
+        reason: "user message missing `message`",
+      }),
+    });
   });
 
   it("a stream_event with an unusable delta arm is unparsed", () => {
+    vi.mocked(writeSync).mockClear();
     const result = convert({
       type: "stream_event",
       session_id: "s",
       event: { type: "content_block_delta", index: 0, delta: { type: "no_such_delta" } },
     });
     expect(result.vendor.payload.case).toBe("unparsed");
+    expect(result.lifecycle).toEqual([]);
+    expect(converterErrors()).toHaveLength(1);
   });
 });
 

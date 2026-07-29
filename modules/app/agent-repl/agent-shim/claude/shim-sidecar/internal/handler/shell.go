@@ -38,12 +38,15 @@ type ShellOutputHandler struct {
 
 // NewShellOutputHandler builds a handler.
 func NewShellOutputHandler(log *logging.Bound) *ShellOutputHandler {
+	log.With(logging.Context{Operation: "shell-handler-new"}).LogVerbose("constructing shell output handler")
 	return &ShellOutputHandler{log: log}
 }
 
 // Handle implements Handler.
 func (h *ShellOutputHandler) Handle(frames []tail.Frame, ctx *Context) []*corev1.Event {
+	h.log.With(logging.Context{Operation: "shell-handle", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).LogVerbose("handling frames=%d bytes_observed=%d", len(frames), ctx.BytesObserved)
 	if len(frames) == 0 {
+		h.log.With(logging.Context{Operation: "shell-handle", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).LogVerbose("no frames to convert")
 		return nil
 	}
 	events := []*corev1.Event{taskProgressEvent(ctx.SessionID, corev1.Plane_PLANE_FILE, &corev1.TaskProgress{
@@ -54,6 +57,7 @@ func (h *ShellOutputHandler) Handle(frames []tail.Frame, ctx *Context) []*corev1
 
 	code, ok := trailingExitCode(frames[0].Raw, frames[0].Offset)
 	if !ok {
+		h.log.With(logging.Context{Operation: "shell-handle", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).LogVerbose("no terminal exit marker in batch events=%d", len(events))
 		return events
 	}
 	status := corev1.TerminalStatus_TERMINAL_STATUS_DONE
@@ -61,13 +65,15 @@ func (h *ShellOutputHandler) Handle(frames []tail.Frame, ctx *Context) []*corev1
 		status = corev1.TerminalStatus_TERMINAL_STATUS_ERROR
 	}
 	h.log.With(logging.Context{Operation: "exit-marker", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).Log("EXIT=%d status=%s", code, status)
-	return append(events, taskEndedEvent(ctx.SessionID, corev1.Plane_PLANE_FILE, &corev1.TaskEnded{
+	events = append(events, taskEndedEvent(ctx.SessionID, corev1.Plane_PLANE_FILE, &corev1.TaskEnded{
 		TaskId:     ctx.TaskID,
 		Kind:       corev1.TaskKind_TASK_KIND_SHELL,
 		Status:     status,
 		OutputPath: ctx.Path,
 		Inference:  "exit-marker",
 	}))
+	h.log.With(logging.Context{Operation: "shell-handle", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).LogVerbose("terminal marker converted events=%d", len(events))
+	return events
 }
 
 // trailingExitCode reads the `EXIT=<code>` terminator off the END of a raw

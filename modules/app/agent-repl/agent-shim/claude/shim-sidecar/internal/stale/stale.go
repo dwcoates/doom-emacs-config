@@ -63,10 +63,11 @@ type taskKey struct {
 // Tracker tracks open detached tasks and infers LOST transitions. Safe for
 // concurrent use (the poll loop and the sweep timer both touch it).
 type Tracker struct {
-	mu    sync.Mutex
-	tasks map[taskKey]*task
-	opt   Options
-	log   *logging.Bound
+	mu             sync.Mutex
+	tasks          map[taskKey]*task
+	restoreFailure string
+	opt            Options
+	log            *logging.Bound
 }
 
 // New builds a Tracker.
@@ -83,14 +84,19 @@ func New(opt Options, log *logging.Bound) *Tracker {
 	if opt.WorkflowSilence == 0 {
 		opt.WorkflowSilence = DefaultWorkflowSilence
 	}
+	log.With(logging.Context{Operation: "stale-new"}).LogVerbose("constructing tracker grace=%s shell_silence=%s agent_silence=%s workflow_silence=%s", opt.Grace, opt.ShellSilence, opt.AgentSilence, opt.WorkflowSilence)
 	return &Tracker{tasks: map[taskKey]*task{}, opt: opt, log: log}
 }
 
 // Open registers (or refreshes) an open task. startedAtMs is the launch/observed
 // time; nowMs seeds last-activity.
 func (t *Tracker) Open(id string, kind tail.Kind, session, outputPath string, startedAtMs, nowMs int64) {
+	t.log.With(logging.Context{Operation: "stale-open", Session: session, Task: id, Path: outputPath}).LogVerbose("open requested kind=%d started_at_ms=%d now_ms=%d", kind, startedAtMs, nowMs)
 	if id == "" || session == "" {
-		return
+		err := fmt.Sprintf("stale: task identity is required session=%q task_id=%q", session, id)
+		// An incomplete identity cannot be routed to a session diagnostic.
+		t.log.With(logging.Context{Operation: "stale-open", Path: outputPath, Level: "error"}).Log("%s", err)
+		panic(err)
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -99,12 +105,14 @@ func (t *Tracker) Open(id string, kind tail.Kind, session, outputPath string, st
 		if outputPath != "" {
 			existing.outputPath = outputPath
 		}
+		t.log.With(logging.Context{Operation: "stale-open", Session: session, Task: id, Path: existing.outputPath}).LogVerbose("refreshed existing task")
 		return
 	}
 	t.tasks[key] = &task{
 		id: id, kind: kind, session: session, outputPath: outputPath,
 		startedAtMs: startedAtMs, lastActMs: nowMs,
 	}
+	t.log.With(logging.Context{Operation: "stale-open", Session: session, Task: id, Path: outputPath}).Log("tracking new task kind=%d", kind)
 }
 
 // Restore replaces the in-memory tracker with the store's authoritative
@@ -112,29 +120,35 @@ func (t *Tracker) Open(id string, kind tail.Kind, session, outputPath string, st
 // so a malformed persisted lifecycle leaves the prior tracker intact and
 // prevents the sidecar link from coming up.
 func (t *Tracker) Restore(states []*corev1.OpenTaskState) error {
+	t.log.With(logging.Context{Operation: "restore-open-tasks"}).LogVerbose("restore requested states=%d", len(states))
 	restored := make(map[taskKey]*task, len(states))
 	for _, state := range states {
 		if state == nil || state.GetStarted() == nil {
-			return fmt.Errorf("stale: recovery contains an open task with no start event")
+			err := fmt.Errorf("stale: recovery contains an open task with no start event")
+			return t.restoreError(logging.Context{}, err)
 		}
 		ev := state.GetStarted()
 		ts := ev.GetTaskStarted()
 		if ts == nil {
-			return fmt.Errorf("stale: recovery session=%s seq=%d is not TaskStarted", ev.GetSessionId(), ev.GetSeq())
+			err := fmt.Errorf("stale: recovery session=%s seq=%d is not TaskStarted", ev.GetSessionId(), ev.GetSeq())
+			return t.restoreError(logging.Context{Session: ev.GetSessionId()}, err)
 		}
 		if ev.GetSessionId() == "" || ts.GetTaskId() == "" || ev.GetProducedAtMs() <= 0 || state.GetLastActivityAtMs() <= 0 {
-			return fmt.Errorf("stale: invalid recovered TaskStarted session=%q task_id=%q produced_at_ms=%d last_activity_at_ms=%d seq=%d",
+			err := fmt.Errorf("stale: invalid recovered TaskStarted session=%q task_id=%q produced_at_ms=%d last_activity_at_ms=%d seq=%d",
 				ev.GetSessionId(), ts.GetTaskId(), ev.GetProducedAtMs(), state.GetLastActivityAtMs(), ev.GetSeq())
+			return t.restoreError(logging.Context{Session: ev.GetSessionId(), Task: ts.GetTaskId()}, err)
 		}
 		key := taskKey{session: ev.GetSessionId(), id: ts.GetTaskId()}
 		if _, exists := restored[key]; exists {
-			return fmt.Errorf("stale: duplicate recovered task session=%q task_id=%q",
+			err := fmt.Errorf("stale: duplicate recovered task session=%q task_id=%q",
 				ev.GetSessionId(), ts.GetTaskId())
+			return t.restoreError(logging.Context{Session: ev.GetSessionId(), Task: ts.GetTaskId()}, err)
 		}
 		kind, err := coreTaskKindToTail(ts.GetKind())
 		if err != nil {
-			return fmt.Errorf("stale: invalid recovered TaskStarted session=%q task_id=%q: %w",
+			wrapped := fmt.Errorf("stale: invalid recovered TaskStarted session=%q task_id=%q: %w",
 				ev.GetSessionId(), ts.GetTaskId(), err)
+			return t.restoreError(logging.Context{Session: ev.GetSessionId(), Task: ts.GetTaskId()}, wrapped)
 		}
 		restored[key] = &task{
 			id:          ts.GetTaskId(),
@@ -147,10 +161,31 @@ func (t *Tracker) Restore(states []*corev1.OpenTaskState) error {
 	}
 	t.mu.Lock()
 	t.tasks = restored
+	t.restoreFailure = ""
 	t.mu.Unlock()
 	t.log.With(logging.Context{Operation: "restore-open-tasks"}).Log(
 		"restored %d authoritative open task(s) with persisted activity from store", len(restored))
 	return nil
+}
+
+// restoreError retains one canonical record for an identical invalid snapshot.
+// Establishment retries the same authoritative snapshot until the store changes;
+// enqueuing the same session diagnostic on every retry would grow the outbox
+// forever while the link is necessarily unable to flush it.
+func (t *Tracker) restoreError(ctx logging.Context, err error) error {
+	fingerprint := ctx.Session + "\x00" + ctx.Task + "\x00" + err.Error()
+	t.mu.Lock()
+	repeated := t.restoreFailure == fingerprint
+	if !repeated {
+		t.restoreFailure = fingerprint
+	}
+	t.mu.Unlock()
+	if !repeated {
+		ctx.Operation = "restore-open-tasks"
+		ctx.Level = "error"
+		t.log.With(ctx).Log("recovery validation failed: %v", err)
+	}
+	return err
 }
 
 // Activity records that a task's file produced new bytes at nowMs and clears any
@@ -202,6 +237,7 @@ func (t *Tracker) IsOpen(session, id string) bool {
 // Sweep evaluates every open task against the vanish-grace and silence windows,
 // emits a LOST TaskEnded for each that crossed a threshold, and closes them.
 func (t *Tracker) Sweep(nowMs int64) []*corev1.Event {
+	t.log.With(logging.Context{Operation: "stale-sweep"}).LogVerbose("sweep requested now_ms=%d", nowMs)
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	var out []*corev1.Event
@@ -215,12 +251,14 @@ func (t *Tracker) Sweep(nowMs int64) []*corev1.Event {
 			delete(t.tasks, key)
 		}
 	}
+	t.log.With(logging.Context{Operation: "stale-sweep"}).LogVerbose("sweep complete inferred_lost=%d", len(out))
 	return out
 }
 
 // BootSweep LOSTs every open task whose started_at predates bootMs (nothing
 // survives a reboot). Run once at startup.
 func (t *Tracker) BootSweep(bootMs, nowMs int64) []*corev1.Event {
+	t.log.With(logging.Context{Operation: "stale-boot-sweep"}).LogVerbose("boot sweep requested boot_ms=%d now_ms=%d", bootMs, nowMs)
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	var out []*corev1.Event
@@ -230,6 +268,7 @@ func (t *Tracker) BootSweep(bootMs, nowMs int64) []*corev1.Event {
 			delete(t.tasks, key)
 		}
 	}
+	t.log.With(logging.Context{Operation: "stale-boot-sweep"}).LogVerbose("boot sweep complete inferred_lost=%d", len(out))
 	return out
 }
 

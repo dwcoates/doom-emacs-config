@@ -13,6 +13,7 @@
  * Every turn ends with a `result` message.
  */
 import { AsyncQueue } from "./input-queue.js";
+import { bindLog } from "./uds/log.js";
 import { ModelInfo, PermissionMode, SlashCommand } from "./protocol.js";
 import {
   CanUseToolLike,
@@ -21,6 +22,8 @@ import {
   SdkMessageLike,
   SdkUserMessageLike,
 } from "./session.js";
+
+const LOGGER = bindLog({ component: "claude-shim-fake-query", operation: "shim.fake-query.lifecycle" });
 
 /**
  * The offline stand-in for `query.supportedModels()`. Two entries, not
@@ -95,6 +98,7 @@ export function createFakeQuery(
   canUseTool: CanUseToolLike,
   opts: FakeQueryOpts,
 ): QueryLike {
+  LOGGER.log({ agent_repl_session_id: opts.sessionId, resumed: opts.resume !== undefined }, "creating offline fake SDK query");
   const out = new AsyncQueue<SdkMessageLike>();
   let interrupted = false;
   let permissionMode: PermissionMode = "default";
@@ -159,6 +163,7 @@ export function createFakeQuery(
       text.trim() === "!md"
         ? MARKDOWN_SHOWCASE
         : `echo: ${text} [mode=${permissionMode}]`;
+    LOGGER.log({ agent_repl_session_id: opts.sessionId, message_id: messageId, prompt_length: text.length, permission_mode: permissionMode, branch: text.trim() === "!md" ? "markdown-showcase" : "echo" }, "running fake text turn");
     emitStream({
       type: "message_start",
       message: { id: messageId, role: "assistant", model, usage },
@@ -201,16 +206,19 @@ export function createFakeQuery(
     emitStream({ type: "content_block_stop", index: 0 });
     emitStream({ type: "message_stop" });
 
+    LOGGER.log({ agent_repl_session_id: opts.sessionId, message_id: messageId, tool_name: "Bash", command_length: command.length }, "running fake tool turn");
     const decision = await canUseTool(
       "Bash",
       { command },
       { signal: new AbortController().signal, toolUseID: toolUseId, suggestions: [] },
     );
     if (interrupted) {
+      LOGGER.log({ level: "warn", agent_repl_session_id: opts.sessionId, message_id: messageId }, "fake tool turn interrupted before permission completed");
       emitResult("error_during_execution");
       return;
     }
     const denied = decision.behavior === "deny";
+    LOGGER.log({ agent_repl_session_id: opts.sessionId, message_id: messageId, tool_name: "Bash", decision: denied ? "deny" : "allow" }, "fake tool permission resolved");
     emit({
       type: "user",
       parent_tool_use_id: null,
@@ -378,22 +386,29 @@ export function createFakeQuery(
               .join("");
       const messageId = `msg_fake_${turn}`;
       if (text.startsWith("!tool ")) {
+        LOGGER.log({ agent_repl_session_id: opts.sessionId, message_id: messageId, branch: "tool" }, "selected fake turn branch");
         await runToolTurn(messageId, text.slice("!tool ".length));
       } else if (text.trim() === "!rotate") {
+        LOGGER.log({ agent_repl_session_id: opts.sessionId, message_id: messageId, branch: "rotate" }, "selected fake turn branch");
         runRotateTurn(messageId, text);
       } else if (text.startsWith("!bg ")) {
+        LOGGER.log({ agent_repl_session_id: opts.sessionId, message_id: messageId, branch: "background" }, "selected fake turn branch");
         runBackgroundTurn(messageId, text.slice("!bg ".length));
       } else {
+        LOGGER.log({ agent_repl_session_id: opts.sessionId, message_id: messageId, branch: "text" }, "selected fake turn branch");
         runTextTurn(messageId, text);
       }
     }
     out.end();
+    LOGGER.log({ agent_repl_session_id: opts.sessionId, turns: turn }, "fake SDK input ended");
   };
 
   void main().catch((err: unknown) => {
-    // Surface fake-engine bugs the same way a real SDK throw would land.
-    out.end();
-    throw err;
+    // The fake is the producer boundary, so it owns the one causal error
+    // record and fails the iterable. Ending cleanly here made callers see
+    // ordinary SDK EOF and silently erased the actual producer failure.
+    LOGGER.log({ level: "error", agent_repl_session_id: opts.sessionId, cause: err }, `fake SDK producer failed: ${err instanceof Error ? err.message : String(err)}`);
+    out.fail(err);
   });
 
   const iterator = out[Symbol.asyncIterator]();
@@ -409,12 +424,15 @@ export function createFakeQuery(
     // so nothing can survive an interrupt here.
     interrupt: async (): Promise<InterruptReceipt | undefined> => {
       interrupted = true;
+      LOGGER.log({ agent_repl_session_id: opts.sessionId, turns: turn }, "fake SDK interrupt accepted");
       return { still_queued: [] };
     },
     setPermissionMode: async (mode: PermissionMode): Promise<void> => {
+      LOGGER.log({ agent_repl_session_id: opts.sessionId, previous_permission_mode: permissionMode, permission_mode: mode }, "fake SDK permission mode changed");
       permissionMode = mode;
     },
     setModel: async (next: string): Promise<void> => {
+      LOGGER.log({ agent_repl_session_id: opts.sessionId, previous_model: model, model: next }, "fake SDK model changed");
       model = next;
     },
     supportedModels: async (): Promise<ModelInfo[]> => FAKE_MODELS,
