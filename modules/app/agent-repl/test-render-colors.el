@@ -88,18 +88,41 @@ can honor."
 
 ;;;; ---- The palette actually paints what the table says -----------------
 
+(ert-deftest agent-repl-test-colors-every-colored-state-has-a-palette-row ()
+  "Every state assigned one of the five colors HAS a tab-bar palette row.
+
+This is the hole `interrupted\=' fell through.  It resolved, the shared
+table assigned it green, and `agent-repl--tab-palette\=' had no row for
+it — so `agent-repl--tab-appearance\=' fell back to
+`agent-repl--tab-default\=', whose background is `unspecified\=', and the
+tab painted uncolored.  A missing row is an assignment nothing honors,
+and it must FAIL rather than be skipped."
+  ;; Act / Assert
+  (dolist (entry agent-repl--state-color)
+    (let ((keyword (car entry))
+          (name (cdr entry)))
+      (unless (equal name "none")
+        (let ((row (alist-get keyword agent-repl--tab-palette)))
+          (should row)
+          (should (plist-get (plist-get row :unselected) :bg)))))))
+
 (ert-deftest agent-repl-test-colors-palette-paints-the-assigned-color ()
   "Each palette row's background IS its assigned color's constant.
 Without this the shared table could agree with the fixture while the tab
-bar painted something else entirely."
+bar painted something else entirely.
+
+Deliberately UNGUARDED on the row existing: a missing row used to make
+this pass silently, which is exactly how a colorless tab shipped.  The
+test above proves the row is there; this proves it is right."
   ;; Act / Assert
   (dolist (entry agent-repl--state-color)
     (let* ((keyword (car entry))
-           (name (cdr entry))
-           (row (alist-get keyword agent-repl--tab-palette))
-           (bg (plist-get (plist-get row :unselected) :bg)))
-      (when (and row bg (not (equal name "none")))
-        (should (equal bg (alist-get name agent-repl--color-by-name nil nil #'equal)))))))
+           (name (cdr entry)))
+      (unless (equal name "none")
+        (let ((bg (plist-get (plist-get (alist-get keyword agent-repl--tab-palette)
+                                        :unselected)
+                             :bg)))
+          (should (equal bg (alist-get name agent-repl--color-by-name nil nil #'equal))))))))
 
 (ert-deftest agent-repl-test-colors-merge-states-spend-no-color ()
   "The merge states carry badges, never one of the five."
