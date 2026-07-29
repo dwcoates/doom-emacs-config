@@ -5588,6 +5588,10 @@ describe("FeedRenderer: fresh user turn logs a rendering receipt", () => {
     return lines;
   }
 
+  function record(line: string): Record<string, unknown> {
+    return JSON.parse(line.slice(line.indexOf(": ") + 2)) as Record<string, unknown>;
+  }
+
   afterEach(() => resetLoggingForTests());
 
   it("logs last=true when the fresh turn is the feed tail", () => {
@@ -5597,9 +5601,12 @@ describe("FeedRenderer: fresh user turn logs a rendering receipt", () => {
     // Act
     feed.render(stateOf([text("b1"), userTurnAt(9, 0)]));
     // Assert
-    expect(lines).toContain(
-      "info: feed: user turn rendering request_id=r1 key=user-turn:req:r1 last=true",
-    );
+    expect(lines).toHaveLength(1);
+    expect(record(lines[0])).toMatchObject({
+      level: "info",
+      operation: "webapp.render.user-turn",
+      message: "feed: user turn rendering request_id=r1 key=user-turn:req:r1 last=true",
+    });
   });
 
   it("logs last=false when items rank below the fresh turn", () => {
@@ -5609,9 +5616,12 @@ describe("FeedRenderer: fresh user turn logs a rendering receipt", () => {
     // Act
     feed.render(stateOf([userTurnAt(9, 0), text("b1")]));
     // Assert
-    expect(lines).toContain(
-      "info: feed: user turn rendering request_id=r1 key=user-turn:req:r1 last=false",
-    );
+    expect(lines).toHaveLength(1);
+    expect(record(lines[0])).toMatchObject({
+      level: "info",
+      operation: "webapp.render.user-turn",
+      message: "feed: user turn rendering request_id=r1 key=user-turn:req:r1 last=false",
+    });
   });
 
   it("does not re-log an already-seen turn on the next render", () => {

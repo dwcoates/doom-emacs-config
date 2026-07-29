@@ -244,7 +244,13 @@ You may invoke ert directly if you have a specific reason:
 emacs -batch -Q -l ert -l modules/app/agent-repl/test-agent-repl.el -f ert-run-tests-batch-and-exit
 ```
 
-A repo-checked-in pre-commit hook enforces this automatically: when any `modules/app/agent-repl/**.el` file is staged, the suite runs and a failure blocks the commit. The hook lives at `.githooks/pre-commit`. Install once per clone:
+A repo-checked-in pre-commit hook enforces this automatically: when agent-repl
+Elisp, Go, TypeScript, proto, or local verification infrastructure is staged,
+the unified `modules/app/agent-repl/bin/test-all.sh` suite runs without
+recording timing history, and any failure blocks the commit. Direct commits on
+`master` are gated too; only automated cherry-pick replay is skipped because
+the source commit was already gated. The hook lives at `.githooks/pre-commit`.
+Install once per clone:
 
 ```bash
 git config core.hooksPath .githooks

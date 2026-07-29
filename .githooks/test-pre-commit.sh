@@ -1,273 +1,250 @@
 #!/usr/bin/env bash
-# test-pre-commit.sh — tests for .githooks/pre-commit.
-#
-# Sets up isolated git repos and asserts on the hook's exit behavior.
-# No host paths or real Emacs invocations are used.
-#
-# Run with:   bash .githooks/test-pre-commit.sh
+# test-pre-commit.sh — hermetic tests for .githooks/pre-commit.
 set -euo pipefail
 
 THIS_DIR="$(cd "$(dirname "$0")" && pwd)"
 HOOK_SRC="$THIS_DIR/pre-commit"
-
 PASS=0
 FAIL=0
-pass() { echo "  PASS: $1"; PASS=$((PASS + 1)); }
-fail() { echo "  FAIL: $1"; FAIL=$((FAIL + 1)); shift; if [ $# -gt 0 ]; then printf '%s\n' "$@" | sed 's/^/        /'; fi; }
 
-# Create a minimal git repo, copy the hook into it, and return its path.
-# The hook is wrapped so that:
-#   - sync.sh is absent (cache-sync section is skipped cleanly)
-#   - emacs is stubbed via PATH to exit 0 (so ERT never really runs)
-#   - check-external-boundaries.sh is absent (boundary lint skipped)
+pass() {
+  printf '  PASS: %s\n' "$1"
+  PASS=$((PASS + 1))
+}
+
+fail() {
+  printf '  FAIL: %s\n' "$1" >&2
+  FAIL=$((FAIL + 1))
+  shift
+  if [ "$#" -gt 0 ]; then
+    printf '%s\n' "$@" | sed 's/^/        /' >&2
+  fi
+}
+
 mkrepo() {
-  local repo module="${1:-agent-repl}"; repo="$(mktemp -d)"
+  local module="${1:-agent-repl}"
+  local repo
+  repo="$(mktemp -d)"
   git -C "$repo" init -q
   git -C "$repo" config user.email "test@example.com"
   git -C "$repo" config user.name "Test"
-
-  # Pin every test repo to a deterministic NON-master branch so the
-  # master-branch skip (see pre-commit) never fires in the gate tests,
-  # regardless of the host's init.defaultBranch.  The master-skip cases
-  # override HEAD to refs/heads/master explicitly.
   git -C "$repo" symbolic-ref HEAD refs/heads/work
 
-  # Minimal repo layout expected by the hook (module name parameterizable
-  # so the legacy agent-repl fallback can be exercised).
-  mkdir -p "$repo/modules/app/$module"
+  mkdir -p "$repo/modules/app/$module/bin"
   touch "$repo/modules/app/$module/test-$module.el"
+  cat >"$repo/modules/app/$module/bin/test-all.sh" <<'EOF'
+#!/usr/bin/env bash
+printf 'unified\n' >"${HOOK_TEST_RUN_LOG:?HOOK_TEST_RUN_LOG is required}"
+exit "${HOOK_TEST_RUN_EXIT:-0}"
+EOF
+  chmod +x "$repo/modules/app/$module/bin/test-all.sh"
 
-  # Install the hook under test.
   cp "$HOOK_SRC" "$repo/.git/hooks/pre-commit"
   chmod +x "$repo/.git/hooks/pre-commit"
-
-  echo "$repo"
+  printf '%s\n' "$repo"
 }
 
-# Stage a dummy module .el file in REPO so the test gate is reached.
-stage_el_file() {
-  local repo="$1" module="${2:-agent-repl}"
-  local file="$repo/modules/app/$module/dummy.el"
-  echo "(provide 'dummy)" > "$file"
-  git -C "$repo" add "$file"
+stage_module_file() {
+  local repo="$1"
+  local relative="$2"
+  local path="$repo/modules/app/agent-repl/$relative"
+  mkdir -p "$(dirname "$path")"
+  printf 'test content\n' >"$path"
+  git -C "$repo" add "$path"
 }
 
-# Build a PATH-stub directory that makes `emacs` a no-op (exit 0).
-stub_emacs_dir() {
-  local dir; dir="$(mktemp -d)"
-  cat > "$dir/emacs" <<'EOF'
-#!/usr/bin/env bash
-exit 0
-EOF
-  chmod +x "$dir/emacs"
-  echo "$dir"
+run_commit() {
+  local repo="$1"
+  local exit_override="${2:-0}"
+  RUN_LOG="$repo/unified-called"
+  rm -f "$RUN_LOG"
+  set +e
+  RUN_OUT="$(
+    HOOK_TEST_RUN_LOG="$RUN_LOG" \
+      HOOK_TEST_RUN_EXIT="$exit_override" \
+      git -C "$repo" -c core.hooksPath=.git/hooks commit -m "test commit" 2>&1
+  )"
+  RUN_RC=$?
+  set -e
 }
 
-# ---------------------------------------------------------------------------
-
-test_cherry_pick_skips_ert() {
-  local repo; repo="$(mkrepo)"
-  stage_el_file "$repo"
-  # Simulate a cherry-pick in progress.
+test_cherry_pick_skips_unified_gate() {
+  local repo
+  repo="$(mkrepo)"
+  stage_module_file "$repo" "src/dummy.ts"
   touch "$repo/.git/CHERRY_PICK_HEAD"
+  run_commit "$repo"
 
-  local out exit_code=0
-  out="$(git -C "$repo" -c core.hooksPath=.git/hooks commit -m "cherry" 2>&1)" || exit_code=$?
-
-  # The hook exits 0 and prints the skip message; the commit may still
-  # fail for unrelated reasons (empty tree), so we check hook output only.
-  if echo "$out" | grep -q "Cherry-pick detected"; then
-    pass "cherry-pick: hook prints skip message"
+  if [ ! -f "$RUN_LOG" ] && printf '%s\n' "$RUN_OUT" | grep -q "Cherry-pick detected"; then
+    pass "cherry-pick replay skips the unified gate"
   else
-    fail "cherry-pick: expected skip message in output" "$out"
+    fail "cherry-pick replay skips the unified gate" "$RUN_OUT"
   fi
-
   rm -rf "$repo"
 }
 
-test_cherry_pick_does_not_invoke_emacs() {
-  local repo; repo="$(mkrepo)"
-  stage_el_file "$repo"
-  touch "$repo/.git/CHERRY_PICK_HEAD"
-
-  # Use a stub emacs that leaves a sentinel file if called.
-  local stub_dir; stub_dir="$(mktemp -d)"
-  local sentinel="$stub_dir/emacs-was-called"
-  cat > "$stub_dir/emacs" <<EOF
-#!/usr/bin/env bash
-touch "$sentinel"
-exit 0
-EOF
-  chmod +x "$stub_dir/emacs"
-
-  PATH="$stub_dir:$PATH" git -C "$repo" -c core.hooksPath=.git/hooks commit -m "cherry" >/dev/null 2>&1 || true
-
-  if [ ! -f "$sentinel" ]; then
-    pass "cherry-pick: emacs is never invoked"
-  else
-    fail "cherry-pick: emacs was invoked despite CHERRY_PICK_HEAD"
-  fi
-
-  rm -rf "$repo" "$stub_dir"
-}
-
-test_master_branch_skips_ert() {
-  local repo; repo="$(mkrepo)"
-  # Put the repo on master; no CHERRY_PICK_HEAD — a plain commit, but on
-  # master the gate must be skipped so workspace-merge cherry-picks onto
-  # master never trip ERT.
+test_direct_master_commit_runs_unified_gate() {
+  local repo
+  repo="$(mkrepo)"
   git -C "$repo" symbolic-ref HEAD refs/heads/master
-  stage_el_file "$repo"
+  stage_module_file "$repo" "internal/dummy.go"
+  run_commit "$repo"
 
-  local out exit_code=0
-  out="$(git -C "$repo" -c core.hooksPath=.git/hooks commit -m "on master" 2>&1)" || exit_code=$?
-
-  if echo "$out" | grep -q "On master branch"; then
-    pass "master: hook prints skip message"
+  if [ "$RUN_RC" -eq 0 ] && [ -f "$RUN_LOG" ]; then
+    pass "direct master commit runs the unified gate"
   else
-    fail "master: expected skip message in output" "$out"
+    fail "direct master commit runs the unified gate" "exit=$RUN_RC" "$RUN_OUT"
   fi
-
   rm -rf "$repo"
 }
 
-test_master_branch_does_not_invoke_emacs() {
-  local repo; repo="$(mkrepo)"
-  git -C "$repo" symbolic-ref HEAD refs/heads/master
-  stage_el_file "$repo"
+test_elisp_change_runs_unified_gate() {
+  local repo
+  repo="$(mkrepo)"
+  stage_module_file "$repo" "dummy.el"
+  run_commit "$repo"
 
-  # Use a stub emacs that leaves a sentinel file if called.
-  local stub_dir; stub_dir="$(mktemp -d)"
-  local sentinel="$stub_dir/emacs-was-called"
-  cat > "$stub_dir/emacs" <<EOF
-#!/usr/bin/env bash
-touch "$sentinel"
-exit 0
-EOF
-  chmod +x "$stub_dir/emacs"
-
-  PATH="$stub_dir:$PATH" git -C "$repo" -c core.hooksPath=.git/hooks commit -m "on master" >/dev/null 2>&1 || true
-
-  if [ ! -f "$sentinel" ]; then
-    pass "master: emacs is never invoked"
+  if [ "$RUN_RC" -eq 0 ] && [ -f "$RUN_LOG" ]; then
+    pass "Elisp change runs the unified gate"
   else
-    fail "master: emacs was invoked despite master branch"
+    fail "Elisp change runs the unified gate" "exit=$RUN_RC" "$RUN_OUT"
   fi
-
-  rm -rf "$repo" "$stub_dir"
+  rm -rf "$repo"
 }
 
-test_normal_commit_reaches_ert_when_el_staged() {
-  local repo; repo="$(mkrepo)"
-  stage_el_file "$repo"
-  # No CHERRY_PICK_HEAD — normal commit path.
+test_typescript_change_runs_unified_gate() {
+  local repo
+  repo="$(mkrepo)"
+  stage_module_file "$repo" "webapp/src/dummy.ts"
+  run_commit "$repo"
 
-  local stub_dir; stub_dir="$(stub_emacs_dir)"
-  local sentinel="$stub_dir/emacs-was-called"
-  # Replace the stub emacs so it also records that it was called.
-  cat > "$stub_dir/emacs" <<EOF
-#!/usr/bin/env bash
-touch "$sentinel"
-exit 0
-EOF
-  chmod +x "$stub_dir/emacs"
-
-  PATH="$stub_dir:$PATH" git -C "$repo" -c core.hooksPath=.git/hooks commit -m "normal" >/dev/null 2>&1 || true
-
-  if [ -f "$sentinel" ]; then
-    pass "normal commit: emacs (ERT) is invoked when .el files are staged"
+  if [ "$RUN_RC" -eq 0 ] && [ -f "$RUN_LOG" ]; then
+    pass "TypeScript change runs the unified gate"
   else
-    fail "normal commit: emacs was NOT invoked for staged .el files"
+    fail "TypeScript change runs the unified gate" "exit=$RUN_RC" "$RUN_OUT"
   fi
-
-  rm -rf "$repo" "$stub_dir"
+  rm -rf "$repo"
 }
 
-test_normal_commit_no_el_skips_ert() {
-  local repo; repo="$(mkrepo)"
-  # Stage a non-.el file — hook should exit 0 without calling emacs.
-  echo "hello" > "$repo/README.txt"
-  git -C "$repo" add "$repo/README.txt"
+test_go_change_runs_unified_gate() {
+  local repo
+  repo="$(mkrepo)"
+  stage_module_file "$repo" "daemon/internal/dummy.go"
+  run_commit "$repo"
 
-  local stub_dir; stub_dir="$(mktemp -d)"
-  local sentinel="$stub_dir/emacs-was-called"
-  cat > "$stub_dir/emacs" <<EOF
-#!/usr/bin/env bash
-touch "$sentinel"
-exit 0
-EOF
-  chmod +x "$stub_dir/emacs"
-
-  PATH="$stub_dir:$PATH" git -C "$repo" -c core.hooksPath=.git/hooks commit -m "docs" >/dev/null 2>&1 || true
-
-  if [ ! -f "$sentinel" ]; then
-    pass "normal commit: emacs not invoked when no .el files staged"
+  if [ "$RUN_RC" -eq 0 ] && [ -f "$RUN_LOG" ]; then
+    pass "Go change runs the unified gate"
   else
-    fail "normal commit: emacs was invoked despite no .el files staged"
+    fail "Go change runs the unified gate" "exit=$RUN_RC" "$RUN_OUT"
   fi
-
-  rm -rf "$repo" "$stub_dir"
+  rm -rf "$repo"
 }
 
-test_legacy_claude_repl_layout_still_gated() {
-  # A sibling worktree that predates the agent-repl -> agent-repl rename
-  # shares this hook via core.hooksPath: the hook must fall back to the
-  # legacy module name and run ITS aggregator.
-  local repo; repo="$(mkrepo agent-repl)"
-  stage_el_file "$repo" agent-repl
+test_proto_change_runs_unified_gate() {
+  local repo
+  repo="$(mkrepo)"
+  stage_module_file "$repo" "proto/dummy.proto"
+  run_commit "$repo"
 
-  local stub_dir; stub_dir="$(mktemp -d)"
-  local arglog="$stub_dir/emacs-args"
-  cat > "$stub_dir/emacs" <<EOF
-#!/usr/bin/env bash
-echo "\$@" > "$arglog"
-exit 0
-EOF
-  chmod +x "$stub_dir/emacs"
-
-  PATH="$stub_dir:$PATH" git -C "$repo" -c core.hooksPath=.git/hooks commit -m "legacy" >/dev/null 2>&1 || true
-
-  if [ -f "$arglog" ] && grep -q "modules/app/agent-repl/test-agent-repl.el" "$arglog"; then
-    pass "legacy layout: hook gates on agent-repl aggregator"
+  if [ "$RUN_RC" -eq 0 ] && [ -f "$RUN_LOG" ]; then
+    pass "proto change runs the unified gate"
   else
-    fail "legacy layout: expected emacs run on agent-repl aggregator" "$(cat "$arglog" 2>/dev/null || echo 'emacs never invoked')"
+    fail "proto change runs the unified gate" "exit=$RUN_RC" "$RUN_OUT"
   fi
-
-  rm -rf "$repo" "$stub_dir"
+  rm -rf "$repo"
 }
 
-test_missing_aggregator_refuses_commit() {
-  # Gate reached (module .el staged) but NO module has an aggregator test
-  # file: the hook must refuse the commit rather than skipping the suite.
-  local repo; repo="$(mkrepo)"
-  rm "$repo/modules/app/agent-repl/test-agent-repl.el"
-  stage_el_file "$repo"
+test_package_manifest_runs_unified_gate() {
+  local repo
+  repo="$(mkrepo)"
+  stage_module_file "$repo" "webapp/package.json"
+  run_commit "$repo"
 
-  local stub_dir; stub_dir="$(stub_emacs_dir)"
-  local out exit_code=0
-  out="$(PATH="$stub_dir:$PATH" git -C "$repo" -c core.hooksPath=.git/hooks commit -m "broken" 2>&1)" || exit_code=$?
-
-  if [ "$exit_code" -ne 0 ] && echo "$out" | grep -q "refusing to commit"; then
-    pass "missing aggregator: commit refused"
+  if [ "$RUN_RC" -eq 0 ] && [ -f "$RUN_LOG" ]; then
+    pass "TypeScript package manifest runs the unified gate"
   else
-    fail "missing aggregator: expected refusal" "exit: $exit_code" "$out"
+    fail "TypeScript package manifest runs the unified gate" "exit=$RUN_RC" "$RUN_OUT"
   fi
-
-  rm -rf "$repo" "$stub_dir"
+  rm -rf "$repo"
 }
 
-# ---------------------------------------------------------------------------
+test_hook_change_runs_unified_gate() {
+  local repo
+  repo="$(mkrepo)"
+  mkdir -p "$repo/.githooks"
+  printf '# changed hook\n' >"$repo/.githooks/pre-commit"
+  git -C "$repo" add "$repo/.githooks/pre-commit"
+  run_commit "$repo"
 
-echo "=== test-pre-commit.sh ==="
-test_cherry_pick_skips_ert
-test_cherry_pick_does_not_invoke_emacs
-test_master_branch_skips_ert
-test_master_branch_does_not_invoke_emacs
-test_normal_commit_reaches_ert_when_el_staged
-test_normal_commit_no_el_skips_ert
-test_legacy_claude_repl_layout_still_gated
-test_missing_aggregator_refuses_commit
+  if [ "$RUN_RC" -eq 0 ] && [ -f "$RUN_LOG" ]; then
+    pass "hook change runs the unified gate"
+  else
+    fail "hook change runs the unified gate" "exit=$RUN_RC" "$RUN_OUT"
+  fi
+  rm -rf "$repo"
+}
 
-echo
-echo "Passed: $PASS  Failed: $FAIL"
-exit $((FAIL > 0))
+test_unrelated_docs_skip_unified_gate() {
+  local repo
+  repo="$(mkrepo)"
+  printf 'docs\n' >"$repo/README.md"
+  git -C "$repo" add "$repo/README.md"
+  run_commit "$repo"
+
+  if [ "$RUN_RC" -eq 0 ] && [ ! -f "$RUN_LOG" ]; then
+    pass "unrelated documentation skips the unified gate"
+  else
+    fail "unrelated documentation skips the unified gate" "exit=$RUN_RC" "$RUN_OUT"
+  fi
+  rm -rf "$repo"
+}
+
+test_unified_failure_blocks_commit() {
+  local repo
+  repo="$(mkrepo)"
+  stage_module_file "$repo" "webapp/src/failing.ts"
+  run_commit "$repo" 7
+
+  if [ "$RUN_RC" -ne 0 ] &&
+    [ -f "$RUN_LOG" ] &&
+    printf '%s\n' "$RUN_OUT" | grep -q "refusing commit"; then
+    pass "unified failure blocks the commit"
+  else
+    fail "unified failure blocks the commit" "exit=$RUN_RC" "$RUN_OUT"
+  fi
+  rm -rf "$repo"
+}
+
+test_missing_unified_runner_blocks_commit() {
+  local repo
+  repo="$(mkrepo)"
+  rm "$repo/modules/app/agent-repl/bin/test-all.sh"
+  stage_module_file "$repo" "daemon/missing-runner.go"
+  run_commit "$repo"
+
+  if [ "$RUN_RC" -ne 0 ] &&
+    printf '%s\n' "$RUN_OUT" | grep -q "unified runner is missing"; then
+    pass "missing unified runner blocks the commit"
+  else
+    fail "missing unified runner blocks the commit" "exit=$RUN_RC" "$RUN_OUT"
+  fi
+  rm -rf "$repo"
+}
+
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/agent-repl-precommit-test.XXXXXX")"
+trap 'rm -rf "$TMP"' EXIT
+
+test_cherry_pick_skips_unified_gate
+test_direct_master_commit_runs_unified_gate
+test_elisp_change_runs_unified_gate
+test_typescript_change_runs_unified_gate
+test_go_change_runs_unified_gate
+test_proto_change_runs_unified_gate
+test_package_manifest_runs_unified_gate
+test_hook_change_runs_unified_gate
+test_unrelated_docs_skip_unified_gate
+test_unified_failure_blocks_commit
+test_missing_unified_runner_blocks_commit
+
+printf 'Passed: %d  Failed: %d\n' "$PASS" "$FAIL"
+[ "$FAIL" -eq 0 ]
