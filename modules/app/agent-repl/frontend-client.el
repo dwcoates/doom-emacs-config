@@ -66,6 +66,7 @@
                   "frontend-uds" (request-id workspace reason))
 (declare-function agent-repl--uds-connected-p "frontend-uds" ())
 (declare-function agent-repl-uds-connect "frontend-uds" (&optional path readiness-p))
+(declare-function agent-repl--frontend-ws-name "frontend-state" (workspace))
 (declare-function agent-repl--frontend-session-view "frontend-state" (session-id))
 (declare-function agent-repl--frontend-session-views-all "frontend-state" ())
 (declare-function agent-repl--frontend-workspace-state-views-all "frontend-state" ())
@@ -367,10 +368,15 @@ view with `healthy=true' is authoritative; a `CommandAck' only confirms
 receipt.  Timeout, command rejection, and an unhealthy result all abort
 before the caller mutates UI or workspace state."
   (agent-repl--frontend-wait-ready)
-  (let (response rejection request-id)
-    (agent-repl--log workspace
-                     "frontend-health: begin what=%s field=%s payload=%S session-id=%s"
-                     what field payload (or session-id "nil"))
+  ;; WORKSPACE is the wire routing key — `agent-repl--frontend-ws-command-key''s
+  ;; cwd, or nil for daemon health — and it must stay that way for the send and
+  ;; for the two tracking registries.  LOG-WORKSPACE is the resolved name the
+  ;; logging ladder can actually index.
+  (let ((log-workspace (agent-repl--frontend-ws-name workspace))
+        response rejection request-id)
+    (agent-repl--log log-workspace
+                     "frontend-health: begin what=%s field=%s ws=%s payload=%S session-id=%s"
+                     what field workspace payload (or session-id "nil"))
     (setq request-id (agent-repl--uds-send-command field payload workspace))
     (agent-repl--uds-track-health-response
      request-id field workspace session-id
@@ -382,11 +388,11 @@ before the caller mutates UI or workspace state."
              (lambda () (or response rejection))
              agent-repl-frontend-health-timeout
              (format "health %s" what)
-             workspace)
+             log-workspace)
       (agent-repl--uds-untrack-command request-id workspace "health-timeout")
       (agent-repl--uds-untrack-health-response
        request-id workspace "health-timeout")
-      (agent-repl--log workspace
+      (agent-repl--log log-workspace
                        "frontend-health: TIMEOUT what=%s field=%s request-id=%s timeout=%.3fs"
                        what field request-id agent-repl-frontend-health-timeout)
       (error "agent-repl: %s health check timed out after %.3fs"
@@ -394,13 +400,13 @@ before the caller mutates UI or workspace state."
     (when rejection
       (agent-repl--uds-untrack-health-response
        request-id workspace "command-rejected")
-      (agent-repl--log workspace
+      (agent-repl--log log-workspace
                        "frontend-health: REJECTED what=%s field=%s request-id=%s error=%s"
                        what field request-id rejection)
       (error "agent-repl: %s health check rejected: %s" what rejection))
     (unless (plist-get response :healthy)
       (let ((reason (plist-get response :reason)))
-        (agent-repl--log workspace
+        (agent-repl--log log-workspace
                          "frontend-health: UNHEALTHY what=%s field=%s request-id=%s session-id=%s reason=%S response=%S"
                          what field request-id (or session-id "nil")
                          reason response)
@@ -409,7 +415,7 @@ before the caller mutates UI or workspace state."
                (if (and (stringp reason) (not (string-empty-p reason)))
                    reason
                  "daemon supplied no reason"))))
-    (agent-repl--log workspace
+    (agent-repl--log log-workspace
                      "frontend-health: HEALTHY what=%s field=%s request-id=%s session-id=%s response=%S"
                      what field request-id (or session-id "nil") response)
     t))
