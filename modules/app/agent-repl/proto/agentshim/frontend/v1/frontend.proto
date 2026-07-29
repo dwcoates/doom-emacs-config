@@ -665,7 +665,23 @@ message ClientLogCmd {
 
 // Additive (S9): graceful daemon shutdown over UDS (replaces Emacs
 // POST /shutdown).
-message ShutdownCmd {}
+message ShutdownCmd {
+  // stop_shims asks the daemon to SIGTERM every session shim on its way out.
+  //
+  // The DEFAULT (false) PRESERVES them. A shim outlives its daemon by design:
+  // it redials the daemon socket forever with backoff and is auto-parked by
+  // the next daemon's listener, so killing it on an orderly shutdown threw
+  // away a live, mid-conversation process the very next boot could have
+  // reattached to for free. Preserving is what makes a daemon bounce cheap.
+  //
+  // The mode exists for the one caller that genuinely needs the old behavior:
+  // a deploy that changed the shim BUNDLE, whose surviving shims would
+  // otherwise keep running the previous build's code (bin/deploy-all.sh
+  // passes it when its stamps show the bundle moved). It is belt-and-braces
+  // alongside the daemon's own version-driven stale-shim refresh, never the
+  // only thing standing between a deploy and stale shims.
+  bool stop_shims = 1;
+}
 
 // Ask the daemon to assert that every boot-critical global dependency is
 // operational.  The matching DaemonHealthView, not socket existence, is the

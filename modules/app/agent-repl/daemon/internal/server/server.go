@@ -1463,15 +1463,40 @@ func (s *Server) sweepIdle() {
 	}
 }
 
-// ShutdownAll stops every live shim (daemon teardown). The registry records
-// stay non-terminal so they rehydrate on the next boot; main also calls
-// driver.Close().
-func (s *Server) ShutdownAll() {
+// ShutdownAll ends the daemon's session work (daemon teardown). The registry
+// records stay non-terminal so they rehydrate on the next boot; main also
+// calls driver.Close().
+//
+// SHIMS SURVIVE BY DEFAULT, and that is the whole point of the parameter.
+//
+// This used to SIGTERM every live shim unconditionally, which threw away
+// exactly the thing the transport inversion was built to preserve: a shim
+// outlives its daemon, redials the one well-known daemon socket forever with
+// backoff, and is auto-PARKED by the next daemon's listener before anything
+// asks for it. Killing them on an orderly bounce meant every restart paid a
+// full cold bring-up per workspace — and killed mid-conversation CLI processes
+// — to save nothing. Preserved shims cost the next boot a reattach, which is
+// what EnsureShim already prefers.
+//
+// stopShims restores the old behavior for the one caller that needs it: a
+// deploy whose shim BUNDLE changed, where a survivor would keep running the
+// previous build. It is belt-and-braces beside the version-driven stale-shim
+// refresh, never the only guard.
+//
+// Nothing here marks a record terminal in either mode: a stopped shim's
+// session is dormant, not dead.
+func (s *Server) ShutdownAll(stopShims bool) {
 	s.stopOnce.Do(func() { close(s.stopped) })
+	if !stopShims {
+		s.logf("server: shutdown PRESERVING session shims; survivors redial %s and park until the next daemon claims them",
+			"the daemon shim socket")
+		return
+	}
 	for _, rec := range s.registry.All() {
 		if rec.Terminal || rec.CWD == "" {
 			continue
 		}
+		s.logf("server: shutdown stop-shims mode: stopping the shim for session %s (ws %s)", rec.SessionID, rec.CWD)
 		if err := s.driver.Hibernate(rec.CWD); err != nil {
 			s.logf("server: shutdown stop shim (ws %s): %v", rec.CWD, err)
 		}
