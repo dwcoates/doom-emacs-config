@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   formatAge,
+  formatCountdown,
   formatDuration,
   formatDurationCeil,
   formatElapsed,
@@ -219,5 +220,59 @@ describe("formatAge", () => {
   it("floors a stamp ahead of the reader's clock to zero seconds", () => {
     // Arrange + Act + Assert — a skewed clock counts from zero, never backwards.
     expect(formatAge(-2_000)).toBe("0s");
+  });
+});
+
+describe("formatCountdown", () => {
+  const MINUTE = 60_000;
+  const HOUR = 60 * MINUTE;
+  const DAY = 24 * HOUR;
+
+  it("reports a wait under a minute as zero minutes", () => {
+    // Arrange + Act + Assert — seconds are noise on a deadline hours away, and
+    // an empty string is not a duration.
+    expect(formatCountdown(30_000)).toBe("0m");
+  });
+
+  it("reports a sub-hour wait in minutes alone", () => {
+    // Arrange + Act + Assert — no `0d 0h` prefix on a 45-minute wait.
+    expect(formatCountdown(45 * MINUTE)).toBe("45m");
+  });
+
+  it("carries an hour's leftover in whole minutes", () => {
+    // Arrange + Act + Assert
+    expect(formatCountdown(3 * HOUR + 20 * MINUTE)).toBe("3h 20m");
+  });
+
+  it("drops the minutes off a whole-hour wait", () => {
+    // Arrange + Act + Assert — a bare `2h`, never `2h 0m`.
+    expect(formatCountdown(2 * HOUR)).toBe("2h");
+  });
+
+  it("goes three levels deep on a multi-day wait", () => {
+    // Arrange + Act + Assert — the weekly allowance's deadline is days out,
+    // and rounding it to the nearest hour loses the reading it is timed by.
+    expect(formatCountdown(2 * DAY + 4 * HOUR + 10 * MINUTE)).toBe("2d 4h 10m");
+  });
+
+  it("drops a zero hours component rather than printing it", () => {
+    // Arrange + Act + Assert — 2d 0h 15m reads `2d 15m`.
+    expect(formatCountdown(2 * DAY + 15 * MINUTE)).toBe("2d 15m");
+  });
+
+  it("drops the minutes off a whole-day wait", () => {
+    // Arrange + Act + Assert — a bare `1d`, never `1d 0h 0m`.
+    expect(formatCountdown(DAY)).toBe("1d");
+  });
+
+  it("truncates rather than rounding a partial minute up", () => {
+    // Arrange + Act + Assert — a countdown may never claim more time remains
+    // than actually does.
+    expect(formatCountdown(5 * MINUTE + 59_000)).toBe("5m");
+  });
+
+  it("floors a deadline already past to zero minutes", () => {
+    // Arrange + Act + Assert — a stale report counts from zero, not backwards.
+    expect(formatCountdown(-90_000)).toBe("0m");
   });
 });
