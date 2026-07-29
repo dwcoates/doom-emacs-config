@@ -94,27 +94,37 @@ workspace.  Returns the count of permission items handled."
   ;; prompt to a stub the renderer never reads (see
   ;; `agent-repl--frontend-ws-name').
   (let* ((raw-workspace (plist-get delta :workspace))
-         (workspace (or (agent-repl--frontend-ws-name raw-workspace) raw-workspace))
+         (resolved (agent-repl--frontend-ws-name raw-workspace))
+         ;; DISPATCH keeps the `or' fallback: `agent-repl--permission-handle-item'
+         ;; fails loudly on a blank workspace, and degrading an unresolvable
+         ;; path to nil would turn that loud refusal into a silent one.
+         (workspace (or resolved raw-workspace))
+         ;; The LOG sink cannot: a cwd never indexes the workspace hash, and
+         ;; this handler runs inside the connection's process filter.  An
+         ;; unresolvable delta is a global line naming its raw path.
+         (log-workspace resolved)
          (items (plist-get delta :items))
          (handled 0))
     ;; Conversation deltas can arrive in rapid succession while a turn is
     ;; streaming, so retain their frame-level trace only in verbose mode.
     ;; Do not log ITEM: it can contain conversation and tool-argument data.
     (agent-repl--log-verbose
-     workspace
-     "permission-delta: workspace-source=%s item-count=%d"
-     (if (equal workspace raw-workspace) "raw" "resolved")
+     log-workspace
+     "permission-delta: wire-workspace=%s workspace-source=%s item-count=%d"
+     raw-workspace
+     (if resolved "resolved" "raw")
      (length items))
     (dolist (item items)
       (when (agent-repl--permission-item-p item)
         (agent-repl--permission-handle-item workspace item)
         (cl-incf handled)))
     (if (> handled 0)
-        (agent-repl--log workspace
+        (agent-repl--log log-workspace
                          "frontend-apply-conversation-delta: ws=%s handled %d permission item(s)"
                          workspace handled)
-      (agent-repl--log-verbose workspace
-                               "permission-delta: no permission items handled"))
+      (agent-repl--log-verbose log-workspace
+                               "permission-delta: no permission items handled (ws=%s)"
+                               workspace))
     handled))
 
 (defun agent-repl--permission-handle-item (workspace item)
@@ -144,9 +154,12 @@ never a defaulted value.  Returns the resolution keyword acted on."
       (agent-repl--permission-clear workspace uuid resolution deny-message)
       (intern (concat ":" (downcase (or resolution "")))))
      (t
-     (agent-repl--log workspace
-                       "permission-handle-item: request=%s resolution=%S unknown — no fallback"
-                       uuid resolution)
+     ;; WORKSPACE reaches here as whatever the delta carried — a resolved
+     ;; name, or the raw cwd the dispatch fallback preserved.  The sink only
+     ;; indexes names, so resolve for the log and name the raw value in it.
+     (agent-repl--log (agent-repl--frontend-ws-name workspace)
+                       "permission-handle-item: ws=%s request=%s resolution=%S unknown — no fallback"
+                       workspace uuid resolution)
       (error "agent-repl permission: unknown resolution %S" resolution)))))
 
 ;;;; ---- Present / clear the prompt --------------------------------------
@@ -162,22 +175,27 @@ Idempotent per uuid: when the workspace already has the SAME uuid active
 \(a retained-ring replay after reconnect re-drives the same item), this is
 a no-op and does NOT re-notify.  Returns the recorded prompt plist, or nil
 when it was already active."
-  (let ((active (agent-repl--ws-get ws :permission-prompt-active)))
+  ;; WS is the delta's workspace, which is a resolved persp name when one
+  ;; owns the cwd and the raw cwd otherwise.  It stays as-is for the plist
+  ;; key; the log sink only indexes names, so it gets the resolution.
+  (let ((active (agent-repl--ws-get ws :permission-prompt-active))
+        (log-ws (agent-repl--frontend-ws-name ws)))
     (if (and active (equal (plist-get active :request-id) uuid))
         (progn
-          (agent-repl--log ws
-                           "permission-present: request=%s already-active=t — no re-notify"
-                           uuid)
+          (agent-repl--log log-ws
+                           "permission-present: ws=%s request=%s already-active=t — no re-notify"
+                           ws uuid)
           nil)
       (let ((prompt (list :request-id uuid :tool-name tool-name :input input)))
-        (agent-repl--log ws
-                         "permission-present: request=%s replaced-active=%s tool-present=%s — presenting + notifying"
-                         uuid (if active "t" "nil") (if tool-name "t" "nil"))
+        (agent-repl--log log-ws
+                         "permission-present: ws=%s request=%s replaced-active=%s tool-present=%s — presenting + notifying"
+                         ws uuid (if active "t" "nil") (if tool-name "t" "nil"))
         (agent-repl--permission-notify ws uuid tool-name)
         ;; Notify before changing workspace state: a notification failure must
         ;; abort presentation without leaving a prompt that cannot be surfaced.
         (agent-repl--ws-put ws :permission-prompt-active prompt)
-        (agent-repl--log ws "permission-present: request=%s active-prompt-recorded=t" uuid)
+        (agent-repl--log log-ws "permission-present: ws=%s request=%s active-prompt-recorded=t"
+                         ws uuid)
         prompt))))
 
 (defun agent-repl--permission-notify (ws request-id tool-name)
@@ -188,20 +206,24 @@ focus-gated desktop-notification mechanism the module already uses for the
 agent-finished banner — so no banner appears while the user is already
 looking at Emacs.  Replaces the notification the deleted `Notification'
 managed hook used to fire."
-  (agent-repl--log ws "permission-notify: request=%s dispatching" request-id)
-  (condition-case err
-      (progn
-        (agent-repl--notify ws "Agent REPL"
-                            (format "%s: permission requested%s"
-                                    ws
-                                    (if (and tool-name (not (string-empty-p tool-name)))
-                                        (format " — %s" tool-name)
-                                      "")))
-        (agent-repl--log ws "permission-notify: request=%s dispatched" request-id))
-    (error
-     (agent-repl--log ws "permission-notify: request=%s failed error-type=%s"
-                      request-id (car err))
-     (signal (car err) (cdr err)))))
+  ;; The banner text keeps WS verbatim — it is what the user recognizes.
+  ;; Only the log sink needs the resolved name.
+  (let ((log-ws (agent-repl--frontend-ws-name ws)))
+    (agent-repl--log log-ws "permission-notify: ws=%s request=%s dispatching" ws request-id)
+    (condition-case err
+        (progn
+          (agent-repl--notify ws "Agent REPL"
+                              (format "%s: permission requested%s"
+                                      ws
+                                      (if (and tool-name (not (string-empty-p tool-name)))
+                                          (format " — %s" tool-name)
+                                        "")))
+          (agent-repl--log log-ws "permission-notify: ws=%s request=%s dispatched"
+                           ws request-id))
+      (error
+       (agent-repl--log log-ws "permission-notify: ws=%s request=%s failed error-type=%s"
+                        ws request-id (car err))
+       (signal (car err) (cdr err))))))
 
 (defun agent-repl--permission-clear (ws uuid resolution deny-message)
   "Clear WS's active permission prompt when its uuid matches UUID.
@@ -211,21 +233,24 @@ clears SILENTLY (log only); `RESOLUTION_ALLOWED' logs only.  A resolution
 whose uuid does not match the active prompt (already cleared, or never seen
 by this Emacs — e.g. resolved before connect) is a benign no-op, logged,
 never an error.  Returns non-nil when a prompt was cleared."
-  (let ((active (agent-repl--ws-get ws :permission-prompt-active)))
+  ;; As in `agent-repl--permission-present': WS keys the plist verbatim, the
+  ;; resolved name scopes the log sink.
+  (let ((active (agent-repl--ws-get ws :permission-prompt-active))
+        (log-ws (agent-repl--frontend-ws-name ws)))
     (if (and active (equal (plist-get active :request-id) uuid))
         (progn
           (agent-repl--ws-put ws :permission-prompt-active nil)
-          (agent-repl--log ws "permission-clear: ws=%s uuid=%s resolution=%s — cleared"
+          (agent-repl--log log-ws "permission-clear: ws=%s uuid=%s resolution=%s — cleared"
                            ws uuid resolution)
           (when (and (equal resolution "RESOLUTION_DENIED")
                      (stringp deny-message)
                      (not (string-empty-p deny-message)))
-            (agent-repl--log ws
-                             "permission-clear: request=%s resolution=denied deny-message-present=t — echoing"
-                             uuid)
+            (agent-repl--log log-ws
+                             "permission-clear: ws=%s request=%s resolution=denied deny-message-present=t — echoing"
+                             ws uuid)
             (message "agent-repl: permission denied — %s" deny-message))
           t)
-      (agent-repl--log ws
+      (agent-repl--log log-ws
                        "permission-clear: ws=%s uuid=%s resolution=%s — no matching active prompt (already cleared / never presented)"
                        ws uuid resolution)
       nil)))
