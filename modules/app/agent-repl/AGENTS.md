@@ -49,6 +49,34 @@ rather than colors so they never spend one of the five, and the Recently Merged
 disc borrows the `--info-agents` violet as a section tint, not as a claim about
 the vendor.
 
+## Hibernation is the memory knob, and it is gated on real elapsed quiet
+
+A live session costs a node+CLI process pair of roughly 500MB, and dozens of
+workspaces will exhaust a machine. `-idle-timeout` is the mitigation: after a
+workspace has been left alone for that long, the sweeper SIGTERMs its shim and
+leaves the registry record rehydratable, so the next act pays one bring-up and
+gets everything back. It defaults to **1 hour**, and `0` disables hibernation
+entirely.
+
+The window is measured from the newest row on the workspace's own state log
+(`ssm.LastActivityMs`), which is already an activity record: every row is
+appended by something that actually happened, and nothing appends on a timer.
+So a turn ending STARTS the clock rather than arming an immediate sweep.
+
+Both gates in `Server.sweepable` are load-bearing, and neither is redundant:
+
+- `!turn_active` alone is satisfied the instant a turn ends, so a sweeper gated
+  on it hibernated healthy sessions within one tick of them finishing work.
+  That was roughly every seven minutes in practice, since the tick is
+  `idleTimeout/4` and the timeout was never applied as a threshold at all.
+- Every unknown answers NO. A workspace with no resolved state, or none the log
+  can date, is one the sweeper knows nothing about, and reaping on absent
+  evidence is how a bring-up still in flight got hibernated before its first
+  event landed.
+
+Raise `-idle-timeout` when a machine has headroom and bring-up latency is the
+annoyance; lower it when memory is the constraint.
+
 ## Committing to master means bouncing what you changed
 
 Every component here is a built artifact, and every running process keeps
