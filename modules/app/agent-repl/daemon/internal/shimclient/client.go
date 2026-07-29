@@ -134,6 +134,12 @@ type FrameSink interface {
 	Consume(ev *corev1.Event)
 }
 
+// ModelCatalogSink receives the live query's selectable models.  A catalogue
+// is session state, not conversation content a frontend may infer.
+type ModelCatalogSink interface {
+	ModelCatalog(sessionID string, catalog *corev1.ModelCatalog)
+}
+
 // FileDiagnosticSink consumes a persistent file-plane diagnostic before it can
 // enter frontend, retained, progress, or SSM paths.
 type FileDiagnosticSink interface {
@@ -198,6 +204,7 @@ type Config struct {
 	StateSink       StateSink
 	TurnClaims      TurnClaimSink
 	FrameSink       FrameSink
+	Models          ModelCatalogSink
 	FileDiagnostics FileDiagnosticSink
 	Degraded        DegradedReporter
 	Permissions     PermissionHandler

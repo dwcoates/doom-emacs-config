@@ -47,7 +47,7 @@
  */
 
 import type { CounterEntry, CounterStatus } from "./counter-menu.js";
-import type { ContentBlock, ModelUsage, ResultSubtype, Usage } from "./protocol.js";
+import type { ContentBlock, ModelInfo, ModelUsage, ResultSubtype, Usage } from "./protocol.js";
 import { recordBlockIdentity } from "./streaming.js";
 import type {
   ContextClearedItem,
@@ -139,6 +139,8 @@ export interface SessionViewInput {
   cwd: string;
   /** CLAUDE_CONFIG_DIR the session runs against (account identity, S8). */
   configDir: string;
+  /** SDK-published menu; the browser renders it but never owns selection. */
+  models: ModelInfo[];
 }
 
 /**
@@ -470,6 +472,11 @@ export class StateAdapter {
         claudeSessionId: sv.claudeSessionId,
         cwd: sv.cwd,
         configDir: sv.configDir,
+        models: sv.modelOptions.map((model) => ({
+          value: model.value,
+          displayName: model.displayName,
+          description: model.description,
+        })),
       },
     };
   }

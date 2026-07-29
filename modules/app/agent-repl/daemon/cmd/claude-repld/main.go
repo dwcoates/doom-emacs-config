@@ -489,7 +489,8 @@ func main() {
 	}
 	// Held by pointer so its SessionView re-push can be late-bound below: the
 	// Server it pushes through does not exist yet (same shape as forwarder).
-	registrar := &server.RegistryRegistrar{Reg: sessionRegistry, Logf: legacyLog}
+	modelCatalogs := server.NewSessionModelCatalogs()
+	registrar := &server.RegistryRegistrar{Reg: sessionRegistry, Logf: legacyLog, ModelCatalogs: modelCatalogs}
 	// One registry adapter serves both durable seq marks: last_seen_seq (the
 	// shimclient replay high-water) and newest_clear_or_compact_seq (the
 	// frontend replay floor).
@@ -513,6 +514,7 @@ func main() {
 		ClearCompactStore: seqStore,
 		PermissionModes:   server.NewRegistryModeStore(sessionRegistry),
 		Registrar:         registrar,
+		ModelCatalogs:     registrar,
 		DaemonVersion:     daemonVersion,
 		ProtocolVersion:   shimProtocolVersion,
 		Logf:              legacyLog,
@@ -599,7 +601,7 @@ func main() {
 		DaemonHealth:      ready,
 		MergeDirs:         pendingMergeDirs{},
 		Lifecycle:         opener,
-		Sessions:          registrySessions{reg: sessionRegistry, driver: driver, logf: legacyLog},
+		Sessions:          registrySessions{reg: sessionRegistry, driver: driver, modelCatalogs: modelCatalogs, logf: legacyLog},
 		Inits:             driver,
 		Catalogs:          driver,
 		Queues:            driver,
@@ -628,6 +630,7 @@ func main() {
 		ForceFake:       *fake,
 		Remediator:      remediator,
 		Registry:        sessionRegistry,
+		ModelCatalogs:   modelCatalogs,
 		Logins:          logins,
 		Accounts:        accounts,
 		IdleTimeout:     *idleTimeout,
