@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -77,35 +78,56 @@ func (h *harness) dial(t *testing.T) net.Conn {
 	return conn
 }
 
-func send(t *testing.T, conn net.Conn, m proto.Message) {
-	t.Helper()
+// sendMsg / recvMsg are the GOROUTINE-SAFE halves of the framing helpers: they
+// return errors instead of calling t.Fatalf, which a non-test goroutine must
+// never do. The concurrency tests below drive producers from their own
+// goroutines and so cannot use the t-bound wrappers.
+func sendMsg(conn net.Conn, m proto.Message) error {
 	a, err := anypb.New(m)
 	if err != nil {
-		t.Fatalf("anypb.New: %v", err)
+		return fmt.Errorf("anypb.New: %w", err)
 	}
 	b, err := proto.Marshal(a)
 	if err != nil {
-		t.Fatalf("marshal: %v", err)
+		return fmt.Errorf("marshal: %w", err)
 	}
 	if err := wire.WriteFrame(conn, b); err != nil {
-		t.Fatalf("write frame: %v", err)
+		return fmt.Errorf("write frame: %w", err)
+	}
+	return nil
+}
+
+func recvMsg(conn net.Conn) (proto.Message, error) {
+	if err := conn.SetReadDeadline(time.Now().Add(10 * time.Second)); err != nil {
+		return nil, fmt.Errorf("set read deadline: %w", err)
+	}
+	frame, err := wire.ReadFrame(conn)
+	if err != nil {
+		return nil, fmt.Errorf("read frame: %w", err)
+	}
+	a := &anypb.Any{}
+	if err := proto.Unmarshal(frame, a); err != nil {
+		return nil, fmt.Errorf("unmarshal Any: %w", err)
+	}
+	m, err := a.UnmarshalNew()
+	if err != nil {
+		return nil, fmt.Errorf("resolve Any: %w", err)
+	}
+	return m, nil
+}
+
+func send(t *testing.T, conn net.Conn, m proto.Message) {
+	t.Helper()
+	if err := sendMsg(conn, m); err != nil {
+		t.Fatalf("send: %v", err)
 	}
 }
 
 func recv(t *testing.T, conn net.Conn) proto.Message {
 	t.Helper()
-	conn.SetReadDeadline(time.Now().Add(3 * time.Second))
-	frame, err := wire.ReadFrame(conn)
+	m, err := recvMsg(conn)
 	if err != nil {
-		t.Fatalf("read frame: %v", err)
-	}
-	a := &anypb.Any{}
-	if err := proto.Unmarshal(frame, a); err != nil {
-		t.Fatalf("unmarshal Any: %v", err)
-	}
-	m, err := a.UnmarshalNew()
-	if err != nil {
-		t.Fatalf("resolve Any: %v", err)
+		t.Fatalf("recv: %v", err)
 	}
 	return m
 }
@@ -402,6 +424,227 @@ func TestEphemeralPassThroughNotPersisted(t *testing.T) {
 		if ev.GetClass() == corev1.EventClass_EVENT_CLASS_EPHEMERAL {
 			t.Fatal("ephemeral event was persisted")
 		}
+	}
+}
+
+// --- publish-order (seq inversion) ----------------------------------------
+//
+// THE INCIDENT THESE COVER. Seq assignment was always serialized (BEGIN
+// IMMEDIATE), but the fan-out publish ran after the transaction on the
+// producer's own goroutine holding nothing. Two producers on one session could
+// therefore commit as N-then-N+1 and publish as N+1-then-N. The daemon reads a
+// non-increasing seq on a session as a terminal protocol violation and kills the
+// session, mid-turn — seen twice on 2026-07-29 (seq=642 after 647, and seq=1043
+// after 1044).
+
+// concurrentProducer drives one producer connection from its own goroutine.
+//
+// IT PIPELINES DELIBERATELY: every batch is written without waiting for its ack,
+// and a second goroutine drains the acks. Ack-per-batch would defeat the whole
+// test — the ack is written AFTER the fan-out publish, so a producer that waits
+// for it is serialized against its own publish and can never be mid-region while
+// another producer publishes. Pipelining is what keeps both of the store's
+// handler goroutines deep in ingestAndFan at the same time, which is the
+// condition the production inversion needed.
+func concurrentProducer(conn net.Conn, batches []*corev1.StoreWrite, ready *sync.WaitGroup, start <-chan struct{}) error {
+	drained := make(chan error, 1)
+	go func() {
+		for i := range batches {
+			m, err := recvMsg(conn)
+			if err != nil {
+				drained <- fmt.Errorf("batch %d ack: %w", i, err)
+				return
+			}
+			if _, ok := m.(*corev1.StoreWriteAck); !ok {
+				drained <- fmt.Errorf("batch %d: ack type = %T, want *StoreWriteAck", i, m)
+				return
+			}
+		}
+		drained <- nil
+	}()
+
+	ready.Done()
+	<-start
+	for i, batch := range batches {
+		if err := sendMsg(conn, batch); err != nil {
+			return fmt.Errorf("batch %d: %w", i, err)
+		}
+	}
+	return <-drained
+}
+
+// runProducersConcurrently releases every producer at once from a channel
+// barrier and waits for all of them. No sleeps: `ready` proves each goroutine
+// reached the barrier, closing `start` releases them together, and `wg` bounds
+// the act.
+func runProducersConcurrently(t *testing.T, fns ...func(*sync.WaitGroup, <-chan struct{}) error) {
+	t.Helper()
+	var ready, done sync.WaitGroup
+	ready.Add(len(fns))
+	done.Add(len(fns))
+	start := make(chan struct{})
+	errs := make([]error, len(fns))
+	for i, fn := range fns {
+		go func() {
+			defer done.Done()
+			errs[i] = fn(&ready, start)
+		}()
+	}
+	ready.Wait() // every producer is at the barrier
+	close(start) // release them together
+	done.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("producer %d: %v", i, err)
+		}
+	}
+}
+
+// registerSubscriber opens a subscription from 0 and proves it is REGISTERED and
+// live-tailing by round-tripping one persistent event through it. Returns the
+// subscriber conn and the seq that handshake consumed, so a caller can assert
+// only on what follows. No timing assumptions.
+func registerSubscriber(t *testing.T, h *harness, session string) (net.Conn, uint64) {
+	t.Helper()
+	sub := h.dial(t)
+	send(t, sub, &corev1.Subscribe{SessionId: session, FromSeq: 0})
+	prod := h.dial(t)
+	send(t, prod, write(vAssistantStream(t, session, "handshake")))
+	if ack := recvAck(t, prod); ack.GetAccepted() != 1 {
+		t.Fatalf("handshake ack accepted = %d, want 1", ack.GetAccepted())
+	}
+	ev := recvEvent(t, sub)
+	if ev.GetSeq() == 0 {
+		t.Fatal("handshake event arrived with seq=0")
+	}
+	return sub, ev.GetSeq()
+}
+
+// watchSeqOrder drains the subscriber CONCURRENTLY with the producers, checking
+// monotonicity as each event lands, and returns a join func yielding the first
+// violation (nil if none).
+//
+// Draining concurrently is not an optimization, it is what makes the test valid.
+// Buffering every event to assert afterwards caps the batch count at the fanout
+// buffer, and overrunning that buffer HARD-DISCONNECTS the subscriber
+// (fanout.publish's slow-consumer path) — which surfaces as an EOF read error
+// that looks like a failure but proves nothing about ordering. Reading as they
+// arrive decouples volume from the buffer, and volume is what makes the
+// inversion reproducible.
+//
+// `wantPersistent` counts only seq-bearing events; ephemerals are passed over
+// (they carry no seq and so cannot violate the ordering).
+func watchSeqOrder(sub net.Conn, floor uint64, wantPersistent int) func() error {
+	result := make(chan error, 1)
+	go func() {
+		last := floor
+		for seen := 0; seen < wantPersistent; {
+			m, err := recvMsg(sub)
+			if err != nil {
+				result <- fmt.Errorf("after %d/%d persistent events: %w", seen, wantPersistent, err)
+				return
+			}
+			ev, ok := m.(*corev1.Event)
+			if !ok {
+				result <- fmt.Errorf("after %d persistent events: frame type = %T, want *Event", seen, m)
+				return
+			}
+			if ev.GetClass() == corev1.EventClass_EVENT_CLASS_EPHEMERAL {
+				continue
+			}
+			if ev.GetSeq() <= last {
+				result <- fmt.Errorf("persistent event %d: seq %d did not increase past %d — publish order inverted", seen, ev.GetSeq(), last)
+				return
+			}
+			last = ev.GetSeq()
+			seen++
+		}
+		result <- nil
+	}()
+	return func() error { return <-result }
+}
+
+// oneEventBatches builds n single-event batches from a per-index event factory.
+func oneEventBatches(n int, event func(i int) *corev1.Event) []*corev1.StoreWrite {
+	batches := make([]*corev1.StoreWrite, n)
+	for i := range n {
+		batches[i] = write(event(i))
+	}
+	return batches
+}
+
+func TestConcurrentProducersOnOneSessionPublishInSeqOrder(t *testing.T) {
+	// Arrange: one session, two producers on different planes with distinct
+	// dedup identities — the shim's stream plane and the sidecar's file plane,
+	// which is exactly the pair that collided in production. Distinct uuids mean
+	// nothing dedups, so every event is assigned a seq and must be published.
+	// The fanout buffer is set well above the event count so a slow-consumer
+	// disconnect can never masquerade as an ordering failure; the buffer is not
+	// what is under test here.
+	const perProducer = 1500
+	h := start(t, 4*perProducer, testLogger())
+	sub, handshakeSeq := registerSubscriber(t, h, "s1")
+
+	streamConn, diskConn := h.dial(t), h.dial(t)
+	streamBatches := oneEventBatches(perProducer, func(i int) *corev1.Event {
+		return vAssistantStream(t, "s1", fmt.Sprintf("stream-%d", i))
+	})
+	diskBatches := oneEventBatches(perProducer, func(i int) *corev1.Event {
+		return vAssistantDisk(t, "s1", fmt.Sprintf("disk-%d", i))
+	})
+
+	// Assert (armed first): the subscriber's stream is STRICTLY INCREASING. This
+	// is the daemon's own invariant — dispatchEvent treats any non-increasing seq
+	// on a session as a terminal protocol violation — checked off the same wire
+	// the daemon reads.
+	joinWatcher := watchSeqOrder(sub, handshakeSeq, 2*perProducer)
+
+	// Act: both producers write the same session at once.
+	runProducersConcurrently(t,
+		func(ready *sync.WaitGroup, start <-chan struct{}) error {
+			return concurrentProducer(streamConn, streamBatches, ready, start)
+		},
+		func(ready *sync.WaitGroup, start <-chan struct{}) error {
+			return concurrentProducer(diskConn, diskBatches, ready, start)
+		},
+	)
+
+	if err := joinWatcher(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRejectedBatchReleasesTheIngestLock(t *testing.T) {
+	// Arrange: a batch the db layer refuses outright. A persistent event with no
+	// session_id is rejected inside Ingest (it has no seq space to belong to), so
+	// ingestAndFan returns down its error branch — the one path that must still
+	// release the lock it took on the way in.
+	h := start(t, 0, testLogger())
+	bad := h.dial(t)
+
+	// Act: the rejected batch, then an ordinary batch on a DIFFERENT producer
+	// connection — the real hazard is a leaked lock wedging every OTHER producer.
+	send(t, bad, write(&corev1.Event{
+		Class:   corev1.EventClass_EVENT_CLASS_PERSISTENT,
+		Plane:   corev1.Plane_PLANE_STREAM,
+		Payload: &corev1.Event_SessionStarted{SessionStarted: &corev1.SessionStarted{}},
+	}))
+	rejected := recvAck(t, bad)
+
+	good := h.dial(t)
+	send(t, good, write(vAssistantStream(t, "s1", "after-rejection")))
+	served := recvAck(t, good) // a leaked lock hangs here until the read deadline
+
+	// Assert: the rejection was reported loudly, and the store still serves. The
+	// error branch is unchanged; only the unlock was added.
+	if rejected.GetError() == "" {
+		t.Fatal("rejected batch acked with an empty error; the loud rejection path changed")
+	}
+	if rejected.GetAccepted() != 0 {
+		t.Fatalf("rejected ack accepted = %d, want 0", rejected.GetAccepted())
+	}
+	if served.GetAccepted() != 1 || served.GetLastSeq() != 1 {
+		t.Fatalf("post-rejection ack = %+v, want accepted=1 last_seq=1", served)
 	}
 }
 

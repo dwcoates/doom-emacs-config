@@ -6,6 +6,7 @@ import (
 	"io"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
@@ -85,6 +86,78 @@ func taskEnded(session, taskID string) *corev1.Event {
 		Payload: &corev1.Event_TaskEnded{TaskEnded: &corev1.TaskEnded{
 			TaskId: taskID, Kind: corev1.TaskKind_TASK_KIND_AGENT,
 		}},
+	}
+}
+
+// --- write serialization ---------------------------------------------------
+
+func TestConcurrentIngestsAssignEverySeqExactlyOnce(t *testing.T) {
+	// Arrange: BEGIN IMMEDIATE (`_txlock=immediate`, see Open) is what makes
+	// concurrent writers mutually exclusive. Ingest reads MAX(seq) and only then
+	// inserts, so if that serialization did NOT hold, two transactions would read
+	// the same high-water and derive the same candidate — and the loser's
+	// `INSERT OR IGNORE` against PRIMARY KEY (session_id, seq) would be silently
+	// ignored and then miscounted as a dedup. Every failure mode is therefore
+	// observable from outside: a duplicate seq, a gap, a lost event, or an error.
+	//
+	// SessionStarted carries no dedup identity, so a genuine dedup can never be
+	// confused with a seq collision here.
+	const writers = 12
+	d := openTemp(t)
+
+	// Act: release every writer at once from a channel barrier — no sleeps.
+	var ready, done sync.WaitGroup
+	ready.Add(writers)
+	done.Add(writers)
+	start := make(chan struct{})
+	results := make([]Result, writers)
+	errs := make([]error, writers)
+	for i := range writers {
+		go func() {
+			defer done.Done()
+			ready.Done()
+			<-start
+			results[i], errs[i] = d.Ingest("p", []*corev1.Event{persistentCore("s1")}, nil)
+		}()
+	}
+	ready.Wait()
+	close(start)
+	done.Wait()
+
+	// Assert: every writer succeeded with its one event, and the assigned seqs are
+	// exactly 1..writers with no duplicate and no gap.
+	seen := make(map[uint64]int, writers)
+	for i := range writers {
+		if errs[i] != nil {
+			t.Fatalf("writer %d: Ingest failed (write serialization did not hold): %v", i, errs[i])
+		}
+		if results[i].Accepted != 1 || results[i].Deduped != 0 {
+			t.Fatalf("writer %d: accepted=%d deduped=%d, want accepted=1 deduped=0 — a seq collision was miscounted as a dedup",
+				i, results[i].Accepted, results[i].Deduped)
+		}
+		seen[results[i].LastSeq]++
+	}
+	for seq := uint64(1); seq <= writers; seq++ {
+		switch n := seen[seq]; {
+		case n == 0:
+			t.Fatalf("seq %d was never assigned; assigned set = %v", seq, seen)
+		case n > 1:
+			t.Fatalf("seq %d was assigned to %d writers; assigned set = %v", seq, n, seen)
+		}
+	}
+
+	// Assert: the durable rows agree with the acks.
+	replayed, err := d.ReplayFrom("s1", 0)
+	if err != nil {
+		t.Fatalf("ReplayFrom: %v", err)
+	}
+	if len(replayed) != writers {
+		t.Fatalf("persisted %d events, want %d", len(replayed), writers)
+	}
+	for i, ev := range replayed {
+		if want := uint64(i + 1); ev.GetSeq() != want {
+			t.Fatalf("persisted event %d has seq %d, want %d", i, ev.GetSeq(), want)
+		}
 	}
 }
 
