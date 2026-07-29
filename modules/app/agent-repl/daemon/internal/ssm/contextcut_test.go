@@ -343,7 +343,7 @@ func TestAnOpenClearingAxisIsRewatchedAcrossAReopen(t *testing.T) {
 		t.Fatalf("reopen: %v", err)
 	}
 	t.Cleanup(func() { reopened.Close() })
-	// The reopen marked every workspace dormant (nothing is wired to a daemon
+	// The reopen marked every workspace hibernated (nothing is wired to a daemon
 	// that has just started), which is orthogonal to the watchdog under test.
 	wireAll(t, reopened, fakeResolver{"s1": "ws1"})
 

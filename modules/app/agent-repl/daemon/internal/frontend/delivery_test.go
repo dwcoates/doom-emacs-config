@@ -168,7 +168,7 @@ func TestTheConnectSnapshotOmitsNoWorkspace(t *testing.T) {
 		t.Fatalf("w1 = %s, want THINKING", seen["w1"])
 	}
 	if seen["w2"] != frontendv1.RenderState_RENDER_STATE_SEVERED {
-		t.Fatalf("w2 = %s, want DORMANT", seen["w2"])
+		t.Fatalf("w2 = %s, want SEVERED", seen["w2"])
 	}
 }
 
