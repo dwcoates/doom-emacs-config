@@ -28,6 +28,7 @@ import (
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/errclass"
 	"claude-repld/internal/frontend"
+	"claude-repld/internal/registry"
 	"claude-repld/internal/ssm"
 
 	"google.golang.org/protobuf/types/known/structpb"
@@ -539,10 +540,12 @@ func (h *commandHandler) SetModel(ctx context.Context, workspace, requestID stri
 	if err := checkWorkspaceKey("set_model", workspace); err != nil {
 		return "", err
 	}
-	if cmd.GetModel() == "" {
+	requested := registry.NormalizeModel(cmd.GetModel())
+	if requested == "" {
 		return "", fmt.Errorf("frontend cmd: set_model ws=%s request_id=%s has an empty model", workspace, requestID)
 	}
-	selected, err := h.prompts.SetModel(ctx, workspace, cmd.GetModel())
+	selected, err := h.prompts.SetModel(ctx, workspace, requested)
+	selected = registry.NormalizeModel(selected)
 	if err != nil {
 		if selected != "" {
 			h.logf("frontend cmd: set_model REJECTED ws=%s request_id=%s requested=%q shim_selected=%q: %v", workspace, requestID, cmd.GetModel(), selected, err)

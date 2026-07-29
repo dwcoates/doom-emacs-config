@@ -41,6 +41,19 @@ func waitConnected(t *testing.T, ch <-chan *corev1.ShimHello) {
 	}
 }
 
+func TestSetModelRejectsSyntheticBeforeControlSend(t *testing.T) {
+	// A zero Client has no live control transport. The CLI marker must be
+	// rejected before request-id allocation or any daemon-to-shim send.
+	c := &Client{}
+	selected, err := c.SetModel(context.Background(), "<synthetic>")
+	if err == nil || err.Error() != "set model: model id is empty" {
+		t.Fatalf("SetModel(<synthetic>) error = %v, want empty-model refusal", err)
+	}
+	if selected != "" {
+		t.Fatalf("SetModel(<synthetic>) selected = %q, want empty", selected)
+	}
+}
+
 func TestSubmitPromptAckSuccess(t *testing.T) {
 	// Arrange: shim acks the prompt with its request_id.
 	h := newHarness()

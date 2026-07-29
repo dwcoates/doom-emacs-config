@@ -244,6 +244,9 @@ func New(cfg Config) *Server {
 	if cfg.Logf == nil {
 		panic("server: Config.Logf is required")
 	}
+	if cfg.ModelCatalogs == nil {
+		panic("server: Config.ModelCatalogs is required")
+	}
 	logf := cfg.Logf
 	now := cfg.Now
 	if now == nil {
@@ -1349,10 +1352,10 @@ func (s *Server) pushSessionView(id string) {
 		pending = s.driver.PendingPermissions(rec.CWD)
 		live = s.driver.Live(rec.CWD)
 	}
-	var modelOptions []*frontendv1.ModelOption
-	if s.modelCatalogs != nil {
-		modelOptions = s.modelCatalogs.Get(id)
+	if s.modelCatalogs == nil {
+		panic(fmt.Sprintf("server: session %s: pushSessionView requires ModelCatalogs", id))
 	}
+	modelOptions := s.modelCatalogs.Get(id)
 	s.frontend.PushSessionView(SessionViewFromRecordWithModels(s.logf, rec, pending, live, modelOptions))
 }
 
