@@ -189,6 +189,7 @@ export class UdsSession {
     this.storeKeyKnown = deps.storeSessionId !== undefined && deps.storeSessionId !== "";
     this.replayIdleMs = deps.replayIdleMs ?? 5000;
     this.effectivePermissionMode = deps.permissionMode ?? "default";
+    LOGGER.log({ agent_repl_session_id: deps.sessionId, uds_socket: deps.udsSocketPath, store_socket: deps.storeSocketPath, session_source: deps.sessionSource, store_key_known: this.storeKeyKnown, permission_mode: this.effectivePermissionMode }, "constructed UDS shim session");
     const target: SdkControlTarget = {
       submitPrompt: ({ requestId, text, permissionMode }): void => {
         this.turnsInFlight++;
@@ -254,6 +255,7 @@ export class UdsSession {
         // watching for the turn's `aborted` result sees the stop and the
         // turn end as two unordered events.
         const wasLive = this.turnsInFlight > 0;
+        LOGGER.log({ agent_repl_session_id: this.deps.sessionId, turns_in_flight: this.turnsInFlight, interrupt_outcome: wasLive ? "interrupted" : "already_complete" }, "processing daemon interrupt request");
         // Interrupt cancels every blocked permission wait so no SDK callback
         // hangs, then forwards to the SDK (a no-op when idle).
         this.control.cancelAll("interrupt");
@@ -387,6 +389,7 @@ export class UdsSession {
    * even an unexpected failure closes the request (loudly, as truncated).
    */
   private async serveReplay(req: ReplayRequest): Promise<void> {
+    LOGGER.log({ agent_repl_session_id: this.deps.sessionId, request_id: req.requestId, from_seq: req.fromSeq, to_seq: req.toSeq, max_events: req.maxEvents, idle_ms: this.replayIdleMs }, "serving daemon replay request");
     let outcome: ReplayOutcome;
     try {
       outcome = await this.store.replay({
@@ -406,6 +409,7 @@ export class UdsSession {
       reason: outcome.reason,
       delivered: BigInt(outcome.delivered),
     }));
+    LOGGER.log({ agent_repl_session_id: this.deps.sessionId, request_id: req.requestId, delivered: outcome.delivered, truncated: outcome.truncated, reason: outcome.reason }, "completed daemon replay request");
   }
 
   /**
@@ -420,6 +424,7 @@ export class UdsSession {
    * stream. Returns the pump promise (resolves when the SDK stream ends).
    */
   async start(): Promise<void> {
+    LOGGER.log({ agent_repl_session_id: this.deps.sessionId, store_socket: this.deps.storeSocketPath, daemon_socket: this.deps.udsSocketPath }, "starting UDS shim session dependencies");
     this.query = this.deps.createQuery(this.input, this.canUseTool);
     // The store round-trip feed: merged, seq-stamped events go to the daemon.
     this.store.onMerged((evt) => {
@@ -430,10 +435,12 @@ export class UdsSession {
     // to the daemon (StoreClient has already loud-logged each dropped event).
     this.store.onDegraded((report) => this.server.sendEvent(this.degradedEvent(report)));
     await this.store.connect();
+    LOGGER.log({ agent_repl_session_id: this.deps.sessionId, store_socket: this.deps.storeSocketPath }, "store producer connection established");
     // Readiness is asserted from the handshake hook wired in the
     // constructor, not here: connect() resolves on the DIAL, and an event
     // sent before the DaemonHello would be dropped.
     await this.server.connect();
+    LOGGER.log({ agent_repl_session_id: this.deps.sessionId, daemon_socket: this.deps.udsSocketPath }, "daemon connection established; awaiting bring-up gate");
     return this.pump();
   }
 
@@ -488,7 +495,10 @@ export class UdsSession {
   private async applyHandshakePermissionMode(mode: string): Promise<boolean> {
     // Empty means a daemon too old to speak the field (core.proto): argv
     // stands, unchanged, for the rollout window.
-    if (mode === "") return true;
+    if (mode === "") {
+      LOGGER.log({ agent_repl_session_id: this.deps.sessionId, argv_permission_mode: this.effectivePermissionMode }, "DaemonHello omitted permission mode; retaining spawn-time posture");
+      return true;
+    }
     if (!isPermissionMode(mode)) {
       this.refuseBringUp(`DaemonHello carried permission_mode "${mode}", which is not one of ${PERMISSION_MODES.join(", ")}`);
       return false;
@@ -634,6 +644,7 @@ export class UdsSession {
   }
 
   private async pump(): Promise<void> {
+    LOGGER.log({ agent_repl_session_id: this.deps.sessionId }, "starting SDK stream pump");
     try {
       for await (const msg of this.query!) {
         this.routeSdkMessage(msg);
@@ -666,7 +677,10 @@ export class UdsSession {
       // current for the deltas that follow it.
       this.streamMessages.observe(msg);
       const evt = toEphemeralEvent(msg, { ...this.convertOpts(), messageId: this.streamMessages.current() });
-      if (evt) this.server.sendEvent(evt);
+      if (evt) {
+        LOGGER.logVerbose({ agent_repl_session_id: this.deps.sessionId, sdk_type: msg.type, payload_case: evt.payload.case, claude_session_id: evt.sessionId }, "forwarding ephemeral SDK event directly to daemon");
+        this.server.sendEvent(evt);
+      }
       return;
     }
     // A result closes the turn it belongs to.
@@ -684,6 +698,7 @@ export class UdsSession {
     this.store.adoptStoreKey(vendor.sessionId);
     setClaudeSessionId(vendor.sessionId);
     this.settleStoreKey(vendor.sessionId);
+    LOGGER.logVerbose({ agent_repl_session_id: this.deps.sessionId, sdk_type: msg.type, claude_session_id: vendor.sessionId, lifecycle_count: lifecycle.length, store_key: this.store.storeSessionId() }, "writing persistent SDK event batch to store");
     void this.store.write([vendor, ...lifecycle]).catch(() => {
       // The honest sad path lives INSIDE StoreClient (loud-log per dropped
       // event + DegradedState to onDegraded). Nothing to add here; we only

@@ -1,11 +1,18 @@
 package server
 
 import (
+	"bytes"
+	"io"
 	"testing"
 	"time"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
+	"agentrepl/shim-store/internal/logging"
 )
+
+func testFanout(buffer int) *fanout {
+	return newFanout(buffer, logging.New(io.Discard, io.Discard, false))
+}
 
 func persistentEvent(session string, seq uint64) *corev1.Event {
 	return &corev1.Event{
@@ -26,7 +33,7 @@ func ephemeralEvent(session string) *corev1.Event {
 
 func TestFanoutDeliversToSessionSubscriber(t *testing.T) {
 	// Arrange
-	f := newFanout(4)
+	f := testFanout(4)
 	sub := f.subscribe("s1")
 	// Act
 	f.publish(persistentEvent("s1", 1))
@@ -43,7 +50,7 @@ func TestFanoutDeliversToSessionSubscriber(t *testing.T) {
 
 func TestFanoutIsSessionScoped(t *testing.T) {
 	// Arrange
-	f := newFanout(4)
+	f := testFanout(4)
 	sub := f.subscribe("s1")
 	// Act: publish for a different session.
 	f.publish(persistentEvent("other", 1))
@@ -57,7 +64,7 @@ func TestFanoutIsSessionScoped(t *testing.T) {
 
 func TestFanoutEphemeralPassesThrough(t *testing.T) {
 	// Arrange
-	f := newFanout(4)
+	f := testFanout(4)
 	sub := f.subscribe("s1")
 	// Act: the fanout is class-agnostic; ephemeral events reach live subscribers.
 	f.publish(ephemeralEvent("s1"))
@@ -74,7 +81,7 @@ func TestFanoutEphemeralPassesThrough(t *testing.T) {
 
 func TestFanoutSlowConsumerDisconnected(t *testing.T) {
 	// Arrange: buffer of 2, a subscriber that never drains.
-	f := newFanout(2)
+	f := testFanout(2)
 	sub := f.subscribe("s1")
 	// Act: overflow the bounded buffer.
 	f.publish(persistentEvent("s1", 1))
@@ -94,7 +101,7 @@ func TestFanoutSlowConsumerDisconnected(t *testing.T) {
 
 func TestFanoutUnsubscribeStopsDelivery(t *testing.T) {
 	// Arrange
-	f := newFanout(4)
+	f := testFanout(4)
 	sub := f.subscribe("s1")
 	// Act
 	f.unsubscribe(sub)
@@ -107,5 +114,27 @@ func TestFanoutUnsubscribeStopsDelivery(t *testing.T) {
 	case <-sub.done:
 	case <-time.After(time.Second):
 		t.Fatal("done not closed after unsubscribe")
+	}
+}
+
+func TestFanoutSlowConsumerLogsCanonicalContext(t *testing.T) {
+	var logs bytes.Buffer
+	f := newFanout(1, logging.New(&logs, io.Discard, false).With(logging.Fields{Component: "server", Socket: "store.sock"}))
+	sub := f.subscribe("vendor-session")
+	f.publish(persistentEvent("vendor-session", 1))
+	f.publish(persistentEvent("vendor-session", 2))
+
+	select {
+	case <-sub.done:
+	case <-time.After(time.Second):
+		t.Fatal("slow subscriber was not disconnected")
+	}
+
+	record, found := findLoggedRecord(t, logs.Bytes(), "slow-consumer", "warn")
+	if !found {
+		t.Fatalf("slow-consumer record missing: %s", logs.String())
+	}
+	if record.Level != "warn" || record.Operation != "slow-consumer" || record.Session != "vendor-session" || record.Context["subscriber"] != "1" || record.Context["component"] != "server" || record.Context["socket"] != "store.sock" {
+		t.Fatalf("slow-consumer record lacks canonical context: %#v", record)
 	}
 }

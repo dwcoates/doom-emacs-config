@@ -73,4 +73,25 @@ describe("AsyncQueue", () => {
     // Assert
     expect(seen).toEqual([1, 2]);
   });
+
+  it("rejects a waiting consumer when the producer fails", async () => {
+    const q = new AsyncQueue<number>();
+    const pending = q[Symbol.asyncIterator]().next();
+    const failure = new Error("producer failed");
+    q.fail(failure);
+    await expect(pending).rejects.toBe(failure);
+    expect(q.isEnded).toBe(true);
+  });
+
+  it("drains buffered values before surfacing producer failure", async () => {
+    const q = new AsyncQueue<number>();
+    const failure = new Error("producer failed");
+    q.push(1);
+    q.push(2);
+    q.fail(failure);
+    const iterator = q[Symbol.asyncIterator]();
+    await expect(iterator.next()).resolves.toEqual({ value: 1, done: false });
+    await expect(iterator.next()).resolves.toEqual({ value: 2, done: false });
+    await expect(iterator.next()).rejects.toBe(failure);
+  });
 });

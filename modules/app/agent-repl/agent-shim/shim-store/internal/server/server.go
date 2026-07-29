@@ -64,7 +64,7 @@ func New(database *db.DB, log *logging.Logger, buffer int) *Server {
 	}
 	return &Server{
 		db:    database,
-		fan:   newFanout(buffer),
+		fan:   newFanout(buffer, log),
 		log:   log,
 		conns: make(map[net.Conn]struct{}),
 	}
@@ -75,21 +75,28 @@ func Listen(path string, log *logging.Logger) (net.Listener, error) {
 	if log == nil {
 		panic("shim-store server: nil logger")
 	}
+	log.LogVerbose(logging.Fields{Operation: "listen", Socket: path}, "opening UDS listener")
 	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		log.Log(logging.Fields{Operation: "remove-stale-socket", Socket: path, Level: "error"}, "removing stale socket failed: %v", err)
 		return nil, fmt.Errorf("shim-store server: removing stale socket %q: %w", path, err)
+	} else if err == nil {
+		log.Log(logging.Fields{Operation: "remove-stale-socket", Socket: path}, "removed stale UDS socket")
+	} else {
+		log.LogVerbose(logging.Fields{Operation: "remove-stale-socket", Socket: path}, "no stale UDS socket present")
 	}
 	ln, err := net.Listen("unix", path)
 	if err != nil {
 		log.Log(logging.Fields{Operation: "listen", Socket: path, Level: "error"}, "opening UDS listener failed: %v", err)
 		return nil, fmt.Errorf("shim-store server: listening on %q: %w", path, err)
 	}
+	log.Log(logging.Fields{Operation: "listen", Socket: path}, "UDS listener ready")
 	return ln, nil
 }
 
 // Serve accepts connections until the listener is closed (via Close). It
 // blocks; run it in its own goroutine.
 func (s *Server) Serve(ln net.Listener) error {
+	s.log.Log(logging.Fields{Operation: "serve"}, "accept loop starting listener=%s", listenerName(ln))
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
@@ -105,10 +112,12 @@ func (s *Server) Serve(ln net.Listener) error {
 			closed := s.closed
 			s.mu.Unlock()
 			if closed {
+				s.log.Log(logging.Fields{Operation: "serve"}, "accept loop stopped by server close")
 				return nil
 			}
 			return fmt.Errorf("shim-store server: accept: %w", err)
 		}
+		s.log.LogVerbose(logging.Fields{Operation: "accept", Subscriber: conn.RemoteAddr().String()}, "accepted UDS connection")
 		s.trackConn(conn)
 		s.wg.Add(1)
 		go func() {
@@ -120,9 +129,11 @@ func (s *Server) Serve(ln net.Listener) error {
 
 // Close stops accepting, closes all live connections, and waits for handlers.
 func (s *Server) Close() error {
+	s.log.Log(logging.Fields{Operation: "close"}, "server shutdown requested")
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
+		s.log.LogVerbose(logging.Fields{Operation: "close"}, "server already closed")
 		return nil
 	}
 	s.closed = true
@@ -133,13 +144,24 @@ func (s *Server) Close() error {
 	}
 	s.mu.Unlock()
 
+	var closeErrs []error
 	if ln != nil {
-		ln.Close()
+		if err := ln.Close(); err != nil {
+			s.log.Log(logging.Fields{Operation: "close-listener", Level: "error"}, "closing UDS listener failed: %v", err)
+			closeErrs = append(closeErrs, fmt.Errorf("closing UDS listener: %w", err))
+		}
 	}
 	for _, c := range conns {
-		c.Close()
+		if err := c.Close(); err != nil {
+			s.log.Log(logging.Fields{Operation: "close-connection", Subscriber: c.RemoteAddr().String(), Level: "error"}, "closing UDS connection failed: %v", err)
+			closeErrs = append(closeErrs, fmt.Errorf("closing UDS connection %s: %w", c.RemoteAddr(), err))
+		}
 	}
 	s.wg.Wait()
+	if err := errors.Join(closeErrs...); err != nil {
+		return err
+	}
+	s.log.Log(logging.Fields{Operation: "close"}, "server shutdown complete connections=%d", len(conns))
 	return nil
 }
 
@@ -158,33 +180,40 @@ func (s *Server) untrackConn(c net.Conn) {
 func (s *Server) handleConn(conn net.Conn) {
 	defer conn.Close()
 	defer s.untrackConn(conn)
+	peer := conn.RemoteAddr().String()
+	s.log.LogVerbose(logging.Fields{Operation: "connection", Subscriber: peer}, "reading initial protocol frame")
 
 	msg, err := wire.ReadAny(conn)
 	if err != nil {
 		if !errors.Is(err, io.EOF) {
-			s.log.Log(logging.Fields{Operation: "read-first-frame", Level: "error"}, "protocol frame read failed: %v", err)
+			s.log.Log(logging.Fields{Operation: "read-first-frame", Subscriber: peer, Level: "error"}, "protocol frame read failed: %v", err)
+		} else {
+			s.log.LogVerbose(logging.Fields{Operation: "read-first-frame", Subscriber: peer}, "connection closed before initial frame")
 		}
 		return
 	}
 	switch m := msg.(type) {
 	case *corev1.StoreWrite:
+		s.log.Log(logging.Fields{Operation: "classify-connection", Producer: m.GetProducer(), Subscriber: peer}, "classified producer connection")
 		s.serveProducer(conn, m)
 	case *corev1.Heartbeat:
 		if err := s.echoHeartbeat(conn, m); err != nil {
 			return
 		}
-		s.log.Log(logging.Fields{Operation: "producer-preamble"}, "connection opened with heartbeat; awaiting first StoreWrite")
+		s.log.Log(logging.Fields{Operation: "producer-preamble", Subscriber: peer}, "connection opened with heartbeat; awaiting first StoreWrite")
 		s.serveProducerPreamble(conn)
 	case *corev1.Subscribe:
+		s.log.Log(logging.Fields{Operation: "classify-connection", Session: m.GetSessionId(), Subscriber: peer}, "classified subscriber connection from_seq=%d", m.GetFromSeq())
 		s.serveSubscriber(conn, m)
 	case *corev1.CursorQuery:
+		s.log.Log(logging.Fields{Operation: "classify-connection", Subscriber: peer}, "classified cursor query file_id=%q", m.GetFileId())
 		s.serveCursorQuery(conn, m)
 	case *corev1.HealthCheck:
 		s.serveHealth(conn, m)
-		s.log.Log(logging.Fields{Operation: "producer-preamble", RequestID: m.GetRequestId()}, "connection opened with health check; awaiting first StoreWrite")
+		s.log.Log(logging.Fields{Operation: "producer-preamble", Subscriber: peer, RequestID: m.GetRequestId()}, "connection opened with health check; awaiting first StoreWrite")
 		s.serveProducerPreamble(conn)
 	default:
-		s.log.Log(logging.Fields{Operation: "classify-connection", Level: "error"},
+		s.log.Log(logging.Fields{Operation: "classify-connection", Subscriber: peer, Level: "error"},
 			"protocol frame is %T; expected StoreWrite, Heartbeat, Subscribe, CursorQuery, or HealthCheck", m)
 	}
 }
@@ -193,8 +222,9 @@ func (s *Server) handleConn(conn net.Conn) {
 // its database-backed server has been constructed.  A socket file alone can be
 // stale or merely listening; only this correlated response is health.
 func (s *Server) serveHealth(conn net.Conn, check *corev1.HealthCheck) {
+	s.log.LogVerbose(logging.Fields{Operation: "health", Subscriber: conn.RemoteAddr().String(), RequestID: check.GetRequestId()}, "processing health check")
 	if check.GetRequestId() == "" {
-		s.log.Log(logging.Fields{Operation: "health", Level: "error"}, "health check rejected: empty request_id")
+		s.log.Log(logging.Fields{Operation: "health", Subscriber: conn.RemoteAddr().String(), Level: "error"}, "health check rejected: empty request_id")
 		return
 	}
 	status := &corev1.HealthStatus{
@@ -203,10 +233,10 @@ func (s *Server) serveHealth(conn net.Conn, check *corev1.HealthCheck) {
 		Component: "shim-store",
 	}
 	if err := wire.WriteAny(conn, status); err != nil {
-		s.log.Log(logging.Fields{Operation: "health-reply", RequestID: check.GetRequestId(), Level: "error"}, "health reply failed: %v", err)
+		s.log.Log(logging.Fields{Operation: "health-reply", Subscriber: conn.RemoteAddr().String(), RequestID: check.GetRequestId(), Level: "error"}, "health reply failed: %v", err)
 		return
 	}
-	s.log.Log(logging.Fields{Operation: "health", RequestID: check.GetRequestId()}, "health PASS")
+	s.log.Log(logging.Fields{Operation: "health", Subscriber: conn.RemoteAddr().String(), RequestID: check.GetRequestId()}, "health PASS")
 }
 
 // serveCursorQuery answers a sidecar's startup cursor-recovery request (§7.3):
@@ -214,6 +244,8 @@ func (s *Server) serveHealth(conn net.Conn, check *corev1.HealthCheck) {
 // that one (or an empty list when absent). One CursorList reply, then the
 // connection is done.
 func (s *Server) serveCursorQuery(conn net.Conn, q *corev1.CursorQuery) {
+	peer := conn.RemoteAddr().String()
+	s.log.LogVerbose(logging.Fields{Operation: "cursor-query", Subscriber: peer}, "processing cursor query file_id=%q", q.GetFileId())
 	var cursors []*corev1.CursorState
 	var openTasks []*corev1.OpenTaskState
 	if id := q.GetFileId(); id != "" {
@@ -232,18 +264,17 @@ func (s *Server) serveCursorQuery(conn net.Conn, q *corev1.CursorQuery) {
 		cursors = all
 		openTasks, err = s.db.OpenTasks()
 		if err != nil {
-			s.log.Log(logging.Fields{Operation: "cursor-query-open-tasks", Level: "error"}, "query failed: %v", err)
 			return
 		}
 	}
-	s.log.Log(logging.Fields{Operation: "cursor-query"},
+	s.log.Log(logging.Fields{Operation: "cursor-query", Subscriber: peer},
 		"startup recovery snapshot: cursors=%d open_tasks=%d file_id=%q", len(cursors), len(openTasks), q.GetFileId())
 	if err := wire.WriteAny(conn, &corev1.CursorList{
 		Cursors:                cursors,
 		OpenTasks:              openTasks,
 		OpenTasksAuthoritative: q.GetFileId() == "",
 	}); err != nil {
-		s.log.Log(logging.Fields{Operation: "cursor-query-reply", Subscriber: conn.RemoteAddr().String(), Level: "error"}, "protocol cursor reply write failed: %v", err)
+		s.log.Log(logging.Fields{Operation: "cursor-query-reply", Subscriber: peer, Level: "error"}, "protocol cursor reply write failed: %v", err)
 	}
 }
 
@@ -254,16 +285,21 @@ func (s *Server) serveCursorQuery(conn net.Conn, q *corev1.CursorQuery) {
 // have no event to write for hours after startup, so requiring a write before
 // its first heartbeat turns healthy idleness into a reconnect loop.
 func (s *Server) serveProducerPreamble(conn net.Conn) {
+	peer := conn.RemoteAddr().String()
+	s.log.LogVerbose(logging.Fields{Operation: "producer-preamble", Subscriber: peer}, "awaiting producer declaration")
 	for {
 		msg, err := wire.ReadAny(conn)
 		if err != nil {
 			if !errors.Is(err, io.EOF) {
-				s.log.Log(logging.Fields{Operation: "producer-preamble-read", Level: "error"}, "connection dropped: %v", err)
+				s.log.Log(logging.Fields{Operation: "producer-preamble-read", Subscriber: peer, Level: "error"}, "connection dropped: %v", err)
+			} else {
+				s.log.LogVerbose(logging.Fields{Operation: "producer-preamble-read", Subscriber: peer}, "producer preamble closed cleanly")
 			}
 			return
 		}
 		switch m := msg.(type) {
 		case *corev1.StoreWrite:
+			s.log.Log(logging.Fields{Operation: "producer-preamble", Producer: m.GetProducer(), Subscriber: peer}, "producer declared by StoreWrite")
 			s.serveProducer(conn, m)
 			return
 		case *corev1.Heartbeat:
@@ -273,13 +309,16 @@ func (s *Server) serveProducerPreamble(conn net.Conn) {
 		case *corev1.HealthCheck:
 			s.serveHealth(conn, m)
 		default:
-			s.log.Log(logging.Fields{Operation: "producer-preamble-read", Level: "error"}, "unrecognized frame %T; disconnecting", m)
+			s.log.Log(logging.Fields{Operation: "producer-preamble-read", Subscriber: peer, Level: "error"}, "unrecognized frame %T; disconnecting", m)
 			return
 		}
 	}
 }
 
 func (s *Server) serveProducer(conn net.Conn, first *corev1.StoreWrite) {
+	peer := conn.RemoteAddr().String()
+	producer := first.GetProducer()
+	s.log.LogVerbose(logging.Fields{Operation: "producer", Producer: producer, Subscriber: peer}, "serving producer connection")
 	if err := s.processWrite(conn, first); err != nil {
 		return
 	}
@@ -287,7 +326,9 @@ func (s *Server) serveProducer(conn net.Conn, first *corev1.StoreWrite) {
 		msg, err := wire.ReadAny(conn)
 		if err != nil {
 			if !errors.Is(err, io.EOF) {
-				s.log.Log(logging.Fields{Operation: "producer-read", Producer: first.GetProducer(), Level: "error"}, "protocol producer frame read failed: %v", err)
+				s.log.Log(logging.Fields{Operation: "producer-read", Producer: producer, Subscriber: peer, Level: "error"}, "protocol producer frame read failed: %v", err)
+			} else {
+				s.log.LogVerbose(logging.Fields{Operation: "producer-read", Producer: producer, Subscriber: peer}, "producer connection closed cleanly")
 			}
 			return
 		}
@@ -303,25 +344,41 @@ func (s *Server) serveProducer(conn net.Conn, first *corev1.StoreWrite) {
 		case *corev1.HealthCheck:
 			s.serveHealth(conn, m)
 		default:
-			s.log.Log(logging.Fields{Operation: "producer-read", Producer: first.GetProducer(), Level: "error"}, "protocol frame is %T; disconnecting producer", m)
+			s.log.Log(logging.Fields{Operation: "producer-read", Producer: producer, Subscriber: peer, Level: "error"}, "protocol frame is %T; disconnecting producer", m)
 			return
 		}
 	}
 }
 
 func (s *Server) echoHeartbeat(conn net.Conn, heartbeat *corev1.Heartbeat) error {
-	return wire.WriteAny(conn, &corev1.Heartbeat{SentAtMs: heartbeat.GetSentAtMs()})
+	if err := wire.WriteAny(conn, &corev1.Heartbeat{SentAtMs: heartbeat.GetSentAtMs()}); err != nil {
+		s.log.Log(logging.Fields{Operation: "heartbeat-reply", Subscriber: conn.RemoteAddr().String(), Level: "error"}, "protocol heartbeat reply failed sent_at_ms=%d: %v", heartbeat.GetSentAtMs(), err)
+		return err
+	}
+	s.log.LogVerbose(logging.Fields{Operation: "heartbeat-reply", Subscriber: conn.RemoteAddr().String()}, "echoed heartbeat sent_at_ms=%d", heartbeat.GetSentAtMs())
+	return nil
 }
 
 // processWrite ingests one batch and fans out its events, then acks. A rejected
 // batch acks with a non-empty error and a loud log; it is never silently
 // dropped.
 func (s *Server) processWrite(conn net.Conn, sw *corev1.StoreWrite) error {
-	ack := s.ingestAndFan(sw)
-	return wire.WriteAny(conn, ack)
+	events := sw.GetBatch().GetEvents()
+	ack, durable := s.ingestAndFan(sw)
+	if durable {
+		s.log.LogVerbose(logging.Fields{Operation: "store-write", Producer: sw.GetProducer(), Subscriber: conn.RemoteAddr().String()}, "processing StoreWrite events=%d cursor_advance=%t", len(events), sw.GetBatch().GetCursorAdvance() != nil)
+	}
+	if err := wire.WriteAny(conn, ack); err != nil {
+		s.log.Log(logging.Fields{Operation: "store-write-ack", Producer: sw.GetProducer(), Subscriber: conn.RemoteAddr().String(), Level: "error"}, "protocol StoreWriteAck failed accepted=%d deduped=%d last_seq=%d rejected=%t: %v", ack.GetAccepted(), ack.GetDeduped(), ack.GetLastSeq(), ack.GetError() != "", err)
+		return err
+	}
+	if durable {
+		s.log.LogVerbose(logging.Fields{Operation: "store-write-ack", Producer: sw.GetProducer(), Subscriber: conn.RemoteAddr().String()}, "StoreWriteAck sent accepted=%d deduped=%d last_seq=%d rejected=%t", ack.GetAccepted(), ack.GetDeduped(), ack.GetLastSeq(), ack.GetError() != "")
+	}
+	return nil
 }
 
-func (s *Server) ingestAndFan(sw *corev1.StoreWrite) *corev1.StoreWriteAck {
+func (s *Server) ingestAndFan(sw *corev1.StoreWrite) (*corev1.StoreWriteAck, bool) {
 	batch := sw.GetBatch()
 	events := batch.GetEvents()
 
@@ -333,12 +390,22 @@ func (s *Server) ingestAndFan(sw *corev1.StoreWrite) *corev1.StoreWriteAck {
 			persistent = append(persistent, ev)
 		}
 	}
+	if len(persistent) == 0 && batch.GetCursorAdvance() == nil {
+		// EPHEMERAL batches are a hot live-tail path. They neither persist nor
+		// change a cursor, so a store log would bury the durable outcomes the
+		// store owns without adding diagnostic value.
+		for _, ev := range events {
+			s.fan.publish(ev)
+		}
+		return &corev1.StoreWriteAck{}, false
+	}
+	s.log.LogVerbose(logging.Fields{Operation: "ingest-classify", Producer: sw.GetProducer()}, "classified batch total_events=%d persistent_events=%d ephemeral_events=%d", len(events), len(persistent), len(events)-len(persistent))
 
 	start := time.Now()
 	res, err := s.db.Ingest(sw.GetProducer(), persistent, batch.GetCursorAdvance())
 	ingestMs := time.Since(start).Milliseconds()
 	if err != nil {
-		return &corev1.StoreWriteAck{Error: err.Error()}
+		return &corev1.StoreWriteAck{Error: err.Error()}, true
 	}
 
 	// Fan out in arrival order. Ingest stamped accepted persistent events with
@@ -363,15 +430,17 @@ func (s *Server) ingestAndFan(sw *corev1.StoreWrite) *corev1.StoreWriteAck {
 		}, "persisted batch events=%d accepted=%d deduped=%d last_seq=%d ingest_ms=%d",
 			len(persistent), res.Accepted, res.Deduped, res.LastSeq, ingestMs)
 	}
-	return &corev1.StoreWriteAck{Accepted: res.Accepted, Deduped: res.Deduped, LastSeq: res.LastSeq}
+	return &corev1.StoreWriteAck{Accepted: res.Accepted, Deduped: res.Deduped, LastSeq: res.LastSeq}, true
 }
 
 // ---- subscriber side ------------------------------------------------------
 
 func (s *Server) serveSubscriber(conn net.Conn, sub *corev1.Subscribe) {
 	sessionID := sub.GetSessionId()
+	peer := conn.RemoteAddr().String()
+	s.log.LogVerbose(logging.Fields{Operation: "subscribe", Session: sessionID, Subscriber: peer}, "starting replay-then-tail from_seq=%d", sub.GetFromSeq())
 	if sessionID == "" {
-		s.log.Log(logging.Fields{Operation: "subscribe", Subscriber: conn.RemoteAddr().String(), Level: "error"}, "protocol subscription rejected: empty session_id")
+		s.log.Log(logging.Fields{Operation: "subscribe", Subscriber: peer, Level: "error"}, "protocol subscription rejected: empty session_id")
 		return
 	}
 
@@ -395,12 +464,14 @@ func (s *Server) serveSubscriber(conn net.Conn, sub *corev1.Subscribe) {
 	var lastReplaySeq uint64
 	for _, ev := range replayed {
 		if err := wire.WriteAny(conn, ev); err != nil {
+			s.log.Log(logging.Fields{Operation: "subscribe-replay", Session: sessionID, Subscriber: peer, Level: "error"}, "protocol replay write failed seq=%d: %v", ev.GetSeq(), err)
 			return
 		}
 		if ev.GetSeq() > lastReplaySeq {
 			lastReplaySeq = ev.GetSeq()
 		}
 	}
+	s.log.Log(logging.Fields{Operation: "subscribe-replay", Session: sessionID, Subscriber: peer}, "replay completed events=%d last_seq=%d", len(replayed), lastReplaySeq)
 
 	// Detect client disconnect / drain client heartbeats without ever writing
 	// from a second goroutine (the tail loop below owns all writes).
@@ -409,16 +480,22 @@ func (s *Server) serveSubscriber(conn net.Conn, sub *corev1.Subscribe) {
 	for {
 		select {
 		case <-subr.done:
+			s.log.LogVerbose(logging.Fields{Operation: "subscribe-tail", Session: sessionID, Subscriber: peer}, "live tail stopped")
 			return
 		case ev := <-subr.ch:
 			// Skip persistent events already covered by replay (overlap window).
 			if ev.GetClass() != corev1.EventClass_EVENT_CLASS_EPHEMERAL &&
 				ev.GetSeq() > 0 && ev.GetSeq() <= lastReplaySeq {
+				s.log.LogVerbose(logging.Fields{Operation: "subscribe-tail", Session: sessionID, Subscriber: peer}, "skipped replay overlap seq=%d", ev.GetSeq())
 				continue
 			}
 			if err := wire.WriteAny(conn, ev); err != nil {
+				s.log.Log(logging.Fields{Operation: "subscribe-tail", Session: sessionID, Subscriber: peer, Level: "error"}, "protocol live-tail write failed seq=%d class=%s: %v", ev.GetSeq(), ev.GetClass(), err)
 				return
 			}
+			// Successful live delivery is a per-event hot path which can fire
+			// hundreds of times per second. Subscription transitions and write
+			// failures retain the useful store-owned diagnostics.
 		}
 	}
 }
@@ -428,10 +505,22 @@ func (s *Server) serveSubscriber(conn net.Conn, sub *corev1.Subscribe) {
 func (s *Server) subReadLoop(conn net.Conn, subr *subscriber) {
 	for {
 		if _, err := wire.ReadAny(conn); err != nil {
+			if errors.Is(err, io.EOF) {
+				s.log.LogVerbose(logging.Fields{Operation: "subscriber-read", Session: subr.sessionID, Subscriber: conn.RemoteAddr().String()}, "subscriber closed cleanly")
+			} else {
+				s.log.Log(logging.Fields{Operation: "subscriber-read", Session: subr.sessionID, Subscriber: conn.RemoteAddr().String(), Level: "error"}, "protocol subscriber frame read failed: %v", err)
+			}
 			subr.close()
 			return
 		}
 	}
+}
+
+func listenerName(ln net.Listener) string {
+	if ln == nil {
+		return "<nil>"
+	}
+	return ln.Addr().String()
 }
 
 // ---- Any framing ----------------------------------------------------------

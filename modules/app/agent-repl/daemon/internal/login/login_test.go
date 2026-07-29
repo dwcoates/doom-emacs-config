@@ -1,12 +1,18 @@
 package login
 
 import (
+	"bytes"
+	"encoding/json"
+	"errors"
 	"io"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"claude-repld/internal/dlog"
 )
 
 // fakeProc is a scripted terminal: tests make it "print" with say and read
@@ -21,6 +27,81 @@ type fakeProc struct {
 	rows      uint16
 	cols      uint16
 	waitCalls int
+}
+
+type errorProc struct {
+	readErr   error
+	writeErr  error
+	resizeErr error
+	closeErr  error
+	waitErr   error
+}
+
+func (p errorProc) Read([]byte) (int, error) {
+	if p.readErr != nil {
+		return 0, p.readErr
+	}
+	return 0, io.EOF
+}
+func (p errorProc) Write([]byte) (int, error)   { return 0, p.writeErr }
+func (p errorProc) Resize(uint16, uint16) error { return p.resizeErr }
+func (p errorProc) Close() error                { return p.closeErr }
+func (p errorProc) Wait() error                 { return p.waitErr }
+
+type capturedLog struct {
+	durable  bytes.Buffer
+	terminal bytes.Buffer
+	logger   *dlog.Logger
+}
+
+func newCapturedLog() *capturedLog {
+	logs := &capturedLog{}
+	logs.logger = dlog.New(&logs.durable, &logs.terminal, false)
+	return logs
+}
+
+func discardLogger() *dlog.Logger {
+	return dlog.New(io.Discard, io.Discard, false)
+}
+
+func (l *capturedLog) records(t *testing.T) []dlog.Record {
+	t.Helper()
+	decoder := json.NewDecoder(bytes.NewReader(l.durable.Bytes()))
+	var records []dlog.Record
+	for {
+		var record dlog.Record
+		if err := decoder.Decode(&record); err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			t.Fatalf("decode canonical log record: %v", err)
+		}
+		records = append(records, record)
+	}
+	return records
+}
+
+func (l *capturedLog) require(t *testing.T, operation, message string, level dlog.Level, verbosity dlog.Verbosity, context map[string]any) {
+	t.Helper()
+	var matches []dlog.Record
+	for _, record := range l.records(t) {
+		if record.Operation == operation && record.Message == message {
+			matches = append(matches, record)
+		}
+	}
+	if len(matches) != 1 {
+		t.Fatalf("records = %#v, operation=%q message=%q count=%d, want exactly 1", l.records(t), operation, message, len(matches))
+	}
+	record := matches[0]
+	if record.Runtime != dlog.RuntimeDaemon || record.Level != level || record.Verbosity != verbosity {
+		t.Fatalf("record = %#v, want runtime=%q level=%q verbosity=%q", record, dlog.RuntimeDaemon, level, verbosity)
+	}
+	if record.WorkspaceDirectory != "" || record.WorkspaceID != "" {
+		t.Fatalf("record = %#v, account-scoped login record must use global scope", record)
+	}
+	if !reflect.DeepEqual(record.Context, context) {
+		t.Fatalf("record context = %#v, want %#v", record.Context, context)
+	}
 }
 
 func newFakeProc() *fakeProc { return &fakeProc{emit: make(chan []byte, 64)} }
@@ -117,7 +198,7 @@ func managerWith(t *testing.T) (*Manager, *[]string, map[string]*fakeProc) {
 	spawned := []string{}
 	procs := map[string]*fakeProc{}
 	m := NewManager(Config{
-		Logf: func(string, ...any) {},
+		Logger: discardLogger(),
 		Start: func(account string) (Proc, error) {
 			mu.Lock()
 			defer mu.Unlock()
@@ -129,6 +210,172 @@ func managerWith(t *testing.T) (*Manager, *[]string, map[string]*fakeProc) {
 	})
 	t.Cleanup(m.CloseAll)
 	return m, &spawned, procs
+}
+
+func TestNewManager_RequiresCanonicalLogger(t *testing.T) {
+	defer func() {
+		if recovered := recover(); recovered != "login: Logger is required" {
+			t.Fatalf("panic = %v, want required Logger invariant", recovered)
+		}
+	}()
+	_ = NewManager(Config{})
+}
+
+func TestOpen_LogsStartFailureWithAccountAndOutcome(t *testing.T) {
+	logs := newCapturedLog()
+	want := errors.New("vendor executable unavailable")
+	m := NewManager(Config{
+		Logger: logs.logger,
+		Start:  func(string) (Proc, error) { return nil, want },
+	})
+
+	if _, err := m.Open("/root/.claude-work"); !errors.Is(err, want) {
+		t.Fatalf("Open error = %v, want %v", err, want)
+	}
+
+	logs.require(t, "login.open", "starting login terminal", dlog.LevelInfo, dlog.Verbose, map[string]any{
+		"account": "/root/.claude-work",
+		"outcome": "starting",
+	})
+	logs.require(t, "login.open", "login terminal start failed", dlog.LevelError, dlog.Normal, map[string]any{
+		"account": "/root/.claude-work",
+		"outcome": "start-error",
+		"error":   "vendor executable unavailable",
+	})
+}
+
+func TestSessionOperationFailuresLogInputsAndOutcomes(t *testing.T) {
+	writeFailure := errors.New("pty write failed")
+	resizeFailure := errors.New("pty resize failed")
+	closeFailure := errors.New("pty close failed")
+	logs := newCapturedLog()
+	sess := &Session{
+		account: "/root/.claude-work",
+		proc: errorProc{
+			writeErr:  writeFailure,
+			resizeErr: resizeFailure,
+			closeErr:  closeFailure,
+		},
+		logger: logs.logger,
+	}
+
+	if err := sess.Write([]byte("secret input")); !errors.Is(err, writeFailure) {
+		t.Fatalf("Write error = %v, want %v", err, writeFailure)
+	}
+	if err := sess.Resize(40, 180); !errors.Is(err, resizeFailure) {
+		t.Fatalf("Resize error = %v, want %v", err, resizeFailure)
+	}
+	if err := sess.Close(); !errors.Is(err, closeFailure) {
+		t.Fatalf("Close error = %v, want %v", err, closeFailure)
+	}
+
+	logs.require(t, "login.write", "login terminal write failed", dlog.LevelError, dlog.Normal, map[string]any{
+		"account": "/root/.claude-work",
+		"outcome": "proc-write",
+		"bytes":   float64(12),
+		"error":   "login: write to /root/.claude-work: pty write failed",
+	})
+	logs.require(t, "login.resize", "login terminal resize failed", dlog.LevelError, dlog.Normal, map[string]any{
+		"account": "/root/.claude-work",
+		"outcome": "proc-resize",
+		"rows":    float64(40),
+		"cols":    float64(180),
+		"error":   "login: resize /root/.claude-work: pty resize failed",
+	})
+	logs.require(t, "login.close", "login terminal close failed", dlog.LevelError, dlog.Normal, map[string]any{
+		"account": "/root/.claude-work",
+		"outcome": "proc-close",
+		"error":   "login: close /root/.claude-work: pty close failed",
+	})
+}
+
+func TestSessionRejectedOperationsLogExitedOutcome(t *testing.T) {
+	logs := newCapturedLog()
+	sess := &Session{account: "/root/.claude-work", proc: errorProc{}, logger: logs.logger, exited: true}
+
+	if err := sess.Write([]byte("x")); err == nil {
+		t.Fatal("Write error = nil, want exited failure")
+	}
+	if err := sess.Resize(24, 80); err == nil {
+		t.Fatal("Resize error = nil, want exited failure")
+	}
+
+	logs.require(t, "login.write", "login terminal write rejected", dlog.LevelError, dlog.Normal, map[string]any{
+		"account": "/root/.claude-work",
+		"outcome": "exited",
+		"bytes":   float64(1),
+		"error":   "login: /root/.claude-work has exited",
+	})
+	logs.require(t, "login.resize", "login terminal resize rejected", dlog.LevelError, dlog.Normal, map[string]any{
+		"account": "/root/.claude-work",
+		"outcome": "exited",
+		"rows":    float64(24),
+		"cols":    float64(80),
+		"error":   "login: /root/.claude-work has exited",
+	})
+}
+
+func TestFinish_LogsChildExitError(t *testing.T) {
+	logs := newCapturedLog()
+	sess := &Session{
+		account: "/root/.claude-work",
+		proc:    errorProc{waitErr: errors.New("child exited 1")},
+		logger:  logs.logger,
+		onExit:  func(string) {},
+		clients: map[*Client]struct{}{},
+	}
+
+	sess.finish()
+
+	logs.require(t, "login.child.exit", "login child exited with error", dlog.LevelError, dlog.Normal, map[string]any{
+		"account": "/root/.claude-work",
+		"outcome": "error",
+		"error":   "child exited 1",
+	})
+}
+
+func TestPump_LogsTerminalReadFailure(t *testing.T) {
+	logs := newCapturedLog()
+	sess := &Session{
+		account: "/root/.claude-work",
+		proc:    errorProc{readErr: errors.New("pty read failed")},
+		logger:  logs.logger,
+		onExit:  func(string) {},
+		clients: map[*Client]struct{}{},
+	}
+
+	sess.pump()
+
+	logs.require(t, "login.read", "login terminal read failed", dlog.LevelError, dlog.Normal, map[string]any{
+		"account": "/root/.claude-work",
+		"outcome": "read-error",
+		"error":   "pty read failed",
+	})
+}
+
+func TestBroadcast_LogsAndDetachesLaggingViewer(t *testing.T) {
+	logs := newCapturedLog()
+	viewer := &Client{Out: make(chan []byte)}
+	sess := &Session{
+		account: "/root/.claude-work",
+		logger:  logs.logger,
+		clients: map[*Client]struct{}{viewer: {}},
+	}
+
+	sess.broadcast([]byte("terminal output"))
+
+	if _, attached := sess.clients[viewer]; attached {
+		t.Fatal("lagging viewer remained attached")
+	}
+	logs.require(t, "login.viewer.drop", "dropping lagging login viewer", dlog.LevelWarn, dlog.Normal, map[string]any{
+		"account":      "/root/.claude-work",
+		"outcome":      "viewer-lagged",
+		"viewer_count": float64(1),
+	})
+	logs.require(t, "login.viewer.detach", "login viewer detached", dlog.LevelInfo, dlog.Verbose, map[string]any{
+		"account":      "/root/.claude-work",
+		"viewer_count": float64(0),
+	})
 }
 
 func TestOpen_ViewerSeesTheTerminal(t *testing.T) {

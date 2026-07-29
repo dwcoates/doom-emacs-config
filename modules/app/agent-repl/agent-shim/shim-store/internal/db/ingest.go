@@ -29,6 +29,9 @@ type Result struct {
 // server routes them straight to fan-out); one arriving is a loud invariant
 // violation that rejects the whole batch.
 func (d *DB) Ingest(producer string, events []*corev1.Event, cursor *corev1.CursorState) (res Result, resultErr error) {
+	d.log.LogVerbose(logging.Fields{
+		Operation: "ingest", Producer: producer, Table: "event", Transaction: "BEGIN IMMEDIATE",
+	}, "starting transaction events=%d cursor_advance=%t", len(events), cursor != nil)
 	defer func() {
 		if resultErr != nil {
 			d.log.Log(logging.Fields{
@@ -122,6 +125,9 @@ func (d *DB) Ingest(producer string, events []*corev1.Event, cursor *corev1.Curs
 	if err := tx.Commit(); err != nil {
 		return res, fmt.Errorf("shim-store ingest: commit (producer=%q): %w", producer, err)
 	}
+	d.log.LogVerbose(logging.Fields{
+		Operation: "ingest", Producer: producer, Table: "event", Transaction: "BEGIN IMMEDIATE",
+	}, "transaction committed accepted=%d deduped=%d last_seq=%d cursor_advance=%t", res.Accepted, res.Deduped, res.LastSeq, cursor != nil)
 	return res, nil
 }
 

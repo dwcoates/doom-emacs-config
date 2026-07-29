@@ -28,6 +28,7 @@ import (
 	"os/exec"
 	"sync"
 
+	"claude-repld/internal/dlog"
 	"claude-repld/internal/pty"
 	"claude-repld/internal/vendorguard"
 )
@@ -85,7 +86,7 @@ func NewClient() *Client {
 type Session struct {
 	account string
 	proc    Proc
-	logf    func(string, ...any)
+	logger  *dlog.Logger
 	onExit  func(account string)
 
 	mu      sync.Mutex
@@ -114,6 +115,7 @@ func (s *Session) Attach(c *Client) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.clients[c] = struct{}{}
+	replayBytes := len(s.scroll)
 	if len(s.scroll) > 0 {
 		replay := make([]byte, len(s.scroll))
 		copy(replay, s.scroll)
@@ -123,6 +125,12 @@ func (s *Session) Attach(c *Client) {
 		delete(s.clients, c)
 		close(c.Out)
 	}
+	emitVerbose(s.logger, dlog.LevelInfo, "login.viewer.attach", "login viewer attached", map[string]any{
+		"account":      s.account,
+		"replay_bytes": replayBytes,
+		"exited":       s.exited,
+		"viewer_count": len(s.clients),
+	})
 }
 
 // Detach unregisters a viewer; its Out channel is closed.
@@ -136,27 +144,62 @@ func (s *Session) detachLocked(c *Client) {
 	if _, ok := s.clients[c]; ok {
 		delete(s.clients, c)
 		close(c.Out)
+		emitVerbose(s.logger, dlog.LevelInfo, "login.viewer.detach", "login viewer detached", map[string]any{
+			"account":      s.account,
+			"viewer_count": len(s.clients),
+		})
 	}
 }
 
 // Write sends keystrokes to the login child.
 func (s *Session) Write(p []byte) error {
 	if s.Exited() {
-		return fmt.Errorf("login: %s has exited", s.describe())
+		err := fmt.Errorf("login: %s has exited", s.describe())
+		emitNormal(s.logger, dlog.LevelError, "login.write", "login terminal write rejected", map[string]any{
+			"account": s.account,
+			"outcome": "exited",
+			"bytes":   len(p),
+			"error":   err.Error(),
+		})
+		return err
 	}
 	if _, err := s.proc.Write(p); err != nil {
-		return fmt.Errorf("login: write to %s: %w", s.describe(), err)
+		wrapped := fmt.Errorf("login: write to %s: %w", s.describe(), err)
+		emitNormal(s.logger, dlog.LevelError, "login.write", "login terminal write failed", map[string]any{
+			"account": s.account,
+			"outcome": "proc-write",
+			"bytes":   len(p),
+			"error":   wrapped.Error(),
+		})
+		return wrapped
 	}
+	// Successful writes are per-keystroke and would drown lifecycle records.
 	return nil
 }
 
 // Resize reports the viewer's terminal geometry to the child.
 func (s *Session) Resize(rows, cols uint16) error {
 	if s.Exited() {
-		return fmt.Errorf("login: %s has exited", s.describe())
+		err := fmt.Errorf("login: %s has exited", s.describe())
+		emitNormal(s.logger, dlog.LevelError, "login.resize", "login terminal resize rejected", map[string]any{
+			"account": s.account,
+			"outcome": "exited",
+			"rows":    rows,
+			"cols":    cols,
+			"error":   err.Error(),
+		})
+		return err
 	}
 	if err := s.proc.Resize(rows, cols); err != nil {
-		return fmt.Errorf("login: resize %s: %w", s.describe(), err)
+		wrapped := fmt.Errorf("login: resize %s: %w", s.describe(), err)
+		emitNormal(s.logger, dlog.LevelError, "login.resize", "login terminal resize failed", map[string]any{
+			"account": s.account,
+			"outcome": "proc-resize",
+			"rows":    rows,
+			"cols":    cols,
+			"error":   wrapped.Error(),
+		})
+		return wrapped
 	}
 	return nil
 }
@@ -164,21 +207,43 @@ func (s *Session) Resize(rows, cols uint16) error {
 // Close kills the login child. The reader goroutine sees the resulting
 // EOF and tears the session down, so this never blocks on the child.
 func (s *Session) Close() error {
-	return s.proc.Close()
+	emitVerbose(s.logger, dlog.LevelInfo, "login.close", "closing login terminal", map[string]any{
+		"account": s.account,
+		"outcome": "closing",
+	})
+	if err := s.proc.Close(); err != nil {
+		wrapped := fmt.Errorf("login: close %s: %w", s.describe(), err)
+		emitNormal(s.logger, dlog.LevelError, "login.close", "login terminal close failed", map[string]any{
+			"account": s.account,
+			"outcome": "proc-close",
+			"error":   wrapped.Error(),
+		})
+		return wrapped
+	}
+	return nil
 }
 
 // describe names the account for error text, since "" is a real account
 // (the CLI's own default root) and reads as nothing at all.
 func (s *Session) describe() string {
-	if s.account == "" {
+	return describeAccount(s.account)
+}
+
+// describeAccount names the default root in lifecycle diagnostics.
+func describeAccount(account string) string {
+	if account == "" {
 		return "the default account"
 	}
-	return s.account
+	return account
 }
 
 // pump reads the terminal until the child is gone, retaining output for
 // replay and fanning it out to every viewer.
 func (s *Session) pump() {
+	emitVerbose(s.logger, dlog.LevelInfo, "login.read", "login terminal reader started", map[string]any{
+		"account": s.account,
+		"outcome": "started",
+	})
 	buf := make([]byte, 32<<10)
 	for {
 		n, err := s.proc.Read(buf)
@@ -192,7 +257,11 @@ func (s *Session) pump() {
 			// Close killed it. Anything else is worth a line in the log,
 			// but the teardown is identical either way.
 			if err != io.EOF {
-				s.logf("login: %s: terminal read ended: %v", s.describe(), err)
+				emitNormal(s.logger, dlog.LevelError, "login.read", "login terminal read failed", map[string]any{
+					"account": s.account,
+					"outcome": "read-error",
+					"error":   err.Error(),
+				})
 			}
 			s.finish()
 			return
@@ -216,7 +285,11 @@ func (s *Session) broadcast(chunk []byte) {
 		default:
 			// Too far behind to catch up. Drop it rather than stall every
 			// other viewer and the reader with it.
-			s.logf("login: %s: dropping a viewer that fell behind", s.describe())
+			emitNormal(s.logger, dlog.LevelWarn, "login.viewer.drop", "dropping lagging login viewer", map[string]any{
+				"account":      s.account,
+				"outcome":      "viewer-lagged",
+				"viewer_count": len(s.clients),
+			})
 			s.detachLocked(c)
 		}
 	}
@@ -235,15 +308,24 @@ func (s *Session) finish() {
 	// Reap outside the lock: Wait blocks until the child is collected and
 	// nothing about that needs the session held.
 	if err := s.proc.Wait(); err != nil {
-		s.logf("login: %s: child exited: %v", s.describe(), err)
+		emitNormal(s.logger, dlog.LevelError, "login.child.exit", "login child exited with error", map[string]any{
+			"account": s.account,
+			"outcome": "error",
+			"error":   err.Error(),
+		})
+	} else {
+		emitNormal(s.logger, dlog.LevelInfo, "login.child.exit", "login child exited cleanly", map[string]any{
+			"account": s.account,
+			"outcome": "clean",
+		})
 	}
 	s.onExit(s.account)
 }
 
 // Manager owns the running logins, at most one per account.
 type Manager struct {
-	start StartFunc
-	logf  func(string, ...any)
+	start  StartFunc
+	logger *dlog.Logger
 
 	mu       sync.Mutex
 	sessions map[string]*Session
@@ -253,7 +335,8 @@ type Manager struct {
 type Config struct {
 	// Start spawns the login child. Defaults to Spawn(DefaultCommand).
 	Start StartFunc
-	Logf  func(string, ...any)
+	// Logger owns canonical global daemon records for account-scoped logins.
+	Logger *dlog.Logger
 }
 
 // DefaultCommand drops straight into the OAuth flow rather than landing
@@ -276,9 +359,8 @@ func SpawnVendor(command []string) StartFunc {
 
 // NewManager returns a Manager.
 func NewManager(cfg Config) *Manager {
-	logf := cfg.Logf
-	if logf == nil {
-		logf = func(string, ...any) {}
+	if cfg.Logger == nil {
+		panic("login: Logger is required")
 	}
 	start := cfg.Start
 	if start == nil {
@@ -286,7 +368,7 @@ func NewManager(cfg Config) *Manager {
 	}
 	return &Manager{
 		start:    start,
-		logf:     logf,
+		logger:   cfg.Logger,
 		sessions: map[string]*Session{},
 	}
 }
@@ -301,23 +383,39 @@ func (m *Manager) Open(account string) (*Session, error) {
 	defer m.mu.Unlock()
 
 	if sess, ok := m.sessions[account]; ok && !sess.Exited() {
+		emitVerbose(m.logger, dlog.LevelInfo, "login.open", "reusing live login terminal", map[string]any{
+			"account": account,
+			"outcome": "reused",
+		})
 		return sess, nil
 	}
 
+	emitVerbose(m.logger, dlog.LevelInfo, "login.open", "starting login terminal", map[string]any{
+		"account": account,
+		"outcome": "starting",
+	})
 	proc, err := m.start(account)
 	if err != nil {
+		emitNormal(m.logger, dlog.LevelError, "login.open", "login terminal start failed", map[string]any{
+			"account": account,
+			"outcome": "start-error",
+			"error":   err.Error(),
+		})
 		return nil, err
 	}
 	sess := &Session{
 		account: account,
 		proc:    proc,
-		logf:    m.logf,
+		logger:  m.logger,
 		onExit:  m.forget,
 		clients: map[*Client]struct{}{},
 	}
 	m.sessions[account] = sess
 	go sess.pump()
-	m.logf("login: opened terminal for %s", sess.describe())
+	emitNormal(m.logger, dlog.LevelInfo, "login.open", "login terminal opened", map[string]any{
+		"account": account,
+		"outcome": "opened",
+	})
 	return sess, nil
 }
 
@@ -337,6 +435,10 @@ func (m *Manager) Close(account string) error {
 	if sess := m.Get(account); sess != nil {
 		return sess.Close()
 	}
+	emitVerbose(m.logger, dlog.LevelInfo, "login.close", "login terminal already absent", map[string]any{
+		"account": account,
+		"outcome": "already-absent",
+	})
 	return nil
 }
 
@@ -348,11 +450,13 @@ func (m *Manager) CloseAll() {
 		running = append(running, sess)
 	}
 	m.mu.Unlock()
+	emitNormal(m.logger, dlog.LevelInfo, "login.close-all", "closing all login terminals", map[string]any{
+		"count": len(running),
+	})
 
 	for _, sess := range running {
-		if err := sess.Close(); err != nil {
-			m.logf("login: %s: close: %v", sess.describe(), err)
-		}
+		// Session.Close owns both the close attempt and its error record.
+		_ = sess.Close()
 	}
 }
 
@@ -362,6 +466,34 @@ func (m *Manager) forget(account string) {
 	defer m.mu.Unlock()
 	if sess, ok := m.sessions[account]; ok && sess.Exited() {
 		delete(m.sessions, account)
+		emitVerbose(m.logger, dlog.LevelInfo, "login.cleanup", "removed exited login terminal", map[string]any{
+			"account": account,
+			"outcome": "removed",
+		})
+	}
+}
+
+func emitNormal(logger *dlog.Logger, level dlog.Level, operation, message string, context map[string]any) {
+	if err := logger.EmitNormal(dlog.GlobalScope(), dlog.Event{
+		Runtime:   dlog.RuntimeDaemon,
+		Level:     level,
+		Operation: operation,
+		Message:   message,
+		Context:   context,
+	}); err != nil {
+		panic(err)
+	}
+}
+
+func emitVerbose(logger *dlog.Logger, level dlog.Level, operation, message string, context map[string]any) {
+	if err := logger.EmitVerbose(dlog.GlobalScope(), dlog.Event{
+		Runtime:   dlog.RuntimeDaemon,
+		Level:     level,
+		Operation: operation,
+		Message:   message,
+		Context:   context,
+	}); err != nil {
+		panic(err)
 	}
 }
 

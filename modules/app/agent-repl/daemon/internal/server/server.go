@@ -668,7 +668,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	sess, err := s.logins.Open(configDir)
 	if err != nil {
-		s.httpFail(w, r, http.StatusInternalServerError, "session %s: opening the login terminal: %v", id, err)
+		httpError(w, http.StatusInternalServerError, fmt.Sprintf("session %s: opening the login terminal: %v", id, err))
 		return
 	}
 	s.logf("session %s: login terminal open for account %q", id, sess.Account())
@@ -729,9 +729,8 @@ func (s *Server) handleLoginTerminal(w http.ResponseWriter, r *http.Request) {
 		}
 		switch kind {
 		case websocket.BinaryMessage:
-			if err := sess.Write(data); err != nil {
-				s.logf("server: login keystroke: %v", err)
-			}
+			// The login session owns the canonical PTY write error record.
+			_ = sess.Write(data)
 		case websocket.TextMessage:
 			var ctl struct {
 				Resize *struct {
@@ -744,9 +743,8 @@ func (s *Server) handleLoginTerminal(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			if ctl.Resize != nil {
-				if err := sess.Resize(ctl.Resize.Rows, ctl.Resize.Cols); err != nil {
-					s.logf("server: login resize: %v", err)
-				}
+				// The login session owns the canonical PTY resize error record.
+				_ = sess.Resize(ctl.Resize.Rows, ctl.Resize.Cols)
 			}
 		}
 	}
@@ -761,7 +759,7 @@ func (s *Server) handleLoginClose(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.logins.Close(configDir); err != nil {
-		s.httpFail(w, r, http.StatusInternalServerError, "session %s: closing the login terminal: %v", id, err)
+		httpError(w, http.StatusInternalServerError, fmt.Sprintf("session %s: closing the login terminal: %v", id, err))
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

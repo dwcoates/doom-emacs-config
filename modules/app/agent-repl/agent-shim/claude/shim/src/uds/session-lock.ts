@@ -79,6 +79,7 @@ export function lockPath(sessionId: string): string {
  * that cannot prove it is the only one for its session must not start.
  */
 export function acquireSessionLock(sessionId: string): () => void {
+  LOGGER.log({ agent_repl_session_id: sessionId, platform: process.platform }, "acquiring exclusive shim session lock");
   if (O_EXLOCK === undefined) {
     throw new Error(
       `${COMPONENT}: ${process.platform} has no O_EXLOCK, so the shim cannot claim session ${sessionId} ` +
@@ -111,6 +112,7 @@ export function acquireSessionLock(sessionId: string): () => void {
     released = true;
     try {
       fs.closeSync(fd); // closing drops the flock
+      LOGGER.log({ agent_repl_session_id: sessionId, lock_path: file }, "released exclusive shim session lock");
     } catch (err) {
       LOGGER.log({ level: "error", agent_repl_session_id: sessionId, cause: err }, `releasing session lock failed: ${(err as Error).message}`);
     }

@@ -1,5 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WsClient, composerEnabled, makeSessionExistsProbe } from "../src/ws.js";
+import { ForwardingLogger, setLogger } from "../src/wslog.js";
+
+function captureCanonicalLogs(): Array<Record<string, unknown>> {
+  const records: Array<Record<string, unknown>> = [];
+  setLogger(new ForwardingLogger((cmd) => {
+    records.push(cmd.context as Record<string, unknown>);
+    return true;
+  }, () => {}));
+  return records;
+}
 
 /** Minimal scripted WebSocket standing in for the real one. */
 class FakeWebSocket {
@@ -10,7 +20,7 @@ class FakeWebSocket {
   sent: string[] = [];
   onopen: (() => void) | null = null;
   onmessage: ((event: { data: string }) => void) | null = null;
-  onclose: (() => void) | null = null;
+  onclose: ((event: { code: number; reason: string }) => void) | null = null;
   onerror: (() => void) | null = null;
 
   constructor(url: string) {
@@ -33,7 +43,11 @@ class FakeWebSocket {
 
   close(): void {
     this.readyState = 3;
-    this.onclose?.();
+    this.onclose?.({ code: 1006, reason: "test close" });
+  }
+
+  error(): void {
+    this.onerror?.();
   }
 }
 
@@ -144,10 +158,17 @@ describe("WsClient", () => {
     expect(FakeWebSocket.instances).toHaveLength(2);
   });
 
+  it("defers error ownership to close so a transport drop records once", () => {
+    const { client } = newClient();
+    client.connect();
+    FakeWebSocket.instances[0].error();
+    expect(FakeWebSocket.instances).toHaveLength(1);
+  });
+
   it("stops reconnecting and fires onGone when the session is gone", async () => {
     // Arrange — the pre-reconnect probe reports the session vanished.
     let gone = 0;
-    const logged: string[] = [];
+    const records = captureCanonicalLogs();
     const client = new WsClient({
       url: "ws://x/sessions/s1/stream",
       onMessage: () => undefined,
@@ -157,7 +178,6 @@ describe("WsClient", () => {
       onGone: () => {
         gone++;
       },
-      log: (m) => logged.push(m),
     });
     client.connect();
     FakeWebSocket.instances[0].open();
@@ -168,7 +188,7 @@ describe("WsClient", () => {
     // terminal transition left a trace in the log.
     expect(FakeWebSocket.instances).toHaveLength(1);
     expect(gone).toBe(1);
-    expect(logged).toEqual(["ws: session gone — stopping reconnect"]);
+    expect(records).toContainEqual(expect.objectContaining({ operation: "ws.session-gone" }));
   });
 
   it("ignores a stale in-flight probe after close() then connect()", async () => {
@@ -199,7 +219,7 @@ describe("WsClient", () => {
   it("keeps reconnecting when the existence probe itself fails", async () => {
     // Arrange — an unreachable probe counts as unknown, not gone.
     let gone = 0;
-    const logged: string[] = [];
+    const records = captureCanonicalLogs();
     const client = new WsClient({
       url: "ws://x/sessions/s1/stream",
       onMessage: () => undefined,
@@ -211,7 +231,6 @@ describe("WsClient", () => {
       onGone: () => {
         gone++;
       },
-      log: (m) => logged.push(m),
     });
     client.connect();
     FakeWebSocket.instances[0].open();
@@ -222,9 +241,10 @@ describe("WsClient", () => {
     // failure was logged rather than swallowed silently.
     expect(FakeWebSocket.instances).toHaveLength(2);
     expect(gone).toBe(0);
-    expect(logged).toEqual([
-      "ws: session-exists probe failed: Error: daemon briefly down — treating as unknown, will retry",
-    ]);
+    expect(records).toContainEqual(expect.objectContaining({
+      operation: "ws.session-exists-probe-failed",
+      context: expect.objectContaining({ cause: expect.objectContaining({ message: "daemon briefly down" }) }),
+    }));
   });
 
   it("does not reconnect after a user-initiated close", () => {

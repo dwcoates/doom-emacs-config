@@ -42,6 +42,7 @@ func New(path string, codec Codec, h Handler, ctx *Context, log *logging.Bound) 
 		ctx = &Context{Path: path}
 	}
 	ctx.Path = path
+	log.With(logging.Context{Operation: "tailer-new", Path: path}).LogVerbose("constructing tailer codec=%T handler=%T", codec, h)
 	return &Tailer{path: path, codec: codec, handler: h, ctx: ctx, log: log, maxRead: defaultMaxRead}
 }
 
@@ -50,11 +51,13 @@ func New(path string, codec Codec, h Handler, ctx *Context, log *logging.Bound) 
 // from 0 (progress counts are advisory, not durable).
 func (t *Tailer) Restore(c *corev1.CursorState) {
 	if c == nil {
+		t.log.With(logging.Context{Operation: "tailer-restore", Path: t.path}).LogVerbose("no recovered cursor supplied")
 		return
 	}
 	t.fileID = c.GetFileId()
 	t.offset = c.GetOffset()
 	t.carry = append([]byte(nil), c.GetCarry()...)
+	t.log.With(logging.Context{Operation: "tailer-restore", Path: t.path}).Log("restored cursor file_id=%q offset=%d carry_bytes=%d", t.fileID, t.offset, len(t.carry))
 }
 
 // PollResult is one batch: the events to write plus the cursor advance to commit
@@ -75,6 +78,7 @@ func (t *Tailer) FileID() string { return t.fileID }
 // the committed cursor. The caller writes Events+Next to the store, then calls
 // Commit(result) on a successful ack.
 func (t *Tailer) Poll() (PollResult, error) {
+	t.log.With(logging.Context{Operation: "tailer-poll", Path: t.path}).LogVerbose("poll start file_id=%q offset=%d carry_bytes=%d records=%d", t.fileID, t.offset, len(t.carry), t.records)
 	fi, err := os.Stat(t.path)
 	if err != nil {
 		return PollResult{}, err
@@ -95,11 +99,13 @@ func (t *Tailer) Poll() (PollResult, error) {
 	if size <= offset {
 		// No new bytes; still surface the (possibly reset) cursor so file_id and
 		// a truncation reset commit.
-		return PollResult{
+		result := PollResult{
 			Next:    &corev1.CursorState{FileId: fileID, Path: t.path, Offset: offset, Carry: carry},
 			Records: records,
 			Changed: offset != t.offset || fileID != t.fileID,
-		}, nil
+		}
+		t.log.With(logging.Context{Operation: "tailer-poll", Path: t.path}).LogVerbose("poll no-new-bytes size=%d offset=%d cursor_changed=%t", size, offset, result.Changed)
+		return result, nil
 	}
 
 	toRead := size - offset
@@ -129,7 +135,7 @@ func (t *Tailer) Poll() (PollResult, error) {
 	events := t.handler.Handle(frames, t.ctx)
 	newOffset, newCarry, records = t.applyHold(frames, offset, newOffset, newCarry, records)
 
-	return PollResult{
+	result := PollResult{
 		Events:  events,
 		Next:    &corev1.CursorState{FileId: fileID, Path: t.path, Offset: newOffset, Carry: newCarry},
 		Records: records,
@@ -137,7 +143,9 @@ func (t *Tailer) Poll() (PollResult, error) {
 		// the store, so it is not a change to write: the next poll re-reads
 		// those same bytes.
 		Changed: newOffset != t.offset || fileID != t.fileID || len(events) > 0,
-	}, nil
+	}
+	t.log.With(logging.Context{Operation: "tailer-poll", Path: t.path}).LogVerbose("poll decoded frames=%d events=%d read_bytes=%d next_offset=%d carry_bytes=%d held=%d changed=%t", len(frames), len(events), toRead, result.Next.GetOffset(), len(result.Next.GetCarry()), t.ctx.HeldDeliveries, result.Changed)
+	return result, nil
 }
 
 // applyHold rolls the batch's cursor advance back to the offset the handler
@@ -172,18 +180,21 @@ func (t *Tailer) applyHold(frames []Frame, offset, newOffset int64, newCarry []b
 	// Re-report the totals as of the rewind, so the next Handle sees the counts
 	// for what has actually been converted.
 	t.ctx.RecordsObserved, t.ctx.BytesObserved = records, held
+	t.log.With(logging.Context{Operation: "tailer-hold", Path: t.path}).Log("deferred deliveries=%d rewinding cursor from=%d to=%d", t.ctx.HeldDeliveries, newOffset, held)
 	return held, nil, records
 }
 
 // Commit advances the committed cursor to a polled result (call only after the
 // store has durably accepted the batch).
 func (t *Tailer) Commit(r PollResult) {
+	t.log.With(logging.Context{Operation: "tailer-commit", Path: t.path}).LogVerbose("commit requested next_present=%t records=%d", r.Next != nil, r.Records)
 	if r.Next != nil {
 		t.fileID = r.Next.GetFileId()
 		t.offset = r.Next.GetOffset()
 		t.carry = append([]byte(nil), r.Next.GetCarry()...)
 	}
 	t.records = r.Records
+	t.log.With(logging.Context{Operation: "tailer-commit", Path: t.path}).LogVerbose("cursor committed file_id=%q offset=%d carry_bytes=%d", t.fileID, t.offset, len(t.carry))
 }
 
 // readAt reads len(buf) bytes at off from path.

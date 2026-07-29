@@ -19,11 +19,13 @@ type WorkflowJournalHandler struct {
 
 // NewWorkflowJournalHandler builds a handler with its own converter.
 func NewWorkflowJournalHandler(log *logging.Bound) *WorkflowJournalHandler {
+	log.With(logging.Context{Operation: "journal-handler-new"}).LogVerbose("constructing workflow journal handler")
 	return &WorkflowJournalHandler{conv: convert.New(log), log: log}
 }
 
 // Handle implements Handler.
 func (h *WorkflowJournalHandler) Handle(frames []tail.Frame, ctx *Context) []*corev1.Event {
+	h.log.With(logging.Context{Operation: "journal-handle", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).LogVerbose("handling frames=%d run_id=%q", len(frames), ctx.RunID)
 	var out []*corev1.Event
 	for _, f := range frames {
 		if f.ParseErr != nil {
@@ -42,6 +44,7 @@ func (h *WorkflowJournalHandler) Handle(frames []tail.Frame, ctx *Context) []*co
 			out = append(out, ev)
 		}
 	}
+	h.log.With(logging.Context{Operation: "journal-handle", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).LogVerbose("handled frames=%d events=%d", len(frames), len(out))
 	return out
 }
 

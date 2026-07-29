@@ -30,6 +30,7 @@ import {
   type CommandStruct,
   type FrontendCommandBody,
 } from "./frontend-command.js";
+import { log, logVerbose } from "./wslog.js";
 
 /**
  * How many in-flight `clientLog` request ids are remembered for ack
@@ -60,11 +61,6 @@ export class InterruptConfirmRequiredError extends Error {
   }
 }
 
-/** The default local-only sink for a rejected clientLog ack. */
-function defaultLocalLog(message: string): void {
-  console.warn(message);
-}
-
 export interface CreateSessionArgs {
   cwd: string;
   model: string;
@@ -87,14 +83,14 @@ export interface DispatchOptions {
   send: (raw: string) => boolean;
   /** Correlation-id factory (injected for deterministic tests). */
   newRequestId?: () => string;
-  log?: (level: "warn" | "error", message: string) => void;
   /**
    * LOCAL-ONLY diagnostic sink, used for the one thing `log` must never carry:
    * a rejected `clientLog` ack. `log` forwards to the daemon AS a clientLog, so
    * reporting a clientLog failure through it would re-send a clientLog, get
-   * another rejection, and loop. Defaults to the console.
+   * another rejection, and loop. The main bootstrap supplies wslog's
+   * documented local-only emergency path.
    */
-  logLocal?: (message: string) => void;
+  logLocal: (message: string) => void;
   /**
    * The classified refusal sink (F4). A rejected command used to reach a
    * human through NOTHING on this side: `error` went to a local log and the
@@ -127,7 +123,12 @@ export class CommandDispatcher {
   private readonly clientLogAcks = new Set<string>();
   private counter = 0;
 
-  constructor(private readonly opts: DispatchOptions) {}
+  constructor(private readonly opts: DispatchOptions) {
+    log("info", "command dispatcher initialized", {
+      operation: "command-dispatch.initialize",
+      context: { pending_count: this.pending.size, known_session_count: this.knownSessions.size },
+    });
+  }
 
   private newId(): string {
     if (this.opts.newRequestId) return this.opts.newRequestId();
@@ -138,15 +139,31 @@ export class CommandDispatcher {
   observe(frame: FrontendFrame): void {
     switch (frame.frame.case) {
       case "commandAck":
+        // STRUCTURAL NO-REENTRY BOUNDARY. A client-log acknowledgement must be
+        // consumed before any diagnostic about the arriving frame. Logging the
+        // acknowledgement would send another clientLog and create an endless
+        // acknowledgement chain.
         this.onAck(frame.frame.value);
         break;
       case "sessionView":
+        logVerbose("info", "command dispatcher selected session correlation", {
+          operation: "command-dispatch.observe-session-view",
+          context: { agent_repl_session_id: frame.frame.value.sessionId, terminal: frame.frame.value.terminal },
+        });
         this.onSessionView(frame.frame.value);
         break;
       case "snapshot":
+        log("info", "command dispatcher selected snapshot session correlation", {
+          operation: "command-dispatch.observe-snapshot",
+          context: { session_count: frame.frame.value.sessions.length },
+        });
         for (const sv of frame.frame.value.sessions) this.onSessionView(sv);
         break;
       default:
+        logVerbose("info", "command dispatcher ignored frame outside correlation plane", {
+          operation: "command-dispatch.observe-ignored",
+          context: { frame_case: frame.frame.case },
+        });
         break;
     }
   }
@@ -197,10 +214,18 @@ export class CommandDispatcher {
 
   private dispatch(workspace: string, body: FrontendCommandBody): Promise<void> {
     const requestId = this.newId();
+    log("info", "command dispatcher dispatching acknowledgement-correlated command", {
+      operation: "command-dispatch.dispatch",
+      context: { request_id: requestId, workspace, command: body.case, pending_count: this.pending.size },
+    });
     return new Promise<void>((resolve, reject) => {
       this.pending.set(requestId, { command: body.case, resolve, reject });
       if (!this.opts.send(encodeFrontendCommand({ requestId, workspace, body }))) {
         this.pending.delete(requestId);
+        log("error", "command dispatcher command send was rejected", {
+          operation: "command-dispatch.dispatch-rejected",
+          context: { request_id: requestId, workspace, command: body.case, pending_count: this.pending.size, cause: "socket not open" },
+        });
         reject(new Error(`${body.case}: socket not open`));
       }
     });
@@ -233,6 +258,11 @@ export class CommandDispatcher {
     return sent;
   }
 
+  /** Number of client-log acknowledgements retained for correlation. */
+  trackedClientLogCount(): number {
+    return this.clientLogAcks.size;
+  }
+
   /**
    * Track an outstanding clientLog id, bounded: an unacked log (a socket that
    * dropped mid-flight) must not accumulate ids forever. Evicting the oldest
@@ -244,6 +274,13 @@ export class CommandDispatcher {
       const oldest = this.clientLogAcks.values().next();
       if (oldest.done === true) break;
       this.clientLogAcks.delete(oldest.value);
+      // The bookkeeping belongs to the logging transport itself. Forwarding
+      // its eviction through that same transport would add another tracked id
+      // and recurse forever while the set remained over its bound.
+      this.opts.logLocal(
+        `clientLog acknowledgement tracking evicted request ${oldest.value} ` +
+        `(tracked=${this.clientLogAcks.size} maximum=${MAX_TRACKED_CLIENT_LOGS})`,
+      );
     }
   }
 
@@ -251,17 +288,27 @@ export class CommandDispatcher {
     if (this.clientLogAcks.delete(ack.requestId)) {
       // A rejected client log is reported LOCALLY ONLY — see `logLocal`.
       if (!ack.ok) {
-        this.opts.logLocal?.(`clientLog rejected: ${ack.error}`);
+        // Logger-sink emergency: forwarding through wslog here would create a
+        // clientLog acknowledgement loop, so the injected local-only sink owns
+        // the sole record.
+        this.opts.logLocal(`clientLog rejected: ${ack.error}`);
       }
       return;
     }
     const p = this.pending.get(ack.requestId);
     if (p === undefined) {
-      this.opts.log?.("warn", `commandAck for unknown request '${ack.requestId}'`);
+      log("warn", `commandAck for unknown request '${ack.requestId}'`, {
+        operation: "command-dispatch.ack-unknown-request",
+        context: { request_id: ack.requestId, ok: ack.ok, error: ack.error, pending_count: this.pending.size },
+      });
       return;
     }
     this.pending.delete(ack.requestId);
     if (ack.ok) {
+      log("info", "command dispatcher acknowledgement resolved command", {
+        operation: "command-dispatch.ack-resolved",
+        context: { request_id: ack.requestId, command: p.command, pending_count: this.pending.size },
+      });
       p.resolve();
       return;
     }
@@ -269,12 +316,24 @@ export class CommandDispatcher {
     // and must not reach the failure sink, which would show the user a refusal
     // card for a question the daemon is asking them.
     if (ack.interruptConfirmRequired !== undefined) {
+      log("info", "command dispatcher acknowledgement requested interrupt confirmation", {
+        operation: "command-dispatch.ack-interrupt-confirmation",
+        context: { request_id: ack.requestId, command: p.command, live_task_count: ack.interruptConfirmRequired.liveTasks },
+      });
       p.reject(new InterruptConfirmRequiredError(ack.interruptConfirmRequired.liveTasks));
       return;
     }
     // Surface BEFORE rejecting: every caller of these promises swallows the
     // rejection into a log line, so the reject alone reaches no one.
     if (ack.failure !== undefined) this.opts.onFailure?.(ack.failure);
+    // CreateSession has its own two-phase waiter. Its rejection flows through
+    // failCreate, which owns the one canonical failure record.
+    if (p.command !== "createSession") {
+      log("error", "command dispatcher acknowledgement rejected command", {
+        operation: "command-dispatch.ack-rejected",
+        context: { request_id: ack.requestId, command: p.command, error: ack.error, has_classified_failure: ack.failure !== undefined },
+      });
+    }
     p.reject(new Error(`${p.command} rejected: ${ack.error}`));
   }
 
@@ -282,6 +341,10 @@ export class CommandDispatcher {
 
   createSession(args: CreateSessionArgs): Promise<string> {
     const requestId = this.newId();
+    log("info", "command dispatcher dispatching session creation", {
+      operation: "command-dispatch.create-session",
+      context: { request_id: requestId, workspace: args.cwd, model: args.model, permission_mode: args.permissionMode, fake: args.fake, known_session_count: this.knownSessions.size },
+    });
     return new Promise<string>((resolve, reject) => {
       const waiter: CreateWaiter = {
         requestId,
@@ -320,6 +383,10 @@ export class CommandDispatcher {
         waiter.settled = true;
         this.pending.delete(waiter.requestId);
         this.removeCreate(waiter);
+        log("info", "command dispatcher correlated session creation with session view", {
+          operation: "command-dispatch.create-session-resolved",
+          context: { request_id: waiter.requestId, workspace: sv.workspace, agent_repl_session_id: sv.sessionId, known_session_count: this.knownSessions.size },
+        });
         waiter.resolve(sv.sessionId);
         break; // one SessionView resolves at most one waiter
       }
@@ -332,6 +399,10 @@ export class CommandDispatcher {
     waiter.settled = true;
     this.pending.delete(waiter.requestId);
     this.removeCreate(waiter);
+    log("error", "command dispatcher session creation failed", {
+      operation: "command-dispatch.create-session-failed",
+      context: { request_id: waiter.requestId, workspace: waiter.cwd, cause: err.message, pending_count: this.pending.size },
+    });
     waiter.reject(err);
   }
 

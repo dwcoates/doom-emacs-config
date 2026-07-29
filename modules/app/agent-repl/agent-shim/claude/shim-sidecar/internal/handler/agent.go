@@ -20,11 +20,13 @@ type AgentTranscriptHandler struct {
 
 // NewAgentTranscriptHandler builds a handler with its own converter.
 func NewAgentTranscriptHandler(log *logging.Bound) *AgentTranscriptHandler {
+	log.With(logging.Context{Operation: "agent-handler-new"}).LogVerbose("constructing agent transcript handler")
 	return &AgentTranscriptHandler{conv: convert.New(log), log: log}
 }
 
 // Handle implements Handler.
 func (h *AgentTranscriptHandler) Handle(frames []tail.Frame, ctx *Context) []*corev1.Event {
+	h.log.With(logging.Context{Operation: "agent-handle", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).LogVerbose("handling frames=%d records_observed=%d", len(frames), ctx.RecordsObserved)
 	var out []*corev1.Event
 	sawRecord := false
 	for _, f := range frames {
@@ -53,5 +55,6 @@ func (h *AgentTranscriptHandler) Handle(frames []tail.Frame, ctx *Context) []*co
 			RecordsObserved: ctx.RecordsObserved,
 		}))
 	}
+	h.log.With(logging.Context{Operation: "agent-handle", Path: ctx.Path, Session: ctx.SessionID, Task: ctx.TaskID}).LogVerbose("handled frames=%d saw_record=%t events=%d", len(frames), sawRecord, len(out))
 	return out
 }

@@ -70,6 +70,21 @@ describe("streamEventToContentDelta arms", () => {
     expect(evt.payload.value.delta.value).toBe("{\"k\":1}");
   });
 
+  it("rejects an unsupported content delta arm without fabricating an event", () => {
+    const msg = {
+      type: "stream_event",
+      event: {
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "future_vendor_delta", value: "unmodeled" },
+      },
+      session_id: "s",
+      uuid: "u",
+    };
+    expect(streamEventToContentDelta(msg)).toBeNull();
+    expect(toEphemeralEvent(msg)).toBeNull();
+  });
+
   it("is classified EPHEMERAL, plane STREAM, seq 0", () => {
     const evt = streamEventToContentDelta(loadStream("stream_event-content_block_delta-text"))!;
     expect(evt.class).toBe(EventClass.EPHEMERAL);
