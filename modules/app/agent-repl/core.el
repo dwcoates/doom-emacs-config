@@ -524,7 +524,7 @@ state because a non-nil WS must identify one specific workspace sink."
       (puthash "workspace_id" (plist-get identity :workspace-id) record)
       (dolist (field-value
                `(("agent_repl_session_id" . ,(agent-repl--ws-get ws :frontend-session-id))
-                 ("claude_session_id" . ,(agent-repl--ws-durable-claude-session-id ws))))
+                 ("claude_session_id" . ,(agent-repl--ws-durable-claude-session-id-unlogged ws))))
         (let ((field (car field-value))
               (value (cdr field-value)))
           (cond
@@ -782,12 +782,15 @@ instrumenting it through the logging ladder would recurse indefinitely."
 
 (defun agent-repl--persist-log-record (ws level verbosity fmt args)
   "Persist one JSONL record for WS without changing caller-facing signatures."
-  ;; Tests deliberately bind the explicit file sink kill-switch off.  Do not
-  ;; construct or route a record when persistence itself was opted out of.
-  (let ((record (agent-repl--log-record ws level verbosity fmt args)))
-    (when agent-repl-log-to-file
-      (agent-repl--do-log-to-file record ws))
-    (agent-repl--append-workspace-log ws record)))
+  ;; Record construction resolves the durable sink identity for WS.  Skip that
+  ;; work when both persistence sinks are disabled, as in the generic batch
+  ;; harness.  Echo-area formatting and emission remain the caller's concern.
+  (when (or agent-repl-log-to-file
+            (and agent-repl--workspace-log-buffer-enabled ws))
+    (let ((record (agent-repl--log-record ws level verbosity fmt args)))
+      (when agent-repl-log-to-file
+        (agent-repl--do-log-to-file record ws))
+      (agent-repl--append-workspace-log ws record))))
 
 ;;;; ---- Echo-area (modeline) severity gate ----
 ;;
@@ -1391,6 +1394,16 @@ before this is called."
 
 (declare-function agent-repl-instantiation-session-id "workspace")
 
+(defun agent-repl--ws-durable-claude-session-id-unlogged (ws)
+  "Return WS's durable Claude session UUID without entering the logger.
+JSON record construction calls this primitive while the logging stack is
+already active.  Instrumenting this helper would recursively construct another
+workspace record, so callers that need an independently logged lookup must use
+`agent-repl--ws-durable-claude-session-id'."
+  (let* ((env (agent-repl--ws-get ws :active-env))
+         (inst (and env (agent-repl--ws-get ws env))))
+    (and inst (agent-repl-instantiation-session-id inst))))
+
 (defun agent-repl--ws-durable-claude-session-id (ws)
   "Return WS's durable claude session uuid, or nil when none is recorded.
 Reads the active instantiation's `session-id' — the hook-captured CLI
@@ -1401,7 +1414,7 @@ instantiation struct yet — a workspace that never booted a session
 legitimately has no durable id."
   (let* ((env (agent-repl--ws-get ws :active-env))
          (inst (and env (agent-repl--ws-get ws env)))
-         (session-id (and inst (agent-repl-instantiation-session-id inst))))
+         (session-id (agent-repl--ws-durable-claude-session-id-unlogged ws)))
     (agent-repl--log-verbose
      ws
      "ws-durable-claude-session-id: env=%S inst-present=%s session-id-present=%s"
