@@ -1150,7 +1150,20 @@ type SessionView struct {
 	TotalCostUsd   float64                `protobuf:"fixed64,7,opt,name=total_cost_usd,json=totalCostUsd,proto3" json:"total_cost_usd,omitempty"`
 	ContextWindow  int64                  `protobuf:"varint,8,opt,name=context_window,json=contextWindow,proto3" json:"context_window,omitempty"`
 	PermissionMode string                 `protobuf:"bytes,9,opt,name=permission_mode,json=permissionMode,proto3" json:"permission_mode,omitempty"`
-	ShimAttached   bool                   `protobuf:"varint,10,opt,name=shim_attached,json=shimAttached,proto3" json:"shim_attached,omitempty"`
+	// Whether the daemon holds a LIVE DRIVER for this session's workspace —
+	// i.e. a shim is attached, or its client is reconnecting to one.
+	//
+	// IT IS THE ONE FIELD ON THIS MESSAGE THAT IS NOT DURABLE, and that is
+	// exactly why it exists. Every other field here is read off the registry
+	// record, which survives a daemon restart; a frontend that judges "is this
+	// workspace already up?" from those sees a non-terminal, fully-backfilled
+	// record and concludes YES against a daemon that has no driver for it at
+	// all. Emacs's switch-ensure did precisely that, so after a daemon restart
+	// switching to a dormant workspace skipped its openWorkspace and the
+	// workspace never bootstrapped.
+	//
+	// The field had NO producer before that bug; the name always meant this.
+	ShimAttached bool `protobuf:"varint,10,opt,name=shim_attached,json=shimAttached,proto3" json:"shim_attached,omitempty"`
 	// Additive (S6): resume/rebind keys the webapp lost in the cutover.
 	ClaudeSessionId string `protobuf:"bytes,11,opt,name=claude_session_id,json=claudeSessionId,proto3" json:"claude_session_id,omitempty"`
 	Cwd             string `protobuf:"bytes,12,opt,name=cwd,proto3" json:"cwd,omitempty"`

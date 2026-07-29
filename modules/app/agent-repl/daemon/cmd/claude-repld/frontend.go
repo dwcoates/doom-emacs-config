@@ -60,10 +60,16 @@ func (r registrySessions) SessionViews() []*frontendv1.SessionView {
 		// faked. server.SessionViewFromRecord is the single shaping shared with
 		// the create/delete pushes, so the snapshot and pushes cannot drift.
 		var pending []string
+		live := false
 		if !rec.Terminal && r.driver != nil {
 			pending = r.driver.PendingPermissions(rec.CWD)
+			// The connect snapshot is precisely where this matters: it is the
+			// first thing a frontend sees after a daemon restart, and it is
+			// what a switch-ensure consults before deciding a workspace has
+			// nothing to bootstrap.
+			live = r.driver.Live(rec.CWD)
 		}
-		out = append(out, server.SessionViewFromRecord(r.logf, rec, pending))
+		out = append(out, server.SessionViewFromRecord(r.logf, rec, pending, live))
 	}
 	return out
 }
