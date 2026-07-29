@@ -117,7 +117,7 @@ func TestAnUnwiredGateRefusesTheInterrupt(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange.
 			p := &fakePrompts{}
-			h, err := newCommandHandler(p, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil, nil, nil,
+			h, err := newCommandHandler(p, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil, nil,
 				CommandHandlerConfig{Interrupt: InterruptGateConfig{Turns: tc.turns, LiveTasks: tc.tasks}})
 			if err != nil {
 				t.Fatalf("newCommandHandler: %v", err)
@@ -140,7 +140,7 @@ func TestAnUnwiredGateRefusesTheInterrupt(t *testing.T) {
 func TestATurnSourceErrorSurfaces(t *testing.T) {
 	// Arrange.
 	p := &fakePrompts{turnErr: errors.New("no live session for workspace")}
-	h, err := newCommandHandler(p, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil, nil, nil,
+	h, err := newCommandHandler(p, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil, nil,
 		CommandHandlerConfig{Interrupt: InterruptGateConfig{Turns: p, LiveTasks: fakeLiveTasks{count: 2}}})
 	if err != nil {
 		t.Fatalf("newCommandHandler: %v", err)

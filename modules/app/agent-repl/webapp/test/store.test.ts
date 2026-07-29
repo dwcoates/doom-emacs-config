@@ -42,7 +42,6 @@ function workspaceEffect(over: Partial<WorkspaceStatusInput> = {}): AdapterEffec
       turnActive: true,
       liveTaskCount: 0,
       mergePhase: "",
-      generation: 1,
       ...over,
     },
   };
@@ -200,15 +199,6 @@ describe("ingest workspace-state", () => {
     expect(store.state.renderState).toBe("ready");
   });
 
-  it("retains the delivery generation the paint ack names", () => {
-    // Arrange — Emacs is not sent the state until this end answers for this
-    // generation, so losing it would strand the tab bar.
-    const store = new ConversationStore();
-    // Act
-    store.ingest([workspaceEffect({ generation: 12 })]);
-    // Assert
-    expect(store.state.renderGeneration).toBe(12);
-  });
 
   it("has no render state before the first workspace state lands", () => {
     // Arrange / Act — null, not a fabricated phase.

@@ -114,16 +114,6 @@ export interface WorkspaceState {
   causeKind: string;
   causeSeq: number;
   atMs: number;
-  /**
-   * The DELIVERY identity of this emission (F5), stamped by the daemon's
-   * frontend sequencer. It is what a paint acknowledgment names, so the daemon
-   * can tell a render of THIS state from a render of a superseded one and
-   * never release a newer state on an older ack.
-   *
-   * Strictly increasing per workspace. Emacs is not sent a state until this
-   * end has acknowledged the generation carrying it.
-   */
-  generation: number;
 }
 
 export interface SessionView {
@@ -706,7 +696,6 @@ const WORKSPACE_STATE_KEYS = new Set([
   "causeKind",
   "causeSeq",
   "atMs",
-  "generation",
 ]);
 function decodeWorkspaceState(v: unknown): WorkspaceState {
   const o = ensureObject(v, "WorkspaceState");
@@ -721,7 +710,6 @@ function decodeWorkspaceState(v: unknown): WorkspaceState {
     causeKind: str(o, "causeKind", "WorkspaceState"),
     causeSeq: num(o, "causeSeq", "WorkspaceState"),
     atMs: num(o, "atMs", "WorkspaceState"),
-    generation: num(o, "generation", "WorkspaceState"),
   };
   if (ws.workspace === "") {
     throw new Error("frontend-proto: WorkspaceState missing required `workspace`");

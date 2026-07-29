@@ -123,61 +123,6 @@ func assistantText(item *frontendv1.ConversationItem) string {
 // one prompt's marker can never be a prefix-match of another's.
 func echoOf(prompt string) string { return fmt.Sprintf("echo: %s [mode=", prompt) }
 
-// --- paint attestation ------------------------------------------------------
-
-// painter answers every WorkspaceState push with the PaintAckCmd a real
-// painting frontend sends (frontend.proto PaintAckCmd). Without the
-// attestation the SSM's paint axis never clears and no workspace resolves
-// past INIT — which is exactly what a webapp-less client looks like to the
-// daemon, and why these tests must paint, not merely read. through_seq tracks
-// the newest ConversationDelta observed, because the daemon versions acks by
-// it so a stale ack cannot green a newer gap.
-type painter struct {
-	t          *testing.T
-	conn       *websocket.Conn
-	workspace  string
-	throughSeq uint64
-	acks       int
-}
-
-// newPainter builds a painter and PRIMES it: the workspace's INIT state
-// (generation 1) was consumed during liveSession's attach, before any painter
-// existed, so nothing would ever attest it — and an unattested paint axis
-// holds the workspace at INIT no matter what the agent does (the chicken and
-// egg: THINKING cannot resolve without paint, and this client only paints
-// states it is pushed). Attesting generation 1 up front breaks the cycle
-// exactly as the real webapp does by painting the snapshot it connects with.
-func newPainter(t *testing.T, conn *websocket.Conn, workspace string) *painter {
-	t.Helper()
-	p := &painter{t: t, conn: conn, workspace: workspace}
-	p.acks++
-	writeCmd(t, conn, fmt.Sprintf(
-		`{"requestId":"p-ack-%d","workspace":%q,"paintAck":{"throughSeq":"0","stateGeneration":"1","outcome":"PAINT_OUTCOME_PAINTED"}}`,
-		p.acks, workspace))
-	return p
-}
-
-// observe attests frame if it is this workspace's WorkspaceState, and tracks
-// the painted-through conversation seq either way.
-func (p *painter) observe(frame *frontendv1.FrontendFrame) {
-	if p == nil {
-		return
-	}
-	if d := frame.GetConversationDelta(); d != nil && d.GetWorkspace() == p.workspace {
-		if ts := d.GetThroughSeq(); ts > p.throughSeq {
-			p.throughSeq = ts
-		}
-	}
-	st := workspaceStateFor(frame, p.workspace)
-	if st == nil {
-		return
-	}
-	p.acks++
-	writeCmd(p.t, p.conn, fmt.Sprintf(
-		`{"requestId":"p-ack-%d","workspace":%q,"paintAck":{"throughSeq":"%d","stateGeneration":"%d","outcome":"PAINT_OUTCOME_PAINTED"}}`,
-		p.acks, p.workspace, p.throughSeq, st.GetGeneration()))
-}
-
 // --- frame waiting ----------------------------------------------------------
 
 // awaitAll reads frames until EVERY condition in want has been satisfied at
@@ -195,7 +140,7 @@ func (p *painter) observe(frame *frontendv1.FrontendFrame) {
 // reject, when non-nil, is shown every frame first: a non-empty string from it
 // fails the test immediately. It is how a NEGATIVE contract ("never repainted
 // INTERRUPTED") is enforced over the same read loop rather than by sleeping.
-func awaitAll(t *testing.T, conn *websocket.Conn, p *painter, reject func(*frontendv1.FrontendFrame) string, want map[string]func(*frontendv1.FrontendFrame) bool) {
+func awaitAll(t *testing.T, conn *websocket.Conn, reject func(*frontendv1.FrontendFrame) string, want map[string]func(*frontendv1.FrontendFrame) bool) {
 	t.Helper()
 	pending := make(map[string]func(*frontendv1.FrontendFrame) bool, len(want))
 	for name, match := range want {
@@ -204,7 +149,6 @@ func awaitAll(t *testing.T, conn *websocket.Conn, p *painter, reject func(*front
 	deadline := time.Now().Add(frameTimeout)
 	for len(pending) > 0 && time.Now().Before(deadline) {
 		frame := readFrame(t, conn)
-		p.observe(frame)
 		if reject != nil {
 			if why := reject(frame); why != "" {
 				t.Fatalf("forbidden frame: %s", why)
@@ -232,10 +176,10 @@ func awaitAll(t *testing.T, conn *websocket.Conn, p *painter, reject func(*front
 // IN FLIGHT and parked: the fake is awaiting canUseTool, which reached the
 // frontend as a PENDING permission item. See this file's header for why an
 // ordinary text turn cannot be caught mid-flight.
-func holdTurnOpen(t *testing.T, conn *websocket.Conn, p *painter, workspace, requestID, command string) {
+func holdTurnOpen(t *testing.T, conn *websocket.Conn, workspace, requestID, command string) {
 	t.Helper()
 	writeCmd(t, conn, fmt.Sprintf(`{"requestId":%q,"submitPrompt":{"text":"!tool %s"}}`, requestID, command))
-	awaitAll(t, conn, p, nil, map[string]func(*frontendv1.FrontendFrame) bool{
+	awaitAll(t, conn, nil, map[string]func(*frontendv1.FrontendFrame) bool{
 		"a PENDING permission item (the held turn)": func(frame *frontendv1.FrontendFrame) bool {
 			for _, item := range deltaItems(frame, workspace) {
 				if isPendingPermission(item) {
@@ -249,10 +193,8 @@ func holdTurnOpen(t *testing.T, conn *websocket.Conn, p *painter, workspace, req
 		// daemon OBSERVES the turn is delivered rather than queued. The
 		// receipt that the observation happened is a pushed WorkspaceState
 		// with the SSM's turn_active set: it resolves off the store-plane
-		// TurnStarted's own apply (the primed paint axis is what lets that
-		// apply change the resolved state at all — see newPainter), and the
-		// same consumer pass sets the queue's turn-in-flight flag, so the
-		// next prompt queues.
+		// TurnStarted's own apply, and the same consumer pass sets the
+		// queue's turn-in-flight flag, so the next prompt queues.
 		"the daemon's observation of the turn (turn_active)": func(frame *frontendv1.FrontendFrame) bool {
 			state := workspaceStateFor(frame, workspace)
 			return state != nil && state.GetTurnActive()
@@ -275,14 +217,14 @@ type stopObservation struct {
 // It waits for all three rather than for whichever arrives first, so a caller
 // using it as SETUP is guaranteed the stop has fully settled — the window is
 // open and the turn has ended — before it acts.
-func stopLiveTurn(t *testing.T, conn *websocket.Conn, p *painter, workspace string) stopObservation {
+func stopLiveTurn(t *testing.T, conn *websocket.Conn, workspace string) stopObservation {
 	t.Helper()
-	holdTurnOpen(t, conn, p, workspace, "r-hold", "sleep e2e-interrupt")
+	holdTurnOpen(t, conn, workspace, "r-hold", "sleep e2e-interrupt")
 
 	const requestID = "r-interrupt"
 	var obs stopObservation
 	writeCmd(t, conn, fmt.Sprintf(`{"requestId":%q,"interrupt":{}}`, requestID))
-	awaitAll(t, conn, p, nil, map[string]func(*frontendv1.FrontendFrame) bool{
+	awaitAll(t, conn, nil, map[string]func(*frontendv1.FrontendFrame) bool{
 		"the CommandAck for the interrupt": func(frame *frontendv1.FrontendFrame) bool {
 			ack := ackFor(frame, requestID)
 			if ack == nil {
@@ -326,10 +268,9 @@ func TestE2EInterruptOfALiveTurnResolvesInterrupted(t *testing.T) {
 	cwd := t.TempDir()
 	h := newUDSHarness(t)
 	_, conn, _, _ := liveSession(t, h, cwd)
-	p := newPainter(t, conn, cwd)
 
 	// Act
-	obs := stopLiveTurn(t, conn, p, cwd)
+	obs := stopLiveTurn(t, conn, cwd)
 
 	// Assert
 	if !obs.ack.GetOk() {
@@ -357,8 +298,7 @@ func TestE2ENextPromptClosesTheInterruptWindow(t *testing.T) {
 	cwd := t.TempDir()
 	h := newUDSHarness(t)
 	_, conn, _, _ := liveSession(t, h, cwd)
-	p := newPainter(t, conn, cwd)
-	stopLiveTurn(t, conn, p, cwd)
+	stopLiveTurn(t, conn, cwd)
 
 	// Act — the prompt the user typed after stopping the agent. The queue is
 	// PAUSED by the stop, but with no turn running this one goes straight
@@ -366,7 +306,7 @@ func TestE2ENextPromptClosesTheInterruptWindow(t *testing.T) {
 	writeCmd(t, conn, `{"requestId":"r-next","submitPrompt":{"text":"after the stop"}}`)
 
 	// Assert
-	awaitAll(t, conn, p, nil, map[string]func(*frontendv1.FrontendFrame) bool{
+	awaitAll(t, conn, nil, map[string]func(*frontendv1.FrontendFrame) bool{
 		"a ProgressView for the NEW turn with the interrupt window CLOSED": func(frame *frontendv1.FrontendFrame) bool {
 			view := progressFor(frame, cwd)
 			// turn_started_at_ms != 0 anchors this to the new turn's own view
@@ -395,10 +335,9 @@ func TestE2ELateInterruptReportsAlreadyComplete(t *testing.T) {
 	cwd := t.TempDir()
 	h := newUDSHarness(t)
 	_, conn, _, _ := liveSession(t, h, cwd)
-	p := newPainter(t, conn, cwd)
 	writeCmd(t, conn, `{"requestId":"r-first","submitPrompt":{"text":"a turn that finishes"}}`)
 	settled := frontendv1.RenderState_RENDER_STATE_UNSPECIFIED
-	awaitAll(t, conn, p, nil, map[string]func(*frontendv1.FrontendFrame) bool{
+	awaitAll(t, conn, nil, map[string]func(*frontendv1.FrontendFrame) bool{
 		"the first turn's clock closing (its end)": func(frame *frontendv1.FrontendFrame) bool {
 			if state := workspaceStateFor(frame, cwd); state != nil {
 				settled = state.GetState()
@@ -423,7 +362,7 @@ func TestE2ELateInterruptReportsAlreadyComplete(t *testing.T) {
 		}
 		return ""
 	}
-	awaitAll(t, conn, p, rejectInterrupted, map[string]func(*frontendv1.FrontendFrame) bool{
+	awaitAll(t, conn, rejectInterrupted, map[string]func(*frontendv1.FrontendFrame) bool{
 		"an ok CommandAck for the late interrupt": func(frame *frontendv1.FrontendFrame) bool {
 			ack := ackFor(frame, requestID)
 			if ack == nil {
@@ -470,7 +409,7 @@ func TestE2EFreshConnectCarriesTheInterruptedResolution(t *testing.T) {
 	cwd := t.TempDir()
 	h := newUDSHarness(t)
 	id, live, _, _ := liveSession(t, h, cwd)
-	stopLiveTurn(t, live, newPainter(t, live, cwd), cwd)
+	stopLiveTurn(t, live, cwd)
 
 	// Act
 	fresh := h.dial(t, id)
@@ -536,15 +475,14 @@ func TestE2EInterruptedQueueRunsTheNextPromptAlone(t *testing.T) {
 	cwd := t.TempDir()
 	h := newUDSHarness(t)
 	_, conn, _, _ := liveSession(t, h, cwd)
-	p := newPainter(t, conn, cwd)
-	holdTurnOpen(t, conn, p, cwd, "r-hold", "sleep e2e-queue")
+	holdTurnOpen(t, conn, cwd, "r-hold", "sleep e2e-queue")
 	writeCmd(t, conn, `{"requestId":"r-q1","submitPrompt":{"text":"queued-one"}}`)
 	writeCmd(t, conn, `{"requestId":"r-q2","submitPrompt":{"text":"queued-two"}}`)
 	// Both prompts must be HELD before the stop lands, or the stop can outrun
 	// a submit and the late prompt would be head-jump promoted instead of
 	// retained — a different (legitimate) scenario than the one this test
 	// pins. The pushed QueueView is the daemon's own receipt that both are in.
-	awaitAll(t, conn, p, nil, map[string]func(*frontendv1.FrontendFrame) bool{
+	awaitAll(t, conn, nil, map[string]func(*frontendv1.FrontendFrame) bool{
 		"a QueueView holding both prompts": func(frame *frontendv1.FrontendFrame) bool {
 			q := frame.GetQueue()
 			return q.GetWorkspace() == cwd && len(q.GetEntries()) == 2
@@ -553,7 +491,7 @@ func TestE2EInterruptedQueueRunsTheNextPromptAlone(t *testing.T) {
 
 	// Act — stop the running turn, then type something new.
 	writeCmd(t, conn, `{"requestId":"r-interrupt","interrupt":{}}`)
-	awaitAll(t, conn, p, nil, map[string]func(*frontendv1.FrontendFrame) bool{
+	awaitAll(t, conn, nil, map[string]func(*frontendv1.FrontendFrame) bool{
 		"a ProgressView carrying an OPEN interrupt window": func(frame *frontendv1.FrontendFrame) bool {
 			return progressFor(frame, cwd).GetInterrupt().GetActive()
 		},
@@ -568,7 +506,6 @@ func TestE2EInterruptedQueueRunsTheNextPromptAlone(t *testing.T) {
 	deadline := time.Now().Add(frameTimeout)
 	for len(order) < len(want) && time.Now().Before(deadline) {
 		frame := readFrame(t, conn)
-		p.observe(frame)
 		for _, item := range deltaItems(frame, cwd) {
 			text := assistantText(item)
 			for _, prompt := range want {
@@ -600,11 +537,10 @@ func TestE2EInterruptDoesNotCrossWorkspaces(t *testing.T) {
 	h := newUDSHarness(t)
 	_, connA, _, _ := liveSession(t, h, cwdA)
 	_, connB, _, _ := liveSession(t, h, cwdB)
-	pB := newPainter(t, connB, cwdB)
 
 	// Act — stop A's live turn (observed on A's own connection), then give B a
 	// turn of its own whose reply is the terminator for B's read below.
-	stopLiveTurn(t, connA, newPainter(t, connA, cwdA), cwdA)
+	stopLiveTurn(t, connA, cwdA)
 	writeCmd(t, connB, `{"requestId":"r-b","submitPrompt":{"text":"b-sentinel"}}`)
 
 	// Assert — nothing about A's stop reached B.
@@ -617,7 +553,7 @@ func TestE2EInterruptDoesNotCrossWorkspaces(t *testing.T) {
 		}
 		return ""
 	}
-	awaitAll(t, connB, pB, reject, map[string]func(*frontendv1.FrontendFrame) bool{
+	awaitAll(t, connB, reject, map[string]func(*frontendv1.FrontendFrame) bool{
 		"workspace B's own turn replying": func(frame *frontendv1.FrontendFrame) bool {
 			for _, item := range deltaItems(frame, cwdB) {
 				if strings.Contains(assistantText(item), echoOf("b-sentinel")) {

@@ -27,64 +27,17 @@ func evTurnEndedReason(sid string, seq uint64, reason string, isErr bool) *corev
 // ---------------------------------------------------------------------------
 
 // A session that is never prompted must still reach green: that is the whole
-// reason readiness moved off the vendor's first-prompt-only system:init. It
-// takes the paint attestation too, which readiness alone no longer implies.
+// reason readiness moved off the vendor's first-prompt-only system:init.
 func TestSessionStartedReachesReadyWithoutAnyPrompt(t *testing.T) {
 	// Arrange.
 	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	// Act — readiness plus an attestation of the empty history; no prompt is
-	// ever submitted.
+	// Act — readiness alone; no prompt is ever submitted.
 	if err := m.Apply(evSessionStarted("s1", 1)); err != nil {
 		t.Fatalf("session started: %v", err)
-	}
-	if err := m.ApplyPaintAck("ws1", 0); err != nil {
-		t.Fatalf("paint ack: %v", err)
 	}
 	// Assert.
 	if got := mustCurrent(t, m, "ws1").State; got != frontendv1.RenderState_RENDER_STATE_READY {
 		t.Fatalf("state = %s, want READY", renderName(got))
-	}
-}
-
-// THE BLUE GATE, made reachable. Readiness alone is HALF of green's promise:
-// the route works, but nothing has drawn the history, and the five-color
-// contract says a workspace no frontend has attested is blue.
-//
-// Before the opening edge existed the paint axis had exactly one writer (the
-// attestation itself), so a workspace with no paint rows contributed no
-// candidate and resolved green — the documented gate never engaged at all.
-func TestSessionStartedAloneStaysBlueUntilAFrontendAttests(t *testing.T) {
-	// Arrange.
-	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	// Act — readiness only; no frontend has painted anything.
-	if err := m.Apply(evSessionStarted("s1", 1)); err != nil {
-		t.Fatalf("session started: %v", err)
-	}
-	// Assert.
-	if got := mustCurrent(t, m, "ws1").State; got != frontendv1.RenderState_RENDER_STATE_INIT {
-		t.Fatalf("state = %s, want INIT (unattested route is blue)", renderName(got))
-	}
-}
-
-// A shim relaunch is a NEW route, so it re-arms the gate: the attestation the
-// previous shim's renderer made does not carry over to a session that just
-// came up again.
-func TestReadinessReArmsTheBlueGateAfterAnAttestation(t *testing.T) {
-	// Arrange — an attested, green workspace.
-	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(evSessionStarted("s1", 1)); err != nil {
-		t.Fatalf("session started: %v", err)
-	}
-	if err := m.ApplyPaintAck("ws1", 4); err != nil {
-		t.Fatalf("paint ack: %v", err)
-	}
-	// Act — the shim comes up again.
-	if err := m.Apply(evSessionStarted("s1", 2)); err != nil {
-		t.Fatalf("session restarted: %v", err)
-	}
-	// Assert.
-	if got := mustCurrent(t, m, "ws1").State; got != frontendv1.RenderState_RENDER_STATE_INIT {
-		t.Fatalf("state = %s, want INIT (a fresh route must be re-attested)", renderName(got))
 	}
 }
 
@@ -136,9 +89,6 @@ func TestReadinessAfterTurnEndsApplies(t *testing.T) {
 	// Act.
 	if err := m.Apply(evSessionStarted("s1", 3)); err != nil {
 		t.Fatalf("session started: %v", err)
-	}
-	if err := m.ApplyPaintAck("ws1", 0); err != nil {
-		t.Fatalf("paint ack: %v", err)
 	}
 	// Assert.
 	if got := mustCurrent(t, m, "ws1").State; got != frontendv1.RenderState_RENDER_STATE_READY {
@@ -394,7 +344,6 @@ func TestVendorBlockedThenASessionRestartSelfHeals(t *testing.T) {
 	seedSignal(t, db, "ws", "s1", sigVendorBlocked, causeVendorBlocked, 2, 2)
 	seedSignal(t, db, "ws", "s2", sigReady, causeSessionStarted, 0, 3)
 	seedSignal(t, db, "ws", "s3", sigReady, causeSessionStarted, 0, 4)
-	seedSignal(t, db, "ws", "", sigPainted, causePaintAck, 12612, 5)
 	// Act.
 	got, err := resolve(db, "ws", nil)
 	// Assert.
@@ -416,7 +365,6 @@ func TestBlueOutranksVendorBlocked(t *testing.T) {
 		cause string
 		want  frontendv1.RenderState
 	}{
-		{"no frontend attested painting", sigUnpainted, causePaintLost, frontendv1.RenderState_RENDER_STATE_INIT},
 		{"the transcript could not be read", sigBackfillFailed, "backfill:failed", frontendv1.RenderState_RENDER_STATE_INIT},
 		{"the transport went quiet", sigDegraded, "connection_degraded", frontendv1.RenderState_RENDER_STATE_DEGRADED},
 	}
@@ -499,7 +447,6 @@ func TestVendorBlockedStandsWhenEveryOtherAxisIsClear(t *testing.T) {
 	// Arrange.
 	db := newTestDB(t)
 	seedSignal(t, db, "ws", "s1", sigVendorBlocked, causeVendorBlocked, 1, 1)
-	seedSignal(t, db, "ws", "", sigPainted, causePaintAck, 5, 2)
 	seedSignal(t, db, "ws", "", sigBackfillOK, "backfill:done", -1, 3)
 	seedSignal(t, db, "ws", "", sigDegradedClear, "connection_recovered", -1, 4)
 	seedSignal(t, db, "ws", "", sigMergeNone, causeMergeTransition, -1, 5)
@@ -568,126 +515,6 @@ func TestHistoricalVendorClearRowsAreInert(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Paint attestation
-// ---------------------------------------------------------------------------
-
-func TestPaintAckAdvancesTheWatermark(t *testing.T) {
-	// Arrange.
-	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(evSessionStarted("s1", 1)); err != nil {
-		t.Fatalf("session started: %v", err)
-	}
-	// Act.
-	if err := m.ApplyPaintAck("ws1", 7); err != nil {
-		t.Fatalf("paint ack: %v", err)
-	}
-	// Assert — a ready, attested session is green.
-	if got := mustCurrent(t, m, "ws1").State; got != frontendv1.RenderState_RENDER_STATE_READY {
-		t.Fatalf("state = %s, want READY", renderName(got))
-	}
-}
-
-// Seq 0 is a REAL attestation of an empty history, which is what lets a
-// never-prompted session reach green.
-func TestPaintAckAtZeroAttestsAnEmptyHistory(t *testing.T) {
-	// Arrange.
-	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(evSessionStarted("s1", 1)); err != nil {
-		t.Fatalf("session started: %v", err)
-	}
-	if err := m.ApplyPaintLost("ws1", "fresh"); err != nil {
-		t.Fatalf("paint lost: %v", err)
-	}
-	// Act.
-	if err := m.ApplyPaintAck("ws1", 0); err != nil {
-		t.Fatalf("paint ack: %v", err)
-	}
-	// Assert.
-	if got := mustCurrent(t, m, "ws1").State; got != frontendv1.RenderState_RENDER_STATE_READY {
-		t.Fatalf("state = %s, want READY after attesting an empty history", renderName(got))
-	}
-}
-
-// An absent attestation leaves BLUE, whatever every other hop reports.
-func TestUnpaintedRouteResolvesBlue(t *testing.T) {
-	// Arrange — a fully ready session whose frontend has not attested.
-	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(evSessionStarted("s1", 1)); err != nil {
-		t.Fatalf("session started: %v", err)
-	}
-	// Act.
-	if err := m.ApplyPaintLost("ws1", "never_attested"); err != nil {
-		t.Fatalf("paint lost: %v", err)
-	}
-	// Assert — INIT is blue's token.
-	if got := mustCurrent(t, m, "ws1").State; got != frontendv1.RenderState_RENDER_STATE_INIT {
-		t.Fatalf("state = %s, want INIT (blue) for an unattested route", renderName(got))
-	}
-}
-
-// Blue outranks a live turn: a turn running behind a route the user cannot
-// see is broken, not working.
-func TestUnpaintedOutranksThinking(t *testing.T) {
-	// Arrange.
-	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.ApplyPaintLost("ws1", "shim_died"); err != nil {
-		t.Fatalf("paint lost: %v", err)
-	}
-	// Act.
-	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
-		t.Fatalf("turn started: %v", err)
-	}
-	// Assert.
-	if got := mustCurrent(t, m, "ws1").State; got != frontendv1.RenderState_RENDER_STATE_INIT {
-		t.Fatalf("state = %s, want INIT (blue beats red)", renderName(got))
-	}
-}
-
-// Versioning: a stale ack cannot green a newer gap.
-func TestStalePaintAckIsDropped(t *testing.T) {
-	// Arrange.
-	m, cl, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.ApplyPaintAck("ws1", 9); err != nil {
-		t.Fatalf("paint ack: %v", err)
-	}
-	// Act.
-	if err := m.ApplyPaintAck("ws1", 4); err != nil {
-		t.Fatalf("stale paint ack: %v", err)
-	}
-	// Assert — dropped, and loudly.
-	if !cl.contains("paint ack superseded") {
-		t.Fatal("a superseded paint ack was not logged")
-	}
-}
-
-// A route break withdraws the watermark, so an ack replayed from before the
-// break does not silently re-green the workspace at its old seq.
-func TestPaintLostResetsTheWatermark(t *testing.T) {
-	// Arrange.
-	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(evSessionStarted("s1", 1)); err != nil {
-		t.Fatalf("session started: %v", err)
-	}
-	if err := m.ApplyPaintAck("ws1", 6); err != nil {
-		t.Fatalf("paint ack: %v", err)
-	}
-	// Act.
-	if err := m.ApplyPaintLost("ws1", "hibernated"); err != nil {
-		t.Fatalf("paint lost: %v", err)
-	}
-	// Assert — blue again, and the SAME ack is accepted afresh.
-	if got := mustCurrent(t, m, "ws1").State; got != frontendv1.RenderState_RENDER_STATE_INIT {
-		t.Fatalf("state = %s, want INIT after the route broke", renderName(got))
-	}
-	if err := m.ApplyPaintAck("ws1", 6); err != nil {
-		t.Fatalf("re-attest: %v", err)
-	}
-	if got := mustCurrent(t, m, "ws1").State; got != frontendv1.RenderState_RENDER_STATE_READY {
-		t.Fatalf("state = %s, want READY after re-attesting", renderName(got))
-	}
-}
-
-// ---------------------------------------------------------------------------
 // Yellow is carved out of every green state, not just idle
 // ---------------------------------------------------------------------------
 
@@ -748,8 +575,8 @@ func TestThinkingIsNotPromotedToIdleAsync(t *testing.T) {
 // forever on the most ordinary action there is — reopening a workspace.
 func TestReopenedSessionWithIngestedHistoryReachesGreen(t *testing.T) {
 	// Arrange — the reopen sequence, with NO transcript line arriving:
-	// the daemon settles the backfill from the store high-water, the shim
-	// asserts readiness, and the frontend attests it painted the replay.
+	// the daemon settles the backfill from the store high-water and the shim
+	// asserts readiness.
 	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
 	if err := m.ApplyBackfillState("ws1", "done"); err != nil {
 		t.Fatalf("backfill: %v", err)
@@ -757,10 +584,7 @@ func TestReopenedSessionWithIngestedHistoryReachesGreen(t *testing.T) {
 	if err := m.Apply(evSessionStarted("s1", 1)); err != nil {
 		t.Fatalf("session started: %v", err)
 	}
-	// Act — the frontend painted the replayed history.
-	if err := m.ApplyPaintAck("ws1", 4200); err != nil {
-		t.Fatalf("paint ack: %v", err)
-	}
+	// Act — readiness lands with the backfill already settled.
 	// Assert
 	if got := mustCurrent(t, m, "ws1").State; got != frontendv1.RenderState_RENDER_STATE_READY {
 		t.Fatalf("state = %s, want READY for a reopened, fully-backfilled session", renderName(got))
@@ -770,13 +594,10 @@ func TestReopenedSessionWithIngestedHistoryReachesGreen(t *testing.T) {
 // A FAILED backfill is blue: the history is incomplete, so anything painted
 // from it is a partial account of the conversation.
 func TestFailedBackfillResolvesBlue(t *testing.T) {
-	// Arrange — everything else healthy and attested.
+	// Arrange — everything else healthy.
 	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
 	if err := m.Apply(evSessionStarted("s1", 1)); err != nil {
 		t.Fatalf("session started: %v", err)
-	}
-	if err := m.ApplyPaintAck("ws1", 10); err != nil {
-		t.Fatalf("paint ack: %v", err)
 	}
 	// Act.
 	if err := m.ApplyBackfillState("ws1", "failed"); err != nil {
@@ -799,10 +620,6 @@ func TestEmptyWorkspaceBackfillDoesNotHoldBlue(t *testing.T) {
 	if err := m.Apply(evSessionStarted("s1", 1)); err != nil {
 		t.Fatalf("session started: %v", err)
 	}
-	// Act — an empty history is attested at seq 0.
-	if err := m.ApplyPaintAck("ws1", 0); err != nil {
-		t.Fatalf("paint ack: %v", err)
-	}
 	// Assert.
 	if got := mustCurrent(t, m, "ws1").State; got != frontendv1.RenderState_RENDER_STATE_READY {
 		t.Fatalf("state = %s, want READY for a fresh empty workspace", renderName(got))
@@ -815,9 +632,6 @@ func TestBackfillRecoveryReleasesBlue(t *testing.T) {
 	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
 	if err := m.Apply(evSessionStarted("s1", 1)); err != nil {
 		t.Fatalf("session started: %v", err)
-	}
-	if err := m.ApplyPaintAck("ws1", 3); err != nil {
-		t.Fatalf("paint ack: %v", err)
 	}
 	if err := m.ApplyBackfillState("ws1", "failed"); err != nil {
 		t.Fatalf("backfill failed: %v", err)

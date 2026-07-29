@@ -10,26 +10,41 @@ transition with its causing event kind and seq.
 
 This module replaces the Emacs-persisted workspace agent-state entirely.
 
-## The paint axis is a latch that re-arms
+## Attestation is GONE; the axis that replaced it is WIRED
 
-Green promises two things: the route is usable AND a frontend has attested
-drawing the history. The second half is the paint axis, and it has three
-edges rather than one:
+Green once promised two things: the route is usable AND a frontend has attested
+drawing the history. The second half was the paint axis — an `unpainted` token
+opened by readiness, closed by a webview's paint acknowledgment, re-opened when
+a painter connected or left. It is deleted, tokens, rank row, watermark and
+entry points alike.
 
-- OPENS when a session asserts readiness (`Apply`, alongside `ready`). A new
-  route has been attested by nobody, so the workspace is blue until someone
-  draws it. Without this edge the axis contributed no candidate at all for a
-  workspace that had never been acked, and the documented blue gate never
-  engaged — a workspace resolved green with no paint row in the log.
-- CLOSES on `ApplyPaintAck`, and only for a render that actually DREW. A
-  suspended webview's acknowledgment settles that state's delivery to Emacs
-  and attests nothing here.
-- RE-OPENS on `ApplyPaintLost`, called by the frontend server when a painting
-  connection attaches or leaves. Attestation is a claim by one renderer about
-  one connection, so a renderer that is gone cannot keep a workspace green.
+A workspace's color is CONNECTION TRUTH. Blue means there is no live backend
+session for this workspace; every non-blue color is a GUARANTEE that the session
+substrate is fully wired. What a viewer has or has not drawn says nothing about
+that, so it can no longer hold a workspace blue.
 
-`paintWatermark` deliberately drops the seq on withdrawal, so a re-attestation
-after a break starts from nothing rather than inheriting the pre-break seq.
+The WIRED axis is the fact that does answer the question, and sessiondrv
+produces it (see internal/sessiondrv/wiredstate.go):
+
+- `wired` — the bring-up gate CLOSED for this workspace: the shim answered
+  ShimReady, which is the same verdict `AwaitReady` resolves on. The axis
+  contributes no candidate, so the agent axis and the vendor outcome are what
+  the workspace renders.
+- `starting` — a bring-up is actively in flight. Blue, rendering
+  RENDER_STATE_INIT, the same word bring-up has always had.
+- `dormant` — not wired and not starting: hibernated, never opened, or a daemon
+  that has just restarted. Blue, rendering RENDER_STATE_DORMANT.
+
+ABSENCE OF A ROW IS DORMANT, not "unknown". A workspace with agent-axis rows and
+no wired row at all has no evidence of a live session behind it, and inventing
+one from the agent axis is precisely the lie the law forbids. The resolution
+query synthesizes the `dormant` candidate for that case rather than letting the
+agent axis answer unopposed.
+
+`warm()` CLOSES the axis for every restored workspace, the same way it releases
+persisted permission rows and for the same reason: the wiring is in-process and
+does not survive a restart, while the agent-axis history does. A restored
+workspace is therefore dormant until something wires it again.
 
 ## The vendor state is a turn OUTCOME, not a latch
 
@@ -52,7 +67,7 @@ subsequent clean `TurnEnded`. That form has no correct closed version:
 Nothing gates on the state — prompts stay sendable while purple, and a retry
 that hits the same wall just writes another `vendor_blocked` row. Rank 20 is
 unchanged, so purple still sits between blue and red when it competes with
-the merge, paint, backfill, and degraded axes; what changed is that a newer
+the merge, wired, backfill, and degraded axes; what changed is that a newer
 agent-axis row (`thinking`, `ready`, `done`, `dead`) now replaces it.
 
 ## The permission row is a covered turn, not a settled one

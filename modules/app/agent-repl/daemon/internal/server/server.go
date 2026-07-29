@@ -1383,12 +1383,11 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	// handler as the Emacs UDS surface. The translator only stamps the scoped
 	// workspace when a command omits it (the URL already scopes the connection).
 	//
-	// PAINTER: this is the endpoint the rendering webview holds open. It draws
-	// every state it is sent and reports what the render produced, so the
-	// delivery sequencer withholds a state from Emacs until this connection has
-	// answered for it (see frontend/paintgate.go).
+	// This is the endpoint the rendering webview holds open. It receives every
+	// state the moment the resolver produces one, exactly as Emacs does: no
+	// frontend's render pace gates another's delivery.
 	s.frontend.ServeWSScoped(w, r, frontend.Scope{SessionID: id, Workspace: cwd},
-		frontend.RolePainter, s.frontendCommandTranslator(cwd))
+		frontend.ClientKindGUIStream, s.frontendCommandTranslator(cwd))
 }
 
 // frontendCommandTranslator decodes an inbound FrontendCommand protojson frame
