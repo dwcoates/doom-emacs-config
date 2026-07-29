@@ -613,6 +613,22 @@ func main() {
 	// workspace bridge, and the inbox has a live daemon session target.  Only
 	// this completed state may report readiness.
 	ready.ready.Store(true)
+
+	// BOOT RECONCILIATION, strictly AFTER readiness (bootsweep.go). Shims that
+	// outlived the previous daemon are already redialling this process's
+	// listener; without this nothing ever claims them, and a restart leaves
+	// every surviving session unclaimed and every workspace blue until some
+	// later act happens to bring it up. It is reconciliation, not a boot
+	// dependency, so it must never sit in front of /healthz.
+	sweepCtx, cancelSweep := context.WithCancel(context.Background())
+	defer cancelSweep()
+	go (&server.BootSweeper{
+		Reg:       sessionRegistry,
+		Connected: shimListener.Connected,
+		Held:      sessionlock.Held,
+		Ensurer:   driver,
+		Logf:      log.Printf,
+	}).Run(sweepCtx)
 	log.Printf("claude-repld %s listening on %s (shim: %s; healthz ready=true; workspace-create inbox=%s)", daemonVersion, *addr, *shimScript, workspaceAssembly.Inbox.Dir)
 	if err := httpServer.Serve(httpListener); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("claude-repld: %v", err)
