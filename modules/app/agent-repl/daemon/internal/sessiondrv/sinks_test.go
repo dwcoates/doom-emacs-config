@@ -154,6 +154,11 @@ type fakeApplier struct {
 	// rotation bounce).
 	wirings  []wiringCall
 	wiredErr error
+	// current is what Current resolves per workspace — the hibernation settled
+	// guard's only input. Absent means "nothing resolved", which is what every
+	// test that does not care about the guard wants.
+	current    map[string]*frontendv1.WorkspaceState
+	currentErr error
 }
 
 // wiringCall is one WIRED-axis edge the driver applied.
@@ -259,6 +264,33 @@ func (f *fakeApplier) ApplyWired(workspace string, wiring ssm.Wiring, reason str
 	defer f.reconcMutex.Unlock()
 	f.wirings = append(f.wirings, wiringCall{workspace: workspace, wiring: wiring, reason: reason})
 	return f.wiredErr
+}
+
+// Current is the one READ on the applier, used only by the hibernation settled
+// guard. The zero value answers "nothing resolved", which the guard treats as a
+// workspace with no turn to interrupt — so a test arranges an unsettled workspace
+// by SETTING current, and every existing test keeps hibernating freely.
+func (f *fakeApplier) Current(workspace string) (*frontendv1.WorkspaceState, bool, error) {
+	f.reconcMutex.Lock()
+	defer f.reconcMutex.Unlock()
+	if f.currentErr != nil {
+		return nil, false, f.currentErr
+	}
+	st, ok := f.current[workspace]
+	if !ok {
+		return nil, false, nil
+	}
+	return st, true, nil
+}
+
+// setCurrent arranges the resolved state the settled guard will read.
+func (f *fakeApplier) setCurrent(workspace string, st *frontendv1.WorkspaceState) {
+	f.reconcMutex.Lock()
+	defer f.reconcMutex.Unlock()
+	if f.current == nil {
+		f.current = map[string]*frontendv1.WorkspaceState{}
+	}
+	f.current[workspace] = st
 }
 
 // wiringsApplied returns the recorded WIRED-axis edges, taken under the lock so

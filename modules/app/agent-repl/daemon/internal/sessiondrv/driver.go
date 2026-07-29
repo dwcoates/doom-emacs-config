@@ -1289,8 +1289,10 @@ var (
 // it stops consuming the stream and SIGTERMs the child shim (the redefined
 // hibernation, §4.4). The registry record stays non-terminal (the caller owns
 // that), so the next act revives it via a fresh reattach-first Ensure. A
-// workspace with no live driver is a loud error (nothing to hibernate). NEVER
-// call this while a turn is active — the SSM is the caller's guard.
+// workspace with no live driver is a loud error (nothing to hibernate). A
+// workspace that has not SETTLED is refused with ErrNotSettled — the guard used
+// to be "NEVER call this while a turn is active", left to each caller, and it is
+// now mechanical inside hibernate().
 //
 // Use this ONLY when the intent really is workspace-scoped (the idle sweep,
 // daemon shutdown). A caller standing down one SPECIFIC record must use
@@ -1348,6 +1350,23 @@ func (m *Manager) HibernateSession(workspace, sessionID string) error {
 // hibernate is the shared teardown. An empty wantSession means "whichever
 // session is live"; a non-empty one gates the teardown on identity.
 func (m *Manager) hibernate(workspace, wantSession string) error {
+	// THE SETTLED GUARD LIVES HERE, not in the idle sweeper, and the placement is
+	// the point. "Never hibernate a workspace mid-turn" was a rule each caller
+	// had to remember, which means it held only for the callers that did — the
+	// sweeper's elapsed-quiet gate enforces it for the sweeper alone, and every
+	// frontend command and future caller entered the same teardown ungated.
+	// Inside the shared teardown it is mechanical: there is no path to a
+	// hibernation of a working workspace left to find.
+	//
+	// It also protects the vocabulary. `hibernated` is ranked in the blue band
+	// precisely so it cannot be masked by a stale agent row, which means a teal
+	// tab OVER a live turn would be indistinguishable from a teal tab over a
+	// settled one — the user would see "asleep" while the agent worked, with no
+	// color anywhere to correct it. Refusing here is what makes that combination
+	// unreachable by construction rather than merely unlikely.
+	if err := m.refuseUnsettledHibernation(workspace); err != nil {
+		return err
+	}
 	m.mu.Lock()
 	d, ok := m.byWS[workspace]
 	if !ok {
