@@ -49,6 +49,7 @@
 (declare-function agent-repl--align-buffer-to-ws-dir "agent-repl-status" (buf ws))
 (declare-function agent-repl--frontend-ensure-session "agent-repl-frontend-client" (ws))
 (declare-function agent-repl--frontend-force-fresh-session "agent-repl-frontend-client" (ws))
+(declare-function agent-repl--frontend-restart-session "agent-repl-frontend-client" (ws))
 (declare-function agent-repl--frontend-session-url "agent-repl-frontend-client" (session-id))
 (declare-function agent-repl-window--panel-window "agent-repl-window" (kind &optional ws frame))
 (declare-function agent-repl-window--side-window-p "agent-repl-window" (win))
@@ -846,6 +847,33 @@ there is no current workspace."
       (agent-repl--frontend-sync-webview ws id)
       (agent-repl--log ws "force-fresh-conversation: outcome=session=%s" id)
       (message "agent-repl: started a fresh conversation (%s)" id))))
+
+;;;###autoload
+(defun agent-repl-restart-session ()
+  "HARD-RESTART the current workspace\='s session: new shim, same conversation.
+
+Stops whatever shim is serving the workspace -- including one that
+outlived a previous daemon, which this daemon never spawned and could not
+otherwise reach -- then brings the SAME session record back up, so the
+respawn resumes the same vendor conversation and nothing is lost.
+
+This is a PROCESS restart, not a new conversation.  Reach for it when the
+shim is wedged, when it survived a deploy and is running superseded code,
+or when the backend simply needs rebuilding under a conversation worth
+keeping.  Use `agent-repl-force-fresh-conversation\=' instead to abandon
+the conversation itself.
+
+A workspace whose session is merely dormant is brought up, because a
+restart and a start are the same request when nothing is running.  Signals when there
+is no current workspace; a daemon-side failure is surfaced loudly through
+the shared command-ack handler rather than read as success."
+  (interactive)
+  (let ((ws (agent-repl--ws-current-name)))
+    (unless ws
+      (user-error "agent-repl: no current workspace"))
+    (agent-repl--log ws "restart-session: begin")
+    (agent-repl--frontend-restart-session ws)
+    (message "agent-repl: restarting the session for %s..." ws)))
 
 (defun agent-repl--frontend-parent-ws-name (ws)
   "Return the basename of WS's recorded parent worktree, or nil.

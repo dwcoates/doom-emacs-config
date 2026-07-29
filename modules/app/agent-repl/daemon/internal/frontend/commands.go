@@ -75,6 +75,11 @@ type CommandHandler interface {
 	// false view is a completed assertion, not a transport error, and is
 	// delivered to the requesting connection before its command ack.
 	SessionHealth(ctx context.Context, workspace, requestID string, cmd *frontendv1.SessionHealthCmd) (*frontendv1.SessionHealthView, error)
+	// RestartSession HARD-RESTARTS the workspace's session: stop whatever shim
+	// is serving it, then bring it up again on the same session record, so the
+	// conversation resumes under a fresh process. Synchronous, because the ack
+	// is the user's only report of whether their session came back.
+	RestartSession(ctx context.Context, workspace, requestID string, cmd *frontendv1.RestartSessionCmd) error
 }
 
 // Dispatch routes a FrontendCommand to the handler and returns the CommandAck to
@@ -134,6 +139,8 @@ func DispatchWithResponse(ctx context.Context, logf dlog.Logf, h CommandHandler,
 		err = h.DeleteSession(ctx, ws, reqID, c.DeleteSession)
 	case *frontendv1.FrontendCommand_Shutdown:
 		err = h.Shutdown(ctx, ws, reqID, c.Shutdown)
+	case *frontendv1.FrontendCommand_RestartSession:
+		err = h.RestartSession(ctx, ws, reqID, c.RestartSession)
 	case *frontendv1.FrontendCommand_ClientLog:
 		err = h.ClientLog(ctx, ws, reqID, c.ClientLog)
 	case *frontendv1.FrontendCommand_QueueForce:

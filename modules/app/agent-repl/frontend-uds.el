@@ -155,7 +155,7 @@ though there is intentionally nothing for Emacs to apply.")
     "closeWorkspace" "openWorkspace" "resync" "createSession" "deleteSession"
     "shutdown" "clientLog" "queueForce" "queueAccept" "queueCancel"
     "workspaceMaterialized" "hostActionCompleted"
-    "daemonHealth" "sessionHealth")
+    "daemonHealth" "sessionHealth" "restartSession")
   "The protojson names of every SENDABLE `FrontendCommand' oneof arm.
 Mirrors the `command' oneof in frontend.proto.  Sending an unknown
 command field is a programming error and fails loudly.

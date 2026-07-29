@@ -636,7 +636,13 @@ so a chord wins key lookup regardless of which evil state is current.")
 (map! :leader
       :desc "Agent REPL (simple)" "o c" #'agent-repl-simple
       :desc "Agent REPL (deprio)" "o C" #'agent-repl
-      :desc "Kill Claude" "o C-c" #'agent-repl-kill
+      ;; SPC o C-c is the HARD RESTART, not the kill.  A restart keeps the
+      ;; conversation and replaces only the process serving it, which is what
+      ;; is wanted in every situation the old kill was reached for -- a wedged
+      ;; shim, a shim still running pre-deploy code -- without losing the
+      ;; conversation as collateral.  `agent-repl-kill' is still available by
+      ;; name for the rarer case of genuinely ending a session.
+      :desc "Restart Claude session (same conversation)" "o C-c" #'agent-repl-restart-session
       :desc "Claude input" "o v" #'agent-repl-focus-input
       :desc "Claude interrupt" "o x" #'agent-repl-interrupt
       :desc "Copy file reference" "o r" #'agent-repl-copy-reference

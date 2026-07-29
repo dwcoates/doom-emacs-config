@@ -250,7 +250,7 @@ emit_sources() {
         find "$dir/src" -type f -print0
     fi
     local manifest
-    for manifest in package.json tsconfig.json vite.config.ts go.mod go.sum; do
+    for manifest in package.json tsconfig.json vite.config.ts go.mod go.sum build.mjs; do
         if [ -f "$dir/$manifest" ]; then
             printf '%s\0' "$dir/$manifest"
         fi
@@ -460,8 +460,17 @@ build_shim() {
     fi
     require_bin npm "install Node.js"
     echo "[build-frontend] shim: building..."
-    ( cd "$SHIM_DIR" && npm run build )
-    write_built_sha "$SHIM_SHA_STAMP" "$ROOT"
+    # ONE revision, baked into the bundle AND written to the stamp.
+    #
+    # The daemon bounces a surviving shim whose reported build identity differs
+    # from this stamp, so the two must be the same value rather than two
+    # computations that usually agree: `source_revision` reports `-dirty` off a
+    # live working tree, which a build can enter and leave between the bundle
+    # and the stamp. Computing it once removes the question.
+    local shim_sha=""
+    shim_sha="$(source_revision "$ROOT" || true)"
+    ( cd "$SHIM_DIR" && SHIM_BUILD_SHA="$shim_sha" npm run build )
+    write_built_sha_value "$SHIM_SHA_STAMP" "$shim_sha"
     echo "[build-frontend] shim: done"
 }
 
