@@ -2476,17 +2476,32 @@ pre {
 .pfooter-grow.error { color: var(--err); }
 .pfooter-grow.muted { color: var(--muted); }
 
-/* The rate-limit rung's two figures, which carry their OWN severity rather
-   than inheriting the cell's one tone: the usage percentage and the reset time
+/* The rate-limit rung's figures, which carry their OWN severity rather than
+   inheriting the cell's one tone: the usage percentage and the reset countdown
    are what the reader acts on, and the labels around them stay muted.
 
-   Two accents, reusing the hues that already speak for these claims elsewhere:
-   the async yellow for an allowance running low, and the same error red the
-   failure row wears for an allowance actually spent. Neither is a literal —
-   both track the theme's variables, so the rung follows light and dark with
-   every other footer signal. */
+   PER ALLOWANCE, not per cell — the rung names the five-hour session window and
+   the seven-day weekly one side by side, and the whole reason they are drawn
+   apart is that they can read very differently at the same moment (a barely
+   touched session beside a week almost entirely spent).
+
+   FOUR rungs, so the ladder to spent escalates instead of flipping between
+   fine and alarming, each reusing a hue that already speaks for that claim
+   elsewhere: the success green through half the allowance, the remediation
+   yellow past the halfway mark, the thinking orange for one running low, and
+   the same error red the failure row wears for one effectively spent. None is
+   a literal — every one tracks the theme's variables, so the rung follows light
+   and dark with every other footer signal. */
+.pfooter-rl-ok {
+  color: var(--ok);
+  font-weight: 600;
+}
 .pfooter-rl-warn {
-  color: var(--async);
+  color: var(--remediation);
+  font-weight: 600;
+}
+.pfooter-rl-high {
+  color: var(--thinking);
   font-weight: 600;
 }
 .pfooter-rl-limit {

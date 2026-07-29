@@ -1068,7 +1068,7 @@ describe("progress (F1): the consolidated footer's whole input", () => {
     expect(got).not.toHaveProperty("state");
   });
 
-  it("carries the rate-limit window's structured detail", () => {
+  it("carries the session allowance's structured detail", () => {
     // Arrange / Act
     const got = progressOf(
       progressFrame({
@@ -1082,10 +1082,59 @@ describe("progress (F1): the consolidated footer's whole input", () => {
     );
     // Assert
     expect(got.rateLimited).toEqual({
+      active: true,
       resetsAt: 1700000900,
       utilization: 0.91,
       status: "allowed_warning",
     });
+  });
+
+  it("carries the WEEKLY allowance in its own slot, never folded into the session's", () => {
+    // Arrange / Act — the two are separate facts; conflating them is what put
+    // a weekly figure on screen under the session's name.
+    const got = progressOf(
+      progressFrame({
+        rateLimitedWeekly: {
+          active: true,
+          resetsAt: "1700500000",
+          utilization: 0.91,
+          status: "allowed_warning",
+        },
+      }),
+    );
+    // Assert
+    expect(got.rateLimitedWeekly).toEqual({
+      active: true,
+      resetsAt: 1700500000,
+      utilization: 0.91,
+      status: "allowed_warning",
+    });
+    expect(got.rateLimited).toBeNull();
+  });
+
+  it("keeps a QUIET allowance's figures rather than flattening it away", () => {
+    // Arrange / Act — deliberately NOT the other windows' discipline: absent
+    // means never reported, inactive means reported and unremarkable, and the
+    // footer needs the second one to name both allowances side by side.
+    const got = progressOf(
+      progressFrame({
+        rateLimited: { resetsAt: "1700000900", utilization: 0.12, status: "allowed" },
+      }),
+    );
+    // Assert
+    expect(got.rateLimited).toEqual({
+      active: false,
+      resetsAt: 1700000900,
+      utilization: 0.12,
+      status: "allowed",
+    });
+  });
+
+  it("leaves an allowance the vendor never reported as null", () => {
+    // Arrange / Act
+    const got = progressOf(progressFrame({}));
+    // Assert
+    expect(got.rateLimitedWeekly).toBeNull();
   });
 
   it("carries an OPEN interrupt window's age and outcome into the footer's input", () => {

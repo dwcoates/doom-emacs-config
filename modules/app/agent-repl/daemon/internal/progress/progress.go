@@ -529,34 +529,77 @@ func (m *Manager) applySessionStateLocked(workspace string, wp *workspaceProgres
 	}
 }
 
-// applyRateLimitLocked folds a rate-limit report into its window.
+// weeklyRateLimitTypes are the vendor's `rate_limit_type` values that bill
+// against the SEVEN-DAY allowance. The per-model variants and the
+// overage-included one are the same weekly allowance reported with a narrower
+// scope, so they share its window rather than each claiming one.
 //
-// The window is open whenever the vendor reports a status OTHER than a plain
-// "allowed": an "allowed_warning" (approaching the cap) or an outright limit is
-// news the footer should carry, while a bare "allowed" is the vendor saying
-// everything is fine and closes the window.
+// "overage" is weekly too: overage is the allowance a user buys once the week's
+// is spent, and it resets on the week's own deadline.
+var weeklyRateLimitTypes = map[string]bool{
+	"seven_day":                  true,
+	"seven_day_opus":             true,
+	"seven_day_sonnet":           true,
+	"seven_day_overage_included": true,
+	"overage":                    true,
+}
+
+// sessionRateLimitTypes are the values that bill against the rolling FIVE-HOUR
+// session allowance. The empty string is here because a vendor that reports no
+// type at all is reporting the session window — that is what the field's
+// absence meant before the type was modeled, and it is the reading every
+// display carried until now.
+var sessionRateLimitTypes = map[string]bool{
+	"five_hour": true,
+	"":          true,
+}
+
+// applyRateLimitLocked folds a rate-limit report into ITS OWN allowance's
+// window — the five-hour session one or the seven-day weekly one, per the
+// vendor's `rate_limit_type`.
+//
+// The two are kept apart because they are separate facts: separate deadlines,
+// separate severities, and separate remedies. One shared window meant the last
+// event won, so a weekly figure deep into its allowance was rendered under the
+// session's name.
+//
+// The window is PRESENT for as long as the vendor has reported its allowance,
+// including a plain "allowed" — that figure is not news on its own, but it is
+// exactly what a reader needs beside the allowance that IS news, and it is the
+// only way the footer can name both. `active` carries the narrower newsworthy
+// claim (any status other than a plain "allowed"), which is what still decides
+// whether the rung outranks the activity the footer would otherwise show.
+//
+// An unrecognized type is loud-logged and folded into the session window rather
+// than dropped: the daemon does not know which allowance it bills against, but
+// a rate-limit report the reader never sees is strictly worse than one filed
+// under the wrong heading, and the log says which happened.
 func (m *Manager) applyRateLimitLocked(workspace string, wp *workspaceProgress, info *datav1.RateLimitInfo) {
-	status := info.GetStatus()
-	active := status != "" && status != "allowed"
-	cur := wp.view.GetRateLimited()
-	if !active {
-		if cur == nil || !cur.GetActive() {
-			return
-		}
-		wp.view.RateLimited = nil
-		m.pushLocked(workspace, wp)
-		return
+	limitType := info.GetRateLimitType()
+	weekly := weeklyRateLimitTypes[limitType]
+	if !weekly && !sessionRateLimitTypes[limitType] {
+		m.logf("progress: unknown rate_limit_type %q ws=%s; filed under the session allowance",
+			limitType, workspace)
 	}
+	status := info.GetStatus()
 	next := &frontendv1.RateLimitWindow{
-		Active:      true,
+		// Anything other than a plain "allowed" is news — UNCHANGED from when
+		// this was the whole gate on the window existing. An empty status is
+		// the vendor reporting no verdict rather than a bad one, so it stays
+		// quiet here exactly as it always did.
+		Active:      status != "" && status != "allowed",
 		ResetsAt:    info.GetResetsAt(),
 		Utilization: info.GetUtilization(),
 		Status:      status,
 	}
-	if proto.Equal(cur, next) {
+	slot := &wp.view.RateLimited
+	if weekly {
+		slot = &wp.view.RateLimitedWeekly
+	}
+	if proto.Equal(*slot, next) {
 		return
 	}
-	wp.view.RateLimited = next
+	*slot = next
 	m.pushLocked(workspace, wp)
 }
 

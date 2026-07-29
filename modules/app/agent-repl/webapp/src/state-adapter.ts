@@ -76,6 +76,7 @@ import {
   type HeartbeatView,
   type InterruptOutcome,
   type InterruptWindow,
+  type RateLimitWindow,
   type ProgressView,
   type ProgressWindow,
   type QueueEntry,
@@ -251,8 +252,17 @@ export interface InterruptInput {
   outcome: InterruptOutcome;
 }
 
-/** The rate-limit window, which carries structured detail rather than a line. */
+/**
+ * One ALLOWANCE's rate-limit window, which carries structured detail rather
+ * than a line.
+ *
+ * It is carried whenever the vendor has reported the allowance, quiet or not:
+ * `active` is the separate question of whether the report was NEWSWORTHY, and
+ * the footer needs the quiet figure to name both allowances beside each other.
+ */
 export interface RateLimitInput {
+  /** Whether the vendor's last report was anything but a plain "allowed". */
+  active: boolean;
   /** Epoch SECONDS (the vendor event's own unit). */
   resetsAt: number;
   utilization: number;
@@ -284,7 +294,12 @@ export interface ProgressInput {
   retrying: ProgressWindowInput | null;
   authenticating: ProgressWindowInput | null;
   hook: ProgressWindowInput | null;
+  /**
+   * The vendor's two allowances, kept apart: the rolling five-hour session
+   * window and the seven-day weekly one. `null` = never reported.
+   */
   rateLimited: RateLimitInput | null;
+  rateLimitedWeekly: RateLimitInput | null;
   /** The session reporting it is parked on the user. NOT a phase. */
   blocked: ProgressWindowInput | null;
   /**
@@ -617,14 +632,12 @@ export class StateAdapter {
         hook: openWindow(pv.hook),
         blocked: openWindow(pv.blocked),
         interrupt: openInterrupt(pv.interrupt),
-        rateLimited:
-          pv.rateLimited !== undefined && pv.rateLimited.active
-            ? {
-                resetsAt: pv.rateLimited.resetsAt,
-                utilization: pv.rateLimited.utilization,
-                status: pv.rateLimited.status,
-              }
-            : null,
+        // Carried whenever the daemon sent the allowance at all — NOT gated on
+        // `active`. A quiet allowance is still the figure the reader needs
+        // beside the one that is not quiet, and the footer decides for itself
+        // whether either is newsworthy enough to claim the activity cell.
+        rateLimited: openRateLimit(pv.rateLimited),
+        rateLimitedWeekly: openRateLimit(pv.rateLimitedWeekly),
         failure: pv.failure === undefined ? null : systemFailureFrom(pv.failure),
         pendingPermissions: pv.pendingPermissions,
         queueDepth: pv.queueDepth,
@@ -1365,4 +1378,25 @@ function openWindow(w: ProgressWindow | undefined): ProgressWindowInput | null {
 function openInterrupt(w: InterruptWindow | undefined): InterruptInput | null {
   if (w === undefined || !w.active || w.outcome === null) return null;
   return { sinceMs: w.sinceMs, outcome: w.outcome };
+}
+
+/**
+ * An allowance's rate-limit window as its figures, or null when the vendor has
+ * never reported that allowance.
+ *
+ * DELIBERATELY NOT `openWindow`'s discipline: absent and inactive are different
+ * answers here. Absent is "no report exists"; inactive is "the last report was
+ * a plain allowed", which still carries the utilization and the deadline the
+ * reader wants to see beside the OTHER allowance. Collapsing the two is what
+ * left the footer able to show only whichever allowance happened to be in
+ * trouble, unlabeled.
+ */
+function openRateLimit(w: RateLimitWindow | undefined): RateLimitInput | null {
+  if (w === undefined) return null;
+  return {
+    active: w.active,
+    resetsAt: w.resetsAt,
+    utilization: w.utilization,
+    status: w.status,
+  };
 }

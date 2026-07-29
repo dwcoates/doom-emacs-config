@@ -2787,6 +2787,54 @@ describe("the footer's interrupt chip (I1)", () => {
   });
 });
 
+describe("the footer's rate-limit severity ladder", () => {
+  it("paints an allowance under half in the success green", () => {
+    // Arrange + Act — plenty left is not a warning.
+    const rule = blockAfter(css, "\n.pfooter-rl-ok {");
+    // Assert
+    expect(rule).toContain("var(--ok)");
+  });
+
+  it("paints an allowance past the halfway mark in the true yellow", () => {
+    // Arrange + Act
+    const rule = blockAfter(css, "\n.pfooter-rl-warn {");
+    // Assert
+    expect(rule).toContain("var(--remediation)");
+  });
+
+  it("paints an allowance running low in the palette's orange", () => {
+    // Arrange + Act — the rung between yellow and spent.
+    const rule = blockAfter(css, "\n.pfooter-rl-high {");
+    // Assert
+    expect(rule).toContain("var(--thinking)");
+  });
+
+  it("paints an effectively spent allowance in the error red", () => {
+    // Arrange + Act
+    const rule = blockAfter(css, "\n.pfooter-rl-limit {");
+    // Assert
+    expect(rule).toContain("var(--err)");
+  });
+
+  it("spends four DISTINCT variables, so the ladder reads as four steps", () => {
+    // Arrange — a repeated hue would collapse two rungs into one reading.
+    const hues = ["ok", "warn", "high", "limit"].map(
+      (rung) => /var\((--[\w-]+)\)/.exec(blockAfter(css, `\n.pfooter-rl-${rung} {`))?.[1],
+    );
+    // Act + Assert
+    expect(new Set(hues).size).toBe(4);
+  });
+
+  it("names no literal color, so every rung follows light and dark", () => {
+    // Arrange + Act — a hardcoded hex is what strands a signal in one theme.
+    const rules = ["ok", "warn", "high", "limit"].map((rung) =>
+      blockAfter(css, `\n.pfooter-rl-${rung} {`),
+    );
+    // Assert
+    expect(rules.filter((rule) => /#[0-9a-f]{3,8}/i.test(rule))).toEqual([]);
+  });
+});
+
 describe("the footer's grabber notch geometry", () => {
   it("takes the notch out of normal flow so it costs the row no height", () => {
     // Arrange + Act — as a flow sibling it ate a band off the dock's top and

@@ -1302,6 +1302,7 @@ describe("the progress footer's input (F1)", () => {
       blocked: null,
       interrupt: null,
       rateLimited: null,
+      rateLimitedWeekly: null,
       failure: null,
       pendingPermissions: 0,
       queueDepth: 0,

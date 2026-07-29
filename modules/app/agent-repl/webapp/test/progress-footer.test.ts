@@ -14,7 +14,6 @@ import {
   ProgressFooter,
   activityBody,
   activityDetail,
-  clockTime,
   countersHtml,
   errorRowHtml,
   footerClickAction,
@@ -33,6 +32,11 @@ import type { ProgressInput } from "../src/state-adapter.js";
 import { ConversationItem, SystemFailureCard, ToolItem } from "../src/store.js";
 
 const NOW = Date.parse("2024-05-01T12:00:00.000Z");
+
+/** Millisecond scales, for reset deadlines expressed as a wait from NOW. */
+const MINUTE = 60_000;
+const HOUR = 60 * MINUTE;
+const DAY = 24 * HOUR;
 
 /** A daemon-classified failure, defaulted to an addressable API failure. */
 function failureCard(over: Partial<SystemFailureCard> = {}): SystemFailureCard {
@@ -64,6 +68,7 @@ function progress(over: Partial<ProgressInput> = {}): ProgressInput {
     blocked: null,
     interrupt: null,
     rateLimited: null,
+    rateLimitedWeekly: null,
     failure: null,
     pendingPermissions: 0,
     queueDepth: 0,
@@ -377,7 +382,12 @@ describe("activityDetail: exactly one account of the dead air", () => {
     const i = input({
       progress: progress({
         retrying: { sinceMs: NOW, detail: "attempt 3/10" },
-        rateLimited: { resetsAt: Math.floor(NOW / 1000), utilization: 0.91, status: "allowed_warning" },
+        rateLimited: {
+          active: true,
+          resetsAt: Math.floor(NOW / 1000),
+          utilization: 0.91,
+          status: "allowed_warning",
+        },
       }),
     });
     // Act
@@ -387,12 +397,41 @@ describe("activityDetail: exactly one account of the dead air", () => {
     expect(got.text).toContain("Session usage");
   });
 
+  it("leaves a quiet allowance out of the cell, so a running tool keeps it", () => {
+    // Arrange — the vendor reported the session at 12% and called it allowed,
+    // which is a figure worth carrying and NOT worth displacing the tool for.
+    const i = input({
+      items: [tool({ toolName: "Bash" })],
+      progress: progress({
+        rateLimited: { active: false, resetsAt: 0, utilization: 0.12, status: "allowed" },
+      }),
+    });
+    // Act
+    const got = activityDetail(i, NOW) as Activity;
+    // Assert
+    expect(got.text).toContain("Bash");
+  });
+
+  it("lets a newsworthy weekly allowance claim the cell on its own", () => {
+    // Arrange — only the WEEKLY window is active, and it must still speak.
+    const i = input({
+      items: [tool({ toolName: "Bash" })],
+      progress: progress({
+        rateLimitedWeekly: { active: true, resetsAt: 0, utilization: 0.91, status: "allowed_warning" },
+      }),
+    });
+    // Act
+    const got = activityDetail(i, NOW) as Activity;
+    // Assert
+    expect(got.text).toBe("Weekly usage: 91%");
+  });
+
   it("lets an auth prompt supersede everything, since it blocks on the reader", () => {
     // Arrange
     const i = input({
       progress: progress({
         authenticating: { sinceMs: NOW, detail: "paste your code" },
-        rateLimited: { resetsAt: 0, utilization: 0, status: "limited" },
+        rateLimited: { active: true, resetsAt: 0, utilization: 0, status: "limited" },
       }),
     });
     // Act
@@ -448,84 +487,152 @@ describe("activityDetail: exactly one account of the dead air", () => {
     expect(got.text).toBe("hook · PreToolUse:Bash");
   });
 
-  it("carries the rate limit's reset time as a local clock reading", () => {
-    // Arrange
-    const resetsAt = Math.floor(NOW / 1000);
+  it("carries the rate limit's reset deadline as a countdown, not a clock reading", () => {
+    // Arrange — a deadline three hours and twenty minutes out.
+    const resetsAt = Math.floor((NOW + 3 * HOUR + 20 * MINUTE) / 1000);
     const i = input({
-      progress: progress({ rateLimited: { resetsAt, utilization: 0, status: "limited" } }),
+      progress: progress({
+        rateLimited: { active: true, resetsAt, utilization: 0, status: "limited" },
+      }),
     });
     // Act
     const got = activityDetail(i, NOW) as Activity;
-    // Assert — the reading is still the local clock; only the words around it
-    // changed (user-directed rewording).
-    expect(got.text).toBe(`Session reset: ${clockTime(resetsAt * 1000)}`);
+    // Assert — a time of day says nothing about how long the wait is.
+    expect(got.text).toBe("Session reset: 3h 20m");
   });
 });
 
 // --- the rate-limit rung -----------------------------------------------------
 
-describe("rateLimitActivity: the session's allowance, in words the reader acts on", () => {
-  /** A rate-limit window, defaulted to a warning deep into the allowance. */
+describe("rateLimitActivity: both allowances, in words the reader acts on", () => {
+  /** One allowance's window, defaulted to a warning deep into it. */
   function limit(over: Partial<NonNullable<ProgressInput["rateLimited"]>> = {}) {
-    return { resetsAt: Math.floor(NOW / 1000), utilization: 0.8, status: "allowed_warning", ...over };
+    return {
+      active: true,
+      resetsAt: Math.floor(NOW / 1000),
+      utilization: 0.8,
+      status: "allowed_warning",
+      ...over,
+    };
   }
 
-  it("names both facts, separated by the interpunct", () => {
+  it("names one allowance's two facts, separated by the interpunct", () => {
     // Arrange
-    const r = limit();
+    const r = limit({ resetsAt: Math.floor((NOW + 2 * HOUR) / 1000) });
     // Act
-    const got = rateLimitActivity(r);
+    const got = rateLimitActivity(progress({ rateLimited: r }), NOW);
     // Assert
-    expect(got.text).toBe(`Session usage: 80% • Session reset: ${clockTime(r.resetsAt * 1000)}`);
+    expect(got.text).toBe("Session usage: 80% • Session reset: 2h");
+  });
+
+  it("names the two allowances apart, separated by the pipe", () => {
+    // Arrange — the reported bug: a barely touched session beside a spent week.
+    const p = progress({
+      rateLimited: { active: false, resetsAt: Math.floor((NOW + 90 * MINUTE) / 1000), utilization: 0.12, status: "allowed" },
+      rateLimitedWeekly: { active: true, resetsAt: Math.floor((NOW + 2 * DAY) / 1000), utilization: 0.91, status: "allowed_warning" },
+    });
+    // Act
+    const got = rateLimitActivity(p, NOW);
+    // Assert
+    expect(got.text).toBe(
+      "Session usage: 12% • Session reset: 1h 30m  |  Weekly usage: 91% • Weekly reset: 2d",
+    );
+  });
+
+  it("gives each allowance its OWN accent, since the two can read very differently", () => {
+    // Arrange
+    const p = progress({
+      rateLimited: { active: false, resetsAt: 0, utilization: 0.12, status: "allowed" },
+      rateLimitedWeekly: { active: true, resetsAt: 0, utilization: 0.91, status: "allowed_warning" },
+    });
+    // Act
+    const got = rateLimitActivity(p, NOW);
+    // Assert
+    expect(got.html).toBe(
+      `Session usage: <span class="pfooter-rl-ok">12%</span>  |  ` +
+        `Weekly usage: <span class="pfooter-rl-limit">91%</span>`,
+    );
+  });
+
+  it("omits an allowance the vendor never reported", () => {
+    // Arrange — only the weekly window has ever arrived.
+    const p = progress({ rateLimitedWeekly: limit({ resetsAt: 0 }) });
+    // Act
+    const got = rateLimitActivity(p, NOW);
+    // Assert
+    expect(got.text).toBe("Weekly usage: 80%");
   });
 
   it("drops the reset segment when the vendor reported no reset time", () => {
     // Arrange
-    const r = limit({ resetsAt: 0 });
+    const p = progress({ rateLimited: limit({ resetsAt: 0 }) });
     // Act
-    const got = rateLimitActivity(r);
+    const got = rateLimitActivity(p, NOW);
     // Assert
     expect(got.text).toBe("Session usage: 80%");
   });
 
   it("drops the usage segment when the vendor reported no utilization", () => {
     // Arrange
-    const r = limit({ utilization: 0 });
+    const p = progress({
+      rateLimited: limit({ utilization: 0, resetsAt: Math.floor((NOW + 45 * MINUTE) / 1000) }),
+    });
     // Act
-    const got = rateLimitActivity(r);
+    const got = rateLimitActivity(p, NOW);
     // Assert
-    expect(got.text).toBe(`Session reset: ${clockTime(r.resetsAt * 1000)}`);
+    expect(got.text).toBe("Session reset: 45m");
   });
 
   it("falls back to a worded line when the vendor reported neither figure", () => {
     // Arrange
-    const r = limit({ resetsAt: 0, utilization: 0 });
+    const p = progress({ rateLimited: limit({ resetsAt: 0, utilization: 0 }) });
     // Act
-    const got = rateLimitActivity(r);
+    const got = rateLimitActivity(p, NOW);
     // Assert — never an empty cell: the window being open is itself the news.
-    expect(got.text).toBe("Session rate limit reported");
+    expect(got.text).toBe("Rate limit reported");
   });
 
-  it("still accents the worded fallback, so the cell is not silent chrome", () => {
-    // Arrange
-    const r = limit({ resetsAt: 0, utilization: 0, status: "rejected" });
+  it("keeps the refusal's red on the worded fallback, so it is not silent chrome", () => {
+    // Arrange — no figures at all, but the session is stopped dead.
+    const p = progress({ rateLimited: limit({ resetsAt: 0, utilization: 0, status: "rejected" }) });
     // Act
-    const got = rateLimitActivity(r);
+    const got = rateLimitActivity(p, NOW);
+    // Assert — a green line here would say the opposite of what it means.
+    expect(got.html).toContain("pfooter-rl-limit");
+  });
+
+  it("takes the LOUDER allowance's accent for the worded fallback", () => {
+    // Arrange — a quiet session beside a refused week; the week is the news.
+    const p = progress({
+      rateLimited: { active: false, resetsAt: 0, utilization: 0, status: "allowed" },
+      rateLimitedWeekly: { active: true, resetsAt: 0, utilization: 0, status: "rejected" },
+    });
+    // Act
+    const got = rateLimitActivity(p, NOW);
     // Assert
     expect(got.html).toContain("pfooter-rl-limit");
   });
 
-  it("colors a 74% warning yellow", () => {
+  it("colors a 50% allowance green", () => {
+    // Arrange — the top of the green band, which is inclusive.
+    const r = limit({ utilization: 0.5 });
+    // Act
+    const got = rateLimitAccent(r);
+    // Assert
+    expect(got).toBe("pfooter-rl-ok");
+  });
+
+  it("colors a 51% allowance yellow", () => {
     // Arrange
-    const r = limit({ utilization: 0.74 });
+    const r = limit({ utilization: 0.51 });
     // Act
     const got = rateLimitAccent(r);
     // Assert
     expect(got).toBe("pfooter-rl-warn");
   });
 
-  it("colors a 75% warning yellow", () => {
-    // Arrange
+  it("colors a 75% allowance yellow", () => {
+    // Arrange — the top of the yellow band, which is inclusive.
     const r = limit({ utilization: 0.75 });
     // Act
     const got = rateLimitAccent(r);
@@ -533,17 +640,26 @@ describe("rateLimitActivity: the session's allowance, in words the reader acts o
     expect(got).toBe("pfooter-rl-warn");
   });
 
-  it("colors an 89% warning yellow", () => {
+  it("colors a 76% allowance orange", () => {
     // Arrange
+    const r = limit({ utilization: 0.76 });
+    // Act
+    const got = rateLimitAccent(r);
+    // Assert
+    expect(got).toBe("pfooter-rl-high");
+  });
+
+  it("colors an 89% allowance orange", () => {
+    // Arrange — the top of the orange band, which stops short of 90%.
     const r = limit({ utilization: 0.89 });
     // Act
     const got = rateLimitAccent(r);
     // Assert
-    expect(got).toBe("pfooter-rl-warn");
+    expect(got).toBe("pfooter-rl-high");
   });
 
-  it("colors a 90% warning red", () => {
-    // Arrange
+  it("colors a 90% allowance red", () => {
+    // Arrange — the ONE inclusive floor: 90% exactly is spent, not merely low.
     const r = limit({ utilization: 0.9 });
     // Act
     const got = rateLimitAccent(r);
@@ -571,18 +687,18 @@ describe("rateLimitActivity: the session's allowance, in words the reader acts o
 
   it("puts the accent on the figures, not on the labels", () => {
     // Arrange
-    const r = limit({ resetsAt: 0, utilization: 0.8 });
+    const p = progress({ rateLimited: limit({ resetsAt: 0, utilization: 0.8 }) });
     // Act
-    const got = rateLimitActivity(r);
+    const got = rateLimitActivity(p, NOW);
     // Assert
-    expect(got.html).toBe(`Session usage: <span class="pfooter-rl-warn">80%</span>`);
+    expect(got.html).toBe(`Session usage: <span class="pfooter-rl-high">80%</span>`);
   });
 
   it("leaves the cell's own tone muted, so the figures are what the eye lands on", () => {
     // Arrange
-    const r = limit();
+    const p = progress({ rateLimited: limit() });
     // Act
-    const got = rateLimitActivity(r);
+    const got = rateLimitActivity(p, NOW);
     // Assert
     expect(got.tone).toBe("muted");
   });
@@ -593,7 +709,20 @@ describe("rateLimitActivity: the session's allowance, in words the reader acts o
     // Act
     const got = sheetHtml(i, NOW);
     // Assert
-    expect(got).toContain(`Session usage: <span class="pfooter-rl-warn">80%</span>`);
+    expect(got).toContain(`Session usage: <span class="pfooter-rl-high">80%</span>`);
+  });
+
+  it("puts a QUIET allowance in the sheet, which the strip's rung declines to show", () => {
+    // Arrange — nothing is newsworthy, so the strip stays on the running tool.
+    const i = input({
+      progress: progress({
+        rateLimitedWeekly: { active: false, resetsAt: 0, utilization: 0.3, status: "allowed" },
+      }),
+    });
+    // Act
+    const got = sheetHtml(i, NOW);
+    // Assert
+    expect(got).toContain(`Weekly usage: <span class="pfooter-rl-ok">30%</span>`);
   });
 
   it("leaves an unrelated activity rung's plain-text rendering untouched", () => {
