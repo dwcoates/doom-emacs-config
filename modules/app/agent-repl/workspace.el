@@ -1329,6 +1329,30 @@ Callers must use this function instead of calling
   (and (fboundp '+workspace-current-name)
        (+workspace-current-name)))
 
+(defun agent-repl--ws-current-log-name ()
+  "Return the current workspace name, or nil when it owns no log sink.
+`agent-repl--ws-current-name' answers a persp-mode question, and persp-mode
+answers with its placeholder perspectives too: outside any agent-repl
+workspace the current perspective is `persp-nil-name' (\"none\"), and Doom's
+initial perspective is \"main\".  Both are real perspectives that are not
+agent-repl workspaces — `agent-repl--ws-project-pollable-p' already
+documents them as live entries that intentionally own no `:project-dir'.
+
+Logging must not mistake them for workspaces.  The ladder's WS argument
+selects a durable per-workspace sink, so a name owning no sink makes
+`agent-repl--workspace-log-identity' signal — and because every level of the
+ladder resolves that identity, a mere debug line would then abort its
+caller.  That is how a persp-activated hook took `doom-init-ui-hook' down
+with it.
+
+nil is the correct answer rather than a fallback: a diagnostic emitted while
+no workspace is current IS a global-scope line, which is exactly what nil
+routes it to.  Use this instead of `agent-repl--ws-current-name' whenever
+the value is destined for the logging ladder; the behavioral callers that
+switch, compare, or resolve directories keep using the unscreened name."
+  (let ((ws (agent-repl--ws-current-name)))
+    (and (agent-repl--ws-log-routable-p ws) ws)))
+
 (defun agent-repl--ws-switch (ws &rest args)
   "Switch the active workspace to WS, passing ARGS to `+workspace-switch'.
 No-op when `+workspace-switch' is not bound (e.g. during tests that do
@@ -1981,7 +2005,7 @@ perspective activation funnels through, so the project picker
   ;; workspace as the caller's previous one and stamp a phantom
   ;; `:last-viewed-at'.
   (if agent-repl--eager-open-in-progress
-      (agent-repl--log (agent-repl--ws-current-name)
+      (agent-repl--log (agent-repl--ws-current-log-name)
                         "record-workspace-history: suppressed (eager-open in progress)")
     (let ((name (agent-repl--ws-current-name)))
       (when name

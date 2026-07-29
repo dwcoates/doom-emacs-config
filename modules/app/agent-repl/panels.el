@@ -35,7 +35,7 @@ window is selected so the user can start typing immediately."
   "Return non-nil if the buffer stored at KEY in current workspace is visible."
   (let* ((buf (agent-repl--ws-get (agent-repl--ws-current-name) key))
          (result (and buf (buffer-live-p buf) (get-buffer-window buf))))
-    (agent-repl--log-verbose (agent-repl--ws-current-name) "ws-buffer-visible-p: key=%s result=%s" key (if result "visible" "hidden"))
+    (agent-repl--log-verbose (agent-repl--ws-current-log-name) "ws-buffer-visible-p: key=%s result=%s" key (if result "visible" "hidden"))
     result))
 
 (defun agent-repl--input-visible-p ()
@@ -50,7 +50,7 @@ window is selected so the user can start typing immediately."
   "Return t if both the input panel and the agent view are visible."
   (let ((result (and (agent-repl--input-visible-p)
                      (agent-repl--view-visible-p))))
-    (agent-repl--log-verbose (agent-repl--ws-current-name) "panels-visible-p: result=%s" (if result "visible" "hidden"))
+    (agent-repl--log-verbose (agent-repl--ws-current-log-name) "panels-visible-p: result=%s" (if result "visible" "hidden"))
     result))
 
 ;;;; Panel display and hide
@@ -70,7 +70,7 @@ caller is doing a per-frame teardown."
 
 (defun agent-repl--close-buffer-windows (&rest bufs)
   "Close windows displaying any of BUFS."
-  (agent-repl--log (agent-repl--ws-current-name) "close-buffer-windows %s" (mapcar #'agent-repl--safe-buffer-name bufs))
+  (agent-repl--log (agent-repl--ws-current-log-name) "close-buffer-windows %s" (mapcar #'agent-repl--safe-buffer-name bufs))
   (dolist (buf bufs)
     (when (and buf (buffer-live-p buf))
       (agent-repl--close-buffer-window buf))))
@@ -258,13 +258,13 @@ leaving the stale window in place."
     (set-window-dedicated-p win nil)
     (if (eq (window-deletable-p win) t)
         (progn
-          (agent-repl--log (agent-repl--ws-current-name)
+          (agent-repl--log (agent-repl--ws-current-log-name)
                             "safe-delete-window: deleting win=%s buf=%s"
                             win (agent-repl--safe-buffer-name (window-buffer win)))
           (delete-window win))
       (let ((fb (or fallback
                     (and (fboundp 'doom-fallback-buffer) (doom-fallback-buffer)))))
-        (agent-repl--log (agent-repl--ws-current-name)
+        (agent-repl--log (agent-repl--ws-current-log-name)
                           "safe-delete-window: win=%s undeletable (deletable-p=%S) — swapping buf=%s to fallback=%s"
                           win (window-deletable-p win)
                           (agent-repl--safe-buffer-name (window-buffer win))
@@ -496,7 +496,7 @@ latest ws, dropping bookkeeping on the intermediate ones).
 
 Logs `persp-names-cache' so cache mutations across persp lifecycle
 events (kill, switch, add) are traceable."
-  (agent-repl--log (agent-repl--ws-current-name) "after-persp-activated: entry cache=%S"
+  (agent-repl--log (agent-repl--ws-current-log-name) "after-persp-activated: entry cache=%S"
                     (or (agent-repl--ws-names-cache) "(unbound)"))
   ;; Suppressed during `agent-repl--eager-open-panels': its transient
   ;; switch-in/build/switch-back would otherwise schedule a deferred
@@ -504,7 +504,7 @@ events (kill, switch, add) are traceable."
   ;; focus has returned to the caller and reclaims the caller's frame with
   ;; the background workspace's panels (the eviction bug `--gui-boot' documents).
   (if agent-repl--eager-open-in-progress
-      (agent-repl--log (agent-repl--ws-current-name)
+      (agent-repl--log (agent-repl--ws-current-log-name)
                         "after-persp-activated: suppressed (eager-open in progress)")
     (let ((ws (agent-repl--ws-current-name)))
       (run-at-time 0 nil #'agent-repl--on-workspace-switch ws))))
@@ -665,7 +665,7 @@ visible — the input panel's live partner is the webview."
                         (or (not is-input)
                             (and (not loading)
                                  (not webview-window))))))
-      (agent-repl--log-verbose (agent-repl--ws-current-name)
+      (agent-repl--log-verbose (agent-repl--ws-current-log-name)
                                 "orphaned-panel-p: name=%s id=%s input=%s partner=%s one-window=%s partner-visible=%s loading=%s webview-visible=%s result=%s"
                                 name id is-input partner one-window
                                 (and partner-window t) (and loading t)
@@ -711,7 +711,7 @@ the sweeper."
   (let* ((orphaned (agent-repl--orphaned-panel-p name))
          (own (and orphaned (agent-repl--own-panel-p name)))
          (result (and orphaned (not own))))
-    (agent-repl--log-verbose (agent-repl--ws-current-name)
+    (agent-repl--log-verbose (agent-repl--ws-current-log-name)
                               "sweepable-panel-p: name=%s orphaned=%s own=%s result=%s"
                               name (and orphaned t) (and own t) (and result t))
     result))
@@ -769,9 +769,9 @@ refresh."
       ;; picker (and sweep the undeletable minibuffer window).  Closing the
       ;; minibuffer changes the window configuration again, re-firing this
       ;; hook to reconcile the settled layout.
-      (agent-repl--log-verbose (agent-repl--ws-current-name)
+      (agent-repl--log-verbose (agent-repl--ws-current-log-name)
                                 "on-window-change: minibuffer active — deferring reconcile")
-    (agent-repl--log-verbose (agent-repl--ws-current-name) "on-window-change")
+    (agent-repl--log-verbose (agent-repl--ws-current-log-name) "on-window-change")
     (agent-repl--sync-panels)
     (agent-repl-window--ensure-layout)))
 
@@ -930,14 +930,14 @@ push-to-back.  Bound to `SPC o c'."
   "Send SIGKILL to PROC if it is still alive."
   (if (process-live-p proc)
       (progn
-        (agent-repl--log (agent-repl--ws-current-name) "sigkill-if-alive: branch=signal proc=%s" proc)
+        (agent-repl--log (agent-repl--ws-current-log-name) "sigkill-if-alive: branch=signal proc=%s" proc)
         (signal-process proc 'SIGKILL))
-    (agent-repl--log-verbose (agent-repl--ws-current-name)
+    (agent-repl--log-verbose (agent-repl--ws-current-log-name)
                               "sigkill-if-alive: branch=already-dead proc=%s" proc)))
 
 (defun agent-repl--schedule-sigkill (proc)
   "Schedule a SIGKILL for PROC after 0.5s if it's still alive."
-  (agent-repl--log (agent-repl--ws-current-name) "schedule-sigkill: scheduling for proc=%s" proc)
+  (agent-repl--log (agent-repl--ws-current-log-name) "schedule-sigkill: scheduling for proc=%s" proc)
   (run-at-time agent-repl-sigkill-delay nil #'agent-repl--sigkill-if-alive proc))
 
 (defun agent-repl--kill-workspace-buffers (ws)

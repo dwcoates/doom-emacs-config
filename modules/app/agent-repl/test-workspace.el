@@ -2351,5 +2351,33 @@ a broken substrate would undo half the split at the glance that matters."
     (should (stringp severed))
     (should-not (equal severed (alist-get :hibernated agent-repl-ws-state-icons)))))
 
+;;;; ---- Tests: log-scoped current-workspace resolution ----
+
+(ert-deftest agent-repl-test-ws-current-log-name-rejects-persp-placeholder ()
+  "Outside any workspace the current perspective owns no log sink."
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "none")))
+      (should-not (agent-repl--ws-current-log-name)))))
+
+(ert-deftest agent-repl-test-ws-current-log-name-returns-registered-workspace ()
+  "Inside a registered workspace the current name is returned unchanged."
+  (agent-repl-test--with-clean-state
+    (let ((project (make-temp-file "agent-repl-current-log-name-" t)))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "live-ws" :project-dir project)
+            (cl-letf (((symbol-function '+workspace-current-name)
+                       (lambda () "live-ws")))
+              (should (equal (agent-repl--ws-current-log-name) "live-ws"))))
+        (delete-directory project t)))))
+
+(ert-deftest agent-repl-test-ws-current-log-name-leaves-behavioral-name-untouched ()
+  "The unscreened persp identity boundary still reports the placeholder.
+The 130 behavioral callers that switch, compare, and resolve directories
+must keep seeing what persp-mode actually says."
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function '+workspace-current-name) (lambda () "none")))
+      (should (equal (agent-repl--ws-current-name) "none")))))
+
 (provide 'test-workspace)
 ;;; test-workspace.el ends here

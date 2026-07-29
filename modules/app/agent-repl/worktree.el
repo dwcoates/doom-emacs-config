@@ -1087,7 +1087,7 @@ in a new workspace, rather than the Doom splash screen lingering in the
 buffer list."
   (when (boundp '+doom-dashboard-buffer-name)
     (when-let ((dash (get-buffer +doom-dashboard-buffer-name)))
-      (agent-repl--log (agent-repl--ws-current-name)
+      (agent-repl--log (agent-repl--ws-current-log-name)
                         "remove-doom-dashboard: removing buffer=%s" (buffer-name dash))
       (ignore-errors (agent-repl--ws-remove-buffer dash)))))
 
