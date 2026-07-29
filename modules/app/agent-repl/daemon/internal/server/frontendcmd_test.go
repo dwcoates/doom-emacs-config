@@ -477,19 +477,24 @@ func TestCommandHandlerDeleteSessionRoutesToSessions(t *testing.T) {
 	}
 }
 
+// newHandlerWithShutdown builds a command handler over a shutdown func that
+// reports the stop-shims mode it was called with.
+func newHandlerWithShutdown(t *testing.T, fired chan bool) *commandHandler {
+	t.Helper()
+	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{},
+		func(stopShims bool) { fired <- stopShims }, nil, nil)
+	if err != nil {
+		t.Fatalf("newCommandHandler: %v", err)
+	}
+	return h
+}
+
 func TestCommandHandlerShutdownRoutesToShutdownFunc(t *testing.T) {
 	// Arrange — a shutdown func that signals when invoked.
-	fired := make(chan struct{}, 1)
-	newHandlerWithShutdown := func(shutdown func()) *commandHandler {
-		h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, shutdown, nil, nil)
-		if err != nil {
-			t.Fatalf("newCommandHandler: %v", err)
-		}
-		return h
-	}
-	h := newHandlerWithShutdown(func() { fired <- struct{}{} })
+	fired := make(chan bool, 1)
+	h := newHandlerWithShutdown(t, fired)
 
-	// Act — the shutdown command routes to the same func POST /shutdown drives.
+	// Act — the shutdown command routes to the same func SIGTERM drives.
 	if err := h.Shutdown(context.Background(), "/w", "r1", &frontendv1.ShutdownCmd{}); err != nil {
 		t.Fatalf("Shutdown: %v", err)
 	}
@@ -497,6 +502,53 @@ func TestCommandHandlerShutdownRoutesToShutdownFunc(t *testing.T) {
 	// Assert — the graceful teardown was requested (async).
 	select {
 	case <-fired:
+	case <-time.After(time.Second):
+		t.Fatal("shutdown command did not invoke the graceful teardown func")
+	}
+}
+
+// AN UNQUALIFIED SHUTDOWN PRESERVES THE SHIMS. This is the default the whole
+// preserve-on-bounce contract rests on, so it is pinned at the command seam
+// rather than left implied by the zero value.
+func TestCommandHandlerShutdownDefaultsToPreservingShims(t *testing.T) {
+	// Arrange.
+	fired := make(chan bool, 1)
+	h := newHandlerWithShutdown(t, fired)
+
+	// Act.
+	if err := h.Shutdown(context.Background(), "/w", "r1", &frontendv1.ShutdownCmd{}); err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+
+	// Assert.
+	select {
+	case stopShims := <-fired:
+		if stopShims {
+			t.Fatal("an unqualified shutdown asked for stop-shims; the default must PRESERVE them")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("shutdown command did not invoke the graceful teardown func")
+	}
+}
+
+// The stop-shims MODE reaches the teardown, which is what a bundle-changing
+// deploy relies on.
+func TestCommandHandlerShutdownCarriesStopShims(t *testing.T) {
+	// Arrange.
+	fired := make(chan bool, 1)
+	h := newHandlerWithShutdown(t, fired)
+
+	// Act.
+	if err := h.Shutdown(context.Background(), "/w", "r1", &frontendv1.ShutdownCmd{StopShims: true}); err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+
+	// Assert.
+	select {
+	case stopShims := <-fired:
+		if !stopShims {
+			t.Fatal("stop_shims=true did not reach the teardown")
+		}
 	case <-time.After(time.Second):
 		t.Fatal("shutdown command did not invoke the graceful teardown func")
 	}

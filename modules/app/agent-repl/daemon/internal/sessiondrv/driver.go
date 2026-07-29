@@ -1288,6 +1288,10 @@ func (m *Manager) bringUp(workspace string) (*driven, error) {
 			delete(m.byWS, workspace)
 			wasCurrent = true
 		}
+		// Read under the SAME lock the eviction took: a manager close is the
+		// difference between "this driver died" and "the daemon is going away",
+		// and the shim-stop decision below turns entirely on which it is.
+		managerClosing := m.closed
 		// The session is gone, so its held prompts can never be delivered.
 		// Empty the queue and PUSH the empty view: a frontend that keeps
 		// rendering chips for a dead session is offering the user controls
@@ -1308,11 +1312,22 @@ func (m *Manager) bringUp(workspace string) (*driven, error) {
 		if wasCurrent {
 			m.noteWiring(workspace, ssm.WiringDormant, "driver_exit")
 		}
+		// A MANAGER CLOSE IS NOT A DEAD DRIVER, and stopping the shim here on
+		// one would silently defeat the daemon's preserve-on-shutdown contract:
+		// the whole point of a preserved shim is that it outlives this process,
+		// redials the daemon socket and parks for the next boot to reattach.
+		// The teardown that closed the manager owns that decision (see
+		// server.ShutdownAll), and it has already acted on it by the time this
+		// runs, so re-deciding it here could only ever contradict it.
+		if wasCurrent && managerClosing {
+			m.logf("sessiondrv: session %s driver exiting on a manager close ws=%q; PRESERVING the shim for the next daemon to reattach",
+				sessionID, workspace)
+		}
 		// A terminal protocol error ends Run while this driver is still current,
 		// without going through Hibernate. That used to orphan the spawned shim
 		// and its stop handle after the byWS eviction above. A non-current Run
 		// exit was initiated by a teardown that already owns StopShim.
-		if wasCurrent {
+		if wasCurrent && !managerClosing {
 			if stopErr := m.cfg.Spawner.StopShim(sessionID); stopErr != nil {
 				m.logf("sessiondrv: session %s unexpected driver-exit shim stop FAILED ws=%q run_err=%v: %v",
 					sessionID, workspace, runErr, stopErr)

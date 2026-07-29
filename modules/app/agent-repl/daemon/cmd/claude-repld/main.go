@@ -290,14 +290,20 @@ func main() {
 	})
 	defer logins.CloseAll()
 
-	// A single graceful-shutdown path serves BOTH SIGTERM and the
-	// POST /shutdown route: Emacs uses the latter to bounce a stale daemon
-	// it adopted from another Emacs (no local process handle to signal). The
-	// closure only closes the channel, so it is safe to hand to the server
-	// before the http.Server exists; sync.Once guards concurrent requests.
-	shutdownReq := make(chan struct{})
+	// A single graceful-shutdown path serves BOTH SIGTERM and the shutdown
+	// FrontendCommand: Emacs uses the latter to bounce a stale daemon it
+	// adopted from another Emacs (no local process handle to signal).
+	//
+	// The request carries ONE decision — whether to stop the session shims on
+	// the way out — so it rides a buffered channel rather than a bare close.
+	// SIGTERM cannot express a mode at all, and it takes the default: PRESERVE.
+	// That is the honest reading of an unqualified "stop this daemon", and it
+	// is what makes an OS-level bounce as cheap as a commanded one.
+	shutdownReq := make(chan bool, 1)
 	var shutdownOnce sync.Once
-	requestShutdown := func() { shutdownOnce.Do(func() { close(shutdownReq) }) }
+	requestShutdown := func(stopShims bool) {
+		shutdownOnce.Do(func() { shutdownReq <- stopShims; close(shutdownReq) })
+	}
 
 	// The SSM (resolved per-workspace state) is opened here and shared by BOTH
 	// the frontend snapshot/merge push loop AND the per-session driver's
@@ -577,15 +583,16 @@ func main() {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 	go func() {
+		stopShims := false
 		select {
 		case sig := <-sigCh:
-			log.Printf("claude-repld: %v received, shutting down sessions", sig)
-		case <-shutdownReq:
-			log.Printf("claude-repld: POST /shutdown received, shutting down sessions")
+			log.Printf("claude-repld: %v received, shutting down (shims preserved)", sig)
+		case stopShims = <-shutdownReq:
+			log.Printf("claude-repld: shutdown command received, shutting down (stop_shims=%v)", stopShims)
 		}
 		ready.ready.Store(false)
 		cancelWorkspaceCreate()
-		srv.ShutdownAll()
+		srv.ShutdownAll(stopShims)
 		// Login terminals are children of THIS process, so a daemon that
 		// exits without killing them strands an orphaned claude TUI on a pty
 		// nobody is reading.
