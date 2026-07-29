@@ -117,6 +117,10 @@ type ShimSpawner struct {
 	// signal delivers a signal to a pid. Injected so the surviving-shim stop
 	// is unit-testable without spawning a real process to kill.
 	signal func(pid int, sig syscall.Signal) error
+	// awaitStopped blocks until sessionID's shim is really gone. Injected so a
+	// unit harness, which has no processes and no locks, is not made to wait
+	// for a condition it can never observe.
+	awaitStopped func(sessionID string) error
 
 	mu    sync.Mutex
 	stops map[string]func() error // session id -> stop the shim WE spawned
@@ -130,8 +134,9 @@ func NewShimSpawner(reg *registry.Registry, connected ConnectedFunc, spawn ShimS
 	}
 	return &ShimSpawner{
 		reg: reg, connected: connected, spawn: spawn, logf: logf,
-		signal: signalPID,
-		stops:  map[string]func() error{},
+		signal:       signalPID,
+		awaitStopped: awaitShimStopped,
+		stops:        map[string]func() error{},
 	}
 }
 
@@ -223,11 +228,13 @@ func (s *ShimSpawner) StopShim(sessionID string, hintPID int32) error {
 		delete(s.stops, sessionID)
 	}
 	s.mu.Unlock()
-	if ok {
+	switch {
+	case ok:
 		s.logf("server: session %s: stopping shim (SIGTERM via our own process handle)", sessionID)
-		return stop()
-	}
-	if hintPID > 0 {
+		if err := stop(); err != nil {
+			return err
+		}
+	case hintPID > 0:
 		s.logf("server: session %s: no daemon-spawned shim; stopping the SURVIVING shim by its announced pid %d (SIGTERM)", sessionID, hintPID)
 		if err := s.signal(int(hintPID), syscall.SIGTERM); err != nil {
 			if errors.Is(err, os.ErrProcessDone) {
@@ -236,10 +243,64 @@ func (s *ShimSpawner) StopShim(sessionID string, hintPID int32) error {
 			}
 			return fmt.Errorf("server: session %s: stopping surviving shim pid %d: %w", sessionID, hintPID, err)
 		}
+	default:
+		s.logf("server: session %s: StopShim no-op (no daemon-spawned shim and no announced pid; already stopped, or never seen)", sessionID)
 		return nil
 	}
-	s.logf("server: session %s: StopShim no-op (no daemon-spawned shim and no announced pid; already stopped, or never seen)", sessionID)
-	return nil
+	// STOPPED MEANS GONE, which is what every caller already assumed and the
+	// signal alone does not deliver.
+	//
+	// A SIGTERM only ASKS. EnsureShim refuses to spawn while the session lock
+	// is held, so a restart that stopped a shim and immediately ensured raced
+	// the kernel releasing that lock and reliably failed — a bounce onto a new
+	// bundle simply never respawned. Returning before the session is actually
+	// free makes this method a lie its own callers are then obliged to work
+	// around.
+	//
+	// The wait is on the CONDITION the spawn is gated by — the session lock,
+	// which the kernel releases when the holder dies, however it dies — not on
+	// a duration chosen to be probably long enough.
+	if s.awaitStopped == nil {
+		return nil
+	}
+	return s.awaitStopped(sessionID)
+}
+
+// stopGrace bounds how long StopShim waits for a signalled shim to actually
+// exit. It is a FAILURE bound, not a delay: the wait ends the instant the
+// session lock is free, and this only decides how long to wait before calling
+// a shim that ignored SIGTERM what it is.
+const stopGrace = 10 * time.Second
+
+// stopPoll is how often the session lock is re-probed while waiting.
+//
+// A POLL, and it is worth saying why rather than pretending otherwise: a
+// kernel flock has no readiness channel to wait on. It is released by process
+// death and the only way to observe that is to try to take it. The alternative
+// — waiting on the child's exit — covers ONLY shims this daemon spawned, and
+// the surviving shim is exactly the case that needs this. So the condition
+// itself is the right one; the sampling is the part the kernel does not offer
+// a better form of.
+const stopPoll = 20 * time.Millisecond
+
+// awaitShimStopped blocks until no process holds sessionID's lock, i.e. until
+// the shim is really gone. An unreadable lock ends the wait with that error
+// rather than a guess: "I could not tell" must never be read as "it is free".
+func awaitShimStopped(sessionID string) error {
+	deadline := time.Now().Add(stopGrace)
+	for {
+		held, err := sessionlock.Held(sessionID)
+		if err != nil {
+			return fmt.Errorf("server: session %s: waiting for its shim to exit: %w", sessionID, err)
+		}
+		if !held {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("server: session %s: its shim still holds the session lock %s after SIGTERM; it is not stopping", sessionID, stopGrace)
+		}
+		time.Sleep(stopPoll)
+	}
 }
 
 // RegistryRegistrar binds the driver's claude_session_id write-through
