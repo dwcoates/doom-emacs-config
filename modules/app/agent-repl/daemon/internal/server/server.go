@@ -1290,7 +1290,7 @@ func SessionViewFromRecordWithModels(logf dlog.Logf, rec registry.Record, pendin
 		// live driver for the workspace. See the field's proto comment — a
 		// frontend that answers "is this workspace already up?" from the durable
 		// fields alone says yes about a workspace a restarted daemon has never
-		// brought up, which is how a dormant workspace stopped bootstrapping on
+		// brought up, which is how an unwired workspace stopped bootstrapping on
 		// a perspective switch.
 		ShimAttached: shimAttached,
 		// The TYPED death (F4), superseding the free-string death_reason

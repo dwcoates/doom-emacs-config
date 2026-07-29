@@ -191,20 +191,20 @@ func TestRestartSessionStopsAndBringsItBack(t *testing.T) {
 	}
 }
 
-// A DORMANT workspace is not an error: "restart" and "start" are the same
+// AN UNWIRED workspace is not an error: "restart" and "start" are the same
 // request when nothing is running.
-func TestRestartSessionBringsUpADormantWorkspace(t *testing.T) {
+func TestRestartSessionBringsUpAnUnwiredWorkspace(t *testing.T) {
 	// Arrange — nothing brought up.
 	m, _, _ := newRefreshRig(t, "sha-1")
 
 	// Act.
 	if err := m.RestartSession(context.Background(), "ws"); err != nil {
-		t.Fatalf("RestartSession on a dormant workspace: %v", err)
+		t.Fatalf("RestartSession on an unwired workspace: %v", err)
 	}
 
 	// Assert.
 	if !m.Live("ws") {
-		t.Fatal("restarting a dormant workspace did not bring it up")
+		t.Fatal("restarting an unwired workspace did not bring it up")
 	}
 }
 

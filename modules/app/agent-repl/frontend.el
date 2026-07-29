@@ -863,7 +863,8 @@ or when the backend simply needs rebuilding under a conversation worth
 keeping.  Use `agent-repl-force-fresh-conversation\=' instead to abandon
 the conversation itself.
 
-A workspace whose session is merely dormant is brought up, because a
+A workspace whose session is merely hibernated or severed is brought up,
+because a
 restart and a start are the same request when nothing is running.  Signals when there
 is no current workspace; a daemon-side failure is surfaced loudly through
 the shared command-ack handler rather than read as success."

@@ -2479,7 +2479,7 @@ other renderer agree on the emoji for a given workspace.
 
 For a disk-only record with no in-memory hash entry returns a neutral
 📁 — a tombstoned or merged workspace still has a hash entry and so
-still renders its (killed / merged / dormant) state glyph."
+still renders its (killed / merged / hibernated) state glyph."
   (let ((ws (plist-get summary :workspace-name)))
     (if (and ws (agent-repl--ws-known-p ws))
         (or (alist-get (agent-repl--ws-render-status ws)
