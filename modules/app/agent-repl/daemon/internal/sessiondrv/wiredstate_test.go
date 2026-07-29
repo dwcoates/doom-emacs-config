@@ -321,6 +321,90 @@ func TestAnUnrotatedHandshakeLeavesTheAxisAlone(t *testing.T) {
 	}
 }
 
+// A LINK LOSS WITHOUT A DRIVER EXIT is the fifth closing edge. The driver lives
+// on across a reconnect, so without this the workspace kept claiming to be fully
+// wired for the whole reconnect.
+func TestALinkLossReportsStarting(t *testing.T) {
+	// Arrange — up and wired.
+	m, applier, _ := newWiredRig(t)
+	if err := m.Ensure("ws"); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	waitForWirings(applier, 1)
+	m.onConnected("ws", "s1", &corev1.ShimHello{})
+
+	// Act — the shim connection drops while the driver lives on.
+	m.onLinkLost("ws", "s1", errors.New("shim connection closed: EOF"))
+
+	// Assert.
+	got := lastWiring(t, applier, "ws")
+	if got.wiring != ssm.WiringStarting {
+		t.Fatalf("wiring = %s, want starting while the reconnect re-runs the gate", got.wiring)
+	}
+	if got.reason != "link_lost" {
+		t.Fatalf("reason = %q, want link_lost", got.reason)
+	}
+}
+
+// The RE-HANDSHAKE closes the gate again, so the axis returns to wired without
+// anything else having to notice the reconnect finished.
+func TestTheReHandshakeRewiresAfterALinkLoss(t *testing.T) {
+	// Arrange — mid-reconnect.
+	m, applier, _ := newWiredRig(t)
+	if err := m.Ensure("ws"); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	waitForWirings(applier, 1)
+	m.onConnected("ws", "s1", &corev1.ShimHello{})
+	m.onLinkLost("ws", "s1", errors.New("shim connection closed: EOF"))
+
+	// Act — the reconnect's own ShimReady lands.
+	m.onConnected("ws", "s1", &corev1.ShimHello{})
+
+	// Assert.
+	if got := lastWiring(t, applier, "ws"); got.wiring != ssm.WiringWired {
+		t.Fatalf("wiring = %s, want wired once the reconnect re-handshaked", got.wiring)
+	}
+}
+
+// A link loss on a SUPERSEDED session leaves the axis alone: a replacement now
+// drives the workspace, and re-spinning it would be a lie about a live session.
+func TestALinkLossOnASupersededSessionLeavesTheAxisAlone(t *testing.T) {
+	// Arrange — the workspace is driven by s1.
+	m, applier, _ := newWiredRig(t)
+	if err := m.Ensure("ws"); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	waitForWirings(applier, 1)
+	m.onConnected("ws", "s1", &corev1.ShimHello{})
+	before := len(wiringsFor(applier, "ws"))
+
+	// Act — some OTHER record's link dies.
+	m.onLinkLost("ws", "s_superseded", errors.New("shim connection closed: EOF"))
+
+	// Assert.
+	if after := len(wiringsFor(applier, "ws")); after != before {
+		t.Fatalf("edges = %d, want %d — a superseded link loss must not touch the live driver's axis", after, before)
+	}
+}
+
+// The edge is only reachable if the driver actually BINDS it on the client it
+// builds, which is the half a direct onLinkLost call can never prove.
+func TestBringUpBindsTheLinkLossCallback(t *testing.T) {
+	// Arrange.
+	m, _, lastClient := newWiredRig(t)
+
+	// Act.
+	if _, err := m.bringUp("ws"); err != nil {
+		t.Fatalf("bringUp: %v", err)
+	}
+
+	// Assert.
+	if lastClient().cfg.OnLinkLost == nil {
+		t.Fatal("the shimclient was built with no OnLinkLost; the fifth wired edge can never fire")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Failure surfacing
 // ---------------------------------------------------------------------------

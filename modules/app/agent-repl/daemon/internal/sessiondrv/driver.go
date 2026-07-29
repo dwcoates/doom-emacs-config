@@ -1245,6 +1245,7 @@ func (m *Manager) bringUp(workspace string) (*driven, error) {
 		Permissions:     ph,
 		OnHandshake:     func(hello *corev1.ShimHello) { m.onHandshake(workspace, sessionID, hello) },
 		OnConnected:     func(hello *corev1.ShimHello) { m.onConnected(workspace, sessionID, hello) },
+		OnLinkLost:      func(cause error) { m.onLinkLost(workspace, sessionID, cause) },
 		Logf:            m.logf,
 	})
 	d.client = client

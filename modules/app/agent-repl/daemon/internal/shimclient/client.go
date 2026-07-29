@@ -192,6 +192,21 @@ type Config struct {
 	// (so stitch sees turn_in_flight for mid-turn reattach). Optional.
 	OnConnected func(hello *corev1.ShimHello)
 
+	// OnLinkLost fires when a connection this client was DRIVING drops while
+	// the client itself lives on — the reconnect loop is about to re-run the
+	// whole bring-up gate. Optional. It is the exact inverse edge of
+	// OnConnected, and it exists because those two were not symmetric: the
+	// gate CLOSING was reported and the gate RE-OPENING was not, so a
+	// workspace whose shim link died without its driver exiting kept claiming
+	// to be fully wired for as long as the reconnect took.
+	//
+	// It does NOT fire for a teardown-initiated close (a cancelled run
+	// context: hibernation, manager close, driver stop). Those are not a link
+	// LOSS — the driver is going away, and its own exit is the honest edge for
+	// them. Restricting the callback to a live context is what keeps the two
+	// reports from racing each other over one teardown.
+	OnLinkLost func(cause error)
+
 	// Logf is the daemon's printf-style logging closure. Nil discards.
 	Logf dlog.Logf
 
@@ -514,15 +529,26 @@ func (c *Client) runOnce(ctx context.Context) (retErr error) {
 	cancel()
 	wg.Wait()
 	c.mu.Lock()
+	lost := false
 	if c.active == ac {
 		c.active = nil
 		// Re-arm the latch: a later send must wait for the RECONNECT — and for
 		// the whole gate it re-runs — rather than sail through on a latch left
 		// closed by the dead connection.
+		lost = c.wired
 		c.wired = false
 		c.markNotReadyLocked()
 	}
 	c.mu.Unlock()
+	// The gate that CLOSED has re-opened. Reported only when it had actually
+	// closed (`wired`) — a connection that died mid-gate never earned the
+	// wiring it would now be retracting — and only when the run context is
+	// still live, so a teardown's own close is left to the driver exit that
+	// follows it. See Config.OnLinkLost.
+	if lost && ctx.Err() == nil && c.cfg.OnLinkLost != nil {
+		c.logf("shim link LOST while the driver lives; the reconnect loop will re-run the bring-up gate: %v", retErr)
+		c.cfg.OnLinkLost(retErr)
+	}
 	ac.failPending(fmt.Errorf("shim connection closed: %w", retErr))
 	// An in-flight replay whose shim went away will never be completed by it.
 	// Telling the caller beats leaving it blocked on a ReplayDone that cannot
