@@ -111,6 +111,7 @@ function client(): Client {
             contextWindow: "0",
             permissionMode: "default",
             shimAttached: true,
+            modelOptions: [],
             claudeSessionId,
             cwd: "/ws",
             configDir: "",

@@ -24,6 +24,7 @@ const SESSION_VIEW = {
   totalTokens: "1200",
   totalCostUsd: 0.5,
   contextWindow: "200000",
+  modelOptions: [],
 };
 const TYPING = { workspace: "ws", sessionId: "s1", delta: { uuid: "u1", blockIndex: 0, text: "hi" } };
 const TASK_CATALOG = {
@@ -356,8 +357,14 @@ describe("decodeFrontendFrame — required-field validation is loud", () => {
   });
 
   it("rejects a SessionView without a session id", () => {
-    expect(() => decode({ sessionView: { workspace: "ws", model: "claude" } })).toThrow(
+    expect(() => decode({ sessionView: { workspace: "ws", model: "claude", modelOptions: [] } })).toThrow(
       /SessionView missing required `session_id`/,
+    );
+  });
+
+  it("rejects a SessionView that omits the model catalog", () => {
+    expect(() => decode({ sessionView: { workspace: "ws", sessionId: "s1", model: "claude" } })).toThrow(
+      /SessionView missing required `modelOptions`/,
     );
   });
 
@@ -617,7 +624,7 @@ describe("UNSUPPORTED_SHAPES registry", () => {
 describe("SessionView.backfill decoding (F2)", () => {
   /** A SessionView frame body carrying an optional backfill value. */
   function sv(over: Record<string, unknown> = {}): string {
-    return JSON.stringify({ sessionView: { sessionId: "s1", workspace: "/w", ...over } });
+    return JSON.stringify({ sessionView: { sessionId: "s1", workspace: "/w", modelOptions: [], ...over } });
   }
 
   function backfillOf(json: string) {
@@ -655,7 +662,7 @@ describe("SessionView.backfill decoding (F2)", () => {
 describe("SessionView.death decoding (F4)", () => {
   /** A SessionView frame body, optionally carrying a classified death. */
   function sv(over: Record<string, unknown> = {}): string {
-    return JSON.stringify({ sessionView: { sessionId: "s1", workspace: "/w", ...over } });
+    return JSON.stringify({ sessionView: { sessionId: "s1", workspace: "/w", modelOptions: [], ...over } });
   }
 
   function deathOf(json: string) {

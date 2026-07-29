@@ -674,27 +674,29 @@ func (m *Manager) SubmitPrompt(ctx context.Context, workspace, requestID, text, 
 // SetModel forwards a deliberate model request to the live shim, then persists
 // the shim-confirmed selection so the next respawn preserves the choice.
 func (m *Manager) SetModel(ctx context.Context, workspace, model string) (string, error) {
-	if model == "" {
+	requested := registry.NormalizeModel(model)
+	if requested == "" {
 		return "", fmt.Errorf("sessiondrv: set model for workspace %q needs a non-empty model id", workspace)
 	}
 	d, err := m.ensure(ctx, workspace)
 	if err != nil {
 		return "", err
 	}
-	selected, err := d.client.SetModel(ctx, model)
+	selected, err := d.client.SetModel(ctx, requested)
+	selected = registry.NormalizeModel(selected)
 	if err != nil {
 		if selected != "" {
 			m.persistObservedModel(d.sessionID, selected)
-			m.logf("sessiondrv: model request REJECTED session=%s ws=%q requested=%q shim_selected=%q: %v", d.sessionID, workspace, model, selected, err)
+			m.logf("sessiondrv: model request REJECTED session=%s ws=%q requested=%q shim_selected=%q: %v", d.sessionID, workspace, requested, selected, err)
 			return selected, err
 		}
-		m.logf("sessiondrv: model request FAILED session=%s ws=%q requested=%q without a shim-selected model: %v", d.sessionID, workspace, model, err)
+		m.logf("sessiondrv: model request FAILED session=%s ws=%q requested=%q without a shim-selected model: %v", d.sessionID, workspace, requested, err)
 		return "", err
 	}
 	if selected == "" {
 		return "", fmt.Errorf("sessiondrv: shim acknowledged model request for %q without a selected model", workspace)
 	}
-	m.logf("sessiondrv: model request CONFIRMED session=%s ws=%q requested=%q selected=%q", d.sessionID, workspace, model, selected)
+	m.logf("sessiondrv: model request CONFIRMED session=%s ws=%q requested=%q selected=%q", d.sessionID, workspace, requested, selected)
 	m.persistObservedModel(d.sessionID, selected)
 	return selected, nil
 }

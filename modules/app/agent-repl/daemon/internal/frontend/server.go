@@ -3,6 +3,7 @@ package frontend
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -633,7 +634,41 @@ func marshalFrame(frame *frontendv1.FrontendFrame) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("frontend: protojson marshal: %w", err)
 	}
+	if frame.GetSessionView() == nil && len(frame.GetSnapshot().GetSessions()) == 0 {
+		return b, nil
+	}
+	var wire map[string]any
+	if err := json.Unmarshal(b, &wire); err != nil {
+		return nil, fmt.Errorf("frontend: decode SessionView wire shape: %w", err)
+	}
+	if sessionView, ok := wire["sessionView"].(map[string]any); ok {
+		sessionView["modelOptions"] = sessionViewModelOptions(sessionView)
+	}
+	if snapshot, ok := wire["snapshot"].(map[string]any); ok {
+		if sessions, ok := snapshot["sessions"].([]any); ok {
+			for index, raw := range sessions {
+				sessionView, ok := raw.(map[string]any)
+				if !ok {
+					return nil, fmt.Errorf("frontend: snapshot session index=%d has invalid wire shape", index)
+				}
+				sessionView["modelOptions"] = sessionViewModelOptions(sessionView)
+			}
+		}
+	}
+	b, err = json.Marshal(wire)
+	if err != nil {
+		return nil, fmt.Errorf("frontend: encode SessionView wire shape: %w", err)
+	}
 	return b, nil
+}
+
+// sessionViewModelOptions preserves an SDK-published catalog and makes a valid
+// empty catalog explicit. An absent field is forbidden by the web protocol.
+func sessionViewModelOptions(sessionView map[string]any) any {
+	if options, ok := sessionView["modelOptions"]; ok {
+		return options
+	}
+	return []any{}
 }
 
 // ---------------------------------------------------------------------------

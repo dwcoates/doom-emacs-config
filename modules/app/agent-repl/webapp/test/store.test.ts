@@ -230,14 +230,15 @@ describe("ingest session-view", () => {
     expect(store.state.model).toBe("opus");
   });
 
-  it("keeps the live model when the view carries none", () => {
+  it("clears a prior model when a new session's authoritative view carries none", () => {
     // Arrange
     const store = new ConversationStore();
-    store.ingest([sessionEffect({ model: "opus" })]);
+    store.ingest([sessionEffect({ sessionId: "s1", model: "opus" })]);
     // Act
-    store.ingest([sessionEffect({ model: "" })]);
+    store.ingest([sessionEffect({ sessionId: "s2", model: "" })]);
     // Assert
-    expect(store.state.model).toBe("opus");
+    expect(store.state.sessionId).toBe("s2");
+    expect(store.state.model).toBe("");
   });
 
   it("adopts the permission mode", () => {

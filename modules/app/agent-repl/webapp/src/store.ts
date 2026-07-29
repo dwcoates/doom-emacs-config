@@ -726,6 +726,19 @@ export class ConversationStore {
     return { changed };
   }
 
+  /**
+   * Apply the explicit SetModel receipt. The receipt is shim-confirmed state,
+   * while a later SessionView remains the durable snapshot authority.
+   */
+  applyAcknowledgedModel(model: string): boolean {
+    if (model === "" || model.trim() === "<synthetic>") {
+      throw new Error("store: SetModel receipt omitted a real selected model");
+    }
+    if (this.state.model === model) return false;
+    this.state.model = model;
+    return true;
+  }
+
   // --- effect appliers ------------------------------------------------------
 
   private applyWorkspaceState(ws: WorkspaceStatusInput): boolean {
@@ -766,7 +779,10 @@ export class ConversationStore {
   private applySessionView(sv: SessionViewInput): boolean {
     const s = this.state;
     if (sv.sessionId !== "") s.sessionId = sv.sessionId;
-    if (sv.model !== "") s.model = sv.model;
+    // Empty is an authoritative "no model override" state, not a missing
+    // field. Retaining a prior selection here would make the browser lie
+    // after a session rebind or daemon-side clear.
+    s.model = sv.model;
     // The model list is daemon/shim-published capability. Replacing it only
     // from SessionView prevents a local dropdown interaction from inventing
     // selectable models or changing authority.
