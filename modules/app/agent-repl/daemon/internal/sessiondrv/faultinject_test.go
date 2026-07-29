@@ -73,7 +73,7 @@ func newFaultRig(t *testing.T) *faultRig {
 
 	rig := &faultRig{t: t, mgr: mgr, push: &fakePusher{}, ws: faultWorkspace, sid: faultSessionID}
 	rig.cons = newConsumer(faultWorkspace, faultSessionID, rig.push, mgr, nil, newFakeClearCompactStore(), t.Logf,
-		nil, nil, nil,
+		nil, nil, nil, nil,
 		func() { rig.death = append(rig.death, errclass.DeathReasonShimDied) })
 	return rig
 }

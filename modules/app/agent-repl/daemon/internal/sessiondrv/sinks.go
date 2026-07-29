@@ -202,6 +202,11 @@ type consumer struct {
 	// onBackfill reports a never-blue backfill transition (F2), once per
 	// distinct state. The driver persists it and re-pushes the SessionView.
 	onBackfill func(state string)
+	// onSystemInit reports the session metadata the SDK announces at init and
+	// RE-ANNOUNCES on every submit, which is what makes it a live signal rather
+	// than a start-of-life one. The driver persists the model off it, so a
+	// respawn stops replaying whatever model was requested at create.
+	onSystemInit func(*datav1.SystemInit)
 	// onSessionEnded reports that the session's shim reported it is over (F4).
 	// Nothing marked a record terminal on shim death before this, so
 	// RENDER_STATE_DEAD and death_reason sat on two disconnected axes: the
@@ -244,7 +249,7 @@ type consumer struct {
 	backfill string
 }
 
-func newConsumer(workspace, sessionID string, push Pusher, applier StateApplier, prog ProgressResolver, floors ClearCompactStore, logf func(string, ...any), onSessionStarted func(*corev1.SessionStarted), onTurn func(active bool), onBackfill func(state string), onSessionEnded func()) *consumer {
+func newConsumer(workspace, sessionID string, push Pusher, applier StateApplier, prog ProgressResolver, floors ClearCompactStore, logf func(string, ...any), onSessionStarted func(*corev1.SessionStarted), onTurn func(active bool), onBackfill func(state string), onSystemInit func(*datav1.SystemInit), onSessionEnded func()) *consumer {
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
@@ -263,6 +268,7 @@ func newConsumer(workspace, sessionID string, push Pusher, applier StateApplier,
 		onSessionStarted: onSessionStarted,
 		onTurn:           onTurn,
 		onBackfill:       onBackfill,
+		onSystemInit:     onSystemInit,
 		onSessionEnded:   onSessionEnded,
 		skills:           newSkillCorrelator(),
 	}
@@ -546,6 +552,13 @@ func (c *consumer) Consume(ev *corev1.Event) {
 			c.mu.Lock()
 			c.systemInit = si
 			c.mu.Unlock()
+			// THE LIVE SESSION METADATA, handed to the driver so it can be
+			// persisted. The SDK re-emits init on every submit, so this is the
+			// only place the daemon learns that a running session's model
+			// changed out from under the model it was spawned with.
+			if c.onSystemInit != nil {
+				c.onSystemInit(si)
+			}
 			// The session's retained SystemInit just became available (attach or a
 			// fresh init): push it as a SessionInitView so frontends can source
 			// their slash-command/tools/model menus from it (S9), replacing the

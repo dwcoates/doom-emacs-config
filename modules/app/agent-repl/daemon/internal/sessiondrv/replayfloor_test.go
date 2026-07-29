@@ -118,7 +118,7 @@ func TestASeqlessClearIsLoudRatherThanSilentlyForgotten(t *testing.T) {
 	// never "nothing happened".
 	var logged []string
 	c := newConsumer("ws", "s1", &fakePusher{}, &fakeApplier{}, nil, newFakeClearCompactStore(),
-		func(f string, a ...any) { logged = append(logged, fmt.Sprintf(f, a...)) }, nil, nil, nil, nil)
+		func(f string, a ...any) { logged = append(logged, fmt.Sprintf(f, a...)) }, nil, nil, nil, nil, nil)
 
 	// Act.
 	c.Consume(clearEvent(0, "u-clear"))

@@ -94,6 +94,8 @@ type fakeRegistrar struct {
 	adopted map[string]string
 	// adoptions records one entry per AdoptVendorSessionID call.
 	adoptions []string
+	// observedModels records one entry per SessionModelObserved call.
+	observedModels []string
 }
 
 // ClaudeSessionIDChanged mirrors the registry adapter, ADOPT LATE gate
@@ -153,6 +155,14 @@ func (f *fakeRegistrar) BackfillStateChanged(sessionID, state string) {
 }
 
 // SessionDied records the terminal write a shim death produces (F4).
+// SessionModelObserved records the models a live session reported, so a test
+// can assert the record follows the session rather than the create request.
+func (f *fakeRegistrar) SessionModelObserved(sessionID, model string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.observedModels = append(f.observedModels, model)
+}
+
 func (f *fakeRegistrar) SessionDied(sessionID, reason string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
