@@ -47,6 +47,9 @@ type AgentShimConfig struct {
 	// unwired Health makes every create a loud nack rather than an unprovable
 	// ok (see createestablish.go).
 	Health SessionHealthRouter
+	// Restarts hard-restarts one workspace's session (the restartSession
+	// command). Nil makes that command a loud failing ack.
+	Restarts SessionRestarter
 	// EstablishTimeout bounds one createSession establishment round. Zero takes
 	// the package default; only a harness sets it.
 	EstablishTimeout time.Duration
@@ -220,6 +223,7 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 		cfg.Queues, logf,
 		CommandHandlerConfig{
 			WorkspaceCreation: cfg.WorkspaceCreation,
+			Restarts:          cfg.Restarts,
 			Health:            HealthConfig{Router: cfg.Health, Daemon: cfg.DaemonHealth},
 			// The gate reads each fact from the authority that owns it: the
 			// driver observes the turn boundary, and the progress resolver

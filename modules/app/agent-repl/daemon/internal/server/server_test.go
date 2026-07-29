@@ -56,7 +56,7 @@ func (f *fakeSpawner) EnsureShim(_ context.Context, sessionID string) error {
 	return nil
 }
 
-func (f *fakeSpawner) StopShim(sessionID string) error {
+func (f *fakeSpawner) StopShim(sessionID string, _ int32) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.stopped = append(f.stopped, sessionID)

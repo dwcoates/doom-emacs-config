@@ -391,6 +391,34 @@ message ShimHello {
   // would resume from a high-water mark belonging to a seq space that no
   // longer exists and read the new space's seq=1 as a regression.
   string vendor_session_id = 6;
+
+  // The shim process's OWN pid.
+  //
+  // WHY THE DAEMON NEEDS IT. A shim outlives its daemon, so a restarted
+  // daemon is talking to processes it never spawned and holds no process
+  // handle for. `StopShim` is a no-op for those, which meant the daemon
+  // could not stop a surviving shim at all — not to bounce a stale one onto
+  // a new build, and not to honor an explicit session restart.
+  //
+  // Killing by pid is normally a PID-REUSE hazard. It is not one here,
+  // because the daemon only ever uses this while the CONNECTION that carried
+  // it is live: a live connection is proof the process on the other end is
+  // the process that opened it. The pid is never persisted and never used
+  // after the connection ends.
+  int32 pid = 7;
+  // The BUILD IDENTITY of the bundle this shim is running: the git revision
+  // its `dist/main.js` was built from, injected at build time and matching
+  // the `dist/.built-sha` stamp the same build writes.
+  //
+  // A survivor from before a deploy runs the previous bundle's code forever —
+  // it has no idea a deploy happened, and the daemon had no way to tell. The
+  // daemon compares this against the CURRENT stamp and gracefully bounces a
+  // mismatched shim onto the new build.
+  //
+  // Empty means a bundle built before this field existed, or a build with no
+  // resolvable revision. Neither is a bounce: an unknown identity is not a
+  // mismatch, and treating it as one is how a refresh becomes a loop.
+  string build_sha = 8;
 }
 
 message DaemonHello {

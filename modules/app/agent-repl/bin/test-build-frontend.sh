@@ -674,6 +674,60 @@ t_stale_empty_source_set
 t_services_fresh_then_shared_dependency_stales_both
 t_services_missing_shared_source_fails_loudly
 
+# --- the shim bundle carries the SAME revision its stamp records ------------
+# The daemon's stale-shim refresh compares the two, so a build that baked one
+# value and stamped another would bounce healthy shims forever.
+t_shim_bundle_and_stamp_share_one_revision() {
+    local root sha baked stamped; root="$(mktemp -d)"
+    make_tree "$root"; make_stubs "$root/stubs"
+    # An npm stub that records the revision the build handed the bundler.
+    cat > "$root/stubs/npm" <<'EOF'
+#!/usr/bin/env bash
+echo "npm $*" >> "$STUB_LOG"
+case "${1:-}" in
+    ci|install) mkdir -p node_modules; echo installed > node_modules/.stamp ;;
+esac
+case "$PWD" in
+    *shim*)   mkdir -p dist; printf '%s' "${SHIM_BUILD_SHA:-unset}" > dist/main.js ;;
+    *webapp*) mkdir -p dist; echo built > dist/index.html ;;
+esac
+exit 0
+EOF
+    chmod +x "$root/stubs/npm"
+    git_tree "$root"
+    sha="$(git -C "$root" rev-parse HEAD)"
+    run_script "$root" shim >/dev/null
+    baked="$(cat "$root/agent-shim/claude/shim/dist/main.js" 2>/dev/null || echo MISSING)"
+    stamped="$(cat "$root/agent-shim/claude/shim/dist/.built-sha" 2>/dev/null || echo MISSING)"
+    if [ "$baked" = "$sha" ] && [ "$stamped" = "$sha" ]; then
+        pass "shim: the bundle is baked with the same revision the stamp records"
+    else
+        fail "shim: the bundle is baked with the same revision the stamp records" \
+             "want=$sha baked=$baked stamped=$stamped"
+    fi
+    rm -rf "$root"
+}
+t_shim_bundle_and_stamp_share_one_revision
+
+# --- editing build.mjs stales the shim --------------------------------------
+# build.mjs is the build DEFINITION — it is what injects the build identity —
+# so a change to it must rebuild the bundle even though it lives outside src/.
+t_build_mjs_stales_the_shim() {
+    local root; root="$(mktemp -d)"
+    make_tree "$root"; make_stubs "$root/stubs"; make_fresh_artifacts "$root"
+    : > "$root/stub.log"
+    sleep 1
+    touch "$root/agent-shim/claude/shim/build.mjs"
+    run_script "$root" shim >/dev/null
+    if grep -q "npm run build" "$root/stub.log"; then
+        pass "shim: a build.mjs edit stales the bundle"
+    else
+        fail "shim: a build.mjs edit stales the bundle" "no rebuild was triggered"
+    fi
+    rm -rf "$root"
+}
+t_build_mjs_stales_the_shim
+
 echo "-----"
 echo "passed: $PASS  failed: $FAIL"
 [ "$FAIL" -eq 0 ]

@@ -37,6 +37,7 @@ import {
 } from "./framing.js";
 import type { Any } from "./framing.js";
 import { shimLog } from "./log.js";
+import { shimBuildSha } from "../build-identity.js";
 import {
   Ack,
   AckSchema,
@@ -368,6 +369,14 @@ export class SessionServer {
       // and the whole point of a rotation bounce is that the NEXT hello
       // announces the NEW identity.
       vendorSessionId: this.opts.vendorSessionId ? this.opts.vendorSessionId() : "",
+      // OUR OWN pid, so a daemon that never spawned this process can still
+      // stop it (an explicit session restart, or a bounce onto a new build).
+      // Trustworthy precisely because it arrives on the connection: a live
+      // connection is proof the process that opened it is still that process.
+      pid: process.pid,
+      // The bundle this shim is running. The daemon compares it against the
+      // current build stamp and bounces a superseded shim onto the new code.
+      buildSha: shimBuildSha(),
     }));
     shimLog(COMPONENT, { session: this.opts.sessionId },
       `bring-up gate OPENED: connected to daemon at ${this.opts.socketPath}; ShimHello sent`);

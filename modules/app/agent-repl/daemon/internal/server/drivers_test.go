@@ -2,6 +2,10 @@ package server
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"strings"
+	"syscall"
 	"testing"
 
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
@@ -211,6 +215,9 @@ func (nopHandler) DeleteSession(context.Context, string, string, *frontendv1.Del
 func (nopHandler) Shutdown(context.Context, string, string, *frontendv1.ShutdownCmd) error {
 	return nil
 }
+func (nopHandler) RestartSession(context.Context, string, string, *frontendv1.RestartSessionCmd) error {
+	return nil
+}
 func (nopHandler) ClientLog(context.Context, string, string, *frontendv1.ClientLogCmd) error {
 	return nil
 }
@@ -322,5 +329,94 @@ func TestSessionDiedOnAnUnknownSessionIsLoud(t *testing.T) {
 	// Assert.
 	if len(logged) == 0 {
 		t.Fatal("a death write for an unknown session passed SILENTLY")
+	}
+}
+
+// THE SURVIVING SHIM'S ONLY STOP HANDLE.
+//
+// StopShim was a permanent no-op for a shim this daemon never spawned — the
+// survivor of a previous daemon — which is exactly the shim a stale-build
+// bounce or an explicit restart needs to reach. The pid it announced on its
+// ShimHello closes that, and it is safe here (rather than a pid-reuse hazard)
+// because the caller only holds one while the connection that carried it lives.
+
+func TestStopShimPrefersItsOwnProcessHandle(t *testing.T) {
+	// Arrange — a shim THIS spawner launched, plus an announced pid.
+	stopped := false
+	var signalled []int
+	s := NewShimSpawner(nil, nil, nil, nil)
+	s.stops["s1"] = func() error { stopped = true; return nil }
+	s.signal = func(pid int, _ syscall.Signal) error { signalled = append(signalled, pid); return nil }
+
+	// Act.
+	if err := s.StopShim("s1", 4242); err != nil {
+		t.Fatalf("StopShim: %v", err)
+	}
+
+	// Assert — the exact handle wins; the pid is not consulted at all.
+	if !stopped {
+		t.Fatal("the daemon's own process handle was not used")
+	}
+	if len(signalled) != 0 {
+		t.Fatalf("signalled %v; the pid must only be used when there is no handle", signalled)
+	}
+}
+
+func TestStopShimSignalsASurvivingShimByItsAnnouncedPid(t *testing.T) {
+	// Arrange — no handle (a shim that outlived a previous daemon).
+	var signalled []int
+	s := NewShimSpawner(nil, nil, nil, nil)
+	s.signal = func(pid int, sig syscall.Signal) error {
+		if sig != syscall.SIGTERM {
+			t.Errorf("signal = %v, want SIGTERM (a clean stop)", sig)
+		}
+		signalled = append(signalled, pid)
+		return nil
+	}
+
+	// Act.
+	if err := s.StopShim("s1", 4242); err != nil {
+		t.Fatalf("StopShim: %v", err)
+	}
+
+	// Assert.
+	if len(signalled) != 1 || signalled[0] != 4242 {
+		t.Fatalf("signalled = %v, want exactly the announced pid 4242", signalled)
+	}
+}
+
+func TestStopShimWithNeitherHandleNorPidIsALoggedNoOp(t *testing.T) {
+	// Arrange.
+	var lines []string
+	s := NewShimSpawner(nil, nil, nil, func(f string, a ...any) { lines = append(lines, fmt.Sprintf(f, a...)) })
+	s.signal = func(int, syscall.Signal) error { t.Fatal("nothing should be signalled"); return nil }
+
+	// Act.
+	if err := s.StopShim("s1", 0); err != nil {
+		t.Fatalf("StopShim with nothing to stop must not fail: %v", err)
+	}
+
+	// Assert — silence here would hide a shim nobody can reach.
+	var said bool
+	for _, l := range lines {
+		if strings.Contains(l, "StopShim no-op") {
+			said = true
+		}
+	}
+	if !said {
+		t.Fatalf("the no-op was not logged; lines: %v", lines)
+	}
+}
+
+// A pid whose process has already exited is a stop that ALREADY HAPPENED, not a
+// failure — a restart must not abort because the thing it wanted gone is gone.
+func TestStopShimTreatsAnAlreadyExitedPidAsStopped(t *testing.T) {
+	// Arrange.
+	s := NewShimSpawner(nil, nil, nil, nil)
+	s.signal = func(int, syscall.Signal) error { return os.ErrProcessDone }
+
+	// Act / Assert.
+	if err := s.StopShim("s1", 4242); err != nil {
+		t.Fatalf("an already-exited shim reported a stop failure: %v", err)
 	}
 }

@@ -2028,3 +2028,45 @@ do live; `message' is silenced but captured in `echoed'."
   (agent-repl-test--with-ws "doom" '(:frontend-session-id "s1")
     ;; Act / Assert
     (should-error (agent-repl--frontend-ws-command-key "doom"))))
+
+;;;; ---- SPC o C-c: the HARD SESSION RESTART -------------------------------
+;;
+;; A restart keeps the conversation and replaces only the process serving it.
+;; The daemon does the work; this side only has to ask, key the request by the
+;; cwd the daemon routes on, and surface a rejection loudly -- a restart that
+;; failed must never read as a session that came back.
+
+(ert-deftest agent-repl-test-frontend-restart-session-sends-the-command ()
+  "The restart sends `restartSession' keyed by the workspace's cwd."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w" :frontend-session-id "s_1")
+    (agent-repl-test--with-uds
+      ;; Act
+      (agent-repl--frontend-restart-session "ws1")
+      ;; Assert — the daemon routes by cwd, never the persp name.
+      (pcase-let ((`(,field ,payload ,ws) (car uds-commands)))
+        (should (equal field "restartSession"))
+        (should (null payload))
+        (should (equal ws "/w"))))))
+
+(ert-deftest agent-repl-test-frontend-restart-session-is-a-known-command ()
+  "`restartSession' is in the sendable command vocabulary.
+An arm missing from the allow-list fails loudly at the send rather than
+reaching the daemon, so this is the guard that the wiring exists at all."
+  (should (member "restartSession" agent-repl--uds-known-command-fields)))
+
+(ert-deftest agent-repl-test-frontend-restart-session-surfaces-a-rejection ()
+  "A REJECTED restart is logged, never read as a session that came back."
+  ;; Arrange
+  (let (logged)
+    (cl-letf (((symbol-function 'agent-repl--uds-send-command) (lambda (&rest _) "req-1"))
+              ((symbol-function 'agent-repl--uds-track-command)
+               (lambda (_req _field _ws &optional on-failure &rest _)
+                 (when on-failure (funcall on-failure "no session to restart"))))
+              ((symbol-function 'agent-repl--log)
+               (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+      (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+        ;; Act
+        (agent-repl--frontend-restart-session "ws1")
+        ;; Assert
+        (should (cl-some (lambda (l) (string-match-p "REJECTED" l)) logged))))))

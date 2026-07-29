@@ -2036,8 +2036,35 @@ type ShimHello struct {
 	// would resume from a high-water mark belonging to a seq space that no
 	// longer exists and read the new space's seq=1 as a regression.
 	VendorSessionId string `protobuf:"bytes,6,opt,name=vendor_session_id,json=vendorSessionId,proto3" json:"vendor_session_id,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// The shim process's OWN pid.
+	//
+	// WHY THE DAEMON NEEDS IT. A shim outlives its daemon, so a restarted
+	// daemon is talking to processes it never spawned and holds no process
+	// handle for. `StopShim` is a no-op for those, which meant the daemon
+	// could not stop a surviving shim at all — not to bounce a stale one onto
+	// a new build, and not to honor an explicit session restart.
+	//
+	// Killing by pid is normally a PID-REUSE hazard. It is not one here,
+	// because the daemon only ever uses this while the CONNECTION that carried
+	// it is live: a live connection is proof the process on the other end is
+	// the process that opened it. The pid is never persisted and never used
+	// after the connection ends.
+	Pid int32 `protobuf:"varint,7,opt,name=pid,proto3" json:"pid,omitempty"`
+	// The BUILD IDENTITY of the bundle this shim is running: the git revision
+	// its `dist/main.js` was built from, injected at build time and matching
+	// the `dist/.built-sha` stamp the same build writes.
+	//
+	// A survivor from before a deploy runs the previous bundle's code forever —
+	// it has no idea a deploy happened, and the daemon had no way to tell. The
+	// daemon compares this against the CURRENT stamp and gracefully bounces a
+	// mismatched shim onto the new build.
+	//
+	// Empty means a bundle built before this field existed, or a build with no
+	// resolvable revision. Neither is a bounce: an unknown identity is not a
+	// mismatch, and treating it as one is how a refresh becomes a loop.
+	BuildSha      string `protobuf:"bytes,8,opt,name=build_sha,json=buildSha,proto3" json:"build_sha,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ShimHello) Reset() {
@@ -2108,6 +2135,20 @@ func (x *ShimHello) GetTurnInFlight() bool {
 func (x *ShimHello) GetVendorSessionId() string {
 	if x != nil {
 		return x.VendorSessionId
+	}
+	return ""
+}
+
+func (x *ShimHello) GetPid() int32 {
+	if x != nil {
+		return x.Pid
+	}
+	return 0
+}
+
+func (x *ShimHello) GetBuildSha() string {
+	if x != nil {
+		return x.BuildSha
 	}
 	return ""
 }
@@ -3664,7 +3705,7 @@ const file_agentshim_core_v1_core_proto_rawDesc = "" +
 	"\tcomponent\x18\x01 \x01(\tR\tcomponent\x12\x16\n" +
 	"\x06reason\x18\x02 \x01(\tR\x06reason\x12#\n" +
 	"\rdropped_count\x18\x03 \x01(\x04R\fdroppedCount\x12\x1c\n" +
-	"\trecovered\x18\x04 \x01(\bR\trecovered\"\xe2\x01\n" +
+	"\trecovered\x18\x04 \x01(\bR\trecovered\"\x91\x02\n" +
 	"\tShimHello\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x16\n" +
@@ -3672,7 +3713,9 @@ const file_agentshim_core_v1_core_proto_rawDesc = "" +
 	"\fshim_version\x18\x03 \x01(\tR\vshimVersion\x12)\n" +
 	"\x10protocol_version\x18\x04 \x01(\tR\x0fprotocolVersion\x12$\n" +
 	"\x0eturn_in_flight\x18\x05 \x01(\bR\fturnInFlight\x12*\n" +
-	"\x11vendor_session_id\x18\x06 \x01(\tR\x0fvendorSessionId\"\xa3\x01\n" +
+	"\x11vendor_session_id\x18\x06 \x01(\tR\x0fvendorSessionId\x12\x10\n" +
+	"\x03pid\x18\a \x01(\x05R\x03pid\x12\x1b\n" +
+	"\tbuild_sha\x18\b \x01(\tR\bbuildSha\"\xa3\x01\n" +
 	"\vDaemonHello\x12%\n" +
 	"\x0edaemon_version\x18\x01 \x01(\tR\rdaemonVersion\x12)\n" +
 	"\x10protocol_version\x18\x02 \x01(\tR\x0fprotocolVersion\x12\x19\n" +

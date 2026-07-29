@@ -1489,3 +1489,24 @@ side silently turns the keys into no-ops."
               #'agent-repl-frontend-chess-back))
   (should (eq (lookup-key agent-repl-frontend-webview-mode-map (kbd "<right>"))
               #'agent-repl-frontend-chess-forward)))
+
+;;;; ---- the hard session restart command ---------------------------------
+
+(ert-deftest agent-repl-test-restart-session-command-dispatches ()
+  "`agent-repl-restart-session' asks the client to restart the current ws."
+  ;; Arrange
+  (let (asked)
+    (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
+              ((symbol-function 'agent-repl--frontend-restart-session)
+               (lambda (ws) (setq asked ws) "req-1"))
+              ((symbol-function 'agent-repl--log) (lambda (&rest _) nil))
+              ((symbol-function 'message) (lambda (&rest _) nil)))
+      ;; Act
+      (agent-repl-restart-session)
+      ;; Assert
+      (should (equal asked "ws1")))))
+
+(ert-deftest agent-repl-test-restart-session-command-needs-a-workspace ()
+  "With no current workspace the restart signals rather than guessing one."
+  (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () nil)))
+    (should-error (agent-repl-restart-session) :type 'user-error)))

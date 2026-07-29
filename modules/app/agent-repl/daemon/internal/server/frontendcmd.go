@@ -44,6 +44,12 @@ type PromptRouter interface {
 	AnswerPermission(ctx context.Context, workspace, permissionRequestID string, allow bool, denyMessage string, updatedInput *structpb.Struct) error
 }
 
+// SessionRestarter hard-restarts one workspace's session: stop its shim, bring
+// the same record back up. Satisfied by *sessiondrv.Manager.
+type SessionRestarter interface {
+	RestartSession(ctx context.Context, workspace string) error
+}
+
 // SessionHealthRouter proves a named session's existing daemon-to-shim path.
 // It is intentionally separate from PromptRouter: a health probe must never
 // lazily create or revive a shim just because a frontend asked whether one is
@@ -209,6 +215,9 @@ type commandHandler struct {
 	// queues backs the queue force/accept/cancel commands (E4). Nil makes each
 	// of them a loud failing ack rather than a silent no-op, same as shutdown.
 	queues QueueController
+	// restarts backs the restartSession command. Nil is a loud unsupported
+	// capability, never a success-shaped no-op.
+	restarts SessionRestarter
 	// workspaceCreation owns durable create jobs and the file-inbox actions.
 	// Nil is a loud unsupported capability, never a success-shaped no-op.
 	workspaceCreation WorkspaceCreationBridge
@@ -254,6 +263,9 @@ type CommandHandlerConfig struct {
 	WorkspaceCreation WorkspaceCreationBridge
 	Health            HealthConfig
 	Interrupt         InterruptGateConfig
+	// Restarts backs the restartSession command. Nil is a loud unsupported
+	// capability.
+	Restarts SessionRestarter
 	// EstablishTimeout bounds one createSession establishment round. Zero takes
 	// createEstablishTimeout, which is the only value production uses; it is
 	// injectable so a harness can prove the DEADLINE nack without waiting out a
@@ -323,6 +335,7 @@ func newCommandHandler(prompts PromptRouter, merges MergeRunner, lifecycle Works
 		workspaceCreation: config.WorkspaceCreation,
 		health:            config.Health.Router, daemonHealth: config.Health.Daemon,
 		turns: config.Interrupt.Turns, liveTasks: config.Interrupt.LiveTasks, logf: logf,
+		restarts:         config.Restarts,
 		establishTimeout: config.EstablishTimeout,
 	}, nil
 }
@@ -535,6 +548,26 @@ func (h *commandHandler) Resync(_ context.Context, workspace, requestID string, 
 func (h *commandHandler) DeleteSession(_ context.Context, workspace, requestID string, cmd *frontendv1.DeleteSessionCmd) error {
 	h.logf("frontend cmd: delete_session ws=%s request_id=%s session=%s", workspace, requestID, cmd.GetSessionId())
 	return h.sessions.DeleteSession(cmd.GetSessionId())
+}
+
+// RestartSession HARD-RESTARTS the workspace's session (sessiondrv's
+// RestartSession): stop whatever shim is serving it — including a survivor of a
+// previous daemon, reached by the pid it announced — then bring the SAME
+// session record back up, so the conversation resumes under a fresh process.
+//
+// Synchronous, unlike Shutdown: the ack is the user's only report of whether
+// their session came back, so a restart that failed must nack rather than
+// return ok and leave them looking at a dead workspace.
+func (h *commandHandler) RestartSession(ctx context.Context, workspace, requestID string, _ *frontendv1.RestartSessionCmd) error {
+	h.logf("frontend cmd: restart-session ws=%s request_id=%s", workspace, requestID)
+	if h.restarts == nil {
+		return fmt.Errorf("server: session restart not supported by this daemon")
+	}
+	if err := h.restarts.RestartSession(ctx, workspace); err != nil {
+		return fmt.Errorf("server: restarting the session for workspace %q: %w", workspace, err)
+	}
+	h.logf("frontend cmd: restart-session ws=%s request_id=%s COMPLETE", workspace, requestID)
+	return nil
 }
 
 // Shutdown begins the daemon's graceful teardown — the same func POST /shutdown

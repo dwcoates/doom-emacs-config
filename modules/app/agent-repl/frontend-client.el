@@ -1045,6 +1045,24 @@ confirmation round trip completes long after this returns."
                        ws id kind)
       t)))
 
+(defun agent-repl--frontend-restart-session (ws)
+  "Send the `restartSession\=' command for WS, keyed by its cwd.
+Returns the request-id.  Signals (via `agent-repl--uds-send-command\=') when
+there is no link to send on; a REJECTED ack is surfaced loudly through the
+shared ack handler, which is the whole point of tracking it: a restart that
+failed must never read as a session that came back."
+  (let* ((key (agent-repl--frontend-ws-command-key ws))
+         (req (agent-repl--uds-send-command "restartSession" nil key)))
+    (agent-repl--uds-track-command
+     req "restartSession" ws
+     (lambda (err)
+       (agent-repl--log ws "restart-session: ws=%s REJECTED: %s" ws err))
+     (lambda ()
+       (agent-repl--log ws "restart-session: ws=%s complete request-id=%s" ws req)
+       (message "agent-repl: session restarted (same conversation, fresh shim)")))
+    (agent-repl--log ws "restart-session: dispatched ws=%s key=%s request-id=%s" ws key req)
+    req))
+
 (defun agent-repl--gui-interrupt-live-task-count (challenge)
   "Read the live subagent count off an `InterruptConfirmRequired' CHALLENGE.
 protojson renders int64 as a STRING, so `liveTasks' arrives as \"3\" from

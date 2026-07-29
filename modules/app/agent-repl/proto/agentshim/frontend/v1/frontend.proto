@@ -544,6 +544,7 @@ message FrontendCommand {
     HostActionCompletedCmd host_action_completed = 20;
     DaemonHealthCmd daemon_health = 21;
     SessionHealthCmd session_health = 22;
+    RestartSessionCmd restart_session = 23;
   }
 }
 
@@ -695,6 +696,21 @@ message ShutdownCmd {
   // only thing standing between a deploy and stale shims.
   bool stop_shims = 1;
 }
+
+// HARD RESTART of one workspace's session: stop whatever shim is serving it
+// (including one that outlived a previous daemon, which this daemon never
+// spawned), then bring it up again along the ordinary path.
+//
+// THE SESSION RECORD IS UNCHANGED, so the respawn resumes the same vendor
+// conversation: the user loses nothing and the transcript continues. This is a
+// PROCESS restart, not a new session — what to reach for when the shim is
+// wedged, when it is running superseded code, or when the backend simply needs
+// rebuilding under a conversation worth keeping.
+//
+// A workspace with no live session is a loud nack; a workspace whose session is
+// merely dormant is brought up, because "restart" and "start" are the same
+// request when nothing is running.
+message RestartSessionCmd {}
 
 // Ask the daemon to assert that every boot-critical global dependency is
 // operational.  The matching DaemonHealthView, not socket existence, is the

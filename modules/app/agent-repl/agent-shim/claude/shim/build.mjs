@@ -39,6 +39,26 @@ await build({
   // Resolve bare imports (notably @bufbuild/protobuf, imported by the
   // out-of-package proto stubs) from THIS package's node_modules.
   nodePaths: [path.join(dir, "node_modules")],
+  // THE BUNDLE'S BUILD IDENTITY, baked in at build time (core.proto
+  // ShimHello.build_sha).
+  //
+  // A shim outlives its daemon, so a survivor from before a deploy runs this
+  // bundle's code forever with no idea a deploy happened. The daemon compares
+  // what the shim reports against the CURRENT dist/.built-sha stamp and
+  // bounces a mismatched one onto the new build — which only works if the two
+  // values come from ONE source. bin/build-frontend.sh computes the revision
+  // once, exports it here, and writes the same value to the stamp, so bundle
+  // and stamp agree by construction rather than by two computations happening
+  // to match.
+  //
+  // Substituting process.env.SHIM_BUILD_SHA (rather than a bare identifier)
+  // is what keeps the source typecheckable and runnable outside a bundle:
+  // `tsc --noEmit` and vitest never run this file, and there the expression is
+  // an ordinary env read that yields undefined — which the daemon reads as
+  // "unknown identity", never as a mismatch.
+  define: {
+    "process.env.SHIM_BUILD_SHA": JSON.stringify(process.env.SHIM_BUILD_SHA ?? ""),
+  },
   banner: {
     js: "// AUTO-GENERATED single-file bundle (esbuild); edit src/ and rebuild via `npm run build`.",
   },

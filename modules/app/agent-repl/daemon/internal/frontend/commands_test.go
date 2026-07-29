@@ -96,6 +96,11 @@ func (m *mockHandler) SessionHealth(_ context.Context, ws, rid string, cmd *fron
 	return &frontendv1.SessionHealthView{RequestId: rid, Workspace: ws, SessionId: cmd.GetSessionId(), Healthy: true}, m.err
 }
 
+func (m *mockHandler) RestartSession(_ context.Context, ws, rid string, _ *frontendv1.RestartSessionCmd) error {
+	m.called, m.lastWorkspace, m.lastRequestID = "restart_session", ws, rid
+	return m.err
+}
+
 // TestDispatchRefusesWireWorkspaceCreation pins the single-producer rule: a
 // workspace is created by writing a workspace_commands_<uuid>.json file into
 // the daemon's inbox, and by nothing else. The arm still exists on the wire,

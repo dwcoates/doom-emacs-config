@@ -11,10 +11,13 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
+	"os"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
@@ -111,6 +114,9 @@ type ShimSpawner struct {
 	connected ConnectedFunc
 	spawn     ShimSpawnFunc
 	logf      func(string, ...any)
+	// signal delivers a signal to a pid. Injected so the surviving-shim stop
+	// is unit-testable without spawning a real process to kill.
+	signal func(pid int, sig syscall.Signal) error
 
 	mu    sync.Mutex
 	stops map[string]func() error // session id -> stop the shim WE spawned
@@ -122,7 +128,11 @@ func NewShimSpawner(reg *registry.Registry, connected ConnectedFunc, spawn ShimS
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
-	return &ShimSpawner{reg: reg, connected: connected, spawn: spawn, logf: logf, stops: map[string]func() error{}}
+	return &ShimSpawner{
+		reg: reg, connected: connected, spawn: spawn, logf: logf,
+		signal: signalPID,
+		stops:  map[string]func() error{},
+	}
 }
 
 // EnsureShim makes sure exactly one shim is alive for sessionID, spawning one
@@ -187,22 +197,49 @@ func (s *ShimSpawner) EnsureShim(ctx context.Context, sessionID string) error {
 	return nil
 }
 
-// StopShim SIGTERMs the shim this spawner launched for sessionID (hibernation's
-// clean stop). A session whose shim the daemon did not spawn — a reattached one
-// that outlived a prior daemon — is a no-op: there is no child to signal.
-func (s *ShimSpawner) StopShim(sessionID string) error {
+// StopShim SIGTERMs the session's shim (hibernation's clean stop, and the stop
+// half of a hard restart).
+//
+// TWO HANDLES, ONE PROCESS, in strict order of authority:
+//
+//  1. THE PROCESS HANDLE this spawner kept when it launched the shim. Exact,
+//     and the ordinary case.
+//  2. THE PID the shim announced on its ShimHello (hintPID), used only when
+//     there is no handle — a shim that outlived a PREVIOUS daemon, which this
+//     process never spawned. Without it StopShim was a permanent no-op for
+//     exactly those shims, so a survivor could not be bounced onto a new
+//     bundle and an explicit session restart silently did nothing to it.
+//
+// The pid is not a guess and not a pid-reuse hazard: the caller only has one
+// while the connection that carried it is live, and a live connection is proof
+// the process on the other end is the process that opened it.
+//
+// No handle and no pid is a genuine no-op — nothing is running that we know of
+// — and it is logged rather than treated as a failure.
+func (s *ShimSpawner) StopShim(sessionID string, hintPID int32) error {
 	s.mu.Lock()
 	stop, ok := s.stops[sessionID]
 	if ok {
 		delete(s.stops, sessionID)
 	}
 	s.mu.Unlock()
-	if !ok {
-		s.logf("server: session %s: StopShim no-op (no daemon-spawned shim; reattached or already stopped)", sessionID)
+	if ok {
+		s.logf("server: session %s: stopping shim (SIGTERM via our own process handle)", sessionID)
+		return stop()
+	}
+	if hintPID > 0 {
+		s.logf("server: session %s: no daemon-spawned shim; stopping the SURVIVING shim by its announced pid %d (SIGTERM)", sessionID, hintPID)
+		if err := s.signal(int(hintPID), syscall.SIGTERM); err != nil {
+			if errors.Is(err, os.ErrProcessDone) {
+				s.logf("server: session %s: shim pid %d had already exited", sessionID, hintPID)
+				return nil
+			}
+			return fmt.Errorf("server: session %s: stopping surviving shim pid %d: %w", sessionID, hintPID, err)
+		}
 		return nil
 	}
-	s.logf("server: session %s: stopping shim (SIGTERM)", sessionID)
-	return stop()
+	s.logf("server: session %s: StopShim no-op (no daemon-spawned shim and no announced pid; already stopped, or never seen)", sessionID)
+	return nil
 }
 
 // RegistryRegistrar binds the driver's claude_session_id write-through
@@ -463,4 +500,15 @@ func (f *PushForwarder) PushQueueView(q *frontendv1.QueueView) {
 		return
 	}
 	f.logMiss("queue-view")
+}
+
+// signalPID is the production signal delivery: find the process and signal it.
+// A pid that no longer exists reports os.ErrProcessDone, which the caller reads
+// as "already stopped" rather than as a failure.
+func signalPID(pid int, sig syscall.Signal) error {
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return err
+	}
+	return proc.Signal(sig)
 }
