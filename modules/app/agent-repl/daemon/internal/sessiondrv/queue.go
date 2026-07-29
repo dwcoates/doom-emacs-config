@@ -310,6 +310,10 @@ func (m *Manager) onTurnBoundary(d *driven, active bool) {
 	d.turnActive = active
 	if active {
 		m.mu.Unlock()
+		// A TURN STARTING IS THE PROOF the vendor really wrote this
+		// conversation, which is what the registry waits for before adopting
+		// its uuid (SessionRegistrar's ADOPT LATE contract).
+		m.noteTurnEvidence(d.sessionID)
 		return
 	}
 	// The turn that just ended: was it one a user-commanded stop was delivered

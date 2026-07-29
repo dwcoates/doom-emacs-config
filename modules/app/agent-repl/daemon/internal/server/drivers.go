@@ -384,18 +384,49 @@ func (r *RegistryRegistrar) SessionDied(sessionID, reason string) {
 // ClaudeSessionIDChanged persists claudeSessionID on sessionID's record. A
 // missing record or a write failure is loud-logged, never silently dropped
 // (the session would not survive a restart).
-func (r *RegistryRegistrar) ClaudeSessionIDChanged(sessionID, claudeSessionID string) {
+// A FIRST adoption is REFUSED without durable evidence — see the ADOPT LATE
+// block on sessiondrv.SessionRegistrar. The refusal reports adopted=false so
+// the caller can hold the uuid rather than lose it.
+func (r *RegistryRegistrar) ClaudeSessionIDChanged(sessionID, claudeSessionID string, durable bool) bool {
 	if r.Reg == nil {
+		return false
+	}
+	var refused bool
+	found, err := r.Reg.Update(sessionID, func(rec *registry.Record) {
+		if rec.ClaudeSessionID == "" && !durable {
+			refused = true
+			return
+		}
+		rec.ClaudeSessionID = claudeSessionID
+	})
+	if err != nil {
+		if r.Logf != nil {
+			r.Logf("server: session %s: registry claude_session_id write FAILED — resume may break after a restart: %v", sessionID, err)
+		}
+		return false
+	}
+	if !found {
+		if r.Logf != nil {
+			r.Logf("server: session %s: claude_session_id write found no record (never registered)", sessionID)
+		}
+		return false
+	}
+	if refused {
+		r.logLateAdoption(sessionID, claudeSessionID)
+		return false
+	}
+	return true
+}
+
+// logLateAdoption reports a first adoption held back for want of durable
+// evidence. Loud because it is the gate that keeps a turn-less session from
+// leaving a pointer to a transcript the vendor never wrote.
+func (r *RegistryRegistrar) logLateAdoption(sessionID, claudeSessionID string) {
+	if r.Logf == nil {
 		return
 	}
-	found, err := r.Reg.Update(sessionID, func(rec *registry.Record) { rec.ClaudeSessionID = claudeSessionID })
-	if err != nil && r.Logf != nil {
-		r.Logf("server: session %s: registry claude_session_id write FAILED — resume may break after a restart: %v", sessionID, err)
-		return
-	}
-	if !found && r.Logf != nil {
-		r.Logf("server: session %s: claude_session_id write found no record (never registered)", sessionID)
-	}
+	r.Logf("server: session %s: first vendor session adoption (uuid=%s) HELD — no turn has yet proved the vendor wrote this conversation, so the record keeps no pointer that a later bring-up would --resume into a transcript that does not exist",
+		sessionID, claudeSessionID)
 }
 
 // AdoptVendorSessionID adopts claudeSessionID as sessionID's vendor uuid,
@@ -423,16 +454,27 @@ func (r *RegistryRegistrar) ClaudeSessionIDChanged(sessionID, claudeSessionID st
 //
 // A first adoption (no uuid yet) and a re-announcement of the SAME uuid both
 // report rotated=false and reset nothing.
-func (r *RegistryRegistrar) AdoptVendorSessionID(sessionID, claudeSessionID string) (bool, string) {
+//
+// A FIRST adoption is additionally REFUSED without durable evidence, reporting
+// adopted=false and writing nothing — see the ADOPT LATE block on
+// sessiondrv.SessionRegistrar. A ROTATION is never refused: its `previous` is
+// non-empty by definition, so the vendor demonstrably wrote the conversation
+// being rotated away from and the reset that accompanies it must still land.
+func (r *RegistryRegistrar) AdoptVendorSessionID(sessionID, claudeSessionID string, durable bool) (bool, string, bool) {
 	if r.Reg == nil || claudeSessionID == "" {
-		return false, ""
+		return false, "", false
 	}
 	var (
 		previous string
 		rotated  bool
+		refused  bool
 	)
 	found, err := r.Reg.Update(sessionID, func(rec *registry.Record) {
 		previous = rec.ClaudeSessionID
+		if previous == "" && !durable {
+			refused = true
+			return
+		}
 		rotated = previous != "" && previous != claudeSessionID
 		rec.ClaudeSessionID = claudeSessionID
 		if rotated {
@@ -445,13 +487,17 @@ func (r *RegistryRegistrar) AdoptVendorSessionID(sessionID, claudeSessionID stri
 			r.Logf("server: session %s: registry vendor session adoption (uuid=%s) FAILED — a rotation's store cursor reset did not land, so the resubscribe may read the new seq space as a regression: %v",
 				sessionID, claudeSessionID, err)
 		}
-		return false, previous
+		return false, previous, false
 	}
 	if !found {
 		if r.Logf != nil {
 			r.Logf("server: session %s: vendor session adoption (uuid=%s) found no record (never registered)", sessionID, claudeSessionID)
 		}
-		return false, previous
+		return false, previous, false
+	}
+	if refused {
+		r.logLateAdoption(sessionID, claudeSessionID)
+		return false, previous, false
 	}
 	if rotated {
 		if r.Logf != nil {
@@ -463,7 +509,7 @@ func (r *RegistryRegistrar) AdoptVendorSessionID(sessionID, claudeSessionID stri
 		// wait for an unrelated event to learn.
 		r.repush(sessionID)
 	}
-	return rotated, previous
+	return rotated, previous, true
 }
 
 // QueuedPromptsChanged persists the prompts the daemon is currently holding for

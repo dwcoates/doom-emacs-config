@@ -60,18 +60,41 @@ func (c *logCapture) contains(substr string) bool {
 	return false
 }
 
-func TestHandshakeAdoptsTheAnnouncedVendorSessionID(t *testing.T) {
-	// Arrange — the announcement is what the registry compares against, and
-	// what the resolver later binds the new key's events to a workspace by.
+// adoptedSession is the arrangement "this session has already run a turn", the
+// durable evidence a FIRST vendor-uuid adoption now requires (ADOPT LATE). Every
+// rotation test needs it, because a rotation is by definition a SECOND uuid and
+// the first one has to have landed for there to be anything to rotate off.
+func adoptedSession(m *Manager, sessionID string) {
+	m.noteTurnEvidence(sessionID)
+}
+
+func TestHandshakeHoldsAFirstAnnouncementUntilATurnRuns(t *testing.T) {
+	// Arrange — the SDK mints a uuid at startup and the vendor writes nothing
+	// for it until a turn runs. Adopting it there is what left a turn-less
+	// session pointing at a transcript that never existed.
 	h := newQueueHarness(t, nil)
 
 	// Act.
 	h.m.onHandshake("ws", "s1", rotationHello("uuid-first"))
 
 	// Assert.
-	want := "s1=uuid-first rotated=false previous="
-	if got := h.reg.adoptionWrites(); len(got) != 1 || got[0] != want {
-		t.Fatalf("adoptions = %v, want [%s]", got, want)
+	if got := h.reg.adoptionWrites(); len(got) != 0 {
+		t.Fatalf("adoptions = %v, want none before a turn has run", got)
+	}
+}
+
+func TestHandshakeAdoptsTheAnnouncedVendorSessionIDOnceATurnRuns(t *testing.T) {
+	// Arrange — the announcement is what the registry compares against, and
+	// what the resolver later binds the new key's events to a workspace by.
+	h := newQueueHarness(t, nil)
+	h.m.onHandshake("ws", "s1", rotationHello("uuid-first"))
+
+	// Act — the first turn is the evidence the conversation exists on disk.
+	h.m.noteTurnEvidence("s1")
+
+	// Assert.
+	if got := h.reg.writeThroughs(); len(got) != 1 || got[0] != "s1=uuid-first" {
+		t.Fatalf("writes = %v, want [s1=uuid-first]", got)
 	}
 }
 
@@ -94,6 +117,7 @@ func TestRotationClearsTheTurnInFlightObservation(t *testing.T) {
 	// reported under the NEW identity, so the flag it set has no boundary
 	// coming to clear it.
 	h := newQueueHarness(t, nil)
+	adoptedSession(h.m, "s1")
 	h.m.onHandshake("ws", "s1", rotationHello("uuid-old"))
 	h.turn(true)
 
@@ -112,6 +136,7 @@ func TestRotationDropsAStandingInterruptMark(t *testing.T) {
 	// rotated. Honoring the mark later would report a stop to a turn that
 	// never received one.
 	h := newQueueHarness(t, nil)
+	adoptedSession(h.m, "s1")
 	h.m.onHandshake("ws", "s1", rotationHello("uuid-old"))
 	h.turn(true)
 	mark := h.driver()
@@ -136,6 +161,7 @@ func TestRotationReconcilesTheSSMAgentAxis(t *testing.T) {
 	// Arrange — the SSM holds its own `thinking` row for the same turn, and
 	// resolves the workspace off it.
 	h := newQueueHarness(t, nil)
+	adoptedSession(h.m, "s1")
 	h.m.onHandshake("ws", "s1", rotationHello("uuid-old"))
 
 	// Act.
@@ -153,6 +179,7 @@ func TestRotationIsAnnouncedLoudly(t *testing.T) {
 	// fixes, and the log line is the only account of the cursor reset.
 	cl := &logCapture{}
 	h := newQueueHarnessWithPusher(t, nil, nil, cl.logf)
+	adoptedSession(h.m, "s1")
 	h.m.onHandshake("ws", "s1", rotationHello("uuid-old"))
 
 	// Act.
@@ -168,10 +195,12 @@ func TestSameUUIDRehandshakeReconcilesNothing(t *testing.T) {
 	// Arrange — the ordinary reattach: the shim re-announces the uuid it
 	// always had, over a live turn. Nothing about that turn changed.
 	h := newQueueHarness(t, nil)
+	adoptedSession(h.m, "s1")
 	h.m.onHandshake("ws", "s1", rotationHello("uuid-old"))
 	h.turn(true)
 
 	// Act.
+	adoptedSession(h.m, "s1")
 	h.m.onHandshake("ws", "s1", rotationHello("uuid-old"))
 
 	// Assert.
