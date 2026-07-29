@@ -30,7 +30,6 @@ import (
 	"errors"
 	"fmt"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 
@@ -313,12 +312,21 @@ type driven struct {
 	// faulted is closed once, by the first bring-up fault, to wake the wait.
 	faulted chan struct{}
 
+	// cwd is the session's working directory, as its SessionStarted reported it.
+	// Guarded by the manager mutex.
+	//
+	// RECORDED FROM EVERY SESSION START, not just the ones that arm the
+	// metaprompt below. The read-directive is resolved relative to it, and a
+	// `/clear` re-fires that directive on ANY session however it started
+	// (promptdispatch.go), so binding the cwd to the arming would leave the
+	// re-fire with no path to name on most sessions.
+	cwd string
+
 	// metaprompt re-fire state, guarded by the manager mutex: armed when a
 	// RESUME/COMPACT_CONTINUE SessionStarted arrived; fired once the directive
 	// has been folded into a prompt.
 	metaArmed bool
 	metaFired bool
-	metaCwd   string
 
 	// Prompt-queue state (E4), guarded by the manager mutex.
 	//
@@ -647,19 +655,16 @@ func (m *Manager) submitPrompt(ctx context.Context, workspace, requestID, text, 
 	entry, queued := m.queueSubmitLocked(d, requestID, text, permissionMode)
 	if !queued {
 		m.mu.Unlock()
-		// THE RECEIPT, pushed before the forward rather than after it: the send
-		// is what the bubble reports, and the shim's Ack can be hundreds of
-		// milliseconds away. A submit that then FAILS keeps its bubble — the
-		// user did send that text, the failure surfaces as its own card, and
-		// silently retracting what they typed would be the worse report.
+		// The reading of the prompt, the receipt, and the forward all happen
+		// together in forwardPrompt (promptdispatch.go) — a `/clear` must not be
+		// echoed as a bubble, and deciding that anywhere but where the text is
+		// read is how the two came apart.
 		//
 		// A QUEUED prompt deliberately reaches none of this: it renders as a
 		// queue chip until it is DELIVERED, and a bubble drawn now would claim
 		// an execution order the session is not going to follow. Its receipt is
 		// pushed at the delivery site instead (queue.go, deliver).
-		m.echo(d, requestID, text)
-		text = m.applyMetaprompt(d, text)
-		if err := d.client.SubmitPrompt(ctx, text, origin, permissionMode); err != nil {
+		if err := m.forwardPrompt(ctx, d, requestID, text, origin, permissionMode); err != nil {
 			// The prompt never reached the shim, so no turn is beginning — and
 			// with a paused queue that matters: the lone-runner flag set on the
 			// way in would otherwise leave the pause waiting for a turn end
@@ -677,7 +682,6 @@ func (m *Manager) submitPrompt(ctx context.Context, workspace, requestID, text, 
 		// A QUEUED prompt deliberately does not reach here: the turn it would
 		// report is the one already running.
 		m.progress().NoteTurnAccepted(workspace, d.sessionID)
-		m.noteClearDispatched(workspace, text)
 		return nil
 	}
 	running := d.runningText
@@ -689,35 +693,6 @@ func (m *Manager) submitPrompt(ctx context.Context, workspace, requestID, text, 
 	m.publish(d.sessionID, view, recs)
 	go m.classify(d, entry.id, running, text)
 	return nil
-}
-
-// clearSessionCommand is the session command that discards a conversation's
-// context. Matched on the SUBMITTED text, which is where the daemon sees it:
-// the harness recognizes `/clear` itself and expands it into a command
-// envelope inside the CLI, so by the time anything is on the file plane the
-// clear has already happened.
-const clearSessionCommand = "/clear"
-
-// noteClearDispatched opens the SSM's clearing axis for a `/clear` the daemon
-// just handed to a shim.
-//
-// THIS IS THE ONLY PLACE THAT KNOWS. Nothing in the event stream announces a
-// clear as it BEGINS — the first-class ContextCleared reports one that already
-// finished — so a footer that waited for an event would say `thinking` through
-// the entire cut and then jump straight to the cleared bubble.
-//
-// An argument after the command means the user asked for something else, so
-// the text must be exactly the command. A failure is loud-logged and does not
-// fail the submit: the prompt was accepted, and losing it over a footer word
-// would be the larger harm.
-func (m *Manager) noteClearDispatched(workspace, text string) {
-	if strings.TrimSpace(text) != clearSessionCommand {
-		return
-	}
-	m.logf("sessiondrv: /clear dispatched ws=%q — opening the SSM's clearing axis until its ContextCleared lands", workspace)
-	if err := m.cfg.SSM.ApplyClearing(workspace, true, "clear_dispatched"); err != nil {
-		m.logf("sessiondrv: opening the clearing axis FAILED ws=%q: %v (the cut will render as an ordinary turn)", workspace, err)
-	}
 }
 
 // persistBackfillState writes the never-blue backfill signal (F2) through to
@@ -781,13 +756,13 @@ func (m *Manager) applyMetaprompt(d *driven, text string) string {
 	if !d.metaArmed || d.metaFired {
 		return text
 	}
-	directive, ok := metapromptDirective(d.metaCwd)
+	directive, ok := metapromptDirective(d.cwd)
 	if !ok {
 		// Armed but the file is absent under this cwd: nothing to prepend. Mark
 		// fired so we do not re-stat on every prompt, and log the honest miss.
 		d.metaFired = true
 		m.logf("sessiondrv: metaprompt re-fire armed for session=%s but %s/%s absent; skipping",
-			d.sessionID, d.metaCwd, metapromptRelPath)
+			d.sessionID, d.cwd, metapromptRelPath)
 		return text
 	}
 	d.metaFired = true
@@ -1516,18 +1491,23 @@ func (m *Manager) bringUp(workspace string) (*driven, error) {
 	return d, nil
 }
 
-// armMetaprompt arms the re-fire for a RESUME/COMPACT_CONTINUE session start.
+// armMetaprompt records a session start's cwd and arms the metaprompt re-fire
+// for a RESUME/COMPACT_CONTINUE one.
+//
+// THE CWD IS TAKEN FROM EVERY START, and the arming from only some. The two used
+// to move together, which quietly meant the daemon knew where a session lived
+// only when it happened to be resuming one — and the post-`/clear` re-fire
+// (promptdispatch.go) needs that path on every session there is.
 func (m *Manager) armMetaprompt(d *driven, ss *corev1.SessionStarted) {
-	if !wantsMetapromptRefire(ss) {
-		return
-	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if d.metaArmed {
+	if cwd := ss.GetCwd(); cwd != "" {
+		d.cwd = cwd
+	}
+	if !wantsMetapromptRefire(ss) || d.metaArmed {
 		return
 	}
 	d.metaArmed = true
-	d.metaCwd = ss.GetCwd()
 	m.logf("sessiondrv: metaprompt re-fire armed session=%s source=%s cwd=%s", d.sessionID, ss.GetSource(), ss.GetCwd())
 }
 

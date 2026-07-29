@@ -49,31 +49,37 @@ func isSlashCommandMachineryText(content string) bool {
 	return false
 }
 
-// machineryEnvelope reports the envelope tag a conversation item is machinery
-// under, or "" when the item is not a machinery user record.
+// userRecordHead returns the leading text of a user record, or "" when the item
+// is not a user record at all.
 //
-// Only the user_message arm is examined: the CLI writes this markup as a "user"
-// record and nothing else in the conversation carries it. For a block-shaped
-// body the FIRST text block is the head of the record — the later blocks of a
-// caveat-wrapped record are more of the same bookkeeping, and a prompt whose
-// first block is real text is a real prompt regardless of what follows.
-func machineryEnvelope(it *frontendv1.ConversationItem) string {
+// Only the user_message arm is examined: the CLI writes its bookkeeping as a
+// "user" record and nothing else in the conversation carries it. For a
+// block-shaped body the FIRST text block is the head of the record — the later
+// blocks of a caveat-wrapped record are more of the same bookkeeping, and a
+// prompt whose first block is real text is a real prompt regardless of what
+// follows.
+func userRecordHead(it *frontendv1.ConversationItem) string {
 	um := it.GetUserMessage()
 	if um == nil {
 		return ""
 	}
-	var head string
 	switch content := um.GetContent().(type) {
 	case *datav1.ApiUserMessage_ContentString:
-		head = content.ContentString
+		return content.ContentString
 	case *datav1.ApiUserMessage_ContentBlocks:
 		for _, b := range content.ContentBlocks.GetBlocks() {
 			if t := b.GetText(); t.GetText() != "" {
-				head = t.GetText()
-				break
+				return t.GetText()
 			}
 		}
 	}
+	return ""
+}
+
+// machineryEnvelope reports the envelope tag a conversation item is machinery
+// under, or "" when the item is not a machinery user record.
+func machineryEnvelope(it *frontendv1.ConversationItem) string {
+	head := userRecordHead(it)
 	if !isSlashCommandMachineryText(head) {
 		return ""
 	}
@@ -82,6 +88,24 @@ func machineryEnvelope(it *frontendv1.ConversationItem) string {
 		if strings.HasPrefix(trimmed, prefix) {
 			return prefix
 		}
+	}
+	return ""
+}
+
+// withheldReason reports why a user record must not be RENDERED as a prompt
+// bubble, or "" when it is a real prompt and belongs in the feed.
+//
+// TWO PRODUCERS OF NON-PROMPTS, one treatment. The CLI writes bookkeeping for
+// its own slash commands; the daemon fires a read-directive of its own behind a
+// `/clear` (promptdispatch.go). Neither is anything a human typed, both arrive
+// as unflagged "user" transcript records, and both drew a purple bubble full of
+// text the user never wrote.
+func withheldReason(it *frontendv1.ConversationItem) string {
+	if envelope := machineryEnvelope(it); envelope != "" {
+		return "slash-command machinery " + envelope
+	}
+	if isMetapromptDirectiveText(userRecordHead(it)) {
+		return "the daemon's own post-/clear metaprompt read-directive"
 	}
 	return ""
 }
@@ -104,13 +128,13 @@ func (c *consumer) withholdMachinery(cd *frontendv1.ConversationDelta) {
 	items := cd.GetItems()
 	kept := items[:0]
 	for _, it := range items {
-		envelope := machineryEnvelope(it)
-		if envelope == "" {
+		reason := withheldReason(it)
+		if reason == "" {
 			kept = append(kept, it)
 			continue
 		}
-		c.logf("sessiondrv: user turn WITHHELD as slash-command machinery ws=%q session=%s seq=%d uuid=%s envelope=%q — the Claude CLI writes this bookkeeping as an unflagged \"user\" transcript record; the store keeps it, the conversation feed does not",
-			c.workspace, c.sessionID, cd.GetThroughSeq(), it.GetUuid(), envelope)
+		c.logf("sessiondrv: user turn WITHHELD as %s ws=%q session=%s seq=%d uuid=%s — this is written as an unflagged \"user\" transcript record but is not a prompt; the store keeps it, the conversation feed does not",
+			reason, c.workspace, c.sessionID, cd.GetThroughSeq(), it.GetUuid())
 	}
 	cd.Items = kept
 }
