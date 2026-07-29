@@ -416,6 +416,48 @@ describe("UdsSession lifecycle: shim-authoritative TurnStarted", () => {
     expect(ended.payload.value.turnId).toBe("p1");
   });
 
+  it("writes a non-lifecycle turn claim bridge into a rotated vendor seq space before its end", async () => {
+    // Arrange: the old key has delivered data, so a different result UUID is
+    // a real rotation. The prompt start is first written under that old key.
+    const { query, store, daemon, daemonListener } = await rig({ storeSessionId: "uuid-old" });
+    store.latest().send(EventSchema, create(EventSchema, { sessionId: "uuid-old", seq: 7n }));
+    await daemon.next(EventSchema);
+    daemon.send(SubmitPromptSchema, create(SubmitPromptSchema, { requestId: "p1", text: "go" }));
+    const oldStart = await store.peer().next(StoreWriteSchema);
+    expect(oldStart.batch!.events[0]!.sessionId).toBe("uuid-old");
+
+    // Act: the matching result belongs to the newly minted vendor UUID.
+    query.emit({
+      type: "result",
+      uuid: "r1",
+      session_id: "uuid-new",
+      subtype: "success",
+    } as unknown as SdkMessageLike);
+    const rotatedBatch = await store.peer().next(StoreWriteSchema);
+    const daemon2 = await daemonListener.next();
+    cleanups.push(() => daemon2.destroy());
+    const hello2 = await daemon2.next(ShimHelloSchema);
+
+    // Assert: the new space contains its own proof before completion, and the
+    // handshake keeps the identity until this batch is durably acked.
+    const kinds = rotatedBatch.batch!.events.map((event) => event.payload.case);
+    const bridgeIndex = kinds.indexOf("turnClaimBridge");
+    const endIndex = kinds.indexOf("turnEnded");
+    expect(kinds).not.toContain("turnStarted");
+    expect(bridgeIndex).toBeGreaterThanOrEqual(0);
+    expect(endIndex).toBeGreaterThan(bridgeIndex);
+    expect(rotatedBatch.batch!.events[bridgeIndex]!.sessionId).toBe("uuid-new");
+    expect(rotatedBatch.batch!.events[endIndex]!.sessionId).toBe("uuid-new");
+    const bridged = rotatedBatch.batch!.events[bridgeIndex]!.payload;
+    if (bridged.case !== "turnClaimBridge") throw new Error("case");
+    expect(bridged.value).toMatchObject({
+      turnId: "p1",
+      previousSessionId: "uuid-old",
+    });
+    expect(hello2.activeTurnIds).toEqual(["p1"]);
+    expect(hello2.turnInFlight).toBe(true);
+  });
+
   it("files the TurnStarted under the vendor session id, not the shim's own id", async () => {
     // Arrange: the store's seq space is keyed by the vendor uuid; writing
     // under `sess-1` would land in a space nothing subscribes to.

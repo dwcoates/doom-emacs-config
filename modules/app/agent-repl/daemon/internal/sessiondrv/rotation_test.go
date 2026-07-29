@@ -28,6 +28,12 @@ func rotationHello(vendorSessionID string) *corev1.ShimHello {
 	}
 }
 
+func rotationHelloInFlight(vendorSessionID string) *corev1.ShimHello {
+	hello := rotationHello(vendorSessionID)
+	hello.TurnInFlight = true
+	return hello
+}
+
 // turnActiveFlag reads the driver's observed turn boundary under the manager
 // lock. The driver is resolved FIRST because existing() takes the same lock.
 func (h *queueHarness) turnActiveFlag() bool {
@@ -118,7 +124,7 @@ func TestRotationClearsTheTurnInFlightObservation(t *testing.T) {
 	// coming to clear it.
 	h := newQueueHarness(t, nil)
 	adoptedSession(h.m, "s1")
-	h.m.onHandshake("ws", "s1", rotationHello("uuid-old"))
+	h.m.onHandshake("ws", "s1", rotationHelloInFlight("uuid-old"))
 	h.turn(true)
 
 	// Act.
@@ -201,7 +207,7 @@ func TestSameUUIDRehandshakeReconcilesNothing(t *testing.T) {
 
 	// Act.
 	adoptedSession(h.m, "s1")
-	h.m.onHandshake("ws", "s1", rotationHello("uuid-old"))
+	h.m.onHandshake("ws", "s1", rotationHelloInFlight("uuid-old"))
 
 	// Assert.
 	active := h.turnActiveFlag()
@@ -220,7 +226,7 @@ func TestFirstAdoptionReconcilesNothing(t *testing.T) {
 	h.turn(true)
 
 	// Act.
-	h.m.onHandshake("ws", "s1", rotationHello("uuid-first"))
+	h.m.onHandshake("ws", "s1", rotationHelloInFlight("uuid-first"))
 
 	// Assert.
 	active := h.turnActiveFlag()

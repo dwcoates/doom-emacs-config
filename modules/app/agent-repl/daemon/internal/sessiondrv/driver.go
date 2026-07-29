@@ -1441,11 +1441,12 @@ func (m *Manager) bringUp(workspace string) (*driven, error) {
 		SeqStore:        m.cfg.SeqStore,
 		PermissionModes: m.cfg.PermissionModes,
 		StateSink:       cons,
+		TurnClaims:      cons,
 		FrameSink:       cons,
 		FileDiagnostics: fileDiagnosticSink{persister: m.cfg.FileDiagnostics, workspace: workspace, agentReplSessionID: sessionID},
 		Degraded:        cons,
 		Permissions:     ph,
-		OnHandshake:     func(hello *corev1.ShimHello) { m.onHandshake(workspace, sessionID, hello) },
+		OnHandshake:     func(hello *corev1.ShimHello) error { return m.onHandshake(workspace, sessionID, hello) },
 		OnConnected:     func(hello *corev1.ShimHello) { m.onConnected(workspace, sessionID, hello) },
 		OnLinkLost:      func(cause error) { m.onLinkLost(workspace, sessionID, cause) },
 		Logf:            m.logf,
@@ -1655,7 +1656,31 @@ func (m *Manager) armMetaprompt(d *driven, ss *corev1.SessionStarted) {
 //     any more.)
 //   - driven.metaCwd / backfill / systemInit / queue entries — carry no seq at
 //     all; a rotation does not change what they describe.
-func (m *Manager) onHandshake(workspace, sessionID string, hello *corev1.ShimHello) {
+func (m *Manager) onHandshake(workspace, sessionID string, hello *corev1.ShimHello) error {
+	m.mu.Lock()
+	d, ok := m.byWS[workspace]
+	m.mu.Unlock()
+	if !ok || d.sessionID != sessionID {
+		err := fmt.Errorf("turn handshake has no matching live driver")
+		m.logf("sessiondrv: turn handshake decision=reject_no_matching_driver ws=%s session=%s active_turn_ids=%v error=%v",
+			workspace, sessionID, hello.GetActiveTurnIds(), err)
+		if applyErr := m.cfg.SSM.ApplyConnectionDegraded(workspace, true, err.Error()); applyErr != nil {
+			m.logf("sessiondrv: surfacing unmatched turn handshake failed ws=%s session=%s: %v", workspace, sessionID, applyErr)
+		}
+		return err
+	}
+	active, err := d.consumer.reconcileTurnHandshake(hello)
+	if err != nil {
+		reason := fmt.Sprintf("turn handshake correlation failed: %v", err)
+		m.logf("sessiondrv: turn handshake decision=reject_correlation ws=%s session=%s active_turn_ids=%v error=%v",
+			workspace, sessionID, hello.GetActiveTurnIds(), err)
+		if applyErr := m.cfg.SSM.ApplyConnectionDegraded(workspace, true, reason); applyErr != nil {
+			m.logf("sessiondrv: surfacing turn handshake correlation failure failed ws=%s session=%s: %v",
+				workspace, sessionID, applyErr)
+		}
+		return fmt.Errorf("%s", reason)
+	}
+	m.reconcileTurnSnapshot(d, active, hello)
 	// The pid rides EVERY hello, so a reconnect refreshes it and a bounce onto
 	// a fresh process never carries the retired one's number forward.
 	m.noteShimPID(sessionID, hello.GetPid())
@@ -1664,12 +1689,12 @@ func (m *Manager) onHandshake(workspace, sessionID string, hello *corev1.ShimHel
 		// A fresh session whose shim has not learned its uuid yet. Announcing
 		// nothing is the honest shape; the SessionStarted that follows carries
 		// it (persistVendorSessionID).
-		return
+		return nil
 	}
 	if m.cfg.Registrar == nil {
 		m.logf("sessiondrv: shim announced vendor_session_id=%s ws=%q session=%s with NO registrar bound — a rotation cannot reset the store cursor and would be read as a seq regression",
 			csid, workspace, sessionID)
-		return
+		return nil
 	}
 	m.mu.Lock()
 	durable := m.turnEvidence[sessionID]
@@ -1681,14 +1706,14 @@ func (m *Manager) onHandshake(workspace, sessionID string, hello *corev1.ShimHel
 		// adopted at the first turn. A ROTATION is never refused (it has a
 		// non-empty previous), so nothing below this line changes for one.
 		m.holdVendorSessionID(sessionID, csid)
-		return
+		return nil
 	}
 	m.mu.Lock()
 	m.lastCSID[sessionID] = csid
 	delete(m.heldCSID, sessionID)
 	m.mu.Unlock()
 	if !rotated {
-		return
+		return nil
 	}
 	m.logf("sessiondrv: VENDOR SESSION ROTATION ws=%q session=%s %s -> %s — the vendor retired one transcript identity mid-stream; store cursor and replay floor reset to zero and the subscription resumes from the new seq space's beginning",
 		workspace, sessionID, previous, csid)
@@ -1704,6 +1729,24 @@ func (m *Manager) onHandshake(workspace, sessionID string, hello *corev1.ShimHel
 		m.logf("sessiondrv: reconciling the SSM across the rotation FAILED ws=%q session=%s %s -> %s: %v (the workspace may stay in THINKING until the next turn)",
 			workspace, sessionID, previous, csid, err)
 	}
+	return nil
+}
+
+// reconcileTurnSnapshot restores the queue's process-local turn latch from the
+// durable handshake result without pretending the snapshot is a TurnEnded
+// edge. Sending it through onTurnBoundary would drain a queued prompt every
+// time an already-idle shim reconnected; merely assigning it leaves the next
+// real boundary as the sole drain trigger.
+func (m *Manager) reconcileTurnSnapshot(d *driven, active bool, hello *corev1.ShimHello) {
+	m.mu.Lock()
+	before := d.turnActive
+	d.turnActive = active
+	queueDepth := len(d.queue.entries)
+	paused := d.paused
+	m.mu.Unlock()
+	m.logf("sessiondrv: turn snapshot reconciled ws=%q session=%s process_before=%v process_after=%v hello_turn_in_flight=%v hello_turn_ids=%v queue_depth=%d paused=%v decision=set_without_boundary_effects",
+		d.workspace, d.sessionID, before, active, hello.GetTurnInFlight(),
+		hello.GetActiveTurnIds(), queueDepth, paused)
 }
 
 // purgeRetainedOnRotation drops the retained conversation window belonging to
@@ -1790,23 +1833,6 @@ func (m *Manager) onConnected(workspace, sessionID string, hello *corev1.ShimHel
 	// THE BRING-UP GATE IS CLOSED. Anything that fails from here is a
 	// mid-session fault, never an escapable bring-up failure.
 	m.noteWired(workspace, sessionID)
-	m.mu.Lock()
-	d, ok := m.byWS[workspace]
-	m.mu.Unlock()
-	if !ok || d.sessionID != sessionID {
-		m.logf("sessiondrv: turn handshake rejected ws=%s session=%s decision=no_matching_driver active_turn_ids=%v",
-			workspace, sessionID, hello.GetActiveTurnIds())
-		if err := m.cfg.SSM.ApplyConnectionDegraded(workspace, true, "turn handshake has no matching live driver"); err != nil {
-			m.logf("sessiondrv: surfacing unmatched turn handshake failed ws=%s session=%s: %v", workspace, sessionID, err)
-		}
-	} else if err := d.consumer.reconcileTurnHandshake(hello); err != nil {
-		reason := fmt.Sprintf("turn handshake correlation failed: %v", err)
-		m.logf("sessiondrv: %s ws=%s session=%s", reason, workspace, sessionID)
-		if applyErr := m.cfg.SSM.ApplyConnectionDegraded(workspace, true, reason); applyErr != nil {
-			m.logf("sessiondrv: surfacing turn handshake correlation failure failed ws=%s session=%s: %v",
-				workspace, sessionID, applyErr)
-		}
-	}
 	// The pid and the build identity are BOTH only trustworthy on a live
 	// connection, and this is the moment the connection is proven usable. A
 	// shim running a superseded bundle is bounced from here onto the current
