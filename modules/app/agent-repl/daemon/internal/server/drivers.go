@@ -207,6 +207,13 @@ func (s *ShimSpawner) EnsureShim(ctx context.Context, sessionID string) (session
 			resume = ""
 		}
 	}
+	// A RECORD WRITTEN BEFORE THE CREATE-SIDE GUARD still carries the CLI's
+	// placeholder as its model, and spawning with it is not possible. Dropping
+	// it silently would hand the user a different model than the record claims,
+	// so the respawn fails loudly and the record gets corrected instead.
+	if registry.IsPlaceholderModel(rec.Model) {
+		return res, fmt.Errorf("server: session %s: the record's model is the CLI placeholder %q rather than a model id, so it cannot be spawned; set a real model or clear it", sessionID, rec.Model)
+	}
 	opts := CreateOpts{
 		CWD:            rec.CWD,
 		Model:          rec.Model,
@@ -401,6 +408,44 @@ func (r *RegistryRegistrar) BackfillStateChanged(sessionID, state string) {
 		return
 	}
 	r.repush(sessionID)
+}
+
+// SessionModelObserved persists the model a live session reports itself to be
+// running, and re-pushes its SessionView so the frontend's model chip follows.
+//
+// This is the write that closes the model's round trip. rec.Model was set once
+// from the create command and read back on every respawn, so a session that
+// changed model mid-life was relaunched as the ORIGINAL model after each
+// hibernation. The observed value is the only one a respawn should trust.
+//
+// Idempotent by value: the SDK re-announces its init on every submit, so this
+// is called constantly with an unchanged model and must not write each time.
+func (r *RegistryRegistrar) SessionModelObserved(sessionID, model string) {
+	if r.Reg == nil || model == "" {
+		return
+	}
+	changed := false
+	found, err := r.Reg.Update(sessionID, func(rec *registry.Record) {
+		if rec.Model == model {
+			return
+		}
+		if r.Logf != nil {
+			r.Logf("server: session %s: observed model %q replaces the record's %q", sessionID, model, rec.Model)
+		}
+		rec.Model = model
+		changed = true
+	})
+	if err != nil && r.Logf != nil {
+		r.Logf("server: session %s: registry model write FAILED — a respawn may re-pin the stale model: %v", sessionID, err)
+		return
+	}
+	if !found && r.Logf != nil {
+		r.Logf("server: session %s: model write found no record (never registered)", sessionID)
+		return
+	}
+	if changed {
+		r.repush(sessionID)
+	}
 }
 
 // SessionDied marks sessionID's record terminal with the reason its death

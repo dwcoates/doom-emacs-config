@@ -34,7 +34,7 @@ func newCutConsumer(t *testing.T) (*consumer, *fakeApplier) {
 	t.Helper()
 	applier := &fakeApplier{}
 	return newConsumer("ws", "s1", &fakePusher{}, applier, nil, newFakeClearCompactStore(),
-		func(string, ...any) {}, nil, nil, nil, nil), applier
+		func(string, ...any) {}, nil, nil, nil, nil, nil), applier
 }
 
 func TestTheVendorStatusMovesTheCompactingAxis(t *testing.T) {

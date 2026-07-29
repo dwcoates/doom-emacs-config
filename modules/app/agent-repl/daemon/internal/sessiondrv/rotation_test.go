@@ -245,7 +245,7 @@ func TestPersistentEventReportsItsVendorSessionID(t *testing.T) {
 	// Arrange — a seq-stamped store event: the store keys by the vendor uuid,
 	// so that is what the envelope carries.
 	var seen []string
-	c := newConsumer("ws", "s1", &fakePusher{}, &fakeApplier{}, nil, newFakeClearCompactStore(), nil, nil, nil, nil, nil)
+	c := newConsumer("ws", "s1", &fakePusher{}, &fakeApplier{}, nil, newFakeClearCompactStore(), nil, nil, nil, nil, nil, nil)
 	c.onVendorSessionID = func(id string) { seen = append(seen, id) }
 
 	// Act.
@@ -265,7 +265,7 @@ func TestEphemeralEventReportsNoVendorSessionID(t *testing.T) {
 	// the DAEMON's own s_ id. Adopting that as the vendor uuid would file the
 	// conversation under an identity no store event will ever use.
 	var seen []string
-	c := newConsumer("ws", "s1", &fakePusher{}, &fakeApplier{}, nil, newFakeClearCompactStore(), nil, nil, nil, nil, nil)
+	c := newConsumer("ws", "s1", &fakePusher{}, &fakeApplier{}, nil, newFakeClearCompactStore(), nil, nil, nil, nil, nil, nil)
 	c.onVendorSessionID = func(id string) { seen = append(seen, id) }
 
 	// Act.
