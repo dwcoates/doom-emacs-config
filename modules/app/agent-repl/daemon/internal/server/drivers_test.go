@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -345,6 +346,9 @@ func TestStopShimPrefersItsOwnProcessHandle(t *testing.T) {
 	stopped := false
 	var signalled []int
 	s := NewShimSpawner(nil, nil, nil, nil)
+	// No processes and no lock files here: the exit wait has nothing real to
+	// observe, so it is stubbed out rather than made to time out.
+	s.awaitStopped = nil
 	s.stops["s1"] = func() error { stopped = true; return nil }
 	s.signal = func(pid int, _ syscall.Signal) error { signalled = append(signalled, pid); return nil }
 
@@ -366,6 +370,7 @@ func TestStopShimSignalsASurvivingShimByItsAnnouncedPid(t *testing.T) {
 	// Arrange — no handle (a shim that outlived a previous daemon).
 	var signalled []int
 	s := NewShimSpawner(nil, nil, nil, nil)
+	s.awaitStopped = nil
 	s.signal = func(pid int, sig syscall.Signal) error {
 		if sig != syscall.SIGTERM {
 			t.Errorf("signal = %v, want SIGTERM (a clean stop)", sig)
@@ -389,6 +394,7 @@ func TestStopShimWithNeitherHandleNorPidIsALoggedNoOp(t *testing.T) {
 	// Arrange.
 	var lines []string
 	s := NewShimSpawner(nil, nil, nil, func(f string, a ...any) { lines = append(lines, fmt.Sprintf(f, a...)) })
+	s.awaitStopped = nil
 	s.signal = func(int, syscall.Signal) error { t.Fatal("nothing should be signalled"); return nil }
 
 	// Act.
@@ -413,10 +419,47 @@ func TestStopShimWithNeitherHandleNorPidIsALoggedNoOp(t *testing.T) {
 func TestStopShimTreatsAnAlreadyExitedPidAsStopped(t *testing.T) {
 	// Arrange.
 	s := NewShimSpawner(nil, nil, nil, nil)
+	s.awaitStopped = nil
 	s.signal = func(int, syscall.Signal) error { return os.ErrProcessDone }
 
 	// Act / Assert.
 	if err := s.StopShim("s1", 4242); err != nil {
 		t.Fatalf("an already-exited shim reported a stop failure: %v", err)
+	}
+}
+
+// STOPPED MEANS GONE. A SIGTERM only asks, and EnsureShim refuses to spawn
+// while the session lock is held — so a StopShim that returned before the
+// process died made every stop-then-start (a bounce onto a new bundle, a hard
+// restart) race the kernel and reliably fail to respawn.
+func TestStopShimWaitsForTheShimToActuallyExit(t *testing.T) {
+	// Arrange.
+	waited := ""
+	s := NewShimSpawner(nil, nil, nil, nil)
+	s.awaitStopped = func(sessionID string) error { waited = sessionID; return nil }
+	s.stops["s1"] = func() error { return nil }
+
+	// Act.
+	if err := s.StopShim("s1", 0); err != nil {
+		t.Fatalf("StopShim: %v", err)
+	}
+
+	// Assert.
+	if waited != "s1" {
+		t.Fatal("StopShim returned without waiting for the shim to exit; the respawn would race its session lock")
+	}
+}
+
+// A shim that will not die FAILS the stop, rather than reporting success and
+// leaving the caller to spawn into a lock that is still held.
+func TestStopShimFailsWhenTheShimNeverExits(t *testing.T) {
+	// Arrange.
+	s := NewShimSpawner(nil, nil, nil, nil)
+	s.awaitStopped = func(string) error { return errors.New("still holds the session lock") }
+	s.stops["s1"] = func() error { return nil }
+
+	// Act / Assert.
+	if err := s.StopShim("s1", 0); err == nil {
+		t.Fatal("a shim that ignored SIGTERM reported a successful stop")
 	}
 }
