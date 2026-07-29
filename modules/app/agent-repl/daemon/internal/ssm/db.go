@@ -215,19 +215,41 @@ const agentAxisMembers = `('thinking','permission','done','ready','idle','dead',
 // reconciliation) is asking whether the agent is CURRENTLY working, which it
 // is not while a human is being asked a question.
 func turnActive(db *sql.DB, workspace string) (bool, error) {
-	var state string
-	err := db.QueryRow(
-		`SELECT state FROM workspace_state
+	active, _, err := turnClaim(db, workspace)
+	return active, err
+}
+
+// turnClaim answers turnActive AND names the session that made the claim.
+//
+// The claimant matters because a `thinking` row is a promise that some session
+// will report the turn's end, and a session that is gone can never keep it. A
+// claim whose session no longer drives the workspace is therefore not a
+// stronger statement than the readiness arriving over it — it is a dead one,
+// and treating it as stronger is what wedged a recreated workspace in
+// "readiness suppressed (turn in flight)" across a delete-and-recreate.
+//
+// claimant is "" for an UNATTRIBUTED claim — a row the SSM itself appended
+// with no session id, such as the `thinking` a permission close restores. That
+// is deliberately NOT read as "a different session": the row describes the
+// workspace's own turn and there is no rival identity in it, so it keeps
+// suppressing exactly as it always has.
+func turnClaim(db *sql.DB, workspace string) (active bool, claimant string, err error) {
+	var (
+		state string
+		sid   sql.NullString
+	)
+	scanErr := db.QueryRow(
+		`SELECT state, session_id FROM workspace_state
 		 WHERE workspace = ?
 		   AND state IN `+agentAxisMembers+`
-		 ORDER BY at DESC LIMIT 1`, workspace).Scan(&state)
-	if err == sql.ErrNoRows {
-		return false, nil
+		 ORDER BY at DESC LIMIT 1`, workspace).Scan(&state, &sid)
+	if scanErr == sql.ErrNoRows {
+		return false, "", nil
 	}
-	if err != nil {
-		return false, fmt.Errorf("ssm: turn-active check for workspace %q: %w", workspace, err)
+	if scanErr != nil {
+		return false, "", fmt.Errorf("ssm: turn-active check for workspace %q: %w", workspace, scanErr)
 	}
-	return state == "thinking", nil
+	return state == "thinking", sid.String, nil
 }
 
 // agentAxisTop returns the workspace's newest agent-axis token, plus the newest
