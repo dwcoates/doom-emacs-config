@@ -147,6 +147,35 @@ describe("phaseLabel: the SSM's verdict as the footer's anchor", () => {
     expect(got.spinning).toBe(false);
   });
 
+  it("names a workspace nothing is wired to dormant", () => {
+    // Arrange / Act
+    const got = phaseLabel("dormant");
+    // Assert
+    expect(got.word).toBe("dormant");
+  });
+
+  it("does NOT spin while dormant", () => {
+    // Arrange / Act — `starting` spins because a bring-up is really under way;
+    // dormant is the opposite claim, and a spinner would say work is happening.
+    const got = phaseLabel("dormant");
+    // Assert
+    expect(got.spinning).toBe(false);
+  });
+
+  it("takes the blue tone while dormant", () => {
+    // Arrange / Act — the same blue every no-live-session state wears.
+    const got = phaseLabel("dormant");
+    // Assert
+    expect(got.tone).toBe("error");
+  });
+
+  it("still spins while starting, which dormant is the opposite of", () => {
+    // Arrange / Act — the contrast the two blues exist to draw.
+    const got = phaseLabel("init");
+    // Assert
+    expect(got.spinning).toBe(true);
+  });
+
   it("takes the alarm tone for a dead session", () => {
     // Arrange / Act
     const got = phaseLabel("dead");
