@@ -426,4 +426,81 @@ name matches nothing and the answer is NACKed as \"no live session\"."
         ;; Assert
         (should (equal sent '("ws1" "r1" nil "too risky")))))))
 
+;;;; ---- Wire CWD routing into the workspace log sink --------------------
+;;
+;; A `ConversationDelta' names its workspace by session CWD.  Dispatch keeps
+;; the raw value (so `agent-repl--permission-handle-item' can still refuse a
+;; blank one loudly), but the LOG sink is scoped by the resolved persp name:
+;; a CWD cannot index `agent-repl--workspaces', so logging under one loses
+;; the workspace attribution entirely.  The durable sink must be ENABLED for
+;; these to test anything — with it off the ladder skips identity resolution.
+;;
+;; The unowned-cwd cases still reach one log call no call site can fix:
+;; `agent-repl--ws-put' warns about the stub it just created and names that
+;; stub as its own workspace, by construction.  That one relies on the sink
+;; degrading an unroutable name to the global record.
+
+(ert-deftest agent-repl-test-permission-delta-attributes-an-owned-cwd-to-its-ws ()
+  "A delta naming an OWNED cwd routes its log record to that workspace's NAME."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :project-dir temporary-file-directory)
+    (let (logged-ws)
+      (cl-letf (((symbol-function 'agent-repl--notify) (lambda (&rest _) nil))
+                ((symbol-function 'agent-repl--log)
+                 (lambda (ws &rest _) (setq logged-ws ws))))
+        ;; Act
+        (agent-repl--frontend-apply-conversation-delta
+         (list :workspace temporary-file-directory
+               :items (list (agent-repl-test--perm-item
+                             "r1" "Bash" "RESOLUTION_PENDING"))))
+        ;; Assert
+        (should (equal logged-ws "ws1"))))))
+
+(ert-deftest agent-repl-test-permission-delta-unowned-cwd-routes-globally ()
+  "A delta no live workspace owns still logs — globally — and still dispatches."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-log-sink-on
+      (cl-letf (((symbol-function 'agent-repl--notify) (lambda (&rest _) nil)))
+        ;; Act / Assert
+        (should (= 1 (agent-repl--frontend-apply-conversation-delta
+                      (list :workspace "/nowhere/unowned"
+                            :items (list (agent-repl-test--perm-item
+                                          "r1" "Bash" "RESOLUTION_PENDING"))))))))))
+
+(ert-deftest agent-repl-test-permission-delta-unowned-cwd-still-dispatches-raw ()
+  "The dispatch fallback is untouched: an unowned cwd still keys the prompt.
+Degrading the DISPATCH value to nil would turn `--permission-handle-item''s
+loud missing-workspace refusal into a silent one; only the log sink resolves."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-log-sink-on
+      (cl-letf (((symbol-function 'agent-repl--notify) (lambda (&rest _) nil)))
+        ;; Act
+        (agent-repl--frontend-apply-conversation-delta
+         (list :workspace "/nowhere/unowned"
+               :items (list (agent-repl-test--perm-item
+                             "r1" "Bash" "RESOLUTION_PENDING"))))
+        ;; Assert
+        (should (equal (plist-get (agent-repl--ws-get "/nowhere/unowned"
+                                                      :permission-prompt-active)
+                                  :request-id)
+                       "r1"))))))
+
+(ert-deftest agent-repl-test-permission-unknown-resolution-errors-on-an-unowned-cwd ()
+  "An unknown resolution still fails with ITS OWN error, not a routing one."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-log-sink-on
+      ;; Act
+      (let ((err (should-error
+                  (agent-repl--permission-handle-item
+                   "/nowhere/unowned"
+                   (agent-repl-test--perm-item "r1" "Bash" "RESOLUTION_WAT")))))
+        ;; Assert
+        (should (string-match-p "unknown resolution"
+                                (error-message-string err)))))))
+
+
 ;;; test-permission.el ends here
