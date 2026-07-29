@@ -607,6 +607,21 @@ may never reorder it.")
                   :bracket-bg ,agent-repl--color-done-green
                   :bracket-fg ,agent-repl--color-light
                   :weight ,agent-repl--tab-weight))
+    ;; INTERRUPTED takes done's green, and had NO palette row at all until
+    ;; now: the state resolved, the shared color table assigned it green, and
+    ;; the tab bar fell through to `agent-repl--tab-default' and painted it
+    ;; uncolored.  An assignment with no row is an assignment nothing honors.
+    (:interrupted
+     :face       agent-repl-tab-done
+     :unselected (:bg ,agent-repl--color-done-green
+                  :fg ,agent-repl--color-dark
+                  :bracket-fg ,agent-repl--color-default-bracket
+                  :weight ,agent-repl--tab-weight)
+     :selected   (:bg ,agent-repl--color-selected-bg
+                  :fg ,agent-repl--color-dark
+                  :bracket-bg ,agent-repl--color-done-green
+                  :bracket-fg ,agent-repl--color-light
+                  :weight ,agent-repl--tab-weight))
     (:permission
      :face       agent-repl-tab-permission
      :unselected (:bg ,agent-repl--color-done-green
