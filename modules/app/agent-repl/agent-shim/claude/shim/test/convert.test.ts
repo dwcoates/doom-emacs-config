@@ -401,12 +401,14 @@ describe("lifecycle twins", () => {
   });
 
   it("result emits TurnEnded with stop_reason/duration/is_error", () => {
-    const { lifecycle } = convert(loadStream("result_success"));
+    const { lifecycle } = convert(loadStream("result_success"), { turnId: "turn-p1" });
     expect(lifecycle).toHaveLength(1);
     if (lifecycle[0]!.payload.case !== "turnEnded") throw new Error("case");
     expect(lifecycle[0]!.payload.value.stopReason).toBe("end_turn");
     expect(lifecycle[0]!.payload.value.durationMs).toBe(1236n);
     expect(lifecycle[0]!.payload.value.isError).toBe(false);
+    expect(lifecycle[0]!.payload.value.turnId).toBe("turn-p1");
+    expect(lifecycle[0]!.requestId).toBe("turn-p1");
   });
 
   it("a plain user message emits NO TurnStarted (turn start is shim-authoritative)", () => {

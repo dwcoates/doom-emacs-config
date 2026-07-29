@@ -2,7 +2,7 @@
 // pure functions with ZERO IO that turn decoded file records into core.Event
 // values. Each handler owns a converter and emits the file-plane twins of the
 // records it reads plus the vendor-neutral lifecycle events the design assigns
-// to that plane (TaskStarted / TurnEnded / TaskEnded / TaskProgress).
+// to that plane (TaskStarted / TaskEnded / TaskProgress).
 package handler
 
 import (
@@ -29,7 +29,7 @@ type Context = tail.Context
 var nowMillis = func() int64 { return time.Now().UnixMilli() }
 
 // vendorEvent wraps a data.v1 vendor message as a PERSISTENT file-plane Event.
-// dedupKey is set only where the store cannot derive it (journal/turn); "" lets
+// dedupKey is set only where the store cannot derive it (journal); "" lets
 // the store derive uuid:/tur: keys itself.
 func vendorEvent(sessionID string, vendor proto.Message, extras *structpb.Struct, dedupKey string, log *logging.Bound) *corev1.Event {
 	a, err := anypb.New(vendor)
@@ -78,13 +78,6 @@ func taskEndedEvent(sessionID string, plane corev1.Plane, te *corev1.TaskEnded) 
 	return e
 }
 
-func turnEndedEvent(sessionID, dedupKey string, te *corev1.TurnEnded) *corev1.Event {
-	e := base(sessionID, corev1.Plane_PLANE_FILE)
-	e.DedupKey = dedupKey
-	e.Payload = &corev1.Event_TurnEnded{TurnEnded: te}
-	return e
-}
-
 // unparsedEvent records a record that failed conversion (§5.1). raw is bounded to
 // 64KiB per the core.UnparsedEvent contract.
 func unparsedEvent(sessionID, path string, offset int64, raw []byte, convErr error) *corev1.Event {
@@ -115,15 +108,6 @@ func shellOutputPath(spoolDir, backgroundTaskID string) string {
 		return ""
 	}
 	return filepath.Join(spoolDir, backgroundTaskID+".output")
-}
-
-// turnDedupKey is the producer-supplied dedup key for a disk turn-end twin
-// (§6.4): the store cannot derive it because core.TurnEnded has no stable id.
-func turnDedupKey(sessionID, envelopeUUID string) string {
-	if envelopeUUID == "" {
-		return ""
-	}
-	return fmt.Sprintf("turn:%s:%s", sessionID, envelopeUUID)
 }
 
 // journalDedupKey is the producer-supplied dedup key for a journal record (§6.4):

@@ -90,8 +90,10 @@ func (r *faultRig) apply(payload any) {
 	case *corev1.SessionEnded:
 		ev.Payload = &corev1.Event_SessionEnded{SessionEnded: p}
 	case *corev1.TurnStarted:
+		ev.Plane = corev1.Plane_PLANE_STREAM
 		ev.Payload = &corev1.Event_TurnStarted{TurnStarted: p}
 	case *corev1.TurnEnded:
+		ev.Plane = corev1.Plane_PLANE_STREAM
 		ev.Payload = &corev1.Event_TurnEnded{TurnEnded: p}
 	case *corev1.TaskStarted:
 		ev.Payload = &corev1.Event_TaskStarted{TaskStarted: p}
