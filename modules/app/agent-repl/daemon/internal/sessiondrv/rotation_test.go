@@ -250,7 +250,7 @@ func TestPersistentEventReportsItsVendorSessionID(t *testing.T) {
 
 	// Act.
 	c.Apply(&corev1.Event{
-		SessionId: "uuid-old", Seq: 7,
+		SessionId: "uuid-old", Seq: 7, Plane: corev1.Plane_PLANE_STREAM,
 		Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{}},
 	})
 

@@ -63,10 +63,10 @@ func evSessionStarted(sid string, seq uint64) *corev1.Event {
 	return &corev1.Event{SessionId: sid, Seq: seq, Payload: &corev1.Event_SessionStarted{SessionStarted: &corev1.SessionStarted{}}}
 }
 func evTurnStarted(sid string, seq uint64) *corev1.Event {
-	return &corev1.Event{SessionId: sid, Seq: seq, Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{}}}
+	return &corev1.Event{SessionId: sid, Seq: seq, Plane: corev1.Plane_PLANE_STREAM, Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{}}}
 }
 func evTurnEnded(sid string, seq uint64, isErr bool) *corev1.Event {
-	return &corev1.Event{SessionId: sid, Seq: seq, Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{IsError: isErr}}}
+	return &corev1.Event{SessionId: sid, Seq: seq, Plane: corev1.Plane_PLANE_STREAM, Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{IsError: isErr}}}
 }
 func evSessionEnded(sid string, seq uint64) *corev1.Event {
 	return &corev1.Event{SessionId: sid, Seq: seq, Payload: &corev1.Event_SessionEnded{SessionEnded: &corev1.SessionEnded{}}}
@@ -463,6 +463,28 @@ func TestApplyNilAndEmptyEventErrors(t *testing.T) {
 	}
 	if err := m.Apply(&corev1.Event{Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{}}}); err == nil {
 		t.Fatalf("expected error for event with empty session_id")
+	}
+}
+
+func TestApplyRejectsFilePlaneTurnLifecycle(t *testing.T) {
+	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
+	ev := &corev1.Event{
+		SessionId: "s1",
+		Seq:       7,
+		Plane:     corev1.Plane_PLANE_FILE,
+		DedupKey:  "turn:s1:old-stop-hook",
+		Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{
+			StopReason: "end_turn",
+		}},
+	}
+	err := m.Apply(ev)
+	if err == nil {
+		t.Fatal("file-plane TurnEnded was accepted")
+	}
+	if !strings.Contains(err.Error(), "non-authoritative turn lifecycle") ||
+		!strings.Contains(err.Error(), "plane=PLANE_FILE") ||
+		!strings.Contains(err.Error(), "seq=7") {
+		t.Fatalf("error = %q", err)
 	}
 }
 

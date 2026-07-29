@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -139,25 +140,30 @@ func TestSessionHandlerTaskStopTwin(t *testing.T) {
 	}
 }
 
-func TestSessionHandlerTurnEndedFromStopHook(t *testing.T) {
+func TestSessionHandlerStopHookRemainsVendorEvidenceOnly(t *testing.T) {
 	// Arrange
-	h := NewSessionTranscriptHandler(quietLog)
+	var logs []string
+	h := NewSessionTranscriptHandler(func(format string, args ...any) {
+		logs = append(logs, fmt.Sprintf(format, args...))
+	})
 	f := frameFor(t, "transcript-lines/system-stop_hook_summary.jsonl")
 	// Act
 	evs := h.Handle([]tail.Frame{f}, &Context{SessionID: "sess"})
-	// Assert: a TurnEnded twin carrying the producer-supplied turn dedup key.
-	var turn *corev1.Event
+	// Assert: total ingestion keeps the transcript line, while no file-plane
+	// lifecycle fact can close a live stream turn.
+	if len(evs) != 1 || evs[0].GetVendor() == nil {
+		t.Fatalf("events = %+v, want one vendor transcript event", evs)
+	}
 	for _, e := range evs {
 		if e.GetTurnEnded() != nil {
-			turn = e
+			t.Fatalf("file-plane stop_hook_summary emitted TurnEnded: %+v", e)
 		}
 	}
-	if turn == nil {
-		t.Fatalf("no TurnEnded emitted")
-	}
-	wantKey := "turn:sess:877b7c91-44c1-4dda-95a2-3eeeef4b7fba"
-	if turn.GetDedupKey() != wantKey {
-		t.Fatalf("dedup_key = %q, want %q", turn.GetDedupKey(), wantKey)
+	joined := strings.Join(logs, "\n")
+	if !strings.Contains(joined, "plane=file") ||
+		!strings.Contains(joined, "identity=877b7c91-44c1-4dda-95a2-3eeeef4b7fba") ||
+		!strings.Contains(joined, "decision=vendor_only") {
+		t.Fatalf("lifecycle decision log = %q", joined)
 	}
 }
 

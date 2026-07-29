@@ -2,6 +2,8 @@ package sessiondrv
 
 import (
 	"errors"
+	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -385,6 +387,7 @@ func TestLifecycleEventsReachTheProgressResolver(t *testing.T) {
 	// Act — the lifecycle plane carries the turn boundaries the footer clocks.
 	c.Apply(&corev1.Event{
 		SessionId: "s1",
+		Plane:     corev1.Plane_PLANE_STREAM,
 		Payload:   &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{}},
 	})
 	// Assert
@@ -784,11 +787,39 @@ func TestApplyNonTaskEventDoesNotPushCatalog(t *testing.T) {
 	c := newTestConsumer(push, &fakeApplier{})
 
 	// Act.
-	c.Apply(&corev1.Event{SessionId: "s1", Seq: 1, Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{}}})
+	c.Apply(&corev1.Event{SessionId: "s1", Seq: 1, Plane: corev1.Plane_PLANE_STREAM, Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{}}})
 
 	// Assert.
 	if len(push.catalog) != 0 {
 		t.Fatalf("turn event must not refresh the task catalog; got %d pushes", len(push.catalog))
+	}
+}
+
+func TestApplyRejectsFileTurnEndBeforeQueueAndStateConsumers(t *testing.T) {
+	applier := &fakeApplier{}
+	var boundaries []bool
+	var logs []string
+	c := newConsumer(
+		"ws", "s1", &fakePusher{}, applier, nil, newFakeClearCompactStore(),
+		func(format string, args ...any) { logs = append(logs, fmt.Sprintf(format, args...)) },
+		nil,
+		func(active bool) { boundaries = append(boundaries, active) },
+		nil, nil, nil,
+	)
+	c.Apply(turnStartEvent(corev1.Plane_PLANE_STREAM, 12885, "turn-new"))
+	c.Apply(turnEndEvent(corev1.Plane_PLANE_FILE, 12891, ""))
+
+	if len(applier.applied) != 1 || applier.applied[0].GetTurnStarted() == nil {
+		t.Fatalf("SSM applied = %+v, want only the stream TurnStarted", applier.applied)
+	}
+	if !reflect.DeepEqual(boundaries, []bool{true}) {
+		t.Fatalf("queue boundaries = %v, want only active=true", boundaries)
+	}
+	joined := strings.Join(logs, "\n")
+	if !strings.Contains(joined, "decision=reject_non_authoritative_plane") ||
+		!strings.Contains(joined, "seq=12891") ||
+		!strings.Contains(joined, "active_after=[turn-new]") {
+		t.Fatalf("turn authority log = %q", joined)
 	}
 }
 
@@ -1408,7 +1439,7 @@ func TestATurnEndDoesNotReportADeath(t *testing.T) {
 	c := newConsumer("ws", "s1", &fakePusher{}, &fakeApplier{}, nil, newFakeClearCompactStore(), nil, nil, nil, nil, nil, func() { ended++ })
 
 	// Act.
-	c.Apply(&corev1.Event{Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{}}})
+	c.Apply(&corev1.Event{Plane: corev1.Plane_PLANE_STREAM, Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{}}})
 
 	// Assert.
 	if ended != 0 {

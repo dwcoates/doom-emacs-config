@@ -16,6 +16,7 @@ func evTurnEndedReason(sid string, seq uint64, reason string, isErr bool) *corev
 	return &corev1.Event{
 		SessionId: sid,
 		Seq:       seq,
+		Plane:     corev1.Plane_PLANE_STREAM,
 		Payload: &corev1.Event_TurnEnded{
 			TurnEnded: &corev1.TurnEnded{StopReason: reason, IsError: isErr},
 		},

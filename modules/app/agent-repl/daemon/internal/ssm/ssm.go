@@ -247,6 +247,14 @@ func (m *Manager) Apply(ev *corev1.Event) error {
 	if sid == "" {
 		return fmt.Errorf("ssm: Apply got an event with no session_id (seq %d)", ev.GetSeq())
 	}
+	switch ev.GetPayload().(type) {
+	case *corev1.Event_TurnStarted, *corev1.Event_TurnEnded:
+		if ev.GetPlane() != corev1.Plane_PLANE_STREAM {
+			return fmt.Errorf("ssm: rejected non-authoritative turn lifecycle plane=%s session=%s seq=%d kind=%s turn_id=%q request_id=%q dedup_key=%q",
+				ev.GetPlane().String(), sid, ev.GetSeq(), payloadKind(ev),
+				turnCorrelation(ev), ev.GetRequestId(), ev.GetDedupKey())
+		}
+	}
 
 	state, causeKind, ok := agentOrTaskSignal(ev)
 	if !ok {
@@ -348,6 +356,16 @@ func (m *Manager) Apply(ev *corev1.Event) error {
 	}
 
 	return m.reresolveLocked(ws, causeKind, ev.GetSeq())
+}
+
+func turnCorrelation(ev *corev1.Event) string {
+	if started := ev.GetTurnStarted(); started != nil {
+		return started.GetTurnId()
+	}
+	if ended := ev.GetTurnEnded(); ended != nil {
+		return ended.GetTurnId()
+	}
+	return ""
 }
 
 // MarkTurnInterrupted records that a user-commanded stop was DELIVERED to the
