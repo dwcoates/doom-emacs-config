@@ -10,11 +10,13 @@ import (
 
 // newClosingRig builds a live driver over a fake client that runs until
 // cancelled, returning the manager and the doubles the exit tail lands in.
-func newClosingRig(t *testing.T) (*Manager, *fakeSpawner, *fakeApplier) {
+func newClosingRig(t *testing.T) (*Manager, *fakeSpawner, *fakeApplier, *logCapture) {
 	t.Helper()
 	spawner := &fakeSpawner{}
 	applier := &fakeApplier{}
+	cl := &logCapture{}
 	cfg := Config{
+		Logf:              cl.logf,
 		Push:              &fakePusher{},
 		Progress:          &fakeProgress{},
 		SSM:               applier,
@@ -36,7 +38,7 @@ func newClosingRig(t *testing.T) (*Manager, *fakeSpawner, *fakeApplier) {
 	if err := m.Ensure("ws"); err != nil {
 		t.Fatalf("Ensure: %v", err)
 	}
-	return m, spawner, applier
+	return m, spawner, applier, cl
 }
 
 // Close JOINS the driver-exit goroutine: the tail of bringUp's `go func` —
@@ -46,25 +48,49 @@ func newClosingRig(t *testing.T) (*Manager, *fakeSpawner, *fakeApplier) {
 // suite it recreated registry files inside a t.TempDir mid-RemoveAll, which
 // was the origin of the roving "directory not empty" teardown flake.
 //
-// The observable is the tail's LAST act, which is the `driver_exit` wiring
-// edge. It used to be the orphan-shim stop; that stop no longer runs on a
-// manager close, because a close preserves the shim (see the test below).
+// The observable is the tail's LAST act, which on a manager close is the
+// shim-preservation line. It has been three different things as the tail
+// changed, and each move was forced rather than chosen: it was the orphan-shim
+// stop until a close stopped SIGTERMing children (see the test below), then the
+// `driver_exit` wiring edge until that edge became conditional on a non-nil
+// runErr — a manager close cancels the root ctx, which ends Run with nil, so
+// there is deliberately no wiring edge left to wait on.
 func TestCloseJoinsTheDriverExitGoroutine(t *testing.T) {
 	// Arrange.
-	m, _, applier := newClosingRig(t)
+	m, _, _, cl := newClosingRig(t)
 
 	// Act.
 	m.Close()
 
 	// Assert.
-	var found bool
-	for _, w := range applier.wiringsApplied() {
-		if w.workspace == "ws" && w.reason == "driver_exit" {
-			found = true
-		}
+	if !cl.contains("PRESERVING the shim") {
+		t.Fatal("Close returned before the driver-exit goroutine finished: its last act had not run yet")
 	}
-	if !found {
-		t.Fatal("Close returned before the driver-exit goroutine finished: its wiring edge had not landed yet")
+}
+
+// A MANAGER CLOSE WRITES NO WIRED ROW, and that silence is the trap this whole
+// design turns on.
+//
+// The tail fires on the same workspace milliseconds after whatever cancelled the
+// driver ctx. A tail that wrote `severed` unconditionally therefore repainted
+// every hibernation blue the instant after it went teal — the entire split
+// undone by one write. `client.Run` returns non-nil ONLY for a terminal protocol
+// error, so a nil answer is positive evidence that nothing broke, and every
+// clean cancel has already recorded a truer answer: a hibernation wrote
+// `hibernated` before cancelling, a failed bring-up wrote `severed` itself, and
+// a manager close's axis is rewritten wholesale by the next boot.
+func TestCloseAppendsNoWiredRow(t *testing.T) {
+	// Arrange.
+	m, _, applier, _ := newClosingRig(t)
+
+	// Act.
+	m.Close()
+
+	// Assert.
+	for _, w := range applier.wiringsApplied() {
+		if w.reason == "driver_exit" {
+			t.Fatalf("a CLEAN driver exit wrote %s/%q; a clean exit must write nothing at all", w.wiring, w.reason)
+		}
 	}
 }
 
@@ -74,7 +100,7 @@ func TestCloseJoinsTheDriverExitGoroutine(t *testing.T) {
 // the stop was unconditional.
 func TestCloseDoesNotStopTheShim(t *testing.T) {
 	// Arrange.
-	m, spawner, _ := newClosingRig(t)
+	m, spawner, _, _ := newClosingRig(t)
 
 	// Act.
 	m.Close()

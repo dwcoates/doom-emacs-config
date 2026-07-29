@@ -22,9 +22,19 @@ import "claude-repld/internal/ssm"
 // THE CLOSING EDGES ARE EVERY WAY THAT VERDICT STOPS HOLDING, and they are
 // listed here in one place so a new one cannot be added without joining them:
 //
-//   - DRIVER EXIT — `client.Run` returned, so this driver is done. It is the
-//     catch-all: a terminal protocol error, a cancelled root context, and the
-//     cancel a hibernation issues all land here.
+//   - DRIVER EXIT — `client.Run` returned a NON-NIL error, so this driver died
+//     on a terminal protocol error. Reported `severed`.
+//
+//     It used to be the catch-all for every way Run could end, and that was the
+//     single most dangerous line in this package once the axis's closed half
+//     split in two: a hibernation's own cancel ends Run milliseconds after the
+//     hibernation writes `hibernated`, so an unconditional severance at the exit
+//     repainted every single hibernation blue immediately after it went teal.
+//     `client.Run` loops forever across benign disconnects and returns non-nil
+//     only for a terminal protocol error, so the error itself is the
+//     discriminator, and a CLEAN exit now writes nothing at all. See the
+//     enumeration of driver-ctx cancels at the tail in driver.go: every one of
+//     them has already recorded a truer answer than the tail could.
 //   - HIBERNATION — the shim is SIGTERMed. Closed at the teardown itself rather
 //     than left to the exit that follows, because the two are not the same
 //     instant and the honest answer is available at the earlier one.
@@ -43,9 +53,18 @@ import "claude-repld/internal/ssm"
 //     bring-up genuinely IS in flight — the reconnect loop re-runs the entire
 //     gate — and the re-handshake's `onConnected` closes it again.
 //
+// EVERY CLOSING EDGE MUST SAY WHICH CLOSED HALF IT MEANS, because the axis's
+// closed half is two tokens rather than one. `severed` claims something broke;
+// `hibernated` claims nothing did. One token used to serve both and therefore
+// served neither — the idle sweeper reclaiming ~500MB from an untouched
+// workspace painted a tab exactly like a dead shim, so blue stopped meaning
+// anything. Of the edges above, hibernation and the session-scoped stop are
+// benign; driver exit and link loss are not.
+//
 // `starting` is written at BRING-UP, and it means strictly that a bring-up is in
 // flight — not that a session is wanted. That is what keeps INIT's spinner
-// honest: a workspace nobody is bringing up is `dormant`, which spins nothing.
+// honest: a workspace nobody is bringing up is on the axis's closed half, which
+// spins nothing.
 
 // noteWiring moves the workspace's wired axis, loud-logging a failure rather
 // than swallowing it.
@@ -72,7 +91,7 @@ func (m *Manager) noteWiring(workspace string, wiring ssm.Wiring, reason string)
 //
 // It fires ONLY for a genuine loss — the shimclient withholds it for a
 // teardown-initiated close, where the driver exit is the honest edge — so this
-// never races the dormant a hibernation or a manager close writes.
+// never races the row a hibernation or a manager close writes.
 //
 // The workspace is only moved when this driver still OWNS it. A superseded
 // driver's link dying says nothing about the replacement now driving the
