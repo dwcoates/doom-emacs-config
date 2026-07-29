@@ -246,6 +246,9 @@ func TestRestartSessionFailsWhenTheOrphanCannotBeStopped(t *testing.T) {
 func TestRestartSessionCarriesTheAnnouncedPidToTheStop(t *testing.T) {
 	// Arrange — a session whose shim announced its pid on the handshake.
 	m, spawner, _ := newRefreshRig(t, "sha-1")
+	if err := m.Ensure("ws"); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
 	m.onHandshake("ws", "s1", &corev1.ShimHello{Pid: 4242})
 
 	// Act.
@@ -265,6 +268,9 @@ func TestRestartSessionCarriesTheAnnouncedPidToTheStop(t *testing.T) {
 func TestAHelloWithoutAPidRecordsNone(t *testing.T) {
 	// Arrange.
 	m, _, _ := newRefreshRig(t, "sha-1")
+	if err := m.Ensure("ws"); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
 	m.onHandshake("ws", "s1", &corev1.ShimHello{Pid: 7})
 
 	// Act — a later hello (a reconnect from a build that does not report one).

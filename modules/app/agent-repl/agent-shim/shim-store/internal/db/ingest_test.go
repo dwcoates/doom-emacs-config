@@ -213,6 +213,17 @@ func TestKindOfNamesFilePlaneDiagnostic(t *testing.T) {
 	}
 }
 
+func TestKindOfNamesTurnClaimBridge(t *testing.T) {
+	ev := &corev1.Event{
+		Payload: &corev1.Event_TurnClaimBridge{
+			TurnClaimBridge: &corev1.TurnClaimBridge{},
+		},
+	}
+	if got := kindOf(ev); got != "TurnClaimBridge" {
+		t.Fatalf("kindOf(TurnClaimBridge) = %q, want TurnClaimBridge", got)
+	}
+}
+
 func TestIngestExtractsColumns(t *testing.T) {
 	// Arrange
 	d := openTemp(t)

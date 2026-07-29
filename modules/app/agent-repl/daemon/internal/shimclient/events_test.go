@@ -1,8 +1,10 @@
 package shimclient
 
 import (
+	"context"
 	"errors"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -79,6 +81,83 @@ func TestSeqRegressionIsDetected(t *testing.T) {
 	// Assert
 	if !errors.Is(err, ErrSeqRegression) {
 		t.Fatalf("want ErrSeqRegression, got %v", err)
+	}
+}
+
+func TestRejectedLifecycleEventDoesNotAdvanceHighWater(t *testing.T) {
+	h := newHarness()
+	sinkErr := errors.New("durable turn claim rejected")
+	h.state.err = sinkErr
+	c := New(h.config(t, "sess-1", "/unused.sock"))
+
+	err := c.dispatchEvent(persistentTurnEnd("sess-1", 7))
+	if !errors.Is(err, ErrLifecycleRejected) || !strings.Contains(err.Error(), sinkErr.Error()) {
+		t.Fatalf("dispatch err = %v, want ErrLifecycleRejected carrying sink cause", err)
+	}
+	<-h.state.ch
+	if got := h.seq.LastSeq("sess-1"); got != 0 {
+		t.Fatalf("last sequence = %d, want 0 after rejected lifecycle event", got)
+	}
+	if c.lastSeen != 0 {
+		t.Fatalf("client lastSeen = %d, want 0 after rejected lifecycle event", c.lastSeen)
+	}
+}
+
+func TestRejectedLifecycleEventTerminatesInsteadOfReconnectLoop(t *testing.T) {
+	h := newHarness()
+	h.state.err = errors.New("turn end has no durable active claim")
+	path := startFakeShim(t, func(conn net.Conn) {
+		_ = fakeServerHandshake(t, conn, "sess-1", "1", false)
+		mustWriteMsg(t, conn, persistentTurnEnd("sess-1", 7))
+		_, _ = wire.ReadAny(conn)
+	})
+	c := New(h.config(t, "sess-1", path))
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	err := c.Run(ctx)
+	if !errors.Is(err, ErrLifecycleRejected) {
+		t.Fatalf("Run err = %v, want terminal ErrLifecycleRejected", err)
+	}
+	if got := h.seq.LastSeq("sess-1"); got != 0 {
+		t.Fatalf("last sequence = %d, want rejected seq uncommitted", got)
+	}
+}
+
+func TestRejectedTurnClaimBridgeDoesNotAdvanceOrLeakToOtherSinks(t *testing.T) {
+	h := newHarness()
+	sinkErr := errors.New("bridge contradicts durable start receipt")
+	h.claims.err = sinkErr
+	c := New(h.config(t, "sess-1", "/unused.sock"))
+	ev := &corev1.Event{
+		SessionId: "vendor-new",
+		Seq:       3,
+		Plane:     corev1.Plane_PLANE_STREAM,
+		Class:     corev1.EventClass_EVENT_CLASS_PERSISTENT,
+		RequestId: "turn-1",
+		Payload: &corev1.Event_TurnClaimBridge{TurnClaimBridge: &corev1.TurnClaimBridge{
+			TurnId: "turn-1", PreviousSessionId: "vendor-old",
+		}},
+	}
+
+	err := c.dispatchEvent(ev)
+	if !errors.Is(err, ErrTurnClaimRejected) ||
+		!strings.Contains(err.Error(), sinkErr.Error()) {
+		t.Fatalf("dispatch err = %v, want ErrTurnClaimRejected carrying sink cause", err)
+	}
+	assertRecv(t, h.claims.ch)
+	if got := h.seq.LastSeq("sess-1"); got != 0 || c.lastSeen != 0 {
+		t.Fatalf("rejected bridge advanced sequence: store=%d client=%d", got, c.lastSeen)
+	}
+	select {
+	case got := <-h.state.ch:
+		t.Fatalf("rejected bridge reached lifecycle sink: %+v", got)
+	default:
+	}
+	select {
+	case got := <-h.frame.ch:
+		t.Fatalf("rejected bridge reached frontend sink: %+v", got)
+	default:
 	}
 }
 
@@ -201,6 +280,16 @@ func TestEventRouting(t *testing.T) {
 			want: "state",
 		},
 		{
+			name: "turn claim bridge to dedicated ledger sink",
+			ev: &corev1.Event{
+				SessionId: "s",
+				Payload: &corev1.Event_TurnClaimBridge{TurnClaimBridge: &corev1.TurnClaimBridge{
+					TurnId: "turn-1", PreviousSessionId: "s-old",
+				}},
+			},
+			want: "claim",
+		},
+		{
 			name: "task started to state sink",
 			ev:   &corev1.Event{SessionId: "s", Payload: &corev1.Event_TaskStarted{TaskStarted: &corev1.TaskStarted{TaskId: "a1"}}},
 			want: "state",
@@ -265,6 +354,8 @@ func TestEventRouting(t *testing.T) {
 			switch tt.want {
 			case "state":
 				assertRecv(t, h.state.ch)
+			case "claim":
+				assertRecv(t, h.claims.ch)
 			case "frame":
 				assertRecv(t, h.frame.ch)
 			case "degraded":
@@ -275,6 +366,36 @@ func TestEventRouting(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestTurnClaimBridgeCannotReachLifecycleOrFrontendSinks(t *testing.T) {
+	h := newHarness()
+	c := New(h.config(t, "s", "/unused.sock"))
+	ev := &corev1.Event{
+		SessionId: "vendor-new",
+		Seq:       2,
+		Plane:     corev1.Plane_PLANE_STREAM,
+		Class:     corev1.EventClass_EVENT_CLASS_PERSISTENT,
+		RequestId: "turn-1",
+		Payload: &corev1.Event_TurnClaimBridge{TurnClaimBridge: &corev1.TurnClaimBridge{
+			TurnId: "turn-1", PreviousSessionId: "vendor-old",
+		}},
+	}
+
+	if err := c.dispatchEvent(ev); err != nil {
+		t.Fatalf("dispatchEvent: %v", err)
+	}
+	assertRecv(t, h.claims.ch)
+	select {
+	case got := <-h.state.ch:
+		t.Fatalf("bridge reached lifecycle StateSink: %+v", got)
+	default:
+	}
+	select {
+	case got := <-h.frame.ch:
+		t.Fatalf("bridge reached frontend FrameSink: %+v", got)
+	default:
 	}
 }
 
