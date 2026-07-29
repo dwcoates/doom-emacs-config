@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   CommandDispatcher,
   InterruptConfirmRequiredError,
+  ModelSelectionRejectedError,
   type CreateSessionArgs,
 } from "../src/command-dispatch.js";
 import { decodeFrontendFrame, type FrontendFrame } from "../src/frontend-proto.js";
@@ -37,8 +38,10 @@ function newDispatcher(sendReturns = true) {
   return { dispatcher, sent, records };
 }
 
-function ackFrame(requestId: string, ok: boolean, error = ""): FrontendFrame {
-  return decodeFrontendFrame(JSON.stringify({ commandAck: { requestId, ok, ...(error !== "" ? { error } : {}) } }));
+function ackFrame(requestId: string, ok: boolean, error = "", selectedModel = ""): FrontendFrame {
+  return decodeFrontendFrame(JSON.stringify({ commandAck: {
+    requestId, ok, ...(error !== "" ? { error } : {}), ...(selectedModel !== "" ? { selectedModel } : {}),
+  } }));
 }
 
 /** The interrupt confirmation CHALLENGE: ok=false, no failure, live tasks. */
@@ -51,7 +54,7 @@ function challengeFrame(requestId: string, liveTasks: number): FrontendFrame {
 }
 
 function sessionViewFrame(over: Record<string, unknown>): FrontendFrame {
-  return decodeFrontendFrame(JSON.stringify({ sessionView: { sessionId: "s1", ...over } }));
+  return decodeFrontendFrame(JSON.stringify({ sessionView: { sessionId: "s1", modelOptions: [], ...over } }));
 }
 
 const CREATE_ARGS: CreateSessionArgs = {
@@ -73,6 +76,21 @@ describe("ack-correlated commands", () => {
     });
     dispatcher.observe(ackFrame("r1", true));
     await expect(p).resolves.toBeUndefined();
+  });
+
+  it("rejects a model switch with the shim-confirmed selected model", async () => {
+    const { dispatcher } = newDispatcher();
+    const p = dispatcher.setModel("/w", "opus");
+    dispatcher.observe(ackFrame("r1", false, "model unavailable", "sonnet"));
+    await expect(p).rejects.toBeInstanceOf(ModelSelectionRejectedError);
+    await expect(p).rejects.toMatchObject({ selectedModel: "sonnet" });
+  });
+
+  it("rejects a SetModel receipt that omits its authoritative selection", async () => {
+    const { dispatcher } = newDispatcher();
+    const p = dispatcher.setModel("/w", "opus");
+    dispatcher.observe(ackFrame("r1", true));
+    await expect(p).rejects.toThrow(/selectedModel is absent/);
   });
 
   it("interrupt rejects on an error ack, naming the command and reason", async () => {
@@ -169,8 +187,8 @@ describe("ack-correlated commands", () => {
     const { dispatcher, sent } = newDispatcher();
     const p = dispatcher.setModel("/w", "opus");
     expect(JSON.parse(sent[0])).toEqual({ requestId: "r1", workspace: "/w", setModel: { model: "opus" } });
-    dispatcher.observe(ackFrame("r1", true));
-    await expect(p).resolves.toBeUndefined();
+    dispatcher.observe(ackFrame("r1", true, "", "opus"));
+    await expect(p).resolves.toBe("opus");
   });
 
   it("rejects when the socket refuses the frame", async () => {

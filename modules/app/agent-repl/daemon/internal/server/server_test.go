@@ -190,6 +190,9 @@ func newHarnessWith(t *testing.T, extra Config) *harness {
 	cfg.Driver = driver
 	cfg.SSM = mgr
 	cfg.Frontend = fe
+	if cfg.ModelCatalogs == nil {
+		cfg.ModelCatalogs = NewSessionModelCatalogs()
+	}
 	srv := New(cfg)
 	binding.SetTarget(srv)
 
@@ -614,7 +617,7 @@ func TestListSessionsEnvelopeReportsBinaryMTime(t *testing.T) {
 
 func TestDaemonViewCarriesIdentity(t *testing.T) {
 	// Arrange — a Server with a known version + binary mtime (seconds).
-	srv := New(Config{DaemonVersion: "v9", BinaryMTime: 5, Logf: func(string, ...any) {}})
+	srv := New(Config{DaemonVersion: "v9", BinaryMTime: 5, Logf: func(string, ...any) {}, ModelCatalogs: NewSessionModelCatalogs()})
 	// Act
 	dv := srv.DaemonView()
 	// Assert — boot id, the frontend.v1 protocol version "1", mtime in millis.

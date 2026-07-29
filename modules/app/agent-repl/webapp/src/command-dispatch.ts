@@ -38,6 +38,18 @@ import { log, logVerbose } from "./wslog.js";
  */
 const MAX_TRACKED_CLIENT_LOGS = 256;
 
+function asError(value: unknown): Error {
+  return value instanceof Error ? value : new Error(String(value));
+}
+
+function requiredSelectedModel(ack: CommandAck, disposition: "ack" | "nack"): string {
+  const selected = ack.selectedModel;
+  if (selected === "" || selected.trim() === "<synthetic>") {
+    throw new Error(`setModel ${disposition} protocol violation: selectedModel is absent, empty, or <synthetic>`);
+  }
+  return selected;
+}
+
 /**
  * The interrupt confirmation CHALLENGE (I1), as a rejection a caller can tell
  * apart from a failure.
@@ -58,6 +70,19 @@ export class InterruptConfirmRequiredError extends Error {
   constructor(readonly liveTasks: number) {
     super(`interrupt needs confirmation: ${liveTasks} live task${liveTasks === 1 ? "" : "s"}`);
     this.name = "InterruptConfirmRequiredError";
+  }
+}
+
+/**
+ * A rejected model request still carries the shim-confirmed selection. The
+ * selector must render that value rather than retaining its browser-local
+ * tentative choice, so callers need a typed refusal rather than prose to
+ * parse.
+ */
+export class ModelSelectionRejectedError extends Error {
+  constructor(readonly selectedModel: string, reason: string) {
+    super(`setModel rejected: ${reason}`);
+    this.name = "ModelSelectionRejectedError";
   }
 }
 
@@ -102,7 +127,7 @@ export interface DispatchOptions {
 
 interface PendingAck {
   command: string;
-  resolve: () => void;
+  resolve: (ack: CommandAck) => void;
   reject: (err: Error) => void;
 }
 
@@ -195,9 +220,30 @@ export class CommandDispatcher {
     return this.dispatch("", { case: "deleteSession", sessionId });
   }
 
-  /** Request a model switch. The selected value remains daemon-owned. */
-  setModel(workspace: string, model: string): Promise<void> {
-    return this.dispatch(workspace, { case: "setModel", model });
+  /** Request a model switch and return the shim-confirmed selected model. */
+  setModel(workspace: string, model: string): Promise<string> {
+    const requestId = this.newId();
+    log("info", "command dispatcher dispatching model selection request", {
+      operation: "command-dispatch.set-model",
+      context: { request_id: requestId, workspace, requested_model: model, pending_count: this.pending.size },
+    });
+    return new Promise<string>((resolve, reject) => {
+      this.pending.set(requestId, {
+        command: "setModel",
+        resolve: (ack) => {
+          try {
+            resolve(requiredSelectedModel(ack, "ack"));
+          } catch (err) {
+            reject(asError(err));
+          }
+        },
+        reject,
+      });
+      if (!this.opts.send(encodeFrontendCommand({ requestId, workspace, body: { case: "setModel", model } }))) {
+        this.pending.delete(requestId);
+        reject(new Error("setModel: socket not open"));
+      }
+    });
   }
 
   // The held-prompt queue controls (E4). Ack-correlated, unlike clientLog:
@@ -223,7 +269,7 @@ export class CommandDispatcher {
       context: { request_id: requestId, workspace, command: body.case, pending_count: this.pending.size },
     });
     return new Promise<void>((resolve, reject) => {
-      this.pending.set(requestId, { command: body.case, resolve, reject });
+      this.pending.set(requestId, { command: body.case, resolve: () => resolve(), reject });
       if (!this.opts.send(encodeFrontendCommand({ requestId, workspace, body }))) {
         this.pending.delete(requestId);
         log("error", "command dispatcher command send was rejected", {
@@ -313,7 +359,7 @@ export class CommandDispatcher {
         operation: "command-dispatch.ack-resolved",
         context: { request_id: ack.requestId, command: p.command, pending_count: this.pending.size },
       });
-      p.resolve();
+      p.resolve(ack);
       return;
     }
     // The CHALLENGE arm, checked before the failure path: it is not a failure
@@ -337,6 +383,14 @@ export class CommandDispatcher {
         operation: "command-dispatch.ack-rejected",
         context: { request_id: ack.requestId, command: p.command, error: ack.error, has_classified_failure: ack.failure !== undefined },
       });
+    }
+    if (p.command === "setModel") {
+      try {
+        p.reject(new ModelSelectionRejectedError(requiredSelectedModel(ack, "nack"), ack.error));
+      } catch (err) {
+        p.reject(asError(err));
+      }
+      return;
     }
     p.reject(new Error(`${p.command} rejected: ${ack.error}`));
   }

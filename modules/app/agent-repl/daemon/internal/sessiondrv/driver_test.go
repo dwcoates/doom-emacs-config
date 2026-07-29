@@ -234,6 +234,19 @@ func (c *fakeClient) Interrupt(_ context.Context) (corev1.InterruptOutcome, erro
 }
 func (c *fakeClient) SetModel(_ context.Context, model string) (string, error) { return model, nil }
 
+func TestManagerSetModelRejectsSyntheticBeforeSessionLookup(t *testing.T) {
+	// A zero Manager has no locator or shim; reaching either would panic. The
+	// marker must stop at this boundary exactly like an empty model.
+	m := &Manager{}
+	selected, err := m.SetModel(context.Background(), "/workspace", "<synthetic>")
+	if err == nil || !strings.Contains(err.Error(), "non-empty model") {
+		t.Fatalf("SetModel(<synthetic>) error = %v, want non-empty-model refusal", err)
+	}
+	if selected != "" {
+		t.Fatalf("SetModel(<synthetic>) selected = %q, want empty", selected)
+	}
+}
+
 // Replay is the shim-mediated bounded history replay. The default fake serves
 // an empty, complete one; the replay-specific harness (repull_test.go) swaps in
 // a scripted stand-in.
