@@ -2776,6 +2776,47 @@ caught loudly."
   (agent-repl-test--with-clean-state
     (should-error (agent-repl--workspace-log-identity "never-registered"))))
 
+;;;; ---- Tests: the log sink does not instrument itself ----
+
+(ert-deftest agent-repl-test-workspace-scoped-record-emits-no-buffer-name-record ()
+  "Writing one workspace-scoped record must not produce a second record.
+`agent-repl--append-workspace-log' documents that it does not instrument its
+own buffer resolution, but the buffer is NAMED by `agent-repl--buffer-name',
+which logged — so every workspace-scoped line emitted a `buffer-name:' line
+too.  In production that doubling put `buffer-name: suffix=-log' third in the
+log at 71,425 records."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-temp-logfile path
+      (let ((project (make-temp-file "agent-repl-no-amplify-" t))
+            (agent-repl--workspace-log-buffer-enabled t)
+            (agent-repl--workspace-log-targets (make-hash-table :test #'equal)))
+        (unwind-protect
+            (progn
+              (agent-repl--ws-put "amp-ws" :project-dir project)
+              (cl-letf (((symbol-function 'message) #'ignore))
+                (agent-repl--log "amp-ws" "single line"))
+              (with-temp-buffer
+                (insert-file-contents path)
+                (should (= 0 (cl-count-if
+                              (lambda (l) (string-match-p "buffer-name: suffix=-log" l))
+                              (split-string (buffer-string) "\n" t))))))
+          (delete-directory project t))))))
+
+(ert-deftest agent-repl-test-buffer-name-still-logs-for-ordinary-callers ()
+  "Silencing the sink's own path must not silence genuine callers."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-temp-logfile path
+      (let ((project (make-temp-file "agent-repl-still-logs-" t)))
+        (unwind-protect
+            (progn
+              (agent-repl--ws-put "named-ws" :project-dir project)
+              (cl-letf (((symbol-function 'message) #'ignore))
+                (agent-repl--buffer-name "-view" "named-ws"))
+              (with-temp-buffer
+                (insert-file-contents path)
+                (should (string-match-p "buffer-name: suffix=-view" (buffer-string)))))
+          (delete-directory project t))))))
+
 (provide 'test-core)
 
 ;;; test-core.el ends here
