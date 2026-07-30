@@ -439,7 +439,7 @@ func TestCommandHandlerCreateSessionRoutesToSessions(t *testing.T) {
 	// assertion needs a shim that answers healthy.
 	h := establishHandler(t, sc, &probeHealthRouter{healthy: true})
 	// Act
-	err := h.CreateSession(context.Background(), "/w", "r1", &frontendv1.CreateSessionCmd{Cwd: "/w"})
+	_, err := h.CreateSession(context.Background(), "/w", "r1", &frontendv1.CreateSessionCmd{Cwd: "/w"})
 	// Assert — the create routes with its opts, never a silent drop.
 	if err != nil {
 		t.Fatalf("err: %v", err)
@@ -458,7 +458,7 @@ func TestCommandHandlerCarriesTheUngatedConsent(t *testing.T) {
 	// assertion needs a shim that answers healthy.
 	h := establishHandler(t, sc, &probeHealthRouter{healthy: true})
 	// Act
-	err := h.CreateSession(context.Background(), "/w", "r1", &frontendv1.CreateSessionCmd{
+	_, err := h.CreateSession(context.Background(), "/w", "r1", &frontendv1.CreateSessionCmd{
 		Cwd:            "/w",
 		PermissionMode: "bypassPermissions",
 		AllowUngated:   true,
@@ -479,7 +479,7 @@ func TestCommandHandlerWithholdsAnUnsetUngatedConsent(t *testing.T) {
 	// assertion needs a shim that answers healthy.
 	h := establishHandler(t, sc, &probeHealthRouter{healthy: true})
 	// Act
-	err := h.CreateSession(context.Background(), "/w", "r1", &frontendv1.CreateSessionCmd{Cwd: "/w"})
+	_, err := h.CreateSession(context.Background(), "/w", "r1", &frontendv1.CreateSessionCmd{Cwd: "/w"})
 	// Assert — an ordinary create never fabricates the consent.
 	if err != nil {
 		t.Fatalf("err: %v", err)
@@ -605,7 +605,7 @@ func TestCommandHandlerCreateSessionErrorSurfaces(t *testing.T) {
 		t.Fatalf("newCommandHandler: %v", err)
 	}
 	// Act / Assert — the error is surfaced, never swallowed.
-	if got := h.CreateSession(context.Background(), "/w", "r1", &frontendv1.CreateSessionCmd{Cwd: "/w"}); got == nil {
+	if _, got := h.CreateSession(context.Background(), "/w", "r1", &frontendv1.CreateSessionCmd{Cwd: "/w"}); got == nil {
 		t.Fatal("want the create error surfaced")
 	}
 }
@@ -751,6 +751,7 @@ func TestSnapshotProviderCombinesSSMAndSessions(t *testing.T) {
 		t.Fatalf("put: %v", err)
 	}
 	shim, err := WireAgentShim(AgentShimConfig{
+		Resumes:           &fakeResumes{},
 		SSM:               openTestSSM(t, reg),
 		Progress:          progress.New(progress.Options{Logf: func(string, ...any) {}}),
 		Prompts:           &fakePrompts{},
@@ -805,6 +806,7 @@ func TestWireAgentShimFeedsTheSsmTransitionIntoProgressWithoutAPhaseCopy(t *test
 	reg := openTestRegistry(t)
 	prog := progress.New(progress.Options{Logf: func(string, ...any) {}})
 	shim, err := WireAgentShim(AgentShimConfig{
+		Resumes:           &fakeResumes{},
 		SSM:               openTestSSM(t, reg),
 		Progress:          prog,
 		Prompts:           &fakePrompts{},
@@ -844,6 +846,7 @@ func TestWireAgentShimRejectsNilProgress(t *testing.T) {
 	// error, not a silently progress-free daemon.
 	reg := openTestRegistry(t)
 	_, err := WireAgentShim(AgentShimConfig{
+		Resumes:         &fakeResumes{},
 		SSM:             openTestSSM(t, reg),
 		MergeDirs:       fakeMergeDirs{},
 		SessionCommands: &SessionCommandBinding{},
@@ -856,6 +859,7 @@ func TestWireAgentShimRejectsNilProgress(t *testing.T) {
 func TestWireAgentShimRejectsNilWorkspaceCreation(t *testing.T) {
 	reg := openTestRegistry(t)
 	_, err := WireAgentShim(AgentShimConfig{
+		Resumes:         &fakeResumes{},
 		SSM:             openTestSSM(t, reg),
 		Progress:        progress.New(progress.Options{Logf: func(string, ...any) {}}),
 		Prompts:         &fakePrompts{},
@@ -912,6 +916,7 @@ func TestWireAgentShimMergeTransitionReachesSSM(t *testing.T) {
 	// Arrange
 	reg := openTestRegistry(t)
 	shim, err := WireAgentShim(AgentShimConfig{
+		Resumes:           &fakeResumes{},
 		SSM:               openTestSSM(t, reg),
 		Progress:          progress.New(progress.Options{Logf: func(string, ...any) {}}),
 		Prompts:           &fakePrompts{},

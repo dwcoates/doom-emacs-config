@@ -212,6 +212,9 @@ type commandHandler struct {
 	resyncer Resyncer
 	// sessions backs the createSession/deleteSession commands. Required.
 	sessions SessionCreateDeleter
+	// resumes resolves which conversation a CONTINUE create lands on. Nil is a
+	// loud failing ack for that mode; see CommandHandlerConfig.Resumes.
+	resumes ConversationResumeResolver
 	// shutdown begins the daemon's graceful teardown, told whether to stop the
 	// session shims on the way out (false PRESERVES them, which is the
 	// default; see server.ShutdownAll). Nil makes the shutdown command a loud
@@ -294,6 +297,26 @@ type CommandHandlerConfig struct {
 	// injectable so a harness can prove the DEADLINE nack without waiting out a
 	// bound sized for a loaded machine.
 	EstablishTimeout time.Duration
+	// Resumes answers which conversation a RESUME_MODE_CONTINUE create should
+	// land on. Nil is a loud failing ack for that mode, NEVER a quiet fresh
+	// start: silently starting fresh on top of an intact conversation is the
+	// exact failure this resolver was introduced to end, and an unwired
+	// resolver must not be able to reproduce it.
+	Resumes ConversationResumeResolver
+}
+
+// ConversationResumeResolver resolves a workspace to the conversation a create
+// should continue, and reports the conversation a live session landed on.
+// Implemented by ConversationResolver; an interface so a harness can drive the
+// create path without a registry on disk.
+type ConversationResumeResolver interface {
+	ResolveResume(configDir, cwd string) (string, bool)
+	// ObservedClaudeSessionID reports the vendor uuid currently on sessionID's
+	// record, for OBSERVABILITY only — it rides the create ack so a client can
+	// attribute its logs before the first pushed SessionView. Empty when
+	// unknown, which is a fine answer: an unattributed client log is accepted,
+	// where a MISattributed one is rejected.
+	ObservedClaudeSessionID(sessionID string) string
 }
 
 // InterruptGateConfig supplies the interrupt confirm gate's two facts. Both
@@ -360,6 +383,7 @@ func newCommandHandler(prompts PromptRouter, merges MergeRunner, lifecycle Works
 		turns: config.Interrupt.Turns, liveTasks: config.Interrupt.LiveTasks, logf: logf,
 		restarts:         config.Restarts,
 		establishTimeout: config.EstablishTimeout,
+		resumes:          config.Resumes,
 	}, nil
 }
 

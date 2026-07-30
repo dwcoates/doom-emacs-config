@@ -610,7 +610,11 @@ func main() {
 		WorkspaceCreation: workspaceBridge,
 		RequestShutdown:   requestShutdown,
 		ClientLogs:        clientLogs,
-		Logf:              legacyLog,
+		// The daemon resolves a workspace's conversation for itself. Frontends
+		// send an intent (continue / fresh / explicit), never a remembered
+		// vendor uuid — see server.ConversationResolver.
+		Resumes: &server.ConversationResolver{Reg: sessionRegistry, Logf: legacyLog},
+		Logf:    legacyLog,
 	})
 	if err != nil {
 		daemonFatal(daemonLog, "claude-repld: frontend surface: %v", err)

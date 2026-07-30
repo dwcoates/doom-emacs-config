@@ -75,12 +75,33 @@ func establishHandler(t *testing.T, sessions *fakeSessionCmds, router SessionHea
 	return establishHandlerWithPrompts(t, &fakePrompts{}, sessions, router)
 }
 
+// fakeResumes is a ConversationResumeResolver that reports whatever it is told
+// to, so a create test can pin the resolution without a registry on disk. The
+// zero value resolves nothing, which is the "brand-new workspace" answer.
+type fakeResumes struct {
+	uuid string
+	// observed is what ObservedClaudeSessionID reports.
+	observed string
+	// asked records every (configDir, cwd) the create path resolved, so a test
+	// can prove the daemon consulted its own records rather than the caller.
+	asked [][2]string
+}
+
+func (f *fakeResumes) ResolveResume(configDir, cwd string) (string, bool) {
+	f.asked = append(f.asked, [2]string{configDir, cwd})
+	return f.uuid, f.uuid != ""
+}
+
+// observed is what the ack should report; separate from uuid so a test can
+// distinguish "what we resumed" from "what we landed on".
+func (f *fakeResumes) ObservedClaudeSessionID(string) string { return f.observed }
+
 // establishHandlerWithPrompts is establishHandler with the prompt router left
 // to the caller, so a test can watch what the create sends down the model path.
 func establishHandlerWithPrompts(t *testing.T, prompts *fakePrompts, sessions *fakeSessionCmds, router SessionHealthRouter) *commandHandler {
 	t.Helper()
 	h, err := newCommandHandler(prompts, &fakeMerges{}, &fakeLifecycle{}, nil, sessions, nil, nil, nil,
-		CommandHandlerConfig{Health: HealthConfig{Router: router}})
+		CommandHandlerConfig{Health: HealthConfig{Router: router}, Resumes: &fakeResumes{}})
 	if err != nil {
 		t.Fatalf("newCommandHandler: %v", err)
 	}
@@ -96,7 +117,7 @@ func TestCreateSessionAppliesTheRequestedStartingModel(t *testing.T) {
 	h := establishHandlerWithPrompts(t, prompts, &fakeSessionCmds{}, &probeHealthRouter{healthy: true})
 
 	// Act
-	err := h.CreateSession(context.Background(), "/w", "r1",
+	_, err := h.CreateSession(context.Background(), "/w", "r1",
 		&frontendv1.CreateSessionCmd{Cwd: "/w", Model: "opus"})
 
 	// Assert
@@ -116,7 +137,7 @@ func TestCreateSessionWithoutAModelLeavesTheModelPathUntouched(t *testing.T) {
 	h := establishHandlerWithPrompts(t, prompts, &fakeSessionCmds{}, &probeHealthRouter{healthy: true})
 
 	// Act
-	err := h.CreateSession(context.Background(), "/w", "r1", &frontendv1.CreateSessionCmd{Cwd: "/w"})
+	_, err := h.CreateSession(context.Background(), "/w", "r1", &frontendv1.CreateSessionCmd{Cwd: "/w"})
 
 	// Assert
 	if err != nil {
@@ -137,7 +158,7 @@ func TestCreateSessionTreatsAPlaceholderModelAsUnspecified(t *testing.T) {
 	h := establishHandlerWithPrompts(t, prompts, &fakeSessionCmds{}, &probeHealthRouter{healthy: true})
 
 	// Act
-	err := h.CreateSession(context.Background(), "/w", "r1",
+	_, err := h.CreateSession(context.Background(), "/w", "r1",
 		&frontendv1.CreateSessionCmd{Cwd: "/w", Model: "<synthetic>"})
 
 	// Assert
@@ -157,7 +178,7 @@ func TestCreateSessionFailsWhenTheShimRefusesTheRequestedModel(t *testing.T) {
 	h := establishHandlerWithPrompts(t, prompts, &fakeSessionCmds{}, &probeHealthRouter{healthy: true})
 
 	// Act
-	err := h.CreateSession(context.Background(), "/w", "r1",
+	_, err := h.CreateSession(context.Background(), "/w", "r1",
 		&frontendv1.CreateSessionCmd{Cwd: "/w", Model: "opus"})
 
 	// Assert
@@ -181,7 +202,8 @@ func TestCreateSessionAcksOnlyAfterTheShimAnswersHealthy(t *testing.T) {
 	// Act: the create runs while the verdict is outstanding.
 	acked := make(chan error, 1)
 	go func() {
-		acked <- h.CreateSession(context.Background(), "/w", "r1", &frontendv1.CreateSessionCmd{Cwd: "/w"})
+		_, err := h.CreateSession(context.Background(), "/w", "r1", &frontendv1.CreateSessionCmd{Cwd: "/w"})
+		acked <- err
 	}()
 
 	// Assert: no ack while the shim has not answered.
@@ -249,7 +271,7 @@ func TestCreateSessionNackNamesTheDeepestLink(t *testing.T) {
 			h := establishHandler(t, &fakeSessionCmds{}, tc.router)
 
 			// Act.
-			err := h.CreateSession(context.Background(), "/w", "r1", &frontendv1.CreateSessionCmd{Cwd: "/w"})
+			_, err := h.CreateSession(context.Background(), "/w", "r1", &frontendv1.CreateSessionCmd{Cwd: "/w"})
 
 			// Assert: the link is named, and the classifier agrees with it.
 			if err == nil {
@@ -275,7 +297,7 @@ func TestCreateSessionNackCarriesTheShimsOwnReason(t *testing.T) {
 	h := establishHandler(t, &fakeSessionCmds{}, router)
 
 	// Act.
-	err := h.CreateSession(context.Background(), "/w", "r1", &frontendv1.CreateSessionCmd{Cwd: "/w"})
+	_, err := h.CreateSession(context.Background(), "/w", "r1", &frontendv1.CreateSessionCmd{Cwd: "/w"})
 
 	// Assert.
 	if err == nil {
@@ -299,7 +321,7 @@ func TestCreateSessionNackOnTheCallersDeadline(t *testing.T) {
 	defer cancel()
 
 	// Act.
-	err := h.CreateSession(ctx, "/w", "r1", &frontendv1.CreateSessionCmd{Cwd: "/w"})
+	_, err := h.CreateSession(ctx, "/w", "r1", &frontendv1.CreateSessionCmd{Cwd: "/w"})
 
 	// Assert.
 	if !errors.Is(err, errclass.ErrSessionNotEstablished) {
@@ -319,7 +341,7 @@ func TestCreateSessionNackOnTheEstablishmentsOwnDeadline(t *testing.T) {
 	// caller's own (absent) deadline.
 	router := &probeHealthRouter{healthy: true, gate: make(chan struct{})}
 	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil, nil,
-		CommandHandlerConfig{Health: HealthConfig{Router: router}, EstablishTimeout: 30 * time.Millisecond})
+		CommandHandlerConfig{Health: HealthConfig{Router: router}, EstablishTimeout: 30 * time.Millisecond, Resumes: &fakeResumes{}})
 	if err != nil {
 		t.Fatalf("newCommandHandler: %v", err)
 	}
@@ -327,7 +349,8 @@ func TestCreateSessionNackOnTheEstablishmentsOwnDeadline(t *testing.T) {
 	// Act: no caller deadline at all — only the round's bound can end this.
 	nacked := make(chan error, 1)
 	go func() {
-		nacked <- h.CreateSession(context.Background(), "/w", "r1", &frontendv1.CreateSessionCmd{Cwd: "/w"})
+		_, err := h.CreateSession(context.Background(), "/w", "r1", &frontendv1.CreateSessionCmd{Cwd: "/w"})
+		nacked <- err
 	}()
 
 	// Assert.
@@ -349,7 +372,7 @@ func TestCreateSessionNackWhenTheHealthRouterIsUnwired(t *testing.T) {
 	h := establishHandler(t, &fakeSessionCmds{}, nil)
 
 	// Act.
-	err := h.CreateSession(context.Background(), "/w", "r1", &frontendv1.CreateSessionCmd{Cwd: "/w"})
+	_, err := h.CreateSession(context.Background(), "/w", "r1", &frontendv1.CreateSessionCmd{Cwd: "/w"})
 
 	// Assert.
 	if err == nil || !strings.Contains(err.Error(), "session health router is not wired") {
@@ -366,7 +389,7 @@ func TestCreateSessionNackOnAnUncorrelatedVerdict(t *testing.T) {
 	h := establishHandler(t, &fakeSessionCmds{}, router)
 
 	// Act.
-	err := h.CreateSession(context.Background(), "/w", "r1", &frontendv1.CreateSessionCmd{Cwd: "/w"})
+	_, err := h.CreateSession(context.Background(), "/w", "r1", &frontendv1.CreateSessionCmd{Cwd: "/w"})
 
 	// Assert.
 	if err == nil || !strings.Contains(err.Error(), "cannot be attributed to this create") {
@@ -383,7 +406,7 @@ func TestCreateSessionNackDoesNotTearDownTheSession(t *testing.T) {
 	h := establishHandler(t, sessions, &probeHealthRouter{err: errclass.ErrShimNotConnected})
 
 	// Act.
-	if err := h.CreateSession(context.Background(), "/w", "r1", &frontendv1.CreateSessionCmd{Cwd: "/w"}); err == nil {
+	if _, err := h.CreateSession(context.Background(), "/w", "r1", &frontendv1.CreateSessionCmd{Cwd: "/w"}); err == nil {
 		t.Fatal("want a nack")
 	}
 
@@ -412,11 +435,11 @@ func TestConcurrentIdenticalCreatesCoalesce(t *testing.T) {
 	// orderings are OBSERVED — the leader's probe arriving, then the follower's
 	// enrollment completing — so the join cannot be a lucky interleaving.
 	first := make(chan error, 1)
-	go func() { first <- h.CreateSession(context.Background(), "/w", "r1", cmd) }()
+	go func() { _, err := h.CreateSession(context.Background(), "/w", "r1", cmd); first <- err }()
 	awaitEnrollment(t, enrolled)
 	awaitProbe(t, router)
 	second := make(chan error, 1)
-	go func() { second <- h.CreateSession(context.Background(), "/w", "r2", cmd) }()
+	go func() { _, err := h.CreateSession(context.Background(), "/w", "r2", cmd); second <- err }()
 	awaitEnrollment(t, enrolled)
 	close(release)
 
@@ -454,13 +477,15 @@ func TestConcurrentCreatesWithDifferentOptsDoNotCoalesce(t *testing.T) {
 	// Act.
 	first := make(chan error, 1)
 	go func() {
-		first <- h.CreateSession(context.Background(), "/w", "r1", &frontendv1.CreateSessionCmd{Cwd: "/w", ConfigDir: "/cfg-a"})
+		_, err := h.CreateSession(context.Background(), "/w", "r1", &frontendv1.CreateSessionCmd{Cwd: "/w", ConfigDir: "/cfg-a"})
+		first <- err
 	}()
 	awaitEnrollment(t, enrolled)
 	awaitProbe(t, router)
 	second := make(chan error, 1)
 	go func() {
-		second <- h.CreateSession(context.Background(), "/w", "r2", &frontendv1.CreateSessionCmd{Cwd: "/w", ConfigDir: "/cfg-b"})
+		_, err := h.CreateSession(context.Background(), "/w", "r2", &frontendv1.CreateSessionCmd{Cwd: "/w", ConfigDir: "/cfg-b"})
+		second <- err
 	}()
 	close(release)
 
@@ -496,7 +521,7 @@ func TestCreateSessionWithNoCwdSkipsTheProbe(t *testing.T) {
 	h := establishHandler(t, &fakeSessionCmds{}, router)
 
 	// Act.
-	err := h.CreateSession(context.Background(), "", "r1", &frontendv1.CreateSessionCmd{})
+	_, err := h.CreateSession(context.Background(), "", "r1", &frontendv1.CreateSessionCmd{})
 
 	// Assert.
 	if err != nil {
@@ -518,7 +543,7 @@ func TestEstablishmentSlotIsReleasedAfterEachRound(t *testing.T) {
 
 	// Act: the same create twice, sequentially.
 	for i, req := range []string{"r1", "r2"} {
-		if err := h.CreateSession(context.Background(), "/w", req, cmd); err != nil {
+		if _, err := h.CreateSession(context.Background(), "/w", req, cmd); err != nil {
 			t.Fatalf("create %d: %v", i, err)
 		}
 	}

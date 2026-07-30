@@ -16,6 +16,9 @@ import (
 type mockHandler struct {
 	called string
 	err    error
+	// observedClaudeSessionID is what CreateSession reports for the ack's
+	// observability-only field.
+	observedClaudeSessionID string
 
 	lastWorkspace string
 	lastRequestID string
@@ -63,9 +66,9 @@ func (m *mockHandler) Resync(_ context.Context, ws, rid string, cmd *frontendv1.
 	m.called, m.lastWorkspace, m.lastRequestID, m.lastResyncSeq = "resync", ws, rid, cmd.GetFromSeq()
 	return m.err
 }
-func (m *mockHandler) CreateSession(_ context.Context, ws, rid string, _ *frontendv1.CreateSessionCmd) error {
+func (m *mockHandler) CreateSession(_ context.Context, ws, rid string, _ *frontendv1.CreateSessionCmd) (string, error) {
 	m.called, m.lastWorkspace, m.lastRequestID = "create_session", ws, rid
-	return m.err
+	return m.observedClaudeSessionID, m.err
 }
 func (m *mockHandler) DeleteSession(_ context.Context, ws, rid string, _ *frontendv1.DeleteSessionCmd) error {
 	m.called, m.lastWorkspace, m.lastRequestID = "delete_session", ws, rid
