@@ -247,3 +247,122 @@ func TestResolveResumeReportsNothingWithoutARegistry(t *testing.T) {
 		t.Fatal("a resolver with no registry reported a resolution")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Deletion is judged per CONVERSATION, on its newest record.
+//
+// The regression these pin: the first version excluded a uuid the moment it
+// saw ANY deleted record naming it, and Reg.All() iterates by session id
+// rather than by time. A workspace accumulates a record per restore, so an old
+// tombstone routinely sits beside newer live records for the same uuid — and
+// the tombstone won whenever its session id happened to sort first.
+//
+// Two real workspaces lost their conversations to that, fell through to
+// unrelated candidates, and one resumed a transcript another live process was
+// writing; the shim replayed into it, saw a turn end for a turn it never saw
+// begin, and died with a protocol error.
+// ---------------------------------------------------------------------------
+
+func TestResolveResumeRevivesAConversationDeletedThenRecreated(t *testing.T) {
+	// Arrange — one uuid, an old delete and a newer supersede. The session ids
+	// are chosen so the DELETED record sorts first by session id, which is the
+	// order Reg.All() returns and the order that used to decide the outcome.
+	reg := openTestRegistry(t)
+	for _, rec := range []registry.Record{
+		{SessionID: "s_a_deleted", CWD: "/w", ConfigDir: "/cfg", ClaudeSessionID: "uuid-1",
+			CreatedAt: "2026-07-01T10:00:00Z", Terminal: true, DeathReason: errclass.DeathReasonDeleted},
+		{SessionID: "s_z_live", CWD: "/w", ConfigDir: "/cfg", ClaudeSessionID: "uuid-1",
+			CreatedAt: "2026-07-29T10:00:00Z", Terminal: true, DeathReason: errclass.DeathReasonSuperseded},
+	} {
+		if err := reg.Put(rec); err != nil {
+			t.Fatalf("put: %v", err)
+		}
+	}
+
+	// Act
+	got, ok := resolverOver(t, reg, "uuid-1").ResolveResume("/cfg", "/w")
+
+	// Assert
+	if !ok || got != "uuid-1" {
+		t.Fatalf("ResolveResume = (%q, %v), want (uuid-1, true): the newest record revived it", got, ok)
+	}
+}
+
+func TestResolveResumeIgnoresATombstoneThatSortsBeforeItsRevival(t *testing.T) {
+	// Arrange — the exact shape that broke: the tombstone's session id sorts
+	// FIRST, so an implementation keyed on iteration order excludes the uuid
+	// and falls through to the decoy.
+	reg := openTestRegistry(t)
+	for _, rec := range []registry.Record{
+		{SessionID: "s_aaa", CWD: "/w", ConfigDir: "/cfg", ClaudeSessionID: "uuid-real",
+			CreatedAt: "2026-07-01T10:00:00Z", Terminal: true, DeathReason: errclass.DeathReasonDeleted},
+		{SessionID: "s_zzz", CWD: "/w", ConfigDir: "/cfg", ClaudeSessionID: "uuid-real",
+			CreatedAt: "2026-07-29T12:00:00Z", Terminal: true, DeathReason: errclass.DeathReasonSuperseded},
+		// Older than the revival, and the wrong answer.
+		{SessionID: "s_mmm", CWD: "/w", ConfigDir: "/cfg", ClaudeSessionID: "uuid-decoy",
+			CreatedAt: "2026-07-15T10:00:00Z"},
+	} {
+		if err := reg.Put(rec); err != nil {
+			t.Fatalf("put: %v", err)
+		}
+	}
+
+	// Act
+	got, _ := resolverOver(t, reg, "uuid-real", "uuid-decoy").ResolveResume("/cfg", "/w")
+
+	// Assert
+	if got != "uuid-real" {
+		t.Fatalf("ResolveResume = %q, want uuid-real: a tombstone must not shadow a newer record for the same conversation", got)
+	}
+}
+
+func TestResolveResumeStaysExcludedWhenTheDeleteIsTheNewestRecord(t *testing.T) {
+	// Arrange — the other direction, and the reason the exclusion exists at
+	// all: a conversation superseded and THEN deleted is still deleted.
+	reg := openTestRegistry(t)
+	for _, rec := range []registry.Record{
+		{SessionID: "s_zzz_superseded", CWD: "/w", ConfigDir: "/cfg", ClaudeSessionID: "uuid-1",
+			CreatedAt: "2026-07-01T10:00:00Z", Terminal: true, DeathReason: errclass.DeathReasonSuperseded},
+		{SessionID: "s_aaa_deleted", CWD: "/w", ConfigDir: "/cfg", ClaudeSessionID: "uuid-1",
+			CreatedAt: "2026-07-29T10:00:00Z", Terminal: true, DeathReason: errclass.DeathReasonDeleted},
+	} {
+		if err := reg.Put(rec); err != nil {
+			t.Fatalf("put: %v", err)
+		}
+	}
+
+	// Act
+	_, ok := resolverOver(t, reg, "uuid-1").ResolveResume("/cfg", "/w")
+
+	// Assert
+	if ok {
+		t.Fatal("resolved a conversation whose newest record is a user delete")
+	}
+}
+
+func TestResolveResumeRanksAConversationByItsNewestRecord(t *testing.T) {
+	// Arrange — uuid-old was FIRST created earlier but restored most recently.
+	// Ranking on the newest record per conversation is what makes "the one the
+	// user was last talking to" the answer.
+	reg := openTestRegistry(t)
+	for _, rec := range []registry.Record{
+		{SessionID: "s_1", CWD: "/w", ConfigDir: "/cfg", ClaudeSessionID: "uuid-old",
+			CreatedAt: "2026-07-01T10:00:00Z", Terminal: true, DeathReason: errclass.DeathReasonSuperseded},
+		{SessionID: "s_2", CWD: "/w", ConfigDir: "/cfg", ClaudeSessionID: "uuid-other",
+			CreatedAt: "2026-07-10T10:00:00Z"},
+		{SessionID: "s_3", CWD: "/w", ConfigDir: "/cfg", ClaudeSessionID: "uuid-old",
+			CreatedAt: "2026-07-29T10:00:00Z", Terminal: true, DeathReason: errclass.DeathReasonSuperseded},
+	} {
+		if err := reg.Put(rec); err != nil {
+			t.Fatalf("put: %v", err)
+		}
+	}
+
+	// Act
+	got, _ := resolverOver(t, reg, "uuid-old", "uuid-other").ResolveResume("/cfg", "/w")
+
+	// Assert
+	if got != "uuid-old" {
+		t.Fatalf("ResolveResume = %q, want uuid-old: its newest record is the newest of any conversation here", got)
+	}
+}
