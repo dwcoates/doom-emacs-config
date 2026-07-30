@@ -444,7 +444,6 @@ returns the SHA string (or the sentinel \"unknown\" when undetermined)."
 (agent-repl--load-module "emoji")
 (agent-repl--load-module "prevent-select")
 (agent-repl--load-module "close-panels-on-open")
-(agent-repl--load-module "caffeinate")
 
 ;; Task notes popup: the sidebar's Task view opens each task's org notes
 ;; file (`agent-repl--task-open', tasks.el) in a right-side popup that
