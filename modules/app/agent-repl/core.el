@@ -599,7 +599,7 @@ through `agent-repl--ws-log-routable-p' first and pass nil when it does not."
       (puthash "workspace_id" (plist-get identity :workspace-id) record)
       (dolist (field-value
                `(("agent_repl_session_id" . ,(agent-repl--ws-get ws :frontend-session-id))
-                 ("claude_session_id" . ,(agent-repl--ws-durable-claude-session-id-unlogged ws))))
+                 ("claude_session_id" . ,(agent-repl--ws-observed-claude-session-id ws))))
         (let ((field (car field-value))
               (value (cdr field-value)))
           (cond
@@ -1485,34 +1485,30 @@ before this is called."
       (agent-repl--log-verbose ws "active-inst: SUCCESS env=%S inst=%S" env inst)
       inst)))
 
-(declare-function agent-repl-instantiation-session-id "workspace")
+(declare-function agent-repl--frontend-session-view "agent-repl-frontend-state" (session-id))
 
-(defun agent-repl--ws-durable-claude-session-id-unlogged (ws)
-  "Return WS's durable Claude session UUID without entering the logger.
-JSON record construction calls this primitive while the logging stack is
-already active.  Instrumenting this helper would recursively construct another
-workspace record, so callers that need an independently logged lookup must use
-`agent-repl--ws-durable-claude-session-id'."
-  (let* ((env (agent-repl--ws-get ws :active-env))
-         (inst (and env (agent-repl--ws-get ws env))))
-    (and inst (agent-repl-instantiation-session-id inst))))
+(defun agent-repl--ws-observed-claude-session-id (ws)
+  "Return the vendor conversation uuid WS's session is CURRENTLY on, or nil.
 
-(defun agent-repl--ws-durable-claude-session-id (ws)
-  "Return WS's durable claude session uuid, or nil when none is recorded.
-Reads the active instantiation's `session-id' — the hook-captured CLI
-session uuid the gui frontend uses as its resume currency, via POST
-/sessions' `resume' field.  Unlike `agent-repl--active-inst' this
-returns nil instead of signaling when WS has no `:active-env' or no
-instantiation struct yet — a workspace that never booted a session
-legitimately has no durable id."
-  (let* ((env (agent-repl--ws-get ws :active-env))
-         (inst (and env (agent-repl--ws-get ws env)))
-         (session-id (agent-repl--ws-durable-claude-session-id-unlogged ws)))
-    (agent-repl--log-verbose
-     ws
-     "ws-durable-claude-session-id: env=%S inst-present=%s session-id-present=%s"
-     env (not (null inst)) (not (null session-id)))
-    session-id))
+FOR OBSERVABILITY ONLY, and read straight off the daemon-pushed
+`SessionView' store rather than from anything Emacs remembers.  Emacs holds
+no durable copy of this value and must never acquire one: a persisted
+vendor uuid made Emacs a second authority on which conversation a workspace
+owns, and when its copy went stale five workspaces opened fresh
+conversations over intact transcripts.  The daemon owns that question now
+\(see `agent-repl--frontend-create-session' and its RESUME-MODE).
+
+Nil is a normal answer — before the first pushed frame, or for an unbound
+workspace.  An unattributed log record is ACCEPTED by the daemon; a
+misattributed one is what gets rejected, so guessing here would be strictly
+worse than saying nothing.
+
+Never enters the logger: JSON record construction calls this while the
+logging stack is already active, and instrumenting it would recursively
+construct another workspace record."
+  (when (fboundp 'agent-repl--frontend-session-view)
+    (when-let ((sid (agent-repl--ws-get ws :frontend-session-id)))
+      (plist-get (agent-repl--frontend-session-view sid) :claudeSessionId))))
 
 (defvar-local agent-repl--owning-workspace nil
   "Workspace name that owns this agent session.

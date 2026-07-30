@@ -1326,11 +1326,7 @@ any caller passes (see the worktree-setup call site)."
 (ert-deftest agent-repl-test-initialize-ws-env-state-file-beats-hint ()
   "Saved state supersedes the caller's ACTIVE-ENV-HINT.
 The file here is a sandbox-era one, so its `:active-env' is migrated to
-`:bare-metal' on the way in and its `:sandbox' instantiation is promoted
-into the surviving env.  The hint path would have written a FRESH EMPTY
-instantiation, so the saved session id landing on `:bare-metal' is what
-proves the file — not the hint — is what hydrated the workspace (and that
-the promotion supersedes the stale `:bare-metal' slot beside it)."
+`:bare-metal' on the way in."
   (agent-repl-test--with-clean-state
     (let ((tmpdir (make-temp-file "test-init-override-" t)))
       (unwind-protect
@@ -1342,10 +1338,12 @@ the promotion supersedes the stale `:bare-metal' slot beside it)."
                :bare-metal (:session-id "bm-saved")
                :sandbox (:session-id "sb-saved")))
             (agent-repl--initialize-ws-env "ws1" tmpdir :bare-metal)
+            ;; The file's migrated :active-env wins over the hint. Both would
+            ;; land on :bare-metal here, but the file is what got it there.
             (should (eq (agent-repl--ws-get "ws1" :active-env) :bare-metal))
-            (should (equal (agent-repl-instantiation-session-id
-                            (agent-repl--ws-get "ws1" :bare-metal))
-                           "sb-saved")))
+            ;; Neither saved uuid is honored — persisted pointers are gone.
+            (should-not (agent-repl-instantiation-session-id
+                         (agent-repl--ws-get "ws1" :bare-metal))))
         (delete-directory tmpdir t)))))
 
 (ert-deftest agent-repl-test-initialize-ws-env-migrates-saved-sandbox-env ()
@@ -1369,11 +1367,12 @@ plist verbatim; `agent-repl--migrate-saved-state' coerces it on the way in."
             (should (eq (agent-repl--ws-get "ws1" :active-env) :bare-metal)))
         (delete-directory tmpdir t)))))
 
-(ert-deftest agent-repl-test-initialize-ws-env-promotes-saved-sandbox-session-id ()
-  "A sandbox-era state file keeps its claude session id through the migration.
-The workspace's session id lived in the `:sandbox' instantiation, so a bare
-relabel of `:active-env' would hydrate the empty `:bare-metal' slot beside it
-and strand the conversation; the instantiation is PROMOTED instead."
+(ert-deftest agent-repl-test-initialize-ws-env-migrates-a-sandbox-state-file ()
+  "A sandbox-era state file hydrates as `:bare-metal' without erroring.
+The migration used to carry real weight: the workspace's claude session id
+lived in the `:sandbox' instantiation, and a bare relabel would have
+stranded the conversation.  Instantiations persist nothing now, so what is
+left to check is only that a saved `:sandbox' stops being one."
   (agent-repl-test--with-clean-state
     (let ((tmpdir (make-temp-file "test-init-migrate-sid-" t)))
       (unwind-protect
@@ -1386,11 +1385,10 @@ and strand the conversation; the instantiation is PROMOTED instead."
                :sandbox (:session-id "sb-legacy")))
             ;; Act
             (agent-repl--initialize-ws-env "ws1" tmpdir)
-            ;; Assert — the session id rides the promotion into :bare-metal,
-            ;; which is what `agent-repl--active-inst' now reads.
-            (should (equal (agent-repl-instantiation-session-id
-                            (agent-repl--ws-get "ws1" :bare-metal))
-                           "sb-legacy")))
+            ;; Assert — the env survives the migration; the uuid does not.
+            (should (eq (agent-repl--ws-get "ws1" :active-env) :bare-metal))
+            (should-not (agent-repl-instantiation-session-id
+                         (agent-repl--ws-get "ws1" :bare-metal))))
         (delete-directory tmpdir t)))))
 
 (ert-deftest agent-repl-test-initialize-ws-env-restores-saved-tab-index ()
@@ -1629,11 +1627,13 @@ guard, the kill-before-workspace-delete advice, and the status poll."
 
 ;;;; ---- Tests: set-session-id ----
 
-(ert-deftest agent-repl-test-set-session-id-persists-to-disk ()
-  "set-session-id mutates the active instantiation AND writes state to disk.
-Persistence-on-capture is what makes a hook-delivered SID durable
-through an Emacs crash — without it, the SID would only reach
-.agent-repl-state at graceful teardown."
+(ert-deftest agent-repl-test-set-session-id-never-reaches-disk ()
+  "set-session-id mutates the active instantiation IN MEMORY ONLY.
+It used to persist too, and that is exactly what made state.el a durable
+resume pointer.  The uuid is still tracked in memory (the sentinel and
+backend paths read it), but it MUST NOT reach disk: a persisted copy made
+Emacs a second authority on which conversation a workspace owns, and a
+stale one silently started fresh conversations over intact transcripts."
   (agent-repl-test--with-clean-state
     (let ((tmpdir (make-temp-file "test-set-sid-" t)))
       (unwind-protect
@@ -1642,10 +1642,14 @@ through an Emacs crash — without it, the SID would only reach
             (agent-repl--ws-put "ws" :active-env :bare-metal)
             (agent-repl--ws-put "ws" :bare-metal (make-agent-repl-instantiation))
             (agent-repl--set-session-id "ws" "captured-sid")
+            ;; In memory: yes.
+            (should (equal (agent-repl-instantiation-session-id
+                            (agent-repl--ws-get "ws" :bare-metal))
+                           "captured-sid"))
+            ;; On disk: never.
             (let* ((file (agent-repl--state-file tmpdir))
                    (data (agent-repl--read-sexp-file file)))
-              (should (equal (plist-get (plist-get data :bare-metal) :session-id)
-                             "captured-sid"))))
+              (should-not (plist-get (plist-get data :bare-metal) :session-id))))
         (delete-directory tmpdir t)))))
 
 (ert-deftest agent-repl-test-set-session-id-no-project-dir-does-not-error ()

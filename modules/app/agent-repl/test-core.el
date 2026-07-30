@@ -945,11 +945,10 @@ quiet `agent-repl--emit-message' gate, so a fatal line always reaches the modeli
           (progn
             (agent-repl--ws-put ws :project-dir project)
             (agent-repl--ws-put ws :frontend-session-id "agent-session-1")
-            (agent-repl--ws-put ws :active-env :bare-metal)
-            (agent-repl--ws-put ws :bare-metal
-                                (make-agent-repl-instantiation :session-id "claude-session-1"))
             (let ((agent-repl-log-to-file t))
-              (cl-letf (((symbol-function 'message) #'ignore))
+              (cl-letf (((symbol-function 'message) #'ignore)
+                        ((symbol-function 'agent-repl--frontend-session-view)
+                         (lambda (_) '(:claudeSessionId "claude-session-1"))))
                 (agent-repl--log ws "identity test")))
             (let* ((target (plist-get (gethash ws agent-repl--workspace-log-targets) :target))
                    (record (with-temp-buffer
@@ -1016,12 +1015,11 @@ quiet `agent-repl--emit-message' gate, so a fatal line always reaches the modeli
             (agent-repl--ws-put ws :frontend-session-id 42)
             (let ((agent-repl-log-to-file t))
               (should-error (agent-repl--log ws "invalid identity")))
-            (agent-repl--ws-put ws :frontend-session-id nil)
-            (agent-repl--ws-put ws :active-env :bare-metal)
-            (agent-repl--ws-put ws :bare-metal
-                                (make-agent-repl-instantiation :session-id 99))
+            (agent-repl--ws-put ws :frontend-session-id "s_1")
             (let ((agent-repl-log-to-file t))
-              (should-error (agent-repl--log ws "invalid claude identity")))
+              (cl-letf (((symbol-function 'agent-repl--frontend-session-view)
+                         (lambda (_) '(:claudeSessionId 99))))
+                (should-error (agent-repl--log ws "invalid claude identity"))))
             (should-not (gethash ws agent-repl--workspace-log-targets)))
         (delete-directory project t)))))
 
@@ -1853,33 +1851,51 @@ ownership intact across that transition."
   (agent-repl-test--with-clean-state
     (should-error (agent-repl--active-inst "ws1") :type 'error)))
 
-;;;; ---- Tests: ws-durable-claude-session-id ----
+;;;; ---- Tests: ws-observed-claude-session-id ----
+;;
+;; Emacs holds NO durable copy of a vendor conversation uuid. It reads the
+;; current one off the daemon-pushed `SessionView\=' store, purely to attribute
+;; its own log records. The accessor this replaced read a PERSISTED uuid and
+;; handed it back as a resume pointer, which made Emacs a second authority on
+;; which conversation a workspace owns.
 
-(ert-deftest agent-repl-test-durable-session-id-returns-recorded-uuid ()
-  "ws-durable-claude-session-id reads the active instantiation's uuid."
+(ert-deftest agent-repl-test-observed-session-id-reads-the-pushed-view ()
+  "ws-observed-claude-session-id reads the daemon-pushed SessionView."
   (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :frontend-session-id "s_1")
+    (cl-letf (((symbol-function 'agent-repl--frontend-session-view)
+               (lambda (sid) (when (equal sid "s_1") '(:claudeSessionId "cli-uuid-1")))))
+      (should (equal (agent-repl--ws-observed-claude-session-id "ws1") "cli-uuid-1")))))
+
+(ert-deftest agent-repl-test-observed-session-id-ignores-the-in-memory-instantiation ()
+  "An instantiation carrying a uuid is NOT a source for attribution.
+Reading it back would be the persisted-pointer path returning by another
+name; the daemon-pushed view is the only source."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :frontend-session-id "s_1")
     (agent-repl--ws-put "ws1" :active-env :bare-metal)
     (agent-repl--ws-put "ws1" :bare-metal
-                        (make-agent-repl-instantiation :session-id "cli-uuid-1"))
-    (should (equal (agent-repl--ws-durable-claude-session-id "ws1") "cli-uuid-1"))))
+                        (make-agent-repl-instantiation :session-id "stale-uuid"))
+    (cl-letf (((symbol-function 'agent-repl--frontend-session-view)
+               (lambda (_) nil)))
+      (should-not (agent-repl--ws-observed-claude-session-id "ws1")))))
 
-(ert-deftest agent-repl-test-durable-session-id-nil-without-active-env ()
-  "A workspace that never initialized an env has no durable id (nil, no signal)."
+(ert-deftest agent-repl-test-observed-session-id-nil-without-a-bound-session ()
+  "A workspace with no daemon session has nothing to attribute to."
   (agent-repl-test--with-clean-state
-    (should-not (agent-repl--ws-durable-claude-session-id "ws1"))))
+    (cl-letf (((symbol-function 'agent-repl--frontend-session-view)
+               (lambda (_) '(:claudeSessionId "cli-uuid-1"))))
+      (should-not (agent-repl--ws-observed-claude-session-id "ws1")))))
 
-(ert-deftest agent-repl-test-durable-session-id-nil-without-instantiation ()
-  "An :active-env with no instantiation struct yields nil, not a signal."
+(ert-deftest agent-repl-test-observed-session-id-nil-before-the-first-push ()
+  "Nil before the first pushed frame is a NORMAL answer, not a failure.
+An unattributed log record is accepted by the daemon; a misattributed one is
+what gets rejected, so guessing would be strictly worse than saying nothing."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :active-env :sandbox)
-    (should-not (agent-repl--ws-durable-claude-session-id "ws1"))))
-
-(ert-deftest agent-repl-test-durable-session-id-nil-when-never-ran ()
-  "An instantiation that never captured a session id yields nil."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :active-env :sandbox)
-    (agent-repl--ws-put "ws1" :sandbox (make-agent-repl-instantiation))
-    (should-not (agent-repl--ws-durable-claude-session-id "ws1"))))
+    (agent-repl--ws-put "ws1" :frontend-session-id "s_1")
+    (cl-letf (((symbol-function 'agent-repl--frontend-session-view)
+               (lambda (_) nil)))
+      (should-not (agent-repl--ws-observed-claude-session-id "ws1")))))
 
 (ert-deftest agent-repl-test-active-inst-sandbox-env ()
   "active-inst should use :sandbox when :active-env is set to :sandbox."

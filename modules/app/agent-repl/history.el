@@ -93,23 +93,40 @@ data dir is auto-provisioned on first save."
 
 (defun agent-repl--instantiation-to-plist (inst)
   "Serialize instantiation INST to a plist for persistence.
-Returns nil when INST is nil."
+Returns nil when INST is nil.
+
+THE VENDOR SESSION UUID IS DELIBERATELY NOT PERSISTED, and this is the one
+thing this function exists to keep true.  It used to write `:session-id\='
+here, which made state.el a durable pointer at a conversation — a second
+authority on a question the daemon answers exactly, and a weaker one, since
+Emacs held one remembered string while the daemon holds the registry, the
+checkpoints, and the transcripts on disk.
+
+That copy is what failed.  `agent-repl--state-save\=' takes the live plist
+value unconditionally for this key (unlike `:created-at\=' and its
+neighbours, which fall back to the previously-persisted value), so the
+moment a live session reported no uuid, a good persisted one was
+overwritten with nil — and the next open silently began a FRESH
+conversation on top of an intact transcript.
+
+Emacs now sends an INTENT (`agent-repl--frontend-create-session\=' and its
+RESUME-MODE) and never a pointer, so there is nothing here to go stale.
+An empty plist is retained rather than the key removed because the
+instantiation is still the per-environment slot; it simply carries nothing
+durable.  See `test-history.el\='s state-file invariant test."
   (if inst
-      `(:session-id ,(agent-repl-instantiation-session-id inst))
+      nil
     (agent-repl--log nil "instantiation-to-plist: inst is nil, returning nil")
     nil))
 
 (defun agent-repl--make-instantiation-from-plist (saved)
   "Create a new `agent-repl-instantiation' from SAVED plist.
 Returns a fresh empty instantiation when SAVED is nil."
-  (if saved
-      (progn
-        (agent-repl--log nil "make-instantiation-from-plist: session-id=%s"
-                          (plist-get saved :session-id))
-        (make-agent-repl-instantiation
-         :session-id (plist-get saved :session-id)))
-    (agent-repl--log nil "make-instantiation-from-plist: nil saved, creating empty")
-    (make-agent-repl-instantiation)))
+  (when saved
+    (agent-repl--log nil
+                     "make-instantiation-from-plist: ignoring persisted keys=%S — nothing in an instantiation is durable any more"
+                     (cl-loop for (k _v) on saved by #'cddr collect k)))
+  (make-agent-repl-instantiation))
 
 ;;;; State migration
 
@@ -123,17 +140,16 @@ if it survives into the current schema:
 
 `:active-env :sandbox' — the environment axis collapsed to `:bare-metal'
 alone (`agent-repl--environment-keys'), so a saved `:sandbox' fails
-`agent-repl--validate-ws-env'.  Relabeling it is NOT sufficient: the
-workspace's claude session id lives in its `:sandbox' instantiation while
-`:bare-metal' sits empty beside it, so the `:sandbox' instantiation is
-PROMOTED into `:bare-metal' rather than dropped.  Relabeling without
-promoting would strand every sandbox-era conversation on a nil session id,
-silently destroying the one thing the state file exists to protect.
+`agent-repl--validate-ws-env'.  The `:sandbox' instantiation is still
+PROMOTED into `:bare-metal' rather than dropped, so the shape a hydration
+sees matches the current schema exactly.
 
-Promoting is sound because `:sandbox' never actually sandboxed anything:
-`agent-repl--build-start-cmd' always returned a hardcoded `:sandboxed-p
-nil' and `agent-repl--assemble-cmd' always launched plain `claude', so the
-promoted session is the same host session it has been all along.
+The promotion used to carry real weight: a workspace's claude session id
+lived in that instantiation, and relabeling without promoting would have
+stranded every sandbox-era conversation on a nil id.  Instantiations no
+longer persist anything (see `agent-repl--instantiation-to-plist\='), so the
+promotion is now purely about the shape.  It is kept rather than
+simplified away because a saved `:sandbox\=' still has to stop being one.
 
 `:frontend vterm' — the vterm frontend is no longer registered, and
 `agent-repl-frontend-get' signals on an unregistered name.  Dropping the
@@ -147,8 +163,7 @@ through `agent-repl-default-frontend'."
           (sandbox-p (eq (plist-get saved :active-env) :sandbox))
           (vterm-p (eq (plist-get saved :frontend) 'vterm)))
       (when (eq (plist-get out :active-env) :sandbox)
-        (agent-repl--log nil "migrate-saved-state: :active-env :sandbox -> :bare-metal, promoting instantiation session-id=%s"
-                         (plist-get (plist-get out :sandbox) :session-id))
+        (agent-repl--log nil "migrate-saved-state: :active-env :sandbox -> :bare-metal")
         (setq out (plist-put out :bare-metal (plist-get out :sandbox)))
         (setq out (plist-put out :active-env :bare-metal)))
       (when (eq (plist-get out :frontend) 'vterm)
@@ -307,7 +322,6 @@ environment's instantiation struct to a plist."
 
 (defun agent-repl--state-save (ws)
   "Persist session state for workspace WS to disk.
-Saves session-id for each environment so it survives Emacs restarts.
 Written to the per-project data dir (`<root>/.claude/emacs/state.el');
 the input history goes alongside as `history.el'.
 

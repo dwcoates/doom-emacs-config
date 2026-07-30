@@ -104,16 +104,51 @@ id the daemon delivers on the pushed SessionView."
         (should (equal (plist-get payload :cwd) "/w/tree"))
         (should (equal ws "/w/tree"))))))
 
-(ert-deftest agent-repl-test-frontend-create-passes-model-and-resume ()
-  "Optional model/resume land in the command payload when given."
+(ert-deftest agent-repl-test-frontend-create-passes-model-and-explicit-conversation ()
+  "Model and an EXPLICIT conversation land in the command payload.
+`explicit' is the one mode that may name a conversation — a human picking
+from among them.  Ordinary restore is `continue', which names nothing."
   ;; Arrange
   (agent-repl-test--with-uds-create '(:id "s_1")
     ;; Act
-    (agent-repl--frontend-create-session "/w" "haiku" "cli-uuid-9")
+    (agent-repl--frontend-create-session "/w" "haiku" 'explicit "cli-uuid-9")
     ;; Assert
     (let ((payload (agent-repl-test--created-payload)))
       (should (equal (plist-get payload :model) "haiku"))
-      (should (equal (plist-get payload :resumeClaudeSessionId) "cli-uuid-9")))))
+      (should (equal (plist-get payload :resumeMode) "RESUME_MODE_EXPLICIT"))
+      (should (equal (plist-get payload :explicitClaudeSessionId) "cli-uuid-9")))))
+
+(ert-deftest agent-repl-test-frontend-create-defaults-to-continue ()
+  "A create with no mode asks the daemon to CONTINUE, naming no conversation.
+This is the load-bearing default: Emacs holds no pointer, so it says what it
+wants and the daemon resolves which conversation that is."
+  ;; Arrange
+  (agent-repl-test--with-uds-create '(:id "s_1")
+    ;; Act
+    (agent-repl--frontend-create-session "/w")
+    ;; Assert
+    (let ((payload (agent-repl-test--created-payload)))
+      (should (equal (plist-get payload :resumeMode) "RESUME_MODE_CONTINUE"))
+      (should-not (plist-member payload :explicitClaudeSessionId)))))
+
+(ert-deftest agent-repl-test-frontend-create-never-names-a-conversation-under-continue ()
+  "An id handed in under `continue' is NOT sent.
+The daemon refuses a create that names a conversation outside `explicit',
+and sending one would be the removed pointer returning by another route."
+  ;; Arrange
+  (agent-repl-test--with-uds-create '(:id "s_1")
+    ;; Act
+    (agent-repl--frontend-create-session "/w" nil 'continue "cli-uuid-9")
+    ;; Assert
+    (let ((payload (agent-repl-test--created-payload)))
+      (should-not (plist-member payload :explicitClaudeSessionId)))))
+
+(ert-deftest agent-repl-test-frontend-create-rejects-an-unknown-mode ()
+  "An unknown resume mode signals rather than defaulting.
+A typo silently becoming `continue' would resume a conversation the caller
+asked to replace; silently becoming `fresh' would strand an intact one."
+  (agent-repl-test--with-uds-create '(:id "s_1")
+    (should-error (agent-repl--frontend-create-session "/w" nil 'contineu))))
 
 (ert-deftest agent-repl-test-frontend-create-defaults-model-to-interactive ()
   "A create with no model sends `agent-repl-interactive-model'."
@@ -280,7 +315,7 @@ id the daemon delivers on the pushed SessionView."
              (lambda (&rest _) "resume-investigate-uuid-gon")))
     (agent-repl-test--with-uds-create (list :error agent-repl-test--resume-missing-error)
       ;; Act / Assert
-      (should-error (agent-repl--frontend-create-session "/w" nil "uuid-gone")
+      (should-error (agent-repl--frontend-create-session "/w" nil 'explicit "uuid-gone")
                     :type 'agent-repl-resume-transcript-missing))))
 
 (ert-deftest agent-repl-test-frontend-create-hard-fail-names-investigation-ws ()
@@ -290,7 +325,7 @@ id the daemon delivers on the pushed SessionView."
              (lambda (&rest _) "resume-investigate-uuid-gon")))
     (agent-repl-test--with-uds-create (list :error agent-repl-test--resume-missing-error)
       ;; Act
-      (let ((err (should-error (agent-repl--frontend-create-session "/w" nil "uuid-gone"))))
+      (let ((err (should-error (agent-repl--frontend-create-session "/w" nil 'explicit "uuid-gone"))))
         ;; Assert
         (should (string-match-p "resume-investigate-uuid-gon"
                                 (error-message-string err)))))))
@@ -306,7 +341,7 @@ is dispatched with the resume id and nil paths (a documented S7 constraint)."
                  (setq captured (list resume-id searched cwd)) "ws")))
       (agent-repl-test--with-uds-create (list :error agent-repl-test--resume-missing-error)
         ;; Act
-        (ignore-errors (agent-repl--frontend-create-session "/w/tree" nil "uuid-gone"))
+        (ignore-errors (agent-repl--frontend-create-session "/w/tree" nil 'explicit "uuid-gone"))
         ;; Assert
         (should (equal captured '("uuid-gone" nil "/w/tree")))))))
 
@@ -315,7 +350,7 @@ is dispatched with the resume id and nil paths (a documented S7 constraint)."
   ;; Arrange
   (agent-repl-test--with-uds-create '(:error "no live shim for workspace")
     ;; Act
-    (let ((err (should-error (agent-repl--frontend-create-session "/w" nil "uuid-x"))))
+    (let ((err (should-error (agent-repl--frontend-create-session "/w" nil 'explicit "uuid-x"))))
       ;; Assert — not misclassified as the resume hard-fail.
       (should-not (eq (car err) 'agent-repl-resume-transcript-missing))
       (should (string-match-p "no live shim" (error-message-string err))))))
@@ -418,28 +453,33 @@ force-fresh recreate (no resume) succeeds with a fresh id."
               ((symbol-function 'agent-repl--frontend-await-uds)
                (lambda (predicate &rest _) (funcall predicate))))
       ;; Act / Assert
-      (should (equal (agent-repl--frontend-create-session "/w" nil "uuid-gone") "fresh-sid"))
-      ;; The last createSession carries no resume.
-      (should-not (plist-member (nth 1 (car (last uds-commands))) :resumeClaudeSessionId)))))
+      (should (equal (agent-repl--frontend-create-session "/w" nil 'explicit "uuid-gone") "fresh-sid"))
+      ;; The last createSession names no conversation and asks for FRESH.
+      (let ((payload (nth 1 (car (last uds-commands)))))
+        (should (equal (plist-get payload :resumeMode) "RESUME_MODE_FRESH"))
+        (should-not (plist-member payload :explicitClaudeSessionId))))))
 
 ;;;; ---- force-fresh session recreate ----------------------------------------
 
 (ert-deftest agent-repl-test-frontend-force-fresh-session-omits-resume ()
-  "`agent-repl--frontend-force-fresh-session' creates its session with no resume."
+  "`agent-repl--frontend-force-fresh-session' asks for an explicit FRESH.
+Not merely omitting a pointer: since a create that names nothing now means
+CONTINUE, a blank-slate request has to say so out loud or the daemon would
+helpfully reattach the conversation the user asked to replace."
   ;; Arrange
-  (let ((captured-resume 'unset))
+  (let ((captured-mode 'unset))
     (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda () t))
               ((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t))
               ((symbol-function 'agent-repl--frontend-create-session)
-               (lambda (_dir &optional _model resume &rest _)
-                 (setq captured-resume resume) "fresh-sid")))
+               (lambda (_dir &optional _model mode &rest _)
+                 (setq captured-mode mode) "fresh-sid")))
       (unwind-protect
           (progn
             (puthash "ws1" (list :project-dir "/w") agent-repl--workspaces)
             ;; Act
             (agent-repl--frontend-force-fresh-session "ws1")
             ;; Assert
-            (should (null captured-resume)))
+            (should (eq captured-mode 'fresh)))
         (remhash "ws1" agent-repl--workspaces)))))
 
 (ert-deftest agent-repl-test-frontend-force-fresh-session-binds-fresh-id ()
@@ -886,12 +926,12 @@ resolver supplies it exactly as creation would."
           (should (equal (agent-repl--ws-get "ws1" :project-dir) "/repo/root/"))
           (should (equal (plist-get (nth 1 (car uds-commands)) :cwd) "/repo/root/")))))))
 
-(ert-deftest agent-repl-test-frontend-ensure-session-resumes-durable-id ()
-  "A fresh POST resumes the workspace's durable claude session uuid.
-The uuid lives in the active instantiation (hook-captured; shared with
-the vterm frontend), so a recreated daemon binding continues the
-conversation instead of starting over."
-  ;; Arrange
+(ert-deftest agent-repl-test-frontend-ensure-session-asks-to-continue ()
+  "A recreated daemon binding asks the daemon to CONTINUE, naming nothing.
+Emacs used to send a uuid it had persisted, which made it a second
+authority on which conversation the workspace owns.  It now states intent
+and the daemon resolves the conversation from its own records."
+  ;; Arrange — an in-memory uuid is present precisely to prove it is NOT sent.
   (agent-repl-test--with-ws "ws1"
       (list :frontend-session-id nil :project-dir "/w"
             :active-env :bare-metal
@@ -901,12 +941,13 @@ conversation instead of starting over."
       (agent-repl-test--with-uds-create '(:id "s_resumed")
         ;; Act
         (agent-repl--frontend-ensure-session "ws1")
-        ;; Assert — the createSession payload carries the resume uuid.
-        (should (equal (plist-get (nth 1 (car uds-commands)) :resumeClaudeSessionId)
-                       "cli-uuid-7"))))))
+        ;; Assert — intent on the wire, and the in-memory uuid stays home.
+        (let ((payload (nth 1 (car uds-commands))))
+          (should (equal (plist-get payload :resumeMode) "RESUME_MODE_CONTINUE"))
+          (should-not (plist-member payload :explicitClaudeSessionId)))))))
 
-(ert-deftest agent-repl-test-frontend-ensure-session-fresh-without-durable-id ()
-  "No recorded durable session id means a fresh session with no resume field."
+(ert-deftest agent-repl-test-frontend-ensure-session-names-no-conversation ()
+  "An ensure NEVER names a conversation, with or without one in memory."
   ;; Arrange
   (agent-repl-test--with-ws "ws1" '(:frontend-session-id nil :project-dir "/w")
     (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&optional _f) t))
@@ -916,7 +957,7 @@ conversation instead of starting over."
         ;; Act
         (agent-repl--frontend-ensure-session "ws1")
         ;; Assert
-        (should-not (plist-member (nth 1 (car uds-commands)) :resumeClaudeSessionId))))))
+        (should-not (plist-member (nth 1 (car uds-commands)) :explicitClaudeSessionId))))))
 
 (ert-deftest agent-repl-test-frontend-ensure-session-passes-ws-model ()
   "A fresh POST carries the workspace's `:model', not a hardcoded nil.
@@ -940,11 +981,11 @@ model is nil)."
         (should (equal (plist-get (nth 1 (car uds-commands)) :model) "opus"))))))
 
 (ert-deftest agent-repl-test-frontend-ensure-session-restores-env-when-missing ()
-  "A nil :active-env triggers env restore, and the restored durable id resumes.
-After an Emacs restart the workspace plist carries no :active-env; the
-gui open must restore it from the persisted state (as the vterm boot
-does) BEFORE resolving the resume uuid, or the created session starts a
-blank conversation."
+  "A nil :active-env triggers env restore before the create is sent.
+After an Emacs restart the workspace plist carries no :active-env, and the
+sentinel handlers error on one.  The restore no longer supplies a resume
+pointer — there is none to supply — but it still has to run, and running
+it BEFORE the create is what this pins."
   ;; Arrange: the stubbed initializer simulates a state-file restore.
   (agent-repl-test--with-ws "ws1" '(:frontend-session-id nil :project-dir "/w")
     (let ((init-calls nil))
@@ -955,15 +996,15 @@ blank conversation."
                    (push (list ws dir env-hint) init-calls)
                    (agent-repl--ws-put ws :active-env :bare-metal)
                    (agent-repl--ws-put ws :bare-metal
-                                       (make-agent-repl-instantiation :session-id "restored-uuid")))))
+                                       (make-agent-repl-instantiation)))))
         (agent-repl-test--with-uds-create '(:id "s_restored")
           ;; Act
           (agent-repl--frontend-ensure-session "ws1")
-          ;; Assert — restore ran for ws1 with its dir, and the createSession
-          ;; resumes the uuid the restore installed.
+          ;; Assert — restore ran for ws1 with its dir, and the create asked
+          ;; the daemon to continue.
           (should (equal init-calls '(("ws1" "/w" nil))))
-          (should (equal (plist-get (nth 1 (car uds-commands)) :resumeClaudeSessionId)
-                         "restored-uuid")))))))
+          (should (equal (plist-get (nth 1 (car uds-commands)) :resumeMode)
+                         "RESUME_MODE_CONTINUE")))))))
 
 (ert-deftest agent-repl-test-frontend-ensure-session-skips-env-restore-when-present ()
   "An already-initialized workspace must not be re-initialized.
