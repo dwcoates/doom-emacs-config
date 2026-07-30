@@ -134,7 +134,7 @@ new chain can start.  Belt-and-braces against permanent wedging."
 ;; !! the format result and will keep painting the cached value until  !!
 ;; !! something forces a re-read.  `agent-repl--force-tab-bar-redraw' !!
 ;; !! flips the toggle AND drives `tab-bar-tabs-set' /                 !!
-;; !! `tab-bar--update-tab-bar-lines' / `force-mode-line-update' so    !!
+;; !! `force-mode-line-update' so                                     !!
 ;; !! the alternating string actually reaches the display.  The 1Hz   !!
 ;; !! `agent-repl--update-all-workspace-states' timer calls            !!
 ;; !! `--force-tab-bar-redraw' every tick.                              !!
@@ -874,16 +874,40 @@ strings ignores text properties — so a change that only differs in face
 `agent-repl--tabline-space-toggle' so the next tabline render appends
 a different cache-buster suffix (`agent-repl--tabline-cache-buster')
 and produces a different string, then drives the tab-bar update
-primitives.  See the block comment above the toggle's defvar for the
-rationale."
-  ;; This runs on the 1Hz status timer; logging each redraw would bury
-  ;; actionable lifecycle records.
-  (setq agent-repl--tabline-space-toggle (not agent-repl--tabline-space-toggle))
-  (when (fboundp 'tab-bar-tabs-set)
-    (tab-bar-tabs-set (tab-bar-tabs)))
-  (when (fboundp 'tab-bar--update-tab-bar-lines)
-    (tab-bar--update-tab-bar-lines t))
-  (force-mode-line-update t))
+primitive that invalidates the tab data plus the ordinary mode-line
+redisplay path.  It deliberately does NOT call
+`tab-bar--update-tab-bar-lines': Emacs 30.2 defines that private
+recalculation as a one-line policy when `tab-bar-show' is t, so calling
+it would destroy agent-repl's fixed two-line frame parameter and its
+future-frame default.  See the block comment above the toggle's defvar
+for the cache-buster rationale."
+  (let* ((frame (selected-frame))
+         (prior-toggle agent-repl--tabline-space-toggle)
+         (tabs-set-available (fboundp 'tab-bar-tabs-set)))
+    (setq agent-repl--tabline-space-toggle
+          (not agent-repl--tabline-space-toggle))
+    (when tabs-set-available
+      (tab-bar-tabs-set (tab-bar-tabs)))
+    (force-mode-line-update t)
+    ;; This runs on the 1Hz status timer.  Record changed redraw
+    ;; prerequisites, plus one sample per second during a bounded capture,
+    ;; rather than writing an unconditional heartbeat.
+    (let ((signature
+           (list (frame-parameter frame 'tab-bar-lines)
+                 (frame-parameter frame 'tab-bar-lines-keep-state)
+                 tab-bar-mode tab-bar-show auto-resize-tab-bars
+                 tab-bar-auto-width tab-bar-format tabs-set-available)))
+      (when (agent-repl--tabbar-observation-due-p
+             frame :redraw-signature :redraw-at signature)
+        (agent-repl--log-verbose
+         (let ((current (agent-repl--ws-current-name)))
+           (and current (agent-repl--ws-known-p current) current))
+         "tabbar-redraw: frame=%S prior-toggle=%S toggle=%S tabs-set-available=%S tab-bar-lines=%S keep-state=%S tab-bar-mode=%S tab-bar-show=%S auto-resize=%S auto-width=%S format=%S"
+         frame prior-toggle agent-repl--tabline-space-toggle
+         tabs-set-available (frame-parameter frame 'tab-bar-lines)
+         (frame-parameter frame 'tab-bar-lines-keep-state)
+         tab-bar-mode tab-bar-show auto-resize-tab-bars tab-bar-auto-width
+         tab-bar-format)))))
 
 (defun agent-repl--render-tab (name spec label name-face img-str)
   "Render a tab string for workspace NAME from SPEC.
@@ -1046,12 +1070,11 @@ do not fill to the full line width, so the rendered segment is always
 two full-width lines and the tab-bar's pixel height never varies.
 
 The height contract is carried by `tab-bar-lines', which
-`agent-repl--install-fixed-height-tab-bar' pins to this value in
-`default-frame-alist' — future frames get the two-line strip at
-creation, the only path that cannot trip the resize livelock.  A
-frame that already exists keeps whatever height it was born with until
-`agent-repl-tabbar-apply-row-count' is invoked deliberately, or Emacs
-is restarted.")
+`agent-repl--install-fixed-height-tab-bar' pins to this value on every
+current graphical frame and in `default-frame-alist'.  The installer
+first adds `tab-bar-lines' to `frame-inhibit-implied-resize', so changing
+a live frame consumes text-area height instead of requesting an outer
+NSWindow resize.")
 
 (defun agent-repl--pack-prefix (widths caps)
   "Greedily first-fit as long a PREFIX of WIDTHS as fits rows sized by CAPS.
@@ -1126,8 +1149,7 @@ of `(length COUNTS)' strings, none containing a newline."
           (setq row (concat lead row)))
         (when (= r (1- nrows))
           (setq row (concat row trail)))
-        (when (> (length row) width)
-          (setq row (substring row 0 width)))
+        (setq row (agent-repl--tabline-truncate-row row width))
         (push row rows)))
     (nreverse rows)))
 
@@ -1155,37 +1177,117 @@ UP so the estimate never under-reserves.  Never returns less than 1."
            (ceiling (string-pixel-width entry) (max 1 (frame-char-width)))
          (string-width entry))))
 
+(defvar agent-repl--tabline-last-truncation nil
+  "Last tab-line truncation signature written to the canonical log.
+
+The renderer can run many times per second.  Remembering the most recent
+overflow shape lets `agent-repl--tabline-truncate-row' record a changed
+pathological row once without writing the same diagnostic on every
+redisplay.")
+
+(defun agent-repl--tabline-truncate-row (row width)
+  "Return ROW truncated to at most WIDTH rendered columns.
+
+Uses `agent-repl--tabline-entry-width' for every candidate prefix, so a
+`display' image and a wide glyph consume their real pixel-derived column
+width rather than their character count.  This is the final physical
+overflow guard after row packing.  It is especially important for the
+degenerate branch that deliberately keeps one anchor entry even when
+the entry is wider than every row budget.
+
+Truncation removes complete source characters from the right until the
+rendered prefix fits.  The function logs only when the overflow signature
+changes because tab-bar redisplay is an extremely hot path."
+  (let ((original-width (agent-repl--tabline-entry-width row)))
+    (if (<= original-width width)
+        row
+      (let ((end (length row)))
+        (while (and (> end 0)
+                    (> (agent-repl--tabline-entry-width
+                        (substring row 0 end))
+                       width))
+          (setq end (1- end)))
+        (let* ((result (substring row 0 end))
+               (result-width (agent-repl--tabline-entry-width result))
+               (signature
+                (list width original-width result-width
+                      (substring-no-properties row)
+                      (substring-no-properties result))))
+          (unless (equal signature agent-repl--tabline-last-truncation)
+            (setq agent-repl--tabline-last-truncation signature)
+            (agent-repl--log-verbose
+             (let ((current (agent-repl--ws-current-name)))
+               (and current (agent-repl--ws-known-p current) current))
+             "tabline-truncate-row: budget=%d original-columns=%d original-chars=%d original=%S result-columns=%d result-chars=%d result=%S"
+             width original-width (length row) (substring-no-properties row)
+             result-width (length result) (substring-no-properties result)))
+          result)))))
+
 (defun agent-repl--tabline-window-size (widths caps start)
   "Return how many consecutive WIDTHS from START fit rows sized by CAPS.
 Never returns less than 1: a window always shows its leading entry,
 even one too wide for any row's budget (the render guard truncates it)."
   (max 1 (apply #'+ (agent-repl--pack-prefix (nthcdr start widths) caps))))
 
-(defvar agent-repl--tabline-anchor nil
-  "Name of the leftmost workspace visible in the tab-bar view window.
+(defvar agent-repl--tabline-view-states
+  (make-hash-table :test #'eq :weakness 'key)
+  "Weak hash table mapping frames to their tab-bar view-state plists.
 
-This is the tab-bar's view state and nothing else: it says where the
-rendered window STARTS, so the window is stable across workspace
-switches instead of recentering on whichever tab is current.  Switching
-between two tabs that are both already visible must change neither
-which entries render nor where they render — that is the whole point,
-and the defect the old recentering window had.
+Each value carries `:anchor', `:width', and `:names'.  The state says
+where that FRAME's rendered workspace window starts.  Frame ownership is
+essential because frames can have different widths and can redisplay in
+alternation; a single global anchor lets one frame continually rewrite
+another frame's view.
 
-Render state, deliberately a status.el defvar and never a field in the
-workspace table: it describes the frame's view, not the workspace, and
-must not survive into persisted workspace records.  Updated only by
-`agent-repl--tabline-anchor-index'.")
+The table is deliberately outside `agent-repl--workspaces': tab-bar
+position is frame view state rather than workspace lifecycle state.
+Weak keys ensure deleting a frame also makes its cached view collectible.")
 
-(defvar agent-repl--tabline-anchor-width nil
-  "Frame column width `agent-repl--tabline-anchor' was last computed at.
-A width change recomputes the window FROM the anchor rather than
-re-deriving an anchor, so resizing the frame never teleports the view.")
+(defvar agent-repl--tabbar-observation-states
+  (make-hash-table :test #'eq :weakness 'key)
+  "Weak hash table mapping frames to tab-bar diagnostic observation state.
 
-(defvar agent-repl--tabline-anchor-names nil
-  "Workspace name list as of the last anchor computation.
-Kept so a membership change can find the anchor's nearest surviving
-neighbor (see `agent-repl--tabline-surviving-anchor') — that needs the
-OLD ordering, which the new name list no longer carries.")
+Each value stores the last signature and log timestamp independently for
+the redraw, formatter, and final keymap boundaries.  Those boundaries run
+inside redisplay, so logging every invocation would create an
+instrumentation-driven redisplay storm.  State-change logging preserves
+the evidence needed to diagnose a rendering transition without multiplying
+unchanged records.")
+
+(defvar agent-repl--tabbar-diagnostic-until nil
+  "Absolute time until which unchanged tab-bar observations are sampled.
+
+Nil disables periodic sampling.  During a bounded investigation, set this
+to a future `float-time'; each instrumented boundary then logs unchanged
+state at most once per second.  State changes are always logged regardless
+of this value.")
+
+(defun agent-repl--tabbar-observation-due-p
+    (frame signature-key time-key signature)
+  "Return non-nil when FRAME's SIGNATURE should be logged.
+
+SIGNATURE-KEY and TIME-KEY identify one instrumented boundary in FRAME's
+observation plist.  A changed SIGNATURE is always due.  An unchanged
+signature is due at most once per second while
+`agent-repl--tabbar-diagnostic-until' names a future time.  Records the
+accepted signature and timestamp before returning.
+
+This helper is intentionally silent: it is the recursion and rate-limit
+boundary for logging performed from redisplay."
+  (let* ((now (float-time))
+         (state (gethash frame agent-repl--tabbar-observation-states))
+         (prior-signature (plist-get state signature-key))
+         (prior-time (or (plist-get state time-key) 0.0))
+         (capture-active
+          (and (numberp agent-repl--tabbar-diagnostic-until)
+               (< now agent-repl--tabbar-diagnostic-until)))
+         (due (or (not (equal signature prior-signature))
+                  (and capture-active (>= (- now prior-time) 1.0)))))
+    (when due
+      (setq state (plist-put state signature-key signature)
+            state (plist-put state time-key now))
+      (puthash frame state agent-repl--tabbar-observation-states))
+    due))
 
 (defun agent-repl--tabline-surviving-anchor (anchor prev-names names)
   "Return the anchor name to render NAMES from, given the previous ANCHOR.
@@ -1220,8 +1322,8 @@ and for an empty NAMES, falls back to the first name (or nil)."
                                                 widths width max-rows)
   "Return the 0-based index in NAMES the tab-bar window should start at.
 
-Pure: computes the anchor position without touching the anchor state
-variables (`agent-repl--tabline-anchor-index' is the stateful wrapper).
+Pure: computes the anchor position without touching the frame view-state
+table (`agent-repl--tabline-anchor-index' is the stateful wrapper).
 ANCHOR is the previous anchor name and PREV-NAMES the name list it was
 chosen against; CURRENT is the current workspace name; WIDTHS are the
 entries' column widths, matching NAMES positionally.
@@ -1267,24 +1369,29 @@ renders an identical set of entries in identical places."
             (setq lo (1+ lo))))
         lo)))))
 
-(defun agent-repl--tabline-anchor-index (widths names current width max-rows)
-  "Update the tab-bar anchor state for NAMES and return its 0-based index.
+(defun agent-repl--tabline-anchor-index (frame widths names current width max-rows)
+  "Update FRAME's tab-bar anchor state for NAMES and return its 0-based index.
 
 Stateful wrapper over `agent-repl--tabline-window-anchor': applies the
-three anchor rules to the current
-`agent-repl--tabline-anchor' / `agent-repl--tabline-anchor-names', then
-records the resulting anchor NAME, the WIDTH it was computed at, and
-the name list it was computed against.  WIDTHS are the rendered
-entries' column widths, matching NAMES positionally; returns the index
-`agent-repl--tabline-rows' should render its window from."
-  (let* ((lo (agent-repl--tabline-window-anchor
+three anchor rules to FRAME's current `:anchor' and `:names', then
+records the resulting anchor name, WIDTH, and NAMES back under FRAME.
+WIDTHS are the rendered entries' column widths, matching NAMES
+positionally; returns the index `agent-repl--tabline-rows' should render
+its window from.
+
+This function runs inside redisplay more than once per second, so the
+frame-local state write is deliberately not logged."
+  (let* ((state (gethash frame agent-repl--tabline-view-states))
+         (lo (agent-repl--tabline-window-anchor
               names current
-              agent-repl--tabline-anchor
-              agent-repl--tabline-anchor-names
+              (plist-get state :anchor)
+              (plist-get state :names)
               widths width max-rows)))
-    (setq agent-repl--tabline-anchor (nth lo names)
-          agent-repl--tabline-anchor-width width
-          agent-repl--tabline-anchor-names names)
+    (puthash frame
+             (list :anchor (nth lo names)
+                   :width width
+                   :names names)
+             agent-repl--tabline-view-states)
     lo))
 
 (defun agent-repl--tabline-rows (entries anchor-pos width max-rows &optional widths)
@@ -1373,11 +1480,11 @@ selected tab landed at the end of any wrapped row, including the
 final one.
 
 Callers must size each row so the trailing unfaced space lands within
-the frame's visible columns (col < `frame-width').  `+doom-dashboard
---center' only left-pads, so a row of length `frame-width' has its
-appended space at column `frame-width' — offscreen — and the last
-visible glyph is still the faced one.  Size and center rows to
-`(1- (frame-width))' to leave room for the terminator."
+the frame's visible columns (col < `frame-width').
+`agent-repl--center-tabline-row' only left-pads, so a row sized to
+`frame-width' would put the appended space at column `frame-width' and
+therefore offscreen.  Size and center rows to `(1- (frame-width))' to
+leave room for the terminator."
   (if (null lines)
       ""
     (concat (mapconcat #'identity lines " \n") " ")))
@@ -1437,6 +1544,66 @@ background to the frame edge (see `agent-repl--join-tabline-rows')."
       (make-string (max 0 width) ?\s)
     row))
 
+(defun agent-repl--center-tabline-row (row width)
+  "Left-pad ROW so its rendered content is centered within WIDTH columns.
+
+Measures ROW through `agent-repl--tabline-entry-width', so display images
+and wide glyphs affect the padding by their rendered pixel width.  The
+function assumes the physical overflow guard has already limited ROW to
+WIDTH.  This pure helper runs inside redisplay more than once per second
+and therefore deliberately performs no logging."
+  (let ((row-width (agent-repl--tabline-entry-width row)))
+    (concat (make-string (max 0 (/ (- width row-width) 2)) ?\s)
+            row)))
+
+(defun agent-repl--tabbar-log-render
+    (frame width line-width names current widths anchor-pos rows padded
+           centered joined output)
+  "Log one diagnostic observation of the visible tab-bar render boundary.
+
+FRAME and WIDTH describe the rendering frame.  LINE-WIDTH is the physical
+row budget; NAMES, CURRENT, WIDTHS, and ANCHOR-POS describe window
+selection; ROWS, PADDED, CENTERED, JOINED, and OUTPUT capture every
+formatter stage.  Text properties are stripped only in the diagnostic
+payload so the rendered values themselves remain untouched.
+
+The observation is emitted when its diagnostic signature changes, or at
+most once per second during a bounded capture.  This function is the
+instrumentation exception for the redisplay hot path: the signature gate
+runs before the canonical logger."
+  (let* ((plain-rows (mapcar #'substring-no-properties rows))
+         (plain-centered (mapcar #'substring-no-properties centered))
+         (plain-joined (substring-no-properties joined))
+         (plain-output (substring-no-properties output))
+         (row-widths (mapcar #'agent-repl--tabline-entry-width rows))
+         (padded-widths
+          (mapcar #'agent-repl--tabline-entry-width padded))
+         (centered-widths
+          (mapcar #'agent-repl--tabline-entry-width centered))
+         (signature
+          (list width line-width names current widths anchor-pos
+                plain-rows row-widths padded-widths plain-centered
+                centered-widths plain-joined
+                (frame-parameter frame 'tab-bar-lines)
+                (frame-parameter frame 'tab-bar-lines-keep-state)
+                tab-bar-mode tab-bar-show auto-resize-tab-bars
+                tab-bar-auto-width tab-bar-format
+                frame-inhibit-implied-resize)))
+    (when (agent-repl--tabbar-observation-due-p
+           frame :render-signature :render-at signature)
+      (agent-repl--log-verbose
+       (and current (agent-repl--ws-known-p current) current)
+       "tabbar-render: frame=%S frame-width=%d frame-pixel-width=%d frame-char-width=%d line-width=%d configured-rows=%d tab-bar-lines=%S keep-state=%S tab-bar-mode=%S tab-bar-show=%S auto-resize=%S auto-width=%S inhibit-implied-resize=%S format=%S names=%S current=%S entry-widths=%S anchor-pos=%d rows=%S row-widths=%S padded-widths=%S centered=%S centered-widths=%S joined-newlines=%d output-newlines=%d output-chars=%d output=%S"
+       frame width (frame-pixel-width frame) (frame-char-width frame)
+       line-width agent-repl--tabline-row-count
+       (frame-parameter frame 'tab-bar-lines)
+       (frame-parameter frame 'tab-bar-lines-keep-state)
+       tab-bar-mode tab-bar-show auto-resize-tab-bars tab-bar-auto-width
+       frame-inhibit-implied-resize tab-bar-format names current widths
+       anchor-pos plain-rows row-widths padded-widths plain-centered
+       centered-widths (cl-count ?\n plain-joined)
+       (cl-count ?\n plain-output) (length output) plain-output))))
+
 (defun agent-repl-workspace-tabline-formatted ()
   "Format workspace list for tab-bar display as a FIXED row count.
 Renders `agent-repl--tabline-row-count' rows, each no wider than
@@ -1458,8 +1625,8 @@ redisplay retries it forever and Emacs livelocks at 100% CPU (see
 
 The `(1- (frame-width))' cap also keeps the unfaced terminator that
 `agent-repl--join-tabline-rows' appends within the visible columns
-\(col < `frame-width'), and each row is centered so left-only padding
-from `+doom-dashboard--center' doesn't push it to the right edge.
+\(col < `frame-width'), and each row is centered by rendered pixel width
+through `agent-repl--center-tabline-row'.
 Appends the zero-width cache-buster
 \(`agent-repl--tabline-cache-buster') so the segment's string content
 actually changes across refresh ticks without changing its rendered
@@ -1480,20 +1647,23 @@ remaining tabs carry contiguous 1-based numbers."
          ;; `string-pixel-width' is expensive and this runs in redisplay.
          (widths (mapcar #'agent-repl--tabline-entry-width entries))
          (anchor-pos (agent-repl--tabline-anchor-index
-                      widths names current line-width
+                      (selected-frame) widths names current line-width
                       agent-repl--tabline-row-count))
          (rows (agent-repl--tabline-rows entries anchor-pos line-width
                                           agent-repl--tabline-row-count widths))
          (padded (mapcar (lambda (row)
                            (agent-repl--pad-tabline-row row line-width))
                          rows))
-         (centered (mapcar (lambda (row)
-                             (if (fboundp '+doom-dashboard--center)
-                                 (+doom-dashboard--center line-width row)
-                               row))
-                           padded))
-         (joined (agent-repl--join-tabline-rows centered)))
-    (concat joined (agent-repl--tabline-cache-buster))))
+         (centered
+          (mapcar (lambda (row)
+                    (agent-repl--center-tabline-row row line-width))
+                  padded))
+         (joined (agent-repl--join-tabline-rows centered))
+         (output (concat joined (agent-repl--tabline-cache-buster))))
+    (agent-repl--tabbar-log-render
+     (selected-frame) width line-width names current widths anchor-pos
+     rows padded centered joined output)
+    output))
 
 (defun agent-repl-current-workspace-name-segment ()
   "Return current workspace name as an invisible tab-bar segment.
@@ -1509,6 +1679,74 @@ so its only purpose is the cache-busting role."
                     (concat name " ")
                   name)
                 'invisible t)))
+
+(defun agent-repl--tabbar-keymap-caption-observations (keymap)
+  "Return diagnostic observations for string captions in KEYMAP.
+
+Each observation records the menu-item key, source-character count,
+newline count, rendered column width, property-free source caption, and
+visible caption with `invisible' characters removed.  This is the last Lisp
+boundary before Emacs C code consumes the tab-bar items, so it reveals
+transformations such as `tab-bar-auto-width' deleting part of a multi-line
+formatter string."
+  (cl-loop for item in keymap
+           for observation =
+           (pcase item
+             (`(,key menu-item ,caption . ,_)
+              (when (stringp caption)
+                (let ((visible-caption
+                       (apply
+                        #'string
+                        (cl-loop for index below (length caption)
+                                 unless (get-text-property
+                                         index 'invisible caption)
+                                 collect (aref caption index)))))
+                  (list :key key
+                        :chars (length caption)
+                        :newlines (cl-count ?\n caption)
+                        :columns (agent-repl--tabline-entry-width caption)
+                        :caption (substring-no-properties caption)
+                        :visible-caption visible-caption))))
+             (_ nil))
+           when observation
+           collect observation))
+
+(defun agent-repl--tabbar-audit-keymap (keymap)
+  "Log KEYMAP's final string captions and return KEYMAP unchanged.
+
+Installed as `tab-bar-make-keymap' return advice.  Its state-change and
+bounded-capture gate makes the actual Lisp-to-C handoff observable without
+logging every redisplay."
+  (let* ((frame (selected-frame))
+         (captions (agent-repl--tabbar-keymap-caption-observations keymap))
+         ;; The cache-buster intentionally alternates an invisible trailing
+         ;; character every poll.  Exclude that character from the
+         ;; state-change signature while retaining the exact source caption
+         ;; in the emitted observation.
+         (semantic-captions
+          (mapcar
+           (lambda (caption)
+             (list :key (plist-get caption :key)
+                   :visible-caption
+                   (plist-get caption :visible-caption)))
+           captions))
+         (signature
+          (list semantic-captions tab-bar-auto-width
+                (frame-parameter frame 'tab-bar-lines)
+                (frame-parameter frame 'tab-bar-lines-keep-state))))
+    (when (agent-repl--tabbar-observation-due-p
+           frame :keymap-signature :keymap-at signature)
+      (agent-repl--log-verbose
+       (let ((current (agent-repl--ws-current-name)))
+         (and current (agent-repl--ws-known-p current) current))
+       "tabbar-keymap-boundary: frame=%S tab-bar-lines=%S keep-state=%S auto-width=%S captions=%S"
+       frame (frame-parameter frame 'tab-bar-lines)
+       (frame-parameter frame 'tab-bar-lines-keep-state)
+       tab-bar-auto-width captions))
+    keymap))
+
+(advice-add 'tab-bar-make-keymap :filter-return
+            #'agent-repl--tabbar-audit-keymap)
 
 ;; The queued-message status segment (agent-repl--ws-queued-segment) and its
 ;; face were deleted in the S9 endgame along with the retired queue plane: it
@@ -1534,6 +1772,101 @@ so its only purpose is the cache-busting role."
 (defvar agent-repl--storm-tick-timer nil
   "Obsolete watchdog timer retained only for hot-reload cleanup.")
 
+(defvar agent-repl--tabbar-frame-parameter-audit-active nil
+  "Non-nil while logging a tab-bar frame-parameter mutation.
+
+The guard prevents canonical logging internals from recursively entering the
+global frame-parameter advice.  Calls made while it is non-nil retain their
+normal behavior but do not emit a nested diagnostic record.")
+
+(defun agent-repl--tabbar-backtrace-string ()
+  "Return the current Lisp backtrace as a string.
+
+`backtrace' writes to `standard-output'; capturing that documented output
+works on the Emacs 30 build used by agent-repl, which does not provide the
+newer convenience function `backtrace-to-string'."
+  (with-output-to-string
+    (backtrace)))
+
+(defun agent-repl--tabbar-log-frame-lines-mutation
+    (api frame prior requested final outcome backtrace)
+  "Log one `tab-bar-lines' mutation attempted through API.
+
+FRAME is the resolved live frame, PRIOR its value before the call, REQUESTED
+the API input, FINAL the value afterward, and OUTCOME is either `returned' or
+an error object.  BACKTRACE is captured before invoking the underlying API so
+the record identifies the caller that initiated the mutation."
+  (let ((agent-repl--tabbar-frame-parameter-audit-active t))
+    (agent-repl--log
+     (let ((current (agent-repl--ws-current-name)))
+       (and current (agent-repl--ws-known-p current) current))
+     "tabbar-lines-mutation: api=%S frame=%S prior=%S requested=%S final=%S outcome=%S backtrace=%S"
+     api frame prior requested final outcome backtrace)))
+
+(defun agent-repl--tabbar-audit-set-frame-parameter
+    (original frame parameter value)
+  "Around advice tracing `tab-bar-lines' changes made through ORIGINAL.
+
+All other frame parameters pass through without instrumentation.  The return
+value and any signaled error remain identical to `set-frame-parameter'."
+  (if (or agent-repl--tabbar-frame-parameter-audit-active
+          (not (eq parameter 'tab-bar-lines)))
+      (funcall original frame parameter value)
+    (let* ((resolved-frame (or frame (selected-frame)))
+           (prior (frame-parameter resolved-frame 'tab-bar-lines))
+           (backtrace (agent-repl--tabbar-backtrace-string)))
+      (condition-case error-data
+          (let* ((agent-repl--tabbar-frame-parameter-audit-active t)
+                 (result (funcall original frame parameter value))
+                 (final (frame-parameter resolved-frame 'tab-bar-lines)))
+            (unless (equal prior final)
+              (agent-repl--tabbar-log-frame-lines-mutation
+               'set-frame-parameter resolved-frame prior value final
+               'returned backtrace))
+            result)
+        (error
+         (agent-repl--tabbar-log-frame-lines-mutation
+          'set-frame-parameter resolved-frame prior value
+          (frame-parameter resolved-frame 'tab-bar-lines)
+          error-data backtrace)
+         (signal (car error-data) (cdr error-data)))))))
+
+(defun agent-repl--tabbar-audit-modify-frame-parameters
+    (original frame parameters)
+  "Around advice tracing `tab-bar-lines' changes in PARAMETERS via ORIGINAL.
+
+Parameter lists without `tab-bar-lines' pass through without instrumentation.
+The return value and any signaled error remain identical to
+`modify-frame-parameters'."
+  (let ((line-cell (assq 'tab-bar-lines parameters)))
+    (if (or agent-repl--tabbar-frame-parameter-audit-active
+            (null line-cell))
+        (funcall original frame parameters)
+      (let* ((resolved-frame (or frame (selected-frame)))
+             (prior (frame-parameter resolved-frame 'tab-bar-lines))
+             (requested (cdr line-cell))
+             (backtrace (agent-repl--tabbar-backtrace-string)))
+        (condition-case error-data
+            (let* ((agent-repl--tabbar-frame-parameter-audit-active t)
+                   (result (funcall original frame parameters))
+                   (final (frame-parameter resolved-frame 'tab-bar-lines)))
+              (unless (equal prior final)
+                (agent-repl--tabbar-log-frame-lines-mutation
+                 'modify-frame-parameters resolved-frame prior requested
+                 final 'returned backtrace))
+              result)
+          (error
+           (agent-repl--tabbar-log-frame-lines-mutation
+            'modify-frame-parameters resolved-frame prior requested
+            (frame-parameter resolved-frame 'tab-bar-lines)
+            error-data backtrace)
+           (signal (car error-data) (cdr error-data))))))))
+
+(advice-add 'set-frame-parameter :around
+            #'agent-repl--tabbar-audit-set-frame-parameter)
+(advice-add 'modify-frame-parameters :around
+            #'agent-repl--tabbar-audit-modify-frame-parameters)
+
 (defun agent-repl--retire-redisplay-storm-watchdog ()
   "Remove the obsolete reactive redisplay watchdog after a hot reload.
 Returns a plist recording whether a heartbeat timer was cancelled and
@@ -1557,55 +1890,74 @@ fix into an older live process does not leave its timer or hook behind."
         (setq hook-present (not (eq prior-hook pre-redisplay-function)))))
     (list :timer-cancelled timer-cancelled :hook-present hook-present)))
 
+(defun agent-repl--tabbar-pin-frame (frame rows)
+  "Pin FRAME's tab bar to ROWS and preserve that explicit line count.
+
+This is status.el's frame-parameter integration boundary.  It sets
+`tab-bar-lines-keep-state' before `tab-bar-lines', preventing Emacs's
+native one-line recalculation from overwriting the fixed agent-repl
+height during later tab operations.  `frame-inhibit-implied-resize'
+must already contain `tab-bar-lines' so the height change is absorbed by
+the frame text area rather than resizing the outer NSWindow."
+  (set-frame-parameter frame 'tab-bar-lines-keep-state t)
+  (set-frame-parameter frame 'tab-bar-lines rows))
+
 (defun agent-repl-tabbar-apply-row-count ()
-  "Apply `agent-repl--tabline-row-count' to the SELECTED frame's tab-bar.
+  "Reapply the fixed agent-repl row count to the selected frame.
 
-Deliberately interactive and deliberately not automatic.  Setting
-`tab-bar-lines' on a LIVE frame drives `ns_change_tab_bar_height' on
-macOS, which resizes the NSWindow; if that resize is clipped (by the
-screen edge, say) the requested and realized sizes never agree and
-redisplay can livelock at 100% CPU retrying it.  Installation therefore
-only pins `default-frame-alist', where a new frame picks the height up
-at creation and no resize ever happens.
-
-This command takes that risk ONCE, on purpose, so an existing frame can
-adopt a changed row count without a restart.  If the frame misbehaves
-afterwards, restarting Emacs is the fallback — a fresh frame is born
-with the right height.  Returns the applied row count."
+`agent-repl--install-fixed-height-tab-bar' normally pins every graphical
+frame automatically.  This interactive command reasserts the same
+contract for manual recovery after external code has changed the selected
+frame.  Returns the applied row count."
   (interactive)
-  (let ((rows agent-repl--tabline-row-count))
-    (set-frame-parameter nil 'tab-bar-lines rows)
-    (agent-repl--log nil "tab-bar-apply-row-count: rows=%d frame=%S" rows
-                     (selected-frame))
+  (let* ((rows agent-repl--tabline-row-count)
+         (frame (selected-frame))
+         (prior-lines (frame-parameter frame 'tab-bar-lines))
+         (prior-keep-state
+          (frame-parameter frame 'tab-bar-lines-keep-state)))
+    (agent-repl--tabbar-pin-frame frame rows)
+    (agent-repl--log
+     (let ((current (agent-repl--ws-current-name)))
+       (and current (agent-repl--ws-known-p current) current))
+     "tab-bar-apply-row-count: frame=%S rows=%d prior-lines=%S lines=%S prior-keep-state=%S keep-state=%S"
+     frame rows prior-lines (frame-parameter frame 'tab-bar-lines)
+     prior-keep-state
+     (frame-parameter frame 'tab-bar-lines-keep-state))
     (message "agent-repl: tab-bar set to %d line%s on this frame"
              rows (if (= rows 1) "" "s"))
     rows))
 
 (defun agent-repl--install-fixed-height-tab-bar ()
   "Install agent-repl's fixed-height tab bar without native auto-resizing.
-Sets the global tab-bar formatter, disables `auto-resize-tab-bars', and
-writes `agent-repl--tabline-row-count' to `default-frame-alist' so
-FUTURE frames are born with the right tab-bar height.  Also removes the
-obsolete redisplay watchdog left by a hot reload.
+Sets the global formatter, disables `auto-resize-tab-bars', and pins
+`agent-repl--tabline-row-count' on every current graphical frame plus
+`default-frame-alist'.  Both scopes also receive
+`tab-bar-lines-keep-state', so Emacs's native one-line recalculation
+cannot overwrite the explicit two-line contract.
 
-Frames that ALREADY exist are deliberately left alone.  Changing
-`tab-bar-lines' on a live frame is the path that drives
-`ns_change_tab_bar_height' and can livelock redisplay on a clipped
-resize; frame creation is the only safe path, so installation never
-takes that risk on its own initiative.  `agent-repl-tabbar-apply-row-count'
-exists for the user to take it deliberately, and restarting Emacs is
-the fallback.
+`frame-inhibit-implied-resize' is configured before any live frame
+height changes.  The changed tab-bar height therefore comes out of the
+frame's text area instead of requesting an outer NSWindow resize, which
+prevents the clipped-resize redisplay livelock.  The obsolete reactive
+watchdog is removed after a hot reload.
 
 Logs every before/after value needed to diagnose a future regression:
-row count, prior auto-resize value, prior default frame height, current
-frame heights (recorded, not changed), and the watchdog cleanup result."
+row count, auto-resize value, default frame parameters, current frame
+parameters, and the watchdog cleanup result."
   (let* ((rows agent-repl--tabline-row-count)
          (frames (cl-remove-if-not #'display-graphic-p (frame-list)))
          (prior-auto-resize auto-resize-tab-bars)
+         (prior-auto-width tab-bar-auto-width)
+         (prior-format tab-bar-format)
          (prior-default-lines (alist-get 'tab-bar-lines default-frame-alist))
-         (prior-frame-lines
+         (prior-default-keep-state
+          (alist-get 'tab-bar-lines-keep-state default-frame-alist))
+         (prior-frame-state
           (mapcar (lambda (frame)
-                    (cons frame (frame-parameter frame 'tab-bar-lines)))
+                    (list frame
+                          :lines (frame-parameter frame 'tab-bar-lines)
+                          :keep-state
+                          (frame-parameter frame 'tab-bar-lines-keep-state)))
                   frames))
          (watchdog-cleanup (agent-repl--retire-redisplay-storm-watchdog)))
     (setq tab-bar-format '(agent-repl-workspace-tabline-formatted
@@ -1613,26 +1965,43 @@ frame heights (recorded, not changed), and the watchdog cleanup result."
                            agent-repl-current-workspace-name-segment)
           tab-bar-show t
           tab-bar-close-button-show nil
-          auto-resize-tab-bars nil)
+          auto-resize-tab-bars nil
+          ;; The visible formatter returns one menu-item caption containing
+          ;; both rows.  Emacs 30's auto-width pass treats a caption whose
+          ;; first glyph has a tab face as one resizable tab and deletes
+          ;; characters from its end, which can erase the entire second row
+          ;; before C redisplay sees it.
+          tab-bar-auto-width nil)
     ;; Obsolete since 28.1 but still honored; the tab-bar-format migration is deliberate future work.
     (with-suppressed-warnings ((obsolete tab-bar-new-button-show))
       (setq tab-bar-new-button-show nil))
-    ;; A tab-bar height change must never imply an NSWindow resize.  Absorb
-    ;; any explicit line-count update into the frame's text area.
+    ;; Establish the no-outer-resize invariant before `tab-bar-mode' or any
+    ;; explicit frame parameter update can alter the live tab-bar height.
     (unless (eq frame-inhibit-implied-resize t)
       (cl-pushnew 'tab-bar-lines frame-inhibit-implied-resize))
     (tab-bar-mode 1)
     ;; `tab-bar-mode' writes `(tab-bar-lines . 1)' into
-    ;; `default-frame-alist', so pin the fixed contract after enabling it.
-    (setf (alist-get 'tab-bar-lines default-frame-alist) rows)
+    ;; `default-frame-alist', so pin both parts of the fixed contract after
+    ;; enabling it and then apply the same contract to every live GUI frame.
+    (setf (alist-get 'tab-bar-lines default-frame-alist) rows
+          (alist-get 'tab-bar-lines-keep-state default-frame-alist) t)
+    (dolist (frame frames)
+      (agent-repl--tabbar-pin-frame frame rows))
     (agent-repl--log
-     nil
-     "tab-bar-fixed-height: rows=%d frames=%d prior-auto-resize=%S auto-resize=%S prior-default-lines=%S default-lines=%S prior-frame-lines=%S frame-lines=%S watchdog-cleanup=%S"
+     (let ((current (agent-repl--ws-current-name)))
+       (and current (agent-repl--ws-known-p current) current))
+     "tab-bar-fixed-height: rows=%d frames=%d prior-auto-resize=%S auto-resize=%S prior-auto-width=%S auto-width=%S prior-format=%S format=%S prior-default-lines=%S default-lines=%S prior-default-keep-state=%S default-keep-state=%S prior-frame-state=%S frame-state=%S watchdog-cleanup=%S"
      rows (length frames) prior-auto-resize auto-resize-tab-bars
+     prior-auto-width tab-bar-auto-width prior-format tab-bar-format
      prior-default-lines (alist-get 'tab-bar-lines default-frame-alist)
-     prior-frame-lines
+     prior-default-keep-state
+     (alist-get 'tab-bar-lines-keep-state default-frame-alist)
+     prior-frame-state
      (mapcar (lambda (frame)
-               (cons frame (frame-parameter frame 'tab-bar-lines)))
+               (list frame
+                     :lines (frame-parameter frame 'tab-bar-lines)
+                     :keep-state
+                     (frame-parameter frame 'tab-bar-lines-keep-state)))
              frames)
      watchdog-cleanup)))
 
@@ -1929,8 +2298,8 @@ the active tab-bar format function
 `+workspace--tabline', so the `agent-repl--tabline-advice' path is
 no longer on the displayed-rendering hot path.  `--force-tab-bar-
 redraw' flips the toggle AND drives `tab-bar-tabs-set' /
-`tab-bar--update-tab-bar-lines' / `force-mode-line-update' so the
-alternating-string cache-bust actually reaches the display.
+`force-mode-line-update' so the alternating-string cache-bust actually
+reaches the display without invoking Emacs's one-line height policy.
 
 When a previous chain is still in flight (per
 `agent-repl--update-in-flight-p'), skips this tick — the in-flight
