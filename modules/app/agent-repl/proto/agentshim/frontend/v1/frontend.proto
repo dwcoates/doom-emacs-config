@@ -793,12 +793,24 @@ message CreateSessionCmd {
   // still rehydrates after a daemon restart, since refusing there would
   // silently change a live session's posture.
   bool allow_ungated = 7;
+
+  // The model this session should START on, empty to accept the shim's own
+  // default.  A caller that has a remembered selection would otherwise have to
+  // create and then immediately SetModel, which races: the session is live and
+  // driveable in between, so its first turn can run on the wrong model.
+  //
+  // This does NOT make the caller authoritative.  The daemon applies it through
+  // the same SetModel path a later change takes, once the shim is wired, and
+  // still publishes only the shim-confirmed selection.  A rejected model fails
+  // the create rather than silently leaving the session on another one.
+  string model = 8;
 }
 
 // A deliberate request to change an already-live session's model.  The daemon
 // forwards this to the shim and only publishes the shim-confirmed selection.
-// Bootstrap, rebind, and creation intentionally have no model field: they
-// observe session state rather than choosing it.
+// Bootstrap and rebind intentionally have no model field: they observe session
+// state rather than choosing it.  Creation is different — see
+// CreateSessionCmd.model, which is a starting choice, not an observation.
 message SetModelCmd {
   string model = 1;
 }
