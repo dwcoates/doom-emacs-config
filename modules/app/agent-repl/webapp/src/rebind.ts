@@ -1,40 +1,47 @@
 /**
  * Client-side session rebind: the "session gone" escape hatch.
  *
- * The daemon makes its s_ ids survive restarts (registry + rehydration),
- * so a failed existence probe should be rare — the
- * id is genuinely unresolvable (transcript pruned, fake session,
- * registry lost). Even then the CONVERSATION usually still exists under
- * its durable CLI uuid, which every hello frame carries. This module
- * persists that uuid (plus the cwd POST /sessions needs) per daemon
- * session id, and trades it for a fresh session via
- * POST /sessions {cwd, resume} so the live view rebinds instead of
- * dead-ending. The headless remediation analyst is the caller's LAST
- * resort, reached only when rehydrate (daemon-side) and rebind (here)
- * have both failed.
+ * The daemon makes its s_ ids survive restarts (registry + rehydration), so a
+ * failed existence probe should be rare — the id is genuinely unresolvable
+ * (transcript pruned, fake session, registry lost). Even then the CONVERSATION
+ * usually still exists, and the daemon can find it. This module remembers the
+ * one thing the daemon cannot infer from a dead session id — WHERE the session
+ * was rooted — and trades it for a fresh session bound to the same
+ * conversation, so the live view rebinds instead of dead-ending. The headless
+ * remediation analyst is the caller's LAST resort, reached only when rehydrate
+ * (daemon-side) and rebind (here) have both failed.
+ *
+ * THIS MODULE USED TO PERSIST THE VENDOR CONVERSATION UUID, and traded it back
+ * on `CreateSessionCmd.resume_claude_session_id`. That made the browser a
+ * second authority on which conversation a workspace owns — the same mistake
+ * the Emacs frontend made in its state.el, and the same failure: a stored
+ * pointer that goes stale silently opens a FRESH conversation on top of an
+ * intact transcript. The daemon owns (config_dir, cwd) -> conversation; it
+ * holds the registry, the checkpoints, and the transcripts on disk. So the
+ * rebind now sends the cwd and the INTENT to continue, and the daemon decides
+ * which conversation that is. See `ResumeMode` in frontend.proto.
  */
 
 import { log } from "./wslog.js";
 
-/** What a rebind needs to re-create the conversation's session. */
+/** Where a gone session was rooted — all a rebind needs. */
 export interface ResumeKeys {
-  claudeSessionId: string;
   cwd: string;
 }
 
 const KEY_PREFIX = "agent-repl.resume.";
 
 /**
- * Persist the resume keys for sessionId. A hello without a
- * claude_session_id (pre-init) carries nothing durable and is skipped —
- * an earlier, filled-in record must not be overwritten by it.
+ * Persist the rebind record for sessionId. A record with no cwd cannot be
+ * rebound from and is skipped, so an earlier usable record is never
+ * overwritten by an empty one.
  */
 export function rememberResumeKeys(storage: Storage, sessionId: string, keys: ResumeKeys): void {
-  if (keys.claudeSessionId === "") return;
+  if (keys.cwd === "") return;
   storage.setItem(KEY_PREFIX + sessionId, JSON.stringify(keys));
 }
 
-/** Recall sessionId's resume keys; null when absent or unusable. */
+/** Recall sessionId's rebind record; null when absent or unusable. */
 export function recallResumeKeys(storage: Storage, sessionId: string): ResumeKeys | null {
   const raw = storage.getItem(KEY_PREFIX + sessionId);
   if (raw === null) {
@@ -58,32 +65,33 @@ export function recallResumeKeys(storage: Storage, sessionId: string): ResumeKey
     );
     return null;
   }
-  if (typeof parsed.claudeSessionId !== "string" || parsed.claudeSessionId === "") {
+  if (typeof parsed.cwd !== "string" || parsed.cwd === "") {
+    // Also the shape a PRE-MIGRATION record has: those stored a
+    // claudeSessionId alongside the cwd, and one written before the cwd was
+    // recorded has nothing this path can use. Loud rather than silent,
+    // because it blocks rebind for sessionId either way.
     log(
       "error",
-      `rebind: resume record for ${sessionId} lacks claudeSessionId (parsed=${JSON.stringify(parsed)}) — falling through to remediation`,
+      `rebind: resume record for ${sessionId} lacks cwd (parsed=${JSON.stringify(parsed)}) — falling through to remediation`,
       { operation: "rebind.resume-record-invalid", context: { agent_repl_session_id: sessionId, parsed } },
     );
     return null;
   }
-  return {
-    claudeSessionId: parsed.claudeSessionId,
-    cwd: typeof parsed.cwd === "string" ? parsed.cwd : "",
-  };
+  return { cwd: parsed.cwd };
 }
 
-/** Creates a session from the stored resume keys, returning its new id. */
-export type SessionCreator = (args: {
-  cwd: string;
-  resumeClaudeSessionId: string;
-}) => Promise<string>;
+/** Creates a session rooted at cwd, continuing its conversation. */
+export type SessionCreator = (args: { cwd: string }) => Promise<string>;
 
 /**
- * Rebind a gone session: create a successor from the stored resume keys and
- * return its id. Returns null when no keys were ever stored (nothing to
+ * Rebind a gone session: create a successor rooted where the old one was and
+ * return its id. Returns null when no record was ever stored (nothing to
  * rebind with — the caller escalates to remediation); rejects when the create
  * fails (same escalation, but loudly distinguishable from "nothing stored").
- * The keys migrate to the successor id so a SECOND loss rebinds too.
+ * The record migrates to the successor id so a SECOND loss rebinds too.
+ *
+ * WHICH conversation the successor lands on is the daemon's decision, not
+ * this module's: the create carries the cwd and asks to CONTINUE.
  *
  * The creator is injected because session creation is a `CreateSessionCmd` on
  * the command plane, not the POST /sessions this used to issue: it needs a
@@ -96,10 +104,7 @@ export async function rebindSession(
 ): Promise<string | null> {
   const keys = recallResumeKeys(storage, sessionId);
   if (keys === null) return null;
-  const successor = await createSession({
-    cwd: keys.cwd,
-    resumeClaudeSessionId: keys.claudeSessionId,
-  });
+  const successor = await createSession({ cwd: keys.cwd });
   rememberResumeKeys(storage, successor, keys);
   storage.removeItem(KEY_PREFIX + sessionId);
   return successor;

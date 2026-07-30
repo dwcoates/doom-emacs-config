@@ -57,19 +57,19 @@ describe("resume key persistence", () => {
     // Arrange
     const storage = new FakeStorage();
     // Act
-    rememberResumeKeys(storage, "s_1", { claudeSessionId: "uuid-1", cwd: "/w" });
+    rememberResumeKeys(storage, "s_1", { cwd: "/w" });
     // Assert
-    expect(recallResumeKeys(storage, "s_1")).toEqual({ claudeSessionId: "uuid-1", cwd: "/w" });
+    expect(recallResumeKeys(storage, "s_1")).toEqual({ cwd: "/w" });
   });
 
   it("skips a pre-init hello so it cannot clobber a stored record", () => {
     // Arrange — a filled record, then a hello with no durable id yet.
     const storage = new FakeStorage();
-    rememberResumeKeys(storage, "s_1", { claudeSessionId: "uuid-1", cwd: "/w" });
+    rememberResumeKeys(storage, "s_1", { cwd: "/w" });
     // Act
-    rememberResumeKeys(storage, "s_1", { claudeSessionId: "", cwd: "/w" });
+    rememberResumeKeys(storage, "s_1", { cwd: "" });
     // Assert
-    expect(recallResumeKeys(storage, "s_1")).toEqual({ claudeSessionId: "uuid-1", cwd: "/w" });
+    expect(recallResumeKeys(storage, "s_1")).toEqual({ cwd: "/w" });
   });
 
   it("recalls null for a session id that was never stored, logging an info breadcrumb", () => {
@@ -103,10 +103,11 @@ describe("resume key persistence", () => {
     expect(spy.consoleLines[0]).toContain("remediation");
   });
 
-  it("recalls null for a record missing claudeSessionId, logging an error naming the session id", () => {
-    // Arrange
+  it("recalls null for a pre-migration record with no cwd, logging an error naming the session id", () => {
+    // Arrange — the shape written before the vendor uuid was removed. It
+    // named a conversation and nothing else, so there is no cwd to rebind at.
     const storage = new FakeStorage();
-    storage.setItem("agent-repl.resume.s_1", JSON.stringify({ cwd: "/w" }));
+    storage.setItem("agent-repl.resume.s_1", JSON.stringify({ claudeSessionId: "uuid-1" }));
     const spy = spyLogger();
     setLogger(spy.logger);
     // Act
@@ -116,7 +117,7 @@ describe("resume key persistence", () => {
     expect(spy.consoleLines).toHaveLength(1);
     expect(spy.consoleLines[0]).toContain("error:");
     expect(spy.consoleLines[0]).toContain("s_1");
-    expect(spy.consoleLines[0]).toContain("claudeSessionId");
+    expect(spy.consoleLines[0]).toContain("cwd");
     expect(spy.consoleLines[0]).toContain("remediation");
   });
 });
@@ -124,11 +125,11 @@ describe("resume key persistence", () => {
 describe("rebindSession", () => {
   /** A session creator recording the args it was asked to create with. */
   function fakeCreator(result: string | Error): {
-    create: (args: { cwd: string; resumeClaudeSessionId: string }) => Promise<string>;
-    calls: Array<{ cwd: string; resumeClaudeSessionId: string }>;
+    create: (args: { cwd: string }) => Promise<string>;
+    calls: Array<{ cwd: string }>;
   } {
-    const calls: Array<{ cwd: string; resumeClaudeSessionId: string }> = [];
-    const create = async (args: { cwd: string; resumeClaudeSessionId: string }) => {
+    const calls: Array<{ cwd: string }> = [];
+    const create = async (args: { cwd: string }) => {
       calls.push(args);
       if (result instanceof Error) throw result;
       return result;
@@ -139,7 +140,7 @@ describe("rebindSession", () => {
   it("trades the stored keys for a successor session id", async () => {
     // Arrange
     const storage = new FakeStorage();
-    rememberResumeKeys(storage, "s_old", { claudeSessionId: "uuid-1", cwd: "/w" });
+    rememberResumeKeys(storage, "s_old", { cwd: "/w" });
     const { create } = fakeCreator("s_new");
     // Act
     const next = await rebindSession("s_old", storage, create);
@@ -150,23 +151,24 @@ describe("rebindSession", () => {
   it("creates the successor with the stored resume keys", async () => {
     // Arrange
     const storage = new FakeStorage();
-    rememberResumeKeys(storage, "s_old", { claudeSessionId: "uuid-1", cwd: "/w" });
+    rememberResumeKeys(storage, "s_old", { cwd: "/w" });
     const { create, calls } = fakeCreator("s_new");
     // Act
     await rebindSession("s_old", storage, create);
-    // Assert — the CreateSessionCmd resumes the SAME claude session.
-    expect(calls).toEqual([{ cwd: "/w", resumeClaudeSessionId: "uuid-1" }]);
+    // Assert — the CreateSessionCmd names the cwd; the daemon picks the
+    // conversation. The browser deliberately holds no pointer to one.
+    expect(calls).toEqual([{ cwd: "/w" }]);
   });
 
   it("migrates the resume keys onto the successor id", async () => {
     // Arrange
     const storage = new FakeStorage();
-    rememberResumeKeys(storage, "s_old", { claudeSessionId: "uuid-1", cwd: "/w" });
+    rememberResumeKeys(storage, "s_old", { cwd: "/w" });
     const { create } = fakeCreator("s_new");
     // Act
     await rebindSession("s_old", storage, create);
     // Assert — a SECOND loss can rebind too; the old key is gone.
-    expect(recallResumeKeys(storage, "s_new")).toEqual({ claudeSessionId: "uuid-1", cwd: "/w" });
+    expect(recallResumeKeys(storage, "s_new")).toEqual({ cwd: "/w" });
     expect(recallResumeKeys(storage, "s_old")).toBeNull();
   });
 
@@ -184,7 +186,7 @@ describe("rebindSession", () => {
   it("rejects on a failed create rather than reading it as rebound", async () => {
     // Arrange
     const storage = new FakeStorage();
-    rememberResumeKeys(storage, "s_old", { claudeSessionId: "uuid-1", cwd: "/w" });
+    rememberResumeKeys(storage, "s_old", { cwd: "/w" });
     const { create } = fakeCreator(new Error("createSession rejected: no such cwd"));
     // Act / Assert
     await expect(rebindSession("s_old", storage, create)).rejects.toThrow("no such cwd");
@@ -193,11 +195,11 @@ describe("rebindSession", () => {
   it("leaves the old keys in place when the create failed", async () => {
     // Arrange
     const storage = new FakeStorage();
-    rememberResumeKeys(storage, "s_old", { claudeSessionId: "uuid-1", cwd: "/w" });
+    rememberResumeKeys(storage, "s_old", { cwd: "/w" });
     const { create } = fakeCreator(new Error("boom"));
     // Act
     await expect(rebindSession("s_old", storage, create)).rejects.toThrow();
     // Assert — a retry can still rebind; the keys were not spent.
-    expect(recallResumeKeys(storage, "s_old")).toEqual({ claudeSessionId: "uuid-1", cwd: "/w" });
+    expect(recallResumeKeys(storage, "s_old")).toEqual({ cwd: "/w" });
   });
 });

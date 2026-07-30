@@ -815,14 +815,18 @@ async function boot(): Promise<void> {
         // Read AFTER ingest so the snapshot's own SessionView has supplied the
         // workspace key the daemon routes a resync by.
         connectResync.observe(isSnapshot, cmdWorkspace(), store.state.lastSeq);
-        // Resume/rebind, re-fed from the SessionView plane. A first adoption and
-        // a rotation both re-persist: the resume keys and logging context must
-        // name the conversation that is live.
+        // Logging context, re-fed from the SessionView plane. A first adoption
+        // and a rotation both re-bind it: the attribution on every log record
+        // must name the conversation that is live RIGHT NOW, which is exactly
+        // why the uuid is read from the pushed plane and never stored.
+        //
+        // The rebind record beside it holds only the cwd. It used to hold the
+        // uuid too, which made the browser a second authority on which
+        // conversation this workspace owns; the daemon resolves that now.
         if (verdict !== "unchanged") {
           bindLogContext({ claude_session_id: sessionRebase.claudeSessionId });
           try {
             rememberResumeKeys(localStorage, activeSessionId, {
-              claudeSessionId: sessionRebase.claudeSessionId,
               cwd: store.state.cwd,
             });
           } catch (err) {
@@ -901,9 +905,7 @@ async function boot(): Promise<void> {
   // the correlation's known-session set is populated first, and a pre-existing
   // same-cwd session cannot masquerade as the new one), and resolves with the
   // new id from the pushed SessionView.
-  const createSessionViaWs = (
-    args: { cwd: string; resumeClaudeSessionId: string } = { cwd: "", resumeClaudeSessionId: "" },
-  ): Promise<string> =>
+  const createSessionViaWs = (args: { cwd: string } = { cwd: "" }): Promise<string> =>
     new Promise<string>((resolve, reject) => {
       let created = false;
       let settled = false;
@@ -954,7 +956,9 @@ async function boot(): Promise<void> {
                 cwd: args.cwd,
                 permissionMode: "",
                 configDir: "",
-                resumeClaudeSessionId: args.resumeClaudeSessionId,
+                // CONTINUE, always: the browser names no conversation. The
+                // daemon resolves which one this cwd owns (see ResumeMode).
+                resumeMode: "RESUME_MODE_CONTINUE",
                 fake: params.get("fake") === "1",
               })
               .then((id) => finish(() => resolve(id)))

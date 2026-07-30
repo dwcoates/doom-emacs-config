@@ -61,7 +61,7 @@ const CREATE_ARGS: CreateSessionArgs = {
   cwd: "",
   permissionMode: "",
   configDir: "",
-  resumeClaudeSessionId: "",
+  resumeMode: "RESUME_MODE_CONTINUE",
   fake: true,
 };
 
@@ -427,5 +427,67 @@ describe("queue controls (E4)", () => {
     const { dispatcher } = newDispatcher(false);
     // Act / Assert
     await expect(dispatcher.queueAccept("/w", "q1")).rejects.toThrow(/socket not open/);
+  });
+});
+
+describe("clientLog rejection circuit breaker", () => {
+  /**
+   * A rejected client log is never transient in practice: the daemon refuses
+   * one whose session attribution disagrees with its registry, and that does
+   * not fix itself. Unbounded, every line the page emits floods the shared
+   * daemon log — 143,057 records from four idle workspaces in one incident.
+   */
+
+  /** Send one client log and reject its ack, returning the dispatcher. */
+  const rejectRun = (h: ReturnType<typeof newDispatcher>, count: number, from = 0): void => {
+    for (let i = 0; i < count; i += 1) {
+      h.dispatcher.clientLog("/w", "info", `line ${from + i}`);
+      h.dispatcher.observe(ackFrame(`r${from + i + 1}`, false, "attribution disagrees"));
+    }
+  };
+
+  it("keeps forwarding while rejections stay below the bound", () => {
+    // Arrange
+    const h = newDispatcher();
+    // Act — one short of the bound.
+    rejectRun(h, 19);
+    // Assert
+    expect(h.dispatcher.clientLog("/w", "info", "still forwarding")).toBe(true);
+  });
+
+  it("trips forwarding off after a run of consecutive rejections", () => {
+    // Arrange
+    const h = newDispatcher();
+    // Act
+    rejectRun(h, 20);
+    // Assert — the next record is not put on the wire at all.
+    const before = h.sent.length;
+    expect(h.dispatcher.clientLog("/w", "info", "flood")).toBe(false);
+    expect(h.sent).toHaveLength(before);
+  });
+
+  it("reports the trip once, naming the reason", () => {
+    // Arrange
+    const h = newDispatcher();
+    // Act — well past the bound.
+    rejectRun(h, 25);
+    // Assert
+    const trips = h.records.filter(
+      (r) => typeof r.local_only === "string" && r.local_only.includes("forwarding DISABLED"),
+    );
+    expect(trips).toHaveLength(1);
+    expect(trips[0].local_only).toContain("attribution disagrees");
+  });
+
+  it("an accepted log clears the run so a recovered page keeps forwarding", () => {
+    // Arrange — 19 rejections, then one that lands.
+    const h = newDispatcher();
+    rejectRun(h, 19);
+    h.dispatcher.clientLog("/w", "info", "accepted");
+    h.dispatcher.observe(ackFrame("r20", true));
+    // Act — another 19 rejections must not trip it.
+    rejectRun(h, 19, 20);
+    // Assert
+    expect(h.dispatcher.clientLog("/w", "info", "still forwarding")).toBe(true);
   });
 });

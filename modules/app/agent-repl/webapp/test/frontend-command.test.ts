@@ -120,7 +120,7 @@ describe("encodeFrontendCommand — createSession", () => {
         cwd: "/work/ws",
         permissionMode: "default",
         configDir: "/home/u/.claude",
-        resumeClaudeSessionId: "cli-uuid",
+        resumeMode: "RESUME_MODE_EXPLICIT",
         fake: true,
       },
     });
@@ -128,7 +128,7 @@ describe("encodeFrontendCommand — createSession", () => {
       cwd: "/work/ws",
       permissionMode: "default",
       configDir: "/home/u/.claude",
-      resumeClaudeSessionId: "cli-uuid",
+      resumeMode: "RESUME_MODE_EXPLICIT",
       fake: true,
     });
   });
@@ -142,7 +142,7 @@ describe("encodeFrontendCommand — createSession", () => {
         cwd: "/work/ws",
         permissionMode: "default",
         configDir: "",
-        resumeClaudeSessionId: "",
+        resumeMode: "RESUME_MODE_CONTINUE",
         fake: false,
       },
     });
@@ -161,7 +161,7 @@ describe("encodeFrontendCommand — createSession", () => {
         cwd: "/work/ws",
         permissionMode: "bypassPermissions",
         configDir: "",
-        resumeClaudeSessionId: "",
+        resumeMode: "RESUME_MODE_CONTINUE",
         fake: false,
       },
     });

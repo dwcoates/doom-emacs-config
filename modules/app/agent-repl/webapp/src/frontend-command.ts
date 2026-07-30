@@ -73,8 +73,16 @@ export interface CreateSessionBody {
   cwd: string;
   permissionMode: string;
   configDir: string;
-  /** "" = fresh; else resume this durable CLI conversation uuid. */
-  resumeClaudeSessionId: string;
+  /**
+    * Which conversation to land on, as an INTENT rather than a pointer:
+    * "RESUME_MODE_CONTINUE" (the daemon resolves this cwd's conversation),
+    * "RESUME_MODE_FRESH", or "RESUME_MODE_EXPLICIT".
+    *
+    * The browser has no business naming a conversation — it used to send a
+    * uuid it had put in localStorage, which made it a second authority on
+    * which conversation a workspace owns. See ResumeMode in frontend.proto.
+    */
+   resumeMode: string;
   /** Test-harness sessions against the offline fake SDK. */
   fake: boolean;
 }
@@ -204,7 +212,7 @@ function encodeBody(b: FrontendCommandBody): Record<string, unknown> {
         cwd: b.cwd,
         permissionMode: b.permissionMode,
         configDir: b.configDir,
-        resumeClaudeSessionId: b.resumeClaudeSessionId,
+        resumeMode: b.resumeMode,
         fake: b.fake,
       };
     case "setModel":
