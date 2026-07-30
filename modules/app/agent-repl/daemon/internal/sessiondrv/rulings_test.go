@@ -98,17 +98,14 @@ type fakeRegistrar struct {
 	observedModels []string
 }
 
-// ClaudeSessionIDChanged mirrors the registry adapter, ADOPT LATE gate
-// included: a FIRST adoption without durable turn evidence is refused and
-// nothing is recorded, so a turn-less session leaves no pointer behind.
-func (f *fakeRegistrar) ClaudeSessionIDChanged(sessionID, csid string, durable bool) bool {
+// ClaudeSessionIDChanged mirrors the registry adapter: adoption is EAGER, so
+// the uuid is recorded the moment it is announced. Whether the vendor actually
+// wrote the transcript it names is checked at resume, not here.
+func (f *fakeRegistrar) ClaudeSessionIDChanged(sessionID, csid string) bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.adopted == nil {
 		f.adopted = map[string]string{}
-	}
-	if f.adopted[sessionID] == "" && !durable {
-		return false
 	}
 	f.adopted[sessionID] = csid
 	f.writes = append(f.writes, sessionID+"="+csid)
@@ -117,16 +114,13 @@ func (f *fakeRegistrar) ClaudeSessionIDChanged(sessionID, csid string, durable b
 
 // AdoptVendorSessionID mirrors the registry adapter: a DIFFERENT uuid over an
 // already-adopted one is a rotation, anything else is a plain adoption.
-func (f *fakeRegistrar) AdoptVendorSessionID(sessionID, csid string, durable bool) (bool, string, bool) {
+func (f *fakeRegistrar) AdoptVendorSessionID(sessionID, csid string) (bool, string, bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.adopted == nil {
 		f.adopted = map[string]string{}
 	}
 	previous := f.adopted[sessionID]
-	if previous == "" && !durable {
-		return false, previous, false
-	}
 	rotated := previous != "" && previous != csid
 	f.adopted[sessionID] = csid
 	f.adoptions = append(f.adoptions, fmt.Sprintf("%s=%s rotated=%t previous=%s", sessionID, csid, rotated, previous))
@@ -234,7 +228,6 @@ func TestPersistVendorSessionIDWritesThroughOncePerValue(t *testing.T) {
 	// Arrange
 	reg := &fakeRegistrar{}
 	m := newRegistrarManager(t, reg)
-	m.noteTurnEvidence("s1")
 
 	// Act — same value twice, then a new value.
 	m.persistVendorSessionID("s1", "cli-uuid-1")
