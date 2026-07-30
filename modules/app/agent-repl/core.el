@@ -529,6 +529,53 @@ invariant; it lets a caller avoid violating it."
               (agent-repl--ws-id-cached ws)
               t))))
 
+(defvar agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal)
+  "Workspace names already reported as unable to own a durable log sink.")
+
+(defun agent-repl--note-unroutable-log-workspace (ws)
+  "Warn once that WS cannot own a durable log sink, naming why.
+The name is marked BEFORE the warning is emitted, because the warning
+itself re-enters the logging ladder; that mark is what stops the re-entry
+from recurring.  The warning carries nil as its own workspace, so it takes
+the global-sink path and cannot re-enter this branch."
+  (unless (gethash ws agent-repl--unroutable-log-workspaces)
+    (puthash ws t agent-repl--unroutable-log-workspaces)
+    (let ((dir (and (fboundp 'agent-repl--ws-get)
+                    (agent-repl--ws-get ws :project-dir))))
+      (agent-repl--warn
+       nil
+       "unroutable log workspace %S (registered-dir=%s) — its records go to the global sink"
+       ws
+       (cond ((not (stringp dir)) "unregistered")
+             ((file-directory-p dir) dir)
+             (t (format "%s [MISSING]" dir)))))))
+
+(defun agent-repl--log-sink-workspace (ws)
+  "Return the workspace WS's records may be routed to, or nil for global.
+A log line must never be able to abort its caller.  Logging is a diagnostic
+channel, and two conditions put a WS beyond routing that no call site can
+prevent:
+
+- A workspace legitimately registered in the hash whose worktree was deleted
+  while Emacs was running.  The caller is correct to log about it; the
+  directory is simply gone.
+- A name that reached the ladder through a local bound from ambient state,
+  where provenance is dynamic rather than statically enumerable.
+
+Both degrade to the global sink here rather than signalling, and neither
+loses the record: `agent-repl--note-unroutable-log-workspace' warns once per
+distinct name, so the condition stays loud and greppable without turning a
+debug line into a fatal error.  The structural checks that guard a HOSTILE
+workspace path — symlinked directory components, a non-directory component,
+a canonical log path that is a directory — remain fatal in
+`agent-repl--ensure-real-log-directory' and
+`agent-repl--workspace-emacs-log-target', because those describe an attack,
+not an absence."
+  (cond
+   ((null ws) nil)
+   ((agent-repl--ws-log-routable-p ws) ws)
+   (t (agent-repl--note-unroutable-log-workspace ws) nil)))
+
 (defun agent-repl--workspace-log-identity (ws)
   "Return WS's registered canonical directory and stable workspace identity.
 The logging boundary deliberately refuses to derive either value from ambient
@@ -815,10 +862,14 @@ instrumenting it through the logging ladder would recurse indefinitely."
   ;; harness.  Echo-area formatting and emission remain the caller's concern.
   (when (or agent-repl-log-to-file
             (and agent-repl--workspace-log-buffer-enabled ws))
-    (let ((record (agent-repl--log-record ws level verbosity fmt args)))
+    ;; Resolve the routing decision ONCE, before anything consumes WS.  The
+    ;; record's identity fields and the sink path must agree about which
+    ;; workspace owns this line, and both derive from this single answer.
+    (let* ((sink-ws (agent-repl--log-sink-workspace ws))
+           (record (agent-repl--log-record sink-ws level verbosity fmt args)))
       (when agent-repl-log-to-file
-        (agent-repl--do-log-to-file record ws))
-      (agent-repl--append-workspace-log ws record))))
+        (agent-repl--do-log-to-file record sink-ws))
+      (agent-repl--append-workspace-log sink-ws record))))
 
 ;;;; ---- Echo-area (modeline) severity gate ----
 ;;
