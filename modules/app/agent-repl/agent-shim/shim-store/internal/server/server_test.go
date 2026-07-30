@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -150,6 +151,18 @@ func recvAck(t *testing.T, conn net.Conn) *corev1.StoreWriteAck {
 		t.Fatalf("expected *StoreWriteAck, got %T", m)
 	}
 	return ack
+}
+
+func collectStoredReplay(t *testing.T, database *db.DB, session string, fromSeq uint64) []*corev1.Event {
+	t.Helper()
+	var events []*corev1.Event
+	if _, err := database.ReplayFrom(context.Background(), session, fromSeq, func(ev *corev1.Event) error {
+		events = append(events, ev)
+		return nil
+	}); err != nil {
+		t.Fatalf("ReplayFrom: %v", err)
+	}
+	return events
 }
 
 func vAssistantStream(t *testing.T, session, uuid string) *corev1.Event {
@@ -323,6 +336,56 @@ func TestReplayFromMidSeq(t *testing.T) {
 	}
 }
 
+func TestLargeReplayStreamsInOrderWithBoundedProgressLogs(t *testing.T) {
+	// Arrange: one batch near the observed incident scale's first progress
+	// boundary. The store must emit the first row before advancing through the
+	// query and must not emit one diagnostic per row.
+	const eventCount = 513
+	logf, drain := collectLogs(128)
+	h := start(t, 0, logf)
+	prod := h.dial(t)
+	events := make([]*corev1.Event, 0, eventCount)
+	for i := range eventCount {
+		events = append(events, vAssistantStream(t, "s1", fmt.Sprintf("replay-%04d", i)))
+	}
+	send(t, prod, write(events...))
+	recvAck(t, prod)
+
+	// Act
+	sub := h.dial(t)
+	send(t, sub, &corev1.Subscribe{SessionId: "s1", FromSeq: 0})
+	for want := uint64(1); want <= eventCount; want++ {
+		if got := recvEvent(t, sub).GetSeq(); got != want {
+			t.Fatalf("streamed seq=%d, want=%d", got, want)
+		}
+	}
+	// A live event proves serveSubscriber finished the replay and entered its
+	// tail loop, so the completion record is present without a timing sleep.
+	send(t, prod, write(vAssistantStream(t, "s1", "tail-proof")))
+	recvAck(t, prod)
+	if got := recvEvent(t, sub).GetSeq(); got != eventCount+1 {
+		t.Fatalf("tail proof seq=%d, want=%d", got, eventCount+1)
+	}
+
+	// Assert
+	lines := drain()
+	if got := findLineContaining(lines, "subscribe-replay-progress", "delivered=512 first_seq=1 last_seq=512"); got == "" {
+		t.Fatalf("bounded replay progress record missing from %d log lines", len(lines))
+	}
+	if got := findLineContaining(lines, "subscribe-replay", "delivered=513 first_seq=1 last_seq=513 query_ms="); got == "" {
+		t.Fatalf("replay completion range and timing missing from %d log lines", len(lines))
+	}
+	progressRecords := 0
+	for _, line := range lines {
+		if strings.Contains(line, `"operation":"subscribe-replay-progress"`) {
+			progressRecords++
+		}
+	}
+	if progressRecords != 2 {
+		t.Fatalf("progress records=%d, want 2 at delivered=1 and delivered=512", progressRecords)
+	}
+}
+
 func TestDedupCollisionAcrossPlanes(t *testing.T) {
 	// Arrange
 	h := start(t, 0, testLogger())
@@ -340,10 +403,7 @@ func TestDedupCollisionAcrossPlanes(t *testing.T) {
 		t.Fatalf("ack2 = %+v, want accepted=0 deduped=1", ack2)
 	}
 	// Assert: exactly one row persisted.
-	replayed, err := h.db.ReplayFrom("s1", 0)
-	if err != nil {
-		t.Fatalf("ReplayFrom: %v", err)
-	}
+	replayed := collectStoredReplay(t, h.db, "s1", 0)
 	if len(replayed) != 1 {
 		t.Fatalf("persisted %d events, want 1 (deduped twin)", len(replayed))
 	}
@@ -368,10 +428,7 @@ func TestCrashReplayIdempotency(t *testing.T) {
 	if ack2.GetAccepted() != 0 || ack2.GetDeduped() != 2 {
 		t.Fatalf("ack2 = %+v, want accepted=0 deduped=2", ack2)
 	}
-	replayed, err := h.db.ReplayFrom("s1", 0)
-	if err != nil {
-		t.Fatalf("ReplayFrom: %v", err)
-	}
+	replayed := collectStoredReplay(t, h.db, "s1", 0)
 	if len(replayed) != 2 {
 		t.Fatalf("persisted %d events, want 2", len(replayed))
 	}
@@ -413,10 +470,7 @@ func TestEphemeralPassThroughNotPersisted(t *testing.T) {
 	}
 
 	// Assert: the DB contains only the two persistent events, never the ephemeral.
-	replayed, err := h.db.ReplayFrom("s1", 0)
-	if err != nil {
-		t.Fatalf("ReplayFrom: %v", err)
-	}
+	replayed := collectStoredReplay(t, h.db, "s1", 0)
 	if len(replayed) != 2 {
 		t.Fatalf("persisted %d events, want 2 (no ephemeral)", len(replayed))
 	}

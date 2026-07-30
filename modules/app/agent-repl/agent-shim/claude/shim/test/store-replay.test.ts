@@ -266,6 +266,30 @@ describe("StoreClient.replay", () => {
     expect(outcome.delivered).toBe(1);
   });
 
+  it("rearms the idle deadline while a replay keeps making progress", async () => {
+    // Arrange: the total stream lasts longer than one idle window, but every
+    // adjacent pair of events arrives well inside that window.
+    const store = await fakeStore();
+    stores.push(store);
+    const client = await connectedClient(store);
+    const got: bigint[] = [];
+
+    // Act
+    const done = client.replay({ fromSeq: 0n, toSeq: 9n, maxEvents: 0, idleMs: 250, onEvent: (event) => got.push(event.seq) });
+    const peer = await replayPeer(store, 1);
+    for (let seq = 1; seq <= 8; seq += 1) {
+      peer.send(EventSchema, storeEvent(seq));
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    peer.send(EventSchema, storeEvent(9));
+    const outcome = await done;
+
+    // Assert: roughly 400ms elapsed under a 250ms idle bound without
+    // truncation because each event refreshed the bound.
+    expect(outcome).toEqual({ delivered: 8, truncated: false, reason: "" });
+    expect(got).toEqual([1n, 2n, 3n, 4n, 5n, 6n, 7n, 8n]);
+  });
+
   it("completes cleanly when an unbounded replay drains", async () => {
     // Arrange: to_seq 0 means "stream until the replay drains", so a quiet
     // subscription IS the whole answer rather than a shortfall.
