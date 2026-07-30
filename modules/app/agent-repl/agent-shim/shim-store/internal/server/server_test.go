@@ -341,7 +341,7 @@ func TestLargeReplayStreamsInOrderWithBoundedProgressLogs(t *testing.T) {
 	// boundary. The store must emit the first row before advancing through the
 	// query and must not emit one diagnostic per row.
 	const eventCount = 513
-	logf, drain := collectLogs(128)
+	logf, drain := collectLogs(128, true)
 	h := start(t, 0, logf)
 	prod := h.dial(t)
 	events := make([]*corev1.Event, 0, eventCount)
