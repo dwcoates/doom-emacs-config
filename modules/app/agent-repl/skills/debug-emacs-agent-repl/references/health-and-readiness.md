@@ -31,7 +31,18 @@ The doctor is read-only. It checks:
 - Per-session shim sockets.
 - Store and sidecar service-log presence.
 - Store database presence.
-- Store database integrity through `PRAGMA integrity_check`.
+- Store database read-only openability.
+- Store database integrity through `PRAGMA integrity_check` when the database
+  is at most 1 GiB.
+
+For a larger database the routine sweep reports `store-db-integrity` as
+`SKIP`, including the measured size and automatic-scan limit, rather than
+blocking indefinitely on a deep page scan. Run the explicit maintenance-window
+probe when a full scan is required:
+
+```sh
+modules/app/agent-repl/scripts/agent-shim-doctor.sh --deep-integrity
+```
 
 Interpret each result:
 

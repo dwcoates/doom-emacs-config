@@ -21,7 +21,9 @@ fail() {
 
 make_tree() {
     local tree="$1"
-    mkdir -p "$tree/modules/app/agent-repl/bin" "$tree/.claude" "$tree/.githooks" "$tree/stubs"
+    mkdir -p "$tree/modules/app/agent-repl/bin" \
+        "$tree/modules/app/agent-repl/scripts" \
+        "$tree/.claude" "$tree/.githooks" "$tree/stubs"
     cp "$SCRIPT_SRC" "$tree/modules/app/agent-repl/bin/test-all.sh"
     printf '%s\n' "$CSV_HEADER" >"$tree/modules/app/agent-repl/test_time.csv"
 
@@ -53,6 +55,11 @@ EOF
     cat >"$tree/modules/app/agent-repl/bin/test-readiness-report.sh" <<'EOF'
 #!/usr/bin/env bash
 printf 'readiness-harness\n' >>"$STUB_LOG"
+EOF
+
+    cat >"$tree/modules/app/agent-repl/scripts/test-agent-shim-doctor.sh" <<'EOF'
+#!/usr/bin/env bash
+printf 'doctor-harness\n' >>"$STUB_LOG"
 EOF
 
     cat >"$tree/.githooks/test-pre-commit.sh" <<'EOF'
@@ -102,6 +109,7 @@ EOF
         "$tree/modules/app/agent-repl/bin/test-build-frontend.sh" \
         "$tree/modules/app/agent-repl/bin/test-deploy-all.sh" \
         "$tree/modules/app/agent-repl/bin/test-readiness-report.sh" \
+        "$tree/modules/app/agent-repl/scripts/test-agent-shim-doctor.sh" \
         "$tree/.githooks/test-pre-commit.sh" \
         "$tree/modules/app/agent-repl/bin/report-nonlisp-coverage.sh" \
         "$tree/modules/app/agent-repl/bin/report-logging-density.sh" \
@@ -134,7 +142,7 @@ test_default_runs_every_suite_without_recording() {
     run_test_all "$tree"
 
     if [ "$RUN_RC" -eq 0 ] &&
-        [ "$(wc -l <"$tree/stub.log" | tr -d ' ')" -eq 16 ] &&
+        [ "$(wc -l <"$tree/stub.log" | tr -d ' ')" -eq 17 ] &&
         [ "$(wc -l <"$tree/modules/app/agent-repl/test_time.csv" | tr -d ' ')" -eq 1 ] &&
         grep -q "timing: proto" "$tree/stdout" &&
         grep -q "timings were not recorded" "$tree/stdout"; then
@@ -150,7 +158,7 @@ test_record_appends_every_suite() {
     run_test_all "$tree" --record
 
     if [ "$RUN_RC" -eq 0 ] &&
-        [ "$(wc -l <"$tree/modules/app/agent-repl/test_time.csv" | tr -d ' ')" -eq 17 ] &&
+        [ "$(wc -l <"$tree/modules/app/agent-repl/test_time.csv" | tr -d ' ')" -eq 18 ] &&
         grep -q ',master,ert,' "$tree/modules/app/agent-repl/test_time.csv" &&
         grep -q ',master,proto,' "$tree/modules/app/agent-repl/test_time.csv" &&
         grep -Eq ',master,daemon,[0-9]+([.][0-9]+)?$' \
