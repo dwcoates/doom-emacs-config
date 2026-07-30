@@ -524,19 +524,22 @@ func (r *RegistryRegistrar) SessionDied(sessionID, reason string) {
 // ClaudeSessionIDChanged persists claudeSessionID on sessionID's record. A
 // missing record or a write failure is loud-logged, never silently dropped
 // (the session would not survive a restart).
-// A FIRST adoption is REFUSED without durable evidence — see the ADOPT LATE
-// block on sessiondrv.SessionRegistrar. The refusal reports adopted=false so
-// the caller can hold the uuid rather than lose it.
-func (r *RegistryRegistrar) ClaudeSessionIDChanged(sessionID, claudeSessionID string, durable bool) bool {
+// ADOPTION IS EAGER. A first adoption used to be REFUSED until a turn proved
+// the vendor had written the conversation on disk, so that a later bring-up
+// could not --resume into a transcript that never existed. That protection now
+// lives at the point of USE instead: ConversationResolver stats the transcript
+// when it resolves a resume target and skips any conversation the vendor never
+// wrote. Checking at use is strictly stronger than refusing to write down —
+// same authority, consulted when the answer actually matters — and it removes
+// the window in which the registry knowingly held an empty uuid while the shim
+// and the webapp both knew the real one. That disagreement was not free: it
+// made every client log fail attribution and nack, forever, for any session
+// that had not yet run a turn.
+func (r *RegistryRegistrar) ClaudeSessionIDChanged(sessionID, claudeSessionID string) bool {
 	if r.Reg == nil {
 		return false
 	}
-	var refused bool
 	found, err := r.Reg.Update(sessionID, func(rec *registry.Record) {
-		if rec.ClaudeSessionID == "" && !durable {
-			refused = true
-			return
-		}
 		rec.ClaudeSessionID = claudeSessionID
 	})
 	if err != nil {
@@ -551,22 +554,7 @@ func (r *RegistryRegistrar) ClaudeSessionIDChanged(sessionID, claudeSessionID st
 		}
 		return false
 	}
-	if refused {
-		r.logLateAdoption(sessionID, claudeSessionID)
-		return false
-	}
 	return true
-}
-
-// logLateAdoption reports a first adoption held back for want of durable
-// evidence. Loud because it is the gate that keeps a turn-less session from
-// leaving a pointer to a transcript the vendor never wrote.
-func (r *RegistryRegistrar) logLateAdoption(sessionID, claudeSessionID string) {
-	if r.Logf == nil {
-		return
-	}
-	r.Logf("server: session %s: first vendor session adoption (uuid=%s) HELD — no turn has yet proved the vendor wrote this conversation, so the record keeps no pointer that a later bring-up would --resume into a transcript that does not exist",
-		sessionID, claudeSessionID)
 }
 
 // AdoptVendorSessionID adopts claudeSessionID as sessionID's vendor uuid,
@@ -600,21 +588,16 @@ func (r *RegistryRegistrar) logLateAdoption(sessionID, claudeSessionID string) {
 // sessiondrv.SessionRegistrar. A ROTATION is never refused: its `previous` is
 // non-empty by definition, so the vendor demonstrably wrote the conversation
 // being rotated away from and the reset that accompanies it must still land.
-func (r *RegistryRegistrar) AdoptVendorSessionID(sessionID, claudeSessionID string, durable bool) (bool, string, bool) {
+func (r *RegistryRegistrar) AdoptVendorSessionID(sessionID, claudeSessionID string) (bool, string, bool) {
 	if r.Reg == nil || claudeSessionID == "" {
 		return false, "", false
 	}
 	var (
 		previous string
 		rotated  bool
-		refused  bool
 	)
 	found, err := r.Reg.Update(sessionID, func(rec *registry.Record) {
 		previous = rec.ClaudeSessionID
-		if previous == "" && !durable {
-			refused = true
-			return
-		}
 		rotated = previous != "" && previous != claudeSessionID
 		rec.ClaudeSessionID = claudeSessionID
 		if rotated {
@@ -633,10 +616,6 @@ func (r *RegistryRegistrar) AdoptVendorSessionID(sessionID, claudeSessionID stri
 		if r.Logf != nil {
 			r.Logf("server: session %s: vendor session adoption (uuid=%s) found no record (never registered)", sessionID, claudeSessionID)
 		}
-		return false, previous, false
-	}
-	if refused {
-		r.logLateAdoption(sessionID, claudeSessionID)
 		return false, previous, false
 	}
 	if rotated {

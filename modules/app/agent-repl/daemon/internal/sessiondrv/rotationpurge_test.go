@@ -34,8 +34,8 @@ type rotatingRegistrar struct {
 	floors *fakeClearCompactStore
 }
 
-func (r *rotatingRegistrar) AdoptVendorSessionID(sessionID, csid string, durable bool) (bool, string, bool) {
-	rotated, previous, adopted := r.fakeRegistrar.AdoptVendorSessionID(sessionID, csid, durable)
+func (r *rotatingRegistrar) AdoptVendorSessionID(sessionID, csid string) (bool, string, bool) {
+	rotated, previous, adopted := r.fakeRegistrar.AdoptVendorSessionID(sessionID, csid)
 	if rotated {
 		r.seq.SetLastSeq(sessionID, 0)
 		r.floors.resetForRotation(sessionID)
@@ -56,8 +56,6 @@ func (f *fakeClearCompactStore) resetForRotation(sessionID string) {
 // shim's re-handshake drives, so the reconciliation is exercised on its real
 // trigger rather than by poking fields.
 func (h *repullHarness) rotate(previous, next string) {
-	// A rotation presupposes an ADOPTED first uuid, which presupposes a turn.
-	adoptedSession(h.m, "s1")
 	h.m.onHandshake("ws", "s1", &corev1.ShimHello{
 		SessionId: "s1", Vendor: "claude", ShimVersion: "test", ProtocolVersion: "1",
 		VendorSessionId: previous,
