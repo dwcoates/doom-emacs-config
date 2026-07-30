@@ -119,7 +119,7 @@ func (c *Client) Recover(fileID string) (RecoveryState, error) {
 	if fileID == "" && !list.GetOpenTasksAuthoritative() {
 		return RecoveryState{}, fmt.Errorf("storeclient: CursorList lacks authoritative open-task state; refusing startup against an incompatible store")
 	}
-	c.log.With(logging.Context{Operation: "storeclient-recover", StoreSocket: c.socket}).Log("recovered file_id=%q cursors=%d open_tasks=%d authoritative=%t", fileID, len(list.GetCursors()), len(list.GetOpenTasks()), list.GetOpenTasksAuthoritative())
+	c.log.With(logging.Context{Operation: "storeclient-recover", StoreSocket: c.socket}).LogVerbose("recovered file_id=%q cursors=%d open_tasks=%d authoritative=%t", fileID, len(list.GetCursors()), len(list.GetOpenTasks()), list.GetOpenTasksAuthoritative())
 	return RecoveryState{
 		Cursors:   list.GetCursors(),
 		OpenTasks: list.GetOpenTasks(),

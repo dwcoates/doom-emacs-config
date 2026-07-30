@@ -82,7 +82,8 @@ the Claude harness file formats it parses.
   meaningful branch that selects a different nontrivial block, call, state
   transition, or outcome logs its selection.
 - The normal helper persists and emits to the terminal. The verbose helper
-  always persists and gates terminal output through the sidecar verbose setting.
+  reaches neither the durable sink nor the terminal unless
+  `AGENT_REPL_LOG_VERBOSE` is enabled.
 - Each error is logged exactly once by its owning layer with store socket,
   transcript path, cursor, session, operation, branch outcome, and cause.
   Error-path tests assert the canonical record and its context.

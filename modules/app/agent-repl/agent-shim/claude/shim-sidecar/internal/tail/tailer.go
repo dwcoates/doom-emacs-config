@@ -57,7 +57,7 @@ func (t *Tailer) Restore(c *corev1.CursorState) {
 	t.fileID = c.GetFileId()
 	t.offset = c.GetOffset()
 	t.carry = append([]byte(nil), c.GetCarry()...)
-	t.log.With(logging.Context{Operation: "tailer-restore", Path: t.path}).Log("restored cursor file_id=%q offset=%d carry_bytes=%d", t.fileID, t.offset, len(t.carry))
+	t.log.With(logging.Context{Operation: "tailer-restore", Path: t.path}).LogVerbose("restored cursor file_id=%q offset=%d carry_bytes=%d", t.fileID, t.offset, len(t.carry))
 }
 
 // PollResult is one batch: the events to write plus the cursor advance to commit
