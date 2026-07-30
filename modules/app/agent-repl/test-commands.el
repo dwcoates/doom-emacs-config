@@ -2736,20 +2736,93 @@ are born under the last-chosen frontend."
   "load-workspace-snapshot carries `:hidden-project-dir' onto the restored
 tombstone so a later unhide can re-establish it."
   (agent-repl-test--with-clean-state
+    ;; The project dir must EXIST: a tombstone whose directory is gone is now
+    ;; pruned at load, and this test is about the hide marker surviving a
+    ;; restore, not about what happens to an orphan.
     (let ((snapshot-file (make-temp-file "agent-snap-"))
+          (project (make-temp-file "agent-repl-hidden-tombstone-" t))
           (agent-repl-hide-project-dirs-enabled nil))
       (unwind-protect
           (let ((agent-repl-workspace-snapshot-file snapshot-file))
             (agent-repl--write-sexp-file
              snapshot-file
-             `(:workspaces (("ws-cc" :project-dir "/tmp/cc"
+             `(:workspaces (("ws-cc" :project-dir ,project
                              :nuked-at ,(current-time)
                              :hidden-project-dir t))
                :hide-project-dirs-enabled t))
             (agent-repl-load-workspace-snapshot)
             (should (agent-repl--ws-get "ws-cc" :hidden-project-dir))
             (should (agent-repl--ws-get "ws-cc" :nuked-at)))
+        (delete-file snapshot-file)
+        (delete-directory project t)))))
+
+(ert-deftest agent-repl-cmd-test-load-workspace-snapshot/drops-orphaned-tombstone ()
+  "A tombstone whose directory is gone is not registered at all."
+  (agent-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "agent-snap-")))
+      (unwind-protect
+          (let ((agent-repl-workspace-snapshot-file snapshot-file))
+            (agent-repl--write-sexp-file
+             snapshot-file
+             `(:workspaces (("ws-gone" :project-dir "/nonexistent/gone"
+                             :nuked-at ,(current-time)))))
+            (agent-repl-load-workspace-snapshot)
+            (should-not (agent-repl--ws-known-p "ws-gone")))
         (delete-file snapshot-file)))))
+
+(ert-deftest agent-repl-cmd-test-load-workspace-snapshot/rewrites-roster-without-orphan ()
+  "The pruned roster is persisted during the load, not just held in memory.
+This is the whole requirement: an orphan costs exactly one startup and is
+never encountered again."
+  (agent-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "agent-snap-")))
+      (unwind-protect
+          (let ((agent-repl-workspace-snapshot-file snapshot-file))
+            (agent-repl--write-sexp-file
+             snapshot-file
+             `(:workspaces (("ws-gone" :project-dir "/nonexistent/gone"
+                             :nuked-at ,(current-time)))))
+            (agent-repl-load-workspace-snapshot)
+            (let ((on-disk (plist-get (agent-repl--read-workspace-snapshot snapshot-file)
+                                      :workspaces)))
+              (should-not (assoc "ws-gone" on-disk))))
+        (delete-file snapshot-file)))))
+
+(ert-deftest agent-repl-cmd-test-load-workspace-snapshot/keeps-tombstone-whose-dir-exists ()
+  "Pruning is keyed on the directory being GONE, not on being a tombstone."
+  (agent-repl-test--with-clean-state
+    (let ((snapshot-file (make-temp-file "agent-snap-"))
+          (project (make-temp-file "agent-repl-live-tombstone-" t)))
+      (unwind-protect
+          (let ((agent-repl-workspace-snapshot-file snapshot-file))
+            (agent-repl--write-sexp-file
+             snapshot-file
+             `(:workspaces (("ws-kept" :project-dir ,project
+                             :nuked-at ,(current-time)))))
+            (agent-repl-load-workspace-snapshot)
+            (should (agent-repl--ws-known-p "ws-kept"))
+            (let ((on-disk (plist-get (agent-repl--read-workspace-snapshot snapshot-file)
+                                      :workspaces)))
+              (should (assoc "ws-kept" on-disk))))
+        (delete-file snapshot-file)
+        (delete-directory project t)))))
+
+(ert-deftest agent-repl-cmd-test-load-workspace-snapshot/leaves-roster-alone-with-no-orphans ()
+  "A roster with nothing to prune is not rewritten."
+  (agent-repl-test--with-clean-state
+    (let* ((snapshot-file (make-temp-file "agent-snap-"))
+           (project (make-temp-file "agent-repl-no-prune-" t)))
+      (unwind-protect
+          (let ((agent-repl-workspace-snapshot-file snapshot-file))
+            (agent-repl--write-sexp-file
+             snapshot-file
+             `(:workspaces (("ws-kept" :project-dir ,project
+                             :nuked-at ,(current-time)))))
+            (let ((before (nth 5 (file-attributes snapshot-file))))
+              (agent-repl-load-workspace-snapshot)
+              (should (equal before (nth 5 (file-attributes snapshot-file))))))
+        (delete-file snapshot-file)
+        (delete-directory project t)))))
 
 (ert-deftest agent-repl-cmd-test-establish-workspace/skips-priority-reorder-during-snapshot-load ()
   "`--establish-workspace' must NOT call `--reorder-workspace-by-priority'
