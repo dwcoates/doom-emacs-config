@@ -1902,11 +1902,57 @@ fix into an older live process does not leave its timer or hook behind."
 This is status.el's frame-parameter integration boundary.  It sets
 `tab-bar-lines-keep-state' before `tab-bar-lines', preventing Emacs's
 native one-line recalculation from overwriting the fixed agent-repl
-height during later tab operations.  `frame-inhibit-implied-resize'
-must already contain `tab-bar-lines' so the height change is absorbed by
-the frame text area rather than resizing the outer NSWindow."
-  (set-frame-parameter frame 'tab-bar-lines-keep-state t)
-  (set-frame-parameter frame 'tab-bar-lines rows))
+height during later tab operations.
+
+On Emacs 30.2's NS backend, the native frame-parameter setter deliberately
+ignores nonzero-to-nonzero changes: changing the Lisp parameter from one
+line to two leaves the native tab-bar window at one physical line.  Force
+the supported zero-to-ROWS transition on NS so its
+`ns_change_tab_bar_height' path actually updates native geometry.  Other
+display backends receive the direct ROWS assignment.
+
+`frame-inhibit-implied-resize' must already contain `tab-bar-lines' so
+the height change is absorbed by the frame text area rather than resizing
+the outer window.  Returns ROWS after logging the complete transition."
+  (let* ((display-type (framep-on-display frame))
+         (native-zero-transition-p
+          (and (eq display-type 'ns) (> rows 0)))
+         (prior-lines (frame-parameter frame 'tab-bar-lines))
+         (prior-keep-state
+          (frame-parameter frame 'tab-bar-lines-keep-state))
+         (ws (let ((current (agent-repl--ws-current-name)))
+               (and current (agent-repl--ws-known-p current) current)))
+         (stage 'keep-state)
+         (zero-lines 'not-requested))
+    (condition-case error-data
+        (let ((agent-repl--tabbar-frame-parameter-audit-active t))
+          (set-frame-parameter frame 'tab-bar-lines-keep-state t)
+          (when native-zero-transition-p
+            (setq stage 'native-zero)
+            (set-frame-parameter frame 'tab-bar-lines 0)
+            (setq zero-lines (frame-parameter frame 'tab-bar-lines)))
+          (setq stage 'target)
+          (set-frame-parameter frame 'tab-bar-lines rows)
+          (let ((final-lines (frame-parameter frame 'tab-bar-lines))
+                (final-keep-state
+                 (frame-parameter frame 'tab-bar-lines-keep-state)))
+            (agent-repl--log
+             ws
+             "tabbar-pin-frame: outcome=installed frame=%S display-type=%S rows=%d native-zero-transition=%s prior-lines=%S zero-lines=%S final-lines=%S prior-keep-state=%S final-keep-state=%S inhibit-implied-resize=%S"
+             frame display-type rows native-zero-transition-p prior-lines
+             zero-lines final-lines prior-keep-state final-keep-state
+             frame-inhibit-implied-resize)
+            rows))
+      (error
+       (agent-repl--log
+        ws
+        "tabbar-pin-frame: outcome=error frame=%S display-type=%S rows=%d native-zero-transition=%s stage=%S prior-lines=%S zero-lines=%S current-lines=%S prior-keep-state=%S current-keep-state=%S inhibit-implied-resize=%S err=%S"
+        frame display-type rows native-zero-transition-p stage prior-lines
+        zero-lines (frame-parameter frame 'tab-bar-lines)
+        prior-keep-state
+        (frame-parameter frame 'tab-bar-lines-keep-state)
+        frame-inhibit-implied-resize error-data)
+       (signal (car error-data) (cdr error-data))))))
 
 (defun agent-repl-tabbar-apply-row-count ()
   "Reapply the fixed agent-repl row count to the selected frame.
