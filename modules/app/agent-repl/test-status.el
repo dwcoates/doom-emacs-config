@@ -3143,7 +3143,9 @@ This is the regression contract for the macOS 100%-CPU livelock:
 `redisplay_tab_bar' must never enter its dynamic height path.  The
 `frame-inhibit-implied-resize' guard is installed before current frame
 heights change, and `tab-bar-lines-keep-state' prevents later native
-tab operations from recalculating the explicit two-line height."
+tab operations from recalculating the explicit two-line height.  NS
+frames pass through zero before the fixed row count because Emacs 30.2's
+native setter ignores nonzero-to-nonzero height changes."
   (let ((auto-resize-tab-bars 'grow-only)
         (tab-bar-auto-width t)
         (default-frame-alist '((tab-bar-lines . 1) (width . 100)))
@@ -3154,11 +3156,13 @@ tab operations from recalculating the explicit two-line height."
         (tab-bar-new-button-show t)
         (frame-lines '((frame-a . 1) (frame-b . 3)))
         (frame-keeps '((frame-a) (frame-b)))
+        (line-sets nil)
         (tab-bar-mode-arg nil)
         (logged nil))
     (cl-letf (((symbol-function 'frame-list)
                (lambda () '(frame-a frame-b)))
               ((symbol-function 'display-graphic-p) (lambda (_frame) t))
+              ((symbol-function 'framep-on-display) (lambda (_frame) 'ns))
               ((symbol-function 'frame-parameter)
                (lambda (frame parameter)
                  (pcase parameter
@@ -3169,8 +3173,9 @@ tab operations from recalculating the explicit two-line height."
                (lambda (frame parameter value)
                  (pcase parameter
                    ('tab-bar-lines
-                    (should (memq 'tab-bar-lines
+                   (should (memq 'tab-bar-lines
                                   frame-inhibit-implied-resize))
+                    (push (list frame value) line-sets)
                     (setf (alist-get frame frame-lines) value))
                    ('tab-bar-lines-keep-state
                     (setf (alist-get frame frame-keeps) value))
@@ -3202,6 +3207,12 @@ tab operations from recalculating the explicit two-line height."
                  agent-repl--tabline-row-count))
       (should (= (alist-get 'frame-b frame-lines)
                  agent-repl--tabline-row-count))
+      (should
+       (equal (nreverse line-sets)
+              (list (list 'frame-a 0)
+                    (list 'frame-a agent-repl--tabline-row-count)
+                    (list 'frame-b 0)
+                    (list 'frame-b agent-repl--tabline-row-count))))
       (should (eq t (alist-get 'frame-a frame-keeps)))
       (should (eq t (alist-get 'frame-b frame-keeps)))
       (should (memq 'tab-bar-lines frame-inhibit-implied-resize))
@@ -3236,12 +3247,13 @@ tab operations from recalculating the explicit two-line height."
                                default-frame-alist))))))
 
 (ert-deftest agent-repl-test-tabbar-apply-row-count-sets-selected-frame ()
-  "The interactive command reapplies both fixed-height frame parameters."
+  "The interactive command forces NS through zero, then reapplies ROWS."
   ;; Arrange
   (let ((params '((tab-bar-lines . 1)
                   (tab-bar-lines-keep-state)))
         (applied nil))
     (cl-letf (((symbol-function 'selected-frame) (lambda () 'frame-a))
+              ((symbol-function 'framep-on-display) (lambda (_frame) 'ns))
               ((symbol-function 'frame-parameter)
                (lambda (_frame parameter) (alist-get parameter params)))
               ((symbol-function 'set-frame-parameter)
@@ -3260,8 +3272,31 @@ tab operations from recalculating the explicit two-line height."
         (should
          (equal (nreverse applied)
                 (list (list 'frame-a 'tab-bar-lines-keep-state t)
+                      (list 'frame-a 'tab-bar-lines 0)
                       (list 'frame-a 'tab-bar-lines
                             agent-repl--tabline-row-count))))))))
+
+(ert-deftest agent-repl-test-tabbar-pin-frame-non-ns-sets-target-directly ()
+  "Non-NS frames do not take the macOS-specific zero transition."
+  (let ((params '((tab-bar-lines . 1)
+                  (tab-bar-lines-keep-state)))
+        (applied nil)
+        (frame-inhibit-implied-resize '(tab-bar-lines)))
+    (cl-letf (((symbol-function 'framep-on-display) (lambda (_frame) 'x))
+              ((symbol-function 'frame-parameter)
+               (lambda (_frame parameter) (alist-get parameter params)))
+              ((symbol-function 'set-frame-parameter)
+               (lambda (frame parameter value)
+                 (push (list frame parameter value) applied)
+                 (setf (alist-get parameter params) value)))
+              ((symbol-function 'agent-repl--ws-current-name)
+               (lambda () nil))
+              ((symbol-function 'agent-repl--log) #'ignore))
+      (should (= 2 (agent-repl--tabbar-pin-frame 'frame-a 2)))
+      (should
+       (equal (nreverse applied)
+              '((frame-a tab-bar-lines-keep-state t)
+                (frame-a tab-bar-lines 2)))))))
 
 ;;;; ---- The hibernation split --------------------------------------------
 
