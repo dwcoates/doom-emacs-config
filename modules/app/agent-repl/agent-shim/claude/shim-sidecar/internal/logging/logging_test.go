@@ -76,21 +76,60 @@ func TestSinkEmergencyWritesJSONOnlyToStderrWithoutEnqueueing(t *testing.T) {
 	}
 }
 
-func TestLogVerboseAlwaysWritesFileAndGatesStderr(t *testing.T) {
+func TestLogVerboseRequiresVerboseModeForEverySink(t *testing.T) {
 	var stderr, file bytes.Buffer
 	l := New(&stderr, &file)
+	var diagnostics []Diagnostic
+	l.With(Context{}).SetDiagnosticSink(func(d Diagnostic) {
+		diagnostics = append(diagnostics, d)
+	})
+	var constructed bool
+	l.now = func() time.Time {
+		constructed = true
+		return time.Now()
+	}
+	l.pid = func() int {
+		constructed = true
+		return 1
+	}
 	l.verbose = func() bool { return false }
 	l.With(Context{Component: "discover", Operation: "scan"}).LogVerbose("scan complete")
-	if !strings.Contains(file.String(), "scan complete") {
-		t.Fatalf("verbose record missing from file: %q", file.String())
-	}
-	if stderr.Len() != 0 {
-		t.Fatalf("verbose record unexpectedly on stderr: %q", stderr.String())
+	l.With(Context{Component: "tail", Session: "s1", Operation: "poll"}).LogVerbose("poll complete")
+	if file.Len() != 0 || stderr.Len() != 0 || len(diagnostics) != 0 || constructed {
+		t.Fatalf("disabled verbose record was constructed or reached a sink: constructed=%t file=%q stderr=%q diagnostics=%#v", constructed, file.String(), stderr.String(), diagnostics)
 	}
 	l.verbose = func() bool { return true }
 	l.With(Context{Component: "discover", Operation: "scan"}).LogVerbose("scan enabled")
+	l.With(Context{Component: "tail", Session: "s1", Operation: "poll"}).LogVerbose("poll enabled")
+	if !strings.Contains(file.String(), "scan enabled") {
+		t.Fatalf("enabled verbose record missing from file: %q", file.String())
+	}
 	if !strings.Contains(stderr.String(), "scan enabled") {
 		t.Fatalf("enabled verbose record missing from stderr: %q", stderr.String())
+	}
+	if len(diagnostics) != 1 || diagnostics[0].Message != "poll enabled" {
+		t.Fatalf("enabled verbose session diagnostics = %#v", diagnostics)
+	}
+}
+
+func TestLogVerboseValidatesContextWhileDisabled(t *testing.T) {
+	var stderr, file bytes.Buffer
+	l := New(&stderr, &file)
+	l.verbose = func() bool { return false }
+	got := capturePanic(t, func() {
+		l.With(Context{Component: "tail"}).LogVerbose("record")
+	})
+	if !strings.Contains(fmt.Sprint(got), "operation is required") {
+		t.Fatalf("panic = %v, want missing operation", got)
+	}
+	got = capturePanic(t, func() {
+		l.With(Context{Operation: "poll", Level: "fatal"}).LogVerbose("record")
+	})
+	if !strings.Contains(fmt.Sprint(got), "invalid level") {
+		t.Fatalf("panic = %v, want invalid level", got)
+	}
+	if file.Len() != 0 || stderr.Len() != 0 {
+		t.Fatalf("invalid disabled records mutated sinks: file=%q stderr=%q", file.String(), stderr.String())
 	}
 }
 
