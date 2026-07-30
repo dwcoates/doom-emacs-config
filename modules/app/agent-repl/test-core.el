@@ -1044,17 +1044,30 @@ quiet `agent-repl--emit-message' gate, so a fatal line always reaches the modeli
             (should (equal (alist-get 'message record) "timer tick"))))
       (delete-directory dir t))))
 
-(ert-deftest agent-repl-test-log-workspace-without-directory-fails-before-global-write ()
-  "A non-nil workspace without a registered directory cannot route globally."
+(ert-deftest agent-repl-test-log-workspace-without-directory-routes-globally ()
+  "A non-nil workspace without a registered directory routes to the global sink.
+
+This test previously asserted the opposite — that the write was REFUSED and
+the caller signalled.  That contract could not hold: a workspace's worktree
+can be deleted while Emacs is running, at which point its owner is still
+correct to log about it and no call site can prevent the condition.  Making
+it fatal aborted `doom-init-ui-hook' and the startup snapshot restore.
+
+The coverage is kept, not dropped: the same input is still exercised, and
+the record must still be persisted rather than silently discarded."
   (agent-repl-test--with-clean-state
     (let* ((dir (make-temp-file "agent-repl-routing-error-" t))
            (global (expand-file-name "global.log" dir))
            (agent-repl-log-to-file t)
-           (agent-repl-log-file-name global))
+           (agent-repl-log-file-name global)
+           (agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal)))
       (unwind-protect
-          (progn
-            (should-error (agent-repl--log "missing-ws" "must not route"))
-            (should-not (file-exists-p global)))
+          (cl-letf (((symbol-function 'message) #'ignore))
+            (agent-repl--log "missing-ws" "must still route")
+            (should (file-exists-p global))
+            (with-temp-buffer
+              (insert-file-contents global)
+              (should (string-match-p "must still route" (buffer-string)))))
         (delete-directory dir t)))))
 
 (ert-deftest agent-repl-test-workspace-log-replaces-hostile-canonical-symlink ()
@@ -2685,6 +2698,83 @@ ladder made a debug line abort `doom-init-ui-hook'."
         (with-temp-buffer
           (insert-file-contents path)
           (should (string-match-p "placeholder probe" (buffer-string))))))))
+
+;;;; ---- Tests: unroutable workspaces degrade instead of signalling ----
+
+(ert-deftest agent-repl-test-deleted-worktree-does-not-abort-its-caller ()
+  "A registered workspace whose worktree vanished must not signal.
+No call site can prevent this: the caller legitimately owns the workspace
+and the directory was deleted underneath it.  Signalling here aborted the
+whole snapshot restore at startup."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-temp-logfile path
+      (let ((project (make-temp-file "agent-repl-vanished-" t))
+            (agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal)))
+        (agent-repl--ws-put "vanished-ws" :project-dir project)
+        (delete-directory project t)
+        (cl-letf (((symbol-function 'message) #'ignore))
+          (agent-repl--log "vanished-ws" "line after the worktree went away"))))))
+
+(ert-deftest agent-repl-test-unroutable-workspace-record-reaches-global-sink ()
+  "The record is written, not dropped, when its workspace cannot be routed."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-temp-logfile path
+      (let ((agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal)))
+        (cl-letf (((symbol-function 'message) #'ignore))
+          (agent-repl--log "no-such-ws" "must still be recorded"))
+        (with-temp-buffer
+          (insert-file-contents path)
+          (should (string-match-p "must still be recorded" (buffer-string))))))))
+
+(ert-deftest agent-repl-test-unroutable-workspace-is-named-in-a-warning ()
+  "The degraded routing is announced loudly enough to grep for."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-temp-logfile path
+      (let ((agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal)))
+        (cl-letf (((symbol-function 'message) #'ignore))
+          (agent-repl--log "no-such-ws" "probe"))
+        (with-temp-buffer
+          (insert-file-contents path)
+          (should (string-match-p "unroutable log workspace" (buffer-string)))
+          (should (string-match-p "no-such-ws" (buffer-string))))))))
+
+(ert-deftest agent-repl-test-unroutable-workspace-warns-only-once ()
+  "A hot path must not flood the sink with the same routing complaint."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-temp-logfile path
+      (let ((agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal)))
+        (cl-letf (((symbol-function 'message) #'ignore))
+          (dotimes (_ 5) (agent-repl--log "no-such-ws" "repeated probe")))
+        ;; Counted per RECORD, not per occurrence: each JSONL line carries the
+        ;; text twice, once as `message' and once inside `context.format'.
+        (with-temp-buffer
+          (insert-file-contents path)
+          (should (= 1 (cl-count-if
+                        (lambda (l) (string-match-p "unroutable log workspace" l))
+                        (split-string (buffer-string) "\n" t)))))))))
+
+(ert-deftest agent-repl-test-routable-workspace-still-uses-its-own-target ()
+  "Degrading an unroutable workspace must not disturb a routable one."
+  (agent-repl-test--with-clean-state
+    (let* ((project (make-temp-file "agent-repl-still-routed-" t))
+           (agent-repl-log-to-file nil)
+           (agent-repl--workspace-log-targets (make-hash-table :test #'equal)))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "routed-ws" :project-dir project)
+            (let ((agent-repl-log-to-file t))
+              (cl-letf (((symbol-function 'message) #'ignore))
+                (agent-repl--log "routed-ws" "owned line")))
+            (should (plist-get (gethash "routed-ws" agent-repl--workspace-log-targets)
+                               :target)))
+        (delete-directory project t)))))
+
+(ert-deftest agent-repl-test-log-identity-resolver-still-signals-when-called-directly ()
+  "The invariant itself is unchanged; only the ladder screens before calling it.
+Keeping this coverage means a direct caller that skips the screen is still
+caught loudly."
+  (agent-repl-test--with-clean-state
+    (should-error (agent-repl--workspace-log-identity "never-registered"))))
 
 (provide 'test-core)
 
