@@ -3341,7 +3341,17 @@ type CreateSessionCmd struct {
 	// a create-time consent only: a session already registered in that mode
 	// still rehydrates after a daemon restart, since refusing there would
 	// silently change a live session's posture.
-	AllowUngated  bool `protobuf:"varint,7,opt,name=allow_ungated,json=allowUngated,proto3" json:"allow_ungated,omitempty"`
+	AllowUngated bool `protobuf:"varint,7,opt,name=allow_ungated,json=allowUngated,proto3" json:"allow_ungated,omitempty"`
+	// The model this session should START on, empty to accept the shim's own
+	// default.  A caller that has a remembered selection would otherwise have to
+	// create and then immediately SetModel, which races: the session is live and
+	// driveable in between, so its first turn can run on the wrong model.
+	//
+	// This does NOT make the caller authoritative.  The daemon applies it through
+	// the same SetModel path a later change takes, once the shim is wired, and
+	// still publishes only the shim-confirmed selection.  A rejected model fails
+	// the create rather than silently leaving the session on another one.
+	Model         string `protobuf:"bytes,8,opt,name=model,proto3" json:"model,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3418,10 +3428,18 @@ func (x *CreateSessionCmd) GetAllowUngated() bool {
 	return false
 }
 
+func (x *CreateSessionCmd) GetModel() string {
+	if x != nil {
+		return x.Model
+	}
+	return ""
+}
+
 // A deliberate request to change an already-live session's model.  The daemon
 // forwards this to the shim and only publishes the shim-confirmed selection.
-// Bootstrap, rebind, and creation intentionally have no model field: they
-// observe session state rather than choosing it.
+// Bootstrap and rebind intentionally have no model field: they observe session
+// state rather than choosing it.  Creation is different — see
+// CreateSessionCmd.model, which is a starting choice, not an observation.
 type SetModelCmd struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Model         string                 `protobuf:"bytes,1,opt,name=model,proto3" json:"model,omitempty"`
@@ -5777,7 +5795,7 @@ const file_agentshim_frontend_v1_frontend_proto_rawDesc = "" +
 	"\x0fDaemonHealthCmd\"1\n" +
 	"\x10SessionHealthCmd\x12\x1d\n" +
 	"\n" +
-	"session_id\x18\x01 \x01(\tR\tsessionId\"\xde\x01\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\"\xf4\x01\n" +
 	"\x10CreateSessionCmd\x12\x10\n" +
 	"\x03cwd\x18\x01 \x01(\tR\x03cwd\x12'\n" +
 	"\x0fpermission_mode\x18\x03 \x01(\tR\x0epermissionMode\x12\x1d\n" +
@@ -5785,7 +5803,8 @@ const file_agentshim_frontend_v1_frontend_proto_rawDesc = "" +
 	"config_dir\x18\x04 \x01(\tR\tconfigDir\x127\n" +
 	"\x18resume_claude_session_id\x18\x05 \x01(\tR\x15resumeClaudeSessionId\x12\x12\n" +
 	"\x04fake\x18\x06 \x01(\bR\x04fake\x12#\n" +
-	"\rallow_ungated\x18\a \x01(\bR\fallowUngated\"#\n" +
+	"\rallow_ungated\x18\a \x01(\bR\fallowUngated\x12\x14\n" +
+	"\x05model\x18\b \x01(\tR\x05model\"#\n" +
 	"\vSetModelCmd\x12\x14\n" +
 	"\x05model\x18\x01 \x01(\tR\x05model\"1\n" +
 	"\x10DeleteSessionCmd\x12\x1d\n" +

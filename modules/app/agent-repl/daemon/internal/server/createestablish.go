@@ -34,6 +34,7 @@ import (
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
 	"claude-repld/internal/errclass"
+	"claude-repld/internal/registry"
 )
 
 // createEstablishTimeout bounds the whole create-plus-establish round for one
@@ -72,9 +73,9 @@ type sessionEstablishment struct {
 // ends first is told so, and the establishment it was waiting on continues for
 // whoever else is waiting.
 func (h *commandHandler) CreateSession(ctx context.Context, workspace, requestID string, cmd *frontendv1.CreateSessionCmd) error {
-	h.logf("frontend cmd: create_session ws=%s request_id=%s config_dir=%s resume=%q fake=%v permission_mode=%q allow_ungated=%v",
+	h.logf("frontend cmd: create_session ws=%s request_id=%s config_dir=%s resume=%q fake=%v permission_mode=%q allow_ungated=%v model=%q",
 		workspace, requestID, cmd.GetConfigDir(), cmd.GetResumeClaudeSessionId(), cmd.GetFake(),
-		cmd.GetPermissionMode(), cmd.GetAllowUngated())
+		cmd.GetPermissionMode(), cmd.GetAllowUngated(), cmd.GetModel())
 	opts := CreateOpts{
 		CWD:            cmd.GetCwd(),
 		PermissionMode: cmd.GetPermissionMode(),
@@ -107,6 +108,28 @@ func (h *commandHandler) CreateSession(ctx context.Context, workspace, requestID
 	}
 	if est.err != nil {
 		return est.err
+	}
+	// Apply the requested starting model through the SAME path a later change
+	// takes, now that the shim is wired and driveable. Doing it here instead of
+	// leaving it to the caller closes the window the two-step has: a create acks
+	// ESTABLISHED, so the caller may submit a turn immediately, and that turn
+	// would run on whatever model the shim defaulted to.
+	//
+	// A model the shim refuses fails the create. Returning success here would
+	// hand back a live session quietly running a model the caller did not ask
+	// for, which is worse than a create the caller can retry.
+	// Normalized here, not just checked for emptiness: a PLACEHOLDER model
+	// ("<synthetic>") normalizes away to "", and it means "unspecified" exactly
+	// as an absent field does. Passing it through would make SetModel refuse an
+	// empty model and fail a create that asked for nothing at all.
+	if requested := registry.NormalizeModel(cmd.GetModel()); requested != "" {
+		selected, modelErr := h.SetModel(ctx, workspace, requestID, &frontendv1.SetModelCmd{Model: requested})
+		if modelErr != nil {
+			return fmt.Errorf("frontend cmd: create_session ws=%s request_id=%s session=%s: requested model %q not applied: %w",
+				workspace, requestID, est.sessionID, requested, modelErr)
+		}
+		h.logf("frontend cmd: create_session ws=%s request_id=%s session=%s model requested=%q selected=%q",
+			workspace, requestID, est.sessionID, requested, selected)
 	}
 	h.logf("frontend cmd: create_session ws=%s request_id=%s -> session=%s ESTABLISHED (shim wired and healthy)",
 		workspace, requestID, est.sessionID)
