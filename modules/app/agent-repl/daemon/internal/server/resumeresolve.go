@@ -127,35 +127,71 @@ func (r *ConversationResolver) ResolveResume(configDir, cwd string) (string, boo
 // checkpoints matter on their own: a checkpoint outlives the session record
 // that produced it, so a conversation whose record has been pruned is still
 // resumable.
+//
+// ONE CONVERSATION IS JUDGED BY ITS NEWEST RECORD, never by whichever record
+// happened to be visited first. A workspace accumulates many records per uuid
+// — every restore supersedes the last — so the same conversation is typically
+// named by a whole run of them, and they do not agree: an old `delete session`
+// tombstone sits beside newer `superseded` records for the uuid the user has
+// been talking to all along.
+//
+// This is a fix, not a refinement. The first version excluded on the uuid the
+// moment it saw ANY deleted record, and Reg.All() iterates sorted by session
+// id rather than by time, so a stale tombstone could shadow a live record on
+// an alphabetical accident. It did: two workspaces had their real
+// conversations excluded that way, fell through to unrelated candidates, and
+// one landed on a transcript another live process was writing — which the
+// shim then replayed into, saw a turn end for a turn it never saw begin, and
+// died with a protocol error.
 func (r *ConversationResolver) candidates(configDir, cwd string) []resumeCandidate {
-	seen := make(map[string]bool)
-	var out []resumeCandidate
+	// newest[uuid] is the most recent record naming that conversation, which
+	// is the only one whose death reason gets a vote.
+	newest := make(map[string]registry.Record)
+	newestAt := make(map[string]time.Time)
+	var order []string
 
 	for _, rec := range r.Reg.All() {
 		if rec.CWD != cwd || rec.ConfigDir != configDir || rec.ClaudeSessionID == "" {
 			continue
 		}
-		// A conversation the user DELETED stays deleted. Superseded and
-		// shim-died records are fair game: those ended for mechanical reasons
-		// (a newer session claimed the workspace, a shim crashed) and their
-		// conversation is exactly what a restore is trying to get back to.
-		if rec.DeathReason == errclass.DeathReasonDeleted {
-			r.logf("resume-resolve: EXCLUDING uuid=%s for cwd=%q — the user deleted this conversation (session=%s)",
-				rec.ClaudeSessionID, cwd, rec.SessionID)
-			seen[rec.ClaudeSessionID] = true
-			continue
-		}
-		if seen[rec.ClaudeSessionID] {
-			continue
-		}
-		seen[rec.ClaudeSessionID] = true
 		at, err := time.Parse(time.RFC3339, rec.CreatedAt)
 		if err != nil {
+			// Unparseable sorts oldest so it never shadows a record with a
+			// real time — the same rule SessionLocator applies.
 			at = time.Time{}
 		}
+		prior, ok := newest[rec.ClaudeSessionID]
+		if !ok {
+			order = append(order, rec.ClaudeSessionID)
+		}
+		// Ties break on session id so the choice is deterministic rather than
+		// dependent on map or slice order.
+		if !ok || at.After(newestAt[rec.ClaudeSessionID]) ||
+			(at.Equal(newestAt[rec.ClaudeSessionID]) && rec.SessionID > prior.SessionID) {
+			newest[rec.ClaudeSessionID] = rec
+			newestAt[rec.ClaudeSessionID] = at
+		}
+	}
+
+	seen := make(map[string]bool)
+	var out []resumeCandidate
+	for _, uuid := range order {
+		rec := newest[uuid]
+		seen[uuid] = true
+		// A conversation whose LATEST record is a user delete stays deleted.
+		// Superseded and shim-died records are fair game: those ended for
+		// mechanical reasons (a newer session claimed the workspace, a shim
+		// crashed) and their conversation is exactly what a restore wants
+		// back. A uuid deleted once and later revived is resumable again,
+		// because its newest record is the revival.
+		if rec.DeathReason == errclass.DeathReasonDeleted {
+			r.logf("resume-resolve: EXCLUDING uuid=%s for cwd=%q — its newest record is a user delete (session=%s created_at=%s)",
+				uuid, cwd, rec.SessionID, rec.CreatedAt)
+			continue
+		}
 		out = append(out, resumeCandidate{
-			claudeSessionID: rec.ClaudeSessionID,
-			createdAt:       at,
+			claudeSessionID: uuid,
+			createdAt:       newestAt[uuid],
 			source:          "session record " + rec.SessionID,
 		})
 	}
