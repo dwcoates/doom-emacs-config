@@ -19,7 +19,7 @@ import (
 // whenever the on-disk shape changes; migrate() refuses to open a DB
 // written by a NEWER schema than this binary understands (loud, no
 // silent downgrade).
-const schemaVersion = 3
+const schemaVersion = 4
 
 // defaultDBPath is the daemon's ONE state store — the SSM's log and the
 // session registry's identity tables share it (§9.2: "own SQLite DB",
@@ -84,6 +84,43 @@ func migrate(db *sql.DB) error {
 		CREATE UNIQUE INDEX IF NOT EXISTS turn_lifecycle_claim_identity
 			ON turn_lifecycle_claim(workspace, claimant_session_id, turn_id)
 			WHERE turn_id <> '';
+		CREATE TABLE IF NOT EXISTS session_connectivity (
+			workspace                 TEXT    NOT NULL,
+			agent_repl_session_id     TEXT    NOT NULL,
+			controller_generation_id  TEXT    NOT NULL,
+			state                     TEXT    NOT NULL,
+			cause_kind                TEXT    NOT NULL,
+			at                        INTEGER NOT NULL,
+			PRIMARY KEY (workspace, at)
+		);
+		CREATE INDEX IF NOT EXISTS session_connectivity_ws
+			ON session_connectivity(workspace, at);
+		CREATE TABLE IF NOT EXISTS session_fault (
+			workspace                 TEXT    NOT NULL,
+			agent_repl_session_id     TEXT    NOT NULL,
+			controller_generation_id  TEXT    NOT NULL,
+			component                 TEXT    NOT NULL,
+			fault_type                TEXT    NOT NULL,
+			impact                    TEXT    NOT NULL,
+			open                      INTEGER NOT NULL CHECK (open IN (0, 1)),
+			cause_kind                TEXT    NOT NULL,
+			at                        INTEGER NOT NULL,
+			PRIMARY KEY (
+				workspace,
+				controller_generation_id,
+				component,
+				fault_type,
+				at
+			)
+		);
+		CREATE INDEX IF NOT EXISTS session_fault_current
+			ON session_fault(
+				workspace,
+				controller_generation_id,
+				component,
+				fault_type,
+				at
+			);
 	`); err != nil {
 		return fmt.Errorf("ssm: create schema: %w", err)
 	}
