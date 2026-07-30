@@ -108,10 +108,10 @@ func TestRegistrySessionViewsSkipsDirlessRecords(t *testing.T) {
 // a frontend sees after a daemon restart, and it is what a switch-ensure
 // consults before deciding a workspace has nothing to bootstrap. A record whose
 // durable fields all say "up" must still report no shim attached when this
-// daemon holds no driver for it — otherwise every switch skips and no workspace
+// daemon holds no session controller for it — otherwise every switch skips and no workspace
 // ever bootstraps.
-func TestRegistrySessionViewsReportNoShimWithoutADriver(t *testing.T) {
-	// Arrange — a fully-settled record and no driver at all (a fresh boot).
+func TestRegistrySessionViewsReportNoShimWithoutASessionController(t *testing.T) {
+	// Arrange — a fully-settled record and no session controller at all (a fresh boot).
 	reg := registry.Open(filepath.Join(t.TempDir(), "sessions.db"), nil)
 	if err := reg.Put(registry.Record{
 		SessionID:       "s_restart",
@@ -129,6 +129,6 @@ func TestRegistrySessionViewsReportNoShimWithoutADriver(t *testing.T) {
 		t.Fatalf("expected 1 session view, got %d", len(views))
 	}
 	if views[0].GetShimAttached() {
-		t.Fatal("the connect snapshot claimed a shim was attached with no driver wired")
+		t.Fatal("the connect snapshot claimed a shim was attached with no session controller wired")
 	}
 }

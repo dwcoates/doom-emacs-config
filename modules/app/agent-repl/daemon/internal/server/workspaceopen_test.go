@@ -11,7 +11,7 @@ import (
 
 	"claude-repld/internal/registry"
 	"claude-repld/internal/session"
-	"claude-repld/internal/sessiondrv"
+	"claude-repld/internal/sessioncontroller"
 )
 
 // fakeEnsurer records the workspaces it was asked to bring up.
@@ -186,7 +186,7 @@ func TestRepeatedOpensAreIdempotent(t *testing.T) {
 	// Assert — the bind happened exactly once (the first open discovered the
 	// transcript; the rest found the record already bound and left it alone),
 	// and each open forwarded one Ensure, which bringUp collapses to a map
-	// lookup once a driver exists.
+	// lookup once a session controller exists.
 	rec, _ := reg.Get("s_1")
 	if rec.ClaudeSessionID != "uuid-disk" {
 		t.Fatalf("ClaudeSessionID = %q; want the once-bound uuid-disk", rec.ClaudeSessionID)
@@ -238,7 +238,7 @@ func TestDiscoveryMarksAWorkspaceWithHistoryBackfillPending(t *testing.T) {
 	// Assert — without this the record reads UNSPECIFIED ("nothing to
 	// backfill") until the first line lands, which is the blue window itself.
 	rec, _ := reg.Get("s_1")
-	if rec.BackfillState != sessiondrv.BackfillPending {
+	if rec.BackfillState != sessioncontroller.BackfillPending {
 		t.Fatalf("BackfillState = %q; want pending", rec.BackfillState)
 	}
 }
@@ -269,7 +269,7 @@ func TestDiscoveryNeverDowngradesASettledBackfillState(t *testing.T) {
 	writeProjectTranscript(t, cfg, "/w", "uuid-disk")
 	if err := reg.Put(registry.Record{
 		SessionID: "s_1", CWD: "/w", ConfigDir: cfg, CreatedAt: "2026-07-25T10:00:00Z",
-		BackfillState: sessiondrv.BackfillDone,
+		BackfillState: sessioncontroller.BackfillDone,
 	}); err != nil {
 		t.Fatalf("put: %v", err)
 	}
@@ -279,7 +279,7 @@ func TestDiscoveryNeverDowngradesASettledBackfillState(t *testing.T) {
 
 	// Assert
 	rec, _ := reg.Get("s_1")
-	if rec.BackfillState != sessiondrv.BackfillDone {
+	if rec.BackfillState != sessioncontroller.BackfillDone {
 		t.Fatalf("BackfillState = %q; want done to survive re-discovery", rec.BackfillState)
 	}
 }

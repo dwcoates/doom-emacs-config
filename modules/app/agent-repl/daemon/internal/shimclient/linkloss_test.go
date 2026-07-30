@@ -53,7 +53,7 @@ func TestALostLinkFiresOnLinkLost(t *testing.T) {
 	<-errCh
 }
 
-// TestATeardownDoesNotFireOnLinkLost — a cancelled run context is the driver
+// TestATeardownDoesNotFireOnLinkLost — a cancelled run context is the session controller
 // going away, not a link loss, and its own exit is the honest edge for it.
 // Firing here would race that exit over one teardown.
 func TestATeardownDoesNotFireOnLinkLost(t *testing.T) {
@@ -86,7 +86,7 @@ func TestATeardownDoesNotFireOnLinkLost(t *testing.T) {
 	}
 	select {
 	case cause := <-lost:
-		t.Fatalf("a teardown fired OnLinkLost (%v); the driver exit owns that edge", cause)
+		t.Fatalf("a teardown fired OnLinkLost (%v); the session controller exit owns that edge", cause)
 	default:
 	}
 }

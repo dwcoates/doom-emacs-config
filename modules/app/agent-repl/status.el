@@ -395,7 +395,7 @@ exist before its workspace directory is known."
 A workspace\='s color is CONNECTION TRUTH: blue is every way green\='s
 promise cannot be kept AND there is evidence of a breakage — no session
 yet, the shim dead or unspawned, bring-up in progress, a bring-up that
-failed or a driver that died on a terminal protocol error, a store
+failed or a session controller that died on a terminal protocol error, a store
 outage, or a backfill that failed.
 
 It is deliberately ONE color for all of them.  The distinctions matter
@@ -418,7 +418,7 @@ finally means something is actually wrong.")
   "TEAL: no live backend session, and NOTHING IS WRONG.
 The session was deliberately put to sleep to reclaim its memory, or
 nothing has ever been wired to this workspace.  No bring-up failed and
-no driver died — there is simply nobody home, on purpose.
+no session controller died — there is simply nobody home, on purpose.
 
 It is NOT green, and its precedence is the blue band\='s rather than
 green\='s: a teal workspace cannot be interacted with until a bring-up is

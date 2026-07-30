@@ -125,7 +125,7 @@ func TestConnectedReportsAParkedShim(t *testing.T) {
 }
 
 func TestClaimingRemovesTheParkedConnection(t *testing.T) {
-	// Arrange: a claimed connection is being driven, so it must not also look
+	// Arrange: a claimed connection is owned by a session controller, so it must not also look
 	// parked — Connected answers "is one waiting to be claimed".
 	s, path := serve(t)
 	dialAsShim(t, path, "s_abc")

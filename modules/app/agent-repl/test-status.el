@@ -3311,7 +3311,7 @@ wear the color that means something is broken."
 (ert-deftest agent-repl-test-state-color-severed-is-blue ()
   ":severed keeps the blue the old `:dormant\=' had.
 It is the half that really is evidence of breakage — a bring-up that
-failed, or a driver that died on a terminal protocol error."
+failed, or a session controller that died on a terminal protocol error."
   ;; Act / Assert
   (should (equal (alist-get :severed agent-repl--state-color) "blue")))
 

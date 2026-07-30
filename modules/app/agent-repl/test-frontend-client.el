@@ -1518,7 +1518,7 @@ guarantees each webview reloads the freshly built bundle."
   ;; Arrange
   (agent-repl-test--with-ws "ws1" '(:project-dir "/w" :frontend-session-id "s_1")
     (cl-letf (((symbol-function 'agent-repl--frontend-session-live-p) (lambda (_id) t))
-              ((symbol-function 'agent-repl--frontend-session-driver-live-p) (lambda (_id) t)))
+              ((symbol-function 'agent-repl--frontend-session-controller-live-p) (lambda (_id) t)))
       (agent-repl-test--with-switch-ensure
         ;; Act
         (agent-repl--frontend-notify-workspace-switch "ws1")
@@ -1529,26 +1529,26 @@ guarantees each webview reloads the freshly built bundle."
 ;;
 ;; The dead perspective switch.  Every fact the skip used to consult is read
 ;; back off the durable registry record, so after a daemon restart a workspace
-;; with no driver at all still looked live-and-backfilled — every switch
+;; with no session controller at all still looked live-and-backfilled — every switch
 ;; skipped, nothing ever bootstrapped, and the workspace sat blue until the
 ;; user typed.  `SessionView.shim_attached' is the non-durable half.
 
-(ert-deftest agent-repl-test-frontend-driver-live-reads-shim-attached ()
-  "The driver-liveness read is the pushed `shim_attached', nothing derived."
+(ert-deftest agent-repl-test-frontend-session-controller-live-reads-shim-attached ()
+  "The session controller-liveness read is the pushed `shim_attached', nothing derived."
   (cl-letf (((symbol-function 'agent-repl--frontend-session-view)
              (lambda (_id) (list :sessionId "s_1" :shimAttached t))))
-    (should (agent-repl--frontend-session-driver-live-p "s_1"))))
+    (should (agent-repl--frontend-session-controller-live-p "s_1"))))
 
-(ert-deftest agent-repl-test-frontend-driver-live-nil-without-the-field ()
+(ert-deftest agent-repl-test-frontend-session-controller-live-nil-without-the-field ()
   "A daemon that sends no field reads as NOT live, so the switch ensures."
   (cl-letf (((symbol-function 'agent-repl--frontend-session-view)
              (lambda (_id) (list :sessionId "s_1"))))
-    (should-not (agent-repl--frontend-session-driver-live-p "s_1"))))
+    (should-not (agent-repl--frontend-session-controller-live-p "s_1"))))
 
 (ert-deftest agent-repl-test-frontend-switch-ensure-sends-after-a-daemon-restart ()
-  "THE restart shape: a durable live+backfilled record with NO live driver.
+  "THE restart shape: a durable live+backfilled record with NO live session controller.
 Every durable fact says the workspace is up; only `shim_attached' knows the
-daemon has never brought it up.  A missing driver must ALWAYS ensure."
+daemon has never brought it up.  A missing session controller must ALWAYS ensure."
   ;; Arrange
   (agent-repl-test--with-ws "ws1" '(:project-dir "/w" :frontend-session-id "s_1")
     (cl-letf (((symbol-function 'agent-repl--uds-connected-p) (lambda () t))
@@ -1893,7 +1893,7 @@ the wire would deprive the agent of the directive it must read."
 ;; frontend.v1's `SubmitPromptCmd' has no `origin' field, so the merge
 ;; status-card origin stamp is no longer forwarded (it was already dead
 ;; server-side — the retired HTTP /message route never read it into the
-;; driver).  Send-user-message still CONSUMES and clears the one-shot
+;; session controller).  Send-user-message still CONSUMES and clears the one-shot
 ;; `:next-send-origin' so it never lingers; it just does not reach the wire.
 
 (ert-deftest agent-repl-test-frontend-send-user-message-clears-next-send-origin ()

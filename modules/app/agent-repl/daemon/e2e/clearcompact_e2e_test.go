@@ -20,7 +20,7 @@
 //
 // NOT COVERED — daemon-restart persistence of the replay floor. e2eHarness
 // exposes only its httptest.Server: the registry file, the SSM database, the
-// shim listener socket, and the driver are all constructed inside
+// shim listener socket, and the session controller are all constructed inside
 // newUDSHarness over per-call t.TempDir() paths with no seam to rebuild the
 // daemon half over the same persisted state. Restarting the daemon in-process
 // would mean forking the entire harness wiring into this file (and re-binding
@@ -271,7 +271,7 @@ func collectItems(t *testing.T, conn *websocket.Conn, workspace string, n int) [
 // The CommandAck for the resync is the terminator, and it is a sound one: the
 // frontend server enqueues the ack only AFTER dispatching the command
 // (frontend/server.go readLoop), and a ring-covered resync pushes its whole
-// replay synchronously inside that dispatch (sessiondrv.Manager.Resync returns
+// replay synchronously inside that dispatch (sessioncontroller.Manager.Resync returns
 // without a store re-pull when the ring covers the request).
 func replayItems(t *testing.T, conn *websocket.Conn, workspace, requestID string) []*frontendv1.ConversationItem {
 	t.Helper()
@@ -303,8 +303,8 @@ func isResult(item *frontendv1.ConversationItem) bool { return item.GetResult() 
 
 // seqItems drops the items a replay serves REGARDLESS of seq — the retained
 // permission items (arm 30), failure cards (arm 31), and prompt receipts
-// (sessiondrv/promptecho.go), all of which are daemon-composed, carry no store
-// seq, and are re-pushed on every resync by contract (sessiondrv/sinks.go
+// (sessioncontroller/promptecho.go), all of which are daemon-composed, carry no store
+// seq, and are re-pushed on every resync by contract (sessioncontroller/sinks.go
 // consumer.resync). They are the only documented asymmetry between a live
 // stream and a replay, so an equivalence check names and excludes exactly them.
 func seqItems(items []*frontendv1.ConversationItem) []*frontendv1.ConversationItem {
@@ -426,7 +426,7 @@ func TestE2EReplayFloorsAtTheClear(t *testing.T) {
 // Permission items and failure cards are excluded (seqItems): they are the only
 // items the contract replays regardless of seq. Nothing else is excluded — both
 // paths run the SAME curator over the SAME retained event
-// (sessiondrv consumer.pushConversation, whose `live` flag only gates a log
+// (sessioncontroller consumer.pushConversation, whose `live` flag only gates a log
 // line), so the items themselves must compare equal field for field.
 func TestE2ELiveAndReplayAgreeFromTheFloor(t *testing.T) {
 	// Arrange

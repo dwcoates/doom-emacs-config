@@ -1,5 +1,32 @@
 # daemon/
 
+## Session-controller vocabulary
+
+A **session controller** is the daemon's in-memory control object for one
+workspace's current agent-repl session. `sessioncontroller.Manager` owns the
+fleet, keyed by absolute workspace path in `Manager.byWS`; each
+`sessionController` value binds that workspace to exactly one agent-repl
+session ID and owns its shim client, event consumer, cancellation boundary,
+bring-up state, and other connection-local bookkeeping. A durable registry
+record says a session exists. A session controller says this daemon instance
+currently owns the live route used to operate the session.
+
+A session controller is **live** precisely when the current
+`sessioncontroller.Manager` has a `Manager.byWS[workspace]` entry. This fact is
+daemon-local and deliberately does not survive a daemon restart. It does not
+mean the shim has completed its handshake, the route is `wired`, or an agent
+turn is active: a live session controller may still be bringing up or
+reconnecting. `Manager.Live` reports this map-membership fact; send paths
+additionally wait for the session controller's readiness gate.
+
+A **matching live session controller** is stronger: the workspace entry must
+exist and its `sessionController.sessionID` must equal the session ID announced
+by the shim. A `turn handshake has no matching live session controller` error
+therefore means the shim handshook while the current daemon either had no
+session controller for that workspace or had already assigned the workspace to
+a different session. Never interpret that error as merely "the session is not
+thinking" or infer session-controller liveness from persisted session fields.
+
 ## Logging
 
 - The daemon owns one canonical JSON logging API in `internal/dlog`, divided

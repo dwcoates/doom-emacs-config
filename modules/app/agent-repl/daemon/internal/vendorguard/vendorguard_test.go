@@ -63,9 +63,9 @@ func TestCheckNamesTheBlockedSite(t *testing.T) {
 	// Arrange
 	t.Setenv(EnvVar, "1")
 	// Act
-	err := Check("sessiondrv.spawnClassifier")
+	err := Check("sessioncontroller.spawnClassifier")
 	// Assert
-	if err == nil || !strings.Contains(err.Error(), "sessiondrv.spawnClassifier") {
+	if err == nil || !strings.Contains(err.Error(), "sessioncontroller.spawnClassifier") {
 		t.Fatalf("Check() = %v, want an error naming the blocked site", err)
 	}
 }

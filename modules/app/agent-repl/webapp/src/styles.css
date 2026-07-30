@@ -540,7 +540,7 @@ body::after {
 /* SEVERED: blue like init, and STILL — init pulses because a bring-up is in
    flight, and a severed route means nothing is. Blue because it is the half of
    the old DORMANT that really is evidence of breakage: a bring-up that could
-   not be completed, or a driver that died on a terminal protocol error. */
+   not be completed, or a session controller that died on a terminal protocol error. */
 #ws-sidebar .st-severed { background: var(--init); }
 /* HIBERNATED: TEAL, and still. The benign half — asleep on purpose, or never
    wired at all. Its own hue rather than a shade of --init, because these two

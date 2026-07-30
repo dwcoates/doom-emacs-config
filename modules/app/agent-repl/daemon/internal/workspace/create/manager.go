@@ -24,7 +24,7 @@ type Config struct {
 }
 
 // Manager drives durable workspace creation jobs to the next safe boundary.
-// It has no dependency on frontend/server or sessiondrv so ownership remains
+// It has no dependency on frontend/server or sessioncontroller so ownership remains
 // unambiguous: this package owns creation; other packages supply adapters.
 type Manager struct {
 	cfg Config

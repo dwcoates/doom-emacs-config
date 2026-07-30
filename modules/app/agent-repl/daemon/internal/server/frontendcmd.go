@@ -39,7 +39,7 @@ import (
 // return a loud error, never a silent no-op — the frontend renders the failed
 // CommandAck.
 type PromptRouter interface {
-	// SubmitPrompt carries the COMMAND'S OWN request id through to the driver:
+	// SubmitPrompt carries the COMMAND'S OWN request id through to the session controller:
 	// it is what the daemon's immediate prompt receipt is keyed on, and what
 	// the durable transcript line is later stamped with, so a frontend
 	// reconciles the two onto one bubble.
@@ -50,7 +50,7 @@ type PromptRouter interface {
 }
 
 // SessionRestarter hard-restarts one workspace's session: stop its shim, bring
-// the same record back up. Satisfied by *sessiondrv.Manager.
+// the same record back up. Satisfied by *sessioncontroller.Manager.
 type SessionRestarter interface {
 	RestartSession(ctx context.Context, workspace string) error
 }
@@ -116,7 +116,7 @@ type WorkspaceHostWorkSnapshot struct {
 // frontend resync the StateSnapshot re-send does not cover. The implementation
 // raises that start to the newest clear or compaction when there is one, so a
 // frontend is never served history one of those already discarded. Satisfied by
-// *sessiondrv.Manager.
+// *sessioncontroller.Manager.
 type Resyncer interface {
 	Resync(workspace string, fromSeq uint64) error
 }
@@ -270,7 +270,7 @@ type ClientLogIdentityResolver interface {
 
 // TurnStateSource reports whether a workspace's session has a turn IN FLIGHT,
 // as observed off the shim's own TurnStarted/TurnEnded stream. Satisfied by
-// *sessiondrv.Manager, which is where that observation already lives.
+// *sessioncontroller.Manager, which is where that observation already lives.
 type TurnStateSource interface {
 	TurnActive(workspace string) (bool, error)
 }
@@ -403,7 +403,7 @@ func (h *commandHandler) DaemonHealth(_ context.Context, _ string, requestID str
 }
 
 // SessionHealth returns a correlated assertion for precisely the session
-// carried by the command.  Any missing driver, mismatched session, transport
+// carried by the command.  Any missing controller, mismatched session, transport
 // failure, or unhealthy shim is encoded as healthy=false so Emacs has one
 // honest result type to wait on during restore.
 func (h *commandHandler) SessionHealth(ctx context.Context, workspace, requestID string, cmd *frontendv1.SessionHealthCmd) (*frontendv1.SessionHealthView, error) {
@@ -429,7 +429,7 @@ func (h *commandHandler) SessionHealth(ctx context.Context, workspace, requestID
 	actual, err := h.health.Health(ctx, workspace, view.GetSessionId(), requestID)
 	if isUnwiredWorkspace(err) {
 		view.Reason = err.Error()
-		h.logf("frontend cmd: session_health ws=%s session=%s request_id=%s — the workspace has no live driver; skipping the probe (healthy=false, nothing to act on)",
+		h.logf("frontend cmd: session_health ws=%s session=%s request_id=%s — the workspace has no live session controller; skipping the probe (healthy=false, nothing to act on)",
 			workspace, view.GetSessionId(), requestID)
 		return view, nil
 	}
@@ -453,7 +453,7 @@ func (h *commandHandler) SessionHealth(ctx context.Context, workspace, requestID
 // absolute path.
 //
 // Every session-routed command is keyed by the session's CWD: SessionLocator
-// matches records on CWD == workspace and sessiondrv maps live drivers under
+// matches records on CWD == workspace and sessioncontroller maps live session controllers under
 // that same string. A frontend that sends a DISPLAY NAME instead ("doom" rather
 // than "/Users/…/.config/doom") therefore matches nothing — and without this
 // check the miss surfaces as `workspace "doom" has no live session to drive`,
@@ -514,7 +514,7 @@ func (h *commandHandler) Interrupt(ctx context.Context, workspace, requestID str
 // challenged, returning the challenge or nil to deliver.
 //
 // Both facts come from the daemon's EXISTING authorities and neither is
-// re-derived here: the turn boundary from the driver that observes it off the
+// re-derived here: the turn boundary from the session controller that observes it off the
 // shim's own stream, and the live-task count from the resolver that already
 // carries it to ProgressView. An unwired source is a construction bug and
 // fails loudly rather than silently skipping the gate — a skipped gate would
@@ -607,20 +607,20 @@ func (h *commandHandler) OpenWorkspace(ctx context.Context, workspace, requestID
 
 // Resync drives the conversation-delta replay half of a frontend resync (the
 // frontend server independently re-sends the StateSnapshot). It routes to the
-// per-session driver's retained-ring replay from the requested seq, inclusive
+// per-session controller's retained-ring replay from the requested seq, inclusive
 // and floored at the newest clear or compaction.
-// A nil resyncer (no driver wired) leaves this a documented no-op — the
+// A nil resyncer (no session controller wired) leaves this a documented no-op — the
 // snapshot half is honest and sufficient for state — rather than a swallow.
 func (h *commandHandler) Resync(_ context.Context, workspace, requestID string, cmd *frontendv1.ResyncCmd) error {
 	if h.resyncer == nil {
-		h.logf("frontend cmd: resync ws=%s request_id=%s from_seq=%d (snapshot re-sent by server; no driver wired for conversation replay)",
+		h.logf("frontend cmd: resync ws=%s request_id=%s from_seq=%d (snapshot re-sent by server; no session controller wired for conversation replay)",
 			workspace, requestID, cmd.GetFromSeq())
 		return nil
 	}
 	h.logf("frontend cmd: resync ws=%s request_id=%s from_seq=%d", workspace, requestID, cmd.GetFromSeq())
 	err := h.resyncer.Resync(workspace, cmd.GetFromSeq())
 	if isUnwiredWorkspace(err) {
-		h.logf("frontend cmd: resync ws=%s request_id=%s from_seq=%d — the workspace has no live driver; skipping the conversation replay (the snapshot half is served regardless)",
+		h.logf("frontend cmd: resync ws=%s request_id=%s from_seq=%d — the workspace has no live session controller; skipping the conversation replay (the snapshot half is served regardless)",
 			workspace, requestID, cmd.GetFromSeq())
 		return nil
 	}
@@ -628,13 +628,13 @@ func (h *commandHandler) Resync(_ context.Context, workspace, requestID string, 
 }
 
 // isUnwiredWorkspace reports whether err is the "this workspace has no live
-// shim driver" refusal.
+// shim controller" refusal.
 //
 // It reads UNWIRED rather than the word it used to carry. `dormant` is no longer
 // a state: the render vocabulary split it into `severed` (the substrate broke)
 // and `hibernated` (nothing is wrong), and this predicate deliberately covers
-// BOTH plus every other reason a driver might be absent. It is a fact about the
-// driver, not a claim about which of the two closed halves the workspace is on.
+// BOTH plus every other reason a session controller might be absent. It is a fact about the
+// controller, not a claim about which of the two closed halves the workspace is on.
 //
 // IT IS CLASSIFIED BY CALLER, not by shape. The refusal is the same fact
 // either way, but what it MEANS to the user is not: Emacs fans background
@@ -649,7 +649,7 @@ func (h *commandHandler) Resync(_ context.Context, workspace, requestID string, 
 // a pressed control doing nothing with no explanation. Nothing here weakens the
 // loud path for a genuine caller error: any other failure still propagates.
 func isUnwiredWorkspace(err error) bool {
-	return err != nil && errors.Is(err, errclass.ErrNoLiveDriver)
+	return err != nil && errors.Is(err, errclass.ErrNoLiveSessionController)
 }
 
 // CreateSession lives in createestablish.go: the command is the daemon's
@@ -662,7 +662,7 @@ func (h *commandHandler) DeleteSession(_ context.Context, workspace, requestID s
 	return h.sessions.DeleteSession(cmd.GetSessionId())
 }
 
-// RestartSession HARD-RESTARTS the workspace's session (sessiondrv's
+// RestartSession HARD-RESTARTS the workspace's session (sessionsession controller's
 // RestartSession): stop whatever shim is serving it — including a survivor of a
 // previous daemon, reached by the pid it announced — then bring the SAME
 // session record back up, so the conversation resumes under a fresh process.
@@ -699,7 +699,7 @@ func (h *commandHandler) Shutdown(_ context.Context, workspace, requestID string
 // ClientLog persists frontend evidence only in the workspace's webapp.log. It
 // never mutates daemon state or duplicates the record into daemon.log.
 // QueueController is the queue half of the frontend command surface (E4).
-// Satisfied by *sessiondrv.Manager. Every method reports an unknown entry id
+// Satisfied by *sessioncontroller.Manager. Every method reports an unknown entry id
 // as an error: the user asked for something specific, and pretending to have
 // done it would be worse than saying it is gone.
 type QueueController interface {
@@ -849,7 +849,7 @@ func clientLogLevel(level frontendv1.ClientLogLevel) dlog.Level {
 	}
 }
 
-// FileDiagnosticPersister is injected into the session driver without making
+// FileDiagnosticPersister is injected into the session controller without making
 // it depend on daemon target management.
 type FileDiagnosticPersister interface {
 	PersistFileDiagnostic(workspace, agentReplSessionID string, ev *corev1.Event, diagnostic *corev1.FilePlaneDiagnostic) error
@@ -951,7 +951,7 @@ type SessionMetaSource interface {
 
 // SessionInitSource supplies the retained SystemInit of every live session as
 // SessionInitViews (S9), for the connect snapshot's inits. Satisfied by
-// *sessiondrv.Manager. Returning an empty slice is valid (no inits yet).
+// *sessioncontroller.Manager. Returning an empty slice is valid (no inits yet).
 type SessionInitSource interface {
 	SessionInits() []*frontendv1.SessionInitView
 }
@@ -964,7 +964,7 @@ type TaskCatalogSource interface {
 }
 
 // QueueSource supplies every live session's held-prompt queue (E4) for the
-// connect/resync snapshot. Satisfied by *sessiondrv.Manager. A session with an
+// connect/resync snapshot. Satisfied by *sessioncontroller.Manager. A session with an
 // empty queue still contributes its empty view, so a reconnecting frontend is
 // TOLD the queue is empty rather than left to assume it.
 type QueueSource interface {
@@ -979,7 +979,7 @@ type ProgressSource interface {
 }
 
 // QueueBackend is the daemon's whole prompt-queue surface: the command half
-// and the snapshot half. Satisfied by *sessiondrv.Manager, which owns both.
+// and the snapshot half. Satisfied by *sessioncontroller.Manager, which owns both.
 type QueueBackend interface {
 	QueueController
 	QueueSource

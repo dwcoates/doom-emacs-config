@@ -594,12 +594,12 @@ func (m *Manager) InvalidateTurnClaim(workspace, staleSessionID, reason string) 
 // backfill" is a real, correct answer — a genuinely fresh workspace — not an
 // unknown, so it must not hold the workspace blue.
 //
-// STATE is the sessiondrv token ("pending" | "done" | "failed"). `pending` is
+// STATE is the sessioncontroller token ("pending" | "done" | "failed"). `pending` is
 // deliberately NOT blue on its own: a session mid-backfill has not been wired
 // yet and the WIRED axis already holds it blue, and treating pending as a
 // separate blue would mean a REOPENED session whose history is already in the
 // store — and which therefore never emits a fresh transition — could never
-// leave it. See sessiondrv.settleBackfillFromStore for the other half of that.
+// leave it. See sessioncontroller.settleBackfillFromStore for the other half of that.
 func (m *Manager) ApplyBackfillState(workspace, state string) error {
 	if workspace == "" {
 		return fmt.Errorf("ssm: ApplyBackfillState got an empty workspace")

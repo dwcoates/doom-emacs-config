@@ -404,7 +404,7 @@ together through one `closeAllMenus`.
 clears, on the FIRST of either signal to arrive:
 
 - `NoteTurnAccepted`, fired when the daemon accepts a prompt for immediate
-  submission (`sessiondrv.Manager.SubmitPrompt`, non-queued path). This is the
+  submission (`sessioncontroller.Manager.SubmitPrompt`, non-queued path). This is the
   earliest turn start the daemon actually observes today, since live
   `TurnStarted` events do not currently reach it (a separate known defect).
 - a `TurnStarted` store event, once those flow again.
@@ -439,7 +439,7 @@ late for a live footer.
    exactly the key `ContentDelta` uses, so both describe one message.
 2. `shimclient.dispatchEvent` routes it to the `FrameSink` alongside the other
    two ephemerals.
-3. `sessiondrv.consumer.Consume` folds it into the progress resolver and pushes
+3. `sessioncontroller.consumer.Consume` folds it into the progress resolver and pushes
    NOTHING to the frontend conversation surface — it is footer input only.
 4. `progress.applyLatencyLocked` sets `ProgressView.ttft_ms` and pushes.
 

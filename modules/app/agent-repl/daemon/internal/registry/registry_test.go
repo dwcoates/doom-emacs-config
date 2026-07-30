@@ -615,7 +615,7 @@ func TestReplayFloorWritesThroughToTheConversationCheckpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Act: model the hot-path writer (the driver observing a clear).
+	// Act: model the hot-path writer (the session controller observing a clear).
 	found, err := r.Update(rec.SessionID, func(stored *Record) {
 		stored.NewestClearOrCompactSeq = 512
 	})
