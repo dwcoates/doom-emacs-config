@@ -36,7 +36,6 @@
   (load (expand-file-name "test-ai-title.el" dir) nil t)
   (load (expand-file-name "test-autosave.el" dir) nil t)
   (load (expand-file-name "test-backend.el" dir) nil t)
-  (load (expand-file-name "test-caffeinate.el" dir) nil t)
   (load (expand-file-name "test-clipboard-image.el" dir) nil t)
   (load (expand-file-name "test-close-panels-on-open.el" dir) nil t)
   (load (expand-file-name "test-codex.el" dir) nil t)
