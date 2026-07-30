@@ -41,15 +41,15 @@ type record struct {
 }
 
 // Logger writes normal records to the persistent log and stderr. Verbose
-// records always reach the persistent log and reach stderr only when enabled.
+// records reach both sinks only when verbose mode is enabled.
 type Logger struct {
-	file            io.Writer
-	stderr          io.Writer
-	verboseToStderr bool
-	fields          Fields
-	state           *sinkState
-	clock           func() time.Time
-	pid             func() int
+	file           io.Writer
+	stderr         io.Writer
+	verboseEnabled bool
+	fields         Fields
+	state          *sinkState
+	clock          func() time.Time
+	pid            func() int
 }
 
 type sinkState struct {
@@ -59,17 +59,17 @@ type sinkState struct {
 
 // New creates the shim-store logger. file is the durable sink and stderr is
 // the interactive sink. Both are required runtime dependencies.
-func New(file, stderr io.Writer, verboseToStderr bool) *Logger {
+func New(file, stderr io.Writer, verboseEnabled bool) *Logger {
 	if file == nil || stderr == nil {
 		panic("shim-store logging: nil output sink")
 	}
 	return &Logger{
-		file:            file,
-		stderr:          stderr,
-		verboseToStderr: verboseToStderr,
-		state:           &sinkState{},
-		clock:           time.Now,
-		pid:             os.Getpid,
+		file:           file,
+		stderr:         stderr,
+		verboseEnabled: verboseEnabled,
+		state:          &sinkState{},
+		clock:          time.Now,
+		pid:            os.Getpid,
 	}
 }
 
@@ -89,13 +89,13 @@ func (l *Logger) Log(fields Fields, format string, args ...any) {
 	l.write("normal", fields, format, args, true)
 }
 
-// LogVerbose records verbose diagnostic output to shim-store.log. stderr is
-// included only when AGENT_REPL_LOG_VERBOSE enabled verbose output at startup.
+// LogVerbose records verbose diagnostic output to both sinks only when
+// AGENT_REPL_LOG_VERBOSE enabled verbose mode at startup.
 func (l *Logger) LogVerbose(fields Fields, format string, args ...any) {
-	l.write("verbose", fields, format, args, l.verboseToStderr)
+	l.write("verbose", fields, format, args, l.verboseEnabled)
 }
 
-func (l *Logger) write(verbosity string, fields Fields, format string, args []any, stderr bool) {
+func (l *Logger) write(verbosity string, fields Fields, format string, args []any, enabled bool) {
 	if l == nil {
 		panic("shim-store logging: nil logger")
 	}
@@ -111,6 +111,9 @@ func (l *Logger) write(verbosity string, fields Fields, format string, args []an
 	case "debug", "info", "warn", "error":
 	default:
 		panic(fmt.Sprintf("shim-store logging: invalid level %q", level))
+	}
+	if !enabled {
+		return
 	}
 	context := map[string]any{}
 	for key, value := range map[string]string{
@@ -172,11 +175,9 @@ func (l *Logger) write(verbosity string, fields Fields, format string, args []an
 		}
 		panic(fmt.Sprintf("shim-store logging: persistent sink failed: %v", err))
 	}
-	if stderr {
-		if err := writeFull(l.stderr, line); err != nil {
-			l.state.poisoned = fmt.Errorf("stderr sink: %w", err)
-			panic(fmt.Sprintf("shim-store logging: stderr sink failed: %v", err))
-		}
+	if err := writeFull(l.stderr, line); err != nil {
+		l.state.poisoned = fmt.Errorf("stderr sink: %w", err)
+		panic(fmt.Sprintf("shim-store logging: stderr sink failed: %v", err))
 	}
 }
 
