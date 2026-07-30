@@ -102,6 +102,16 @@ type StateApplier interface {
 	// teardown means there is no ungated path left to find. found=false is a
 	// workspace the log knows nothing about, which has no turn to interrupt.
 	Current(workspace string) (*frontendv1.WorkspaceState, bool, error)
+	// CloseStaleTurn closes a workspace's standing `thinking` when the daemon
+	// has just STOPPED the shim that promised to report that turn's end. The
+	// agent axis retires `thinking` on a `TurnEnded` and on nothing else, so a
+	// stop landing mid-turn kills the only process that could ever produce
+	// one and latches the axis forever.
+	//
+	// It reports whether it WROTE the closing row: false with a nil error is
+	// the good outcome, meaning the shim's own end reached the log first and
+	// closed the axis honestly. See turnstop.go, which is the only caller.
+	CloseStaleTurn(workspace, sessionID, reason string, soleDriver bool) (closed bool, err error)
 }
 
 // ProgressResolver is the slice of the progress-footer resolver (F1) the driver
