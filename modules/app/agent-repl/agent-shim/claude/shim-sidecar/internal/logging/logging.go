@@ -62,7 +62,8 @@ type Diagnostic struct {
 
 // Logger routes session records to the diagnostic outbox and conceptually
 // global records to the persistent sidecar log. Normal records are also
-// written to stderr; verbose stderr output requires AGENT_REPL_LOG_VERBOSE.
+// written to stderr. Verbose records are emitted only when
+// AGENT_REPL_LOG_VERBOSE is enabled.
 type Logger struct {
 	stderr  io.Writer
 	file    io.Writer
@@ -137,8 +138,8 @@ func (b *Bound) Log(format string, args ...any) {
 	b.logger.write(false, b.context, format, args...)
 }
 
-// LogVerbose records a verbose diagnostic to the persistent log and writes it
-// to stderr only when AGENT_REPL_LOG_VERBOSE is enabled.
+// LogVerbose records a verbose diagnostic only when AGENT_REPL_LOG_VERBOSE is
+// enabled. Disabled verbose records reach neither the durable sink nor stderr.
 func (b *Bound) LogVerbose(format string, args ...any) {
 	if b == nil {
 		panic("sidecar logging: LogVerbose called on nil Bound logger")
@@ -161,6 +162,9 @@ func (l *Logger) write(verbose bool, ctx Context, format string, args ...any) {
 	case "debug", "info", "warn", "error":
 	default:
 		panic(fmt.Sprintf("sidecar logging: invalid level %q", level))
+	}
+	if verbose && !l.verbose() {
+		return
 	}
 	verbosity := "normal"
 	if verbose {
@@ -242,10 +246,8 @@ func (l *Logger) write(verbose bool, ctx Context, format string, args ...any) {
 			panic(fmt.Sprintf("sidecar logging: persistent sink failed: %v", err))
 		}
 	}
-	if !verbose || l.verbose() {
-		if err := writeAll(l.stderr, []byte(line)); err != nil {
-			panic(fmt.Sprintf("sidecar logging: stderr sink failed: %v", err))
-		}
+	if err := writeAll(l.stderr, []byte(line)); err != nil {
+		panic(fmt.Sprintf("sidecar logging: stderr sink failed: %v", err))
 	}
 }
 
