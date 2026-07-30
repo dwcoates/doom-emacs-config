@@ -9,22 +9,25 @@
 #
 #   PASS  the checked invariant holds.
 #   FAIL  the invariant is violated (something is down / missing / corrupt).
-#   SKIP  the check could not run because an OPTIONAL tool is absent. A SKIP
-#         is an honest environment report, never a silent fallback: the check
-#         did not pass, it simply could not be evaluated here.
+#   SKIP  the check could not run because an optional tool is absent or the
+#         bounded sweep explicitly declined an unbounded deep scan. A SKIP is
+#         an honest environment report, never a pass or a silent alternative.
 #
 # This script is STRICTLY READ-ONLY. It never starts, stops, restarts, loads,
 # unloads, or otherwise mutates any service, socket, file, or launchd state.
 # It only stats files, opens (and immediately closes) sockets, and issues
-# read-only `launchctl print` / `sqlite3 'PRAGMA integrity_check'` queries.
+# read-only `launchctl print` / SQLite queries. Full integrity scans of large
+# live databases are opt-in because they can run for hours.
 #
 # State root: defaults to ${XDG_CACHE_HOME:-$HOME/.cache}/agent-repl. Override
 # with AGENT_REPL_STATE_ROOT (used by the unit dry-run to point at a fabricated
 # temp dir so the real cache is never touched).
 #
 # Usage:
-#   agent-shim-doctor.sh [--json]
-#     --json   emit a machine-readable JSON array instead of text lines.
+#   agent-shim-doctor.sh [--json] [--deep-integrity]
+#     --json             emit a machine-readable JSON array instead of text lines.
+#     --deep-integrity   force PRAGMA integrity_check even when the database is
+#                        larger than the automatic-scan threshold.
 #
 # Exit: 0 when no check FAILed (SKIPs do not fail); 1 when any check FAILed.
 
@@ -49,6 +52,11 @@ SIDECAR_LABEL="com.agentrepl.shim-claude-sidecar"
 LOG_RECENT_SECS=900
 
 JSON=0
+DEEP_INTEGRITY=0
+# A 34 GiB production store made the nominal health sweep block indefinitely.
+# The routine probe declines an automatic deep scan above this size and reports
+# an explicit SKIP. --deep-integrity remains available for a maintenance window.
+INTEGRITY_AUTO_MAX_BYTES="${AGENT_REPL_DOCTOR_INTEGRITY_AUTO_MAX_BYTES:-1073741824}"
 
 # --- Result accumulation ------------------------------------------------
 
@@ -77,6 +85,11 @@ now_epoch() { date +%s; }
 file_mtime() {
   # Prints the file's mtime in epoch seconds, or nothing if stat fails.
   stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || true
+}
+
+file_size() {
+  # Prints the file size in bytes, or nothing if stat fails.
+  stat -f %z "$1" 2>/dev/null || stat -c %s "$1" 2>/dev/null || true
 }
 
 # json_escape STRING — escape for embedding in a JSON string literal.
@@ -212,7 +225,25 @@ check_store_db() {
       "install the sqlite3 CLI to enable the integrity check"
     return 0
   fi
-  local res
+  local res size
+  # Prove SQLite can open and read the live schema before deciding whether the
+  # potentially enormous page scan belongs in this bounded health sweep.
+  if ! res="$(sqlite3 -readonly "$STORE_DB" 'PRAGMA query_only=ON; SELECT count(*) FROM sqlite_schema;' 2>&1)"; then
+    record "store-db-openable" "FAIL" "read-only schema query could not run: $res" \
+      "the DB may be locked or unreadable; inspect $STORE_DB"
+    return 0
+  fi
+  record "store-db-openable" "PASS" "read-only schema query succeeded (objects=$res)"
+
+  size="$(file_size "$STORE_DB")"
+  if [ "$DEEP_INTEGRITY" -ne 1 ] && [ -n "$size" ] &&
+     [ "$size" -gt "$INTEGRITY_AUTO_MAX_BYTES" ]; then
+    record "store-db-integrity" "SKIP" \
+      "database is ${size} bytes, above the ${INTEGRITY_AUTO_MAX_BYTES}-byte automatic deep-scan limit" \
+      "run agent-shim-doctor.sh --deep-integrity during a maintenance window to execute PRAGMA integrity_check"
+    return 0
+  fi
+
   # -readonly guarantees we never mutate the live DB under a running store.
   if ! res="$(sqlite3 -readonly "$STORE_DB" 'PRAGMA integrity_check;' 2>&1)"; then
     record "store-db-integrity" "FAIL" "PRAGMA integrity_check could not run: $res" \
@@ -270,6 +301,7 @@ render_json() {
 while [ $# -gt 0 ]; do
   case "$1" in
     --json) JSON=1 ;;
+    --deep-integrity) DEEP_INTEGRITY=1 ;;
     -h|--help)
       sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
