@@ -2013,18 +2013,50 @@ gate for each live shim/store route."
       (setq agent-repl-default-frontend saved-frontend)
       (agent-repl--log nil "snapshot-load: restored default-frontend=%s" saved-frontend))
     (let* ((normalized (mapcar #'agent-repl--snapshot-entry-normalize snapshot))
+           ;; An ORPHANED tombstone names a `:project-dir' that no longer
+           ;; exists.  Nothing can ever resolve it again: it cannot be
+           ;; reverse-looked-up, cannot be restored by the hide toggle, cannot
+           ;; be a peer's parent.  It is pure weight — and not a little of it,
+           ;; since deleting a batch of worktrees orphans one per worktree, and
+           ;; every roster-wide sweep then pays for all of them forever.
+           (orphan-tombstone-p
+            (lambda (e)
+              (let ((plist (cdr e)))
+                (and (plist-get plist :nuked-at)
+                     (let ((dir (plist-get plist :project-dir)))
+                       (and (stringp dir) (not (file-directory-p dir))))))))
+           (orphans (cl-remove-if-not orphan-tombstone-p normalized))
            ;; Partition: tombstoned entries (`:nuked-at' present) are
            ;; identity-only records — restore them directly to the hash
            ;; without queueing them for establish (which would create a
            ;; persp + start claude for a workspace the user already
            ;; nuked).  Live entries follow the original establish queue.
            (tombstones (cl-remove-if-not
-                        (lambda (e) (plist-get (cdr e) :nuked-at))
+                        (lambda (e) (and (plist-get (cdr e) :nuked-at)
+                                         (not (funcall orphan-tombstone-p e))))
                         normalized))
            (queue (cl-remove-if
                    (lambda (e) (plist-get (cdr e) :nuked-at))
                    normalized))
            (origin-ws (agent-repl--ws-current-name)))
+      ;; Written back BEFORE anything else in the load runs, so a directory
+      ;; deleted outside Emacs costs exactly one startup and is never
+      ;; encountered again.  The pruned list is the normalized roster minus the
+      ;; orphans, not a re-collection from the live hash: the hash is still
+      ;; half-populated here (live entries have not been established yet), so
+      ;; collecting from it would drop every workspace still queued.
+      (when orphans
+        (agent-repl--write-workspace-snapshot
+         (cl-remove-if orphan-tombstone-p normalized))
+        (agent-repl--info
+         nil
+         "snapshot-load: pruned %d orphaned tombstone(s) with a missing directory; rewrote roster %d -> %d entries file=%s"
+         (length orphans) (length normalized)
+         (- (length normalized) (length orphans))
+         agent-repl-workspace-snapshot-file)
+        (agent-repl--log-verbose
+         nil "snapshot-load: pruned orphaned tombstones=%S"
+         (mapcar #'car orphans)))
       (dolist (entry tombstones)
         (let ((ws (car entry))
               (plist (cdr entry)))
