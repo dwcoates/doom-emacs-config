@@ -502,6 +502,36 @@ Regression guard so the file is not silently moved or deleted —
       (should (re-search-forward "^name: debug-emacs-agent-repl$" nil t))
       (should (re-search-forward "^description: " nil t)))))
 
+(ert-deftest agent-repl-test-debug-skill-critical-path-runbook-and-ambiguity-gate ()
+  "The debug skill must expose its iterative runbook through a user choice gate."
+  (let* ((src-dir (expand-file-name
+                   (or agent-repl-local-skills-src-dir
+                       (error "agent-repl-local-skills-src-dir is unset"))))
+         (skill-dir (expand-file-name "debug-emacs-agent-repl/" src-dir))
+         (skill-md (expand-file-name "SKILL.md" skill-dir))
+         (runbook (expand-file-name
+                   "references/critical-path-observability-loop.md"
+                   skill-dir)))
+    (should (file-exists-p runbook))
+    (with-temp-buffer
+      (insert-file-contents skill-md)
+      (should (re-search-forward
+               "`references/critical-path-observability-loop\\.md`"
+               nil t))
+      (should (re-search-forward
+               "Surface the plausible runbooks to the user"
+               nil t))
+      (should (re-search-forward
+               "Wait for that[[:space:]\n]+selection"
+               nil t)))
+    (with-temp-buffer
+      (insert-file-contents runbook)
+      (should (re-search-forward "^## Audit and repair instrumentation$" nil t))
+      (should (re-search-forward "^## Reload and prove loaded state$" nil t))
+      (should (re-search-forward "^## Provoke, deprovoke, and capture$" nil t))
+      (should (re-search-forward "^## Reassess and iterate$" nil t))
+      (should (re-search-forward "^## Verify the fix and close the loop$" nil t)))))
+
 (ert-deftest agent-repl-test-managed-local-skills-includes-runtime-eval-code ()
   "Repo-local skills list must include `runtime-eval-code' (regression guard).
 `/runtime-eval-code' replaces the prior `/workspace-eval' skill and owns
