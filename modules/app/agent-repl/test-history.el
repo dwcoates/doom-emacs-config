@@ -409,24 +409,28 @@ longer exists on the next hydration."
   "instantiation-to-plist returns nil for nil input."
   (should-not (agent-repl--instantiation-to-plist nil)))
 
-(ert-deftest agent-repl-test-instantiation-to-plist-basic ()
-  "instantiation-to-plist serializes session-id."
+(ert-deftest agent-repl-test-instantiation-to-plist-drops-the-vendor-uuid ()
+  "instantiation-to-plist NEVER persists the claude session uuid.
+It used to, and that made state.el a durable pointer at a conversation —
+a second authority on a question the daemon answers exactly.  When the
+pointer went stale, workspaces opened FRESH conversations over intact
+transcripts."
   (let ((inst (make-agent-repl-instantiation :session-id "abc-123")))
-    (should (equal (agent-repl--instantiation-to-plist inst)
-                   '(:session-id "abc-123")))))
+    (should-not (agent-repl--instantiation-to-plist inst))))
 
 (ert-deftest agent-repl-test-instantiation-to-plist-empty-struct ()
-  "instantiation-to-plist serializes an empty struct with nil fields."
+  "instantiation-to-plist has nothing durable to write for an empty struct."
   (let ((inst (make-agent-repl-instantiation)))
-    (should (equal (agent-repl--instantiation-to-plist inst)
-                   '(:session-id nil)))))
+    (should-not (agent-repl--instantiation-to-plist inst))))
 
-(ert-deftest agent-repl-test-make-instantiation-from-plist-basic ()
-  "make-instantiation-from-plist creates a struct with session-id."
+(ert-deftest agent-repl-test-make-instantiation-from-plist-ignores-a-persisted-uuid ()
+  "A uuid left in an OLD state.el on disk is read and discarded.
+Honoring it would resurrect the very pointer this change removed, on every
+machine that still has a pre-migration state file."
   (let ((inst (agent-repl--make-instantiation-from-plist
                '(:session-id "xyz-789"))))
     (should (agent-repl-instantiation-p inst))
-    (should (equal (agent-repl-instantiation-session-id inst) "xyz-789"))))
+    (should-not (agent-repl-instantiation-session-id inst))))
 
 (ert-deftest agent-repl-test-make-instantiation-from-plist-nil ()
   "make-instantiation-from-plist with nil creates a fresh empty struct."
@@ -435,17 +439,16 @@ longer exists on the next hydration."
     (should-not (agent-repl-instantiation-session-id inst))))
 
 (ert-deftest agent-repl-test-make-instantiation-from-plist-extra-keys ()
-  "make-instantiation-from-plist ignores extra keys in saved plist."
+  "make-instantiation-from-plist tolerates unknown keys in a saved plist."
   (let ((inst (agent-repl--make-instantiation-from-plist
                '(:session-id "xyz" :unknown-key "val"))))
-    (should (equal (agent-repl-instantiation-session-id inst) "xyz"))))
+    (should (agent-repl-instantiation-p inst))))
 
 (ert-deftest agent-repl-test-make-instantiation-from-plist-legacy-had-session ()
   "make-instantiation-from-plist ignores the legacy :had-session key in old state files."
   (let ((inst (agent-repl--make-instantiation-from-plist
                '(:session-id "legacy" :had-session t))))
-    (should (agent-repl-instantiation-p inst))
-    (should (equal (agent-repl-instantiation-session-id inst) "legacy"))))
+    (should (agent-repl-instantiation-p inst))))
 
 ;;;; ---- Tests: state-file ----
 
@@ -493,13 +496,15 @@ longer exists on the next hydration."
 ;;;; ---- Tests: collect-env-state ----
 
 (ert-deftest agent-repl-test-collect-env-state ()
-  "collect-env-state returns a plist for each environment key."
+  "collect-env-state emits every environment key, carrying nothing durable.
+The key is still written so the persisted shape stays stable; what it used
+to carry — the vendor conversation uuid — is deliberately gone."
   (agent-repl-test--with-clean-state
     (let ((bare-inst (make-agent-repl-instantiation :session-id "b1")))
       (agent-repl--ws-put "ws" :bare-metal bare-inst)
       (let ((state (agent-repl--collect-env-state "ws")))
-        (should (equal (plist-get state :bare-metal)
-                       '(:session-id "b1")))))))
+        (should (plist-member state :bare-metal))
+        (should-not (plist-get state :bare-metal))))))
 
 (ert-deftest agent-repl-test-collect-env-state-nil-envs ()
   "collect-env-state returns nil plists when no envs are initialized."
@@ -1003,17 +1008,17 @@ write is the primary obligation; snapshot is the piggyback)."
             (agent-repl--initialize-ws-env "ws")
             (should (eq (agent-repl--ws-get "ws" :active-env) :bare-metal))
             (should (equal (agent-repl--ws-get "ws" :project-dir) "/restored/root"))
-            (should (equal (agent-repl-instantiation-session-id
-                            (agent-repl--ws-get "ws" :bare-metal))
-                           "bm-id")))
+            ;; A uuid in an OLD state file on disk is read and DISCARDED. It
+            ;; was the resume pointer; the daemon owns that now.
+            (should-not (agent-repl-instantiation-session-id
+                         (agent-repl--ws-get "ws" :bare-metal))))
         (delete-directory tmpdir t)))))
 
 (ert-deftest agent-repl-test-initialize-ws-env-migrates-retired-sandbox-env ()
   "A state file left behind by the retired :sandbox env hydrates as :bare-metal.
 The hydration runs the saved plist through `agent-repl--migrate-saved-state',
-so the sandbox-era session id is PROMOTED into the surviving env instead of
-failing validation (`:sandbox' is no longer a legal `:active-env') or
-stranding the conversation on an empty :bare-metal instantiation."
+so a saved `:sandbox' stops being one instead of failing validation
+\(`:sandbox' is no longer a legal `:active-env')."
   (agent-repl-test--with-clean-state
     (let ((tmpdir (make-temp-file "test-state-migrate-" t)))
       (unwind-protect
@@ -1030,9 +1035,8 @@ stranding the conversation on an empty :bare-metal instantiation."
             (agent-repl--initialize-ws-env "ws")
             ;; Assert
             (should (eq (agent-repl--ws-get "ws" :active-env) :bare-metal))
-            (should (equal (agent-repl-instantiation-session-id
-                            (agent-repl--ws-get "ws" :bare-metal))
-                           "sb-id")))
+            (should (agent-repl-instantiation-p
+                     (agent-repl--ws-get "ws" :bare-metal))))
         (delete-directory tmpdir t)))))
 
 (ert-deftest agent-repl-test-initialize-ws-env-fresh-when-no-file ()
@@ -1065,11 +1069,12 @@ stranding the conversation on an empty :bare-metal instantiation."
             (clrhash agent-repl--workspaces)
             (agent-repl--ws-put "ws" :project-dir tmpdir)
             (agent-repl--initialize-ws-env "ws")
-            ;; :active-env and the env's session id survive the restart
+            ;; :active-env survives the restart; the vendor uuid deliberately
+            ;; does NOT — Emacs asks the daemon to CONTINUE and the daemon
+            ;; decides which conversation that is.
             (should (eq (agent-repl--ws-get "ws" :active-env) :bare-metal))
-            (should (equal (agent-repl-instantiation-session-id
-                            (agent-repl--ws-get "ws" :bare-metal))
-                           "bm1")))
+            (should-not (agent-repl-instantiation-session-id
+                         (agent-repl--ws-get "ws" :bare-metal))))
         (delete-directory tmpdir t)))))
 
 (ert-deftest agent-repl-test-initialize-ws-env-restores-source-ws-dir ()
@@ -1289,7 +1294,6 @@ silently start round-tripping back onto disk."
                 :session-id "abc"
                 :start-cmd "claude --resume"))
          (plist (agent-repl--instantiation-to-plist inst)))
-    (should (equal plist '(:session-id "abc")))
     (should-not (plist-member plist :start-cmd))))
 
 ;;;; ---- Tests: make-instantiation-from-plist edge cases ----
@@ -1364,7 +1368,7 @@ whatever the workspace plist happens to carry."
       (agent-repl--ws-put "ws" :bare-metal
                            (make-agent-repl-instantiation :session-id "b1"))
       (let ((state (agent-repl--collect-env-state "ws")))
-        (should (equal (plist-get state :bare-metal) '(:session-id "b1")))
+        (should (plist-member state :bare-metal))
         (should-not (plist-member state :sandbox))))))
 
 ;;;; ---- Tests: state-save edge cases ----
@@ -1750,3 +1754,65 @@ been killed (both the ws plist and the existing file lack the field)."
 (provide 'test-history)
 
 ;;; test-history.el ends here
+
+;;;; ---- Tests: the state file carries NO vendor conversation id ----
+;;
+;; This is the invariant the whole resume-pointer removal rests on, and it is
+;; asserted against the BYTES on disk rather than against any accessor, because
+;; the failure it guards was a value reaching the file — not a function
+;; returning the wrong thing.
+;;
+;; The history: state.el used to persist the vendor uuid, which made Emacs a
+;; second authority on which conversation a workspace owns. `state-save' takes
+;; the live plist value unconditionally for the env keys (unlike `:created-at'
+;; and its neighbours, which fall back to the previously-persisted value), so
+;; one save while a live session reported no uuid overwrote a good one with
+;; nil — and the next open silently began a FRESH conversation on top of an
+;; intact transcript.
+
+(ert-deftest agent-repl-test-state-file-never-contains-a-vendor-uuid ()
+  "state-save writes NO claude session uuid, even with one in memory."
+  (agent-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-state-no-uuid-" t)))
+      (unwind-protect
+          (progn
+            ;; Arrange — a workspace whose live instantiation knows its uuid.
+            (agent-repl--ws-put "ws" :project-dir tmpdir)
+            (agent-repl--ws-put "ws" :active-env :bare-metal)
+            (agent-repl--ws-put "ws" :bare-metal
+                                (make-agent-repl-instantiation
+                                 :session-id "e6cb9929-c4bd-4164-b5d1-7fd3bc743bc7"))
+            ;; Act
+            (agent-repl--state-save "ws")
+            ;; Assert — against the raw file contents.
+            (with-temp-buffer
+              (insert-file-contents (agent-repl--state-file tmpdir))
+              (should-not (search-forward "e6cb9929-c4bd-4164-b5d1-7fd3bc743bc7" nil t))))
+        (delete-directory tmpdir t)))))
+
+(ert-deftest agent-repl-test-state-save-cannot-clobber-a-persisted-uuid ()
+  "A save over an OLD state file drops its uuid rather than rewriting one.
+The pre-migration file on disk still names a conversation; the point is that
+after this save nothing does, so no stale pointer can outlive the change."
+  (agent-repl-test--with-clean-state
+    (let ((tmpdir (make-temp-file "test-state-migrate-uuid-" t)))
+      (unwind-protect
+          (progn
+            ;; Arrange — the shape a pre-migration Emacs left behind.
+            ;; :project-dir must be tmpdir: initialize-ws-env restores it from
+            ;; the file, and a different value would send the save elsewhere
+            ;; and leave this assertion reading the untouched original.
+            (agent-repl--write-sexp-file
+             (agent-repl--state-file tmpdir)
+             `(:project-dir ,tmpdir
+               :active-env :bare-metal
+               :bare-metal (:session-id "35af6729-a618-4a00-8af0-2618381812e4")))
+            (agent-repl--ws-put "ws" :project-dir tmpdir)
+            (agent-repl--initialize-ws-env "ws")
+            ;; Act
+            (agent-repl--state-save "ws")
+            ;; Assert
+            (with-temp-buffer
+              (insert-file-contents (agent-repl--state-file tmpdir))
+              (should-not (search-forward "35af6729-a618-4a00-8af0-2618381812e4" nil t))))
+        (delete-directory tmpdir t)))))

@@ -44,7 +44,6 @@
 (declare-function agent-repl--ws-name-for-dir "agent-repl-workspace" (dir))
 (declare-function agent-repl--ensure-frontend-daemon "agent-repl-daemon" (&optional force))
 (declare-function agent-repl--resolve-current-git-root "agent-repl-core" ())
-(declare-function agent-repl--ws-durable-claude-session-id "agent-repl-core" (ws))
 (declare-function agent-repl--initialize-ws-env "agent-repl-session" (ws &optional project-dir-hint active-env-hint))
 (declare-function agent-repl--frontend-sync-webview "agent-repl-frontend" (ws session-id))
 (declare-function agent-repl--frontend-snap-webview-to-tail "agent-repl-frontend" (ws))
@@ -475,8 +474,8 @@ unreachable, or has no recorded id."
     (message "agent-repl: %s session %s is healthy" ws session-id)
     t))
 
-(defun agent-repl--frontend-create-handle-rejection (cwd model resume force-fresh err)
-  "Handle a REJECTED `createSession' for CWD; MODEL/RESUME were the request.
+(defun agent-repl--frontend-create-handle-rejection (cwd model explicit-id force-fresh err)
+  "Handle a REJECTED `createSession' for CWD; MODEL/EXPLICIT-ID were the request.
 ERR is the `CommandAck' error string.  When it names a missing resume
 transcript (the daemon's §2.10 resume-viability hard-fail, whose message
 contains \"has no transcript\"), reproduce the lost-transcript behavior:
@@ -484,22 +483,29 @@ FORCE-FRESH recreates with no resume; otherwise open an investigation
 workspace and re-raise `agent-repl-resume-transcript-missing'.  Any other
 rejection is a loud error.
 
+ONLY AN `explicit\=' CREATE CAN REACH THE LOST-TRANSCRIPT ARM, and that is a
+property of the new resolution rather than a coincidence: a `continue\='
+create names no conversation, and the daemon\'s resolver stats the
+transcript before choosing one, so it can only ever hand back a
+conversation that exists.  A caller that NAMED a conversation is the only
+one that can name a missing one.
+
 NOTE (frontend.v1 constraint): a `CommandAck' carries only an error
 STRING, not the structured `searched_paths' the old HTTP 422 body did, so
 the investigation is dispatched with the resume id alone (nil paths)."
-  (if (and (stringp err) resume (string-match-p "has no transcript" err))
+  (if (and (stringp err) explicit-id (string-match-p "has no transcript" err))
       (progn
         (agent-repl--log (agent-repl--ws-name-for-dir cwd)
                          "createSession REJECTED for %s: resume %s transcript missing (%s)"
-                         cwd resume err)
+                         cwd explicit-id err)
         (if force-fresh
-            (agent-repl--frontend-force-fresh-on-lost-transcript cwd model resume)
-          (let ((ws-name (agent-repl--dispatch-resume-investigation resume nil cwd)))
+            (agent-repl--frontend-force-fresh-on-lost-transcript cwd model explicit-id)
+          (let ((ws-name (agent-repl--dispatch-resume-investigation explicit-id nil cwd)))
             (signal 'agent-repl-resume-transcript-missing
                     (list (format (concat "resume target %s has no transcript — refusing a fresh "
                                           "conversation; opened investigation workspace `%s'")
-                                  resume ws-name)
-                          resume ws-name)))))
+                                  explicit-id ws-name)
+                          explicit-id ws-name)))))
     ;; Every other rejection is now an ESTABLISHMENT verdict: the daemon acks a
     ;; create only when the new session's shim answered healthy over the wired
     ;; connection, and a nack names the deepest link that failed or is still
@@ -514,6 +520,24 @@ the investigation is dispatched with the resume id alone (nil paths)."
       (message "agent-repl: session for %s did not come up: %s" cwd reason)
       (error "agent-repl: createSession for %s failed: %s" cwd reason))))
 
+(defconst agent-repl--frontend-resume-modes
+  '((continue . "RESUME_MODE_CONTINUE")
+    (fresh    . "RESUME_MODE_FRESH")
+    (explicit . "RESUME_MODE_EXPLICIT"))
+  "Map of `agent-repl--frontend-create-session' RESUME-MODE to its wire name.
+Deliberately has no entry for the proto's `RESUME_MODE_UNSPECIFIED': that
+value exists so an older peer's absent field reads as `continue', and a
+caller here always knows which of the three it means.")
+
+(defun agent-repl--frontend-resume-mode-wire (mode)
+  "Return the protojson enum name for resume MODE.
+Signals on an unknown MODE rather than defaulting: a typo silently
+becoming `continue' would resume a conversation a caller asked to replace,
+and one silently becoming `fresh' would strand an intact one."
+  (or (alist-get mode agent-repl--frontend-resume-modes)
+      (error "agent-repl: unknown resume mode %S (want one of %S)"
+             mode (mapcar #'car agent-repl--frontend-resume-modes))))
+
 (defun agent-repl--frontend-force-fresh-on-lost-transcript (cwd model resume-id)
   "Degrade a lost-transcript resume for RESUME-ID to a FRESH conversation.
 Invoked by `agent-repl--frontend-create-handle-rejection' when
@@ -525,12 +549,34 @@ lost-transcript hard-fail), and returns the fresh session id."
                    (concat "force-fresh-conversation: lost resume %s overridden — creating a "
                            "fresh conversation in %s (skipping investigation)")
                    resume-id cwd)
-  (agent-repl--frontend-create-session cwd model nil))
+  (agent-repl--frontend-create-session cwd model 'fresh))
 
-(defun agent-repl--frontend-create-session (cwd &optional model resume force-fresh)
+(defun agent-repl--frontend-create-session (cwd &optional model resume-mode explicit-id force-fresh)
   "Create a daemon session rooted at CWD over the UDS `createSession' command;
-return the new session id.  MODEL and RESUME (a durable claude session
-uuid) are optional passthroughs.
+return the new session id.  MODEL is an optional passthrough.
+
+RESUME-MODE says WHICH CONVERSATION to land on, as an INTENT rather than a
+pointer.  It is one of:
+
+  `continue' (the default, and what nil means) — continue this workspace's
+             conversation, whichever one that is.  The DAEMON resolves it.
+  `fresh'    — deliberately begin a new conversation even though a
+             resumable one exists.
+  `explicit' — land on the conversation named by EXPLICIT-ID.  Reserved for
+             a human choosing among conversations (a picker, a fork).
+
+EXPLICIT-ID is meaningful ONLY under `explicit', and the daemon refuses a
+create that carries it under any other mode.
+
+EMACS DOES NOT KNOW VENDOR CONVERSATION IDS, and must not learn them.  It
+used to: each workspace persisted the claude session uuid in its state.el
+and handed it back here at boot, which made Emacs a second and weaker
+authority on a question the daemon answers exactly — it holds the registry,
+the conversation checkpoints, and the transcripts on disk, while Emacs held
+one remembered string and hoped.  When that string went missing, five
+workspaces silently opened FRESH conversations on top of fully intact
+transcripts, because \"I have no pointer\" and \"start me fresh\" were the
+same thing on the wire.  They are different values now.
 
 The daemon's `createSession' `CommandAck' is a BARE RECEIPT (it carries no
 session id); the id arrives on a pushed `SessionView' whose workspace is
@@ -577,9 +623,15 @@ inherited."
          (config-dir (plist-get posture :config-dir))
          (permission-mode (plist-get posture :permission-mode))
          (allow-ungated (plist-get posture :allow-ungated))
-         (payload (append (list :cwd cwd)
+         (resume-mode (or resume-mode 'continue))
+         (payload (append (list :cwd cwd
+                                :resumeMode (agent-repl--frontend-resume-mode-wire resume-mode))
                           (when model (list :model model))
-                          (when resume (list :resumeClaudeSessionId resume))
+                          ;; Only ever sent under `explicit'; the daemon
+                          ;; REFUSES a create that names a conversation under
+                          ;; any other mode rather than ignoring it quietly.
+                          (when (eq resume-mode 'explicit)
+                            (list :explicitClaudeSessionId explicit-id))
                           (when config-dir (list :configDir config-dir))
                           (when permission-mode
                             (list :permissionMode permission-mode))
@@ -592,8 +644,10 @@ inherited."
          (ack (list :done nil :ok nil :error nil)))
     (agent-repl--log
      ws
-     "createSession: begin cwd=%s model=%s resume=%s config-dir=%s permission-mode=%s allow-ungated=%s force-fresh=%s"
-     cwd (or model "none") (or resume "none") (or config-dir "CLI-default")
+     "createSession: begin cwd=%s model=%s resume-mode=%s explicit-id=%s config-dir=%s permission-mode=%s allow-ungated=%s force-fresh=%s"
+     cwd (or model "none") resume-mode
+     (if (eq resume-mode 'explicit) (or explicit-id "MISSING") "n/a")
+     (or config-dir "CLI-default")
      (or permission-mode "SDK-default") allow-ungated force-fresh)
     ;; Send + await the ack UNDER the in-flight guard, but handle the OUTCOME
     ;; after releasing it: the force-fresh rejection branch recreates the SAME
@@ -634,12 +688,12 @@ inherited."
         (unless id
           (agent-repl--log ws "createSession: ACKED_WITHOUT_SESSION_VIEW cwd=%s" cwd)
           (error "agent-repl: createSession for %s acked but no SessionView arrived" cwd))
-        (agent-repl--log ws "createSession: cwd=%s -> session %s (resume=%s)"
-                         cwd id (or resume "none"))
+        (agent-repl--log ws "createSession: cwd=%s -> session %s (resume-mode=%s)"
+                         cwd id resume-mode)
         id))
      (t
       (agent-repl--frontend-create-handle-rejection
-       cwd model resume force-fresh (plist-get ack :error))))))
+       cwd model explicit-id force-fresh (plist-get ack :error))))))
 
 (defun agent-repl--frontend-delete-session (id &optional ws)
   "Send a `deleteSession' UDS command for session ID; return the request-id.
@@ -768,20 +822,21 @@ contract)."
         (unless (agent-repl--ws-get ws :active-env)
           (agent-repl--log ws "ensure-session: initializing environment cwd=%s" dir)
           (agent-repl--initialize-ws-env ws dir))
-        ;; Resume the workspace's durable claude session so a
-        ;; recreated daemon binding (daemon restart, Emacs restart,
-        ;; panel close/reopen) CONTINUES the conversation — the
-        ;; frontend is presentation, the session is the shared backend.
-        ;; nil (no session ever recorded) starts fresh.
-        (let* ((resume (agent-repl--ws-durable-claude-session-id ws))
-               (id (agent-repl--frontend-create-session
-                    dir (agent-repl--ws-get ws :model) resume)))
+        ;; CONTINUE the workspace's conversation so a recreated daemon
+        ;; binding (daemon restart, Emacs restart, panel close/reopen)
+        ;; picks up where it left off — the frontend is presentation, the
+        ;; session is the shared backend.  WHICH conversation that is, and
+        ;; whether one exists at all, is the daemon's to decide: it holds
+        ;; the registry and the transcripts, and Emacs deliberately holds
+        ;; no pointer it could get wrong.
+        (let ((id (agent-repl--frontend-create-session
+                   dir (agent-repl--ws-get ws :model) 'continue)))
           (agent-repl--ws-put ws :frontend-session-id id)
           (agent-repl--ws-put ws :reattach-failed nil)
           (agent-repl--ws-put ws :reattach-failures nil)
           (agent-repl--frontend-reattach-timer-start)
-          (agent-repl--log ws "frontend session created: %s (cwd=%s resume=%s)"
-                           id dir (or resume "none"))
+          (agent-repl--log ws "frontend session created: %s (cwd=%s resume-mode=continue)"
+                           id dir)
           id)))))
 
 ;;;; ---- Daemon-bounce resilience: the reattach loop -----------------------
@@ -1140,7 +1195,7 @@ the subsequent open attaches to the continued conversation."
   (let* ((dir (or (agent-repl--ws-get ws :project-dir)
                   (agent-repl--resolve-current-git-root)))
          (id (agent-repl--frontend-create-session
-              dir (agent-repl--ws-get ws :model) claude-session-id)))
+              dir (agent-repl--ws-get ws :model) 'explicit claude-session-id)))
     (agent-repl--ws-put ws :frontend-session-id id)
     (agent-repl--log ws "gui adopted claude session %s as %s" claude-session-id id)
     id))
@@ -1161,7 +1216,7 @@ discarded one."
   (let* ((dir (or (agent-repl--ws-get ws :project-dir)
                   (agent-repl--resolve-current-git-root)))
          (id (agent-repl--frontend-create-session
-              dir (agent-repl--ws-get ws :model) nil)))
+              dir (agent-repl--ws-get ws :model) 'fresh)))
     (agent-repl--ws-put ws :frontend-session-id id)
     (agent-repl--ws-put ws :reattach-failed nil)
     (agent-repl--ws-put ws :reattach-failures nil)
