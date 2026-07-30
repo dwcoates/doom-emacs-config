@@ -105,8 +105,17 @@ remains valid across daemon reconnects and is not duplicated onto
 ## Emission behavior
 
 Each runtime exposes one canonical API with normal and verbose public emission
-functions. Both functions use the same durable JSONL sink. Verbose controls
-terminal or console visibility only and never changes persistence.
+functions. Normal records use the runtime's canonical durable JSONL sink.
+Workspace-owned runtimes persist verbose records to that same sink while their
+verbose setting controls only terminal or console visibility.
+
+The global `shim-store` and `shim-claude-sidecar` services are different:
+`AGENT_REPL_LOG_VERBOSE` is a process-startup gate for both persistence and
+terminal emission of verbose records. Their global sinks have no workspace
+cap, so persisting hot successful per-event, per-batch, per-heartbeat, or
+per-file diagnostics while verbose mode is disabled is forbidden. Normal
+records continue to persist lifecycle transitions, invariant violations,
+bounded summaries, and owned failures.
 
 Every OS-process record includes the emitting process's `pid`. Multiple shim
 processes may share one workspace `shim.log`; `pid` and session identifiers

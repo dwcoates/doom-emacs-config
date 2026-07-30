@@ -60,7 +60,10 @@ Dependencies: `proto/agentshim/` (generated Go), SQLite.
   meaningful branch that selects a different nontrivial block, call, state
   transition, or outcome logs its selection.
 - The normal helper persists and emits to the terminal. The verbose helper
-  always persists and gates terminal output through the store verbose setting.
+  emits to neither sink unless `AGENT_REPL_LOG_VERBOSE` enabled verbose mode at
+  process startup. This gate is load-bearing for the singleton global log:
+  successful per-batch, heartbeat, replay-query, and connection diagnostics
+  are high-volume and must not consume durable space in normal operation.
 - Each error is logged exactly once by its owning layer with database path,
   table, session, producer or subscriber, transaction, operation, branch
   outcome, and cause. Error-path tests assert the canonical record and context.

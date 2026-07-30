@@ -661,9 +661,9 @@ func (w channelWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func collectLogs(capacity int) (*logging.Logger, func() []string) {
+func collectLogs(capacity int, verbose bool) (*logging.Logger, func() []string) {
 	lines := make(chan string, capacity)
-	logf := logging.New(channelWriter(lines), io.Discard, false)
+	logf := logging.New(channelWriter(lines), io.Discard, verbose)
 	drain := func() []string {
 		var out []string
 		for {
@@ -717,9 +717,9 @@ func findLoggedRecord(t *testing.T, logs []byte, operation, level string) (logge
 	return loggedRecord{}, false
 }
 
-func TestIngestLineLogsBatchFacts(t *testing.T) {
+func TestIngestVerboseLineLogsBatchFacts(t *testing.T) {
 	// Arrange
-	logf, drain := collectLogs(64)
+	logf, drain := collectLogs(64, true)
 	h := start(t, 0, logf)
 	prod := h.dial(t)
 
@@ -735,9 +735,9 @@ func TestIngestLineLogsBatchFacts(t *testing.T) {
 	}
 }
 
-func TestIngestLineSilentForEphemeralOnlyBatch(t *testing.T) {
+func TestIngestVerboseLineSilentForEphemeralOnlyBatch(t *testing.T) {
 	// Arrange
-	logf, drain := collectLogs(64)
+	logf, drain := collectLogs(64, true)
 	h := start(t, 0, logf)
 	prod := h.dial(t)
 
@@ -750,6 +750,19 @@ func TestIngestLineSilentForEphemeralOnlyBatch(t *testing.T) {
 	// Assert: no ingest line for a batch that never touched the DB.
 	if got := findLine(drain(), "ingest"); got != "" {
 		t.Fatalf("ephemeral-only batch logged %q, want silence", got)
+	}
+}
+
+func TestIngestSuccessSilentWhenVerboseDisabled(t *testing.T) {
+	logf, drain := collectLogs(64, false)
+	h := start(t, 0, logf)
+	prod := h.dial(t)
+
+	send(t, prod, write(vAssistantStream(t, "s1", "A")))
+	recvAck(t, prod)
+
+	if got := findLine(drain(), "ingest"); got != "" {
+		t.Fatalf("non-verbose ingest success logged %q, want silence", got)
 	}
 }
 

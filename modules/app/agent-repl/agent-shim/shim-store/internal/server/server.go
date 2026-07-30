@@ -473,11 +473,11 @@ func (s *Server) ingestAndFan(sw *corev1.StoreWrite) (*corev1.StoreWriteAck, boo
 	// other batch's correctness depends on it.
 	s.ingestMu.Unlock()
 
-	// One line per persisted batch, so the store hop of the prompt round trip is
-	// visible end to end. Ephemeral-only batches (and heartbeats) stay silent;
-	// this line also carries what the old dedup-only line reported.
+	// Successful persisted batches are high-frequency session narration rather
+	// than lifecycle or failure evidence. Keep their detailed outcome available
+	// in verbose mode without growing the normal global service log.
 	if len(persistent) > 0 {
-		s.log.Log(logging.Fields{
+		s.log.LogVerbose(logging.Fields{
 			Operation: "ingest", Producer: sw.GetProducer(), Session: persistent[0].GetSessionId(),
 		}, "persisted batch events=%d accepted=%d deduped=%d last_seq=%d ingest_ms=%d",
 			len(persistent), res.Accepted, res.Deduped, res.LastSeq, ingestMs)
