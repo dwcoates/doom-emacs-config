@@ -17,7 +17,11 @@ import {
 import { AgentClock } from "./agent-clock.js";
 import { AGENTS_SPEC, sessionSubagents } from "./agents.js";
 import { TASKS_SPEC } from "./tasks.js";
-import { ProgressFooter, footerClickAction } from "./progress-footer.js";
+import {
+  ProgressFooter,
+  alreadyCompletePhaseViolation,
+  footerClickAction,
+} from "./progress-footer.js";
 import {
   type CounterSpec,
   MISSING_BUBBLE_NOTICE_MS,
@@ -428,6 +432,7 @@ async function boot(): Promise<void> {
     if (slot) slot.textContent = label;
   });
 
+  let lastFooterStateSignature = "";
   const renderChrome = (): void => {
     const s = store.state;
     // topbarInfoHtml escapes every value it interpolates. The same strip
@@ -458,6 +463,37 @@ async function boot(): Promise<void> {
       items: s.items,
       timerLabel,
     });
+    const interruptOutcome = store.progress?.interrupt?.outcome ?? "none";
+    const footerStateSignature = `${s.renderState ?? "none"}|${interruptOutcome}`;
+    if (footerStateSignature !== lastFooterStateSignature) {
+      clog(
+        "info",
+        `footer state rendered phase=${s.renderState ?? "none"} ` +
+          `interrupt_outcome=${interruptOutcome} session=${s.sessionId}`,
+        {
+          phase: s.renderState ?? "none",
+          interrupt_outcome: interruptOutcome,
+          session_id: s.sessionId,
+        },
+      );
+      lastFooterStateSignature = footerStateSignature;
+    }
+    const activeViolation = alreadyCompletePhaseViolation(
+      s.renderState,
+      store.progress?.interrupt?.outcome ?? null,
+    );
+    if (activeViolation !== null) {
+      clog(
+        "error",
+        `INVARIANT VIOLATION: footer rendered already_complete beside active phase=${activeViolation} ` +
+          `session=${s.sessionId}`,
+        {
+          phase: activeViolation,
+          interrupt_outcome: interruptOutcome,
+          session_id: s.sessionId,
+        },
+      );
+    }
     // After the footer exists, so the paint on a starting turn has a span to
     // land in. Only the edges of a turn touch the interval.
     timer.sync(s.turnStartedAt);

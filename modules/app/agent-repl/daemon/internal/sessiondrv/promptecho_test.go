@@ -2,6 +2,8 @@ package sessiondrv
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
@@ -80,6 +82,62 @@ func TestDirectSubmitPushesTheReceiptKeyedOnItsRequestID(t *testing.T) {
 	}
 	if got := turns[0].item.GetUserMessage().GetContentString(); got != "hello there" {
 		t.Errorf("receipt text = %q, want the submitted prompt", got)
+	}
+}
+
+func TestPromptThinkingPublicationPrecedesReceipt(t *testing.T) {
+	// Arrange: clear any bring-up pushes so this trace names only the prompt's
+	// critical path.
+	h := newQueueHarness(t, nil)
+	h.push.mu.Lock()
+	h.push.trace = nil
+	h.push.mu.Unlock()
+
+	// Act.
+	if err := h.submitAs("r1", "hello there"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+
+	// Assert: one synchronous state publication must precede the local prompt
+	// delta. Separate per-kind slices could prove both happened but not order;
+	// this shared trace makes the invariant executable.
+	h.push.mu.Lock()
+	trace := append([]string(nil), h.push.trace...)
+	h.push.mu.Unlock()
+	want := []string{"workspace:RENDER_STATE_THINKING", "conversation"}
+	if len(trace) != len(want) || trace[0] != want[0] || trace[1] != want[1] {
+		t.Fatalf("frontend push trace = %v, want %v", trace, want)
+	}
+}
+
+func TestPromptStatePublicationFailureWithholdsReceipt(t *testing.T) {
+	// Arrange: the shim accepts the prompt, but the SSM cannot establish the
+	// state premise required by a prompt bubble.
+	h := newQueueHarness(t, nil)
+	h.applier.promptAcceptErr = errors.New("state database unavailable")
+	h.push.mu.Lock()
+	h.push.trace = nil
+	h.push.mu.Unlock()
+
+	// Act.
+	err := h.submitAs("r1", "hello there")
+
+	// Assert: fail loudly after the external acceptance and expose no dependent
+	// local frame. The durable stream may still repair/report the prompt.
+	if err == nil || !strings.Contains(err.Error(), "synchronous state publication failed") {
+		t.Fatalf("submit error = %v, want synchronous-publication failure", err)
+	}
+	h.push.mu.Lock()
+	trace := append([]string(nil), h.push.trace...)
+	h.push.mu.Unlock()
+	if len(trace) != 0 {
+		t.Fatalf("frontend push trace = %v, want no state-dependent local frames", trace)
+	}
+	if got := h.client.promptTexts(); len(got) != 1 || got[0] != "hello there" {
+		t.Fatalf("shim submissions = %q, want the already-accepted prompt", got)
+	}
+	if active, activeErr := h.m.TurnActive("ws"); activeErr != nil || !active {
+		t.Fatalf("TurnActive after accepted prompt whose state publication failed = (%v, %v), want true/nil so a later prompt cannot bypass the live turn", active, activeErr)
 	}
 }
 

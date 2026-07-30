@@ -21,6 +21,7 @@ import (
 // fakePusher records every frontend push for assertions.
 type fakePusher struct {
 	mu         sync.Mutex
+	trace      []string
 	convo      []*frontendv1.ConversationDelta
 	typing     []*frontendv1.TypingDelta
 	catalog    []*frontendv1.TaskCatalog
@@ -32,6 +33,7 @@ type fakePusher struct {
 
 func (p *fakePusher) PushConversationDelta(c *frontendv1.ConversationDelta) {
 	p.mu.Lock()
+	p.trace = append(p.trace, "conversation")
 	p.convo = append(p.convo, c)
 	p.mu.Unlock()
 }
@@ -47,6 +49,7 @@ func (p *fakePusher) PushTaskCatalog(c *frontendv1.TaskCatalog) {
 }
 func (p *fakePusher) PushWorkspaceState(w *frontendv1.WorkspaceState) {
 	p.mu.Lock()
+	p.trace = append(p.trace, "workspace:"+w.GetState().String())
 	p.state = append(p.state, w)
 	p.mu.Unlock()
 }
@@ -133,6 +136,15 @@ type fakeApplier struct {
 	// the transport-level miss that used to reach no state axis at all.
 	degradations []degradedCall
 	degradedErr  error
+	// promptAccepts records daemon-local prompt-accept edges, which close the
+	// bubble-before-thinking race before command completion.
+	promptAccepts   []promptAcceptCall
+	promptAcceptErr error
+	// alreadyCompletes records the reconciliation that must precede an
+	// ALREADY_COMPLETE footer window.
+	alreadyCompletes   []alreadyCompleteCall
+	alreadyCompleteDid bool
+	alreadyCompleteErr error
 	// interruptMarks records one workspace per MarkTurnInterrupted call — the
 	// user-commanded stops that will paint their turn's end `interrupted`.
 	interruptMarks   []string
@@ -209,6 +221,17 @@ type degradedCall struct {
 	reason    string
 }
 
+type promptAcceptCall struct {
+	workspace string
+	sessionID string
+	requestID string
+}
+
+type alreadyCompleteCall struct {
+	workspace string
+	sessionID string
+}
+
 func (f *fakeApplier) ApplyBackfillState(workspace, state string) error {
 	f.reconcMutex.Lock()
 	defer f.reconcMutex.Unlock()
@@ -221,6 +244,37 @@ func (f *fakeApplier) ApplyConnectionDegraded(workspace string, degraded bool, r
 	defer f.reconcMutex.Unlock()
 	f.degradations = append(f.degradations, degradedCall{workspace: workspace, degraded: degraded, reason: reason})
 	return f.degradedErr
+}
+
+func (f *fakeApplier) MarkPromptAccepted(
+	workspace, sessionID, requestID string,
+	publish func(*frontendv1.WorkspaceState),
+) error {
+	f.reconcMutex.Lock()
+	f.promptAccepts = append(f.promptAccepts, promptAcceptCall{
+		workspace: workspace, sessionID: sessionID, requestID: requestID,
+	})
+	err := f.promptAcceptErr
+	f.reconcMutex.Unlock()
+	if err == nil {
+		publish(&frontendv1.WorkspaceState{
+			Workspace:  workspace,
+			SessionId:  sessionID,
+			State:      frontendv1.RenderState_RENDER_STATE_THINKING,
+			TurnActive: true,
+			CauseKind:  "prompt_accepted",
+		})
+	}
+	return err
+}
+
+func (f *fakeApplier) ReconcileAlreadyComplete(workspace, sessionID string) (bool, error) {
+	f.reconcMutex.Lock()
+	defer f.reconcMutex.Unlock()
+	f.alreadyCompletes = append(f.alreadyCompletes, alreadyCompleteCall{
+		workspace: workspace, sessionID: sessionID,
+	})
+	return f.alreadyCompleteDid, f.alreadyCompleteErr
 }
 
 // MarkTurnInterrupted records the workspaces whose running turn a

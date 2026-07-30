@@ -368,6 +368,17 @@ func TestSubmitPromptBringsUpAndSends(t *testing.T) {
 	if fc.origins[0] != "frontend" {
 		t.Errorf("origin: got %q, want frontend", fc.origins[0])
 	}
+	applier := m.cfg.SSM.(*fakeApplier)
+	if len(applier.promptAccepts) != 1 {
+		t.Fatalf("prompt accepted edges = %+v, want exactly one", applier.promptAccepts)
+	}
+	gotEdge := applier.promptAccepts[0]
+	if gotEdge.workspace != "ws" || gotEdge.sessionID != "s1" || gotEdge.requestID != "" {
+		t.Fatalf("prompt accepted edge = %+v, want ws/s1/empty-request", gotEdge)
+	}
+	if active, activeErr := m.TurnActive("ws"); activeErr != nil || !active {
+		t.Fatalf("TurnActive after prompt acceptance = (%v, %v), want true/nil", active, activeErr)
+	}
 }
 
 func TestSubmitPromptUnknownWorkspaceErrors(t *testing.T) {
@@ -623,10 +634,12 @@ func TestMetapromptRefireFoldsOncePerResume(t *testing.T) {
 	if err != nil {
 		t.Fatalf("existing: %v", err)
 	}
+	m.onTurnBoundary(d, false)
 	m.armMetaprompt(d, &corev1.SessionStarted{Source: corev1.SessionSource_SESSION_SOURCE_RESUME, Cwd: cwd})
 
 	// Act: the NEXT two prompts.
 	_ = m.SubmitPrompt(context.Background(), "ws", "", "second", "")
+	m.onTurnBoundary(d, false)
 	_ = m.SubmitPrompt(context.Background(), "ws", "", "third", "")
 
 	// Assert: exactly the "second" prompt carries the directive; "third" does not.
@@ -690,6 +703,40 @@ func TestInterruptReportsNoErrorWhenTheTurnHadAlreadyEnded(t *testing.T) {
 	// Assert.
 	if err != nil {
 		t.Fatalf("Interrupt(ALREADY_COMPLETE) = %v, want nil; a no-op stop is success", err)
+	}
+	applier := m.cfg.SSM.(*fakeApplier)
+	if len(applier.alreadyCompletes) != 1 ||
+		applier.alreadyCompletes[0] != (alreadyCompleteCall{workspace: "ws", sessionID: "s1"}) {
+		t.Fatalf("already-complete reconciliations = %+v, want ws/s1 exactly once", applier.alreadyCompletes)
+	}
+	if active, activeErr := m.TurnActive("ws"); activeErr != nil || active {
+		t.Fatalf("TurnActive after ALREADY_COMPLETE = (%v, %v), want false/nil", active, activeErr)
+	}
+}
+
+func TestAlreadyCompleteWithholdsFooterWindowWhenStateReconciliationFails(t *testing.T) {
+	// Arrange — the shim can truthfully answer ALREADY_COMPLETE while the
+	// state database fails. Publishing the footer chip then would recreate the
+	// contradiction this path exists to prevent.
+	m, lastClient := newTestManager(t, fakeLocator{m: map[string]string{"ws": "s1"}}, &fakeSpawner{})
+	progress := &fakeProgress{}
+	m.cfg.Progress = progress
+	if err := m.SubmitPrompt(context.Background(), "ws", "", "hello", ""); err != nil {
+		t.Fatalf("SubmitPrompt: %v", err)
+	}
+	applier := m.cfg.SSM.(*fakeApplier)
+	applier.alreadyCompleteErr = errors.New("state write failed")
+	lastClient().interruptOutcome = corev1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE
+
+	// Act.
+	err := m.Interrupt(context.Background(), "ws")
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "state write failed") {
+		t.Fatalf("Interrupt error = %v, want reconciliation failure", err)
+	}
+	if notes := progress.interruptNotes(); len(notes) != 0 {
+		t.Fatalf("interrupt windows = %+v, want none when state reconciliation failed", notes)
 	}
 }
 

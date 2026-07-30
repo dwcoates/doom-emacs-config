@@ -54,6 +54,7 @@
 ;; before it reaches a log call.  The raw wire value stays in the message
 ;; TEXT so an operator can still correlate an unowned path.
 (declare-function agent-repl--frontend-ws-name "frontend-state" (workspace))
+(declare-function agent-repl--frontend-invalidate-daemon-view "frontend-state" (reason))
 
 ;;;; ---- Configuration ---------------------------------------------------
 
@@ -317,6 +318,10 @@ Returns the process on success, nil on a failed dial."
                      (process-name agent-repl--uds-process))
     (cl-return-from agent-repl-uds-connect agent-repl--uds-process))
   (let ((sock (or path agent-repl-uds-socket-path)))
+    ;; A connected socket is not a ready daemon until THIS connection's
+    ;; snapshot lands. Retaining the previous DaemonView let wait-ready return
+    ;; immediately and made restart preflight read stale state stores.
+    (agent-repl--frontend-invalidate-daemon-view "uds-connect-new-dial")
     (setq agent-repl--uds-read-accumulator "")
     (agent-repl--log nil "uds-connect: dialing %s" sock)
     (condition-case err

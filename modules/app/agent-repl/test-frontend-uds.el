@@ -291,6 +291,19 @@ FIELD-JSON is the already-serialized `\"field\": {...}' body."
         ;; Assert
         (should (equal dialed "/tmp/configured.sock"))))))
 
+(ert-deftest agent-repl-test-uds-new-dial-invalidates-prior-daemon-view ()
+  "A new socket cannot satisfy readiness with the previous connection's view."
+  (agent-repl-test--with-uds
+    (let ((agent-repl--frontend-last-daemon-view '(:bootId "old-boot")))
+      (cl-letf (((symbol-function 'agent-repl--uds-connect)
+                 (lambda (&rest _) 'fake-proc))
+                ((symbol-function 'process-live-p)
+                 (lambda (p) (eq p 'fake-proc)))
+                ((symbol-function 'process-name) (lambda (_p) "fake"))
+                ((symbol-function 'process-status) (lambda (_p) 'open)))
+        (agent-repl-uds-connect "/tmp/test.sock")
+        (should-not agent-repl--frontend-last-daemon-view)))))
+
 (ert-deftest agent-repl-test-uds-connect-already-connected-is-noop ()
   "Connect while already connected returns the existing process, no re-dial."
   ;; Arrange
