@@ -1,6 +1,6 @@
 ---
 name: debug-emacs-agent-repl
-description: Investigate the agent-repl system across Emacs, daemon, shim, webapp, sidecar, store, state, deployment, logging, and test coverage. Use for current or historical workspace failures, wrong colors or stuck states, missing conversation data, service-health questions, source-versus-running readiness, workspace/session/process correlation, structured-log analysis, SSM or store SQL investigation, coverage questions, and missing telemetry.
+description: Investigate the agent-repl system across Emacs, daemon, shim, webapp, sidecar, store, state, deployment, logging, and test coverage. Use for current or historical workspace failures, wrong colors or stuck states, missing conversation data, service-health questions, source-versus-running readiness, workspace/session/process correlation, structured-log analysis, SSM or store SQL investigation, coverage questions, missing telemetry, and iterative critical-path instrumentation, reload, reproduction, and log-analysis loops.
 ---
 
 # Debug agent-repl
@@ -42,22 +42,34 @@ Write a short internal investigation brief before opening evidence:
 Do not invent missing identifiers. Resolve them through
 `references/identity-correlation.md`.
 
-### 2. Select the initial playbooks
+### 2. Select the initial runbooks
 
 Read every selected reference completely before following its workflow.
 Select the smallest set that can answer the case, but compose references when
 the symptom crosses planes.
 
-| Investigative question | Read first | Common companions |
-|---|---|---|
-| Is a service or socket healthy? | `references/health-and-readiness.md` | identity, logs |
-| Is deployed or running code stale? | `references/health-and-readiness.md` | logs |
-| Which workspace, session, or process is this? | `references/identity-correlation.md` | logs |
-| What happened across runtimes? | `references/structured-logs.md` | identity |
-| Why is a workspace this color or state? | `references/state-investigation.md` | identity, logs |
-| Why is conversation data missing or malformed? | `references/conversation-investigation.md` | identity, logs, health |
-| What tests or coverage exercise this path? | `references/testing-coverage.md` | observability |
-| Is the evidence itself inadequate? | `references/observability-gaps.md` | the active playbooks |
+| Runbook | Investigative question | Read first | Common companions |
+|---|---|---|---|
+| Health and readiness | Is a service, socket, deployed artifact, or running process healthy and current? | `references/health-and-readiness.md` | identity, logs |
+| Identity correlation | Which workspace, session, process, connection, or request is this? | `references/identity-correlation.md` | logs |
+| Structured logs | What happened across runtimes and in what order? | `references/structured-logs.md` | identity |
+| State investigation | Why is a workspace this color or state? | `references/state-investigation.md` | identity, logs |
+| Conversation investigation | Why is conversation data missing or malformed? | `references/conversation-investigation.md` | identity, logs, health |
+| Testing and coverage | What tests or coverage exercise this path? | `references/testing-coverage.md` | observability |
+| Observability gaps | Is the evidence itself adequate for a diagnosis? | `references/observability-gaps.md` | the active runbooks |
+| Critical-path observability loop | Must the path be instrumented, reloaded, provoked, and inspected iteratively to expose and verify the bug? | `references/critical-path-observability-loop.md` | logs, observability, testing |
+
+Apply an ambiguity gate before choosing:
+
+1. If exactly one runbook unambiguously matches, select it and continue.
+2. If two or more runbooks plausibly fit, the symptom crosses strategies, or
+   the best starting strategy is uncertain, stop before selecting or running
+   diagnostics.
+3. Surface the plausible runbooks to the user. For each, state in one line
+   what question it answers, which runtime or evidence plane it touches, and
+   whether it is read-only or may require source or runtime mutation.
+4. Ask the user to select the starting runbook or combination. Wait for that
+   selection; do not silently choose a primary runbook or companion set.
 
 For an unexplained live or historical runtime failure, begin with health,
 readiness, and identity before narrowing to a data source. For a pure
@@ -84,7 +96,8 @@ component healthy or ready.
 ### 4. Follow and revise the evidence plan
 
 Keep facts, inferences, and missing evidence distinct. When a finding points
-to another plane, add that plane's playbook and state why. Do not load every
+to another plane, add that plane's runbook and state why. Apply the ambiguity
+gate again when more than one next runbook is plausible. Do not load every
 reference merely because it exists.
 
 Use `/runtime-eval-code` when the needed fact exists only inside the live Emacs
