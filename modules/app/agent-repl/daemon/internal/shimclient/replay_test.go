@@ -229,6 +229,28 @@ func TestReplayHonorsTheCallersDeadline(t *testing.T) {
 	}
 }
 
+func TestReplayPreservesTheCallersActivityTimeoutCause(t *testing.T) {
+	// Arrange: the session driver owns the no-progress verdict and carries
+	// counts plus seq range in its cancellation cause. Replay must not flatten
+	// that evidence to context.Canceled.
+	idleCause := errors.New("history replay idle after delivered=512 first_seq=1 last_seq=512")
+	ctx, cancel := context.WithCancelCause(context.Background())
+	rig := newReplayRig(t, func(_ net.Conn, _ *corev1.ReplayRequest) {
+		cancel(idleCause)
+	})
+
+	// Act
+	res, err := rig.client.Replay(ctx, 0, 999, 0, func(*corev1.Event) {})
+
+	// Assert
+	if !errors.Is(err, idleCause) {
+		t.Fatalf("err=%v, want caller's activity-timeout cause", err)
+	}
+	if !res.Truncated || res.Reason != idleCause.Error() {
+		t.Fatalf("result=%+v, want truncated with preserved activity cause", res)
+	}
+}
+
 func TestReplayFailsWhenTheShimConnectionDrops(t *testing.T) {
 	// Arrange — a replay whose shim went away is never going to finish;
 	// leaving the caller blocked would be worse than telling it.

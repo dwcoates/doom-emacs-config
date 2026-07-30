@@ -2,6 +2,7 @@ package db
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"path/filepath"
@@ -39,6 +40,20 @@ func persistentCore(session string) *corev1.Event {
 		Plane:     corev1.Plane_PLANE_STREAM,
 		Payload:   &corev1.Event_SessionStarted{SessionStarted: &corev1.SessionStarted{}},
 	}
+}
+
+// collectReplay materializes a streamed replay only inside tests that need to
+// inspect the complete result. Production has no slice-returning replay API.
+func collectReplay(t *testing.T, d *DB, session string, fromSeq uint64) []*corev1.Event {
+	t.Helper()
+	var events []*corev1.Event
+	if _, err := d.ReplayFrom(context.Background(), session, fromSeq, func(ev *corev1.Event) error {
+		events = append(events, ev)
+		return nil
+	}); err != nil {
+		t.Fatalf("ReplayFrom: %v", err)
+	}
+	return events
 }
 
 // streamAssistant builds a PERSISTENT stream-plane event whose derived dedup
@@ -147,10 +162,7 @@ func TestConcurrentIngestsAssignEverySeqExactlyOnce(t *testing.T) {
 	}
 
 	// Assert: the durable rows agree with the acks.
-	replayed, err := d.ReplayFrom("s1", 0)
-	if err != nil {
-		t.Fatalf("ReplayFrom: %v", err)
-	}
+	replayed := collectReplay(t, d, "s1", 0)
 	if len(replayed) != writers {
 		t.Fatalf("persisted %d events, want %d", len(replayed), writers)
 	}

@@ -174,11 +174,16 @@ func (c *Client) Replay(ctx context.Context, fromSeq, toSeq uint64, maxEvents ui
 		return ReplayResult{Truncated: true, Reason: reason},
 			fmt.Errorf("%w: request_id=%s (session %s): %s", ErrReplayLinkLost, requestID, c.cfg.SessionID, reason)
 	case <-ctx.Done():
-		// The caller's deadline. Say so rather than reporting a short answer as
-		// complete; late ReplayEvents for this id are dropped loudly by
-		// dispatchReplayEvent once the registry entry is gone.
-		return ReplayResult{Truncated: true, Reason: ctx.Err().Error()},
-			fmt.Errorf("shimclient: replay request_id=%s (session %s): %w", requestID, c.cfg.SessionID, ctx.Err())
+		// Preserve the caller's cancellation CAUSE. The session driver uses a
+		// progress-rearmed idle context whose cause carries delivered counts and
+		// seq range; flattening it to context.Canceled would discard the exact
+		// evidence needed to distinguish zero progress from a partial stream.
+		cause := context.Cause(ctx)
+		if cause == nil {
+			panic("shimclient: replay context closed without a cancellation cause")
+		}
+		return ReplayResult{Truncated: true, Reason: cause.Error()},
+			fmt.Errorf("shimclient: replay request_id=%s (session %s): %w", requestID, c.cfg.SessionID, cause)
 	}
 }
 

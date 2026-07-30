@@ -3,6 +3,7 @@ package sessiondrv
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
@@ -11,10 +12,13 @@ import (
 	"claude-repld/internal/shimclient"
 )
 
-// repullTimeout bounds one below-floor re-pull end to end. It is a FAILURE
-// bound, not a pacing knob: a shim mid-replay streams back to back, so this
-// only decides how long a wedged replay may hold a resync open.
-const repullTimeout = 60 * time.Second
+// repullIdleTimeout bounds how long one below-floor re-pull may make no
+// progress. Every replayed event rearms it, so a large healthy stream may run
+// for arbitrarily longer than this while a wedged replay still fails finitely.
+const repullIdleTimeout = 60 * time.Second
+
+// repullProgressLogEvery bounds progress instrumentation on large histories.
+const repullProgressLogEvery = 512
 
 // repullMaxEvents caps how many events ONE re-pull may deliver. Generously
 // above the largest observed backfill burst (~1,009 events) and the retained
@@ -42,6 +46,144 @@ type repullState struct {
 	// across generations is comparing numbers from different spaces, so the
 	// coalescing rule refuses rather than pretends.
 	epoch uint64
+}
+
+type repullTimer interface {
+	Stop() bool
+	Reset(time.Duration) bool
+}
+
+type repullSnapshot struct {
+	delivered uint64
+	firstSeq  uint64
+	lastSeq   uint64
+	elapsed   time.Duration
+}
+
+// repullNoProgressError is the activity deadline's owned failure. Counts and
+// seq range make a timeout distinguish "the store never yielded its first row"
+// from "streaming stopped partway through a large replay".
+type repullNoProgressError struct {
+	timeout   time.Duration
+	delivered uint64
+	firstSeq  uint64
+	lastSeq   uint64
+}
+
+func (e *repullNoProgressError) Error() string {
+	return fmt.Sprintf("sessiondrv: history re-pull made no progress for %s after delivered=%d first_seq=%d last_seq=%d",
+		e.timeout, e.delivered, e.firstSeq, e.lastSeq)
+}
+
+// repullActivity owns one progress-rearmed cancellation context. expire
+// re-checks the elapsed idle duration before cancelling, which makes a timer
+// callback racing with Observe harmless: recent progress rearms the remaining
+// interval instead of losing to a stale callback.
+type repullActivity struct {
+	mu           sync.Mutex
+	ctx          context.Context
+	cancel       context.CancelCauseFunc
+	timer        repullTimer
+	timeout      time.Duration
+	now          func() time.Time
+	started      time.Time
+	lastActivity time.Time
+	delivered    uint64
+	firstSeq     uint64
+	lastSeq      uint64
+	stopped      bool
+}
+
+func newRepullActivity(parent context.Context, timeout time.Duration) *repullActivity {
+	return newRepullActivityWithClock(parent, timeout, time.Now, func(d time.Duration, f func()) repullTimer {
+		return time.AfterFunc(d, f)
+	})
+}
+
+func newRepullActivityWithClock(
+	parent context.Context,
+	timeout time.Duration,
+	now func() time.Time,
+	newTimer func(time.Duration, func()) repullTimer,
+) *repullActivity {
+	if timeout <= 0 || now == nil || newTimer == nil {
+		panic("sessiondrv: repull activity requires a positive timeout, clock, and timer factory")
+	}
+	ctx, cancel := context.WithCancelCause(parent)
+	started := now()
+	a := &repullActivity{
+		ctx:          ctx,
+		cancel:       cancel,
+		timeout:      timeout,
+		now:          now,
+		started:      started,
+		lastActivity: started,
+	}
+	a.timer = newTimer(timeout, a.expire)
+	if a.timer == nil {
+		panic("sessiondrv: repull activity timer factory returned nil")
+	}
+	return a
+}
+
+func (a *repullActivity) observe(seq uint64) repullSnapshot {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.stopped {
+		return a.snapshotLocked()
+	}
+	a.delivered++
+	if a.delivered == 1 {
+		a.firstSeq = seq
+	}
+	a.lastSeq = seq
+	a.lastActivity = a.now()
+	a.timer.Reset(a.timeout)
+	return a.snapshotLocked()
+}
+
+func (a *repullActivity) expire() {
+	a.mu.Lock()
+	if a.stopped {
+		a.mu.Unlock()
+		return
+	}
+	idleFor := a.now().Sub(a.lastActivity)
+	if idleFor < a.timeout {
+		a.timer.Reset(a.timeout - idleFor)
+		a.mu.Unlock()
+		return
+	}
+	a.stopped = true
+	cause := &repullNoProgressError{
+		timeout:   a.timeout,
+		delivered: a.delivered,
+		firstSeq:  a.firstSeq,
+		lastSeq:   a.lastSeq,
+	}
+	a.mu.Unlock()
+	a.cancel(cause)
+}
+
+func (a *repullActivity) stop() repullSnapshot {
+	a.mu.Lock()
+	if !a.stopped {
+		a.stopped = true
+		a.timer.Stop()
+	}
+	snapshot := a.snapshotLocked()
+	a.mu.Unlock()
+	a.cancel(context.Canceled)
+	return snapshot
+}
+
+func (a *repullActivity) snapshotLocked() repullSnapshot {
+	return repullSnapshot{
+		delivered: a.delivered,
+		firstSeq:  a.firstSeq,
+		lastSeq:   a.lastSeq,
+		elapsed:   a.now().Sub(a.started),
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -86,8 +228,8 @@ type repullState struct {
 //     the tail of a ResyncCmd a frontend sent.
 //  2. BOUNDED. to_seq is the ring floor (the first seq the live window already
 //     covers); max_events caps one replay; the shim adds an idle window; this
-//     side adds a deadline. A tripped bound comes back as a TRUNCATED
-//     ReplayDone and becomes ErrRepullTruncated here.
+//     side adds a progress-rearmed idle deadline. A tripped bound comes back
+//     as a TRUNCATED ReplayDone and becomes ErrRepullTruncated here.
 //  3. SIDE CHANNEL. The shim opens a throwaway store subscription and leaves
 //     its standing one alone, so the daemon's own consumption position never
 //     moves and no SeqStore write happens.
@@ -147,23 +289,39 @@ func (m *Manager) startRepull(d *driven, fromSeq, stopAt uint64) error {
 		m.mu.Unlock()
 	}()
 
-	ctx, cancel := context.WithTimeout(m.rootCtx, repullTimeout)
-	defer cancel()
-	m.logf("sessiondrv: re-pulling history ws=%q session=%s from_seq=%d stop_at=%d (frontend-initiated, via the shim, conversation only)",
-		d.workspace, d.sessionID, fromSeq, stopAt)
-	res, err := d.client.Replay(ctx, fromSeq, stopAt, repullMaxEvents, d.consumer.repullConversation)
+	activity := newRepullActivity(m.rootCtx, repullIdleTimeout)
+	defer activity.stop()
+	m.logf("sessiondrv: re-pulling history ws=%q session=%s from_seq=%d stop_at=%d max_events=%d idle_timeout_ms=%d (frontend-initiated, via the shim, conversation only)",
+		d.workspace, d.sessionID, fromSeq, stopAt, repullMaxEvents, repullIdleTimeout.Milliseconds())
+	res, err := d.client.Replay(activity.ctx, fromSeq, stopAt, repullMaxEvents, func(ev *corev1.Event) {
+		progress := activity.observe(ev.GetSeq())
+		if progress.delivered == 1 || progress.delivered%repullProgressLogEvery == 0 {
+			m.logf("sessiondrv: re-pull progress ws=%q session=%s from_seq=%d stop_at=%d delivered=%d first_seq=%d last_seq=%d elapsed_ms=%d idle_timeout_ms=%d",
+				d.workspace, d.sessionID, fromSeq, stopAt, progress.delivered, progress.firstSeq, progress.lastSeq,
+				progress.elapsed.Milliseconds(), repullIdleTimeout.Milliseconds())
+		}
+		d.consumer.repullConversation(ev)
+	})
+	progress := activity.stop()
 	if err != nil {
+		m.logf("sessiondrv: history re-pull FAILED ws=%q session=%s from_seq=%d stop_at=%d delivered=%d first_seq=%d last_seq=%d elapsed_ms=%d idle_timeout_ms=%d cause=%q",
+			d.workspace, d.sessionID, fromSeq, stopAt, progress.delivered, progress.firstSeq, progress.lastSeq,
+			progress.elapsed.Milliseconds(), repullIdleTimeout.Milliseconds(), err)
 		return fmt.Errorf("sessiondrv: history re-pull for ws %q (from_seq=%d stop_at=%d) failed: %w",
 			d.workspace, fromSeq, stopAt, err)
 	}
 	if res.Truncated {
 		// A partial answer is reported as one. The frontend rendered whatever
 		// did arrive; the ack tells it the rest is still missing.
+		m.logf("sessiondrv: history re-pull TRUNCATED ws=%q session=%s from_seq=%d stop_at=%d delivered=%d observed=%d first_seq=%d last_seq=%d elapsed_ms=%d idle_timeout_ms=%d reason=%q",
+			d.workspace, d.sessionID, fromSeq, stopAt, res.Delivered, progress.delivered, progress.firstSeq, progress.lastSeq,
+			progress.elapsed.Milliseconds(), repullIdleTimeout.Milliseconds(), res.Reason)
 		return fmt.Errorf("%w: ws=%q from_seq=%d stop_at=%d delivered %d event(s): %s",
 			ErrRepullTruncated, d.workspace, fromSeq, stopAt, res.Delivered, res.Reason)
 	}
-	m.logf("sessiondrv: re-pull complete ws=%q delivered=%d event(s) from_seq=%d stop_at=%d",
-		d.workspace, res.Delivered, fromSeq, stopAt)
+	m.logf("sessiondrv: re-pull complete ws=%q session=%s delivered=%d observed=%d first_seq=%d last_seq=%d from_seq=%d stop_at=%d elapsed_ms=%d idle_timeout_ms=%d",
+		d.workspace, d.sessionID, res.Delivered, progress.delivered, progress.firstSeq, progress.lastSeq,
+		fromSeq, stopAt, progress.elapsed.Milliseconds(), repullIdleTimeout.Milliseconds())
 	return nil
 }
 

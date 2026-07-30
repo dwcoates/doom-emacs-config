@@ -777,7 +777,10 @@ export class StoreClient {
    */
   replay(opts: ReplayOptions): Promise<ReplayOutcome> {
     return new Promise<ReplayOutcome>((resolve) => {
+      const startedAt = Date.now();
       let delivered = 0;
+      let firstSeq: bigint | undefined;
+      let lastSeq: bigint | undefined;
       let settled = false;
       let idleTimer: NodeJS.Timeout | null = null;
       let conn: MessageConn | null = null;
@@ -787,7 +790,7 @@ export class StoreClient {
         settled = true;
         if (idleTimer) clearTimeout(idleTimer);
         conn?.close();
-        LOGGER.log({ level: truncated ? "error" : "info", agent_repl_session_id: this.opts.sessionId, claude_session_id: this.storeKey, store_key: this.storeKey, delivered, truncated },
+        LOGGER.log({ operation: "shim.store-client.replay", level: truncated ? "error" : "info", agent_repl_session_id: this.opts.sessionId, claude_session_id: this.storeKey, store_key: this.storeKey, from_seq: opts.fromSeq, to_seq: opts.toSeq, delivered, first_seq: firstSeq, last_seq: lastSeq, elapsed_ms: Date.now() - startedAt, idle_ms: opts.idleMs, truncated, reason },
           truncated ? `replay TRUNCATED: ${reason}` : `replay complete`);
         resolve({ delivered, truncated, reason: truncated ? reason : "" });
       };
@@ -824,6 +827,12 @@ export class StoreClient {
               }
               opts.onEvent(evt);
               delivered += 1;
+              firstSeq ??= evt.seq;
+              lastSeq = evt.seq;
+              if (delivered === 1 || delivered % 512 === 0) {
+                LOGGER.logVerbose({ operation: "shim.store-client.replay-progress", agent_repl_session_id: this.opts.sessionId, claude_session_id: this.storeKey, store_key: this.storeKey, from_seq: opts.fromSeq, to_seq: opts.toSeq, delivered, first_seq: firstSeq, last_seq: lastSeq, elapsed_ms: Date.now() - startedAt, idle_ms: opts.idleMs },
+                  "replay stream made progress");
+              }
               if (opts.maxEvents > 0 && delivered >= opts.maxEvents) {
                 finish(true, `hit the ${opts.maxEvents}-event cap before reaching seq ${opts.toSeq}`);
               }
@@ -840,7 +849,7 @@ export class StoreClient {
           sessionId: this.storeKey,
           fromSeq: opts.fromSeq,
         }));
-        LOGGER.log({ agent_repl_session_id: this.opts.sessionId, claude_session_id: this.storeKey, store_key: this.storeKey, from_seq: opts.fromSeq, to_seq: opts.toSeq },
+        LOGGER.log({ operation: "shim.store-client.replay", agent_repl_session_id: this.opts.sessionId, claude_session_id: this.storeKey, store_key: this.storeKey, from_seq: opts.fromSeq, to_seq: opts.toSeq, max_events: opts.maxEvents, idle_ms: opts.idleMs },
           `opened throwaway replay subscription (standing subscription untouched)`);
         armIdle();
       });

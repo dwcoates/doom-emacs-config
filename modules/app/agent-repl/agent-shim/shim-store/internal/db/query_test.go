@@ -1,10 +1,71 @@
 package db
 
 import (
+	"context"
 	"testing"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
 )
+
+func TestReplayFromStreamsLargeHistoryInOrder(t *testing.T) {
+	// Arrange: match the observed incident scale closely enough that a future
+	// slice-based implementation would again be an obvious architectural
+	// regression rather than an optimization hidden by tiny fixtures.
+	const eventCount = 3702
+	d := openTemp(t)
+	events := make([]*corev1.Event, 0, eventCount)
+	for range eventCount {
+		events = append(events, persistentCore("s1"))
+	}
+	if _, err := d.Ingest("p", events, nil); err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+
+	// Act: each row is observed through the callback while the query is open.
+	var delivered uint64
+	stats, err := d.ReplayFrom(context.Background(), "s1", 0, func(ev *corev1.Event) error {
+		delivered++
+		if ev.GetSeq() != delivered {
+			t.Fatalf("streamed seq=%d at position=%d", ev.GetSeq(), delivered)
+		}
+		return nil
+	})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("ReplayFrom: %v", err)
+	}
+	if delivered != eventCount || stats.Events != eventCount || stats.FirstSeq != 1 || stats.LastSeq != eventCount {
+		t.Fatalf("delivered=%d stats=%+v, want %d events spanning [1,%d]", delivered, stats, eventCount, eventCount)
+	}
+}
+
+func TestReplayFromDeliversEarlierRowsBeforeALaterDecodeFailure(t *testing.T) {
+	// Arrange: seq 1 is valid and seq 2 is deliberately malformed. A
+	// materializing implementation would decode the later row before the
+	// caller saw seq 1; row-to-callback streaming must expose seq 1 first.
+	d := openTemp(t)
+	if _, err := d.Ingest("p", []*corev1.Event{persistentCore("s1"), persistentCore("s1")}, nil); err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+	if _, err := d.sql.Exec(`UPDATE event SET payload = X'00' WHERE session_id = 's1' AND seq = 2`); err != nil {
+		t.Fatalf("corrupting later fixture row: %v", err)
+	}
+
+	var seqs []uint64
+	stats, err := d.ReplayFrom(context.Background(), "s1", 0, func(ev *corev1.Event) error {
+		seqs = append(seqs, ev.GetSeq())
+		return nil
+	})
+
+	// Assert: the decode error remains loud, after the prior row was delivered.
+	if err == nil {
+		t.Fatal("ReplayFrom unexpectedly accepted a malformed persisted payload")
+	}
+	if len(seqs) != 1 || seqs[0] != 1 || stats.Events != 1 || stats.FirstSeq != 1 || stats.LastSeq != 1 {
+		t.Fatalf("delivered seqs=%v stats=%+v before failure, want only seq 1", seqs, stats)
+	}
+}
 
 func TestReplayFromZeroReturnsAll(t *testing.T) {
 	// Arrange
@@ -13,11 +74,8 @@ func TestReplayFromZeroReturnsAll(t *testing.T) {
 		t.Fatalf("Ingest: %v", err)
 	}
 	// Act
-	got, err := d.ReplayFrom("s1", 0)
+	got := collectReplay(t, d, "s1", 0)
 	// Assert
-	if err != nil {
-		t.Fatalf("ReplayFrom: %v", err)
-	}
 	if len(got) != 3 {
 		t.Fatalf("replayed %d events, want 3", len(got))
 	}
@@ -35,11 +93,8 @@ func TestReplayFromMidSeqIsExclusive(t *testing.T) {
 		t.Fatalf("Ingest: %v", err)
 	}
 	// Act: from_seq is EXCLUSIVE, so from_seq=1 yields seqs 2,3.
-	got, err := d.ReplayFrom("s1", 1)
+	got := collectReplay(t, d, "s1", 1)
 	// Assert
-	if err != nil {
-		t.Fatalf("ReplayFrom: %v", err)
-	}
 	if len(got) != 2 || got[0].GetSeq() != 2 || got[1].GetSeq() != 3 {
 		t.Fatalf("replay from_seq=1 gave seqs %v, want [2 3]", seqs(got))
 	}
@@ -52,11 +107,8 @@ func TestReplayIsSessionScoped(t *testing.T) {
 		t.Fatalf("Ingest: %v", err)
 	}
 	// Act
-	got, err := d.ReplayFrom("a", 0)
+	got := collectReplay(t, d, "a", 0)
 	// Assert
-	if err != nil {
-		t.Fatalf("ReplayFrom: %v", err)
-	}
 	if len(got) != 1 || got[0].GetSessionId() != "a" {
 		t.Fatalf("replay for session a returned %d events (want 1 for 'a')", len(got))
 	}

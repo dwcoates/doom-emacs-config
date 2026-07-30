@@ -30,6 +30,7 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -490,7 +491,8 @@ func (s *Server) ingestAndFan(sw *corev1.StoreWrite) (*corev1.StoreWriteAck, boo
 func (s *Server) serveSubscriber(conn net.Conn, sub *corev1.Subscribe) {
 	sessionID := sub.GetSessionId()
 	peer := conn.RemoteAddr().String()
-	s.log.LogVerbose(logging.Fields{Operation: "subscribe", Session: sessionID, Subscriber: peer}, "starting replay-then-tail from_seq=%d", sub.GetFromSeq())
+	started := time.Now()
+	s.log.LogVerbose(logging.Fields{Operation: "subscribe", Session: sessionID, Subscriber: peer}, "starting streaming replay-then-tail from_seq=%d", sub.GetFromSeq())
 	if sessionID == "" {
 		s.log.Log(logging.Fields{Operation: "subscribe", Subscriber: peer, Level: "error"}, "protocol subscription rejected: empty session_id")
 		return
@@ -500,34 +502,58 @@ func (s *Server) serveSubscriber(conn net.Conn, sub *corev1.Subscribe) {
 	defer s.fan.unsubscribe(subr)
 
 	// When the subscriber is dropped (slow-consumer disconnect via the fanout,
-	// or normal teardown), close the conn so a write blocked on a stuck socket
-	// is unblocked and the tail loop returns promptly.
+	// client disconnect detected by subReadLoop, or normal teardown), cancel
+	// the SQLite query and close the conn so a write blocked on a stuck socket
+	// is unblocked. Starting the read loop before replay also means a client
+	// that disconnects before the first row cannot leave a query running.
+	replayCtx, cancelReplay := context.WithCancel(context.Background())
+	defer cancelReplay()
 	go func() {
 		<-subr.done
+		cancelReplay()
 		conn.Close()
 	}()
+	go s.subReadLoop(conn, subr)
 
 	// Register (above) BEFORE replay so live events arriving during replay are
-	// buffered, then de-overlapped by seq afterwards.
-	replayed, err := s.db.ReplayFrom(sessionID, sub.GetFromSeq())
+	// buffered, then de-overlapped by seq afterwards. ReplayFrom yields one
+	// SQLite row at a time, and this callback writes it before the query advances
+	// to the next row. That first-row progress is what keeps the shim's
+	// activity deadline alive during large history pulls.
+	var delivered, firstReplaySeq, lastReplaySeq uint64
+	replayStats, err := s.db.ReplayFrom(replayCtx, sessionID, sub.GetFromSeq(), func(ev *corev1.Event) error {
+		nextDelivered := delivered + 1
+		if err := wire.WriteAny(conn, ev); err != nil {
+			s.log.Log(logging.Fields{Operation: "subscribe-replay", Session: sessionID, Subscriber: peer, Level: "error"},
+				"protocol replay write failed from_seq=%d delivered=%d first_seq=%d last_seq=%d failed_seq=%d elapsed_ms=%d cause=%q",
+				sub.GetFromSeq(), delivered, firstReplaySeq, lastReplaySeq, ev.GetSeq(), time.Since(started).Milliseconds(), err)
+			return err
+		}
+		if delivered == 0 {
+			firstReplaySeq = ev.GetSeq()
+		}
+		delivered = nextDelivered
+		lastReplaySeq = ev.GetSeq()
+		// One bounded record at first progress and then every 512 events keeps
+		// large replays diagnosable without turning this per-event path into a
+		// log-volume multiplier.
+		if delivered == 1 || delivered%512 == 0 {
+			s.log.LogVerbose(logging.Fields{Operation: "subscribe-replay-progress", Session: sessionID, Subscriber: peer},
+				"streaming replay progress from_seq=%d delivered=%d first_seq=%d last_seq=%d elapsed_ms=%d",
+				sub.GetFromSeq(), delivered, firstReplaySeq, lastReplaySeq, time.Since(started).Milliseconds())
+		}
+		return nil
+	})
 	if err != nil {
 		return
 	}
-	var lastReplaySeq uint64
-	for _, ev := range replayed {
-		if err := wire.WriteAny(conn, ev); err != nil {
-			s.log.Log(logging.Fields{Operation: "subscribe-replay", Session: sessionID, Subscriber: peer, Level: "error"}, "protocol replay write failed seq=%d: %v", ev.GetSeq(), err)
-			return
-		}
-		if ev.GetSeq() > lastReplaySeq {
-			lastReplaySeq = ev.GetSeq()
-		}
+	if replayStats.Events != delivered || replayStats.FirstSeq != firstReplaySeq || replayStats.LastSeq != lastReplaySeq {
+		panic(fmt.Sprintf("shim-store server: replay accounting diverged: query=%+v transport={events:%d first_seq:%d last_seq:%d}",
+			replayStats, delivered, firstReplaySeq, lastReplaySeq))
 	}
-	s.log.Log(logging.Fields{Operation: "subscribe-replay", Session: sessionID, Subscriber: peer}, "replay completed events=%d last_seq=%d", len(replayed), lastReplaySeq)
-
-	// Detect client disconnect / drain client heartbeats without ever writing
-	// from a second goroutine (the tail loop below owns all writes).
-	go s.subReadLoop(conn, subr)
+	s.log.Log(logging.Fields{Operation: "subscribe-replay", Session: sessionID, Subscriber: peer},
+		"streaming replay completed from_seq=%d delivered=%d first_seq=%d last_seq=%d query_ms=%d elapsed_ms=%d",
+		sub.GetFromSeq(), delivered, firstReplaySeq, lastReplaySeq, replayStats.Elapsed.Milliseconds(), time.Since(started).Milliseconds())
 
 	for {
 		select {
