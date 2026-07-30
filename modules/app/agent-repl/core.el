@@ -841,13 +841,27 @@ boundary.  Its contents are an in-memory view only; the durable logfile
 remains the authoritative persisted record."
   (agent-repl--create-buffer ws agent-repl--workspace-log-buffer-suffix))
 
+(defvar agent-repl--log-sink-reentrant nil
+  "Non-nil while the logging ladder is resolving its own sink.
+Helpers the sink itself calls consult this to stay silent.  Without it the
+de-instrumentation below holds for one level only: this function does not
+log, but the buffer it resolves is named by `agent-repl--buffer-name', which
+does — so every workspace-scoped record produced a SECOND record announcing
+the name of the buffer it was about to be appended to.  That doubling is
+what made `buffer-name: suffix=-log' the third-largest operation in the log
+at 71,425 records, and it scales with ALL workspace-scoped logging, not with
+any one noisy caller.")
+
 (defun agent-repl--append-workspace-log (ws text)
   "Append the exact formatted log TEXT to WS's live log buffer.
 Only a non-nil WS is workspace-scoped.  This helper deliberately does not
 log its own buffer creation or append work: it runs for every log entry, and
-instrumenting it through the logging ladder would recurse indefinitely."
+instrumenting it through the logging ladder would recurse indefinitely.  The
+`agent-repl--log-sink-reentrant' binding extends that intent to the helpers
+it calls, which would otherwise reinstate the instrumentation it avoids."
   (when (and agent-repl--workspace-log-buffer-enabled ws)
-    (with-current-buffer (agent-repl--workspace-log-buffer ws)
+    (with-current-buffer (let ((agent-repl--log-sink-reentrant t))
+                           (agent-repl--workspace-log-buffer ws))
       (let ((inhibit-read-only t))
         (save-excursion
           (save-restriction
@@ -1576,7 +1590,10 @@ to delete the input panel as orphaned."
       (error "agent-repl--buffer-name: empty workspace name (ws=%S, +workspace-current-name=%S, sanitized=%S)"
              ws (agent-repl--ws-current-name) safe))
     (let ((name (format agent-repl-panel-buffer-name-format (or suffix "") safe)))
-      (agent-repl--log-verbose nil "buffer-name: suffix=%s ws=%s name=%s" suffix ws-name name)
+      ;; Silent when the log sink is resolving its own buffer: instrumenting
+      ;; that path makes every workspace-scoped record emit a second record.
+      (unless agent-repl--log-sink-reentrant
+        (agent-repl--log-verbose nil "buffer-name: suffix=%s ws=%s name=%s" suffix ws-name name))
       name)))
 
 (defun agent-repl--create-buffer (ws &optional suffix)
