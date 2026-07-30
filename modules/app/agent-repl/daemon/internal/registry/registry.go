@@ -586,6 +586,32 @@ func (r *Registry) Checkpoint(id ConversationIdentity) (ConversationCheckpoint, 
 	return cp, ok
 }
 
+// AllCheckpoints returns every conversation checkpoint, sorted by identity for
+// deterministic iteration.
+//
+// A checkpoint OUTLIVES the session record that produced it, which is what
+// makes this worth exposing separately from All: a conversation whose record
+// has been pruned is still on disk and still resumable, and the checkpoint is
+// the only thing that still remembers it exists.
+func (r *Registry) AllCheckpoints() []ConversationCheckpoint {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]ConversationCheckpoint, 0, len(r.checkpoints))
+	for _, cp := range r.checkpoints {
+		out = append(out, cp)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].ConfigDir != out[j].ConfigDir {
+			return out[i].ConfigDir < out[j].ConfigDir
+		}
+		if out[i].CWD != out[j].CWD {
+			return out[i].CWD < out[j].CWD
+		}
+		return out[i].ClaudeSessionID < out[j].ClaudeSessionID
+	})
+	return out
+}
+
 // Get returns id's record and whether it exists.
 func (r *Registry) Get(id string) (Record, bool) {
 	r.mu.Lock()
