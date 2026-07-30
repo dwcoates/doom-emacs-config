@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -14,36 +15,67 @@ import (
 // nowMillis is the store's wall clock in unix millis (cursor updated_at).
 func nowMillis() int64 { return time.Now().UnixMilli() }
 
-// ReplayFrom returns the session's persisted events with seq > fromSeq, in seq
-// order. from_seq is EXCLUSIVE (core.proto Subscribe semantics). Only
-// PERSISTENT events are stored, so replay never yields ephemeral events.
-func (d *DB) ReplayFrom(sessionID string, fromSeq uint64) ([]*corev1.Event, error) {
-	d.log.LogVerbose(logging.Fields{Operation: "replay", Table: "event", Session: sessionID}, "querying replay from_seq=%d", fromSeq)
-	rows, err := d.sql.Query(
+// ReplayStats describes rows successfully handed to a ReplayFrom sink.
+type ReplayStats struct {
+	Events   uint64
+	FirstSeq uint64
+	LastSeq  uint64
+	Elapsed  time.Duration
+}
+
+// ReplayFrom streams the session's persisted events with seq > fromSeq to
+// yield in seq order. from_seq is EXCLUSIVE (core.proto Subscribe semantics).
+// Only PERSISTENT events are stored, so replay never yields ephemeral events.
+//
+// The callback-only API is load-bearing: the store server writes each row to
+// the subscriber before SQLite advances to the next row. A slice-returning API
+// would make it possible to buffer an arbitrarily large replay before the
+// first socket write, defeating every downstream activity deadline.
+func (d *DB) ReplayFrom(ctx context.Context, sessionID string, fromSeq uint64, yield func(*corev1.Event) error) (ReplayStats, error) {
+	if yield == nil {
+		panic("shim-store db: ReplayFrom requires a yield callback")
+	}
+	started := time.Now()
+	fields := logging.Fields{Operation: "replay", Table: "event", Session: sessionID}
+	d.log.LogVerbose(fields, "streaming replay query from_seq=%d", fromSeq)
+	rows, err := d.sql.QueryContext(ctx,
 		`SELECT payload FROM event WHERE session_id = ? AND seq > ? ORDER BY seq ASC`,
 		sessionID, fromSeq)
 	if err != nil {
-		return nil, d.queryError("replay", "event", sessionID, fmt.Errorf("shim-store query: replay (session=%q from_seq=%d): %w", sessionID, fromSeq, err))
+		return ReplayStats{}, d.queryError("replay", "event", sessionID, fmt.Errorf("shim-store query: replay (session=%q from_seq=%d): %w", sessionID, fromSeq, err))
 	}
 	defer rows.Close()
 
-	var out []*corev1.Event
+	var stats ReplayStats
 	for rows.Next() {
 		var blob []byte
 		if err := rows.Scan(&blob); err != nil {
-			return nil, d.queryError("replay-scan", "event", sessionID, fmt.Errorf("shim-store query: scanning replay row (session=%q): %w", sessionID, err))
+			return stats, d.queryError("replay-scan", "event", sessionID, fmt.Errorf("shim-store query: scanning replay row (session=%q from_seq=%d delivered=%d): %w", sessionID, fromSeq, stats.Events, err))
 		}
 		ev := &corev1.Event{}
 		if err := proto.Unmarshal(blob, ev); err != nil {
-			return nil, d.queryError("replay-unmarshal", "event", sessionID, fmt.Errorf("shim-store query: unmarshaling replay payload (session=%q): %w", sessionID, err))
+			return stats, d.queryError("replay-unmarshal", "event", sessionID, fmt.Errorf("shim-store query: unmarshaling replay payload (session=%q from_seq=%d delivered=%d): %w", sessionID, fromSeq, stats.Events, err))
 		}
-		out = append(out, ev)
+		if err := yield(ev); err != nil {
+			stats.Elapsed = time.Since(started)
+			d.log.LogVerbose(fields, "replay sink stopped stream from_seq=%d delivered=%d first_seq=%d last_seq=%d elapsed_ms=%d cause=%q",
+				fromSeq, stats.Events, stats.FirstSeq, stats.LastSeq, stats.Elapsed.Milliseconds(), err)
+			return stats, err
+		}
+		if stats.Events == 0 {
+			stats.FirstSeq = ev.GetSeq()
+		}
+		stats.Events++
+		stats.LastSeq = ev.GetSeq()
 	}
 	if err := rows.Err(); err != nil {
-		return nil, d.queryError("replay-iterate", "event", sessionID, fmt.Errorf("shim-store query: iterating replay rows (session=%q): %w", sessionID, err))
+		return stats, d.queryError("replay-iterate", "event", sessionID, fmt.Errorf("shim-store query: iterating replay rows (session=%q from_seq=%d delivered=%d first_seq=%d last_seq=%d): %w",
+			sessionID, fromSeq, stats.Events, stats.FirstSeq, stats.LastSeq, err))
 	}
-	d.log.LogVerbose(logging.Fields{Operation: "replay", Table: "event", Session: sessionID}, "replay returned events=%d from_seq=%d", len(out), fromSeq)
-	return out, nil
+	stats.Elapsed = time.Since(started)
+	d.log.LogVerbose(fields, "replay query completed from_seq=%d delivered=%d first_seq=%d last_seq=%d elapsed_ms=%d",
+		fromSeq, stats.Events, stats.FirstSeq, stats.LastSeq, stats.Elapsed.Milliseconds())
+	return stats, nil
 }
 
 // MaxSeq returns the highest assigned seq for a session (0 if none).
