@@ -72,12 +72,101 @@ func (r *probeHealthRouter) probeCount() int {
 // are the two things under test here.
 func establishHandler(t *testing.T, sessions *fakeSessionCmds, router SessionHealthRouter) *commandHandler {
 	t.Helper()
-	h, err := newCommandHandler(&fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}, nil, sessions, nil, nil, nil,
+	return establishHandlerWithPrompts(t, &fakePrompts{}, sessions, router)
+}
+
+// establishHandlerWithPrompts is establishHandler with the prompt router left
+// to the caller, so a test can watch what the create sends down the model path.
+func establishHandlerWithPrompts(t *testing.T, prompts *fakePrompts, sessions *fakeSessionCmds, router SessionHealthRouter) *commandHandler {
+	t.Helper()
+	h, err := newCommandHandler(prompts, &fakeMerges{}, &fakeLifecycle{}, nil, sessions, nil, nil, nil,
 		CommandHandlerConfig{Health: HealthConfig{Router: router}})
 	if err != nil {
 		t.Fatalf("newCommandHandler: %v", err)
 	}
 	return h
+}
+
+// TestCreateSessionAppliesTheRequestedStartingModel is the whole point of
+// carrying a model on the create: the session must already be on it when the
+// create acks, because the caller may submit a turn the moment it does.
+func TestCreateSessionAppliesTheRequestedStartingModel(t *testing.T) {
+	// Arrange
+	prompts := &fakePrompts{}
+	h := establishHandlerWithPrompts(t, prompts, &fakeSessionCmds{}, &probeHealthRouter{healthy: true})
+
+	// Act
+	err := h.CreateSession(context.Background(), "/w", "r1",
+		&frontendv1.CreateSessionCmd{Cwd: "/w", Model: "opus"})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("CreateSession with a model = %v, want nil", err)
+	}
+	if len(prompts.models) != 1 || prompts.models[0] != "opus" {
+		t.Fatalf("create sent models %#v, want exactly [opus]", prompts.models)
+	}
+}
+
+// TestCreateSessionWithoutAModelLeavesTheModelPathUntouched keeps the field
+// genuinely optional: an empty model must not become a model request.
+func TestCreateSessionWithoutAModelLeavesTheModelPathUntouched(t *testing.T) {
+	// Arrange
+	prompts := &fakePrompts{}
+	h := establishHandlerWithPrompts(t, prompts, &fakeSessionCmds{}, &probeHealthRouter{healthy: true})
+
+	// Act
+	err := h.CreateSession(context.Background(), "/w", "r1", &frontendv1.CreateSessionCmd{Cwd: "/w"})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("CreateSession without a model = %v, want nil", err)
+	}
+	if len(prompts.models) != 0 {
+		t.Fatalf("create sent models %#v, want none", prompts.models)
+	}
+}
+
+// TestCreateSessionTreatsAPlaceholderModelAsUnspecified: "<synthetic>" means
+// the caller has no selection, so it must behave like an absent field.  Passing
+// it through would normalize to "" and make SetModel refuse an empty model,
+// failing a create that asked for nothing.
+func TestCreateSessionTreatsAPlaceholderModelAsUnspecified(t *testing.T) {
+	// Arrange
+	prompts := &fakePrompts{}
+	h := establishHandlerWithPrompts(t, prompts, &fakeSessionCmds{}, &probeHealthRouter{healthy: true})
+
+	// Act
+	err := h.CreateSession(context.Background(), "/w", "r1",
+		&frontendv1.CreateSessionCmd{Cwd: "/w", Model: "<synthetic>"})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("CreateSession with a placeholder model = %v, want nil", err)
+	}
+	if len(prompts.models) != 0 {
+		t.Fatalf("placeholder model sent %#v down the model path, want none", prompts.models)
+	}
+}
+
+// TestCreateSessionFailsWhenTheShimRefusesTheRequestedModel: acking ok would
+// hand back a live session quietly running a model nobody asked for.
+func TestCreateSessionFailsWhenTheShimRefusesTheRequestedModel(t *testing.T) {
+	// Arrange
+	prompts := &fakePrompts{err: errors.New("shim refused the model")}
+	h := establishHandlerWithPrompts(t, prompts, &fakeSessionCmds{}, &probeHealthRouter{healthy: true})
+
+	// Act
+	err := h.CreateSession(context.Background(), "/w", "r1",
+		&frontendv1.CreateSessionCmd{Cwd: "/w", Model: "opus"})
+
+	// Assert
+	if err == nil {
+		t.Fatal("CreateSession must fail when the requested model is refused")
+	}
+	if !strings.Contains(err.Error(), "opus") {
+		t.Fatalf("CreateSession error = %v, want the refused model named", err)
+	}
 }
 
 // TestCreateSessionAcksOnlyAfterTheShimAnswersHealthy is the gate's central
