@@ -52,7 +52,10 @@ type CommandHandler interface {
 	// CreateSession brings up a session for the command's cwd (the UDS
 	// replacement for POST /sessions). The daemon delivers the resulting
 	// session identity via a pushed SessionView; the ack carries only ok/error.
-	CreateSession(ctx context.Context, workspace, requestID string, cmd *frontendv1.CreateSessionCmd) error
+	// CreateSession also reports the vendor conversation uuid the created
+	// session landed on, FOR OBSERVABILITY ONLY (CommandAck.observed_claude_
+	// session_id). Empty when unknown; a client must never persist it.
+	CreateSession(ctx context.Context, workspace, requestID string, cmd *frontendv1.CreateSessionCmd) (observedClaudeSessionID string, err error)
 	// DeleteSession marks a session terminal and stops its shim (the UDS
 	// replacement for DELETE /sessions/{id}).
 	DeleteSession(ctx context.Context, workspace, requestID string, cmd *frontendv1.DeleteSessionCmd) error
@@ -111,6 +114,8 @@ func DispatchWithResponse(ctx context.Context, logf dlog.Logf, h CommandHandler,
 
 	var err error
 	var selectedModel string
+	// Observability only; see CommandHandler.CreateSession.
+	var observedClaudeSessionID string
 	var response *frontendv1.FrontendFrame
 	switch c := cmd.GetCommand().(type) {
 	case *frontendv1.FrontendCommand_CreateWorkspace:
@@ -138,7 +143,7 @@ func DispatchWithResponse(ctx context.Context, logf dlog.Logf, h CommandHandler,
 	case *frontendv1.FrontendCommand_Resync:
 		err = h.Resync(ctx, ws, reqID, c.Resync)
 	case *frontendv1.FrontendCommand_CreateSession:
-		err = h.CreateSession(ctx, ws, reqID, c.CreateSession)
+		observedClaudeSessionID, err = h.CreateSession(ctx, ws, reqID, c.CreateSession)
 	case *frontendv1.FrontendCommand_DeleteSession:
 		err = h.DeleteSession(ctx, ws, reqID, c.DeleteSession)
 	case *frontendv1.FrontendCommand_Shutdown:
@@ -195,7 +200,10 @@ func DispatchWithResponse(ctx context.Context, logf dlog.Logf, h CommandHandler,
 		ack.SelectedModel = selectedModel
 		return ack, nil
 	}
-	return &frontendv1.CommandAck{RequestId: reqID, Ok: true, SelectedModel: selectedModel}, response
+	return &frontendv1.CommandAck{
+		RequestId: reqID, Ok: true, SelectedModel: selectedModel,
+		ObservedClaudeSessionId: observedClaudeSessionID,
+	}, response
 }
 
 // InterruptConfirmRequired is the interrupt gate's CHALLENGE, carried on the

@@ -63,24 +63,71 @@ type sessionEstablishment struct {
 	err       error
 }
 
-// CreateSession runs the shared create core for the command's cwd and acks ONLY
-// once that session is fully established (see the file comment). Concurrent
-// identical creates for one workspace coalesce onto a single establishment: one
-// spawn, one probe, every caller answered.
+// resolveResume turns the caller's INTENT into the concrete conversation the
+// create will land on.
 //
-// The wait is bounded twice over — by the establishment's own deadline and by
-// the CALLER'S context — and neither bound is a hang: a caller whose context
-// ends first is told so, and the establishment it was waiting on continues for
-// whoever else is waiting.
-func (h *commandHandler) CreateSession(ctx context.Context, workspace, requestID string, cmd *frontendv1.CreateSessionCmd) error {
-	h.logf("frontend cmd: create_session ws=%s request_id=%s config_dir=%s resume=%q fake=%v permission_mode=%q allow_ungated=%v model=%q",
-		workspace, requestID, cmd.GetConfigDir(), cmd.GetResumeClaudeSessionId(), cmd.GetFake(),
+// The caller says what it wants; the daemon decides what that means. CONTINUE
+// is resolved here against the registry and the transcripts on disk, so no
+// frontend has to remember a vendor uuid across restarts — which is the entire
+// point of ResumeMode. See ConversationResolver for why the frontend's copy
+// was the wrong authority.
+func (h *commandHandler) resolveResume(cmd *frontendv1.CreateSessionCmd) (string, error) {
+	mode := cmd.GetResumeMode()
+	explicit := cmd.GetExplicitClaudeSessionId()
+
+	// A uuid supplied under any mode but EXPLICIT is a caller that believes it
+	// is steering. Ignoring it quietly would land the session somewhere the
+	// caller did not ask for and say nothing, so it fails the create instead.
+	if mode != frontendv1.ResumeMode_RESUME_MODE_EXPLICIT && explicit != "" {
+		return "", fmt.Errorf("create_session carries explicit_claude_session_id=%q under resume_mode=%s: a conversation may only be named under RESUME_MODE_EXPLICIT", explicit, mode)
+	}
+
+	switch mode {
+	case frontendv1.ResumeMode_RESUME_MODE_FRESH:
+		h.logf("frontend cmd: create_session cwd=%s resume_mode=FRESH — the caller deliberately asked for a NEW conversation, so no resolution is attempted",
+			cmd.GetCwd())
+		return "", nil
+
+	case frontendv1.ResumeMode_RESUME_MODE_EXPLICIT:
+		if explicit == "" {
+			return "", fmt.Errorf("create_session resume_mode=EXPLICIT requires explicit_claude_session_id")
+		}
+		h.logf("frontend cmd: create_session cwd=%s resume_mode=EXPLICIT uuid=%s — a caller named this conversation, so no resolution is attempted",
+			cmd.GetCwd(), explicit)
+		return explicit, nil
+
+	case frontendv1.ResumeMode_RESUME_MODE_UNSPECIFIED, frontendv1.ResumeMode_RESUME_MODE_CONTINUE:
+		// Unwired resolver is a LOUD refusal, never a quiet fresh start:
+		// silently beginning a new conversation on top of an intact one is the
+		// data-loss this whole mechanism exists to prevent, and it must not be
+		// reachable by forgetting to wire a dependency.
+		if h.resumes == nil {
+			return "", fmt.Errorf("create_session resume_mode=%s needs a conversation resolver and none is wired; refusing rather than silently starting a fresh conversation over an existing one", mode)
+		}
+		resume, ok := h.resumes.ResolveResume(cmd.GetConfigDir(), cmd.GetCwd())
+		if !ok {
+			return "", nil
+		}
+		return resume, nil
+
+	default:
+		return "", fmt.Errorf("create_session carries unknown resume_mode=%d", int32(mode))
+	}
+}
+
+func (h *commandHandler) CreateSession(ctx context.Context, workspace, requestID string, cmd *frontendv1.CreateSessionCmd) (string, error) {
+	h.logf("frontend cmd: create_session ws=%s request_id=%s config_dir=%s resume_mode=%s fake=%v permission_mode=%q allow_ungated=%v model=%q",
+		workspace, requestID, cmd.GetConfigDir(), cmd.GetResumeMode(), cmd.GetFake(),
 		cmd.GetPermissionMode(), cmd.GetAllowUngated(), cmd.GetModel())
+	resume, err := h.resolveResume(cmd)
+	if err != nil {
+		return "", fmt.Errorf("frontend cmd: create_session ws=%s request_id=%s: %w", workspace, requestID, err)
+	}
 	opts := CreateOpts{
 		CWD:            cmd.GetCwd(),
 		PermissionMode: cmd.GetPermissionMode(),
 		ConfigDir:      cmd.GetConfigDir(),
-		Resume:         cmd.GetResumeClaudeSessionId(),
+		Resume:         resume,
 		Fake:           cmd.GetFake(),
 		AllowUngated:   cmd.GetAllowUngated(),
 	}
@@ -92,7 +139,7 @@ func (h *commandHandler) CreateSession(ctx context.Context, workspace, requestID
 	}
 	est, leader, err := h.beginEstablishment(ctx, opts)
 	if err != nil {
-		return fmt.Errorf("frontend cmd: create_session ws=%s request_id=%s: %w", workspace, requestID, err)
+		return "", fmt.Errorf("frontend cmd: create_session ws=%s request_id=%s: %w", workspace, requestID, err)
 	}
 	if leader {
 		go h.runEstablishment(est, workspace, requestID)
@@ -103,11 +150,11 @@ func (h *commandHandler) CreateSession(ctx context.Context, workspace, requestID
 	select {
 	case <-est.done:
 	case <-ctx.Done():
-		return fmt.Errorf("frontend cmd: create_session ws=%s request_id=%s: %w: the caller's context ended first (%v); bring-up continues in the background",
+		return "", fmt.Errorf("frontend cmd: create_session ws=%s request_id=%s: %w: the caller's context ended first (%v); bring-up continues in the background",
 			workspace, requestID, errclass.ErrSessionNotEstablished, ctx.Err())
 	}
 	if est.err != nil {
-		return est.err
+		return "", est.err
 	}
 	// Apply the requested starting model through the SAME path a later change
 	// takes, now that the shim is wired and driveable. Doing it here instead of
@@ -125,15 +172,23 @@ func (h *commandHandler) CreateSession(ctx context.Context, workspace, requestID
 	if requested := registry.NormalizeModel(cmd.GetModel()); requested != "" {
 		selected, modelErr := h.SetModel(ctx, workspace, requestID, &frontendv1.SetModelCmd{Model: requested})
 		if modelErr != nil {
-			return fmt.Errorf("frontend cmd: create_session ws=%s request_id=%s session=%s: requested model %q not applied: %w",
+			return "", fmt.Errorf("frontend cmd: create_session ws=%s request_id=%s session=%s: requested model %q not applied: %w",
 				workspace, requestID, est.sessionID, requested, modelErr)
 		}
 		h.logf("frontend cmd: create_session ws=%s request_id=%s session=%s model requested=%q selected=%q",
 			workspace, requestID, est.sessionID, requested, selected)
 	}
-	h.logf("frontend cmd: create_session ws=%s request_id=%s -> session=%s ESTABLISHED (shim wired and healthy)",
-		workspace, requestID, est.sessionID)
-	return nil
+	// OBSERVABILITY ONLY, and read AFTER establishment so it reflects what the
+	// session actually landed on rather than what was asked for. It rides the
+	// ack purely so a client can attribute its logs before the first pushed
+	// SessionView; nothing may persist it or feed it back (see ResumeMode).
+	var observed string
+	if h.resumes != nil {
+		observed = h.resumes.ObservedClaudeSessionID(est.sessionID)
+	}
+	h.logf("frontend cmd: create_session ws=%s request_id=%s -> session=%s ESTABLISHED (shim wired and healthy) observed_claude_session_id=%q",
+		workspace, requestID, est.sessionID, observed)
+	return observed, nil
 }
 
 // onEstablishEnroll, when set, is called with the workspace each time a caller

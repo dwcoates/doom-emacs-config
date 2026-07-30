@@ -53,6 +53,12 @@ type AgentShimConfig struct {
 	// EstablishTimeout bounds one createSession establishment round. Zero takes
 	// the package default; only a harness sets it.
 	EstablishTimeout time.Duration
+	// Resumes resolves which conversation a create continues, from the daemon's
+	// own registry and the transcripts on disk. Required: without it every
+	// ordinary create is a loud refusal, because the alternative — quietly
+	// starting a fresh conversation over an intact one — is the data-loss this
+	// resolver exists to prevent. See ConversationResolver.
+	Resumes ConversationResumeResolver
 	// DaemonHealth supplies the one daemon-global readiness assertion shared by
 	// the HTTP health route and frontend health command.
 	DaemonHealth DaemonHealthChecker
@@ -212,6 +218,8 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 		return nil, fmt.Errorf("server: WireAgentShim needs a WorkspaceCreation bridge")
 	case cfg.Turns == nil:
 		return nil, fmt.Errorf("server: WireAgentShim needs a TurnStateSource (without it the interrupt confirm gate cannot tell a live turn from working subagents)")
+	case cfg.Resumes == nil:
+		return nil, fmt.Errorf("server: WireAgentShim needs a ConversationResumeResolver (without it the daemon cannot tell a workspace's existing conversation from a new one, and every create would have to start fresh)")
 	}
 	mgr := cfg.SSM
 
@@ -233,6 +241,7 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 			// already carries the live-task count to the footer.
 			Interrupt:        InterruptGateConfig{Turns: cfg.Turns, LiveTasks: cfg.Progress},
 			EstablishTimeout: cfg.EstablishTimeout,
+			Resumes:          cfg.Resumes,
 		},
 	)
 	if err != nil {

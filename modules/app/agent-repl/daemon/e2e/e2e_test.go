@@ -508,6 +508,9 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 	binding := &server.SessionCommandBinding{Logf: t.Logf}
 	workspaceCreation := newEmptyWorkspaceCreation()
 	agentShim, err := server.WireAgentShim(server.AgentShimConfig{
+		// The real resolver over the real registry: an e2e that faked this
+		// would not exercise the daemon actually deciding what to resume.
+		Resumes:           &server.ConversationResolver{Reg: reg, Logf: t.Logf},
 		SSM:               ssmMgr,
 		Progress:          progressMgr,
 		Prompts:           driver,

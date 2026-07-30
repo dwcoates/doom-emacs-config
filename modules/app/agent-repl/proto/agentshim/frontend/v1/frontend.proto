@@ -773,11 +773,47 @@ message SessionHealthCmd {
 }
 
 // Additive (S7): session creation over UDS (replaces Emacs POST /sessions).
+// What conversation a create should land on.
+//
+// This is the caller's INTENT, not a pointer. It used to be a pointer —
+// `resume_claude_session_id`, a vendor uuid the frontend had remembered from a
+// previous session and handed back at boot — and that made every frontend a
+// second, weaker authority on a question the daemon can answer exactly.
+//
+// The daemon owns (config_dir, cwd) -> conversation. It keeps a session_record
+// per conversation and a conversation_checkpoint keyed on precisely that
+// triple, and it can check the vendor transcript on disk. A frontend has none
+// of that; it has a value it wrote down earlier and hopes is still true. When
+// the frontend's copy went missing, five workspaces silently started fresh
+// conversations on top of intact transcripts, because a frontend saying
+// nothing and a frontend saying "start fresh" were the same wire value.
+//
+// They are now different values, which is the whole point of this enum.
+enum ResumeMode {
+  // Unset. Treated as RESUME_MODE_CONTINUE so an older or simpler caller gets
+  // the safe behavior: continuing an existing conversation is recoverable,
+  // stranding one is not.
+  RESUME_MODE_UNSPECIFIED = 0;
+
+  // Continue this workspace's conversation, whichever one that is. The daemon
+  // resolves it and starts fresh only when no viable conversation exists.
+  RESUME_MODE_CONTINUE = 1;
+
+  // Deliberately begin a NEW conversation, even though a resumable one exists.
+  // The user asked for a blank slate; the daemon must not helpfully reattach.
+  RESUME_MODE_FRESH = 2;
+
+  // Land on one SPECIFIC conversation named in explicit_claude_session_id.
+  // Reserved for a human choosing from among conversations (a picker, a fork)
+  // — never for ordinary restore, which is what CONTINUE is for. A caller that
+  // reaches for this at boot is reintroducing the pointer.
+  RESUME_MODE_EXPLICIT = 3;
+}
+
 message CreateSessionCmd {
   string cwd = 1;
   string permission_mode = 3;
   string config_dir = 4;
-  string resume_claude_session_id = 5;  // "" = fresh
   bool fake = 6;                        // test harness sessions
   // The caller's DELIBERATE consent to create a session with NO permission
   // gate. Required whenever permission_mode names a mode that shadows the
@@ -804,6 +840,16 @@ message CreateSessionCmd {
   // still publishes only the shim-confirmed selection.  A rejected model fails
   // the create rather than silently leaving the session on another one.
   string model = 8;
+
+  // Which conversation to land on. See ResumeMode: this is intent, and the
+  // daemon does the resolving.
+  ResumeMode resume_mode = 9;
+
+  // The conversation to land on, and ONLY meaningful under
+  // RESUME_MODE_EXPLICIT. The daemon rejects a create that sets this under any
+  // other mode rather than quietly ignoring it, because a caller that filled
+  // this in believes it is steering and must be told it is not.
+  string explicit_claude_session_id = 10;
 }
 
 // A deliberate request to change an already-live session's model.  The daemon
@@ -999,6 +1045,24 @@ message CommandAck {
   // both success and rejection, so a frontend never needs an optimistic model
   // state or a local recovery guess.
   string selected_model = 6;
+
+  // Present only for CreateSessionCmd, and FOR OBSERVABILITY ONLY: the vendor
+  // conversation uuid the created session actually landed on, so a client can
+  // attribute its logs from its very first line instead of waiting for the
+  // first pushed SessionView.
+  //
+  // A CLIENT MUST NOT PERSIST THIS OR FEED IT BACK. It is an observation of
+  // daemon state at one instant, not a durable fact: the uuid ROTATES (a
+  // /clear or a compact starts a new vendor conversation and resets the
+  // cursors with it), so a stored copy is wrong from the next rotation
+  // onward. The steady-state source is the pushed SessionView, which tracks
+  // rotations; this field only covers the gap before the first push.
+  //
+  // Feeding it back is what this whole change removed — see ResumeMode. The
+  // rule is not enforceable from here, so it is also enforced where it
+  // matters: the Emacs frontend has no persistence path that can reach a
+  // vendor uuid, and a test asserts its state file never contains one.
+  string observed_claude_session_id = 7;
 }
 
 // The challenge payload: what the interrupt would actually stop, so the
