@@ -61,6 +61,15 @@ Anchors the frontend build script and artifact locations.")
   (expand-file-name "bin/build-frontend.sh" agent-repl--frontend-root)
   "Absolute path to the build-if-stale orchestrator script.")
 
+(defconst agent-repl--frontend-deploy-script
+  (expand-file-name "bin/deploy-all.sh" agent-repl--frontend-root)
+  "Absolute path to the whole-stack deploy orchestrator.
+Supersedes `agent-repl--frontend-build-script' on the boot path: that one
+covers the shim bundle, the webapp, and the daemon, and MISSES the two
+things that bit a live deploy — protobuf regeneration (whose generated Go
+lives outside `daemon/', so the daemon\='s own staleness check cannot see it)
+and the launchd-managed shim-store and sidecar.")
+
 (defconst agent-repl--frontend-shim-entry
   (expand-file-name "agent-shim/claude/shim/dist/main.js"
                     agent-repl--frontend-root)
@@ -414,8 +423,58 @@ persistent agent-repl log before success or failure is decided."
 
 (defun agent-repl--frontend-build-if-stale (&optional force)
   "Build stale shim, webapp, and daemon artifacts.
-With FORCE non-nil, rebuild all three.  Signals loudly on failure."
+With FORCE non-nil, rebuild all three.  Signals loudly on failure.
+
+Covers the three build-frontend targets ONLY.  The boot path wants the
+whole stack and calls `agent-repl--frontend-deploy-stack' instead; this
+stays the narrow build for callers that own the rest of the deploy
+themselves (notably `agent-repl-runtime-restart', which kickstarts the
+services in elisp and would otherwise do it twice)."
   (agent-repl--frontend-build-targets-if-stale nil force))
+
+(defun agent-repl--frontend-deploy-stack (&optional force)
+  "Build and deploy the WHOLE agent-repl stack; signal loudly on failure.
+Runs `bin/deploy-all.sh --no-daemon-bounce': protobuf regeneration, the
+shim/webapp/daemon build, a forced daemon rebuild (proto codegen lands
+outside `daemon/', where its staleness check cannot see it), and the
+shim-store and sidecar binaries with a launchd kickstart for whichever of
+them is not already running its installed build.
+
+`--no-daemon-bounce' is not an optimization.  The script\='s last step
+restarts the daemon by evaluating a form in Emacs over emacsclient, so a
+call made FROM Emacs would re-enter the very session that is mid-boot.
+The caller starts the daemon directly once this returns, which is what
+that step would have been asking for anyway.
+
+WHY THIS IS ON THE BOOT PATH.  It used to be `build-frontend.sh', which
+left two gaps: a proto change reached neither the regenerated Go nor a
+daemon rebuilt against it, and the two launchd services were only ever
+deployed by the interactive `agent-repl-runtime-restart'.  A wire-format
+change could therefore leave a new Emacs talking to a daemon built before
+it, which fails every command rather than degrading."
+  (agent-repl--log nil "frontend deploy-stack: requested force=%s script=%s"
+                   (if force "t" "nil") agent-repl--frontend-deploy-script)
+  (unless (file-exists-p agent-repl--frontend-deploy-script)
+    (agent-repl--log nil "frontend deploy-stack: script missing path=%s"
+                     agent-repl--frontend-deploy-script)
+    (error "agent-repl: deploy script not found: %s"
+           agent-repl--frontend-deploy-script))
+  (with-current-buffer (get-buffer-create agent-repl--frontend-build-buffer)
+    (erase-buffer))
+  (let* ((args (append (list agent-repl--frontend-deploy-script "--no-daemon-bounce")
+                       (when force (list "--force"))))
+         (exit-code (agent-repl--frontend-run-build-script args))
+         (output
+          (with-current-buffer agent-repl--frontend-build-buffer
+            (string-trim-right (buffer-string)))))
+    (agent-repl--log nil "frontend deploy-stack: force=%s exit=%S output=%s"
+                     (if force "t" "nil") exit-code
+                     (if (string-empty-p output) "<empty>" output))
+    (unless (eq exit-code 0)
+      (display-buffer agent-repl--frontend-build-buffer)
+      (error "agent-repl: stack deploy failed (exit %s) — see %s"
+             exit-code agent-repl--frontend-build-buffer))
+    exit-code))
 
 ;;;; ---- Launch -----------------------------------------------------------
 
@@ -933,7 +992,7 @@ remains the cheap idempotent session-open ensure."
         (agent-repl--frontend-stop-daemon))
       (agent-repl--log nil "ensure-frontend-daemon: build-and-launch force=%s"
                        (if force "t" "nil"))
-      (agent-repl--frontend-build-if-stale force)
+      (agent-repl--frontend-deploy-stack force)
       (agent-repl--frontend-start-daemon)))))))
 
 (defun agent-repl--frontend-stop-daemon (&optional force stop-shims)
@@ -1036,7 +1095,7 @@ reattaches instead of rebuilding, leaving every conversation running.
 
 STOP-SHIMS (the interactive prefix argument) restores the old behavior for
 the one caller that needs it: a deploy that changed the shim BUNDLE, whose
-survivors would otherwise keep running the previous build\='s code."
+survivors would otherwise keep running the previous build\=' code."
   (interactive "P")
   (agent-repl-runtime-restart (and stop-shims t)))
 

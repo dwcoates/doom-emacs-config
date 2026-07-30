@@ -48,6 +48,16 @@
 #                  restart, and any elisp reload (pure build mode). Leaves the
 #                  deployed stamps untouched, so a later real run still sees
 #                  the freshly installed binaries as un-deployed and bounces.
+#   --no-daemon-bounce
+#                  everything through step 4 (services ARE kickstarted), but
+#                  skip step 5's emacsclient restart and step 6's elisp reload.
+#                  This is the mode EMACS ITSELF uses on its lazy boot path:
+#                  step 5 bounces the daemon by calling back into Emacs over
+#                  emacsclient, so an Emacs that ran the full script from
+#                  inside its own session-open would be re-entering itself
+#                  mid-boot. Emacs starts the daemon directly right after this
+#                  returns, so the bounce would be redundant even if it were
+#                  safe.
 #   --elisp RANGE  after a successful bounce, hot-load changed non-test .el
 #                  files from `git diff --name-only RANGE`
 #
@@ -78,11 +88,13 @@ command -v "$EMACSCLIENT" >/dev/null 2>&1 || EMACSCLIENT="emacsclient"
 
 FORCE=0
 NO_BOUNCE=0
+NO_DAEMON_BOUNCE=0
 ELISP_RANGE=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --force)     FORCE=1 ;;
         --no-bounce) NO_BOUNCE=1 ;;
+        --no-daemon-bounce) NO_DAEMON_BOUNCE=1 ;;
         --elisp)     shift; ELISP_RANGE="${1:?--elisp needs a git range}" ;;
         *) echo "[deploy-all] unknown argument: $1" >&2; exit 2 ;;
     esac
@@ -223,6 +235,15 @@ if [ "$SIDECAR_STALE" -eq 1 ] || [ "$FORCE" -eq 1 ]; then
 fi
 
 # ---- 5. daemon bounce ------------------------------------------------------
+# Skipped for a caller that owns the daemon's lifecycle itself. Emacs\'s lazy
+# boot path is the one that does: it runs this script and then starts the
+# daemon directly, so bouncing here would both re-enter the calling Emacs over
+# emacsclient and fight the launch about to happen.
+if [ "$NO_DAEMON_BOUNCE" -eq 1 ]; then
+    log "--no-daemon-bounce: services deployed; the caller owns the daemon restart"
+    exit 0
+fi
+
 # No running Emacs means there is no live daemon to bounce and no old elisp to
 # hot-reload. The normal agent-repl startup path rebuilds/bounces the backend
 # before restoring workspaces, then loads these files from disk. Treat that

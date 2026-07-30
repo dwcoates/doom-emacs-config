@@ -273,6 +273,32 @@ else
     fail "--no-bounce builds everything and bounces nothing" "rc=$RC log: $(cat "$STUB_LOG")"
 fi
 
+# --- 5b. --no-daemon-bounce: services deploy, the daemon is left alone ------
+# Emacs\'s lazy boot path runs this mode: step 5 bounces the daemon by calling
+# BACK into Emacs over emacsclient, so the caller that IS Emacs must not reach
+# it -- and starts the daemon itself immediately after.
+d="$TMP/t5b"; mkdir -p "$d"; RUN_ENV="" run_deploy "$d" --no-daemon-bounce
+if [ "$RC" -eq 0 ] && log_has "launchctl" && ! log_has "emacsclient"; then
+    pass "--no-daemon-bounce kickstarts the services and never touches Emacs"
+else
+    fail "--no-daemon-bounce kickstarts the services and never touches Emacs" "rc=$RC log: $(cat "$STUB_LOG")"
+fi
+
+# --- 5c. --no-daemon-bounce still records the deployed stamps ---------------
+# Unlike --no-bounce, this mode DID kickstart, so the stamps must move or the
+# next run would bounce services that are already running the installed build.
+d="$TMP/t5c"
+seed_deployed "$d" shim-store bin-v0
+seed_deployed "$d" shim-claude-sidecar bin-v0
+RUN_ENV="" run_deploy "$d" --no-daemon-bounce
+if [ "$RC" -eq 0 ] \
+   && [ "$(cat "$d/h/.cache/agent-repl/bin/.shim-store.deployed")" \
+        = "$(shasum -a 256 "$d/h/.cache/agent-repl/bin/shim-store" | cut -d' ' -f1)" ]; then
+    pass "--no-daemon-bounce stamps the services it kickstarted"
+else
+    fail "--no-daemon-bounce stamps the services it kickstarted" "rc=$RC"
+fi
+
 # --- 6. refused daemon restart fails the deploy loudly ----------------------
 d="$TMP/t6"; mkdir -p "$d"; RUN_ENV="EC_STUB_REFUSE=1" run_deploy "$d"
 if [ "$RC" -eq 3 ] && grep -q "daemon restart" "$d/stderr"; then
