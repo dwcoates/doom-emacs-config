@@ -31,7 +31,7 @@ import (
 	"claude-repld/internal/remediation"
 	"claude-repld/internal/replog"
 	"claude-repld/internal/server"
-	"claude-repld/internal/sessiondrv"
+	"claude-repld/internal/sessioncontroller"
 	"claude-repld/internal/sessionlock"
 	"claude-repld/internal/shim"
 	"claude-repld/internal/shimlisten"
@@ -389,7 +389,7 @@ func main() {
 	}
 
 	// The SSM (resolved per-workspace state) is opened here and shared by BOTH
-	// the frontend snapshot/merge push loop AND the per-session driver's
+	// the frontend snapshot/merge push loop AND the per-session controller's
 	// lifecycle-event application; one owner (main) closes it once.
 	ssmMgr, err := ssm.Open(ssm.Options{
 		DB:       stateStore,
@@ -403,13 +403,13 @@ func main() {
 
 	// The progress-footer resolver (F1) is the SSM's sibling and is owned here
 	// for the same reason: both the frontend push loop and the per-session
-	// driver feed it, so one owner closes it once.
+	// controller feed it, so one owner closes it once.
 	progressMgr := progress.New(progress.Options{Logf: legacyLog})
 	defer progressMgr.Close()
 
 	// Shims dial US. One listening socket serves every session; each shim
 	// announces itself with its ShimHello and the listener routes the
-	// connection to the driver that owns that session. Started BEFORE any
+	// connection to the session controller that owns that session. Started BEFORE any
 	// session is brought up so a shim surviving a previous daemon has
 	// somewhere to reconnect to the instant this one boots.
 	shimSocketPath, err := shimlisten.DefaultSocketPath()
@@ -426,12 +426,12 @@ func main() {
 		daemonFatal(daemonLog, "claude-repld: create session lock dir: %v", err)
 	}
 
-	// The per-session shim-driver consumes each session's UDS shim stream and
+	// The per-session shim-controller consumes each session's UDS shim stream and
 	// renders it onto the frontend surface + SSM. Its push target (the
 	// frontend.Server) does not exist until WireAgentShim returns, so it pushes
 	// through a late-bound forwarder whose target is set below.
 	forwarder := &server.PushForwarder{Logf: legacyLog}
-	// The driver spawns a fresh UDS-mode shim when no live one is listening. The
+	// The controller spawns a fresh UDS-mode shim when no live one is listening. The
 	// exec stays here (main owns node/shim paths); production omits
 	// --store-socket so the shim defaults to the launchd singleton store. The
 	// returned stop func SIGTERMs the shim on hibernation.
@@ -501,8 +501,8 @@ func main() {
 	}
 	// The below-floor history re-pull needs no wiring of its own: it rides the
 	// session's existing shim connection as a ReplayRequest, so the store stays
-	// behind the agent-shim facade (sessiondrv/repull.go).
-	driver, err := sessiondrv.New(sessiondrv.Config{
+	// behind the agent-shim facade (sessioncontroller/repull.go).
+	controller, err := sessioncontroller.New(sessioncontroller.Config{
 		Push:              forwarder,
 		SSM:               ssmMgr,
 		Progress:          progressMgr,
@@ -525,7 +525,7 @@ func main() {
 		// this daemon would spawn today, read fresh on every comparison so a
 		// deploy that lands WHILE the daemon runs is seen without a restart.
 		ShimBuildSHA: shimBuildSHA(*shimScript),
-		Classifier:   sessiondrv.NewCLIClassifier("", legacyLog),
+		Classifier:   sessioncontroller.NewCLIClassifier("", legacyLog),
 		SessionConfigDir: func(sessionID string) string {
 			rec, ok := sessionRegistry.Get(sessionID)
 			if !ok {
@@ -535,9 +535,9 @@ func main() {
 		},
 	})
 	if err != nil {
-		daemonFatal(daemonLog, "claude-repld: build session driver: %v", err)
+		daemonFatal(daemonLog, "claude-repld: build session controller: %v", err)
 	}
-	defer driver.Close()
+	defer controller.Close()
 
 	// Agent-shim frontend.v1 surface (design §9.1, §14.2): the SSM-backed
 	// snapshot + merge Engine + frontend Server. Always on post-cutover — it is
@@ -557,8 +557,8 @@ func main() {
 		StateRoot:      logRoot,
 		Commands:       sessionCommands,
 		Registry:       sessionRegistry,
-		Health:         sessionDriverHealthProbe{Driver: driver, Logf: legacyLog},
-		InitialPrompts: driver,
+		Health:         sessionControllerHealthProbe{Controller: controller, Logf: legacyLog},
+		InitialPrompts: controller,
 		Logf:           legacyLog,
 		InboxInterval:  time.Second,
 	})
@@ -586,7 +586,7 @@ func main() {
 	// target before a frontend can connect, and ensure eagerly on open.
 	opener := &server.WorkspaceOpener{
 		Reg:        sessionRegistry,
-		Ensurer:    driver,
+		Ensurer:    controller,
 		ConfigDirs: knownConfigDirs(accounts),
 		Logf:       legacyLog,
 	}
@@ -594,19 +594,19 @@ func main() {
 	agentShim, err := server.WireAgentShim(server.AgentShimConfig{
 		SSM:               ssmMgr,
 		Progress:          progressMgr,
-		Prompts:           driver,
-		Turns:             driver,
-		Health:            driver,
-		Restarts:          driver,
+		Prompts:           controller,
+		Turns:             controller,
+		Health:            controller,
+		Restarts:          controller,
 		DaemonHealth:      ready,
 		MergeDirs:         pendingMergeDirs{},
 		Lifecycle:         opener,
-		Sessions:          registrySessions{reg: sessionRegistry, driver: driver, modelCatalogs: modelCatalogs, logf: legacyLog},
-		Inits:             driver,
-		Catalogs:          driver,
-		Queues:            driver,
+		Sessions:          registrySessions{reg: sessionRegistry, controller: controller, modelCatalogs: modelCatalogs, logf: legacyLog},
+		Inits:             controller,
+		Catalogs:          controller,
+		Queues:            controller,
 		SessionCommands:   sessionCommands,
-		Resyncer:          driver,
+		Resyncer:          controller,
 		WorkspaceCreation: workspaceBridge,
 		RequestShutdown:   requestShutdown,
 		ClientLogs:        clientLogs,
@@ -619,7 +619,7 @@ func main() {
 	if err != nil {
 		daemonFatal(daemonLog, "claude-repld: frontend surface: %v", err)
 	}
-	// Bind the driver's push target now that the frontend server exists.
+	// Bind the session controller's push target now that the frontend server exists.
 	forwarder.SetTarget(agentShim.Server)
 	defer func() {
 		if cerr := agentShim.Close(); cerr != nil {
@@ -640,7 +640,7 @@ func main() {
 		IdleTimeout:     *idleTimeout,
 		WidgetAssetsDir: *widgetAssets,
 		DaemonAddr:      *addr,
-		Driver:          driver,
+		Controller:      controller,
 		SSM:             ssmMgr,
 		Frontend:        agentShim.Server,
 	})
@@ -757,7 +757,7 @@ func main() {
 		Reg:       sessionRegistry,
 		Connected: shimListener.Connected,
 		Held:      sessionlock.Held,
-		Ensurer:   driver,
+		Ensurer:   controller,
 		Logf:      legacyLog,
 	}).Run(sweepCtx)
 	daemonLog.With("operation", "serve-http", "version", daemonVersion, "address", *addr,
@@ -913,7 +913,7 @@ func pumpAnalystOutput(logger *dlog.Logger, out io.Reader) {
 // rebuilds before the bounce — and a boot-time snapshot would compare every
 // surviving shim against the bundle that was current when the daemon started.
 //
-// An unreadable or absent stamp reports "", which the driver reads as UNKNOWN
+// An unreadable or absent stamp reports "", which the session controller reads as UNKNOWN
 // and never as a mismatch: a checkout with no stamp must not bounce every shim
 // it meets.
 func shimBuildSHA(shimScript string) func() string {

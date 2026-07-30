@@ -10,7 +10,7 @@
 // there is no window in which such a turn is "in flight". A `!tool <command>`
 // turn is different: it AWAITS canUseTool (fake-query.ts runToolTurn), which
 // travels to the daemon as a PermissionRequest and back as a PENDING permission
-// ConversationItem (sessiondrv/driver.go pushPermission), and the fake stays
+// ConversationItem (sessioncontroller/sessioncontroller.go pushPermission), and the fake stays
 // parked there until something answers. That pending item is therefore both the
 // hold and the proof of the hold, and it is what every test here waits for
 // before stopping the turn. The interrupt itself releases it: the shim cancels
@@ -95,7 +95,7 @@ func ackFor(frame *frontendv1.FrontendFrame, requestID string) *frontendv1.Comma
 }
 
 // isPendingPermission identifies the item a blocked canUseTool round-trip
-// produces: arm 30 with RESOLUTION_PENDING (sessiondrv/driver.go:1092 pushes
+// produces: arm 30 with RESOLUTION_PENDING (sessioncontroller/sessioncontroller.go:1092 pushes
 // permissionItem(req, PermissionItem_RESOLUTION_PENDING, "")).
 func isPendingPermission(item *frontendv1.ConversationItem) bool {
 	perm := item.GetPermission()
@@ -130,7 +130,7 @@ func echoOf(prompt string) string { return fmt.Sprintf("echo: %s [mode=", prompt
 // never were.
 //
 // Order-independence is the point. The daemon pushes the interrupt window from
-// inside the command dispatch (sessiondrv noteUserInterrupt → progress
+// inside the command dispatch (sessioncontroller noteUserInterrupt → progress
 // NoteInterrupt, which pushes at once), enqueues the CommandAck after that
 // dispatch returns (frontend/server.go readLoop), and resolves the workspace
 // state only when the stopped turn's TurnEnded comes back through the store —
@@ -302,7 +302,7 @@ func TestE2ENextPromptClosesTheInterruptWindow(t *testing.T) {
 
 	// Act — the prompt the user typed after stopping the agent. The queue is
 	// PAUSED by the stop, but with no turn running this one goes straight
-	// through as the lone runner (sessiondrv queueSubmitLocked).
+	// through as the lone runner (sessioncontroller queueSubmitLocked).
 	writeCmd(t, conn, `{"requestId":"r-next","submitPrompt":{"text":"after the stop"}}`)
 
 	// Assert
@@ -458,7 +458,7 @@ func TestE2EFreshConnectCarriesTheInterruptedResolution(t *testing.T) {
 // TestE2EInterruptedQueueRunsTheNextPromptAlone covers THE PAUSE over the real
 // processes: a stop PAUSES the queue while RETAINING every held prompt, the
 // prompt submitted afterwards jumps them and runs ALONE, and its clean end
-// resumes the drain in the original order (sessiondrv queue.go addHeadJump /
+// resumes the drain in the original order (sessioncontroller queue.go addHeadJump /
 // onTurnBoundary).
 //
 // Order is observed off the fake's own replies, which echo the prompt text

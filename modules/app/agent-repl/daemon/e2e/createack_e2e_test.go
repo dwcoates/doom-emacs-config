@@ -70,7 +70,7 @@ func createAck(t *testing.T, conn *websocket.Conn, cwd, requestID string) (*fron
 // require the turn to flow.
 //
 // Before the gate this raced — the ack preceded the shim's attach, so the very
-// next command could reach a driver with no live connection — and the client
+// next command could reach a session controller with no live connection — and the client
 // covered it with a health poll. The poll is what this replaces, so its absence
 // here is the assertion.
 func TestE2ECreateAckMeansThePromptPathIsOpen(t *testing.T) {

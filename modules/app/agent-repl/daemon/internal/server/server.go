@@ -3,10 +3,10 @@
 //
 // After the agent-shim consumption cutover the daemon no longer owns a
 // Layer-2 stdio streaming hub. Each session's UDS shim is consumed through
-// the per-session driver (internal/sessiondrv) and rendered onto the
+// the per-session controller (internal/sessioncontroller) and rendered onto the
 // frontend.v1 surface (internal/frontend) plus the session-state manager
 // (internal/ssm). The registry is the source of truth for which sessions
-// exist; the driver owns the live shims. Several routes here exist ONLY to
+// exist; the session controller owns the live shims. Several routes here exist ONLY to
 // keep the still-Layer-2 Emacs client working until it finishes its own
 // full-UDS migration; those are marked SUPERSEDED (S7).
 package server
@@ -41,7 +41,7 @@ import (
 	"claude-repld/internal/protocol"
 	"claude-repld/internal/registry"
 	"claude-repld/internal/session"
-	"claude-repld/internal/sessiondrv"
+	"claude-repld/internal/sessioncontroller"
 	"claude-repld/internal/ssm"
 	"claude-repld/internal/workspacecmd"
 )
@@ -145,9 +145,9 @@ type Server struct {
 	// every session as AGENT_REPL_DAEMON_ADDR.
 	daemonAddr string
 
-	// driver consumes each session's UDS shim and backs prompt/interrupt/
+	// controller consumes each session's UDS shim and backs prompt/interrupt/
 	// permission plus /status, /commands, and /tasks introspection.
-	driver *sessiondrv.Manager
+	controller *sessioncontroller.Manager
 	// ssm resolves per-workspace render state (turn-active, live tasks) the
 	// list and idle-sweep read.
 	ssm *ssm.Manager
@@ -191,9 +191,9 @@ type Config struct {
 	// ForceFake mirrors the daemon-wide -fake flag: every session runs the
 	// offline scripted SDK. The resume viability gate skips fake sessions.
 	ForceFake bool
-	// Driver consumes each session's UDS shim (prompt/interrupt/permission,
+	// Controller consumes each session's UDS shim (prompt/interrupt/permission,
 	// plus /status, /commands, /tasks introspection). Required in production.
-	Driver *sessiondrv.Manager
+	Controller *sessioncontroller.Manager
 	// SSM resolves per-workspace render state (turn-active, live tasks).
 	// Required in production.
 	SSM *ssm.Manager
@@ -261,7 +261,7 @@ func New(cfg Config) *Server {
 		now:             now,
 		widgetAssetsDir: cfg.WidgetAssetsDir,
 		daemonAddr:      cfg.DaemonAddr,
-		driver:          cfg.Driver,
+		controller:      cfg.Controller,
 		ssm:             cfg.SSM,
 		frontend:        cfg.Frontend,
 		logins:          cfg.Logins,
@@ -378,7 +378,7 @@ func (s *Server) routes() []route {
 // Registry-sourced session resolution
 //
 // There is no live-session map anymore: the registry is the source of truth
-// for records and the driver owns the live shims. A session id maps to its
+// for records and the session controller owns the live shims. A session id maps to its
 // workspace via rec.CWD.
 // ---------------------------------------------------------------------------
 
@@ -772,7 +772,7 @@ func (s *Server) handleLoginClose(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleTaskOutput serves a bounded, session-scoped tail of a detached task's
-// output file. The task's output path comes off the driver's rebuilt
+// output file. The task's output path comes off the session controller's rebuilt
 // TaskEntry and is re-validated for confinement before any read. The response
 // carries the next byte cursor, whether the task completed, and a live elapsed
 // the frozen SDK heartbeat no longer feeds.
@@ -783,7 +783,7 @@ func (s *Server) handleTaskOutput(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusNotFound, "no such session")
 		return
 	}
-	entry, ok := s.driver.TaskEntry(cwd, r.PathValue("taskId"))
+	entry, ok := s.controller.TaskEntry(cwd, r.PathValue("taskId"))
 	if !ok {
 		httpError(w, http.StatusNotFound, "no such task")
 		return
@@ -976,7 +976,7 @@ func (s *Server) handleAccountSwitch(w http.ResponseWriter, r *http.Request) {
 
 	// Stop the old shim before the root changes. A workspace with no live
 	// shim is an expected no-op, not a failure.
-	if err := s.driver.Hibernate(rec.CWD); err != nil {
+	if err := s.controller.Hibernate(rec.CWD); err != nil {
 		s.logf("session %s: account-switch shim stop (ws %s): %v (expected when no live shim)", id, rec.CWD, err)
 	}
 
@@ -992,7 +992,7 @@ func (s *Server) handleAccountSwitch(w http.ResponseWriter, r *http.Request) {
 
 	// Bring the shim back up under the same id: Ensure re-locates the
 	// just-updated record and spawns fresh under the target root.
-	if err := s.driver.Ensure(rec.CWD); err != nil {
+	if err := s.controller.Ensure(rec.CWD); err != nil {
 		s.httpFail(w, r, http.StatusInternalServerError, "session %s (cwd %s): relaunch under %q: %v", id, rec.CWD, target.ConfigDir, err)
 		return
 	}
@@ -1066,7 +1066,7 @@ func (s *Server) handleRemediate(w http.ResponseWriter, r *http.Request) {
 // prompts and interrupts over the frontend.v1 UDS commands
 // (submitPrompt/interrupt, keyed by workspace), and the webapp drives both over
 // its /stream WebSocket — neither HTTP route had a remaining caller. The turn
-// still flows through the same per-session driver (SubmitPrompt/Interrupt); only
+// still flows through the same per-session controller (SubmitPrompt/Interrupt); only
 // the HTTP entry points are gone.
 
 // frontendProtocolVersion is the agentshim.frontend.v1 protocol version the
@@ -1161,12 +1161,12 @@ func (s *Server) CreateSession(_ context.Context, opts CreateOpts) (string, erro
 	// rejected never tears down a healthy session.
 	s.supersedeCreateConflicts(opts)
 	id := newSessionID()
-	// Register BEFORE bring-up: the driver's SessionLocator resolves a
+	// Register BEFORE bring-up: the session controller's SessionLocator resolves a
 	// workspace to a session by reading the registry, so the record MUST exist
 	// for Ensure to find and drive THIS session — for fake sessions too (unlike
 	// the old L2 hub, which kept fake sessions only in an in-memory map). A fake
 	// record carries an empty claude_session_id, so it never rehydrates into a
-	// doomed --resume; it is simply the driver's handle on a transient session.
+	// doomed --resume; it is simply the session controller's handle on a transient session.
 	if s.registry != nil {
 		if err := s.registry.Put(registry.Record{
 			SessionID:       id,
@@ -1180,18 +1180,18 @@ func (s *Server) CreateSession(_ context.Context, opts CreateOpts) (string, erro
 			s.logf("session %s: registry write on create FAILED — the session will not survive a daemon restart: %v", id, err)
 		}
 	}
-	// Eager, reattach-first bring-up: the driver's SessionLocator resolves the
+	// Eager, reattach-first bring-up: the session controller's SessionLocator resolves the
 	// workspace to the newest non-terminal record — the one just Put — so
 	// Ensure brings up THIS session. A workspace-less session (no cwd) has no
 	// workspace to drive, so it is registered but not brought up.
 	if opts.CWD != "" {
-		if err := s.driver.Ensure(opts.CWD); err != nil {
+		if err := s.controller.Ensure(opts.CWD); err != nil {
 			return "", fmt.Errorf("session %s (cwd %s): bring up shim: %w", id, opts.CWD, err)
 		}
 	}
 	dlog.Tag(s.logf, "cwd", opts.CWD)("session %s: created", id)
 	// Deliver the workspace->session binding proactively: SessionView is not a
-	// driver push (only snapshots carry it otherwise), so the UDS/webapp clients
+	// controller push (only snapshots carry it otherwise), so the UDS/webapp clients
 	// would not learn the new session's id until their next resync without this.
 	s.pushSessionView(id)
 	return id, nil
@@ -1215,10 +1215,10 @@ func (s *Server) DeleteSession(id string) error {
 		rec, _ = s.registry.Get(id)
 	}
 	// Always retry this exact session's stop. A terminal transition can race a
-	// driver eviction while the spawner still owns its process handle; the
+	// controller eviction while the spawner still owns its process handle; the
 	// session-id-scoped stop guarantees a replacement on the same cwd is untouched.
 	if rec.CWD != "" {
-		if err := s.driver.HibernateSession(rec.CWD, id); err != nil {
+		if err := s.controller.HibernateSession(rec.CWD, id); err != nil {
 			s.logf("session %s: delete exact shim stop FAILED (ws %s terminal_before=%v): %v",
 				id, rec.CWD, wasTerminal, err)
 		} else {
@@ -1264,7 +1264,7 @@ func (s *Server) DaemonView() *frontendv1.DaemonView {
 // live pending-permission ids. It is the SINGLE shaping shared by the connect
 // snapshot (cmd/claude-repld registrySessions) and the create/delete pushes, so
 // the two cannot drift. Rehydratable/Hibernated are not listed session state
-// post-cutover (driver-internal shim lifecycle) and stay false.
+// post-cutover (controller-internal shim lifecycle) and stay false.
 //
 // logf carries the classifier's loud default for a persisted death reason
 // outside the known set. A record written by an earlier build may hold an
@@ -1287,7 +1287,7 @@ func SessionViewFromRecordWithModels(logf dlog.Logf, rec registry.Record, pendin
 		Cwd:             rec.CWD,
 		Terminal:        rec.Terminal,
 		// The one NON-DURABLE fact on this message: whether THIS daemon holds a
-		// live driver for the workspace. See the field's proto comment — a
+		// live session controller for the workspace. See the field's proto comment — a
 		// frontend that answers "is this workspace already up?" from the durable
 		// fields alone says yes about a workspace a restarted daemon has never
 		// brought up, which is how an unwired workspace stopped bootstrapping on
@@ -1317,11 +1317,11 @@ func SessionViewFromRecordWithModels(logf dlog.Logf, rec registry.Record, pendin
 // since UNSPECIFIED makes the switch-ensure retry rather than skip.
 func backfillState(s string) frontendv1.BackfillState {
 	switch s {
-	case sessiondrv.BackfillPending:
+	case sessioncontroller.BackfillPending:
 		return frontendv1.BackfillState_BACKFILL_STATE_PENDING
-	case sessiondrv.BackfillDone:
+	case sessioncontroller.BackfillDone:
 		return frontendv1.BackfillState_BACKFILL_STATE_DONE
-	case sessiondrv.BackfillFailed:
+	case sessioncontroller.BackfillFailed:
 		return frontendv1.BackfillState_BACKFILL_STATE_FAILED
 	default:
 		return frontendv1.BackfillState_BACKFILL_STATE_UNSPECIFIED
@@ -1348,9 +1348,9 @@ func (s *Server) pushSessionView(id string) {
 	}
 	var pending []string
 	live := false
-	if !rec.Terminal && rec.CWD != "" && s.driver != nil {
-		pending = s.driver.PendingPermissions(rec.CWD)
-		live = s.driver.Live(rec.CWD)
+	if !rec.Terminal && rec.CWD != "" && s.controller != nil {
+		pending = s.controller.PendingPermissions(rec.CWD)
+		live = s.controller.Live(rec.CWD)
 	}
 	if s.modelCatalogs == nil {
 		panic(fmt.Sprintf("server: session %s: pushSessionView requires ModelCatalogs", id))
@@ -1362,7 +1362,7 @@ func (s *Server) pushSessionView(id string) {
 func (s *Server) handleListSessions(w http.ResponseWriter, _ *http.Request) {
 	// SUPERSEDED (S7): the Emacs poller consumes the full list; the webapp
 	// probe only reads presence. It is built entirely off the registry (the
-	// source of truth for records) plus the driver/SSM for live fields.
+	// source of truth for records) plus the session controller/SSM for live fields.
 	type entry struct {
 		SessionID string `json:"session_id"`
 		Terminal  bool   `json:"terminal"`
@@ -1380,7 +1380,7 @@ func (s *Server) handleListSessions(w http.ResponseWriter, _ *http.Request) {
 		// under the cutover (the registry is always the source of truth).
 		Rehydratable bool `json:"rehydratable,omitempty"`
 		// Hibernated is retained for wire compatibility; hibernation is now a
-		// driver-internal shim lifecycle detail, not a listed session state.
+		// controller-internal shim lifecycle detail, not a listed session state.
 		Hibernated bool `json:"hibernated,omitempty"`
 	}
 	records := s.registry.All()
@@ -1398,7 +1398,7 @@ func (s *Server) handleListSessions(w http.ResponseWriter, _ *http.Request) {
 			if st, found, _ := s.ssm.Current(rec.CWD); found {
 				e.TurnActive = st.GetTurnActive()
 			}
-			e.PendingPermissions = s.driver.PendingPermissions(rec.CWD)
+			e.PendingPermissions = s.controller.PendingPermissions(rec.CWD)
 		}
 		list = append(list, e)
 	}
@@ -1491,13 +1491,13 @@ func (s *Server) sweepIdle() {
 		if !s.sweepable(rec.SessionID, rec.CWD, nowMs) {
 			continue
 		}
-		if err := s.driver.Hibernate(rec.CWD); err != nil {
+		if err := s.controller.Hibernate(rec.CWD); err != nil {
 			// Expected for an already-hibernated / never-brought-up workspace, and
 			// now also for one that started working between sweepable's read and
 			// this call. That race is exactly why the settled check is inside
 			// hibernate() as well as here: this gate can go stale, and the one
 			// inside the teardown cannot.
-			if errors.Is(err, sessiondrv.ErrNotSettled) {
+			if errors.Is(err, sessioncontroller.ErrNotSettled) {
 				s.logf("session %s: idle sweep HELD after the gate (ws %s): the workspace started working between the check and the teardown: %v",
 					rec.SessionID, rec.CWD, err)
 			} else {
@@ -1557,7 +1557,7 @@ func (s *Server) sweepable(sessionID, workspace string, nowMs int64) bool {
 
 // ShutdownAll ends the daemon's session work (daemon teardown). The registry
 // records stay non-terminal so they rehydrate on the next boot; main also
-// calls driver.Close().
+// calls controller.Close().
 //
 // SHIMS SURVIVE BY DEFAULT, and that is the whole point of the parameter.
 //
@@ -1589,14 +1589,14 @@ func (s *Server) ShutdownAll(stopShims bool) {
 			continue
 		}
 		s.logf("server: shutdown stop-shims mode: stopping the shim for session %s (ws %s)", rec.SessionID, rec.CWD)
-		if err := s.driver.Hibernate(rec.CWD); err != nil {
+		if err := s.controller.Hibernate(rec.CWD); err != nil {
 			// A MID-TURN WORKSPACE IS NOW REFUSED here too, because the settled
 			// check lives inside the shared teardown rather than in each caller.
 			// That is the right trade for this caller as well: a shim left running
 			// on the previous bundle is a stale binary, while a shim SIGTERMed
 			// mid-turn is lost work, and the version-driven stale-shim refresh
 			// already bounces the survivor the moment it reconnects.
-			if errors.Is(err, sessiondrv.ErrNotSettled) {
+			if errors.Is(err, sessioncontroller.ErrNotSettled) {
 				s.logf("server: shutdown stop-shims mode PRESERVING the shim for session %s (ws %s): it has not settled, and the stale-shim refresh will bounce it after the turn: %v",
 					rec.SessionID, rec.CWD, err)
 			} else {

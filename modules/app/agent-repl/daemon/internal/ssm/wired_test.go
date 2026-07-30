@@ -539,7 +539,7 @@ func TestTheBlueBandOutranksHibernated(t *testing.T) {
 	}
 }
 
-// A teal tab OVER A LIVE TURN is unreachable by construction — sessiondrv's
+// A teal tab OVER A LIVE TURN is unreachable by construction — sessioncontroller's
 // hibernate() refuses any workspace whose resolved state is not settled — so the
 // resolver treats it as an INVARIANT VIOLATION rather than a case to handle.
 //

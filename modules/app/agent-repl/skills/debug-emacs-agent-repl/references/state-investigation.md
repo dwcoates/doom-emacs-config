@@ -58,7 +58,7 @@ there is no evidence of a live session AND none of a breakage. A clear token
 contributes no candidate for its axis.
 
 The wired axis's closed half is TWO states, and it used to be one. `severed`
-means the substrate broke (a bring-up that could not be completed, a driver that
+means the substrate broke (a bring-up that could not be completed, a session controller that
 died on a terminal protocol error); `hibernated` means nothing is wrong (we
 SIGTERMed the shim on purpose to reclaim ~500MB, or a daemon has just booted).
 `dormant` is the PRE-SPLIT spelling and still appears in rows written before the

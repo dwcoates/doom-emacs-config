@@ -31,7 +31,7 @@
  * where that ordering is visible.
  *
  * HOW THE ROTATION IS LEARNED. `SessionView.claude_session_id`, which the
- * daemon re-pushes on the rotation itself (server/drivers.go
+ * daemon re-pushes on the rotation itself (server/sessioncontrollers.go
  * AdoptVendorSessionID) from the shim's re-handshake — before it resubscribes,
  * so the announcement precedes the new space's first conversation push on the
  * connection. The re-requested resync makes that ordering a convenience rather

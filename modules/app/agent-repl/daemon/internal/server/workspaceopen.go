@@ -41,7 +41,7 @@
 //   - PENDING is set HERE, because this is the only place that knows a
 //     transcript exists at all — the event-stream derivation downstream can
 //     see backfill ARRIVE but never that one was owed;
-//   - DONE and FAILED are derived in sessiondrv's consumer from the event
+//   - DONE and FAILED are derived in sessioncontroller's consumer from the event
 //     stream (a data.v1.TranscriptLine, and a sidecar-stamped UnparsedEvent
 //     respectively). See frontendv1.BackfillState for the full mapping.
 //
@@ -62,11 +62,11 @@ import (
 
 	"claude-repld/internal/registry"
 	"claude-repld/internal/session"
-	"claude-repld/internal/sessiondrv"
+	"claude-repld/internal/sessioncontroller"
 )
 
 // WorkspaceEnsurer brings a workspace's session up without submitting a
-// prompt. Satisfied by *sessiondrv.Manager.
+// prompt. Satisfied by *sessioncontroller.Manager.
 type WorkspaceEnsurer interface {
 	Ensure(workspace string) error
 }
@@ -176,7 +176,7 @@ func (o *WorkspaceOpener) bindRecord(rec registry.Record) bool {
 	// exactly the blue window the never-blue contract is about.
 	if d.Found && rec.BackfillState == "" {
 		if _, err := o.Reg.Update(rec.SessionID, func(r *registry.Record) {
-			r.BackfillState = sessiondrv.BackfillPending
+			r.BackfillState = sessioncontroller.BackfillPending
 		}); err != nil {
 			o.Logf("server: marking session %s backfill-pending FAILED: %v", rec.SessionID, err)
 		} else {

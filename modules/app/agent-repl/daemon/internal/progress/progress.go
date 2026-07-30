@@ -255,7 +255,7 @@ func (m *Manager) NoteTurnAccepted(workspace, sessionID string) {
 // ONLY THE COMMAND PATH CALLS THIS. The queue's interject sends the same
 // Interrupt to the same shim as machinery (a held prompt asked to run sooner,
 // not a user asking for the turn to stop), and it reaches this resolver from
-// nowhere: sessiondrv's interject calls the shim client directly, while the
+// nowhere: sessioncontroller's interject calls the shim client directly, while the
 // frontend command's Interrupt is the sole caller here.
 func (m *Manager) NoteInterrupt(workspace, sessionID string, outcome corev1.InterruptOutcome) {
 	if workspace == "" {

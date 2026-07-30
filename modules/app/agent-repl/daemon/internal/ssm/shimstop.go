@@ -31,7 +31,7 @@ import (
 // The release restores `thinking` only for a turn the log can still see, which
 // is then closed here.
 //
-// SOLEDRIVER says whether this stop is the workspace's OWN teardown. It decides
+// soleSessionController says whether this stop is the workspace's OWN teardown. It decides
 // one thing: whether an UNATTRIBUTED `thinking` — a row the SSM itself appended
 // with no session id, such as the one a permission close restores — may be
 // spent. It is exactly the row the observed bug wedges on, and it names no
@@ -43,7 +43,7 @@ import (
 // A claim naming a DIFFERENT session is declined under either value. It is not
 // this session's to spend, and that refusal is the same one InvalidateTurnClaim
 // makes.
-func (m *Manager) CloseStaleTurn(workspace, sessionID, reason string, soleDriver bool) (bool, error) {
+func (m *Manager) CloseStaleTurn(workspace, sessionID, reason string, soleSessionController bool) (bool, error) {
 	if workspace == "" {
 		return false, fmt.Errorf("ssm: CloseStaleTurn got an empty workspace")
 	}
@@ -56,7 +56,7 @@ func (m *Manager) CloseStaleTurn(workspace, sessionID, reason string, soleDriver
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.closePermissionLocked(workspace, reason)
-	return m.closeStaleTurnLocked(workspace, sessionID, reason, soleDriver)
+	return m.closeStaleTurnLocked(workspace, sessionID, reason, soleSessionController)
 }
 
 // closeStaleTurnLocked appends the closing agent-axis row when the workspace's
@@ -73,26 +73,26 @@ func (m *Manager) CloseStaleTurn(workspace, sessionID, reason string, soleDriver
 // off the stale row itself — the latch defends itself. This write goes straight
 // to the log rather than through Apply, so the guard never sees it, and the
 // readiness arriving afterwards reads a settled axis and is appended normally.
-func (m *Manager) closeStaleTurnLocked(workspace, sessionID, reason string, soleDriver bool) (bool, error) {
+func (m *Manager) closeStaleTurnLocked(workspace, sessionID, reason string, soleSessionController bool) (bool, error) {
 	active, claimant, err := turnClaim(m.db, workspace)
 	if err != nil {
 		return false, err
 	}
 	if !active {
-		m.logf("ssm: stale turn close ws=%s session=%s reason=%q sole_driver=%v — the agent axis holds no `thinking`, so the turn's own end already closed it honestly and nothing is appended",
-			workspace, sessionID, reason, soleDriver)
+		m.logf("ssm: stale turn close ws=%s session=%s reason=%q sole_session_controller=%v — the agent axis holds no `thinking`, so the turn's own end already closed it honestly and nothing is appended",
+			workspace, sessionID, reason, soleSessionController)
 		return false, nil
 	}
-	if claimant != sessionID && !(claimant == "" && soleDriver) {
-		m.logf("ssm: stale turn close ws=%s session=%s reason=%q sole_driver=%v DECLINED — the standing `thinking` is held by session=%q, which is not this stop's to spend",
-			workspace, sessionID, reason, claimant, soleDriver)
+	if claimant != sessionID && !(claimant == "" && soleSessionController) {
+		m.logf("ssm: stale turn close ws=%s session=%s reason=%q sole_session_controller=%v DECLINED — the standing `thinking` is held by session=%q, which is not this stop's to spend",
+			workspace, sessionID, reason, claimant, soleSessionController)
 		return false, nil
 	}
 	cause := causeShimStopped + ":" + reason
 	if err := appendRow(m.db, workspace, sessionID, sigIdle, cause, sql.NullInt64{}, m.nextAt(), ""); err != nil {
 		return false, err
 	}
-	m.logf("ssm: stale turn CLOSED ws=%s session=%s reason=%q sole_driver=%v claimant=%q — the shim behind the running turn is gone, so its end can never arrive and the agent axis is reconciled to `idle` rather than latched in `thinking`",
-		workspace, sessionID, reason, soleDriver, claimant)
+	m.logf("ssm: stale turn CLOSED ws=%s session=%s reason=%q sole_session_controller=%v claimant=%q — the shim behind the running turn is gone, so its end can never arrive and the agent axis is reconciled to `idle` rather than latched in `thinking`",
+		workspace, sessionID, reason, soleSessionController, claimant)
 	return true, m.reresolveLocked(workspace, cause, 0)
 }

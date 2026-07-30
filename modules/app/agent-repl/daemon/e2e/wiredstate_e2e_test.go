@@ -83,10 +83,10 @@ func TestE2EAFreshSessionGoesStartingThenWiredThenItsRealState(t *testing.T) {
 // but it goes TEAL, not blue, and this is the end-to-end proof of the split.
 //
 // It is driven through the daemon's own idle sweeper — the production
-// hibernation trigger, which calls driver.Hibernate — on a clock this test
+// hibernation trigger, which calls controller.Hibernate — on a clock this test
 // supplies, so the edge is provoked by an event rather than waited out. That
 // also makes this the only test that exercises the trap in situ: the sweeper's
-// hibernation cancels the driver ctx, so the driver-exit tail fires on this same
+// hibernation cancels the session controller ctx, so the session-controller-exit tail fires on this same
 // workspace milliseconds later, and a tail that wrote `severed` unconditionally
 // would repaint the tab blue right after this assertion's frame.
 func TestE2EHibernationDropsTheWorkspaceToHibernated(t *testing.T) {
@@ -114,14 +114,14 @@ func TestE2EHibernationDropsTheWorkspaceToHibernated(t *testing.T) {
 }
 
 // AND THE TEAL STAYS TEAL. The frame above is only half the guarantee: the
-// hibernation's own cancel ends client.Run, so the driver-exit tail runs on this
+// hibernation's own cancel ends client.Run, so the session-controller-exit tail runs on this
 // workspace immediately afterwards, and an unconditional severance there
 // repainted every single hibernation blue milliseconds after it went teal.
 //
 // This reads PAST the hibernation frame and fails on a severance arriving behind
 // it, which is the only way to catch a repaint that happens after the state the
 // previous test already accepted.
-func TestE2EAHibernationIsNotRepaintedByItsOwnDriverExit(t *testing.T) {
+func TestE2EAHibernationIsNotRepaintedByItsOwnSessionControllerExit(t *testing.T) {
 	// Arrange — a wired, green session under the idle sweeper.
 	h := newUDSHarness(t, withIdleSweeper())
 	cwd := t.TempDir()
@@ -151,7 +151,7 @@ func TestE2EAHibernationIsNotRepaintedByItsOwnDriverExit(t *testing.T) {
 			continue
 		}
 		if st.GetState() == frontendv1.RenderState_RENDER_STATE_SEVERED {
-			t.Fatalf("the driver-exit tail repainted a hibernation %s; a clean exit must write no wired row at all", st.GetState())
+			t.Fatalf("the session-controller-exit tail repainted a hibernation %s; a clean exit must write no wired row at all", st.GetState())
 		}
 	}
 }

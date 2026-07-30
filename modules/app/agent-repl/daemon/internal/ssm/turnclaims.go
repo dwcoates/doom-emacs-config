@@ -236,8 +236,8 @@ func (m *Manager) ReconcileTurnHandshake(workspace, claimantSessionID string, id
 	// is the edge that was missing. A shim reporting zero turn ids is stating,
 	// from the only vantage point that can, that nothing is running behind it —
 	// the same statement already trusted to seed `turn_lifecycle_claim` above
-	// and to set the driver's process-local latch in
-	// sessiondrv.reconcileTurnSnapshot. A workspace whose axis still tops out in
+	// and to set the session controller's process-local latch in
+	// sessioncontroller.reconcileTurnSnapshot. A workspace whose axis still tops out in
 	// `thinking` under that statement is holding a claim whose `TurnEnded` will
 	// never arrive, because the turn it named is over and the process that would
 	// have reported it is a previous one.

@@ -14,7 +14,7 @@ import (
 // signals (merge_none, degraded_clear, task_started, task_ended) that the
 // resolution query interprets but never emits as a resolved state.
 const (
-	// THE WIRED AXIS. sessiondrv produces it off the bring-up gate's own
+	// THE WIRED AXIS. sessioncontroller produces it off the bring-up gate's own
 	// verdict, and it is what makes a workspace's color CONNECTION TRUTH:
 	// `wired` clears the axis and lets the agent axis speak, and neither other
 	// token does.
@@ -456,7 +456,7 @@ WITH
     --
     -- TEAL, because the absence of a wired row is the absence of EVIDENCE OF
     -- BREAKAGE. Nothing was ever wired to this workspace: no bring-up failed and
-    -- no driver died. It resolved to the old blue dormant before the split, which
+    -- no session controller died. It resolved to the old blue dormant before the split, which
     -- meant a workspace whose only sin was never having been opened stood there
     -- accusing the local substrate of being broken.
     SELECT 'hibernated', 'wired:absent', cause_seq, at, session_id FROM latest_agent
@@ -562,7 +562,7 @@ func resolve(db *sql.DB, workspace string, logf dlog.Logf) (resolved, error) {
 		(agentCause.String == causeTurnStarted || agentCause.String == causePromptAccepted)
 
 	// AN INVARIANT VIOLATION, never a benign combination. A hibernation is
-	// something WE do on purpose, and sessiondrv's hibernate() refuses any
+	// something WE do on purpose, and sessioncontroller's hibernate() refuses any
 	// workspace whose resolved state is not settled — so a workspace reading
 	// `hibernated` with a turn still active is a state no code path is supposed to
 	// be able to produce.

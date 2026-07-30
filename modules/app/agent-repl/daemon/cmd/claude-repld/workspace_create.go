@@ -469,29 +469,29 @@ func (c daemonSessionCreator) ResolveSessionMetadata(_ context.Context, job work
 }
 
 // WorkspaceHealthProbe is deliberately stronger than a shim handshake.  Main
-// binds it to sessiondrv.Manager.Health once that health path is assembled;
+// binds it to sessioncontroller.Manager.Health once that health path is assembled;
 // this adapter refuses construction without the probe rather than weakening
 // the workspace-ready invariant to Ensure/AwaitReady.
 type WorkspaceHealthProbe interface {
 	CheckWorkspaceHealth(context.Context, string, string, string) error
 }
 
-// sessionDriverHealthProbe turns the driver's correlated shim health RPC into
+// sessionControllerHealthProbe turns the session controller's correlated shim health RPC into
 // the create manager's hard readiness gate.  It deliberately rejects a nil or
 // unhealthy reply; a shim connection alone is not evidence that the complete
 // daemon-to-shim path is usable.
-type sessionDriverHealthProbe struct {
-	Driver interface {
+type sessionControllerHealthProbe struct {
+	Controller interface {
 		Health(context.Context, string, string, string) (*corev1.HealthStatus, error)
 	}
 	Logf func(string, ...any)
 }
 
-func (h sessionDriverHealthProbe) CheckWorkspaceHealth(ctx context.Context, workspace, sessionID, requestID string) error {
-	if h.Driver == nil || h.Logf == nil {
+func (h sessionControllerHealthProbe) CheckWorkspaceHealth(ctx context.Context, workspace, sessionID, requestID string) error {
+	if h.Controller == nil || h.Logf == nil {
 		return fmt.Errorf("workspace create: session health probe is not fully configured")
 	}
-	status, err := h.Driver.Health(ctx, workspace, sessionID, requestID)
+	status, err := h.Controller.Health(ctx, workspace, sessionID, requestID)
 	if err != nil {
 		return fmt.Errorf("workspace create: health rpc workspace=%s session=%s job=%s: %w", workspace, sessionID, requestID, err)
 	}
@@ -514,7 +514,7 @@ func (h daemonSessionHealth) AwaitHealthy(ctx context.Context, job workspacecrea
 	return h.Probe.CheckWorkspaceHealth(ctx, job.WorktreePath, job.SessionID, job.ID)
 }
 
-// InitialPromptRouter is the required session-driver seam.  The JobID is
+// InitialPromptRouter is the required session-controller seam.  The JobID is
 // carried as a vendor-visible origin, but delivery is intentionally
 // at-least-once: the job is checkpointed only after this call succeeds, so the
 // narrow process-death window after a shim acknowledgement can repeat a
