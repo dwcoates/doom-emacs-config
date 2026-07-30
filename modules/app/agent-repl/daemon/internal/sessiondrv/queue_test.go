@@ -1056,6 +1056,14 @@ func TestInterjectMootPathDoesNotSubmitIntoATurnThatStartedMeanwhile(t *testing.
 	waitFor(t, "the first prompt to reach the shim", func() bool {
 		return len(h.client.promptTexts()) == 1
 	})
+	// Prompt acceptance now closes the old accepted-but-not-yet-observed race
+	// by setting the queue latch immediately. Put the fixture back at the
+	// no-turn premise this test needs while deliberately retaining the second
+	// entry; the test below owns the racing start explicitly.
+	d := h.driver()
+	h.m.mu.Lock()
+	d.turnActive = false
+	h.m.mu.Unlock()
 
 	// Act — force the held entry. With no turn running this takes the moot
 	// path; the gate stops it mid-window and a TurnStarted lands there.

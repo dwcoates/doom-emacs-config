@@ -1,0 +1,193 @@
+package ssm
+
+import (
+	"strings"
+	"testing"
+
+	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+)
+
+func TestMarkPromptAcceptedMovesReadyToThinking(t *testing.T) {
+	m, cl, _ := openTest(t, fakeResolver{"s1": "ws1"})
+	if err := m.Apply(evSessionStarted("s1", 1)); err != nil {
+		t.Fatalf("session started: %v", err)
+	}
+
+	var published *frontendv1.WorkspaceState
+	if err := m.MarkPromptAccepted("ws1", "s1", "req-1", func(state *frontendv1.WorkspaceState) {
+		published = state
+	}); err != nil {
+		t.Fatalf("MarkPromptAccepted: %v", err)
+	}
+
+	got := mustCurrent(t, m, "ws1")
+	if got.GetState() != frontendv1.RenderState_RENDER_STATE_THINKING || !got.GetTurnActive() {
+		t.Fatalf("state = %s turn_active=%v, want THINKING/true", got.GetState(), got.GetTurnActive())
+	}
+	if got.GetCauseKind() != causePromptAccepted || got.GetCauseSeq() != 0 {
+		t.Fatalf("cause = %q seq=%d, want %q/0", got.GetCauseKind(), got.GetCauseSeq(), causePromptAccepted)
+	}
+	if published == nil || published.GetState() != frontendv1.RenderState_RENDER_STATE_THINKING || !published.GetTurnActive() {
+		t.Fatalf("published = %+v, want synchronous THINKING/active state", published)
+	}
+	if !cl.contains(`ssm: prompt accepted ws=ws1 session=s1 request_id="req-1"`) {
+		t.Fatalf("missing accepted-edge log:\n%s", strings.Join(cl.lines, "\n"))
+	}
+}
+
+func TestMarkPromptAcceptedIsIdempotentWhenTurnStartedWonTheRace(t *testing.T) {
+	m, cl, _ := openTest(t, fakeResolver{"s1": "ws1"})
+	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+		t.Fatalf("turn started: %v", err)
+	}
+
+	if err := m.MarkPromptAccepted("ws1", "s1", "req-1", func(*frontendv1.WorkspaceState) {}); err != nil {
+		t.Fatalf("MarkPromptAccepted: %v", err)
+	}
+
+	got := mustCurrent(t, m, "ws1")
+	if got.GetCauseKind() != causeTurnStarted || got.GetCauseSeq() != 1 {
+		t.Fatalf("cause = %q seq=%d, want durable turn_started/1 preserved", got.GetCauseKind(), got.GetCauseSeq())
+	}
+	if !cl.contains("prompt accepted IDEMPOTENT") {
+		t.Fatalf("missing idempotent-race log:\n%s", strings.Join(cl.lines, "\n"))
+	}
+}
+
+func TestMarkPromptAcceptedRejectsAnotherSessionsTurn(t *testing.T) {
+	m, cl, _ := openTest(t, fakeResolver{"s1": "ws1", "s2": "ws1"})
+	if err := m.Apply(evTurnStarted("s2", 1)); err != nil {
+		t.Fatalf("turn started: %v", err)
+	}
+
+	err := m.MarkPromptAccepted("ws1", "s1", "req-1", func(*frontendv1.WorkspaceState) {})
+
+	if err == nil || !strings.Contains(err.Error(), `session "s2" owns the active turn`) {
+		t.Fatalf("err = %v, want active-owner rejection", err)
+	}
+	if got := mustCurrent(t, m, "ws1").GetState(); got != frontendv1.RenderState_RENDER_STATE_THINKING {
+		t.Fatalf("state = %s, want standing THINKING untouched", got)
+	}
+	if !cl.contains("prompt accepted REJECTED") {
+		t.Fatalf("missing rejection log:\n%s", strings.Join(cl.lines, "\n"))
+	}
+}
+
+func TestReconcileAlreadyCompleteClosesThinkingBeforeFooterWindow(t *testing.T) {
+	m, cl, _ := openTest(t, fakeResolver{"s1": "ws1"})
+	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+		t.Fatalf("turn started: %v", err)
+	}
+
+	closed, err := m.ReconcileAlreadyComplete("ws1", "s1")
+
+	if err != nil {
+		t.Fatalf("ReconcileAlreadyComplete: %v", err)
+	}
+	if !closed {
+		t.Fatal("closed = false, want true")
+	}
+	got := mustCurrent(t, m, "ws1")
+	if got.GetState() != frontendv1.RenderState_RENDER_STATE_IDLE || got.GetTurnActive() {
+		t.Fatalf("state = %s turn_active=%v, want IDLE/false", got.GetState(), got.GetTurnActive())
+	}
+	if got.GetCauseKind() != causeInterruptAlreadyComplete {
+		t.Fatalf("cause = %q, want %q", got.GetCauseKind(), causeInterruptAlreadyComplete)
+	}
+	if !cl.contains("already-complete reconciliation CLOSED") {
+		t.Fatalf("missing reconciliation log:\n%s", strings.Join(cl.lines, "\n"))
+	}
+}
+
+func TestReconcileAlreadyCompletePreservesSettledOutcome(t *testing.T) {
+	m, cl, _ := openTest(t, fakeResolver{"s1": "ws1"})
+	if err := m.Apply(evTurnEnded("s1", 1, false)); err != nil {
+		t.Fatalf("turn ended: %v", err)
+	}
+
+	closed, err := m.ReconcileAlreadyComplete("ws1", "s1")
+
+	if err != nil {
+		t.Fatalf("ReconcileAlreadyComplete: %v", err)
+	}
+	if closed {
+		t.Fatal("closed = true, want false over an already-settled outcome")
+	}
+	if got := mustCurrent(t, m, "ws1").GetState(); got != frontendv1.RenderState_RENDER_STATE_DONE {
+		t.Fatalf("state = %s, want DONE preserved", got)
+	}
+	if !cl.contains("decision=preserve_settled state=done") {
+		t.Fatalf("missing preserved-outcome log:\n%s", strings.Join(cl.lines, "\n"))
+	}
+}
+
+func TestReconcileAlreadyCompleteClosesStalePermission(t *testing.T) {
+	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
+	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+		t.Fatalf("turn started: %v", err)
+	}
+	if err := m.ApplyPermission("ws1", true, "request"); err != nil {
+		t.Fatalf("open permission: %v", err)
+	}
+
+	closed, err := m.ReconcileAlreadyComplete("ws1", "s1")
+
+	if err != nil {
+		t.Fatalf("ReconcileAlreadyComplete: %v", err)
+	}
+	if !closed {
+		t.Fatal("closed = false, want true")
+	}
+	if got := mustCurrent(t, m, "ws1"); got.GetState() != frontendv1.RenderState_RENDER_STATE_IDLE || got.GetTurnActive() {
+		t.Fatalf("state = %s turn_active=%v, want IDLE/false", got.GetState(), got.GetTurnActive())
+	}
+}
+
+func TestReconcileAlreadyCompleteRejectsAnotherSessionsClaim(t *testing.T) {
+	m, cl, _ := openTest(t, fakeResolver{"s1": "ws1", "s2": "ws1"})
+	if err := m.Apply(evTurnStarted("s2", 1)); err != nil {
+		t.Fatalf("turn started: %v", err)
+	}
+
+	closed, err := m.ReconcileAlreadyComplete("ws1", "s1")
+
+	if err == nil || !strings.Contains(err.Error(), `session "s2"`) {
+		t.Fatalf("err = %v, want foreign-claim rejection", err)
+	}
+	if closed {
+		t.Fatal("closed = true, want false on rejection")
+	}
+	if got := mustCurrent(t, m, "ws1").GetState(); got != frontendv1.RenderState_RENDER_STATE_THINKING {
+		t.Fatalf("state = %s, want THINKING untouched", got)
+	}
+	if !cl.contains("already-complete reconciliation REJECTED") {
+		t.Fatalf("missing rejection log:\n%s", strings.Join(cl.lines, "\n"))
+	}
+}
+
+func TestPromptStateMethodsRejectMissingIdentity(t *testing.T) {
+	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
+	tests := []struct {
+		name string
+		call func() error
+	}{
+		{"prompt workspace", func() error { return m.MarkPromptAccepted("", "s1", "r", func(*frontendv1.WorkspaceState) {}) }},
+		{"prompt session", func() error { return m.MarkPromptAccepted("ws1", "", "r", func(*frontendv1.WorkspaceState) {}) }},
+		{"prompt publisher", func() error { return m.MarkPromptAccepted("ws1", "s1", "r", nil) }},
+		{"interrupt workspace", func() error {
+			_, err := m.ReconcileAlreadyComplete("", "s1")
+			return err
+		}},
+		{"interrupt session", func() error {
+			_, err := m.ReconcileAlreadyComplete("ws1", "")
+			return err
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := tc.call(); err == nil {
+				t.Fatal("err = nil, want validation failure")
+			}
+		})
+	}
+}

@@ -5,10 +5,10 @@ import (
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 )
 
-// promptEcho is ONE prompt the daemon has taken responsibility for sending, and
-// the bubble it pushed to say so.
+// promptEcho is ONE prompt the shim accepted, and the bubble the daemon pushed
+// after synchronously publishing that prompt's `thinking` state.
 //
-// It is the daemon's RECEIPT OF THE SEND, not the vendor's echo of it. The
+// It is the daemon's RECEIPT OF ACCEPTANCE, not the vendor's echo of it. The
 // prompt's durable life belongs to the transcript: the shim writes a UserLine,
 // the store stamps it with a seq, and it reaches the frontend as an ordinary
 // conversation item — eventually. Between the submit and that line the user had
@@ -29,7 +29,9 @@ type promptEcho struct {
 func echoUUID(requestID string) string { return "prompt-echo:" + requestID }
 
 // pushUserEcho pushes the prompt bubble for one accepted submit and retains it
-// until the durable transcript line claims it.
+// until the durable transcript line claims it. Its caller must first complete
+// the synchronous accepted-prompt state barrier; this function deliberately
+// owns only the receipt so the ordering remains explicit at forwardPrompt.
 //
 // RETAINED AND REPLAYED, exactly like a permission item (pushPermission) and
 // for the same reason: it carries no store seq, so no from_seq a resync names

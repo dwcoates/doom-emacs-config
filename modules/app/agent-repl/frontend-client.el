@@ -717,46 +717,58 @@ replacement for the GET /sessions per-id probe."
   (let ((view (agent-repl--frontend-session-view id)))
     (and view (not (eq (plist-get view :terminal) t)))))
 
-(defun agent-repl--frontend-ws-turn-active-p (ws)
-  "Return non-nil when WS's last pushed `WorkspaceState' is turn-active.
-Reads the `:turn-active' resolution input frontend-state.el stashed under
-`:pushed-render-state-meta' from the pushed frame (protojson bool -> t)."
-  (eq (plist-get (agent-repl--ws-get ws :pushed-render-state-meta) :turn-active) t))
-
 (defun agent-repl--frontend-turn-active-sessions ()
-  "Return workspace-bound session ids the daemon reports mid-turn.
-Sourced entirely from pushed-frame state (no daemon round-trip): a session
-counts when its bound workspace's last `WorkspaceState' push is turn-active
-\(`agent-repl--frontend-ws-turn-active-p') AND its `SessionView' is
-non-terminal (`agent-repl--frontend-session-live-p').  The daemon-stop
-guard keys on this.
-
-Iterating only live workspaces' bound ids intrinsically excludes both a
-stale UNBOUND session (never visited) and a TERMINAL session
-\(filtered by the live-p check) — exactly the two exclusions the old
-GET /sessions sweep spelled out."
-  (let (busy)
-    (dolist (ws (agent-repl--live-ws-names) (nreverse busy))
-      (let ((sid (agent-repl--ws-get ws :frontend-session-id)))
-        (when (and sid
-                   (agent-repl--frontend-ws-turn-active-p ws)
-                   (agent-repl--frontend-session-live-p sid))
-          (push sid busy))))))
+  "Return live session ids whose authoritative workspace is mid-turn.
+This daemon-stop guard delegates to
+`agent-repl--frontend-all-turn-active-session-ids' so startup and explicit
+stop cannot form two opinions from different caches."
+  (agent-repl--frontend-all-turn-active-session-ids))
 
 (defun agent-repl--frontend-all-turn-active-session-ids ()
   "Return every live session id whose latest daemon state is turn-active.
-Unlike `agent-repl--frontend-turn-active-sessions', this startup-safety
-probe includes workspace paths Emacs has not restored yet.  A normal Emacs
-restart must never kill a turn merely because the perspective-to-path
-mapping has not been reconstructed.  Terminal sessions remain excluded."
-  (let (busy)
-    (dolist (state (agent-repl--frontend-workspace-state-views-all)
-                   (delete-dups (nreverse busy)))
-      (let ((sid (plist-get state :sessionId)))
-        (when (and sid
-                   (eq (plist-get state :turnActive) t)
-                   (agent-repl--frontend-session-live-p sid))
-          (push sid busy))))))
+Correlates daemon-owned snapshot collections by WORKSPACE PATH: an active
+`WorkspaceState' contributes every non-terminal `SessionView' whose
+`:workspace' is the same path.  It never compares their session ids:
+lifecycle-backed WorkspaceState rows can name the vendor UUID, while
+SessionView.sessionId is the daemon's `s_...' identity.
+
+This includes unrestored workspace paths and ignores stale local
+`:frontend-session-id' bindings, protecting every real turn without letting
+an obsolete binding block forever."
+  (let ((states (agent-repl--frontend-workspace-state-views-all))
+        (sessions (agent-repl--frontend-session-views-all))
+        busy
+        active-workspaces
+        unmatched)
+    (dolist (state states)
+      (when (eq (plist-get state :turnActive) t)
+        (let* ((workspace (plist-get state :workspace))
+               (state-session-id (plist-get state :sessionId))
+               (matches
+                (delq nil
+                      (mapcar
+                       (lambda (view)
+                         (let ((sid (plist-get view :sessionId)))
+                           (and sid
+                                (equal (plist-get view :workspace) workspace)
+                                (agent-repl--frontend-session-live-p sid)
+                                sid)))
+                       sessions))))
+          (push workspace active-workspaces)
+          (if matches
+              (setq busy (append matches busy))
+            (push (list workspace state-session-id) unmatched))
+          (agent-repl--log-verbose
+           (agent-repl--frontend-ws-name workspace)
+           "frontend turn-active correlate: workspace=%S state-session-id=%S matching-live-session-ids=%S matched=%s"
+           workspace state-session-id matches (if matches "t" "nil")))))
+    (setq busy (sort (delete-dups busy) #'string<))
+    (agent-repl--log
+     nil
+     "frontend turn-active probe: source=workspace-state+session-roster state-count=%d session-count=%d active-workspaces=%S busy=%S unmatched=%S"
+     (length states) (length sessions) (nreverse active-workspaces) busy
+     (nreverse unmatched))
+    busy))
 
 ;; The client-side orphan reaper that used to live here is GONE, on purpose.
 ;; It existed because a superseded session's shim kept running with nobody

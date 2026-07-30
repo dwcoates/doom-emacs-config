@@ -60,6 +60,16 @@ type StateApplier interface {
 	// events already reached the degraded axis; this transport-level miss did
 	// not, so it produced a banner and no workspace color at all.
 	ApplyConnectionDegraded(workspace string, degraded bool, reason string) error
+	// MarkPromptAccepted appends the daemon-local `thinking` edge after the
+	// shim accepts an immediately delivered prompt and synchronously publishes
+	// that state through PUBLISH before the frontend prompt bubble can be
+	// exposed. The durable TurnStarted follows over the store stream.
+	MarkPromptAccepted(workspace, sessionID, requestID string, publish func(*frontendv1.WorkspaceState)) error
+	// ReconcileAlreadyComplete makes an ALREADY_COMPLETE interrupt Ack agree
+	// with the agent axis before the progress footer may publish
+	// "already finished". It closes a still-standing `thinking`/`permission`
+	// row owned by this session and preserves already-settled turn outcomes.
+	ReconcileAlreadyComplete(workspace, sessionID string) (closed bool, err error)
 	// MarkTurnInterrupted records that a USER-COMMANDED stop was delivered to
 	// the workspace's running turn, so that turn's own TurnEnded reports
 	// `interrupted` instead of `done` or `vendor_blocked` (I1). Fed ONLY from

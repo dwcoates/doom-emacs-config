@@ -1131,63 +1131,58 @@ keyed by the workspace CWD (no session id on the wire)."
 ;;;; ---- turn-active probe ------------------------------------------------------
 
 (ert-deftest agent-repl-test-frontend-turn-active-sessions-extracts-busy-ids ()
-  "A bound session whose pushed WorkspaceState is turn-active is returned; idle skipped."
-  ;; Arrange — ws1's pushed state is turn-active, ws2's is not.
-  (agent-repl-test--with-views '((:sessionId "s_busy" :workspace "/w1")
-                                 (:sessionId "s_idle" :workspace "/w2"))
-    (agent-repl-test--with-ws "ws1"
-        '(:frontend-session-id "s_busy" :project-dir "/w1"
-          :pushed-render-state-meta (:turn-active t))
-      (agent-repl-test--with-ws "ws2"
-          '(:frontend-session-id "s_idle" :project-dir "/w2"
-            :pushed-render-state-meta (:turn-active nil))
-        ;; Act / Assert
-        (should (equal (agent-repl--frontend-turn-active-sessions) '("s_busy")))))))
+  "An active workspace resolves its live agent session by workspace path."
+  (let ((agent-repl--frontend-workspace-state-views
+         (make-hash-table :test 'equal)))
+    (puthash "/w1"
+             '(:workspace "/w1" :sessionId "vendor-uuid" :turnActive t)
+             agent-repl--frontend-workspace-state-views)
+    (puthash "/w2"
+             '(:workspace "/w2" :sessionId "vendor-idle" :turnActive nil)
+             agent-repl--frontend-workspace-state-views)
+    (agent-repl-test--with-views '((:sessionId "s_busy" :workspace "/w1")
+                                   (:sessionId "s_idle" :workspace "/w2"))
+      (should (equal (agent-repl--frontend-turn-active-sessions) '("s_busy"))))))
 
 (ert-deftest agent-repl-test-frontend-turn-active-sessions-skips-terminal ()
-  "A terminal session is never counted busy, even bound and turn-active."
-  ;; Arrange
-  (agent-repl-test--with-views '((:sessionId "s_zombie" :workspace "/w1" :terminal t)
-                                 (:sessionId "s_live" :workspace "/w2"))
-    (agent-repl-test--with-ws "ws1"
-        '(:frontend-session-id "s_zombie" :project-dir "/w1"
-          :pushed-render-state-meta (:turn-active t))
-      (agent-repl-test--with-ws "ws2"
-          '(:frontend-session-id "s_live" :project-dir "/w2"
-            :pushed-render-state-meta (:turn-active t))
-        ;; Act / Assert
-        (should (equal (agent-repl--frontend-turn-active-sessions) '("s_live")))))))
+  "A terminal session is never counted busy for its active workspace."
+  (let ((agent-repl--frontend-workspace-state-views
+         (make-hash-table :test 'equal)))
+    (puthash "/w1" '(:workspace "/w1" :turnActive t)
+             agent-repl--frontend-workspace-state-views)
+    (puthash "/w2" '(:workspace "/w2" :turnActive t)
+             agent-repl--frontend-workspace-state-views)
+    (agent-repl-test--with-views '((:sessionId "s_zombie" :workspace "/w1" :terminal t)
+                                   (:sessionId "s_live" :workspace "/w2"))
+      (should (equal (agent-repl--frontend-turn-active-sessions) '("s_live"))))))
 
-(ert-deftest agent-repl-test-frontend-turn-active-sessions-skips-unbound-stale ()
-  "A turn-active session in the store but bound to NO live workspace is never counted.
-Iterating only live workspaces' bindings intrinsically excludes the stale
-unbound session a prior bounce leaves behind — it must not block a future
-bounce."
-  ;; Arrange — s_stale is live in the store but no workspace is bound to it.
-  (agent-repl-test--with-views '((:sessionId "s_bound" :workspace "/w1")
-                                 (:sessionId "s_stale" :workspace "/w2"))
-    (agent-repl-test--with-ws "ws1"
-        '(:frontend-session-id "s_bound" :project-dir "/w1"
-          :pushed-render-state-meta (:turn-active t))
-      ;; Act / Assert
-      (should (equal (agent-repl--frontend-turn-active-sessions) '("s_bound"))))))
+(ert-deftest agent-repl-test-frontend-turn-active-sessions-ignores-stale-local-binding ()
+  "A stale local binding cannot turn an idle authoritative workspace busy."
+  (let ((agent-repl--frontend-workspace-state-views
+         (make-hash-table :test 'equal)))
+    (puthash "/w1" '(:workspace "/w1" :turnActive nil)
+             agent-repl--frontend-workspace-state-views)
+    (agent-repl-test--with-views '((:sessionId "s_current" :workspace "/w1"))
+      (agent-repl-test--with-ws "ws1"
+          '(:frontend-session-id "s_stale" :project-dir "/w1"
+            :pushed-render-state-meta (:turn-active t))
+        (should-not (agent-repl--frontend-turn-active-sessions))))))
 
 (ert-deftest agent-repl-test-frontend-turn-active-sessions-nil-when-none-active ()
-  "No bound workspace reporting turn-active reads as no turns (nothing to protect)."
-  ;; Arrange — a bound, live session whose pushed state is idle.
-  (agent-repl-test--with-views '((:sessionId "s_1" :workspace "/w1"))
-    (agent-repl-test--with-ws "ws1"
-        '(:frontend-session-id "s_1" :project-dir "/w1"
-          :pushed-render-state-meta (:turn-active nil))
-      ;; Act / Assert
-      (should (null (agent-repl--frontend-turn-active-sessions))))))
+  "No authoritative workspace reporting turn-active means nothing to protect."
+  (let ((agent-repl--frontend-workspace-state-views
+         (make-hash-table :test 'equal)))
+    (puthash "/w1" '(:workspace "/w1" :turnActive nil)
+             agent-repl--frontend-workspace-state-views)
+    (agent-repl-test--with-views '((:sessionId "s_1" :workspace "/w1"))
+      (should-not (agent-repl--frontend-turn-active-sessions)))))
 
 (ert-deftest agent-repl-test-frontend-all-turn-active-includes-unrestored-workspace ()
   "Startup safety sees an active daemon path before Emacs restores its workspace."
   (let ((agent-repl--frontend-workspace-state-views
          (make-hash-table :test 'equal)))
     (puthash "/unrestored"
-             '(:workspace "/unrestored" :sessionId "s_busy" :turnActive t)
+             '(:workspace "/unrestored" :sessionId "vendor-uuid" :turnActive t)
              agent-repl--frontend-workspace-state-views)
     (agent-repl-test--with-views
         '((:sessionId "s_busy" :workspace "/unrestored"))
@@ -1199,7 +1194,7 @@ bounce."
   (let ((agent-repl--frontend-workspace-state-views
          (make-hash-table :test 'equal)))
     (puthash "/old"
-             '(:workspace "/old" :sessionId "s_dead" :turnActive t)
+             '(:workspace "/old" :sessionId "vendor-uuid" :turnActive t)
              agent-repl--frontend-workspace-state-views)
     (agent-repl-test--with-views
         '((:sessionId "s_dead" :workspace "/old" :terminal t))

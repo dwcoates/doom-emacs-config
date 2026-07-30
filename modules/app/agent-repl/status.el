@@ -1557,12 +1557,12 @@ and therefore deliberately performs no logging."
             row)))
 
 (defun agent-repl--tabbar-log-render
-    (frame width line-width names current widths anchor-pos rows padded
+    (frame width line-width names states current widths anchor-pos rows padded
            centered joined output)
   "Log one diagnostic observation of the visible tab-bar render boundary.
 
 FRAME and WIDTH describe the rendering frame.  LINE-WIDTH is the physical
-row budget; NAMES, CURRENT, WIDTHS, and ANCHOR-POS describe window
+row budget; NAMES, STATES, CURRENT, WIDTHS, and ANCHOR-POS describe window
 selection; ROWS, PADDED, CENTERED, JOINED, and OUTPUT capture every
 formatter stage.  Text properties are stripped only in the diagnostic
 payload so the rendered values themselves remain untouched.
@@ -1581,7 +1581,7 @@ runs before the canonical logger."
          (centered-widths
           (mapcar #'agent-repl--tabline-entry-width centered))
          (signature
-          (list width line-width names current widths anchor-pos
+          (list width line-width names states current widths anchor-pos
                 plain-rows row-widths padded-widths plain-centered
                 centered-widths plain-joined
                 (frame-parameter frame 'tab-bar-lines)
@@ -1593,13 +1593,13 @@ runs before the canonical logger."
            frame :render-signature :render-at signature)
       (agent-repl--log-verbose
        (and current (agent-repl--ws-known-p current) current)
-       "tabbar-render: frame=%S frame-width=%d frame-pixel-width=%d frame-char-width=%d line-width=%d configured-rows=%d tab-bar-lines=%S keep-state=%S tab-bar-mode=%S tab-bar-show=%S auto-resize=%S auto-width=%S inhibit-implied-resize=%S format=%S names=%S current=%S entry-widths=%S anchor-pos=%d rows=%S row-widths=%S padded-widths=%S centered=%S centered-widths=%S joined-newlines=%d output-newlines=%d output-chars=%d output=%S"
+       "tabbar-render: frame=%S frame-width=%d frame-pixel-width=%d frame-char-width=%d line-width=%d configured-rows=%d tab-bar-lines=%S keep-state=%S tab-bar-mode=%S tab-bar-show=%S auto-resize=%S auto-width=%S inhibit-implied-resize=%S format=%S names=%S states=%S current=%S entry-widths=%S anchor-pos=%d rows=%S row-widths=%S padded-widths=%S centered=%S centered-widths=%S joined-newlines=%d output-newlines=%d output-chars=%d output=%S"
        frame width (frame-pixel-width frame) (frame-char-width frame)
        line-width agent-repl--tabline-row-count
        (frame-parameter frame 'tab-bar-lines)
        (frame-parameter frame 'tab-bar-lines-keep-state)
        tab-bar-mode tab-bar-show auto-resize-tab-bars tab-bar-auto-width
-       frame-inhibit-implied-resize tab-bar-format names current widths
+       frame-inhibit-implied-resize tab-bar-format names states current widths
        anchor-pos plain-rows row-widths padded-widths plain-centered
        centered-widths (cl-count ?\n plain-joined)
        (cl-count ?\n plain-output) (length output) plain-output))))
@@ -1641,6 +1641,12 @@ remaining tabs carry contiguous 1-based numbers."
   (let* ((width (frame-width))
          (line-width (max 1 (1- width)))
          (names (agent-repl--ws-tabline-names))
+         (states
+          (mapcar (lambda (name)
+                    (cons name
+                          (and (agent-repl--ws-known-p name)
+                               (agent-repl--ws-render-status name))))
+                  names))
          (entries (agent-repl--tabline-rendered-entries names))
          (current (agent-repl--ws-current-name))
          ;; Measured once and handed to both the anchor and the rows:
@@ -1661,7 +1667,7 @@ remaining tabs carry contiguous 1-based numbers."
          (joined (agent-repl--join-tabline-rows centered))
          (output (concat joined (agent-repl--tabline-cache-buster))))
     (agent-repl--tabbar-log-render
-     (selected-frame) width line-width names current widths anchor-pos
+     (selected-frame) width line-width names states current widths anchor-pos
      rows padded centered joined output)
     output))
 

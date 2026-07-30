@@ -595,6 +595,25 @@ export class WorkspaceSidebar {
     const revealing = this.mount.hidden;
     const wasPinned = revealing && this.isPinned();
     this.roster = validateWorkspaceRoster(roster);
+    const rows = rosterRows(this.roster);
+    const current = rows.find((row) => row.current);
+    log(
+      "info",
+      `workspace roster adopted rows=${rows.length} current_dir=${current?.dir ?? "none"} ` +
+        `current_status=${current?.status ?? "none"} view=${this.roster.view} ` +
+        `nav_dir=${this.roster.navDir ?? "none"} revealing=${revealing}`,
+      {
+        operation: "sidebar.roster-adopted",
+        context: {
+          rows: rows.length,
+          current_dir: current?.dir ?? "",
+          current_status: current?.status ?? "",
+          view: this.roster.view,
+          nav_dir: this.roster.navDir ?? "",
+          revealing,
+        },
+      },
+    );
     this.mount.hidden = false;
     this.render();
     if (wasPinned) this.parkFeed();
@@ -749,6 +768,19 @@ export class WorkspaceSidebar {
       }
     }, COMMAND_FAILED_NOTICE_MS);
   }
+}
+
+/** Flatten every row, including nested workspace families, for diagnostics. */
+function rosterRows(roster: WorkspaceRoster): WorkspaceRow[] {
+  const out: WorkspaceRow[] = [];
+  const visit = (row: WorkspaceRow): void => {
+    out.push(row);
+    row.children.forEach(visit);
+  };
+  const groups = roster.view === "task" ? roster.tasks : roster.repos;
+  groups.forEach((group) => group.rows.forEach(visit));
+  roster.recentlyMerged?.rows.forEach(visit);
+  return out;
 }
 
 /**

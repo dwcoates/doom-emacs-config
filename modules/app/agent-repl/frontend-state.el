@@ -572,6 +572,20 @@ view (readiness, binary-staleness) therefore gate on
 which is exactly how the old HTTP probes treated an unreachable daemon."
   agent-repl--frontend-last-daemon-view)
 
+(defun agent-repl--frontend-invalidate-daemon-view (reason)
+  "Invalidate the retained daemon identity before a new UDS connection.
+REASON names the connection boundary that made the prior view stale.  The
+next `agent-repl--frontend-wait-ready' must then pump until a fresh snapshot
+applies a new `DaemonView'; merely opening a socket can no longer satisfy
+readiness with the previous daemon instance's identity."
+  (let ((prior agent-repl--frontend-last-daemon-view))
+    (setq agent-repl--frontend-last-daemon-view nil)
+    (agent-repl--log
+     nil
+     "frontend-daemon-view invalidated: reason=%s prior-present=%s prior-boot-id=%S result=nil"
+     reason (if prior "t" "nil") (plist-get prior :bootId)))
+  nil)
+
 (defun agent-repl--frontend-daemon-view-binary-mtime-seconds ()
   "Return the pushed daemon binary mtime as integer Unix SECONDS, or nil.
 Reads `:daemonBinaryMtimeMs' off the stored `DaemonView'.  The proto field

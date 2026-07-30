@@ -743,6 +743,8 @@ export class ConversationStore {
 
   private applyWorkspaceState(ws: WorkspaceStatusInput): boolean {
     const s = this.state;
+    const previousState = s.renderState;
+    const previousActive = s.turnInFlight;
     if (ws.sessionId !== "") s.sessionId = ws.sessionId;
     // THE workspace's phase, kept so the footer reads the same authority the
     // tab bar does.
@@ -754,6 +756,14 @@ export class ConversationStore {
     } else if (!ws.turnActive) {
       s.turnStartedAt = null;
     }
+    this.log(
+      "info",
+      `workspace state adopted workspace=${ws.workspace} session=${ws.sessionId} ` +
+        `state=${previousState ?? "none"}->${ws.state} ` +
+        `turn_active=${previousActive}->${ws.turnActive} live_tasks=${ws.liveTaskCount} ` +
+        `merge_phase=${ws.mergePhase} cause_kind=${ws.causeKind} ` +
+        `cause_seq=${ws.causeSeq} at_ms=${ws.atMs}`,
+    );
     return true;
   }
 
@@ -768,10 +778,20 @@ export class ConversationStore {
    * off the retained `ProgressView` by the footer — the store keeps no copy.
    */
   private applyProgress(p: ProgressInput): boolean {
+    const previousInterrupt = this.progress?.interrupt?.outcome ?? null;
     this.progress = p;
     const s = this.state;
     if (p.turnStartedAtMs > 0) {
       s.turnStartedAt = new Date(p.turnStartedAtMs).toISOString();
+    }
+    const nextInterrupt = p.interrupt?.outcome ?? null;
+    if (previousInterrupt !== nextInterrupt) {
+      this.log(
+        "info",
+        `progress interrupt adopted workspace=${p.workspace} session=${p.sessionId} ` +
+          `outcome=${previousInterrupt ?? "none"}->${nextInterrupt ?? "none"} ` +
+          `since_ms=${p.interrupt?.sinceMs ?? 0} turn_started_at_ms=${p.turnStartedAtMs}`,
+      );
     }
     return true;
   }

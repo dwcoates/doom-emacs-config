@@ -29,7 +29,7 @@ import { AGENTS_SPEC, agentsMenuHtml } from "./agents.js";
 import { CounterEntry, CounterSpec, isActive } from "./counter-menu.js";
 import { formatElapsed } from "./duration.js";
 import { escapeHtml } from "./highlight.js";
-import type { ProgressInput, WebRenderState } from "./state-adapter.js";
+import type { InterruptInput, ProgressInput, WebRenderState } from "./state-adapter.js";
 import { ConversationItem, ToolItem } from "./store.js";
 import { TASKS_SPEC, tasksMenuHtml } from "./tasks.js";
 import { IDLE_LABEL, TIMER_SLOT } from "./timer.js";
@@ -190,6 +190,32 @@ export interface InterruptChip {
   tone: "ok" | "error";
   /** The hover line, which says what the word means without abbreviating. */
   title: string;
+}
+
+/**
+ * Return the active phase that contradicts an ALREADY_COMPLETE interrupt
+ * verdict, or null when the pair is coherent.
+ *
+ * The shim's verdict means no foreground turn exists. Thinking and the two
+ * context-cut phases all claim one does; permission can cover the same stale
+ * turn and is reconciled at the daemon boundary for the same reason. Keeping
+ * this check beside the renderer makes any future regression a canonical log
+ * event instead of a visual puzzle.
+ */
+export function alreadyCompletePhaseViolation(
+  state: WebRenderState | null,
+  outcome: InterruptInput["outcome"] | null,
+): WebRenderState | null {
+  if (outcome !== "already_complete") return null;
+  switch (state) {
+    case "thinking":
+    case "clearing":
+    case "compacting":
+    case "permission":
+      return state;
+    default:
+      return null;
+  }
 }
 
 /**

@@ -2528,11 +2528,11 @@ without a stub so the suite covers the live-runtime dependency surface."
       ;; Act: two identical observations followed by one changed raw row.
       (dotimes (_ 2)
         (agent-repl--tabbar-log-render
-         'frame-a 80 79 '("ws") "ws" '(8) 0
+         'frame-a 80 79 '("ws") '(("ws" . :ready)) "ws" '(8) 0
          '("row" "") '("row" "   ") '(" row" "   ")
          " row \n    " " row \n    "))
       (agent-repl--tabbar-log-render
-       'frame-a 80 79 '("ws") "ws" '(12) 0
+       'frame-a 80 79 '("ws") '(("ws" . :thinking)) "ws" '(12) 0
        '("changed" "") '("changed" "   ") '(" changed" "   ")
        " changed \n    " " changed \n    ")
       ;; Assert
