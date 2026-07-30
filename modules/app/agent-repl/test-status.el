@@ -1079,6 +1079,46 @@ visible-width character."
              (r2 (agent-repl--tabline-advice '("ws1"))))
         (should-not (equal r1 r2))))))
 
+(ert-deftest agent-repl-test-force-tab-bar-redraw-preserves-fixed-height ()
+  "A repaint invalidates tab data without invoking Emacs's line recalculator.
+On Emacs 30.2 `tab-bar--update-tab-bar-lines' sets every frame and the
+future-frame default to one line when `tab-bar-show' is t.  The fixed
+two-line contract therefore requires the redraw path never to call it."
+  ;; Arrange
+  (let ((agent-repl--tabline-space-toggle nil)
+        (agent-repl--tabbar-observation-states
+         (make-hash-table :test #'eq))
+        (agent-repl--tabbar-diagnostic-until nil)
+        (tabs-set nil)
+        (mode-line-forced nil))
+    (cl-letf (((symbol-function 'tab-bar-tabs)
+               (lambda () '(current-tabs)))
+              ((symbol-function 'tab-bar-tabs-set)
+               (lambda (&rest args) (setq tabs-set args)))
+              ((symbol-function 'tab-bar--update-tab-bar-lines)
+               (lambda (&rest _)
+                 (error "redraw must not recalculate tab-bar line count")))
+              ((symbol-function 'force-mode-line-update)
+               (lambda (&optional all)
+                 (setq mode-line-forced all)))
+              ((symbol-function 'selected-frame) (lambda () 'frame-a))
+              ((symbol-function 'frame-parameter)
+               (lambda (_frame parameter)
+                 (pcase parameter
+                   ('tab-bar-lines 2)
+                   ('tab-bar-lines-keep-state t))))
+              ((symbol-function 'agent-repl--ws-current-name)
+               (lambda () "ws"))
+              ((symbol-function 'agent-repl--ws-known-p)
+               (lambda (_ws) t))
+              ((symbol-function 'agent-repl--log-verbose) #'ignore))
+      ;; Act
+      (agent-repl--force-tab-bar-redraw)
+      ;; Assert
+      (should agent-repl--tabline-space-toggle)
+      (should (equal tabs-set '((current-tabs))))
+      (should mode-line-forced))))
+
 (ert-deftest agent-repl-test-update-all-flips-space-toggle ()
   "update-all-workspace-states flips the space toggle on each call."
   (agent-repl-test--with-clean-state
@@ -2310,6 +2350,194 @@ columns could overflow the frame and wrap to a further physical row."
   ;; Arrange / Act / Assert
   (should (equal (agent-repl--pad-tabline-row "abc" 40) "abc")))
 
+;;;; ---- Tests: rendered-width row centering ----
+
+(ert-deftest agent-repl-test-center-tabline-row-plain-text ()
+  "Plain text is centered by its rendered column width."
+  ;; Arrange / Act / Assert
+  (should (equal (agent-repl--center-tabline-row "abc" 9) "   abc")))
+
+(ert-deftest agent-repl-test-center-tabline-row-measures-display-image ()
+  "Image width rather than source character count determines left padding."
+  ;; Arrange
+  (cl-letf (((symbol-function 'string-pixel-width)
+             (lambda (string)
+               (+ (string-width (substring-no-properties string))
+                  (if (text-property-not-all
+                       0 (length string) 'display nil string)
+                      7
+                    0))))
+            ((symbol-function 'frame-char-width) (lambda (&rest _) 1)))
+    (let ((row (propertize " " 'display "eight-column-image")))
+      ;; Act
+      (let ((centered (agent-repl--center-tabline-row row 10)))
+        ;; Assert: the image is eight columns, so exactly one column is added.
+        (should (string-prefix-p " " centered))
+        (should (= 9 (agent-repl--tabline-entry-width centered)))))))
+
+;;;; ---- Tests: tab-bar boundary instrumentation ----
+
+(ert-deftest agent-repl-test-tabbar-keymap-caption-observes-final-newlines ()
+  "The Lisp-to-C boundary records the caption after tab-bar transforms it."
+  ;; Arrange
+  (let* ((caption "first row\nsecond row")
+         (keymap `((mouse-1 . ignore)
+                   (str-1 menu-item ,caption ignore)))
+         ;; Act
+         (observations
+          (agent-repl--tabbar-keymap-caption-observations keymap))
+         (observation (car observations)))
+    ;; Assert
+    (should (= 1 (length observations)))
+    (should (eq 'str-1 (plist-get observation :key)))
+    (should (= 1 (plist-get observation :newlines)))
+    (should (equal caption (plist-get observation :caption)))
+    (should (equal caption (plist-get observation :visible-caption)))))
+
+(ert-deftest agent-repl-test-tabbar-backtrace-capture-is-available-unstubbed ()
+  "The mutation tracing's backtrace capture resolves without a test stub.
+
+The live Emacs 30 runtime does not provide `backtrace-to-string', even though
+batch test startup can incidentally load the library that defines it.  This
+test deliberately exercises agent-repl's portable `backtrace' capture helper
+without a stub so the suite covers the live-runtime dependency surface."
+  ;; Arrange / Act / Assert — the load of status.el is the code under test.
+  (should (stringp (agent-repl--tabbar-backtrace-string))))
+
+(ert-deftest agent-repl-test-tabbar-set-frame-lines-audit-preserves-result ()
+  "The setter boundary logs requested and final line counts with a backtrace."
+  ;; Arrange
+  (let ((lines 2)
+        (record nil)
+        (agent-repl--tabbar-frame-parameter-audit-active nil))
+    (cl-letf (((symbol-function 'selected-frame) (lambda () 'frame-a))
+              ((symbol-function 'frame-parameter)
+               (lambda (_frame _parameter) lines))
+              ((symbol-function 'agent-repl--tabbar-backtrace-string)
+               (lambda () "caller-trace"))
+              ((symbol-function 'agent-repl--ws-current-name)
+               (lambda () nil))
+              ((symbol-function 'agent-repl--log)
+               (lambda (_ws format-string &rest args)
+                 (setq record (apply #'format format-string args)))))
+      ;; Act
+      (let ((result
+             (agent-repl--tabbar-audit-set-frame-parameter
+              (lambda (_frame _parameter value)
+                (setq lines value)
+                'setter-result)
+              nil 'tab-bar-lines 0)))
+        ;; Assert
+        (should (eq result 'setter-result))
+        (should (= lines 0))
+        (should (string-match-p "prior=2 requested=0 final=0" record))
+        (should (string-match-p "caller-trace" record))))))
+
+(ert-deftest agent-repl-test-tabbar-modify-frame-lines-audit-resignals-errors ()
+  "The bulk setter boundary logs failures and preserves the original signal."
+  ;; Arrange
+  (let ((record nil)
+        (agent-repl--tabbar-frame-parameter-audit-active nil))
+    (cl-letf (((symbol-function 'selected-frame) (lambda () 'frame-a))
+              ((symbol-function 'frame-parameter)
+               (lambda (_frame _parameter) 2))
+              ((symbol-function 'agent-repl--tabbar-backtrace-string)
+               (lambda () "bulk-caller-trace"))
+              ((symbol-function 'agent-repl--ws-current-name)
+               (lambda () nil))
+              ((symbol-function 'agent-repl--log)
+               (lambda (_ws format-string &rest args)
+                 (setq record (apply #'format format-string args)))))
+      ;; Act / Assert
+      (should-error
+       (agent-repl--tabbar-audit-modify-frame-parameters
+        (lambda (&rest _) (error "setter failed"))
+        nil '((tab-bar-lines . 0) (width . 100)))
+       :type 'error)
+      (should (string-match-p "requested=0 final=2" record))
+      (should (string-match-p "setter failed" record))
+      (should (string-match-p "bulk-caller-trace" record)))))
+
+(ert-deftest agent-repl-test-tabbar-keymap-audit-logs-state-changes-only ()
+  "The hot keymap boundary logs once until its actual caption changes."
+  ;; Arrange
+  (let ((agent-repl--tabbar-observation-states
+         (make-hash-table :test #'eq))
+        (agent-repl--tabbar-diagnostic-until nil)
+        (tab-bar-auto-width nil)
+        (log-count 0)
+        (first '((str-1 menu-item "row one\nrow two" ignore)))
+        (first-with-cache-buster
+         `((str-1 menu-item
+                  ,(concat "row one\nrow two"
+                           (propertize " " 'invisible t))
+                  ignore)))
+        (second '((str-1 menu-item "changed\nrow two" ignore))))
+    (cl-letf (((symbol-function 'selected-frame) (lambda () 'frame-a))
+              ((symbol-function 'frame-parameter)
+               (lambda (_frame parameter)
+                 (pcase parameter
+                   ('tab-bar-lines 2)
+                   ('tab-bar-lines-keep-state t))))
+              ((symbol-function 'agent-repl--ws-current-name)
+               (lambda () "ws"))
+              ((symbol-function 'agent-repl--ws-known-p)
+               (lambda (_ws) t))
+              ((symbol-function 'agent-repl--log-verbose)
+               (lambda (&rest _) (cl-incf log-count))))
+      ;; Act
+      (should (eq first (agent-repl--tabbar-audit-keymap first)))
+      (should
+       (equal
+        (plist-get
+         (car (agent-repl--tabbar-keymap-caption-observations first))
+         :visible-caption)
+        (plist-get
+         (car (agent-repl--tabbar-keymap-caption-observations
+               first-with-cache-buster))
+         :visible-caption)))
+      (agent-repl--tabbar-audit-keymap first-with-cache-buster)
+      (agent-repl--tabbar-audit-keymap second)
+      ;; Assert
+      (should (= 2 log-count)))))
+
+(ert-deftest agent-repl-test-tabbar-render-log-records-changed-pipeline ()
+  "The visible formatter boundary logs identical state once and changed rows."
+  ;; Arrange
+  (let ((agent-repl--tabbar-observation-states
+         (make-hash-table :test #'eq))
+        (agent-repl--tabbar-diagnostic-until nil)
+        (tab-bar-mode t)
+        (tab-bar-show t)
+        (auto-resize-tab-bars nil)
+        (tab-bar-auto-width nil)
+        (tab-bar-format '(agent-repl-workspace-tabline-formatted))
+        (frame-inhibit-implied-resize '(tab-bar-lines))
+        (log-count 0))
+    (cl-letf (((symbol-function 'frame-parameter)
+               (lambda (_frame parameter)
+                 (pcase parameter
+                   ('tab-bar-lines 2)
+                   ('tab-bar-lines-keep-state t))))
+              ((symbol-function 'frame-pixel-width) (lambda (_frame) 800))
+              ((symbol-function 'frame-char-width) (lambda (&optional _frame) 10))
+              ((symbol-function 'agent-repl--ws-known-p)
+               (lambda (_ws) t))
+              ((symbol-function 'agent-repl--log-verbose)
+               (lambda (&rest _) (cl-incf log-count))))
+      ;; Act: two identical observations followed by one changed raw row.
+      (dotimes (_ 2)
+        (agent-repl--tabbar-log-render
+         'frame-a 80 79 '("ws") "ws" '(8) 0
+         '("row" "") '("row" "   ") '(" row" "   ")
+         " row \n    " " row \n    "))
+      (agent-repl--tabbar-log-render
+       'frame-a 80 79 '("ws") "ws" '(12) 0
+       '("changed" "") '("changed" "   ") '(" changed" "   ")
+       " changed \n    " " changed \n    ")
+      ;; Assert
+      (should (= 2 log-count)))))
+
 ;;;; ---- Tests: tabline row packing (livelock guard) ----
 ;;
 ;; `agent-repl--tabline-rows' returns a LIST of exactly MAX-ROWS
@@ -2423,8 +2651,8 @@ the anchor are what the leading badge counts."
 ;; livelock, the actual pixel height of the tab-bar strip) cannot be
 ;; exercised in batch: there is no graphical frame.  These tests pin the
 ;; STRING contract only — which entries render, in which order, in how
-;; many rows.  The height contract is covered indirectly, by pinning
-;; that installation never touches a live frame's `tab-bar-lines'.
+;; many rows.  The installation tests separately pin the frame-parameter
+;; contract and the no-native-recalculation redraw contract.
 
 (defconst agent-repl-test--anchor-names
   '("n1" "n2" "n3" "n4" "n5" "n6" "n7" "n8")
@@ -2505,22 +2733,25 @@ surviving entry to its LEFT takes over."
                        "gone" '("n2" "n3") '("n1" "n2" "n3")))))
 
 (ert-deftest agent-repl-test-tabline-anchor-index-records-state ()
-  "The stateful wrapper records the anchor NAME, the width it was computed
-at, and the name list it was computed against."
+  "The stateful wrapper records anchor state under the supplied frame."
   ;; Arrange
-  (let ((agent-repl--tabline-anchor "n5")
-        (agent-repl--tabline-anchor-width nil)
-        (agent-repl--tabline-anchor-names agent-repl-test--anchor-names))
+  (let ((agent-repl--tabline-view-states (make-hash-table :test #'eq)))
+    (puthash 'frame-a
+             (list :anchor "n5"
+                   :width nil
+                   :names agent-repl-test--anchor-names)
+             agent-repl--tabline-view-states)
     ;; Act
     (let ((lo (agent-repl--tabline-anchor-index
-               (agent-repl-test--anchor-widths)
+               'frame-a (agent-repl-test--anchor-widths)
                agent-repl-test--anchor-names "n6" 12 2)))
       ;; Assert
-      (should (= 4 lo))
-      (should (equal "n5" agent-repl--tabline-anchor))
-      (should (= 12 agent-repl--tabline-anchor-width))
-      (should (equal agent-repl-test--anchor-names
-                     agent-repl--tabline-anchor-names)))))
+      (let ((state (gethash 'frame-a agent-repl--tabline-view-states)))
+        (should (= 4 lo))
+        (should (equal "n5" (plist-get state :anchor)))
+        (should (= 12 (plist-get state :width)))
+        (should (equal agent-repl-test--anchor-names
+                       (plist-get state :names)))))))
 
 (ert-deftest agent-repl-test-tabline-anchor-resize-recomputes-from-anchor ()
   "A width change recomputes the window FROM the anchor: the anchor
@@ -2528,19 +2759,25 @@ workspace does not teleport, only the recorded width changes."
   ;; Arrange: twelve entries, overflowing at both widths under test.
   (let* ((names (mapcar (lambda (i) (format "e%03d" i)) (number-sequence 1 12)))
          (widths (agent-repl-test--anchor-widths 12))
-         (agent-repl--tabline-anchor "e005")
-         (agent-repl--tabline-anchor-width 12)
-         (agent-repl--tabline-anchor-names names))
+         (agent-repl--tabline-view-states (make-hash-table :test #'eq)))
+    (puthash 'frame-a
+             (list :anchor "e005" :width 12 :names names)
+             agent-repl--tabline-view-states)
     ;; Act
-    (let ((narrow (agent-repl--tabline-anchor-index widths names "e005" 12 2))
-          (narrow-anchor agent-repl--tabline-anchor)
-          (wide (agent-repl--tabline-anchor-index widths names "e005" 20 2)))
+    (let* ((narrow (agent-repl--tabline-anchor-index
+                    'frame-a widths names "e005" 12 2))
+           (narrow-anchor
+            (plist-get (gethash 'frame-a agent-repl--tabline-view-states)
+                       :anchor))
+           (wide (agent-repl--tabline-anchor-index
+                  'frame-a widths names "e005" 20 2))
+           (state (gethash 'frame-a agent-repl--tabline-view-states)))
       ;; Assert
       (should (= 4 narrow))
       (should (= 4 wide))
       (should (equal "e005" narrow-anchor))
-      (should (equal "e005" agent-repl--tabline-anchor))
-      (should (= 20 agent-repl--tabline-anchor-width)))))
+      (should (equal "e005" (plist-get state :anchor)))
+      (should (= 20 (plist-get state :width))))))
 
 (ert-deftest agent-repl-test-tabline-rows-identical-across-visible-tab-switch ()
   "Switching between two tabs that are both already visible renders a
@@ -2549,20 +2786,51 @@ LITERALLY identical set of rows — same entries, same order, same string."
   ;; inside the six-wide window the 20-column frame renders.
   (let* ((names (mapcar (lambda (i) (format "e%03d" i)) (number-sequence 1 12)))
          (widths (agent-repl-test--anchor-widths 12))
-         (agent-repl--tabline-anchor "e005")
-         (agent-repl--tabline-anchor-width 20)
-         (agent-repl--tabline-anchor-names names)
+         (agent-repl--tabline-view-states (make-hash-table :test #'eq))
          (render (lambda (current)
                    (agent-repl--tabline-rows
                     names
-                    (agent-repl--tabline-anchor-index widths names current 20 2)
+                    (agent-repl--tabline-anchor-index
+                     'frame-a widths names current 20 2)
                     20 2 widths))))
+    (puthash 'frame-a
+             (list :anchor "e005" :width 20 :names names)
+             agent-repl--tabline-view-states)
     ;; Act
     (let ((before (funcall render "e006"))
           (after (funcall render "e007")))
       ;; Assert
       (should (equal before after))
-      (should (equal "e005" agent-repl--tabline-anchor)))))
+      (should
+       (equal "e005"
+              (plist-get
+               (gethash 'frame-a agent-repl--tabline-view-states)
+               :anchor))))))
+
+(ert-deftest agent-repl-test-tabline-anchor-state-is-frame-local ()
+  "Redisplaying one frame never changes another frame's anchor window."
+  ;; Arrange
+  (let* ((names agent-repl-test--anchor-names)
+         (widths (agent-repl-test--anchor-widths))
+         (agent-repl--tabline-view-states (make-hash-table :test #'eq)))
+    (puthash 'frame-a
+             (list :anchor "n1" :width 12 :names names)
+             agent-repl--tabline-view-states)
+    (puthash 'frame-b
+             (list :anchor "n5" :width 12 :names names)
+             agent-repl--tabline-view-states)
+    ;; Act
+    (agent-repl--tabline-anchor-index 'frame-a widths names "n4" 12 2)
+    (agent-repl--tabline-anchor-index 'frame-b widths names "n8" 12 2)
+    ;; Assert
+    (should
+     (equal "n1"
+            (plist-get (gethash 'frame-a agent-repl--tabline-view-states)
+                       :anchor)))
+    (should
+     (equal "n5"
+            (plist-get (gethash 'frame-b agent-repl--tabline-view-states)
+                       :anchor)))))
 
 (ert-deftest agent-repl-test-tabline-rows-badges-on-both-ends ()
   "Entries elided on EITHER side of the window get their own badge: the
@@ -2650,16 +2918,39 @@ estimate never under-reserves and a row can never pixel-overflow."
 
 (ert-deftest agent-repl-test-tabline-rows-image-pixel-width-forces-elision ()
   "An image-bearing entry whose PIXEL width overflows the row budget is
-elided behind a `+N' badge, even though its one-character length would
-fit both rows.  The column-accurate width from
-`agent-repl--tabline-entry-width' is what stops a badge-bearing row
-from physically wrapping to a third row (the tab-bar livelock); with
-the old character-length measurement no badge would appear."
-  (cl-letf (((symbol-function 'string-pixel-width) (lambda (&rest _) 30))
-            ((symbol-function 'frame-char-width) (lambda (&rest _) 1)))
-    (let* ((img (propertize " " 'display "badge")) ; 1 char, 30 px-columns
-           (rows (agent-repl--tabline-rows (list "aa" img "bb" "cc" "dd") 1 20 2)))
-      (should (cl-some (lambda (r) (string-match-p "\\+[0-9]+" r)) rows)))))
+elided behind a `+N' badge and the forced anchor entry is physically
+truncated when even that entry exceeds the row budget.  Character-count
+truncation cannot enforce this because the image occupies one source
+character but thirty rendered columns."
+  ;; Arrange
+  (let ((agent-repl--tabline-last-truncation nil)
+        (log-count 0))
+    (cl-letf (((symbol-function 'string-pixel-width)
+               (lambda (string)
+                 (+ (string-width (substring-no-properties string))
+                    (if (text-property-not-all
+                         0 (length string) 'display nil string)
+                        29
+                      0))))
+              ((symbol-function 'frame-char-width) (lambda (&rest _) 1))
+              ((symbol-function 'agent-repl--log-verbose)
+               (lambda (&rest _) (cl-incf log-count))))
+      (let ((img (propertize " " 'display "badge"))) ; 1 char, 30 columns
+        ;; Act
+        (let ((first
+               (agent-repl--tabline-rows
+                (list "aa" img "bb" "cc" "dd") 1 20 2))
+              (second
+               (agent-repl--tabline-rows
+                (list "aa" img "bb" "cc" "dd") 1 20 2)))
+          ;; Assert
+          (should (cl-some (lambda (row)
+                             (string-match-p "\\+[0-9]+" row))
+                           first))
+          (dolist (row (append first second))
+            (should (<= (agent-repl--tabline-entry-width row) 20)))
+          ;; The identical hot-path overflow is logged once.
+          (should (= 1 log-count)))))))
 
 ;;;; ---- Tests: tabline row join (face-extension guard) ----
 
@@ -2847,14 +3138,14 @@ called and verifies the advice runs cleanly."
       (should-not pre-redisplay-function))))
 
 (ert-deftest agent-repl-test-fixed-height-tab-bar-disables-native-resize ()
-  "Installation disables auto-resize and pins FUTURE frames only.
+  "Installation disables auto-resize and pins current plus future frames.
 This is the regression contract for the macOS 100%-CPU livelock:
-`redisplay_tab_bar' must never enter its dynamic height path, and
-installation must never change a LIVE frame's `tab-bar-lines' — that is
-the path that drives `ns_change_tab_bar_height'.  Existing frames keep
-whatever height they were born with until the user invokes
-`agent-repl-tabbar-apply-row-count'."
+`redisplay_tab_bar' must never enter its dynamic height path.  The
+`frame-inhibit-implied-resize' guard is installed before current frame
+heights change, and `tab-bar-lines-keep-state' prevents later native
+tab operations from recalculating the explicit two-line height."
   (let ((auto-resize-tab-bars 'grow-only)
+        (tab-bar-auto-width t)
         (default-frame-alist '((tab-bar-lines . 1) (width . 100)))
         (frame-inhibit-implied-resize nil)
         (tab-bar-format nil)
@@ -2862,6 +3153,7 @@ whatever height they were born with until the user invokes
         (tab-bar-close-button-show t)
         (tab-bar-new-button-show t)
         (frame-lines '((frame-a . 1) (frame-b . 3)))
+        (frame-keeps '((frame-a) (frame-b)))
         (tab-bar-mode-arg nil)
         (logged nil))
     (cl-letf (((symbol-function 'frame-list)
@@ -2869,17 +3161,28 @@ whatever height they were born with until the user invokes
               ((symbol-function 'display-graphic-p) (lambda (_frame) t))
               ((symbol-function 'frame-parameter)
                (lambda (frame parameter)
-                 (and (eq parameter 'tab-bar-lines)
-                      (alist-get frame frame-lines))))
+                 (pcase parameter
+                   ('tab-bar-lines (alist-get frame frame-lines))
+                   ('tab-bar-lines-keep-state
+                    (alist-get frame frame-keeps)))))
               ((symbol-function 'set-frame-parameter)
-               (lambda (&rest _)
-                 (error "fixed-height install must not resize a live frame")))
+               (lambda (frame parameter value)
+                 (pcase parameter
+                   ('tab-bar-lines
+                    (should (memq 'tab-bar-lines
+                                  frame-inhibit-implied-resize))
+                    (setf (alist-get frame frame-lines) value))
+                   ('tab-bar-lines-keep-state
+                    (setf (alist-get frame frame-keeps) value))
+                   (_ (error "unexpected frame parameter %S" parameter)))))
               ((symbol-function 'tab-bar-mode)
                (lambda (arg)
                  (setq tab-bar-mode-arg arg)
                  ;; Emulate Emacs 30.2: enabling the mode resets the future
-                 ;; frame default to one line.
-                 (setf (alist-get 'tab-bar-lines default-frame-alist) 1)))
+                 ;; frame default and every live frame to one line.
+                 (setf (alist-get 'tab-bar-lines default-frame-alist) 1
+                       (alist-get 'frame-a frame-lines) 1
+                       (alist-get 'frame-b frame-lines) 1)))
               ((symbol-function 'agent-repl--retire-redisplay-storm-watchdog)
                (lambda () '(:timer-cancelled nil :hook-present nil)))
               ((symbol-function 'agent-repl--log)
@@ -2889,11 +3192,18 @@ whatever height they were born with until the user invokes
                  (error "fixed-height install must not schedule recovery timers"))))
       (agent-repl--install-fixed-height-tab-bar)
       (should-not auto-resize-tab-bars)
+      (should-not tab-bar-auto-width)
       (should (eq tab-bar-mode-arg 1))
       (should (= (alist-get 'tab-bar-lines default-frame-alist)
                  agent-repl--tabline-row-count))
-      ;; Live frames are left exactly as they were found.
-      (should (equal frame-lines '((frame-a . 1) (frame-b . 3))))
+      (should (eq t (alist-get 'tab-bar-lines-keep-state
+                               default-frame-alist)))
+      (should (= (alist-get 'frame-a frame-lines)
+                 agent-repl--tabline-row-count))
+      (should (= (alist-get 'frame-b frame-lines)
+                 agent-repl--tabline-row-count))
+      (should (eq t (alist-get 'frame-a frame-keeps)))
+      (should (eq t (alist-get 'frame-b frame-keeps)))
       (should (memq 'tab-bar-lines frame-inhibit-implied-resize))
       (should (equal tab-bar-format
                      '(agent-repl-workspace-tabline-formatted
@@ -2906,6 +3216,7 @@ whatever height they were born with until the user invokes
 (ert-deftest agent-repl-test-fixed-height-tab-bar-default-covers-future-frames ()
   "Installation pins `default-frame-alist' even with no current GUI frame."
   (let ((auto-resize-tab-bars t)
+        (tab-bar-auto-width t)
         (default-frame-alist nil)
         (frame-inhibit-implied-resize t))
     (cl-letf (((symbol-function 'frame-list) (lambda () nil))
@@ -2918,27 +3229,39 @@ whatever height they were born with until the user invokes
               ((symbol-function 'agent-repl--log) #'ignore))
       (agent-repl--install-fixed-height-tab-bar)
       (should-not auto-resize-tab-bars)
+      (should-not tab-bar-auto-width)
       (should (= (alist-get 'tab-bar-lines default-frame-alist)
-                 agent-repl--tabline-row-count)))))
+                 agent-repl--tabline-row-count))
+      (should (eq t (alist-get 'tab-bar-lines-keep-state
+                               default-frame-alist))))))
 
 (ert-deftest agent-repl-test-tabbar-apply-row-count-sets-selected-frame ()
-  "The interactive command applies the row count to the SELECTED frame.
-This is the one path that deliberately drives `ns_change_tab_bar_height'
-on a live frame; installation never does it on its own initiative."
+  "The interactive command reapplies both fixed-height frame parameters."
   ;; Arrange
-  (let ((applied nil))
-    (cl-letf (((symbol-function 'set-frame-parameter)
+  (let ((params '((tab-bar-lines . 1)
+                  (tab-bar-lines-keep-state)))
+        (applied nil))
+    (cl-letf (((symbol-function 'selected-frame) (lambda () 'frame-a))
+              ((symbol-function 'frame-parameter)
+               (lambda (_frame parameter) (alist-get parameter params)))
+              ((symbol-function 'set-frame-parameter)
                (lambda (frame parameter value)
-                 (setq applied (list frame parameter value))))
+                 (push (list frame parameter value) applied)
+                 (setf (alist-get parameter params) value)))
               ((symbol-function 'agent-repl--log) #'ignore)
               ((symbol-function 'message) #'ignore))
       ;; Act
       (let ((result (agent-repl-tabbar-apply-row-count)))
         ;; Assert
         (should (= agent-repl--tabline-row-count result))
-        (should (equal applied
-                       (list nil 'tab-bar-lines
-                             agent-repl--tabline-row-count)))))))
+        (should (= agent-repl--tabline-row-count
+                   (alist-get 'tab-bar-lines params)))
+        (should (eq t (alist-get 'tab-bar-lines-keep-state params)))
+        (should
+         (equal (nreverse applied)
+                (list (list 'frame-a 'tab-bar-lines-keep-state t)
+                      (list 'frame-a 'tab-bar-lines
+                            agent-repl--tabline-row-count))))))))
 
 ;;;; ---- The hibernation split --------------------------------------------
 
