@@ -35,7 +35,7 @@ func TestSentinelClassifiesEachSentinel(t *testing.T) {
 		{"repull in flight", ErrRepullInFlight, TypeHistoryRepullInFlight},
 		{"repull truncated", ErrRepullTruncated, TypeHistoryReplayTruncated},
 		{"interrupt undelivered", ErrInterruptUndelivered, TypeInterruptUndelivered},
-		{"no live driver", ErrNoLiveDriver, TypeShimNotSpawned},
+		{"no live session controller", ErrNoLiveSessionController, TypeShimNotSpawned},
 		{"shim not ready", ErrShimNotReady, TypeShimHandshakeIncomplete},
 		{"shim unhealthy", ErrShimUnhealthy, TypeShimUnhealthy},
 		{"session not established", ErrSessionNotEstablished, TypeSessionNotEstablished},

@@ -110,18 +110,18 @@ func TestCloseStaleTurnWritesNothingOverASettledAxis(t *testing.T) {
 	if got := mustCurrent(t, m, "ws1").State; got != frontendv1.RenderState_RENDER_STATE_DONE {
 		t.Fatalf("state = %s, want DONE preserved — the honest outcome must not be overwritten", renderName(got))
 	}
-	if !cl.contains("ssm: stale turn close ws=ws1 session=s1 reason=\"hibernate_session\" sole_driver=true — the agent axis holds no `thinking`") {
+	if !cl.contains("ssm: stale turn close ws=ws1 session=s1 reason=\"hibernate_session\" sole_session_controller=true — the agent axis holds no `thinking`") {
 		t.Fatalf("missing the canonical no-op record; log:\n%s", strings.Join(cl.lines, "\n"))
 	}
 }
 
 // A claim belonging to some OTHER session is not this stop's to spend, whatever
-// soleDriver says: closing it would blue out a turn the replacement is running.
+// soleSessionController says: closing it would blue out a turn the replacement is running.
 func TestCloseStaleTurnDeclinesAnotherSessionsClaim(t *testing.T) {
-	for _, soleDriver := range []bool{true, false} {
-		name := "sole driver"
-		if !soleDriver {
-			name = "not sole driver"
+	for _, soleSessionController := range []bool{true, false} {
+		name := "sole session controller"
+		if !soleSessionController {
+			name = "not sole session controller"
 		}
 		t.Run(name, func(t *testing.T) {
 			// Arrange — s2 holds the running turn.
@@ -130,7 +130,7 @@ func TestCloseStaleTurnDeclinesAnotherSessionsClaim(t *testing.T) {
 				t.Fatalf("turn started: %v", err)
 			}
 			// Act — the stop is aimed at s1.
-			closed, err := m.CloseStaleTurn("ws1", "s1", "hibernate_session_superseded", soleDriver)
+			closed, err := m.CloseStaleTurn("ws1", "s1", "hibernate_session_superseded", soleSessionController)
 			// Assert.
 			if err != nil {
 				t.Fatalf("CloseStaleTurn: %v", err)
@@ -152,19 +152,19 @@ func TestCloseStaleTurnDeclinesAnotherSessionsClaim(t *testing.T) {
 // An UNATTRIBUTED `thinking` — the row a permission close restores, and the one
 // the observed wedge is made of — is the workspace's own teardown to spend, and
 // nobody else's.
-func TestCloseStaleTurnSpendsAnUnattributedClaimOnlyForTheSoleDriver(t *testing.T) {
+func TestCloseStaleTurnSpendsAnUnattributedClaimOnlyForTheSoleSessionController(t *testing.T) {
 	tests := []struct {
-		name       string
-		soleDriver bool
-		wantClosed bool
-		wantLog    string
+		name                  string
+		soleSessionController bool
+		wantClosed            bool
+		wantLog               string
 	}{
 		{
-			name: "the workspace's own teardown closes it", soleDriver: true, wantClosed: true,
+			name: "the workspace's own teardown closes it", soleSessionController: true, wantClosed: true,
 			wantLog: "ssm: stale turn CLOSED ws=ws1 session=s1",
 		},
 		{
-			name: "a stop aimed elsewhere leaves it for the live driver", soleDriver: false, wantClosed: false,
+			name: "a stop aimed elsewhere leaves it for the live session controller", soleSessionController: false, wantClosed: false,
 			wantLog: "DECLINED",
 		},
 	}
@@ -186,7 +186,7 @@ func TestCloseStaleTurnSpendsAnUnattributedClaimOnlyForTheSoleDriver(t *testing.
 				t.Fatalf("arrangement claimant = %q err = %v, want an unattributed claim", claimant, err)
 			}
 			// Act.
-			closed, err := m.CloseStaleTurn("ws1", "s1", "hibernate_session", tc.soleDriver)
+			closed, err := m.CloseStaleTurn("ws1", "s1", "hibernate_session", tc.soleSessionController)
 			// Assert.
 			if err != nil {
 				t.Fatalf("CloseStaleTurn: %v", err)

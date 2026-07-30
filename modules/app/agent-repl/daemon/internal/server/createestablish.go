@@ -3,7 +3,7 @@
 // probe healthy over the fully wired connection.
 //
 // Why the gate exists. The create core registers the record and STARTS bring-up
-// (sessiondrv.Ensure returns as soon as the connect loop is launched), so an ack
+// (sessioncontroller.Ensure returns as soon as the connect loop is launched), so an ack
 // written at that point asserts only that a spawn was issued. Emacs papered over
 // the gap by polling session health after every create, and that poll lost
 // microsecond races — it probed before the shim attached, and before the shim's
@@ -285,7 +285,7 @@ func (h *commandHandler) runEstablishment(est *sessionEstablishment, workspace, 
 // registers the record and brings nothing up — so it is established by
 // definition. That is stated here rather than left implicit, because the
 // alternative reading (probe a workspace that is the empty string) would fail
-// every such create with a message about a missing driver.
+// every such create with a message about a missing controller.
 func (h *commandHandler) awaitEstablished(ctx context.Context, cwd, workspace, sessionID, requestID string) error {
 	if cwd == "" {
 		h.logf("frontend cmd: create_session ws=%s request_id=%s -> session=%s registered with no cwd; nothing is brought up for a workspace-less session, so there is no shim to establish",
@@ -334,8 +334,8 @@ var establishLinks = []struct {
 	{errclass.ErrShimNack, "the shim rejected the health probe"},
 	{errclass.ErrShimAckTimeout, "the shim did not answer the health probe in time"},
 	{errclass.ErrShimNotConnected, "the shim has no live connection to this daemon"},
-	{errclass.ErrNoLiveDriver, "no shim was ever brought up for this workspace"},
-	{errclass.ErrNotLiveSession, "the workspace is driven by a different session than the one just created"},
+	{errclass.ErrNoLiveSessionController, "no shim was ever brought up for this workspace"},
+	{errclass.ErrNotLiveSession, "the workspace is controlled by a different session than the one just created"},
 	{errclass.ErrSessionNotEstablished, "the establishment deadline elapsed with no verdict"},
 	{context.DeadlineExceeded, "the establishment deadline elapsed with no verdict"},
 }

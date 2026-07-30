@@ -290,7 +290,7 @@ func TestLegacyHandshakeClaimBindsToFirstOrderedStreamStart(t *testing.T) {
 // ReconcileTurnHandshake and the AGENT AXIS.
 //
 // The shim's pre-subscription snapshot is already authoritative for
-// `turn_lifecycle_claim` and for the driver's process-local latch. These tests
+// `turn_lifecycle_claim` and for the session controller's process-local latch. These tests
 // pin the edge that was missing: it is authoritative for the axis too, which is
 // what lets a shim coming back cure a ledger some earlier crash poisoned.
 // ---------------------------------------------------------------------------
@@ -375,7 +375,7 @@ func TestHandshakeOverASettledAxisAppendsNothing(t *testing.T) {
 	if got := mustCurrent(t, m, "ws1").State; got != frontendv1.RenderState_RENDER_STATE_DONE {
 		t.Fatalf("state = %s, want DONE preserved", renderName(got))
 	}
-	if !cl.contains("reason=\"shim_handshake_no_turns\" sole_driver=true — the agent axis holds no `thinking`") {
+	if !cl.contains("reason=\"shim_handshake_no_turns\" sole_session_controller=true — the agent axis holds no `thinking`") {
 		t.Fatalf("missing the canonical no-op record; log:\n%s", strings.Join(cl.lines, "\n"))
 	}
 }

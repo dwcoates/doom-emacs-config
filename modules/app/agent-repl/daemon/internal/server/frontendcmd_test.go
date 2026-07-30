@@ -56,7 +56,7 @@ type fakePrompts struct {
 	err              error
 	// turnActive is what this fake reports as the workspace's observed turn
 	// state, so one double serves as both the prompt router and the interrupt
-	// gate's turn source (the production wiring binds one driver to both).
+	// gate's turn source (the production wiring binds one controller to both).
 	turnActive bool
 	turnErr    error
 }
@@ -278,7 +278,7 @@ func TestCommandHandlerSubmitPromptRoutesToPrompts(t *testing.T) {
 }
 
 // TestCommandHandlerSubmitPromptCarriesTheRequestID pins the correlation the
-// prompt receipt is built on: the driver cannot key a bubble on an id the
+// prompt receipt is built on: the session controller cannot key a bubble on an id the
 // handler kept to itself.
 func TestCommandHandlerSubmitPromptCarriesTheRequestID(t *testing.T) {
 	// Arrange

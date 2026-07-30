@@ -6,7 +6,7 @@
 //
 // These were ported verbatim from the deleted internal/session tailer when the
 // daemon moved to consuming each session's UDS shim: the task-output path now
-// comes off the driver's rebuilt TaskEntry rather than a live Session, but the
+// comes off the session controller's rebuilt TaskEntry rather than a live Session, but the
 // confinement rules and the split-rune-safe tail read are unchanged — a
 // caller-supplied path is still validated down to a known-safe shape before any
 // read happens.

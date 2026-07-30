@@ -42,7 +42,7 @@
 // Those two are the ONLY non-vendor Event payloads that curate to an item, and
 // the only ones a frontend must never have to FIND for itself: the daemon
 // floors every replay at the newest clear or compaction
-// (sessiondrv.Manager.Resync), so one that arrives is always live, and the
+// (sessioncontroller.Manager.Resync), so one that arrives is always live, and the
 // string-matching a frontend used to do on prompt text has no successor here
 // by design.
 //
@@ -64,7 +64,7 @@
 // carries: the SDK emits one assistant record per content block, all repeating
 // that message id, so keying items on it collapses a multi-block message onto
 // one item. A permission item's uuid is the permission request_id (sourced from
-// the control plane in sinks.go / driver.go, not this file).
+// the control plane in sinks.go / sessioncontroller.go, not this file).
 //
 // A TypingDelta preview is REPLACED when the ConversationDelta item for that
 // message arrives, but the two carry no common id — the preview keys the
@@ -306,7 +306,7 @@ func ConversationDeltaFromEvent(workspace string, ev *corev1.Event) (*frontendv1
 // already made (the standing rule: frontends render, never interpret). Nor can
 // a curator recover these from the delta afterwards — ConversationItem models
 // the MESSAGE, so the moment translation runs the envelope is gone, which is
-// exactly why the slash-command curator (sessiondrv/machinery.go) has to
+// exactly why the slash-command curator (sessioncontroller/machinery.go) has to
 // string-match record bodies instead of reading a flag.
 //
 // Only file-plane records have one. The stream plane's messages carry no
@@ -658,7 +658,7 @@ func BuildTaskCatalog(workspace, sessionID string, events []*corev1.Event) *fron
 
 // BackgroundTasksFromVendor decodes a vendor event's Any into its
 // BackgroundTasksChanged arm, or nil when the Any is anything else. Exported so
-// the session driver can recognize the event without re-deriving the unwrap.
+// the session controller can recognize the event without re-deriving the unwrap.
 func BackgroundTasksFromVendor(a *anypb.Any) *datav1.BackgroundTasksChanged {
 	if a == nil {
 		return nil

@@ -23,8 +23,8 @@ live backend session for this workspace; every OTHER color is a GUARANTEE that
 the session substrate is fully wired. What a viewer has or has not drawn says
 nothing about that, so it can no longer hold a workspace blue.
 
-The WIRED axis is the fact that does answer the question, and sessiondrv
-produces it (see internal/sessiondrv/wiredstate.go):
+The WIRED axis is the fact that does answer the question, and sessioncontroller
+produces it (see internal/sessioncontroller/wiredstate.go):
 
 - `wired` — the bring-up gate CLOSED for this workspace: the shim answered
   ShimReady, which is the same verdict `AwaitReady` resolves on. The axis
@@ -33,7 +33,7 @@ produces it (see internal/sessiondrv/wiredstate.go):
 - `starting` — a bring-up is actively in flight. Blue, rendering
   RENDER_STATE_INIT, the same word bring-up has always had.
 - `severed` — not wired, not starting, and there is EVIDENCE THAT SOMETHING
-  BROKE: a bring-up that could not be completed, or a driver whose `client.Run`
+  BROKE: a bring-up that could not be completed, or a session controller whose `client.Run`
   returned a terminal protocol error. Blue, rendering RENDER_STATE_SEVERED.
   Rank 12.
 - `hibernated` — not wired, not starting, and NOTHING IS WRONG: the shim was
@@ -100,7 +100,7 @@ agent-axis row (`thinking`, `ready`, `done`, `dead`) now replaces it.
 
 `permission` is an agent-axis row like `done` and `vendor_blocked`, written by
 `ApplyPermission` when the workspace's pending-permission count leaves zero and
-released when it returns to zero. The count is derived from sessiondrv's
+released when it returns to zero. The count is derived from sessioncontroller's
 `permRegistry` — one waiter per parked canUseTool round-trip — so a grant, a
 deny and a teardown abandonment all close it without any of them being named.
 

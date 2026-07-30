@@ -174,7 +174,7 @@ func (c *Client) Replay(ctx context.Context, fromSeq, toSeq uint64, maxEvents ui
 		return ReplayResult{Truncated: true, Reason: reason},
 			fmt.Errorf("%w: request_id=%s (session %s): %s", ErrReplayLinkLost, requestID, c.cfg.SessionID, reason)
 	case <-ctx.Done():
-		// Preserve the caller's cancellation CAUSE. The session driver uses a
+		// Preserve the caller's cancellation CAUSE. The session controller uses a
 		// progress-rearmed idle context whose cause carries delivered counts and
 		// seq range; flattening it to context.Canceled would discard the exact
 		// evidence needed to distinguish zero progress from a partial stream.

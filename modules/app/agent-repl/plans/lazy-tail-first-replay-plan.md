@@ -24,8 +24,8 @@ The path a conversation takes on mount, end to end:
   the daemon answers a `ResyncCmd` by re-sending a fresh `StateSnapshot` to that
   client (`daemon/internal/frontend/server.go:655-668`), so "resync on every
   snapshot" is an infinite loop.
-- `Manager.Resync` (`daemon/internal/sessiondrv/driver.go:781-805`) floors the
-  request at the newest clear-or-compaction (`driver.go:908-925`), replays the
+- `Manager.Resync` (`daemon/internal/sessioncontroller/sessioncontroller.go:781-805`) floors the
+  request at the newest clear-or-compaction (`sessioncontroller.go:908-925`), replays the
   retained ring from there (`sinks.go:860-896`), and — when the request falls
   below the ring floor (`sinks.go:908-917`) — closes the gap with a bounded,
   frontend-initiated store re-pull (`repull.go:119-168`).
@@ -59,11 +59,11 @@ Three facts about today's shape matter for everything below.
   `main.ts:638` calls `feed.render` and nothing else. The good ideas are already
   written; they are wired to nothing.
 - **The seq space is per vendor-session-uuid, and a rotation retires it.** The
-  daemon resets cursors, purges the ring, and bumps `driven.rotEpoch`
-  (`driver.go:1346-1413`); the client wipes items and `lastSeq` and re-asks from
+  daemon resets cursors, purges the ring, and bumps `sessionController.rotEpoch`
+  (`sessioncontroller.go:1346-1413`); the client wipes items and `lastSeq` and re-asks from
   zero (`webapp/src/session-rebase.ts:94-108`, `main.ts:799-867`). One seq holder
   is deliberately NOT reset — the SSM paint watermark, the "KNOWN residual" named
-  at `driver.go:1332-1343`.
+  at `sessioncontroller.go:1332-1343`.
 
 ---
 
@@ -165,7 +165,7 @@ enum HistoryExhausted {
   HISTORY_EXHAUSTED_UNSPECIFIED = 0;
   // The window reached the REPLAY FLOOR: the newest clear or compaction, which
   // is itself the oldest item served. Nothing above it will ever be served,
-  // because the agent no longer carries it (sessiondrv replayFloor).
+  // because the agent no longer carries it (sessioncontroller replayFloor).
   HISTORY_EXHAUSTED_FLOOR = 1;
   // The window reached the start of this conversation's seq space. There is no
   // older history, floor or not.
@@ -203,13 +203,13 @@ no second rule to learn where its history starts.
   declared served by it and answered with silence. It must become
   `cur.epoch == epoch && cur.fromSeq <= fromSeq && cur.stopAt >= stopAt`.
 - Window arithmetic lives in `Manager`, beside `replayFloor` and `lastSeenSeq`
-  (`driver.go:908-946`), because both bounds are already computed there:
+  (`sessioncontroller.go:908-946`), because both bounds are already computed there:
   - tail window: `hi = lastSeenSeq(d)`, `lo = max(replayFloor(d, fromSeq), hi - tailEvents + 1)`.
   - backward window: `hi = beforeSeq - 1`, `lo = max(replayFloor(d, 0), hi - maxEvents + 1)`.
   - `next_before_seq = lo` when `lo > replayFloor`, else `0` with the matching
     `exhausted` reason.
   - the store hop still takes the EXCLUSIVE lower bound via
-    `exclusiveLowerBound` (`driver.go:959-964`) — unchanged.
+    `exclusiveLowerBound` (`sessioncontroller.go:959-964`) — unchanged.
 
 ---
 
@@ -260,7 +260,7 @@ its own merits regardless of the rest of this plan.
 
 `itemsFromClearOrCompact` slices from the LAST clear or compaction
 (`clear-compact.ts:77-82`). The daemon floors every replay at the newest one
-(`driver.go:908-925`), so **a backward window can never deliver an item older
+(`sessioncontroller.go:908-925`), so **a backward window can never deliver an item older
 than the current boundary** and therefore can never introduce a new boundary
 above it. Backfill cannot move the truncation point. A LIVE clear can, and
 `renderImpl` already handles that by rebuilding the feed when the boundary key
@@ -377,7 +377,7 @@ delays a first attestation; it never suppresses one, because the tail window's
 
 ### 3.3 Compatibility, and the known residual
 
-- **The residual is unchanged.** `driver.go:1332-1343` names the SSM paint
+- **The residual is unchanged.** `sessioncontroller.go:1332-1343` names the SSM paint
   watermark as deliberately not reset across a vendor session rotation: a
   retired-space attestation survives and swallows the new space's lower acks
   until they climb past it, erring green rather than permanently blue. Nothing
@@ -428,12 +428,12 @@ history replay. Two concrete dependencies fall out:
 
 - **The tail window's `hi` is only meaningful after the handshake.** `hi` is
   `lastSeenSeq(d)` = max(durable `last_seen_seq`, `newestRetainedSeq()`)
-  (`driver.go:940-946`). `DaemonHello.from_seq` is that same durable mark
+  (`sessioncontroller.go:940-946`). `DaemonHello.from_seq` is that same durable mark
   (`core.proto:396-416`) and is read AFTER the rotation reconciliation. Serving a
   tail window against a session whose handshake has not completed would anchor
   at a mark the rotation is about to zero. The tail-window path must therefore
-  fail loudly on a workspace with no live driver — which `m.existing(workspace)`
-  (`driver.go:782-785`) already does — rather than serving an empty window and
+  fail loudly on a workspace with no live session controller — which `m.existing(workspace)`
+  (`sessioncontroller.go:782-785`) already does — rather than serving an empty window and
   letting the client conclude "history exhausted".
 - **`HISTORY_EXHAUSTED_HISTORY_START` is only true post-handshake.** Pre-ready,
   the honest answer is a refusal, not an exhaustion.
@@ -475,8 +475,8 @@ rather than in a controller beside it.
 `applyConversationItems` ranks a `throughSeq == 0` push at `this.state.lastSeq`
 (`store.ts:818-829`) — the live tail, which is right. But `Manager.Resync`
 pushes the retained seq-less items (permissions, failure cards, prompt receipts)
-from `consumer.resync` at `driver.go:787`, **before** `startRepull` at
-`driver.go:797` streams any history. On a cold daemon the ring is empty, so a
+from `consumer.resync` at `sessioncontroller.go:787`, **before** `startRepull` at
+`sessioncontroller.go:797` streams any history. On a cold daemon the ring is empty, so a
 freshly-mounted client with `lastSeq == 0` ranks a pending permission card, a
 failure card, and the user's own prompt receipt at rank 0 — the very top of the
 feed, above the entire history that is about to arrive.
@@ -493,8 +493,8 @@ independently valuable, and a prerequisite for trusting the tail window's rank.
 
 ### 5.3 Rotation mid-scroll
 
-Daemon side, `onHandshake` (`driver.go:1346-1374`) already resets the registry
-cursors, purges the ring, and bumps `driven.rotEpoch` (`driver.go:1398`), and
+Daemon side, `onHandshake` (`sessioncontroller.go:1346-1374`) already resets the registry
+cursors, purges the ring, and bumps `sessionController.rotEpoch` (`sessioncontroller.go:1398`), and
 `startRepull` refuses to coalesce across epochs (`repull.go:135-138`). Two
 additions:
 
@@ -502,8 +502,8 @@ additions:
   **refused loudly** when the epoch has moved, exactly as a cross-epoch re-pull
   is. A `before_seq` from a retired space is a number with no meaning in the
   current one — the same class of bug `replayFloor`'s retired-mark ruling exists
-  for (`driver.go:898-925`).
-- `driver.go`'s SEQ-HOLDER INVENTORY comment (`driver.go:1284-1345`) is a
+  for (`sessioncontroller.go:898-925`).
+- `sessioncontroller.go`'s SEQ-HOLDER INVENTORY comment (`sessioncontroller.go:1284-1345`) is a
   checklist a new seq holder must join. The window cursor is a new seq holder.
   It goes in the "RESET ON ROTATION" list, and so does the client-side
   `oldestSeq` in the corresponding client-side reasoning at
@@ -520,7 +520,7 @@ space), and the exhausted latch is cleared.
 The daemon records the floor BEFORE pushing the clear (`sinks.go:524-531`,
 `545-562`) and drops unclaimed prompt receipts with it (`sinks.go:558-561`).
 Every window served afterwards is bounded below by the new floor
-(`driver.go:908-925`), so the daemon will never serve above it — a stale
+(`sessioncontroller.go:908-925`), so the daemon will never serve above it — a stale
 `before_seq` is CLAMPED, and `served_from_seq` on the answer is what tells the
 client its cursor moved.
 
@@ -626,9 +626,9 @@ revisiting is stated in the risk register.
 | Scroll anchor | `webapp/test/scroll.test.ts` | `anchorShift` pure helper, both signs and zero |
 | Backfill controller | `webapp/test/history-window.test.ts` (new — one test file per source module) | arms on scroll-top proximity; one request in flight at a time; latches on `next_before_seq == 0`; unlatches on a boundary change; exponential budget |
 | Attestation | `webapp/test/paint-attest.test.ts` | first ack withheld while `hasContent` is false; released on exhaustion of a short conversation; later acks never gated; `painted_from_seq` carried |
-| Window arithmetic | `daemon/internal/sessiondrv/` (table-driven, AAA) | tail window bounds vs floor vs high water; backward window clamped at the floor; `next_before_seq`/`exhausted` for each of the four enum cases |
-| Re-pull coalescing | `daemon/internal/sessiondrv/repull_test.go` | table over (epoch, from_seq, stop_at): only a strictly-covering in-flight pull coalesces |
-| Local-item ordering | `daemon/internal/sessiondrv/sinks_test.go` | permissions/failures/receipts are pushed AFTER the range, and only on the tail path |
+| Window arithmetic | `daemon/internal/sessioncontroller/` (table-driven, AAA) | tail window bounds vs floor vs high water; backward window clamped at the floor; `next_before_seq`/`exhausted` for each of the four enum cases |
+| Re-pull coalescing | `daemon/internal/sessioncontroller/repull_test.go` | table over (epoch, from_seq, stop_at): only a strictly-covering in-flight pull coalesces |
+| Local-item ordering | `daemon/internal/sessioncontroller/sinks_test.go` | permissions/failures/receipts are pushed AFTER the range, and only on the tail path |
 | Command surface | `daemon/internal/server/frontendcmd_test.go` | `HistoryWindowCmd` with `before_seq == 0` is refused loudly; with no resyncer wired, refused not swallowed |
 | Delivery order | `daemon/internal/frontend/paintgate_test.go` | unchanged — asserts this plan did not move the gate |
 | End to end | `daemon/e2e/` (beside `rotationresync_e2e_test.go`, `clearcompact_e2e_test.go`) | tail-first resync serves only the tail; a backward window reaches the floor and says so; a clear lands mid-backfill; a rotation lands mid-backfill |
@@ -658,7 +658,7 @@ independently, in any order among themselves.
    `HistoryWindowCmd` from scroll (§1, §5.1). This is the one commit that changes
    what the user sees.
 8. **`painted_from_seq` + the `hasContent` first-ack gate** (§3).
-9. **Documentation**: `frontend.proto`'s `through_seq` comment, `driver.go`'s
+9. **Documentation**: `frontend.proto`'s `through_seq` comment, `sessioncontroller.go`'s
    seq-holder inventory, `session-rebase.ts`'s header.
 
 Deploy per `modules/app/agent-repl/AGENTS.md`: `bin/build-frontend.sh` then
@@ -672,9 +672,9 @@ their hand-deploy path is not involved.
 | 1 | **A fixed event budget does not map to a predictable amount of rendered height.** One tool card with a 500-line diff is a screenful; forty seq-less permission items are not. Under-fill turns "lazy" into "eager with extra round trips"; over-fill defeats the point. | The `hasContent` gate measures actual geometry, and the backfill controller arms on scroll-top proximity rather than on item count — so an under-filled window immediately requests the next one and the failure mode is round trips, not a broken feed. |
 | 2 | Deep scroll-back is more expensive than modeled, because each window materializes everything above its `from_seq` in the store (§6). | Exponential window growth caps the window count at O(log history). **Trigger for a bounded store read:** a measured window response above ~500 ms, or a store CPU spike correlated with scroll-back, in the daemon log. |
 | 3 | A `HistoryWindowCmd` per scroll gesture floods the command channel. | One request in flight per view, enforced client-side; `startRepull` already refuses a non-covering concurrent pull loudly (`repull.go:139-140`) rather than queueing. |
-| 4 | The client's window cursor and the daemon's floor disagree after a clear. | The daemon clamps and reports `served_from_seq`; the client adopts the daemon's answer rather than its own arithmetic. The daemon is the only authority on the floor (`driver.go:908-925`). |
+| 4 | The client's window cursor and the daemon's floor disagree after a clear. | The daemon clamps and reports `served_from_seq`; the client adopts the daemon's answer rather than its own arithmetic. The daemon is the only authority on the floor (`sessioncontroller.go:908-925`). |
 | 5 | Deleting `renderRestored` loses a behavior some path depends on. | It has exactly zero production callers (`main.ts:638` calls `feed.render` only); its only references are tests and one comment in `catalogue.ts:564`. |
-| 6 | The unrebased SSM paint watermark (`driver.go:1332-1343`) interacts badly with a smaller painted range. | It cannot: both watermarks are maxima and this plan never lowers either (§3.3). Named here because it is where a reviewer will look. |
+| 6 | The unrebased SSM paint watermark (`sessioncontroller.go:1332-1343`) interacts badly with a smaller painted range. | It cannot: both watermarks are maxima and this plan never lowers either (§3.3). Named here because it is where a reviewer will look. |
 
 **The single riskiest assumption is #1** — that "roughly a screenful" can be
 requested in units of store events. Everything else in this plan is bounded
@@ -714,7 +714,7 @@ wire surface and `WorkspaceState.generation`, and the webapp's
 The law that replaced it: a workspace's color is CONNECTION TRUTH. Blue means
 there is no live backend session for this workspace; every non-blue color is a
 guarantee that the session substrate is fully wired. The SSM's WIRED axis
-(produced by sessiondrv off the bring-up gate's own ShimReady verdict) decides
+(produced by sessioncontroller off the bring-up gate's own ShimReady verdict) decides
 that, and no viewer's render pace has any claim on it.
 
 **What this plan needs before it is implemented:** every "painted enough"

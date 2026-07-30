@@ -236,13 +236,13 @@ func TestCreateSessionNackNamesTheDeepestLink(t *testing.T) {
 	}{
 		{
 			name:     "no shim was ever brought up",
-			router:   &probeHealthRouter{err: fmt.Errorf("sessiondrv: no live session for workspace %q: %w", "/w", errclass.ErrNoLiveDriver)},
+			router:   &probeHealthRouter{err: fmt.Errorf("session-controller: no live session for workspace %q: %w", "/w", errclass.ErrNoLiveSessionController)},
 			wantLink: "no shim was ever brought up",
 			wantType: errclass.TypeShimNotSpawned,
 		},
 		{
 			name:     "the handshake never completed",
-			router:   &probeHealthRouter{err: fmt.Errorf("sessiondrv: health: %w: %w", errclass.ErrShimNotReady, context.DeadlineExceeded)},
+			router:   &probeHealthRouter{err: fmt.Errorf("session-controller: health: %w: %w", errclass.ErrShimNotReady, context.DeadlineExceeded)},
 			wantLink: "never completed its handshake",
 			wantType: errclass.TypeShimHandshakeIncomplete,
 		},

@@ -45,7 +45,7 @@ type CommandHandler interface {
 	// re-push replaces by uuid, so re-sending the client's last-seen item costs
 	// nothing and re-sending one short of it would lose a bubble). The actual
 	// start is raised to the newest clear or compaction when there is one — see
-	// sessiondrv.Manager.Resync. The server independently re-sends a
+	// sessioncontroller.Manager.Resync. The server independently re-sends a
 	// StateSnapshot to the requesting client; this hook covers the
 	// conversation-delta replay the snapshot omits.
 	Resync(ctx context.Context, workspace, requestID string, cmd *frontendv1.ResyncCmd) error

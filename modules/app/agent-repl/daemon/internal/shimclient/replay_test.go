@@ -137,7 +137,7 @@ func TestReplayedEventsNeverReachTheStateSink(t *testing.T) {
 func TestReplayedEventsNeverReachTheFrameSink(t *testing.T) {
 	// Arrange — the frame sink is what feeds conversation, progress, and the
 	// retained ring on the live path. Replayed history routes to the caller's
-	// own sink instead, so the driver can render it WITHOUT the other planes.
+	// own sink instead, so the session controller can render it WITHOUT the other planes.
 	rig := newReplayRig(t, func(conn net.Conn, req *corev1.ReplayRequest) {
 		mustWriteMsg(t, conn, replayEvent(req.GetRequestId(), 1))
 		mustWriteMsg(t, conn, &corev1.ReplayDone{RequestId: req.GetRequestId(), Delivered: 1})
@@ -230,7 +230,7 @@ func TestReplayHonorsTheCallersDeadline(t *testing.T) {
 }
 
 func TestReplayPreservesTheCallersActivityTimeoutCause(t *testing.T) {
-	// Arrange: the session driver owns the no-progress verdict and carries
+	// Arrange: the session controller owns the no-progress verdict and carries
 	// counts plus seq range in its cancellation cause. Replay must not flatten
 	// that evidence to context.Canceled.
 	idleCause := errors.New("history replay idle after delivered=512 first_seq=1 last_seq=512")

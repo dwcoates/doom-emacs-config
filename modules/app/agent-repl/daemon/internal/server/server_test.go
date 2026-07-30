@@ -27,7 +27,7 @@ import (
 	"claude-repld/internal/frontend"
 	"claude-repld/internal/registry"
 	"claude-repld/internal/session"
-	"claude-repld/internal/sessiondrv"
+	"claude-repld/internal/sessioncontroller"
 	"claude-repld/internal/ssm"
 )
 
@@ -41,7 +41,7 @@ func (discardFileDiagnosticPersister) PersistFileDiagnostic(string, string, *cor
 // Harness
 //
 // Post-cutover the daemon has no live-session hub: it consumes each session's
-// UDS shim through a real *sessiondrv.Manager over a FAKE Spawner/Locator (no
+// UDS shim through a real *sessioncontroller.Manager over a FAKE Spawner/Locator (no
 // real node process), renders onto a real frontend.Server + SSM, and treats
 // the registry as the source of truth. The harness wires exactly that so HTTP
 // routes are exercised against the production plumbing.
@@ -56,11 +56,11 @@ type fakeSpawner struct {
 	dropped []string
 }
 
-func (f *fakeSpawner) EnsureShim(_ context.Context, sessionID string) (sessiondrv.SpawnResult, error) {
+func (f *fakeSpawner) EnsureShim(_ context.Context, sessionID string) (sessioncontroller.SpawnResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.ensured = append(f.ensured, sessionID)
-	return sessiondrv.SpawnResult{}, nil
+	return sessioncontroller.SpawnResult{}, nil
 }
 
 func (f *fakeSpawner) DropResume(sessionID string) (string, error) {
@@ -122,13 +122,13 @@ func (s stubState) Snapshot() *frontendv1.StateSnapshot {
 }
 
 type harness struct {
-	ts      *httptest.Server
-	srv     *Server
-	reg     *registry.Registry
-	driver  *sessiondrv.Manager
-	spawner *fakeSpawner
-	ssm     *ssm.Manager
-	fe      *frontend.Server
+	ts         *httptest.Server
+	srv        *Server
+	reg        *registry.Registry
+	controller *sessioncontroller.Manager
+	spawner    *fakeSpawner
+	ssm        *ssm.Manager
+	fe         *frontend.Server
 }
 
 func newHarness(t *testing.T) *harness {
@@ -137,7 +137,7 @@ func newHarness(t *testing.T) *harness {
 
 // newHarnessWith builds a harness, letting a test override selected Config
 // fields (Remediator, RequestShutdown, Accounts, Logins, WidgetAssetsDir,
-// BinaryMTime, IdleSweepTicks). Registry, Driver, SSM, and Frontend are always
+// BinaryMTime, IdleSweepTicks). Registry, Controller, SSM, and Frontend are always
 // wired.
 func newHarnessWith(t *testing.T, extra Config) *harness {
 	t.Helper()
@@ -156,7 +156,7 @@ func newHarnessWith(t *testing.T, extra Config) *harness {
 
 	spawner := &fakeSpawner{}
 	seqStore := NewRegistrySeqStore(reg, logf)
-	driver, err := sessiondrv.New(sessiondrv.Config{
+	controller, err := sessioncontroller.New(sessioncontroller.Config{
 		Push:              &PushForwarder{Logf: logf},
 		SSM:               mgr,
 		Spawner:           spawner,
@@ -170,14 +170,14 @@ func newHarnessWith(t *testing.T, extra Config) *harness {
 		Logf:              logf,
 	})
 	if err != nil {
-		t.Fatalf("sessiondrv new: %v", err)
+		t.Fatalf("sessioncontroller new: %v", err)
 	}
-	t.Cleanup(driver.Close)
+	t.Cleanup(controller.Close)
 
 	// The command handler needs the session-lifecycle binding, whose *Server
 	// target does not exist until New below — bind it after (mirrors main).
 	binding := &SessionCommandBinding{Logf: logf}
-	handler, err := newCommandHandler(driver, stubMerge{}, stubLifecycle{}, driver, binding, nil, driver, logf)
+	handler, err := newCommandHandler(controller, stubMerge{}, stubLifecycle{}, controller, binding, nil, controller, logf)
 	if err != nil {
 		t.Fatalf("command handler: %v", err)
 	}
@@ -187,7 +187,7 @@ func newHarnessWith(t *testing.T, extra Config) *harness {
 	cfg := extra
 	cfg.Logf = logf
 	cfg.Registry = reg
-	cfg.Driver = driver
+	cfg.Controller = controller
 	cfg.SSM = mgr
 	cfg.Frontend = fe
 	if cfg.ModelCatalogs == nil {
@@ -199,7 +199,7 @@ func newHarnessWith(t *testing.T, extra Config) *harness {
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 
-	return &harness{ts: ts, srv: srv, reg: reg, driver: driver, spawner: spawner, ssm: mgr, fe: fe}
+	return &harness{ts: ts, srv: srv, reg: reg, controller: controller, spawner: spawner, ssm: mgr, fe: fe}
 }
 
 // createSession brings a session up through the create CORE, the same entry
@@ -315,7 +315,7 @@ func TestCreateSessionRegistersARecord(t *testing.T) {
 	h := newHarness(t)
 	// Act
 	id := createSession(t, h, `{"cwd":"/w","model":"haiku","config_dir":"/cfg"}`)
-	// Assert — the record is the driver's source of truth for this session.
+	// Assert — the record is the session controller's source of truth for this session.
 	rec, ok := h.reg.Get(id)
 	if !ok {
 		t.Fatalf("no registry record for %s", id)
@@ -345,9 +345,9 @@ func TestCreateSessionEagerlyBringsUpTheShim(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	// Act — create resolves the workspace to the just-registered record and
-	// asks the driver to bring its shim up.
+	// asks the session controller to bring its shim up.
 	id := createSession(t, h, `{"cwd":"/w"}`)
-	// Assert — the driver's spawner was asked to ensure exactly this session.
+	// Assert — the session controller's spawner was asked to ensure exactly this session.
 	if !slices.Contains(h.spawner.ensuredIDs(), id) {
 		t.Fatalf("spawner ensured %v, want it to include %s", h.spawner.ensuredIDs(), id)
 	}
@@ -355,7 +355,7 @@ func TestCreateSessionEagerlyBringsUpTheShim(t *testing.T) {
 
 // --- Create supersede (one live session per workspace) ---------------------
 //
-// The driver runs one session per cwd and the locator resolves a cwd to its
+// The controller runs one session per cwd and the locator resolves a cwd to its
 // newest non-terminal record, so a create leaves every older record on its
 // cwd unreachable-but-live: a leaked shim, and a stale roster entry frontends
 // then mis-correlate the cwd to (the every-restore mis-bind of 2026-07-26).
@@ -697,7 +697,7 @@ func TestSessionViewClassifiesASupersededSession(t *testing.T) {
 
 func TestSessionViewClassifiesAShimDeath(t *testing.T) {
 	// Arrange: the reason the registry documented and nothing ever wrote,
-	// until the driver's SessionEnded hook.
+	// until the session controller's SessionEnded hook.
 	rec := registry.Record{SessionID: "s1", CWD: "/w", Terminal: true, DeathReason: errclass.DeathReasonShimDied}
 
 	// Act.
@@ -761,9 +761,9 @@ func TestSessionViewCarriesTheBackfillState(t *testing.T) {
 		want   frontendv1.BackfillState
 	}{
 		{"", frontendv1.BackfillState_BACKFILL_STATE_UNSPECIFIED},
-		{sessiondrv.BackfillPending, frontendv1.BackfillState_BACKFILL_STATE_PENDING},
-		{sessiondrv.BackfillDone, frontendv1.BackfillState_BACKFILL_STATE_DONE},
-		{sessiondrv.BackfillFailed, frontendv1.BackfillState_BACKFILL_STATE_FAILED},
+		{sessioncontroller.BackfillPending, frontendv1.BackfillState_BACKFILL_STATE_PENDING},
+		{sessioncontroller.BackfillDone, frontendv1.BackfillState_BACKFILL_STATE_DONE},
+		{sessioncontroller.BackfillFailed, frontendv1.BackfillState_BACKFILL_STATE_FAILED},
 	}
 	for _, c := range cases {
 		rec := registry.Record{SessionID: "s1", CWD: "/w", BackfillState: c.stored}

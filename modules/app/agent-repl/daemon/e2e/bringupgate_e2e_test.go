@@ -26,8 +26,8 @@ import (
 )
 
 // unwiredHealthRouter is the harness gap these probes cannot close from here:
-// newUDSHarness builds its AgentShimConfig without `Health: driver`, so the
-// frontend session-health command has nothing to route to. The driver already
+// newUDSHarness builds its AgentShimConfig without `Health: controller`, so the
+// frontend session-health command has nothing to route to. The controller already
 // satisfies server.SessionHealthRouter, so the fix is that one field — until
 // it lands, a probe here proves nothing and says so rather than passing.
 const unwiredHealthRouter = "session health router is not wired"
@@ -82,7 +82,7 @@ func TestE2EFirstHealthProbeAfterOpenIsHealthy(t *testing.T) {
 	// Act — the very first probe of this session's life.
 	view := awaitSessionHealth(t, conn, cwd, id, "e2e-first-health-1")
 	if strings.Contains(view.GetReason(), unwiredHealthRouter) {
-		t.Skipf("harness gap, not a product failure: newUDSHarness (e2e_test.go) omits `Health: driver` from its AgentShimConfig, so no probe can reach the session. Add that one field to make this test real.")
+		t.Skipf("harness gap, not a product failure: newUDSHarness (e2e_test.go) omits `Health: controller` from its AgentShimConfig, so no probe can reach the session. Add that one field to make this test real.")
 	}
 
 	// Assert
@@ -146,7 +146,7 @@ func TestE2EHealthProbeAfterRotationIsHealthy(t *testing.T) {
 	// Act
 	view := awaitSessionHealth(t, conn, cwd, id, "e2e-rotated-health-1")
 	if strings.Contains(view.GetReason(), unwiredHealthRouter) {
-		t.Skipf("harness gap, not a product failure: newUDSHarness (e2e_test.go) omits `Health: driver` from its AgentShimConfig, so no probe can reach the session. Add that one field to make this test real.")
+		t.Skipf("harness gap, not a product failure: newUDSHarness (e2e_test.go) omits `Health: controller` from its AgentShimConfig, so no probe can reach the session. Add that one field to make this test real.")
 	}
 
 	// Assert

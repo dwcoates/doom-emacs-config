@@ -8,7 +8,7 @@ import (
 )
 
 // The durable REPLAY FLOOR mark: newest_clear_or_compact_seq, the store seq of
-// the newest clear or compaction on a conversation. sessiondrv reads it to
+// the newest clear or compaction on a conversation. sessioncontroller reads it to
 // decide where a frontend replay may start; these cover the persistence and
 // conversation-scoping half, which is the half that has to survive a restart.
 

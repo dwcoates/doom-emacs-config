@@ -35,10 +35,11 @@ picks its hue from that split before it picks a shade:
   auto-retried.
 - **Blue: the local environment, BROKEN.** Everything on the
   Emacs→daemon→shim→store route and the machine it runs on, when there is
-  EVIDENCE something failed. `starting`, `severed` (a bring-up that could not be
-  completed, or a driver that died on a terminal protocol error), `dead`,
-  `degraded` and `ERROR_CLASS_INTERNAL` (shim down, store outage, a refused
-  command), the backfill-failed gate, and the user's own prompt bubble.
+  EVIDENCE something failed. `starting`, `severed` (a bring-up that could not
+  be completed, or a session controller that died on a terminal protocol
+  error), `dead`, `degraded` and `ERROR_CLASS_INTERNAL` (shim down, store
+  outage, a refused command), the backfill-failed gate, and the user's own
+  prompt bubble.
 - **Teal: nothing is wired, and nothing is wrong.** `hibernated` alone — a
   session we SIGTERMed on purpose to reclaim its ~500MB, or a workspace nothing
   has ever been wired to.
@@ -97,13 +98,14 @@ The window is measured from the newest row on the workspace's own state log
 appended by something that actually happened, and nothing appends on a timer.
 So a turn ending STARTS the clock rather than arming an immediate sweep.
 
-AND THE SWEEPER IS NO LONGER THE ONLY GUARD. `sessiondrv.hibernate()` itself
-refuses any workspace whose resolved state is not SETTLED — the red band (a turn
-in flight, either context cut) and purple (a vendor block the user has not seen
-through yet) — with the typed `sessiondrv.ErrNotSettled`. The rule used to be
-"never call Hibernate mid-turn", left to each caller, so it held only for the
-callers that remembered it; inside the shared teardown it is mechanical, and the
-frontend command and every future caller hit it too.
+AND THE SWEEPER IS NO LONGER THE ONLY GUARD.
+`sessioncontroller.hibernate()` itself refuses any workspace whose resolved
+state is not SETTLED — the red band (a turn in flight, either context cut) and
+purple (a vendor block the user has not seen through yet) — with the typed
+`sessioncontroller.ErrNotSettled`. The rule used to be "never call Hibernate
+mid-turn", left to each caller, so it held only for the callers that remembered
+it; inside the shared teardown it is mechanical, and the frontend command and
+every future caller hit it too.
 
 That also protects the vocabulary. `hibernated` is ranked in the blue band
 precisely so a stale agent row cannot mask it, which means a teal tab over a live
@@ -201,6 +203,6 @@ vendor entry point refuse loudly: `daemon/internal/vendorguard` returns an
 error at the queue classifier's `claude -p` exec and at the login pty, and
 `agent-shim/claude/shim/src/vendor-guard.ts` throws at the one chokepoint that
 can import the real SDK. The harnesses set it for you — `TestMain` in
-`daemon/e2e` and `daemon/internal/sessiondrv`, and the shim's vitest setup — and
-children inherit it, so a new test needs no opt-in. Production must never set
-it.
+`daemon/e2e` and `daemon/internal/sessioncontroller`, and the shim's vitest
+setup — and children inherit it, so a new test needs no opt-in. Production must
+never set it.

@@ -278,9 +278,9 @@ var stopReasonTypes = map[string]Type{
 // The daemon's sentinel errors. They live HERE, in the classifier, rather
 // than in the packages that return them, for one structural reason: a
 // classifier that imported those packages would close a cycle
-// (sessiondrv -> frontend -> errclass -> sessiondrv). Owning the anchors is
+// (sessioncontroller -> frontend -> errclass -> sessioncontroller). Owning the anchors is
 // also the honest arrangement — a sentinel exists precisely to be
-// classified, and shimclient/sessiondrv re-export these under their historic
+// classified, and shimclient/sessioncontroller re-export these under their historic
 // names so every existing errors.Is call site keeps matching the same value.
 //
 // Their Error() text is unchanged from where they were declared, because it
@@ -291,23 +291,23 @@ var (
 	ErrShimAckTimeout      = errors.New("shimclient: control request timed out")
 	ErrShimVersionMismatch = errors.New("shimclient: protocol version mismatch")
 	ErrShimSeqRegression   = errors.New("shimclient: sequence regression")
-	ErrNotLiveSession      = errors.New("sessiondrv: not the live session for this workspace")
+	ErrNotLiveSession      = errors.New("session-controller: not the live session for this workspace")
 	// The establishment ladder's anchors. They are DISJOINT by construction:
 	// exactly one may appear in any one error chain, because each names the
 	// deepest hop that hop's failure reached, and a nack that matched two
 	// would have no single deepest link to report.
-	ErrNoLiveDriver          = errors.New("sessiondrv: the workspace has no live shim driver")
-	ErrShimNotReady          = errors.New("sessiondrv: the shim connection never completed its handshake")
-	ErrShimUnhealthy         = errors.New("server: the shim reported itself unhealthy")
-	ErrSessionNotEstablished = errors.New("server: the session did not become established within the deadline")
-	ErrRepullInFlight        = errors.New("sessiondrv: a history re-pull is already in flight for this workspace")
-	ErrRepullTruncated       = errors.New("sessiondrv: history re-pull truncated before reaching the retained window")
+	ErrNoLiveSessionController = errors.New("session-controller: the workspace has no live session controller")
+	ErrShimNotReady            = errors.New("session-controller: the shim connection never completed its handshake")
+	ErrShimUnhealthy           = errors.New("server: the shim reported itself unhealthy")
+	ErrSessionNotEstablished   = errors.New("server: the session did not become established within the deadline")
+	ErrRepullInFlight          = errors.New("session-controller: a history re-pull is already in flight for this workspace")
+	ErrRepullTruncated         = errors.New("session-controller: history re-pull truncated before reaching the retained window")
 	// ErrInterruptUndelivered is the one interrupt outcome that is a failure.
 	// It is a sentinel rather than a special case at the ack site so that an
 	// undeliverable stop reaches a human through the SAME door as every other
 	// command failure — outcome to error to Command to card — instead of
 	// getting a second classification path of its own.
-	ErrInterruptUndelivered = errors.New("sessiondrv: the interrupt could not be delivered")
+	ErrInterruptUndelivered = errors.New("session-controller: the interrupt could not be delivered")
 )
 
 // sentinelTypes is the ladder, as data rather than as a switch, so the
@@ -323,7 +323,7 @@ var sentinelTypes = []struct {
 	{ErrShimVersionMismatch, TypeShimVersionMismatch},
 	{ErrShimSeqRegression, TypeShimSeqRegression},
 	{ErrNotLiveSession, TypeSessionNotLive},
-	{ErrNoLiveDriver, TypeShimNotSpawned},
+	{ErrNoLiveSessionController, TypeShimNotSpawned},
 	{ErrShimNotReady, TypeShimHandshakeIncomplete},
 	{ErrShimUnhealthy, TypeShimUnhealthy},
 	{ErrSessionNotEstablished, TypeSessionNotEstablished},

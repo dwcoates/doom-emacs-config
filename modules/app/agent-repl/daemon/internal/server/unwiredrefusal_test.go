@@ -23,11 +23,11 @@ import (
 // refusal IS the feedback.
 // ---------------------------------------------------------------------------
 
-// unwiredResyncer refuses with the no-live-driver sentinel, exactly as
-// sessiondrv does for a workspace that has not been brought up.
+// unwiredResyncer refuses with the no-live-controller sentinel, exactly as
+// sessioncontroller does for a workspace that has not been brought up.
 type unwiredResyncer struct{}
 
-func (unwiredResyncer) Resync(string, uint64) error { return errclass.ErrNoLiveDriver }
+func (unwiredResyncer) Resync(string, uint64) error { return errclass.ErrNoLiveSessionController }
 
 // brokenResyncer fails for a reason that is nobody's routine expectation.
 type brokenResyncer struct{}
@@ -72,7 +72,7 @@ func TestResyncOnAnUnwiredWorkspaceSaysSoPlainly(t *testing.T) {
 
 	// Assert.
 	for _, l := range logged {
-		if strings.Contains(l, "the workspace has no live driver") {
+		if strings.Contains(l, "the workspace has no live session controller") {
 			return
 		}
 	}
@@ -96,7 +96,7 @@ func TestAGenuineResyncFailureStaysLoud(t *testing.T) {
 func TestInterruptOnAnUnwiredWorkspaceStaysLoud(t *testing.T) {
 	// Arrange — a DIRECT user action. The user pressed stop; a silent no-op
 	// would leave a pressed control doing nothing with no explanation.
-	p := &fakePrompts{err: errclass.ErrNoLiveDriver}
+	p := &fakePrompts{err: errclass.ErrNoLiveSessionController}
 	h, err := newCommandHandler(p, &fakeMerges{}, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("newCommandHandler: %v", err)

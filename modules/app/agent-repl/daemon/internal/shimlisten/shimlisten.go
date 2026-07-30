@@ -22,9 +22,9 @@
 // # Claiming
 //
 // A shim announces itself with ShimHello, which carries its session id. The
-// connection is then PARKED under that id until a driver claims it. Parking
+// connection is then PARKED under that id until a session controller claims it. Parking
 // matters on daemon restart: survivors dial in as soon as the socket exists,
-// long before any prompt causes a driver to be built for them.
+// long before any prompt causes a session controller to be built for them.
 package shimlisten
 
 import (

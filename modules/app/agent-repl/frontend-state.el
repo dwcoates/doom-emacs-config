@@ -108,7 +108,7 @@ failure is surfaced, not hidden)."
     ;;
     ;; BLUE like :init, and the opposite claim: :init says a bring-up is in
     ;; flight, :severed says nothing is wired, nothing is coming, and something
-    ;; on our side broke — a bring-up that failed, or a driver that died on a
+    ;; on our side broke — a bring-up that failed, or a session controller that died on a
     ;; terminal protocol error.
     ("RENDER_STATE_SEVERED"        . :severed)
     ;; TEAL, and pointedly not blue.  Nothing is wired here and nothing is
@@ -183,7 +183,7 @@ perspective has not been recreated.")
 ;;;; ---- The inbound workspace key ---------------------------------------
 ;;
 ;; Every daemon frame names its workspace by the session CWD, because that is
-;; what the daemon keys workspaces by (SessionLocator, the SSM, sessiondrv).
+;; what the daemon keys workspaces by (SessionLocator, the SSM, sessioncontroller).
 ;; Emacs keys workspaces by their persp NAME ("doom").
 ;;
 ;; Feeding the daemon's path straight to `agent-repl--ws-put' does not fail —

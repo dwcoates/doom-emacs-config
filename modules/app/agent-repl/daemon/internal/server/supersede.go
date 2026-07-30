@@ -1,9 +1,9 @@
 // Single-session enforcement for a workspace, and single-writer
 // enforcement for a resumed transcript.
 //
-// Driver routing is keyed by cwd, so two non-terminal records for one cwd make
+// Controller routing is keyed by cwd, so two non-terminal records for one cwd make
 // the newest create appear live in the pushed roster while Ensure can retain
-// the predecessor's driver. A transcript JSONL also has exactly one legitimate
+// the predecessor's controller. A transcript JSONL also has exactly one legitimate
 // author: the CLI that owns the conversation.
 //
 // That is not a cosmetic overlap: each session's model reconciler once
@@ -15,7 +15,7 @@
 // stood down. The newest create is the one the user just requested.
 //
 // The workspace itself has the same shape of conflict WITHOUT a resume:
-// the driver runs one session per cwd and the locator resolves a cwd to
+// the session controller runs one session per cwd and the locator resolves a cwd to
 // its newest non-terminal record, so the moment a create mints a newer
 // record, every older record on that cwd stops being reachable — but its
 // shim keeps running and its registry record keeps reading as live.
@@ -29,7 +29,7 @@
 //
 // After the agent-shim consumption cutover there is no live-session map:
 // the persistent registry is the source of truth for who holds which
-// workspace/transcript, and the per-session driver owns the live shim. Supersede
+// workspace/transcript, and the per-session controller owns the live shim. Supersede
 // therefore works entirely off the registry — it marks every non-terminal
 // record contending for the same workspace or transcript terminal, stops
 // its shim, and pushes the terminal SessionView — rather than reaching
@@ -68,7 +68,7 @@ func transcriptOwner(configDir, cwd, claudeSessionID string) string {
 // nothing yet.
 //
 // For every conflict the record is marked terminal (so its id stops
-// resolving and the driver never brings it up again), its shim is stopped
+// resolving and the session controller never brings it up again), its shim is stopped
 // best-effort — a shim that was never brought up is a no-op Hibernate —
 // and its terminal SessionView is pushed. The push is load-bearing:
 // without it every connected frontend keeps the superseded session listed
@@ -103,10 +103,10 @@ func (s *Server) supersedeCreateConflicts(opts CreateOpts) {
 			r.Terminal = true
 			r.DeathReason = supersedeReason
 		})
-		// Stop the OLD session's shim if the driver had brought one up —
+		// Stop the OLD session's shim if the session controller had brought one up —
 		// session-scoped, so superseding a stale record can never SIGTERM a
 		// newer session that already owns the same cwd.
-		if err := s.driver.HibernateSession(rec.CWD, rec.SessionID); err != nil {
+		if err := s.controller.HibernateSession(rec.CWD, rec.SessionID); err != nil {
 			s.logf("session %s: supersede exact shim stop FAILED (ws %s): %v", rec.SessionID, rec.CWD, err)
 		}
 		// Deliver the stand-down to every connected frontend so their rosters

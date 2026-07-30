@@ -11,7 +11,7 @@ import (
 // floor's durability is only half the contract: it also has to come BACK onto
 // whatever record the new daemon files the conversation under. A floor that
 // survived on the checkpoint but never rehydrated onto the live record would
-// leave the driver reading zero and replaying the whole conversation a clear
+// leave the session controller reading zero and replaying the whole conversation a clear
 // already discarded — the exact failure the floor exists to end.
 
 // floorTestPath is this file's own registry path helper, kept local so these

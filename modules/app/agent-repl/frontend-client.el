@@ -81,9 +81,9 @@
 ;; The daemon keys every workspace-routed command (`submitPrompt',
 ;; `interrupt', `permissionAnswer') by the session's CWD: its
 ;; `SessionLocator.Locate' scans the registry for a non-terminal record whose
-;; `CWD' EQUALS the `workspace' field, and `sessiondrv.Manager' maps live
-;; drivers under that same cwd string (daemon/internal/server/drivers.go,
-;; daemon/internal/sessiondrv/driver.go).
+;; `CWD' EQUALS the `workspace' field, and `sessioncontroller.Manager' maps live
+;; session controllers under that same cwd string (daemon/internal/server/sessioncontrollers.go,
+;; daemon/internal/sessioncontroller/sessioncontroller.go).
 ;;
 ;; Emacs, meanwhile, keys everything by the persp NAME ("doom").  Sending the
 ;; name as the `workspace' field therefore matches NO record, and the daemon
@@ -1247,7 +1247,7 @@ The one-shot `:next-send-origin' tag (set by the merge remediation) is
 consumed and cleared here but is NOT forwarded: frontend.v1's
 `SubmitPromptCmd' has no `origin' field, so the merge status-card stamping
 is gone — matching the already-dead server behavior (the retired HTTP
-/message route never read `origin' into the driver either)."
+/message route never read `origin' into the session controller either)."
   (let ((id (agent-repl--frontend-ensure-session ws))
         (origin (agent-repl--ws-get ws :next-send-origin)))
     ;; The ensure may have HEALED a dead binding into a fresh session —
@@ -1274,8 +1274,8 @@ is gone — matching the already-dead server behavior (the retired HTTP
 ;;
 ;;   - `bindRecord' returns early WITHOUT writing once the record already
 ;;     carries a `claude_session_id', so a re-open never re-binds;
-;;   - `Ensure' -> `sessiondrv.Manager.bringUp' takes the manager mutex,
-;;     finds the workspace in `byWS' and returns the live driver
+;;   - `Ensure' -> `sessioncontroller.Manager.bringUp' takes the manager mutex,
+;;     finds the workspace in `byWS' and returns the live session controller
 ;;     immediately — no shim spawn, no consumer, no push.
 ;;
 ;; Panel mounting is entirely Emacs-side, so there is no open-only side
@@ -1330,8 +1330,8 @@ cannot backfill on switch either, so retrying would loop for nothing."
     (or (null state)
         (member state '("BACKFILL_STATE_DONE" "BACKFILL_STATE_UNSPECIFIED")))))
 
-(defun agent-repl--frontend-session-driver-live-p (session-id)
-  "Return non-nil when the daemon holds a LIVE DRIVER for SESSION-ID.
+(defun agent-repl--frontend-session-controller-live-p (session-id)
+  "Return non-nil when the daemon holds a LIVE SESSION CONTROLLER for SESSION-ID.
 Reads `SessionView.shim_attached\=' off the pushed-frame store — the one
 field on that message that is NOT read back from the durable registry
 record.
@@ -1340,7 +1340,7 @@ WHY LIVENESS CANNOT BE READ OFF THE RECORD (the dead perspective switch).
 `agent-repl--frontend-session-live-p\=' answers whether this record is
 non-terminal, and `agent-repl--frontend-backfill-settled-p\=' answers
 whether its history finished arriving.  Both are DURABLE, so both keep
-answering yes across a daemon restart — about a daemon that has no driver for the
+answering yes across a daemon restart — about a daemon that has no session controller for the
 workspace at all.  The switch-ensure skipped on exactly that pair, so
 after every restart a switch to an unwired workspace sent no
 `openWorkspace\=', nothing brought the session up, and the workspace sat
@@ -1380,15 +1380,15 @@ that would have retried it is the retry."
    ;;     go on describing a workspace the new daemon has never brought up.
    ;;     That is the dead perspective switch: after a restart every workspace
    ;;     looked live-and-backfilled, every switch skipped, and no workspace
-   ;;     ever bootstrapped. `agent-repl--frontend-session-driver-live-p' is
-   ;;     the non-durable half, so a missing driver ALWAYS ensures.
+   ;;     ever bootstrapped. `agent-repl--frontend-session-controller-live-p' is
+   ;;     the non-durable half, so a missing session controller ALWAYS ensures.
    ;;
    ;; Everything that falls through is bounded by the cooldown and give-up
    ;; below.
    ((let ((id (agent-repl--ws-get ws :frontend-session-id)))
       (and id
            (agent-repl--frontend-session-live-p id)
-           (agent-repl--frontend-session-driver-live-p id)
+           (agent-repl--frontend-session-controller-live-p id)
            (agent-repl--frontend-backfill-settled-p id)))
     "session already live, driven and backfilled")
    ((agent-repl--ws-get ws :switch-ensure-failed) "gave up after repeated failures")

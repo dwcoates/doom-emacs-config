@@ -20,7 +20,7 @@ import (
 )
 
 // AgentShimConfig injects everything WireAgentShim binds. SSM is opened by the
-// caller (main) and injected so its lifecycle — and the per-session driver that
+// caller (main) and injected so its lifecycle — and the per-session controller that
 // also feeds it — is owned in one place; the three routers back the frontend
 // command handler; MergeDirs resolves a workspace to the cherry-pick request
 // the merge Engine runs; Sessions supplies SessionView metadata for snapshots.
@@ -28,21 +28,21 @@ type AgentShimConfig struct {
 	// SSM is the session-state manager, opened and owned by the caller (main).
 	// Required: the frontend snapshot and the merge-transition push loop both
 	// read/write it. WireAgentShim does NOT close it — main does (the same SSM
-	// is shared with the per-session driver, so one owner closes it once).
+	// is shared with the per-session controller, so one owner closes it once).
 	SSM *ssm.Manager
 	// Progress is the progress-footer resolver (F1), a sibling of the SSM. It is
 	// created and owned by the caller for the same reason the SSM is: the
-	// per-session driver folds events into it too. Required.
+	// per-session controller folds events into it too. Required.
 	Progress *progress.Manager
 	// Prompts routes prompt/interrupt/permission to the session shim.
 	Prompts PromptRouter
 	// Turns reports whether a workspace has a turn in flight, for the interrupt
-	// confirm gate (I1). Required, and it must be the same driver fleet as
+	// confirm gate (I1). Required, and it must be the same controller fleet as
 	// Prompts: the gate decides whether there is a turn to stop, and reading a
 	// different fleet's answer would gate one session on another's liveness.
 	Turns TurnStateSource
 	// Health routes correlated session health checks to the existing live shim
-	// connection.  It must be the same driver fleet as Prompts. It is also what
+	// connection.  It must be the same controller fleet as Prompts. It is also what
 	// createSession's establishment gate proves the new session on, so an
 	// unwired Health makes every create a loud nack rather than an unprovable
 	// ok (see createestablish.go).
@@ -71,10 +71,10 @@ type AgentShimConfig struct {
 	Sessions SessionMetaSource
 	// Inits supplies the retained SystemInit of every live session as
 	// SessionInitViews for the connect snapshot (S9). Nil-safe: a nil source
-	// leaves snapshot.inits empty. Satisfied by *sessiondrv.Manager.
+	// leaves snapshot.inits empty. Satisfied by *sessioncontroller.Manager.
 	Inits SessionInitSource
 	// Catalogs supplies every live session's complete detached-task roster for
-	// connect/resync snapshots. Satisfied by *sessiondrv.Manager.
+	// connect/resync snapshots. Satisfied by *sessioncontroller.Manager.
 	Catalogs TaskCatalogSource
 	// Queues is the prompt-queue backend (E4): the force/accept/cancel command
 	// half and the snapshot half. Nil makes each queue command a loud failing
@@ -119,7 +119,7 @@ type MergeDirResolver interface {
 // AgentShim is the assembled frontend surface. Server is mounted by main.go
 // (ServeUDS + ServeWS); Close tears down the push loop and the frontend server.
 // The SSM is injected and owned by main (Close does NOT close it), because the
-// same SSM instance also backs the per-session driver.
+// same SSM instance also backs the per-session controller.
 type AgentShim struct {
 	Server   *frontend.Server
 	SSM      *ssm.Manager
@@ -237,7 +237,7 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 			Restarts:          cfg.Restarts,
 			Health:            HealthConfig{Router: cfg.Health, Daemon: cfg.DaemonHealth},
 			// The gate reads each fact from the authority that owns it: the
-			// driver observes the turn boundary, and the progress resolver
+			// controller observes the turn boundary, and the progress resolver
 			// already carries the live-task count to the footer.
 			Interrupt:        InterruptGateConfig{Turns: cfg.Turns, LiveTasks: cfg.Progress},
 			EstablishTimeout: cfg.EstablishTimeout,
@@ -318,7 +318,7 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 
 // Close stops the push loop and closes the frontend server (disconnecting
 // clients). It does NOT close the SSM: main opened it and owns its lifecycle
-// (the per-session driver shares the same instance), so main closes it exactly
+// (the per-session controller shares the same instance), so main closes it exactly
 // once. Idempotent-safe for a single call.
 func (a *AgentShim) Close() error {
 	if a.cancelPush != nil {

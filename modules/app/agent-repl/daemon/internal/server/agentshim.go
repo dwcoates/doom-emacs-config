@@ -210,7 +210,7 @@ var _ ssm.Resolver = (*RegistryResolver)(nil)
 // events are keyed by the vendor uuid — the store files them under it, since
 // the shim reads it off the SDK message and the sidecar derives it from
 // `<uuid>.jsonl`. Resolving only the s_ id meant every lifecycle event the
-// driver applied failed with "no workspace bound to session <uuid>", so no
+// controller applied failed with "no workspace bound to session <uuid>", so no
 // turn or task state ever reached a workspace.
 //
 // The uuid lookup is a scan because the registry is keyed by the other id, and

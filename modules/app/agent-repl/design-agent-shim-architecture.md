@@ -356,7 +356,7 @@ freshly-mounted GUI never sees what was pushed before it existed. So a
 (re)connecting frontend sends `ResyncCmd{from_seq}` and the daemon answers in
 two layers:
 
-1. **The retained ring** (`sessiondrv`, 4,096 events). Replayed from `from_seq`
+1. **The retained ring** (`sessioncontroller`, 4,096 events). Replayed from `from_seq`
    as ordinary `ConversationDelta`s. Idempotent: frontends reconcile by uuid, so
    a re-push REPLACES.
 2. **The below-floor replay** (`core.ReplayRequest` over the session's existing

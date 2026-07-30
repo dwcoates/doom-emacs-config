@@ -26,7 +26,7 @@ import (
 //     next replaces it.
 //
 // PENDING is the workspace's pending-permission count folded to a boolean; the
-// caller derives it from the live rendezvous registry (sessiondrv's permRegistry)
+// caller derives it from the live rendezvous registry (sessioncontroller's permRegistry)
 // rather than keeping a second ledger. So the opening edge is the FIRST pending
 // permission and the closing edge is the count returning to zero — grant, deny
 // and abandonment alike, because all three release the waiter.
@@ -105,7 +105,7 @@ func (m *Manager) applyPermissionLocked(workspace string, pending bool, reason s
 // restart). Caller holds mu.
 //
 // THE PENDINGS DIE WITH THE SHIM CONNECTION. A rotation bounces the shim and
-// sessiondrv's permRegistry.fail abandons every waiter on it; a restart takes
+// sessioncontroller's permRegistry.fail abandons every waiter on it; a restart takes
 // the whole rendezvous with it. In both cases the question is gone and the shim
 // re-asks on reattach, so a row left standing would describe a prompt nobody is
 // looking at — and, on the rotation path specifically, would hide the `thinking`

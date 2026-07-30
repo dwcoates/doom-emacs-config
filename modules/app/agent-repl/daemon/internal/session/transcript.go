@@ -4,7 +4,7 @@
 // (ClaudeConfigDir). Everything else that once lived here — the Layer-2
 // streaming hub (Session, Client, the stdio Run loop, the Translator, replay,
 // queue/classify/summarize, the detached-task tailer) — was deleted when the
-// daemon moved to consuming each session's UDS shim through internal/sessiondrv
+// daemon moved to consuming each session's UDS shim through internal/sessioncontroller
 // and rendering onto the frontend.v1 surface + SSM. These helpers are pure
 // (filesystem-path arithmetic only) and back the resume-viability gate, the
 // account-switch transcript migration, and registry rehydration.

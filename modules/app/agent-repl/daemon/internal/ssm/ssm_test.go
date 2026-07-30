@@ -81,7 +81,7 @@ func evTaskEnded(sid string, seq uint64, taskID string, status corev1.TerminalSt
 // openTest opens a Manager on a temp DB with a capturing logger, and WIRES
 // every workspace the resolver names.
 //
-// The wiring is arrangement, not subject. It is sessiondrv's fact, produced off
+// The wiring is arrangement, not subject. It is sessioncontroller's fact, produced off
 // the bring-up gate's own verdict, and until it stands the connection-truth law
 // holds every workspace on the axis's closed half no matter what the agent
 // reports — so a test

@@ -1,5 +1,5 @@
 // Package e2e exercises the full post-cutover daemon⇄shim stack end to end:
-// a real claude-repld frontend surface + per-session driver spawning the real
+// a real claude-repld frontend surface + per-session controller spawning the real
 // TS claude-shim in UDS mode (--uds-socket + --store-socket, --fake offline),
 // writing to a real agent-shim/shim-store, with the daemon consuming the
 // merged stream and rendering agentshim.frontend.v1 frames onto the existing
@@ -46,7 +46,7 @@ import (
 	"claude-repld/internal/progress"
 	"claude-repld/internal/registry"
 	"claude-repld/internal/server"
-	"claude-repld/internal/sessiondrv"
+	"claude-repld/internal/sessioncontroller"
 	"claude-repld/internal/sessionlock"
 	"claude-repld/internal/shim"
 	"claude-repld/internal/shimlisten"
@@ -288,7 +288,7 @@ type harnessTuning struct {
 	currentBuildSHA string
 	// idleSweeper hands the daemon's idle sweeper a clock the TEST drives, so
 	// a hibernation is provoked by an event rather than waited out. It is the
-	// production trigger — sweepIdle calls driver.Hibernate — so what it
+	// production trigger — sweepIdle calls controller.Hibernate — so what it
 	// exercises is the real edge and not a stand-in for one.
 	idleSweeper bool
 }
@@ -351,9 +351,9 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 		opt(&tuning)
 	}
 	// The LAST-RESORT shim reaper, registered before anything else so it runs
-	// AFTER every other cleanup (LIFO) — in particular after driver.Close. A
-	// per-session cleanup kills the shim it spawned, but the still-live driver
-	// RESPAWNS one ~100ms later, and driver.Close then SIGTERMs that respawn
+	// AFTER every other cleanup (LIFO) — in particular after controller.Close. A
+	// per-session cleanup kills the shim it spawned, but the still-live session controller
+	// RESPAWNS one ~100ms later, and controller.Close then SIGTERMs that respawn
 	// WITHOUT waiting — leaving a dying node process racing the t.TempDir
 	// RemoveAll, which fails tests from cleanup with "directory not empty".
 	// Waiting out every spawned process here closes that race.
@@ -472,17 +472,17 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 	e2eSeqStore := server.NewRegistrySeqStore(reg, t.Logf)
 	modelCatalogs := server.NewSessionModelCatalogs()
 	registrar := &server.RegistryRegistrar{Reg: reg, Logf: t.Logf, ModelCatalogs: modelCatalogs}
-	// ONE progress resolver, shared by the driver (which feeds it interrupts,
+	// ONE progress resolver, shared by the session controller (which feeds it interrupts,
 	// permission and queue counts) and WireAgentShim (which fans its views out
 	// to frontends) — the same single-instance wiring main.go does. Two
-	// instances split the brain: the driver's notes push to nobody while the
+	// instances split the brain: the session controller's notes push to nobody while the
 	// wired instance never hears them.
 	progressMgr := progress.New(progress.Options{Logf: t.Logf})
 	fileDiagnostics, err := server.NewTargetFileDiagnosticPersister(targets, os.Stderr, false)
 	if err != nil {
 		t.Fatalf("build file diagnostic persister: %v", err)
 	}
-	driver, err := sessiondrv.New(sessiondrv.Config{
+	controller, err := sessioncontroller.New(sessioncontroller.Config{
 		Push:              forwarder,
 		SSM:               ssmMgr,
 		Progress:          progressMgr,
@@ -501,9 +501,9 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 		Logf:              t.Logf,
 	})
 	if err != nil {
-		t.Fatalf("build driver: %v", err)
+		t.Fatalf("build controller: %v", err)
 	}
-	t.Cleanup(driver.Close)
+	t.Cleanup(controller.Close)
 
 	binding := &server.SessionCommandBinding{Logf: t.Logf}
 	workspaceCreation := newEmptyWorkspaceCreation()
@@ -513,13 +513,13 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 		Resumes:           &server.ConversationResolver{Reg: reg, Logf: t.Logf},
 		SSM:               ssmMgr,
 		Progress:          progressMgr,
-		Prompts:           driver,
-		Turns:             driver,
-		Health:            driver,
+		Prompts:           controller,
+		Turns:             controller,
+		Health:            controller,
 		MergeDirs:         stubMergeDirs{},
 		Lifecycle:         stubLifecycle{},
-		Resyncer:          driver,
-		Catalogs:          driver,
+		Resyncer:          controller,
+		Catalogs:          controller,
 		SessionCommands:   binding,
 		WorkspaceCreation: workspaceCreation,
 		EstablishTimeout:  tuning.establishTimeout,
@@ -539,7 +539,7 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 		DaemonVersion:  "0.1.0-e2e",
 		Registry:       reg,
 		ModelCatalogs:  modelCatalogs,
-		Driver:         driver,
+		Controller:     controller,
 		SSM:            ssmMgr,
 		Frontend:       agentShim.Server,
 		IdleSweepTicks: sweepTicks,
@@ -729,7 +729,7 @@ func TestE2EUDSTextTurnRendersFrontendFrames(t *testing.T) {
 			}
 		case *frontendv1.FrontendFrame_WorkspaceState:
 			if f.WorkspaceState.GetSessionId() == id || f.WorkspaceState.GetWorkspace() == cwd {
-				return // success: the driver drove an SSM transition for this session
+				return // success: the session controller drove an SSM transition for this session
 			}
 		}
 	}

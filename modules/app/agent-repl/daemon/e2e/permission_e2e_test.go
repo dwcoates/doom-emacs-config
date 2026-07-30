@@ -20,7 +20,7 @@
 //
 // WHY THE ASSERTION IS ON cause_kind AND NOT ONLY THE STATE. The permission
 // handler ALSO pushes a bare WorkspaceState carrying the PERMISSION enum
-// directly (sessiondrv/driver.go HandlePermission), predating the SSM producer
+// directly (sessioncontroller/sessioncontroller.go HandlePermission), predating the SSM producer
 // and independent of it. A test that matched on the enum alone would pass with
 // the producer deleted. The SSM's own push is the one carrying a resolved
 // cause_kind — `permission:pending=N` — so that is what these match, and the

@@ -12,7 +12,7 @@ type Wiring int
 const (
 	// WiringSevered — nothing is wired to this workspace, nothing is coming up,
 	// and there is EVIDENCE THAT SOMETHING BROKE. A bring-up that could not be
-	// completed, or a driver whose client.Run returned a terminal protocol
+	// completed, or a session controller whose client.Run returned a terminal protocol
 	// error.
 	//
 	// It is the ZERO VALUE deliberately. A Wiring nobody set says "the substrate
@@ -35,7 +35,7 @@ const (
 	// one token meant both "asleep by choice" and "the substrate is broken", so
 	// the idle sweeper reaping an untouched workspace was indistinguishable from
 	// a dead shim. A closing edge must now say WHICH it is, and there is no
-	// default — every producer in sessiondrv/wiredstate.go picks explicitly.
+	// default — every producer in sessioncontroller/wiredstate.go picks explicitly.
 	WiringHibernated
 )
 
@@ -85,8 +85,8 @@ func (w Wiring) String() string { return w.token() }
 //
 // THE PRODUCER IS SESSIONDRV, which is the only component that knows. The
 // opening edge is the bring-up gate's own ShimReady verdict; the closing edges
-// are driver exit, hibernation, shim stop, and the bounce window a vendor
-// session rotation opens. See internal/sessiondrv/wiredstate.go.
+// are session controller exit, hibernation, shim stop, and the bounce window a vendor
+// session rotation opens. See internal/sessioncontroller/wiredstate.go.
 //
 // REASON is a short note recorded as the cause detail, so the log names WHY a
 // workspace went blue rather than only that it did.

@@ -20,7 +20,7 @@ func TestShutdownPreservesShimsByDefault(t *testing.T) {
 	// Arrange — a live session, so there is a shim to preserve or kill.
 	h := newHarness(t)
 	id := createSession(t, h, `{"cwd":"/w"}`)
-	if err := h.driver.Ensure("/w"); err != nil {
+	if err := h.controller.Ensure("/w"); err != nil {
 		t.Fatalf("Ensure: %v", err)
 	}
 
@@ -39,7 +39,7 @@ func TestShutdownStopShimsModeStopsThem(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	id := createSession(t, h, `{"cwd":"/w"}`)
-	if err := h.driver.Ensure("/w"); err != nil {
+	if err := h.controller.Ensure("/w"); err != nil {
 		t.Fatalf("Ensure: %v", err)
 	}
 
@@ -58,7 +58,7 @@ func TestShutdownLeavesRecordsNonTerminal(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	id := createSession(t, h, `{"cwd":"/w"}`)
-	if err := h.driver.Ensure("/w"); err != nil {
+	if err := h.controller.Ensure("/w"); err != nil {
 		t.Fatalf("Ensure: %v", err)
 	}
 

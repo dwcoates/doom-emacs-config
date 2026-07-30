@@ -244,8 +244,9 @@ export const DaemonHealthViewSchema: GenMessage<DaemonHealthView> = /*@__PURE__*
 
 /**
  * Correlated result of the session-specific health command.  The daemon sets
- * healthy=true only when the named live driver has a handshaked shim and that
- * shim has proved its own dependency health (including its store connection).
+ * healthy=true only when the named live session controller has a handshaked
+ * shim and that shim has proved its own dependency health (including its store
+ * connection).
  * WORKSPACE is the absolute CWD, matching every session-routed frontend
  * command; SESSION_ID prevents an old response from satisfying a newer
  * restored binding.
@@ -409,17 +410,17 @@ export type SessionView = Message<"agentshim.frontend.v1.SessionView"> & {
   permissionMode: string;
 
   /**
-   * Whether the daemon holds a LIVE DRIVER for this session's workspace —
-   * i.e. a shim is attached, or its client is reconnecting to one.
+   * Whether the daemon holds a LIVE SESSION CONTROLLER for this session's
+   * workspace — i.e. a shim is attached, or its client is reconnecting to one.
    *
    * IT IS THE ONE FIELD ON THIS MESSAGE THAT IS NOT DURABLE, and that is
    * exactly why it exists. Every other field here is read off the registry
    * record, which survives a daemon restart; a frontend that judges "is this
    * workspace already up?" from those sees a non-terminal, fully-backfilled
-   * record and concludes YES against a daemon that has no driver for it at
-   * all. Emacs's switch-ensure did precisely that, so after a daemon restart
-   * switching to an unwired workspace skipped its openWorkspace and the
-   * workspace never bootstrapped.
+   * record and concludes YES against a daemon that has no session controller
+   * for it at all. Emacs's switch-ensure did precisely that, so after a daemon
+   * restart switching to an unwired workspace skipped its openWorkspace and
+   * the workspace never bootstrapped.
    *
    * The field had NO producer before that bug; the name always meant this.
    *
@@ -1455,7 +1456,7 @@ export const DaemonHealthCmdSchema: GenMessage<DaemonHealthCmd> = /*@__PURE__*/
 
 /**
  * Ask the daemon to prove the entire session route for one restored workspace:
- * daemon registry -> current driver -> handshaked shim -> shim dependencies.
+ * daemon registry -> current session controller -> handshaked shim -> shim dependencies.
  * The command's outer workspace is authoritative and must equal the session's
  * CWD; SESSION_ID makes a stale response impossible to use after a rebind.
  *
@@ -2708,7 +2709,7 @@ export const StateSnapshotSchema: GenMessage<StateSnapshot> = /*@__PURE__*/
  *
  *   BLUE   INIT, SEVERED, DEAD, DEGRADED — the route Emacs→daemon→shim→SDK is
  *          compromised on OUR side, and there is EVIDENCE of the breakage. A
- *          bring-up in flight (INIT), a bring-up that failed or a driver that
+ *          bring-up in flight (INIT), a bring-up that failed or a session controller that
  *          died on a terminal protocol error (SEVERED), a dead or unspawned
  *          shim, a store outage, or a failed backfill. Blue is the honest
  *          state whenever green's promise cannot be kept AND something is
@@ -2883,7 +2884,7 @@ export enum RenderState {
 
   /**
    * NOT WIRED, and the SUBSTRATE IS BROKEN. A bring-up that could not be
-   * completed, or a driver whose `client.Run` returned a terminal protocol
+   * completed, or a session controller whose `client.Run` returned a terminal protocol
    * error.
    *
    * It is the resting half of the connection-truth law above. INIT already
