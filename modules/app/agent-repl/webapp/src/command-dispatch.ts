@@ -38,6 +38,25 @@ import { log, logVerbose } from "./wslog.js";
  */
 const MAX_TRACKED_CLIENT_LOGS = 256;
 
+/**
+ * How many client logs may be rejected IN A ROW before forwarding trips off.
+ *
+ * A rejection here is never transient in practice: the daemon refuses a client
+ * log whose session attribution disagrees with its registry, and a session's
+ * attribution does not fix itself. Left unbounded, every log line the page
+ * emits is sent, rejected, and reported locally, forever — one incident put
+ * 143,057 rejection records in the daemon log from four idle workspaces in
+ * twenty minutes, at roughly ten commands a second, while the browser's own
+ * workspace log stayed frozen at the seven lines that predated the
+ * disagreement.
+ *
+ * Tripping off costs nothing that was working: the records were being thrown
+ * away at the far end either way, and `logLocal` still has them. What it buys
+ * is that a misattributed page degrades to local-only logging instead of
+ * flooding the shared daemon log for every OTHER workspace.
+ */
+const MAX_CONSECUTIVE_CLIENT_LOG_REJECTIONS = 20;
+
 function asError(value: unknown): Error {
   return value instanceof Error ? value : new Error(String(value));
 }
@@ -91,7 +110,7 @@ export interface CreateSessionArgs {
   permissionMode: string;
   configDir: string;
   /** "" = fresh; else resume this durable CLI conversation uuid. */
-  resumeClaudeSessionId: string;
+  resumeMode: string;
   fake: boolean;
 }
 
@@ -145,6 +164,10 @@ export class CommandDispatcher {
   private readonly knownSessions = new Set<string>();
   private readonly creates: CreateWaiter[] = [];
   private readonly clientLogAcks = new Set<string>();
+  /** Consecutive client-log rejections; reset by any accepted one. */
+  private clientLogRejections = 0;
+  /** Set once forwarding has tripped off, so the reason is reported once. */
+  private clientLogForwardingOff = false;
   private counter = 0;
 
   constructor(private readonly opts: DispatchOptions) {
@@ -296,6 +319,10 @@ export class CommandDispatcher {
    * anomaly (which would itself be logged, and forwarded, and acked…).
    */
   clientLog(workspace: string, level: ClientLogBodyLevel, message: string, context?: CommandStruct): boolean {
+    // Tripped off after a run of rejections; see the constant. Reporting false
+    // is honest — the record did not reach the daemon — and `logLocal` keeps
+    // it, so nothing is silently dropped.
+    if (this.clientLogForwardingOff) return false;
     const requestId = this.newId();
     const body: ClientLogBody = {
       case: "clientLog",
@@ -342,6 +369,18 @@ export class CommandDispatcher {
         // clientLog acknowledgement loop, so the injected local-only sink owns
         // the sole record.
         this.opts.logLocal(`clientLog rejected: ${ack.error}`);
+        this.clientLogRejections += 1;
+        if (this.clientLogRejections >= MAX_CONSECUTIVE_CLIENT_LOG_REJECTIONS) {
+          this.clientLogForwardingOff = true;
+          this.opts.logLocal(
+            `clientLog forwarding DISABLED after ${this.clientLogRejections} consecutive rejections ` +
+            `(last: ${ack.error}) — every further record is local-only. The daemon was refusing all of ` +
+            `them, so nothing that was arriving stops arriving; this only stops the flood.`,
+          );
+        }
+      } else {
+        // Any accepted log clears the run: whatever was wrong is no longer.
+        this.clientLogRejections = 0;
       }
       return;
     }
