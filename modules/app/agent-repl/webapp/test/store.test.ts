@@ -42,6 +42,9 @@ function workspaceEffect(over: Partial<WorkspaceStatusInput> = {}): AdapterEffec
       turnActive: true,
       liveTaskCount: 0,
       mergePhase: "",
+      causeKind: "turn_started",
+      causeSeq: 1,
+      atMs: 1000,
       ...over,
     },
   };
@@ -215,6 +218,28 @@ describe("ingest workspace-state", () => {
     const result = store.ingest([workspaceEffect()]);
     // Assert
     expect(result.changed).toBe(true);
+  });
+
+  it("logs state adoption with transition identity and old/new values", () => {
+    const logs: string[] = [];
+    const store = new ConversationStore((_level, message) => logs.push(message));
+
+    store.ingest([
+      workspaceEffect({
+        state: "ready",
+        turnActive: false,
+        causeKind: "session_started",
+        causeSeq: 7,
+        atMs: 1234,
+      }),
+    ]);
+
+    expect(logs).toEqual([
+      expect.stringContaining(
+        "state=none->ready turn_active=false->false live_tasks=0 " +
+          "merge_phase= cause_kind=session_started cause_seq=7 at_ms=1234",
+      ),
+    ]);
   });
 });
 
@@ -1298,6 +1323,28 @@ describe("the progress footer's input (F1)", () => {
     store.ingest([progressEffect({ inputTokens: 41_200 })]);
     // Assert
     expect(store.progress?.inputTokens).toBe(41_200);
+  });
+
+  it("logs interrupt-window adoption only when the outcome changes", () => {
+    const logs: string[] = [];
+    const store = new ConversationStore((_level, message) => logs.push(message));
+
+    store.ingest([
+      progressEffect({
+        interrupt: { sinceMs: 42, outcome: "already_complete" },
+      }),
+    ]);
+    store.ingest([
+      progressEffect({
+        interrupt: { sinceMs: 42, outcome: "already_complete" },
+      }),
+    ]);
+
+    expect(logs).toEqual([
+      expect.stringContaining(
+        "outcome=none->already_complete since_ms=42 turn_started_at_ms=0",
+      ),
+    ]);
   });
 
   it("retains the compaction window on the progress view the footer reads", () => {

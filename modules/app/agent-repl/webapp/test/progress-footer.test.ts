@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 
 import { CounterEntry } from "../src/counter-menu.js";
 import {
+  alreadyCompletePhaseViolation,
   Activity,
   FooterDisclosure,
   FooterInput,
@@ -910,6 +911,26 @@ describe("footerHtml: the phase comes from the workspace state (F5)", () => {
 });
 
 // --- the interrupt chip (I1) -------------------------------------------------
+
+describe("alreadyCompletePhaseViolation: footer/state invariant", () => {
+  it.each(["thinking", "clearing", "compacting", "permission"] as const)(
+    "flags already_complete beside %s",
+    (state) => {
+      expect(alreadyCompletePhaseViolation(state, "already_complete")).toBe(state);
+    },
+  );
+
+  it.each(["ready", "idle", "done", "vendor_blocked"] as const)(
+    "accepts already_complete beside settled phase %s",
+    (state) => {
+      expect(alreadyCompletePhaseViolation(state, "already_complete")).toBeNull();
+    },
+  );
+
+  it("does not flag an active phase for another interrupt outcome", () => {
+    expect(alreadyCompletePhaseViolation("thinking", "interrupted")).toBeNull();
+  });
+});
 
 describe("interruptChip: the outcome of the stop the user asked for", () => {
   it("says interrupted when the stop was delivered to a live turn", () => {

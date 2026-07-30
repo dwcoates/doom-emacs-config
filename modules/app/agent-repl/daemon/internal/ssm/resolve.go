@@ -93,6 +93,11 @@ const (
 	causeWired         = "wired"
 	causeVendorBlocked = "vendor_blocked"
 	causeInterrupted   = "interrupted"
+	// Daemon-local ordering edges that make prompt/interrupt UI claims true
+	// before their corresponding durable stream events finish traversing the
+	// store.  See promptstate.go.
+	causePromptAccepted           = "prompt_accepted"
+	causeInterruptAlreadyComplete = "interrupt_already_complete"
 	// The vendor retired one session uuid mid-stream and minted another, so
 	// the turn the old identity was running can never report its own end. The
 	// row is daemon-local and carries no store seq, exactly as a merge
@@ -550,7 +555,11 @@ func resolve(db *sql.DB, workspace string, logf dlog.Logf) (resolved, error) {
 		mergePhase = mergeState.String
 	}
 
-	turnActive := agentCause.Valid && agentCause.String == causeTurnStarted
+	// The shim-accepted command edge is the first authoritative observation
+	// that a turn is beginning; the durable stream TurnStarted later replaces
+	// its cause without changing the truth value.
+	turnActive := agentCause.Valid &&
+		(agentCause.String == causeTurnStarted || agentCause.String == causePromptAccepted)
 
 	// AN INVARIANT VIOLATION, never a benign combination. A hibernation is
 	// something WE do on purpose, and sessiondrv's hibernate() refuses any

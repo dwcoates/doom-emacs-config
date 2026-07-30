@@ -300,8 +300,8 @@ type Manager struct {
 	// can be driven without a ten-second wait (see turnstop.go).
 	interruptDrain time.Duration
 	closed         bool
-	rootCtx      context.Context
-	rootStop     context.CancelFunc
+	rootCtx        context.Context
+	rootStop       context.CancelFunc
 	// exits counts every driver-exit goroutine (the tail of bringUp's `go
 	// func`), so Close can JOIN them. Unjoined, that tail — which drains the
 	// queue, publishes the empty view, and persists queued_prompts through the
@@ -705,14 +705,6 @@ func (m *Manager) submitPrompt(ctx context.Context, workspace, requestID, text, 
 			m.mu.Unlock()
 			return err
 		}
-		// The submit was ACCEPTED, so a turn is beginning. This is the earliest
-		// turn-start signal the daemon actually observes today (live TurnStarted
-		// events do not currently reach it), and it is what starts the footer's
-		// turn clock and resets its turn-scoped token figure. The resolver's open
-		// is idempotent, so the real TurnStarted arriving later changes nothing.
-		// A QUEUED prompt deliberately does not reach here: the turn it would
-		// report is the one already running.
-		m.progress().NoteTurnAccepted(workspace, d.sessionID)
 		return nil
 	}
 	running := d.runningText
@@ -879,7 +871,9 @@ func (m *Manager) Interrupt(ctx context.Context, workspace string) error {
 	if err != nil {
 		return err
 	}
-	m.noteUserInterrupt(d, outcome)
+	if err := m.noteUserInterrupt(d, outcome); err != nil {
+		return err
+	}
 	if failed := errclass.InterruptError(outcome); failed != nil {
 		m.logf("sessiondrv: interrupt undeliverable ws=%s session=%s outcome=%s", workspace, d.sessionID, outcome)
 		return failed
@@ -962,7 +956,27 @@ func (m *Manager) recoverDriverForInterrupt(ctx context.Context, workspace strin
 // the queue would otherwise deliver the next held prompt into the silence they
 // just asked for. FAILED changes nothing — no stop was delivered, so nothing
 // about the session moved.
-func (m *Manager) noteUserInterrupt(d *driven, outcome corev1.InterruptOutcome) {
+func (m *Manager) noteUserInterrupt(d *driven, outcome corev1.InterruptOutcome) error {
+	// ALREADY_COMPLETE is a shim-side assertion that no foreground turn
+	// exists. Its durable TurnEnded can still be traversing the store while
+	// this control Ack arrives. Reconcile the SSM FIRST and publish the footer
+	// window only after that succeeds; reversing these calls is the exact race
+	// that rendered "already finished" beside `thinking`.
+	if outcome == corev1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE {
+		closed, err := m.cfg.SSM.ReconcileAlreadyComplete(d.workspace, d.sessionID)
+		if err != nil {
+			m.logf("sessiondrv: already-complete reconciliation FAILED ws=%s session=%s outcome=%s: %v — withholding the interrupt window so mutually exclusive footer/state claims cannot be published",
+				d.workspace, d.sessionID, outcome, err)
+			return err
+		}
+		m.mu.Lock()
+		wasActive := d.turnActive
+		d.turnActive = false
+		m.mu.Unlock()
+		m.logf("sessiondrv: already-complete reconciliation CONFIRMED ws=%s session=%s outcome=%s ssm_closed=%v driver_turn_active_before=%v driver_turn_active_after=false",
+			d.workspace, d.sessionID, outcome, closed, wasActive)
+	}
+
 	m.progress().NoteInterrupt(d.workspace, d.sessionID, outcome)
 
 	if outcome == corev1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED {
@@ -974,7 +988,7 @@ func (m *Manager) noteUserInterrupt(d *driven, outcome corev1.InterruptOutcome) 
 		}
 	}
 	if errclass.InterruptError(outcome) != nil {
-		return
+		return nil
 	}
 
 	m.mu.Lock()
@@ -986,6 +1000,7 @@ func (m *Manager) noteUserInterrupt(d *driven, outcome corev1.InterruptOutcome) 
 	m.mu.Unlock()
 	m.logf("sessiondrv: queue PAUSED by a user interrupt ws=%s session=%s outcome=%s held=%d (every entry retained; a newly submitted prompt runs alone and its clean end resumes the drain)",
 		d.workspace, d.sessionID, outcome, held)
+	return nil
 }
 
 // TurnActive reports whether the workspace's session has a turn IN FLIGHT, as

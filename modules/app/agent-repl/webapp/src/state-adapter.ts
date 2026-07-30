@@ -120,6 +120,10 @@ export interface WorkspaceStatusInput {
   turnActive: boolean;
   liveTaskCount: number;
   mergePhase: string;
+  /** SSM transition identity, retained so adoption logs can be correlated. */
+  causeKind: string;
+  causeSeq: number;
+  atMs: number;
 }
 
 /** SessionView → topbar / session-info input. */
@@ -443,15 +447,26 @@ export class StateAdapter {
   // --- mappers --------------------------------------------------------------
 
   private workspaceEffect(ws: WorkspaceState): AdapterEffect {
+    const state = renderStateKeyword(ws.state);
+    this.log(
+      "debug",
+      `state-adapter: workspace state workspace=${ws.workspace} session=${ws.sessionId} ` +
+        `proto=${RenderState[ws.state]} keyword=${state} turn_active=${ws.turnActive} ` +
+        `live_tasks=${String(ws.liveTaskCount)} merge_phase=${ws.mergePhase} ` +
+        `cause_kind=${ws.causeKind} cause_seq=${String(ws.causeSeq)} at_ms=${String(ws.atMs)}`,
+    );
     return {
       kind: "workspace-state",
       value: {
         workspace: ws.workspace,
         sessionId: ws.sessionId,
-        state: renderStateKeyword(ws.state),
+        state,
         turnActive: ws.turnActive,
         liveTaskCount: Number(ws.liveTaskCount),
         mergePhase: ws.mergePhase,
+        causeKind: ws.causeKind,
+        causeSeq: Number(ws.causeSeq),
+        atMs: Number(ws.atMs),
       },
     };
   }
@@ -544,6 +559,14 @@ export class StateAdapter {
    * render-state keyword and each window collapses to its open detail or null.
    */
   private progressEffect(pv: ProgressView): AdapterEffect {
+    if (pv.interrupt !== undefined && pv.interrupt.active) {
+      this.log(
+        "info",
+        `state-adapter: interrupt window workspace=${pv.workspace} session=${pv.sessionId} ` +
+          `outcome=${pv.interrupt.outcome} since_ms=${String(pv.interrupt.sinceMs)} ` +
+          `turn_started_at_ms=${String(pv.turnStartedAtMs)}`,
+      );
+    }
     return {
       kind: "progress",
       value: {

@@ -2,7 +2,10 @@ package sessiondrv
 
 import (
 	"context"
+	"fmt"
 	"strings"
+
+	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 )
 
 // This file is the daemon's whole reading of a submitted prompt: the one place
@@ -94,21 +97,34 @@ func (c sessionCommand) foldsMetaprompt() bool { return !c.recognized() }
 func (m *Manager) forwardPrompt(ctx context.Context, d *driven, requestID, text, origin, permissionMode string) error {
 	cmd := classifyPrompt(text)
 
-	// THE RECEIPT, pushed before the forward rather than after it: the send is
-	// what the bubble reports, and the shim's Ack can be hundreds of
-	// milliseconds away. A submit that then FAILS keeps its bubble — the user
-	// did send that text, the failure surfaces as its own card, and silently
-	// retracting what they typed would be the worse report.
-	if cmd.echoes() {
-		m.echo(d, requestID, text)
-	}
-
 	wire := text
 	if cmd.foldsMetaprompt() {
 		wire = m.applyMetaprompt(d, text)
 	}
 	if err := d.client.SubmitPrompt(ctx, wire, origin, permissionMode); err != nil {
 		return err
+	}
+
+	// THE ACCEPTED EDGE AND ITS SYNCHRONOUS PUBLICATION, before the receipt.
+	// Only an ordinary prompt creates this edge: `/clear` is a session command,
+	// not a turn, and its clearing axis below is the truthful status premise.
+	// MarkPromptAccepted holds the SSM transition lock through the frontend
+	// publication, so neither the asynchronous SSM subscriber nor a later
+	// TurnEnded can make the prompt bubble overtake its `thinking` premise.
+	if cmd.echoes() {
+		if err := m.notePromptAccepted(d, requestID); err != nil {
+			// The shim has accepted the external mutation and cannot be rolled
+			// back. Withhold the daemon-local bubble and progress window:
+			// publishing either without its state premise would manufacture
+			// the contradiction this boundary exists to prevent. The durable
+			// UserLine/TurnStarted can still report and repair the acceptance.
+			return err
+		}
+
+		// THE RECEIPT, only after every frontend has been synchronously offered
+		// the accepted prompt's `thinking` state. It closes the transcript-
+		// latency gap, but never at the cost of a green prompt bubble.
+		m.echo(d, requestID, text)
 	}
 
 	// AFTER THE ACCEPT, never before: an axis opened for a prompt that never
@@ -118,6 +134,43 @@ func (m *Manager) forwardPrompt(ctx context.Context, d *driven, requestID, text,
 	if cmd.clear {
 		m.refireMetapromptAfterClear(ctx, d, permissionMode)
 	}
+	return nil
+}
+
+// notePromptAccepted applies every daemon-local consequence of the shim
+// accepting an immediately delivered prompt.
+//
+// Both outward mutations happen before the frontend command returns: the SSM
+// edge makes every status surface `thinking`, and the progress edge starts the
+// footer clock. The driver's queue latch moves on the same accepted edge.
+// Waiting for the durable TurnStarted would let a second prompt bypass the
+// queue while every frontend already truthfully reported an active turn.
+func (m *Manager) notePromptAccepted(d *driven, requestID string) error {
+	// The accepted Ack is authoritative for BOTH user-visible state and queue
+	// ordering. If the SSM says turn_active while the queue manager still says
+	// idle, a second prompt can bypass the queue before the durable TurnStarted
+	// arrives. The observed TurnStarted is an idempotent confirmation.
+	m.mu.Lock()
+	driverActiveBefore := d.turnActive
+	d.turnActive = true
+	m.mu.Unlock()
+
+	publish := func(state *frontendv1.WorkspaceState) {
+		d.consumer.push.PushWorkspaceState(state)
+	}
+	if err := m.cfg.SSM.MarkPromptAccepted(d.workspace, d.sessionID, requestID, publish); err != nil {
+		// The prompt is already accepted by the external shim and cannot be
+		// rolled back. Fail the frontend command loudly and withhold dependent
+		// local frames; the durable TurnStarted remains able to repair the SSM.
+		err = fmt.Errorf("sessiondrv: prompt accepted by shim but synchronous state publication failed for workspace %q session %q request %q: %w",
+			d.workspace, d.sessionID, requestID, err)
+		m.logf("sessiondrv: prompt accepted state edge FAILED ws=%s session=%s request_id=%q driver_turn_active_before=%v driver_turn_active_after=true publish_sync=true dependent_frames=withheld error=%v",
+			d.workspace, d.sessionID, requestID, driverActiveBefore, err)
+		return err
+	}
+	m.logf("sessiondrv: prompt accepted state edge APPLIED ws=%s session=%s request_id=%q driver_turn_active_before=%v driver_turn_active_after=true publish_sync=true next=prompt_echo_then_progress",
+		d.workspace, d.sessionID, requestID, driverActiveBefore)
+	m.progress().NoteTurnAccepted(d.workspace, d.sessionID)
 	return nil
 }
 

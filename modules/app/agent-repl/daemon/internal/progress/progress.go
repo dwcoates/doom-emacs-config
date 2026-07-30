@@ -230,8 +230,12 @@ func (m *Manager) NoteTurnAccepted(workspace, sessionID string) {
 		wp.view.SessionId = sessionID
 	}
 	if !m.openTurnLocked(wp, m.clock()) {
+		m.logf("progress: turn accepted IDEMPOTENT ws=%s session=%s turn_open=true interrupt_outcome=%s",
+			workspace, sessionID, wp.view.GetInterrupt().GetOutcome())
 		return
 	}
+	m.logf("progress: turn accepted OPENED ws=%s session=%s turn_started_at_ms=%d interrupt_cleared=true",
+		workspace, sessionID, wp.view.GetTurnStartedAtMs())
 	m.pushLocked(workspace, wp)
 }
 
@@ -269,6 +273,8 @@ func (m *Manager) NoteInterrupt(workspace, sessionID string, outcome corev1.Inte
 		SinceMs: m.clock(),
 		Outcome: outcome,
 	}
+	m.logf("progress: interrupt window OPENED ws=%s session=%s outcome=%s since_ms=%d turn_started_at_ms=%d",
+		workspace, sessionID, outcome, wp.view.Interrupt.GetSinceMs(), wp.view.GetTurnStartedAtMs())
 	// STRUCTURAL: a stop landing is exactly the kind of latency the footer
 	// exists to show, so it goes out at once rather than riding a window.
 	m.pushLocked(workspace, wp)

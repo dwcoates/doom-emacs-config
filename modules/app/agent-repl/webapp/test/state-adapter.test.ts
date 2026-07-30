@@ -52,6 +52,9 @@ describe("WorkspaceState mapping", () => {
         turnActive: true,
         liveTaskCount: "2",
         mergePhase: "cherry-pick",
+        causeKind: "prompt_accepted",
+        causeSeq: "17",
+        atMs: "1234",
       },
     });
     expect(effects).toEqual([
@@ -64,8 +67,36 @@ describe("WorkspaceState mapping", () => {
           turnActive: true,
           liveTaskCount: 2,
           mergePhase: "cherry-pick",
+          causeKind: "prompt_accepted",
+          causeSeq: 17,
+          atMs: 1234,
         },
       },
+    ]);
+  });
+
+  it("logs the raw and mapped state with its SSM transition identity", () => {
+    const lines: string[] = [];
+    const adapter = new StateAdapter((_level, message) => lines.push(message));
+
+    adapter.apply(
+      frame({
+        workspaceState: {
+          workspace: "ws-a",
+          sessionId: "s1",
+          state: "RENDER_STATE_READY",
+          causeKind: "session_started",
+          causeSeq: "9",
+          atMs: "1234",
+        },
+      }),
+    );
+
+    expect(lines).toEqual([
+      expect.stringContaining(
+        "proto=READY keyword=ready turn_active=false live_tasks=0 merge_phase= " +
+          "cause_kind=session_started cause_seq=9 at_ms=1234",
+      ),
     ]);
   });
 
@@ -1053,6 +1084,30 @@ describe("progress (F1): the consolidated footer's whole input", () => {
     );
     // Assert
     expect(got.interrupt).toEqual({ sinceMs: 42, outcome: "interrupted" });
+  });
+
+  it("logs an open interrupt window with the verdict and turn clock", () => {
+    const lines: string[] = [];
+    const adapter = new StateAdapter((_level, message) => lines.push(message));
+
+    adapter.apply(
+      frame(
+        progressFrame({
+          turnStartedAtMs: "23",
+          interrupt: {
+            active: true,
+            sinceMs: "42",
+            outcome: "INTERRUPT_OUTCOME_ALREADY_COMPLETE",
+          },
+        }),
+      ),
+    );
+
+    expect(lines).toEqual([
+      expect.stringContaining(
+        "outcome=already_complete since_ms=42 turn_started_at_ms=23",
+      ),
+    ]);
   });
 
   it("flattens an INACTIVE interrupt window to null, leaving no residue", () => {
