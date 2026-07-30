@@ -111,6 +111,14 @@ func (s *fakeSpawner) dropCalls() []string {
 	return append([]string(nil), s.drops...)
 }
 
+// stoppedSessions returns every session the spawner was asked to stop, taken
+// under the lock so a teardown goroutine cannot race the read.
+func (s *fakeSpawner) stoppedSessions() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.stopped...)
+}
+
 // stopHints returns the announced pids each stop was told about, so a test can
 // prove the surviving-shim handle actually reaches the spawner.
 func (s *fakeSpawner) stopHints() []int32 {

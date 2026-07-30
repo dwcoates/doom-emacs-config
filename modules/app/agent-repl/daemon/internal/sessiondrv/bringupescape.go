@@ -144,14 +144,25 @@ func (m *Manager) escapeFailedBringUp(ctx context.Context, workspace string, d *
 // spawned, so the retry starts from nothing rather than racing a corpse.
 func (m *Manager) tearDownFailedBringUp(workspace string, d *driven) {
 	m.mu.Lock()
+	wasCurrent := false
 	if cur, ok := m.byWS[workspace]; ok && cur == d {
 		delete(m.byWS, workspace)
+		wasCurrent = true
 	}
 	m.mu.Unlock()
+	// The drain runs before the cancel like every other teardown's, even though
+	// a bring-up that never wired has almost never started a turn: a RETRY
+	// after a partially handshaked shim is the exception, and the interrupt
+	// costs nothing when the connection was never established.
+	m.drainLiveTurnForStop(workspace, d.sessionID, "bringup_failed", d.client)
 	if d.cancel != nil {
 		d.cancel()
 	}
-	if err := m.cfg.Spawner.StopShim(d.sessionID, m.shimPIDFor(d.sessionID)); err != nil {
+	// SOLE DRIVER ONLY WHEN THIS DRIVER OWNED THE WORKSPACE. A bring-up that
+	// lost the concurrent-first-prompt race is being torn down while the winner
+	// drives the workspace, and closing an unattributed claim there would blue
+	// out the winner's live turn.
+	if err := m.stopShimSettlingTurn(workspace, d.sessionID, "bringup_failed", wasCurrent); err != nil {
 		m.logf("sessiondrv: stopping the shim of a failed bring-up FAILED ws=%q session=%s: %v", workspace, d.sessionID, err)
 	}
 }

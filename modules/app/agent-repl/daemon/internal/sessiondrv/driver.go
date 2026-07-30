@@ -295,7 +295,11 @@ type Manager struct {
 	// whose identity cannot move, a stamp that is wrong) is loud ONCE instead
 	// of bouncing forever.
 	buildBounced map[string]bool
-	closed       bool
+	// interruptDrain overrides the teardown drain's interrupt bound. Zero means
+	// the production constant; only a test assigns one, so the timeout branch
+	// can be driven without a ten-second wait (see turnstop.go).
+	interruptDrain time.Duration
+	closed         bool
 	rootCtx      context.Context
 	rootStop     context.CancelFunc
 	// exits counts every driver-exit goroutine (the tail of bringUp's `go
@@ -1342,13 +1346,24 @@ func (m *Manager) HibernateSession(workspace, sessionID string) error {
 		m.mu.Unlock()
 		m.logf("sessiondrv: session-scoped hibernate ws=%q requested=%s live=%s; preserving live driver and stopping requested shim only",
 			workspace, sessionID, live)
-		return m.cfg.Spawner.StopShim(sessionID, m.shimPIDFor(sessionID))
+		// NOT the sole driver, and no interrupt. The requested record's own
+		// connection is not the one in hand — a DIFFERENT session drives this
+		// workspace — so there is nothing here to interrupt over, and an
+		// unattributed `thinking` may belong to the replacement rather than to
+		// the shim being stopped. A claim naming the requested session is still
+		// closed; anything else is left for the live driver to report.
+		return m.stopShimSettlingTurn(workspace, sessionID, "hibernate_session_superseded", false)
 	}
 	if ok {
 		delete(m.byWS, workspace)
 	}
 	m.mu.Unlock()
+	// THE DRAIN COMES BEFORE THE CANCEL, and this teardown is the one that most
+	// needs it: unlike hibernate() it carries no settled guard, because a delete
+	// or a supersede stands a record down whether or not it is mid-turn. That is
+	// precisely the stop that used to strand a `thinking` nothing could retire.
 	if ok {
+		m.drainLiveTurnForStop(workspace, sessionID, "hibernate_session", d.client)
 		d.cancel()
 	}
 	m.logf("sessiondrv: hibernating session-scoped ws=%q session=%s driver_present=%v (SIGTERM child shim)",
@@ -1365,7 +1380,7 @@ func (m *Manager) HibernateSession(workspace, sessionID string) error {
 	if ok {
 		m.noteWiring(workspace, ssm.WiringHibernated, "hibernate_session")
 	}
-	return m.cfg.Spawner.StopShim(sessionID, m.shimPIDFor(sessionID))
+	return m.stopShimSettlingTurn(workspace, sessionID, "hibernate_session", true)
 }
 
 // hibernate is the shared teardown. An empty wantSession means "whichever
@@ -1402,6 +1417,12 @@ func (m *Manager) hibernate(workspace, wantSession string) error {
 	}
 	delete(m.byWS, workspace)
 	m.mu.Unlock()
+	// THE DRAIN COMES BEFORE THE CANCEL, which ends client.Run and takes the
+	// connection an interrupt would travel over with it. It is reached at all
+	// only when refuseUnsettledHibernation let a live turn through — its state
+	// read failing is an explicit allow — and that escape is exactly the case
+	// where the shim's own turn end is still worth asking for.
+	m.drainLiveTurnForStop(workspace, d.sessionID, "hibernate", d.client)
 	d.cancel() // stop consuming; the shimclient Run ends
 	m.logf("sessiondrv: hibernating ws=%q session=%s (SIGTERM child shim)", workspace, d.sessionID)
 	// HIBERNATED, and this ORDERING is what makes the answer stick. The cancel
@@ -1412,7 +1433,7 @@ func (m *Manager) hibernate(workspace, wantSession string) error {
 	// hibernation blue immediately after it went teal, which is the whole split
 	// undone.
 	m.noteWiring(workspace, ssm.WiringHibernated, "hibernated")
-	return m.cfg.Spawner.StopShim(d.sessionID, m.shimPIDFor(d.sessionID))
+	return m.stopShimSettlingTurn(workspace, d.sessionID, "hibernate", true)
 }
 
 // bringUpTimeout bounds how long ensure waits for a spawned shim to connect
@@ -1683,8 +1704,15 @@ func (m *Manager) bringUp(workspace string) (*driven, error) {
 		// without going through Hibernate. That used to orphan the spawned shim
 		// and its stop handle after the byWS eviction above. A non-current Run
 		// exit was initiated by a teardown that already owns StopShim.
+		//
+		// NO DRAIN HERE, and its absence is not an omission. This tail runs
+		// BECAUSE client.Run ended, so the connection an interrupt would travel
+		// over is already gone; asking for one could only produce a nack. The
+		// stop still routes through the funnel, so the axis is closed either
+		// way — which is what makes a shim that DIED mid-turn, rather than one
+		// this daemon stopped, unable to latch the workspace in `thinking`.
 		if wasCurrent && !managerClosing {
-			if stopErr := m.cfg.Spawner.StopShim(sessionID, m.shimPIDFor(sessionID)); stopErr != nil {
+			if stopErr := m.stopShimSettlingTurn(workspace, sessionID, "driver_exit", true); stopErr != nil {
 				m.logf("sessiondrv: session %s unexpected driver-exit shim stop FAILED ws=%q run_err=%v: %v",
 					sessionID, workspace, runErr, stopErr)
 			} else {
@@ -1692,6 +1720,12 @@ func (m *Manager) bringUp(workspace string) (*driven, error) {
 					sessionID, workspace, runErr)
 			}
 		}
+		// A MANAGER CLOSE DELIBERATELY LEAVES THE AXIS ALONE. The shim is
+		// PRESERVED there, so it is still running the turn and will report that
+		// turn's end to whichever daemon it redials — closing the axis would be
+		// a lie about a live turn, which is the one thing worse than a stale
+		// claim. The workspace's own reattach handshake settles the axis if the
+		// turn really did finish in the gap (ssm.ReconcileTurnHandshake).
 	}()
 	m.logf("sessiondrv: brought up session=%s ws=%q (reattach-first)", sessionID, workspace)
 	return d, nil

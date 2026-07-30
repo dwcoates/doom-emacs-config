@@ -159,6 +159,12 @@ type fakeApplier struct {
 	// test that does not care about the guard wants.
 	current    map[string]*frontendv1.WorkspaceState
 	currentErr error
+	// staleTurnCloses records one entry per CloseStaleTurn call — the
+	// teardown's guaranteed agent-axis close, which is what makes a
+	// daemon-initiated shim stop unable to strand a live turn.
+	staleTurnCloses []staleTurnCloseCall
+	staleTurnClosed bool
+	staleTurnErr    error
 }
 
 // wiringCall is one WIRED-axis edge the driver applied.
@@ -281,6 +287,35 @@ func (f *fakeApplier) Current(workspace string) (*frontendv1.WorkspaceState, boo
 		return nil, false, nil
 	}
 	return st, true, nil
+}
+
+// staleTurnCloseCall is one teardown axis close the driver asked the SSM for.
+type staleTurnCloseCall struct {
+	workspace  string
+	sessionID  string
+	reason     string
+	soleDriver bool
+}
+
+// CloseStaleTurn records the teardown's guaranteed agent-axis close. The zero
+// value answers "there was nothing stale to close", which is what every test
+// that does not care about the invariant wants; a test exercising it sets
+// staleTurnClosed or staleTurnErr.
+func (f *fakeApplier) CloseStaleTurn(workspace, sessionID, reason string, soleDriver bool) (bool, error) {
+	f.reconcMutex.Lock()
+	defer f.reconcMutex.Unlock()
+	f.staleTurnCloses = append(f.staleTurnCloses, staleTurnCloseCall{
+		workspace: workspace, sessionID: sessionID, reason: reason, soleDriver: soleDriver,
+	})
+	return f.staleTurnClosed, f.staleTurnErr
+}
+
+// staleTurnClosesApplied returns the recorded teardown axis closes, taken under
+// the lock so a driver goroutine cannot race the read.
+func (f *fakeApplier) staleTurnClosesApplied() []staleTurnCloseCall {
+	f.reconcMutex.Lock()
+	defer f.reconcMutex.Unlock()
+	return append([]staleTurnCloseCall(nil), f.staleTurnCloses...)
 }
 
 // setCurrent arranges the resolved state the settled guard will read.

@@ -231,6 +231,38 @@ func (m *Manager) ReconcileTurnHandshake(workspace, claimantSessionID string, id
 	}
 	m.logf("ssm: turn handshake decision=accept workspace=%s claimant_session=%s hello_ids=%v legacy_active=%v durable_before=%v durable_after=%v",
 		workspace, claimantSessionID, ids, legacyActive, before, after)
+
+	// THE HANDSHAKE SNAPSHOT IS AUTHORITATIVE OVER THE AGENT AXIS TOO, and this
+	// is the edge that was missing. A shim reporting zero turn ids is stating,
+	// from the only vantage point that can, that nothing is running behind it —
+	// the same statement already trusted to seed `turn_lifecycle_claim` above
+	// and to set the driver's process-local latch in
+	// sessiondrv.reconcileTurnSnapshot. A workspace whose axis still tops out in
+	// `thinking` under that statement is holding a claim whose `TurnEnded` will
+	// never arrive, because the turn it named is over and the process that would
+	// have reported it is a previous one.
+	//
+	// This cures ledgers already poisoned — by a shim crash the daemon never
+	// initiated, by a kill that predates the teardown obligation, by the
+	// unattributed `thinking` a permission close restores — which is why it
+	// exists ALONGSIDE the teardown's own closing write rather than instead of
+	// it. Neither subsumes the other: the teardown covers stops this daemon
+	// makes, and this covers everything already latched when a shim comes back.
+	//
+	// A LEGACY SHIM CLAIMING A TURN IS BELIEVED. `legacy_active` with no ids is a
+	// positive assertion that a turn IS in flight under a protocol too old to
+	// name it, so the empty id list says nothing there and the axis is left
+	// exactly as it stands.
+	if len(ids) == 0 && !legacyActive {
+		if _, err := m.closeStaleTurnLocked(workspace, claimantSessionID, causeShimHandshake, true); err != nil {
+			// Never swallowed, and never allowed to fail the handshake: the
+			// reconciliation above has already committed and DaemonHello is
+			// gated on this call's error, so returning here would refuse a
+			// perfectly good session over a stale row it merely failed to tidy.
+			m.logf("ssm: closing the stale turn on the shim handshake FAILED workspace=%s claimant_session=%s hello_ids=%v: %v — the agent axis may stay latched in `thinking` until the next edge supersedes it",
+				workspace, claimantSessionID, ids, err)
+		}
+	}
 	return before, after, nil
 }
 

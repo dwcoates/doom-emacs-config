@@ -156,7 +156,12 @@ func (m *Manager) RestartSession(ctx context.Context, workspace string) error {
 			return fmt.Errorf("sessiondrv: restarting session %s (ws %q): stopping the live shim: %w", sessionID, workspace, err)
 		}
 		m.logf("sessiondrv: hard restart ws=%q session=%s: live shim stopped", workspace, sessionID)
-	} else if err := m.cfg.Spawner.StopShim(sessionID, m.shimPIDFor(sessionID)); err != nil {
+	} else if err := m.stopShimSettlingTurn(workspace, sessionID, "restart_session_orphan", true); err != nil {
+		// NO DRAIN ON THIS BRANCH: there is no driver, so there is no connection
+		// an interrupt could travel over. The funnel still closes the axis, so a
+		// parked orphan that died holding a `thinking` cannot survive the
+		// restart as one.
+		//
 		// No driver, but a parked or orphaned process may still be out there
 		// holding the session lock. Failing to stop it is fatal to the restart:
 		// the bring-up below would refuse to spawn against that held lock, and

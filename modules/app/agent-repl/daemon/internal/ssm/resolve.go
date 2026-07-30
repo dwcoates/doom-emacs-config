@@ -107,7 +107,19 @@ const (
 	// edge moved it — the first pending request, the answer that emptied the
 	// set, or the bounding event (rotation, restart) that released it.
 	causePermission = "permission"
+	// The daemon STOPPED the shim behind a live turn, or a shim came back
+	// reporting no turns at all over a workspace still claiming one. Neither
+	// turn can ever report its own end, so the closing row is written by the
+	// only party left that knows the turn is over. The detail after the colon
+	// names the teardown path or the handshake that produced it. See
+	// Manager.CloseStaleTurn.
+	causeShimStopped = "shim_stopped"
 )
+
+// causeShimHandshake is the reason detail carried by the closing row
+// ReconcileTurnHandshake writes: a shim came back reporting no turns at all
+// over a workspace whose agent axis still claimed one.
+const causeShimHandshake = "shim_handshake_no_turns"
 
 // vendorBlockingStopReasons are the TurnEnded stop reasons that conclude a
 // turn abnormally — the whole family VENDOR_BLOCKED covers.
