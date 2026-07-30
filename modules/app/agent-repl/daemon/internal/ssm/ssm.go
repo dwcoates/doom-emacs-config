@@ -177,7 +177,15 @@ func (m *Manager) warm() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var maxAt sql.NullInt64
-	if err := m.db.QueryRow(`SELECT MAX(at) FROM workspace_state`).Scan(&maxAt); err != nil {
+	if err := m.db.QueryRow(`
+		SELECT MAX(at) FROM (
+			SELECT at FROM workspace_state
+			UNION ALL
+			SELECT at FROM session_connectivity
+			UNION ALL
+			SELECT at FROM session_fault
+		)
+	`).Scan(&maxAt); err != nil {
 		return fmt.Errorf("ssm: warm read max(at): %w", err)
 	}
 	if maxAt.Valid {
@@ -198,6 +206,9 @@ func (m *Manager) warm() error {
 	// must claim. Same placement, and the same reason, as the permission
 	// release above.
 	if err := m.hibernateEveryWorkspaceLocked(); err != nil {
+		return err
+	}
+	if err := m.hibernatePersistedConnectivityLocked(); err != nil {
 		return err
 	}
 	names, err := distinctWorkspaces(m.db)
