@@ -53,10 +53,16 @@ func TestLogFormatsBoundAndRecordContext(t *testing.T) {
 	}
 }
 
-func TestLogVerboseAlwaysWritesFileAndGatesStderr(t *testing.T) {
+func TestLogVerboseRequiresEnabledModeForBothSinks(t *testing.T) {
 	var file, stderr bytes.Buffer
 	log := New(&file, &stderr, false)
 	log.LogVerbose(Fields{Operation: "tail"}, "queued=%d", 4)
+	if file.Len() != 0 || stderr.Len() != 0 {
+		t.Fatalf("disabled verbose mutated sinks: file=%q stderr=%q", file.String(), stderr.String())
+	}
+
+	enabled := New(&file, &stderr, true)
+	enabled.LogVerbose(Fields{Operation: "tail"}, "queued=%d", 4)
 	var verboseRecord record
 	if err := json.Unmarshal(file.Bytes(), &verboseRecord); err != nil {
 		t.Fatalf("persistent verbose record is not JSON: %v", err)
@@ -64,13 +70,6 @@ func TestLogVerboseAlwaysWritesFileAndGatesStderr(t *testing.T) {
 	if verboseRecord.Verbosity != "verbose" || verboseRecord.Operation != "tail" || verboseRecord.Message != "queued=4" {
 		t.Fatalf("persistent verbose record = %#v", verboseRecord)
 	}
-	if stderr.Len() != 0 {
-		t.Fatalf("stderr received verbose record while disabled: %q", stderr.String())
-	}
-
-	file.Reset()
-	stderr.Reset()
-	New(&file, &stderr, true).LogVerbose(Fields{Operation: "tail"}, "queued=%d", 4)
 	if file.String() != stderr.String() {
 		t.Fatalf("enabled verbose routing differs: file=%q stderr=%q", file.String(), stderr.String())
 	}
@@ -90,6 +89,18 @@ func TestLogRejectsMissingOperationAndInvalidLevel(t *testing.T) {
 	})
 	if !strings.Contains(fmt.Sprint(got), "invalid level") {
 		t.Fatalf("panic = %v, want invalid level", got)
+	}
+	got = capturePanic(t, func() {
+		log.LogVerbose(Fields{}, "record")
+	})
+	if !strings.Contains(fmt.Sprint(got), "operation is required") {
+		t.Fatalf("disabled verbose panic = %v, want missing operation", got)
+	}
+	got = capturePanic(t, func() {
+		log.LogVerbose(Fields{Operation: "write", Level: "fatal"}, "record")
+	})
+	if !strings.Contains(fmt.Sprint(got), "invalid level") {
+		t.Fatalf("disabled verbose panic = %v, want invalid level", got)
 	}
 	if file.Len() != 0 || stderr.Len() != 0 {
 		t.Fatalf("invalid records mutated sinks: file=%q stderr=%q", file.String(), stderr.String())
