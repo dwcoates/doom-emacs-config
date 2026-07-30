@@ -138,6 +138,60 @@ against whatever holds port 8787 on the developer's machine."
                      (list agent-repl--frontend-build-script
                            "store" "sidecar"))))))
 
+;;;; ---- deploy-stack: the boot path's whole-stack deploy --------------------
+;;
+;; The boot path used to run build-frontend.sh, which covers the shim, the
+;; webapp and the daemon and MISSES protobuf regeneration and the two
+;; launchd services. A wire-format change could therefore leave a new Emacs
+;; talking to a daemon built before it.
+
+(ert-deftest agent-repl-test-daemon-deploy-stack-runs-the-deploy-script ()
+  "deploy-stack runs bin/deploy-all.sh, not the narrower build script."
+  ;; Arrange
+  (let (captured)
+    (cl-letf (((symbol-function 'agent-repl--frontend-run-build-script)
+               (lambda (args) (setq captured args) 0)))
+      ;; Act
+      (agent-repl--frontend-deploy-stack nil)
+      ;; Assert
+      (should (equal (car captured) agent-repl--frontend-deploy-script)))))
+
+(ert-deftest agent-repl-test-daemon-deploy-stack-suppresses-the-daemon-bounce ()
+  "deploy-stack always passes --no-daemon-bounce.
+The script's last step restarts the daemon by evaluating a form in Emacs
+over emacsclient.  A call made FROM Emacs would re-enter the session that
+is mid-boot, and the caller starts the daemon directly anyway."
+  ;; Arrange
+  (let (captured)
+    (cl-letf (((symbol-function 'agent-repl--frontend-run-build-script)
+               (lambda (args) (setq captured args) 0)))
+      ;; Act
+      (agent-repl--frontend-deploy-stack nil)
+      ;; Assert
+      (should (member "--no-daemon-bounce" captured)))))
+
+(ert-deftest agent-repl-test-daemon-deploy-stack-omits-force-by-default ()
+  "Without FORCE the deploy argv carries no --force."
+  (let (captured)
+    (cl-letf (((symbol-function 'agent-repl--frontend-run-build-script)
+               (lambda (args) (setq captured args) 0)))
+      (agent-repl--frontend-deploy-stack nil)
+      (should-not (member "--force" captured)))))
+
+(ert-deftest agent-repl-test-daemon-deploy-stack-passes-force-flag ()
+  "With FORCE the deploy argv appends --force."
+  (let (captured)
+    (cl-letf (((symbol-function 'agent-repl--frontend-run-build-script)
+               (lambda (args) (setq captured args) 0)))
+      (agent-repl--frontend-deploy-stack t)
+      (should (member "--force" captured)))))
+
+(ert-deftest agent-repl-test-daemon-deploy-stack-surfaces-a-failed-deploy ()
+  "A non-zero deploy exit signals rather than launching against stale code."
+  (cl-letf (((symbol-function 'agent-repl--frontend-run-build-script)
+             (lambda (_args) 1)))
+    (should-error (agent-repl--frontend-deploy-stack nil))))
+
 ;;;; ---- build-if-stale: failure surfacing -----------------------------------
 
 (ert-deftest agent-repl-test-daemon-build-errors-on-missing-script ()
@@ -341,7 +395,7 @@ VIEW is the `DaemonView' plist the daemon last pushed (nil = none yet)."
    (let ((existing (agent-repl-test--make-live-daemon))
          (built nil) (spawned nil))
      (setq agent-repl--frontend-daemon-process existing)
-     (cl-letf (((symbol-function 'agent-repl--frontend-build-if-stale)
+     (cl-letf (((symbol-function 'agent-repl--frontend-deploy-stack)
                 (lambda (&optional _f) (setq built t) 0))
                ((symbol-function 'agent-repl--frontend-spawn-daemon)
                 (lambda () (setq spawned t) (agent-repl-test--make-live-daemon))))
@@ -360,7 +414,7 @@ VIEW is the `DaemonView' plist the daemon last pushed (nil = none yet)."
          (fresh (agent-repl-test--make-live-daemon 777)))
      (cl-letf (((symbol-function 'agent-repl--frontend-daemon-responsive-p)
                 (lambda () nil))
-               ((symbol-function 'agent-repl--frontend-build-if-stale)
+               ((symbol-function 'agent-repl--frontend-deploy-stack)
                 (lambda (&optional _f) (setq built t) 0))
                ((symbol-function 'agent-repl--frontend-spawn-daemon)
                 (lambda () fresh)))
@@ -380,7 +434,7 @@ VIEW is the `DaemonView' plist the daemon last pushed (nil = none yet)."
      (setq agent-repl--frontend-daemon-process old)
      (cl-letf (((symbol-function 'agent-repl--frontend-turn-active-sessions)
                 (lambda () nil))
-               ((symbol-function 'agent-repl--frontend-build-if-stale)
+               ((symbol-function 'agent-repl--frontend-deploy-stack)
                 (lambda (&optional _f) 0))
                ((symbol-function 'agent-repl--frontend-spawn-daemon)
                 (lambda () new)))
@@ -473,7 +527,7 @@ VIEW is the `DaemonView' plist the daemon last pushed (nil = none yet)."
    (let ((built nil) (spawned nil))
      (cl-letf (((symbol-function 'agent-repl--frontend-daemon-responsive-p)
                 (lambda () t))
-               ((symbol-function 'agent-repl--frontend-build-if-stale)
+               ((symbol-function 'agent-repl--frontend-deploy-stack)
                 (lambda (&optional _f) (setq built t) 0))
                ((symbol-function 'agent-repl--frontend-spawn-daemon)
                 (lambda () (setq spawned t) (agent-repl-test--make-live-daemon))))
@@ -492,7 +546,7 @@ VIEW is the `DaemonView' plist the daemon last pushed (nil = none yet)."
          (fresh (agent-repl-test--make-live-daemon 9)))
      (cl-letf (((symbol-function 'agent-repl--frontend-daemon-responsive-p)
                 (lambda () t))
-               ((symbol-function 'agent-repl--frontend-build-if-stale)
+               ((symbol-function 'agent-repl--frontend-deploy-stack)
                 (lambda (&optional _f) (setq built t) 0))
                ((symbol-function 'agent-repl--frontend-spawn-daemon)
                 (lambda () fresh)))
@@ -968,7 +1022,7 @@ obvious (no listener, no build, no spawn) rather than reaching the host."
          (agent-repl--frontend-daemon-process nil))
      (cl-letf (((symbol-function 'agent-repl--frontend-run-listener-probe)
                 (lambda (&rest _) nil))
-               ((symbol-function 'agent-repl--frontend-build-if-stale)
+               ((symbol-function 'agent-repl--frontend-deploy-stack)
                 (lambda (&rest _) 0))
                ((symbol-function 'agent-repl--frontend-start-daemon)
                 (lambda (&rest _) 'started))
