@@ -64,25 +64,31 @@ afterEach(() => {
 
 function newClient(onMessage: (data: string) => void = () => {}) {
   const statusChanges: boolean[] = [];
+  const freshnessChanges: string[] = [];
   const client = new WsClient({
     url: "ws://x/sessions/s1/stream",
     onMessage,
     onStatusChange: (c) => statusChanges.push(c),
+    onFreshnessChange: (freshness) => freshnessChanges.push(freshness),
     wsFactory: (url) => new FakeWebSocket(url) as unknown as WebSocket,
     backoffMs: [10, 20],
   });
-  return { client, statusChanges };
+  return { client, statusChanges, freshnessChanges };
 }
 
 describe("WsClient", () => {
-  it("reports connected on open", () => {
+  it("does not report current until the first snapshot is adopted", () => {
     // Arrange
-    const { client, statusChanges } = newClient();
+    const { client, statusChanges, freshnessChanges } = newClient();
     // Act
     client.connect();
     FakeWebSocket.instances[0].open();
+    expect(statusChanges).toEqual([]);
+    expect(freshnessChanges).toEqual(["connecting", "awaiting_snapshot"]);
+    client.adoptSnapshot({ revision_at_ms: 10 });
     // Assert
     expect(statusChanges).toEqual([true]);
+    expect(freshnessChanges).toEqual(["connecting", "awaiting_snapshot", "current"]);
   });
 
   it("delivers inbound messages to onMessage", () => {
@@ -105,6 +111,7 @@ describe("WsClient", () => {
     client.connect();
     const ws = FakeWebSocket.instances[0];
     ws.open();
+    client.adoptSnapshot();
     // Act
     const ok = client.send(`{"requestId":"r1","interrupt":{"confirmAgents":false}}`);
     // Assert
@@ -118,6 +125,96 @@ describe("WsClient", () => {
     client.connect();
     // Act + Assert — never opened.
     expect(client.send("{}")).toBe(false);
+  });
+
+  it("send() returns false while an open socket still awaits its snapshot", () => {
+    const { client } = newClient();
+    client.connect();
+    FakeWebSocket.instances[0].open();
+    expect(client.send("{}")).toBe(false);
+  });
+
+  it("rejects snapshot adoption before the connection opens", () => {
+    const records = captureCanonicalLogs();
+    const { client } = newClient();
+    client.connect();
+
+    expect(() => client.adoptSnapshot({ revision_at_ms: 10 })).toThrow(
+      "cannot adopt snapshot while freshness=connecting",
+    );
+    expect(records).toContainEqual(expect.objectContaining({
+      operation: "ws.snapshot-adoption-rejected",
+      context: expect.objectContaining({ freshness: "connecting", revision_at_ms: 10 }),
+    }));
+  });
+
+  it("rejects a non-positive freshness timeout with its configured value", () => {
+    const records = captureCanonicalLogs();
+    const client = new WsClient({
+      url: "ws://x/sessions/s1/stream",
+      onMessage: () => undefined,
+      wsFactory: (url) => new FakeWebSocket(url) as unknown as WebSocket,
+      snapshotTimeoutMs: 0,
+    });
+    client.connect();
+
+    expect(() => FakeWebSocket.instances[0].open()).toThrow(
+      "snapshotTimeoutMs must be positive, got 0",
+    );
+    expect(records).toContainEqual(expect.objectContaining({
+      operation: "ws.snapshot-timeout-invalid",
+      context: expect.objectContaining({ timeout_ms: 0 }),
+    }));
+  });
+
+  it("expires a connection whose authoritative snapshot lease is not renewed", () => {
+    const freshnessChanges: string[] = [];
+    const statusChanges: boolean[] = [];
+    const records = captureCanonicalLogs();
+    const client = new WsClient({
+      url: "ws://x/sessions/s1/stream",
+      onMessage: () => undefined,
+      onFreshnessChange: (freshness) => freshnessChanges.push(freshness),
+      onStatusChange: (connected) => statusChanges.push(connected),
+      wsFactory: (url) => new FakeWebSocket(url) as unknown as WebSocket,
+      backoffMs: [10],
+      snapshotTimeoutMs: 30,
+    });
+    client.connect();
+    FakeWebSocket.instances[0].open();
+    client.adoptSnapshot({ revision_at_ms: 10 });
+
+    vi.advanceTimersByTime(30);
+
+    expect(freshnessChanges).toEqual(["connecting", "awaiting_snapshot", "current", "expired"]);
+    expect(statusChanges).toEqual([true, false]);
+    expect(records).toContainEqual(expect.objectContaining({
+      operation: "ws.freshness-changed",
+      context: expect.objectContaining({ previous: "current", next: "expired", timeout_ms: 30 }),
+    }));
+  });
+
+  it("a renewed snapshot extends the lease from its own adoption", () => {
+    const { client, freshnessChanges } = newClient();
+    client.connect();
+    FakeWebSocket.instances[0].open();
+    client.adoptSnapshot();
+    vi.advanceTimersByTime(30_000);
+    client.adoptSnapshot();
+    vi.advanceTimersByTime(30_000);
+    expect(freshnessChanges).toEqual(["connecting", "awaiting_snapshot", "current"]);
+  });
+
+  it("ignores messages from a retired socket generation", () => {
+    const seen: string[] = [];
+    const { client } = newClient((data) => seen.push(data));
+    client.connect();
+    const first = FakeWebSocket.instances[0];
+    first.open();
+    client.close();
+    client.connect();
+    first.receive("stale");
+    expect(seen).toEqual([]);
   });
 
   it("composerEnabled is on by default and off only for composer=0", () => {

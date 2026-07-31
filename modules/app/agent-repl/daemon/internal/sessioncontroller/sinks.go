@@ -80,7 +80,10 @@ type StateApplier interface {
 	// with the session-status lifecycle before the progress footer may publish
 	// "already finished". It closes a still-standing `thinking`/`permission`
 	// row owned by this session and preserves already-settled turn outcomes.
-	ReconcileAlreadyComplete(workspace, sessionID string) (closed bool, err error)
+	// PUBLISH is the synchronous frontend ordering barrier. The reconciled
+	// settled WorkspaceState must be offered before the progress resolver may
+	// publish the mutually exclusive ALREADY_COMPLETE window.
+	ReconcileAlreadyComplete(workspace, sessionID string, publish func(*frontendv1.WorkspaceState)) (closed bool, err error)
 	// MarkTurnInterrupted records that a USER-COMMANDED stop was delivered to
 	// the workspace's running turn, so that turn's own TurnEnded reports
 	// `interrupted` instead of `done` or `vendor_blocked` (I1). Fed ONLY from

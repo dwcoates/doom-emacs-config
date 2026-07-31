@@ -135,8 +135,9 @@ func TestTheConnectSnapshotOmitsNoWorkspace(t *testing.T) {
 	// the push path (the exact condition that used to omit them).
 	h := &mockHandler{}
 	s := New(Config{
-		Logf:    testLogf(t),
-		Handler: h,
+		Logf:        testLogf(t),
+		LogVerbosef: testLogf(t),
+		Handler:     h,
 		State: staticState{snap: &frontendv1.StateSnapshot{
 			Workspaces: []*frontendv1.WorkspaceState{
 				{Workspace: "w1", SessionId: "s1", State: frontendv1.RenderState_RENDER_STATE_THINKING},
@@ -178,8 +179,9 @@ func TestTheResyncSnapshotOmitsNoWorkspace(t *testing.T) {
 	// Arrange.
 	h := &mockHandler{}
 	s := New(Config{
-		Logf:    testLogf(t),
-		Handler: h,
+		Logf:        testLogf(t),
+		LogVerbosef: testLogf(t),
+		Handler:     h,
 		State: staticState{snap: &frontendv1.StateSnapshot{
 			Workspaces: []*frontendv1.WorkspaceState{
 				{Workspace: "w1", SessionId: "s1", State: frontendv1.RenderState_RENDER_STATE_READY},

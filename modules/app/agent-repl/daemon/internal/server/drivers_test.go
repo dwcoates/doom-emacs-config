@@ -186,9 +186,10 @@ func TestPushForwarderForwardsAfterTargetSet(t *testing.T) {
 	var logged int
 	f := &PushForwarder{Logf: func(string, ...any) { logged++ }}
 	srv := frontend.New(frontend.Config{
-		Logf:    func(string, ...any) {},
-		State:   staticState{},
-		Handler: nopHandler{},
+		Logf:        func(string, ...any) {},
+		LogVerbosef: func(string, ...any) {},
+		State:       staticState{},
+		Handler:     nopHandler{},
 	})
 	t.Cleanup(func() { _ = srv.Close() })
 	f.SetTarget(srv)

@@ -28,8 +28,8 @@ import (
 	"claude-repld/internal/registry"
 	"claude-repld/internal/session"
 	"claude-repld/internal/sessioncontroller"
-	"claude-repld/internal/workspace/merge"
 	"claude-repld/internal/ssm"
+	"claude-repld/internal/workspace/merge"
 )
 
 type discardFileDiagnosticPersister struct{}
@@ -182,7 +182,7 @@ func newHarnessWith(t *testing.T, extra Config) *harness {
 	if err != nil {
 		t.Fatalf("command handler: %v", err)
 	}
-	fe := frontend.New(frontend.Config{Logf: logf, State: stubState{ssm: mgr}, Handler: handler})
+	fe := frontend.New(frontend.Config{Logf: logf, LogVerbosef: logf, State: stubState{ssm: mgr}, Handler: handler})
 	t.Cleanup(func() { _ = fe.Close() })
 
 	cfg := extra

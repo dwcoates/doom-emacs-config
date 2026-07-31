@@ -992,7 +992,10 @@ func (m *Manager) noteUserInterrupt(d *sessionController, outcome corev1.Interru
 	// window only after that succeeds; reversing these calls is the exact race
 	// that rendered "already finished" beside `thinking`.
 	if outcome == corev1.InterruptOutcome_INTERRUPT_OUTCOME_ALREADY_COMPLETE {
-		closed, err := m.cfg.SSM.ReconcileAlreadyComplete(d.workspace, d.sessionID)
+		publish := func(state *frontendv1.WorkspaceState) {
+			d.consumer.push.PushWorkspaceState(state)
+		}
+		closed, err := m.cfg.SSM.ReconcileAlreadyComplete(d.workspace, d.sessionID, publish)
 		if err != nil {
 			m.logf("session-controller: already-complete reconciliation FAILED ws=%s session=%s outcome=%s: %v — withholding the interrupt window so mutually exclusive footer/state claims cannot be published",
 				d.workspace, d.sessionID, outcome, err)

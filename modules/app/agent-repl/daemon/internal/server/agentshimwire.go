@@ -103,6 +103,10 @@ type AgentShimConfig struct {
 	ClientLogs ClientLogWriter
 	// Logf is the daemon logger. Nil discards.
 	Logf func(string, ...any)
+	// LogVerbosef persists frequent lease-success diagnostics without forcing
+	// them onto the daemon terminal. Required so freshness cannot be opaque or
+	// inflate normal console volume.
+	LogVerbosef func(string, ...any)
 }
 
 // AgentShim is the assembled frontend surface. Server is mounted by main.go
@@ -192,6 +196,8 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 		logf = func(string, ...any) {}
 	}
 	switch {
+	case cfg.LogVerbosef == nil:
+		return nil, fmt.Errorf("server: WireAgentShim needs a verbose logger")
 	case cfg.SSM == nil:
 		return nil, fmt.Errorf("server: WireAgentShim needs an SSM")
 	case cfg.Progress == nil:
@@ -246,7 +252,8 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 	handler.clientLogs = cfg.ClientLogs
 
 	srv := frontend.New(frontend.Config{
-		Logf: logf,
+		Logf:        logf,
+		LogVerbosef: cfg.LogVerbosef,
 		State: &ssmSnapshotProvider{
 			ssm: mgr, sessions: cfg.Sessions, inits: cfg.Inits,
 			catalogs: cfg.Catalogs, queues: cfg.Queues, daemon: cfg.SessionCommands,
