@@ -11,7 +11,7 @@ import (
 
 func TestMain(m *testing.M) {
 	// The package executes both fixture Git commands and the production merge
-	// engine. A parent pre-commit hook exports its live repository bindings,
+	// driver. A parent pre-commit hook exports its live repository bindings,
 	// which must never escape into either path.
 	for _, key := range []string{"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_PREFIX"} {
 		_ = os.Unsetenv(key)
@@ -21,7 +21,7 @@ func TestMain(m *testing.M) {
 
 // --- fakes & fixtures ---------------------------------------------------
 
-// recordingSink captures every transition the engine emits, in order. When
+// recordingSink captures every transition the driver emits, in order. When
 // failOn is set, RecordMergeTransition returns an error for that phase (to
 // exercise sink-error propagation).
 type recordingSink struct {
@@ -57,17 +57,17 @@ func (e sentinelError) Error() string { return string(e) }
 
 const errFakeSink = sentinelError("sink write failed")
 
-func newTestEngine(t *testing.T, sink StateSink) *Engine {
+func newTestDriver(t *testing.T, sink StateSink) *Driver {
 	t.Helper()
-	e, err := NewEngine(Config{Logf: t.Logf, Sink: sink})
+	e, err := NewDriver(Config{Logf: t.Logf, Sink: sink})
 	if err != nil {
-		t.Fatalf("NewEngine: %v", err)
+		t.Fatalf("NewDriver: %v", err)
 	}
 	return e
 }
 
 // gitRun runs a git command in dir, failing the test on error. Test-driver
-// git only; the engine runs its own git.
+// git only; the driver runs its own git.
 func gitRun(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	gitArgs := append([]string{"-c", "core.hooksPath=/dev/null", "-C", dir}, args...)
@@ -108,7 +108,7 @@ func writeFile(t *testing.T, dir, name, content string) {
 }
 
 // initTarget creates a fresh repo on `main` with one commit (A: base.txt) and
-// repo-local identity so the engine's cherry-pick can commit hermetically.
+// repo-local identity so the driver's cherry-pick can commit hermetically.
 func initTarget(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -116,7 +116,7 @@ func initTarget(t *testing.T) string {
 	gitRun(t, dir, "config", "user.email", "test@example.com")
 	gitRun(t, dir, "config", "user.name", "Test")
 	gitRun(t, dir, "config", "commit.gpgsign", "false")
-	// Engine.Merge runs production Git commands directly. Persist the fixture
+	// Driver.Merge runs production Git commands directly. Persist the fixture
 	// hook isolation so cherry-pick commits cannot recurse into the parent
 	// repository's pre-commit suite.
 	gitRun(t, dir, "config", "core.hooksPath", "/dev/null")
@@ -138,7 +138,7 @@ func addFeatureWorktree(t *testing.T, target string) string {
 
 // --- construction -------------------------------------------------------
 
-func TestNewEngineRequiresDependencies(t *testing.T) {
+func TestNewDriverRequiresDependencies(t *testing.T) {
 	tests := []struct {
 		name    string
 		cfg     Config
@@ -151,10 +151,10 @@ func TestNewEngineRequiresDependencies(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Act.
-			_, err := NewEngine(tc.cfg)
+			_, err := NewDriver(tc.cfg)
 			// Assert.
 			if (err != nil) != tc.wantErr {
-				t.Fatalf("NewEngine err = %v, wantErr = %v", err, tc.wantErr)
+				t.Fatalf("NewDriver err = %v, wantErr = %v", err, tc.wantErr)
 			}
 		})
 	}
@@ -175,7 +175,7 @@ func TestMergeRejectsIncompleteRequest(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange.
 			sink := &recordingSink{}
-			e := newTestEngine(t, sink)
+			e := newTestDriver(t, sink)
 			req := base
 			tc.mutat(&req)
 			// Act.
@@ -202,7 +202,7 @@ func TestMergeCleanCherryPick(t *testing.T) {
 	gitRun(t, featureDir, "commit", "-q", "-m", "add feature.txt")
 
 	sink := &recordingSink{}
-	e := newTestEngine(t, sink)
+	e := newTestDriver(t, sink)
 	req := Request{Workspace: "/ws/clean-ws", Name: "clean-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
 
 	// Act.
@@ -247,7 +247,7 @@ func TestMergeTransitionsAreEmittedOnTheStateKeyNotTheName(t *testing.T) {
 	gitRun(t, featureDir, "commit", "-q", "-m", "add feature.txt")
 
 	sink := &recordingSink{}
-	e := newTestEngine(t, sink)
+	e := newTestDriver(t, sink)
 	req := Request{Workspace: "/ws/keyed-ws", Name: "keyed-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
 
 	// Act.
@@ -282,7 +282,7 @@ func TestMergeConflictDetection(t *testing.T) {
 	gitRun(t, target, "commit", "-q", "-m", "target edit")
 
 	sink := &recordingSink{}
-	e := newTestEngine(t, sink)
+	e := newTestDriver(t, sink)
 	req := Request{Workspace: "/ws/cf-ws", Name: "cf-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
 
 	// Act.
@@ -300,7 +300,7 @@ func TestMergeConflictDetection(t *testing.T) {
 	}
 	// The pick is left IN TREE (never aborted): CHERRY_PICK_HEAD survives.
 	if !cherryPickHeadPresent(t, target) {
-		t.Errorf("CHERRY_PICK_HEAD absent — engine aborted the conflict instead of leaving it in tree")
+		t.Errorf("CHERRY_PICK_HEAD absent — driver aborted the conflict instead of leaving it in tree")
 	}
 	assertPhases(t, sink.phases(), PhaseMerging, PhaseMergeConflict)
 }
@@ -319,7 +319,7 @@ func TestResumeCompletesMergeAndOrdersTransitions(t *testing.T) {
 	gitRun(t, target, "commit", "-q", "-m", "target edit")
 
 	sink := &recordingSink{}
-	e := newTestEngine(t, sink)
+	e := newTestDriver(t, sink)
 	req := Request{Workspace: "/ws/rz-ws", Name: "rz-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
 
 	if res, err := e.Merge(context.Background(), req); err != nil || res.Outcome != OutcomeConflict {
@@ -357,7 +357,7 @@ func TestResumeWithoutInProgressPickFails(t *testing.T) {
 	target := initTarget(t)
 	featureDir := addFeatureWorktree(t, target)
 	sink := &recordingSink{}
-	e := newTestEngine(t, sink)
+	e := newTestDriver(t, sink)
 	req := Request{Workspace: "/ws/no-pick", Name: "no-pick", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
 
 	// Act.
@@ -393,7 +393,7 @@ func TestMergeFailedOnNonConflictError(t *testing.T) {
 	gitRun(t, featureDir, "commit", "-q", "-m", "F2")
 
 	sink := &recordingSink{}
-	e := newTestEngine(t, sink)
+	e := newTestDriver(t, sink)
 	req := Request{Workspace: "/ws/fail-ws", Name: "fail-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
 
 	// Act.
@@ -427,7 +427,7 @@ func TestMergeDirtySourceAbortsWithStateIntact(t *testing.T) {
 	writeFile(t, featureDir, "base.txt", "dirty edit\n") // tracked, unstaged
 
 	sink := &recordingSink{}
-	e := newTestEngine(t, sink)
+	e := newTestDriver(t, sink)
 	req := Request{Workspace: "/ws/dirty-ws", Name: "dirty-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
 
 	// Act.
@@ -447,7 +447,7 @@ func TestMergeMissingBranchAbortsWithStateIntact(t *testing.T) {
 	target := initTarget(t)
 	featureDir := addFeatureWorktree(t, target)
 	sink := &recordingSink{}
-	e := newTestEngine(t, sink)
+	e := newTestDriver(t, sink)
 	req := Request{Workspace: "/ws/nb-ws", Name: "nb-ws", SourceBranch: "does-not-exist", SourceDir: featureDir, TargetDir: target}
 
 	// Act.
@@ -466,7 +466,7 @@ func TestMergeMissingBranchAbortsWithStateIntact(t *testing.T) {
 
 func TestMergeSurfacesSinkError(t *testing.T) {
 	// Arrange: a clean cherry-pick, but the sink rejects the terminal merged
-	// transition. The engine must surface (not swallow) it.
+	// transition. The driver must surface (not swallow) it.
 	target := initTarget(t)
 	featureDir := addFeatureWorktree(t, target)
 	writeFile(t, featureDir, "feature.txt", "hello\n")
@@ -474,7 +474,7 @@ func TestMergeSurfacesSinkError(t *testing.T) {
 	gitRun(t, featureDir, "commit", "-q", "-m", "add feature.txt")
 
 	sink := &recordingSink{failOn: PhaseMerged}
-	e := newTestEngine(t, sink)
+	e := newTestDriver(t, sink)
 	req := Request{Workspace: "/ws/sink-ws", Name: "sink-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
 
 	// Act.

@@ -540,7 +540,7 @@ func main() {
 	defer controller.Close()
 
 	// Agent-shim frontend.v1 surface (design §9.1, §14.2): the SSM-backed
-	// snapshot + merge Engine + frontend Server. Always on post-cutover — it is
+	// snapshot + merge.Driver + frontend Server. Always on post-cutover — it is
 	// the daemon's consumption plane, not an optional add.
 	// sessionCommands is the late-bound daemon-core surface (session
 	// create/delete + DaemonView) the frontend command handler and snapshot
