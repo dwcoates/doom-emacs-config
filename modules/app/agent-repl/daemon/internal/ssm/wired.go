@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-// Wiring is a workspace's position on the WIRED axis: the one fact that decides
+// Wiring is a workspace's position on the legacy connectivity projection: the one fact that decides
 // whether anything the agent reports may be shown at all.
 type Wiring int
 
@@ -60,13 +60,13 @@ func (w Wiring) token() string {
 
 func (w Wiring) String() string { return w.token() }
 
-// ApplyWired moves the workspace's WIRED axis, which is the axis every color in
+// ApplyWired moves the workspace's legacy connectivity projection, which is the axis every color in
 // the vocabulary now stands on.
 //
 // THE LAW IT ENFORCES. A workspace's color is CONNECTION TRUTH: blue and teal
 // both mean there is no live backend session for this workspace, and every OTHER
 // color is a GUARANTEE that the session substrate is fully wired — shim live,
-// handshake complete, store link settled. So the agent axis and the vendor
+// handshake complete, store link settled. So the session-status lifecycle and the vendor
 // outcome are visible ONLY while this axis reads `wired`, and the rank table
 // enforces that rather than any Go branch: `severed` sits at 12, `starting` at
 // 14 and `hibernated` at 15, all above `thinking` at 30 and `vendor_blocked` at
@@ -108,13 +108,13 @@ func (m *Manager) ApplyWired(workspace string, wiring Wiring, reason string) err
 // is re-entrant and teardown is idempotent by design — and both are worth seeing
 // when a workspace's color is being explained.
 func (m *Manager) applyWiredLocked(workspace string, wiring Wiring, reason string) error {
-	current, err := wiredAxisTop(m.db, workspace)
+	current, err := legacyConnectivityProjectionTop(m.db, workspace)
 	if err != nil {
 		return err
 	}
 	want := wiring.token()
 	if current == want {
-		m.logf("ssm: wired axis unchanged ws=%s wiring=%s reason=%q — no row appended", workspace, want, reason)
+		m.logf("ssm: legacy connectivity projection unchanged ws=%s wiring=%s reason=%q — no row appended", workspace, want, reason)
 		return nil
 	}
 	cause := causeWired
@@ -124,7 +124,7 @@ func (m *Manager) applyWiredLocked(workspace string, wiring Wiring, reason strin
 	if err := appendRow(m.db, workspace, "", want, cause, sql.NullInt64{}, m.nextAt(), ""); err != nil {
 		return err
 	}
-	m.logf("ssm: wired axis ws=%s %s→%s reason=%q", workspace, orNone(current), want, reason)
+	m.logf("ssm: legacy connectivity projection ws=%s %s→%s reason=%q", workspace, orNone(current), want, reason)
 	return m.reresolveLocked(workspace, cause, 0)
 }
 
@@ -136,7 +136,8 @@ func orNone(token string) string {
 	return token
 }
 
-// wiredAxisTop returns the workspace's newest wired-axis token, or "" when the
+// legacyConnectivityProjectionTop returns the workspace's newest legacy
+// connectivity-projection token, or "" when the
 // axis has no row at all.
 //
 // "" IS NOT `wired`. The resolution query treats an axis with no row as
@@ -148,7 +149,7 @@ func orNone(token string) string {
 // stays in the resolution query: `workspace_state` is append-only, so a
 // workspace's newest wired row can still be a pre-split one, and omitting it
 // would make applyWiredLocked believe the axis had never moved at all.
-func wiredAxisTop(db *sql.DB, workspace string) (string, error) {
+func legacyConnectivityProjectionTop(db *sql.DB, workspace string) (string, error) {
 	var state string
 	err := db.QueryRow(
 		`SELECT state FROM workspace_state
@@ -163,10 +164,10 @@ func wiredAxisTop(db *sql.DB, workspace string) (string, error) {
 	return state, nil
 }
 
-// hibernateEveryWorkspaceLocked closes the wired axis for every workspace whose
+// hibernateEveryWorkspaceLocked closes the legacy connectivity projection for every workspace whose
 // log still shows one wired or starting. Caller holds mu (warm).
 //
-// THE WIRING DOES NOT SURVIVE A RESTART and the agent-axis history does, which
+// THE WIRING DOES NOT SURVIVE A RESTART and the session-status lifecycle history does, which
 // is the whole asymmetry. A daemon that comes back up has no shim connections at
 // all, so a `wired` row left standing from the previous process would let a
 // restored workspace paint whatever its last turn reported — a green tab, or a
@@ -202,7 +203,7 @@ func (m *Manager) hibernateEveryWorkspaceLocked() error {
 	}
 	closed := 0
 	for _, ws := range names {
-		top, err := wiredAxisTop(m.db, ws)
+		top, err := legacyConnectivityProjectionTop(m.db, ws)
 		if err != nil {
 			return err
 		}

@@ -9,7 +9,7 @@ import (
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 )
 
-// wiredstate.go — this package's production of the SSM's WIRED axis.
+// connectivitystate.go — this package's production of session connectivity.
 //
 // WHY HERE. A workspace's color is CONNECTION TRUTH: blue means there is no
 // live backend session for it, and every non-blue color is a GUARANTEE that the
@@ -73,23 +73,25 @@ import (
 // honest: a workspace nobody is bringing up is on the axis's closed half, which
 // spins nothing.
 
-// noteWiring moves the workspace's wired axis, loud-logging a failure rather
-// than swallowing it.
-//
-// A failed edge here is a workspace whose color stops tracking whether it has a
-// session at all, which is the one thing the vocabulary promises — but the
-// bring-up or teardown that called it must still complete, so the failure is
-// surfaced and the caller carries on. Same shape as notePermissionState.
+// noteConnectivity appends one identity-complete connectivity lifecycle edge.
+// A rejected edge is never hidden: the caller continues its process teardown
+// or bring-up, but the canonical log carries the exact controller identity,
+// requested transition, cause, and SSM verdict.
 //
 // Must be called with m.mu RELEASED: it takes the SSM's lock.
-func (m *Manager) noteWiring(workspace string, wiring ssm.Wiring, reason string) {
-	if workspace == "" {
+func (m *Manager) noteConnectivity(workspace, sessionID, generationID string, state ssm.SessionConnectivity, causeKind string) {
+	if workspace == "" || sessionID == "" || generationID == "" {
+		m.logf("session-controller: connectivity edge REJECTED ws=%q session=%q generation=%q next=%q cause=%q branch=incomplete_identity",
+			workspace, sessionID, generationID, state, causeKind)
 		return
 	}
-	if err := m.cfg.SSM.ApplyWired(workspace, wiring, reason); err != nil {
-		m.logf("session-controller: applying the wired axis to the SSM FAILED ws=%q wiring=%s reason=%s: %v",
-			workspace, wiring, reason, err)
+	if err := m.cfg.SSM.ApplySessionConnectivity(workspace, sessionID, generationID, state, causeKind); err != nil {
+		m.logf("session-controller: connectivity edge FAILED ws=%q session=%q generation=%q next=%q cause=%q branch=ssm_rejected error=%v",
+			workspace, sessionID, generationID, state, causeKind, err)
+		return
 	}
+	m.logf("session-controller: connectivity edge APPLIED ws=%q session=%q generation=%q next=%q cause=%q branch=accepted",
+		workspace, sessionID, generationID, state, causeKind)
 }
 
 // onLinkLost reports the FIFTH closing edge: the shim link dropped while this
@@ -104,19 +106,36 @@ func (m *Manager) noteWiring(workspace string, wiring ssm.Wiring, reason string)
 // session controller's link dying says nothing about the replacement now driving the
 // workspace, and re-spinning that replacement would be a lie about a live
 // session — the same guard the session-controller-exit tail keeps.
-func (m *Manager) onLinkLost(workspace, sessionID string, cause error) {
+func (m *Manager) onLinkLostForGeneration(workspace, sessionID, generationID string, cause error) {
 	m.mu.Lock()
 	d, ok := m.byWS[workspace]
-	current := ok && d.sessionID == sessionID
+	current := ok && d.sessionID == sessionID && d.generationID == generationID
 	m.mu.Unlock()
 	if !current {
-		m.logf("session-controller: shim link lost on a superseded session=%s ws=%q; leaving the wired axis to the live session controller: %v",
-			sessionID, workspace, cause)
+		m.logf("session-controller: stale shim link-loss ignored ws=%q session=%q generation=%q cause=%v branch=retired_controller",
+			workspace, sessionID, generationID, cause)
 		return
 	}
-	m.logf("session-controller: shim link LOST session=%s ws=%q — reconnecting, workspace is starting again: %v",
-		sessionID, workspace, cause)
-	m.noteWiring(workspace, ssm.WiringStarting, "link_lost")
+	m.logf("session-controller: shim link LOST ws=%q session=%q generation=%q cause=%v branch=reconnect",
+		workspace, sessionID, generationID, cause)
+	m.noteConnectivity(workspace, sessionID, generationID, ssm.SessionConnectivityConnecting, "link_lost")
+}
+
+// currentControllerGeneration is a focused test seam for legacy white-box
+// tests that drive callbacks directly. Production callbacks always capture the
+// generation at construction and never resolve it ambiently.
+func (m *Manager) currentControllerGeneration(workspace, sessionID string) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	d, ok := m.byWS[workspace]
+	if !ok || d.sessionID != sessionID {
+		return ""
+	}
+	return d.generationID
+}
+
+func (m *Manager) onLinkLost(workspace, sessionID string, cause error) {
+	m.onLinkLostForGeneration(workspace, sessionID, m.currentControllerGeneration(workspace, sessionID), cause)
 }
 
 // ErrNotSettled reports that a workspace was asked to hibernate while it was

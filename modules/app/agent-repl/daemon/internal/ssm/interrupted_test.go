@@ -10,7 +10,7 @@ import (
 // ---------------------------------------------------------------------------
 // `interrupted` as a TURN OUTCOME (I1)
 //
-// It is modeled EXACTLY as `done` and `vendor_blocked` are: one agent-axis row
+// It is modeled EXACTLY as `done` and `vendor_blocked` are: one session-status lifecycle row
 // reporting HOW the last turn ended, no clearing token, superseded by whatever
 // the agent does next. The tests below assert each half of that separately.
 // ---------------------------------------------------------------------------
@@ -73,7 +73,7 @@ func TestMarkedTurnEndSupersedesVendorBlocked(t *testing.T) {
 	}
 }
 
-// ONE row, on the agent axis — the same shape `done` and `vendor_blocked`
+// ONE row, on the session-status lifecycle — the same shape `done` and `vendor_blocked`
 // write. A second row on an axis of its own would be the latch this model
 // exists to avoid.
 func TestInterruptedTurnEndWritesExactlyOneAgentRow(t *testing.T) {
@@ -233,7 +233,7 @@ func TestBackgroundWorkPromotesInterruptedToYellow(t *testing.T) {
 	}
 }
 
-// The readiness no-regress guard reads the agent axis, so `interrupted` must
+// The readiness no-regress guard reads the session-status lifecycle, so `interrupted` must
 // be a member of it: a readiness assertion after an interrupted turn is a
 // real transition, not a suppressed one over a live turn.
 func TestTurnActiveReadsAnInterruptedRowAsIdle(t *testing.T) {
@@ -248,7 +248,7 @@ func TestTurnActiveReadsAnInterruptedRowAsIdle(t *testing.T) {
 		t.Fatalf("turnActive: %v", err)
 	}
 	if active {
-		t.Fatal("turnActive = true, want false — the interrupted row is the newest agent-axis row")
+		t.Fatal("turnActive = true, want false — the interrupted row is the newest session-status lifecycle row")
 	}
 }
 

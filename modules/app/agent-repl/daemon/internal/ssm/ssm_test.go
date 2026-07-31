@@ -85,7 +85,7 @@ func evTaskEnded(sid string, seq uint64, taskID string, status corev1.TerminalSt
 // the bring-up gate's own verdict, and until it stands the connection-truth law
 // holds every workspace on the axis's closed half no matter what the agent
 // reports — so a test
-// about the agent axis, the context cuts, or the backfill cannot be asked at all
+// about the session-status lifecycle, the context cuts, or the backfill cannot be asked at all
 // of an unwired workspace. Tests that are ABOUT the axis call ApplyWired
 // themselves, and openUnwiredTest exists for the ones that must start from
 // nothing.
@@ -96,7 +96,7 @@ func openTest(t *testing.T, resolver Resolver) (*Manager, *capLog, string) {
 	return m, cl, path
 }
 
-// wireAll puts every workspace RESOLVER names on the WIRED axis. See openTest
+// wireAll puts every workspace RESOLVER names on the legacy connectivity projection. See openTest
 // for why this is arrangement rather than subject.
 func wireAll(t *testing.T, m *Manager, resolver Resolver) {
 	t.Helper()
@@ -137,7 +137,7 @@ func mustCurrent(t *testing.T, m *Manager, ws string) *frontendv1.WorkspaceState
 	return cur
 }
 
-// TestApplyLifecycleTransitions drives the full agent-axis lifecycle through
+// TestApplyLifecycleTransitions drives the full session-status lifecycle lifecycle through
 // Apply, one transition per case.
 func TestApplyLifecycleTransitions(t *testing.T) {
 	tests := []struct {
@@ -323,7 +323,7 @@ func TestPersistenceAcrossReopen(t *testing.T) {
 	if !cl.contains("restored 1 workspace") {
 		t.Fatalf("expected a restore-count log line, got: %v", cl.lines)
 	}
-	wireAll(t, m2, res)
+	connectOperational(t, m2, "ws1", "s1", "generation-reopen")
 
 	// Assert, SECOND HALF: the LOG survived. Re-wire, and the state (including
 	// live_task_count) is exactly what it was.
@@ -692,13 +692,12 @@ func TestMigrateAddsTaskIDToAV1Database(t *testing.T) {
 		t.Fatalf("Open a v1 db: %v", err)
 	}
 	t.Cleanup(func() { m.Close() })
-	// The Open marked the restored workspace hibernated (nothing is wired to a
-	// daemon that has just started); the migration is what is under test.
-	wireAll(t, m, fakeResolver{"s1": "ws1"})
+	// The migration is observed after a new controller generation establishes.
+	connectOperational(t, m, "ws1", "s1", "generation-reopen")
 
 	// Assert — the workspace still resolves, which it cannot without the column.
-	if got := mustCurrent(t, m, "ws1").State; got != frontendv1.RenderState_RENDER_STATE_IDLE {
-		t.Fatalf("state after migration = %s, want idle", renderName(got))
+	if got := mustCurrent(t, m, "ws1").State; got != frontendv1.RenderState_RENDER_STATE_READY {
+		t.Fatalf("state after migration = %s, want ready", renderName(got))
 	}
 }
 
@@ -803,8 +802,8 @@ func TestConnectionDegradedResolvesTheWorkspaceDegraded(t *testing.T) {
 }
 
 func TestConnectionRecoveredRevealsTheStateUnderneath(t *testing.T) {
-	// Arrange: a live workspace that then went quiet. The degraded axis sits
-	// ON TOP of the agent axis rather than replacing it, so clearing it must
+	// Arrange: a live workspace that then went quiet. The legacy impairment projection sits
+	// ON TOP of the session-status lifecycle rather than replacing it, so clearing it must
 	// reveal the session underneath rather than leave the workspace stateless.
 	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
 	if err := m.Apply(evSessionStarted("s1", 1)); err != nil {

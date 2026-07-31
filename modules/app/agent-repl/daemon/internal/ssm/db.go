@@ -19,7 +19,7 @@ import (
 // whenever the on-disk shape changes; migrate() refuses to open a DB
 // written by a NEWER schema than this binary understands (loud, no
 // silent downgrade).
-const schemaVersion = 3
+const schemaVersion = 4
 
 // defaultDBPath is the daemon's ONE state store — the SSM's log and the
 // session registry's identity tables share it (§9.2: "own SQLite DB",
@@ -84,6 +84,43 @@ func migrate(db *sql.DB) error {
 		CREATE UNIQUE INDEX IF NOT EXISTS turn_lifecycle_claim_identity
 			ON turn_lifecycle_claim(workspace, claimant_session_id, turn_id)
 			WHERE turn_id <> '';
+		CREATE TABLE IF NOT EXISTS session_connectivity (
+			workspace                 TEXT    NOT NULL,
+			agent_repl_session_id     TEXT    NOT NULL,
+			controller_generation_id  TEXT    NOT NULL,
+			state                     TEXT    NOT NULL,
+			cause_kind                TEXT    NOT NULL,
+			at                        INTEGER NOT NULL,
+			PRIMARY KEY (workspace, at)
+		);
+		CREATE INDEX IF NOT EXISTS session_connectivity_ws
+			ON session_connectivity(workspace, at);
+		CREATE TABLE IF NOT EXISTS session_fault (
+			workspace                 TEXT    NOT NULL,
+			agent_repl_session_id     TEXT    NOT NULL,
+			controller_generation_id  TEXT    NOT NULL,
+			component                 TEXT    NOT NULL,
+			fault_type                TEXT    NOT NULL,
+			impact                    TEXT    NOT NULL,
+			open                      INTEGER NOT NULL CHECK (open IN (0, 1)),
+			cause_kind                TEXT    NOT NULL,
+			at                        INTEGER NOT NULL,
+			PRIMARY KEY (
+				workspace,
+				controller_generation_id,
+				component,
+				fault_type,
+				at
+			)
+		);
+		CREATE INDEX IF NOT EXISTS session_fault_current
+			ON session_fault(
+				workspace,
+				controller_generation_id,
+				component,
+				fault_type,
+				at
+			);
 	`); err != nil {
 		return fmt.Errorf("ssm: create schema: %w", err)
 	}
@@ -248,16 +285,16 @@ func seqApplied(db *sql.DB, sessionID string, seq uint64) (bool, error) {
 	return true, nil
 }
 
-// agentAxisMembers is the agent axis's row membership, as one SQL list shared
+// sessionStatusMembers is the session-status lifecycle's row membership, as one SQL list shared
 // by every reader of the axis. It is the same membership the resolution query
 // carries in its `prec` table, kept in one place here so a reader and the
 // resolver can never disagree about which rows count as agent states.
-const agentAxisMembers = `('thinking','permission','done','ready','idle','dead','vendor_blocked','interrupted')`
+const sessionStatusMembers = `('thinking','permission','done','ready','idle','dead','vendor_blocked','interrupted')`
 
-// turnActive reports whether the workspace's LATEST agent-axis row is a
+// turnActive reports whether the workspace's LATEST session-status lifecycle row is a
 // running turn. It is the no-regress guard's only input: a readiness
 // assertion arriving over a live turn must be dropped rather than appended,
-// because the agent axis resolves on its latest row and the readiness row
+// because the session-status lifecycle resolves on its latest row and the readiness row
 // would otherwise win.
 //
 // A workspace whose top row is `permission` reads FALSE, exactly as `done`
@@ -293,7 +330,7 @@ func turnClaim(db *sql.DB, workspace string) (active bool, claimant string, err 
 	scanErr := db.QueryRow(
 		`SELECT state, session_id FROM workspace_state
 		 WHERE workspace = ?
-		   AND state IN `+agentAxisMembers+`
+		   AND state IN `+sessionStatusMembers+`
 		 ORDER BY at DESC LIMIT 1`, workspace).Scan(&state, &sid)
 	if scanErr == sql.ErrNoRows {
 		return false, "", nil
@@ -304,17 +341,17 @@ func turnClaim(db *sql.DB, workspace string) (active bool, claimant string, err 
 	return state == "thinking", sid.String, nil
 }
 
-// agentAxisTop returns the workspace's newest agent-axis token, plus the newest
-// agent-axis token BENEATH any `permission` row sitting on top of it. Both are
+// sessionStatusTop returns the workspace's newest session-status lifecycle token, plus the newest
+// session-status lifecycle token BENEATH any `permission` row sitting on top of it. Both are
 // "" when the axis has no such row.
 //
 // The second answer is what the permission row's CLOSING edge needs. A pending
-// permission is written as an agent-axis row that supersedes the `thinking` it
+// permission is written as an session-status lifecycle row that supersedes the `thinking` it
 // covers, so once it is answered the only record of whether a turn is still
 // running is the row it buried. Reading it back is how the close restores
 // `thinking` for a turn that is genuinely still in flight — and how it knows
 // NOT to, for one that is not.
-func agentAxisTop(db *sql.DB, workspace string) (top, beneath string, err error) {
+func sessionStatusTop(db *sql.DB, workspace string) (top, beneath string, err error) {
 	scan := func(query string) (string, error) {
 		var state string
 		e := db.QueryRow(query, workspace).Scan(&state)
@@ -322,18 +359,18 @@ func agentAxisTop(db *sql.DB, workspace string) (top, beneath string, err error)
 			return "", nil
 		}
 		if e != nil {
-			return "", fmt.Errorf("ssm: agent-axis read for workspace %q: %w", workspace, e)
+			return "", fmt.Errorf("ssm: session-status lifecycle read for workspace %q: %w", workspace, e)
 		}
 		return state, nil
 	}
 	top, err = scan(`SELECT state FROM workspace_state
-		 WHERE workspace = ? AND state IN ` + agentAxisMembers + `
+		 WHERE workspace = ? AND state IN ` + sessionStatusMembers + `
 		 ORDER BY at DESC LIMIT 1`)
 	if err != nil {
 		return "", "", err
 	}
 	beneath, err = scan(`SELECT state FROM workspace_state
-		 WHERE workspace = ? AND state IN ` + agentAxisMembers + ` AND state <> 'permission'
+		 WHERE workspace = ? AND state IN ` + sessionStatusMembers + ` AND state <> 'permission'
 		 ORDER BY at DESC LIMIT 1`)
 	if err != nil {
 		return "", "", err
@@ -341,7 +378,7 @@ func agentAxisTop(db *sql.DB, workspace string) (top, beneath string, err error)
 	return top, beneath, nil
 }
 
-// permissionOpenWorkspaces lists every workspace whose agent axis currently
+// permissionOpenWorkspaces lists every workspace whose session-status lifecycle currently
 // tops out in `permission`. It backs the release at Open: the pendings a
 // permission row stands for are in-process rendezvous that do not survive a
 // daemon restart, so a row left standing across one has nothing that could
@@ -353,7 +390,7 @@ func permissionOpenWorkspaces(db *sql.DB) ([]string, error) {
 	}
 	var out []string
 	for _, ws := range names {
-		top, _, err := agentAxisTop(db, ws)
+		top, _, err := sessionStatusTop(db, ws)
 		if err != nil {
 			return nil, err
 		}
@@ -408,10 +445,16 @@ func openCutWorkspaces(db *sql.DB, openToken, closeToken string) ([]string, erro
 	return out, nil
 }
 
-// distinctWorkspaces lists every workspace that has any logged signal, in
-// stable order, for Snapshot.
+// distinctWorkspaces lists every workspace that has status or connectivity
+// history, in stable order, for Snapshot.
 func distinctWorkspaces(db *sql.DB) ([]string, error) {
-	rows, err := db.Query(`SELECT DISTINCT workspace FROM workspace_state ORDER BY workspace`)
+	rows, err := db.Query(
+		`SELECT workspace FROM (
+			SELECT workspace FROM workspace_state
+			UNION
+			SELECT workspace FROM session_connectivity
+		)
+		ORDER BY workspace`)
 	if err != nil {
 		return nil, fmt.Errorf("ssm: list workspaces: %w", err)
 	}

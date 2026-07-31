@@ -886,13 +886,24 @@ recorded value is empty."
 
 (defun agent-repl--gui-show (ws)
   "The gui frontend's show capability (registry `:show-fn').
-Remounts the live webview (or opens fresh when it died)."
-  (let ((buf (agent-repl--ws-get ws :frontend-buffer)))
+Remounts the live webview (or opens fresh when it died).
+Before touching the window layout, synchronously ensures the existing
+daemon session is operational.  This is the `SPC o c' wake invariant:
+a hibernated workspace is brought up before its UI can look available."
+  (let* ((session-id (agent-repl--frontend-ensure-session ws))
+         (_ (agent-repl--frontend-sync-webview ws session-id))
+         (buf (agent-repl--ws-get ws :frontend-buffer)))
     (if (buffer-live-p buf)
         (progn
-          (agent-repl--log ws "gui-show: outcome=redisplay buf=%s" (buffer-name buf))
+          (agent-repl--log
+           ws
+           "gui-show: outcome=redisplay session=%s buf=%s"
+           session-id (buffer-name buf))
           (agent-repl--frontend-display-webview ws buf))
-      (agent-repl--log ws "gui-show: outcome=open-fresh")
+      (agent-repl--log
+       ws
+       "gui-show: outcome=open-fresh session=%s reason=buffer-not-live"
+       session-id)
       (agent-repl--gui-open ws))))
 
 (defun agent-repl--gui-hide (ws)

@@ -325,6 +325,15 @@ say the daemon went quiet."
   :type 'number
   :group 'agent-repl)
 
+(defcustom agent-repl-frontend-open-workspace-timeout 30
+  "Seconds to await an `openWorkspace' acknowledgement.
+Opening the Agent REPL is a presentation gate: the daemon must finish
+ensuring the workspace's existing session controller before Emacs mounts
+or redisplays its webview.  A timeout therefore aborts presentation
+rather than leaving a hibernated session looking open."
+  :type 'number
+  :group 'agent-repl)
+
 (defvar agent-repl--frontend-creates-in-flight (make-hash-table :test 'equal)
   "Set of cwds with a `createSession' command awaiting its ack.
 Serializes concurrent creates per workspace so the SessionView->id
@@ -417,6 +426,63 @@ before the caller mutates UI or workspace state."
     (agent-repl--log log-workspace
                      "frontend-health: HEALTHY what=%s field=%s request-id=%s session-id=%s response=%S"
                      what field request-id (or session-id "nil") response)
+    t))
+
+(defun agent-repl--frontend-await-open-workspace (ws)
+  "Synchronously ensure WS is operational through daemon `openWorkspace'.
+The command is idempotent for an already-operational session and is the
+canonical wake path for a hibernated one.  Return t only after the daemon
+accepts the command.  Rejection, timeout, or a broken UDS link signals
+before any caller presents agent-repl UI."
+  (let* ((key (agent-repl--frontend-ws-command-key ws))
+         (outcome (list :done nil :ok nil :error nil))
+         (request-id
+          (agent-repl--uds-send-command "openWorkspace" nil key)))
+    (agent-repl--log
+     ws
+     "open-workspace gate: begin ws=%s key=%s request-id=%s timeout=%.3fs"
+     ws key request-id agent-repl-frontend-open-workspace-timeout)
+    (agent-repl--uds-track-command
+     request-id "openWorkspace" ws
+     (lambda (err)
+       (plist-put outcome :error err)
+       (plist-put outcome :done t)
+       (agent-repl--log
+        ws
+        "open-workspace gate: REJECTED ws=%s key=%s request-id=%s error=%s"
+        ws key request-id err))
+     (lambda ()
+       (plist-put outcome :ok t)
+       (plist-put outcome :done t)
+       (agent-repl--log
+        ws
+        "open-workspace gate: ACCEPTED ws=%s key=%s request-id=%s"
+        ws key request-id)))
+    (unless (agent-repl--frontend-await-uds
+             (lambda () (plist-get outcome :done))
+             agent-repl-frontend-open-workspace-timeout
+             (format "openWorkspace ws=%s" ws)
+             ws)
+      (agent-repl--uds-untrack-command request-id ws "open-workspace-timeout")
+      (agent-repl--log
+       ws
+       "open-workspace gate: TIMEOUT ws=%s key=%s request-id=%s timeout=%.3fs outcome=%S"
+       ws key request-id agent-repl-frontend-open-workspace-timeout outcome)
+      (error "agent-repl: opening workspace %s timed out after %.3fs"
+             ws agent-repl-frontend-open-workspace-timeout))
+    (when-let ((reason (plist-get outcome :error)))
+      (agent-repl--log
+       ws
+       "open-workspace gate: ABORT ws=%s key=%s request-id=%s error=%s"
+       ws key request-id reason)
+      (error "agent-repl: opening workspace %s failed: %s" ws reason))
+    (unless (plist-get outcome :ok)
+      (agent-repl--log
+       ws
+       "open-workspace gate: INVARIANT ws=%s key=%s request-id=%s outcome=%S"
+       ws key request-id outcome)
+      (error "agent-repl: openWorkspace for %s completed without an accepted acknowledgement"
+             ws))
     t))
 
 (defun agent-repl--frontend-wait-daemon-healthy ()
@@ -814,7 +880,15 @@ contract)."
   (let ((existing (agent-repl--ws-get ws :frontend-session-id)))
     (if (and existing (agent-repl--frontend-session-live-p existing))
         (progn
-          (agent-repl--log ws "ensure-session: reusing live session=%s" existing)
+          (agent-repl--log
+           ws
+           "ensure-session: existing record is live session=%s; requiring operational controller before reuse"
+           existing)
+          (agent-repl--frontend-await-open-workspace ws)
+          (agent-repl--log
+           ws
+           "ensure-session: reusing operational session=%s"
+           existing)
           existing)
       (let ((dir (or (agent-repl--ws-get ws :project-dir)
                      (let ((root (agent-repl--resolve-current-git-root)))

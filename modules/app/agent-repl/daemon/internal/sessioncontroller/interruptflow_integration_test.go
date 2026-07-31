@@ -194,12 +194,14 @@ func (r *interruptFlowRig) apply(payload any) {
 func (r *interruptFlowRig) settleReady() {
 	r.t.Helper()
 	r.apply(&corev1.SessionStarted{Model: "test-model", Cwd: interruptFlowWorkspace})
-	// The WIRED axis is sessionsession controller's report of the bring-up gate closing, and
-	// every color above blue stands on it. This rig drives a FAKE shim client,
-	// whose ShimReady never arrives, so the wiring is arranged directly.
-	if err := r.ssm.ApplyWired(interruptFlowWorkspace, ssm.WiringWired, "test arrangement"); err != nil {
-		r.t.Fatalf("apply wired: %v", err)
+	d, err := r.m.existing(interruptFlowWorkspace)
+	if err != nil {
+		r.t.Fatalf("existing controller: %v", err)
 	}
+	r.m.onConnectedForGeneration(
+		interruptFlowWorkspace, interruptFlowSessionID, d.generationID,
+		&corev1.ShimHello{SessionId: interruptFlowSessionID},
+	)
 	if err := r.ssm.ApplyBackfillState(interruptFlowWorkspace, BackfillDone); err != nil {
 		r.t.Fatalf("apply backfill done: %v", err)
 	}
