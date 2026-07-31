@@ -1369,6 +1369,7 @@ introducing a sibling raw `make-process' site."
     agent-repl--frontend-webview-reload-widget
     agent-repl--uds-connect
     agent-repl--uds-probe
+    agent-repl--uds-probe-async
     agent-repl--image-call-process
     agent-repl--run-install-script
     agent-repl--readiness-run-script)
