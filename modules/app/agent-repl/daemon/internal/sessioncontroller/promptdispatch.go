@@ -101,29 +101,59 @@ func (m *Manager) forwardPrompt(ctx context.Context, d *sessionController, reque
 	if cmd.foldsMetaprompt() {
 		wire = m.applyMetaprompt(d, text)
 	}
-	if err := d.client.SubmitPrompt(ctx, wire, origin, permissionMode); err != nil {
-		return err
-	}
 
-	// THE ACCEPTED EDGE AND ITS SYNCHRONOUS PUBLICATION, before the receipt.
-	// Only an ordinary prompt creates this edge: `/clear` is a session command,
+	// THE ACCEPTED EDGE AND ITS SYNCHRONOUS PUBLICATION, BEFORE THE SUBMIT.
+	//
+	// It used to follow the shim's Ack, on the reasoning that the daemon should
+	// not claim a turn the shim had not confirmed. The cost of that ordering is
+	// paid by the user on every prompt: the Ack is a round-trip to a node
+	// process that is frequently busy serving the stream this very workspace is
+	// about to produce, so the workspace stayed GREEN for the whole of it —
+	// which is the one window in which a user cannot tell a prompt that was
+	// sent from one that was dropped, and the window they reported as "it takes
+	// too long to register as in flight".
+	//
+	// So the claim is now made on the daemon's OWN decision to submit, which it
+	// has already taken by this line, and the honesty of the claim is
+	// maintained on the failure path instead (retractPromptAccepted below).
+	// Only an ordinary prompt creates the edge: `/clear` is a session command,
 	// not a turn, and its clearing axis below is the truthful status premise.
 	// MarkPromptAccepted holds the SSM transition lock through the frontend
 	// publication, so neither the asynchronous SSM subscriber nor a later
-	// TurnEnded can make the prompt bubble overtake its `thinking` premise.
+	// TurnEnded can overtake it.
+	accepted, activeBefore := false, false
 	if cmd.echoes() {
-		if err := m.notePromptAccepted(d, requestID); err != nil {
-			// The shim has accepted the external mutation and cannot be rolled
-			// back. Withhold the daemon-local bubble and progress window:
-			// publishing either without its state premise would manufacture
-			// the contradiction this boundary exists to prevent. The durable
-			// UserLine/TurnStarted can still report and repair the acceptance.
+		before, err := m.notePromptAccepted(d, requestID)
+		if err != nil {
+			// NOTHING EXTERNAL HAS HAPPENED YET, which is the whole advantage
+			// of failing here rather than after the submit: the prompt is not
+			// sent, no daemon-local frame is exposed without its state premise,
+			// and the frontend command fails loudly on a session left exactly
+			// as it was found. The user can resubmit.
 			return err
 		}
+		accepted, activeBefore = true, before
+	}
 
-		// THE RECEIPT, only after every frontend has been synchronously offered
-		// the accepted prompt's `thinking` state. It closes the transcript-
-		// latency gap, but never at the cost of a green prompt bubble.
+	if err := d.client.SubmitPrompt(ctx, wire, origin, permissionMode); err != nil {
+		if accepted {
+			// The `thinking` every frontend was just shown described a turn
+			// that is not going to happen, and nothing else will ever close it:
+			// the lifecycle retires `thinking` on a TurnEnded, and no turn that
+			// never began reports an end.
+			m.retractPromptAccepted(d, requestID, activeBefore, err)
+		}
+		return err
+	}
+
+	// THE RECEIPT, only after every frontend has been synchronously offered the
+	// accepted prompt's `thinking` state, and only once the shim has actually
+	// TAKEN the prompt. It closes the transcript-latency gap, but never at the
+	// cost of a green prompt bubble — and never at the cost of a bubble for a
+	// prompt no session received, which is why it stays behind the submit while
+	// the state edge moved ahead of it: a state edge can be retracted, a
+	// conversation item the frontend has already drawn cannot.
+	if accepted {
 		m.echo(d, requestID, text)
 	}
 
@@ -137,16 +167,17 @@ func (m *Manager) forwardPrompt(ctx context.Context, d *sessionController, reque
 	return nil
 }
 
-// notePromptAccepted applies every daemon-local consequence of the shim
-// accepting an immediately delivered prompt.
+// notePromptAccepted applies every daemon-local consequence of the daemon
+// committing to submit an immediately delivered prompt, and reports the queue
+// latch's value BEFORE the edge — what a retraction must restore.
 //
-// Both outward mutations happen before the frontend command returns: the SSM
-// edge makes every status surface `thinking`, and the progress edge starts the
-// footer clock. The session controller's queue latch moves on the same accepted edge.
-// Waiting for the durable TurnStarted would let a second prompt bypass the
-// queue while every frontend already truthfully reported an active turn.
-func (m *Manager) notePromptAccepted(d *sessionController, requestID string) error {
-	// The accepted Ack is authoritative for BOTH user-visible state and queue
+// Every outward mutation happens before the prompt is handed to the shim: the
+// SSM edge makes every status surface `thinking`, and the progress edge starts
+// the footer clock. The session controller's queue latch moves on the same
+// edge. Waiting for the durable TurnStarted would let a second prompt bypass
+// the queue while every frontend already reported an active turn.
+func (m *Manager) notePromptAccepted(d *sessionController, requestID string) (activeBefore bool, err error) {
+	// The accepted edge is authoritative for BOTH user-visible state and queue
 	// ordering. If the SSM says turn_active while the queue manager still says
 	// idle, a second prompt can bypass the queue before the durable TurnStarted
 	// arrives. The observed TurnStarted is an idempotent confirmation.
@@ -159,19 +190,69 @@ func (m *Manager) notePromptAccepted(d *sessionController, requestID string) err
 		d.consumer.push.PushWorkspaceState(state)
 	}
 	if err := m.cfg.SSM.MarkPromptAccepted(d.workspace, d.sessionID, requestID, publish); err != nil {
-		// The prompt is already accepted by the external shim and cannot be
-		// rolled back. Fail the frontend command loudly and withhold dependent
-		// local frames; the durable TurnStarted remains able to repair the SSM.
-		err = fmt.Errorf("session-controller: prompt accepted by shim but synchronous state publication failed for workspace %q session %q request %q: %w",
+		// The prompt has NOT been submitted yet, so the latch is put back where
+		// it was found: a session left claiming a turn that was never started
+		// would queue every subsequent prompt behind a turn end that can never
+		// arrive. Fail the frontend command loudly and withhold every dependent
+		// frame.
+		m.mu.Lock()
+		d.turnActive = controllerActiveBefore
+		m.mu.Unlock()
+		err = fmt.Errorf("session-controller: synchronous state publication failed before submitting for workspace %q session %q request %q: %w",
 			d.workspace, d.sessionID, requestID, err)
-		m.logf("session-controller: prompt accepted state edge FAILED ws=%s session=%s request_id=%q session_controller_turn_active_before=%v session_controller_turn_active_after=true publish_sync=true dependent_frames=withheld error=%v",
-			d.workspace, d.sessionID, requestID, controllerActiveBefore, err)
-		return err
+		m.logf("session-controller: prompt accepted state edge FAILED ws=%s session=%s request_id=%q session_controller_turn_active_before=%v session_controller_turn_active_after=%v publish_sync=true prompt_submitted=false dependent_frames=withheld error=%v",
+			d.workspace, d.sessionID, requestID, controllerActiveBefore, controllerActiveBefore, err)
+		return controllerActiveBefore, err
 	}
-	m.logf("session-controller: prompt accepted state edge APPLIED ws=%s session=%s request_id=%q session_controller_turn_active_before=%v session_controller_turn_active_after=true publish_sync=true next=prompt_echo_then_progress",
+	m.logf("session-controller: prompt accepted state edge APPLIED ws=%s session=%s request_id=%q session_controller_turn_active_before=%v session_controller_turn_active_after=true publish_sync=true next=shim_submit_then_prompt_echo",
 		d.workspace, d.sessionID, requestID, controllerActiveBefore)
 	m.progress().NoteTurnAccepted(d.workspace, d.sessionID)
-	return nil
+	return controllerActiveBefore, nil
+}
+
+// retractPromptAccepted undoes notePromptAccepted for a submit the shim
+// refused, restoring the queue latch, withdrawing the published `thinking`, and
+// closing the footer clock.
+//
+// THE PRICE OF PUBLISHING EARLY, and the reason publishing early is safe. The
+// accepted edge is now a statement of intent rather than of confirmed fact, so
+// exactly one path can falsify it — this one — and it runs before the failing
+// frontend command returns, so the workspace is green again by the time the
+// user is told the prompt did not go.
+//
+// The latch is restored FIRST and unconditionally: it is daemon-local, nothing
+// else can have a claim on it, and leaving it set would queue every later
+// prompt behind a turn that no TurnEnded is coming for. The two published
+// surfaces are gated on the SSM confirming it actually retracted the row,
+// because a durable TurnStarted (or a permission, or a cut) landing in the
+// window between the accept and the failure means a real turn now owns the
+// axis, and closing THAT would report an idle workspace over a working session.
+//
+// Every failure here is loud-logged and swallowed: the caller is already
+// returning the submit's own error, which is the news, and a retraction failure
+// must not replace the account of why the prompt did not go.
+func (m *Manager) retractPromptAccepted(d *sessionController, requestID string, activeBefore bool, cause error) {
+	m.mu.Lock()
+	d.turnActive = activeBefore
+	m.mu.Unlock()
+
+	publish := func(state *frontendv1.WorkspaceState) {
+		d.consumer.push.PushWorkspaceState(state)
+	}
+	retracted, err := m.cfg.SSM.MarkPromptRejected(d.workspace, d.sessionID, requestID, publish)
+	if err != nil {
+		m.logf("session-controller: prompt rejected state edge FAILED ws=%s session=%s request_id=%q session_controller_turn_active_restored=%v submit_error=%v error=%v (the workspace may hold `thinking` for a turn that never began)",
+			d.workspace, d.sessionID, requestID, activeBefore, cause, err)
+		return
+	}
+	if !retracted {
+		m.logf("session-controller: prompt rejected state edge PRESERVED ws=%s session=%s request_id=%q session_controller_turn_active_restored=%v submit_error=%v — something more authoritative owns the state axis, so neither it nor the footer clock is touched",
+			d.workspace, d.sessionID, requestID, activeBefore, cause)
+		return
+	}
+	m.progress().NoteTurnRejected(d.workspace, d.sessionID)
+	m.logf("session-controller: prompt rejected state edge APPLIED ws=%s session=%s request_id=%q session_controller_turn_active_restored=%v publish_sync=true turn_clock=closed submit_error=%v",
+		d.workspace, d.sessionID, requestID, activeBefore, cause)
 }
 
 // metapromptRefireOrigin is the vendor-visible provenance of the daemon's own

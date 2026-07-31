@@ -169,6 +169,10 @@ type fakeClient struct {
 	healthStatus     *corev1.HealthStatus
 	healthErr        error
 	healthRequestIDs []string
+	// onSubmit, when set, runs INSIDE SubmitPrompt, before it records or
+	// returns. It is how a test observes the world as the shim round-trip
+	// begins, which is the only way to prove what was published BEFORE it.
+	onSubmit func()
 }
 
 type fakeFileDiagnosticPersister struct{}
@@ -190,6 +194,12 @@ func (c *fakeClient) Run(ctx context.Context) error {
 	return nil
 }
 func (c *fakeClient) SubmitPrompt(_ context.Context, text, origin, mode string) error {
+	c.mu.Lock()
+	hook := c.onSubmit
+	c.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
 	c.mu.Lock()
 	c.prompts = append(c.prompts, text)
 	c.origins = append(c.origins, origin)
