@@ -12,35 +12,35 @@ import (
 	"claude-repld/internal/dlog"
 )
 
-// Config constructs an Engine. Both fields are required: a merge engine that
+// Config constructs an Driver. Both fields are required: a merge driver that
 // cannot record state or log its git work is a silent-fallback risk, so a
 // nil either is a hard construction error rather than a defaulted logger.
 type Config struct {
-	// Logf receives the engine's git-driver and transition logging. Required.
+	// Logf receives the driver's git-driver and transition logging. Required.
 	Logf dlog.Logf
 	// Sink receives every merge-state transition. Bound to the SSM at stitch.
 	// Required.
 	Sink StateSink
 }
 
-// Engine runs cherry-pick merges via `git -C <dir>` and emits every
+// Driver runs cherry-pick merges via `git -C <dir>` and emits every
 // resulting state transition through its StateSink. It holds no per-merge
 // state; each Merge / Resume call is self-contained and drives one request.
-type Engine struct {
+type Driver struct {
 	logf dlog.Logf
 	emit *stateEmitter
 }
 
-// NewEngine validates cfg and returns the engine, or an error when a
+// NewDriver validates cfg and returns the driver, or an error when a
 // required dependency is missing.
-func NewEngine(cfg Config) (*Engine, error) {
+func NewDriver(cfg Config) (*Driver, error) {
 	if cfg.Logf == nil {
 		return nil, fmt.Errorf("merge: Logf is required")
 	}
 	if cfg.Sink == nil {
 		return nil, fmt.Errorf("merge: Sink is required")
 	}
-	return &Engine{
+	return &Driver{
 		logf: cfg.Logf,
 		emit: &stateEmitter{sink: cfg.Sink, logf: cfg.Logf},
 	}, nil
@@ -138,7 +138,7 @@ var cherryPickAnnotationRE = regexp.MustCompile(`\(cherry picked from commit ([0
 //
 // A conflict is LEFT IN THE TARGET TREE (never aborted); the caller resumes
 // it via Resume once a human has resolved it.
-func (e *Engine) Merge(ctx context.Context, req Request) (Result, error) {
+func (e *Driver) Merge(ctx context.Context, req Request) (Result, error) {
 	if err := req.validate(); err != nil {
 		return Result{}, err
 	}
@@ -222,7 +222,7 @@ func (e *Engine) Merge(ctx context.Context, req Request) (Result, error) {
 //
 // It emits merging (the conflict is clearing), then exactly one of merged /
 // merge_conflict (another commit in the range conflicted) / merge_failed.
-func (e *Engine) Resume(ctx context.Context, req Request) (Result, error) {
+func (e *Driver) Resume(ctx context.Context, req Request) (Result, error) {
 	if err := req.validate(); err != nil {
 		return Result{}, err
 	}
@@ -278,7 +278,7 @@ func (e *Engine) Resume(ctx context.Context, req Request) (Result, error) {
 // agent-repl--workspace-merge-do. A tag-write failure is non-fatal (warned,
 // not signaled) exactly as in the elisp: the cherry-pick already landed, so a
 // tag failure must not undo it.
-func (e *Engine) finalizeMerged(ctx context.Context, req Request, alreadyIncorporated bool) (Result, error) {
+func (e *Driver) finalizeMerged(ctx context.Context, req Request, alreadyIncorporated bool) (Result, error) {
 	tag := "merge/" + req.Name
 	exit, out, err := e.gitExit(ctx, req.TargetDir, "tag", "-f", tag, "HEAD")
 	if err != nil {
@@ -303,7 +303,7 @@ func (e *Engine) finalizeMerged(ctx context.Context, req Request, alreadyIncorpo
 // markConflict emits merge_conflict for a pick left paused in the target
 // tree. It never aborts the cherry-pick: the conflict stays in-tree so a
 // human can resolve it and Resume can continue it.
-func (e *Engine) markConflict(ctx context.Context, req Request) (Result, error) {
+func (e *Driver) markConflict(ctx context.Context, req Request) (Result, error) {
 	short, err := e.gitString(ctx, req.TargetDir, "rev-parse", "--short", "CHERRY_PICK_HEAD")
 	if err != nil {
 		return Result{}, err
@@ -317,7 +317,7 @@ func (e *Engine) markConflict(ctx context.Context, req Request) (Result, error) 
 
 // markFailed emits merge_failed for a pick git aborted with no conflict to
 // resolve (the elisp silent-failure sentinel).
-func (e *Engine) markFailed(_ context.Context, req Request, cause string) (Result, error) {
+func (e *Driver) markFailed(_ context.Context, req Request, cause string) (Result, error) {
 	if err := e.emit.emit(req.Workspace, PhaseMergeFailed, cause); err != nil {
 		return Result{}, err
 	}
@@ -328,7 +328,7 @@ func (e *Engine) markFailed(_ context.Context, req Request, cause string) (Resul
 // because another cherry-pick is already in flight against the same target
 // worktree. The queue and its drain live at stitch; this method only records
 // the transition so it is never invisible.
-func (e *Engine) MarkQueued(ws, cause string) error {
+func (e *Driver) MarkQueued(ws, cause string) error {
 	return e.emit.emit(ws, PhaseMergeQueued, cause)
 }
 
@@ -338,7 +338,7 @@ func (e *Engine) MarkQueued(ws, cause string) error {
 // targetBranch commit already incorporated; otherwise fall back to the
 // merge-base. Unlike the elisp (which swallows git failures into an empty
 // string), a git failure here is surfaced as an error.
-func (e *Engine) cherryPickBase(ctx context.Context, dir, targetBranch string) (string, error) {
+func (e *Driver) cherryPickBase(ctx context.Context, dir, targetBranch string) (string, error) {
 	symmetric := "HEAD..." + targetBranch
 	rightOut, err := e.gitString(ctx, dir, "log", "--right-only", "--pretty=%H", "--no-merges", symmetric)
 	if err != nil {
@@ -376,7 +376,7 @@ func (e *Engine) cherryPickBase(ctx context.Context, dir, targetBranch string) (
 // `+` is real un-applied work. A blank/error output is NOT treated as
 // incorporated, so a probe failure never masquerades as an already-merged
 // success.
-func (e *Engine) rangeAlreadyIncorporated(ctx context.Context, dir, base, targetBranch string) (bool, error) {
+func (e *Driver) rangeAlreadyIncorporated(ctx context.Context, dir, base, targetBranch string) (bool, error) {
 	out, err := e.gitString(ctx, dir, "cherry", "HEAD", targetBranch, base)
 	if err != nil {
 		return false, err
@@ -398,7 +398,7 @@ func (e *Engine) rangeAlreadyIncorporated(ctx context.Context, dir, base, target
 // as a rev when present. `rev-parse --verify --quiet` exits non-zero (with no
 // stderr) when it is absent, which is the normal not-in-progress signal
 // rather than an error.
-func (e *Engine) cherryPickInProgress(ctx context.Context, dir string) (bool, error) {
+func (e *Driver) cherryPickInProgress(ctx context.Context, dir string) (bool, error) {
 	exit, _, err := e.gitExit(ctx, dir, "rev-parse", "--verify", "--quiet", "CHERRY_PICK_HEAD")
 	if err != nil {
 		return false, err
@@ -407,7 +407,7 @@ func (e *Engine) cherryPickInProgress(ctx context.Context, dir string) (bool, er
 }
 
 // branchExists mirrors agent-repl--git-branch-exists-p.
-func (e *Engine) branchExists(ctx context.Context, dir, branch string) (bool, error) {
+func (e *Driver) branchExists(ctx context.Context, dir, branch string) (bool, error) {
 	exit, _, err := e.gitExit(ctx, dir, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch)
 	if err != nil {
 		return false, err
@@ -418,7 +418,7 @@ func (e *Engine) branchExists(ctx context.Context, dir, branch string) (bool, er
 // assertCleanWorktree signals an error when dir has uncommitted changes,
 // mirroring agent-repl--assert-clean-worktree (`diff --quiet` +
 // `diff --cached --quiet`). A non-zero exit from either means dirty.
-func (e *Engine) assertCleanWorktree(ctx context.Context, dir string) error {
+func (e *Driver) assertCleanWorktree(ctx context.Context, dir string) error {
 	unstaged, _, err := e.gitExit(ctx, dir, "diff", "--quiet")
 	if err != nil {
 		return err
@@ -438,7 +438,7 @@ func (e *Engine) assertCleanWorktree(ctx context.Context, dir string) error {
 // output. A non-zero exit is NOT an error (the caller classifies it); only a
 // failure to spawn/run git (binary missing, dir gone) returns an error.
 // Mirrors the exit-code role of agent-repl--git-exit-code.
-func (e *Engine) gitExit(ctx context.Context, dir string, args ...string) (int, string, error) {
+func (e *Driver) gitExit(ctx context.Context, dir string, args ...string) (int, string, error) {
 	full := append([]string{"-C", dir}, args...)
 	cmd := exec.CommandContext(ctx, "git", full...)
 	var out bytes.Buffer
@@ -459,7 +459,7 @@ func (e *Engine) gitExit(ctx context.Context, dir string, args ...string) (int, 
 // elisp agent-repl--git-string (which returns whatever stdout was, even on a
 // non-zero exit — a silent-fallback risk), this treats a non-zero exit as an
 // error so a git failure in base/range computation aborts loudly.
-func (e *Engine) gitString(ctx context.Context, dir string, args ...string) (string, error) {
+func (e *Driver) gitString(ctx context.Context, dir string, args ...string) (string, error) {
 	full := append([]string{"-C", dir}, args...)
 	cmd := exec.CommandContext(ctx, "git", full...)
 	var out, errb bytes.Buffer

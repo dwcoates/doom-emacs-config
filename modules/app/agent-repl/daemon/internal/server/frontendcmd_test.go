@@ -987,14 +987,14 @@ func TestWireAgentShimRejectsNilWorkspaceCreation(t *testing.T) {
 
 func TestMergeRunnerSurfacesAnIncompleteRequest(t *testing.T) {
 	// Arrange — a command that named no source branch.
-	eng, err := merge.NewEngine(merge.Config{Logf: func(string, ...any) {}, Sink: noopSink{}})
+	eng, err := merge.NewDriver(merge.Config{Logf: func(string, ...any) {}, Sink: noopSink{}})
 	if err != nil {
 		t.Fatalf("engine: %v", err)
 	}
-	runner := mergeRunner{engine: eng}
+	runner := mergeRunner{driver: eng}
 	// Act
 	got := runner.Merge(context.Background(), merge.Request{Workspace: "/ws/ws1", Name: "ws1", SourceDir: "/s", TargetDir: "/t"})
-	// Assert — the Engine's own validation refuses it, never a silent no-op merge.
+	// Assert — the merge.Driver's own validation refuses it, never a silent no-op merge.
 	if got == nil || !strings.Contains(got.Error(), "SourceBranch is required") {
 		t.Fatalf("merge error = %v, want the incomplete request refused", got)
 	}
@@ -1003,11 +1003,11 @@ func TestMergeRunnerSurfacesAnIncompleteRequest(t *testing.T) {
 func TestMergeResumeSurfacesAnIncompleteRequest(t *testing.T) {
 	// Arrange — the resume path re-receives the geometry, so it can arrive
 	// incomplete in exactly the same way.
-	eng, err := merge.NewEngine(merge.Config{Logf: func(string, ...any) {}, Sink: noopSink{}})
+	eng, err := merge.NewDriver(merge.Config{Logf: func(string, ...any) {}, Sink: noopSink{}})
 	if err != nil {
 		t.Fatalf("engine: %v", err)
 	}
-	runner := mergeRunner{engine: eng}
+	runner := mergeRunner{driver: eng}
 	// Act
 	got := runner.Resume(context.Background(), merge.Request{Workspace: "/ws/ws1", Name: "ws1", SourceBranch: "b", SourceDir: "/s"})
 	// Assert
@@ -1048,7 +1048,7 @@ func TestWireAgentShimMergeTransitionReachesSSM(t *testing.T) {
 		t.Fatalf("WireAgentShim: %v", err)
 	}
 	defer shim.Close()
-	// Act — the merge Engine's sink is the SSM, so a transition it emits lands
+	// Act — the merge.Driver's sink is the SSM, so a transition it emits lands
 	// in the SSM's per-workspace log.
 	if err := shim.Merge.MarkQueued("/w", "queued behind another merge"); err != nil {
 		t.Fatalf("mark queued: %v", err)
