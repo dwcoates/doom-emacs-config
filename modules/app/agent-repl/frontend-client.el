@@ -65,6 +65,7 @@
                   "frontend-uds" (request-id workspace reason))
 (declare-function agent-repl--uds-connected-p "frontend-uds" ())
 (declare-function agent-repl-uds-connect "frontend-uds" (&optional path readiness-p))
+(declare-function agent-repl--uds-run-timer "frontend-uds" (delay fn))
 (declare-function agent-repl--frontend-ws-name "frontend-state" (workspace))
 (declare-function agent-repl--frontend-session-view "frontend-state" (session-id))
 (declare-function agent-repl--frontend-session-views-all "frontend-state" ())
@@ -199,7 +200,7 @@ creation consume this helper so the two entry points cannot drift."
           :allow-ungated allow-ungated)))
 
 (defcustom agent-repl-frontend-ready-attempts 25
-  "Poll attempts for `agent-repl--frontend-wait-ready' (0.2s apart)."
+  "Dial attempts for `agent-repl--frontend-after-ready' (0.2s apart)."
   :type 'integer
   :group 'agent-repl)
 
@@ -234,74 +235,225 @@ round-trip."
        (agent-repl--frontend-daemon-view)
        t))
 
-(defun agent-repl--frontend-wait-ready ()
-  "Block until the frontend UDS link is ready, or signal an error.
+(defun agent-repl--frontend-after-ready (on-ready on-failure &optional ws)
+  "Run ON-READY once the frontend UDS snapshot establishes readiness.
 `agent-repl--ensure-frontend-daemon' returns as soon as the process is
 SPAWNED, which precedes the socket bind; polling closes that gap.  Each
 attempt dials when the link is down (`agent-repl-uds-connect' in its
-readiness-owned mode, which loud-logs without raising a premature outage
-alarm or arming a competing reconnect timer) and otherwise PUMPS the live
-connection so the connect snapshot — which carries the `DaemonView'
-readiness depends on — is dispatched while we wait.  Polls
-`agent-repl-frontend-ready-attempts' times, 0.2s apart, then fails loudly
-once if the daemon never becomes ready.
+readiness-owned mode).  The UDS filter dispatches the connect snapshot; this
+function never pumps Emacs process I/O or waits on the main thread.  ON-FAILURE
+receives a diagnostic string after the bounded dial budget expires.
 
-MAIN THREAD ONLY: `accept-process-output' routes through `ns_select_1' ->
-`[NSApp run]', which deadlocks Emacs off the main thread (the AGENTS.md
-worker-thread trap), so this asserts it up front exactly as the old
-synchronous HTTP boundary did."
-  (agent-repl--assert-main-thread "frontend-wait-ready")
-  (let ((attempt 0)
-        (ready (agent-repl--frontend-daemon-ready-p)))
+Returns `:pending' when readiness is asynchronous, otherwise `:ready'."
+  (unless (and (functionp on-ready) (functionp on-failure))
+    (error "agent-repl: frontend readiness requires callable continuations"))
+  (let ((attempt 0) (started (float-time)) timer settled)
+    (cl-labels
+        ((finish (outcome &optional detail)
+           (unless settled
+             (setq settled t)
+             (when (timerp timer) (cancel-timer timer))
+             (agent-repl--log ws "frontend-ready: outcome=%s attempts=%d elapsed=%.3fs detail=%S"
+                              outcome attempt (- (float-time) started) detail)
+             (if (eq outcome 'ready) (funcall on-ready) (funcall on-failure detail))))
+         (tick ()
+           (cond
+            ((agent-repl--frontend-daemon-ready-p) (finish 'ready))
+            ((>= attempt agent-repl-frontend-ready-attempts)
+             (finish 'timeout (format "daemon at %s never became ready" agent-repl-uds-socket-path)))
+            (t
+             (setq attempt (1+ attempt))
+             (unless (agent-repl--uds-connected-p) (agent-repl-uds-connect nil t))
+             (setq timer (agent-repl--uds-run-timer 0.2 #'tick))))))
     (agent-repl--log
-     nil
-     "frontend-wait-ready: begin ready=%s connected=%s daemon-view=%s budget=%d"
-     ready (agent-repl--uds-connected-p)
+     ws
+     "frontend-ready: begin connected=%s daemon-view=%s budget=%d"
+     (agent-repl--uds-connected-p)
      (and (agent-repl--frontend-daemon-view) t)
      agent-repl-frontend-ready-attempts)
+    (if (agent-repl--frontend-daemon-ready-p) (progn (finish 'ready) :ready)
+      (tick) :pending))))
+
+(defun agent-repl--frontend-wait-ready ()
+  "Legacy blocking readiness bridge retained for legacy synchronous callers.
+New work must use `agent-repl--frontend-after-ready'."
+  (agent-repl--assert-main-thread "frontend-wait-ready")
+  (let ((attempt 0) (ready (agent-repl--frontend-daemon-ready-p)))
+    (agent-repl--log nil "frontend-wait-ready: begin ready=%s connected=%s daemon-view=%s budget=%d"
+                     ready (agent-repl--uds-connected-p) (and (agent-repl--frontend-daemon-view) t)
+                     agent-repl-frontend-ready-attempts)
     (while (and (not ready) (< attempt agent-repl-frontend-ready-attempts))
       (setq attempt (1+ attempt))
-      (unless (agent-repl--uds-connected-p)
-        ;; WHY: a freshly spawned daemon has not bound its socket yet.  The
-        ;; wait loop owns this expected retry window; routing the dial through
-        ;; ordinary outage handling produced the false startup alarms this
-        ;; function exists to prevent.
-        (agent-repl--log-verbose nil
-                                 "frontend-wait-ready: attempt=%d/%d dialing socket=%s"
-                                 attempt agent-repl-frontend-ready-attempts
-                                 agent-repl-uds-socket-path)
-        (agent-repl-uds-connect nil t))
+      (unless (agent-repl--uds-connected-p) (agent-repl-uds-connect nil t))
       (if (agent-repl--uds-connected-p)
-          (progn
-            (agent-repl--log-verbose nil
-                                     "frontend-wait-ready: attempt=%d/%d pumping connected UDS"
-                                     attempt agent-repl-frontend-ready-attempts)
-            (accept-process-output agent-repl--uds-process 0.2))
-        ;; sleep-for, NOT sit-for: sit-for returns immediately when
-        ;; input is pending, which would collapse the whole readiness
-        ;; window into back-to-back failed dials while the user types.
-        (agent-repl--log-verbose nil
-                                 "frontend-wait-ready: attempt=%d/%d socket still unavailable"
-                                 attempt agent-repl-frontend-ready-attempts)
+          (accept-process-output agent-repl--uds-process 0.2)
         (sleep-for 0.2))
       (setq ready (agent-repl--frontend-daemon-ready-p)))
     (unless ready
-      (agent-repl--log
-       nil
-       "frontend-wait-ready: TIMEOUT attempts=%d socket=%s connected=%s daemon-view=%s"
-       attempt agent-repl-uds-socket-path
-       (agent-repl--uds-connected-p)
-       (and (agent-repl--frontend-daemon-view) t))
+      (agent-repl--log nil "frontend-wait-ready: TIMEOUT attempts=%d socket=%s connected=%s daemon-view=%s"
+                       attempt agent-repl-uds-socket-path (agent-repl--uds-connected-p)
+                       (and (agent-repl--frontend-daemon-view) t))
       (error "agent-repl: daemon at %s never became ready (%d attempts; connected=%s daemon-view=%s)"
-             agent-repl-uds-socket-path attempt
-             (if (agent-repl--uds-connected-p) "yes" "no")
+             agent-repl-uds-socket-path attempt (if (agent-repl--uds-connected-p) "yes" "no")
              (if (agent-repl--frontend-daemon-view) "yes" "no")))
-    (agent-repl--log
-     nil
-     "frontend-wait-ready: READY attempts=%d connected=%s daemon-view=%s"
-     attempt (agent-repl--uds-connected-p)
-     (and (agent-repl--frontend-daemon-view) t))
+    (agent-repl--log nil "frontend-wait-ready: READY attempts=%d connected=%s daemon-view=%s"
+                     attempt (agent-repl--uds-connected-p) (and (agent-repl--frontend-daemon-view) t))
     t))
+
+(defun agent-repl--frontend-async-fail (ws operation request-id started on-failure detail)
+  "Log and surface OPERATION failure, then deliver DETAIL to ON-FAILURE."
+  (agent-repl--log ws
+                   "frontend-async: FAILED operation=%s request-id=%s elapsed=%.3fs detail=%s"
+                   operation request-id (- (float-time) started) detail)
+  (message "agent-repl: %s failed: %s" operation detail)
+  (funcall on-failure detail))
+
+(defun agent-repl--frontend-after-health-command
+    (field payload workspace session-id what on-success on-failure &optional ws)
+  "Asynchronously require a healthy FIELD response before ON-SUCCESS.
+ON-FAILURE receives a diagnostic string for readiness failure, command
+rejection, timeout, or an unhealthy correlated response.  The caller owns no
+timer or UDS callback after either continuation runs."
+  (unless (and (functionp on-success) (functionp on-failure))
+    (error "agent-repl: %s health requires callable continuations" what))
+  (let ((started (float-time)) request-id timer settled)
+    (cl-labels
+        ((finish (ok detail)
+           (unless settled
+             (setq settled t)
+             (when (timerp timer) (cancel-timer timer))
+             (when request-id
+               (agent-repl--uds-untrack-command request-id workspace "health-settled")
+               (agent-repl--uds-untrack-health-response request-id workspace "health-settled"))
+             (if ok
+                 (progn
+                   (agent-repl--log ws "frontend-health-async: HEALTHY what=%s field=%s request-id=%s elapsed=%.3fs"
+                                    what field request-id (- (float-time) started))
+                   (funcall on-success))
+               (agent-repl--frontend-async-fail ws what request-id started on-failure detail))))
+         (dispatch ()
+           (setq request-id (agent-repl--uds-send-command field payload workspace))
+           (agent-repl--log ws "frontend-health-async: dispatched what=%s field=%s request-id=%s workspace=%s session-id=%s"
+                            what field request-id workspace session-id)
+           (agent-repl--uds-track-health-response
+            request-id field workspace session-id
+            (lambda (response)
+              (if (plist-get response :healthy)
+                  (finish t nil)
+                (finish nil (format "daemon reported unhealthy: %s"
+                                    (or (plist-get response :reason) "no reason supplied"))))))
+           (agent-repl--uds-track-command
+            request-id field workspace
+            (lambda (err) (finish nil (format "command rejected: %s" err))))
+           (setq timer (agent-repl--uds-run-timer
+                        agent-repl-frontend-health-timeout
+                        (lambda () (finish nil (format "timed out after %.3fs" agent-repl-frontend-health-timeout)))))))
+      (agent-repl--frontend-after-ready #'dispatch
+                                         (lambda (detail) (finish nil detail)) ws)
+      :pending)))
+
+(defun agent-repl--frontend-after-open-workspace (ws on-success on-failure)
+  "Asynchronously open WS, calling exactly one continuation."
+  (unless (and (functionp on-success) (functionp on-failure))
+    (error "agent-repl: openWorkspace requires callable continuations"))
+  (let ((started (float-time)) request-id timer settled (key (agent-repl--frontend-ws-command-key ws)))
+    (cl-labels ((finish (ok detail)
+                  (unless settled
+                    (setq settled t)
+                    (when (timerp timer) (cancel-timer timer))
+                    (when request-id (agent-repl--uds-untrack-command request-id key "open-workspace-settled"))
+                    (if ok
+                        (progn (agent-repl--log ws "open-workspace-async: ACCEPTED ws=%s key=%s request-id=%s elapsed=%.3fs" ws key request-id (- (float-time) started))
+                               (funcall on-success))
+                      (agent-repl--frontend-async-fail ws "openWorkspace" request-id started on-failure detail)))))
+      (agent-repl--frontend-after-ready
+       (lambda ()
+         (setq request-id (agent-repl--uds-send-command "openWorkspace" nil key))
+         (agent-repl--uds-track-command request-id "openWorkspace" key
+                                        (lambda (err) (finish nil (format "command rejected: %s" err)))
+                                        (lambda () (finish t nil)))
+         (setq timer (agent-repl--uds-run-timer agent-repl-frontend-open-workspace-timeout
+                                                (lambda () (finish nil (format "timed out after %.3fs" agent-repl-frontend-open-workspace-timeout))))))
+       (lambda (detail) (finish nil detail)) ws)
+      :pending)))
+
+(defun agent-repl--frontend-after-create-session
+    (cwd model resume-mode explicit-id force-fresh on-success on-failure &optional ws)
+  "Asynchronously create CWD's session and await its pushed `SessionView'."
+  (unless (and (stringp cwd) (not (string-empty-p cwd))
+               (functionp on-success) (functionp on-failure))
+    (error "agent-repl: createSession requires cwd and callable continuations"))
+  (when (gethash cwd agent-repl--frontend-creates-in-flight)
+    (agent-repl--log ws "createSession-async: REFUSED cwd=%s already-in-flight" cwd)
+    (error "agent-repl: a createSession for %s is already in flight" cwd))
+  (let* ((ws (or ws (agent-repl--ws-name-for-dir cwd)))
+         (started (float-time)) request-id deadline-timer poll-timer settled acked
+         (resume-mode (or resume-mode 'continue))
+         (model (agent-repl--effective-model model))
+         (posture (agent-repl--frontend-session-posture cwd))
+         (payload (append (list :cwd cwd :resumeMode (agent-repl--frontend-resume-mode-wire resume-mode))
+                          (when model (list :model model))
+                          (when (eq resume-mode 'explicit) (list :explicitClaudeSessionId explicit-id))
+                          (when (plist-get posture :config-dir) (list :configDir (plist-get posture :config-dir)))
+                          (when (plist-get posture :permission-mode) (list :permissionMode (plist-get posture :permission-mode)))
+                          (when (plist-get posture :allow-ungated) (list :allowUngated t)))))
+    (cl-labels
+        ((finish (id detail)
+           (unless settled
+             (setq settled t)
+             (when (timerp deadline-timer) (cancel-timer deadline-timer))
+             (when (timerp poll-timer) (cancel-timer poll-timer))
+             (when request-id (agent-repl--uds-untrack-command request-id cwd "create-settled"))
+             (remhash cwd agent-repl--frontend-creates-in-flight)
+             (if id
+                 (progn (agent-repl--log ws "createSession-async: CREATED cwd=%s session-id=%s request-id=%s elapsed=%.3fs" cwd id request-id (- (float-time) started))
+                        (funcall on-success id))
+               (agent-repl--frontend-async-fail ws "createSession" request-id started on-failure detail))))
+         (observe-view ()
+           (when acked
+             (when-let ((id (agent-repl--frontend-live-session-id-for-cwd cwd))) (finish id nil))))
+         (poll-view ()
+           (observe-view)
+           (unless settled (setq poll-timer (agent-repl--uds-run-timer 0.05 #'poll-view))))
+         (dispatch ()
+           (puthash cwd t agent-repl--frontend-creates-in-flight)
+           (setq request-id (agent-repl--uds-send-command "createSession" payload cwd))
+           (agent-repl--log ws "createSession-async: dispatched cwd=%s request-id=%s resume-mode=%s model=%s" cwd request-id resume-mode model)
+           (agent-repl--uds-track-command request-id "createSession" cwd
+                                          (lambda (err) (finish nil (format "command rejected: %s" err)))
+                                          (lambda () (setq acked t) (observe-view)))
+           (setq deadline-timer (agent-repl--uds-run-timer agent-repl-frontend-create-timeout
+                                                           (lambda () (finish nil (format "timed out after %.3fs awaiting acknowledgement and SessionView" agent-repl-frontend-create-timeout)))))
+           (setq poll-timer (agent-repl--uds-run-timer 0.05 #'poll-view))))
+      (agent-repl--frontend-after-ready #'dispatch (lambda (detail) (finish nil detail)) ws)
+      :pending)))
+
+(defun agent-repl--frontend-after-ensure-session (ws on-success on-failure)
+  "Asynchronously provide WS's live session id through exactly one continuation."
+  (if (not (agent-repl--ensure-frontend-daemon))
+      (progn
+        (agent-repl--frontend-async-fail ws "ensure-session" nil (float-time) on-failure
+                                         "frontend daemon not started (auto-start disabled or init inhibited)")
+        :failed)
+    (let ((existing (agent-repl--ws-get ws :frontend-session-id)))
+      (agent-repl--frontend-after-ready
+     (lambda ()
+       (if (and existing (agent-repl--frontend-session-live-p existing))
+           (agent-repl--frontend-after-open-workspace ws (lambda () (funcall on-success existing)) on-failure)
+         (let ((dir (or (agent-repl--ws-get ws :project-dir) (agent-repl--resolve-current-git-root))))
+           (agent-repl--frontend-after-create-session
+            dir (agent-repl--ws-get ws :model) 'continue nil nil
+            (lambda (id)
+              (unless (agent-repl--ws-get ws :project-dir) (agent-repl--ws-put ws :project-dir dir))
+              (unless (agent-repl--ws-get ws :active-env) (agent-repl--initialize-ws-env ws dir))
+              (agent-repl--ws-put ws :frontend-session-id id)
+              (agent-repl--ws-put ws :reattach-failed nil)
+              (agent-repl--ws-put ws :reattach-failures nil)
+              (agent-repl--frontend-reattach-timer-start)
+              (funcall on-success id))
+            on-failure ws))))
+       on-failure ws)
+      :pending)))
 
 ;;;; ---- Session CRUD -------------------------------------------------------
 

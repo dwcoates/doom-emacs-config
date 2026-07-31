@@ -75,6 +75,108 @@ and the SessionView store is cleared first so tests do not contaminate."
                 (lambda (predicate &rest _) (funcall predicate))))
        ,@body)))
 
+;;;; ---- asynchronous client continuations -----------------------------------
+
+(ert-deftest agent-repl-test-frontend-after-ready-returns-before-its-callback ()
+  "Readiness schedules its retry and returns before a later ready callback."
+  (let (tick events)
+    (cl-letf (((symbol-function 'agent-repl--frontend-daemon-ready-p) (lambda () nil))
+              ((symbol-function 'agent-repl--uds-connected-p) (lambda () t))
+              ((symbol-function 'agent-repl--uds-run-timer)
+               (lambda (_delay fn) (setq tick fn) 'timer)))
+      (should (eq :pending (agent-repl--frontend-after-ready
+                            (lambda () (push 'ready events))
+                            (lambda (_detail) (push 'failed events)))))
+      (should-not events)
+      (cl-letf (((symbol-function 'agent-repl--frontend-daemon-ready-p) (lambda () t)))
+        (funcall tick))
+      (should (equal events '(ready))))))
+
+(ert-deftest agent-repl-test-frontend-after-ready-times-out-on-its-owned-timer ()
+  "Readiness invokes only failure after its bounded dial budget is exhausted."
+  (let ((agent-repl-frontend-ready-attempts 1) ticks events)
+    (cl-letf (((symbol-function 'agent-repl--frontend-daemon-ready-p) (lambda () nil))
+              ((symbol-function 'agent-repl--uds-connected-p) (lambda () t))
+              ((symbol-function 'agent-repl--uds-run-timer)
+               (lambda (_delay fn) (push fn ticks) 'timer)))
+      (agent-repl--frontend-after-ready
+       (lambda () (push 'ready events)) (lambda (_detail) (push 'failed events)))
+      (funcall (pop ticks))
+      (should (equal events '(failed))))))
+
+(ert-deftest agent-repl-test-frontend-after-open-workspace-preserves-continuation-order ()
+  "openWorkspace returns before its ack and completes only through success."
+  (let (success failure ack)
+    (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+      (cl-letf (((symbol-function 'agent-repl--frontend-after-ready) (lambda (ok _fail &optional _ws) (funcall ok) :ready))
+                ((symbol-function 'agent-repl--uds-send-command) (lambda (&rest _) "open-1"))
+                ((symbol-function 'agent-repl--uds-track-command)
+                 (lambda (_id _field _ws _failure on-success &rest _) (setq ack on-success)))
+                ((symbol-function 'agent-repl--uds-run-timer) (lambda (&rest _) 'timer)))
+        (should (eq :pending (agent-repl--frontend-after-open-workspace
+                              "ws1" (lambda () (setq success t)) (lambda (_e) (setq failure t)))))
+        (should-not success)
+        (should-not failure)
+        (funcall ack)
+        (should success)
+        (should-not failure)))))
+
+(ert-deftest agent-repl-test-frontend-after-create-awaits-ack-and-session-view ()
+  "createSession completes only after its ack and matching pushed SessionView."
+  (let (success failure ack poll)
+    (clrhash agent-repl--frontend-session-views)
+    (cl-letf (((symbol-function 'agent-repl--frontend-after-ready) (lambda (ok _fail &optional _ws) (funcall ok) :ready))
+              ((symbol-function 'agent-repl--uds-send-command) (lambda (&rest _) "create-1"))
+              ((symbol-function 'agent-repl--uds-track-command)
+               (lambda (_id _field _ws _failure on-success &rest _) (setq ack on-success)))
+              ((symbol-function 'agent-repl--uds-run-timer)
+               (lambda (delay fn) (when (= delay 0.05) (setq poll fn)) 'timer)))
+      (should (eq :pending (agent-repl--frontend-after-create-session
+                            "/w" nil 'continue nil nil
+                            (lambda (id) (setq success id))
+                            (lambda (e) (setq failure e)))))
+      (should-not success)
+      (funcall ack)
+      (should-not success)
+      (agent-repl--frontend-store-session-view '(:sessionId "s-new" :workspace "/w"))
+      (funcall poll)
+      (should (equal success "s-new"))
+      (should-not failure))))
+
+(ert-deftest agent-repl-test-frontend-after-health-rejection-cleans-up-and-fails ()
+  "A rejected health command invokes failure and retires both registrations."
+  (let (failure untracked-command untracked-health rejection)
+    (cl-letf (((symbol-function 'agent-repl--frontend-after-ready) (lambda (ok _fail &optional _ws) (funcall ok) :ready))
+              ((symbol-function 'agent-repl--uds-send-command) (lambda (&rest _) "health-1"))
+              ((symbol-function 'agent-repl--uds-track-health-response) (lambda (&rest _) nil))
+              ((symbol-function 'agent-repl--uds-track-command)
+               (lambda (_id _field _ws on-failure &rest _) (setq rejection on-failure)))
+              ((symbol-function 'agent-repl--uds-run-timer) (lambda (&rest _) 'timer))
+              ((symbol-function 'agent-repl--uds-untrack-command) (lambda (&rest args) (setq untracked-command args)))
+              ((symbol-function 'agent-repl--uds-untrack-health-response) (lambda (&rest args) (setq untracked-health args))))
+      (agent-repl--frontend-after-health-command "daemonHealth" nil nil nil "daemon"
+                                                  (lambda () (error "unexpected success"))
+                                                  (lambda (detail) (setq failure detail)))
+      (funcall rejection "not ready")
+      (should (string-match-p "rejected" failure))
+      (should (equal untracked-command '("health-1" nil "health-settled")))
+      (should (equal untracked-health '("health-1" nil "health-settled"))))))
+
+(ert-deftest agent-repl-test-frontend-after-ensure-session-reuses-a-live-binding ()
+  "ensure-session returns immediately and passes an operational live id onward."
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w" :frontend-session-id "s-live")
+    (let (success failure)
+      (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&optional _force) t))
+                ((symbol-function 'agent-repl--frontend-after-ready) (lambda (ok _fail &optional _ws) (funcall ok) :ready))
+                ((symbol-function 'agent-repl--frontend-session-live-p) (lambda (_id) t))
+                ((symbol-function 'agent-repl--frontend-after-open-workspace)
+                 (lambda (_ws ok _fail) (funcall ok) :pending)))
+        (should (eq :pending (agent-repl--frontend-after-ensure-session
+                              "ws1" (lambda (id) (setq success id))
+                              (lambda (detail) (setq failure detail)))))
+        (should (equal success "s-live"))
+        (should-not failure)))))
+
 ;;;; ---- webview URL ---------------------------------------------------------
 
 (ert-deftest agent-repl-test-frontend-base-url-is-the-webview-address ()
