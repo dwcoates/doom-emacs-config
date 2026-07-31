@@ -423,15 +423,17 @@ func TestCommandHandlerMergeCarriesTheCommandGeometry(t *testing.T) {
 	// Arrange
 	h, _, m, _ := newTestHandler(t)
 	// Act
-	_ = h.MergeWorkspace(context.Background(), "ws1", "r1", &frontendv1.MergeWorkspaceCmd{
-		Handler:      "cherry-pick",
-		SourceBranch: "DWC/feature-one",
-		SourceDir:    "/worktrees/feature-one",
-		TargetDir:    "/repo",
+	_ = h.MergeWorkspace(context.Background(), "/ws/ws1", "r1", &frontendv1.MergeWorkspaceCmd{
+		Handler:       "cherry-pick",
+		WorkspaceName: "ws1",
+		SourceBranch:  "DWC/feature-one",
+		SourceDir:     "/worktrees/feature-one",
+		TargetDir:     "/repo",
 	})
 	// Assert
 	want := merge.Request{
-		Workspace:    "ws1",
+		Workspace:    "/ws/ws1",
+		Name:         "ws1",
 		SourceBranch: "DWC/feature-one",
 		SourceDir:    "/worktrees/feature-one",
 		TargetDir:    "/repo",
@@ -446,22 +448,52 @@ func TestCommandHandlerResumeCarriesTheCommandGeometry(t *testing.T) {
 	// the same geometry rather than remembering the merge it continues.
 	h, _, m, _ := newTestHandler(t)
 	// Act
-	_ = h.MergeWorkspace(context.Background(), "ws1", "r1", &frontendv1.MergeWorkspaceCmd{
+	_ = h.MergeWorkspace(context.Background(), "/ws/ws1", "r1", &frontendv1.MergeWorkspaceCmd{
 		Handler:                  "cherry-pick",
 		ConflictResolvedContinue: true,
+		WorkspaceName:            "ws1",
 		SourceBranch:             "DWC/feature-one",
 		SourceDir:                "/worktrees/feature-one",
 		TargetDir:                "/repo",
 	})
 	// Assert
 	want := merge.Request{
-		Workspace:    "ws1",
+		Workspace:    "/ws/ws1",
+		Name:         "ws1",
 		SourceBranch: "DWC/feature-one",
 		SourceDir:    "/worktrees/feature-one",
 		TargetDir:    "/repo",
 	}
 	if len(m.resumed) != 1 || m.resumed[0] != want {
 		t.Fatalf("resume request = %+v, want %+v", m.resumed, want)
+	}
+}
+
+func TestMergeStateIsKeyedOnTheEnvelopeWorkspaceNotTheName(t *testing.T) {
+	// The defect this guards: keying merge state on the DISPLAY name filed a
+	// merge's rows under a workspace the SSM knew nothing else about, so its
+	// WorkspaceState carried no connectivity verdict and Emacs refused the
+	// frame. The merge landed on disk and its workspace was never torn down.
+	// Arrange
+	h, _, m, _ := newTestHandler(t)
+	// Act
+	_ = h.MergeWorkspace(context.Background(), "/Users/me/worktrees/feature-one", "r1", &frontendv1.MergeWorkspaceCmd{
+		Handler:       "cherry-pick",
+		WorkspaceName: "feature-one",
+		SourceBranch:  "DWC/feature-one",
+		SourceDir:     "/Users/me/worktrees/feature-one",
+		TargetDir:     "/repo",
+	})
+	// Assert — the state key is the cwd every other axis files under, and the
+	// name is carried separately for the tag.
+	if len(m.merged) != 1 {
+		t.Fatalf("merges = %d, want one", len(m.merged))
+	}
+	if got := m.merged[0].Workspace; got != "/Users/me/worktrees/feature-one" {
+		t.Errorf("state key = %q, want the envelope's cwd", got)
+	}
+	if got := m.merged[0].Name; got != "feature-one" {
+		t.Errorf("display name = %q, want the bare workspace name", got)
 	}
 }
 
@@ -957,7 +989,7 @@ func TestMergeRunnerSurfacesAnIncompleteRequest(t *testing.T) {
 	}
 	runner := mergeRunner{engine: eng}
 	// Act
-	got := runner.Merge(context.Background(), merge.Request{Workspace: "ws1", SourceDir: "/s", TargetDir: "/t"})
+	got := runner.Merge(context.Background(), merge.Request{Workspace: "/ws/ws1", Name: "ws1", SourceDir: "/s", TargetDir: "/t"})
 	// Assert — the Engine's own validation refuses it, never a silent no-op merge.
 	if got == nil || !strings.Contains(got.Error(), "SourceBranch is required") {
 		t.Fatalf("merge error = %v, want the incomplete request refused", got)
@@ -973,7 +1005,7 @@ func TestMergeResumeSurfacesAnIncompleteRequest(t *testing.T) {
 	}
 	runner := mergeRunner{engine: eng}
 	// Act
-	got := runner.Resume(context.Background(), merge.Request{Workspace: "ws1", SourceBranch: "b", SourceDir: "/s"})
+	got := runner.Resume(context.Background(), merge.Request{Workspace: "/ws/ws1", Name: "ws1", SourceBranch: "b", SourceDir: "/s"})
 	// Assert
 	if got == nil || !strings.Contains(got.Error(), "TargetDir is required") {
 		t.Fatalf("resume error = %v, want the incomplete request refused", got)
