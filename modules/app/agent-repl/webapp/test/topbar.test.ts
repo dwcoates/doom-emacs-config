@@ -99,6 +99,10 @@ function storeState(over: Partial<StoreState> = {}): StoreState {
     taskSummary: null,
     lastSeq: 0,
     renderState: null,
+    sessionConnectivity: null,
+    sessionStatus: null,
+    controllerGenerationId: "",
+    activeFaults: [],
     ...over,
   };
 }

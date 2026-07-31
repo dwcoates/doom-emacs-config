@@ -23,7 +23,7 @@ ordering is part of correctness.
 
 ## Schema
 
-The state history is append-only:
+The SSM keeps three append-only histories:
 
 ```sql
 CREATE TABLE workspace_state (
@@ -36,33 +36,57 @@ CREATE TABLE workspace_state (
   task_id TEXT,
   PRIMARY KEY (workspace, at)
 );
+
+CREATE TABLE session_connectivity (
+  workspace TEXT NOT NULL,
+  agent_repl_session_id TEXT NOT NULL,
+  controller_generation_id TEXT NOT NULL,
+  state TEXT NOT NULL,
+  cause_kind TEXT NOT NULL,
+  at INTEGER NOT NULL,
+  PRIMARY KEY (workspace, at)
+);
+
+CREATE TABLE session_fault (
+  workspace TEXT NOT NULL,
+  agent_repl_session_id TEXT NOT NULL,
+  controller_generation_id TEXT NOT NULL,
+  component TEXT NOT NULL,
+  fault_type TEXT NOT NULL,
+  impact TEXT NOT NULL,
+  open INTEGER NOT NULL,
+  cause_kind TEXT NOT NULL,
+  at INTEGER NOT NULL
+);
 ```
 
 `workspace` is an absolute directory. `at` is Unix milliseconds.
 
 ## Resolution model
 
-Resolved color is not one timeline. Independent axes contribute their latest
-row and SQL precedence chooses the winning candidate:
+Resolve two independent current facts:
 
-| Axis | States | Clear token |
-|---|---|---|
-| Agent | `thinking`, `permission`, `done`, `interrupted`, `ready`, `idle`, `dead`, `vendor_blocked` | none |
-| Wired | `severed`, `hibernated`, `starting`, and the legacy `dormant` | `wired` |
-| Backfill | `backfill_failed` | `backfill_ok` |
-| Degraded | `degraded` | `degraded_clear` |
-| Merge | `merge_conflict`, `merge_failed`, `merged`, `merging`, `merge_queued` | `merge_none` |
+- Session connectivity: `hibernated`, `connecting`, `operational`,
+  `degraded`, or `unavailable`.
+- Session status: `ready`, `thinking`, `permission`, `done`, `interrupted`,
+  `vendor-blocked`, or `monitoring`.
 
-An absent wired row resolves as `hibernated` — nothing was ever wired here, so
-there is no evidence of a live session AND none of a breakage. A clear token
-contributes no candidate for its axis.
+The latest `session_connectivity` row selects the current agent-repl session
+and controller generation. `degraded` is derived only when that generation's
+latest open fault windows include at least one `impact='connectivity'` record.
+A fault from any retired generation is historical evidence and cannot affect
+the current result. Feature, command, and turn-terminal faults remain
+diagnostic and do not change connectivity.
 
-The wired axis's closed half is TWO states, and it used to be one. `severed`
-means the substrate broke (a bring-up that could not be completed, a session controller that
-died on a terminal protocol error); `hibernated` means nothing is wrong (we
-SIGTERMed the shim on purpose to reclaim ~500MB, or a daemon has just booted).
-`dormant` is the PRE-SPLIT spelling and still appears in rows written before the
-split; it resolves as an alias for `severed` and must never be migrated away.
+Session status is resolved from the current session's lifecycle rows.
+`monitoring` is derived from live background-task count. Connectivity outranks
+status only for the primary color/word; status remains independently
+queryable.
+
+Rows using `wired`, `starting`, `severed`, `dormant`, `degraded`, and
+`degraded_clear` are legacy evidence. They are useful when reconstructing an
+older daemon's decisions, but they do not control current composite
+connectivity once a controller generation exists.
 
 Merge states outrank the color ladder:
 
@@ -72,17 +96,13 @@ Merge states outrank the color ladder:
 4. `merging`
 5. `merge_queued`
 
-The color precedence is:
+The primary projection is:
 
-1. Blue: `dead`, `degraded`, `severed` (and the legacy `dormant`),
-   `backfill_failed`, `starting`.
-2. Teal: `hibernated`. Ranked here — directly below blue and above purple —
-   rather than below green, because it makes the same actionability claim blue
-   does and only its reason is benign.
-3. Purple: `vendor_blocked`.
-4. Red: `thinking`.
-5. Yellow: `idle_async`, derived from live task count rather than stored.
-6. Green: `permission`, `done`, `interrupted`, `ready`, `idle`.
+1. `hibernated`: teal, asleep.
+2. `connecting`: blue, starting.
+3. `degraded`: blue, impaired, with the active connectivity fault summary.
+4. `unavailable`: blue, unavailable.
+5. `operational`: the session-status presentation.
 
 Read the current implementation in `daemon/internal/ssm/resolve.go` when the
 exact precedence is under investigation. The SQL query is authoritative.
@@ -95,61 +115,68 @@ Set the exact absolute workspace path:
 WS=/absolute/workspace
 ```
 
-Read recent transitions:
+Read connectivity lifecycle:
 
 ```sh
 sqlite3 -readonly ~/.cache/agent-repl/ssm/state.db "
   SELECT datetime(at/1000,'unixepoch','localtime') AS time,
-         state, cause_kind, cause_seq, session_id, task_id
-  FROM workspace_state
+         state, cause_kind, agent_repl_session_id,
+         controller_generation_id
+  FROM session_connectivity
   WHERE workspace='$WS'
   ORDER BY at DESC
   LIMIT 40;"
 ```
 
-Read the latest row on each axis rather than assuming the newest overall row
-explains the rendered result:
+Read every fault edge for the current generation:
 
 ```sh
 sqlite3 -readonly ~/.cache/agent-repl/ssm/state.db "
+  WITH current_generation AS (
+    SELECT controller_generation_id
+    FROM session_connectivity
+    WHERE workspace='$WS'
+    ORDER BY at DESC LIMIT 1
+  )
   SELECT datetime(at/1000,'unixepoch','localtime') AS time,
-         state, cause_kind, cause_seq, session_id
-  FROM workspace_state
+         component, fault_type, impact, open, cause_kind,
+         agent_repl_session_id, controller_generation_id
+  FROM session_fault
   WHERE workspace='$WS'
-    AND state IN (
-      'thinking','permission','done','interrupted','ready','idle','dead',
-      'vendor_blocked','wired','starting','severed','hibernated','dormant',
-      'backfill_failed',
-      'backfill_ok','degraded','degraded_clear','merge_conflict',
-      'merge_failed','merged','merging','merge_queued','merge_none'
+    AND controller_generation_id = (
+      SELECT controller_generation_id FROM current_generation
     )
   ORDER BY at DESC
   LIMIT 100;"
 ```
 
-Group the returned rows by axis and select the latest row for each axis. Apply
-the current SQL precedence. Record the winning row's timestamp, cause, and
-session.
+Then read the current session's status lifecycle from `workspace_state`.
+Group fault rows by `(component, fault_type)` and take the latest edge for each
+key. Record both resolved dimensions, the selected session/controller
+identity, and every open fault. Never summarize the result as a single opaque
+state.
 
 ## Diagnostic cautions
 
-- Start with the wired axis for a blue workspace.
+- Start with session connectivity for a blue workspace.
 - A newly visible color may expose an older winning row after a higher-priority
-  axis clears.
-- `vendor_blocked` is an agent-axis turn outcome rather than a permanent latch.
-- `idle_async` is derived and will not appear as a stored row.
-- Legacy rows for removed tokens may remain inert in old databases.
+  projection clears.
+- `vendor-blocked` is a session-status turn outcome rather than a permanent latch.
+- `monitoring` is derived and will not appear as a stored row.
+- A matching recovery must close the same generation, component, and fault
+  type. Do not let one component's close stand in for another's.
+- Legacy connectivity/degradation rows remain inert historical evidence.
 - `memory-state.el` does not decide the rendered color.
 
 ## Cross-check
 
-After identifying the winning row:
+After resolving the composite:
 
-1. Resolve its session identity.
-2. Read daemon logs for the row's `cause_kind` and `cause_seq`.
+1. Resolve both session and controller-generation identity.
+2. Read daemon logs for lifecycle and every active fault's `cause_kind`.
 3. Check readiness before comparing source behavior with runtime behavior.
 4. Audit whether the transition log contains the inputs and branch decision
-   needed to explain the row.
+   needed to explain both dimensions and each fault window.
 
 If the database has a row but no corresponding transition evidence, record a
 logging gap. If the user-visible state has no explainable winning row, record

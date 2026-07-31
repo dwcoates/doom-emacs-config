@@ -64,6 +64,8 @@ import type {
 import {
   ERROR_CLASSES,
   RenderState,
+  SessionConnectivity,
+  SessionStatus,
   UNSUPPORTED_SHAPES,
   type ConversationDelta,
   type ConversationItemArm,
@@ -78,6 +80,7 @@ import {
   type ProgressWindow,
   type QueueEntry,
   type QueueView,
+  type RuntimeFault,
   type SessionInitView,
   type SessionView,
   type TaskCatalog,
@@ -111,6 +114,23 @@ export type WebRenderState =
   | "severed"
   | "hibernated";
 
+export type WebSessionConnectivity =
+  | "hibernated"
+  | "connecting"
+  | "operational"
+  | "degraded"
+  | "unavailable";
+
+export type WebSessionStatus =
+  | "ready"
+  | "thinking"
+  | "permission"
+  | "done"
+  | "interrupted"
+  | "vendor_blocked"
+  | "monitoring"
+  | null;
+
 /** WorkspaceState → status/tail-row input. */
 export interface WorkspaceStatusInput {
   workspace: string;
@@ -124,6 +144,10 @@ export interface WorkspaceStatusInput {
   causeKind: string;
   causeSeq: number;
   atMs: number;
+  connectivity: WebSessionConnectivity;
+  sessionStatus: WebSessionStatus;
+  controllerGenerationId: string;
+  activeFaults: RuntimeFault[];
 }
 
 /** SessionView → topbar / session-info input. */
@@ -448,11 +472,16 @@ export class StateAdapter {
 
   private workspaceEffect(ws: WorkspaceState): AdapterEffect {
     const state = renderStateKeyword(ws.state);
+    const connectivity = connectivityKeyword(ws.connectivity);
+    const sessionStatus = sessionStatusKeyword(ws.status);
     this.log(
       "debug",
       `state-adapter: workspace state workspace=${ws.workspace} session=${ws.sessionId} ` +
+        `generation=${ws.controllerGenerationId || "none"} ` +
+        `connectivity=${connectivity} status=${sessionStatus ?? "none"} ` +
         `proto=${RenderState[ws.state]} keyword=${state} turn_active=${ws.turnActive} ` +
         `live_tasks=${String(ws.liveTaskCount)} merge_phase=${ws.mergePhase} ` +
+        `faults=${ws.activeFaults.map((fault) => `${fault.component}/${fault.faultType}`).join(",") || "none"} ` +
         `cause_kind=${ws.causeKind} cause_seq=${String(ws.causeSeq)} at_ms=${String(ws.atMs)}`,
     );
     return {
@@ -467,6 +496,10 @@ export class StateAdapter {
         causeKind: ws.causeKind,
         causeSeq: Number(ws.causeSeq),
         atMs: Number(ws.atMs),
+        connectivity,
+        sessionStatus,
+        controllerGenerationId: ws.controllerGenerationId,
+        activeFaults: ws.activeFaults,
       },
     };
   }
@@ -682,7 +715,7 @@ const RENDER_STATE_KEYWORD: Record<RenderState, WebRenderState | null> = {
   [RenderState.MERGED]: "merged",
   [RenderState.DEAD]: "dead",
   [RenderState.DEGRADED]: "degraded",
-  // THE CLOSED HALF OF THE WIRED AXIS IS TWO STATES, and it used to be one. A
+  // THE CLOSED HALF OF THE legacy connectivity projection IS TWO STATES, and it used to be one. A
   // single DORMANT meant both "asleep on purpose, to reclaim ~500MB" and "the
   // backend substrate is broken", so the most ordinary event in the system
   // rendered identically to a dead shim. Severed keeps the blue and the field
@@ -697,6 +730,44 @@ function renderStateKeyword(state: RenderState): WebRenderState {
     throw new Error(`state-adapter: WorkspaceState has unrenderable RenderState ${state}`);
   }
   return kw;
+}
+
+const CONNECTIVITY_KEYWORD: Record<SessionConnectivity, WebSessionConnectivity | null> = {
+  [SessionConnectivity.UNSPECIFIED]: null,
+  [SessionConnectivity.HIBERNATED]: "hibernated",
+  [SessionConnectivity.CONNECTING]: "connecting",
+  [SessionConnectivity.OPERATIONAL]: "operational",
+  [SessionConnectivity.DEGRADED]: "degraded",
+  [SessionConnectivity.UNAVAILABLE]: "unavailable",
+};
+
+function connectivityKeyword(connectivity: SessionConnectivity): WebSessionConnectivity {
+  const keyword = CONNECTIVITY_KEYWORD[connectivity];
+  if (keyword === null || keyword === undefined) {
+    throw new Error(
+      `state-adapter: WorkspaceState has unrenderable SessionConnectivity ${connectivity}`,
+    );
+  }
+  return keyword;
+}
+
+const SESSION_STATUS_KEYWORD: Record<SessionStatus, WebSessionStatus> = {
+  [SessionStatus.UNSPECIFIED]: null,
+  [SessionStatus.READY]: "ready",
+  [SessionStatus.THINKING]: "thinking",
+  [SessionStatus.PERMISSION]: "permission",
+  [SessionStatus.DONE]: "done",
+  [SessionStatus.INTERRUPTED]: "interrupted",
+  [SessionStatus.VENDOR_BLOCKED]: "vendor_blocked",
+  [SessionStatus.MONITORING]: "monitoring",
+};
+
+function sessionStatusKeyword(status: SessionStatus): WebSessionStatus {
+  const keyword = SESSION_STATUS_KEYWORD[status];
+  if (keyword === undefined) {
+    throw new Error(`state-adapter: WorkspaceState has unrenderable SessionStatus ${status}`);
+  }
+  return keyword;
 }
 
 /**

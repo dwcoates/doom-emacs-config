@@ -14,7 +14,7 @@
  * whether anything visible changed; the caller schedules the render.
  */
 import type { CounterEntry } from "./counter-menu.js";
-import type { ErrorClass } from "./frontend-proto.js";
+import type { ErrorClass, RuntimeFault } from "./frontend-proto.js";
 import type {
   AdapterEffect,
   ProgressInput,
@@ -24,6 +24,8 @@ import type {
   ToolProgressInput,
   TypingReveal,
   WebRenderState,
+  WebSessionConnectivity,
+  WebSessionStatus,
   WorkspaceStatusInput,
 } from "./state-adapter.js";
 import { applyStreamDelta, blockKey, insertBySeq, settleStreamedBlock } from "./streaming.js";
@@ -497,6 +499,14 @@ export interface StoreState {
    * the footer of an already-green tab.
    */
   renderState: WebRenderState | null;
+  /** Daemon-resolved usability of the current session-controller generation. */
+  sessionConnectivity: WebSessionConnectivity | null;
+  /** Daemon-resolved activity retained independently of connectivity. */
+  sessionStatus: WebSessionStatus;
+  /** Opaque identity of the session controller whose connectivity is current. */
+  controllerGenerationId: string;
+  /** Current generation's active explanatory fault windows. */
+  activeFaults: RuntimeFault[];
 }
 
 function initialState(): StoreState {
@@ -524,6 +534,10 @@ function initialState(): StoreState {
     taskSummary: null,
     lastSeq: 0,
     renderState: null,
+    sessionConnectivity: null,
+    sessionStatus: null,
+    controllerGenerationId: "",
+    activeFaults: [],
   };
 }
 
@@ -744,11 +758,17 @@ export class ConversationStore {
   private applyWorkspaceState(ws: WorkspaceStatusInput): boolean {
     const s = this.state;
     const previousState = s.renderState;
+    const previousConnectivity = s.sessionConnectivity;
+    const previousStatus = s.sessionStatus;
     const previousActive = s.turnInFlight;
     if (ws.sessionId !== "") s.sessionId = ws.sessionId;
     // THE workspace's phase, kept so the footer reads the same authority the
     // tab bar does.
     s.renderState = ws.state;
+    s.sessionConnectivity = ws.connectivity;
+    s.sessionStatus = ws.sessionStatus;
+    s.controllerGenerationId = ws.controllerGenerationId;
+    s.activeFaults = ws.activeFaults;
     const wasActive = s.turnInFlight;
     s.turnInFlight = ws.turnActive;
     if (ws.turnActive && !wasActive) {
@@ -760,7 +780,11 @@ export class ConversationStore {
       "info",
       `workspace state adopted workspace=${ws.workspace} session=${ws.sessionId} ` +
         `state=${previousState ?? "none"}->${ws.state} ` +
+        `connectivity=${previousConnectivity ?? "none"}->${ws.connectivity} ` +
+        `status=${previousStatus ?? "none"}->${ws.sessionStatus ?? "none"} ` +
+        `generation=${ws.controllerGenerationId || "none"} ` +
         `turn_active=${previousActive}->${ws.turnActive} live_tasks=${ws.liveTaskCount} ` +
+        `faults=${ws.activeFaults.map((fault) => `${fault.component}/${fault.faultType}`).join(",") || "none"} ` +
         `merge_phase=${ws.mergePhase} cause_kind=${ws.causeKind} ` +
         `cause_seq=${ws.causeSeq} at_ms=${ws.atMs}`,
     );

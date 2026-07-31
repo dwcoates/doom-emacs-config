@@ -119,7 +119,7 @@ func TestPermissionCloseRestoresTurnActive(t *testing.T) {
 }
 
 func TestPermissionCloseWithNoLiveTurnBeneathLeavesTheAxis(t *testing.T) {
-	// Arrange — a question asked over a SETTLED agent axis. The question
+	// Arrange — a question asked over a SETTLED session-status lifecycle. The question
 	// travels the direct shim control path and its turn's TurnStarted travels
 	// the store, so a question can reach this log while the newest agent row is
 	// still the PREVIOUS turn's end. There is then no `thinking` to restore.
@@ -157,7 +157,7 @@ func TestTurnEndedDuringAPendingPermissionWins(t *testing.T) {
 
 	// Assert — the later row wins; the question died with its turn.
 	if got := mustCurrent(t, m, "ws1").GetState(); got != frontendv1.RenderState_RENDER_STATE_DONE {
-		t.Fatalf("state = %s, want DONE (the turn end is the later agent-axis row)", renderName(got))
+		t.Fatalf("state = %s, want DONE (the turn end is the later session-status lifecycle row)", renderName(got))
 	}
 }
 
@@ -240,10 +240,8 @@ func TestReopenReleasesAPersistedPendingPermission(t *testing.T) {
 		t.Fatalf("reopen: %v", err)
 	}
 	t.Cleanup(func() { reopened.Close() })
-	// The restart also marked the workspace hibernated — nothing is wired to a
-	// daemon that has just started — which would hide the agent axis this test
-	// is asking after. Re-wiring is what Phase B's reattach sweep will do.
-	wireAll(t, reopened, fakeResolver{"s1": "ws1"})
+	// A new controller generation re-establishes the session after restart.
+	connectOperational(t, reopened, "ws1", "s1", "generation-reopen")
 
 	// Assert — the rendezvous did not survive, so neither does the row; the
 	// turn beneath it does, because the shim did not die with the daemon.
