@@ -96,6 +96,18 @@ the daemon may in fact have performed."
 (defvar agent-repl--uds-process nil
   "The live frontend UDS `process' object, or nil when disconnected.")
 
+(defvar agent-repl--uds-connection-state 'failed
+  "Frontend UDS lifecycle state: `dialing', `open', or `failed'.")
+
+(defvar agent-repl--uds-connect-started-at nil
+  "Monotonic timestamp for the active UDS dial, or nil without one.")
+
+(defvar agent-repl--uds-outbound-queue nil
+  "FIFO plists retained until a dial reaches `open'.
+Each entry carries `:request-id', `:field', `:workspace', `:bytes',
+`:enqueued-at', and encoded `:frame' so completion and failure records retain
+the exact command identity.")
+
 (defvar agent-repl--uds-read-accumulator ""
   "Bytes received on the UDS link not yet split into complete frames.
 The daemon frames each protojson message with a trailing newline; a
@@ -104,6 +116,11 @@ is retained here until its newline arrives.")
 
 (defvar agent-repl--uds-reconnect-timer nil
   "The pending reconnect timer, or nil.  Reset via `agent-repl--uds-run-timer'.")
+
+(defcustom agent-repl-uds-probe-timeout 2.0
+  "Seconds a callback-based UDS probe may remain unresolved."
+  :type 'number
+  :group 'agent-repl)
 
 (defvar agent-repl--uds-request-id-counter 0
   "Monotonic counter feeding `agent-repl--uds-generate-request-id'.")
@@ -293,37 +310,72 @@ this module's landing report) so the test guard installs for it."
    :family 'local
    :service path
    :coding 'utf-8-unix
-   :nowait nil
+   :nowait t
    :noquery t
    :filter filter
    :sentinel sentinel))
 
-(defun agent-repl--uds-probe (path)
-  "External boundary: open a THROWAWAY connection to the UDS at PATH.
-Does nothing but dial and immediately close, so the only thing its return
-proves is that something is LISTENING at PATH.  Signals (like
-`make-network-process') when nothing is; callers convert that to a
-boolean.  Deliberately separate from `agent-repl--uds-connect': it must
-not disturb `agent-repl--uds-process', install handlers, or arm the
-reconnect timer, because the liveness probes in daemon.el ask the
-question repeatedly (including while waiting for a daemon to EXIT).
+(defun agent-repl--uds-probe-async (path sentinel)
+  "External boundary: asynchronously probe UDS PATH with SENTINEL.
+Returns a process in `dialing' state.  The caller owns interpretation,
+cleanup, and timeouts.  This wrapper does only the external dial and is
+registered in `agent-repl--external-boundary-functions'."
+  (make-network-process
+   :name "agent-repl-frontend-uds-probe"
+   :family 'local
+   :service path
+   :nowait t
+   :noquery t
+   :sentinel sentinel))
 
-AGENTS.md external-boundary wrapper: registered in
-`agent-repl--external-boundary-functions'."
+(defun agent-repl--uds-probe (path)
+  "External boundary: synchronously probe PATH for legacy lifecycle callers.
+This compatibility boundary is retained only until daemon lifecycle callers
+migrate to `agent-repl-uds-probe-async'."
   (delete-process
-   (make-network-process
-    :name "agent-repl-frontend-uds-probe"
-    :family 'local
-    :service path
-    :nowait nil
-    :noquery t))
+   (make-network-process :name "agent-repl-frontend-uds-probe"
+                         :family 'local :service path :nowait nil :noquery t))
   t)
 
 ;;;; ---- Connection lifecycle --------------------------------------------
 
 (defun agent-repl--uds-connected-p ()
   "Return non-nil iff the frontend UDS link is live."
-  (process-live-p agent-repl--uds-process))
+  (and (eq agent-repl--uds-connection-state 'open)
+       (process-live-p agent-repl--uds-process)))
+
+(defun agent-repl-uds-probe-async (path on-open on-failure)
+  "Probe PATH asynchronously and call ON-OPEN or ON-FAILURE exactly once.
+The returned probe process is deleted by this owner after its sentinel settles
+or its owned timeout fires.  Callbacks run only after cleanup so callers
+cannot retain a stale probe socket."
+  (let ((settled nil) (timer nil) proc)
+    (cl-labels
+        ((finish (outcome detail)
+           (unless settled
+             (setq settled t)
+             (when (timerp timer) (cancel-timer timer))
+             (when (process-live-p proc) (delete-process proc))
+             (agent-repl--log nil
+                              "uds-probe: complete path=%s outcome=%s detail=%S"
+                              path outcome detail)
+             (if (eq outcome 'open)
+                 (funcall on-open)
+               (funcall on-failure detail))))
+         (sentinel (process event)
+           (cond
+            ((string-match-p "open" event) (finish 'open event))
+            ((not (process-live-p process)) (finish 'failed event)))))
+      (agent-repl--log nil "uds-probe: start path=%s timeout=%.3fs" path agent-repl-uds-probe-timeout)
+      (condition-case err
+          (setq proc (agent-repl--uds-probe-async path #'sentinel))
+        (error (finish 'failed (error-message-string err))))
+      (unless settled
+        (setq timer
+              (agent-repl--uds-run-timer
+               agent-repl-uds-probe-timeout
+               (lambda () (finish 'timeout "probe timeout")))))
+      proc)))
 
 (defun agent-repl--uds-socket-live-p (&optional path)
   "Return non-nil when a daemon is listening on the frontend UDS at PATH.
@@ -378,8 +430,10 @@ Returns the process on success, nil on a failed dial."
                      sock "agent-repl-frontend-uds"
                      #'agent-repl--uds-filter
                      #'agent-repl--uds-sentinel)))
-          (setq agent-repl--uds-process proc)
-          (agent-repl--log nil "uds-connect: connected proc=%s status=%s"
+          (setq agent-repl--uds-process proc
+                agent-repl--uds-connection-state 'dialing
+                agent-repl--uds-connect-started-at (float-time))
+          (agent-repl--log nil "uds-connect: start proc=%s status=%s state=dialing"
                            (process-name proc) (process-status proc))
           ;; A fresh connection is a fresh command plane: whatever went
           ;; unacknowledged belonged to the socket that is gone.  Any command
@@ -388,7 +442,9 @@ Returns the process on success, nil on a failed dial."
           (agent-repl--uds-link-restore "reconnect" nil)
           proc)
       (error
-       (setq agent-repl--uds-process nil)
+       (setq agent-repl--uds-process nil
+             agent-repl--uds-connection-state 'failed
+             agent-repl--uds-connect-started-at nil)
        (agent-repl--log nil
                         (concat "uds-connect: FAILED dialing %s: %S "
                                 "readiness=%s action=%s")
@@ -422,6 +478,9 @@ Returns the process on success, nil on a failed dial."
                      (process-name agent-repl--uds-process))
     (delete-process agent-repl--uds-process))
   (setq agent-repl--uds-process nil
+        agent-repl--uds-connection-state 'failed
+        agent-repl--uds-connect-started-at nil
+        agent-repl--uds-outbound-queue nil
         agent-repl--uds-read-accumulator ""))
 
 ;;;; ---- Reconnect scheduling (injectable timer seam) --------------------
@@ -451,12 +510,35 @@ the accumulator (a partial frame across a disconnect is unrecoverable)
 and reconnects (design §4.4)."
   (agent-repl--log nil "uds-sentinel: proc=%s event=%s"
                    (process-name proc) (string-trim event))
-  (unless (process-live-p proc)
+  (cond
+   ((and (eq proc agent-repl--uds-process) (string-match-p "open" event))
+    (let ((elapsed (- (float-time) agent-repl--uds-connect-started-at))
+          (queued agent-repl--uds-outbound-queue))
+      (setq agent-repl--uds-connection-state 'open
+            agent-repl--uds-connect-started-at nil
+            agent-repl--uds-outbound-queue nil)
+      (agent-repl--log nil "uds-connect: complete proc=%s elapsed=%.3fs queued=%d"
+                       (process-name proc) elapsed (length queued))
+      (dolist (entry queued)
+        (agent-repl--uds-write-frame proc entry))))
+   ((not (process-live-p proc))
     (when (eq proc agent-repl--uds-process)
-      (setq agent-repl--uds-process nil))
-    (setq agent-repl--uds-read-accumulator "")
+      (let ((elapsed (and agent-repl--uds-connect-started-at
+                          (- (float-time) agent-repl--uds-connect-started-at)))
+            (queued agent-repl--uds-outbound-queue))
+        (setq agent-repl--uds-process nil
+              agent-repl--uds-connection-state 'failed
+              agent-repl--uds-connect-started-at nil
+              agent-repl--uds-outbound-queue nil)
+        (dolist (entry queued)
+          (agent-repl--uds-handle-command-ack
+           (list :requestId (plist-get entry :request-id)
+                 :ok nil :error "UDS dial failed before command delivery")))
+        (agent-repl--log nil "uds-connect: failed proc=%s elapsed=%S event=%s"
+                         (process-name proc) elapsed (string-trim event))))
+        (setq agent-repl--uds-read-accumulator "")
     (agent-repl--log nil "uds-sentinel: link down — scheduling reconnect")
-    (agent-repl--uds-schedule-reconnect)))
+    (agent-repl--uds-schedule-reconnect))))
 
 ;;;; ---- Inbound framing + decode ----------------------------------------
 
@@ -578,6 +660,25 @@ not silently dropped.  Returns the handler's value, or nil."
 
 ;;;; ---- Outbound commands -----------------------------------------------
 
+(defun agent-repl--uds-write-frame (proc entry)
+  "Write queued ENTRY to open PROC and log completion or owned failure."
+  (let ((ws (agent-repl--frontend-ws-name (plist-get entry :workspace)))
+        (started (float-time)))
+    (condition-case err
+        (progn
+          (process-send-string proc (plist-get entry :frame))
+          (agent-repl--log ws "uds-send-command: complete field=%s request-id=%s elapsed=%.3fs queued-for=%.3fs"
+                           (plist-get entry :field) (plist-get entry :request-id)
+                           (- (float-time) started)
+                           (- started (plist-get entry :enqueued-at))))
+      (error
+       (agent-repl--log ws "uds-send-command: FAILED field=%s request-id=%s error=%s"
+                        (plist-get entry :field) (plist-get entry :request-id)
+                        (error-message-string err))
+       (agent-repl--uds-handle-command-ack
+        (list :requestId (plist-get entry :request-id) :ok nil
+              :error (error-message-string err)))))))
+
 (defun agent-repl--uds-generate-request-id ()
   "Generate a unique `request_id' for an outbound `FrontendCommand'.
 Combines a monotonic counter with a random suffix.  Isolated so tests
@@ -596,15 +697,16 @@ message object `{}' (for `closeWorkspace'/`openWorkspace').  WORKSPACE,
 when non-nil, is set as the frame's `workspace' field.  PROCESS defaults
 to the live connection.
 
-Fails loudly (`user-error' + log) when there is no live connection or
-FIELD is unknown — no queuing, no silent drop.  Returns the generated
-`request_id'."
+Fails loudly (`user-error' + log) when there is no dialing or live connection
+or FIELD is unknown.  Frames submitted while `dialing' are queued and only the
+connection sentinel flushes them after `open'.  Returns `request_id'."
   (let ((proc (or process agent-repl--uds-process))
         ;; WORKSPACE goes ON THE WIRE verbatim below — the daemon routes by
         ;; cwd — so it must not be rewritten.  LOG-WORKSPACE is a separate
         ;; binding used only for the log sink.
         (log-workspace (agent-repl--frontend-ws-name workspace)))
-    (unless (process-live-p proc)
+    (unless (and (process-live-p proc)
+                 (memq agent-repl--uds-connection-state '(dialing open)))
       (agent-repl--log log-workspace
                        "uds-send-command: NO live connection (field=%s ws=%s) — aborting"
                        field workspace)
@@ -623,10 +725,21 @@ FIELD is unknown — no queuing, no silent drop.  Returns the generated
                           (when workspace (list :workspace workspace))
                           (list (intern (concat ":" field)) value)))
            (json (json-encode frame)))
-      (agent-repl--log log-workspace
-                       "uds-send-command: field=%s request-id=%s ws=%s bytes=%d"
-                       field request-id workspace (length json))
-      (process-send-string proc (concat json "\n"))
+      (let* ((frame-text (concat json "\n"))
+             (entry (list :request-id request-id :field field :workspace workspace
+                          :bytes (length json) :enqueued-at (float-time)
+                          :frame frame-text)))
+        (agent-repl--log log-workspace
+                         "uds-send-command: start field=%s request-id=%s ws=%s bytes=%d state=%s"
+                         field request-id workspace (length json)
+                         agent-repl--uds-connection-state)
+        (if (eq agent-repl--uds-connection-state 'open)
+            (agent-repl--uds-write-frame proc entry)
+          (setq agent-repl--uds-outbound-queue
+                (append agent-repl--uds-outbound-queue (list entry)))
+          (agent-repl--log log-workspace
+                           "uds-send-command: queued field=%s request-id=%s queue-depth=%d"
+                           field request-id (length agent-repl--uds-outbound-queue))))
       request-id)))
 
 ;;;; ---- Command-ack tracking --------------------------------------------
