@@ -181,6 +181,17 @@ func TestPushForwarderDropsUntilTargetSet(t *testing.T) {
 	}
 }
 
+func TestPushForwarderNamesADroppedSynchronousProgressFrame(t *testing.T) {
+	var logged string
+	f := &PushForwarder{Logf: func(format string, args ...any) { logged = fmt.Sprintf(format, args...) }}
+
+	f.PushProgressView(&frontendv1.ProgressView{Workspace: "/w"})
+
+	if !strings.Contains(logged, "progress-view") {
+		t.Fatalf("pre-target progress log = %q, want frame identity", logged)
+	}
+}
+
 func TestPushForwarderForwardsAfterTargetSet(t *testing.T) {
 	// Arrange — a real frontend.Server target with one connected client.
 	var logged int

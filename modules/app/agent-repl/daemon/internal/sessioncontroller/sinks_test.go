@@ -29,6 +29,7 @@ type fakePusher struct {
 	inits      []*frontendv1.SessionInitView
 	heartbeats []*frontendv1.HeartbeatView
 	queues     []*frontendv1.QueueView
+	progress   []*frontendv1.ProgressView
 }
 
 func (p *fakePusher) PushConversationDelta(c *frontendv1.ConversationDelta) {
@@ -66,6 +67,12 @@ func (p *fakePusher) PushHeartbeatView(h *frontendv1.HeartbeatView) {
 func (p *fakePusher) PushQueueView(q *frontendv1.QueueView) {
 	p.mu.Lock()
 	p.queues = append(p.queues, q)
+	p.mu.Unlock()
+}
+func (p *fakePusher) PushProgressView(v *frontendv1.ProgressView) {
+	p.mu.Lock()
+	p.trace = append(p.trace, "progress")
+	p.progress = append(p.progress, v)
 	p.mu.Unlock()
 }
 
@@ -289,7 +296,7 @@ func (f *fakeApplier) MarkPromptAccepted(
 		publish(&frontendv1.WorkspaceState{
 			Workspace:  workspace,
 			SessionId:  sessionID,
-			State:      frontendv1.RenderState_RENDER_STATE_THINKING,
+			State:      frontendv1.RenderState_RENDER_STATE_SUBMITTING,
 			TurnActive: true,
 			CauseKind:  "prompt_accepted",
 		})
@@ -739,8 +746,10 @@ func (p *fakeProgress) Apply(workspace string, ev *corev1.Event) error {
 	p.applied = append(p.applied, ev)
 	return p.err
 }
-func (p *fakeProgress) SetCounts(string, int64, int64)  {}
-func (p *fakeProgress) NoteTurnAccepted(string, string) {}
+func (p *fakeProgress) SetCounts(string, int64, int64) {}
+func (p *fakeProgress) NoteTurnAccepted(workspace, sessionID string) *frontendv1.ProgressView {
+	return &frontendv1.ProgressView{Workspace: workspace, SessionId: sessionID}
+}
 
 // NoteTurnRejected records the clock closures a failed submit produced, so a
 // test can prove the footer was not left counting against a turn that never ran.

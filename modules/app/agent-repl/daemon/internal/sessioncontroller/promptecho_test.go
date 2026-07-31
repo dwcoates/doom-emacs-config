@@ -3,6 +3,7 @@ package sessioncontroller
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -104,8 +105,8 @@ func TestPromptThinkingPublicationPrecedesReceipt(t *testing.T) {
 	h.push.mu.Lock()
 	trace := append([]string(nil), h.push.trace...)
 	h.push.mu.Unlock()
-	want := []string{"workspace:RENDER_STATE_THINKING", "conversation"}
-	if len(trace) != len(want) || trace[0] != want[0] || trace[1] != want[1] {
+	want := []string{"progress", "workspace:RENDER_STATE_SUBMITTING", "conversation"}
+	if !reflect.DeepEqual(trace, want) {
 		t.Fatalf("frontend push trace = %v, want %v", trace, want)
 	}
 }
