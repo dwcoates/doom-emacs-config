@@ -256,7 +256,7 @@ bundle would never be refetched."
       (cl-letf (((symbol-function 'agent-repl--frontend-make-webview-buffer)
                  (agent-repl-test--fake-webview-factory 'agent-repl-test--urls))
                 ((symbol-function 'agent-repl--frontend-ensure-session)
-                 (lambda (_ws) "s_1")))
+                 (lambda (_ws &optional _purpose) "s_1")))
         (let ((old (agent-repl--frontend-ensure-webview-buffer
                     "ws1" "s_1" "http://x/?session=s_1")))
           ;; Act
@@ -276,7 +276,7 @@ bundle would never be refetched."
       (cl-letf (((symbol-function 'agent-repl--frontend-make-webview-buffer)
                  (agent-repl-test--fake-webview-factory 'agent-repl-test--urls))
                 ((symbol-function 'agent-repl--frontend-ensure-session)
-                 (lambda (_ws) "s_1")))
+                 (lambda (_ws &optional _purpose) "s_1")))
         ;; Act
         (let ((result (agent-repl--frontend-remount-webview "ws1")))
           ;; Assert
@@ -293,7 +293,7 @@ bundle would never be refetched."
         (cl-letf (((symbol-function 'agent-repl--frontend-make-webview-buffer)
                    (agent-repl-test--fake-webview-factory 'agent-repl-test--urls))
                   ((symbol-function 'agent-repl--frontend-ensure-session)
-                   (lambda (_ws) "s_x"))
+                   (lambda (_ws &optional _purpose) "s_x"))
                   ((symbol-function 'agent-repl--live-ws-names)
                    (lambda () '("ws1" "ws2"))))
           (agent-repl--frontend-ensure-webview-buffer "ws1" "s_x" "http://x/?session=s_x")
@@ -321,7 +321,7 @@ bundle would never be refetched."
       (cl-letf (((symbol-function 'agent-repl--frontend-make-webview-buffer)
                  (agent-repl-test--fake-webview-factory 'agent-repl-test--urls))
                 ((symbol-function 'agent-repl--frontend-ensure-session)
-                 (lambda (_ws) "s_1"))
+                 (lambda (_ws &optional _purpose) "s_1"))
                 ((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1")))
         (let ((old (agent-repl--frontend-ensure-webview-buffer
                     "ws1" "s_1" "http://x/?session=s_1")))
@@ -1106,7 +1106,7 @@ exact failure seen live in the fresh instance."
                 ((symbol-function 'agent-repl--ws-current-name)
                  (lambda () "ws1"))
                 ((symbol-function 'agent-repl--frontend-ensure-session)
-                 (lambda (ws) (setq ensured ws) "s_42"))
+                 (lambda (ws &optional _purpose) (setq ensured ws) "s_42"))
                 ((symbol-function 'agent-repl--frontend-ensure-webview-buffer)
                  (lambda (_ws id url)
                    (should (equal id "s_42"))
@@ -1130,7 +1130,7 @@ The webapp status bar renders it in its topbar."
     (cl-letf (((symbol-function 'agent-repl--frontend-xwidget-available-p)
                (lambda () t))
               ((symbol-function 'agent-repl--frontend-ensure-session)
-               (lambda (_ws) "s_42"))
+               (lambda (_ws &optional _purpose) "s_42"))
               ((symbol-function 'agent-repl--frontend-ensure-webview-buffer)
                (lambda (_ws _id url)
                  ;; Assert — encoded basename rides after composer=0.
@@ -1147,7 +1147,7 @@ The webapp status bar renders it in its topbar."
     (cl-letf (((symbol-function 'agent-repl--frontend-xwidget-available-p)
                (lambda () t))
               ((symbol-function 'agent-repl--frontend-ensure-session)
-               (lambda (_ws) "s_42"))
+               (lambda (_ws &optional _purpose) "s_42"))
               ((symbol-function 'agent-repl--frontend-ensure-webview-buffer)
                (lambda (_ws _id url)
                  (should-not (string-match-p "parent_ws" url))
@@ -1183,7 +1183,7 @@ The webapp status bar renders it in its topbar."
   (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
     (let ((ensured nil))
       (cl-letf (((symbol-function 'agent-repl--frontend-ensure-session)
-                 (lambda (ws) (setq ensured ws) "s_42")))
+                 (lambda (ws &optional _purpose) (setq ensured ws) "s_42")))
         ;; Act
         (agent-repl--gui-boot "ws1" "/w" :bare-metal)
         ;; Assert
@@ -1198,7 +1198,7 @@ would evict the caller's windows."
     (let ((displayed nil)
           (mounted nil))
       (cl-letf (((symbol-function 'agent-repl--frontend-ensure-session)
-                 (lambda (_ws) "s_42"))
+                 (lambda (_ws &optional _purpose) "s_42"))
                 ((symbol-function 'agent-repl--frontend-ensure-webview-buffer)
                  (lambda (&rest _) (setq mounted t) 'fake-buffer))
                 ((symbol-function 'agent-repl--frontend-display-webview)
@@ -1216,7 +1216,7 @@ state at all until its agent answered."
   ;; Arrange
   (agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
     (cl-letf (((symbol-function 'agent-repl--frontend-ensure-session)
-               (lambda (_ws) "s_42")))
+               (lambda (_ws &optional _purpose) "s_42")))
       ;; Act
       (agent-repl--gui-boot "ws1" "/w" :bare-metal)
       ;; Assert

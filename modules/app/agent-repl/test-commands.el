@@ -490,7 +490,7 @@ file into the fake project dir."
       (agent-repl--ws-put "ws-gui" :frontend 'gui)
       (agent-repl-cmd-test--with-establish-stubs
         (cl-letf (((symbol-function 'agent-repl--frontend-ensure-session)
-                   (lambda (ws) (setq ensured ws))))
+                   (lambda (ws &optional _purpose) (setq ensured ws))))
           (agent-repl--establish-workspace "ws-gui" "/tmp/ws-gui")
           (should (equal ensured "ws-gui")))))))
 
@@ -502,7 +502,7 @@ file into the fake project dir."
       (agent-repl--ws-put "ws-gui" :frontend-session-id "s_live")
       (agent-repl-cmd-test--with-establish-stubs
         (cl-letf (((symbol-function 'agent-repl--frontend-ensure-session)
-                   (lambda (ws) (setq ensured ws))))
+                   (lambda (ws &optional _purpose) (setq ensured ws))))
           (agent-repl--establish-workspace "ws-gui" "/tmp/ws-gui")
           (should-not ensured))))))
 
@@ -518,7 +518,7 @@ rather than staying pinned to the vterm it happened to boot once."
       ;; workspace whose save carried no :frontend-explicit marker).
       (agent-repl-cmd-test--with-establish-stubs
         (cl-letf (((symbol-function 'agent-repl--frontend-ensure-session)
-                   (lambda (ws) (setq ensured ws))))
+                   (lambda (ws &optional _purpose) (setq ensured ws))))
           ;; Act
           (agent-repl--establish-workspace "ws-old" "/tmp/ws-old")
           ;; Assert
