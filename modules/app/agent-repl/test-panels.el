@@ -1100,7 +1100,7 @@ Selection-handling stays orthogonal to the always-close hide path."
           (events nil))
       (unwind-protect
           (cl-letf (((symbol-function 'agent-repl--frontend-ensure-session)
-                     (lambda (ws)
+                     (lambda (ws &optional _purpose)
                        (push (list :wake ws) events)
                        "session-1"))
                     ((symbol-function 'agent-repl--frontend-sync-webview)
@@ -1126,7 +1126,7 @@ Selection-handling stays orthogonal to the always-close hide path."
     (let ((synced nil)
           (displayed nil))
       (cl-letf (((symbol-function 'agent-repl--frontend-ensure-session)
-                 (lambda (_ws) (error "wake failed")))
+                 (lambda (_ws &optional _purpose) (error "wake failed")))
                 ((symbol-function 'agent-repl--frontend-sync-webview)
                  (lambda (&rest _) (setq synced t)))
                 ((symbol-function 'agent-repl--frontend-display-webview)
