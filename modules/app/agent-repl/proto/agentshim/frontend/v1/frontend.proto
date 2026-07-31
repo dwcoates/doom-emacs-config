@@ -330,6 +330,19 @@ message WorkspaceState {
   SessionStatus status = 11;
   string controller_generation_id = 12;
   repeated RuntimeFault active_faults = 13;
+  // Merge-queue facts. `merge_phase` (6) says WHAT this workspace's merge is
+  // doing; the two fields below say WHERE it sits among the other workspaces
+  // contending for the same repository, which no per-workspace row can carry.
+  //
+  // The queue is keyed by REPOSITORY, not by worktree: sibling worktrees of
+  // one repo cherry-pick into the same target and therefore share one queue.
+  int32 merge_queue_position = 14;  // 1-based; 0 when not enqueued
+  int32 merge_queue_depth = 15;     // total entries on this repo's queue
+  // Whether merge.Coordinator holds the exclusivity lease on this workspace's
+  // shim. While held, USER prompting is blocked (the merge owns the session)
+  // and every conversation item the session produces carries
+  // CONVERSATION_SOURCE_MERGE.
+  bool merge_lease_held = 16;
 }
 
 message SessionView {
@@ -444,6 +457,26 @@ message ConversationDelta {
   uint64 through_seq = 4;  // frontends persist this for reconnect resync
 }
 
+// WHO drove the turn that produced a conversation item.
+//
+// The merge coordinator borrows a workspace's own shim to resolve a merge
+// conflict (the session holding the full context of the work is the one best
+// equipped to resolve it), so a session can emit a full turn the user never
+// prompted. That provenance is a durable FACT recorded on every item, not a
+// rendering hint: frontends decide independently what to do with it, and the
+// decision can change without another wire change.
+enum ConversationSource {
+  // Never set by the daemon. proto3 reserves 0 for "the field was not
+  // populated", and every item the daemon builds sets one of the arms below,
+  // so a receiver seeing UNSPECIFIED is looking at a malformed frame and must
+  // reject it loudly rather than assume USER.
+  CONVERSATION_SOURCE_UNSPECIFIED = 0;
+  // An ordinary turn: the user prompted it, or it followed from one.
+  CONVERSATION_SOURCE_USER = 1;
+  // A turn merge.Coordinator drove under its lease (conflict resolution).
+  CONVERSATION_SOURCE_MERGE = 2;
+}
+
 // One curated conversation addition: a thin envelope around the typed
 // data.v1/core.v1 payload. Consumers reconcile by uuid (permission items
 // use the permission request_id as their uuid).
@@ -459,6 +492,10 @@ message ConversationItem {
   string uuid = 1;
   int64 ts_ms = 2;
   string request_id = 3;  // vendor API request correlation, "" when absent
+  // Provenance. ALWAYS set (see ConversationSource): persisted with the item
+  // so a resync or transcript replay reproduces the same verdict instead of
+  // re-deriving it from state that has since moved on.
+  ConversationSource source = 4;
   oneof item {
     agentshim.data.v1.ApiAssistantMessage assistant_message = 10;
     agentshim.data.v1.ApiUserMessage user_message = 11;
