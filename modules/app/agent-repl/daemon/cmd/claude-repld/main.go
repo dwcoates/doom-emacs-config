@@ -599,7 +599,6 @@ func main() {
 		Health:            controller,
 		Restarts:          controller,
 		DaemonHealth:      ready,
-		MergeDirs:         pendingMergeDirs{},
 		Lifecycle:         opener,
 		Sessions:          registrySessions{reg: sessionRegistry, controller: controller, modelCatalogs: modelCatalogs, logf: legacyLog},
 		Inits:             controller,

@@ -109,18 +109,41 @@ func (f *fakePrompts) SetModel(_ context.Context, _ string, model string) (strin
 	return "opus", f.err
 }
 
+// fakeMerges records WHOLE requests, not just workspace names: the geometry
+// the command carried is the thing the handler must pass through intact, so a
+// fake that kept only the name could not tell a working handler from the one
+// that dropped all three dirs on the floor.
 type fakeMerges struct {
-	merged  []string
-	resumed []string
+	merged  []merge.Request
+	resumed []merge.Request
 }
 
-func (f *fakeMerges) Merge(_ context.Context, ws string) error {
-	f.merged = append(f.merged, ws)
+func (f *fakeMerges) Merge(_ context.Context, req merge.Request) error {
+	f.merged = append(f.merged, req)
 	return nil
 }
-func (f *fakeMerges) Resume(_ context.Context, ws string) error {
-	f.resumed = append(f.resumed, ws)
+func (f *fakeMerges) Resume(_ context.Context, req merge.Request) error {
+	f.resumed = append(f.resumed, req)
 	return nil
+}
+
+// mergedWorkspaces returns just the workspace names of the recorded merges, for
+// assertions that only care about routing.
+func (f *fakeMerges) mergedWorkspaces() []string {
+	out := make([]string, 0, len(f.merged))
+	for _, req := range f.merged {
+		out = append(out, req.Workspace)
+	}
+	return out
+}
+
+// resumedWorkspaces is mergedWorkspaces for the resume path.
+func (f *fakeMerges) resumedWorkspaces() []string {
+	out := make([]string, 0, len(f.resumed))
+	for _, req := range f.resumed {
+		out = append(out, req.Workspace)
+	}
+	return out
 }
 
 type fakeLifecycle struct {
@@ -375,8 +398,8 @@ func TestCommandHandlerMergeRoutesToMerge(t *testing.T) {
 	// Act — no conflict_resolved_continue -> Merge.
 	_ = h.MergeWorkspace(context.Background(), "ws1", "r1", &frontendv1.MergeWorkspaceCmd{})
 	// Assert
-	if len(m.merged) != 1 || m.merged[0] != "ws1" || len(m.resumed) != 0 {
-		t.Fatalf("merged=%v resumed=%v", m.merged, m.resumed)
+	if got := m.mergedWorkspaces(); len(got) != 1 || got[0] != "ws1" || len(m.resumed) != 0 {
+		t.Fatalf("merged=%v resumed=%v", got, m.resumedWorkspaces())
 	}
 }
 
@@ -386,8 +409,59 @@ func TestCommandHandlerMergeResolvedContinueRoutesToResume(t *testing.T) {
 	// Act — conflict_resolved_continue -> Resume.
 	_ = h.MergeWorkspace(context.Background(), "ws1", "r1", &frontendv1.MergeWorkspaceCmd{ConflictResolvedContinue: true})
 	// Assert
-	if len(m.resumed) != 1 || m.resumed[0] != "ws1" || len(m.merged) != 0 {
-		t.Fatalf("merged=%v resumed=%v", m.merged, m.resumed)
+	if got := m.resumedWorkspaces(); len(got) != 1 || got[0] != "ws1" || len(m.merged) != 0 {
+		t.Fatalf("merged=%v resumed=%v", m.mergedWorkspaces(), got)
+	}
+}
+
+// The geometry only Emacs knows: the daemon cannot derive any of these three
+// fields, so a handler that drops them leaves the merge unrunnable. That is
+// exactly what happened before — every merge died on "merge dir resolution not
+// wired" while the command in front of the handler named all three.
+
+func TestCommandHandlerMergeCarriesTheCommandGeometry(t *testing.T) {
+	// Arrange
+	h, _, m, _ := newTestHandler(t)
+	// Act
+	_ = h.MergeWorkspace(context.Background(), "ws1", "r1", &frontendv1.MergeWorkspaceCmd{
+		Handler:      "cherry-pick",
+		SourceBranch: "DWC/feature-one",
+		SourceDir:    "/worktrees/feature-one",
+		TargetDir:    "/repo",
+	})
+	// Assert
+	want := merge.Request{
+		Workspace:    "ws1",
+		SourceBranch: "DWC/feature-one",
+		SourceDir:    "/worktrees/feature-one",
+		TargetDir:    "/repo",
+	}
+	if len(m.merged) != 1 || m.merged[0] != want {
+		t.Fatalf("merge request = %+v, want %+v", m.merged, want)
+	}
+}
+
+func TestCommandHandlerResumeCarriesTheCommandGeometry(t *testing.T) {
+	// Arrange — the daemon is stateless per call, so a resume must re-receive
+	// the same geometry rather than remembering the merge it continues.
+	h, _, m, _ := newTestHandler(t)
+	// Act
+	_ = h.MergeWorkspace(context.Background(), "ws1", "r1", &frontendv1.MergeWorkspaceCmd{
+		Handler:                  "cherry-pick",
+		ConflictResolvedContinue: true,
+		SourceBranch:             "DWC/feature-one",
+		SourceDir:                "/worktrees/feature-one",
+		TargetDir:                "/repo",
+	})
+	// Assert
+	want := merge.Request{
+		Workspace:    "ws1",
+		SourceBranch: "DWC/feature-one",
+		SourceDir:    "/worktrees/feature-one",
+		TargetDir:    "/repo",
+	}
+	if len(m.resumed) != 1 || m.resumed[0] != want {
+		t.Fatalf("resume request = %+v, want %+v", m.resumed, want)
 	}
 }
 
@@ -756,7 +830,6 @@ func TestSnapshotProviderCombinesSSMAndSessions(t *testing.T) {
 		Progress:          progress.New(progress.Options{Logf: func(string, ...any) {}}),
 		Prompts:           &fakePrompts{},
 		Turns:             &fakePrompts{},
-		MergeDirs:         fakeMergeDirs{},
 		Lifecycle:         &fakeLifecycle{},
 		Sessions:          fakeSessions{views: []*frontendv1.SessionView{{Workspace: "/w", SessionId: "s1", Model: "haiku"}}},
 		SessionCommands:   &SessionCommandBinding{},
@@ -811,7 +884,6 @@ func TestWireAgentShimFeedsTheSsmTransitionIntoProgressWithoutAPhaseCopy(t *test
 		Progress:          prog,
 		Prompts:           &fakePrompts{},
 		Turns:             &fakePrompts{},
-		MergeDirs:         fakeMergeDirs{},
 		Lifecycle:         &fakeLifecycle{},
 		SessionCommands:   &SessionCommandBinding{},
 		WorkspaceCreation: newFakeWorkspaceCreation(),
@@ -848,7 +920,6 @@ func TestWireAgentShimRejectsNilProgress(t *testing.T) {
 	_, err := WireAgentShim(AgentShimConfig{
 		Resumes:         &fakeResumes{},
 		SSM:             openTestSSM(t, reg),
-		MergeDirs:       fakeMergeDirs{},
 		SessionCommands: &SessionCommandBinding{},
 	})
 	if err == nil {
@@ -863,7 +934,6 @@ func TestWireAgentShimRejectsNilWorkspaceCreation(t *testing.T) {
 		SSM:             openTestSSM(t, reg),
 		Progress:        progress.New(progress.Options{Logf: func(string, ...any) {}}),
 		Prompts:         &fakePrompts{},
-		MergeDirs:       fakeMergeDirs{},
 		Lifecycle:       &fakeLifecycle{},
 		SessionCommands: &SessionCommandBinding{},
 	})
@@ -874,27 +944,39 @@ func TestWireAgentShimRejectsNilWorkspaceCreation(t *testing.T) {
 
 // --- merge runner ---------------------------------------------------------
 
-type fakeMergeDirs struct{ err error }
+// The runner no longer resolves anything, so the failure it used to have — a
+// workspace it could not map to dirs — is gone. What remains is a request that
+// arrived INCOMPLETE, and it must still surface rather than run a merge with a
+// blank source or target.
 
-func (f fakeMergeDirs) Resolve(workspace string) (merge.Request, error) {
-	if f.err != nil {
-		return merge.Request{}, f.err
-	}
-	return merge.Request{Workspace: workspace, SourceBranch: "b", SourceDir: "/s", TargetDir: "/t"}, nil
-}
-
-func TestMergeRunnerResolverErrorSurfaces(t *testing.T) {
-	// Arrange — a resolver that cannot map the workspace to dirs.
+func TestMergeRunnerSurfacesAnIncompleteRequest(t *testing.T) {
+	// Arrange — a command that named no source branch.
 	eng, err := merge.NewEngine(merge.Config{Logf: func(string, ...any) {}, Sink: noopSink{}})
 	if err != nil {
 		t.Fatalf("engine: %v", err)
 	}
-	runner := mergeRunner{engine: eng, resolver: fakeMergeDirs{err: errors.New("dirs unknown")}}
+	runner := mergeRunner{engine: eng}
 	// Act
-	got := runner.Merge(context.Background(), "ws1")
-	// Assert — the resolver failure surfaces, never a silent no-op merge.
-	if got == nil {
-		t.Fatal("want the dir-resolution error surfaced")
+	got := runner.Merge(context.Background(), merge.Request{Workspace: "ws1", SourceDir: "/s", TargetDir: "/t"})
+	// Assert — the Engine's own validation refuses it, never a silent no-op merge.
+	if got == nil || !strings.Contains(got.Error(), "SourceBranch is required") {
+		t.Fatalf("merge error = %v, want the incomplete request refused", got)
+	}
+}
+
+func TestMergeResumeSurfacesAnIncompleteRequest(t *testing.T) {
+	// Arrange — the resume path re-receives the geometry, so it can arrive
+	// incomplete in exactly the same way.
+	eng, err := merge.NewEngine(merge.Config{Logf: func(string, ...any) {}, Sink: noopSink{}})
+	if err != nil {
+		t.Fatalf("engine: %v", err)
+	}
+	runner := mergeRunner{engine: eng}
+	// Act
+	got := runner.Resume(context.Background(), merge.Request{Workspace: "ws1", SourceBranch: "b", SourceDir: "/s"})
+	// Assert
+	if got == nil || !strings.Contains(got.Error(), "TargetDir is required") {
+		t.Fatalf("resume error = %v, want the incomplete request refused", got)
 	}
 }
 
@@ -907,7 +989,7 @@ func (noopSink) RecordMergeTransition(string, merge.Phase, string) error { retur
 func TestWireAgentShimRejectsNilSSM(t *testing.T) {
 	// Arrange / Act / Assert — the SSM is now injected; a nil one is a
 	// construction error rather than a nil-deref later.
-	if _, err := WireAgentShim(AgentShimConfig{MergeDirs: fakeMergeDirs{}}); err == nil {
+	if _, err := WireAgentShim(AgentShimConfig{}); err == nil {
 		t.Fatal("want error for nil SSM")
 	}
 }
@@ -921,7 +1003,6 @@ func TestWireAgentShimMergeTransitionReachesSSM(t *testing.T) {
 		Progress:          progress.New(progress.Options{Logf: func(string, ...any) {}}),
 		Prompts:           &fakePrompts{},
 		Turns:             &fakePrompts{},
-		MergeDirs:         fakeMergeDirs{},
 		Lifecycle:         &fakeLifecycle{},
 		SessionCommands:   &SessionCommandBinding{},
 		WorkspaceCreation: newFakeWorkspaceCreation(),

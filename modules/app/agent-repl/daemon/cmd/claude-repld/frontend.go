@@ -1,8 +1,6 @@
 package main
 
 import (
-	"fmt"
-
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
 	"claude-repld/internal/dlog"
@@ -10,7 +8,6 @@ import (
 	"claude-repld/internal/server"
 	"claude-repld/internal/session"
 	"claude-repld/internal/sessioncontroller"
-	"claude-repld/internal/workspace/merge"
 )
 
 // This file holds the daemon-side production backends for the frontend.v1
@@ -77,14 +74,6 @@ func (r registrySessions) SessionViews() []*frontendv1.SessionView {
 		out = append(out, server.SessionViewFromRecordWithModels(r.logf, rec, pending, live, modelOptions))
 	}
 	return out
-}
-
-// pendingMergeDirs is the not-yet-resolved MergeDirResolver: the daemon has no
-// daemon-side source for a workspace's source/target worktrees and branch yet.
-type pendingMergeDirs struct{}
-
-func (pendingMergeDirs) Resolve(workspace string) (merge.Request, error) {
-	return merge.Request{}, fmt.Errorf("merge dir resolution not wired for workspace %q: the workspace->worktree/branch mapping is not yet exposed daemon-side (§9.3)", workspace)
 }
 
 // knownConfigDirs is every Claude config root the daemon knows: the account
