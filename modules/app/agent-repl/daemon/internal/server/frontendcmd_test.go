@@ -866,6 +866,7 @@ func TestSnapshotProviderCombinesSSMAndSessions(t *testing.T) {
 		Sessions:          fakeSessions{views: []*frontendv1.SessionView{{Workspace: "/w", SessionId: "s1", Model: "haiku"}}},
 		SessionCommands:   &SessionCommandBinding{},
 		WorkspaceCreation: newFakeWorkspaceCreation(),
+		LogVerbosef:       t.Logf,
 	})
 	if err != nil {
 		t.Fatalf("WireAgentShim: %v", err)
@@ -919,6 +920,7 @@ func TestWireAgentShimFeedsTheSsmTransitionIntoProgressWithoutAPhaseCopy(t *test
 		Lifecycle:         &fakeLifecycle{},
 		SessionCommands:   &SessionCommandBinding{},
 		WorkspaceCreation: newFakeWorkspaceCreation(),
+		LogVerbosef:       t.Logf,
 	})
 	if err != nil {
 		t.Fatalf("WireAgentShim: %v", err)
@@ -951,6 +953,7 @@ func TestWireAgentShimRejectsNilProgress(t *testing.T) {
 	reg := openTestRegistry(t)
 	_, err := WireAgentShim(AgentShimConfig{
 		Resumes:         &fakeResumes{},
+		LogVerbosef:     t.Logf,
 		SSM:             openTestSSM(t, reg),
 		SessionCommands: &SessionCommandBinding{},
 	})
@@ -963,6 +966,7 @@ func TestWireAgentShimRejectsNilWorkspaceCreation(t *testing.T) {
 	reg := openTestRegistry(t)
 	_, err := WireAgentShim(AgentShimConfig{
 		Resumes:         &fakeResumes{},
+		LogVerbosef:     t.Logf,
 		SSM:             openTestSSM(t, reg),
 		Progress:        progress.New(progress.Options{Logf: func(string, ...any) {}}),
 		Prompts:         &fakePrompts{},
@@ -1038,6 +1042,7 @@ func TestWireAgentShimMergeTransitionReachesSSM(t *testing.T) {
 		Lifecycle:         &fakeLifecycle{},
 		SessionCommands:   &SessionCommandBinding{},
 		WorkspaceCreation: newFakeWorkspaceCreation(),
+		LogVerbosef:       t.Logf,
 	})
 	if err != nil {
 		t.Fatalf("WireAgentShim: %v", err)

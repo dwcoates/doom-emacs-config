@@ -811,6 +811,13 @@ func (m *Manager) pushMessageLocked(workspace string, msg *frontendv1.WorkspaceS
 func (m *Manager) Current(workspace string) (*frontendv1.WorkspaceState, bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	return m.currentLocked(workspace)
+}
+
+// currentLocked is Current's lock-owning core. Caller holds m.mu. Keeping the
+// resolver behind this helper lets synchronous publication validate and emit
+// one exact state without dropping the ordering lock between those actions.
+func (m *Manager) currentLocked(workspace string) (*frontendv1.WorkspaceState, bool, error) {
 	r, err := resolve(m.db, workspace, m.logf)
 	if err != nil {
 		return nil, false, err

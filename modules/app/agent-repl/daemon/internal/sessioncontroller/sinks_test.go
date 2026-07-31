@@ -347,13 +347,21 @@ func (f *fakeApplier) promptRejectCalls() []promptAcceptCall {
 	return append([]promptAcceptCall(nil), f.promptRejects...)
 }
 
-func (f *fakeApplier) ReconcileAlreadyComplete(workspace, sessionID string) (bool, error) {
+func (f *fakeApplier) ReconcileAlreadyComplete(workspace, sessionID string, publish func(*frontendv1.WorkspaceState)) (bool, error) {
 	f.reconcMutex.Lock()
-	defer f.reconcMutex.Unlock()
 	f.alreadyCompletes = append(f.alreadyCompletes, alreadyCompleteCall{
 		workspace: workspace, sessionID: sessionID,
 	})
-	return f.alreadyCompleteDid, f.alreadyCompleteErr
+	did, err := f.alreadyCompleteDid, f.alreadyCompleteErr
+	f.reconcMutex.Unlock()
+	if err == nil {
+		publish(&frontendv1.WorkspaceState{
+			Workspace: workspace, SessionId: sessionID,
+			State:  frontendv1.RenderState_RENDER_STATE_IDLE,
+			Status: frontendv1.SessionStatus_SESSION_STATUS_READY,
+		})
+	}
+	return did, err
 }
 
 // MarkTurnInterrupted records the workspaces whose running turn a

@@ -516,6 +516,7 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 		WorkspaceCreation: workspaceCreation,
 		EstablishTimeout:  tuning.establishTimeout,
 		Logf:              t.Logf,
+		LogVerbosef:       t.Logf,
 	})
 	if err != nil {
 		t.Fatalf("WireAgentShim: %v", err)

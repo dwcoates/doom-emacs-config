@@ -153,7 +153,7 @@ describe("ingest workspace-state", () => {
     const store = new ConversationStore();
     store.ingest([workspaceEffect({ turnActive: true })]);
     // Act
-    store.ingest([workspaceEffect({ turnActive: false })]);
+    store.ingest([workspaceEffect({ turnActive: false, state: "done", atMs: 1001 })]);
     // Assert
     expect(store.state.turnInFlight).toBe(false);
   });
@@ -184,7 +184,7 @@ describe("ingest workspace-state", () => {
     const store = new ConversationStore();
     store.ingest([workspaceEffect({ turnActive: true })]);
     // Act
-    store.ingest([workspaceEffect({ turnActive: false })]);
+    store.ingest([workspaceEffect({ turnActive: false, state: "done", atMs: 1001 })]);
     // Assert
     expect(store.state.turnStartedAt).toBeNull();
   });
@@ -245,6 +245,46 @@ describe("ingest workspace-state", () => {
           "merge_phase= cause_kind=session_started cause_seq=7 at_ms=1234",
       ),
     ]);
+  });
+
+  it("rejects a regressing WorkspaceState revision without partial mutation", () => {
+    const logs: string[] = [];
+    const store = new ConversationStore((_level, message) => logs.push(message));
+    store.ingest([workspaceEffect({ state: "done", turnActive: false, atMs: 2000 })]);
+
+    expect(() => store.ingest([workspaceEffect({ state: "thinking", turnActive: true, atMs: 1999 })]))
+      .toThrow("WorkspaceState revision regressed");
+    expect(store.state.renderState).toBe("done");
+    expect(store.state.turnInFlight).toBe(false);
+    expect(logs.at(-1)).toContain("INVARIANT VIOLATION");
+  });
+
+  it("rejects a non-positive WorkspaceState revision", () => {
+    const store = new ConversationStore();
+    expect(() => store.ingest([workspaceEffect({ atMs: 0 })]))
+      .toThrow("WorkspaceState has non-positive revision");
+    expect(store.state.renderState).toBeNull();
+  });
+
+  it("rejects conflicting payloads at one WorkspaceState revision", () => {
+    const store = new ConversationStore();
+    store.ingest([workspaceEffect({ state: "done", turnActive: false, atMs: 2000 })]);
+    expect(() => store.ingest([workspaceEffect({ state: "ready", turnActive: false, atMs: 2000 })]))
+      .toThrow("WorkspaceState revision conflicted");
+  });
+
+  it("invalidates every socket-owned active projection while retaining conversation metadata", () => {
+    const store = new ConversationStore();
+    store.ingest([workspaceEffect({ state: "thinking", turnActive: true, atMs: 2000 })]);
+    store.state.cwd = "/w";
+
+    const changed = store.invalidateFrontendState("websocket_disconnected");
+
+    expect(changed).toBe(true);
+    expect(store.state.renderState).toBeNull();
+    expect(store.state.turnInFlight).toBe(false);
+    expect(store.state.cwd).toBe("/w");
+    expect(store.state.workspaceStateAtMs).toBe(2000);
   });
 });
 
@@ -1351,6 +1391,37 @@ describe("the progress footer's input (F1)", () => {
         "outcome=none->already_complete since_ms=42 turn_started_at_ms=0",
       ),
     ]);
+  });
+
+  it("rejects already-complete progress beside an active WorkspaceState", () => {
+    const logs: string[] = [];
+    const store = new ConversationStore((_level, message) => logs.push(message));
+    store.ingest([workspaceEffect({ state: "thinking", turnActive: true, atMs: 2000 })]);
+
+    expect(() => store.ingest([
+      progressEffect({ interrupt: { sinceMs: 42, outcome: "already_complete" } }),
+    ])).toThrow("ALREADY_COMPLETE contradicts active WorkspaceState");
+    expect(store.progress).toBeNull();
+    expect(logs.at(-1)).toContain("INVARIANT VIOLATION");
+  });
+
+  it("rejects already-complete progress beside the pre-submit active phase", () => {
+    const store = new ConversationStore();
+    store.ingest([workspaceEffect({ state: "submitting", turnActive: true, atMs: 2000 })]);
+    expect(() => store.ingest([
+      progressEffect({ interrupt: { sinceMs: 42, outcome: "already_complete" } }),
+    ])).toThrow("ALREADY_COMPLETE contradicts active WorkspaceState");
+  });
+
+  it("accepts an atomic snapshot that settles state before already-complete progress", () => {
+    const store = new ConversationStore();
+    store.ingest([workspaceEffect({ state: "thinking", turnActive: true, atMs: 2000 })]);
+    store.ingest([
+      workspaceEffect({ state: "done", turnActive: false, atMs: 2001 }),
+      progressEffect({ interrupt: { sinceMs: 42, outcome: "already_complete" } }),
+    ]);
+    expect(store.state.renderState).toBe("done");
+    expect(store.progress?.interrupt?.outcome).toBe("already_complete");
   });
 
   it("retains the compaction window on the progress view the footer reads", () => {

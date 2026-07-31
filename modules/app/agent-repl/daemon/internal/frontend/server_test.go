@@ -2,6 +2,7 @@ package frontend
 
 import (
 	"bufio"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -48,6 +50,22 @@ func (s staticState) Snapshot() *frontendv1.StateSnapshot {
 	return s.snap
 }
 
+type sequenceState struct {
+	mu    sync.Mutex
+	snaps []*frontendv1.StateSnapshot
+}
+
+func (s *sequenceState) Snapshot() *frontendv1.StateSnapshot {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.snaps) == 0 {
+		panic("sequenceState exhausted")
+	}
+	snapshot := s.snaps[0]
+	s.snaps = s.snaps[1:]
+	return snapshot
+}
+
 func sampleSnapshot() *frontendv1.StateSnapshot {
 	return &frontendv1.StateSnapshot{
 		Workspaces: []*frontendv1.WorkspaceState{
@@ -59,8 +77,138 @@ func sampleSnapshot() *frontendv1.StateSnapshot {
 func newTestServer(t *testing.T, buf int) (*Server, *mockHandler) {
 	t.Helper()
 	h := &mockHandler{}
-	s := New(Config{Logf: testLogf(t), State: staticState{snap: sampleSnapshot()}, Handler: h, BufSize: buf})
+	s := New(Config{Logf: testLogf(t), LogVerbosef: testLogf(t), State: staticState{snap: sampleSnapshot()}, Handler: h, BufSize: buf})
 	return s, h
+}
+
+func TestRenewSnapshotLeaseEnqueuesRevisionedCurrentState(t *testing.T) {
+	var verbose []string
+	h := &mockHandler{}
+	s := New(Config{
+		Logf: testLogf(t),
+		LogVerbosef: func(format string, args ...any) {
+			verbose = append(verbose, fmt.Sprintf(format, args...))
+		},
+		State: staticState{snap: &frontendv1.StateSnapshot{
+			Workspaces: []*frontendv1.WorkspaceState{
+				{Workspace: "/w", SessionId: "s1", ControllerGenerationId: "g1", AtMs: 42, CauseSeq: 7},
+			},
+		}},
+		Handler: h,
+	})
+	cl := &client{
+		id: 9, send: make(chan []byte, 1), done: make(chan struct{}),
+		scope: &Scope{Workspace: "/w", SessionID: "s1"}, kind: ClientKindGUIStream,
+	}
+	s.clients[cl] = struct{}{}
+
+	if !s.renewSnapshotLease(cl) {
+		t.Fatal("renewSnapshotLease = false, want live lease")
+	}
+	frame := &frontendv1.FrontendFrame{}
+	if err := protojson.Unmarshal(<-cl.send, frame); err != nil {
+		t.Fatalf("decode lease snapshot: %v", err)
+	}
+	state := frame.GetSnapshot().GetWorkspaces()[0]
+	if state.GetAtMs() != 42 || state.GetControllerGenerationId() != "g1" || state.GetCauseSeq() != 7 {
+		t.Fatalf("lease revision = %+v, want g1/42/7", state)
+	}
+	if len(verbose) != 1 || !strings.Contains(verbose[0], "revisions=/w:g1:42:7") {
+		t.Fatalf("verbose lease log = %v, want revision identity", verbose)
+	}
+}
+
+func TestRenewSnapshotLeaseHardDisconnectsAFullQueue(t *testing.T) {
+	var logs []string
+	s := New(Config{
+		Logf: func(format string, args ...any) {
+			logs = append(logs, fmt.Sprintf(format, args...))
+		},
+		LogVerbosef: testLogf(t),
+		State:       staticState{snap: sampleSnapshot()},
+		Handler:     &mockHandler{},
+	})
+	cl := &client{
+		id: 10, send: make(chan []byte, 1), done: make(chan struct{}),
+		scope: &Scope{Workspace: "w1", SessionID: "s1"}, kind: ClientKindGUIStream,
+	}
+	cl.send <- []byte("occupied")
+	s.clients[cl] = struct{}{}
+
+	if s.renewSnapshotLease(cl) {
+		t.Fatal("renewSnapshotLease = true, want full-queue detach")
+	}
+	select {
+	case <-cl.done:
+	default:
+		t.Fatal("full lease queue did not close client")
+	}
+	if len(logs) != 2 || !strings.Contains(logs[0], "snapshot lease queue full") || !strings.Contains(logs[1], "client disconnected") {
+		t.Fatalf("lease failure logs = %v, want queue-full then disconnect identities", logs)
+	}
+}
+
+func TestRenewSnapshotLeaseRetriesCaptureOlderThanDeliveredState(t *testing.T) {
+	var verbose []string
+	provider := &sequenceState{snaps: []*frontendv1.StateSnapshot{
+		{Workspaces: []*frontendv1.WorkspaceState{{Workspace: "/w", SessionId: "s1", AtMs: 41}}},
+		{Workspaces: []*frontendv1.WorkspaceState{{Workspace: "/w", SessionId: "s1", AtMs: 42}}},
+	}}
+	s := New(Config{
+		Logf: testLogf(t),
+		LogVerbosef: func(format string, args ...any) {
+			verbose = append(verbose, fmt.Sprintf(format, args...))
+		},
+		State: provider, Handler: &mockHandler{},
+	})
+	cl := &client{
+		id: 12, send: make(chan []byte, 1), done: make(chan struct{}),
+		scope: &Scope{Workspace: "/w", SessionID: "s1"}, kind: ClientKindGUIStream,
+	}
+	s.clients[cl] = struct{}{}
+	s.latestWorkspaceAt["/w"] = 42
+
+	if !s.renewSnapshotLease(cl) {
+		t.Fatal("renewSnapshotLease = false, want retry then renewal")
+	}
+	frame := &frontendv1.FrontendFrame{}
+	if err := protojson.Unmarshal(<-cl.send, frame); err != nil {
+		t.Fatalf("decode renewed snapshot: %v", err)
+	}
+	if got := frame.GetSnapshot().GetWorkspaces()[0].GetAtMs(); got != 42 {
+		t.Fatalf("renewed snapshot at_ms = %d, want 42", got)
+	}
+	if len(verbose) != 2 || !strings.Contains(verbose[0], "snapshot lease retry") || !strings.Contains(verbose[1], "snapshot lease renewed") {
+		t.Fatalf("verbose logs = %v, want retry then renewal", verbose)
+	}
+}
+
+func TestRenewSnapshotLeaseHardDisconnectsMarshalFailure(t *testing.T) {
+	var logs []string
+	s := New(Config{
+		Logf: func(format string, args ...any) {
+			logs = append(logs, fmt.Sprintf(format, args...))
+		},
+		LogVerbosef: testLogf(t),
+		State: staticState{snap: &frontendv1.StateSnapshot{Workspaces: []*frontendv1.WorkspaceState{
+			{Workspace: string([]byte{0xff}), SessionId: "s1", AtMs: 1},
+		}}},
+		Handler: &mockHandler{},
+	})
+	cl := &client{id: 11, send: make(chan []byte, 1), done: make(chan struct{}), kind: ClientKindGUIStream}
+	s.clients[cl] = struct{}{}
+
+	if s.renewSnapshotLease(cl) {
+		t.Fatal("renewSnapshotLease = true, want marshal-failure detach")
+	}
+	select {
+	case <-cl.done:
+	default:
+		t.Fatal("marshal failure did not close client")
+	}
+	if len(logs) != 2 || !strings.Contains(logs[0], "snapshot lease marshal failed") || !strings.Contains(logs[1], "client disconnected") {
+		t.Fatalf("lease failure logs = %v, want marshal-failure then disconnect identities", logs)
+	}
 }
 
 // --- UDS: snapshot on connect + command ack correlation ---------------------
@@ -182,7 +330,7 @@ func TestHostOnlyWorkspaceWorkReachesUDSButNotGUI(t *testing.T) {
 	// Arrange.  Both connections are observers, so this proves delivery is
 	// controlled by ClientKind alone.
 	h := &mockHandler{}
-	s := New(Config{Logf: testLogf(t), State: staticState{snap: &frontendv1.StateSnapshot{
+	s := New(Config{Logf: testLogf(t), LogVerbosef: testLogf(t), State: staticState{snap: &frontendv1.StateSnapshot{
 		WorkspaceAvailable: []*frontendv1.WorkspaceAvailable{{JobId: "job-1", FinalName: "new"}},
 		HostActions:        []*frontendv1.HostAction{{ActionId: "action-1"}},
 	}}, Handler: h})
@@ -437,9 +585,10 @@ func TestNewPanicsOnMissingDeps(t *testing.T) {
 		name string
 		cfg  Config
 	}{
-		{"no logf", Config{State: staticState{}, Handler: &mockHandler{}}},
-		{"no state", Config{Logf: func(string, ...any) {}, Handler: &mockHandler{}}},
-		{"no handler", Config{Logf: func(string, ...any) {}, State: staticState{}}},
+		{"no logf", Config{LogVerbosef: func(string, ...any) {}, State: staticState{}, Handler: &mockHandler{}}},
+		{"no verbose logf", Config{Logf: func(string, ...any) {}, State: staticState{}, Handler: &mockHandler{}}},
+		{"no state", Config{Logf: func(string, ...any) {}, LogVerbosef: func(string, ...any) {}, Handler: &mockHandler{}}},
+		{"no handler", Config{Logf: func(string, ...any) {}, LogVerbosef: func(string, ...any) {}, State: staticState{}}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

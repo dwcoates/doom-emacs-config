@@ -11,6 +11,8 @@ export interface WsClientOptions {
   /** Raw inbound text frame; the caller decodes + routes it. */
   onMessage: (data: string) => void;
   onStatusChange?: (connected: boolean) => void;
+  /** State freshness, distinct from the browser socket's open bit. */
+  onFreshnessChange?: (freshness: WsStateFreshness) => void;
   /** WebSocket constructor (injectable for tests). */
   wsFactory?: (url: string) => WebSocket;
   /** Reconnect backoff schedule in ms; last entry repeats. */
@@ -37,9 +39,19 @@ export interface WsClientOptions {
    * reports a recovery from nothing.
    */
   onReachable?: () => void;
+  /** Maximum gap between authoritative StateSnapshots. */
+  snapshotTimeoutMs?: number;
 }
 
 const DEFAULT_BACKOFF_MS = [250, 500, 1000, 2000, 5000];
+export const DEFAULT_SNAPSHOT_TIMEOUT_MS = 45_000;
+
+export type WsStateFreshness =
+  | "connecting"
+  | "awaiting_snapshot"
+  | "current"
+  | "disconnected"
+  | "expired";
 
 export class WsClient {
   private readonly opts: WsClientOptions;
@@ -48,6 +60,9 @@ export class WsClient {
   private attempts = 0;
   private closedByUser = false;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private snapshotTimer: ReturnType<typeof setTimeout> | null = null;
+  private freshness: WsStateFreshness = "disconnected";
+  private pendingReachable = false;
   /**
    * Connection epoch: bumped by every connect() and close(). Scheduled
    * reconnects and in-flight existence probes capture the epoch they
@@ -64,45 +79,64 @@ export class WsClient {
 
   connect(): void {
     this.epoch++;
+    const connectionEpoch = this.epoch;
     this.closedByUser = false;
+    this.transitionFreshness("connecting", { epoch: connectionEpoch });
     log("info", "websocket connection attempt started", {
       operation: "ws.connect",
-      context: { url: this.opts.url, epoch: this.epoch, reconnect_attempt_count: this.attempts },
+      context: { url: this.opts.url, epoch: connectionEpoch, reconnect_attempt_count: this.attempts },
     });
     const factory = this.opts.wsFactory ?? ((url: string) => new WebSocket(url));
     const ws = factory(this.opts.url);
     this.ws = ws;
 
     ws.onopen = () => {
-      // A reconnect CLOSES the unreachable window rather than leaving its
-      // card standing: the route works again, and a permanent alarm about a
-      // fault that ended is the thing the resolution stamp exists to stop.
+      if (!this.isCurrentSocket(ws, connectionEpoch)) {
+        this.logStaleCallback("open", connectionEpoch);
+        return;
+      }
+      // Socket-open begins synchronization. Recovery is not reported until
+      // adoptSnapshot proves that current authoritative state landed.
       const reconnected = this.attempts > 0;
-      if (reconnected) this.opts.onReachable?.();
+      this.pendingReachable = reconnected;
       this.attempts = 0;
       log("info", "websocket connection opened", {
         operation: "ws.open",
-        context: { url: this.opts.url, epoch: this.epoch, reconnected },
+        context: { url: this.opts.url, epoch: connectionEpoch, reconnected },
       });
-      this.opts.onStatusChange?.(true);
+      this.transitionFreshness("awaiting_snapshot", { epoch: connectionEpoch, reconnected });
+      this.armSnapshotExpiry(connectionEpoch);
     };
     ws.onmessage = (event: MessageEvent) => {
+      if (!this.isCurrentSocket(ws, connectionEpoch)) {
+        this.logStaleCallback("message", connectionEpoch);
+        return;
+      }
       // WebSocket frames can arrive many times per second during replay.
       logVerbose("info", "websocket received frame", {
         operation: "ws.message",
-        context: { epoch: this.epoch, byte_length: String(event.data).length },
+        context: { epoch: connectionEpoch, byte_length: String(event.data).length, freshness: this.freshness },
       });
       this.opts.onMessage(String(event.data));
     };
     ws.onclose = (event: CloseEvent) => {
-      this.opts.onStatusChange?.(false);
+      if (!this.isCurrentSocket(ws, connectionEpoch)) {
+        this.logStaleCallback("close", connectionEpoch);
+        return;
+      }
+      this.clearSnapshotExpiry();
+      if (this.freshness !== "expired") this.opts.onStatusChange?.(false);
       this.ws = null;
       if (this.closedByUser) {
+        this.transitionFreshness("disconnected", { epoch: connectionEpoch, code: event.code, reason: event.reason, owner: "user" });
         log("info", "websocket closed by user", {
           operation: "ws.close-user",
-          context: { epoch: this.epoch, code: event.code, reason: event.reason },
+          context: { epoch: connectionEpoch, code: event.code, reason: event.reason },
         });
         return;
+      }
+      if (this.freshness !== "expired") {
+        this.transitionFreshness("disconnected", { epoch: connectionEpoch, code: event.code, reason: event.reason, owner: "transport" });
       }
       // The close CODE and REASON are the only evidence separating a daemon
       // that restarted from a network drop, and this handler used to read
@@ -112,7 +146,7 @@ export class WsClient {
       this.opts.onUnreachable?.(event.code, event.reason);
       log("warn", "websocket closed unexpectedly and will reconnect", {
         operation: "ws.close-unexpected",
-        context: { epoch: this.epoch, code: event.code, reason: event.reason, reconnect_attempt_count: this.attempts },
+        context: { epoch: connectionEpoch, code: event.code, reason: event.reason, reconnect_attempt_count: this.attempts },
       });
       this.scheduleReconnect();
     };
@@ -121,6 +155,93 @@ export class WsClient {
       // where the code and reason are available. An error handler that
       // classified on its own would double-report every drop.
     };
+  }
+
+  /**
+   * Attest that the current connection's StateSnapshot decoded and fully
+   * ingested. Socket-open alone never calls this and therefore never makes the
+   * UI current. Every renewed snapshot extends the same bounded lease.
+   */
+  adoptSnapshot(revision: Record<string, unknown> = {}): void {
+    if (
+      this.ws === null ||
+      this.ws.readyState !== WebSocket.OPEN ||
+      (this.freshness !== "awaiting_snapshot" && this.freshness !== "current")
+    ) {
+      log("error", "websocket snapshot adoption rejected outside a live snapshot-bearing connection", {
+        operation: "ws.snapshot-adoption-rejected",
+        context: { epoch: this.epoch, freshness: this.freshness, ready_state: this.ws?.readyState ?? -1, ...revision },
+      });
+      throw new Error(`ws: cannot adopt snapshot while freshness=${this.freshness}`);
+    }
+    const renewed = this.freshness === "current";
+    this.armSnapshotExpiry(this.epoch);
+    if (renewed) {
+      logVerbose("info", "websocket authoritative snapshot lease renewed", {
+        operation: "ws.snapshot-renewed",
+        context: { epoch: this.epoch, timeout_ms: this.snapshotTimeoutMs(), ...revision },
+      });
+      return;
+    }
+    this.transitionFreshness("current", { epoch: this.epoch, timeout_ms: this.snapshotTimeoutMs(), ...revision });
+    this.opts.onStatusChange?.(true);
+    if (this.pendingReachable) {
+      this.pendingReachable = false;
+      this.opts.onReachable?.();
+    }
+  }
+
+  private isCurrentSocket(ws: WebSocket, epoch: number): boolean {
+    return this.ws === ws && this.epoch === epoch;
+  }
+
+  private logStaleCallback(callback: string, callbackEpoch: number): void {
+    logVerbose("warn", "websocket callback ignored after connection generation advanced", {
+      operation: "ws.stale-callback",
+      context: { callback, callback_epoch: callbackEpoch, current_epoch: this.epoch, freshness: this.freshness },
+    });
+  }
+
+  private transitionFreshness(next: WsStateFreshness, context: Record<string, unknown>): void {
+    const previous = this.freshness;
+    if (previous === next) return;
+    this.freshness = next;
+    log(next === "expired" ? "error" : "info", "websocket state freshness changed", {
+      operation: "ws.freshness-changed",
+      context: { previous, next, ...context },
+    });
+    this.opts.onFreshnessChange?.(next);
+  }
+
+  private snapshotTimeoutMs(): number {
+    return this.opts.snapshotTimeoutMs ?? DEFAULT_SNAPSHOT_TIMEOUT_MS;
+  }
+
+  private armSnapshotExpiry(epoch: number): void {
+    this.clearSnapshotExpiry();
+    const timeoutMs = this.snapshotTimeoutMs();
+    if (timeoutMs <= 0) {
+      log("error", "websocket snapshot timeout configuration rejected", {
+        operation: "ws.snapshot-timeout-invalid",
+        context: { epoch, timeout_ms: timeoutMs },
+      });
+      throw new Error(`ws: snapshotTimeoutMs must be positive, got ${timeoutMs}`);
+    }
+    this.snapshotTimer = setTimeout(() => {
+      if (epoch !== this.epoch || this.closedByUser) return;
+      if (this.freshness !== "awaiting_snapshot" && this.freshness !== "current") return;
+      this.transitionFreshness("expired", { epoch, timeout_ms: timeoutMs });
+      this.opts.onStatusChange?.(false);
+      // Force a new connection because only its first successfully ingested
+      // StateSnapshot may restore currentness.
+      this.ws?.close();
+    }, timeoutMs);
+  }
+
+  private clearSnapshotExpiry(): void {
+    if (this.snapshotTimer === null) return;
+    clearTimeout(this.snapshotTimer);
+    this.snapshotTimer = null;
   }
 
   private scheduleReconnect(): void {
@@ -185,23 +306,30 @@ export class WsClient {
     // ForwardingLogger -> CommandDispatcher.clientLog -> WsClient.send again.
     // The command owner records an ordinary send refusal. The logger retains
     // its own refused frame in its bounded forwarding queue.
-    if (this.ws === null || this.ws.readyState !== WebSocket.OPEN) return false;
+    if (this.ws === null || this.ws.readyState !== WebSocket.OPEN || this.freshness !== "current") return false;
     this.ws.send(raw);
     return true;
   }
 
   close(): void {
+    const wasCurrent = this.freshness === "current";
+    const ws = this.ws;
     this.epoch++;
     this.closedByUser = true;
+    this.pendingReachable = false;
+    this.clearSnapshotExpiry();
     log("info", "websocket close requested", {
       operation: "ws.close-requested",
-      context: { epoch: this.epoch, had_socket: this.ws !== null, had_reconnect_timer: this.reconnectTimer !== null },
+      context: { epoch: this.epoch, had_socket: ws !== null, had_reconnect_timer: this.reconnectTimer !== null },
     });
     if (this.reconnectTimer !== null) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
-    this.ws?.close();
+    this.ws = null;
+    if (wasCurrent) this.opts.onStatusChange?.(false);
+    this.transitionFreshness("disconnected", { epoch: this.epoch, owner: "user" });
+    ws?.close();
   }
 }
 

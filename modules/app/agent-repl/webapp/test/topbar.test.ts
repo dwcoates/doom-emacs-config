@@ -103,6 +103,8 @@ function storeState(over: Partial<StoreState> = {}): StoreState {
     sessionStatus: null,
     controllerGenerationId: "",
     activeFaults: [],
+    workspaceStateAtMs: 0,
+    workspaceStateCauseSeq: 0,
     ...over,
   };
 }

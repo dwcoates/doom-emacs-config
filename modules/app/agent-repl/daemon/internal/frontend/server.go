@@ -11,7 +11,9 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
+	"time"
 
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
@@ -27,6 +29,12 @@ import (
 // §5.4 fan-out contract); reconnect replays a fresh snapshot, so nothing is
 // lost by construction.
 const defaultClientBuffer = 256
+
+// guiSnapshotLeaseInterval is the maximum time a live GUI stream goes without
+// receiving a fresh authoritative snapshot. The browser expires its visible
+// WorkspaceState after three missed leases, so a wedged writer cannot leave an
+// active phase presented forever behind an apparently open WebSocket.
+const guiSnapshotLeaseInterval = 15 * time.Second
 
 // StateProvider is the SSM-like read surface the frontend server snapshots on
 // every (re)connect. It is defined NARROWLY here on purpose: this package does
@@ -46,9 +54,10 @@ type StateProvider interface {
 
 // Config configures a Server. Logf, State, and Handler are required.
 type Config struct {
-	Logf    dlog.Logf
-	State   StateProvider
-	Handler CommandHandler
+	Logf        dlog.Logf
+	LogVerbosef dlog.Logf
+	State       StateProvider
+	Handler     CommandHandler
 	// BufSize is the per-client outbound buffer; <=0 uses defaultClientBuffer.
 	BufSize int
 }
@@ -58,17 +67,22 @@ type Config struct {
 // message). Every connected frontend receives every broadcast frame (workspace
 // entitlement is "all" for now; the fan-out list is the future filter point).
 type Server struct {
-	logf    dlog.Logf
-	state   StateProvider
-	handler CommandHandler
-	bufSize int
+	logf        dlog.Logf
+	logVerbosef dlog.Logf
+	state       StateProvider
+	handler     CommandHandler
+	bufSize     int
 
 	upgrader websocket.Upgrader
 
-	mu       sync.Mutex
-	clients  map[*client]struct{}
-	listener net.Listener
-	closed   bool
+	mu           sync.Mutex
+	clients      map[*client]struct{}
+	listener     net.Listener
+	closed       bool
+	nextClientID uint64
+	// latestWorkspaceAt is the newest WorkspaceState revision that crossed the
+	// delivery lock. Snapshot paths use it to detect a concurrent publication.
+	latestWorkspaceAt map[string]int64
 }
 
 // client is one connected frontend's outbound state. send is never closed
@@ -82,6 +96,7 @@ type Server struct {
 // kind names the frontend product behind the connection. It is fixed at accept
 // and never reassigned — see ClientKind.
 type client struct {
+	id        uint64
 	send      chan []byte
 	done      chan struct{}
 	closeOnce sync.Once
@@ -96,6 +111,9 @@ func New(cfg Config) *Server {
 	if cfg.Logf == nil {
 		panic("frontend: Config.Logf is required")
 	}
+	if cfg.LogVerbosef == nil {
+		panic("frontend: Config.LogVerbosef is required")
+	}
 	if cfg.State == nil {
 		panic("frontend: Config.State is required")
 	}
@@ -107,17 +125,19 @@ func New(cfg Config) *Server {
 		buf = defaultClientBuffer
 	}
 	return &Server{
-		logf:    cfg.Logf,
-		state:   cfg.State,
-		handler: cfg.Handler,
-		bufSize: buf,
+		logf:        cfg.Logf,
+		logVerbosef: cfg.LogVerbosef,
+		state:       cfg.State,
+		handler:     cfg.Handler,
+		bufSize:     buf,
 		upgrader: websocket.Upgrader{
 			// Local-loopback developer tool; the webview origin is app-scoped,
 			// so origin checks are permissive by design (mirrors the existing
 			// daemon server upgrader).
 			CheckOrigin: func(*http.Request) bool { return true },
 		},
-		clients: map[*client]struct{}{},
+		clients:           map[*client]struct{}{},
+		latestWorkspaceAt: map[string]int64{},
 	}
 }
 
@@ -335,6 +355,9 @@ func (s *Server) Broadcast(frame *frontendv1.FrontendFrame) {
 // exactly the order the resolver produced them.
 func (s *Server) PushWorkspaceState(w *frontendv1.WorkspaceState) {
 	s.mu.Lock()
+	if at := w.GetAtMs(); at > s.latestWorkspaceAt[w.GetWorkspace()] {
+		s.latestWorkspaceAt[w.GetWorkspace()] = at
+	}
 	slow := s.deliverLocked(WorkspaceStateFrame(w), func(*client) bool { return true })
 	s.mu.Unlock()
 	s.disconnectAll(slow)
@@ -496,34 +519,158 @@ func (s *Server) serveClient(c conn, scope *Scope, kind ClientKind) {
 		kind:  kind,
 	}
 
-	// Register the client and enqueue its StateSnapshot atomically, under the
-	// same lock Broadcast takes. This guarantees snapshot-then-deltas ordering:
-	// no broadcast can slip a delta ahead of the snapshot, because the snapshot
-	// is already first in this client's FIFO buffer before it joins the set.
-	s.mu.Lock()
-	if s.closed {
-		s.mu.Unlock()
-		_ = c.close()
-		return
-	}
 	// THE SNAPSHOT CARRIES EVERY WORKSPACE the provider knows about. It used to
 	// be filtered down to the states a painter had settled, which could omit a
 	// workspace from Emacs entirely; nothing filters it now but the connection's
 	// own scope.
-	snapshot := snapshotForClient(s.state.Snapshot(), scope, kind)
-	snap, err := marshalFrame(SnapshotFrame(snapshot))
-	if err != nil {
+	var snapshot *frontendv1.StateSnapshot
+	for {
+		// Never call StateProvider while holding the frontend lock. Synchronous
+		// SSM publication takes the locks in the opposite order. The revision
+		// check under s.mu closes the capture race this lock order creates.
+		snapshot = snapshotForClient(s.state.Snapshot(), scope, kind)
+		snap, err := marshalFrame(SnapshotFrame(snapshot))
+		if err != nil {
+			s.logf("frontend: marshal connect snapshot kind=%s scope_workspace=%q scope_session=%q: %v",
+				kind, scopeWorkspace(scope), scopeSession(scope), err)
+			_ = c.close()
+			return
+		}
+		s.mu.Lock()
+		if s.closed {
+			s.mu.Unlock()
+			_ = c.close()
+			return
+		}
+		if workspace, snapshotAt, deliveredAt, stale := s.snapshotStaleLocked(snapshot, scope); stale {
+			s.mu.Unlock()
+			s.logVerbosef("frontend: connect snapshot retry kind=%s scope_workspace=%q scope_session=%q stale_workspace=%q snapshot_at_ms=%d delivered_at_ms=%d",
+				kind, scopeWorkspace(scope), scopeSession(scope), workspace, snapshotAt, deliveredAt)
+			continue
+		}
+		// Registration and enqueue remain one delivery-lock operation, so no
+		// delta can slip ahead of this first FIFO frame after validation.
+		s.nextClientID++
+		cl.id = s.nextClientID
+		cl.send <- snap
+		s.clients[cl] = struct{}{}
 		s.mu.Unlock()
-		s.logf("frontend: marshal connect snapshot: %v", err)
-		_ = c.close()
-		return
+		break
 	}
-	cl.send <- snap // buffer is empty here; non-blocking
-	s.clients[cl] = struct{}{}
-	s.mu.Unlock()
+	s.logf("frontend: client connected client_id=%d kind=%s scope_workspace=%q scope_session=%q snapshot_workspaces=%d",
+		cl.id, cl.kind, scopeWorkspace(scope), scopeSession(scope), len(snapshot.GetWorkspaces()))
 
 	go s.writeLoop(c, cl)
+	if kind == ClientKindGUIStream {
+		go s.snapshotLeaseLoop(cl)
+	}
 	s.readLoop(c, cl)
+}
+
+// snapshotLeaseLoop renews a GUI stream's authoritative state lease. A
+// StateSnapshot is already the protocol's reconnect truth and ConnectResync
+// deliberately requests conversation history only once per connection, so
+// repeating this frame refreshes state without replaying conversation data.
+func (s *Server) snapshotLeaseLoop(cl *client) {
+	ticker := time.NewTicker(guiSnapshotLeaseInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-cl.done:
+			return
+		case <-ticker.C:
+			if !s.renewSnapshotLease(cl) {
+				return
+			}
+		}
+	}
+}
+
+// renewSnapshotLease captures outside the delivery lock, validates the captured
+// revision under that lock, then enqueues. Returning false means the client is
+// gone or was detached, so its lease loop must stop.
+func (s *Server) renewSnapshotLease(cl *client) bool {
+	for {
+		select {
+		case <-cl.done:
+			return false
+		default:
+		}
+		// Preserve the SSM -> frontend lock order. snapshotStaleLocked closes
+		// the race when a state publication lands after this capture.
+		snapshot := snapshotForClient(s.state.Snapshot(), cl.scope, cl.kind)
+		data, err := marshalFrame(SnapshotFrame(snapshot))
+		if err != nil {
+			s.logf("frontend: snapshot lease marshal failed client_id=%d kind=%s scope_workspace=%q scope_session=%q: %v",
+				cl.id, cl.kind, scopeWorkspace(cl.scope), scopeSession(cl.scope), err)
+			s.disconnect(cl)
+			return false
+		}
+		s.mu.Lock()
+		if _, live := s.clients[cl]; !live {
+			s.mu.Unlock()
+			return false
+		}
+		if workspace, snapshotAt, deliveredAt, stale := s.snapshotStaleLocked(snapshot, cl.scope); stale {
+			s.mu.Unlock()
+			s.logVerbosef("frontend: snapshot lease retry client_id=%d kind=%s scope_workspace=%q scope_session=%q stale_workspace=%q snapshot_at_ms=%d delivered_at_ms=%d",
+				cl.id, cl.kind, scopeWorkspace(cl.scope), scopeSession(cl.scope), workspace, snapshotAt, deliveredAt)
+			continue
+		}
+		queued := enqueueLocked(cl, data)
+		s.mu.Unlock()
+		if !queued {
+			s.logf("frontend: snapshot lease queue full client_id=%d kind=%s scope_workspace=%q scope_session=%q buffer=%d; hard-disconnecting",
+				cl.id, cl.kind, scopeWorkspace(cl.scope), scopeSession(cl.scope), cap(cl.send))
+			s.disconnect(cl)
+			return false
+		}
+		s.logVerbosef("frontend: snapshot lease renewed client_id=%d kind=%s scope_workspace=%q scope_session=%q workspaces=%d revisions=%s interval_ms=%d",
+			cl.id, cl.kind, scopeWorkspace(cl.scope), scopeSession(cl.scope), len(snapshot.GetWorkspaces()), snapshotRevisions(snapshot), guiSnapshotLeaseInterval.Milliseconds())
+		return true
+	}
+}
+
+// snapshotStaleLocked reports a snapshot captured before a WorkspaceState that
+// has already crossed the delivery lock. Caller holds s.mu.
+func (s *Server) snapshotStaleLocked(snapshot *frontendv1.StateSnapshot, scope *Scope) (string, int64, int64, bool) {
+	seen := make(map[string]int64, len(snapshot.GetWorkspaces()))
+	for _, state := range snapshot.GetWorkspaces() {
+		seen[state.GetWorkspace()] = state.GetAtMs()
+	}
+	if scope != nil && scope.Workspace != "" {
+		deliveredAt := s.latestWorkspaceAt[scope.Workspace]
+		snapshotAt := seen[scope.Workspace]
+		return scope.Workspace, snapshotAt, deliveredAt, deliveredAt > snapshotAt
+	}
+	for workspace, deliveredAt := range s.latestWorkspaceAt {
+		if snapshotAt := seen[workspace]; deliveredAt > snapshotAt {
+			return workspace, snapshotAt, deliveredAt, true
+		}
+	}
+	return "", 0, 0, false
+}
+
+func scopeWorkspace(scope *Scope) string {
+	if scope == nil {
+		return ""
+	}
+	return scope.Workspace
+}
+
+func scopeSession(scope *Scope) string {
+	if scope == nil {
+		return ""
+	}
+	return scope.SessionID
+}
+
+func snapshotRevisions(snapshot *frontendv1.StateSnapshot) string {
+	parts := make([]string, 0, len(snapshot.GetWorkspaces()))
+	for _, state := range snapshot.GetWorkspaces() {
+		parts = append(parts, fmt.Sprintf("%s:%s:%d:%d", state.GetWorkspace(), state.GetControllerGenerationId(), state.GetAtMs(), state.GetCauseSeq()))
+	}
+	return strings.Join(parts, ",")
 }
 
 func (s *Server) writeLoop(c conn, cl *client) {
@@ -613,7 +760,11 @@ func (s *Server) disconnect(cl *client) {
 	s.mu.Lock()
 	delete(s.clients, cl)
 	s.mu.Unlock()
-	cl.closeOnce.Do(func() { close(cl.done) })
+	cl.closeOnce.Do(func() {
+		close(cl.done)
+		s.logf("frontend: client disconnected client_id=%d kind=%s scope_workspace=%q scope_session=%q",
+			cl.id, cl.kind, scopeWorkspace(cl.scope), scopeSession(cl.scope))
+	})
 }
 
 // clientCount reports the number of connected clients (test/introspection aid).

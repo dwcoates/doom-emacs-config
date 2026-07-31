@@ -195,6 +195,11 @@ func (m *Manager) notePromptAccepted(d *sessionController, requestID string) (ac
 	m.mu.Unlock()
 
 	publish := func(state *frontendv1.WorkspaceState) {
+		// Clear the prior turn's interrupt window only after the SSM has
+		// validated and committed this edge, but before the active state crosses
+		// the frontend boundary. This makes ALREADY_COMPLETE plus SUBMITTING or
+		// THINKING unrepresentable without mutating progress on an SSM failure.
+		m.progress().NoteTurnAccepted(d.workspace, d.sessionID)
 		d.consumer.push.PushWorkspaceState(state)
 	}
 	if err := m.cfg.SSM.MarkPromptAccepted(d.workspace, d.sessionID, requestID, publish); err != nil {
@@ -214,7 +219,6 @@ func (m *Manager) notePromptAccepted(d *sessionController, requestID string) (ac
 	}
 	m.logf("session-controller: prompt accepted state edge APPLIED ws=%s session=%s request_id=%q session_controller_turn_active_before=%v session_controller_turn_active_after=true publish_sync=true next=shim_submit_then_prompt_echo",
 		d.workspace, d.sessionID, requestID, controllerActiveBefore)
-	m.progress().NoteTurnAccepted(d.workspace, d.sessionID)
 	return controllerActiveBefore, nil
 }
 

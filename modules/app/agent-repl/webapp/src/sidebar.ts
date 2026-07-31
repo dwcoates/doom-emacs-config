@@ -12,6 +12,7 @@
  */
 import { HostGlobal } from "./host.js";
 import { escapeHtml } from "./highlight.js";
+import type { WebRenderState } from "./state-adapter.js";
 import { log } from "./wslog.js";
 
 /**
@@ -33,6 +34,7 @@ import { log } from "./wslog.js";
  * says what the merge pipeline needs to, without spending a color.
  */
 export type WorkspaceStatus =
+  | "submitting"
   | "thinking"
   | "clearing"
   | "compacting"
@@ -92,6 +94,19 @@ export const WORKSPACE_STATUSES: ReadonlySet<string> = new Set([
   "none",
   "inactive",
 ]);
+
+/** Map the daemon wire spelling onto the roster's CSS spelling. */
+export function workspaceStatusFromRenderState(state: WebRenderState): WorkspaceStatus {
+  switch (state) {
+    case "idle": return "ready";
+    case "idle_async": return "idle-async";
+    case "vendor_blocked": return "vendor-blocked";
+    case "merge_queued": return "merge-queued";
+    case "merge_conflict": return "merge-conflict";
+    case "merge_failed": return "merge-failed";
+    default: return state;
+  }
+}
 
 /** The statuses whose dot is the recycle glyph rather than a disc.
  * `merged` is deliberately absent: a settled merge is no longer part of the
@@ -173,6 +188,28 @@ export interface WorkspaceRoster {
   recentlyMerged: RepoGroup | null;
   /** The keyboard cursor: the dir C-S-n / C-S-p currently point at. */
   navDir: string | null;
+}
+
+function rosterWithCurrentStatus(
+  roster: WorkspaceRoster,
+  status: WorkspaceStatus | null,
+): WorkspaceRoster {
+  if (status === null) return roster;
+  const mapRow = (row: WorkspaceRow): WorkspaceRow => ({
+    ...row,
+    status: row.current ? status : row.status,
+    children: row.children.map(mapRow),
+  });
+  const mapGroup = (group: RepoGroup): RepoGroup => ({
+    ...group,
+    rows: group.rows.map(mapRow),
+  });
+  return {
+    ...roster,
+    repos: roster.repos.map(mapGroup),
+    tasks: roster.tasks.map(mapGroup),
+    recentlyMerged: roster.recentlyMerged === null ? null : mapGroup(roster.recentlyMerged),
+  };
 }
 
 /** A gesture relayed to Emacs via POST /workspace-command (a JSON array). */
@@ -562,6 +599,8 @@ export class WorkspaceSidebar {
   private errorNote: string | null = null;
   /** The session's own idle-with-live-async gate (see setMonitoring). */
   private monitoring = false;
+  /** Current row status from this webview's revisioned WorkspaceState. */
+  private authoritativeCurrentStatus: WorkspaceStatus | null = null;
 
   constructor(mount: HTMLElement, opts: WorkspaceSidebarOptions) {
     this.mount = mount;
@@ -623,12 +662,28 @@ export class WorkspaceSidebar {
   private render(): void {
     if (this.roster === null) return;
     this.mount.innerHTML = sidebarHtml(
-      this.roster,
+      rosterWithCurrentStatus(this.roster, this.authoritativeCurrentStatus),
       this.openDirs,
       this.now(),
       this.errorNote,
       this.monitoring,
     );
+  }
+
+  /**
+   * Replace only the current row's Emacs-carried status copy. Emacs remains
+   * the authority for membership and every non-current row, while the footer
+   * and current sidebar dot now consume the same webapp WorkspaceState lease.
+   */
+  setAuthoritativeCurrentStatus(status: WorkspaceStatus): void {
+    const previous = this.authoritativeCurrentStatus;
+    if (previous === status) return;
+    this.authoritativeCurrentStatus = status;
+    log("info", "current sidebar status authority changed", {
+      operation: "sidebar.current-status-changed",
+      context: { previous: previous ?? "none", next: status },
+    });
+    this.render();
   }
 
   /**

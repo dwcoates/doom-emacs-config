@@ -337,20 +337,26 @@ func (m *Manager) publishPromptRejectedLocked(
 // ALREADY_COMPLETE is a live observation from the shim that no foreground turn
 // exists. Its TurnEnded can still be in flight through the store while the
 // control Ack has already arrived, so the SSM may temporarily retain
-// `thinking`. A stale permission row can hide the same contradiction. Those two
-// active shapes are reconciled to `idle`; an already-settled outcome such as
+// `submitting` or `thinking`. A stale permission row can hide the same
+// contradiction. Those active shapes are reconciled to `idle`; a settled outcome such as
 // `done` or `vendor_blocked` is preserved because the Ack says only that the
 // turn is over, not how it ended.
 //
-// A `thinking` claim owned by another session is an invariant violation and is
+// A `submitting` or `thinking` claim owned by another session is an invariant violation and is
 // rejected without writing. The caller must then withhold the interrupt window
 // rather than publish two mutually exclusive claims.
-func (m *Manager) ReconcileAlreadyComplete(workspace, sessionID string) (bool, error) {
+func (m *Manager) ReconcileAlreadyComplete(
+	workspace, sessionID string,
+	publish func(*frontendv1.WorkspaceState),
+) (bool, error) {
 	if workspace == "" {
 		return false, fmt.Errorf("ssm: ReconcileAlreadyComplete got an empty workspace")
 	}
 	if sessionID == "" {
 		return false, fmt.Errorf("ssm: ReconcileAlreadyComplete for workspace %q got an empty session id", workspace)
+	}
+	if publish == nil {
+		return false, fmt.Errorf("ssm: ReconcileAlreadyComplete for workspace %q session %q got a nil synchronous publisher", workspace, sessionID)
 	}
 
 	m.mu.Lock()
@@ -366,57 +372,71 @@ func (m *Manager) ReconcileAlreadyComplete(workspace, sessionID string) (bool, e
 		 ORDER BY at DESC LIMIT 1`,
 		workspace,
 	).Scan(&topState, &topSID)
+	closed := false
 	if err == sql.ErrNoRows {
 		m.logf("ssm: already-complete reconciliation ws=%s session=%s decision=no_agent_axis — nothing active can contradict the footer verdict",
 			workspace, sessionID)
-		return false, nil
-	}
-	if err != nil {
+	} else if err != nil {
 		return false, fmt.Errorf("ssm: ReconcileAlreadyComplete read session-status lifecycle for workspace %q: %w", workspace, err)
-	}
-
-	if topState != sigThinking && topState != sigSubmitting && topState != sigPermission {
+	} else if topState != sigThinking && topState != sigSubmitting && topState != sigPermission {
 		m.logf("ssm: already-complete reconciliation ws=%s session=%s decision=preserve_settled state=%s claimant=%q",
 			workspace, sessionID, topState, topSID.String)
-		return false, nil
-	}
-
-	// A permission row carries no claimant of its own. Inspect the row it
-	// covered so a stale question cannot authorize this session to close a
-	// replacement session's live turn.
-	claimant := topSID.String
-	if topState == sigPermission {
-		var beneathSID sql.NullString
-		beneathErr := m.db.QueryRow(
-			`SELECT session_id FROM workspace_state
+	} else {
+		// A permission row carries no claimant of its own. Inspect the row it
+		// covered so a stale question cannot authorize this session to close a
+		// replacement session's live turn.
+		claimant := topSID.String
+		if topState == sigPermission {
+			var beneathSID sql.NullString
+			beneathErr := m.db.QueryRow(
+				`SELECT session_id FROM workspace_state
 			 WHERE workspace = ? AND state IN `+sessionStatusMembers+`
 			   AND state <> 'permission'
 			 ORDER BY at DESC LIMIT 1`,
-			workspace,
-		).Scan(&beneathSID)
-		if beneathErr != nil && beneathErr != sql.ErrNoRows {
-			return false, fmt.Errorf("ssm: ReconcileAlreadyComplete read permission-covered claim for workspace %q: %w", workspace, beneathErr)
+				workspace,
+			).Scan(&beneathSID)
+			if beneathErr != nil && beneathErr != sql.ErrNoRows {
+				return false, fmt.Errorf("ssm: ReconcileAlreadyComplete read permission-covered claim for workspace %q: %w", workspace, beneathErr)
+			}
+			claimant = beneathSID.String
 		}
-		claimant = beneathSID.String
-	}
-	if claimant != "" && claimant != sessionID {
-		err := fmt.Errorf("ssm: already-complete verdict for workspace %q session %q cannot close active state owned by session %q", workspace, sessionID, claimant)
-		m.logf("ssm: already-complete reconciliation REJECTED ws=%s session=%s state=%s active_claimant=%q error=%v",
-			workspace, sessionID, topState, claimant, err)
-		return false, err
-	}
+		if claimant != "" && claimant != sessionID {
+			err := fmt.Errorf("ssm: already-complete verdict for workspace %q session %q cannot close active state owned by session %q", workspace, sessionID, claimant)
+			m.logf("ssm: already-complete reconciliation REJECTED ws=%s session=%s state=%s active_claimant=%q error=%v",
+				workspace, sessionID, topState, claimant, err)
+			return false, err
+		}
 
-	if err := appendRow(
-		m.db, workspace, sessionID, sigIdle, causeInterruptAlreadyComplete,
-		sql.NullInt64{}, m.nextAt(), "",
-	); err != nil {
-		return false, fmt.Errorf("ssm: reconcile already-complete verdict for workspace %q session %q: %w",
-			workspace, sessionID, err)
+		if err := appendRow(
+			m.db, workspace, sessionID, sigIdle, causeInterruptAlreadyComplete,
+			sql.NullInt64{}, m.nextAt(), "",
+		); err != nil {
+			return false, fmt.Errorf("ssm: reconcile already-complete verdict for workspace %q session %q: %w",
+				workspace, sessionID, err)
+		}
+		m.logf("ssm: already-complete reconciliation CLOSED ws=%s session=%s previous=%s active_claimant=%q — shim reports no foreground turn, so the footer cannot coexist with `thinking`",
+			workspace, sessionID, topState, claimant)
+		if err := m.reresolveLocked(workspace, causeInterruptAlreadyComplete, 0); err != nil {
+			return false, err
+		}
+		closed = true
 	}
-	m.logf("ssm: already-complete reconciliation CLOSED ws=%s session=%s previous=%s active_claimant=%q — shim reports no foreground turn, so the footer cannot coexist with `thinking`",
-		workspace, sessionID, topState, claimant)
-	if err := m.reresolveLocked(workspace, causeInterruptAlreadyComplete, 0); err != nil {
-		return false, err
+	state, found, err := m.currentLocked(workspace)
+	if err != nil {
+		return false, fmt.Errorf("ssm: resolve synchronous already-complete state for workspace %q session %q: %w", workspace, sessionID, err)
 	}
-	return true, nil
+	if !found {
+		m.logf("ssm: already-complete reconciliation PUBLISH_SYNC ws=%s session=%s decision=no_render_state closed=%t",
+			workspace, sessionID, closed)
+		return closed, nil
+	}
+	if state.GetTurnActive() || state.GetStatus() == frontendv1.SessionStatus_SESSION_STATUS_THINKING || state.GetStatus() == frontendv1.SessionStatus_SESSION_STATUS_PERMISSION {
+		return false, fmt.Errorf("ssm: synchronous already-complete state invariant failed for workspace %q session %q: state=%s status=%s turn_active=%t",
+			workspace, sessionID, state.GetState(), state.GetStatus(), state.GetTurnActive())
+	}
+	m.logf("ssm: already-complete reconciliation PUBLISH_SYNC ws=%s session=%s state=%s status=%s turn_active=%t cause_kind=%s cause_seq=%d at_ms=%d",
+		workspace, sessionID, state.GetState(), state.GetStatus(), state.GetTurnActive(),
+		state.GetCauseKind(), state.GetCauseSeq(), state.GetAtMs())
+	publish(state)
+	return closed, nil
 }
