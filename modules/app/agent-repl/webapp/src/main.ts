@@ -458,20 +458,32 @@ async function boot(): Promise<void> {
       // THE phase, read off the workspace's one authoritative state rather
       // than off a copy carried in a second message (F5).
       renderState: s.renderState,
+      connectivity: s.sessionConnectivity,
+      sessionStatus: s.sessionStatus,
       agents: sessionSubagents(s.items),
       tasks: store.taskRoster,
       items: s.items,
       timerLabel,
     });
     const interruptOutcome = store.progress?.interrupt?.outcome ?? "none";
-    const footerStateSignature = `${s.renderState ?? "none"}|${interruptOutcome}`;
+    const footerStateSignature =
+      `${s.renderState ?? "none"}|${s.sessionConnectivity ?? "none"}|` +
+      `${s.sessionStatus ?? "none"}|${interruptOutcome}`;
     if (footerStateSignature !== lastFooterStateSignature) {
       clog(
         "info",
         `footer state rendered phase=${s.renderState ?? "none"} ` +
+          `connectivity=${s.sessionConnectivity ?? "none"} ` +
+          `status=${s.sessionStatus ?? "none"} ` +
+          `generation=${s.controllerGenerationId || "none"} ` +
+          `faults=${s.activeFaults.map((fault) => `${fault.component}/${fault.faultType}`).join(",") || "none"} ` +
           `interrupt_outcome=${interruptOutcome} session=${s.sessionId}`,
         {
           phase: s.renderState ?? "none",
+          connectivity: s.sessionConnectivity ?? "none",
+          session_status: s.sessionStatus ?? "none",
+          controller_generation_id: s.controllerGenerationId || "none",
+          active_faults: s.activeFaults.map((fault) => `${fault.component}/${fault.faultType}`),
           interrupt_outcome: interruptOutcome,
           session_id: s.sessionId,
         },

@@ -8,15 +8,15 @@ by checking it in.
 The SSM currently resolves one workspace render state from several append-only
 "axes." Two of those axes make incompatible claims:
 
-- The wired axis calls `wired` proof that the complete session route is
+- The legacy connectivity projection calls `wired` proof that the complete session route is
   current and operational.
-- The degraded axis can remain open while the wired axis still reads `wired`.
+- The legacy impairment projection can remain open while the legacy connectivity projection still reads `wired`.
 
 That is not a valid pair of current facts. In practice `wired` means only that
 the most recent bring-up gate succeeded, while a newer degraded row masks that
 historical assertion through precedence.
 
-The degraded axis is also too coarse. A failure card is keyed by session and
+The legacy impairment projection is also too coarse. A failure card is keyed by session and
 component, but the SSM reduces every failure to one workspace-wide latch. This
 permits:
 
@@ -177,7 +177,7 @@ type at one daemon-owned boundary. Unknown values fail loudly.
 ### Session status
 
 Retain the append-only session-status lifecycle, but rename the current
-agent-axis vocabulary and query helpers. Move `dead` out of session status:
+session-status lifecycle vocabulary and query helpers. Move `dead` out of session status:
 terminal controller or session loss contributes `unavailable` connectivity.
 
 Legacy wired and degraded rows remain immutable historical evidence. A schema
@@ -246,7 +246,7 @@ The tab bar, sidebar, and footer derive one primary presentation:
 | `unavailable` | blue, unavailable, not animated |
 
 The footer and failure cards name the component and concrete cause. Avoid
-backend vocabulary such as "wired axis" or "degraded axis" in user-facing
+backend vocabulary such as "legacy connectivity projection" or "legacy impairment projection" in user-facing
 text.
 
 When connectivity is not operational, retain but visually subordinate session

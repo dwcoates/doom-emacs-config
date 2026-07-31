@@ -10,7 +10,7 @@ import (
 // has just STOPPED the shim behind it.
 //
 // THIS IS A TEARDOWN'S OWN OBLIGATION, not a fallback around a broken
-// mechanism. The agent axis retires `thinking` on a `TurnEnded` and on nothing
+// mechanism. The session-status lifecycle retires `thinking` on a `TurnEnded` and on nothing
 // else. When the daemon kills a shim mid-turn that event can never arrive, so
 // the latch is immortal: `verify-brilliant-fanout-uen` carried one from
 // 2026-07-29 14:11:15 through every restart after it, with the shim answering
@@ -59,7 +59,7 @@ func (m *Manager) CloseStaleTurn(workspace, sessionID, reason string, soleSessio
 	return m.closeStaleTurnLocked(workspace, sessionID, reason, soleSessionController)
 }
 
-// closeStaleTurnLocked appends the closing agent-axis row when the workspace's
+// closeStaleTurnLocked appends the closing session-status lifecycle row when the workspace's
 // axis still tops out in a `thinking` this session may spend. Caller holds m.mu.
 //
 // IT APPENDS `idle` RATHER THAN `done`, the same choice ApplySessionRotated and
@@ -79,7 +79,7 @@ func (m *Manager) closeStaleTurnLocked(workspace, sessionID, reason string, sole
 		return false, err
 	}
 	if !active {
-		m.logf("ssm: stale turn close ws=%s session=%s reason=%q sole_session_controller=%v — the agent axis holds no `thinking`, so the turn's own end already closed it honestly and nothing is appended",
+		m.logf("ssm: stale turn close ws=%s session=%s reason=%q sole_session_controller=%v — the session-status lifecycle holds no `thinking`, so the turn's own end already closed it honestly and nothing is appended",
 			workspace, sessionID, reason, soleSessionController)
 		return false, nil
 	}
@@ -92,7 +92,7 @@ func (m *Manager) closeStaleTurnLocked(workspace, sessionID, reason string, sole
 	if err := appendRow(m.db, workspace, sessionID, sigIdle, cause, sql.NullInt64{}, m.nextAt(), ""); err != nil {
 		return false, err
 	}
-	m.logf("ssm: stale turn CLOSED ws=%s session=%s reason=%q sole_session_controller=%v claimant=%q — the shim behind the running turn is gone, so its end can never arrive and the agent axis is reconciled to `idle` rather than latched in `thinking`",
+	m.logf("ssm: stale turn CLOSED ws=%s session=%s reason=%q sole_session_controller=%v claimant=%q — the shim behind the running turn is gone, so its end can never arrive and the session-status lifecycle is reconciled to `idle` rather than latched in `thinking`",
 		workspace, sessionID, reason, soleSessionController, claimant)
 	return true, m.reresolveLocked(workspace, cause, 0)
 }

@@ -8,11 +8,11 @@ import (
 )
 
 // turnstop.go — THE INVARIANT: a session whose shim THIS DAEMON stops cannot
-// leave a live turn standing on the SSM's agent axis.
+// leave a live turn standing on the SSM's session-status lifecycle.
 //
 // # The defect it closes
 //
-// The agent axis retires `thinking` on a `TurnEnded` and on nothing else. A
+// The session-status lifecycle retires `thinking` on a `TurnEnded` and on nothing else. A
 // daemon-initiated stop kills the only process that could ever emit that event,
 // so a stop landing mid-turn latches the axis forever: the shim, asked to
 // interrupt, answers INTERRUPT_OUTCOME_ALREADY_COMPLETE from its own honest
@@ -131,7 +131,7 @@ func (m *Manager) drainLiveTurnForStop(workspace, sessionID, path string, cl tur
 	defer cancel()
 	outcome, err := cl.Interrupt(ctx)
 	if err != nil {
-		m.logf("session-controller: teardown turn drain interrupt FAILED ws=%q session=%s path=%s outcome=%s timeout=%s: %v — the shim will not report this turn's end, so the teardown closes the agent axis itself",
+		m.logf("session-controller: teardown turn drain interrupt FAILED ws=%q session=%s path=%s outcome=%s timeout=%s: %v — the shim will not report this turn's end, so the teardown closes the session-status lifecycle itself",
 			workspace, sessionID, path, outcome, bound, err)
 		return
 	}
@@ -140,7 +140,7 @@ func (m *Manager) drainLiveTurnForStop(workspace, sessionID, path string, cl tur
 }
 
 // stopShimSettlingTurn stops a session's shim and then GUARANTEES the workspace's
-// agent axis carries no live turn. It is the only route from this package to
+// session-status lifecycle carries no live turn. It is the only route from this package to
 // Spawner.StopShim.
 //
 // soleSessionController says whether this stop is the workspace's OWN teardown, and it
@@ -161,14 +161,14 @@ func (m *Manager) stopShimSettlingTurn(workspace, sessionID, path string, soleSe
 		workspace, sessionID, path, soleSessionController)
 	stopErr := m.cfg.Spawner.StopShim(sessionID, m.shimPIDFor(sessionID))
 	if stopErr != nil {
-		m.logf("session-controller: teardown shim stop FAILED ws=%q session=%s path=%s: %v — the agent axis is still closed below, because a stop that failed leaves the turn no more reportable than one that succeeded",
+		m.logf("session-controller: teardown shim stop FAILED ws=%q session=%s path=%s: %v — the session-status lifecycle is still closed below, because a stop that failed leaves the turn no more reportable than one that succeeded",
 			workspace, sessionID, path, stopErr)
 	}
 	m.settleTurnAfterStop(workspace, sessionID, path, soleSessionController)
 	return stopErr
 }
 
-// settleTurnAfterStop is the teardown's final act: the workspace's agent axis
+// settleTurnAfterStop is the teardown's final act: the workspace's session-status lifecycle
 // carries no live turn once it returns.
 //
 // A workspace it cannot name is the one case with nothing to settle — there is
@@ -176,7 +176,7 @@ func (m *Manager) stopShimSettlingTurn(workspace, sessionID, path string, soleSe
 // stop with no workspace behind it means the caller lost the binding.
 func (m *Manager) settleTurnAfterStop(workspace, sessionID, path string, soleSessionController bool) {
 	if workspace == "" {
-		m.logf("session-controller: teardown axis close SKIPPED session=%s path=%s — the stop named no workspace, so there is no agent axis to close",
+		m.logf("session-controller: teardown axis close SKIPPED session=%s path=%s — the stop named no workspace, so there is no session-status lifecycle to close",
 			sessionID, path)
 		return
 	}

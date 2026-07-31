@@ -281,6 +281,16 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 	states, cancel := mgr.Subscribe()
 	go func() {
 		for ws := range states {
+			logf("server: SSM workspace state forward ws=%q session=%q generation=%q state=%s connectivity=%s status=%s faults=%d cause_kind=%q cause_seq=%d branch=frontend+progress",
+				ws.GetWorkspace(),
+				ws.GetSessionId(),
+				ws.GetControllerGenerationId(),
+				ws.GetState(),
+				ws.GetConnectivity(),
+				ws.GetStatus(),
+				len(ws.GetActiveFaults()),
+				ws.GetCauseKind(),
+				ws.GetCauseSeq())
 			srv.PushWorkspaceState(ws)
 			if err := prog.ObserveWorkspaceState(ws); err != nil {
 				logf("server: progress observe workspace state: %v", err)

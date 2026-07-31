@@ -136,12 +136,14 @@ func (r *vendorBlockedRig) state() frontendv1.RenderState {
 func (r *vendorBlockedRig) settleReady() {
 	r.t.Helper()
 	r.apply(&corev1.SessionStarted{Model: "test-model", Cwd: vendorBlockedWorkspace})
-	// The WIRED axis is sessioncontroller's report of the bring-up gate closing, and
-	// every color above blue stands on it. This rig drives a FAKE shim client,
-	// whose ShimReady never arrives, so the wiring is arranged directly.
-	if err := r.mgr.ApplyWired(vendorBlockedWorkspace, ssm.WiringWired, "test arrangement"); err != nil {
-		r.t.Fatalf("apply wired: %v", err)
+	d, err := r.m.existing(vendorBlockedWorkspace)
+	if err != nil {
+		r.t.Fatalf("existing controller: %v", err)
 	}
+	r.m.onConnectedForGeneration(
+		vendorBlockedWorkspace, vendorBlockedSessionID, d.generationID,
+		&corev1.ShimHello{SessionId: vendorBlockedSessionID},
+	)
 	if err := r.mgr.ApplyBackfillState(vendorBlockedWorkspace, BackfillDone); err != nil {
 		r.t.Fatalf("apply backfill done: %v", err)
 	}

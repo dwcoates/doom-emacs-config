@@ -268,6 +268,10 @@ type Config struct {
 
 	// newClient is injected only by tests; production uses a real shimclient.
 	newClient func(cfg shimclient.Config) sessionClient
+	// newControllerGenerationID is injected only by tests. Production uses a
+	// cryptographically random process-independent identity because generation
+	// rows survive daemon restarts.
+	newControllerGenerationID func() (string, error)
 }
 
 // Manager is the fleet of session controllers. It implements the frontend
@@ -278,6 +282,9 @@ type Manager struct {
 	reg  *permRegistry
 
 	newClient func(cfg shimclient.Config) sessionClient
+	// newControllerGenerationID mints the identity persisted on every
+	// connectivity lifecycle and runtime-fault edge.
+	newControllerGenerationID func() (string, error)
 	// now is the queue's clock (queued_at_ms), injected by tests.
 	now func() int64
 
@@ -315,9 +322,12 @@ type Manager struct {
 type sessionController struct {
 	sessionID string
 	workspace string
-	client    sessionClient
-	consumer  *consumer
-	cancel    context.CancelFunc
+	// generationID distinguishes this in-memory controller from every retired
+	// controller for the same workspace and session.
+	generationID string
+	client       sessionClient
+	consumer     *consumer
+	cancel       context.CancelFunc
 
 	// Bring-up gate state (bringupescape.go), guarded by the manager mutex
 	// except for faulted, which is a one-shot broadcast channel.
@@ -410,6 +420,20 @@ type sessionController struct {
 	resyncRetried bool
 }
 
+func controllerSessionID(d *sessionController) string {
+	if d == nil {
+		return ""
+	}
+	return d.sessionID
+}
+
+func controllerGenerationID(d *sessionController) string {
+	if d == nil {
+		return ""
+	}
+	return d.generationID
+}
+
 // pendingResync is a frontend resync waiting for the shim to reattach.
 type pendingResync struct {
 	// fromSeq is the CLIENT's original mark, not the floored replay position:
@@ -461,23 +485,28 @@ func New(cfg Config) (*Manager, error) {
 	if newClient == nil {
 		newClient = func(c shimclient.Config) sessionClient { return shimclient.New(c) }
 	}
+	newControllerGenerationID := cfg.newControllerGenerationID
+	if newControllerGenerationID == nil {
+		newControllerGenerationID = newSecureControllerGenerationID
+	}
 	rootCtx, rootStop := context.WithCancel(context.Background())
 	now := cfg.now
 	if now == nil {
 		now = func() int64 { return time.Now().UnixMilli() }
 	}
 	return &Manager{
-		cfg:          cfg,
-		logf:         logf,
-		reg:          newPermRegistry(logf),
-		newClient:    newClient,
-		now:          now,
-		byWS:         make(map[string]*sessionController),
-		lastCSID:     make(map[string]string),
-		shimPID:      make(map[string]int32),
-		buildBounced: make(map[string]bool),
-		rootCtx:      rootCtx,
-		rootStop:     rootStop,
+		cfg:                       cfg,
+		logf:                      logf,
+		reg:                       newPermRegistry(logf),
+		newClient:                 newClient,
+		newControllerGenerationID: newControllerGenerationID,
+		now:                       now,
+		byWS:                      make(map[string]*sessionController),
+		lastCSID:                  make(map[string]string),
+		shimPID:                   make(map[string]int32),
+		buildBounced:              make(map[string]bool),
+		rootCtx:                   rootCtx,
+		rootStop:                  rootStop,
 	}, nil
 }
 
@@ -907,7 +936,7 @@ func (m *Manager) Interrupt(ctx context.Context, workspace string) error {
 // and a several-hundred-millisecond handshake to deliver a stop to an idle
 // session is a worse answer than the honest error. `turn_active` is what
 // separates the two, and it is deliberately read INSTEAD of the resolved state:
-// the violated case resolves `hibernated`, since teal outranks the agent axis by
+// the violated case resolves `hibernated`, since teal outranks the session-status lifecycle by
 // design, so "reads red" would never fire on the very state this exists for. The
 // red band is accepted too, for a workspace without a session controller whose log never got the
 // hibernation row at all.
@@ -1393,7 +1422,7 @@ func (m *Manager) HibernateSession(workspace, sessionID string) error {
 	// and it is the earlier instant precisely so the benign answer is the one
 	// recorded, before the session-controller-exit tail can only guess.
 	if ok {
-		m.noteWiring(workspace, ssm.WiringHibernated, "hibernate_session")
+		m.noteConnectivity(workspace, d.sessionID, d.generationID, ssm.SessionConnectivityHibernated, "hibernate_session")
 	}
 	return m.stopShimSettlingTurn(workspace, sessionID, "hibernate_session", true)
 }
@@ -1447,7 +1476,7 @@ func (m *Manager) hibernate(workspace, wantSession string) error {
 	// keeps it from being overwritten. Reversing the two would repaint every
 	// hibernation blue immediately after it went teal, which is the whole split
 	// undone.
-	m.noteWiring(workspace, ssm.WiringHibernated, "hibernated")
+	m.noteConnectivity(workspace, d.sessionID, d.generationID, ssm.SessionConnectivityHibernated, "hibernated")
 	return m.stopShimSettlingTurn(workspace, d.sessionID, "hibernate", true)
 }
 
@@ -1522,12 +1551,29 @@ func (m *Manager) bringUp(workspace string) (*sessionController, error) {
 	if !ok {
 		return nil, fmt.Errorf("session-controller: workspace %q has no live session to drive", workspace)
 	}
+	generationID, err := m.newControllerGenerationID()
+	if err != nil {
+		m.logf("session-controller: controller generation mint FAILED ws=%q session=%s decision=abort_before_spawn error=%v",
+			workspace, sessionID, err)
+		return nil, err
+	}
+	if generationID == "" {
+		err := fmt.Errorf("session-controller: controller generation factory returned an empty id")
+		m.logf("session-controller: controller generation mint FAILED ws=%q session=%s decision=abort_before_spawn error=%v",
+			workspace, sessionID, err)
+		return nil, err
+	}
+	m.logf("session-controller: controller generation minted ws=%q session=%s generation=%s decision=begin_bring_up",
+		workspace, sessionID, generationID)
 	spawn, err := m.cfg.Spawner.EnsureShim(m.rootCtx, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("session-controller: ensure shim for session %s (ws %q): %w", sessionID, workspace, err)
 	}
 
-	d := &sessionController{sessionID: sessionID, workspace: workspace, faulted: make(chan struct{})}
+	d := &sessionController{
+		sessionID: sessionID, workspace: workspace,
+		generationID: generationID, faulted: make(chan struct{}),
+	}
 	cons := newConsumer(workspace, sessionID, m.cfg.Push, m.cfg.SSM, m.cfg.Progress, m.cfg.ClearCompactStore, m.logf, func(ss *corev1.SessionStarted) {
 		m.armMetaprompt(d, ss)
 		m.persistVendorSessionID(sessionID, ss.GetVendorSessionId())
@@ -1545,6 +1591,7 @@ func (m *Manager) bringUp(workspace string) (*sessionController, error) {
 	}, func() {
 		m.persistSessionDeath(sessionID, errclass.DeathReasonShimDied)
 	})
+	cons.generationID = generationID
 	// Every PERSISTENT store event names the conversation it belongs to.
 	// Keeping the record current off the live stream is what gives a later
 	// handshake's announcement something to DIFFER from — a rotation is
@@ -1593,10 +1640,12 @@ func (m *Manager) bringUp(workspace string) (*sessionController, error) {
 		FileDiagnostics: fileDiagnosticSink{persister: m.cfg.FileDiagnostics, workspace: workspace, agentReplSessionID: sessionID},
 		Degraded:        cons,
 		Permissions:     ph,
-		OnHandshake:     func(hello *corev1.ShimHello) error { return m.onHandshake(workspace, sessionID, hello) },
-		OnConnected:     func(hello *corev1.ShimHello) { m.onConnected(workspace, sessionID, hello) },
-		OnLinkLost:      func(cause error) { m.onLinkLost(workspace, sessionID, cause) },
-		Logf:            m.logf,
+		OnHandshake: func(hello *corev1.ShimHello) error {
+			return m.onHandshakeForGeneration(workspace, sessionID, generationID, hello)
+		},
+		OnConnected: func(hello *corev1.ShimHello) { m.onConnectedForGeneration(workspace, sessionID, generationID, hello) },
+		OnLinkLost:  func(cause error) { m.onLinkLostForGeneration(workspace, sessionID, generationID, cause) },
+		Logf:        m.logf,
 	})
 	d.client = client
 
@@ -1623,7 +1672,7 @@ func (m *Manager) bringUp(workspace string) (*sessionController, error) {
 	// winner has already earned. What is left uncovered is the spawn itself,
 	// which is a process exec; the window the user actually waits through is the
 	// handshake, and that is entirely after this point.
-	m.noteWiring(workspace, ssm.WiringStarting, "bring_up")
+	m.noteConnectivity(workspace, sessionID, generationID, ssm.SessionConnectivityConnecting, "bring_up")
 
 	// The spawner dropped a pointer to a conversation that does not exist, so
 	// this session is starting FRESH where the user expected continuity. Said
@@ -1698,10 +1747,10 @@ func (m *Manager) bringUp(workspace string) (*sessionController, error) {
 		// already correct on every clean path, and re-stating it can only be
 		// wrong.
 		if wasCurrent && runErr != nil {
-			m.noteWiring(workspace, ssm.WiringSevered, "session_controller_exit")
+			m.noteConnectivity(workspace, sessionID, generationID, ssm.SessionConnectivityUnavailable, "session_controller_exit")
 		}
 		if wasCurrent && runErr == nil {
-			m.logf("session-controller: session %s session controller exited CLEANLY ws=%q; leaving the wired axis to whoever asked for the teardown (a hibernation already recorded `hibernated`, a failed bring-up already recorded `severed`)",
+			m.logf("session-controller: session %s session controller exited CLEANLY ws=%q; leaving the legacy connectivity projection to whoever asked for the teardown (a hibernation already recorded `hibernated`, a failed bring-up already recorded `severed`)",
 				sessionID, workspace)
 		}
 		// A MANAGER CLOSE IS NOT A DEAD SESSION CONTROLLER, and stopping the shim here on
@@ -1850,28 +1899,22 @@ func (m *Manager) armMetaprompt(d *sessionController, ss *corev1.SessionStarted)
 //     any more.)
 //   - sessionController.metaCwd / backfill / systemInit / queue entries — carry no seq at
 //     all; a rotation does not change what they describe.
-func (m *Manager) onHandshake(workspace, sessionID string, hello *corev1.ShimHello) error {
+func (m *Manager) onHandshakeForGeneration(workspace, sessionID, generationID string, hello *corev1.ShimHello) error {
 	m.mu.Lock()
 	d, ok := m.byWS[workspace]
 	m.mu.Unlock()
-	if !ok || d.sessionID != sessionID {
+	if !ok || d.sessionID != sessionID || d.generationID != generationID {
 		err := fmt.Errorf("turn handshake has no matching live session controller")
-		m.logf("session-controller: turn handshake decision=reject_no_matching_session_controller ws=%s session=%s active_turn_ids=%v error=%v",
-			workspace, sessionID, hello.GetActiveTurnIds(), err)
-		if applyErr := m.cfg.SSM.ApplyConnectionDegraded(workspace, true, err.Error()); applyErr != nil {
-			m.logf("session-controller: surfacing unmatched turn handshake failed ws=%s session=%s: %v", workspace, sessionID, applyErr)
-		}
+		m.logf("session-controller: turn handshake decision=reject_no_matching_session_controller ws=%q session=%q generation=%q current_session=%q current_generation=%q active_turn_ids=%v error=%v",
+			workspace, sessionID, generationID, controllerSessionID(d), controllerGenerationID(d), hello.GetActiveTurnIds(), err)
 		return err
 	}
 	active, err := d.consumer.reconcileTurnHandshake(hello)
 	if err != nil {
 		reason := fmt.Sprintf("turn handshake correlation failed: %v", err)
-		m.logf("session-controller: turn handshake decision=reject_correlation ws=%s session=%s active_turn_ids=%v error=%v",
-			workspace, sessionID, hello.GetActiveTurnIds(), err)
-		if applyErr := m.cfg.SSM.ApplyConnectionDegraded(workspace, true, reason); applyErr != nil {
-			m.logf("session-controller: surfacing turn handshake correlation failure failed ws=%s session=%s: %v",
-				workspace, sessionID, applyErr)
-		}
+		m.logf("session-controller: turn handshake decision=reject_correlation ws=%q session=%q generation=%q active_turn_ids=%v error=%v",
+			workspace, sessionID, generationID, hello.GetActiveTurnIds(), err)
+		m.noteConnectivity(workspace, sessionID, generationID, ssm.SessionConnectivityUnavailable, "turn_handshake_correlation_failed")
 		return fmt.Errorf("%s", reason)
 	}
 	m.reconcileTurnSnapshot(d, active, hello)
@@ -1910,7 +1953,7 @@ func (m *Manager) onHandshake(workspace, sessionID string, hello *corev1.ShimHel
 	// axis honestly rather than letting a rotating workspace keep claiming a
 	// substrate that is mid-re-handshake; the ShimReady that follows re-opens it
 	// through onConnected.
-	m.noteWiring(workspace, ssm.WiringStarting, "session_rotating")
+	m.noteConnectivity(workspace, sessionID, generationID, ssm.SessionConnectivityConnecting, "session_rotating")
 	m.purgeRetainedOnRotation(workspace, sessionID, previous, csid)
 	m.clearTurnOnRotation(workspace, sessionID, previous, csid)
 	if err := m.cfg.SSM.ApplySessionRotated(workspace, previous, csid); err != nil {
@@ -1918,6 +1961,12 @@ func (m *Manager) onHandshake(workspace, sessionID string, hello *corev1.ShimHel
 			workspace, sessionID, previous, csid, err)
 	}
 	return nil
+}
+
+func (m *Manager) onHandshake(workspace, sessionID string, hello *corev1.ShimHello) error {
+	return m.onHandshakeForGeneration(
+		workspace, sessionID, m.currentControllerGeneration(workspace, sessionID), hello,
+	)
 }
 
 // reconcileTurnSnapshot restores the queue's process-local turn latch from the
@@ -2011,13 +2060,22 @@ func (m *Manager) clearTurnOnRotation(workspace, sessionID, previous, next strin
 // replays events from last_seen_seq on Subscribe, so the SSM re-derives turn
 // state from the replayed TurnStarted; this hook loud-logs the observation so a
 // reconciliation gap is visible rather than silent.
-func (m *Manager) onConnected(workspace, sessionID string, hello *corev1.ShimHello) {
+func (m *Manager) onConnectedForGeneration(workspace, sessionID, generationID string, hello *corev1.ShimHello) {
+	m.mu.Lock()
+	d, ok := m.byWS[workspace]
+	current := ok && d.sessionID == sessionID && d.generationID == generationID
+	m.mu.Unlock()
+	if !current {
+		m.logf("session-controller: stale ShimReady ignored ws=%q session=%q generation=%q current_session=%q current_generation=%q branch=retired_controller",
+			workspace, sessionID, generationID, controllerSessionID(d), controllerGenerationID(d))
+		return
+	}
 	// THE BRING-UP GATE CLOSED. This hook fires from the shim's ShimReady, the
 	// same frame AwaitReady resolves on, so "wired" here means exactly what
 	// "driveable" means everywhere else: session lock held, SDK query built,
 	// store producer link up, standing subscription open. It is the ONE opening
 	// edge of the axis, and nothing weaker may write it.
-	m.noteWiring(workspace, ssm.WiringWired, "shim_ready")
+	m.noteConnectivity(workspace, sessionID, generationID, ssm.SessionConnectivityOperational, "shim_ready")
 	// THE BRING-UP GATE IS CLOSED. Anything that fails from here is a
 	// mid-session fault, never an escapable bring-up failure.
 	m.noteWired(workspace, sessionID)
@@ -2035,6 +2093,12 @@ func (m *Manager) onConnected(workspace, sessionID string, hello *corev1.ShimHel
 	// again here — the link being back IS the event it was waiting for, which is
 	// why nothing sleeps or polls for it.
 	m.runPendingResync(workspace, sessionID)
+}
+
+func (m *Manager) onConnected(workspace, sessionID string, hello *corev1.ShimHello) {
+	m.onConnectedForGeneration(
+		workspace, sessionID, m.currentControllerGeneration(workspace, sessionID), hello,
+	)
 }
 
 // Close stops every controller, abandons pending permissions (no fabricated

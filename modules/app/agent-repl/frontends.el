@@ -2,7 +2,7 @@
 
 ;;; Commentary:
 
-;; The FRONTEND axis, mirroring backend.el's agent axis: a backend
+;; The FRONTEND axis, mirroring backend.el's session-status lifecycle: a backend
 ;; picks WHICH agent CLI runs (claude, codex), a frontend picks HOW the
 ;; session is presented and driven.  Today there is exactly one
 ;; registered frontend, the web GUI (daemon + SDK session + xwidget

@@ -17,7 +17,7 @@ import (
 // (ShimHello.vendor_session_id), and bounces the connection deliberately when
 // the vendor rotates it. This hook runs BEFORE the resubscribe reads its
 // position, and moves three things together: the registry (uuid + cursors), the
-// queue's turn observation, and the SSM's agent axis.
+// queue's turn observation, and the SSM's session-status lifecycle.
 // ---------------------------------------------------------------------------
 
 // hello builds a ShimHello announcing vendorSessionID for session "s1".
@@ -139,7 +139,7 @@ func TestRotationDropsAStandingInterruptMark(t *testing.T) {
 	}
 }
 
-func TestRotationReconcilesTheSSMAgentAxis(t *testing.T) {
+func TestRotationReconcilesTheSSMSessionStatus(t *testing.T) {
 	// Arrange — the SSM holds its own `thinking` row for the same turn, and
 	// resolves the workspace off it.
 	h := newQueueHarness(t, nil)

@@ -21,7 +21,7 @@ func newTestDB(t *testing.T) *sql.DB {
 	return db
 }
 
-// newWiredTestDB is newTestDB with WORKSPACE already on the WIRED axis, at an
+// newWiredTestDB is newTestDB with WORKSPACE already on the legacy connectivity projection, at an
 // `at` below every seed a test appends.
 //
 // Almost every resolution test is about an axis ABOVE the wiring — which agent
@@ -29,7 +29,7 @@ func newTestDB(t *testing.T) *sql.DB {
 // can be asked at all of an unwired workspace, because `severed` (rank 12)
 // outranks every one of those candidates by construction: that is the whole
 // point of the connection-truth law. So the wiring is arranged, once, here, and
-// the tests that are genuinely ABOUT the wired axis use newTestDB directly.
+// the tests that are genuinely ABOUT the legacy connectivity projection use newTestDB directly.
 func newWiredTestDB(t *testing.T, workspace string) *sql.DB {
 	t.Helper()
 	db := newTestDB(t)
@@ -83,7 +83,7 @@ func TestResolvePrecedence(t *testing.T) {
 			want: frontendv1.RenderState_RENDER_STATE_MERGE_FAILED,
 		},
 		{
-			name: "merged shows when no agent axis present",
+			name: "merged shows when no session-status lifecycle present",
 			sigs: []sig{{sigMerged, causeMergeTransition, 1}},
 			want: frontendv1.RenderState_RENDER_STATE_MERGED,
 		},
@@ -137,7 +137,7 @@ func TestResolvePrecedence(t *testing.T) {
 			want: frontendv1.RenderState_RENDER_STATE_VENDOR_BLOCKED,
 		},
 		{
-			// The wired axis's own two blue tokens. `starting` says a bring-up
+			// The legacy connectivity projection's own two blue tokens. `starting` says a bring-up
 			// is in flight; `severed` says nothing is, nothing is wired, and
 			// something broke.
 			name: "starting is bring-up",

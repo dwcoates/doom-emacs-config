@@ -77,6 +77,8 @@ function input(over: Partial<FooterInput> = {}): FooterInput {
   return {
     progress: progress(),
     renderState: "idle",
+    connectivity: "operational",
+    sessionStatus: "ready",
     agents: [],
     tasks: [],
     items: [],
@@ -891,6 +893,20 @@ describe("footerHtml: the phase comes from the workspace state (F5)", () => {
     // Assert
     expect(got).toContain("ready");
     expect(got).not.toContain("starting");
+  });
+
+  it("subordinates session activity beneath impaired connectivity", () => {
+    const got = footerHtml(
+      input({
+        renderState: "degraded",
+        connectivity: "degraded",
+        sessionStatus: "thinking",
+      }),
+      CLOSED,
+      NOW,
+    );
+    expect(got).toContain("degraded");
+    expect(got).toContain('<span class="pfooter-secondary">thinking</span>');
   });
 
   it("names no phase at all before a state has been resolved", () => {

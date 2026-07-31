@@ -194,7 +194,7 @@ func TestUserInterruptConcludesGreen(t *testing.T) {
 }
 
 // A clean turn simply reports its own outcome. Nothing releases anything:
-// the newer agent-axis row is the whole mechanism.
+// the newer session-status lifecycle row is the whole mechanism.
 func TestCleanTurnAfterABlockReportsDone(t *testing.T) {
 	// Arrange — blocked by an auth failure.
 	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
@@ -218,7 +218,7 @@ func TestCleanTurnAfterABlockReportsDone(t *testing.T) {
 // vendor_blocked as a TURN OUTCOME, not a latch
 //
 // `vendor_blocked` reports HOW the last turn ended, exactly as `done` reports
-// that it ended cleanly. It shares the agent axis with `done`, has no
+// that it ended cleanly. It shares the session-status lifecycle with `done`, has no
 // clearing token, and is superseded by whatever the agent does next.
 //
 // Modeling it as an independent latched axis was a defect with no correct
@@ -283,7 +283,7 @@ func TestAbnormalTurnEndWritesExactlyOneAgentRow(t *testing.T) {
 	}
 	defer db.Close()
 	// The wiring arrangement's own row is dropped: this asserts what the TURN
-	// END wrote, and the wired axis is a different axis entirely.
+	// END wrote, and the legacy connectivity projection is a different axis entirely.
 	got := agentRowsOnly(rowsFor(t, db, "ws1"))
 	want := [][2]string{{sigVendorBlocked, causeVendorBlocked}}
 	if !reflect.DeepEqual(got, want) {
@@ -404,7 +404,7 @@ func TestBlueOutranksVendorBlocked(t *testing.T) {
 	}
 }
 
-// `dead` is blue, but it shares the AGENT axis with `vendor_blocked`, so
+// `dead` is blue, but it shares the session-status lifecycle with `vendor_blocked`, so
 // recency settles it rather than rank — the same way `dead` already supersedes
 // `done`. A shim that dies after a blocked turn reads dead, which is both the
 // newer fact and the stronger claim.
@@ -457,8 +457,8 @@ func TestMergeStatesOutrankVendorBlocked(t *testing.T) {
 	}
 }
 
-// Rank 20 still does its job downward: with every non-agent axis CLEARED,
-// nothing competes and the purple stands. Moving it to the agent axis changed
+// Rank 20 still does its job downward: with every non-session-status lifecycle CLEARED,
+// nothing competes and the purple stands. Moving it to the session-status lifecycle changed
 // which rows supersede it, never where it sits in the ladder.
 func TestVendorBlockedStandsWhenEveryOtherAxisIsClear(t *testing.T) {
 	// Arrange.
@@ -524,11 +524,9 @@ func TestHistoricalVendorClearRowsAreInert(t *testing.T) {
 		t.Fatalf("Open over a pre-remodel database: %v", err)
 	}
 	t.Cleanup(func() { m.Close() })
-	// The reopen marked the restored workspace hibernated; the legacy row's
-	// inertness is what is under test, so the wiring is restored.
-	if err := m.ApplyWired("ws1", WiringWired, "test arrangement"); err != nil {
-		t.Fatalf("ApplyWired: %v", err)
-	}
+	// The legacy row's inertness is observed after a new controller generation
+	// establishes itself.
+	connectOperational(t, m, "ws1", "s1", "generation-reopen")
 
 	// Assert — the live turn wins; the legacy row contributed nothing.
 	if got := mustCurrent(t, m, "ws1").State; got != frontendv1.RenderState_RENDER_STATE_THINKING {

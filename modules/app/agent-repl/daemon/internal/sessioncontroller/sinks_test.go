@@ -150,7 +150,7 @@ type fakeApplier struct {
 	interruptMarks   []string
 	interruptMarkErr error
 	// rotations records one entry per ApplySessionRotated call — the vendor
-	// session uuid rotations the session controller reconciled onto the agent axis.
+	// session uuid rotations the session controller reconciled onto the session-status lifecycle.
 	rotations   []rotationCall
 	rotationErr error
 	// cuts records one entry per ApplyClearing / ApplyCompacting call — the
@@ -164,15 +164,19 @@ type fakeApplier struct {
 	// wirings records one entry per ApplyWired call — every edge of the WIRED
 	// axis this package produces (bring-up, ShimReady, exit, hibernation,
 	// rotation bounce).
-	wirings  []wiringCall
-	wiredErr error
+	wirings           []wiringCall
+	wiredErr          error
+	connectivityEdges []connectivityCall
+	connectivityErr   error
+	faultEdges        []runtimeFaultCall
+	faultErr          error
 	// current is what Current resolves per workspace — the hibernation settled
 	// guard's only input. Absent means "nothing resolved", which is what every
 	// test that does not care about the guard wants.
 	current    map[string]*frontendv1.WorkspaceState
 	currentErr error
 	// staleTurnCloses records one entry per CloseStaleTurn call — the
-	// teardown's guaranteed agent-axis close, which is what makes a
+	// teardown's guaranteed session-status lifecycle close, which is what makes a
 	// daemon-initiated shim stop unable to strand a live turn.
 	staleTurnCloses []staleTurnCloseCall
 	staleTurnClosed bool
@@ -184,6 +188,20 @@ type wiringCall struct {
 	workspace string
 	wiring    ssm.Wiring
 	reason    string
+}
+
+type connectivityCall struct {
+	workspace, sessionID, generationID string
+	state                              ssm.SessionConnectivity
+	causeKind                          string
+}
+
+type runtimeFaultCall struct {
+	workspace, sessionID, generationID string
+	component, faultType               string
+	impact                             ssm.FaultImpact
+	open                               bool
+	causeKind                          string
 }
 
 // permissionCall is one permission-row edge the session controller applied.
@@ -287,7 +305,7 @@ func (f *fakeApplier) MarkTurnInterrupted(workspace string) error {
 }
 
 // ApplySessionRotated records the vendor session rotations reconciled onto the
-// agent axis.
+// session-status lifecycle.
 func (f *fakeApplier) ApplySessionRotated(workspace, previous, next string) error {
 	f.reconcMutex.Lock()
 	defer f.reconcMutex.Unlock()
@@ -326,6 +344,50 @@ func (f *fakeApplier) ApplyWired(workspace string, wiring ssm.Wiring, reason str
 	return f.wiredErr
 }
 
+func (f *fakeApplier) ApplySessionConnectivity(
+	workspace, sessionID, generationID string,
+	state ssm.SessionConnectivity,
+	causeKind string,
+) error {
+	f.reconcMutex.Lock()
+	defer f.reconcMutex.Unlock()
+	f.connectivityEdges = append(f.connectivityEdges, connectivityCall{
+		workspace: workspace, sessionID: sessionID, generationID: generationID,
+		state: state, causeKind: causeKind,
+	})
+	legacy := map[ssm.SessionConnectivity]ssm.Wiring{
+		ssm.SessionConnectivityConnecting:  ssm.WiringStarting,
+		ssm.SessionConnectivityOperational: ssm.WiringWired,
+		ssm.SessionConnectivityHibernated:  ssm.WiringHibernated,
+		ssm.SessionConnectivityUnavailable: ssm.WiringSevered,
+	}
+	if wiring, ok := legacy[state]; ok {
+		f.wirings = append(f.wirings, wiringCall{workspace: workspace, wiring: wiring, reason: causeKind})
+	}
+	return f.connectivityErr
+}
+
+func (f *fakeApplier) ApplyRuntimeFault(
+	workspace, sessionID, generationID, component, faultType string,
+	impact ssm.FaultImpact,
+	open bool,
+	causeKind string,
+) error {
+	f.reconcMutex.Lock()
+	defer f.reconcMutex.Unlock()
+	f.faultEdges = append(f.faultEdges, runtimeFaultCall{
+		workspace: workspace, sessionID: sessionID, generationID: generationID,
+		component: component, faultType: faultType, impact: impact,
+		open: open, causeKind: causeKind,
+	})
+	if impact == ssm.FaultImpactConnectivity {
+		f.degradations = append(f.degradations, degradedCall{
+			workspace: workspace, degraded: open, reason: causeKind,
+		})
+	}
+	return f.faultErr
+}
+
 // Current is the one READ on the applier, used only by the hibernation settled
 // guard. The zero value answers "nothing resolved", which the guard treats as a
 // workspace with no turn to interrupt — so a test arranges an unsettled workspace
@@ -351,7 +413,7 @@ type staleTurnCloseCall struct {
 	soleSessionController bool
 }
 
-// CloseStaleTurn records the teardown's guaranteed agent-axis close. The zero
+// CloseStaleTurn records the teardown's guaranteed session-status lifecycle close. The zero
 // value answers "there was nothing stale to close", which is what every test
 // that does not care about the invariant wants; a test exercising it sets
 // staleTurnClosed or staleTurnErr.

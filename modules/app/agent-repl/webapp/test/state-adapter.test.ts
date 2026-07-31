@@ -32,6 +32,19 @@ function applyOne(obj: unknown): AdapterEffect[] {
   return new StateAdapter().apply(frame(obj));
 }
 
+function workspaceState(over: Record<string, unknown>): Record<string, unknown> {
+  return {
+    workspace: "ws-a",
+    sessionId: "s1",
+    state: "RENDER_STATE_READY",
+    connectivity: "SESSION_CONNECTIVITY_OPERATIONAL",
+    status: "SESSION_STATUS_READY",
+    controllerGenerationId: "g1",
+    activeFaults: [],
+    ...over,
+  };
+}
+
 /** The store items a single conversation item decomposes into. */
 function itemsFrom(item: Record<string, unknown>): ConversationItem[] {
   const effects = applyOne({ conversationDelta: { sessionId: "s1", workspace: "ws", throughSeq: "9", items: [item] } });
@@ -45,17 +58,16 @@ function itemsFrom(item: Record<string, unknown>): ConversationItem[] {
 describe("WorkspaceState mapping", () => {
   it("maps the render state to its keyword and converts inputs", () => {
     const effects = applyOne({
-      workspaceState: {
-        workspace: "ws-a",
-        sessionId: "s1",
+      workspaceState: workspaceState({
         state: "RENDER_STATE_THINKING",
+        status: "SESSION_STATUS_THINKING",
         turnActive: true,
         liveTaskCount: "2",
         mergePhase: "cherry-pick",
         causeKind: "prompt_accepted",
         causeSeq: "17",
         atMs: "1234",
-      },
+      }),
     });
     expect(effects).toEqual([
       {
@@ -70,6 +82,10 @@ describe("WorkspaceState mapping", () => {
           causeKind: "prompt_accepted",
           causeSeq: 17,
           atMs: 1234,
+          connectivity: "operational",
+          sessionStatus: "thinking",
+          controllerGenerationId: "g1",
+          activeFaults: [],
         },
       },
     ]);
@@ -81,21 +97,19 @@ describe("WorkspaceState mapping", () => {
 
     adapter.apply(
       frame({
-        workspaceState: {
-          workspace: "ws-a",
-          sessionId: "s1",
+        workspaceState: workspaceState({
           state: "RENDER_STATE_READY",
           causeKind: "session_started",
           causeSeq: "9",
           atMs: "1234",
-        },
+        }),
       }),
     );
 
     expect(lines).toEqual([
       expect.stringContaining(
-        "proto=READY keyword=ready turn_active=false live_tasks=0 merge_phase= " +
-          "cause_kind=session_started cause_seq=9 at_ms=1234",
+        "connectivity=operational status=ready proto=READY keyword=ready turn_active=false live_tasks=0 merge_phase= " +
+          "faults=none cause_kind=session_started cause_seq=9 at_ms=1234",
       ),
     ]);
   });
@@ -104,7 +118,7 @@ describe("WorkspaceState mapping", () => {
     // Arrange / Act — the two context cuts share thinking's color, so only the
     // keyword can carry the distinction through to the footer's phase word.
     const effects = applyOne({
-      workspaceState: { workspace: "ws-a", sessionId: "s1", state: "RENDER_STATE_CLEARING" },
+      workspaceState: workspaceState({ state: "RENDER_STATE_CLEARING" }),
     });
     // Assert
     expect(effects[0]).toMatchObject({ kind: "workspace-state", value: { state: "clearing" } });
@@ -113,7 +127,7 @@ describe("WorkspaceState mapping", () => {
   it("decodes RENDER_STATE_COMPACTING into its own keyword", () => {
     // Arrange / Act
     const effects = applyOne({
-      workspaceState: { workspace: "ws-a", sessionId: "s1", state: "RENDER_STATE_COMPACTING" },
+      workspaceState: workspaceState({ state: "RENDER_STATE_COMPACTING" }),
     });
     // Assert
     expect(effects[0]).toMatchObject({ kind: "workspace-state", value: { state: "compacting" } });
@@ -133,7 +147,7 @@ describe("WorkspaceState mapping", () => {
   ];
   for (const [proto, keyword] of keywordCases) {
     it(`maps ${proto} to '${keyword}'`, () => {
-      const effects = applyOne({ workspaceState: { workspace: "w", sessionId: "s", state: proto } });
+      const effects = applyOne({ workspaceState: workspaceState({ workspace: "w", sessionId: "s", state: proto }) });
       expect(effects[0]).toMatchObject({ kind: "workspace-state", value: { state: keyword } });
     });
   }
@@ -287,7 +301,7 @@ describe("StateSnapshot mapping", () => {
   it("fans out into per-workspace / per-session / per-catalog / per-init effects", () => {
     const effects = applyOne({
       snapshot: {
-        workspaces: [{ workspace: "w", sessionId: "s", state: "RENDER_STATE_IDLE" }],
+        workspaces: [workspaceState({ workspace: "w", sessionId: "s", state: "RENDER_STATE_IDLE" })],
         sessions: [{ workspace: "w", sessionId: "s", model: "m", modelOptions: [] }],
         catalogs: [{ workspace: "w", sessionId: "s", tasks: [] }],
         inits: [{ workspace: "w", sessionId: "s", init: { model: "m" } }],

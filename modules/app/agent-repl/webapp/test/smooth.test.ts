@@ -67,6 +67,10 @@ function state(items: ConversationItem[]): StoreState {
     taskSummary: null,
     lastSeq: 0,
     renderState: null,
+    sessionConnectivity: null,
+    sessionStatus: null,
+    controllerGenerationId: "",
+    activeFaults: [],
   };
 }
 
