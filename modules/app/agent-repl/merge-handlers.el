@@ -49,7 +49,12 @@
 (declare-function agent-repl--uds-send-command "frontend-uds"
                   (field payload &optional workspace process))
 (declare-function agent-repl--uds-track-command "frontend-uds"
-                  (request-id field workspace &optional on-failure))
+                  (request-id field workspace
+                              &optional on-failure on-success on-challenge))
+(declare-function agent-repl--host-action-defer "workspace-create-client"
+                  (token))
+(declare-function agent-repl--host-action-settle "workspace-create-client"
+                  (token ok error-text))
 
 (defvar agent-repl--merge-handler-registry nil
   "Alist mapping handler symbol → handler function.
@@ -366,13 +371,24 @@ callback clears the dispatch marker.  Returns the request-id."
       (agent-repl--log ws
                         "merge-dispatch-cherry-pick-over-uds: ws=%s command-issued request-id=%s dispatch-marker=t"
                         ws req)
+      ;; THE HOST ACTION'S OUTCOME IS THIS COMMAND'S ACK, not this dispatch.
+      ;; Returning here without deferring is what let the daemon record a merge
+      ;; as `ok=true' 52ms before its own rejection arrived, so the failure that
+      ;; killed every merge left no trace on the workspace at all.
+      (agent-repl--host-action-defer req)
       (agent-repl--uds-track-command
        req "mergeWorkspace" ws
        (lambda (err)
          (agent-repl--ws-put ws :daemon-merge-dispatched nil)
+         (agent-repl--host-action-settle req nil err)
          (agent-repl--log ws
                            "merge-dispatch-cherry-pick-over-uds: ws=%s command REJECTED err=%s — cleared dispatch marker"
-                           ws err)))
+                           ws err))
+       (lambda ()
+         (agent-repl--host-action-settle req t nil)
+         (agent-repl--log ws
+                           "merge-dispatch-cherry-pick-over-uds: ws=%s request-id=%s command ACKED — host action completed on the merge's own outcome"
+                           ws req)))
       (agent-repl--log ws
                         "merge-dispatch-cherry-pick-over-uds: ws=%s request-id=%s tracking-registered"
                         ws req)

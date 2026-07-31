@@ -409,7 +409,7 @@ Source-dir /src, target-dir /tgt, branch DWC/foo, base BASE-SHA."
         (cl-letf (((symbol-function 'agent-repl--uds-send-command)
                    (lambda (&rest _) "req-9"))
                   ((symbol-function 'agent-repl--uds-track-command)
-                   (lambda (req field ws &optional _cb)
+                   (lambda (req field ws &optional _fail _ok _challenge)
                      (setq tracked (list req field ws)))))
           (agent-repl--merge-dispatch-cherry-pick-over-uds "DWC/foo")
           (should (equal tracked '("req-9" "mergeWorkspace" "DWC/foo"))))))))
@@ -423,12 +423,72 @@ Source-dir /src, target-dir /tgt, branch DWC/foo, base BASE-SHA."
         (cl-letf (((symbol-function 'agent-repl--uds-send-command)
                    (lambda (&rest _) "req-1"))
                   ((symbol-function 'agent-repl--uds-track-command)
-                   (lambda (_req _field _ws &optional cb) (setq on-failure cb))))
+                   (lambda (_req _field _ws &optional cb &rest _)
+                     (setq on-failure cb))))
           (agent-repl--merge-dispatch-cherry-pick-over-uds "DWC/foo")
           (should (eq (agent-repl--ws-get "DWC/foo" :daemon-merge-dispatched) t))
           ;; Simulate a rejected ack
           (funcall on-failure "branch not found")
           (should-not (agent-repl--ws-get "DWC/foo" :daemon-merge-dispatched)))))))
+
+;;;; ---- Tests: the host action waits for the merge's own outcome ----
+;;
+;; The dispatch returns long before the daemon answers, so a host action
+;; completed on the dispatch reports a merge that has not happened yet. These
+;; cover the deferral that closes that gap.
+
+(ert-deftest agent-repl-test-cherry-pick-dispatch-defers-its-host-action ()
+  "The dispatch declares its outcome unknown rather than letting it read OK."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "DWC/foo" :project-dir "/src")
+    (let (deferred)
+      (agent-repl-test--with-mocked-merge-geometry
+        (cl-letf (((symbol-function 'agent-repl--uds-send-command)
+                   (lambda (&rest _) "req-9"))
+                  ((symbol-function 'agent-repl--uds-track-command)
+                   (lambda (&rest _) nil))
+                  ((symbol-function 'agent-repl--host-action-defer)
+                   (lambda (token) (setq deferred token))))
+          (agent-repl--merge-dispatch-cherry-pick-over-uds "DWC/foo")
+          (should (equal deferred "req-9")))))))
+
+(ert-deftest agent-repl-test-cherry-pick-ack-failure-settles-the-host-action ()
+  "A rejected merge ack completes the deferred host action as FAILED."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "DWC/foo" :project-dir "/src")
+    (let (on-failure settled)
+      (agent-repl-test--with-mocked-merge-geometry
+        (cl-letf (((symbol-function 'agent-repl--uds-send-command)
+                   (lambda (&rest _) "req-1"))
+                  ((symbol-function 'agent-repl--uds-track-command)
+                   (lambda (_req _field _ws &optional cb &rest _)
+                     (setq on-failure cb)))
+                  ((symbol-function 'agent-repl--host-action-defer)
+                   (lambda (_token) nil))
+                  ((symbol-function 'agent-repl--host-action-settle)
+                   (lambda (token ok text) (setq settled (list token ok text)))))
+          (agent-repl--merge-dispatch-cherry-pick-over-uds "DWC/foo")
+          (funcall on-failure "resolve dirs: not wired")
+          (should (equal settled '("req-1" nil "resolve dirs: not wired"))))))))
+
+(ert-deftest agent-repl-test-cherry-pick-ack-success-settles-the-host-action ()
+  "An accepted merge ack completes the deferred host action as OK."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "DWC/foo" :project-dir "/src")
+    (let (on-success settled)
+      (agent-repl-test--with-mocked-merge-geometry
+        (cl-letf (((symbol-function 'agent-repl--uds-send-command)
+                   (lambda (&rest _) "req-1"))
+                  ((symbol-function 'agent-repl--uds-track-command)
+                   (lambda (_req _field _ws &optional _cb ok-cb &rest _)
+                     (setq on-success ok-cb)))
+                  ((symbol-function 'agent-repl--host-action-defer)
+                   (lambda (_token) nil))
+                  ((symbol-function 'agent-repl--host-action-settle)
+                   (lambda (token ok text) (setq settled (list token ok text)))))
+          (agent-repl--merge-dispatch-cherry-pick-over-uds "DWC/foo")
+          (funcall on-success)
+          (should (equal settled '("req-1" t nil))))))))
 
 ;;;; ---- Tests: resolve-and-continue over UDS ----
 
