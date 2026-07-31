@@ -7,7 +7,7 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// ApplySessionRotated — the agent axis across a VENDOR SESSION UUID ROTATION.
+// ApplySessionRotated — the session-status lifecycle across a VENDOR SESSION UUID ROTATION.
 //
 // The vendor retires one transcript identity mid-stream and mints another (a
 // `/clear` does exactly this). The turn that was running can never report its
@@ -57,7 +57,7 @@ func TestRotationReportsIdleRatherThanDone(t *testing.T) {
 	}
 }
 
-func TestRotationLeavesASettledAgentAxisAlone(t *testing.T) {
+func TestRotationLeavesSettledSessionStatusAlone(t *testing.T) {
 	// Arrange — no turn in flight. There is nothing stuck to unstick, and
 	// appending `idle` over `done` would discard a more specific true fact.
 	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})

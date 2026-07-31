@@ -61,12 +61,15 @@ and the SessionView store is cleared first so tests do not contaminate."
                   (format "req-%d" (cl-incf uds-counter))))
                ((symbol-function 'agent-repl--uds-track-command)
                 (lambda (request-id field workspace &optional on-failure on-success)
-                  (when (equal field "createSession")
+                  (cond
+                   ((equal field "createSession")
                     (if (plist-get uds-outcome :error)
                         (when on-failure (funcall on-failure (plist-get uds-outcome :error)))
                       (agent-repl--frontend-store-session-view
                        (list :sessionId (plist-get uds-outcome :id) :workspace workspace))
                       (when on-success (funcall on-success))))
+                   ((equal field "openWorkspace")
+                    (when on-success (funcall on-success))))
                   request-id))
                ((symbol-function 'agent-repl--frontend-await-uds)
                 (lambda (predicate &rest _) (funcall predicate))))
@@ -879,7 +882,7 @@ anything: with it off the logging ladder never resolves an identity at all."
 ;;;; ---- ensure-session ----------------------------------------------------------
 
 (ert-deftest agent-repl-test-frontend-ensure-session-reuses-live-id ()
-  "A recorded id whose pushed SessionView is still live is reused; no create."
+  "A recorded live id is woken through `openWorkspace' before reuse."
   ;; Arrange
   (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_live" :project-dir "/w")
     (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&optional _f) t))
@@ -888,9 +891,46 @@ anything: with it off the logging ladder never resolves an identity at all."
         (agent-repl--frontend-store-session-view '(:sessionId "s_live" :workspace "/w"))
         ;; Act
         (let ((id (agent-repl--frontend-ensure-session "ws1")))
-          ;; Assert — the live binding is reused, no createSession sent.
+          ;; Assert — the live binding is reused only after the daemon has
+          ;; ensured its existing controller.
           (should (equal id "s_live"))
-          (should (null uds-commands)))))))
+          (should (equal uds-commands
+                         '(("openWorkspace" nil "/w")))))))))
+
+(ert-deftest agent-repl-test-frontend-await-open-workspace-rejection-is-loud ()
+  "A rejected wake aborts instead of letting presentation continue."
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+    (let (untracked)
+      (cl-letf (((symbol-function 'agent-repl--uds-send-command)
+                 (lambda (&rest _) "wake-1"))
+                ((symbol-function 'agent-repl--uds-track-command)
+                 (lambda (_id _field _workspace on-failure &rest _)
+                   (funcall on-failure "controller bring-up failed")))
+                ((symbol-function 'agent-repl--frontend-await-uds)
+                 (lambda (predicate &rest _) (funcall predicate)))
+                ((symbol-function 'agent-repl--uds-untrack-command)
+                 (lambda (&rest args) (setq untracked args))))
+        (let ((err (should-error
+                    (agent-repl--frontend-await-open-workspace "ws1"))))
+          (should (string-match-p "controller bring-up failed"
+                                  (error-message-string err)))
+          (should-not untracked))))))
+
+(ert-deftest agent-repl-test-frontend-await-open-workspace-timeout-is-loud ()
+  "A timed-out wake is untracked and aborts presentation."
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+    (let (untracked)
+      (cl-letf (((symbol-function 'agent-repl--uds-send-command)
+                 (lambda (&rest _) "wake-2"))
+                ((symbol-function 'agent-repl--uds-track-command)
+                 (lambda (&rest _) nil))
+                ((symbol-function 'agent-repl--frontend-await-uds)
+                 (lambda (&rest _) nil))
+                ((symbol-function 'agent-repl--uds-untrack-command)
+                 (lambda (&rest args) (setq untracked args))))
+        (should-error (agent-repl--frontend-await-open-workspace "ws1"))
+        (should (equal untracked
+                       '("wake-2" "ws1" "open-workspace-timeout")))))))
 
 (ert-deftest agent-repl-test-frontend-ensure-session-creates-when-stale ()
   "A recorded id with no live pushed SessionView is replaced via createSession."

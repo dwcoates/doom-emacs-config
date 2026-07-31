@@ -10,7 +10,7 @@ import (
 // ResolveTurnLifecycle durably validates and records one STREAM turn boundary.
 //
 // The ledger is separate from workspace_state because queued turns have
-// multiple simultaneous identities while the rendered agent axis remains one
+// multiple simultaneous identities while the rendered session-status lifecycle remains one
 // `thinking` claim. Completed claims remain as replay receipts: if the daemon
 // crashes after recording a boundary but before advancing last_seen_seq, the
 // replayed event is admitted only when both its identity and seq match the
@@ -232,7 +232,7 @@ func (m *Manager) ReconcileTurnHandshake(workspace, claimantSessionID string, id
 	m.logf("ssm: turn handshake decision=accept workspace=%s claimant_session=%s hello_ids=%v legacy_active=%v durable_before=%v durable_after=%v",
 		workspace, claimantSessionID, ids, legacyActive, before, after)
 
-	// THE HANDSHAKE SNAPSHOT IS AUTHORITATIVE OVER THE AGENT AXIS TOO, and this
+	// THE HANDSHAKE SNAPSHOT IS AUTHORITATIVE OVER THE session-status lifecycle TOO, and this
 	// is the edge that was missing. A shim reporting zero turn ids is stating,
 	// from the only vantage point that can, that nothing is running behind it —
 	// the same statement already trusted to seed `turn_lifecycle_claim` above
@@ -259,7 +259,7 @@ func (m *Manager) ReconcileTurnHandshake(workspace, claimantSessionID string, id
 			// reconciliation above has already committed and DaemonHello is
 			// gated on this call's error, so returning here would refuse a
 			// perfectly good session over a stale row it merely failed to tidy.
-			m.logf("ssm: closing the stale turn on the shim handshake FAILED workspace=%s claimant_session=%s hello_ids=%v: %v — the agent axis may stay latched in `thinking` until the next edge supersedes it",
+			m.logf("ssm: closing the stale turn on the shim handshake FAILED workspace=%s claimant_session=%s hello_ids=%v: %v — the session-status lifecycle may stay latched in `thinking` until the next edge supersedes it",
 				workspace, claimantSessionID, ids, err)
 		}
 	}

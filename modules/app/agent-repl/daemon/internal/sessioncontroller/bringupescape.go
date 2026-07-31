@@ -4,7 +4,7 @@
 // THE DEFECT. A record naming a vendor conversation with no transcript made
 // every bring-up run `claude --resume <uuid>`; the CLI exited 1, the shim shut
 // down with `sdk_error`, and the connection died before ShimReady. Nothing
-// closed the WIRED axis — the axis has an opening edge at ShimReady and close
+// closed the legacy connectivity projection — the axis has an opening edge at ShimReady and close
 // edges for hibernation and controller exit, and a shim that dies mid-handshake
 // while the client loops waiting to reconnect is none of those — so the
 // workspace stayed blue-on-`starting` with no card, no error, and no end.
@@ -184,12 +184,12 @@ func (m *Manager) tearDownFailedBringUp(workspace string, d *sessionController) 
 // teardown here cancels the session controller ctx, ending Run with nil, and this row is
 // already the truer answer that tail would otherwise overwrite.
 func (m *Manager) resolveStartFailed(workspace string, d *sessionController, cause error) {
-	m.logf("session-controller: START FAILED ws=%q session=%s — the wiring is resolved rather than left in `starting`: %v",
-		workspace, d.sessionID, cause)
+	m.logf("session-controller: START FAILED ws=%q session=%s generation=%s connectivity=unavailable cause=%v branch=bring_up_failed",
+		workspace, d.sessionID, d.generationID, cause)
 	if d.consumer != nil {
 		d.consumer.pushFailure(d.consumer.startFailedUUID(), errclass.StartFailed(cause.Error()))
 	}
-	m.noteWiring(workspace, ssm.WiringSevered, "bring_up_failed")
+	m.noteConnectivity(workspace, d.sessionID, d.generationID, ssm.SessionConnectivityUnavailable, "bring_up_failed")
 }
 
 // pushHistoryMissingNote tells the user, in their own feed, that the

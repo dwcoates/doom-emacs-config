@@ -49,9 +49,11 @@ func ssmResolved(frame *frontendv1.FrontendFrame, workspace string, state fronte
 	return st.GetState() == state && strings.HasPrefix(st.GetCauseKind(), causePrefix)
 }
 
-// askQuestion submits a `!tool` prompt and returns once the shim's canUseTool
-// has reached the frontend as a PENDING permission item, handing back that
-// item's uuid — which IS the permission request id the answer is keyed by.
+// askQuestion submits a `!tool` prompt and returns once BOTH authoritative
+// consequences have reached the frontend: the PENDING permission item and the
+// SSM-resolved PERMISSION state. Their producers are independent and either
+// may arrive first, so one await must retain both observations rather than
+// consuming whichever came first while waiting only for the other.
 func askQuestion(t *testing.T, conn *websocket.Conn, workspace, requestID, command string) string {
 	t.Helper()
 	var permID string
@@ -65,6 +67,9 @@ func askQuestion(t *testing.T, conn *websocket.Conn, workspace, requestID, comma
 				}
 			}
 			return false
+		},
+		"a WorkspaceState the SSM resolved to PERMISSION": func(frame *frontendv1.FrontendFrame) bool {
+			return ssmResolved(frame, workspace, frontendv1.RenderState_RENDER_STATE_PERMISSION, "permission")
 		},
 	})
 	return permID
@@ -83,15 +88,9 @@ func TestE2EPendingPermissionResolvesThePermissionState(t *testing.T) {
 	h := newUDSHarness(t)
 	_, conn, _, _ := liveSession(t, h, cwd)
 
-	// Act — a turn that stops to ask.
+	// Act / Assert — a turn that stops to ask, with both its item and
+	// authoritative state observed regardless of arrival order.
 	askQuestion(t, conn, cwd, "r-ask", "ls e2e-permission")
-
-	// Assert — green, and the agent is waiting on the user.
-	awaitAll(t, conn, nil, map[string]func(*frontendv1.FrontendFrame) bool{
-		"a WorkspaceState the SSM resolved to PERMISSION": func(frame *frontendv1.FrontendFrame) bool {
-			return ssmResolved(frame, cwd, frontendv1.RenderState_RENDER_STATE_PERMISSION, "permission")
-		},
-	})
 }
 
 // TestE2EAnsweredPermissionReturnsToThinking covers THE CLOSING EDGE: answering
@@ -104,11 +103,6 @@ func TestE2EAnsweredPermissionReturnsToThinking(t *testing.T) {
 	h := newUDSHarness(t)
 	_, conn, _, _ := liveSession(t, h, cwd)
 	permID := askQuestion(t, conn, cwd, "r-ask", "ls e2e-permission")
-	awaitAll(t, conn, nil, map[string]func(*frontendv1.FrontendFrame) bool{
-		"a WorkspaceState the SSM resolved to PERMISSION": func(frame *frontendv1.FrontendFrame) bool {
-			return ssmResolved(frame, cwd, frontendv1.RenderState_RENDER_STATE_PERMISSION, "permission")
-		},
-	})
 
 	// Act — the human allows it.
 	writeCmd(t, conn, fmt.Sprintf(

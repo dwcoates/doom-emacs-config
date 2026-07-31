@@ -55,18 +55,19 @@ type StateApplier interface {
 	// and resolves the workspace blue: an incomplete history cannot be the
 	// basis of a "ready" claim.
 	ApplyBackfillState(workspace, state string) error
-	// ApplyConnectionDegraded records the daemon's OWN observation that the
-	// shim transport went quiet, or came back (F4). The shim's DegradedState
-	// events already reached the degraded axis; this transport-level miss did
-	// not, so it produced a banner and no workspace color at all.
-	ApplyConnectionDegraded(workspace string, degraded bool, reason string) error
+	// ApplySessionConnectivity records the current session-controller
+	// generation's establishment lifecycle.
+	ApplySessionConnectivity(workspace, sessionID, generationID string, state ssm.SessionConnectivity, causeKind string) error
+	// ApplyRuntimeFault opens or closes one typed, component-scoped fault
+	// window owned by the named controller generation.
+	ApplyRuntimeFault(workspace, sessionID, generationID, component, faultType string, impact ssm.FaultImpact, open bool, causeKind string) error
 	// MarkPromptAccepted appends the daemon-local `thinking` edge after the
 	// shim accepts an immediately delivered prompt and synchronously publishes
 	// that state through PUBLISH before the frontend prompt bubble can be
 	// exposed. The durable TurnStarted follows over the store stream.
 	MarkPromptAccepted(workspace, sessionID, requestID string, publish func(*frontendv1.WorkspaceState)) error
 	// ReconcileAlreadyComplete makes an ALREADY_COMPLETE interrupt Ack agree
-	// with the agent axis before the progress footer may publish
+	// with the session-status lifecycle before the progress footer may publish
 	// "already finished". It closes a still-standing `thinking`/`permission`
 	// row owned by this session and preserves already-settled turn outcomes.
 	ReconcileAlreadyComplete(workspace, sessionID string) (closed bool, err error)
@@ -83,7 +84,7 @@ type StateApplier interface {
 	// ApplyCompacting opens or closes the COMPACTING axis, from the vendor's
 	// own status ticker and the first-class ContextCompacted.
 	ApplyCompacting(workspace string, compacting bool, reason string) error
-	// ApplySessionRotated reconciles the agent axis across a VENDOR SESSION
+	// ApplySessionRotated reconciles the session-status lifecycle across a VENDOR SESSION
 	// UUID ROTATION: the turn in flight when the uuid changed can never report
 	// its end under the retired identity, so a `thinking` row held for it has
 	// nothing arriving to supersede it. Fed only from the shim handshake that
@@ -95,12 +96,6 @@ type StateApplier interface {
 	// so the opening edge is the first pending request and the closing edge is
 	// the count returning to zero — grant, deny and abandonment alike.
 	ApplyPermission(workspace string, pending bool, reason string) error
-	// ApplyWired moves the workspace's WIRED axis, the axis every non-blue color
-	// now stands on: blue means no live backend session, and every other color
-	// guarantees the substrate is wired. THIS PACKAGE IS THE SOLE PRODUCER —
-	// nothing else can observe the bring-up gate — so wiredstate.go holds every
-	// edge that moves it.
-	ApplyWired(workspace string, wiring ssm.Wiring, reason string) error
 	// Current resolves the workspace's state, which this package needs for
 	// exactly one purpose: REFUSING a hibernation of a workspace that has not
 	// settled (see refuseUnsettledHibernation).
@@ -114,7 +109,7 @@ type StateApplier interface {
 	Current(workspace string) (*frontendv1.WorkspaceState, bool, error)
 	// CloseStaleTurn closes a workspace's standing `thinking` when the daemon
 	// has just STOPPED the shim that promised to report that turn's end. The
-	// agent axis retires `thinking` on a `TurnEnded` and on nothing else, so a
+	// session-status lifecycle retires `thinking` on a `TurnEnded` and on nothing else, so a
 	// stop landing mid-turn kills the only process that could ever produce
 	// one and latches the axis forever.
 	//
@@ -196,8 +191,12 @@ const ringCap = 4096
 type consumer struct {
 	workspace string
 	sessionID string
-	push      Pusher
-	ssm       StateApplier
+	// generationID scopes every runtime fault to this exact controller
+	// incarnation. A delayed edge from a retired consumer is rejected by the
+	// SSM instead of repainting its replacement.
+	generationID string
+	push         Pusher
+	ssm          StateApplier
 	// prog is the progress-footer resolver, fed the same stream as the SSM.
 	// Never nil (noopProgress stands in), so the feed sites stay unconditional.
 	prog ProgressResolver
@@ -1005,6 +1004,26 @@ func (c *consumer) pushConversation(ev *corev1.Event, live bool) {
 // connectionComponent names the daemon's own transport in a degraded card.
 const connectionComponent = "shim-connection"
 
+type faultClassification struct {
+	faultType string
+	impact    ssm.FaultImpact
+}
+
+var faultClassifications = map[string]faultClassification{
+	"shim-store-client":              {faultType: "store-link", impact: ssm.FaultImpactConnectivity},
+	"shim-store":                     {faultType: "store-link", impact: ssm.FaultImpactConnectivity},
+	"store-client":                   {faultType: "store-link", impact: ssm.FaultImpactConnectivity},
+	"store":                          {faultType: "store-link", impact: ssm.FaultImpactConnectivity},
+	connectionComponent:              {faultType: "heartbeat", impact: ssm.FaultImpactConnectivity},
+	"claude-shim-model-catalog":      {faultType: "model-catalog", impact: ssm.FaultImpactFeature},
+	"daemon-model-catalog":           {faultType: "model-catalog", impact: ssm.FaultImpactFeature},
+	"shim-claude-sidecar-store-link": {faultType: "transcript-file-plane", impact: ssm.FaultImpactFeature},
+	"claude-shim-sdk":                {faultType: "sdk-stream", impact: ssm.FaultImpactTurnTerminal},
+	"claude-shim-interrupt":          {faultType: "interrupt", impact: ssm.FaultImpactCommand},
+	"claude-shim-permission-mode":    {faultType: "permission-mode", impact: ssm.FaultImpactCommand},
+	"claude-shim":                    {faultType: "shim-capability", impact: ssm.FaultImpactFeature},
+}
+
 // Degraded surfaces a shim-sourced DegradedState as a self-resolving failure
 // card (F4).
 //
@@ -1018,6 +1037,13 @@ func (c *consumer) Degraded(_ string, ds *corev1.DegradedState) {
 	if c.onDegraded != nil {
 		c.onDegraded(ds)
 	}
+	classification, ok := faultClassifications[ds.GetComponent()]
+	if !ok {
+		c.logf("session-controller: runtime fault REJECTED ws=%q session=%q generation=%q component=%q reason=%q recovered=%v branch=unknown_component",
+			c.workspace, c.sessionID, c.generationID, ds.GetComponent(), ds.GetReason(), ds.GetRecovered())
+	} else {
+		c.applyRuntimeFault(ds.GetComponent(), classification, !ds.GetRecovered(), ds.GetReason())
+	}
 	item := frontend.SystemFailureItemFromDegradedState(ds, c.now())
 	if item == nil {
 		return
@@ -1025,38 +1051,39 @@ func (c *consumer) Degraded(_ string, ds *corev1.DegradedState) {
 	c.pushFailure(c.degradedUUID(ds.GetComponent()), item)
 }
 
-// ConnectionDegraded surfaces a transport-level missed-heartbeat window: the
-// SSM's degraded axis PLUS the opening edge of a failure card.
-//
-// The SSM row is the half that never existed. The missed-heartbeat window
-// called this sink and nothing appended a state row, so the transport going
-// quiet produced a banner and no workspace color at all — the ambience the
-// banner was standing in for had no other home.
+// ConnectionDegraded opens the transport heartbeat's typed connectivity fault
+// and the matching failure card.
 func (c *consumer) ConnectionDegraded(_ string, reason string) {
-	c.applyConnectionDegraded(true, reason)
+	c.applyRuntimeFault(connectionComponent, faultClassifications[connectionComponent], true, reason)
 	c.pushFailure(c.degradedUUID(connectionComponent), errclass.ConnectionDegraded(reason))
 }
 
-// ConnectionRecovered closes the window: the SSM's degraded axis clears and
-// the SAME card is re-sent with resolved_at_ms stamped.
+// ConnectionRecovered closes exactly that heartbeat fault window and re-sends
+// the SAME card with resolved_at_ms stamped.
 //
 // Re-sending under the opening card's uuid is what makes it ONE card that
 // settles rather than two cards that accumulate — the recovery report used to
 // carry neither a reason nor any correlation to what it was recovering from.
 func (c *consumer) ConnectionRecovered(_ string) {
-	c.applyConnectionDegraded(false, "")
+	c.applyRuntimeFault(connectionComponent, faultClassifications[connectionComponent], false, "heartbeat_resumed")
 	item := errclass.ConnectionDegraded("")
 	item.ResolvedAtMs = c.now()
 	c.pushFailure(c.degradedUUID(connectionComponent), item)
 }
 
-// applyConnectionDegraded moves the SSM's degraded axis, loud-logging a
-// failure rather than swallowing it: a workspace whose color silently failed
-// to move is the exact misreport this axis exists to prevent.
-func (c *consumer) applyConnectionDegraded(degraded bool, reason string) {
-	if err := c.ssm.ApplyConnectionDegraded(c.workspace, degraded, reason); err != nil {
-		c.logf("session-controller: applying connection degraded=%v to the SSM (ws %q): %v", degraded, c.workspace, err)
+// applyRuntimeFault records one typed, generation-scoped fault edge and logs
+// the complete identity and branch verdict.
+func (c *consumer) applyRuntimeFault(component string, classification faultClassification, open bool, causeKind string) {
+	if err := c.ssm.ApplyRuntimeFault(
+		c.workspace, c.sessionID, c.generationID,
+		component, classification.faultType, classification.impact, open, causeKind,
+	); err != nil {
+		c.logf("session-controller: runtime fault FAILED ws=%q session=%q generation=%q component=%q fault_type=%q impact=%q open=%v cause=%q branch=ssm_rejected error=%v",
+			c.workspace, c.sessionID, c.generationID, component, classification.faultType, classification.impact, open, causeKind, err)
+		return
 	}
+	c.logf("session-controller: runtime fault APPLIED ws=%q session=%q generation=%q component=%q fault_type=%q impact=%q open=%v cause=%q branch=accepted",
+		c.workspace, c.sessionID, c.generationID, component, classification.faultType, classification.impact, open, causeKind)
 }
 
 // degradedUUID is the STABLE card identity for one component's degraded

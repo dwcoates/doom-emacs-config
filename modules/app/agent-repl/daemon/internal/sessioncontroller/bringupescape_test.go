@@ -234,7 +234,7 @@ func TestStartFailedNamesTheError(t *testing.T) {
 	t.Fatal("no start-failed card")
 }
 
-func TestStartFailedClosesTheWiredAxis(t *testing.T) {
+func TestStartFailedClosesTheLegacyConnectivityProjection(t *testing.T) {
 	// Arrange — this is the whole point: `starting` may never be terminal.
 	h := newEscapeHarness(t, blocked())
 	if _, err := h.m.bringUp("ws"); err != nil {
@@ -251,7 +251,7 @@ func TestStartFailedClosesTheWiredAxis(t *testing.T) {
 			return
 		}
 	}
-	t.Fatalf("no bring-up-failed close on the wired axis; calls=%v", h.applier.wiringsApplied())
+	t.Fatalf("no bring-up-failed close on the legacy connectivity projection; calls=%v", h.applier.wiringsApplied())
 }
 
 func TestABringUpTimeoutResolvesStartFailed(t *testing.T) {
