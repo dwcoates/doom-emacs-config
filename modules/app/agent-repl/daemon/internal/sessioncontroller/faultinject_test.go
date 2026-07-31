@@ -55,8 +55,9 @@ type faultRig struct {
 }
 
 const (
-	faultWorkspace = "/ws/fault"
-	faultSessionID = "s_fault"
+	faultWorkspace    = "/ws/fault"
+	faultSessionID    = "s_fault"
+	faultGenerationID = "g_fault"
 )
 
 func newFaultRig(t *testing.T) *faultRig {
@@ -75,6 +76,7 @@ func newFaultRig(t *testing.T) *faultRig {
 	rig.cons = newConsumer(faultWorkspace, faultSessionID, rig.push, mgr, nil, newFakeClearCompactStore(), t.Logf,
 		nil, nil, nil, nil,
 		func() { rig.death = append(rig.death, errclass.DeathReasonShimDied) })
+	rig.cons.generationID = faultGenerationID
 	return rig
 }
 
@@ -157,13 +159,22 @@ func (r *faultRig) cardUUIDs() []string {
 	return out
 }
 
-// wire opens the workspace's WIRED axis, which in production is sessioncontroller's
+// wire opens the workspace's legacy connectivity projection, which in production is sessioncontroller's
 // own report of the bring-up gate closing. Every color above blue stands on it,
 // so a test about any other axis has to arrange it.
 func (r *faultRig) wire() {
 	r.t.Helper()
-	if err := r.mgr.ApplyWired(r.ws, ssm.WiringWired, "test arrangement"); err != nil {
-		r.t.Fatalf("apply wired: %v", err)
+	if err := r.mgr.ApplySessionConnectivity(
+		r.ws, r.sid, faultGenerationID,
+		ssm.SessionConnectivityConnecting, "test_arrangement",
+	); err != nil {
+		r.t.Fatalf("apply connecting: %v", err)
+	}
+	if err := r.mgr.ApplySessionConnectivity(
+		r.ws, r.sid, faultGenerationID,
+		ssm.SessionConnectivityOperational, "test_arrangement_ready",
+	); err != nil {
+		r.t.Fatalf("apply operational: %v", err)
 	}
 }
 
@@ -174,7 +185,7 @@ func (r *faultRig) retainedCards() []*frontendv1.ConversationItem {
 }
 
 // settleGreen brings the workspace to green the way a real bring-up does: the
-// bring-up gate closes (the WIRED axis opens), the shim asserts readiness, and
+// bring-up gate closes (the legacy connectivity projection opens), the shim asserts readiness, and
 // the transcript backfill settles.
 func (r *faultRig) settleGreen() {
 	r.t.Helper()
@@ -358,7 +369,7 @@ func TestStoreRecoveryResolvesTheSameCardInPlace(t *testing.T) {
 	}
 }
 
-// A transport outage moves the SSM's degraded axis to blue, so the color and
+// A transport outage moves the SSM's legacy impairment projection to blue, so the color and
 // the card agree that the route is compromised.
 func TestConnectionOutageResolvesDegraded(t *testing.T) {
 	// Arrange
@@ -373,7 +384,7 @@ func TestConnectionOutageResolvesDegraded(t *testing.T) {
 }
 
 // Recovery must return the workspace to green with no manual intervention: the
-// degraded axis clears itself when traffic resumes.
+// legacy impairment projection clears itself when traffic resumes.
 func TestConnectionRecoveryReturnsToGreenUnaided(t *testing.T) {
 	// Arrange
 	rig := newFaultRig(t)

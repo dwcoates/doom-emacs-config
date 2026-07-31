@@ -425,7 +425,7 @@ func TestBringUpBindsTheLinkLossCallback(t *testing.T) {
 func TestARejectedWiringEdgeIsLoggedNotFatal(t *testing.T) {
 	// Arrange.
 	m, applier, _ := newWiredRig(t)
-	applier.wiredErr = errApplyWired
+	applier.connectivityErr = errApplyWired
 	var lines []string
 	m.logf = func(format string, args ...any) { lines = append(lines, format) }
 
@@ -438,7 +438,7 @@ func TestARejectedWiringEdgeIsLoggedNotFatal(t *testing.T) {
 	// Assert.
 	var found bool
 	for _, l := range lines {
-		if len(l) > 0 && l[0] == 's' && contains(l, "wired axis to the SSM FAILED") {
+		if len(l) > 0 && l[0] == 's' && contains(l, "connectivity edge FAILED") {
 			found = true
 		}
 	}

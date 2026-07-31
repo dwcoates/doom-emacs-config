@@ -81,7 +81,7 @@ func awaitRenderState(t *testing.T, conn *websocket.Conn, workspace string, want
 // awaitRenderStateLeaves reads frames until the workspace resolves to anything
 // OTHER than unwanted. It is the closing assertion: what the workspace lands on
 // afterwards is the other axes' business, and pinning it here would assert the
-// agent axis rather than the cut.
+// session-status lifecycle rather than the cut.
 func awaitRenderStateLeaves(t *testing.T, conn *websocket.Conn, workspace string, unwanted frontendv1.RenderState) {
 	t.Helper()
 	awaitAll(t, conn, nil, map[string]func(*frontendv1.FrontendFrame) bool{

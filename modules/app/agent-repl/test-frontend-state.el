@@ -115,6 +115,92 @@ back to the persp NAME, and a name with no live workspace behind it is
 dropped rather than stub-created."
   (agent-repl--ws-put name :project-dir (or dir (concat "/tmp/" name))))
 
+(defun agent-repl-test--complete-workspace-state (state)
+  "Return test STATE with the mandatory composite daemon verdict."
+  (append state
+          '(:sessionId "s_test"
+            :connectivity "SESSION_CONNECTIVITY_OPERATIONAL"
+            :status "SESSION_STATUS_READY"
+            :controllerGenerationId "g_test"
+            :activeFaults nil)))
+
+(defun agent-repl-test--apply-workspace-state (state)
+  "Apply test STATE after adding mandatory composite fields."
+  (agent-repl--frontend-apply-workspace-state
+   (agent-repl-test--complete-workspace-state state)))
+
+(defun agent-repl-test--apply-snapshot (snapshot)
+  "Apply test SNAPSHOT after completing every workspace state."
+  (let ((copy (copy-sequence snapshot)))
+    (setq copy
+          (plist-put
+           copy :workspaces
+           (mapcar #'agent-repl-test--complete-workspace-state
+                   (plist-get snapshot :workspaces))))
+    (agent-repl--frontend-apply-snapshot copy)))
+
+(ert-deftest agent-repl-test-composite-state-stores-both-authoritative-facts ()
+  "Connectivity and status remain separately queryable in Emacs."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--register-ws "ws1")
+    (agent-repl--frontend-apply-workspace-state
+     '(:workspace "ws1" :sessionId "s1"
+       :state "RENDER_STATE_DEGRADED"
+       :connectivity "SESSION_CONNECTIVITY_DEGRADED"
+       :status "SESSION_STATUS_THINKING"
+       :controllerGenerationId "g1"
+       :activeFaults ((:component "shim-store-client"
+                       :faultType "store-link"
+                       :impact "connectivity"
+                       :causeKind "store_subscription_lost"
+                       :openedAtMs "42"))))
+    (should (eq (agent-repl--ws-get "ws1" :pushed-session-connectivity)
+                :degraded))
+    (should (eq (agent-repl--ws-get "ws1" :pushed-session-status)
+                :thinking))
+    (let ((meta (agent-repl--ws-get "ws1" :pushed-render-state-meta)))
+      (should (equal (plist-get meta :controller-generation-id) "g1"))
+      (should (= (length (plist-get meta :active-faults)) 1)))))
+
+(ert-deftest agent-repl-test-composite-state-rejects-missing-connectivity ()
+  "A WorkspaceState without connectivity fails before mutating workspace state."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--register-ws "ws1")
+    (should-error
+     (agent-repl--frontend-apply-workspace-state
+      '(:workspace "ws1" :sessionId "s1"
+        :state "RENDER_STATE_READY"
+        :status "SESSION_STATUS_READY"
+        :controllerGenerationId "g1")))
+    (should-not (agent-repl--ws-get "ws1" :pushed-render-state))))
+
+(ert-deftest agent-repl-test-composite-state-rejects-incomplete-controller-identity ()
+  "Current connectivity without a generation fails before mutation."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--register-ws "ws1")
+    (should-error
+     (agent-repl--frontend-apply-workspace-state
+      '(:workspace "ws1" :sessionId "s1"
+        :state "RENDER_STATE_READY"
+        :connectivity "SESSION_CONNECTIVITY_OPERATIONAL"
+        :status "SESSION_STATUS_READY")))
+    (should-not (agent-repl--ws-get "ws1" :pushed-render-state))))
+
+(ert-deftest agent-repl-test-composite-state-rejects-malformed-runtime-fault ()
+  "A RuntimeFault without typed impact fails before mutation."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--register-ws "ws1")
+    (should-error
+     (agent-repl--frontend-apply-workspace-state
+      '(:workspace "ws1" :sessionId "s1"
+        :state "RENDER_STATE_DEGRADED"
+        :connectivity "SESSION_CONNECTIVITY_DEGRADED"
+        :status "SESSION_STATUS_READY"
+        :controllerGenerationId "g1"
+        :activeFaults ((:component "shim-store-client"
+                        :faultType "store-link")))))
+    (should-not (agent-repl--ws-get "ws1" :pushed-render-state))))
+
 (ert-deftest agent-repl-test-apply-workspace-state-stores-keyword ()
   "Applying a WorkspaceState stores the mapped keyword under :pushed-render-state."
   ;; Arrange
@@ -124,7 +210,7 @@ dropped rather than stub-created."
     (agent-repl-test--register-ws "b")
     (agent-repl-test--register-ws "ws1")
     ;; Act
-    (agent-repl--frontend-apply-workspace-state
+    (agent-repl-test--apply-workspace-state
      '(:workspace "ws1" :state "RENDER_STATE_THINKING"))
     ;; Assert
     (should (eq (agent-repl--ws-get "ws1" :pushed-render-state) :thinking))))
@@ -137,7 +223,7 @@ dropped rather than stub-created."
     (agent-repl-test--register-ws "a")
     (agent-repl-test--register-ws "b")
     ;; Act / Assert
-    (should (eq (agent-repl--frontend-apply-workspace-state
+    (should (eq (agent-repl-test--apply-workspace-state
                 '(:workspace "ws1" :state "RENDER_STATE_DONE"))
                :done))))
 
@@ -148,10 +234,10 @@ dropped rather than stub-created."
     (agent-repl-test--register-ws "ws1")
     (agent-repl-test--register-ws "a")
     (agent-repl-test--register-ws "b")
-    (agent-repl--frontend-apply-workspace-state
+    (agent-repl-test--apply-workspace-state
      '(:workspace "ws1" :state "RENDER_STATE_THINKING"))
     ;; Act
-    (agent-repl--frontend-apply-workspace-state
+    (agent-repl-test--apply-workspace-state
      '(:workspace "ws1" :state "RENDER_STATE_IDLE"))
     ;; Assert
     (should (eq (agent-repl--ws-get "ws1" :pushed-render-state) :idle))))
@@ -165,7 +251,7 @@ dropped rather than stub-created."
     (agent-repl-test--register-ws "b")
     (agent-repl-test--register-ws "ws1")
     ;; Act
-    (agent-repl--frontend-apply-workspace-state
+    (agent-repl-test--apply-workspace-state
      '(:workspace "ws1" :state "RENDER_STATE_IDLE_ASYNC"
        :turnActive t :liveTaskCount "3" :mergePhase "none"
        :causeKind "task_started" :causeSeq "42"))
@@ -184,7 +270,7 @@ dropped rather than stub-created."
     (agent-repl-test--register-ws "a")
     (agent-repl-test--register-ws "b")
     ;; Act / Assert
-    (should-error (agent-repl--frontend-apply-workspace-state
+    (should-error (agent-repl-test--apply-workspace-state
                    '(:state "RENDER_STATE_IDLE")))))
 
 (ert-deftest agent-repl-test-apply-workspace-state-blank-workspace-errors ()
@@ -195,7 +281,7 @@ dropped rather than stub-created."
     (agent-repl-test--register-ws "a")
     (agent-repl-test--register-ws "b")
     ;; Act / Assert
-    (should-error (agent-repl--frontend-apply-workspace-state
+    (should-error (agent-repl-test--apply-workspace-state
                    '(:workspace "" :state "RENDER_STATE_IDLE")))))
 
 (ert-deftest agent-repl-test-apply-workspace-state-bad-state-errors ()
@@ -206,7 +292,7 @@ dropped rather than stub-created."
     (agent-repl-test--register-ws "a")
     (agent-repl-test--register-ws "b")
     ;; Act / Assert
-    (should-error (agent-repl--frontend-apply-workspace-state
+    (should-error (agent-repl-test--apply-workspace-state
                    '(:workspace "ws1" :state "RENDER_STATE_UNSPECIFIED")))))
 
 ;;;; ---- StateSnapshot resync --------------------------------------------
@@ -219,7 +305,7 @@ dropped rather than stub-created."
     (agent-repl-test--register-ws "a")
     (agent-repl-test--register-ws "b")
     ;; Act
-    (agent-repl--frontend-apply-snapshot
+    (agent-repl-test--apply-snapshot
      '(:workspaces ((:workspace "a" :state "RENDER_STATE_THINKING")
                     (:workspace "b" :state "RENDER_STATE_MERGED"))))
     ;; Assert
@@ -234,7 +320,7 @@ dropped rather than stub-created."
     (agent-repl-test--register-ws "a")
     (agent-repl-test--register-ws "b")
     ;; Act / Assert
-    (should (= (agent-repl--frontend-apply-snapshot
+    (should (= (agent-repl-test--apply-snapshot
                 '(:workspaces ((:workspace "a" :state "RENDER_STATE_IDLE")
                                (:workspace "b" :state "RENDER_STATE_IDLE"))))
                2))))
@@ -247,7 +333,7 @@ dropped rather than stub-created."
     (agent-repl-test--register-ws "a")
     (agent-repl-test--register-ws "b")
     ;; Act / Assert
-    (should (= (agent-repl--frontend-apply-snapshot '(:workspaces nil)) 0))))
+    (should (= (agent-repl-test--apply-snapshot '(:workspaces nil)) 0))))
 
 (ert-deftest agent-repl-test-apply-snapshot-applies-sessions-and-tolerates-catalogs ()
   "A snapshot applies workspaces AND rebuilds the SessionView store from
@@ -259,7 +345,7 @@ dropped rather than stub-created."
     (agent-repl-test--register-ws "b")
     (clrhash agent-repl--frontend-session-views)
     ;; Act — sessions carry ids now; catalogs present but unhandled here.
-    (agent-repl--frontend-apply-snapshot
+    (agent-repl-test--apply-snapshot
      '(:workspaces ((:workspace "a" :state "RENDER_STATE_IDLE"))
        :sessions ((:sessionId "s_a" :workspace "a" :model "haiku"))
        :catalogs ((:workspace "a" :tasks nil))))
@@ -278,7 +364,7 @@ daemon no longer knows."
     (clrhash agent-repl--frontend-session-views)
     (agent-repl--frontend-store-session-view '(:sessionId "s_stale" :workspace "old"))
     ;; Act
-    (agent-repl--frontend-apply-snapshot
+    (agent-repl-test--apply-snapshot
      '(:workspaces nil :sessions ((:sessionId "s_new" :workspace "a"))))
     ;; Assert — the stale entry is gone, only the snapshot's roster remains.
     (should-not (agent-repl--frontend-session-view "s_stale"))
@@ -293,9 +379,10 @@ daemon no longer knows."
                    :sessionId "s_busy"
                    :state "RENDER_STATE_THINKING"
                    :turnActive t)))
-      (should-not (agent-repl--frontend-apply-workspace-state state))
+      (should-not (agent-repl-test--apply-workspace-state state))
       (should (equal (agent-repl--frontend-workspace-state-views-all)
-                     (list state))))))
+                     (list
+                      (agent-repl-test--complete-workspace-state state)))))))
 
 (ert-deftest agent-repl-test-snapshot-replaces-workspace-state-safety-store ()
   "A reconnect snapshot drops raw states the daemon no longer reports."
@@ -304,7 +391,7 @@ daemon no longer knows."
            (make-hash-table :test 'equal)))
       (puthash "/stale" '(:workspace "/stale")
                agent-repl--frontend-workspace-state-views)
-      (agent-repl--frontend-apply-snapshot
+      (agent-repl-test--apply-snapshot
        '(:workspaces ((:workspace "/current"
                        :sessionId "s_1"
                        :state "RENDER_STATE_IDLE"))))
@@ -324,7 +411,7 @@ daemon no longer knows."
       (cl-letf (((symbol-function 'agent-repl--frontend-note-boot-id)
                  (lambda (boot-id) (setq noted boot-id))))
         ;; Act
-        (agent-repl--frontend-apply-snapshot
+        (agent-repl-test--apply-snapshot
          '(:workspaces nil :daemon (:bootId "b_1" :protocolVersion "1")))
         ;; Assert
         (should (equal noted "b_1"))))))
@@ -421,7 +508,7 @@ daemon no longer knows."
     (let ((agent-repl--frontend-last-daemon-view nil))
       (cl-letf (((symbol-function 'agent-repl--frontend-note-boot-id) #'ignore))
         ;; Act
-        (agent-repl--frontend-apply-snapshot '(:daemon (:bootId "b_1")))
+        (agent-repl-test--apply-snapshot '(:daemon (:bootId "b_1")))
         ;; Assert
         (should (equal (plist-get (agent-repl--frontend-daemon-view) :bootId) "b_1"))))))
 
@@ -513,7 +600,7 @@ daemon no longer knows."
     (agent-repl--frontend-store-session-init
      '(:sessionId "s_stale" :init (:slashCommands ("old"))))
     ;; Act
-    (agent-repl--frontend-apply-snapshot
+    (agent-repl-test--apply-snapshot
      '(:inits ((:sessionId "s_new" :init (:slashCommands ("new"))))))
     ;; Assert — stale gone, new present.
     (should-not (agent-repl--frontend-session-init "s_stale"))
@@ -539,7 +626,7 @@ daemon no longer knows."
 ;;
 ;; These replace the five DegradedNotice tests that stood here. The banner
 ;; is retired: degradation is a self-resolving failure card on the
-;; conversation plane plus a move on the SSM's degraded axis, so there is no
+;; conversation plane plus a move on the SSM's legacy impairment projection, so there is no
 ;; echo-area handler left to test.
 
 (ert-deftest agent-repl-test-session-death-surfaces ()
@@ -651,7 +738,7 @@ than a settled no-op."
     ;; Act — decode + dispatch via the real registered handler
     (agent-repl--uds-dispatch-frame
      (agent-repl--uds-decode-frame
-      "{\"workspaceState\":{\"workspace\":\"ws1\",\"state\":\"RENDER_STATE_PERMISSION\"}}"))
+      "{\"workspaceState\":{\"workspace\":\"ws1\",\"sessionId\":\"s1\",\"state\":\"RENDER_STATE_PERMISSION\",\"connectivity\":\"SESSION_CONNECTIVITY_OPERATIONAL\",\"status\":\"SESSION_STATUS_PERMISSION\",\"controllerGenerationId\":\"g1\"}}"))
     ;; Assert
     (should (eq (agent-repl--ws-get "ws1" :pushed-render-state) :permission))))
 
@@ -671,7 +758,7 @@ than a settled no-op."
            (agent-repl-ws-state-transition-functions
             (list (lambda (ws new prev) (setq captured (list ws new prev))))))
       ;; Act
-      (agent-repl--frontend-apply-workspace-state
+      (agent-repl-test--apply-workspace-state
        '(:workspace "ws1" :state "RENDER_STATE_MERGING"))
       ;; Assert
       (should (equal captured '("ws1" :merging nil))))))
@@ -686,10 +773,10 @@ than a settled no-op."
     (let* (captured
            (agent-repl-ws-state-transition-functions
             (list (lambda (ws new prev) (setq captured (list ws new prev))))))
-      (agent-repl--frontend-apply-workspace-state
+      (agent-repl-test--apply-workspace-state
        '(:workspace "ws1" :state "RENDER_STATE_MERGING"))
       ;; Act — second push transitions merging -> merge-conflict
-      (agent-repl--frontend-apply-workspace-state
+      (agent-repl-test--apply-workspace-state
        '(:workspace "ws1" :state "RENDER_STATE_MERGE_CONFLICT"))
       ;; Assert
       (should (equal captured '("ws1" :merge-conflict :merging))))))
@@ -704,7 +791,7 @@ than a settled no-op."
     (let ((agent-repl-ws-state-transition-functions
            (list (lambda (&rest _) (error "boom")))))
       ;; Act
-      (agent-repl--frontend-apply-workspace-state
+      (agent-repl-test--apply-workspace-state
        '(:workspace "ws1" :state "RENDER_STATE_MERGED"))
       ;; Assert — the pushed state landed despite the broken subscriber
       (should (eq (agent-repl--ws-get "ws1" :pushed-render-state) :merged)))))
@@ -722,7 +809,7 @@ than a settled no-op."
       (cl-letf (((symbol-function 'agent-repl--latch-and-maybe-fire-loaded)
                  (lambda (ws key &optional _m) (push (list ws key) calls))))
         ;; Act
-        (agent-repl--frontend-apply-workspace-state
+        (agent-repl-test--apply-workspace-state
          '(:workspace "ws1" :state "RENDER_STATE_INIT"))
         ;; Assert
         (should (equal calls '(("ws1" :agent-ready))))))))
@@ -737,10 +824,10 @@ than a settled no-op."
     (let (calls)
       (cl-letf (((symbol-function 'agent-repl--latch-and-maybe-fire-loaded)
                  (lambda (ws key &optional _m) (push (list ws key) calls))))
-        (agent-repl--frontend-apply-workspace-state
+        (agent-repl-test--apply-workspace-state
          '(:workspace "ws1" :state "RENDER_STATE_INIT"))
         ;; Act — second push
-        (agent-repl--frontend-apply-workspace-state
+        (agent-repl-test--apply-workspace-state
          '(:workspace "ws1" :state "RENDER_STATE_IDLE"))
         ;; Assert — latch fired exactly once
         (should (= (length calls) 1))))))
@@ -807,7 +894,7 @@ first."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "doom" :project-dir "/Users/x/.config/doom")
     ;; Act — the daemon always names the workspace by cwd.
-    (agent-repl--frontend-apply-workspace-state
+    (agent-repl-test--apply-workspace-state
      '(:workspace "/Users/x/.config/doom" :state "RENDER_STATE_THINKING"))
     ;; Assert — the state reached the NAME the renderer reads.
     (should (eq (agent-repl--ws-get "doom" :pushed-render-state) :thinking))))
@@ -818,7 +905,7 @@ first."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "doom" :project-dir "/Users/x/.config/doom")
     ;; Act
-    (agent-repl--frontend-apply-workspace-state
+    (agent-repl-test--apply-workspace-state
      '(:workspace "/Users/x/.config/doom" :state "RENDER_STATE_DONE"))
     ;; Assert — the path is not a workspace.
     (should-not (agent-repl--ws-get "/Users/x/.config/doom" :pushed-render-state))))
@@ -828,7 +915,7 @@ first."
   ;; Arrange
   (agent-repl-test--with-clean-state
     ;; Act — Emacs has nothing open for this path.
-    (agent-repl--frontend-apply-workspace-state
+    (agent-repl-test--apply-workspace-state
      '(:workspace "/Users/x/not-open" :state "RENDER_STATE_THINKING"))
     ;; Assert — no entry invented to hold it.
     (should-not (agent-repl--ws-known-p "/Users/x/not-open"))))
@@ -839,7 +926,7 @@ first."
   (agent-repl-test--with-clean-state
     (agent-repl--ws-put "doom" :project-dir "/Users/x/.config/doom")
     ;; Act
-    (agent-repl--frontend-apply-workspace-state
+    (agent-repl-test--apply-workspace-state
      '(:workspace "doom" :state "RENDER_STATE_IDLE"))
     ;; Assert
     (should (eq (agent-repl--ws-get "doom" :pushed-render-state) :idle))))
@@ -852,7 +939,7 @@ first."
   (agent-repl-test--with-clean-state
     (agent-repl-test--register-ws "ws1")
     ;; Act
-    (agent-repl--frontend-apply-workspace-state
+    (agent-repl-test--apply-workspace-state
      '(:workspace "ws1" :state "RENDER_STATE_CLEARING"))
     ;; Assert
     (should (eq (agent-repl--ws-get "ws1" :pushed-render-state) :clearing))))
@@ -863,7 +950,7 @@ first."
   (agent-repl-test--with-clean-state
     (agent-repl-test--register-ws "ws1")
     ;; Act
-    (agent-repl--frontend-apply-workspace-state
+    (agent-repl-test--apply-workspace-state
      '(:workspace "ws1" :state "RENDER_STATE_COMPACTING"))
     ;; Assert
     (should (eq (agent-repl--ws-get "ws1" :pushed-render-state) :compacting))))

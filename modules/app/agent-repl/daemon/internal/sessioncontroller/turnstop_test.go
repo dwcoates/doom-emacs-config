@@ -13,7 +13,7 @@ import (
 
 // ---------------------------------------------------------------------------
 // THE INVARIANT: a session whose shim this daemon stops cannot leave a live
-// turn standing on the agent axis.
+// turn standing on the session-status lifecycle.
 //
 // These tests pin both halves separately — the graceful drain that asks the
 // shim for an honest turn end, and the funnel's guaranteed close, which holds

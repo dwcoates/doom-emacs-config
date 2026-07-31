@@ -18,6 +18,7 @@ func sweptWorkspace(t *testing.T, window time.Duration) (*harness, string, func(
 	t.Helper()
 	h := newHarnessWith(t, Config{IdleTimeout: window})
 	id := createSession(t, h, `{"cwd":"/w"}`)
+	markControllerOperational(t, h, "/w")
 	at, dated, err := h.ssm.LastActivityMs("/w")
 	if err != nil || !dated {
 		t.Fatalf("LastActivityMs(/w) = (%d, %t, %v), want the workspace dated", at, dated, err)
@@ -37,7 +38,10 @@ func TestAWorkspaceQuietPastTheWindowIsSweepable(t *testing.T) {
 
 	// Assert.
 	if !got {
-		t.Fatal("sweepable = false, want a workspace quiet for the full window hibernated")
+		state, found, stateErr := h.ssm.Current("/w")
+		activity, dated, activityErr := h.ssm.LastActivityMs("/w")
+		t.Fatalf("sweepable = false, want a workspace quiet for the full window hibernated; state=%+v found=%t state_err=%v activity=%d dated=%t activity_err=%v now=%d",
+			state, found, stateErr, activity, dated, activityErr, h.srv.now().UnixMilli())
 	}
 }
 
@@ -77,7 +81,7 @@ func TestATurnActiveWorkspaceIsHeldHoweverOldItsLogIs(t *testing.T) {
 	// gate must never be able to override the turn gate.
 	h, id, quietFor := sweptWorkspace(t, time.Hour)
 	if err := h.ssm.Apply(&corev1.Event{
-		SessionId: id, Seq: 1,
+		SessionId: id, Seq: 2,
 		Plane:     corev1.Plane_PLANE_STREAM,
 		RequestId: "turn-1",
 		Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{
