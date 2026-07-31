@@ -82,10 +82,11 @@ import {
   WorkspaceSidebar,
   installWorkspaceExpandHook,
   installWorkspaceRosterHook,
+  workspaceStatusFromRenderState,
 } from "./sidebar.js";
 import { ConversationStore } from "./store.js";
 import { IDLE_LABEL, TIMER_SLOT, TaskTimer, windowHost } from "./timer.js";
-import { WsClient, composerEnabled, makeSessionExistsProbe } from "./ws.js";
+import { WsClient, composerEnabled, makeSessionExistsProbe, type WsStateFreshness } from "./ws.js";
 import {
   bindLogContext,
   ForwardingLogger,
@@ -807,7 +808,7 @@ async function boot(): Promise<void> {
       agent_repl_session_id: sessionId,
       connection_id: `${pageLogInstance}:${logConnectionGeneration}`,
     });
-    return new WsClient({
+    const client = new WsClient({
       url: `${wsBase}/sessions/${sessionId}/stream`,
       onMessage: (data) => {
         // The one path: decode the protojson `frontend.v1` frame, let the
@@ -859,6 +860,35 @@ async function boot(): Promise<void> {
           else log("info", line, { operation: "webapp.main.user-turn-receipt", localOnly: true });
         }
         const result = store.ingest(effects);
+        if (isSnapshot) {
+          if (store.state.renderState === null || store.state.workspaceStateAtMs <= 0) {
+            const err = new Error(
+              `session snapshot omitted a revisioned WorkspaceState session=${sessionId} ` +
+                `state=${store.state.renderState ?? "none"} at_ms=${store.state.workspaceStateAtMs}`,
+            );
+            clog("error", err.message, {
+              session_id: sessionId,
+              workspace: store.state.cwd,
+              render_state: store.state.renderState ?? "none",
+              revision_at_ms: store.state.workspaceStateAtMs,
+            });
+            throw err;
+          }
+          client.adoptSnapshot({
+            workspace: store.state.cwd,
+            session_id: store.state.sessionId,
+            controller_generation_id: store.state.controllerGenerationId,
+            revision_at_ms: store.state.workspaceStateAtMs,
+            cause_seq: store.state.workspaceStateCauseSeq,
+            render_state: store.state.renderState,
+          });
+        }
+        if (effects.some((effect) => effect.kind === "workspace-state")) {
+          if (store.state.renderState === null) {
+            throw new Error("workspace-state ingestion completed without a render state");
+          }
+          sidebar.setAuthoritativeCurrentStatus(workspaceStatusFromRenderState(store.state.renderState));
+        }
         // Ask for the conversation history this connection has not been told.
         // Read AFTER ingest so the snapshot's own SessionView has supplied the
         // workspace key the daemon routes a resync by.
@@ -901,13 +931,32 @@ async function boot(): Promise<void> {
         // resyncs via `StateSnapshot`, not a client replay-request.
         return undefined;
       },
-      onStatusChange: (connected) => {
-        if (connected) wslog.flush();
-        // Every socket owes its own history request; a dropped one owes none.
-        if (connected) connectResync.onConnect();
-        else connectResync.onDisconnect();
-        statusEl.textContent = connected ? "connected" : "disconnected";
-        statusEl.classList.toggle("ok", connected);
+      onFreshnessChange: (freshness: WsStateFreshness) => {
+        const current = freshness === "current";
+        if (current) {
+          wslog.flush();
+          connectResync.onConnect();
+          if (store.state.renderState === null) {
+            throw new Error("websocket reported current before WorkspaceState adoption");
+          }
+          sidebar.setAuthoritativeCurrentStatus(workspaceStatusFromRenderState(store.state.renderState));
+        } else {
+          connectResync.onDisconnect();
+          const changed = store.invalidateFrontendState(`websocket_${freshness}`);
+          sidebar.setAuthoritativeCurrentStatus(
+            freshness === "connecting" || freshness === "awaiting_snapshot" ? "init" : "degraded",
+          );
+          if (changed) frames.schedule();
+        }
+        const label: Record<WsStateFreshness, string> = {
+          connecting: "connecting",
+          awaiting_snapshot: "synchronizing",
+          current: "connected",
+          disconnected: "disconnected",
+          expired: "state stale",
+        };
+        statusEl.textContent = label[freshness];
+        statusEl.classList.toggle("ok", current);
       },
       sessionExists: makeSessionExistsProbe(httpBase, sessionId),
       // The daemon-unreachable window (F4). It is the ONE fact the daemon
@@ -944,6 +993,7 @@ async function boot(): Promise<void> {
           });
       },
     });
+    return client;
   };
   // Session creation (replaces POST /sessions), used both to open the first
   // session and to rebind a gone one: a short-lived connection to the unscoped
@@ -998,6 +1048,8 @@ async function boot(): Promise<void> {
           }
           bootDispatcher.observe(decoded);
           if (decoded.frame.case === "snapshot" && !created) {
+            bootWs.adoptSnapshot({ bootstrap: true });
+            wslog.flush();
             created = true;
             void bootDispatcher
               .createSession({

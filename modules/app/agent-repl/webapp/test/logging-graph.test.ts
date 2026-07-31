@@ -112,6 +112,8 @@ function openAndSettleStartup(graph: ProductionGraph): GraphWebSocket {
   graph.client.connect();
   const socket = GraphWebSocket.instances[0];
   socket.open();
+  graph.client.adoptSnapshot({ revision_at_ms: 1 });
+  graph.logger.flush();
   for (const raw of [...socket.sent]) acknowledge(socket, graph.dispatcher, raw);
   socket.sent.length = 0;
   return socket;
@@ -170,20 +172,26 @@ describe("the production webapp logging graph", () => {
     const first = openAndSettleStartup(graph);
 
     first.drop(1006, "daemon restart");
-    expect(graph.logger.pendingCount()).toBe(2);
+    expect(graph.logger.pendingCount()).toBe(3);
     await vi.advanceTimersByTimeAsync(10);
     expect(GraphWebSocket.instances).toHaveLength(2);
-    expect(graph.logger.pendingCount()).toBe(3);
+    expect(graph.logger.pendingCount()).toBe(5);
 
     const second = GraphWebSocket.instances[1];
     second.open();
+    graph.client.adoptSnapshot({ revision_at_ms: 2 });
+    graph.logger.flush();
 
     expect(graph.logger.pendingCount()).toBe(0);
     expect(second.sent.map(operation)).toEqual([
+      "ws.freshness-changed",
       "ws.close-unexpected",
       "ws.reconnect-scheduled",
+      "ws.freshness-changed",
       "ws.connect",
       "ws.open",
+      "ws.freshness-changed",
+      "ws.freshness-changed",
     ]);
     expect(second.sent.filter((raw) => operation(raw) === "ws.close-unexpected")).toHaveLength(1);
     expect(second.sent.filter((raw) => operation(raw) === "ws.open")).toHaveLength(1);

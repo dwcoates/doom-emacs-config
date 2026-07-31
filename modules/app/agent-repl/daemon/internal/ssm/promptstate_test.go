@@ -320,7 +320,8 @@ func TestReconcileAlreadyCompleteClosesThinkingBeforeFooterWindow(t *testing.T) 
 		t.Fatalf("turn started: %v", err)
 	}
 
-	closed, err := m.ReconcileAlreadyComplete("ws1", "s1")
+	var published *frontendv1.WorkspaceState
+	closed, err := m.ReconcileAlreadyComplete("ws1", "s1", func(state *frontendv1.WorkspaceState) { published = state })
 
 	if err != nil {
 		t.Fatalf("ReconcileAlreadyComplete: %v", err)
@@ -335,8 +336,28 @@ func TestReconcileAlreadyCompleteClosesThinkingBeforeFooterWindow(t *testing.T) 
 	if got.GetCauseKind() != causeInterruptAlreadyComplete {
 		t.Fatalf("cause = %q, want %q", got.GetCauseKind(), causeInterruptAlreadyComplete)
 	}
+	if published == nil || published.GetTurnActive() || published.GetState() != frontendv1.RenderState_RENDER_STATE_IDLE {
+		t.Fatalf("published = %+v, want synchronous IDLE/inactive state", published)
+	}
 	if !cl.contains("already-complete reconciliation CLOSED") {
 		t.Fatalf("missing reconciliation log:\n%s", strings.Join(cl.lines, "\n"))
+	}
+}
+
+func TestReconcileAlreadyCompleteClosesSubmittingBeforeFooterWindow(t *testing.T) {
+	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
+	if err := m.MarkPromptAccepted("ws1", "s1", "req-1", func(*frontendv1.WorkspaceState) {}); err != nil {
+		t.Fatalf("MarkPromptAccepted: %v", err)
+	}
+
+	var published *frontendv1.WorkspaceState
+	closed, err := m.ReconcileAlreadyComplete("ws1", "s1", func(state *frontendv1.WorkspaceState) { published = state })
+
+	if err != nil {
+		t.Fatalf("ReconcileAlreadyComplete: %v", err)
+	}
+	if !closed || published == nil || published.GetTurnActive() || published.GetState() != frontendv1.RenderState_RENDER_STATE_IDLE {
+		t.Fatalf("closed=%v published=%+v, want synchronous IDLE/inactive state", closed, published)
 	}
 }
 
@@ -346,7 +367,8 @@ func TestReconcileAlreadyCompletePreservesSettledOutcome(t *testing.T) {
 		t.Fatalf("turn ended: %v", err)
 	}
 
-	closed, err := m.ReconcileAlreadyComplete("ws1", "s1")
+	var published *frontendv1.WorkspaceState
+	closed, err := m.ReconcileAlreadyComplete("ws1", "s1", func(state *frontendv1.WorkspaceState) { published = state })
 
 	if err != nil {
 		t.Fatalf("ReconcileAlreadyComplete: %v", err)
@@ -356,6 +378,9 @@ func TestReconcileAlreadyCompletePreservesSettledOutcome(t *testing.T) {
 	}
 	if got := mustCurrent(t, m, "ws1").GetState(); got != frontendv1.RenderState_RENDER_STATE_DONE {
 		t.Fatalf("state = %s, want DONE preserved", got)
+	}
+	if published == nil || published.GetState() != frontendv1.RenderState_RENDER_STATE_DONE {
+		t.Fatalf("published = %+v, want synchronous preserved DONE state", published)
 	}
 	if !cl.contains("decision=preserve_settled state=done") {
 		t.Fatalf("missing preserved-outcome log:\n%s", strings.Join(cl.lines, "\n"))
@@ -371,7 +396,7 @@ func TestReconcileAlreadyCompleteClosesStalePermission(t *testing.T) {
 		t.Fatalf("open permission: %v", err)
 	}
 
-	closed, err := m.ReconcileAlreadyComplete("ws1", "s1")
+	closed, err := m.ReconcileAlreadyComplete("ws1", "s1", func(*frontendv1.WorkspaceState) {})
 
 	if err != nil {
 		t.Fatalf("ReconcileAlreadyComplete: %v", err)
@@ -390,7 +415,7 @@ func TestReconcileAlreadyCompleteRejectsAnotherSessionsClaim(t *testing.T) {
 		t.Fatalf("turn started: %v", err)
 	}
 
-	closed, err := m.ReconcileAlreadyComplete("ws1", "s1")
+	closed, err := m.ReconcileAlreadyComplete("ws1", "s1", func(*frontendv1.WorkspaceState) {})
 
 	if err == nil || !strings.Contains(err.Error(), `session "s2"`) {
 		t.Fatalf("err = %v, want foreign-claim rejection", err)
@@ -428,11 +453,15 @@ func TestPromptStateMethodsRejectMissingIdentity(t *testing.T) {
 			return err
 		}},
 		{"interrupt workspace", func() error {
-			_, err := m.ReconcileAlreadyComplete("", "s1")
+			_, err := m.ReconcileAlreadyComplete("", "s1", func(*frontendv1.WorkspaceState) {})
 			return err
 		}},
 		{"interrupt session", func() error {
-			_, err := m.ReconcileAlreadyComplete("ws1", "")
+			_, err := m.ReconcileAlreadyComplete("ws1", "", func(*frontendv1.WorkspaceState) {})
+			return err
+		}},
+		{"interrupt publisher", func() error {
+			_, err := m.ReconcileAlreadyComplete("ws1", "s1", nil)
 			return err
 		}},
 	}

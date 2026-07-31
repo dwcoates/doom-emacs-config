@@ -23,6 +23,7 @@ import {
   statusDotHtml,
   taskSectionHtml,
   validateWorkspaceRoster,
+  workspaceStatusFromRenderState,
 } from "../src/sidebar.js";
 import css from "../src/styles.css?raw";
 import { ForwardingLogger, setLogger } from "../src/wslog.js";
@@ -620,6 +621,35 @@ afterEach(() => {
 });
 
 describe("WorkspaceSidebar", () => {
+  it("uses the revisioned webapp authority for the current row only", () => {
+    const { mount, sidebar } = harness();
+    sidebar.update(roster({ repos: [group({ rows: [
+      row({ name: "current", current: true, status: "thinking" }),
+      row({ name: "other", current: false, status: "done" }),
+    ] })] }));
+
+    sidebar.setAuthoritativeCurrentStatus("interrupted");
+
+    expect(mount.querySelector(".ws.current .st")?.getAttribute("title")).toBe("interrupted");
+    expect(mount.innerHTML).toContain('title="done"');
+  });
+
+  it("keeps applying current status authority across later Emacs roster pushes", () => {
+    const { mount, sidebar } = harness();
+    sidebar.setAuthoritativeCurrentStatus("degraded");
+    sidebar.update(roster({ repos: [group({ rows: [row({ current: true, status: "thinking" })] })] }));
+    expect(mount.querySelector(".ws.current .st")?.getAttribute("title")).toBe("degraded");
+  });
+
+  it("maps every underscore wire spelling onto the roster vocabulary", () => {
+    expect(workspaceStatusFromRenderState("submitting")).toBe("submitting");
+    expect(workspaceStatusFromRenderState("idle")).toBe("ready");
+    expect(workspaceStatusFromRenderState("idle_async")).toBe("idle-async");
+    expect(workspaceStatusFromRenderState("vendor_blocked")).toBe("vendor-blocked");
+    expect(workspaceStatusFromRenderState("merge_conflict")).toBe("merge-conflict");
+    expect(workspaceStatusFromRenderState("interrupted")).toBe("interrupted");
+  });
+
   it("repaints the rail when the monitoring gate flips", () => {
     // Arrange — a pushed roster whose only row is the current workspace.
     const { mount, sidebar } = harness();

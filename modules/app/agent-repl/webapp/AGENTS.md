@@ -1,5 +1,23 @@
 # Webapp
 
+## Workspace-state freshness
+
+- An open WebSocket is transport reachability, not current session state.
+  `WsClient` reports `awaiting_snapshot` until the first `StateSnapshot` is
+  decoded and atomically adopted by `ConversationStore`.
+- GUI streams receive a `StateSnapshot` every 15 seconds. The browser's
+  45-second lease expires after three missed snapshots, invalidates all active
+  state and progress projections, and forces a reconnect. No disconnected or
+  freshness-expired UI may retain `submitting`, `thinking`, `permission`, or
+  another active phase.
+- `WorkspaceState.at_ms` is the browser's monotonic revision. A regressing
+  revision, conflicting payload at an equal revision, or `already_complete`
+  beside an active phase is an ingestion invariant violation. Validate the
+  entire adapter-effect batch before mutating store state.
+- Emacs owns sidebar membership and non-current row status. The revisioned
+  `ConversationStore` state owns both the footer and the current row status, so
+  later roster pushes cannot overwrite the current session's phase.
+
 ## Logging
 
 - The webapp owns one canonical logging API with normal and verbose emission

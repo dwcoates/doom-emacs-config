@@ -507,6 +507,10 @@ export interface StoreState {
   controllerGenerationId: string;
   /** Current generation's active explanatory fault windows. */
   activeFaults: RuntimeFault[];
+  /** Monotonic SSM revision of the adopted WorkspaceState. */
+  workspaceStateAtMs: number;
+  /** Store sequence that caused the adopted state, or zero for daemon-local. */
+  workspaceStateCauseSeq: number;
 }
 
 function initialState(): StoreState {
@@ -538,7 +542,25 @@ function initialState(): StoreState {
     sessionStatus: null,
     controllerGenerationId: "",
     activeFaults: [],
+    workspaceStateAtMs: 0,
+    workspaceStateCauseSeq: 0,
   };
+}
+
+function activeRenderState(state: WebRenderState | null): boolean {
+  return state === "submitting" || state === "thinking" || state === "clearing" || state === "compacting" || state === "permission";
+}
+
+function workspaceStateFingerprint(ws: WorkspaceStatusInput): string {
+  return JSON.stringify({
+    state: ws.state,
+    turnActive: ws.turnActive,
+    connectivity: ws.connectivity,
+    sessionStatus: ws.sessionStatus,
+    controllerGenerationId: ws.controllerGenerationId,
+    causeSeq: ws.causeSeq,
+    activeFaults: ws.activeFaults,
+  });
 }
 
 /** Result of ingesting a batch of adapter effects. */
@@ -660,7 +682,7 @@ export class ConversationStore {
    * agnostic; the no-op/`Date.now` defaults keep call sites unchanged.
    */
   constructor(
-    private readonly log: (level: "info" | "warn", message: string) => void = () => {},
+    private readonly log: (level: "info" | "warn" | "error", message: string) => void = () => {},
     private readonly now: () => number = () => Date.now(),
   ) {}
 
@@ -702,6 +724,7 @@ export class ConversationStore {
    * it is a no-op here.
    */
   ingest(effects: readonly AdapterEffect[]): IngestResult {
+    this.validateIngest(effects);
     let changed = false;
     for (const effect of effects) {
       switch (effect.kind) {
@@ -741,6 +764,104 @@ export class ConversationStore {
   }
 
   /**
+   * Remove every frontend projection whose truth depends on the live socket.
+   * Conversation history and durable session metadata remain readable, while
+   * no active phase or progress window survives a disconnected or expired
+   * WorkspaceState lease. The next StateSnapshot reconstructs every field.
+   */
+  invalidateFrontendState(reason: string): boolean {
+    const s = this.state;
+    const changed =
+      s.renderState !== null ||
+      s.sessionConnectivity !== null ||
+      s.sessionStatus !== null ||
+      s.turnInFlight ||
+      this.progress !== null;
+    this.log(
+      "warn",
+      `workspace state invalidated reason=${reason} session=${s.sessionId || "none"} ` +
+        `state=${s.renderState ?? "none"} connectivity=${s.sessionConnectivity ?? "none"} ` +
+        `status=${s.sessionStatus ?? "none"} revision_at_ms=${s.workspaceStateAtMs} ` +
+        `cause_seq=${s.workspaceStateCauseSeq} progress=${this.progress === null ? "absent" : "present"}`,
+    );
+    s.renderState = null;
+    s.sessionConnectivity = null;
+    s.sessionStatus = null;
+    s.controllerGenerationId = "";
+    s.activeFaults = [];
+    s.turnInFlight = false;
+    s.turnStartedAt = null;
+    this.progress = null;
+    return changed;
+  }
+
+  /** Validate a frame's entire effect batch before mutating any store field. */
+  private validateIngest(effects: readonly AdapterEffect[]): void {
+    let nextWorkspace: WorkspaceStatusInput | null = null;
+    let nextProgress = this.progress;
+    let revisionAtMs = this.state.workspaceStateAtMs;
+    let revisionFingerprint = this.workspaceStateFingerprint();
+
+    for (const effect of effects) {
+      if (effect.kind === "workspace-state") {
+        const ws = effect.value;
+        const fingerprint = workspaceStateFingerprint(ws);
+        if (ws.atMs <= 0) {
+          this.failIngestInvariant(
+            `WorkspaceState has non-positive revision workspace=${ws.workspace} session=${ws.sessionId} at_ms=${ws.atMs}`,
+          );
+        }
+        if (revisionAtMs > 0 && ws.atMs < revisionAtMs) {
+          this.failIngestInvariant(
+            `WorkspaceState revision regressed workspace=${ws.workspace} session=${ws.sessionId} ` +
+              `incoming_at_ms=${ws.atMs} retained_at_ms=${revisionAtMs} incoming_cause_seq=${ws.causeSeq}`,
+          );
+        }
+        if (revisionAtMs > 0 && ws.atMs === revisionAtMs && revisionFingerprint !== fingerprint) {
+          this.failIngestInvariant(
+            `WorkspaceState revision conflicted workspace=${ws.workspace} session=${ws.sessionId} ` +
+              `at_ms=${ws.atMs} incoming_cause_seq=${ws.causeSeq}`,
+          );
+        }
+        revisionAtMs = ws.atMs;
+        revisionFingerprint = fingerprint;
+        nextWorkspace = ws;
+      } else if (effect.kind === "progress") {
+        nextProgress = effect.value;
+      }
+    }
+
+    const renderState = nextWorkspace?.state ?? this.state.renderState;
+    const turnActive = nextWorkspace?.turnActive ?? this.state.turnInFlight;
+    const interrupt = nextProgress?.interrupt?.outcome ?? null;
+    if (interrupt === "already_complete" && (turnActive || activeRenderState(renderState))) {
+      this.failIngestInvariant(
+        `ALREADY_COMPLETE contradicts active WorkspaceState state=${renderState ?? "none"} ` +
+          `turn_active=${turnActive} session=${(nextWorkspace?.sessionId ?? this.state.sessionId) || "none"} ` +
+          `revision_at_ms=${nextWorkspace?.atMs ?? this.state.workspaceStateAtMs}`,
+      );
+    }
+  }
+
+  private workspaceStateFingerprint(): string {
+    if (this.state.workspaceStateAtMs === 0 || this.state.renderState === null) return "";
+    return JSON.stringify({
+      state: this.state.renderState,
+      turnActive: this.state.turnInFlight,
+      connectivity: this.state.sessionConnectivity,
+      sessionStatus: this.state.sessionStatus,
+      controllerGenerationId: this.state.controllerGenerationId,
+      causeSeq: this.state.workspaceStateCauseSeq,
+      activeFaults: this.state.activeFaults,
+    });
+  }
+
+  private failIngestInvariant(message: string): never {
+    this.log("error", `INVARIANT VIOLATION: ${message}`);
+    throw new Error(`store: ${message}`);
+  }
+
+  /**
    * Apply the explicit SetModel receipt. The receipt is shim-confirmed state,
    * while a later SessionView remains the durable snapshot authority.
    */
@@ -769,6 +890,8 @@ export class ConversationStore {
     s.sessionStatus = ws.sessionStatus;
     s.controllerGenerationId = ws.controllerGenerationId;
     s.activeFaults = ws.activeFaults;
+    s.workspaceStateAtMs = ws.atMs;
+    s.workspaceStateCauseSeq = ws.causeSeq;
     const wasActive = s.turnInFlight;
     s.turnInFlight = ws.turnActive;
     if (ws.turnActive && !wasActive) {
