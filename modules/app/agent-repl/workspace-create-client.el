@@ -611,6 +611,38 @@ Exactly one UI action arm must be present."
         (and error-text (length error-text)) (car err))
        (signal (car err) (cdr err))))))
 
+(defvar agent-repl--host-action-deferral nil
+  "Bound by the host-action executor around each handler call.
+A handler whose real outcome is NOT known by the time it returns sets this
+to its own correlation token, through `agent-repl--host-action-defer'.
+
+WHY IT EXISTS.  The executor's default is to read a handler that returned
+without signalling as a SUCCEEDED action, which is right for a handler that
+did the work itself.  The daemon-routed merge does not: it sends a
+`mergeWorkspace' command and returns immediately, so the daemon was told
+`ok=true' while the merge's own `CommandAck' was still in flight — and when
+that ack was a rejection, the daemon had already durably recorded the merge
+as done.  Deferring is what makes an action's completion mean the effect
+happened rather than the dispatch happened.")
+
+(defvar agent-repl--host-action-deferrals (make-hash-table :test 'equal)
+  "Deferred host actions keyed by their handler's correlation token.
+Maps token -> action id for `agent-repl--host-action-settle'.  `defvar'
+preserves entries across module hot reload, exactly as
+`agent-repl--host-action-outcomes' does, so a reload mid-merge does not
+strand the completion.")
+
+(defun agent-repl--host-action-defer (token)
+  "Declare that the running host action's outcome is not yet known.
+TOKEN is the handler's own correlation handle (the merge path uses its
+`mergeWorkspace' request id), later passed to
+`agent-repl--host-action-settle'.  A no-op when called outside a host-action
+handler, so the same dispatch function stays callable from an interactive
+command that has no action to complete."
+  (when (and token (boundp 'agent-repl--host-action-deferral))
+    (setq agent-repl--host-action-deferral token))
+  token)
+
 (defun agent-repl--workspace-create-cache-host-success
     (action-id type handler cmd ws duplicates)
   "Cache ACTION-ID's successful outcome and prune old completed entries."
@@ -661,6 +693,83 @@ Exactly one UI action arm must be present."
        action-id))
     :duplicate))
 
+(defun agent-repl--host-action-succeed (action-id type handler cmd ws)
+  "Cache and send ACTION-ID's SUCCESS outcome, replaying suppressed duplicates.
+The terminal success path shared by a handler that finished synchronously
+and by a deferred handler whose awaited outcome came back OK
+\(`agent-repl--host-action-settle'), so neither can drift from the other."
+  (let* ((in-flight (gethash action-id agent-repl--host-action-outcomes))
+         (duplicates (or (plist-get in-flight :duplicates) 0)))
+    (agent-repl--workspace-create-cache-host-success
+     action-id type handler cmd ws duplicates)
+    (dotimes (_ (1+ duplicates))
+      (agent-repl--workspace-create-send-host-completion action-id t nil ws))
+    (agent-repl--log
+     ws
+     "host-action: COMPLETE action-id=%s type=%s handler=%s duplicate-completions=%d"
+     action-id type handler duplicates)
+    t))
+
+(defun agent-repl--host-action-hold (action-id type handler cmd ws token)
+  "Retain ACTION-ID as in-flight until TOKEN's outcome settles it.
+No completion is sent: the daemon keeps the action durably outstanding,
+which is exactly what an unresolved effect should look like from its side.
+A duplicate delivery arriving in this window hits the ordinary in-flight
+suppression and is replayed when the outcome lands."
+  (puthash action-id
+           (list :state 'in-flight
+                 :duplicates (or (plist-get
+                                  (gethash action-id agent-repl--host-action-outcomes)
+                                  :duplicates)
+                                 0)
+                 :type type :handler handler :cmd cmd :ws ws
+                 :deferred-token token)
+           agent-repl--host-action-outcomes)
+  (puthash token action-id agent-repl--host-action-deferrals)
+  (agent-repl--log
+   ws
+   "host-action: DEFERRED action-id=%s type=%s handler=%s token=%s completion=awaiting-outcome"
+   action-id type handler token)
+  :deferred)
+
+(defun agent-repl--host-action-settle (token ok error-text)
+  "Complete the host action deferred under TOKEN with OK and ERROR-TEXT.
+Called from whatever the deferring handler was waiting on — for the
+daemon-routed merge, its `mergeWorkspace' CommandAck.  An unknown TOKEN is
+logged and ignored: the same dispatch runs for interactive merges that have
+no host action behind them, and inventing one would complete an action
+nobody is owed."
+  (let ((action-id (gethash token agent-repl--host-action-deferrals)))
+    (if (null action-id)
+        (agent-repl--log
+         nil
+         "host-action: settle for an UNTRACKED token=%s ok=%S — no deferred action is waiting on it"
+         token ok)
+      (remhash token agent-repl--host-action-deferrals)
+      (let* ((entry (gethash action-id agent-repl--host-action-outcomes))
+             (type (plist-get entry :type))
+             (handler (plist-get entry :handler))
+             (cmd (plist-get entry :cmd))
+             (ws (plist-get entry :ws))
+             (duplicates (or (plist-get entry :duplicates) 0)))
+        (if ok
+            (agent-repl--host-action-succeed action-id type handler cmd ws)
+          (let ((text (or error-text "the deferred host action failed")))
+            (puthash action-id
+                     (list :state 'failed-unsent :type type :handler handler
+                           :cmd cmd :ws ws :ok nil :error text
+                           :duplicates duplicates)
+                     agent-repl--host-action-outcomes)
+            (dotimes (_ (1+ duplicates))
+              (agent-repl--workspace-create-send-host-completion
+               action-id nil text ws))
+            (remhash action-id agent-repl--host-action-outcomes)
+            (agent-repl--log
+             ws
+             "host-action: DEFERRED FAILURE SENT action-id=%s type=%s handler=%s token=%s err-length=%d duplicate-completions=%d retryable-on-next-delivery=yes"
+             action-id type handler token (length text) duplicates)
+            nil))))))
+
 (defun agent-repl--workspace-create-host-action-ws (action)
   "Return ACTION's directly supplied legacy workspace name, if valid.
 This is diagnostic context only; HostAction validation remains authoritative."
@@ -704,7 +813,7 @@ duplicate resends its cached outcome."
       (puthash action-id
                (list :state 'in-flight :duplicates 0)
                agent-repl--host-action-outcomes)
-      (let (type handler cmd ws handler-error)
+      (let (type handler cmd ws handler-error deferral)
         (condition-case err
             (pcase-let ((`(,_ ,parsed-type ,parsed-handler ,parsed-cmd ,parsed-ws)
                          (agent-repl--workspace-create-host-action-command
@@ -722,22 +831,18 @@ duplicate resends its cached outcome."
                "host-action: DISPATCH action-id=%s type=%s handler=%s cmd-shape=%s"
                action-id type handler
                (agent-repl--workspace-create-log-payload-shape cmd))
-              (funcall handler cmd))
+              ;; The handler may declare its outcome UNKNOWN yet by setting
+              ;; this (see `agent-repl--host-action-defer'), in which case the
+              ;; completion waits for whatever the handler is waiting on.
+              (let ((agent-repl--host-action-deferral nil))
+                (funcall handler cmd)
+                (setq deferral agent-repl--host-action-deferral)))
           (error (setq handler-error err)))
         (if (null handler-error)
-            (let* ((in-flight
-                    (gethash action-id agent-repl--host-action-outcomes))
-                   (duplicates (or (plist-get in-flight :duplicates) 0)))
-              (agent-repl--workspace-create-cache-host-success
-               action-id type handler cmd ws duplicates)
-              (dotimes (_ (1+ duplicates))
-                (agent-repl--workspace-create-send-host-completion
-                 action-id t nil ws))
-              (agent-repl--log
-               ws
-               "host-action: COMPLETE action-id=%s type=%s handler=%s duplicate-completions=%d"
-               action-id type handler duplicates)
-              t)
+            (if deferral
+                (agent-repl--host-action-hold action-id type handler cmd ws
+                                              deferral)
+              (agent-repl--host-action-succeed action-id type handler cmd ws))
           (let* ((text (error-message-string handler-error))
                  (in-flight
                   (gethash action-id agent-repl--host-action-outcomes))
