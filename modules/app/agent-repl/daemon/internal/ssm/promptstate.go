@@ -414,7 +414,7 @@ func (m *Manager) ReconcileAlreadyComplete(
 			return false, fmt.Errorf("ssm: reconcile already-complete verdict for workspace %q session %q: %w",
 				workspace, sessionID, err)
 		}
-		m.logf("ssm: already-complete reconciliation CLOSED ws=%s session=%s previous=%s active_claimant=%q — shim reports no foreground turn, so the footer cannot coexist with `thinking`",
+		m.logf("ssm: already-complete reconciliation CLOSED ws=%s session=%s previous=%s active_claimant=%q — shim reports no foreground turn, so the footer cannot coexist with an active state",
 			workspace, sessionID, topState, claimant)
 		if err := m.reresolveLocked(workspace, causeInterruptAlreadyComplete, 0); err != nil {
 			return false, err

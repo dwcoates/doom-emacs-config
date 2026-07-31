@@ -728,6 +728,14 @@ func (f *PushForwarder) PushQueueView(q *frontendv1.QueueView) {
 	f.logMiss("queue-view")
 }
 
+func (f *PushForwarder) PushProgressView(v *frontendv1.ProgressView) {
+	if s := f.target.Load(); s != nil {
+		s.PushProgressView(v)
+		return
+	}
+	f.logMiss("progress-view")
+}
+
 // signalPID is the production signal delivery: find the process and signal it.
 // A pid that no longer exists reports os.ErrProcessDone, which the caller reads
 // as "already stopped" rather than as a failure.

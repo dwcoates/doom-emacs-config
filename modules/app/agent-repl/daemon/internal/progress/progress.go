@@ -217,11 +217,13 @@ func (m *Manager) ObserveWorkspaceState(ws *frontendv1.WorkspaceState) error {
 // becomes the earlier of the two and nothing double-resets.
 //
 // A prompt that the daemon QUEUES rather than submits must NOT call this: the
-// turn it would be reporting is the one already running.
-func (m *Manager) NoteTurnAccepted(workspace, sessionID string) {
+// turn it would be reporting is the one already running. The returned clone is
+// the exact cleared view callers can synchronously offer before an active
+// WorkspaceState, independently of the ordinary subscriber broadcast.
+func (m *Manager) NoteTurnAccepted(workspace, sessionID string) *frontendv1.ProgressView {
 	if workspace == "" {
 		m.logf("progress: NoteTurnAccepted with no workspace (session=%s); ignoring", sessionID)
-		return
+		return nil
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -232,11 +234,12 @@ func (m *Manager) NoteTurnAccepted(workspace, sessionID string) {
 	if !m.openTurnLocked(wp, m.clock()) {
 		m.logf("progress: turn accepted IDEMPOTENT ws=%s session=%s turn_open=true interrupt_outcome=%s",
 			workspace, sessionID, wp.view.GetInterrupt().GetOutcome())
-		return
+		return cloneView(wp.view)
 	}
 	m.logf("progress: turn accepted OPENED ws=%s session=%s turn_started_at_ms=%d interrupt_cleared=true",
 		workspace, sessionID, wp.view.GetTurnStartedAtMs())
 	m.pushLocked(workspace, wp)
+	return cloneView(wp.view)
 }
 
 // NoteTurnRejected closes the turn clock NoteTurnAccepted opened for a prompt

@@ -29,6 +29,7 @@ type Pusher interface {
 	PushSessionInitView(*frontendv1.SessionInitView)
 	PushHeartbeatView(*frontendv1.HeartbeatView)
 	PushQueueView(*frontendv1.QueueView)
+	PushProgressView(*frontendv1.ProgressView)
 }
 
 // StateApplier is the slice of the SSM the session controller feeds lifecycle events to.
@@ -61,7 +62,7 @@ type StateApplier interface {
 	// ApplyRuntimeFault opens or closes one typed, component-scoped fault
 	// window owned by the named controller generation.
 	ApplyRuntimeFault(workspace, sessionID, generationID, component, faultType string, impact ssm.FaultImpact, open bool, causeKind string) error
-	// MarkPromptAccepted appends the daemon-local `thinking` edge as the daemon
+	// MarkPromptAccepted appends the daemon-local `submitting` edge as the daemon
 	// commits to submitting an immediately delivered prompt — BEFORE the shim
 	// Acks it, so the status does not wait on a shim round-trip — and
 	// synchronously publishes that state through PUBLISH. The durable
@@ -78,7 +79,8 @@ type StateApplier interface {
 	MarkPromptRejected(workspace, sessionID, requestID string, publish func(*frontendv1.WorkspaceState)) (retracted bool, err error)
 	// ReconcileAlreadyComplete makes an ALREADY_COMPLETE interrupt Ack agree
 	// with the session-status lifecycle before the progress footer may publish
-	// "already finished". It closes a still-standing `thinking`/`permission`
+	// "already finished". It closes a still-standing
+	// `submitting`/`thinking`/`permission`
 	// row owned by this session and preserves already-settled turn outcomes.
 	// PUBLISH is the synchronous frontend ordering barrier. The reconciled
 	// settled WorkspaceState must be offered before the progress resolver may
@@ -143,7 +145,10 @@ type StateApplier interface {
 type ProgressResolver interface {
 	Apply(workspace string, ev *corev1.Event) error
 	SetCounts(workspace string, pendingPermissions, queueDepth int64)
-	NoteTurnAccepted(workspace, sessionID string)
+	// NoteTurnAccepted returns the exact cleared interrupt view so the prompt
+	// path can offer it synchronously before the active WorkspaceState. Nil is
+	// reserved for the explicitly optional noopProgress implementation.
+	NoteTurnAccepted(workspace, sessionID string) *frontendv1.ProgressView
 	// NoteTurnRejected closes the clock NoteTurnAccepted opened when the submit
 	// it was opened for never reached the shim. Fed only after the SSM confirms
 	// it retracted the matching state edge, so a turn that started for another
@@ -189,11 +194,11 @@ type ClearCompactStore interface {
 // not care about it, without every feed site growing a nil check.
 type noopProgress struct{}
 
-func (noopProgress) Apply(string, *corev1.Event) error                     { return nil }
-func (noopProgress) SetCounts(string, int64, int64)                        {}
-func (noopProgress) NoteTurnAccepted(string, string)                       {}
-func (noopProgress) NoteTurnRejected(string, string)                       {}
-func (noopProgress) NoteInterrupt(string, string, corev1.InterruptOutcome) {}
+func (noopProgress) Apply(string, *corev1.Event) error                        { return nil }
+func (noopProgress) SetCounts(string, int64, int64)                           {}
+func (noopProgress) NoteTurnAccepted(string, string) *frontendv1.ProgressView { return nil }
+func (noopProgress) NoteTurnRejected(string, string)                          {}
+func (noopProgress) NoteInterrupt(string, string, corev1.InterruptOutcome)    {}
 
 // ringCap bounds the per-session retained event ring the daemon keeps for the
 // live TaskCatalog rebuild and for resync replay. It is a bounded window: older

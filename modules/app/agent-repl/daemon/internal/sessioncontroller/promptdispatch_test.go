@@ -3,6 +3,7 @@ package sessioncontroller
 import (
 	"errors"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -395,7 +396,7 @@ func TestAFoldedDirectiveStillRendersItsPrompt(t *testing.T) {
 
 // --- the accepted edge, and the price of publishing it early ------------------
 //
-// `thinking` is published on the daemon's OWN decision to submit, ahead of the
+// `submitting` is published on the daemon's OWN decision to submit, ahead of the
 // shim round-trip that used to gate it, so the workspace stops reading green the
 // moment the user presses send. The daemon pays for that claim by withdrawing it
 // itself when the submit then fails.
@@ -423,9 +424,9 @@ func TestThinkingIsPublishedBeforeTheShimIsAsked(t *testing.T) {
 	}
 
 	// Assert.
-	want := "workspace:RENDER_STATE_THINKING"
-	if len(atSubmit) != 1 || atSubmit[0] != want {
-		t.Fatalf("frontend push trace as the submit began = %v, want [%s] already published", atSubmit, want)
+	want := []string{"progress", "workspace:RENDER_STATE_SUBMITTING"}
+	if !reflect.DeepEqual(atSubmit, want) {
+		t.Fatalf("frontend push trace as the submit began = %v, want %v already published", atSubmit, want)
 	}
 }
 
