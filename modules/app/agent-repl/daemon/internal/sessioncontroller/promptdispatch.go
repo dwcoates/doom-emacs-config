@@ -199,7 +199,9 @@ func (m *Manager) notePromptAccepted(d *sessionController, requestID string) (ac
 		// validated and committed this edge, but before the active state crosses
 		// the frontend boundary. This makes ALREADY_COMPLETE plus SUBMITTING or
 		// THINKING unrepresentable without mutating progress on an SSM failure.
-		m.progress().NoteTurnAccepted(d.workspace, d.sessionID)
+		if progress := m.progress().NoteTurnAccepted(d.workspace, d.sessionID); progress != nil {
+			d.consumer.push.PushProgressView(progress)
+		}
 		d.consumer.push.PushWorkspaceState(state)
 	}
 	if err := m.cfg.SSM.MarkPromptAccepted(d.workspace, d.sessionID, requestID, publish); err != nil {

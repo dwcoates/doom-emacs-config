@@ -43,10 +43,13 @@ func TestInterruptWindowClearsOnTheNextTurnStart(t *testing.T) {
 	h.m.NoteInterrupt(testWS, testSID, corev1.InterruptOutcome_INTERRUPT_OUTCOME_INTERRUPTED)
 	h.drain()
 	// Act.
-	h.m.NoteTurnAccepted(testWS, testSID)
+	synchronous := h.m.NoteTurnAccepted(testWS, testSID)
 	// Assert.
 	if got := h.last().GetInterrupt(); got.GetActive() {
 		t.Fatalf("interrupt window = %+v, want cleared by the next turn start", got)
+	}
+	if got := synchronous.GetInterrupt(); got.GetActive() {
+		t.Fatalf("synchronous interrupt window = %+v, want the exact cleared view", got)
 	}
 }
 
