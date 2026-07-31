@@ -34,8 +34,9 @@
 (declare-function agent-repl--in-sandbox-p "agent-repl-install" ())
 (declare-function agent-repl--frontend-turn-active-sessions "agent-repl-frontend-client" ())
 (declare-function agent-repl-runtime-restart "services" ())
-(declare-function agent-repl--uds-socket-live-p "frontend-uds" (&optional path))
 (declare-function agent-repl--uds-connected-p "frontend-uds" ())
+(declare-function agent-repl-uds-probe-async "frontend-uds" (path on-open on-failure))
+(declare-function agent-repl--uds-run-timer "frontend-uds" (seconds function &rest args))
 (declare-function agent-repl-uds-connect "frontend-uds" (&optional path readiness-p))
 (declare-function agent-repl--uds-send-command "frontend-uds" (field payload &optional workspace process))
 (declare-function agent-repl--uds-track-command "frontend-uds" (request-id field workspace &optional on-failure on-success))
@@ -351,28 +352,56 @@ No-op under batch (tests) and inside the agent sandbox, matching the
   (or noninteractive
       (agent-repl--in-sandbox-p)))
 
-(defun agent-repl--frontend-poll-until (predicate timeout interval)
-  "Block until PREDICATE clears or TIMEOUT elapses; return PREDICATE's last value.
-Calls PREDICATE (a nullary function), sleeping INTERVAL seconds between
-polls, until PREDICATE returns nil or the deadline passes.  Returns the
-LAST value of PREDICATE, so a caller branches on whether the condition
-cleared (nil) or the wait timed out (non-nil) — e.g. \"process still live
-after the grace window\" or \"socket still bound after shutdown\".
+(defun agent-repl--frontend-probe-daemon-async (on-open on-failure)
+  "Resolve frontend UDS liveness without blocking the main thread.
+ON-OPEN and ON-FAILURE run once after the callback-owned probe settles."
+  (agent-repl--log nil "frontend daemon probe: start socket=%s" agent-repl-uds-socket-path)
+  (agent-repl-uds-probe-async
+   agent-repl-uds-socket-path
+   (lambda ()
+     (agent-repl--log nil "frontend daemon probe: complete socket=%s outcome=open"
+                      agent-repl-uds-socket-path)
+     (funcall on-open))
+   (lambda (detail)
+     (agent-repl--log nil "frontend daemon probe: complete socket=%s outcome=absent detail=%S"
+                      agent-repl-uds-socket-path detail)
+     (funcall on-failure detail))))
 
-Uses `sleep-for', NOT `sit-for': sit-for returns immediately on pending
-input, which would collapse the wait window while the user types (the
-same rationale as the readiness poll in frontend-client.el)."
-  (agent-repl--log-verbose nil
-                            "frontend poll: begin predicate=%S timeout=%s interval=%s"
-                            predicate timeout interval)
+(defun agent-repl--frontend-await-async (predicate timeout interval on-ready on-timeout context)
+  "Run PREDICATE through timers and call a continuation without blocking.
+CONTEXT and every terminal value are persisted for lifecycle diagnosis."
   (let ((deadline (+ (float-time) timeout)))
-    (while (and (funcall predicate) (< (float-time) deadline))
-      (sleep-for interval))
-    (let ((remaining (funcall predicate)))
-      (agent-repl--log-verbose nil
-                                "frontend poll: complete predicate=%S remaining=%S timeout=%s interval=%s"
-                                predicate remaining timeout interval)
-      remaining)))
+    (cl-labels ((step ()
+                  (let ((value (funcall predicate)))
+                    (cond
+                     ((not value)
+                      (agent-repl--log nil "frontend await: complete context=%s outcome=ready value=%S" context value)
+                      (funcall on-ready))
+                     ((>= (float-time) deadline)
+                      (agent-repl--log nil "frontend await: timeout context=%s timeout=%s value=%S" context timeout value)
+                      (funcall on-timeout value))
+                     (t
+                      (agent-repl--log-verbose nil "frontend await: pending context=%s deadline=%S value=%S" context deadline value)
+                      (agent-repl--uds-run-timer interval #'step))))))
+      (agent-repl--log nil "frontend await: start context=%s timeout=%s interval=%s" context timeout interval)
+      (step))))
+
+(defun agent-repl--frontend-await-socket-absence-async (timeout on-absent on-timeout context)
+  "Await frontend socket removal through callback probes and timers only."
+  (let ((deadline (+ (float-time) timeout)))
+    (cl-labels ((attempt ()
+                  (agent-repl--frontend-probe-daemon-async
+                   (lambda ()
+                     (if (>= (float-time) deadline)
+                         (progn
+                           (agent-repl--log nil "frontend socket await: timeout context=%s timeout=%s" context timeout)
+                           (funcall on-timeout))
+                       (agent-repl--uds-run-timer 0.1 #'attempt)))
+                   (lambda (detail)
+                     (agent-repl--log nil "frontend socket await: complete context=%s outcome=absent detail=%S" context detail)
+                     (funcall on-absent)))))
+      (agent-repl--log nil "frontend socket await: start context=%s timeout=%s" context timeout)
+      (attempt))))
 
 ;;;; ---- Build-if-stale ---------------------------------------------------
 
@@ -610,17 +639,10 @@ under the reserved `client.\=' prefix."
 
 ;;;; ---- Entry point ------------------------------------------------------
 
-(defun agent-repl--frontend-daemon-responsive-p ()
-  "Return non-nil when a daemon is listening on the frontend UDS socket.
-Detects a daemon this Emacs does not track — one bounced into place by
-an agent, or surviving from a previous Emacs — because the socket path is
-a fixed, single-owner rendezvous just as the HTTP port was.  An
-unreachable socket counts as absent.
-
-Re-sourced from the deleted `GET /sessions' probe onto
-`agent-repl--uds-socket-live-p' (S8/S9 sentinel endgame): Emacs speaks no
-HTTP to the daemon any more."
-  (agent-repl--uds-socket-live-p))
+(defun agent-repl--frontend-daemon-responsive-async (on-open on-absent)
+  "Asynchronously report whether a daemon owns the frontend UDS socket.
+The callback API is the only daemon lifecycle liveness surface."
+  (agent-repl--frontend-probe-daemon-async on-open on-absent))
 
 ;;;; ---- Staleness detection ----------------------------------------------
 
@@ -681,8 +703,8 @@ reaches a daemon this Emacs never spawned.
 
 Tracks the command so a rejected ack is surfaced loudly rather than read
 as success.  Signals (`agent-repl--uds-send-command's loud `user-error')
-when there is no connection to send on; the caller logs that and falls
-through to the liveness poll, which is the real exit signal."
+when there is no connection to send on; the caller logs that and lets the
+asynchronous socket probe determine the exit outcome."
   (let ((connected (agent-repl--uds-connected-p)))
     (agent-repl--log nil "foreign daemon shutdown: uds-connected=%s addr=%s"
                      connected agent-repl-frontend-daemon-addr)
@@ -696,17 +718,18 @@ through to the liveness poll, which is the real exit signal."
                        req (if stop-shims "t" "nil"))
       req)))
 
-(defun agent-repl--frontend-bounce-foreign-daemon (&optional stop-shims)
+(defun agent-repl--frontend-bounce-foreign-daemon (&optional stop-shims on-complete)
   "Bounce an ADOPTED daemon this Emacs does not track, via `ShutdownCmd'.
 STOP-SHIMS rides the command; see
 `agent-repl--frontend-request-foreign-shutdown'.
 Asks the foreign daemon to exit gracefully (it runs the same shutdown path
 SIGTERM triggers), waits for its listener to free the socket, then starts a
-fresh daemon from the already-rebuilt on-disk binary.
+fresh daemon from the already-rebuilt on-disk binary.  Returns `:pending'
+immediately; ON-COMPLETE receives the replacement only after socket release.
 
 The shutdown command errors benignly if the daemon drops the connection as
 it tears down, so a transport error on the send is logged and ignored —
-the liveness poll is the real exit signal.  A daemon that never frees the
+the asynchronous socket probe is the real exit signal.  A daemon that never frees the
 socket within `agent-repl-frontend-foreign-stop-grace-seconds' fails loudly
 and is left in place; spawning next to it would only bind-fail."
   (agent-repl--log nil
@@ -716,51 +739,50 @@ and is left in place; spawning next to it would only bind-fail."
   (condition-case err
       (agent-repl--frontend-request-foreign-shutdown stop-shims)
     (error
-     (agent-repl--log nil "startup: foreign daemon shutdown request errored (%s) — polling the socket anyway"
+     (agent-repl--log nil "startup: foreign daemon shutdown request errored (%s) — probing the socket asynchronously"
                        (error-message-string err))))
-  (let ((still-responsive
-         (agent-repl--frontend-poll-until
-          #'agent-repl--frontend-daemon-responsive-p
-          agent-repl-frontend-foreign-stop-grace-seconds 0.1)))
-    (agent-repl--log nil
-                     "foreign daemon bounce: shutdown wait complete still-responsive=%S addr=%s"
-                     still-responsive agent-repl-frontend-daemon-addr)
-    (if still-responsive
-      (agent-repl--error nil
-                         "adopted daemon on %s ignored shutdown within %ss; replacement aborted"
-                         agent-repl-frontend-daemon-addr
-                         agent-repl-frontend-foreign-stop-grace-seconds)
-      (agent-repl--frontend-start-daemon))))
+  (agent-repl--frontend-await-socket-absence-async
+   agent-repl-frontend-foreign-stop-grace-seconds
+   (lambda ()
+     (agent-repl--log nil "foreign daemon bounce: socket released addr=%s; starting replacement"
+                      agent-repl-frontend-daemon-addr)
+     (let ((started (agent-repl--frontend-start-daemon)))
+       (when on-complete (funcall on-complete started))))
+   (lambda ()
+     (agent-repl--error nil "adopted daemon on %s ignored shutdown within %ss; replacement aborted"
+                        agent-repl-frontend-daemon-addr
+                        agent-repl-frontend-foreign-stop-grace-seconds))
+   "foreign-daemon-shutdown")
+  :pending)
 
-(defun agent-repl--frontend-runtime-bounce-preflight ()
+(defun agent-repl--frontend-runtime-bounce-preflight-async (callback)
   "Resolve and validate the daemon state before any runtime mutation.
-Returns `:tracked', `:responsive', `:absent', or
-`(:incompatible PID . COMMAND)'.  A listener that is neither responsive
-nor the verified claude-repld binary fails loudly before builds or service
-bounces can change anything."
-  (let* ((tracked (agent-repl--frontend-daemon-live-p))
-         (responsive (agent-repl--frontend-daemon-responsive-p))
-         (owner (and (not tracked) (not responsive)
-                     (agent-repl--frontend-listener-owner)))
-         (state
-          (cond
-           (tracked :tracked)
-           (responsive :responsive)
-           ((and owner
-                 (agent-repl--frontend-our-daemon-command-p (cdr owner)))
-            (cons :incompatible owner))
-           (owner
-            (agent-repl--error nil
-                               "daemon address %s is held by unrelated process pid=%s command=%s"
-                               agent-repl-frontend-daemon-addr
-                               (car owner) (cdr owner)))
-           (t :absent))))
-    (agent-repl--log nil
-                     "runtime-bounce preflight: state=%S addr=%s owner=%S"
-                     state agent-repl-frontend-daemon-addr owner)
-    state))
+CALLBACK receives a validated state before any lifecycle mutation."
+  (if (agent-repl--frontend-daemon-live-p)
+      (progn
+        (agent-repl--log nil "runtime-bounce preflight: state=tracked addr=%s"
+                         agent-repl-frontend-daemon-addr)
+        (funcall callback :tracked))
+    (agent-repl--frontend-daemon-responsive-async
+     (lambda ()
+       (agent-repl--log nil "runtime-bounce preflight: state=responsive addr=%s"
+                        agent-repl-frontend-daemon-addr)
+       (funcall callback :responsive))
+     (lambda (_detail)
+       (let ((owner (agent-repl--frontend-listener-owner)))
+         (cond
+          ((and owner (agent-repl--frontend-our-daemon-command-p (cdr owner)))
+           (let ((state (cons :incompatible owner)))
+             (agent-repl--log nil "runtime-bounce preflight: state=%S addr=%s" state agent-repl-frontend-daemon-addr)
+             (funcall callback state)))
+          (owner
+           (agent-repl--error nil "daemon address %s is held by unrelated process pid=%s command=%s"
+                              agent-repl-frontend-daemon-addr (car owner) (cdr owner)))
+          (t
+           (agent-repl--log nil "runtime-bounce preflight: state=absent addr=%s" agent-repl-frontend-daemon-addr)
+           (funcall callback :absent))))))))
 
-(defun agent-repl--frontend-bounce-after-build (&optional preflight stop-shims)
+(defun agent-repl--frontend-bounce-after-build (&optional preflight stop-shims on-complete)
   "Bounce the current daemon after all required artifacts are built.
 STOP-SHIMS asks the outgoing daemon to stop its session shims rather than
 leave them running for the replacement to reattach to; see
@@ -769,28 +791,35 @@ Starts a daemon when none exists, gracefully replaces a tracked or adopted
 daemon, and handles an incompatible pre-UDS generation by terminating only
 the verified claude-repld listener.  The caller must reject active turns
 before invoking this state-changing operation.  PREFLIGHT is the validated
-result of `agent-repl--frontend-runtime-bounce-preflight'; when omitted,
-this function resolves it before acting."
-  (let ((state (or preflight
-                   (agent-repl--frontend-runtime-bounce-preflight))))
+result of `agent-repl--frontend-runtime-bounce-preflight-async'.  The
+caller supplies PREFLIGHT and ON-COMPLETE receives the started daemon after
+any asynchronous stop has settled."
+  (let ((state preflight))
+    (unless state
+      (error "agent-repl: runtime bounce requires asynchronous preflight state"))
     (agent-repl--log nil
                      "runtime-bounce: applying preflight=%S addr=%s"
                      state agent-repl-frontend-daemon-addr)
     (cond
      ((eq state :tracked)
-      (agent-repl--frontend-stop-daemon nil stop-shims)
-      (agent-repl--frontend-start-daemon))
+      (agent-repl--frontend-stop-daemon
+       nil stop-shims
+       (lambda ()
+         (let ((started (agent-repl--frontend-start-daemon)))
+           (when on-complete (funcall on-complete started)))))
+      :pending)
      ((eq state :responsive)
-      (agent-repl--frontend-bounce-foreign-daemon stop-shims))
+      (agent-repl--frontend-bounce-foreign-daemon stop-shims on-complete))
      ((and (consp state) (eq (car state) :incompatible))
-      (unless (agent-repl--frontend-terminate-incompatible-daemon
-               (cadr state))
-        (agent-repl--error nil
-                           "incompatible daemon pid=%s survived termination; replacement aborted"
-                           (cadr state)))
-      (agent-repl--frontend-start-daemon))
+      (agent-repl--frontend-terminate-incompatible-daemon
+       (cadr state)
+       (lambda ()
+         (let ((started (agent-repl--frontend-start-daemon)))
+           (when on-complete (funcall on-complete started))))))
      ((eq state :absent)
-      (agent-repl--frontend-start-daemon))
+      (let ((started (agent-repl--frontend-start-daemon)))
+        (when on-complete (funcall on-complete started))
+        started))
      (t
       (agent-repl--error nil
                          "invalid daemon runtime-bounce preflight state: %S"
@@ -872,7 +901,7 @@ an unrelated program on the port is left strictly alone and reported."
   (and (stringp command)
        (equal command (file-name-nondirectory agent-repl--frontend-daemon-bin))))
 
-(defun agent-repl--frontend-incompatible-daemon ()
+(defun agent-repl--frontend-incompatible-daemon-async (callback)
   "Return (PID . COMMAND) of a running daemon this generation cannot talk to.
 This is the FIRST-BOOT-AFTER-CUTOVER condition: a `claude-repld' from a
 previous generation is still holding the daemon's port, but serves no
@@ -888,38 +917,36 @@ case:
   - the listener is OUR daemon binary (else it is someone else's program
     and is none of our business).
 
-Returns nil in every other case, including when the port is held by a
-foreign program — that is reported by the caller, not acted on."
-  (let ((responsive (agent-repl--frontend-daemon-responsive-p)))
-    (if responsive
-        (progn
-          (agent-repl--log nil
-                           "incompatible daemon check: addr=%s responsive=t; no replacement needed"
-                           agent-repl-frontend-daemon-addr)
-          nil)
-      (let ((owner (agent-repl--frontend-listener-owner)))
+CALLBACK receives the owner or nil.  Foreign listeners remain untouched."
+  (agent-repl--frontend-daemon-responsive-async
+   (lambda ()
+     (agent-repl--log nil "incompatible daemon check: addr=%s responsive=t; no replacement needed"
+                      agent-repl-frontend-daemon-addr)
+     (funcall callback nil))
+   (lambda (_detail)
+     (let ((owner (agent-repl--frontend-listener-owner)))
         (cond
          ((null owner)
           (agent-repl--log nil
                            "incompatible daemon check: addr=%s responsive=nil owner=nil"
                            agent-repl-frontend-daemon-addr)
-          nil)
+          (funcall callback nil))
          ((agent-repl--frontend-our-daemon-command-p (cdr owner))
           (agent-repl--log nil
                            "incompatible daemon check: addr=%s responsive=nil owner=%S ours=t"
                            agent-repl-frontend-daemon-addr owner)
-          owner)
+          (funcall callback owner))
          (t
           (agent-repl--log nil
                            "startup: %s is held by pid %s (%s), which is NOT our daemon — leaving it alone"
                            agent-repl-frontend-daemon-addr (car owner) (cdr owner))
-          nil))))))
+          (funcall callback nil)))))))
 
-(defun agent-repl--frontend-terminate-incompatible-daemon (pid)
+(defun agent-repl--frontend-terminate-incompatible-daemon (pid &optional on-stopped)
   "Terminate the incompatible daemon PID, gracefully first.
 SIGTERM so it runs its own shutdown path, then SIGKILL only if it
 outlives `agent-repl-frontend-incompatible-stop-grace-seconds'.  Returns
-non-nil when the port is free afterwards.
+`:pending' immediately and invokes ON-STOPPED only after the port is free.
 
 There is no in-flight-turn guard here, unlike the ordinary stop: this
 daemon serves no UDS, so its turns are already unreachable from this
@@ -927,35 +954,33 @@ Emacs — there is no live conversation to protect, only a process holding
 a port nothing can use."
   (agent-repl--log nil "startup: terminating incompatible daemon pid=%s on %s"
                    pid agent-repl-frontend-daemon-addr)
+  (unless on-stopped
+    (error "agent-repl: incompatible termination requires completion callback"))
   (agent-repl--signal-process pid 'TERM)
-  (let ((survived-term
-         (agent-repl--frontend-poll-until
-          #'agent-repl--frontend-listener-owner
-          agent-repl-frontend-incompatible-stop-grace-seconds 0.1)))
-    (agent-repl--log nil
-                     "incompatible daemon termination: pid=%s TERM-survived=%S"
-                     pid survived-term)
-    (when survived-term
-      (agent-repl--log nil "startup: incompatible daemon pid=%s ignored SIGTERM for %ss; sending KILL"
-                       pid agent-repl-frontend-incompatible-stop-grace-seconds)
-      (agent-repl--signal-process pid 'KILL)
-      (let ((survived-kill
-             (agent-repl--frontend-poll-until
-              #'agent-repl--frontend-listener-owner
-              agent-repl-frontend-incompatible-stop-grace-seconds 0.1)))
-        (agent-repl--log nil
-                         "incompatible daemon termination: pid=%s KILL-survived=%S"
-                         pid survived-kill))))
-  (let ((stopped (not (agent-repl--frontend-listener-owner))))
-    (agent-repl--log nil "incompatible daemon termination: pid=%s stopped=%s"
-                     pid stopped)
-    stopped))
+  (agent-repl--frontend-await-async
+   #'agent-repl--frontend-listener-owner agent-repl-frontend-incompatible-stop-grace-seconds 0.1
+   (lambda ()
+     (agent-repl--log nil "incompatible daemon termination: pid=%s outcome=term-stopped" pid)
+     (funcall on-stopped))
+   (lambda (owner)
+     (agent-repl--log nil "startup: incompatible daemon pid=%s ignored SIGTERM owner=%S; sending KILL" pid owner)
+     (agent-repl--signal-process pid 'KILL)
+     (agent-repl--frontend-await-async
+      #'agent-repl--frontend-listener-owner agent-repl-frontend-incompatible-stop-grace-seconds 0.1
+      (lambda ()
+        (agent-repl--log nil "incompatible daemon termination: pid=%s outcome=kill-stopped" pid)
+        (funcall on-stopped))
+      (lambda (still-owner)
+        (agent-repl--error nil "incompatible daemon pid=%s survived SIGKILL owner=%S; replacement aborted" pid still-owner))
+      "incompatible-daemon-kill"))
+   "incompatible-daemon-term")
+  :pending)
 
 (defun agent-repl--ensure-frontend-daemon (&optional force)
-  "Ensure the frontend daemon is built and running; return its process.
+  "Ensure frontend daemon startup has been requested; return its state.
 Idempotent: returns the live process immediately when one exists (unless
 FORCE).  A daemon already answering on the port that this Emacs does
-NOT track is ADOPTED (returns t): spawning next to it would only
+NOT track is ADOPTED asynchronously: spawning next to it would only
 bind-fail and die — the orphan-daemon failure mode.  Otherwise builds
 any stale artifact and launches `claude-repld'.  FORCE skips adoption:
 an explicit restart wants a fresh process (a foreign daemon cannot be
@@ -963,7 +988,8 @@ stopped from here — only its owner can).  Returns nil without acting
 when `agent-repl-frontend-auto-start' is nil or automatic init is
 inhibited (batch/sandbox).  The post-snapshot startup coordinator in
 services.el owns the once-per-Emacs full-runtime bounce; this function
-remains the cheap idempotent session-open ensure."
+remains the cheap idempotent session-open ensure.  Every probe or lifecycle
+transition returns `:pending' immediately and completes from its callback."
   (let ((inhibited (agent-repl--frontend-init-inhibited-p)))
     (agent-repl--log nil
                      "ensure-frontend-daemon: force=%s auto-start=%s init-inhibited=%s tracked-live=%s"
@@ -982,20 +1008,28 @@ remains the cheap idempotent session-open ensure."
       (agent-repl--log nil "ensure-frontend-daemon: reusing tracked pid=%S"
                        (process-id agent-repl--frontend-daemon-process))
       agent-repl--frontend-daemon-process)
-     ((and (not force) (agent-repl--frontend-daemon-responsive-p))
-      (agent-repl--log nil "ensure-frontend-daemon: adopting foreign daemon on %s"
-                        agent-repl-frontend-daemon-addr)
-      t)
      (t
-      (when (and force (agent-repl--frontend-daemon-live-p))
-        (agent-repl--log nil "ensure-frontend-daemon: force=t; stopping tracked daemon before rebuild")
-        (agent-repl--frontend-stop-daemon))
-      (agent-repl--log nil "ensure-frontend-daemon: build-and-launch force=%s"
-                       (if force "t" "nil"))
-      (agent-repl--frontend-deploy-stack force)
-      (agent-repl--frontend-start-daemon)))))))
+      (cl-labels ((build-and-launch ()
+                    (agent-repl--log nil "ensure-frontend-daemon: build-and-launch force=%s"
+                                     (if force "t" "nil"))
+                    (agent-repl--frontend-deploy-stack force)
+                    (agent-repl--frontend-start-daemon)))
+        (if (and force (agent-repl--frontend-daemon-live-p))
+            (progn
+              (agent-repl--log nil "ensure-frontend-daemon: force=t; asynchronously stopping tracked daemon before rebuild")
+              (agent-repl--frontend-stop-daemon t nil #'build-and-launch))
+          (agent-repl--frontend-daemon-responsive-async
+           (lambda ()
+             (if force
+                 (build-and-launch)
+               (agent-repl--log nil "ensure-frontend-daemon: adopting foreign daemon on %s"
+                                agent-repl-frontend-daemon-addr)))
+           (lambda (detail)
+             (agent-repl--log nil "ensure-frontend-daemon: no daemon probe-detail=%S; building" detail)
+             (build-and-launch))))
+        :pending)))))))
 
-(defun agent-repl--frontend-stop-daemon (&optional force stop-shims)
+(defun agent-repl--frontend-stop-daemon (&optional force stop-shims on-stopped)
   "Stop the tracked `claude-repld' process, gracefully first.
 STOP-SHIMS asks the daemon to SIGTERM its session shims on the way out.
 A SIGNAL CANNOT CARRY A MODE, so that request has to travel as a
@@ -1011,9 +1045,9 @@ daemon-bounce incidents) — unless FORCE is non-nil.  An unreachable
 daemon has nothing to protect, so the turn probe treats it as idle.
 
 The stop itself signals SIGTERM so the daemon runs its shutdown path
-\(draining its sessions and flushing the session registry), waits up to
-`agent-repl-frontend-stop-grace-seconds' for the process to exit, and
-only then falls back to `delete-process' (SIGKILL).  The old
+\(draining its sessions and flushing the session registry), then checks
+the process through timers until `agent-repl-frontend-stop-grace-seconds'
+elapses before issuing `delete-process' (SIGKILL).  The old
 delete-process-first behavior SIGKILLed the daemon on every routine
 restart, which is exactly the restart class the session registry exists
 to survive — the registry makes that survivable either way, and the
@@ -1023,7 +1057,10 @@ inherited-pipe EOF."
     (agent-repl--log nil "frontend stop: requested force=%s tracked-live=%s"
                      (if force "t" "nil") live)
     (if (not live)
-        (agent-repl--log nil "frontend stop: no tracked live daemon; clearing process slot")
+        (progn
+          (agent-repl--log nil "frontend stop: no tracked live daemon; clearing process slot")
+          (setq agent-repl--frontend-daemon-process nil)
+          (when on-stopped (funcall on-stopped)))
       (unless force
         (when-let ((busy (agent-repl--frontend-turn-active-sessions)))
           (agent-repl--log nil "frontend stop: refused force=nil active-sessions=%S" busy)
@@ -1045,17 +1082,20 @@ inherited-pipe EOF."
                        (process-id proc) agent-repl-frontend-stop-grace-seconds
                        (if stop-shims "t" "nil"))
       (signal-process proc 'TERM)
-      (if (agent-repl--frontend-poll-until
-           (lambda () (process-live-p proc))
-           agent-repl-frontend-stop-grace-seconds 0.05)
-          (progn
-            (agent-repl--log nil "claude-repld ignored SIGTERM for %ss; falling back to delete-process"
-                             agent-repl-frontend-stop-grace-seconds)
-            (delete-process proc)
-            (agent-repl--log nil "frontend stop: delete-process issued pid=%S" (process-id proc)))
-        (agent-repl--log nil "frontend stop: graceful exit observed pid=%S" (process-id proc)))))
-    (setq agent-repl--frontend-daemon-process nil)
-    (agent-repl--log nil "frontend stop: complete tracked-process-cleared=t")))
+      (agent-repl--frontend-await-async
+       (lambda () (process-live-p proc)) agent-repl-frontend-stop-grace-seconds 0.05
+       (lambda ()
+         (setq agent-repl--frontend-daemon-process nil)
+         (agent-repl--log nil "frontend stop: graceful exit observed pid=%S" (process-id proc))
+         (when on-stopped (funcall on-stopped)))
+       (lambda (_live)
+         (agent-repl--log nil "claude-repld ignored SIGTERM for %ss; issuing delete-process pid=%S"
+                          agent-repl-frontend-stop-grace-seconds (process-id proc))
+         (delete-process proc)
+         (setq agent-repl--frontend-daemon-process nil)
+         (when on-stopped (funcall on-stopped)))
+       "tracked-daemon-stop")))
+  :pending))
 
 ;;;; ---- Interactive commands ---------------------------------------------
 
@@ -1068,10 +1108,9 @@ so a user can force initialization on demand."
   (let ((agent-repl-frontend-auto-start t))
     (cl-letf (((symbol-function 'agent-repl--frontend-init-inhibited-p)
                (lambda () nil)))
-      (let ((proc (agent-repl--ensure-frontend-daemon)))
-        ;; PROC is t for an adopted foreign daemon (no process object).
-        (message "claude-repld running (pid %s) on %s"
-                 (if (processp proc) (process-id proc) "foreign/adopted")
+      (let ((state (agent-repl--ensure-frontend-daemon)))
+        (message "claude-repld startup %s on %s"
+                 (if (eq state :pending) "requested" "already available")
                  agent-repl-frontend-daemon-addr)))))
 
 ;;;###autoload

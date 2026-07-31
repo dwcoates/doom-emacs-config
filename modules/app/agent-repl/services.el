@@ -16,12 +16,12 @@
 (declare-function agent-repl--error "core" (ws fmt &rest args))
 (declare-function agent-repl--frontend-all-turn-active-session-ids "frontend-client" ())
 (declare-function agent-repl--frontend-artifact-exists-p "daemon" (path))
-(declare-function agent-repl--frontend-bounce-after-build "daemon" (&optional preflight stop-shims))
+(declare-function agent-repl--frontend-bounce-after-build "daemon" (&optional preflight stop-shims on-complete))
 (declare-function agent-repl--frontend-build-if-stale "daemon" (&optional force))
 (declare-function agent-repl--frontend-build-targets-if-stale "daemon" (targets &optional force))
 (declare-function agent-repl--frontend-init-inhibited-p "daemon" ())
 (declare-function agent-repl--frontend-rebind-workspaces-after-restart "frontend-client" ())
-(declare-function agent-repl--frontend-runtime-bounce-preflight "daemon" ())
+(declare-function agent-repl--frontend-runtime-bounce-preflight-async "daemon" (callback))
 (declare-function agent-repl--frontend-wait-daemon-healthy "frontend-client" ())
 (declare-function agent-repl--frontend-wait-ready "frontend-client" ())
 (declare-function agent-repl--log "core" (ws fmt &rest args))
@@ -238,10 +238,15 @@ leaving them to redial and park for the replacement.  Nil -- the default --
 PRESERVES them, which is what makes a bounce cheap: a surviving shim is
 reattached rather than rebuilt, and its conversation is never interrupted.
 Only a deploy that changed the shim BUNDLE has a reason to pass it, because
-a survivor would otherwise keep running the previous build's code."
+a survivor would otherwise keep running the previous build's code.
+
+Returns `:pending' immediately.  The daemon preflight invokes its callback
+before any runtime mutation; completion and interactive feedback happen only
+after the replacement daemon is ready and healthy."
   (agent-repl--assert-main-thread "runtime-restart")
-  (let* ((daemon-state (agent-repl--frontend-runtime-bounce-preflight))
-         (daemon-present (memq daemon-state '(:tracked :responsive))))
+  (agent-repl--frontend-runtime-bounce-preflight-async
+   (lambda (daemon-state)
+    (let ((daemon-present (memq daemon-state '(:tracked :responsive))))
     (agent-repl--log nil
                      "runtime-prepare: beginning rebind=%s daemon-state=%S daemon-present=%s"
                      (if rebind "t" "nil") daemon-state
@@ -272,7 +277,9 @@ a survivor would otherwise keep running the previous build's code."
                        "runtime-prepare: frontend build completed result=%S"
                        frontend-build-result))
     (agent-repl--shim-services-build-and-bounce t)
-    (agent-repl--frontend-bounce-after-build daemon-state stop-shims)
+    (agent-repl--frontend-bounce-after-build
+     daemon-state stop-shims
+     (lambda (_started)
     ;; The new daemon can accept a UDS connection before it can service
     ;; requests.  Require both the link/snapshot readiness and the daemon's
     ;; correlated initialization readiness before a caller can continue.
@@ -289,7 +296,8 @@ a survivor would otherwise keep running the previous build's code."
                        "runtime-prepare complete: mode=startup launchd-store=%s launchd-sidecar=%s"
                        agent-repl--shim-store-label
                        agent-repl--shim-sidecar-label)
-      t)))
+      t))))))
+  :pending)
 
 (defun agent-repl-runtime-restart (&optional stop-shims)
   "Rebuild, bounce, verify, then rebind the complete agent-repl runtime.
@@ -305,14 +313,7 @@ to reattach to.  The default PRESERVES them; see
                    "runtime-restart command: invoked interactive=%s stop-shims=%s"
                    (if (called-interactively-p 'interactive) "t" "nil")
                    (if stop-shims "t" "nil"))
-  (let ((rebound (agent-repl--runtime-prepare t (and stop-shims t))))
-    (when (called-interactively-p 'interactive)
-      (agent-repl--log nil
-                       "runtime-restart command: presenting interactive completion rebound=%d"
-                       rebound)
-      (message "agent-repl runtime restarted; rebound %d workspace%s"
-               rebound (if (= rebound 1) "" "s")))
-    rebound))
+  (agent-repl--runtime-prepare t (and stop-shims t)))
 
 (defun agent-repl--runtime-startup-prepare ()
   "Prepare runtime services and daemon readiness before snapshot restoration.

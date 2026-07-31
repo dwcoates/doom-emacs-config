@@ -219,26 +219,32 @@ is mid-boot, and the caller starts the daemon directly anyway."
     ;; Act / Assert
     (should (eq 0 (agent-repl--frontend-build-if-stale nil)))))
 
-;;;; ---- poll-until helper ---------------------------------------------------
+;;;; ---- timer-backed lifecycle waiting --------------------------------------
 
-(ert-deftest agent-repl-test-daemon-poll-until-returns-nil-when-condition-clears ()
-  "The poll returns nil (and stops early) once the predicate clears."
-  ;; Arrange — a predicate that flips to nil on its second call.
-  (let ((calls 0))
-    (cl-letf (((symbol-function 'sleep-for) #'ignore))
-      ;; Act
-      (let ((result (agent-repl--frontend-poll-until
-                     (lambda () (setq calls (1+ calls)) (< calls 2))
-                     10 0.01)))
-        ;; Assert — cleared condition yields nil.
-        (should (null result))))))
+(ert-deftest agent-repl-test-daemon-await-calls-ready-without-scheduling ()
+  "A clear lifecycle condition completes synchronously without a timer."
+  (let (ready scheduled)
+    (cl-letf (((symbol-function 'agent-repl--uds-run-timer)
+               (lambda (&rest _) (setq scheduled t))))
+      (agent-repl--frontend-await-async (lambda () nil) 10 0.01
+                                         (lambda () (setq ready t)) #'ignore "test")
+      (should ready)
+      (should-not scheduled))))
 
-(ert-deftest agent-repl-test-daemon-poll-until-returns-truthy-on-timeout ()
-  "The poll returns the predicate's truthy value when the deadline passes first."
-  ;; Arrange — a predicate that never clears, and a zeroed timeout.
-  (cl-letf (((symbol-function 'sleep-for) #'ignore))
-    ;; Act / Assert
-    (should (eq t (agent-repl--frontend-poll-until (lambda () t) 0 0.01)))))
+(ert-deftest agent-repl-test-daemon-await-timeout-calls-timeout ()
+  "A lifecycle deadline reports the remaining value without blocking."
+  (let (timed-out)
+    (agent-repl--frontend-await-async (lambda () 'still-live) 0 0.01
+                                       #'ignore (lambda (value) (setq timed-out value)) "test")
+    (should (eq timed-out 'still-live))))
+
+(ert-deftest agent-repl-test-daemon-await-pending-schedules-one-timer ()
+  "A pending lifecycle condition returns immediately after scheduling one retry."
+  (let (timer)
+    (cl-letf (((symbol-function 'agent-repl--uds-run-timer)
+               (lambda (&rest args) (setq timer args) :timer)))
+      (should (eq :timer (agent-repl--frontend-await-async (lambda () t) 10 0.25 #'ignore #'ignore "test")))
+      (should (equal (car timer) 0.25)))))
 
 ;;;; ---- staleness: on-disk binary mtime -------------------------------------
 
@@ -406,14 +412,14 @@ VIEW is the `DaemonView' plist the daemon last pushed (nil = none yet)."
          (should-not built)
          (should-not spawned))))))
 
-(ert-deftest agent-repl-test-daemon-ensure-builds-then-spawns-when-none ()
+(ert-deftest agent-repl-test-daemon-ensure-builds-then-spawns-when-probe-fails ()
   "Ensure builds-if-stale then spawns when no daemon is running."
   ;; Arrange
   (agent-repl-test--with-daemon-env
    (let ((built nil)
          (fresh (agent-repl-test--make-live-daemon 777)))
-     (cl-letf (((symbol-function 'agent-repl--frontend-daemon-responsive-p)
-                (lambda () nil))
+     (cl-letf (((symbol-function 'agent-repl--frontend-daemon-responsive-async)
+                (lambda (_open absent) (funcall absent 'no-listener)))
                ((symbol-function 'agent-repl--frontend-deploy-stack)
                 (lambda (&optional _f) (setq built t) 0))
                ((symbol-function 'agent-repl--frontend-spawn-daemon)
@@ -422,7 +428,7 @@ VIEW is the `DaemonView' plist the daemon last pushed (nil = none yet)."
        (let ((result (agent-repl--ensure-frontend-daemon)))
          ;; Assert
          (should built)
-         (should (eq result fresh))
+         (should (eq result :pending))
          (should (eq agent-repl--frontend-daemon-process fresh)))))))
 
 (ert-deftest agent-repl-test-daemon-ensure-force-restarts-live ()
@@ -441,26 +447,29 @@ VIEW is the `DaemonView' plist the daemon last pushed (nil = none yet)."
        ;; Act
        (let ((result (agent-repl--ensure-frontend-daemon t)))
          ;; Assert
-         (should (eq result new))
+         (should (eq result :pending))
          (should-not (agent-repl-test--fake-daemon-live old)))))))
 
 ;;;; ---- startup staleness bounce (one-shot) ---------------------------------
 
 ;;;; ---- Daemon liveness probe (UDS) -----------------------------------------
 
-(ert-deftest agent-repl-test-daemon-responsive-p-delegates-to-the-uds-socket ()
-  "The liveness probe reads the UDS socket, not an HTTP port."
-  ;; Arrange
-  (cl-letf (((symbol-function 'agent-repl--uds-socket-live-p) (lambda (&optional _p) t)))
-    ;; Act / Assert
-    (should (agent-repl--frontend-daemon-responsive-p))))
+(ert-deftest agent-repl-test-daemon-responsive-async-delegates-to-uds-probe ()
+  "The asynchronous liveness probe forwards open completion without a sync socket check."
+  (let (path open)
+    (cl-letf (((symbol-function 'agent-repl-uds-probe-async)
+               (lambda (socket on-open _failure) (setq path socket) (funcall on-open))))
+      (agent-repl--frontend-daemon-responsive-async (lambda () (setq open t)) #'ignore)
+      (should open)
+      (should (equal path agent-repl-uds-socket-path)))))
 
-(ert-deftest agent-repl-test-daemon-responsive-p-nil-without-a-listener ()
-  "No listener on the UDS socket reads as no daemon."
-  ;; Arrange
-  (cl-letf (((symbol-function 'agent-repl--uds-socket-live-p) (lambda (&optional _p) nil)))
-    ;; Act / Assert
-    (should-not (agent-repl--frontend-daemon-responsive-p))))
+(ert-deftest agent-repl-test-daemon-responsive-async-forwards-probe-error ()
+  "An absent listener reaches the failure continuation with probe detail."
+  (let (detail)
+    (cl-letf (((symbol-function 'agent-repl-uds-probe-async)
+               (lambda (_socket _open failure) (funcall failure 'refused))))
+      (agent-repl--frontend-daemon-responsive-async #'ignore (lambda (value) (setq detail value)))
+      (should (eq detail 'refused)))))
 
 ;;;; ---- Foreign-daemon shutdown (UDS `ShutdownCmd') -------------------------
 
@@ -518,6 +527,32 @@ VIEW is the `DaemonView' plist the daemon last pushed (nil = none yet)."
     ;; Act / Assert
     (should-error (agent-repl--frontend-request-foreign-shutdown))))
 
+(ert-deftest agent-repl-test-daemon-foreign-bounce-starts-only-after-socket-release ()
+  "Foreign replacement waits for the socket-absence completion callback."
+  (let (events completion)
+    (cl-letf (((symbol-function 'agent-repl--frontend-request-foreign-shutdown)
+               (lambda (&rest _) (setq events (append events '(shutdown)))))
+              ((symbol-function 'agent-repl--frontend-await-socket-absence-async)
+               (lambda (_timeout absent _timeout-callback _context)
+                 (setq events (append events '(await))) (setq completion absent) :timer))
+              ((symbol-function 'agent-repl--frontend-start-daemon)
+               (lambda () (setq events (append events '(start))) 'started)))
+      (should (eq :pending (agent-repl--frontend-bounce-foreign-daemon nil (lambda (value) (setq events (append events (list value)))))))
+      (should (equal events '(shutdown await)))
+      (funcall completion)
+      (should (equal events '(shutdown await start started))))))
+
+(ert-deftest agent-repl-test-daemon-foreign-bounce-timeout-never-starts-replacement ()
+  "Foreign socket timeout reports failure without starting beside a live listener."
+  (let (timeout-called started)
+    (cl-letf (((symbol-function 'agent-repl--frontend-request-foreign-shutdown) (lambda (&rest _) t))
+              ((symbol-function 'agent-repl--frontend-await-socket-absence-async)
+               (lambda (_timeout _absent timeout _context) (setq timeout-called timeout) :timer))
+              ((symbol-function 'agent-repl--frontend-start-daemon) (lambda () (setq started t))))
+      (agent-repl--frontend-bounce-foreign-daemon)
+      (should-error (funcall timeout-called))
+      (should-not started))))
+
 ;;;; ---- Foreign-daemon adoption + stop guard ---------------------------------
 
 (ert-deftest agent-repl-test-daemon-ensure-adopts-foreign-daemon ()
@@ -525,8 +560,8 @@ VIEW is the `DaemonView' plist the daemon last pushed (nil = none yet)."
   ;; Arrange
   (agent-repl-test--with-daemon-env
    (let ((built nil) (spawned nil))
-     (cl-letf (((symbol-function 'agent-repl--frontend-daemon-responsive-p)
-                (lambda () t))
+     (cl-letf (((symbol-function 'agent-repl--frontend-daemon-responsive-async)
+                (lambda (open _absent) (funcall open)))
                ((symbol-function 'agent-repl--frontend-deploy-stack)
                 (lambda (&optional _f) (setq built t) 0))
                ((symbol-function 'agent-repl--frontend-spawn-daemon)
@@ -534,7 +569,7 @@ VIEW is the `DaemonView' plist the daemon last pushed (nil = none yet)."
        ;; Act
        (let ((result (agent-repl--ensure-frontend-daemon)))
          ;; Assert — adopted (non-nil, no process object), nothing spawned.
-         (should (eq result t))
+         (should (eq result :pending))
          (should-not built)
          (should-not spawned))))))
 
@@ -544,8 +579,8 @@ VIEW is the `DaemonView' plist the daemon last pushed (nil = none yet)."
   (agent-repl-test--with-daemon-env
    (let ((built nil)
          (fresh (agent-repl-test--make-live-daemon 9)))
-     (cl-letf (((symbol-function 'agent-repl--frontend-daemon-responsive-p)
-                (lambda () t))
+     (cl-letf (((symbol-function 'agent-repl--frontend-daemon-responsive-async)
+                (lambda (open _absent) (funcall open)))
                ((symbol-function 'agent-repl--frontend-deploy-stack)
                 (lambda (&optional _f) (setq built t) 0))
                ((symbol-function 'agent-repl--frontend-spawn-daemon)
@@ -554,7 +589,7 @@ VIEW is the `DaemonView' plist the daemon last pushed (nil = none yet)."
        (let ((result (agent-repl--ensure-frontend-daemon t)))
          ;; Assert
          (should built)
-         (should (eq result fresh)))))))
+         (should (eq result :pending)))))))
 
 (ert-deftest agent-repl-test-daemon-stop-refuses-during-turn ()
   "Stopping is refused while any daemon session has a turn in flight."
@@ -1028,9 +1063,15 @@ obvious (no listener, no build, no spawn) rather than reaching the host."
                 (lambda (&rest _) 'started))
                ((symbol-function 'agent-repl--signal-process)
                 (lambda (&rest _) t))
-               ((symbol-function 'agent-repl--uds-socket-live-p)
-                (lambda (&rest _) nil)))
+               ((symbol-function 'agent-repl-uds-probe-async)
+                (lambda (_path _open failure) (funcall failure 'absent))))
        ,@body)))
+
+(defun agent-repl-test--incompatible-daemon-result ()
+  "Return the immediate result delivered by the incompatible-daemon callback."
+  (let (result)
+    (agent-repl--frontend-incompatible-daemon-async (lambda (value) (setq result value)))
+    result))
 
 ;; --- port parsing -------------------------------------------------------
 
@@ -1104,24 +1145,25 @@ obvious (no listener, no build, no spawn) rather than reaching the host."
                  (format "p999\nc%s\n"
                          (file-name-nondirectory agent-repl--frontend-daemon-bin)))))
       ;; Act / Assert
-      (should (equal (agent-repl--frontend-incompatible-daemon) '(999 . "claude-repld"))))))
+      (should (equal (agent-repl-test--incompatible-daemon-result) '(999 . "claude-repld"))))))
 
 (ert-deftest agent-repl-test-current-daemon-is-not-incompatible ()
   "A daemon serving the frontend UDS is current and must never be killed."
   ;; Arrange
   (agent-repl-test--with-daemon-boot
-    (cl-letf (((symbol-function 'agent-repl--uds-socket-live-p) (lambda (&rest _) t))
+    (cl-letf (((symbol-function 'agent-repl-uds-probe-async)
+               (lambda (_path open _failure) (funcall open)))
               ((symbol-function 'agent-repl--frontend-run-listener-probe)
                (lambda (&rest _) "p999\ncclaude-repld\n")))
       ;; Act / Assert
-      (should-not (agent-repl--frontend-incompatible-daemon)))))
+      (should-not (agent-repl-test--incompatible-daemon-result)))))
 
 (ert-deftest agent-repl-test-free-port-is-not-incompatible ()
   "Nothing listening means nothing to replace."
   ;; Arrange
   (agent-repl-test--with-daemon-boot
     ;; Act / Assert
-    (should-not (agent-repl--frontend-incompatible-daemon))))
+    (should-not (agent-repl-test--incompatible-daemon-result))))
 
 (ert-deftest agent-repl-test-foreign-listener-is-not-incompatible ()
   "A program that is not our daemon is left strictly alone."
@@ -1130,28 +1172,29 @@ obvious (no listener, no build, no spawn) rather than reaching the host."
     (cl-letf (((symbol-function 'agent-repl--frontend-run-listener-probe)
                (lambda (&rest _) "p999\ncsome-web-server\n")))
       ;; Act / Assert
-      (should-not (agent-repl--frontend-incompatible-daemon)))))
+      (should-not (agent-repl-test--incompatible-daemon-result)))))
 
-(ert-deftest agent-repl-test-runtime-bounce-preflight-rejects-unrelated-listener ()
-  "An unrelated port owner fails before the runtime coordinator mutates state."
+(ert-deftest agent-repl-test-runtime-bounce-preflight-async-rejects-unrelated-listener ()
+  "An unrelated port owner signals from the probe failure callback."
   (cl-letf (((symbol-function 'agent-repl--frontend-daemon-live-p)
              (lambda () nil))
-            ((symbol-function 'agent-repl--frontend-daemon-responsive-p)
-             (lambda () nil))
+            ((symbol-function 'agent-repl--frontend-daemon-responsive-async)
+             (lambda (_open absent) (funcall absent 'absent)))
             ((symbol-function 'agent-repl--frontend-listener-owner)
              (lambda () '(987 . "other-server"))))
-    (should-error (agent-repl--frontend-runtime-bounce-preflight))))
+    (should-error (agent-repl--frontend-runtime-bounce-preflight-async #'ignore))))
 
-(ert-deftest agent-repl-test-runtime-bounce-preflight-identifies-incompatible-daemon ()
-  "A verified pre-UDS claude-repld listener is safe to replace after builds."
+(ert-deftest agent-repl-test-runtime-bounce-preflight-async-identifies-incompatible-daemon ()
+  "A verified pre-UDS listener is reported through the completion callback."
+  (let (state)
   (cl-letf (((symbol-function 'agent-repl--frontend-daemon-live-p)
              (lambda () nil))
-            ((symbol-function 'agent-repl--frontend-daemon-responsive-p)
-             (lambda () nil))
+            ((symbol-function 'agent-repl--frontend-daemon-responsive-async)
+             (lambda (_open absent) (funcall absent 'absent)))
             ((symbol-function 'agent-repl--frontend-listener-owner)
              (lambda () '(987 . "claude-repld"))))
-    (should (equal (agent-repl--frontend-runtime-bounce-preflight)
-                   '(:incompatible 987 . "claude-repld")))))
+    (agent-repl--frontend-runtime-bounce-preflight-async (lambda (value) (setq state value)))
+    (should (equal state '(:incompatible 987 . "claude-repld"))))))
 
 (provide 'test-daemon)
 
