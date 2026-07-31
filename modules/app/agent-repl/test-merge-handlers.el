@@ -378,12 +378,34 @@ Source-dir /src, target-dir /tgt, branch DWC/foo, base BASE-SHA."
                    (lambda (&rest _) "req-1")))
           (agent-repl--merge-dispatch-cherry-pick-over-uds "DWC/foo")
           (should (equal (plist-get sent :field) "mergeWorkspace"))
-          (should (equal (plist-get sent :ws) "DWC/foo"))
+          ;; ROUTED BY THE COMMAND KEY (the project dir), like every other
+          ;; command. Sending the bare name here filed the daemon's merge state
+          ;; under a workspace key nothing else used, so its WorkspaceState
+          ;; carried no connectivity verdict and Emacs refused the frame.
+          (should (equal (plist-get sent :ws) "/src"))
           (let ((p (plist-get sent :payload)))
             (should (equal (plist-get p :handler) "cherry-pick"))
+            (should (equal (plist-get p :workspaceName) "DWC/foo"))
             (should (equal (plist-get p :sourceBranch) "DWC/foo"))
             (should (equal (plist-get p :sourceDir) "/src"))
             (should (equal (plist-get p :targetDir) "/tgt"))))))))
+
+(ert-deftest agent-repl-test-resume-is-routed-by-the-command-key-too ()
+  "The resume path routes on the command key and names the workspace."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "DWC/foo" :project-dir "/src")
+    (let (sent)
+      (agent-repl-test--with-mocked-merge-geometry
+        (cl-letf (((symbol-function 'agent-repl--uds-send-command)
+                   (lambda (field payload &optional ws &rest _)
+                     (setq sent (list :field field :payload payload :ws ws))
+                     "req-1"))
+                  ((symbol-function 'agent-repl--uds-track-command)
+                   (lambda (&rest _) "req-1")))
+          (agent-repl--merge-resume-over-uds "DWC/foo")
+          (should (equal (plist-get sent :ws) "/src"))
+          (should (equal (plist-get (plist-get sent :payload) :workspaceName)
+                         "DWC/foo")))))))
 
 (ert-deftest agent-repl-test-cherry-pick-dispatch-stashes-geometry-and-marker ()
   "The dispatch stashes target/branch/base + the :daemon-merge-dispatched marker."

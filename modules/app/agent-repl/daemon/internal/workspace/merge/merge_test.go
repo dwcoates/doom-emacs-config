@@ -161,7 +161,7 @@ func TestNewEngineRequiresDependencies(t *testing.T) {
 }
 
 func TestMergeRejectsIncompleteRequest(t *testing.T) {
-	base := Request{Workspace: "ws", SourceBranch: "feature", SourceDir: "/s", TargetDir: "/t"}
+	base := Request{Workspace: "/ws/ws", Name: "ws", SourceBranch: "feature", SourceDir: "/s", TargetDir: "/t"}
 	tests := []struct {
 		name  string
 		mutat func(*Request)
@@ -203,7 +203,7 @@ func TestMergeCleanCherryPick(t *testing.T) {
 
 	sink := &recordingSink{}
 	e := newTestEngine(t, sink)
-	req := Request{Workspace: "clean-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+	req := Request{Workspace: "/ws/clean-ws", Name: "clean-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
 
 	// Act.
 	res, err := e.Merge(context.Background(), req)
@@ -234,6 +234,42 @@ func TestMergeCleanCherryPick(t *testing.T) {
 
 // --- conflict detection -------------------------------------------------
 
+func TestMergeTransitionsAreEmittedOnTheStateKeyNotTheName(t *testing.T) {
+	// The two identities must not be conflated: state rows filed under the
+	// display name land on a workspace key the SSM knows nothing else about,
+	// so the composite carries no connectivity verdict and the frontend drops
+	// the frame. The tag is the one place the name belongs.
+	// Arrange.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	writeFile(t, featureDir, "feature.txt", "hello\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "add feature.txt")
+
+	sink := &recordingSink{}
+	e := newTestEngine(t, sink)
+	req := Request{Workspace: "/ws/keyed-ws", Name: "keyed-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+
+	// Act.
+	res, err := e.Merge(context.Background(), req)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Merge() err = %v", err)
+	}
+	if len(sink.got) == 0 {
+		t.Fatal("no merge transitions recorded")
+	}
+	for _, tr := range sink.got {
+		if tr.ws != "/ws/keyed-ws" {
+			t.Errorf("transition %s keyed on %q, want the state key /ws/keyed-ws", tr.phase, tr.ws)
+		}
+	}
+	if res.Tag != "merge/keyed-ws" {
+		t.Errorf("res.Tag = %q, want the DISPLAY name in the tag", res.Tag)
+	}
+}
+
 func TestMergeConflictDetection(t *testing.T) {
 	// Arrange: feature and target both edit the same line — a real conflict.
 	target := initTarget(t)
@@ -247,7 +283,7 @@ func TestMergeConflictDetection(t *testing.T) {
 
 	sink := &recordingSink{}
 	e := newTestEngine(t, sink)
-	req := Request{Workspace: "cf-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+	req := Request{Workspace: "/ws/cf-ws", Name: "cf-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
 
 	// Act.
 	res, err := e.Merge(context.Background(), req)
@@ -284,7 +320,7 @@ func TestResumeCompletesMergeAndOrdersTransitions(t *testing.T) {
 
 	sink := &recordingSink{}
 	e := newTestEngine(t, sink)
-	req := Request{Workspace: "rz-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+	req := Request{Workspace: "/ws/rz-ws", Name: "rz-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
 
 	if res, err := e.Merge(context.Background(), req); err != nil || res.Outcome != OutcomeConflict {
 		t.Fatalf("setup Merge() res=%+v err=%v, want conflict", res, err)
@@ -322,7 +358,7 @@ func TestResumeWithoutInProgressPickFails(t *testing.T) {
 	featureDir := addFeatureWorktree(t, target)
 	sink := &recordingSink{}
 	e := newTestEngine(t, sink)
-	req := Request{Workspace: "no-pick", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+	req := Request{Workspace: "/ws/no-pick", Name: "no-pick", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
 
 	// Act.
 	_, err := e.Resume(context.Background(), req)
@@ -358,7 +394,7 @@ func TestMergeFailedOnNonConflictError(t *testing.T) {
 
 	sink := &recordingSink{}
 	e := newTestEngine(t, sink)
-	req := Request{Workspace: "fail-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+	req := Request{Workspace: "/ws/fail-ws", Name: "fail-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
 
 	// Act.
 	res, err := e.Merge(context.Background(), req)
@@ -392,7 +428,7 @@ func TestMergeDirtySourceAbortsWithStateIntact(t *testing.T) {
 
 	sink := &recordingSink{}
 	e := newTestEngine(t, sink)
-	req := Request{Workspace: "dirty-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+	req := Request{Workspace: "/ws/dirty-ws", Name: "dirty-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
 
 	// Act.
 	_, err := e.Merge(context.Background(), req)
@@ -412,7 +448,7 @@ func TestMergeMissingBranchAbortsWithStateIntact(t *testing.T) {
 	featureDir := addFeatureWorktree(t, target)
 	sink := &recordingSink{}
 	e := newTestEngine(t, sink)
-	req := Request{Workspace: "nb-ws", SourceBranch: "does-not-exist", SourceDir: featureDir, TargetDir: target}
+	req := Request{Workspace: "/ws/nb-ws", Name: "nb-ws", SourceBranch: "does-not-exist", SourceDir: featureDir, TargetDir: target}
 
 	// Act.
 	_, err := e.Merge(context.Background(), req)
@@ -439,7 +475,7 @@ func TestMergeSurfacesSinkError(t *testing.T) {
 
 	sink := &recordingSink{failOn: PhaseMerged}
 	e := newTestEngine(t, sink)
-	req := Request{Workspace: "sink-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+	req := Request{Workspace: "/ws/sink-ws", Name: "sink-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
 
 	// Act.
 	_, err := e.Merge(context.Background(), req)

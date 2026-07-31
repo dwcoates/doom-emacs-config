@@ -973,6 +973,18 @@ message MergeWorkspaceCmd {
   string source_branch = 3;
   string source_dir = 4;
   string target_dir = 5;
+  // Additive: the workspace's DISPLAY name, for the `merge/<name>` completion
+  // tag and the daemon's merge logs.
+  //
+  // It exists because the envelope's `workspace` field is the daemon's
+  // workspace KEY — the session cwd — exactly as it is for every other
+  // command. This command used to put the bare Emacs name there instead, which
+  // filed every merge state row under a workspace key nothing else used: the
+  // row had no session identity, so its WorkspaceState reached Emacs with an
+  // absent connectivity verdict and was refused, and the merge never tore its
+  // workspace down. The two identities are now separate fields rather than one
+  // slot meaning different things per command.
+  string workspace_name = 6;
 }
 
 message CloseWorkspaceCmd {}

@@ -4083,9 +4083,21 @@ type MergeWorkspaceCmd struct {
 	ConflictResolvedContinue bool                   `protobuf:"varint,2,opt,name=conflict_resolved_continue,json=conflictResolvedContinue,proto3" json:"conflict_resolved_continue,omitempty"` // the resolve-and-continue handoff
 	// Additive (S6): the daemon has no workspace→worktree mapping of its own,
 	// so the frontend supplies the merge geometry with the command.
-	SourceBranch  string `protobuf:"bytes,3,opt,name=source_branch,json=sourceBranch,proto3" json:"source_branch,omitempty"`
-	SourceDir     string `protobuf:"bytes,4,opt,name=source_dir,json=sourceDir,proto3" json:"source_dir,omitempty"`
-	TargetDir     string `protobuf:"bytes,5,opt,name=target_dir,json=targetDir,proto3" json:"target_dir,omitempty"`
+	SourceBranch string `protobuf:"bytes,3,opt,name=source_branch,json=sourceBranch,proto3" json:"source_branch,omitempty"`
+	SourceDir    string `protobuf:"bytes,4,opt,name=source_dir,json=sourceDir,proto3" json:"source_dir,omitempty"`
+	TargetDir    string `protobuf:"bytes,5,opt,name=target_dir,json=targetDir,proto3" json:"target_dir,omitempty"`
+	// Additive: the workspace's DISPLAY name, for the `merge/<name>` completion
+	// tag and the daemon's merge logs.
+	//
+	// It exists because the envelope's `workspace` field is the daemon's
+	// workspace KEY — the session cwd — exactly as it is for every other
+	// command. This command used to put the bare Emacs name there instead, which
+	// filed every merge state row under a workspace key nothing else used: the
+	// row had no session identity, so its WorkspaceState reached Emacs with an
+	// absent connectivity verdict and was refused, and the merge never tore its
+	// workspace down. The two identities are now separate fields rather than one
+	// slot meaning different things per command.
+	WorkspaceName string `protobuf:"bytes,6,opt,name=workspace_name,json=workspaceName,proto3" json:"workspace_name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4151,6 +4163,13 @@ func (x *MergeWorkspaceCmd) GetSourceDir() string {
 func (x *MergeWorkspaceCmd) GetTargetDir() string {
 	if x != nil {
 		return x.TargetDir
+	}
+	return ""
+}
+
+func (x *MergeWorkspaceCmd) GetWorkspaceName() string {
+	if x != nil {
+		return x.WorkspaceName
 	}
 	return ""
 }
@@ -6235,7 +6254,7 @@ const file_agentshim_frontend_v1_frontend_proto_rawDesc = "" +
 	"\x15permission_request_id\x18\x01 \x01(\tR\x13permissionRequestId\x12\x14\n" +
 	"\x05allow\x18\x02 \x01(\bR\x05allow\x12<\n" +
 	"\rupdated_input\x18\x03 \x01(\v2\x17.google.protobuf.StructR\fupdatedInput\x12!\n" +
-	"\fdeny_message\x18\x04 \x01(\tR\vdenyMessage\"\xce\x01\n" +
+	"\fdeny_message\x18\x04 \x01(\tR\vdenyMessage\"\xf5\x01\n" +
 	"\x11MergeWorkspaceCmd\x12\x18\n" +
 	"\ahandler\x18\x01 \x01(\tR\ahandler\x12<\n" +
 	"\x1aconflict_resolved_continue\x18\x02 \x01(\bR\x18conflictResolvedContinue\x12#\n" +
@@ -6243,7 +6262,8 @@ const file_agentshim_frontend_v1_frontend_proto_rawDesc = "" +
 	"\n" +
 	"source_dir\x18\x04 \x01(\tR\tsourceDir\x12\x1d\n" +
 	"\n" +
-	"target_dir\x18\x05 \x01(\tR\ttargetDir\"\x13\n" +
+	"target_dir\x18\x05 \x01(\tR\ttargetDir\x12%\n" +
+	"\x0eworkspace_name\x18\x06 \x01(\tR\rworkspaceName\"\x13\n" +
 	"\x11CloseWorkspaceCmd\"\x12\n" +
 	"\x10OpenWorkspaceCmd\"&\n" +
 	"\tResyncCmd\x12\x19\n" +

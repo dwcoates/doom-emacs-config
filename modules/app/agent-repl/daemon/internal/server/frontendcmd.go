@@ -609,19 +609,24 @@ func (h *commandHandler) SetModel(ctx context.Context, workspace, requestID stri
 // inside the Engine, which is the single place that decides what a runnable
 // merge is.
 func (h *commandHandler) MergeWorkspace(ctx context.Context, workspace, requestID string, cmd *frontendv1.MergeWorkspaceCmd) error {
+	// The envelope's workspace is the daemon's KEY (the session cwd), exactly
+	// as it is for every other command, and the display name rides its own
+	// field. Keying merge state on the name instead is what filed a merge's
+	// rows under a workspace nothing else knew about.
 	req := merge.Request{
 		Workspace:    workspace,
+		Name:         cmd.GetWorkspaceName(),
 		SourceBranch: cmd.GetSourceBranch(),
 		SourceDir:    cmd.GetSourceDir(),
 		TargetDir:    cmd.GetTargetDir(),
 	}
 	if cmd.GetConflictResolvedContinue() {
-		h.logf("frontend cmd: merge_workspace RESUME ws=%s request_id=%s source_branch=%q source_dir=%q target_dir=%q",
-			workspace, requestID, req.SourceBranch, req.SourceDir, req.TargetDir)
+		h.logf("frontend cmd: merge_workspace RESUME ws=%s name=%q request_id=%s source_branch=%q source_dir=%q target_dir=%q",
+			workspace, req.Name, requestID, req.SourceBranch, req.SourceDir, req.TargetDir)
 		return h.merges.Resume(ctx, req)
 	}
-	h.logf("frontend cmd: merge_workspace ws=%s request_id=%s handler=%s source_branch=%q source_dir=%q target_dir=%q",
-		workspace, requestID, cmd.GetHandler(), req.SourceBranch, req.SourceDir, req.TargetDir)
+	h.logf("frontend cmd: merge_workspace ws=%s name=%q request_id=%s handler=%s source_branch=%q source_dir=%q target_dir=%q",
+		workspace, req.Name, requestID, cmd.GetHandler(), req.SourceBranch, req.SourceDir, req.TargetDir)
 	return h.merges.Merge(ctx, req)
 }
 
