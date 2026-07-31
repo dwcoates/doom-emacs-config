@@ -52,7 +52,6 @@
 (declare-function agent-repl--live-ws-names "agent-repl-workspace" ())
 (declare-function agent-repl--mark-ws-thinking "input" (ws))
 (declare-function agent-repl--dispatch-resume-investigation "agent-repl-worktree" (resume-id searched-paths cwd))
-(declare-function agent-repl--assert-main-thread "agent-repl-worktree" (what))
 ;; The UDS command channel + pushed-frame SessionView store (the daemon plane
 ;; that replaced the GET /sessions poller); resolved at call time.
 (declare-function agent-repl--uds-send-command "frontend-uds" (field payload &optional workspace process))
@@ -99,7 +98,7 @@
 (defun agent-repl--frontend-ws-command-key (ws)
   "Return the `workspace' wire key the daemon routes WS's commands by.
 That key is WS's `:project-dir' — the same cwd string
-`agent-repl--frontend-create-session' registered the session under, so the
+`agent-repl--frontend-after-create-session' registered the session under, so the
 daemon's cwd-keyed lookup resolves it.  NEVER the persp name WS itself.
 
 Signals (via `agent-repl--ws-dir') when WS has no `:project-dir': a
@@ -132,7 +131,7 @@ beats a daemon NACK that reads as \"no live session\"."
 (defvar agent-repl--force-fresh-conversation nil
   "When non-nil, a lost-transcript resume degrades to a fresh conversation.
 Overrides the default `resume_transcript_missing' investigation dispatch
-in `agent-repl--frontend-create-session'.")
+in `agent-repl--frontend-after-create-session'.")
 
 ;;;; ---- Customization ----------------------------------------------------
 
@@ -255,7 +254,10 @@ Returns `:pending' when readiness is asynchronous, otherwise `:ready'."
              (when (timerp timer) (cancel-timer timer))
              (agent-repl--log ws "frontend-ready: outcome=%s attempts=%d elapsed=%.3fs detail=%S"
                               outcome attempt (- (float-time) started) detail)
-             (if (eq outcome 'ready) (funcall on-ready) (funcall on-failure detail))))
+             (if (eq outcome 'ready)
+                 (funcall on-ready)
+               (message "agent-repl: frontend readiness failed: %s" detail)
+               (funcall on-failure detail))))
          (tick ()
            (cond
             ((agent-repl--frontend-daemon-ready-p) (finish 'ready))
@@ -273,32 +275,6 @@ Returns `:pending' when readiness is asynchronous, otherwise `:ready'."
      agent-repl-frontend-ready-attempts)
     (if (agent-repl--frontend-daemon-ready-p) (progn (finish 'ready) :ready)
       (tick) :pending))))
-
-(defun agent-repl--frontend-wait-ready ()
-  "Legacy blocking readiness bridge retained for legacy synchronous callers.
-New work must use `agent-repl--frontend-after-ready'."
-  (agent-repl--assert-main-thread "frontend-wait-ready")
-  (let ((attempt 0) (ready (agent-repl--frontend-daemon-ready-p)))
-    (agent-repl--log nil "frontend-wait-ready: begin ready=%s connected=%s daemon-view=%s budget=%d"
-                     ready (agent-repl--uds-connected-p) (and (agent-repl--frontend-daemon-view) t)
-                     agent-repl-frontend-ready-attempts)
-    (while (and (not ready) (< attempt agent-repl-frontend-ready-attempts))
-      (setq attempt (1+ attempt))
-      (unless (agent-repl--uds-connected-p) (agent-repl-uds-connect nil t))
-      (if (agent-repl--uds-connected-p)
-          (accept-process-output agent-repl--uds-process 0.2)
-        (sleep-for 0.2))
-      (setq ready (agent-repl--frontend-daemon-ready-p)))
-    (unless ready
-      (agent-repl--log nil "frontend-wait-ready: TIMEOUT attempts=%d socket=%s connected=%s daemon-view=%s"
-                       attempt agent-repl-uds-socket-path (agent-repl--uds-connected-p)
-                       (and (agent-repl--frontend-daemon-view) t))
-      (error "agent-repl: daemon at %s never became ready (%d attempts; connected=%s daemon-view=%s)"
-             agent-repl-uds-socket-path attempt (if (agent-repl--uds-connected-p) "yes" "no")
-             (if (agent-repl--frontend-daemon-view) "yes" "no")))
-    (agent-repl--log nil "frontend-wait-ready: READY attempts=%d connected=%s daemon-view=%s"
-                     attempt (agent-repl--uds-connected-p) (and (agent-repl--frontend-daemon-view) t))
-    t))
 
 (defun agent-repl--frontend-async-fail (ws operation request-id started on-failure detail)
   "Log and surface OPERATION failure, then deliver DETAIL to ON-FAILURE."
@@ -389,6 +365,7 @@ timer or UDS callback after either continuation runs."
   (let* ((ws (or ws (agent-repl--ws-name-for-dir cwd)))
          (started (float-time)) request-id deadline-timer poll-timer settled acked
          (resume-mode (or resume-mode 'continue))
+         (force-fresh (or force-fresh agent-repl--force-fresh-conversation))
          (model (agent-repl--effective-model model))
          (posture (agent-repl--frontend-session-posture cwd))
          (payload (append (list :cwd cwd :resumeMode (agent-repl--frontend-resume-mode-wire resume-mode))
@@ -398,17 +375,43 @@ timer or UDS callback after either continuation runs."
                           (when (plist-get posture :permission-mode) (list :permissionMode (plist-get posture :permission-mode)))
                           (when (plist-get posture :allow-ungated) (list :allowUngated t)))))
     (cl-labels
-        ((finish (id detail)
+        ((cleanup ()
+           (when (timerp deadline-timer) (cancel-timer deadline-timer))
+           (when (timerp poll-timer) (cancel-timer poll-timer))
+           (when request-id (agent-repl--uds-untrack-command request-id cwd "create-settled"))
+           (remhash cwd agent-repl--frontend-creates-in-flight))
+         (finish (id detail)
            (unless settled
              (setq settled t)
-             (when (timerp deadline-timer) (cancel-timer deadline-timer))
-             (when (timerp poll-timer) (cancel-timer poll-timer))
-             (when request-id (agent-repl--uds-untrack-command request-id cwd "create-settled"))
-             (remhash cwd agent-repl--frontend-creates-in-flight)
+             (cleanup)
              (if id
                  (progn (agent-repl--log ws "createSession-async: CREATED cwd=%s session-id=%s request-id=%s elapsed=%.3fs" cwd id request-id (- (float-time) started))
                         (funcall on-success id))
                (agent-repl--frontend-async-fail ws "createSession" request-id started on-failure detail))))
+         (reject (err)
+           (unless settled
+             (setq settled t)
+             (cleanup)
+             (if (and (stringp err) explicit-id
+                      (string-match-p "has no transcript" err))
+                 (if force-fresh
+                     (progn
+                       (agent-repl--log ws
+                                        "createSession-async: lost transcript resume=%s force-fresh=t cwd=%s"
+                                        explicit-id cwd)
+                       (agent-repl--frontend-after-create-session
+                        cwd model 'fresh nil nil on-success on-failure ws))
+                   (let* ((investigation
+                           (agent-repl--dispatch-resume-investigation explicit-id nil cwd))
+                          (detail
+                           (format (concat "resume target %s has no transcript; refusing a fresh "
+                                           "conversation; opened investigation workspace `%s'")
+                                   explicit-id investigation)))
+                     (agent-repl--frontend-async-fail
+                      ws "createSession" request-id started on-failure detail)))
+               (agent-repl--frontend-async-fail
+                ws "createSession" request-id started on-failure
+                (format "command rejected: %s" (or err "no reason supplied"))))))
          (observe-view ()
            (when acked
              (when-let ((id (agent-repl--frontend-live-session-id-for-cwd cwd))) (finish id nil))))
@@ -416,30 +419,46 @@ timer or UDS callback after either continuation runs."
            (observe-view)
            (unless settled (setq poll-timer (agent-repl--uds-run-timer 0.05 #'poll-view))))
          (dispatch ()
-           (puthash cwd t agent-repl--frontend-creates-in-flight)
            (setq request-id (agent-repl--uds-send-command "createSession" payload cwd))
            (agent-repl--log ws "createSession-async: dispatched cwd=%s request-id=%s resume-mode=%s model=%s" cwd request-id resume-mode model)
            (agent-repl--uds-track-command request-id "createSession" cwd
-                                          (lambda (err) (finish nil (format "command rejected: %s" err)))
+                                          #'reject
                                           (lambda () (setq acked t) (observe-view)))
            (setq deadline-timer (agent-repl--uds-run-timer agent-repl-frontend-create-timeout
                                                            (lambda () (finish nil (format "timed out after %.3fs awaiting acknowledgement and SessionView" agent-repl-frontend-create-timeout)))))
            (setq poll-timer (agent-repl--uds-run-timer 0.05 #'poll-view))))
+      ;; Reserve the cwd before readiness polling.  Two UI actions issued while
+      ;; the daemon is still starting must not arm two future creates.
+      (puthash cwd t agent-repl--frontend-creates-in-flight)
       (agent-repl--frontend-after-ready #'dispatch (lambda (detail) (finish nil detail)) ws)
       :pending)))
 
-(defun agent-repl--frontend-after-ensure-session (ws on-success on-failure)
-  "Asynchronously provide WS's live session id through exactly one continuation."
+(defun agent-repl--frontend-after-ensure-session (ws on-success on-failure &optional purpose)
+  "Asynchronously provide WS's live session id through exactly one continuation.
+PURPOSE is `presentation' or `send'.  A presentation reopens an existing
+workspace before delivering it; a send dispatches directly because
+`submitPrompt' performs the daemon-side establishment itself."
+  (unless (and (functionp on-success) (functionp on-failure))
+    (error "agent-repl: ensure-session requires callable continuations"))
   (if (not (agent-repl--ensure-frontend-daemon))
       (progn
         (agent-repl--frontend-async-fail ws "ensure-session" nil (float-time) on-failure
                                          "frontend daemon not started (auto-start disabled or init inhibited)")
         :failed)
-    (let ((existing (agent-repl--ws-get ws :frontend-session-id)))
+    (let ((existing (agent-repl--ws-get ws :frontend-session-id))
+          (gated (not (eq purpose 'send))))
       (agent-repl--frontend-after-ready
      (lambda ()
        (if (and existing (agent-repl--frontend-session-live-p existing))
-           (agent-repl--frontend-after-open-workspace ws (lambda () (funcall on-success existing)) on-failure)
+           (progn
+             (agent-repl--log ws
+                              "ensure-session-async: reusing session=%s purpose=%s presentation-gate=%s"
+                              existing (or purpose 'presentation)
+                              (if gated "awaited" "skipped"))
+             (if gated
+                 (agent-repl--frontend-after-open-workspace
+                  ws (lambda () (funcall on-success existing)) on-failure)
+               (funcall on-success existing)))
          (let ((dir (or (agent-repl--ws-get ws :project-dir) (agent-repl--resolve-current-git-root))))
            (agent-repl--frontend-after-create-session
             dir (agent-repl--ws-get ws :model) 'continue nil nil
@@ -458,7 +477,7 @@ timer or UDS callback after either continuation runs."
 ;;;; ---- Session CRUD -------------------------------------------------------
 
 (defcustom agent-repl-frontend-create-timeout 30
-  "Seconds `agent-repl--frontend-create-session' awaits its UDS outcome.
+  "Seconds `agent-repl--frontend-after-create-session' awaits its UDS outcome.
 createSession's `CommandAck' is the daemon's ESTABLISHMENT verdict: it is
 written only once the new session's shim answers a health probe healthy over
 the fully wired connection, so the ack legitimately takes as long as the
@@ -493,162 +512,19 @@ correlation (`agent-repl--frontend-live-session-id-for-cwd') stays
 unambiguous: a second create for the same cwd while one is in flight is
 refused loudly rather than racing two views onto one key.")
 
-(defun agent-repl--frontend-await-uds (predicate timeout what &optional ws)
-  "Block until PREDICATE returns non-nil or TIMEOUT seconds elapse; return its value.
-Pumps the frontend UDS connection via `accept-process-output' so inbound
-frames (the CommandAck, the SessionView) are dispatched while we wait.
-WHAT names the wait for the main-thread assertion + logging.  WS, when
-known, scopes the diagnostics to its workspace metadata.
-
-MAIN THREAD ONLY: `accept-process-output' routes through `ns_select_1' ->
-`[NSApp run]', which deadlocks Emacs off the main thread (the AGENTS.md
-worker-thread trap); every blocking wait in this module asserts it."
-  (agent-repl--assert-main-thread (format "frontend-await-uds %s" what))
-  (let ((started (float-time))
-        (deadline (+ (float-time) timeout))
-        result)
-    (agent-repl--log-verbose ws
-                             "frontend-await-uds: begin what=%s timeout=%.3fs"
-                             what timeout)
-    (while (and (not (setq result (funcall predicate)))
-                (< (float-time) deadline))
-      (accept-process-output agent-repl--uds-process 0.1))
-    (agent-repl--log-verbose ws
-                             "frontend-await-uds: complete what=%s outcome=%s elapsed=%.3fs"
-                             what (if result "resolved" "timeout")
-                             (- (float-time) started))
-    result))
-
-(defun agent-repl--frontend-await-health-command
-    (field payload workspace session-id what)
-  "Require successful UDS health FIELD with PAYLOAD for WORKSPACE.
-SESSION-ID is the expected identity for session health and nil for daemon
-health.  WHAT identifies the scope in diagnostics.  The correlated health
-view with `healthy=true' is authoritative; a `CommandAck' only confirms
-receipt.  Timeout, command rejection, and an unhealthy result all abort
-before the caller mutates UI or workspace state."
-  (agent-repl--frontend-wait-ready)
-  ;; WORKSPACE is the wire routing key — `agent-repl--frontend-ws-command-key''s
-  ;; cwd, or nil for daemon health — and it must stay that way for the send and
-  ;; for the two tracking registries.  LOG-WORKSPACE is the resolved name the
-  ;; logging ladder can actually index.
-  (let ((log-workspace (agent-repl--frontend-ws-name workspace))
-        response rejection request-id)
-    (agent-repl--log log-workspace
-                     "frontend-health: begin what=%s field=%s ws=%s payload=%S session-id=%s"
-                     what field workspace payload (or session-id "nil"))
-    (setq request-id (agent-repl--uds-send-command field payload workspace))
-    (agent-repl--uds-track-health-response
-     request-id field workspace session-id
-     (lambda (view) (setq response view)))
-    (agent-repl--uds-track-command
-     request-id field workspace
-     (lambda (err) (setq rejection err)))
-    (unless (agent-repl--frontend-await-uds
-             (lambda () (or response rejection))
-             agent-repl-frontend-health-timeout
-             (format "health %s" what)
-             log-workspace)
-      (agent-repl--uds-untrack-command request-id workspace "health-timeout")
-      (agent-repl--uds-untrack-health-response
-       request-id workspace "health-timeout")
-      (agent-repl--log log-workspace
-                       "frontend-health: TIMEOUT what=%s field=%s request-id=%s timeout=%.3fs"
-                       what field request-id agent-repl-frontend-health-timeout)
-      (error "agent-repl: %s health check timed out after %.3fs"
-             what agent-repl-frontend-health-timeout))
-    (when rejection
-      (agent-repl--uds-untrack-health-response
-       request-id workspace "command-rejected")
-      (agent-repl--log log-workspace
-                       "frontend-health: REJECTED what=%s field=%s request-id=%s error=%s"
-                       what field request-id rejection)
-      (error "agent-repl: %s health check rejected: %s" what rejection))
-    (unless (plist-get response :healthy)
-      (let ((reason (plist-get response :reason)))
-        (agent-repl--log log-workspace
-                         "frontend-health: UNHEALTHY what=%s field=%s request-id=%s session-id=%s reason=%S response=%S"
-                         what field request-id (or session-id "nil")
-                         reason response)
-        (error "agent-repl: %s is unhealthy: %s"
-               what
-               (if (and (stringp reason) (not (string-empty-p reason)))
-                   reason
-                 "daemon supplied no reason"))))
-    (agent-repl--log log-workspace
-                     "frontend-health: HEALTHY what=%s field=%s request-id=%s session-id=%s response=%S"
-                     what field request-id (or session-id "nil") response)
-    t))
-
-(defun agent-repl--frontend-await-open-workspace (ws)
-  "Synchronously ensure WS is operational through daemon `openWorkspace'.
-The command is idempotent for an already-operational session and is the
-canonical wake path for a hibernated one.  Return t only after the daemon
-accepts the command.  Rejection, timeout, or a broken UDS link signals
-before any caller presents agent-repl UI."
-  (let* ((key (agent-repl--frontend-ws-command-key ws))
-         (outcome (list :done nil :ok nil :error nil))
-         (request-id
-          (agent-repl--uds-send-command "openWorkspace" nil key)))
-    (agent-repl--log
-     ws
-     "open-workspace gate: begin ws=%s key=%s request-id=%s timeout=%.3fs"
-     ws key request-id agent-repl-frontend-open-workspace-timeout)
-    (agent-repl--uds-track-command
-     request-id "openWorkspace" ws
-     (lambda (err)
-       (plist-put outcome :error err)
-       (plist-put outcome :done t)
-       (agent-repl--log
-        ws
-        "open-workspace gate: REJECTED ws=%s key=%s request-id=%s error=%s"
-        ws key request-id err))
-     (lambda ()
-       (plist-put outcome :ok t)
-       (plist-put outcome :done t)
-       (agent-repl--log
-        ws
-        "open-workspace gate: ACCEPTED ws=%s key=%s request-id=%s"
-        ws key request-id)))
-    (unless (agent-repl--frontend-await-uds
-             (lambda () (plist-get outcome :done))
-             agent-repl-frontend-open-workspace-timeout
-             (format "openWorkspace ws=%s" ws)
-             ws)
-      (agent-repl--uds-untrack-command request-id ws "open-workspace-timeout")
-      (agent-repl--log
-       ws
-       "open-workspace gate: TIMEOUT ws=%s key=%s request-id=%s timeout=%.3fs outcome=%S"
-       ws key request-id agent-repl-frontend-open-workspace-timeout outcome)
-      (error "agent-repl: opening workspace %s timed out after %.3fs"
-             ws agent-repl-frontend-open-workspace-timeout))
-    (when-let ((reason (plist-get outcome :error)))
-      (agent-repl--log
-       ws
-       "open-workspace gate: ABORT ws=%s key=%s request-id=%s error=%s"
-       ws key request-id reason)
-      (error "agent-repl: opening workspace %s failed: %s" ws reason))
-    (unless (plist-get outcome :ok)
-      (agent-repl--log
-       ws
-       "open-workspace gate: INVARIANT ws=%s key=%s request-id=%s outcome=%S"
-       ws key request-id outcome)
-      (error "agent-repl: openWorkspace for %s completed without an accepted acknowledgement"
-             ws))
-    t))
-
-(defun agent-repl--frontend-wait-daemon-healthy ()
-  "Require the daemon's correlated initialization-readiness assertion.
+(defun agent-repl--frontend-after-daemon-healthy (on-success on-failure)
+  "Asynchronously require the daemon's initialization-readiness assertion.
 This proves the daemon completed its startup assembly and bound its
 boot-critical listeners.  It does not probe shim-store or the sidecar:
 session health separately proves the live daemon -> shim route and the shim's
 own dependencies, including shim-store; startup service orchestration
 separately validates and kickstarts the launchd jobs."
-  (agent-repl--frontend-await-health-command
-   "daemonHealth" nil nil nil "daemon"))
+  (agent-repl--frontend-after-health-command
+   "daemonHealth" nil nil nil "daemon" on-success on-failure))
 
-(defun agent-repl--frontend-wait-session-healthy (ws session-id)
-  "Assert WS's live shim health and identity for SESSION-ID.
+(defun agent-repl--frontend-after-session-healthy
+    (ws session-id on-success on-failure)
+  "Asynchronously assert WS's live shim health and identity for SESSION-ID.
 The daemon routes the command by WS's project directory and verifies that
 its live shim is connected and healthy.  SESSION-ID correlation prevents a
 stale binding from being reported after a restart or remount.
@@ -665,11 +541,12 @@ answer to \"is this already-open session's shim still there\"."
                      "frontend-health: invalid session id for session health id=%S"
                      session-id)
     (error "agent-repl: cannot health-check workspace %s without a session id" ws))
-  (agent-repl--frontend-await-health-command
+  (agent-repl--frontend-after-health-command
    "sessionHealth" (list :sessionId session-id)
    (agent-repl--frontend-ws-command-key ws)
    session-id
-   (format "session ws=%s id=%s" ws session-id)))
+   (format "session ws=%s id=%s" ws session-id)
+   on-success on-failure ws))
 
 ;;;###autoload
 (defun agent-repl-session-health (&optional ws)
@@ -688,61 +565,21 @@ unreachable, or has no recorded id."
       (user-error "agent-repl: no current workspace to health-check"))
     (unless (and (stringp session-id) (not (string-empty-p session-id)))
       (user-error "agent-repl: workspace %s has no daemon session to health-check" ws))
-    (agent-repl--frontend-wait-session-healthy ws session-id)
-    (message "agent-repl: %s session %s is healthy" ws session-id)
-    t))
-
-(defun agent-repl--frontend-create-handle-rejection (cwd model explicit-id force-fresh err)
-  "Handle a REJECTED `createSession' for CWD; MODEL/EXPLICIT-ID were the request.
-ERR is the `CommandAck' error string.  When it names a missing resume
-transcript (the daemon's §2.10 resume-viability hard-fail, whose message
-contains \"has no transcript\"), reproduce the lost-transcript behavior:
-FORCE-FRESH recreates with no resume; otherwise open an investigation
-workspace and re-raise `agent-repl-resume-transcript-missing'.  Any other
-rejection is a loud error.
-
-ONLY AN `explicit\=' CREATE CAN REACH THE LOST-TRANSCRIPT ARM, and that is a
-property of the new resolution rather than a coincidence: a `continue\='
-create names no conversation, and the daemon\'s resolver stats the
-transcript before choosing one, so it can only ever hand back a
-conversation that exists.  A caller that NAMED a conversation is the only
-one that can name a missing one.
-
-NOTE (frontend.v1 constraint): a `CommandAck' carries only an error
-STRING, not the structured `searched_paths' the old HTTP 422 body did, so
-the investigation is dispatched with the resume id alone (nil paths)."
-  (if (and (stringp err) explicit-id (string-match-p "has no transcript" err))
-      (progn
-        (agent-repl--log (agent-repl--ws-name-for-dir cwd)
-                         "createSession REJECTED for %s: resume %s transcript missing (%s)"
-                         cwd explicit-id err)
-        (if force-fresh
-            (agent-repl--frontend-force-fresh-on-lost-transcript cwd model explicit-id)
-          (let ((ws-name (agent-repl--dispatch-resume-investigation explicit-id nil cwd)))
-            (signal 'agent-repl-resume-transcript-missing
-                    (list (format (concat "resume target %s has no transcript — refusing a fresh "
-                                          "conversation; opened investigation workspace `%s'")
-                                  explicit-id ws-name)
-                          explicit-id ws-name)))))
-    ;; Every other rejection is now an ESTABLISHMENT verdict: the daemon acks a
-    ;; create only when the new session's shim answered healthy over the wired
-    ;; connection, and a nack names the deepest link that failed or is still
-    ;; pending (shim never spawned / handshake incomplete / no live connection /
-    ;; probe unanswered / the shim's own unhealthy verdict and reason).  That
-    ;; text is the whole diagnosis, so it goes to BOTH surfaces — the log
-    ;; buffer, which survives, and the echo area, which a caller that traps the
-    ;; signal would otherwise leave blank.
-    (let ((reason (or err "rejected")))
-      (agent-repl--log (agent-repl--ws-name-for-dir cwd)
-                       "createSession: NOT ESTABLISHED cwd=%s reason=%s" cwd reason)
-      (message "agent-repl: session for %s did not come up: %s" cwd reason)
-      (error "agent-repl: createSession for %s failed: %s" cwd reason))))
+    (agent-repl--frontend-after-session-healthy
+     ws session-id
+     (lambda ()
+       (agent-repl--log ws "session-health command: HEALTHY session-id=%s" session-id)
+       (message "agent-repl: %s session %s is healthy" ws session-id))
+     (lambda (detail)
+       (agent-repl--log ws "session-health command: FAILED session-id=%s detail=%s"
+                        session-id detail)))
+    :pending))
 
 (defconst agent-repl--frontend-resume-modes
   '((continue . "RESUME_MODE_CONTINUE")
     (fresh    . "RESUME_MODE_FRESH")
     (explicit . "RESUME_MODE_EXPLICIT"))
-  "Map of `agent-repl--frontend-create-session' RESUME-MODE to its wire name.
+  "Map of `agent-repl--frontend-after-create-session' RESUME-MODE to its wire name.
 Deliberately has no entry for the proto's `RESUME_MODE_UNSPECIFIED': that
 value exists so an older peer's absent field reads as `continue', and a
 caller here always knows which of the three it means.")
@@ -755,163 +592,6 @@ and one silently becoming `fresh' would strand an intact one."
   (or (alist-get mode agent-repl--frontend-resume-modes)
       (error "agent-repl: unknown resume mode %S (want one of %S)"
              mode (mapcar #'car agent-repl--frontend-resume-modes))))
-
-(defun agent-repl--frontend-force-fresh-on-lost-transcript (cwd model resume-id)
-  "Degrade a lost-transcript resume for RESUME-ID to a FRESH conversation.
-Invoked by `agent-repl--frontend-create-handle-rejection' when
-`agent-repl--force-fresh-conversation' (or the FORCE-FRESH arg) overrides
-the default investigation dispatch.  Logs the override, then recreates the
-session in CWD with MODEL and NO resume (which cannot re-trigger the
-lost-transcript hard-fail), and returns the fresh session id."
-  (agent-repl--log (agent-repl--ws-name-for-dir cwd)
-                   (concat "force-fresh-conversation: lost resume %s overridden — creating a "
-                           "fresh conversation in %s (skipping investigation)")
-                   resume-id cwd)
-  (agent-repl--frontend-create-session cwd model 'fresh))
-
-(defun agent-repl--frontend-create-session (cwd &optional model resume-mode explicit-id force-fresh)
-  "Create a daemon session rooted at CWD over the UDS `createSession' command;
-return the new session id.  MODEL is an optional passthrough.
-
-RESUME-MODE says WHICH CONVERSATION to land on, as an INTENT rather than a
-pointer.  It is one of:
-
-  `continue' (the default, and what nil means) — continue this workspace's
-             conversation, whichever one that is.  The DAEMON resolves it.
-  `fresh'    — deliberately begin a new conversation even though a
-             resumable one exists.
-  `explicit' — land on the conversation named by EXPLICIT-ID.  Reserved for
-             a human choosing among conversations (a picker, a fork).
-
-EXPLICIT-ID is meaningful ONLY under `explicit', and the daemon refuses a
-create that carries it under any other mode.
-
-EMACS DOES NOT KNOW VENDOR CONVERSATION IDS, and must not learn them.  It
-used to: each workspace persisted the claude session uuid in its state.el
-and handed it back here at boot, which made Emacs a second and weaker
-authority on a question the daemon answers exactly — it holds the registry,
-the conversation checkpoints, and the transcripts on disk, while Emacs held
-one remembered string and hoped.  When that string went missing, five
-workspaces silently opened FRESH conversations on top of fully intact
-transcripts, because \"I have no pointer\" and \"start me fresh\" were the
-same thing on the wire.  They are different values now.
-
-The daemon's `createSession' `CommandAck' is a BARE RECEIPT (it carries no
-session id); the id arrives on a pushed `SessionView' whose workspace is
-CWD.  So this: sends `createSession', awaits the ack (pumping the UDS link
-via `agent-repl--frontend-await-uds'), then correlates the id by matching
-the non-terminal `SessionView' the daemon pushed for CWD
-\(`agent-repl--frontend-live-session-id-for-cwd').  The daemon pushes that
-view BEFORE the ack, so on an accepted ack the view is already stored; a
-brief extra await tolerates the reverse ordering.  Creates are serialized
-per cwd (`agent-repl--frontend-creates-in-flight'), and the daemon stands
-down every older session on the cwd — pushing each one's terminal view —
-before it pushes the new session's, so at most one live view per cwd
-exists and the correlation is unambiguous.
-
-On a REJECTED ack the lost-workspace resume attempt is handled by
-`agent-repl--frontend-create-handle-rejection': the resume-viability
-hard-fail (ack error contains \"has no transcript\") either opens an
-investigation workspace and re-raises `agent-repl-resume-transcript-missing'
-\(default), or — under FORCE-FRESH / `agent-repl--force-fresh-conversation'
-— recreates with no resume.
-
-MODEL defaults to `agent-repl-interactive-model' when nil, matching the
-CLI-launch path: a concrete `--model' makes the daemon's hello carry the
-real model from the first frame instead of leaving the topbar picker empty
-until the first turn.  A nil `agent-repl-interactive-model' is respected as
-\"let the CLI choose\" and sends no model.
-
-The account the CLI runs as travels in `configDir', computed from CWD by
-`agent-repl--compute-config-dir' — one daemon serves every workspace, so
-the daemon's own environment cannot encode a per-workspace account; without
-this field every gui session would run as whichever account the daemon
-inherited."
-  (unless (and (stringp cwd) (not (string-empty-p cwd)))
-    (agent-repl--log nil "createSession: REJECTED invalid cwd=%S" cwd)
-    (error "agent-repl: create-session requires a cwd (got %S)" cwd))
-  (when (gethash cwd agent-repl--frontend-creates-in-flight)
-    (agent-repl--log (agent-repl--ws-name-for-dir cwd)
-                     "createSession: REJECTED cwd=%s already in flight" cwd)
-    (error "agent-repl: a createSession for %s is already in flight" cwd))
-  (let* ((ws (agent-repl--ws-name-for-dir cwd))
-         (force-fresh (or force-fresh agent-repl--force-fresh-conversation))
-         (model (agent-repl--effective-model model))
-         (posture (agent-repl--frontend-session-posture cwd))
-         (config-dir (plist-get posture :config-dir))
-         (permission-mode (plist-get posture :permission-mode))
-         (allow-ungated (plist-get posture :allow-ungated))
-         (resume-mode (or resume-mode 'continue))
-         (payload (append (list :cwd cwd
-                                :resumeMode (agent-repl--frontend-resume-mode-wire resume-mode))
-                          (when model (list :model model))
-                          ;; Only ever sent under `explicit'; the daemon
-                          ;; REFUSES a create that names a conversation under
-                          ;; any other mode rather than ignoring it quietly.
-                          (when (eq resume-mode 'explicit)
-                            (list :explicitClaudeSessionId explicit-id))
-                          (when config-dir (list :configDir config-dir))
-                          (when permission-mode
-                            (list :permissionMode permission-mode))
-                          ;; Sent ONLY when a caller has bound the consent, so
-                          ;; an ordinary create can never carry it by accident.
-                          (when allow-ungated
-                            (list :allowUngated t))))
-         ;; Mutable outcome the ack callbacks flip; all keys pre-populated so
-         ;; `plist-put' mutates in place and the closures + await loop observe it.
-         (ack (list :done nil :ok nil :error nil)))
-    (agent-repl--log
-     ws
-     "createSession: begin cwd=%s model=%s resume-mode=%s explicit-id=%s config-dir=%s permission-mode=%s allow-ungated=%s force-fresh=%s"
-     cwd (or model "none") resume-mode
-     (if (eq resume-mode 'explicit) (or explicit-id "MISSING") "n/a")
-     (or config-dir "CLI-default")
-     (or permission-mode "SDK-default") allow-ungated force-fresh)
-    ;; Send + await the ack UNDER the in-flight guard, but handle the OUTCOME
-    ;; after releasing it: the force-fresh rejection branch recreates the SAME
-    ;; cwd, which the guard would otherwise refuse as "already in flight".
-    (puthash cwd t agent-repl--frontend-creates-in-flight)
-    (unwind-protect
-        (let ((req (agent-repl--uds-send-command "createSession" payload cwd)))
-          (agent-repl--uds-track-command
-           req "createSession" cwd
-           (lambda (err)
-             (plist-put ack :error err)
-             (plist-put ack :done t)
-             (agent-repl--log ws
-                              "createSession: ack REJECTED cwd=%s request-id=%s error=%s"
-                              cwd req err))
-           (lambda ()
-             (plist-put ack :ok t)
-             (plist-put ack :done t)
-             (agent-repl--log ws
-                              "createSession: ack ACCEPTED cwd=%s request-id=%s"
-                              cwd req)))
-          (agent-repl--frontend-await-uds
-           (lambda () (plist-get ack :done))
-           agent-repl-frontend-create-timeout
-           (format "createSession cwd=%s" cwd)
-           ws))
-      (remhash cwd agent-repl--frontend-creates-in-flight))
-    (cond
-     ((not (plist-get ack :done))
-      (agent-repl--log ws "createSession: TIMEOUT cwd=%s timeout=%ss"
-                       cwd agent-repl-frontend-create-timeout)
-      (error "agent-repl: createSession for %s timed out after %ss"
-             cwd agent-repl-frontend-create-timeout))
-     ((plist-get ack :ok)
-      (let ((id (agent-repl--frontend-await-uds
-                 (lambda () (agent-repl--frontend-live-session-id-for-cwd cwd))
-                 2 (format "sessionView cwd=%s" cwd) ws)))
-        (unless id
-          (agent-repl--log ws "createSession: ACKED_WITHOUT_SESSION_VIEW cwd=%s" cwd)
-          (error "agent-repl: createSession for %s acked but no SessionView arrived" cwd))
-        (agent-repl--log ws "createSession: cwd=%s -> session %s (resume-mode=%s)"
-                         cwd id resume-mode)
-        id))
-     (t
-      (agent-repl--frontend-create-handle-rejection
-       cwd model explicit-id force-fresh (plist-get ack :error))))))
 
 (defun agent-repl--frontend-delete-session (id &optional ws)
   "Send a `deleteSession' UDS command for session ID; return the request-id.
@@ -1004,99 +684,6 @@ an obsolete binding block forever."
 (defun agent-repl--frontend-session-url (session-id)
   "Return the webapp URL that attaches to SESSION-ID."
   (format "%s/?session=%s" (agent-repl--frontend-base-url) session-id))
-
-(defun agent-repl--frontend-ensure-session (ws &optional purpose)
-  "Return WS's live daemon session id, creating the session if needed.
-Lazily ensures the daemon itself (build-if-stale + launch via
-daemon.el), waits for readiness, then reuses WS's recorded
-`:frontend-session-id' when the daemon still lists it as live —
-otherwise POSTs a new session rooted at WS's `:project-dir'.
-
-PURPOSE says what the caller is about to do with the session, and decides
-whether the reuse path pays the `openWorkspace' PRESENTATION GATE:
-
-  - `presentation' (the default) mounts or redisplays a webview, so it
-    waits for the daemon to confirm the workspace is operational.  Showing
-    a hibernated session's stale webview is exactly what the gate exists
-    to prevent.
-  - `send' hands the user's prompt over and shows no new surface, so it
-    does NOT wait.
-
-WHY `send' MUST NOT WAIT.  The gate blocks the Emacs main thread on a
-round trip, and while it waits it also dispatches whatever the daemon is
-streaming, so a busy workspace paid ~2.8s of frozen editor per prompt with
-only ~0.1s of that being the daemon's answer.  Nothing was gained for it:
-`SubmitPrompt' re-establishes the session daemon-side on arrival, and the
-`thinking' state is published before the shim round trip, so the send path
-neither needs the workspace pre-opened nor needs the gate to look
-responsive.
-
-A workspace WITHOUT a recorded `:project-dir' is not an error: plain
-project perspectives (opened via projectile, never through agent-repl
-workspace creation) have no registration at all.  The project dir is
-adopted from the current git root exactly as workspace creation would
-resolve it, and recorded so later consumers see the same value.
-Signals `user-error' outside a git repository (the resolver's own
-contract)."
-  ;; ensure-frontend-daemon returns nil (without acting) when auto-start
-  ;; is disabled or init is inhibited — polling readiness against a
-  ;; daemon that was never started would burn the whole retry budget to
-  ;; produce a misleading "never became ready" error, so fail fast with
-  ;; the actual cause. A nil return with a LIVE daemon process cannot
-  ;; happen (ensure returns the process in every acting branch).
-  (unless (agent-repl--ensure-frontend-daemon)
-    (agent-repl--log ws "ensure-session: daemon unavailable auto-start-or-init-inhibited")
-    (error "agent-repl: frontend daemon not started (auto-start disabled or init inhibited)"))
-  (agent-repl--frontend-wait-ready)
-  (let ((existing (agent-repl--ws-get ws :frontend-session-id))
-        (gated (not (eq purpose 'send))))
-    (if (and existing (agent-repl--frontend-session-live-p existing))
-        (progn
-          (agent-repl--log
-           ws
-           "ensure-session: existing record is live session=%s purpose=%s presentation-gate=%s"
-           existing (or purpose 'presentation) (if gated "awaited" "skipped"))
-          (when gated
-            (agent-repl--frontend-await-open-workspace ws))
-          (agent-repl--log
-           ws
-           "ensure-session: reusing session=%s purpose=%s"
-           existing (or purpose 'presentation))
-          existing)
-      (let ((dir (or (agent-repl--ws-get ws :project-dir)
-                     (let ((root (agent-repl--resolve-current-git-root)))
-                       (agent-repl--log ws "ensure-session: adopting git root %s for unregistered ws %s" root ws)
-                       (agent-repl--ws-put ws :project-dir root)
-                       root))))
-        ;; Env restore: after an Emacs restart the workspace plist has no
-        ;; :active-env and no instantiation structs, so the durable-id
-        ;; lookup below resolves nil and the created session silently
-        ;; starts a BLANK conversation (observed as "SPC o c doesn't
-        ;; restore the gui session").  A gui-first open is now the ONLY
-        ;; boot path a workspace has, so it must restore env itself from
-        ;; the persisted state file via `agent-repl--initialize-ws-env'
-        ;; rather than relying on some other boot path having already
-        ;; done it.  Env presence also heals the sentinel handlers,
-        ;; which error on a nil :active-env.
-        (unless (agent-repl--ws-get ws :active-env)
-          (agent-repl--log ws "ensure-session: initializing environment cwd=%s" dir)
-          (agent-repl--initialize-ws-env ws dir))
-        ;; CONTINUE the workspace's conversation so a recreated daemon
-        ;; binding (daemon restart, Emacs restart, panel close/reopen)
-        ;; picks up where it left off — the frontend is presentation, the
-        ;; session is the shared backend.  WHICH conversation that is, and
-        ;; whether one exists at all, is the daemon's to decide: it holds
-        ;; the registry and the transcripts, and Emacs deliberately holds
-        ;; no pointer it could get wrong.
-        (let ((id (agent-repl--frontend-create-session
-                   dir (agent-repl--ws-get ws :model) 'continue)))
-          (agent-repl--ws-put ws :frontend-session-id id)
-          (agent-repl--ws-put ws :reattach-failed nil)
-          (agent-repl--ws-put ws :reattach-failures nil)
-          (agent-repl--frontend-reattach-timer-start)
-          (agent-repl--log ws "frontend session created: %s (cwd=%s resume-mode=continue)"
-                           id dir)
-          id)))))
 
 ;;;; ---- Daemon-bounce resilience: the reattach loop -----------------------
 ;;
@@ -1256,7 +843,8 @@ the workspace is marked `:reattach-failed' and a warning surfaces."
      #'failed)
     :pending))
 
-(defun agent-repl--frontend-rebind-workspaces-after-restart ()
+(defun agent-repl--frontend-rebind-workspaces-after-restart
+    (&optional on-success on-failure)
   "Bounce every open gui workspace's shim onto the freshly restarted daemon.
 Meant to run right after `agent-repl-frontend-daemon-restart' force-bounces
 the daemon: rather than leaving each open panel dark until the next reattach
@@ -1285,8 +873,11 @@ the count of open workspaces that carried a session binding to rebind."
     ;; when a fresh build lands, and each remount replays history off the
     ;; live session, so nothing is lost.
       (agent-repl--frontend-remount-all-webviews)
-      (agent-repl--log nil "reattach: explicit rebind complete remounted-workspaces=%d" n))
-     (lambda (detail) (agent-repl--log nil "reattach: explicit rebind FAILED detail=%s" detail)))
+      (agent-repl--log nil "reattach: explicit rebind complete remounted-workspaces=%d" n)
+      (when on-success (funcall on-success n)))
+     (lambda (detail)
+       (agent-repl--log nil "reattach: explicit rebind FAILED detail=%s" detail)
+       (when on-failure (funcall on-failure detail))))
     :pending))
 
 ;; The in-flight message-queue plane (§2.13) is fully retired.  It was dead
@@ -1324,15 +915,22 @@ webapp/src/render.ts) still lands the answer at the tail, but only
 once the turn arrives — this snap closes the round-trip gap so the
 sender watches the bottom from the instant the prompt leaves."
   (agent-repl--log ws "do-send[gui] ws=%s len=%d" ws (length input))
-  (agent-repl--frontend-snap-webview-to-tail ws)
-  (agent-repl--mark-ws-thinking ws)
-  (agent-repl--ws-put ws :last-prompt-time (float-time))
-  (agent-repl--ws-put ws :sent-turn
-                      (list :request-id (agent-repl--frontend-send-user-message ws input)
-                            :raw raw))
-  (agent-repl--run-send-posthooks ws raw)
-  (agent-repl--kickoff-prompt-summary ws raw)
-  (when on-settle (funcall on-settle)))
+  (agent-repl--frontend-send-user-message
+   ws input
+   (lambda (request-id)
+     (agent-repl--frontend-snap-webview-to-tail ws)
+     (agent-repl--mark-ws-thinking ws)
+     (agent-repl--ws-put ws :last-prompt-time (float-time))
+     (agent-repl--ws-put ws :sent-turn (list :request-id request-id :raw raw))
+     (agent-repl--run-send-posthooks ws raw)
+     (agent-repl--kickoff-prompt-summary ws raw)
+     (agent-repl--log ws "do-send[gui]: dispatched request-id=%s raw-len=%d"
+                      request-id (length raw))
+     (when on-settle (funcall on-settle)))
+   (lambda (detail)
+     (agent-repl--log ws "do-send[gui]: FAILED before dispatch detail=%s" detail)
+     (when on-settle (funcall on-settle))))
+  :pending)
 
 (defun agent-repl--gui-interrupt (ws kind)
   "The gui frontend's interrupt capability (registry `:interrupt-fn').
@@ -1444,24 +1042,31 @@ conversation rather than aborting it)."
     ;; the old unreachable/uninitialized path degraded.
     (plist-get (agent-repl--frontend-session-view sid) :claudeSessionId)))
 
-(defun agent-repl--gui-adopt-session (ws claude-session-id)
+(defun agent-repl--gui-adopt-session
+    (ws claude-session-id on-success on-failure)
   "The gui frontend's adopt capability: resume CLAUDE-SESSION-ID.
 Creates a fresh daemon session with resume set and binds it to WS, so
 the subsequent open attaches to the continued conversation."
-  (unless (agent-repl--ensure-frontend-daemon)
-    (agent-repl--log ws "gui-adopt-session: daemon unavailable resume=%s" claude-session-id)
-    (error "agent-repl: frontend daemon not started (auto-start disabled or init inhibited)"))
-  (agent-repl--frontend-wait-ready)
-  (let* ((dir (or (agent-repl--ws-get ws :project-dir)
-                  (agent-repl--resolve-current-git-root)))
-         (id (agent-repl--frontend-create-session
-              dir (agent-repl--ws-get ws :model) 'explicit claude-session-id)))
-    (agent-repl--ws-put ws :frontend-session-id id)
-    (agent-repl--log ws "gui adopted claude session %s as %s" claude-session-id id)
-    id))
+  (unless (and (functionp on-success) (functionp on-failure))
+    (error "agent-repl: gui adoption requires callable continuations"))
+  (if (not (agent-repl--ensure-frontend-daemon))
+      (agent-repl--frontend-async-fail
+       ws "gui-adopt-session" nil (float-time) on-failure
+       "frontend daemon not started (auto-start disabled or init inhibited)")
+    (let ((dir (or (agent-repl--ws-get ws :project-dir)
+                   (agent-repl--resolve-current-git-root))))
+      (agent-repl--frontend-after-create-session
+       dir (agent-repl--ws-get ws :model) 'explicit claude-session-id nil
+       (lambda (id)
+         (agent-repl--ws-put ws :frontend-session-id id)
+         (agent-repl--log ws "gui adopted claude session %s as %s"
+                          claude-session-id id)
+         (funcall on-success id))
+       on-failure ws)))
+  :pending)
 
-(defun agent-repl--frontend-force-fresh-session (ws)
-  "Create a FRESH daemon session for WS (NO resume), bind it, and return its id.
+(defun agent-repl--frontend-force-fresh-session (ws on-success on-failure)
+  "Asynchronously create and bind a FRESH daemon session for WS.
 Mirrors `agent-repl--gui-adopt-session' but passes NO resume, so a BLANK
 conversation replaces whatever the normal ensure path would replay.
 Resets the reattach failure markers so the fresh binding reads as healthy.
@@ -1469,27 +1074,34 @@ Does NOT sync the webview — callers that display do that.  The fresh
 session captures its own durable id through the usual hook path once it
 runs, so a later resume continues the fresh conversation rather than the
 discarded one."
-  (unless (agent-repl--ensure-frontend-daemon)
-    (agent-repl--log ws "force-fresh-conversation: daemon unavailable")
-    (error "agent-repl: frontend daemon not started (auto-start disabled or init inhibited)"))
-  (agent-repl--frontend-wait-ready)
-  (let* ((dir (or (agent-repl--ws-get ws :project-dir)
-                  (agent-repl--resolve-current-git-root)))
-         (id (agent-repl--frontend-create-session
-              dir (agent-repl--ws-get ws :model) 'fresh)))
-    (agent-repl--ws-put ws :frontend-session-id id)
-    (agent-repl--ws-put ws :reattach-failed nil)
-    (agent-repl--ws-put ws :reattach-failures nil)
-    (agent-repl--log ws "force-fresh-conversation: fresh session %s bound (cwd=%s)" id dir)
-    id))
+  (unless (and (functionp on-success) (functionp on-failure))
+    (error "agent-repl: force-fresh requires callable continuations"))
+  (if (not (agent-repl--ensure-frontend-daemon))
+      (agent-repl--frontend-async-fail
+       ws "force-fresh-conversation" nil (float-time) on-failure
+       "frontend daemon not started (auto-start disabled or init inhibited)")
+    (let ((dir (or (agent-repl--ws-get ws :project-dir)
+                   (agent-repl--resolve-current-git-root))))
+      (agent-repl--frontend-after-create-session
+       dir (agent-repl--ws-get ws :model) 'fresh nil nil
+       (lambda (id)
+         (agent-repl--ws-put ws :frontend-session-id id)
+         (agent-repl--ws-put ws :reattach-failed nil)
+         (agent-repl--ws-put ws :reattach-failures nil)
+         (agent-repl--log ws "force-fresh-conversation: fresh session %s bound (cwd=%s)"
+                          id dir)
+         (funcall on-success id))
+       on-failure ws)))
+  :pending)
 
-(defun agent-repl--frontend-send-user-message (ws text)
+(defun agent-repl--frontend-send-user-message
+    (ws text on-success on-failure)
   "Send TEXT as WS's user turn over the UDS `submitPrompt' command.
 Ensures the session first (recreating a stale binding), so a send into a
 dead session heals instead of failing, then sends `submitPrompt' keyed by
 WS's cwd (`agent-repl--frontend-ws-command-key') — the daemon resolves that
-cwd -> session, so no session id is on the wire.  Returns the command
-request-id (retained by the caller as the sent-turn handle).
+cwd -> session, so no session id is on the wire.  ON-SUCCESS receives the
+command request id.  ON-FAILURE receives the ensure failure detail.
 
 FIRE AND FORGET, end to end.  The ensure runs with purpose `send' so it
 skips the `openWorkspace' presentation gate, and the command itself is
@@ -1502,20 +1114,25 @@ consumed and cleared here but is NOT forwarded: frontend.v1's
 `SubmitPromptCmd' has no `origin' field, so the merge status-card stamping
 is gone — matching the already-dead server behavior (the retired HTTP
 /message route never read `origin' into the session controller either)."
-  (let ((id (agent-repl--frontend-ensure-session ws 'send))
-        (origin (agent-repl--ws-get ws :next-send-origin)))
-    ;; The ensure may have HEALED a dead binding into a fresh session —
-    ;; the displayed webview must follow, or the user watches the dead
-    ;; session while the turn streams into the replacement.
-    (agent-repl--frontend-sync-webview ws id)
-    (when origin (agent-repl--ws-put ws :next-send-origin nil))
-    (agent-repl--log ws "frontend send: session=%s len=%d origin=%s (uds submitPrompt)"
-                     id (length text) origin)
-    (let ((req (agent-repl--uds-send-command
-                "submitPrompt" (list :text text)
-                (agent-repl--frontend-ws-command-key ws))))
-      (agent-repl--uds-track-command req "submitPrompt" ws)
-      req)))
+  (unless (and (functionp on-success) (functionp on-failure))
+    (error "agent-repl: frontend send requires callable continuations"))
+  (agent-repl--frontend-after-ensure-session
+   ws
+   (lambda (id)
+     (let ((origin (agent-repl--ws-get ws :next-send-origin)))
+       ;; The ensure may have HEALED a dead binding into a fresh session.
+       (agent-repl--frontend-sync-webview ws id)
+       (when origin (agent-repl--ws-put ws :next-send-origin nil))
+       (agent-repl--log ws "frontend send: session=%s len=%d origin=%s (uds submitPrompt)"
+                        id (length text) origin)
+       (let ((req (agent-repl--uds-send-command
+                   "submitPrompt" (list :text text)
+                   (agent-repl--frontend-ws-command-key ws))))
+         (agent-repl--uds-track-command req "submitPrompt" ws)
+         (agent-repl--log ws "frontend send: dispatched session=%s request-id=%s" id req)
+         (funcall on-success req))))
+   on-failure 'send)
+  :pending)
 
 ;;;; ---- Never-blue: the workspace-SWITCH ensure ---------------------------
 ;;

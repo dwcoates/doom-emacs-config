@@ -46,8 +46,8 @@
 
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--ensure-frontend-daemon "agent-repl-daemon" (&optional force))
-(declare-function agent-repl--frontend-wait-ready "agent-repl-frontend-client" ())
-(declare-function agent-repl--frontend-create-session "agent-repl-frontend-client" (cwd &optional model resume-mode explicit-id force-fresh))
+(declare-function agent-repl--frontend-after-ready "agent-repl-frontend-client" (on-ready on-failure &optional ws))
+(declare-function agent-repl--frontend-after-create-session "agent-repl-frontend-client" (cwd model resume-mode explicit-id force-fresh on-success on-failure &optional ws))
 (declare-function agent-repl--frontend-delete-session "agent-repl-frontend-client" (id &optional ws))
 (declare-function agent-repl--frontend-session-live-p "agent-repl-frontend-client" (id))
 (declare-function agent-repl--frontend-session-url "agent-repl-frontend-client" (session-id))
@@ -388,58 +388,56 @@ its cwd cannot collide with another session."
                      agent-repl-explain-config-dir cwd)
     cwd))
 
-(defun agent-repl--explain-config-ensure-session ()
-  "Return the live explain-config daemon session id, creating it if needed.
-Ensures the daemon itself (built if stale, launched if absent) and
-waits for it to answer, then reuses the recorded session while the
-daemon still lists it as live.  A newly created session is rooted at
-`agent-repl-explain-config-dir', pinned to
-`agent-repl-explain-config-model', and created under
-`agent-repl-explain-config-permission-mode' — and clears the primed
-flag, so its first turn carries the read-only preamble."
+(defun agent-repl--explain-config-after-session (on-success on-failure)
+  "Asynchronously deliver the live explain-config session to ON-SUCCESS.
+ON-FAILURE receives daemon readiness or creation diagnostics.  Session and
+priming state change only after a new SessionView has been correlated."
+  (unless (and (functionp on-success) (functionp on-failure))
+    (error "agent-repl: explain-config session requires callable continuations"))
   (agent-repl--log nil
                    "explain-config: ensure-session start recorded-session=%S primed=%s model=%S permission-mode=%S"
                    agent-repl--explain-config-session-id
                    agent-repl--explain-config-primed-p
                    agent-repl-explain-config-model
                    agent-repl-explain-config-permission-mode)
-  (unless (agent-repl--ensure-frontend-daemon)
-    (agent-repl--log nil "explain-config: ensure-session FAILED; frontend daemon did not start")
-    (error "agent-repl: frontend daemon not started (auto-start disabled or init inhibited)"))
-  (agent-repl--frontend-wait-ready)
-  (let* ((recorded-id agent-repl--explain-config-session-id)
-         (live-p (and recorded-id
-                      (agent-repl--frontend-session-live-p recorded-id))))
-    (agent-repl--log nil "explain-config: ensure-session daemon-ready recorded-session=%S live=%s"
-                     recorded-id live-p)
-    (if live-p
-        (progn
-          (agent-repl--log nil "explain-config: ensure-session reusing live session=%S" recorded-id)
-          recorded-id)
-      (let* ((dir (agent-repl--explain-config-cwd))
-           (agent-repl-frontend-permission-mode
-            agent-repl-explain-config-permission-mode)
-           ;; THE one deliberate ungated create in the tree.  The daemon
-           ;; refuses `bypassPermissions' without this consent, because that
-           ;; mode leaves the session with no permission gate at all: the SDK
-           ;; auto-approves every tool before `canUseTool' is consulted.  Said
-           ;; out loud here rather than defaulted on globally, so no other
-           ;; create inherits it.
-           (agent-repl-frontend-allow-ungated
-            (agent-repl-frontend-ungated-permission-mode-p
-             agent-repl-explain-config-permission-mode))
-           (id (agent-repl--frontend-create-session
-                dir agent-repl-explain-config-model)))
-      (setq agent-repl--explain-config-session-id id
-            agent-repl--explain-config-primed-p nil)
-      (agent-repl--log nil
-                       "explain-config: session created id=%S replaced=%S cwd=%S model=%S permission-mode=%S ungated-consent=%s primed=%s"
-                       id recorded-id dir agent-repl-explain-config-model
-                       agent-repl-explain-config-permission-mode
-                       agent-repl-frontend-allow-ungated
-                       agent-repl--explain-config-primed-p)
-      id))))
-
+  (if (not (agent-repl--ensure-frontend-daemon))
+      (progn
+        (agent-repl--log nil
+                         "explain-config: ensure-session FAILED frontend daemon did not start")
+        (message "agent-repl: explain-config failed: frontend daemon did not start")
+        (funcall on-failure
+                 "frontend daemon not started (auto-start disabled or init inhibited)"))
+    (agent-repl--frontend-after-ready
+     (lambda ()
+       (let* ((recorded-id agent-repl--explain-config-session-id)
+              (live-p (and recorded-id
+                           (agent-repl--frontend-session-live-p recorded-id))))
+         (agent-repl--log nil
+                          "explain-config: daemon ready recorded-session=%S live=%s"
+                          recorded-id live-p)
+         (if live-p
+             (funcall on-success recorded-id)
+           (let ((dir (agent-repl--explain-config-cwd))
+                 (agent-repl-frontend-permission-mode
+                  agent-repl-explain-config-permission-mode)
+                 (agent-repl-frontend-allow-ungated
+                  (agent-repl-frontend-ungated-permission-mode-p
+                   agent-repl-explain-config-permission-mode)))
+             (agent-repl--frontend-after-create-session
+              dir agent-repl-explain-config-model 'continue nil nil
+              (lambda (id)
+                (setq agent-repl--explain-config-session-id id
+                      agent-repl--explain-config-primed-p nil)
+                (agent-repl--log nil
+                                 "explain-config: session created id=%S replaced=%S cwd=%S model=%S permission-mode=%S ungated-consent=%s primed=%s"
+                                 id recorded-id dir agent-repl-explain-config-model
+                                 agent-repl-explain-config-permission-mode
+                                 agent-repl-frontend-allow-ungated
+                                 agent-repl--explain-config-primed-p)
+                (funcall on-success id))
+              on-failure)))))
+     on-failure))
+  :pending)
 (defun agent-repl--explain-config-release-session ()
   "Best-effort DELETE of the explain-config daemon session; clear the binding.
 Errors are LOGGED, never signalled: a reset must not abort because the
@@ -585,15 +583,20 @@ clarification and explanation only."
     (when new-conversation
       (agent-repl--log nil "explain-config: command resetting conversation before send")
       (agent-repl-explain-config-reset))
-    (let* ((session-id (agent-repl--explain-config-ensure-session))
-           (buf (agent-repl--explain-config-ensure-webview session-id)))
-      (agent-repl--log nil "explain-config: command pipeline ready session=%S webview=%S"
-                       session-id buf)
-      (agent-repl--explain-config-show)
-      (agent-repl--explain-config-send session-id trimmed)
-      (agent-repl--log nil "explain-config: command completed session=%S webview=%S"
-                       session-id buf)
-      buf)))
+    (agent-repl--explain-config-after-session
+     (lambda (session-id)
+       (let ((buf (agent-repl--explain-config-ensure-webview session-id)))
+         (agent-repl--log nil
+                          "explain-config: command pipeline ready session=%S webview=%S"
+                          session-id buf)
+         (agent-repl--explain-config-show)
+         (agent-repl--explain-config-send session-id trimmed)
+         (agent-repl--log nil
+                          "explain-config: command completed session=%S webview=%S"
+                          session-id buf)))
+     (lambda (detail)
+       (agent-repl--log nil "explain-config: command FAILED detail=%s" detail)))
+    :pending))
 
 ;;;###autoload
 (defun agent-repl-explain-config-close ()

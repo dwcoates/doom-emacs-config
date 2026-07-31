@@ -100,148 +100,49 @@ push onto it through `symbol-value'.")
 
 ;;;; ---- ensure-session ---------------------------------------------------------
 
-(ert-deftest agent-repl-ecfg-test-ensure-session/creates-in-configured-dir ()
-  "A fresh session is rooted at the configured (expanded) config dir."
+(ert-deftest agent-repl-ecfg-test-after-session-reports-daemon-start-failure ()
+  "A daemon that refuses to start reaches failure without arming readiness."
   ;; Arrange
   (agent-repl-ecfg-test--with-state
-    (let (captured-cwd)
-      (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&rest _) 'proc))
-                ((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t))
-                ((symbol-function 'agent-repl--frontend-create-session)
-                 (lambda (cwd &rest _) (setq captured-cwd cwd) "s_new")))
-        ;; Act
-        (agent-repl--explain-config-ensure-session)
-        ;; Assert
-        (should (equal captured-cwd
-                       (file-name-as-directory
-                        (expand-file-name agent-repl-explain-config-dir))))))))
+    (let (failure ready-called)
+      (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&rest _) nil))
+                ((symbol-function 'agent-repl--frontend-after-ready)
+                 (lambda (&rest _) (setq ready-called t))))
+        (should (eq :pending
+                    (agent-repl--explain-config-after-session
+                     (lambda (_id) (error "unexpected success"))
+                     (lambda (detail) (setq failure detail)))))
+        (should (string-match-p "not started" failure))
+        (should-not ready-called)))))
 
-(ert-deftest agent-repl-ecfg-test-ensure-session/pins-the-configured-model ()
-  "A fresh session is created with the pinned explain-config model."
-  ;; Arrange
-  (agent-repl-ecfg-test--with-state
-    (let (captured-model)
-      (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&rest _) 'proc))
-                ((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t))
-                ((symbol-function 'agent-repl--frontend-create-session)
-                 (lambda (_cwd &optional model &rest _) (setq captured-model model) "s_new")))
-        ;; Act
-        (agent-repl--explain-config-ensure-session)
-        ;; Assert
-        (should (equal captured-model agent-repl-explain-config-model))))))
-
-(ert-deftest agent-repl-ecfg-test-ensure-session/binds-explain-config-permission-mode ()
-  "Session creation runs under the explain-config permission mode, not the
-workspace frontend's."
-  ;; Arrange
-  (agent-repl-ecfg-test--with-state
-    (let ((agent-repl-frontend-permission-mode "auto")
-          captured-mode)
-      (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&rest _) 'proc))
-                ((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t))
-                ((symbol-function 'agent-repl--frontend-create-session)
-                 (lambda (&rest _)
-                   (setq captured-mode agent-repl-frontend-permission-mode)
-                   "s_new")))
-        ;; Act
-        (agent-repl--explain-config-ensure-session)
-        ;; Assert
-        (should (equal captured-mode agent-repl-explain-config-permission-mode))))))
-
-(ert-deftest agent-repl-ecfg-test-ensure-session/consents-to-the-ungated-mode ()
-  "Creation binds the ungated consent the daemon requires for `bypassPermissions'."
-  ;; Arrange
+(ert-deftest agent-repl-ecfg-test-after-session-creates-with-explicit-posture ()
+  "Creation preserves cwd, model, permission mode, consent, and completion order."
   (agent-repl-ecfg-test--with-state
     (let ((agent-repl-explain-config-permission-mode "bypassPermissions")
-          (agent-repl-frontend-allow-ungated nil)
-          captured-consent)
-      (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&rest _) 'proc))
-                ((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t))
-                ((symbol-function 'agent-repl--frontend-create-session)
-                 (lambda (&rest _)
-                   (setq captured-consent agent-repl-frontend-allow-ungated)
-                   "s_new")))
-        ;; Act
-        (agent-repl--explain-config-ensure-session)
-        ;; Assert
-        (should captured-consent)))))
-
-(ert-deftest agent-repl-ecfg-test-ensure-session/withholds-consent-for-a-gated-mode ()
-  "A gated explain-config mode sends no ungated consent."
-  ;; Arrange
-  (agent-repl-ecfg-test--with-state
-    (let ((agent-repl-explain-config-permission-mode "acceptEdits")
-          (agent-repl-frontend-allow-ungated nil)
-          captured-consent)
-      (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&rest _) 'proc))
-                ((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t))
-                ((symbol-function 'agent-repl--frontend-create-session)
-                 (lambda (&rest _)
-                   (setq captured-consent agent-repl-frontend-allow-ungated)
-                   "s_new")))
-        ;; Act
-        (agent-repl--explain-config-ensure-session)
-        ;; Assert
-        (should-not captured-consent)))))
-
-(ert-deftest agent-repl-ecfg-test-ensure-session/reuses-live-session ()
-  "A recorded session the daemon still lists as live is reused, not recreated."
-  ;; Arrange
-  (agent-repl-ecfg-test--with-state
-    (let ((agent-repl--explain-config-session-id "s_live")
-          (created 0))
-      (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&rest _) 'proc))
-                ((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t))
-                ((symbol-function 'agent-repl--frontend-session-live-p) (lambda (_id) t))
-                ((symbol-function 'agent-repl--frontend-create-session)
-                 (lambda (&rest _) (cl-incf created) "s_new")))
-        ;; Act
-        (let ((id (agent-repl--explain-config-ensure-session)))
-          ;; Assert
-          (should (equal id "s_live"))
-          (should (= created 0)))))))
-
-(ert-deftest agent-repl-ecfg-test-ensure-session/recreates-dead-session ()
-  "A recorded session the daemon no longer lists as live is replaced."
-  ;; Arrange
-  (agent-repl-ecfg-test--with-state
-    (let ((agent-repl--explain-config-session-id "s_dead"))
-      (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&rest _) 'proc))
-                ((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t))
+          captured success)
+      (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&rest _) t))
+                ((symbol-function 'agent-repl--frontend-after-ready)
+                 (lambda (ok _fail &optional _ws) (funcall ok) :ready))
                 ((symbol-function 'agent-repl--frontend-session-live-p) (lambda (_id) nil))
-                ((symbol-function 'agent-repl--frontend-create-session)
-                 (lambda (&rest _) "s_new")))
-        ;; Act
-        (let ((id (agent-repl--explain-config-ensure-session)))
-          ;; Assert
-          (should (equal id "s_new"))
-          (should (equal agent-repl--explain-config-session-id "s_new")))))))
-
-(ert-deftest agent-repl-ecfg-test-ensure-session/new-session-clears-primed-flag ()
-  "A new session re-arms the preamble: its first turn must carry the contract."
-  ;; Arrange
-  (agent-repl-ecfg-test--with-state
-    (let ((agent-repl--explain-config-session-id "s_dead")
-          (agent-repl--explain-config-primed-p t))
-      (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&rest _) 'proc))
-                ((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t))
-                ((symbol-function 'agent-repl--frontend-session-live-p) (lambda (_id) nil))
-                ((symbol-function 'agent-repl--frontend-create-session)
-                 (lambda (&rest _) "s_new")))
-        ;; Act
-        (agent-repl--explain-config-ensure-session)
-        ;; Assert
+                ((symbol-function 'agent-repl--frontend-after-create-session)
+                 (lambda (cwd model mode explicit force ok _fail &optional _ws)
+                   (setq captured
+                         (list cwd model mode explicit force
+                               agent-repl-frontend-permission-mode
+                               agent-repl-frontend-allow-ungated))
+                   (funcall ok "s-new")
+                   :pending)))
+        (agent-repl--explain-config-after-session
+         (lambda (id) (setq success id))
+         (lambda (detail) (error "unexpected failure: %s" detail)))
+        (should (equal success "s-new"))
+        (should (equal captured
+                       (list (file-name-as-directory
+                              (expand-file-name agent-repl-explain-config-dir))
+                             agent-repl-explain-config-model 'continue nil nil
+                             "bypassPermissions" t)))
+        (should (equal agent-repl--explain-config-session-id "s-new"))
         (should-not agent-repl--explain-config-primed-p)))))
-
-(ert-deftest agent-repl-ecfg-test-ensure-session/errors-when-daemon-not-started ()
-  "A daemon that refuses to start fails fast rather than burning the poll budget."
-  ;; Arrange
-  (agent-repl-ecfg-test--with-state
-    (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&rest _) nil))
-              ((symbol-function 'agent-repl--frontend-wait-ready)
-               (lambda () (error "must not poll"))))
-      ;; Act + Assert
-      (should-error (agent-repl--explain-config-ensure-session) :type 'error))))
 
 ;;;; ---- release-session ----------------------------------------------------------
 
@@ -495,8 +396,8 @@ SENT-SYM is bound to the text handed to the send path (nil if none)."
        ;; Not every BODY reads the capture; `ignore' marks it as
        ;; deliberately maybe-unused so expansions compile warning-free.
        (ignore ,sent-sym)
-       (cl-letf (((symbol-function 'agent-repl--explain-config-ensure-session)
-                  (lambda () "s_1"))
+       (cl-letf (((symbol-function 'agent-repl--explain-config-after-session)
+                  (lambda (ok _fail) (funcall ok "s_1") :pending))
                  ((symbol-function 'agent-repl--explain-config-ensure-webview)
                   (lambda (_id) 'fake-webview))
                  ((symbol-function 'agent-repl--explain-config-show) #'ignore)
@@ -518,78 +419,27 @@ SENT-SYM is bound to the text handed to the send path (nil if none)."
     (should-error (agent-repl-explain-config "   \n\t  ") :type 'user-error)
     (should-not sent)))
 
-(ert-deftest agent-repl-ecfg-test-command/forwards-trimmed-prompt ()
-  "explain-config trims surrounding whitespace before sending the turn."
+(ert-deftest agent-repl-ecfg-test-command/async-session-success-sends-trimmed-prompt ()
+  "The command performs presentation and send only from session success."
   (agent-repl-ecfg-test--with-stubbed-pipeline sent
-    ;; Act
-    (agent-repl-explain-config "  hello  ")
-    ;; Assert
+    (should (eq :pending (agent-repl-explain-config "  hello  ")))
     (should (equal sent "hello"))))
 
-(ert-deftest agent-repl-ecfg-test-command/shows-the-popup ()
-  "explain-config displays the webview popup for the answer."
-  ;; Arrange
+(ert-deftest agent-repl-ecfg-test-command/session-failure-does-not-present ()
+  "A failed session continuation leaves the webview and send path untouched."
   (agent-repl-ecfg-test--with-state
-    (let (shown)
-      (cl-letf (((symbol-function 'agent-repl--explain-config-ensure-session)
-                 (lambda () "s_1"))
+    (let (presented sent failure)
+      (cl-letf (((symbol-function 'agent-repl--explain-config-after-session)
+                 (lambda (_ok fail) (setq failure "no daemon")
+                   (funcall fail failure) :pending))
                 ((symbol-function 'agent-repl--explain-config-ensure-webview)
-                 (lambda (_id) 'fake-webview))
-                ((symbol-function 'agent-repl--explain-config-show)
-                 (lambda () (setq shown t)))
-                ((symbol-function 'agent-repl--explain-config-send) #'ignore))
-        ;; Act
-        (agent-repl-explain-config "q")
-        ;; Assert
-        (should shown)))))
-
-(ert-deftest agent-repl-ecfg-test-command/reuses-session-for-follow-ups ()
-  "A second question reuses the same session — that IS the conversation."
-  ;; Arrange
-  (agent-repl-ecfg-test--with-state
-    (let ((sends 0)
-          (created 0))
-      (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&rest _) 'proc))
-                ((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t))
-                ((symbol-function 'agent-repl--frontend-session-live-p) (lambda (_id) t))
-                ((symbol-function 'agent-repl--frontend-create-session)
-                 (lambda (&rest _) (cl-incf created) "s_1"))
-                ((symbol-function 'agent-repl--explain-config-ensure-webview)
-                 (lambda (_id) 'fake-webview))
-                ((symbol-function 'agent-repl--explain-config-show) #'ignore)
-                ((symbol-function 'agent-repl--uds-send-command)
-                 (lambda (&rest _) (cl-incf sends) "req"))
-                ((symbol-function 'agent-repl--uds-track-command)
-                 (lambda (r &rest _) r)))
-        ;; Act
-        (agent-repl-explain-config "first")
-        (agent-repl-explain-config "second")
-        ;; Assert — both turns sent, but the session was created exactly once
-        ;; (the second reuses it — that IS the conversation).
-        (should (= sends 2))
-        (should (= created 1))))))
-
-(ert-deftest agent-repl-ecfg-test-command/second-question-is-not-re-preambled ()
-  "The follow-up question rides the existing conversation, unwrapped."
-  ;; Arrange
-  (agent-repl-ecfg-test--with-state
-    (let ((sent nil))
-      (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&rest _) 'proc))
-                ((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t))
-                ((symbol-function 'agent-repl--frontend-session-live-p) (lambda (_id) t))
-                ((symbol-function 'agent-repl--frontend-create-session) (lambda (&rest _) "s_1"))
-                ((symbol-function 'agent-repl--explain-config-ensure-webview)
-                 (lambda (_id) 'fake-webview))
-                ((symbol-function 'agent-repl--explain-config-show) #'ignore)
-                ((symbol-function 'agent-repl--uds-send-command)
-                 (lambda (_field payload &rest _) (push (plist-get payload :text) sent) "req"))
-                ((symbol-function 'agent-repl--uds-track-command)
-                 (lambda (r &rest _) r)))
-        ;; Act
-        (agent-repl-explain-config "first")
-        (agent-repl-explain-config "second")
-        ;; Assert
-        (should (equal (car sent) "second"))))))
+                 (lambda (&rest _) (setq presented t)))
+                ((symbol-function 'agent-repl--explain-config-send)
+                 (lambda (&rest _) (setq sent t))))
+        (agent-repl-explain-config "hello")
+        (should (equal failure "no daemon"))
+        (should-not presented)
+        (should-not sent)))))
 
 (ert-deftest agent-repl-ecfg-test-command/prefix-arg-resets-first ()
   "A prefix argument discards the conversation before asking."
@@ -638,34 +488,6 @@ SENT-SYM is bound to the text handed to the send path (nil if none)."
         (should (= hidden 1))
         (should (= webview 1))
         (should (= session 1))))))
-
-(ert-deftest agent-repl-ecfg-test-reset/next-question-re-primes-the-preamble ()
-  "After a reset the next question opens a fresh conversation, contract and all."
-  ;; Arrange
-  (agent-repl-ecfg-test--with-state
-    (let ((agent-repl--explain-config-session-id "s_old")
-          (agent-repl--explain-config-primed-p t)
-          (sent nil))
-      (cl-letf (((symbol-function 'agent-repl--explain-config-hide) #'ignore)
-                ((symbol-function 'agent-repl--explain-config-release-webview) #'ignore)
-                ((symbol-function 'agent-repl--frontend-delete-session) (lambda (_id &optional _ws) "req"))
-                ((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&rest _) 'proc))
-                ((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t))
-                ((symbol-function 'agent-repl--frontend-create-session) (lambda (&rest _) "s_new"))
-                ((symbol-function 'agent-repl--explain-config-ensure-webview)
-                 (lambda (_id) 'fake-webview))
-                ((symbol-function 'agent-repl--explain-config-show) #'ignore)
-                ((symbol-function 'agent-repl--uds-send-command)
-                 (lambda (_field payload &rest _) (setq sent (plist-get payload :text)) "req"))
-                ((symbol-function 'agent-repl--uds-track-command)
-                 (lambda (r &rest _) r)))
-        ;; Act
-        (agent-repl-explain-config "fresh" t)
-        ;; Assert
-        (should (string-match-p "READ-ONLY" sent))
-        (should (equal agent-repl--explain-config-session-id "s_new"))))))
-
-;;;; ---- Popup: display action ---------------------------------------------------------
 
 (ert-deftest agent-repl-ecfg-test-display-action/uses-right-side-window ()
   "Display action routes the explain-config webview to a right-side window."

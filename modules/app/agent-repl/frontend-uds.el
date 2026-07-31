@@ -409,7 +409,7 @@ reconnect is scheduled (design §4.4 honest downtime); the connection is
 left nil and the display goes stale until the daemon is reachable.
 
 When READINESS-P is non-nil, the synchronous
-`agent-repl--frontend-wait-ready' loop owns retry pacing and the final
+`agent-repl--frontend-after-ready' continuation owns retry pacing and the final
 hard error.  A refused cold-start dial is still fully logged, but it
 neither raises a premature outage alarm nor arms a competing timer.
 Returns the process on success, nil on a failed dial."

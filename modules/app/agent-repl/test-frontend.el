@@ -348,7 +348,10 @@ bundle would never be refetched."
   (let (synced)
     (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
               ((symbol-function 'agent-repl--frontend-force-fresh-session)
-               (lambda (ws) (should (equal ws "ws1")) "fresh-sid"))
+               (lambda (ws ok _fail)
+                 (should (equal ws "ws1"))
+                 (funcall ok "fresh-sid")
+                 :pending))
               ((symbol-function 'agent-repl--frontend-sync-webview)
                (lambda (ws id) (setq synced (list ws id)))))
       ;; Act

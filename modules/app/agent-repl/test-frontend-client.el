@@ -42,37 +42,41 @@ Suitable for submitPrompt/interrupt/deleteSession, which do not await."
                 (lambda (request-id &rest _) request-id)))
        ,@body)))
 
-(defmacro agent-repl-test--with-uds-create (outcome &rest body)
-  "Run BODY with the UDS boundary mocked so `createSession' resolves via OUTCOME.
-OUTCOME evaluates to a plist: (:id STRING) simulates the daemon storing a
-SessionView for the command's cwd and succeeding the ack (create returns
-that id); (:error STRING) fails the ack with that error.  Other commands
-are captured into `uds-commands'.  `agent-repl--frontend-await-uds' is
-reduced to a single predicate evaluation (the mock resolves synchronously),
-and the SessionView store is cleared first so tests do not contaminate."
+(defmacro agent-repl-test--with-ws (ws plist &rest body)
+  "Register workspace WS with PLIST for BODY in isolated workspace state."
+  (declare (indent 2))
+  `(agent-repl-test--with-clean-state
+     (let ((agent-repl-test--plist (copy-sequence ,plist)))
+       (while agent-repl-test--plist
+         (agent-repl--ws-put ,ws (pop agent-repl-test--plist)
+                             (pop agent-repl-test--plist))))
+     ,@body))
+
+(defmacro agent-repl-test--with-views (views &rest body)
+  "Clear the SessionView store, install VIEWS, then run BODY."
   (declare (indent 1))
-  `(let ((uds-commands '()) (uds-counter 0) (uds-outcome ,outcome))
-     (ignore uds-commands)
+  `(progn
      (clrhash agent-repl--frontend-session-views)
+     (dolist (v ,views) (agent-repl--frontend-store-session-view v))
+     ,@body))
+
+(defmacro agent-repl-test--with-interrupt-acks (answer &rest body)
+  "Run BODY with interrupt commands captured and confirmation returning ANSWER."
+  (declare (indent 1))
+  `(let ((uds-commands '()) (uds-counter 0) (asked '()) (echoed nil))
+     (ignore uds-commands asked echoed)
+     (clrhash agent-repl--uds-pending-commands)
      (cl-letf (((symbol-function 'agent-repl--uds-send-command)
                 (lambda (field payload &optional workspace &rest _)
                   (setq uds-commands
                         (append uds-commands (list (list field payload workspace))))
                   (format "req-%d" (cl-incf uds-counter))))
-               ((symbol-function 'agent-repl--uds-track-command)
-                (lambda (request-id field workspace &optional on-failure on-success)
-                  (cond
-                   ((equal field "createSession")
-                    (if (plist-get uds-outcome :error)
-                        (when on-failure (funcall on-failure (plist-get uds-outcome :error)))
-                      (agent-repl--frontend-store-session-view
-                       (list :sessionId (plist-get uds-outcome :id) :workspace workspace))
-                      (when on-success (funcall on-success))))
-                   ((equal field "openWorkspace")
-                    (when on-success (funcall on-success))))
-                  request-id))
-               ((symbol-function 'agent-repl--frontend-await-uds)
-                (lambda (predicate &rest _) (funcall predicate))))
+               ((symbol-function 'y-or-n-p)
+                (lambda (question)
+                  (setq asked (append asked (list question)))
+                  ,answer))
+               ((symbol-function 'message)
+                (lambda (fmt &rest args) (setq echoed (apply #'format fmt args)))))
        ,@body)))
 
 ;;;; ---- asynchronous client continuations -----------------------------------
@@ -143,6 +147,20 @@ and the SessionView store is cleared first so tests do not contaminate."
       (should (equal success "s-new"))
       (should-not failure))))
 
+(ert-deftest agent-repl-test-frontend-after-create-readiness-failure-cleans-reservation ()
+  "A readiness failure removes the cwd reservation before reporting failure."
+  (let (failure)
+    (remhash "/w-fail" agent-repl--frontend-creates-in-flight)
+    (cl-letf (((symbol-function 'agent-repl--frontend-after-ready)
+               (lambda (_ok fail &optional _ws)
+                 (funcall fail "no daemon")
+                 :pending)))
+      (agent-repl--frontend-after-create-session
+       "/w-fail" nil 'continue nil nil #'ignore
+       (lambda (detail) (setq failure detail)))
+      (should (equal failure "no daemon"))
+      (should-not (gethash "/w-fail" agent-repl--frontend-creates-in-flight)))))
+
 (ert-deftest agent-repl-test-frontend-after-health-rejection-cleans-up-and-fails ()
   "A rejected health command invokes failure and retires both registrations."
   (let (failure untracked-command untracked-health rejection)
@@ -177,6 +195,81 @@ and the SessionView store is cleared first so tests do not contaminate."
         (should (equal success "s-live"))
         (should-not failure)))))
 
+(ert-deftest agent-repl-test-frontend-after-ensure-send-skips-presentation-gate ()
+  "Send-purpose ensure delivers a live binding without opening the workspace."
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w" :frontend-session-id "s-live")
+    (let (success opened)
+      (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&rest _) t))
+                ((symbol-function 'agent-repl--frontend-after-ready)
+                 (lambda (ok _fail &optional _ws) (funcall ok) :ready))
+                ((symbol-function 'agent-repl--frontend-session-live-p) (lambda (_id) t))
+                ((symbol-function 'agent-repl--frontend-after-open-workspace)
+                 (lambda (&rest _) (setq opened t))))
+        (agent-repl--frontend-after-ensure-session
+         "ws1" (lambda (id) (setq success id)) #'error 'send)
+        (should (equal success "s-live"))
+        (should-not opened)))))
+
+(ert-deftest agent-repl-test-frontend-async-send-mutates-only-after-ensure-success ()
+  "Prompt dispatch, origin clearing, and webview sync follow ensure success."
+  (agent-repl-test--with-ws "ws1"
+      '(:project-dir "/w" :frontend-session-id "old" :next-send-origin merge)
+    (let (ensure-success sent synced request)
+      (cl-letf (((symbol-function 'agent-repl--frontend-after-ensure-session)
+                 (lambda (_ws ok _fail &optional purpose)
+                   (should (eq purpose 'send))
+                   (setq ensure-success ok)
+                   :pending))
+                ((symbol-function 'agent-repl--frontend-sync-webview)
+                 (lambda (ws id) (setq synced (list ws id))))
+                ((symbol-function 'agent-repl--uds-send-command)
+                 (lambda (field payload key)
+                   (setq sent (list field payload key)) "req-1"))
+                ((symbol-function 'agent-repl--uds-track-command) #'ignore))
+        (agent-repl--frontend-send-user-message
+         "ws1" "hello" (lambda (id) (setq request id)) #'error)
+        (should-not sent)
+        (should (eq (agent-repl--ws-get "ws1" :next-send-origin) 'merge))
+        (funcall ensure-success "s-new")
+        (should (equal synced '("ws1" "s-new")))
+        (should (equal sent '("submitPrompt" (:text "hello") "/w")))
+        (should (equal request "req-1"))
+        (should-not (agent-repl--ws-get "ws1" :next-send-origin))))))
+
+(ert-deftest agent-repl-test-gui-send-turn-does-not-mark-thinking-on-ensure-failure ()
+  "A failed asynchronous ensure leaves all sent-turn state untouched."
+  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
+    (let (failure settled)
+      (cl-letf (((symbol-function 'agent-repl--frontend-send-user-message)
+                 (lambda (_ws _text _ok fail) (setq failure fail) :pending))
+                ((symbol-function 'agent-repl--frontend-snap-webview-to-tail)
+                 (lambda (&rest _) (error "must not present"))))
+        (agent-repl--gui-send-turn "ws1" "prepared" "raw"
+                                   (lambda () (setq settled t)))
+        (funcall failure "no daemon")
+        (should settled)
+        (should-not (agent-repl--ws-get "ws1" :sent-turn))
+        (should-not (agent-repl--ws-get "ws1" :thinking))))))
+
+(ert-deftest agent-repl-test-frontend-force-fresh-binds-only-on-create-success ()
+  "Fresh-session state changes are continuation-owned."
+  (agent-repl-test--with-ws "ws1"
+      '(:project-dir "/w" :frontend-session-id "old" :reattach-failed t)
+    (let (create-success result)
+      (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&rest _) t))
+                ((symbol-function 'agent-repl--frontend-after-create-session)
+                 (lambda (_cwd _model mode _explicit _force ok _fail &optional _ws)
+                   (should (eq mode 'fresh))
+                   (setq create-success ok)
+                   :pending)))
+        (agent-repl--frontend-force-fresh-session
+         "ws1" (lambda (id) (setq result id)) #'error)
+        (should (equal (agent-repl--ws-get "ws1" :frontend-session-id) "old"))
+        (funcall create-success "fresh")
+        (should (equal result "fresh"))
+        (should (equal (agent-repl--ws-get "ws1" :frontend-session-id) "fresh"))
+        (should-not (agent-repl--ws-get "ws1" :reattach-failed))))))
+
 ;;;; ---- webview URL ---------------------------------------------------------
 
 (ert-deftest agent-repl-test-frontend-base-url-is-the-webview-address ()
@@ -194,137 +287,6 @@ Emacs itself issues no HTTP; this URL is handed to the embedded browser."
 A macro (not a defun) so it captures the lexical `uds-commands' at the call
 site inside `agent-repl-test--with-uds-create'."
   '(nth 1 (car uds-commands)))
-
-(ert-deftest agent-repl-test-frontend-create-sends-cwd-payload ()
-  "Create sends a `createSession' command carrying the cwd, and returns the
-id the daemon delivers on the pushed SessionView."
-  ;; Arrange
-  (agent-repl-test--with-uds-create '(:id "s_1")
-    ;; Act
-    (let ((id (agent-repl--frontend-create-session "/w/tree")))
-      ;; Assert
-      (should (equal id "s_1"))
-      (pcase-let ((`(,field ,payload ,ws) (car uds-commands)))
-        (should (equal field "createSession"))
-        (should (equal (plist-get payload :cwd) "/w/tree"))
-        (should (equal ws "/w/tree"))))))
-
-(ert-deftest agent-repl-test-frontend-create-passes-model-and-explicit-conversation ()
-  "Model and an EXPLICIT conversation land in the command payload.
-`explicit' is the one mode that may name a conversation — a human picking
-from among them.  Ordinary restore is `continue', which names nothing."
-  ;; Arrange
-  (agent-repl-test--with-uds-create '(:id "s_1")
-    ;; Act
-    (agent-repl--frontend-create-session "/w" "haiku" 'explicit "cli-uuid-9")
-    ;; Assert
-    (let ((payload (agent-repl-test--created-payload)))
-      (should (equal (plist-get payload :model) "haiku"))
-      (should (equal (plist-get payload :resumeMode) "RESUME_MODE_EXPLICIT"))
-      (should (equal (plist-get payload :explicitClaudeSessionId) "cli-uuid-9")))))
-
-(ert-deftest agent-repl-test-frontend-create-defaults-to-continue ()
-  "A create with no mode asks the daemon to CONTINUE, naming no conversation.
-This is the load-bearing default: Emacs holds no pointer, so it says what it
-wants and the daemon resolves which conversation that is."
-  ;; Arrange
-  (agent-repl-test--with-uds-create '(:id "s_1")
-    ;; Act
-    (agent-repl--frontend-create-session "/w")
-    ;; Assert
-    (let ((payload (agent-repl-test--created-payload)))
-      (should (equal (plist-get payload :resumeMode) "RESUME_MODE_CONTINUE"))
-      (should-not (plist-member payload :explicitClaudeSessionId)))))
-
-(ert-deftest agent-repl-test-frontend-create-never-names-a-conversation-under-continue ()
-  "An id handed in under `continue' is NOT sent.
-The daemon refuses a create that names a conversation outside `explicit',
-and sending one would be the removed pointer returning by another route."
-  ;; Arrange
-  (agent-repl-test--with-uds-create '(:id "s_1")
-    ;; Act
-    (agent-repl--frontend-create-session "/w" nil 'continue "cli-uuid-9")
-    ;; Assert
-    (let ((payload (agent-repl-test--created-payload)))
-      (should-not (plist-member payload :explicitClaudeSessionId)))))
-
-(ert-deftest agent-repl-test-frontend-create-rejects-an-unknown-mode ()
-  "An unknown resume mode signals rather than defaulting.
-A typo silently becoming `continue' would resume a conversation the caller
-asked to replace; silently becoming `fresh' would strand an intact one."
-  (agent-repl-test--with-uds-create '(:id "s_1")
-    (should-error (agent-repl--frontend-create-session "/w" nil 'contineu))))
-
-(ert-deftest agent-repl-test-frontend-create-defaults-model-to-interactive ()
-  "A create with no model sends `agent-repl-interactive-model'."
-  ;; Arrange
-  (agent-repl-test--with-uds-create '(:id "s_1")
-    (let ((agent-repl-interactive-model "opus"))
-      ;; Act
-      (agent-repl--frontend-create-session "/w")
-      ;; Assert
-      (should (equal (plist-get (agent-repl-test--created-payload) :model) "opus")))))
-
-(ert-deftest agent-repl-test-frontend-create-omits-model-when-interactive-nil ()
-  "A nil `agent-repl-interactive-model' sends no model field."
-  ;; Arrange
-  (agent-repl-test--with-uds-create '(:id "s_1")
-    (let ((agent-repl-interactive-model nil))
-      ;; Act
-      (agent-repl--frontend-create-session "/w")
-      ;; Assert
-      (should-not (plist-member (agent-repl-test--created-payload) :model)))))
-
-(ert-deftest agent-repl-test-frontend-create-explicit-model-overrides-interactive ()
-  "An explicit MODEL wins over `agent-repl-interactive-model'."
-  ;; Arrange
-  (agent-repl-test--with-uds-create '(:id "s_1")
-    (let ((agent-repl-interactive-model "opus"))
-      ;; Act
-      (agent-repl--frontend-create-session "/w" "haiku")
-      ;; Assert
-      (should (equal (plist-get (agent-repl-test--created-payload) :model) "haiku")))))
-
-(ert-deftest agent-repl-test-frontend-create-sends-permission-mode ()
-  "Create carries the configured permission mode (default auto)."
-  ;; Arrange
-  (agent-repl-test--with-uds-create '(:id "s_1")
-    (let ((agent-repl-frontend-permission-mode "auto"))
-      ;; Act
-      (agent-repl--frontend-create-session "/w")
-      ;; Assert
-      (should (equal (plist-get (agent-repl-test--created-payload) :permissionMode) "auto")))))
-
-(ert-deftest agent-repl-test-frontend-create-omits-permission-mode-when-nil ()
-  "A nil mode customization omits the field (SDK default)."
-  ;; Arrange
-  (agent-repl-test--with-uds-create '(:id "s_1")
-    (let ((agent-repl-frontend-permission-mode nil))
-      ;; Act
-      (agent-repl--frontend-create-session "/w")
-      ;; Assert
-      (should-not (plist-member (agent-repl-test--created-payload) :permissionMode)))))
-
-(ert-deftest agent-repl-test-frontend-create-omits-ungated-consent-by-default ()
-  "An ordinary create never carries the ungated-session consent."
-  ;; Arrange
-  (agent-repl-test--with-uds-create '(:id "s_1")
-    (let ((agent-repl-frontend-allow-ungated nil))
-      ;; Act
-      (agent-repl--frontend-create-session "/w")
-      ;; Assert
-      (should-not (plist-member (agent-repl-test--created-payload) :allowUngated)))))
-
-(ert-deftest agent-repl-test-frontend-create-sends-bound-ungated-consent ()
-  "A caller that binds the consent gets it on the wire as `allowUngated'."
-  ;; Arrange
-  (agent-repl-test--with-uds-create '(:id "s_1")
-    (let ((agent-repl-frontend-allow-ungated t)
-          (agent-repl-frontend-permission-mode "bypassPermissions"))
-      ;; Act
-      (agent-repl--frontend-create-session "/w")
-      ;; Assert
-      (should (eq (plist-get (agent-repl-test--created-payload) :allowUngated) t)))))
 
 (ert-deftest agent-repl-test-frontend-ungated-mode-p-flags-bypass-permissions ()
   "`bypassPermissions' is the mode under which no permission gate exists."
@@ -362,138 +324,6 @@ asked to replace; silently becoming `fresh' would strand an intact one."
                 :permission-mode "bypassPermissions"
                 :allow-ungated t))))))
 
-(ert-deftest agent-repl-test-frontend-create-sends-multi-repo-config-dir ()
-  "A cwd under the multi-repo root carries that account's CLAUDE_CONFIG_DIR."
-  ;; Arrange
-  (agent-repl-test--with-uds-create '(:id "s_1")
-    (let ((process-environment (cons "MULTI_REPO_ROOT=/home/user/multi" process-environment))
-          (agent-repl-multi-repo-config-dir "~/.claude-chesscom"))
-      ;; Act
-      (agent-repl--frontend-create-session "/home/user/multi/repoA")
-      ;; Assert
-      (should (equal (plist-get (agent-repl-test--created-payload) :configDir)
-                     (expand-file-name "~/.claude-chesscom"))))))
-
-(ert-deftest agent-repl-test-frontend-create-omits-config-dir-outside-multi-repo ()
-  "A personal project omits configDir so the CLI uses its own default root."
-  ;; Arrange
-  (agent-repl-test--with-uds-create '(:id "s_1")
-    (let ((process-environment (cons "MULTI_REPO_ROOT=/home/user/multi" process-environment))
-          (agent-repl-default-config-dir nil)
-          (agent-repl-doom-multi-repo-mode nil))
-      ;; Act
-      (agent-repl--frontend-create-session "/home/user/personal/proj")
-      ;; Assert
-      (should-not (plist-member (agent-repl-test--created-payload) :configDir)))))
-
-(ert-deftest agent-repl-test-frontend-create-requires-cwd ()
-  "Create without a cwd signals instead of minting a cwd-less session."
-  ;; Act / Assert — must fail before touching the UDS boundary.
-  (should-error (agent-repl--frontend-create-session nil)))
-
-(ert-deftest agent-repl-test-frontend-create-errors-without-session-view ()
-  "An accepted ack with no matching SessionView signals loudly (never a silent nil)."
-  ;; Arrange — ack succeeds but the store gets no view for the cwd.
-  (let ((uds-commands '()))
-    (ignore uds-commands)
-    (clrhash agent-repl--frontend-session-views)
-    (cl-letf (((symbol-function 'agent-repl--uds-send-command)
-               (lambda (&rest _) "req-1"))
-              ((symbol-function 'agent-repl--uds-track-command)
-               (lambda (_r _f _w &optional _of on-success) (when on-success (funcall on-success)) "req-1"))
-              ((symbol-function 'agent-repl--frontend-await-uds)
-               (lambda (predicate &rest _) (funcall predicate))))
-      ;; Act / Assert
-      (should-error (agent-repl--frontend-create-session "/w")))))
-
-;;;; ---- resume-viability hard-fail (ack error) --------------------------------
-
-(defconst agent-repl-test--resume-missing-error
-  "resume target uuid-gone has no transcript in this daemon's config dir"
-  "The `createSession' CommandAck error text the resume-viability gate returns.")
-
-(ert-deftest agent-repl-test-frontend-create-hard-fails-on-missing-transcript ()
-  "A resume-missing ack error signals the distinct
-`agent-repl-resume-transcript-missing' rather than starting fresh."
-  ;; Arrange
-  (cl-letf (((symbol-function 'agent-repl--dispatch-resume-investigation)
-             (lambda (&rest _) "resume-investigate-uuid-gon")))
-    (agent-repl-test--with-uds-create (list :error agent-repl-test--resume-missing-error)
-      ;; Act / Assert
-      (should-error (agent-repl--frontend-create-session "/w" nil 'explicit "uuid-gone")
-                    :type 'agent-repl-resume-transcript-missing))))
-
-(ert-deftest agent-repl-test-frontend-create-hard-fail-names-investigation-ws ()
-  "The surfaced hard-fail error names the investigation workspace."
-  ;; Arrange
-  (cl-letf (((symbol-function 'agent-repl--dispatch-resume-investigation)
-             (lambda (&rest _) "resume-investigate-uuid-gon")))
-    (agent-repl-test--with-uds-create (list :error agent-repl-test--resume-missing-error)
-      ;; Act
-      (let ((err (should-error (agent-repl--frontend-create-session "/w" nil 'explicit "uuid-gone"))))
-        ;; Assert
-        (should (string-match-p "resume-investigate-uuid-gon"
-                                (error-message-string err)))))))
-
-(ert-deftest agent-repl-test-frontend-create-hard-fail-dispatches-investigation ()
-  "The hard-fail opens an investigation workspace with the requested resume id.
-The CommandAck carries no structured `searched_paths', so the investigation
-is dispatched with the resume id and nil paths (a documented S7 constraint)."
-  ;; Arrange
-  (let (captured)
-    (cl-letf (((symbol-function 'agent-repl--dispatch-resume-investigation)
-               (lambda (resume-id searched cwd)
-                 (setq captured (list resume-id searched cwd)) "ws")))
-      (agent-repl-test--with-uds-create (list :error agent-repl-test--resume-missing-error)
-        ;; Act
-        (ignore-errors (agent-repl--frontend-create-session "/w/tree" nil 'explicit "uuid-gone"))
-        ;; Assert
-        (should (equal captured '("uuid-gone" nil "/w/tree")))))))
-
-(ert-deftest agent-repl-test-frontend-create-other-errors-stay-generic ()
-  "An ack error WITHOUT the resume-missing signature stays a plain error."
-  ;; Arrange
-  (agent-repl-test--with-uds-create '(:error "no live shim for workspace")
-    ;; Act
-    (let ((err (should-error (agent-repl--frontend-create-session "/w" nil 'explicit "uuid-x"))))
-      ;; Assert — not misclassified as the resume hard-fail.
-      (should-not (eq (car err) 'agent-repl-resume-transcript-missing))
-      (should (string-match-p "no live shim" (error-message-string err))))))
-
-;;;; ---- establishment nack surfacing ------------------------------------------
-
-(ert-deftest agent-repl-test-frontend-create-nack-reaches-the-echo-area ()
-  "The daemon's establishment nack is echoed, not only signalled.
-The nack names the deepest link that failed, and a caller that traps the
-signal would otherwise leave the user with nothing on screen."
-  ;; Arrange
-  (let (echoed)
-    (cl-letf (((symbol-function 'message)
-               (lambda (fmt &rest args) (setq echoed (apply #'format fmt args)))))
-      (agent-repl-test--with-uds-create
-          '(:error "session s_1 is not established — the shim never completed its handshake")
-        ;; Act
-        (should-error (agent-repl--frontend-create-session "/w"))
-        ;; Assert
-        (should (string-match-p "never completed its handshake" echoed))))))
-
-(ert-deftest agent-repl-test-frontend-create-nack-reaches-the-log ()
-  "The same nack is written to the agent-repl log, which survives the echo area."
-  ;; Arrange
-  (let (logged)
-    (cl-letf (((symbol-function 'message) (lambda (&rest _) nil))
-              ((symbol-function 'agent-repl--log)
-               (lambda (_ws fmt &rest args)
-                 (push (apply #'format fmt args) logged))))
-      (agent-repl-test--with-uds-create
-          '(:error "session s_1 is not established — the shim reported itself unhealthy")
-        ;; Act
-        (should-error (agent-repl--frontend-create-session "/w"))
-        ;; Assert
-        (should (seq-find (lambda (line)
-                            (string-match-p "NOT ESTABLISHED.*reported itself unhealthy" line))
-                          logged))))))
-
 (ert-deftest agent-repl-test-frontend-create-timeout-outlives-the-daemon-bound ()
   "The client waits longer than the daemon's own establishment bound.
 Whichever bound fires first is the one the user reads, and only the daemon's
@@ -502,134 +332,6 @@ nack can name the link that is still pending."
   (should (> agent-repl-frontend-create-timeout 20)))
 
 ;;;; ---- session health as a diagnostic ----------------------------------------
-
-(ert-deftest agent-repl-test-session-health-probes-the-recorded-session ()
-  "The diagnostic command probes exactly the workspace's recorded session."
-  ;; Arrange
-  (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_live" :project-dir "/w")
-    (let (probed)
-      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
-                ((symbol-function 'message) (lambda (&rest _) nil))
-                ((symbol-function 'agent-repl--frontend-wait-session-healthy)
-                 (lambda (ws id) (setq probed (list ws id)) t)))
-        ;; Act
-        (should (agent-repl-session-health))
-        ;; Assert
-        (should (equal probed '("ws1" "s_live")))))))
-
-(ert-deftest agent-repl-test-session-health-refuses-a-workspace-with-no-session ()
-  "A workspace with no recorded session id is a loud refusal, never a pass."
-  ;; Arrange
-  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
-    (let (probed)
-      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () "ws1"))
-                ((symbol-function 'agent-repl--frontend-wait-session-healthy)
-                 (lambda (&rest _) (setq probed t) t)))
-        ;; Act / Assert
-        (should-error (agent-repl-session-health) :type 'user-error)
-        (should-not probed)))))
-
-;;;; ---- force-fresh override of the lost-transcript hard-fail ----------------
-
-(ert-deftest agent-repl-test-frontend-create-force-fresh-var-degrades-to-fresh ()
-  "With the override var set, a lost-transcript resume recreates fresh.
-The mock fails the resumed create with the resume-missing ack, then the
-force-fresh recreate (no resume) succeeds with a fresh id."
-  ;; Arrange — a stateful mock: first createSession (with resume) fails, the
-  ;; second (no resume) succeeds.
-  (let ((agent-repl--force-fresh-conversation t)
-        (calls 0) (uds-commands '()))
-    (ignore uds-commands)
-    (clrhash agent-repl--frontend-session-views)
-    (cl-letf (((symbol-function 'agent-repl--dispatch-resume-investigation)
-               (lambda (&rest _) (error "investigation must not run")))
-              ((symbol-function 'agent-repl--uds-send-command)
-               (lambda (field payload &optional ws &rest _)
-                 (setq uds-commands (append uds-commands (list (list field payload ws)))) "req"))
-              ((symbol-function 'agent-repl--uds-track-command)
-               (lambda (_r field ws &optional on-failure on-success)
-                 (when (equal field "createSession")
-                   (if (= (cl-incf calls) 1)
-                       (funcall on-failure agent-repl-test--resume-missing-error)
-                     (agent-repl--frontend-store-session-view
-                      (list :sessionId "fresh-sid" :workspace ws))
-                     (funcall on-success)))
-                 "req"))
-              ((symbol-function 'agent-repl--frontend-await-uds)
-               (lambda (predicate &rest _) (funcall predicate))))
-      ;; Act / Assert
-      (should (equal (agent-repl--frontend-create-session "/w" nil 'explicit "uuid-gone") "fresh-sid"))
-      ;; The last createSession names no conversation and asks for FRESH.
-      (let ((payload (nth 1 (car (last uds-commands)))))
-        (should (equal (plist-get payload :resumeMode) "RESUME_MODE_FRESH"))
-        (should-not (plist-member payload :explicitClaudeSessionId))))))
-
-;;;; ---- force-fresh session recreate ----------------------------------------
-
-(ert-deftest agent-repl-test-frontend-force-fresh-session-omits-resume ()
-  "`agent-repl--frontend-force-fresh-session' asks for an explicit FRESH.
-Not merely omitting a pointer: since a create that names nothing now means
-CONTINUE, a blank-slate request has to say so out loud or the daemon would
-helpfully reattach the conversation the user asked to replace."
-  ;; Arrange
-  (let ((captured-mode 'unset))
-    (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda () t))
-              ((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t))
-              ((symbol-function 'agent-repl--frontend-create-session)
-               (lambda (_dir &optional _model mode &rest _)
-                 (setq captured-mode mode) "fresh-sid")))
-      (unwind-protect
-          (progn
-            (puthash "ws1" (list :project-dir "/w") agent-repl--workspaces)
-            ;; Act
-            (agent-repl--frontend-force-fresh-session "ws1")
-            ;; Assert
-            (should (eq captured-mode 'fresh)))
-        (remhash "ws1" agent-repl--workspaces)))))
-
-(ert-deftest agent-repl-test-frontend-force-fresh-session-binds-fresh-id ()
-  "The fresh session id is bound as the workspace's frontend session."
-  ;; Arrange
-  (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda () t))
-            ((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t))
-            ((symbol-function 'agent-repl--frontend-create-session)
-             (lambda (&rest _) "fresh-sid")))
-    (unwind-protect
-        (progn
-          (puthash "ws1" (list :project-dir "/w") agent-repl--workspaces)
-          ;; Act / Assert
-          (should (equal (agent-repl--frontend-force-fresh-session "ws1") "fresh-sid"))
-          (should (equal (agent-repl--ws-get "ws1" :frontend-session-id) "fresh-sid")))
-      (remhash "ws1" agent-repl--workspaces))))
-
-(ert-deftest agent-repl-test-frontend-force-fresh-session-clears-reattach-markers ()
-  "The recreate resets the workspace's reattach failure markers."
-  ;; Arrange
-  (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda () t))
-            ((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t))
-            ((symbol-function 'agent-repl--frontend-create-session)
-             (lambda (&rest _) "fresh-sid")))
-    (unwind-protect
-        (progn
-          (puthash "ws1" (list :project-dir "/w" :reattach-failed t :reattach-failures 3)
-                   agent-repl--workspaces)
-          ;; Act
-          (agent-repl--frontend-force-fresh-session "ws1")
-          ;; Assert
-          (should-not (agent-repl--ws-get "ws1" :reattach-failed))
-          (should-not (agent-repl--ws-get "ws1" :reattach-failures)))
-      (remhash "ws1" agent-repl--workspaces))))
-
-;;;; ---- liveness (pushed SessionView store) ----------------------------------
-
-(defmacro agent-repl-test--with-views (views &rest body)
-  "Clear the SessionView store, install VIEWS (a list of plists), run BODY.
-Isolates the module-global `agent-repl--frontend-session-views' per test."
-  (declare (indent 1))
-  `(progn
-     (clrhash agent-repl--frontend-session-views)
-     (dolist (v ,views) (agent-repl--frontend-store-session-view v))
-     ,@body))
 
 (ert-deftest agent-repl-test-frontend-session-live-p-true-for-listed ()
   "A stored, non-terminal SessionView is live."
@@ -700,584 +402,6 @@ daemon that may be gone."
     ;; Act / Assert
     (should (agent-repl--frontend-daemon-ready-p))))
 
-(ert-deftest agent-repl-test-frontend-wait-ready-returns-immediately-when-ready ()
-  "An already-ready link neither dials nor pumps."
-  ;; Arrange
-  (agent-repl-test--with-readiness (lambda () t)
-    (setq agent-repl--frontend-last-daemon-view '(:bootId "b_1"))
-    ;; Act
-    (should (agent-repl--frontend-wait-ready))
-    ;; Assert
-    (should (= dials 0))
-    (should (= pumps 0))))
-
-(ert-deftest agent-repl-test-frontend-wait-ready-dials-while-the-link-is-down ()
-  "Each DOWN-link attempt is readiness-owned and paces with a blocking sleep."
-  ;; Arrange — the first two dials fail; the third connects with a view.
-  (let ((attempts 0)
-        readiness-args)
-    (agent-repl-test--with-readiness (lambda () (>= attempts 3))
-      (cl-letf (((symbol-function 'agent-repl-uds-connect)
-                 (lambda (&optional _p readiness-p)
-                   (cl-incf attempts)
-                   (setq readiness-args
-                         (append readiness-args (list readiness-p)))
-                   (when (>= attempts 3)
-                     (setq agent-repl--frontend-last-daemon-view '(:bootId "b_1")))
-                   nil)))
-        ;; Act
-        (should (agent-repl--frontend-wait-ready))
-        ;; Assert — one dial per attempt, one 0.2s pacing sleep per FAILED dial.
-        (should (= attempts 3))
-        (should (equal readiness-args '(t t t)))
-        (should (equal sleeps '(0.2 0.2)))))))
-
-(ert-deftest agent-repl-test-frontend-wait-ready-pumps-a-live-link-for-the-view ()
-  "A live link with no view yet is PUMPED until the snapshot lands."
-  ;; Arrange — connected throughout; the view arrives on the 2nd pump.
-  (let ((pumped 0))
-    (agent-repl-test--with-readiness (lambda () t)
-      (cl-letf (((symbol-function 'accept-process-output)
-                 (lambda (&rest _)
-                   (cl-incf pumped)
-                   (when (>= pumped 2)
-                     (setq agent-repl--frontend-last-daemon-view '(:bootId "b_1")))
-                   nil)))
-        ;; Act
-        (should (agent-repl--frontend-wait-ready))
-        ;; Assert — pumped, never slept (a live link needs no pacing sleep).
-        (should (= pumped 2))
-        (should (null sleeps))))))
-
-(ert-deftest agent-repl-test-frontend-wait-ready-never-dials-a-live-link ()
-  "A live link is never re-dialed while waiting for its snapshot."
-  ;; Arrange
-  (let ((pumped 0))
-    (agent-repl-test--with-readiness (lambda () t)
-      (cl-letf (((symbol-function 'accept-process-output)
-                 (lambda (&rest _)
-                   (cl-incf pumped)
-                   (setq agent-repl--frontend-last-daemon-view '(:bootId "b_1"))
-                   nil)))
-        ;; Act
-        (agent-repl--frontend-wait-ready)
-        ;; Assert
-        (should (= dials 0))))))
-
-(defmacro agent-repl-test--with-ws (ws plist &rest body)
-  "Register workspace WS with PLIST for BODY, cleaning up after."
-  (declare (indent 2))
-  `(unwind-protect
-       (progn
-         (puthash ,ws (copy-sequence ,plist) agent-repl--workspaces)
-         ,@body)
-     (remhash ,ws agent-repl--workspaces)))
-
-(ert-deftest agent-repl-test-frontend-ensure-session-fails-fast-without-daemon ()
-  "A nil daemon-ensure (auto-start off/inhibited) errors immediately.
-Polling readiness against a daemon that was never started would burn
-the retry budget on a misleading error."
-  ;; Arrange
-  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
-    (let ((polled nil))
-      (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon)
-                 (lambda (&optional _f) nil))
-                ((symbol-function 'agent-repl--frontend-wait-ready)
-                 (lambda () (setq polled t))))
-        ;; Act
-        (let ((err (should-error (agent-repl--frontend-ensure-session "ws1"))))
-          ;; Assert — loud, immediate, and readiness never polled.
-          (should (string-match-p "not started" (error-message-string err)))
-          (should-not polled))))))
-
-(ert-deftest agent-repl-test-frontend-wait-ready-errors-when-never-connected ()
-  "A link that never comes up gives up loudly after the attempt budget."
-  ;; Arrange
-  (let ((agent-repl-frontend-ready-attempts 3))
-    (agent-repl-test--with-readiness (lambda () nil)
-      ;; Act / Assert
-      (let ((err (should-error (agent-repl--frontend-wait-ready))))
-        (should (string-match-p "connected=no" (error-message-string err)))))))
-
-(ert-deftest agent-repl-test-frontend-wait-ready-errors-when-no-view-arrives ()
-  "A live link that never pushes a `DaemonView' gives up loudly too.
-Distinct failure mode from an unreachable socket, and the error says so."
-  ;; Arrange
-  (let ((agent-repl-frontend-ready-attempts 3))
-    (agent-repl-test--with-readiness (lambda () t)
-      ;; Act / Assert
-      (let ((err (should-error (agent-repl--frontend-wait-ready))))
-        (should (string-match-p "daemon-view=no" (error-message-string err)))))))
-
-(ert-deftest agent-repl-test-frontend-wait-ready-honors-the-attempt-budget ()
-  "The give-up happens after exactly `agent-repl-frontend-ready-attempts' tries."
-  ;; Arrange
-  (let ((agent-repl-frontend-ready-attempts 3))
-    (agent-repl-test--with-readiness (lambda () nil)
-      ;; Act
-      (ignore-errors (agent-repl--frontend-wait-ready))
-      ;; Assert — one dial per attempt, no more.
-      (should (= dials 3)))))
-
-;;;; ---- UDS health commands ---------------------------------------------------
-
-(ert-deftest agent-repl-test-frontend-daemon-health-awaits-correlated-view ()
-  "Daemon health succeeds only from its correlated healthy result frame."
-  (let (sent tracked-command tracked-health)
-    (cl-letf (((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t))
-              ((symbol-function 'agent-repl--uds-send-command)
-               (lambda (field payload workspace &rest _)
-                 (setq sent (list field payload workspace)) "health-1"))
-              ((symbol-function 'agent-repl--uds-track-health-response)
-               (lambda (id field workspace session-id callback)
-                 (setq tracked-health
-                       (list id field workspace session-id))
-                 (funcall callback '(:requestId "health-1" :healthy t))))
-              ((symbol-function 'agent-repl--uds-track-command)
-               (lambda (id field workspace &rest _)
-                 (setq tracked-command (list id field workspace))))
-              ((symbol-function 'agent-repl--frontend-await-uds)
-               (lambda (predicate &rest _) (funcall predicate))))
-      (should (agent-repl--frontend-wait-daemon-healthy))
-      (should (equal sent '("daemonHealth" nil nil)))
-      (should (equal tracked-command
-                     '("health-1" "daemonHealth" nil)))
-      (should (equal tracked-health
-                     '("health-1" "daemonHealth" nil nil))))))
-
-(ert-deftest agent-repl-test-frontend-session-health-sends-session-id-and-cwd ()
-  "Session health binds the daemon's verdict to the rendered session id."
-  (agent-repl-test--with-ws "ws1" '(:project-dir "/w/tree")
-    (let (sent tracked-health)
-      (cl-letf (((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t))
-                ((symbol-function 'agent-repl--uds-send-command)
-                 (lambda (field payload workspace &rest _)
-                   (setq sent (list field payload workspace)) "health-2"))
-                ((symbol-function 'agent-repl--uds-track-health-response)
-                 (lambda (id field workspace session-id callback)
-                   (setq tracked-health
-                         (list id field workspace session-id))
-                   (funcall callback
-                            '(:requestId "health-2"
-                              :workspace "/w/tree"
-                              :sessionId "s_expected"
-                              :healthy t))))
-                ((symbol-function 'agent-repl--uds-track-command)
-                 (lambda (&rest _) "health-2"))
-                ((symbol-function 'agent-repl--frontend-await-uds)
-                 (lambda (predicate &rest _) (funcall predicate))))
-        (should (agent-repl--frontend-wait-session-healthy "ws1" "s_expected"))
-        (should (equal sent
-                       '("sessionHealth" (:sessionId "s_expected") "/w/tree")))
-        (should (equal tracked-health
-                       '("health-2" "sessionHealth" "/w/tree" "s_expected")))))))
-
-(ert-deftest agent-repl-test-frontend-health-unowned-cwd-does-not-signal ()
-  "A health check whose cwd no live workspace owns must not abort on a log line.
-WORKSPACE here is `agent-repl--frontend-ws-command-key''s cwd, which cannot
-index the workspace hash.  The durable sink must be ENABLED for this to test
-anything: with it off the logging ladder never resolves an identity at all."
-  ;; Arrange
-  (agent-repl-test--with-clean-state
-    (agent-repl-test--with-log-sink-on
-      (cl-letf (((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t))
-                ((symbol-function 'agent-repl--uds-send-command)
-                 (lambda (&rest _) "health-3"))
-                ((symbol-function 'agent-repl--uds-track-health-response)
-                 (lambda (_id _field _ws _sid callback)
-                   (funcall callback '(:requestId "health-3" :healthy t))))
-                ((symbol-function 'agent-repl--uds-track-command)
-                 (lambda (&rest _) "health-3"))
-                ((symbol-function 'agent-repl--frontend-await-uds)
-                 (lambda (predicate &rest _) (funcall predicate))))
-        ;; Act / Assert
-        (should (agent-repl--frontend-await-health-command
-                 "sessionHealth" '(:sessionId "s1")
-                 "/nowhere/unowned" "s1" "session ws=gone"))))))
-
-(ert-deftest agent-repl-test-frontend-health-keeps-the-raw-cwd-on-the-wire ()
-  "Resolving for the log must not change the cwd the daemon routes health by."
-  ;; Arrange
-  (agent-repl-test--with-ws "ws1" (list :project-dir temporary-file-directory)
-    (let (sent)
-      (cl-letf (((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t))
-                ((symbol-function 'agent-repl--uds-send-command)
-                 (lambda (_field _payload workspace &rest _)
-                   (setq sent workspace) "health-4"))
-                ((symbol-function 'agent-repl--uds-track-health-response)
-                 (lambda (_id _field _ws _sid callback)
-                   (funcall callback '(:requestId "health-4" :healthy t))))
-                ((symbol-function 'agent-repl--uds-track-command)
-                 (lambda (&rest _) "health-4"))
-                ((symbol-function 'agent-repl--frontend-await-uds)
-                 (lambda (predicate &rest _) (funcall predicate))))
-        ;; Act
-        (agent-repl--frontend-await-health-command
-         "sessionHealth" '(:sessionId "s1")
-         temporary-file-directory "s1" "session ws=ws1")
-        ;; Assert
-        (should (equal sent temporary-file-directory))))))
-
-(ert-deftest agent-repl-test-frontend-health-accepted-ack-alone-times-out ()
-  "A successful command receipt cannot satisfy a health wait."
-  (let (command-tracked)
-    (cl-letf (((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t))
-              ((symbol-function 'agent-repl--uds-send-command)
-               (lambda (&rest _) "health-ack-only"))
-              ((symbol-function 'agent-repl--uds-track-health-response)
-               (lambda (&rest _) "health-ack-only"))
-              ((symbol-function 'agent-repl--uds-track-command)
-               (lambda (&rest _)
-                 (setq command-tracked t)
-                 "health-ack-only"))
-              ((symbol-function 'agent-repl--frontend-await-uds)
-               (lambda (predicate &rest _)
-                 (should-not (funcall predicate))
-                 nil))
-              ((symbol-function 'agent-repl--uds-untrack-command)
-               (lambda (&rest _) nil))
-              ((symbol-function 'agent-repl--uds-untrack-health-response)
-               (lambda (&rest _) nil)))
-      (should-error (agent-repl--frontend-wait-daemon-healthy))
-      (should command-tracked))))
-
-(ert-deftest agent-repl-test-frontend-unhealthy-result-fails-loudly ()
-  "A correlated `healthy=false' result aborts and includes its reason."
-  (cl-letf (((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t))
-            ((symbol-function 'agent-repl--uds-send-command)
-             (lambda (&rest _) "health-bad"))
-            ((symbol-function 'agent-repl--uds-track-health-response)
-             (lambda (_id _field _workspace _session-id callback)
-               (funcall callback
-                        '(:requestId "health-bad"
-                          :reason "store link down"))))
-            ((symbol-function 'agent-repl--uds-track-command)
-             (lambda (&rest _) "health-bad"))
-            ((symbol-function 'agent-repl--frontend-await-uds)
-             (lambda (predicate &rest _) (funcall predicate))))
-    (let ((err (should-error
-                (agent-repl--frontend-wait-daemon-healthy))))
-      (should (string-match-p "store link down"
-                              (error-message-string err))))))
-
-(ert-deftest agent-repl-test-frontend-health-timeout-untracks-and-fails-loudly ()
-  "A health timeout removes its delayed callback and aborts rendering/startup."
-  (let (command-untracked health-untracked)
-    (cl-letf (((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t))
-              ((symbol-function 'agent-repl--uds-send-command) (lambda (&rest _) "health-3"))
-              ((symbol-function 'agent-repl--uds-track-health-response)
-               (lambda (&rest _) "health-3"))
-              ((symbol-function 'agent-repl--uds-track-command) (lambda (&rest _) "health-3"))
-              ((symbol-function 'agent-repl--frontend-await-uds) (lambda (&rest _) nil))
-              ((symbol-function 'agent-repl--uds-untrack-command)
-               (lambda (id workspace reason)
-                 (setq command-untracked (list id workspace reason))))
-              ((symbol-function 'agent-repl--uds-untrack-health-response)
-               (lambda (id workspace reason)
-                 (setq health-untracked (list id workspace reason)))))
-      (should-error (agent-repl--frontend-wait-daemon-healthy))
-      (should (equal command-untracked
-                     '("health-3" nil "health-timeout")))
-      (should (equal health-untracked
-                     '("health-3" nil "health-timeout"))))))
-
-;;;; ---- ensure-session ----------------------------------------------------------
-
-(ert-deftest agent-repl-test-frontend-ensure-session-reuses-live-id ()
-  "A recorded live id is woken through `openWorkspace' before reuse."
-  ;; Arrange
-  (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_live" :project-dir "/w")
-    (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&optional _f) t))
-              ((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t)))
-      (agent-repl-test--with-uds-create '(:id "unused")
-        (agent-repl--frontend-store-session-view '(:sessionId "s_live" :workspace "/w"))
-        ;; Act
-        (let ((id (agent-repl--frontend-ensure-session "ws1")))
-          ;; Assert — the live binding is reused only after the daemon has
-          ;; ensured its existing controller.
-          (should (equal id "s_live"))
-          (should (equal uds-commands
-                         '(("openWorkspace" nil "/w")))))))))
-
-(ert-deftest agent-repl-test-frontend-ensure-session-for-send-skips-the-gate ()
-  "A send-purpose ensure reuses a live session WITHOUT the openWorkspace wait.
-The gate blocks the main thread on a round trip and dispatches the daemon's
-stream while it waits, which cost roughly 2.8s of frozen editor per prompt
-for a ~0.1s answer.  A send shows no new surface, so it pays none of it."
-  ;; Arrange
-  (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_live" :project-dir "/w")
-    (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&optional _f) t))
-              ((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t)))
-      (agent-repl-test--with-uds-create '(:id "unused")
-        (agent-repl--frontend-store-session-view '(:sessionId "s_live" :workspace "/w"))
-        ;; Act
-        (let ((id (agent-repl--frontend-ensure-session "ws1" 'send)))
-          ;; Assert — the same session comes back, and nothing went on the wire.
-          (should (equal id "s_live"))
-          (should-not uds-commands))))))
-
-(ert-deftest agent-repl-test-frontend-send-user-message-does-not-gate ()
-  "The prompt send never awaits openWorkspace before reaching the wire."
-  ;; Arrange
-  (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_live" :project-dir "/w")
-    (let (gated)
-      (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&optional _f) t))
-                ((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t))
-                ((symbol-function 'agent-repl--frontend-sync-webview) (lambda (&rest _) nil))
-                ((symbol-function 'agent-repl--uds-track-command) (lambda (&rest _) nil))
-                ((symbol-function 'agent-repl--frontend-await-open-workspace)
-                 (lambda (&rest _) (setq gated t))))
-        (agent-repl-test--with-uds-create '(:id "unused")
-          (agent-repl--frontend-store-session-view '(:sessionId "s_live" :workspace "/w"))
-          ;; Act
-          (agent-repl--frontend-send-user-message "ws1" "hello there")
-          ;; Assert — submitPrompt is the ONLY command the send emits.
-          (should-not gated)
-          (should (equal (mapcar #'car uds-commands) '("submitPrompt"))))))))
-
-(ert-deftest agent-repl-test-frontend-ensure-session-defaults-to-the-gate ()
-  "An ensure with no purpose still gates, so presentation is unaffected."
-  ;; Arrange
-  (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_live" :project-dir "/w")
-    (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&optional _f) t))
-              ((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t)))
-      (agent-repl-test--with-uds-create '(:id "unused")
-        (agent-repl--frontend-store-session-view '(:sessionId "s_live" :workspace "/w"))
-        ;; Act
-        (agent-repl--frontend-ensure-session "ws1" 'presentation)
-        ;; Assert
-        (should (equal uds-commands '(("openWorkspace" nil "/w"))))))))
-
-(ert-deftest agent-repl-test-frontend-await-open-workspace-rejection-is-loud ()
-  "A rejected wake aborts instead of letting presentation continue."
-  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
-    (let (untracked)
-      (cl-letf (((symbol-function 'agent-repl--uds-send-command)
-                 (lambda (&rest _) "wake-1"))
-                ((symbol-function 'agent-repl--uds-track-command)
-                 (lambda (_id _field _workspace on-failure &rest _)
-                   (funcall on-failure "controller bring-up failed")))
-                ((symbol-function 'agent-repl--frontend-await-uds)
-                 (lambda (predicate &rest _) (funcall predicate)))
-                ((symbol-function 'agent-repl--uds-untrack-command)
-                 (lambda (&rest args) (setq untracked args))))
-        (let ((err (should-error
-                    (agent-repl--frontend-await-open-workspace "ws1"))))
-          (should (string-match-p "controller bring-up failed"
-                                  (error-message-string err)))
-          (should-not untracked))))))
-
-(ert-deftest agent-repl-test-frontend-await-open-workspace-timeout-is-loud ()
-  "A timed-out wake is untracked and aborts presentation."
-  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
-    (let (untracked)
-      (cl-letf (((symbol-function 'agent-repl--uds-send-command)
-                 (lambda (&rest _) "wake-2"))
-                ((symbol-function 'agent-repl--uds-track-command)
-                 (lambda (&rest _) nil))
-                ((symbol-function 'agent-repl--frontend-await-uds)
-                 (lambda (&rest _) nil))
-                ((symbol-function 'agent-repl--uds-untrack-command)
-                 (lambda (&rest args) (setq untracked args))))
-        (should-error (agent-repl--frontend-await-open-workspace "ws1"))
-        (should (equal untracked
-                       '("wake-2" "ws1" "open-workspace-timeout")))))))
-
-(ert-deftest agent-repl-test-frontend-ensure-session-creates-when-stale ()
-  "A recorded id with no live pushed SessionView is replaced via createSession."
-  ;; Arrange
-  (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_stale" :project-dir "/w/tree")
-    (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&optional _f) t))
-              ((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t))
-              ((symbol-function 'agent-repl--initialize-ws-env) (lambda (&rest _args) nil)))
-      (agent-repl-test--with-uds-create '(:id "s_fresh")
-        ;; Act — "s_stale" is absent from the (cleared) store, so it is stale.
-        (let ((id (agent-repl--frontend-ensure-session "ws1")))
-          ;; Assert
-          (should (equal id "s_fresh"))
-          (should (equal (agent-repl--ws-get "ws1" :frontend-session-id) "s_fresh")))))))
-
-(ert-deftest agent-repl-test-frontend-ensure-session-adopts-git-root ()
-  "An unregistered perspective adopts the current git root as its project dir.
-Plain project persps (doom itself, projectile switches) never pass
-through agent-repl workspace creation, so :project-dir is absent — the
-resolver supplies it exactly as creation would."
-  ;; Arrange
-  (agent-repl-test--with-ws "ws1" '(:frontend-session-id nil)
-    (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&optional _f) t))
-              ((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t))
-              ((symbol-function 'agent-repl--initialize-ws-env) (lambda (&rest _args) nil))
-              ((symbol-function 'agent-repl--resolve-current-git-root)
-               (lambda () "/repo/root/")))
-      (agent-repl-test--with-uds-create '(:id "s_new")
-        ;; Act
-        (let ((id (agent-repl--frontend-ensure-session "ws1")))
-          ;; Assert — session rooted at the adopted dir, dir recorded.
-          (should (equal id "s_new"))
-          (should (equal (agent-repl--ws-get "ws1" :project-dir) "/repo/root/"))
-          (should (equal (plist-get (nth 1 (car uds-commands)) :cwd) "/repo/root/")))))))
-
-(ert-deftest agent-repl-test-frontend-ensure-session-asks-to-continue ()
-  "A recreated daemon binding asks the daemon to CONTINUE, naming nothing.
-Emacs used to send a uuid it had persisted, which made it a second
-authority on which conversation the workspace owns.  It now states intent
-and the daemon resolves the conversation from its own records."
-  ;; Arrange — an in-memory uuid is present precisely to prove it is NOT sent.
-  (agent-repl-test--with-ws "ws1"
-      (list :frontend-session-id nil :project-dir "/w"
-            :active-env :bare-metal
-            :bare-metal (make-agent-repl-instantiation :session-id "cli-uuid-7"))
-    (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&optional _f) t))
-              ((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t)))
-      (agent-repl-test--with-uds-create '(:id "s_resumed")
-        ;; Act
-        (agent-repl--frontend-ensure-session "ws1")
-        ;; Assert — intent on the wire, and the in-memory uuid stays home.
-        (let ((payload (nth 1 (car uds-commands))))
-          (should (equal (plist-get payload :resumeMode) "RESUME_MODE_CONTINUE"))
-          (should-not (plist-member payload :explicitClaudeSessionId)))))))
-
-(ert-deftest agent-repl-test-frontend-ensure-session-names-no-conversation ()
-  "An ensure NEVER names a conversation, with or without one in memory."
-  ;; Arrange
-  (agent-repl-test--with-ws "ws1" '(:frontend-session-id nil :project-dir "/w")
-    (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&optional _f) t))
-              ((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t))
-              ((symbol-function 'agent-repl--initialize-ws-env) (lambda (&rest _args) nil)))
-      (agent-repl-test--with-uds-create '(:id "s_new")
-        ;; Act
-        (agent-repl--frontend-ensure-session "ws1")
-        ;; Assert
-        (should-not (plist-member (nth 1 (car uds-commands)) :explicitClaudeSessionId))))))
-
-(ert-deftest agent-repl-test-frontend-ensure-session-passes-ws-model ()
-  "A fresh POST carries the workspace's `:model', not a hardcoded nil.
-
-Regression test: `agent-repl--frontend-ensure-session' once passed a
-literal nil for the model argument regardless of WS, so a gui workspace
-generated with an explicit model silently ran on the daemon/SDK default
-model instead.  Fails against that hardcoded nil, since `:model' would
-then never reach the POST body at all
-\(`agent-repl--frontend-create-session' omits the field entirely when
-model is nil)."
-  ;; Arrange
-  (agent-repl-test--with-ws "ws1"
-      '(:frontend-session-id nil :project-dir "/w" :model "opus")
-    (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&optional _f) t))
-              ((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t)))
-      (agent-repl-test--with-uds-create '(:id "s_new")
-        ;; Act
-        (agent-repl--frontend-ensure-session "ws1")
-        ;; Assert
-        (should (equal (plist-get (nth 1 (car uds-commands)) :model) "opus"))))))
-
-(ert-deftest agent-repl-test-frontend-ensure-session-restores-env-when-missing ()
-  "A nil :active-env triggers env restore before the create is sent.
-After an Emacs restart the workspace plist carries no :active-env, and the
-sentinel handlers error on one.  The restore no longer supplies a resume
-pointer — there is none to supply — but it still has to run, and running
-it BEFORE the create is what this pins."
-  ;; Arrange: the stubbed initializer simulates a state-file restore.
-  (agent-repl-test--with-ws "ws1" '(:frontend-session-id nil :project-dir "/w")
-    (let ((init-calls nil))
-      (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&optional _f) t))
-                ((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t))
-                ((symbol-function 'agent-repl--initialize-ws-env)
-                 (lambda (ws &optional dir env-hint)
-                   (push (list ws dir env-hint) init-calls)
-                   (agent-repl--ws-put ws :active-env :bare-metal)
-                   (agent-repl--ws-put ws :bare-metal
-                                       (make-agent-repl-instantiation)))))
-        (agent-repl-test--with-uds-create '(:id "s_restored")
-          ;; Act
-          (agent-repl--frontend-ensure-session "ws1")
-          ;; Assert — restore ran for ws1 with its dir, and the create asked
-          ;; the daemon to continue.
-          (should (equal init-calls '(("ws1" "/w" nil))))
-          (should (equal (plist-get (nth 1 (car uds-commands)) :resumeMode)
-                         "RESUME_MODE_CONTINUE")))))))
-
-(ert-deftest agent-repl-test-frontend-ensure-session-skips-env-restore-when-present ()
-  "An already-initialized workspace must not be re-initialized.
-Re-running the initializer while a session is live would clobber the
-in-memory instantiation with staler on-disk state."
-  ;; Arrange
-  (agent-repl-test--with-ws "ws1"
-      (list :frontend-session-id nil :project-dir "/w"
-            :active-env :bare-metal
-            :bare-metal (make-agent-repl-instantiation :session-id "live-uuid"))
-    (let ((init-calls 0))
-      (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&optional _f) t))
-                ((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t))
-                ((symbol-function 'agent-repl--initialize-ws-env)
-                 (lambda (&rest _args) (cl-incf init-calls))))
-        (agent-repl-test--with-uds-create '(:id "s_new")
-          ;; Act
-          (agent-repl--frontend-ensure-session "ws1")
-          ;; Assert
-          (should (= init-calls 0)))))))
-
-(ert-deftest agent-repl-test-frontend-ensure-session-propagates-non-git-error ()
-  "Outside a git repository, the resolver's user-error surfaces unchanged."
-  ;; Arrange
-  (agent-repl-test--with-ws "ws1" '(:frontend-session-id nil)
-    (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&optional _f) t))
-              ((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t))
-              ((symbol-function 'agent-repl--resolve-current-git-root)
-               (lambda () (user-error "not inside a git repository"))))
-      ;; Act / Assert
-      (should-error (agent-repl--frontend-ensure-session "ws1") :type 'user-error))))
-
-;;;; ---- gui-adopt-session ----------------------------------------------------------
-
-(ert-deftest agent-repl-test-gui-adopt-session-passes-ws-model ()
-  "Adopting a durable session carries the workspace's `:model', not a
-hardcoded nil.
-
-Regression test for the same bug fixed in
-`agent-repl--frontend-ensure-session': `agent-repl--gui-adopt-session'
-once passed a literal nil for the model argument regardless of WS, so a
-frontend switch that adopted a durable claude session silently dropped
-the workspace's model.  Fails against that hardcoded nil, since
-`:model' would then never reach the POST body at all."
-  ;; Arrange
-  (agent-repl-test--with-ws "ws1" '(:project-dir "/w" :model "opus")
-    (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&optional _f) t))
-              ((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t)))
-      (agent-repl-test--with-uds-create '(:id "s_new")
-        ;; Act
-        (agent-repl--gui-adopt-session "ws1" "cli-uuid-1")
-        ;; Assert
-        (should (equal (plist-get (nth 1 (car uds-commands)) :model) "opus"))))))
-
-(ert-deftest agent-repl-test-gui-adopt-session-binds-the-new-session-id ()
-  "Adopt binds WS's `:frontend-session-id' to the newly created session."
-  ;; Arrange
-  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
-    (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&optional _f) t))
-              ((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t)))
-      (agent-repl-test--with-uds-create '(:id "s_adopted")
-        ;; Act
-        (let ((id (agent-repl--gui-adopt-session "ws1" "cli-uuid-1")))
-          ;; Assert
-          (should (equal id "s_adopted"))
-          (should (equal (agent-repl--ws-get "ws1" :frontend-session-id) "s_adopted")))))))
-
-;;;; ---- prompt submission (UDS `submitPrompt') --------------------------------
-;;
-;; The send/interrupt paths were migrated off HTTP (POST /message, /interrupt)
-;; onto the UDS `submitPrompt'/`interrupt' commands keyed by workspace.  The
-;; old session-id-keyed HTTP senders (`--frontend-send-message',
-;; `--frontend-interrupt-session') and their retract half are gone (frontend.v1
-;; carries no origin or retract), so their tests are gone with them; the send
-;; is now covered by `agent-repl-test-frontend-send-user-message-*' and the
-;; interrupt by `agent-repl-test-gui-interrupt-*'.
-
-;; The §2.13 in-flight-message-queue tests (the queue-run-now / queue-cancel
-;; POST routes and the :queued-messages / queued-count accessors) were deleted
-;; in the S9 endgame: the queue plane is retired daemon-side and the
-;; perpetually-empty accessors are gone.
-
 (ert-deftest agent-repl-test-gui-running-p-tracks-session-binding ()
   "The gui liveness capability is exactly the presence of :frontend-session-id."
   ;; Arrange
@@ -1286,40 +410,6 @@ the workspace's model.  Fails against that hardcoded nil, since
     (should (agent-repl--gui-running-p "ws1")))
   (agent-repl-test--with-ws "ws2" '(:project-dir "/w")
     (should-not (agent-repl--gui-running-p "ws2"))))
-
-(ert-deftest agent-repl-test-frontend-send-user-message-heals-via-ensure ()
-  "Workspace sends ensure the session (healing staleness) then send `submitPrompt'
-keyed by the workspace CWD (no session id on the wire)."
-  ;; Arrange
-  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
-    (cl-letf (((symbol-function 'agent-repl--frontend-ensure-session)
-               (lambda (_ws &optional _purpose) "s_fresh"))
-              ((symbol-function 'agent-repl--frontend-sync-webview) (lambda (&rest _) nil)))
-      (agent-repl-test--with-uds
-        ;; Act
-        (agent-repl--frontend-send-user-message "ws1" "hi")
-        ;; Assert — submitPrompt carrying the text, keyed by the workspace CWD.
-        (pcase-let ((`(,field ,payload ,ws) (car uds-commands)))
-          (should (equal field "submitPrompt"))
-          (should (equal (plist-get payload :text) "hi"))
-          (should (equal ws "/w")))))))
-
-(ert-deftest agent-repl-test-frontend-send-user-message-syncs-webview ()
-  "The send path remounts the webview onto the ensured (possibly healed) session."
-  ;; Arrange
-  (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
-    (let ((synced nil))
-      (cl-letf (((symbol-function 'agent-repl--frontend-ensure-session)
-                 (lambda (_ws &optional _purpose) "s_healed"))
-                ((symbol-function 'agent-repl--frontend-sync-webview)
-                 (lambda (ws id) (setq synced (list ws id)))))
-        (agent-repl-test--with-uds
-          ;; Act
-          (agent-repl--frontend-send-user-message "ws1" "hi")
-          ;; Assert
-          (should (equal synced '("ws1" "s_healed"))))))))
-
-;;;; ---- turn-active probe ------------------------------------------------------
 
 (ert-deftest agent-repl-test-frontend-turn-active-sessions-extracts-busy-ids ()
   "An active workspace resolves its live agent session by workspace path."
@@ -1517,25 +607,6 @@ keyed by the workspace CWD (no session id on the wire)."
       (should (equal (agent-repl--ws-get "ws1" :frontend-session-id) "s_gone"))
       (should (= (agent-repl--ws-get "ws1" :reattach-failures) 1))
       (should-not (agent-repl--ws-get "ws1" :reattach-failed)))))
-
-(ert-deftest agent-repl-test-frontend-reattach-ws-gives-up-at-cap ()
-  "Reaching the failure cap sets :reattach-failed and warns."
-  ;; Arrange
-  (agent-repl-test--with-ws "ws1" (list :frontend-session-id "s_gone"
-                                        :reattach-failures
-                                        (1- agent-repl-frontend-reattach-max-failures)
-                                        :project-dir "/w")
-    (let ((warned nil))
-      (cl-letf (((symbol-function 'agent-repl--frontend-ensure-session)
-                 (lambda (_ws &optional _purpose) (error "boom")))
-                ((symbol-function 'display-warning)
-                 (lambda (type msg &rest _) (setq warned (cons type msg)))))
-        ;; Act
-        (agent-repl--frontend-reattach-ws "ws1" "s_gone")
-        ;; Assert
-        (should (agent-repl--ws-get "ws1" :reattach-failed))
-        (should (eq (car warned) 'agent-repl))
-        (should (string-match-p "ws1" (cdr warned)))))))
 
 (ert-deftest agent-repl-test-frontend-reattach-timer-inhibited-in-batch ()
   "The sweep timer does not start when init is inhibited."
@@ -2006,44 +1077,6 @@ protection."
 
 ;;;; ---- gui-send-turn ------------------------------------------------------------
 
-(ert-deftest agent-repl-test-gui-send-turn-sets-thinking-before-send ()
-  "gui-send-turn sets :thinking optimistically BEFORE the HTTP send.
-The prompt_submit hook remains the authoritative confirmation, but a
-permission request can beat a lagging hook and on-permission-event
-gates on :thinking, so the optimistic write must precede the wire."
-  ;; Arrange
-  (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_1" :project-dir "/w")
-    (let ((state-at-send nil))
-      (cl-letf (((symbol-function 'agent-repl--frontend-send-user-message)
-                 (lambda (ws _input)
-                   (setq state-at-send (agent-repl--ws-get ws :agent-state))))
-                ((symbol-function 'agent-repl--run-send-posthooks) #'ignore)
-                ((symbol-function 'agent-repl--kickoff-prompt-summary) #'ignore))
-        ;; Act
-        (agent-repl--gui-send-turn "ws1" "prepared input" "raw input")
-        ;; Assert
-        (should (eq state-at-send :thinking))))))
-
-(ert-deftest agent-repl-test-gui-send-turn-snaps-webview-to-tail-before-send ()
-  "gui-send-turn snaps the webview to its tail BEFORE the HTTP send.
-A prompt sent from a scrolled-up feed must jump to the bottom the instant
-it leaves, not wait for the daemon to echo the turn back, so the snap
-precedes the wire."
-  ;; Arrange
-  (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_1" :project-dir "/w")
-    (let ((events '()))
-      (cl-letf (((symbol-function 'agent-repl--frontend-snap-webview-to-tail)
-                 (lambda (_ws) (push 'snap events)))
-                ((symbol-function 'agent-repl--frontend-send-user-message)
-                 (lambda (&rest _) (push 'send events) "r_1"))
-                ((symbol-function 'agent-repl--mark-ws-thinking) #'ignore)
-                ((symbol-function 'agent-repl--run-send-posthooks) #'ignore)
-                ((symbol-function 'agent-repl--kickoff-prompt-summary) #'ignore))
-        ;; Act
-        (agent-repl--gui-send-turn "ws1" "prepared input" "raw input")
-        ;; Assert -- snap was recorded, and it landed before the send.
-        (should (equal (reverse events) '(snap send)))))))
-
 (ert-deftest agent-repl-test-gui-send-turn-keeps-meta-markers ()
   "gui-send-turn posts the marked text VERBATIM to the daemon.
 The webapp hides the bracketed spans at render time, so stripping them on
@@ -2053,7 +1086,10 @@ the wire would deprive the agent of the directive it must read."
     (let ((sent nil)
           (input (concat (agent-repl--meta-wrap "READ-DIRECTIVE") "\n\nhello")))
       (cl-letf (((symbol-function 'agent-repl--frontend-send-user-message)
-                 (lambda (_ws text) (setq sent text)))
+                 (lambda (_ws text ok _fail)
+                   (setq sent text)
+                   (funcall ok "r_1")
+                   :pending))
                 ((symbol-function 'agent-repl--run-send-posthooks) #'ignore)
                 ((symbol-function 'agent-repl--kickoff-prompt-summary) #'ignore))
         ;; Act
@@ -2084,44 +1120,6 @@ the wire would deprive the agent of the directive it must read."
 ;; session controller).  Send-user-message still CONSUMES and clears the one-shot
 ;; `:next-send-origin' so it never lingers; it just does not reach the wire.
 
-(ert-deftest agent-repl-test-frontend-send-user-message-clears-next-send-origin ()
-  "Send-user-message consumes and clears the one-shot `:next-send-origin'."
-  ;; Arrange
-  (agent-repl-test--with-ws "ws1" '(:project-dir "/w" :frontend-session-id "s1" :next-send-origin "merge")
-    (cl-letf (((symbol-function 'agent-repl--frontend-ensure-session) (lambda (_ws &optional _purpose) "s1"))
-              ((symbol-function 'agent-repl--frontend-sync-webview) (lambda (&rest _) nil)))
-      (agent-repl-test--with-uds
-        ;; Act
-        (agent-repl--frontend-send-user-message "ws1" "rebase")
-        ;; Assert — the one-shot flag is cleared (not forwarded on the wire).
-        (should (null (agent-repl--ws-get "ws1" :next-send-origin)))))))
-
-(ert-deftest agent-repl-test-frontend-send-user-message-submits-text ()
-  "Send-user-message sends `submitPrompt' with the text, keyed by the workspace CWD."
-  ;; Arrange
-  (agent-repl-test--with-ws "ws1" '(:project-dir "/w" :frontend-session-id "s1")
-    (cl-letf (((symbol-function 'agent-repl--frontend-ensure-session) (lambda (_ws &optional _purpose) "s1"))
-              ((symbol-function 'agent-repl--frontend-sync-webview) (lambda (&rest _) nil)))
-      (agent-repl-test--with-uds
-        ;; Act
-        (agent-repl--frontend-send-user-message "ws1" "a normal prompt")
-        ;; Assert
-        (pcase-let ((`(,field ,payload ,ws) (car uds-commands)))
-          (should (equal field "submitPrompt"))
-          (should (equal (plist-get payload :text) "a normal prompt"))
-          (should (equal ws "/w")))))))
-
-(provide 'test-frontend-client)
-
-;;; test-frontend-client.el ends here
-
-;;;; ---- gui interrupt (UDS `interrupt', keyed by workspace) --------------------
-;;
-;; The retract half of `C-c C-k' is gone: frontend.v1's `InterruptCmd' carries
-;; only `hard' (no retract id), and the daemon's HTTP interrupt already reported
-;; retracted=false post-cutover.  So gui-interrupt now just dispatches an
-;; `interrupt' command keyed by the workspace and always returns t.
-
 (ert-deftest agent-repl-test-gui-interrupt-sends-command-keyed-by-workspace ()
   "Interrupt dispatches the UDS `interrupt' command keyed by the workspace CWD."
   ;; Arrange
@@ -2151,30 +1149,6 @@ the wire would deprive the agent of the directive it must read."
 ;; command was understood and deliberately not performed.  These drive the
 ;; REAL ack handler (only the socket write is shadowed) so the routing from
 ;; ack arm to minibuffer question to resend is covered end to end.
-
-(defmacro agent-repl-test--with-interrupt-acks (answer &rest body)
-  "Run BODY with the interrupt round trip observable and `y-or-n-p' stubbed.
-ANSWER is what the stubbed prompt returns; the questions it was asked
-accumulate in `asked' (newest last) and the sent commands in
-`uds-commands' as (FIELD PAYLOAD WORKSPACE), both anaphoric.  The command
-tracking table is real (and cleared first), so acks route exactly as they
-do live; `message' is silenced but captured in `echoed'."
-  (declare (indent 1))
-  `(let ((uds-commands '()) (uds-counter 0) (asked '()) (echoed nil))
-     (ignore uds-commands asked echoed)
-     (clrhash agent-repl--uds-pending-commands)
-     (cl-letf (((symbol-function 'agent-repl--uds-send-command)
-                (lambda (field payload &optional workspace &rest _)
-                  (setq uds-commands
-                        (append uds-commands (list (list field payload workspace))))
-                  (format "req-%d" (cl-incf uds-counter))))
-               ((symbol-function 'y-or-n-p)
-                (lambda (question)
-                  (setq asked (append asked (list question)))
-                  ,answer))
-               ((symbol-function 'message)
-                (lambda (fmt &rest args) (setq echoed (apply #'format fmt args)))))
-       ,@body)))
 
 (ert-deftest agent-repl-test-gui-interrupt-challenge-yes-resends-confirmed ()
   "A yes to the challenge resends the interrupt carrying `confirmAgents'."
@@ -2265,7 +1239,9 @@ do live; `message' is silenced but captured in `echoed'."
   ;; Arrange
   (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_1")
     (cl-letf (((symbol-function 'agent-repl--frontend-send-user-message)
-               (lambda (&rest _) "r_9"))
+               (lambda (_ws _text ok _fail)
+                 (funcall ok "r_9")
+                 :pending))
               ((symbol-function 'agent-repl--mark-ws-thinking) #'ignore)
               ((symbol-function 'agent-repl--run-send-posthooks) #'ignore)
               ((symbol-function 'agent-repl--kickoff-prompt-summary) #'ignore))

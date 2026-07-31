@@ -8,8 +8,7 @@
 (defvar agent-repl-master-branch-name)
 (declare-function agent-repl--frontend-dispatch-send "frontends")
 (declare-function agent-repl--frontend-boot-session "frontends")
-(declare-function agent-repl--frontend-ensure-session "frontend-client")
-(declare-function agent-repl--runtime-startup-prepare "services" ())
+(declare-function agent-repl--runtime-startup-prepare "services" (on-success on-failure))
 
 ;; Forward declaration: defined in hide-project-dirs.el (loaded after
 ;; commands.el).  The snapshot writer/loader persists and restores this
@@ -132,7 +131,7 @@ Dispatches unconditionally through the frontend registry's `:send-fn'
 \(`agent-repl--gui-send-turn', the gui being the only registered
 frontend) rather than branching on frontend here.  The gui's send path
 ensures the daemon session itself
-\(`agent-repl--frontend-ensure-session', via
+\(`agent-repl--frontend-after-ensure-session', via
 `agent-repl--frontend-send-user-message'), healing a stale binding or
 creating a fresh one on demand, so no separate not-running check or
 manual boot is needed at this call site.  Used by every
@@ -1967,18 +1966,23 @@ lookup, so no workspace state is read or restored before daemon health is
 authoritative.  A failed prerequisite or malformed snapshot aborts loudly;
 there is no post-restore bounce and no degraded restore path."
   (agent-repl--log nil "startup restore: backend preparation begins before snapshot lookup")
-  (agent-repl--runtime-startup-prepare)
-  (let ((file (agent-repl--workspace-snapshot-file-for-read)))
-    (agent-repl--log nil
-                     "startup restore: runtime prepared and daemon ready; snapshot candidate=%s"
-                     file)
-    (if (file-exists-p file)
-        (condition-case err
-            (agent-repl-load-workspace-snapshot file t)
-          (error
-           (agent-repl--error nil "startup restore: snapshot load aborted file=%s err=%S"
-                              file err)))
-      (agent-repl--log nil "startup restore: no snapshot file=%s; no restore requested" file))))
+  (agent-repl--runtime-startup-prepare
+   (lambda ()
+     (let ((file (agent-repl--workspace-snapshot-file-for-read)))
+       (agent-repl--log nil
+                        "startup restore: runtime prepared and daemon ready; snapshot candidate=%s"
+                        file)
+       (if (file-exists-p file)
+           (condition-case err
+               (agent-repl-load-workspace-snapshot file t)
+             (error
+              (agent-repl--error nil "startup restore: snapshot load aborted file=%s err=%S"
+                                 file err)))
+         (agent-repl--log nil
+                          "startup restore: no snapshot file=%s; no restore requested"
+                          file))))
+   (lambda (detail)
+     (agent-repl--log nil "startup restore: backend preparation FAILED detail=%s" detail))))
 
 ;;;; Workspace snapshot archive picker
 
