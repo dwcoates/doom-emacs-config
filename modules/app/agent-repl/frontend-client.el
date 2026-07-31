@@ -1225,23 +1225,15 @@ predate boot ids report nil, which never triggers a reset."
 On failure the stale binding is RESTORED so the next sweep retries;
 after `agent-repl-frontend-reattach-max-failures' consecutive failures
 the workspace is marked `:reattach-failed' and a warning surfaces."
-  (condition-case err
-      (progn
-        (agent-repl--log ws "reattach: session %s vanished — re-ensuring ws=%s" stale-id ws)
-        (agent-repl--ws-put ws :frontend-session-id nil)
-        (let ((id (agent-repl--frontend-ensure-session ws)))
-          (agent-repl--frontend-sync-webview ws id)
-          (agent-repl--ws-put ws :reattach-failures nil)
-          (agent-repl--log ws "reattach: ws=%s recovered as %s" ws id)))
-    (error
-     (let ((n (1+ (or (agent-repl--ws-get ws :reattach-failures) 0))))
+  (cl-labels ((failed (detail)
+                (let ((n (1+ (or (agent-repl--ws-get ws :reattach-failures) 0))))
        ;; Restore the vanished binding: it is the marker the next sweep
        ;; keys the retry on.
        (agent-repl--ws-put ws :frontend-session-id stale-id)
        (agent-repl--ws-put ws :reattach-failures n)
        (agent-repl--log ws "reattach: ws=%s attempt %d/%d failed: %s"
                          ws n agent-repl-frontend-reattach-max-failures
-                         (error-message-string err))
+                         detail)
        (when (>= n agent-repl-frontend-reattach-max-failures)
          (agent-repl--ws-put ws :reattach-failed t)
          (agent-repl--log ws "reattach: giving up ws=%s stale-session=%s failures=%d"
@@ -1251,8 +1243,18 @@ the workspace is marked `:reattach-failed' and a warning surfaces."
           (format (concat "workspace %s failed to reattach to the new daemon instance "
                           "after %d attempts (%s) — likely a client/daemon version "
                           "mismatch; rebuild/reload, then reopen the panel")
-                  ws n (error-message-string err))
-          :error))))))
+                  ws n detail)
+          :error)))))
+    (agent-repl--log ws "reattach: session %s vanished — re-ensuring ws=%s" stale-id ws)
+    (agent-repl--ws-put ws :frontend-session-id nil)
+    (agent-repl--frontend-after-ensure-session
+     ws
+     (lambda (id)
+       (agent-repl--frontend-sync-webview ws id)
+       (agent-repl--ws-put ws :reattach-failures nil)
+       (agent-repl--log ws "reattach: ws=%s recovered as %s" ws id))
+     #'failed)
+    :pending))
 
 (defun agent-repl--frontend-rebind-workspaces-after-restart ()
   "Bounce every open gui workspace's shim onto the freshly restarted daemon.
@@ -1269,11 +1271,11 @@ sweep notes the new boot id (resetting the give-ups the previous instance
 left behind), re-ensures each bound workspace's session (a fresh shim that
 resumes the durable conversation), and remounts each live webview.  Returns
 the count of open workspaces that carried a session binding to rebind."
-  (agent-repl--frontend-wait-ready)
   (let ((n (cl-count-if (lambda (ws) (agent-repl--ws-get ws :frontend-session-id))
                         (agent-repl--live-ws-names))))
     (agent-repl--log nil "reattach: explicit rebind begin bound-workspaces=%d" n)
-    (agent-repl--frontend-reattach-check)
+    (agent-repl--frontend-after-ready
+     (lambda () (agent-repl--frontend-reattach-check)
     ;; reattach-check rebinds each workspace's daemon session and, via
     ;; `agent-repl--frontend-sync-webview', remounts only those whose
     ;; session id CHANGED.  A session that rehydrated under its old id is
@@ -1282,9 +1284,10 @@ the count of open workspaces that carried a session binding to rebind."
     ;; reloads the served bundle across the board — a bounce is exactly
     ;; when a fresh build lands, and each remount replays history off the
     ;; live session, so nothing is lost.
-    (agent-repl--frontend-remount-all-webviews)
-    (agent-repl--log nil "reattach: explicit rebind complete remounted-workspaces=%d" n)
-    n))
+      (agent-repl--frontend-remount-all-webviews)
+      (agent-repl--log nil "reattach: explicit rebind complete remounted-workspaces=%d" n))
+     (lambda (detail) (agent-repl--log nil "reattach: explicit rebind FAILED detail=%s" detail)))
+    :pending))
 
 ;; The in-flight message-queue plane (§2.13) is fully retired.  It was dead
 ;; server-side (the post-cutover daemon carries no `queue' array and
