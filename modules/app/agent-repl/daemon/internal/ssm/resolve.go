@@ -96,7 +96,13 @@ const (
 	// Daemon-local ordering edges that make prompt/interrupt UI claims true
 	// before their corresponding durable stream events finish traversing the
 	// store.  See promptstate.go.
-	causePromptAccepted           = "prompt_accepted"
+	causePromptAccepted = "prompt_accepted"
+	// The retraction of causePromptAccepted. The accepted edge is now written
+	// BEFORE the shim's Ack, so a submit the shim refuses (or never receives)
+	// leaves a `thinking` row describing a turn that never began. Nothing else
+	// can close it — no TurnEnded is coming for a prompt no session ever ran —
+	// so the submitter writes the closing row itself. See promptstate.go.
+	causePromptRejected           = "prompt_rejected"
 	causeInterruptAlreadyComplete = "interrupt_already_complete"
 	// The vendor retired one session uuid mid-stream and minted another, so
 	// the turn the old identity was running can never report its own end. The

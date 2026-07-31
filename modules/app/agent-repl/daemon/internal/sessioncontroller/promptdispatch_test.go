@@ -393,6 +393,200 @@ func TestAFoldedDirectiveStillRendersItsPrompt(t *testing.T) {
 	}
 }
 
+// --- the accepted edge, and the price of publishing it early ------------------
+//
+// `thinking` is published on the daemon's OWN decision to submit, ahead of the
+// shim round-trip that used to gate it, so the workspace stops reading green the
+// moment the user presses send. The daemon pays for that claim by withdrawing it
+// itself when the submit then fails.
+
+func TestThinkingIsPublishedBeforeTheShimIsAsked(t *testing.T) {
+	// Arrange — capture the frontend push trace as the shim round-trip BEGINS.
+	// That vantage point is the only one that can tell "published before the
+	// Ack" from "published after it"; asserting afterwards proves neither.
+	h := newQueueHarness(t, nil)
+	h.push.mu.Lock()
+	h.push.trace = nil
+	h.push.mu.Unlock()
+	var atSubmit []string
+	h.client.mu.Lock()
+	h.client.onSubmit = func() {
+		h.push.mu.Lock()
+		atSubmit = append([]string(nil), h.push.trace...)
+		h.push.mu.Unlock()
+	}
+	h.client.mu.Unlock()
+
+	// Act.
+	if err := h.submitAs("r1", "hello there"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+
+	// Assert.
+	want := "workspace:RENDER_STATE_THINKING"
+	if len(atSubmit) != 1 || atSubmit[0] != want {
+		t.Fatalf("frontend push trace as the submit began = %v, want [%s] already published", atSubmit, want)
+	}
+}
+
+func TestTheAcceptedStateEdgeIsAppliedBeforeTheShimIsAsked(t *testing.T) {
+	// Arrange — the same vantage point, watching the SSM rather than the push.
+	h := newQueueHarness(t, nil)
+	var atSubmit int
+	h.client.mu.Lock()
+	h.client.onSubmit = func() {
+		h.applier.reconcMutex.Lock()
+		atSubmit = len(h.applier.promptAccepts)
+		h.applier.reconcMutex.Unlock()
+	}
+	h.client.mu.Unlock()
+
+	// Act.
+	if err := h.submitAs("r1", "hello there"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+
+	// Assert.
+	if atSubmit != 1 {
+		t.Fatalf("prompt-accept edges applied as the submit began = %d, want the edge already taken", atSubmit)
+	}
+}
+
+func TestAFailedSubmitRetractsTheAcceptedPrompt(t *testing.T) {
+	// Arrange — the daemon has published `thinking` for a prompt the shim then
+	// refuses. Nothing else can ever close that row: the lifecycle retires
+	// `thinking` on a TurnEnded, and no turn that never began reports an end.
+	h := newQueueHarness(t, nil)
+	h.applier.promptRejectDid = true
+	h.controller().client = &failingClient{err: errors.New("shim gone")}
+
+	// Act.
+	err := h.submitAs("r1", "hello there")
+
+	// Assert.
+	if err == nil {
+		t.Fatal("submit succeeded, want the injected failure")
+	}
+	rejects := h.applier.promptRejectCalls()
+	if len(rejects) != 1 {
+		t.Fatalf("prompt-reject edges = %d, want the one retraction", len(rejects))
+	}
+	if rejects[0].workspace != "ws" || rejects[0].requestID != "r1" {
+		t.Errorf("retraction = %+v, want the refused submit's own workspace and request id", rejects[0])
+	}
+}
+
+func TestAFailedSubmitRestoresTheTurnLatch(t *testing.T) {
+	// Arrange — a latch left set would queue every later prompt behind a turn
+	// end that can never arrive.
+	h := newQueueHarness(t, nil)
+	h.applier.promptRejectDid = true
+	h.controller().client = &failingClient{err: errors.New("shim gone")}
+
+	// Act.
+	if err := h.submitAs("r1", "hello there"); err == nil {
+		t.Fatal("submit succeeded, want the injected failure")
+	}
+
+	// Assert.
+	active, err := h.m.TurnActive("ws")
+	if err != nil || active {
+		t.Fatalf("TurnActive after a refused submit = (%v, %v), want false/nil", active, err)
+	}
+}
+
+func TestAFailedSubmitPushesNoReceipt(t *testing.T) {
+	// Arrange — the receipt stays BEHIND the submit even though the state edge
+	// moved ahead of it, because a state edge can be retracted and a
+	// conversation item the frontend has already drawn cannot.
+	h := newQueueHarness(t, nil)
+	h.applier.promptRejectDid = true
+	h.controller().client = &failingClient{err: errors.New("shim gone")}
+
+	// Act.
+	if err := h.submitAs("r1", "hello there"); err == nil {
+		t.Fatal("submit succeeded, want the injected failure")
+	}
+
+	// Assert.
+	if turns := h.userTurns(); len(turns) != 0 {
+		t.Fatalf("pushed %d user turn(s) for a prompt no session received, want none", len(turns))
+	}
+}
+
+func TestARetractedPromptClosesTheFooterClock(t *testing.T) {
+	// Arrange — the accept started the footer clock, and a footer counting up
+	// against a turn that never began is a worse report than no footer.
+	h := newQueueHarness(t, nil)
+	h.applier.promptRejectDid = true
+	h.controller().client = &failingClient{err: errors.New("shim gone")}
+
+	// Act.
+	if err := h.submitAs("r1", "hello there"); err == nil {
+		t.Fatal("submit succeeded, want the injected failure")
+	}
+
+	// Assert.
+	notes := h.prog.turnRejectionNotes()
+	if len(notes) != 1 || notes[0].workspace != "ws" {
+		t.Fatalf("progress turn rejections = %+v, want the one closure for ws", notes)
+	}
+}
+
+func TestASupersededStateAxisLeavesTheFooterClockAlone(t *testing.T) {
+	// Arrange — the submit fails, but the SSM reports it retracted NOTHING: a
+	// durable TurnStarted (or a permission, or a cut) took the axis in the
+	// window between the accept and the failure.
+	h := newQueueHarness(t, nil)
+	h.applier.promptRejectDid = false
+	h.controller().client = &failingClient{err: errors.New("shim gone")}
+
+	// Act.
+	if err := h.submitAs("r1", "hello there"); err == nil {
+		t.Fatal("submit succeeded, want the injected failure")
+	}
+
+	// Assert: closing the clock would report an idle footer over whatever now
+	// genuinely owns the turn.
+	if notes := h.prog.turnRejectionNotes(); len(notes) != 0 {
+		t.Fatalf("progress turn rejections = %+v, want none when the state axis was preserved", notes)
+	}
+}
+
+func TestARetractionFailureStillReportsTheSubmitError(t *testing.T) {
+	// Arrange — both the submit and the retraction of its state edge fail.
+	h := newQueueHarness(t, nil)
+	h.applier.promptRejectErr = errors.New("state database unavailable")
+	h.controller().client = &failingClient{err: errors.New("shim gone")}
+
+	// Act.
+	err := h.submitAs("r1", "hello there")
+
+	// Assert: the news is why the prompt did not go, never the bookkeeping that
+	// failed to tidy up after it.
+	if err == nil || err.Error() != "shim gone" {
+		t.Fatalf("submit error = %v, want the shim failure itself", err)
+	}
+}
+
+func TestAFailedClearRetractsNothing(t *testing.T) {
+	// Arrange — `/clear` is a session command, not a turn, so it published no
+	// accepted edge that could need withdrawing.
+	h := newQueueHarness(t, nil)
+	h.applier.promptRejectDid = true
+	h.controller().client = &failingClient{err: errors.New("shim gone")}
+
+	// Act.
+	if err := h.submitAs("r1", "/clear"); err == nil {
+		t.Fatal("submit succeeded, want the injected failure")
+	}
+
+	// Assert: retracting a claim never made would close a turn on no evidence.
+	if rejects := h.applier.promptRejectCalls(); len(rejects) != 0 {
+		t.Fatalf("prompt-reject edges for a failed /clear = %+v, want none", rejects)
+	}
+}
+
 // metapromptCwd is a temp cwd holding a metaprompt file.
 func metapromptCwd(t *testing.T) string {
 	t.Helper()

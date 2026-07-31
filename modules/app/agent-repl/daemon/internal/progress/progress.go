@@ -239,6 +239,39 @@ func (m *Manager) NoteTurnAccepted(workspace, sessionID string) {
 	m.pushLocked(workspace, wp)
 }
 
+// NoteTurnRejected closes the turn clock NoteTurnAccepted opened for a prompt
+// the shim then refused to take.
+//
+// The accept is optimistic by design (see ssm.MarkPromptAccepted): it starts
+// the footer clock the moment the daemon commits to the submit, so the elapsed
+// time the user reads counts from when they pressed send. A failed submit means
+// no turn is running behind that clock, and a footer counting up against
+// nothing is a worse report than no footer at all.
+//
+// Callers must first confirm the state retraction actually happened, so a turn
+// that started for some other reason between the accept and the failure keeps
+// its clock. An already-closed clock is an idempotent no-op.
+func (m *Manager) NoteTurnRejected(workspace, sessionID string) {
+	if workspace == "" {
+		m.logf("progress: NoteTurnRejected with no workspace (session=%s); ignoring", sessionID)
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	wp := m.forLocked(workspace)
+	if !wp.turnOpen {
+		m.logf("progress: turn rejected IDEMPOTENT ws=%s session=%s turn_open=false", workspace, sessionID)
+		return
+	}
+	wp.turnOpen = false
+	wp.view.TurnStartedAtMs = 0
+	wp.view.Retrying = nil
+	wp.retryDetailRich = false
+	m.logf("progress: turn rejected CLOSED ws=%s session=%s — the shim never took the prompt whose accept opened this clock",
+		workspace, sessionID)
+	m.pushLocked(workspace, wp)
+}
+
 // NoteInterrupt opens the INTERRUPT WINDOW on the shim's ack of a
 // USER-COMMANDED stop (I1).
 //

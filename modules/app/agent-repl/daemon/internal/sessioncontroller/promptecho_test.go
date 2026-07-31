@@ -110,9 +110,13 @@ func TestPromptThinkingPublicationPrecedesReceipt(t *testing.T) {
 	}
 }
 
-func TestPromptStatePublicationFailureWithholdsReceipt(t *testing.T) {
-	// Arrange: the shim accepts the prompt, but the SSM cannot establish the
-	// state premise required by a prompt bubble.
+// The state edge now precedes the submit, so its failure is a failure to even
+// START the prompt rather than a failure to describe one already accepted. That
+// inversion is the point of the reordering: the daemon can fail here having
+// changed nothing outside itself, which the post-Ack ordering could never do.
+func TestPromptStatePublicationFailureWithholdsTheSubmitAndTheReceipt(t *testing.T) {
+	// Arrange: the SSM cannot establish the state premise the prompt is about
+	// to be published under.
 	h := newQueueHarness(t, nil)
 	h.applier.promptAcceptErr = errors.New("state database unavailable")
 	h.push.mu.Lock()
@@ -122,10 +126,10 @@ func TestPromptStatePublicationFailureWithholdsReceipt(t *testing.T) {
 	// Act.
 	err := h.submitAs("r1", "hello there")
 
-	// Assert: fail loudly after the external acceptance and expose no dependent
-	// local frame. The durable stream may still repair/report the prompt.
-	if err == nil || !strings.Contains(err.Error(), "synchronous state publication failed") {
-		t.Fatalf("submit error = %v, want synchronous-publication failure", err)
+	// Assert: fail loudly, having mutated nothing outside the daemon and
+	// exposed no frame whose premise could not be established.
+	if err == nil || !strings.Contains(err.Error(), "synchronous state publication failed before submitting") {
+		t.Fatalf("submit error = %v, want a pre-submit synchronous-publication failure", err)
 	}
 	h.push.mu.Lock()
 	trace := append([]string(nil), h.push.trace...)
@@ -133,11 +137,11 @@ func TestPromptStatePublicationFailureWithholdsReceipt(t *testing.T) {
 	if len(trace) != 0 {
 		t.Fatalf("frontend push trace = %v, want no state-dependent local frames", trace)
 	}
-	if got := h.client.promptTexts(); len(got) != 1 || got[0] != "hello there" {
-		t.Fatalf("shim submissions = %q, want the already-accepted prompt", got)
+	if got := h.client.promptTexts(); len(got) != 0 {
+		t.Fatalf("shim submissions = %q, want none — the state premise failed before the prompt could be sent", got)
 	}
-	if active, activeErr := h.m.TurnActive("ws"); activeErr != nil || !active {
-		t.Fatalf("TurnActive after accepted prompt whose state publication failed = (%v, %v), want true/nil so a later prompt cannot bypass the live turn", active, activeErr)
+	if active, activeErr := h.m.TurnActive("ws"); activeErr != nil || active {
+		t.Fatalf("TurnActive after a prompt that was never submitted = (%v, %v), want false/nil so later prompts are not queued behind a turn that never began", active, activeErr)
 	}
 }
 

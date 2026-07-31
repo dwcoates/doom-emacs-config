@@ -73,6 +73,135 @@ func TestMarkPromptAcceptedRejectsAnotherSessionsTurn(t *testing.T) {
 	}
 }
 
+// The accepted edge is published BEFORE the shim takes the prompt, so these
+// cover the other half of that trade: the retraction that keeps the optimistic
+// claim honest, and the cases where retracting would itself be the lie.
+
+func TestMarkPromptRejectedRetractsItsOwnAcceptedRow(t *testing.T) {
+	m, cl, _ := openTest(t, fakeResolver{"s1": "ws1"})
+	if err := m.Apply(evSessionStarted("s1", 1)); err != nil {
+		t.Fatalf("session started: %v", err)
+	}
+	if err := m.MarkPromptAccepted("ws1", "s1", "req-1", func(*frontendv1.WorkspaceState) {}); err != nil {
+		t.Fatalf("MarkPromptAccepted: %v", err)
+	}
+
+	var published *frontendv1.WorkspaceState
+	retracted, err := m.MarkPromptRejected("ws1", "s1", "req-1", func(state *frontendv1.WorkspaceState) {
+		published = state
+	})
+
+	if err != nil {
+		t.Fatalf("MarkPromptRejected: %v", err)
+	}
+	if !retracted {
+		t.Fatal("retracted = false, want true over this session's own accepted row")
+	}
+	got := mustCurrent(t, m, "ws1")
+	if got.GetState() != frontendv1.RenderState_RENDER_STATE_IDLE || got.GetTurnActive() {
+		t.Fatalf("state = %s turn_active=%v, want IDLE/false", got.GetState(), got.GetTurnActive())
+	}
+	if got.GetCauseKind() != causePromptRejected {
+		t.Fatalf("cause = %q, want %q", got.GetCauseKind(), causePromptRejected)
+	}
+	if published == nil || published.GetTurnActive() {
+		t.Fatalf("published = %+v, want a synchronous state claiming no turn", published)
+	}
+	if !cl.contains(`ssm: prompt rejected ws=ws1 session=s1 request_id="req-1"`) {
+		t.Fatalf("missing retraction log:\n%s", strings.Join(cl.lines, "\n"))
+	}
+}
+
+func TestMarkPromptRejectedPreservesADurableTurnStarted(t *testing.T) {
+	// A real turn began in the window between the accept and the submit
+	// failure. Closing it would report an idle workspace over a working session.
+	m, cl, _ := openTest(t, fakeResolver{"s1": "ws1"})
+	if err := m.MarkPromptAccepted("ws1", "s1", "req-1", func(*frontendv1.WorkspaceState) {}); err != nil {
+		t.Fatalf("MarkPromptAccepted: %v", err)
+	}
+	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+		t.Fatalf("turn started: %v", err)
+	}
+
+	retracted, err := m.MarkPromptRejected("ws1", "s1", "req-1", func(*frontendv1.WorkspaceState) {})
+
+	if err != nil {
+		t.Fatalf("MarkPromptRejected: %v", err)
+	}
+	if retracted {
+		t.Fatal("retracted = true, want false over a durable turn_started row")
+	}
+	got := mustCurrent(t, m, "ws1")
+	if got.GetState() != frontendv1.RenderState_RENDER_STATE_THINKING || !got.GetTurnActive() {
+		t.Fatalf("state = %s turn_active=%v, want the live turn preserved", got.GetState(), got.GetTurnActive())
+	}
+	if !cl.contains("decision=preserve state=thinking cause_kind=turn_started") {
+		t.Fatalf("missing preservation log:\n%s", strings.Join(cl.lines, "\n"))
+	}
+}
+
+func TestMarkPromptRejectedPreservesASettledOutcome(t *testing.T) {
+	// The turn the accept claimed has already ENDED. Its outcome is the more
+	// specific account and a retraction must not overwrite it.
+	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
+	if err := m.Apply(evTurnEnded("s1", 1, false)); err != nil {
+		t.Fatalf("turn ended: %v", err)
+	}
+
+	retracted, err := m.MarkPromptRejected("ws1", "s1", "req-1", func(*frontendv1.WorkspaceState) {})
+
+	if err != nil {
+		t.Fatalf("MarkPromptRejected: %v", err)
+	}
+	if retracted {
+		t.Fatal("retracted = true, want false over a settled outcome")
+	}
+	if got := mustCurrent(t, m, "ws1").GetState(); got != frontendv1.RenderState_RENDER_STATE_DONE {
+		t.Fatalf("state = %s, want DONE preserved", got)
+	}
+}
+
+func TestMarkPromptRejectedRefusesAnotherSessionsClaim(t *testing.T) {
+	// Two submitters disagreeing about who owns the workspace's turn is a fault
+	// to surface, never one to resolve by closing the other session's turn.
+	m, cl, _ := openTest(t, fakeResolver{"s1": "ws1", "s2": "ws1"})
+	if err := m.Apply(evTurnStarted("s2", 1)); err != nil {
+		t.Fatalf("turn started: %v", err)
+	}
+
+	retracted, err := m.MarkPromptRejected("ws1", "s1", "req-1", func(*frontendv1.WorkspaceState) {})
+
+	if err == nil || !strings.Contains(err.Error(), `session "s2"`) {
+		t.Fatalf("err = %v, want foreign-claim refusal", err)
+	}
+	if retracted {
+		t.Fatal("retracted = true, want false on refusal")
+	}
+	if got := mustCurrent(t, m, "ws1").GetState(); got != frontendv1.RenderState_RENDER_STATE_THINKING {
+		t.Fatalf("state = %s, want THINKING untouched", got)
+	}
+	if !cl.contains("prompt rejected REJECTED") {
+		t.Fatalf("missing refusal log:\n%s", strings.Join(cl.lines, "\n"))
+	}
+}
+
+func TestMarkPromptRejectedOnAWorkspaceWithNoAgentAxis(t *testing.T) {
+	// The accept itself never landed a row, so there is nothing to withdraw.
+	m, cl, _ := openTest(t, fakeResolver{"s1": "ws1"})
+
+	retracted, err := m.MarkPromptRejected("ws1", "s1", "req-1", func(*frontendv1.WorkspaceState) {})
+
+	if err != nil {
+		t.Fatalf("MarkPromptRejected: %v", err)
+	}
+	if retracted {
+		t.Fatal("retracted = true, want false with no session-status row at all")
+	}
+	if !cl.contains("decision=no_agent_axis") {
+		t.Fatalf("missing no-axis log:\n%s", strings.Join(cl.lines, "\n"))
+	}
+}
+
 func TestReconcileAlreadyCompleteClosesThinkingBeforeFooterWindow(t *testing.T) {
 	m, cl, _ := openTest(t, fakeResolver{"s1": "ws1"})
 	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
@@ -174,6 +303,18 @@ func TestPromptStateMethodsRejectMissingIdentity(t *testing.T) {
 		{"prompt workspace", func() error { return m.MarkPromptAccepted("", "s1", "r", func(*frontendv1.WorkspaceState) {}) }},
 		{"prompt session", func() error { return m.MarkPromptAccepted("ws1", "", "r", func(*frontendv1.WorkspaceState) {}) }},
 		{"prompt publisher", func() error { return m.MarkPromptAccepted("ws1", "s1", "r", nil) }},
+		{"retraction workspace", func() error {
+			_, err := m.MarkPromptRejected("", "s1", "r", func(*frontendv1.WorkspaceState) {})
+			return err
+		}},
+		{"retraction session", func() error {
+			_, err := m.MarkPromptRejected("ws1", "", "r", func(*frontendv1.WorkspaceState) {})
+			return err
+		}},
+		{"retraction publisher", func() error {
+			_, err := m.MarkPromptRejected("ws1", "s1", "r", nil)
+			return err
+		}},
 		{"interrupt workspace", func() error {
 			_, err := m.ReconcileAlreadyComplete("", "s1")
 			return err

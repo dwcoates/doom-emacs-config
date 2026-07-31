@@ -61,11 +61,17 @@ type StateApplier interface {
 	// ApplyRuntimeFault opens or closes one typed, component-scoped fault
 	// window owned by the named controller generation.
 	ApplyRuntimeFault(workspace, sessionID, generationID, component, faultType string, impact ssm.FaultImpact, open bool, causeKind string) error
-	// MarkPromptAccepted appends the daemon-local `thinking` edge after the
-	// shim accepts an immediately delivered prompt and synchronously publishes
-	// that state through PUBLISH before the frontend prompt bubble can be
-	// exposed. The durable TurnStarted follows over the store stream.
+	// MarkPromptAccepted appends the daemon-local `thinking` edge as the daemon
+	// commits to submitting an immediately delivered prompt — BEFORE the shim
+	// Acks it, so the status does not wait on a shim round-trip — and
+	// synchronously publishes that state through PUBLISH. The durable
+	// TurnStarted follows over the store stream.
 	MarkPromptAccepted(workspace, sessionID, requestID string, publish func(*frontendv1.WorkspaceState)) error
+	// MarkPromptRejected withdraws that edge when the submit it was published
+	// for then FAILS, and synchronously publishes the retraction. It reports
+	// whether it wrote the closing row: false with a nil error means something
+	// more authoritative already owns the axis and nothing was retracted.
+	MarkPromptRejected(workspace, sessionID, requestID string, publish func(*frontendv1.WorkspaceState)) (retracted bool, err error)
 	// ReconcileAlreadyComplete makes an ALREADY_COMPLETE interrupt Ack agree
 	// with the session-status lifecycle before the progress footer may publish
 	// "already finished". It closes a still-standing `thinking`/`permission`
@@ -131,6 +137,11 @@ type ProgressResolver interface {
 	Apply(workspace string, ev *corev1.Event) error
 	SetCounts(workspace string, pendingPermissions, queueDepth int64)
 	NoteTurnAccepted(workspace, sessionID string)
+	// NoteTurnRejected closes the clock NoteTurnAccepted opened when the submit
+	// it was opened for never reached the shim. Fed only after the SSM confirms
+	// it retracted the matching state edge, so a turn that started for another
+	// reason in that window keeps its clock.
+	NoteTurnRejected(workspace, sessionID string)
 	// NoteInterrupt opens the interrupt window on the shim's ack of a
 	// USER-COMMANDED stop (I1), carrying the ack's outcome verbatim. Fed ONLY
 	// from the frontend interrupt command path, for the same reason
@@ -174,6 +185,7 @@ type noopProgress struct{}
 func (noopProgress) Apply(string, *corev1.Event) error                     { return nil }
 func (noopProgress) SetCounts(string, int64, int64)                        {}
 func (noopProgress) NoteTurnAccepted(string, string)                       {}
+func (noopProgress) NoteTurnRejected(string, string)                       {}
 func (noopProgress) NoteInterrupt(string, string, corev1.InterruptOutcome) {}
 
 // ringCap bounds the per-session retained event ring the daemon keeps for the
