@@ -140,6 +140,12 @@ type fakeApplier struct {
 	// bubble-before-thinking race before command completion.
 	promptAccepts   []promptAcceptCall
 	promptAcceptErr error
+	// promptRejects records the retraction of those edges when the submit they
+	// were published for never reached the shim. promptRejectDid is the "a row
+	// was written" answer a caller gates the progress retraction on.
+	promptRejects   []promptAcceptCall
+	promptRejectDid bool
+	promptRejectErr error
 	// alreadyCompletes records the reconciliation that must precede an
 	// ALREADY_COMPLETE footer window.
 	alreadyCompletes   []alreadyCompleteCall
@@ -284,6 +290,38 @@ func (f *fakeApplier) MarkPromptAccepted(
 		})
 	}
 	return err
+}
+
+// MarkPromptRejected records the retractions of an accepted-prompt edge whose
+// submit then failed, and publishes the idle state a real retraction resolves
+// to. promptRejectDid/promptRejectErr drive the two outcomes a caller must
+// distinguish: nothing was retracted, and the retraction itself failed.
+func (f *fakeApplier) MarkPromptRejected(
+	workspace, sessionID, requestID string,
+	publish func(*frontendv1.WorkspaceState),
+) (bool, error) {
+	f.reconcMutex.Lock()
+	f.promptRejects = append(f.promptRejects, promptAcceptCall{
+		workspace: workspace, sessionID: sessionID, requestID: requestID,
+	})
+	did, err := f.promptRejectDid, f.promptRejectErr
+	f.reconcMutex.Unlock()
+	if err == nil && did {
+		publish(&frontendv1.WorkspaceState{
+			Workspace: workspace,
+			SessionId: sessionID,
+			State:     frontendv1.RenderState_RENDER_STATE_IDLE,
+			CauseKind: "prompt_rejected",
+		})
+	}
+	return did, err
+}
+
+// promptRejectCalls returns the recorded retractions, taken under the lock.
+func (f *fakeApplier) promptRejectCalls() []promptAcceptCall {
+	f.reconcMutex.Lock()
+	defer f.reconcMutex.Unlock()
+	return append([]promptAcceptCall(nil), f.promptRejects...)
 }
 
 func (f *fakeApplier) ReconcileAlreadyComplete(workspace, sessionID string) (bool, error) {
@@ -653,6 +691,9 @@ type fakeProgress struct {
 	// interrupts records one entry per NoteInterrupt call — the interrupt
 	// windows a USER-COMMANDED stop opened.
 	interrupts []interruptNote
+	// turnRejections records one entry per NoteTurnRejected call — the turn
+	// clocks closed because the submit that opened them never landed.
+	turnRejections []interruptNote
 }
 
 // interruptNote is one opened interrupt window.
@@ -669,6 +710,21 @@ func (p *fakeProgress) Apply(workspace string, ev *corev1.Event) error {
 }
 func (p *fakeProgress) SetCounts(string, int64, int64)  {}
 func (p *fakeProgress) NoteTurnAccepted(string, string) {}
+
+// NoteTurnRejected records the clock closures a failed submit produced, so a
+// test can prove the footer was not left counting against a turn that never ran.
+func (p *fakeProgress) NoteTurnRejected(workspace, sessionID string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.turnRejections = append(p.turnRejections, interruptNote{workspace: workspace, sessionID: sessionID})
+}
+
+// turnRejectionNotes returns the recorded closures, taken under the lock.
+func (p *fakeProgress) turnRejectionNotes() []interruptNote {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]interruptNote(nil), p.turnRejections...)
+}
 
 func (p *fakeProgress) NoteInterrupt(workspace, sessionID string, outcome corev1.InterruptOutcome) {
 	p.mu.Lock()

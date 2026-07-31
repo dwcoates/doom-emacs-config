@@ -293,6 +293,62 @@ func TestNoteTurnAcceptedIsIdempotentMidTurn(t *testing.T) {
 	}
 }
 
+func TestNoteTurnRejectedStopsTheTurnClock(t *testing.T) {
+	// Arrange — the clock the optimistic accept started, for a prompt the shim
+	// then refused.
+	h := newHarness(t)
+	h.m.NoteTurnAccepted(testWS, testSID)
+	h.drain()
+	// Act
+	h.m.NoteTurnRejected(testWS, testSID)
+	// Assert — a footer counting up against a turn that never began is a worse
+	// report than no footer at all.
+	if got := h.last().GetTurnStartedAtMs(); got != 0 {
+		t.Fatalf("turnStartedAtMs = %d, want the clock stopped", got)
+	}
+}
+
+func TestNoteTurnRejectedIsIdempotentWithNoTurnOpen(t *testing.T) {
+	// Arrange — nothing opened a clock.
+	h := newHarness(t)
+	h.drain()
+	// Act
+	h.m.NoteTurnRejected(testWS, testSID)
+	// Assert
+	if pushes := h.drain(); len(pushes) != 0 {
+		t.Fatalf("wanted no push from a retraction with no clock running, got %d", len(pushes))
+	}
+}
+
+func TestNoteTurnRejectedKeepsTheTurnsTokenFigures(t *testing.T) {
+	// Arrange — a submit can fail on a session that has already banked usage
+	// this turn (a queued prompt's delivery, say).
+	h := newHarness(t)
+	h.openTurn()
+	h.apply(streamEvent(t, assistantWithUsage("m1", &datav1.ApiUsage{InputTokens: 500})))
+	h.drain()
+	// Act
+	h.m.NoteTurnRejected(testWS, testSID)
+	// Assert — the idle footer shows the last turn's summary rather than
+	// blanking, exactly as an ordinary turn end leaves it.
+	cur, _ := h.m.Current(testWS)
+	if got := cur.GetInputTokens(); got != 500 {
+		t.Fatalf("inputTokens = %d, want the accumulated 500 left standing", got)
+	}
+}
+
+func TestNoteTurnRejectedWithNoWorkspaceIsIgnored(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.drain()
+	// Act
+	h.m.NoteTurnRejected("", testSID)
+	// Assert — a workspace-keyed view cannot be resolved from nothing.
+	if pushes := h.drain(); len(pushes) != 0 {
+		t.Fatalf("wanted no push for a workspace-less retraction, got %d", len(pushes))
+	}
+}
+
 func TestTurnStartedEventStartsTheTurnClock(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
