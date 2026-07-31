@@ -897,6 +897,55 @@ anything: with it off the logging ladder never resolves an identity at all."
           (should (equal uds-commands
                          '(("openWorkspace" nil "/w")))))))))
 
+(ert-deftest agent-repl-test-frontend-ensure-session-for-send-skips-the-gate ()
+  "A send-purpose ensure reuses a live session WITHOUT the openWorkspace wait.
+The gate blocks the main thread on a round trip and dispatches the daemon's
+stream while it waits, which cost roughly 2.8s of frozen editor per prompt
+for a ~0.1s answer.  A send shows no new surface, so it pays none of it."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_live" :project-dir "/w")
+    (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&optional _f) t))
+              ((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t)))
+      (agent-repl-test--with-uds-create '(:id "unused")
+        (agent-repl--frontend-store-session-view '(:sessionId "s_live" :workspace "/w"))
+        ;; Act
+        (let ((id (agent-repl--frontend-ensure-session "ws1" 'send)))
+          ;; Assert — the same session comes back, and nothing went on the wire.
+          (should (equal id "s_live"))
+          (should-not uds-commands))))))
+
+(ert-deftest agent-repl-test-frontend-send-user-message-does-not-gate ()
+  "The prompt send never awaits openWorkspace before reaching the wire."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_live" :project-dir "/w")
+    (let (gated)
+      (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&optional _f) t))
+                ((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t))
+                ((symbol-function 'agent-repl--frontend-sync-webview) (lambda (&rest _) nil))
+                ((symbol-function 'agent-repl--uds-track-command) (lambda (&rest _) nil))
+                ((symbol-function 'agent-repl--frontend-await-open-workspace)
+                 (lambda (&rest _) (setq gated t))))
+        (agent-repl-test--with-uds-create '(:id "unused")
+          (agent-repl--frontend-store-session-view '(:sessionId "s_live" :workspace "/w"))
+          ;; Act
+          (agent-repl--frontend-send-user-message "ws1" "hello there")
+          ;; Assert — submitPrompt is the ONLY command the send emits.
+          (should-not gated)
+          (should (equal (mapcar #'car uds-commands) '("submitPrompt"))))))))
+
+(ert-deftest agent-repl-test-frontend-ensure-session-defaults-to-the-gate ()
+  "An ensure with no purpose still gates, so presentation is unaffected."
+  ;; Arrange
+  (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_live" :project-dir "/w")
+    (cl-letf (((symbol-function 'agent-repl--ensure-frontend-daemon) (lambda (&optional _f) t))
+              ((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t)))
+      (agent-repl-test--with-uds-create '(:id "unused")
+        (agent-repl--frontend-store-session-view '(:sessionId "s_live" :workspace "/w"))
+        ;; Act
+        (agent-repl--frontend-ensure-session "ws1" 'presentation)
+        ;; Assert
+        (should (equal uds-commands '(("openWorkspace" nil "/w"))))))))
+
 (ert-deftest agent-repl-test-frontend-await-open-workspace-rejection-is-loud ()
   "A rejected wake aborts instead of letting presentation continue."
   (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
@@ -1142,7 +1191,7 @@ keyed by the workspace CWD (no session id on the wire)."
   ;; Arrange
   (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
     (cl-letf (((symbol-function 'agent-repl--frontend-ensure-session)
-               (lambda (_ws) "s_fresh"))
+               (lambda (_ws &optional _purpose) "s_fresh"))
               ((symbol-function 'agent-repl--frontend-sync-webview) (lambda (&rest _) nil)))
       (agent-repl-test--with-uds
         ;; Act
@@ -1159,7 +1208,7 @@ keyed by the workspace CWD (no session id on the wire)."
   (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
     (let ((synced nil))
       (cl-letf (((symbol-function 'agent-repl--frontend-ensure-session)
-                 (lambda (_ws) "s_healed"))
+                 (lambda (_ws &optional _purpose) "s_healed"))
                 ((symbol-function 'agent-repl--frontend-sync-webview)
                  (lambda (ws id) (setq synced (list ws id)))))
         (agent-repl-test--with-uds
@@ -1345,7 +1394,7 @@ keyed by the workspace CWD (no session id on the wire)."
                                     :reattach-failures 2 :project-dir "/w")
     (let ((synced nil))
       (cl-letf (((symbol-function 'agent-repl--frontend-ensure-session)
-                 (lambda (_ws) "s_new"))
+                 (lambda (_ws &optional _purpose) "s_new"))
                 ((symbol-function 'agent-repl--frontend-sync-webview)
                  (lambda (ws id) (setq synced (list ws id)))))
         ;; Act
@@ -1359,7 +1408,7 @@ keyed by the workspace CWD (no session id on the wire)."
   ;; Arrange
   (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_gone" :project-dir "/w")
     (cl-letf (((symbol-function 'agent-repl--frontend-ensure-session)
-               (lambda (_ws) (error "boom"))))
+               (lambda (_ws &optional _purpose) (error "boom"))))
       ;; Act
       (agent-repl--frontend-reattach-ws "ws1" "s_gone")
       ;; Assert — binding restored so the next sweep retries.
@@ -1376,7 +1425,7 @@ keyed by the workspace CWD (no session id on the wire)."
                                         :project-dir "/w")
     (let ((warned nil))
       (cl-letf (((symbol-function 'agent-repl--frontend-ensure-session)
-                 (lambda (_ws) (error "boom")))
+                 (lambda (_ws &optional _purpose) (error "boom")))
                 ((symbol-function 'display-warning)
                  (lambda (type msg &rest _) (setq warned (cons type msg)))))
         ;; Act
@@ -1940,7 +1989,7 @@ the wire would deprive the agent of the directive it must read."
   "Send-user-message consumes and clears the one-shot `:next-send-origin'."
   ;; Arrange
   (agent-repl-test--with-ws "ws1" '(:project-dir "/w" :frontend-session-id "s1" :next-send-origin "merge")
-    (cl-letf (((symbol-function 'agent-repl--frontend-ensure-session) (lambda (_ws) "s1"))
+    (cl-letf (((symbol-function 'agent-repl--frontend-ensure-session) (lambda (_ws &optional _purpose) "s1"))
               ((symbol-function 'agent-repl--frontend-sync-webview) (lambda (&rest _) nil)))
       (agent-repl-test--with-uds
         ;; Act
@@ -1952,7 +2001,7 @@ the wire would deprive the agent of the directive it must read."
   "Send-user-message sends `submitPrompt' with the text, keyed by the workspace CWD."
   ;; Arrange
   (agent-repl-test--with-ws "ws1" '(:project-dir "/w" :frontend-session-id "s1")
-    (cl-letf (((symbol-function 'agent-repl--frontend-ensure-session) (lambda (_ws) "s1"))
+    (cl-letf (((symbol-function 'agent-repl--frontend-ensure-session) (lambda (_ws &optional _purpose) "s1"))
               ((symbol-function 'agent-repl--frontend-sync-webview) (lambda (&rest _) nil)))
       (agent-repl-test--with-uds
         ;; Act

@@ -853,12 +853,31 @@ an obsolete binding block forever."
   "Return the webapp URL that attaches to SESSION-ID."
   (format "%s/?session=%s" (agent-repl--frontend-base-url) session-id))
 
-(defun agent-repl--frontend-ensure-session (ws)
+(defun agent-repl--frontend-ensure-session (ws &optional purpose)
   "Return WS's live daemon session id, creating the session if needed.
 Lazily ensures the daemon itself (build-if-stale + launch via
 daemon.el), waits for readiness, then reuses WS's recorded
 `:frontend-session-id' when the daemon still lists it as live —
 otherwise POSTs a new session rooted at WS's `:project-dir'.
+
+PURPOSE says what the caller is about to do with the session, and decides
+whether the reuse path pays the `openWorkspace' PRESENTATION GATE:
+
+  - `presentation' (the default) mounts or redisplays a webview, so it
+    waits for the daemon to confirm the workspace is operational.  Showing
+    a hibernated session's stale webview is exactly what the gate exists
+    to prevent.
+  - `send' hands the user's prompt over and shows no new surface, so it
+    does NOT wait.
+
+WHY `send' MUST NOT WAIT.  The gate blocks the Emacs main thread on a
+round trip, and while it waits it also dispatches whatever the daemon is
+streaming, so a busy workspace paid ~2.8s of frozen editor per prompt with
+only ~0.1s of that being the daemon's answer.  Nothing was gained for it:
+`SubmitPrompt' re-establishes the session daemon-side on arrival, and the
+`thinking' state is published before the shim round trip, so the send path
+neither needs the workspace pre-opened nor needs the gate to look
+responsive.
 
 A workspace WITHOUT a recorded `:project-dir' is not an error: plain
 project perspectives (opened via projectile, never through agent-repl
@@ -877,18 +896,20 @@ contract)."
     (agent-repl--log ws "ensure-session: daemon unavailable auto-start-or-init-inhibited")
     (error "agent-repl: frontend daemon not started (auto-start disabled or init inhibited)"))
   (agent-repl--frontend-wait-ready)
-  (let ((existing (agent-repl--ws-get ws :frontend-session-id)))
+  (let ((existing (agent-repl--ws-get ws :frontend-session-id))
+        (gated (not (eq purpose 'send))))
     (if (and existing (agent-repl--frontend-session-live-p existing))
         (progn
           (agent-repl--log
            ws
-           "ensure-session: existing record is live session=%s; requiring operational controller before reuse"
-           existing)
-          (agent-repl--frontend-await-open-workspace ws)
+           "ensure-session: existing record is live session=%s purpose=%s presentation-gate=%s"
+           existing (or purpose 'presentation) (if gated "awaited" "skipped"))
+          (when gated
+            (agent-repl--frontend-await-open-workspace ws))
           (agent-repl--log
            ws
-           "ensure-session: reusing operational session=%s"
-           existing)
+           "ensure-session: reusing session=%s purpose=%s"
+           existing (or purpose 'presentation))
           existing)
       (let ((dir (or (agent-repl--ws-get ws :project-dir)
                      (let ((root (agent-repl--resolve-current-git-root)))
@@ -1317,12 +1338,18 @@ WS's cwd (`agent-repl--frontend-ws-command-key') — the daemon resolves that
 cwd -> session, so no session id is on the wire.  Returns the command
 request-id (retained by the caller as the sent-turn handle).
 
+FIRE AND FORGET, end to end.  The ensure runs with purpose `send' so it
+skips the `openWorkspace' presentation gate, and the command itself is
+written and tracked without awaiting its ack, so no step between the
+user's key and the wire blocks the Emacs main thread.  The ack still
+arrives asynchronously and still surfaces loudly on rejection.
+
 The one-shot `:next-send-origin' tag (set by the merge remediation) is
 consumed and cleared here but is NOT forwarded: frontend.v1's
 `SubmitPromptCmd' has no `origin' field, so the merge status-card stamping
 is gone — matching the already-dead server behavior (the retired HTTP
 /message route never read `origin' into the session controller either)."
-  (let ((id (agent-repl--frontend-ensure-session ws))
+  (let ((id (agent-repl--frontend-ensure-session ws 'send))
         (origin (agent-repl--ws-get ws :next-send-origin)))
     ;; The ensure may have HEALED a dead binding into a fresh session —
     ;; the displayed webview must follow, or the user watches the dead
