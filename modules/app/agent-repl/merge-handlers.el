@@ -48,6 +48,7 @@
 (declare-function agent-repl--cherry-pick-base "worktree" (root target-branch))
 (declare-function agent-repl--uds-send-command "frontend-uds"
                   (field payload &optional workspace process))
+(declare-function agent-repl--frontend-ws-command-key "frontend-client" (ws))
 (declare-function agent-repl--uds-track-command "frontend-uds"
                   (request-id field workspace
                               &optional on-failure on-success on-challenge))
@@ -361,13 +362,19 @@ callback clears the dispatch marker.  Returns the request-id."
     (agent-repl--log ws
                       "merge-dispatch-cherry-pick-over-uds: ws=%s source-branch=%s source-dir=%s target-dir=%s base=%s"
                       ws source-branch source-dir target-dir (or base "nil"))
+    ;; ROUTED BY THE WORKSPACE COMMAND KEY, like every other command. Sending
+    ;; the bare name here filed the daemon's merge state rows under a workspace
+    ;; key nothing else used, so their WorkspaceState carried no connectivity
+    ;; verdict and Emacs refused the frame — the merge landed and its workspace
+    ;; was never torn down. The name now rides `:workspaceName' for the tag.
     (let ((req (agent-repl--uds-send-command
                 "mergeWorkspace"
                 (list :handler "cherry-pick"
+                      :workspaceName ws
                       :sourceBranch source-branch
                       :sourceDir source-dir
                       :targetDir target-dir)
-                ws)))
+                (agent-repl--frontend-ws-command-key ws))))
       (agent-repl--log ws
                         "merge-dispatch-cherry-pick-over-uds: ws=%s command-issued request-id=%s dispatch-marker=t"
                         ws req)
@@ -413,10 +420,11 @@ Returns the request-id."
                 "mergeWorkspace"
                 (list :handler "cherry-pick"
                       :conflictResolvedContinue t
+                      :workspaceName ws
                       :sourceBranch source-branch
                       :sourceDir source-dir
                       :targetDir target-dir)
-                ws)))
+                (agent-repl--frontend-ws-command-key ws))))
       (agent-repl--uds-track-command req "mergeWorkspace" ws)
       (agent-repl--log ws
                         "merge-resume-over-uds: ws=%s command-issued request-id=%s tracking-registered"

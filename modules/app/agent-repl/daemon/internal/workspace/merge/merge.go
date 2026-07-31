@@ -52,9 +52,21 @@ func NewEngine(cfg Config) (*Engine, error) {
 // worktrees of the same repo (shared object store and refs), which is why
 // TargetDir can resolve SourceBranch by name.
 type Request struct {
-	// Workspace is the bare workspace name — used for the merge/<ws> tag, the
-	// state transitions, and logging.
+	// Workspace is the daemon's WORKSPACE KEY — the session cwd, the same
+	// string every other axis of the SSM files its rows under. The merge state
+	// transitions are emitted on it, so a merge's rows join the composite the
+	// session already populates.
+	//
+	// It used to be the bare Emacs workspace name, which filed merge rows under
+	// a key nothing else used. Such a key has no session_connectivity history,
+	// so its WorkspaceState composited to an ABSENT connectivity verdict, and
+	// Emacs's (correctly strict) resolver refused the frame — the merge landed
+	// on disk and its workspace was never torn down.
 	Workspace string
+	// Name is the workspace's DISPLAY name, used for the merge/<name>
+	// completion tag and for logs. Never a state key: a path makes a wretched
+	// git tag, which is why the two identities are separate fields.
+	Name string
 	// SourceBranch is the branch whose commits are cherry-picked (the right
 	// side of the HEAD...branch range computed in TargetDir).
 	SourceBranch string
@@ -70,6 +82,8 @@ func (r Request) validate() error {
 	switch {
 	case r.Workspace == "":
 		return fmt.Errorf("merge: request Workspace is required")
+	case r.Name == "":
+		return fmt.Errorf("merge: request Name is required")
 	case r.SourceBranch == "":
 		return fmt.Errorf("merge: request SourceBranch is required")
 	case r.SourceDir == "":
@@ -128,14 +142,14 @@ func (e *Engine) Merge(ctx context.Context, req Request) (Result, error) {
 	if err := req.validate(); err != nil {
 		return Result{}, err
 	}
-	e.logf("merge: Merge start {ws=%s branch=%s source=%s target=%s}",
-		req.Workspace, req.SourceBranch, req.SourceDir, req.TargetDir)
+	e.logf("merge: Merge start {ws=%s key=%s branch=%s source=%s target=%s}",
+		req.Name, req.Workspace, req.SourceBranch, req.SourceDir, req.TargetDir)
 
 	// Preconditions run before the first transition so a rejection leaves
 	// state intact. Uncommitted changes in the source worktree would be
 	// silently lost by the merge (they belong to no commit), so they abort it.
 	if err := e.assertCleanWorktree(ctx, req.SourceDir); err != nil {
-		return Result{}, fmt.Errorf("merge: precondition for %q: %w", req.Workspace, err)
+		return Result{}, fmt.Errorf("merge: precondition for %q: %w", req.Name, err)
 	}
 	exists, err := e.branchExists(ctx, req.TargetDir, req.SourceBranch)
 	if err != nil {
@@ -162,7 +176,7 @@ func (e *Engine) Merge(ctx context.Context, req Request) (Result, error) {
 		return Result{}, err
 	}
 	if count == "0" {
-		e.logf("merge: range %s empty — already incorporated {ws=%s}", rng, req.Workspace)
+		e.logf("merge: range %s empty — already incorporated {ws=%s}", rng, req.Name)
 		return e.finalizeMerged(ctx, req, true)
 	}
 
@@ -172,7 +186,7 @@ func (e *Engine) Merge(ctx context.Context, req Request) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	e.logf("merge: cherry-pick -x %s exit=%d {ws=%s} %s", rng, exit, req.Workspace, dlog.Clamp(out, 400))
+	e.logf("merge: cherry-pick -x %s exit=%d {ws=%s} %s", rng, exit, req.Name, dlog.Clamp(out, 400))
 
 	inProgress, err := e.cherryPickInProgress(ctx, req.TargetDir)
 	if err != nil {
@@ -194,7 +208,7 @@ func (e *Engine) Merge(ctx context.Context, req Request) (Result, error) {
 		return Result{}, err
 	}
 	if incorporated {
-		e.logf("merge: range %s already incorporated by patch-id {ws=%s}", rng, req.Workspace)
+		e.logf("merge: range %s already incorporated by patch-id {ws=%s}", rng, req.Name)
 		return e.finalizeMerged(ctx, req, true)
 	}
 	return e.markFailed(ctx, req, fmt.Sprintf("cherry-pick exited %d with no conflict to resolve", exit))
@@ -212,7 +226,7 @@ func (e *Engine) Resume(ctx context.Context, req Request) (Result, error) {
 	if err := req.validate(); err != nil {
 		return Result{}, err
 	}
-	e.logf("merge: Resume start {ws=%s target=%s}", req.Workspace, req.TargetDir)
+	e.logf("merge: Resume start {ws=%s key=%s target=%s}", req.Name, req.Workspace, req.TargetDir)
 
 	inProgress, err := e.cherryPickInProgress(ctx, req.TargetDir)
 	if err != nil {
@@ -223,7 +237,7 @@ func (e *Engine) Resume(ctx context.Context, req Request) (Result, error) {
 		// conflict awaiting continue) is false. Fail loudly rather than
 		// silently report success.
 		return Result{}, fmt.Errorf("merge: no cherry-pick in progress in %s — nothing to resume for %q",
-			req.TargetDir, req.Workspace)
+			req.TargetDir, req.Name)
 	}
 
 	if err := e.emit.emit(req.Workspace, PhaseMerging, "resuming cherry-pick after resolve"); err != nil {
@@ -243,7 +257,7 @@ func (e *Engine) Resume(ctx context.Context, req Request) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	e.logf("merge: cherry-pick --continue exit=%d {ws=%s} %s", exit, req.Workspace, dlog.Clamp(out, 400))
+	e.logf("merge: cherry-pick --continue exit=%d {ws=%s} %s", exit, req.Name, dlog.Clamp(out, 400))
 
 	stillInProgress, err := e.cherryPickInProgress(ctx, req.TargetDir)
 	if err != nil {
@@ -265,16 +279,16 @@ func (e *Engine) Resume(ctx context.Context, req Request) (Result, error) {
 // not signaled) exactly as in the elisp: the cherry-pick already landed, so a
 // tag failure must not undo it.
 func (e *Engine) finalizeMerged(ctx context.Context, req Request, alreadyIncorporated bool) (Result, error) {
-	tag := "merge/" + req.Workspace
+	tag := "merge/" + req.Name
 	exit, out, err := e.gitExit(ctx, req.TargetDir, "tag", "-f", tag, "HEAD")
 	if err != nil {
 		return Result{}, err
 	}
 	if exit != 0 {
 		e.logf("merge: WARNING tag %s failed (exit=%d) — merge already landed, not reverting {ws=%s} %s",
-			tag, exit, req.Workspace, dlog.Clamp(out, 200))
+			tag, exit, req.Name, dlog.Clamp(out, 200))
 	} else {
-		e.logf("merge: tagged completion %s {ws=%s}", tag, req.Workspace)
+		e.logf("merge: tagged completion %s {ws=%s}", tag, req.Name)
 	}
 	cause := "cherry-pick landed on target"
 	if alreadyIncorporated {
