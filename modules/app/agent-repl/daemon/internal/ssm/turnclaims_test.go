@@ -287,7 +287,7 @@ func TestLegacyHandshakeClaimBindsToFirstOrderedStreamStart(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// ReconcileTurnHandshake and the AGENT AXIS.
+// ReconcileTurnHandshake and the session-status lifecycle.
 //
 // The shim's pre-subscription snapshot is already authoritative for
 // `turn_lifecycle_claim` and for the session controller's process-local latch. These tests
@@ -375,7 +375,7 @@ func TestHandshakeOverASettledAxisAppendsNothing(t *testing.T) {
 	if got := mustCurrent(t, m, "ws1").State; got != frontendv1.RenderState_RENDER_STATE_DONE {
 		t.Fatalf("state = %s, want DONE preserved", renderName(got))
 	}
-	if !cl.contains("reason=\"shim_handshake_no_turns\" sole_session_controller=true — the agent axis holds no `thinking`") {
+	if !cl.contains("reason=\"shim_handshake_no_turns\" sole_session_controller=true — the session-status lifecycle holds no `thinking`") {
 		t.Fatalf("missing the canonical no-op record; log:\n%s", strings.Join(cl.lines, "\n"))
 	}
 }
@@ -384,7 +384,7 @@ func TestHandshakeOverASettledAxisAppendsNothing(t *testing.T) {
 // on this call's error, so refusing a good session over a row it merely could
 // not tidy would trade a stale color for a dead workspace.
 func TestHandshakeCloseFailureIsLoggedWithoutFailingTheHandshake(t *testing.T) {
-	// Arrange — the agent-axis table is gone, so the close cannot read it.
+	// Arrange — the session-status lifecycle table is gone, so the close cannot read it.
 	m, cl, _ := openTest(t, fakeResolver{"s1": "ws1"})
 	if _, err := m.db.Exec(`DROP TABLE workspace_state`); err != nil {
 		t.Fatalf("drop workspace_state: %v", err)

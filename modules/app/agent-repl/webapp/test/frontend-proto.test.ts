@@ -16,7 +16,15 @@ function decode(obj: unknown): ReturnType<typeof decodeFrontendFrame> {
 }
 
 // Minimal-but-valid sample payloads for each frame variant.
-const WS_STATE = { workspace: "ws", sessionId: "s1", state: "RENDER_STATE_IDLE" };
+const WS_STATE = {
+  workspace: "ws",
+  sessionId: "s1",
+  state: "RENDER_STATE_IDLE",
+  connectivity: "SESSION_CONNECTIVITY_OPERATIONAL",
+  status: "SESSION_STATUS_READY",
+  controllerGenerationId: "g1",
+  activeFaults: [],
+};
 const SESSION_VIEW = {
   workspace: "ws",
   sessionId: "s1",
@@ -121,6 +129,53 @@ describe("decodeFrontendFrame — protojson field coercion", () => {
     const frame = decode({ workspaceState: { ...WS_STATE, liveTaskCount: "3" } });
     if (frame.frame.case !== "workspaceState") throw new Error("wrong variant");
     expect(frame.frame.value.liveTaskCount).toBe(3);
+  });
+
+  it("decodes composite connectivity, status, generation, and active faults", () => {
+    const frame = decode({
+      workspaceState: {
+        ...WS_STATE,
+        connectivity: "SESSION_CONNECTIVITY_DEGRADED",
+        status: "SESSION_STATUS_THINKING",
+        activeFaults: [
+          {
+            component: "store-client",
+            faultType: "subscription",
+            impact: "connectivity",
+            causeKind: "store_subscription_lost",
+            openedAtMs: "42",
+          },
+        ],
+      },
+    });
+    if (frame.frame.case !== "workspaceState") throw new Error("wrong variant");
+    expect(frame.frame.value.connectivity).toBe(4);
+    expect(frame.frame.value.status).toBe(2);
+    expect(frame.frame.value.controllerGenerationId).toBe("g1");
+    expect(frame.frame.value.activeFaults[0]).toMatchObject({
+      component: "store-client",
+      faultType: "subscription",
+      impact: "connectivity",
+      openedAtMs: 42,
+    });
+  });
+
+  it("rejects unspecified session connectivity", () => {
+    expect(() =>
+      decode({ workspaceState: { ...WS_STATE, connectivity: "SESSION_CONNECTIVITY_UNSPECIFIED" } }),
+    ).toThrow(/UNSPECIFIED session connectivity/);
+  });
+
+  it("rejects current connectivity without complete controller identity", () => {
+    expect(() =>
+      decode({ workspaceState: { ...WS_STATE, controllerGenerationId: "" } }),
+    ).toThrow(/without complete session-controller identity/);
+  });
+
+  it("rejects an active fault without its scoped identity", () => {
+    expect(() =>
+      decode({ workspaceState: { ...WS_STATE, activeFaults: [{ component: "store-client" }] } }),
+    ).toThrow(/missing component, faultType, or impact/);
   });
 });
 

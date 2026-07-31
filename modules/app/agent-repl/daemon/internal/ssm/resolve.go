@@ -14,9 +14,9 @@ import (
 // signals (merge_none, degraded_clear, task_started, task_ended) that the
 // resolution query interprets but never emits as a resolved state.
 const (
-	// THE WIRED AXIS. sessioncontroller produces it off the bring-up gate's own
+	// THE legacy connectivity projection. sessioncontroller produces it off the bring-up gate's own
 	// verdict, and it is what makes a workspace's color CONNECTION TRUTH:
-	// `wired` clears the axis and lets the agent axis speak, and neither other
+	// `wired` clears the axis and lets the session-status lifecycle speak, and neither other
 	// token does.
 	sigWired    = "wired"    // the bring-up gate CLOSED (ShimReady).
 	sigStarting = "starting" // a bring-up is actively in flight.
@@ -42,18 +42,18 @@ const (
 	sigIdle          = "idle"
 	sigReady         = "ready"
 	sigIdleAsync     = "idle_async" // DERIVED at resolve time; never stored.
-	// An AGENT-axis token: it reports HOW the last turn ended, exactly as
+	// An session-status lifecycle token: it reports HOW the last turn ended, exactly as
 	// `done` reports that it ended cleanly. It is not a latch and has no
-	// clearing token — the next agent-axis row supersedes it.
+	// clearing token — the next session-status lifecycle row supersedes it.
 	sigVendorBlocked = "vendor_blocked"
-	// Another AGENT-axis turn outcome (I1): the last turn ended because a
+	// Another session-status lifecycle turn outcome (I1): the last turn ended because a
 	// user-commanded stop was DELIVERED (the shim's ack said INTERRUPTED).
 	// Modeled exactly as `done` and `vendor_blocked` are — one row naming
 	// how the turn ended, no clearing token, superseded by the next
-	// agent-axis row — so there is nothing to latch and nothing to release.
+	// session-status lifecycle row — so there is nothing to latch and nothing to release.
 	sigInterrupted = "interrupted"
 	// THE TWO CONTEXT CUTS, each its own transient axis. They are not agent
-	// states: the agent axis keeps saying whatever it was saying (usually
+	// states: the session-status lifecycle keeps saying whatever it was saying (usually
 	// `thinking`, since a cut runs inside a turn), and these ride above it to
 	// say what the agent is busy WITH. Each has a clearing token, because
 	// each is a window that opens and must be closed by something.
@@ -73,7 +73,7 @@ const (
 	sigMerged         = "merged"
 	sigMergeNone      = "merge_none" // merge axis cleared (no merge in flight).
 	sigDegraded       = "degraded"
-	sigDegradedClear  = "degraded_clear" // degraded axis cleared (recovered).
+	sigDegradedClear  = "degraded_clear" // legacy impairment projection cleared (recovered).
 	sigTaskStarted    = "task_started"
 	sigTaskEnded      = "task_ended"
 )
@@ -87,7 +87,7 @@ const (
 	causeTaskStarted     = "task_started"
 	causeTaskEnded       = "task_ended"
 	causeMergeTransition = "merge_transition"
-	// The wired axis's edges. The detail after the colon names which one moved
+	// The legacy connectivity projection's edges. The detail after the colon names which one moved
 	// it — the bring-up that started, the ShimReady that closed the gate, or the
 	// exit/hibernation/rotation that took the wiring away.
 	causeWired         = "wired"
@@ -123,7 +123,7 @@ const (
 
 // causeShimHandshake is the reason detail carried by the closing row
 // ReconcileTurnHandshake writes: a shim came back reporting no turns at all
-// over a workspace whose agent axis still claimed one.
+// over a workspace whose session-status lifecycle still claimed one.
 const causeShimHandshake = "shim_handshake_no_turns"
 
 // vendorBlockingStopReasons are the TurnEnded stop reasons that conclude a
@@ -185,7 +185,7 @@ func VendorBlockingRateLimit(status string) bool {
 	return !allowedRateLimitStatuses[status]
 }
 
-// greenTokens are the agent-axis tokens that resolve GREEN: the route is
+// greenTokens are the session-status lifecycle tokens that resolve GREEN: the route is
 // proven usable and there is no foreground turn. `permission` is green
 // because a pending permission means the agent is READY for the user to
 // view the response and answer it, not that anything is wrong.
@@ -271,10 +271,10 @@ func renderStateOf(token string) frontendv1.RenderState {
 // stronger claim about what the user CANNOT do than the one beneath it, so
 // the strongest true claim wins:
 //
-//   - THE WIRED AXIS IS WHY BLUE OUTRANKS EVERYTHING. A workspace's color is
+//   - THE legacy connectivity projection IS WHY BLUE OUTRANKS EVERYTHING. A workspace's color is
 //     CONNECTION TRUTH: blue means there is no live backend session for it,
 //     and every non-blue color is a guarantee that the substrate is wired.
-//     `severed` (12) and `starting` (14) therefore sit above every agent-axis
+//     `severed` (12) and `starting` (14) therefore sit above every session-status lifecycle
 //     row and above `vendor_blocked`, so the agent's last word is visible only
 //     while the axis reads `wired`. Nothing in Go decides this; the ranks do.
 //
@@ -298,7 +298,7 @@ func renderStateOf(token string) frontendv1.RenderState {
 //     INVARIANT VIOLATION, never as expected.
 //
 //   - PURPLE outranks red for the mirror of that reason, but only ever
-//     among rows of the SAME vintage: `vendor_blocked` is an AGENT-axis
+//     among rows of the SAME vintage: `vendor_blocked` is an session-status lifecycle
 //     turn OUTCOME, so it competes with the non-agent axes at rank 20 and
 //     is superseded outright by whatever the agent does next. A `thinking`
 //     row appended after it means a new turn is genuinely running, and red
@@ -327,7 +327,7 @@ func renderStateOf(token string) frontendv1.RenderState {
 //	--- teal ---------------------------------------------------------------
 //	15 hibernated       nothing is wired, and NOTHING IS WRONG
 //	--- purple -------------------------------------------------------------
-//	20 vendor_blocked   agent axis: the last turn ended AT THE VENDOR
+//	20 vendor_blocked   session-status lifecycle: the last turn ended AT THE VENDOR
 //	--- red ----------------------------------------------------------------
 //	28 clearing         the agent is discarding the context
 //	29 compacting       the agent is summarizing the context
@@ -348,11 +348,11 @@ func renderStateOf(token string) frontendv1.RenderState {
 //	--- green --------------------------------------------------------------
 //	40 permission       green: the agent is ready for you to view the answer
 //	41 done
-//	42 interrupted      agent axis: the last turn ended BECAUSE YOU STOPPED IT
+//	42 interrupted      session-status lifecycle: the last turn ended BECAUSE YOU STOPPED IT
 //	43 ready
 //	44 idle
 //
-// `merged` is no longer guarded on the agent axis. A merged workspace leaves
+// `merged` is no longer guarded on the session-status lifecycle. A merged workspace leaves
 // the tab-bar entirely the moment the merge lands, so there is no tab for a
 // live agent state to compete for, and the guard existed only to keep that
 // tab from flashing during the async teardown.
@@ -361,7 +361,7 @@ func renderStateOf(token string) frontendv1.RenderState {
 // is the min-rank candidate.
 const resolveQuery = `
 WITH
-  ws(w) AS (SELECT ?),
+  ws(w, composite_active) AS (SELECT ?, ?),
   prec(state, axis, rank) AS (VALUES
     ('merge_conflict','merge',1),
     ('merge_failed','merge',2),
@@ -374,7 +374,7 @@ WITH
     -- THE LEGACY ALIAS, ranked identically to severed because that is what it
     -- resolves to. workspace_state is append-only and pre-split rows carry the
     -- literal text 'dormant'; dropping this row would silently stop ranking them
-    -- and every such workspace would resolve off its stale agent axis instead.
+    -- and every such workspace would resolve off its stale session-status lifecycle instead.
     ('dormant','wired',12),
     ('backfill_failed','backfill',13),
     ('starting','wired',14),
@@ -411,6 +411,7 @@ WITH
   latest_degraded AS (
     SELECT r.* FROM rows r
     WHERE r.state IN ('degraded','degraded_clear')
+      AND (SELECT composite_active FROM ws) = 0
     ORDER BY r.at DESC LIMIT 1
   ),
   latest_wired AS (
@@ -421,6 +422,7 @@ WITH
     -- which the synthesized branch below then answers 'hibernated' for, quietly
     -- repainting an old failure benign.
     WHERE r.state IN ('wired','starting','severed','hibernated','dormant')
+      AND (SELECT composite_active FROM ws) = 0
     ORDER BY r.at DESC LIMIT 1
   ),
   latest_backfill AS (
@@ -449,9 +451,9 @@ WITH
     UNION ALL
     -- ABSENCE OF A WIRED ROW IS HIBERNATED, not "unknown" and not "severed". A
     -- workspace with agent history and no wired row has no evidence of a live
-    -- session behind it, and letting the agent axis answer unopposed would
+    -- session behind it, and letting the session-status lifecycle answer unopposed would
     -- advertise an agent nobody is connected to. The synthesized row borrows the
-    -- agent axis's timestamp and session id so the emitted state still names the
+    -- session-status lifecycle's timestamp and session id so the emitted state still names the
     -- conversation it is about.
     --
     -- TEAL, because the absence of a wired row is the absence of EVIDENCE OF
@@ -460,7 +462,8 @@ WITH
     -- meant a workspace whose only sin was never having been opened stood there
     -- accusing the local substrate of being broken.
     SELECT 'hibernated', 'wired:absent', cause_seq, at, session_id FROM latest_agent
-      WHERE NOT EXISTS (SELECT 1 FROM latest_wired)
+      WHERE (SELECT composite_active FROM ws) = 0
+        AND NOT EXISTS (SELECT 1 FROM latest_wired)
     UNION ALL
     SELECT state, cause_kind, cause_seq, at, session_id FROM latest_backfill WHERE state <> 'backfill_ok'
     UNION ALL
@@ -525,7 +528,18 @@ func resolve(db *sql.DB, workspace string, logf dlog.Logf) (resolved, error) {
 		mergeState sql.NullString
 		sessionID  sql.NullString
 	)
-	err := db.QueryRow(resolveQuery, workspace).Scan(
+	var compositeActive int
+	if err := db.QueryRow(
+		`SELECT EXISTS(
+			SELECT 1 FROM session_connectivity WHERE workspace = ?
+		)`,
+		workspace,
+	).Scan(&compositeActive); err != nil {
+		return resolved{}, fmt.Errorf(
+			"ssm: resolve connectivity authority for workspace %q: %w",
+			workspace, err)
+	}
+	err := db.QueryRow(resolveQuery, workspace, compositeActive).Scan(
 		&token, &causeKind, &causeSeq, &at, &taskCount, &agentCause, &mergeState, &sessionID)
 	if err == sql.ErrNoRows || (err == nil && !token.Valid) {
 		return resolved{found: false, state: frontendv1.RenderState_RENDER_STATE_UNSPECIFIED}, nil
@@ -578,8 +592,8 @@ func resolve(db *sql.DB, workspace string, logf dlog.Logf) (resolved, error) {
 	// precedence, and a Go branch that overrode it here would be a second,
 	// invisible precedence rule. The repair belongs at whichever writer produced
 	// the impossible pair.
-	if winner == sigHibernated && turnActive && logf != nil {
-		logf("ssm: INVARIANT VIOLATION ws=%s resolved hibernated WITH A TURN ACTIVE (cause=%s seq=%d session=%s) — hibernate() refuses an unsettled workspace, so some writer closed the axis behind a live turn; the tab reads asleep while the agent works",
+	if winner == sigHibernated && turnActive && logf != nil && compositeActive == 0 {
+		logf("ssm: INVARIANT VIOLATION ws=%s resolved hibernated WITH A TURN ACTIVE (cause=%s seq=%d session=%s) — legacy hibernation outranks a live turn without a composite connectivity lifecycle",
 			workspace, causeKind.String, causeSeq.Int64, sessionID.String)
 	}
 

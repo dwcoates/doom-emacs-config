@@ -7,7 +7,7 @@ import (
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 )
 
-// MarkPromptAccepted moves the agent axis to `thinking` when the shim accepts
+// MarkPromptAccepted moves the session-status lifecycle to `thinking` when the shim accepts
 // an immediately delivered prompt.
 //
 // This is the daemon's earliest authoritative turn-start observation. The
@@ -53,7 +53,7 @@ func (m *Manager) MarkPromptAccepted(
 				workspace, sessionID, requestID, claimant, err)
 			return err
 		}
-		m.logf("ssm: prompt accepted IDEMPOTENT ws=%s session=%s request_id=%q active_claimant=%q — agent axis already reads `thinking`",
+		m.logf("ssm: prompt accepted IDEMPOTENT ws=%s session=%s request_id=%q active_claimant=%q — session-status lifecycle already reads `thinking`",
 			workspace, sessionID, requestID, claimant)
 		return m.publishPromptAcceptedLocked(workspace, sessionID, requestID, "idempotent", publish)
 	}
@@ -89,7 +89,11 @@ func (m *Manager) publishPromptAcceptedLocked(
 		return fmt.Errorf("ssm: synchronous prompt state missing for workspace %q session %q request %q",
 			workspace, sessionID, requestID)
 	}
-	state := r.toProto(workspace)
+	state, err := m.workspaceMessageLocked(workspace, r)
+	if err != nil {
+		return fmt.Errorf("ssm: resolve synchronous composite prompt state for workspace %q session %q request %q: %w",
+			workspace, sessionID, requestID, err)
+	}
 	if state.GetState() != frontendv1.RenderState_RENDER_STATE_THINKING || !state.GetTurnActive() {
 		return fmt.Errorf("ssm: synchronous prompt state invariant failed for workspace %q session %q request %q: state=%s turn_active=%t",
 			workspace, sessionID, requestID, state.GetState(), state.GetTurnActive())
@@ -102,7 +106,7 @@ func (m *Manager) publishPromptAcceptedLocked(
 }
 
 // ReconcileAlreadyComplete makes the shim's ALREADY_COMPLETE interrupt verdict
-// agree with the agent axis before the progress footer is allowed to display
+// agree with the session-status lifecycle before the progress footer is allowed to display
 // "already finished".
 //
 // ALREADY_COMPLETE is a live observation from the shim that no foreground turn
@@ -133,7 +137,7 @@ func (m *Manager) ReconcileAlreadyComplete(workspace, sessionID string) (bool, e
 	)
 	err := m.db.QueryRow(
 		`SELECT state, session_id FROM workspace_state
-		 WHERE workspace = ? AND state IN `+agentAxisMembers+`
+		 WHERE workspace = ? AND state IN `+sessionStatusMembers+`
 		 ORDER BY at DESC LIMIT 1`,
 		workspace,
 	).Scan(&topState, &topSID)
@@ -143,7 +147,7 @@ func (m *Manager) ReconcileAlreadyComplete(workspace, sessionID string) (bool, e
 		return false, nil
 	}
 	if err != nil {
-		return false, fmt.Errorf("ssm: ReconcileAlreadyComplete read agent axis for workspace %q: %w", workspace, err)
+		return false, fmt.Errorf("ssm: ReconcileAlreadyComplete read session-status lifecycle for workspace %q: %w", workspace, err)
 	}
 
 	if topState != sigThinking && topState != sigPermission {
@@ -160,7 +164,7 @@ func (m *Manager) ReconcileAlreadyComplete(workspace, sessionID string) (bool, e
 		var beneathSID sql.NullString
 		beneathErr := m.db.QueryRow(
 			`SELECT session_id FROM workspace_state
-			 WHERE workspace = ? AND state IN `+agentAxisMembers+`
+			 WHERE workspace = ? AND state IN `+sessionStatusMembers+`
 			   AND state <> 'permission'
 			 ORDER BY at DESC LIMIT 1`,
 			workspace,

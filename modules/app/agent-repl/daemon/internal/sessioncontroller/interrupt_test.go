@@ -505,7 +505,7 @@ func TestInterruptRecoveryStopsTheTurnAfterBringingItUp(t *testing.T) {
 
 // A RED resolved state recovers too, for a workspace without a session controller whose log never
 // received the hibernation row at all. `turn_active` is the discriminator that
-// catches the teal case (teal outranks the agent axis, so the violated state
+// catches the teal case (teal outranks the session-status lifecycle, so the violated state
 // resolves `hibernated` and never reads red), and this is the other direction.
 func TestInterruptRecoversAWorkspaceStillReadingRed(t *testing.T) {
 	// Arrange — no session controller, and the resolved state is the turn itself.

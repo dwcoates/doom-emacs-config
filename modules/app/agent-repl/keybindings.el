@@ -48,6 +48,7 @@
      (:name :ws-id :priority :group-key))
     ("⚡ State"
      (:agent-state :repl-state :status :pushed-render-state
+      :pushed-session-connectivity :pushed-session-status
       :pushed-render-state-meta
       :dead :bogus :merged))
     ("🌳 Project / Git"

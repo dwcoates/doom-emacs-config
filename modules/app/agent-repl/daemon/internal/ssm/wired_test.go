@@ -122,7 +122,7 @@ func TestSeveredResolvesItsOwnState(t *testing.T) {
 // behind it, and equally none of anything having broken. Nothing was ever wired
 // here, so the honest answer is teal — before the split this workspace stood
 // there in blue accusing the local substrate of a fault it never had.
-func TestAnAbsentWiredAxisResolvesHibernated(t *testing.T) {
+func TestAnAbsentLegacyConnectivityProjectionResolvesHibernated(t *testing.T) {
 	// Arrange — a workspace whose log predates the axis entirely.
 	db := newTestDB(t)
 	seedSignal(t, db, "ws", "s1", sigDone, causeTurnEnded, 1, 1)
@@ -155,7 +155,7 @@ func TestTheSynthesizedHibernatedCandidateKeepsTheSessionID(t *testing.T) {
 }
 
 // A workspace with ONLY task counters still resolves found=false. The
-// synthesized hibernated candidate rides the agent axis, so a workspace that has
+// synthesized hibernated candidate rides the session-status lifecycle, so a workspace that has
 // never had one stays unborn rather than becoming a sleeping tab.
 func TestATaskOnlyWorkspaceIsStillUnborn(t *testing.T) {
 	// Arrange.
@@ -211,8 +211,8 @@ func TestTheMoreSpecificBluesOutrankSevered(t *testing.T) {
 // The axis's own edges
 // ---------------------------------------------------------------------------
 
-// The wiring OPENS and the agent axis becomes visible in the same act.
-func TestWiringOpensTheAgentAxis(t *testing.T) {
+// The wiring OPENS and the session-status lifecycle becomes visible in the same act.
+func TestWiringOpensSessionStatus(t *testing.T) {
 	// Arrange — a turn running behind a workspace nothing is wired to.
 	m, _, _ := openUnwiredTest(t, fakeResolver{"s1": "ws1"})
 	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
@@ -264,7 +264,7 @@ func TestARotationBounceReopensOnTheReHandshake(t *testing.T) {
 	if err := m.ApplyWired("ws1", WiringWired, "shim_ready"); err != nil {
 		t.Fatalf("re-handshake: %v", err)
 	}
-	// Assert — blue across the window, and the agent axis back afterwards.
+	// Assert — blue across the window, and the session-status lifecycle back afterwards.
 	if bounced != frontendv1.RenderState_RENDER_STATE_INIT {
 		t.Fatalf("mid-bounce state = %s, want INIT (a re-handshake is a bring-up)", renderName(bounced))
 	}
@@ -286,7 +286,7 @@ func TestARepeatedWiringIsALoudNoOp(t *testing.T) {
 		t.Fatalf("second: %v", err)
 	}
 	// Assert.
-	if !cl.contains("wired axis unchanged") {
+	if !cl.contains("legacy connectivity projection unchanged") {
 		t.Fatalf("a no-op wiring edge was not logged: %v", cl.lines)
 	}
 }
@@ -390,7 +390,7 @@ func TestTheBootSweepAppendsNothingForAnAlreadyAsleepWorkspace(t *testing.T) {
 	}
 }
 
-// wiredRowCount counts the workspace's rows on the WIRED axis.
+// wiredRowCount counts the workspace's rows on the legacy connectivity projection.
 func wiredRowCount(t *testing.T, m *Manager, ws string) int {
 	t.Helper()
 	var n int
@@ -456,12 +456,12 @@ func TestALegacyDormantRowStillResolvesSevered(t *testing.T) {
 	}
 }
 
-// The legacy row must keep OUTRANKING the agent axis too. If it were dropped
+// The legacy row must keep OUTRANKING the session-status lifecycle too. If it were dropped
 // from the rank table it would stop being a candidate at all, and the workspace
 // would resolve off whatever its last turn reported — a green or red tab for a
 // session nothing is connected to, which is the one thing the connection-truth
 // law forbids.
-func TestALegacyDormantRowStillHidesTheAgentAxis(t *testing.T) {
+func TestALegacyDormantRowStillHidesSessionStatus(t *testing.T) {
 	// Arrange — the legacy row is OLDER than the agent row, so only RANK can
 	// make it win.
 	db := newTestDB(t)
@@ -480,7 +480,8 @@ func TestALegacyDormantRowStillHidesTheAgentAxis(t *testing.T) {
 
 // A legacy `dormant` row is still the TOP of the axis, so a hibernation landing
 // on top of it must actually append. Were the legacy spelling missing from
-// wiredAxisTop's IN-list, that read would answer "" and applyWiredLocked would
+// legacyConnectivityProjectionTop's IN-list, that read would answer "" and
+// applyWiredLocked would
 // believe the axis had never moved.
 func TestALegacyDormantRowIsVisibleToTheAxisTopRead(t *testing.T) {
 	// Arrange.
@@ -489,13 +490,13 @@ func TestALegacyDormantRowIsVisibleToTheAxisTopRead(t *testing.T) {
 		t.Fatalf("seed a legacy row: %v", err)
 	}
 	// Act.
-	top, err := wiredAxisTop(m.db, "ws1")
+	top, err := legacyConnectivityProjectionTop(m.db, "ws1")
 	// Assert.
 	if err != nil {
-		t.Fatalf("wiredAxisTop: %v", err)
+		t.Fatalf("legacyConnectivityProjectionTop: %v", err)
 	}
 	if top != "dormant" {
-		t.Fatalf("wiredAxisTop = %q, want %q — the pre-split spelling must stay visible to the axis read", top, "dormant")
+		t.Fatalf("legacyConnectivityProjectionTop = %q, want %q — the pre-split spelling must stay visible to the legacy projection read", top, "dormant")
 	}
 }
 

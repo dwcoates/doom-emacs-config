@@ -368,6 +368,49 @@ func TestDaemonRestartInvalidatesPersistedControllerGeneration(t *testing.T) {
 	}
 }
 
+func TestDaemonRestartSeedsLegacyWorkspaceHibernatedWithoutFabricatedGeneration(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.db")
+	first, err := Open(Options{
+		DBPath:   path,
+		Resolver: fakeResolver{"session-1": "ws"},
+		Logf:     func(string, ...any) {},
+	})
+	if err != nil {
+		t.Fatalf("Open first: %v", err)
+	}
+	if err := first.Apply(evSessionStarted("session-1", 1)); err != nil {
+		t.Fatalf("Apply SessionStarted: %v", err)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatalf("Close first: %v", err)
+	}
+
+	logs := &capLog{}
+	second, err := Open(Options{DBPath: path, Logf: logs.logf})
+	if err != nil {
+		t.Fatalf("Open second: %v", err)
+	}
+	t.Cleanup(func() { second.Close() })
+	got := mustComposite(t, second, "ws")
+	if got.Connectivity != SessionConnectivityHibernated ||
+		got.ControllerGenerationID != "" ||
+		got.AgentReplSessionID != "session-1" {
+		t.Fatalf("seeded composite = %+v, want hibernated session-1 with no generation", got)
+	}
+	snapshot, err := second.Snapshot()
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	if len(snapshot) != 1 ||
+		snapshot[0].GetConnectivity().String() != "SESSION_CONNECTIVITY_HIBERNATED" ||
+		snapshot[0].GetControllerGenerationId() != "" {
+		t.Fatalf("seeded snapshot = %+v", snapshot)
+	}
+	if !logs.contains(`branch=seed_no_controller_generation`) {
+		t.Fatalf("seed log missing branch and identity: %v", logs.lines)
+	}
+}
+
 func TestObservedStaleWorkspaceHistoriesResolveNewGenerationOperational(t *testing.T) {
 	tests := []struct {
 		name       string

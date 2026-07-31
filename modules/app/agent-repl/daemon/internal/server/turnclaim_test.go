@@ -5,8 +5,6 @@ import (
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
-
-	"claude-repld/internal/ssm"
 )
 
 // A DELETE MID-TURN LEAVES NOBODY TO END THE TURN. The shim is stopped, so the
@@ -20,14 +18,12 @@ func TestDeleteSessionReleasesTheWorkspacesTurnClaim(t *testing.T) {
 	id := createSession(t, h, `{"cwd":"/w","model":"m"}`)
 	turn := &corev1.Event{
 		SessionId: id,
-		Seq:       1,
+		Seq:       2,
 		Plane:     corev1.Plane_PLANE_STREAM,
 		RequestId: "turn-1",
 		Payload:   &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{TurnId: "turn-1"}},
 	}
-	if err := h.ssm.ApplyWired("/w", ssm.WiringWired, "test arrangement"); err != nil {
-		t.Fatalf("ApplyWired: %v", err)
-	}
+	markControllerOperational(t, h, "/w")
 	if err := h.ssm.Apply(turn); err != nil {
 		t.Fatalf("turn started: %v", err)
 	}

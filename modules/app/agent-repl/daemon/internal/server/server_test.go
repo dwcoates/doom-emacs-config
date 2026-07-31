@@ -215,6 +215,37 @@ func createSession(t *testing.T, h *harness, body string) string {
 	return id
 }
 
+// markControllerOperational completes the fake harness's bring-up lifecycle.
+// The harness deliberately has no shim connection, so tests whose precondition
+// is an established route must close the exact generated controller edge
+// themselves rather than reviving the retired legacy wiring projection.
+func markControllerOperational(t *testing.T, h *harness, workspace string) {
+	t.Helper()
+	state, found, err := h.ssm.Composite(workspace)
+	if err != nil || !found {
+		t.Fatalf("Composite(%s) = (%+v, %t, %v), want connecting controller",
+			workspace, state, found, err)
+	}
+	if err := h.ssm.Apply(&corev1.Event{
+		SessionId: state.AgentReplSessionID,
+		Seq:       1,
+		Payload: &corev1.Event_SessionStarted{
+			SessionStarted: &corev1.SessionStarted{},
+		},
+	}); err != nil {
+		t.Fatalf("Apply SessionStarted(%s): %v", workspace, err)
+	}
+	if err := h.ssm.ApplySessionConnectivity(
+		workspace,
+		state.AgentReplSessionID,
+		string(state.ControllerGenerationID),
+		ssm.SessionConnectivityOperational,
+		"test_shim_ready",
+	); err != nil {
+		t.Fatalf("ApplySessionConnectivity(%s operational): %v", workspace, err)
+	}
+}
+
 // createSessionErr is createSession without the fatal, for the tests that
 // assert on a typed create failure.
 func createSessionErr(t *testing.T, h *harness, body string) (string, error) {
@@ -810,9 +841,10 @@ func TestAccountSwitchGuardsTurnActive(t *testing.T) {
 	// Arrange — a session with a turn in flight (the SSM guard).
 	h := newHarnessWith(t, Config{Accounts: accountRoster()})
 	id := createSession(t, h, `{"cwd":"/w"}`)
+	markControllerOperational(t, h, "/w")
 	if err := h.ssm.Apply(&corev1.Event{
 		SessionId: id,
-		Seq:       1,
+		Seq:       2,
 		Plane:     corev1.Plane_PLANE_STREAM,
 		RequestId: "turn-1",
 		Payload: &corev1.Event_TurnStarted{TurnStarted: &corev1.TurnStarted{

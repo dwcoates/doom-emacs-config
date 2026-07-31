@@ -230,7 +230,7 @@ func TestContradictoryTurnHandshakeAbortsBeforeHandshakeSideEffects(t *testing.T
 	if got := h.reg.adoptionWrites(); len(got) != 0 {
 		t.Fatalf("rejected handshake wrote vendor adoption %v", got)
 	}
-	if got := h.applier.degradedCalls(); len(got) != 1 || !got[0].degraded {
-		t.Fatalf("rejected handshake degradation calls = %+v, want one open degradation", got)
+	if got := h.applier.degradedCalls(); len(got) != 0 {
+		t.Fatalf("rejected stale handshake mutated connectivity through degradation calls = %+v", got)
 	}
 }

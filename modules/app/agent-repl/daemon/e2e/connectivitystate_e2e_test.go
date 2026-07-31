@@ -50,7 +50,7 @@ func observedStates(t *testing.T, conn *websocket.Conn, workspace string, want f
 //
 // The green half is what could not be true before the axis existed. Nothing in
 // the daemon previously PROVED that a green tab had a wired session behind it;
-// the color came off the agent axis alone, which a hibernated or restarted
+// the color came off the session-status lifecycle alone, which a hibernated or restarted
 // workspace could keep reporting with no substrate at all.
 func TestE2EAFreshSessionGoesStartingThenWiredThenItsRealState(t *testing.T) {
 	// Arrange.

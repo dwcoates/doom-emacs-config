@@ -106,7 +106,7 @@ func TestInvalidateTurnClaimReleasesTheDeletedSessionsTurn(t *testing.T) {
 	}
 }
 
-func TestInvalidateTurnClaimLeavesASettledAgentAxisAlone(t *testing.T) {
+func TestInvalidateTurnClaimLeavesSettledSessionStatusAlone(t *testing.T) {
 	// Arrange — the turn already ended, so there is nothing stuck to unstick
 	// and `idle` would discard a more specific true fact.
 	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})

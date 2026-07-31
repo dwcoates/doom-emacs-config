@@ -23,8 +23,9 @@ hole of its own: an observer's reconnect snapshot was filtered to states a
 painter had SETTLED, so a workspace whose first emission was still held was
 OMITTED from Emacs entirely.
 
-Both are gone. A workspace's color is connection truth, decided by the SSM's
-WIRED axis, and no viewer's render pass has a claim on it.
+Both are gone. The SSM emits the same composite session connectivity, session
+status, controller generation, and active faults to every frontend; no
+viewer's render pass has a claim on those facts.
 
 `ClientKind` remains, and it was never about painting: it names the frontend
 product behind a connection, fixed at accept from the endpoint that accepted it,

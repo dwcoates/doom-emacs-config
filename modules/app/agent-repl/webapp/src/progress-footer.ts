@@ -29,7 +29,13 @@ import { AGENTS_SPEC, agentsMenuHtml } from "./agents.js";
 import { CounterEntry, CounterSpec, isActive } from "./counter-menu.js";
 import { formatElapsed } from "./duration.js";
 import { escapeHtml } from "./highlight.js";
-import type { InterruptInput, ProgressInput, WebRenderState } from "./state-adapter.js";
+import type {
+  InterruptInput,
+  ProgressInput,
+  WebRenderState,
+  WebSessionConnectivity,
+  WebSessionStatus,
+} from "./state-adapter.js";
 import { ConversationItem, ToolItem } from "./store.js";
 import { TASKS_SPEC, tasksMenuHtml } from "./tasks.js";
 import { IDLE_LABEL, TIMER_SLOT } from "./timer.js";
@@ -57,6 +63,10 @@ export interface FooterInput {
    * "starting" against an already-green tab.
    */
   renderState: WebRenderState | null;
+  /** Daemon-resolved route reliability for the same WorkspaceState. */
+  connectivity: WebSessionConnectivity | null;
+  /** Activity fact retained beneath a non-operational connectivity verdict. */
+  sessionStatus: WebSessionStatus;
   /** The session's subagent roster, relocated from the topbar. */
   agents: readonly CounterEntry[];
   /** The session's task roster, relocated from the topbar. */
@@ -566,8 +576,14 @@ export function footerHtml(
   if (input.renderState !== null) {
     const phase = phaseLabel(input.renderState);
     const spin = phase.spinning ? `<span class="pfooter-spin" aria-hidden="true"></span> ` : "";
+    const secondary =
+      input.connectivity !== null &&
+      input.connectivity !== "operational" &&
+      input.sessionStatus !== null
+        ? `<span class="pfooter-secondary">${escapeHtml(input.sessionStatus.replaceAll("_", " "))}</span>`
+        : "";
     cells.push(
-      `<div class="pfooter-cell pfooter-phase ${phase.tone}">${spin}${escapeHtml(phase.word)}</div>`,
+      `<div class="pfooter-cell pfooter-phase ${phase.tone}">${spin}${escapeHtml(phase.word)}${secondary}</div>`,
     );
   }
   // The interrupt chip sits immediately right of the phase: it qualifies the

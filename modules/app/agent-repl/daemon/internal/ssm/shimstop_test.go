@@ -10,7 +10,7 @@ import (
 // ---------------------------------------------------------------------------
 // CloseStaleTurn — the teardown's obligation to leave no live turn behind.
 //
-// The agent axis retires `thinking` on a `TurnEnded` and on nothing else, so a
+// The session-status lifecycle retires `thinking` on a `TurnEnded` and on nothing else, so a
 // daemon-initiated shim stop kills the only process that could ever emit one.
 // These tests pin each arm of the close: the write, every refusal, every
 // validation error, and the guard the stale row uses to defend itself.
@@ -110,7 +110,7 @@ func TestCloseStaleTurnWritesNothingOverASettledAxis(t *testing.T) {
 	if got := mustCurrent(t, m, "ws1").State; got != frontendv1.RenderState_RENDER_STATE_DONE {
 		t.Fatalf("state = %s, want DONE preserved — the honest outcome must not be overwritten", renderName(got))
 	}
-	if !cl.contains("ssm: stale turn close ws=ws1 session=s1 reason=\"hibernate_session\" sole_session_controller=true — the agent axis holds no `thinking`") {
+	if !cl.contains("ssm: stale turn close ws=ws1 session=s1 reason=\"hibernate_session\" sole_session_controller=true — the session-status lifecycle holds no `thinking`") {
 		t.Fatalf("missing the canonical no-op record; log:\n%s", strings.Join(cl.lines, "\n"))
 	}
 }

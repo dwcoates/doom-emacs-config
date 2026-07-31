@@ -9,13 +9,13 @@ import (
 // asked the user a canUseTool question and is parked until it is answered.
 //
 // THIS IS THE ONLY PRODUCER of RENDER_STATE_PERMISSION. The render side of it
-// was complete on every plane — the token, rank 40 on the agent axis, the green
+// was complete on every plane — the token, rank 40 on the session-status lifecycle, the green
 // color, the webapp and elisp mappings — and nothing ever wrote the row, so a
 // workspace parked on a question the user had not seen kept the `thinking` row
 // of the turn that asked it and painted RED. The one state whose whole job is
 // "the agent is waiting on YOU" read as "the agent is busy".
 //
-// IT IS AN AGENT-AXIS ROW, not an axis of its own, and it supersedes rather
+// IT IS AN session-status lifecycle ROW, not an axis of its own, and it supersedes rather
 // than latches — the same shape `done`, `interrupted` and `vendor_blocked`
 // have. That is what makes every one of these true without a special case:
 //
@@ -50,7 +50,7 @@ func (m *Manager) ApplyPermission(workspace string, pending bool, reason string)
 // answer came back. Both are ordinary, both are worth seeing when a workspace's
 // color is being explained.
 func (m *Manager) applyPermissionLocked(workspace string, pending bool, reason string) error {
-	top, beneath, err := agentAxisTop(m.db, workspace)
+	top, beneath, err := sessionStatusTop(m.db, workspace)
 	if err != nil {
 		return err
 	}
@@ -84,7 +84,7 @@ func (m *Manager) applyPermissionLocked(workspace string, pending bool, reason s
 	// supersedes it, which is the honest reading: the question is answered, and
 	// nothing since has said what the agent is doing.
 	if beneath != sigThinking {
-		m.logf("ssm: permission answered with no live turn beneath it ws=%s beneath=%q reason=%q — the agent axis is left as it stands rather than claiming a turn the log cannot see",
+		m.logf("ssm: permission answered with no live turn beneath it ws=%s beneath=%q reason=%q — the session-status lifecycle is left as it stands rather than claiming a turn the log cannot see",
 			workspace, beneath, reason)
 		return nil
 	}
@@ -95,7 +95,7 @@ func (m *Manager) applyPermissionLocked(workspace string, pending bool, reason s
 	if err := appendRow(m.db, workspace, "", sigThinking, causeTurnStarted, sql.NullInt64{}, m.nextAt(), ""); err != nil {
 		return err
 	}
-	m.logf("ssm: permission closed ws=%s reason=%q — the turn that asked is still in flight, so the agent axis returns to `thinking`",
+	m.logf("ssm: permission closed ws=%s reason=%q — the turn that asked is still in flight, so the session-status lifecycle returns to `thinking`",
 		workspace, reason)
 	return m.reresolveLocked(workspace, cause, 0)
 }
@@ -115,9 +115,9 @@ func (m *Manager) applyPermissionLocked(workspace string, pending bool, reason s
 // window's bounding close is: the caller is a rotation or a warm whose own work
 // must still complete. It is never absorbed silently.
 func (m *Manager) closePermissionLocked(workspace, reason string) {
-	top, _, err := agentAxisTop(m.db, workspace)
+	top, _, err := sessionStatusTop(m.db, workspace)
 	if err != nil {
-		m.logf("ssm: reading the agent axis FAILED ws=%s reason=%s: %v — a pending permission row may stay open", workspace, reason, err)
+		m.logf("ssm: reading the session-status lifecycle FAILED ws=%s reason=%s: %v — a pending permission row may stay open", workspace, reason, err)
 		return
 	}
 	if top != sigPermission {

@@ -112,10 +112,10 @@ enum RenderState {
   // cause chain distinguishes "never ran" from "ran and finished".
   RENDER_STATE_READY = 15;
   RENDER_STATE_VENDOR_BLOCKED = 16;
-  // Additive (I1): a turn OUTCOME on the agent axis, exactly as DONE and
+  // Additive (I1): a turn OUTCOME on the session-status lifecycle, exactly as DONE and
   // VENDOR_BLOCKED are: it reports that the LAST turn ended because a stop
   // was delivered (core.InterruptOutcome INTERRUPTED), and the next
-  // agent-axis row supersedes it. Never a latch, never needs releasing.
+  // session-status lifecycle row supersedes it. Never a latch, never needs releasing.
   RENDER_STATE_INTERRUPTED = 17;
   // Additive: the two CONTEXT-CUT states. Both are red for the same reason
   // THINKING is — the agent is busy and the user's prompt cannot land yet —
@@ -171,6 +171,54 @@ enum RenderState {
   // workspace that is genuinely asleep. See the SSM's `prec` table, where it
   // sits at 15 — directly below the blue band and above purple's 20.
   RENDER_STATE_HIBERNATED = 21;
+}
+
+// SESSION CONNECTIVITY answers whether the current session-controller
+// generation can operate the session reliably now. The daemon is the sole
+// authority: frontends adopt this verdict unchanged and never infer it from
+// SessionView.live, a socket, a historical RenderState, or a fault card.
+enum SessionConnectivity {
+  SESSION_CONNECTIVITY_UNSPECIFIED = 0;
+  // Intentionally offline. No controller generation is current and no fault
+  // is implied; the session may be brought up on demand.
+  SESSION_CONNECTIVITY_HIBERNATED = 1;
+  // Establishment or re-establishment of the current controller generation is
+  // in progress.
+  SESSION_CONNECTIVITY_CONNECTING = 2;
+  // The current generation passed readiness and has no open
+  // connectivity-impacting fault.
+  SESSION_CONNECTIVITY_OPERATIONAL = 3;
+  // The current generation remains attached, but one or more
+  // connectivity-impacting fault windows are open.
+  SESSION_CONNECTIVITY_DEGRADED = 4;
+  // Establishment or operation failed and no operating route remains.
+  SESSION_CONNECTIVITY_UNAVAILABLE = 5;
+}
+
+// SESSION STATUS answers what the session is doing independently of whether
+// its current route is usable. Connectivity outranks it for primary
+// presentation whenever connectivity is not OPERATIONAL.
+enum SessionStatus {
+  SESSION_STATUS_UNSPECIFIED = 0;
+  SESSION_STATUS_READY = 1;
+  SESSION_STATUS_THINKING = 2;
+  SESSION_STATUS_PERMISSION = 3;
+  SESSION_STATUS_DONE = 4;
+  SESSION_STATUS_INTERRUPTED = 5;
+  SESSION_STATUS_VENDOR_BLOCKED = 6;
+  SESSION_STATUS_MONITORING = 7;
+}
+
+// A runtime fault is explanatory evidence scoped to exactly one
+// session-controller generation. A close edge can close only its matching
+// (component, fault_type) window, and a retired generation's faults can never
+// affect its replacement.
+message RuntimeFault {
+  string component = 1;
+  string fault_type = 2;
+  string impact = 3;
+  string cause_kind = 4;
+  int64 opened_at_ms = 5;
 }
 
 message FrontendFrame {
@@ -243,6 +291,9 @@ message SessionHealthView {
 message WorkspaceState {
   string workspace = 1;
   string session_id = 2;
+  // Primary UX projection resolved by the daemon. This is retained for merge
+  // and context-cut presentation; it is not the authority for connectivity or
+  // session status.
   RenderState state = 3;
   // Resolution inputs (SSM):
   bool turn_active = 4;
@@ -251,12 +302,10 @@ message WorkspaceState {
   string cause_kind = 7;  // event kind that caused this transition
   uint64 cause_seq = 8;   // store seq when event-caused (0 = daemon-local)
   int64 at_ms = 9;
-  // (The retired `generation` field lived at field 10: the per-workspace
-  // delivery identity a paint acknowledgment addressed. Paint attestation
-  // is gone — every frontend now receives every emission immediately — so
-  // nothing addresses an emission any more. Deleted rather than reserved,
-  // in this repo's established style for retired frontend surface, because
-  // no live frontend commitment survives the same change.)
+  SessionConnectivity connectivity = 10;
+  SessionStatus status = 11;
+  string controller_generation_id = 12;
+  repeated RuntimeFault active_faults = 13;
 }
 
 message SessionView {

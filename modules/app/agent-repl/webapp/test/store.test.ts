@@ -45,6 +45,10 @@ function workspaceEffect(over: Partial<WorkspaceStatusInput> = {}): AdapterEffec
       causeKind: "turn_started",
       causeSeq: 1,
       atMs: 1000,
+      connectivity: "operational",
+      sessionStatus: "thinking",
+      controllerGenerationId: "g1",
+      activeFaults: [],
       ...over,
     },
   };
@@ -236,7 +240,8 @@ describe("ingest workspace-state", () => {
 
     expect(logs).toEqual([
       expect.stringContaining(
-        "state=none->ready turn_active=false->false live_tasks=0 " +
+        "state=none->ready connectivity=none->operational status=none->thinking generation=g1 " +
+          "turn_active=false->false live_tasks=0 faults=none " +
           "merge_phase= cause_kind=session_started cause_seq=7 at_ms=1234",
       ),
     ]);

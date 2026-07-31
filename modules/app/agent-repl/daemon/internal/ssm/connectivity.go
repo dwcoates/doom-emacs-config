@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 )
 
 // ControllerGenerationID identifies one daemon-local session-controller
@@ -71,8 +73,13 @@ type CompositeState struct {
 	LifecycleTop           SessionConnectivity
 	Connectivity           SessionConnectivity
 	Status                 SessionStatus
+	StatusCauseKind        string
+	StatusCauseSeq         uint64
+	StatusAtMs             int64
 	ActiveFaults           []RuntimeFault
 	LiveTaskCount          int64
+	connectivityCauseKind  string
+	connectivityAtMs       int64
 }
 
 var (
@@ -169,6 +176,9 @@ func (m *Manager) ApplySessionConnectivity(
 	}
 	m.logf("ssm: session connectivity ws=%q session=%q generation=%q prior=%q next=%q cause=%q at=%d branch=applied",
 		workspace, sessionID, generationID, prior.state, state, causeKind, at)
+	if err := m.publishCompositeLocked(workspace, causeKind); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -299,7 +309,197 @@ func (m *Manager) ApplyRuntimeFault(
 	}
 	m.logf("ssm: runtime fault ws=%q session=%q generation=%q component=%q fault_type=%q impact=%q prior_open=%t next_open=%t prior_connectivity=%q next_connectivity=%q cause=%q at=%d branch=applied",
 		workspace, sessionID, generationID, component, faultType, impact, wasOpen, open, before.Connectivity, after.Connectivity, causeKind, at)
+	if err := m.publishCompositeLocked(workspace, causeKind); err != nil {
+		return err
+	}
 	return nil
+}
+
+func (m *Manager) publishCompositeLocked(workspace, causeKind string) error {
+	if len(m.subs) == 0 {
+		return nil
+	}
+	r, err := resolve(m.db, workspace, m.logf)
+	if err != nil {
+		return fmt.Errorf("ssm: resolve projection after composite edge workspace=%q cause=%q: %w", workspace, causeKind, err)
+	}
+	composite, found, err := resolveComposite(m.db, workspace)
+	if err != nil {
+		return fmt.Errorf("ssm: resolve composite after edge workspace=%q cause=%q: %w", workspace, causeKind, err)
+	}
+	if !found {
+		return fmt.Errorf("ssm: composite edge left workspace %q without a composite state", workspace)
+	}
+	if !r.found {
+		r = resolved{found: true, state: frontendv1.RenderState_RENDER_STATE_UNSPECIFIED}
+	}
+	msg, err := compositeWorkspaceState(workspace, r, composite)
+	if err != nil {
+		return err
+	}
+	m.last[workspace] = msg.GetState()
+	m.lastTasks[workspace] = msg.GetLiveTaskCount()
+	for id, ch := range m.subs {
+		select {
+		case ch <- msg:
+		default:
+			m.logf("ssm: subscriber %d slow; dropped composite ws=%s connectivity=%s status=%s cause=%s branch=will_resync",
+				id, workspace, composite.Connectivity, composite.Status, causeKind)
+		}
+	}
+	return nil
+}
+
+func compositeWorkspaceState(workspace string, projection resolved, composite CompositeState) (*frontendv1.WorkspaceState, error) {
+	state, err := compositeRenderState(projection, composite)
+	if err != nil {
+		return nil, fmt.Errorf("ssm: project composite workspace=%q connectivity=%q status=%q: %w",
+			workspace, composite.Connectivity, composite.Status, err)
+	}
+	msg := projection.toProto(workspace)
+	msg.State = state
+	msg.SessionId = composite.AgentReplSessionID
+	msg.Connectivity = connectivityProto(composite.Connectivity)
+	msg.Status = statusProto(composite.Status)
+	msg.ControllerGenerationId = string(composite.ControllerGenerationID)
+	switch composite.Connectivity {
+	case SessionConnectivityOperational:
+		if isSessionStatusRenderState(state) {
+			msg.CauseKind = composite.StatusCauseKind
+			msg.CauseSeq = composite.StatusCauseSeq
+			msg.AtMs = composite.StatusAtMs
+			msg.TurnActive = composite.Status == SessionStatusThinking
+		}
+	case SessionConnectivityDegraded:
+		if fault, ok := newestConnectivityFault(composite.ActiveFaults); ok {
+			msg.CauseKind = fault.CauseKind
+			msg.CauseSeq = 0
+			msg.AtMs = fault.OpenedAtMs
+			msg.TurnActive = false
+		}
+	default:
+		msg.CauseKind = compositeConnectivityCause(composite)
+		msg.CauseSeq = 0
+		msg.AtMs = compositeConnectivityAt(composite)
+		msg.TurnActive = false
+	}
+	msg.ActiveFaults = make([]*frontendv1.RuntimeFault, 0, len(composite.ActiveFaults))
+	for _, fault := range composite.ActiveFaults {
+		msg.ActiveFaults = append(msg.ActiveFaults, &frontendv1.RuntimeFault{
+			Component:  fault.Component,
+			FaultType:  fault.FaultType,
+			Impact:     string(fault.Impact),
+			CauseKind:  fault.CauseKind,
+			OpenedAtMs: fault.OpenedAtMs,
+		})
+	}
+	return msg, nil
+}
+
+func isSessionStatusRenderState(state frontendv1.RenderState) bool {
+	switch state {
+	case frontendv1.RenderState_RENDER_STATE_READY,
+		frontendv1.RenderState_RENDER_STATE_THINKING,
+		frontendv1.RenderState_RENDER_STATE_PERMISSION,
+		frontendv1.RenderState_RENDER_STATE_DONE,
+		frontendv1.RenderState_RENDER_STATE_INTERRUPTED,
+		frontendv1.RenderState_RENDER_STATE_VENDOR_BLOCKED,
+		frontendv1.RenderState_RENDER_STATE_IDLE_ASYNC:
+		return true
+	default:
+		return false
+	}
+}
+
+func newestConnectivityFault(faults []RuntimeFault) (RuntimeFault, bool) {
+	var newest RuntimeFault
+	found := false
+	for _, fault := range faults {
+		if fault.Impact == FaultImpactConnectivity &&
+			(!found || fault.OpenedAtMs > newest.OpenedAtMs) {
+			newest = fault
+			found = true
+		}
+	}
+	return newest, found
+}
+
+func compositeConnectivityCause(composite CompositeState) string {
+	return composite.connectivityCauseKind
+}
+
+func compositeConnectivityAt(composite CompositeState) int64 {
+	return composite.connectivityAtMs
+}
+
+func compositeRenderState(projection resolved, composite CompositeState) (frontendv1.RenderState, error) {
+	switch composite.Connectivity {
+	case SessionConnectivityHibernated:
+		return frontendv1.RenderState_RENDER_STATE_HIBERNATED, nil
+	case SessionConnectivityConnecting:
+		return frontendv1.RenderState_RENDER_STATE_INIT, nil
+	case SessionConnectivityDegraded:
+		return frontendv1.RenderState_RENDER_STATE_DEGRADED, nil
+	case SessionConnectivityUnavailable:
+		return frontendv1.RenderState_RENDER_STATE_SEVERED, nil
+	case SessionConnectivityOperational:
+		switch projection.state {
+		case frontendv1.RenderState_RENDER_STATE_INIT,
+			frontendv1.RenderState_RENDER_STATE_DEAD,
+			frontendv1.RenderState_RENDER_STATE_CLEARING,
+			frontendv1.RenderState_RENDER_STATE_COMPACTING,
+			frontendv1.RenderState_RENDER_STATE_MERGING,
+			frontendv1.RenderState_RENDER_STATE_MERGE_QUEUED,
+			frontendv1.RenderState_RENDER_STATE_MERGE_CONFLICT,
+			frontendv1.RenderState_RENDER_STATE_MERGE_FAILED,
+			frontendv1.RenderState_RENDER_STATE_MERGED:
+			return projection.state, nil
+		}
+		switch composite.Status {
+		case SessionStatusReady:
+			return frontendv1.RenderState_RENDER_STATE_READY, nil
+		case SessionStatusThinking:
+			return frontendv1.RenderState_RENDER_STATE_THINKING, nil
+		case SessionStatusPermission:
+			return frontendv1.RenderState_RENDER_STATE_PERMISSION, nil
+		case SessionStatusDone:
+			return frontendv1.RenderState_RENDER_STATE_DONE, nil
+		case SessionStatusInterrupted:
+			return frontendv1.RenderState_RENDER_STATE_INTERRUPTED, nil
+		case SessionStatusVendorBlocked:
+			return frontendv1.RenderState_RENDER_STATE_VENDOR_BLOCKED, nil
+		case SessionStatusMonitoring:
+			return frontendv1.RenderState_RENDER_STATE_IDLE_ASYNC, nil
+		default:
+			return frontendv1.RenderState_RENDER_STATE_UNSPECIFIED,
+				fmt.Errorf("operational controller has invalid session status %q", composite.Status)
+		}
+	default:
+		return frontendv1.RenderState_RENDER_STATE_UNSPECIFIED,
+			fmt.Errorf("invalid session connectivity %q", composite.Connectivity)
+	}
+}
+
+func connectivityProto(state SessionConnectivity) frontendv1.SessionConnectivity {
+	return map[SessionConnectivity]frontendv1.SessionConnectivity{
+		SessionConnectivityHibernated:  frontendv1.SessionConnectivity_SESSION_CONNECTIVITY_HIBERNATED,
+		SessionConnectivityConnecting:  frontendv1.SessionConnectivity_SESSION_CONNECTIVITY_CONNECTING,
+		SessionConnectivityOperational: frontendv1.SessionConnectivity_SESSION_CONNECTIVITY_OPERATIONAL,
+		SessionConnectivityDegraded:    frontendv1.SessionConnectivity_SESSION_CONNECTIVITY_DEGRADED,
+		SessionConnectivityUnavailable: frontendv1.SessionConnectivity_SESSION_CONNECTIVITY_UNAVAILABLE,
+	}[state]
+}
+
+func statusProto(status SessionStatus) frontendv1.SessionStatus {
+	return map[SessionStatus]frontendv1.SessionStatus{
+		SessionStatusReady:         frontendv1.SessionStatus_SESSION_STATUS_READY,
+		SessionStatusThinking:      frontendv1.SessionStatus_SESSION_STATUS_THINKING,
+		SessionStatusPermission:    frontendv1.SessionStatus_SESSION_STATUS_PERMISSION,
+		SessionStatusDone:          frontendv1.SessionStatus_SESSION_STATUS_DONE,
+		SessionStatusInterrupted:   frontendv1.SessionStatus_SESSION_STATUS_INTERRUPTED,
+		SessionStatusVendorBlocked: frontendv1.SessionStatus_SESSION_STATUS_VENDOR_BLOCKED,
+		SessionStatusMonitoring:    frontendv1.SessionStatus_SESSION_STATUS_MONITORING,
+	}[status]
 }
 
 // Composite resolves the authoritative connectivity and session status pair.
@@ -333,19 +533,24 @@ func resolveComposite(q stateQueryer, workspace string) (CompositeState, bool, e
 	if err != nil {
 		return CompositeState{}, false, err
 	}
-	status, taskCount, statusSessionID, statusFound, err := resolveSessionStatus(q, workspace, lifecycle.sessionID)
+	statusResolution, err := resolveSessionStatus(q, workspace, lifecycle)
 	if err != nil {
 		return CompositeState{}, false, err
 	}
-	if !lifecycle.found && !statusFound {
+	if !lifecycle.found && !statusResolution.found {
 		return CompositeState{}, false, nil
 	}
 
 	state := CompositeState{
-		Workspace:     workspace,
-		Connectivity:  SessionConnectivityHibernated,
-		Status:        status,
-		LiveTaskCount: taskCount,
+		Workspace:             workspace,
+		Connectivity:          SessionConnectivityHibernated,
+		Status:                statusResolution.status,
+		StatusCauseKind:       statusResolution.causeKind,
+		StatusCauseSeq:        statusResolution.causeSeq,
+		StatusAtMs:            statusResolution.atMs,
+		LiveTaskCount:         statusResolution.taskCount,
+		connectivityCauseKind: lifecycle.causeKind,
+		connectivityAtMs:      lifecycle.atMs,
 	}
 	if lifecycle.found {
 		state.AgentReplSessionID = lifecycle.sessionID
@@ -363,7 +568,7 @@ func resolveComposite(q stateQueryer, workspace string) (CompositeState, bool, e
 			}
 		}
 	} else {
-		state.AgentReplSessionID = statusSessionID
+		state.AgentReplSessionID = statusResolution.sessionID
 	}
 	return state, true, nil
 }
@@ -412,50 +617,124 @@ func latestConnectivity(q stateQueryer, workspace string) (connectivityLifecycle
 	return row, nil
 }
 
+type sessionStatusResolution struct {
+	status    SessionStatus
+	taskCount int64
+	sessionID string
+	found     bool
+	causeKind string
+	causeSeq  uint64
+	atMs      int64
+}
+
 func resolveSessionStatus(
 	q stateQueryer,
-	workspace, currentSessionID string,
-) (SessionStatus, int64, string, bool, error) {
+	workspace string,
+	lifecycle connectivityLifecycle,
+) (sessionStatusResolution, error) {
 	var (
 		token     string
 		sessionID sql.NullString
+		causeKind sql.NullString
+		causeSeq  sql.NullInt64
+		atMs      int64
 	)
-	query := `SELECT state, session_id
+	lowerBound, bounded, err := statusGenerationLowerBound(q, workspace, lifecycle)
+	if err != nil {
+		return sessionStatusResolution{}, err
+	}
+	query := `SELECT state, session_id, cause_kind, cause_seq, at
 		FROM workspace_state
 		WHERE workspace = ?
 		  AND state IN ('thinking','permission','done','ready','idle','vendor_blocked','interrupted')`
 	args := []any{workspace}
-	if currentSessionID != "" {
-		query += ` AND session_id = ?`
-		args = append(args, currentSessionID)
+	if bounded {
+		query += ` AND at >= ?`
+		args = append(args, lowerBound)
 	}
 	query += ` ORDER BY at DESC LIMIT 1`
-	err := q.QueryRow(query, args...).Scan(&token, &sessionID)
+	err = q.QueryRow(query, args...).Scan(&token, &sessionID, &causeKind, &causeSeq, &atMs)
 	if err == sql.ErrNoRows {
-		return "", 0, "", false, nil
+		return sessionStatusResolution{}, nil
 	}
 	if err != nil {
-		return "", 0, "", false, fmt.Errorf("read session status for workspace %q: %w", workspace, err)
+		return sessionStatusResolution{}, fmt.Errorf("read session status for workspace %q: %w", workspace, err)
 	}
-	taskCount, err := liveTaskCount(q, workspace, currentSessionID)
+	taskCount, err := liveTaskCount(q, workspace, lowerBound, bounded)
 	if err != nil {
-		return "", 0, "", false, err
+		return sessionStatusResolution{}, err
 	}
 	status, err := sessionStatusOf(token, taskCount)
 	if err != nil {
-		return "", 0, "", false, err
+		return sessionStatusResolution{}, err
 	}
-	return status, taskCount, sessionID.String, true, nil
+	return sessionStatusResolution{
+		status:    status,
+		taskCount: taskCount,
+		sessionID: sessionID.String,
+		found:     true,
+		causeKind: causeKind.String,
+		causeSeq:  uint64(causeSeq.Int64),
+		atMs:      atMs,
+	}, nil
 }
 
-func liveTaskCount(q stateQueryer, workspace, currentSessionID string) (int64, error) {
+// statusGenerationLowerBound keeps two different identities distinct without
+// confusing either one with the vendor transcript UUID stored on stream rows.
+// A replacement agent-repl session starts a new status epoch at its first
+// controller-generation edge; a replacement generation for the SAME session
+// keeps the prior status, including vendor UUID rotations inside that session.
+func statusGenerationLowerBound(
+	q stateQueryer,
+	workspace string,
+	lifecycle connectivityLifecycle,
+) (int64, bool, error) {
+	if !lifecycle.found || lifecycle.sessionID == "" || lifecycle.generationID == "" {
+		return 0, false, nil
+	}
+	var firstAt int64
+	if err := q.QueryRow(
+		`SELECT MIN(at)
+		 FROM session_connectivity
+		 WHERE workspace = ?
+		   AND agent_repl_session_id = ?
+		   AND controller_generation_id = ?`,
+		workspace, lifecycle.sessionID, lifecycle.generationID,
+	).Scan(&firstAt); err != nil {
+		return 0, false, fmt.Errorf(
+			"read controller-generation start for workspace %q session %q generation %q: %w",
+			workspace, lifecycle.sessionID, lifecycle.generationID, err)
+	}
+	var priorSessionID string
+	err := q.QueryRow(
+		`SELECT agent_repl_session_id
+		 FROM session_connectivity
+		 WHERE workspace = ? AND at < ?
+		 ORDER BY at DESC LIMIT 1`,
+		workspace, firstAt,
+	).Scan(&priorSessionID)
+	if err == sql.ErrNoRows {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, fmt.Errorf(
+			"read prior connectivity identity for workspace %q session %q generation %q at=%d: %w",
+			workspace, lifecycle.sessionID, lifecycle.generationID, firstAt, err)
+	}
+	if priorSessionID == lifecycle.sessionID {
+		return 0, false, nil
+	}
+	return firstAt, true, nil
+}
+
+func liveTaskCount(q stateQueryer, workspace string, lowerBound int64, bounded bool) (int64, error) {
 	var count int64
 	query := `WITH rows AS (
 			SELECT state, task_id FROM workspace_state WHERE workspace = ?`
 	args := []any{workspace}
-	if currentSessionID != "" {
-		query += ` AND session_id = ?`
-		args = append(args, currentSessionID)
+	if bounded {
+		query += ` AND at >= ?`
+		args = append(args, lowerBound)
 	}
 	query += `
 		)
@@ -840,6 +1119,74 @@ func (m *Manager) hibernatePersistedConnectivityLocked() error {
 	}
 	if len(pending) == 0 {
 		m.logf("ssm: persisted connectivity reset branch=no-active-generations count=0")
+	}
+	return nil
+}
+
+// seedMissingConnectivityLocked gives every restored legacy workspace an
+// explicit hibernated lifecycle without fabricating a live controller
+// generation. This is the coordinated-migration boundary: legacy projection
+// rows stay immutable history, while every frontend snapshot after Open has a
+// mandatory composite connectivity verdict.
+func (m *Manager) seedMissingConnectivityLocked() error {
+	rows, err := m.db.Query(`
+		WITH restored_workspaces AS (
+			SELECT DISTINCT workspace FROM workspace_state
+		)
+		SELECT
+			restored_workspaces.workspace,
+			COALESCE((
+				SELECT session_id
+				FROM workspace_state
+				WHERE workspace_state.workspace = restored_workspaces.workspace
+				  AND session_id IS NOT NULL
+				  AND session_id <> ''
+				ORDER BY at DESC LIMIT 1
+			), '')
+		FROM restored_workspaces
+		WHERE 1 = 1
+		  AND NOT EXISTS (
+			SELECT 1 FROM session_connectivity
+			WHERE session_connectivity.workspace = restored_workspaces.workspace
+		  )
+		ORDER BY restored_workspaces.workspace`)
+	if err != nil {
+		return fmt.Errorf("ssm: list restored workspaces missing connectivity: %w", err)
+	}
+	type missing struct{ workspace, sessionID string }
+	var pending []missing
+	for rows.Next() {
+		var item missing
+		if err := rows.Scan(&item.workspace, &item.sessionID); err != nil {
+			return fmt.Errorf("ssm: scan restored workspace missing connectivity: %w", err)
+		}
+		pending = append(pending, item)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("ssm: iterate restored workspaces missing connectivity: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("ssm: close restored workspaces missing connectivity: %w", err)
+	}
+	for _, item := range pending {
+		at := m.nextAt()
+		if _, err := m.db.Exec(
+			`INSERT INTO session_connectivity(
+				workspace, agent_repl_session_id, controller_generation_id,
+				state, cause_kind, at
+			) VALUES (?,?,?,?,?,?)`,
+			item.workspace, item.sessionID, "",
+			string(SessionConnectivityHibernated),
+			"daemon_restart_no_controller_generation",
+			at,
+		); err != nil {
+			return fmt.Errorf("ssm: seed restored hibernation workspace=%q session=%q at=%d: %w",
+				item.workspace, item.sessionID, at, err)
+		}
+		m.logf("ssm: restored connectivity ws=%q session=%q generation=%q prior=%q next=%q cause=%q at=%d branch=seed_no_controller_generation",
+			item.workspace, item.sessionID, "", "", SessionConnectivityHibernated,
+			"daemon_restart_no_controller_generation", at)
 	}
 	return nil
 }

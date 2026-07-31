@@ -107,10 +107,60 @@ const RENDER_STATE_BY_NAME: Readonly<Record<string, RenderState>> = {
   RENDER_STATE_DEGRADED: RenderState.DEGRADED,
 };
 
+/** Daemon-resolved reliability of the current session-controller generation. */
+export enum SessionConnectivity {
+  UNSPECIFIED = 0,
+  HIBERNATED = 1,
+  CONNECTING = 2,
+  OPERATIONAL = 3,
+  DEGRADED = 4,
+  UNAVAILABLE = 5,
+}
+
+const SESSION_CONNECTIVITY_BY_NAME: Readonly<Record<string, SessionConnectivity>> = {
+  SESSION_CONNECTIVITY_UNSPECIFIED: SessionConnectivity.UNSPECIFIED,
+  SESSION_CONNECTIVITY_HIBERNATED: SessionConnectivity.HIBERNATED,
+  SESSION_CONNECTIVITY_CONNECTING: SessionConnectivity.CONNECTING,
+  SESSION_CONNECTIVITY_OPERATIONAL: SessionConnectivity.OPERATIONAL,
+  SESSION_CONNECTIVITY_DEGRADED: SessionConnectivity.DEGRADED,
+  SESSION_CONNECTIVITY_UNAVAILABLE: SessionConnectivity.UNAVAILABLE,
+};
+
+/** Daemon-resolved activity of the session, independent of connectivity. */
+export enum SessionStatus {
+  UNSPECIFIED = 0,
+  READY = 1,
+  THINKING = 2,
+  PERMISSION = 3,
+  DONE = 4,
+  INTERRUPTED = 5,
+  VENDOR_BLOCKED = 6,
+  MONITORING = 7,
+}
+
+const SESSION_STATUS_BY_NAME: Readonly<Record<string, SessionStatus>> = {
+  SESSION_STATUS_UNSPECIFIED: SessionStatus.UNSPECIFIED,
+  SESSION_STATUS_READY: SessionStatus.READY,
+  SESSION_STATUS_THINKING: SessionStatus.THINKING,
+  SESSION_STATUS_PERMISSION: SessionStatus.PERMISSION,
+  SESSION_STATUS_DONE: SessionStatus.DONE,
+  SESSION_STATUS_INTERRUPTED: SessionStatus.INTERRUPTED,
+  SESSION_STATUS_VENDOR_BLOCKED: SessionStatus.VENDOR_BLOCKED,
+  SESSION_STATUS_MONITORING: SessionStatus.MONITORING,
+};
+
 // --- message types ----------------------------------------------------------
 
 /** A protojson google.protobuf.Struct value (a free-form JSON object). */
 export type JsonObject = Record<string, unknown>;
+
+export interface RuntimeFault {
+  component: string;
+  faultType: string;
+  impact: string;
+  causeKind: string;
+  openedAtMs: number;
+}
 
 export interface WorkspaceState {
   workspace: string;
@@ -122,6 +172,10 @@ export interface WorkspaceState {
   causeKind: string;
   causeSeq: number;
   atMs: number;
+  connectivity: SessionConnectivity;
+  status: SessionStatus;
+  controllerGenerationId: string;
+  activeFaults: RuntimeFault[];
 }
 
 export interface SessionView {
@@ -714,6 +768,10 @@ const WORKSPACE_STATE_KEYS = new Set([
   "causeKind",
   "causeSeq",
   "atMs",
+  "connectivity",
+  "status",
+  "controllerGenerationId",
+  "activeFaults",
 ]);
 function decodeWorkspaceState(v: unknown): WorkspaceState {
   const o = ensureObject(v, "WorkspaceState");
@@ -728,6 +786,12 @@ function decodeWorkspaceState(v: unknown): WorkspaceState {
     causeKind: str(o, "causeKind", "WorkspaceState"),
     causeSeq: num(o, "causeSeq", "WorkspaceState"),
     atMs: num(o, "atMs", "WorkspaceState"),
+    connectivity: enumSessionConnectivity(o, "connectivity", "WorkspaceState"),
+    status: enumSessionStatus(o, "status", "WorkspaceState"),
+    controllerGenerationId: str(o, "controllerGenerationId", "WorkspaceState"),
+    activeFaults: ensureArray(o.activeFaults ?? [], "WorkspaceState.activeFaults").map(
+      decodeRuntimeFault,
+    ),
   };
   if (ws.workspace === "") {
     throw new Error("frontend-proto: WorkspaceState missing required `workspace`");
@@ -738,7 +802,44 @@ function decodeWorkspaceState(v: unknown): WorkspaceState {
         "render state (SSM must resolve a concrete state)",
     );
   }
+  if (ws.connectivity === SessionConnectivity.UNSPECIFIED) {
+    throw new Error(
+      `frontend-proto: WorkspaceState for '${ws.workspace}' has UNSPECIFIED session connectivity`,
+    );
+  }
+  if (
+    ws.connectivity !== SessionConnectivity.HIBERNATED &&
+    (ws.sessionId === "" || ws.controllerGenerationId === "")
+  ) {
+    throw new Error(
+      `frontend-proto: WorkspaceState for '${ws.workspace}' has ` +
+        `${SessionConnectivity[ws.connectivity]} connectivity without complete session-controller identity`,
+    );
+  }
   return ws;
+}
+
+const RUNTIME_FAULT_KEYS = new Set([
+  "component",
+  "faultType",
+  "impact",
+  "causeKind",
+  "openedAtMs",
+]);
+function decodeRuntimeFault(v: unknown): RuntimeFault {
+  const o = ensureObject(v, "RuntimeFault");
+  rejectUnknown(o, RUNTIME_FAULT_KEYS, "RuntimeFault");
+  const fault: RuntimeFault = {
+    component: str(o, "component", "RuntimeFault"),
+    faultType: str(o, "faultType", "RuntimeFault"),
+    impact: str(o, "impact", "RuntimeFault"),
+    causeKind: str(o, "causeKind", "RuntimeFault"),
+    openedAtMs: num(o, "openedAtMs", "RuntimeFault"),
+  };
+  if (fault.component === "" || fault.faultType === "" || fault.impact === "") {
+    throw new Error("frontend-proto: RuntimeFault missing component, faultType, or impact");
+  }
+  return fault;
 }
 
 const SESSION_VIEW_KEYS = new Set([
@@ -1545,16 +1646,42 @@ function bool(o: Obj, key: string, ctx: string): boolean {
 }
 
 function enumRenderState(o: Obj, key: string, ctx: string): RenderState {
+  return enumValue(o, key, ctx, RenderState, RENDER_STATE_BY_NAME, RenderState.UNSPECIFIED);
+}
+
+function enumSessionConnectivity(o: Obj, key: string, ctx: string): SessionConnectivity {
+  return enumValue(
+    o,
+    key,
+    ctx,
+    SessionConnectivity,
+    SESSION_CONNECTIVITY_BY_NAME,
+    SessionConnectivity.UNSPECIFIED,
+  );
+}
+
+function enumSessionStatus(o: Obj, key: string, ctx: string): SessionStatus {
+  return enumValue(o, key, ctx, SessionStatus, SESSION_STATUS_BY_NAME, SessionStatus.UNSPECIFIED);
+}
+
+function enumValue<T extends number>(
+  o: Obj,
+  key: string,
+  ctx: string,
+  numericNames: Record<number, string>,
+  names: Readonly<Record<string, T>>,
+  unspecified: T,
+): T {
   const v = o[key];
-  if (v === undefined || v === null) return RenderState.UNSPECIFIED;
+  if (v === undefined || v === null) return unspecified;
   if (typeof v === "number") {
-    if (RenderState[v] === undefined) {
+    if (numericNames[v] === undefined) {
       throw new Error(`frontend-proto: ${ctx}.${key} has unknown enum value ${v}`);
     }
-    return v as RenderState;
+    return v as T;
   }
   if (typeof v === "string") {
-    const mapped = RENDER_STATE_BY_NAME[v];
+    const mapped = names[v];
     if (mapped === undefined) {
       throw new Error(`frontend-proto: ${ctx}.${key} has unknown enum value '${v}'`);
     }

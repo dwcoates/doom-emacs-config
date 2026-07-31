@@ -96,6 +96,10 @@ function workspaceStateView(state: string, turnActive = false): Record<string, u
     workspace: WS,
     sessionId: SESSION,
     state,
+    connectivity: "SESSION_CONNECTIVITY_OPERATIONAL",
+    status: turnActive ? "SESSION_STATUS_THINKING" : "SESSION_STATUS_DONE",
+    controllerGenerationId: "g1",
+    activeFaults: [],
     ...(turnActive ? { turnActive: true } : {}),
     atMs: String(NOW_MS),
   };
@@ -140,6 +144,8 @@ function flow(): Flow {
       footer.render({
         progress: store.progress,
         renderState: s.renderState,
+        connectivity: s.sessionConnectivity,
+        sessionStatus: s.sessionStatus,
         agents: sessionSubagents(s.items),
         tasks: store.taskRoster,
         items: s.items,

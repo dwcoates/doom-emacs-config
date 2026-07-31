@@ -1093,6 +1093,48 @@ Selection-handling stays orthogonal to the always-close hide path."
         (should (equal sent-text "hello world"))
         (should-not hidden)))))
 
+(ert-deftest agent-repl-test-panels-gui-show-wakes-before-presentation ()
+  "`SPC o c' show wakes a hibernated session before mounting its webview."
+  (agent-repl-test--with-clean-state
+    (let ((buf (get-buffer-create " *agent-repl-wake-test*"))
+          (events nil))
+      (unwind-protect
+          (cl-letf (((symbol-function 'agent-repl--frontend-ensure-session)
+                     (lambda (ws)
+                       (push (list :wake ws) events)
+                       "session-1"))
+                    ((symbol-function 'agent-repl--frontend-sync-webview)
+                     (lambda (ws session)
+                       (push (list :sync ws session) events)))
+                    ((symbol-function 'agent-repl--ws-get)
+                     (lambda (_ws key)
+                       (and (eq key :frontend-buffer) buf)))
+                    ((symbol-function 'agent-repl--frontend-display-webview)
+                     (lambda (ws displayed)
+                       (push (list :display ws displayed) events))))
+            (agent-repl--gui-show "ws1")
+            (should (equal
+                     (nreverse events)
+                     (list (list :wake "ws1")
+                           (list :sync "ws1" "session-1")
+                           (list :display "ws1" buf)))))
+        (kill-buffer buf)))))
+
+(ert-deftest agent-repl-test-panels-gui-show-wake-failure-does-not-present ()
+  "A failed hibernation wake signals before sync or display mutates the UI."
+  (agent-repl-test--with-clean-state
+    (let ((synced nil)
+          (displayed nil))
+      (cl-letf (((symbol-function 'agent-repl--frontend-ensure-session)
+                 (lambda (_ws) (error "wake failed")))
+                ((symbol-function 'agent-repl--frontend-sync-webview)
+                 (lambda (&rest _) (setq synced t)))
+                ((symbol-function 'agent-repl--frontend-display-webview)
+                 (lambda (&rest _) (setq displayed t))))
+        (should-error (agent-repl--gui-show "ws1"))
+        (should-not synced)
+        (should-not displayed)))))
+
 (ert-deftest agent-repl-test-panels-entry-point-simple-not-running-initializes ()
   "agent-repl-simple (SPC o c) keeps its non-always-close dispatch: when
 nothing is running, it opens the agent through the workspace's frontend

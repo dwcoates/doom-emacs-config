@@ -121,7 +121,7 @@ func TestContextCutAxesResolveTheirOwnState(t *testing.T) {
 	}
 }
 
-func TestContextCutAxesReturnToTheAgentAxisWhenClosed(t *testing.T) {
+func TestContextCutReturnsToSessionStatusWhenClosed(t *testing.T) {
 	tests := []struct {
 		name  string
 		open  func(m *Manager) error

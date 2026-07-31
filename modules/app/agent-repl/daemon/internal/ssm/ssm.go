@@ -199,7 +199,7 @@ func (m *Manager) warm() error {
 	if err := m.releasePersistedPermissionsLocked(); err != nil {
 		return err
 	}
-	// NOTHING IS WIRED TO A DAEMON THAT HAS JUST STARTED. The agent-axis
+	// NOTHING IS WIRED TO A DAEMON THAT HAS JUST STARTED. The session-status lifecycle
 	// history survives the restart and the shim connections do not, so every
 	// restored workspace is hibernated until something wires it again — which is
 	// exactly what the connection-truth law says a tab with no live session
@@ -209,6 +209,9 @@ func (m *Manager) warm() error {
 		return err
 	}
 	if err := m.hibernatePersistedConnectivityLocked(); err != nil {
+		return err
+	}
+	if err := m.seedMissingConnectivityLocked(); err != nil {
 		return err
 	}
 	names, err := distinctWorkspaces(m.db)
@@ -221,9 +224,20 @@ func (m *Manager) warm() error {
 		if err != nil {
 			return err
 		}
-		if r.found {
-			m.last[ws] = r.state
-			m.lastTasks[ws] = r.liveTaskCount
+		composite, compositeFound, err := resolveComposite(m.db, ws)
+		if err != nil {
+			return err
+		}
+		if r.found || (compositeFound && composite.LifecycleTop != "") {
+			if !r.found {
+				r = resolved{found: true, state: frontendv1.RenderState_RENDER_STATE_UNSPECIFIED}
+			}
+			msg, err := m.workspaceMessageLocked(ws, r)
+			if err != nil {
+				return err
+			}
+			m.last[ws] = msg.GetState()
+			m.lastTasks[ws] = msg.GetLiveTaskCount()
 			restored++
 		}
 	}
@@ -246,7 +260,7 @@ func (m *Manager) nextAt() int64 {
 }
 
 // Apply ingests a lifecycle event forwarded from a shim stream. Supported
-// payloads: session started/ended, turn started/ended (agent axis), task
+// payloads: session started/ended, turn started/ended (session-status lifecycle), task
 // started/ended (live-task counting), degraded state (extension). Applying
 // the same event twice (same session+seq) is a no-op. Ephemeral and
 // unmodeled payloads are ignored but loud-logged — never silently dropped.
@@ -306,7 +320,7 @@ func (m *Manager) Apply(ev *corev1.Event) error {
 	// It is applied by rewriting the row this turn end would have written
 	// anyway — never by adding a second one — which is what keeps
 	// `interrupted` the same kind of fact as `done` and `vendor_blocked`: one
-	// agent-axis row naming how the turn ended, superseded by whatever the
+	// session-status lifecycle row naming how the turn ended, superseded by whatever the
 	// agent does next.
 	state, causeKind = m.applyInterruptMarkLocked(ws, ev, state, causeKind)
 
@@ -316,7 +330,7 @@ func (m *Manager) Apply(ev *corev1.Event) error {
 	// SessionStarted is now emitted at the SHIM's own readiness rather than
 	// off the vendor's first `system:init`, which means it can legitimately
 	// arrive while a turn is already running — a shim relaunch, a revive, a
-	// re-handshake. The agent axis resolves on its LATEST row, so appending
+	// re-handshake. The session-status lifecycle resolves on its LATEST row, so appending
 	// `ready` underneath a live `thinking` would resolve the workspace green
 	// while the agent was mid-turn. That regression was observed directly
 	// (a THINKING→IDLE flip at 01:24:20 in the readiness logs).
@@ -363,7 +377,7 @@ func (m *Manager) Apply(ev *corev1.Event) error {
 	// A COMPACTION CANNOT OUTLIVE ITS TURN. The vendor opens the window with a
 	// status ticker and is not obliged to close it — a turn that dies mid-fold
 	// simply stops reporting — so the turn's own end is a hard bound on the
-	// window. Without it the phase word would stand over a settled agent axis
+	// window. Without it the phase word would stand over a settled session-status lifecycle
 	// with nothing arriving that could ever release it.
 	if _, ended := ev.GetPayload().(*corev1.Event_TurnEnded); ended {
 		m.closeCompactingLocked(ws, causeTurnEnded)
@@ -466,7 +480,7 @@ func (m *Manager) applyInterruptMarkLocked(ws string, ev *corev1.Event, state, c
 	return state, causeKind
 }
 
-// ApplySessionRotated reconciles the workspace's agent axis across a VENDOR
+// ApplySessionRotated reconciles the workspace's session-status lifecycle across a VENDOR
 // SESSION UUID ROTATION: the vendor retired one transcript identity mid-stream
 // and minted another (a `/clear` does exactly this), so the conversation
 // continues under a new store seq space.
@@ -485,7 +499,7 @@ func (m *Manager) applyInterruptMarkLocked(ws string, ev *corev1.Event, state, c
 // is superseded normally by whatever the agent does next — including the very
 // TurnEnded that arrives moments later once the new space replays.
 //
-// A settled agent axis is left ALONE. A workspace sitting in `done` when the
+// A settled session-status lifecycle is left ALONE. A workspace sitting in `done` when the
 // uuid rotated has nothing stuck to unstick, and appending `idle` over it would
 // discard a more specific true statement. `permission` is NOT settled in that
 // sense — it is a live turn wearing a green row — so it is released first and
@@ -522,7 +536,7 @@ func (m *Manager) ApplySessionRotated(workspace, previous, next string) error {
 	// A PENDING PERMISSION DOES NOT SURVIVE THE ROTATION EITHER: the shim that
 	// asked the question is bounced, every waiter on it is abandoned, and the
 	// re-asked question arrives under the new identity as a fresh request. It is
-	// released FIRST so the reconciliation below sees the agent axis's real
+	// released FIRST so the reconciliation below sees the session-status lifecycle's real
 	// truth: the row buries the `thinking` of the turn that asked, and left
 	// standing it would make the in-flight turn this method exists to unstick
 	// look like a settled workspace with nothing stuck.
@@ -533,7 +547,7 @@ func (m *Manager) ApplySessionRotated(workspace, previous, next string) error {
 		return err
 	}
 	if !active {
-		m.logf("ssm: vendor session rotated ws=%s %s -> %s — no turn was in flight, agent axis left as it stands",
+		m.logf("ssm: vendor session rotated ws=%s %s -> %s — no turn was in flight, session-status lifecycle left as it stands",
 			workspace, previous, next)
 		return nil
 	}
@@ -541,7 +555,7 @@ func (m *Manager) ApplySessionRotated(workspace, previous, next string) error {
 	if err := appendRow(m.db, workspace, "", sigIdle, cause, sql.NullInt64{}, m.nextAt(), ""); err != nil {
 		return err
 	}
-	m.logf("ssm: vendor session rotated ws=%s %s -> %s — the in-flight turn's end belongs to the retired identity, so the agent axis is reconciled to `idle` rather than held in `thinking`",
+	m.logf("ssm: vendor session rotated ws=%s %s -> %s — the in-flight turn's end belongs to the retired identity, so the session-status lifecycle is reconciled to `idle` rather than held in `thinking`",
 		workspace, previous, next)
 	return m.reresolveLocked(workspace, cause, 0)
 }
@@ -576,7 +590,7 @@ func (m *Manager) InvalidateTurnClaim(workspace, staleSessionID, reason string) 
 		return err
 	}
 	if !active {
-		m.logf("ssm: turn claim release ws=%s session=%s reason=%q — no turn was in flight, agent axis left as it stands",
+		m.logf("ssm: turn claim release ws=%s session=%s reason=%q — no turn was in flight, session-status lifecycle left as it stands",
 			workspace, staleSessionID, reason)
 		return nil
 	}
@@ -589,7 +603,7 @@ func (m *Manager) InvalidateTurnClaim(workspace, staleSessionID, reason string) 
 	if err := appendRow(m.db, workspace, staleSessionID, sigIdle, cause, sql.NullInt64{}, m.nextAt(), ""); err != nil {
 		return err
 	}
-	m.logf("ssm: turn claim INVALIDATED ws=%s session=%s reason=%q — the session holding `thinking` is gone and its turn's end will never arrive, so the agent axis is reconciled to `idle` rather than held in `thinking`",
+	m.logf("ssm: turn claim INVALIDATED ws=%s session=%s reason=%q — the session holding `thinking` is gone and its turn's end will never arrive, so the session-status lifecycle is reconciled to `idle` rather than held in `thinking`",
 		workspace, staleSessionID, reason)
 	return m.reresolveLocked(workspace, cause, 0)
 }
@@ -607,7 +621,7 @@ func (m *Manager) InvalidateTurnClaim(workspace, staleSessionID, reason string) 
 //
 // STATE is the sessioncontroller token ("pending" | "done" | "failed"). `pending` is
 // deliberately NOT blue on its own: a session mid-backfill has not been wired
-// yet and the WIRED axis already holds it blue, and treating pending as a
+// yet and the legacy connectivity projection already holds it blue, and treating pending as a
 // separate blue would mean a REOPENED session whose history is already in the
 // store — and which therefore never emits a fresh transition — could never
 // leave it. See sessioncontroller.settleBackfillFromStore for the other half of that.
@@ -632,7 +646,7 @@ func (m *Manager) ApplyBackfillState(workspace, state string) error {
 // ApplyConnectionDegraded records the daemon's OWN observation of the shim
 // transport going quiet, or coming back (F4).
 //
-// The degraded AXIS already existed, fed by the shim's own DegradedState
+// The legacy impairment projection already existed, fed by the shim's own DegradedState
 // events. What did not reach it was the transport-level miss the daemon
 // detects itself: the missed-heartbeat window called the Degraded sink and
 // nothing appended a row, so a heartbeat miss produced a banner and no state
@@ -712,17 +726,28 @@ func (m *Manager) reresolveLocked(workspace, causeKind string, causeSeq uint64) 
 		return err
 	}
 	if !r.found {
-		return nil
+		composite, found, err := resolveComposite(m.db, workspace)
+		if err != nil {
+			return err
+		}
+		if !found || composite.LifecycleTop == "" {
+			return nil
+		}
+		r = resolved{found: true, state: frontendv1.RenderState_RENDER_STATE_UNSPECIFIED}
+	}
+	msg, err := m.workspaceMessageLocked(workspace, r)
+	if err != nil {
+		return err
 	}
 	old, had := m.last[workspace]
 	oldTasks, hadTasks := m.lastTasks[workspace]
-	stateMoved := !had || old != r.state
-	tasksMoved := !hadTasks || oldTasks != r.liveTaskCount
+	stateMoved := !had || old != msg.GetState()
+	tasksMoved := !hadTasks || oldTasks != msg.GetLiveTaskCount()
 	if !stateMoved && !tasksMoved {
 		return nil // nothing visible changed; stay quiet (§12: log deltas only)
 	}
-	m.last[workspace] = r.state
-	m.lastTasks[workspace] = r.liveTaskCount
+	m.last[workspace] = msg.GetState()
+	m.lastTasks[workspace] = msg.GetLiveTaskCount()
 
 	if stateMoved {
 		oldName := "∅"
@@ -731,31 +756,53 @@ func (m *Manager) reresolveLocked(workspace, causeKind string, causeSeq uint64) 
 		}
 		// §12 SSM contract: every transition logged old→new + cause kind + seq.
 		m.logf("ssm: transition ws=%s %s→%s cause_kind=%s cause_seq=%d turn_active=%t live_tasks=%d merge=%q",
-			workspace, oldName, renderName(r.state), causeKind, causeSeq, r.turnActive, r.liveTaskCount, r.mergePhase)
+			workspace, oldName, renderName(msg.GetState()), causeKind, causeSeq, msg.GetTurnActive(), msg.GetLiveTaskCount(), msg.GetMergePhase())
 	} else {
 		m.logf("ssm: live_tasks ws=%s %d→%d cause_kind=%s cause_seq=%d state=%s",
-			workspace, oldTasks, r.liveTaskCount, causeKind, causeSeq, renderName(r.state))
+			workspace, oldTasks, msg.GetLiveTaskCount(), causeKind, causeSeq, renderName(msg.GetState()))
 	}
 
-	m.pushLocked(workspace, r)
-	return nil
+	return m.pushMessageLocked(workspace, msg)
 }
 
 // pushLocked broadcasts a WorkspaceState to every subscriber. A full
 // subscriber channel is a slow consumer: the update is dropped loudly (the
 // consumer recovers from a subsequent Snapshot), never blocked on.
-func (m *Manager) pushLocked(workspace string, r resolved) {
+func (m *Manager) pushLocked(workspace string, r resolved) error {
 	if len(m.subs) == 0 {
-		return
+		return nil
 	}
-	msg := r.toProto(workspace)
+	msg, err := m.workspaceMessageLocked(workspace, r)
+	if err != nil {
+		return err
+	}
+	return m.pushMessageLocked(workspace, msg)
+}
+
+func (m *Manager) workspaceMessageLocked(workspace string, r resolved) (*frontendv1.WorkspaceState, error) {
+	composite, found, err := resolveComposite(m.db, workspace)
+	if err != nil {
+		return nil, fmt.Errorf("ssm: resolve composite for push workspace=%q: %w", workspace, err)
+	}
+	if !found {
+		return r.toProto(workspace), nil
+	}
+	if composite.LifecycleTop == "" {
+		return r.toProto(workspace), nil
+	}
+	return compositeWorkspaceState(workspace, r, composite)
+}
+
+func (m *Manager) pushMessageLocked(workspace string, msg *frontendv1.WorkspaceState) error {
 	for id, ch := range m.subs {
 		select {
 		case ch <- msg:
 		default:
-			m.logf("ssm: subscriber %d slow; dropped ws=%s state=%s (will resync via Snapshot)", id, workspace, renderName(r.state))
+			m.logf("ssm: subscriber %d slow; dropped ws=%s state=%s connectivity=%s status=%s (will resync via Snapshot)",
+				id, workspace, renderName(msg.GetState()), msg.GetConnectivity(), msg.GetStatus())
 		}
 	}
+	return nil
 }
 
 // Current returns the resolved WorkspaceState for a workspace. found is
@@ -768,10 +815,27 @@ func (m *Manager) Current(workspace string) (*frontendv1.WorkspaceState, bool, e
 	if err != nil {
 		return nil, false, err
 	}
-	if !r.found {
+	composite, compositeFound, err := resolveComposite(m.db, workspace)
+	if err != nil {
+		return nil, false, err
+	}
+	if !r.found && (!compositeFound || composite.LifecycleTop == "") {
 		return nil, false, nil
 	}
-	return r.toProto(workspace), true, nil
+	if !r.found {
+		r = resolved{found: true, state: frontendv1.RenderState_RENDER_STATE_UNSPECIFIED}
+	}
+	if !compositeFound {
+		return r.toProto(workspace), true, nil
+	}
+	if composite.LifecycleTop == "" {
+		return r.toProto(workspace), true, nil
+	}
+	msg, err := compositeWorkspaceState(workspace, r, composite)
+	if err != nil {
+		return nil, false, err
+	}
+	return msg, true, nil
 }
 
 // Snapshot returns the current WorkspaceState of every workspace with a
@@ -789,9 +853,25 @@ func (m *Manager) Snapshot() ([]*frontendv1.WorkspaceState, error) {
 		if err != nil {
 			return nil, err
 		}
-		if r.found {
-			out = append(out, r.toProto(ws))
+		composite, compositeFound, err := resolveComposite(m.db, ws)
+		if err != nil {
+			return nil, err
 		}
+		if !r.found && (!compositeFound || composite.LifecycleTop == "") {
+			continue
+		}
+		if !r.found {
+			r = resolved{found: true, state: frontendv1.RenderState_RENDER_STATE_UNSPECIFIED}
+		}
+		if !compositeFound || composite.LifecycleTop == "" {
+			out = append(out, r.toProto(ws))
+			continue
+		}
+		msg, err := compositeWorkspaceState(ws, r, composite)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, msg)
 	}
 	return out, nil
 }
@@ -890,7 +970,7 @@ func agentOrTaskSignal(ev *corev1.Event) (state, causeKind string, ok bool) {
 	case *corev1.Event_TurnStarted:
 		return sigThinking, causeTurnStarted, true
 	case *corev1.Event_TurnEnded:
-		// EXACTLY ONE agent-axis row per turn end, naming HOW the turn
+		// EXACTLY ONE session-status lifecycle row per turn end, naming HOW the turn
 		// ended. `vendor_blocked` and `done` are the same kind of fact —
 		// a report of the concluded turn — so they are the same axis and
 		// the same row, and whatever the agent does next supersedes it.

@@ -100,7 +100,7 @@ failure is surfaced, not hidden)."
     ;; RED like :thinking — the agent is busy and a prompt cannot land yet.
     ;; The two context cuts differ from thinking only in WHAT the agent is
     ;; busy with, which the word carries; the color claim is the same.
-    ;; THE CLOSED HALF OF THE WIRED AXIS IS TWO STATES, and it used to be one.
+    ;; THE CLOSED HALF OF THE legacy connectivity projection IS TWO STATES, and it used to be one.
     ;; A single RENDER_STATE_DORMANT meant both "we put this session to sleep on
     ;; purpose to reclaim its ~500MB" and "the backend substrate is broken", so
     ;; the most ordinary event in the system painted a tab exactly like a dead
@@ -165,6 +165,65 @@ threads per-workspace log metadata through a state-frame application."
                              "frontend-state->keyword: state=%s keyword=%s"
                              state kw)
     kw))
+
+(defconst agent-repl--frontend-connectivity-map
+  '(("SESSION_CONNECTIVITY_HIBERNATED" . :hibernated)
+    ("SESSION_CONNECTIVITY_CONNECTING" . :connecting)
+    ("SESSION_CONNECTIVITY_OPERATIONAL" . :operational)
+    ("SESSION_CONNECTIVITY_DEGRADED" . :degraded)
+    ("SESSION_CONNECTIVITY_UNAVAILABLE" . :unavailable))
+  "Closed daemon-pushed session-connectivity vocabulary.")
+
+(defconst agent-repl--frontend-session-status-map
+  '(("SESSION_STATUS_READY" . :ready)
+    ("SESSION_STATUS_THINKING" . :thinking)
+    ("SESSION_STATUS_PERMISSION" . :permission)
+    ("SESSION_STATUS_DONE" . :done)
+    ("SESSION_STATUS_INTERRUPTED" . :interrupted)
+    ("SESSION_STATUS_VENDOR_BLOCKED" . :vendor-blocked)
+    ("SESSION_STATUS_MONITORING" . :monitoring))
+  "Closed daemon-pushed session-status vocabulary.")
+
+(defun agent-repl--frontend-enum->keyword
+    (value mapping field workspace &optional allow-unspecified)
+  "Map enum VALUE through MAPPING for FIELD and WORKSPACE.
+ALLOW-UNSPECIFIED returns nil only for a nil or explicitly unspecified
+session-status value.  Every other missing or unknown enum fails loudly."
+  (let ((keyword (and (stringp value) (cdr (assoc value mapping)))))
+    (cond
+     (keyword
+      (agent-repl--log-verbose
+       workspace "frontend-enum->keyword: field=%s value=%s keyword=%s"
+       field value keyword)
+      keyword)
+     ((and allow-unspecified
+           (or (null value)
+               (equal value "SESSION_STATUS_UNSPECIFIED")))
+      nil)
+     (t
+      (agent-repl--log
+       workspace
+       "frontend-enum->keyword: UNMAPPABLE field=%s value=%S allow-unspecified=%S"
+       field value allow-unspecified)
+      (error "agent-repl frontend: unmappable %s %S" field value)))))
+
+(defun agent-repl--frontend-validate-runtime-faults (workspace faults)
+  "Validate daemon-pushed runtime FAULTS for WORKSPACE and return them."
+  (dolist (fault faults)
+    (let ((component (plist-get fault :component))
+          (fault-type (plist-get fault :faultType))
+          (impact (plist-get fault :impact)))
+      (when (or (not (stringp component)) (string-empty-p component)
+                (not (stringp fault-type)) (string-empty-p fault-type)
+                (not (member impact
+                             '("connectivity" "feature" "command"
+                               "turn-terminal"))))
+        (agent-repl--log
+         workspace
+         "frontend-runtime-fault: INVALID component=%S fault-type=%S impact=%S fault=%S"
+         component fault-type impact fault)
+        (error "agent-repl frontend: invalid RuntimeFault %S" fault))))
+  faults)
 
 ;;;; ---- WorkspaceState application --------------------------------------
 
@@ -238,17 +297,48 @@ Fails loudly on a missing/blank `workspace' (invariant violation)."
                        "frontend-apply-workspace-state: MISSING workspace in %S — no fallback"
                        ws-state)
       (error "agent-repl frontend: WorkspaceState missing workspace"))
-    ;; Preserve the daemon fact even before snapshot restore recreates the
-    ;; corresponding Emacs workspace.  Render application below may honestly
-    ;; drop an unowned path, but startup bounce safety must still see its
-    ;; `turnActive' bit.
-    (puthash raw-workspace ws-state agent-repl--frontend-workspace-state-views)
-    ;; No live workspace owning this cwd means the daemon is reporting state
-    ;; for something Emacs does not have open. Dropping it is honest; keying
-    ;; it under the path would STUB-CREATE an entry the renderer never reads.
-    (if-let ((workspace (agent-repl--frontend-ws-name raw-workspace)))
-    (let* ((keyword (agent-repl--frontend-state->keyword state workspace))
-           (previous (agent-repl--ws-get workspace :pushed-render-state))
+    (let* ((workspace (agent-repl--frontend-ws-name raw-workspace))
+           (diagnostic-workspace (or workspace raw-workspace))
+           (keyword
+            (agent-repl--frontend-state->keyword
+             state diagnostic-workspace))
+           (connectivity
+            (agent-repl--frontend-enum->keyword
+             (plist-get ws-state :connectivity)
+             agent-repl--frontend-connectivity-map
+             "SessionConnectivity" diagnostic-workspace))
+           (session-status
+            (agent-repl--frontend-enum->keyword
+             (plist-get ws-state :status)
+             agent-repl--frontend-session-status-map
+             "SessionStatus" diagnostic-workspace t))
+           (session-id (plist-get ws-state :sessionId))
+           (generation-id (plist-get ws-state :controllerGenerationId))
+           (faults
+            (agent-repl--frontend-validate-runtime-faults
+             diagnostic-workspace (plist-get ws-state :activeFaults))))
+      ;; Validate every precondition before retaining the raw frame or mutating
+      ;; workspace state, so a malformed composite verdict cannot partially
+      ;; land.
+      (when (and (not (eq connectivity :hibernated))
+                 (or (not (stringp session-id)) (string-empty-p session-id)
+                     (not (stringp generation-id))
+                     (string-empty-p generation-id)))
+        (agent-repl--log
+         diagnostic-workspace
+         "frontend-apply-workspace-state: INCOMPLETE controller identity connectivity=%s session=%S generation=%S"
+         connectivity session-id generation-id)
+        (error "agent-repl frontend: incomplete session-controller identity"))
+      ;; Preserve the daemon fact even before snapshot restore recreates the
+      ;; corresponding Emacs workspace.  Render application below may honestly
+      ;; drop an unowned path, but startup bounce safety must still see its
+      ;; `turnActive' bit.
+      (puthash raw-workspace ws-state agent-repl--frontend-workspace-state-views)
+      ;; No live workspace owning this cwd means the daemon is reporting state
+      ;; for something Emacs does not have open. Dropping it is honest; keying
+      ;; it under the path would STUB-CREATE an entry the renderer never reads.
+      (if workspace
+    (let* ((previous (agent-repl--ws-get workspace :pushed-render-state))
            ;; live_task_count / cause_seq / at_ms are proto int64/uint64,
            ;; which protojson encodes as JSON strings — stored verbatim.
            (turn-active (plist-get ws-state :turnActive))
@@ -257,6 +347,8 @@ Fails loudly on a missing/blank `workspace' (invariant violation)."
            (cause-kind (plist-get ws-state :causeKind))
            (cause-seq (plist-get ws-state :causeSeq)))
       (agent-repl--ws-put workspace :pushed-render-state keyword)
+      (agent-repl--ws-put workspace :pushed-session-connectivity connectivity)
+      (agent-repl--ws-put workspace :pushed-session-status session-status)
       (agent-repl--ws-put workspace :pushed-render-state-meta
                           (list :turn-active turn-active
                                 :live-task-count live-tasks
@@ -264,11 +356,14 @@ Fails loudly on a missing/blank `workspace' (invariant violation)."
                                 :cause-kind cause-kind
                                 :cause-seq cause-seq
                                 :at-ms (plist-get ws-state :atMs)
-                                :session-id (plist-get ws-state :sessionId)))
+                                :session-id session-id
+                                :controller-generation-id generation-id
+                                :active-faults faults))
       (agent-repl--log workspace
-                       "frontend-apply-workspace-state: %s -> %s (cause=%s seq=%s turn-active=%S live-tasks=%s merge-phase=%s)"
-                       previous keyword cause-kind cause-seq
-                       turn-active live-tasks merge-phase)
+                       "frontend-apply-workspace-state: %s -> %s connectivity=%s status=%s session=%S generation=%S faults=%S cause=%s seq=%s turn-active=%S live-tasks=%s merge-phase=%s"
+                       previous keyword connectivity session-status session-id
+                       generation-id faults cause-kind cause-seq turn-active
+                       live-tasks merge-phase)
       ;; Session-ready latch (design §10 cutover gap): the SessionStart
       ;; managed hook that used to set the `:agent-ready' half of the
       ;; ws-fully-loaded latch was deleted in S2, orphaning
@@ -286,7 +381,7 @@ Fails loudly on a missing/blank `workspace' (invariant violation)."
                        "frontend-apply-workspace-state: no live workspace owns %s — retained for restart safety, render skipped (state=%s session=%s turn-active=%S)"
                        raw-workspace state (plist-get ws-state :sessionId)
                        (plist-get ws-state :turnActive))
-      nil)))
+      nil))))
 
 (defun agent-repl--frontend-maybe-latch-agent-ready (workspace)
   "Set the `:agent-ready' latch bit for WORKSPACE on its FIRST pushed state.
@@ -374,7 +469,7 @@ receives every catalog but has no per-task roster."
 ;; how much conversation the outage had cost.
 ;;
 ;; Degradation is now a self-resolving failure CARD on the conversation
-;; plane, plus a move on the SSM's degraded axis that colors the workspace.
+;; plane, plus a move on the SSM's legacy impairment projection that colors the workspace.
 ;; The frame arm itself is gone (reserved 8/"degraded_notice" in
 ;; frontend.proto, step 11): `degradedNotice' is no longer in
 ;; `agent-repl--uds-known-frame-fields', so a push from a daemon old enough
