@@ -500,6 +500,10 @@ body::after {
    alignment invisibly. */
 #ws-sidebar .st { flex: 0 0 auto; width: 9px; height: 9px; border-radius: 50%; }
 #ws-sidebar .st-thinking { background: var(--err); animation: ws-pulse 1.3s ease-in-out infinite; }
+/* SUBMITTING breathes exactly as thinking does: a turn is in flight and a
+   prompt cannot land, which is the same claim. Only the footer's phase word
+   says the shim has not taken it yet. */
+#ws-sidebar .st-submitting { background: var(--err); animation: ws-pulse 1.3s ease-in-out infinite; }
 /* The two context cuts breathe exactly as thinking does: the agent is busy
    and a prompt cannot land, which is the same claim. Only the footer's phase
    word says WHAT it is busy with. */
