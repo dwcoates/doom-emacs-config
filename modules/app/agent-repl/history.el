@@ -109,7 +109,7 @@ moment a live session reported no uuid, a good persisted one was
 overwritten with nil — and the next open silently began a FRESH
 conversation on top of an intact transcript.
 
-Emacs now sends an INTENT (`agent-repl--frontend-create-session\=' and its
+Emacs now sends an INTENT (`agent-repl--frontend-after-create-session\=' and its
 RESUME-MODE) and never a pointer, so there is nothing here to go stale.
 An empty plist is retained rather than the key removed because the
 instantiation is still the per-environment slot; it simply carries nothing

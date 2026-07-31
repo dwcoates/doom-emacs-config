@@ -682,7 +682,7 @@ which is exactly how the old HTTP probes treated an unreachable daemon."
 (defun agent-repl--frontend-invalidate-daemon-view (reason)
   "Invalidate the retained daemon identity before a new UDS connection.
 REASON names the connection boundary that made the prior view stale.  The
-next `agent-repl--frontend-wait-ready' must then pump until a fresh snapshot
+next `agent-repl--frontend-after-ready' must then poll until a fresh snapshot
 applies a new `DaemonView'; merely opening a socket can no longer satisfy
 readiness with the previous daemon instance's identity."
   (let ((prior agent-repl--frontend-last-daemon-view))

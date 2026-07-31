@@ -100,7 +100,7 @@ added and Claude uses its configured default.  Does NOT affect headless
   "Return MODEL, or `agent-repl-interactive-model' when MODEL is nil.
 The single resolver for which model a session launches under, shared by
 the CLI-launch path (`agent-repl--compute-claude-flags') and the
-gui-frontend create path (`agent-repl--frontend-create-session').  A nil
+gui-frontend create path (`agent-repl--frontend-after-create-session').  A nil
 result — MODEL and `agent-repl-interactive-model' both nil — means no
 `--model' is pinned and Claude picks its configured default."
   (or model agent-repl-interactive-model))

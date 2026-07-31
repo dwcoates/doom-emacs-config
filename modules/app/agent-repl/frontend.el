@@ -51,7 +51,7 @@
 (declare-function agent-repl--ws-put "agent-repl-workspace" (ws key val))
 (declare-function agent-repl--align-buffer-to-ws-dir "agent-repl-status" (buf ws))
 (declare-function agent-repl--frontend-after-ensure-session "agent-repl-frontend-client" (ws on-success on-failure))
-(declare-function agent-repl--frontend-force-fresh-session "agent-repl-frontend-client" (ws))
+(declare-function agent-repl--frontend-force-fresh-session "agent-repl-frontend-client" (ws on-success on-failure))
 (declare-function agent-repl--frontend-restart-session "agent-repl-frontend-client" (ws))
 (declare-function agent-repl--frontend-session-url "agent-repl-frontend-client" (session-id))
 (declare-function agent-repl-window--panel-window "agent-repl-window" (kind &optional ws frame))
@@ -75,7 +75,7 @@
 (declare-function agent-repl--gui-interrupt "agent-repl-frontend-client" (ws kind))
 (declare-function agent-repl--gui-running-p "agent-repl-frontend-client" (ws))
 (declare-function agent-repl--gui-durable-session-id "agent-repl-frontend-client" (ws))
-(declare-function agent-repl--gui-adopt-session "agent-repl-frontend-client" (ws claude-session-id))
+(declare-function agent-repl--gui-adopt-session "agent-repl-frontend-client" (ws claude-session-id on-success on-failure))
 (defvar agent-repl-input-height-fraction)
 (declare-function xwidget-webkit--create-new-session-buffer "xwidget" (url &optional callback))
 (declare-function xwidget-webkit-current-session "xwidget" ())
@@ -813,7 +813,7 @@ answered; the gui branch of `agent-repl--on-session-start-event' flips
 
 The hints are unused: `agent-repl--frontend-boot-session' has already
 hydrated the environment with them, and the gui reads WS's
-`:project-dir' from the plist (`agent-repl--frontend-ensure-session')."
+`:project-dir' from the plist (`agent-repl--frontend-after-ensure-session')."
   (agent-repl--frontend-validate-for-ws 'gui ws)
   (agent-repl--log ws "gui-boot: begin")
   (agent-repl--ws-set-agent-state ws :init)
@@ -837,7 +837,7 @@ topbar.  Omitted when the workspace has no recorded parent."
 (defun agent-repl--frontend-sync-webview (ws session-id)
   "Remount WS's displayed webview when bound to a session other than SESSION-ID.
 The send path heals a dead daemon session by creating a fresh one
-\(`agent-repl--frontend-ensure-session'); without this remount the
+\(`agent-repl--frontend-after-ensure-session'); without this remount the
 displayed webview keeps rendering the DEAD session while the turn
 streams into the replacement.  No-op when no webview buffer is live
 \(panel closed — the next open mounts fresh anyway) or when the
@@ -868,7 +868,7 @@ binding already matches."
 The daemon serves the webapp off disk (`http.FileServer'), so a rebuilt
 bundle is live the moment `bin/build-frontend.sh' finishes — but an
 already-mounted webview keeps rendering the bundle it first loaded, and
-`agent-repl--frontend-ensure-session' would REUSE that live buffer
+`agent-repl--frontend-after-ensure-session' would REUSE that live buffer
 because the session is unchanged.  Kill the buffer and drop its binding
 first, so the fresh mount navigates the URL clean and refetches (Vite's
 content-hashed asset names turn the refetch into a guaranteed cache
@@ -939,10 +939,15 @@ there is no current workspace."
     (unless ws
       (user-error "agent-repl: no current workspace"))
     (agent-repl--log ws "force-fresh-conversation: begin")
-    (let ((id (agent-repl--frontend-force-fresh-session ws)))
-      (agent-repl--frontend-sync-webview ws id)
-      (agent-repl--log ws "force-fresh-conversation: outcome=session=%s" id)
-      (message "agent-repl: started a fresh conversation (%s)" id))))
+    (agent-repl--frontend-force-fresh-session
+     ws
+     (lambda (id)
+       (agent-repl--frontend-sync-webview ws id)
+       (agent-repl--log ws "force-fresh-conversation: outcome=session=%s" id)
+       (message "agent-repl: started a fresh conversation (%s)" id))
+     (lambda (detail)
+       (agent-repl--log ws "force-fresh-conversation: FAILED detail=%s" detail)))
+    :pending))
 
 ;;;###autoload
 (defun agent-repl-restart-session ()
