@@ -520,6 +520,69 @@ func (BackfillState) EnumDescriptor() ([]byte, []int) {
 	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{3}
 }
 
+// WHO drove the turn that produced a conversation item.
+//
+// The merge coordinator borrows a workspace's own shim to resolve a merge
+// conflict (the session holding the full context of the work is the one best
+// equipped to resolve it), so a session can emit a full turn the user never
+// prompted. That provenance is a durable FACT recorded on every item, not a
+// rendering hint: frontends decide independently what to do with it, and the
+// decision can change without another wire change.
+type ConversationSource int32
+
+const (
+	// Never set by the daemon. proto3 reserves 0 for "the field was not
+	// populated", and every item the daemon builds sets one of the arms below,
+	// so a receiver seeing UNSPECIFIED is looking at a malformed frame and must
+	// reject it loudly rather than assume USER.
+	ConversationSource_CONVERSATION_SOURCE_UNSPECIFIED ConversationSource = 0
+	// An ordinary turn: the user prompted it, or it followed from one.
+	ConversationSource_CONVERSATION_SOURCE_USER ConversationSource = 1
+	// A turn merge.Coordinator drove under its lease (conflict resolution).
+	ConversationSource_CONVERSATION_SOURCE_MERGE ConversationSource = 2
+)
+
+// Enum value maps for ConversationSource.
+var (
+	ConversationSource_name = map[int32]string{
+		0: "CONVERSATION_SOURCE_UNSPECIFIED",
+		1: "CONVERSATION_SOURCE_USER",
+		2: "CONVERSATION_SOURCE_MERGE",
+	}
+	ConversationSource_value = map[string]int32{
+		"CONVERSATION_SOURCE_UNSPECIFIED": 0,
+		"CONVERSATION_SOURCE_USER":        1,
+		"CONVERSATION_SOURCE_MERGE":       2,
+	}
+)
+
+func (x ConversationSource) Enum() *ConversationSource {
+	p := new(ConversationSource)
+	*p = x
+	return p
+}
+
+func (x ConversationSource) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ConversationSource) Descriptor() protoreflect.EnumDescriptor {
+	return file_agentshim_frontend_v1_frontend_proto_enumTypes[4].Descriptor()
+}
+
+func (ConversationSource) Type() protoreflect.EnumType {
+	return &file_agentshim_frontend_v1_frontend_proto_enumTypes[4]
+}
+
+func (x ConversationSource) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ConversationSource.Descriptor instead.
+func (ConversationSource) EnumDescriptor() ([]byte, []int) {
+	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{4}
+}
+
 // The class of a system failure. SEMANTIC, not chromatic: the wire says what
 // KIND of thing failed and each frontend decides what that looks like. A wire
 // that spoke in colors would make every future frontend inherit this one's
@@ -565,11 +628,11 @@ func (x ErrorClass) String() string {
 }
 
 func (ErrorClass) Descriptor() protoreflect.EnumDescriptor {
-	return file_agentshim_frontend_v1_frontend_proto_enumTypes[4].Descriptor()
+	return file_agentshim_frontend_v1_frontend_proto_enumTypes[5].Descriptor()
 }
 
 func (ErrorClass) Type() protoreflect.EnumType {
-	return &file_agentshim_frontend_v1_frontend_proto_enumTypes[4]
+	return &file_agentshim_frontend_v1_frontend_proto_enumTypes[5]
 }
 
 func (x ErrorClass) Number() protoreflect.EnumNumber {
@@ -578,7 +641,7 @@ func (x ErrorClass) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use ErrorClass.Descriptor instead.
 func (ErrorClass) EnumDescriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{4}
+	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{5}
 }
 
 // What the classifier decided about a queued prompt.
@@ -635,11 +698,11 @@ func (x QueueClassification) String() string {
 }
 
 func (QueueClassification) Descriptor() protoreflect.EnumDescriptor {
-	return file_agentshim_frontend_v1_frontend_proto_enumTypes[5].Descriptor()
+	return file_agentshim_frontend_v1_frontend_proto_enumTypes[6].Descriptor()
 }
 
 func (QueueClassification) Type() protoreflect.EnumType {
-	return &file_agentshim_frontend_v1_frontend_proto_enumTypes[5]
+	return &file_agentshim_frontend_v1_frontend_proto_enumTypes[6]
 }
 
 func (x QueueClassification) Number() protoreflect.EnumNumber {
@@ -648,7 +711,7 @@ func (x QueueClassification) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use QueueClassification.Descriptor instead.
 func (QueueClassification) EnumDescriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{5}
+	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{6}
 }
 
 // The severity of a ClientLogCmd. A closed vocabulary rather than a free
@@ -689,11 +752,11 @@ func (x ClientLogLevel) String() string {
 }
 
 func (ClientLogLevel) Descriptor() protoreflect.EnumDescriptor {
-	return file_agentshim_frontend_v1_frontend_proto_enumTypes[6].Descriptor()
+	return file_agentshim_frontend_v1_frontend_proto_enumTypes[7].Descriptor()
 }
 
 func (ClientLogLevel) Type() protoreflect.EnumType {
-	return &file_agentshim_frontend_v1_frontend_proto_enumTypes[6]
+	return &file_agentshim_frontend_v1_frontend_proto_enumTypes[7]
 }
 
 func (x ClientLogLevel) Number() protoreflect.EnumNumber {
@@ -702,7 +765,7 @@ func (x ClientLogLevel) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use ClientLogLevel.Descriptor instead.
 func (ClientLogLevel) EnumDescriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{6}
+	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{7}
 }
 
 // Additive (S7): session creation over UDS (replaces Emacs POST /sessions).
@@ -769,11 +832,11 @@ func (x ResumeMode) String() string {
 }
 
 func (ResumeMode) Descriptor() protoreflect.EnumDescriptor {
-	return file_agentshim_frontend_v1_frontend_proto_enumTypes[7].Descriptor()
+	return file_agentshim_frontend_v1_frontend_proto_enumTypes[8].Descriptor()
 }
 
 func (ResumeMode) Type() protoreflect.EnumType {
-	return &file_agentshim_frontend_v1_frontend_proto_enumTypes[7]
+	return &file_agentshim_frontend_v1_frontend_proto_enumTypes[8]
 }
 
 func (x ResumeMode) Number() protoreflect.EnumNumber {
@@ -782,7 +845,7 @@ func (x ResumeMode) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use ResumeMode.Descriptor instead.
 func (ResumeMode) EnumDescriptor() ([]byte, []int) {
-	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{7}
+	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{8}
 }
 
 // A runtime fault is explanatory evidence scoped to exactly one
@@ -1414,8 +1477,21 @@ type WorkspaceState struct {
 	Status                 SessionStatus       `protobuf:"varint,11,opt,name=status,proto3,enum=agentshim.frontend.v1.SessionStatus" json:"status,omitempty"`
 	ControllerGenerationId string              `protobuf:"bytes,12,opt,name=controller_generation_id,json=controllerGenerationId,proto3" json:"controller_generation_id,omitempty"`
 	ActiveFaults           []*RuntimeFault     `protobuf:"bytes,13,rep,name=active_faults,json=activeFaults,proto3" json:"active_faults,omitempty"`
-	unknownFields          protoimpl.UnknownFields
-	sizeCache              protoimpl.SizeCache
+	// Merge-queue facts. `merge_phase` (6) says WHAT this workspace's merge is
+	// doing; the two fields below say WHERE it sits among the other workspaces
+	// contending for the same repository, which no per-workspace row can carry.
+	//
+	// The queue is keyed by REPOSITORY, not by worktree: sibling worktrees of
+	// one repo cherry-pick into the same target and therefore share one queue.
+	MergeQueuePosition int32 `protobuf:"varint,14,opt,name=merge_queue_position,json=mergeQueuePosition,proto3" json:"merge_queue_position,omitempty"` // 1-based; 0 when not enqueued
+	MergeQueueDepth    int32 `protobuf:"varint,15,opt,name=merge_queue_depth,json=mergeQueueDepth,proto3" json:"merge_queue_depth,omitempty"`          // total entries on this repo's queue
+	// Whether merge.Coordinator holds the exclusivity lease on this workspace's
+	// shim. While held, USER prompting is blocked (the merge owns the session)
+	// and every conversation item the session produces carries
+	// CONVERSATION_SOURCE_MERGE.
+	MergeLeaseHeld bool `protobuf:"varint,16,opt,name=merge_lease_held,json=mergeLeaseHeld,proto3" json:"merge_lease_held,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *WorkspaceState) Reset() {
@@ -1537,6 +1613,27 @@ func (x *WorkspaceState) GetActiveFaults() []*RuntimeFault {
 		return x.ActiveFaults
 	}
 	return nil
+}
+
+func (x *WorkspaceState) GetMergeQueuePosition() int32 {
+	if x != nil {
+		return x.MergeQueuePosition
+	}
+	return 0
+}
+
+func (x *WorkspaceState) GetMergeQueueDepth() int32 {
+	if x != nil {
+		return x.MergeQueueDepth
+	}
+	return 0
+}
+
+func (x *WorkspaceState) GetMergeLeaseHeld() bool {
+	if x != nil {
+		return x.MergeLeaseHeld
+	}
+	return false
 }
 
 type SessionView struct {
@@ -1904,6 +2001,10 @@ type ConversationItem struct {
 	Uuid      string                 `protobuf:"bytes,1,opt,name=uuid,proto3" json:"uuid,omitempty"`
 	TsMs      int64                  `protobuf:"varint,2,opt,name=ts_ms,json=tsMs,proto3" json:"ts_ms,omitempty"`
 	RequestId string                 `protobuf:"bytes,3,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"` // vendor API request correlation, "" when absent
+	// Provenance. ALWAYS set (see ConversationSource): persisted with the item
+	// so a resync or transcript replay reproduces the same verdict instead of
+	// re-deriving it from state that has since moved on.
+	Source ConversationSource `protobuf:"varint,4,opt,name=source,proto3,enum=agentshim.frontend.v1.ConversationSource" json:"source,omitempty"`
 	// Types that are valid to be assigned to Item:
 	//
 	//	*ConversationItem_AssistantMessage
@@ -1971,6 +2072,13 @@ func (x *ConversationItem) GetRequestId() string {
 		return x.RequestId
 	}
 	return ""
+}
+
+func (x *ConversationItem) GetSource() ConversationSource {
+	if x != nil {
+		return x.Source
+	}
+	return ConversationSource_CONVERSATION_SOURCE_UNSPECIFIED
 }
 
 func (x *ConversationItem) GetItem() isConversationItem_Item {
@@ -6075,7 +6183,7 @@ const file_agentshim_frontend_v1_frontend_proto_rawDesc = "" +
 	"\n" +
 	"session_id\x18\x03 \x01(\tR\tsessionId\x12\x18\n" +
 	"\ahealthy\x18\x04 \x01(\bR\ahealthy\x12\x16\n" +
-	"\x06reason\x18\x05 \x01(\tR\x06reason\"\xd4\x04\n" +
+	"\x06reason\x18\x05 \x01(\tR\x06reason\"\xdc\x05\n" +
 	"\x0eWorkspaceState\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12\x1d\n" +
 	"\n" +
@@ -6094,7 +6202,10 @@ const file_agentshim_frontend_v1_frontend_proto_rawDesc = "" +
 	" \x01(\x0e2*.agentshim.frontend.v1.SessionConnectivityR\fconnectivity\x12<\n" +
 	"\x06status\x18\v \x01(\x0e2$.agentshim.frontend.v1.SessionStatusR\x06status\x128\n" +
 	"\x18controller_generation_id\x18\f \x01(\tR\x16controllerGenerationId\x12H\n" +
-	"\ractive_faults\x18\r \x03(\v2#.agentshim.frontend.v1.RuntimeFaultR\factiveFaults\"\x95\x06\n" +
+	"\ractive_faults\x18\r \x03(\v2#.agentshim.frontend.v1.RuntimeFaultR\factiveFaults\x120\n" +
+	"\x14merge_queue_position\x18\x0e \x01(\x05R\x12mergeQueuePosition\x12*\n" +
+	"\x11merge_queue_depth\x18\x0f \x01(\x05R\x0fmergeQueueDepth\x12(\n" +
+	"\x10merge_lease_held\x18\x10 \x01(\bR\x0emergeLeaseHeld\"\x95\x06\n" +
 	"\vSessionView\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12\x1d\n" +
 	"\n" +
@@ -6131,12 +6242,13 @@ const file_agentshim_frontend_v1_frontend_proto_rawDesc = "" +
 	"session_id\x18\x02 \x01(\tR\tsessionId\x12=\n" +
 	"\x05items\x18\x03 \x03(\v2'.agentshim.frontend.v1.ConversationItemR\x05items\x12\x1f\n" +
 	"\vthrough_seq\x18\x04 \x01(\x04R\n" +
-	"throughSeq\"\xd5\a\n" +
+	"throughSeq\"\x98\b\n" +
 	"\x10ConversationItem\x12\x12\n" +
 	"\x04uuid\x18\x01 \x01(\tR\x04uuid\x12\x13\n" +
 	"\x05ts_ms\x18\x02 \x01(\x03R\x04tsMs\x12\x1d\n" +
 	"\n" +
-	"request_id\x18\x03 \x01(\tR\trequestId\x12U\n" +
+	"request_id\x18\x03 \x01(\tR\trequestId\x12A\n" +
+	"\x06source\x18\x04 \x01(\x0e2).agentshim.frontend.v1.ConversationSourceR\x06source\x12U\n" +
 	"\x11assistant_message\x18\n" +
 	" \x01(\v2&.agentshim.data.v1.ApiAssistantMessageH\x00R\x10assistantMessage\x12F\n" +
 	"\fuser_message\x18\v \x01(\v2!.agentshim.data.v1.ApiUserMessageH\x00R\vuserMessage\x12<\n" +
@@ -6488,7 +6600,11 @@ const file_agentshim_frontend_v1_frontend_proto_rawDesc = "" +
 	"\x1aBACKFILL_STATE_UNSPECIFIED\x10\x00\x12\x1a\n" +
 	"\x16BACKFILL_STATE_PENDING\x10\x01\x12\x17\n" +
 	"\x13BACKFILL_STATE_DONE\x10\x02\x12\x19\n" +
-	"\x15BACKFILL_STATE_FAILED\x10\x03*X\n" +
+	"\x15BACKFILL_STATE_FAILED\x10\x03*v\n" +
+	"\x12ConversationSource\x12#\n" +
+	"\x1fCONVERSATION_SOURCE_UNSPECIFIED\x10\x00\x12\x1c\n" +
+	"\x18CONVERSATION_SOURCE_USER\x10\x01\x12\x1d\n" +
+	"\x19CONVERSATION_SOURCE_MERGE\x10\x02*X\n" +
 	"\n" +
 	"ErrorClass\x12\x1b\n" +
 	"\x17ERROR_CLASS_UNSPECIFIED\x10\x00\x12\x18\n" +
@@ -6524,194 +6640,196 @@ func file_agentshim_frontend_v1_frontend_proto_rawDescGZIP() []byte {
 	return file_agentshim_frontend_v1_frontend_proto_rawDescData
 }
 
-var file_agentshim_frontend_v1_frontend_proto_enumTypes = make([]protoimpl.EnumInfo, 8)
+var file_agentshim_frontend_v1_frontend_proto_enumTypes = make([]protoimpl.EnumInfo, 9)
 var file_agentshim_frontend_v1_frontend_proto_msgTypes = make([]protoimpl.MessageInfo, 57)
 var file_agentshim_frontend_v1_frontend_proto_goTypes = []any{
 	(RenderState)(0),                  // 0: agentshim.frontend.v1.RenderState
 	(SessionConnectivity)(0),          // 1: agentshim.frontend.v1.SessionConnectivity
 	(SessionStatus)(0),                // 2: agentshim.frontend.v1.SessionStatus
 	(BackfillState)(0),                // 3: agentshim.frontend.v1.BackfillState
-	(ErrorClass)(0),                   // 4: agentshim.frontend.v1.ErrorClass
-	(QueueClassification)(0),          // 5: agentshim.frontend.v1.QueueClassification
-	(ClientLogLevel)(0),               // 6: agentshim.frontend.v1.ClientLogLevel
-	(ResumeMode)(0),                   // 7: agentshim.frontend.v1.ResumeMode
-	(*RuntimeFault)(nil),              // 8: agentshim.frontend.v1.RuntimeFault
-	(*FrontendFrame)(nil),             // 9: agentshim.frontend.v1.FrontendFrame
-	(*DaemonView)(nil),                // 10: agentshim.frontend.v1.DaemonView
-	(*DaemonHealthView)(nil),          // 11: agentshim.frontend.v1.DaemonHealthView
-	(*SessionHealthView)(nil),         // 12: agentshim.frontend.v1.SessionHealthView
-	(*WorkspaceState)(nil),            // 13: agentshim.frontend.v1.WorkspaceState
-	(*SessionView)(nil),               // 14: agentshim.frontend.v1.SessionView
-	(*ModelOption)(nil),               // 15: agentshim.frontend.v1.ModelOption
-	(*ConversationDelta)(nil),         // 16: agentshim.frontend.v1.ConversationDelta
-	(*ConversationItem)(nil),          // 17: agentshim.frontend.v1.ConversationItem
-	(*SkillBodyItem)(nil),             // 18: agentshim.frontend.v1.SkillBodyItem
-	(*SystemFailureItem)(nil),         // 19: agentshim.frontend.v1.SystemFailureItem
-	(*TypingDelta)(nil),               // 20: agentshim.frontend.v1.TypingDelta
-	(*HeartbeatView)(nil),             // 21: agentshim.frontend.v1.HeartbeatView
-	(*SessionInitView)(nil),           // 22: agentshim.frontend.v1.SessionInitView
-	(*TaskEntry)(nil),                 // 23: agentshim.frontend.v1.TaskEntry
-	(*TaskCatalog)(nil),               // 24: agentshim.frontend.v1.TaskCatalog
-	(*FrontendCommand)(nil),           // 25: agentshim.frontend.v1.FrontendCommand
-	(*QueueEntry)(nil),                // 26: agentshim.frontend.v1.QueueEntry
-	(*QueueView)(nil),                 // 27: agentshim.frontend.v1.QueueView
-	(*QueueForceCmd)(nil),             // 28: agentshim.frontend.v1.QueueForceCmd
-	(*QueueAcceptCmd)(nil),            // 29: agentshim.frontend.v1.QueueAcceptCmd
-	(*QueueCancelCmd)(nil),            // 30: agentshim.frontend.v1.QueueCancelCmd
-	(*ClientLogCmd)(nil),              // 31: agentshim.frontend.v1.ClientLogCmd
-	(*ShutdownCmd)(nil),               // 32: agentshim.frontend.v1.ShutdownCmd
-	(*RestartSessionCmd)(nil),         // 33: agentshim.frontend.v1.RestartSessionCmd
-	(*DaemonHealthCmd)(nil),           // 34: agentshim.frontend.v1.DaemonHealthCmd
-	(*SessionHealthCmd)(nil),          // 35: agentshim.frontend.v1.SessionHealthCmd
-	(*CreateSessionCmd)(nil),          // 36: agentshim.frontend.v1.CreateSessionCmd
-	(*SetModelCmd)(nil),               // 37: agentshim.frontend.v1.SetModelCmd
-	(*DeleteSessionCmd)(nil),          // 38: agentshim.frontend.v1.DeleteSessionCmd
-	(*SubmitPromptCmd)(nil),           // 39: agentshim.frontend.v1.SubmitPromptCmd
-	(*InterruptCmd)(nil),              // 40: agentshim.frontend.v1.InterruptCmd
-	(*PermissionAnswerCmd)(nil),       // 41: agentshim.frontend.v1.PermissionAnswerCmd
-	(*MergeWorkspaceCmd)(nil),         // 42: agentshim.frontend.v1.MergeWorkspaceCmd
-	(*CloseWorkspaceCmd)(nil),         // 43: agentshim.frontend.v1.CloseWorkspaceCmd
-	(*OpenWorkspaceCmd)(nil),          // 44: agentshim.frontend.v1.OpenWorkspaceCmd
-	(*ResyncCmd)(nil),                 // 45: agentshim.frontend.v1.ResyncCmd
-	(*CreateWorkspaceCmd)(nil),        // 46: agentshim.frontend.v1.CreateWorkspaceCmd
-	(*WorkspaceAvailable)(nil),        // 47: agentshim.frontend.v1.WorkspaceAvailable
-	(*WorkspaceMaterializedCmd)(nil),  // 48: agentshim.frontend.v1.WorkspaceMaterializedCmd
-	(*HostAction)(nil),                // 49: agentshim.frontend.v1.HostAction
-	(*HostWorkspaceCreateFailed)(nil), // 50: agentshim.frontend.v1.HostWorkspaceCreateFailed
-	(*HostSwitchWorkspace)(nil),       // 51: agentshim.frontend.v1.HostSwitchWorkspace
-	(*HostSetRepositoryFold)(nil),     // 52: agentshim.frontend.v1.HostSetRepositoryFold
-	(*HostSetSidebarView)(nil),        // 53: agentshim.frontend.v1.HostSetSidebarView
-	(*HostTaskCreate)(nil),            // 54: agentshim.frontend.v1.HostTaskCreate
-	(*HostTaskById)(nil),              // 55: agentshim.frontend.v1.HostTaskById
-	(*HostLegacyCommand)(nil),         // 56: agentshim.frontend.v1.HostLegacyCommand
-	(*HostActionCompletedCmd)(nil),    // 57: agentshim.frontend.v1.HostActionCompletedCmd
-	(*CommandAck)(nil),                // 58: agentshim.frontend.v1.CommandAck
-	(*InterruptConfirmRequired)(nil),  // 59: agentshim.frontend.v1.InterruptConfirmRequired
-	(*ProgressWindow)(nil),            // 60: agentshim.frontend.v1.ProgressWindow
-	(*RateLimitWindow)(nil),           // 61: agentshim.frontend.v1.RateLimitWindow
-	(*InterruptWindow)(nil),           // 62: agentshim.frontend.v1.InterruptWindow
-	(*ProgressView)(nil),              // 63: agentshim.frontend.v1.ProgressView
-	(*StateSnapshot)(nil),             // 64: agentshim.frontend.v1.StateSnapshot
-	(*v1.ApiAssistantMessage)(nil),    // 65: agentshim.data.v1.ApiAssistantMessage
-	(*v1.ApiUserMessage)(nil),         // 66: agentshim.data.v1.ApiUserMessage
-	(*v1.ToolUseBlock)(nil),           // 67: agentshim.data.v1.ToolUseBlock
-	(*v1.ToolResultBlock)(nil),        // 68: agentshim.data.v1.ToolResultBlock
-	(*v1.ToolUseResult)(nil),          // 69: agentshim.data.v1.ToolUseResult
-	(*v1.ResultMessage)(nil),          // 70: agentshim.data.v1.ResultMessage
-	(*v11.PermissionItem)(nil),        // 71: agentshim.core.v1.PermissionItem
-	(*v11.ContextCleared)(nil),        // 72: agentshim.core.v1.ContextCleared
-	(*v11.ContextCompacted)(nil),      // 73: agentshim.core.v1.ContextCompacted
-	(*v11.ContentDelta)(nil),          // 74: agentshim.core.v1.ContentDelta
-	(*v11.HeartbeatProgress)(nil),     // 75: agentshim.core.v1.HeartbeatProgress
-	(*v1.SystemInit)(nil),             // 76: agentshim.data.v1.SystemInit
-	(*structpb.Struct)(nil),           // 77: google.protobuf.Struct
-	(v11.InterruptOutcome)(0),         // 78: agentshim.core.v1.InterruptOutcome
+	(ConversationSource)(0),           // 4: agentshim.frontend.v1.ConversationSource
+	(ErrorClass)(0),                   // 5: agentshim.frontend.v1.ErrorClass
+	(QueueClassification)(0),          // 6: agentshim.frontend.v1.QueueClassification
+	(ClientLogLevel)(0),               // 7: agentshim.frontend.v1.ClientLogLevel
+	(ResumeMode)(0),                   // 8: agentshim.frontend.v1.ResumeMode
+	(*RuntimeFault)(nil),              // 9: agentshim.frontend.v1.RuntimeFault
+	(*FrontendFrame)(nil),             // 10: agentshim.frontend.v1.FrontendFrame
+	(*DaemonView)(nil),                // 11: agentshim.frontend.v1.DaemonView
+	(*DaemonHealthView)(nil),          // 12: agentshim.frontend.v1.DaemonHealthView
+	(*SessionHealthView)(nil),         // 13: agentshim.frontend.v1.SessionHealthView
+	(*WorkspaceState)(nil),            // 14: agentshim.frontend.v1.WorkspaceState
+	(*SessionView)(nil),               // 15: agentshim.frontend.v1.SessionView
+	(*ModelOption)(nil),               // 16: agentshim.frontend.v1.ModelOption
+	(*ConversationDelta)(nil),         // 17: agentshim.frontend.v1.ConversationDelta
+	(*ConversationItem)(nil),          // 18: agentshim.frontend.v1.ConversationItem
+	(*SkillBodyItem)(nil),             // 19: agentshim.frontend.v1.SkillBodyItem
+	(*SystemFailureItem)(nil),         // 20: agentshim.frontend.v1.SystemFailureItem
+	(*TypingDelta)(nil),               // 21: agentshim.frontend.v1.TypingDelta
+	(*HeartbeatView)(nil),             // 22: agentshim.frontend.v1.HeartbeatView
+	(*SessionInitView)(nil),           // 23: agentshim.frontend.v1.SessionInitView
+	(*TaskEntry)(nil),                 // 24: agentshim.frontend.v1.TaskEntry
+	(*TaskCatalog)(nil),               // 25: agentshim.frontend.v1.TaskCatalog
+	(*FrontendCommand)(nil),           // 26: agentshim.frontend.v1.FrontendCommand
+	(*QueueEntry)(nil),                // 27: agentshim.frontend.v1.QueueEntry
+	(*QueueView)(nil),                 // 28: agentshim.frontend.v1.QueueView
+	(*QueueForceCmd)(nil),             // 29: agentshim.frontend.v1.QueueForceCmd
+	(*QueueAcceptCmd)(nil),            // 30: agentshim.frontend.v1.QueueAcceptCmd
+	(*QueueCancelCmd)(nil),            // 31: agentshim.frontend.v1.QueueCancelCmd
+	(*ClientLogCmd)(nil),              // 32: agentshim.frontend.v1.ClientLogCmd
+	(*ShutdownCmd)(nil),               // 33: agentshim.frontend.v1.ShutdownCmd
+	(*RestartSessionCmd)(nil),         // 34: agentshim.frontend.v1.RestartSessionCmd
+	(*DaemonHealthCmd)(nil),           // 35: agentshim.frontend.v1.DaemonHealthCmd
+	(*SessionHealthCmd)(nil),          // 36: agentshim.frontend.v1.SessionHealthCmd
+	(*CreateSessionCmd)(nil),          // 37: agentshim.frontend.v1.CreateSessionCmd
+	(*SetModelCmd)(nil),               // 38: agentshim.frontend.v1.SetModelCmd
+	(*DeleteSessionCmd)(nil),          // 39: agentshim.frontend.v1.DeleteSessionCmd
+	(*SubmitPromptCmd)(nil),           // 40: agentshim.frontend.v1.SubmitPromptCmd
+	(*InterruptCmd)(nil),              // 41: agentshim.frontend.v1.InterruptCmd
+	(*PermissionAnswerCmd)(nil),       // 42: agentshim.frontend.v1.PermissionAnswerCmd
+	(*MergeWorkspaceCmd)(nil),         // 43: agentshim.frontend.v1.MergeWorkspaceCmd
+	(*CloseWorkspaceCmd)(nil),         // 44: agentshim.frontend.v1.CloseWorkspaceCmd
+	(*OpenWorkspaceCmd)(nil),          // 45: agentshim.frontend.v1.OpenWorkspaceCmd
+	(*ResyncCmd)(nil),                 // 46: agentshim.frontend.v1.ResyncCmd
+	(*CreateWorkspaceCmd)(nil),        // 47: agentshim.frontend.v1.CreateWorkspaceCmd
+	(*WorkspaceAvailable)(nil),        // 48: agentshim.frontend.v1.WorkspaceAvailable
+	(*WorkspaceMaterializedCmd)(nil),  // 49: agentshim.frontend.v1.WorkspaceMaterializedCmd
+	(*HostAction)(nil),                // 50: agentshim.frontend.v1.HostAction
+	(*HostWorkspaceCreateFailed)(nil), // 51: agentshim.frontend.v1.HostWorkspaceCreateFailed
+	(*HostSwitchWorkspace)(nil),       // 52: agentshim.frontend.v1.HostSwitchWorkspace
+	(*HostSetRepositoryFold)(nil),     // 53: agentshim.frontend.v1.HostSetRepositoryFold
+	(*HostSetSidebarView)(nil),        // 54: agentshim.frontend.v1.HostSetSidebarView
+	(*HostTaskCreate)(nil),            // 55: agentshim.frontend.v1.HostTaskCreate
+	(*HostTaskById)(nil),              // 56: agentshim.frontend.v1.HostTaskById
+	(*HostLegacyCommand)(nil),         // 57: agentshim.frontend.v1.HostLegacyCommand
+	(*HostActionCompletedCmd)(nil),    // 58: agentshim.frontend.v1.HostActionCompletedCmd
+	(*CommandAck)(nil),                // 59: agentshim.frontend.v1.CommandAck
+	(*InterruptConfirmRequired)(nil),  // 60: agentshim.frontend.v1.InterruptConfirmRequired
+	(*ProgressWindow)(nil),            // 61: agentshim.frontend.v1.ProgressWindow
+	(*RateLimitWindow)(nil),           // 62: agentshim.frontend.v1.RateLimitWindow
+	(*InterruptWindow)(nil),           // 63: agentshim.frontend.v1.InterruptWindow
+	(*ProgressView)(nil),              // 64: agentshim.frontend.v1.ProgressView
+	(*StateSnapshot)(nil),             // 65: agentshim.frontend.v1.StateSnapshot
+	(*v1.ApiAssistantMessage)(nil),    // 66: agentshim.data.v1.ApiAssistantMessage
+	(*v1.ApiUserMessage)(nil),         // 67: agentshim.data.v1.ApiUserMessage
+	(*v1.ToolUseBlock)(nil),           // 68: agentshim.data.v1.ToolUseBlock
+	(*v1.ToolResultBlock)(nil),        // 69: agentshim.data.v1.ToolResultBlock
+	(*v1.ToolUseResult)(nil),          // 70: agentshim.data.v1.ToolUseResult
+	(*v1.ResultMessage)(nil),          // 71: agentshim.data.v1.ResultMessage
+	(*v11.PermissionItem)(nil),        // 72: agentshim.core.v1.PermissionItem
+	(*v11.ContextCleared)(nil),        // 73: agentshim.core.v1.ContextCleared
+	(*v11.ContextCompacted)(nil),      // 74: agentshim.core.v1.ContextCompacted
+	(*v11.ContentDelta)(nil),          // 75: agentshim.core.v1.ContentDelta
+	(*v11.HeartbeatProgress)(nil),     // 76: agentshim.core.v1.HeartbeatProgress
+	(*v1.SystemInit)(nil),             // 77: agentshim.data.v1.SystemInit
+	(*structpb.Struct)(nil),           // 78: google.protobuf.Struct
+	(v11.InterruptOutcome)(0),         // 79: agentshim.core.v1.InterruptOutcome
 }
 var file_agentshim_frontend_v1_frontend_proto_depIdxs = []int32{
-	64, // 0: agentshim.frontend.v1.FrontendFrame.snapshot:type_name -> agentshim.frontend.v1.StateSnapshot
-	13, // 1: agentshim.frontend.v1.FrontendFrame.workspace_state:type_name -> agentshim.frontend.v1.WorkspaceState
-	14, // 2: agentshim.frontend.v1.FrontendFrame.session_view:type_name -> agentshim.frontend.v1.SessionView
-	16, // 3: agentshim.frontend.v1.FrontendFrame.conversation_delta:type_name -> agentshim.frontend.v1.ConversationDelta
-	20, // 4: agentshim.frontend.v1.FrontendFrame.typing_delta:type_name -> agentshim.frontend.v1.TypingDelta
-	24, // 5: agentshim.frontend.v1.FrontendFrame.task_catalog:type_name -> agentshim.frontend.v1.TaskCatalog
-	58, // 6: agentshim.frontend.v1.FrontendFrame.command_ack:type_name -> agentshim.frontend.v1.CommandAck
-	10, // 7: agentshim.frontend.v1.FrontendFrame.daemon_view:type_name -> agentshim.frontend.v1.DaemonView
-	22, // 8: agentshim.frontend.v1.FrontendFrame.session_init:type_name -> agentshim.frontend.v1.SessionInitView
-	21, // 9: agentshim.frontend.v1.FrontendFrame.heartbeat:type_name -> agentshim.frontend.v1.HeartbeatView
-	27, // 10: agentshim.frontend.v1.FrontendFrame.queue:type_name -> agentshim.frontend.v1.QueueView
-	63, // 11: agentshim.frontend.v1.FrontendFrame.progress:type_name -> agentshim.frontend.v1.ProgressView
-	47, // 12: agentshim.frontend.v1.FrontendFrame.workspace_available:type_name -> agentshim.frontend.v1.WorkspaceAvailable
-	49, // 13: agentshim.frontend.v1.FrontendFrame.host_action:type_name -> agentshim.frontend.v1.HostAction
-	11, // 14: agentshim.frontend.v1.FrontendFrame.daemon_health:type_name -> agentshim.frontend.v1.DaemonHealthView
-	12, // 15: agentshim.frontend.v1.FrontendFrame.session_health:type_name -> agentshim.frontend.v1.SessionHealthView
-	0,  // 16: agentshim.frontend.v1.WorkspaceState.state:type_name -> agentshim.frontend.v1.RenderState
-	1,  // 17: agentshim.frontend.v1.WorkspaceState.connectivity:type_name -> agentshim.frontend.v1.SessionConnectivity
-	2,  // 18: agentshim.frontend.v1.WorkspaceState.status:type_name -> agentshim.frontend.v1.SessionStatus
-	8,  // 19: agentshim.frontend.v1.WorkspaceState.active_faults:type_name -> agentshim.frontend.v1.RuntimeFault
-	3,  // 20: agentshim.frontend.v1.SessionView.backfill:type_name -> agentshim.frontend.v1.BackfillState
-	19, // 21: agentshim.frontend.v1.SessionView.death:type_name -> agentshim.frontend.v1.SystemFailureItem
-	15, // 22: agentshim.frontend.v1.SessionView.model_options:type_name -> agentshim.frontend.v1.ModelOption
-	17, // 23: agentshim.frontend.v1.ConversationDelta.items:type_name -> agentshim.frontend.v1.ConversationItem
-	65, // 24: agentshim.frontend.v1.ConversationItem.assistant_message:type_name -> agentshim.data.v1.ApiAssistantMessage
-	66, // 25: agentshim.frontend.v1.ConversationItem.user_message:type_name -> agentshim.data.v1.ApiUserMessage
-	67, // 26: agentshim.frontend.v1.ConversationItem.tool_use:type_name -> agentshim.data.v1.ToolUseBlock
-	68, // 27: agentshim.frontend.v1.ConversationItem.tool_result:type_name -> agentshim.data.v1.ToolResultBlock
-	69, // 28: agentshim.frontend.v1.ConversationItem.tool_use_result:type_name -> agentshim.data.v1.ToolUseResult
-	70, // 29: agentshim.frontend.v1.ConversationItem.result:type_name -> agentshim.data.v1.ResultMessage
-	71, // 30: agentshim.frontend.v1.ConversationItem.permission:type_name -> agentshim.core.v1.PermissionItem
-	19, // 31: agentshim.frontend.v1.ConversationItem.system_failure:type_name -> agentshim.frontend.v1.SystemFailureItem
-	72, // 32: agentshim.frontend.v1.ConversationItem.context_cleared:type_name -> agentshim.core.v1.ContextCleared
-	73, // 33: agentshim.frontend.v1.ConversationItem.context_compacted:type_name -> agentshim.core.v1.ContextCompacted
-	18, // 34: agentshim.frontend.v1.ConversationItem.skill_body:type_name -> agentshim.frontend.v1.SkillBodyItem
-	4,  // 35: agentshim.frontend.v1.SystemFailureItem.error_class:type_name -> agentshim.frontend.v1.ErrorClass
-	74, // 36: agentshim.frontend.v1.TypingDelta.delta:type_name -> agentshim.core.v1.ContentDelta
-	75, // 37: agentshim.frontend.v1.HeartbeatView.progress:type_name -> agentshim.core.v1.HeartbeatProgress
-	76, // 38: agentshim.frontend.v1.SessionInitView.init:type_name -> agentshim.data.v1.SystemInit
-	23, // 39: agentshim.frontend.v1.TaskCatalog.tasks:type_name -> agentshim.frontend.v1.TaskEntry
-	39, // 40: agentshim.frontend.v1.FrontendCommand.submit_prompt:type_name -> agentshim.frontend.v1.SubmitPromptCmd
-	40, // 41: agentshim.frontend.v1.FrontendCommand.interrupt:type_name -> agentshim.frontend.v1.InterruptCmd
-	41, // 42: agentshim.frontend.v1.FrontendCommand.permission_answer:type_name -> agentshim.frontend.v1.PermissionAnswerCmd
-	42, // 43: agentshim.frontend.v1.FrontendCommand.merge_workspace:type_name -> agentshim.frontend.v1.MergeWorkspaceCmd
-	43, // 44: agentshim.frontend.v1.FrontendCommand.close_workspace:type_name -> agentshim.frontend.v1.CloseWorkspaceCmd
-	44, // 45: agentshim.frontend.v1.FrontendCommand.open_workspace:type_name -> agentshim.frontend.v1.OpenWorkspaceCmd
-	45, // 46: agentshim.frontend.v1.FrontendCommand.resync:type_name -> agentshim.frontend.v1.ResyncCmd
-	36, // 47: agentshim.frontend.v1.FrontendCommand.create_session:type_name -> agentshim.frontend.v1.CreateSessionCmd
-	38, // 48: agentshim.frontend.v1.FrontendCommand.delete_session:type_name -> agentshim.frontend.v1.DeleteSessionCmd
-	32, // 49: agentshim.frontend.v1.FrontendCommand.shutdown:type_name -> agentshim.frontend.v1.ShutdownCmd
-	31, // 50: agentshim.frontend.v1.FrontendCommand.client_log:type_name -> agentshim.frontend.v1.ClientLogCmd
-	28, // 51: agentshim.frontend.v1.FrontendCommand.queue_force:type_name -> agentshim.frontend.v1.QueueForceCmd
-	29, // 52: agentshim.frontend.v1.FrontendCommand.queue_accept:type_name -> agentshim.frontend.v1.QueueAcceptCmd
-	30, // 53: agentshim.frontend.v1.FrontendCommand.queue_cancel:type_name -> agentshim.frontend.v1.QueueCancelCmd
-	46, // 54: agentshim.frontend.v1.FrontendCommand.create_workspace:type_name -> agentshim.frontend.v1.CreateWorkspaceCmd
-	48, // 55: agentshim.frontend.v1.FrontendCommand.workspace_materialized:type_name -> agentshim.frontend.v1.WorkspaceMaterializedCmd
-	57, // 56: agentshim.frontend.v1.FrontendCommand.host_action_completed:type_name -> agentshim.frontend.v1.HostActionCompletedCmd
-	34, // 57: agentshim.frontend.v1.FrontendCommand.daemon_health:type_name -> agentshim.frontend.v1.DaemonHealthCmd
-	35, // 58: agentshim.frontend.v1.FrontendCommand.session_health:type_name -> agentshim.frontend.v1.SessionHealthCmd
-	33, // 59: agentshim.frontend.v1.FrontendCommand.restart_session:type_name -> agentshim.frontend.v1.RestartSessionCmd
-	37, // 60: agentshim.frontend.v1.FrontendCommand.set_model:type_name -> agentshim.frontend.v1.SetModelCmd
-	5,  // 61: agentshim.frontend.v1.QueueEntry.classification:type_name -> agentshim.frontend.v1.QueueClassification
-	26, // 62: agentshim.frontend.v1.QueueView.entries:type_name -> agentshim.frontend.v1.QueueEntry
-	6,  // 63: agentshim.frontend.v1.ClientLogCmd.level:type_name -> agentshim.frontend.v1.ClientLogLevel
-	77, // 64: agentshim.frontend.v1.ClientLogCmd.context:type_name -> google.protobuf.Struct
-	7,  // 65: agentshim.frontend.v1.CreateSessionCmd.resume_mode:type_name -> agentshim.frontend.v1.ResumeMode
-	77, // 66: agentshim.frontend.v1.PermissionAnswerCmd.updated_input:type_name -> google.protobuf.Struct
-	51, // 67: agentshim.frontend.v1.HostAction.switch_workspace:type_name -> agentshim.frontend.v1.HostSwitchWorkspace
-	52, // 68: agentshim.frontend.v1.HostAction.set_repository_fold:type_name -> agentshim.frontend.v1.HostSetRepositoryFold
-	53, // 69: agentshim.frontend.v1.HostAction.set_sidebar_view:type_name -> agentshim.frontend.v1.HostSetSidebarView
-	54, // 70: agentshim.frontend.v1.HostAction.task_create:type_name -> agentshim.frontend.v1.HostTaskCreate
-	55, // 71: agentshim.frontend.v1.HostAction.task_toggle_done:type_name -> agentshim.frontend.v1.HostTaskById
-	55, // 72: agentshim.frontend.v1.HostAction.task_open:type_name -> agentshim.frontend.v1.HostTaskById
-	55, // 73: agentshim.frontend.v1.HostAction.task_add_workspace:type_name -> agentshim.frontend.v1.HostTaskById
-	56, // 74: agentshim.frontend.v1.HostAction.legacy_command:type_name -> agentshim.frontend.v1.HostLegacyCommand
-	50, // 75: agentshim.frontend.v1.HostAction.workspace_create_failed:type_name -> agentshim.frontend.v1.HostWorkspaceCreateFailed
-	77, // 76: agentshim.frontend.v1.HostLegacyCommand.payload:type_name -> google.protobuf.Struct
-	19, // 77: agentshim.frontend.v1.CommandAck.failure:type_name -> agentshim.frontend.v1.SystemFailureItem
-	59, // 78: agentshim.frontend.v1.CommandAck.interrupt_confirm_required:type_name -> agentshim.frontend.v1.InterruptConfirmRequired
-	78, // 79: agentshim.frontend.v1.InterruptWindow.outcome:type_name -> agentshim.core.v1.InterruptOutcome
-	0,  // 80: agentshim.frontend.v1.ProgressView.state:type_name -> agentshim.frontend.v1.RenderState
-	60, // 81: agentshim.frontend.v1.ProgressView.compacting:type_name -> agentshim.frontend.v1.ProgressWindow
-	60, // 82: agentshim.frontend.v1.ProgressView.retrying:type_name -> agentshim.frontend.v1.ProgressWindow
-	60, // 83: agentshim.frontend.v1.ProgressView.authenticating:type_name -> agentshim.frontend.v1.ProgressWindow
-	60, // 84: agentshim.frontend.v1.ProgressView.hook:type_name -> agentshim.frontend.v1.ProgressWindow
-	61, // 85: agentshim.frontend.v1.ProgressView.rate_limited:type_name -> agentshim.frontend.v1.RateLimitWindow
-	61, // 86: agentshim.frontend.v1.ProgressView.rate_limited_weekly:type_name -> agentshim.frontend.v1.RateLimitWindow
-	60, // 87: agentshim.frontend.v1.ProgressView.blocked:type_name -> agentshim.frontend.v1.ProgressWindow
-	62, // 88: agentshim.frontend.v1.ProgressView.interrupt:type_name -> agentshim.frontend.v1.InterruptWindow
-	19, // 89: agentshim.frontend.v1.ProgressView.failure:type_name -> agentshim.frontend.v1.SystemFailureItem
-	13, // 90: agentshim.frontend.v1.StateSnapshot.workspaces:type_name -> agentshim.frontend.v1.WorkspaceState
-	14, // 91: agentshim.frontend.v1.StateSnapshot.sessions:type_name -> agentshim.frontend.v1.SessionView
-	24, // 92: agentshim.frontend.v1.StateSnapshot.catalogs:type_name -> agentshim.frontend.v1.TaskCatalog
-	10, // 93: agentshim.frontend.v1.StateSnapshot.daemon:type_name -> agentshim.frontend.v1.DaemonView
-	22, // 94: agentshim.frontend.v1.StateSnapshot.inits:type_name -> agentshim.frontend.v1.SessionInitView
-	27, // 95: agentshim.frontend.v1.StateSnapshot.queues:type_name -> agentshim.frontend.v1.QueueView
-	63, // 96: agentshim.frontend.v1.StateSnapshot.progress:type_name -> agentshim.frontend.v1.ProgressView
-	47, // 97: agentshim.frontend.v1.StateSnapshot.workspace_available:type_name -> agentshim.frontend.v1.WorkspaceAvailable
-	49, // 98: agentshim.frontend.v1.StateSnapshot.host_actions:type_name -> agentshim.frontend.v1.HostAction
-	99, // [99:99] is the sub-list for method output_type
-	99, // [99:99] is the sub-list for method input_type
-	99, // [99:99] is the sub-list for extension type_name
-	99, // [99:99] is the sub-list for extension extendee
-	0,  // [0:99] is the sub-list for field type_name
+	65,  // 0: agentshim.frontend.v1.FrontendFrame.snapshot:type_name -> agentshim.frontend.v1.StateSnapshot
+	14,  // 1: agentshim.frontend.v1.FrontendFrame.workspace_state:type_name -> agentshim.frontend.v1.WorkspaceState
+	15,  // 2: agentshim.frontend.v1.FrontendFrame.session_view:type_name -> agentshim.frontend.v1.SessionView
+	17,  // 3: agentshim.frontend.v1.FrontendFrame.conversation_delta:type_name -> agentshim.frontend.v1.ConversationDelta
+	21,  // 4: agentshim.frontend.v1.FrontendFrame.typing_delta:type_name -> agentshim.frontend.v1.TypingDelta
+	25,  // 5: agentshim.frontend.v1.FrontendFrame.task_catalog:type_name -> agentshim.frontend.v1.TaskCatalog
+	59,  // 6: agentshim.frontend.v1.FrontendFrame.command_ack:type_name -> agentshim.frontend.v1.CommandAck
+	11,  // 7: agentshim.frontend.v1.FrontendFrame.daemon_view:type_name -> agentshim.frontend.v1.DaemonView
+	23,  // 8: agentshim.frontend.v1.FrontendFrame.session_init:type_name -> agentshim.frontend.v1.SessionInitView
+	22,  // 9: agentshim.frontend.v1.FrontendFrame.heartbeat:type_name -> agentshim.frontend.v1.HeartbeatView
+	28,  // 10: agentshim.frontend.v1.FrontendFrame.queue:type_name -> agentshim.frontend.v1.QueueView
+	64,  // 11: agentshim.frontend.v1.FrontendFrame.progress:type_name -> agentshim.frontend.v1.ProgressView
+	48,  // 12: agentshim.frontend.v1.FrontendFrame.workspace_available:type_name -> agentshim.frontend.v1.WorkspaceAvailable
+	50,  // 13: agentshim.frontend.v1.FrontendFrame.host_action:type_name -> agentshim.frontend.v1.HostAction
+	12,  // 14: agentshim.frontend.v1.FrontendFrame.daemon_health:type_name -> agentshim.frontend.v1.DaemonHealthView
+	13,  // 15: agentshim.frontend.v1.FrontendFrame.session_health:type_name -> agentshim.frontend.v1.SessionHealthView
+	0,   // 16: agentshim.frontend.v1.WorkspaceState.state:type_name -> agentshim.frontend.v1.RenderState
+	1,   // 17: agentshim.frontend.v1.WorkspaceState.connectivity:type_name -> agentshim.frontend.v1.SessionConnectivity
+	2,   // 18: agentshim.frontend.v1.WorkspaceState.status:type_name -> agentshim.frontend.v1.SessionStatus
+	9,   // 19: agentshim.frontend.v1.WorkspaceState.active_faults:type_name -> agentshim.frontend.v1.RuntimeFault
+	3,   // 20: agentshim.frontend.v1.SessionView.backfill:type_name -> agentshim.frontend.v1.BackfillState
+	20,  // 21: agentshim.frontend.v1.SessionView.death:type_name -> agentshim.frontend.v1.SystemFailureItem
+	16,  // 22: agentshim.frontend.v1.SessionView.model_options:type_name -> agentshim.frontend.v1.ModelOption
+	18,  // 23: agentshim.frontend.v1.ConversationDelta.items:type_name -> agentshim.frontend.v1.ConversationItem
+	4,   // 24: agentshim.frontend.v1.ConversationItem.source:type_name -> agentshim.frontend.v1.ConversationSource
+	66,  // 25: agentshim.frontend.v1.ConversationItem.assistant_message:type_name -> agentshim.data.v1.ApiAssistantMessage
+	67,  // 26: agentshim.frontend.v1.ConversationItem.user_message:type_name -> agentshim.data.v1.ApiUserMessage
+	68,  // 27: agentshim.frontend.v1.ConversationItem.tool_use:type_name -> agentshim.data.v1.ToolUseBlock
+	69,  // 28: agentshim.frontend.v1.ConversationItem.tool_result:type_name -> agentshim.data.v1.ToolResultBlock
+	70,  // 29: agentshim.frontend.v1.ConversationItem.tool_use_result:type_name -> agentshim.data.v1.ToolUseResult
+	71,  // 30: agentshim.frontend.v1.ConversationItem.result:type_name -> agentshim.data.v1.ResultMessage
+	72,  // 31: agentshim.frontend.v1.ConversationItem.permission:type_name -> agentshim.core.v1.PermissionItem
+	20,  // 32: agentshim.frontend.v1.ConversationItem.system_failure:type_name -> agentshim.frontend.v1.SystemFailureItem
+	73,  // 33: agentshim.frontend.v1.ConversationItem.context_cleared:type_name -> agentshim.core.v1.ContextCleared
+	74,  // 34: agentshim.frontend.v1.ConversationItem.context_compacted:type_name -> agentshim.core.v1.ContextCompacted
+	19,  // 35: agentshim.frontend.v1.ConversationItem.skill_body:type_name -> agentshim.frontend.v1.SkillBodyItem
+	5,   // 36: agentshim.frontend.v1.SystemFailureItem.error_class:type_name -> agentshim.frontend.v1.ErrorClass
+	75,  // 37: agentshim.frontend.v1.TypingDelta.delta:type_name -> agentshim.core.v1.ContentDelta
+	76,  // 38: agentshim.frontend.v1.HeartbeatView.progress:type_name -> agentshim.core.v1.HeartbeatProgress
+	77,  // 39: agentshim.frontend.v1.SessionInitView.init:type_name -> agentshim.data.v1.SystemInit
+	24,  // 40: agentshim.frontend.v1.TaskCatalog.tasks:type_name -> agentshim.frontend.v1.TaskEntry
+	40,  // 41: agentshim.frontend.v1.FrontendCommand.submit_prompt:type_name -> agentshim.frontend.v1.SubmitPromptCmd
+	41,  // 42: agentshim.frontend.v1.FrontendCommand.interrupt:type_name -> agentshim.frontend.v1.InterruptCmd
+	42,  // 43: agentshim.frontend.v1.FrontendCommand.permission_answer:type_name -> agentshim.frontend.v1.PermissionAnswerCmd
+	43,  // 44: agentshim.frontend.v1.FrontendCommand.merge_workspace:type_name -> agentshim.frontend.v1.MergeWorkspaceCmd
+	44,  // 45: agentshim.frontend.v1.FrontendCommand.close_workspace:type_name -> agentshim.frontend.v1.CloseWorkspaceCmd
+	45,  // 46: agentshim.frontend.v1.FrontendCommand.open_workspace:type_name -> agentshim.frontend.v1.OpenWorkspaceCmd
+	46,  // 47: agentshim.frontend.v1.FrontendCommand.resync:type_name -> agentshim.frontend.v1.ResyncCmd
+	37,  // 48: agentshim.frontend.v1.FrontendCommand.create_session:type_name -> agentshim.frontend.v1.CreateSessionCmd
+	39,  // 49: agentshim.frontend.v1.FrontendCommand.delete_session:type_name -> agentshim.frontend.v1.DeleteSessionCmd
+	33,  // 50: agentshim.frontend.v1.FrontendCommand.shutdown:type_name -> agentshim.frontend.v1.ShutdownCmd
+	32,  // 51: agentshim.frontend.v1.FrontendCommand.client_log:type_name -> agentshim.frontend.v1.ClientLogCmd
+	29,  // 52: agentshim.frontend.v1.FrontendCommand.queue_force:type_name -> agentshim.frontend.v1.QueueForceCmd
+	30,  // 53: agentshim.frontend.v1.FrontendCommand.queue_accept:type_name -> agentshim.frontend.v1.QueueAcceptCmd
+	31,  // 54: agentshim.frontend.v1.FrontendCommand.queue_cancel:type_name -> agentshim.frontend.v1.QueueCancelCmd
+	47,  // 55: agentshim.frontend.v1.FrontendCommand.create_workspace:type_name -> agentshim.frontend.v1.CreateWorkspaceCmd
+	49,  // 56: agentshim.frontend.v1.FrontendCommand.workspace_materialized:type_name -> agentshim.frontend.v1.WorkspaceMaterializedCmd
+	58,  // 57: agentshim.frontend.v1.FrontendCommand.host_action_completed:type_name -> agentshim.frontend.v1.HostActionCompletedCmd
+	35,  // 58: agentshim.frontend.v1.FrontendCommand.daemon_health:type_name -> agentshim.frontend.v1.DaemonHealthCmd
+	36,  // 59: agentshim.frontend.v1.FrontendCommand.session_health:type_name -> agentshim.frontend.v1.SessionHealthCmd
+	34,  // 60: agentshim.frontend.v1.FrontendCommand.restart_session:type_name -> agentshim.frontend.v1.RestartSessionCmd
+	38,  // 61: agentshim.frontend.v1.FrontendCommand.set_model:type_name -> agentshim.frontend.v1.SetModelCmd
+	6,   // 62: agentshim.frontend.v1.QueueEntry.classification:type_name -> agentshim.frontend.v1.QueueClassification
+	27,  // 63: agentshim.frontend.v1.QueueView.entries:type_name -> agentshim.frontend.v1.QueueEntry
+	7,   // 64: agentshim.frontend.v1.ClientLogCmd.level:type_name -> agentshim.frontend.v1.ClientLogLevel
+	78,  // 65: agentshim.frontend.v1.ClientLogCmd.context:type_name -> google.protobuf.Struct
+	8,   // 66: agentshim.frontend.v1.CreateSessionCmd.resume_mode:type_name -> agentshim.frontend.v1.ResumeMode
+	78,  // 67: agentshim.frontend.v1.PermissionAnswerCmd.updated_input:type_name -> google.protobuf.Struct
+	52,  // 68: agentshim.frontend.v1.HostAction.switch_workspace:type_name -> agentshim.frontend.v1.HostSwitchWorkspace
+	53,  // 69: agentshim.frontend.v1.HostAction.set_repository_fold:type_name -> agentshim.frontend.v1.HostSetRepositoryFold
+	54,  // 70: agentshim.frontend.v1.HostAction.set_sidebar_view:type_name -> agentshim.frontend.v1.HostSetSidebarView
+	55,  // 71: agentshim.frontend.v1.HostAction.task_create:type_name -> agentshim.frontend.v1.HostTaskCreate
+	56,  // 72: agentshim.frontend.v1.HostAction.task_toggle_done:type_name -> agentshim.frontend.v1.HostTaskById
+	56,  // 73: agentshim.frontend.v1.HostAction.task_open:type_name -> agentshim.frontend.v1.HostTaskById
+	56,  // 74: agentshim.frontend.v1.HostAction.task_add_workspace:type_name -> agentshim.frontend.v1.HostTaskById
+	57,  // 75: agentshim.frontend.v1.HostAction.legacy_command:type_name -> agentshim.frontend.v1.HostLegacyCommand
+	51,  // 76: agentshim.frontend.v1.HostAction.workspace_create_failed:type_name -> agentshim.frontend.v1.HostWorkspaceCreateFailed
+	78,  // 77: agentshim.frontend.v1.HostLegacyCommand.payload:type_name -> google.protobuf.Struct
+	20,  // 78: agentshim.frontend.v1.CommandAck.failure:type_name -> agentshim.frontend.v1.SystemFailureItem
+	60,  // 79: agentshim.frontend.v1.CommandAck.interrupt_confirm_required:type_name -> agentshim.frontend.v1.InterruptConfirmRequired
+	79,  // 80: agentshim.frontend.v1.InterruptWindow.outcome:type_name -> agentshim.core.v1.InterruptOutcome
+	0,   // 81: agentshim.frontend.v1.ProgressView.state:type_name -> agentshim.frontend.v1.RenderState
+	61,  // 82: agentshim.frontend.v1.ProgressView.compacting:type_name -> agentshim.frontend.v1.ProgressWindow
+	61,  // 83: agentshim.frontend.v1.ProgressView.retrying:type_name -> agentshim.frontend.v1.ProgressWindow
+	61,  // 84: agentshim.frontend.v1.ProgressView.authenticating:type_name -> agentshim.frontend.v1.ProgressWindow
+	61,  // 85: agentshim.frontend.v1.ProgressView.hook:type_name -> agentshim.frontend.v1.ProgressWindow
+	62,  // 86: agentshim.frontend.v1.ProgressView.rate_limited:type_name -> agentshim.frontend.v1.RateLimitWindow
+	62,  // 87: agentshim.frontend.v1.ProgressView.rate_limited_weekly:type_name -> agentshim.frontend.v1.RateLimitWindow
+	61,  // 88: agentshim.frontend.v1.ProgressView.blocked:type_name -> agentshim.frontend.v1.ProgressWindow
+	63,  // 89: agentshim.frontend.v1.ProgressView.interrupt:type_name -> agentshim.frontend.v1.InterruptWindow
+	20,  // 90: agentshim.frontend.v1.ProgressView.failure:type_name -> agentshim.frontend.v1.SystemFailureItem
+	14,  // 91: agentshim.frontend.v1.StateSnapshot.workspaces:type_name -> agentshim.frontend.v1.WorkspaceState
+	15,  // 92: agentshim.frontend.v1.StateSnapshot.sessions:type_name -> agentshim.frontend.v1.SessionView
+	25,  // 93: agentshim.frontend.v1.StateSnapshot.catalogs:type_name -> agentshim.frontend.v1.TaskCatalog
+	11,  // 94: agentshim.frontend.v1.StateSnapshot.daemon:type_name -> agentshim.frontend.v1.DaemonView
+	23,  // 95: agentshim.frontend.v1.StateSnapshot.inits:type_name -> agentshim.frontend.v1.SessionInitView
+	28,  // 96: agentshim.frontend.v1.StateSnapshot.queues:type_name -> agentshim.frontend.v1.QueueView
+	64,  // 97: agentshim.frontend.v1.StateSnapshot.progress:type_name -> agentshim.frontend.v1.ProgressView
+	48,  // 98: agentshim.frontend.v1.StateSnapshot.workspace_available:type_name -> agentshim.frontend.v1.WorkspaceAvailable
+	50,  // 99: agentshim.frontend.v1.StateSnapshot.host_actions:type_name -> agentshim.frontend.v1.HostAction
+	100, // [100:100] is the sub-list for method output_type
+	100, // [100:100] is the sub-list for method input_type
+	100, // [100:100] is the sub-list for extension type_name
+	100, // [100:100] is the sub-list for extension extendee
+	0,   // [0:100] is the sub-list for field type_name
 }
 
 func init() { file_agentshim_frontend_v1_frontend_proto_init() }
@@ -6790,7 +6908,7 @@ func file_agentshim_frontend_v1_frontend_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentshim_frontend_v1_frontend_proto_rawDesc), len(file_agentshim_frontend_v1_frontend_proto_rawDesc)),
-			NumEnums:      8,
+			NumEnums:      9,
 			NumMessages:   57,
 			NumExtensions: 0,
 			NumServices:   0,
