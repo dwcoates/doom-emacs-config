@@ -80,6 +80,7 @@ export enum RenderState {
      onto this state forever. */
   SEVERED = 20,
   HIBERNATED = 21,
+  SUBMITTING = 22,
 }
 
 const RENDER_STATE_BY_NAME: Readonly<Record<string, RenderState>> = {
@@ -94,6 +95,7 @@ const RENDER_STATE_BY_NAME: Readonly<Record<string, RenderState>> = {
   RENDER_STATE_COMPACTING: RenderState.COMPACTING,
   RENDER_STATE_SEVERED: RenderState.SEVERED,
   RENDER_STATE_HIBERNATED: RenderState.HIBERNATED,
+  RENDER_STATE_SUBMITTING: RenderState.SUBMITTING,
   RENDER_STATE_THINKING: RenderState.THINKING,
   RENDER_STATE_PERMISSION: RenderState.PERMISSION,
   RENDER_STATE_DONE: RenderState.DONE,
@@ -136,11 +138,13 @@ export enum SessionStatus {
   INTERRUPTED = 5,
   VENDOR_BLOCKED = 6,
   MONITORING = 7,
+  SUBMITTING = 8,
 }
 
 const SESSION_STATUS_BY_NAME: Readonly<Record<string, SessionStatus>> = {
   SESSION_STATUS_UNSPECIFIED: SessionStatus.UNSPECIFIED,
   SESSION_STATUS_READY: SessionStatus.READY,
+  SESSION_STATUS_SUBMITTING: SessionStatus.SUBMITTING,
   SESSION_STATUS_THINKING: SessionStatus.THINKING,
   SESSION_STATUS_PERMISSION: SessionStatus.PERMISSION,
   SESSION_STATUS_DONE: SessionStatus.DONE,

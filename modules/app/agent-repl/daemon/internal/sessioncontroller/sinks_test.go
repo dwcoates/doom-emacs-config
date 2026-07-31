@@ -146,6 +146,11 @@ type fakeApplier struct {
 	promptRejects   []promptAcceptCall
 	promptRejectDid bool
 	promptRejectErr error
+	// promptDelivers records the shim-ack edges advancing `submitting` to
+	// `thinking`. promptDeliverDid is the "a row was written" answer.
+	promptDelivers   []promptAcceptCall
+	promptDeliverDid bool
+	promptDeliverErr error
 	// alreadyCompletes records the reconciliation that must precede an
 	// ALREADY_COMPLETE footer window.
 	alreadyCompletes   []alreadyCompleteCall
@@ -315,6 +320,24 @@ func (f *fakeApplier) MarkPromptRejected(
 		})
 	}
 	return did, err
+}
+
+// MarkPromptDelivered records the shim-ack edges that advance a turn from
+// `submitting` to `thinking`.
+func (f *fakeApplier) MarkPromptDelivered(workspace, sessionID, requestID string) (bool, error) {
+	f.reconcMutex.Lock()
+	defer f.reconcMutex.Unlock()
+	f.promptDelivers = append(f.promptDelivers, promptAcceptCall{
+		workspace: workspace, sessionID: sessionID, requestID: requestID,
+	})
+	return f.promptDeliverDid, f.promptDeliverErr
+}
+
+// promptDeliverCalls returns the recorded delivered edges, taken under the lock.
+func (f *fakeApplier) promptDeliverCalls() []promptAcceptCall {
+	f.reconcMutex.Lock()
+	defer f.reconcMutex.Unlock()
+	return append([]promptAcceptCall(nil), f.promptDelivers...)
 }
 
 // promptRejectCalls returns the recorded retractions, taken under the lock.

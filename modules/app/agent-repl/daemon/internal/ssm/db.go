@@ -289,7 +289,7 @@ func seqApplied(db *sql.DB, sessionID string, seq uint64) (bool, error) {
 // by every reader of the axis. It is the same membership the resolution query
 // carries in its `prec` table, kept in one place here so a reader and the
 // resolver can never disagree about which rows count as agent states.
-const sessionStatusMembers = `('thinking','permission','done','ready','idle','dead','vendor_blocked','interrupted')`
+const sessionStatusMembers = `('submitting','thinking','permission','done','ready','idle','dead','vendor_blocked','interrupted')`
 
 // turnActive reports whether the workspace's LATEST session-status lifecycle row is a
 // running turn. It is the no-regress guard's only input: a readiness
@@ -338,7 +338,11 @@ func turnClaim(db *sql.DB, workspace string) (active bool, claimant string, err 
 	if scanErr != nil {
 		return false, "", fmt.Errorf("ssm: turn-active check for workspace %q: %w", workspace, scanErr)
 	}
-	return state == "thinking", sid.String, nil
+	// BOTH halves of a turn claim it. `submitting` is a turn in flight whose
+	// prompt the shim has not acked yet, so a claim check that only counted
+	// `thinking` would report the workspace idle during it and let a second
+	// prompt bypass the queue into a turn that is already starting.
+	return state == sigThinking || state == sigSubmitting, sid.String, nil
 }
 
 // sessionStatusTop returns the workspace's newest session-status lifecycle token, plus the newest

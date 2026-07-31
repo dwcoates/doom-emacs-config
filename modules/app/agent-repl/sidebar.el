@@ -105,7 +105,8 @@ roster never carries, so the keyboard reaches it through this hook
 rather than a roster rebuild.")
 
 (defconst agent-repl--sidebar-status-wire
-  '((:thinking       . "thinking")
+  '((:submitting     . "submitting")
+    (:thinking       . "thinking")
     (:clearing       . "clearing")
     (:compacting     . "compacting")
     (:permission     . "permission")

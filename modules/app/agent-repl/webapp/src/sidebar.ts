@@ -68,6 +68,7 @@ export type WorkspaceStatus =
  * checked rather than merely asserted.
  */
 export const WORKSPACE_STATUSES: ReadonlySet<string> = new Set([
+  "submitting",
   "thinking",
   "clearing",
   "compacting",

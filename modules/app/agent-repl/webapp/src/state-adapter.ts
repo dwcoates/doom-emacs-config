@@ -97,6 +97,7 @@ export type WebRenderState =
   | "idle"
   | "ready"
   | "idle_async"
+  | "submitting"
   | "thinking"
   | "clearing"
   | "compacting"
@@ -123,6 +124,7 @@ export type WebSessionConnectivity =
 
 export type WebSessionStatus =
   | "ready"
+  | "submitting"
   | "thinking"
   | "permission"
   | "done"
@@ -692,6 +694,10 @@ const RENDER_STATE_KEYWORD: Record<RenderState, WebRenderState | null> = {
   [RenderState.INIT]: "init",
   [RenderState.IDLE]: "idle",
   [RenderState.IDLE_ASYNC]: "idle_async",
+  // SUBMITTING is the first half of a turn, before the shim has taken the
+  // prompt. Red like thinking for the same reason the cuts are, and only the
+  // phase word distinguishes them.
+  [RenderState.SUBMITTING]: "submitting",
   [RenderState.THINKING]: "thinking",
   // The two CONTEXT CUTS. Red like thinking — the agent is busy and a prompt
   // cannot land yet — and only the phase word distinguishes them.
@@ -754,6 +760,7 @@ function connectivityKeyword(connectivity: SessionConnectivity): WebSessionConne
 const SESSION_STATUS_KEYWORD: Record<SessionStatus, WebSessionStatus> = {
   [SessionStatus.UNSPECIFIED]: null,
   [SessionStatus.READY]: "ready",
+  [SessionStatus.SUBMITTING]: "submitting",
   [SessionStatus.THINKING]: "thinking",
   [SessionStatus.PERMISSION]: "permission",
   [SessionStatus.DONE]: "done",

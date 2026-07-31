@@ -89,6 +89,11 @@ failure is surfaced, not hidden)."
   '(("RENDER_STATE_INIT"           . :init)
     ("RENDER_STATE_IDLE"           . :idle)
     ("RENDER_STATE_IDLE_ASYNC"     . :idle-async)
+    ;; RED like :thinking — a turn is in flight and a prompt cannot land yet.
+    ;; The phase word is the whole distinction: the daemon has committed to the
+    ;; submit and the shim has not acked it, so the agent is not holding
+    ;; anything yet.
+    ("RENDER_STATE_SUBMITTING"     . :submitting)
     ("RENDER_STATE_THINKING"       . :thinking)
     ("RENDER_STATE_PERMISSION"     . :permission)
     ("RENDER_STATE_DONE"           . :done)
@@ -176,6 +181,7 @@ threads per-workspace log metadata through a state-frame application."
 
 (defconst agent-repl--frontend-session-status-map
   '(("SESSION_STATUS_READY" . :ready)
+    ("SESSION_STATUS_SUBMITTING" . :submitting)
     ("SESSION_STATUS_THINKING" . :thinking)
     ("SESSION_STATUS_PERMISSION" . :permission)
     ("SESSION_STATUS_DONE" . :done)

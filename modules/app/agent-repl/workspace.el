@@ -908,6 +908,10 @@ Returns:
     ;; is gone, which is a different thing from a nap, and the glyph is the only
     ;; distinction the tab-bar carries once the color says "something is wrong".
     (:severed        . "🔌")
+    ;; SUBMITTING gets the outbound envelope: the prompt is on its way to the
+    ;; agent and the agent has not started on it, which the hourglass would
+    ;; overstate.
+    (:submitting     . "📤")
     (:thinking       . "⌛")
     (:clearing       . "🧹")
     (:compacting     . "🗜")

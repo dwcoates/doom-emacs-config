@@ -37,11 +37,17 @@ const (
 	// evidence is the one direction that can mislead.
 	sigDormantLegacy = "dormant"
 	sigThinking      = "thinking"
-	sigDone          = "done"
-	sigPermission    = "permission"
-	sigIdle          = "idle"
-	sigReady         = "ready"
-	sigIdleAsync     = "idle_async" // DERIVED at resolve time; never stored.
+	// sigSubmitting is the FIRST half of a turn: the daemon has committed to
+	// submitting the prompt and the shim has not yet acked it. Same band and
+	// same hue as `thinking`, which it exists only to make more precise — see
+	// RENDER_STATE_SUBMITTING in frontend.proto for why its closing edge is the
+	// ack rather than the durable TurnStarted.
+	sigSubmitting = "submitting"
+	sigDone       = "done"
+	sigPermission = "permission"
+	sigIdle       = "idle"
+	sigReady      = "ready"
+	sigIdleAsync  = "idle_async" // DERIVED at resolve time; never stored.
 	// An session-status lifecycle token: it reports HOW the last turn ended, exactly as
 	// `done` reports that it ended cleanly. It is not a latch and has no
 	// clearing token — the next session-status lifecycle row supersedes it.
@@ -97,9 +103,14 @@ const (
 	// before their corresponding durable stream events finish traversing the
 	// store.  See promptstate.go.
 	causePromptAccepted = "prompt_accepted"
+	// The shim ACKED the submit, so the turn advances from `submitting` to
+	// `thinking`: the agent now genuinely holds the prompt, which is the first
+	// moment that word is true. See promptstate.go for why this edge is the ack
+	// rather than the durable TurnStarted.
+	causePromptDelivered = "prompt_delivered"
 	// The retraction of causePromptAccepted. The accepted edge is now written
 	// BEFORE the shim's Ack, so a submit the shim refuses (or never receives)
-	// leaves a `thinking` row describing a turn that never began. Nothing else
+	// leaves a `submitting` row describing a turn that never began. Nothing else
 	// can close it — no TurnEnded is coming for a prompt no session ever ran —
 	// so the submitter writes the closing row itself. See promptstate.go.
 	causePromptRejected           = "prompt_rejected"
@@ -229,6 +240,8 @@ func renderStateOf(token string) frontendv1.RenderState {
 		return frontendv1.RenderState_RENDER_STATE_IDLE
 	case sigIdleAsync:
 		return frontendv1.RenderState_RENDER_STATE_IDLE_ASYNC
+	case sigSubmitting:
+		return frontendv1.RenderState_RENDER_STATE_SUBMITTING
 	case sigThinking:
 		return frontendv1.RenderState_RENDER_STATE_THINKING
 	case sigClearing:
@@ -394,6 +407,10 @@ WITH
     ('vendor_blocked','agent',20),
     ('clearing','clearing',28),
     ('compacting','compacting',29),
+    -- SUBMITTING shares thinking's rank because it shares thinking's band: it
+    -- is the same claim about what the user can do, refined by one word. Only
+    -- one agent row is ever a candidate, so the tie is never resolved.
+    ('submitting','agent',30),
     ('thinking','agent',30),
     ('permission','agent',40),
     ('done','agent',41),
@@ -578,8 +595,14 @@ func resolve(db *sql.DB, workspace string, logf dlog.Logf) (resolved, error) {
 	// The shim-accepted command edge is the first authoritative observation
 	// that a turn is beginning; the durable stream TurnStarted later replaces
 	// its cause without changing the truth value.
+	// EVERY edge that opens a turn counts, and the split into `submitting` and
+	// `thinking` added one. Omitting the delivered edge would report no turn
+	// active for the whole span between the shim ack and the durable
+	// TurnStarted, which is exactly when the agent is working hardest.
 	turnActive := agentCause.Valid &&
-		(agentCause.String == causeTurnStarted || agentCause.String == causePromptAccepted)
+		(agentCause.String == causeTurnStarted ||
+			agentCause.String == causePromptAccepted ||
+			agentCause.String == causePromptDelivered)
 
 	// AN INVARIANT VIOLATION, never a benign combination. A hibernation is
 	// something WE do on purpose, and sessioncontroller's hibernate() refuses any

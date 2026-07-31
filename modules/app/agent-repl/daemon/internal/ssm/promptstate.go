@@ -7,8 +7,8 @@ import (
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 )
 
-// MarkPromptAccepted moves the session-status lifecycle to `thinking` when the daemon
-// commits to submitting an immediately delivered prompt.
+// MarkPromptAccepted moves the session-status lifecycle to `submitting` when the
+// daemon commits to submitting an immediately delivered prompt.
 //
 // This is the daemon's earliest turn-start observation, and it is deliberately
 // written BEFORE the prompt is handed to the shim rather than after the shim
@@ -27,12 +27,12 @@ import (
 //
 // PUBLISH is the synchronous frontend barrier. It runs while the SSM lock is
 // still held, after the accepted state has resolved, so no later SSM transition
-// can overtake this `thinking` publication. The ordinary SSM subscription still
+// can overtake this `submitting` publication. The ordinary SSM subscription still
 // receives the same transition for progress mirroring and reconnect recovery;
 // its duplicate frontend push is intentionally harmless.
 //
 // The later TurnStarted remains the durable lifecycle authority. It appends its
-// own seq-bearing row and is harmless over this daemon-local `thinking` row.
+// own seq-bearing row and is harmless over this daemon-local row.
 func (m *Manager) MarkPromptAccepted(
 	workspace, sessionID, requestID string,
 	publish func(*frontendv1.WorkspaceState),
@@ -61,19 +61,19 @@ func (m *Manager) MarkPromptAccepted(
 				workspace, sessionID, requestID, claimant, err)
 			return err
 		}
-		m.logf("ssm: prompt accepted IDEMPOTENT ws=%s session=%s request_id=%q active_claimant=%q — session-status lifecycle already reads `thinking`",
+		m.logf("ssm: prompt accepted IDEMPOTENT ws=%s session=%s request_id=%q active_claimant=%q — session-status lifecycle already claims this turn",
 			workspace, sessionID, requestID, claimant)
 		return m.publishPromptAcceptedLocked(workspace, sessionID, requestID, "idempotent", publish)
 	}
 
 	if err := appendRow(
-		m.db, workspace, sessionID, sigThinking, causePromptAccepted,
+		m.db, workspace, sessionID, sigSubmitting, causePromptAccepted,
 		sql.NullInt64{}, m.nextAt(), "",
 	); err != nil {
 		return fmt.Errorf("ssm: record accepted prompt for workspace %q session %q request %q: %w",
 			workspace, sessionID, requestID, err)
 	}
-	m.logf("ssm: prompt accepted ws=%s session=%s request_id=%q — appended daemon-local `thinking` before command completion; durable TurnStarted will supersede it",
+	m.logf("ssm: prompt accepted ws=%s session=%s request_id=%q — appended daemon-local `submitting` before command completion; the shim ack advances it to `thinking`",
 		workspace, sessionID, requestID)
 	if err := m.reresolveLocked(workspace, causePromptAccepted, 0); err != nil {
 		return err
@@ -102,7 +102,14 @@ func (m *Manager) publishPromptAcceptedLocked(
 		return fmt.Errorf("ssm: resolve synchronous composite prompt state for workspace %q session %q request %q: %w",
 			workspace, sessionID, requestID, err)
 	}
-	if state.GetState() != frontendv1.RenderState_RENDER_STATE_THINKING || !state.GetTurnActive() {
+	// EITHER half of a turn satisfies this. The appended branch resolves to
+	// `submitting`, and the IDEMPOTENT branch — a durable TurnStarted that won
+	// the race — legitimately resolves to `thinking`. What the invariant
+	// actually guards is that a turn is claimed at all before a prompt bubble
+	// is exposed, which both states assert.
+	inTurn := state.GetState() == frontendv1.RenderState_RENDER_STATE_SUBMITTING ||
+		state.GetState() == frontendv1.RenderState_RENDER_STATE_THINKING
+	if !inTurn || !state.GetTurnActive() {
 		return fmt.Errorf("ssm: synchronous prompt state invariant failed for workspace %q session %q request %q: state=%s turn_active=%t",
 			workspace, sessionID, requestID, state.GetState(), state.GetTurnActive())
 	}
@@ -113,7 +120,90 @@ func (m *Manager) publishPromptAcceptedLocked(
 	return nil
 }
 
-// MarkPromptRejected retracts the daemon-local `thinking` edge for a prompt the
+// MarkPromptDelivered advances `submitting` to `thinking` when the shim ACKS
+// the prompt, which is the moment the agent genuinely holds it.
+//
+// THIS IS THE EDGE THE SPLIT EXISTS FOR. MarkPromptAccepted publishes on the
+// daemon's own intent so the user sees a turn begin at the speed of their
+// keystroke, but during that window nothing has been handed to the agent yet,
+// and calling it `thinking` overstated what was happening. The ack is the first
+// moment that word is true.
+//
+// NOT the durable TurnStarted, deliberately: the shim MINTS TurnStarted inside
+// the same synchronous block that acks the submit, so the two describe one
+// instant and the delay between them is store round-trip time. Cutting here
+// instead would make the phase word move with store load rather than with the
+// agent.
+//
+// IT ADVANCES ONLY ITS OWN ROW, for the same reason MarkPromptRejected retracts
+// only its own: any other top row means something more authoritative landed in
+// the window, and overwriting it would report the agent thinking over a
+// permission question, a context cut or another session's turn. Reports whether
+// it wrote the row; false with a nil error is the benign already-superseded
+// outcome.
+//
+// A failure is returned to the caller but is NOT fatal to the prompt: the shim
+// already has it, and the durable TurnStarted still arrives to state the same
+// thing. The caller logs loudly and carries on.
+func (m *Manager) MarkPromptDelivered(workspace, sessionID, requestID string) (bool, error) {
+	if workspace == "" {
+		return false, fmt.Errorf("ssm: MarkPromptDelivered got an empty workspace")
+	}
+	if sessionID == "" {
+		return false, fmt.Errorf("ssm: MarkPromptDelivered for workspace %q got an empty session id", workspace)
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	var (
+		topState string
+		topCause string
+		topSID   sql.NullString
+	)
+	err := m.db.QueryRow(
+		`SELECT state, cause_kind, session_id FROM workspace_state
+		 WHERE workspace = ? AND state IN `+sessionStatusMembers+`
+		 ORDER BY at DESC LIMIT 1`,
+		workspace,
+	).Scan(&topState, &topCause, &topSID)
+	if err == sql.ErrNoRows {
+		m.logf("ssm: prompt delivered ws=%s session=%s request_id=%q decision=no_agent_axis — nothing claims the turn this ack belongs to",
+			workspace, sessionID, requestID)
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("ssm: MarkPromptDelivered read session-status lifecycle for workspace %q: %w", workspace, err)
+	}
+
+	if topSID.String != "" && topSID.String != sessionID {
+		err := fmt.Errorf("ssm: prompt delivered for workspace %q session %q cannot advance state owned by session %q", workspace, sessionID, topSID.String)
+		m.logf("ssm: prompt delivered REJECTED ws=%s session=%s request_id=%q state=%s cause_kind=%s active_claimant=%q error=%v",
+			workspace, sessionID, requestID, topState, topCause, topSID.String, err)
+		return false, err
+	}
+	if topState != sigSubmitting || topCause != causePromptAccepted {
+		m.logf("ssm: prompt delivered ws=%s session=%s request_id=%q decision=preserve state=%s cause_kind=%s — the submitting row this would advance is already superseded",
+			workspace, sessionID, requestID, topState, topCause)
+		return false, nil
+	}
+
+	if err := appendRow(
+		m.db, workspace, sessionID, sigThinking, causePromptDelivered,
+		sql.NullInt64{}, m.nextAt(), "",
+	); err != nil {
+		return false, fmt.Errorf("ssm: record delivered prompt for workspace %q session %q request %q: %w",
+			workspace, sessionID, requestID, err)
+	}
+	m.logf("ssm: prompt delivered ws=%s session=%s request_id=%q — the shim acked the submit, so the turn advances from `submitting` to `thinking`",
+		workspace, sessionID, requestID)
+	if err := m.reresolveLocked(workspace, causePromptDelivered, 0); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// MarkPromptRejected retracts the daemon-local `submitting` edge for a prompt the
 // shim did NOT take.
 //
 // MarkPromptAccepted is written before the submit rather than after its Ack, so
@@ -122,9 +212,9 @@ func (m *Manager) publishPromptAcceptedLocked(
 // with a claim the daemon has not yet confirmed, and this is the other half of
 // it: when the submit then fails, the claim must be withdrawn by the same
 // caller that made it. Nothing else can withdraw it — the session-status
-// lifecycle retires `thinking` on a TurnEnded, and no turn that never began
-// will ever report an end — so without this the workspace reads `thinking`
-// until the watchdog or a shim stop closes it.
+// lifecycle retires a turn on a TurnEnded, and no turn that never began will
+// ever report an end — so without this the workspace reads `submitting` until
+// the watchdog or a shim stop closes it.
 //
 // IT RETRACTS ONLY WHAT IT WROTE. The row on top must still be this session's
 // `prompt_accepted` row: any other top row means something authoritative landed
@@ -184,7 +274,7 @@ func (m *Manager) MarkPromptRejected(
 			workspace, sessionID, requestID, topState, topCause, topSID.String, err)
 		return false, err
 	}
-	if topState != sigThinking || topCause != causePromptAccepted {
+	if topState != sigSubmitting || topCause != causePromptAccepted {
 		m.logf("ssm: prompt rejected ws=%s session=%s request_id=%q decision=preserve state=%s cause_kind=%s — the accepted row this would retract has already been superseded",
 			workspace, sessionID, requestID, topState, topCause)
 		return false, nil
@@ -285,7 +375,7 @@ func (m *Manager) ReconcileAlreadyComplete(workspace, sessionID string) (bool, e
 		return false, fmt.Errorf("ssm: ReconcileAlreadyComplete read session-status lifecycle for workspace %q: %w", workspace, err)
 	}
 
-	if topState != sigThinking && topState != sigPermission {
+	if topState != sigThinking && topState != sigSubmitting && topState != sigPermission {
 		m.logf("ssm: already-complete reconciliation ws=%s session=%s decision=preserve_settled state=%s claimant=%q",
 			workspace, sessionID, topState, topSID.String)
 		return false, nil

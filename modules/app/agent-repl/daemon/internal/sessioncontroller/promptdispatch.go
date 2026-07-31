@@ -146,6 +146,14 @@ func (m *Manager) forwardPrompt(ctx context.Context, d *sessionController, reque
 		return err
 	}
 
+	// THE DELIVERED EDGE: the shim has the prompt, so the turn advances from
+	// `submitting` to `thinking`. This is the whole reason the two are split —
+	// the accepted edge above publishes on the daemon's own intent, and only
+	// here is the agent actually holding anything.
+	if accepted {
+		m.notePromptDelivered(d, requestID)
+	}
+
 	// THE RECEIPT, only after every frontend has been synchronously offered the
 	// accepted prompt's `thinking` state, and only once the shim has actually
 	// TAKEN the prompt. It closes the transcript-latency gap, but never at the
@@ -253,6 +261,29 @@ func (m *Manager) retractPromptAccepted(d *sessionController, requestID string, 
 	m.progress().NoteTurnRejected(d.workspace, d.sessionID)
 	m.logf("session-controller: prompt rejected state edge APPLIED ws=%s session=%s request_id=%q session_controller_turn_active_restored=%v publish_sync=true turn_clock=closed submit_error=%v",
 		d.workspace, d.sessionID, requestID, activeBefore, cause)
+}
+
+// notePromptDelivered advances the workspace from `submitting` to `thinking` on
+// the shim's ack.
+//
+// A failure is loud-logged and SWALLOWED, unlike the accepted edge's. The prompt
+// has already reached the agent, so there is nothing to fail back to the caller,
+// and failing the submit over a phase word would report a prompt as lost when it
+// is running. The durable TurnStarted still arrives to state the same thing.
+func (m *Manager) notePromptDelivered(d *sessionController, requestID string) {
+	advanced, err := m.cfg.SSM.MarkPromptDelivered(d.workspace, d.sessionID, requestID)
+	if err != nil {
+		m.logf("session-controller: prompt delivered state edge FAILED ws=%s session=%s request_id=%q error=%v (the workspace holds `submitting` until the durable TurnStarted lands)",
+			d.workspace, d.sessionID, requestID, err)
+		return
+	}
+	if !advanced {
+		m.logf("session-controller: prompt delivered state edge PRESERVED ws=%s session=%s request_id=%q — something more authoritative already owns the state axis",
+			d.workspace, d.sessionID, requestID)
+		return
+	}
+	m.logf("session-controller: prompt delivered state edge APPLIED ws=%s session=%s request_id=%q submitting->thinking",
+		d.workspace, d.sessionID, requestID)
 }
 
 // metapromptRefireOrigin is the vendor-visible provenance of the daemon's own

@@ -67,6 +67,10 @@ type StateApplier interface {
 	// synchronously publishes that state through PUBLISH. The durable
 	// TurnStarted follows over the store stream.
 	MarkPromptAccepted(workspace, sessionID, requestID string, publish func(*frontendv1.WorkspaceState)) error
+	// MarkPromptDelivered advances that edge from `submitting` to `thinking`
+	// when the shim ACKS the prompt, which is the first moment the agent
+	// genuinely holds it. Reports whether it wrote the row.
+	MarkPromptDelivered(workspace, sessionID, requestID string) (advanced bool, err error)
 	// MarkPromptRejected withdraws that edge when the submit it was published
 	// for then FAILS, and synchronously publishes the retraction. It reports
 	// whether it wrote the closing row: false with a nil error means something

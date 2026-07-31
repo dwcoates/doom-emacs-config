@@ -171,6 +171,27 @@ enum RenderState {
   // workspace that is genuinely asleep. See the SSM's `prec` table, where it
   // sits at 15 — directly below the blue band and above purple's 20.
   RENDER_STATE_HIBERNATED = 21;
+  // Additive: the FIRST half of a turn, before the shim has taken the prompt.
+  //
+  // RED, exactly as THINKING is, and for the identical reason: a turn is in
+  // flight and the user's next prompt cannot land yet. The WORD is the whole
+  // distinction, precisely as CLEARING and COMPACTING split THINKING above.
+  //
+  // WHAT IT SPLITS. The daemon publishes a turn's state the moment it commits
+  // to submitting, which is what stops a prompt from sitting against a green
+  // workspace while a busy shim gets round to acking it. That claim is
+  // truthful but coarse: it says the agent is thinking during a window in
+  // which the agent has not yet been handed anything. SUBMITTING names that
+  // window, so THINKING can go back to meaning the shim actually holds the
+  // prompt.
+  //
+  // ITS CLOSING EDGE IS THE SHIM ACK, and deliberately not the durable
+  // TurnStarted: the shim MINTS TurnStarted in the same synchronous block that
+  // acks the submit (uds-session.ts, emitTurnStarted), so the two report one
+  // instant and the gap between them is store round-trip time. A state cut
+  // there would move with store load rather than with the agent, lingering
+  // longest exactly when the model was fastest.
+  RENDER_STATE_SUBMITTING = 22;
 }
 
 // SESSION CONNECTIVITY answers whether the current session-controller
@@ -207,6 +228,9 @@ enum SessionStatus {
   SESSION_STATUS_INTERRUPTED = 5;
   SESSION_STATUS_VENDOR_BLOCKED = 6;
   SESSION_STATUS_MONITORING = 7;
+  // The session-status twin of RENDER_STATE_SUBMITTING: the daemon has
+  // committed to submitting a prompt and the shim has not yet acked it.
+  SESSION_STATUS_SUBMITTING = 8;
 }
 
 // A runtime fault is explanatory evidence scoped to exactly one

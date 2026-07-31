@@ -587,6 +587,104 @@ func TestAFailedClearRetractsNothing(t *testing.T) {
 	}
 }
 
+// --- the delivered edge -------------------------------------------------------
+//
+// The accepted edge publishes on the daemon's own intent, so the workspace reads
+// `submitting` until the shim actually takes the prompt. These cover the second
+// edge that turns it into `thinking`.
+
+func TestASuccessfulSubmitAdvancesTheStateToThinking(t *testing.T) {
+	// Arrange
+	h := newQueueHarness(t, nil)
+	h.applier.promptDeliverDid = true
+
+	// Act
+	if err := h.submitAs("r1", "hello there"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+
+	// Assert
+	delivers := h.applier.promptDeliverCalls()
+	if len(delivers) != 1 {
+		t.Fatalf("prompt-deliver edges = %d, want the one advance", len(delivers))
+	}
+	if delivers[0].workspace != "ws" || delivers[0].requestID != "r1" {
+		t.Errorf("delivered edge = %+v, want the submit's own workspace and request id", delivers[0])
+	}
+}
+
+func TestTheDeliveredEdgeFollowsTheShimSubmit(t *testing.T) {
+	// Arrange — observe the SSM as the shim round-trip BEGINS, which is the
+	// only vantage point that can prove the advance did not happen too early.
+	h := newQueueHarness(t, nil)
+	h.applier.promptDeliverDid = true
+	var atSubmit int
+	h.client.mu.Lock()
+	h.client.onSubmit = func() { atSubmit = len(h.applier.promptDeliverCalls()) }
+	h.client.mu.Unlock()
+
+	// Act
+	if err := h.submitAs("r1", "hello there"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+
+	// Assert — `thinking` cannot be claimed before the shim has answered.
+	if atSubmit != 0 {
+		t.Fatalf("prompt-deliver edges as the submit began = %d, want none until it acks", atSubmit)
+	}
+}
+
+func TestAFailedSubmitAdvancesNothing(t *testing.T) {
+	// Arrange — the shim refuses, so the turn never reaches `thinking`.
+	h := newQueueHarness(t, nil)
+	h.applier.promptRejectDid = true
+	h.controller().client = &failingClient{err: errors.New("shim gone")}
+
+	// Act
+	if err := h.submitAs("r1", "hello there"); err == nil {
+		t.Fatal("submit succeeded, want the injected failure")
+	}
+
+	// Assert
+	if delivers := h.applier.promptDeliverCalls(); len(delivers) != 0 {
+		t.Fatalf("prompt-deliver edges for a refused submit = %+v, want none", delivers)
+	}
+}
+
+func TestAFailedDeliveredEdgeStillReportsTheSubmitAsAccepted(t *testing.T) {
+	// Arrange — the shim HAS the prompt, so a bookkeeping failure on the phase
+	// word must not report the prompt as lost.
+	h := newQueueHarness(t, nil)
+	h.applier.promptDeliverErr = errors.New("state database unavailable")
+
+	// Act
+	err := h.submitAs("r1", "hello there")
+
+	// Assert
+	if err != nil {
+		t.Fatalf("submit = %v, want nil — the prompt reached the agent", err)
+	}
+	if got := h.client.promptTexts(); len(got) != 1 || got[0] != "hello there" {
+		t.Fatalf("shim submissions = %q, want the accepted prompt", got)
+	}
+}
+
+func TestAFailedClearAdvancesNothing(t *testing.T) {
+	// Arrange — `/clear` is a session command, so it opened no turn to advance.
+	h := newQueueHarness(t, nil)
+	h.applier.promptDeliverDid = true
+
+	// Act
+	if err := h.submitAs("r1", "/clear"); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+
+	// Assert
+	if delivers := h.applier.promptDeliverCalls(); len(delivers) != 0 {
+		t.Fatalf("prompt-deliver edges for a /clear = %+v, want none", delivers)
+	}
+}
+
 // metapromptCwd is a temp cwd holding a metaprompt file.
 func metapromptCwd(t *testing.T) string {
 	t.Helper()
