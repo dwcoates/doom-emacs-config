@@ -623,6 +623,105 @@ slash produced a key the daemon has no session for."
       (should (equal (plist-get (cadr completion) :actionId) "action-1"))
       (should (eq (plist-get (cadr completion) :ok) t)))))
 
+;;;; ---- Tests: deferred host-action completion ----
+;;
+;; A handler that only DISPATCHES its effect must not have that read as the
+;; effect succeeding. The merge is the case that motivated it: the daemon
+;; recorded `ok=true' while the merge's own rejection was still in flight, so
+;; the failure that killed every merge left the workspace showing nothing.
+
+(ert-deftest agent-repl-test-host-action-deferred-handler-sends-no-completion ()
+  "A handler that defers leaves the action outstanding, not completed."
+  (let ((agent-repl--host-action-outcomes (make-hash-table :test 'equal))
+        (agent-repl--host-action-deferrals (make-hash-table :test 'equal))
+        (completions nil))
+    (cl-letf (((symbol-function 'agent-repl--handle-switch-command)
+               (lambda (_cmd) (agent-repl--host-action-defer "tok-1")))
+              ((symbol-function 'agent-repl--uds-send-command)
+               (lambda (field payload &optional _ws _process)
+                 (push (list field payload) completions)
+                 "host-ack"))
+              ((symbol-function 'agent-repl--uds-track-command)
+               (lambda (&rest _) nil)))
+      (should (eq (agent-repl--workspace-create-handle-host-action
+                   '(:actionId "action-1" :switchWorkspace (:dir "/tmp/repo")))
+                  :deferred))
+      (should-not completions))))
+
+(ert-deftest agent-repl-test-host-action-deferred-settles-ok ()
+  "Settling a deferred action OK sends its success completion."
+  (let ((agent-repl--host-action-outcomes (make-hash-table :test 'equal))
+        (agent-repl--host-action-deferrals (make-hash-table :test 'equal))
+        (agent-repl--host-action-success-order nil)
+        (completions nil))
+    (cl-letf (((symbol-function 'agent-repl--handle-switch-command)
+               (lambda (_cmd) (agent-repl--host-action-defer "tok-1")))
+              ((symbol-function 'agent-repl--uds-send-command)
+               (lambda (_field payload &optional _ws _process)
+                 (push payload completions)
+                 "host-ack"))
+              ((symbol-function 'agent-repl--uds-track-command)
+               (lambda (&rest _) nil)))
+      (agent-repl--workspace-create-handle-host-action
+       '(:actionId "action-1" :switchWorkspace (:dir "/tmp/repo")))
+      (agent-repl--host-action-settle "tok-1" t nil)
+      (should (equal (length completions) 1))
+      (should (equal (plist-get (car completions) :actionId) "action-1"))
+      (should (eq (plist-get (car completions) :ok) t)))))
+
+(ert-deftest agent-repl-test-host-action-deferred-settles-failed ()
+  "Settling a deferred action with an error reports ok=false and the reason."
+  (let ((agent-repl--host-action-outcomes (make-hash-table :test 'equal))
+        (agent-repl--host-action-deferrals (make-hash-table :test 'equal))
+        (completions nil))
+    (cl-letf (((symbol-function 'agent-repl--handle-switch-command)
+               (lambda (_cmd) (agent-repl--host-action-defer "tok-1")))
+              ((symbol-function 'agent-repl--uds-send-command)
+               (lambda (_field payload &optional _ws _process)
+                 (push payload completions)
+                 "host-ack"))
+              ((symbol-function 'agent-repl--uds-track-command)
+               (lambda (&rest _) nil)))
+      (agent-repl--workspace-create-handle-host-action
+       '(:actionId "action-1" :switchWorkspace (:dir "/tmp/repo")))
+      (agent-repl--host-action-settle "tok-1" nil "resolve dirs: not wired")
+      (should (equal (length completions) 1))
+      (should (eq (plist-get (car completions) :ok) json-false))
+      (should (equal (plist-get (car completions) :error)
+                     "resolve dirs: not wired")))))
+
+(ert-deftest agent-repl-test-host-action-deferred-failure-is-retryable ()
+  "A settled failure drops the cached outcome so redelivery re-runs it."
+  (let ((agent-repl--host-action-outcomes (make-hash-table :test 'equal))
+        (agent-repl--host-action-deferrals (make-hash-table :test 'equal)))
+    (cl-letf (((symbol-function 'agent-repl--handle-switch-command)
+               (lambda (_cmd) (agent-repl--host-action-defer "tok-1")))
+              ((symbol-function 'agent-repl--uds-send-command)
+               (lambda (&rest _) "host-ack"))
+              ((symbol-function 'agent-repl--uds-track-command)
+               (lambda (&rest _) nil)))
+      (agent-repl--workspace-create-handle-host-action
+       '(:actionId "action-1" :switchWorkspace (:dir "/tmp/repo")))
+      (agent-repl--host-action-settle "tok-1" nil "merge rejected")
+      (should-not (gethash "action-1" agent-repl--host-action-outcomes)))))
+
+(ert-deftest agent-repl-test-host-action-settle-of-an-untracked-token-is-inert ()
+  "A token no host action is waiting on completes nothing."
+  (let ((agent-repl--host-action-outcomes (make-hash-table :test 'equal))
+        (agent-repl--host-action-deferrals (make-hash-table :test 'equal))
+        (completions nil))
+    (cl-letf (((symbol-function 'agent-repl--uds-send-command)
+               (lambda (_field payload &optional _ws _process)
+                 (push payload completions)
+                 "host-ack")))
+      (agent-repl--host-action-settle "interactive-merge" t nil)
+      (should-not completions))))
+
+(ert-deftest agent-repl-test-host-action-defer-outside-a-handler-is-inert ()
+  "The merge dispatch stays callable from an interactive command."
+  (let ((agent-repl--host-action-deferral nil))
+    (should (equal (agent-repl--host-action-defer "tok-1") "tok-1"))))
+
 (ert-deftest agent-repl-test-host-action-workspace-create-failure-is-announced ()
   "A failed creation job is logged and echoed, then completed ok."
   (let ((logged nil)
