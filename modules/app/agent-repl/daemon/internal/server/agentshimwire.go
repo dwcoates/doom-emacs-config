@@ -22,8 +22,7 @@ import (
 // AgentShimConfig injects everything WireAgentShim binds. SSM is opened by the
 // caller (main) and injected so its lifecycle — and the per-session controller that
 // also feeds it — is owned in one place; the three routers back the frontend
-// command handler; MergeDirs resolves a workspace to the cherry-pick request
-// the merge Engine runs; Sessions supplies SessionView metadata for snapshots.
+// command handler; Sessions supplies SessionView metadata for snapshots.
 type AgentShimConfig struct {
 	// SSM is the session-state manager, opened and owned by the caller (main).
 	// Required: the frontend snapshot and the merge-transition push loop both
@@ -62,9 +61,6 @@ type AgentShimConfig struct {
 	// DaemonHealth supplies the one daemon-global readiness assertion shared by
 	// the HTTP health route and frontend health command.
 	DaemonHealth DaemonHealthChecker
-	// MergeDirs resolves a workspace to its merge.Request (source/target
-	// worktrees + branch). Required: the merge Engine cannot run without it.
-	MergeDirs MergeDirResolver
 	// Lifecycle closes/opens workspaces (the Emacs workspace-command channel).
 	Lifecycle WorkspaceLifecycle
 	// Sessions supplies SessionView metadata (model/slug/title) for snapshots.
@@ -107,13 +103,6 @@ type AgentShimConfig struct {
 	ClientLogs ClientLogWriter
 	// Logf is the daemon logger. Nil discards.
 	Logf func(string, ...any)
-}
-
-// MergeDirResolver resolves a workspace name to the cherry-pick request the
-// merge Engine runs. It owns the workspace -> (source dir, source branch,
-// target dir) policy the daemon needs and the frontend command does not carry.
-type MergeDirResolver interface {
-	Resolve(workspace string) (merge.Request, error)
 }
 
 // AgentShim is the assembled frontend surface. Server is mounted by main.go
@@ -170,28 +159,25 @@ func (s mergeSink) RecordMergeTransition(ws string, phase merge.Phase, cause str
 	return s.mgr.ApplyMergeTransition(ws, string(phase), cause)
 }
 
-// mergeRunner backs the frontend MergeRunner with the merge Engine plus the
-// workspace->dirs resolver.
+// mergeRunner backs the frontend MergeRunner with the merge Engine, adapting
+// the Engine's (Result, error) to the command handler's error.
+//
+// It holds NOTHING ELSE. It used to also hold a workspace->dirs resolver and
+// call it on the way through, which is the seam this file no longer has: the
+// geometry arrives on the command (MergeWorkspaceCmd), so there is nothing left
+// to resolve and no way for a merge to fail because the daemon could not work
+// out where the workspace lives.
 type mergeRunner struct {
-	engine   *merge.Engine
-	resolver MergeDirResolver
+	engine *merge.Engine
 }
 
-func (m mergeRunner) Merge(ctx context.Context, workspace string) error {
-	req, err := m.resolver.Resolve(workspace)
-	if err != nil {
-		return fmt.Errorf("merge %q: resolve dirs: %w", workspace, err)
-	}
-	_, err = m.engine.Merge(ctx, req)
+func (m mergeRunner) Merge(ctx context.Context, req merge.Request) error {
+	_, err := m.engine.Merge(ctx, req)
 	return err
 }
 
-func (m mergeRunner) Resume(ctx context.Context, workspace string) error {
-	req, err := m.resolver.Resolve(workspace)
-	if err != nil {
-		return fmt.Errorf("resume merge %q: resolve dirs: %w", workspace, err)
-	}
-	_, err = m.engine.Resume(ctx, req)
+func (m mergeRunner) Resume(ctx context.Context, req merge.Request) error {
+	_, err := m.engine.Resume(ctx, req)
 	return err
 }
 
@@ -210,8 +196,6 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 		return nil, fmt.Errorf("server: WireAgentShim needs an SSM")
 	case cfg.Progress == nil:
 		return nil, fmt.Errorf("server: WireAgentShim needs a progress resolver")
-	case cfg.MergeDirs == nil:
-		return nil, fmt.Errorf("server: WireAgentShim needs a MergeDirResolver")
 	case cfg.SessionCommands == nil:
 		return nil, fmt.Errorf("server: WireAgentShim needs a SessionCommands binding")
 	case cfg.WorkspaceCreation == nil:
@@ -229,7 +213,7 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 	}
 
 	handler, err := newCommandHandler(
-		cfg.Prompts, mergeRunner{engine: engine, resolver: cfg.MergeDirs},
+		cfg.Prompts, mergeRunner{engine: engine},
 		cfg.Lifecycle, cfg.Resyncer, cfg.SessionCommands, cfg.RequestShutdown,
 		cfg.Queues, logf,
 		CommandHandlerConfig{

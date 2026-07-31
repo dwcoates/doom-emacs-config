@@ -28,6 +28,7 @@ import (
 	"claude-repld/internal/registry"
 	"claude-repld/internal/session"
 	"claude-repld/internal/sessioncontroller"
+	"claude-repld/internal/workspace/merge"
 	"claude-repld/internal/ssm"
 )
 
@@ -103,8 +104,8 @@ func (stubConnSource) Next(ctx context.Context, _ string) (net.Conn, *corev1.Shi
 
 type stubMerge struct{}
 
-func (stubMerge) Merge(context.Context, string) error  { return nil }
-func (stubMerge) Resume(context.Context, string) error { return nil }
+func (stubMerge) Merge(context.Context, merge.Request) error  { return nil }
+func (stubMerge) Resume(context.Context, merge.Request) error { return nil }
 
 type stubLifecycle struct{}
 

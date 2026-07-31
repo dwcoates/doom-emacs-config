@@ -30,6 +30,7 @@ import (
 	"claude-repld/internal/frontend"
 	"claude-repld/internal/registry"
 	"claude-repld/internal/ssm"
+	"claude-repld/internal/workspace/merge"
 
 	"google.golang.org/protobuf/types/known/structpb"
 )
@@ -70,15 +71,23 @@ type DaemonHealthChecker interface {
 	DaemonHealth() (healthy bool, reason string)
 }
 
-// MergeRunner runs (or resumes) a workspace merge. It owns the workspace ->
-// (source dir, source branch, target dir) resolution the merge.Engine needs,
-// so the handler stays free of that policy.
+// MergeRunner runs (or resumes) a workspace merge against the geometry the
+// FRONTEND supplied with the command.
+//
+// It takes a whole merge.Request rather than a workspace name because the
+// daemon has no workspace -> (source dir, source branch, target dir) mapping of
+// its own, and MergeWorkspaceCmd carries all three precisely so it does not need
+// one. It previously took the bare name and re-derived the geometry through an
+// injected resolver, which meant the one fact the command already stated was
+// discarded on arrival and then reported as unknowable: every merge died on
+// "merge dir resolution not wired for workspace", with Emacs having sent the
+// answer in the same message.
 type MergeRunner interface {
-	// Merge starts a cherry-pick merge for the workspace.
-	Merge(ctx context.Context, workspace string) error
+	// Merge starts a cherry-pick merge for the request's workspace.
+	Merge(ctx context.Context, req merge.Request) error
 	// Resume continues a human-resolved conflict (the
 	// conflict_resolved_continue handoff, §9.3).
-	Resume(ctx context.Context, workspace string) error
+	Resume(ctx context.Context, req merge.Request) error
 }
 
 // WorkspaceLifecycle closes/opens a workspace. Bound to the Emacs
@@ -586,13 +595,34 @@ func (h *commandHandler) SetModel(ctx context.Context, workspace, requestID stri
 
 // MergeWorkspace runs a merge, or resumes one on the conflict_resolved_continue
 // handoff (§9.3).
+//
+// THE COMMAND'S OWN GEOMETRY IS AUTHORITATIVE. Only the frontend knows which
+// worktree a workspace lives in and which worktree it was created from, so
+// MergeWorkspaceCmd carries the source branch and both directories and the
+// daemon reads them from there. Re-deriving them daemon-side is what the
+// deleted MergeDirResolver seam attempted, and it could never answer: the
+// mapping it needed exists only in Emacs, so every merge failed with "merge dir
+// resolution not wired" while the command sitting in front of it named all
+// three fields.
+//
+// A request missing any of them is refused by merge.Request's own validation
+// inside the Engine, which is the single place that decides what a runnable
+// merge is.
 func (h *commandHandler) MergeWorkspace(ctx context.Context, workspace, requestID string, cmd *frontendv1.MergeWorkspaceCmd) error {
-	if cmd.GetConflictResolvedContinue() {
-		h.logf("frontend cmd: merge_workspace RESUME ws=%s request_id=%s", workspace, requestID)
-		return h.merges.Resume(ctx, workspace)
+	req := merge.Request{
+		Workspace:    workspace,
+		SourceBranch: cmd.GetSourceBranch(),
+		SourceDir:    cmd.GetSourceDir(),
+		TargetDir:    cmd.GetTargetDir(),
 	}
-	h.logf("frontend cmd: merge_workspace ws=%s request_id=%s handler=%s", workspace, requestID, cmd.GetHandler())
-	return h.merges.Merge(ctx, workspace)
+	if cmd.GetConflictResolvedContinue() {
+		h.logf("frontend cmd: merge_workspace RESUME ws=%s request_id=%s source_branch=%q source_dir=%q target_dir=%q",
+			workspace, requestID, req.SourceBranch, req.SourceDir, req.TargetDir)
+		return h.merges.Resume(ctx, req)
+	}
+	h.logf("frontend cmd: merge_workspace ws=%s request_id=%s handler=%s source_branch=%q source_dir=%q target_dir=%q",
+		workspace, requestID, cmd.GetHandler(), req.SourceBranch, req.SourceDir, req.TargetDir)
+	return h.merges.Merge(ctx, req)
 }
 
 func (h *commandHandler) CloseWorkspace(ctx context.Context, workspace, requestID string, _ *frontendv1.CloseWorkspaceCmd) error {

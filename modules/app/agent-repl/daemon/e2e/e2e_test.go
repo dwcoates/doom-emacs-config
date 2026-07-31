@@ -52,7 +52,6 @@ import (
 	"claude-repld/internal/shimlisten"
 	"claude-repld/internal/ssm"
 	"claude-repld/internal/statedb"
-	"claude-repld/internal/workspace/merge"
 )
 
 var frameTimeout = 30 * time.Second
@@ -193,13 +192,7 @@ func (l testShimLogger) Log(format string, args ...any) { l.t.Logf(format, args.
 
 func (l testShimLogger) LogVerbose(format string, args ...any) { l.t.Logf(format, args...) }
 
-// --- minimal WireAgentShim stubs (merge/lifecycle unused here) --------------
-
-type stubMergeDirs struct{}
-
-func (stubMergeDirs) Resolve(string) (merge.Request, error) {
-	return merge.Request{}, fmt.Errorf("e2e: merge not exercised")
-}
+// --- minimal WireAgentShim stubs (lifecycle unused here) --------------------
 
 type stubLifecycle struct{}
 
@@ -516,7 +509,6 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 		Prompts:           controller,
 		Turns:             controller,
 		Health:            controller,
-		MergeDirs:         stubMergeDirs{},
 		Lifecycle:         stubLifecycle{},
 		Resyncer:          controller,
 		Catalogs:          controller,
