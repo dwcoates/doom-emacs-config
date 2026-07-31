@@ -1494,7 +1494,7 @@ no durable copy of this value and must never acquire one: a persisted
 vendor uuid made Emacs a second authority on which conversation a workspace
 owns, and when its copy went stale five workspaces opened fresh
 conversations over intact transcripts.  The daemon owns that question now
-\(see `agent-repl--frontend-create-session' and its RESUME-MODE).
+\(see `agent-repl--frontend-after-create-session' and its RESUME-MODE).
 
 Nil is a normal answer — before the first pushed frame, or for an unbound
 workspace.  An unattributed log record is ACCEPTED by the daemon; a

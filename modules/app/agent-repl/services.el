@@ -20,10 +20,10 @@
 (declare-function agent-repl--frontend-build-if-stale "daemon" (&optional force))
 (declare-function agent-repl--frontend-build-targets-if-stale "daemon" (targets &optional force))
 (declare-function agent-repl--frontend-init-inhibited-p "daemon" ())
-(declare-function agent-repl--frontend-rebind-workspaces-after-restart "frontend-client" ())
+(declare-function agent-repl--frontend-after-daemon-healthy "frontend-client" (on-success on-failure))
+(declare-function agent-repl--frontend-after-ready "frontend-client" (on-ready on-failure &optional ws))
+(declare-function agent-repl--frontend-rebind-workspaces-after-restart "frontend-client" (&optional on-success on-failure))
 (declare-function agent-repl--frontend-runtime-bounce-preflight-async "daemon" (callback))
-(declare-function agent-repl--frontend-wait-daemon-healthy "frontend-client" ())
-(declare-function agent-repl--frontend-wait-ready "frontend-client" ())
 (declare-function agent-repl--log "core" (ws fmt &rest args))
 (declare-function agent-repl--log-verbose "core" (ws fmt &rest args))
 
@@ -63,6 +63,10 @@
 
 (defconst agent-repl--shim-services-buffer "*agent-repl-shim-services*"
   "Capture buffer for launchctl diagnostics.")
+
+(defun agent-repl--shim-services-run-timer (seconds callback)
+  "Integration boundary: run CALLBACK after SECONDS without blocking Emacs."
+  (run-with-timer seconds nil callback))
 
 (defun agent-repl--launchctl-call (args)
   "External-boundary wrapper: run launchctl with ARGS and capture its output."
@@ -142,50 +146,56 @@
                      "shim-services deployed stamp: binary=%s stamp=%s sha256=%s"
                      binary stamp digest)))
 
-(defun agent-repl--shim-store-wait-ready ()
-  "Wait for the newly kickstarted store socket, failing on timeout."
+(defun agent-repl--shim-store-after-ready (on-success on-failure)
+  "Poll for the newly kickstarted store socket without blocking Emacs."
+  (unless (and (functionp on-success) (functionp on-failure))
+    (error "agent-repl: shim-store readiness requires callable continuations"))
   (let* ((started-at (float-time))
          (deadline (+ started-at agent-repl-shim-store-ready-timeout))
-         (ready (agent-repl--shim-store-socket-present-p)))
+         timer settled)
     (agent-repl--log nil
                      "shim-services store readiness: socket=%s timeout=%.1fs initial-ready=%s"
                      agent-repl--shim-store-socket
                      agent-repl-shim-store-ready-timeout
-                     (if ready "t" "nil"))
-    (while (and (not ready)
-                (< (float-time) deadline))
-      (sleep-for 0.1)
-      (setq ready (agent-repl--shim-store-socket-present-p))
-      ;; This poll runs up to ten times per second while a service is starting.
-      (agent-repl--log-verbose nil
-                               "shim-services store readiness poll: socket=%s ready=%s elapsed=%.3fs remaining=%.3fs"
-                               agent-repl--shim-store-socket
-                               (if ready "t" "nil")
-                               (- (float-time) started-at)
-                               (max 0.0 (- deadline (float-time)))))
-    (unless ready
-      (agent-repl--log nil
-                       "shim-services store readiness: timeout socket=%s elapsed=%.3fs timeout=%.1fs"
-                       agent-repl--shim-store-socket
-                       (- (float-time) started-at)
-                       agent-repl-shim-store-ready-timeout)
-      (agent-repl--error nil
-                         "shim-store socket %s absent after %.1fs"
-                         agent-repl--shim-store-socket
-                         agent-repl-shim-store-ready-timeout))
-    (agent-repl--log nil
-                     "shim-services store ready: socket=%s elapsed=%.3fs timeout=%.1fs"
-                     agent-repl--shim-store-socket
-                     (- (float-time) started-at)
-                     agent-repl-shim-store-ready-timeout)
-    t))
+                     (if (agent-repl--shim-store-socket-present-p) "t" "nil"))
+    (cl-labels
+        ((finish (ok detail)
+           (unless settled
+             (setq settled t)
+             (when (timerp timer) (cancel-timer timer))
+             (agent-repl--log nil
+                              "shim-services store readiness: outcome=%s socket=%s elapsed=%.3fs timeout=%.1fs detail=%S"
+                              (if ok "ready" "timeout") agent-repl--shim-store-socket
+                              (- (float-time) started-at)
+                              agent-repl-shim-store-ready-timeout detail)
+             (if ok (funcall on-success) (funcall on-failure detail))))
+         (poll ()
+           (let ((ready (agent-repl--shim-store-socket-present-p))
+                 (now (float-time)))
+             (agent-repl--log-verbose nil
+                                      "shim-services store readiness poll: socket=%s ready=%s elapsed=%.3fs remaining=%.3fs"
+                                      agent-repl--shim-store-socket
+                                      (if ready "t" "nil") (- now started-at)
+                                      (max 0.0 (- deadline now)))
+             (cond
+              (ready (finish t nil))
+              ((>= now deadline)
+               (finish nil (format "shim-store socket %s absent after %.1fs"
+                                   agent-repl--shim-store-socket
+                                   agent-repl-shim-store-ready-timeout)))
+              (t (setq timer (agent-repl--shim-services-run-timer 0.1 #'poll)))))))
+      (poll)
+      :pending)))
 
-(defun agent-repl--shim-services-build-and-bounce (&optional preflight-complete)
+(defun agent-repl--shim-services-build-and-bounce
+    (preflight-complete on-success on-failure)
   "Build stale store/sidecar binaries and kickstart both launchd jobs.
 The store is kickstarted and confirmed ready before the sidecar is touched.
 Both deployed-binary stamps are written only after their corresponding
 kickstart succeeds.  PREFLIGHT-COMPLETE means the coordinator already
 validated both jobs before building any runtime artifact."
+  (unless (and (functionp on-success) (functionp on-failure))
+    (error "agent-repl: shim service bounce requires callable continuations"))
   (agent-repl--log nil
                    "shim-services build-and-bounce: beginning preflight-complete=%s store=%s sidecar=%s"
                    (if preflight-complete "t" "nil")
@@ -215,90 +225,99 @@ validated both jobs before building any runtime artifact."
                          "shim service build completed without both binaries: store=%s present=%s sidecar=%s present=%s"
                          agent-repl--shim-store-binary (if store-present "t" "nil")
                          agent-repl--shim-sidecar-binary (if sidecar-present "t" "nil"))))
-  (agent-repl--shim-services-launchctl "kickstart"
-                                       agent-repl--shim-store-label)
-  (agent-repl--shim-store-wait-ready)
-  (agent-repl--shim-service-record-deployed agent-repl--shim-store-binary)
-  (agent-repl--shim-services-launchctl "kickstart"
-                                       agent-repl--shim-sidecar-label)
-  (agent-repl--shim-service-record-deployed agent-repl--shim-sidecar-binary)
-  (agent-repl--log nil
-                   "shim-services bounce complete: store=%s sidecar=%s"
-                   agent-repl--shim-store-label agent-repl--shim-sidecar-label)
-  t)
-
-(defun agent-repl--runtime-prepare (rebind &optional stop-shims)
-  "Bounce backend dependencies, require daemon health, and optionally REBIND.
-REBIND is non-nil only for an explicit runtime restart with workspaces
-already loaded.  Startup passes nil so the backend becomes healthy before
-the snapshot reader can establish, restore, or render any workspace.
-
-STOP-SHIMS asks the outgoing daemon to SIGTERM its session shims instead of
-leaving them to redial and park for the replacement.  Nil -- the default --
-PRESERVES them, which is what makes a bounce cheap: a surviving shim is
-reattached rather than rebuilt, and its conversation is never interrupted.
-Only a deploy that changed the shim BUNDLE has a reason to pass it, because
-a survivor would otherwise keep running the previous build's code.
-
-Returns `:pending' immediately.  The daemon preflight invokes its callback
-before any runtime mutation; completion and interactive feedback happen only
-after the replacement daemon is ready and healthy."
-  (agent-repl--assert-main-thread "runtime-restart")
-  (agent-repl--frontend-runtime-bounce-preflight-async
-   (lambda (daemon-state)
-    (let ((daemon-present (memq daemon-state '(:tracked :responsive))))
-    (agent-repl--log nil
-                     "runtime-prepare: beginning rebind=%s daemon-state=%S daemon-present=%s"
-                     (if rebind "t" "nil") daemon-state
-                     (if daemon-present "t" "nil"))
-    ;; Pump the authoritative snapshot before checking active turns.  This
-    ;; includes states for workspace paths not yet restored into Emacs.
-    (if daemon-present
-        (progn
-          (agent-repl--log nil
-                           "runtime-prepare: waiting for pre-existing daemon snapshot before turn preflight")
-          (agent-repl--frontend-wait-ready))
-      (agent-repl--log nil
-                       "runtime-prepare: daemon absent; skipping pre-bounce snapshot wait"))
-    (let ((busy (agent-repl--frontend-all-turn-active-session-ids)))
-      (agent-repl--log nil
-                       "runtime-restart preflight: daemon-state=%S daemon-present=%s busy=%S store=%s sidecar=%s"
-                       daemon-state (if daemon-present "t" "nil") busy
-                       agent-repl--shim-store-label
-                       agent-repl--shim-sidecar-label)
-      (when busy
-        (agent-repl--error nil
-                           "runtime restart refused: turn in flight in %s"
-                           busy)))
-    ;; Validate both launchd jobs before any build changes installed files.
-    (agent-repl--shim-services-assert-launchd-loaded)
-    (let ((frontend-build-result (agent-repl--frontend-build-if-stale nil)))
-      (agent-repl--log nil
-                       "runtime-prepare: frontend build completed result=%S"
-                       frontend-build-result))
-    (agent-repl--shim-services-build-and-bounce t)
-    (agent-repl--frontend-bounce-after-build
-     daemon-state stop-shims
-     (lambda (_started)
-    ;; The new daemon can accept a UDS connection before it can service
-    ;; requests.  Require both the link/snapshot readiness and the daemon's
-    ;; correlated initialization readiness before a caller can continue.
-    (agent-repl--frontend-wait-ready)
-    (agent-repl--frontend-wait-daemon-healthy)
-    (if rebind
-        (let ((rebound (agent-repl--frontend-rebind-workspaces-after-restart)))
-          (agent-repl--log nil
-                           "runtime-prepare complete: mode=restart rebound=%d launchd-store=%s launchd-sidecar=%s"
-                           rebound agent-repl--shim-store-label
-                           agent-repl--shim-sidecar-label)
-          rebound)
-      (agent-repl--log nil
-                       "runtime-prepare complete: mode=startup launchd-store=%s launchd-sidecar=%s"
-                       agent-repl--shim-store-label
-                       agent-repl--shim-sidecar-label)
-      t))))))
+  (agent-repl--shim-services-launchctl "kickstart" agent-repl--shim-store-label)
+  (agent-repl--shim-store-after-ready
+   (lambda ()
+     (condition-case err
+         (progn
+           (agent-repl--shim-service-record-deployed agent-repl--shim-store-binary)
+           (agent-repl--shim-services-launchctl "kickstart" agent-repl--shim-sidecar-label)
+           (agent-repl--shim-service-record-deployed agent-repl--shim-sidecar-binary)
+           (agent-repl--log nil "shim-services bounce complete: store=%s sidecar=%s"
+                            agent-repl--shim-store-label agent-repl--shim-sidecar-label)
+           (funcall on-success))
+       (error
+        (let ((detail (error-message-string err)))
+          (agent-repl--log nil "shim-services bounce FAILED after store readiness: %s" detail)
+          (funcall on-failure detail)))))
+   (lambda (detail)
+     (agent-repl--log nil "shim-services bounce FAILED before sidecar: %s" detail)
+     (message "agent-repl: shim service bounce failed: %s" detail)
+     (funcall on-failure detail)))
   :pending)
 
+(defun agent-repl--runtime-prepare (rebind on-success on-failure &optional stop-shims)
+  "Asynchronously bounce dependencies, verify the daemon, and optionally REBIND.
+ON-SUCCESS runs only after every requested stage completes.  ON-FAILURE
+receives the first diagnostic and no later stage starts."
+  (agent-repl--assert-main-thread "runtime-restart")
+  (unless (and (functionp on-success) (functionp on-failure))
+    (error "agent-repl: runtime preparation requires callable continuations"))
+  (let ((started (float-time)) settled)
+    (cl-labels
+        ((fail (detail)
+           (unless settled
+             (setq settled t)
+             (agent-repl--log nil
+                              "runtime-prepare: FAILED rebind=%s elapsed=%.3fs detail=%s"
+                              (if rebind "t" "nil") (- (float-time) started) detail)
+             (message "agent-repl: runtime preparation failed: %s" detail)
+             (funcall on-failure detail)))
+         (complete (&optional rebound)
+           (unless settled
+             (setq settled t)
+             (agent-repl--log nil
+                              "runtime-prepare complete: mode=%s rebound=%S elapsed=%.3fs launchd-store=%s launchd-sidecar=%s"
+                              (if rebind "restart" "startup") rebound
+                              (- (float-time) started)
+                              agent-repl--shim-store-label agent-repl--shim-sidecar-label)
+             (funcall on-success)))
+         (after-daemon-bounce ()
+           (agent-repl--frontend-after-ready
+            (lambda ()
+              (agent-repl--frontend-after-daemon-healthy
+               (lambda ()
+                 (if rebind
+                     (agent-repl--frontend-rebind-workspaces-after-restart
+                      #'complete #'fail)
+                   (complete)))
+               #'fail))
+            #'fail))
+         (bounce-runtime (daemon-state)
+           (condition-case err
+               (progn
+                 (let ((busy (agent-repl--frontend-all-turn-active-session-ids)))
+                   (agent-repl--log nil
+                                    "runtime-restart preflight: daemon-state=%S busy=%S store=%s sidecar=%s"
+                                    daemon-state busy agent-repl--shim-store-label
+                                    agent-repl--shim-sidecar-label)
+                   (when busy
+                     (error "runtime restart refused: turn in flight in %s" busy)))
+                 (agent-repl--shim-services-assert-launchd-loaded)
+                 (let ((build-result (agent-repl--frontend-build-if-stale nil)))
+                   (agent-repl--log nil
+                                    "runtime-prepare: frontend build completed result=%S"
+                                    build-result))
+                 (agent-repl--shim-services-build-and-bounce
+                  t
+                  (lambda ()
+                    (agent-repl--frontend-bounce-after-build
+                     daemon-state stop-shims
+                     (lambda (_started) (after-daemon-bounce))))
+                  #'fail))
+             (error (fail (error-message-string err)))))
+         (after-preflight (daemon-state)
+           (let ((daemon-present (memq daemon-state '(:tracked :responsive))))
+             (agent-repl--log nil
+                              "runtime-prepare: beginning rebind=%s daemon-state=%S daemon-present=%s"
+                              (if rebind "t" "nil") daemon-state
+                              (if daemon-present "t" "nil"))
+             (if daemon-present
+                 (agent-repl--frontend-after-ready
+                  (lambda () (bounce-runtime daemon-state)) #'fail)
+               (bounce-runtime daemon-state)))))
+      (agent-repl--frontend-runtime-bounce-preflight-async #'after-preflight)
+      :pending)))
 (defun agent-repl-runtime-restart (&optional stop-shims)
   "Rebuild, bounce, verify, then rebind the complete agent-repl runtime.
 Refuses before any build or bounce when any daemon workspace reports an
@@ -313,19 +332,28 @@ to reattach to.  The default PRESERVES them; see
                    "runtime-restart command: invoked interactive=%s stop-shims=%s"
                    (if (called-interactively-p 'interactive) "t" "nil")
                    (if stop-shims "t" "nil"))
-  (agent-repl--runtime-prepare t (and stop-shims t)))
+  (agent-repl--runtime-prepare
+   t
+   (lambda () (message "agent-repl: runtime restart complete"))
+   (lambda (detail)
+     (agent-repl--log nil "runtime-restart command: FAILED detail=%s" detail))
+   (and stop-shims t)))
 
-(defun agent-repl--runtime-startup-prepare ()
+(defun agent-repl--runtime-startup-prepare (on-success on-failure)
   "Prepare runtime services and daemon readiness before snapshot restoration.
 Batch and sandbox loads intentionally inhibit automatic backend startup;
 outside those explicit no-runtime contexts, a failed readiness check signals
 and leaves snapshot restoration entirely untouched."
+  (unless (and (functionp on-success) (functionp on-failure))
+    (error "agent-repl: runtime startup requires callable continuations"))
   (if (agent-repl--frontend-init-inhibited-p)
-      (agent-repl--log nil
-                       "runtime-startup-prepare: inhibited noninteractive=%s"
-                       noninteractive)
+      (progn
+        (agent-repl--log nil
+                         "runtime-startup-prepare: inhibited noninteractive=%s"
+                         noninteractive)
+        (funcall on-success))
     (agent-repl--log nil "runtime-startup-prepare: beginning before snapshot restore")
-    (agent-repl--runtime-prepare nil)))
+    (agent-repl--runtime-prepare nil on-success on-failure)))
 
 (provide 'services)
 

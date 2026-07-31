@@ -101,8 +101,9 @@ Resolution (`agent-repl--frontend-default-for-ws') and validation
 
 DURABLE-SESSION-ID-FN (WS): the DURABLE claude session uuid of WS's
 live session on this frontend, or nil.  ADOPT-SESSION-FN (WS
-CLAUDE-SESSION-ID): bind WS to a session resuming that uuid, so the
-next open continues the conversation.  Both optional: a frontend
+CLAUDE-SESSION-ID ON-SUCCESS ON-FAILURE): asynchronously bind WS to a
+session resuming that uuid, invoking exactly one continuation before
+the next open continues the conversation.  Both optional: a frontend
 without them simply cannot carry a conversation into an adopting
 session.  Currently unexercised with a single registered frontend (the
 cross-frontend switch that used to drive them is gone), but kept as
