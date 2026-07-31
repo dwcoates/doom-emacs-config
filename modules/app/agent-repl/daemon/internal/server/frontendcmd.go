@@ -6,7 +6,7 @@
 // The handler dispatches through NARROW injected interfaces (PromptRouter,
 // MergeRunner, WorkspaceLifecycle) rather than reaching into the modules
 // directly, so the routing is unit-testable and the concrete bindings (the
-// per-session shimclient, the merge Engine, the Emacs workspace-command
+// per-session shimclient, the merge.Driver, the Emacs workspace-command
 // channel) are assembled by WireAgentShim / main.go. Every path surfaces its
 // failure as a CommandAck error via the returned error — never a silent drop.
 package server
@@ -606,7 +606,7 @@ func (h *commandHandler) SetModel(ctx context.Context, workspace, requestID stri
 // three fields.
 //
 // A request missing any of them is refused by merge.Request's own validation
-// inside the Engine, which is the single place that decides what a runnable
+// inside merge.Driver, which is the single place that decides what a runnable
 // merge is.
 func (h *commandHandler) MergeWorkspace(ctx context.Context, workspace, requestID string, cmd *frontendv1.MergeWorkspaceCmd) error {
 	// The envelope's workspace is the daemon's KEY (the session cwd), exactly

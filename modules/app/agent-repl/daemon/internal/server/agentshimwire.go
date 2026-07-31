@@ -1,6 +1,6 @@
 // agentshimwire.go assembles the daemon's agent-shim frontend surface (design
 // §9.1 ADD, §14.2): the session-state manager (SSM), the workspace-merge
-// Engine whose transitions feed the SSM, and the frontend.Server that snapshots
+// merge.Driver whose transitions feed the SSM, and the frontend.Server that snapshots
 // SSM state on connect and pushes every SSM state change as a WorkspaceState
 // frame. WireAgentShim builds them wired together; main.go opens listeners on
 // the returned Server and closes the handle on shutdown.
@@ -117,7 +117,7 @@ type AgentShim struct {
 	Server   *frontend.Server
 	SSM      *ssm.Manager
 	Progress *progress.Manager
-	Merge    *merge.Engine
+	Merge    *merge.Driver
 
 	cancelPush               func()
 	cancelProgress           func()
@@ -155,16 +155,16 @@ func forwardHostActions(logf func(string, ...any), publisher hostWorkPublisher, 
 }
 
 // mergeSink adapts the SSM to merge.StateSink: every merge-state transition the
-// Engine emits is appended to the SSM's per-workspace log (§9.2, §4.6). A sink
-// failure propagates so the Engine aborts loudly rather than losing state.
+// merge.Driver emits is appended to the SSM's per-workspace log (§9.2, §4.6). A sink
+// failure propagates so the merge.Driver aborts loudly rather than losing state.
 type mergeSink struct{ mgr *ssm.Manager }
 
 func (s mergeSink) RecordMergeTransition(ws string, phase merge.Phase, cause string) error {
 	return s.mgr.ApplyMergeTransition(ws, string(phase), cause)
 }
 
-// mergeRunner backs the frontend MergeRunner with the merge Engine, adapting
-// the Engine's (Result, error) to the command handler's error.
+// mergeRunner backs the frontend MergeRunner with the merge.Driver, adapting
+// the merge.Driver's (Result, error) to the command handler's error.
 //
 // It holds NOTHING ELSE. It used to also hold a workspace->dirs resolver and
 // call it on the way through, which is the seam this file no longer has: the
@@ -172,20 +172,20 @@ func (s mergeSink) RecordMergeTransition(ws string, phase merge.Phase, cause str
 // to resolve and no way for a merge to fail because the daemon could not work
 // out where the workspace lives.
 type mergeRunner struct {
-	engine *merge.Engine
+	driver *merge.Driver
 }
 
 func (m mergeRunner) Merge(ctx context.Context, req merge.Request) error {
-	_, err := m.engine.Merge(ctx, req)
+	_, err := m.driver.Merge(ctx, req)
 	return err
 }
 
 func (m mergeRunner) Resume(ctx context.Context, req merge.Request) error {
-	_, err := m.engine.Resume(ctx, req)
+	_, err := m.driver.Resume(ctx, req)
 	return err
 }
 
-// WireAgentShim builds the SSM, merge Engine, and frontend Server wired
+// WireAgentShim builds the SSM, merge.Driver, and frontend Server wired
 // together, and starts the SSM-subscribe -> PushWorkspaceState loop. The
 // caller mounts cfg's listeners on the returned Server and calls Close on
 // shutdown. A missing required dependency or a failed SSM open is a hard error
@@ -213,13 +213,13 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 	}
 	mgr := cfg.SSM
 
-	engine, err := merge.NewEngine(merge.Config{Logf: logf, Sink: mergeSink{mgr}})
+	driver, err := merge.NewDriver(merge.Config{Logf: logf, Sink: mergeSink{mgr}})
 	if err != nil {
-		return nil, fmt.Errorf("server: build merge engine: %w", err)
+		return nil, fmt.Errorf("server: build merge driver: %w", err)
 	}
 
 	handler, err := newCommandHandler(
-		cfg.Prompts, mergeRunner{engine: engine},
+		cfg.Prompts, mergeRunner{driver: driver},
 		cfg.Lifecycle, cfg.Resyncer, cfg.SessionCommands, cfg.RequestShutdown,
 		cfg.Queues, logf,
 		CommandHandlerConfig{
@@ -311,7 +311,7 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 	}()
 
 	return &AgentShim{
-		Server: srv, SSM: mgr, Progress: prog, Merge: engine,
+		Server: srv, SSM: mgr, Progress: prog, Merge: driver,
 		cancelPush: cancel, cancelProgress: cancelProgress,
 		cancelWorkspaceAvailable: cancelWorkspaceAvailable, cancelHostActions: cancelHostActions, logf: logf,
 	}, nil
