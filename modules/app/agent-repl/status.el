@@ -516,6 +516,7 @@ tabs; readable against `agent-repl--color-selected-bg'.")
     ;; intentional teardown and a broken substrate.
     (:hibernated     . "teal")
     (:vendor-blocked . "purple")
+    (:submitting     . "red")
     (:thinking       . "red")
     (:clearing       . "red")
     (:compacting     . "red")
@@ -616,6 +617,20 @@ same actionability claim blue does, and only the reason is benign.")
                   :bracket-fg ,agent-repl--color-light
                   :weight ,agent-repl--tab-weight))
     (:thinking
+     :face       agent-repl-tab-thinking
+     :unselected (:bg ,agent-repl--color-thinking-red
+                  :fg ,agent-repl--color-light
+                  :bracket-fg ,agent-repl--color-default-bracket
+                  :weight ,agent-repl--tab-weight)
+     :selected   (:bg ,agent-repl--color-selected-bg
+                  :fg ,agent-repl--color-dark
+                  :bracket-bg ,agent-repl--color-thinking-red
+                  :bracket-fg ,agent-repl--color-light
+                  :weight ,agent-repl--tab-weight))
+    ;; :submitting borrows thinking's red for the same reason the context cuts
+    ;; below do: the claim about what the user cannot do is identical, and only
+    ;; the phase word says the shim has not taken the prompt yet.
+    (:submitting
      :face       agent-repl-tab-thinking
      :unselected (:bg ,agent-repl--color-thinking-red
                   :fg ,agent-repl--color-light

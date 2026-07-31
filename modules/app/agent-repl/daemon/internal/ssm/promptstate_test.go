@@ -7,34 +7,6 @@ import (
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 )
 
-func TestMarkPromptAcceptedMovesReadyToThinking(t *testing.T) {
-	m, cl, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(evSessionStarted("s1", 1)); err != nil {
-		t.Fatalf("session started: %v", err)
-	}
-
-	var published *frontendv1.WorkspaceState
-	if err := m.MarkPromptAccepted("ws1", "s1", "req-1", func(state *frontendv1.WorkspaceState) {
-		published = state
-	}); err != nil {
-		t.Fatalf("MarkPromptAccepted: %v", err)
-	}
-
-	got := mustCurrent(t, m, "ws1")
-	if got.GetState() != frontendv1.RenderState_RENDER_STATE_THINKING || !got.GetTurnActive() {
-		t.Fatalf("state = %s turn_active=%v, want THINKING/true", got.GetState(), got.GetTurnActive())
-	}
-	if got.GetCauseKind() != causePromptAccepted || got.GetCauseSeq() != 0 {
-		t.Fatalf("cause = %q seq=%d, want %q/0", got.GetCauseKind(), got.GetCauseSeq(), causePromptAccepted)
-	}
-	if published == nil || published.GetState() != frontendv1.RenderState_RENDER_STATE_THINKING || !published.GetTurnActive() {
-		t.Fatalf("published = %+v, want synchronous THINKING/active state", published)
-	}
-	if !cl.contains(`ssm: prompt accepted ws=ws1 session=s1 request_id="req-1"`) {
-		t.Fatalf("missing accepted-edge log:\n%s", strings.Join(cl.lines, "\n"))
-	}
-}
-
 func TestMarkPromptAcceptedIsIdempotentWhenTurnStartedWonTheRace(t *testing.T) {
 	m, cl, _ := openTest(t, fakeResolver{"s1": "ws1"})
 	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
@@ -70,6 +42,146 @@ func TestMarkPromptAcceptedRejectsAnotherSessionsTurn(t *testing.T) {
 	}
 	if !cl.contains("prompt accepted REJECTED") {
 		t.Fatalf("missing rejection log:\n%s", strings.Join(cl.lines, "\n"))
+	}
+}
+
+// The accepted edge lands on `submitting` and the shim ack advances it to
+// `thinking`. The split exists so the phase word stops claiming the agent is
+// working during a window in which it has not been handed anything.
+
+func TestMarkPromptAcceptedLandsOnSubmitting(t *testing.T) {
+	m, cl, _ := openTest(t, fakeResolver{"s1": "ws1"})
+	if err := m.Apply(evSessionStarted("s1", 1)); err != nil {
+		t.Fatalf("session started: %v", err)
+	}
+
+	var published *frontendv1.WorkspaceState
+	if err := m.MarkPromptAccepted("ws1", "s1", "req-1", func(state *frontendv1.WorkspaceState) {
+		published = state
+	}); err != nil {
+		t.Fatalf("MarkPromptAccepted: %v", err)
+	}
+
+	got := mustCurrent(t, m, "ws1")
+	if got.GetState() != frontendv1.RenderState_RENDER_STATE_SUBMITTING || !got.GetTurnActive() {
+		t.Fatalf("state = %s turn_active=%v, want SUBMITTING/true", got.GetState(), got.GetTurnActive())
+	}
+	if got.GetCauseKind() != causePromptAccepted || got.GetCauseSeq() != 0 {
+		t.Fatalf("cause = %q seq=%d, want %q/0", got.GetCauseKind(), got.GetCauseSeq(), causePromptAccepted)
+	}
+	if published == nil || published.GetState() != frontendv1.RenderState_RENDER_STATE_SUBMITTING || !published.GetTurnActive() {
+		t.Fatalf("published = %+v, want synchronous SUBMITTING/active state", published)
+	}
+	if !cl.contains(`ssm: prompt accepted ws=ws1 session=s1 request_id="req-1"`) {
+		t.Fatalf("missing accepted-edge log:\n%s", strings.Join(cl.lines, "\n"))
+	}
+}
+
+func TestMarkPromptDeliveredAdvancesSubmittingToThinking(t *testing.T) {
+	m, cl, _ := openTest(t, fakeResolver{"s1": "ws1"})
+	if err := m.MarkPromptAccepted("ws1", "s1", "req-1", func(*frontendv1.WorkspaceState) {}); err != nil {
+		t.Fatalf("MarkPromptAccepted: %v", err)
+	}
+
+	advanced, err := m.MarkPromptDelivered("ws1", "s1", "req-1")
+
+	if err != nil {
+		t.Fatalf("MarkPromptDelivered: %v", err)
+	}
+	if !advanced {
+		t.Fatal("advanced = false, want true over this session's own submitting row")
+	}
+	got := mustCurrent(t, m, "ws1")
+	if got.GetState() != frontendv1.RenderState_RENDER_STATE_THINKING || !got.GetTurnActive() {
+		t.Fatalf("state = %s turn_active=%v, want THINKING/true", got.GetState(), got.GetTurnActive())
+	}
+	if got.GetCauseKind() != causePromptDelivered {
+		t.Fatalf("cause = %q, want %q", got.GetCauseKind(), causePromptDelivered)
+	}
+	if !cl.contains("prompt delivered ws=ws1 session=s1") {
+		t.Fatalf("missing delivered-edge log:\n%s", strings.Join(cl.lines, "\n"))
+	}
+}
+
+func TestMarkPromptDeliveredKeepsTheTurnActiveAcrossTheEdge(t *testing.T) {
+	// A turn that reported inactive between the ack and the durable TurnStarted
+	// would let a second prompt bypass the queue mid-turn.
+	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
+	if err := m.MarkPromptAccepted("ws1", "s1", "req-1", func(*frontendv1.WorkspaceState) {}); err != nil {
+		t.Fatalf("MarkPromptAccepted: %v", err)
+	}
+	if _, err := m.MarkPromptDelivered("ws1", "s1", "req-1"); err != nil {
+		t.Fatalf("MarkPromptDelivered: %v", err)
+	}
+
+	active, claimant, err := turnClaim(m.db, "ws1")
+
+	if err != nil {
+		t.Fatalf("turnClaim: %v", err)
+	}
+	if !active || claimant != "s1" {
+		t.Fatalf("turn claim = (%v, %q), want an active claim held by s1", active, claimant)
+	}
+}
+
+func TestSubmittingAloneClaimsTheTurn(t *testing.T) {
+	// The claim must cover the FIRST half too, or a second prompt submitted
+	// during it would be forwarded straight into a turn that is already starting.
+	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
+	if err := m.MarkPromptAccepted("ws1", "s1", "req-1", func(*frontendv1.WorkspaceState) {}); err != nil {
+		t.Fatalf("MarkPromptAccepted: %v", err)
+	}
+
+	active, claimant, err := turnClaim(m.db, "ws1")
+
+	if err != nil {
+		t.Fatalf("turnClaim: %v", err)
+	}
+	if !active || claimant != "s1" {
+		t.Fatalf("turn claim = (%v, %q), want submitting to claim the turn for s1", active, claimant)
+	}
+}
+
+func TestMarkPromptDeliveredPreservesASupersededRow(t *testing.T) {
+	// A durable TurnStarted landed first, so there is no submitting row left to
+	// advance and overwriting would restate a row already more authoritative.
+	m, cl, _ := openTest(t, fakeResolver{"s1": "ws1"})
+	if err := m.Apply(evTurnStarted("s1", 1)); err != nil {
+		t.Fatalf("turn started: %v", err)
+	}
+
+	advanced, err := m.MarkPromptDelivered("ws1", "s1", "req-1")
+
+	if err != nil {
+		t.Fatalf("MarkPromptDelivered: %v", err)
+	}
+	if advanced {
+		t.Fatal("advanced = true, want false over a durable turn_started row")
+	}
+	if got := mustCurrent(t, m, "ws1").GetCauseKind(); got != causeTurnStarted {
+		t.Fatalf("cause = %q, want the durable turn_started preserved", got)
+	}
+	if !cl.contains("decision=preserve state=thinking cause_kind=turn_started") {
+		t.Fatalf("missing preservation log:\n%s", strings.Join(cl.lines, "\n"))
+	}
+}
+
+func TestMarkPromptDeliveredRefusesAnotherSessionsClaim(t *testing.T) {
+	m, cl, _ := openTest(t, fakeResolver{"s1": "ws1", "s2": "ws1"})
+	if err := m.Apply(evTurnStarted("s2", 1)); err != nil {
+		t.Fatalf("turn started: %v", err)
+	}
+
+	advanced, err := m.MarkPromptDelivered("ws1", "s1", "req-1")
+
+	if err == nil || !strings.Contains(err.Error(), `session "s2"`) {
+		t.Fatalf("err = %v, want foreign-claim refusal", err)
+	}
+	if advanced {
+		t.Fatal("advanced = true, want false on refusal")
+	}
+	if !cl.contains("prompt delivered REJECTED") {
+		t.Fatalf("missing refusal log:\n%s", strings.Join(cl.lines, "\n"))
 	}
 }
 

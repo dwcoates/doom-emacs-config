@@ -117,6 +117,13 @@ export interface PhaseLabel {
  */
 export function phaseLabel(state: WebRenderState): PhaseLabel {
   switch (state) {
+    // The FIRST half of a turn: the daemon has the prompt and the shim has not
+    // acked it yet. Spinning and red exactly as thinking is, because the claim
+    // about what the user can do is identical. The word is the whole point of
+    // the split — it stops `thinking` from being said while the agent has not
+    // been handed anything.
+    case "submitting":
+      return { word: "submitting", tone: "thinking", spinning: true };
     case "thinking":
       return { word: "thinking", tone: "thinking", spinning: true };
     // RED like thinking, and spinning for the same reason: the agent is busy

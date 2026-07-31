@@ -190,6 +190,27 @@ const (
 	// workspace that is genuinely asleep. See the SSM's `prec` table, where it
 	// sits at 15 — directly below the blue band and above purple's 20.
 	RenderState_RENDER_STATE_HIBERNATED RenderState = 21
+	// Additive: the FIRST half of a turn, before the shim has taken the prompt.
+	//
+	// RED, exactly as THINKING is, and for the identical reason: a turn is in
+	// flight and the user's next prompt cannot land yet. The WORD is the whole
+	// distinction, precisely as CLEARING and COMPACTING split THINKING above.
+	//
+	// WHAT IT SPLITS. The daemon publishes a turn's state the moment it commits
+	// to submitting, which is what stops a prompt from sitting against a green
+	// workspace while a busy shim gets round to acking it. That claim is
+	// truthful but coarse: it says the agent is thinking during a window in
+	// which the agent has not yet been handed anything. SUBMITTING names that
+	// window, so THINKING can go back to meaning the shim actually holds the
+	// prompt.
+	//
+	// ITS CLOSING EDGE IS THE SHIM ACK, and deliberately not the durable
+	// TurnStarted: the shim MINTS TurnStarted in the same synchronous block that
+	// acks the submit (uds-session.ts, emitTurnStarted), so the two report one
+	// instant and the gap between them is store round-trip time. A state cut
+	// there would move with store load rather than with the agent, lingering
+	// longest exactly when the model was fastest.
+	RenderState_RENDER_STATE_SUBMITTING RenderState = 22
 )
 
 // Enum value maps for RenderState.
@@ -217,6 +238,7 @@ var (
 		19: "RENDER_STATE_COMPACTING",
 		20: "RENDER_STATE_SEVERED",
 		21: "RENDER_STATE_HIBERNATED",
+		22: "RENDER_STATE_SUBMITTING",
 	}
 	RenderState_value = map[string]int32{
 		"RENDER_STATE_UNSPECIFIED":    0,
@@ -241,6 +263,7 @@ var (
 		"RENDER_STATE_COMPACTING":     19,
 		"RENDER_STATE_SEVERED":        20,
 		"RENDER_STATE_HIBERNATED":     21,
+		"RENDER_STATE_SUBMITTING":     22,
 	}
 )
 
@@ -356,6 +379,9 @@ const (
 	SessionStatus_SESSION_STATUS_INTERRUPTED    SessionStatus = 5
 	SessionStatus_SESSION_STATUS_VENDOR_BLOCKED SessionStatus = 6
 	SessionStatus_SESSION_STATUS_MONITORING     SessionStatus = 7
+	// The session-status twin of RENDER_STATE_SUBMITTING: the daemon has
+	// committed to submitting a prompt and the shim has not yet acked it.
+	SessionStatus_SESSION_STATUS_SUBMITTING SessionStatus = 8
 )
 
 // Enum value maps for SessionStatus.
@@ -369,6 +395,7 @@ var (
 		5: "SESSION_STATUS_INTERRUPTED",
 		6: "SESSION_STATUS_VENDOR_BLOCKED",
 		7: "SESSION_STATUS_MONITORING",
+		8: "SESSION_STATUS_SUBMITTING",
 	}
 	SessionStatus_value = map[string]int32{
 		"SESSION_STATUS_UNSPECIFIED":    0,
@@ -379,6 +406,7 @@ var (
 		"SESSION_STATUS_INTERRUPTED":    5,
 		"SESSION_STATUS_VENDOR_BLOCKED": 6,
 		"SESSION_STATUS_MONITORING":     7,
+		"SESSION_STATUS_SUBMITTING":     8,
 	}
 )
 
@@ -6364,7 +6392,7 @@ const file_agentshim_frontend_v1_frontend_proto_rawDesc = "" +
 	"\x06queues\x18\x06 \x03(\v2 .agentshim.frontend.v1.QueueViewR\x06queues\x12?\n" +
 	"\bprogress\x18\a \x03(\v2#.agentshim.frontend.v1.ProgressViewR\bprogress\x12Z\n" +
 	"\x13workspace_available\x18\b \x03(\v2).agentshim.frontend.v1.WorkspaceAvailableR\x12workspaceAvailable\x12D\n" +
-	"\fhost_actions\x18\t \x03(\v2!.agentshim.frontend.v1.HostActionR\vhostActions*\xf1\x04\n" +
+	"\fhost_actions\x18\t \x03(\v2!.agentshim.frontend.v1.HostActionR\vhostActions*\x8e\x05\n" +
 	"\vRenderState\x12\x1c\n" +
 	"\x18RENDER_STATE_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11RENDER_STATE_INIT\x10\x01\x12\x15\n" +
@@ -6388,14 +6416,15 @@ const file_agentshim_frontend_v1_frontend_proto_rawDesc = "" +
 	"\x15RENDER_STATE_CLEARING\x10\x12\x12\x1b\n" +
 	"\x17RENDER_STATE_COMPACTING\x10\x13\x12\x18\n" +
 	"\x14RENDER_STATE_SEVERED\x10\x14\x12\x1b\n" +
-	"\x17RENDER_STATE_HIBERNATED\x10\x15*\xf4\x01\n" +
+	"\x17RENDER_STATE_HIBERNATED\x10\x15\x12\x1b\n" +
+	"\x17RENDER_STATE_SUBMITTING\x10\x16*\xf4\x01\n" +
 	"\x13SessionConnectivity\x12$\n" +
 	" SESSION_CONNECTIVITY_UNSPECIFIED\x10\x00\x12#\n" +
 	"\x1fSESSION_CONNECTIVITY_HIBERNATED\x10\x01\x12#\n" +
 	"\x1fSESSION_CONNECTIVITY_CONNECTING\x10\x02\x12$\n" +
 	" SESSION_CONNECTIVITY_OPERATIONAL\x10\x03\x12!\n" +
 	"\x1dSESSION_CONNECTIVITY_DEGRADED\x10\x04\x12$\n" +
-	" SESSION_CONNECTIVITY_UNAVAILABLE\x10\x05*\x80\x02\n" +
+	" SESSION_CONNECTIVITY_UNAVAILABLE\x10\x05*\x9f\x02\n" +
 	"\rSessionStatus\x12\x1e\n" +
 	"\x1aSESSION_STATUS_UNSPECIFIED\x10\x00\x12\x18\n" +
 	"\x14SESSION_STATUS_READY\x10\x01\x12\x1b\n" +
@@ -6404,7 +6433,8 @@ const file_agentshim_frontend_v1_frontend_proto_rawDesc = "" +
 	"\x13SESSION_STATUS_DONE\x10\x04\x12\x1e\n" +
 	"\x1aSESSION_STATUS_INTERRUPTED\x10\x05\x12!\n" +
 	"\x1dSESSION_STATUS_VENDOR_BLOCKED\x10\x06\x12\x1d\n" +
-	"\x19SESSION_STATUS_MONITORING\x10\a*\x7f\n" +
+	"\x19SESSION_STATUS_MONITORING\x10\a\x12\x1d\n" +
+	"\x19SESSION_STATUS_SUBMITTING\x10\b*\x7f\n" +
 	"\rBackfillState\x12\x1e\n" +
 	"\x1aBACKFILL_STATE_UNSPECIFIED\x10\x00\x12\x1a\n" +
 	"\x16BACKFILL_STATE_PENDING\x10\x01\x12\x17\n" +

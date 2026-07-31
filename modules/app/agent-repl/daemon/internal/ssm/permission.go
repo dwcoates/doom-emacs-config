@@ -83,20 +83,28 @@ func (m *Manager) applyPermissionLocked(workspace string, pending bool, reason s
 	// built to avoid. The permission row stands until the agent's next row
 	// supersedes it, which is the honest reading: the question is answered, and
 	// nothing since has said what the agent is doing.
-	if beneath != sigThinking {
+	// BOTH halves of a turn are restorable, and each is restored AS ITSELF. A
+	// permission raised over a `submitting` row would come back reading
+	// `thinking` if this restored one fixed token, which claims the shim holds
+	// a prompt the log only knows the daemon sent.
+	restoredCause := causeTurnStarted
+	if beneath == sigSubmitting {
+		restoredCause = causePromptAccepted
+	}
+	if beneath != sigThinking && beneath != sigSubmitting {
 		m.logf("ssm: permission answered with no live turn beneath it ws=%s beneath=%q reason=%q — the session-status lifecycle is left as it stands rather than claiming a turn the log cannot see",
 			workspace, beneath, reason)
 		return nil
 	}
-	// The restored row carries the bare `turn_started` cause kind, unadorned,
-	// because resolve() reads turn_active off an EXACT match on it — a decorated
-	// detail here would report a running turn as inactive. The edge that caused
-	// the restore is named in the log line below instead.
-	if err := appendRow(m.db, workspace, "", sigThinking, causeTurnStarted, sql.NullInt64{}, m.nextAt(), ""); err != nil {
+	// The restored row carries a bare cause kind, unadorned, because resolve()
+	// reads turn_active off an EXACT match on it — a decorated detail here would
+	// report a running turn as inactive. The edge that caused the restore is
+	// named in the log line below instead.
+	if err := appendRow(m.db, workspace, "", beneath, restoredCause, sql.NullInt64{}, m.nextAt(), ""); err != nil {
 		return err
 	}
-	m.logf("ssm: permission closed ws=%s reason=%q — the turn that asked is still in flight, so the session-status lifecycle returns to `thinking`",
-		workspace, reason)
+	m.logf("ssm: permission closed ws=%s reason=%q restored=%q — the turn that asked is still in flight, so the session-status lifecycle returns to it",
+		workspace, reason, beneath)
 	return m.reresolveLocked(workspace, cause, 0)
 }
 

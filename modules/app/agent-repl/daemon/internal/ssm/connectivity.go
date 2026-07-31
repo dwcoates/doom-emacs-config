@@ -34,6 +34,7 @@ type SessionStatus string
 const (
 	SessionStatusReady         SessionStatus = "ready"
 	SessionStatusThinking      SessionStatus = "thinking"
+	SessionStatusSubmitting    SessionStatus = "submitting"
 	SessionStatusPermission    SessionStatus = "permission"
 	SessionStatusDone          SessionStatus = "done"
 	SessionStatusInterrupted   SessionStatus = "interrupted"
@@ -368,7 +369,12 @@ func compositeWorkspaceState(workspace string, projection resolved, composite Co
 			msg.CauseKind = composite.StatusCauseKind
 			msg.CauseSeq = composite.StatusCauseSeq
 			msg.AtMs = composite.StatusAtMs
-			msg.TurnActive = composite.Status == SessionStatusThinking
+			// BOTH halves of a turn are active. A composite that only counted
+			// `thinking` would report no turn for the whole `submitting`
+			// window, which is when a second prompt must be queued rather than
+			// forwarded.
+			msg.TurnActive = composite.Status == SessionStatusThinking ||
+				composite.Status == SessionStatusSubmitting
 		}
 	case SessionConnectivityDegraded:
 		if fault, ok := newestConnectivityFault(composite.ActiveFaults); ok {
@@ -399,6 +405,7 @@ func compositeWorkspaceState(workspace string, projection resolved, composite Co
 func isSessionStatusRenderState(state frontendv1.RenderState) bool {
 	switch state {
 	case frontendv1.RenderState_RENDER_STATE_READY,
+		frontendv1.RenderState_RENDER_STATE_SUBMITTING,
 		frontendv1.RenderState_RENDER_STATE_THINKING,
 		frontendv1.RenderState_RENDER_STATE_PERMISSION,
 		frontendv1.RenderState_RENDER_STATE_DONE,
@@ -458,6 +465,8 @@ func compositeRenderState(projection resolved, composite CompositeState) (fronte
 		switch composite.Status {
 		case SessionStatusReady:
 			return frontendv1.RenderState_RENDER_STATE_READY, nil
+		case SessionStatusSubmitting:
+			return frontendv1.RenderState_RENDER_STATE_SUBMITTING, nil
 		case SessionStatusThinking:
 			return frontendv1.RenderState_RENDER_STATE_THINKING, nil
 		case SessionStatusPermission:
@@ -493,6 +502,7 @@ func connectivityProto(state SessionConnectivity) frontendv1.SessionConnectivity
 func statusProto(status SessionStatus) frontendv1.SessionStatus {
 	return map[SessionStatus]frontendv1.SessionStatus{
 		SessionStatusReady:         frontendv1.SessionStatus_SESSION_STATUS_READY,
+		SessionStatusSubmitting:    frontendv1.SessionStatus_SESSION_STATUS_SUBMITTING,
 		SessionStatusThinking:      frontendv1.SessionStatus_SESSION_STATUS_THINKING,
 		SessionStatusPermission:    frontendv1.SessionStatus_SESSION_STATUS_PERMISSION,
 		SessionStatusDone:          frontendv1.SessionStatus_SESSION_STATUS_DONE,
@@ -646,7 +656,7 @@ func resolveSessionStatus(
 	query := `SELECT state, session_id, cause_kind, cause_seq, at
 		FROM workspace_state
 		WHERE workspace = ?
-		  AND state IN ('thinking','permission','done','ready','idle','vendor_blocked','interrupted')`
+		  AND state IN ('submitting','thinking','permission','done','ready','idle','vendor_blocked','interrupted')`
 	args := []any{workspace}
 	if bounded {
 		query += ` AND at >= ?`
@@ -760,6 +770,8 @@ func liveTaskCount(q stateQueryer, workspace string, lowerBound int64, bounded b
 
 func sessionStatusOf(token string, liveTasks int64) (SessionStatus, error) {
 	switch token {
+	case sigSubmitting:
+		return SessionStatusSubmitting, nil
 	case sigThinking:
 		return SessionStatusThinking, nil
 	case sigPermission:
