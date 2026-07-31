@@ -489,8 +489,11 @@ file into the fake project dir."
     (agent-repl-test--with-clean-state
       (agent-repl--ws-put "ws-gui" :frontend 'gui)
       (agent-repl-cmd-test--with-establish-stubs
-        (cl-letf (((symbol-function 'agent-repl--frontend-ensure-session)
-                   (lambda (ws &optional _purpose) (setq ensured ws))))
+         (cl-letf (((symbol-function 'agent-repl--frontend-after-ensure-session)
+                    (lambda (ws on-success _on-failure)
+                      (setq ensured ws)
+                      (funcall on-success "s-test")
+                      :ready)))
           (agent-repl--establish-workspace "ws-gui" "/tmp/ws-gui")
           (should (equal ensured "ws-gui")))))))
 
@@ -501,8 +504,8 @@ file into the fake project dir."
       (agent-repl--ws-put "ws-gui" :frontend 'gui)
       (agent-repl--ws-put "ws-gui" :frontend-session-id "s_live")
       (agent-repl-cmd-test--with-establish-stubs
-        (cl-letf (((symbol-function 'agent-repl--frontend-ensure-session)
-                   (lambda (ws &optional _purpose) (setq ensured ws))))
+         (cl-letf (((symbol-function 'agent-repl--frontend-after-ensure-session)
+                    (lambda (ws _on-success _on-failure) (setq ensured ws))))
           (agent-repl--establish-workspace "ws-gui" "/tmp/ws-gui")
           (should-not ensured))))))
 
@@ -517,8 +520,11 @@ rather than staying pinned to the vterm it happened to boot once."
       ;; Arrange — no :frontend at all (what the restore leaves behind for a
       ;; workspace whose save carried no :frontend-explicit marker).
       (agent-repl-cmd-test--with-establish-stubs
-        (cl-letf (((symbol-function 'agent-repl--frontend-ensure-session)
-                   (lambda (ws &optional _purpose) (setq ensured ws))))
+         (cl-letf (((symbol-function 'agent-repl--frontend-after-ensure-session)
+                    (lambda (ws on-success _on-failure)
+                      (setq ensured ws)
+                      (funcall on-success "s-test")
+                      :ready)))
           ;; Act
           (agent-repl--establish-workspace "ws-old" "/tmp/ws-old")
           ;; Assert

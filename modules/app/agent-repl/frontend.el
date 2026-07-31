@@ -50,7 +50,7 @@
 (declare-function agent-repl--ws-get "agent-repl-workspace" (ws key))
 (declare-function agent-repl--ws-put "agent-repl-workspace" (ws key val))
 (declare-function agent-repl--align-buffer-to-ws-dir "agent-repl-status" (buf ws))
-(declare-function agent-repl--frontend-ensure-session "agent-repl-frontend-client" (ws))
+(declare-function agent-repl--frontend-after-ensure-session "agent-repl-frontend-client" (ws on-success on-failure))
 (declare-function agent-repl--frontend-force-fresh-session "agent-repl-frontend-client" (ws))
 (declare-function agent-repl--frontend-restart-session "agent-repl-frontend-client" (ws))
 (declare-function agent-repl--frontend-session-url "agent-repl-frontend-client" (session-id))
@@ -777,12 +777,16 @@ panel."
   (agent-repl--log ws "gui-open: begin")
   (agent-repl--frontend-require-xwidget ws)
   (agent-repl--frontend-validate-for-ws 'gui ws)
-  (let* ((session-id (agent-repl--frontend-ensure-session ws))
-         (url (agent-repl--frontend-webview-url ws session-id))
-         (buf (agent-repl--frontend-ensure-webview-buffer ws session-id url)))
-    (agent-repl--frontend-display-webview ws buf)
-    (agent-repl--log ws "gui-open: outcome=displayed session=%s buf=%s"
-                     session-id buf)))
+  (agent-repl--frontend-after-ensure-session
+   ws
+   (lambda (session-id)
+     (let* ((url (agent-repl--frontend-webview-url ws session-id))
+            (buf (agent-repl--frontend-ensure-webview-buffer ws session-id url)))
+       (agent-repl--frontend-display-webview ws buf)
+       (agent-repl--log ws "gui-open: outcome=displayed session=%s buf=%s"
+                        session-id buf)))
+   (lambda (detail) (agent-repl--log ws "gui-open: FAILED detail=%s" detail)))
+  :pending)
 
 (defun agent-repl--gui-boot (ws &optional _project-dir-hint _active-env-hint)
   "The gui frontend's boot capability (registry `:boot-fn').
@@ -813,9 +817,11 @@ hydrated the environment with them, and the gui reads WS's
   (agent-repl--frontend-validate-for-ws 'gui ws)
   (agent-repl--log ws "gui-boot: begin")
   (agent-repl--ws-set-agent-state ws :init)
-  (let ((session-id (agent-repl--frontend-ensure-session ws)))
-    (agent-repl--log ws "gui-boot: outcome=session-started session=%s" session-id)
-    session-id))
+  (agent-repl--frontend-after-ensure-session
+   ws
+   (lambda (session-id) (agent-repl--log ws "gui-boot: outcome=session-started session=%s" session-id))
+   (lambda (detail) (agent-repl--log ws "gui-boot: FAILED detail=%s" detail)))
+  :pending)
 
 (defun agent-repl--frontend-webview-url (ws session-id)
   "Return the webapp URL for WS's webview attached to SESSION-ID.
@@ -878,22 +884,19 @@ current bundle anyway.  Returns the new buffer when a remount happened."
         (progn
           (agent-repl--log ws "remount-webview: skipped=no-live-webview")
           nil)
-      (let* ((win (get-buffer-window buf t))
-             (session-id (agent-repl--frontend-ensure-session ws))
-             (url (agent-repl--frontend-webview-url ws session-id)))
-        (agent-repl--frontend-kill-webview buf)
-        (agent-repl--ws-put ws :frontend-buffer nil)
-        (agent-repl--ws-put ws :frontend-buffer-session-id nil)
-        (let ((new (agent-repl--frontend-ensure-webview-buffer ws session-id url)))
-          (agent-repl--log ws "remount-webview: reloaded bundle ws=%s -> %s" ws session-id)
-          (when (window-live-p win)
-            (set-window-buffer win new)
-            (agent-repl--log ws "remount-webview: outcome=swapped window=%s new-buffer=%s"
-                             win (buffer-name new)))
-          (unless (window-live-p win)
-            (agent-repl--log ws "remount-webview: outcome=remounted-not-displayed new-buffer=%s"
-                             (buffer-name new)))
-          new)))))
+      (let ((win (get-buffer-window buf t)))
+        (agent-repl--frontend-after-ensure-session
+         ws
+         (lambda (session-id)
+           (let ((url (agent-repl--frontend-webview-url ws session-id)))
+             (agent-repl--frontend-kill-webview buf)
+             (agent-repl--ws-put ws :frontend-buffer nil)
+             (agent-repl--ws-put ws :frontend-buffer-session-id nil)
+             (let ((new (agent-repl--frontend-ensure-webview-buffer ws session-id url)))
+               (agent-repl--log ws "remount-webview: reloaded bundle ws=%s -> %s" ws session-id)
+               (when (window-live-p win) (set-window-buffer win new)))))
+         (lambda (detail) (agent-repl--log ws "remount-webview: FAILED detail=%s" detail)))
+        :pending))))
 
 (defun agent-repl--frontend-remount-all-webviews ()
   "Remount every open workspace's webview so all pick up a rebuilt bundle.
@@ -983,21 +986,16 @@ Remounts the live webview (or opens fresh when it died).
 Before touching the window layout, synchronously ensures the existing
 daemon session is operational.  This is the `SPC o c' wake invariant:
 a hibernated workspace is brought up before its UI can look available."
-  (let* ((session-id (agent-repl--frontend-ensure-session ws))
-         (_ (agent-repl--frontend-sync-webview ws session-id))
-         (buf (agent-repl--ws-get ws :frontend-buffer)))
-    (if (buffer-live-p buf)
-        (progn
-          (agent-repl--log
-           ws
-           "gui-show: outcome=redisplay session=%s buf=%s"
-           session-id (buffer-name buf))
-          (agent-repl--frontend-display-webview ws buf))
-      (agent-repl--log
-       ws
-       "gui-show: outcome=open-fresh session=%s reason=buffer-not-live"
-       session-id)
-      (agent-repl--gui-open ws))))
+  (agent-repl--frontend-after-ensure-session
+   ws
+   (lambda (session-id)
+     (agent-repl--frontend-sync-webview ws session-id)
+     (let ((buf (agent-repl--ws-get ws :frontend-buffer)))
+       (if (buffer-live-p buf)
+           (agent-repl--frontend-display-webview ws buf)
+         (agent-repl--gui-open ws))))
+   (lambda (detail) (agent-repl--log ws "gui-show: FAILED detail=%s" detail)))
+  :pending)
 
 (defun agent-repl--gui-hide (ws)
   "The gui frontend's hide capability (registry `:hide-fn').

@@ -1495,8 +1495,8 @@ keyed by the workspace CWD (no session id on the wire)."
   (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_gone"
                                     :reattach-failures 2 :project-dir "/w")
     (let ((synced nil))
-      (cl-letf (((symbol-function 'agent-repl--frontend-ensure-session)
-                 (lambda (_ws &optional _purpose) "s_new"))
+       (cl-letf (((symbol-function 'agent-repl--frontend-after-ensure-session)
+                  (lambda (_ws ok _fail) (funcall ok "s_new") :ready))
                 ((symbol-function 'agent-repl--frontend-sync-webview)
                  (lambda (ws id) (setq synced (list ws id)))))
         ;; Act
@@ -1509,8 +1509,8 @@ keyed by the workspace CWD (no session id on the wire)."
   "A failed reattach restores the stale binding and counts the failure."
   ;; Arrange
   (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_gone" :project-dir "/w")
-    (cl-letf (((symbol-function 'agent-repl--frontend-ensure-session)
-               (lambda (_ws &optional _purpose) (error "boom"))))
+     (cl-letf (((symbol-function 'agent-repl--frontend-after-ensure-session)
+                (lambda (_ws _ok fail) (funcall fail "boom") :failed)))
       ;; Act
       (agent-repl--frontend-reattach-ws "ws1" "s_gone")
       ;; Assert — binding restored so the next sweep retries.
@@ -1575,15 +1575,15 @@ daemon as \"nothing to reattach\", so probing before readiness would skip
 every workspace."
   ;; Arrange
   (let ((calls nil))
-    (cl-letf (((symbol-function 'agent-repl--frontend-wait-ready)
-               (lambda () (push 'wait calls) t))
+    (cl-letf (((symbol-function 'agent-repl--frontend-after-ready)
+               (lambda (ok _fail &optional _ws) (push 'ready calls) (funcall ok) :ready))
               ((symbol-function 'agent-repl--live-ws-names) (lambda () nil))
               ((symbol-function 'agent-repl--frontend-reattach-check)
                (lambda () (push 'reattach calls))))
       ;; Act
       (agent-repl--frontend-rebind-workspaces-after-restart)
       ;; Assert
-      (should (equal (reverse calls) '(wait reattach))))))
+      (should (equal (reverse calls) '(ready reattach))))))
 
 (ert-deftest agent-repl-test-frontend-rebind-remounts-all-after-reattach ()
   "The rebind force-remounts every open webview, and only after the reattach.
@@ -1591,7 +1591,7 @@ The reattach must rebind sessions first; the unconditional remount then
 guarantees each webview reloads the freshly built bundle."
   ;; Arrange
   (let ((calls nil))
-    (cl-letf (((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t))
+    (cl-letf (((symbol-function 'agent-repl--frontend-after-ready) (lambda (ok _fail &optional _ws) (funcall ok) :ready))
               ((symbol-function 'agent-repl--live-ws-names) (lambda () nil))
               ((symbol-function 'agent-repl--frontend-reattach-check)
                (lambda () (push 'reattach calls)))
@@ -1606,7 +1606,7 @@ guarantees each webview reloads the freshly built bundle."
   "The rebind drives the same sweep machinery that bounces and remounts."
   ;; Arrange
   (let ((reattached nil))
-    (cl-letf (((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t))
+    (cl-letf (((symbol-function 'agent-repl--frontend-after-ready) (lambda (ok _fail &optional _ws) (funcall ok) :ready))
               ((symbol-function 'agent-repl--live-ws-names) (lambda () nil))
               ((symbol-function 'agent-repl--frontend-reattach-check)
                (lambda () (setq reattached t))))
@@ -1621,19 +1621,19 @@ guarantees each webview reloads the freshly built bundle."
   (agent-repl-test--with-ws "ws1" '(:frontend-session-id "s_1" :project-dir "/w")
     (agent-repl-test--with-ws "ws2" '(:frontend-session-id "s_2" :project-dir "/w2")
       (agent-repl-test--with-ws "ws3" '(:project-dir "/w3")
-        (cl-letf (((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t))
+        (cl-letf (((symbol-function 'agent-repl--frontend-after-ready) (lambda (ok _fail &optional _ws) (funcall ok) :ready))
                   ((symbol-function 'agent-repl--frontend-reattach-check) #'ignore))
           ;; Act / Assert — ws1 and ws2 are bound, ws3 is not.
-          (should (= 2 (agent-repl--frontend-rebind-workspaces-after-restart))))))))
+          (should (eq :pending (agent-repl--frontend-rebind-workspaces-after-restart))))))))
 
 (ert-deftest agent-repl-test-frontend-rebind-returns-zero-without-bindings ()
   "The rebind returns 0 when no open workspace carries a session binding."
   ;; Arrange
   (agent-repl-test--with-ws "ws1" '(:project-dir "/w")
-    (cl-letf (((symbol-function 'agent-repl--frontend-wait-ready) (lambda () t))
+    (cl-letf (((symbol-function 'agent-repl--frontend-after-ready) (lambda (ok _fail &optional _ws) (funcall ok) :ready))
               ((symbol-function 'agent-repl--frontend-reattach-check) #'ignore))
       ;; Act / Assert
-      (should (= 0 (agent-repl--frontend-rebind-workspaces-after-restart))))))
+      (should (eq :pending (agent-repl--frontend-rebind-workspaces-after-restart))))))
 
 ;;;; ---- release on nuke ------------------------------------------------------------
 
