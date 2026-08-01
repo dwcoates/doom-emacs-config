@@ -116,7 +116,7 @@ func TestE2ECreateAckMeansThePromptPathIsOpen(t *testing.T) {
 // bare timeout cannot tell anybody.
 func TestE2ECreateNacksLoudlyOnAWedgedBringUp(t *testing.T) {
 	// Arrange — a shim that spawns and then does nothing, under a short bound.
-	h := newUDSHarness(t, withWedgedShim(), withEstablishTimeout(2*time.Second))
+	h := newUDSHarness(t, withWedgedShim(), withEstablishTimeout(250*time.Millisecond))
 	cwd := t.TempDir()
 	conn := h.dialFrontend(t)
 	defer conn.Close()
