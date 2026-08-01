@@ -1,5 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { parseArgs, probeQueryOptions, realQueryOptions, validateUdsLoggingArgs } from "../src/main.js";
+import { METAPROMPT_REL_PATH } from "../src/metaprompt.js";
+
+const metapromptRoots: string[] = [];
+afterEach(() => {
+  metapromptRoots.splice(0).forEach((r) => fs.rmSync(r, { recursive: true, force: true }));
+});
 
 describe("parseArgs", () => {
   it("defaults to real SDK mode with a generated session id and default mode", () => {
@@ -62,6 +71,25 @@ describe("realQueryOptions", () => {
     expect(opts.systemPrompt).toEqual({ type: "preset", preset: "claude_code" });
     expect(opts.settingSources).toEqual(["user", "project", "local"]);
     expect(opts.includePartialMessages).toBe(true);
+  });
+
+  it("appends the cwd's metaprompt to the system prompt", () => {
+    // Arrange: a checkout carrying a metaprompt at the in-repo path.
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "shim-main-metaprompt-"));
+    metapromptRoots.push(root);
+    const file = path.join(root, METAPROMPT_REL_PATH);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, "Answer as a TLDR tree.\n", "utf8");
+    // Act
+    const opts = realQueryOptions(parseArgs(["--session-id", "s1", "--cwd", root]), noopCanUse);
+    // Assert — the guidelines reach the agent as system prompt rather than
+    // as a read-directive injected into the conversation, so they survive
+    // `/clear`, `/compact`, and resume without anything re-firing them.
+    expect(opts.systemPrompt).toEqual({
+      type: "preset",
+      preset: "claude_code",
+      append: "Answer as a TLDR tree.",
+    });
   });
 
   it("passes cwd/model/resume through only when provided", () => {
