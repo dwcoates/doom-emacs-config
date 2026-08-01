@@ -1143,13 +1143,12 @@ the count of open workspaces that carried a session binding to rebind."
 
 (defun agent-repl--gui-send-turn (ws input raw &optional on-settle)
   "The gui frontend's send capability (registry `:send-fn').
-INPUT (the prepared text, which may carry the metaprompt prefix —
+INPUT (the prepared text, which may carry an on-demand read-directive —
 genuine message content) goes to the daemon session.  There is no
 owning-workspace pin to apply here — WS's daemon session id already
 identifies the target unambiguously, unlike a shared vterm buffer that
-once needed disambiguating — but the prefix counter still increments
-so metaprompt periodicity is tracked the same way for every workspace.
-Posthooks and prompt summary key on RAW, identically.
+once needed disambiguating.  Posthooks and prompt summary key on RAW,
+identically.
 
 Sets `:thinking' optimistically BEFORE the send so the turn reads as
 in-flight immediately, ahead of the daemon's authoritative pushed
@@ -1172,7 +1171,6 @@ sender watches the bottom from the instant the prompt leaves."
   (agent-repl--log ws "do-send[gui] ws=%s len=%d" ws (length input))
   (agent-repl--frontend-snap-webview-to-tail ws)
   (agent-repl--mark-ws-thinking ws)
-  (agent-repl--increment-prefix-counter ws)
   (agent-repl--ws-put ws :last-prompt-time (float-time))
   (agent-repl--ws-put ws :sent-turn
                       (list :request-id (agent-repl--frontend-send-user-message ws input)

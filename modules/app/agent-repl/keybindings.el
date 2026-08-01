@@ -74,7 +74,7 @@
       :pending-initial-buffers :fullscreen-config :ai-title-cache
       :saved-tab-index))
     ("🔢 Counters"
-     (:counter :prefix-counter)))
+     (:counter)))
   "Section layout for `agent-repl-debug/dump-workspace'.
 Each entry is (TITLE KEYS).  TITLE is the section header string (with a
 leading emoji); KEYS is the list of plist keys that belong in that
@@ -503,26 +503,15 @@ appended to the file regardless of the `agent-repl-debug' level."
              (if path (format " (%s)" path) ""))))
 
 (defun agent-repl-debug/toggle-metaprompt ()
-  "Toggle the metaprompt prefix injection."
+  "Toggle the on-demand metaprompt re-read.
+Does NOT affect the metaprompt the shim installs as each session's
+system prompt, which is how the guidelines ordinarily reach the agent."
   (interactive)
   (setq agent-repl-skip-permissions (not agent-repl-skip-permissions))
   (agent-repl--log (agent-repl--ws-current-log-name)
                     "debug/toggle-metaprompt: skip-permissions=%s"
                     (if agent-repl-skip-permissions "t" "nil"))
-  (message "Agent REPL metaprompt: %s" (if agent-repl-skip-permissions "ON" "OFF")))
-
-(defun agent-repl-debug/prefix-counter ()
-  "Show the current metaprompt prefix counter, period, and workspace."
-  (interactive)
-  (let* ((ws (agent-repl--ws-current-name))
-         (counter (or (agent-repl--ws-get ws :prefix-counter) 0)))
-    (agent-repl--log ws
-                      "debug/prefix-counter: counter=%d period=%d remaining=%d"
-                      counter agent-repl-prefix-period
-                      (- agent-repl-prefix-period (mod counter agent-repl-prefix-period)))
-    (message "[%s] Prefix counter: %d  period: %d  next metaprompt in: %d sends"
-             ws counter agent-repl-prefix-period
-             (- agent-repl-prefix-period (mod counter agent-repl-prefix-period)))))
+  (message "Agent REPL on-demand metaprompt re-read: %s" (if agent-repl-skip-permissions "ON" "OFF")))
 
 (defun agent-repl-debug/dump-workspace ()
   "Display the full serialized plist for a selected workspace from the hashmap.
