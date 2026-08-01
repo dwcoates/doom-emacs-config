@@ -168,7 +168,7 @@ func newBouncedHarness(t *testing.T) *bouncedHarness {
 				}
 				return rec.ClaudeSessionID, rec.ClaudeSessionID != ""
 			},
-			Idle: 2 * time.Second,
+			Idle: durableReplayIdle,
 			Logf: t.Logf,
 		},
 		DaemonVersion:   "0.1.0-e2e",
