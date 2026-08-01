@@ -54,6 +54,23 @@ export function compactTokens(n: number): string {
 }
 
 /**
+ * The NEW input tokens a turn fed the model: uncached input plus the prefix
+ * it wrote to cache. This is the figure the progress footer tickers up during
+ * a turn and the final-response bubble stamps when it lands, computed here
+ * from a result's own turn-scoped `usage` so the two agree.
+ *
+ * THE CACHE READ IS NOT NEW INPUT and is deliberately excluded. It is the same
+ * standing prefix presented to the model again on every request of the turn,
+ * so counting it reports the conversation's size times the request count — a
+ * 94-request turn against a 500k prefix reads as 47M "input tokens", which is
+ * the inflation this exclusion removes. Output is excluded for the same reason
+ * it is excluded from the footer: this is an INPUT figure.
+ */
+export function turnInputTokens(u: Usage): number {
+  return u.input_tokens + (u.cache_creation_input_tokens ?? 0);
+}
+
+/**
  * A cost estimate row's text. Two decimals once the figure is readable
  * at that resolution, four below a dime so small spends do not all
  * collapse into `$0.00`.

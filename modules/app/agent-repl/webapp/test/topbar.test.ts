@@ -88,7 +88,6 @@ function storeState(over: Partial<StoreState> = {}): StoreState {
     queued: [],
     turnInFlight: false,
     turnStartedAt: null,
-    lastFinalResponseAt: null,
     contextTokens: null,
     resultUsage: null,
     turnUsage: new Map(),

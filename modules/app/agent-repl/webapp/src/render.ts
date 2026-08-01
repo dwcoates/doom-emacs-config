@@ -16,7 +16,7 @@ import {
 } from "./topbar.js";
 import { taskCreateToolUseId } from "./tasks.js";
 import { IDLE_LABEL, TIMER_SLOT } from "./timer.js";
-import { compactTokens, formatTokens } from "./tokens.js";
+import { compactTokens, formatTokens, turnInputTokens } from "./tokens.js";
 import { formatAge, formatDuration, formatDurationCeil, formatElapsed } from "./duration.js";
 import {
   CLICK_THROUGH_SELECTOR,
@@ -514,7 +514,7 @@ function warnTreeMisfire(blockId: string, done: boolean, segText: string): void 
  *
  * CHIP is the closing result of the turn that bubble answers. Its stats
  * ride in the bubble's top-right corner (`resultMeta` via `Bubble`'s META):
- * the turn's elapsed time and the context delta it moved, rather than a
+ * the turn's elapsed time and the input tokens it spent, rather than a
  * pill floating in the feed beneath. Only a final response carries one, so
  * CHIP is null for the commentary bubbles above it (see `finalResponses`).
  *
@@ -556,9 +556,11 @@ function TextStream(
   const catalog = AsyncCatalog(item.blockId, panels);
   const gns = chip ? GnsPanel(item.blockId, panels) : "";
   // A completed turn's stats ride in the bubble's top-right corner
-  // (`resultMeta`): its elapsed time and the context delta it moved. A
-  // sub-second turn reports no time worth showing and a `/clear`-ended turn
-  // no delta, so either half may be absent and the corner may render empty.
+  // (`resultMeta`): its elapsed time and the input tokens it spent — the
+  // progress footer's two turn-scoped figures, which clear to `--` at turn
+  // end because this is where they land. A sub-second turn reports no time
+  // worth showing and a turn that spent no new input reports no token
+  // figure, so either half may be absent and the corner may render empty.
   const meta = chip ? resultMeta(chip) : "";
   // Chess-game markers split the body FIRST: they must work inside a
   // TLDR-tree response too, and the tree renderer below never sees
@@ -1845,29 +1847,42 @@ function formatTokenDelta(n: number): string {
 }
 
 /**
- * A final response's top-right corner content: the turn's elapsed time in
- * the topbar's time color, then the context delta it moved in the topbar's
- * token color, bullet-separated (`5s · +12,000`). The context total itself
- * is NOT here — it stands in the header's tokens chip now, and repeating it
- * on every bubble was the noise this move removed.
+ * A final response's top-right corner content: THE PROGRESS FOOTER'S TWO
+ * TURN-SCOPED FIGURES, stamped onto the answer the turn landed on — how long
+ * the turn ran in the topbar's time color, then the new input tokens it fed
+ * the model in the topbar's token color, bullet-separated (`5s · 63.5k in`).
+ *
+ * This is where those figures LIVE once a turn concludes. The footer clears
+ * both to `--` at turn end (see `closeTurnLocked` and `tokenCellHtml`) because
+ * a settled turn's summary belongs beside its answer, not in the chrome that
+ * reports the running one — and because a stamp on a persisted conversation
+ * item is REPLAYED, so a reloaded session still shows what each turn cost,
+ * which the footer's ephemeral view never could.
+ *
+ * Both halves come off the result item the daemon persists, so neither has to
+ * be re-derived from live state:
+ *
+ * - the duration is `durationMs`, the SDK's own figure for the turn — which
+ *   is the span the footer's clock cell measured, rather than the span since
+ *   the PREVIOUS turn ended (that would bill this turn for however long the
+ *   user spent reading before sending the prompt);
+ * - the tokens are `turnInputTokens(usage)` — a result's `usage` is that
+ *   turn's own usage, not a session-cumulative snapshot, which is exactly the
+ *   scope the footer's ticker has.
  *
  * Either half may be absent: a sub-second turn reports no elapsed worth a
  * figure (the same one-second floor the old closing chip used), and a turn
- * that ended with the context size unknown (a `/clear` or a compaction)
- * carries no delta. An all-absent corner returns "" and the bubble shows
- * only its hover timestamp.
+ * that spent no new input reports no token figure rather than a `0 in`. An
+ * all-absent corner returns "" and the bubble shows only its hover timestamp.
  */
 function resultMeta(chip: ResultItem): string {
   const parts: string[] = [];
-  if (chip.sincePrevFinalMs >= 1000) {
-    parts.push(
-      `<span class="turn-dur">${escapeHtml(formatDurationCeil(chip.sincePrevFinalMs))}</span>`,
-    );
+  if (chip.durationMs >= 1000) {
+    parts.push(`<span class="turn-dur">${escapeHtml(formatDurationCeil(chip.durationMs))}</span>`);
   }
-  if (chip.context) {
-    parts.push(
-      `<span class="turn-diff">${escapeHtml(formatTokenDelta(chip.context.delta))}</span>`,
-    );
+  const input = turnInputTokens(chip.usage);
+  if (input > 0) {
+    parts.push(`<span class="turn-in">${escapeHtml(`${compactTokens(input)} in`)}</span>`);
   }
   if (parts.length === 0) return "";
   // Group both stats under one flex item so the `·` separator sits inline
@@ -1880,11 +1895,9 @@ function resultMeta(chip: ResultItem): string {
  * A turn's closing chip: how long the turn took, then where the session's
  * input tokens now stand and how far this turn moved them.
  *
- * DURATION-MS is the span the chip reports, which differs by where the chip
- * is drawn: a final-response chip reads the turn's elapsed time SINCE THE
- * PREVIOUS final response (`sincePrevFinalMs`), while a standalone chip
- * reads the SDK's whole-task figure (`durationMs`). The caller passes
- * whichever it means, so this renderer never has to know which it is.
+ * DURATION-MS is the span the chip reports: the SDK's whole-task figure
+ * (`durationMs`). It is passed in rather than read off the item so this
+ * renderer never has to know which span its caller means.
  *
  * A completed turn is labelled by the chip's own wash rather than by a
  * word, so only a turn that ended some OTHER way (aborted, errored) names

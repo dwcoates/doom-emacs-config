@@ -1228,19 +1228,20 @@ describe("turn stamp", () => {
     expect(blockAfter(css, ".turn-meta .turn-dur")).toMatch(/color:\s*var\(--info-time\)/);
   });
 
-  it("colors the context delta in the topbar's token color", () => {
-    // Arrange / Act — the corner delta reuses the header's token datapoint color.
+  it("colors the turn's input tokens in the topbar's token color", () => {
+    // Arrange / Act — the corner figure reuses the header's token datapoint
+    // color, which is the same amber the footer's token cell wears.
     // Assert
-    expect(blockAfter(css, ".turn-meta .turn-diff")).toMatch(/color:\s*var\(--info-tokens\)/);
+    expect(blockAfter(css, ".turn-meta .turn-in")).toMatch(/color:\s*var\(--info-tokens\)/);
   });
 
-  it("sizes the duration and delta at ONE shared size via their wrapper, never per-span", () => {
+  it("sizes the duration and the token figure at ONE shared size via their wrapper, never per-span", () => {
     // Arrange / Act — the shared size lives on `.turn-stats`, so the two figures
     // always read at the same font-size as each other; neither span sets its own.
     // Assert
     expect(blockAfter(css, ".turn-meta .turn-stats")).toMatch(/font-size:\s*[\d.]+rem/);
     expect(blockAfter(css, ".turn-meta .turn-dur")).not.toMatch(/font-size/);
-    expect(blockAfter(css, ".turn-meta .turn-diff")).not.toMatch(/font-size/);
+    expect(blockAfter(css, ".turn-meta .turn-in")).not.toMatch(/font-size/);
   });
 
   it("sizes the two corner stats a notch below the corner's own dating size", () => {
