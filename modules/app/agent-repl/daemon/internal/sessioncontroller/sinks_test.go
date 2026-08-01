@@ -199,6 +199,33 @@ type fakeApplier struct {
 	staleTurnCloses []staleTurnCloseCall
 	staleTurnClosed bool
 	staleTurnErr    error
+	// mergeLeases names the workspaces merge.Coordinator holds the exclusivity
+	// lease on. Empty is the ordinary case: no merge is running.
+	mergeLeases map[string]bool
+	// mergeWindows are the lease windows the durable ledger holds per
+	// workspace, as (acquiredAt, releasedAt) with a zero release meaning still
+	// open. It backs ConversationSourceAt.
+	mergeWindows       map[string][][2]int64
+	conversationSrcErr error
+}
+
+// MergeLeaseHeld reports whether the fake ledger holds an open lease on
+// workspace.
+func (f *fakeApplier) MergeLeaseHeld(workspace string) bool {
+	return f.mergeLeases[workspace]
+}
+
+// ConversationSourceAt places tsMs against the fake lease ledger.
+func (f *fakeApplier) ConversationSourceAt(workspace string, tsMs int64) (frontendv1.ConversationSource, error) {
+	if f.conversationSrcErr != nil {
+		return frontendv1.ConversationSource_CONVERSATION_SOURCE_UNSPECIFIED, f.conversationSrcErr
+	}
+	for _, w := range f.mergeWindows[workspace] {
+		if tsMs >= w[0] && (w[1] == 0 || tsMs < w[1]) {
+			return frontendv1.ConversationSource_CONVERSATION_SOURCE_MERGE, nil
+		}
+	}
+	return frontendv1.ConversationSource_CONVERSATION_SOURCE_USER, nil
 }
 
 // wiringCall is one WIRED-axis edge the session controller applied.
