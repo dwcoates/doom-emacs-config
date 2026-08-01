@@ -2449,8 +2449,25 @@ the in-flight slot."
     (agent-repl--update-all-workspace-states-now)))
 
 ;; Periodically update all workspace states.
-(push (run-with-timer agent-repl-state-poll-interval agent-repl-state-poll-interval #'agent-repl--update-all-workspace-states)
-      agent-repl--timers)
+;;
+;; This is THE heartbeat: the 1Hz tick that repaints the tab bar, polls
+;; workspace notifications, and pushes the sidebar roster.  Losing it is
+;; the most visible failure the module has (frozen tabs), so it is armed
+;; under the `:state-poll' key — re-loading this file replaces the timer
+;; rather than stacking a second one, and core.el's
+;; `agent-repl--assert-heartbeat-armed' can re-arm it by name.
+(defun agent-repl--arm-state-poll-timer ()
+  "Arm the 1Hz workspace-state heartbeat under the `:state-poll' key.
+Idempotent: `agent-repl--register-timer' cancels and replaces any timer
+already held under the key, so any number of re-loads of this file leave
+exactly one heartbeat running.  Returns the timer."
+  (agent-repl--register-timer
+   :state-poll
+   (run-with-timer agent-repl-state-poll-interval
+                   agent-repl-state-poll-interval
+                   #'agent-repl--update-all-workspace-states)))
+
+(agent-repl--arm-state-poll-timer)
 
 (defun agent-repl--mark-dead (ws)
   "Record that WS's agent session is no longer running.

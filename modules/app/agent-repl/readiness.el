@@ -115,8 +115,9 @@ Non-nil is the coalescing interlock: a tick that finds it live skips.")
 
 (defvar agent-repl--readiness-timer nil
   "The repeating poll timer, or nil.
-Held separately from `agent-repl--timers' so the start helper can
-guarantee there is never more than one.")
+A convenience handle on the timer registered under the `:readiness-poll'
+key; the registry (core.el) is what guarantees there is never more than
+one.")
 
 ;;;; Faces
 ;;
@@ -255,22 +256,25 @@ gets a lower refresh rate, not an unbounded pile of processes."
 ;;;; Timer lifecycle
 
 (defun agent-repl--readiness-cancel-timer ()
-  "Cancel the readiness poll timer, if one is running."
-  (when (timerp agent-repl--readiness-timer)
-    (cancel-timer agent-repl--readiness-timer)
-    (setq agent-repl--timers (delq agent-repl--readiness-timer agent-repl--timers)))
-  (setq agent-repl--readiness-timer nil))
+  "Cancel the readiness poll timer, if one is running.
+Delegates the registry bookkeeping to `agent-repl--cancel-timer-key' and
+clears this module's own handle."
+  (prog1 (agent-repl--cancel-timer-key :readiness-poll)
+    (setq agent-repl--readiness-timer nil)))
 
 (defun agent-repl--readiness-start-timer ()
   "Start the readiness poll timer, replacing any existing one.
-Cancelling first is what makes \"never more than one timer\" true across
-a re-eval of this file, which is how the module is hot-reloaded."
-  (agent-repl--readiness-cancel-timer)
+Arming through the `:readiness-poll' registry key is what makes \"never
+more than one timer\" true across a re-eval of this file, which is how
+the module is hot-reloaded.  This is also the arm function core.el's
+`agent-repl--required-timer-keys' names for the key, so a stranded
+readiness poll is re-armed through exactly this path."
   (setq agent-repl--readiness-timer
-        (run-with-timer agent-repl-readiness-poll-interval
-                        agent-repl-readiness-poll-interval
-                        #'agent-repl--readiness-poll))
-  (push agent-repl--readiness-timer agent-repl--timers)
+        (agent-repl--register-timer
+         :readiness-poll
+         (run-with-timer agent-repl-readiness-poll-interval
+                         agent-repl-readiness-poll-interval
+                         #'agent-repl--readiness-poll)))
   (agent-repl--log nil "readiness: poll timer started interval=%s script=%s"
                    agent-repl-readiness-poll-interval
                    agent-repl-readiness-script)

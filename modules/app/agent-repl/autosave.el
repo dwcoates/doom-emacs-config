@@ -87,9 +87,19 @@ Runs silently every 5 minutes to prevent data loss."
   :type 'integer
   :group 'agent-repl)
 
-(let ((timer (run-with-timer agent-repl-autosave-initial-delay agent-repl-autosave-interval
-                             #'agent-repl--autosave-workspace-buffers)))
-  (push timer agent-repl--timers)
-  (agent-repl--log
-   nil "autosave: timer-scheduled initial-delay=%S interval=%S timer=%S"
-   agent-repl-autosave-initial-delay agent-repl-autosave-interval timer))
+(defun agent-repl--arm-autosave-timer ()
+  "Arm the periodic autosave sweep under the `:autosave' key.
+Idempotent: `agent-repl--register-timer' cancels and replaces any timer
+already held under the key, so re-loading this file leaves exactly one
+sweep scheduled instead of stacking a second.  Returns the timer."
+  (let ((timer (agent-repl--register-timer
+                :autosave
+                (run-with-timer agent-repl-autosave-initial-delay
+                                agent-repl-autosave-interval
+                                #'agent-repl--autosave-workspace-buffers))))
+    (agent-repl--log
+     nil "autosave: timer-scheduled initial-delay=%S interval=%S timer=%S"
+     agent-repl-autosave-initial-delay agent-repl-autosave-interval timer)
+    timer))
+
+(agent-repl--arm-autosave-timer)
