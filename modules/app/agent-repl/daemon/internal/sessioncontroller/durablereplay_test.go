@@ -84,8 +84,11 @@ type durableHarness struct {
 	seq     *fakeSeqStore
 	floors  *fakeClearCompactStore
 	history *durableHistorySpy
-	logMu   *sync.Mutex
-	logged  *[]string
+	// receipts is the durable prompt-receipt ledger this harness's Manager
+	// records into and replays from (promptreceipt_test.go).
+	receipts *fakeReceiptStore
+	logMu    *sync.Mutex
+	logged   *[]string
 }
 
 func newDurableHarness(t *testing.T, history DurableHistorySource) *durableHarness {
@@ -93,12 +96,13 @@ func newDurableHarness(t *testing.T, history DurableHistorySource) *durableHarne
 	var logged []string
 	var mu sync.Mutex
 	h := &durableHarness{
-		push:    &fakePusher{},
-		applier: &fakeApplier{},
-		seq:     &fakeSeqStore{seq: map[string]uint64{}},
-		floors:  newFakeClearCompactStore(),
-		logMu:   &mu,
-		logged:  &logged,
+		push:     &fakePusher{},
+		applier:  &fakeApplier{},
+		seq:      &fakeSeqStore{seq: map[string]uint64{}},
+		floors:   newFakeClearCompactStore(),
+		receipts: newFakeReceiptStore(),
+		logMu:    &mu,
+		logged:   &logged,
 	}
 	if spy, ok := history.(*durableHistorySpy); ok {
 		h.history = spy
@@ -111,6 +115,7 @@ func newDurableHarness(t *testing.T, history DurableHistorySource) *durableHarne
 		SeqStore:          h.seq,
 		ClearCompactStore: h.floors,
 		DurableHistory:    history,
+		PromptReceipts:    h.receipts,
 		ProtocolVersion:   "1",
 		Source:            stubSource{},
 		FileDiagnostics:   fakeFileDiagnosticPersister{},

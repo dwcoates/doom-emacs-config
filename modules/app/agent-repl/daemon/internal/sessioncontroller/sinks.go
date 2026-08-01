@@ -13,6 +13,7 @@ import (
 	"claude-repld/internal/errclass"
 	"claude-repld/internal/frontend"
 	"claude-repld/internal/ssm"
+	"claude-repld/internal/statedb"
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -200,6 +201,30 @@ type ClearCompactStore interface {
 	SetNewestClearOrCompactSeq(sessionID string, seq uint64)
 }
 
+// PromptReceiptStore persists the DURABLE half of a prompt receipt: one row per
+// prompt this daemon accepted and has not yet seen the conversation carry.
+// Satisfied by *statedb.PromptReceipts.
+//
+// It is the only thing standing between a user and a silently lost prompt. A
+// receipt lived only in daemon memory before this, so a prompt accepted and not
+// yet durable when the daemon died left no trace anywhere — the shim-store had
+// never received the turn, and the bubble the user had already seen died with
+// the process.
+type PromptReceiptStore interface {
+	// Record persists one accepted prompt. It runs BEFORE the receipt bubble is
+	// pushed, so a receipt on a user's screen always implies a durable record.
+	Record(r statedb.PromptReceipt) error
+	// Retire discards a request's receipt, reporting whether one was
+	// outstanding. Retiring an already-retired receipt is a no-op, never an
+	// error: the retirement points are several and any may run second.
+	Retire(requestID string) (bool, error)
+	// RetireWorkspace discards every receipt for a workspace accepted at or
+	// before throughMs — the context cut's sweep — reporting how many went.
+	RetireWorkspace(workspace string, throughMs int64) (int, error)
+	// Outstanding lists a workspace's un-retired receipts, oldest first.
+	Outstanding(workspace string) ([]statedb.PromptReceipt, error)
+}
+
 // noopProgress is the ProgressResolver a session controller built without one falls back
 // to. It exists so the progress feed is OPTIONAL for a test harness that does
 // not care about it, without every feed site growing a nil check.
@@ -239,8 +264,19 @@ type consumer struct {
 	// Required: Config validation rejects a Manager built without one, so a
 	// clear or a compaction can never be observed and silently forgotten.
 	floors ClearCompactStore
-	logf   func(string, ...any)
-	now    func() int64
+	// receipts persists prompt receipts durably. Assigned after construction
+	// (bindReceipts) rather than taken as yet another positional constructor
+	// argument. Nil is a session controller built without one, and every use
+	// site says so out loud rather than silently skipping the write.
+	receipts PromptReceiptStore
+	// onPushedConversation observes each translated ConversationDelta at the
+	// moment it is pushed. Assigned only by the throwaway consumer a DURABLE
+	// replay runs through, which needs to know which prompts the store's own
+	// events just served so it does not serve a receipt for one of them twice
+	// (durablereplay.go). Nil on every live consumer.
+	onPushedConversation func(*frontendv1.ConversationDelta)
+	logf                 func(string, ...any)
+	now                  func() int64
 	// onSessionStarted fires when a SessionStarted event arrives, letting the
 	// controller adopt the vendor session uuid the start announced.
 	onSessionStarted func(*corev1.SessionStarted)
@@ -777,6 +813,9 @@ func (c *consumer) noteClearOrCompact(ev *corev1.Event) {
 	if dropped := c.dropEchoes(); dropped > 0 {
 		logf("session-controller: dropped %d unclaimed prompt receipt(s) with the history this floor hides", dropped)
 	}
+	// And their DURABLE records, or the very next replay would put the
+	// pre-cut prompts back above the floor this event just raised.
+	c.retireDurableReceiptsThrough(c.now(), "replay_floor_raised:"+stateKind(ev))
 }
 
 // noteCutCompleted closes the SSM axis the arrived context cut was the
@@ -991,17 +1030,7 @@ func userTurnReceipt(cd *frontendv1.ConversationDelta) (requestID string, textLe
 		if um == nil {
 			continue
 		}
-		n := 0
-		switch content := um.GetContent().(type) {
-		case *datav1.ApiUserMessage_ContentString:
-			n = len(content.ContentString)
-		case *datav1.ApiUserMessage_ContentBlocks:
-			for _, b := range content.ContentBlocks.GetBlocks() {
-				if t := b.GetText(); t != nil {
-					n += len(t.GetText())
-				}
-			}
-		}
+		n := len(userMessageText(um))
 		if n > 0 {
 			requestID = it.GetRequestId()
 			textLen += n
@@ -1055,6 +1084,13 @@ func (c *consumer) pushConversation(ev *corev1.Event, live bool) {
 		c.attributeUserTurn(cd)
 	}
 	c.push.PushConversationDelta(cd)
+	// A DURABLE replay watches what its own store events carried, so an
+	// un-retired receipt for a prompt those events already drew is suppressed
+	// rather than drawn a second time (durablereplay.go). Nil on every live
+	// consumer, where the ring and attributeUserTurn cover the same ground.
+	if c.onPushedConversation != nil {
+		c.onPushedConversation(cd)
+	}
 	// The prompt round-trip receipt: one line per LIVE user prompt reaching
 	// the frontend push, closing the gap between "control request acked" (the
 	// shim took the prompt) and the webapp's own mount log. Live only — a
@@ -1289,6 +1325,33 @@ func (c *consumer) pushLocalItem(item *frontendv1.ConversationItem) {
 		SessionId: c.sessionID,
 		Items:     []*frontendv1.ConversationItem{item},
 	})
+}
+
+// pushReplayedReceipt pushes ONE durable prompt receipt during a durable
+// replay, and reports whether it went.
+//
+// IT IS NOT pushLocalItem, and the difference is the provenance rule. A local
+// item is composed NOW, so the live lease state is its provenance; a replayed
+// receipt was composed by a daemon that no longer exists, at an instant the
+// record remembers, so its verdict must come from the merge lease's DURABLE
+// LEDGER at that instant — the same rule pushConversation applies to every
+// other replayed item. Reading the live lease instead would rewrite a merge's
+// prompt as the user's, or the reverse, purely on the basis of what happens to
+// be leased when the frontend reconnects.
+//
+// Nothing is retained: this consumer is the throwaway one a durable replay runs
+// through, and the record in the state store is the thing that persists.
+func (c *consumer) pushReplayedReceipt(item *frontendv1.ConversationItem) bool {
+	cd := &frontendv1.ConversationDelta{
+		Workspace: c.workspace,
+		SessionId: c.sessionID,
+		Items:     []*frontendv1.ConversationItem{item},
+	}
+	if !c.stampConversationProvenance(cd) {
+		return false
+	}
+	c.push.PushConversationDelta(cd)
+	return true
 }
 
 // pushFailure retains and pushes a system-failure ConversationItem under uuid,

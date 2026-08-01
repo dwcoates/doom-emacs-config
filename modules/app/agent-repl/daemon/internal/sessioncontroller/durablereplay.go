@@ -5,9 +5,11 @@ import (
 	"fmt"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
+	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
 	"claude-repld/internal/dlog"
 	"claude-repld/internal/errclass"
+	"claude-repld/internal/statedb"
 	"claude-repld/internal/storehistory"
 )
 
@@ -67,6 +69,21 @@ type DurableHistorySource interface {
 // an unreadable store, and a truncated replay all return an error, so the
 // resync's CommandAck reports the failure. Silence here would be
 // indistinguishable from an empty conversation, which is the bug.
+// promptReceiptStaleAfterMs is the age past which a served prompt receipt is
+// reported as STALE.
+//
+// Twenty-four hours, and the number is a diagnostic threshold rather than an
+// expiry: nothing is withheld for being old, because a receipt is the only
+// evidence its prompt was ever sent and discarding evidence for being
+// inconvenient is the failure this mechanism exists to end. What the bound
+// buys is a name for an anomaly. A receipt survives exactly as long as the
+// conversation takes to carry its prompt, which is normally seconds and at
+// worst the length of one turn; a day means something never retired it — a
+// transcript that never arrived, a session abandoned mid-submit, a retirement
+// that has been failing — and that deserves to be findable in the log rather
+// than replayed in silence forever.
+const promptReceiptStaleAfterMs int64 = 24 * 60 * 60 * 1000
+
 func (m *Manager) resyncFromDurableHistory(workspace string, fromSeq uint64) error {
 	logf := dlog.Tag(dlog.Logf(m.logf), "ws", workspace, "from_seq", fromSeq, "source", "shim-store")
 	logf("session-controller: resync for an UNWIRED workspace — serving the conversation replay from DURABLE history (no session controller is live, and none is brought up to answer a read)")
@@ -82,6 +99,11 @@ func (m *Manager) resyncFromDurableHistory(workspace string, fromSeq uint64) err
 	lastSeen := m.cfg.SeqStore.LastSeq(sessionID)
 	replayFrom := m.replayFloorAt(workspace, sessionID, lastSeen, fromSeq)
 	cons := m.durableConsumer(workspace, sessionID)
+	// What the store's OWN events serve, watched as they are pushed, so a
+	// receipt for a prompt the conversation already carries is suppressed
+	// rather than drawn beside it (serveDurableReceipts).
+	served := newServedPrompts()
+	cons.onPushedConversation = served.observe
 	logf("session-controller: durable resync replaying ws=%q session=%s replay_from=%d (inclusive) last_seen_seq=%d max_events=%d",
 		workspace, sessionID, replayFrom, lastSeen, repullMaxEvents)
 	res, err := m.cfg.DurableHistory.ReplayHistory(m.rootCtx, workspace, sessionID,
@@ -100,7 +122,133 @@ func (m *Manager) resyncFromDurableHistory(workspace string, fromSeq uint64) err
 	}
 	logf("session-controller: durable resync COMPLETE ws=%q session=%s replay_from=%d events_served=%d first_seq=%d last_seq=%d",
 		workspace, sessionID, replayFrom, res.Delivered, res.FirstSeq, res.LastSeq)
+	// AFTER the store's own events, never before: a receipt belongs at the
+	// bottom of the conversation, because the prompt it stands for is the most
+	// recent thing that happened to this workspace.
+	return m.serveDurableReceipts(workspace, sessionID, cons, served)
+}
+
+// serveDurableReceipts pushes every un-retired prompt receipt the store's own
+// events did not already account for.
+//
+// WHY THE DURABLE REPLAY NEEDS THIS AT ALL. The store serves the conversation,
+// and a prompt is in the conversation only once the vendor's transcript has
+// carried it. A prompt ACCEPTED and not yet durable when the daemon died is in
+// neither place: the store never received the turn, and the in-memory receipt
+// died with the process. Without this the user's own prompt simply disappeared
+// on reconnect, which is indistinguishable from never having sent it.
+//
+// WHY THE LIVE RESYNC PATH NEEDS NOTHING. A workspace WITH a live session
+// controller replays its retained receipts already (consumer.resync pushes
+// snapshotEchoes beside the permission and failure cards), and those receipts
+// are the very ones this daemon is still holding in memory. The durable record
+// and the retained one describe the same submits there, so serving both would
+// draw each bubble twice.
+//
+// SUPPRESSION IS BY REQUEST ID FIRST AND BY TEXT SECOND. A durable line that
+// NAMES its request settles the question outright. A transcript UserLine
+// carries no request id of its own, though, so after a bounce the store's copy
+// of the prompt and the receipt for it share nothing but their text — and
+// drawing both would put the user's prompt on screen twice, every time, for
+// every turn that outlived the daemon that started it. Matching on the text of
+// a prompt served at or after the accept instant closes that, and the failure
+// mode of matching too eagerly is benign in a way the alternative is not: a
+// wrongly suppressed receipt loses nothing, because what suppressed it is the
+// conversation's own copy of the same prompt.
+func (m *Manager) serveDurableReceipts(workspace, sessionID string, cons *consumer, served *servedPrompts) error {
+	logf := dlog.Tag(dlog.Logf(m.logf), "ws", workspace, "session", sessionID, "source", "prompt-receipts")
+	if m.cfg.PromptReceipts == nil {
+		logf("session-controller: durable prompt receipts NOT served — no PromptReceiptStore is wired, so a prompt accepted but never made durable cannot be recovered")
+		return nil
+	}
+	receipts, err := m.cfg.PromptReceipts.Outstanding(workspace)
+	if err != nil {
+		logf("session-controller: durable prompt receipts UNREADABLE ws=%q: %v — the resync is failed rather than served without the prompts it may be missing", workspace, err)
+		return fmt.Errorf("session-controller: reading the durable prompt receipts for ws %q failed: %w", workspace, err)
+	}
+	now := m.now()
+	for _, r := range receipts {
+		age := now - r.AcceptedAtMs
+		if reason, ok := served.claim(r); ok {
+			logf("session-controller: durable prompt receipt SUPPRESSED ws=%q request_id=%s age_ms=%d match=%s — the store's own events already carried this prompt, and the record is retired",
+				workspace, r.RequestID, age, reason)
+			cons.retireDurableReceipt(r.RequestID, "store_events_carried_the_prompt:"+reason)
+			continue
+		}
+		if age > promptReceiptStaleAfterMs {
+			logf("session-controller: durable prompt receipt STALE ws=%q request_id=%s age_ms=%d stale_after_ms=%d — served anyway, because it is the only evidence this prompt was ever sent",
+				workspace, r.RequestID, age, promptReceiptStaleAfterMs)
+		}
+		item := promptReceiptItem(r.RequestID, r.Text, r.AcceptedAtMs)
+		if !cons.pushReplayedReceipt(item) {
+			logf("session-controller: durable prompt receipt NOT PUSHED ws=%q request_id=%s age_ms=%d — its provenance could not be resolved (see the refusal above)",
+				workspace, r.RequestID, age)
+			continue
+		}
+		logf("session-controller: durable prompt receipt SERVED ws=%q request_id=%s age_ms=%d accepted_at_ms=%d len=%d — the prompt never became durable, so this is the only record of it",
+			workspace, r.RequestID, age, r.AcceptedAtMs, len(r.Text))
+	}
 	return nil
+}
+
+// servedPrompts is what a durable replay's OWN store events served, as far as
+// user prompts go: the request ids they named, and the prompt texts they drew.
+type servedPrompts struct {
+	ids map[string]struct{}
+	// texts are consumed one-for-one by claim, so two receipts carrying the
+	// same text are suppressed only by two served copies of it. A user who
+	// submits "continue" twice and has one of the two become durable keeps the
+	// receipt for the one that did not.
+	texts []servedPrompt
+}
+
+type servedPrompt struct {
+	text    string
+	tsMs    int64
+	claimed bool
+}
+
+func newServedPrompts() *servedPrompts {
+	return &servedPrompts{ids: map[string]struct{}{}}
+}
+
+// observe records the user prompts one pushed delta carried.
+func (s *servedPrompts) observe(cd *frontendv1.ConversationDelta) {
+	for _, it := range cd.GetItems() {
+		um := it.GetUserMessage()
+		if um == nil {
+			continue
+		}
+		text := userMessageText(um)
+		if text == "" {
+			// A pure tool-result feedback message rides the user_message arm
+			// too, and it is not a prompt anyone submitted.
+			continue
+		}
+		if id := it.GetRequestId(); id != "" {
+			s.ids[id] = struct{}{}
+		}
+		s.texts = append(s.texts, servedPrompt{text: text, tsMs: it.GetTsMs()})
+	}
+}
+
+// claim reports whether the served events already account for this receipt's
+// prompt, naming which rule decided it.
+func (s *servedPrompts) claim(r statedb.PromptReceipt) (string, bool) {
+	if _, ok := s.ids[r.RequestID]; ok {
+		return "request_id", true
+	}
+	for i := range s.texts {
+		// AT OR AFTER THE ACCEPT INSTANT: an identical prompt from earlier in
+		// the conversation is a different submit, and letting it suppress this
+		// receipt would discard the evidence of the one still outstanding.
+		if s.texts[i].claimed || s.texts[i].text != r.Text || s.texts[i].tsMs < r.AcceptedAtMs {
+			continue
+		}
+		s.texts[i].claimed = true
+		return "text", true
+	}
+	return "", false
 }
 
 // durableConsumer builds the throwaway translation consumer one durable replay
@@ -112,5 +260,11 @@ func (m *Manager) resyncFromDurableHistory(workspace string, fromSeq uint64) err
 // re-pull. The curation state (the skill correlator in particular) starts empty
 // per replay, which is what a replay read in store order from the floor wants.
 func (m *Manager) durableConsumer(workspace, sessionID string) *consumer {
-	return newConsumer(workspace, sessionID, m.cfg.Push, m.cfg.SSM, nil, m.cfg.ClearCompactStore, m.logf, nil, nil, nil, nil, nil)
+	cons := newConsumer(workspace, sessionID, m.cfg.Push, m.cfg.SSM, nil, m.cfg.ClearCompactStore, m.logf, nil, nil, nil, nil, nil)
+	// The one durable store it DOES hold, and it holds it to RETIRE rows: a
+	// replay that finds a receipt's prompt already in the store has established
+	// the fact the live retirement point would have established, for a daemon
+	// that was not alive to establish it.
+	cons.receipts = m.cfg.PromptReceipts
+	return cons
 }
