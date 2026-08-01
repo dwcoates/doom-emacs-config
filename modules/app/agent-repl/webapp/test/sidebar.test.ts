@@ -290,6 +290,11 @@ describe("statusDotHtml", () => {
     expect(statusDotHtml("inactive")).toContain(">❓<");
   });
 
+  it("carries the recycle glyph on a merge-enqueuing dot", () => {
+    // Arrange + Act + Assert — the first mark of the pipeline the glyph denotes.
+    expect(statusDotHtml("merge-enqueuing")).toContain(">⟳<");
+  });
+
   it("carries the recycle glyph on a merging dot", () => {
     // Arrange + Act + Assert
     expect(statusDotHtml("merging")).toContain(">⟳<");
@@ -341,6 +346,7 @@ describe("statusDotHtml", () => {
     // Assert
     expect(spinning).not.toBeNull();
     expect(css).not.toMatch(/\.st-merge-queued[^{]*\{[^}]*animation/);
+    expect(css).not.toMatch(/\.st-merge-enqueuing[^{]*\{[^}]*animation/);
   });
 });
 

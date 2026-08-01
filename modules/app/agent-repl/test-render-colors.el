@@ -127,7 +127,7 @@ test above proves the row is there; this proves it is right."
 (ert-deftest agent-repl-test-colors-merge-states-spend-no-color ()
   "The merge states carry badges, never one of the six."
   ;; Act / Assert
-  (dolist (keyword '(:merging :merge-queued :merge-conflict :merge-failed :merged))
+  (dolist (keyword '(:merge-enqueuing :merging :merge-queued :merge-conflict :merge-failed :merged))
     (should (equal (alist-get keyword agent-repl--state-color) "none"))))
 
 ;;;; ---- Exhaustiveness across the three Emacs tables --------------------

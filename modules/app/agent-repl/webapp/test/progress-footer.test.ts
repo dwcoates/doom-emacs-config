@@ -242,6 +242,38 @@ describe("phaseLabel: the SSM's verdict as the footer's anchor", () => {
     expect(got.spinning).toBe(true);
   });
 
+  it("names the first instant of a merge attempt as merge enqueuing", () => {
+    // Arrange / Act — the window between the command arriving and the merge
+    // being durably queued, which nothing described before it.
+    const got = phaseLabel("merge_enqueuing");
+    // Assert
+    expect(got.word).toBe("merge enqueuing");
+  });
+
+  it("spins while enqueuing, because the daemon really is working", () => {
+    // Arrange / Act — resolving the geometry and writing the durable entry is
+    // work happening, unlike a queued merge's wait.
+    const got = phaseLabel("merge_enqueuing");
+    // Assert
+    expect(got.spinning).toBe(true);
+  });
+
+  it("keeps enqueuing quiet, like every other merge phase the sidebar leads on", () => {
+    // Arrange / Act
+    const got = phaseLabel("merge_enqueuing");
+    // Assert
+    expect(got.tone).toBe("muted");
+  });
+
+  it("distinguishes enqueuing from the queue place that follows it", () => {
+    // Arrange / Act — the two are consecutive phases of one pipeline, and a
+    // shared word would hide the transition entirely.
+    const enqueuing = phaseLabel("merge_enqueuing");
+    const queued = phaseLabel("merge_queued");
+    // Assert
+    expect(enqueuing.word).not.toBe(queued.word);
+  });
+
   it("names idle_async as monitoring", () => {
     // Arrange / Act — the yellow no-turn-but-live-async signal.
     const got = phaseLabel("idle_async");
@@ -1129,6 +1161,15 @@ describe("mergeQueueChip: where this workspace sits in its repo's merge queue", 
     expect(got).toBeNull();
   });
 
+  it("shows no place while the merge is still being enqueued", () => {
+    // Arrange / Act — there is no queue entry yet, so there is no place to
+    // report; any figures riding along describe a queue this merge has not
+    // joined.
+    const got = mergeQueueChip("merge_enqueuing", 1, 3);
+    // Assert
+    expect(got).toBeNull();
+  });
+
   it("shows no place for an ordinary working session", () => {
     // Arrange / Act
     const got = mergeQueueChip("thinking", 0, 0);
@@ -1173,6 +1214,17 @@ describe("footerHtml: the merge queue's place beside the phase", () => {
     const got = footerHtml(built, CLOSED, NOW);
     // Assert
     expect(got).toContain("merge queued");
+  });
+
+  it("names the enqueuing phase with no queue cell beside it", () => {
+    // Arrange — the transition the pipeline renders: the phase word alone
+    // while enqueuing, the word plus the place once queued.
+    const built = input({ renderState: "merge_enqueuing", mergeQueuePosition: 0, mergeQueueDepth: 0 });
+    // Act
+    const got = footerHtml(built, CLOSED, NOW);
+    // Assert
+    expect(got).toContain("merge enqueuing");
+    expect(got).not.toContain("pfooter-merge-queue");
   });
 
   it("renders NO queue cell when the workspace is not enqueued", () => {

@@ -929,6 +929,7 @@ Returns:
     (:merge-failed   . "⛔")
     (:merge-conflict . "💥")
     (:merging        . "🔄")
+    (:merge-enqueuing . "🕒")
     (:merge-queued   . "🕒"))
   "Alist mapping a render-state keyword to its indicator glyph.
 The glyph half of the render-state unification: renderers resolve a

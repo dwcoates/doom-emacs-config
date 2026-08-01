@@ -72,6 +72,11 @@ const (
 	sigBackfillFailed = "backfill_failed"
 	sigBackfillOK     = "backfill_ok" // backfill axis cleared (done, or nothing to do).
 	sigDead           = "dead"
+	// THE FIRST INSTANT OF A MERGE ATTEMPT, before anything durable exists for
+	// it. The command handler emits it on receipt; every other merge token
+	// supersedes it, and an orphaned one is swept to merge_failed at the next
+	// boot (merge.Coordinator.Drain).
+	sigMergeEnqueuing = "merge_enqueuing"
 	sigMerging        = "merging"
 	sigMergeQueued    = "merge_queued"
 	sigMergeConflict  = "merge_conflict"
@@ -262,6 +267,8 @@ func renderStateOf(token string) frontendv1.RenderState {
 		// Blue, like every other compromised route: an incomplete history
 		// cannot be the basis of a "ready" claim.
 		return frontendv1.RenderState_RENDER_STATE_INIT
+	case sigMergeEnqueuing:
+		return frontendv1.RenderState_RENDER_STATE_MERGE_ENQUEUING
 	case sigMerging:
 		return frontendv1.RenderState_RENDER_STATE_MERGING
 	case sigMergeQueued:
@@ -336,6 +343,7 @@ func renderStateOf(token string) frontendv1.RenderState {
 //	 3 merged           (unguarded: a merged workspace leaves the tab-bar)
 //	 4 merging
 //	 5 merge_queued
+//	 6 merge_enqueuing  the attempt is not even on a queue yet
 //	--- blue ---------------------------------------------------------------
 //	10 dead             the shim is gone
 //	11 degraded         a store/transport outage
@@ -387,6 +395,14 @@ WITH
     ('merged','merge',3),
     ('merging','merge',4),
     ('merge_queued','merge',5),
+    -- DIRECTLY BELOW merge_queued, and that placement is the whole of what
+    -- this rank says: merge_enqueuing is the WEAKEST claim the merge axis can
+    -- make. Every other merge state describes a merge the daemon has already
+    -- recorded something durable about; this one describes an attempt that is
+    -- not even on a queue yet, so any other merge row that exists is the more
+    -- specific truth and must win. Only one merge row is ever a candidate
+    -- (latest_merge takes the newest), so the rank decides nothing else.
+    ('merge_enqueuing','merge',6),
     ('dead','agent',10),
     ('degraded','degraded',11),
     ('severed','wired',12),
@@ -428,7 +444,7 @@ WITH
   ),
   latest_merge AS (
     SELECT r.* FROM rows r
-    WHERE r.state IN ('merging','merge_queued','merge_conflict','merge_failed','merged','merge_none')
+    WHERE r.state IN ('merge_enqueuing','merging','merge_queued','merge_conflict','merge_failed','merged','merge_none')
     ORDER BY r.at DESC LIMIT 1
   ),
   latest_degraded AS (
