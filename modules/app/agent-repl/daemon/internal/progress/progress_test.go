@@ -395,18 +395,35 @@ func TestThinkingTokensTicks(t *testing.T) {
 	}
 }
 
-func TestInputTokensSumTheCacheHalves(t *testing.T) {
+func TestInputTokensSumTheNewInputHalves(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	h.openTurn()
 	// Act
 	h.apply(streamEvent(t, assistantWithUsage("m1", &datav1.ApiUsage{
-		InputTokens: 100, CacheReadInputTokens: 40_000, CacheCreationInputTokens: 1_100,
+		InputTokens: 100, CacheCreationInputTokens: 1_100,
 		OutputTokens: 9_999, // deliberately ignored: the footer shows input only
 	})))
 	// Assert
-	if got := h.last().GetInputTokens(); got != 41_200 {
-		t.Fatalf("inputTokens = %d, want 41200 (input + both cache halves, no output)", got)
+	if got := h.last().GetInputTokens(); got != 1_200 {
+		t.Fatalf("inputTokens = %d, want 1200 (uncached input + cache write, no output)", got)
+	}
+}
+
+// The cache read is the standing prefix presented AGAIN, so counting it once
+// per request reports the conversation's size times the request count rather
+// than anything the turn spent (see applyAssistantLocked).
+func TestInputTokensExcludeCacheReads(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.openTurn()
+	// Act
+	h.apply(streamEvent(t, assistantWithUsage("m1", &datav1.ApiUsage{
+		InputTokens: 100, CacheReadInputTokens: 40_000,
+	})))
+	// Assert
+	if got := h.last().GetInputTokens(); got != 100 {
+		t.Fatalf("inputTokens = %d, want 100 (the 40k cache read is not new input)", got)
 	}
 }
 
@@ -471,6 +488,43 @@ func TestInputTokensResetAtTurnStart(t *testing.T) {
 	// Assert
 	if got := h.last().GetInputTokens(); got != 0 {
 		t.Fatalf("inputTokens = %d, want 0 at the start of a fresh turn", got)
+	}
+}
+
+func TestInputTokensClearedAtTurnEnd(t *testing.T) {
+	// Arrange — a turn that spent tokens.
+	h := newHarness(t)
+	h.openTurn()
+	h.apply(streamEvent(t, assistantWithUsage("m1", &datav1.ApiUsage{InputTokens: 9_000})))
+	// Act
+	h.apply(&corev1.Event{
+		SessionId: testSID, ProducedAtMs: atMs,
+		Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{}},
+	})
+	// Assert — the figure moves to the final-response bubble's stamp, so the
+	// footer reads `--` between turns rather than a stale summary.
+	if got := h.last().GetInputTokens(); got != 0 {
+		t.Fatalf("inputTokens = %d, want 0 once the turn has ended", got)
+	}
+}
+
+func TestThinkingTokensClearedAtTurnEnd(t *testing.T) {
+	// Arrange — a turn that reasoned.
+	h := newHarness(t)
+	h.openTurn()
+	h.apply(streamEvent(t, &datav1.ClaudeStreamMessage{
+		Msg: &datav1.ClaudeStreamMessage_ThinkingTokens{
+			ThinkingTokens: &datav1.ThinkingTokens{EstimatedTokens: 1400},
+		},
+	}))
+	// Act
+	h.apply(&corev1.Event{
+		SessionId: testSID, ProducedAtMs: atMs,
+		Payload: &corev1.Event_TurnEnded{TurnEnded: &corev1.TurnEnded{}},
+	})
+	// Assert
+	if got := h.last().GetThinkingTokens(); got != 0 {
+		t.Fatalf("thinkingTokens = %d, want 0 once the turn has ended", got)
 	}
 }
 

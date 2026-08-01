@@ -574,20 +574,26 @@ export function toolElapsed(tool: ToolItem, nowMs: number): string {
 }
 
 /**
- * The token cell: the CURRENT TURN's cumulative input tokens, with the
- * thinking ticker beside it while the model is reasoning.
+ * The token cell: the CURRENT TURN's new input tokens, with the thinking
+ * ticker beside it while the model is reasoning.
  *
  * There is deliberately no output figure — the running output-token count is
  * explicitly unwanted here, and the session-wide total lives in the topbar's
  * tokens chip.
  *
- * Returns "" when the turn has spent nothing yet and nothing is being thought,
- * so the caller drops the cell rather than showing a lying `0 in`.
+ * BETWEEN TURNS it reads the idle dash, exactly as the clock cell does. The
+ * turn's final figure is not lost by clearing: it is stamped into the
+ * top-right corner of the final-response bubble that turn produced (see
+ * `resultMeta`), where it persists and replays with the conversation. A
+ * footer that kept showing it would be reporting a turn the feed has already
+ * accounted for, and would go on doing so until the next turn overwrote it.
  */
 export function tokenCellHtml(p: ProgressInput): string {
   const parts: string[] = [];
   if (p.inputTokens > 0) {
     parts.push(`<span class="info-tokens">${escapeHtml(compactTokens(p.inputTokens))} in</span>`);
+  } else if (p.thinkingTokens === 0) {
+    parts.push(`<span class="info-tokens">${escapeHtml(IDLE_LABEL)}</span>`);
   }
   if (p.thinkingTokens > 0) {
     parts.push(
