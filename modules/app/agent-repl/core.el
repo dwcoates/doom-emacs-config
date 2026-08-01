@@ -596,9 +596,15 @@ in `json-serialize'."
     (dolist (pair pairs object)
       (puthash (car pair) (cdr pair) object))))
 
-(defun agent-repl--log-rfc3339-timestamp ()
-  "Return the current time as an RFC 3339 timestamp with microseconds."
-  (format-time-string "%FT%T.%6N%:z"))
+(defconst agent-repl--log-timestamp-format "%FT%T.%6N%:z"
+  "The log timestamp representation shared by every agent-repl runtime.
+RFC 3339 in the machine's local zone, on a 24-hour clock, with fixed-width
+microseconds and an explicit numeric offset.  Fixed width keeps records from
+different runtimes lexically comparable.")
+
+(defun agent-repl--log-rfc3339-timestamp (&optional time)
+  "Return TIME, or the current time, in `agent-repl--log-timestamp-format'."
+  (format-time-string agent-repl--log-timestamp-format time))
 
 (defun agent-repl--log-operation (fmt)
   "Return the stable operation name represented by FMT.

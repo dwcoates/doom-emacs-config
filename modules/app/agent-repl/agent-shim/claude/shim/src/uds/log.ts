@@ -2,6 +2,26 @@
 import { createHash } from "node:crypto";
 import { writeSync } from "node:fs";
 
+/**
+ * The log timestamp representation shared by every agent-repl runtime:
+ * RFC 3339 in the machine's local zone, on a 24-hour clock, with fixed-width
+ * microseconds and an explicit numeric offset. Fixed width keeps records from
+ * different runtimes lexically comparable. JavaScript instants resolve to
+ * milliseconds, so the last three microsecond digits are always zero.
+ */
+export function logTimestamp(at: Date = new Date()): string {
+  const pad = (value: number, width: number): string => String(value).padStart(width, "0");
+  const offsetMinutes = -at.getTimezoneOffset();
+  const sign = offsetMinutes < 0 ? "-" : "+";
+  const offset = Math.abs(offsetMinutes);
+  return (
+    `${pad(at.getFullYear(), 4)}-${pad(at.getMonth() + 1, 2)}-${pad(at.getDate(), 2)}` +
+    `T${pad(at.getHours(), 2)}:${pad(at.getMinutes(), 2)}:${pad(at.getSeconds(), 2)}` +
+    `.${pad(at.getMilliseconds(), 3)}000` +
+    `${sign}${pad(Math.floor(offset / 60), 2)}:${pad(offset % 60, 2)}`
+  );
+}
+
 export type LogLevel = "debug" | "info" | "warn" | "error";
 export type LogFields = Record<string, unknown>;
 
@@ -116,7 +136,7 @@ function buildRecord(verbosity: ShimLogRecord["verbosity"], fields: LogFields, m
     if (!RESERVED_FIELDS.has(key) && value !== undefined) context[key] = jsonSafe(value);
   }
   const record: ShimLogRecord = {
-    timestamp: new Date().toISOString(), runtime: "shim", level: logLevel(fields, verbosity), verbosity,
+    timestamp: logTimestamp(), runtime: "shim", level: logLevel(fields, verbosity), verbosity,
     operation, message, context, pid: process.pid,
     workspace_dir: runtime.workspace_dir, workspace_id: runtime.workspace_id,
     agent_repl_session_id: runtime.agent_repl_session_id,
@@ -131,7 +151,7 @@ function buildRecord(verbosity: ShimLogRecord["verbosity"], fields: LogFields, m
 export function emergencyStderr(message: string): void {
   const runtime = runtimeContext;
   process.stderr.write(`${JSON.stringify({
-    timestamp: new Date().toISOString(),
+    timestamp: logTimestamp(),
     runtime: "shim",
     level: "error",
     verbosity: "normal",
