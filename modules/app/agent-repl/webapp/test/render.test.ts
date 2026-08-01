@@ -153,15 +153,21 @@ function result(subtype: ResultItem["subtype"] = "success"): ResultItem {
   return {
     kind: "result",
     subtype,
-    // Distinct from sincePrevFinalMs so a chip that reads the wrong field
-    // is caught: the whole-task figure the standalone chip shows.
-    durationMs: 12,
-    // The since-previous-final figure the final-response chip shows, above
-    // the one-second floor below which that chip is dropped entirely.
-    sincePrevFinalMs: 7_000,
+    // The turn's own duration, which both the standalone chip and the
+    // final-response corner stamp read. Above the one-second floor below
+    // which the corner drops its duration half entirely.
+    durationMs: 7_000,
     numTurns: 1,
     totalCostUsd: 0.5,
-    usage: { input_tokens: 3, output_tokens: 4 },
+    // 100,000 NEW input tokens (uncached input + cache write). The 900,000
+    // cache read is deliberately larger than every other figure here, so a
+    // stamp that counts it is caught by its magnitude alone.
+    usage: {
+      input_tokens: 3,
+      output_tokens: 4,
+      cache_creation_input_tokens: 99_997,
+      cache_read_input_tokens: 900_000,
+    },
     isError: subtype === "error_during_execution",
     context: { total: 300_000, delta: 100_000 },
   };
@@ -2017,10 +2023,7 @@ describe("ResultChip", () => {
     return {
       kind: "result",
       subtype,
-      // Distinct from sincePrevFinalMs: the standalone chip must read this,
-      // the whole-task figure, and never the since-previous-final one.
       durationMs: 12,
-      sincePrevFinalMs: 7,
       numTurns: 1,
       totalCostUsd: 0.5,
       usage: { input_tokens: 3, output_tokens: 4 },
@@ -2029,8 +2032,8 @@ describe("ResultChip", () => {
     };
   }
 
-  /** The HTML of a completed answer nesting its chip, whose turn closed
-   *  ELAPSED ms after the previous final response. */
+  /** The HTML of a completed answer carrying its closing result's corner
+   *  stamp, for a turn that ran ELAPSED ms. */
   function finalResponseHtml(elapsed: number): string {
     const answer: TextItem = {
       kind: "text",
@@ -2040,7 +2043,7 @@ describe("ResultChip", () => {
       done: true,
       ts: TEXT_TS,
     };
-    const closing: ResultItem = { ...result("success"), sincePrevFinalMs: elapsed };
+    const closing: ResultItem = { ...result("success"), durationMs: elapsed };
     return renderItem(
       answer,
       undefined,
@@ -2162,38 +2165,13 @@ describe("ResultChip", () => {
     expect(html).toContain(`class="result err"`);
   });
 
-  it("reads the standalone chip from the whole-task duration, not the since-previous-final elapsed", () => {
+  it("reads the standalone chip from the turn's whole-task duration", () => {
     // Arrange — an aborted turn's chip stands alone in the feed.
-    const item = { ...resultItem("aborted"), durationMs: 12, sincePrevFinalMs: 7 };
+    const item = { ...resultItem("aborted"), durationMs: 12 };
     // Act
     const html = renderItem(item);
-    // Assert — 12ms is durationMs; 7ms (sincePrevFinalMs) must not surface.
+    // Assert
     expect(html).toContain("interrupted · 12ms");
-    expect(html).not.toContain("7ms");
-  });
-
-  it("reads a final-response chip from the since-previous-final elapsed, not the whole-task duration", () => {
-    // Arrange — a completed answer whose whole-task figure differs from its
-    // since-previous-final elapsed, nested inside the response it closes.
-    const answer: TextItem = {
-      kind: "text",
-      blockId: "b1",
-      messageId: "m1",
-      text: "done",
-      done: true,
-      ts: TEXT_TS,
-    };
-    const closing: ResultItem = {
-      ...result("success"),
-      durationMs: 330_000,
-      sincePrevFinalMs: 30_000,
-    };
-    const finals = finalResponses([userTurnAt(9, 0), answer, closing]);
-    // Act
-    const html = renderItem(answer, undefined, finals);
-    // Assert — 30s is sincePrevFinalMs; the 5m 30s whole-task figure never shows.
-    expect(html).toContain(`<span class="turn-dur">30s</span>`);
-    expect(html).not.toContain("5m 30s");
   });
 
   it("drops the final-response chip when the turn closed in under a second", () => {
@@ -2225,15 +2203,50 @@ describe("ResultChip", () => {
     expect(html).not.toContain("984ms");
   });
 
-  it("groups the duration and delta under one stats span so the bullet stays inline", () => {
+  it("groups the duration and the token figure under one stats span so the bullet stays inline", () => {
     // Arrange + Act — the wrapping .turn-stats item keeps the `·` between the
     // two figures on one line rather than dropping it onto its own row in the
     // .turn-meta column.
     const html = finalResponseHtml(1_000);
     // Assert
     expect(html).toContain(
-      `<span class="turn-stats"><span class="turn-dur">1s</span> · <span class="turn-diff">+100,000</span></span>`,
+      `<span class="turn-stats"><span class="turn-dur">1s</span> · <span class="turn-in">100k in</span></span>`,
     );
+  });
+
+  it("stamps the turn's NEW input tokens, never its re-read cached prefix", () => {
+    // Arrange + Act — the fixture's 900,000 cache read dwarfs its 100,000 of
+    // new input, which is the inflation the footer used to report.
+    const html = finalResponseHtml(1_000);
+    // Assert
+    expect(html).toContain(`<span class="turn-in">100k in</span>`);
+    expect(html).not.toContain("1.0M");
+  });
+
+  it("drops the token half when the turn fed the model no new input", () => {
+    // Arrange — a turn served entirely from cache spent nothing new.
+    const answer: TextItem = {
+      kind: "text",
+      blockId: "b1",
+      messageId: "m1",
+      text: "done",
+      done: true,
+      ts: TEXT_TS,
+    };
+    const closing: ResultItem = {
+      ...result("success"),
+      usage: {
+        input_tokens: 0,
+        output_tokens: 4,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 900_000,
+      },
+    };
+    const finals = finalResponses([userTurnAt(9, 0), answer, closing]);
+    // Act
+    const html = renderItem(answer, undefined, finals);
+    // Assert — a `0 in` would claim a measurement the turn never made.
+    expect(html).not.toContain("turn-in");
   });
 });
 
@@ -2629,7 +2642,6 @@ describe("itemKey", () => {
       kind: "result",
       subtype: "success",
       durationMs: 1,
-      sincePrevFinalMs: 1,
       numTurns: 1,
       totalCostUsd: 0,
       usage: { input_tokens: 0, output_tokens: 0 },
@@ -4821,7 +4833,6 @@ describe("unsupported slash-command card", () => {
       kind: "result",
       subtype: "success",
       durationMs: 1,
-      sincePrevFinalMs: 1,
       numTurns: 1,
       totalCostUsd: 0,
       usage: { input_tokens: 0, output_tokens: 0 },

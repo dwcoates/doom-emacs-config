@@ -207,13 +207,6 @@ export interface ResultItem extends FeedOrderedItem {
   kind: "result";
   subtype: ResultSubtype;
   durationMs: number;
-  /**
-   * How long the turn ran measured from the PREVIOUS turn boundary of the
-   * session, or from this turn's own start for the session's first one. This
-   * is what the final-response bubble's chip shows, as against `durationMs`
-   * (the SDK's whole-task figure) which the standalone chip still shows.
-   */
-  sincePrevFinalMs: number;
   numTurns: number;
   totalCostUsd: number;
   usage: Usage;
@@ -437,13 +430,6 @@ export interface StoreState {
    */
   turnStartedAt: string | null;
   /**
-   * The stamp of the session's most recent turn BOUNDARY, or `null` before the
-   * first one. The anchor the final-response chip measures its elapsed time
-   * from. Carried on pre-rendered `result` items from the daemon; the store no
-   * longer derives it.
-   */
-  lastFinalResponseAt: string | null;
-  /**
    * The session's context size. Fed from `SessionView.totalTokens`. A
    * `/clear` or compaction that used to revert this to `null` is now the
    * daemon's to resolve.
@@ -542,7 +528,6 @@ function initialState(): StoreState {
     queued: [],
     turnInFlight: false,
     turnStartedAt: null,
-    lastFinalResponseAt: null,
     contextTokens: null,
     resultUsage: null,
     turnUsage: new Map(),

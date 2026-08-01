@@ -6,6 +6,7 @@ import {
   formatTokens,
   tokensMenuHtml,
   tokensOverlayHtml,
+  turnInputTokens,
 } from "../src/tokens.js";
 
 /** A top-level usage payload, defaulted small and fully dimensioned. */
@@ -236,5 +237,35 @@ describe("tokensOverlayHtml per-model sections", () => {
     const d = data({ models: { a: modelUsage({ cost_usd: 1.2345 }) } });
     // Act + Assert
     expect(rows(tokensOverlayHtml(d))).toContain("cost|$1.23");
+  });
+});
+
+describe("turnInputTokens: the NEW input a turn fed the model", () => {
+  it("sums the uncached input and the cache write", () => {
+    // Arrange
+    const u = usage({ input_tokens: 100, cache_creation_input_tokens: 20 });
+    // Act + Assert
+    expect(turnInputTokens(u)).toBe(120);
+  });
+
+  it("excludes the cache read, which is the standing prefix presented again", () => {
+    // Arrange — a re-read prefix dwarfing everything the turn actually added.
+    const u = usage({ input_tokens: 100, cache_creation_input_tokens: 20, cache_read_input_tokens: 900_000 });
+    // Act + Assert
+    expect(turnInputTokens(u)).toBe(120);
+  });
+
+  it("excludes the output tokens, this being an INPUT figure", () => {
+    // Arrange
+    const u = usage({ input_tokens: 100, cache_creation_input_tokens: 20, output_tokens: 5_000 });
+    // Act + Assert
+    expect(turnInputTokens(u)).toBe(120);
+  });
+
+  it("treats an absent cache-write field as no cache write", () => {
+    // Arrange — the dimension is optional on the wire.
+    const u: Usage = { input_tokens: 100, output_tokens: 40 };
+    // Act + Assert
+    expect(turnInputTokens(u)).toBe(100);
   });
 });

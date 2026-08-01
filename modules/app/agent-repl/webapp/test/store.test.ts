@@ -129,7 +129,6 @@ function resultItem(over: Partial<ResultItem> = {}): ResultItem {
     kind: "result",
     subtype: "success",
     durationMs: 10,
-    sincePrevFinalMs: 10,
     numTurns: 1,
     totalCostUsd: 0.1,
     usage: { input_tokens: 1, output_tokens: 1 },

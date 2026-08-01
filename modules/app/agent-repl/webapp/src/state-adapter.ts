@@ -1178,9 +1178,6 @@ function resultItemFrom(r: Obj): ResultItem {
     kind: "result",
     subtype: resultSubtype(pstr(r, "subtype")),
     durationMs: pnum(r, "durationMs"),
-    // The cross-turn deltas are session state this per-item translator does not
-    // hold; the store re-derives them (matching the old translate.go contract).
-    sincePrevFinalMs: 0,
     numTurns: pnum(r, "numTurns"),
     totalCostUsd: pnum(r, "totalCostUsd"),
     usage: usageFrom(pobj(r, "usage")),

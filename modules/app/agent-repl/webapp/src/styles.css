@@ -1065,7 +1065,7 @@ pre {
 .bubble.user .bubble-body > :first-child { margin-top: 0; }
 .bubble.user .bubble-body > :last-child { margin-bottom: 0; }
 /* The bubble's top-right corner: a flex column stacking a final response's
-   stats (duration, context delta) above its timestamp. Smaller and quieter
+   stats (duration, input tokens) above its timestamp. Smaller and quieter
    than the body text, lifted clear of its first line. Negative top/right
    margins pull it toward the corner — closer than the body padding alone
    would, but each margin's magnitude stays under the padding it eats into
@@ -1089,12 +1089,15 @@ pre {
   min-width: 1.75rem;
   min-height: 1.1rem;
 }
-/* The two corner stats in the topbar's own datapoint colors, so the turn's
-   duration and context delta read as the same figures the header shows:
-   duration in the time blue, the token delta in the token amber. */
+/* The two corner stats in the progress footer's own datapoint colors, because
+   they ARE the footer's two turn-scoped figures once the turn has landed (see
+   `resultMeta`): the duration in the time blue the footer's clock cell wears,
+   the turn's input tokens in the token amber its token cell wears. A reader
+   who watched the numbers climb in the footer finds the same two numbers, in
+   the same two colors, stamped on the answer they were counting toward. */
 .turn-meta .turn-dur { color: var(--info-time); }
-.turn-meta .turn-diff { color: var(--info-tokens); }
-/* The duration and the context delta share ONE size on this wrapper — a notch
+.turn-meta .turn-in { color: var(--info-tokens); }
+/* The duration and the token figure share ONE size on this wrapper — a notch
    below the corner's own 0.65rem — so the two figures always read at the same
    font and size as each other, just slightly smaller than the corner's dating
    text. Scoped to the stats wrapper (not `.turn-meta`) so the hover timestamp

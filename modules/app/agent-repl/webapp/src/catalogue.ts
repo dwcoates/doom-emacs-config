@@ -129,7 +129,6 @@ function successResult(): ResultItem {
     kind: "result",
     subtype: "success",
     durationMs: 5230,
-    sincePrevFinalMs: 5230,
     numTurns: 3,
     totalCostUsd: 0.12,
     usage: { input_tokens: 1200, output_tokens: 300 },

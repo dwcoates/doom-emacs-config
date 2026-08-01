@@ -618,7 +618,6 @@ describe("result arm", () => {
       kind: "result",
       subtype: "success",
       durationMs: 100,
-      sincePrevFinalMs: 0,
       numTurns: 1,
       totalCostUsd: 0.1,
       usage: { input_tokens: 10, output_tokens: 5, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
