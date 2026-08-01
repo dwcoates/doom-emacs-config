@@ -3,39 +3,22 @@ package postmerge
 import (
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"claude-repld/internal/gitexec"
 )
 
 // --- git fixtures -------------------------------------------------------
 
-// gitFixtureEnv removes the repository bindings a parent git hook exports.
-// Without this boundary a scratch `git init` or `git commit` can operate on the
-// CALLER's real repository instead of the temporary one.
-func gitFixtureEnv() []string {
-	env := make([]string, 0, len(os.Environ()))
-	for _, entry := range os.Environ() {
-		switch {
-		case strings.HasPrefix(entry, "GIT_DIR="),
-			strings.HasPrefix(entry, "GIT_WORK_TREE="),
-			strings.HasPrefix(entry, "GIT_INDEX_FILE="),
-			strings.HasPrefix(entry, "GIT_OBJECT_DIRECTORY="),
-			strings.HasPrefix(entry, "GIT_COMMON_DIR="),
-			strings.HasPrefix(entry, "GIT_PREFIX="):
-		default:
-			env = append(env, entry)
-		}
-	}
-	return env
-}
-
 func gitRun(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	full := append([]string{"-c", "core.hooksPath=/dev/null", "-C", dir}, args...)
-	cmd := exec.Command("git", full...)
-	cmd.Env = gitFixtureEnv()
+	// The same env-stripped builder the probe uses: without that boundary a
+	// scratch `git init` or `git commit` can operate on the CALLER's real
+	// repository instead of the temporary one.
+	full := append([]string{"-c", "core.hooksPath=/dev/null"}, args...)
+	cmd := gitexec.Command(context.Background(), dir, full...)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %v in %s: %v\n%s", args, dir, err, out)
 	}

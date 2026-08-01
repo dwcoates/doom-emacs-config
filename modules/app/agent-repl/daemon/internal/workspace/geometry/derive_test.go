@@ -179,30 +179,26 @@ func TestNewDeriverRefusesWithoutALogger(t *testing.T) {
 	}
 }
 
-func TestGitCmdStripsInheritedRepositoryBindings(t *testing.T) {
-	// Arrange — a daemon launched from a git hook inherits these; an inherited
-	// binding would make every workspace derive the HOOK's repository.
-	t.Setenv("GIT_DIR", "/somewhere/else/.git")
-	t.Setenv("GIT_WORK_TREE", "/somewhere/else")
-	t.Setenv("GIT_INDEX_FILE", "/somewhere/else/.git/index")
+// The env-shape assertions on the shared builder live in internal/gitexec.
+// What geometry owns is that its OWN git path goes through that builder: a
+// daemon launched from a git hook inherits GIT_DIR, and an inherited binding
+// would make every workspace derive the HOOK's repository.
+func TestDeriveIgnoresAnInheritedGitDir(t *testing.T) {
+	// Arrange — a real fixture repo, plus a hook-shaped leak pointing elsewhere.
+	main := newRepo(t)
+	want := runGit(t, main, "rev-parse", "--abbrev-ref", "HEAD")
+	t.Setenv("GIT_DIR", filepath.Join(t.TempDir(), "elsewhere", ".git"))
+	t.Setenv("GIT_WORK_TREE", filepath.Join(t.TempDir(), "elsewhere"))
 
 	// Act.
-	cmd := gitCmd(context.Background(), t.TempDir(), "status")
+	got, err := gitCapture(context.Background(), main, "rev-parse", "--abbrev-ref", "HEAD")
 
 	// Assert.
-	sawPath := false
-	for _, entry := range cmd.Env {
-		for _, banned := range []string{"GIT_DIR=", "GIT_WORK_TREE=", "GIT_INDEX_FILE=", "GIT_OBJECT_DIRECTORY=", "GIT_COMMON_DIR=", "GIT_PREFIX="} {
-			if strings.HasPrefix(entry, banned) {
-				t.Fatalf("gitCmd env kept %q; derivation would target another repository", entry)
-			}
-		}
-		if strings.HasPrefix(entry, "PATH=") {
-			sawPath = true
-		}
+	if err != nil {
+		t.Fatalf("gitCapture err = %v; the inherited GIT_DIR reached git", err)
 	}
-	if !sawPath {
-		t.Fatal("gitCmd env dropped PATH; only repository bindings may be stripped")
+	if got != want {
+		t.Fatalf("gitCapture branch = %q, want %q from the -C directory's repository", got, want)
 	}
 }
 
