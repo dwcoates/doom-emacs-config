@@ -108,7 +108,7 @@ environment, which today means one for :bare-metal."
 (defvar agent-repl--workspaces (make-hash-table :test 'equal)
   "Hash table mapping workspace name -> state plist.
 Keys: :frontend-buffer :input-buffer
-      :prefix-counter :agent-state :repl-state
+      :agent-state :repl-state
       :worktree-p :project-dir
       :active-env :bare-metal :fork-session-id
       :ready-timer :priority

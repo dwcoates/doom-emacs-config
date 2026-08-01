@@ -175,7 +175,7 @@ keeps that section's rendering unchanged."
   "A live workspace with no `:project-dir' is skipped (with a log)."
   (agent-repl-test--with-clean-state
     (agent-repl-test--sidebar-ws "ws" "/tmp/ws")
-    (agent-repl--ws-put "dirless" :prefix-counter 1)
+    (agent-repl--ws-put "dirless" :agent-state :idle)
     (should (equal (agent-repl--sidebar-entries)
                    '(("ws" . "/tmp/ws"))))))
 

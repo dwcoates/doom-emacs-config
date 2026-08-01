@@ -14,54 +14,43 @@
                                             (or load-file-name buffer-file-name)))
       nil t)
 
-;;;; ---- Tests: Prefix injection counter (migrated) ----
+;;;; ---- Tests: the metaprompt is never injected automatically ----
 
-(ert-deftest agent-repl-test-prefix-injection-counter ()
-  "Prefix should be injected when counter mod period is 0."
+(ert-deftest agent-repl-test-ordinary-send-carries-no-directive ()
+  "An ordinary send prepends nothing: the metaprompt is the system prompt.
+The shim installs it at spawn (agent-shim/claude/shim/src/metaprompt.ts),
+so no send has to carry it."
   (agent-repl-test--with-clean-state
     (let ((agent-repl-skip-permissions t)
-          (agent-repl-prefix-period 3)
           (agent-repl-command-prefix "TEST")
           (agent-repl--command-prefix "PREFIX: "))
-      (agent-repl-test--with-temp-buffer " *test-prefix*"
-        (let ((ws "test-ws"))
-          (agent-repl--ws-put ws :input-buffer (current-buffer))
-          (agent-repl--ws-put ws :prefix-counter 0)
-          (insert "hello")
-          ;; Counter 0 mod 3 = 0 -> prefix (bracketed as a meta span)
-          (should (string-prefix-p (agent-repl--meta-wrap "PREFIX: ")
-                                   (agent-repl--prepare-input ws "hello")))
-          ;; Counter 1 mod 3 != 0 -> no prefix
-          (agent-repl--ws-put ws :prefix-counter 1)
-          (should-not (string-prefix-p (agent-repl--meta-wrap "PREFIX: ")
-                                       (agent-repl--prepare-input ws "hello")))
-          ;; Counter 3 mod 3 = 0 -> prefix again
-          (agent-repl--ws-put ws :prefix-counter 3)
-          (should (string-prefix-p (agent-repl--meta-wrap "PREFIX: ")
-                                   (agent-repl--prepare-input ws "hello"))))))))
+      (should (equal (agent-repl--prepare-input "ws1" "hello") "hello")))))
 
-(ert-deftest agent-repl-test-prefix-counter-per-workspace ()
-  "Each workspace should maintain its own prefix counter independently."
+(ert-deftest agent-repl-test-repeated-sends-carry-no-directive ()
+  "No send in a run of them injects the directive — there is no period."
   (agent-repl-test--with-clean-state
-    ;; Set different counters for two workspaces
-    (agent-repl--ws-put "ws-a" :prefix-counter 7)
-    (agent-repl--ws-put "ws-b" :prefix-counter 42)
-    ;; They should be independent
-    (should (= (agent-repl--ws-get "ws-a" :prefix-counter) 7))
-    (should (= (agent-repl--ws-get "ws-b" :prefix-counter) 42))
-    ;; Mutating one should not affect the other
-    (agent-repl--ws-put "ws-a" :prefix-counter 8)
-    (should (= (agent-repl--ws-get "ws-b" :prefix-counter) 42))))
+    (let ((agent-repl-skip-permissions t)
+          (agent-repl-command-prefix "TEST")
+          (agent-repl--command-prefix "PREFIX: "))
+      (dotimes (_ 20)
+        (should (equal (agent-repl--prepare-input "ws1" "hello") "hello"))))))
+
+(ert-deftest agent-repl-test-forced-send-carries-the-directive ()
+  "The on-demand re-read is the ONLY path that prepends the directive."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl-skip-permissions t)
+          (agent-repl-command-prefix "TEST")
+          (agent-repl--command-prefix "PREFIX: "))
+      (should (string-prefix-p (agent-repl--meta-wrap "PREFIX: ")
+                               (agent-repl--prepare-input "ws1" "hello" t))))))
 
 ;;;; ---- Tests: Input preparation (migrated) ----
 
 (ert-deftest agent-repl-test-prepare-input-no-prefix-when-disabled ()
   "When `agent-repl-skip-permissions' is nil, `prepare-input' returns raw text."
   (agent-repl-test--with-clean-state
-    (let ((agent-repl-skip-permissions nil)
-          (agent-repl-prefix-period 1))
-      (agent-repl--ws-put "ws1" :prefix-counter 0)
-      (should (equal (agent-repl--prepare-input "ws1" "raw text") "raw text")))))
+    (let ((agent-repl-skip-permissions nil))
+      (should (equal (agent-repl--prepare-input "ws1" "raw text" t) "raw text")))))
 
 ;;;; ---- Tests: Per-workspace metaprompt path resolution ----
 
@@ -133,16 +122,14 @@ worktree metaprompt, not the load-time canonical copy."
     (let* ((root (make-temp-file "agent-repl-mp-" t))
            (sub (expand-file-name "modules/app/agent-repl" root))
            (file (expand-file-name "metaprompt.md" sub))
-           (agent-repl-skip-permissions t)
-           (agent-repl-prefix-period 1))
+           (agent-repl-skip-permissions t))
       (unwind-protect
           (progn
             (make-directory sub t)
             (with-temp-file file (insert "body"))
             (agent-repl--ws-put "ws1" :project-dir root)
-            (agent-repl--ws-put "ws1" :prefix-counter 0)
             (should (string-match-p (regexp-quote file)
-                                    (agent-repl--prepare-input "ws1" "hello"))))
+                                    (agent-repl--prepare-input "ws1" "hello" t))))
         (delete-directory root t)))))
 
 ;;;; ---- Tests: Composite state functions (migrated) ----
@@ -281,15 +268,6 @@ worktree metaprompt, not the load-time canonical copy."
                          '("wait for it"))))))))
 
 ;;;; ---- Tests: Bug regressions (migrated) ----
-
-(ert-deftest agent-repl-test-bug7-prefix-counter-persists ()
-  "Bug 7: prefix counter should persist in the workspaces hash across lookups."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :prefix-counter 42)
-    (should (= (agent-repl--ws-get "ws1" :prefix-counter) 42))
-    ;; Incrementing via the dedicated helper should work correctly
-    (agent-repl--increment-prefix-counter "ws1")
-    (should (= (agent-repl--ws-get "ws1" :prefix-counter) 43))))
 
 ;;;; ---- Tests: command-prefix content ----
 
@@ -1246,53 +1224,46 @@ structured diagnostic context passed to that helper."
 
 ;;;; ---- Tests: should-prepend-metaprompt-p ----
 
-(ert-deftest agent-repl-test-should-prepend-metaprompt-p-all-conditions ()
-  "Test the full matrix of conditions for metaprompt prepending."
-  ;; Enabled + prefix set + non-exempt + counter aligned -> t
+(ert-deftest agent-repl-test-should-prepend-nil-without-force ()
+  "Without an explicit force, the directive is never prepended."
   (let ((agent-repl-skip-permissions t)
         (agent-repl-command-prefix "TEST")
-        (agent-repl--command-prefix "PREFIX: ")
-        (agent-repl-prefix-period 3))
-    (should (agent-repl--should-prepend-metaprompt-p "hello" 0))
-    ;; Counter not aligned -> nil
-    (should-not (agent-repl--should-prepend-metaprompt-p "hello" 1))
-    (should-not (agent-repl--should-prepend-metaprompt-p "hello" 2))
-    ;; Counter aligned again -> t
-    (should (agent-repl--should-prepend-metaprompt-p "hello" 6))
-    ;; Force bypasses counter
-    (should (agent-repl--should-prepend-metaprompt-p "hello" 1 t))
-    (should (agent-repl--should-prepend-metaprompt-p "hello" 2 t))))
+        (agent-repl--command-prefix "PREFIX: "))
+    (should-not (agent-repl--should-prepend-metaprompt-p "hello" nil))))
+
+(ert-deftest agent-repl-test-should-prepend-t-with-force ()
+  "An explicit force prepends the directive."
+  (let ((agent-repl-skip-permissions t)
+        (agent-repl-command-prefix "TEST")
+        (agent-repl--command-prefix "PREFIX: "))
+    (should (agent-repl--should-prepend-metaprompt-p "hello" t))))
 
 (ert-deftest agent-repl-test-should-prepend-nil-when-skip-permissions-off ()
-  "Returns nil when `agent-repl-skip-permissions' is nil."
+  "Returns nil when `agent-repl-skip-permissions' is nil, even forced."
   (let ((agent-repl-skip-permissions nil)
-        (agent-repl-command-prefix "TEST")
-        (agent-repl-prefix-period 1))
-    (should-not (agent-repl--should-prepend-metaprompt-p "hello" 0))))
+        (agent-repl-command-prefix "TEST"))
+    (should-not (agent-repl--should-prepend-metaprompt-p "hello" t))))
 
 (ert-deftest agent-repl-test-should-prepend-nil-when-no-command-prefix ()
-  "Returns nil when `agent-repl-command-prefix' is nil."
+  "Returns nil when `agent-repl-command-prefix' is nil, even forced."
   (let ((agent-repl-skip-permissions t)
-        (agent-repl-command-prefix nil)
-        (agent-repl-prefix-period 1))
-    (should-not (agent-repl--should-prepend-metaprompt-p "hello" 0))))
+        (agent-repl-command-prefix nil))
+    (should-not (agent-repl--should-prepend-metaprompt-p "hello" t))))
 
 (ert-deftest agent-repl-test-should-prepend-nil-for-exempt-strings ()
-  "Returns nil for exempt slash commands even when conditions are met."
+  "Returns nil for exempt slash commands even when forced."
   (let ((agent-repl-skip-permissions t)
-        (agent-repl-command-prefix "TEST")
-        (agent-repl-prefix-period 1))
+        (agent-repl-command-prefix "TEST"))
     (dolist (exempt '("/clear" "/usage" "/login" "/logout"))
-      (should-not (agent-repl--should-prepend-metaprompt-p exempt 0)))))
+      (should-not (agent-repl--should-prepend-metaprompt-p exempt t)))))
 
 (ert-deftest agent-repl-test-should-prepend-nil-for-bare-numerals ()
-  "Returns nil for bare numeral inputs (e.g. '1', '42')."
+  "Returns nil for bare numeral inputs (e.g. '1', '42') even when forced."
   (let ((agent-repl-skip-permissions t)
-        (agent-repl-command-prefix "TEST")
-        (agent-repl-prefix-period 1))
-    (should-not (agent-repl--should-prepend-metaprompt-p "1" 0))
-    (should-not (agent-repl--should-prepend-metaprompt-p "42" 0))
-    (should-not (agent-repl--should-prepend-metaprompt-p "0" 0))))
+        (agent-repl-command-prefix "TEST"))
+    (should-not (agent-repl--should-prepend-metaprompt-p "1" t))
+    (should-not (agent-repl--should-prepend-metaprompt-p "42" t))
+    (should-not (agent-repl--should-prepend-metaprompt-p "0" t))))
 
 ;;;; ---- Tests: slash-command-p ----
 
@@ -1376,38 +1347,22 @@ still gets the metaprompt."
 ;;;; ---- Tests: prepare-input ----
 
 (ert-deftest agent-repl-test-prepare-input-force-metaprompt ()
-  "Force-metaprompt should prepend regardless of counter."
+  "Force-metaprompt prepends the directive."
   (agent-repl-test--with-clean-state
     (let ((agent-repl-skip-permissions t)
-          (agent-repl-prefix-period 3)
           (agent-repl-command-prefix "TEST")
           (agent-repl--command-prefix "PREFIX: "))
-      ;; Counter 1 normally would not prepend with period 3
-      (agent-repl--ws-put "ws1" :prefix-counter 1)
       (should (string-prefix-p (agent-repl--meta-wrap "PREFIX: ")
                                (agent-repl--prepare-input "ws1" "hello" t))))))
 
-(ert-deftest agent-repl-test-prepare-input-nil-counter ()
-  "When counter is nil (fresh workspace), should treat as 0."
-  (agent-repl-test--with-clean-state
-    (let ((agent-repl-skip-permissions t)
-          (agent-repl-prefix-period 3)
-          (agent-repl-command-prefix "TEST")
-          (agent-repl--command-prefix "PREFIX: "))
-      ;; No :prefix-counter set -> defaults to 0 -> 0 mod 3 = 0 -> prepend
-      (should (string-prefix-p (agent-repl--meta-wrap "PREFIX: ")
-                               (agent-repl--prepare-input "ws1" "hello"))))))
-
 (ert-deftest agent-repl-test-prepare-input-exempt-input ()
-  "Exempt inputs should not get the prefix even when counter is aligned."
+  "Exempt inputs get no prefix even when the send is forced."
   (agent-repl-test--with-clean-state
     (let ((agent-repl-skip-permissions t)
-          (agent-repl-prefix-period 1)
           (agent-repl-command-prefix "TEST")
           (agent-repl--command-prefix "PREFIX: "))
-      (agent-repl--ws-put "ws1" :prefix-counter 0)
-      (should (equal (agent-repl--prepare-input "ws1" "/clear") "/clear"))
-      (should (equal (agent-repl--prepare-input "ws1" "42") "42")))))
+      (should (equal (agent-repl--prepare-input "ws1" "/clear" t) "/clear"))
+      (should (equal (agent-repl--prepare-input "ws1" "42" t) "42")))))
 
 ;;;; ---- Tests: workspace-command detection + source-ws tag injection ----
 ;;
@@ -1467,20 +1422,18 @@ command when the metaprompt is not due to fire."
                      "/workspace-generation do it [source-ws:ws1 path:/repo/root]")))))
 
 (ert-deftest agent-repl-test-prepare-input-wor-command-gets-tag-not-metaprompt ()
-  "A /wor slash command gets its source-ws tag but NEVER the metaprompt,
-even when the prefix counter would otherwise trigger the metaprompt.
+  "A /wor slash command gets its source-ws tag but NEVER the directive,
+even on a forced send.
 
 `/workspace-generation' is a slash command, and slash commands run a skill
-that owns its own behavior, so the harness metaprompt is never prepended;
+that owns its own behavior, so the read-directive is never prepended;
 the source-ws tag the skill actually needs is still appended."
   (agent-repl-test--with-clean-state
     (let ((agent-repl-skip-permissions t)
-          (agent-repl-prefix-period 1)
           (agent-repl-command-prefix "TEST")
           (agent-repl--command-prefix "PREFIX: "))
-      (agent-repl--ws-put "ws1" :prefix-counter 0)
       (agent-repl--ws-put "ws1" :project-dir "/repo/root")
-      (should (equal (agent-repl--prepare-input "ws1" "/workspace-generation do it")
+      (should (equal (agent-repl--prepare-input "ws1" "/workspace-generation do it" t)
                      "/workspace-generation do it [source-ws:ws1 path:/repo/root]")))))
 
 (ert-deftest agent-repl-test-send-injects-source-ws-into-dispatched-input-but-not-raw ()
@@ -1510,21 +1463,6 @@ saved to history) stays untagged."
           ;; History records the untagged raw, not the tagged input.
           (should (equal agent-repl--input-history
                          '("/workspace-generation do the thing"))))))))
-
-;;;; ---- Tests: increment-prefix-counter ----
-
-(ert-deftest agent-repl-test-increment-prefix-counter-from-nil ()
-  "Incrementing from nil should yield 1."
-  (agent-repl-test--with-clean-state
-    (agent-repl--increment-prefix-counter "ws1")
-    (should (= (agent-repl--ws-get "ws1" :prefix-counter) 1))))
-
-(ert-deftest agent-repl-test-increment-prefix-counter-from-existing ()
-  "Incrementing from existing value should add 1."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :prefix-counter 10)
-    (agent-repl--increment-prefix-counter "ws1")
-    (should (= (agent-repl--ws-get "ws1" :prefix-counter) 11))))
 
 ;;;; ---- Tests: read-input-buffer ----
 
@@ -1633,46 +1571,26 @@ saved to history) stays untagged."
 
 ;;;; ---- Tests: posthooks ----
 
-(ert-deftest agent-repl-test-posthook-reset-prefix-counter ()
-  "`/clear' posthook resets the prefix counter to 0."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :prefix-counter 42)
-    (agent-repl--posthook-reset-prefix-counter "ws1" "/clear")
-    (should (= (agent-repl--ws-get "ws1" :prefix-counter) 0))))
-
-(ert-deftest agent-repl-test-posthook-reset-prefix-counter-fires-next-send ()
-  "After `/clear' reset, the next send re-injects the metaprompt.
-Counter 0 satisfies the firing condition `(zerop (mod counter period))',
-mirroring the first send of a freshly-initialized workspace."
-  (agent-repl-test--with-clean-state
-    (let ((agent-repl-skip-permissions t)
-          (agent-repl-command-prefix "PREFIX")
-          (agent-repl-prefix-period 3))
-      (agent-repl--ws-put "ws1" :prefix-counter 42)
-      (agent-repl--posthook-reset-prefix-counter "ws1" "/clear")
-      (let ((counter (agent-repl--ws-get "ws1" :prefix-counter)))
-        (should (agent-repl--should-prepend-metaprompt-p "hello" counter))))))
-
 (ert-deftest agent-repl-test-run-send-posthooks-matches-clear ()
   "`agent-repl--run-send-posthooks' fires the /clear hook."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :prefix-counter 42)
+    (agent-repl--ws-set-agent-state "ws1" :idle)
     (agent-repl--run-send-posthooks "ws1" "/clear")
-    (should (= (agent-repl--ws-get "ws1" :prefix-counter) 0))))
+    (should (eq (agent-repl--ws-get "ws1" :agent-state) :done))))
 
 (ert-deftest agent-repl-test-run-send-posthooks-no-match ()
   "Posthooks should not fire for non-matching input."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :prefix-counter 42)
+    (agent-repl--ws-set-agent-state "ws1" :idle)
     (agent-repl--run-send-posthooks "ws1" "hello")
-    (should (= (agent-repl--ws-get "ws1" :prefix-counter) 42))))
+    (should (eq (agent-repl--ws-get "ws1" :agent-state) :idle))))
 
 (ert-deftest agent-repl-test-run-send-posthooks-trailing-whitespace ()
   "Posthook matching should trim trailing whitespace."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :prefix-counter 42)
+    (agent-repl--ws-set-agent-state "ws1" :idle)
     (agent-repl--run-send-posthooks "ws1" "/clear  ")
-    (should (= (agent-repl--ws-get "ws1" :prefix-counter) 0))))
+    (should (eq (agent-repl--ws-get "ws1" :agent-state) :done))))
 
 (ert-deftest agent-repl-test-posthook-mark-done-sets-done ()
   "`agent-repl--posthook-mark-done' sets :agent-state :done for WS."
@@ -1757,7 +1675,7 @@ a hybrid-UI or gui-only workspace's send."
         (agent-repl--do-send "ws1" "input" "raw"))
       (should (equal dispatch-args '("ws1" "input" "raw" nil))))))
 
-;;;; ---- Tests: fire-metaprompt-read (standalone re-read, e.g. post-/compact) ----
+;;;; ---- Tests: fire-metaprompt-read (explicit on-demand re-read) ----
 
 (ert-deftest agent-repl-test-fire-metaprompt-read-dispatches-wrapped-directive ()
   "`agent-repl--fire-metaprompt-read' sends the meta-wrapped read-directive.
@@ -1774,33 +1692,19 @@ empty so the gui draws no bubble and skips the prompt summary."
       (should (equal send-args
                      (list "ws1" (agent-repl--meta-wrap "READ-DIRECTIVE") ""))))))
 
-(ert-deftest agent-repl-test-fire-metaprompt-read-resets-prefix-counter ()
-  "`agent-repl--fire-metaprompt-read' resets the prefix counter to 0.
-Realigns periodic re-injection to a fresh period from this send."
-  (agent-repl-test--with-clean-state
-    (let ((agent-repl-skip-permissions t)
-          (agent-repl-command-prefix "BODY")
-          (agent-repl--command-prefix "READ-DIRECTIVE"))
-      (agent-repl--ws-put "ws1" :prefix-counter 9)
-      (cl-letf (((symbol-function 'agent-repl--do-send) #'ignore))
-        (agent-repl--fire-metaprompt-read "ws1"))
-      (should (= (agent-repl--ws-get "ws1" :prefix-counter) 0)))))
-
 (ert-deftest agent-repl-test-fire-metaprompt-read-noop-when-skip-permissions-off ()
-  "`agent-repl--fire-metaprompt-read' is a no-op when the metaprompt is disabled.
-`agent-repl-skip-permissions' nil means the metaprompt system is off, so the
-read-directive must not be re-established behind the user's back."
+  "`agent-repl--fire-metaprompt-read' is a no-op when the re-read is disabled.
+`agent-repl-skip-permissions' nil turns the on-demand re-read off, so no
+directive is sent behind the user's back."
   (agent-repl-test--with-clean-state
     (let ((sent nil)
           (agent-repl-skip-permissions nil)
           (agent-repl-command-prefix "BODY")
           (agent-repl--command-prefix "READ-DIRECTIVE"))
-      (agent-repl--ws-put "ws1" :prefix-counter 9)
       (cl-letf (((symbol-function 'agent-repl--do-send)
                  (lambda (&rest _) (setq sent t))))
         (agent-repl--fire-metaprompt-read "ws1"))
-      (should-not sent)
-      (should (= (agent-repl--ws-get "ws1" :prefix-counter) 9)))))
+      (should-not sent))))
 
 (ert-deftest agent-repl-test-fire-metaprompt-read-noop-when-no-command-prefix ()
   "`agent-repl--fire-metaprompt-read' is a no-op when `agent-repl-command-prefix' is nil.
@@ -2217,10 +2121,9 @@ counterparts) were removed, so the defconst that declared them is gone."
   ;; This test documents that behavior.
   (let ((agent-repl-skip-permissions t)
         (agent-repl-command-prefix "")
-        (agent-repl--command-prefix "PREFIX: ")
-        (agent-repl-prefix-period 1))
-    ;; "" is truthy in Emacs, so the function returns t
-    (should (agent-repl--should-prepend-metaprompt-p "hello" 0))))
+        (agent-repl--command-prefix "PREFIX: "))
+    ;; "" is truthy in Emacs, so a forced send still returns t
+    (should (agent-repl--should-prepend-metaprompt-p "hello" t))))
 
 ;;; prepare-input: empty raw input
 
@@ -2228,13 +2131,11 @@ counterparts) were removed, so the defconst that declared them is gone."
   "`agent-repl--prepare-input' with empty raw input: empty string is not exempt."
   (agent-repl-test--with-clean-state
     (let ((agent-repl-skip-permissions t)
-          (agent-repl-prefix-period 1)
           (agent-repl-command-prefix "TEST")
           (agent-repl--command-prefix "PREFIX: "))
-      (agent-repl--ws-put "ws1" :prefix-counter 0)
       ;; Empty string is not in exempt list and doesn't match numeral regex
-      ;; So it gets the prefix prepended (with "\n\n" separator)
-      (should (equal (agent-repl--prepare-input "ws1" "")
+      ;; So a forced send prepends the prefix (with "\n\n" separator)
+      (should (equal (agent-repl--prepare-input "ws1" "" t)
                      (concat (agent-repl--meta-wrap "PREFIX: ") "\n\n"))))))
 
 ;;; run-send-posthooks: multiple hooks matching same input
@@ -2256,10 +2157,10 @@ counterparts) were removed, so the defconst that declared them is gone."
 (ert-deftest agent-repl-test-run-send-posthooks-empty-input ()
   "Empty input should not match /clear pattern."
   (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :prefix-counter 42)
+    (agent-repl--ws-set-agent-state "ws1" :idle)
     (agent-repl--run-send-posthooks "ws1" "")
-    ;; Counter should be unchanged -- no hooks matched
-    (should (= (agent-repl--ws-get "ws1" :prefix-counter) 42))))
+    ;; State unchanged -- no hooks matched
+    (should (eq (agent-repl--ws-get "ws1" :agent-state) :idle))))
 
 ;;; send: force-metaprompt path
 
@@ -2414,10 +2315,6 @@ Mirrors the append-to-input-buffer dead-buffer case."
 (ert-deftest agent-repl-test-skip-permissions-default ()
   "`agent-repl-skip-permissions' should default to t."
   (should (eq (default-value 'agent-repl-skip-permissions) t)))
-
-(ert-deftest agent-repl-test-prefix-period-default ()
-  "`agent-repl-prefix-period' should default to 14."
-  (should (= (default-value 'agent-repl-prefix-period) 14)))
 
 (ert-deftest agent-repl-test-command-prefix-contains-text ()
   "`agent-repl--command-prefix' should contain the plain read-directive text.

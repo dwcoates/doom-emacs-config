@@ -473,9 +473,9 @@ and execute autonomously without waiting for confirmation.  The commit
 policy (commit freely and often, tests pass before each commit, no
 other mutating git operations without explicit permission) used to
 live in this prefix but has been migrated to the metaprompt at
-`agent-repl-metaprompt-file', which the spawned agent reads on its
-first send via `agent-repl--command-prefix' — duplicating the policy
-here would only risk the two sources drifting out of sync.")
+`agent-repl-metaprompt-file', which the shim installs as the spawned
+session's system prompt — duplicating the policy here would only risk
+the two sources drifting out of sync.")
 
 (defun agent-repl--build-preemptive-prompt (raw-prompt &optional suffix)
   "Compose the first message sent to a spawned workspace agent.
@@ -487,9 +487,9 @@ Everything the user did NOT type — the autonomous-execution preamble
 and SUFFIX — is bracketed as a harness-injected span
 \(`agent-repl--meta-wrap'), so the gui frontend renders the user-turn
 bubble as RAW-PROMPT alone while the agent still receives the whole
-composed message verbatim.  The read-directive pointing at the
-metaprompt is bracketed the same way, at its own injection point in
-`agent-repl--prepare-input'."
+composed message verbatim.  The metaprompt itself is NOT injected here
+or anywhere else in this composition: it is the session's system
+prompt (agent-shim/claude/shim/src/metaprompt.ts)."
   (concat (agent-repl--meta-wrap agent-repl--autonomous-prompt-prefix)
           raw-prompt
           (when suffix (agent-repl--meta-wrap suffix))))

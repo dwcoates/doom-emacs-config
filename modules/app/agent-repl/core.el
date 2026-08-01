@@ -366,7 +366,6 @@ structs) are represented compactly (live/dead, running/nil, present/nil)."
                (env      (plist-get plist :active-env))
                (fbuf     (plist-get plist :frontend-buffer))
                (ibuf     (plist-get plist :input-buffer))
-               (pcnt     (plist-get plist :prefix-counter))
                (wt       (plist-get plist :worktree-p))
                (fork     (plist-get plist :fork-session-id))
                (rtimer   (plist-get plist :ready-timer))
@@ -375,7 +374,7 @@ structs) are represented compactly (live/dead, running/nil, present/nil)."
                (pshow    (plist-get plist :pending-show-panels))
                (dprompts (plist-get plist :deferred-prompts)))
           (format (concat " {ws=%s id=%s dir=%s cst=%s rst=%s env=%s"
-                          " fe=%s in=%s cnt=%s"
+                          " fe=%s in=%s"
                           " wt=%s fork=%s"
                           " rtmr=%s pri=%s pend=%s pshow=%s defq=%s}")
                   ws
@@ -386,7 +385,6 @@ structs) are represented compactly (live/dead, running/nil, present/nil)."
                   (or env "-")
                   (if fbuf (if (buffer-live-p fbuf) "live" "dead") "-")
                   (if ibuf (if (buffer-live-p ibuf) "live" "dead") "-")
-                  (or pcnt "-")
                   (if wt "t" "-")
                   (or fork "-")
                   (if rtimer "t" "-")
@@ -1689,10 +1687,10 @@ COLOR is any Emacs color spec, e.g. a #rrggbb hex string."
 
 ;;; Harness-injected (meta) prompt spans
 ;;
-;; Every prompt agent-repl sends carries text the USER never typed: the
-;; periodic read-directive pointing at the metaprompt file (input.el), the
-;; autonomous-execution preamble, and the one-shot wrap-up gate
-;; (worktree.el).  The agent must receive all of it verbatim, but a human
+;; Some prompts agent-repl sends carry text the USER never typed: the
+;; autonomous-execution preamble, the one-shot wrap-up gate (worktree.el),
+;; and the on-demand read-directive pointing at the metaprompt file
+;; (input.el).  The agent must receive all of it verbatim, but a human
 ;; reading the conversation wants only their own words back.
 ;;
 ;; So each injected span is bracketed with inert HTML-comment markers at

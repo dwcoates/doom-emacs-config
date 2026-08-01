@@ -772,7 +772,6 @@ remaining) gui frontend, that is `agent-repl--gui-send-turn'
   (agent-repl-test--with-clean-state
     (let ((kickoff-args nil))
       (cl-letf (((symbol-function 'agent-repl--frontend-send-user-message) #'ignore)
-                ((symbol-function 'agent-repl--increment-prefix-counter) #'ignore)
                 ((symbol-function 'agent-repl--run-send-posthooks) #'ignore)
                 ((symbol-function 'agent-repl--kickoff-prompt-summary)
                  (lambda (ws raw) (setq kickoff-args (list ws raw)))))

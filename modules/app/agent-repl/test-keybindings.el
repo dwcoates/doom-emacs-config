@@ -574,37 +574,6 @@ this test doesn't pin."
     (agent-repl-debug/toggle-metaprompt)
     (should-not agent-repl-skip-permissions)))
 
-;;;; ---- Tests: agent-repl-debug/prefix-counter ----
-
-(ert-deftest agent-repl-test-prefix-counter-message ()
-  "prefix-counter should report counter, period, and sends until next metaprompt."
-  (agent-repl-test--with-clean-state
-    (let ((msg nil)
-          (agent-repl-prefix-period 5))
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
-                ((symbol-function 'message) (lambda (fmt &rest args)
-                                              (setq msg (apply #'format fmt args)))))
-        ;; No counter set yet -- should default to 0
-        (agent-repl-debug/prefix-counter)
-        (should (string-match-p "ws1" msg))
-        (should (string-match-p "counter: 0" msg))
-        (should (string-match-p "period: 5" msg))
-        (should (string-match-p "next metaprompt in: 5" msg))))))
-
-(ert-deftest agent-repl-test-prefix-counter-with-existing-count ()
-  "prefix-counter should compute remaining sends correctly."
-  (agent-repl-test--with-clean-state
-    (let ((msg nil)
-          (agent-repl-prefix-period 7))
-      (agent-repl--ws-put "ws1" :prefix-counter 10)
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
-                ((symbol-function 'message) (lambda (fmt &rest args)
-                                              (setq msg (apply #'format fmt args)))))
-        (agent-repl-debug/prefix-counter)
-        ;; 10 mod 7 = 3, so 7 - 3 = 4 sends until next
-        (should (string-match-p "counter: 10" msg))
-        (should (string-match-p "next metaprompt in: 4" msg))))))
-
 ;;;; ---- Tests: agent-repl-debug/--format-diagnostics ----
 
 (ert-deftest agent-repl-test-format-diagnostics-full ()
