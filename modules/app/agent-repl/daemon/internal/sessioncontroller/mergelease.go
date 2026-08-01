@@ -88,7 +88,8 @@ func (m *Manager) SubmitMergePrompt(ctx context.Context, workspace, requestID, t
 }
 
 // InterruptForMerge stops the workspace's in-flight turn so merge.Coordinator
-// can take its session over. It satisfies ssm.TurnInterrupter.
+// can take its session over. It is half of ssm.SessionAuthority; TeardownMerged
+// (mergedteardown.go) is the other.
 //
 // IT IS MACHINERY, NOT A USER'S STOP, and that is the whole reason it is not
 // Manager.Interrupt. The user did not ask for their turn to end — a merge

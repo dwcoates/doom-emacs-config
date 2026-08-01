@@ -112,6 +112,18 @@ type AgentShimConfig struct {
 	// the SAME instance to resolve merge_queue_position / merge_queue_depth: two
 	// queues over one directory would report a depth nobody is draining.
 	MergeQueue merge.DurableQueue
+	// MergeGeometry is THE daemon's workspace -> merge-geometry map, and it is
+	// what a BARE merge_workspace command (the only kind Emacs sends) resolves
+	// through. main always supplies it, opened over the shared state store.
+	//
+	// Nil is a loud unsupported capability, exactly as it is for the other
+	// optional handler bindings: every bare merge is refused with "the daemon's
+	// merge-geometry record is not wired". It is left optional because a caller
+	// that states all three coordinates on the command needs no map at all —
+	// that is how the integration suites drive merges against fixture
+	// repositories the daemon never created — and a nil map can therefore never
+	// silently produce a guessed target.
+	MergeGeometry MergeGeometrySource
 	// Logf is the daemon logger. Nil discards.
 	Logf func(string, ...any)
 	// LogVerbosef persists frequent lease-success diagnostics without forcing
@@ -245,14 +257,23 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 	if err != nil {
 		return nil, fmt.Errorf("server: build merge repo keyer: %w", err)
 	}
+	// The post-merge handoff: when a child workspace merges into a PARENT
+	// worktree, the parent's session is told, and any postprocessing prompt
+	// the child was created with runs there. See postmergehook.go for why both
+	// dependencies are derived from cfg rather than injected separately.
+	postMerge, err := buildPostMergeHook(cfg, logf)
+	if err != nil {
+		return nil, err
+	}
 	coordinator, err := merge.NewCoordinator(merge.CoordinatorConfig{
-		Logf:     logf,
-		Sink:     mergeSink{mgr},
-		Queue:    cfg.MergeQueue,
-		Keyer:    keyer,
-		Picker:   driver,
-		Lease:    cfg.MergeLease,
-		Resolver: mergeConflictResolver{prompts: cfg.Prompts},
+		Logf:      logf,
+		Sink:      mergeSink{mgr},
+		Queue:     cfg.MergeQueue,
+		Keyer:     keyer,
+		Picker:    driver,
+		Lease:     cfg.MergeLease,
+		Resolver:  mergeConflictResolver{prompts: cfg.Prompts},
+		PostMerge: postMerge,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("server: build merge coordinator: %w", err)
@@ -271,6 +292,7 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 		cfg.Queues, logf,
 		CommandHandlerConfig{
 			WorkspaceCreation: cfg.WorkspaceCreation,
+			MergeGeometry:     cfg.MergeGeometry,
 			Restarts:          cfg.Restarts,
 			Health:            HealthConfig{Router: cfg.Health, Daemon: cfg.DaemonHealth},
 			// The gate reads each fact from the authority that owns it: the

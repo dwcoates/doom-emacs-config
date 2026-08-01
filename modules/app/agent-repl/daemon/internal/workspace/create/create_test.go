@@ -113,9 +113,23 @@ func (f *fakeActions) PublishHostAction(_ context.Context, action HostAction) er
 	return f.err
 }
 
+// fakeGeometry stands in for the durable merge-geometry recorder.  It records
+// exactly which jobs reached the recording call, which is what the ordering
+// assertions (geometry before worktree_ready) read.
+type fakeGeometry struct {
+	jobs []Job
+	err  error
+}
+
+func (f *fakeGeometry) RecordWorkspaceGeometry(_ context.Context, job Job) error {
+	f.jobs = append(f.jobs, job)
+	return f.err
+}
+
 type fixture struct {
 	store     *FileJobStore
 	manager   *Manager
+	geometry  *fakeGeometry
 	worktrees *fakeWorktrees
 	sessions  *fakeSessions
 	health    *fakeHealth
@@ -128,6 +142,7 @@ type fixture struct {
 func newFixture(t *testing.T, statePath string) *fixture {
 	t.Helper()
 	f := &fixture{
+		geometry:  &fakeGeometry{},
 		worktrees: &fakeWorktrees{path: "/worktrees/new"},
 		sessions:  &fakeSessions{id: "s_new"},
 		health:    &fakeHealth{},
@@ -142,7 +157,7 @@ func newFixture(t *testing.T, statePath string) *fixture {
 	}
 	f.store = store
 	f.manager, err = NewManager(Config{
-		Store: store, Planner: f.worktrees, Worktrees: f.worktrees, Sessions: f.sessions, Health: f.health,
+		Store: store, Planner: f.worktrees, Worktrees: f.worktrees, Geometry: f.geometry, Sessions: f.sessions, Health: f.health,
 		Prompts: f.prompts, Available: f.available, HostActions: f.actions, Logf: logf,
 	})
 	if err != nil {
@@ -500,7 +515,7 @@ func TestResolvedSessionMetadataPersistsBeforeCreateAndSurvivesRestart(t *testin
 	statePath := filepath.Join(root, "jobs.json")
 	f := newFixture(t, statePath)
 	sessions := &metadataSessions{fakeSessions: fakeSessions{id: "s_new"}, resolved: Request{Name: "DWC/child", GitRoot: "/repo", SourceWorkspace: "parent", SourceDir: "/parent", ConfigDir: "/cfg", PermissionMode: "plan"}}
-	manager, err := NewManager(Config{Store: f.store, Planner: f.worktrees, Worktrees: f.worktrees, Sessions: sessions, Health: f.health, Prompts: f.prompts, Available: f.available, HostActions: f.actions, Logf: func(string, ...any) {}})
+	manager, err := NewManager(Config{Store: f.store, Planner: f.worktrees, Worktrees: f.worktrees, Geometry: f.geometry, Sessions: sessions, Health: f.health, Prompts: f.prompts, Available: f.available, HostActions: f.actions, Logf: func(string, ...any) {}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -852,5 +867,109 @@ func TestPriorityRoundTripsAsAString(t *testing.T) {
 	// Assert
 	if decoded.Priority != "p2" {
 		t.Fatalf("priority = %q, want %q", decoded.Priority, "p2")
+	}
+}
+
+// TestGeometryIsRecordedWithThePersistedWorktreeIdentity proves the recorder
+// sees the job's checkpointed identity (path + branch), not a bare request:
+// those two fields ARE two of the three merge coordinates.
+func TestGeometryIsRecordedWithThePersistedWorktreeIdentity(t *testing.T) {
+	// Arrange.
+	root := t.TempDir()
+	f := newFixture(t, filepath.Join(root, "jobs.json"))
+	f.worktrees.path = "/worktrees/geo"
+	f.worktrees.branch = "DWC/geo"
+	if _, _, err := f.store.Enqueue(Job{ID: "geo", Request: Request{Name: "DWC/geo", GitRoot: "/repo"}, State: StateQueued}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act.
+	if err := f.manager.Process(context.Background(), "geo"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert.
+	if len(f.geometry.jobs) != 1 {
+		t.Fatalf("geometry recordings = %d, want 1", len(f.geometry.jobs))
+	}
+	got := f.geometry.jobs[0]
+	if got.ID != "geo" || got.WorktreePath != "/worktrees/geo" || got.Branch != "DWC/geo" {
+		t.Fatalf("recorded job = %#v", got)
+	}
+}
+
+// TestGeometryIsRecordedBeforeTheWorktreeStageCompletes pins the ORDERING: a
+// workspace must never reach worktree_ready (and from there the user) without
+// the geometry that makes it mergeable.
+func TestGeometryIsRecordedBeforeTheWorktreeStageCompletes(t *testing.T) {
+	// Arrange — the recorder refuses, so the stage must not advance.
+	root := t.TempDir()
+	f := newFixture(t, filepath.Join(root, "jobs.json"))
+	f.geometry.err = errors.New("state store is down")
+	if _, _, err := f.store.Enqueue(Job{ID: "order", Request: Request{Name: "DWC/order", GitRoot: "/repo"}, State: StateQueued}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act.
+	err := f.manager.Process(context.Background(), "order")
+
+	// Assert.
+	if err == nil {
+		t.Fatal("Process succeeded, want the geometry failure")
+	}
+	got := job(t, f.store, "order")
+	if got.State != StateFailed {
+		t.Fatalf("state = %s, want failed", got.State)
+	}
+	if f.sessions.calls != 0 || f.available.calls != 0 {
+		t.Fatalf("the job advanced past the worktree stage: sessions=%d available=%d", f.sessions.calls, f.available.calls)
+	}
+}
+
+// TestGeometryRecordingFailureIsSurfacedToTheHost proves the failure is not
+// merely returned: it lands durably and reaches the host with its cause.
+func TestGeometryRecordingFailureIsSurfacedToTheHost(t *testing.T) {
+	// Arrange.
+	root := t.TempDir()
+	f := newFixture(t, filepath.Join(root, "jobs.json"))
+	f.geometry.err = errors.New("state store is down")
+	if _, _, err := f.store.Enqueue(Job{ID: "surfaced", Request: Request{Name: "DWC/surfaced", GitRoot: "/repo"}, State: StateQueued}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act.
+	if err := f.manager.Process(context.Background(), "surfaced"); err == nil {
+		t.Fatal("Process succeeded, want the geometry failure")
+	}
+
+	// Assert.
+	if len(f.actions.items) != 1 {
+		t.Fatalf("host actions = %d, want 1", len(f.actions.items))
+	}
+	var failure WorkspaceCreateFailure
+	if err := json.Unmarshal(f.actions.items[0].Payload, &failure); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(failure.Error, "record merge geometry") || !strings.Contains(failure.Error, "state store is down") {
+		t.Fatalf("host failure text = %q", failure.Error)
+	}
+}
+
+// TestManagerRefusesConstructionWithoutAGeometryRecorder keeps the capability
+// mandatory: a manager without one would materialize unmergeable workspaces.
+func TestManagerRefusesConstructionWithoutAGeometryRecorder(t *testing.T) {
+	// Arrange.
+	root := t.TempDir()
+	f := newFixture(t, filepath.Join(root, "jobs.json"))
+
+	// Act.
+	_, err := NewManager(Config{
+		Store: f.store, Planner: f.worktrees, Worktrees: f.worktrees, Sessions: f.sessions, Health: f.health,
+		Prompts: f.prompts, Available: f.available, HostActions: f.actions, Logf: func(string, ...any) {},
+	})
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "WorkspaceGeometryRecorder") {
+		t.Fatalf("NewManager error = %v, want a WorkspaceGeometryRecorder refusal", err)
 	}
 }

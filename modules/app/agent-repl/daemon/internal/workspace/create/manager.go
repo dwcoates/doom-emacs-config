@@ -15,6 +15,7 @@ type Config struct {
 	Store       JobStore
 	Planner     WorktreePlanner
 	Worktrees   WorktreeCreator
+	Geometry    WorkspaceGeometryRecorder
 	Sessions    SessionCreator
 	Health      SessionHealthChecker
 	Prompts     InitialPromptSubmitter
@@ -45,6 +46,8 @@ func NewManager(cfg Config) (*Manager, error) {
 		return nil, fmt.Errorf("workspace create: manager needs a WorktreePlanner")
 	case cfg.Worktrees == nil:
 		return nil, fmt.Errorf("workspace create: manager needs a WorktreeCreator")
+	case cfg.Geometry == nil:
+		return nil, fmt.Errorf("workspace create: manager needs a WorkspaceGeometryRecorder (without it a created workspace has no recorded merge geometry and can never be merged)")
 	case cfg.Sessions == nil:
 		return nil, fmt.Errorf("workspace create: manager needs a SessionCreator")
 	case cfg.Health == nil:
@@ -187,6 +190,15 @@ func (m *Manager) process(ctx context.Context, id string) error {
 			}
 			if err := m.cfg.Worktrees.EnsureWorktree(ctx, job); err != nil {
 				return m.fail(ctx, id, "ensure worktree", err)
+			}
+			// The worktree now exists, so its merge geometry is an observed
+			// fact: this branch, this directory, and the worktree it was cut
+			// from. Record it BEFORE the worktree stage completes — a
+			// workspace that reaches the user without geometry is one nobody
+			// can ever merge. The recorder is idempotent, so a crash between
+			// this call and the checkpoint below re-records the same facts.
+			if err := m.cfg.Geometry.RecordWorkspaceGeometry(ctx, job); err != nil {
+				return m.fail(ctx, id, "record merge geometry", err)
 			}
 			if _, err := m.cfg.Store.Update(id, func(j *Job) error {
 				j.State = StateWorktreeReady

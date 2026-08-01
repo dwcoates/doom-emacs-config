@@ -343,6 +343,19 @@ message WorkspaceState {
   // and every conversation item the session produces carries
   // CONVERSATION_SOURCE_MERGE.
   bool merge_lease_held = 16;
+  // WHEN this workspace's merge landed, in unix millis. 0 means it has never
+  // reached `merged`, which is the only reading of absence: a merged
+  // workspace always carries the instant it merged at.
+  //
+  // WRITTEN ONCE, at the `merged` transition, and never moved afterwards.
+  // `merge_phase` (6) reports whichever merge row is currently newest and can
+  // therefore be superseded; this is the durable record that the merge
+  // LANDED, so a later transition on any axis leaves it exactly where it was.
+  //
+  // It is its own persisted fact rather than a re-derivation over the state
+  // log, so a frontend ordering a recently-merged section reads the identical
+  // instant from every push, snapshot and resync.
+  int64 merged_at_ms = 17;
 }
 
 message SessionView {

@@ -110,6 +110,17 @@ type Manager struct {
 	// lookup be total, and the TABLE remains the authority both are warmed
 	// from.
 	mergeLeases map[string][]leaseWindow
+	// mergedAt is the in-memory projection of the durable workspace_merged
+	// table: the instant each workspace's merge landed. See merged.go — the
+	// projection is what lets the WorkspaceState construction funnel stamp
+	// merged_at_ms without an error channel, and the TABLE remains the
+	// authority it is warmed from.
+	mergedAt map[string]int64
+	// mergedTeardown stands a merged workspace's session down, bound by
+	// ssm.NewMergeLease. A daemon assembled without the merge subsystem has
+	// none, and a merged workspace's session then simply keeps running (loudly
+	// noted at the transition).
+	mergedTeardown MergedTeardown
 	// mergeQueue is the merge subsystem's queue, bound by ssm.NewMergeLease.
 	// It is the sole source of merge_queue_position / merge_queue_depth, which
 	// are cross-workspace facts no per-workspace row can carry.
@@ -167,6 +178,7 @@ func Open(opts Options) (*Manager, error) {
 		lastTasks:       make(map[string]int64),
 		interruptedTurn: make(map[string]*interruptMark),
 		mergeLeases:     make(map[string][]leaseWindow),
+		mergedAt:        make(map[string]int64),
 		clearingTimers:  make(map[string]Timer),
 		clearingTimeout: clearingTimeout,
 		afterFunc:       afterFunc,
@@ -210,6 +222,14 @@ func (m *Manager) warm() error {
 	// already carries merge_lease_held rather than a frame that says the
 	// workspace is open to prompts it will then refuse.
 	if err := m.warmMergeLeasesLocked(); err != nil {
+		return err
+	}
+	// Before any workspace resolves too, for the same reason: a merged
+	// workspace's very first restored WorkspaceState must already carry
+	// merged_at_ms, or a reconnecting sidebar would drop it out of its
+	// recently-merged ordering until something happened to that workspace
+	// again — and nothing ever happens to a merged workspace again.
+	if err := m.warmMergedAtLocked(); err != nil {
 		return err
 	}
 	// Before the cache is seeded, so a released row is what gets restored
@@ -704,6 +724,10 @@ func (m *Manager) ApplyConnectionDegraded(workspace string, degraded bool, reaso
 // (merging|merge_queued|merge_conflict|merge_failed|merged) or the empty
 // string / merge_none to clear the merge axis. cause is a short human note
 // recorded as the cause kind's detail; it never carries a store seq.
+// A `merged` phase additionally establishes the workspace's durable merged-at
+// fact and stands its session down. Both happen HERE, at the one transition
+// that knows the merge landed, rather than at a second producer that would
+// have to be told.
 func (m *Manager) ApplyMergeTransition(workspace, phase, cause string) error {
 	if workspace == "" {
 		return fmt.Errorf("ssm: ApplyMergeTransition got an empty workspace")
@@ -717,6 +741,30 @@ func (m *Manager) ApplyMergeTransition(workspace, phase, cause string) error {
 		causeKind = causeMergeTransition + ":" + cause
 	}
 
+	mergedAt, err := m.appendMergeTransition(workspace, token, causeKind)
+	if err != nil {
+		return err
+	}
+	if token != sigMerged {
+		return nil
+	}
+	// OUTSIDE THE LOCK, and after the `merged` state has been handed to the
+	// subscribers. The teardown re-enters the SSM (its hibernation writes a
+	// connectivity edge), so holding mu across it would deadlock — and running
+	// it after the push is what guarantees a frontend is told the workspace
+	// merged before anything starts taking the session away. See
+	// merged.go for why it reports failure through the log rather than here.
+	m.teardownMerged(workspace, mergedAt)
+	return nil
+}
+
+// appendMergeTransition writes the merge row, records the merged-at fact when
+// the phase is `merged`, and pushes the resolved state. It owns the lock for
+// exactly that span so the teardown that may follow runs outside it.
+//
+// mergedAt is the workspace's durable merge instant, and 0 for every phase
+// other than `merged`.
+func (m *Manager) appendMergeTransition(workspace, token, causeKind string) (mergedAt int64, err error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -724,9 +772,22 @@ func (m *Manager) ApplyMergeTransition(workspace, phase, cause string) error {
 	// Daemon-local: no store seq, cause_seq stays NULL, and a merge is not a
 	// task so it carries no task id.
 	if err := appendRow(m.db, workspace, "", token, causeKind, sql.NullInt64{}, at, ""); err != nil {
-		return err
+		return 0, err
 	}
-	return m.reresolveLocked(workspace, causeKind, 0)
+	if token == sigMerged {
+		// BEFORE the resolve below, so the very frame that first says `merged`
+		// already carries merged_at_ms. Stamping it afterwards would push one
+		// merged state with a zero instant, and a frontend that ordered on it
+		// would file the workspace at the beginning of time.
+		mergedAt, _, err = m.recordMergedAtLocked(workspace, at)
+		if err != nil {
+			return 0, err
+		}
+	}
+	if err := m.reresolveLocked(workspace, causeKind, 0); err != nil {
+		return 0, err
+	}
+	return mergedAt, nil
 }
 
 // reresolveLocked recomputes the workspace's state, loud-logs a transition

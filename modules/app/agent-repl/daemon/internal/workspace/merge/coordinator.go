@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"claude-repld/internal/dlog"
 )
@@ -53,6 +54,12 @@ type CoordinatorConfig struct {
 	// the session that wrote the conflicting commits sits idle under a lease
 	// taken expressly to drive it.
 	Resolver ConflictResolver
+	// PostMerge receives every `merged` terminal outcome once the queue entry
+	// is dropped and the lease released. Required, on the same footing as the
+	// rest: it carries the child-to-parent handoffs (the merge phone-home and
+	// the workspace's postprocessing prompt), and a coordinator without it
+	// silently drops them exactly the way the deleted Emacs handler did.
+	PostMerge PostMergeHook
 }
 
 // QueueCoordinator is the merge.Coordinator implementation: one drain goroutine
@@ -65,13 +72,14 @@ type CoordinatorConfig struct {
 // than improbable — there is no lock to forget to take, because there is no
 // second party to take one.
 type QueueCoordinator struct {
-	logf     dlog.Logf
-	emit     *stateEmitter
-	queue    DurableQueue
-	keyer    RepoKeyer
-	picker   Picker
-	lease    Lease
-	resolver ConflictResolver
+	logf      dlog.Logf
+	emit      *stateEmitter
+	queue     DurableQueue
+	keyer     RepoKeyer
+	picker    Picker
+	lease     Lease
+	resolver  ConflictResolver
+	postMerge PostMergeHook
 
 	// ctx bounds every DRIVEN merge, and is deliberately not the caller's
 	// Enqueue context: a cherry-pick outlives the frontend command that asked
@@ -86,6 +94,13 @@ type QueueCoordinator struct {
 	cancels  map[string]func()
 	gates    map[string]*sync.Mutex
 	parks    map[string]*conflictPark
+
+	// postMergeMu guards the retained hook-failure record. It is deliberately
+	// its own mutex: the hook runs off the drain goroutine, and recording its
+	// failure must not contend with (let alone block behind) the queue
+	// bookkeeping c.mu protects.
+	postMergeMu       sync.Mutex
+	postMergeFailures []PostMergeFailure
 }
 
 // conflictPark is the resume rendezvous for the merge a repository currently
@@ -143,16 +158,20 @@ func NewCoordinator(cfg CoordinatorConfig) (*QueueCoordinator, error) {
 		return nil, fmt.Errorf("merge: Coordinator Lease is required")
 	case cfg.Resolver == nil:
 		return nil, fmt.Errorf("merge: Coordinator Resolver is required")
+	case cfg.PostMerge == nil:
+		return nil, fmt.Errorf("merge: Coordinator PostMerge hook is required")
 	}
 	ctx, stop := context.WithCancel(context.Background())
 	return &QueueCoordinator{
-		logf:     cfg.Logf,
-		emit:     &stateEmitter{sink: cfg.Sink, logf: cfg.Logf},
-		queue:    cfg.Queue,
-		keyer:    cfg.Keyer,
-		picker:   cfg.Picker,
-		lease:    cfg.Lease,
-		resolver: cfg.Resolver,
+		logf:      cfg.Logf,
+		emit:      &stateEmitter{sink: cfg.Sink, logf: cfg.Logf},
+		queue:     cfg.Queue,
+		keyer:     cfg.Keyer,
+		picker:    cfg.Picker,
+		lease:     cfg.Lease,
+		resolver:  cfg.Resolver,
+		postMerge: cfg.PostMerge,
+
 		ctx:      ctx,
 		stop:     stop,
 		draining: map[string]struct{}{},
@@ -423,6 +442,85 @@ func (c *QueueCoordinator) finish(repo string, req Request, release func()) bool
 	return true
 }
 
+// finishTerminal retires a merge that reached a terminal OUTCOME and fires the
+// post-merge hook when that outcome is `merged`.
+//
+// The hook fires strictly after finish, which is what gives merge.PostMergeHook
+// its "queue entry dropped, lease released" precondition: the hook prompts the
+// parent workspace's session, and doing that under a lease the merge still held
+// would have the prompt refused by the very exclusivity the merge took.
+//
+// A merge whose queue entry could NOT be dropped does not fire the hook. That
+// entry is replayed by the next boot's Drain, so notifying now would phone the
+// parent home twice for one child.
+func (c *QueueCoordinator) finishTerminal(repo string, req Request, release func(), outcome Outcome) bool {
+	ok := c.finish(repo, req, release)
+	if outcome != OutcomeMerged {
+		return ok
+	}
+	if !ok {
+		c.logf("merge: post-merge hook NOT RUN, the durable entry could not be dropped {repo=%s ws=%s name=%s} — the next boot's Drain replays this merge, and notifying now would hand the parent the same child twice",
+			repo, req.Workspace, req.Name)
+		return ok
+	}
+	c.firePostMerge(repo, req)
+	return ok
+}
+
+// firePostMerge runs the post-merge hook on its OWN goroutine.
+//
+// OFF THE DRAIN PATH IS THE POINT. The hook talks to another workspace's agent
+// session, which can be slow, unreachable, or mid-turn. Running it inline would
+// make every later merge on this repository wait behind a courtesy notification
+// — a queue stalled by a nicety. The goroutine is tracked on c.wg and bounded
+// by c.ctx, so Close still waits for a hook that honors cancellation rather
+// than leaking it.
+func (c *QueueCoordinator) firePostMerge(repo string, req Request) {
+	c.wg.Add(1)
+	go func() {
+		defer c.wg.Done()
+		c.logf("merge: post-merge hook RUNNING {repo=%s ws=%s name=%s target=%s}", repo, req.Workspace, req.Name, req.TargetDir)
+		if err := c.postMerge.AfterMerged(c.ctx, req); err != nil {
+			c.recordPostMergeFailure(repo, req, err)
+			return
+		}
+		c.logf("merge: post-merge hook COMPLETE {repo=%s ws=%s name=%s}", repo, req.Workspace, req.Name)
+	}()
+}
+
+// recordPostMergeFailure loud-logs a hook error and retains it.
+//
+// It deliberately does NOT emit merge_failed. The commits are on the target
+// worktree; a failed handoff does not put them back, and recording a merge as
+// failed because its notification did not land would make the pushed state lie
+// about the tree.
+func (c *QueueCoordinator) recordPostMergeFailure(repo string, req Request, err error) {
+	c.logf("merge: post-merge hook FAILED {repo=%s ws=%s name=%s target=%s}: %v — the merge STANDS (the commits are on the target); only the post-merge handoff did not land",
+		repo, req.Workspace, req.Name, req.TargetDir, err)
+	c.postMergeMu.Lock()
+	defer c.postMergeMu.Unlock()
+	c.postMergeFailures = append(c.postMergeFailures, PostMergeFailure{
+		Repo: repo, Workspace: req.Workspace, Name: req.Name, At: time.Now(), Err: err,
+	})
+	if len(c.postMergeFailures) > maxRetainedPostMergeFailures {
+		evicted := c.postMergeFailures[0]
+		c.postMergeFailures = c.postMergeFailures[1:]
+		c.logf("merge: post-merge failure record EVICTED the oldest entry {repo=%s ws=%s name=%s}: %v — the retained record is capped at %d; the canonical log still carries every failure",
+			evicted.Repo, evicted.Workspace, evicted.Name, evicted.Err, maxRetainedPostMergeFailures)
+	}
+}
+
+// PostMergeFailures returns a copy of the retained hook-failure record, oldest
+// first. It is the in-process view of merges that landed whose post-merge
+// handoff did not.
+func (c *QueueCoordinator) PostMergeFailures() []PostMergeFailure {
+	c.postMergeMu.Lock()
+	defer c.postMergeMu.Unlock()
+	out := make([]PostMergeFailure, len(c.postMergeFailures))
+	copy(out, c.postMergeFailures)
+	return out
+}
+
 // runOne drives one request end to end and reports whether draining continues.
 // False means this repository's drain stops with its entry left durable, for
 // the next boot's Drain to pick up.
@@ -472,7 +570,7 @@ func (c *QueueCoordinator) runOne(repo string, req Request) bool {
 		return c.awaitResolution(repo, req, park, release, res.ConflictCommit)
 	}
 	c.logf("merge: terminal {repo=%s ws=%s name=%s outcome=%s}", repo, req.Workspace, req.Name, res.Outcome)
-	return c.finish(repo, req, release)
+	return c.finishTerminal(repo, req, release, res.Outcome)
 }
 
 // awaitResolution serves park's resume calls until one drives the merge to a
@@ -518,7 +616,10 @@ func (c *QueueCoordinator) awaitResolution(repo string, req Request, park *confl
 				continue
 			}
 			c.logf("merge: terminal after resume {repo=%s ws=%s outcome=%s}", repo, req.Workspace, res.Outcome)
-			ok := c.finish(repo, req, release)
+			// A merge that landed only after a conflict resolution is merged
+			// all the same, so the post-merge handoff is owed here exactly as
+			// it is on the clean path.
+			ok := c.finishTerminal(repo, req, release, res.Outcome)
 			call.reply <- nil
 			return ok
 		}
