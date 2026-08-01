@@ -23,9 +23,11 @@
 # silently linking a stale copy.  A skill is always the live in-tree
 # source, so edits go live with no reinstall.
 #
-# Git pre-commit hook: a managed ERT + external-boundary gate is installed
+# Git pre-commit hook: a managed external-boundary lint gate is installed
 # into the repo's git hooks dir, identified by a marker so a foreign
-# pre-commit hook is never trampled.
+# pre-commit hook is never trampled.  It does NOT run the test suite: that
+# gate lives in the workspace-merge machinery, which tests every
+# cherry-picked commit as it lands on the target.
 #
 # Opt-in agent-shim services (OFF by default):
 #   --with-agent-shim-services  Also build + launchd-install the shim-store
@@ -191,8 +193,8 @@ fi
 
 # --- Constants (full install path) ---
 
-# Pre-commit hook (ERT + boundary gate) installed into the repo's git
-# hooks dir by do_install below.
+# Pre-commit hook (external-boundary lint gate) installed into the repo's
+# git hooks dir by do_install below.
 GITHOOKS_DIR="$(_canonpath "$SCRIPT_DIR/../.githooks")"
 
 # Marker identifying our managed pre-commit hook so install/uninstall can
@@ -203,7 +205,7 @@ PRECOMMIT_MARKER="AGENT_REPL_MANAGED_HOOK: agent-repl-precommit"
 # recognizing it as managed rather than warning "foreign".  (The blanket
 # rename had rewritten this constant to the CURRENT spelling, which made it
 # a duplicate: every pre-rename installed hook was then misreported as
-# foreign and never refreshed, silently freezing the ERT gate at whatever
+# foreign and never refreshed, silently freezing the lint gate at whatever
 # copy predated the rename.)
 PRECOMMIT_MARKER_LEGACY="CLAUDE_REPL_MANAGED_HOOK: claude-repl-precommit"
 
@@ -270,7 +272,7 @@ do_install() {
     link_skill_to_impl "$name" "$LOCAL_SKILLS_SRC/$name" "install" || missing=$((missing + 1))
   done
 
-  # Install the pre-commit hook (ERT + external-boundary gate) into the
+  # Install the pre-commit hook (external-boundary lint gate) into the
   # repo's current git hooks dir (wherever core.hooksPath / git config
   # say it is).  Idempotency:
   #   - No pre-commit exists  → copy ours in.
@@ -297,7 +299,7 @@ do_install() {
           echo "[install] Refreshed managed pre-commit hook -> $dest_hook"
         else
           echo "[install] WARNING: foreign pre-commit hook at $dest_hook (skipped)"
-          echo "[install] To enable the agent-repl test gate, append the body of $src_hook to it."
+          echo "[install] To enable the agent-repl boundary lint gate, append the body of $src_hook to it."
         fi
       fi
     fi

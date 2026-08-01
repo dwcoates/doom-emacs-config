@@ -195,6 +195,37 @@ func (m *Manager) ResolveMergeConflict(ctx context.Context, res merge.ConflictRe
 	return nil
 }
 
+// ResolveMergeTestFailure implements merge.TestFailureResolver (through the
+// server's PromptRouter): it submits the test-fix prompt on the merge lease
+// holder's behalf and returns once that turn has ended.
+//
+// It is the sibling of ResolveMergeConflict and shares every part of its
+// machinery — the same lease, the same session, the same turn-boundary wait,
+// the same bound. The two differ only in what the agent is told, which is
+// merge-subsystem knowledge and lives with the port
+// (merge.TestFailureResolution.Prompt).
+func (m *Manager) ResolveMergeTestFailure(ctx context.Context, res merge.TestFailureResolution) error {
+	if res.Workspace == "" {
+		return fmt.Errorf("session-controller: a merge test-failure resolution needs a workspace")
+	}
+	if res.RequestID == "" {
+		return fmt.Errorf("session-controller: a merge test-failure resolution for workspace %q needs a request id", res.Workspace)
+	}
+	m.logf("session-controller: merge test-failure resolution ws=%q request_id=%s commit=%s branch=%s target=%q — driving the workspace's own session under the merge lease",
+		res.Workspace, res.RequestID, res.FailingCommit, res.SourceBranch, res.TargetDir)
+
+	ctx, cancel := context.WithTimeout(ctx, m.mergeResolutionBound())
+	defer cancel()
+	if err := m.SubmitMergePromptAwaitingTurn(ctx, res.Workspace, res.RequestID, res.Prompt(), mergeResolutionPermissionMode); err != nil {
+		m.logf("session-controller: merge test-failure resolution FAILED ws=%q request_id=%s commit=%s: %v",
+			res.Workspace, res.RequestID, res.FailingCommit, err)
+		return err
+	}
+	m.logf("session-controller: merge test-failure resolution turn COMPLETE ws=%q request_id=%s commit=%s — merge.Coordinator commits the fix and re-runs the suite",
+		res.Workspace, res.RequestID, res.FailingCommit)
+	return nil
+}
+
 // mergeResolutionBound resolves the wait's bound: the configured override when
 // a harness set one, the package default otherwise.
 func (m *Manager) mergeResolutionBound() time.Duration {

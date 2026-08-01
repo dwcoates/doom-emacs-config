@@ -57,6 +57,11 @@ type PromptRouter interface {
 	// session — the one prompt path the merge lease admits — so the fleet that
 	// serves the user's prompts is necessarily the fleet the merge drives.
 	ResolveMergeConflict(ctx context.Context, res merge.ConflictResolution) error
+	// ResolveMergeTestFailure drives the workspace's OWN session to fix a test
+	// suite a cherry-picked commit broke on the target, returning once that
+	// resolution turn has ended. It is the test-gate sibling of
+	// ResolveMergeConflict and lives here for the same reason.
+	ResolveMergeTestFailure(ctx context.Context, res merge.TestFailureResolution) error
 }
 
 // SessionRestarter hard-restarts one workspace's session: stop its shim, bring

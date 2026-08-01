@@ -224,3 +224,87 @@ func TestResolveMergeConflictRejectsAnIncompleteResolution(t *testing.T) {
 		})
 	}
 }
+
+// --- test-failure resolution --------------------------------------------
+
+func TestResolveMergeTestFailureSubmitsThePromptAndCompletesOnItsTurn(t *testing.T) {
+	// Arrange.
+	h := newMergeResolveHarness(t)
+	submitted := submitHook(h)
+	done := make(chan error, 1)
+
+	// Act.
+	go func() {
+		done <- h.m.ResolveMergeTestFailure(context.Background(), merge.TestFailureResolution{
+			Workspace: "ws", RequestID: "req-1", FailingCommit: "abc1234",
+			SourceBranch: "feature/a", TargetDir: "/target", FailureTail: "FAIL: agent-repl-suite",
+		})
+	}()
+	<-submitted
+	d := h.controller()
+	h.m.onTurnEvent(d, true, "t1")
+	h.m.onTurnEvent(d, false, "t1")
+
+	// Assert — the agent was told which commit broke what, under a merge origin.
+	if err := <-done; err != nil {
+		t.Fatalf("ResolveMergeTestFailure() = %v, want nil", err)
+	}
+	h.client.mu.Lock()
+	prompts := append([]string(nil), h.client.prompts...)
+	origins := append([]string(nil), h.client.origins...)
+	h.client.mu.Unlock()
+	if len(prompts) != 1 || !strings.Contains(prompts[0], "abc1234") || !strings.Contains(prompts[0], "FAIL: agent-repl-suite") {
+		t.Fatalf("prompts = %q, want one naming the failing commit and its output", prompts)
+	}
+	if len(origins) != 1 || !strings.HasPrefix(origins[0], "merge:") {
+		t.Fatalf("origins = %q, want a merge-shaped provenance", origins)
+	}
+}
+
+func TestResolveMergeTestFailureRejectsAnIncompleteResolution(t *testing.T) {
+	tests := []struct {
+		name string
+		res  merge.TestFailureResolution
+		want string
+	}{
+		{name: "no workspace", res: merge.TestFailureResolution{RequestID: "req-1"}, want: "workspace"},
+		{name: "no request id", res: merge.TestFailureResolution{Workspace: "ws"}, want: "request id"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			m := &Manager{logf: func(string, ...any) {}}
+
+			// Act.
+			err := m.ResolveMergeTestFailure(context.Background(), tc.res)
+
+			// Assert.
+			if err == nil {
+				t.Fatalf("ResolveMergeTestFailure(%+v) = nil, want an error", tc.res)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %q, want it to name the missing %s", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestResolveMergeTestFailureTurnThatNeverEndsIsAnError(t *testing.T) {
+	// Arrange — a fix turn that never reports its end.
+	h := newMergeResolveHarness(t)
+	h.m.cfg.MergeResolutionTurnBound = 20 * time.Millisecond
+
+	// Act.
+	err := h.m.ResolveMergeTestFailure(context.Background(), merge.TestFailureResolution{
+		Workspace: "ws", RequestID: "req-1", FailingCommit: "abc1234",
+		SourceBranch: "feature/a", TargetDir: "/target", FailureTail: "boom",
+	})
+
+	// Assert — reported, never reported as a completed fix.
+	if err == nil {
+		t.Fatal("ResolveMergeTestFailure() = nil, want the unfinished-turn error")
+	}
+	if !strings.Contains(err.Error(), "never reported its end") {
+		t.Fatalf("error = %q, want it to name the turn that never ended", err)
+	}
+}
