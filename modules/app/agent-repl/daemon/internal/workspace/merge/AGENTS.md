@@ -73,9 +73,20 @@ The implementation is `internal/workspace/postmerge` (`postmerge.Notifier`),
 reached — like `merge.ConflictResolver` — through the server's wiring, so this
 package still never imports the session controller.
 
-Every merge-state transition (`merging`, `merge_queued`, `merge_conflict`,
-`merge_failed`, `merged`) is written to the SSM — never to the shim-store,
-which is agent-interaction-only.
+Every merge-state transition (`merge_enqueuing`, `merging`, `merge_queued`,
+`merge_conflict`, `merge_failed`, `merged`) is written to the SSM — never to
+the shim-store, which is agent-interaction-only.
+
+`merge_enqueuing` is the ONE phase this package does not emit itself. The
+frontend command handler emits it the instant a merge command arrives, before
+the geometry is resolved and before `merge.Coordinator.Enqueue`, so the very
+first thing a merge attempt does is become visible. It is also the one phase
+with NO durable queue entry behind it, which is why
+`merge.Coordinator.Drain` sweeps any workspace still resting on it with no
+entry to `merge_failed` at boot: a daemon that died in that window genuinely
+lost the attempt, and nothing else would ever advance the phase. The sweep
+reads the phase back through `merge.PhaseSource`, the package's third
+outbound port.
 
 The queue is keyed by REPOSITORY, not by worktree: sibling worktrees of one
 repo cherry-pick into the same target, so one queue serializes them all.

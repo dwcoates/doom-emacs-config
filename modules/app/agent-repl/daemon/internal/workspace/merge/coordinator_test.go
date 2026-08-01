@@ -225,6 +225,19 @@ func (s *syncSink) RecordMergeTransition(ws string, phase Phase, cause string) e
 	return s.err
 }
 
+// fakePhases is a PhaseSource: the workspaces a boot finds pinned on a phase.
+type fakePhases struct {
+	byPhase map[Phase][]string
+	err     error
+}
+
+func (p fakePhases) WorkspacesAtPhase(phase Phase) ([]string, error) {
+	if p.err != nil {
+		return nil, p.err
+	}
+	return p.byPhase[phase], nil
+}
+
 // failingQueue is a DurableQueue whose Publish always fails.
 type failingQueue struct{ err error }
 
@@ -259,6 +272,9 @@ type harnessOpts struct {
 	// postMerge replaces the auto-completing default hook for tests that are
 	// about the post-merge handoff itself.
 	postMerge PostMergeHook
+	// phases replaces the empty default phase source for tests about the boot
+	// sweep of orphaned merge_enqueuing marks.
+	phases PhaseSource
 }
 
 func newHarness(t *testing.T) *harness {
@@ -280,10 +296,15 @@ func newHarnessWith(t *testing.T, opts harnessOpts) *harness {
 	if hook == nil {
 		hook = newAutoPostMergeHook(8)
 	}
+	phases := opts.phases
+	if phases == nil {
+		phases = fakePhases{}
+	}
 	coord, err := NewCoordinator(CoordinatorConfig{
 		Logf:      t.Logf,
 		Sink:      sink,
 		Queue:     q,
+		Phases:    phases,
 		Keyer:     fakeKeyer{keys: opts.keys, err: opts.keyErr},
 		Picker:    picker,
 		Lease:     lease,
@@ -312,6 +333,7 @@ func TestNewCoordinatorRequiresEveryDependency(t *testing.T) {
 			Logf:      func(string, ...any) {},
 			Sink:      newSyncSink(1),
 			Queue:     q,
+			Phases:    fakePhases{},
 			Keyer:     fakeKeyer{},
 			Picker:    newFakePicker(1),
 			Lease:     newFakeLease(1),
@@ -328,6 +350,7 @@ func TestNewCoordinatorRequiresEveryDependency(t *testing.T) {
 		{name: "no logger", mutate: func(c *CoordinatorConfig) { c.Logf = nil }, wantErr: true},
 		{name: "no sink", mutate: func(c *CoordinatorConfig) { c.Sink = nil }, wantErr: true},
 		{name: "no queue", mutate: func(c *CoordinatorConfig) { c.Queue = nil }, wantErr: true},
+		{name: "no phase source", mutate: func(c *CoordinatorConfig) { c.Phases = nil }, wantErr: true},
 		{name: "no keyer", mutate: func(c *CoordinatorConfig) { c.Keyer = nil }, wantErr: true},
 		{name: "no picker", mutate: func(c *CoordinatorConfig) { c.Picker = nil }, wantErr: true},
 		{name: "no lease", mutate: func(c *CoordinatorConfig) { c.Lease = nil }, wantErr: true},
@@ -401,7 +424,7 @@ func TestEnqueueSurfacesAPublishFailure(t *testing.T) {
 	picker := newFakePicker(1)
 	coord, err := NewCoordinator(CoordinatorConfig{
 		Logf: t.Logf, Sink: newSyncSink(1), Queue: failingQueue{err: sentinelError("disk full")},
-		Keyer: fakeKeyer{}, Picker: picker, Lease: newFakeLease(1), Resolver: newFakeResolver(1),
+		Phases: fakePhases{}, Keyer: fakeKeyer{}, Picker: picker, Lease: newFakeLease(1), Resolver: newFakeResolver(1),
 		PostMerge: newAutoPostMergeHook(1),
 	})
 	if err != nil {
@@ -1145,7 +1168,7 @@ func TestCloseRetainsAParkedConflictForTheNextBoot(t *testing.T) {
 	defer close(resolver.stop)
 	coord, err := NewCoordinator(CoordinatorConfig{
 		Logf: t.Logf, Sink: newSyncSink(4), Queue: q,
-		Keyer: fakeKeyer{}, Picker: picker, Lease: lease, Resolver: resolver,
+		Phases: fakePhases{}, Keyer: fakeKeyer{}, Picker: picker, Lease: lease, Resolver: resolver,
 		PostMerge: newAutoPostMergeHook(4),
 	})
 	if err != nil {

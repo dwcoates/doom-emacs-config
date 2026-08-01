@@ -3219,6 +3219,7 @@ native setter ignores nonzero-to-nonzero height changes."
       (should (equal tab-bar-format
                      '(agent-repl-workspace-tabline-formatted
                        tab-bar-format-align-right
+                       agent-repl-daemon-link-segment
                        agent-repl-current-workspace-name-segment)))
       (should-not tab-bar-close-button-show)
       (should-not tab-bar-new-button-show)
@@ -3383,6 +3384,38 @@ the tab bar."
     (cl-letf (((symbol-function 'agent-repl--ws-agent-open-p)
                (lambda (_ws) t)))
       (should (eq :compacting (agent-repl--ws-display-state "ws1"))))))
+
+;;;; ---- Daemon-link indicator (Emacs's own command-plane fact) ----------
+
+(ert-deftest agent-repl-test-daemon-link-segment-empty-when-healthy ()
+  "A healthy command link renders nothing in the tab bar."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl-uds-link-health)
+             (lambda () :healthy)))
+    ;; Act / Assert
+    (should (equal (agent-repl-daemon-link-segment) ""))))
+
+(ert-deftest agent-repl-test-daemon-link-segment-names-the-link-when-degraded ()
+  "A degraded command link renders a caption naming the DAEMON LINK."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl-uds-link-health)
+             (lambda () :degraded)))
+    ;; Act
+    (let ((segment (agent-repl-daemon-link-segment)))
+      ;; Assert
+      (should (string-match-p "DAEMON LINK DEGRADED"
+                              (substring-no-properties segment))))))
+
+(ert-deftest agent-repl-test-daemon-link-segment-carries-its-own-face ()
+  "The degraded caption uses its own face, not any per-workspace tab face."
+  ;; Arrange
+  (cl-letf (((symbol-function 'agent-repl-uds-link-health)
+             (lambda () :degraded)))
+    ;; Act
+    (let ((segment (agent-repl-daemon-link-segment)))
+      ;; Assert
+      (should (eq (get-text-property 0 'face segment)
+                  'agent-repl-daemon-link-degraded)))))
 
 (provide 'test-status)
 

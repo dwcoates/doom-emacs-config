@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -133,9 +134,22 @@ type fakeMerges struct {
 	// fail. Zero values are the common "no merge in flight" answer.
 	abandonHit bool
 	abandonErr error
+	// enqueueErr refuses the admission, which is the path that must still leave
+	// a terminal merge phase behind.
+	enqueueErr error
+	// onEnqueue runs INSIDE Enqueue, before it answers. It is how a test reads
+	// what was already recorded at the instant the coordinator was asked, which
+	// is the only way to observe the mark's ordering rather than assume it.
+	onEnqueue func()
 }
 
 func (f *fakeMerges) Enqueue(_ context.Context, req merge.Request) (merge.Position, error) {
+	if f.onEnqueue != nil {
+		f.onEnqueue()
+	}
+	if f.enqueueErr != nil {
+		return merge.Position{}, f.enqueueErr
+	}
 	f.merged = append(f.merged, req)
 	return merge.Position{Index: len(f.merged), Depth: len(f.merged), Repo: "/repo/.git"}, nil
 }
@@ -278,10 +292,56 @@ func (f *fakeSessionCmds) DeleteSession(id string) error {
 	return f.err
 }
 
+// mergeTransition is one recorded merge-state write, in order.
+type mergeTransition struct {
+	workspace string
+	phase     merge.Phase
+	cause     string
+}
+
+// fakeMergeStates is the handler's merge.StateSink: it records every phase the
+// command handler itself emits, in order, which is what makes the
+// merge_enqueuing-before-enqueue ordering observable.
+type fakeMergeStates struct {
+	mu  sync.Mutex
+	got []mergeTransition
+	// err fails EVERY record, for the "the mark itself could not be written"
+	// path.
+	err error
+	// failPhase fails exactly one phase, for the "the terminal record failed"
+	// path where the mark must still have landed.
+	failPhase merge.Phase
+}
+
+func (f *fakeMergeStates) RecordMergeTransition(ws string, phase merge.Phase, cause string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return f.err
+	}
+	if f.failPhase != "" && phase == f.failPhase {
+		return fmt.Errorf("sink refused %s", phase)
+	}
+	f.got = append(f.got, mergeTransition{ws, phase, cause})
+	return nil
+}
+
+// phases returns the recorded phases in order.
+func (f *fakeMergeStates) phases() []merge.Phase {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]merge.Phase, len(f.got))
+	for i, tr := range f.got {
+		out[i] = tr.phase
+	}
+	return out
+}
+
 func newTestHandler(t *testing.T) (*commandHandler, *fakePrompts, *fakeMerges, *fakeLifecycle) {
 	t.Helper()
 	p, m, l := &fakePrompts{}, &fakeMerges{}, &fakeLifecycle{}
-	h, err := newCommandHandler(p, m, l, nil, &fakeSessionCmds{}, nil, nil, nil)
+	h, err := newCommandHandler(p, m, l, nil, &fakeSessionCmds{}, nil, nil, nil,
+		CommandHandlerConfig{MergeStates: &fakeMergeStates{}})
 	if err != nil {
 		t.Fatalf("newCommandHandler: %v", err)
 	}
@@ -308,18 +368,19 @@ func (f *fakeGeometry) Lookup(_ context.Context, workspace string) (geometry.Rec
 // newMergeTestHandler wires a handler over a geometry record for "ws1", which
 // is the post-cutover shape: Emacs sends a bare workspace name and the daemon
 // answers the three coordinates from its own record.
-func newMergeTestHandler(t *testing.T) (*commandHandler, *fakeMerges, *fakeGeometry) {
+func newMergeTestHandler(t *testing.T) (*commandHandler, *fakeMerges, *fakeGeometry, *fakeMergeStates) {
 	t.Helper()
 	g := &fakeGeometry{records: map[string]geometry.Record{
 		"ws1": {Workspace: "ws1", SourceBranch: "DWC/recorded", SourceDir: "/worktrees/ws1", TargetDir: "/repo", Origin: geometry.OriginCreated},
 	}}
 	m := &fakeMerges{}
+	states := &fakeMergeStates{}
 	h, err := newCommandHandler(&fakePrompts{}, m, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil, nil,
-		CommandHandlerConfig{MergeGeometry: g})
+		CommandHandlerConfig{MergeGeometry: g, MergeStates: states})
 	if err != nil {
 		t.Fatalf("newCommandHandler: %v", err)
 	}
-	return h, m, g
+	return h, m, g, states
 }
 
 // --- dispatch tests -------------------------------------------------------
@@ -452,7 +513,7 @@ func TestCommandHandlerSessionHealthMakesMissingShimExplicitlyUnhealthy(t *testi
 
 func TestCommandHandlerMergeRoutesToMerge(t *testing.T) {
 	// Arrange
-	h, m, _ := newMergeTestHandler(t)
+	h, m, _, _ := newMergeTestHandler(t)
 	// Act — no conflict_resolved_continue -> Merge.
 	_ = h.MergeWorkspace(context.Background(), "ws1", "r1", &frontendv1.MergeWorkspaceCmd{})
 	// Assert
@@ -463,7 +524,7 @@ func TestCommandHandlerMergeRoutesToMerge(t *testing.T) {
 
 func TestCommandHandlerMergeResolvedContinueRoutesToResume(t *testing.T) {
 	// Arrange
-	h, m, _ := newMergeTestHandler(t)
+	h, m, _, _ := newMergeTestHandler(t)
 	// Act — conflict_resolved_continue -> Resume.
 	_ = h.MergeWorkspace(context.Background(), "ws1", "r1", &frontendv1.MergeWorkspaceCmd{ConflictResolvedContinue: true})
 	// Assert
@@ -532,7 +593,7 @@ func TestCommandHandlerResumeCarriesTheCommandGeometry(t *testing.T) {
 func TestBareMergeResolvesTheRecordedGeometry(t *testing.T) {
 	// Arrange — the post-cutover Emacs command: a workspace name and nothing
 	// else.
-	h, m, g := newMergeTestHandler(t)
+	h, m, g, _ := newMergeTestHandler(t)
 
 	// Act.
 	err := h.MergeWorkspace(context.Background(), "ws1", "r1", &frontendv1.MergeWorkspaceCmd{WorkspaceName: "ws1"})
@@ -552,7 +613,7 @@ func TestBareMergeResolvesTheRecordedGeometry(t *testing.T) {
 
 func TestBareResumeResolvesTheRecordedGeometry(t *testing.T) {
 	// Arrange — a resume carries no geometry either.
-	h, m, _ := newMergeTestHandler(t)
+	h, m, _, _ := newMergeTestHandler(t)
 
 	// Act.
 	err := h.MergeWorkspace(context.Background(), "ws1", "r1", &frontendv1.MergeWorkspaceCmd{WorkspaceName: "ws1", ConflictResolvedContinue: true})
@@ -570,7 +631,7 @@ func TestBareResumeResolvesTheRecordedGeometry(t *testing.T) {
 func TestACommandStatedGeometryIsHonoredOverTheRecord(t *testing.T) {
 	// Arrange — an explicit caller (the integration suites) names all three
 	// against a repository the daemon never created.
-	h, m, g := newMergeTestHandler(t)
+	h, m, g, _ := newMergeTestHandler(t)
 
 	// Act.
 	err := h.MergeWorkspace(context.Background(), "ws1", "r1", &frontendv1.MergeWorkspaceCmd{
@@ -595,7 +656,7 @@ func TestACommandStatedGeometryIsHonoredOverTheRecord(t *testing.T) {
 
 func TestAMergeForAnUnrecordedWorkspaceIsRefusedWithAnExplanation(t *testing.T) {
 	// Arrange.
-	h, m, _ := newMergeTestHandler(t)
+	h, m, _, _ := newMergeTestHandler(t)
 
 	// Act.
 	err := h.MergeWorkspace(context.Background(), "ws-unknown", "r1", &frontendv1.MergeWorkspaceCmd{WorkspaceName: "ws-unknown"})
@@ -615,7 +676,7 @@ func TestAMergeForAnUnrecordedWorkspaceIsRefusedWithAnExplanation(t *testing.T) 
 func TestAPartiallyStatedGeometryIsRefusedRatherThanCompleted(t *testing.T) {
 	// Arrange — half a caller-stated geometry is a caller bug, and mixing it
 	// with the record would land the pick somewhere neither owner named.
-	h, m, g := newMergeTestHandler(t)
+	h, m, g, _ := newMergeTestHandler(t)
 
 	// Act.
 	err := h.MergeWorkspace(context.Background(), "ws1", "r1", &frontendv1.MergeWorkspaceCmd{
@@ -634,7 +695,7 @@ func TestAPartiallyStatedGeometryIsRefusedRatherThanCompleted(t *testing.T) {
 
 func TestAGeometryLookupFailureRefusesTheMerge(t *testing.T) {
 	// Arrange — the state store is unreadable.
-	h, m, g := newMergeTestHandler(t)
+	h, m, g, _ := newMergeTestHandler(t)
 	g.err = errors.New("state store is down")
 
 	// Act.
@@ -1262,7 +1323,7 @@ func newTestMergeCoordinator(t *testing.T) *merge.QueueCoordinator {
 		t.Fatalf("queue: %v", err)
 	}
 	coord, err := merge.NewCoordinator(merge.CoordinatorConfig{
-		Logf: logf, Sink: noopSink{}, Queue: queue, Keyer: keyer, Picker: driver,
+		Logf: logf, Sink: noopSink{}, Queue: queue, Phases: noopPhases{}, Keyer: keyer, Picker: driver,
 		Lease: stubMergeLease{}, Resolver: stubMergeResolver{}, PostMerge: stubPostMergeHook{},
 	})
 	if err != nil {
@@ -1275,6 +1336,12 @@ func newTestMergeCoordinator(t *testing.T) *merge.QueueCoordinator {
 type noopSink struct{}
 
 func (noopSink) RecordMergeTransition(string, merge.Phase, string) error { return nil }
+
+// noopPhases is the merge.PhaseSource a unit harness binds: no workspace is
+// pinned on any phase, so the boot sweep has nothing to sweep.
+type noopPhases struct{}
+
+func (noopPhases) WorkspacesAtPhase(merge.Phase) ([]string, error) { return nil, nil }
 
 // stubMergeLease is the merge.Lease a unit harness binds. The real one lives in
 // internal/ssm and interrupts the workspace's turn; nothing in these tests runs

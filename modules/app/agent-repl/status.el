@@ -526,6 +526,7 @@ tabs; readable against `agent-repl--color-selected-bg'.")
     (:done           . "green")
     (:interrupted    . "green")
     (:permission     . "green")
+    (:merge-enqueuing . "none")
     (:merging        . "none")
     (:merge-queued   . "none")
     (:merge-conflict . "none")
@@ -879,6 +880,51 @@ background work (yellow).")
   "Face for workspace tabs blocked on the vendor or the account
 \(purple + ⛔): auth, usage limit, a persistent API failure, or an
 abnormal turn conclusion.")
+
+;;; The daemon-link indicator
+;;
+;; A workspace tab paints a DAEMON-OWNED fact: the state the daemon pushed
+;; for that workspace's session.  Nothing on that row can describe Emacs's
+;; own link to the daemon, and for a long time nothing anywhere did — a
+;; command that vanished on the way to the daemon left every tab painting a
+;; perfectly healthy session while the command plane was dead.
+;;
+;; This indicator is the frontend's own fact, deliberately rendered OUTSIDE
+;; the tab row (right-aligned, its own segment) so it can never be read as
+;; a verdict on any one workspace.  Its source is
+;; `agent-repl-uds-link-health', which frontend-uds.el owns.
+(declare-function agent-repl-uds-link-health "frontend-uds" ())
+
+(defface agent-repl-daemon-link-degraded
+  `((t :background ,agent-repl--color-thinking-red
+       :foreground ,agent-repl--color-light
+       :weight ,agent-repl--tab-weight))
+  "Face for the tab-bar indicator saying the DAEMON LINK is degraded.
+Distinct from every `agent-repl-tab-*' face by position rather than by
+color: those paint one workspace's daemon-pushed session state, this
+paints Emacs's own command link to the daemon.")
+
+(defconst agent-repl-daemon-link-degraded-label " DAEMON LINK DEGRADED "
+  "The visible caption of the degraded-command-link tab-bar indicator.
+Names the LINK rather than any workspace, because a degraded link says
+nothing about which session the user was talking to.")
+
+(defun agent-repl-daemon-link-segment ()
+  "Return the right-aligned DAEMON LINK indicator for the tab bar.
+
+Empty while `agent-repl-uds-link-health' is `:healthy', so the segment
+costs nothing and shows nothing in the ordinary case.  When a command has
+gone unacknowledged past its deadline the segment renders
+`agent-repl-daemon-link-degraded-label', which stays until an ack lands
+inside its deadline or the link reconnects.
+
+Runs inside redisplay, so it deliberately performs no logging: the health
+transitions themselves are logged where they are decided, in
+frontend-uds.el."
+  (if (eq (agent-repl-uds-link-health) :degraded)
+      (propertize agent-repl-daemon-link-degraded-label
+                  'face 'agent-repl-daemon-link-degraded)
+    ""))
 
 (defun agent-repl--force-tab-bar-redraw ()
   "Force the tab-bar to repaint NOW, bypassing its string-equality cache.
@@ -2029,6 +2075,7 @@ parameters, and the watchdog cleanup result."
          (watchdog-cleanup (agent-repl--retire-redisplay-storm-watchdog)))
     (setq tab-bar-format '(agent-repl-workspace-tabline-formatted
                            tab-bar-format-align-right
+                           agent-repl-daemon-link-segment
                            agent-repl-current-workspace-name-segment)
           tab-bar-show t
           tab-bar-close-button-show nil

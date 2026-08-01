@@ -256,7 +256,12 @@ type commandHandler struct {
 	// every name-only merge a loud failing ack: the daemon owns the map, and a
 	// daemon that cannot read it must say so rather than cherry-pick blind.
 	mergeGeometry MergeGeometrySource
-	lifecycle     WorkspaceLifecycle
+	// mergeStates records the merge phases this handler owns (merge_enqueuing
+	// on receipt, merge_failed on a refused enqueue). Nil makes a merge command
+	// a loud failing ack: an unmarked merge attempt is invisible until the
+	// coordinator gets to it, which is the hole merge_enqueuing closes.
+	mergeStates merge.StateSink
+	lifecycle   WorkspaceLifecycle
 	// resyncer replays conversation deltas on a resync; nil-safe (Resync then
 	// documents the snapshot-only behavior rather than swallowing).
 	resyncer Resyncer
@@ -340,8 +345,14 @@ type CommandHandlerConfig struct {
 	// MergeGeometry answers a bare merge request's three coordinates. Nil is a
 	// loud failing ack for a name-only merge, NEVER a guessed geometry.
 	MergeGeometry MergeGeometrySource
-	Health        HealthConfig
-	Interrupt     InterruptGateConfig
+	// MergeStates records the merge phases the COMMAND HANDLER itself owns:
+	// merge_enqueuing on receipt, and merge_failed when the enqueue is refused.
+	// Nil is a loud failing ack for a merge, never a merge run without its
+	// first mark — a merge attempt nothing can see is precisely the state
+	// merge_enqueuing exists to end.
+	MergeStates merge.StateSink
+	Health      HealthConfig
+	Interrupt   InterruptGateConfig
 	// Restarts backs the restartSession command. Nil is a loud unsupported
 	// capability.
 	Restarts SessionRestarter
@@ -433,6 +444,7 @@ func newCommandHandler(prompts PromptRouter, merges MergeRunner, lifecycle Works
 		sessions: sessions, shutdown: shutdown, queues: queues,
 		workspaceCreation: config.WorkspaceCreation,
 		mergeGeometry:     config.MergeGeometry,
+		mergeStates:       config.MergeStates,
 		health:            config.Health.Router, daemonHealth: config.Health.Daemon,
 		turns: config.Interrupt.Turns, liveTasks: config.Interrupt.LiveTasks, logf: logf,
 		restarts:         config.Restarts,
@@ -704,6 +716,48 @@ func (h *commandHandler) resolveMergeGeometry(ctx context.Context, req merge.Req
 	return req, mergeGeometryFromRecord, nil
 }
 
+// markMergeEnqueuing records merge_enqueuing for a merge attempt the moment the
+// command arrives.
+//
+// A FAILURE HERE REFUSES THE MERGE. The mark is the attempt's only trace until
+// the coordinator records something of its own, so a merge run without it is a
+// merge the user cannot see and the next boot cannot sweep. Proceeding past a
+// failed mark would put the system back in exactly the state this phase exists
+// to end, so the command nacks and nothing is enqueued.
+func (h *commandHandler) markMergeEnqueuing(workspace, name, requestID string) error {
+	if h.mergeStates == nil {
+		h.logf("frontend cmd: merge_workspace REFUSED ws=%s name=%q request_id=%s reason=no-merge-state-sink", workspace, name, requestID)
+		return fmt.Errorf("server: merge_workspace for %s cannot be recorded: the daemon's merge state sink is not wired", workspace)
+	}
+	cause := fmt.Sprintf("merge command received (request_id=%s)", requestID)
+	if err := h.mergeStates.RecordMergeTransition(workspace, merge.PhaseMergeEnqueuing, cause); err != nil {
+		h.logf("frontend cmd: merge_workspace merge_enqueuing record FAILED ws=%s name=%q request_id=%s: %v — the merge is REFUSED rather than run unmarked",
+			workspace, name, requestID, err)
+		return fmt.Errorf("server: merge_workspace for %s: record %s: %w", workspace, merge.PhaseMergeEnqueuing, err)
+	}
+	h.logf("frontend cmd: merge_workspace ENQUEUING ws=%s name=%q request_id=%s", workspace, name, requestID)
+	return nil
+}
+
+// failMergeAttempt records merge_failed for an attempt that never reached the
+// queue, and returns the nack the caller propagates.
+//
+// BOTH HALVES ARE REQUIRED. The nack is the frontend's answer to the command it
+// sent; the transition is what stops the workspace from sitting on
+// merge_enqueuing forever for every other surface that reads pushed state. A
+// failure to RECORD the transition is joined onto the returned error rather
+// than replacing it: the caller's original refusal is still the reason the
+// merge did not happen.
+func (h *commandHandler) failMergeAttempt(workspace, name, requestID, cause string, nack error) error {
+	if err := h.mergeStates.RecordMergeTransition(workspace, merge.PhaseMergeFailed, cause); err != nil {
+		h.logf("frontend cmd: merge_workspace merge_failed record FAILED ws=%s name=%q request_id=%s cause=%q: %v — the workspace stays at merge_enqueuing with nothing to advance it",
+			workspace, name, requestID, cause, err)
+		return errors.Join(nack, fmt.Errorf("server: merge_workspace for %s: record %s: %w", workspace, merge.PhaseMergeFailed, err))
+	}
+	h.logf("frontend cmd: merge_workspace FAILED ws=%s name=%q request_id=%s cause=%q", workspace, name, requestID, cause)
+	return nack
+}
+
 // MergeWorkspace runs a merge, or resumes one on the conflict_resolved_continue
 // handoff (§9.3).
 //
@@ -733,21 +787,40 @@ func (h *commandHandler) MergeWorkspace(ctx context.Context, workspace, requestI
 		Workspace: workspace,
 		Name:      cmd.GetWorkspaceName(),
 	}
-	req, resolvedBy, err := h.resolveMergeGeometry(ctx, req, cmd)
-	if err != nil {
-		return err
-	}
+	// THE RESUME PATH BRANCHES FIRST, before the enqueuing mark below. A
+	// conflict_resolved_continue is the continuation of a merge that is already
+	// on the queue and already holds its lease; marking it "enqueuing" would
+	// walk a live merge_conflict backwards to the weakest phase on the axis.
 	if cmd.GetConflictResolvedContinue() {
+		req, resolvedBy, err := h.resolveMergeGeometry(ctx, req, cmd)
+		if err != nil {
+			return err
+		}
 		h.logf("frontend cmd: merge_workspace RESUME ws=%s name=%q request_id=%s geometry=%s source_branch=%q source_dir=%q target_dir=%q",
 			workspace, req.Name, requestID, resolvedBy, req.SourceBranch, req.SourceDir, req.TargetDir)
 		return h.merges.Resume(ctx, req)
+	}
+
+	// THE FIRST THING A MERGE ATTEMPT DOES IS BECOME VISIBLE, and it happens
+	// HERE — before the geometry is resolved and before the coordinator is
+	// asked for anything. Everything below this line can fail, and every one of
+	// those failures used to leave the user with a command that vanished: no
+	// phase was pushed until merge_queued or merging, so a merge refused for an
+	// unresolvable geometry, or a daemon that died before the durable write,
+	// left zero trace in any UI.
+	if err := h.markMergeEnqueuing(workspace, req.Name, requestID); err != nil {
+		return err
+	}
+	req, resolvedBy, err := h.resolveMergeGeometry(ctx, req, cmd)
+	if err != nil {
+		return h.failMergeAttempt(workspace, req.Name, requestID, "merge geometry unresolvable: "+err.Error(), err)
 	}
 	h.logf("frontend cmd: merge_workspace ws=%s name=%q request_id=%s handler=%s geometry=%s source_branch=%q source_dir=%q target_dir=%q",
 		workspace, req.Name, requestID, cmd.GetHandler(), resolvedBy, req.SourceBranch, req.SourceDir, req.TargetDir)
 	pos, enqueueErr := h.merges.Enqueue(ctx, req)
 	if enqueueErr != nil {
 		h.logf("frontend cmd: merge_workspace ENQUEUE FAILED ws=%s name=%q request_id=%s: %v", workspace, req.Name, requestID, enqueueErr)
-		return enqueueErr
+		return h.failMergeAttempt(workspace, req.Name, requestID, "merge enqueue refused: "+enqueueErr.Error(), enqueueErr)
 	}
 	h.logf("frontend cmd: merge_workspace ENQUEUED ws=%s name=%q request_id=%s repo=%q index=%d depth=%d",
 		workspace, req.Name, requestID, pos.Repo, pos.Index, pos.Depth)

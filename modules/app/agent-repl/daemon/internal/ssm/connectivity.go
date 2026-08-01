@@ -461,6 +461,7 @@ func compositeRenderState(projection resolved, composite CompositeState) (fronte
 			frontendv1.RenderState_RENDER_STATE_DEAD,
 			frontendv1.RenderState_RENDER_STATE_CLEARING,
 			frontendv1.RenderState_RENDER_STATE_COMPACTING,
+			frontendv1.RenderState_RENDER_STATE_MERGE_ENQUEUING,
 			frontendv1.RenderState_RENDER_STATE_MERGING,
 			frontendv1.RenderState_RENDER_STATE_MERGE_QUEUED,
 			frontendv1.RenderState_RENDER_STATE_MERGE_CONFLICT,

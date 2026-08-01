@@ -62,6 +62,8 @@
 (agent-repl-test--deftest-state-map
  agent-repl-test-state-map-vendor-blocked "RENDER_STATE_VENDOR_BLOCKED" :vendor-blocked)
 (agent-repl-test--deftest-state-map
+ agent-repl-test-state-map-merge-enqueuing "RENDER_STATE_MERGE_ENQUEUING" :merge-enqueuing)
+(agent-repl-test--deftest-state-map
  agent-repl-test-state-map-merging "RENDER_STATE_MERGING" :merging)
 (agent-repl-test--deftest-state-map
  agent-repl-test-state-map-merge-queued "RENDER_STATE_MERGE_QUEUED" :merge-queued)
