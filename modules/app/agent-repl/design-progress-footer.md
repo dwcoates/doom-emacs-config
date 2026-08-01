@@ -110,10 +110,18 @@ Sourcing notes:
   (SHIPPED — see §The ttft relay below). The `message_delta` cumulative output
   usage stays dropped on purpose: the footer wants input tokens only.
 - `input_tokens` is TURN-scoped, not session-scoped: the resolver sums each
-  API request's input usage (`input_tokens` + `cache_read_input_tokens` +
-  `cache_creation_input_tokens`) across the current turn and resets the sum
-  at turn start. Session-wide and per-model figures are topbar territory and
-  never appear here.
+  API request's NEW input (`input_tokens` + `cache_creation_input_tokens`)
+  across the current turn, and CLEARS the sum at turn END.
+  - SUPERSEDED (F6): `cache_read_input_tokens` was in the sum. A cache read
+    is the same standing prefix presented again, so summing it multiplies one
+    context by the turn's request count — a 94-request turn against a 500k
+    prefix reported 47M "input tokens". Only tokens the turn fed the model NEW
+    are counted now.
+  - SUPERSEDED (F6): the sum reset at turn START and stood between turns, so
+    the idle footer showed the last turn's summary. It clears at turn END
+    instead, because that summary has a better home — see the idle note below.
+- Session-wide and per-model figures are topbar territory and never appear
+  here.
 
 ## UI design (delegated; honors the constraints above)
 
@@ -140,9 +148,19 @@ Sourcing notes:
 - **Expansion:** clicking the strip (or a keyboard toggle) grows the bubble
   upward into a short detail sheet — per-window detail rows now; the task
   roster and per-model token breakdown when their deferred work lands.
-- **Idle:** the strip stays visible with a quiet low-opacity summary of the
-  last turn (duration + tokens), replacing the nuked bottom-right widgets'
-  role.
+- **Idle:** the strip stays visible, with the clock and token cells both
+  reading `--`. The concluded turn's duration and input tokens are STAMPED
+  into the top-right corner of the final-response bubble that turn produced
+  (`resultMeta`, webapp/src/render.ts), in the footer's own two datapoint
+  colors, and they persist and REPLAY with the conversation — which the
+  footer's ephemeral view never could. Both halves come off the persisted
+  result item: `duration_ms`, and `input_tokens + cache_creation_input_tokens`
+  of the result's own turn-scoped `usage`, the same arithmetic the live
+  ticker does, so the footer figure converges on the stamp the turn lands
+  with.
+  - SUPERSEDED (F6): the strip carried a quiet low-opacity summary of the
+    last turn here instead. It reported a turn the feed had already
+    accounted for, and went on doing so until the next turn overwrote it.
 
 ## NOT to be implemented: task telemetry (reference note only)
 
