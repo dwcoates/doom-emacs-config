@@ -86,6 +86,11 @@ type Manager struct {
 	// way. Keying the push on state alone left that change unpushed, which is
 	// how a swept ghost count stayed on screen.
 	lastTasks map[string]int64
+	// pushedAtMs is the per-workspace freshness watermark: the newest AtMs any
+	// outgoing WorkspaceState carried. See stampFreshnessLocked — the frontend
+	// refuses snapshots older than what it delivered, so AtMs must never
+	// regress within a process.
+	pushedAtMs map[string]int64
 	// interruptedTurn names the workspaces whose IN-FLIGHT turn was stopped by
 	// a user-commanded interrupt the shim acknowledged as INTERRUPTED. The
 	// mark is consumed by that turn's own TurnEnded, which then reports
@@ -176,6 +181,7 @@ func Open(opts Options) (*Manager, error) {
 		clock:           clock,
 		last:            make(map[string]frontendv1.RenderState),
 		lastTasks:       make(map[string]int64),
+		pushedAtMs:      make(map[string]int64),
 		interruptedTurn: make(map[string]*interruptMark),
 		mergeLeases:     make(map[string][]leaseWindow),
 		mergedAt:        make(map[string]int64),
@@ -881,7 +887,36 @@ func (m *Manager) workspaceMessageLocked(workspace string, r resolved) (*fronten
 		}
 	}
 	m.stampMergeFactsLocked(workspace, msg)
+	m.stampFreshnessLocked(workspace, msg)
 	return msg, nil
+}
+
+// stampFreshnessLocked makes AtMs MONOTONIC per workspace within this
+// process. The composite builder stamps AtMs from whichever axis branch wins
+// (a status row, a fault's open instant, a connectivity edge) — three
+// different clocks, and a re-rank can hand the win back to an OLDER row. The
+// frontend's snapshot-freshness check records the newest AtMs it ever
+// delivered and refuses any snapshot older than it, so a regressing stamp
+// wedged the connect loop into an unbounded retry storm (observed: a
+// merge_failed push stamped newer than every later snapshot could resolve,
+// which also starved that connection's command reads — merges silently
+// vanished).
+//
+// The watermark is deliberately IN-MEMORY: the frontend's delivered watermark
+// is in-memory too, and both reset together at daemon boot, so durability
+// would add nothing but a stale floor.
+func (m *Manager) stampFreshnessLocked(workspace string, msg *frontendv1.WorkspaceState) {
+	// Lazily initialized because the Manager has more than one construction
+	// path (Open plus the test rigs' direct literals); a nil map here must
+	// never turn a state push into a panic.
+	if m.pushedAtMs == nil {
+		m.pushedAtMs = make(map[string]int64)
+	}
+	if prev, ok := m.pushedAtMs[workspace]; ok && msg.GetAtMs() < prev {
+		msg.AtMs = prev
+		return
+	}
+	m.pushedAtMs[workspace] = msg.GetAtMs()
 }
 
 func (m *Manager) pushMessageLocked(workspace string, msg *frontendv1.WorkspaceState) error {
