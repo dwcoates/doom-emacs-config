@@ -1510,3 +1510,149 @@ side silently turns the keys into no-ops."
   "With no current workspace the restart signals rather than guessing one."
   (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () nil)))
     (should-error (agent-repl-restart-session) :type 'user-error)))
+
+;;;; ---- Refreshing live webviews -----------------------------------------
+
+(defmacro agent-repl-test--with-webview-buffers (names &rest body)
+  "Create a buffer per name in NAMES for BODY, killing them afterwards."
+  (declare (indent 1))
+  `(let ((agent-repl-test--bufs (mapcar #'get-buffer-create ,names)))
+     (unwind-protect (progn ,@body)
+       (dolist (b agent-repl-test--bufs)
+         (when (buffer-live-p b) (kill-buffer b))))))
+
+(ert-deftest agent-repl-test-refresh-webviews-skips-non-frontend-buffers ()
+  "Only `*agent-frontend-WS*' buffers are reloaded; other buffers are untouched."
+  ;; Arrange
+  (let (reloaded)
+    (agent-repl-test--with-webview-buffers
+        '("*agent-frontend-ws1*" "*agent-panel-input-ws1*" "*scratch-not-ours*")
+      (cl-letf (((symbol-function 'agent-repl--frontend-webview-live-widget)
+                 (lambda (buf) (buffer-name buf)))
+                ((symbol-function 'agent-repl--frontend-webview-reload-widget)
+                 (lambda (xw) (push xw reloaded) "http://x/?session=s_1"))
+                ((symbol-function 'agent-repl--log) (lambda (&rest _) nil))
+                ((symbol-function 'agent-repl--warn) (lambda (&rest _) nil)))
+        ;; Act
+        (agent-repl-refresh-webviews)
+        ;; Assert
+        (should (equal reloaded '("*agent-frontend-ws1*")))))))
+
+(ert-deftest agent-repl-test-refresh-webviews-returns-refreshed-count ()
+  "The sweep returns how many webviews it actually reloaded."
+  ;; Arrange
+  (agent-repl-test--with-webview-buffers
+      '("*agent-frontend-ws1*" "*agent-frontend-ws2*" "*agent-panel-input-ws1*")
+    (cl-letf (((symbol-function 'agent-repl--frontend-webview-live-widget)
+               (lambda (buf) (buffer-name buf)))
+              ((symbol-function 'agent-repl--frontend-webview-reload-widget)
+               (lambda (_xw) "http://x/?session=s_1"))
+              ((symbol-function 'agent-repl--log) (lambda (&rest _) nil))
+              ((symbol-function 'agent-repl--warn) (lambda (&rest _) nil)))
+      ;; Act / Assert
+      (should (= (agent-repl-refresh-webviews) 2)))))
+
+(ert-deftest agent-repl-test-refresh-webviews-dead-webview-warns-and-continues ()
+  "A buffer whose WKWebView is dead warns, and the next webview still reloads."
+  ;; Arrange
+  (let (reloaded warnings)
+    (agent-repl-test--with-webview-buffers
+        '("*agent-frontend-dead*" "*agent-frontend-live*")
+      (cl-letf (((symbol-function 'agent-repl--frontend-webview-live-widget)
+                 (lambda (buf)
+                   (unless (equal (buffer-name buf) "*agent-frontend-dead*")
+                     (buffer-name buf))))
+                ((symbol-function 'agent-repl--frontend-webview-reload-widget)
+                 (lambda (xw) (push xw reloaded) "http://x/?session=s_1"))
+                ((symbol-function 'agent-repl--log) (lambda (&rest _) nil))
+                ((symbol-function 'agent-repl--warn)
+                 (lambda (ws fmt &rest args)
+                   (push (cons ws (apply #'format fmt args)) warnings))))
+        ;; Act
+        (should (= (agent-repl-refresh-webviews) 1))
+        ;; Assert
+        (should (equal reloaded '("*agent-frontend-live*")))
+        (should (equal (length warnings) 1))
+        (should (equal (car (car warnings)) "dead"))
+        (should (string-match-p "outcome=dead-webview" (cdr (car warnings))))))))
+
+(ert-deftest agent-repl-test-refresh-webviews-reload-error-warns-and-continues ()
+  "A webview whose reload signals warns, and the sweep still reloads the next."
+  ;; Arrange
+  (let (reloaded warnings)
+    (agent-repl-test--with-webview-buffers
+        '("*agent-frontend-broken*" "*agent-frontend-ok*")
+      (cl-letf (((symbol-function 'agent-repl--frontend-webview-live-widget)
+                 (lambda (buf) (buffer-name buf)))
+                ((symbol-function 'agent-repl--frontend-webview-reload-widget)
+                 (lambda (xw)
+                   (when (equal xw "*agent-frontend-broken*")
+                     (error "no uri"))
+                   (push xw reloaded)
+                   "http://x/?session=s_1"))
+                ((symbol-function 'agent-repl--log) (lambda (&rest _) nil))
+                ((symbol-function 'agent-repl--warn)
+                 (lambda (_ws fmt &rest args)
+                   (push (apply #'format fmt args) warnings))))
+        ;; Act
+        (should (= (agent-repl-refresh-webviews) 1))
+        ;; Assert
+        (should (equal reloaded '("*agent-frontend-ok*")))
+        (should (string-match-p "outcome=reload-failed" (car warnings)))))))
+
+(ert-deftest agent-repl-test-refresh-webviews-no-buffers-is-a-quiet-no-op ()
+  "With no webview buffers open the sweep reloads nothing and returns 0."
+  ;; Arrange
+  (let (reloaded)
+    (cl-letf (((symbol-function 'agent-repl--frontend-live-webview-buffers)
+               (lambda () nil))
+              ((symbol-function 'agent-repl--frontend-webview-reload-widget)
+               (lambda (xw) (push xw reloaded) "http://x/"))
+              ((symbol-function 'agent-repl--log) (lambda (&rest _) nil))
+              ((symbol-function 'agent-repl--warn) (lambda (&rest _) nil)))
+      ;; Act / Assert
+      (should (= (agent-repl-refresh-webviews) 0))
+      (should-not reloaded))))
+
+(ert-deftest agent-repl-test-refresh-webviews-logs-workspace-and-buffer ()
+  "Each refresh is logged with its workspace and buffer name."
+  ;; Arrange
+  (let (logs)
+    (agent-repl-test--with-webview-buffers '("*agent-frontend-ws1*")
+      (cl-letf (((symbol-function 'agent-repl--frontend-webview-live-widget)
+                 (lambda (buf) (buffer-name buf)))
+                ((symbol-function 'agent-repl--frontend-webview-reload-widget)
+                 (lambda (_xw) "http://x/?session=s_1"))
+                ((symbol-function 'agent-repl--warn) (lambda (&rest _) nil))
+                ((symbol-function 'agent-repl--log)
+                 (lambda (ws fmt &rest args)
+                   (push (cons ws (apply #'format fmt args)) logs))))
+        ;; Act
+        (agent-repl-refresh-webviews)
+        ;; Assert
+        (should (seq-find (lambda (entry)
+                            (and (equal (car entry) "ws1")
+                                 (string-match-p "buffer=\\*agent-frontend-ws1\\* outcome=refreshed"
+                                                 (cdr entry))))
+                          logs))))))
+
+(ert-deftest agent-repl-test-refresh-webviews-workspace-prefers-owning-local ()
+  "The logged workspace comes from the buffer's owner when one is stamped."
+  ;; Arrange
+  (agent-repl-test--with-webview-buffers '("*agent-frontend-ws1*")
+    (with-current-buffer "*agent-frontend-ws1*"
+      (setq-local agent-repl--owning-workspace "renamed-ws"))
+    ;; Act / Assert
+    (should (equal (agent-repl--frontend-webview-workspace
+                    (get-buffer "*agent-frontend-ws1*"))
+                   "renamed-ws"))))
+
+(ert-deftest agent-repl-test-refresh-webviews-widget-probe-is-a-registered-boundary ()
+  "The live-widget probe is registered as an external boundary wrapper."
+  (should (memq 'agent-repl--frontend-webview-live-widget
+                agent-repl--external-boundary-functions)))
+
+(ert-deftest agent-repl-test-refresh-webviews-reload-is-a-registered-boundary ()
+  "The reload wrapper is registered as an external boundary wrapper."
+  (should (memq 'agent-repl--frontend-webview-reload-widget
+                agent-repl--external-boundary-functions)))

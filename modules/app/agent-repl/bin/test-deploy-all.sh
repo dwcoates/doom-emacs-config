@@ -117,6 +117,19 @@ if [ "${EC_STUB_PROBE_ERROR:-0}" = "1" ]; then
             ;;
     esac
 fi
+# The webview refresh is `fboundp'-guarded inside the eval, so the stub answers
+# for BOTH shapes: a current Emacs returns the sweep's count, an older one
+# (EC_STUB_REFRESH_ABSENT=1) returns the absent branch's string.
+case "$*" in
+    *refresh-webviews*)
+        if [ "${EC_STUB_REFRESH_ABSENT:-0}" = "1" ]; then
+            echo '"absent"'
+        else
+            echo "\"refreshed ${EC_STUB_REFRESH_COUNT:-3}\""
+        fi
+        exit 0
+        ;;
+esac
 if [ "${EC_STUB_REFUSE:-0}" = "1" ]; then
     case "$*" in
         *daemon-restart*)
@@ -426,6 +439,55 @@ if [ "$RC" -eq 0 ] && log_has "daemon-restart t"; then
 else
     fail "a bundle that moved within one revision still stops the shims" \
          "rc=$RC restart=$(grep -o 'daemon-restart[^)]*' "$STUB_LOG" | tail -1)"
+fi
+
+# --- 16. the webview refresh runs after a successful daemon restart ---------
+# A page mounted before the bounce talks to a listener that no longer exists,
+# so the refresh must follow the restart, never precede it.
+d="$TMP/t16"; mkdir -p "$d"
+RUN_ENV="EC_STUB_REFRESH_COUNT=2" run_deploy "$d"
+if [ "$RC" -eq 0 ] \
+   && log_before "daemon-restart" "refresh-webviews" \
+   && grep -q "webviews: refreshed 2" "$d/stdout"; then
+    pass "the webview refresh follows the daemon restart and reports its count"
+else
+    fail "the webview refresh follows the daemon restart and reports its count" \
+         "rc=$RC stdout: $(cat "$d/stdout") log: $(cat "$STUB_LOG")"
+fi
+
+# --- 17. an Emacs without the command skips, and the deploy still succeeds --
+# The running Emacs may predate `agent-repl-refresh-webviews' (step 6's elisp
+# hot-load is what defines it, and it runs after), so an absent symbol is a
+# reported skip rather than a deploy failure.
+d="$TMP/t17"; mkdir -p "$d"
+RUN_ENV="EC_STUB_REFRESH_ABSENT=1" run_deploy "$d"
+if [ "$RC" -eq 0 ] && grep -q "webviews: skipped — function absent" "$d/stdout"; then
+    pass "an Emacs lacking the refresh command skips it without failing the deploy"
+else
+    fail "an Emacs lacking the refresh command skips it without failing the deploy" \
+         "rc=$RC stdout: $(cat "$d/stdout") stderr: $(cat "$d/stderr")"
+fi
+
+# --- 18. no Emacs server means nothing to refresh --------------------------
+d="$TMP/t18"; mkdir -p "$d"; RUN_ENV="EC_STUB_UNAVAILABLE=1" run_deploy "$d"
+if [ "$RC" -eq 0 ] \
+   && ! log_has "refresh-webviews" \
+   && grep -q "webviews: no Emacs running, so no live page to refresh" "$d/stdout"; then
+    pass "an unavailable Emacs server reports there is no live page to refresh"
+else
+    fail "an unavailable Emacs server reports there is no live page to refresh" \
+         "rc=$RC stdout: $(cat "$d/stdout") log: $(cat "$STUB_LOG")"
+fi
+
+# --- 19. a refused daemon restart never reaches the refresh ----------------
+# The refresh is only meaningful once the new daemon is up; a refused bounce
+# leaves the OLD daemon serving, and reloading pages against it is noise.
+d="$TMP/t19"; mkdir -p "$d"; RUN_ENV="EC_STUB_REFUSE=1" run_deploy "$d"
+if [ "$RC" -eq 3 ] && ! log_has "refresh-webviews"; then
+    pass "a refused daemon restart aborts before the webview refresh"
+else
+    fail "a refused daemon restart aborts before the webview refresh" \
+         "rc=$RC log: $(cat "$STUB_LOG")"
 fi
 
 echo

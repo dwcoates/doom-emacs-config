@@ -35,6 +35,12 @@
 #                       survivor keeps running the previous build's code. That
 #                       is belt-and-braces beside the daemon's own version-
 #                       driven stale-shim refresh, not the only guard
+#  5b. webview refresh  `(agent-repl-refresh-webviews)` via emacsclient, right
+#                       after the bounce: the pages mounted in Emacs outlive
+#                       the daemon they loaded against, so each one is
+#                       re-navigated to re-attach to the new daemon. Guarded
+#                       with `fboundp' — a running Emacs that predates the
+#                       command reports a skip instead of failing the deploy
 #   6. elisp reload     with `--elisp <git-range>`: hot-load every non-test
 #                       .el under modules/app/agent-repl changed in the range
 #                       into the running Emacs (test-*.el is batch-only and is
@@ -255,6 +261,7 @@ if ! EMACS_PROBE_OUT="$("$EMACSCLIENT" --eval t 2>&1)"; then
         *"can't find socket"*|*"No socket or alternate editor"*|*"Could not connect to the Emacs daemon"*|*"Connection refused"*)
             log "daemon: Emacs is not running; restart deferred until Emacs starts"
             log "daemon: the rebuilt backend will start automatically at startup"
+            log "webviews: no Emacs running, so no live page to refresh"
             if [ -n "$ELISP_RANGE" ]; then
                 log "elisp: reload deferred; Emacs will load the changed files at startup"
             fi
@@ -287,6 +294,29 @@ else
             ;;
     esac
     log "daemon: restarted"
+
+    # ---- 5b. webview refresh -----------------------------------------------
+    # The pages mounted in Emacs outlive the daemon they were loaded against,
+    # so a bounced daemon leaves every live webview talking to a listener that
+    # no longer exists. Re-navigate them here, from the deploy side.
+    #
+    # `fboundp'-guarded: the running Emacs may predate the command (the elisp
+    # hot-load in step 6 is what would define it, and it runs AFTER this), and
+    # a not-yet-loaded symbol must not fail the deploy — an old Emacs simply
+    # reports the refresh as skipped.
+    REFRESH_FORM='(if (fboundp (quote agent-repl-refresh-webviews)) (format "refreshed %d" (agent-repl-refresh-webviews)) "absent")'
+    REFRESH_OUT="$("$EMACSCLIENT" --eval "$REFRESH_FORM" 2>&1)" || {
+        echo "[deploy-all] webview refresh failed: $REFRESH_OUT" >&2
+        exit 3
+    }
+    case "$REFRESH_OUT" in
+        *absent*)   log "webviews: skipped — function absent (Emacs predates agent-repl-refresh-webviews)" ;;
+        *refreshed*) log "webviews: ${REFRESH_OUT//\"/}" ;;
+        *)
+            echo "[deploy-all] webview refresh returned an unrecognized result: $REFRESH_OUT" >&2
+            exit 3
+            ;;
+    esac
 fi
 
 # ---- 6. elisp hot-reload ---------------------------------------------------
