@@ -322,6 +322,33 @@ describe("sidebar overlay (floating dock)", () => {
   });
 });
 
+describe("sidebar failure footer (.sb-err)", () => {
+  const sbErr = blockAfter(css, "#ws-sidebar .sb-err {");
+
+  it("holds its own band at the rail's foot rather than flexing with the sections", () => {
+    // Arrange / Act — the rail is a flex column; the note must not shrink away.
+    // Assert
+    expect(sbErr).toMatch(/flex:\s*0 0 auto/);
+  });
+
+  it("rules itself off from the sections above so the note reads as its own band", () => {
+    // Arrange / Act
+    // Assert
+    expect(sbErr).toMatch(/border-top:\s*1px solid var\(--border\)/);
+  });
+
+  it("stops claiming the header's auto margin now that it left the header row", () => {
+    // Arrange / Act — margin-left:auto was what pinned it beside the view selector.
+    // Assert
+    expect(sbErr).not.toMatch(/margin-left:\s*auto/);
+  });
+
+  it("no longer carries a header-row override tied to the view selector", () => {
+    // Arrange / Act + Assert — the sibling rule went with the header placement.
+    expect(css).not.toContain(".sb-views ~ .sb-err");
+  });
+});
+
 describe("bubble depth shading", () => {
   const bubbleRule = blockAfter(css, "\n.bubble {");
   /** The black-mix opacity percentage of a shadow token's drop-shadow layer. */

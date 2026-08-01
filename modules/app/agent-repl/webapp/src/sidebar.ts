@@ -515,12 +515,18 @@ function viewSelectorHtml(view: SidebarView): string {
 }
 
 /**
- * The whole rail: header (title, total count, view selector, any transient
- * command-failure note) over the scrolling sections. The active view
- * (`roster.view`) picks the grouping — repo sections or task sections —
- * while the Recently-Merged section renders under both. Pure so the render
- * is testable without a DOM; OPEN is the caller-owned expansion state that
- * must survive every roster push.
+ * The whole rail: header (title, total count, view selector) over the
+ * scrolling sections, with any transient failure note as the rail's FOOTER.
+ * The active view (`roster.view`) picks the grouping — repo sections or task
+ * sections — while the Recently-Merged section renders under both. Pure so
+ * the render is testable without a DOM; OPEN is the caller-owned expansion
+ * state that must survive every roster push.
+ *
+ * The note sits at the bottom rather than beside the control that failed:
+ * every sidebar gesture (view selector, task controls, row switch, repo
+ * fold) reports through one fixed slot, so the user learns a single place
+ * to look instead of hunting for an inline note next to whatever they last
+ * clicked — and a long message can never shove the header's controls around.
  */
 export function sidebarHtml(
   roster: WorkspaceRoster,
@@ -532,7 +538,8 @@ export function sidebarHtml(
   const taskView = roster.view === "task";
   const groups = taskView ? roster.tasks : roster.repos;
   const total = groups.reduce((n, g) => n + countRows(g.rows), 0);
-  const err = errorNote === null ? "" : `<span class="sb-err">${escapeHtml(errorNote)}</span>`;
+  const err =
+    errorNote === null ? "" : `<div class="sb-err" role="alert">${escapeHtml(errorNote)}</div>`;
   const sections = taskView
     ? roster.tasks.map((g) => taskSectionHtml(g, roster.navDir, open, nowMs, monitoring)).join("")
     : roster.repos
@@ -548,9 +555,9 @@ export function sidebarHtml(
       <span class="sb-title">${taskView ? "Tasks" : "Workspaces"}</span>
       <span class="sb-count">${total}</span>
       ${viewSelectorHtml(roster.view)}
-      ${err}
     </div>
-    <div class="sb-scroll">${sections}${merged}</div>`;
+    <div class="sb-scroll">${sections}${merged}</div>
+    ${err}`;
 }
 
 /** The header note shown when a POSTed command did not land. */
@@ -619,7 +626,16 @@ export class WorkspaceSidebar {
     // One delegated listener: every render rewrites the mount's children,
     // so per-row bindings would die with the first push after them.
     this.mount.addEventListener("click", (e) => {
-      this.onClick(e.target as HTMLElement);
+      // A gesture that could not even be classified is still a gesture the
+      // user made and expects an answer to, so it reports in the SAME footer
+      // slot a failed POST does — then rethrows, because a contract breach in
+      // the render/handler pair must stay as loud as it ever was.
+      try {
+        this.onClick(e.target as HTMLElement);
+      } catch (err: unknown) {
+        this.showError(String(err));
+        throw err;
+      }
     });
   }
 

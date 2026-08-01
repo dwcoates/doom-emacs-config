@@ -502,11 +502,26 @@ describe("sidebarHtml", () => {
     expect(out).not.toContain("<img");
   });
 
-  it("shows the transient error note in the header", () => {
+  it("shows the transient error note as the rail's footer", () => {
     // Arrange + Act
     const out = sidebarHtml(roster(), new Set(), NOW_MS, "workspace command failed");
     // Assert
-    expect(out).toContain(`<span class="sb-err">workspace command failed</span>`);
+    expect(out).toContain(`<div class="sb-err" role="alert">workspace command failed</div>`);
+  });
+
+  it("puts the error note after the scrolling sections, not in the header", () => {
+    // Arrange + Act
+    const out = sidebarHtml(roster(), new Set(), NOW_MS, "workspace command failed");
+    // Assert
+    expect(out.indexOf("sb-err")).toBeGreaterThan(out.indexOf(`class="sb-scroll"`));
+  });
+
+  it("keeps the error note out of the scrolling sections", () => {
+    // Arrange + Act
+    const out = sidebarHtml(roster(), new Set(), NOW_MS, "workspace command failed");
+    // Assert — the note follows the .sb-scroll element's close, so scrolling
+    // the roster can never carry it out of view.
+    expect(out).toContain(`</div>\n    <div class="sb-err"`);
   });
 
   it("omits the error slot while no note is pending", () => {
@@ -618,10 +633,36 @@ function click(el: Element): void {
   el.dispatchEvent(new MouseEvent("click", { bubbles: true }));
 }
 
+/**
+ * A rail carrying a task control the render could never emit — one with no
+ * task id — so a click on it trips the handler's contract check. jsdom turns
+ * the rethrow into a window `error` event; the listener collects it (and
+ * preventDefault-s it, so the deliberate throw is not reported as an
+ * unhandled test-run error) for the assertions to read back.
+ */
+function breachHarness(): { mount: HTMLElement; reported: string[] } {
+  vi.spyOn(console, "error").mockImplementation(() => undefined);
+  const reported: string[] = [];
+  const onError = (e: ErrorEvent): void => {
+    reported.push(String(e.error));
+    e.preventDefault();
+  };
+  window.addEventListener("error", onError);
+  cleanups.push(() => window.removeEventListener("error", onError));
+  const { mount, sidebar } = harness();
+  sidebar.update(roster());
+  mount.querySelector(".sb-head")!.insertAdjacentHTML("beforeend", `<span data-task-check></span>`);
+  return { mount, reported };
+}
+
+/** Teardown registered by a test's arrangement, drained after each test. */
+const cleanups: Array<() => void> = [];
+
 /** Settle the post's promise chain (real timers only). */
 const flush = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
 
 afterEach(() => {
+  while (cleanups.length > 0) cleanups.pop()!();
   vi.restoreAllMocks();
   vi.useRealTimers();
 });
@@ -957,9 +998,9 @@ describe("WorkspaceSidebar", () => {
     expect(calls).toHaveLength(0);
   });
 
-  it("surfaces a non-2xx command response in the header", async () => {
+  it("surfaces a non-2xx command response in the footer", async () => {
     // Arrange
-    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
     const { mount, sidebar } = harness({ ok: false });
     sidebar.update(roster());
     // Act
@@ -969,7 +1010,7 @@ describe("WorkspaceSidebar", () => {
     expect(mount.querySelector(".sb-err")!.textContent).toBe(COMMAND_FAILED_NOTICE);
   });
 
-  it("surfaces a network failure in the header", async () => {
+  it("surfaces a network failure in the footer", async () => {
     // Arrange
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     const { mount, sidebar } = harness({ reject: true });
@@ -979,6 +1020,24 @@ describe("WorkspaceSidebar", () => {
     await flush();
     // Assert
     expect(mount.querySelector(".sb-err")!.textContent).toBe(COMMAND_FAILED_NOTICE);
+  });
+
+  it("renders a click-handler contract breach in the same footer slot", () => {
+    // Arrange — a task control the render could never emit: no task id.
+    const { mount } = breachHarness();
+    // Act
+    click(mount.querySelector("[data-task-check]")!);
+    // Assert
+    expect(mount.querySelector(".sb-err")!.textContent).toContain("task control without an id");
+  });
+
+  it("still rethrows a click-handler contract breach after showing it", () => {
+    // Arrange
+    const { mount, reported } = breachHarness();
+    // Act
+    click(mount.querySelector("[data-task-check]")!);
+    // Assert — the footer note is additive; the breach stays as loud as it was.
+    expect(reported.some((r) => r.includes("task control without an id"))).toBe(true);
   });
 
   it("clears the failure note after its holding time", async () => {
