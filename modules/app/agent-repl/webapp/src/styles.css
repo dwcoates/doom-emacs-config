@@ -2174,9 +2174,16 @@ pre {
    degrades to a pulse (a pulse in place reads as a stalled spinner) — the
    rotation stays continuous and only slows down. */
 @media (prefers-reduced-motion: reduce) {
-  .thinking-spinner,
-  .pfooter-spin {
+  .thinking-spinner {
     animation-duration: 1.4s;
+  }
+  /* The footer's breath gets the same treatment for the same reason, and NOT
+     `animation: none`: it is the footer's only remaining "the agent is working"
+     motion, so stopping it would say the session had stalled. It slows to a
+     markedly calmer cycle instead, and the per-arrival color step (which is not
+     an animation at all) carries the tick regardless. */
+  .pfooter-breath {
+    animation-duration: 6s;
   }
   /* Per-animation durations, in the order the base rule declares them: the
      slowed rotation, then the unchanged fade-in (whose 1s delay, declared
@@ -2429,11 +2436,10 @@ pre {
    first and only thing to give when the strip tightens — its ellipsis absorbs
    any squeeze below its content width.
 
-   `min-width` is its HAPPY-EMPTY width: wide enough to out-measure the widest
-   fixed cell (the 17ch phase) at every dock width, small enough that the fixed
-   edges (17 + 10 + 11 + 9 = 47ch) still fit inside the capped dock alongside
-   it. It replaces the old `min-width: 0`, which is what let the cell collapse
-   to nothing. */
+   `min-width` is its HAPPY-EMPTY width: wide enough to out-measure every fixed
+   cell beside it at every dock width, small enough that all of them still fit
+   inside the capped dock alongside it. It replaces the old `min-width: 0`,
+   which is what let the cell collapse to nothing. */
 .pfooter-grow {
   flex: 1 1 auto;
   min-width: 20ch;
@@ -2446,23 +2452,26 @@ pre {
 /* Phase tones: the footer's anchor word, colored by what the session is doing.
    Each reuses the hue that already speaks for that state elsewhere in the GUI,
    so the footer never invents a vocabulary. */
-/* FIXED geometry, min == max. The phase vocabulary is CLOSED (see phaseLabel()
-   in progress-footer.ts), so the cell is sized once to the widest reading it
-   can ever hold and then never moves: the strip's left edge is identical in
-   every phase, and a short word like `ready` reads as floating in its cell
-   rather than shrink-wrapped by it.
+/* SHRINK-WRAPPED, with UNIFORM padding. The cell used to be pinned at a fixed
+   17ch — wide enough for the longest phrase in the closed vocabulary, so the
+   strip's left edge never moved. That stability was bought with a lot of dead
+   air: a short word like `ready` sat in the middle of a cell more than twice
+   its width, and the gap read as an enormous asymmetric left/right padding
+   beside every other cell's tight one.
 
-   The budget covers both worst cases at 0.78rem/650: the longest phrase,
-   `merge conflict` (14 characters, no spinner), and the longest SPINNING
-   phrase, `monitoring` plus the 0.8em arc and its 6px gap — each comfortably
-   inside 17ch minus the cell's own 20px of border-box padding, so no phrase
-   truncates and `white-space: nowrap` stays honest. It neither grows nor
-   shrinks (it inherits `flex: 0 0 auto` from `.pfooter-cell`), so the slack it
-   used to absorb now belongs entirely to the grow cell. */
+   So the fixed width is gone and the padding is a single value: the cell's
+   horizontal breathing room now equals its vertical breathing room exactly, and
+   the word is the only thing setting the cell's width. The strip's left edge
+   moves a little between phases as a consequence, which is the trade this
+   deliberately takes — a phase change is already a visible event, and the dead
+   air was visible ALL the time.
+
+   Nothing here truncates: the cell still neither grows nor shrinks (it inherits
+   `flex: 0 0 auto` from `.pfooter-cell`), so `white-space: nowrap` stays honest
+   for every phrase, and all the strip's slack remains the grow cell's. */
 .pfooter-phase {
   font-weight: 650;
-  min-width: 17ch;
-  max-width: 17ch;
+  padding: 11px;
 }
 .pfooter-secondary {
   margin-left: 0.45em;
@@ -2552,17 +2561,31 @@ pre {
   font-weight: 600;
 }
 
-/* The phase spinner: the same arc the feed's progress rows wore, inheriting
-   its cell's phase color so it spins in whatever hue the phase speaks in. */
-.pfooter-spin {
-  flex: none;
+/* The breathing phase word (breathing.ts): the footer's liveness signal, which
+   replaced the rotating arc that used to sit beside it.
+
+   `transform: scale` and NOT `font-size`, which is the whole reason this is a
+   span rather than the cell: a font-size oscillation would re-measure the word
+   sixty times a second and shove the entire cell row sideways with every
+   breath, and the phase cell now shrink-wraps its word (see `.pfooter-phase`),
+   so there is no fixed width left to absorb that. A transform is painted
+   without re-laying anything out, so the strip stays perfectly still while the
+   word breathes. `display: inline-block` is what makes a transform apply at all
+   — inline boxes ignore it.
+
+   The animation carries NO `animation-delay` here on purpose. Each render emits
+   a negative one inline, which seeks a freshly built element to the point the
+   cycle had already reached; declaring a delay in this rule would be the value
+   the inline style is there to override.
+
+   The duration must stay in step with BREATH_PERIOD_MS. */
+.pfooter-breath {
   display: inline-block;
-  width: 0.8em;
-  height: 0.8em;
-  border: 2px solid color-mix(in srgb, currentColor 25%, transparent);
-  border-top-color: currentColor;
-  border-radius: 50%;
-  animation: thinking-spin 0.8s linear infinite;
+  animation: pfooter-breath 2.6s ease-in-out infinite;
+}
+@keyframes pfooter-breath {
+  0%, 100% { transform: scale(0.93); }
+  50% { transform: scale(1.07); }
 }
 
 /* The turn clock and token cells: tabular figures so a ticking digit never
