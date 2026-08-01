@@ -64,6 +64,9 @@ type fakePrompts struct {
 	// resolutions records every merge conflict this double was asked to drive
 	// the workspace's own session through.
 	resolutions []merge.ConflictResolution
+	// testFailures records every merge test failure this double was asked to
+	// drive the workspace's own session through.
+	testFailures []merge.TestFailureResolution
 }
 
 // TurnActive makes the prompt double the gate's turn source.
@@ -74,6 +77,13 @@ func (f *fakePrompts) TurnActive(string) (bool, error) { return f.turnActive, f.
 // resolutions it was asked to drive and reports each as a completed turn.
 func (f *fakePrompts) ResolveMergeConflict(_ context.Context, res merge.ConflictResolution) error {
 	f.resolutions = append(f.resolutions, res)
+	return f.err
+}
+
+// ResolveMergeTestFailure makes the prompt double merge.Coordinator's test-gate
+// resolver too, on the same footing as ResolveMergeConflict.
+func (f *fakePrompts) ResolveMergeTestFailure(_ context.Context, res merge.TestFailureResolution) error {
+	f.testFailures = append(f.testFailures, res)
 	return f.err
 }
 
@@ -1310,7 +1320,11 @@ func TestMergeResumeSurfacesAnIncompleteRequest(t *testing.T) {
 func newTestMergeCoordinator(t *testing.T) *merge.QueueCoordinator {
 	t.Helper()
 	logf := func(string, ...any) {}
-	driver, err := merge.NewDriver(merge.Config{Logf: logf, Sink: noopSink{}})
+	suite, err := merge.NewRepoSuiteRunner(logf)
+	if err != nil {
+		t.Fatalf("suite runner: %v", err)
+	}
+	driver, err := merge.NewDriver(merge.Config{Logf: logf, Sink: noopSink{}, Suite: suite})
 	if err != nil {
 		t.Fatalf("driver: %v", err)
 	}
@@ -1324,7 +1338,8 @@ func newTestMergeCoordinator(t *testing.T) *merge.QueueCoordinator {
 	}
 	coord, err := merge.NewCoordinator(merge.CoordinatorConfig{
 		Logf: logf, Sink: noopSink{}, Queue: queue, Phases: noopPhases{}, Keyer: keyer, Picker: driver,
-		Lease: stubMergeLease{}, Resolver: stubMergeResolver{}, PostMerge: stubPostMergeHook{},
+		Lease: stubMergeLease{}, Resolver: stubMergeResolver{}, TestResolver: stubMergeTestResolver{},
+		PostMerge: stubPostMergeHook{},
 	})
 	if err != nil {
 		t.Fatalf("coordinator: %v", err)
@@ -1359,6 +1374,12 @@ func (stubMergeLease) Held(string) bool                                { return 
 type stubMergeResolver struct{}
 
 func (stubMergeResolver) Resolve(context.Context, merge.ConflictResolution) error { return nil }
+
+// stubMergeTestResolver is the merge.TestFailureResolver sibling of
+// stubMergeResolver, bound by the same harnesses for the same reason.
+type stubMergeTestResolver struct{}
+
+func (stubMergeTestResolver) Resolve(context.Context, merge.TestFailureResolution) error { return nil }
 
 // newTestMergeQueue roots the durable merge queue in a scratch directory, so a
 // harness never publishes into the operator's real state root.

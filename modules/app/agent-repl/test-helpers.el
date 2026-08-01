@@ -327,6 +327,14 @@ from START (default 0), or nil when NEEDLE does not occur."
   (defvar agent-repl--notification-backend (lambda (_ws _title _msg) nil)
     "Stub: no-op notification backend for test environments."))
 
+(defun agent-repl-test--inert-timer (&rest _)
+  "Return a fresh timer object that is not scheduled on any timer list.
+Used as the `:override' for `run-with-timer' / `run-with-idle-timer'
+while the module loads, so load-time arming produces a REAL timer object
+— which `agent-repl--register-timer' requires — without ever scheduling
+work in the batch process.  Ignores every argument by design."
+  (timer-create))
+
 ;; Isolate agent-repl's canonical state dir to a throwaway temp location
 ;; for the ENTIRE test session, BEFORE the module loads.  `core.el'
 ;; resolves `agent-repl--global-state-dir' (and the log path default it
@@ -350,10 +358,21 @@ from START (default 0), or nil when NEEDLE does not occur."
   ;; and idle (`run-with-idle-timer') registrations that fire at module
   ;; load are overridden so no real timer leaks into the batch test
   ;; process.
+  ;;
+  ;; The override returns a real but NEVER-SCHEDULED timer object rather
+  ;; than nil: module-load arming now goes through
+  ;; `agent-repl--register-timer', whose TIMER argument is an invariant it
+  ;; signals on.  A `timer-create' object satisfies that contract, is in
+  ;; neither `timer-list' nor `timer-idle-list' (so
+  ;; `agent-repl--timer-armed-p' correctly reports it as un-armed), and
+  ;; still fires nothing.
+  ;;
+  ;; The override is a NAMED function, not an anonymous lambda, so
+  ;; `advice-remove' below can actually match and remove it.
   (defvar agent-repl-test--orig-run-with-timer (symbol-function 'run-with-timer))
   (defvar agent-repl-test--orig-run-with-idle-timer (symbol-function 'run-with-idle-timer))
-  (advice-add 'run-with-timer :override (lambda (&rest _) nil))
-  (advice-add 'run-with-idle-timer :override (lambda (&rest _) nil))
+  (advice-add 'run-with-timer :override #'agent-repl-test--inert-timer)
+  (advice-add 'run-with-idle-timer :override #'agent-repl-test--inert-timer)
 
   ;; Load the module
   (load (expand-file-name "config.el" (file-name-directory
@@ -361,8 +380,8 @@ from START (default 0), or nil when NEEDLE does not occur."
         nil t)
 
   ;; Restore run-with-timer / run-with-idle-timer after loading
-  (advice-remove 'run-with-timer (lambda (&rest _) nil))
-  (advice-remove 'run-with-idle-timer (lambda (&rest _) nil))
+  (advice-remove 'run-with-timer #'agent-repl-test--inert-timer)
+  (advice-remove 'run-with-idle-timer #'agent-repl-test--inert-timer)
 
   ;; Restore file-notify-add-watch after loading
   (advice-remove 'file-notify-add-watch #'file-notify-add-watch--test-stub))

@@ -220,6 +220,18 @@ func (r mergeConflictResolver) Resolve(ctx context.Context, res merge.ConflictRe
 
 var _ merge.ConflictResolver = mergeConflictResolver{}
 
+// mergeTestFailureResolver adapts the PromptRouter to merge.TestFailureResolver,
+// the port merge.Coordinator drives a broken test suite through. It is derived
+// from Prompts for exactly the reason mergeConflictResolver is: the fix prompt
+// is admissible only against the session the merge lease was taken over.
+type mergeTestFailureResolver struct{ prompts PromptRouter }
+
+func (r mergeTestFailureResolver) Resolve(ctx context.Context, res merge.TestFailureResolution) error {
+	return r.prompts.ResolveMergeTestFailure(ctx, res)
+}
+
+var _ merge.TestFailureResolver = mergeTestFailureResolver{}
+
 // The command handler's merge surface IS merge.Coordinator. There is no
 // adapter between them any more: the handler enqueues, the coordinator owns
 // the queue and the lease, and merge.Driver is reached only from inside the
@@ -262,7 +274,14 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 	}
 	mgr := cfg.SSM
 
-	driver, err := merge.NewDriver(merge.Config{Logf: logf, Sink: mergeSink{mgr}})
+	// The per-commit test gate. It resolves the TARGET repository's own test
+	// entrypoint, so a target that declares none skips the gate loudly rather
+	// than failing every merge into a repository that is not this one.
+	suite, err := merge.NewRepoSuiteRunner(logf)
+	if err != nil {
+		return nil, fmt.Errorf("server: build merge suite runner: %w", err)
+	}
+	driver, err := merge.NewDriver(merge.Config{Logf: logf, Sink: mergeSink{mgr}, Suite: suite})
 	if err != nil {
 		return nil, fmt.Errorf("server: build merge driver: %w", err)
 	}
@@ -279,15 +298,16 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 		return nil, err
 	}
 	coordinator, err := merge.NewCoordinator(merge.CoordinatorConfig{
-		Logf:      logf,
-		Sink:      mergeSink{mgr},
-		Queue:     cfg.MergeQueue,
-		Phases:    mergePhases{mgr},
-		Keyer:     keyer,
-		Picker:    driver,
-		Lease:     cfg.MergeLease,
-		Resolver:  mergeConflictResolver{prompts: cfg.Prompts},
-		PostMerge: postMerge,
+		Logf:         logf,
+		Sink:         mergeSink{mgr},
+		Queue:        cfg.MergeQueue,
+		Phases:       mergePhases{mgr},
+		Keyer:        keyer,
+		Picker:       driver,
+		Lease:        cfg.MergeLease,
+		Resolver:     mergeConflictResolver{prompts: cfg.Prompts},
+		TestResolver: mergeTestFailureResolver{prompts: cfg.Prompts},
+		PostMerge:    postMerge,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("server: build merge coordinator: %w", err)

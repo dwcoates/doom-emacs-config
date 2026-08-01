@@ -2833,6 +2833,202 @@ log at 71,425 records."
                 (should (string-match-p "buffer-name: suffix=-view" (buffer-string)))))
           (delete-directory project t))))))
 
+;;;; ---- Tests: keyed timer registry ----
+
+(defmacro agent-repl-test--with-timer-registry (&rest body)
+  "Run BODY against fresh, isolated timer registries.
+Any timer BODY armed is cancelled on the way out, so no real timer
+survives into the rest of the batch run."
+  (declare (indent 0))
+  `(let ((agent-repl--timers nil)
+         (agent-repl--keyed-timers nil))
+     (unwind-protect (progn ,@body)
+       (agent-repl--cancel-all-timers))))
+
+(defun agent-repl-test--armed-timer ()
+  "Return a genuinely scheduled timer that will not fire during the run."
+  (run-with-timer 3600 nil #'ignore))
+
+(defvar agent-repl-test--fake-heartbeat-arm-count 0
+  "Number of times `agent-repl-test--arm-fake-heartbeat' has been called.")
+
+(defun agent-repl-test--arm-fake-heartbeat ()
+  "Arm a stand-in heartbeat under `:test-heartbeat', counting the call."
+  (setq agent-repl-test--fake-heartbeat-arm-count
+        (1+ agent-repl-test--fake-heartbeat-arm-count))
+  (agent-repl--register-timer :test-heartbeat (agent-repl-test--armed-timer)))
+
+(ert-deftest agent-repl-test-register-timer-replaces-rather-than-stacks ()
+  "Re-arming a key cancels the prior timer instead of stacking a duplicate."
+  ;; Arrange
+  (agent-repl-test--with-timer-registry
+    (let ((first (agent-repl--register-timer :test-key (agent-repl-test--armed-timer))))
+      ;; Act
+      (let ((second (agent-repl--register-timer :test-key (agent-repl-test--armed-timer))))
+        ;; Assert
+        (should (equal 1 (length agent-repl--timers)))
+        (should (equal 1 (length agent-repl--keyed-timers)))
+        (should (eq second (cdr (assq :test-key agent-repl--keyed-timers))))
+        (should-not (memq first timer-list))))))
+
+(ert-deftest agent-repl-test-cancel-all-then-one-arm-per-key-yields-one-each ()
+  "Cancel-all followed by a single arm per key leaves exactly one timer per key."
+  ;; Arrange
+  (agent-repl-test--with-timer-registry
+    (agent-repl--register-timer :key-a (agent-repl-test--armed-timer))
+    (agent-repl--register-timer :key-b (agent-repl-test--armed-timer))
+    (agent-repl--cancel-all-timers)
+    ;; Act
+    (agent-repl--register-timer :key-a (agent-repl-test--armed-timer))
+    (agent-repl--register-timer :key-b (agent-repl-test--armed-timer))
+    ;; Assert
+    (should (equal 2 (length agent-repl--timers)))
+    (should (equal 2 (length agent-repl--keyed-timers)))
+    (should (agent-repl--timer-armed-p :key-a))
+    (should (agent-repl--timer-armed-p :key-b))))
+
+(ert-deftest agent-repl-test-cancel-all-timers-clears-the-keyed-registry ()
+  "Cancel-all empties the keyed registry, not just the flat timer list."
+  ;; Arrange
+  (agent-repl-test--with-timer-registry
+    (agent-repl--register-timer :test-key (agent-repl-test--armed-timer))
+    ;; Act
+    (agent-repl--cancel-all-timers)
+    ;; Assert
+    (should (null agent-repl--keyed-timers))))
+
+(ert-deftest agent-repl-test-cancel-timer-key-deregisters-only-that-key ()
+  "Cancelling one key leaves every other key's timer armed."
+  ;; Arrange
+  (agent-repl-test--with-timer-registry
+    (agent-repl--register-timer :key-a (agent-repl-test--armed-timer))
+    (agent-repl--register-timer :key-b (agent-repl-test--armed-timer))
+    ;; Act
+    (should (agent-repl--cancel-timer-key :key-a))
+    ;; Assert
+    (should-not (agent-repl--timer-armed-p :key-a))
+    (should (agent-repl--timer-armed-p :key-b))))
+
+(ert-deftest agent-repl-test-register-timer-signals-on-a-non-timer ()
+  "A caller handing something that is not a timer is a bug and must signal."
+  ;; Arrange
+  (agent-repl-test--with-timer-registry
+    ;; Act / Assert
+    (should-error (agent-repl--register-timer :test-key "not-a-timer") :type 'error)
+    (should (null agent-repl--keyed-timers))))
+
+(ert-deftest agent-repl-test-register-timer-signals-on-a-nil-key ()
+  "A nil KEY would make the registry unaddressable, so it must signal."
+  ;; Arrange
+  (agent-repl-test--with-timer-registry
+    (let ((timer (agent-repl-test--armed-timer)))
+      (unwind-protect
+          ;; Act / Assert
+          (should-error (agent-repl--register-timer nil timer) :type 'error)
+        (cancel-timer timer)))))
+
+;;;; ---- Tests: heartbeat assertion ----
+
+(ert-deftest agent-repl-test-assert-heartbeat-rearms-a-stranded-key ()
+  "A key with no live timer is re-armed through its owner's arm function."
+  ;; Arrange
+  (agent-repl-test--with-timer-registry
+    (let ((warnings nil)
+          (agent-repl--required-timer-keys
+           '((:test-heartbeat . agent-repl-test--arm-fake-heartbeat)))
+          (agent-repl-test--fake-heartbeat-arm-count 0))
+      (cl-letf (((symbol-function 'agent-repl--warn)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warnings))))
+        ;; Act
+        (let ((result (agent-repl--assert-heartbeat-armed)))
+          ;; Assert
+          (should (equal '(:test-heartbeat) (plist-get result :rearmed)))
+          (should (equal 1 agent-repl-test--fake-heartbeat-arm-count))
+          (should (agent-repl--timer-armed-p :test-heartbeat)))))))
+
+(ert-deftest agent-repl-test-assert-heartbeat-warns-naming-the-stranded-key ()
+  "The re-arm is reported loudly, naming the key that was stranded."
+  ;; Arrange
+  (agent-repl-test--with-timer-registry
+    (let ((warnings nil)
+          (agent-repl--required-timer-keys
+           '((:test-heartbeat . agent-repl-test--arm-fake-heartbeat)))
+          (agent-repl-test--fake-heartbeat-arm-count 0))
+      (cl-letf (((symbol-function 'agent-repl--warn)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warnings))))
+        ;; Act
+        (agent-repl--assert-heartbeat-armed)
+        ;; Assert
+        (should (cl-some (lambda (w)
+                           (string-match-p "key=:test-heartbeat outcome=stranded" w))
+                         warnings))))))
+
+(ert-deftest agent-repl-test-assert-heartbeat-is-quiet-when-all-armed ()
+  "An already-armed contract produces no warning and no re-arm."
+  ;; Arrange
+  (agent-repl-test--with-timer-registry
+    (let ((warnings nil)
+          (agent-repl--required-timer-keys
+           '((:test-heartbeat . agent-repl-test--arm-fake-heartbeat)))
+          (agent-repl-test--fake-heartbeat-arm-count 0))
+      (agent-repl--register-timer :test-heartbeat (agent-repl-test--armed-timer))
+      (cl-letf (((symbol-function 'agent-repl--warn)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) warnings))))
+        ;; Act
+        (let ((result (agent-repl--assert-heartbeat-armed)))
+          ;; Assert
+          (should (equal '(:test-heartbeat) (plist-get result :armed)))
+          (should (null (plist-get result :rearmed)))
+          (should (equal 0 agent-repl-test--fake-heartbeat-arm-count))
+          (should (null warnings)))))))
+
+(ert-deftest agent-repl-test-assert-heartbeat-reports-an-unloaded-owner ()
+  "A key whose owner file is not loaded is reported, never silently passed."
+  ;; Arrange
+  (agent-repl-test--with-timer-registry
+    (let ((agent-repl--required-timer-keys
+           '((:test-heartbeat . agent-repl-test--arm-fn-that-does-not-exist))))
+      (cl-letf (((symbol-function 'agent-repl--warn) (lambda (&rest _) nil)))
+        ;; Act
+        (let ((result (agent-repl--assert-heartbeat-armed)))
+          ;; Assert
+          (should (equal '(:test-heartbeat) (plist-get result :unavailable))))))))
+
+(ert-deftest agent-repl-test-heartbeat-assertion-defers-on-a-cold-load ()
+  "A cold load (owners not yet defined) defers instead of erroring or stranding."
+  ;; Arrange — this is exactly core.el's own load-time state in a fresh
+  ;; batch process: core.el is evaluated before status.el, autosave.el,
+  ;; workspace-status-export.el, and readiness.el define the arm functions.
+  (agent-repl-test--with-timer-registry
+    (let ((agent-repl--required-timer-keys
+           '((:test-heartbeat . agent-repl-test--arm-fn-that-does-not-exist)))
+          (agent-repl--heartbeat-assert-deferral-timer nil)
+          (scheduled nil))
+      (cl-letf (((symbol-function 'run-with-idle-timer)
+                 (lambda (&rest _) (setq scheduled t) (timer-create))))
+        ;; Act
+        (let ((outcome (agent-repl--assert-heartbeat-armed-when-owners-load)))
+          ;; Assert
+          (should (eq outcome :deferred))
+          (should scheduled)
+          (should (timerp agent-repl--heartbeat-assert-deferral-timer)))))))
+
+(ert-deftest agent-repl-test-heartbeat-assertion-runs-immediately-when-owners-exist ()
+  "With every arm function defined the check runs inline rather than deferring."
+  ;; Arrange — a bare core.el hot-load into a RUNNING Emacs looks like this.
+  (agent-repl-test--with-timer-registry
+    (let ((agent-repl--required-timer-keys
+           '((:test-heartbeat . agent-repl-test--arm-fake-heartbeat)))
+          (agent-repl-test--fake-heartbeat-arm-count 0)
+          (agent-repl--heartbeat-assert-deferral-timer nil))
+      (cl-letf (((symbol-function 'agent-repl--warn) (lambda (&rest _) nil)))
+        ;; Act
+        (let ((outcome (agent-repl--assert-heartbeat-armed-when-owners-load)))
+          ;; Assert
+          (should (eq :checked (car outcome)))
+          (should (equal '(:test-heartbeat) (plist-get (cdr outcome) :rearmed)))
+          (should (null agent-repl--heartbeat-assert-deferral-timer)))))))
+
 (provide 'test-core)
 
 ;;; test-core.el ends here
