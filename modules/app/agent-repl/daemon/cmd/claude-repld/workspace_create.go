@@ -15,6 +15,7 @@ import (
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	"claude-repld/internal/gitexec"
 	"claude-repld/internal/registry"
 	"claude-repld/internal/server"
 	workspacecreate "claude-repld/internal/workspace/create"
@@ -45,8 +46,10 @@ type GitRunner interface {
 type ExecGitRunner struct{}
 
 func (ExecGitRunner) RunGit(ctx context.Context, dir string, args ...string) (string, int, error) {
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Dir = dir
+	// gitexec.Command strips inherited repository bindings (GIT_DIR and
+	// friends) so the nominated dir is the only repository selector — a daemon
+	// launched from a Git hook must never create worktrees in the hook's repo.
+	cmd := gitexec.Command(ctx, dir, args...)
 	out, err := cmd.CombinedOutput()
 	if err == nil {
 		return string(out), 0, nil

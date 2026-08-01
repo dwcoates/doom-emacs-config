@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -95,6 +96,104 @@ func TestBuildPostMergeHookBindsBothDerivedDependencies(t *testing.T) {
 	}
 	if hook == nil {
 		t.Fatalf("buildPostMergeHook() hook = nil, want a notifier")
+	}
+}
+
+// recordingHook is a merge.PostMergeHook that remembers it ran and can be told
+// to fail.
+type recordingHook struct {
+	ran int
+	err error
+}
+
+func (h *recordingHook) AfterMerged(context.Context, merge.Request) error {
+	h.ran++
+	return h.err
+}
+
+func TestFanOutPostMergeHookRunsEveryBoundHook(t *testing.T) {
+	// Arrange.
+	first, second := &recordingHook{}, &recordingHook{}
+	fan := &fanOutPostMergeHook{logf: t.Logf, hooks: []namedHook{
+		{name: "parent-handoff", hook: first},
+		{name: "self-reload", hook: second},
+	}}
+
+	// Act.
+	err := fan.AfterMerged(context.Background(), merge.Request{Workspace: "/ws"})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("AfterMerged() error = %v", err)
+	}
+	if first.ran != 1 || second.ran != 1 {
+		t.Fatalf("hook runs = (%d, %d), want both run exactly once", first.ran, second.ran)
+	}
+}
+
+// A failing notifier must never cancel the redeploy: chaining them is how a
+// merge lands with neither the parent told nor the stack rebuilt.
+func TestFanOutPostMergeHookRunsTheSecondHookAfterTheFirstFails(t *testing.T) {
+	// Arrange.
+	first := &recordingHook{err: errors.New("parent unreachable")}
+	second := &recordingHook{}
+	fan := &fanOutPostMergeHook{logf: t.Logf, hooks: []namedHook{
+		{name: "parent-handoff", hook: first},
+		{name: "self-reload", hook: second},
+	}}
+
+	// Act.
+	err := fan.AfterMerged(context.Background(), merge.Request{Workspace: "/ws"})
+
+	// Assert.
+	if err == nil {
+		t.Fatalf("AfterMerged() error = nil, want the first hook's failure surfaced")
+	}
+	if second.ran != 1 {
+		t.Fatalf("second hook runs = %d, want it run despite the first hook failing", second.ran)
+	}
+}
+
+func TestFanOutPostMergeHookSurfacesEveryFailureIndependently(t *testing.T) {
+	// Arrange — both halves fail, for different reasons.
+	fan := &fanOutPostMergeHook{logf: t.Logf, hooks: []namedHook{
+		{name: "parent-handoff", hook: &recordingHook{err: errors.New("parent unreachable")}},
+		{name: "self-reload", hook: &recordingHook{err: errors.New("spawn refused")}},
+	}}
+
+	// Act.
+	err := fan.AfterMerged(context.Background(), merge.Request{Workspace: "/ws"})
+
+	// Assert.
+	if err == nil {
+		t.Fatalf("AfterMerged() error = nil, want both failures surfaced")
+	}
+	for _, want := range []string{"parent-handoff: parent unreachable", "self-reload: spawn refused"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("AfterMerged() error = %v, want it to name %q", err, want)
+		}
+	}
+}
+
+// A test binary lives in the build cache, so it has no checkout to redeploy and
+// must never arm the trigger that bounces the live stack.
+func TestBuildSelfReloadTriggerIsDisabledForABinaryOutsideACheckout(t *testing.T) {
+	// Arrange — this very test binary.
+	var records []string
+	logf := func(format string, _ ...any) { records = append(records, format) }
+
+	// Act.
+	trigger, armed, err := buildSelfReloadTrigger(logf)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("buildSelfReloadTrigger() error = %v", err)
+	}
+	if armed || trigger != nil {
+		t.Fatalf("buildSelfReloadTrigger armed the redeploy from a test binary")
+	}
+	if len(records) != 1 || !strings.Contains(records[0], "self-merge redeploy DISABLED") {
+		t.Fatalf("buildSelfReloadTrigger records = %v, want a loud disabled record", records)
 	}
 }
 

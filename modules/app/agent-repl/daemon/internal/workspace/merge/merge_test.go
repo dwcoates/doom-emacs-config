@@ -3,11 +3,11 @@ package merge
 import (
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
+
+	"claude-repld/internal/gitexec"
 )
 
 func TestMain(m *testing.M) {
@@ -67,64 +67,56 @@ func newTestDriver(t *testing.T, sink StateSink) *Driver {
 	return e
 }
 
-// A Git hook exports repository bindings (GIT_DIR, GIT_INDEX_FILE, ...) into
-// every child it runs. merge.Driver's git must operate on `-C dir` and
-// nothing else, so gitCmd strips those bindings — otherwise a daemon (or this
-// suite) running under the repo's own pre-commit hook cherry-picks into the
-// HOOK'S repository instead of the fixture's.
-func TestGitCmdStripsInheritedRepositoryBindings(t *testing.T) {
-	// Arrange — a hook-shaped environment.
-	t.Setenv("GIT_DIR", "/somewhere/.git")
-	t.Setenv("GIT_INDEX_FILE", "/somewhere/.git/index")
-	t.Setenv("GIT_WORK_TREE", "/somewhere")
+// The env-shape assertions on the shared builder live in internal/gitexec.
+// What this package owns is that merge.Driver's OWN git goes through that
+// builder: a daemon (or this suite) running under the repo's pre-commit hook
+// inherits GIT_DIR and would otherwise cherry-pick into the HOOK'S repository
+// instead of the fixture's.
+func TestMergeIgnoresAnInheritedGitDir(t *testing.T) {
+	// Arrange — a real fixture merge, plus a hook-shaped leak pointing elsewhere.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	writeFile(t, featureDir, "feature.txt", "hello\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "add feature.txt")
+
+	sink := &recordingSink{}
+	e := newTestDriver(t, sink)
+	req := Request{Workspace: "/ws/leak-ws", Name: "leak-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+
+	elsewhere := t.TempDir()
+	t.Setenv("GIT_DIR", filepath.Join(elsewhere, ".git"))
+	t.Setenv("GIT_WORK_TREE", elsewhere)
+	t.Setenv("GIT_INDEX_FILE", filepath.Join(elsewhere, ".git", "index"))
 
 	// Act.
-	cmd := gitCmd(context.Background(), t.TempDir(), "status")
+	res, err := e.Merge(context.Background(), req)
 
-	// Assert — the bindings are gone and unrelated variables survive.
-	for _, entry := range cmd.Env {
-		for _, banned := range []string{"GIT_DIR=", "GIT_INDEX_FILE=", "GIT_WORK_TREE="} {
-			if strings.HasPrefix(entry, banned) {
-				t.Fatalf("gitCmd env kept %q; the driver's git would target the hook's repository", entry)
-			}
-		}
+	// Assert — the pick landed in the -C target, not the leaked repository.
+	if err != nil {
+		t.Fatalf("Merge() err = %v; the inherited GIT_DIR reached git", err)
 	}
-	if os.Getenv("PATH") != "" && !slices.ContainsFunc(cmd.Env, func(e string) bool { return strings.HasPrefix(e, "PATH=") }) {
-		t.Fatalf("gitCmd env dropped PATH; only repository bindings may be stripped")
+	if res.Outcome != OutcomeMerged {
+		t.Fatalf("Merge() outcome = %s, want merged", res.Outcome)
+	}
+	if _, statErr := os.Stat(filepath.Join(target, "feature.txt")); statErr != nil {
+		t.Errorf("feature.txt did not land on the -C target: %v", statErr)
 	}
 }
 
 // gitRun runs a git command in dir, failing the test on error. Test-driver
-// git only; the driver runs its own git.
+// git only; the driver runs its own git. It uses the same env-stripped builder
+// the driver does, so a leaked GIT_DIR cannot make a fixture's `git add` /
+// `git commit` rewrite the caller's real repository.
 func gitRun(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	gitArgs := append([]string{"-c", "core.hooksPath=/dev/null", "-C", dir}, args...)
-	cmd := exec.Command("git", gitArgs...)
-	cmd.Env = gitFixtureEnv()
+	gitArgs := append([]string{"-c", "core.hooksPath=/dev/null"}, args...)
+	cmd := gitexec.Command(context.Background(), dir, gitArgs...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %v in %s: %v\n%s", args, dir, err, out)
 	}
 	return string(out)
-}
-
-// gitFixtureEnv removes repository bindings exported by a parent Git hook.
-// Without this boundary, scratch `git add` and `git commit` commands can
-// rewrite the caller's real staging index instead of the temporary repo.
-func gitFixtureEnv() []string {
-	env := make([]string, 0, len(os.Environ()))
-	for _, entry := range os.Environ() {
-		switch {
-		case strings.HasPrefix(entry, "GIT_DIR="),
-			strings.HasPrefix(entry, "GIT_WORK_TREE="),
-			strings.HasPrefix(entry, "GIT_INDEX_FILE="),
-			strings.HasPrefix(entry, "GIT_PREFIX="):
-			continue
-		default:
-			env = append(env, entry)
-		}
-	}
-	return env
 }
 
 // writeFile writes content to a file under dir.
@@ -490,7 +482,362 @@ func TestMergeMissingBranchAbortsWithStateIntact(t *testing.T) {
 	}
 }
 
+func TestMergeDirtyStagedSourceAbortsWithStateIntact(t *testing.T) {
+	// Arrange: a STAGED (not merely unstaged) change in the source worktree.
+	// It belongs to no commit either, so the merge would drop it just the same.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	writeFile(t, featureDir, "feature.txt", "hello\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "add feature.txt")
+	writeFile(t, featureDir, "base.txt", "staged edit\n")
+	gitRun(t, featureDir, "add", "base.txt")
+
+	sink := &recordingSink{}
+	e := newTestDriver(t, sink)
+	req := Request{Workspace: "/ws/staged-ws", Name: "staged-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+
+	// Act.
+	_, err := e.Merge(context.Background(), req)
+
+	// Assert.
+	if err == nil {
+		t.Fatalf("Merge() err = nil; want a staged-dirty-source precondition failure")
+	}
+	if !strings.Contains(err.Error(), "staged=true") {
+		t.Errorf("Merge() err = %v; want it to name the staged dirtiness", err)
+	}
+	if len(sink.got) != 0 {
+		t.Fatalf("Merge() emitted %v on a failed precondition; want state intact (none)", sink.phases())
+	}
+}
+
+// --- no-op merges: the work is already on the target --------------------
+
+func TestMergeEmptyRangeReportsAlreadyIncorporated(t *testing.T) {
+	// Arrange: a source branch that never committed anything, so the range is
+	// empty by ancestry.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+
+	sink := &recordingSink{}
+	e := newTestDriver(t, sink)
+	req := Request{Workspace: "/ws/empty-ws", Name: "empty-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+
+	// Act.
+	res, err := e.Merge(context.Background(), req)
+
+	// Assert: a successful no-op, and the phases still say so out loud.
+	if err != nil {
+		t.Fatalf("Merge() err = %v", err)
+	}
+	if res.Outcome != OutcomeMerged || !res.AlreadyIncorporated {
+		t.Fatalf("Merge() res = %+v, want merged + AlreadyIncorporated", res)
+	}
+	assertPhases(t, sink.phases(), PhaseMerging, PhaseMerged)
+}
+
+func TestMergeRangeAlreadyIncorporatedByCherryPickBase(t *testing.T) {
+	// Arrange: a PRIOR `cherry-pick -x` already landed the work on the target
+	// under a new SHA. The -x annotation is what lets the base probe see it, so
+	// the range collapses to empty rather than replaying the patch twice.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	writeFile(t, featureDir, "feature.txt", "hello\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "add feature.txt")
+	gitRun(t, target, "cherry-pick", "-x", "feature")
+	headBefore := strings.TrimSpace(gitRun(t, target, "rev-parse", "HEAD"))
+
+	sink := &recordingSink{}
+	e := newTestDriver(t, sink)
+	req := Request{Workspace: "/ws/inc-ws", Name: "inc-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+
+	// Act.
+	res, err := e.Merge(context.Background(), req)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Merge() err = %v", err)
+	}
+	if res.Outcome != OutcomeMerged || !res.AlreadyIncorporated {
+		t.Fatalf("Merge() res = %+v, want merged + AlreadyIncorporated", res)
+	}
+	if head := strings.TrimSpace(gitRun(t, target, "rev-parse", "HEAD")); head != headBefore {
+		t.Errorf("target HEAD moved from %s to %s; a no-op merge must not replay the patch", headBefore, head)
+	}
+	assertPhases(t, sink.phases(), PhaseMerging, PhaseMerged)
+}
+
+func TestMergeRangeAlreadyIncorporatedByPatchID(t *testing.T) {
+	// Arrange: the range's only non-merge commit is already on the target under
+	// a DIFFERENT sha and with NO -x annotation, so the base probe cannot see
+	// it. The range leads with a merge commit, which `cherry-pick` refuses
+	// outright — a non-zero exit with no CHERRY_PICK_HEAD. Only the patch-id
+	// probe can tell that apart from real un-applied work.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	// feature: side commit S, merged back as M, then F2.
+	gitRun(t, featureDir, "checkout", "-q", "-b", "side")
+	writeFile(t, featureDir, "s.txt", "s\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "S")
+	gitRun(t, featureDir, "checkout", "-q", "feature")
+	gitRun(t, featureDir, "merge", "-q", "--no-ff", "-m", "merge side", "side")
+	writeFile(t, featureDir, "f2.txt", "f2\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "F2")
+	// target: fast-forward onto S (so the merge-base is S and the range leads
+	// with M), then apply F2's patch by hand under its own sha.
+	gitRun(t, target, "merge", "-q", "--ff-only", "side")
+	writeFile(t, target, "f2.txt", "f2\n")
+	gitRun(t, target, "add", ".")
+	gitRun(t, target, "commit", "-q", "-m", "target already carries f2")
+
+	sink := &recordingSink{}
+	e := newTestDriver(t, sink)
+	req := Request{Workspace: "/ws/pid-ws", Name: "pid-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+
+	// Act.
+	res, err := e.Merge(context.Background(), req)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Merge() err = %v", err)
+	}
+	if res.Outcome != OutcomeMerged || !res.AlreadyIncorporated {
+		t.Fatalf("Merge() res = %+v, want merged + AlreadyIncorporated via the patch-id probe", res)
+	}
+	assertPhases(t, sink.phases(), PhaseMerging, PhaseMerged)
+}
+
+// --- a dirty or colliding TARGET tree -----------------------------------
+
+func TestMergeTargetDirtyUnstagedFails(t *testing.T) {
+	// Arrange: the target has an uncommitted edit to a file the pick rewrites.
+	// Git refuses rather than clobbering it, and there is no conflict to
+	// resolve, so the merge is failed and NOT parked.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	writeFile(t, featureDir, "base.txt", "feature\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "feature edits base")
+	writeFile(t, target, "base.txt", "local uncommitted work\n")
+
+	sink := &recordingSink{}
+	e := newTestDriver(t, sink)
+	req := Request{Workspace: "/ws/tdirty-ws", Name: "tdirty-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+
+	// Act.
+	res, err := e.Merge(context.Background(), req)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Merge() err = %v", err)
+	}
+	if res.Outcome != OutcomeFailed {
+		t.Fatalf("Merge() outcome = %s, want failed", res.Outcome)
+	}
+	if got := readFile(t, target, "base.txt"); got != "local uncommitted work\n" {
+		t.Errorf("target base.txt = %q; the refused merge overwrote uncommitted work", got)
+	}
+	assertPhases(t, sink.phases(), PhaseMerging, PhaseMergeFailed)
+}
+
+func TestMergeTargetDirtyStagedFails(t *testing.T) {
+	// Arrange: same collision, but the target's edit is STAGED. Git reports it
+	// differently ("your local changes would be overwritten by cherry-pick"),
+	// and the classification must land the same way.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	writeFile(t, featureDir, "base.txt", "feature\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "feature edits base")
+	writeFile(t, target, "base.txt", "staged local work\n")
+	gitRun(t, target, "add", "base.txt")
+
+	sink := &recordingSink{}
+	e := newTestDriver(t, sink)
+	req := Request{Workspace: "/ws/tstaged-ws", Name: "tstaged-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+
+	// Act.
+	res, err := e.Merge(context.Background(), req)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Merge() err = %v", err)
+	}
+	if res.Outcome != OutcomeFailed {
+		t.Fatalf("Merge() outcome = %s, want failed", res.Outcome)
+	}
+	if cherryPickHeadPresent(t, target) {
+		t.Errorf("CHERRY_PICK_HEAD present; a refused pick is not a resolvable conflict")
+	}
+	assertPhases(t, sink.phases(), PhaseMerging, PhaseMergeFailed)
+}
+
+func TestMergeUntrackedCollisionFails(t *testing.T) {
+	// Arrange: an UNTRACKED target file with the same name a later commit in
+	// the range adds. Git applies the earlier commit and then refuses, so the
+	// merge is partially applied — and must still be reported failed rather
+	// than merged, because the rest of the range never landed.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	writeFile(t, featureDir, "base.txt", "feature\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "feature edits base")
+	writeFile(t, featureDir, "new.txt", "from feature\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "feature adds new.txt")
+	writeFile(t, target, "new.txt", "untracked local file\n")
+
+	sink := &recordingSink{}
+	e := newTestDriver(t, sink)
+	req := Request{Workspace: "/ws/untracked-ws", Name: "untracked-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+
+	// Act.
+	res, err := e.Merge(context.Background(), req)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Merge() err = %v", err)
+	}
+	if res.Outcome != OutcomeFailed {
+		t.Fatalf("Merge() outcome = %s, want failed", res.Outcome)
+	}
+	if got := readFile(t, target, "new.txt"); got != "untracked local file\n" {
+		t.Errorf("target new.txt = %q; the refused merge clobbered an untracked file", got)
+	}
+	if tags := strings.TrimSpace(gitRun(t, target, "tag", "-l", "merge/untracked-ws")); tags != "" {
+		t.Errorf("merge/untracked-ws tagged on a failed merge; git tag -l = %q", tags)
+	}
+	assertPhases(t, sink.phases(), PhaseMerging, PhaseMergeFailed)
+}
+
+// --- resume that hits a further conflict --------------------------------
+
+func TestResumeSecondConflictReEmitsConflict(t *testing.T) {
+	// Arrange: two feature commits that both touch the contended line, so
+	// resolving the first only exposes the second. Resume must park again
+	// rather than report the merge finished.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	writeFile(t, featureDir, "base.txt", "feature one\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "feature edit 1")
+	writeFile(t, featureDir, "base.txt", "feature two\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "feature edit 2")
+	writeFile(t, target, "base.txt", "target\n")
+	gitRun(t, target, "add", ".")
+	gitRun(t, target, "commit", "-q", "-m", "target edit")
+
+	sink := &recordingSink{}
+	e := newTestDriver(t, sink)
+	req := Request{Workspace: "/ws/rz2-ws", Name: "rz2-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+
+	first, err := e.Merge(context.Background(), req)
+	if err != nil || first.Outcome != OutcomeConflict {
+		t.Fatalf("setup Merge() res=%+v err=%v, want conflict", first, err)
+	}
+	// A human resolves the FIRST conflict only.
+	writeFile(t, target, "base.txt", "resolved one\n")
+	gitRun(t, target, "add", "base.txt")
+
+	// Act.
+	res, err := e.Resume(context.Background(), req)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Resume() err = %v", err)
+	}
+	if res.Outcome != OutcomeConflict {
+		t.Fatalf("Resume() outcome = %s, want conflict on the next commit", res.Outcome)
+	}
+	if res.ConflictCommit == first.ConflictCommit {
+		t.Errorf("Resume() re-reported the first conflict %s; want the NEXT commit", res.ConflictCommit)
+	}
+	if !cherryPickHeadPresent(t, target) {
+		t.Errorf("CHERRY_PICK_HEAD absent — the second conflict was not left in tree")
+	}
+	if tags := strings.TrimSpace(gitRun(t, target, "tag", "-l", "merge/rz2-ws")); tags != "" {
+		t.Errorf("merge/rz2-ws tagged while still conflicted; git tag -l = %q", tags)
+	}
+	assertPhases(t, sink.phases(), PhaseMerging, PhaseMergeConflict, PhaseMerging, PhaseMergeConflict)
+}
+
 // --- sink-error propagation ---------------------------------------------
+
+func TestMergeSinkFailureOnMergingAbortsBeforeThePick(t *testing.T) {
+	// Arrange: the sink rejects the OPENING merging transition. The driver must
+	// surface it and never run the cherry-pick, so the target is untouched.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	writeFile(t, featureDir, "feature.txt", "hello\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "add feature.txt")
+	headBefore := strings.TrimSpace(gitRun(t, target, "rev-parse", "HEAD"))
+
+	sink := &recordingSink{failOn: PhaseMerging}
+	e := newTestDriver(t, sink)
+	req := Request{Workspace: "/ws/sink0-ws", Name: "sink0-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+
+	// Act.
+	_, err := e.Merge(context.Background(), req)
+
+	// Assert.
+	if err == nil {
+		t.Fatalf("Merge() err = nil; want the sink error surfaced")
+	}
+	if !strings.Contains(err.Error(), string(errFakeSink)) {
+		t.Errorf("Merge() err = %v; want it to wrap the sink error", err)
+	}
+	if head := strings.TrimSpace(gitRun(t, target, "rev-parse", "HEAD")); head != headBefore {
+		t.Errorf("target HEAD moved to %s; the pick ran despite the aborted transition", head)
+	}
+	if _, statErr := os.Stat(filepath.Join(target, "feature.txt")); statErr == nil {
+		t.Errorf("feature.txt landed despite the aborted transition")
+	}
+	assertPhases(t, sink.phases(), PhaseMerging)
+}
+
+func TestResumeSurfacesSinkError(t *testing.T) {
+	// Arrange: a resolved conflict whose resume-time merging transition the
+	// sink rejects. Resume must abort with the error rather than continue the
+	// pick behind an unrecorded state.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	writeFile(t, featureDir, "base.txt", "feature\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "feature edit")
+	writeFile(t, target, "base.txt", "target\n")
+	gitRun(t, target, "add", ".")
+	gitRun(t, target, "commit", "-q", "-m", "target edit")
+
+	sink := &recordingSink{}
+	e := newTestDriver(t, sink)
+	req := Request{Workspace: "/ws/rsink-ws", Name: "rsink-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+	if res, err := e.Merge(context.Background(), req); err != nil || res.Outcome != OutcomeConflict {
+		t.Fatalf("setup Merge() res=%+v err=%v, want conflict", res, err)
+	}
+	writeFile(t, target, "base.txt", "resolved\n")
+	gitRun(t, target, "add", "base.txt")
+	sink.failOn = PhaseMerging
+
+	// Act.
+	_, err := e.Resume(context.Background(), req)
+
+	// Assert.
+	if err == nil {
+		t.Fatalf("Resume() err = nil; want the sink error surfaced")
+	}
+	if !strings.Contains(err.Error(), string(errFakeSink)) {
+		t.Errorf("Resume() err = %v; want it to wrap the sink error", err)
+	}
+	if !cherryPickHeadPresent(t, target) {
+		t.Errorf("CHERRY_PICK_HEAD gone; Resume continued the pick despite the aborted transition")
+	}
+}
 
 func TestMergeSurfacesSinkError(t *testing.T) {
 	// Arrange: a clean cherry-pick, but the sink rejects the terminal merged
