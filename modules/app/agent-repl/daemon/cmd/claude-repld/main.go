@@ -312,6 +312,15 @@ func main() {
 		}
 	}()
 
+	// The durable half of every prompt receipt, in the same store the state log
+	// and the merge lease ledger live in. A daemon that cannot install it cannot
+	// promise a submitted prompt survives its own death, and starting anyway
+	// would make that promise silently false.
+	promptReceipts, err := statedb.NewPromptReceipts(stateStore)
+	if err != nil {
+		daemonFatal(daemonLog, "claude-repld: open prompt receipt store: %v", err)
+	}
+
 	// Persistent session registry: the in-memory session map dies with
 	// the process, so this write-through record store is what lets a
 	// restarted daemon keep resolving the s_<hex> ids its frontends
@@ -537,6 +546,7 @@ func main() {
 		SeqStore:          seqStore,
 		ClearCompactStore: seqStore,
 		DurableHistory:    durableHistory,
+		PromptReceipts:    promptReceipts,
 		PermissionModes:   server.NewRegistryModeStore(sessionRegistry),
 		Registrar:         registrar,
 		ModelCatalogs:     registrar,

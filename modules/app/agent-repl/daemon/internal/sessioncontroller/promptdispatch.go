@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+
+	"claude-repld/internal/statedb"
 )
 
 // This file is the daemon's whole reading of a submitted prompt: the one place
@@ -121,6 +123,7 @@ func (m *Manager) forwardPrompt(ctx context.Context, d *sessionController, reque
 	// conflict-resolution submit on a state the merge axis rightly owns. The
 	// turn itself is still claimed durably, by the shim's own TurnStarted.
 	accepted, activeBefore := false, false
+	var acceptedAtMs int64
 	if cmd.echoes() && who != submitterMergeLeaseHolder {
 		before, err := m.notePromptAccepted(d, requestID)
 		if err != nil {
@@ -132,6 +135,29 @@ func (m *Manager) forwardPrompt(ctx context.Context, d *sessionController, reque
 			return err
 		}
 		accepted, activeBefore = true, before
+		// THE DURABLE RECEIPT, PART OF THE ACCEPTANCE ITSELF and therefore
+		// ahead of BOTH the submit and the pushed bubble.
+		//
+		// The ordering is the guarantee. A receipt the user saw must never be
+		// unrecoverable, so the record cannot come after the push; and a prompt
+		// this daemon handed to a shim must never be lost, so it cannot come
+		// after the submit either. Writing it here puts the durable evidence
+		// ahead of everything that could make the prompt real to anyone else,
+		// which makes "the user saw a bubble for a prompt with no record" and
+		// "a shim is running a prompt with no record" both unrepresentable
+		// rather than merely improbable.
+		//
+		// The window it opens instead is the honest one: a record for a prompt
+		// whose submit then FAILS. That is closed on the failure path
+		// (retractPromptAccepted), and a daemon that dies inside it replays a
+		// receipt for a prompt the user genuinely typed and the daemon
+		// genuinely accepted — which is the truth, and the strictly safer of
+		// the two ways to be wrong.
+		acceptedAtMs = m.now()
+		if err := m.recordPromptReceipt(d, requestID, text, acceptedAtMs); err != nil {
+			m.retractPromptAccepted(d, requestID, activeBefore, err)
+			return err
+		}
 	}
 
 	if err := d.client.SubmitPrompt(ctx, text, origin, permissionMode); err != nil {
@@ -161,7 +187,7 @@ func (m *Manager) forwardPrompt(ctx context.Context, d *sessionController, reque
 	// the state edge moved ahead of it: a state edge can be retracted, a
 	// conversation item the frontend has already drawn cannot.
 	if accepted {
-		m.echo(d, requestID, text)
+		m.echo(d, requestID, text, acceptedAtMs)
 	}
 
 	// AFTER THE ACCEPT, never before: an axis opened for a prompt that never
@@ -220,6 +246,47 @@ func (m *Manager) notePromptAccepted(d *sessionController, requestID string) (ac
 	return controllerActiveBefore, nil
 }
 
+// recordPromptReceipt persists the durable evidence that this daemon accepted
+// one user prompt, BEFORE the prompt reaches a shim or its bubble reaches a
+// frontend.
+//
+// A caller with no request id behind it (an internal re-submit, a harness)
+// records nothing, exactly as it pushes nothing: the record is keyed by the
+// identity the frontend reconciles the bubble on, and a minted id would name a
+// bubble nothing could ever claim.
+//
+// A WRITE FAILURE FAILS THE SUBMIT. This is a write to the same state store the
+// accepted edge just wrote to, so a failure here is a state store that cannot
+// be written — the condition under which every durable claim the daemon makes
+// is already void. Carrying on would submit a prompt the daemon has no record
+// of, which is precisely the loss this whole mechanism exists to end, so the
+// caller retracts the accepted edge and fails the frontend command instead.
+func (m *Manager) recordPromptReceipt(d *sessionController, requestID, text string, acceptedAtMs int64) error {
+	if requestID == "" {
+		return nil
+	}
+	if m.cfg.PromptReceipts == nil {
+		m.logf("session-controller: durable prompt receipt NOT recorded ws=%s session=%s request_id=%q accepted_at_ms=%d — no PromptReceiptStore is wired, so this prompt cannot be replayed if the daemon dies before its turn becomes durable",
+			d.workspace, d.sessionID, requestID, acceptedAtMs)
+		return nil
+	}
+	if err := m.cfg.PromptReceipts.Record(statedb.PromptReceipt{
+		RequestID:    requestID,
+		Workspace:    d.workspace,
+		Text:         text,
+		AcceptedAtMs: acceptedAtMs,
+	}); err != nil {
+		err = fmt.Errorf("session-controller: recording the durable prompt receipt for workspace %q session %q request %q failed before submitting: %w",
+			d.workspace, d.sessionID, requestID, err)
+		m.logf("session-controller: durable prompt receipt record FAILED ws=%s session=%s request_id=%q accepted_at_ms=%d len=%d prompt_submitted=false: %v",
+			d.workspace, d.sessionID, requestID, acceptedAtMs, len(text), err)
+		return err
+	}
+	m.logf("session-controller: durable prompt receipt recorded ws=%s session=%s request_id=%q accepted_at_ms=%d len=%d next=shim_submit_then_prompt_echo",
+		d.workspace, d.sessionID, requestID, acceptedAtMs, len(text))
+	return nil
+}
+
 // retractPromptAccepted undoes notePromptAccepted for a submit the shim
 // refused, restoring the queue latch, withdrawing the published `thinking`, and
 // closing the footer clock.
@@ -245,6 +312,15 @@ func (m *Manager) retractPromptAccepted(d *sessionController, requestID string, 
 	m.mu.Lock()
 	d.turnActive = activeBefore
 	m.mu.Unlock()
+
+	// The durable receipt goes with the edge it was written beside. It was
+	// recorded on the daemon's INTENT to submit, and that intent has now been
+	// falsified, so replaying a bubble for it after a bounce would testify to a
+	// prompt no session ever received. This is the one window the accept-time
+	// write opens, and this is where it closes.
+	if requestID != "" {
+		d.consumer.retireDurableReceipt(requestID, "submit_failed_after_acceptance")
+	}
 
 	publish := func(state *frontendv1.WorkspaceState) {
 		d.consumer.push.PushWorkspaceState(state)

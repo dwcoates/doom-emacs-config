@@ -1,6 +1,8 @@
 package sessioncontroller
 
 import (
+	"strings"
+
 	datav1 "agentrepl/proto/agentshim/data/v1"
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 )
@@ -28,6 +30,27 @@ type promptEcho struct {
 // this only has to be stable.
 func echoUUID(requestID string) string { return "prompt-echo:" + requestID }
 
+// promptReceiptItem composes THE receipt item, and is the ONE construction of
+// it in the daemon.
+//
+// Both the live push below and the durable replay (durablereplay.go) build the
+// bubble here, from the same identity, the same shape, and the same accept
+// instant, so a receipt served after a bounce is indistinguishable from the one
+// the user saw before it. There is no separate "replayed receipt" shape to keep
+// in agreement with this one, and no extra marking: an unreconciled receipt is
+// already the pending shape every frontend renders for a prompt the transcript
+// has not claimed, and that is exactly what a replayed one is.
+func promptReceiptItem(requestID, text string, tsMs int64) *frontendv1.ConversationItem {
+	return &frontendv1.ConversationItem{
+		Uuid:      echoUUID(requestID),
+		TsMs:      tsMs,
+		RequestId: requestID,
+		Item: &frontendv1.ConversationItem_UserMessage{UserMessage: &datav1.ApiUserMessage{
+			Content: &datav1.ApiUserMessage_ContentString{ContentString: text},
+		}},
+	}
+}
+
 // pushUserEcho pushes the prompt bubble for one accepted submit and retains it
 // until the durable transcript line claims it. Its caller must first complete
 // the synchronous accepted-prompt state barrier; this function deliberately
@@ -47,15 +70,13 @@ func echoUUID(requestID string) string { return "prompt-echo:" + requestID }
 // the conversation already holds. A receipt the transcript NEVER claims (the
 // shim died mid-submit) is retained indefinitely, which is right: it is then
 // the only evidence the prompt was ever sent.
-func (c *consumer) pushUserEcho(requestID, text string) {
-	item := &frontendv1.ConversationItem{
-		Uuid:      echoUUID(requestID),
-		TsMs:      c.now(),
-		RequestId: requestID,
-		Item: &frontendv1.ConversationItem_UserMessage{UserMessage: &datav1.ApiUserMessage{
-			Content: &datav1.ApiUserMessage_ContentString{ContentString: text},
-		}},
-	}
+// acceptedAtMs is the instant the daemon committed to the submit, which is the
+// same instant the DURABLE receipt was recorded under. Passing it in rather
+// than reading the clock again is what makes the live bubble and a replayed one
+// the same item: same uuid, same timestamp, and therefore the same provenance
+// verdict from the merge lease's ledger.
+func (c *consumer) pushUserEcho(requestID, text string, acceptedAtMs int64) {
+	item := promptReceiptItem(requestID, text, acceptedAtMs)
 	c.mu.Lock()
 	c.echoes = append(c.echoes, &promptEcho{requestID: requestID, text: text, item: item})
 	pending := len(c.echoes)
@@ -71,11 +92,11 @@ func (c *consumer) pushUserEcho(requestID, text string) {
 // to correlate — the durable transcript line still draws the prompt.
 //
 // Must be called with m.mu RELEASED: the push reaches the frontend server.
-func (m *Manager) echo(d *sessionController, requestID, text string) {
+func (m *Manager) echo(d *sessionController, requestID, text string, acceptedAtMs int64) {
 	if requestID == "" {
 		return
 	}
-	d.consumer.pushUserEcho(requestID, text)
+	d.consumer.pushUserEcho(requestID, text, acceptedAtMs)
 }
 
 // snapshotEchoes returns the unclaimed receipts in submit order, for replay.
@@ -161,6 +182,7 @@ func (c *consumer) attributeUserTurn(cd *frontendv1.ConversationDelta) {
 			if id := it.GetRequestId(); id != "" && it.GetUserMessage() != nil && c.claimEcho(id) {
 				c.logf("session-controller: prompt receipt superseded ws=%q session=%s request_id=%s — the durable line arrived carrying the id itself",
 					c.workspace, c.sessionID, id)
+				c.retireDurableReceipt(id, "durable_line_named_the_request")
 			}
 			continue
 		}
@@ -173,7 +195,94 @@ func (c *consumer) attributeUserTurn(cd *frontendv1.ConversationDelta) {
 		it.RequestId = requestID
 		c.logf("session-controller: user turn attributed ws=%q session=%s uuid=%s request_id=%s (the receipt it supersedes is retired)",
 			c.workspace, c.sessionID, it.GetUuid(), requestID)
+		c.retireDurableReceipt(requestID, "durable_line_attributed_to_the_request")
 	}
+}
+
+// retireDurableReceipt discards one request's DURABLE receipt record.
+//
+// THE RETIREMENT POINT, AND WHY IT IS HERE. attributeUserTurn is the single
+// place the daemon establishes that a durable transcript line IS a given
+// submit's prompt — by the line naming the request id itself, or by the
+// oldest-outstanding correlation the durable line carries no id for. Every
+// in-memory receipt already retires exactly here, so hanging the durable
+// retirement off the same decision means the two records cannot disagree about
+// which prompts the conversation now holds. Deriving the fact a second time
+// somewhere else would be a second implementation of the correlation, and
+// correlations that exist twice drift.
+//
+// IT IS NOT THE ONLY ONE, and it cannot be. A daemon that dies between the
+// accept and the transcript line is never present for this decision, so the
+// record it left behind is retired instead by the durable replay that finds the
+// prompt already in the store (durablereplay.go). That path and this one are
+// the same statement — the conversation carries the prompt now — observed from
+// the two places the daemon can observe it from.
+//
+// IDEMPOTENT BY CONSTRUCTION: retiring a receipt that is already gone reports
+// false with no error, so a replay-retired record reaching this path (or the
+// reverse) is ordinary rather than an anomaly.
+//
+// A failure is loud-logged and swallowed: the caller is delivering the
+// conversation, and a bookkeeping row that would not delete is not a reason to
+// stop doing that. The cost of the failure is bounded and self-correcting — the
+// receipt is re-served on a later replay and suppressed there instead.
+func (c *consumer) retireDurableReceipt(requestID, reason string) {
+	if c.receipts == nil {
+		c.logf("session-controller: durable prompt receipt NOT retired ws=%q session=%s request_id=%s reason=%s — no durable receipt store is wired to this session controller",
+			c.workspace, c.sessionID, requestID, reason)
+		return
+	}
+	retired, err := c.receipts.Retire(requestID)
+	if err != nil {
+		c.logf("session-controller: durable prompt receipt retirement FAILED ws=%q session=%s request_id=%s reason=%s: %v (it will be re-served by a later replay and suppressed there)",
+			c.workspace, c.sessionID, requestID, reason, err)
+		return
+	}
+	c.logf("session-controller: durable prompt receipt retirement ws=%q session=%s request_id=%s reason=%s row_deleted=%v",
+		c.workspace, c.sessionID, requestID, reason, retired)
+}
+
+// retireDurableReceiptsThrough discards every durable receipt for this
+// workspace accepted at or before throughMs, and reports how many went.
+//
+// It is dropEchoes's durable twin, called from the same context cut: a clear or
+// a compaction discards the history below it, and a receipt for a prompt from
+// below that line would otherwise replay pre-cut text above a floor that exists
+// to hide exactly that.
+func (c *consumer) retireDurableReceiptsThrough(throughMs int64, reason string) {
+	if c.receipts == nil {
+		c.logf("session-controller: durable prompt receipts NOT retired ws=%q session=%s through_ms=%d reason=%s — no durable receipt store is wired to this session controller",
+			c.workspace, c.sessionID, throughMs, reason)
+		return
+	}
+	n, err := c.receipts.RetireWorkspace(c.workspace, throughMs)
+	if err != nil {
+		c.logf("session-controller: durable prompt receipt sweep FAILED ws=%q session=%s through_ms=%d reason=%s: %v (a receipt from below the new replay floor may still be served)",
+			c.workspace, c.sessionID, throughMs, reason, err)
+		return
+	}
+	c.logf("session-controller: durable prompt receipt sweep ws=%q session=%s through_ms=%d reason=%s rows_deleted=%d",
+		c.workspace, c.sessionID, throughMs, reason, n)
+}
+
+// userMessageText is the prompt text a user_message carries, across both of the
+// arms it can carry text in, with no separator between blocks. Empty means the
+// message carries no prompt at all — a pure tool-result feedback message rides
+// the user_message arm too.
+func userMessageText(um *datav1.ApiUserMessage) string {
+	switch content := um.GetContent().(type) {
+	case *datav1.ApiUserMessage_ContentString:
+		return content.ContentString
+	case *datav1.ApiUserMessage_ContentBlocks:
+		var sb strings.Builder
+		for _, b := range content.ContentBlocks.GetBlocks() {
+			if t := b.GetText(); t != nil {
+				sb.WriteString(t.GetText())
+			}
+		}
+		return sb.String()
+	}
+	return ""
 }
 
 // isPromptUserMessage reports whether an item is a user PROMPT still lacking a
@@ -191,15 +300,5 @@ func isPromptUserMessage(it *frontendv1.ConversationItem) bool {
 	if um == nil {
 		return false
 	}
-	switch content := um.GetContent().(type) {
-	case *datav1.ApiUserMessage_ContentString:
-		return content.ContentString != ""
-	case *datav1.ApiUserMessage_ContentBlocks:
-		for _, b := range content.ContentBlocks.GetBlocks() {
-			if t := b.GetText(); t.GetText() != "" {
-				return true
-			}
-		}
-	}
-	return false
+	return userMessageText(um) != ""
 }
