@@ -840,3 +840,75 @@ func TestConnectionDegradedRejectsAnEmptyWorkspace(t *testing.T) {
 		t.Fatal("ApplyConnectionDegraded with no workspace must error")
 	}
 }
+
+// AtMs is the frontend's freshness watermark: the connect snapshot is refused
+// until it is at least as new as the newest delivered frame, so a stamp that
+// moves backwards wedges the connect loop into an unbounded retry storm (and
+// starves that connection's command reads). The stamp is therefore monotonic
+// per workspace, whatever the axis branches resolve.
+func TestStampFreshnessNeverLetsAtMsRegress(t *testing.T) {
+	// Arrange — a manager that has already stamped a newer frame.
+	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
+	newer := &frontendv1.WorkspaceState{Workspace: "ws1", AtMs: 2000}
+	m.mu.Lock()
+	m.stampFreshnessLocked("ws1", newer)
+	m.mu.Unlock()
+
+	// Act — a later build resolves an OLDER winning row.
+	older := &frontendv1.WorkspaceState{Workspace: "ws1", AtMs: 1000}
+	m.mu.Lock()
+	m.stampFreshnessLocked("ws1", older)
+	m.mu.Unlock()
+
+	// Assert — the stamp is raised to the watermark, never regressed.
+	if got := older.GetAtMs(); got != 2000 {
+		t.Fatalf("AtMs = %d after a regressing resolution, want the 2000 watermark", got)
+	}
+}
+
+// A newer resolution must advance the watermark rather than being clamped.
+func TestStampFreshnessAdvancesWithNewerFrames(t *testing.T) {
+	// Arrange.
+	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
+	m.mu.Lock()
+	m.stampFreshnessLocked("ws1", &frontendv1.WorkspaceState{Workspace: "ws1", AtMs: 1000})
+	m.mu.Unlock()
+
+	// Act.
+	newer := &frontendv1.WorkspaceState{Workspace: "ws1", AtMs: 3000}
+	m.mu.Lock()
+	m.stampFreshnessLocked("ws1", newer)
+	m.mu.Unlock()
+
+	// Assert — untouched, and the watermark moved with it.
+	if got := newer.GetAtMs(); got != 3000 {
+		t.Fatalf("AtMs = %d, want 3000", got)
+	}
+	m.mu.Lock()
+	watermark := m.pushedAtMs["ws1"]
+	m.mu.Unlock()
+	if watermark != 3000 {
+		t.Fatalf("watermark = %d, want 3000", watermark)
+	}
+}
+
+// Workspaces must not share a watermark: one workspace's newer frame cannot
+// inflate another's stamp.
+func TestStampFreshnessIsPerWorkspace(t *testing.T) {
+	// Arrange.
+	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
+	m.mu.Lock()
+	m.stampFreshnessLocked("ws-a", &frontendv1.WorkspaceState{Workspace: "ws-a", AtMs: 9000})
+	m.mu.Unlock()
+
+	// Act.
+	other := &frontendv1.WorkspaceState{Workspace: "ws-b", AtMs: 100}
+	m.mu.Lock()
+	m.stampFreshnessLocked("ws-b", other)
+	m.mu.Unlock()
+
+	// Assert.
+	if got := other.GetAtMs(); got != 100 {
+		t.Fatalf("AtMs = %d, want ws-b's own 100, not ws-a's watermark", got)
+	}
+}
