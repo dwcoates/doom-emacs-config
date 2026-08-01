@@ -103,9 +103,16 @@ type ConflictResolver interface {
 // a colliding request id would reconcile one turn's receipt against another's
 // transcript line.
 func newResolutionRequestID() string {
+	return "merge_resolve_" + randomIDSuffix()
+}
+
+// randomIDSuffix is the shared entropy behind every merge-driven request id
+// (conflict resolution and test-fix alike). crypto/rand failing is not a
+// condition to paper over with a weaker id, so it panics rather than degrade.
+func randomIDSuffix() string {
 	var b [12]byte
 	if _, err := rand.Read(b[:]); err != nil {
-		panic(fmt.Sprintf("merge: crypto/rand failed minting a conflict-resolution request id: %v", err))
+		panic(fmt.Sprintf("merge: crypto/rand failed minting a merge request id: %v", err))
 	}
-	return "merge_resolve_" + hex.EncodeToString(b[:])
+	return hex.EncodeToString(b[:])
 }
