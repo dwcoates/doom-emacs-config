@@ -660,7 +660,6 @@ so a chord wins key lookup regardless of which evil state is current.")
        :desc "New worktree ws (from current)" "n" #'agent-repl-create-worktree-workspace
        :desc "New worktree ws (from local master)" "N" #'agent-repl-create-worktree-workspace-from-origin-master
        :desc "Fork worktree ws + fork Claude session" "f" #'agent-repl-fork-worktree-workspace
-       :desc "Merge workspace into current" "m" #'agent-repl-workspace-merge
        :desc "Merge current workspace into source" "M" #'agent-repl-workspace-merge-current-into-source
        :desc "Continue merge after resolving conflict" "c" #'agent-repl-workspace-merge-continue-after-resolve
        :desc "Rename current workspace" "r" #'agent-repl-rename-workspace

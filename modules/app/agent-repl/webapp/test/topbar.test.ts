@@ -104,6 +104,9 @@ function storeState(over: Partial<StoreState> = {}): StoreState {
     controllerGenerationId: "",
     activeFaults: [],
     workspaceStateAtMs: 0,
+    mergeQueuePosition: 0,
+    mergeQueueDepth: 0,
+    mergeLeaseHeld: false,
     workspaceStateCauseSeq: 0,
     ...over,
   };

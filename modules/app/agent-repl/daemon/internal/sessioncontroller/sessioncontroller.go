@@ -228,6 +228,12 @@ type Config struct {
 	// must equal the shim's ("1").
 	DaemonVersion   string
 	ProtocolVersion string
+	// MergeResolutionTurnBound bounds one shim-driven merge-conflict resolution
+	// turn (mergeresolve.go). Zero takes mergeResolutionTurnBound, which is the
+	// only value production uses; it is injectable so a harness can prove the
+	// unfinished-turn error without waiting out a bound sized for real conflict
+	// resolution.
+	MergeResolutionTurnBound time.Duration
 	// ShimBuildSHA reports the build identity of the shim bundle this daemon
 	// would spawn TODAY — the `dist/.built-sha` stamp beside the entrypoint.
 	// A shim announcing a different identity is running superseded code and is
@@ -391,6 +397,12 @@ type sessionController struct {
 	// this daemon saw it. It is the classifier's "what is already running"
 	// context, and is empty when the turn predates this daemon.
 	runningText string
+
+	// turnWaiters are the waits for a SPECIFIC turn to end (mergeresolve.go),
+	// guarded by the manager mutex. Only merge.Coordinator's conflict-resolution
+	// prompt arms one today: it is the one caller whose next action depends on
+	// the agent having finished, rather than on the queue's active/idle edge.
+	turnWaiters []*turnWaiter
 
 	// repull is the below-floor history re-pull now running for this workspace,
 	// or nil. Guarded by the manager mutex; it is what keeps two frontends
@@ -1610,6 +1622,12 @@ func (m *Manager) bringUp(workspace string) (*sessionController, error) {
 		m.persistSessionDeath(sessionID, errclass.DeathReasonShimDied)
 	})
 	cons.generationID = generationID
+	// The per-turn wait (mergeresolve.go) rides the SAME stream the queue's
+	// edges do, but correlated by turn id rather than by edge. Bound before Run,
+	// so no boundary can reach the consumer with this unset.
+	cons.onTurnEvent = func(started bool, turnID string) {
+		m.onTurnEvent(d, started, turnID)
+	}
 	// Every PERSISTENT store event names the conversation it belongs to.
 	// Keeping the record current off the live stream is what gives a later
 	// handshake's announcement something to DIFFER from — a rotation is
@@ -1700,7 +1718,35 @@ func (m *Manager) bringUp(workspace string) (*sessionController, error) {
 		m.pushHistoryMissingNote(d, spawn.StaleResumeDropped, "no transcript exists for the recorded conversation")
 	}
 
+	// The Add is taken UNDER m.mu with a closed re-check, exactly like
+	// runPendingResync's: Close sets `closed` under this lock and then waits on
+	// `exits`, so a bare Add here could land while that Wait is already running
+	// on a zero counter — the WaitGroup reuse panic. Once closed, no new exit
+	// goroutine may start; the bring-up aborts and mirrors the exit tail's
+	// manager-close path instead (evict, drop the queue, preserve the shim).
+	m.mu.Lock()
+	if m.closed {
+		wasCurrent := false
+		if cur, ok := m.byWS[workspace]; ok && cur == d {
+			delete(m.byWS, workspace)
+			wasCurrent = true
+		}
+		dropped := d.queue.drainAll()
+		view := d.queue.view(workspace, sessionID)
+		m.mu.Unlock()
+		if len(dropped) > 0 {
+			m.logf("session-controller: session %s bring-up aborted with %d queued prompt(s) undelivered ws=%q",
+				sessionID, len(dropped), workspace)
+		}
+		m.publish(sessionID, view, nil)
+		if wasCurrent {
+			m.logf("session-controller: session %s bring-up aborted by a manager close ws=%q; PRESERVING the shim for the next daemon to reattach",
+				sessionID, workspace)
+		}
+		return nil, fmt.Errorf("session-controller: manager closed during bring-up of workspace %q", workspace)
+	}
 	m.exits.Add(1)
+	m.mu.Unlock()
 	go func() {
 		defer m.exits.Done()
 		runErr := client.Run(runCtx)

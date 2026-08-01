@@ -37,7 +37,10 @@ function itemsFrom(item: Record<string, unknown>): ConversationItem[] {
       sessionId: "s1",
       workspace: "ws",
       throughSeq: "9",
-      items: [item],
+      // The daemon stamps a provenance on every item it builds; an envelope
+      // without one is a malformed frame the adapter refuses (see the
+      // provenance gate in state-adapter.ts), so the fixture speaks it.
+      items: [{ source: "CONVERSATION_SOURCE_USER", ...item }],
     },
   });
   const conv = effects.find((e) => e.kind === "conversation-items");

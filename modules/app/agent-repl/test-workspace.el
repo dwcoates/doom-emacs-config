@@ -2379,5 +2379,92 @@ must keep seeing what persp-mode actually says."
     (cl-letf (((symbol-function '+workspace-current-name) (lambda () "none")))
       (should (equal (agent-repl--ws-current-name) "none")))))
 
+;;;; ---- Tests: the unfinished-merge teardown guard ----
+;;
+;; The ONE merge responsibility Emacs still carries.  Killing a workspace
+;; mid-merge kills the session the daemon's merge lease drives conflict
+;; resolution through, so the primitive refuses before it touches anything.
+
+(ert-deftest agent-repl-test-merge-unfinished-p-true-while-merging ()
+  "A pushed `:merging' state reads as an unfinished merge."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws" :pushed-render-state :merging)
+    (should (agent-repl--ws-merge-unfinished-p "ws"))))
+
+(ert-deftest agent-repl-test-merge-unfinished-p-true-while-queued ()
+  "A pushed `:merge-queued' state reads as an unfinished merge."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws" :pushed-render-state :merge-queued)
+    (should (agent-repl--ws-merge-unfinished-p "ws"))))
+
+(ert-deftest agent-repl-test-merge-unfinished-p-true-while-conflicted ()
+  "A pushed `:merge-conflict' state reads as an unfinished merge."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws" :pushed-render-state :merge-conflict)
+    (should (agent-repl--ws-merge-unfinished-p "ws"))))
+
+(ert-deftest agent-repl-test-merge-unfinished-p-nil-when-merged ()
+  "`:merged' is terminal, so the workspace is free to be torn down."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws" :pushed-render-state :merged)
+    (should-not (agent-repl--ws-merge-unfinished-p "ws"))))
+
+(ert-deftest agent-repl-test-merge-unfinished-p-nil-when-merge-failed ()
+  "`:merge-failed' is terminal too: the daemon reached a verdict."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws" :pushed-render-state :merge-failed)
+    (should-not (agent-repl--ws-merge-unfinished-p "ws"))))
+
+(ert-deftest agent-repl-test-merge-unfinished-p-nil-for-non-merge-state ()
+  "An ordinary render state is not a merge at all."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws" :pushed-render-state :thinking)
+    (should-not (agent-repl--ws-merge-unfinished-p "ws"))))
+
+(ert-deftest agent-repl-test-merge-unfinished-p-nil-when-nothing-pushed ()
+  "A workspace with no pushed state has no merge to be unfinished."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws" :project-dir "/tmp/ws")
+    (should-not (agent-repl--ws-merge-unfinished-p "ws"))))
+
+(ert-deftest agent-repl-test-teardown-guard-signals-on-unfinished-merge ()
+  "The assertion signals `user-error' for a workspace still merging."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws" :pushed-render-state :merging)
+    (should-error (agent-repl--assert-mergeable-teardown "ws")
+                  :type 'user-error)))
+
+(ert-deftest agent-repl-test-teardown-guard-passes-on-terminal-merge ()
+  "The assertion returns quietly once the merge has a verdict."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws" :pushed-render-state :merged)
+    (should-not (agent-repl--assert-mergeable-teardown "ws"))))
+
+(ert-deftest agent-repl-test-teardown-guard-logs-the-refusal ()
+  "The refusal is recorded through the canonical log helper."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws" :pushed-render-state :merge-conflict)
+    (let (logged)
+      (cl-letf (((symbol-function 'agent-repl--log)
+                 (lambda (_ws fmt &rest args)
+                   (push (apply #'format fmt args) logged))))
+        (ignore-errors (agent-repl--assert-mergeable-teardown "ws")))
+      (should (cl-some (lambda (line)
+                         (and (string-match-p "REFUSED" line)
+                              (string-match-p "merge not finished" line)))
+                       logged)))))
+
+(ert-deftest agent-repl-test-nuke-refuses-merging-workspace-before-teardown ()
+  "`--nuke-one-workspace' aborts BEFORE any teardown step mutates state."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws" :project-dir "/tmp/ws")
+    (agent-repl--ws-put "ws" :pushed-render-state :merging)
+    (let ((saved nil))
+      (cl-letf (((symbol-function 'agent-repl--state-save)
+                 (lambda (&rest _) (setq saved t))))
+        (should-error (agent-repl--nuke-one-workspace "ws") :type 'user-error))
+      (should-not saved)
+      (should (agent-repl--ws-get "ws" :project-dir)))))
+
 (provide 'test-workspace)
 ;;; test-workspace.el ends here

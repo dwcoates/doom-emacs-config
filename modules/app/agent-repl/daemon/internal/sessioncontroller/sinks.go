@@ -276,6 +276,20 @@ type consumer struct {
 	// anything that needs that loop to make progress — notably an Ack-awaiting
 	// send back to the same shim.
 	onTurn func(active bool)
+	// onTurnEvent reports EVERY accepted turn boundary WITH THE TURN'S OWN ID,
+	// where onTurn above reports only the active/idle EDGES the queue drains on.
+	// Assigned after construction, like onVendorSessionID.
+	//
+	// The distinction is what makes a per-turn wait correlatable. A merge's
+	// conflict-resolution turn has to be waited on SPECIFICALLY (mergeresolve.go):
+	// the coordinator resumes the cherry-pick the moment that turn ends, so the
+	// end of some OTHER turn — the user's interrupted one, whose TurnEnded can
+	// still be in flight when the lease is taken — must never be mistaken for it.
+	// Edges cannot express that; turn ids can.
+	//
+	// Called on the shim read-loop goroutine, with the same non-blocking
+	// obligation onTurn carries.
+	onTurnEvent func(started bool, turnID string)
 	// onBackfill reports a never-blue backfill transition (F2), once per
 	// distinct state. The controller persists it and re-pushes the SessionView.
 	onBackfill func(state string)
@@ -598,6 +612,13 @@ func (c *consumer) Apply(ev *corev1.Event) error {
 	}
 	if turnResult != nil && turnResult.notify && c.onTurn != nil {
 		c.onTurn(turnResult.active)
+	}
+	// EVERY accepted boundary, edge or not: a turn that starts while another is
+	// still ending produces no edge, and a wait correlated on that turn's id
+	// would otherwise never see it begin.
+	if turnResult != nil && c.onTurnEvent != nil {
+		_, started := ev.GetPayload().(*corev1.Event_TurnStarted)
+		c.onTurnEvent(started, turnResult.correlation)
 	}
 	if applyState {
 		c.applyProgress(ev)

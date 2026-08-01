@@ -367,29 +367,6 @@ from START (default 0), or nil when NEEDLE does not occur."
   ;; Restore file-notify-add-watch after loading
   (advice-remove 'file-notify-add-watch #'file-notify-add-watch--test-stub))
 
-;; Make `agent-repl--workspace-merge-async' synchronous in tests.  In
-;; production the wrapper closes the workspace UI, spawns a worker thread
-;; that runs `--dispatch-merge-handler', and posts a reopen on failure.
-;; For most tests we want the dispatch to run inline so the test can
-;; assert on the eventual cherry-pick/merge state directly.  Tests that
-;; specifically verify the close-then-spawn-then-reopen lifecycle bypass
-;; this stub via:
-;;
-;;   (cl-letf (((symbol-function 'agent-repl--workspace-merge-async)
-;;              agent-repl-test--orig-workspace-merge-async))
-;;     ...)
-;; Batch-gated: this advice persists across module reloads, so in a
-;; live session it would permanently force merges synchronous.
-(when noninteractive
-  (defvar agent-repl-test--orig-workspace-merge-async
-    (symbol-function 'agent-repl--workspace-merge-async)
-    "Real `agent-repl--workspace-merge-async' captured before the fixture's
-sync-stub advice.  Tests that need to exercise the actual async wrapper
-behavior can rebind via `cl-letf'.")
-  (advice-add 'agent-repl--workspace-merge-async :override
-              (lambda (ws repo-root &optional onto-master)
-                (agent-repl--dispatch-merge-handler ws repo-root onto-master))))
-
 ;; Make `agent-repl--defer-to-main-thread' synchronous in tests.  In
 ;; production the helper schedules its thunk via `run-at-time' so the work
 ;; lands on the main thread even when called from the worker thread spawned
@@ -714,31 +691,11 @@ re-routes their frontend resolution instead."
          (when (file-directory-p archive-dir)
            (delete-directory archive-dir t))))))
 
-(defmacro agent-repl-test--with-merge-state (&rest body)
-  "Execute BODY with fresh merge queue / in-flight / progress / lookahead state.
-Used by the worktree tests, which exercise the cherry-pick progress
-filter against exactly these globals."
-  (declare (indent 0))
-  `(let ((agent-repl--merge-queue nil)
-         (agent-repl--in-flight-merges nil)
-         (agent-repl--merge-progress (make-hash-table :test 'equal))
-         (agent-repl--merge-progress-seq 0)
-         (agent-repl--merge-lookahead (make-hash-table :test 'equal)))
-     ,@body))
-
 (defmacro agent-repl-test--with-mocked-git-probes (&rest body)
-  "Execute BODY with the cherry-pick probe's git wrappers stubbed.
+  "Execute BODY with the git-probe external-boundary wrappers stubbed.
 
-`agent-repl--cherry-pick-in-progress-p' probes a target worktree for
-`CHERRY_PICK_HEAD' via two external-boundary wrappers
-\(`agent-repl--git-string' for `rev-parse --absolute-git-dir',
-`agent-repl--git-string-quiet' for other rev-parse variants), and the
-merge-queue drain additionally reads HEAD SHAs via
-`agent-repl--current-head-sha' (also `agent-repl--git-string').  Any
-test whose subject reaches one of these — including every
-`--drain-merge-queue' test, every `--workspace-merge-into-source' /
-`--workspace-merge-current-into-source' test, and any future call site
-that probes a worktree's git dir — must mock both wrappers or trip the
+Any test whose subject reaches `agent-repl--git-string' or
+`agent-repl--git-string-quiet' must mock both wrappers or trip the
 runtime boundary guard.
 
 This macro stubs both wrappers to return the empty string, which

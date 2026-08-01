@@ -1515,22 +1515,6 @@ the ws-plist hash with a nil key in test/init environments."
       (agent-repl--on-workspace-switch nil)
       (should-not (gethash nil agent-repl--workspaces)))))
 
-(ert-deftest agent-repl-test-panels-on-workspace-switch-dequeues-merge ()
-  "Switching to a workspace calls `--dequeue-merge' on it so a parked
-merge request is pulled from the queue on activation."
-  (agent-repl-test--with-clean-state
-    (let (dequeued)
-      (cl-letf (((symbol-function '+workspace-current-name) (lambda () "ws1"))
-                  ((symbol-function 'agent-repl--dequeue-merge)
-                 (lambda (ws) (setq dequeued ws)))
-                ((symbol-function 'agent-repl--update-all-workspace-states-now) #'ignore)
-                ((symbol-function 'agent-repl--drain-pending-magit) #'ignore)
-                ((symbol-function 'agent-repl--drain-pending-initial-buffers) #'ignore)
-                ((symbol-function 'agent-repl--drain-pending-show-panels) #'ignore)
-                ((symbol-function 'agent-repl--maybe-autoselect-input) #'ignore))
-        (agent-repl--on-workspace-switch "ws1")
-        (should (equal dequeued "ws1"))))))
-
 (ert-deftest agent-repl-test-panels-on-workspace-switch-snaps-webview-to-tail ()
   "Switching to a workspace snaps its gui webview feed to the newest message,
 the gui counterpart of the vterm window's snap to the cursor."
@@ -1802,7 +1786,6 @@ background workspace's panels."
                (lambda () (error "sync failed")))
               ((symbol-function 'agent-repl--update-hide-overlay) #'ignore))
       (should-error (agent-repl--on-window-change) :type 'error))))
-
 
 ;;;; ---- Tests: initialize-input-buffer ----
 

@@ -83,6 +83,31 @@ export enum RenderState {
   SUBMITTING = 22,
 }
 
+/**
+ * `frontend.v1.ConversationSource` — WHO drove the turn that produced an item.
+ *
+ * The merge coordinator borrows a workspace's own shim to resolve a conflict,
+ * so a session can emit a full turn the user never prompted. The provenance is
+ * a durable FACT on every item, not a rendering hint.
+ *
+ * UNSPECIFIED is never emitted by the daemon: proto3 reserves 0 for "not
+ * populated", and every item the daemon builds sets one of the other arms. The
+ * decoder therefore ADOPTS it rather than throwing — the loud rejection belongs
+ * to the layer that owns conversation items (`state-adapter.ts`), which logs it
+ * as an error and drops the item rather than defaulting it to USER.
+ */
+export enum ConversationSource {
+  UNSPECIFIED = 0,
+  USER = 1,
+  MERGE = 2,
+}
+
+const CONVERSATION_SOURCE_BY_NAME: Readonly<Record<string, ConversationSource>> = {
+  CONVERSATION_SOURCE_UNSPECIFIED: ConversationSource.UNSPECIFIED,
+  CONVERSATION_SOURCE_USER: ConversationSource.USER,
+  CONVERSATION_SOURCE_MERGE: ConversationSource.MERGE,
+};
+
 const RENDER_STATE_BY_NAME: Readonly<Record<string, RenderState>> = {
   RENDER_STATE_UNSPECIFIED: RenderState.UNSPECIFIED,
   RENDER_STATE_INIT: RenderState.INIT,
@@ -180,6 +205,23 @@ export interface WorkspaceState {
   status: SessionStatus;
   controllerGenerationId: string;
   activeFaults: RuntimeFault[];
+  /**
+   * MERGE-QUEUE facts. `mergePhase` says WHAT this workspace's merge is doing;
+   * these say WHERE it sits among the other workspaces contending for the same
+   * REPOSITORY, which no per-workspace phase can carry.
+   *
+   * 1-based position; 0 means this workspace is not enqueued at all.
+   */
+  mergeQueuePosition: number;
+  /** Total entries on this repository's queue (0 when nothing is enqueued). */
+  mergeQueueDepth: number;
+  /**
+   * Whether the merge coordinator holds the exclusivity lease on this
+   * workspace's shim. While held the merge OWNS the session: the daemon refuses
+   * user prompts with an explanatory error, and every conversation item the
+   * session produces carries `CONVERSATION_SOURCE_MERGE`.
+   */
+  mergeLeaseHeld: boolean;
 }
 
 export interface SessionView {
@@ -329,6 +371,12 @@ export interface ConversationItemFrame {
   uuid: string;
   tsMs: number;
   requestId: string;
+  /**
+   * WHO drove the turn that produced this item. Decoded, never defaulted: an
+   * `UNSPECIFIED` here is a malformed frame, and the conversation layer refuses
+   * it loudly rather than assuming a user drove it.
+   */
+  source: ConversationSource;
   arm: ConversationItemArm;
   /** The typed data.v1/core.v1 payload, adopted by shape (see file-top §5.1). */
   payload: JsonObject;
@@ -790,6 +838,9 @@ const WORKSPACE_STATE_KEYS = new Set([
   "status",
   "controllerGenerationId",
   "activeFaults",
+  "mergeQueuePosition",
+  "mergeQueueDepth",
+  "mergeLeaseHeld",
 ]);
 function decodeWorkspaceState(v: unknown): WorkspaceState {
   const o = ensureObject(v, "WorkspaceState");
@@ -810,7 +861,25 @@ function decodeWorkspaceState(v: unknown): WorkspaceState {
     activeFaults: ensureArray(o.activeFaults ?? [], "WorkspaceState.activeFaults").map(
       decodeRuntimeFault,
     ),
+    mergeQueuePosition: num(o, "mergeQueuePosition", "WorkspaceState"),
+    mergeQueueDepth: num(o, "mergeQueueDepth", "WorkspaceState"),
+    mergeLeaseHeld: bool(o, "mergeLeaseHeld", "WorkspaceState"),
   };
+  if (ws.mergeQueuePosition < 0 || ws.mergeQueueDepth < 0) {
+    throw new Error(
+      `frontend-proto: WorkspaceState for '${ws.workspace}' has a negative merge-queue ` +
+        `figure (position=${ws.mergeQueuePosition} depth=${ws.mergeQueueDepth})`,
+    );
+  }
+  // A 1-based position can never exceed the depth it indexes into. A pair that
+  // says otherwise is a daemon-side accounting bug, and rendering "3/2" would
+  // hide it behind a plausible-looking chip.
+  if (ws.mergeQueuePosition > ws.mergeQueueDepth) {
+    throw new Error(
+      `frontend-proto: WorkspaceState for '${ws.workspace}' has merge-queue position ` +
+        `${ws.mergeQueuePosition} beyond depth ${ws.mergeQueueDepth}`,
+    );
+  }
   if (ws.workspace === "") {
     throw new Error("frontend-proto: WorkspaceState missing required `workspace`");
   }
@@ -965,7 +1034,7 @@ function decodeConversationDelta(v: unknown): ConversationDelta {
   return cd;
 }
 
-const CONVERSATION_ITEM_ENVELOPE_KEYS = new Set(["uuid", "tsMs", "requestId"]);
+const CONVERSATION_ITEM_ENVELOPE_KEYS = new Set(["uuid", "tsMs", "requestId", "source"]);
 const CONVERSATION_ITEM_ARM_SET: ReadonlySet<string> = new Set(CONVERSATION_ITEM_ARMS);
 function decodeConversationItem(v: unknown, i: number): ConversationItemFrame {
   const ctx = `ConversationItem[${i}]`;
@@ -989,6 +1058,7 @@ function decodeConversationItem(v: unknown, i: number): ConversationItemFrame {
     uuid: str(o, "uuid", ctx),
     tsMs: num(o, "tsMs", ctx),
     requestId: str(o, "requestId", ctx),
+    source: enumConversationSource(o, "source", ctx),
     arm,
     // Adopt the typed payload by shape (see file-top §5.1 boundary note).
     payload: ensureObject(o[arm], `${ctx}.${arm}`),
@@ -1664,6 +1734,26 @@ function bool(o: Obj, key: string, ctx: string): boolean {
     throw new Error(`frontend-proto: ${ctx}.${key} must be a boolean (got ${typeof v})`);
   }
   return v;
+}
+
+/**
+ * `ConversationSource`, adopted rather than rejected at UNSPECIFIED.
+ *
+ * An unknown NAME still throws (that is a wire the webapp cannot read), but the
+ * proto3 zero value is a well-formed enum member here. Refusing it in the
+ * decoder would take the whole frame down and lose the correlated context — the
+ * item's uuid, arm and session — that makes the malformed item findable. The
+ * conversation layer owns that error (see `state-adapter.ts`).
+ */
+function enumConversationSource(o: Obj, key: string, ctx: string): ConversationSource {
+  return enumValue(
+    o,
+    key,
+    ctx,
+    ConversationSource,
+    CONVERSATION_SOURCE_BY_NAME,
+    ConversationSource.UNSPECIFIED,
+  );
 }
 
 function enumRenderState(o: Obj, key: string, ctx: string): RenderState {
