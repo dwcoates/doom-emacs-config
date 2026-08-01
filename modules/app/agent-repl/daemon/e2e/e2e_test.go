@@ -500,7 +500,7 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 		Push:              forwarder,
 		SSM:               ssmMgr,
 		Progress:          progressMgr,
-		Spawner:           server.NewShimSpawner(reg, shimListener.Connected, udsSpawn, t.Logf),
+		Spawner:           server.NewShimSpawner(reg, shimListener.Connected, shimListener.Evict, udsSpawn, t.Logf),
 		Locator:           &server.SessionLocator{Reg: reg},
 		Source:            &server.ShimConnSource{Listener: shimListener},
 		FileDiagnostics:   fileDiagnostics,

@@ -59,13 +59,13 @@ type fakeSpawner struct {
 	// stopErr, when set, makes every stop fail.
 	stopErr error
 	// resume is the vendor conversation pointer each session would be spawned
-	// with; DropResume clears it, which is how a test arranges "this bring-up
-	// was a resume" versus "this one was already fresh".
+	// with.
 	resume map[string]string
 	// staleDropped is reported by the NEXT EnsureShim, standing in for the
 	// spawner's validate-before-resume repair.
 	staleDropped string
-	// drops records every DropResume call.
+	// drops is a tripwire proving recovery never clears durable identity through
+	// the legacy concrete-only DropResume method.
 	drops []string
 	// dropErr, when set, makes every drop fail.
 	dropErr error
@@ -92,8 +92,8 @@ func (s *fakeSpawner) EnsureShim(_ context.Context, sessionID string) (SpawnResu
 	return res, s.err
 }
 
-// DropResume clears the fake's resume pointer, reporting what it dropped —
-// which is what the escape ladder classifies a failed bring-up by.
+// DropResume clears the fake's resume pointer. It remains outside the Spawner
+// interface as a test tripwire for any accidental legacy recovery call.
 func (s *fakeSpawner) DropResume(sessionID string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -116,7 +116,7 @@ func (s *fakeSpawner) StopShim(sessionID string, hintPID int32) error {
 	return s.stopErr
 }
 
-// dropCalls returns every DropResume the escape ladder made.
+// dropCalls returns every accidental legacy DropResume call.
 func (s *fakeSpawner) dropCalls() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()

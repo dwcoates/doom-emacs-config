@@ -11,22 +11,25 @@ import (
 // per connection rather than re-deriving frames (design ruling: the webapp
 // keeps its existing /stream URL and now parses frontend.v1 there).
 //
-// A match on EITHER the session id OR the workspace passes: a WorkspaceState
-// resolved from a merge transition may carry the workspace but no session id,
-// and it still belongs to this connection's view.
+// Durable/control views carry an agent-repl session id and therefore require
+// an exact session match. ConversationDelta is the exception: its session_id
+// is the vendor conversation id from the durable event, which can rotate while
+// the agent-repl session and scoped WebSocket remain stable. It routes by the
+// authoritative workspace instead.
 type Scope struct {
 	SessionID string
 	Workspace string
 }
 
-func (s Scope) matches(sessionID, workspace string) bool {
-	if s.SessionID != "" && sessionID == s.SessionID {
-		return true
+func (s Scope) matchesAgentSession(sessionID, workspace string) bool {
+	if sessionID != "" {
+		return s.SessionID != "" && sessionID == s.SessionID
 	}
-	if s.Workspace != "" && workspace == s.Workspace {
-		return true
-	}
-	return false
+	return s.Workspace != "" && workspace == s.Workspace
+}
+
+func (s Scope) matchesWorkspace(workspace string) bool {
+	return s.Workspace != "" && workspace == s.Workspace
 }
 
 // scopeFrame decides whether frame reaches a client with this scope and returns
@@ -39,23 +42,23 @@ func scopeFrame(frame *frontendv1.FrontendFrame, sc Scope) (*frontendv1.Frontend
 	case *frontendv1.FrontendFrame_Snapshot:
 		return SnapshotFrame(filterSnapshot(f.Snapshot, sc)), true
 	case *frontendv1.FrontendFrame_WorkspaceState:
-		return frame, sc.matches(f.WorkspaceState.GetSessionId(), f.WorkspaceState.GetWorkspace())
+		return frame, sc.matchesAgentSession(f.WorkspaceState.GetSessionId(), f.WorkspaceState.GetWorkspace())
 	case *frontendv1.FrontendFrame_SessionView:
-		return frame, sc.matches(f.SessionView.GetSessionId(), f.SessionView.GetWorkspace())
+		return frame, sc.matchesAgentSession(f.SessionView.GetSessionId(), f.SessionView.GetWorkspace())
 	case *frontendv1.FrontendFrame_ConversationDelta:
-		return frame, sc.matches(f.ConversationDelta.GetSessionId(), f.ConversationDelta.GetWorkspace())
+		return frame, sc.matchesWorkspace(f.ConversationDelta.GetWorkspace())
 	case *frontendv1.FrontendFrame_TypingDelta:
-		return frame, sc.matches(f.TypingDelta.GetSessionId(), f.TypingDelta.GetWorkspace())
+		return frame, sc.matchesAgentSession(f.TypingDelta.GetSessionId(), f.TypingDelta.GetWorkspace())
 	case *frontendv1.FrontendFrame_TaskCatalog:
-		return frame, sc.matches(f.TaskCatalog.GetSessionId(), f.TaskCatalog.GetWorkspace())
+		return frame, sc.matchesAgentSession(f.TaskCatalog.GetSessionId(), f.TaskCatalog.GetWorkspace())
 	case *frontendv1.FrontendFrame_SessionInit:
-		return frame, sc.matches(f.SessionInit.GetSessionId(), f.SessionInit.GetWorkspace())
+		return frame, sc.matchesAgentSession(f.SessionInit.GetSessionId(), f.SessionInit.GetWorkspace())
 	case *frontendv1.FrontendFrame_Heartbeat:
-		return frame, sc.matches(f.Heartbeat.GetSessionId(), f.Heartbeat.GetWorkspace())
+		return frame, sc.matchesAgentSession(f.Heartbeat.GetSessionId(), f.Heartbeat.GetWorkspace())
 	case *frontendv1.FrontendFrame_Queue:
-		return frame, sc.matches(f.Queue.GetSessionId(), f.Queue.GetWorkspace())
+		return frame, sc.matchesAgentSession(f.Queue.GetSessionId(), f.Queue.GetWorkspace())
 	case *frontendv1.FrontendFrame_Progress:
-		return frame, sc.matches(f.Progress.GetSessionId(), f.Progress.GetWorkspace())
+		return frame, sc.matchesAgentSession(f.Progress.GetSessionId(), f.Progress.GetWorkspace())
 	default:
 		// CommandAck / unknown: connection-global, pass through.
 		return frame, true
@@ -67,12 +70,13 @@ type scopedView interface {
 	GetWorkspace() string
 }
 
-// filterScopedViews retains the views whose session or workspace belongs to
-// sc. The protos themselves remain shared and read-only; only the slice is new.
+// filterScopedViews retains each session-bearing view only for its exact
+// session scope. A sessionless view may instead route by workspace. The protos
+// themselves remain shared and read-only; only the slice is new.
 func filterScopedViews[T scopedView](views []T, sc Scope) []T {
 	var out []T
 	for _, view := range views {
-		if sc.matches(view.GetSessionId(), view.GetWorkspace()) {
+		if sc.matchesAgentSession(view.GetSessionId(), view.GetWorkspace()) {
 			out = append(out, view)
 		}
 	}

@@ -81,7 +81,7 @@ func sweepRig(t *testing.T, cwds ...string) (*BootSweeper, *sweepEnsurer, *[]str
 	var lines []string
 	s := &BootSweeper{
 		Reg:       reg,
-		Connected: func(string) bool { return false },
+		Connected: func(string) (bool, error) { return false, nil },
 		Held:      func(string) (bool, error) { return false, nil },
 		Ensurer:   ens,
 		Logf: func(f string, a ...any) {
@@ -108,7 +108,7 @@ func logged(lines *[]string, needle string) bool {
 func TestBootSweepReattachesAParkedShim(t *testing.T) {
 	// Arrange.
 	s, ens, lines := sweepRig(t, "/w")
-	s.Connected = func(string) bool { return true }
+	s.Connected = func(string) (bool, error) { return true, nil }
 
 	// Act.
 	s.Run(context.Background())
@@ -137,15 +137,15 @@ func TestBootSweepReattachesALockedShimOnTheRecheck(t *testing.T) {
 		mu    sync.Mutex
 		calls int
 	)
-	s.Connected = func(string) bool {
+	s.Connected = func(string) (bool, error) {
 		mu.Lock()
 		defer mu.Unlock()
 		calls++
 		if calls == 1 {
 			recheck <- time.Time{}
-			return false
+			return false, nil
 		}
-		return true
+		return true, nil
 	}
 
 	// Act.
@@ -170,9 +170,9 @@ func TestBootSweepNeverSpawnsAgainstAStuckLock(t *testing.T) {
 	s.Recheck = recheck
 	s.Held = func(string) (bool, error) { return true, nil }
 	var once sync.Once
-	s.Connected = func(string) bool {
+	s.Connected = func(string) (bool, error) {
 		once.Do(func() { recheck <- time.Time{} })
-		return false
+		return false, nil
 	}
 
 	// Act.
@@ -212,7 +212,7 @@ func TestBootSweepSkipsTerminalRecords(t *testing.T) {
 	if err := s.Reg.Put(registry.Record{SessionID: "s_dead", CWD: "/w", Terminal: true}); err != nil {
 		t.Fatalf("Put: %v", err)
 	}
-	s.Connected = func(string) bool { return true }
+	s.Connected = func(string) (bool, error) { return true, nil }
 
 	// Act.
 	s.Run(context.Background())
@@ -241,13 +241,58 @@ func TestBootSweepDoesNotTreatAnUnreadableLockAsFree(t *testing.T) {
 	}
 }
 
+func TestBootSweepDoesNotTreatAnUnreadableParkedConnectionAsAbsent(t *testing.T) {
+	// Arrange — a failed non-consuming socket probe cannot authorize either a
+	// reattach or the no-shim classification.
+	s, ens, lines := sweepRig(t, "/w")
+	probes := 0
+	recheck := make(chan time.Time, 1)
+	recheck <- time.Time{}
+	s.Recheck = recheck
+	s.Connected = func(string) (bool, error) {
+		probes++
+		return false, errors.New("socket probe failed")
+	}
+
+	// Act.
+	s.Run(context.Background())
+
+	// Assert.
+	if got := ens.ensured(); len(got) != 0 {
+		t.Fatalf("ensured = %v, want nothing on an unreadable parked transport", got)
+	}
+	if probes != 2 {
+		t.Fatalf("connection probes = %d, want boot and bounded re-check", probes)
+	}
+	if !logged(lines, "parked-connection probe FAILED") || !logged(lines, "UNKNOWN") {
+		t.Fatalf("the connection probe failure was not surfaced; lines: %v", *lines)
+	}
+}
+
+func TestBootSweepSurfacesFailedParkedReattachWithoutDeferringIt(t *testing.T) {
+	// A proven parked shim whose controller cannot be reconstructed must not be
+	// retried as though its transport identity were still uncertain.
+	s, ens, lines := sweepRig(t, "/w")
+	s.Connected = func(string) (bool, error) { return true, nil }
+	ens.err = errors.New("controller construction failed")
+
+	s.Run(context.Background())
+
+	if got := ens.ensured(); len(got) != 1 || got[0] != "/w" {
+		t.Fatalf("ensured = %v, want one attempted reattach", got)
+	}
+	if !logged(lines, "reattach FAILED") {
+		t.Fatalf("failed reattach was not logged: %v", *lines)
+	}
+}
+
 // CONCURRENCY IS BOUNDED. A boot with many registered workspaces must not open
 // all of them at the same instant.
 func TestBootSweepBoundsItsConcurrency(t *testing.T) {
 	// Arrange — six workspaces, all parked, with a gate holding every Ensure
 	// open so the peak is observable rather than inferred.
 	s, ens, _ := sweepRig(t, "/a", "/b", "/c", "/d", "/e", "/f")
-	s.Connected = func(string) bool { return true }
+	s.Connected = func(string) (bool, error) { return true, nil }
 	s.Parallelism = 2
 	ens.gate = make(chan struct{})
 
