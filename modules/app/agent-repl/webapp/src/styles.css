@@ -365,11 +365,17 @@ body::after {
   border-radius: 999px;
   padding: 0 0.45em;
 }
-/* The transient command-failure note (WorkspaceSidebar.showError): the
-   header is the rail's one fixed slot, so a switch or fold that never
-   landed reports here rather than vanishing. */
+/* The transient failure note (WorkspaceSidebar.showError): the rail's FOOTER
+   is its one fixed error slot, so every failed sidebar gesture — view
+   selector, task control, row switch, repo fold — reports in the same place
+   rather than inline beside whichever control was clicked. Outside
+   .sb-scroll, so it neither scrolls away nor steals room from the header's
+   controls; it holds its own band and the sections give up the height. */
 #ws-sidebar .sb-err {
-  margin-left: auto;
+  flex: 0 0 auto;
+  padding: 0.3rem 0.7rem;
+  border-top: 1px solid var(--border);
+  background: var(--sidebar-bg);
   color: var(--err);
   font-size: 0.72rem;
   overflow: hidden;
@@ -410,9 +416,6 @@ body::after {
   cursor: pointer;
 }
 #ws-sidebar .sb-add:hover { background: var(--card); }
-/* A transient failure note that follows the view selector must not push
-   the selector off the row, so it stops claiming the auto margin. */
-#ws-sidebar .sb-views ~ .sb-err { margin-left: 0.5rem; }
 
 #ws-sidebar .sb-scroll { flex: 1 1 auto; overflow-y: auto; padding: 0.35rem 0 1rem; }
 
