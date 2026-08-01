@@ -47,36 +47,53 @@ func newResyncHandler(t *testing.T, r Resyncer, lines *[]string) *commandHandler
 	return h
 }
 
-func TestResyncOnAnUnwiredWorkspaceIsCalm(t *testing.T) {
-	// Arrange — a BACKGROUND caller: Emacs re-syncing every workspace it knows
-	// about after a bounce.
+// An unwired workspace is NO LONGER a resync exception. Its conversation is
+// served from durable store history (sessioncontroller/durablereplay.go), so a
+// resyncer that still reports "no live session controller" is reporting that
+// the durable path itself could not answer — a failure, not a routine state.
+func TestResyncThatCannotServeAnUnwiredWorkspaceNacks(t *testing.T) {
+	// Arrange.
 	var logged []string
 	h := newResyncHandler(t, unwiredResyncer{}, &logged)
 
 	// Act.
 	err := h.Resync(context.Background(), "/w", "r1", &frontendv1.ResyncCmd{FromSeq: 1})
 
-	// Assert — no nack, so no failure card and no error-shaped ack.
-	if err != nil {
-		t.Fatalf("Resync on an unwired workspace = %v, want a calm no-op", err)
+	// Assert — silence would be indistinguishable from an empty conversation.
+	if err == nil {
+		t.Fatal("Resync that could not serve an unwired workspace returned no error")
 	}
 }
 
-func TestResyncOnAnUnwiredWorkspaceSaysSoPlainly(t *testing.T) {
-	// Arrange — calm is not silent: the skip is still accounted for.
+func TestResyncWithNoResyncerWiredNacks(t *testing.T) {
+	// Arrange — the command exists, so something must answer it.
 	var logged []string
-	h := newResyncHandler(t, unwiredResyncer{}, &logged)
+	h := newResyncHandler(t, nil, &logged)
+
+	// Act.
+	err := h.Resync(context.Background(), "/w", "r1", &frontendv1.ResyncCmd{FromSeq: 1})
+
+	// Assert.
+	if err == nil {
+		t.Fatal("Resync with no resyncer wired returned no error")
+	}
+}
+
+func TestAFailedResyncIsLoggedWithItsCause(t *testing.T) {
+	// Arrange.
+	var logged []string
+	h := newResyncHandler(t, brokenResyncer{}, &logged)
 
 	// Act.
 	h.Resync(context.Background(), "/w", "r1", &frontendv1.ResyncCmd{FromSeq: 1})
 
 	// Assert.
 	for _, l := range logged {
-		if strings.Contains(l, "the workspace has no live session controller") {
+		if strings.Contains(l, "resync ws=/w request_id=r1 from_seq=1 FAILED") && strings.Contains(l, "the retained ring is corrupt") {
 			return
 		}
 	}
-	t.Fatalf("no calm skip line logged; lines=%v", logged)
+	t.Fatalf("no failed-resync line carrying the cause; lines=%v", logged)
 }
 
 func TestAGenuineResyncFailureStaysLoud(t *testing.T) {

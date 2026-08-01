@@ -38,6 +38,7 @@ import (
 	"claude-repld/internal/ssm"
 	"claude-repld/internal/statedb"
 	"claude-repld/internal/stateroot"
+	"claude-repld/internal/storehistory"
 	"claude-repld/internal/workspace/geometry"
 	"claude-repld/internal/workspace/merge"
 )
@@ -504,6 +505,27 @@ func main() {
 	// The below-floor history re-pull needs no wiring of its own: it rides the
 	// session's existing shim connection as a ReplayRequest, so the store stays
 	// behind the agent-shim facade (sessioncontroller/repull.go).
+	//
+	// A resync for a workspace with NO live session controller has no such
+	// connection to ride, and bringing one up to answer a read would charge a
+	// frontend's mount a vendor process. It reads the store directly instead
+	// (sessioncontroller/durablereplay.go), keyed by the VENDOR session uuid the
+	// store files that conversation's seq space under.
+	storeSocketPath, err := storehistory.DefaultSocketPath()
+	if err != nil {
+		daemonFatal(daemonLog, "claude-repld: resolve store socket path: %v", err)
+	}
+	durableHistory := &storehistory.Reader{
+		Socket: storeSocketPath,
+		Vendor: func(sessionID string) (string, bool) {
+			rec, ok := sessionRegistry.Get(sessionID)
+			if !ok {
+				return "", false
+			}
+			return rec.ClaudeSessionID, rec.ClaudeSessionID != ""
+		},
+		Logf: legacyLog,
+	}
 	controller, err := sessioncontroller.New(sessioncontroller.Config{
 		Push:              forwarder,
 		SSM:               ssmMgr,
@@ -514,6 +536,7 @@ func main() {
 		Locator:           &server.SessionLocator{Reg: sessionRegistry},
 		SeqStore:          seqStore,
 		ClearCompactStore: seqStore,
+		DurableHistory:    durableHistory,
 		PermissionModes:   server.NewRegistryModeStore(sessionRegistry),
 		Registrar:         registrar,
 		ModelCatalogs:     registrar,

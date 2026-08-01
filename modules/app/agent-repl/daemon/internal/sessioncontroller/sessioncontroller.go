@@ -224,6 +224,12 @@ type Config struct {
 	// the next resync the very history that clear or compaction discarded, which
 	// is the failure the floor exists to prevent.
 	ClearCompactStore ClearCompactStore
+	// DurableHistory serves a resync for a workspace with NO live session
+	// controller, straight from the store the shim itself reads
+	// (durablereplay.go). Nil makes such a resync a LOUD failure rather than
+	// the quiet empty feed it used to be: a frontend cannot tell silence from
+	// an empty conversation, so the daemon must say which one it means.
+	DurableHistory DurableHistorySource
 	// DaemonVersion / ProtocolVersion travel in DaemonHello; ProtocolVersion
 	// must equal the shim's ("1").
 	DaemonVersion   string
@@ -1133,9 +1139,16 @@ func (m *Manager) AnswerPermission(_ context.Context, workspace, permissionReque
 // some daemon and is no longer held here, so the first seq the live window
 // covers is one past it.
 //
-// A workspace with no live session is a loud error.
+// A workspace with NO live session controller is served from DURABLE history
+// instead (durablereplay.go). It used to be skipped quietly one layer up, which
+// is what left a webview reloaded after a daemon bounce showing a correct
+// footer over an empty feed: the conversation was in the store the whole time,
+// and every read path required a shim.
 func (m *Manager) Resync(workspace string, fromSeq uint64) error {
 	d, err := m.existing(workspace)
+	if errors.Is(err, ErrNoLiveSessionController) {
+		return m.resyncFromDurableHistory(workspace, fromSeq)
+	}
 	if err != nil {
 		return err
 	}
@@ -1262,10 +1275,18 @@ func (m *Manager) runPendingResync(workspace, sessionID string) {
 // newest clear or compaction (or at zero, replaying what is retained), loudly,
 // rather than believed.
 func (m *Manager) replayFloor(d *sessionController, fromSeq uint64) uint64 {
-	floorSeq := m.cfg.ClearCompactStore.NewestClearOrCompactSeq(d.sessionID)
-	lastSeen := m.lastSeenSeq(d)
+	return m.replayFloorAt(d.workspace, d.sessionID, m.lastSeenSeq(d), fromSeq)
+}
+
+// replayFloorAt is replayFloor's rule expressed against a workspace, its
+// session, and the ceiling on an honest client mark, so the UNWIRED durable
+// replay (durablereplay.go) floors identically without a session controller to
+// read the ceiling off. Its ceiling is the DURABLE last_seen_seq alone, because
+// a workspace with no controller has no retained ring to raise it.
+func (m *Manager) replayFloorAt(workspace, sessionID string, lastSeen, fromSeq uint64) uint64 {
+	floorSeq := m.cfg.ClearCompactStore.NewestClearOrCompactSeq(sessionID)
 	logf := dlog.Tag(dlog.Logf(m.logf),
-		"ws", d.workspace, "session", d.sessionID,
+		"ws", workspace, "session", sessionID,
 		"from_seq", fromSeq, "newest_clear_or_compact_seq", floorSeq,
 		"last_seen_seq", lastSeen)
 	if fromSeq > lastSeen {
