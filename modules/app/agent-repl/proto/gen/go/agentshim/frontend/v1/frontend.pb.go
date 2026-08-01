@@ -1490,8 +1490,21 @@ type WorkspaceState struct {
 	// and every conversation item the session produces carries
 	// CONVERSATION_SOURCE_MERGE.
 	MergeLeaseHeld bool `protobuf:"varint,16,opt,name=merge_lease_held,json=mergeLeaseHeld,proto3" json:"merge_lease_held,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// WHEN this workspace's merge landed, in unix millis. 0 means it has never
+	// reached `merged`, which is the only reading of absence: a merged
+	// workspace always carries the instant it merged at.
+	//
+	// WRITTEN ONCE, at the `merged` transition, and never moved afterwards.
+	// `merge_phase` (6) reports whichever merge row is currently newest and can
+	// therefore be superseded; this is the durable record that the merge
+	// LANDED, so a later transition on any axis leaves it exactly where it was.
+	//
+	// It is its own persisted fact rather than a re-derivation over the state
+	// log, so a frontend ordering a recently-merged section reads the identical
+	// instant from every push, snapshot and resync.
+	MergedAtMs    int64 `protobuf:"varint,17,opt,name=merged_at_ms,json=mergedAtMs,proto3" json:"merged_at_ms,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *WorkspaceState) Reset() {
@@ -1634,6 +1647,13 @@ func (x *WorkspaceState) GetMergeLeaseHeld() bool {
 		return x.MergeLeaseHeld
 	}
 	return false
+}
+
+func (x *WorkspaceState) GetMergedAtMs() int64 {
+	if x != nil {
+		return x.MergedAtMs
+	}
+	return 0
 }
 
 type SessionView struct {
@@ -6183,7 +6203,7 @@ const file_agentshim_frontend_v1_frontend_proto_rawDesc = "" +
 	"\n" +
 	"session_id\x18\x03 \x01(\tR\tsessionId\x12\x18\n" +
 	"\ahealthy\x18\x04 \x01(\bR\ahealthy\x12\x16\n" +
-	"\x06reason\x18\x05 \x01(\tR\x06reason\"\xdc\x05\n" +
+	"\x06reason\x18\x05 \x01(\tR\x06reason\"\xfe\x05\n" +
 	"\x0eWorkspaceState\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12\x1d\n" +
 	"\n" +
@@ -6205,7 +6225,9 @@ const file_agentshim_frontend_v1_frontend_proto_rawDesc = "" +
 	"\ractive_faults\x18\r \x03(\v2#.agentshim.frontend.v1.RuntimeFaultR\factiveFaults\x120\n" +
 	"\x14merge_queue_position\x18\x0e \x01(\x05R\x12mergeQueuePosition\x12*\n" +
 	"\x11merge_queue_depth\x18\x0f \x01(\x05R\x0fmergeQueueDepth\x12(\n" +
-	"\x10merge_lease_held\x18\x10 \x01(\bR\x0emergeLeaseHeld\"\x95\x06\n" +
+	"\x10merge_lease_held\x18\x10 \x01(\bR\x0emergeLeaseHeld\x12 \n" +
+	"\fmerged_at_ms\x18\x11 \x01(\x03R\n" +
+	"mergedAtMs\"\x95\x06\n" +
 	"\vSessionView\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12\x1d\n" +
 	"\n" +

@@ -106,4 +106,43 @@ Databases predating the remodel contain `vendor_clear` rows. No token maps
 them to a render state and no CTE selects them, so they are inert and need no
 migration.
 
+## A merged workspace is a fact, not a row that happens to be newest
+
+`workspace_merged` holds one row per workspace that has ever reached the
+`merged` phase: the workspace and the instant it merged at. It is written by
+`ApplyMergeTransition` at that transition and never rewritten — the primary key
+is what makes set-once structural, so a second merge keeps the first landing.
+
+It is deliberately NOT a query over the state log. The log answers "which merge
+row is newest", which any later transition can change; "this workspace merged,
+at this instant" becomes true once and stays true. The frontends were stripped
+of merge state entirely and order their recently-merged section on this
+instant, so re-deriving it would make that order depend on whatever happened to
+the workspace afterwards.
+
+It reaches the wire as `WorkspaceState.merged_at_ms` (unix millis, 0 = never
+merged), stamped in `stampMergeFactsLocked` beside the queue facts — the one
+WorkspaceState construction funnel, so a push, a snapshot and a synchronous
+publication cannot disagree.
+
+## The daemon stands a merged workspace down
+
+Reaching `merged` also ends the workspace's session. `ApplyMergeTransition`
+drives `ssm.MergedTeardown` (implemented by
+`(*sessioncontroller.Manager).TeardownMerged`, which hibernates), bound through
+`NewMergeLease` so the fleet that ran the merge is provably the fleet that
+stands it down.
+
+Two properties are load-bearing:
+
+- The teardown runs AFTER the lock is released and AFTER the `merged` state has
+  been handed to the subscribers. Every frontend state travels one ordered
+  channel, so a frontend is told the workspace merged before anything the
+  teardown produces can arrive — a merged workspace never simply disappears.
+- A teardown failure NEVER travels back up `ApplyMergeTransition`. That error
+  would reach `merge.Driver.finalizeMerged` and report a cherry-pick that
+  already landed as a failed merge. It is surfaced through the canonical log
+  instead, naming the session left running, exactly as a merge lease release
+  failure is.
+
 Dependencies: `proto/agentshim/` (generated Go), SQLite.

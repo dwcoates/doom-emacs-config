@@ -496,6 +496,76 @@ func TestMarshalWorkspaceStateFrameLowerCamelCase(t *testing.T) {
 	}
 }
 
+// THE MERGED-AT FACT MUST REACH THE WIRE. It is an int64, which protojson
+// renders as a STRING, and a frontend ordering its recently-merged section
+// reads it off this frame — so the field being carried is the whole point of
+// persisting it.
+func TestMarshalWorkspaceStateFrameCarriesMergedAt(t *testing.T) {
+	// Arrange.
+	frame := WorkspaceStateFrame(&frontendv1.WorkspaceState{
+		Workspace:  "ws",
+		State:      frontendv1.RenderState_RENDER_STATE_MERGED,
+		MergedAtMs: 1750000000123,
+	})
+
+	// Act.
+	b, err := marshalFrame(frame)
+	if err != nil {
+		t.Fatalf("marshalFrame: %v", err)
+	}
+
+	// Assert.
+	if !strings.Contains(string(b), `"mergedAtMs":"1750000000123"`) {
+		t.Errorf("serialized frame missing mergedAtMs\n%s", b)
+	}
+}
+
+// A WORKSPACE THAT NEVER MERGED CARRIES NO INSTANT, and protojson's zero-value
+// omission is what says so on the wire: absent reads as never merged, which is
+// exactly the field's documented meaning.
+func TestMarshalWorkspaceStateFrameOmitsAnAbsentMergedAt(t *testing.T) {
+	// Arrange.
+	frame := WorkspaceStateFrame(&frontendv1.WorkspaceState{
+		Workspace: "ws",
+		State:     frontendv1.RenderState_RENDER_STATE_IDLE,
+	})
+
+	// Act.
+	b, err := marshalFrame(frame)
+	if err != nil {
+		t.Fatalf("marshalFrame: %v", err)
+	}
+
+	// Assert.
+	if strings.Contains(string(b), "mergedAtMs") {
+		t.Errorf("serialized frame carries mergedAtMs for a workspace that never merged\n%s", b)
+	}
+}
+
+// A SCOPED SNAPSHOT KEEPS THE FACT. The scope pass rebuilds the snapshot's
+// slices, so a merged workspace that survives the filter must arrive with its
+// instant intact rather than with a rebuilt, emptied view.
+func TestFilterSnapshotKeepsMergedAt(t *testing.T) {
+	// Arrange.
+	snap := &frontendv1.StateSnapshot{Workspaces: []*frontendv1.WorkspaceState{{
+		Workspace:  "/ws/alpha",
+		SessionId:  "s1",
+		State:      frontendv1.RenderState_RENDER_STATE_MERGED,
+		MergedAtMs: 1750000000123,
+	}}}
+
+	// Act.
+	got := filterSnapshot(snap, Scope{Workspace: "/ws/alpha"})
+
+	// Assert.
+	if len(got.GetWorkspaces()) != 1 {
+		t.Fatalf("filtered workspaces = %d, want the merged workspace retained", len(got.GetWorkspaces()))
+	}
+	if got.GetWorkspaces()[0].GetMergedAtMs() != 1750000000123 {
+		t.Fatalf("filtered merged_at_ms = %d, want 1750000000123", got.GetWorkspaces()[0].GetMergedAtMs())
+	}
+}
+
 // --- TypingDeltaFromContentDelta embeds the ContentDelta as-is --------------
 
 func TestTypingDeltaFromContentDelta(t *testing.T) {

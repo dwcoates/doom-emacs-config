@@ -38,6 +38,7 @@ import (
 	"claude-repld/internal/ssm"
 	"claude-repld/internal/statedb"
 	"claude-repld/internal/stateroot"
+	"claude-repld/internal/workspace/geometry"
 	"claude-repld/internal/workspace/merge"
 )
 
@@ -540,6 +541,49 @@ func main() {
 	}
 	defer controller.Close()
 
+	// THE merge-geometry map: which branch, which worktree, and which parent
+	// worktree each workspace merges with. It lives in the shared state store
+	// beside the registry and the SSM because it is durable daemon-owned
+	// identity of exactly their kind, and it must survive the daemon bounce a
+	// self-merge causes. Emacs sends a bare merge request keyed by workspace and
+	// this map answers it; a daemon that cannot open the map cannot merge, so
+	// failing to open it aborts startup rather than serving guessed targets.
+	geometryStore, err := geometry.Open(stateStore, legacyLog)
+	if err != nil {
+		daemonFatal(daemonLog, "claude-repld: open workspace merge geometry: %v", err)
+	}
+
+	// ONE-TIME REPAIR for workspaces that predate the daemon owning the map.
+	// They have no record, and without one every merge of one would be refused
+	// forever, so their geometry is derived from git at boot: the worktree's
+	// checked-out branch, and the repository's main worktree as the target.
+	//
+	// This is a repair of missing state, not a fallback for the recording path:
+	// it never touches a workspace that already has a record, and a workspace
+	// whose branch or worktree git cannot answer for (a detached HEAD, a
+	// deleted worktree) deliberately keeps NO record so its merge is refused
+	// with an explanation rather than run against a guess.
+	geometryDeriver, err := geometry.NewDeriver(legacyLog)
+	if err != nil {
+		daemonFatal(daemonLog, "claude-repld: build workspace geometry deriver: %v", err)
+	}
+	geometryBackfiller, err := geometry.NewBackfiller(geometry.BackfillConfig{
+		Store:   geometryStore,
+		Deriver: geometryDeriver,
+		Lister:  registryGeometryLister{Reg: sessionRegistry},
+		Logf:    legacyLog,
+	})
+	if err != nil {
+		daemonFatal(daemonLog, "claude-repld: build workspace geometry backfiller: %v", err)
+	}
+	geometryReport, err := geometryBackfiller.Run(context.Background())
+	if err != nil {
+		daemonFatal(daemonLog, "claude-repld: backfill workspace merge geometry: %v", err)
+	}
+	daemonLog.With("operation", "geometry-backfill").Log(
+		"claude-repld: workspace merge geometry backfill recorded=%d already=%d underivable=%d",
+		geometryReport.Recorded, geometryReport.AlreadyRecorded, geometryReport.Underivable)
+
 	// The merge queue's durable substrate and the shim exclusivity lease.
 	// Both are constructed HERE, not inside WireAgentShim, because the SSM's
 	// merge.Lease reads the SAME queue instance to resolve
@@ -582,6 +626,7 @@ func main() {
 		StateRoot:      logRoot,
 		Commands:       sessionCommands,
 		Registry:       sessionRegistry,
+		Geometry:       daemonGeometryRecorder{Store: geometryStore, Logf: legacyLog},
 		Health:         sessionControllerHealthProbe{Controller: controller, Logf: legacyLog},
 		InitialPrompts: controller,
 		Logf:           legacyLog,
@@ -641,11 +686,12 @@ func main() {
 		// The daemon resolves a workspace's conversation for itself. Frontends
 		// send an intent (continue / fresh / explicit), never a remembered
 		// vendor uuid — see server.ConversationResolver.
-		Resumes:     &server.ConversationResolver{Reg: sessionRegistry, Logf: legacyLog},
-		MergeLease:  mergeLease,
-		MergeQueue:  mergeQueue,
-		Logf:        legacyLog,
-		LogVerbosef: daemonLog.LogVerbose,
+		Resumes:       &server.ConversationResolver{Reg: sessionRegistry, Logf: legacyLog},
+		MergeLease:    mergeLease,
+		MergeQueue:    mergeQueue,
+		MergeGeometry: geometryStore,
+		Logf:          legacyLog,
+		LogVerbosef:   daemonLog.LogVerbose,
 	})
 	if err != nil {
 		daemonFatal(daemonLog, "claude-repld: frontend surface: %v", err)

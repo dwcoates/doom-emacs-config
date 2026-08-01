@@ -32,17 +32,25 @@ import (
 // operation, and the concrete cause, the same canonical path the turn ledger
 // and the connectivity axis use.
 
-// TurnInterrupter stops the in-flight turn of a workspace whose shim
-// merge.Coordinator is about to take over. Satisfied by
+// SessionAuthority is the merge subsystem's whole authority over a workspace's
+// session lifecycle: it stops the turn a lease displaces at the START of a
+// merge, and stands the session down at the END of one. Satisfied by
 // *sessioncontroller.Manager.
 //
-// It is a MACHINERY stop, not a user-commanded one: the user did not ask for
-// their turn to end, the merge needs the session, so the turn's outcome must
-// not be painted `interrupted`. That distinction is why this is its own port
-// rather than the frontend interrupt command's entry point.
-type TurnInterrupter interface {
+// THE TWO ARE ONE PORT DELIBERATELY. Both are the merge reaching into a single
+// workspace's session, and both must reach the SAME controller fleet — the one
+// whose shim the lease was taken over. Two injection points could be bound to
+// two fleets, so a merge would interrupt one daemon's session and stop
+// another's; one port makes that unrepresentable rather than merely unlikely.
+//
+// The interrupt half is a MACHINERY stop, not a user-commanded one: the user
+// did not ask for their turn to end, the merge needs the session, so the turn's
+// outcome must not be painted `interrupted`. That distinction is why this is
+// its own port rather than the frontend interrupt command's entry point.
+type SessionAuthority interface {
 	// InterruptForMerge delivers the stop and reports a failure to deliver it.
 	InterruptForMerge(ctx context.Context, workspace string) error
+	MergedTeardown
 }
 
 // MergeLeaseConfig constructs a MergeLease. EVERY field is required: a lease
@@ -57,14 +65,16 @@ type MergeLeaseConfig struct {
 	// are cross-workspace facts, and no per-workspace row can carry them.
 	// Required.
 	Queue merge.Queue
-	// Interrupter stops the USER turn the lease displaces. Required.
-	Interrupter TurnInterrupter
+	// Interrupter is the merge's authority over the workspace's session: it
+	// stops the USER turn the lease displaces, and stands the session down once
+	// the merge has landed. Required.
+	Interrupter SessionAuthority
 }
 
 // MergeLease is the SSM's implementation of merge.Lease.
 type MergeLease struct {
 	m           *Manager
-	interrupter TurnInterrupter
+	interrupter SessionAuthority
 }
 
 // The frozen contract is the compile-time obligation, not a comment.
@@ -83,6 +93,12 @@ func NewMergeLease(cfg MergeLeaseConfig) (*MergeLease, error) {
 		return nil, fmt.Errorf("ssm: MergeLeaseConfig.Interrupter is required; a lease that cannot interrupt the turn it displaces would leave the user driving the shim it claims to own")
 	}
 	if err := cfg.Manager.bindMergeQueue(cfg.Queue); err != nil {
+		return nil, err
+	}
+	// The SAME authority drives the merged transition's teardown. Binding it
+	// here rather than accepting a second config field is what keeps the
+	// interrupt and the stand-down provably aimed at one controller fleet.
+	if err := cfg.Manager.bindMergedTeardown(cfg.Interrupter); err != nil {
 		return nil, err
 	}
 	return &MergeLease{m: cfg.Manager, interrupter: cfg.Interrupter}, nil
@@ -367,8 +383,13 @@ func (m *Manager) mergeQueueFactsLocked(workspace string) (position, depth int32
 	return 0, 0
 }
 
-// stampMergeFactsLocked writes the three cross-workspace merge fields onto a
-// WorkspaceState about to be pushed. Caller holds mu.
+// stampMergeFactsLocked writes the merge fields no per-workspace state row can
+// carry onto a WorkspaceState about to be pushed. Caller holds mu.
+//
+// merged_at_ms rides here rather than off the resolution for the same reason
+// the queue facts do: it is a fact about the workspace's HISTORY, not about
+// which row currently wins, so resolving it would tie a permanent instant to
+// whichever transition happened to be newest.
 //
 // It is called from workspaceMessageLocked and nowhere else, which is what
 // makes every push, snapshot and synchronous publication carry the same
@@ -379,6 +400,7 @@ func (m *Manager) stampMergeFactsLocked(workspace string, msg *frontendv1.Worksp
 	msg.MergeQueuePosition = position
 	msg.MergeQueueDepth = depth
 	msg.MergeLeaseHeld = len(m.openMergeWindowsLocked(workspace)) > 0
+	msg.MergedAtMs = m.mergedAtLocked(workspace)
 }
 
 // pushCurrentLocked re-resolves the workspace and pushes it unconditionally.

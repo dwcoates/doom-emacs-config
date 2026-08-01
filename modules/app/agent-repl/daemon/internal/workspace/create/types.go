@@ -193,6 +193,24 @@ type WorktreeCreator interface {
 	EnsureWorktree(context.Context, Job) error
 }
 
+// WorkspaceGeometryRecorder durably records the created workspace's MERGE
+// GEOMETRY — its branch, its own worktree, and the worktree its commits will
+// later land in.
+//
+// It runs at the worktree stage on purpose: that is the single moment the three
+// coordinates are OBSERVED FACTS rather than a later reconstruction. Emacs used
+// to carry them on every merge command, and two owners of one map is how a
+// merge landed against a target the daemon had never heard of.
+//
+// It receives the whole Job because path spelling and the parent-worktree
+// choice are the adapter's business, exactly as they are for WorktreeCreator.
+// A recording failure FAILS THE JOB: a workspace materialized without geometry
+// is a workspace nobody can ever merge, and discovering that at merge time is
+// strictly worse than discovering it at creation.
+type WorkspaceGeometryRecorder interface {
+	RecordWorkspaceGeometry(context.Context, Job) error
+}
+
 // SessionCreator registers the session and starts its waiting shim.  Every
 // create job uses it, including jobs with no initial prompt.
 type SessionCreator interface {
