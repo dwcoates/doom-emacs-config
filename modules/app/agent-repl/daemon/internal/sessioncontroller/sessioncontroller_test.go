@@ -69,6 +69,11 @@ type fakeSpawner struct {
 	drops []string
 	// dropErr, when set, makes every drop fail.
 	dropErr error
+	// entered / gate, when set, park every EnsureShim: entry is announced on
+	// entered and the call blocks until gate closes. That is how a test holds
+	// a bring-up mid-flight (past its entry closed-check) without a sleep.
+	entered chan struct{}
+	gate    chan struct{}
 }
 
 func (s *fakeSpawner) EnsureShim(_ context.Context, sessionID string) (SpawnResult, error) {
@@ -76,7 +81,14 @@ func (s *fakeSpawner) EnsureShim(_ context.Context, sessionID string) (SpawnResu
 	s.calls = append(s.calls, sessionID)
 	res := SpawnResult{StaleResumeDropped: s.staleDropped, Resumed: s.resume[sessionID]}
 	s.staleDropped = ""
+	entered, gate := s.entered, s.gate
 	s.mu.Unlock()
+	if entered != nil {
+		entered <- struct{}{}
+	}
+	if gate != nil {
+		<-gate
+	}
 	return res, s.err
 }
 

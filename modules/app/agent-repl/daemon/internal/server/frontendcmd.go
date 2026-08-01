@@ -48,6 +48,14 @@ type PromptRouter interface {
 	Interrupt(ctx context.Context, workspace string) error
 	AnswerPermission(ctx context.Context, workspace, permissionRequestID string, allow bool, denyMessage string, updatedInput *structpb.Struct) error
 	SetModel(ctx context.Context, workspace, model string) (string, error)
+	// ResolveMergeConflict drives the workspace's OWN session to resolve a
+	// cherry-pick merge.Coordinator parked on a conflict, returning once that
+	// resolution turn has ended.
+	//
+	// It belongs on THIS interface because it is a prompt submitted to that same
+	// session — the one prompt path the merge lease admits — so the fleet that
+	// serves the user's prompts is necessarily the fleet the merge drives.
+	ResolveMergeConflict(ctx context.Context, res merge.ConflictResolution) error
 }
 
 // SessionRestarter hard-restarts one workspace's session: stop its shim, bring
@@ -82,12 +90,25 @@ type DaemonHealthChecker interface {
 // discarded on arrival and then reported as unknowable: every merge died on
 // "merge dir resolution not wired for workspace", with Emacs having sent the
 // answer in the same message.
+// It is merge.Coordinator, NOT merge.Driver. Enqueue returns as soon as the
+// request is durably on its repository's queue, because a merge that has to
+// wait its turn cannot report a terminal outcome inline — the outcome arrives
+// as pushed merge state instead. Calling merge.Driver straight from the command
+// handler is what let two merge_workspace commands cherry-pick into one target
+// worktree at the same time.
 type MergeRunner interface {
-	// Merge starts a cherry-pick merge for the request's workspace.
-	Merge(ctx context.Context, req merge.Request) error
+	// Enqueue admits a cherry-pick merge onto its repository's queue and
+	// returns the position it landed at.
+	Enqueue(ctx context.Context, req merge.Request) (merge.Position, error)
 	// Resume continues a human-resolved conflict (the
 	// conflict_resolved_continue handoff, §9.3).
 	Resume(ctx context.Context, req merge.Request) error
+	// Abandon gives up the workspace's in-flight merge, if any. Closing a
+	// workspace whose merge is parked on a conflict is the abandonment the
+	// merge.Lease contract names — the lease must release on it like on any
+	// other terminal phase — and abandonment has no command of its own on the
+	// wire, so close_workspace routes here before the lifecycle close.
+	Abandon(ctx context.Context, workspace string) (bool, error)
 }
 
 // WorkspaceLifecycle closes/opens a workspace. Bound to the Emacs
@@ -605,9 +626,13 @@ func (h *commandHandler) SetModel(ctx context.Context, workspace, requestID stri
 // resolution not wired" while the command sitting in front of it named all
 // three fields.
 //
-// A request missing any of them is refused by merge.Request's own validation
-// inside merge.Driver, which is the single place that decides what a runnable
-// merge is.
+// A request missing any of them is refused by merge.Request's own validation,
+// which is the single place that decides what a runnable merge is.
+//
+// The non-resume path ENQUEUES rather than merges: merge.Coordinator owns the
+// repository's queue, and this call returns once the request is durably on it.
+// A merge that had to wait reports its outcome through pushed merge state, so
+// an ok ack here means "accepted and recorded", never "already merged".
 func (h *commandHandler) MergeWorkspace(ctx context.Context, workspace, requestID string, cmd *frontendv1.MergeWorkspaceCmd) error {
 	// The envelope's workspace is the daemon's KEY (the session cwd), exactly
 	// as it is for every other command, and the display name rides its own
@@ -627,11 +652,31 @@ func (h *commandHandler) MergeWorkspace(ctx context.Context, workspace, requestI
 	}
 	h.logf("frontend cmd: merge_workspace ws=%s name=%q request_id=%s handler=%s source_branch=%q source_dir=%q target_dir=%q",
 		workspace, req.Name, requestID, cmd.GetHandler(), req.SourceBranch, req.SourceDir, req.TargetDir)
-	return h.merges.Merge(ctx, req)
+	pos, err := h.merges.Enqueue(ctx, req)
+	if err != nil {
+		h.logf("frontend cmd: merge_workspace ENQUEUE FAILED ws=%s name=%q request_id=%s: %v", workspace, req.Name, requestID, err)
+		return err
+	}
+	h.logf("frontend cmd: merge_workspace ENQUEUED ws=%s name=%q request_id=%s repo=%q index=%d depth=%d",
+		workspace, req.Name, requestID, pos.Repo, pos.Index, pos.Depth)
+	return nil
 }
 
 func (h *commandHandler) CloseWorkspace(ctx context.Context, workspace, requestID string, _ *frontendv1.CloseWorkspaceCmd) error {
 	h.logf("frontend cmd: close_workspace ws=%s request_id=%s", workspace, requestID)
+	// A close is also the abandonment of any merge the workspace has parked on
+	// a conflict: the lease must not outlive the workspace it was taken over,
+	// and there is no separate abandon command on the wire. An abandon failure
+	// refuses the close loudly — closing anyway would leave the lease standing
+	// over a workspace nobody can prompt or resolve.
+	abandoned, err := h.merges.Abandon(ctx, workspace)
+	if err != nil {
+		h.logf("frontend cmd: close_workspace ABANDON FAILED ws=%s request_id=%s: %v", workspace, requestID, err)
+		return err
+	}
+	if abandoned {
+		h.logf("frontend cmd: close_workspace ABANDONED the workspace's parked merge ws=%s request_id=%s", workspace, requestID)
+	}
 	return h.lifecycle.Close(ctx, workspace)
 }
 

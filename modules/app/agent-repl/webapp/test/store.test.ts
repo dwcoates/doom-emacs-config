@@ -49,6 +49,9 @@ function workspaceEffect(over: Partial<WorkspaceStatusInput> = {}): AdapterEffec
       sessionStatus: "thinking",
       controllerGenerationId: "g1",
       activeFaults: [],
+      mergeQueuePosition: 0,
+      mergeQueueDepth: 0,
+      mergeLeaseHeld: false,
       ...over,
     },
   };
@@ -146,6 +149,61 @@ describe("ingest workspace-state", () => {
     store.ingest([workspaceEffect({ turnActive: true })]);
     // Assert
     expect(store.state.turnInFlight).toBe(true);
+  });
+
+  it("adopts the merge lease, which the composer gates on", () => {
+    // Arrange
+    const store = new ConversationStore();
+    // Act
+    store.ingest([workspaceEffect({ state: "merge_conflict", mergeLeaseHeld: true })]);
+    // Assert
+    expect(store.state.mergeLeaseHeld).toBe(true);
+  });
+
+  it("adopts the merge-queue place beside the phase that names it", () => {
+    // Arrange
+    const store = new ConversationStore();
+    // Act
+    store.ingest([
+      workspaceEffect({ state: "merge_queued", mergeQueuePosition: 2, mergeQueueDepth: 3 }),
+    ]);
+    // Assert
+    expect(store.state.mergeQueuePosition).toBe(2);
+    expect(store.state.mergeQueueDepth).toBe(3);
+  });
+
+  it("releases the merge lease when a later revision clears it", () => {
+    // Arrange — the daemon clears the flag on the same revisioned message that
+    // set it, so the composer un-gates with no local state to unwind.
+    const store = new ConversationStore();
+    store.ingest([workspaceEffect({ state: "merging", mergeLeaseHeld: true })]);
+    // Act
+    store.ingest([workspaceEffect({ state: "merged", mergeLeaseHeld: false, atMs: 1001 })]);
+    // Assert
+    expect(store.state.mergeLeaseHeld).toBe(false);
+  });
+
+  it("drops the merge lease when frontend state is invalidated", () => {
+    // Arrange — a lease that outlived its freshness lease would leave the
+    // composer gated against a state nothing current claims.
+    const store = new ConversationStore();
+    store.ingest([workspaceEffect({ state: "merging", mergeLeaseHeld: true })]);
+    // Act
+    store.invalidateFrontendState("websocket_disconnected");
+    // Assert
+    expect(store.state.mergeLeaseHeld).toBe(false);
+  });
+
+  it("drops the merge-queue place when frontend state is invalidated", () => {
+    // Arrange
+    const store = new ConversationStore();
+    store.ingest([
+      workspaceEffect({ state: "merge_queued", mergeQueuePosition: 2, mergeQueueDepth: 3 }),
+    ]);
+    // Act
+    store.invalidateFrontendState("websocket_disconnected");
+    // Assert
+    expect(store.state.mergeQueuePosition).toBe(0);
   });
 
   it("clears turnInFlight when turnActive is false", () => {

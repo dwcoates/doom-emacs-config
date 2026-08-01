@@ -45,9 +45,20 @@ function workspaceState(over: Record<string, unknown>): Record<string, unknown> 
   };
 }
 
+/**
+ * An ordinary user-driven item envelope. The daemon stamps a source on every
+ * item it builds, so a fixture without one is not a wire the daemon can emit —
+ * see the provenance-gate suite for the malformed and merge-driven cases.
+ */
+function userItem(item: Record<string, unknown>): Record<string, unknown> {
+  return { source: "CONVERSATION_SOURCE_USER", ...item };
+}
+
 /** The store items a single conversation item decomposes into. */
 function itemsFrom(item: Record<string, unknown>): ConversationItem[] {
-  const effects = applyOne({ conversationDelta: { sessionId: "s1", workspace: "ws", throughSeq: "9", items: [item] } });
+  const effects = applyOne({
+    conversationDelta: { sessionId: "s1", workspace: "ws", throughSeq: "9", items: [userItem(item)] },
+  });
   const conv = effects.find((e) => e.kind === "conversation-items");
   if (conv?.kind !== "conversation-items") throw new Error("no conversation-items effect");
   return conv.items;
@@ -86,6 +97,9 @@ describe("WorkspaceState mapping", () => {
           sessionStatus: "thinking",
           controllerGenerationId: "g1",
           activeFaults: [],
+          mergeQueuePosition: 0,
+          mergeQueueDepth: 0,
+          mergeLeaseHeld: false,
         },
       },
     ]);
@@ -109,6 +123,7 @@ describe("WorkspaceState mapping", () => {
     expect(lines).toEqual([
       expect.stringContaining(
         "connectivity=operational status=ready proto=READY keyword=ready turn_active=false live_tasks=0 merge_phase= " +
+          "merge_queue=0/0 merge_lease_held=false " +
           "faults=none cause_kind=session_started cause_seq=9 at_ms=1234",
       ),
     ]);
@@ -830,6 +845,145 @@ describe("permission arm", () => {
 
 // --- explicit-ignore path (unsupported shapes) -----------------------------
 
+// --- the provenance gate ----------------------------------------------------
+
+/** One conversation delta carrying ITEM verbatim (no source is injected). */
+function deltaOf(
+  item: Record<string, unknown>,
+  log?: (level: AdapterLogLevel, message: string) => void,
+): AdapterEffect[] {
+  const adapter = new StateAdapter(log);
+  return adapter.apply(
+    frame({
+      conversationDelta: { sessionId: "s1", workspace: "/ws", throughSeq: "9", items: [item] },
+    }),
+  );
+}
+
+/** The store items one raw (un-stamped) conversation item produced. */
+function gatedItems(item: Record<string, unknown>): ConversationItem[] {
+  const conv = deltaOf(item).find((e) => e.kind === "conversation-items");
+  if (conv?.kind !== "conversation-items") throw new Error("no conversation-items effect");
+  return conv.items;
+}
+
+const PROSE = { uuid: "m1", assistantMessage: { id: "msg_1", content: [{ text: { text: "hi" } }] } };
+
+describe("conversation provenance gate", () => {
+  it("renders a USER-driven item, which is the ordinary turn", () => {
+    // Arrange / Act
+    const items = gatedItems({ ...PROSE, source: "CONVERSATION_SOURCE_USER" });
+    // Assert
+    expect(items).toHaveLength(1);
+  });
+
+  it("keeps the USER item's own content, not just its count", () => {
+    // Arrange / Act
+    const items = gatedItems({ ...PROSE, source: "CONVERSATION_SOURCE_USER" });
+    // Assert
+    expect((items[0] as TextItem).text).toBe("hi");
+  });
+
+  it("hides a MERGE-driven item from the feed", () => {
+    // Arrange / Act — the merge drives the session under its lease, and its
+    // turns are noise in the feed of a user who is only waiting for it.
+    const items = gatedItems({ ...PROSE, source: "CONVERSATION_SOURCE_MERGE" });
+    // Assert
+    expect(items).toEqual([]);
+  });
+
+  it("counts a hidden MERGE item on the explicit-ignore path", () => {
+    // Arrange / Act — a deliberate non-render stays visible in diagnostics
+    // rather than looking like data loss.
+    const effects = deltaOf({ ...PROSE, source: "CONVERSATION_SOURCE_MERGE" });
+    // Assert
+    expect(effects).toContainEqual({
+      kind: "ignored",
+      shape: "conversation-item-source:merge",
+    });
+  });
+
+  it("does NOT log an error for a MERGE item, which is a normal frame", () => {
+    // Arrange
+    const logs: Array<[AdapterLogLevel, string]> = [];
+    // Act
+    deltaOf({ ...PROSE, source: "CONVERSATION_SOURCE_MERGE" }, (lvl, msg) => logs.push([lvl, msg]));
+    // Assert
+    expect(logs.filter(([lvl]) => lvl === "error")).toEqual([]);
+  });
+
+  it("logs an ERROR for an UNSPECIFIED source, which the daemon never emits", () => {
+    // Arrange
+    const logs: Array<[AdapterLogLevel, string]> = [];
+    // Act — protojson omits the proto3 zero, so an absent `source` IS
+    // UNSPECIFIED on the wire.
+    deltaOf(PROSE, (lvl, msg) => logs.push([lvl, msg]));
+    // Assert
+    expect(logs.filter(([lvl]) => lvl === "error")).toHaveLength(1);
+  });
+
+  it("names the malformed item's uuid in that error, so it can be found", () => {
+    // Arrange
+    const logs: string[] = [];
+    // Act
+    deltaOf(PROSE, (_lvl, msg) => logs.push(msg));
+    // Assert
+    expect(logs.find((m) => m.includes("UNSPECIFIED source"))).toContain("uuid=m1");
+  });
+
+  it("names the session in that error, so the record is correlatable", () => {
+    // Arrange
+    const logs: string[] = [];
+    // Act
+    deltaOf(PROSE, (_lvl, msg) => logs.push(msg));
+    // Assert
+    expect(logs.find((m) => m.includes("UNSPECIFIED source"))).toContain("session=s1");
+  });
+
+  it("DROPS the UNSPECIFIED item rather than defaulting it to a user turn", () => {
+    // Arrange / Act — the reserved zero exists precisely so a receiver never
+    // draws a turn nothing vouches for.
+    const items = gatedItems(PROSE);
+    // Assert
+    expect(items).toEqual([]);
+  });
+
+  it("counts the dropped UNSPECIFIED item under its own ignore shape", () => {
+    // Arrange / Act
+    const effects = deltaOf(PROSE);
+    // Assert
+    expect(effects).toContainEqual({
+      kind: "ignored",
+      shape: "conversation-item-source:unspecified",
+    });
+  });
+
+  it("keeps a USER item in a batch whose sibling is a MERGE item", () => {
+    // Arrange — the gate is per item, not per delta.
+    const effects = new StateAdapter().apply(
+      frame({
+        conversationDelta: {
+          sessionId: "s1",
+          workspace: "/ws",
+          throughSeq: "9",
+          items: [
+            { ...PROSE, source: "CONVERSATION_SOURCE_MERGE" },
+            {
+              uuid: "m2",
+              source: "CONVERSATION_SOURCE_USER",
+              assistantMessage: { id: "msg_2", content: [{ text: { text: "mine" } }] },
+            },
+          ],
+        },
+      }),
+    );
+    // Act
+    const conv = effects.find((e) => e.kind === "conversation-items");
+    // Assert
+    expect(conv?.kind === "conversation-items" && conv.items).toHaveLength(1);
+  });
+});
+
 describe("explicit-ignore path", () => {
   it("ignores a commandAck frame, counting and logging once per name", () => {
     const logs: Array<[AdapterLogLevel, string]> = [];
@@ -856,7 +1010,12 @@ describe("explicit-ignore path", () => {
   it("ignores a toolUseResult item (no correlation key), emitting an empty batch beside it", () => {
     const adapter = new StateAdapter();
     const effects = adapter.apply(
-      frame({ conversationDelta: { sessionId: "s1", items: [{ uuid: "m1", toolUseResult: { rawString: "x" } }] } }),
+      frame({
+        conversationDelta: {
+          sessionId: "s1",
+          items: [userItem({ uuid: "m1", toolUseResult: { rawString: "x" } })],
+        },
+      }),
     );
     expect(effects).toEqual([
       { kind: "conversation-items", workspace: "", sessionId: "s1", throughSeq: 0, items: [] },
@@ -872,7 +1031,12 @@ describe("explicit-ignore path", () => {
       frame({
         conversationDelta: {
           sessionId: "s1",
-          items: [{ uuid: "m1", assistantMessage: { content: [{ text: { text: "keep" } }, { image: { source: {} } }] } }],
+          items: [
+            userItem({
+              uuid: "m1",
+              assistantMessage: { content: [{ text: { text: "keep" } }, { image: { source: {} } }] },
+            }),
+          ],
         },
       });
 

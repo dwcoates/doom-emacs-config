@@ -129,8 +129,19 @@ func (m *Manager) forwardPrompt(ctx context.Context, d *sessionController, reque
 	// MarkPromptAccepted holds the SSM transition lock through the frontend
 	// publication, so neither the asynchronous SSM subscriber nor a later
 	// TurnEnded can overtake it.
+	// THE MERGE'S OWN PROMPT IS MACHINERY, NOT THE USER'S, so it takes neither
+	// the accepted edge nor the receipt — exactly like the post-`/clear`
+	// metaprompt re-fire below, and for the same reason: the user did not type
+	// it.
+	//
+	// It is also the only honest reading of the state axis. A workspace whose
+	// merge parked on a conflict IS `merge_conflict`, and the SSM (correctly)
+	// refuses to publish a `submitting` premise over it — the accepted edge's
+	// invariant fails outright, so claiming the edge here would fail every
+	// conflict-resolution submit on a state the merge axis rightly owns. The
+	// turn itself is still claimed durably, by the shim's own TurnStarted.
 	accepted, activeBefore := false, false
-	if cmd.echoes() {
+	if cmd.echoes() && who != submitterMergeLeaseHolder {
 		before, err := m.notePromptAccepted(d, requestID)
 		if err != nil {
 			// NOTHING EXTERNAL HAS HAPPENED YET, which is the whole advantage

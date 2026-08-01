@@ -574,7 +574,6 @@ rather than staying pinned to the vterm it happened to boot once."
       (agent-repl-explain-prompt)
       (should (null sent-text)))))
 
-
 ;;;; ---- agent-repl--enter-insert-mode ----
 
 (ert-deftest agent-repl-cmd-test-enter-insert-mode/live-input-buffer ()
@@ -3460,65 +3459,7 @@ state file (`<root>/.claude/emacs/state.el') is the authoritative source."
               (should-not (plist-member (cdr entry) :priority))))
         (delete-file snapshot-file)))))
 
-(ert-deftest agent-repl-cmd-test-save-workspace-snapshot/one-entry-per-line ()
-  "Save writes each workspace entry on its own line for human-readable diffs.
-The current format wraps entries in a `:workspaces' key inside a top-level
-plist that also carries `:merge-queue'; the workspace list portion still
-puts one entry per line so per-workspace diffs stay tight."
-  (agent-repl-test--with-clean-state
-    (let ((snapshot-file (make-temp-file "agent-snap-")))
-      (unwind-protect
-          (let ((agent-repl-workspace-snapshot-file snapshot-file))
-            (agent-repl--ws-put "ws1" :project-dir "/tmp/ws1")
-            (agent-repl--ws-put "ws2" :project-dir "/tmp/ws2")
-            (agent-repl--ws-put "ws3" :project-dir "/tmp/ws3")
-            (agent-repl-save-workspace-snapshot)
-            (let* ((raw (with-temp-buffer
-                          (insert-file-contents snapshot-file)
-                          (buffer-string)))
-                   (ws-line-count
-                    (cl-count-if (lambda (line)
-                                   (string-match-p "(\"ws[0-9]+\"" line))
-                                 (split-string raw "\n"))))
-              ;; Each of the three workspace entries appears on its own
-              ;; line inside the :workspaces sub-list (order is hash-key
-              ;; dependent and intentionally not asserted here).
-              (should (= 3 ws-line-count))
-              ;; Round-trip cleanly through the new reader.
-              (let ((parsed (agent-repl--read-workspace-snapshot snapshot-file)))
-                (should (= 3 (length (plist-get parsed :workspaces)))))))
-        (delete-file snapshot-file)))))
-
 ;;;; ---- Tests: read-workspace-snapshot (format normalizer) ----
-
-(ert-deftest agent-repl-cmd-test-read-workspace-snapshot/legacy-list-format ()
-  "Legacy `((NAME :project-dir DIR) ...)' files normalize to a plist with
-the entries under :workspaces and a nil :merge-queue."
-  (let ((file (make-temp-file "agent-snap-")))
-    (unwind-protect
-        (progn
-          (agent-repl--write-sexp-file
-           file '(("ws-a" :project-dir "/tmp/a")
-                  ("ws-b" :project-dir "/tmp/b")))
-          (let ((parsed (agent-repl--read-workspace-snapshot file)))
-            (should (= 2 (length (plist-get parsed :workspaces))))
-            (should (null (plist-get parsed :merge-queue)))))
-      (delete-file file))))
-
-(ert-deftest agent-repl-cmd-test-read-workspace-snapshot/plist-format ()
-  "New plist files round-trip through the reader with both keys intact."
-  (let ((file (make-temp-file "agent-snap-")))
-    (unwind-protect
-        (progn
-          (agent-repl--write-sexp-file
-           file '(:workspaces (("ws-a" :project-dir "/tmp/a"))
-                  :merge-queue ((:source-ws "ws-a" :silent t :auto-resolve nil))))
-          (let ((parsed (agent-repl--read-workspace-snapshot file)))
-            (should (equal (plist-get parsed :workspaces)
-                           '(("ws-a" :project-dir "/tmp/a"))))
-            (should (equal (plist-get parsed :merge-queue)
-                           '((:source-ws "ws-a" :silent t :auto-resolve nil))))))
-      (delete-file file))))
 
 (ert-deftest agent-repl-cmd-test-read-workspace-snapshot/missing-file-returns-nil ()
   "Reader returns nil for a non-existent file (no error)."
@@ -3526,270 +3467,13 @@ the entries under :workspaces and a nil :merge-queue."
 
 ;;;; ---- Tests: write-workspace-snapshot (merge-queue persistence) ----
 
-(ert-deftest agent-repl-cmd-test-write-workspace-snapshot/persists-merge-queue ()
-  "Writer round-trips `agent-repl--merge-queue' into the snapshot file
-so a later read restores the FIFO."
-  (agent-repl-test--with-clean-state
-    (let ((snapshot-file (make-temp-file "agent-snap-")))
-      (unwind-protect
-          (let ((agent-repl-workspace-snapshot-file snapshot-file)
-                (agent-repl--merge-queue
-                 '((:source-ws "ws-a" :silent t :auto-resolve nil)
-                   (:source-ws "ws-b" :silent nil :auto-resolve t))))
-            (agent-repl--ws-put "ws-a" :project-dir "/tmp/a")
-            (agent-repl--ws-put "ws-b" :project-dir "/tmp/b")
-            (agent-repl-save-workspace-snapshot)
-            (let* ((parsed (agent-repl--read-workspace-snapshot snapshot-file))
-                   (mq (plist-get parsed :merge-queue)))
-              (should (= 2 (length mq)))
-              (should (equal (plist-get (nth 0 mq) :source-ws) "ws-a"))
-              (should (eq    (plist-get (nth 0 mq) :silent) t))
-              (should (eq    (plist-get (nth 0 mq) :auto-resolve) nil))
-              (should (equal (plist-get (nth 1 mq) :source-ws) "ws-b"))
-              (should (eq    (plist-get (nth 1 mq) :silent) nil))
-              (should (eq    (plist-get (nth 1 mq) :auto-resolve) t))))
-        (delete-file snapshot-file)))))
-
-(ert-deftest agent-repl-cmd-test-write-workspace-snapshot/persists-merge-queue-target-dir ()
-  "Writer round-trips each entry's `:target-dir' so the per-target bucket
-partitioning survives a restart."
-  (agent-repl-test--with-clean-state
-    (let ((snapshot-file (make-temp-file "agent-snap-")))
-      (unwind-protect
-          (let ((agent-repl-workspace-snapshot-file snapshot-file)
-                (agent-repl--merge-queue
-                 '((:source-ws "ws-a" :silent t :auto-resolve t
-                    :target-dir "/tmp/target-a"))))
-            (agent-repl--ws-put "ws-a" :project-dir "/tmp/a")
-            (agent-repl-save-workspace-snapshot)
-            (let* ((parsed (agent-repl--read-workspace-snapshot snapshot-file))
-                   (mq (plist-get parsed :merge-queue)))
-              (should (equal (plist-get (nth 0 mq) :target-dir) "/tmp/target-a"))))
-        (delete-file snapshot-file)))))
-
-(ert-deftest agent-repl-cmd-test-write-workspace-snapshot/empty-merge-queue ()
-  "An empty live queue writes an empty :merge-queue list — not omitted."
-  (agent-repl-test--with-clean-state
-    (let ((snapshot-file (make-temp-file "agent-snap-")))
-      (unwind-protect
-          (let ((agent-repl-workspace-snapshot-file snapshot-file)
-                (agent-repl--merge-queue nil))
-            (agent-repl--ws-put "ws-a" :project-dir "/tmp/a")
-            (agent-repl-save-workspace-snapshot)
-            (let ((parsed (agent-repl--read-workspace-snapshot snapshot-file)))
-              ;; :merge-queue is present and explicitly an empty list.
-              (should (plist-member parsed :merge-queue))
-              (should (null (plist-get parsed :merge-queue)))))
-        (delete-file snapshot-file)))))
-
 ;;;; ---- Tests: snapshot-restore-merge-queue ----
-
-(ert-deftest agent-repl-cmd-test-snapshot-restore-merge-queue/repopulates-live-queue ()
-  "Restore copies the saved entries into `agent-repl--merge-queue' in order."
-  (agent-repl-test--with-clean-state
-    (let ((agent-repl--merge-queue nil))
-      (agent-repl--ws-put "ws-a" :project-dir "/tmp/a")
-      (agent-repl--ws-put "ws-b" :project-dir "/tmp/b")
-      (agent-repl--snapshot-restore-merge-queue
-       '((:source-ws "ws-a" :silent t :auto-resolve nil)
-         (:source-ws "ws-b" :silent nil :auto-resolve t)))
-      (should (= 2 (length agent-repl--merge-queue)))
-      (should (equal (plist-get (nth 0 agent-repl--merge-queue) :source-ws) "ws-a"))
-      (should (equal (plist-get (nth 1 agent-repl--merge-queue) :source-ws) "ws-b")))))
-
-(ert-deftest agent-repl-cmd-test-snapshot-restore-merge-queue/preserves-target-dir ()
-  "Restore carries each entry's `:target-dir' so the per-target sub-queue
-partitioning survives the restart."
-  (agent-repl-test--with-clean-state
-    (let ((agent-repl--merge-queue nil))
-      (agent-repl--ws-put "ws-a" :project-dir "/tmp/a")
-      (agent-repl--snapshot-restore-merge-queue
-       '((:source-ws "ws-a" :silent t :auto-resolve t :target-dir "/tmp/target-a")))
-      (should (equal (plist-get (car agent-repl--merge-queue) :target-dir)
-                     "/tmp/target-a")))))
-
-(ert-deftest agent-repl-cmd-test-snapshot-restore-merge-queue/remarks-queued-state ()
-  "Restore re-applies `:repl-state :merge-queued' on each surviving ws so
-the tab-bar and picker show the queued badge again post-restart."
-  (agent-repl-test--with-clean-state
-    (let ((agent-repl--merge-queue nil))
-      (agent-repl--ws-put "ws-a" :project-dir "/tmp/a")
-      (agent-repl--snapshot-restore-merge-queue
-       '((:source-ws "ws-a" :silent t :auto-resolve t)))
-      (should (eq :merge-queued (agent-repl--ws-get "ws-a" :repl-state))))))
-
-(ert-deftest agent-repl-cmd-test-snapshot-restore-merge-queue/drops-vanished-ws ()
-  "Entries whose `:source-ws' no longer exists in `agent-repl--workspaces'
-are dropped (a workspace was removed between sessions)."
-  (agent-repl-test--with-clean-state
-    (let ((agent-repl--merge-queue nil))
-      (agent-repl--ws-put "ws-a" :project-dir "/tmp/a")
-      ;; ws-gone is not in the workspaces hash.
-      (agent-repl--snapshot-restore-merge-queue
-       '((:source-ws "ws-a" :silent t :auto-resolve t)
-         (:source-ws "ws-gone" :silent t :auto-resolve t)))
-      (should (= 1 (length agent-repl--merge-queue)))
-      (should (equal (plist-get (car agent-repl--merge-queue) :source-ws) "ws-a")))))
-
-(ert-deftest agent-repl-cmd-test-snapshot-restore-merge-queue/empty-input-noop ()
-  "Restore with nil input leaves the live queue untouched."
-  (agent-repl-test--with-clean-state
-    (let ((agent-repl--merge-queue
-           '((:source-ws "preexisting" :silent nil :auto-resolve nil))))
-      (agent-repl--snapshot-restore-merge-queue nil)
-      ;; Existing queue is unchanged.
-      (should (= 1 (length agent-repl--merge-queue))))))
 
 ;;;; ---- Tests: in-flight-merges persistence (round-trip + restore) ----
 
-(ert-deftest agent-repl-cmd-test-read-workspace-snapshot/in-flight-merges-round-trip ()
-  "Plist files with `:in-flight-merges' round-trip through the reader."
-  (let ((file (make-temp-file "agent-snap-")))
-    (unwind-protect
-        (progn
-          (agent-repl--write-sexp-file
-           file '(:workspaces (("ws-a" :project-dir "/tmp/a"))
-                  :merge-queue nil
-                  :in-flight-merges ((:source-ws "ws-a" :target-dir "/tmp/a" :started-at 12345.0))))
-          (let ((parsed (agent-repl--read-workspace-snapshot file)))
-            (should (equal (plist-get parsed :in-flight-merges)
-                           '((:source-ws "ws-a" :target-dir "/tmp/a" :started-at 12345.0))))))
-      (delete-file file))))
-
-(ert-deftest agent-repl-cmd-test-read-workspace-snapshot/in-flight-merges-absent-returns-nil ()
-  "Files predating `:in-flight-merges' (or without that key) yield nil."
-  (let ((file (make-temp-file "agent-snap-")))
-    (unwind-protect
-        (progn
-          (agent-repl--write-sexp-file
-           file '(:workspaces (("ws-a" :project-dir "/tmp/a"))
-                  :merge-queue nil))
-          (let ((parsed (agent-repl--read-workspace-snapshot file)))
-            (should (null (plist-get parsed :in-flight-merges)))))
-      (delete-file file))))
-
-(ert-deftest agent-repl-cmd-test-write-workspace-snapshot/persists-in-flight-merges ()
-  "Writer captures the live `agent-repl--in-flight-merges' alongside the roster."
-  (agent-repl-test--with-clean-state
-    (let ((snapshot-file (make-temp-file "agent-snap-")))
-      (unwind-protect
-          (let ((agent-repl-workspace-snapshot-file snapshot-file)
-                (agent-repl--merge-queue nil)
-                (agent-repl--in-flight-merges
-                 '((:source-ws "ws-a" :target-dir "/tmp/a" :started-at 1.0)
-                   (:source-ws "ws-b" :target-dir "/tmp/b" :started-at 2.0))))
-            (agent-repl--ws-put "ws-a" :project-dir "/tmp/a")
-            (agent-repl-save-workspace-snapshot)
-            (let* ((parsed (agent-repl--read-workspace-snapshot snapshot-file))
-                   (ifm (plist-get parsed :in-flight-merges)))
-              (should (= 2 (length ifm)))
-              (should (equal (plist-get (nth 0 ifm) :source-ws) "ws-a"))
-              (should (equal (plist-get (nth 0 ifm) :target-dir) "/tmp/a"))
-              (should (equal (plist-get (nth 1 ifm) :source-ws) "ws-b"))))
-        (delete-file snapshot-file)))))
-
-(ert-deftest agent-repl-cmd-test-write-workspace-snapshot/empty-in-flight-merges ()
-  "An empty live in-flight list writes `:in-flight-merges' as an empty
-list — present, not omitted."
-  (agent-repl-test--with-clean-state
-    (let ((snapshot-file (make-temp-file "agent-snap-")))
-      (unwind-protect
-          (let ((agent-repl-workspace-snapshot-file snapshot-file)
-                (agent-repl--merge-queue nil)
-                (agent-repl--in-flight-merges nil))
-            (agent-repl--ws-put "ws-a" :project-dir "/tmp/a")
-            (agent-repl-save-workspace-snapshot)
-            (let ((parsed (agent-repl--read-workspace-snapshot snapshot-file)))
-              (should (plist-member parsed :in-flight-merges))
-              (should (null (plist-get parsed :in-flight-merges)))))
-        (delete-file snapshot-file)))))
-
-(ert-deftest agent-repl-cmd-test-snapshot-restore-in-flight-merges/repopulates-live-list ()
-  "Restore copies saved entries into `agent-repl--in-flight-merges' as plain plists."
-  (agent-repl-test--with-clean-state
-    (let ((agent-repl--in-flight-merges nil))
-      (agent-repl--snapshot-restore-in-flight-merges
-       '((:source-ws "ws-a" :target-dir "/tmp/a" :started-at 1.0)
-         (:source-ws "ws-b" :target-dir "/tmp/b" :started-at 2.0)))
-      (should (= 2 (length agent-repl--in-flight-merges)))
-      (should (equal (plist-get (nth 0 agent-repl--in-flight-merges) :source-ws) "ws-a"))
-      (should (equal (plist-get (nth 1 agent-repl--in-flight-merges) :target-dir) "/tmp/b")))))
-
-(ert-deftest agent-repl-cmd-test-snapshot-restore-in-flight-merges/empty-input-noop ()
-  "Restore with nil input leaves the live list untouched."
-  (agent-repl-test--with-clean-state
-    (let ((agent-repl--in-flight-merges
-           '((:source-ws "preexisting" :target-dir "/tmp/p" :started-at 1.0))))
-      (agent-repl--snapshot-restore-in-flight-merges nil)
-      (should (= 1 (length agent-repl--in-flight-merges))))))
-
 ;;;; ---- Tests: load-workspace-snapshot (merge-queue restoration) ----
 
-(ert-deftest agent-repl-cmd-test-load-workspace-snapshot/restores-merge-queue ()
-  "Loader populates `agent-repl--merge-queue' from the snapshot file's
-:merge-queue at the end of the load (in `--snapshot-load-finish')."
-  (agent-repl-test--with-clean-state
-    (let ((snapshot-file (make-temp-file "agent-snap-"))
-          (real-dir (make-temp-file "agent-proj-" t))
-          (agent-repl--merge-queue nil))
-      (unwind-protect
-          (let ((agent-repl-workspace-snapshot-file snapshot-file))
-            (agent-repl--write-sexp-file
-             snapshot-file
-             `(:workspaces (("ws-a" :project-dir ,real-dir))
-               :merge-queue ((:source-ws "ws-a" :silent t :auto-resolve nil))))
-            (cl-letf (((symbol-function 'agent-repl--establish-workspace)
-                       (lambda (ws dir)
-                         (agent-repl--ws-put ws :project-dir dir)))
-                      ((symbol-function 'agent-repl--snapshot-load-ws-ready-p)
-                       (lambda (_ws) t)))
-              (agent-repl-load-workspace-snapshot)
-              (should (= 1 (length agent-repl--merge-queue)))
-              (should (equal (plist-get (car agent-repl--merge-queue) :source-ws)
-                             "ws-a"))))
-        (delete-file snapshot-file)
-        (delete-directory real-dir t)))))
-
 ;;;; ---- Tests: drain-merge-queue interactive command ----
-
-(ert-deftest agent-repl-cmd-test-drain-merge-queue/empty-queue-messages ()
-  "With an empty queue the command emits a `message' and does not call
-the internal drain."
-  (agent-repl-test--with-clean-state
-    (let ((agent-repl--merge-queue nil)
-          (drain-called nil))
-      (cl-letf (((symbol-function 'agent-repl--drain-merge-queue)
-                 (lambda () (setq drain-called t))))
-        (agent-repl-drain-merge-queue)
-        (should-not drain-called)))))
-
-(ert-deftest agent-repl-cmd-test-drain-merge-queue/cherry-pick-active-does-not-block ()
-  "The drain is per-target now, so a live cherry-pick in one target no
-longer makes the command refuse — it still calls the internal drain,
-which skips busy buckets and dispatches the free ones."
-  (agent-repl-test--with-clean-state
-    (let ((agent-repl--merge-queue
-           '((:source-ws "ws-a" :silent t :auto-resolve t :target-dir "/tmp/target")))
-          (drain-called nil))
-      (cl-letf (((symbol-function 'agent-repl--path-canonical) #'identity)
-                ((symbol-function 'agent-repl--drain-merge-queue)
-                 (lambda () (setq drain-called t))))
-        ;; Must NOT signal, and must still reach the drain.
-        (agent-repl-drain-merge-queue)
-        (should drain-called)))))
-
-(ert-deftest agent-repl-cmd-test-drain-merge-queue/dispatches-when-safe ()
-  "With a non-empty queue the command calls `agent-repl--drain-merge-queue'
-to dispatch the next eligible entry."
-  (agent-repl-test--with-clean-state
-    (let ((agent-repl--merge-queue
-           '((:source-ws "ws-a" :silent t :auto-resolve t :target-dir "/tmp/target")))
-          (drain-called nil))
-      (cl-letf (((symbol-function 'agent-repl--path-canonical) #'identity)
-                ((symbol-function 'agent-repl--drain-merge-queue)
-                 (lambda () (setq drain-called t))))
-        (agent-repl-drain-merge-queue)
-        (should drain-called)))))
 
 ;;;; ---- Tests: load-workspace-snapshot (back-compat + hydration + pending) ----
 
@@ -6193,7 +5877,6 @@ With ws-list (a b c d) and current=c, the result should be (a c b d)."
         (agent-repl-open-most-recent-workspace)
         (should-not switched)
         (should-not agent-repl--opened-recent-workspaces)))))
-
 
 (provide 'test-commands)
 

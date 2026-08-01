@@ -378,18 +378,13 @@ Snaps the agent's webview feed to its last message
 workspace never shows stale middle-of-history output.
 
 never causes a silent decay.
-
-Runs `agent-repl--dequeue-merge' so a workspace parked in the merge
-queue is pulled from it on switch — activating a queued workspace is
-read as the user wanting to work on it directly rather than have its
-pending merge auto-fire."
+"
   (let ((ws (or ws (agent-repl--ws-current-name))))
     (agent-repl--log-verbose ws "workspace-switch ws=%s" ws)
     ;; Purge stale panel windows from other workspaces and restore own
     ;; panels if they were visible before this workspace was deactivated.
     ;; Must run BEFORE autoselect so it sees the correct panel windows.
     (agent-repl--ensure-own-panels-on-persp-switch ws)
-    (agent-repl--dequeue-merge ws)
     ;; Event-driven (workspace just activated) → kick a fresh pass via
     ;; the unguarded entrypoint so the in-flight reentry guard from the
     ;; 1Hz timer doesn't swallow the switch's refresh.

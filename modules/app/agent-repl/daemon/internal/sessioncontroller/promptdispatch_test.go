@@ -1,6 +1,7 @@
 package sessioncontroller
 
 import (
+	"context"
 	"errors"
 	"path/filepath"
 	"reflect"
@@ -692,4 +693,32 @@ func metapromptCwd(t *testing.T) string {
 	cwd := t.TempDir()
 	writeMetaprompt(t, cwd)
 	return cwd
+}
+
+func TestTheMergeLeaseHoldersPromptTakesNoAcceptedEdge(t *testing.T) {
+	// Arrange — the lease is held, so the merge's own prompt is the only one
+	// admissible. It is machinery, not something the user typed, and the state
+	// axis a parked merge owns must not be overwritten with a `submitting`
+	// premise the SSM would (rightly) refuse.
+	h := newQueueHarness(t, nil)
+	h.applier.mergeLeases = map[string]bool{"ws": true}
+
+	// Act.
+	if err := h.m.SubmitMergePrompt(context.Background(), "ws", "merge_resolve_1", "resolve the conflict", ""); err != nil {
+		t.Fatalf("SubmitMergePrompt: %v", err)
+	}
+
+	// Assert — the shim has it, and no accepted edge was claimed for it.
+	h.client.mu.Lock()
+	prompts := len(h.client.prompts)
+	h.client.mu.Unlock()
+	if prompts != 1 {
+		t.Fatalf("prompts submitted = %d, want 1", prompts)
+	}
+	h.applier.reconcMutex.Lock()
+	accepts := len(h.applier.promptAccepts)
+	h.applier.reconcMutex.Unlock()
+	if accepts != 0 {
+		t.Fatalf("prompt-accept edges for a merge-driven prompt = %d, want 0", accepts)
+	}
 }

@@ -1353,12 +1353,9 @@ introducing a sibling raw `make-process' site."
     agent-repl--async-git
     agent-repl--gh-string-quiet
     agent-repl--early-git-string
-    agent-repl--early-git-exit-code
     agent-repl--make-process-git
     agent-repl--async-gh
     agent-repl--signal-process
-    agent-repl--cee-agent-reinstall-and-bounce-exit-code
-    agent-repl--notify-parent-of-child-merge
     agent-repl--frontend-run-build-script
     agent-repl--frontend-run-listener-probe
     agent-repl--frontend-artifact-exists-p

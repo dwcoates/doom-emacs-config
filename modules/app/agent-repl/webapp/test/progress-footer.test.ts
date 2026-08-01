@@ -20,6 +20,7 @@ import {
   footerHtml,
   hasLiveCounters,
   interruptChip,
+  mergeQueueChip,
   phaseLabel,
   rateLimitAccent,
   rateLimitActivity,
@@ -82,6 +83,8 @@ function input(over: Partial<FooterInput> = {}): FooterInput {
   return {
     progress: progress(),
     renderState: "idle",
+    mergeQueuePosition: 0,
+    mergeQueueDepth: 0,
     connectivity: "operational",
     sessionStatus: "ready",
     agents: [],
@@ -222,6 +225,21 @@ describe("phaseLabel: the SSM's verdict as the footer's anchor", () => {
     const got = phaseLabel("merge_queued");
     // Assert
     expect(got.tone).toBe("muted");
+  });
+
+  it("names a running merge as merging", () => {
+    // Arrange / Act — the footer says what the merge is doing in realtime, not
+    // only once it has queued or finished.
+    const got = phaseLabel("merging");
+    // Assert
+    expect(got.word).toBe("merging");
+  });
+
+  it("spins while merging, because work really is happening", () => {
+    // Arrange / Act
+    const got = phaseLabel("merging");
+    // Assert
+    expect(got.spinning).toBe(true);
   });
 
   it("names idle_async as monitoring", () => {
@@ -1074,6 +1092,105 @@ describe("alreadyCompletePhaseViolation: footer/state invariant", () => {
 
   it("does not flag an active phase for another interrupt outcome", () => {
     expect(alreadyCompletePhaseViolation("thinking", "interrupted")).toBeNull();
+  });
+});
+
+describe("mergeQueueChip: where this workspace sits in its repo's merge queue", () => {
+  it("reads position over depth while the workspace is queued", () => {
+    // Arrange / Act — beside the `merge queued` phase word this reads as
+    // "merge queued 2/3".
+    const got = mergeQueueChip("merge_queued", 2, 3);
+    // Assert
+    expect(got?.text).toBe("2/3");
+  });
+
+  it("spells the two figures out in the hover line", () => {
+    // Arrange / Act
+    const got = mergeQueueChip("merge_queued", 2, 3);
+    // Assert
+    expect(got?.title).toBe(
+      "this workspace is 2 of 3 waiting to merge into this repository",
+    );
+  });
+
+  it("shows NO place when the workspace is not enqueued", () => {
+    // Arrange / Act — position 0 is the daemon saying "not on the queue"; a
+    // `0/0` chip would be noise beside every phase.
+    const got = mergeQueueChip("merge_queued", 0, 0);
+    // Assert
+    expect(got).toBeNull();
+  });
+
+  it("shows no place once the merge has left the queue and started running", () => {
+    // Arrange / Act — a merge that is `merging` holds the lease, not a place
+    // in line, so any figures riding along are stale by definition.
+    const got = mergeQueueChip("merging", 1, 3);
+    // Assert
+    expect(got).toBeNull();
+  });
+
+  it("shows no place for an ordinary working session", () => {
+    // Arrange / Act
+    const got = mergeQueueChip("thinking", 0, 0);
+    // Assert
+    expect(got).toBeNull();
+  });
+
+  it("shows no place before any WorkspaceState has resolved", () => {
+    // Arrange / Act — null render state means nothing is known yet, and a
+    // queue place invented here would be the fabrication the phase cell's own
+    // null-guard exists to prevent.
+    const got = mergeQueueChip(null, 2, 3);
+    // Assert
+    expect(got).toBeNull();
+  });
+});
+
+describe("footerHtml: the merge queue's place beside the phase", () => {
+  it("renders the queue place while the workspace is queued", () => {
+    // Arrange
+    const built = input({ renderState: "merge_queued", mergeQueuePosition: 2, mergeQueueDepth: 3 });
+    // Act
+    const got = footerHtml(built, CLOSED, NOW);
+    // Assert
+    expect(got).toContain(">2/3</div>");
+  });
+
+  it("renders the queue place in its own cell, not inside the phase cell", () => {
+    // Arrange — the phase cell's geometry is fixed to the closed phase
+    // vocabulary; the queue's two figures are unbounded.
+    const built = input({ renderState: "merge_queued", mergeQueuePosition: 2, mergeQueueDepth: 3 });
+    // Act
+    const got = footerHtml(built, CLOSED, NOW);
+    // Assert
+    expect(got).toContain("pfooter-merge-queue");
+  });
+
+  it("still names the phase beside the place", () => {
+    // Arrange
+    const built = input({ renderState: "merge_queued", mergeQueuePosition: 2, mergeQueueDepth: 3 });
+    // Act
+    const got = footerHtml(built, CLOSED, NOW);
+    // Assert
+    expect(got).toContain("merge queued");
+  });
+
+  it("renders NO queue cell when the workspace is not enqueued", () => {
+    // Arrange
+    const built = input({ renderState: "thinking", mergeQueuePosition: 0, mergeQueueDepth: 0 });
+    // Act
+    const got = footerHtml(built, CLOSED, NOW);
+    // Assert
+    expect(got).not.toContain("pfooter-merge-queue");
+  });
+
+  it("names a running merge in the phase cell", () => {
+    // Arrange
+    const built = input({ renderState: "merging", mergeQueuePosition: 0, mergeQueueDepth: 0 });
+    // Act
+    const got = footerHtml(built, CLOSED, NOW);
+    // Assert
+    expect(got).toContain("merging");
   });
 });
 
