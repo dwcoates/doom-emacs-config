@@ -291,6 +291,59 @@ the frame rather than key state under an unresolvable id."
        resolved)
       resolved)))
 
+(defun agent-repl--frontend-int64 (raw)
+  "Return protojson int64 field RAW as an Emacs number, or nil.
+protojson encodes int64/uint64 as a JSON STRING, so the wire value for a
+numeric field arrives as either a string of digits (the daemon's own
+encoder) or a number (a hand-built frame in a test).  Anything else — an
+absent field, a non-numeric string — answers nil, so the caller decides
+what an unusable value means rather than inheriting a guessed 0."
+  (cond ((numberp raw) raw)
+        ((and (stringp raw) (string-match-p "\\`-?[0-9]+\\'" raw))
+         (string-to-number raw))))
+
+(defun agent-repl--frontend-retain-merged-at (workspace ws-state)
+  "Retain WS-STATE's `mergedAtMs' as WORKSPACE's `:merge-completed-at'.
+Returns the retained epoch-seconds float, or nil when the frame carries no
+merge instant.
+
+The daemon persists the instant a workspace's merge landed
+\(`ssm/merged.go') and rides it on EVERY WorkspaceState from then on, so
+this is the durable fact the sidebar's Recently Merged section orders on
+\(`agent-repl--sidebar-merged-at').  It is stored in epoch SECONDS to match
+every other Emacs-side time value; the wire field is millis.
+
+Retention is MONOTONE — a positive instant is adopted, and a zero or
+absent one leaves an already-known instant alone.  protojson omits a
+zero-valued int64, so \"not merged\" and \"field absent\" are the same wire
+shape, and clearing on it would erase a merge Emacs restored from its own
+session state.  A merge never un-happens, so there is no honest reading of
+that shape that should destroy the fact.
+
+A DIFFERENT positive instant is adopted with a loud log: the daemon holds
+the first landing as the fact every frontend orders on, so a disagreement
+is the daemon correcting Emacs, and one that goes unrecorded would leave
+the section's ordering unexplainable."
+  (let ((ms (agent-repl--frontend-int64 (plist-get ws-state :mergedAtMs)))
+        (known (agent-repl--ws-get workspace :merge-completed-at)))
+    (cond
+     ((or (null ms) (<= ms 0))
+      (agent-repl--log-verbose workspace
+                               "frontend-retain-merged-at: ws=%s no merge instant on frame (raw=%S) — keeping known=%S"
+                               workspace (plist-get ws-state :mergedAtMs) known)
+      nil)
+     (t
+      (let ((at (/ ms 1000.0)))
+        (if (and known (/= (float-time known) at))
+            (agent-repl--log workspace
+                             "frontend-retain-merged-at: ws=%s daemon merged_at_ms=%d (%.3f) SUPERSEDES known=%.3f — the daemon's first landing is the ordering fact"
+                             workspace ms at (float-time known))
+          (agent-repl--log-verbose workspace
+                                   "frontend-retain-merged-at: ws=%s merged_at_ms=%d -> :merge-completed-at=%.3f"
+                                   workspace ms at))
+        (agent-repl--ws-put workspace :merge-completed-at at)
+        at)))))
+
 (defun agent-repl--frontend-apply-workspace-state (ws-state)
   "Apply a `WorkspaceState' frame WS-STATE (a plist).
 Handler for the `workspaceState' oneof arm.  Maps the pushed RenderState
@@ -299,7 +352,9 @@ workspace key (via `agent-repl--ws-put') as the pushed-state source of
 truth the renderer reads.  The resolution inputs (turn-active, live-task
 count, merge phase, cause kind/seq) are stored under
 `:pushed-render-state-meta' for debuggability and logged as an old->new
-transition.  Returns the applied keyword.
+transition.  The frame's `mergedAtMs' is retained separately, on the
+durable `:merge-completed-at' key
+\(`agent-repl--frontend-retain-merged-at').  Returns the applied keyword.
 
 Fails loudly on a missing/blank `workspace' (invariant violation)."
   (let ((raw-workspace (plist-get ws-state :workspace))
@@ -357,7 +412,13 @@ Fails loudly on a missing/blank `workspace' (invariant violation)."
            (live-tasks (plist-get ws-state :liveTaskCount))
            (merge-phase (plist-get ws-state :mergePhase))
            (cause-kind (plist-get ws-state :causeKind))
-           (cause-seq (plist-get ws-state :causeSeq)))
+           (cause-seq (plist-get ws-state :causeSeq))
+           ;; The merge instant is a DURABLE workspace fact rather than a
+           ;; resolution input, so it lands on its own key: the render state
+           ;; moves on after a merge (the daemon hibernates the session, and
+           ;; the pushed state becomes `:hibernated'), and a section keyed on
+           ;; the transient state loses the row the moment that happens.
+           (merged-at (agent-repl--frontend-retain-merged-at workspace ws-state)))
       (agent-repl--ws-put workspace :pushed-render-state keyword)
       (agent-repl--ws-put workspace :pushed-session-connectivity connectivity)
       (agent-repl--ws-put workspace :pushed-session-status session-status)
@@ -372,10 +433,10 @@ Fails loudly on a missing/blank `workspace' (invariant violation)."
                                 :controller-generation-id generation-id
                                 :active-faults faults))
       (agent-repl--log workspace
-                       "frontend-apply-workspace-state: %s -> %s connectivity=%s status=%s session=%S generation=%S faults=%S cause=%s seq=%s turn-active=%S live-tasks=%s merge-phase=%s"
+                       "frontend-apply-workspace-state: %s -> %s connectivity=%s status=%s session=%S generation=%S faults=%S cause=%s seq=%s turn-active=%S live-tasks=%s merge-phase=%s merged-at=%s"
                        previous keyword connectivity session-status session-id
                        generation-id faults cause-kind cause-seq turn-active
-                       live-tasks merge-phase)
+                       live-tasks merge-phase merged-at)
       ;; Session-ready latch (design §10 cutover gap): the SessionStart
       ;; managed hook that used to set the `:agent-ready' half of the
       ;; ws-fully-loaded latch was deleted in S2, orphaning
