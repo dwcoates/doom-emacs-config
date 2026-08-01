@@ -83,51 +83,16 @@ what loads core.el."
       (push (cons ,file err) agent-repl--load-errors)
       (agent-repl--boot-warn "FAILED to load %s.el: %S" ,file err))))
 
-;; ---- Early orphan cherry-pick recovery ----
-;;
-;; When Emacs is hard-killed mid-cherry-pick (the synchronous headless
-;; `claude -p' auto-resolve is the canonical blocker — the worker thread
-;; blocks via `agent-repl--wait-for-process-exit' and can't run its
-;; `condition-case' cleanup if the whole process dies), the in-flight
-;; cherry-pick is left orphaned: CHERRY_PICK_HEAD lingers in the target
-;; worktree's git dir and conflict markers may remain in working-tree
-;; files.  When the target IS this Emacs's master worktree and the
-;; marker-bearing files are `.el' under `modules/app/agent-repl/', the
-;; next Emacs start can't load the agent-repl module at all because
-;; the elisp reader rejects `<<<<<<<' markers.
-;;
-;; This block runs BEFORE any module file is `require'd — its only
-;; dependencies are built-in Elisp (`read', `call-process', `with-temp-file')
-;; and the persisted workspace snapshot at `~/.claude-emacs/workspaces.el'.
-;; That keeps it loadable even when every other agent-repl module file
-;; has conflict markers.  Each in-flight entry persisted by
-;; `agent-repl--push-in-flight-merge' is processed:
-;;
-;;   1. If CHERRY_PICK_HEAD is still present at the recorded `:target-dir',
-;;      run `git -C target-dir cherry-pick --abort' to clear conflict
-;;      markers from working-tree files.  The source workspace is moved
-;;      onto `:merge-queue' (BACK, no halt) so the normal drain retries
-;;      it once the rest of the config has loaded.
-;;   2. If CHERRY_PICK_HEAD is absent: the prior merge actually completed
-;;      between the push and the crash — nothing to abort, just clear
-;;      the bookkeeping.
-;;
-;; The snapshot file is rewritten in place: `:in-flight-merges' becomes
-;; nil and recovered entries are appended to `:merge-queue'.  All errors
-;; are caught and surfaced via `message' so a broken snapshot or missing
-;; `git' binary cannot block Emacs startup.
-
 (defun agent-repl--early-git-string (&rest args)
   "Run `git ARGS' synchronously and return its trimmed stdout.
-Returns the empty string on non-zero exit — early recovery callers
-need a tolerant probe, not a hard fail, mirroring the
+Returns the empty string on non-zero exit — the early callers need a
+tolerant probe, not a hard fail, mirroring the
 `agent-repl--git-string-quiet' contract.
 
-This IS the external-boundary wrapper for the early-recovery code
-path.  Defined locally because `config.el's early recovery executes
-at module-loader top level — BEFORE `core.el' loads and the regular
-`agent-repl--git-*' family becomes available.  Same role,
-separately defined so the recovery is self-contained.  Registered in
+This IS the external-boundary wrapper for the pre-`core.el' code path.
+Defined locally because it runs at module-loader top level — BEFORE
+`core.el' loads and the regular `agent-repl--git-*' family becomes
+available.  Same role, separately defined.  Registered in
 `agent-repl--external-boundary-functions' (core.el) so the
 test-time runtime guards see it and tests cannot accidentally shell
 out to real `git'."
@@ -140,147 +105,6 @@ out to real `git'."
        "early-git-string: args=%S exit=%d success=%s stdout=%S"
        args exit-code success-p stdout)
       (if success-p stdout ""))))
-
-(defun agent-repl--early-git-exit-code (&rest args)
-  "Run `git ARGS' synchronously and return its exit code (stdout discarded).
-Sibling to `agent-repl--early-git-string'; see that function's
-docstring for the architectural context.  Registered in
-`agent-repl--external-boundary-functions' (core.el)."
-  (agent-repl--boot-info "early-git-exit-code: invoking args=%S" args)
-  (let ((exit-code (apply #'call-process "git" nil nil nil args))) ;; ALLOW-EXTERNAL-BOUNDARY
-    (agent-repl--boot-info "early-git-exit-code: args=%S exit=%d success=%s"
-                           args exit-code (zerop exit-code))
-    exit-code))
-
-(defun agent-repl--early-cherry-pick-head-at (target-dir)
-  "Return the path to CHERRY_PICK_HEAD for TARGET-DIR's repo, or nil.
-Resolves the git dir via `git rev-parse --absolute-git-dir' so a linked
-worktree (whose `.git' is a file pointing into the parent
-`.git/worktrees/<name>') is handled correctly."
-  (cond
-   ((null target-dir)
-    (agent-repl--boot-info "early-recovery: CHERRY_PICK_HEAD probe skipped; target-dir=nil")
-    nil)
-   ((not (file-directory-p target-dir))
-    (agent-repl--boot-info "early-recovery: CHERRY_PICK_HEAD probe skipped; target-dir=%S is not a directory"
-                           target-dir)
-    nil)
-   (t
-    (let ((git-dir (agent-repl--early-git-string
-                    "-C" target-dir "rev-parse" "--absolute-git-dir")))
-      (if (string-empty-p git-dir)
-          (progn
-            (agent-repl--boot-info "early-recovery: CHERRY_PICK_HEAD probe target-dir=%S resolved no git-dir"
-                                   target-dir)
-            nil)
-        (let* ((cp-head (expand-file-name "CHERRY_PICK_HEAD" git-dir))
-               (present-p (file-exists-p cp-head)))
-          (agent-repl--boot-info "early-recovery: CHERRY_PICK_HEAD probe target-dir=%S git-dir=%S path=%S present=%s"
-                                 target-dir git-dir cp-head present-p)
-          (and present-p cp-head)))))))
-
-(defun agent-repl--early-abort-cherry-pick (target-dir)
-  "Run `git -C TARGET-DIR cherry-pick --abort'; return the exit code."
-  (agent-repl--early-git-exit-code
-   "-C" target-dir "cherry-pick" "--abort"))
-
-(defun agent-repl--early-workspace-snapshot-file ()
-  "Return the absolute path of the workspace-roster snapshot.
-Resolved with ONLY built-in Elisp because this runs before `core.el'
-defines `agent-repl--global-state-file'; the resolution must stay
-byte-for-byte equivalent to that helper (the `AGENT_REPL_STATE_DIR'
-override, else `~/.claude-emacs')."
-  (let ((path (expand-file-name
-               "workspaces.el"
-               (expand-file-name (or (getenv "AGENT_REPL_STATE_DIR") "~/.claude-emacs")))))
-    (agent-repl--boot-info "early-recovery: resolved snapshot path=%S" path)
-    path))
-
-(defun agent-repl--early-recover-orphan-cherry-picks ()
-  "Process every in-flight-merge entry in the on-disk workspace snapshot.
-See the commentary at the top of `config.el' for the full rationale.
-Reads `~/.claude-emacs/workspaces.el', iterates `:in-flight-merges',
-aborts each entry whose `:target-dir' still has a `CHERRY_PICK_HEAD',
-and rewrites the snapshot with `:in-flight-merges' cleared and the
-recovered source workspaces appended to `:merge-queue' for retry."
-  (let ((snap-file (agent-repl--early-workspace-snapshot-file)))
-    (if (not (file-exists-p snap-file))
-        (agent-repl--boot-info "early-recovery: snapshot path=%S absent; nothing to recover" snap-file)
-      (condition-case err
-          (let* ((raw (with-temp-buffer
-                        (insert-file-contents snap-file)
-                        (goto-char (point-min))
-                        (read (current-buffer))))
-                 (valid-plist-p (and (consp raw) (keywordp (car raw))))
-                 (in-flight (and valid-plist-p
-                                 (plist-get raw :in-flight-merges))))
-            (agent-repl--boot-info "early-recovery: snapshot path=%S parsed valid-plist=%s in-flight=%S"
-                                   snap-file valid-plist-p in-flight)
-            (unless valid-plist-p
-              (agent-repl--boot-warn "early-recovery: snapshot path=%S is not a keyword plist; recovery skipped"
-                                     snap-file))
-            (when in-flight
-              ;; Early recovery runs pre-core.el, so it emits through the
-              ;; bootstrap helpers: progress lines are quiet, dropped/failed
-              ;; entries are loud.
-              (agent-repl--boot-info "early-recovery: scanning %d in-flight merge entries"
-                                     (length in-flight))
-              (let ((recovered nil))
-                (dolist (entry in-flight)
-                  (let* ((source-ws (plist-get entry :source-ws))
-                         (target-dir (plist-get entry :target-dir))
-                         (recovered-entry (list source-ws target-dir)))
-                    ;; Short-circuit malformed entries BEFORE probing
-                    ;; the target dir — a botched prior write must not
-                    ;; spawn `git' subprocesses against the partial
-                    ;; entry's stale path.
-                    (cond
-                     ((or (null source-ws) (null target-dir))
-                      (agent-repl--boot-warn "early-recovery: malformed entry %S — skipping"
-                                             entry))
-                     (t
-                      (let ((cp-head (agent-repl--early-cherry-pick-head-at target-dir)))
-                        (cond
-                         (cp-head
-                          (let ((exit-code (agent-repl--early-abort-cherry-pick target-dir)))
-                            (agent-repl--boot-info "early-recovery: ws=%s aborted cherry-pick in %s (exit=%d) — re-enqueueing"
-                                                   source-ws target-dir exit-code)
-                            (push recovered-entry recovered)))
-                         (t
-                          (agent-repl--boot-info "early-recovery: ws=%s no orphan CHERRY_PICK_HEAD at %s — clearing bookkeeping"
-                                                 source-ws target-dir))))))))
-                ;; Rewrite the snapshot: clear :in-flight-merges and
-                ;; append recovered entries to :merge-queue.
-                (let* ((workspaces (plist-get raw :workspaces))
-                       (merge-queue (plist-get raw :merge-queue))
-                       ;; RECOVERED holds (SOURCE-WS TARGET-DIR) pairs.
-                       ;; Carry TARGET-DIR onto the re-enqueued entry as
-                       ;; `:target-dir' so the recovered merge rejoins its
-                       ;; own per-target+repo sub-queue (the orphan's
-                       ;; destination is exactly the in-flight target dir).
-                       (new-entries
-                        (mapcar (lambda (pair)
-                                  (list :source-ws (nth 0 pair)
-                                        :silent t
-                                        :auto-resolve t
-                                        :target-dir (nth 1 pair)
-                                        :last-attempt-target-head nil
-                                        :halt-until-human nil))
-                                (reverse recovered)))
-                       (new-queue (append merge-queue new-entries))
-                       (new-raw (list :workspaces workspaces
-                                      :merge-queue new-queue
-                                      :in-flight-merges nil)))
-                  (with-temp-file snap-file
-                    (let ((print-length nil)
-                          (print-level nil))
-                      (prin1 new-raw (current-buffer))))
-                  (agent-repl--boot-info "early-recovery: snapshot rewritten — merge-queue=%d in-flight=0 recovered=%d"
-                                         (length new-queue) (length recovered))))))
-        (error
-         (agent-repl--boot-warn "early-recovery: snapshot path=%S failed err=%S" snap-file err))))))
-
-(agent-repl--early-recover-orphan-cherry-picks)
 
 ;; ---- Loaded-version SHA ----
 ;;
@@ -306,7 +130,7 @@ cannot resolve a SHA (for example outside a repository).
 
 Uses the early-boundary `agent-repl--early-git-string' wrapper so this
 helper has no dependency on `core.el' having loaded — it runs at the
-config-loader top level alongside the early-recovery code."
+config-loader top level, before `core.el' has loaded."
   (when agent-repl--config-file
     (let ((sha (agent-repl--early-git-string
                 "-C" (file-name-directory agent-repl--config-file)

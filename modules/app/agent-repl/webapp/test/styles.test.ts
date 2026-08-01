@@ -3223,3 +3223,52 @@ describe("visual-width normalization: every feed card kind stops at the response
     expect(promptBubble).toMatch(/max-width:\s*60%/);
   });
 });
+
+// The merge state's two visual halves: the composer's gate notice and the
+// footer's queue place. Both describe a routine, temporary, deliberate state,
+// so neither may wear a tone the stylesheet reserves for things going wrong.
+describe("the merge gate's composer notice", () => {
+  const notice = blockAfter(css, "\n#merge-gate-notice {");
+  const empty = blockAfter(css, "\n#merge-gate-notice:empty");
+  const disabledSend = blockAfter(css, "\n#send-btn:disabled {");
+
+  it("takes the whole composer row, so the sentence never fights the textarea", () => {
+    // Assert
+    expect(notice).toContain("flex-basis: 100%");
+  });
+
+  it("wears the muted tone, never the error one", () => {
+    // Assert — a workspace being merged is routine; red would say otherwise.
+    expect(notice).toContain("color: var(--muted)");
+  });
+
+  it("collapses entirely when it carries no notice", () => {
+    // Assert — an unmerged workspace pays no layout for a block it does not have.
+    expect(empty).toContain("display: none");
+  });
+
+  it("shows the send control as unavailable while the merge owns the session", () => {
+    // Assert — the gate's visible half; the notice beside it says why.
+    expect(disabledSend).toContain("cursor: not-allowed");
+  });
+});
+
+describe("the footer's merge-queue place", () => {
+  const queue = blockAfter(css, "\n.pfooter-merge-queue {");
+
+  it("wears the muted tone the merge phase beside it wears", () => {
+    // Assert — spending a color here would outrank the phase it qualifies.
+    expect(queue).toContain("color: var(--muted)");
+  });
+
+  it("uses tabular figures, so the place does not jitter as the queue moves", () => {
+    // Assert
+    expect(queue).toContain("font-variant-numeric: tabular-nums");
+  });
+
+  it("declares no fixed width, unlike the phase cell it sits beside", () => {
+    // Assert — the phase vocabulary is closed and can be sized once; a queue's
+    // two figures are unbounded, which is why they are NOT in that cell.
+    expect(queue).not.toContain("min-width");
+  });
+});

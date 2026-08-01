@@ -783,7 +783,7 @@ buffer.
 WS is optional and used only for the log line so a caller with a
 workspace context (e.g. `agent-repl--refresh-magit-status') can keep
 the existing log prefix; directory-keyed callers (e.g. the post-merge
-refresh in `agent-repl--workspace-merge-do') pass nil and the log
+refresh after a merge) pass nil and the log
 falls back to the bare directory."
   (if-let* ((canonical (and dir (agent-repl--path-canonical dir))))
       (let ((refreshed 0))
@@ -808,7 +808,7 @@ No-op when WS has no :project-dir or no matching buffer exists.
 Thin wrapper over `agent-repl--refresh-magit-status-for-dir' so the
 WS-keyed call sites (e.g. `--handle-agent-finished') and
 directory-keyed call sites (e.g. the post-merge refresh in
-`--workspace-merge-do', which has the target directory but not a
+a merge teardown, which has the target directory but not a
 target workspace) share the same buffer-matching logic."
   (agent-repl--refresh-magit-status-for-dir
    (agent-repl--ws-get ws :project-dir) ws))

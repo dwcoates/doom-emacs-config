@@ -3,15 +3,9 @@
 ;;; Code:
 
 ;; Forward declarations: defined in worktree.el (loaded after commands.el).
-;; Snapshot save/load helpers and the interactive drain command in this
-;; file refer to these symbols, so the names must be readable here at
-;; compile/load time.
-(defvar agent-repl--merge-queue)
-(defvar agent-repl--in-flight-merges)
+;; Snapshot save/load helpers in this file refer to these symbols, so the
+;; names must be readable here at compile/load time.
 (defvar agent-repl-master-branch-name)
-(declare-function agent-repl--drain-merge-queue "worktree")
-(declare-function agent-repl--merge-queue-target-dirs "worktree")
-(declare-function agent-repl--merge-queue-front-for-target "worktree")
 (declare-function agent-repl--frontend-dispatch-send "frontends")
 (declare-function agent-repl--frontend-boot-session "frontends")
 (declare-function agent-repl--frontend-ensure-session "frontend-client")
@@ -446,7 +440,6 @@ Without region: pre-fills with file path and current line."
     (when (or (null msg) (string-empty-p msg))
       (agent-repl--log (agent-repl--ws-current-log-name)
                         "explain-prompt: empty input; no message sent"))))
-
 
 (defun agent-repl--enter-insert-mode (ws)
   "Re-enter evil insert state in WS's input buffer after an interrupt.
@@ -1174,7 +1167,7 @@ restarts."
 (defun agent-repl--snapshot-raw-format (raw)
   "Classify the RAW sexp read from a workspace-snapshot file.
 Returns `:plist' when RAW is a plist (top-level keyword keys — the
-current format that carries both `:workspaces' and `:merge-queue'),
+current format, keyed `:workspaces' plus the session toggles),
 `:legacy' when RAW is the older list-of-entries shape (each element a
 cons/list whose car is a ws-name string), and `:empty' when RAW is nil."
   (cond
@@ -1198,8 +1191,7 @@ RAW is a parsed workspace-snapshot sexp.
 Every key EXCEPT `:workspaces' is plist-only: each was added after the
 legacy list-of-entries format, so for those keys `RAW is legacy' and
 `RAW is a plist lacking KEY' collapse to the same answer — nil.  That
-collapse is the whole shape shared by `:merge-queue',
-`:in-flight-merges', `:hide-project-dirs-enabled', and
+collapse is the whole shape shared by `:hide-project-dirs-enabled' and
 `:default-frontend', which is why they read through here rather than
 each restating the pcase.
 
@@ -1213,8 +1205,7 @@ reader."
 
 (defun agent-repl--read-workspace-snapshot (file)
   "Read FILE and return a plist with the parsed snapshot contents.
-Returned shape: `(:workspaces ENTRIES :merge-queue QUEUE
-:in-flight-merges IN-FLIGHT :hide-project-dirs-enabled BOOL
+Returned shape: `(:workspaces ENTRIES :hide-project-dirs-enabled BOOL
 :default-frontend SYMBOL)'.
 
 Normalizes both legacy (`((ws :project-dir dir) ...)') and current
@@ -1225,10 +1216,6 @@ the sexp is unreadable."
     (condition-case err
         (let ((raw (agent-repl--read-sexp-file file)))
           (list :workspaces (agent-repl--snapshot-entries-from-raw raw)
-                :merge-queue
-                (agent-repl--snapshot-plist-key-from-raw raw :merge-queue)
-                :in-flight-merges
-                (agent-repl--snapshot-plist-key-from-raw raw :in-flight-merges)
                 :hide-project-dirs-enabled
                 (agent-repl--snapshot-plist-key-from-raw raw :hide-project-dirs-enabled)
                 :default-frontend
@@ -1238,53 +1225,15 @@ the sexp is unreadable."
                          file err)
        nil))))
 
-(defun agent-repl--serialize-merge-queue (queue)
-  "Return QUEUE (the live `agent-repl--merge-queue') stripped down to
-the keys that survive `read' round-trip.  Every entry plist is plain
-strings/booleans/nil today, so serialization is a key-pick.  The
-indirection keeps the on-disk format insulated from future plist-key
-additions.
-
-Carries the loop-guard metadata `:last-attempt-target-head' (HEAD SHA
-recorded at re-enqueue time after a failed merge), the
-`:halt-until-human' flag (set on generic-failure re-enqueues to block
-auto-drain), and the `:target-dir' bucket key (canonical cherry-pick
-destination, used to partition the queue into independent per-target
-sub-queues) so a restart preserves the same drain semantics as the
-live queue."
-  (mapcar (lambda (entry)
-            (list :source-ws (plist-get entry :source-ws)
-                  :silent (and (plist-get entry :silent) t)
-                  :auto-resolve (and (plist-get entry :auto-resolve) t)
-                  :target-dir (plist-get entry :target-dir)
-                  :last-attempt-target-head
-                  (plist-get entry :last-attempt-target-head)
-                  :halt-until-human
-                  (and (plist-get entry :halt-until-human) t)))
-          queue))
-
-(defun agent-repl--serialize-in-flight-merges (in-flight)
-  "Return IN-FLIGHT (the live `agent-repl--in-flight-merges') stripped
-down to the keys that survive `read' round-trip.  Mirrors
-`agent-repl--serialize-merge-queue' so the persisted format stays
-insulated from future plist-key additions on the live entries."
-  (mapcar (lambda (entry)
-            (list :source-ws (plist-get entry :source-ws)
-                  :target-dir (plist-get entry :target-dir)
-                  :started-at (plist-get entry :started-at)))
-          in-flight))
-
-(defun agent-repl--write-workspace-snapshot (snapshot &optional merge-queue in-flight-merges)
-  "Write SNAPSHOT (a list of workspace entries) and queue state to
+(defun agent-repl--write-workspace-snapshot (snapshot)
+  "Write SNAPSHOT (a list of workspace entries) to
 `agent-repl-workspace-snapshot-file' in the plist format
-`(:workspaces SNAPSHOT :merge-queue MERGE-QUEUE
-:in-flight-merges IN-FLIGHT-MERGES
-:hide-project-dirs-enabled BOOL
+`(:workspaces SNAPSHOT :hide-project-dirs-enabled BOOL
 :default-frontend SYMBOL)'.
 
-When MERGE-QUEUE / IN-FLIGHT-MERGES are omitted, defaults to the live
-`agent-repl--merge-queue' / `agent-repl--in-flight-merges' so every
-snapshot write captures the live state alongside the roster.
+Merge queueing is DAEMON-OWNED, so no queue or in-flight-merge state is
+persisted here — a workspace's queue position and depth arrive on its
+pushed `WorkspaceState' and are rendered, never restored.
 
 `:hide-project-dirs-enabled' records the live
 `agent-repl-hide-project-dirs-enabled' toggle so a session restore
@@ -1302,31 +1251,12 @@ before overwriting.  Caller is responsible for any pre-write checks
     (when (and dir (not (file-directory-p dir)))
       (make-directory dir t)))
   (agent-repl--archive-workspace-snapshot)
-  (let* ((queue (agent-repl--serialize-merge-queue
-                 (or merge-queue
-                     (and (boundp 'agent-repl--merge-queue)
-                          agent-repl--merge-queue))))
-         (in-flight (agent-repl--serialize-in-flight-merges
-                     (or in-flight-merges
-                         (and (boundp 'agent-repl--in-flight-merges)
-                              agent-repl--in-flight-merges)))))
+  (progn
     (with-temp-file agent-repl-workspace-snapshot-file
       (insert "(:workspaces (")
       (let ((first t))
         (dolist (entry snapshot)
           (unless first (insert "\n               "))
-          (setq first nil)
-          (prin1 entry (current-buffer))))
-      (insert ")\n :merge-queue (")
-      (let ((first t))
-        (dolist (entry queue)
-          (unless first (insert "\n                "))
-          (setq first nil)
-          (prin1 entry (current-buffer))))
-      (insert ")\n :in-flight-merges (")
-      (let ((first t))
-        (dolist (entry in-flight)
-          (unless first (insert "\n                     "))
           (setq first nil)
           (prin1 entry (current-buffer))))
       (insert ")\n :hide-project-dirs-enabled ")
@@ -1644,65 +1574,6 @@ began)."
     (setq agent-repl--snapshot-load-state
           (plist-put agent-repl--snapshot-load-state :timeout-timer nil))))
 
-(defun agent-repl--snapshot-restore-merge-queue (saved-mq)
-  "Repopulate `agent-repl--merge-queue' from SAVED-MQ (read from disk).
-Filters out entries whose `:source-ws' no longer exists in
-`agent-repl--workspaces' (the workspace was removed between sessions,
-or its snapshot entry was skipped because its `:project-dir' was gone).
-Re-applies the `:repl-state :merge-queued' marker on each surviving
-source-ws so its queued-for-merge badge re-surfaces wherever
-`agent-repl--ws-render-status' renders it.  Preserves
-each entry's `:target-dir' so the per-target sub-queue partitioning
-survives the restart (a missing key falls back to lazy resolution in
-the drain).
-
-Does NOT auto-drain — `agent-repl--workspace-merge-do' is the normal
-drain trigger and the user kicks it off via `agent-repl-drain-merge-queue'
-\(intended for cases where the in-flight cherry-pick died with Emacs and
-the user has manually resolved before re-entering the loop)."
-  (when (and saved-mq (boundp 'agent-repl--merge-queue))
-    (let ((restored nil)
-          (dropped 0))
-      (dolist (entry saved-mq)
-        (let ((ws (plist-get entry :source-ws)))
-          (cond
-           ((and ws (agent-repl--ws-known-p ws))
-            (push (list :source-ws ws
-                        :silent (and (plist-get entry :silent) t)
-                        :auto-resolve (and (plist-get entry :auto-resolve) t)
-                        :target-dir (plist-get entry :target-dir))
-                  restored)
-            (agent-repl--ws-put ws :repl-state :merge-queued)
-            (agent-repl--ws-put ws :agent-state nil))
-           (t
-            (cl-incf dropped)
-            (agent-repl--log nil
-                              "snapshot-restore-merge-queue: dropping entry ws=%s — ws absent post-load"
-                              (or ws "nil"))))))
-      (setq agent-repl--merge-queue (nreverse restored))
-      (agent-repl--log nil
-                        "snapshot-restore-merge-queue: restored=%d dropped=%d"
-                        (length agent-repl--merge-queue) dropped))))
-
-(defun agent-repl--snapshot-restore-in-flight-merges (saved-in-flight)
-  "Repopulate `agent-repl--in-flight-merges' from SAVED-IN-FLIGHT (read from disk).
-The early-recovery in `config.el' should have already drained on-disk
-in-flight entries (aborted any orphan cherry-pick and moved each to
-`:merge-queue').  This restoration is a safety net: if early-recovery
-was skipped or failed silently, the live var still reflects the on-disk
-state so subsequent `--push-in-flight-merge' / `--clear-in-flight-merge'
-mutations have a consistent base."
-  (when (and saved-in-flight (boundp 'agent-repl--in-flight-merges))
-    (setq agent-repl--in-flight-merges
-          (mapcar (lambda (entry)
-                    (list :source-ws (plist-get entry :source-ws)
-                          :target-dir (plist-get entry :target-dir)
-                          :started-at (plist-get entry :started-at)))
-                  saved-in-flight))
-    (agent-repl--log nil
-                      "snapshot-restore-in-flight-merges: restored=%d"
-                      (length agent-repl--in-flight-merges))))
-
 (defun agent-repl--snapshot-load-finish ()
   "Finalize the recursive load: detach hook, return to origin, message.
 Idempotent: re-entry with `agent-repl--snapshot-load-state' already
@@ -1716,11 +1587,7 @@ can call finish without worrying whether a normal finish already ran."
            (origin (plist-get state :origin))
            (loaded (plist-get state :loaded))
            (skipped (plist-get state :skipped))
-           (load-error (or (plist-get state :load-error) 0))
-           (saved-mq (plist-get state :saved-merge-queue))
-           (saved-ifm (plist-get state :saved-in-flight-merges)))
-      (agent-repl--snapshot-restore-merge-queue saved-mq)
-      (agent-repl--snapshot-restore-in-flight-merges saved-ifm)
+           (load-error (or (plist-get state :load-error) 0)))
       ;; persp-mode saved origin's window-config when the loader's first
       ;; `--establish-workspace' switched away from it, so this switch-back
       ;; replays that layout — and persp-mode's restore filters foreign
@@ -1730,16 +1597,11 @@ can call finish without worrying whether a normal finish already ran."
         (agent-repl--ws-frame-switch origin))
       (force-mode-line-update t)
       (setq agent-repl--snapshot-loaded-p t)
-      (let ((mq-restored (and (boundp 'agent-repl--merge-queue)
-                              (length agent-repl--merge-queue))))
-        (agent-repl--log nil
-                          "snapshot-load: END loaded=%d skipped=%d load-error=%d merge-queue=%d returned-to=%s"
-                          loaded skipped load-error (or mq-restored 0) (or origin "nil"))
-        (agent-repl--info nil "Loaded %d workspace(s), skipped %d, errored %d%s"
-                          loaded skipped load-error
-                          (if (and mq-restored (> mq-restored 0))
-                              (format ", merge-queue=%d" mq-restored)
-                            "")))
+      (agent-repl--log nil
+                        "snapshot-load: END loaded=%d skipped=%d load-error=%d returned-to=%s"
+                        loaded skipped load-error (or origin "nil"))
+      (agent-repl--info nil "Loaded %d workspace(s), skipped %d, errored %d"
+                        loaded skipped load-error)
       ;; The startup backend preparation occurred before this loader read the
       ;; snapshot.  Clear recursive state only after the final workspace hook
       ;; has unwound; no post-restore bounce may rebind these fresh sessions.
@@ -1988,8 +1850,6 @@ gate for each live shim/store route."
   (let* ((file (or file (agent-repl--workspace-snapshot-file-for-read)))
          (parsed (agent-repl--read-workspace-snapshot file))
          (snapshot (plist-get parsed :workspaces))
-         (saved-mq (plist-get parsed :merge-queue))
-         (saved-ifm (plist-get parsed :in-flight-merges))
          (saved-hide (plist-get parsed :hide-project-dirs-enabled))
          (saved-frontend (plist-get parsed :default-frontend)))
     (unless snapshot
@@ -2092,14 +1952,12 @@ gate for each live shim/store route."
                   :load-error 0
                   :total (length queue)
                   :timeout-timer nil
-                  :saved-merge-queue saved-mq
-                  :saved-in-flight-merges saved-ifm
                   :startup startup))
       (add-hook 'agent-repl-ws-fully-loaded-functions
                 #'agent-repl--snapshot-load-on-loaded)
       (agent-repl--log nil
-                        "snapshot-load: BEGIN file=%s entries=%d merge-queue=%d origin-ws=%s"
-                        file (length queue) (length saved-mq) (or origin-ws "nil"))
+                        "snapshot-load: BEGIN file=%s entries=%d origin-ws=%s"
+                        file (length queue) (or origin-ws "nil"))
       (agent-repl--snapshot-load-step))))
 
 (defun agent-repl--load-workspace-snapshot-on-startup ()
@@ -2181,60 +2039,6 @@ explicitly (skips the configured-vs-legacy resolver)."
     (when file
       (agent-repl--log nil "load-workspace-snapshot-from-archive: file=%s" file)
       (agent-repl-load-workspace-snapshot file))))
-
-;;;; Merge-queue manual drain
-
-(defun agent-repl-drain-merge-queue ()
-  "Re-kick the merge-queue drain loop after a manually-resolved stall.
-
-Normal flow: `agent-repl--workspace-merge-do' completes (success or
-failure) and immediately calls `agent-repl--drain-merge-queue', so the
-queue drains naturally as cherry-picks finish.  This command is the
-escape hatch for stalls where that automatic drain didn't happen — for
-example, when Emacs restarts with a non-empty queue restored from the
-on-disk snapshot, or when a cherry-pick fails in a way that requires
-the user to repair the worktree by hand before the next queued merge
-can proceed.
-
-Clears `:halt-until-human' on the FRONT entry of every per-target+repo
-bucket before draining — `agent-repl--reenqueue-merge-on-failure' sets
-that flag on generic failures specifically so auto-drain does NOT retry
-them.  The interactive kick IS the human signal that re-dispatch should
-proceed, so the flag is dropped on each bucket's front and those entries
-become drainable.
-
-No-op (with a `message') when the queue is empty.  Does NOT block when a
-cherry-pick is in progress: the drain is now per-target, so buckets whose
-target worktree has a live cherry-pick are simply skipped while free
-buckets drain — the user no longer has to clear every `CHERRY_PICK_HEAD'
-in the session before any queued merge can proceed.
-
-The drain itself is the same `agent-repl--drain-merge-queue' that the
-automatic path uses: each free bucket's front entry pops, the
-corresponding `agent-repl--workspace-merge-into-source' runs, and its
-completion cascades into the next drain."
-  (interactive)
-  (cond
-   ((not (boundp 'agent-repl--merge-queue))
-    (user-error "agent-repl: merge queue module not loaded"))
-   ((null agent-repl--merge-queue)
-    (message "[agent-repl] merge queue is empty — nothing to drain"))
-   (t
-    (dolist (target-dir (agent-repl--merge-queue-target-dirs))
-      (let ((front (agent-repl--merge-queue-front-for-target target-dir)))
-        (when (and front (plist-get front :halt-until-human))
-          (agent-repl--log nil
-                            "drain-merge-queue: manual kick clearing :halt-until-human on ws=%s target=%s"
-                            (plist-get front :source-ws) (or target-dir "nil"))
-          (plist-put front :halt-until-human nil))))
-    (agent-repl--log nil
-                      "drain-merge-queue: manual kick queue-len=%d"
-                      (length agent-repl--merge-queue))
-    (agent-repl--info nil "draining merge queue (%d entries)"
-                      (length agent-repl--merge-queue))
-    (agent-repl--drain-merge-queue))))
-
-(defalias '+dwc/drain-merge-queue #'agent-repl-drain-merge-queue)
 
 ;;;; Merge-completed restore
 

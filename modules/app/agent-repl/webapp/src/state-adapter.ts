@@ -62,6 +62,7 @@ import type {
   UserTurnItem,
 } from "./store.js";
 import {
+  ConversationSource,
   ERROR_CLASSES,
   RenderState,
   SessionConnectivity,
@@ -151,6 +152,21 @@ export interface WorkspaceStatusInput {
   sessionStatus: WebSessionStatus;
   controllerGenerationId: string;
   activeFaults: RuntimeFault[];
+  /**
+   * This workspace's 1-based place in its REPOSITORY's merge queue, or 0 when
+   * it is not enqueued. The phase says what the merge is doing; this says where
+   * it sits among the sibling worktrees contending for the same target.
+   */
+  mergeQueuePosition: number;
+  /** Total entries on that queue (0 when nothing is enqueued). */
+  mergeQueueDepth: number;
+  /**
+   * Whether the merge coordinator holds the exclusivity lease on this
+   * workspace's shim. The merge OWNS the session while it is held: the daemon
+   * refuses user prompts, so the composer must say so rather than let a prompt
+   * leave and come back as an error.
+   */
+  mergeLeaseHeld: boolean;
 }
 
 /** SessionView → topbar / session-info input. */
@@ -353,7 +369,7 @@ export type AdapterEffect =
   | { kind: "session-init"; value: SessionInitInput }
   | { kind: "ignored"; shape: string };
 
-export type AdapterLogLevel = "debug" | "info" | "warn";
+export type AdapterLogLevel = "debug" | "info" | "warn" | "error";
 export type AdapterLogger = (level: AdapterLogLevel, message: string) => void;
 
 // --- ingest-time user-turn receipt -------------------------------------------
@@ -498,6 +514,8 @@ export class StateAdapter {
         `connectivity=${connectivity} status=${sessionStatus ?? "none"} ` +
         `proto=${RenderState[ws.state]} keyword=${state} turn_active=${ws.turnActive} ` +
         `live_tasks=${String(ws.liveTaskCount)} merge_phase=${ws.mergePhase} ` +
+        `merge_queue=${String(ws.mergeQueuePosition)}/${String(ws.mergeQueueDepth)} ` +
+        `merge_lease_held=${ws.mergeLeaseHeld} ` +
         `faults=${ws.activeFaults.map((fault) => `${fault.component}/${fault.faultType}`).join(",") || "none"} ` +
         `cause_kind=${ws.causeKind} cause_seq=${String(ws.causeSeq)} at_ms=${String(ws.atMs)}`,
     );
@@ -517,6 +535,9 @@ export class StateAdapter {
         sessionStatus,
         controllerGenerationId: ws.controllerGenerationId,
         activeFaults: ws.activeFaults,
+        mergeQueuePosition: Number(ws.mergeQueuePosition),
+        mergeQueueDepth: Number(ws.mergeQueueDepth),
+        mergeLeaseHeld: ws.mergeLeaseHeld,
       },
     };
   }
@@ -663,10 +684,44 @@ export class StateAdapter {
     ];
   }
 
+  /**
+   * PROVENANCE GATE — which conversation items reach the feed at all.
+   *
+   * MERGE items are dropped. A merge conflict is resolved by the coordinator
+   * driving this workspace's own shim, so the session emits full turns the user
+   * never asked for; drawing them puts an unattributable conversation in the
+   * feed of a workspace whose user is only waiting for the merge to finish.
+   * This is a PRODUCT decision, not a wire fact — the daemon still sends them,
+   * and the drop is counted on the same explicit-ignore path every other
+   * deliberately unrendered shape uses, so it stays visible in diagnostics
+   * rather than looking like data loss.
+   *
+   * UNSPECIFIED is a MALFORMED item, not a third policy. The daemon sets a
+   * source on everything it builds, so a zero here means the frame did not come
+   * from a contract-abiding producer. It is logged at error with the item's
+   * identity and dropped — defaulting it to USER would draw a turn nothing
+   * vouches for, which is exactly what the enum's reserved zero exists to stop.
+   */
   private conversationEffects(cd: ConversationDelta): AdapterEffect[] {
     const items: ConversationItem[] = [];
     const ignored: AdapterEffect[] = [];
     for (const frame of cd.items) {
+      if (frame.source === ConversationSource.UNSPECIFIED) {
+        this.log(
+          "error",
+          `state-adapter: conversation item has UNSPECIFIED source — the daemon ` +
+            `never emits it, so the frame is malformed and the item is DROPPED ` +
+            `(never defaulted to user) workspace=${cd.workspace} session=${cd.sessionId} ` +
+            `uuid=${frame.uuid} arm=${frame.arm} request_id=${frame.requestId || "none"} ` +
+            `through_seq=${String(cd.throughSeq)}`,
+        );
+        ignored.push(this.ignore(`conversation-item-source:unspecified`));
+        continue;
+      }
+      if (frame.source === ConversationSource.MERGE) {
+        ignored.push(this.ignore("conversation-item-source:merge"));
+        continue;
+      }
       const built = itemsFromFrame(frame);
       items.push(...built.items);
       for (const shape of built.ignores) ignored.push(this.ignore(shape));

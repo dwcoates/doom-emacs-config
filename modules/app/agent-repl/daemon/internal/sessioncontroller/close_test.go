@@ -3,6 +3,7 @@ package sessioncontroller
 import (
 	"errors"
 	"runtime"
+	"strings"
 	"testing"
 
 	"claude-repld/internal/shimclient"
@@ -39,6 +40,55 @@ func newClosingRig(t *testing.T) (*Manager, *fakeSpawner, *fakeApplier, *logCapt
 		t.Fatalf("Ensure: %v", err)
 	}
 	return m, spawner, applier, cl
+}
+
+// A Close that lands while a bring-up is still inside its spawn must ABORT
+// that bring-up, not race it: Close waits on the exits WaitGroup, and a
+// bring-up that reached its exits.Add only after Close began waiting is the
+// WaitGroup-reuse panic. The re-check under m.mu turns that interleaving into
+// a loud refusal instead.
+//
+// The spawner gate is what makes the interleaving deterministic: the bring-up
+// is parked PAST its entry closed-check, Close completes, and only then is the
+// bring-up released to discover the closed manager.
+func TestCloseDuringBringUpAbortsTheBringUp(t *testing.T) {
+	// Arrange — a bring-up parked inside the spawner.
+	spawner := &fakeSpawner{entered: make(chan struct{}, 1), gate: make(chan struct{})}
+	applier := &fakeApplier{}
+	cl := &logCapture{}
+	m, err := New(Config{
+		Logf:              cl.logf,
+		Push:              &fakePusher{},
+		Progress:          &fakeProgress{},
+		SSM:               applier,
+		Spawner:           spawner,
+		Locator:           fakeLocator{m: map[string]string{"ws": "s1"}},
+		SeqStore:          &fakeSeqStore{seq: map[string]uint64{}},
+		ClearCompactStore: newFakeClearCompactStore(),
+		Registrar:         &fakeRegistrar{},
+		ProtocolVersion:   "1",
+		now:               func() int64 { return 1000 },
+		Source:            stubSource{},
+		FileDiagnostics:   fakeFileDiagnosticPersister{},
+		newClient:         func(c shimclient.Config) sessionClient { return &fakeClient{cfg: c} },
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	errs := make(chan error, 1)
+	go func() { errs <- m.Ensure("ws") }()
+	<-spawner.entered
+
+	// Act — close while the bring-up is parked, then release it.
+	m.Close()
+	close(spawner.gate)
+
+	// Assert — the bring-up refuses loudly instead of adding an exit
+	// goroutine behind the Close that already joined them.
+	err = <-errs
+	if err == nil || !strings.Contains(err.Error(), "manager closed during bring-up") {
+		t.Fatalf("Ensure() error = %v, want the manager-closed-during-bring-up refusal", err)
+	}
 }
 
 // Close JOINS the session-controller-exit goroutine: the tail of bringUp's `go func` —

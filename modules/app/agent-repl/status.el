@@ -257,7 +257,7 @@ STATE is one of:
   :active    — panels displayed, session alive
   :inactive  — panels hidden, session alive (plain `SPC o c' close)
   :merged    — workspace's branch has been merged into its source.
-               Set by `agent-repl--workspace-merge-do' on success
+               Set when a merge lands
                (alongside `:merge-completed t').  Takes precedence
                over `:dead' so the 🔀 badge survives the post-merge
                nuke-and-poll cycle that would otherwise mark the

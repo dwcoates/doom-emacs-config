@@ -144,6 +144,8 @@ function flow(): Flow {
       footer.render({
         progress: store.progress,
         renderState: s.renderState,
+        mergeQueuePosition: s.mergeQueuePosition,
+        mergeQueueDepth: s.mergeQueueDepth,
         connectivity: s.sessionConnectivity,
         sessionStatus: s.sessionStatus,
         agents: sessionSubagents(s.items),

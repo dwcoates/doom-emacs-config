@@ -101,6 +101,17 @@ type AgentShimConfig struct {
 	// ClientLogs persists canonical browser records to the webapp workspace
 	// target. A missing writer makes that command fail loudly.
 	ClientLogs ClientLogWriter
+	// MergeLease is the shim exclusivity claim merge.Coordinator holds across
+	// every merge it drives. Required: without it a cherry-pick would run into
+	// a session the user is still prompting, so an unbound lease is a broken
+	// merge subsystem rather than a merge subsystem without a nicety. It is
+	// implemented in internal/ssm and injected by main.
+	MergeLease merge.Lease
+	// MergeQueue is merge.Coordinator's DURABLE request channel. Required, and
+	// injected rather than constructed here because the SSM's merge.Lease reads
+	// the SAME instance to resolve merge_queue_position / merge_queue_depth: two
+	// queues over one directory would report a depth nobody is draining.
+	MergeQueue merge.DurableQueue
 	// Logf is the daemon logger. Nil discards.
 	Logf func(string, ...any)
 	// LogVerbosef persists frequent lease-success diagnostics without forcing
@@ -118,6 +129,10 @@ type AgentShim struct {
 	SSM      *ssm.Manager
 	Progress *progress.Manager
 	Merge    *merge.Driver
+	// MergeCoordinator owns the per-repository merge queue that drives Merge.
+	// Close stops its drains; a merge in flight keeps its durable queue entry
+	// so the next daemon resumes it.
+	MergeCoordinator *merge.QueueCoordinator
 
 	cancelPush               func()
 	cancelProgress           func()
@@ -163,27 +178,30 @@ func (s mergeSink) RecordMergeTransition(ws string, phase merge.Phase, cause str
 	return s.mgr.ApplyMergeTransition(ws, string(phase), cause)
 }
 
-// mergeRunner backs the frontend MergeRunner with the merge.Driver, adapting
-// the merge.Driver's (Result, error) to the command handler's error.
+// mergeConflictResolver adapts the PromptRouter to merge.ConflictResolver, the
+// port merge.Coordinator drives a parked conflict through.
 //
-// It holds NOTHING ELSE. It used to also hold a workspace->dirs resolver and
-// call it on the way through, which is the seam this file no longer has: the
-// geometry arrives on the command (MergeWorkspaceCmd), so there is nothing left
-// to resolve and no way for a merge to fail because the daemon could not work
-// out where the workspace lives.
-type mergeRunner struct {
-	driver *merge.Driver
+// IT IS DERIVED FROM Prompts RATHER THAN INJECTED SEPARATELY, and that is the
+// point. The resolution prompt is admissible only against the session the merge
+// lease was taken over, and that lease is taken over the fleet Prompts routes
+// to. A second injection point could be bound to a different controller fleet —
+// resolving a conflict on one daemon's session while another holds the lease —
+// which this makes unrepresentable rather than merely unlikely.
+type mergeConflictResolver struct{ prompts PromptRouter }
+
+func (r mergeConflictResolver) Resolve(ctx context.Context, res merge.ConflictResolution) error {
+	return r.prompts.ResolveMergeConflict(ctx, res)
 }
 
-func (m mergeRunner) Merge(ctx context.Context, req merge.Request) error {
-	_, err := m.driver.Merge(ctx, req)
-	return err
-}
+var _ merge.ConflictResolver = mergeConflictResolver{}
 
-func (m mergeRunner) Resume(ctx context.Context, req merge.Request) error {
-	_, err := m.driver.Resume(ctx, req)
-	return err
-}
+// The command handler's merge surface IS merge.Coordinator. There is no
+// adapter between them any more: the handler enqueues, the coordinator owns
+// the queue and the lease, and merge.Driver is reached only from inside the
+// coordinator's drain. The adapter that used to sit here called merge.Driver
+// straight from the command, which put every concurrent merge_workspace
+// command on the same target worktree at once.
+var _ MergeRunner = (*merge.QueueCoordinator)(nil)
 
 // WireAgentShim builds the SSM, merge.Driver, and frontend Server wired
 // together, and starts the SSM-subscribe -> PushWorkspaceState loop. The
@@ -210,6 +228,12 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 		return nil, fmt.Errorf("server: WireAgentShim needs a TurnStateSource (without it the interrupt confirm gate cannot tell a live turn from working subagents)")
 	case cfg.Resumes == nil:
 		return nil, fmt.Errorf("server: WireAgentShim needs a ConversationResumeResolver (without it the daemon cannot tell a workspace's existing conversation from a new one, and every create would have to start fresh)")
+	case cfg.MergeLease == nil:
+		return nil, fmt.Errorf("server: WireAgentShim needs a merge.Lease (without it a cherry-pick would run into a session the user is still prompting)")
+	case cfg.MergeQueue == nil:
+		return nil, fmt.Errorf("server: WireAgentShim needs a merge.Queue (without it the merge queue is not durable and a self-merge's daemon bounce loses it)")
+	case cfg.Prompts == nil:
+		return nil, fmt.Errorf("server: WireAgentShim needs a PromptRouter (it is both the frontend's submit path and merge.Coordinator's conflict-resolution path)")
 	}
 	mgr := cfg.SSM
 
@@ -217,9 +241,32 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 	if err != nil {
 		return nil, fmt.Errorf("server: build merge driver: %w", err)
 	}
+	keyer, err := merge.NewGitRepoKeyer(logf)
+	if err != nil {
+		return nil, fmt.Errorf("server: build merge repo keyer: %w", err)
+	}
+	coordinator, err := merge.NewCoordinator(merge.CoordinatorConfig{
+		Logf:     logf,
+		Sink:     mergeSink{mgr},
+		Queue:    cfg.MergeQueue,
+		Keyer:    keyer,
+		Picker:   driver,
+		Lease:    cfg.MergeLease,
+		Resolver: mergeConflictResolver{prompts: cfg.Prompts},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("server: build merge coordinator: %w", err)
+	}
+	// Boot-time reconstruction. A workspace that merges the daemon's own
+	// repository bounces the daemon mid-queue, so the durable entries left by
+	// the previous process are resumed here rather than forgotten.
+	if err := coordinator.Drain(context.Background()); err != nil {
+		coordinator.Close()
+		return nil, fmt.Errorf("server: drain merge queue: %w", err)
+	}
 
 	handler, err := newCommandHandler(
-		cfg.Prompts, mergeRunner{driver: driver},
+		cfg.Prompts, coordinator,
 		cfg.Lifecycle, cfg.Resyncer, cfg.SessionCommands, cfg.RequestShutdown,
 		cfg.Queues, logf,
 		CommandHandlerConfig{
@@ -311,7 +358,7 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 	}()
 
 	return &AgentShim{
-		Server: srv, SSM: mgr, Progress: prog, Merge: driver,
+		Server: srv, SSM: mgr, Progress: prog, Merge: driver, MergeCoordinator: coordinator,
 		cancelPush: cancel, cancelProgress: cancelProgress,
 		cancelWorkspaceAvailable: cancelWorkspaceAvailable, cancelHostActions: cancelHostActions, logf: logf,
 	}, nil
@@ -333,6 +380,13 @@ func (a *AgentShim) Close() error {
 	}
 	if a.cancelHostActions != nil {
 		a.cancelHostActions()
+	}
+	if a.MergeCoordinator != nil {
+		// Stops the drains. A merge in flight keeps its durable queue entry, so
+		// the next daemon's Drain resumes it rather than losing it.
+		if err := a.MergeCoordinator.Close(); err != nil {
+			a.logf("server: merge coordinator close: %v", err)
+		}
 	}
 	if a.Server != nil {
 		if err := a.Server.Close(); err != nil {

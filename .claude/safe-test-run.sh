@@ -46,11 +46,43 @@ fi
 
 SELECTOR="${1:-}"
 
+# ---- Ref snapshot scope ----------------------------------------------------
+# The refs snapshot must cover only state THIS test run could damage. The
+# repo's refs database is shared with every linked worktree, and live
+# agent-repl workspace sessions legitimately commit to their own branches
+# (and workspace creation adds a branch plus a start/* tag) while the suite
+# runs — so refs vouched for by ANOTHER worktree are excluded, additions and
+# movements alike. Everything else stays covered: this checkout's HEAD and
+# branch, its working-tree status, and every ref no sibling worktree owns.
+
+# foreign_owned_refs prints "refs/heads/<branch>" for every branch checked
+# out in a worktree OTHER than this one.
+foreign_owned_refs() {
+  git worktree list --porcelain \
+    | awk -v self="worktree $REPO_ROOT" '
+        /^worktree /            { cur = $0 }
+        /^branch / && cur != self { print $2 }'
+}
+
+# snapshot_refs prints the drift-scoped ref list: all heads and tags, minus
+# workspace start/* tags and minus branches a sibling worktree vouches for.
+snapshot_refs() {
+  local exclude
+  exclude="$(foreign_owned_refs)"
+  git for-each-ref --format='%(refname) %(objectname)' refs/heads/ refs/tags/ \
+    | grep -v '^refs/tags/start/' \
+    | { if [ -n "$exclude" ]; then
+          grep -v -F -f <(printf '%s\n' "$exclude" | sed 's/$/ /')
+        else
+          cat
+        fi; } || true
+}
+
 # ---- Capture pre-test state ------------------------------------------------
 
 PRE_HEAD="$(git rev-parse HEAD)"
 PRE_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
-PRE_REFS="$(git for-each-ref --format='%(refname) %(objectname)' refs/heads/ refs/tags/)"
+PRE_REFS="$(snapshot_refs)"
 PRE_REFS_HASH="$(printf '%s' "$PRE_REFS" | shasum -a 256 | cut -d' ' -f1)"
 PRE_STATUS="$(git status --porcelain)"
 
@@ -88,7 +120,7 @@ echo "[safe-test-run] ert exited with code $TEST_RC"
 
 POST_HEAD="$(git rev-parse HEAD)"
 POST_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
-POST_REFS="$(git for-each-ref --format='%(refname) %(objectname)' refs/heads/ refs/tags/ | grep -v "^refs/tags/$CHECKPOINT_TAG ")"
+POST_REFS="$(snapshot_refs | grep -v "^refs/tags/$CHECKPOINT_TAG " || true)"
 POST_REFS_HASH="$(printf '%s' "$POST_REFS" | shasum -a 256 | cut -d' ' -f1)"
 POST_STATUS="$(git status --porcelain | grep -v "scheduled_tasks.lock" || true)"
 PRE_STATUS_FILTERED="$(printf '%s' "$PRE_STATUS" | grep -v "scheduled_tasks.lock" || true)"
@@ -110,8 +142,12 @@ fi
 
 if [ "$PRE_REFS_HASH" != "$POST_REFS_HASH" ]; then
   DRIFT=1
-  ADDED_REFS="$(diff <(printf '%s\n' "$PRE_REFS") <(printf '%s\n' "$POST_REFS") | awk '/^>/{$1=""; print}' | sed 's/^ //')"
-  REMOVED_REFS="$(diff <(printf '%s\n' "$PRE_REFS") <(printf '%s\n' "$POST_REFS") | awk '/^</{$1=""; print}' | sed 's/^ //')"
+  # `diff` exits 1 when the inputs differ — which is the ONLY reason this
+  # branch runs — so under `set -o pipefail` an unguarded pipeline kills the
+  # script right here and the drift is never reported. The guard keeps the
+  # reporter alive; the drift itself still fails the run below.
+  ADDED_REFS="$(diff <(printf '%s\n' "$PRE_REFS") <(printf '%s\n' "$POST_REFS") | awk '/^>/{$1=""; print}' | sed 's/^ //' || true)"
+  REMOVED_REFS="$(diff <(printf '%s\n' "$PRE_REFS") <(printf '%s\n' "$POST_REFS") | awk '/^</{$1=""; print}' | sed 's/^ //' || true)"
   DRIFT_REPORT="${DRIFT_REPORT}  - refs/heads or refs/tags changed:\n"
   if [ -n "$ADDED_REFS" ]; then
     DRIFT_REPORT="${DRIFT_REPORT}      added:\n"

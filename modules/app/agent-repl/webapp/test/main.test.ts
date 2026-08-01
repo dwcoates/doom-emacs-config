@@ -141,3 +141,41 @@ describe("mid-task memory", () => {
     expect(offenders).toEqual([]);
   });
 });
+
+/**
+ * The composer's ONE submit path, so the merge gate cannot be bypassed by a
+ * second entry point. `submit` is shared by the send button's click and the
+ * textarea's Enter chord; both must meet the same gate.
+ */
+const composerSubmit = blocksAfter(main, "const submit = (): void => {")[0]!;
+
+describe("the composer's merge gate", () => {
+  it("has exactly one submit path, which is what makes the gate total", () => {
+    // Assert — a second `submit` closure would be a second way past the gate.
+    expect(blocksAfter(main, "const submit = (): void => {")).toHaveLength(1);
+  });
+
+  it("consults the gate before handing a prompt to the dispatcher", () => {
+    // Assert — the daemon refuses the prompt anyway; asking here is what turns
+    // a vanished draft and a delayed failure card into an immediate answer.
+    expect(composerSubmit).toContain("submitBlocked(store.state.mergeLeaseHeld)");
+  });
+
+  it("surfaces the explanation on a blocked attempt rather than no-opping", () => {
+    // Assert — a blocked send that showed nothing would read as a broken app.
+    expect(composerSubmit).toContain("mergeGateNoticeHtml(true)");
+  });
+
+  it("logs the blocked attempt through the canonical logging API", () => {
+    // Assert — the record carries the same wording the user was shown.
+    expect(composerSubmit).toContain("mergeGateBlockedLog(");
+  });
+
+  it("keeps the draft, so a blocked send is never a lost one", () => {
+    // Assert — the blocked branch returns BEFORE the `input.value = ""` clear,
+    // which only the accepted path reaches.
+    const blocked = composerSubmit.indexOf("mergeGateBlockedLog(");
+    const cleared = composerSubmit.indexOf('input.value = ""');
+    expect(blocked).toBeLessThan(cleared);
+  });
+});

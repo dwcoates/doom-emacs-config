@@ -63,6 +63,17 @@ export interface FooterInput {
    * "starting" against an already-green tab.
    */
   renderState: WebRenderState | null;
+  /**
+   * This workspace's 1-based place in its REPOSITORY's merge queue, and the
+   * queue's total depth. Both 0 when the workspace is not enqueued.
+   *
+   * They arrive on the SAME `WorkspaceState` as `renderState` for the reason
+   * that field's own note gives: a queue place carried in a second message is a
+   * queue place kept in two copies, and the stale copy is the one that reads
+   * "2/3" against an already-merged workspace.
+   */
+  mergeQueuePosition: number;
+  mergeQueueDepth: number;
   /** Daemon-resolved route reliability for the same WorkspaceState. */
   connectivity: WebSessionConnectivity | null;
   /** Activity fact retained beneath a non-operational connectivity verdict. */
@@ -194,6 +205,42 @@ export function phaseLabel(state: WebRenderState): PhaseLabel {
       throw new Error(`progress-footer: unhandled render state ${String(never)}`);
     }
   }
+}
+
+/** The merge queue's place, as the footer's chip beside the phase. */
+export interface MergeQueueChip {
+  /** `position/depth`, e.g. `2/3`. */
+  text: string;
+  /** The hover line, which spells out what the two figures mean. */
+  title: string;
+}
+
+/**
+ * The merge-queue chip, or null when there is no queue place to show.
+ *
+ * It is a CHIP rather than more words in the phase cell, and that is deliberate:
+ * the phase cell's geometry is fixed to the widest phrase the CLOSED phase
+ * vocabulary can produce, while a queue place is two unbounded numbers. Read
+ * left to right the pair still says "merge queued 2/3"; putting the digits
+ * inside the phase cell would have made every phase's cell wider forever to
+ * accommodate a queue nobody is usually in.
+ *
+ * Present ONLY while the workspace is actually queued: a position of 0 is the
+ * daemon saying "not enqueued", and `0/0` beside any phase would be noise.
+ * A workspace whose merge has moved on (merging, merged, failed) has left the
+ * queue, so no place is shown for it either.
+ */
+export function mergeQueueChip(
+  state: WebRenderState | null,
+  position: number,
+  depth: number,
+): MergeQueueChip | null {
+  if (state !== "merge_queued") return null;
+  if (position <= 0 || depth <= 0) return null;
+  return {
+    text: `${String(position)}/${String(depth)}`,
+    title: `this workspace is ${String(position)} of ${String(depth)} waiting to merge into this repository`,
+  };
 }
 
 /** The interrupt window as the footer's chip beside the phase. */
@@ -673,6 +720,15 @@ export function footerHtml(
         : "";
     cells.push(
       `<div class="pfooter-cell pfooter-phase ${phase.tone}">${spin}${escapeHtml(phase.word)}${secondary}</div>`,
+    );
+  }
+  // The queue place sits immediately right of the phase word it qualifies, so
+  // the pair reads as one statement: "merge queued 2/3".
+  const queue = mergeQueueChip(input.renderState, input.mergeQueuePosition, input.mergeQueueDepth);
+  if (queue !== null) {
+    cells.push(
+      `<div class="pfooter-cell pfooter-merge-queue" title="${escapeHtml(queue.title)}">` +
+        `${escapeHtml(queue.text)}</div>`,
     );
   }
   // The interrupt chip sits immediately right of the phase: it qualifies the

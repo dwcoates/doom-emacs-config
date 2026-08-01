@@ -507,6 +507,21 @@ export interface StoreState {
   controllerGenerationId: string;
   /** Current generation's active explanatory fault windows. */
   activeFaults: RuntimeFault[];
+  /**
+   * This workspace's 1-based place in its repository's merge queue, 0 when it
+   * is not enqueued. Read by the footer beside the phase word: `merge_queued`
+   * alone cannot say whether the merge is next or fifth in line.
+   */
+  mergeQueuePosition: number;
+  /** Total entries on that queue, 0 when nothing is enqueued. */
+  mergeQueueDepth: number;
+  /**
+   * Whether the merge coordinator holds the exclusivity lease on this
+   * workspace's shim. The composer gates on it: the daemon refuses user prompts
+   * while it is held, so a composer that stayed live would send prompts whose
+   * only possible outcome is a refusal.
+   */
+  mergeLeaseHeld: boolean;
   /** Monotonic SSM revision of the adopted WorkspaceState. */
   workspaceStateAtMs: number;
   /** Store sequence that caused the adopted state, or zero for daemon-local. */
@@ -542,6 +557,9 @@ function initialState(): StoreState {
     sessionStatus: null,
     controllerGenerationId: "",
     activeFaults: [],
+    mergeQueuePosition: 0,
+    mergeQueueDepth: 0,
+    mergeLeaseHeld: false,
     workspaceStateAtMs: 0,
     workspaceStateCauseSeq: 0,
   };
@@ -560,6 +578,9 @@ function workspaceStateFingerprint(ws: WorkspaceStatusInput): string {
     controllerGenerationId: ws.controllerGenerationId,
     causeSeq: ws.causeSeq,
     activeFaults: ws.activeFaults,
+    mergeQueuePosition: ws.mergeQueuePosition,
+    mergeQueueDepth: ws.mergeQueueDepth,
+    mergeLeaseHeld: ws.mergeLeaseHeld,
   });
 }
 
@@ -776,6 +797,8 @@ export class ConversationStore {
       s.sessionConnectivity !== null ||
       s.sessionStatus !== null ||
       s.turnInFlight ||
+      s.mergeLeaseHeld ||
+      s.mergeQueuePosition > 0 ||
       this.progress !== null;
     this.log(
       "warn",
@@ -789,6 +812,12 @@ export class ConversationStore {
     s.sessionStatus = null;
     s.controllerGenerationId = "";
     s.activeFaults = [];
+    // The merge projections are WorkspaceState facts like any other: a stale
+    // lease must not leave the composer gated (or a queue place on screen)
+    // after the state that claimed it stopped being current.
+    s.mergeQueuePosition = 0;
+    s.mergeQueueDepth = 0;
+    s.mergeLeaseHeld = false;
     s.turnInFlight = false;
     s.turnStartedAt = null;
     this.progress = null;
@@ -853,6 +882,9 @@ export class ConversationStore {
       controllerGenerationId: this.state.controllerGenerationId,
       causeSeq: this.state.workspaceStateCauseSeq,
       activeFaults: this.state.activeFaults,
+      mergeQueuePosition: this.state.mergeQueuePosition,
+      mergeQueueDepth: this.state.mergeQueueDepth,
+      mergeLeaseHeld: this.state.mergeLeaseHeld,
     });
   }
 
@@ -890,6 +922,11 @@ export class ConversationStore {
     s.sessionStatus = ws.sessionStatus;
     s.controllerGenerationId = ws.controllerGenerationId;
     s.activeFaults = ws.activeFaults;
+    // Merge-queue facts ride the SAME revisioned message as the phase, so the
+    // footer's "merge queued 2/3" and its phase word can never disagree.
+    s.mergeQueuePosition = ws.mergeQueuePosition;
+    s.mergeQueueDepth = ws.mergeQueueDepth;
+    s.mergeLeaseHeld = ws.mergeLeaseHeld;
     s.workspaceStateAtMs = ws.atMs;
     s.workspaceStateCauseSeq = ws.causeSeq;
     const wasActive = s.turnInFlight;

@@ -1833,6 +1833,24 @@ pre {
   white-space: pre-wrap;
 }
 #search-status.on { display: block; }
+
+/* --- The merge gate's notice (merge-gate.ts) -----------------------------
+   Why the composer below is disabled while the merge coordinator owns this
+   workspace's session. It takes the full composer row (like #search-status)
+   so the sentence never competes with the textarea for width, and it wears
+   the muted tone rather than an error one: a workspace being merged is a
+   routine, temporary, deliberate state, and painting it red would say the
+   opposite. */
+#merge-gate-notice {
+  flex-basis: 100%;
+  font-size: 0.8rem;
+  color: var(--muted);
+  padding: 0 0.25rem 0.4rem;
+}
+/* An empty slot collapses completely: an unmerged workspace pays no layout
+   for a notice it does not carry. */
+#merge-gate-notice:empty { display: none; }
+
 #composer-input {
   flex: 1;
   resize: none;
@@ -1846,6 +1864,14 @@ pre {
   font-family: inherit;
 }
 #send-btn { cursor: pointer; }
+/* The merge gate's visible half: the send control reads as unavailable while
+   the merge owns the session. The TEXTAREA is deliberately left enabled — the
+   draft stays editable, and an attempted send still reaches the gate, which
+   answers with the explanation instead of nothing. */
+#send-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
 
 /* --- Feed search marks (search.ts) --------------------------------------
    One <mark> per match, wrapped around the matched TEXT only (never around
@@ -2466,6 +2492,19 @@ pre {
 }
 .pfooter-interrupt.ok { color: var(--ok); }
 .pfooter-interrupt.error { color: var(--err); }
+
+/* The merge queue's place, immediately right of the `merge queued` phase word
+   it qualifies. Muted like that phase: a queue place is chrome the sidebar
+   leads on, and spending a color here would outrank the phase it belongs to.
+   It sizes to its own content rather than joining the phase cell's fixed
+   geometry — the two figures are unbounded, and widening every phase's cell
+   forever for a queue nobody is usually in is the trade this chip avoids. */
+.pfooter-merge-queue {
+  font-size: 0.74rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
 
 /* Activity-detail tones: one accent per window, so which kind of dead air the
    session is in reads at a glance without parsing the words. */

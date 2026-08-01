@@ -104,8 +104,13 @@ func (stubConnSource) Next(ctx context.Context, _ string) (net.Conn, *corev1.Shi
 
 type stubMerge struct{}
 
-func (stubMerge) Merge(context.Context, merge.Request) error  { return nil }
+func (stubMerge) Enqueue(context.Context, merge.Request) (merge.Position, error) {
+	return merge.Position{Index: 1, Depth: 1, Repo: "/repo/.git"}, nil
+}
 func (stubMerge) Resume(context.Context, merge.Request) error { return nil }
+func (stubMerge) Abandon(context.Context, string) (bool, error) {
+	return false, nil
+}
 
 type stubLifecycle struct{}
 

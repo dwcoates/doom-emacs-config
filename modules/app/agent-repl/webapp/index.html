@@ -75,6 +75,13 @@
            so collapsed) whenever no search is running. -->
       <footer id="composer">
         <div id="search-status"></div>
+        <!-- The merge gate's notice (merge-gate.ts): why the composer below is
+             disabled while the merge coordinator owns this workspace's
+             session. Empty (and so collapsed via :empty) whenever no lease is
+             held. It sits INSIDE the composer, next to the control it
+             explains, rather than in the topbar where the composer's own
+             greyed-out state would read as a bug. -->
+        <div id="merge-gate-notice"></div>
         <textarea id="composer-input" rows="3" placeholder="Message Claude… (Enter to send, Shift+Enter for newline)"></textarea>
         <button id="send-btn">send</button>
       </footer>

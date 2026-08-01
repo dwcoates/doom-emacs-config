@@ -38,6 +38,7 @@ import (
 	"claude-repld/internal/ssm"
 	"claude-repld/internal/statedb"
 	"claude-repld/internal/stateroot"
+	"claude-repld/internal/workspace/merge"
 )
 
 // shimProtocolVersion is the agent-shim wire protocol version the daemon's
@@ -539,6 +540,30 @@ func main() {
 	}
 	defer controller.Close()
 
+	// The merge queue's durable substrate and the shim exclusivity lease.
+	// Both are constructed HERE, not inside WireAgentShim, because the SSM's
+	// merge.Lease reads the SAME queue instance to resolve
+	// merge_queue_position / merge_queue_depth on every pushed WorkspaceState:
+	// a second queue over the same directory would report a depth nobody is
+	// draining. The queue directory lives under the state root so a queued
+	// merge survives the daemon bounce a self-merge of the daemon causes.
+	mergeQueueDir, err := stateroot.Root()
+	if err != nil {
+		daemonFatal(daemonLog, "claude-repld: resolve merge queue dir: %v", err)
+	}
+	mergeQueue, err := merge.NewFileQueue(filepath.Join(mergeQueueDir, "merge-queue"), legacyLog)
+	if err != nil {
+		daemonFatal(daemonLog, "claude-repld: open merge queue: %v", err)
+	}
+	mergeLease, err := ssm.NewMergeLease(ssm.MergeLeaseConfig{
+		Manager:     ssmMgr,
+		Queue:       mergeQueue,
+		Interrupter: controller,
+	})
+	if err != nil {
+		daemonFatal(daemonLog, "claude-repld: build merge lease: %v", err)
+	}
+
 	// Agent-shim frontend.v1 surface (design §9.1, §14.2): the SSM-backed
 	// snapshot + merge.Driver + frontend Server. Always on post-cutover — it is
 	// the daemon's consumption plane, not an optional add.
@@ -592,8 +617,12 @@ func main() {
 	}
 	opener.BindAll()
 	agentShim, err := server.WireAgentShim(server.AgentShimConfig{
-		SSM:               ssmMgr,
-		Progress:          progressMgr,
+		SSM:      ssmMgr,
+		Progress: progressMgr,
+		// Prompts is BOTH the frontend's submit path and merge.Coordinator's
+		// conflict-resolution path (the controller implements
+		// merge.ConflictResolver), so the session a merge drives is necessarily
+		// the session the user prompts.
 		Prompts:           controller,
 		Turns:             controller,
 		Health:            controller,
@@ -613,6 +642,8 @@ func main() {
 		// send an intent (continue / fresh / explicit), never a remembered
 		// vendor uuid — see server.ConversationResolver.
 		Resumes:     &server.ConversationResolver{Reg: sessionRegistry, Logf: legacyLog},
+		MergeLease:  mergeLease,
+		MergeQueue:  mergeQueue,
 		Logf:        legacyLog,
 		LogVerbosef: daemonLog.LogVerbose,
 	})

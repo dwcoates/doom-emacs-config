@@ -42,12 +42,40 @@ interface Fixture {
 
 const fixture = fixtureJson as unknown as Fixture;
 
+/**
+ * Stamp `CONVERSATION_SOURCE_USER` on every conversation item the fixture
+ * carries.
+ *
+ * The fixture is SHARED with the Go end and lives outside this package, so it
+ * still predates `ConversationItem.source`. The adapter's provenance gate
+ * refuses an item without one (the daemon always sets it), so leaving the
+ * fixture unstamped would test the gate rather than the streaming identity this
+ * file exists to pin. Nothing else about the frames is touched.
+ */
+function stampUserSource(frame: unknown): unknown {
+  if (typeof frame !== "object" || frame === null) return frame;
+  const delta = (frame as Record<string, unknown>).conversationDelta;
+  if (typeof delta !== "object" || delta === null) return frame;
+  const items = (delta as Record<string, unknown>).items;
+  if (!Array.isArray(items)) return frame;
+  return {
+    ...(frame as Record<string, unknown>),
+    conversationDelta: {
+      ...(delta as Record<string, unknown>),
+      items: items.map((item) => ({
+        source: "CONVERSATION_SOURCE_USER",
+        ...(item as Record<string, unknown>),
+      })),
+    },
+  };
+}
+
 /** Push every fixture frame through the real decode → adapt → store path. */
 function drainFixture(): ConversationStore {
   const adapter = new StateAdapter();
   const store = new ConversationStore();
   for (const raw of fixture.frontendFrames) {
-    store.ingest(adapter.apply(decodeFrontendFrame(JSON.stringify(raw))));
+    store.ingest(adapter.apply(decodeFrontendFrame(JSON.stringify(stampUserSource(raw)))));
   }
   return store;
 }

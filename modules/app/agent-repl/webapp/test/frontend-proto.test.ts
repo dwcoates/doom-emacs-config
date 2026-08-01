@@ -160,6 +160,47 @@ describe("decodeFrontendFrame — protojson field coercion", () => {
     });
   });
 
+  it("decodes the merge-queue place", () => {
+    const frame = decode({
+      workspaceState: { ...WS_STATE, mergeQueuePosition: 2, mergeQueueDepth: 3 },
+    });
+    if (frame.frame.case !== "workspaceState") throw new Error("wrong variant");
+    expect(frame.frame.value.mergeQueuePosition).toBe(2);
+    expect(frame.frame.value.mergeQueueDepth).toBe(3);
+  });
+
+  it("decodes the merge lease", () => {
+    const frame = decode({ workspaceState: { ...WS_STATE, mergeLeaseHeld: true } });
+    if (frame.frame.case !== "workspaceState") throw new Error("wrong variant");
+    expect(frame.frame.value.mergeLeaseHeld).toBe(true);
+  });
+
+  it("reads an ABSENT merge lease as not held, the proto3 default protojson omits", () => {
+    const frame = decode({ workspaceState: WS_STATE });
+    if (frame.frame.case !== "workspaceState") throw new Error("wrong variant");
+    expect(frame.frame.value.mergeLeaseHeld).toBe(false);
+  });
+
+  it("reads an ABSENT queue place as not enqueued", () => {
+    const frame = decode({ workspaceState: WS_STATE });
+    if (frame.frame.case !== "workspaceState") throw new Error("wrong variant");
+    expect(frame.frame.value.mergeQueuePosition).toBe(0);
+  });
+
+  it("rejects a merge-queue position beyond the depth it indexes into", () => {
+    // A 1-based place can never exceed the queue holding it; rendering "3/2"
+    // would hide a daemon-side accounting bug behind a plausible chip.
+    expect(() =>
+      decode({ workspaceState: { ...WS_STATE, mergeQueuePosition: 3, mergeQueueDepth: 2 } }),
+    ).toThrow(/beyond depth/);
+  });
+
+  it("rejects a negative merge-queue figure", () => {
+    expect(() =>
+      decode({ workspaceState: { ...WS_STATE, mergeQueuePosition: -1, mergeQueueDepth: 3 } }),
+    ).toThrow(/negative merge-queue figure/);
+  });
+
   it("rejects unspecified session connectivity", () => {
     expect(() =>
       decode({ workspaceState: { ...WS_STATE, connectivity: "SESSION_CONNECTIVITY_UNSPECIFIED" } }),
@@ -236,6 +277,26 @@ describe("decodeFrontendFrame — ConversationItem envelope", () => {
     expect(item.requestId).toBe("r7");
     expect(item.arm).toBe("toolUse");
     expect(item.payload).toEqual({ id: "tu1", name: "Bash" });
+  });
+
+  it("decodes the item's provenance by its proto name", () => {
+    const frame = itemOf({ uuid: "u1", source: "CONVERSATION_SOURCE_MERGE", toolUse: { id: "tu1" } });
+    if (frame.frame.case !== "conversationDelta") throw new Error("wrong variant");
+    expect(frame.frame.value.items[0].source).toBe(2);
+  });
+
+  it("ADOPTS an absent provenance as UNSPECIFIED rather than throwing", () => {
+    // The conversation layer owns that error: rejecting the whole frame here
+    // would lose the correlated context that makes the bad item findable.
+    const frame = itemOf({ uuid: "u1", toolUse: { id: "tu1" } });
+    if (frame.frame.case !== "conversationDelta") throw new Error("wrong variant");
+    expect(frame.frame.value.items[0].source).toBe(0);
+  });
+
+  it("rejects an unrecognized provenance name", () => {
+    expect(() => itemOf({ uuid: "u1", source: "CONVERSATION_SOURCE_ROBOT", toolUse: {} })).toThrow(
+      /unknown enum value/,
+    );
   });
 
   it("rejects an item with no arm (empty oneof)", () => {

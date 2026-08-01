@@ -966,8 +966,53 @@ Used for registered-but-not-yet-started workspaces (render-status nil)."
 ;; Callers in `commands.el', `status.el', etc. must route
 ;; through these, not poke persp-mode directly.
 
+(defconst agent-repl--unfinished-merge-states
+  '(:merging :merge-queued :merge-conflict)
+  "Pushed render states that mean WS's merge has NOT reached a verdict.
+
+`:merged' and `:merge-failed' are absent deliberately: both are terminal,
+and a workspace sitting on either is finished with the daemon and free to
+be torn down.  Everything here is a merge the daemon is still carrying —
+running it, holding it behind a sibling in its repository's queue, or
+resolving its conflict under the merge lease.")
+
+(defun agent-repl--ws-merge-unfinished-p (ws)
+  "Return non-nil when WS's DAEMON-PUSHED state is an unfinished merge.
+Reads the `:pushed-render-state' key directly, so the answer is the
+daemon's verdict rather than anything Emacs derived: merging is
+daemon-owned and Emacs holds no merge state of its own to consult.  The
+raw key (rather than `agent-repl--ws-render-status') keeps the predicate
+answerable for a workspace the registry no longer calls known."
+  (memq (agent-repl--ws-get ws :pushed-render-state)
+        agent-repl--unfinished-merge-states))
+
+(defun agent-repl--assert-mergeable-teardown (ws)
+  "SIGNAL `user-error' when WS may not be torn down yet.
+The one merge responsibility Emacs still carries: a workspace whose merge
+has not reached a verdict must not have its session, buffers, or
+perspective killed underneath the daemon.  Tearing one down mid-merge
+kills the very session the merge lease is driving the conflict resolution
+through, and the merge then fails against a worktree nobody is watching.
+
+Refuses loudly (logged, then signalled) rather than deferring or
+no-opping: a caller that asked to kill a merging workspace asked for
+something the system cannot honour, and a silent skip would read to the
+user as a completed teardown."
+  (when (agent-repl--ws-merge-unfinished-p ws)
+    (let ((state (agent-repl--ws-get ws :pushed-render-state)))
+      (agent-repl--log ws
+                        "nuke-one-workspace: REFUSED ws=%s state=%s — merge not finished"
+                        ws state)
+      (user-error
+       "Cannot tear down workspace '%s': its merge is still %s"
+       ws (substring (symbol-name state) 1)))))
+
 (defun agent-repl--nuke-one-workspace (ws &optional preserve-entry)
   "Tear down a single agent-repl workspace WS without prompting.
+
+REFUSES (via `agent-repl--assert-mergeable-teardown') any workspace whose
+daemon-pushed state is an unfinished merge, before any teardown step runs
+so no partial teardown is left behind.
 Kills any in-flight git-diff process, tears down the agent session
 and buffers, removes WS from `agent-repl--workspaces', kills every
 remaining buffer (and attached process) that belongs to the persp via
@@ -1004,6 +1049,7 @@ This function is part of the persp-mode integration boundary owned
 by `workspace.el' (see file Commentary and AGENTS.md).  It is the
 only `+workspace/kill' call site inside agent-repl outside the
 finish-workspace path."
+  (agent-repl--assert-mergeable-teardown ws)
   (agent-repl--log ws "nuke-one-workspace: ENTRY ws=%s preserve-entry=%s kill-cause=%s cache=%S"
                     ws (if preserve-entry "t" "nil")
                     (agent-repl--kill-cause-str)
@@ -1071,7 +1117,7 @@ finish-workspace path."
     ;; guard never short-circuited.  In the merge-async flow that
     ;; double-closes the workspace (once preemptively in
     ;; `--workspace-merge-async', then again in the deferred
-    ;; success callback of `--workspace-merge-do'), pass 2 would slip
+    ;; success callback of a merge teardown), pass 2 would slip
     ;; through the broken guard and call `+workspace/kill', which then
     ;; emitted the user-visible warning `'<ws>' workspace doesn't
     ;; exist' in the echo area after every successful merge.

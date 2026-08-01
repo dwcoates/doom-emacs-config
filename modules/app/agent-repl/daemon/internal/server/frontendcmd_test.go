@@ -59,10 +59,21 @@ type fakePrompts struct {
 	// gate's turn source (the production wiring binds one controller to both).
 	turnActive bool
 	turnErr    error
+	// resolutions records every merge conflict this double was asked to drive
+	// the workspace's own session through.
+	resolutions []merge.ConflictResolution
 }
 
 // TurnActive makes the prompt double the gate's turn source.
 func (f *fakePrompts) TurnActive(string) (bool, error) { return f.turnActive, f.turnErr }
+
+// ResolveMergeConflict makes the prompt double merge.Coordinator's conflict
+// resolver too, exactly as the production controller is both. It records the
+// resolutions it was asked to drive and reports each as a completed turn.
+func (f *fakePrompts) ResolveMergeConflict(_ context.Context, res merge.ConflictResolution) error {
+	f.resolutions = append(f.resolutions, res)
+	return f.err
+}
 
 // fakeLiveTasks is the gate's live-task source: a canned count, plus the
 // explicit "this workspace is unknown" miss.
@@ -114,17 +125,29 @@ func (f *fakePrompts) SetModel(_ context.Context, _ string, model string) (strin
 // fake that kept only the name could not tell a working handler from the one
 // that dropped all three dirs on the floor.
 type fakeMerges struct {
-	merged  []merge.Request
-	resumed []merge.Request
+	merged    []merge.Request
+	resumed   []merge.Request
+	abandoned []string
+	// abandonHit makes Abandon report an abandoned merge; abandonErr makes it
+	// fail. Zero values are the common "no merge in flight" answer.
+	abandonHit bool
+	abandonErr error
 }
 
-func (f *fakeMerges) Merge(_ context.Context, req merge.Request) error {
+func (f *fakeMerges) Enqueue(_ context.Context, req merge.Request) (merge.Position, error) {
 	f.merged = append(f.merged, req)
-	return nil
+	return merge.Position{Index: len(f.merged), Depth: len(f.merged), Repo: "/repo/.git"}, nil
 }
 func (f *fakeMerges) Resume(_ context.Context, req merge.Request) error {
 	f.resumed = append(f.resumed, req)
 	return nil
+}
+func (f *fakeMerges) Abandon(_ context.Context, workspace string) (bool, error) {
+	f.abandoned = append(f.abandoned, workspace)
+	if f.abandonErr != nil {
+		return false, f.abandonErr
+	}
+	return f.abandonHit, nil
 }
 
 // mergedWorkspaces returns just the workspace names of the recorded merges, for
@@ -509,6 +532,41 @@ func TestCommandHandlerCloseOpenRouteToLifecycle(t *testing.T) {
 	}
 }
 
+func TestCommandHandlerCloseAbandonsTheWorkspacesMergeFirst(t *testing.T) {
+	// Arrange
+	h, _, m, l := newTestHandler(t)
+	// Act
+	if err := h.CloseWorkspace(context.Background(), "ws1", "r1", &frontendv1.CloseWorkspaceCmd{}); err != nil {
+		t.Fatalf("CloseWorkspace: %v", err)
+	}
+	// Assert — the merge abandonment ran, and the close still went through.
+	if len(m.abandoned) != 1 || m.abandoned[0] != "ws1" {
+		t.Fatalf("abandoned = %v, want [ws1]", m.abandoned)
+	}
+	if len(l.closed) != 1 || l.closed[0] != "ws1" {
+		t.Fatalf("closed = %v, want [ws1]", l.closed)
+	}
+}
+
+func TestCommandHandlerCloseRefusesWhenAbandonFails(t *testing.T) {
+	// Arrange — the abandonment cannot complete.
+	p, l := &fakePrompts{}, &fakeLifecycle{}
+	m := &fakeMerges{abandonErr: errors.New("coordinator is shutting down")}
+	h, err := newCommandHandler(p, m, l, nil, &fakeSessionCmds{}, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("newCommandHandler: %v", err)
+	}
+	// Act
+	err = h.CloseWorkspace(context.Background(), "ws1", "r1", &frontendv1.CloseWorkspaceCmd{})
+	// Assert — the close is refused rather than leaving the lease standing.
+	if err == nil {
+		t.Fatalf("CloseWorkspace() error = nil, want error")
+	}
+	if len(l.closed) != 0 {
+		t.Fatalf("closed = %v, want none", l.closed)
+	}
+}
+
 func TestCommandHandlerPromptErrorSurfaces(t *testing.T) {
 	// Arrange — the prompt router fails.
 	p := &fakePrompts{err: errors.New("no live shim")}
@@ -866,6 +924,8 @@ func TestSnapshotProviderCombinesSSMAndSessions(t *testing.T) {
 		Sessions:          fakeSessions{views: []*frontendv1.SessionView{{Workspace: "/w", SessionId: "s1", Model: "haiku"}}},
 		SessionCommands:   &SessionCommandBinding{},
 		WorkspaceCreation: newFakeWorkspaceCreation(),
+		MergeLease:        stubMergeLease{},
+		MergeQueue:        newTestMergeQueue(t),
 		LogVerbosef:       t.Logf,
 	})
 	if err != nil {
@@ -920,6 +980,8 @@ func TestWireAgentShimFeedsTheSsmTransitionIntoProgressWithoutAPhaseCopy(t *test
 		Lifecycle:         &fakeLifecycle{},
 		SessionCommands:   &SessionCommandBinding{},
 		WorkspaceCreation: newFakeWorkspaceCreation(),
+		MergeLease:        stubMergeLease{},
+		MergeQueue:        newTestMergeQueue(t),
 		LogVerbosef:       t.Logf,
 	})
 	if err != nil {
@@ -980,21 +1042,17 @@ func TestWireAgentShimRejectsNilWorkspaceCreation(t *testing.T) {
 
 // --- merge runner ---------------------------------------------------------
 
-// The runner no longer resolves anything, so the failure it used to have — a
-// workspace it could not map to dirs — is gone. What remains is a request that
-// arrived INCOMPLETE, and it must still surface rather than run a merge with a
-// blank source or target.
+// The MergeRunner IS merge.Coordinator now, so the runner resolves nothing and
+// the failure it used to have — a workspace it could not map to dirs — is gone.
+// What remains is a request that arrived INCOMPLETE, and it must still surface
+// rather than queue a merge with a blank source or target.
 
 func TestMergeRunnerSurfacesAnIncompleteRequest(t *testing.T) {
 	// Arrange — a command that named no source branch.
-	eng, err := merge.NewDriver(merge.Config{Logf: func(string, ...any) {}, Sink: noopSink{}})
-	if err != nil {
-		t.Fatalf("engine: %v", err)
-	}
-	runner := mergeRunner{driver: eng}
+	runner := newTestMergeCoordinator(t)
 	// Act
-	got := runner.Merge(context.Background(), merge.Request{Workspace: "/ws/ws1", Name: "ws1", SourceDir: "/s", TargetDir: "/t"})
-	// Assert — the merge.Driver's own validation refuses it, never a silent no-op merge.
+	_, got := runner.Enqueue(context.Background(), merge.Request{Workspace: "/ws/ws1", Name: "ws1", SourceDir: "/s", TargetDir: "/t"})
+	// Assert — merge.Request's own validation refuses it, never a silent no-op merge.
 	if got == nil || !strings.Contains(got.Error(), "SourceBranch is required") {
 		t.Fatalf("merge error = %v, want the incomplete request refused", got)
 	}
@@ -1003,11 +1061,7 @@ func TestMergeRunnerSurfacesAnIncompleteRequest(t *testing.T) {
 func TestMergeResumeSurfacesAnIncompleteRequest(t *testing.T) {
 	// Arrange — the resume path re-receives the geometry, so it can arrive
 	// incomplete in exactly the same way.
-	eng, err := merge.NewDriver(merge.Config{Logf: func(string, ...any) {}, Sink: noopSink{}})
-	if err != nil {
-		t.Fatalf("engine: %v", err)
-	}
-	runner := mergeRunner{driver: eng}
+	runner := newTestMergeCoordinator(t)
 	// Act
 	got := runner.Resume(context.Background(), merge.Request{Workspace: "/ws/ws1", Name: "ws1", SourceBranch: "b", SourceDir: "/s"})
 	// Assert
@@ -1016,9 +1070,66 @@ func TestMergeResumeSurfacesAnIncompleteRequest(t *testing.T) {
 	}
 }
 
+// newTestMergeCoordinator builds the production merge.Coordinator over a
+// scratch durable queue, so a handler-level test exercises the real admission
+// path rather than a fake's idea of it.
+func newTestMergeCoordinator(t *testing.T) *merge.QueueCoordinator {
+	t.Helper()
+	logf := func(string, ...any) {}
+	driver, err := merge.NewDriver(merge.Config{Logf: logf, Sink: noopSink{}})
+	if err != nil {
+		t.Fatalf("driver: %v", err)
+	}
+	keyer, err := merge.NewGitRepoKeyer(logf)
+	if err != nil {
+		t.Fatalf("keyer: %v", err)
+	}
+	queue, err := merge.NewFileQueue(t.TempDir(), logf)
+	if err != nil {
+		t.Fatalf("queue: %v", err)
+	}
+	coord, err := merge.NewCoordinator(merge.CoordinatorConfig{
+		Logf: logf, Sink: noopSink{}, Queue: queue, Keyer: keyer, Picker: driver,
+		Lease: stubMergeLease{}, Resolver: stubMergeResolver{},
+	})
+	if err != nil {
+		t.Fatalf("coordinator: %v", err)
+	}
+	t.Cleanup(func() { coord.Close() })
+	return coord
+}
+
 type noopSink struct{}
 
 func (noopSink) RecordMergeTransition(string, merge.Phase, string) error { return nil }
+
+// stubMergeLease is the merge.Lease a unit harness binds. The real one lives in
+// internal/ssm and interrupts the workspace's turn; nothing in these tests runs
+// a shim, so taking the lease here is a no-op that still returns a release func
+// (a nil release is a hard panic in the coordinator, by design).
+type stubMergeLease struct{}
+
+func (stubMergeLease) Acquire(context.Context, string) (func(), error) { return func() {}, nil }
+func (stubMergeLease) Held(string) bool                                { return false }
+
+// stubMergeResolver is the merge.ConflictResolver a unit harness binds where it
+// builds a coordinator directly. In WireAgentShim the resolver is DERIVED from
+// the PromptRouter (see mergeConflictResolver), so those harnesses get theirs
+// from fakePrompts instead.
+type stubMergeResolver struct{}
+
+func (stubMergeResolver) Resolve(context.Context, merge.ConflictResolution) error { return nil }
+
+// newTestMergeQueue roots the durable merge queue in a scratch directory, so a
+// harness never publishes into the operator's real state root.
+func newTestMergeQueue(t *testing.T) merge.DurableQueue {
+	t.Helper()
+	q, err := merge.NewFileQueue(filepath.Join(t.TempDir(), "merge-queue"), func(string, ...any) {})
+	if err != nil {
+		t.Fatalf("merge queue: %v", err)
+	}
+	return q
+}
 
 // --- wire assembly --------------------------------------------------------
 
@@ -1042,6 +1153,8 @@ func TestWireAgentShimMergeTransitionReachesSSM(t *testing.T) {
 		Lifecycle:         &fakeLifecycle{},
 		SessionCommands:   &SessionCommandBinding{},
 		WorkspaceCreation: newFakeWorkspaceCreation(),
+		MergeLease:        stubMergeLease{},
+		MergeQueue:        newTestMergeQueue(t),
 		LogVerbosef:       t.Logf,
 	})
 	if err != nil {

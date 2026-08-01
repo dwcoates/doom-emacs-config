@@ -52,6 +52,7 @@ import (
 	"claude-repld/internal/shimlisten"
 	"claude-repld/internal/ssm"
 	"claude-repld/internal/statedb"
+	"claude-repld/internal/workspace/merge"
 )
 
 var frameTimeout = 30 * time.Second
@@ -198,6 +199,26 @@ type stubLifecycle struct{}
 
 func (stubLifecycle) Close(context.Context, string) error { return nil }
 func (stubLifecycle) Open(context.Context, string) error  { return nil }
+
+// stubMergeLease is the merge.Lease for E2E flows that never drive a merge.
+// The real one lives in internal/ssm and interrupts the workspace's turn; a
+// release func is still returned because a nil release is a hard panic in
+// merge.Coordinator, by design.
+type stubMergeLease struct{}
+
+func (stubMergeLease) Acquire(context.Context, string) (func(), error) { return func() {}, nil }
+func (stubMergeLease) Held(string) bool                                { return false }
+
+// newTestMergeQueue roots the durable merge queue in a scratch directory, so
+// the harness never publishes into the operator's real state root.
+func newTestMergeQueue(t *testing.T) merge.DurableQueue {
+	t.Helper()
+	q, err := merge.NewFileQueue(filepath.Join(t.TempDir(), "merge-queue"), t.Logf)
+	if err != nil {
+		t.Fatalf("merge queue: %v", err)
+	}
+	return q
+}
 
 // emptyWorkspaceCreation is the explicit creation seam for E2E flows that do
 // not exercise workspace creation. It is deliberately strict: a create,
@@ -500,6 +521,16 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 
 	binding := &server.SessionCommandBinding{Logf: t.Logf}
 	workspaceCreation := newEmptyWorkspaceCreation()
+	// The REAL merge.Lease over the real SSM and the real durable queue: an
+	// e2e that stubbed them would never exercise merge_lease_held or the queue
+	// facts the pushed WorkspaceState carries.
+	mergeQueue := newTestMergeQueue(t)
+	mergeLease, err := ssm.NewMergeLease(ssm.MergeLeaseConfig{
+		Manager: ssmMgr, Queue: mergeQueue, Interrupter: controller,
+	})
+	if err != nil {
+		t.Fatalf("build merge lease: %v", err)
+	}
 	agentShim, err := server.WireAgentShim(server.AgentShimConfig{
 		// The real resolver over the real registry: an e2e that faked this
 		// would not exercise the daemon actually deciding what to resume.
@@ -515,6 +546,8 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 		SessionCommands:   binding,
 		WorkspaceCreation: workspaceCreation,
 		EstablishTimeout:  tuning.establishTimeout,
+		MergeLease:        mergeLease,
+		MergeQueue:        mergeQueue,
 		Logf:              t.Logf,
 		LogVerbosef:       t.Logf,
 	})

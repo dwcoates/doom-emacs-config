@@ -27,6 +27,12 @@ import {
   MISSING_BUBBLE_NOTICE_MS,
   missingBubbleNotice,
 } from "./counter-menu.js";
+import {
+  mergeGateBlockedLog,
+  mergeGateNoticeHtml,
+  mergeGateSendTitle,
+  submitBlocked,
+} from "./merge-gate.js";
 import { configureChessGames, installChessNavHook } from "./chess-game.js";
 import { RenderCoalescer, windowFrameHost } from "./coalesce.js";
 import { SmoothReveal } from "./smooth.js";
@@ -387,6 +393,17 @@ async function boot(): Promise<void> {
   const spinnerEl = must("spinner");
   const compactBarEl = must("compact-progress-slot");
   const ungatedBannerEl = must("ungated-banner");
+  // The composer's own elements, resolved HERE rather than in the wiring block
+  // below because `renderChrome` repaints the merge gate on them every frame.
+  // Null when the host owns input (Emacs's `composer=0`), which is also the one
+  // case where there is no gate to paint.
+  const composerEls = composerEnabled(params)
+    ? {
+        input: must<HTMLTextAreaElement>("composer-input"),
+        send: must<HTMLButtonElement>("send-btn"),
+        notice: must("merge-gate-notice"),
+      }
+    : null;
   // The picker's own vocabulary, captured BEFORE any live-mode option is
   // appended, so an ungated session's disabled marker never gets mistaken for
   // a switchable mode on the next frame.
@@ -459,6 +476,10 @@ async function boot(): Promise<void> {
       // THE phase, read off the workspace's one authoritative state rather
       // than off a copy carried in a second message (F5).
       renderState: s.renderState,
+      // The queue place rides the same WorkspaceState as the phase above, for
+      // the same reason the phase does: two copies would drift.
+      mergeQueuePosition: s.mergeQueuePosition,
+      mergeQueueDepth: s.mergeQueueDepth,
       connectivity: s.sessionConnectivity,
       sessionStatus: s.sessionStatus,
       agents: sessionSubagents(s.items),
@@ -469,7 +490,8 @@ async function boot(): Promise<void> {
     const interruptOutcome = store.progress?.interrupt?.outcome ?? "none";
     const footerStateSignature =
       `${s.renderState ?? "none"}|${s.sessionConnectivity ?? "none"}|` +
-      `${s.sessionStatus ?? "none"}|${interruptOutcome}`;
+      `${s.sessionStatus ?? "none"}|${interruptOutcome}|` +
+      `${s.mergeQueuePosition}/${s.mergeQueueDepth}|${s.mergeLeaseHeld}`;
     if (footerStateSignature !== lastFooterStateSignature) {
       clog(
         "info",
@@ -478,7 +500,9 @@ async function boot(): Promise<void> {
           `status=${s.sessionStatus ?? "none"} ` +
           `generation=${s.controllerGenerationId || "none"} ` +
           `faults=${s.activeFaults.map((fault) => `${fault.component}/${fault.faultType}`).join(",") || "none"} ` +
-          `interrupt_outcome=${interruptOutcome} session=${s.sessionId}`,
+          `interrupt_outcome=${interruptOutcome} ` +
+          `merge_queue=${s.mergeQueuePosition}/${s.mergeQueueDepth} ` +
+          `merge_lease_held=${s.mergeLeaseHeld} session=${s.sessionId}`,
         {
           phase: s.renderState ?? "none",
           connectivity: s.sessionConnectivity ?? "none",
@@ -486,6 +510,9 @@ async function boot(): Promise<void> {
           controller_generation_id: s.controllerGenerationId || "none",
           active_faults: s.activeFaults.map((fault) => `${fault.component}/${fault.faultType}`),
           interrupt_outcome: interruptOutcome,
+          merge_queue_position: s.mergeQueuePosition,
+          merge_queue_depth: s.mergeQueueDepth,
+          merge_lease_held: s.mergeLeaseHeld,
           session_id: s.sessionId,
         },
       );
@@ -545,6 +572,17 @@ async function boot(): Promise<void> {
     });
     ungatedBannerEl.innerHTML = ungatedBannerHtml(ungatedMode);
     document.body.classList.toggle("ungated", ungatedMode !== "");
+    // THE MERGE GATE (merge-gate.ts). Both halves are pure functions of the
+    // revisioned `WorkspaceState` lease, repainted on the chrome cadence, so
+    // the composer un-gates the moment the merge releases without any local
+    // state to unwind. Skipped entirely when the host owns input (Emacs runs
+    // the webview with composer=0 and there are no controls to gate).
+    if (composerEls !== null) {
+      const blocked = submitBlocked(s.mergeLeaseHeld);
+      composerEls.notice.innerHTML = mergeGateNoticeHtml(s.mergeLeaseHeld);
+      composerEls.send.disabled = blocked;
+      composerEls.send.title = mergeGateSendTitle(s.mergeLeaseHeld);
+    }
     spinnerEl.classList.toggle("on", s.turnInFlight);
     // The centered "current objective" label (§2.14): textContent (not
     // innerHTML) so the daemon's summary is inert text, and the full line
@@ -1098,15 +1136,28 @@ async function boot(): Promise<void> {
   ws = makeClient(activeSessionId);
   ws.connect();
 
-  if (composerEnabled(params)) {
-    const input = must<HTMLTextAreaElement>("composer-input");
+  if (composerEls !== null) {
+    const input = composerEls.input;
     const submit = (): void => {
       const text = input.value.trim();
       if (text === "") return;
+      // THE MERGE GATE, on the one path every submit goes through. The daemon
+      // would refuse this prompt anyway (it holds the lease); refusing it here
+      // is what turns a vanished draft and a delayed failure card into an
+      // immediate explanation. The draft is deliberately KEPT — the user
+      // will want to send it once the merge finishes.
+      if (submitBlocked(store.state.mergeLeaseHeld)) {
+        clog("warn", mergeGateBlockedLog(text.length));
+        // The standing notice is already the explanation; re-assert it in case
+        // this attempt raced a frame that had not painted it yet, so an
+        // attempted send NEVER reads as nothing having happened.
+        composerEls.notice.innerHTML = mergeGateNoticeHtml(true);
+        return;
+      }
       submitPrompt(text);
       input.value = "";
     };
-    must<HTMLButtonElement>("send-btn").addEventListener("click", submit);
+    composerEls.send.addEventListener("click", submit);
     // Cycle the output feed without ever leaving the composer: the chords
     // are swallowed here, every other key still types. Armed before the
     // send handler so neither can shadow the other — they share no chord.
