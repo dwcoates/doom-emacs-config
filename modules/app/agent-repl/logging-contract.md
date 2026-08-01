@@ -51,7 +51,7 @@ records are forbidden.
 
 Required fields:
 
-- `timestamp`: RFC 3339 timestamp with subsecond precision
+- `timestamp`: RFC 3339 timestamp in the shared representation below
 - `runtime`: `emacs`, `daemon`, `shim`, `webapp`, `sidecar`, or `store`
 - `level`: `debug`, `info`, `warn`, or `error`
 - `verbosity`: `normal` or `verbose`
@@ -76,6 +76,31 @@ Identity fields are included whenever the owning runtime knows them:
 Identifiers belong in their dedicated fields, never only inside `message`.
 Dynamic values and error causes belong in `context`, never in an incompatible
 per-call text convention.
+
+## Timestamp representation
+
+Every runtime renders `timestamp` identically, so records from different
+runtimes interleave and compare without per-runtime normalization:
+
+```
+2026-07-28T12:34:56.789000-04:00
+```
+
+- RFC 3339 date and time on a 24-hour clock.
+- The machine's local zone, never UTC and never a `Z` suffix.
+- Exactly six fractional digits. Fixed width is required so records sort
+  lexically; a runtime that resolves instants only to milliseconds pads the
+  remaining digits with zeros rather than emitting a shorter field.
+- An explicit numeric offset in `±HH:MM` form.
+
+The layout is expressed as `TimestampLayout` in each Go runtime
+(`dlog`, `shim-store/internal/logging`, `shim-sidecar/internal/logging`),
+`logTimestamp` in the shim and webapp TypeScript loggers, and
+`agent-repl--log-timestamp-format` in Emacs.
+
+Timestamps arriving from another runtime are parsed as ordinary RFC 3339, so a
+forwarded record carrying a UTC instant is still readable; the daemon converts
+it to the local zone before persisting.
 
 ## Runtime ownership
 

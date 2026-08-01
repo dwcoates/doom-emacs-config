@@ -5,6 +5,7 @@ import {
   bindLogContext,
   clearLogDedup,
   log,
+  logTimestamp,
   logVerbose,
   resetLoggingForTests,
   setLogger,
@@ -382,5 +383,58 @@ describe("local-only canonical option", () => {
     // Assert
     expect(JSON.parse(lines[0])).toEqual(record);
     expect(sent).toEqual([]);
+  });
+});
+
+/** RFC 3339, 24-hour clock, fixed-width microseconds, explicit numeric offset. */
+const CANONICAL_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}[+-]\d{2}:\d{2}$/;
+
+describe("webapp log timestamp", () => {
+  it("renders the canonical fixed-width layout", () => {
+    // Arrange: a whole second, which toISOString would render with milliseconds only.
+    const at = new Date(2026, 6, 28, 12, 34, 56, 0);
+
+    // Act
+    const rendered = logTimestamp(at);
+
+    // Assert
+    expect(rendered).toMatch(CANONICAL_TIMESTAMP);
+  });
+
+  it("renders the local wall clock rather than UTC", () => {
+    // Arrange
+    const at = new Date(2026, 6, 28, 12, 34, 56, 789);
+
+    // Act
+    const rendered = logTimestamp(at);
+
+    // Assert
+    expect(rendered.slice(0, 23)).toBe("2026-07-28T12:34:56.789");
+  });
+
+  it("carries the local UTC offset instead of a Z suffix", () => {
+    // Arrange
+    const at = new Date(2026, 6, 28, 12, 34, 56, 789);
+    const offsetMinutes = -at.getTimezoneOffset();
+    const sign = offsetMinutes < 0 ? "-" : "+";
+    const absolute = Math.abs(offsetMinutes);
+    const expected = `${sign}${String(Math.floor(absolute / 60)).padStart(2, "0")}:${String(absolute % 60).padStart(2, "0")}`;
+
+    // Act
+    const rendered = logTimestamp(at);
+
+    // Assert
+    expect(rendered.slice(-6)).toBe(expected);
+  });
+
+  it("pads microseconds because JavaScript instants resolve to milliseconds", () => {
+    // Arrange
+    const at = new Date(2026, 6, 28, 12, 34, 56, 7);
+
+    // Act
+    const rendered = logTimestamp(at);
+
+    // Assert
+    expect(rendered.slice(19, 26)).toBe(".007000");
   });
 });

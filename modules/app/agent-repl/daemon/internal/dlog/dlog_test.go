@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -457,8 +458,9 @@ func TestPersistForwardedPreservesSourceTimestampAndEnrichesIdentity(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	timestamp := time.Date(2026, 7, 28, 12, 0, 0, 123, time.UTC)
-	err = logger.PersistForwarded(workspace, RuntimeWebapp, Record{Timestamp: timestamp, Runtime: RuntimeWebapp, Level: LevelWarn, Verbosity: Normal, Operation: "webapp.render.failed", Message: "render failed", Context: map[string]any{"cause": "x"}, ConnectionID: "connection-1"}, ForwardedIdentity{AgentReplSessionID: "agent-1", ClaudeSessionID: "claude-1", RequestID: "request-1"})
+	// 123 microseconds: the canonical timestamp layout preserves microseconds.
+	timestamp := time.Date(2026, 7, 28, 12, 0, 0, 123_000, time.UTC)
+	err = logger.PersistForwarded(workspace, RuntimeWebapp, Record{Timestamp: NewStamp(timestamp), Runtime: RuntimeWebapp, Level: LevelWarn, Verbosity: Normal, Operation: "webapp.render.failed", Message: "render failed", Context: map[string]any{"cause": "x"}, ConnectionID: "connection-1"}, ForwardedIdentity{AgentReplSessionID: "agent-1", ClaudeSessionID: "claude-1", RequestID: "request-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1014,4 +1016,88 @@ func TestRetainedCompatibilityHelpersCoverNilOddTagFuncAndCallOutcomes(t *testin
 	if record := decodeOne(t, durable.String()); record.Verbosity != Verbose || terminal.Len() == 0 {
 		t.Fatalf("legacy verbose record=%#v terminal=%q", record, terminal.String())
 	}
+}
+
+// canonicalTimestampPattern is the shared shape every agent-repl runtime emits:
+// RFC 3339, 24-hour clock, fixed-width microseconds, explicit numeric offset.
+var canonicalTimestampPattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}[+-]\d{2}:\d{2}$`)
+
+func TestStampMarshalsCanonicalFixedWidthLayout(t *testing.T) {
+	// Arrange: a whole second, whose subsecond digits Go's RFC 3339 default would drop.
+	stamp := NewStamp(time.Date(2026, 7, 28, 12, 34, 56, 0, time.UTC))
+
+	// Act
+	raw, err := json.Marshal(stamp)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert
+	var text string
+	if err := json.Unmarshal(raw, &text); err != nil {
+		t.Fatal(err)
+	}
+	if !canonicalTimestampPattern.MatchString(text) {
+		t.Fatalf("timestamp = %q, want canonical layout", text)
+	}
+}
+
+func TestStampMarshalsInLocalZoneRatherThanUTC(t *testing.T) {
+	// Arrange: an instant held in UTC.
+	at := time.Date(2026, 7, 28, 12, 34, 56, 789000000, time.UTC)
+
+	// Act
+	raw, err := json.Marshal(NewStamp(at))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert: the rendered wall clock is the local one, never a "Z" instant.
+	var text string
+	if err := json.Unmarshal(raw, &text); err != nil {
+		t.Fatal(err)
+	}
+	if text != at.Local().Format(TimestampLayout) || strings.HasSuffix(text, "Z") {
+		t.Fatalf("timestamp = %q, want %q", text, at.Local().Format(TimestampLayout))
+	}
+}
+
+func TestStampUnmarshalsForwardedUTCTimestampAsLocalInstant(t *testing.T) {
+	// Arrange: a runtime that has not yet migrated still forwards a "Z" timestamp.
+	raw := []byte(`"2026-07-28T12:34:56.789000Z"`)
+
+	// Act
+	var stamp Stamp
+	if err := json.Unmarshal(raw, &stamp); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert: the instant is preserved and re-rendered canonically.
+	want := time.Date(2026, 7, 28, 12, 34, 56, 789000000, time.UTC)
+	if !stamp.Equal(want) {
+		t.Fatalf("instant = %v, want %v", stamp.Time, want)
+	}
+	if _, offset := stamp.Zone(); offset != localOffset(t, want) {
+		t.Fatalf("zone offset = %d, want local", offset)
+	}
+}
+
+func TestStampUnmarshalRejectsNonRFC3339Timestamp(t *testing.T) {
+	// Arrange
+	raw := []byte(`"28 Jul 2026 12:34:56"`)
+
+	// Act
+	var stamp Stamp
+	err := json.Unmarshal(raw, &stamp)
+
+	// Assert
+	if err == nil {
+		t.Fatal("expected a parse failure for a non-RFC 3339 timestamp")
+	}
+}
+
+func localOffset(t *testing.T, at time.Time) int {
+	t.Helper()
+	_, offset := at.Local().Zone()
+	return offset
 }

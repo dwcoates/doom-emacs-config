@@ -164,7 +164,7 @@ func bootFatal(format string, args ...any) {
 
 func bootFatalLine(message string) []byte {
 	line, err := json.Marshal(dlog.Record{
-		Timestamp: time.Now().UTC(), Runtime: dlog.RuntimeDaemon, PID: os.Getpid(),
+		Timestamp: dlog.NewStamp(time.Now()), Runtime: dlog.RuntimeDaemon, PID: os.Getpid(),
 		Level: dlog.LevelError, Verbosity: dlog.Normal,
 		Operation: "daemon.bootstrap.fatal", Message: message, Context: map[string]any{},
 	})

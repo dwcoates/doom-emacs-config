@@ -17,6 +17,40 @@ import (
 
 const daemonRuntime Runtime = "daemon"
 
+// TimestampLayout is the log timestamp representation shared by every
+// agent-repl runtime: RFC 3339 in the machine's local zone, on a 24-hour
+// clock, with fixed-width microseconds and an explicit numeric offset.
+// Fixed width keeps records from different runtimes lexically comparable.
+const TimestampLayout = "2006-01-02T15:04:05.000000-07:00"
+
+// Stamp renders an instant in TimestampLayout. It carries a time.Time so
+// callers keep the usual comparison helpers.
+type Stamp struct{ time.Time }
+
+// NewStamp converts an instant into the shared local-zone representation.
+func NewStamp(at time.Time) Stamp { return Stamp{at.Local()} }
+
+// MarshalJSON writes the canonical representation rather than Go's
+// variable-precision RFC 3339 default.
+func (s Stamp) MarshalJSON() ([]byte, error) {
+	return json.Marshal(s.Time.Local().Format(TimestampLayout))
+}
+
+// UnmarshalJSON accepts any RFC 3339 timestamp so records forwarded by other
+// runtimes are readable, then normalizes them to the local zone.
+func (s *Stamp) UnmarshalJSON(raw []byte) error {
+	var text string
+	if err := json.Unmarshal(raw, &text); err != nil {
+		return fmt.Errorf("dlog: decode timestamp: %w", err)
+	}
+	at, err := time.Parse(time.RFC3339Nano, text)
+	if err != nil {
+		return fmt.Errorf("dlog: parse timestamp %q: %w", text, err)
+	}
+	*s = NewStamp(at)
+	return nil
+}
+
 // Runtime identifies the runtime which owns a persisted record.
 type Runtime string
 
@@ -103,7 +137,7 @@ func WorkspaceScope(workspace Workspace) (Scope, error) {
 
 // Record is the JSONL schema shared by daemon-owned sinks.
 type Record struct {
-	Timestamp          time.Time      `json:"timestamp"`
+	Timestamp          Stamp          `json:"timestamp"`
 	Runtime            Runtime        `json:"runtime"`
 	Level              Level          `json:"level"`
 	Verbosity          Verbosity      `json:"verbosity"`
@@ -163,7 +197,7 @@ func (e Event) record(scope Scope, verbosity Verbosity) (Record, error) {
 	if e.Context == nil {
 		return Record{}, errors.New("dlog: context is required")
 	}
-	record := Record{Timestamp: time.Now().UTC(), Runtime: e.Runtime, Level: e.Level, Verbosity: verbosity, Operation: e.Operation, Message: e.Message, Context: e.Context, AgentReplSessionID: e.AgentReplSessionID, ClaudeSessionID: e.ClaudeSessionID, RequestID: e.RequestID}
+	record := Record{Timestamp: NewStamp(time.Now()), Runtime: e.Runtime, Level: e.Level, Verbosity: verbosity, Operation: e.Operation, Message: e.Message, Context: e.Context, AgentReplSessionID: e.AgentReplSessionID, ClaudeSessionID: e.ClaudeSessionID, RequestID: e.RequestID}
 	if e.Runtime == RuntimeWebapp {
 		if e.ConnectionID == "" {
 			return Record{}, errors.New("dlog: webapp connection ID is required")
@@ -359,7 +393,7 @@ func (l *Logger) persist(record Record) error {
 
 func sinkEmergencyLine(failed Record, sinkErr error) ([]byte, error) {
 	emergency := Record{
-		Timestamp:          time.Now().UTC(),
+		Timestamp:          NewStamp(time.Now()),
 		Runtime:            RuntimeDaemon,
 		Level:              LevelError,
 		Verbosity:          Normal,

@@ -55,7 +55,7 @@ func main() {
 func reportFatal(err error, stderr io.Writer) {
 	if isBootstrapError(err) {
 		payload, encodeErr := json.Marshal(map[string]any{
-			"timestamp": time.Now().UTC().Format(time.RFC3339Nano),
+			"timestamp": time.Now().Local().Format(logging.TimestampLayout),
 			"runtime":   "sidecar", "pid": os.Getpid(), "level": "error", "verbosity": "normal",
 			"operation": "sidecar.bootstrap", "message": "sidecar bootstrap failed",
 			"context": map[string]any{"error": err.Error()},

@@ -1138,7 +1138,7 @@ func (p *targetFileDiagnosticPersister) PersistFileDiagnostic(workspace, agentRe
 		context["source_path"] = diagnostic.GetSourcePath()
 	}
 	record := dlog.Record{
-		Timestamp: time.UnixMilli(ev.GetProducedAtMs()).UTC(), Runtime: dlog.RuntimeSidecar,
+		Timestamp: dlog.NewStamp(time.UnixMilli(ev.GetProducedAtMs())), Runtime: dlog.RuntimeSidecar,
 		Level: dlog.Level(diagnostic.GetLevel()), Verbosity: dlog.Verbosity(diagnostic.GetVerbosity()),
 		Operation: diagnostic.GetOperation(), Message: diagnostic.GetMessage(), Context: context,
 		PID: int(diagnostic.GetSourcePid()),
