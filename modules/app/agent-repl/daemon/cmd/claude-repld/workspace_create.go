@@ -589,9 +589,12 @@ type WorkspaceCreateAssembly struct {
 }
 
 type WorkspaceCreateAssemblyConfig struct {
-	StateRoot      string
-	Commands       server.SessionCreateDeleter
-	Registry       *registry.Registry
+	StateRoot string
+	Commands  server.SessionCreateDeleter
+	Registry  *registry.Registry
+	// Geometry durably records each created workspace's merge geometry.
+	// Required: a workspace materialized without it can never be merged.
+	Geometry       workspacecreate.WorkspaceGeometryRecorder
 	Health         WorkspaceHealthProbe
 	InitialPrompts InitialPromptRouter
 	Logf           func(string, ...any)
@@ -622,6 +625,17 @@ func (b *WorkspaceCreationBridge) MarkWorkspaceMaterialized(ctx context.Context,
 }
 func (b *WorkspaceCreationBridge) CompleteHostAction(_ context.Context, actionID string, ok bool, failure string) error {
 	return b.manager.CompleteHostAction(actionID, ok, failure)
+}
+
+// PostprocessingPrompt satisfies postmerge.PostprocessingSource: it reports the
+// postprocessing prompt the workspace at worktreePath was created with.
+//
+// It hangs off THIS bridge because the bridge already owns the durable job
+// store, and the post-merge handoff must read the very records the create
+// commands wrote. Giving the handoff its own store binding would let it answer
+// from a file no creation ever wrote to.
+func (b *WorkspaceCreationBridge) PostprocessingPrompt(worktreePath string) (string, error) {
+	return workspacecreate.PostprocessingPromptFor(b.store, worktreePath)
 }
 
 func (b *WorkspaceCreationBridge) SnapshotHostWork() server.WorkspaceHostWorkSnapshot {
@@ -700,8 +714,8 @@ func toProtoAction(a workspacecreate.HostAction) *frontendv1.HostAction {
 }
 
 func NewWorkspaceCreateAssembly(cfg WorkspaceCreateAssemblyConfig) (*WorkspaceCreateAssembly, error) {
-	if cfg.Commands == nil || cfg.Registry == nil || cfg.Health == nil || cfg.InitialPrompts == nil || cfg.Logf == nil {
-		return nil, fmt.Errorf("workspace create: startup requires commands, registry, health probe, initial-prompt router, and logger")
+	if cfg.Commands == nil || cfg.Registry == nil || cfg.Geometry == nil || cfg.Health == nil || cfg.InitialPrompts == nil || cfg.Logf == nil {
+		return nil, fmt.Errorf("workspace create: startup requires commands, registry, geometry recorder, health probe, initial-prompt router, and logger")
 	}
 	storePath, inboxPath, err := workspaceCreatePaths(cfg.StateRoot)
 	if err != nil {
@@ -714,7 +728,7 @@ func NewWorkspaceCreateAssembly(cfg WorkspaceCreateAssemblyConfig) (*WorkspaceCr
 	forwarder := &WorkspaceCreateHostForwarder{}
 	worktrees := DaemonWorktree{Git: ExecGitRunner{}, Registry: cfg.Registry, Marker: osProjectileMarker{}, Logf: cfg.Logf}
 	manager, err := workspacecreate.NewManager(workspacecreate.Config{
-		Store: store, Planner: worktrees, Worktrees: worktrees,
+		Store: store, Planner: worktrees, Worktrees: worktrees, Geometry: cfg.Geometry,
 		Sessions:  daemonSessionCreator{Commands: cfg.Commands, Registry: cfg.Registry, Logf: cfg.Logf},
 		Health:    daemonSessionHealth{Probe: cfg.Health},
 		Prompts:   daemonInitialPromptSubmitter{Router: cfg.InitialPrompts, Registry: cfg.Registry},

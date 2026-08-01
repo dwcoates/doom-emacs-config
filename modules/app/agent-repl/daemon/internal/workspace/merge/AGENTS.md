@@ -36,6 +36,43 @@ conflicting commits, and the one whose shim the coordinator already holds the
   does, so a human resume or an abandon arriving mid-attempt is serialized
   against it rather than racing it.
 
+## What happens after a merge lands: `merge.PostMergeHook`
+
+A merged workspace is not the end of the story, and the two things that follow
+it were Emacs's job until the editor strip deleted them. `merge.PostMergeHook`
+(`posthook.go`) is the package's second outbound port, and it re-homes both
+daemon-side:
+
+- CHILD TO PARENT. A workspace spawned from another workspace merges into its
+  PARENT's worktree, not into the repository's main checkout. The parent's
+  agent session is told its child merged.
+- THE POSTPROCESSING PROMPT. A workspace created with a `postprocessing_prompt`
+  has that prompt run in the parent once the merge fully finishes.
+
+The port's contract:
+
+- It fires on the `merged` terminal outcome ONLY — never on `merge_failed`,
+  never on a conflict, and never on a conflict a user abandoned. A merge that
+  landed only after a resolution is merged all the same and fires it too.
+- It fires AFTER the queue entry is dropped and the lease released. That
+  ordering is load-bearing: the hook prompts another workspace's session, and
+  doing it under a lease the merge still held would have the submit refused by
+  the very exclusivity the merge took.
+- It runs OFF the drain goroutine, on its own `c.wg`-tracked goroutine bounded
+  by the coordinator's context. A slow, hung, or unreachable parent must never
+  stall the repository's queue — the next merge starts immediately.
+- A hook error CANNOT un-merge the merge. It is loud-logged and retained as a
+  `merge.PostMergeFailure` (readable via `PostMergeFailures`), never turned into
+  a `merge_failed` transition: the commits are on the target either way, and
+  saying otherwise would make the pushed state lie about the tree.
+- A merge whose durable entry could NOT be dropped does not fire the hook at
+  all, because the next boot's `Drain` replays it and the parent must not be
+  handed the same child twice.
+
+The implementation is `internal/workspace/postmerge` (`postmerge.Notifier`),
+reached — like `merge.ConflictResolver` — through the server's wiring, so this
+package still never imports the session controller.
+
 Every merge-state transition (`merging`, `merge_queued`, `merge_conflict`,
 `merge_failed`, `merged`) is written to the SSM — never to the shim-store,
 which is agent-interaction-only.
@@ -51,8 +88,9 @@ merge state. It is informed of status by the daemon and renders it.
 ## Naming
 
 NEVER refer to these types by their bare names. Always write the
-package-qualified form — `merge.Coordinator`, `merge.Driver`, `merge.Lease` —
-in code comments, commit messages, design docs, and prose alike.
+package-qualified form — `merge.Coordinator`, `merge.Driver`, `merge.Lease`,
+`merge.PostMergeHook` — in code comments, commit messages, design docs, and
+prose alike.
 
 `Coordinator`, `Driver`, and `Lease` are generic words that appear across the
 daemon in unrelated roles, so a bare mention forces the reader to work out

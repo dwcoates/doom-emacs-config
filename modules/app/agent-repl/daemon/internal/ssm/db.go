@@ -19,7 +19,7 @@ import (
 // whenever the on-disk shape changes; migrate() refuses to open a DB
 // written by a NEWER schema than this binary understands (loud, no
 // silent downgrade).
-const schemaVersion = 4
+const schemaVersion = 5
 
 // defaultDBPath is the daemon's ONE state store — the SSM's log and the
 // session registry's identity tables share it (§9.2: "own SQLite DB",
@@ -146,6 +146,22 @@ func migrate(db *sql.DB) error {
 		-- is made unrepresentable at the substrate instead of merely unlikely.
 		CREATE UNIQUE INDEX IF NOT EXISTS merge_lease_open
 			ON merge_lease(workspace) WHERE released_at IS NULL;
+		-- WHEN EACH WORKSPACE'S MERGE LANDED: one row per workspace that has ever
+		-- reached the merged phase, written at that transition and never
+		-- rewritten. It is a fact of its own rather than a query over the state
+		-- log, because the log answers "which merge row is newest" — something a
+		-- later transition can change — while "this workspace merged, at this
+		-- instant" is permanent the moment it becomes true. The frontend's
+		-- recently-merged ordering reads it, so re-deriving it would make that
+		-- order depend on whatever happened to the workspace afterwards.
+		--
+		-- The PRIMARY KEY is what makes set-once STRUCTURAL: the database decides
+		-- that a second merged transition cannot move the instant, rather than Go
+		-- remembering to look first.
+		CREATE TABLE IF NOT EXISTS workspace_merged (
+			workspace  TEXT    PRIMARY KEY,
+			merged_at  INTEGER NOT NULL
+		);
 	`); err != nil {
 		return fmt.Errorf("ssm: create schema: %w", err)
 	}

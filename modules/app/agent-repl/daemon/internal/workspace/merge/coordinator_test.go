@@ -142,6 +142,52 @@ func (r *fakeResolver) Resolve(_ context.Context, res ConflictResolution) error 
 	}
 }
 
+// fakePostMergeHook stands in for merge.PostMergeHook. Like fakePicker it
+// announces the call and then waits for the test to release it, which is what
+// lets a test hold the hook open and prove the repository's queue advances
+// underneath it without a sleep.
+type fakePostMergeHook struct {
+	calls   chan Request
+	results chan error
+	stop    chan struct{}
+}
+
+func newFakePostMergeHook(capacity int) *fakePostMergeHook {
+	return &fakePostMergeHook{
+		calls:   make(chan Request, capacity),
+		results: make(chan error, capacity),
+		stop:    make(chan struct{}),
+	}
+}
+
+func (h *fakePostMergeHook) AfterMerged(_ context.Context, req Request) error {
+	h.calls <- req
+	select {
+	case err := <-h.results:
+		return err
+	case <-h.stop:
+		return errStopped
+	}
+}
+
+// autoPostMergeHook is the harness default: it records the call and returns
+// immediately, so every test that is not ABOUT the hook is unaffected by it.
+type autoPostMergeHook struct {
+	calls chan Request
+}
+
+func newAutoPostMergeHook(capacity int) *autoPostMergeHook {
+	return &autoPostMergeHook{calls: make(chan Request, capacity)}
+}
+
+func (h *autoPostMergeHook) AfterMerged(_ context.Context, req Request) error {
+	select {
+	case h.calls <- req:
+	default:
+	}
+	return nil
+}
+
 // fakeKeyer maps a target worktree to a repository key, modeling the sibling
 // worktrees that must collapse onto one queue.
 type fakeKeyer struct {
@@ -210,6 +256,9 @@ type harnessOpts struct {
 	dir    string
 	keys   map[string]string
 	keyErr error
+	// postMerge replaces the auto-completing default hook for tests that are
+	// about the post-merge handoff itself.
+	postMerge PostMergeHook
 }
 
 func newHarness(t *testing.T) *harness {
@@ -227,14 +276,19 @@ func newHarnessWith(t *testing.T, opts harnessOpts) *harness {
 	lease := newFakeLease(8)
 	resolver := newFakeResolver(8)
 	sink := newSyncSink(8)
+	hook := opts.postMerge
+	if hook == nil {
+		hook = newAutoPostMergeHook(8)
+	}
 	coord, err := NewCoordinator(CoordinatorConfig{
-		Logf:     t.Logf,
-		Sink:     sink,
-		Queue:    q,
-		Keyer:    fakeKeyer{keys: opts.keys, err: opts.keyErr},
-		Picker:   picker,
-		Lease:    lease,
-		Resolver: resolver,
+		Logf:      t.Logf,
+		Sink:      sink,
+		Queue:     q,
+		Keyer:     fakeKeyer{keys: opts.keys, err: opts.keyErr},
+		Picker:    picker,
+		Lease:     lease,
+		Resolver:  resolver,
+		PostMerge: hook,
 	})
 	if err != nil {
 		t.Fatalf("NewCoordinator: %v", err)
@@ -255,13 +309,14 @@ func TestNewCoordinatorRequiresEveryDependency(t *testing.T) {
 	q, _ := newTestQueue(t)
 	complete := func() CoordinatorConfig {
 		return CoordinatorConfig{
-			Logf:     func(string, ...any) {},
-			Sink:     newSyncSink(1),
-			Queue:    q,
-			Keyer:    fakeKeyer{},
-			Picker:   newFakePicker(1),
-			Lease:    newFakeLease(1),
-			Resolver: newFakeResolver(1),
+			Logf:      func(string, ...any) {},
+			Sink:      newSyncSink(1),
+			Queue:     q,
+			Keyer:     fakeKeyer{},
+			Picker:    newFakePicker(1),
+			Lease:     newFakeLease(1),
+			Resolver:  newFakeResolver(1),
+			PostMerge: newAutoPostMergeHook(1),
 		}
 	}
 	tests := []struct {
@@ -347,6 +402,7 @@ func TestEnqueueSurfacesAPublishFailure(t *testing.T) {
 	coord, err := NewCoordinator(CoordinatorConfig{
 		Logf: t.Logf, Sink: newSyncSink(1), Queue: failingQueue{err: sentinelError("disk full")},
 		Keyer: fakeKeyer{}, Picker: picker, Lease: newFakeLease(1), Resolver: newFakeResolver(1),
+		PostMerge: newAutoPostMergeHook(1),
 	})
 	if err != nil {
 		t.Fatalf("NewCoordinator: %v", err)
@@ -1090,6 +1146,7 @@ func TestCloseRetainsAParkedConflictForTheNextBoot(t *testing.T) {
 	coord, err := NewCoordinator(CoordinatorConfig{
 		Logf: t.Logf, Sink: newSyncSink(4), Queue: q,
 		Keyer: fakeKeyer{}, Picker: picker, Lease: lease, Resolver: resolver,
+		PostMerge: newAutoPostMergeHook(4),
 	})
 	if err != nil {
 		t.Fatalf("NewCoordinator: %v", err)

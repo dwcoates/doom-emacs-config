@@ -31,24 +31,38 @@ func (f *fakeQueue) Subscribe(repo string) (<-chan merge.Request, func()) {
 
 func (f *fakeQueue) Snapshot() map[string][]merge.Request { return f.snapshot }
 
-// fakeInterrupter records the workspaces whose turn a lease stopped, and can
-// be armed to refuse.
-type fakeInterrupter struct {
-	stopped []string
-	err     error
+// fakeSessionAuthority records the workspaces whose turn a lease stopped and
+// whose session a merged transition stood down, and can be armed to refuse
+// either.
+type fakeSessionAuthority struct {
+	stopped     []string
+	err         error
+	tornDown    []string
+	teardownErr error
+	// teardownHook runs inside TeardownMerged, so a test can observe what the
+	// rest of the daemon looks like at the instant the teardown is entered.
+	teardownHook func(workspace string)
 }
 
-func (f *fakeInterrupter) InterruptForMerge(_ context.Context, workspace string) error {
+func (f *fakeSessionAuthority) InterruptForMerge(_ context.Context, workspace string) error {
 	f.stopped = append(f.stopped, workspace)
 	return f.err
 }
 
+func (f *fakeSessionAuthority) TeardownMerged(workspace string) error {
+	f.tornDown = append(f.tornDown, workspace)
+	if f.teardownHook != nil {
+		f.teardownHook(workspace)
+	}
+	return f.teardownErr
+}
+
 // openLeaseTest arranges a wired manager plus a lease over it.
-func openLeaseTest(t *testing.T, ws string) (*Manager, *MergeLease, *fakeQueue, *fakeInterrupter, *capLog) {
+func openLeaseTest(t *testing.T, ws string) (*Manager, *MergeLease, *fakeQueue, *fakeSessionAuthority, *capLog) {
 	t.Helper()
 	m, cl, _ := openTest(t, fakeResolver{"s1": ws})
 	q := &fakeQueue{}
-	in := &fakeInterrupter{}
+	in := &fakeSessionAuthority{}
 	l, err := NewMergeLease(MergeLeaseConfig{Manager: m, Queue: q, Interrupter: in})
 	if err != nil {
 		t.Fatalf("NewMergeLease: %v", err)
@@ -66,12 +80,12 @@ func TestNewMergeLeaseRequiresEveryDependency(t *testing.T) {
 	}{
 		{
 			name: "nil manager",
-			cfg:  MergeLeaseConfig{Queue: &fakeQueue{}, Interrupter: &fakeInterrupter{}},
+			cfg:  MergeLeaseConfig{Queue: &fakeQueue{}, Interrupter: &fakeSessionAuthority{}},
 			want: "Manager is required",
 		},
 		{
 			name: "nil queue",
-			cfg:  MergeLeaseConfig{Manager: m, Interrupter: &fakeInterrupter{}},
+			cfg:  MergeLeaseConfig{Manager: m, Interrupter: &fakeSessionAuthority{}},
 			want: "Queue is required",
 		},
 		{
@@ -104,7 +118,7 @@ func TestNewMergeLeaseRefusesASecondQueue(t *testing.T) {
 	m, _, _, _, _ := openLeaseTest(t, "ws1")
 
 	// Act.
-	_, err := NewMergeLease(MergeLeaseConfig{Manager: m, Queue: &fakeQueue{}, Interrupter: &fakeInterrupter{}})
+	_, err := NewMergeLease(MergeLeaseConfig{Manager: m, Queue: &fakeQueue{}, Interrupter: &fakeSessionAuthority{}})
 
 	// Assert.
 	if err == nil {
@@ -279,7 +293,7 @@ func TestMergeLeaseHeldReachesTheWorkspaceState(t *testing.T) {
 func TestMergeLeaseSurvivesAReopen(t *testing.T) {
 	// Arrange.
 	m, cl, path := openTest(t, fakeResolver{"s1": "ws1"})
-	l, err := NewMergeLease(MergeLeaseConfig{Manager: m, Queue: &fakeQueue{}, Interrupter: &fakeInterrupter{}})
+	l, err := NewMergeLease(MergeLeaseConfig{Manager: m, Queue: &fakeQueue{}, Interrupter: &fakeSessionAuthority{}})
 	if err != nil {
 		t.Fatalf("NewMergeLease: %v", err)
 	}
