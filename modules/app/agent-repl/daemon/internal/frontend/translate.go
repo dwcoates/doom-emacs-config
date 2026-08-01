@@ -262,6 +262,19 @@ func SystemFailureItemFromDegradedState(ds *corev1.DegradedState, atMs int64) *f
 //
 // The second return is the RECORD ENVELOPES of the items that came from the
 // file plane, keyed by ConversationItem.uuid — see RecordEnvelope.
+//
+// PROVENANCE IS STAMPED CONVERSATION_SOURCE_USER HERE, EXPLICITLY, on every
+// item this file builds. An ordinary turn is what a translated store event
+// describes, and it is what every item predating the merge lease describes too,
+// so USER is the CURATOR'S OWN VERDICT rather than a proto3 zero left
+// unpopulated — UNSPECIFIED is a malformed frame the receiver must reject.
+//
+// The one party that can say otherwise is the one holding the merge lease's
+// ledger, and it revises the verdict through StampConversationSource on the way
+// out (sessioncontroller/sinks.go). This layer has no access to the lease and
+// deliberately does not acquire one: a curator that re-derived provenance from
+// live state would produce a different answer on a resync than it did on the
+// original push, which is the exact failure the persisted ledger prevents.
 func ConversationDeltaFromEvent(workspace string, ev *corev1.Event) (*frontendv1.ConversationDelta, map[string]RecordEnvelope, error) {
 	if ev == nil {
 		return nil, nil, nil
@@ -382,7 +395,8 @@ func contextClearedItems(cc *corev1.ContextCleared, ev *corev1.Event) []*fronten
 	}
 	return []*frontendv1.ConversationItem{{
 		Uuid: clearOrCompactUUID(ev, "clear"), TsMs: ev.GetProducedAtMs(), RequestId: ev.GetRequestId(),
-		Item: &frontendv1.ConversationItem_ContextCleared{ContextCleared: cc},
+		Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
+		Item:   &frontendv1.ConversationItem_ContextCleared{ContextCleared: cc},
 	}}
 }
 
@@ -402,7 +416,8 @@ func contextCompactedItems(cc *corev1.ContextCompacted, ev *corev1.Event) []*fro
 	}
 	return []*frontendv1.ConversationItem{{
 		Uuid: clearOrCompactUUID(ev, "compact"), TsMs: ev.GetProducedAtMs(), RequestId: ev.GetRequestId(),
-		Item: &frontendv1.ConversationItem_ContextCompacted{ContextCompacted: cc},
+		Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
+		Item:   &frontendv1.ConversationItem_ContextCompacted{ContextCompacted: cc},
 	}}
 }
 
@@ -497,7 +512,8 @@ func systemLineItems(sl *datav1.SystemLine, tsMs int64, requestID string) []*fro
 		}
 		return []*frontendv1.ConversationItem{{
 			Uuid: failure.GetItemUuid(), TsMs: tsMs, RequestId: requestID,
-			Item: &frontendv1.ConversationItem_SystemFailure{SystemFailure: failure},
+			Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
+			Item:   &frontendv1.ConversationItem_SystemFailure{SystemFailure: failure},
 		}}
 	default:
 		return nil
@@ -544,7 +560,8 @@ func assistantMessageItem(uuid string, tsMs int64, requestID string, msg *datav1
 	}
 	return []*frontendv1.ConversationItem{{
 		Uuid: uuid, TsMs: tsMs, RequestId: requestID,
-		Item: &frontendv1.ConversationItem_AssistantMessage{AssistantMessage: msg},
+		Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
+		Item:   &frontendv1.ConversationItem_AssistantMessage{AssistantMessage: msg},
 	}}
 }
 
@@ -566,7 +583,8 @@ func userMessageItem(uuid string, tsMs int64, requestID string, msg *datav1.ApiU
 	}
 	return []*frontendv1.ConversationItem{{
 		Uuid: uuid, TsMs: tsMs, RequestId: requestID,
-		Item: &frontendv1.ConversationItem_UserMessage{UserMessage: msg},
+		Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
+		Item:   &frontendv1.ConversationItem_UserMessage{UserMessage: msg},
 	}}
 }
 
@@ -590,7 +608,8 @@ func resultItems(r *datav1.ResultMessage, tsMs int64, requestID string) []*front
 	}
 	return []*frontendv1.ConversationItem{{
 		TsMs: tsMs, RequestId: requestID,
-		Item: &frontendv1.ConversationItem_Result{Result: r},
+		Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
+		Item:   &frontendv1.ConversationItem_Result{Result: r},
 	}}
 }
 
