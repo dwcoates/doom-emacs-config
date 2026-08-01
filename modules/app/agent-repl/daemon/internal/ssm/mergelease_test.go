@@ -290,6 +290,38 @@ func TestMergeLeaseHeldReachesTheWorkspaceState(t *testing.T) {
 	}
 }
 
+// A connectivity-edge push used to be hand-built beside the funnel, which
+// silently dropped the merge facts stampMergeFactsLocked owns. Every outgoing
+// WorkspaceState now goes through workspaceMessageLocked, so the edge-driven
+// push must carry the held lease like any other frame.
+func TestConnectivityEdgePushCarriesTheHeldLease(t *testing.T) {
+	// Arrange — a held lease, then subscribe so only edge-driven pushes land.
+	m, l, _, _, _ := openLeaseTest(t, "ws1")
+	if err := m.Apply(evSessionStarted("s1", 1)); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if _, err := l.Acquire(context.Background(), "ws1"); err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	states, cancel := m.Subscribe()
+	defer cancel()
+
+	// Act — a connectivity edge, whose push runs publishCompositeLocked.
+	if err := m.ApplySessionConnectivity("ws1", "s1", "g1", SessionConnectivityConnecting, "test_edge"); err != nil {
+		t.Fatalf("ApplySessionConnectivity: %v", err)
+	}
+
+	// Assert — the edge-driven frame carries the lease fact.
+	select {
+	case msg := <-states:
+		if !msg.GetMergeLeaseHeld() {
+			t.Fatal("connectivity-edge push dropped merge_lease_held; the hand-built bypass is back")
+		}
+	default:
+		t.Fatal("the connectivity edge pushed no WorkspaceState")
+	}
+}
+
 func TestMergeLeaseSurvivesAReopen(t *testing.T) {
 	// Arrange.
 	m, cl, path := openTest(t, fakeResolver{"s1": "ws1"})

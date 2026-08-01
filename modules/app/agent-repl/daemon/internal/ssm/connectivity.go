@@ -334,7 +334,13 @@ func (m *Manager) publishCompositeLocked(workspace, causeKind string) error {
 	if !r.found {
 		r = resolved{found: true, state: frontendv1.RenderState_RENDER_STATE_UNSPECIFIED}
 	}
-	msg, err := compositeWorkspaceState(workspace, r, composite)
+	// THROUGH THE FUNNEL, not a hand-built message. This used to call
+	// compositeWorkspaceState directly, which skipped stampMergeFactsLocked
+	// (a connectivity-edge push silently dropped merge_lease_held and the
+	// queue facts) and skipped the freshness watermark below it. Every
+	// WorkspaceState that leaves the manager goes through
+	// workspaceMessageLocked so no push path can under-stamp.
+	msg, err := m.workspaceMessageLocked(workspace, r)
 	if err != nil {
 		return err
 	}
