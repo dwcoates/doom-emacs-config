@@ -3,12 +3,69 @@
 The workspace-merge subsystem. Two components, with strictly separated
 responsibilities:
 
-- `merge.Driver` — the git cherry-pick layer (`git -C <dir>`): run the pick,
+- `merge.Driver` — the git cherry-pick layer (`git -C <dir>`): replay the range
+  COMMIT BY COMMIT, run the target repository's test suite after each landing,
   detect conflicts, finalize a merged workspace, resume after a resolution.
   Stateless per call, and the ONLY component that shells out to git.
 - `merge.Coordinator` — the per-repository singleton that owns the merge
   QUEUE, the shim exclusivity lease, and conflict resolution. It is the only
   caller of `merge.Driver`.
+
+## The replay is per-commit, and every landing is tested
+
+`merge.Driver` picks the range one commit at a time (`rev-list --reverse
+--no-merges`, then `cherry-pick -x <sha>` each) and runs the target
+repository's test suite after each commit lands. A single whole-range pick
+could only be tested once, at the end, which names no culprit and gives a
+resolution attempt nothing narrower than the whole range to reason about.
+
+- THE SUITE IS A PORT. `merge.SuiteRunner` (`suiterunner.go`) resolves the
+  TARGET repository's own entrypoint — `modules/app/agent-repl/bin/test-all.sh`
+  relative to its toplevel. A target that declares none SKIPS the gate with a
+  loud log naming the absence; this machinery serves repositories that have no
+  agent-repl suite, and a skip is never reported as a pass.
+- THE LOOP IS RESTARTABLE BY CONSTRUCTION. It derives its work from git alone
+  (the cherry-pick base, which advances past every `-x` annotation, plus a
+  per-commit patch-id probe), so re-entering it after a resume, a test fix, or a
+  whole daemon bounce skips what already landed. That is what makes the durable
+  queue's boot replay a no-op for the commits the previous daemon got through.
+- MERGE COMMITS ARE FLATTENED. `--no-merges` drops them: a merge commit carries
+  no patch of its own and both of its sides are already in the range. The
+  whole-range driver this replaced failed outright on such a branch, because
+  `git cherry-pick` refuses a range containing a merge.
+- THE GATE MOVED HERE FROM THE PRE-COMMIT HOOK. `.githooks/pre-commit` used to
+  run the whole unified suite before any agent-authored commit. That taxed every
+  intermediate commit on a workspace's own branch and said nothing about the
+  TARGET, which is the tree everyone else works from. The hook now runs only the
+  grep-only external-boundary lint.
+
+## A test failure gets ONE agent attempt, then the target is ROLLED BACK
+
+A suite that fails after a landing parks exactly the way a conflict does, and
+the merging workspace's OWN session is asked to fix it through
+`merge.TestFailureResolver` (`testfailureresolver.go`). `merge.Coordinator`
+then commits whatever that turn staged as a FOLLOW-UP commit (never an amend:
+an amend would rewrite the `-x` annotation the replay's restartability keys on)
+and re-runs the suite.
+
+- EXACTLY ONE ATTEMPT PER FAILING COMMIT. A repeat failure on the same commit,
+  a resolver error, and a driver error all go straight to the rollback path. A
+  failure on a LATER commit is a different failure and earns its own attempt.
+- **THE TARGET IS ROLLED BACK TO ITS PRE-MERGE HEAD.** `merge.Driver.Merge`
+  records that head before it lands anything and returns it on every Result;
+  `merge.Coordinator` resets the target to it, emits `merge_failed` carrying the
+  failing commit and the suite's output tail, and releases everything per the
+  ordinary terminal path. This is the load-bearing decision of the whole test
+  gate: the target worktree is what every other workspace cuts from and merges
+  into, so leaving it carrying commits that break its suite converts one
+  workspace's failure into everyone else's. Nothing is lost — the source branch
+  still holds every commit and the merge can be retried once the work is fixed
+  there. The rollback deliberately does NOT `git clean`: untracked files in the
+  target may be a human's own work.
+- A ROLLBACK THAT ITSELF FAILS still fails the merge, and the `merge_failed`
+  cause names the failed reset. A merge whose Result carries no pre-merge head
+  (which no valid `merge.Driver` Merge produces) is failed with that absence
+  named rather than papered over.
 
 ## Conflict resolution is shim-driven first, human second
 
@@ -74,7 +131,11 @@ reached — like `merge.ConflictResolver` — through the server's wiring, so th
 package still never imports the session controller.
 
 Every merge-state transition (`merge_enqueuing`, `merging`, `merge_queued`,
-`merge_conflict`, `merge_failed`, `merged`) is written to the SSM — never to
+`merge_conflict`, `merge_failed`, `merged`) is written to the SSM. The
+per-commit loop reuses `merging` rather than adding vocabulary: its cause
+strings carry the progress (`testing 3/7 after cherry-pick of abc123def456`), so
+a user watching a merge sees where it is without a new phase or a new proto
+enum value. Transitions are written to the SSM — never to
 the shim-store, which is agent-interaction-only.
 
 `merge_enqueuing` is the ONE phase this package does not emit itself. The
@@ -100,7 +161,8 @@ merge state. It is informed of status by the daemon and renders it.
 
 NEVER refer to these types by their bare names. Always write the
 package-qualified form — `merge.Coordinator`, `merge.Driver`, `merge.Lease`,
-`merge.PostMergeHook` — in code comments, commit messages, design docs, and
+`merge.PostMergeHook`, `merge.SuiteRunner`, `merge.TestFailureResolver` — in
+code comments, commit messages, design docs, and
 prose alike.
 
 `Coordinator`, `Driver`, and `Lease` are generic words that appear across the
