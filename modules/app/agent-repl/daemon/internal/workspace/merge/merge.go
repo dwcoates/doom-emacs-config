@@ -5,7 +5,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -158,6 +160,19 @@ func (e *Driver) Merge(ctx context.Context, req Request) (Result, error) {
 	}
 	if !exists {
 		return Result{}, fmt.Errorf("merge: branch %q not found in %s", req.SourceBranch, req.TargetDir)
+	}
+	// Stale sequencer residue (no parked commit) refuses every new pick with
+	// an opaque exit 128 and can never be resumed, so it is rejected here as
+	// a NAMED precondition — before any transition — with the operator's way
+	// out in the message. A target parked on a REAL conflict is deliberately
+	// not refused: the bounce-replay path re-enters it to re-park.
+	stale, err := e.staleSequencerState(ctx, req.TargetDir)
+	if err != nil {
+		return Result{}, err
+	}
+	if stale {
+		return Result{}, fmt.Errorf("merge: target %s has an unfinished cherry-pick (stale sequencer state, no conflicted commit) — run `git -C %s cherry-pick --quit` before merging %q",
+			req.TargetDir, req.TargetDir, req.Name)
 	}
 
 	if err := e.emit.emit(req.Workspace, PhaseMerging, "cherry-pick starting for "+req.SourceBranch); err != nil {
@@ -405,6 +420,38 @@ func (e *Driver) cherryPickInProgress(ctx context.Context, dir string) (bool, er
 		return false, err
 	}
 	return exit == 0, nil
+}
+
+// staleSequencerState reports whether dir carries sequencer residue WITHOUT a
+// parked CHERRY_PICK_HEAD. That exact state — a multi-commit pick interrupted
+// between commits, or an abandoned pick's leftovers — makes git refuse every
+// new cherry-pick with an opaque "already in progress" exit 128, and nothing
+// can resume it (there is no conflicted commit to resolve). Observed live: an
+// abandoned merge's sequencer wedged every later merge.
+//
+// It is DELIBERATELY narrower than "any in-progress pick": a target parked on
+// a real conflict (CHERRY_PICK_HEAD present) must NOT be refused, because the
+// boot-time replay of a durable merge re-enters exactly that target and
+// re-parks its conflict — that is how a conflicted merge survives a daemon
+// bounce.
+func (e *Driver) staleSequencerState(ctx context.Context, dir string) (bool, error) {
+	inProgress, err := e.cherryPickInProgress(ctx, dir)
+	if err != nil || inProgress {
+		return false, err
+	}
+	seqDir, err := e.gitString(ctx, dir, "rev-parse", "--git-path", "sequencer")
+	if err != nil {
+		return false, err
+	}
+	if !filepath.IsAbs(seqDir) {
+		seqDir = filepath.Join(dir, seqDir)
+	}
+	if _, statErr := os.Stat(seqDir); statErr == nil {
+		return true, nil
+	} else if !errors.Is(statErr, os.ErrNotExist) {
+		return false, fmt.Errorf("merge: probe sequencer state %s: %w", seqDir, statErr)
+	}
+	return false, nil
 }
 
 // branchExists mirrors agent-repl--git-branch-exists-p.
