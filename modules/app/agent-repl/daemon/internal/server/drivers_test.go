@@ -67,7 +67,8 @@ func TestShimSpawnerDoesNotSpawnWhenTheShimIsConnected(t *testing.T) {
 	reg := openTestRegistry(t)
 	spawned := 0
 	sp := NewShimSpawner(reg,
-		func(string) bool { return true },
+		func(string) (bool, error) { return true, nil },
+		nil,
 		func(string, CreateOpts) (func() error, error) { spawned++; return nil, nil },
 		nil)
 
@@ -80,6 +81,28 @@ func TestShimSpawnerDoesNotSpawnWhenTheShimIsConnected(t *testing.T) {
 	}
 	if spawned != 0 {
 		t.Fatalf("a connected shim must not be re-spawned (spawned=%d)", spawned)
+	}
+}
+
+func TestShimSpawnerRefusesToGuessWhenConnectionProbeFails(t *testing.T) {
+	// Arrange — an unreadable listener state is neither connected nor absent.
+	reg := openTestRegistry(t)
+	spawned := 0
+	sp := NewShimSpawner(reg,
+		func(string) (bool, error) { return false, errors.New("probe unavailable") },
+		nil,
+		func(string, CreateOpts) (func() error, error) { spawned++; return nil, nil },
+		nil)
+
+	// Act.
+	_, err := sp.EnsureShim(context.Background(), "s1")
+
+	// Assert — spawning on unknown liveness could create two transcript writers.
+	if err == nil || !strings.Contains(err.Error(), "cannot determine whether a shim is connected") {
+		t.Fatalf("EnsureShim error = %v", err)
+	}
+	if spawned != 0 {
+		t.Fatalf("connection-probe failure spawned %d shims", spawned)
 	}
 }
 
@@ -97,7 +120,8 @@ func TestShimSpawnerSpawnsFromRegistryRecordWhenNothingIsAlive(t *testing.T) {
 	}
 	var gotOpts CreateOpts
 	sp := NewShimSpawner(reg,
-		func(string) bool { return false },
+		func(string) (bool, error) { return false, nil },
+		nil,
 		func(_ string, opts CreateOpts) (func() error, error) {
 			gotOpts = opts
 			return nil, nil
@@ -127,7 +151,8 @@ func TestShimSpawnerTreatsALegacyPlaceholderRecordLikeAnEmptyModel(t *testing.T)
 	}
 	var gotOpts CreateOpts
 	sp := NewShimSpawner(reg,
-		func(string) bool { return false },
+		func(string) (bool, error) { return false, nil },
+		nil,
 		func(_ string, opts CreateOpts) (func() error, error) {
 			gotOpts = opts
 			return nil, nil
@@ -151,7 +176,8 @@ func TestShimSpawnerErrorsWhenNoRecordToSpawnFrom(t *testing.T) {
 	// CreateOpts from, so it is a loud error.
 	reg := openTestRegistry(t)
 	sp := NewShimSpawner(reg,
-		func(string) bool { return false },
+		func(string) (bool, error) { return false, nil },
+		nil,
 		func(string, CreateOpts) (func() error, error) { return nil, nil },
 		nil)
 
@@ -391,10 +417,10 @@ func TestStopShimPrefersItsOwnProcessHandle(t *testing.T) {
 	// Arrange — a shim THIS spawner launched, plus an announced pid.
 	stopped := false
 	var signalled []int
-	s := NewShimSpawner(nil, nil, nil, nil)
+	s := NewShimSpawner(nil, nil, nil, nil, nil)
 	// No processes and no lock files here: the exit wait has nothing real to
 	// observe, so it is stubbed out rather than made to time out.
-	s.awaitStopped = nil
+	s.awaitStopped = func(string) error { return nil }
 	s.stops["s1"] = func() error { stopped = true; return nil }
 	s.signal = func(pid int, _ syscall.Signal) error { signalled = append(signalled, pid); return nil }
 
@@ -415,8 +441,8 @@ func TestStopShimPrefersItsOwnProcessHandle(t *testing.T) {
 func TestStopShimSignalsASurvivingShimByItsAnnouncedPid(t *testing.T) {
 	// Arrange — no handle (a shim that outlived a previous daemon).
 	var signalled []int
-	s := NewShimSpawner(nil, nil, nil, nil)
-	s.awaitStopped = nil
+	s := NewShimSpawner(nil, nil, nil, nil, nil)
+	s.awaitStopped = func(string) error { return nil }
 	s.signal = func(pid int, sig syscall.Signal) error {
 		if sig != syscall.SIGTERM {
 			t.Errorf("signal = %v, want SIGTERM (a clean stop)", sig)
@@ -439,8 +465,8 @@ func TestStopShimSignalsASurvivingShimByItsAnnouncedPid(t *testing.T) {
 func TestStopShimWithNeitherHandleNorPidIsALoggedNoOp(t *testing.T) {
 	// Arrange.
 	var lines []string
-	s := NewShimSpawner(nil, nil, nil, func(f string, a ...any) { lines = append(lines, fmt.Sprintf(f, a...)) })
-	s.awaitStopped = nil
+	s := NewShimSpawner(nil, nil, nil, nil, func(f string, a ...any) { lines = append(lines, fmt.Sprintf(f, a...)) })
+	s.awaitStopped = func(string) error { return nil }
 	s.signal = func(int, syscall.Signal) error { t.Fatal("nothing should be signalled"); return nil }
 
 	// Act.
@@ -464,8 +490,8 @@ func TestStopShimWithNeitherHandleNorPidIsALoggedNoOp(t *testing.T) {
 // failure — a restart must not abort because the thing it wanted gone is gone.
 func TestStopShimTreatsAnAlreadyExitedPidAsStopped(t *testing.T) {
 	// Arrange.
-	s := NewShimSpawner(nil, nil, nil, nil)
-	s.awaitStopped = nil
+	s := NewShimSpawner(nil, nil, nil, nil, nil)
+	s.awaitStopped = func(string) error { return nil }
 	s.signal = func(int, syscall.Signal) error { return os.ErrProcessDone }
 
 	// Act / Assert.
@@ -481,7 +507,7 @@ func TestStopShimTreatsAnAlreadyExitedPidAsStopped(t *testing.T) {
 func TestStopShimWaitsForTheShimToActuallyExit(t *testing.T) {
 	// Arrange.
 	waited := ""
-	s := NewShimSpawner(nil, nil, nil, nil)
+	s := NewShimSpawner(nil, nil, nil, nil, nil)
 	s.awaitStopped = func(sessionID string) error { waited = sessionID; return nil }
 	s.stops["s1"] = func() error { return nil }
 
@@ -496,16 +522,120 @@ func TestStopShimWaitsForTheShimToActuallyExit(t *testing.T) {
 	}
 }
 
+func TestStopShimFailsBeforeMutationWithoutAnExitObserver(t *testing.T) {
+	// Arrange — losing the observer must not consume the only exact stop handle
+	// or signal a process before the caller learns cleanup cannot be proved.
+	stopped := false
+	s := NewShimSpawner(nil, nil, nil, nil, nil)
+	s.awaitStopped = nil
+	s.stops["s1"] = func() error { stopped = true; return nil }
+
+	// Act.
+	err := s.StopShim("s1", 0)
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "exit observer is nil") {
+		t.Fatalf("StopShim error = %v", err)
+	}
+	if stopped {
+		t.Fatal("stop handle ran before the exit-observer precondition failed")
+	}
+	if _, retained := s.stops["s1"]; !retained {
+		t.Fatal("stop handle was consumed before the exit-observer precondition failed")
+	}
+}
+
+func TestStopShimEvictsAParkedReconnectAfterProcessExit(t *testing.T) {
+	// Arrange — the shim reconnects during teardown and parks just before its
+	// process exits. StopShim must clear that transport after the exit proof.
+	var evictedSession, evictedReason string
+	s := NewShimSpawner(nil, nil,
+		func(sessionID, reason string) bool {
+			evictedSession, evictedReason = sessionID, reason
+			return true
+		}, nil, nil)
+	s.awaitStopped = func(string) error { return nil }
+	s.stops["s1"] = func() error { return nil }
+
+	// Act.
+	if err := s.StopShim("s1", 0); err != nil {
+		t.Fatalf("StopShim: %v", err)
+	}
+
+	// Assert.
+	if evictedSession != "s1" || evictedReason != "shim_process_stop_completed" {
+		t.Fatalf("eviction = session %q reason %q", evictedSession, evictedReason)
+	}
+}
+
+func TestStopShimDoesNotEvictParkedStateBeforeProcessExitIsProven(t *testing.T) {
+	// Arrange.
+	evicted := false
+	s := NewShimSpawner(nil, nil,
+		func(string, string) bool { evicted = true; return true }, nil, nil)
+	s.awaitStopped = func(string) error { return errors.New("still alive") }
+	s.stops["s1"] = func() error { return nil }
+
+	// Act.
+	err := s.StopShim("s1", 0)
+
+	// Assert — closing a still-live shim's parked transport would only provoke
+	// reconnect churn while claiming the stop had completed.
+	if err == nil {
+		t.Fatal("StopShim reported success without process-exit proof")
+	}
+	if evicted {
+		t.Fatal("parked state was evicted before the shim process stopped")
+	}
+}
+
 // A shim that will not die FAILS the stop, rather than reporting success and
 // leaving the caller to spawn into a lock that is still held.
 func TestStopShimFailsWhenTheShimNeverExits(t *testing.T) {
 	// Arrange.
-	s := NewShimSpawner(nil, nil, nil, nil)
+	s := NewShimSpawner(nil, nil, nil, nil, nil)
 	s.awaitStopped = func(string) error { return errors.New("still holds the session lock") }
 	s.stops["s1"] = func() error { return nil }
 
 	// Act / Assert.
 	if err := s.StopShim("s1", 0); err == nil {
 		t.Fatal("a shim that ignored SIGTERM reported a successful stop")
+	}
+}
+
+func TestStopShimDoesNotEvictWhenItsOwnStopHandleFails(t *testing.T) {
+	// A failed local stop has not established process exit.  Evicting a parked
+	// reconnect here would destroy the only route to a still-live shim.
+	evicted := false
+	s := NewShimSpawner(nil, nil, func(string, string) bool { evicted = true; return true }, nil, nil)
+	s.awaitStopped = func(string) error { t.Fatal("exit wait ran after stop failure"); return nil }
+	s.stops["s1"] = func() error { return errors.New("SIGTERM delivery failed") }
+
+	err := s.StopShim("s1", 0)
+
+	if err == nil || !strings.Contains(err.Error(), "SIGTERM delivery failed") {
+		t.Fatalf("StopShim error = %v", err)
+	}
+	if evicted {
+		t.Fatal("parked transport was evicted before the process stop succeeded")
+	}
+}
+
+func TestStopShimDoesNotEvictWhenSurvivingShimSignalFails(t *testing.T) {
+	// The announced PID is authoritative only while its stop succeeds.  A
+	// signal error leaves lifecycle ownership unresolved and must not clean up
+	// the parked route.
+	evicted := false
+	s := NewShimSpawner(nil, nil, func(string, string) bool { evicted = true; return true }, nil, nil)
+	s.awaitStopped = func(string) error { t.Fatal("exit wait ran after signal failure"); return nil }
+	s.signal = func(int, syscall.Signal) error { return errors.New("permission denied") }
+
+	err := s.StopShim("s1", 4242)
+
+	if err == nil || !strings.Contains(err.Error(), "permission denied") {
+		t.Fatalf("StopShim error = %v", err)
+	}
+	if evicted {
+		t.Fatal("parked transport was evicted after a failed survivor signal")
 	}
 }

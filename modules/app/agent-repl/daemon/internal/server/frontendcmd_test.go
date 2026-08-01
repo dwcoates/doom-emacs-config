@@ -1551,6 +1551,60 @@ func TestTargetClientLogWriterRejectsMismatchedSourceWorkspace(t *testing.T) {
 	}
 }
 
+func TestTargetClientLogWriterMismatchNamesReceivedAndAuthoritativeClaudeIDs(t *testing.T) {
+	workspace := t.TempDir()
+	writer, err := NewTargetClientLogWriter(dlog.NewTargetManager(), fakeClientLogIdentityResolver{
+		identity: ClientLogSessionIdentity{AgentReplSessionID: "session-current", ClaudeSessionID: "claude-current"},
+		known:    true,
+	}, io.Discard, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	context, err := structpb.NewStruct(map[string]any{
+		"timestamp": "2026-07-28T12:00:00Z", "runtime": "webapp", "level": "info", "verbosity": "normal",
+		"operation": "webapp.x", "message": "source", "context": map[string]any{}, "connection_id": "connection-1",
+		"agent_repl_session_id": "session-current", "claude_session_id": "claude-retired",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = writer.PersistClientLog(workspace, "request-1", &frontendv1.ClientLogCmd{
+		Level: frontendv1.ClientLogLevel_CLIENT_LOG_LEVEL_INFO, Message: "source", Context: context,
+	})
+
+	if err == nil || !strings.Contains(err.Error(), `got="claude-retired"`) || !strings.Contains(err.Error(), `want="claude-current"`) {
+		t.Fatalf("mismatch error = %v, want got and authoritative Claude ids", err)
+	}
+}
+
+func TestTargetClientLogWriterMismatchNamesReceivedAndAuthoritativeAgentReplIDs(t *testing.T) {
+	workspace := t.TempDir()
+	writer, err := NewTargetClientLogWriter(dlog.NewTargetManager(), fakeClientLogIdentityResolver{
+		identity: ClientLogSessionIdentity{AgentReplSessionID: "session-current", ClaudeSessionID: "claude-current"},
+		known:    true,
+	}, io.Discard, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	context, err := structpb.NewStruct(map[string]any{
+		"timestamp": "2026-07-28T12:00:00Z", "runtime": "webapp", "level": "info", "verbosity": "normal",
+		"operation": "webapp.x", "message": "source", "context": map[string]any{}, "connection_id": "connection-1",
+		"agent_repl_session_id": "session-retired", "claude_session_id": "claude-current",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = writer.PersistClientLog(workspace, "request-1", &frontendv1.ClientLogCmd{
+		Level: frontendv1.ClientLogLevel_CLIENT_LOG_LEVEL_INFO, Message: "source", Context: context,
+	})
+
+	if err == nil || !strings.Contains(err.Error(), `got="session-retired"`) || !strings.Contains(err.Error(), `want="session-current"`) {
+		t.Fatalf("mismatch error = %v, want got and authoritative agent-repl ids", err)
+	}
+}
+
 func TestCommandHandlerClientLogChangesNoDaemonState(t *testing.T) {
 	// Arrange — a client log is EVIDENCE, never a control signal.
 	p := &fakePrompts{}

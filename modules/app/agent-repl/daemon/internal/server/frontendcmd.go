@@ -1071,10 +1071,12 @@ func (w *targetClientLogWriter) PersistClientLog(workspace, requestID string, cm
 			return errors.New("client log source session attribution cannot be verified for command workspace")
 		}
 		if record.AgentReplSessionID != "" && record.AgentReplSessionID != identity.AgentReplSessionID {
-			return errors.New("client log source agent-repl session ID disagrees with daemon registry")
+			return fmt.Errorf("client log source agent-repl session ID disagrees with daemon registry: got=%q want=%q workspace=%q request_id=%q",
+				record.AgentReplSessionID, identity.AgentReplSessionID, workspace, requestID)
 		}
 		if record.ClaudeSessionID != "" && record.ClaudeSessionID != identity.ClaudeSessionID {
-			return errors.New("client log source Claude session ID disagrees with daemon registry")
+			return fmt.Errorf("client log source Claude session ID disagrees with daemon registry: got=%q want=%q agent_repl_session_id=%q workspace=%q request_id=%q",
+				record.ClaudeSessionID, identity.ClaudeSessionID, identity.AgentReplSessionID, workspace, requestID)
 		}
 	}
 	logger, err := w.targets.OpenWorkspaceRuntimeLogger(ws, dlog.RuntimeWebapp, w.terminal, w.verbose)

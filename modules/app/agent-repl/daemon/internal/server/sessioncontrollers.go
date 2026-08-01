@@ -117,7 +117,11 @@ func (s *ShimConnSource) Next(ctx context.Context, sessionID string) (net.Conn, 
 // ConnectedFunc reports whether a shim for sessionID has already dialled in.
 // Backed by the shim listener; injected so ShimSpawner is unit-testable
 // without a real socket.
-type ConnectedFunc func(sessionID string) bool
+type ConnectedFunc func(sessionID string) (bool, error)
+
+// EvictParkedFunc removes the listener's unclaimed transport for one session
+// after the process owning it has been proven stopped.
+type EvictParkedFunc func(sessionID, reason string) bool
 
 // ShimSpawnFunc execs a fresh shim for sessionID, told which daemon socket to
 // dial and where to write its events. The exec itself stays in main (which
@@ -135,6 +139,7 @@ type ShimSpawnFunc func(sessionID string, opts CreateOpts) (stop func() error, e
 type ShimSpawner struct {
 	reg       *registry.Registry
 	connected ConnectedFunc
+	evict     EvictParkedFunc
 	spawn     ShimSpawnFunc
 	logf      func(string, ...any)
 	// signal delivers a signal to a pid. Injected so the surviving-shim stop
@@ -151,12 +156,12 @@ type ShimSpawner struct {
 
 // NewShimSpawner builds a ShimSpawner. reg and spawn are required; a nil
 // connected reports nothing connected, a nil logf discards.
-func NewShimSpawner(reg *registry.Registry, connected ConnectedFunc, spawn ShimSpawnFunc, logf func(string, ...any)) *ShimSpawner {
+func NewShimSpawner(reg *registry.Registry, connected ConnectedFunc, evict EvictParkedFunc, spawn ShimSpawnFunc, logf func(string, ...any)) *ShimSpawner {
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
 	return &ShimSpawner{
-		reg: reg, connected: connected, spawn: spawn, logf: logf,
+		reg: reg, connected: connected, evict: evict, spawn: spawn, logf: logf,
 		signal:       signalPID,
 		awaitStopped: awaitShimStopped,
 		stops:        map[string]func() error{},
@@ -200,9 +205,15 @@ func (s *ShimSpawner) EnsureShim(ctx context.Context, sessionID string) (session
 	if s.spawn == nil {
 		return res, fmt.Errorf("server: ShimSpawner has no spawn func; cannot bring up session %s", sessionID)
 	}
-	if s.connected != nil && s.connected(sessionID) {
-		s.logf("server: session %s: shim already connected (no spawn)", sessionID)
-		return res, nil
+	if s.connected != nil {
+		connected, err := s.connected(sessionID)
+		if err != nil {
+			return res, fmt.Errorf("server: session %s: cannot determine whether a shim is connected: %w", sessionID, err)
+		}
+		if connected {
+			s.logf("server: session %s: shim connection proved open (no spawn)", sessionID)
+			return res, nil
+		}
 	}
 	held, err := sessionlock.Held(sessionID)
 	if err != nil {
@@ -303,6 +314,10 @@ func (s *ShimSpawner) DropResume(sessionID string) (string, error) {
 func (s *ShimSpawner) StopShim(sessionID string, hintPID int32) error {
 	s.mu.Lock()
 	stop, ok := s.stops[sessionID]
+	if (ok || hintPID > 0) && s.awaitStopped == nil {
+		s.mu.Unlock()
+		return fmt.Errorf("server: session %s: cannot stop shim because the exit observer is nil", sessionID)
+	}
 	if ok {
 		delete(s.stops, sessionID)
 	}
@@ -318,7 +333,7 @@ func (s *ShimSpawner) StopShim(sessionID string, hintPID int32) error {
 		if err := s.signal(int(hintPID), syscall.SIGTERM); err != nil {
 			if errors.Is(err, os.ErrProcessDone) {
 				s.logf("server: session %s: shim pid %d had already exited", sessionID, hintPID)
-				return nil
+				break
 			}
 			return fmt.Errorf("server: session %s: stopping surviving shim pid %d: %w", sessionID, hintPID, err)
 		}
@@ -339,10 +354,19 @@ func (s *ShimSpawner) StopShim(sessionID string, hintPID int32) error {
 	// The wait is on the CONDITION the spawn is gated by — the session lock,
 	// which the kernel releases when the holder dies, however it dies — not on
 	// a duration chosen to be probably long enough.
-	if s.awaitStopped == nil {
-		return nil
+	if err := s.awaitStopped(sessionID); err != nil {
+		return err
 	}
-	return s.awaitStopped(sessionID)
+	s.evictStoppedParked(sessionID)
+	return nil
+}
+
+func (s *ShimSpawner) evictStoppedParked(sessionID string) {
+	if s.evict == nil {
+		return
+	}
+	evicted := s.evict(sessionID, "shim_process_stop_completed")
+	s.logf("server: session %s: parked transport cleanup after stop evicted=%t", sessionID, evicted)
 }
 
 // stopGrace bounds how long StopShim waits for a signalled shim to actually

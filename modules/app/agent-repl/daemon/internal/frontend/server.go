@@ -524,11 +524,13 @@ func (s *Server) serveClient(c conn, scope *Scope, kind ClientKind) {
 	// workspace from Emacs entirely; nothing filters it now but the connection's
 	// own scope.
 	var snapshot *frontendv1.StateSnapshot
+	var rawSnapshot *frontendv1.StateSnapshot
 	for {
 		// Never call StateProvider while holding the frontend lock. Synchronous
 		// SSM publication takes the locks in the opposite order. The revision
 		// check under s.mu closes the capture race this lock order creates.
-		snapshot = snapshotForClient(s.state.Snapshot(), scope, kind)
+		rawSnapshot = s.state.Snapshot()
+		snapshot = snapshotForClient(rawSnapshot, scope, kind)
 		snap, err := marshalFrame(SnapshotFrame(snapshot))
 		if err != nil {
 			s.logf("frontend: marshal connect snapshot kind=%s scope_workspace=%q scope_session=%q: %v",
@@ -557,8 +559,9 @@ func (s *Server) serveClient(c conn, scope *Scope, kind ClientKind) {
 		s.mu.Unlock()
 		break
 	}
-	s.logf("frontend: client connected client_id=%d kind=%s scope_workspace=%q scope_session=%q snapshot_workspaces=%d",
-		cl.id, cl.kind, scopeWorkspace(scope), scopeSession(scope), len(snapshot.GetWorkspaces()))
+	retainedSessions, rejectedSessions := snapshotScopeSessionAudit(rawSnapshot, scope)
+	s.logf("frontend: client connected client_id=%d kind=%s scope_workspace=%q scope_session=%q snapshot_workspaces=%d snapshot_sessions_retained=%q snapshot_sessions_rejected=%q",
+		cl.id, cl.kind, scopeWorkspace(scope), scopeSession(scope), len(snapshot.GetWorkspaces()), retainedSessions, rejectedSessions)
 
 	go s.writeLoop(c, cl)
 	if kind == ClientKindGUIStream {
@@ -663,6 +666,25 @@ func scopeSession(scope *Scope) string {
 		return ""
 	}
 	return scope.SessionID
+}
+
+// snapshotScopeSessionAudit names both sides of the scope decision that binds
+// a GUI page. Counts alone hid the incident where twelve historical records
+// shared one cwd and the last rejected identity rebound the live page.
+func snapshotScopeSessionAudit(snapshot *frontendv1.StateSnapshot, scope *Scope) (retained, rejected string) {
+	if snapshot == nil || scope == nil {
+		return "", ""
+	}
+	var kept, dropped []string
+	for _, view := range snapshot.GetSessions() {
+		identity := view.GetSessionId()
+		if scope.matchesAgentSession(identity, view.GetWorkspace()) {
+			kept = append(kept, identity)
+		} else {
+			dropped = append(dropped, identity)
+		}
+	}
+	return strings.Join(kept, ","), strings.Join(dropped, ",")
 }
 
 func snapshotRevisions(snapshot *frontendv1.StateSnapshot) string {

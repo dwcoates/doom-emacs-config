@@ -539,7 +539,7 @@ func main() {
 		Push:              forwarder,
 		SSM:               ssmMgr,
 		Progress:          progressMgr,
-		Spawner:           server.NewShimSpawner(sessionRegistry, shimListener.Connected, udsSpawn, legacyLog),
+		Spawner:           server.NewShimSpawner(sessionRegistry, shimListener.Connected, shimListener.Evict, udsSpawn, legacyLog),
 		Source:            &server.ShimConnSource{Listener: shimListener},
 		FileDiagnostics:   fileDiagnostics,
 		Locator:           &server.SessionLocator{Reg: sessionRegistry},

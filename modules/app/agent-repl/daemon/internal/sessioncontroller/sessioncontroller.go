@@ -140,13 +140,6 @@ type SpawnResult struct {
 // the spawn plumbing); injected here so the session controller stays IO-narrow and testable.
 type Spawner interface {
 	EnsureShim(ctx context.Context, sessionID string) (SpawnResult, error)
-	// DropResume clears the session's vendor conversation pointer so the NEXT
-	// spawn starts fresh, reporting what it dropped ("" when there was none).
-	//
-	// It is the escape ladder's classifier as much as its repair: a bring-up
-	// that failed WITH a pointer is a bad-pointer failure worth one fresh
-	// retry, and one that failed WITHOUT a pointer has nothing left to try.
-	DropResume(sessionID string) (dropped string, err error)
 	// StopShim asks the session's shim to stop cleanly (the daemon SIGTERMs
 	// its child shim on hibernation, §4.4 redefined). A stop failure is
 	// surfaced, never swallowed.
@@ -350,9 +343,16 @@ type sessionController struct {
 	// generationID distinguishes this in-memory controller from every retired
 	// controller for the same workspace and session.
 	generationID string
-	client       sessionClient
-	consumer     *consumer
-	cancel       context.CancelFunc
+	// resumedVendorSessionID records the exact durable conversation this
+	// generation asked the spawner to resume. A transport failure may retry
+	// only while preserving this identity.
+	resumedVendorSessionID string
+	// staleResumeDroppedVendorSessionID is nonempty only when the spawner
+	// proved the recorded transcript absent before this generation spawned.
+	staleResumeDroppedVendorSessionID string
+	client                            sessionClient
+	consumer                          *consumer
+	cancel                            context.CancelFunc
 
 	// Bring-up gate state (bringupescape.go), guarded by the manager mutex
 	// except for faulted, which is a one-shot broadcast channel.
@@ -1560,43 +1560,52 @@ func (m *Manager) existing(workspace string) (*sessionController, error) {
 // connection for the few hundred milliseconds the shim takes to boot, listen,
 // and handshake. Anything about to SEND must use ensure instead.
 func (m *Manager) bringUp(workspace string) (*sessionController, error) {
+	d, _, err := m.bringUpTracked(workspace)
+	return d, err
+}
+
+// bringUpTracked is bringUp plus the ownership fact recovery needs. created is
+// false when a concurrent caller already owns the workspace, so a failed old
+// generation can observe that winner without applying retry policy to it.
+func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, error) {
 	m.mu.Lock()
 	if m.closed {
 		m.mu.Unlock()
-		return nil, fmt.Errorf("session-controller: manager closed")
+		return nil, false, fmt.Errorf("session-controller: manager closed")
 	}
 	if d, ok := m.byWS[workspace]; ok {
 		m.mu.Unlock()
-		return d, nil
+		return d, false, nil
 	}
 	m.mu.Unlock()
 
 	sessionID, ok := m.cfg.Locator.Locate(workspace)
 	if !ok {
-		return nil, fmt.Errorf("session-controller: workspace %q has no live session to drive", workspace)
+		return nil, false, fmt.Errorf("session-controller: workspace %q has no live session to drive", workspace)
 	}
 	generationID, err := m.newControllerGenerationID()
 	if err != nil {
 		m.logf("session-controller: controller generation mint FAILED ws=%q session=%s decision=abort_before_spawn error=%v",
 			workspace, sessionID, err)
-		return nil, err
+		return nil, false, err
 	}
 	if generationID == "" {
 		err := fmt.Errorf("session-controller: controller generation factory returned an empty id")
 		m.logf("session-controller: controller generation mint FAILED ws=%q session=%s decision=abort_before_spawn error=%v",
 			workspace, sessionID, err)
-		return nil, err
+		return nil, false, err
 	}
 	m.logf("session-controller: controller generation minted ws=%q session=%s generation=%s decision=begin_bring_up",
 		workspace, sessionID, generationID)
 	spawn, err := m.cfg.Spawner.EnsureShim(m.rootCtx, sessionID)
 	if err != nil {
-		return nil, fmt.Errorf("session-controller: ensure shim for session %s (ws %q): %w", sessionID, workspace, err)
+		return nil, false, fmt.Errorf("session-controller: ensure shim for session %s (ws %q): %w", sessionID, workspace, err)
 	}
 
 	d := &sessionController{
 		sessionID: sessionID, workspace: workspace,
-		generationID: generationID, faulted: make(chan struct{}),
+		generationID: generationID, resumedVendorSessionID: spawn.Resumed,
+		staleResumeDroppedVendorSessionID: spawn.StaleResumeDropped, faulted: make(chan struct{}),
 	}
 	cons := newConsumer(workspace, sessionID, m.cfg.Push, m.cfg.SSM, m.cfg.Progress, m.cfg.ClearCompactStore, m.logf, func(ss *corev1.SessionStarted) {
 		m.persistVendorSessionID(sessionID, ss.GetVendorSessionId())
@@ -1689,7 +1698,7 @@ func (m *Manager) bringUp(workspace string) (*sessionController, error) {
 		cancel()
 		// The winner owns the axis: this loser's teardown must not report the
 		// workspace unwired while a live session controller holds it.
-		return existing, nil
+		return existing, false, nil
 	}
 	m.byWS[workspace] = d
 	m.mu.Unlock()
@@ -1739,7 +1748,9 @@ func (m *Manager) bringUp(workspace string) (*sessionController, error) {
 			m.logf("session-controller: session %s bring-up aborted by a manager close ws=%q; PRESERVING the shim for the next daemon to reattach",
 				sessionID, workspace)
 		}
-		return nil, fmt.Errorf("session-controller: manager closed during bring-up of workspace %q", workspace)
+		m.logf("session-controller: session %s bring-up FAILED ws=%q generation=%s reason=manager_closed was_current=%t dropped_prompts=%d decision=abort",
+			sessionID, workspace, generationID, wasCurrent, len(dropped))
+		return nil, false, fmt.Errorf("session-controller: manager closed during bring-up of workspace %q", workspace)
 	}
 	m.exits.Add(1)
 	m.mu.Unlock()
@@ -1852,7 +1863,7 @@ func (m *Manager) bringUp(workspace string) (*sessionController, error) {
 		// turn really did finish in the gap (ssm.ReconcileTurnHandshake).
 	}()
 	m.logf("session-controller: brought up session=%s ws=%q (reattach-first)", sessionID, workspace)
-	return d, nil
+	return d, true, nil
 }
 
 // onHandshake adopts the vendor session uuid a (re)handshaking shim announces,

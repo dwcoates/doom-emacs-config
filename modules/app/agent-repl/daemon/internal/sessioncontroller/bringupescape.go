@@ -13,9 +13,9 @@
 //
 //  1. A bring-up that neither wires nor faults within bringUpTimeout is a
 //     failure, not a wait. (Already true; what is new is that it now RESOLVES.)
-//  2. A bring-up that failed WITH a resume pointer is classified as a bad
-//     pointer: drop it, note it in the feed, retry FRESH exactly once.
-//  3. A fresh bring-up that fails is terminal: the axis closes with
+//  2. A transport failure preserves the durable resume pointer and retries the
+//     same conversation exactly once.
+//  3. A vendor failure or failed retry is terminal: the axis closes with
 //     `bring_up_failed` and a loud failure card names the error.
 //
 // So every bring-up now ends on `wired` or on a resolved failure, and
@@ -24,6 +24,7 @@ package sessioncontroller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
@@ -38,6 +39,23 @@ import (
 // with `sdk_error`, so it arrives over the live connection even when ShimReady
 // never does, and it carries the vendor's own message verbatim.
 const shimSDKComponent = "claude-shim-sdk"
+
+type bringUpFailureKind string
+
+const (
+	bringUpFailureTransport bringUpFailureKind = "transport"
+	bringUpFailureTimeout   bringUpFailureKind = "timeout"
+	bringUpFailureVendor    bringUpFailureKind = "vendor"
+	bringUpFailureCanceled  bringUpFailureKind = "canceled"
+)
+
+type bringUpFailure struct {
+	kind  bringUpFailureKind
+	cause error
+}
+
+func (e *bringUpFailure) Error() string { return e.cause.Error() }
+func (e *bringUpFailure) Unwrap() error { return e.cause }
 
 // noteBringUpFault records a shim-reported SDK failure observed while a
 // bring-up is still waiting, and WAKES the wait.
@@ -88,7 +106,14 @@ func (m *Manager) awaitDriveable(ctx context.Context, d *sessionController) erro
 	select {
 	case err := <-ready:
 		if err != nil {
-			return fmt.Errorf("session-controller: session %s for workspace %q never became driveable: %w", d.sessionID, d.workspace, err)
+			kind := bringUpFailureTransport
+			switch {
+			case ctx.Err() != nil:
+				kind = bringUpFailureCanceled
+			case errors.Is(err, context.DeadlineExceeded):
+				kind = bringUpFailureTimeout
+			}
+			return &bringUpFailure{kind: kind, cause: fmt.Errorf("session-controller: session %s for workspace %q never became driveable: %w", d.sessionID, d.workspace, err)}
 		}
 		m.noteWired(d.workspace, d.sessionID)
 		return nil
@@ -96,44 +121,83 @@ func (m *Manager) awaitDriveable(ctx context.Context, d *sessionController) erro
 		m.mu.Lock()
 		reason := d.faultReason
 		m.mu.Unlock()
-		return fmt.Errorf("session-controller: session %s for workspace %q died during bring-up: %s", d.sessionID, d.workspace, reason)
+		return &bringUpFailure{kind: bringUpFailureVendor, cause: fmt.Errorf("session-controller: session %s for workspace %q died during bring-up: %s", d.sessionID, d.workspace, reason)}
 	}
 }
 
 // escapeFailedBringUp is rungs 2 and 3 of the ladder. It always resolves: it
-// either returns a session controller that IS wired (the fresh retry worked) or a loud
-// error whose failure card and closed axis have already been published.
+// either returns a session controller that IS wired (the same-conversation
+// transport retry worked) or a loud error whose failure card and closed axis
+// have already been published.
 func (m *Manager) escapeFailedBringUp(ctx context.Context, workspace string, d *sessionController, cause error) (*sessionController, error) {
-	m.tearDownFailedBringUp(workspace, d)
-
-	dropped, dropErr := m.cfg.Spawner.DropResume(d.sessionID)
-	if dropErr != nil {
-		// The pointer could not be cleared, so a retry would resume the very
-		// thing that just failed. Resolve rather than loop.
-		m.resolveStartFailed(workspace, d, fmt.Errorf("%w (and the stale resume pointer could not be dropped: %v)", cause, dropErr))
-		return nil, cause
+	// A retired generation has no authority to stop the shim or rewrite durable
+	// conversation identity. Re-enter ensure through the current generation so
+	// the original waiter observes its replacement instead of sabotaging it.
+	m.mu.Lock()
+	current := m.byWS[workspace]
+	m.mu.Unlock()
+	if current != d {
+		m.cancelRetiredBringUp(workspace, d, current, "pre_teardown", cause)
+		if current == nil {
+			return nil, cause
+		}
+		return m.ensure(ctx, workspace)
 	}
-	if dropped == "" {
-		// The bring-up was already FRESH. There is nothing left to try, and
-		// retrying the identical spawn would only spend the user's time.
-		m.logf("session-controller: bring-up FAILED ws=%q session=%s with no resume pointer to drop — resolving start-failed: %v",
-			workspace, d.sessionID, cause)
+
+	if !m.tearDownFailedBringUp(workspace, d) {
+		m.mu.Lock()
+		current = m.byWS[workspace]
+		m.mu.Unlock()
+		m.cancelRetiredBringUp(workspace, d, current, "teardown_race", cause)
+		if current == nil {
+			return nil, cause
+		}
+		return m.ensure(ctx, workspace)
+	}
+
+	kind := bringUpFailureTransport
+	var classified *bringUpFailure
+	if errors.As(cause, &classified) {
+		kind = classified.kind
+	}
+	if kind != bringUpFailureTransport && kind != bringUpFailureTimeout {
+		m.logf("session-controller: bring-up FAILED ws=%q session=%s generation=%s failure_kind=%s resume=%q resume_decision=preserve retry=false cause=%v",
+			workspace, d.sessionID, d.generationID, kind, d.resumedVendorSessionID, cause)
 		m.resolveStartFailed(workspace, d, cause)
 		return nil, cause
 	}
 
-	m.logf("session-controller: bring-up FAILED ws=%q session=%s while resuming vendor conversation %s — dropping the pointer and retrying FRESH exactly once: %v",
-		workspace, d.sessionID, dropped, cause)
-	m.pushHistoryMissingNote(d, dropped, cause.Error())
+	m.logf("session-controller: bring-up FAILED ws=%q session=%s generation=%s failure_kind=%s resume=%q resume_decision=preserve retry=same_conversation_once cause=%v",
+		workspace, d.sessionID, d.generationID, kind, d.resumedVendorSessionID, cause)
 
-	retry, err := m.bringUp(workspace)
+	retry, created, err := m.bringUpTracked(workspace)
 	if err != nil {
 		m.resolveStartFailed(workspace, d, err)
 		return nil, err
 	}
+	if !created {
+		m.logf("session-controller: same-conversation retry lost concurrent bring-up race ws=%q failed_session=%s failed_generation=%s current_session=%s current_generation=%s decision=observe_current resume_decision=preserve",
+			workspace, d.sessionID, d.generationID, retry.sessionID, retry.generationID)
+		return m.ensure(ctx, workspace)
+	}
+	if d.resumedVendorSessionID != "" && retry.resumedVendorSessionID != d.resumedVendorSessionID {
+		if retry.staleResumeDroppedVendorSessionID == d.resumedVendorSessionID {
+			m.logf("session-controller: same-conversation retry found affirmative stale-pointer evidence ws=%q session=%s generation=%s resume=%q resume_decision=drop_transcript_absent",
+				workspace, retry.sessionID, retry.generationID, d.resumedVendorSessionID)
+		} else {
+			err := fmt.Errorf("session-controller: transport retry changed resume identity for session %s from %q to %q without affirmative stale-pointer evidence",
+				d.sessionID, d.resumedVendorSessionID, retry.resumedVendorSessionID)
+			m.logf("session-controller: bring-up retry invariant FAILED ws=%q session=%s first_generation=%s retry_generation=%s resume_decision=abort expected_resume=%q actual_resume=%q cause=%v",
+				workspace, d.sessionID, d.generationID, retry.generationID, d.resumedVendorSessionID, retry.resumedVendorSessionID, err)
+			m.tearDownFailedBringUp(workspace, retry)
+			m.resolveStartFailed(workspace, retry, err)
+			return nil, err
+		}
+	}
 	if err := m.awaitDriveable(ctx, retry); err != nil {
 		m.tearDownFailedBringUp(workspace, retry)
-		m.logf("session-controller: the FRESH retry failed too ws=%q session=%s — resolving start-failed: %v", workspace, retry.sessionID, err)
+		m.logf("session-controller: same-conversation transport retry failed ws=%q session=%s generation=%s resume=%q resume_decision=preserve retry=false cause=%v",
+			workspace, retry.sessionID, retry.generationID, retry.resumedVendorSessionID, err)
 		m.resolveStartFailed(workspace, retry, err)
 		return nil, err
 	}
@@ -142,7 +206,7 @@ func (m *Manager) escapeFailedBringUp(ctx context.Context, workspace string, d *
 
 // tearDownFailedBringUp evicts a session controller that never wired and stops the shim it
 // spawned, so the retry starts from nothing rather than racing a corpse.
-func (m *Manager) tearDownFailedBringUp(workspace string, d *sessionController) {
+func (m *Manager) tearDownFailedBringUp(workspace string, d *sessionController) bool {
 	m.mu.Lock()
 	wasCurrent := false
 	if cur, ok := m.byWS[workspace]; ok && cur == d {
@@ -150,6 +214,12 @@ func (m *Manager) tearDownFailedBringUp(workspace string, d *sessionController) 
 		wasCurrent = true
 	}
 	m.mu.Unlock()
+	if !wasCurrent {
+		if d.cancel != nil {
+			d.cancel()
+		}
+		return false
+	}
 	// The drain runs before the cancel like every other teardown's, even though
 	// a bring-up that never wired has almost never started a turn: a RETRY
 	// after a partially handshaked shim is the exception, and the interrupt
@@ -164,6 +234,27 @@ func (m *Manager) tearDownFailedBringUp(workspace string, d *sessionController) 
 	// out the winner's live turn.
 	if err := m.stopShimSettlingTurn(workspace, d.sessionID, "bringup_failed", wasCurrent); err != nil {
 		m.logf("session-controller: stopping the shim of a failed bring-up FAILED ws=%q session=%s: %v", workspace, d.sessionID, err)
+	}
+	return true
+}
+
+// cancelRetiredBringUp releases only the retired controller's private client.
+// It never stops a shim or publishes durable/render state because current is
+// the sole owner of those effects, including when current is nil after an
+// explicit hibernation removed the workspace.
+func (m *Manager) cancelRetiredBringUp(workspace string, d, current *sessionController, phase string, cause error) {
+	currentGeneration := ""
+	currentSession := ""
+	decision := "return_failure"
+	if current != nil {
+		currentGeneration = current.generationID
+		currentSession = current.sessionID
+		decision = "observe_current"
+	}
+	m.logf("session-controller: bring-up failure belongs to retired generation ws=%q session=%s failed_generation=%s current_session=%s current_generation=%s phase=%s decision=%s stop_shim=false resume_decision=preserve cause=%v",
+		workspace, d.sessionID, d.generationID, currentSession, currentGeneration, phase, decision, cause)
+	if d.cancel != nil {
+		d.cancel()
 	}
 }
 

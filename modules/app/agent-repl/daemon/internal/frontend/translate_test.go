@@ -555,7 +555,7 @@ func TestFilterSnapshotKeepsMergedAt(t *testing.T) {
 	}}}
 
 	// Act.
-	got := filterSnapshot(snap, Scope{Workspace: "/ws/alpha"})
+	got := filterSnapshot(snap, Scope{SessionID: "s1", Workspace: "/ws/alpha"})
 
 	// Assert.
 	if len(got.GetWorkspaces()) != 1 {
