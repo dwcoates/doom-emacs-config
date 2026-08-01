@@ -53,9 +53,23 @@ fi
 EOF
     chmod +x "$mod/bin/build-frontend.sh"
 
-    # An .el file for the --elisp scenario (test-foo.el deliberately absent
-    # from disk to double as the deleted-file case if listed).
+    # .el files for the --elisp scenarios (test-foo.el and deleted.el are
+    # deliberately absent from disk so they double as the skipped cases).
+    #
+    # config.el carries the canonical `agent-repl--load-module' order the
+    # core.el expansion reads. `emoji' is listed but has no file on disk, so
+    # the expansion is also exercised against a loader entry whose module is
+    # missing.
     printf ';; stub\n' > "$mod/status.el"
+    printf ';; stub\n' > "$mod/core.el"
+    printf ';; stub\n' > "$mod/workspace.el"
+    cat > "$mod/config.el" <<'EOF'
+;; stub loader
+(agent-repl--load-module "core")
+(agent-repl--load-module "workspace")
+(agent-repl--load-module "status")
+(agent-repl--load-module "emoji")
+EOF
 }
 
 # --- stub toolchain on PATH -------------------------------------------------
@@ -129,6 +143,18 @@ case "$*" in
         fi
         exit 0
         ;;
+    *assert-heartbeat-armed*)
+        # The post-load timer-contract verification. EC_STUB_ASSERT selects
+        # which shape the running Emacs answers with.
+        case "${EC_STUB_ASSERT:-ok}" in
+            absent) echo '"absent"' ;;
+            rearmed) echo '"armed=3 rearmed=1 failed=0 unavailable=0"' ;;
+            failed)  echo '"armed=3 rearmed=0 failed=1 unavailable=0"' ;;
+            garbage) echo '"who knows"' ;;
+            *)       echo '"armed=4 rearmed=0 failed=0 unavailable=0"' ;;
+        esac
+        exit 0
+        ;;
 esac
 if [ "${EC_STUB_REFUSE:-0}" = "1" ]; then
     case "$*" in
@@ -148,10 +174,16 @@ case "$*" in
     *"rev-parse HEAD"*)     echo "${GIT_STUB_SHA:-deadbeefcafe}" ;;
     *"status --porcelain"*) printf '%s' "${GIT_STUB_DIRTY:-}" ;;
     *"diff --name-only"*)
-        printf '%s\n' \
-            "modules/app/agent-repl/status.el" \
-            "modules/app/agent-repl/test-foo.el" \
-            "modules/app/agent-repl/deleted.el"
+        if [ -n "${GIT_STUB_DIFF_FILES:-}" ]; then
+            # Comma-separated, because RUN_ENV is word-split by the runner and
+            # a space-bearing value would be parsed as a command.
+            printf '%s\n' ${GIT_STUB_DIFF_FILES//,/ }
+        else
+            printf '%s\n' \
+                "modules/app/agent-repl/status.el" \
+                "modules/app/agent-repl/test-foo.el" \
+                "modules/app/agent-repl/deleted.el"
+        fi
         ;;
 esac
 EOF
@@ -488,6 +520,109 @@ if [ "$RC" -eq 3 ] && ! log_has "refresh-webviews"; then
 else
     fail "a refused daemon restart aborts before the webview refresh" \
          "rc=$RC log: $(cat "$STUB_LOG")"
+fi
+
+# --- 20. core.el in the change set expands to the full module set ----------
+# core.el cancels every module timer at load time and only its owner files
+# re-arm them, so loading core.el with a partial set strands the 1Hz heartbeat.
+d="$TMP/t20"; mkdir -p "$d"
+RUN_ENV="GIT_STUB_DIFF_FILES=modules/app/agent-repl/core.el" run_deploy "$d" --elisp "abc..def"
+if [ "$RC" -eq 0 ] \
+   && grep -q "core.el in change set — expanding to full module reload (3 files)" "$d/stdout" \
+   && log_has 'emacsclient --eval (load .*core.el' \
+   && log_has 'emacsclient --eval (load .*workspace.el' \
+   && log_has 'emacsclient --eval (load .*status.el'; then
+    pass "a change set containing core.el expands to the full canonical module set"
+else
+    fail "a change set containing core.el expands to the full canonical module set" \
+         "rc=$RC stdout: $(cat "$d/stdout") log: $(cat "$STUB_LOG")"
+fi
+
+# --- 21. the expansion follows config.el's load-module order ---------------
+# Loading status.el before core.el would let core.el's cancel-all clear the
+# heartbeat status.el had just armed, which is the stranding this fixes.
+d="$TMP/t21"; mkdir -p "$d"
+RUN_ENV="GIT_STUB_DIFF_FILES=modules/app/agent-repl/core.el" run_deploy "$d" --elisp "abc..def"
+if [ "$RC" -eq 0 ] \
+   && log_before 'load .*/core.el' 'load .*/workspace.el' \
+   && log_before 'load .*/workspace.el' 'load .*/status.el'; then
+    pass "the expanded load list follows config.el's agent-repl--load-module order"
+else
+    fail "the expanded load list follows config.el's agent-repl--load-module order" \
+         "rc=$RC log: $(cat "$STUB_LOG")"
+fi
+
+# --- 22. a change set without core.el stays minimal ------------------------
+d="$TMP/t22"; mkdir -p "$d"
+RUN_ENV="GIT_STUB_DIFF_FILES=modules/app/agent-repl/status.el" run_deploy "$d" --elisp "abc..def"
+if [ "$RC" -eq 0 ] \
+   && ! grep -q "expanding to full module reload" "$d/stdout" \
+   && log_has 'emacsclient --eval (load .*status.el' \
+   && ! log_has 'emacsclient --eval (load .*workspace.el'; then
+    pass "a change set without core.el loads only the changed files"
+else
+    fail "a change set without core.el loads only the changed files" \
+         "rc=$RC stdout: $(cat "$d/stdout") log: $(cat "$STUB_LOG")"
+fi
+
+# --- 23. a changed file outside the loader still loads after the expansion --
+d="$TMP/t23"; mkdir -p "$d"
+RUN_ENV="GIT_STUB_DIFF_FILES=modules/app/agent-repl/core.el,modules/app/agent-repl/config.el" \
+    run_deploy "$d" --elisp "abc..def"
+if [ "$RC" -eq 0 ] \
+   && grep -q "expanding to full module reload (4 files)" "$d/stdout" \
+   && log_before 'load .*/status.el' 'load .*/config.el'; then
+    pass "a changed file the loader does not name is appended after the canonical set"
+else
+    fail "a changed file the loader does not name is appended after the canonical set" \
+         "rc=$RC stdout: $(cat "$d/stdout") log: $(cat "$STUB_LOG")"
+fi
+
+# --- 24. the post-load timer assertion runs and its result is logged -------
+d="$TMP/t24"; mkdir -p "$d"; RUN_ENV="" run_deploy "$d" --elisp "abc..def"
+if [ "$RC" -eq 0 ] \
+   && log_before 'load .*status.el' 'assert-heartbeat-armed' \
+   && grep -q "heartbeat assertion: armed=4 rearmed=0 failed=0 unavailable=0" "$d/stdout"; then
+    pass "the post-load heartbeat assertion runs after the loads and logs its result"
+else
+    fail "the post-load heartbeat assertion runs after the loads and logs its result" \
+         "rc=$RC stdout: $(cat "$d/stdout") log: $(cat "$STUB_LOG")"
+fi
+
+# --- 25. a re-armed stranded timer is reported loudly, deploy still succeeds
+d="$TMP/t25"; mkdir -p "$d"; RUN_ENV="EC_STUB_ASSERT=rearmed" run_deploy "$d" --elisp "abc..def"
+if [ "$RC" -eq 0 ] && grep -q "RE-ARMED stranded timers" "$d/stdout"; then
+    pass "a stranded timer that the assertion re-armed is reported without failing the deploy"
+else
+    fail "a stranded timer that the assertion re-armed is reported without failing the deploy" \
+         "rc=$RC stdout: $(cat "$d/stdout")"
+fi
+
+# --- 26. a timer that could NOT be re-armed fails the deploy ---------------
+d="$TMP/t26"; mkdir -p "$d"; RUN_ENV="EC_STUB_ASSERT=failed" run_deploy "$d" --elisp "abc..def"
+if [ "$RC" -eq 3 ] && grep -q "a required timer could not be re-armed" "$d/stderr"; then
+    pass "a timer the assertion could not re-arm fails the deploy loudly"
+else
+    fail "a timer the assertion could not re-arm fails the deploy loudly" \
+         "rc=$RC stderr: $(cat "$d/stderr")"
+fi
+
+# --- 27. an Emacs predating the assertion reports a skip -------------------
+d="$TMP/t27"; mkdir -p "$d"; RUN_ENV="EC_STUB_ASSERT=absent" run_deploy "$d" --elisp "abc..def"
+if [ "$RC" -eq 0 ] && grep -q "heartbeat assertion skipped — function absent" "$d/stdout"; then
+    pass "an Emacs lacking the heartbeat assertion skips it without failing the deploy"
+else
+    fail "an Emacs lacking the heartbeat assertion skips it without failing the deploy" \
+         "rc=$RC stdout: $(cat "$d/stdout")"
+fi
+
+# --- 28. an unrecognized assertion result is fatal -------------------------
+d="$TMP/t28"; mkdir -p "$d"; RUN_ENV="EC_STUB_ASSERT=garbage" run_deploy "$d" --elisp "abc..def"
+if [ "$RC" -eq 3 ] && grep -q "heartbeat assertion returned an unrecognized result" "$d/stderr"; then
+    pass "an unrecognized heartbeat-assertion result fails the deploy rather than passing silently"
+else
+    fail "an unrecognized heartbeat-assertion result fails the deploy rather than passing silently" \
+         "rc=$RC stderr: $(cat "$d/stderr")"
 fi
 
 echo
