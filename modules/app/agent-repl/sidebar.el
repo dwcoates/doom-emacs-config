@@ -197,9 +197,11 @@ drops its row outright rather than greying it — greying a row for a
 workspace the user can no longer switch to was the confusion this
 predicate used to produce.
 
-`:merged' is the one perspective-less state that still greys, because
-merged rows deliberately outlive their tab in the Recently Merged
-section and must keep receding there exactly as before."
+A merged workspace is the one perspective-less case that still greys,
+because merged rows deliberately outlive their tab in the Recently Merged
+section and must keep receding there exactly as before.  Merged-ness is
+`agent-repl--sidebar-merged-p' — the durable merge instant, not the
+transient `:merged' render state."
   (let ((repl-state (agent-repl--ws-get name :repl-state))
         (merged (agent-repl--sidebar-merged-p name)))
     (let ((closed (or merged (eq repl-state :inactive))))
@@ -302,16 +304,38 @@ minute has passed."
                                 agent-repl--sidebar-merged-epoch))
     agent-repl--sidebar-merged-epoch))
 
-(defun agent-repl--sidebar-merged-p (name)
-  "Return non-nil when workspace NAME's render status is `:merged'."
-  (eq (agent-repl--ws-render-status name) :merged))
-
 (defun agent-repl--sidebar-merged-at (name)
-  "Return NAME's merge-completion time as epoch seconds, or 0 when absent."
+  "Return NAME's merge-completion time as epoch seconds, or 0 when absent.
+Sourced from `:merge-completed-at', which `frontend-state.el' retains off
+every pushed `WorkspaceState' (`agent-repl--frontend-retain-merged-at')
+and `session.el' restores from saved state."
   (let ((at (agent-repl--ws-get name :merge-completed-at)))
     (cond ((null at) 0)
           ((numberp at) at)
           (t (float-time at)))))
+
+(defun agent-repl--sidebar-merged-p (name)
+  "Return non-nil when workspace NAME belongs to the Recently Merged section.
+
+Keyed on the DURABLE merge instant plus the absence of a perspective,
+NOT on the render state being `:merged'.  The render state is transient:
+after a merge lands the daemon hibernates the session, so within seconds
+the pushed state reads `:hibernated' — and a section keyed on `:merged'
+dropped the row exactly then, while `agent-repl--sidebar-rostered-p' (which
+exempts merged rows from the perspective requirement) dropped it from the
+roster entirely.  The workspace vanished from the sidebar with no trace.
+A merge instant never un-happens, so keying on it makes that disappearance
+unrepresentable rather than merely unlikely.
+
+The perspective clause is what keeps the section honest in the other
+direction.  A merged row that the user REVIVES out of the section
+\(`agent-repl--sidebar-open-dir') gets its perspective and its session
+back, and a live workspace does not belong in a list of work that has
+receded — it rejoins its repo or task group and reports its live status
+there.  Merging kills the perspective, so a settled merge satisfies this
+clause for as long as it stays settled."
+  (and (> (agent-repl--sidebar-merged-at name) 0)
+       (not (agent-repl--ws-open-p name))))
 
 (defun agent-repl--sidebar-recently-merged-p (name)
   "Return non-nil when merged NAME merged at or after the current epoch.
@@ -322,38 +346,67 @@ completed merge still counts as recent."
          (or (null agent-repl--sidebar-merged-epoch)
              (>= at agent-repl--sidebar-merged-epoch)))))
 
-(defun agent-repl--sidebar-merged-sorted (entries)
-  "Return the recently-merged ENTRIES, newest merge first."
-  (sort (cl-remove-if-not (lambda (e) (agent-repl--sidebar-recently-merged-p (car e)))
-                          (copy-sequence entries))
-        (lambda (a b)
-          (> (agent-repl--sidebar-merged-at (car a))
-             (agent-repl--sidebar-merged-at (car b))))))
+(defcustom agent-repl-sidebar-merged-max-rows 10
+  "Most recently-merged rows the Recently Merged section will render.
+Merges accumulate faster than the activity window
+\(`agent-repl-sidebar-merged-window-seconds') retires them, and an
+unbounded section pushes the live workspaces — the rows the user acts on
+— off the bottom of the rail.  The newest merges survive the cap, since
+recency is the only thing the section claims to order on.  Rows dropped
+by the cap are logged, never silently truncated."
+  :type 'integer
+  :group 'agent-repl)
 
-(defun agent-repl--sidebar-merged-group (entries current-name)
-  "Return the Recently Merged group plist for ENTRIES, or nil when empty.
+(defun agent-repl--sidebar-merged-sorted (entries)
+  "Return the recently-merged ENTRIES, newest merge first, capped.
+The cap is `agent-repl-sidebar-merged-max-rows'; whatever it drops is
+named in the log, so a merge missing from the rail is explainable from
+the log alone rather than looking like the retention bug this section
+exists to fix."
+  (let* ((recent (sort (cl-remove-if-not
+                        (lambda (e) (agent-repl--sidebar-recently-merged-p (car e)))
+                        (copy-sequence entries))
+                       (lambda (a b)
+                         (> (agent-repl--sidebar-merged-at (car a))
+                            (agent-repl--sidebar-merged-at (car b))))))
+         (total (length recent)))
+    (if (<= total agent-repl-sidebar-merged-max-rows)
+        recent
+      (let ((kept (cl-subseq recent 0 agent-repl-sidebar-merged-max-rows)))
+        (agent-repl--log nil
+                         "sidebar-merged-sorted: cap=%d recent=%d — dropping %d older merge(s) from Recently Merged: %s"
+                         agent-repl-sidebar-merged-max-rows total
+                         (- total agent-repl-sidebar-merged-max-rows)
+                         (mapcar #'car (cl-subseq recent agent-repl-sidebar-merged-max-rows)))
+        kept))))
+
+(defun agent-repl--sidebar-merged-group (recent current-name)
+  "Return the Recently Merged group plist for RECENT, or nil when empty.
+RECENT is the already-sorted, already-capped entry list
+`agent-repl--sidebar-merged-sorted' returns, passed in rather than
+recomputed so the cap is decided — and logged — exactly once per build.
+
 Shaped exactly like a repo group so the webapp validates and folds it
 through the same path.  Merged rows carry no children: the family tree
 is an organizing claim about live work, and a merged workspace has left
 that tree."
-  (let ((recent (agent-repl--sidebar-merged-sorted entries)))
-    (when recent
-      (agent-repl--log-verbose nil "sidebar-merged-group: entries=%d recent=%d current=%s"
-                                (length entries) (length recent) current-name)
-      (list :key agent-repl--sidebar-merged-key
-            :label "Recently Merged"
-            :folded (if (agent-repl--repo-folded-p agent-repl--sidebar-merged-key)
-                        t :false)
-            ;; Uniform group shape: `:done' is meaningful only for task
-            ;; sections, but every group carries it so the webapp's
-            ;; validateGroup stays one code path.
-            :done :false
-            :rows (vconcat
-                   (mapcar (lambda (e)
-                             (agent-repl--sidebar-row-plist
-                              (car e) (agent-repl--path-canonical (cdr e))
-                              current-name []))
-                           recent))))))
+  (when recent
+    (agent-repl--log-verbose nil "sidebar-merged-group: recent=%d current=%s"
+                             (length recent) current-name)
+    (list :key agent-repl--sidebar-merged-key
+          :label "Recently Merged"
+          :folded (if (agent-repl--repo-folded-p agent-repl--sidebar-merged-key)
+                      t :false)
+          ;; Uniform group shape: `:done' is meaningful only for task
+          ;; sections, but every group carries it so the webapp's
+          ;; validateGroup stays one code path.
+          :done :false
+          :rows (vconcat
+                 (mapcar (lambda (e)
+                           (agent-repl--sidebar-row-plist
+                            (car e) (agent-repl--path-canonical (cdr e))
+                            current-name []))
+                         recent)))))
 
 ;;;; ---- Roster building --------------------------------------------------
 
@@ -659,13 +712,16 @@ invariant compares two exact counts.  They render instead in the
                    nil)))
          (sections (car built))
          (flat (cdr built))
-         (recent (agent-repl--sidebar-merged-group merged-entries current))
+         ;; Sorted and capped ONCE: the group and the keyboard-navigable dir
+         ;; list must walk the identical row set, and the cap's drop log must
+         ;; not double per build.
+         (recent-entries (agent-repl--sidebar-merged-sorted merged-entries))
+         (recent (agent-repl--sidebar-merged-group recent-entries current))
          (recent-folded (agent-repl--repo-folded-p agent-repl--sidebar-merged-key))
          (recent-dirs (and recent (not recent-folded)
                            (mapcar (lambda (e)
                                      (agent-repl--path-canonical (cdr e)))
-                                   (agent-repl--sidebar-merged-sorted
-                                   merged-entries)))))
+                                   recent-entries))))
     (agent-repl--log-verbose nil "sidebar-build: view=%s entries=%d grouped=%d merged=%d sections=%d recent=%s flat=%d"
                               agent-repl--sidebar-view (length all-entries) (length entries)
                               (length merged-entries) (length sections) (and recent t)

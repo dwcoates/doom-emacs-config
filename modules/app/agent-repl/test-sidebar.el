@@ -154,11 +154,11 @@ perspective-less workspace loses its row entirely instead of greying."
 (ert-deftest agent-repl-test-sidebar-closed-p-merged-stays-greyed ()
   "A merged workspace greys even though its REPL is not `:inactive'.
 Merged rows outlive their tab inside Recently Merged, and the ruling
-keeps that section's rendering unchanged."
+keeps that section's rendering unchanged.  Merged-ness is the durable
+merge instant, so that is what the arrangement carries."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--sidebar-ws "ws" "/tmp/ws" :repl-state :merged)
-    (cl-letf (((symbol-function 'agent-repl--ws-open-p) (lambda (_ws) nil))
-              ((symbol-function 'agent-repl--ws-render-status) (lambda (_ws) :merged)))
+    (agent-repl-test--sidebar-ws "ws" "/tmp/ws" :merge-completed-at 100.0)
+    (cl-letf (((symbol-function 'agent-repl--ws-open-p) (lambda (_ws) nil)))
       (should (eq (agent-repl--sidebar-closed-p "ws") t)))))
 
 ;;;; ---- The roster universe -------------------------------------------------
@@ -244,24 +244,21 @@ keeps that section's rendering unchanged."
 (ert-deftest agent-repl-test-sidebar-entries-keeps-perspective-less-merged ()
   "A merged workspace survives losing its perspective — the ruling's exemption."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--sidebar-ws "merged" "/tmp/merged" :repl-state :merged)
-    (cl-letf (((symbol-function 'agent-repl--ws-render-status) (lambda (_ws) :merged)))
-      (agent-repl-test--sidebar-with-persps '("other")
-        (should (equal (agent-repl--sidebar-entries)
-                       '(("merged" . "/tmp/merged"))))))))
+    (agent-repl-test--sidebar-ws "merged" "/tmp/merged" :merge-completed-at 100.0)
+    (agent-repl-test--sidebar-with-persps '("other")
+      (should (equal (agent-repl--sidebar-entries)
+                     '(("merged" . "/tmp/merged")))))))
 
 (ert-deftest agent-repl-test-sidebar-merged-section-survives-perspective-kill ()
   "The Recently Merged section still renders a merged, perspective-less row."
   (agent-repl-test--with-clean-state
-    (agent-repl-test--sidebar-ws "merged" "/tmp/merged"
-                                 :repl-state :merged :merge-completed-at 100.0)
-    (cl-letf (((symbol-function 'agent-repl--ws-render-status) (lambda (_ws) :merged)))
-      (agent-repl-test--sidebar-with-persps '("other")
-        (let* ((roster (car (agent-repl--sidebar-build)))
-               (recent (plist-get roster :recentlyMerged))
-               (row (agent-repl-test--sidebar-row (plist-get recent :rows) "merged")))
-          (should row)
-          (should (eq (plist-get row :closed) t)))))))
+    (agent-repl-test--sidebar-ws "merged" "/tmp/merged" :merge-completed-at 100.0)
+    (agent-repl-test--sidebar-with-persps '("other")
+      (let* ((roster (car (agent-repl--sidebar-build)))
+             (recent (plist-get roster :recentlyMerged))
+             (row (agent-repl-test--sidebar-row (plist-get recent :rows) "merged")))
+        (should row)
+        (should (eq (plist-get row :closed) t))))))
 
 (ert-deftest agent-repl-test-sidebar-folded-repo-keeps-its-rows ()
   "Folding a repo collapses the section without dropping its rows."
@@ -879,6 +876,80 @@ to be greyed."
                   (car (agent-repl--sidebar-build)))))
       (should (member "live" names))
       (should-not (member "gone" names)))))
+
+(ert-deftest agent-repl-test-sidebar-merged-survives-post-merge-hibernation ()
+  "A merged workspace the daemon then HIBERNATES keeps its merged row.
+The observed disappearance: the render state went `:merged' and, seconds
+later, `:hibernated' when the daemon reclaimed the session's memory, and a
+section keyed on `:merged' lost the row exactly then."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "napping" "/tmp/napping"
+                                 :pushed-render-state :hibernated
+                                 :merge-completed-at (float-time))
+    (agent-repl-test--sidebar-with-persps '("other")
+      (let* ((roster (car (agent-repl--sidebar-build)))
+             (recent (plist-get roster :recentlyMerged)))
+        (should (agent-repl-test--sidebar-row (plist-get recent :rows) "napping"))))))
+
+(ert-deftest agent-repl-test-sidebar-merged-revived-rejoins-the-live-groups ()
+  "A merged row revived back into a perspective leaves Recently Merged.
+Reopening a merged workspace restores its perspective and its session, and
+a live workspace does not belong in a list of work that has receded."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--sidebar-ws "revived" "/tmp/revived"
+                                 :pushed-render-state :ready
+                                 :merge-completed-at (float-time))
+    (agent-repl-test--sidebar-with-persps '("revived")
+      (let ((roster (car (agent-repl--sidebar-build))))
+        (should (eq (plist-get roster :recentlyMerged) :null))
+        (should (member "revived" (agent-repl-test--roster-repo-names roster)))))))
+
+(ert-deftest agent-repl-test-sidebar-merged-capped-at-the-max-rows ()
+  "Recently Merged renders at most `agent-repl-sidebar-merged-max-rows'."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl-sidebar-merged-max-rows 3)
+          (now (float-time)))
+      (dotimes (i 5)
+        (agent-repl-test--sidebar-ws (format "m%d" i) (format "/tmp/m%d" i)
+                                     :pushed-render-state :merged
+                                     :merge-completed-at (+ now i)))
+      (let* ((roster (car (agent-repl--sidebar-build)))
+             (rows (append (plist-get (plist-get roster :recentlyMerged) :rows) nil)))
+        (should (equal (mapcar (lambda (r) (plist-get r :name)) rows)
+                       '("m4" "m3" "m2")))))))
+
+(ert-deftest agent-repl-test-sidebar-merged-cap-names-what-it-dropped ()
+  "The cap logs the merges it dropped rather than truncating silently."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl-sidebar-merged-max-rows 1)
+          (now (float-time))
+          (logged nil))
+      (agent-repl-test--sidebar-ws "kept" "/tmp/kept"
+                                   :pushed-render-state :merged
+                                   :merge-completed-at (+ now 1))
+      (agent-repl-test--sidebar-ws "dropped" "/tmp/dropped"
+                                   :pushed-render-state :merged
+                                   :merge-completed-at now)
+      (cl-letf (((symbol-function 'agent-repl--log)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+        (agent-repl--sidebar-merged-sorted (agent-repl--sidebar-entries)))
+      (should (cl-find-if (lambda (line)
+                            (and (string-match-p "sidebar-merged-sorted: cap=1" line)
+                                 (string-match-p "dropped" line)))
+                          logged)))))
+
+(ert-deftest agent-repl-test-sidebar-merged-cap-leaves-a-short-section-whole ()
+  "A merge count at the cap renders every row (the cap drops nothing)."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl-sidebar-merged-max-rows 2)
+          (now (float-time)))
+      (agent-repl-test--sidebar-ws "a" "/tmp/a"
+                                   :pushed-render-state :merged :merge-completed-at now)
+      (agent-repl-test--sidebar-ws "b" "/tmp/b"
+                                   :pushed-render-state :merged :merge-completed-at (- now 1))
+      (let* ((roster (car (agent-repl--sidebar-build)))
+             (rows (append (plist-get (plist-get roster :recentlyMerged) :rows) nil)))
+        (should (= (length rows) 2))))))
 
 (ert-deftest agent-repl-test-sidebar-merged-listed-newest-first ()
   "Recently merged rows sort by merge time, newest first."

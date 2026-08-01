@@ -264,6 +264,114 @@ dropped rather than stub-created."
       (should (equal (plist-get meta :cause-kind) "task_started"))
       (should (equal (plist-get meta :cause-seq) "42")))))
 
+;;;; ---- The durable merge instant ---------------------------------------
+
+(ert-deftest agent-repl-test-apply-workspace-state-retains-merged-at ()
+  "`mergedAtMs' lands on :merge-completed-at as epoch SECONDS.
+protojson encodes the int64 as a JSON string, which is the shape the
+daemon actually puts on the wire."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--register-ws "ws1")
+    ;; Act
+    (agent-repl-test--apply-workspace-state
+     '(:workspace "ws1" :state "RENDER_STATE_MERGED" :mergedAtMs "1700000000500"))
+    ;; Assert
+    (should (= (agent-repl--ws-get "ws1" :merge-completed-at) 1700000000.5))))
+
+(ert-deftest agent-repl-test-apply-workspace-state-retains-numeric-merged-at ()
+  "A numeric `mergedAtMs' is retained exactly as a stringified one is."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--register-ws "ws1")
+    ;; Act
+    (agent-repl-test--apply-workspace-state
+     '(:workspace "ws1" :state "RENDER_STATE_MERGED" :mergedAtMs 1700000000500))
+    ;; Assert
+    (should (= (agent-repl--ws-get "ws1" :merge-completed-at) 1700000000.5))))
+
+(ert-deftest agent-repl-test-apply-workspace-state-merged-at-survives-hibernation ()
+  "The post-merge `:hibernated' frame keeps carrying the merge instant.
+This is the frame sequence that made a merged workspace vanish from the
+sidebar: the merge lands, then the daemon hibernates the session."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--register-ws "ws1")
+    (agent-repl-test--apply-workspace-state
+     '(:workspace "ws1" :state "RENDER_STATE_MERGED" :mergedAtMs "1700000000000"))
+    ;; Act
+    (agent-repl--frontend-apply-workspace-state
+     '(:workspace "ws1" :state "RENDER_STATE_HIBERNATED"
+       :connectivity "SESSION_CONNECTIVITY_HIBERNATED"
+       :status "SESSION_STATUS_READY"
+       :mergedAtMs "1700000000000"))
+    ;; Assert
+    (should (eq (agent-repl--ws-get "ws1" :pushed-render-state) :hibernated))
+    (should (= (agent-repl--ws-get "ws1" :merge-completed-at) 1700000000.0))))
+
+(ert-deftest agent-repl-test-apply-workspace-state-absent-merged-at-keeps-known ()
+  "An unmerged frame leaves an already-known merge instant alone.
+protojson omits a zero int64, so \"not merged\" and \"field absent\" share
+a wire shape; clearing on it would erase a restored merge."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--register-ws "ws1")
+    (agent-repl--ws-put "ws1" :merge-completed-at 1700000000.0)
+    ;; Act
+    (agent-repl-test--apply-workspace-state
+     '(:workspace "ws1" :state "RENDER_STATE_READY"))
+    ;; Assert
+    (should (= (agent-repl--ws-get "ws1" :merge-completed-at) 1700000000.0))))
+
+(ert-deftest agent-repl-test-apply-workspace-state-zero-merged-at-retains-nothing ()
+  "A zero `mergedAtMs' records no merge (0 is the never-merged value)."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--register-ws "ws1")
+    ;; Act
+    (agent-repl-test--apply-workspace-state
+     '(:workspace "ws1" :state "RENDER_STATE_READY" :mergedAtMs "0"))
+    ;; Assert
+    (should-not (agent-repl--ws-get "ws1" :merge-completed-at))))
+
+(ert-deftest agent-repl-test-apply-workspace-state-unparsable-merged-at-retains-nothing ()
+  "A non-numeric `mergedAtMs' records no merge rather than a guessed 0."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--register-ws "ws1")
+    ;; Act
+    (agent-repl-test--apply-workspace-state
+     '(:workspace "ws1" :state "RENDER_STATE_READY" :mergedAtMs "later"))
+    ;; Assert
+    (should-not (agent-repl--ws-get "ws1" :merge-completed-at))))
+
+(ert-deftest agent-repl-test-apply-workspace-state-merged-at-supersedes-loudly ()
+  "A daemon instant that disagrees with the known one wins, with a log."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--register-ws "ws1")
+    (agent-repl--ws-put "ws1" :merge-completed-at 1600000000.0)
+    (let (logged)
+      ;; Act
+      (cl-letf (((symbol-function 'agent-repl--log)
+                 (lambda (_ws fmt &rest args) (push (apply #'format fmt args) logged))))
+        (agent-repl-test--apply-workspace-state
+         '(:workspace "ws1" :state "RENDER_STATE_MERGED" :mergedAtMs "1700000000000")))
+      ;; Assert
+      (should (= (agent-repl--ws-get "ws1" :merge-completed-at) 1700000000.0))
+      (should (cl-find-if (lambda (line) (string-match-p "SUPERSEDES" line)) logged)))))
+
+(ert-deftest agent-repl-test-apply-workspace-state-merged-at-ignores-unowned-frame ()
+  "A frame for a workspace Emacs does not own records no merge instant."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    ;; Act
+    (should-not (agent-repl-test--apply-workspace-state
+                 '(:workspace "/tmp/nobody" :state "RENDER_STATE_MERGED"
+                   :mergedAtMs "1700000000000")))
+    ;; Assert
+    (should-not (agent-repl--ws-get "/tmp/nobody" :merge-completed-at))))
+
 (ert-deftest agent-repl-test-apply-workspace-state-missing-workspace-errors ()
   "A WorkspaceState with no workspace fails loudly (invariant violation)."
   ;; Arrange
