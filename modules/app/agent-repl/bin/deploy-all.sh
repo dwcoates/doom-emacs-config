@@ -44,7 +44,19 @@
 #   6. elisp reload     with `--elisp <git-range>`: hot-load every non-test
 #                       .el under modules/app/agent-repl changed in the range
 #                       into the running Emacs (test-*.el is batch-only and is
-#                       never loaded interactively)
+#                       never loaded interactively).
+#
+#                       When the change set contains core.el, the load list is
+#                       EXPANDED to the full module set in config.el's
+#                       `agent-repl--load-module' order: core.el cancels every
+#                       module timer at load time and only its owner files
+#                       re-arm them, so a partial set containing core.el used
+#                       to leave the running Emacs with a dead 1Hz heartbeat
+#                       and a frozen tab bar
+#  6b. timer assertion  `(agent-repl--assert-heartbeat-armed)' via emacsclient:
+#                       verifies every required timer key is armed, re-arms
+#                       anything stranded, and fails the deploy (exit 3) when
+#                       a re-arm did not take
 #
 # Usage:  bin/deploy-all.sh [--force] [--no-bounce] [--elisp <git-range>]
 #
@@ -76,6 +88,7 @@ set -euo pipefail
 THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(dirname "$THIS_DIR")"              # modules/app/agent-repl
 REPO_ROOT="$(cd "$ROOT/../../.." && pwd)"  # the git checkout
+MOD_REL="${ROOT#"$REPO_ROOT/"}"            # e.g. modules/app/agent-repl
 
 # shellcheck source=lib-deploy-stamp.sh
 . "$THIS_DIR/lib-deploy-stamp.sh"
@@ -320,16 +333,107 @@ else
 fi
 
 # ---- 6. elisp hot-reload ---------------------------------------------------
+#
+# core.el runs `(agent-repl--cancel-all-timers)' at LOAD time, which clears
+# every module timer including the 1Hz heartbeat that repaints the tab bar.
+# The timers are re-armed only by their OWNER files (status.el, readiness.el,
+# autosave.el, workspace-status-export.el), so hot-loading a change set that
+# contains core.el but not all four owners used to leave a live Emacs with no
+# heartbeat at all — frozen tabs until somebody noticed.
+#
+# So a change set containing core.el is expanded to the FULL module set, in
+# config.el's canonical `agent-repl--load-module' order. That order is read
+# from config.el itself rather than hardcoded here, so a module added to the
+# loader is picked up without touching this script.
+#
+# Belt-and-braces beside core.el's own `agent-repl--assert-heartbeat-armed',
+# which self-heals a bare core.el load; the post-load verification below asks
+# the running Emacs for that assertion's result and reports it.
+
+# Emit the canonical module set as repo-relative paths, in load order.
+canonical_module_files() {
+    local m
+    sed -n 's/^(agent-repl--load-module "\([^"]*\)").*/\1/p' "$ROOT/config.el" \
+    | while IFS= read -r m; do
+        [ -f "$ROOT/$m.el" ] || continue
+        printf '%s\n' "$MOD_REL/$m.el"
+    done
+}
+
 if [ -n "$ELISP_RANGE" ] && [ "$EMACS_AVAILABLE" -eq 1 ]; then
     log "elisp: reloading non-test .el changed in $ELISP_RANGE..."
+
+    CHANGED=()
+    CORE_IN_SET=0
     while IFS= read -r rel; do
         base="$(basename "$rel")"
         case "$base" in test-*.el) continue ;; esac   # batch-only harness files
         [ -f "$REPO_ROOT/$rel" ] || continue          # deleted in range
-        log "elisp: load $base"
+        [ "$base" = "core.el" ] && CORE_IN_SET=1
+        CHANGED+=("$rel")
+    done < <(git -C "$REPO_ROOT" diff --name-only "$ELISP_RANGE" -- "$MOD_REL/*.el")
+
+    LOAD_LIST=()
+    if [ "$CORE_IN_SET" -eq 1 ]; then
+        while IFS= read -r rel; do
+            LOAD_LIST+=("$rel")
+        done < <(canonical_module_files)
+        # Anything changed that the loader does not name (config.el itself,
+        # for instance) still gets loaded, after the canonical set.
+        for rel in ${CHANGED[@]+"${CHANGED[@]}"}; do
+            found=0
+            for c in ${LOAD_LIST[@]+"${LOAD_LIST[@]}"}; do
+                [ "$c" = "$rel" ] && { found=1; break; }
+            done
+            [ "$found" -eq 0 ] && LOAD_LIST+=("$rel")
+        done
+        log "elisp: core.el in change set — expanding to full module reload (${#LOAD_LIST[@]} files)"
+    else
+        LOAD_LIST=(${CHANGED[@]+"${CHANGED[@]}"})
+    fi
+
+    for rel in ${LOAD_LIST[@]+"${LOAD_LIST[@]}"}; do
+        log "elisp: load $(basename "$rel")"
         "$EMACSCLIENT" --eval "(load \"$REPO_ROOT/$rel\" nil t)" >/dev/null
-    done < <(git -C "$REPO_ROOT" diff --name-only "$ELISP_RANGE" -- 'modules/app/agent-repl/*.el')
+    done
     log "elisp: done"
+
+    # ---- 6b. post-load timer-contract verification -------------------------
+    # Ask the reloaded Emacs whether every required timer key is armed. The
+    # assertion re-arms anything stranded, so a nonzero `rearmed' is a repaired
+    # deploy, while a nonzero `failed' is a broken one and fails the script.
+    #
+    # `fboundp'-guarded like the webview refresh above: an Emacs that predates
+    # the assertion reports a skip rather than failing the deploy.
+    ASSERT_FORM='(if (fboundp (quote agent-repl--assert-heartbeat-armed)) (let ((r (agent-repl--assert-heartbeat-armed))) (format "armed=%d rearmed=%d failed=%d unavailable=%d" (length (plist-get r :armed)) (length (plist-get r :rearmed)) (length (plist-get r :failed)) (length (plist-get r :unavailable)))) "absent")'
+    ASSERT_OUT="$("$EMACSCLIENT" --eval "$ASSERT_FORM" 2>&1)" || {
+        echo "[deploy-all] elisp: heartbeat assertion failed to run: $ASSERT_OUT" >&2
+        exit 3
+    }
+    ASSERT_OUT="${ASSERT_OUT//\"/}"
+    case "$ASSERT_OUT" in
+        absent)
+            log "elisp: heartbeat assertion skipped — function absent (Emacs predates agent-repl--assert-heartbeat-armed)"
+            ;;
+        armed=*)
+            log "elisp: heartbeat assertion: $ASSERT_OUT"
+            case "$ASSERT_OUT" in
+                *"rearmed=0"*) ;;
+                *) log "elisp: heartbeat assertion RE-ARMED stranded timers — see the agent-repl log for which" ;;
+            esac
+            case "$ASSERT_OUT" in
+                *"failed=0"*) ;;
+                *)
+                    echo "[deploy-all] elisp: a required timer could not be re-armed: $ASSERT_OUT" >&2
+                    exit 3
+                    ;;
+            esac
+            ;;
+        *)
+            echo "[deploy-all] elisp: heartbeat assertion returned an unrecognized result: $ASSERT_OUT" >&2
+            exit 3
+            ;;
+    esac
 fi
 
 log "deploy complete"
