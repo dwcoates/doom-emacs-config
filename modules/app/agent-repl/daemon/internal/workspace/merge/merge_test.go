@@ -893,3 +893,38 @@ func readFile(t *testing.T, dir, name string) string {
 	}
 	return string(b)
 }
+
+// A target carrying only SEQUENCER residue (a multi-commit pick interrupted
+// between commits — no CHERRY_PICK_HEAD) makes git refuse every new pick with
+// an opaque exit 128. The driver must reject it as a NAMED precondition,
+// before any transition, with the operator's way out in the message.
+func TestMergeRefusesATargetWithStaleSequencerState(t *testing.T) {
+	// Arrange — a normal fixture pair, plus hand-planted sequencer residue.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	writeFile(t, featureDir, "feature.txt", "hello\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "add feature.txt")
+	seqDir := strings.TrimSpace(gitRun(t, target, "rev-parse", "--git-path", "sequencer"))
+	if !filepath.IsAbs(seqDir) {
+		seqDir = filepath.Join(target, seqDir)
+	}
+	if err := os.MkdirAll(seqDir, 0o755); err != nil {
+		t.Fatalf("plant sequencer dir: %v", err)
+	}
+
+	sink := &recordingSink{}
+	e := newTestDriver(t, sink)
+	req := Request{Workspace: "/ws/seq-ws", Name: "seq-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+
+	// Act.
+	_, err := e.Merge(context.Background(), req)
+
+	// Assert — refused pre-transition, naming the unfinished pick.
+	if err == nil || !strings.Contains(err.Error(), "unfinished cherry-pick") {
+		t.Fatalf("Merge() err = %v, want the unfinished-cherry-pick precondition", err)
+	}
+	if len(sink.got) != 0 {
+		t.Fatalf("Merge() emitted %v before the precondition; want none", sink.phases())
+	}
+}
