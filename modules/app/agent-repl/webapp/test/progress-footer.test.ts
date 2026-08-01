@@ -870,11 +870,27 @@ describe("tokenCellHtml: the turn's input tokens, and never its output", () => {
     expect(got).toContain("1.4k thought");
   });
 
-  it("renders nothing when the turn has spent nothing yet", () => {
-    // Arrange / Act — a lying `0 in` is worse than an absent cell.
+  it("reads the idle dash when the turn has spent nothing yet", () => {
+    // Arrange / Act — the turn's landed figure lives on its response bubble
+    // now, so between turns the cell reports nothing rather than a stale sum.
     const got = tokenCellHtml(progress());
     // Assert
-    expect(got).toBe("");
+    expect(got).toBe('<span class="info-tokens">--</span>');
+  });
+
+  it("drops the dash the moment a figure exists to show", () => {
+    // Arrange / Act — a real figure displaces the placeholder outright.
+    const got = tokenCellHtml(progress({ inputTokens: 41_200 }));
+    // Assert
+    expect(got).not.toContain("--");
+  });
+
+  it("drops the dash while only the thinking ticker is running", () => {
+    // Arrange / Act — reasoning before the first request lands is activity,
+    // not idleness, so the cell shows the ticker alone.
+    const got = tokenCellHtml(progress({ thinkingTokens: 1_400 }));
+    // Assert
+    expect(got).toBe('<span class="pfooter-thinking-tokens">1.4k thought</span>');
   });
 });
 
@@ -1401,11 +1417,12 @@ describe("footerHtml: the V4 segmented dock", () => {
     expect(got).toContain('aria-expanded="true"');
   });
 
-  it("drops the token cell when the turn has spent nothing", () => {
-    // Arrange / Act
+  it("dashes the token cell when the turn has spent nothing", () => {
+    // Arrange / Act — off-turn the cell reads the idle dash rather than
+    // vanishing, so the strip's geometry does not jump at a turn boundary.
     const got = footerHtml(input(), CLOSED, NOW);
     // Assert
-    expect(got).not.toContain("pfooter-tokens");
+    expect(got).toContain('<div class="pfooter-cell pfooter-tokens"><span class="info-tokens">--</span></div>');
   });
 
   it("escapes the activity detail", () => {

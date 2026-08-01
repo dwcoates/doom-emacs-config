@@ -653,10 +653,20 @@ func (m *Manager) applyApiErrorLocked(workspace string, wp *workspaceProgress, u
 	m.pushLocked(workspace, wp)
 }
 
-// applyAssistantLocked adds one assistant message's INPUT usage to the current
-// turn's running total: uncached input plus both cache halves, exactly the
-// figure the design's token cell names. Output tokens are deliberately absent —
-// the footer never shows a running output figure.
+// applyAssistantLocked adds one assistant message's NEW input tokens to the
+// current turn's running total: uncached input plus the prefix this request
+// wrote to cache. Output tokens are deliberately absent — the footer never
+// shows a running output figure.
+//
+// CACHE READS ARE EXCLUDED, and that exclusion is the whole point of the
+// figure. A cache read is the SAME standing prefix presented again, so summing
+// it across a turn multiplies one context by the number of requests the turn
+// made: a 94-request turn against a 500k prefix reported 47M "input tokens",
+// which is the conversation's size times ninety-four rather than anything the
+// turn spent. Counting only the tokens the turn actually fed the model NEW
+// leaves a figure that tracks the work done, and it is the same arithmetic the
+// final-response bubble's stamp does on the result's own turn-scoped usage, so
+// the live footer figure converges on the stamp the turn lands with.
 //
 // Deduped per message so the twin observation planes cannot double-count, and
 // skipped entirely off-turn: the figure is turn-scoped, so usage arriving with
@@ -681,7 +691,7 @@ func (m *Manager) applyAssistantLocked(workspace string, wp *workspaceProgress, 
 		}
 		wp.countedUsage[key] = struct{}{}
 	}
-	add := u.GetInputTokens() + u.GetCacheReadInputTokens() + u.GetCacheCreationInputTokens()
+	add := u.GetInputTokens() + u.GetCacheCreationInputTokens()
 	if add == 0 {
 		return
 	}
@@ -720,12 +730,21 @@ func (m *Manager) openTurnLocked(wp *workspaceProgress, atMs int64) bool {
 	return true
 }
 
-// closeTurnLocked stops the turn clock and records an errored end. The turn's
-// token figures are left standing: the idle footer shows the last turn's
-// summary rather than blanking the moment the turn lands.
+// closeTurnLocked stops the turn clock and clears every turn-scoped ticker.
+//
+// The token and thinking figures used to be left standing so the idle footer
+// showed the last turn's summary. They are cleared now because the summary has
+// a better home: the turn's duration and input tokens are stamped into the
+// top-right corner of the final-response bubble the turn produced (see
+// `resultMeta` in the webapp), where they persist and replay with the
+// conversation instead of surviving only until the next turn overwrites them.
+// The footer reads `--` between turns for the same reason the clock does —
+// there is no turn in flight for it to report on.
 func (m *Manager) closeTurnLocked(wp *workspaceProgress, te *corev1.TurnEnded) {
 	wp.turnOpen = false
 	wp.view.TurnStartedAtMs = 0
+	wp.view.InputTokens = 0
+	wp.view.ThinkingTokens = 0
 	wp.view.Retrying = nil
 	wp.retryDetailRich = false
 	if te.GetIsError() {
