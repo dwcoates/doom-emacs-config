@@ -357,14 +357,27 @@ next window will pick up any newly-registered workspaces."
 
 ;; Outer scheduler: fire immediately on load so a fresh status file is
 ;; produced without waiting a full window, then re-plan every window.
-(push (run-with-timer 0 agent-repl-workspace-status-write-window-seconds
-                      #'agent-repl--reschedule-workspace-status-writes)
-      agent-repl--timers)
-(agent-repl--log
- nil
- "workspace-status-export scheduler: outcome=started window-seconds=%s timer-count=%d"
- agent-repl-workspace-status-write-window-seconds
- (length agent-repl--timers))
+(defun agent-repl--arm-workspace-status-export-timer ()
+  "Arm the outer workspace-status write scheduler under its registry key.
+Idempotent: `agent-repl--register-timer' cancels and replaces any timer
+already held under `:workspace-status-export', so re-loading this file
+leaves exactly one outer scheduler running.  Returns the timer.
+
+Note this covers only the OUTER window timer.  The inner sub-timers are
+one-shots owned by `agent-repl--reschedule-workspace-status-writes',
+which cancels its own previous batch on every run."
+  (let ((timer (agent-repl--register-timer
+                :workspace-status-export
+                (run-with-timer 0 agent-repl-workspace-status-write-window-seconds
+                                #'agent-repl--reschedule-workspace-status-writes))))
+    (agent-repl--log
+     nil
+     "workspace-status-export scheduler: outcome=started window-seconds=%s timer-count=%d"
+     agent-repl-workspace-status-write-window-seconds
+     (length agent-repl--timers))
+    timer))
+
+(agent-repl--arm-workspace-status-export-timer)
 
 (provide 'agent-repl-workspace-status-export)
 ;;; workspace-status-export.el ends here

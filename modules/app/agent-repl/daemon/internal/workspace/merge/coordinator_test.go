@@ -2,6 +2,7 @@ package merge
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -28,19 +29,30 @@ type fakePicker struct {
 	results       chan pickResult
 	resumes       chan Request
 	resumeResults chan pickResult
-	queued        chan queuedRecord
-	queuedErr     error
-	stop          chan struct{}
+	// continues announces each ContinueAfterTestFix, and continueResults hands
+	// it the outcome of the re-run suite plus the rest of the replay.
+	continues       chan string
+	continueResults chan pickResult
+	// rollbacks announces each Rollback with the head it was asked to reset to,
+	// which is how a test pins that the target went back to its pre-merge HEAD.
+	rollbacks   chan string
+	rollbackErr error
+	queued      chan queuedRecord
+	queuedErr   error
+	stop        chan struct{}
 }
 
 func newFakePicker(capacity int) *fakePicker {
 	return &fakePicker{
-		merges:        make(chan Request, capacity),
-		results:       make(chan pickResult, capacity),
-		resumes:       make(chan Request, capacity),
-		resumeResults: make(chan pickResult, capacity),
-		queued:        make(chan queuedRecord, capacity),
-		stop:          make(chan struct{}),
+		merges:          make(chan Request, capacity),
+		results:         make(chan pickResult, capacity),
+		resumes:         make(chan Request, capacity),
+		resumeResults:   make(chan pickResult, capacity),
+		continues:       make(chan string, capacity),
+		continueResults: make(chan pickResult, capacity),
+		rollbacks:       make(chan string, capacity),
+		queued:          make(chan queuedRecord, capacity),
+		stop:            make(chan struct{}),
 	}
 }
 
@@ -62,6 +74,23 @@ func (p *fakePicker) Resume(_ context.Context, req Request) (Result, error) {
 	case <-p.stop:
 		return Result{}, errStopped
 	}
+}
+
+func (p *fakePicker) ContinueAfterTestFix(ctx context.Context, _ Request, failingCommit string) (Result, error) {
+	p.continues <- failingCommit
+	select {
+	case r := <-p.continueResults:
+		return r.res, r.err
+	case <-ctx.Done():
+		return Result{}, ctx.Err()
+	case <-p.stop:
+		return Result{}, errStopped
+	}
+}
+
+func (p *fakePicker) Rollback(_ context.Context, _ Request, head string) error {
+	p.rollbacks <- head
+	return p.rollbackErr
 }
 
 func (p *fakePicker) MarkQueued(ws, cause string) error {
@@ -137,6 +166,35 @@ func (r *fakeResolver) Resolve(_ context.Context, res ConflictResolution) error 
 	select {
 	case err := <-r.results:
 		return err
+	case <-r.stop:
+		return errStopped
+	}
+}
+
+// fakeTestFailureResolver stands in for merge.TestFailureResolver. Like
+// fakeResolver it announces the call and then waits for the test to say how the
+// fix turn ended.
+type fakeTestFailureResolver struct {
+	calls   chan TestFailureResolution
+	results chan error
+	stop    chan struct{}
+}
+
+func newFakeTestFailureResolver(capacity int) *fakeTestFailureResolver {
+	return &fakeTestFailureResolver{
+		calls:   make(chan TestFailureResolution, capacity),
+		results: make(chan error, capacity),
+		stop:    make(chan struct{}),
+	}
+}
+
+func (r *fakeTestFailureResolver) Resolve(ctx context.Context, res TestFailureResolution) error {
+	r.calls <- res
+	select {
+	case err := <-r.results:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
 	case <-r.stop:
 		return errStopped
 	}
@@ -253,13 +311,14 @@ func (q failingQueue) Complete(string, Request) error { return nil }
 
 // harness bundles a coordinator with the fakes behind it.
 type harness struct {
-	coord    *QueueCoordinator
-	queue    *FileQueue
-	picker   *fakePicker
-	lease    *fakeLease
-	resolver *fakeResolver
-	sink     *syncSink
-	dir      string
+	coord        *QueueCoordinator
+	queue        *FileQueue
+	picker       *fakePicker
+	lease        *fakeLease
+	resolver     *fakeResolver
+	testResolver *fakeTestFailureResolver
+	sink         *syncSink
+	dir          string
 }
 
 // harnessOpts varies the one dependency a given test cares about. Everything
@@ -291,6 +350,7 @@ func newHarnessWith(t *testing.T, opts harnessOpts) *harness {
 	picker := newFakePicker(8)
 	lease := newFakeLease(8)
 	resolver := newFakeResolver(8)
+	testResolver := newFakeTestFailureResolver(8)
 	sink := newSyncSink(8)
 	hook := opts.postMerge
 	if hook == nil {
@@ -301,15 +361,16 @@ func newHarnessWith(t *testing.T, opts harnessOpts) *harness {
 		phases = fakePhases{}
 	}
 	coord, err := NewCoordinator(CoordinatorConfig{
-		Logf:      t.Logf,
-		Sink:      sink,
-		Queue:     q,
-		Phases:    phases,
-		Keyer:     fakeKeyer{keys: opts.keys, err: opts.keyErr},
-		Picker:    picker,
-		Lease:     lease,
-		Resolver:  resolver,
-		PostMerge: hook,
+		Logf:         t.Logf,
+		Sink:         sink,
+		Queue:        q,
+		Phases:       phases,
+		Keyer:        fakeKeyer{keys: opts.keys, err: opts.keyErr},
+		Picker:       picker,
+		Lease:        lease,
+		Resolver:     resolver,
+		TestResolver: testResolver,
+		PostMerge:    hook,
 	})
 	if err != nil {
 		t.Fatalf("NewCoordinator: %v", err)
@@ -317,11 +378,12 @@ func newHarnessWith(t *testing.T, opts harnessOpts) *harness {
 	t.Cleanup(func() {
 		close(picker.stop)
 		close(resolver.stop)
+		close(testResolver.stop)
 		if err := coord.Close(); err != nil {
 			t.Fatalf("Close: %v", err)
 		}
 	})
-	return &harness{coord: coord, queue: q, picker: picker, lease: lease, resolver: resolver, sink: sink, dir: dir}
+	return &harness{coord: coord, queue: q, picker: picker, lease: lease, resolver: resolver, testResolver: testResolver, sink: sink, dir: dir}
 }
 
 // --- construction -------------------------------------------------------
@@ -330,15 +392,16 @@ func TestNewCoordinatorRequiresEveryDependency(t *testing.T) {
 	q, _ := newTestQueue(t)
 	complete := func() CoordinatorConfig {
 		return CoordinatorConfig{
-			Logf:      func(string, ...any) {},
-			Sink:      newSyncSink(1),
-			Queue:     q,
-			Phases:    fakePhases{},
-			Keyer:     fakeKeyer{},
-			Picker:    newFakePicker(1),
-			Lease:     newFakeLease(1),
-			Resolver:  newFakeResolver(1),
-			PostMerge: newAutoPostMergeHook(1),
+			Logf:         func(string, ...any) {},
+			Sink:         newSyncSink(1),
+			Queue:        q,
+			Phases:       fakePhases{},
+			Keyer:        fakeKeyer{},
+			Picker:       newFakePicker(1),
+			Lease:        newFakeLease(1),
+			Resolver:     newFakeResolver(1),
+			TestResolver: newFakeTestFailureResolver(1),
+			PostMerge:    newAutoPostMergeHook(1),
 		}
 	}
 	tests := []struct {
@@ -354,6 +417,8 @@ func TestNewCoordinatorRequiresEveryDependency(t *testing.T) {
 		{name: "no keyer", mutate: func(c *CoordinatorConfig) { c.Keyer = nil }, wantErr: true},
 		{name: "no picker", mutate: func(c *CoordinatorConfig) { c.Picker = nil }, wantErr: true},
 		{name: "no lease", mutate: func(c *CoordinatorConfig) { c.Lease = nil }, wantErr: true},
+		{name: "no conflict resolver", mutate: func(c *CoordinatorConfig) { c.Resolver = nil }, wantErr: true},
+		{name: "no test resolver", mutate: func(c *CoordinatorConfig) { c.TestResolver = nil }, wantErr: true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -425,7 +490,7 @@ func TestEnqueueSurfacesAPublishFailure(t *testing.T) {
 	coord, err := NewCoordinator(CoordinatorConfig{
 		Logf: t.Logf, Sink: newSyncSink(1), Queue: failingQueue{err: sentinelError("disk full")},
 		Phases: fakePhases{}, Keyer: fakeKeyer{}, Picker: picker, Lease: newFakeLease(1), Resolver: newFakeResolver(1),
-		PostMerge: newAutoPostMergeHook(1),
+		TestResolver: newFakeTestFailureResolver(1), PostMerge: newAutoPostMergeHook(1),
 	})
 	if err != nil {
 		t.Fatalf("NewCoordinator: %v", err)
@@ -1169,7 +1234,7 @@ func TestCloseRetainsAParkedConflictForTheNextBoot(t *testing.T) {
 	coord, err := NewCoordinator(CoordinatorConfig{
 		Logf: t.Logf, Sink: newSyncSink(4), Queue: q,
 		Phases: fakePhases{}, Keyer: fakeKeyer{}, Picker: picker, Lease: lease, Resolver: resolver,
-		PostMerge: newAutoPostMergeHook(4),
+		TestResolver: newFakeTestFailureResolver(4), PostMerge: newAutoPostMergeHook(4),
 	})
 	if err != nil {
 		t.Fatalf("NewCoordinator: %v", err)
@@ -1197,5 +1262,320 @@ func TestCloseRetainsAParkedConflictForTheNextBoot(t *testing.T) {
 	}
 	if got := len(next.Snapshot()[testRepoKey]); got != 1 {
 		t.Fatalf("surviving depth = %d, want 1", got)
+	}
+}
+
+// --- the per-commit test gate -------------------------------------------
+
+// testFailure is the Result merge.Driver returns when a landed commit broke the
+// suite. The pre-merge head is what the rollback path resets the target to.
+func testFailure(commit, tail, preHead string) Result {
+	return Result{Outcome: OutcomeTestFailed, FailingCommit: commit, TestFailureTail: tail, PreMergeHead: preHead}
+}
+
+func TestTestFailureIsHandedToTheWorkspacesOwnShim(t *testing.T) {
+	// Arrange — a merge whose first landed commit breaks the suite.
+	h := newHarness(t)
+	req := testRequest("a")
+	if _, err := h.coord.Enqueue(context.Background(), req); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	<-h.picker.merges
+
+	// Act.
+	h.picker.results <- pickResult{res: testFailure("abc1234", "FAIL: suite", "head0")}
+	got := <-h.testResolver.calls
+
+	// Assert — the fix turn is handed everything it needs to act.
+	if got.Workspace != req.Workspace || got.SourceBranch != req.SourceBranch || got.TargetDir != req.TargetDir {
+		t.Fatalf("resolution = %+v, want workspace/branch/target of %+v", got, req)
+	}
+	if got.FailingCommit != "abc1234" || got.FailureTail != "FAIL: suite" {
+		t.Fatalf("resolution = %+v, want the failing commit and its tail", got)
+	}
+	if got.RequestID == "" {
+		t.Fatalf("resolution carries no request id")
+	}
+}
+
+func TestTestFailureFixedByTheShimContinuesTheMerge(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	req := testRequest("a")
+	if _, err := h.coord.Enqueue(context.Background(), req); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	<-h.picker.merges
+	h.picker.results <- pickResult{res: testFailure("abc1234", "FAIL: suite", "head0")}
+	<-h.testResolver.calls
+
+	// Act — the fix turn ends, and the continued replay finishes the range.
+	h.testResolver.results <- nil
+	if got := <-h.picker.continues; got != "abc1234" {
+		t.Fatalf("ContinueAfterTestFix commit = %q, want abc1234", got)
+	}
+	h.picker.continueResults <- pickResult{res: Result{Outcome: OutcomeMerged}}
+
+	// Assert — the merge landed, nothing was rolled back, the queue advanced.
+	<-h.lease.releases
+	if got := len(h.picker.rollbacks); got != 0 {
+		t.Fatalf("rollbacks = %d, want 0 for a merge that recovered", got)
+	}
+	if got := len(h.queue.Snapshot()[testRepoKey]); got != 0 {
+		t.Fatalf("queue depth = %d, want 0", got)
+	}
+}
+
+func TestTestFailureThatSurvivesTheFixRollsTheTargetBack(t *testing.T) {
+	// Arrange — the fix turn runs and the suite still fails on the same commit.
+	h := newHarness(t)
+	req := testRequest("a")
+	if _, err := h.coord.Enqueue(context.Background(), req); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	<-h.picker.merges
+	h.picker.results <- pickResult{res: testFailure("abc1234", "FAIL: suite", "head0")}
+	<-h.testResolver.calls
+
+	// Act.
+	h.testResolver.results <- nil
+	<-h.picker.continues
+	h.picker.continueResults <- pickResult{res: testFailure("abc1234", "FAIL: still", "")}
+
+	// Assert — the target went back to the pre-merge HEAD recorded at start.
+	if got := <-h.picker.rollbacks; got != "head0" {
+		t.Fatalf("rollback head = %q, want the pre-merge head0", got)
+	}
+}
+
+func TestTestFailureThatSurvivesTheFixRecordsMergeFailedWithTheTail(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	req := testRequest("a")
+	if _, err := h.coord.Enqueue(context.Background(), req); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	<-h.picker.merges
+	h.picker.results <- pickResult{res: testFailure("abc1234", "FAIL: suite", "head0")}
+	<-h.testResolver.calls
+
+	// Act.
+	h.testResolver.results <- nil
+	<-h.picker.continues
+	h.picker.continueResults <- pickResult{res: testFailure("abc1234", "FAIL: still", "")}
+	<-h.picker.rollbacks
+
+	// Assert — the failure the user sees names the commit and carries the tail.
+	got := <-h.sink.ch
+	if got.phase != PhaseMergeFailed {
+		t.Fatalf("transition = %+v, want merge_failed", got)
+	}
+	if !strings.Contains(got.cause, "abc1234") || !strings.Contains(got.cause, "FAIL: still") {
+		t.Fatalf("merge_failed cause = %q, want the failing commit and the suite tail", got.cause)
+	}
+}
+
+func TestTestFailureIsAttemptedExactlyOncePerCommit(t *testing.T) {
+	// Arrange — the same commit fails again after its one attempt.
+	h := newHarness(t)
+	req := testRequest("a")
+	if _, err := h.coord.Enqueue(context.Background(), req); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	<-h.picker.merges
+	h.picker.results <- pickResult{res: testFailure("abc1234", "FAIL: suite", "head0")}
+	<-h.testResolver.calls
+
+	// Act.
+	h.testResolver.results <- nil
+	<-h.picker.continues
+	h.picker.continueResults <- pickResult{res: testFailure("abc1234", "FAIL: still", "")}
+	<-h.picker.rollbacks
+	<-h.lease.releases
+
+	// Assert — no second prompt for a commit whose attempt already ran.
+	if got := len(h.testResolver.calls); got != 0 {
+		t.Fatalf("test-fix resolver calls still pending = %d, want 0 (exactly one attempt)", got)
+	}
+}
+
+func TestATestFailureOnALaterCommitGetsItsOwnAttempt(t *testing.T) {
+	// Arrange — the first commit's failure is fixed, and a LATER commit fails.
+	// That is a different failure, so it earns its own attempt.
+	h := newHarness(t)
+	req := testRequest("a")
+	if _, err := h.coord.Enqueue(context.Background(), req); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	<-h.picker.merges
+	h.picker.results <- pickResult{res: testFailure("abc1234", "FAIL: one", "head0")}
+	<-h.testResolver.calls
+	h.testResolver.results <- nil
+	<-h.picker.continues
+
+	// Act.
+	h.picker.continueResults <- pickResult{res: testFailure("def5678", "FAIL: two", "")}
+
+	// Assert.
+	got := <-h.testResolver.calls
+	if got.FailingCommit != "def5678" {
+		t.Fatalf("second resolution commit = %q, want def5678", got.FailingCommit)
+	}
+}
+
+func TestAFailedTestResolverRollsBackWithoutContinuing(t *testing.T) {
+	// Arrange — no live session takes the fix prompt.
+	h := newHarness(t)
+	req := testRequest("a")
+	if _, err := h.coord.Enqueue(context.Background(), req); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	<-h.picker.merges
+	h.picker.results <- pickResult{res: testFailure("abc1234", "FAIL: suite", "head0")}
+	<-h.testResolver.calls
+
+	// Act.
+	h.testResolver.results <- sentinelError("no live session to drive")
+
+	// Assert — rolled back, failed, and the replay was never continued.
+	if got := <-h.picker.rollbacks; got != "head0" {
+		t.Fatalf("rollback head = %q, want head0", got)
+	}
+	<-h.lease.releases
+	if got := len(h.picker.continues); got != 0 {
+		t.Fatalf("ContinueAfterTestFix calls = %d, want 0 after a refused resolution", got)
+	}
+}
+
+func TestAFailedRollbackStillFailsTheMergeAndSaysSo(t *testing.T) {
+	// Arrange — the reset itself fails, which must not silently become a
+	// merged (or a stalled) outcome.
+	h := newHarness(t)
+	h.picker.rollbackErr = sentinelError("reset refused")
+	req := testRequest("a")
+	if _, err := h.coord.Enqueue(context.Background(), req); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	<-h.picker.merges
+	h.picker.results <- pickResult{res: testFailure("abc1234", "FAIL: suite", "head0")}
+	<-h.testResolver.calls
+
+	// Act.
+	h.testResolver.results <- sentinelError("no live session")
+	<-h.picker.rollbacks
+
+	// Assert — merge_failed names the rollback failure too.
+	got := <-h.sink.ch
+	if got.phase != PhaseMergeFailed {
+		t.Fatalf("transition = %+v, want merge_failed", got)
+	}
+	if !strings.Contains(got.cause, "rollback to head0 FAILED") {
+		t.Fatalf("merge_failed cause = %q, want it to name the failed rollback", got.cause)
+	}
+}
+
+func TestATestFailureWithNoPreMergeHeadIsFailedAndNamed(t *testing.T) {
+	// Arrange — a Result carrying no rollback point, which no valid
+	// merge.Driver Merge produces.
+	h := newHarness(t)
+	req := testRequest("a")
+	if _, err := h.coord.Enqueue(context.Background(), req); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	<-h.picker.merges
+	h.picker.results <- pickResult{res: testFailure("abc1234", "FAIL: suite", "")}
+	<-h.testResolver.calls
+
+	// Act.
+	h.testResolver.results <- sentinelError("no live session")
+
+	// Assert — no rollback was attempted against a head that does not exist,
+	// and the merge_failed cause says the target was left as it stands.
+	got := <-h.sink.ch
+	if got.phase != PhaseMergeFailed {
+		t.Fatalf("transition = %+v, want merge_failed", got)
+	}
+	if !strings.Contains(got.cause, "no pre-merge HEAD was recorded") {
+		t.Fatalf("merge_failed cause = %q, want it to name the missing rollback point", got.cause)
+	}
+	if len(h.picker.rollbacks) != 0 {
+		t.Fatalf("a rollback was attempted with no head to roll back to")
+	}
+}
+
+func TestAConflictResolvedIntoATestFailureIsStillGated(t *testing.T) {
+	// The two parking outcomes feed each other: a resume that finishes the pick
+	// can leave the suite broken, and that failure gets the same one attempt.
+	// Arrange — a conflict, resolved by the shim.
+	h := newHarness(t)
+	req := testRequest("a")
+	if _, err := h.coord.Enqueue(context.Background(), req); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	<-h.picker.merges
+	h.picker.results <- pickResult{res: Result{Outcome: OutcomeConflict, ConflictCommit: "abc1234", PreMergeHead: "head0"}}
+	<-h.resolver.calls
+	h.resolver.results <- nil
+	<-h.picker.resumes
+
+	// Act — the resume lands the commit and breaks the suite.
+	h.picker.resumeResults <- pickResult{res: testFailure("abc1234", "FAIL: after resolve", "")}
+
+	// Assert — the test-fix path takes over, carrying the ORIGINAL pre-merge
+	// head as its rollback point.
+	got := <-h.testResolver.calls
+	if got.FailingCommit != "abc1234" {
+		t.Fatalf("resolution commit = %q, want abc1234", got.FailingCommit)
+	}
+	h.testResolver.results <- sentinelError("cannot fix")
+	if head := <-h.picker.rollbacks; head != "head0" {
+		t.Fatalf("rollback head = %q, want the head recorded before the FIRST pick", head)
+	}
+}
+
+func TestATestFixThatConflictsLaterParksAgain(t *testing.T) {
+	// Arrange — a fixed suite whose continued replay conflicts on a later
+	// commit.
+	h := newHarness(t)
+	req := testRequest("a")
+	if _, err := h.coord.Enqueue(context.Background(), req); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	<-h.picker.merges
+	h.picker.results <- pickResult{res: testFailure("abc1234", "FAIL: suite", "head0")}
+	<-h.testResolver.calls
+	h.testResolver.results <- nil
+	<-h.picker.continues
+
+	// Act.
+	h.picker.continueResults <- pickResult{res: Result{Outcome: OutcomeConflict, ConflictCommit: "def5678"}}
+
+	// Assert — the conflict path takes over, shim first as always.
+	got := <-h.resolver.calls
+	if got.ConflictCommit != "def5678" {
+		t.Fatalf("conflict resolution commit = %q, want def5678", got.ConflictCommit)
+	}
+}
+
+func TestAbandonDuringATestFixIsNotLost(t *testing.T) {
+	// Arrange — a fix turn in flight.
+	h := newHarness(t)
+	req := testRequest("a")
+	if _, err := h.coord.Enqueue(context.Background(), req); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	<-h.picker.merges
+	h.picker.results <- pickResult{res: testFailure("abc1234", "FAIL: suite", "head0")}
+	<-h.testResolver.calls
+
+	// Act — the user closes the workspace while the agent is still fixing.
+	abandoned, err := h.coord.Abandon(context.Background(), req.Workspace)
+
+	// Assert — served without waiting for the turn, and the lease went back.
+	if err != nil || !abandoned {
+		t.Fatalf("Abandon() = (%v, %v), want (true, nil)", abandoned, err)
+	}
+	if got := <-h.lease.releases; got != req.Workspace {
+		t.Fatalf("lease released for %q, want %q", got, req.Workspace)
 	}
 }
