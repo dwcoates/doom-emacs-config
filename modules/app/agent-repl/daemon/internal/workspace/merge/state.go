@@ -9,9 +9,9 @@
 // the cherry-pick after a human resolves a conflict. Emacs keeps only the
 // reactive conflict-resolution UX (magit); state ownership lives here.
 //
-// Every merge-state transition (merging, merge_queued, merge_conflict,
-// merge_failed, merged) is emitted through the StateSink defined in this
-// file. The SSM binds a real StateSink at stitch; this module never imports
+// Every merge-state transition (merge_enqueuing, merging, merge_queued,
+// merge_conflict, merge_failed, merged) is emitted through the StateSink
+// defined in this file. The SSM binds a real StateSink at stitch; this module never imports
 // internal/ssm and never writes to the shim-store — merge state is
 // daemon-local by design (the shim ecosystem is agent-interaction-only).
 package merge
@@ -30,6 +30,21 @@ import (
 type Phase string
 
 const (
+	// PhaseMergeEnqueuing: a merge attempt has been RECEIVED and nothing
+	// durable exists for it yet. It is emitted by the frontend command handler
+	// the instant a merge_workspace command arrives — before the geometry is
+	// resolved and before Coordinator.Enqueue — so the very first thing a merge
+	// attempt does is become visible.
+	//
+	// IT IS TRANSIENT BY CONSTRUCTION and has no durable queue entry behind it.
+	// Every path out of it emits something else within milliseconds:
+	// merge_queued or merging once the request is durably enqueued,
+	// merge_failed when the enqueue is refused. A daemon that bounces while a
+	// workspace sits here has lost the attempt, which is why
+	// Coordinator.Drain sweeps an orphaned merge_enqueuing to merge_failed at
+	// the next boot rather than leaving a workspace pinned on a phase nothing
+	// will ever advance.
+	PhaseMergeEnqueuing Phase = "merge_enqueuing"
 	// PhaseMerging: a cherry-pick is in flight for the workspace.
 	PhaseMerging Phase = "merging"
 	// PhaseMergeQueued: the merge is deferred because another cherry-pick is
@@ -53,11 +68,12 @@ const (
 // validPhases gates emit against a typo'd Phase. All in-tree call sites use
 // the constants above; this is loud belt-and-suspenders, never a fallback.
 var validPhases = map[Phase]bool{
-	PhaseMerging:       true,
-	PhaseMergeQueued:   true,
-	PhaseMergeConflict: true,
-	PhaseMergeFailed:   true,
-	PhaseMerged:        true,
+	PhaseMergeEnqueuing: true,
+	PhaseMerging:        true,
+	PhaseMergeQueued:    true,
+	PhaseMergeConflict:  true,
+	PhaseMergeFailed:    true,
+	PhaseMerged:         true,
 }
 
 // StateSink receives every merge-state transition the engine produces. The
@@ -69,6 +85,23 @@ var validPhases = map[Phase]bool{
 // swallows a sink error and never falls back to a best-effort no-op.
 type StateSink interface {
 	RecordMergeTransition(ws string, phase Phase, cause string) error
+}
+
+// PhaseSource reads back the merge phase a workspace currently rests on. The
+// SSM implements it at stitch (a query over its state log); nothing here
+// imports internal/ssm.
+//
+// IT EXISTS FOR merge_enqueuing AND FOR NOTHING ELSE. Every other phase has a
+// durable queue entry behind it, so the queue's own Snapshot is the authority
+// on what is outstanding. merge_enqueuing deliberately has none — it marks the
+// window before the durable write — which makes the pushed state the ONLY
+// record that the attempt ever happened, and therefore the only place a boot
+// can discover an attempt that died in that window.
+type PhaseSource interface {
+	// WorkspacesAtPhase reports every workspace whose LATEST merge phase is
+	// phase. A read failure is returned, never reported as an empty result:
+	// an empty answer says "nothing to sweep", which is the opposite claim.
+	WorkspacesAtPhase(phase Phase) ([]string, error)
 }
 
 // stateEmitter binds a StateSink to the engine's logger so every transition

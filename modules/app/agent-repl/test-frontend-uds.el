@@ -35,7 +35,13 @@
 (defmacro agent-repl-test--with-uds (&rest body)
   "Run BODY with every frontend-uds module global reset to a clean slate.
 Isolates the process, read accumulator, reconnect timer, handler
-registry, and request-id counter so tests never leak into each other."
+registry, request-id counter, ack-aging tables, and command-link health so
+tests never leak into each other.
+
+The timer seam `agent-repl--uds-run-timer' is stubbed to a sentinel for
+the whole body, so tracking a command never arms a real ack-deadline
+alarm.  Tests that assert ON the seam shadow it again with their own
+`cl-letf', which wins."
   (declare (indent 0))
   `(let ((agent-repl--uds-process nil)
          (agent-repl--uds-read-accumulator "")
@@ -43,11 +49,26 @@ registry, and request-id counter so tests never leak into each other."
          (agent-repl--uds-frame-handlers nil)
          (agent-repl--uds-request-id-counter 0)
          (agent-repl--uds-pending-commands (make-hash-table :test 'equal))
+         (agent-repl--uds-timed-out-commands (make-hash-table :test 'equal))
          (agent-repl--uds-pending-health-responses
           (make-hash-table :test 'equal))
+         (agent-repl--uds-link-health :healthy)
          (agent-repl-uds-reconnect-delay 2.0)
+         (agent-repl-uds-command-ack-deadline 10.0)
          (agent-repl-debug nil))
-     ,@body))
+     (cl-letf (((symbol-function 'agent-repl--uds-run-timer)
+                (lambda (&rest _) 'fake-timer)))
+       ,@body)))
+
+(defmacro agent-repl-test--with-captured-deadline (thunk-var &rest body)
+  "Run BODY capturing the ack-deadline alarm thunk into THUNK-VAR.
+The timer seam is shadowed so no real timer is armed; calling THUNK-VAR is
+what \"the deadline expired\" means in these tests."
+  (declare (indent 1))
+  `(let (,thunk-var)
+     (cl-letf (((symbol-function 'agent-repl--uds-run-timer)
+                (lambda (_delay fn) (setq ,thunk-var fn) 'fake-timer)))
+       ,@body)))
 
 (defun agent-repl-test--uds-frame (field-json)
   "Return a single-arm FrontendFrame protojson string wrapping FIELD-JSON.
@@ -1176,6 +1197,306 @@ workspace open."
     (should-not (agent-repl--uds-handle-command-ack
                  '(:requestId "req-1"
                    :interruptConfirmRequired (:liveTasks 2))))))
+
+;;;; ---- Ack aging + command-link health ---------------------------------
+
+(ert-deftest agent-repl-test-uds-link-health-starts-healthy ()
+  "The command link's initial state is `:healthy'."
+  ;; Arrange / Act / Assert
+  (agent-repl-test--with-uds
+    (should (eq (agent-repl-uds-link-health) :healthy))))
+
+(ert-deftest agent-repl-test-uds-link-health-reports-degraded ()
+  "The health reader reports `:degraded' once the link has been degraded."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    ;; Act
+    (agent-repl--uds-link-degrade "req-1" "mergeWorkspace" "ws1")
+    ;; Assert
+    (should (eq (agent-repl-uds-link-health) :degraded))))
+
+(ert-deftest agent-repl-test-uds-track-command-arms-deadline-alarm ()
+  "Tracking a command arms the ack alarm through the injectable timer seam."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let ((agent-repl-uds-command-ack-deadline 7.5)
+          scheduled)
+      (cl-letf (((symbol-function 'agent-repl--uds-run-timer)
+                 (lambda (delay fn) (setq scheduled (list delay fn)) 'fake-timer)))
+        ;; Act
+        (agent-repl--uds-track-command "req-1" "mergeWorkspace" "ws1")
+        ;; Assert
+        (should (equal (nth 0 scheduled) 7.5))
+        (should (functionp (nth 1 scheduled)))))))
+
+(ert-deftest agent-repl-test-uds-deadline-expiry-warns-user ()
+  "An unacked command past its deadline surfaces a user-visible warning."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (agent-repl-test--with-captured-deadline expire
+      (agent-repl--uds-track-command "req-1" "mergeWorkspace" "ws1")
+      (let (echoed)
+        (cl-letf (((symbol-function 'message)
+                   (lambda (fmt &rest args) (setq echoed (apply #'format fmt args)))))
+          ;; Act
+          (funcall expire)
+          ;; Assert
+          (should (string-match-p "mergeWorkspace" echoed))
+          (should (string-match-p "never acknowledged" echoed)))))))
+
+(ert-deftest agent-repl-test-uds-deadline-expiry-names-request-id ()
+  "The deadline warning carries the request-id so the log can be correlated."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (agent-repl-test--with-captured-deadline expire
+      (agent-repl--uds-track-command "req-1" "mergeWorkspace" "ws1")
+      (let (echoed)
+        (cl-letf (((symbol-function 'message)
+                   (lambda (fmt &rest args) (setq echoed (apply #'format fmt args)))))
+          ;; Act
+          (funcall expire)
+          ;; Assert
+          (should (string-match-p "req-1" echoed)))))))
+
+(ert-deftest agent-repl-test-uds-deadline-expiry-logs-field-and-workspace ()
+  "The canonical log line names the request-id, field, and wire workspace."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (agent-repl-test--with-captured-deadline expire
+      (agent-repl--uds-track-command "req-1" "mergeWorkspace" "ws1")
+      (let (logged)
+        (cl-letf (((symbol-function 'message) (lambda (&rest _) nil))
+                  ((symbol-function 'agent-repl--log)
+                   (lambda (_ws fmt &rest args)
+                     (push (apply #'format fmt args) logged))))
+          ;; Act
+          (funcall expire)
+          ;; Assert
+          (should (cl-find-if
+                   (lambda (line)
+                     (and (string-match-p "uds-ack-deadline: UNACKED" line)
+                          (string-match-p "request-id=req-1" line)
+                          (string-match-p "field=mergeWorkspace" line)
+                          (string-match-p "ws=ws1" line)))
+                   logged)))))))
+
+(ert-deftest agent-repl-test-uds-deadline-expiry-degrades-link ()
+  "An unacked command past its deadline flips the command link to degraded."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (agent-repl-test--with-captured-deadline expire
+      (agent-repl--uds-track-command "req-1" "mergeWorkspace" "ws1")
+      (cl-letf (((symbol-function 'message) (lambda (&rest _) nil)))
+        ;; Act
+        (funcall expire)
+        ;; Assert
+        (should (eq (agent-repl-uds-link-health) :degraded))))))
+
+(ert-deftest agent-repl-test-uds-deadline-expiry-marks-not-drops ()
+  "A timed-out command is MARKED timed-out, never silently forgotten."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (agent-repl-test--with-captured-deadline expire
+      (agent-repl--uds-track-command "req-1" "mergeWorkspace" "ws1")
+      (cl-letf (((symbol-function 'message) (lambda (&rest _) nil)))
+        ;; Act
+        (funcall expire)
+        ;; Assert
+        (should-not (gethash "req-1" agent-repl--uds-pending-commands))
+        (should (equal (plist-get (gethash "req-1"
+                                           agent-repl--uds-timed-out-commands)
+                                  :field)
+                       "mergeWorkspace"))))))
+
+(ert-deftest agent-repl-test-uds-deadline-expiry-skips-on-failure-callback ()
+  "A timeout never runs :on-failure — nothing was rejected, only unanswered."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (agent-repl-test--with-captured-deadline expire
+      (let (failed)
+        (agent-repl--uds-track-command
+         "req-1" "mergeWorkspace" "ws1" (lambda (_err) (setq failed t)))
+        (cl-letf (((symbol-function 'message) (lambda (&rest _) nil)))
+          ;; Act
+          (funcall expire)
+          ;; Assert
+          (should-not failed))))))
+
+(ert-deftest agent-repl-test-uds-deadline-after-ack-is-a-no-op ()
+  "A deadline thunk that runs after its ack landed reports nothing."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (agent-repl-test--with-captured-deadline expire
+      (agent-repl--uds-track-command "req-1" "mergeWorkspace" "ws1")
+      (agent-repl--uds-handle-command-ack '(:requestId "req-1" :ok t))
+      (let (echoed)
+        (cl-letf (((symbol-function 'message)
+                   (lambda (fmt &rest args) (setq echoed (apply #'format fmt args)))))
+          ;; Act
+          (funcall expire)
+          ;; Assert
+          (should-not echoed)
+          (should (eq (agent-repl-uds-link-health) :healthy)))))))
+
+(ert-deftest agent-repl-test-uds-ack-before-deadline-cancels-alarm ()
+  "An ack inside the deadline disarms the alarm rather than leaving it live."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let (cancelled)
+      (cl-letf (((symbol-function 'agent-repl--uds-run-timer)
+                 (lambda (&rest _) 'armed-timer))
+                ((symbol-function 'timerp) (lambda (tm) (eq tm 'armed-timer)))
+                ((symbol-function 'cancel-timer)
+                 (lambda (tm) (setq cancelled tm))))
+        (agent-repl--uds-track-command "req-1" "mergeWorkspace" "ws1")
+        ;; Act
+        (agent-repl--uds-handle-command-ack '(:requestId "req-1" :ok t))
+        ;; Assert
+        (should (eq cancelled 'armed-timer))))))
+
+(ert-deftest agent-repl-test-uds-ack-before-deadline-leaves-health-clean ()
+  "An ack inside the deadline leaves the command link healthy."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (agent-repl--uds-track-command "req-1" "mergeWorkspace" "ws1")
+    ;; Act
+    (agent-repl--uds-handle-command-ack '(:requestId "req-1" :ok t))
+    ;; Assert
+    (should (eq (agent-repl-uds-link-health) :healthy))))
+
+(ert-deftest agent-repl-test-uds-untrack-command-cancels-alarm ()
+  "Untracking a command after a local wait aborts also disarms its alarm."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (let (cancelled)
+      (cl-letf (((symbol-function 'agent-repl--uds-run-timer)
+                 (lambda (&rest _) 'armed-timer))
+                ((symbol-function 'timerp) (lambda (tm) (eq tm 'armed-timer)))
+                ((symbol-function 'cancel-timer)
+                 (lambda (tm) (setq cancelled tm))))
+        (agent-repl--uds-track-command "req-1" "mergeWorkspace" "ws1")
+        ;; Act
+        (agent-repl--uds-untrack-command "req-1" "ws1" "local-wait-aborted")
+        ;; Assert
+        (should (eq cancelled 'armed-timer))))))
+
+(ert-deftest agent-repl-test-uds-late-ack-does-not-error ()
+  "An ack arriving after its timeout is tolerated, never an error."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (agent-repl-test--with-captured-deadline expire
+      (agent-repl--uds-track-command "req-1" "mergeWorkspace" "ws1")
+      (cl-letf (((symbol-function 'message) (lambda (&rest _) nil)))
+        (funcall expire)
+        ;; Act / Assert
+        (should (eq (agent-repl--uds-handle-command-ack
+                     '(:requestId "req-1" :ok t))
+                    t))))))
+
+(ert-deftest agent-repl-test-uds-late-ack-logs-late-ack-after-timeout ()
+  "A late ack is logged as `late ack after timeout', not as untracked."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (agent-repl-test--with-captured-deadline expire
+      (agent-repl--uds-track-command "req-1" "mergeWorkspace" "ws1")
+      (cl-letf (((symbol-function 'message) (lambda (&rest _) nil)))
+        (funcall expire))
+      (let (logged)
+        (cl-letf (((symbol-function 'agent-repl--log)
+                   (lambda (_ws fmt &rest args)
+                     (push (apply #'format fmt args) logged))))
+          ;; Act
+          (agent-repl--uds-handle-command-ack '(:requestId "req-1" :ok t))
+          ;; Assert
+          (should (cl-find-if
+                   (lambda (line)
+                     (and (string-match-p "late ack after timeout" line)
+                          (string-match-p "field=mergeWorkspace" line)))
+                   logged)))))))
+
+(ert-deftest agent-repl-test-uds-late-ack-clears-the-timed-out-record ()
+  "A late ack consumes its timed-out record so it cannot be reported twice."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (agent-repl-test--with-captured-deadline expire
+      (agent-repl--uds-track-command "req-1" "mergeWorkspace" "ws1")
+      (cl-letf (((symbol-function 'message) (lambda (&rest _) nil)))
+        (funcall expire))
+      ;; Act
+      (agent-repl--uds-handle-command-ack '(:requestId "req-1" :ok t))
+      ;; Assert
+      (should-not (gethash "req-1" agent-repl--uds-timed-out-commands)))))
+
+(ert-deftest agent-repl-test-uds-late-ack-leaves-link-degraded ()
+  "A late ack does not clear degradation: its deadline really was missed."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (agent-repl-test--with-captured-deadline expire
+      (agent-repl--uds-track-command "req-1" "mergeWorkspace" "ws1")
+      (cl-letf (((symbol-function 'message) (lambda (&rest _) nil)))
+        (funcall expire))
+      ;; Act
+      (agent-repl--uds-handle-command-ack '(:requestId "req-1" :ok t))
+      ;; Assert
+      (should (eq (agent-repl-uds-link-health) :degraded)))))
+
+(ert-deftest agent-repl-test-uds-next-successful-ack-restores-health ()
+  "The next in-deadline ack after a timeout restores the link to healthy."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (agent-repl-test--with-captured-deadline expire
+      (agent-repl--uds-track-command "req-1" "mergeWorkspace" "ws1")
+      (cl-letf (((symbol-function 'message) (lambda (&rest _) nil)))
+        (funcall expire))
+      (agent-repl--uds-track-command "req-2" "mergeWorkspace" "ws1")
+      ;; Act
+      (agent-repl--uds-handle-command-ack '(:requestId "req-2" :ok t))
+      ;; Assert
+      (should (eq (agent-repl-uds-link-health) :healthy)))))
+
+(ert-deftest agent-repl-test-uds-rejected-ack-restores-health ()
+  "A REJECTED ack still proves the link carried traffic, so health returns."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (agent-repl-test--with-captured-deadline expire
+      (agent-repl--uds-track-command "req-1" "mergeWorkspace" "ws1")
+      (cl-letf (((symbol-function 'message) (lambda (&rest _) nil)))
+        (funcall expire)
+        (agent-repl--uds-track-command "req-2" "mergeWorkspace" "ws1")
+        ;; Act
+        (agent-repl--uds-handle-command-ack
+         '(:requestId "req-2" :error "branch not found"))
+        ;; Assert
+        (should (eq (agent-repl-uds-link-health) :healthy))))))
+
+(ert-deftest agent-repl-test-uds-untracked-ack-leaves-link-degraded ()
+  "An ack for a request nobody tracked is no proof about the command plane."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (agent-repl--uds-link-degrade "req-1" "mergeWorkspace" "ws1")
+    ;; Act
+    (agent-repl--uds-handle-command-ack '(:requestId "req-9" :ok t))
+    ;; Assert
+    (should (eq (agent-repl-uds-link-health) :degraded))))
+
+(ert-deftest agent-repl-test-uds-reconnect-restores-health ()
+  "A successful reconnect restores the command link to healthy."
+  ;; Arrange
+  (agent-repl-test--with-uds
+    (agent-repl--uds-link-degrade "req-1" "mergeWorkspace" "ws1")
+    (cl-letf (((symbol-function 'agent-repl--uds-connect)
+               (lambda (&rest _) 'fake-proc))
+              ((symbol-function 'process-name) (lambda (_p) "fake"))
+              ((symbol-function 'process-status) (lambda (_p) 'open)))
+      ;; Act
+      (agent-repl-uds-connect)
+      ;; Assert
+      (should (eq (agent-repl-uds-link-health) :healthy)))))
+
+(ert-deftest agent-repl-test-uds-command-unacked-is-a-local-failure-type ()
+  "The timeout's failure type belongs to the closed local vocabulary."
+  ;; Arrange / Act / Assert
+  (should (member "client.command_unacked" agent-repl-failure-local-types)))
 
 (provide 'test-frontend-uds)
 

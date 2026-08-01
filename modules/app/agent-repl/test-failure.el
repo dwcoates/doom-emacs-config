@@ -167,6 +167,15 @@ failure would be Emacs guessing at something only the daemon can see."
     ;; Assert
     (should (eq (plist-get f :class) :internal))))
 
+(ert-deftest agent-repl-test-failure-local-accepts-command-unacked ()
+  "An unanswered outbound command is a locally-classifiable failure.
+The daemon cannot report that it never answered Emacs, so the ack-aging
+verdict has to be minted at this end."
+  ;; Act
+  (let ((f (agent-repl-failure-local "client.command_unacked" "never acked")))
+    ;; Assert
+    (should (equal (plist-get f :type) "client.command_unacked"))))
+
 (ert-deftest agent-repl-test-failure-local-rejects-an-unlisted-type ()
   "A type outside the closed local set fails loudly.
 That is what keeps the local vocabulary closed rather than accumulating a

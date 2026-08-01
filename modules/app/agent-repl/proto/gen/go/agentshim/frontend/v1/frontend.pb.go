@@ -211,6 +211,30 @@ const (
 	// there would move with store load rather than with the agent, lingering
 	// longest exactly when the model was fastest.
 	RenderState_RENDER_STATE_SUBMITTING RenderState = 22
+	// Additive: the FIRST instant of a merge attempt, before the request is
+	// durably on its repository's queue.
+	//
+	// WHAT IT SPLITS. MERGE_QUEUED and MERGING both describe a merge the
+	// daemon has already accepted and recorded; neither can describe the window
+	// between the frontend command arriving and the durable enqueue landing. A
+	// command that died in that window — an unresolvable geometry, a queue write
+	// that failed, a daemon that never got to process it — left no trace in any
+	// UI at all, so the user's merge simply never appeared to happen. This is
+	// the command handler's own "I have this" mark, emitted on receipt before
+	// geometry resolution and before Coordinator.Enqueue.
+	//
+	// IT IS DELIBERATELY TRANSIENT and has NO durable queue entry behind it. It
+	// is superseded within milliseconds by MERGE_QUEUED or MERGING on the happy
+	// path, and by MERGE_FAILED when the enqueue is refused. A daemon that
+	// bounces while a workspace sits here has by definition lost the attempt,
+	// so Coordinator.Drain sweeps it to MERGE_FAILED at the next boot rather
+	// than leaving a workspace pinned on a phase nothing will ever advance.
+	//
+	// Its PRECEDENCE is directly BELOW MERGE_QUEUED (rank 6 in the SSM's prec
+	// table, beneath merge_queued's 5): it is the weakest claim the merge axis
+	// can make — the attempt is not even on a queue yet — so any other merge row
+	// that exists is the more specific truth.
+	RenderState_RENDER_STATE_MERGE_ENQUEUING RenderState = 23
 )
 
 // Enum value maps for RenderState.
@@ -239,31 +263,33 @@ var (
 		20: "RENDER_STATE_SEVERED",
 		21: "RENDER_STATE_HIBERNATED",
 		22: "RENDER_STATE_SUBMITTING",
+		23: "RENDER_STATE_MERGE_ENQUEUING",
 	}
 	RenderState_value = map[string]int32{
-		"RENDER_STATE_UNSPECIFIED":    0,
-		"RENDER_STATE_INIT":           1,
-		"RENDER_STATE_IDLE":           2,
-		"RENDER_STATE_IDLE_ASYNC":     3,
-		"RENDER_STATE_THINKING":       4,
-		"RENDER_STATE_PERMISSION":     5,
-		"RENDER_STATE_DONE":           6,
-		"RENDER_STATE_STOP_FAILED":    7,
-		"RENDER_STATE_MERGING":        8,
-		"RENDER_STATE_MERGE_QUEUED":   9,
-		"RENDER_STATE_MERGE_CONFLICT": 10,
-		"RENDER_STATE_MERGE_FAILED":   11,
-		"RENDER_STATE_MERGED":         12,
-		"RENDER_STATE_DEAD":           13,
-		"RENDER_STATE_DEGRADED":       14,
-		"RENDER_STATE_READY":          15,
-		"RENDER_STATE_VENDOR_BLOCKED": 16,
-		"RENDER_STATE_INTERRUPTED":    17,
-		"RENDER_STATE_CLEARING":       18,
-		"RENDER_STATE_COMPACTING":     19,
-		"RENDER_STATE_SEVERED":        20,
-		"RENDER_STATE_HIBERNATED":     21,
-		"RENDER_STATE_SUBMITTING":     22,
+		"RENDER_STATE_UNSPECIFIED":     0,
+		"RENDER_STATE_INIT":            1,
+		"RENDER_STATE_IDLE":            2,
+		"RENDER_STATE_IDLE_ASYNC":      3,
+		"RENDER_STATE_THINKING":        4,
+		"RENDER_STATE_PERMISSION":      5,
+		"RENDER_STATE_DONE":            6,
+		"RENDER_STATE_STOP_FAILED":     7,
+		"RENDER_STATE_MERGING":         8,
+		"RENDER_STATE_MERGE_QUEUED":    9,
+		"RENDER_STATE_MERGE_CONFLICT":  10,
+		"RENDER_STATE_MERGE_FAILED":    11,
+		"RENDER_STATE_MERGED":          12,
+		"RENDER_STATE_DEAD":            13,
+		"RENDER_STATE_DEGRADED":        14,
+		"RENDER_STATE_READY":           15,
+		"RENDER_STATE_VENDOR_BLOCKED":  16,
+		"RENDER_STATE_INTERRUPTED":     17,
+		"RENDER_STATE_CLEARING":        18,
+		"RENDER_STATE_COMPACTING":      19,
+		"RENDER_STATE_SEVERED":         20,
+		"RENDER_STATE_HIBERNATED":      21,
+		"RENDER_STATE_SUBMITTING":      22,
+		"RENDER_STATE_MERGE_ENQUEUING": 23,
 	}
 )
 
@@ -6575,7 +6601,7 @@ const file_agentshim_frontend_v1_frontend_proto_rawDesc = "" +
 	"\x06queues\x18\x06 \x03(\v2 .agentshim.frontend.v1.QueueViewR\x06queues\x12?\n" +
 	"\bprogress\x18\a \x03(\v2#.agentshim.frontend.v1.ProgressViewR\bprogress\x12Z\n" +
 	"\x13workspace_available\x18\b \x03(\v2).agentshim.frontend.v1.WorkspaceAvailableR\x12workspaceAvailable\x12D\n" +
-	"\fhost_actions\x18\t \x03(\v2!.agentshim.frontend.v1.HostActionR\vhostActions*\x8e\x05\n" +
+	"\fhost_actions\x18\t \x03(\v2!.agentshim.frontend.v1.HostActionR\vhostActions*\xb0\x05\n" +
 	"\vRenderState\x12\x1c\n" +
 	"\x18RENDER_STATE_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11RENDER_STATE_INIT\x10\x01\x12\x15\n" +
@@ -6600,7 +6626,8 @@ const file_agentshim_frontend_v1_frontend_proto_rawDesc = "" +
 	"\x17RENDER_STATE_COMPACTING\x10\x13\x12\x18\n" +
 	"\x14RENDER_STATE_SEVERED\x10\x14\x12\x1b\n" +
 	"\x17RENDER_STATE_HIBERNATED\x10\x15\x12\x1b\n" +
-	"\x17RENDER_STATE_SUBMITTING\x10\x16*\xf4\x01\n" +
+	"\x17RENDER_STATE_SUBMITTING\x10\x16\x12 \n" +
+	"\x1cRENDER_STATE_MERGE_ENQUEUING\x10\x17*\xf4\x01\n" +
 	"\x13SessionConnectivity\x12$\n" +
 	" SESSION_CONNECTIVITY_UNSPECIFIED\x10\x00\x12#\n" +
 	"\x1fSESSION_CONNECTIVITY_HIBERNATED\x10\x01\x12#\n" +

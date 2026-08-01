@@ -190,6 +190,12 @@ export function phaseLabel(state: WebRenderState): PhaseLabel {
       return { word: "dead", tone: "error", spinning: false };
     case "degraded":
       return { word: "degraded", tone: "error", spinning: false };
+    // THE FIRST INSTANT OF A MERGE ATTEMPT, before it is durably enqueued. It
+    // SPINS, exactly as `merging` does and unlike `merge_queued`: something is
+    // actively happening (the daemon is resolving the geometry and writing the
+    // queue entry), where a queued merge is waiting for someone else to finish.
+    case "merge_enqueuing":
+      return { word: "merge enqueuing", tone: "muted", spinning: true };
     case "merging":
       return { word: "merging", tone: "muted", spinning: true };
     case "merge_queued":

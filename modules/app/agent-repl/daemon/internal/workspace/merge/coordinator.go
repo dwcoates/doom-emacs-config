@@ -2,6 +2,7 @@ package merge
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -42,6 +43,12 @@ type CoordinatorConfig struct {
 	Sink StateSink
 	// Queue is the durable per-repository request channel.
 	Queue DurableQueue
+	// Phases reads back the phase a workspace currently rests on, which is what
+	// Drain's boot sweep of orphaned merge_enqueuing marks needs. Required, on
+	// the same footing as the rest: without it a merge attempt that died before
+	// its durable enqueue would leave its workspace pinned on merge_enqueuing
+	// forever, with no queue entry for anything to notice it by.
+	Phases PhaseSource
 	// Keyer resolves the queue key from a request's target worktree.
 	Keyer RepoKeyer
 	// Picker is the git cherry-pick layer (*merge.Driver in production).
@@ -75,6 +82,7 @@ type QueueCoordinator struct {
 	logf      dlog.Logf
 	emit      *stateEmitter
 	queue     DurableQueue
+	phases    PhaseSource
 	keyer     RepoKeyer
 	picker    Picker
 	lease     Lease
@@ -150,6 +158,8 @@ func NewCoordinator(cfg CoordinatorConfig) (*QueueCoordinator, error) {
 		return nil, fmt.Errorf("merge: Coordinator Sink is required")
 	case cfg.Queue == nil:
 		return nil, fmt.Errorf("merge: Coordinator Queue is required")
+	case cfg.Phases == nil:
+		return nil, fmt.Errorf("merge: Coordinator Phases source is required")
 	case cfg.Keyer == nil:
 		return nil, fmt.Errorf("merge: Coordinator Keyer is required")
 	case cfg.Picker == nil:
@@ -166,6 +176,7 @@ func NewCoordinator(cfg CoordinatorConfig) (*QueueCoordinator, error) {
 		logf:      cfg.Logf,
 		emit:      &stateEmitter{sink: cfg.Sink, logf: cfg.Logf},
 		queue:     cfg.Queue,
+		phases:    cfg.Phases,
 		keyer:     cfg.Keyer,
 		picker:    cfg.Picker,
 		lease:     cfg.Lease,
@@ -242,7 +253,61 @@ func (c *QueueCoordinator) Drain(_ context.Context) error {
 		c.logf("merge: drain resuming {repo=%s depth=%d head_ws=%s}", repo, len(reqs), reqs[0].Workspace)
 		c.startDrain(repo)
 	}
-	return nil
+	return c.sweepEnqueuing(snap)
+}
+
+// enqueuingLostCause is what an orphaned merge_enqueuing is failed with. It is
+// deliberately a full sentence: it is the only thing the user will see about a
+// merge attempt that left no other trace.
+const enqueuingLostCause = "daemon restarted before the merge was durably enqueued"
+
+// sweepEnqueuing fails every workspace resting on merge_enqueuing that has no
+// durable queue entry behind it.
+//
+// WHY IT IS NEEDED AT ALL. merge_enqueuing is the one merge phase with nothing
+// durable behind it: the command handler emits it on receipt, before the
+// geometry is resolved and before the queue write. A daemon that dies in that
+// window has genuinely lost the attempt — there is no entry to replay and no
+// goroutine that will ever advance the phase — so a boot that stayed quiet
+// would leave the workspace pinned on "enqueuing" for the rest of its life.
+//
+// WHY IT CHECKS THE QUEUE. The mark and the durable write are two steps, and a
+// boot can land after both: a workspace whose entry IS on the queue is a merge
+// that will be drained normally, and failing it here would contradict a merge
+// that is about to run. The snapshot is therefore the authority on what is
+// still alive, and only workspaces absent from it are swept.
+//
+// Every sweep decision is loud-logged, both the failures and the retentions,
+// because a merge silently reclassified at boot is exactly the kind of event a
+// user later needs to find in the log.
+func (c *QueueCoordinator) sweepEnqueuing(snap map[string][]Request) error {
+	pinned, err := c.phases.WorkspacesAtPhase(PhaseMergeEnqueuing)
+	if err != nil {
+		// The sweep could not run. That is not "nothing to sweep": any
+		// workspace stuck at merge_enqueuing stays stuck, so the boot says so
+		// and surfaces the failure rather than reporting a clean drain.
+		c.logf("merge: drain enqueuing sweep FAILED to read the pinned workspaces: %v — any workspace left at merge_enqueuing by the previous daemon stays pinned", err)
+		return fmt.Errorf("merge: drain: read workspaces at %s: %w", PhaseMergeEnqueuing, err)
+	}
+	queued := map[string]struct{}{}
+	for _, reqs := range snap {
+		for _, req := range reqs {
+			queued[req.Workspace] = struct{}{}
+		}
+	}
+	var failed error
+	for _, ws := range pinned {
+		if _, ok := queued[ws]; ok {
+			c.logf("merge: drain enqueuing sweep RETAINED {ws=%s} — the workspace is at merge_enqueuing but its durable queue entry survived, so the merge is drained normally", ws)
+			continue
+		}
+		c.logf("merge: drain enqueuing sweep FAILING {ws=%s} — merge_enqueuing with NO durable queue entry: the attempt died before it was recorded and nothing will ever advance it", ws)
+		if err := c.emit.emit(ws, PhaseMergeFailed, enqueuingLostCause); err != nil {
+			c.logf("merge: drain enqueuing sweep merge_failed record FAILED {ws=%s}: %v", ws, err)
+			failed = errors.Join(failed, err)
+		}
+	}
+	return failed
 }
 
 // Resume continues a merge parked on a conflict its human has resolved (the

@@ -107,6 +107,7 @@ export type WebRenderState =
   | "done"
   | "interrupted"
   | "vendor_blocked"
+  | "merge_enqueuing"
   | "merging"
   | "merge_queued"
   | "merge_conflict"
@@ -782,6 +783,11 @@ const RENDER_STATE_KEYWORD: Record<RenderState, WebRenderState | null> = {
   // VENDOR_BLOCKED means, because that is what it always was — a turn that
   // ended on something only a human or the vendor can fix.
   [RenderState.STOP_FAILED]: "vendor_blocked",
+  // THE MERGE PIPELINE'S FIRST MARK. It has no durable queue entry behind
+  // it, which is why it is the one merge phase a daemon boot can find
+  // orphaned — and why the footer renders it distinctly from the queue place
+  // that follows it.
+  [RenderState.MERGE_ENQUEUING]: "merge_enqueuing",
   [RenderState.MERGING]: "merging",
   [RenderState.MERGE_QUEUED]: "merge_queued",
   [RenderState.MERGE_CONFLICT]: "merge_conflict",

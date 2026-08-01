@@ -132,6 +132,12 @@ failure is surfaced, not hidden)."
     ;; purple `:vendor-blocked' means, because that is what it always was —
     ;; a turn that ended on something only a human or the vendor can fix.
     ("RENDER_STATE_STOP_FAILED"    . :vendor-blocked)
+    ;; The merge pipeline's FIRST mark, emitted by the daemon's command
+    ;; handler the instant a merge command arrives and before anything
+    ;; durable exists for it.  Transient by construction: it is superseded
+    ;; by `:merge-queued' or `:merging' within milliseconds, or by
+    ;; `:merge-failed' when the enqueue is refused.
+    ("RENDER_STATE_MERGE_ENQUEUING" . :merge-enqueuing)
     ("RENDER_STATE_MERGING"        . :merging)
     ("RENDER_STATE_MERGE_QUEUED"   . :merge-queued)
     ("RENDER_STATE_MERGE_CONFLICT" . :merge-conflict)

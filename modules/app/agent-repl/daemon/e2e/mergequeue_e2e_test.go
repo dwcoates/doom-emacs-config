@@ -293,11 +293,12 @@ func sendMergeResume(t *testing.T, conn *websocket.Conn, requestID string, m mer
 // merge's own account of itself on the merge's own field keeps the assertion
 // about the merge.
 const (
-	phaseMerging       = "merging"
-	phaseMergeQueued   = "merge_queued"
-	phaseMergeConflict = "merge_conflict"
-	phaseMergeFailed   = "merge_failed"
-	phaseMerged        = "merged"
+	phaseMergeEnqueuing = "merge_enqueuing"
+	phaseMerging        = "merging"
+	phaseMergeQueued    = "merge_queued"
+	phaseMergeConflict  = "merge_conflict"
+	phaseMergeFailed    = "merge_failed"
+	phaseMerged         = "merged"
 )
 
 // mergeWatch is an accumulating reader over ONE frontend connection.

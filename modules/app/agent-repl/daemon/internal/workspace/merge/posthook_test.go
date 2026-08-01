@@ -334,6 +334,7 @@ func TestNewCoordinatorRequiresThePostMergeHook(t *testing.T) {
 		Logf:     func(string, ...any) {},
 		Sink:     newSyncSink(1),
 		Queue:    q,
+		Phases:   fakePhases{},
 		Keyer:    fakeKeyer{},
 		Picker:   newFakePicker(1),
 		Lease:    newFakeLease(1),

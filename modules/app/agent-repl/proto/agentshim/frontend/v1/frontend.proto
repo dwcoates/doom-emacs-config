@@ -192,6 +192,30 @@ enum RenderState {
   // there would move with store load rather than with the agent, lingering
   // longest exactly when the model was fastest.
   RENDER_STATE_SUBMITTING = 22;
+  // Additive: the FIRST instant of a merge attempt, before the request is
+  // durably on its repository's queue.
+  //
+  // WHAT IT SPLITS. MERGE_QUEUED and MERGING both describe a merge the
+  // daemon has already accepted and recorded; neither can describe the window
+  // between the frontend command arriving and the durable enqueue landing. A
+  // command that died in that window — an unresolvable geometry, a queue write
+  // that failed, a daemon that never got to process it — left no trace in any
+  // UI at all, so the user's merge simply never appeared to happen. This is
+  // the command handler's own "I have this" mark, emitted on receipt before
+  // geometry resolution and before Coordinator.Enqueue.
+  //
+  // IT IS DELIBERATELY TRANSIENT and has NO durable queue entry behind it. It
+  // is superseded within milliseconds by MERGE_QUEUED or MERGING on the happy
+  // path, and by MERGE_FAILED when the enqueue is refused. A daemon that
+  // bounces while a workspace sits here has by definition lost the attempt,
+  // so Coordinator.Drain sweeps it to MERGE_FAILED at the next boot rather
+  // than leaving a workspace pinned on a phase nothing will ever advance.
+  //
+  // Its PRECEDENCE is directly BELOW MERGE_QUEUED (rank 6 in the SSM's prec
+  // table, beneath merge_queued's 5): it is the weakest claim the merge axis
+  // can make — the attempt is not even on a queue yet — so any other merge row
+  // that exists is the more specific truth.
+  RENDER_STATE_MERGE_ENQUEUING = 23;
 }
 
 // SESSION CONNECTIVITY answers whether the current session-controller

@@ -153,6 +153,7 @@ describe("WorkspaceState mapping", () => {
     ["RENDER_STATE_IDLE", "idle"],
     ["RENDER_STATE_IDLE_ASYNC", "idle_async"],
     ["RENDER_STATE_PERMISSION", "permission"],
+    ["RENDER_STATE_MERGE_ENQUEUING", "merge_enqueuing"],
     ["RENDER_STATE_MERGE_CONFLICT", "merge_conflict"],
     ["RENDER_STATE_MERGED", "merged"],
     ["RENDER_STATE_DEAD", "dead"],

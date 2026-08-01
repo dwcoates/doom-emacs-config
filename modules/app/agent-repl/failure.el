@@ -46,14 +46,21 @@ daemon.")
 (defconst agent-repl-failure-local-types
   '("client.daemon_unreachable"
     "client.daemon_exited"
+    "client.command_unacked"
     "client.worktree_failed"
     "client.merge_failed")
   "The closed vocabulary of failures Emacs classifies for ITSELF.
 
 Each names something no other process can observe: the UDS dial Emacs
-performs, the daemon process Emacs supervises, and the git/worktree
+performs, the daemon process Emacs supervises, the acknowledgements Emacs
+is still waiting on for commands only Emacs sent, and the git/worktree
 operations Emacs runs.  Nothing on the `frontend.v1' conversation plane
-appears here — that plane arrives already classified.")
+appears here — that plane arrives already classified.
+
+`client.command_unacked' is the aging verdict on an outbound
+`FrontendCommand': the daemon cannot report that it never answered, so
+the deadline that declares the command lost is necessarily this end's
+own (see `agent-repl--uds-command-deadline-expired').")
 
 (defun agent-repl-failure-client-type-p (type)
   "Return non-nil when TYPE belongs to the FRONTEND namespace."

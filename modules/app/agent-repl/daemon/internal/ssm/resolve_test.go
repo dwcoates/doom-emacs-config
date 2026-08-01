@@ -109,6 +109,14 @@ func TestResolvePrecedence(t *testing.T) {
 			want: frontendv1.RenderState_RENDER_STATE_MERGING,
 		},
 		{
+			// The mark's own rank: it is a merge state, so it still outranks
+			// the whole color ladder — a merge attempt the user just made is
+			// what the workspace is doing.
+			name: "merge_enqueuing beats dead",
+			sigs: []sig{{sigDead, causeSessionEnded, 1}, {sigMergeEnqueuing, causeMergeTransition, 2}},
+			want: frontendv1.RenderState_RENDER_STATE_MERGE_ENQUEUING,
+		},
+		{
 			name: "merge_queued beats dead",
 			sigs: []sig{{sigDead, causeSessionEnded, 1}, {sigMergeQueued, causeMergeTransition, 2}},
 			want: frontendv1.RenderState_RENDER_STATE_MERGE_QUEUED,

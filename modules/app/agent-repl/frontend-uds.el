@@ -75,6 +75,22 @@ stale until the daemon is reachable again.  There is no spill buffer."
   :type 'number
   :group 'agent-repl)
 
+(defcustom agent-repl-uds-command-ack-deadline 10.0
+  "Seconds an outbound `FrontendCommand' may go unacknowledged.
+
+Every command Emacs sends is answered by a `CommandAck' frame.  Past this
+deadline the command is declared LOST: the daemon either never read it or
+never answered, and in both cases nothing further is coming.  The frontend
+says so loudly (log + echo) and marks its own command link degraded
+\(`agent-repl-uds-link-health') rather than leaving the request pending
+forever with no feedback at all.
+
+This is a REPORTING deadline, never a retry timer: the command is not
+resent, because a resend would double a submitPrompt or a mergeWorkspace
+the daemon may in fact have performed."
+  :type 'number
+  :group 'agent-repl)
+
 ;;;; ---- Connection state ------------------------------------------------
 
 (defvar agent-repl--uds-process nil
@@ -98,7 +114,40 @@ Populated by `agent-repl--uds-track-command'; entries are removed by
 `agent-repl--uds-handle-command-ack' when the matching ack lands.  Each
 value plist carries `:field' (the command oneof name), `:workspace', and
 an optional `:on-failure' (a function of one arg, the error string, run
-when the ack reports failure — in addition to the loud log + echo).")
+when the ack reports failure — in addition to the loud log + echo).  Each
+value also carries `:deadline-timer', the ack-aging alarm armed by
+`agent-repl--uds-track-command'.")
+
+(defvar agent-repl--uds-timed-out-commands (make-hash-table :test 'equal)
+  "Hash of request_id -> plist for commands whose ack deadline expired.
+
+An entry moves here from `agent-repl--uds-pending-commands' when
+`agent-repl--uds-command-deadline-expired' declares it lost, and leaves
+when a LATE `CommandAck' finally arrives.  A timed-out command is marked,
+never silently dropped: without this record a late ack would read as an
+ack for a request nobody ever sent.
+
+Each value carries only `:field' and `:workspace'.  The caller callbacks
+are deliberately NOT retained — the caller has already been told the
+command was lost, so letting a delayed ack run `:on-success' would mutate
+state that was abandoned ten seconds earlier.")
+
+(defvar agent-repl--uds-link-health :healthy
+  "The FRONTEND's own fact about its command link to the daemon.
+
+`:healthy' means every command sent since the last check was answered.
+`:degraded' means at least one command went unacknowledged past
+`agent-repl-uds-command-ack-deadline' and nothing has been acknowledged
+since.
+
+This axis is Emacs-owned and Emacs-classified, exactly like
+`client.daemon_unreachable': the daemon definitionally cannot report that
+it failed to answer Emacs.  It is NOT the daemon-pushed workspace session
+status, which describes the daemon-to-shim link and stays entirely the
+daemon's to write.  A healthy session status and a degraded command link
+are a perfectly coherent pair, and were precisely the pair that went
+unreported when three `mergeWorkspace' commands vanished into a starved
+connection.")
 
 (defvar agent-repl--uds-pending-health-responses (make-hash-table :test 'equal)
   "Hash of health request_id -> correlation contract awaiting a health view.
@@ -332,6 +381,11 @@ Returns the process on success, nil on a failed dial."
           (setq agent-repl--uds-process proc)
           (agent-repl--log nil "uds-connect: connected proc=%s status=%s"
                            (process-name proc) (process-status proc))
+          ;; A fresh connection is a fresh command plane: whatever went
+          ;; unacknowledged belonged to the socket that is gone.  Any command
+          ;; still aging on the NEW connection reports itself when its own
+          ;; deadline expires, so this restore cannot hide a live failure.
+          (agent-repl--uds-link-restore "reconnect" nil)
           proc)
       (error
        (setq agent-repl--uds-process nil)
@@ -584,6 +638,97 @@ FIELD is unknown — no queuing, no silent drop.  Returns the generated
 ;; it and, on failure, surfaces loudly (log + echo area) per
 ;; No-Silent-Fallbacks — a rejected command is never dropped silently.
 
+;;;; ---- Command-link health (Emacs's own fact) --------------------------
+
+(defun agent-repl-uds-link-health ()
+  "Return the frontend command link's health: `:healthy' or `:degraded'.
+
+The single reader of `agent-repl--uds-link-health'.  Surfaces are expected
+to call this rather than touch the variable, so the two states stay the
+whole vocabulary."
+  agent-repl--uds-link-health)
+
+(defun agent-repl--uds-link-degrade (request-id field workspace)
+  "Mark the command link degraded because REQUEST-ID went unacknowledged.
+
+FIELD and WORKSPACE name the lost command for the transition log.  The
+transition is recorded once: a second lost command while already degraded
+is logged by its own deadline handler, not by a repeated state change."
+  (let ((previous agent-repl--uds-link-health))
+    (setq agent-repl--uds-link-health :degraded)
+    (agent-repl--log workspace
+                     "uds-link-health: %S -> :degraded cause=unacked-command request-id=%s field=%s ws=%s"
+                     previous request-id field (or workspace "none"))))
+
+(defun agent-repl--uds-link-restore (reason workspace)
+  "Return the command link to `:healthy' because of REASON.
+
+WORKSPACE supplies log context.  A restore from an already-healthy link is
+recorded only in the verbose trace: it is the ordinary case (every ack
+takes this path) and would otherwise drown the durable log."
+  (let ((previous agent-repl--uds-link-health))
+    (setq agent-repl--uds-link-health :healthy)
+    (if (eq previous :healthy)
+        (agent-repl--log-verbose workspace
+                                 "uds-link-health: already :healthy reason=%s ws=%s"
+                                 reason (or workspace "none"))
+      (agent-repl--log workspace
+                       "uds-link-health: %S -> :healthy reason=%s ws=%s"
+                       previous reason (or workspace "none")))))
+
+;;;; ---- Ack aging -------------------------------------------------------
+
+(defun agent-repl--uds-cancel-ack-deadline (pending)
+  "Disarm the ack-aging alarm recorded on PENDING, if it is still armed.
+Tolerates a non-timer value so the injected test seam can hand back a
+sentinel instead of a real timer object."
+  (let ((timer (plist-get pending :deadline-timer)))
+    (when (timerp timer)
+      (cancel-timer timer))))
+
+(defun agent-repl--uds-command-deadline-expired (request-id)
+  "Declare REQUEST-ID lost: no `CommandAck' arrived within the deadline.
+
+Moves the entry to `agent-repl--uds-timed-out-commands', degrades the
+command link, and surfaces a locally-classified `client.command_unacked'
+failure through the module's one failure channel, so the user learns that
+a command they issued went nowhere.
+
+The tracked callbacks are NOT run.  `:on-failure' means \"the daemon
+rejected this\", and a command that was never answered was never rejected;
+inventing a rejection would hand callers a verdict the daemon never
+reached.
+
+A request-id already settled between the alarm firing and this body
+running is not lost at all, and is recorded only in the verbose trace."
+  (let ((pending (gethash request-id agent-repl--uds-pending-commands)))
+    (if (null pending)
+        (agent-repl--log-verbose
+         nil "uds-ack-deadline: request-id=%s already settled — no timeout"
+         request-id)
+      (let* ((field (plist-get pending :field))
+             (raw-workspace (plist-get pending :workspace))
+             (workspace (agent-repl--frontend-ws-name raw-workspace)))
+        (remhash request-id agent-repl--uds-pending-commands)
+        (puthash request-id (list :field field :workspace raw-workspace)
+                 agent-repl--uds-timed-out-commands)
+        (agent-repl--log
+         workspace
+         "uds-ack-deadline: UNACKED request-id=%s field=%s ws=%s deadline=%ss — command lost, callbacks abandoned"
+         request-id field (or raw-workspace "none")
+         agent-repl-uds-command-ack-deadline)
+        (agent-repl--uds-link-degrade request-id field workspace)
+        (agent-repl-failure-surface
+         workspace
+         (agent-repl-failure-local
+          "client.command_unacked"
+          (format "the daemon never acknowledged the %s command; the daemon link is degraded"
+                  (or field "frontend"))
+          (format "request-id=%s workspace=%s deadline=%ss"
+                  request-id (or raw-workspace "none")
+                  agent-repl-uds-command-ack-deadline)))
+        request-id))))
+
 (defun agent-repl--uds-track-command (request-id field workspace
                                                  &optional on-failure on-success
                                                  on-challenge)
@@ -599,17 +744,29 @@ ON-CHALLENGE, when non-nil, is a function of one argument (the ack's
 interrupt confirmation CHALLENGE — NOT a failure: the command was
 understood and deliberately not performed, so the challenge branch
 replaces the failure surfacing rather than adding to it.
+
+Tracking also ARMS an ack-aging alarm for
+`agent-repl-uds-command-ack-deadline' seconds (via the injectable
+`agent-repl--uds-run-timer' seam, so this is one scheduled alarm per
+command rather than any polling).  If the ack has not landed by then,
+`agent-repl--uds-command-deadline-expired' declares the command lost.
 Returns REQUEST-ID."
   ;; The RETAINED `:workspace' stays raw: it is the identity the ack path
   ;; correlates against, and callers hand it whatever they put on the wire.
   (puthash request-id
            (list :field field :workspace workspace
                  :on-failure on-failure :on-success on-success
-                 :on-challenge on-challenge)
+                 :on-challenge on-challenge
+                 :deadline-timer
+                 (agent-repl--uds-run-timer
+                  agent-repl-uds-command-ack-deadline
+                  (lambda ()
+                    (agent-repl--uds-command-deadline-expired request-id))))
            agent-repl--uds-pending-commands)
   (agent-repl--log (agent-repl--frontend-ws-name workspace)
-                   "uds-track-command: tracking request-id=%s field=%s ws=%s"
-                   request-id field workspace)
+                   "uds-track-command: tracking request-id=%s field=%s ws=%s ack-deadline=%ss"
+                   request-id field workspace
+                   agent-repl-uds-command-ack-deadline)
   request-id)
 
 (defun agent-repl--uds-untrack-command (request-id workspace reason)
@@ -617,10 +774,16 @@ Returns REQUEST-ID."
 WORKSPACE supplies log context and REASON records why the caller can no
 longer consume a later `CommandAck'.  This is the only transport-owned
 cleanup path for a synchronous command wait: retaining the callback after a
-timeout would let a delayed acknowledgement mutate stale caller state."
-  (let ((log-workspace (agent-repl--frontend-ws-name workspace)))
-    (if (gethash request-id agent-repl--uds-pending-commands)
+timeout would let a delayed acknowledgement mutate stale caller state.
+
+Also disarms the entry's ack-aging alarm: the caller has already stopped
+waiting and reported its own outcome, so a later ack-deadline warning
+about the same request would be a second account of one event."
+  (let ((log-workspace (agent-repl--frontend-ws-name workspace))
+        (pending (gethash request-id agent-repl--uds-pending-commands)))
+    (if pending
         (progn
+          (agent-repl--uds-cancel-ack-deadline pending)
           (remhash request-id agent-repl--uds-pending-commands)
           (agent-repl--log log-workspace
                            "uds-untrack-command: request-id=%s ws=%s reason=%s"
@@ -791,27 +954,50 @@ the `:ok' flag."
          (challenge (plist-get ack :interruptConfirmRequired))
          (pending (and request-id
                        (gethash request-id agent-repl--uds-pending-commands)))
-         (raw-workspace (if pending
-                            (plist-get pending :workspace)
+         ;; A LATE ack: the deadline already declared this command lost and
+         ;; moved its record aside.  Recognized here so the arrival reads as
+         ;; what it is rather than as an ack for a request nobody sent.
+         (late (and request-id (null pending)
+                    (gethash request-id agent-repl--uds-timed-out-commands)))
+         (record (or pending late))
+         (raw-workspace (if record
+                            (plist-get record :workspace)
                           (plist-get ack :workspace)))
          ;; The tracked and the echoed workspace are both wire cwds.  This
          ;; value reaches every log call below AND `agent-repl-failure-surface',
          ;; which logs with it too, so one resolution covers both.
          (workspace (agent-repl--frontend-ws-name raw-workspace))
-         (field (plist-get pending :field)))
+         (field (plist-get record :field)))
     (unless (and (stringp request-id) (not (string-empty-p request-id)))
       (agent-repl--log workspace
                        "uds-command-ack: MALFORMED missing request-id workspace=%S ok=%S error-present=%s"
                        raw-workspace ok (if err "yes" "no"))
       (signal 'agent-repl-uds-malformed-frame
               (list "command ack missing requestId" ack)))
+    (when pending
+      (agent-repl--uds-cancel-ack-deadline pending)
+      ;; The ack landed inside its deadline, so the command plane is
+      ;; demonstrably carrying traffic again.  Receipt is the fact here, not
+      ;; the verdict: a REJECTED command still proves the daemon read and
+      ;; answered, which is exactly what a degraded link says it did not.
+      (agent-repl--uds-link-restore "command-ack" workspace))
     (when request-id
       (remhash request-id agent-repl--uds-pending-commands))
     (cond
      ((null pending)
-     (agent-repl--log workspace
-                       "uds-command-ack: UNTRACKED request-id=%s ws=%s ok=%S error-present=%s — ignoring"
-                       request-id raw-workspace ok (if err "yes" "no")))
+      (if late
+          (progn
+            ;; Never an error: a late ack is a slow daemon, not a broken
+            ;; one.  The link stays degraded — the deadline really was
+            ;; missed, and only an ack that lands inside one clears it.
+            (remhash request-id agent-repl--uds-timed-out-commands)
+            (agent-repl--log workspace
+                             "uds-command-ack: late ack after timeout request-id=%s field=%s ws=%s ok=%S error-present=%s — callbacks already abandoned"
+                             request-id field raw-workspace ok
+                             (if err "yes" "no")))
+        (agent-repl--log workspace
+                         "uds-command-ack: UNTRACKED request-id=%s ws=%s ok=%S error-present=%s — ignoring"
+                         request-id raw-workspace ok (if err "yes" "no"))))
      (ok
       (agent-repl--log workspace
                        "uds-command-ack: ACCEPTED request-id=%s field=%s"

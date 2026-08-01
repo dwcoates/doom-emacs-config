@@ -577,6 +577,7 @@ body::after {
    human.  `merged` is NOT here: a settled merge has left the pipeline and
    renders in the Recently Merged section, where the recycle mark would
    misread as still-queued, so it takes the purple disc below instead. */
+#ws-sidebar .st-merge-enqueuing,
 #ws-sidebar .st-merging,
 #ws-sidebar .st-merge-queued,
 #ws-sidebar .st-merge-conflict,

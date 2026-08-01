@@ -50,6 +50,7 @@ export type WorkspaceStatus =
   | "start-failed"
   | "degraded"
   | "dead"
+  | "merge-enqueuing"
   | "merging"
   | "merge-queued"
   | "merge-conflict"
@@ -86,6 +87,7 @@ export const WORKSPACE_STATUSES: ReadonlySet<string> = new Set([
   "start-failed",
   "degraded",
   "dead",
+  "merge-enqueuing",
   "merging",
   "merge-queued",
   "merge-conflict",
@@ -101,6 +103,7 @@ export function workspaceStatusFromRenderState(state: WebRenderState): Workspace
     case "idle": return "ready";
     case "idle_async": return "idle-async";
     case "vendor_blocked": return "vendor-blocked";
+    case "merge_enqueuing": return "merge-enqueuing";
     case "merge_queued": return "merge-queued";
     case "merge_conflict": return "merge-conflict";
     case "merge_failed": return "merge-failed";
@@ -113,6 +116,7 @@ export function workspaceStatusFromRenderState(state: WebRenderState): Workspace
  * merge pipeline the glyph denotes, and it renders in its own Recently
  * Merged section where the recycle mark would misread as still-queued. */
 const MERGE_GLYPH_STATUSES: ReadonlySet<WorkspaceStatus> = new Set([
+  "merge-enqueuing",
   "merging",
   "merge-queued",
   "merge-conflict",

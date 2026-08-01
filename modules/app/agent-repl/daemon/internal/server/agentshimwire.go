@@ -190,6 +190,19 @@ func (s mergeSink) RecordMergeTransition(ws string, phase merge.Phase, cause str
 	return s.mgr.ApplyMergeTransition(ws, string(phase), cause)
 }
 
+// mergePhases adapts the SSM to merge.PhaseSource: the boot sweep's read of
+// which workspaces are still pinned on a merge phase. It is the same log
+// mergeSink writes to, read back — which is the point: merge_enqueuing has no
+// durable queue entry, so the pushed state IS the record that the attempt
+// happened, and the only place a boot can find one that died.
+type mergePhases struct{ mgr *ssm.Manager }
+
+func (p mergePhases) WorkspacesAtPhase(phase merge.Phase) ([]string, error) {
+	return p.mgr.WorkspacesAtMergePhase(phase)
+}
+
+var _ merge.PhaseSource = mergePhases{}
+
 // mergeConflictResolver adapts the PromptRouter to merge.ConflictResolver, the
 // port merge.Coordinator drives a parked conflict through.
 //
@@ -269,6 +282,7 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 		Logf:      logf,
 		Sink:      mergeSink{mgr},
 		Queue:     cfg.MergeQueue,
+		Phases:    mergePhases{mgr},
 		Keyer:     keyer,
 		Picker:    driver,
 		Lease:     cfg.MergeLease,
@@ -293,8 +307,12 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 		CommandHandlerConfig{
 			WorkspaceCreation: cfg.WorkspaceCreation,
 			MergeGeometry:     cfg.MergeGeometry,
-			Restarts:          cfg.Restarts,
-			Health:            HealthConfig{Router: cfg.Health, Daemon: cfg.DaemonHealth},
+			// The SAME sink the coordinator and merge.Driver write through, so
+			// the handler's merge_enqueuing lands on one merge axis with every
+			// later phase rather than on a parallel record.
+			MergeStates: mergeSink{mgr},
+			Restarts:    cfg.Restarts,
+			Health:      HealthConfig{Router: cfg.Health, Daemon: cfg.DaemonHealth},
 			// The gate reads each fact from the authority that owns it: the
 			// controller observes the turn boundary, and the progress resolver
 			// already carries the live-task count to the footer.

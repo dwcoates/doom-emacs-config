@@ -81,6 +81,10 @@ export enum RenderState {
   SEVERED = 20,
   HIBERNATED = 21,
   SUBMITTING = 22,
+  /* The first instant of a merge attempt, before anything durable exists
+     for it. Transient by construction: superseded by MERGE_QUEUED or MERGING
+     within milliseconds, or by MERGE_FAILED when the enqueue is refused. */
+  MERGE_ENQUEUING = 23,
 }
 
 /**
@@ -125,6 +129,7 @@ const RENDER_STATE_BY_NAME: Readonly<Record<string, RenderState>> = {
   RENDER_STATE_PERMISSION: RenderState.PERMISSION,
   RENDER_STATE_DONE: RenderState.DONE,
   RENDER_STATE_STOP_FAILED: RenderState.STOP_FAILED,
+  RENDER_STATE_MERGE_ENQUEUING: RenderState.MERGE_ENQUEUING,
   RENDER_STATE_MERGING: RenderState.MERGING,
   RENDER_STATE_MERGE_QUEUED: RenderState.MERGE_QUEUED,
   RENDER_STATE_MERGE_CONFLICT: RenderState.MERGE_CONFLICT,

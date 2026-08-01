@@ -727,7 +727,8 @@ func (m *Manager) ApplyConnectionDegraded(workspace string, degraded bool, reaso
 
 // ApplyMergeTransition records a daemon-local merge phase change (merge
 // state lives ONLY in the SSM, §9.2). phase is a merge signal token
-// (merging|merge_queued|merge_conflict|merge_failed|merged) or the empty
+// (merge_enqueuing|merging|merge_queued|merge_conflict|merge_failed|merged)
+// or the empty
 // string / merge_none to clear the merge axis. cause is a short human note
 // recorded as the cause kind's detail; it never carries a store seq.
 // A `merged` phase additionally establishes the workspace's durable merged-at
@@ -1130,7 +1131,7 @@ func mergeToken(phase string) (string, error) {
 	switch phase {
 	case "", sigMergeNone:
 		return sigMergeNone, nil
-	case sigMerging, sigMergeQueued, sigMergeConflict, sigMergeFailed, sigMerged:
+	case sigMergeEnqueuing, sigMerging, sigMergeQueued, sigMergeConflict, sigMergeFailed, sigMerged:
 		return phase, nil
 	default:
 		return "", fmt.Errorf("ssm: unknown merge phase %q", phase)
