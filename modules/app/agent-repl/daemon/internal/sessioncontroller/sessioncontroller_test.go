@@ -640,15 +640,13 @@ func TestSubmitPromptReusesLiveSession(t *testing.T) {
 	}
 }
 
-func TestMetapromptRefireFoldsOncePerResume(t *testing.T) {
-	// Arrange: a resumed session whose cwd carries a metaprompt file.
-	cwd := t.TempDir()
-	writeMetaprompt(t, cwd)
+func TestResumedSessionPromptsAreForwardedVerbatim(t *testing.T) {
+	// Arrange: a resumed session, which used to have a read-directive folded
+	// into its first prompt. Its guidelines now ride in the system prompt the
+	// shim built at spawn (agent-shim/claude/shim/src/metaprompt.ts), so the
+	// daemon has nothing to re-establish and rewrites nothing.
 	spawner := &fakeSpawner{}
 	m, lastClient := newTestManager(t, fakeLocator{m: map[string]string{"ws": "s1"}}, spawner)
-
-	// Bring the session up, then arm via a resume SessionStarted, as the
-	// consumer's onSessionStarted would on the live stream.
 	if err := m.SubmitPrompt(context.Background(), "ws", "", "first", ""); err != nil {
 		t.Fatalf("SubmitPrompt: %v", err)
 	}
@@ -657,26 +655,29 @@ func TestMetapromptRefireFoldsOncePerResume(t *testing.T) {
 		t.Fatalf("existing: %v", err)
 	}
 	m.onTurnBoundary(d, false)
-	m.armMetaprompt(d, &corev1.SessionStarted{Source: corev1.SessionSource_SESSION_SOURCE_RESUME, Cwd: cwd})
+	d.consumer.Apply(&corev1.Event{
+		SessionId: "s1",
+		Payload: &corev1.Event_SessionStarted{SessionStarted: &corev1.SessionStarted{
+			Source: corev1.SessionSource_SESSION_SOURCE_RESUME,
+			Cwd:    t.TempDir(),
+		}},
+	})
 
-	// Act: the NEXT two prompts.
+	// Act: the next two prompts.
 	_ = m.SubmitPrompt(context.Background(), "ws", "", "second", "")
 	m.onTurnBoundary(d, false)
 	_ = m.SubmitPrompt(context.Background(), "ws", "", "third", "")
 
-	// Assert: exactly the "second" prompt carries the directive; "third" does not.
+	// Assert: every prompt reaches the shim exactly as the user typed it.
 	fc := lastClient()
-	if len(fc.prompts) != 3 {
-		t.Fatalf("expected 3 prompts, got %d", len(fc.prompts))
+	want := []string{"first", "second", "third"}
+	if len(fc.prompts) != len(want) {
+		t.Fatalf("expected %d prompts, got %d", len(want), len(fc.prompts))
 	}
-	if fc.prompts[1] == "second" {
-		t.Error("second prompt should have the metaprompt directive prepended")
-	}
-	if !strings.Contains(fc.prompts[1], "second") {
-		t.Errorf("second prompt should still contain the user text; got %q", fc.prompts[1])
-	}
-	if fc.prompts[2] != "third" {
-		t.Errorf("third prompt must NOT re-fire the directive; got %q", fc.prompts[2])
+	for i, w := range want {
+		if fc.prompts[i] != w {
+			t.Errorf("prompt %d = %q, want %q verbatim", i, fc.prompts[i], w)
+		}
 	}
 }
 
