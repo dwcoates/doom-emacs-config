@@ -26,6 +26,7 @@
  * second, never a re-render of the footer, and never of the feed.
  */
 import { AGENTS_SPEC, agentsMenuHtml } from "./agents.js";
+import { BreathState, BreathingTicker, breathColor } from "./breathing.js";
 import { CounterEntry, CounterSpec, isActive } from "./counter-menu.js";
 import { formatCountdown, formatElapsed } from "./duration.js";
 import { escapeHtml } from "./highlight.js";
@@ -113,13 +114,19 @@ export interface PhaseLabel {
    * user to act on the single most routine event in the system.
    */
   tone: "thinking" | "blocked" | "async" | "retry" | "error" | "ok" | "hibernated" | "muted";
-  /** Whether the phase spins (the agent is actively working). */
-  spinning: boolean;
+  /**
+   * Whether the phase word BREATHES (the agent is actively working).
+   *
+   * This was `spinning` and drove a rotating arc beside the word. The motion is
+   * now the word's own gentle size oscillation (see breathing.ts) — the claim
+   * it makes is identical, so every arm below keeps the value it had.
+   */
+  breathing: boolean;
 }
 
 /**
  * The workspace's resolved render state as the footer's anchor word, tone, and
- * spin — read off the ONE authority, not off a copy.
+ * breath — read off the ONE authority, not off a copy.
  *
  * The vocabulary is CLOSED, so a new render state is a compile error here
  * rather than a footer that silently shows nothing. Merge phases get the quiet
@@ -129,83 +136,83 @@ export interface PhaseLabel {
 export function phaseLabel(state: WebRenderState): PhaseLabel {
   switch (state) {
     // The FIRST half of a turn: the daemon has the prompt and the shim has not
-    // acked it yet. Spinning and red exactly as thinking is, because the claim
+    // acked it yet. Breathing and red exactly as thinking is, because the claim
     // about what the user can do is identical. The word is the whole point of
     // the split — it stops `thinking` from being said while the agent has not
     // been handed anything.
     case "submitting":
-      return { word: "submitting", tone: "thinking", spinning: true };
+      return { word: "submitting", tone: "thinking", breathing: true };
     case "thinking":
-      return { word: "thinking", tone: "thinking", spinning: true };
-    // RED like thinking, and spinning for the same reason: the agent is busy
+      return { word: "thinking", tone: "thinking", breathing: true };
+    // RED like thinking, and breathing for the same reason: the agent is busy
     // and a prompt cannot land. The word is the whole distinction — it says
     // the turn is doing something OTHER than producing the answer, which is
     // why these outrank thinking in the SSM's rank table.
     case "clearing":
-      return { word: "clearing", tone: "thinking", spinning: true };
+      return { word: "clearing", tone: "thinking", breathing: true };
     case "compacting":
-      return { word: "compacting", tone: "thinking", spinning: true };
+      return { word: "compacting", tone: "thinking", breathing: true };
     case "permission":
-      return { word: "permission", tone: "retry", spinning: false };
+      return { word: "permission", tone: "retry", breathing: false };
     case "done":
-      return { word: "done", tone: "ok", spinning: false };
+      return { word: "done", tone: "ok", breathing: false };
     // GREEN like done: an interrupted turn is a CONCLUDED turn — the user
     // asked for the stop, got it, and can prompt again immediately. The word
     // is the distinction; the color claim is the same.
     case "interrupted":
-      return { word: "interrupted", tone: "ok", spinning: false };
+      return { word: "interrupted", tone: "ok", breathing: false };
     // GREEN, not muted: idle and ready are the same claim as done — the
     // route works and the agent is available. Greying them said "nothing to
     // see here" about a workspace that was ready to be used.
     case "idle":
-      return { word: "ready", tone: "ok", spinning: false };
+      return { word: "ready", tone: "ok", breathing: false };
     case "ready":
-      return { word: "ready", tone: "ok", spinning: false };
+      return { word: "ready", tone: "ok", breathing: false };
     // YELLOW: no foreground turn, but detached work continues.
     case "idle_async":
-      return { word: "monitoring", tone: "async", spinning: true };
-    // BLUE: the route is compromised on our side. `starting` keeps its spin
+      return { word: "monitoring", tone: "async", breathing: true };
+    // BLUE: the route is compromised on our side. `starting` keeps its breath
     // because bring-up really is in progress.
     case "init":
-      return { word: "starting", tone: "error", spinning: true };
-    // PURPLE: blocked until a human or the vendor acts. It does NOT spin —
-    // every other phase that spins is work happening, and animating this one
+      return { word: "starting", tone: "error", breathing: true };
+    // PURPLE: blocked until a human or the vendor acts. It does NOT breathe —
+    // every other phase that breathes is work happening, and animating this one
     // would say the opposite of what it means.
     case "vendor_blocked":
-      return { word: "blocked", tone: "blocked", spinning: false };
-    // BLUE, and pointedly NOT spinning. `starting` spins because a bring-up is
+      return { word: "blocked", tone: "blocked", breathing: false };
+    // BLUE, and pointedly NOT breathing. `starting` breathes because a bring-up is
     // really under way; severed is the opposite claim — nothing is wired,
-    // nothing is coming, and something on our side broke — and a spinner would
+    // nothing is coming, and something on our side broke — and a breath would
     // say work is happening.
     case "severed":
-      return { word: "severed", tone: "error", spinning: false };
+      return { word: "severed", tone: "error", breathing: false };
     // TEAL, still, and BENIGN. The tone is the whole point of this arm: this
     // state inherited `dormant`'s "error" tone, which put an error-shaped word
     // in the footer of a workspace whose only sin was being asleep on purpose.
     // Nothing here needs acting on — the next prompt pays one bring-up and
     // everything comes back.
     case "hibernated":
-      return { word: "hibernated", tone: "hibernated", spinning: false };
+      return { word: "hibernated", tone: "hibernated", breathing: false };
     case "dead":
-      return { word: "dead", tone: "error", spinning: false };
+      return { word: "dead", tone: "error", breathing: false };
     case "degraded":
-      return { word: "degraded", tone: "error", spinning: false };
+      return { word: "degraded", tone: "error", breathing: false };
     // THE FIRST INSTANT OF A MERGE ATTEMPT, before it is durably enqueued. It
-    // SPINS, exactly as `merging` does and unlike `merge_queued`: something is
+    // BREATHES, exactly as `merging` does and unlike `merge_queued`: something is
     // actively happening (the daemon is resolving the geometry and writing the
     // queue entry), where a queued merge is waiting for someone else to finish.
     case "merge_enqueuing":
-      return { word: "merge enqueuing", tone: "muted", spinning: true };
+      return { word: "merge enqueuing", tone: "muted", breathing: true };
     case "merging":
-      return { word: "merging", tone: "muted", spinning: true };
+      return { word: "merging", tone: "muted", breathing: true };
     case "merge_queued":
-      return { word: "merge queued", tone: "muted", spinning: false };
+      return { word: "merge queued", tone: "muted", breathing: false };
     case "merge_conflict":
-      return { word: "merge conflict", tone: "error", spinning: false };
+      return { word: "merge conflict", tone: "error", breathing: false };
     case "merge_failed":
-      return { word: "merge failed", tone: "error", spinning: false };
+      return { word: "merge failed", tone: "error", breathing: false };
     case "merged":
-      return { word: "merged", tone: "ok", spinning: false };
+      return { word: "merged", tone: "ok", breathing: false };
     default: {
       const never: never = state;
       throw new Error(`progress-footer: unhandled render state ${String(never)}`);
@@ -714,6 +721,7 @@ export function footerHtml(
   input: FooterInput,
   open: FooterDisclosure,
   nowMs: number = Date.now(),
+  breath: BreathState = { shade: 0, elapsedMs: 0 },
 ): string {
   const p = input.progress;
   if (p === null) return "";
@@ -723,15 +731,32 @@ export function footerHtml(
   // the fabrication the stale mirror used to commit.
   if (input.renderState !== null) {
     const phase = phaseLabel(input.renderState);
-    const spin = phase.spinning ? `<span class="pfooter-spin" aria-hidden="true"></span> ` : "";
     const secondary =
       input.connectivity !== null &&
       input.connectivity !== "operational" &&
       input.sessionStatus !== null
         ? `<span class="pfooter-secondary">${escapeHtml(input.sessionStatus.replaceAll("_", " "))}</span>`
         : "";
+    // A working phase wears the WORD as its own liveness signal — no arc beside
+    // it. Both of the breath's channels are inline styles rather than classes,
+    // and neither is optional:
+    //
+    //   the NEGATIVE animation-delay resumes the oscillation exactly where the
+    //   previous element left it, which is what stops the rewrite this function
+    //   performs every chrome frame from restarting the breath on every frame
+    //   (and, with it, on every arriving ProgressView);
+    //
+    //   the color is the ramp stop the arrival counter is standing on, which is
+    //   the channel that DOES move per arrival, and it overrides the phase
+    //   tone's own hue for as long as the word is working.
+    //
+    // A resting phase renders exactly as before: bare text in its tone color.
+    const word = phase.breathing
+      ? `<span class="pfooter-breath" style="color:${breathColor(breath.shade)};` +
+        `animation-delay:-${Math.round(breath.elapsedMs)}ms">${escapeHtml(phase.word)}</span>`
+      : escapeHtml(phase.word);
     cells.push(
-      `<div class="pfooter-cell pfooter-phase ${phase.tone}">${spin}${escapeHtml(phase.word)}${secondary}</div>`,
+      `<div class="pfooter-cell pfooter-phase ${phase.tone}">${word}${secondary}</div>`,
     );
   }
   // The queue place sits immediately right of the phase word it qualifies, so
@@ -847,6 +872,13 @@ export const FOOTER_COUNTER_SPECS: Readonly<Record<"agents" | "tasks", CounterSp
  */
 export class ProgressFooter {
   private open: FooterDisclosure = { agentsOpen: false, tasksOpen: false, expanded: false };
+  /**
+   * The breathing phase word's bookkeeping. It lives on the OWNER rather than
+   * in the markup for the same reason the disclosure does: `render` rewrites
+   * the dock wholesale, so anything held in the DOM is lost every frame — and
+   * for the breath that loss is precisely the reset the design forbids.
+   */
+  private readonly breath = new BreathingTicker();
 
   constructor(
     private readonly el: HTMLElement,
@@ -855,7 +887,11 @@ export class ProgressFooter {
 
   /** Rewrite the dock. Every value it interpolates is escaped in the builders. */
   render(input: FooterInput): void {
-    this.el.innerHTML = footerHtml(input, this.open, this.now());
+    // Step the color ramp FIRST, so this render paints the shade belonging to
+    // the view it is rendering rather than the previous one's.
+    this.breath.observe(input.progress);
+    const now = this.now();
+    this.el.innerHTML = footerHtml(input, this.open, now, this.breath.state(now));
   }
 
   /**
