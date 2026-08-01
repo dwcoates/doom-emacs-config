@@ -913,6 +913,22 @@ whenever a real session happened to be mid-turn."
      ;; Assert
      (should (null agent-repl--frontend-daemon-process)))))
 
+(ert-deftest agent-repl-test-daemon-stop-command-reports-only-after-completion ()
+  "The interactive stop command never claims completion while shutdown is pending."
+  (let (on-stopped messages)
+    (cl-letf (((symbol-function 'agent-repl--frontend-stop-daemon)
+               (lambda (_force _stop-shims callback)
+                 (setq on-stopped callback)
+                 :pending))
+              ((symbol-function 'message)
+               (lambda (format-string &rest args)
+                 (push (apply #'format format-string args) messages))))
+      (should (eq (agent-repl-frontend-daemon-stop) :pending))
+      (should (functionp on-stopped))
+      (should-not messages)
+      (funcall on-stopped)
+      (should (equal messages '("claude-repld stopped."))))))
+
 ;;;; ---- restart command: canonical runtime delegation ----------------------
 
 (ert-deftest agent-repl-test-daemon-restart-delegates-to-runtime-coordinator ()
