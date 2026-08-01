@@ -705,6 +705,13 @@ func toProtoAction(a workspacecreate.HostAction) *frontendv1.HostAction {
 		}
 		return &frontendv1.HostAction{ActionId: a.ID, Action: &frontendv1.HostAction_WorkspaceCreateFailed{WorkspaceCreateFailed: &frontendv1.HostWorkspaceCreateFailed{JobId: failure.JobID, RequestedName: failure.RequestedName, Error: failure.Error}}}
 	}
+	// The sidebar's own gestures each have a typed arm, and the host accepts
+	// them ONLY there: HostLegacyCommand's contract names exactly eight verbs,
+	// so posting a sidebar gesture down the legacy arm is refused by Emacs and
+	// then redelivered forever. Route each gesture to the arm it belongs in.
+	if action, ok := toProtoSidebarAction(a); ok {
+		return action
+	}
 	var raw map[string]any
 	if err := json.Unmarshal(a.Payload, &raw); err != nil {
 		panic(fmt.Sprintf("workspace create: action %s payload: %v", a.ID, err))
@@ -714,6 +721,47 @@ func toProtoAction(a workspacecreate.HostAction) *frontendv1.HostAction {
 		panic(fmt.Sprintf("workspace create: action %s payload struct: %v", a.ID, err))
 	}
 	return &frontendv1.HostAction{ActionId: a.ID, Action: &frontendv1.HostAction_LegacyCommand{LegacyCommand: &frontendv1.HostLegacyCommand{Type: a.Type, Payload: payload}}}
+}
+
+// toProtoSidebarAction maps a sidebar gesture onto its typed HostAction arm,
+// reporting false for every other command type so the caller falls through to
+// the legacy arm. The payload is the command entry as the webapp posted it, so
+// a field the entry never carried is a contract breach the daemon must not
+// paper over — POST /workspace-command already validated every one of them.
+func toProtoSidebarAction(a workspacecreate.HostAction) (*frontendv1.HostAction, bool) {
+	switch a.Type {
+	case "switch", "fold", "set-view", "task-create", "task-toggle-done", "task-open", "task-add-workspace":
+	default:
+		return nil, false
+	}
+	var entry struct {
+		Dir     string `json:"dir"`
+		RepoKey string `json:"repo_key"`
+		Folded  bool   `json:"folded"`
+		View    string `json:"view"`
+		ID      string `json:"id"`
+	}
+	if err := json.Unmarshal(a.Payload, &entry); err != nil {
+		panic(fmt.Sprintf("workspace create: action %s payload: %v", a.ID, err))
+	}
+	action := &frontendv1.HostAction{ActionId: a.ID}
+	switch a.Type {
+	case "switch":
+		action.Action = &frontendv1.HostAction_SwitchWorkspace{SwitchWorkspace: &frontendv1.HostSwitchWorkspace{Dir: entry.Dir}}
+	case "fold":
+		action.Action = &frontendv1.HostAction_SetRepositoryFold{SetRepositoryFold: &frontendv1.HostSetRepositoryFold{RepoKey: entry.RepoKey, Folded: entry.Folded}}
+	case "set-view":
+		action.Action = &frontendv1.HostAction_SetSidebarView{SetSidebarView: &frontendv1.HostSetSidebarView{View: entry.View}}
+	case "task-create":
+		action.Action = &frontendv1.HostAction_TaskCreate{TaskCreate: &frontendv1.HostTaskCreate{}}
+	case "task-toggle-done":
+		action.Action = &frontendv1.HostAction_TaskToggleDone{TaskToggleDone: &frontendv1.HostTaskById{Id: entry.ID}}
+	case "task-open":
+		action.Action = &frontendv1.HostAction_TaskOpen{TaskOpen: &frontendv1.HostTaskById{Id: entry.ID}}
+	case "task-add-workspace":
+		action.Action = &frontendv1.HostAction_TaskAddWorkspace{TaskAddWorkspace: &frontendv1.HostTaskById{Id: entry.ID}}
+	}
+	return action, true
 }
 
 func NewWorkspaceCreateAssembly(cfg WorkspaceCreateAssemblyConfig) (*WorkspaceCreateAssembly, error) {
