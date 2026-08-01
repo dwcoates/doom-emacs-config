@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -16,7 +17,8 @@ func TestLogFormatsContextAndRoutesToBothSinks(t *testing.T) {
 	l := New(&stderr, &file)
 	var diagnostic Diagnostic
 	l.With(Context{}).SetDiagnosticSink(func(d Diagnostic) { diagnostic = d })
-	l.now = func() time.Time { return time.Date(2026, 7, 28, 12, 34, 56, 789000000, time.UTC) }
+	at := time.Date(2026, 7, 28, 12, 34, 56, 789000000, time.UTC)
+	l.now = func() time.Time { return at }
 	l.pid = func() int { return 42 }
 	l.With(Context{Component: "tail", Path: "/tmp/a", Session: "s1"}).With(Context{Operation: "poll"}).Log("read %d bytes", 42)
 
@@ -27,7 +29,7 @@ func TestLogFormatsContextAndRoutesToBothSinks(t *testing.T) {
 	if err := json.Unmarshal(stderr.Bytes(), &got); err != nil {
 		t.Fatalf("persistent record is not JSON: %v\n%s", err, file.String())
 	}
-	if got.Timestamp != "2026-07-28T12:34:56.789Z" || got.Runtime != "sidecar" || got.PID != 42 {
+	if got.Timestamp != at.Local().Format(TimestampLayout) || got.Runtime != "sidecar" || got.PID != 42 {
 		t.Fatalf("runtime identity = %#v", got)
 	}
 	if got.Level != "info" || got.Verbosity != "normal" || got.Operation != "poll" || got.Message != "read 42 bytes" {
@@ -264,4 +266,47 @@ func (w *partialWriter) Write(p []byte) (int, error) {
 		p = p[:w.limit]
 	}
 	return w.Buffer.Write(p)
+}
+
+// canonicalTimestampPattern is the shared shape every agent-repl runtime emits:
+// RFC 3339, 24-hour clock, fixed-width microseconds, explicit numeric offset.
+var canonicalTimestampPattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}[+-]\d{2}:\d{2}$`)
+
+func TestLogTimestampUsesCanonicalFixedWidthLayout(t *testing.T) {
+	// Arrange: a whole second, whose subsecond digits RFC3339Nano would drop.
+	var stderr, file bytes.Buffer
+	l := New(&stderr, &file)
+	l.now = func() time.Time { return time.Date(2026, 7, 28, 12, 34, 56, 0, time.UTC) }
+
+	// Act
+	l.With(Context{Operation: "poll"}).Log("read")
+
+	// Assert
+	var got record
+	if err := json.Unmarshal(file.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if !canonicalTimestampPattern.MatchString(got.Timestamp) {
+		t.Fatalf("timestamp = %q, want canonical layout", got.Timestamp)
+	}
+}
+
+func TestLogTimestampUsesLocalZoneRatherThanUTC(t *testing.T) {
+	// Arrange
+	at := time.Date(2026, 7, 28, 12, 34, 56, 789000000, time.UTC)
+	var stderr, file bytes.Buffer
+	l := New(&stderr, &file)
+	l.now = func() time.Time { return at }
+
+	// Act
+	l.With(Context{Operation: "poll"}).Log("read")
+
+	// Assert
+	var got record
+	if err := json.Unmarshal(file.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Timestamp != at.Local().Format(TimestampLayout) || strings.HasSuffix(got.Timestamp, "Z") {
+		t.Fatalf("timestamp = %q, want %q", got.Timestamp, at.Local().Format(TimestampLayout))
+	}
 }

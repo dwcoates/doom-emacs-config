@@ -10,6 +10,12 @@ import (
 	"time"
 )
 
+// TimestampLayout is the log timestamp representation shared by every
+// agent-repl runtime: RFC 3339 in the machine's local zone, on a 24-hour
+// clock, with fixed-width microseconds and an explicit numeric offset.
+// Fixed width keeps records from different runtimes lexically comparable.
+const TimestampLayout = "2006-01-02T15:04:05.000000-07:00"
+
 // Fields is diagnostic context bound to a store logger or supplied per record.
 // Empty fields are omitted.  The store's runtime owners bind the stable values
 // they know: database and table in db, socket and connection role in server.
@@ -129,7 +135,7 @@ func (l *Logger) write(verbosity string, fields Fields, format string, args []an
 			context[key] = value
 		}
 	}
-	now := l.clock().UTC().Format(time.RFC3339Nano)
+	now := l.clock().Local().Format(TimestampLayout)
 	entry := record{
 		Timestamp:       now,
 		Runtime:         "store",
