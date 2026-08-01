@@ -1116,10 +1116,18 @@ so a user can force initialization on demand."
 ;;;###autoload
 (defun agent-repl-frontend-daemon-stop (&optional force)
   "Stop the running frontend daemon.
-Refuses while a turn is in flight; with prefix arg FORCE, stops anyway."
+Refuses while a turn is in flight; with prefix arg FORCE, stops anyway.
+Completion is reported only after the asynchronous stop continuation runs."
   (interactive "P")
-  (agent-repl--frontend-stop-daemon (and force t))
-  (message "claude-repld stopped."))
+  (let ((forced (and force t)))
+    (agent-repl--log nil "frontend stop command: requested force=%s"
+                     (if forced "t" "nil"))
+    (agent-repl--frontend-stop-daemon
+     forced nil
+     (lambda ()
+       (agent-repl--log nil "frontend stop command: completed force=%s"
+                        (if forced "t" "nil"))
+       (message "claude-repld stopped.")))))
 
 ;;;###autoload
 (defun agent-repl-frontend-daemon-restart (&optional stop-shims)
