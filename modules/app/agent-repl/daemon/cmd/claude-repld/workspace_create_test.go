@@ -12,6 +12,7 @@ import (
 	"time"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
+	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 	"claude-repld/internal/registry"
 	"claude-repld/internal/server"
 	workspacecreate "claude-repld/internal/workspace/create"
@@ -419,5 +420,124 @@ func TestToProtoAvailableOmitsAnAbsentPriority(t *testing.T) {
 	// Assert
 	if got.GetPriority() != "" {
 		t.Fatalf("priority = %q, want empty", got.GetPriority())
+	}
+}
+
+// Every sidebar gesture has its own typed HostAction arm, and Emacs accepts it
+// ONLY there: HostLegacyCommand's contract names exactly eight verbs, so a
+// gesture sent down the legacy arm is refused by the host and then redelivered
+// forever ("unsupported HostAction legacyCommand type set-view"), leaving the
+// rail reporting a failure for a click that can never land.
+func TestToProtoActionMapsSidebarGesturesToTheirTypedArms(t *testing.T) {
+	tests := []struct {
+		name    string
+		typ     string
+		payload string
+		assert  func(*testing.T, *frontendv1.HostAction)
+	}{
+		{
+			name: "switch", typ: "switch", payload: `{"type":"switch","dir":"/tmp/ws"}`,
+			assert: func(t *testing.T, got *frontendv1.HostAction) {
+				if got.GetSwitchWorkspace().GetDir() != "/tmp/ws" {
+					t.Fatalf("switch arm = %#v", got.GetAction())
+				}
+			},
+		},
+		{
+			name: "fold", typ: "fold", payload: `{"type":"fold","repo_key":"doom","folded":true}`,
+			assert: func(t *testing.T, got *frontendv1.HostAction) {
+				fold := got.GetSetRepositoryFold()
+				if fold.GetRepoKey() != "doom" || !fold.GetFolded() {
+					t.Fatalf("fold arm = %#v", got.GetAction())
+				}
+			},
+		},
+		{
+			name: "unfold keeps folded false", typ: "fold", payload: `{"type":"fold","repo_key":"doom","folded":false}`,
+			assert: func(t *testing.T, got *frontendv1.HostAction) {
+				if fold := got.GetSetRepositoryFold(); fold.GetRepoKey() != "doom" || fold.GetFolded() {
+					t.Fatalf("fold arm = %#v", got.GetAction())
+				}
+			},
+		},
+		{
+			name: "set-view", typ: "set-view", payload: `{"type":"set-view","view":"task"}`,
+			assert: func(t *testing.T, got *frontendv1.HostAction) {
+				if got.GetSetSidebarView().GetView() != "task" {
+					t.Fatalf("set-view arm = %#v", got.GetAction())
+				}
+			},
+		},
+		{
+			name: "task-create", typ: "task-create", payload: `{"type":"task-create"}`,
+			assert: func(t *testing.T, got *frontendv1.HostAction) {
+				if got.GetTaskCreate() == nil {
+					t.Fatalf("task-create arm = %#v", got.GetAction())
+				}
+			},
+		},
+		{
+			name: "task-toggle-done", typ: "task-toggle-done", payload: `{"type":"task-toggle-done","id":"t1"}`,
+			assert: func(t *testing.T, got *frontendv1.HostAction) {
+				if got.GetTaskToggleDone().GetId() != "t1" {
+					t.Fatalf("task-toggle-done arm = %#v", got.GetAction())
+				}
+			},
+		},
+		{
+			name: "task-open", typ: "task-open", payload: `{"type":"task-open","id":"t1"}`,
+			assert: func(t *testing.T, got *frontendv1.HostAction) {
+				if got.GetTaskOpen().GetId() != "t1" {
+					t.Fatalf("task-open arm = %#v", got.GetAction())
+				}
+			},
+		},
+		{
+			name: "task-add-workspace", typ: "task-add-workspace", payload: `{"type":"task-add-workspace","id":"t1"}`,
+			assert: func(t *testing.T, got *frontendv1.HostAction) {
+				if got.GetTaskAddWorkspace().GetId() != "t1" {
+					t.Fatalf("task-add-workspace arm = %#v", got.GetAction())
+				}
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			action := workspacecreate.HostAction{ID: "file:0", Type: tc.typ, Payload: json.RawMessage(tc.payload)}
+
+			// Act
+			got := toProtoAction(action)
+
+			// Assert
+			if got.GetActionId() != "file:0" {
+				t.Fatalf("action id = %q", got.GetActionId())
+			}
+			if got.GetLegacyCommand() != nil {
+				t.Fatalf("%s took the legacy arm, which the host refuses for it", tc.typ)
+			}
+			tc.assert(t, got)
+		})
+	}
+}
+
+// The eight verbs HostLegacyCommand's contract names still ride the legacy
+// arm: they have no typed arm to move to, and the host dispatches them from
+// that envelope alone.
+func TestToProtoActionKeepsTheLegacyVerbsOnTheLegacyArm(t *testing.T) {
+	for _, verb := range []string{"prompt", "finish", "close", "open", "clipboard", "send", "merge", "eval"} {
+		t.Run(verb, func(t *testing.T) {
+			// Arrange
+			action := workspacecreate.HostAction{ID: "file:0", Type: verb, Payload: json.RawMessage(`{"type":"` + verb + `","workspace":"ws"}`)}
+
+			// Act
+			got := toProtoAction(action)
+
+			// Assert
+			legacy := got.GetLegacyCommand()
+			if legacy == nil || legacy.GetType() != verb {
+				t.Fatalf("action = %#v, want the legacy arm carrying %q", got.GetAction(), verb)
+			}
+		})
 	}
 }
