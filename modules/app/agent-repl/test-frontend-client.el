@@ -1915,7 +1915,6 @@ gates on :thinking, so the optimistic write must precede the wire."
       (cl-letf (((symbol-function 'agent-repl--frontend-send-user-message)
                  (lambda (ws _input)
                    (setq state-at-send (agent-repl--ws-get ws :agent-state))))
-                ((symbol-function 'agent-repl--increment-prefix-counter) #'ignore)
                 ((symbol-function 'agent-repl--run-send-posthooks) #'ignore)
                 ((symbol-function 'agent-repl--kickoff-prompt-summary) #'ignore))
         ;; Act
@@ -1936,7 +1935,6 @@ precedes the wire."
                 ((symbol-function 'agent-repl--frontend-send-user-message)
                  (lambda (&rest _) (push 'send events) "r_1"))
                 ((symbol-function 'agent-repl--mark-ws-thinking) #'ignore)
-                ((symbol-function 'agent-repl--increment-prefix-counter) #'ignore)
                 ((symbol-function 'agent-repl--run-send-posthooks) #'ignore)
                 ((symbol-function 'agent-repl--kickoff-prompt-summary) #'ignore))
         ;; Act
@@ -1954,7 +1952,6 @@ the wire would deprive the agent of the directive it must read."
           (input (concat (agent-repl--meta-wrap "READ-DIRECTIVE") "\n\nhello")))
       (cl-letf (((symbol-function 'agent-repl--frontend-send-user-message)
                  (lambda (_ws text) (setq sent text)))
-                ((symbol-function 'agent-repl--increment-prefix-counter) #'ignore)
                 ((symbol-function 'agent-repl--run-send-posthooks) #'ignore)
                 ((symbol-function 'agent-repl--kickoff-prompt-summary) #'ignore))
         ;; Act
@@ -2168,7 +2165,6 @@ do live; `message' is silenced but captured in `echoed'."
     (cl-letf (((symbol-function 'agent-repl--frontend-send-user-message)
                (lambda (&rest _) "r_9"))
               ((symbol-function 'agent-repl--mark-ws-thinking) #'ignore)
-              ((symbol-function 'agent-repl--increment-prefix-counter) #'ignore)
               ((symbol-function 'agent-repl--run-send-posthooks) #'ignore)
               ((symbol-function 'agent-repl--kickoff-prompt-summary) #'ignore))
       ;; Act — the prepared text carries decoration the user never typed.

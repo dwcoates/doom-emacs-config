@@ -2,42 +2,47 @@
 
 ;;; Code:
 
-;;; Metaprompt permissions prefix
+;;; Metaprompt on-demand re-read
+
+;; THE METAPROMPT IS THE SESSION'S SYSTEM PROMPT, and nothing here injects it.
+;; The shim reads `metaprompt.md' out of the session's own cwd and hands it to
+;; the SDK as a `claude_code' preset append (agent-shim/claude/shim/src/
+;; metaprompt.ts), so the guidelines are re-sent with every request and survive
+;; `/clear', `/compact', and resume without anyone re-establishing them.
+;;
+;; What remains here is the MANUAL re-read: `agent-repl-send-with-metaprompt'
+;; and `agent-repl--fire-metaprompt-read', for deliberately telling the agent
+;; to go read the file again.  Neither fires on its own.
 
 (defcustom agent-repl-skip-permissions t
-  "When non-nil, prepend the command prefix metaprompt to inputs.
-Applies to each input sent to Claude."
+  "When non-nil, the on-demand metaprompt re-read is available.
+Turning this off makes `agent-repl-send-with-metaprompt' and
+`agent-repl--fire-metaprompt-read' no-ops.  It does NOT affect the
+metaprompt the shim installs as the session's system prompt, which is
+the only path by which the guidelines ordinarily reach the agent."
   :type 'boolean
-  :group 'agent-repl)
-
-(defcustom agent-repl-prefix-period 14
-  "Number of prompts between metaprompt prefix injections.
-The prefix is sent on the first prompt and every Nth prompt thereafter."
-  :type 'integer
   :group 'agent-repl)
 
 (defvar agent-repl-metaprompt-file
   (expand-file-name "metaprompt.md"
                     (file-name-directory (or load-file-name buffer-file-name)))
   "Absolute path to the canonical metaprompt source file in this repository.
-This is the .md data file extracted out of input.el so that the
-metaprompt body lives as plain text, edited and version-controlled
-alongside the code.  It is ALSO the path the agent is told to read: the
-in-repo file is the single canonical location, with no out-of-tree
-symlink standing between the agent and the source of truth.  Captured at
-file-load time because `load-file-name' is only bound during load.")
+The .md data file lives as plain text, edited and version-controlled
+alongside the code, and is read at session spawn by the shim.  It is
+ALSO the path the on-demand read-directive names.  Captured at file-load
+time because `load-file-name' is only bound during load.")
 
 (defcustom agent-repl-command-prefix
   (with-temp-buffer
     (insert-file-contents agent-repl-metaprompt-file)
     (buffer-string))
   "Canonical metaprompt content, loaded from `agent-repl-metaprompt-file'.
-Not sent inline to Claude — the wrapper template at
-`agent-repl-command-prefix-template' instead instructs Claude to read
-`agent-repl-metaprompt-file' directly, so the body stays in one
-canonical place on disk.  This variable mirrors the file's content for
-tests and tooling that need to assert against the canonical metaprompt
-without re-reading the file."
+Never sent to Claude from Emacs.  The shim installs this same content as
+the session's system prompt, and the on-demand directive
+\(`agent-repl-command-prefix-template') names the file rather than
+quoting it.  This variable mirrors the file's content for tests and
+tooling that need to assert against the canonical metaprompt without
+re-reading the file."
   :type 'string
   :group 'agent-repl)
 
@@ -50,23 +55,22 @@ without re-reading the file."
           "and they have not changed since. Everything that follows this sentence "
           "is a real user prompt, and for answering it, and for answering ALL subsequent user "
           "prompts, obey precisely the guidelines that you just read for answering, and without failure.")
-  "Template instructing Claude to read the metaprompt file before acting.
-Must contain a single %s placeholder, filled at load time with
-`agent-repl-metaprompt-file'.  Intentionally avoids any
-\"metaprompt\" terminology in the inline prefix itself — the directive
-framing lives inside the .md file rather than here, so the inline prefix
-is a plain instruction to read the file."
+  "Template instructing Claude to re-read the metaprompt file before acting.
+Must contain a single %s placeholder, filled with the workspace's own
+metaprompt path.  Sent ONLY on an explicit request
+\(`agent-repl-send-with-metaprompt', `agent-repl--fire-metaprompt-read'),
+never periodically.  Intentionally avoids any \"metaprompt\" terminology
+in the directive itself — the framing lives inside the .md file rather
+than here, so the directive is a plain instruction to read the file."
   :type 'string
   :group 'agent-repl)
 
 (defvar agent-repl--command-prefix
   (format agent-repl-command-prefix-template
           agent-repl-metaprompt-file)
-  "Formatted read-directive prepended before every periodic user input.
-Active when `agent-repl-skip-permissions' is non-nil, subject to
-`agent-repl-prefix-period'.  A plain instruction to read the file at
-`agent-repl-metaprompt-file' — the metaprompt body lives inside that
-in-repo file, not here.")
+  "Formatted read-directive for a workspace with no worktree-local copy.
+Sent only on an explicit on-demand re-read, gated by
+`agent-repl-skip-permissions'.")
 
 ;; `defcustom' and `defvar' only initialize their values on first load;
 ;; reloading the file (e.g. via `agent-repl-reload-config' or
@@ -309,24 +313,11 @@ to it is never wanted.  WS, when supplied, scopes the diagnostic entry."
     result))
 
 (defvar agent-repl-send-posthooks
-  '(("^/clear$" . agent-repl--posthook-reset-prefix-counter)
-    ("^/clear$" . agent-repl--posthook-mark-done))
+  '(("^/clear$" . agent-repl--posthook-mark-done))
   "Alist of (PATTERN . FUNCTION) posthooks run after input is sent.
 PATTERN is a string or regexp matched against the raw input (trimmed).
 FUNCTION is called with (WS RAW) where WS is the workspace name and
 RAW is the input.")
-
-(defun agent-repl--posthook-reset-prefix-counter (ws _raw)
-  "Reset the metaprompt prefix counter for workspace WS.
-Resets to 0 — the same value a freshly-initialized workspace starts at
-\(see `agent-repl--initialize-agent') — so the first send after a
-`/clear' re-injects the metaprompt.  A `/clear' wipes Claude's context,
-including the previously-prepended guidelines, so the next prompt must
-re-establish them exactly as the first prompt of a new session does.
-Resetting to 1 instead would skip a full period before re-injecting,
-leaving Claude without guidelines in the interim."
-  (agent-repl--log ws "posthook-reset-prefix-counter new-counter=0")
-  (agent-repl--ws-put ws :prefix-counter 0))
 
 (defun agent-repl--posthook-mark-done (ws _raw)
   "Mark workspace WS's agent-state as :done.
@@ -348,22 +339,21 @@ than linger on whatever state preceded the clear."
     (agent-repl--log ws "posthook scan raw-len=%d hook-count=%d matched-count=%d"
                       (length raw) (length agent-repl-send-posthooks) matched-count)))
 
-(defun agent-repl--should-prepend-metaprompt-p (raw counter &optional force ws)
-  "Return non-nil if the metaprompt prefix should be prepended to RAW.
-COUNTER is the current prefix counter.  FORCE bypasses the counter check.
+(defun agent-repl--should-prepend-metaprompt-p (raw force &optional ws)
+  "Return non-nil if the read-directive should be prepended to RAW.
+FORCE is the caller's explicit request for it — nothing else prepends,
+because the guidelines reach the agent as the session's system prompt
+rather than as anything injected into a prompt.
 WS, when supplied, scopes the diagnostic entry."
   (let* ((system-active-p (and agent-repl-skip-permissions
                                agent-repl-command-prefix))
-         ;; Preserve short-circuiting: a disabled system, exemption, or forced
-         ;; send must not evaluate the period arithmetic.
-         (skip-p (and system-active-p (agent-repl--skip-metaprompt-p raw ws)))
-         (period-boundary-p (and system-active-p (not skip-p) (not force)
-                                 (zerop (mod counter agent-repl-prefix-period))))
-         (result (and system-active-p (not skip-p)
-                      (or force period-boundary-p))))
+         ;; Preserve short-circuiting: a disabled system or an unforced send
+         ;; must not evaluate the exemption check.
+         (skip-p (and system-active-p force (agent-repl--skip-metaprompt-p raw ws)))
+         (result (and system-active-p force (not skip-p))))
     (agent-repl--log-verbose ws
-                              "should-prepend-metaprompt-p raw-len=%d counter=%d force=%s system-active=%s skip=%s period-boundary=%s result=%s"
-                              (length raw) counter force system-active-p skip-p period-boundary-p result)
+                              "should-prepend-metaprompt-p raw-len=%d force=%s system-active=%s skip=%s result=%s"
+                              (length raw) force system-active-p skip-p result)
     result))
 
 (defcustom agent-repl-workspace-command-prefix "/wor"
@@ -437,8 +427,10 @@ global prefix) are byte-for-byte unchanged."
       (format agent-repl-command-prefix-template file))))
 
 (defun agent-repl--prepare-input (ws raw &optional force-metaprompt)
-  "Optionally prepend metaprompt prefix to RAW for workspace WS.
-When FORCE-METAPROMPT is non-nil, always prepend (ignoring the counter).
+  "Optionally prepend the read-directive to RAW for workspace WS.
+The directive is prepended ONLY when FORCE-METAPROMPT is non-nil: the
+metaprompt itself arrives as the session's system prompt, so an ordinary
+send carries nothing extra.
 The prepended read-directive is bracketed as a harness-injected span
 (`agent-repl--meta-wrap') — the agent still receives it verbatim, while
 the gui frontend keeps it out of the user-turn bubble, which shows only
@@ -449,11 +441,10 @@ A /wor command additionally gets a source-workspace tag appended (see
 workspace-update skills know their origin.  This only affects the
 returned string; the caller's RAW (used for history and posthook
 matching) is untouched."
-  (let* ((counter (or (agent-repl--ws-get ws :prefix-counter) 0))
-         (tagged (agent-repl--maybe-inject-source-ws ws raw))
-         (prepend-p (agent-repl--should-prepend-metaprompt-p raw counter force-metaprompt ws)))
-    (agent-repl--log ws "prepare-input raw-len=%d tagged-len=%d counter=%d period=%d force=%s prepend=%s"
-                      (length raw) (length tagged) counter agent-repl-prefix-period force-metaprompt prepend-p)
+  (let* ((tagged (agent-repl--maybe-inject-source-ws ws raw))
+         (prepend-p (agent-repl--should-prepend-metaprompt-p raw force-metaprompt ws)))
+    (agent-repl--log ws "prepare-input raw-len=%d tagged-len=%d force=%s prepend=%s"
+                      (length raw) (length tagged) force-metaprompt prepend-p)
     (if prepend-p
         (concat (agent-repl--meta-wrap (agent-repl--command-prefix-for ws)) "\n\n" tagged)
       tagged)))
@@ -579,12 +570,6 @@ typed."
   (agent-repl--log ws "mark-ws-thinking ws=%s" ws)
   (agent-repl--ws-set-agent-state ws :thinking))
 
-(defun agent-repl--increment-prefix-counter (ws)
-  "Increment the metaprompt prefix counter for workspace WS."
-  (let ((new-val (1+ (or (agent-repl--ws-get ws :prefix-counter) 0))))
-    (agent-repl--log-verbose ws "increment-prefix-counter: ws=%s new-counter=%d" ws new-val)
-    (agent-repl--ws-put ws :prefix-counter new-val)))
-
 (defun agent-repl--do-send (ws input raw &optional on-settle)
   "Core send: dispatch INPUT to WS's agent through its frontend.
 A pure delegation to `agent-repl--frontend-dispatch-send', which looks
@@ -662,45 +647,35 @@ Handles input preparation, sending, history, and persistence."
   (agent-repl--on-close))
 
 (defun agent-repl-send-with-metaprompt ()
-  "Send input with the metaprompt prefix, bypassing the counter."
+  "Send input with the metaprompt read-directive prepended.
+The deliberate on-demand re-read: an ordinary send carries no directive,
+because the metaprompt is already the session's system prompt."
   (interactive)
   (agent-repl--log (agent-repl--ws-current-log-name) "send-with-metaprompt")
   (agent-repl--send nil nil t))
 
 (defun agent-repl--fire-metaprompt-read (ws)
   "Send the metaprompt read-directive to WS as a standalone message.
-Re-establishes the metaprompt guidelines in WS's agent after an event
-that drops them from context — a successful `/compact', whose summary
-replaces the detailed conversation that carried the previously-injected
-directive.  Unlike `/clear', which idles a fresh session and so can
-defer re-injection to the next user prompt via
-`agent-repl--posthook-reset-prefix-counter', a compacted session
-continues mid-work, so the directive is fired PROACTIVELY here.
+The programmatic half of the on-demand re-read, for callers that want
+the agent to go re-read the file without any user prompt riding along.
+NOTHING CALLS THIS AUTOMATICALLY: the metaprompt is WS's system prompt,
+so it survives `/clear', `/compact', and resume with no re-establishing.
 
-No-op unless the metaprompt system is active — `agent-repl-skip-permissions'
+No-op unless the on-demand re-read is enabled — `agent-repl-skip-permissions'
 and `agent-repl-command-prefix', the same gate
-`agent-repl--should-prepend-metaprompt-p' applies to the periodic
-injection — so a user who has turned the metaprompt off never has it
-re-established behind their back.
+`agent-repl--should-prepend-metaprompt-p' applies — so a user who has
+turned it off never has a directive sent behind their back.
 
 The directive (`agent-repl--command-prefix-for', pointing at WS's own
 worktree copy of the metaprompt) is meta-wrapped
 \(`agent-repl--meta-wrap') so the gui strips it to an empty user turn
-and draws no bubble, exactly as the periodic prefix injection and the
-webapp's auto-continue nudge do.  RAW is empty: no user text sits
-behind a harness re-read, and an empty RAW makes
-`agent-repl--gui-send-turn' skip the prompt summary and match no
-posthook.
-
-The prefix counter is reset to 0 first so periodic re-injection
-realigns to a fresh period from this send — the send's own increment
-lands it at 1, so the next user prompt is one-into-period and never
-falls on a boundary that would redundantly re-inject right behind this
-read."
+and draws no bubble, exactly as the webapp's auto-continue nudge does.
+RAW is empty: no user text sits behind a harness re-read, and an empty
+RAW makes `agent-repl--gui-send-turn' skip the prompt summary and match
+no posthook."
   (if (not (and agent-repl-skip-permissions agent-repl-command-prefix))
-      (agent-repl--log ws "fire-metaprompt-read: SKIP ws=%s (metaprompt system inactive)" ws)
+      (agent-repl--log ws "fire-metaprompt-read: SKIP ws=%s (on-demand re-read disabled)" ws)
     (agent-repl--log ws "fire-metaprompt-read: ws=%s" ws)
-    (agent-repl--ws-put ws :prefix-counter 0)
     (agent-repl--do-send ws (agent-repl--meta-wrap (agent-repl--command-prefix-for ws)) "")))
 
 (defun agent-repl--append-to-input-buffer (text)
