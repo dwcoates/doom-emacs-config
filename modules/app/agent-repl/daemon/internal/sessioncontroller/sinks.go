@@ -242,7 +242,7 @@ type consumer struct {
 	logf   func(string, ...any)
 	now    func() int64
 	// onSessionStarted fires when a SessionStarted event arrives, letting the
-	// controller arm the metaprompt re-fire for a RESUME/COMPACT_CONTINUE session.
+	// controller adopt the vendor session uuid the start announced.
 	onSessionStarted func(*corev1.SessionStarted)
 	// onVendorSessionID reports the VENDOR session uuid observed on a
 	// PERSISTENT store event's envelope. Assigned after construction (the
@@ -572,7 +572,7 @@ func (c *consumer) applyCommandsChanged(cc *datav1.CommandsChanged) *datav1.Syst
 
 // Apply feeds a lifecycle event to the SSM and refreshes the TaskCatalog on
 // task-lifecycle transitions (design step 1). It also fires onSessionStarted so
-// the session controller can arm the metaprompt re-fire. A lifecycle rejection or SSM
+// the session controller sees the start. A lifecycle rejection or SSM
 // apply error is loud-logged and aborts this delivery, so shimclient cannot
 // advance last_seen_seq past state the daemon did not accept.
 func (c *consumer) Apply(ev *corev1.Event) error {

@@ -105,7 +105,7 @@ func withheldReason(it *frontendv1.ConversationItem) string {
 		return "slash-command machinery " + envelope
 	}
 	if isMetapromptDirectiveText(userRecordHead(it)) {
-		return "the daemon's own post-/clear metaprompt read-directive"
+		return "a standalone metaprompt read-directive"
 	}
 	return ""
 }

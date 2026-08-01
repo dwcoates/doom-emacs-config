@@ -12,19 +12,16 @@ import (
 // that looks at what the user typed and decides what it MEANS, and the one
 // place that acts on the answer.
 //
-// It is one file rather than three because the consequences of that reading are
+// It is one file rather than two because the consequences of that reading are
 // not independent of each other. A `/clear` is not a prompt at all — it is an
 // instruction to the CLI to discard the conversation — so it must not be
-// echoed as a purple bubble, must not have the metaprompt directive folded into
-// it, and must open the SSM's clearing axis. Those three used to be decided in
-// three different places from three different readings of the string (one of
-// them the POST-metaprompt string), and they disagreed:
+// echoed as a purple bubble, and must open the SSM's clearing axis. Those used
+// to be decided in different places from different readings of the string, and
+// they disagreed:
 //
 //   - the receipt was pushed before anything was recognized, so `/clear` drew a
 //     bubble reading "/clear" beside the red divider that reported the very same
 //     cut;
-//   - the clearing axis was opened from text the metaprompt had already
-//     rewritten, so an armed session's `/clear` opened no axis;
 //   - the queue's delivery path recognized nothing at all, so a `/clear` held
 //     behind a running turn was cut with no axis open either.
 //
@@ -72,15 +69,6 @@ func (c sessionCommand) recognized() bool { return c.clear }
 // discard.
 func (c sessionCommand) echoes() bool { return !c.recognized() }
 
-// foldsMetaprompt reports whether the armed read-directive may be prepended.
-//
-// Never onto a recognized command. The CLI expands `/clear` only when the
-// command is the whole prompt, so a directive prepended to one destroys the
-// command — the conversation is never cut — and spends the single-shot
-// directive on a prompt no agent will read. Leaving it armed costs nothing: the
-// next ordinary prompt takes it.
-func (c sessionCommand) foldsMetaprompt() bool { return !c.recognized() }
-
 // forwardPrompt hands one submitted prompt to its shim.
 //
 // BOTH SUBMIT FUNNELS END HERE — the immediate submit (submitPrompt) and the
@@ -92,8 +80,7 @@ func (c sessionCommand) foldsMetaprompt() bool { return !c.recognized() }
 // requestID is the frontend command's own id, empty for a caller with no
 // frontend request behind it. origin is the vendor-visible provenance.
 //
-// Must be called with m.mu RELEASED: the receipt reaches the frontend server and
-// applyMetaprompt takes the mutex itself.
+// Must be called with m.mu RELEASED: the receipt reaches the frontend server.
 func (m *Manager) forwardPrompt(ctx context.Context, d *sessionController, requestID, text, origin, permissionMode string, who submitter) error {
 	// THE MERGE LEASE'S BACKSTOP. submitPromptAs already refused a user prompt
 	// for a leased workspace, and this catches every path that does not pass
@@ -104,11 +91,6 @@ func (m *Manager) forwardPrompt(ctx context.Context, d *sessionController, reque
 		return err
 	}
 	cmd := classifyPrompt(text)
-
-	wire := text
-	if cmd.foldsMetaprompt() {
-		wire = m.applyMetaprompt(d, text)
-	}
 
 	// THE ACCEPTED EDGE AND ITS SYNCHRONOUS PUBLICATION, BEFORE THE SUBMIT.
 	//
@@ -130,9 +112,7 @@ func (m *Manager) forwardPrompt(ctx context.Context, d *sessionController, reque
 	// publication, so neither the asynchronous SSM subscriber nor a later
 	// TurnEnded can overtake it.
 	// THE MERGE'S OWN PROMPT IS MACHINERY, NOT THE USER'S, so it takes neither
-	// the accepted edge nor the receipt — exactly like the post-`/clear`
-	// metaprompt re-fire below, and for the same reason: the user did not type
-	// it.
+	// the accepted edge nor the receipt: the user did not type it.
 	//
 	// It is also the only honest reading of the state axis. A workspace whose
 	// merge parked on a conflict IS `merge_conflict`, and the SSM (correctly)
@@ -154,7 +134,7 @@ func (m *Manager) forwardPrompt(ctx context.Context, d *sessionController, reque
 		accepted, activeBefore = true, before
 	}
 
-	if err := d.client.SubmitPrompt(ctx, wire, origin, permissionMode); err != nil {
+	if err := d.client.SubmitPrompt(ctx, text, origin, permissionMode); err != nil {
 		if accepted {
 			// The `thinking` every frontend was just shown described a turn
 			// that is not going to happen, and nothing else will ever close it:
@@ -188,9 +168,6 @@ func (m *Manager) forwardPrompt(ctx context.Context, d *sessionController, reque
 	// reached the shim would be waiting on a cut that is not coming, and would
 	// hold the phase word until the watchdog expired it.
 	m.noteClearDispatched(d.workspace, cmd)
-	if cmd.clear {
-		m.refireMetapromptAfterClear(ctx, d, permissionMode)
-	}
 	return nil
 }
 
@@ -309,58 +286,6 @@ func (m *Manager) notePromptDelivered(d *sessionController, requestID string) {
 	}
 	m.logf("session-controller: prompt delivered state edge APPLIED ws=%s session=%s request_id=%q submitting->thinking",
 		d.workspace, d.sessionID, requestID)
-}
-
-// metapromptRefireOrigin is the vendor-visible provenance of the daemon's own
-// read-directive, so a transcript reader can tell it from anything a human sent.
-const metapromptRefireOrigin = "daemon:metaprompt-refire"
-
-// refireMetapromptAfterClear sends the read-directive as its OWN prompt, right
-// behind the `/clear` that just went out.
-//
-// WHY IT MUST FOLLOW RATHER THAN RIDE ALONG. A clear discards the conversation's
-// context, and the guidelines the session was operating under go with it — the
-// agent comes back knowing nothing about how it is meant to answer. Folding the
-// directive into the `/clear` cannot fix that: the CLI expands the command only
-// when the command is the entire prompt, so a directive prepended to one means
-// nothing is cleared at all. Two sequential prompts is the only shape that both
-// cuts the context and restores the guidelines.
-//
-// UNDER THE HOOD ON BOTH DELIVERIES. No receipt is pushed — the user did not
-// type this — and the durable transcript line it produces is withheld from the
-// feed alongside the CLI's own slash-command bookkeeping (machinery.go,
-// withheldReason). The user asked for a clear; they get a divider, and none of
-// the plumbing that follows it.
-//
-// A failure is loud-logged and swallowed. The clear itself already succeeded, so
-// there is nothing to fail back to the caller, and reporting the user's command
-// as failed over a follow-up they never asked for would be the worse account.
-func (m *Manager) refireMetapromptAfterClear(ctx context.Context, d *sessionController, permissionMode string) {
-	m.mu.Lock()
-	cwd := d.cwd
-	m.mu.Unlock()
-
-	directive, ok := metapromptDirective(cwd)
-	if !ok {
-		// Not an error: most checkouts are not this repo, and a session with no
-		// metaprompt file simply has no guidelines to restore.
-		m.logf("session-controller: post-/clear metaprompt re-fire skipped ws=%q session=%s — no %s under cwd=%q",
-			d.workspace, d.sessionID, metapromptRelPath, cwd)
-		return
-	}
-	m.logf("session-controller: post-/clear metaprompt re-fire ws=%q session=%s — resending the read-directive the cut discarded",
-		d.workspace, d.sessionID)
-	if err := d.client.SubmitPrompt(ctx, directive, metapromptRefireOrigin, permissionMode); err != nil {
-		m.logf("session-controller: post-/clear metaprompt re-fire FAILED ws=%q session=%s: %v (the cleared session continues without its guidelines)",
-			d.workspace, d.sessionID, err)
-		return
-	}
-	// The session has now been told to read the file, so an ARMED fold has
-	// nothing left to do: leaving it armed would prepend the same directive to
-	// the user's next prompt and say all of it a second time.
-	m.mu.Lock()
-	d.metaFired = true
-	m.mu.Unlock()
 }
 
 // noteClearDispatched opens the SSM's clearing axis for a `/clear` the daemon

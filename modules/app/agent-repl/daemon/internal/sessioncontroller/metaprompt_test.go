@@ -1,93 +1,58 @@
 package sessioncontroller
 
 import (
-	"os"
-	"path/filepath"
-	"strings"
+	"fmt"
 	"testing"
-
-	corev1 "agentrepl/proto/agentshim/core/v1"
 )
 
-func writeMetaprompt(t *testing.T, cwd string) string {
-	t.Helper()
-	dir := filepath.Join(cwd, "modules", "app", "agent-repl")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	path := filepath.Join(dir, "metaprompt.md")
-	if err := os.WriteFile(path, []byte("guidelines"), 0o644); err != nil {
-		t.Fatalf("write metaprompt: %v", err)
-	}
-	return path
+// directiveFor builds the read-directive naming PATH, exactly as a
+// pre-migration daemon (and as Emacs's on-demand re-read) writes it.
+func directiveFor(path string) string {
+	return fmt.Sprintf(metapromptDirectiveTemplate, path)
 }
 
-func TestMetapromptDirectivePresent(t *testing.T) {
-	// Arrange.
-	cwd := t.TempDir()
-	want := writeMetaprompt(t, cwd)
+func TestIsMetapromptDirectiveTextStandalone(t *testing.T) {
+	// Arrange: the directive alone, which is machinery talking to the agent.
+	text := directiveFor("/repo/modules/app/agent-repl/metaprompt.md")
 
-	// Act.
-	got, ok := metapromptDirective(cwd)
-
-	// Assert.
-	if !ok {
-		t.Fatal("expected ok when metaprompt.md exists")
-	}
-	if !strings.Contains(got, want) {
-		t.Errorf("directive should name the metaprompt path %q; got %q", want, got)
+	// Act + Assert.
+	if !isMetapromptDirectiveText(text) {
+		t.Fatal("a standalone read-directive must be recognized so its transcript line draws no bubble")
 	}
 }
 
-func TestMetapromptDirectiveAbsent(t *testing.T) {
-	// Arrange: an empty cwd with no metaprompt file.
-	cwd := t.TempDir()
+func TestIsMetapromptDirectiveTextSurroundingWhitespace(t *testing.T) {
+	// Arrange: the transcript may carry the directive with padding.
+	text := "\n\t " + directiveFor("/repo/modules/app/agent-repl/metaprompt.md") + " \n"
 
-	// Act.
-	_, ok := metapromptDirective(cwd)
-
-	// Assert.
-	if ok {
-		t.Fatal("expected not-ok when metaprompt.md is absent")
+	// Act + Assert.
+	if !isMetapromptDirectiveText(text) {
+		t.Fatal("padding must not hide a standalone directive")
 	}
 }
 
-func TestMetapromptDirectiveEmptyCwd(t *testing.T) {
-	if _, ok := metapromptDirective(""); ok {
-		t.Fatal("expected not-ok for an empty cwd")
+func TestIsMetapromptDirectiveTextFoldedKeepsUserPrompt(t *testing.T) {
+	// Arrange: a pre-migration FOLDED directive, with the user's real prompt
+	// after it.
+	text := directiveFor("/repo/modules/app/agent-repl/metaprompt.md") + "\n\nfix the parser"
+
+	// Act + Assert: the tail no longer matches, so the bubble is drawn —
+	// correctly, because the user did type the prompt inside it.
+	if isMetapromptDirectiveText(text) {
+		t.Fatal("a folded directive carries a real user prompt and must still be shown")
 	}
 }
 
-func TestWantsMetapromptRefire(t *testing.T) {
-	tests := []struct {
-		name string
-		src  corev1.SessionSource
-		want bool
-	}{
-		{"resume", corev1.SessionSource_SESSION_SOURCE_RESUME, true},
-		{"compact_continue", corev1.SessionSource_SESSION_SOURCE_COMPACT_CONTINUE, true},
-		{"fresh", corev1.SessionSource_SESSION_SOURCE_FRESH, false},
-		{"unspecified", corev1.SessionSource_SESSION_SOURCE_UNSPECIFIED, false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := wantsMetapromptRefire(&corev1.SessionStarted{Source: tt.src}); got != tt.want {
-				t.Errorf("wantsMetapromptRefire(%s) = %v, want %v", tt.src, got, tt.want)
-			}
-		})
+func TestIsMetapromptDirectiveTextOrdinaryPrompt(t *testing.T) {
+	// Arrange + Act + Assert.
+	if isMetapromptDirectiveText("read the metaprompt and tell me what it says") {
+		t.Fatal("an ordinary prompt that merely mentions the metaprompt is not the directive")
 	}
 }
 
-func TestWantsMetapromptRefireNil(t *testing.T) {
-	if wantsMetapromptRefire(nil) {
-		t.Fatal("nil SessionStarted must not arm the re-fire")
-	}
-}
-
-func TestPrependMetaprompt(t *testing.T) {
-	got := prependMetaprompt("READ THE FILE", "do the thing")
-	want := "READ THE FILE\n\ndo the thing"
-	if got != want {
-		t.Errorf("prependMetaprompt = %q, want %q", got, want)
+func TestIsMetapromptDirectiveTextEmpty(t *testing.T) {
+	// Arrange + Act + Assert.
+	if isMetapromptDirectiveText("") {
+		t.Fatal("empty text is not the directive")
 	}
 }

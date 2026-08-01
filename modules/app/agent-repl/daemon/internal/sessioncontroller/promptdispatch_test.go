@@ -3,15 +3,13 @@ package sessioncontroller
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"reflect"
-	"strings"
 	"testing"
 )
 
-// The daemon's single reading of a submitted prompt, and the three consequences
-// it decides together: the receipt, the metaprompt fold, and the clearing axis.
-// Splitting them is what let a `/clear` be both cut AND drawn as a bubble.
+// The daemon's single reading of a submitted prompt, and the two consequences
+// it decides together: the receipt and the clearing axis. Splitting them is
+// what let a `/clear` be both cut AND drawn as a bubble.
 
 // --- the reading -------------------------------------------------------------
 
@@ -63,30 +61,24 @@ func TestClassifyPromptRecognizesTheBareClear(t *testing.T) {
 	}
 }
 
-func TestARecognizedCommandEarnsNoReceiptAndNoDirective(t *testing.T) {
-	// Arrange — the coupling itself: one reading decides both, so the two can
-	// never disagree about whether this string is prompt text.
+func TestARecognizedCommandEarnsNoReceipt(t *testing.T) {
+	// Arrange — one reading decides the receipt, so nothing can disagree with
+	// it about whether this string is prompt text.
 	cmd := classifyPrompt("/clear")
 
 	// Act / Assert.
 	if cmd.echoes() {
 		t.Error("a recognized command echoes; the cut already draws its own divider")
 	}
-	if cmd.foldsMetaprompt() {
-		t.Error("a recognized command folds the directive; that would destroy the command")
-	}
 }
 
-func TestAnOrdinaryPromptEarnsBoth(t *testing.T) {
+func TestAnOrdinaryPromptEarnsAReceipt(t *testing.T) {
 	// Arrange.
 	cmd := classifyPrompt("hello there")
 
 	// Act / Assert.
 	if !cmd.echoes() {
 		t.Error("an ordinary prompt must echo — it is what the user said")
-	}
-	if !cmd.foldsMetaprompt() {
-		t.Error("an ordinary prompt must be eligible for the directive")
 	}
 }
 
@@ -218,26 +210,13 @@ func TestDeliveringAHeldClearOpensTheClearingAxis(t *testing.T) {
 	})
 }
 
-// --- the metaprompt re-fire --------------------------------------------------
+// --- the metaprompt no longer rides in the conversation ----------------------
 
-// clearedHarness is a harness whose session has a cwd holding a metaprompt file,
-// which is what the post-/clear re-fire resolves its directive from.
-func clearedHarness(t *testing.T) (*queueHarness, string) {
-	t.Helper()
+func TestAClearForwardsNothingBehindIt(t *testing.T) {
+	// Arrange — the daemon used to re-fire a read-directive behind every cut,
+	// because the guidelines lived in the conversation the cut discarded. They
+	// now live in the session's system prompt, which the cut cannot touch.
 	h := newQueueHarness(t, nil)
-	cwd := t.TempDir()
-	writeMetaprompt(t, cwd)
-	d := h.controller()
-	h.m.mu.Lock()
-	d.cwd = cwd
-	h.m.mu.Unlock()
-	return h, cwd
-}
-
-func TestTheDirectiveIsNotFoldedIntoTheClearItself(t *testing.T) {
-	// Arrange — the CLI expands the command only when it is the WHOLE prompt, so
-	// a directive prepended to one means nothing is cleared at all.
-	h, _ := clearedHarness(t)
 
 	// Act.
 	if err := h.submitAs("r1", "/clear"); err != nil {
@@ -245,148 +224,55 @@ func TestTheDirectiveIsNotFoldedIntoTheClearItself(t *testing.T) {
 	}
 
 	// Assert.
-	got := h.client.promptTexts()
-	if len(got) == 0 || got[0] != "/clear" {
-		t.Fatalf("first forwarded prompt = %q, want the bare /clear", got)
+	if got := h.client.promptTexts(); len(got) != 1 || got[0] != "/clear" {
+		t.Fatalf("forwarded %q, want the /clear alone with no follow-up", got)
 	}
 }
 
-func TestAClearFiresTheDirectiveAsItsOwnFollowUpPrompt(t *testing.T) {
-	// Arrange — the cut discards the guidelines the session was operating under,
-	// so they are re-sent behind it as a SEPARATE prompt.
-	h, cwd := clearedHarness(t)
-
-	// Act.
-	if err := h.submitAs("r1", "/clear"); err != nil {
-		t.Fatalf("submit: %v", err)
-	}
-
-	// Assert.
-	got := h.client.promptTexts()
-	if len(got) != 2 {
-		t.Fatalf("forwarded %d prompt(s), want the /clear and the directive behind it", len(got))
-	}
-	if !strings.Contains(got[1], filepath.Join(cwd, metapromptRelPath)) {
-		t.Errorf("follow-up = %q, want the read-directive naming the metaprompt file", got[1])
-	}
-}
-
-func TestTheFollowUpDirectiveIsSentUnderItsOwnOrigin(t *testing.T) {
-	// Arrange — a transcript reader must be able to tell the daemon's own
-	// follow-up from anything a human sent.
-	h, _ := clearedHarness(t)
-
-	// Act.
-	if err := h.submitAs("r1", "/clear"); err != nil {
-		t.Fatalf("submit: %v", err)
-	}
-
-	// Assert.
-	h.client.mu.Lock()
-	origins := append([]string(nil), h.client.origins...)
-	h.client.mu.Unlock()
-	if len(origins) != 2 || origins[1] != metapromptRefireOrigin {
-		t.Fatalf("origins = %q, want the follow-up under %q", origins, metapromptRefireOrigin)
-	}
-}
-
-func TestTheFollowUpDirectivePushesNoReceipt(t *testing.T) {
-	// Arrange — it is under the hood: the user typed a /clear and nothing else,
-	// so the feed shows a divider and no bubbles at all.
-	h, _ := clearedHarness(t)
-
-	// Act.
-	if err := h.submitAs("r1", "/clear"); err != nil {
-		t.Fatalf("submit: %v", err)
-	}
-
-	// Assert.
-	if turns := h.userTurns(); len(turns) != 0 {
-		t.Fatalf("pushed %d user turn(s), want none for a /clear and its follow-up", len(turns))
-	}
-}
-
-func TestAClearWithNoMetapromptFileFiresNoFollowUp(t *testing.T) {
-	// Arrange — most checkouts are not this repo, and a session with no
-	// metaprompt file has no guidelines to restore.
+func TestAnOrdinaryPromptIsForwardedVerbatim(t *testing.T) {
+	// Arrange — the daemon used to fold a directive into the first prompt of a
+	// resumed session, rewriting what the user typed on its way to the shim.
 	h := newQueueHarness(t, nil)
-	d := h.controller()
-	h.m.mu.Lock()
-	d.cwd = t.TempDir()
-	h.m.mu.Unlock()
 
 	// Act.
-	if err := h.submitAs("r1", "/clear"); err != nil {
+	if err := h.submitAs("r1", "fix the parser"); err != nil {
 		t.Fatalf("submit: %v", err)
 	}
 
 	// Assert.
-	if got := h.client.promptTexts(); len(got) != 1 {
-		t.Fatalf("forwarded %q, want the /clear alone", got)
+	if got := h.client.promptTexts(); len(got) != 1 || got[0] != "fix the parser" {
+		t.Fatalf("forwarded %q, want the prompt untouched", got)
 	}
 }
 
-func TestTheFollowUpSatisfiesAnArmedFold(t *testing.T) {
-	// Arrange — an ARMED session (a RESUME start) that then clears. The re-fire
-	// has already told it to read the file, so folding the same directive into
-	// the next prompt would say all of it a second time.
-	h, _ := clearedHarness(t)
-	d := h.controller()
-	h.m.mu.Lock()
-	d.metaArmed = true
-	h.m.mu.Unlock()
-
-	// Act: the /clear (which re-fires), then an ordinary prompt.
-	if err := h.submitAs("r1", "/clear"); err != nil {
-		t.Fatalf("submit /clear: %v", err)
-	}
-	if err := h.submitAs("r2", "now do the thing"); err != nil {
-		t.Fatalf("submit prompt: %v", err)
-	}
-
-	// Assert.
-	got := h.client.promptTexts()
-	if len(got) != 3 {
-		t.Fatalf("forwarded %d prompt(s), want the /clear, the directive, and the prompt", len(got))
-	}
-	if got[2] != "now do the thing" {
-		t.Errorf("ordinary prompt = %q, want it verbatim — the re-fire already delivered the directive", got[2])
-	}
-}
-
-// --- withholding the follow-up's durable line --------------------------------
+// --- withholding a legacy directive's durable line ---------------------------
 
 func TestTheStandaloneDirectiveIsWithheldFromTheFeed(t *testing.T) {
-	// Arrange — the CLI records the daemon's follow-up as an ordinary "user"
-	// line, so suppressing the receipt alone would still leave a purple bubble
-	// full of text the user never typed.
+	// Arrange — a transcript recorded before the migration (or an on-demand
+	// re-read fired from Emacs) records the directive as an ordinary "user"
+	// line, which would otherwise draw a purple bubble full of text the user
+	// never typed.
 	h := newQueueHarness(t, nil)
-	directive, ok := metapromptDirective(metapromptCwd(t))
-	if !ok {
-		t.Fatal("metapromptDirective: want a directive")
-	}
+	directive := directiveFor("/repo/" + "modules/app/agent-repl/metaprompt.md")
 
 	// Act.
 	h.controller().consumer.Consume(transcriptUserEvent(t, 12, "u-directive", directive))
 
 	// Assert.
 	if turns := h.userTurns(); len(turns) != 0 {
-		t.Fatalf("pushed %d user turn(s), want the daemon's own directive withheld", len(turns))
+		t.Fatalf("pushed %d user turn(s), want the standalone directive withheld", len(turns))
 	}
 }
 
 func TestAFoldedDirectiveStillRendersItsPrompt(t *testing.T) {
-	// Arrange — the fold puts the user's REAL prompt after the directive, and
-	// withholding that would swallow something they actually typed.
+	// Arrange — a pre-migration fold put the user's REAL prompt after the
+	// directive, and withholding that would swallow something they typed.
 	h := newQueueHarness(t, nil)
-	directive, ok := metapromptDirective(metapromptCwd(t))
-	if !ok {
-		t.Fatal("metapromptDirective: want a directive")
-	}
+	directive := directiveFor("/repo/" + "modules/app/agent-repl/metaprompt.md")
 
 	// Act.
 	h.controller().consumer.Consume(
-		transcriptUserEvent(t, 12, "u-folded", prependMetaprompt(directive, "the real prompt")))
+		transcriptUserEvent(t, 12, "u-folded", directive+"\n\nthe real prompt"))
 
 	// Assert.
 	turns := h.userTurns()
@@ -685,14 +571,6 @@ func TestAFailedClearAdvancesNothing(t *testing.T) {
 	if delivers := h.applier.promptDeliverCalls(); len(delivers) != 0 {
 		t.Fatalf("prompt-deliver edges for a /clear = %+v, want none", delivers)
 	}
-}
-
-// metapromptCwd is a temp cwd holding a metaprompt file.
-func metapromptCwd(t *testing.T) string {
-	t.Helper()
-	cwd := t.TempDir()
-	writeMetaprompt(t, cwd)
-	return cwd
 }
 
 func TestTheMergeLeaseHoldersPromptTakesNoAcceptedEdge(t *testing.T) {

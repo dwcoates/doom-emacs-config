@@ -351,22 +351,6 @@ type sessionController struct {
 	// faulted is closed once, by the first bring-up fault, to wake the wait.
 	faulted chan struct{}
 
-	// cwd is the session's working directory, as its SessionStarted reported it.
-	// Guarded by the manager mutex.
-	//
-	// RECORDED FROM EVERY SESSION START, not just the ones that arm the
-	// metaprompt below. The read-directive is resolved relative to it, and a
-	// `/clear` re-fires that directive on ANY session however it started
-	// (promptdispatch.go), so binding the cwd to the arming would leave the
-	// re-fire with no path to name on most sessions.
-	cwd string
-
-	// metaprompt re-fire state, guarded by the manager mutex: armed when a
-	// RESUME/COMPACT_CONTINUE SessionStarted arrived; fired once the directive
-	// has been folded into a prompt.
-	metaArmed bool
-	metaFired bool
-
 	// Prompt-queue state (E4), guarded by the manager mutex.
 	//
 	// turnActive tracks the OBSERVED turn boundary (TurnStarted/TurnEnded off
@@ -660,8 +644,9 @@ func (m *Manager) persistVendorSessionID(sessionID, csid string) {
 }
 
 // SubmitPrompt brings the workspace's session up (lazily, reattach-first) and
-// submits text to its shim. On the FIRST prompt after a RESUME/COMPACT_CONTINUE
-// session start, the metaprompt read-directive is prepended once (task step 4).
+// submits text to its shim, VERBATIM: the daemon rewrites no prompt, because
+// the session's guidelines ride in its system prompt (metaprompt.go) rather
+// than in anything folded into the conversation.
 // A prompt submitted while the session's turn is ALREADY RUNNING is not
 // forwarded at all: the daemon queues it (E4) and this returns nil, because
 // the command was accepted — it was accepted into the queue. The queue's own
@@ -869,31 +854,6 @@ func (m *Manager) progress() ProgressResolver {
 func (m *Manager) noteProgressCounts(workspace string, queueDepth int64) {
 	pending := int64(len(m.reg.idsForWorkspace(workspace)))
 	m.progress().SetCounts(workspace, pending, queueDepth)
-}
-
-// applyMetaprompt folds the metaprompt directive into text once for an armed
-// session, loud-logging the fold.
-//
-// TAKES m.mu itself, which is why it carries no `Locked` suffix (see the
-// package doc): callers must NOT hold the mutex.
-func (m *Manager) applyMetaprompt(d *sessionController, text string) string {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if !d.metaArmed || d.metaFired {
-		return text
-	}
-	directive, ok := metapromptDirective(d.cwd)
-	if !ok {
-		// Armed but the file is absent under this cwd: nothing to prepend. Mark
-		// fired so we do not re-stat on every prompt, and log the honest miss.
-		d.metaFired = true
-		m.logf("session-controller: metaprompt re-fire armed for session=%s but %s/%s absent; skipping",
-			d.sessionID, d.cwd, metapromptRelPath)
-		return text
-	}
-	d.metaFired = true
-	m.logf("session-controller: metaprompt re-fire folding read-directive into next prompt session=%s ws=%s", d.sessionID, d.workspace)
-	return prependMetaprompt(directive, text)
 }
 
 // Interrupt interrupts the workspace's live turn. A workspace with no live
@@ -1605,7 +1565,6 @@ func (m *Manager) bringUp(workspace string) (*sessionController, error) {
 		generationID: generationID, faulted: make(chan struct{}),
 	}
 	cons := newConsumer(workspace, sessionID, m.cfg.Push, m.cfg.SSM, m.cfg.Progress, m.cfg.ClearCompactStore, m.logf, func(ss *corev1.SessionStarted) {
-		m.armMetaprompt(d, ss)
 		m.persistVendorSessionID(sessionID, ss.GetVendorSessionId())
 	}, func(active bool) {
 		m.onTurnBoundary(d, active)
@@ -1857,26 +1816,6 @@ func (m *Manager) bringUp(workspace string) (*sessionController, error) {
 	}()
 	m.logf("session-controller: brought up session=%s ws=%q (reattach-first)", sessionID, workspace)
 	return d, nil
-}
-
-// armMetaprompt records a session start's cwd and arms the metaprompt re-fire
-// for a RESUME/COMPACT_CONTINUE one.
-//
-// THE CWD IS TAKEN FROM EVERY START, and the arming from only some. The two used
-// to move together, which quietly meant the daemon knew where a session lived
-// only when it happened to be resuming one — and the post-`/clear` re-fire
-// (promptdispatch.go) needs that path on every session there is.
-func (m *Manager) armMetaprompt(d *sessionController, ss *corev1.SessionStarted) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if cwd := ss.GetCwd(); cwd != "" {
-		d.cwd = cwd
-	}
-	if !wantsMetapromptRefire(ss) || d.metaArmed {
-		return
-	}
-	d.metaArmed = true
-	m.logf("session-controller: metaprompt re-fire armed session=%s source=%s cwd=%s", d.sessionID, ss.GetSource(), ss.GetCwd())
 }
 
 // onHandshake adopts the vendor session uuid a (re)handshaking shim announces,
