@@ -69,6 +69,7 @@ import {
   daemonUnreachableFailure,
   frameUndecodableFailure,
   sessionGoneFailure,
+  staleBundleFailure,
 } from "./local-failure.js";
 import { StateAdapter, systemFailureFrom, userTurnReceipt } from "./state-adapter.js";
 import { CommandDispatcher, ModelSelectionRejectedError } from "./command-dispatch.js";
@@ -92,6 +93,7 @@ import {
 } from "./sidebar.js";
 import { ConversationStore } from "./store.js";
 import { IDLE_LABEL, TIMER_SLOT, TaskTimer, windowHost } from "./timer.js";
+import { VersionSkewGuard } from "./version-skew.js";
 import { WsClient, composerEnabled, makeSessionExistsProbe, type WsStateFreshness } from "./ws.js";
 import {
   bindLogContext,
@@ -761,6 +763,23 @@ async function boot(): Promise<void> {
         }),
     },
   );
+  // VERSION SKEW (see version-skew.ts). This bundle is loaded once into a
+  // long-lived xwidget webview and outlives daemon redeploys; when the code it
+  // is running can no longer ingest the daemon's frames, no amount of
+  // reconnecting fixes it and the page must fetch itself again.
+  const versionSkew = new VersionSkewGuard({
+    reload: () => location.reload(),
+    storage: sessionStorage,
+    onReloadRefused: (detail) => {
+      // The fresh bundle cannot adopt either, so this is a real defect that
+      // must be visible rather than hidden behind more reload churn.
+      if (store.addFailure(staleBundleFailure(detail))) frames.schedule();
+      statusEl.textContent = "state unreadable";
+      statusEl.classList.remove("ok");
+    },
+    log: (level, message) => clog(level, message),
+  });
+
   // The wake anchors' countdowns tick on wall-clock time, not on frames,
   // so nothing would re-render them between deltas. A slow heartbeat
   // ask keeps them honest through the same coalescer every other render
@@ -859,9 +878,15 @@ async function boot(): Promise<void> {
         // Whether THIS frame was the connect StateSnapshot — the signal the
         // history request waits for (it carries no conversation of its own).
         let isSnapshot = false;
+        // The daemon PROCESS identity this snapshot came from, which the
+        // version-skew guard compares against the one this page pinned.
+        let daemonBootId = "";
         try {
           const decoded = decodeFrontendFrame(data);
           isSnapshot = decoded.frame.case === "snapshot";
+          if (decoded.frame.case === "snapshot") {
+            daemonBootId = decoded.frame.value.daemon?.bootId ?? "";
+          }
           dispatcher.observe(decoded);
           effects = adapter.apply(decoded);
         } catch (err) {
@@ -920,6 +945,13 @@ async function boot(): Promise<void> {
             cause_seq: store.state.workspaceStateCauseSeq,
             render_state: store.state.renderState,
           });
+          // AFTER adoption, never before: a snapshot this page failed to ingest
+          // proves nothing about which daemon build this bundle can talk to,
+          // and pinning its boot id would let a wedged page believe it is
+          // current. A CHANGED boot id means the daemon restarted (possibly
+          // redeployed) under a page that cannot be redeployed in place, so the
+          // page fetches itself again.
+          versionSkew.observeSnapshotAdoption(daemonBootId);
         }
         if (effects.some((effect) => effect.kind === "workspace-state")) {
           if (store.state.renderState === null) {
@@ -980,6 +1012,10 @@ async function boot(): Promise<void> {
           sidebar.setAuthoritativeCurrentStatus(workspaceStatusFromRenderState(store.state.renderState));
         } else {
           connectResync.onDisconnect();
+          // A lease that expired is a connection that was served a snapshot and
+          // still never became current. Enough of those in a row condemn this
+          // bundle as stale code rather than the daemon as unreachable.
+          if (freshness === "expired") versionSkew.observeLeaseExpiry();
           const changed = store.invalidateFrontendState(`websocket_${freshness}`);
           sidebar.setAuthoritativeCurrentStatus(
             freshness === "connecting" || freshness === "awaiting_snapshot" ? "init" : "degraded",

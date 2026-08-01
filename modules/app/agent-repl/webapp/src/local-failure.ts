@@ -61,6 +61,17 @@ export const CLIENT_FAILURE_TYPES = [
    * that it could not read it.
    */
   "client.frame_undecodable",
+  /**
+   * The page could not ingest the daemon's state, reloaded itself for a fresh
+   * bundle, and STILL could not ingest it.
+   *
+   * Classified here because it is a statement about this browser's own code,
+   * which the daemon cannot observe: from its side it pushed a well-formed
+   * snapshot and the client dropped the socket. It is deliberately loud and
+   * unresolvable — reaching it means the version-skew reload was the wrong
+   * diagnosis and a real defect is being hidden by reload churn.
+   */
+  "client.stale_bundle",
 ] as const;
 export type ClientFailureType = (typeof CLIENT_FAILURE_TYPES)[number];
 
@@ -167,6 +178,21 @@ export function frameUndecodableFailure(err: unknown, frameHead: string): System
     "client.frame_undecodable",
     "a message from the daemon could not be read and was skipped",
     frameHead === "" ? cause : `${cause} — frame head: ${frameHead}`,
+  );
+}
+
+/**
+ * Classify a refused version-skew reload as the frontend's own failure.
+ *
+ * The message names the consequence rather than the mechanism: the reader does
+ * not care about snapshot leases, only that what they are looking at is not the
+ * live state and reloading did not fix it. `detail` carries the evidence.
+ */
+export function staleBundleFailure(detail: string): SystemFailureCard {
+  return clientFailure(
+    "client.stale_bundle",
+    "this page cannot read the daemon's state and reloading did not fix it; restart the view",
+    detail,
   );
 }
 

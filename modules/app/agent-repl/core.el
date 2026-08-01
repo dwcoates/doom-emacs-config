@@ -1367,6 +1367,8 @@ introducing a sibling raw `make-process' site."
     agent-repl--frontend-make-webview-buffer
     agent-repl--frontend-webview-selection
     agent-repl--frontend-webview-execute-script
+    agent-repl--frontend-webview-live-widget
+    agent-repl--frontend-webview-reload-widget
     agent-repl--uds-connect
     agent-repl--uds-probe
     agent-repl--image-call-process

@@ -41,6 +41,9 @@
 
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--log-verbose "agent-repl-core" (ws fmt &rest args))
+(declare-function agent-repl--warn "agent-repl-core" (ws fmt &rest args))
+(declare-function agent-repl--agent-view-buffer-p "agent-repl-core" (&optional buf))
+(declare-function agent-repl--buffer-owner "agent-repl-core" (buf))
 (declare-function agent-repl--current-ws-p "agent-repl-core" (ws))
 (declare-function agent-repl--ws-current-name "agent-repl-workspace" ())
 (declare-function agent-repl--live-ws-names "agent-repl-workspace" ())
@@ -79,6 +82,9 @@
 (declare-function xwidget-webkit-goto-uri "xwidget.c" (xwidget uri))
 (declare-function xwidget-webkit-get-selection "xwidget" (proc))
 (declare-function xwidget-webkit-execute-script "xwidget" (xwidget script &optional callback))
+(declare-function xwidget-webkit-uri "xwidget.c" (xwidget))
+(declare-function xwidget-at "xwidget" (pos))
+(declare-function xwidget-live-p "xwidget" (xwidget))
 (declare-function evil-define-key* "evil-core" (state keymap key def &rest bindings))
 (declare-function evil-normalize-keymaps "evil-core" (&optional state))
 
@@ -223,6 +229,93 @@ close-panel, workspace nuke), so the prompt is suppressed — left in
 place it deadlocks non-interactive callers like the nuke hook."
   (let ((kill-buffer-query-functions nil))
     (kill-buffer buf)))
+
+;;;; ---- Refreshing live webviews ----------------------------------------------
+
+(defun agent-repl--frontend-webview-live-widget (buf)
+  "External-boundary wrapper: return BUF's live WKWebView xwidget, or nil.
+Reads the xwidget out of BUF itself rather than through
+`xwidget-webkit-current-session', whose last-session fallback would hand
+back some OTHER buffer's webview for a buffer that has lost its own —
+a sweep over many buffers must never be able to act on the wrong page.
+Body does nothing but the external calls; tests mock via `cl-letf'.
+Registered in `agent-repl--external-boundary-functions'."
+  (require 'xwidget)
+  (with-current-buffer buf
+    (let ((xw (xwidget-at (point-min)))) ;; ALLOW-EXTERNAL-BOUNDARY
+      (and (xwidget-live-p xw) xw))))    ;; ALLOW-EXTERNAL-BOUNDARY
+
+(defun agent-repl--frontend-webview-reload-widget (xwidget)
+  "External-boundary wrapper: re-navigate XWIDGET to its current URI.
+Returns the URI navigated to.  Re-navigation (rather than
+`xwidget-webkit-reload's zero-offset history walk) is what a redeploy
+needs: the page must come back from the daemon's freshly restarted
+listener, on the same session URL it already carries.  Signals when the
+webview reports no URI — there is nothing to navigate to, and the sweep
+records that as a failed refresh rather than pretending one happened.
+Body does nothing but the external calls; tests mock via `cl-letf'.
+Registered in `agent-repl--external-boundary-functions'."
+  (require 'xwidget)
+  (let ((uri (xwidget-webkit-uri xwidget))) ;; ALLOW-EXTERNAL-BOUNDARY
+    (when (or (null uri) (string-empty-p uri))
+      (error "agent-repl: webview reports no URI to reload (xwidget=%S)" xwidget))
+    (xwidget-webkit-goto-uri xwidget uri) ;; ALLOW-EXTERNAL-BOUNDARY
+    uri))
+
+(defun agent-repl--frontend-webview-workspace (buf)
+  "Return the workspace name webview BUF belongs to.
+Prefers the permanent-local `agent-repl--owning-workspace' recorded on
+the buffer, falling back to the name the buffer is pinned to — the
+webview name format encodes the workspace, and a webview mounted before
+the owner was stamped still has to be identifiable in the log."
+  (or (agent-repl--buffer-owner buf)
+      (let ((name (buffer-name buf)))
+        (when (string-match "\\`\\*agent-frontend-\\(.+\\)\\*\\'" name)
+          (match-string 1 name)))))
+
+(defun agent-repl--frontend-live-webview-buffers ()
+  "Return every live workspace webview buffer, in `buffer-list' order."
+  (seq-filter (lambda (buf)
+                (and (buffer-live-p buf)
+                     (agent-repl--agent-view-buffer-p buf)))
+              (buffer-list)))
+
+;;;###autoload
+(defun agent-repl-refresh-webviews ()
+  "Reload every live workspace webview page, returning the count refreshed.
+
+A webview outlives the daemon it was mounted against: bin/deploy-all.sh
+restarts the daemon under the running Emacs, leaving each mounted page
+talking to a listener that no longer exists.  This sweep re-navigates
+every such page so it re-attaches to the freshly deployed daemon.
+
+One bad webview never stops the sweep: a buffer whose WKWebView is dead
+or refuses to report a URI is recorded as a warning and the sweep moves
+on to the next buffer.  Every outcome — refreshed, dead, failed — is on
+the log with its workspace and buffer."
+  (interactive)
+  (let ((bufs (agent-repl--frontend-live-webview-buffers))
+        (refreshed 0))
+    (agent-repl--log nil "refresh-webviews: sweep begin candidates=%d" (length bufs))
+    (dolist (buf bufs)
+      (let ((ws (agent-repl--frontend-webview-workspace buf)))
+        (condition-case err
+            (let ((xw (agent-repl--frontend-webview-live-widget buf)))
+              (if (null xw)
+                  (agent-repl--warn ws "refresh-webviews: buffer=%s outcome=dead-webview"
+                                    (buffer-name buf))
+                (let ((uri (agent-repl--frontend-webview-reload-widget xw)))
+                  (setq refreshed (1+ refreshed))
+                  (agent-repl--log ws "refresh-webviews: buffer=%s outcome=refreshed url=%s"
+                                   (buffer-name buf) uri))))
+          (error
+           (agent-repl--warn ws "refresh-webviews: buffer=%s outcome=reload-failed err=%S"
+                             (buffer-name buf) err)))))
+    (agent-repl--log nil "refresh-webviews: sweep done refreshed=%d candidates=%d"
+                     refreshed (length bufs))
+    (when (called-interactively-p 'interactive)
+      (message "agent-repl: refreshed %d of %d webview(s)" refreshed (length bufs)))
+    refreshed))
 
 ;;;; ---- Copying the webview's highlighted text --------------------------------
 

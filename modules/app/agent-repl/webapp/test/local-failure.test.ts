@@ -14,6 +14,7 @@ import {
   frameUndecodableFailure,
   isClientType,
   sessionGoneFailure,
+  staleBundleFailure,
 } from "../src/local-failure.js";
 
 describe("the namespace partition", () => {
@@ -254,5 +255,29 @@ describe("sessionGoneFailure", () => {
     const f = sessionGoneFailure("s_abc");
     // Assert
     expect(f.resolvedAtMs).toBe(0);
+  });
+});
+
+describe("staleBundleFailure", () => {
+  it("carries the refusal detail as the raw account", () => {
+    // Arrange / Act
+    const f = staleBundleFailure("reloaded 12s ago and still cannot ingest");
+    // Assert
+    expect(f.sourceDetail).toBe("reloaded 12s ago and still cannot ingest");
+  });
+
+  it("never resolves, because the running bundle cannot repair itself", () => {
+    // Arrange / Act
+    const f = staleBundleFailure("detail");
+    // Assert
+    expect(f.resolvedAtMs).toBe(0);
+  });
+
+  it("reconciles onto one card, so repeated refusals cannot stack", () => {
+    // Arrange / Act
+    const first = staleBundleFailure("a");
+    const second = staleBundleFailure("b");
+    // Assert
+    expect(first.uuid).toBe(second.uuid);
   });
 });
