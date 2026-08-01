@@ -94,7 +94,15 @@ func (c sessionCommand) foldsMetaprompt() bool { return !c.recognized() }
 //
 // Must be called with m.mu RELEASED: the receipt reaches the frontend server and
 // applyMetaprompt takes the mutex itself.
-func (m *Manager) forwardPrompt(ctx context.Context, d *sessionController, requestID, text, origin, permissionMode string) error {
+func (m *Manager) forwardPrompt(ctx context.Context, d *sessionController, requestID, text, origin, permissionMode string, who submitter) error {
+	// THE MERGE LEASE'S BACKSTOP. submitPromptAs already refused a user prompt
+	// for a leased workspace, and this catches every path that does not pass
+	// through it — the queue's drain, an interject's head jump, anything added
+	// later. Both funnels end here by design, so the gate placed here is the one
+	// a new caller cannot forget to ask for.
+	if err := m.guardMergeLease(d.workspace, who, requestID, origin); err != nil {
+		return err
+	}
 	cmd := classifyPrompt(text)
 
 	wire := text

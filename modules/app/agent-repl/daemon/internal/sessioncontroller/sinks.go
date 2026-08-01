@@ -99,6 +99,17 @@ type StateApplier interface {
 	// ApplyCompacting opens or closes the COMPACTING axis, from the vendor's
 	// own status ticker and the first-class ContextCompacted.
 	ApplyCompacting(workspace string, compacting bool, reason string) error
+	// MergeLeaseHeld reports whether merge.Coordinator currently owns the
+	// workspace's shim. While it does, the merge is the ONLY party allowed to
+	// submit, and every conversation item the session produces is a merge's
+	// rather than a user's.
+	MergeLeaseHeld(workspace string) bool
+	// ConversationSourceAt returns the PERSISTED provenance verdict for an item
+	// produced in workspace at tsMs. It is read off the merge lease's durable
+	// ledger rather than off the lease's current state, which is what makes a
+	// resync of a finished merge replay CONVERSATION_SOURCE_MERGE instead of
+	// rewriting the history as the user's.
+	ConversationSourceAt(workspace string, tsMs int64) (frontendv1.ConversationSource, error)
 	// ApplySessionRotated reconciles the session-status lifecycle across a VENDOR SESSION
 	// UUID ROTATION: the turn in flight when the uuid changed can never report
 	// its end under the retired identity, so a `thinking` row held for it has
@@ -1002,6 +1013,18 @@ func (c *consumer) pushConversation(ev *corev1.Event, live bool) {
 	// line closing a turn nothing was asked of — goes no further either
 	// (noresponse.go).
 	c.withholdNoResponsePlaceholders(cd)
+	// PROVENANCE, AFTER EVERY CURATION AND BEFORE THE PUSH. The curators above
+	// rebuild items (skillbody.go mints a fresh SkillBodyItem from the record it
+	// consumed), so stamping earlier would leave a rebuilt item carrying the
+	// proto3 zero — the malformed frame a receiver must reject.
+	//
+	// The verdict comes from the merge lease's DURABLE LEDGER keyed on the
+	// item's own instant, never from whether the lease happens to be held right
+	// now: this same path runs on a resync replaying history, and a released
+	// lease would rewrite a merge's conversation as the user's.
+	if !c.stampConversationProvenance(cd) {
+		return
+	}
 	// LIVE ONLY. A durable user turn arriving now may be the transcript's
 	// account of a submit this daemon made moments ago, and stamping it with
 	// that submit's request id is what lets the frontend reconcile it onto the
@@ -1228,7 +1251,18 @@ func (c *consumer) pushPermission(item *frontendv1.ConversationItem) {
 // pushLocalItem wraps a single DAEMON-COMPOSED item (a permission, a failure
 // card, a prompt receipt) in a ConversationDelta and pushes it. No store seq:
 // through_seq stays 0, because nothing in the store produced it.
+//
+// PROVENANCE IS THE LIVE VERDICT HERE, not a ledger lookup, and the difference
+// from pushConversation is the item's origin rather than an inconsistency. A
+// daemon-composed item is composed NOW, by this daemon, so whether the merge
+// owns the shim at this instant IS its provenance — and a permission card
+// carries no timestamp to look one up with anyway. Every caller retains the
+// stamped item (permItems, failItems, echoes), so a resync replays the verdict
+// that was made rather than deriving a new one.
 func (c *consumer) pushLocalItem(item *frontendv1.ConversationItem) {
+	if !c.stampLocalItemProvenance(item) {
+		return
+	}
 	c.push.PushConversationDelta(&frontendv1.ConversationDelta{
 		Workspace: c.workspace,
 		SessionId: c.sessionID,

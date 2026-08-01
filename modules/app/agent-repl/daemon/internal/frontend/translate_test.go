@@ -92,7 +92,8 @@ func TestConversationDeltaFromEvent(t *testing.T) {
 				Workspace: "ws", SessionId: "s1", ThroughSeq: 7,
 				Items: []*frontendv1.ConversationItem{{
 					Uuid: "u1", TsMs: producedMs,
-					Item: &frontendv1.ConversationItem_AssistantMessage{AssistantMessage: assistantMsg},
+					Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
+					Item:   &frontendv1.ConversationItem_AssistantMessage{AssistantMessage: assistantMsg},
 				}},
 			},
 		},
@@ -108,7 +109,8 @@ func TestConversationDeltaFromEvent(t *testing.T) {
 				Workspace: "ws", SessionId: "s1", ThroughSeq: 9,
 				Items: []*frontendv1.ConversationItem{{
 					Uuid: "u3", TsMs: producedMs,
-					Item: &frontendv1.ConversationItem_AssistantMessage{AssistantMessage: toolUseMsg},
+					Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
+					Item:   &frontendv1.ConversationItem_AssistantMessage{AssistantMessage: toolUseMsg},
 				}},
 			},
 		},
@@ -124,7 +126,8 @@ func TestConversationDeltaFromEvent(t *testing.T) {
 				Workspace: "ws", SessionId: "s1", ThroughSeq: 10,
 				Items: []*frontendv1.ConversationItem{{
 					Uuid: "u4", TsMs: producedMs,
-					Item: &frontendv1.ConversationItem_UserMessage{UserMessage: toolResultMsg},
+					Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
+					Item:   &frontendv1.ConversationItem_UserMessage{UserMessage: toolResultMsg},
 				}},
 			},
 		},
@@ -140,7 +143,8 @@ func TestConversationDeltaFromEvent(t *testing.T) {
 				Workspace: "ws", SessionId: "s1", ThroughSeq: 2,
 				Items: []*frontendv1.ConversationItem{{
 					Uuid: "u5", TsMs: producedMs, RequestId: "req-5",
-					Item: &frontendv1.ConversationItem_UserMessage{UserMessage: promptMsg},
+					Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
+					Item:   &frontendv1.ConversationItem_UserMessage{UserMessage: promptMsg},
 				}},
 			},
 		},
@@ -153,8 +157,9 @@ func TestConversationDeltaFromEvent(t *testing.T) {
 			want: &frontendv1.ConversationDelta{
 				Workspace: "ws", SessionId: "s1", ThroughSeq: 12,
 				Items: []*frontendv1.ConversationItem{{
-					TsMs: producedMs,
-					Item: &frontendv1.ConversationItem_Result{Result: resultMsg},
+					TsMs:   producedMs,
+					Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
+					Item:   &frontendv1.ConversationItem_Result{Result: resultMsg},
 				}},
 			},
 		},
@@ -257,7 +262,8 @@ func TestConversationDeltaFromEventTranscriptAssistantUsesEnvelopeTs(t *testing.
 		Workspace: "ws", SessionId: "s1", ThroughSeq: 20,
 		Items: []*frontendv1.ConversationItem{{
 			Uuid: "au1", TsMs: wantTsMs,
-			Item: &frontendv1.ConversationItem_AssistantMessage{AssistantMessage: msg},
+			Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
+			Item:   &frontendv1.ConversationItem_AssistantMessage{AssistantMessage: msg},
 		}},
 	}
 
@@ -416,6 +422,7 @@ func TestMarshalConversationDeltaLowerCamelCase(t *testing.T) {
 		Workspace: "ws", SessionId: "s1", ThroughSeq: 5,
 		Items: []*frontendv1.ConversationItem{{
 			Uuid: "u1", TsMs: producedMs,
+			Source: frontendv1.ConversationSource_CONVERSATION_SOURCE_USER,
 			Item: &frontendv1.ConversationItem_AssistantMessage{AssistantMessage: &datav1.ApiAssistantMessage{
 				Content: []*datav1.ContentBlock{
 					{Block: &datav1.ContentBlock_ToolUse{ToolUse: &datav1.ToolUseBlock{Id: "tu_1", Name: "Bash"}}},

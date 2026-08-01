@@ -388,7 +388,7 @@ func (m *Manager) onTurnBoundary(d *sessionController, active bool) {
 // reading an immediate one gets: it is recognized, echoed to nobody, and opens
 // the clearing axis. This path used to recognize nothing at all.
 func (m *Manager) deliver(d *sessionController, e *queueEntry) {
-	err := m.forwardPrompt(m.rootCtx, d, e.requestID, e.text, "frontend", e.permissionMode)
+	err := m.forwardPrompt(m.rootCtx, d, e.requestID, e.text, "frontend", e.permissionMode, submitterUser)
 	if err == nil {
 		m.mu.Lock()
 		d.runningText = e.text

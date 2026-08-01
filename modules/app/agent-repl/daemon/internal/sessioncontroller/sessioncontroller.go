@@ -706,6 +706,21 @@ func (m *Manager) SubmitWorkspaceInitialPrompt(ctx context.Context, workspace, j
 }
 
 func (m *Manager) submitPrompt(ctx context.Context, workspace, requestID, text, permissionMode, origin string) error {
+	return m.submitPromptAs(ctx, workspace, requestID, text, permissionMode, origin, submitterUser)
+}
+
+// submitPromptAs is submitPrompt with the SUBMITTER named, which is what the
+// merge exclusivity lease is decided against (mergelease.go).
+//
+// The lease is checked HERE, before the session is even brought up, so a
+// refused prompt neither spawns a shim nor lands on the queue. A user prompt
+// parked on the queue of a leased session would be delivered into the middle of
+// merge.Coordinator's conflict resolution the moment its turn ended, which is
+// the silent drop-shaped failure the loud refusal replaces.
+func (m *Manager) submitPromptAs(ctx context.Context, workspace, requestID, text, permissionMode, origin string, who submitter) error {
+	if err := m.guardMergeLease(workspace, who, requestID, origin); err != nil {
+		return err
+	}
 	d, err := m.ensure(ctx, workspace)
 	if err != nil {
 		return err
@@ -724,7 +739,7 @@ func (m *Manager) submitPrompt(ctx context.Context, workspace, requestID, text, 
 		// queue chip until it is DELIVERED, and a bubble drawn now would claim
 		// an execution order the session is not going to follow. Its receipt is
 		// pushed at the delivery site instead (queue.go, deliver).
-		if err := m.forwardPrompt(ctx, d, requestID, text, origin, permissionMode); err != nil {
+		if err := m.forwardPrompt(ctx, d, requestID, text, origin, permissionMode, who); err != nil {
 			// The prompt never reached the shim, so no turn is beginning — and
 			// with a paused queue that matters: the lone-runner flag set on the
 			// way in would otherwise leave the pause waiting for a turn end

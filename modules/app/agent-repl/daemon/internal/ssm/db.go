@@ -121,6 +121,31 @@ func migrate(db *sql.DB) error {
 				fault_type,
 				at
 			);
+		-- THE MERGE LEASE LEDGER: one row per exclusivity window merge.Coordinator
+		-- has held over a workspace's shim. It is a LEDGER, not a flag, and that
+		-- is what makes conversation provenance reproducible: an item's source is
+		-- decided by whether its timestamp falls inside a window, so a resync or a
+		-- transcript replay years later reaches the same verdict as the live push
+		-- instead of re-deriving it from a lease that has long since been released.
+		--
+		-- An OPEN window (released_at IS NULL) is a lease currently held. It
+		-- survives a daemon bounce on purpose: merge.Coordinator.Drain
+		-- reconstructs the merge behind it rather than the lease being silently
+		-- dropped and the workspace quietly re-opened to user prompts.
+		CREATE TABLE IF NOT EXISTS merge_lease (
+			lease_id     INTEGER PRIMARY KEY AUTOINCREMENT,
+			workspace    TEXT    NOT NULL,
+			acquired_at  INTEGER NOT NULL,
+			released_at  INTEGER
+		);
+		CREATE INDEX IF NOT EXISTS merge_lease_window
+			ON merge_lease(workspace, acquired_at, released_at);
+		-- AT MOST ONE OPEN WINDOW PER WORKSPACE, enforced by the database rather
+		-- than by the Go that writes it. Two coordinators believing they both hold
+		-- the same shim is exactly the failure the lease exists to prevent, so it
+		-- is made unrepresentable at the substrate instead of merely unlikely.
+		CREATE UNIQUE INDEX IF NOT EXISTS merge_lease_open
+			ON merge_lease(workspace) WHERE released_at IS NULL;
 	`); err != nil {
 		return fmt.Errorf("ssm: create schema: %w", err)
 	}

@@ -8,6 +8,7 @@ import (
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/workspace/merge"
 
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 )
@@ -103,9 +104,19 @@ type Manager struct {
 	clearingTimers  map[string]Timer
 	clearingTimeout time.Duration
 	afterFunc       func(time.Duration, func()) Timer
-	subs            map[int]chan *frontendv1.WorkspaceState
-	nextSub         int
-	closed          bool
+	// mergeLeases is the in-memory projection of the durable merge_lease
+	// ledger, keyed by workspace and ordered oldest window first. See
+	// mergelease.go: the projection is what lets Held and the provenance
+	// lookup be total, and the TABLE remains the authority both are warmed
+	// from.
+	mergeLeases map[string][]leaseWindow
+	// mergeQueue is the merge subsystem's queue, bound by ssm.NewMergeLease.
+	// It is the sole source of merge_queue_position / merge_queue_depth, which
+	// are cross-workspace facts no per-workspace row can carry.
+	mergeQueue merge.Queue
+	subs       map[int]chan *frontendv1.WorkspaceState
+	nextSub    int
+	closed     bool
 }
 
 // Open opens the SSM database and warms the last-resolved cache from the
@@ -155,6 +166,7 @@ func Open(opts Options) (*Manager, error) {
 		last:            make(map[string]frontendv1.RenderState),
 		lastTasks:       make(map[string]int64),
 		interruptedTurn: make(map[string]*interruptMark),
+		mergeLeases:     make(map[string][]leaseWindow),
 		clearingTimers:  make(map[string]Timer),
 		clearingTimeout: clearingTimeout,
 		afterFunc:       afterFunc,
@@ -192,6 +204,12 @@ func (m *Manager) warm() error {
 		m.lastAt = maxAt.Int64
 	}
 	if err := m.repairPersistedOrphanTaskEndsLocked(); err != nil {
+		return err
+	}
+	// Before any workspace resolves, so the first restored WorkspaceState
+	// already carries merge_lease_held rather than a frame that says the
+	// workspace is open to prompts it will then refuse.
+	if err := m.warmMergeLeasesLocked(); err != nil {
 		return err
 	}
 	// Before the cache is seeded, so a released row is what gets restored
@@ -779,18 +797,30 @@ func (m *Manager) pushLocked(workspace string, r resolved) error {
 	return m.pushMessageLocked(workspace, msg)
 }
 
+// workspaceMessageLocked builds THE WorkspaceState for a workspace. Caller
+// holds mu.
+//
+// Every producer of a pushed, snapshotted or synchronously published frame
+// funnels through here, which is what makes a frame missing the merge facts
+// unrepresentable rather than merely unlikely: there is one construction site
+// to stamp, not four to remember.
 func (m *Manager) workspaceMessageLocked(workspace string, r resolved) (*frontendv1.WorkspaceState, error) {
 	composite, found, err := resolveComposite(m.db, workspace)
 	if err != nil {
 		return nil, fmt.Errorf("ssm: resolve composite for push workspace=%q: %w", workspace, err)
 	}
-	if !found {
-		return r.toProto(workspace), nil
+	var msg *frontendv1.WorkspaceState
+	switch {
+	case !found || composite.LifecycleTop == "":
+		msg = r.toProto(workspace)
+	default:
+		msg, err = compositeWorkspaceState(workspace, r, composite)
+		if err != nil {
+			return nil, err
+		}
 	}
-	if composite.LifecycleTop == "" {
-		return r.toProto(workspace), nil
-	}
-	return compositeWorkspaceState(workspace, r, composite)
+	m.stampMergeFactsLocked(workspace, msg)
+	return msg, nil
 }
 
 func (m *Manager) pushMessageLocked(workspace string, msg *frontendv1.WorkspaceState) error {
@@ -832,13 +862,7 @@ func (m *Manager) currentLocked(workspace string) (*frontendv1.WorkspaceState, b
 	if !r.found {
 		r = resolved{found: true, state: frontendv1.RenderState_RENDER_STATE_UNSPECIFIED}
 	}
-	if !compositeFound {
-		return r.toProto(workspace), true, nil
-	}
-	if composite.LifecycleTop == "" {
-		return r.toProto(workspace), true, nil
-	}
-	msg, err := compositeWorkspaceState(workspace, r, composite)
+	msg, err := m.workspaceMessageLocked(workspace, r)
 	if err != nil {
 		return nil, false, err
 	}
@@ -870,11 +894,7 @@ func (m *Manager) Snapshot() ([]*frontendv1.WorkspaceState, error) {
 		if !r.found {
 			r = resolved{found: true, state: frontendv1.RenderState_RENDER_STATE_UNSPECIFIED}
 		}
-		if !compositeFound || composite.LifecycleTop == "" {
-			out = append(out, r.toProto(ws))
-			continue
-		}
-		msg, err := compositeWorkspaceState(ws, r, composite)
+		msg, err := m.workspaceMessageLocked(ws, r)
 		if err != nil {
 			return nil, err
 		}
