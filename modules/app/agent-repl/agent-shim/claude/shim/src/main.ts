@@ -31,6 +31,7 @@ import { SessionSource } from "./uds/proto.js";
 import { FAKE_COMMANDS, createFakeQuery } from "./fake-query.js";
 import { importRealSDK } from "./vendor-guard.js";
 import { normalizeOptionalModel } from "./model.js";
+import { systemPromptOption } from "./metaprompt.js";
 import {
   ModelInfo,
   PermissionMode,
@@ -181,6 +182,11 @@ function packageVersion(spec: string): string {
  * - settingSources loads the user's settings.json (permission
  *   allowlists, hooks), project settings, and CLAUDE.md — the posture
  *   every vterm-era workflow assumes.
+ *
+ * The preset additionally carries the session's metaprompt as an
+ * `append` (metaprompt.ts), which is how the harness's guidelines reach
+ * the agent at all: they are part of the system prompt the SDK re-sends
+ * on every request, not a directive injected into the conversation.
  */
 export function realQueryOptions(
   args: CliArgs,
@@ -191,7 +197,7 @@ export function realQueryOptions(
     canUseTool: canUseTool as never,
     includePartialMessages: true,
     permissionMode: args.permissionMode,
-    systemPrompt: { type: "preset", preset: "claude_code" },
+    systemPrompt: systemPromptOption(args.cwd),
     settingSources: ["user", "project", "local"],
     ...(args.claudeBin !== undefined
       ? { pathToClaudeCodeExecutable: args.claudeBin }
