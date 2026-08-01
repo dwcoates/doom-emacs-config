@@ -89,6 +89,10 @@ func TestCloseDuringBringUpAbortsTheBringUp(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "manager closed during bring-up") {
 		t.Fatalf("Ensure() error = %v, want the manager-closed-during-bring-up refusal", err)
 	}
+	if !cl.contains("bring-up FAILED ws=\"ws\" generation=") ||
+		!cl.contains("reason=manager_closed was_current=true dropped_prompts=0 decision=abort") {
+		t.Fatalf("logs = %v, want canonical manager-close bring-up failure diagnostics", cl.lines)
+	}
 }
 
 // Close JOINS the session-controller-exit goroutine: the tail of bringUp's `go func` —

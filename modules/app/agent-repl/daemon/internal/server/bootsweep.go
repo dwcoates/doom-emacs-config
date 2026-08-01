@@ -68,7 +68,7 @@ type BootSweeper struct {
 	Reg *registry.Registry
 	// Connected reports whether a shim for a session has already dialled in
 	// (the listener's parked map). Required.
-	Connected func(sessionID string) bool
+	Connected func(sessionID string) (bool, error)
 	// Held reports whether a live process holds a session's lock — a shim that
 	// is alive but may not have dialled in yet. Required. An error means "I
 	// could not tell", which is NEVER read as free.
@@ -162,7 +162,18 @@ func (s *BootSweeper) pass(ctx context.Context, label string, only []registry.Re
 // reconcile classifies one record and acts on it, reporting whether it should
 // be revisited by the re-check pass.
 func (s *BootSweeper) reconcile(label string, rec registry.Record) (registry.Record, bool) {
-	if s.Connected(rec.SessionID) {
+	connected, err := s.Connected(rec.SessionID)
+	if err != nil {
+		if label == "boot" {
+			s.Logf("server: %s sweep: session %s (ws %s) parked-connection probe FAILED, so whether the shim is connected is UNKNOWN; deferring to the re-check pass: %v",
+				label, rec.SessionID, rec.CWD, err)
+			return rec, true
+		}
+		s.Logf("server: %s sweep: session %s (ws %s) parked-connection probe FAILED again, so whether the shim is connected remains UNKNOWN; leaving it unwired: %v",
+			label, rec.SessionID, rec.CWD, err)
+		return registry.Record{}, false
+	}
+	if connected {
 		s.Logf("server: %s sweep: session %s (ws %s) has a PARKED shim connection; reattaching", label, rec.SessionID, rec.CWD)
 		if err := s.Ensurer.Ensure(rec.CWD); err != nil {
 			s.Logf("server: %s sweep: session %s (ws %s) reattach FAILED — the workspace stays unwired until it is opened: %v",

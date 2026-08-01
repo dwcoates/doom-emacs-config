@@ -28,7 +28,8 @@ func spawnerWithRecord(t *testing.T, cfgDir, resumeID string) (*ShimSpawner, *re
 	}
 	got := &CreateOpts{}
 	sp := NewShimSpawner(reg,
-		func(string) bool { return false },
+		func(string) (bool, error) { return false, nil },
+		nil,
 		func(_ string, opts CreateOpts) (func() error, error) { *got = opts; return nil, nil },
 		func(string, ...any) {})
 	return sp, reg, got
@@ -99,7 +100,8 @@ func TestSpawnAnnouncesAStalePointerLoudly(t *testing.T) {
 	}
 	var logged []string
 	sp := NewShimSpawner(reg,
-		func(string) bool { return false },
+		func(string) (bool, error) { return false, nil },
+		nil,
 		func(string, CreateOpts) (func() error, error) { return nil, nil },
 		func(f string, a ...any) { logged = append(logged, f) })
 
@@ -121,8 +123,8 @@ func TestSpawnAnnouncesAStalePointerLoudly(t *testing.T) {
 }
 
 func TestDropResumeReportsWhatItDropped(t *testing.T) {
-	// Arrange — the escape ladder classifies a failed bring-up by this answer:
-	// a non-empty drop means the failure was a resume worth one fresh retry.
+	// Arrange. Explicit administrative callers need the removed identity for
+	// durable-state audit logs.
 	sp, _, _ := spawnerWithRecord(t, t.TempDir(), "uuid-gone")
 
 	// Act.
@@ -138,8 +140,7 @@ func TestDropResumeReportsWhatItDropped(t *testing.T) {
 }
 
 func TestDropResumeOnAFreshSessionReportsNothing(t *testing.T) {
-	// Arrange — nothing to drop means the bring-up was already fresh, and the
-	// ladder has nothing left to try.
+	// Arrange. A session without durable identity has nothing to remove.
 	sp, _, _ := spawnerWithRecord(t, t.TempDir(), "")
 
 	// Act.
@@ -157,7 +158,7 @@ func TestDropResumeOnAFreshSessionReportsNothing(t *testing.T) {
 func TestDropResumeOnAnUnknownSessionIsLoud(t *testing.T) {
 	// Arrange.
 	reg := openTestRegistry(t)
-	sp := NewShimSpawner(reg, nil, func(string, CreateOpts) (func() error, error) { return nil, nil }, nil)
+	sp := NewShimSpawner(reg, nil, nil, func(string, CreateOpts) (func() error, error) { return nil, nil }, nil)
 
 	// Act.
 	_, err := sp.DropResume("ghost")

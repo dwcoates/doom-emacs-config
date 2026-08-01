@@ -113,7 +113,7 @@ func TestNextReturnsAParkedConnectionImmediately(t *testing.T) {
 func TestConnectedReportsAParkedShim(t *testing.T) {
 	// Arrange: this is what replaces ReattachDecision's dial-and-handshake.
 	s, path := serve(t)
-	if s.Connected("s_abc") {
+	if connected(t, s, "s_abc") {
 		t.Fatal("Connected = true before any shim dialed in")
 	}
 
@@ -137,7 +137,7 @@ func TestClaimingRemovesTheParkedConnection(t *testing.T) {
 	}
 
 	// Assert
-	if s.Connected("s_abc") {
+	if connected(t, s, "s_abc") {
 		t.Fatal("Connected = true after the connection was claimed")
 	}
 }
@@ -163,7 +163,7 @@ func TestReconnectSupersedesTheParkedConnection(t *testing.T) {
 			t.Fatal("the superseded connection was left open")
 		}
 	}
-	if !s.Connected("s_abc") {
+	if !connected(t, s, "s_abc") {
 		t.Fatal("Connected = false after the reconnect")
 	}
 }
@@ -193,7 +193,7 @@ func TestConnectionWithoutAHelloIsRejected(t *testing.T) {
 
 	// Assert: never parked under any session.
 	time.Sleep(100 * time.Millisecond)
-	if s.Connected("s_abc") || s.Connected("") {
+	if connected(t, s, "s_abc") || connected(t, s, "") {
 		t.Fatal("a non-ShimHello connection was accepted as a shim")
 	}
 }
@@ -219,10 +219,87 @@ func TestNextFailsWhenTheShimNeverConnects(t *testing.T) {
 func waitConnected(t *testing.T, s *Server, sessionID string) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
-	for !s.Connected(sessionID) {
+	for !connected(t, s, sessionID) {
 		if time.Now().After(deadline) {
 			t.Fatalf("session %s never registered as connected", sessionID)
 		}
 		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+func connected(t *testing.T, s *Server, sessionID string) bool {
+	t.Helper()
+	connected, err := s.Connected(sessionID)
+	if err != nil {
+		t.Fatalf("Connected(%s): %v", sessionID, err)
+	}
+	return connected
+}
+
+func TestDisconnectedParkedShimIsEvictedBeforeItIsAdvertised(t *testing.T) {
+	// Arrange — the hibernate race parked a reconnect just before the shim
+	// process exited, leaving exactly this closed peer in the map.
+	s, path := serve(t)
+	peer := dialAsShim(t, path, "s_dead")
+	waitConnected(t, s, "s_dead")
+	if err := peer.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act / Assert — the kernel closure proof is synchronous and consumes no
+	// protocol data. The corpse is removed before Connected answers.
+	if connected(t, s, "s_dead") {
+		t.Fatal("a disconnected parked shim was still advertised as connected")
+	}
+	s.mu.Lock()
+	_, retained := s.parked["s_dead"]
+	s.mu.Unlock()
+	if retained {
+		t.Fatal("a disconnected parked shim remained in the registry")
+	}
+}
+
+func TestExplicitStopEvictsOnlyTheNamedParkedSession(t *testing.T) {
+	// Arrange.
+	s, path := serve(t)
+	dialAsShim(t, path, "s_stop")
+	dialAsShim(t, path, "s_keep")
+	waitConnected(t, s, "s_stop")
+	waitConnected(t, s, "s_keep")
+
+	// Act.
+	if !s.Evict("s_stop", "explicit_stop_completed") {
+		t.Fatal("the named parked session was not evicted")
+	}
+
+	// Assert.
+	if connected(t, s, "s_stop") {
+		t.Fatal("the stopped session remained advertised")
+	}
+	if !connected(t, s, "s_keep") {
+		t.Fatal("evicting one session disturbed another parked connection")
+	}
+}
+
+func TestConnectedSurfacesAnUnprobeableConnectionWithoutEvictingIt(t *testing.T) {
+	// Arrange — net.Pipe deliberately lacks syscall.Conn, exercising the loud
+	// boundary when kernel socket state cannot be inspected.
+	s := New(func(string, ...any) {})
+	server, peer := net.Pipe()
+	t.Cleanup(func() { _ = server.Close(); _ = peer.Close() })
+	s.parked["s_unknown"] = &Conn{Net: server, Hello: &corev1.ShimHello{SessionId: "s_unknown"}}
+
+	// Act.
+	connected, err := s.Connected("s_unknown")
+
+	// Assert — unknown is never rewritten as disconnected.
+	if err == nil || connected {
+		t.Fatalf("Connected = %v, %v, want false plus a probe error", connected, err)
+	}
+	s.mu.Lock()
+	_, retained := s.parked["s_unknown"]
+	s.mu.Unlock()
+	if !retained {
+		t.Fatal("an unprobeable connection was silently evicted as dead")
 	}
 }

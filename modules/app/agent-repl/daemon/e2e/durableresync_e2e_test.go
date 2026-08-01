@@ -151,7 +151,7 @@ func newBouncedHarness(t *testing.T) *bouncedHarness {
 		Push:              forwarder,
 		SSM:               ssmMgr,
 		Progress:          progressMgr,
-		Spawner:           server.NewShimSpawner(reg, shimListener.Connected, refuseSpawn, t.Logf),
+		Spawner:           server.NewShimSpawner(reg, shimListener.Connected, shimListener.Evict, refuseSpawn, t.Logf),
 		Source:            &server.ShimConnSource{Listener: shimListener},
 		FileDiagnostics:   fileDiagnostics,
 		Locator:           &server.SessionLocator{Reg: reg},

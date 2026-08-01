@@ -29,14 +29,18 @@ package shimlisten
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
 	"path/filepath"
 	"sync"
+	"syscall"
 
 	corev1 "agentrepl/proto/agentshim/core/v1"
 	"agentrepl/wire"
+
+	"golang.org/x/sys/unix"
 )
 
 // DefaultSocketPath is the one socket every shim dials. Fixed and well-known:
@@ -168,15 +172,71 @@ func (s *Server) deliver(sessionID string, c *Conn) {
 // yet. It returns a PARKED connection immediately when one is present, which
 // is the daemon-restart case: survivors connect before anything claims them.
 func (s *Server) Next(ctx context.Context, sessionID string) (*Conn, error) {
+	for {
+		c, err := s.takeParked(sessionID)
+		if err != nil {
+			return nil, err
+		}
+		if c != nil {
+			return c, nil
+		}
+		c, err = s.waitForConnection(ctx, sessionID)
+		if err != nil {
+			return nil, err
+		}
+		if c != nil {
+			return c, nil
+		}
+	}
+}
+
+// takeParked atomically claims a parked connection only after a non-consuming
+// kernel probe proves its peer has not disconnected. A dead entry is evicted
+// and nil is returned so Next can wait for the shim's replacement dial.
+func (s *Server) takeParked(sessionID string) (*Conn, error) {
+	for {
+		s.mu.Lock()
+		if s.closed {
+			s.mu.Unlock()
+			return nil, fmt.Errorf("shimlisten: server closed")
+		}
+		c := s.parked[sessionID]
+		s.mu.Unlock()
+		if c == nil {
+			return nil, nil
+		}
+		open, err := connectionOpen(c.Net)
+		if err != nil {
+			return nil, fmt.Errorf("shimlisten: probing parked session %s connection: %w", sessionID, err)
+		}
+		if !open {
+			s.evictIfCurrent(sessionID, c, "peer_disconnected_before_claim")
+			continue
+		}
+		s.mu.Lock()
+		if s.parked[sessionID] == c {
+			delete(s.parked, sessionID)
+			s.mu.Unlock()
+			s.logf("shimlisten: parked lifecycle session=%s decision=claim connection_state=open", sessionID)
+			return c, nil
+		}
+		s.mu.Unlock()
+		// The parked generation changed during the probe. Re-evaluate the new
+		// connection instead of claiming an identity the map no longer owns.
+	}
+}
+
+func (s *Server) waitForConnection(ctx context.Context, sessionID string) (*Conn, error) {
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
 		return nil, fmt.Errorf("shimlisten: server closed")
 	}
-	if c, ok := s.parked[sessionID]; ok {
-		delete(s.parked, sessionID)
+	// A connection may have landed between takeParked and this lock. Re-run
+	// the liveness proof rather than bypassing it under the waiter path.
+	if _, ok := s.parked[sessionID]; ok {
 		s.mu.Unlock()
-		return c, nil
+		return nil, nil
 	}
 	if _, exists := s.waiters[sessionID]; exists {
 		s.mu.Unlock()
@@ -209,15 +269,106 @@ func (s *Server) Next(ctx context.Context, sessionID string) (*Conn, error) {
 	}
 }
 
-// Connected reports whether a shim for sessionID is currently parked here.
+// Connected reports whether a shim for sessionID is currently parked here and
+// its peer remains connected. A closed peer is evicted before false returns,
+// so callers can never advertise a parked corpse as a live shim.
 // This is the cheap half of the "is a shim alive?" question that
 // ReattachDecision used to answer with a dial and a handshake read; the
 // session lock covers the other half (a shim alive but not yet dialled in).
-func (s *Server) Connected(sessionID string) bool {
+func (s *Server) Connected(sessionID string) (bool, error) {
+	for {
+		s.mu.Lock()
+		c := s.parked[sessionID]
+		s.mu.Unlock()
+		if c == nil {
+			return false, nil
+		}
+		open, err := connectionOpen(c.Net)
+		if err != nil {
+			return false, fmt.Errorf("shimlisten: probing parked session %s connection: %w", sessionID, err)
+		}
+		if !open {
+			if s.evictIfCurrent(sessionID, c, "peer_disconnected_while_parked") {
+				return false, nil
+			}
+			continue
+		}
+		s.mu.Lock()
+		current := s.parked[sessionID] == c
+		s.mu.Unlock()
+		if current {
+			return true, nil
+		}
+	}
+}
+
+// Evict closes and removes sessionID's parked transport after an explicit
+// lifecycle stop. Claimed connections are owned by shimclient and are not in
+// this registry, so this operation cannot close an active controller's route.
+func (s *Server) Evict(sessionID, reason string) bool {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	_, parked := s.parked[sessionID]
-	return parked
+	c := s.parked[sessionID]
+	if c != nil {
+		delete(s.parked, sessionID)
+	}
+	s.mu.Unlock()
+	if c == nil {
+		s.logf("shimlisten: parked lifecycle session=%s decision=no_entry reason=%s connection_state=absent", sessionID, reason)
+		return false
+	}
+	_ = c.Net.Close()
+	s.logf("shimlisten: parked lifecycle session=%s decision=evict reason=%s connection_state=closed_by_daemon", sessionID, reason)
+	return true
+}
+
+func (s *Server) evictIfCurrent(sessionID string, c *Conn, reason string) bool {
+	s.mu.Lock()
+	if s.parked[sessionID] != c {
+		s.mu.Unlock()
+		return false
+	}
+	delete(s.parked, sessionID)
+	s.mu.Unlock()
+	_ = c.Net.Close()
+	s.logf("shimlisten: parked lifecycle session=%s decision=evict reason=%s connection_state=closed", sessionID, reason)
+	return true
+}
+
+// connectionOpen asks the kernel whether the peer has closed without consuming
+// even one protocol byte. MSG_PEEK preserves any frame already waiting for the
+// eventual shimclient owner. MSG_DONTWAIT makes this a state query rather than
+// a timing probe or background poll.
+func connectionOpen(conn net.Conn) (bool, error) {
+	sc, ok := conn.(syscall.Conn)
+	if !ok {
+		return false, fmt.Errorf("connection type %T does not expose syscall state", conn)
+	}
+	raw, err := sc.SyscallConn()
+	if err != nil {
+		return false, err
+	}
+	open := false
+	var probeErr error
+	if err := raw.Control(func(fd uintptr) {
+		var one [1]byte
+		n, _, recvErr := unix.Recvfrom(int(fd), one[:], unix.MSG_PEEK|unix.MSG_DONTWAIT)
+		switch {
+		case recvErr == nil:
+			open = n > 0
+		case errors.Is(recvErr, unix.EAGAIN), errors.Is(recvErr, unix.EWOULDBLOCK):
+			open = true
+		case errors.Is(recvErr, unix.ECONNRESET), errors.Is(recvErr, unix.ENOTCONN):
+			open = false
+		default:
+			probeErr = recvErr
+		}
+	}); err != nil {
+		return false, err
+	}
+	if probeErr != nil {
+		return false, probeErr
+	}
+	return open, nil
 }
 
 // Close stops accepting and drops every parked connection.

@@ -98,7 +98,7 @@ func bootGeometryDaemon(t *testing.T) *geometryBoot {
 		Push:              forwarder,
 		SSM:               ssmMgr,
 		Progress:          progressMgr,
-		Spawner:           server.NewShimSpawner(reg, shimListener.Connected, noSpawn, t.Logf),
+		Spawner:           server.NewShimSpawner(reg, shimListener.Connected, shimListener.Evict, noSpawn, t.Logf),
 		Locator:           &server.SessionLocator{Reg: reg},
 		Source:            &server.ShimConnSource{Listener: shimListener},
 		FileDiagnostics:   fileDiagnostics,
