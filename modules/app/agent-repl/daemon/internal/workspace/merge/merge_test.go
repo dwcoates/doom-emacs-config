@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -64,6 +65,33 @@ func newTestDriver(t *testing.T, sink StateSink) *Driver {
 		t.Fatalf("NewDriver: %v", err)
 	}
 	return e
+}
+
+// A Git hook exports repository bindings (GIT_DIR, GIT_INDEX_FILE, ...) into
+// every child it runs. merge.Driver's git must operate on `-C dir` and
+// nothing else, so gitCmd strips those bindings — otherwise a daemon (or this
+// suite) running under the repo's own pre-commit hook cherry-picks into the
+// HOOK'S repository instead of the fixture's.
+func TestGitCmdStripsInheritedRepositoryBindings(t *testing.T) {
+	// Arrange — a hook-shaped environment.
+	t.Setenv("GIT_DIR", "/somewhere/.git")
+	t.Setenv("GIT_INDEX_FILE", "/somewhere/.git/index")
+	t.Setenv("GIT_WORK_TREE", "/somewhere")
+
+	// Act.
+	cmd := gitCmd(context.Background(), t.TempDir(), "status")
+
+	// Assert — the bindings are gone and unrelated variables survive.
+	for _, entry := range cmd.Env {
+		for _, banned := range []string{"GIT_DIR=", "GIT_INDEX_FILE=", "GIT_WORK_TREE="} {
+			if strings.HasPrefix(entry, banned) {
+				t.Fatalf("gitCmd env kept %q; the driver's git would target the hook's repository", entry)
+			}
+		}
+	}
+	if os.Getenv("PATH") != "" && !slices.ContainsFunc(cmd.Env, func(e string) bool { return strings.HasPrefix(e, "PATH=") }) {
+		t.Fatalf("gitCmd env dropped PATH; only repository bindings may be stripped")
+	}
 }
 
 // gitRun runs a git command in dir, failing the test on error. Test-driver
