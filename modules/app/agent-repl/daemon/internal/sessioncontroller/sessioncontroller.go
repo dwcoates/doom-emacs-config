@@ -230,6 +230,19 @@ type Config struct {
 	// the quiet empty feed it used to be: a frontend cannot tell silence from
 	// an empty conversation, so the daemon must say which one it means.
 	DurableHistory DurableHistorySource
+	// PromptReceipts persists the DURABLE half of every prompt receipt: the
+	// record written at acceptance, before the receipt bubble is pushed, and
+	// retired once the conversation itself carries the prompt (promptecho.go,
+	// durablereplay.go).
+	//
+	// Nil is a session controller with the durable receipt guarantee OFF — a
+	// focused harness that does not exercise it. Production always wires one,
+	// and every site that would have written or read a record says out loud
+	// that it did not, so the absence is never mistaken for "there were no
+	// receipts". It is deliberately not Required: a Manager built without one
+	// still serves prompts correctly, it merely cannot testify to a prompt
+	// across its own death.
+	PromptReceipts PromptReceiptStore
 	// DaemonVersion / ProtocolVersion travel in DaemonHello; ProtocolVersion
 	// must equal the shim's ("1").
 	DaemonVersion   string
@@ -1602,6 +1615,9 @@ func (m *Manager) bringUp(workspace string) (*sessionController, error) {
 		m.persistSessionDeath(sessionID, errclass.DeathReasonShimDied)
 	})
 	cons.generationID = generationID
+	// The durable receipt ledger. Bound before Run, so no durable user line can
+	// reach attributeUserTurn — the retirement point — with this unset.
+	cons.receipts = m.cfg.PromptReceipts
 	// The per-turn wait (mergeresolve.go) rides the SAME stream the queue's
 	// edges do, but correlated by turn id rather than by edge. Bound before Run,
 	// so no boundary can reach the consumer with this unset.
