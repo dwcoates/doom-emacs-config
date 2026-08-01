@@ -71,6 +71,7 @@ snapshot_refs() {
   exclude="$(foreign_owned_refs)"
   git for-each-ref --format='%(refname) %(objectname)' refs/heads/ refs/tags/ \
     | grep -v '^refs/tags/start/' \
+    | grep -v '^refs/tags/agent-repl-test-checkpoint-' \
     | { if [ -n "$exclude" ]; then
           grep -v -F -f <(printf '%s\n' "$exclude" | sed 's/$/ /')
         else

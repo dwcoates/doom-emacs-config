@@ -854,22 +854,30 @@ func (h *commandHandler) OpenWorkspace(ctx context.Context, workspace, requestID
 // frontend server independently re-sends the StateSnapshot). It routes to the
 // per-session controller's retained-ring replay from the requested seq, inclusive
 // and floored at the newest clear or compaction.
-// A nil resyncer (no session controller wired) leaves this a documented no-op — the
-// snapshot half is honest and sufficient for state — rather than a swallow.
+//
+// WHENEVER A FRONTEND CONNECTS, IT GETS THE CONVERSATION. There is no longer an
+// unwired skip here. A workspace with no live session controller is served from
+// its DURABLE store history instead (sessioncontroller/durablereplay.go), so a
+// webview mounting after a daemon bounce receives the same feed a live
+// workspace's does. The skip that used to sit here is what left that webview
+// showing a correct footer over an empty conversation, and quieting the failure
+// is precisely what made the gap invisible: EVERY failure of the replay now
+// nacks, because a frontend cannot tell silence from an empty conversation.
+//
+// A nil resyncer is a construction error, not a degraded mode: the command
+// exists, so something must answer it.
 func (h *commandHandler) Resync(_ context.Context, workspace, requestID string, cmd *frontendv1.ResyncCmd) error {
-	if h.resyncer == nil {
-		h.logf("frontend cmd: resync ws=%s request_id=%s from_seq=%d (snapshot re-sent by server; no session controller wired for conversation replay)",
-			workspace, requestID, cmd.GetFromSeq())
-		return nil
-	}
 	h.logf("frontend cmd: resync ws=%s request_id=%s from_seq=%d", workspace, requestID, cmd.GetFromSeq())
-	err := h.resyncer.Resync(workspace, cmd.GetFromSeq())
-	if isUnwiredWorkspace(err) {
-		h.logf("frontend cmd: resync ws=%s request_id=%s from_seq=%d — the workspace has no live session controller; skipping the conversation replay (the snapshot half is served regardless)",
+	if h.resyncer == nil {
+		h.logf("frontend cmd: resync ws=%s request_id=%s from_seq=%d FAILED — no resyncer is wired, so the conversation replay cannot be served at all (the snapshot half alone would render an empty feed)",
 			workspace, requestID, cmd.GetFromSeq())
-		return nil
+		return fmt.Errorf("frontend cmd: resync ws=%s request_id=%s: no resyncer wired for the conversation replay", workspace, requestID)
 	}
-	return err
+	if err := h.resyncer.Resync(workspace, cmd.GetFromSeq()); err != nil {
+		h.logf("frontend cmd: resync ws=%s request_id=%s from_seq=%d FAILED: %v", workspace, requestID, cmd.GetFromSeq(), err)
+		return err
+	}
+	return nil
 }
 
 // isUnwiredWorkspace reports whether err is the "this workspace has no live
