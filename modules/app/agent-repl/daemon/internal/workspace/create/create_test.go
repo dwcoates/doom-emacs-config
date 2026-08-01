@@ -469,6 +469,118 @@ func TestInteractiveCreatePersistsBeforeItsAsyncWork(t *testing.T) {
 	}
 }
 
+func TestHostActionRepeatedIdenticalRefusalIsParked(t *testing.T) {
+	// Arrange — an action the host refuses deterministically, twice with the
+	// identical failure text (the "unsupported type" shape that hot-looped a
+	// stuck set-view action through Emacs startup once per drain tick).
+	root := t.TempDir()
+	f := newFixture(t, filepath.Join(root, "jobs.json"))
+	action := HostAction{ID: "a1", SourceFile: "file", Type: "set-view", Payload: json.RawMessage(`{"type":"set-view","view":"task"}`)}
+	if _, _, err := f.store.EnqueueHostAction(action); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.manager.DrainHostActions(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.manager.CompleteHostAction("a1", false, "unsupported type set-view"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.manager.DrainHostActions(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act — the second refusal repeats the identical failure.
+	if err := f.manager.CompleteHostAction("a1", false, "unsupported type set-view"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert — active redelivery stops, but the reconnect snapshot still
+	// carries the action with its durable failure.
+	calls := f.actions.calls
+	if err := f.manager.DrainHostActions(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if f.actions.calls != calls {
+		t.Fatalf("parked action was actively redelivered: calls %d -> %d", calls, f.actions.calls)
+	}
+	pending, err := f.store.PendingHostActions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending) != 1 || pending[0].Completed || pending[0].Failure != "unsupported type set-view" {
+		t.Fatalf("pending = %#v, want the parked action with its failure retained", pending)
+	}
+}
+
+func TestHostActionDifferingRefusalStaysActivelyRedelivered(t *testing.T) {
+	// Arrange — two refusals with DIFFERENT failure texts: not deterministic,
+	// so the active-retry contract must hold.
+	root := t.TempDir()
+	f := newFixture(t, filepath.Join(root, "jobs.json"))
+	action := HostAction{ID: "a1", SourceFile: "file", Type: "switch", Payload: json.RawMessage(`{"type":"switch","dir":"/worktree"}`)}
+	if _, _, err := f.store.EnqueueHostAction(action); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.manager.DrainHostActions(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.manager.CompleteHostAction("a1", false, "first transient failure"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.manager.DrainHostActions(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act.
+	if err := f.manager.CompleteHostAction("a1", false, "second, different failure"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert — the action is re-armed for the next drain.
+	calls := f.actions.calls
+	if err := f.manager.DrainHostActions(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if f.actions.calls != calls+1 {
+		t.Fatalf("differing refusal was not redelivered: calls %d -> %d", calls, f.actions.calls)
+	}
+}
+
+func TestHostActionParkedRefusalCanStillCompleteSuccessfully(t *testing.T) {
+	// Arrange — a parked action (two identical refusals).
+	root := t.TempDir()
+	f := newFixture(t, filepath.Join(root, "jobs.json"))
+	action := HostAction{ID: "a1", SourceFile: "file", Type: "set-view", Payload: json.RawMessage(`{"type":"set-view","view":"task"}`)}
+	if _, _, err := f.store.EnqueueHostAction(action); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.manager.DrainHostActions(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := f.manager.CompleteHostAction("a1", false, "unsupported type set-view"); err != nil {
+			t.Fatal(err)
+		}
+		if err := f.manager.DrainHostActions(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Act — a host that has since learned the type completes it.
+	if err := f.manager.CompleteHostAction("a1", true, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert — terminal, nothing pending.
+	pending, err := f.store.PendingHostActions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending) != 0 {
+		t.Fatalf("completed parked action still pending: %#v", pending)
+	}
+}
+
 func TestHostActionFailureRemainsPendingUntilSuccess(t *testing.T) {
 	root := t.TempDir()
 	f := newFixture(t, filepath.Join(root, "jobs.json"))

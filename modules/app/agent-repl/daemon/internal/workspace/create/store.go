@@ -231,6 +231,17 @@ func (s *FileJobStore) CompleteHostAction(id string, ok bool, failure string) er
 	if ok {
 		action.Completed = true
 		action.Failure = ""
+	} else if action.Failure == failure {
+		// The host refused this action with the IDENTICAL failure it already
+		// reported: a deterministic refusal (e.g. "unsupported type"), not a
+		// transient one. Re-publishing it on the drain tick would loop the
+		// host through the same refusal every second — which is exactly what
+		// stalled Emacs startup on a stuck set-view action. The action is
+		// PARKED instead: it stays incomplete with its durable failure, and
+		// the next frontend reconnect snapshot re-surfaces it once, so the
+		// evidence is never hidden and a host that has since learned the type
+		// can still complete it.
+		s.logf("workspace-create: host action PARKED after repeated identical refusal id=%s type=%s failure=%q — active redelivery stops; the reconnect snapshot re-surfaces it", id, action.Type, failure)
 	} else {
 		// A failed host action deliberately remains incomplete and becomes
 		// publishable again. Its failure is durable diagnostic evidence, while

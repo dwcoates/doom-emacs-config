@@ -782,12 +782,12 @@ slash produced a key the daemon has no session for."
                      '("host-legacy-ack" "hostActionCompleted" "ws1"))))))
 
 (ert-deftest agent-repl-test-host-action-legacy-types-are-exact ()
-  "Only the eight daemon legacy-command types resolve to host handlers."
+  "Only the nine daemon legacy-command types resolve to host handlers."
   (should
    (equal
     (mapcar #'car agent-repl--legacy-host-action-handlers)
     '("prompt" "finish" "close" "open"
-      "clipboard" "send" "merge" "eval")))
+      "clipboard" "send" "merge" "eval" "set-view")))
   (should-not (assoc "create" agent-repl--legacy-host-action-handlers)))
 
 (ert-deftest agent-repl-test-host-action-unknown-legacy-type-nacks ()
@@ -809,6 +809,25 @@ slash produced a key the daemon has no session for."
       (should (string-match-p
                "unsupported HostAction legacyCommand type create"
                (plist-get (cadr completion) :error))))))
+
+(ert-deftest agent-repl-test-host-action-set-view-dispatches-to-sidebar ()
+  "A set-view legacy HostAction reaches the sidebar handler and ACKs ok."
+  (let ((completion nil)
+        (seen nil))
+    (cl-letf (((symbol-function 'agent-repl--handle-set-view-command)
+               (lambda (cmd) (setq seen cmd)))
+              ((symbol-function 'agent-repl--uds-send-command)
+               (lambda (field payload &optional workspace _process)
+                 (setq completion (list field payload workspace))
+                 "host-ok-ack"))
+              ((symbol-function 'agent-repl--uds-track-command)
+               (lambda (&rest _) nil)))
+      (agent-repl--workspace-create-handle-host-action
+       '(:actionId "legacy-set-view"
+         :legacyCommand (:type "set-view" :payload (:view "task"))))
+      (should (equal (alist-get 'view seen) "task"))
+      (should (equal (plist-get (cadr completion) :actionId) "legacy-set-view"))
+      (should (eq (plist-get (cadr completion) :ok) t)))))
 
 (ert-deftest agent-repl-test-host-action-handler-error-nacks-and-resignals ()
   "A legacy handler error is ACKed false before the error escapes."

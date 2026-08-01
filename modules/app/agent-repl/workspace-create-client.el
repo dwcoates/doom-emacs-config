@@ -454,7 +454,12 @@ and redelivered forever, replacing a visible failure with a loop."
     ("clipboard" . agent-repl--handle-clipboard-command)
     ("send" . agent-repl--handle-send-command)
     ("merge" . agent-repl--handle-merge-command)
-    ("eval" . agent-repl--handle-eval-command))
+    ("eval" . agent-repl--handle-eval-command)
+    ;; The sidebar view selector (webapp click delivered via the daemon).  Its
+    ;; absence here left a durable set-view HostAction permanently refused: the
+    ;; daemon re-published it every drain tick and the refusal loop stalled
+    ;; Emacs startup.  The handler predates the entry (sidebar.el).
+    ("set-view" . agent-repl--handle-set-view-command))
   "Daemon-owned legacy command types mapped to their Emacs host handlers.
 Only the daemon reads and claims `workspace_commands_*.json'; Emacs receives
 the UI effect as a durable HostAction and executes it through this table.")
