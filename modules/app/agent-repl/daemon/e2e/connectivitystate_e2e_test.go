@@ -160,7 +160,7 @@ func TestE2EAHibernationIsNotRepaintedByItsOwnSessionControllerExit(t *testing.T
 // It is a FAILURE bound rather than a tuned delay: the tail runs milliseconds
 // after the cancel, so anything this side of a second is generous, and the test
 // spends the whole window only when it is passing.
-const repaintWindow = 2 * time.Second
+const repaintWindow = 500 * time.Millisecond
 
 // tryReadFrame reads one frame, reporting ok=false when the socket goes quiet
 // before DEADLINE rather than failing the test.

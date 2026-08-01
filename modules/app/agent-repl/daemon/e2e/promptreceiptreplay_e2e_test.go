@@ -431,7 +431,7 @@ func (w *receiptWorld) restart(t *testing.T) *bouncedFrontend {
 				}
 				return rec.ClaudeSessionID, rec.ClaudeSessionID != ""
 			},
-			Idle: 2 * time.Second,
+			Idle: durableReplayIdle,
 			Logf: t.Logf,
 		},
 		DaemonVersion:   "0.1.0-e2e",

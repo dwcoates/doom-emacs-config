@@ -57,6 +57,12 @@ import (
 
 var frameTimeout = 30 * time.Second
 
+// durableReplayIdle is the quiet window used by E2E readers of the in-process
+// shim-store. The production reader keeps its multi-second bound, while these
+// tests need only distinguish the local store's completed replay from a live
+// tail that stays open indefinitely.
+const durableReplayIdle = 250 * time.Millisecond
+
 func repoRoot(t *testing.T) string {
 	t.Helper()
 	// daemon/e2e -> daemon -> agent-repl
