@@ -16,6 +16,13 @@ import (
 type Picker interface {
 	Merge(ctx context.Context, req Request) (Result, error)
 	Resume(ctx context.Context, req Request) (Result, error)
+	// ContinueAfterTestFix commits what a test-failure resolution turn staged
+	// in the target worktree, re-runs the suite, and continues the per-commit
+	// replay.
+	ContinueAfterTestFix(ctx context.Context, req Request, failingCommit string) (Result, error)
+	// Rollback resets the target worktree to head, undoing everything the merge
+	// landed. It is the tail of a merge whose test gate failed for good.
+	Rollback(ctx context.Context, req Request, head string) error
 	MarkQueued(ws, cause string) error
 }
 
@@ -61,6 +68,12 @@ type CoordinatorConfig struct {
 	// the session that wrote the conflicting commits sits idle under a lease
 	// taken expressly to drive it.
 	Resolver ConflictResolver
+	// TestResolver drives the merging workspace's OWN shim to fix a test suite
+	// a cherry-picked commit broke. Required, on the same footing as Resolver
+	// and for the same reason: without it every suite failure would fail the
+	// merge outright while the session that wrote the offending commit sits
+	// idle under a lease taken expressly to drive it.
+	TestResolver TestFailureResolver
 	// PostMerge receives every `merged` terminal outcome once the queue entry
 	// is dropped and the lease released. Required, on the same footing as the
 	// rest: it carries the child-to-parent handoffs (the merge phone-home and
@@ -79,15 +92,16 @@ type CoordinatorConfig struct {
 // than improbable — there is no lock to forget to take, because there is no
 // second party to take one.
 type QueueCoordinator struct {
-	logf      dlog.Logf
-	emit      *stateEmitter
-	queue     DurableQueue
-	phases    PhaseSource
-	keyer     RepoKeyer
-	picker    Picker
-	lease     Lease
-	resolver  ConflictResolver
-	postMerge PostMergeHook
+	logf         dlog.Logf
+	emit         *stateEmitter
+	queue        DurableQueue
+	phases       PhaseSource
+	keyer        RepoKeyer
+	picker       Picker
+	lease        Lease
+	resolver     ConflictResolver
+	testResolver TestFailureResolver
+	postMerge    PostMergeHook
 
 	// ctx bounds every DRIVEN merge, and is deliberately not the caller's
 	// Enqueue context: a cherry-pick outlives the frontend command that asked
@@ -168,20 +182,23 @@ func NewCoordinator(cfg CoordinatorConfig) (*QueueCoordinator, error) {
 		return nil, fmt.Errorf("merge: Coordinator Lease is required")
 	case cfg.Resolver == nil:
 		return nil, fmt.Errorf("merge: Coordinator Resolver is required")
+	case cfg.TestResolver == nil:
+		return nil, fmt.Errorf("merge: Coordinator TestResolver is required")
 	case cfg.PostMerge == nil:
 		return nil, fmt.Errorf("merge: Coordinator PostMerge hook is required")
 	}
 	ctx, stop := context.WithCancel(context.Background())
 	return &QueueCoordinator{
-		logf:      cfg.Logf,
-		emit:      &stateEmitter{sink: cfg.Sink, logf: cfg.Logf},
-		queue:     cfg.Queue,
-		phases:    cfg.Phases,
-		keyer:     cfg.Keyer,
-		picker:    cfg.Picker,
-		lease:     cfg.Lease,
-		resolver:  cfg.Resolver,
-		postMerge: cfg.PostMerge,
+		logf:         cfg.Logf,
+		emit:         &stateEmitter{sink: cfg.Sink, logf: cfg.Logf},
+		queue:        cfg.Queue,
+		phases:       cfg.Phases,
+		keyer:        cfg.Keyer,
+		picker:       cfg.Picker,
+		lease:        cfg.Lease,
+		resolver:     cfg.Resolver,
+		testResolver: cfg.TestResolver,
+		postMerge:    cfg.PostMerge,
 
 		ctx:      ctx,
 		stop:     stop,
@@ -630,12 +647,50 @@ func (c *QueueCoordinator) runOne(repo string, req Request) bool {
 		return c.finish(repo, req, release)
 	}
 
-	if res.Outcome == OutcomeConflict {
-		c.logf("merge: parked on conflict {repo=%s ws=%s name=%s commit=%s}", repo, req.Workspace, req.Name, res.ConflictCommit)
-		return c.awaitResolution(repo, req, park, release, res.ConflictCommit)
+	return c.settle(repo, req, park, release, res)
+}
+
+// settle drives a merge Result to a terminal outcome and reports whether
+// draining continues.
+//
+// IT IS A LOOP BECAUSE THE TWO PARKING OUTCOMES FEED EACH OTHER. A conflict
+// resolved by a resume continues the per-commit replay, which can break the
+// suite; a test fix continues the same replay, which can conflict on a later
+// commit. Expressing that as one loop over a Result — rather than as recursion
+// between the conflict path and the test path — is what keeps "how did this
+// merge end" answerable in one place.
+//
+// PreMergeHead is read ONCE, from the Result of the original Merge, and carried
+// across every later step. Resume and ContinueAfterTestFix each start from a
+// target that already carries landed commits, so their own view of HEAD is not
+// a rollback point.
+func (c *QueueCoordinator) settle(repo string, req Request, park *conflictPark, release func(), res Result) bool {
+	preHead := res.PreMergeHead
+	// attempted records which failing commits have already had their ONE
+	// resolution attempt, so a suite that fails again on the same commit fails
+	// the merge instead of re-prompting an agent that already tried.
+	attempted := map[string]bool{}
+	for {
+		switch res.Outcome {
+		case OutcomeConflict:
+			c.logf("merge: parked on conflict {repo=%s ws=%s name=%s commit=%s}", repo, req.Workspace, req.Name, res.ConflictCommit)
+			next, handled, cont := c.awaitResolution(repo, req, park, release, res.ConflictCommit)
+			if handled {
+				return cont
+			}
+			res = next
+		case OutcomeTestFailed:
+			c.logf("merge: test gate failed {repo=%s ws=%s name=%s commit=%s}", repo, req.Workspace, req.Name, res.FailingCommit)
+			next, handled, cont := c.awaitTestFix(repo, req, park, release, preHead, res, attempted)
+			if handled {
+				return cont
+			}
+			res = next
+		default:
+			c.logf("merge: terminal {repo=%s ws=%s name=%s outcome=%s}", repo, req.Workspace, req.Name, res.Outcome)
+			return c.finishTerminal(repo, req, release, res.Outcome)
+		}
 	}
-	c.logf("merge: terminal {repo=%s ws=%s name=%s outcome=%s}", repo, req.Workspace, req.Name, res.Outcome)
-	return c.finishTerminal(repo, req, release, res.Outcome)
 }
 
 // awaitResolution serves park's resume calls until one drives the merge to a
@@ -647,7 +702,17 @@ func (c *QueueCoordinator) runOne(repo string, req Request) bool {
 // human's conflict_resolved_continue uses. That is what serializes the two: a
 // human Resume or an Abandon arriving mid-attempt is not racing the shim, it is
 // queueing behind (or ahead of) it at this one select.
-func (c *QueueCoordinator) awaitResolution(repo string, req Request, park *conflictPark, release func(), conflictCommit string) bool {
+// It returns (next, handled, cont). handled=true means the merge was RETIRED
+// inside this call (abandoned, or the coordinator shut down) and cont is the
+// drain verdict. handled=false means the resume produced a non-conflict Result
+// that settle must take from here.
+//
+// The resume caller is replied to as soon as the resume is CLASSIFIED, before
+// settle finishes the merge. That is deliberate: everything settle may still do
+// (a suite run, a resolution turn, more picks) is reported through the pushed
+// merge state, and blocking a frontend command on it would make
+// conflict_resolved_continue hang for the length of a test suite.
+func (c *QueueCoordinator) awaitResolution(repo string, req Request, park *conflictPark, release func(), conflictCommit string) (Result, bool, bool) {
 	c.driveShimResolution(repo, req, park, conflictCommit)
 	for {
 		select {
@@ -657,7 +722,7 @@ func (c *QueueCoordinator) awaitResolution(repo string, req Request, park *confl
 			// durable so the next daemon's Drain re-parks it.
 			c.logf("merge: conflict park abandoned on shutdown {repo=%s ws=%s}", repo, req.Workspace)
 			release()
-			return false
+			return Result{}, true, false
 		case call := <-park.abandons:
 			// The user closed the workspace this conflict belongs to. The
 			// conflicted cherry-pick stays in the target tree for a human to
@@ -665,7 +730,7 @@ func (c *QueueCoordinator) awaitResolution(repo string, req Request, park *confl
 			c.logf("merge: conflict park ABANDONED {repo=%s ws=%s name=%s} — the conflicted cherry-pick is left in the target tree for hand cleanup", repo, req.Workspace, req.Name)
 			ok := c.finish(repo, req, release)
 			call.reply <- nil
-			return ok
+			return Result{}, true, ok
 		case call := <-park.calls:
 			res, err := c.picker.Resume(c.ctx, call.req)
 			if err != nil {
@@ -680,16 +745,149 @@ func (c *QueueCoordinator) awaitResolution(repo string, req Request, park *confl
 				call.reply <- nil
 				continue
 			}
-			c.logf("merge: terminal after resume {repo=%s ws=%s outcome=%s}", repo, req.Workspace, res.Outcome)
-			// A merge that landed only after a conflict resolution is merged
-			// all the same, so the post-merge handoff is owed here exactly as
-			// it is on the clean path.
-			ok := c.finishTerminal(repo, req, release, res.Outcome)
+			c.logf("merge: resume classified {repo=%s ws=%s outcome=%s}", repo, req.Workspace, res.Outcome)
 			call.reply <- nil
-			return ok
+			return res, false, false
 		}
 	}
 }
+
+// awaitTestFix drives the ONE resolution attempt a broken test suite gets, and
+// reports what the merge should do next.
+//
+// EXACTLY ONE ATTEMPT PER FAILING COMMIT. A second identical prompt to an agent
+// that already failed to fix the suite is a spin, not a strategy, so a repeat
+// failure on the same commit goes straight to the rollback path. A failure on a
+// LATER commit is a different failure and gets its own attempt.
+//
+// THE ATTEMPT RUNS ON ITS OWN GOROUTINE even though nothing else needs to serve
+// the park meanwhile. That is what keeps an Abandon responsive: closing the
+// workspace while its agent is fixing tests must not block until the fix and
+// the re-run finish. The attempt's context is cancelled on that abandon, so the
+// cancelled fix cannot go on cherry-picking into a target the merge has already
+// given up.
+func (c *QueueCoordinator) awaitTestFix(repo string, req Request, park *conflictPark, release func(), preHead string, res Result, attempted map[string]bool) (Result, bool, bool) {
+	if attempted[res.FailingCommit] {
+		c.logf("merge: test failure NOT RE-ATTEMPTED {repo=%s ws=%s name=%s commit=%s} — its one resolution attempt already ran and the suite still fails",
+			repo, req.Workspace, req.Name, res.FailingCommit)
+		return Result{}, true, c.failTestGate(repo, req, release, preHead, res)
+	}
+	attempted[res.FailingCommit] = true
+
+	fix := TestFailureResolution{
+		Workspace:     req.Workspace,
+		RequestID:     newTestFixRequestID(),
+		FailingCommit: res.FailingCommit,
+		SourceBranch:  req.SourceBranch,
+		TargetDir:     req.TargetDir,
+		FailureTail:   res.TestFailureTail,
+	}
+	if err := fix.validate(); err != nil {
+		// The facts the driver reported do not describe a fixable failure,
+		// which no valid Result produces. Prompting an agent with a half-empty
+		// instruction is worse than failing the merge with the reason.
+		c.logf("merge: test failure NOT HANDED to the shim {repo=%s ws=%s name=%s}: %v", repo, req.Workspace, req.Name, err)
+		return Result{}, true, c.failTestGate(repo, req, release, preHead, res)
+	}
+
+	fixCtx, cancelFix := context.WithCancel(c.ctx)
+	defer cancelFix()
+	done := make(chan pickResultOrError, 1)
+	c.wg.Add(1)
+	go func() {
+		defer c.wg.Done()
+		done <- c.driveTestFix(fixCtx, repo, req, fix)
+	}()
+
+	select {
+	case out := <-done:
+		if out.err != nil {
+			return Result{}, true, c.failTestGate(repo, req, release, preHead, res)
+		}
+		return out.res, false, false
+	case call := <-park.abandons:
+		c.logf("merge: test-fix attempt ABANDONED {repo=%s ws=%s name=%s commit=%s} — the workspace was closed mid-fix; the target keeps what landed",
+			repo, req.Workspace, req.Name, res.FailingCommit)
+		cancelFix()
+		<-done
+		ok := c.finish(repo, req, release)
+		call.reply <- nil
+		return Result{}, true, ok
+	case <-c.ctx.Done():
+		c.logf("merge: test-fix attempt abandoned on shutdown {repo=%s ws=%s name=%s}", repo, req.Workspace, req.Name)
+		<-done
+		release()
+		return Result{}, true, false
+	}
+}
+
+// pickResultOrError is the test-fix goroutine's return channel payload.
+type pickResultOrError struct {
+	res Result
+	err error
+}
+
+// driveTestFix runs the resolution turn and then continues the replay. Every
+// failure inside it is loud-logged and returned as an error, which settle turns
+// into the rollback path.
+func (c *QueueCoordinator) driveTestFix(ctx context.Context, repo string, req Request, fix TestFailureResolution) pickResultOrError {
+	c.logf("merge: test failure HANDED TO THE SHIM {repo=%s ws=%s name=%s commit=%s branch=%s target=%s request_id=%s}",
+		repo, req.Workspace, req.Name, fix.FailingCommit, fix.SourceBranch, fix.TargetDir, fix.RequestID)
+	if err := c.testResolver.Resolve(ctx, fix); err != nil {
+		c.logf("merge: shim test-failure resolution FAILED {repo=%s ws=%s name=%s commit=%s request_id=%s}: %v — the merge is failed and the target rolled back",
+			repo, req.Workspace, req.Name, fix.FailingCommit, fix.RequestID, err)
+		return pickResultOrError{err: err}
+	}
+	c.logf("merge: shim test-failure resolution TURN COMPLETE {repo=%s ws=%s name=%s commit=%s request_id=%s} — committing the fix and re-running the suite",
+		repo, req.Workspace, req.Name, fix.FailingCommit, fix.RequestID)
+	res, err := c.picker.ContinueAfterTestFix(ctx, req, fix.FailingCommit)
+	if err != nil {
+		c.logf("merge: continue-after-test-fix driver FAILED {repo=%s ws=%s name=%s commit=%s}: %v",
+			repo, req.Workspace, req.Name, fix.FailingCommit, err)
+		return pickResultOrError{err: err}
+	}
+	return pickResultOrError{res: res}
+}
+
+// failTestGate is the terminal tail of a merge whose test gate failed for good:
+// roll the target back to its pre-merge HEAD, record merge_failed with the
+// failing commit and the suite's output tail, and retire the entry.
+//
+// THE ROLLBACK IS THE POINT. The target worktree is the tree every other
+// workspace cuts from, so leaving it carrying commits that break its suite
+// turns one workspace's failure into everyone's. Nothing is lost: the source
+// branch still holds every commit, and the merge can be retried once the work is
+// fixed there.
+func (c *QueueCoordinator) failTestGate(repo string, req Request, release func(), preHead string, res Result) bool {
+	cause := fmt.Sprintf("test suite failed after cherry-picking %s and the one resolution attempt did not fix it: %s",
+		res.FailingCommit, dlog.Clamp(res.TestFailureTail, testFailureCauseBytes))
+	switch {
+	case preHead == "":
+		// No rollback point was recorded, which no merge.Driver Merge omits.
+		// The merge still fails, and the missing point is named rather than
+		// papered over — a target left carrying broken commits is exactly what
+		// a user must be told about.
+		c.logf("merge: test-gate rollback IMPOSSIBLE {repo=%s ws=%s name=%s} — no pre-merge HEAD was recorded, so the target KEEPS the commits that failed the suite",
+			repo, req.Workspace, req.Name)
+		cause += " (NOT rolled back: no pre-merge HEAD was recorded)"
+	default:
+		if err := c.picker.Rollback(c.ctx, req, preHead); err != nil {
+			c.logf("merge: test-gate rollback FAILED {repo=%s ws=%s name=%s head=%s}: %v — the target is LEFT carrying the commits that failed the suite",
+				repo, req.Workspace, req.Name, preHead, err)
+			cause += fmt.Sprintf(" (rollback to %s FAILED: %v)", preHead, err)
+		} else {
+			c.logf("merge: test-gate rollback COMPLETE {repo=%s ws=%s name=%s head=%s} — the target is back where the merge found it; the workspace branch still holds all the work",
+				repo, req.Workspace, req.Name, preHead)
+			cause += fmt.Sprintf(" (target rolled back to %s)", preHead)
+		}
+	}
+	c.failed(req, cause)
+	return c.finish(repo, req, release)
+}
+
+// testFailureCauseBytes bounds how much of the suite's output tail travels into
+// the merge_failed cause the frontends render.
+const testFailureCauseBytes = 1200
 
 // driveShimResolution hands the parked conflict to the merging workspace's OWN
 // agent session, EXACTLY ONCE, and then asks the park to resume the pick.
