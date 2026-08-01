@@ -53,6 +53,7 @@
          (agent-repl--readiness-process nil)
          (agent-repl--readiness-timer nil)
          (agent-repl--timers nil)
+         (agent-repl--keyed-timers nil)
          (agent-repl-readiness-enabled t))
      ,@body))
 
