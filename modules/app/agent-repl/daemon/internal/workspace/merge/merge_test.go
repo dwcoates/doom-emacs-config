@@ -2,6 +2,7 @@ package merge
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -58,9 +59,46 @@ func (e sentinelError) Error() string { return string(e) }
 
 const errFakeSink = sentinelError("sink write failed")
 
+// fakeSuite stands in for merge.SuiteRunner. It records every target it was
+// asked to test, in order, and replays a scripted list of verdicts — the last
+// verdict repeats, so a test that only cares about "the gate never fails"
+// scripts nothing at all.
+type fakeSuite struct {
+	targets  []string
+	verdicts []SuiteResult
+	err      error
+	calls    int
+}
+
+// skipping is the harness default: a target repository with no test entrypoint,
+// which is what every fixture repo in this file actually is.
+func skippingSuite() *fakeSuite {
+	return &fakeSuite{verdicts: []SuiteResult{{Skipped: true, Reason: "fixture repo declares no test entrypoint"}}}
+}
+
+func (f *fakeSuite) RunSuite(_ context.Context, targetDir string) (SuiteResult, error) {
+	f.targets = append(f.targets, targetDir)
+	f.calls++
+	if f.err != nil {
+		return SuiteResult{}, f.err
+	}
+	if len(f.verdicts) == 0 {
+		return SuiteResult{Passed: true}, nil
+	}
+	if f.calls <= len(f.verdicts) {
+		return f.verdicts[f.calls-1], nil
+	}
+	return f.verdicts[len(f.verdicts)-1], nil
+}
+
 func newTestDriver(t *testing.T, sink StateSink) *Driver {
 	t.Helper()
-	e, err := NewDriver(Config{Logf: t.Logf, Sink: sink})
+	return newTestDriverWithSuite(t, sink, skippingSuite())
+}
+
+func newTestDriverWithSuite(t *testing.T, sink StateSink, suite SuiteRunner) *Driver {
+	t.Helper()
+	e, err := NewDriver(Config{Logf: t.Logf, Sink: sink, Suite: suite})
 	if err != nil {
 		t.Fatalf("NewDriver: %v", err)
 	}
@@ -164,9 +202,10 @@ func TestNewDriverRequiresDependencies(t *testing.T) {
 		cfg     Config
 		wantErr bool
 	}{
-		{"nil logf", Config{Sink: &recordingSink{}}, true},
-		{"nil sink", Config{Logf: func(string, ...any) {}}, true},
-		{"both present", Config{Logf: func(string, ...any) {}, Sink: &recordingSink{}}, false},
+		{"nil logf", Config{Sink: &recordingSink{}, Suite: skippingSuite()}, true},
+		{"nil sink", Config{Logf: func(string, ...any) {}, Suite: skippingSuite()}, true},
+		{"nil suite", Config{Logf: func(string, ...any) {}, Sink: &recordingSink{}}, true},
+		{"all present", Config{Logf: func(string, ...any) {}, Sink: &recordingSink{}, Suite: skippingSuite()}, false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -249,7 +288,8 @@ func TestMergeCleanCherryPick(t *testing.T) {
 	if res.Tag != "merge/clean-ws" {
 		t.Errorf("res.Tag = %q, want merge/clean-ws", res.Tag)
 	}
-	assertPhases(t, sink.phases(), PhaseMerging, PhaseMerged)
+	// The opening transition, then one `testing 1/1 ...` per landed commit.
+	assertPhases(t, sink.phases(), PhaseMerging, PhaseMerging, PhaseMerged)
 }
 
 // --- conflict detection -------------------------------------------------
@@ -368,8 +408,9 @@ func TestResumeCompletesMergeAndOrdersTransitions(t *testing.T) {
 	if tags := gitRun(t, target, "tag", "-l", "merge/rz-ws"); !strings.Contains(tags, "merge/rz-ws") {
 		t.Errorf("tag merge/rz-ws not created after Resume")
 	}
-	// The full ordered sequence across Merge + Resume.
-	assertPhases(t, sink.phases(), PhaseMerging, PhaseMergeConflict, PhaseMerging, PhaseMerged)
+	// The full ordered sequence across Merge + Resume: the opening pick, the
+	// conflict, the resume, the test gate on the RESUMED commit, the terminal.
+	assertPhases(t, sink.phases(), PhaseMerging, PhaseMergeConflict, PhaseMerging, PhaseMerging, PhaseMerged)
 }
 
 func TestResumeWithoutInProgressPickFails(t *testing.T) {
@@ -392,20 +433,23 @@ func TestResumeWithoutInProgressPickFails(t *testing.T) {
 	}
 }
 
-// --- merge_failed on a non-cherry-pick (non-conflict) error -------------
+// --- a range containing a merge commit ---------------------------------
 
-func TestMergeFailedOnNonConflictError(t *testing.T) {
-	// Arrange: put a merge commit early in the range so `cherry-pick -x`
-	// aborts on it (a merge with no -m) leaving a later commit unapplied and
-	// no CHERRY_PICK_HEAD — the elisp silent-failure sentinel.
+// Per-commit replay FLATTENS a branch that has an internal merge: `--no-merges`
+// drops the merge commit (which carries no patch of its own) and both of its
+// sides are picked individually, because both are already in the range.
+//
+// The whole-range driver this replaced could not do that — `git cherry-pick`
+// refuses a range containing a merge outright — so a branch with an internal
+// merge used to fail the entire attempt.
+func TestMergeFlattensAMergeCommitInTheRange(t *testing.T) {
+	// Arrange: feature = A -> (side S) -> merge M -> F2.
 	target := initTarget(t)
 	featureDir := addFeatureWorktree(t, target)
-	// side branch off feature(=A) with commit S.
 	gitRun(t, featureDir, "checkout", "-q", "-b", "side")
 	writeFile(t, featureDir, "s.txt", "s\n")
 	gitRun(t, featureDir, "add", ".")
 	gitRun(t, featureDir, "commit", "-q", "-m", "S")
-	// back on feature, merge side (creates merge commit M), then commit F2.
 	gitRun(t, featureDir, "checkout", "-q", "feature")
 	gitRun(t, featureDir, "merge", "-q", "--no-ff", "-m", "merge side", "side")
 	writeFile(t, featureDir, "f2.txt", "f2\n")
@@ -414,25 +458,24 @@ func TestMergeFailedOnNonConflictError(t *testing.T) {
 
 	sink := &recordingSink{}
 	e := newTestDriver(t, sink)
-	req := Request{Workspace: "/ws/fail-ws", Name: "fail-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+	req := Request{Workspace: "/ws/flat-ws", Name: "flat-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
 
 	// Act.
 	res, err := e.Merge(context.Background(), req)
 
-	// Assert.
+	// Assert — both sides of the merge landed, under one merged outcome.
 	if err != nil {
 		t.Fatalf("Merge() err = %v", err)
 	}
-	if res.Outcome != OutcomeFailed {
-		t.Fatalf("Merge() outcome = %s, want failed", res.Outcome)
+	if res.Outcome != OutcomeMerged {
+		t.Fatalf("Merge() outcome = %s, want merged", res.Outcome)
 	}
-	if cherryPickHeadPresent(t, target) {
-		t.Errorf("CHERRY_PICK_HEAD present on a non-conflict failure")
+	for _, name := range []string{"s.txt", "f2.txt"} {
+		if _, statErr := os.Stat(filepath.Join(target, name)); statErr != nil {
+			t.Errorf("%s did not land on the target: %v", name, statErr)
+		}
 	}
-	if tags := gitRun(t, target, "tag", "-l", "merge/fail-ws"); strings.TrimSpace(tags) != "" {
-		t.Errorf("merge/fail-ws tagged on a failed merge; git tag -l = %q", tags)
-	}
-	assertPhases(t, sink.phases(), PhaseMerging, PhaseMergeFailed)
+	assertPhases(t, sink.phases(), PhaseMerging, PhaseMerging, PhaseMerging, PhaseMerged)
 }
 
 // --- preconditions abort with state intact ------------------------------
@@ -711,7 +754,8 @@ func TestMergeUntrackedCollisionFails(t *testing.T) {
 	if tags := strings.TrimSpace(gitRun(t, target, "tag", "-l", "merge/untracked-ws")); tags != "" {
 		t.Errorf("merge/untracked-ws tagged on a failed merge; git tag -l = %q", tags)
 	}
-	assertPhases(t, sink.phases(), PhaseMerging, PhaseMergeFailed)
+	// The first commit landed and was tested; the second is what git refused.
+	assertPhases(t, sink.phases(), PhaseMerging, PhaseMerging, PhaseMergeFailed)
 }
 
 // --- resume that hits a further conflict --------------------------------
@@ -763,7 +807,7 @@ func TestResumeSecondConflictReEmitsConflict(t *testing.T) {
 	if tags := strings.TrimSpace(gitRun(t, target, "tag", "-l", "merge/rz2-ws")); tags != "" {
 		t.Errorf("merge/rz2-ws tagged while still conflicted; git tag -l = %q", tags)
 	}
-	assertPhases(t, sink.phases(), PhaseMerging, PhaseMergeConflict, PhaseMerging, PhaseMergeConflict)
+	assertPhases(t, sink.phases(), PhaseMerging, PhaseMergeConflict, PhaseMerging, PhaseMerging, PhaseMergeConflict)
 }
 
 // --- sink-error propagation ---------------------------------------------
@@ -927,4 +971,424 @@ func TestMergeRefusesATargetWithStaleSequencerState(t *testing.T) {
 	if len(sink.got) != 0 {
 		t.Fatalf("Merge() emitted %v before the precondition; want none", sink.phases())
 	}
+}
+
+// --- the per-commit test gate -------------------------------------------
+
+func TestMergeRunsTheSuiteOncePerLandedCommit(t *testing.T) {
+	// Arrange: three orthogonal commits on the source branch.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	for _, name := range []string{"one.txt", "two.txt", "three.txt"} {
+		writeFile(t, featureDir, name, name+"\n")
+		gitRun(t, featureDir, "add", ".")
+		gitRun(t, featureDir, "commit", "-q", "-m", "add "+name)
+	}
+
+	sink := &recordingSink{}
+	suite := &fakeSuite{}
+	e := newTestDriverWithSuite(t, sink, suite)
+	req := Request{Workspace: "/ws/gate-ws", Name: "gate-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+
+	// Act.
+	res, err := e.Merge(context.Background(), req)
+
+	// Assert — one run per commit, all against the target worktree.
+	if err != nil {
+		t.Fatalf("Merge() err = %v", err)
+	}
+	if res.Outcome != OutcomeMerged {
+		t.Fatalf("Merge() outcome = %s, want merged", res.Outcome)
+	}
+	if suite.calls != 3 {
+		t.Fatalf("suite runs = %d, want 3 (one per landed commit)", suite.calls)
+	}
+	for i, dir := range suite.targets {
+		if dir != target {
+			t.Errorf("suite run %d ran against %q, want the target %q", i, dir, target)
+		}
+	}
+}
+
+func TestMergeOrdersEachSuiteRunAfterItsOwnCommit(t *testing.T) {
+	// The gate is only a gate if it runs on the tree the pick produced, so the
+	// interleaving (pick, test, pick, test) is pinned rather than merely the
+	// count.
+	// Arrange.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	for _, name := range []string{"one.txt", "two.txt"} {
+		writeFile(t, featureDir, name, name+"\n")
+		gitRun(t, featureDir, "add", ".")
+		gitRun(t, featureDir, "commit", "-q", "-m", "add "+name)
+	}
+
+	sink := &recordingSink{}
+	var seen []string
+	suite := &fakeSuite{}
+	observing := suiteFunc(func(ctx context.Context, dir string) (SuiteResult, error) {
+		files, err := os.ReadDir(dir)
+		if err != nil {
+			t.Fatalf("read target: %v", err)
+		}
+		var landed int
+		for _, f := range files {
+			if f.Name() == "one.txt" || f.Name() == "two.txt" {
+				landed++
+			}
+		}
+		seen = append(seen, fmt.Sprintf("%d", landed))
+		return suite.RunSuite(ctx, dir)
+	})
+	e := newTestDriverWithSuite(t, sink, observing)
+	req := Request{Workspace: "/ws/order-ws", Name: "order-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+
+	// Act.
+	if _, err := e.Merge(context.Background(), req); err != nil {
+		t.Fatalf("Merge() err = %v", err)
+	}
+
+	// Assert — the first run saw one commit's file, the second saw both.
+	if len(seen) != 2 || seen[0] != "1" || seen[1] != "2" {
+		t.Fatalf("files present at each suite run = %v, want [1 2]", seen)
+	}
+}
+
+func TestMergeSkipsTheGateWhenTheTargetDeclaresNoEntrypoint(t *testing.T) {
+	// Arrange — the real runner against a fixture repo, which has no
+	// modules/app/agent-repl/bin/test-all.sh.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	writeFile(t, featureDir, "feature.txt", "hello\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "add feature.txt")
+
+	var logged []string
+	runner, err := NewRepoSuiteRunner(func(format string, args ...any) {
+		logged = append(logged, fmt.Sprintf(format, args...))
+	})
+	if err != nil {
+		t.Fatalf("NewRepoSuiteRunner: %v", err)
+	}
+	sink := &recordingSink{}
+	e := newTestDriverWithSuite(t, sink, runner)
+	req := Request{Workspace: "/ws/noentry-ws", Name: "noentry-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+
+	// Act.
+	res, err := e.Merge(context.Background(), req)
+
+	// Assert — the merge lands, and the absence is named out loud.
+	if err != nil {
+		t.Fatalf("Merge() err = %v", err)
+	}
+	if res.Outcome != OutcomeMerged {
+		t.Fatalf("Merge() outcome = %s, want merged", res.Outcome)
+	}
+	var skipped bool
+	for _, line := range logged {
+		if strings.Contains(line, "suite SKIPPED") && strings.Contains(line, "no test entrypoint") {
+			skipped = true
+		}
+	}
+	if !skipped {
+		t.Fatalf("no loud skip log naming the missing entrypoint; got %v", logged)
+	}
+}
+
+func TestMergeReportsATestFailureWithTheFailingCommitAndTail(t *testing.T) {
+	// Arrange — the suite fails on the first landed commit.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	writeFile(t, featureDir, "feature.txt", "hello\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "add feature.txt")
+	head := strings.TrimSpace(gitRun(t, target, "rev-parse", "HEAD"))
+
+	sink := &recordingSink{}
+	suite := &fakeSuite{verdicts: []SuiteResult{{Passed: false, Tail: "FAIL: agent-repl-suite"}}}
+	e := newTestDriverWithSuite(t, sink, suite)
+	req := Request{Workspace: "/ws/tf-ws", Name: "tf-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+
+	// Act.
+	res, err := e.Merge(context.Background(), req)
+
+	// Assert — a non-terminal test failure carrying everything the coordinator
+	// needs to prompt a fix and, failing that, to roll back.
+	if err != nil {
+		t.Fatalf("Merge() err = %v", err)
+	}
+	if res.Outcome != OutcomeTestFailed {
+		t.Fatalf("Merge() outcome = %s, want test_failed", res.Outcome)
+	}
+	if res.FailingCommit == "" {
+		t.Errorf("res.FailingCommit empty; want the landed commit's short SHA")
+	}
+	if res.TestFailureTail != "FAIL: agent-repl-suite" {
+		t.Errorf("res.TestFailureTail = %q, want the suite's tail", res.TestFailureTail)
+	}
+	if res.PreMergeHead != head {
+		t.Errorf("res.PreMergeHead = %q, want the pre-merge HEAD %q", res.PreMergeHead, head)
+	}
+	// No terminal transition: the coordinator classifies this one.
+	assertPhases(t, sink.phases(), PhaseMerging, PhaseMerging)
+}
+
+func TestMergeStopsPickingAfterATestFailure(t *testing.T) {
+	// Arrange — two commits, the suite fails after the first.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	for _, name := range []string{"one.txt", "two.txt"} {
+		writeFile(t, featureDir, name, name+"\n")
+		gitRun(t, featureDir, "add", ".")
+		gitRun(t, featureDir, "commit", "-q", "-m", "add "+name)
+	}
+
+	sink := &recordingSink{}
+	suite := &fakeSuite{verdicts: []SuiteResult{{Passed: false, Tail: "boom"}}}
+	e := newTestDriverWithSuite(t, sink, suite)
+	req := Request{Workspace: "/ws/stop-ws", Name: "stop-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+
+	// Act.
+	if _, err := e.Merge(context.Background(), req); err != nil {
+		t.Fatalf("Merge() err = %v", err)
+	}
+
+	// Assert — the second commit never landed.
+	if _, statErr := os.Stat(filepath.Join(target, "two.txt")); statErr == nil {
+		t.Errorf("the second commit landed after the first broke the suite")
+	}
+}
+
+func TestMergeSurfacesAnUnrunnableSuite(t *testing.T) {
+	// Arrange — the runner cannot classify the run at all.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	writeFile(t, featureDir, "feature.txt", "hello\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "add feature.txt")
+
+	sink := &recordingSink{}
+	suite := &fakeSuite{err: sentinelError("suite binary vanished")}
+	e := newTestDriverWithSuite(t, sink, suite)
+	req := Request{Workspace: "/ws/unrun-ws", Name: "unrun-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+
+	// Act.
+	_, err := e.Merge(context.Background(), req)
+
+	// Assert — surfaced, never reported as a passing (or failing) gate.
+	if err == nil {
+		t.Fatalf("Merge() err = nil; want the unrunnable suite surfaced")
+	}
+	if !strings.Contains(err.Error(), "suite binary vanished") {
+		t.Errorf("Merge() err = %v; want it to wrap the runner's error", err)
+	}
+}
+
+// --- resuming after a fix -----------------------------------------------
+
+func TestContinueAfterTestFixCommitsTheStagedFixAndFinishesTheRange(t *testing.T) {
+	// Arrange — one commit lands, the suite fails, an agent stages a fix.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	writeFile(t, featureDir, "feature.txt", "hello\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "add feature.txt")
+
+	sink := &recordingSink{}
+	suite := &fakeSuite{verdicts: []SuiteResult{{Passed: false, Tail: "boom"}, {Passed: true}}}
+	e := newTestDriverWithSuite(t, sink, suite)
+	req := Request{Workspace: "/ws/fix-ws", Name: "fix-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+	first, err := e.Merge(context.Background(), req)
+	if err != nil || first.Outcome != OutcomeTestFailed {
+		t.Fatalf("setup Merge() res=%+v err=%v, want test_failed", first, err)
+	}
+	headAfterPick := strings.TrimSpace(gitRun(t, target, "rev-parse", "HEAD"))
+	writeFile(t, target, "feature.txt", "fixed\n")
+	gitRun(t, target, "add", "feature.txt")
+
+	// Act.
+	res, err := e.ContinueAfterTestFix(context.Background(), req, first.FailingCommit)
+
+	// Assert — the fix is a FOLLOW-UP commit (the picked commit's SHA stands),
+	// and the merge completes.
+	if err != nil {
+		t.Fatalf("ContinueAfterTestFix() err = %v", err)
+	}
+	if res.Outcome != OutcomeMerged {
+		t.Fatalf("ContinueAfterTestFix() outcome = %s, want merged", res.Outcome)
+	}
+	if parent := strings.TrimSpace(gitRun(t, target, "rev-parse", "HEAD^")); parent != headAfterPick {
+		t.Errorf("HEAD^ = %s, want the untouched picked commit %s (the fix must not amend it)", parent, headAfterPick)
+	}
+	if body := gitRun(t, target, "log", "-1", "--pretty=%s"); !strings.Contains(body, "fix tests after cherry-pick of "+first.FailingCommit) {
+		t.Errorf("follow-up commit subject = %q, want it to name the failing commit", body)
+	}
+}
+
+func TestContinueAfterTestFixReportsAStillFailingSuite(t *testing.T) {
+	// Arrange — the agent's attempt does not fix anything.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	writeFile(t, featureDir, "feature.txt", "hello\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "add feature.txt")
+
+	sink := &recordingSink{}
+	suite := &fakeSuite{verdicts: []SuiteResult{{Passed: false, Tail: "still boom"}}}
+	e := newTestDriverWithSuite(t, sink, suite)
+	req := Request{Workspace: "/ws/nofix-ws", Name: "nofix-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+	first, err := e.Merge(context.Background(), req)
+	if err != nil || first.Outcome != OutcomeTestFailed {
+		t.Fatalf("setup Merge() res=%+v err=%v, want test_failed", first, err)
+	}
+
+	// Act.
+	res, err := e.ContinueAfterTestFix(context.Background(), req, first.FailingCommit)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ContinueAfterTestFix() err = %v", err)
+	}
+	if res.Outcome != OutcomeTestFailed {
+		t.Fatalf("ContinueAfterTestFix() outcome = %s, want test_failed", res.Outcome)
+	}
+}
+
+func TestResumeGatesTheResolvedCommitOnTheSuite(t *testing.T) {
+	// A conflict a human resolved is exactly the kind of landing that breaks a
+	// suite, so the resumed commit is gated like every other one.
+	// Arrange.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	writeFile(t, featureDir, "base.txt", "feature\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "feature edit")
+	writeFile(t, target, "base.txt", "target\n")
+	gitRun(t, target, "add", ".")
+	gitRun(t, target, "commit", "-q", "-m", "target edit")
+
+	sink := &recordingSink{}
+	suite := &fakeSuite{verdicts: []SuiteResult{{Passed: false, Tail: "resolved badly"}}}
+	e := newTestDriverWithSuite(t, sink, suite)
+	req := Request{Workspace: "/ws/rzgate-ws", Name: "rzgate-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+	if res, err := e.Merge(context.Background(), req); err != nil || res.Outcome != OutcomeConflict {
+		t.Fatalf("setup Merge() res=%+v err=%v, want conflict", res, err)
+	}
+	writeFile(t, target, "base.txt", "resolved\n")
+	gitRun(t, target, "add", "base.txt")
+
+	// Act.
+	res, err := e.Resume(context.Background(), req)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Resume() err = %v", err)
+	}
+	if res.Outcome != OutcomeTestFailed {
+		t.Fatalf("Resume() outcome = %s, want test_failed on the resumed commit", res.Outcome)
+	}
+	if suite.calls != 1 {
+		t.Errorf("suite runs = %d, want 1 (the resumed commit)", suite.calls)
+	}
+}
+
+// --- rollback -----------------------------------------------------------
+
+func TestRollbackReturnsTheTargetToItsPreMergeHead(t *testing.T) {
+	// Arrange — a merge that landed a commit and then broke the suite.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	writeFile(t, featureDir, "feature.txt", "hello\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "add feature.txt")
+
+	sink := &recordingSink{}
+	suite := &fakeSuite{verdicts: []SuiteResult{{Passed: false, Tail: "boom"}}}
+	e := newTestDriverWithSuite(t, sink, suite)
+	req := Request{Workspace: "/ws/rb-ws", Name: "rb-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+	res, err := e.Merge(context.Background(), req)
+	if err != nil || res.Outcome != OutcomeTestFailed {
+		t.Fatalf("setup Merge() res=%+v err=%v, want test_failed", res, err)
+	}
+
+	// Act.
+	if err := e.Rollback(context.Background(), req, res.PreMergeHead); err != nil {
+		t.Fatalf("Rollback() err = %v", err)
+	}
+
+	// Assert — the target is exactly where the merge found it.
+	if head := strings.TrimSpace(gitRun(t, target, "rev-parse", "HEAD")); head != res.PreMergeHead {
+		t.Errorf("target HEAD = %s, want the pre-merge %s", head, res.PreMergeHead)
+	}
+	if _, statErr := os.Stat(filepath.Join(target, "feature.txt")); statErr == nil {
+		t.Errorf("feature.txt survived the rollback")
+	}
+}
+
+func TestRollbackWithoutAHeadIsRefused(t *testing.T) {
+	// Arrange.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	e := newTestDriver(t, &recordingSink{})
+	req := Request{Workspace: "/ws/rb0-ws", Name: "rb0-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+
+	// Act.
+	err := e.Rollback(context.Background(), req, "")
+
+	// Assert — a rollback with no point to roll back to is a loud failure, not
+	// a no-op that leaves the target broken in silence.
+	if err == nil {
+		t.Fatalf("Rollback() err = nil; want a refusal")
+	}
+}
+
+// --- boot replay --------------------------------------------------------
+
+func TestMergeReplayedAfterABounceSkipsTheCommitsThatAlreadyLanded(t *testing.T) {
+	// A daemon that dies mid-loop leaves its durable queue entry behind, and
+	// the next boot's Drain re-runs Merge from the top. The commits the dead
+	// process landed must be no-ops rather than a second replay.
+	// Arrange — two commits; the first "already landed" before the bounce.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	for _, name := range []string{"one.txt", "two.txt"} {
+		writeFile(t, featureDir, name, name+"\n")
+		gitRun(t, featureDir, "add", ".")
+		gitRun(t, featureDir, "commit", "-q", "-m", "add "+name)
+	}
+	sink := &recordingSink{}
+	suite := &fakeSuite{verdicts: []SuiteResult{{Passed: false, Tail: "the daemon died here"}}}
+	e := newTestDriverWithSuite(t, sink, suite)
+	req := Request{Workspace: "/ws/replay-ws", Name: "replay-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+	if res, err := e.Merge(context.Background(), req); err != nil || res.Outcome != OutcomeTestFailed {
+		t.Fatalf("setup Merge() res=%+v err=%v, want test_failed", res, err)
+	}
+	landedBefore := strings.TrimSpace(gitRun(t, target, "rev-parse", "HEAD"))
+
+	// Act — the next boot replays the same request against a green suite.
+	replaySink := &recordingSink{}
+	replaySuite := &fakeSuite{}
+	replay := newTestDriverWithSuite(t, replaySink, replaySuite)
+	res, err := replay.Merge(context.Background(), req)
+
+	// Assert — only the SECOND commit was picked and tested.
+	if err != nil {
+		t.Fatalf("replay Merge() err = %v", err)
+	}
+	if res.Outcome != OutcomeMerged {
+		t.Fatalf("replay Merge() outcome = %s, want merged", res.Outcome)
+	}
+	if replaySuite.calls != 1 {
+		t.Fatalf("replay suite runs = %d, want 1 (only the commit that had not landed)", replaySuite.calls)
+	}
+	if parent := strings.TrimSpace(gitRun(t, target, "rev-parse", "HEAD^")); parent != landedBefore {
+		t.Errorf("HEAD^ = %s, want the pre-bounce landing %s; the replay re-applied a commit", parent, landedBefore)
+	}
+}
+
+// suiteFunc adapts a plain function to SuiteRunner.
+type suiteFunc func(ctx context.Context, targetDir string) (SuiteResult, error)
+
+func (f suiteFunc) RunSuite(ctx context.Context, targetDir string) (SuiteResult, error) {
+	return f(ctx, targetDir)
 }
