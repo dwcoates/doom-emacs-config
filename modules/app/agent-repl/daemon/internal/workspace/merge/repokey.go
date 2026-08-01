@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/gitexec"
 )
 
 // GitRepoKeyer resolves a worktree directory to its REPOSITORY identity, which
@@ -81,10 +82,11 @@ func (k *GitRepoKeyer) RepoKey(ctx context.Context, worktreeDir string) (string,
 // convention merge.Driver.gitString uses; the two are kept separate only
 // because merge.Driver's is a method bound to that type's logger.
 func gitCapture(ctx context.Context, dir string, args ...string) (string, error) {
-	// gitCmd strips inherited repository bindings (GIT_DIR and friends), which
-	// matters doubly here: with a leaked GIT_DIR every worktree would resolve
-	// to the LEAKING repository's key, collapsing distinct repos onto one queue.
-	cmd := gitCmd(ctx, dir, args...)
+	// gitexec.Command strips inherited repository bindings (GIT_DIR and
+	// friends), which matters doubly here: with a leaked GIT_DIR every worktree
+	// would resolve to the LEAKING repository's key, collapsing distinct repos
+	// onto one queue.
+	cmd := gitexec.Command(ctx, dir, args...)
 	var out, errb bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &errb

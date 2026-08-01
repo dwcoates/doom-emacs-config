@@ -5,11 +5,11 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/gitexec"
 )
 
 // Deriver reconstructs a workspace's merge geometry from GIT FACTS, for
@@ -132,38 +132,13 @@ func mainWorktree(listing string) string {
 	return ""
 }
 
-// gitCmd builds every geometry git invocation. It mirrors merge.gitCmd
-// deliberately, including the stripping: the repository is ALWAYS the `-C dir`
-// argument, and a daemon launched from a git hook inherits GIT_DIR and friends
-// pointing at the HOOK'S repository. An inherited binding would make every
-// workspace derive the LEAKING repository's branch and main worktree, and the
-// backfill would then record a target that cherry-picks into the wrong
-// checkout.
-func gitCmd(ctx context.Context, dir string, args ...string) *exec.Cmd {
-	full := append([]string{"-C", dir}, args...)
-	cmd := exec.CommandContext(ctx, "git", full...)
-	env := os.Environ()
-	kept := env[:0]
-	for _, entry := range env {
-		switch {
-		case strings.HasPrefix(entry, "GIT_DIR="),
-			strings.HasPrefix(entry, "GIT_INDEX_FILE="),
-			strings.HasPrefix(entry, "GIT_WORK_TREE="),
-			strings.HasPrefix(entry, "GIT_OBJECT_DIRECTORY="),
-			strings.HasPrefix(entry, "GIT_COMMON_DIR="),
-			strings.HasPrefix(entry, "GIT_PREFIX="):
-		default:
-			kept = append(kept, entry)
-		}
-	}
-	cmd.Env = kept
-	return cmd
-}
-
 // gitCapture runs `git -C dir args...` and returns trimmed stdout, treating a
-// non-zero exit as an error.
+// non-zero exit as an error. The repository is ALWAYS the `-C dir` argument:
+// gitexec.Command strips the inherited bindings that would otherwise make every
+// workspace derive the LEAKING repository's branch and main worktree, and the
+// backfill would then record a target that cherry-picks into the wrong checkout.
 func gitCapture(ctx context.Context, dir string, args ...string) (string, error) {
-	cmd := gitCmd(ctx, dir, args...)
+	cmd := gitexec.Command(ctx, dir, args...)
 	var out, errb bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &errb

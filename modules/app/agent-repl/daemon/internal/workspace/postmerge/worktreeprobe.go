@@ -4,12 +4,11 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/gitexec"
 )
 
 // GitWorktreeProbe answers postmerge.WorktreeProbe from git itself.
@@ -93,9 +92,13 @@ func canonicalize(path string) (string, error) {
 }
 
 // gitCapture runs `git -C dir args...` and returns trimmed stdout, treating a
-// non-zero exit as an error.
+// non-zero exit as an error. gitexec.Command strips the inherited repository
+// bindings: a leaked GIT_DIR would make every probed directory report the
+// LEAKING repository's git dir, so a linked worktree and the trunk would answer
+// identically and the parent handoff would fire (or not fire) for the wrong
+// reason entirely.
 func gitCapture(ctx context.Context, dir string, args ...string) (string, error) {
-	cmd := gitCmd(ctx, dir, args...)
+	cmd := gitexec.Command(ctx, dir, args...)
 	var out, errb bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &errb
@@ -103,32 +106,4 @@ func gitCapture(ctx context.Context, dir string, args ...string) (string, error)
 		return "", fmt.Errorf("postmerge: git %v in %s: %w (stderr: %s)", args, dir, err, dlog.Clamp(errb.String(), 400))
 	}
 	return strings.TrimSpace(out.String()), nil
-}
-
-// gitCmd builds `git -C dir args...` with the inherited repository bindings
-// STRIPPED.
-//
-// A leaked GIT_DIR is not a cosmetic problem here: it would make every probed
-// directory report the LEAKING repository's git dir, so a linked worktree and
-// the trunk would answer identically and the parent handoff would fire (or not
-// fire) for the wrong reason entirely.
-func gitCmd(ctx context.Context, dir string, args ...string) *exec.Cmd {
-	full := append([]string{"-C", dir}, args...)
-	cmd := exec.CommandContext(ctx, "git", full...)
-	env := os.Environ()
-	kept := env[:0]
-	for _, entry := range env {
-		switch {
-		case strings.HasPrefix(entry, "GIT_DIR="),
-			strings.HasPrefix(entry, "GIT_INDEX_FILE="),
-			strings.HasPrefix(entry, "GIT_WORK_TREE="),
-			strings.HasPrefix(entry, "GIT_OBJECT_DIRECTORY="),
-			strings.HasPrefix(entry, "GIT_COMMON_DIR="),
-			strings.HasPrefix(entry, "GIT_PREFIX="):
-		default:
-			kept = append(kept, entry)
-		}
-	}
-	cmd.Env = kept
-	return cmd
 }

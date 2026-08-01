@@ -5,12 +5,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
 	"regexp"
 	"strings"
 
 	"claude-repld/internal/dlog"
+	"claude-repld/internal/gitexec"
 )
 
 // Config constructs an Driver. Both fields are required: a merge driver that
@@ -435,41 +435,12 @@ func (e *Driver) assertCleanWorktree(ctx context.Context, dir string) error {
 	return nil
 }
 
-// gitCmd builds every merge.Driver git invocation. The repository is ALWAYS
-// the `-C dir` argument, so the environment's repository bindings are
-// stripped: a daemon launched from a Git hook inherits GIT_DIR /
-// GIT_INDEX_FILE / GIT_WORK_TREE pointing at the HOOK'S repository, and an
-// inherited binding would silently retarget this cherry-pick at that repo
-// instead of dir's. That is not a hypothetical — the pre-commit hook runs
-// this very suite, and the leak both hung the merge e2e tests and is the kind
-// of misdirected git write that can flip core.bare on a live checkout.
-func gitCmd(ctx context.Context, dir string, args ...string) *exec.Cmd {
-	full := append([]string{"-C", dir}, args...)
-	cmd := exec.CommandContext(ctx, "git", full...)
-	env := os.Environ()
-	kept := env[:0]
-	for _, entry := range env {
-		switch {
-		case strings.HasPrefix(entry, "GIT_DIR="),
-			strings.HasPrefix(entry, "GIT_INDEX_FILE="),
-			strings.HasPrefix(entry, "GIT_WORK_TREE="),
-			strings.HasPrefix(entry, "GIT_OBJECT_DIRECTORY="),
-			strings.HasPrefix(entry, "GIT_COMMON_DIR="),
-			strings.HasPrefix(entry, "GIT_PREFIX="):
-		default:
-			kept = append(kept, entry)
-		}
-	}
-	cmd.Env = kept
-	return cmd
-}
-
 // gitExit runs `git -C dir args...` and returns the exit code plus combined
 // output. A non-zero exit is NOT an error (the caller classifies it); only a
 // failure to spawn/run git (binary missing, dir gone) returns an error.
 // Mirrors the exit-code role of agent-repl--git-exit-code.
 func (e *Driver) gitExit(ctx context.Context, dir string, args ...string) (int, string, error) {
-	cmd := gitCmd(ctx, dir, args...)
+	cmd := gitexec.Command(ctx, dir, args...)
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out
@@ -489,7 +460,7 @@ func (e *Driver) gitExit(ctx context.Context, dir string, args ...string) (int, 
 // non-zero exit — a silent-fallback risk), this treats a non-zero exit as an
 // error so a git failure in base/range computation aborts loudly.
 func (e *Driver) gitString(ctx context.Context, dir string, args ...string) (string, error) {
-	cmd := gitCmd(ctx, dir, args...)
+	cmd := gitexec.Command(ctx, dir, args...)
 	var out, errb bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &errb
