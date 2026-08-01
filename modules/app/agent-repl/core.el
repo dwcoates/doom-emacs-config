@@ -4,22 +4,131 @@
 
 (require 'cl-lib)
 
-;; Cancel all previously registered timers on re-eval so we don't accumulate.
+;;;; ---- Timer registry ----
+;;
+;; Every long-lived agent-repl timer is armed under a KEY through
+;; `agent-repl--register-timer'.  Keyed registration is what makes arming
+;; IDEMPOTENT: re-arming a key cancels and replaces the timer already held
+;; under it instead of stacking a second one beside it.
+;;
+;; The landmine this exists to disarm has two halves, both reachable by an
+;; ordinary hot-reload of a subset of the module's files:
+;;
+;;   (a) loading core.el WITHOUT its timer owners ran `--cancel-all-timers'
+;;       and nothing re-armed, leaving zero timers — a dead 1Hz heartbeat
+;;       and a frozen tab bar; and
+;;   (b) re-loading an owner file WITHOUT a preceding cancel-all pushed a
+;;       SECOND timer for the same job, so the heartbeat ran at 2Hz, 3Hz, …
+;;
+;; (b) is now structurally impossible: arming goes through the key, and a
+;; key holds at most one timer.  (a) is caught by
+;; `agent-repl--assert-heartbeat-armed' at the bottom of this file.
+
 (defvar agent-repl--timers nil
   "List of active timers created by agent-repl.
-Cancelled and reset whenever this file is re-evaluated.")
+Cancelled and reset whenever this file is re-evaluated.  Every entry is
+also reachable by key through `agent-repl--keyed-timers'.")
+
+(defvar agent-repl--keyed-timers nil
+  "Alist of (KEY . TIMER) for every timer armed via `agent-repl--register-timer'.
+KEY is a keyword naming the JOB, not the timer object, so re-arming the
+same job replaces its timer rather than adding one.  Reset alongside
+`agent-repl--timers' by `agent-repl--cancel-all-timers'.")
+
+(defconst agent-repl--required-timer-keys
+  '((:state-poll               . agent-repl--arm-state-poll-timer)
+    (:workspace-status-export  . agent-repl--arm-workspace-status-export-timer)
+    (:autosave                 . agent-repl--arm-autosave-timer)
+    (:readiness-poll           . agent-repl--readiness-start-timer))
+  "Alist of (KEY . ARM-FUNCTION) for every timer the module must keep armed.
+
+This is the contract `agent-repl--assert-heartbeat-armed' enforces: each
+KEY names a job that must have exactly one live timer once the module is
+loaded, and ARM-FUNCTION is the owner file's entry point for (re-)arming
+it.  The owners are `status.el' (:state-poll, the 1Hz heartbeat that
+repaints the tab bar), `workspace-status-export.el', `autosave.el', and
+`readiness.el'.
+
+Declared HERE rather than accumulated by the owners so a core.el loaded
+by itself still knows what is supposed to be running — which is exactly
+the case where the owners have not run and cannot have registered
+anything.")
+
+(defun agent-repl--timer-armed-p (key)
+  "Return non-nil when KEY holds a timer that is actually scheduled.
+A cancelled timer is still a `timerp', so membership in `timer-list' /
+`timer-idle-list' is the only honest test of \"armed\"."
+  (let ((timer (cdr (assq key agent-repl--keyed-timers))))
+    (and (timerp timer)
+         (or (memq timer timer-list)
+             (memq timer timer-idle-list))
+         t)))
+
+(defun agent-repl--register-timer (key timer)
+  "Register TIMER under KEY, cancelling and replacing any timer already held.
+KEY is a keyword naming the job (see `agent-repl--required-timer-keys').
+Returns TIMER.
+
+This is the ONLY sanctioned way to arm a long-lived agent-repl timer:
+going through the key is what makes re-loading an owner file idempotent
+instead of additive.
+
+Both arguments are invariants of the caller, not user input: a non-symbol
+KEY or a non-timer TIMER is a programming error and is signalled rather
+than absorbed."
+  (unless (and key (symbolp key))
+    (error "[agent-repl] register-timer: KEY must be a non-nil symbol, got %S" key))
+  (unless (timerp timer)
+    (error "[agent-repl] register-timer: TIMER must be a timer, got %S" timer))
+  (let* ((cell (assq key agent-repl--keyed-timers))
+         (prior (cdr cell))
+         (replaced (timerp prior)))
+    (when replaced
+      (cancel-timer prior)
+      (setq agent-repl--timers (delq prior agent-repl--timers)))
+    (if cell
+        (setcdr cell timer)
+      (setq agent-repl--keyed-timers
+            (append agent-repl--keyed-timers (list (cons key timer)))))
+    (push timer agent-repl--timers)
+    ;; Guard: owner files can arm before `agent-repl--log' exists on an
+    ;; unusual load order; the registration itself must not depend on it.
+    (when (fboundp 'agent-repl--log)
+      (agent-repl--log nil "register-timer: key=%s replaced=%s timer=%S keyed-count=%d total-count=%d"
+                       key (if replaced "t" "nil") timer
+                       (length agent-repl--keyed-timers) (length agent-repl--timers)))
+    timer))
+
+(defun agent-repl--cancel-timer-key (key)
+  "Cancel and deregister the timer held under KEY.
+Returns non-nil when a timer was actually cancelled."
+  (let* ((cell (assq key agent-repl--keyed-timers))
+         (timer (cdr cell))
+         (cancelled (timerp timer)))
+    (when cancelled
+      (cancel-timer timer)
+      (setq agent-repl--timers (delq timer agent-repl--timers)))
+    (when cell
+      (setq agent-repl--keyed-timers (delq cell agent-repl--keyed-timers)))
+    (when (fboundp 'agent-repl--log)
+      (agent-repl--log nil "cancel-timer-key: key=%s cancelled=%s keyed-count=%d"
+                       key (if cancelled "t" "nil") (length agent-repl--keyed-timers)))
+    cancelled))
 
 (defun agent-repl--cancel-all-timers ()
-  "Cancel every timer in `agent-repl--timers' and reset the list."
-  (let ((count (length agent-repl--timers)))
+  "Cancel every timer in `agent-repl--timers' and reset both registries."
+  (let ((count (length agent-repl--timers))
+        (keyed-count (length agent-repl--keyed-timers)))
     (dolist (timer agent-repl--timers)
       (when (timerp timer)
         (cancel-timer timer)))
     (setq agent-repl--timers nil)
+    (setq agent-repl--keyed-timers nil)
     ;; Guard: this function is called at load time (line below), before
     ;; agent-repl--log is defined.  Only log when logging is available.
     (when (fboundp 'agent-repl--log)
-      (agent-repl--log nil "cancel-all-timers: cancelled=%d" count))))
+      (agent-repl--log nil "cancel-all-timers: cancelled=%d keyed-cleared=%d"
+                       count keyed-count))))
 
 (agent-repl--cancel-all-timers)
 
@@ -1369,7 +1478,6 @@ introducing a sibling raw `make-process' site."
     agent-repl--frontend-webview-reload-widget
     agent-repl--uds-connect
     agent-repl--uds-probe
-    agent-repl--uds-probe-async
     agent-repl--image-call-process
     agent-repl--run-install-script
     agent-repl--readiness-run-script)
@@ -1494,7 +1602,7 @@ no durable copy of this value and must never acquire one: a persisted
 vendor uuid made Emacs a second authority on which conversation a workspace
 owns, and when its copy went stale five workspaces opened fresh
 conversations over intact transcripts.  The daemon owns that question now
-\(see `agent-repl--frontend-after-create-session' and its RESUME-MODE).
+\(see `agent-repl--frontend-create-session' and its RESUME-MODE).
 
 Nil is a normal answer — before the first pushed frame, or for an unbound
 workspace.  An unattributed log record is ACCEPTED by the daemon; a
@@ -1720,3 +1828,130 @@ the span was injected rather than typed by the user."
 (defun agent-repl--current-ws-p (ws)
   "Return non-nil when WS is the currently active workspace name."
   (string= ws (agent-repl--ws-current-name)))
+
+;;;; ---- Heartbeat assertion ----
+;;
+;; `--cancel-all-timers' runs at the TOP of this file, and the timers it
+;; clears are re-armed only by their owner files.  A hot-load of a set that
+;; contains core.el but not all four owners therefore leaves the module with
+;; no heartbeat at all: the 1Hz `agent-repl--update-all-workspace-states'
+;; tick that repaints the tab bar is gone, and the tabs freeze.
+;;
+;; The assertion below closes that hole from the core side, so even a BARE
+;; core.el load self-heals.  It is deliberately loud: a re-arm here means
+;; something upstream stranded a timer, and that is worth a WARNING on the
+;; record even though the state is repaired.
+
+(defvar agent-repl--heartbeat-assert-deferral-timer nil
+  "Idle timer holding a deferred `agent-repl--assert-heartbeat-armed' run, or nil.
+Set by `agent-repl--assert-heartbeat-armed-when-owners-load' when the
+owner files have not been loaded yet.  Held OUTSIDE `agent-repl--timers'
+on purpose: it must survive the very `--cancel-all-timers' whose fallout
+it exists to check for.")
+
+(defcustom agent-repl-heartbeat-assert-defer-delay 1.0
+  "Idle seconds to wait before re-checking the timer contract on a cold load.
+Only used when core.el is loaded before its timer owners, which is the
+normal cold-boot order: config.el loads core.el first, then status.el,
+workspace-status-export.el, autosave.el, and readiness.el."
+  :type 'number
+  :group 'agent-repl)
+
+(defun agent-repl--assert-heartbeat-armed ()
+  "Verify every key in `agent-repl--required-timer-keys' has a live timer.
+
+Any key found un-armed is re-armed by calling its owner's arm function,
+and the strand is reported through `agent-repl--warn' naming the key, the
+arm function, and whether the re-arm took.  A key whose owner has not been
+loaded (its arm function is not `fboundp') cannot be re-armed and is
+reported as unavailable rather than silently passed over.
+
+Returns a plist:
+  :armed        keys that were already armed
+  :rearmed      keys that were stranded and are now armed again
+  :failed       keys whose arm function ran but left the key un-armed
+  :unavailable  keys whose owner file is not loaded
+
+Quiet when every key is armed: the only output in that case is a verbose
+log line."
+  (let ((armed nil) (rearmed nil) (failed nil) (unavailable nil))
+    (dolist (entry agent-repl--required-timer-keys)
+      (let ((key (car entry))
+            (arm-fn (cdr entry)))
+        (cond
+         ((agent-repl--timer-armed-p key)
+          (push key armed))
+         ((not (fboundp arm-fn))
+          (push key unavailable)
+          (agent-repl--warn
+           nil "assert-heartbeat-armed: key=%s outcome=unavailable arm-fn=%s reason=owner-not-loaded"
+           key arm-fn))
+         (t
+          (agent-repl--warn
+           nil "assert-heartbeat-armed: key=%s outcome=stranded arm-fn=%s action=re-arming"
+           key arm-fn)
+          (funcall arm-fn)
+          (if (agent-repl--timer-armed-p key)
+              (progn
+                (push key rearmed)
+                (agent-repl--warn
+                 nil "assert-heartbeat-armed: key=%s outcome=rearmed arm-fn=%s" key arm-fn))
+            (push key failed)
+            (agent-repl--warn
+             nil "assert-heartbeat-armed: key=%s outcome=rearm-failed arm-fn=%s"
+             key arm-fn))))))
+    (let ((result (list :armed (nreverse armed)
+                        :rearmed (nreverse rearmed)
+                        :failed (nreverse failed)
+                        :unavailable (nreverse unavailable))))
+      (agent-repl--log-verbose
+       nil "assert-heartbeat-armed: armed=%d rearmed=%d failed=%d unavailable=%d"
+       (length (plist-get result :armed))
+       (length (plist-get result :rearmed))
+       (length (plist-get result :failed))
+       (length (plist-get result :unavailable)))
+      result)))
+
+(defun agent-repl--heartbeat-arm-functions-available-p ()
+  "Return non-nil when every owner's arm function is defined.
+False during a COLD load, where core.el is evaluated before the four
+owner files that define the arm functions."
+  (let ((all t))
+    (dolist (entry agent-repl--required-timer-keys)
+      (unless (fboundp (cdr entry))
+        (setq all nil)))
+    all))
+
+(defun agent-repl--assert-heartbeat-armed-when-owners-load ()
+  "Run the timer-contract assertion, deferring it if the owners are absent.
+
+This is core.el's load-time entry point.  Two cases, and the distinction
+is the whole point:
+
+- Every arm function is already defined, which is what a hot-load of
+  core.el into a RUNNING Emacs looks like.  The check runs immediately, so
+  the bare core.el load repairs the heartbeat its own `--cancel-all-timers'
+  just cleared.
+- Some arm function is undefined, which is what a COLD load looks like:
+  config.el loads core.el first and the owners afterwards.  Asserting now
+  would report four bogus strands, so the check is deferred onto an idle
+  timer that fires once the load has settled.  Under `noninteractive' the
+  idle timer never fires, which is correct — a batch run has no heartbeat
+  to keep alive.
+
+Returns `:checked' with the assertion result consed on, or `:deferred'."
+  (when (timerp agent-repl--heartbeat-assert-deferral-timer)
+    (cancel-timer agent-repl--heartbeat-assert-deferral-timer)
+    (setq agent-repl--heartbeat-assert-deferral-timer nil))
+  (if (agent-repl--heartbeat-arm-functions-available-p)
+      (cons :checked (agent-repl--assert-heartbeat-armed))
+    (setq agent-repl--heartbeat-assert-deferral-timer
+          (run-with-idle-timer agent-repl-heartbeat-assert-defer-delay nil
+                               #'agent-repl--assert-heartbeat-armed))
+    (agent-repl--log
+     nil "assert-heartbeat-armed: outcome=deferred reason=owners-not-loaded delay=%s timer=%S"
+     agent-repl-heartbeat-assert-defer-delay
+     agent-repl--heartbeat-assert-deferral-timer)
+    :deferred))
+
+(agent-repl--assert-heartbeat-armed-when-owners-load)
