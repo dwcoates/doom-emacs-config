@@ -5,6 +5,7 @@
 // survival are asserted against a real mount.
 import { describe, expect, it } from "vitest";
 
+import { BREATH_SHADES, breathColor } from "../src/breathing.js";
 import { CounterEntry } from "../src/counter-menu.js";
 import {
   alreadyCompletePhaseViolation,
@@ -134,28 +135,28 @@ describe("phaseLabel: the SSM's verdict as the footer's anchor", () => {
     // Arrange / Act
     const got = phaseLabel("thinking");
     // Assert
-    expect(got).toEqual({ word: "thinking", tone: "thinking", spinning: true });
+    expect(got).toEqual({ word: "thinking", tone: "thinking", breathing: true });
   });
 
   it("says clearing while the context is being discarded", () => {
     // Arrange / Act
     const got = phaseLabel("clearing");
     // Assert — thinking's tone and spin: the same claim, a different word.
-    expect(got).toEqual({ word: "clearing", tone: "thinking", spinning: true });
+    expect(got).toEqual({ word: "clearing", tone: "thinking", breathing: true });
   });
 
   it("says compacting while the context is being summarized", () => {
     // Arrange / Act
     const got = phaseLabel("compacting");
     // Assert
-    expect(got).toEqual({ word: "compacting", tone: "thinking", spinning: true });
+    expect(got).toEqual({ word: "compacting", tone: "thinking", breathing: true });
   });
 
   it("does not spin once the turn is done", () => {
     // Arrange / Act
     const got = phaseLabel("done");
     // Assert
-    expect(got.spinning).toBe(false);
+    expect(got.breathing).toBe(false);
   });
 
   it("names a workspace whose route broke severed", () => {
@@ -170,7 +171,7 @@ describe("phaseLabel: the SSM's verdict as the footer's anchor", () => {
     // severed is the opposite claim, and a spinner would say work is happening.
     const got = phaseLabel("severed");
     // Assert
-    expect(got.spinning).toBe(false);
+    expect(got.breathing).toBe(false);
   });
 
   it("takes the blue tone while severed", () => {
@@ -192,7 +193,7 @@ describe("phaseLabel: the SSM's verdict as the footer's anchor", () => {
     // prompt pays a bring-up, so a spinner would say work is happening.
     const got = phaseLabel("hibernated");
     // Assert
-    expect(got.spinning).toBe(false);
+    expect(got.breathing).toBe(false);
   });
 
   it("takes a BENIGN tone while hibernated, never the error tone", () => {
@@ -210,7 +211,7 @@ describe("phaseLabel: the SSM's verdict as the footer's anchor", () => {
     // Arrange / Act — the contrast the two blues exist to draw.
     const got = phaseLabel("init");
     // Assert
-    expect(got.spinning).toBe(true);
+    expect(got.breathing).toBe(true);
   });
 
   it("takes the alarm tone for a dead session", () => {
@@ -235,11 +236,11 @@ describe("phaseLabel: the SSM's verdict as the footer's anchor", () => {
     expect(got.word).toBe("merging");
   });
 
-  it("spins while merging, because work really is happening", () => {
+  it("breathes while merging, because work really is happening", () => {
     // Arrange / Act
     const got = phaseLabel("merging");
     // Assert
-    expect(got.spinning).toBe(true);
+    expect(got.breathing).toBe(true);
   });
 
   it("names the first instant of a merge attempt as merge enqueuing", () => {
@@ -250,12 +251,12 @@ describe("phaseLabel: the SSM's verdict as the footer's anchor", () => {
     expect(got.word).toBe("merge enqueuing");
   });
 
-  it("spins while enqueuing, because the daemon really is working", () => {
+  it("breathes while enqueuing, because the daemon really is working", () => {
     // Arrange / Act — resolving the geometry and writing the durable entry is
     // work happening, unlike a queued merge's wait.
     const got = phaseLabel("merge_enqueuing");
     // Assert
-    expect(got.spinning).toBe(true);
+    expect(got.breathing).toBe(true);
   });
 
   it("keeps enqueuing quiet, like every other merge phase the sidebar leads on", () => {
@@ -326,11 +327,11 @@ describe("phaseLabel: the SSM's verdict as the footer's anchor", () => {
   });
 
   it("does NOT spin while blocked, since nothing is in progress", () => {
-    // Arrange / Act — every other spinning phase is work happening, so
+    // Arrange / Act — every other breathing phase is work happening, so
     // animating this one would say the opposite of what it means.
     const got = phaseLabel("vendor_blocked");
     // Assert
-    expect(got.spinning).toBe(false);
+    expect(got.breathing).toBe(false);
   });
 
   it("takes the compromised-route tone during bring-up", () => {
@@ -344,7 +345,7 @@ describe("phaseLabel: the SSM's verdict as the footer's anchor", () => {
     // Arrange / Act
     const got = phaseLabel("init");
     // Assert
-    expect(got.spinning).toBe(true);
+    expect(got.breathing).toBe(true);
   });
 
   it("keeps a pending permission out of the alarm tones", () => {
@@ -1121,6 +1122,69 @@ describe("footerHtml: the phase comes from the workspace state (F5)", () => {
   });
 });
 
+describe("footerHtml: the breathing phase word", () => {
+  it("wraps a working phase's word so it can breathe", () => {
+    // Arrange / Act — the word IS the liveness signal now.
+    const got = footerHtml(input({ renderState: "thinking" }), CLOSED, NOW);
+    // Assert
+    expect(got).toContain('class="pfooter-breath"');
+  });
+
+  it("leaves a resting phase's word bare", () => {
+    // Arrange / Act — nothing is working, so nothing should move.
+    const got = footerHtml(input({ renderState: "ready" }), CLOSED, NOW);
+    // Assert
+    expect(got).not.toContain("pfooter-breath");
+  });
+
+  it("renders no rotating arc beside the word any more", () => {
+    // Arrange / Act — the breath replaced the spinner outright.
+    const got = footerHtml(input({ renderState: "thinking" }), CLOSED, NOW);
+    // Assert
+    expect(got).not.toContain("pfooter-spin");
+  });
+
+  it("paints the working word in the ramp stop the tick is standing on", () => {
+    // Arrange
+    const breath = { shade: 3, elapsedMs: 0 };
+    // Act
+    const got = footerHtml(input({ renderState: "thinking" }), CLOSED, NOW, breath);
+    // Assert
+    expect(got).toContain(`color:${breathColor(3)}`);
+  });
+
+  it("seeks the fresh element into the cycle with a negative delay", () => {
+    // Arrange — the footer rewrites its markup every chrome frame, so without
+    // this the breath would restart on each one.
+    const breath = { shade: 0, elapsedMs: 1234 };
+    // Act
+    const got = footerHtml(input({ renderState: "thinking" }), CLOSED, NOW, breath);
+    // Assert
+    expect(got).toContain("animation-delay:-1234ms");
+  });
+
+  it("rounds a fractional elapsed to whole milliseconds", () => {
+    // Arrange — a raw float would emit an unparseable delay.
+    const breath = { shade: 0, elapsedMs: 1234.56 };
+    // Act
+    const got = footerHtml(input({ renderState: "thinking" }), CLOSED, NOW, breath);
+    // Assert
+    expect(got).toContain("animation-delay:-1235ms");
+  });
+
+  it("keeps the secondary status outside the breathing word", () => {
+    // Arrange / Act — the status qualifies the phase and does not itself claim
+    // the agent is working, so it neither breathes nor takes the ramp color.
+    const got = footerHtml(
+      input({ renderState: "thinking", connectivity: "degraded", sessionStatus: "thinking" }),
+      CLOSED,
+      NOW,
+    );
+    // Assert
+    expect(got).toContain('</span><span class="pfooter-secondary">thinking</span>');
+  });
+});
+
 // --- the interrupt chip (I1) -------------------------------------------------
 
 describe("alreadyCompletePhaseViolation: footer/state invariant", () => {
@@ -1533,6 +1597,61 @@ describe("ProgressFooter", () => {
     // Assert — the tick is a paint, never a re-render.
     expect(el.querySelector("[data-task-timer]")?.textContent).toBe("1m 5s");
     expect(el.querySelector(".pfooter-phase")?.outerHTML).toBe(before);
+  });
+
+  it("advances the breath's color when a new progress view arrives", () => {
+    // Arrange — a distinct ProgressInput object is exactly "the daemon sent
+    // another one", which is the tick the color channel reports.
+    const el = document.createElement("div");
+    const footer = new ProgressFooter(el, () => NOW);
+    footer.render(input({ renderState: "thinking", progress: progress() }));
+    // Act
+    footer.render(input({ renderState: "thinking", progress: progress() }));
+    // Assert
+    const style = el.querySelector(".pfooter-breath")?.getAttribute("style") ?? "";
+    expect(style).toContain(`color:${breathColor(1)}`);
+  });
+
+  it("holds the breath's color across a re-render of the same view", () => {
+    // Arrange — the footer renders on the chrome cadence, so most renders
+    // carry no new arrival and must not step the ramp.
+    const el = document.createElement("div");
+    const footer = new ProgressFooter(el, () => NOW);
+    const view = progress();
+    footer.render(input({ renderState: "thinking", progress: view }));
+    // Act
+    footer.render(input({ renderState: "thinking", progress: view }));
+    // Assert
+    const style = el.querySelector(".pfooter-breath")?.getAttribute("style") ?? "";
+    expect(style).toContain(`color:${breathColor(0)}`);
+  });
+
+  it("wraps the ramp rather than running out of shades", () => {
+    // Arrange — a long turn delivers far more views than the ramp has stops.
+    const el = document.createElement("div");
+    const footer = new ProgressFooter(el, () => NOW);
+    // Act — one adoption plus a full lap.
+    for (let i = 0; i <= BREATH_SHADES; i += 1) {
+      footer.render(input({ renderState: "thinking", progress: progress() }));
+    }
+    // Assert
+    const style = el.querySelector(".pfooter-breath")?.getAttribute("style") ?? "";
+    expect(style).toContain(`color:${breathColor(0)}`);
+  });
+
+  it("does NOT reset the breath's size cycle when a new view arrives", () => {
+    // Arrange — THE requirement the epoch exists for: the word carries on to
+    // its already-planned next size instead of snapping back to the start.
+    const el = document.createElement("div");
+    let now = NOW;
+    const footer = new ProgressFooter(el, () => now);
+    footer.render(input({ renderState: "thinking", progress: progress() }));
+    // Act — a second view lands most of a breath later.
+    now = NOW + 1_700;
+    footer.render(input({ renderState: "thinking", progress: progress() }));
+    // Assert — the delay seeks the fresh element to where the cycle already was.
+    const style = el.querySelector(".pfooter-breath")?.getAttribute("style") ?? "";
+    expect(style).toContain("animation-delay:-1700ms");
   });
 
   it("leaves no chip behind when the next frame carries the window closed", () => {

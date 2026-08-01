@@ -7,6 +7,7 @@
  */
 import { describe, expect, it } from "vitest";
 
+import { BREATH_PERIOD_MS } from "../src/breathing.js";
 import { CAPPED_CLASSES, EXPANDED_CLASS } from "../src/expand.js";
 import { NAV_CURRENT_CLASS } from "../src/nav.js";
 import { CURRENT_CLASS, MARK_CLASS, REVEAL_CLASS } from "../src/search.js";
@@ -2876,6 +2877,86 @@ describe("the footer's grabber notch geometry", () => {
   });
 });
 
+// The footer's liveness motion: the phase word breathes, and the rotating arc
+// that used to sit beside it is gone entirely.
+describe("the footer's breathing phase word", () => {
+  const breath = blockAfter(css, "\n.pfooter-breath {");
+  const keyframes = blockAfter(css, "@keyframes pfooter-breath");
+  const reduced = blockAfter(
+    blockAfter(css, "@media (prefers-reduced-motion: reduce)"),
+    ".pfooter-breath",
+  );
+
+  it("drops the rotating arc the breath replaced", () => {
+    // Arrange + Act — the old spinner rule must be gone, not merely unused.
+    // Assert
+    expect(css).not.toContain("pfooter-spin");
+  });
+
+  it("oscillates the word forever rather than running once", () => {
+    // Arrange + Act — the breath is a liveness signal, so it never ends.
+    // Assert
+    expect(breath).toMatch(/animation:\s*pfooter-breath\s+[\d.]+s\s+ease-in-out\s+infinite/);
+  });
+
+  it("declares no animation-delay, leaving the seek to the inline style", () => {
+    // Arrange + Act — the render emits a negative delay to resume the cycle,
+    // and a delay declared here would be exactly what it must override.
+    // Assert
+    expect(breath).not.toContain("animation-delay");
+  });
+
+  it("runs one cycle for every BREATH_PERIOD_MS", () => {
+    // Arrange — the markup's negative delay is in the module's milliseconds,
+    // so a drifted duration would seek the element to the wrong point.
+    const seconds = Number(/animation:\s*pfooter-breath\s+([\d.]+)s/.exec(breath)?.[1]);
+    // Act + Assert
+    expect(seconds * 1000).toBe(BREATH_PERIOD_MS);
+  });
+
+  it("makes the word transformable so the scale applies at all", () => {
+    // Arrange + Act — inline boxes ignore transforms.
+    // Assert
+    expect(breath).toContain("display: inline-block");
+  });
+
+  it("breathes with a transform rather than a font-size", () => {
+    // Arrange + Act — a font-size oscillation would re-measure the word and
+    // shove the whole cell row sideways on every frame.
+    // Assert
+    expect(keyframes).toMatch(/transform:\s*scale\(/);
+    expect(keyframes).not.toContain("font-size");
+  });
+
+  it("swings symmetrically around the word's own size", () => {
+    // Arrange — the resting size is the midpoint, so the word never reads as
+    // permanently larger or smaller than a phase that is not working.
+    const scales = [...keyframes.matchAll(/scale\(([\d.]+)\)/g)].map(([, s]) => Number(s));
+    // Act + Assert
+    expect(Math.min(...scales) + Math.max(...scales)).toBeCloseTo(2, 5);
+  });
+
+  it("stays subtle rather than pumping the word", () => {
+    // Arrange + Act — the brief asks for a slight oscillation.
+    const scales = [...keyframes.matchAll(/scale\(([\d.]+)\)/g)].map(([, s]) => Number(s));
+    // Assert
+    expect(Math.max(...scales) - Math.min(...scales)).toBeLessThanOrEqual(0.2);
+  });
+
+  it("keeps breathing under reduced motion instead of stopping", () => {
+    // Arrange + Act — it is the only remaining "the agent is working" motion,
+    // so halting it would claim the session had stalled.
+    // Assert
+    expect(reduced).not.toContain("animation: none");
+  });
+
+  it("slows the breath under reduced motion rather than replacing it", () => {
+    // Arrange + Act — the same treatment the surviving spinner gets.
+    // Assert
+    expect(reduced).toMatch(/animation-duration:\s*[\d.]+s/);
+  });
+});
+
 // The strip's sizing contract: slack has exactly ONE owner (the middle grow
 // cell), rigidity has the rest. Before this, every cell was elastic, so an
 // empty middle collapsed and the leftover width leaked into the readings on
@@ -2928,25 +3009,29 @@ describe("the footer strip's flex-sizing contract", () => {
     expect(grow).toContain("min-width: 20ch");
   });
 
-  it("keeps the grow cell's floor wider than the widest fixed cell", () => {
+  it("keeps the grow cell's floor wider than the widest fixed floor", () => {
     // Arrange — an empty middle must still read as the strip's largest
-    // section, and the phase cell is the widest of the rigid ones.
+    // section, so its floor out-measures every rigid cell's.
     const floor = Number(/min-width:\s*(\d+)ch/.exec(grow)?.[1]);
-    const widestFixed = Number(/max-width:\s*(\d+)ch/.exec(phase)?.[1]);
+    const widestFixed = Math.max(
+      ...Object.values(fixedRight).map((rule) => Number(/min-width:\s*(\d+)ch/.exec(rule)?.[1])),
+    );
     // Act + Assert
     expect(floor).toBeGreaterThan(widestFixed);
   });
 
-  it("pins the phase cell to one fixed width so the left edge never moves", () => {
-    // Arrange + Act — the phase vocabulary is closed, so min == max.
+  it("lets the phase cell shrink-wrap its word instead of pinning a width", () => {
+    // Arrange + Act — the old fixed 17ch left short words floating in a cell
+    // more than twice their width, which read as an enormous side padding.
     // Assert
-    expect(phase).toContain("max-width: 17ch");
+    expect(phase).not.toMatch(/(min|max)-width:/);
   });
 
-  it("sizes the phase cell's floor to the same fixed width", () => {
-    // Arrange + Act — a min below the max would let short words shrink it.
+  it("pads the phase cell equally on both axes", () => {
+    // Arrange + Act — one value, so its side breathing room is exactly its
+    // vertical breathing room rather than the base cell's wider pair.
     // Assert
-    expect(phase).toContain("min-width: 17ch");
+    expect(phase).toContain("padding: 11px;");
   });
 
   it("keeps the phase cell out of the flex bargaining entirely", () => {
@@ -2973,9 +3058,10 @@ describe("the footer strip's flex-sizing contract", () => {
   });
 
   it("leaves the fixed edges room for the grow cell inside the capped dock", () => {
-    // Arrange — the four rigid floors plus the grow cell's floor is the
-    // strip's narrowest honest layout.
-    const floors = [phase, ...Object.values(fixedRight), grow].map((rule) =>
+    // Arrange — the rigid floors plus the grow cell's floor is the strip's
+    // narrowest honest layout. The phase cell contributes none: it shrink-wraps
+    // its word now rather than declaring a floor of its own.
+    const floors = [...Object.values(fixedRight), grow].map((rule) =>
       Number(/min-width:\s*(\d+)ch/.exec(rule)?.[1]),
     );
     // Act
