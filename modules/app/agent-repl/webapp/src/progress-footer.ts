@@ -67,25 +67,14 @@ export interface FooterInput {
    */
   renderState: WebRenderState | null;
   /**
-   * This workspace's 1-based place in its REPOSITORY's merge queue, and the
-   * queue's total depth. Both 0 when the workspace is not enqueued.
-   *
-   * They arrive on the SAME `WorkspaceState` as `renderState` for the reason
-   * that field's own note gives: a queue place carried in a second message is a
-   * queue place kept in two copies, and the stale copy is the one that reads
-   * "2/3" against an already-merged workspace.
-   */
-  mergeQueuePosition: number;
-  mergeQueueDepth: number;
-  /**
    * THE structured merge status, or null when no merge run touches this
-   * workspace.
+   * workspace. It is the ONLY merge input the footer takes.
    *
-   * It does not replace the two figures above — the daemon still stamps them,
-   * and their chip still renders — but where it is present it OUTRANKS them,
-   * because it says the same thing plus everything they cannot: which commit of
-   * how many is landing, which one conflicted, and which pre/post-merge prompt
-   * the daemon is running.
+   * It arrives on the SAME `WorkspaceState` as `renderState` for the reason
+   * that field's own note gives: a merge fact carried in a second message is a
+   * merge fact kept in two copies, and the stale copy is the one that reads
+   * "2/3" against an already-merged workspace. The flat queue pair that used to
+   * sit here was exactly that second copy, and it is retired.
    */
   mergeStatus: MergeStatus | null;
   /** Daemon-resolved route reliability for the same WorkspaceState. */
@@ -259,10 +248,16 @@ export function mergeStatusPhaseLabel(status: MergeStatus | null): PhaseLabel | 
  * The structured merge status as the footer's chip, or null when there is no
  * figure to show.
  *
- * Same cell and same reasoning as `mergeQueueChip`, which it supersedes while a
- * status is present: the phase cell's geometry is fixed to the widest phrase
- * the phase vocabulary produces, while the run's arithmetic is unbounded
- * numbers. Read left to right the pair still says "merging 2/4".
+ * It is a CHIP rather than more words in the phase cell, and that is
+ * deliberate: the phase cell's geometry is fixed to the widest phrase the
+ * CLOSED phase vocabulary can produce, while a run's arithmetic is unbounded
+ * numbers. Read left to right the pair still says "merging 2/4"; putting the
+ * digits inside the phase cell would have made every phase's cell wider forever
+ * to accommodate figures that are usually absent.
+ *
+ * It is the ONLY merge chip now. The flat `mergeQueueChip` it used to
+ * supersede-when-present is gone with the fields that fed it, so there is no
+ * second arithmetic that could render beside or instead of this one.
  */
 export function mergeStatusChip(status: MergeStatus | null): MergeQueueChip | null {
   const facts = mergeFacts(status);
@@ -276,34 +271,6 @@ export interface MergeQueueChip {
   text: string;
   /** The hover line, which spells out what the two figures mean. */
   title: string;
-}
-
-/**
- * The merge-queue chip, or null when there is no queue place to show.
- *
- * It is a CHIP rather than more words in the phase cell, and that is deliberate:
- * the phase cell's geometry is fixed to the widest phrase the CLOSED phase
- * vocabulary can produce, while a queue place is two unbounded numbers. Read
- * left to right the pair still says "merge queued 2/3"; putting the digits
- * inside the phase cell would have made every phase's cell wider forever to
- * accommodate a queue nobody is usually in.
- *
- * Present ONLY while the workspace is actually queued: a position of 0 is the
- * daemon saying "not enqueued", and `0/0` beside any phase would be noise.
- * A workspace whose merge has moved on (merging, merged, failed) has left the
- * queue, so no place is shown for it either.
- */
-export function mergeQueueChip(
-  state: WebRenderState | null,
-  position: number,
-  depth: number,
-): MergeQueueChip | null {
-  if (state !== "merge_queued") return null;
-  if (position <= 0 || depth <= 0) return null;
-  return {
-    text: `${String(position)}/${String(depth)}`,
-    title: `this workspace is ${String(position)} of ${String(depth)} waiting to merge into this repository`,
-  };
 }
 
 /** The interrupt window as the footer's chip beside the phase. */
@@ -856,13 +823,10 @@ export function footerHtml(
       `<div class="pfooter-cell pfooter-phase ${phase.tone}">${word}${secondary}</div>`,
     );
   }
-  // The queue place sits immediately right of the phase word it qualifies, so
-  // the pair reads as one statement: "merge queued 2/3".
-  // The structured chip where the daemon stamped a status, the flat one
-  // otherwise — never both, which would put two arithmetics side by side.
-  const queue =
-    mergeStatusChip(input.mergeStatus) ??
-    mergeQueueChip(input.renderState, input.mergeQueuePosition, input.mergeQueueDepth);
+  // The merge figures sit immediately right of the phase word they qualify, so
+  // the pair reads as one statement: "merge queued 2/3". One source only —
+  // the run's own status.
+  const queue = mergeStatusChip(input.mergeStatus);
   if (queue !== null) {
     cells.push(
       `<div class="pfooter-cell pfooter-merge-queue" title="${escapeHtml(queue.title)}">` +

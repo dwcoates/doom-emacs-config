@@ -579,75 +579,57 @@ func TestConversationSourceAtRejectsUnplaceableItems(t *testing.T) {
 	}
 }
 
-func TestMergeQueueFactsReachTheWorkspaceState(t *testing.T) {
-	// Arrange.
-	m, _, q, _, _ := openLeaseTest(t, "ws1")
+// The flat merge_queue_position / merge_queue_depth pair this file used to
+// assert on is retired from the wire contract; MergeStatus's enqueued arm
+// carries the run's admitted queue place instead, and the e2e merge-pipeline
+// gate is where that is asserted. What survives here is the wiring INVARIANT
+// the retired pair used to be checked alongside: a held lease with no
+// merge.Queue behind it.
+
+func TestALeaseHeldWithNoQueueBoundIsReported(t *testing.T) {
+	// Arrange. A manager with no merge subsystem bound at all, driven straight
+	// into a held lease window — the shape only a caller that bypassed
+	// NewMergeLease can produce.
+	m, cl, _ := openTest(t, fakeResolver{"s1": "ws1"})
 	if err := m.Apply(evSessionStarted("s1", 1)); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
-	tests := []struct {
-		name         string
-		snapshot     map[string][]merge.Request
-		wantPosition int32
-		wantDepth    int32
-	}{
-		{
-			name:         "not enqueued",
-			snapshot:     map[string][]merge.Request{"repo": {{Workspace: "other"}}},
-			wantPosition: 0,
-			wantDepth:    1,
-		},
-		{
-			name:         "at the head",
-			snapshot:     map[string][]merge.Request{"repo": {{Workspace: "ws1"}, {Workspace: "other"}}},
-			wantPosition: 1,
-			wantDepth:    2,
-		},
-		{
-			name:         "behind a sibling worktree",
-			snapshot:     map[string][]merge.Request{"repo": {{Workspace: "other"}, {Workspace: "ws1"}}},
-			wantPosition: 2,
-			wantDepth:    2,
-		},
-		{
-			name:         "an empty queue",
-			snapshot:     map[string][]merge.Request{},
-			wantPosition: 0,
-			wantDepth:    0,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			q.snapshot = tt.snapshot
-
-			// Act.
-			got := mustCurrent(t, m, "ws1")
-
-			// Assert.
-			if got.GetMergeQueuePosition() != tt.wantPosition {
-				t.Fatalf("merge_queue_position = %d, want %d", got.GetMergeQueuePosition(), tt.wantPosition)
-			}
-			if tt.wantPosition != 0 && got.GetMergeQueueDepth() != tt.wantDepth {
-				t.Fatalf("merge_queue_depth = %d, want %d", got.GetMergeQueueDepth(), tt.wantDepth)
-			}
-		})
-	}
-}
-
-func TestMergeQueueFactsAreZeroWithoutAQueue(t *testing.T) {
-	// Arrange. A daemon with no merge subsystem at all: nothing can be
-	// enqueued on a queue that does not exist.
-	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.Apply(evSessionStarted("s1", 1)); err != nil {
-		t.Fatalf("Apply: %v", err)
+	if _, err := m.openMergeLease("ws1"); err != nil {
+		t.Fatalf("openMergeLease: %v", err)
 	}
 
 	// Act.
 	got := mustCurrent(t, m, "ws1")
 
 	// Assert.
-	if got.GetMergeQueuePosition() != 0 || got.GetMergeQueueDepth() != 0 || got.GetMergeLeaseHeld() {
-		t.Fatalf("merge facts = (%d, %d, %t), want all zero without a merge subsystem",
-			got.GetMergeQueuePosition(), got.GetMergeQueueDepth(), got.GetMergeLeaseHeld())
+	if !got.GetMergeLeaseHeld() {
+		t.Fatal("merge_lease_held = false, want the opened window reported as held")
+	}
+	if !cl.contains("holds a merge lease with NO merge.Queue bound") {
+		t.Fatal("a lease held with no merge.Queue bound was not reported through the canonical logger")
+	}
+}
+
+func TestABoundQueueLeavesTheWiringInvariantQuiet(t *testing.T) {
+	// Arrange. The well-formed shape: NewMergeLease bound the queue.
+	m, l, _, _, cl := openLeaseTest(t, "ws1")
+	if err := m.Apply(evSessionStarted("s1", 1)); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	release, err := l.Acquire(context.Background(), "ws1")
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	t.Cleanup(release)
+
+	// Act.
+	got := mustCurrent(t, m, "ws1")
+
+	// Assert.
+	if !got.GetMergeLeaseHeld() {
+		t.Fatal("merge_lease_held = false, want the acquired lease reported as held")
+	}
+	if cl.contains("NO merge.Queue bound") {
+		t.Fatal("the wiring invariant fired for a lease NewMergeLease produced")
 	}
 }
