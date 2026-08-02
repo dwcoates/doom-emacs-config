@@ -483,12 +483,8 @@ async function boot(): Promise<void> {
       // THE phase, read off the workspace's one authoritative state rather
       // than off a copy carried in a second message (F5).
       renderState: s.renderState,
-      // The queue place rides the same WorkspaceState as the phase above, for
-      // the same reason the phase does: two copies would drift.
-      mergeQueuePosition: s.mergeQueuePosition,
-      mergeQueueDepth: s.mergeQueueDepth,
-      // THE structured status, on the same revisioned message as both of the
-      // above. Where it is present the footer reads it in preference to them.
+      // THE structured status, on the same revisioned message as the phase
+      // above and the only merge input the footer takes.
       mergeStatus: s.mergeStatus,
       connectivity: s.sessionConnectivity,
       sessionStatus: s.sessionStatus,
@@ -500,8 +496,7 @@ async function boot(): Promise<void> {
     const interruptOutcome = store.progress?.interrupt?.outcome ?? "none";
     const footerStateSignature =
       `${s.renderState ?? "none"}|${s.sessionConnectivity ?? "none"}|` +
-      `${s.sessionStatus ?? "none"}|${interruptOutcome}|` +
-      `${s.mergeQueuePosition}/${s.mergeQueueDepth}|${s.mergeLeaseHeld}|` +
+      `${s.sessionStatus ?? "none"}|${interruptOutcome}|${s.mergeLeaseHeld}|` +
       mergeStatusLogValue(s.mergeStatus);
     if (footerStateSignature !== lastFooterStateSignature) {
       clog(
@@ -512,7 +507,6 @@ async function boot(): Promise<void> {
           `generation=${s.controllerGenerationId || "none"} ` +
           `faults=${s.activeFaults.map((fault) => `${fault.component}/${fault.faultType}`).join(",") || "none"} ` +
           `interrupt_outcome=${interruptOutcome} ` +
-          `merge_queue=${s.mergeQueuePosition}/${s.mergeQueueDepth} ` +
           `merge_lease_held=${s.mergeLeaseHeld} ` +
           `merge_status=${mergeStatusLogValue(s.mergeStatus)} session=${s.sessionId}`,
         {
@@ -522,8 +516,6 @@ async function boot(): Promise<void> {
           controller_generation_id: s.controllerGenerationId || "none",
           active_faults: s.activeFaults.map((fault) => `${fault.component}/${fault.faultType}`),
           interrupt_outcome: interruptOutcome,
-          merge_queue_position: s.mergeQueuePosition,
-          merge_queue_depth: s.mergeQueueDepth,
           merge_lease_held: s.mergeLeaseHeld,
           merge_status: mergeStatusLogValue(s.mergeStatus),
           session_id: s.sessionId,

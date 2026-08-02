@@ -20,10 +20,11 @@
  * new daemon-side phase a compile error here rather than a merge that silently
  * renders as nothing.
  *
- * The FLAT fields (`mergePhase`, `mergeQueuePosition`, `mergeQueueDepth`) are
- * untouched by this file and still render through their own paths. Retiring
- * them is a later wave; until then a workspace can carry both, and the flat
- * paths stay the fallback for a daemon that has not yet stamped a status.
+ * The FLAT fields this file was written beside (`mergePhase`,
+ * `mergeQueuePosition`, `mergeQueueDepth`) are RETIRED from the wire contract.
+ * There is no fallback path any more and no second account of a merge to
+ * disagree with: `merge_status` unset means no merge run to report, and the
+ * merge axis's own render state is what says a merge is under way at all.
  */
 import type { MergeStatus } from "./frontend-proto.js";
 
@@ -32,7 +33,7 @@ import type { MergeStatus } from "./frontend-proto.js";
  * sidebar's dot already speak.
  *
  * `muted` is the whole in-flight band: a merge is chrome that spends no color,
- * exactly as `phaseLabel` decided for the flat phases. Only a phase that has
+ * exactly as `phaseLabel` decides for the merge render states. Only a phase that has
  * STOPPED the run spends `error`, and only a settled one spends `ok`.
  */
 export type MergeTone = "muted" | "error" | "ok";

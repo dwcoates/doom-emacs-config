@@ -160,13 +160,19 @@ describe("decodeFrontendFrame — protojson field coercion", () => {
     });
   });
 
-  it("decodes the merge-queue place", () => {
-    const frame = decode({
-      workspaceState: { ...WS_STATE, mergeQueuePosition: 2, mergeQueueDepth: 3 },
-    });
-    if (frame.frame.case !== "workspaceState") throw new Error("wrong variant");
-    expect(frame.frame.value.mergeQueuePosition).toBe(2);
-    expect(frame.frame.value.mergeQueueDepth).toBe(3);
+  it("rejects the retired flat merge-queue place as an unknown field", () => {
+    // The flat trio is RESERVED on the wire. A daemon that stamped it again
+    // would be a version skew, and skew is an error here rather than a field
+    // the decoder quietly ignores.
+    expect(() =>
+      decode({ workspaceState: { ...WS_STATE, mergeQueuePosition: 2, mergeQueueDepth: 3 } }),
+    ).toThrow(/unrecognized field/);
+  });
+
+  it("rejects the retired flat merge phase as an unknown field", () => {
+    expect(() => decode({ workspaceState: { ...WS_STATE, mergePhase: "merging" } })).toThrow(
+      /unrecognized field/,
+    );
   });
 
   it("decodes the merge lease", () => {
@@ -194,26 +200,6 @@ describe("decodeFrontendFrame — protojson field coercion", () => {
     const frame = decode({ workspaceState: WS_STATE });
     if (frame.frame.case !== "workspaceState") throw new Error("wrong variant");
     expect(frame.frame.value.mergeLeaseHeld).toBe(false);
-  });
-
-  it("reads an ABSENT queue place as not enqueued", () => {
-    const frame = decode({ workspaceState: WS_STATE });
-    if (frame.frame.case !== "workspaceState") throw new Error("wrong variant");
-    expect(frame.frame.value.mergeQueuePosition).toBe(0);
-  });
-
-  it("rejects a merge-queue position beyond the depth it indexes into", () => {
-    // A 1-based place can never exceed the queue holding it; rendering "3/2"
-    // would hide a daemon-side accounting bug behind a plausible chip.
-    expect(() =>
-      decode({ workspaceState: { ...WS_STATE, mergeQueuePosition: 3, mergeQueueDepth: 2 } }),
-    ).toThrow(/beyond depth/);
-  });
-
-  it("rejects a negative merge-queue figure", () => {
-    expect(() =>
-      decode({ workspaceState: { ...WS_STATE, mergeQueuePosition: -1, mergeQueueDepth: 3 } }),
-    ).toThrow(/negative merge-queue figure/);
   });
 
   it("rejects unspecified session connectivity", () => {
@@ -1068,6 +1054,21 @@ describe("WorkspaceState.mergeStatus decoding", () => {
     // Assert
     if (status.phase.case !== "enqueued") throw new Error("wrong phase");
     expect(status.phase.value).toEqual({ position: 2, depth: 3 });
+  });
+
+  it("rejects an enqueued place beyond the depth it indexes into", () => {
+    // MOVED from the retired flat merge_queue_position / merge_queue_depth
+    // pair, which used to carry this check. A 1-based place can never exceed
+    // the queue holding it; rendering "3/2" would hide a daemon-side
+    // accounting bug behind a plausible chip.
+    expect(() => withStatus({ enqueued: { position: 3, depth: 2 } })).toThrow(/beyond depth/);
+  });
+
+  it("rejects a negative enqueued figure", () => {
+    // MOVED from the retired flat pair for the same reason.
+    expect(() => withStatus({ enqueued: { position: -1, depth: 3 } })).toThrow(
+      /negative merge-queue figure/,
+    );
   });
 
   it("decodes the before-action phase's prompt", () => {

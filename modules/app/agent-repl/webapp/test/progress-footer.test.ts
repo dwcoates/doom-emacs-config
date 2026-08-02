@@ -22,7 +22,6 @@ import {
   hasLiveCounters,
   interruptChip,
   mergeNoteRowHtml,
-  mergeQueueChip,
   mergeStatusChip,
   phaseLabel,
   rateLimitAccent,
@@ -86,8 +85,6 @@ function input(over: Partial<FooterInput> = {}): FooterInput {
   return {
     progress: progress(),
     renderState: "idle",
-    mergeQueuePosition: 0,
-    mergeQueueDepth: 0,
     mergeStatus: null,
     connectivity: "operational",
     sessionStatus: "ready",
@@ -1210,70 +1207,21 @@ describe("alreadyCompletePhaseViolation: footer/state invariant", () => {
   });
 });
 
-describe("mergeQueueChip: where this workspace sits in its repo's merge queue", () => {
-  it("reads position over depth while the workspace is queued", () => {
-    // Arrange / Act — beside the `merge queued` phase word this reads as
-    // "merge queued 2/3".
-    const got = mergeQueueChip("merge_queued", 2, 3);
-    // Assert
-    expect(got?.text).toBe("2/3");
-  });
-
-  it("spells the two figures out in the hover line", () => {
-    // Arrange / Act
-    const got = mergeQueueChip("merge_queued", 2, 3);
-    // Assert
-    expect(got?.title).toBe(
-      "this workspace is 2 of 3 waiting to merge into this repository",
-    );
-  });
-
-  it("shows NO place when the workspace is not enqueued", () => {
-    // Arrange / Act — position 0 is the daemon saying "not on the queue"; a
-    // `0/0` chip would be noise beside every phase.
-    const got = mergeQueueChip("merge_queued", 0, 0);
-    // Assert
-    expect(got).toBeNull();
-  });
-
-  it("shows no place once the merge has left the queue and started running", () => {
-    // Arrange / Act — a merge that is `merging` holds the lease, not a place
-    // in line, so any figures riding along are stale by definition.
-    const got = mergeQueueChip("merging", 1, 3);
-    // Assert
-    expect(got).toBeNull();
-  });
-
-  it("shows no place while the merge is still being enqueued", () => {
-    // Arrange / Act — there is no queue entry yet, so there is no place to
-    // report; any figures riding along describe a queue this merge has not
-    // joined.
-    const got = mergeQueueChip("merge_enqueuing", 1, 3);
-    // Assert
-    expect(got).toBeNull();
-  });
-
-  it("shows no place for an ordinary working session", () => {
-    // Arrange / Act
-    const got = mergeQueueChip("thinking", 0, 0);
-    // Assert
-    expect(got).toBeNull();
-  });
-
-  it("shows no place before any WorkspaceState has resolved", () => {
-    // Arrange / Act — null render state means nothing is known yet, and a
-    // queue place invented here would be the fabrication the phase cell's own
-    // null-guard exists to prevent.
-    const got = mergeQueueChip(null, 2, 3);
-    // Assert
-    expect(got).toBeNull();
-  });
-});
-
+// REWRITTEN off the retired flat merge_queue_position / merge_queue_depth pair.
+// Those figures reach the footer only through MergeStatus's `enqueued` arm now,
+// so every case below drives the same guarantee through the structured input.
 describe("footerHtml: the merge queue's place beside the phase", () => {
+  /** An enqueued merge status at a given place on its repository's queue. */
+  const enqueued = (position: number, depth: number): MergeStatus => ({
+    runId: "run-queued",
+    phaseStartedAtMs: NOW - 5_000,
+    updatedAtMs: NOW,
+    phase: { case: "enqueued", value: { position, depth } },
+  });
+
   it("renders the queue place while the workspace is queued", () => {
     // Arrange
-    const built = input({ renderState: "merge_queued", mergeQueuePosition: 2, mergeQueueDepth: 3 });
+    const built = input({ renderState: "merge_queued", mergeStatus: enqueued(2, 3) });
     // Act
     const got = footerHtml(built, CLOSED, NOW);
     // Assert
@@ -1283,7 +1231,7 @@ describe("footerHtml: the merge queue's place beside the phase", () => {
   it("renders the queue place in its own cell, not inside the phase cell", () => {
     // Arrange — the phase cell's geometry is fixed to the closed phase
     // vocabulary; the queue's two figures are unbounded.
-    const built = input({ renderState: "merge_queued", mergeQueuePosition: 2, mergeQueueDepth: 3 });
+    const built = input({ renderState: "merge_queued", mergeStatus: enqueued(2, 3) });
     // Act
     const got = footerHtml(built, CLOSED, NOW);
     // Assert
@@ -1292,7 +1240,7 @@ describe("footerHtml: the merge queue's place beside the phase", () => {
 
   it("still names the phase beside the place", () => {
     // Arrange
-    const built = input({ renderState: "merge_queued", mergeQueuePosition: 2, mergeQueueDepth: 3 });
+    const built = input({ renderState: "merge_queued", mergeStatus: enqueued(2, 3) });
     // Act
     const got = footerHtml(built, CLOSED, NOW);
     // Assert
@@ -1302,7 +1250,7 @@ describe("footerHtml: the merge queue's place beside the phase", () => {
   it("names the enqueuing phase with no queue cell beside it", () => {
     // Arrange — the transition the pipeline renders: the phase word alone
     // while enqueuing, the word plus the place once queued.
-    const built = input({ renderState: "merge_enqueuing", mergeQueuePosition: 0, mergeQueueDepth: 0 });
+    const built = input({ renderState: "merge_enqueuing", mergeStatus: null });
     // Act
     const got = footerHtml(built, CLOSED, NOW);
     // Assert
@@ -1312,7 +1260,17 @@ describe("footerHtml: the merge queue's place beside the phase", () => {
 
   it("renders NO queue cell when the workspace is not enqueued", () => {
     // Arrange
-    const built = input({ renderState: "thinking", mergeQueuePosition: 0, mergeQueueDepth: 0 });
+    const built = input({ renderState: "thinking", mergeStatus: null });
+    // Act
+    const got = footerHtml(built, CLOSED, NOW);
+    // Assert
+    expect(got).not.toContain("pfooter-merge-queue");
+  });
+
+  it("renders NO queue cell for an enqueued arm carrying no depth", () => {
+    // Arrange — depth 0 is the run saying it has no queue place to report; a
+    // `0/0` chip would be noise beside every phase.
+    const built = input({ renderState: "merge_queued", mergeStatus: enqueued(0, 0) });
     // Act
     const got = footerHtml(built, CLOSED, NOW);
     // Assert
@@ -1321,7 +1279,7 @@ describe("footerHtml: the merge queue's place beside the phase", () => {
 
   it("names a running merge in the phase cell", () => {
     // Arrange
-    const built = input({ renderState: "merging", mergeQueuePosition: 0, mergeQueueDepth: 0 });
+    const built = input({ renderState: "merging", mergeStatus: null });
     // Act
     const got = footerHtml(built, CLOSED, NOW);
     // Assert
@@ -1911,12 +1869,14 @@ describe("the footer's structured merge status", () => {
     expect(got).toBe("");
   });
 
-  it("shows the structured count in place of the flat queue chip", () => {
-    // Arrange — two arithmetics side by side is two accounts of one run.
+  it("shows the structured count as the ONLY merge arithmetic", () => {
+    // REWRITTEN: this pair used to assert the structured chip superseded a flat
+    // one, and that the flat one remained the fallback. The flat path is gone,
+    // so what is left to guarantee is that the run's own figures are what
+    // render.
+    // Arrange
     const built = input({
       renderState: "merge_queued",
-      mergeQueuePosition: 2,
-      mergeQueueDepth: 3,
       mergeStatus: merge({ case: "enqueued", value: { position: 1, depth: 5 } }),
     });
     // Act
@@ -1925,18 +1885,15 @@ describe("the footer's structured merge status", () => {
     expect(got).toContain(">1/5<");
   });
 
-  it("keeps the FLAT queue chip when the daemon stamped no status", () => {
-    // Arrange — the flat path stays the fallback until the daemon's cutover.
-    const built = input({
-      renderState: "merge_queued",
-      mergeQueuePosition: 2,
-      mergeQueueDepth: 3,
-      mergeStatus: null,
-    });
+  it("shows NO merge arithmetic when the daemon stamped no status", () => {
+    // REWRITTEN: with the flat fallback retired, an absent status is an absent
+    // chip rather than a handover to a second source.
+    // Arrange
+    const built = input({ renderState: "merge_queued", mergeStatus: null });
     // Act
     const got = footerHtml(built, CLOSED, NOW);
     // Assert
-    expect(got).toContain(">2/3<");
+    expect(got).not.toContain("pfooter-merge-queue");
   });
 
   it("puts the merge's full account in the expansion sheet", () => {
