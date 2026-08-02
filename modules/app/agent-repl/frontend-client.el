@@ -720,8 +720,8 @@ is reset, because the failures belonged to the previous instance.")
 
 (defun agent-repl--frontend-reattach-timer-start ()
   "Idempotently start the reattach sweep timer.
-No-op in batch/sandbox (`agent-repl--frontend-init-inhibited-p') —
-the same environments that never auto-start the daemon."
+No-op in batch (`agent-repl--frontend-init-inhibited-p') — the same
+environment that never auto-starts the daemon."
   (cond
    (agent-repl--frontend-reattach-timer
     (agent-repl--log-verbose nil "reattach: timer already armed=%S"

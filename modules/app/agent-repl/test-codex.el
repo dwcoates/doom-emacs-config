@@ -322,39 +322,29 @@ The git-check skip is mandatory: headless spawns run from
 ;;;; ---- Tests: doctor ----
 
 (defmacro agent-repl-test--with-codex-doctor-env (&rest body)
-  "Run BODY outside the sandbox with a temp codex home bound as ROOT."
+  "Run BODY with a temp codex home bound as ROOT."
   (declare (indent 0))
   `(let* ((root (make-temp-file "agent-codex-" t))
           (agent-repl-codex-home root))
      (unwind-protect
-         (cl-letf (((symbol-function 'agent-repl--in-sandbox-p)
-                    (lambda () nil)))
-           ,@body)
+         (progn ,@body)
        (delete-directory root t))))
 
 (ert-deftest agent-repl-test-codex-doctor-silent-when-not-in-use ()
   "No codex signals at all yields no issues."
   (let ((agent-repl-codex-home nil)
         (agent-repl-default-backend 'claude))
-    (cl-letf (((symbol-function 'agent-repl--in-sandbox-p) (lambda () nil)))
-      (agent-repl-test--with-clean-state
-        (should-not (agent-repl--codex-doctor-issues))))))
+    (agent-repl-test--with-clean-state
+      (should-not (agent-repl--codex-doctor-issues)))))
 
 (ert-deftest agent-repl-test-codex-doctor-missing-home-errors ()
   "An explicitly configured but absent CODEX_HOME yields an error issue."
   (let ((agent-repl-codex-home "/nonexistent/codex-home"))
-    (cl-letf (((symbol-function 'agent-repl--in-sandbox-p) (lambda () nil))
-              ((symbol-function 'executable-find) (lambda (_) "/usr/bin/codex")))
+    (cl-letf (((symbol-function 'executable-find) (lambda (_) "/usr/bin/codex")))
       (should (cl-find-if (lambda (issue)
                             (and (eq (car issue) 'error)
                                  (string-match-p "does not exist" (cdr issue))))
                           (agent-repl--codex-doctor-issues))))))
-
-(ert-deftest agent-repl-test-codex-doctor-silent-in-sandbox ()
-  "Inside the sandbox the codex doctor is silent (host-only concern)."
-  (let ((agent-repl-codex-home "/nonexistent"))
-    (cl-letf (((symbol-function 'agent-repl--in-sandbox-p) (lambda () t)))
-      (should-not (agent-repl--codex-doctor-issues)))))
 
 (ert-deftest agent-repl-test-codex-doctor-in-use-via-ws-backend ()
   "A registered workspace with a codex :backend marks codex as in use."
