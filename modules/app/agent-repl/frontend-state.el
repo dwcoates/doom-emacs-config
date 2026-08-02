@@ -349,6 +349,122 @@ the section's ordering unexplainable."
         (agent-repl--ws-put workspace :merge-completed-at at)
         at)))))
 
+;;;; ---- MergeStatus (the merge pipeline's own structured report) --------
+;;
+;; `WorkspaceState.merge_status' carries what the flat `merge_phase' string
+;; never could: which merge run this is, how far into the cherry-pick it
+;; got, which commit is on the table right now, and why a merge ended the
+;; way it did.  The daemon owns the whole pipeline (it runs the
+;; before/after actions too); Emacs only renders what lands here.
+;;
+;; EXACTLY ONE oneof arm is set per push, and WHICH arm it is IS the phase.
+;; Deriving the phase keyword from the arm — rather than reading a second,
+;; parallel phase field — means the two can never disagree, because there
+;; is only one of them.
+
+(defconst agent-repl--frontend-merge-status-arms
+  '((:enqueued      . :enqueued)
+    (:beforeAction  . :before-action)
+    (:cherryPicking . :cherry-picking)
+    (:testing       . :testing)
+    (:conflict      . :conflict)
+    (:afterAction   . :after-action)
+    (:merged        . :merged)
+    (:failed        . :failed))
+  "Map each `MergeStatus' oneof arm (its protojson key) to a phase keyword.
+Closed by construction: the arm set IS the phase vocabulary.  A status
+carrying no arm, or more than one, is a malformed frame rather than a
+phase to render — `agent-repl--frontend-merge-status-arm' errors on it
+\(AGENTS.md No-Silent-Fallbacks).")
+
+(defconst agent-repl--frontend-merge-status-fields
+  '((:position          . :position)
+    (:depth             . :depth)
+    (:prompt            . :prompt)
+    (:commitsTotal      . :commits-total)
+    (:commitsLanded     . :commits-landed)
+    (:currentSha        . :current-sha)
+    (:currentSubject    . :current-subject)
+    (:conflictedSha     . :conflicted-sha)
+    (:conflictedSubject . :conflicted-subject)
+    (:failingSha        . :failing-sha)
+    (:failingSubject    . :failing-subject)
+    (:cause             . :cause)
+    (:afterActionError  . :after-action-error))
+  "Every field a `MergeStatus' oneof arm can carry: wire key to plist key.
+The union across all arms, deliberately flat: a caller asks for
+`:commits-landed' without first knowing which arm produced it.  A field
+outside this table is a wire addition Emacs has not been taught, which
+fails loudly for the same reason an unknown frame arm does.")
+
+(defconst agent-repl--frontend-merge-status-numeric-fields
+  '(:position :depth :commits-total :commits-landed)
+  "The `MergeStatus' arm fields read as NUMBERS rather than kept verbatim.
+Routed through `agent-repl--frontend-int64' because protojson encodes a
+64-bit field as a JSON string while a 32-bit one arrives as a number, and
+a renderer that formatted the raw value would print counts two ways.")
+
+(defun agent-repl--frontend-merge-status-arm (status workspace)
+  "Return (PHASE . ARM-PLIST) for STATUS's single present oneof arm.
+STATUS is a decoded `MergeStatus' plist and WORKSPACE threads log
+metadata.  Signals (after a loud log) when the count of present arms is
+not exactly one: a merge with no phase, or with two, is not a state to
+render and there is no arm to prefer."
+  (let ((present (cl-remove-if-not
+                  (lambda (cell) (plist-member status (car cell)))
+                  agent-repl--frontend-merge-status-arms)))
+    (unless (= 1 (length present))
+      (agent-repl--log workspace
+                       "frontend-merge-status-arm: EXPECTED exactly one oneof arm, got %d (%S) in %S — no fallback"
+                       (length present) (mapcar #'car present) status)
+      (error "agent-repl frontend: MergeStatus carries %d oneof arms"
+             (length present)))
+    (cons (cdr (car present)) (plist-get status (car (car present))))))
+
+(defun agent-repl--frontend-parse-merge-status (status workspace)
+  "Decode `MergeStatus' plist STATUS into Emacs's merge-status plist.
+Returns nil when STATUS is absent — the daemon rides the submessage only
+while it has a merge to report, and inventing an idle phase for its
+absence would narrate a merge nobody asked for.
+
+The result is `(:phase KW :run-id S :phase-started-at-ms N
+:updated-at-ms N ...)' plus the present arm's own fields, renamed through
+`agent-repl--frontend-merge-status-fields' and, for the counts, parsed
+through `agent-repl--frontend-int64'.  An arm field outside that table
+fails loudly."
+  (when status
+    (let* ((arm (agent-repl--frontend-merge-status-arm status workspace))
+           (phase (car arm))
+           (body (cdr arm))
+           (parsed (list :phase phase
+                         :run-id (plist-get status :runId)
+                         :phase-started-at-ms
+                         (agent-repl--frontend-int64
+                          (plist-get status :phaseStartedAtMs))
+                         :updated-at-ms
+                         (agent-repl--frontend-int64
+                          (plist-get status :updatedAtMs)))))
+      (cl-loop for (wire value) on body by #'cddr
+               do (let ((key (cdr (assq wire
+                                        agent-repl--frontend-merge-status-fields))))
+                    (unless key
+                      (agent-repl--log workspace
+                                       "frontend-parse-merge-status: UNKNOWN field=%S in phase=%s arm=%S — no fallback"
+                                       wire phase body)
+                      (error "agent-repl frontend: unknown MergeStatus field %S" wire))
+                    (setq parsed
+                          (plist-put parsed key
+                                     (if (memq key agent-repl--frontend-merge-status-numeric-fields)
+                                         (agent-repl--frontend-int64 value)
+                                       value)))))
+      ;; A merge pushes a status on every tick of its cherry-pick, so the
+      ;; decisive per-frame record stays verbose; the narration in
+      ;; merge-handlers.el logs the transitions at normal volume.
+      (agent-repl--log-verbose workspace
+                               "frontend-parse-merge-status: phase=%s run-id=%s parsed=%S"
+                               phase (plist-get status :runId) parsed)
+      parsed)))
+
 (defun agent-repl--frontend-apply-workspace-state (ws-state)
   "Apply a `WorkspaceState' frame WS-STATE (a plist).
 Handler for the `workspaceState' oneof arm.  Maps the pushed RenderState
@@ -359,7 +475,9 @@ count, merge phase, cause kind/seq) are stored under
 `:pushed-render-state-meta' for debuggability and logged as an old->new
 transition.  The frame's `mergedAtMs' is retained separately, on the
 durable `:merge-completed-at' key
-\(`agent-repl--frontend-retain-merged-at').  Returns the applied keyword.
+\(`agent-repl--frontend-retain-merged-at'), and its structured
+`mergeStatus' lands on `:pushed-merge-status'
+\(`agent-repl--frontend-parse-merge-status').  Returns the applied keyword.
 
 Fails loudly on a missing/blank `workspace' (invariant violation)."
   (let ((raw-workspace (plist-get ws-state :workspace))
@@ -388,7 +506,13 @@ Fails loudly on a missing/blank `workspace' (invariant violation)."
            (generation-id (plist-get ws-state :controllerGenerationId))
            (faults
             (agent-repl--frontend-validate-runtime-faults
-             diagnostic-workspace (plist-get ws-state :activeFaults))))
+             diagnostic-workspace (plist-get ws-state :activeFaults)))
+           ;; Decoded with the other preconditions, before anything is
+           ;; retained: a malformed MergeStatus must reject the whole frame
+           ;; rather than land a render state whose merge half was dropped.
+           (merge-status
+            (agent-repl--frontend-parse-merge-status
+             (plist-get ws-state :mergeStatus) diagnostic-workspace)))
       ;; Validate every precondition before retaining the raw frame or mutating
       ;; workspace state, so a malformed composite verdict cannot partially
       ;; land.
@@ -437,11 +561,18 @@ Fails loudly on a missing/blank `workspace' (invariant violation)."
                                 :session-id session-id
                                 :controller-generation-id generation-id
                                 :active-faults faults))
+      ;; Stored VERBATIM, absence included.  The daemon rides the submessage
+      ;; only while it has a merge to report, so retaining the last one it
+      ;; sent would leave the narrator (merge-handlers.el) describing a phase
+      ;; the daemon has already moved past.
+      (agent-repl--ws-put workspace :pushed-merge-status merge-status)
       (agent-repl--log workspace
-                       "frontend-apply-workspace-state: %s -> %s connectivity=%s status=%s session=%S generation=%S faults=%S cause=%s seq=%s turn-active=%S live-tasks=%s merge-phase=%s merged-at=%s"
+                       "frontend-apply-workspace-state: %s -> %s connectivity=%s status=%s session=%S generation=%S faults=%S cause=%s seq=%s turn-active=%S live-tasks=%s merge-phase=%s merged-at=%s merge-status-phase=%s merge-status-run=%s"
                        previous keyword connectivity session-status session-id
                        generation-id faults cause-kind cause-seq turn-active
-                       live-tasks merge-phase merged-at)
+                       live-tasks merge-phase merged-at
+                       (plist-get merge-status :phase)
+                       (plist-get merge-status :run-id))
       ;; Session-ready latch (design §10 cutover gap): the SessionStart
       ;; managed hook that used to set the `:agent-ready' half of the
       ;; ws-fully-loaded latch was deleted in S2, orphaning

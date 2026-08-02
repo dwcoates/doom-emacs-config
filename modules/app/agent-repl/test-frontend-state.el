@@ -405,6 +405,187 @@ a wire shape; clearing on it would erase a restored merge."
     (should-error (agent-repl-test--apply-workspace-state
                    '(:workspace "ws1" :state "RENDER_STATE_UNSPECIFIED")))))
 
+;;;; ---- MergeStatus: the phase IS the oneof arm -------------------------
+
+(defmacro agent-repl-test--deftest-merge-phase (name arm keyword)
+  "Define a test asserting `MergeStatus' oneof ARM derives phase KEYWORD.
+NAME is the ert test-name suffix.  One arm per test — the derivation is
+the whole contract, so a broken arm must name itself in the failure."
+  `(ert-deftest ,(intern (format "agent-repl-test-merge-phase-%s" name)) ()
+     ,(format "MergeStatus arm `%s' derives the phase %s." arm keyword)
+     ;; Act / Assert
+     (should (eq (plist-get (agent-repl--frontend-parse-merge-status
+                             (list :runId "r1" ,arm nil) nil)
+                            :phase)
+                 ,keyword))))
+
+(agent-repl-test--deftest-merge-phase enqueued :enqueued :enqueued)
+(agent-repl-test--deftest-merge-phase before-action :beforeAction :before-action)
+(agent-repl-test--deftest-merge-phase cherry-picking :cherryPicking :cherry-picking)
+(agent-repl-test--deftest-merge-phase testing :testing :testing)
+(agent-repl-test--deftest-merge-phase conflict :conflict :conflict)
+(agent-repl-test--deftest-merge-phase after-action :afterAction :after-action)
+(agent-repl-test--deftest-merge-phase merged :merged :merged)
+(agent-repl-test--deftest-merge-phase failed :failed :failed)
+
+(ert-deftest agent-repl-test-merge-status-absent-is-nil ()
+  "No `mergeStatus' on the frame decodes to nil, never an invented phase."
+  ;; Act / Assert
+  (should-not (agent-repl--frontend-parse-merge-status nil nil)))
+
+(ert-deftest agent-repl-test-merge-status-no-arm-errors ()
+  "A MergeStatus with no oneof arm is malformed and fails loudly."
+  ;; Act / Assert
+  (should-error (agent-repl--frontend-parse-merge-status
+                 '(:runId "r1" :updatedAtMs "5") nil)))
+
+(ert-deftest agent-repl-test-merge-status-two-arms-error ()
+  "A MergeStatus with two oneof arms is malformed and fails loudly."
+  ;; Act / Assert
+  (should-error (agent-repl--frontend-parse-merge-status
+                 '(:runId "r1" :testing nil :conflict nil) nil)))
+
+(ert-deftest agent-repl-test-merge-status-unknown-arm-field-errors ()
+  "An arm field Emacs was never taught fails loudly (no silent drop)."
+  ;; Act / Assert
+  (should-error (agent-repl--frontend-parse-merge-status
+                 '(:runId "r1" :testing (:someNewField "x")) nil)))
+
+(ert-deftest agent-repl-test-merge-status-keeps-the-run-id ()
+  "The run id rides every decoded status."
+  ;; Act / Assert
+  (should (equal (plist-get (agent-repl--frontend-parse-merge-status
+                             '(:runId "run-7" :merged (:commitsTotal 3)) nil)
+                            :run-id)
+                 "run-7")))
+
+(ert-deftest agent-repl-test-merge-status-parses-int64-instants ()
+  "protojson int64 instants arrive as strings and decode to numbers."
+  ;; Arrange / Act
+  (let ((parsed (agent-repl--frontend-parse-merge-status
+                 '(:runId "r1" :phaseStartedAtMs "1700000000000"
+                   :updatedAtMs "1700000000500" :testing nil)
+                 nil)))
+    ;; Assert
+    (should (equal (plist-get parsed :phase-started-at-ms) 1700000000000))
+    (should (equal (plist-get parsed :updated-at-ms) 1700000000500))))
+
+(ert-deftest agent-repl-test-merge-status-flattens-queue-position ()
+  "The enqueued arm's position and depth land as flat plist keys."
+  ;; Arrange / Act
+  (let ((parsed (agent-repl--frontend-parse-merge-status
+                 '(:runId "r1" :enqueued (:position 2 :depth 5)) nil)))
+    ;; Assert
+    (should (equal (plist-get parsed :position) 2))
+    (should (equal (plist-get parsed :depth) 5))))
+
+(ert-deftest agent-repl-test-merge-status-flattens-pick-progress ()
+  "The cherry-picking arm's counts and current commit land as flat keys."
+  ;; Arrange / Act
+  (let ((parsed (agent-repl--frontend-parse-merge-status
+                 '(:runId "r1" :cherryPicking
+                   (:commitsTotal 4 :commitsLanded 2
+                    :currentSha "abc1234" :currentSubject "fix the thing"))
+                 nil)))
+    ;; Assert
+    (should (equal (plist-get parsed :commits-landed) 2))
+    (should (equal (plist-get parsed :commits-total) 4))
+    (should (equal (plist-get parsed :current-sha) "abc1234"))
+    (should (equal (plist-get parsed :current-subject) "fix the thing"))))
+
+(ert-deftest agent-repl-test-merge-status-flattens-the-conflicted-commit ()
+  "The conflict arm names the commit that conflicted."
+  ;; Act / Assert
+  (should (equal (plist-get (agent-repl--frontend-parse-merge-status
+                             '(:runId "r1" :conflict
+                               (:conflictedSha "def5678"
+                                :conflictedSubject "rename the widget"))
+                             nil)
+                            :conflicted-subject)
+                 "rename the widget")))
+
+(ert-deftest agent-repl-test-merge-status-flattens-the-failure-cause ()
+  "The failed arm carries the daemon's cause verbatim."
+  ;; Act / Assert
+  (should (equal (plist-get (agent-repl--frontend-parse-merge-status
+                             '(:runId "r1" :failed (:cause "lease unavailable"))
+                             nil)
+                            :cause)
+                 "lease unavailable")))
+
+(ert-deftest agent-repl-test-merge-status-flattens-the-after-action-error ()
+  "A merged run reports an after-action that failed."
+  ;; Act / Assert
+  (should (equal (plist-get (agent-repl--frontend-parse-merge-status
+                             '(:runId "r1" :merged
+                               (:commitsTotal 3 :afterActionError "tests failed"))
+                             nil)
+                            :after-action-error)
+                 "tests failed")))
+
+(ert-deftest agent-repl-test-merge-status-flattens-the-action-prompt ()
+  "A before-action arm carries the configured prompt for display."
+  ;; Act / Assert
+  (should (equal (plist-get (agent-repl--frontend-parse-merge-status
+                             '(:runId "r1" :beforeAction (:prompt "bump the version"))
+                             nil)
+                            :prompt)
+                 "bump the version")))
+
+(ert-deftest agent-repl-test-apply-workspace-state-stores-merge-status ()
+  "An applied frame's `mergeStatus' lands on `:pushed-merge-status'."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--register-ws "ws1")
+    ;; Act
+    (agent-repl-test--apply-workspace-state
+     '(:workspace "ws1" :state "RENDER_STATE_MERGING"
+       :mergeStatus (:runId "r1" :cherryPicking
+                     (:commitsTotal 2 :commitsLanded 1))))
+    ;; Assert
+    (should (eq (plist-get (agent-repl--ws-get "ws1" :pushed-merge-status) :phase)
+                :cherry-picking))))
+
+(ert-deftest agent-repl-test-apply-workspace-state-clears-a-gone-merge-status ()
+  "A later frame without `mergeStatus' clears the retained one."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--register-ws "ws1")
+    (agent-repl-test--apply-workspace-state
+     '(:workspace "ws1" :state "RENDER_STATE_MERGING"
+       :mergeStatus (:runId "r1" :cherryPicking (:commitsTotal 2))))
+    ;; Act
+    (agent-repl-test--apply-workspace-state
+     '(:workspace "ws1" :state "RENDER_STATE_READY"))
+    ;; Assert
+    (should-not (agent-repl--ws-get "ws1" :pushed-merge-status))))
+
+(ert-deftest agent-repl-test-apply-workspace-state-rejects-a-malformed-merge-status ()
+  "A malformed `mergeStatus' rejects the whole frame before any mutation."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--register-ws "ws1")
+    ;; Act / Assert
+    (should-error (agent-repl-test--apply-workspace-state
+                   '(:workspace "ws1" :state "RENDER_STATE_MERGING"
+                     :mergeStatus (:runId "r1"))))
+    (should-not (agent-repl--ws-get "ws1" :pushed-render-state))))
+
+(ert-deftest agent-repl-test-apply-workspace-state-keeps-the-flat-merge-phase ()
+  "The pre-cutover flat `mergePhase' still lands in the meta plist."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--register-ws "ws1")
+    ;; Act
+    (agent-repl-test--apply-workspace-state
+     '(:workspace "ws1" :state "RENDER_STATE_MERGING"
+       :mergePhase "merging"
+       :mergeStatus (:runId "r1" :cherryPicking (:commitsTotal 2))))
+    ;; Assert
+    (should (equal (plist-get (agent-repl--ws-get "ws1" :pushed-render-state-meta)
+                              :merge-phase)
+                   "merging"))))
+
 ;;;; ---- StateSnapshot resync --------------------------------------------
 
 (ert-deftest agent-repl-test-apply-snapshot-applies-every-workspace ()
