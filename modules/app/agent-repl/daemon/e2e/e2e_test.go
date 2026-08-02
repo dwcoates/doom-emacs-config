@@ -413,6 +413,64 @@ type e2eHarness struct {
 	// withIdleSweeper; a test that never asks for one cannot accidentally
 	// hibernate its own session.
 	sweepIdle chan<- time.Time
+	// vendors announces every vendor-uuid write the daemon makes, so a test
+	// waiting on an asynchronous conversation rotation waits on the WRITE
+	// rather than re-reading /sessions on an interval.
+	vendors *vendorIdentities
+}
+
+// vendorIdentities publishes the daemon's vendor-uuid writes as events.
+//
+// It decorates the production *server.RegistryRegistrar, which is the single
+// seam the session controller adopts (AdoptVendorSessionID) and re-adopts
+// (ClaudeSessionIDChanged) a conversation's uuid through — so every write that
+// can move the value /sessions reports passes here first, already durable by
+// the time the announcement goes out.
+//
+// The broadcast is a channel closed and replaced per write rather than a
+// buffered signal, so any number of waiters wake on any write and none can
+// consume another's wakeup.
+type vendorIdentities struct {
+	*server.RegistryRegistrar
+
+	mu      sync.Mutex
+	changed chan struct{}
+}
+
+func newVendorIdentities(inner *server.RegistryRegistrar) *vendorIdentities {
+	return &vendorIdentities{RegistryRegistrar: inner, changed: make(chan struct{})}
+}
+
+// pending returns the channel that closes on the NEXT vendor-uuid write. A
+// waiter takes it BEFORE reading the value it is waiting on, so a write landing
+// between that read and the wait is not missed.
+func (v *vendorIdentities) pending() <-chan struct{} {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return v.changed
+}
+
+func (v *vendorIdentities) announce() {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	close(v.changed)
+	v.changed = make(chan struct{})
+}
+
+func (v *vendorIdentities) ClaudeSessionIDChanged(sessionID, claudeSessionID string) bool {
+	adopted := v.RegistryRegistrar.ClaudeSessionIDChanged(sessionID, claudeSessionID)
+	if adopted {
+		v.announce()
+	}
+	return adopted
+}
+
+func (v *vendorIdentities) AdoptVendorSessionID(sessionID, claudeSessionID string) (bool, string, bool) {
+	rotated, previous, adopted := v.RegistryRegistrar.AdoptVendorSessionID(sessionID, claudeSessionID)
+	if adopted {
+		v.announce()
+	}
+	return rotated, previous, adopted
 }
 
 // harnessTuning is the small set of knobs a test may bend on the otherwise
@@ -627,6 +685,11 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 	e2eSeqStore := server.NewRegistrySeqStore(reg, t.Logf)
 	modelCatalogs := server.NewSessionModelCatalogs()
 	registrar := &server.RegistryRegistrar{Reg: reg, Logf: t.Logf, ModelCatalogs: modelCatalogs}
+	// The controller drives the registrar through the DECORATED value, which is
+	// what makes vendor-uuid writes observable as events. It forwards every
+	// call to the production registrar above, so the behaviour under test is
+	// unchanged — only the harness gains a notification.
+	vendors := newVendorIdentities(registrar)
 	// ONE progress resolver, shared by the session controller (which feeds it interrupts,
 	// permission and queue counts) and WireAgentShim (which fans its views out
 	// to frontends) — the same single-instance wiring main.go does. Two
@@ -648,7 +711,7 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 		SeqStore:          e2eSeqStore,
 		ClearCompactStore: e2eSeqStore,
 		PermissionModes:   server.NewRegistryModeStore(reg),
-		Registrar:         registrar,
+		Registrar:         vendors,
 		ModelCatalogs:     registrar,
 		DaemonVersion:     "0.1.0-e2e",
 		ProtocolVersion:   "1",
@@ -742,7 +805,7 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 	mux.HandleFunc("/frontend", agentShim.Server.ServeWS)
 	ts := httptest.NewServer(mux)
 	t.Cleanup(ts.Close)
-	h := &e2eHarness{ts: ts, geometry: geometryStore, merges: mergeBinding, shimSpawns: spawnCount.Load}
+	h := &e2eHarness{ts: ts, geometry: geometryStore, merges: mergeBinding, shimSpawns: spawnCount.Load, vendors: vendors}
 	if sweepTicks != nil {
 		h.sweepIdle = sweepTicks
 	}
