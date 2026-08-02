@@ -30,6 +30,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"claude-repld/internal/dlog"
 )
@@ -61,6 +62,20 @@ type Record struct {
 	SourceDir string
 	// TargetDir is the worktree the cherry-pick lands in.
 	TargetDir string
+	// BeforeAction is the `before_ws_merge` prompt the workspace was CREATED
+	// with, run against the workspace's own session under the merge lease before
+	// the cherry-pick plan is computed. Empty for the common case.
+	//
+	// IT LIVES HERE BECAUSE IT IS MERGE GEOMETRY. Like the other three
+	// coordinates it is a creation-time fact whose only consumer is the merge,
+	// and this record is already the one thing a merge looks a workspace up in.
+	// A second store keyed the same way would be a second place for the merge to
+	// find a different answer.
+	//
+	// It is deliberately NOT part of the disagreement check below: a BACKFILLED
+	// record cannot know it (git carries no such fact), so counting its absence
+	// as a conflict would refuse every backfill for a workspace that has one.
+	BeforeAction string
 	// Origin is how the record was obtained; see Origin.
 	Origin Origin
 }
@@ -125,6 +140,15 @@ func Open(db *sql.DB, logf dlog.Logf) (*Store, error) {
 	`); err != nil {
 		return nil, fmt.Errorf("geometry: create schema: %w", err)
 	}
+	// before_action was added after the table shipped, so it is a migration
+	// rather than a column of the CREATE above: a database created by an older
+	// daemon still has the four-column table, and recreating it would drop every
+	// recorded geometry. A duplicate-column error is the migration having already
+	// run, which is the only reading of it.
+	if _, err := db.Exec(`ALTER TABLE workspace_merge_geometry ADD COLUMN before_action TEXT NOT NULL DEFAULT ''`); err != nil &&
+		!strings.Contains(err.Error(), "duplicate column name") {
+		return nil, fmt.Errorf("geometry: add before_action column: %w", err)
+	}
 	return &Store{db: db, logf: logf}, nil
 }
 
@@ -182,14 +206,18 @@ func (s *Store) Record(ctx context.Context, rec Record) error {
 		}
 	}
 	if _, err := s.db.ExecContext(ctx, `
-		INSERT INTO workspace_merge_geometry(workspace, source_branch, source_dir, target_dir, origin)
-		VALUES (?, ?, ?, ?, ?)
+		INSERT INTO workspace_merge_geometry(workspace, source_branch, source_dir, target_dir, before_action, origin)
+		VALUES (?, ?, ?, ?, ?, ?)
 		ON CONFLICT(workspace) DO UPDATE SET
 			source_branch = excluded.source_branch,
 			source_dir    = excluded.source_dir,
 			target_dir    = excluded.target_dir,
+			-- A DERIVED record never erases a recorded action. Only the creation
+			-- path knows one, so a backfill writing its empty string over the real
+			-- value would silently drop an action the user asked for.
+			before_action = CASE WHEN excluded.before_action = '' THEN workspace_merge_geometry.before_action ELSE excluded.before_action END,
 			origin        = excluded.origin
-	`, rec.Workspace, rec.SourceBranch, rec.SourceDir, rec.TargetDir, string(rec.Origin)); err != nil {
+	`, rec.Workspace, rec.SourceBranch, rec.SourceDir, rec.TargetDir, rec.BeforeAction, string(rec.Origin)); err != nil {
 		s.logf("geometry: record WRITE FAILED {workspace=%s origin=%s}: %v", rec.Workspace, rec.Origin, err)
 		return fmt.Errorf("geometry: record %s: %w", rec.Workspace, err)
 	}
@@ -208,10 +236,11 @@ func (s *Store) Lookup(ctx context.Context, workspace string) (Record, bool, err
 	}
 	rec := Record{Workspace: key}
 	var origin string
+	var beforeAction sql.NullString
 	err := s.db.QueryRowContext(ctx, `
-		SELECT source_branch, source_dir, target_dir, origin
+		SELECT source_branch, source_dir, target_dir, before_action, origin
 		FROM workspace_merge_geometry WHERE workspace = ?
-	`, key).Scan(&rec.SourceBranch, &rec.SourceDir, &rec.TargetDir, &origin)
+	`, key).Scan(&rec.SourceBranch, &rec.SourceDir, &rec.TargetDir, &beforeAction, &origin)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Record{}, false, nil
 	}
@@ -219,6 +248,7 @@ func (s *Store) Lookup(ctx context.Context, workspace string) (Record, bool, err
 		s.logf("geometry: lookup FAILED {workspace=%s}: %v", key, err)
 		return Record{}, false, fmt.Errorf("geometry: lookup %s: %w", key, err)
 	}
+	rec.BeforeAction = beforeAction.String
 	rec.Origin = Origin(origin)
 	return rec, true, nil
 }

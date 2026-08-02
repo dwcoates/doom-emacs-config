@@ -6,8 +6,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
+	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 	"claude-repld/internal/gitexec"
 )
 
@@ -27,8 +29,9 @@ func TestMain(m *testing.M) {
 // failOn is set, RecordMergeTransition returns an error for that phase (to
 // exercise sink-error propagation).
 type recordingSink struct {
-	got    []transition
-	failOn Phase
+	got      []transition
+	statuses []*frontendv1.MergeStatus
+	failOn   Phase
 }
 
 type transition struct {
@@ -43,6 +46,47 @@ func (s *recordingSink) RecordMergeTransition(ws string, phase Phase, cause stri
 		return errFakeSink
 	}
 	return nil
+}
+
+// RecordMergeStatus makes the double the StatusSink too, exactly as the
+// production sink is both: one call carries the axis row and the phase status,
+// so a test cannot observe one without the other any more than production can.
+func (s *recordingSink) RecordMergeStatus(ws string, phase Phase, cause string, status *frontendv1.MergeStatus) error {
+	s.statuses = append(s.statuses, status)
+	return s.RecordMergeTransition(ws, phase, cause)
+}
+
+var (
+	_ StateSink  = (*recordingSink)(nil)
+	_ StatusSink = (*recordingSink)(nil)
+)
+
+// withRun attaches a run to a driver-level request. merge.Driver refuses a
+// request that carries none — a merge that publishes no phase status lands
+// commits no frontend can watch — and in production merge.Coordinator mints it
+// at admission. These tests drive the driver directly, so they mint their own.
+func withRun(t *testing.T, sink StatusSink, req Request) Request {
+	t.Helper()
+	run, err := NewRunStatus(sink, t.Logf, req.Workspace, testClock())
+	if err != nil {
+		t.Fatalf("NewRunStatus: %v", err)
+	}
+	req.Run = run
+	return req
+}
+
+// testClock is a monotonically advancing millisecond clock. It is deliberately
+// not time.Now: a test asserting on the phase timestamps must not depend on how
+// fast the machine ran.
+func testClock() func() int64 {
+	var at int64 = 1_000_000
+	var mu sync.Mutex
+	return func() int64 {
+		mu.Lock()
+		defer mu.Unlock()
+		at++
+		return at
+	}
 }
 
 func (s *recordingSink) phases() []Phase {
@@ -120,7 +164,7 @@ func TestMergeIgnoresAnInheritedGitDir(t *testing.T) {
 
 	sink := &recordingSink{}
 	e := newTestDriver(t, sink)
-	req := Request{Workspace: "/ws/leak-ws", Name: "leak-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+	req := withRun(t, sink, Request{Workspace: "/ws/leak-ws", Name: "leak-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
 
 	elsewhere := t.TempDir()
 	t.Setenv("GIT_DIR", filepath.Join(elsewhere, ".git"))
@@ -220,7 +264,7 @@ func TestNewDriverRequiresDependencies(t *testing.T) {
 }
 
 func TestMergeRejectsIncompleteRequest(t *testing.T) {
-	base := Request{Workspace: "/ws/ws", Name: "ws", SourceBranch: "feature", SourceDir: "/s", TargetDir: "/t"}
+	base := withRun(t, &recordingSink{}, Request{Workspace: "/ws/ws", Name: "ws", SourceBranch: "feature", SourceDir: "/s", TargetDir: "/t"})
 	tests := []struct {
 		name  string
 		mutat func(*Request)
@@ -262,7 +306,7 @@ func TestMergeCleanCherryPick(t *testing.T) {
 
 	sink := &recordingSink{}
 	e := newTestDriver(t, sink)
-	req := Request{Workspace: "/ws/clean-ws", Name: "clean-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+	req := withRun(t, sink, Request{Workspace: "/ws/clean-ws", Name: "clean-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
 
 	// Act.
 	res, err := e.Merge(context.Background(), req)
@@ -288,8 +332,9 @@ func TestMergeCleanCherryPick(t *testing.T) {
 	if res.Tag != "merge/clean-ws" {
 		t.Errorf("res.Tag = %q, want merge/clean-ws", res.Tag)
 	}
-	// The opening transition, then one `testing 1/1 ...` per landed commit.
-	assertPhases(t, sink.phases(), PhaseMerging, PhaseMerging, PhaseMerged)
+	// The opening transition, then a cherry_picking and a testing phase per
+	// commit the replay picks, then the terminal merged.
+	assertPhases(t, sink.phases(), PhaseMerging, PhaseMerging, PhaseMerging, PhaseMerged)
 }
 
 // --- conflict detection -------------------------------------------------
@@ -308,7 +353,7 @@ func TestMergeTransitionsAreEmittedOnTheStateKeyNotTheName(t *testing.T) {
 
 	sink := &recordingSink{}
 	e := newTestDriver(t, sink)
-	req := Request{Workspace: "/ws/keyed-ws", Name: "keyed-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+	req := withRun(t, sink, Request{Workspace: "/ws/keyed-ws", Name: "keyed-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
 
 	// Act.
 	res, err := e.Merge(context.Background(), req)
@@ -343,7 +388,7 @@ func TestMergeConflictDetection(t *testing.T) {
 
 	sink := &recordingSink{}
 	e := newTestDriver(t, sink)
-	req := Request{Workspace: "/ws/cf-ws", Name: "cf-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+	req := withRun(t, sink, Request{Workspace: "/ws/cf-ws", Name: "cf-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
 
 	// Act.
 	res, err := e.Merge(context.Background(), req)
@@ -362,7 +407,7 @@ func TestMergeConflictDetection(t *testing.T) {
 	if !cherryPickHeadPresent(t, target) {
 		t.Errorf("CHERRY_PICK_HEAD absent — driver aborted the conflict instead of leaving it in tree")
 	}
-	assertPhases(t, sink.phases(), PhaseMerging, PhaseMergeConflict)
+	assertPhases(t, sink.phases(), PhaseMerging, PhaseMerging, PhaseMergeConflict)
 }
 
 // --- resume-after-resolve completing the merge --------------------------
@@ -380,7 +425,7 @@ func TestResumeCompletesMergeAndOrdersTransitions(t *testing.T) {
 
 	sink := &recordingSink{}
 	e := newTestDriver(t, sink)
-	req := Request{Workspace: "/ws/rz-ws", Name: "rz-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+	req := withRun(t, sink, Request{Workspace: "/ws/rz-ws", Name: "rz-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
 
 	if res, err := e.Merge(context.Background(), req); err != nil || res.Outcome != OutcomeConflict {
 		t.Fatalf("setup Merge() res=%+v err=%v, want conflict", res, err)
@@ -410,7 +455,7 @@ func TestResumeCompletesMergeAndOrdersTransitions(t *testing.T) {
 	}
 	// The full ordered sequence across Merge + Resume: the opening pick, the
 	// conflict, the resume, the test gate on the RESUMED commit, the terminal.
-	assertPhases(t, sink.phases(), PhaseMerging, PhaseMergeConflict, PhaseMerging, PhaseMerging, PhaseMerged)
+	assertPhases(t, sink.phases(), PhaseMerging, PhaseMerging, PhaseMergeConflict, PhaseMerging, PhaseMerging, PhaseMerged)
 }
 
 func TestResumeWithoutInProgressPickFails(t *testing.T) {
@@ -419,7 +464,7 @@ func TestResumeWithoutInProgressPickFails(t *testing.T) {
 	featureDir := addFeatureWorktree(t, target)
 	sink := &recordingSink{}
 	e := newTestDriver(t, sink)
-	req := Request{Workspace: "/ws/no-pick", Name: "no-pick", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+	req := withRun(t, sink, Request{Workspace: "/ws/no-pick", Name: "no-pick", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
 
 	// Act.
 	_, err := e.Resume(context.Background(), req)
@@ -458,7 +503,7 @@ func TestMergeFlattensAMergeCommitInTheRange(t *testing.T) {
 
 	sink := &recordingSink{}
 	e := newTestDriver(t, sink)
-	req := Request{Workspace: "/ws/flat-ws", Name: "flat-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+	req := withRun(t, sink, Request{Workspace: "/ws/flat-ws", Name: "flat-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
 
 	// Act.
 	res, err := e.Merge(context.Background(), req)
@@ -475,7 +520,7 @@ func TestMergeFlattensAMergeCommitInTheRange(t *testing.T) {
 			t.Errorf("%s did not land on the target: %v", name, statErr)
 		}
 	}
-	assertPhases(t, sink.phases(), PhaseMerging, PhaseMerging, PhaseMerging, PhaseMerged)
+	assertPhases(t, sink.phases(), PhaseMerging, PhaseMerging, PhaseMerging, PhaseMerging, PhaseMerging, PhaseMerged)
 }
 
 // --- preconditions abort with state intact ------------------------------
@@ -491,7 +536,7 @@ func TestMergeDirtySourceAbortsWithStateIntact(t *testing.T) {
 
 	sink := &recordingSink{}
 	e := newTestDriver(t, sink)
-	req := Request{Workspace: "/ws/dirty-ws", Name: "dirty-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+	req := withRun(t, sink, Request{Workspace: "/ws/dirty-ws", Name: "dirty-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
 
 	// Act.
 	_, err := e.Merge(context.Background(), req)
@@ -511,7 +556,7 @@ func TestMergeMissingBranchAbortsWithStateIntact(t *testing.T) {
 	featureDir := addFeatureWorktree(t, target)
 	sink := &recordingSink{}
 	e := newTestDriver(t, sink)
-	req := Request{Workspace: "/ws/nb-ws", Name: "nb-ws", SourceBranch: "does-not-exist", SourceDir: featureDir, TargetDir: target}
+	req := withRun(t, sink, Request{Workspace: "/ws/nb-ws", Name: "nb-ws", SourceBranch: "does-not-exist", SourceDir: featureDir, TargetDir: target})
 
 	// Act.
 	_, err := e.Merge(context.Background(), req)
@@ -538,7 +583,7 @@ func TestMergeDirtyStagedSourceAbortsWithStateIntact(t *testing.T) {
 
 	sink := &recordingSink{}
 	e := newTestDriver(t, sink)
-	req := Request{Workspace: "/ws/staged-ws", Name: "staged-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+	req := withRun(t, sink, Request{Workspace: "/ws/staged-ws", Name: "staged-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
 
 	// Act.
 	_, err := e.Merge(context.Background(), req)
@@ -565,7 +610,7 @@ func TestMergeEmptyRangeReportsAlreadyIncorporated(t *testing.T) {
 
 	sink := &recordingSink{}
 	e := newTestDriver(t, sink)
-	req := Request{Workspace: "/ws/empty-ws", Name: "empty-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+	req := withRun(t, sink, Request{Workspace: "/ws/empty-ws", Name: "empty-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
 
 	// Act.
 	res, err := e.Merge(context.Background(), req)
@@ -594,7 +639,7 @@ func TestMergeRangeAlreadyIncorporatedByCherryPickBase(t *testing.T) {
 
 	sink := &recordingSink{}
 	e := newTestDriver(t, sink)
-	req := Request{Workspace: "/ws/inc-ws", Name: "inc-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+	req := withRun(t, sink, Request{Workspace: "/ws/inc-ws", Name: "inc-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
 
 	// Act.
 	res, err := e.Merge(context.Background(), req)
@@ -639,7 +684,7 @@ func TestMergeRangeAlreadyIncorporatedByPatchID(t *testing.T) {
 
 	sink := &recordingSink{}
 	e := newTestDriver(t, sink)
-	req := Request{Workspace: "/ws/pid-ws", Name: "pid-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+	req := withRun(t, sink, Request{Workspace: "/ws/pid-ws", Name: "pid-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
 
 	// Act.
 	res, err := e.Merge(context.Background(), req)
@@ -669,7 +714,7 @@ func TestMergeTargetDirtyUnstagedFails(t *testing.T) {
 
 	sink := &recordingSink{}
 	e := newTestDriver(t, sink)
-	req := Request{Workspace: "/ws/tdirty-ws", Name: "tdirty-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+	req := withRun(t, sink, Request{Workspace: "/ws/tdirty-ws", Name: "tdirty-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
 
 	// Act.
 	res, err := e.Merge(context.Background(), req)
@@ -684,7 +729,7 @@ func TestMergeTargetDirtyUnstagedFails(t *testing.T) {
 	if got := readFile(t, target, "base.txt"); got != "local uncommitted work\n" {
 		t.Errorf("target base.txt = %q; the refused merge overwrote uncommitted work", got)
 	}
-	assertPhases(t, sink.phases(), PhaseMerging, PhaseMergeFailed)
+	assertPhases(t, sink.phases(), PhaseMerging, PhaseMerging, PhaseMergeFailed)
 }
 
 func TestMergeTargetDirtyStagedFails(t *testing.T) {
@@ -701,7 +746,7 @@ func TestMergeTargetDirtyStagedFails(t *testing.T) {
 
 	sink := &recordingSink{}
 	e := newTestDriver(t, sink)
-	req := Request{Workspace: "/ws/tstaged-ws", Name: "tstaged-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+	req := withRun(t, sink, Request{Workspace: "/ws/tstaged-ws", Name: "tstaged-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
 
 	// Act.
 	res, err := e.Merge(context.Background(), req)
@@ -716,7 +761,7 @@ func TestMergeTargetDirtyStagedFails(t *testing.T) {
 	if cherryPickHeadPresent(t, target) {
 		t.Errorf("CHERRY_PICK_HEAD present; a refused pick is not a resolvable conflict")
 	}
-	assertPhases(t, sink.phases(), PhaseMerging, PhaseMergeFailed)
+	assertPhases(t, sink.phases(), PhaseMerging, PhaseMerging, PhaseMergeFailed)
 }
 
 func TestMergeUntrackedCollisionFails(t *testing.T) {
@@ -736,7 +781,7 @@ func TestMergeUntrackedCollisionFails(t *testing.T) {
 
 	sink := &recordingSink{}
 	e := newTestDriver(t, sink)
-	req := Request{Workspace: "/ws/untracked-ws", Name: "untracked-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+	req := withRun(t, sink, Request{Workspace: "/ws/untracked-ws", Name: "untracked-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
 
 	// Act.
 	res, err := e.Merge(context.Background(), req)
@@ -755,7 +800,7 @@ func TestMergeUntrackedCollisionFails(t *testing.T) {
 		t.Errorf("merge/untracked-ws tagged on a failed merge; git tag -l = %q", tags)
 	}
 	// The first commit landed and was tested; the second is what git refused.
-	assertPhases(t, sink.phases(), PhaseMerging, PhaseMerging, PhaseMergeFailed)
+	assertPhases(t, sink.phases(), PhaseMerging, PhaseMerging, PhaseMerging, PhaseMerging, PhaseMergeFailed)
 }
 
 // --- resume that hits a further conflict --------------------------------
@@ -778,7 +823,7 @@ func TestResumeSecondConflictReEmitsConflict(t *testing.T) {
 
 	sink := &recordingSink{}
 	e := newTestDriver(t, sink)
-	req := Request{Workspace: "/ws/rz2-ws", Name: "rz2-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+	req := withRun(t, sink, Request{Workspace: "/ws/rz2-ws", Name: "rz2-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
 
 	first, err := e.Merge(context.Background(), req)
 	if err != nil || first.Outcome != OutcomeConflict {
@@ -807,7 +852,7 @@ func TestResumeSecondConflictReEmitsConflict(t *testing.T) {
 	if tags := strings.TrimSpace(gitRun(t, target, "tag", "-l", "merge/rz2-ws")); tags != "" {
 		t.Errorf("merge/rz2-ws tagged while still conflicted; git tag -l = %q", tags)
 	}
-	assertPhases(t, sink.phases(), PhaseMerging, PhaseMergeConflict, PhaseMerging, PhaseMerging, PhaseMergeConflict)
+	assertPhases(t, sink.phases(), PhaseMerging, PhaseMerging, PhaseMergeConflict, PhaseMerging, PhaseMerging, PhaseMerging, PhaseMergeConflict)
 }
 
 // --- sink-error propagation ---------------------------------------------
@@ -824,7 +869,7 @@ func TestMergeSinkFailureOnMergingAbortsBeforeThePick(t *testing.T) {
 
 	sink := &recordingSink{failOn: PhaseMerging}
 	e := newTestDriver(t, sink)
-	req := Request{Workspace: "/ws/sink0-ws", Name: "sink0-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+	req := withRun(t, sink, Request{Workspace: "/ws/sink0-ws", Name: "sink0-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
 
 	// Act.
 	_, err := e.Merge(context.Background(), req)
@@ -860,7 +905,7 @@ func TestResumeSurfacesSinkError(t *testing.T) {
 
 	sink := &recordingSink{}
 	e := newTestDriver(t, sink)
-	req := Request{Workspace: "/ws/rsink-ws", Name: "rsink-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+	req := withRun(t, sink, Request{Workspace: "/ws/rsink-ws", Name: "rsink-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
 	if res, err := e.Merge(context.Background(), req); err != nil || res.Outcome != OutcomeConflict {
 		t.Fatalf("setup Merge() res=%+v err=%v, want conflict", res, err)
 	}
@@ -894,7 +939,7 @@ func TestMergeSurfacesSinkError(t *testing.T) {
 
 	sink := &recordingSink{failOn: PhaseMerged}
 	e := newTestDriver(t, sink)
-	req := Request{Workspace: "/ws/sink-ws", Name: "sink-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+	req := withRun(t, sink, Request{Workspace: "/ws/sink-ws", Name: "sink-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
 
 	// Act.
 	_, err := e.Merge(context.Background(), req)
@@ -959,7 +1004,7 @@ func TestMergeRefusesATargetWithStaleSequencerState(t *testing.T) {
 
 	sink := &recordingSink{}
 	e := newTestDriver(t, sink)
-	req := Request{Workspace: "/ws/seq-ws", Name: "seq-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+	req := withRun(t, sink, Request{Workspace: "/ws/seq-ws", Name: "seq-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
 
 	// Act.
 	_, err := e.Merge(context.Background(), req)
@@ -988,7 +1033,7 @@ func TestMergeRunsTheSuiteOncePerLandedCommit(t *testing.T) {
 	sink := &recordingSink{}
 	suite := &fakeSuite{}
 	e := newTestDriverWithSuite(t, sink, suite)
-	req := Request{Workspace: "/ws/gate-ws", Name: "gate-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+	req := withRun(t, sink, Request{Workspace: "/ws/gate-ws", Name: "gate-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
 
 	// Act.
 	res, err := e.Merge(context.Background(), req)
@@ -1041,7 +1086,7 @@ func TestMergeOrdersEachSuiteRunAfterItsOwnCommit(t *testing.T) {
 		return suite.RunSuite(ctx, dir)
 	})
 	e := newTestDriverWithSuite(t, sink, observing)
-	req := Request{Workspace: "/ws/order-ws", Name: "order-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+	req := withRun(t, sink, Request{Workspace: "/ws/order-ws", Name: "order-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
 
 	// Act.
 	if _, err := e.Merge(context.Background(), req); err != nil {
@@ -1072,7 +1117,7 @@ func TestMergeSkipsTheGateWhenTheTargetDeclaresNoEntrypoint(t *testing.T) {
 	}
 	sink := &recordingSink{}
 	e := newTestDriverWithSuite(t, sink, runner)
-	req := Request{Workspace: "/ws/noentry-ws", Name: "noentry-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+	req := withRun(t, sink, Request{Workspace: "/ws/noentry-ws", Name: "noentry-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
 
 	// Act.
 	res, err := e.Merge(context.Background(), req)
@@ -1107,7 +1152,7 @@ func TestMergeReportsATestFailureWithTheFailingCommitAndTail(t *testing.T) {
 	sink := &recordingSink{}
 	suite := &fakeSuite{verdicts: []SuiteResult{{Passed: false, Tail: "FAIL: agent-repl-suite"}}}
 	e := newTestDriverWithSuite(t, sink, suite)
-	req := Request{Workspace: "/ws/tf-ws", Name: "tf-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+	req := withRun(t, sink, Request{Workspace: "/ws/tf-ws", Name: "tf-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
 
 	// Act.
 	res, err := e.Merge(context.Background(), req)
@@ -1130,7 +1175,7 @@ func TestMergeReportsATestFailureWithTheFailingCommitAndTail(t *testing.T) {
 		t.Errorf("res.PreMergeHead = %q, want the pre-merge HEAD %q", res.PreMergeHead, head)
 	}
 	// No terminal transition: the coordinator classifies this one.
-	assertPhases(t, sink.phases(), PhaseMerging, PhaseMerging)
+	assertPhases(t, sink.phases(), PhaseMerging, PhaseMerging, PhaseMerging)
 }
 
 func TestMergeStopsPickingAfterATestFailure(t *testing.T) {
@@ -1146,7 +1191,7 @@ func TestMergeStopsPickingAfterATestFailure(t *testing.T) {
 	sink := &recordingSink{}
 	suite := &fakeSuite{verdicts: []SuiteResult{{Passed: false, Tail: "boom"}}}
 	e := newTestDriverWithSuite(t, sink, suite)
-	req := Request{Workspace: "/ws/stop-ws", Name: "stop-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+	req := withRun(t, sink, Request{Workspace: "/ws/stop-ws", Name: "stop-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
 
 	// Act.
 	if _, err := e.Merge(context.Background(), req); err != nil {
@@ -1170,7 +1215,7 @@ func TestMergeSurfacesAnUnrunnableSuite(t *testing.T) {
 	sink := &recordingSink{}
 	suite := &fakeSuite{err: sentinelError("suite binary vanished")}
 	e := newTestDriverWithSuite(t, sink, suite)
-	req := Request{Workspace: "/ws/unrun-ws", Name: "unrun-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+	req := withRun(t, sink, Request{Workspace: "/ws/unrun-ws", Name: "unrun-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
 
 	// Act.
 	_, err := e.Merge(context.Background(), req)
@@ -1197,7 +1242,7 @@ func TestContinueAfterTestFixCommitsTheStagedFixAndFinishesTheRange(t *testing.T
 	sink := &recordingSink{}
 	suite := &fakeSuite{verdicts: []SuiteResult{{Passed: false, Tail: "boom"}, {Passed: true}}}
 	e := newTestDriverWithSuite(t, sink, suite)
-	req := Request{Workspace: "/ws/fix-ws", Name: "fix-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+	req := withRun(t, sink, Request{Workspace: "/ws/fix-ws", Name: "fix-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
 	first, err := e.Merge(context.Background(), req)
 	if err != nil || first.Outcome != OutcomeTestFailed {
 		t.Fatalf("setup Merge() res=%+v err=%v, want test_failed", first, err)
@@ -1236,7 +1281,7 @@ func TestContinueAfterTestFixReportsAStillFailingSuite(t *testing.T) {
 	sink := &recordingSink{}
 	suite := &fakeSuite{verdicts: []SuiteResult{{Passed: false, Tail: "still boom"}}}
 	e := newTestDriverWithSuite(t, sink, suite)
-	req := Request{Workspace: "/ws/nofix-ws", Name: "nofix-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+	req := withRun(t, sink, Request{Workspace: "/ws/nofix-ws", Name: "nofix-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
 	first, err := e.Merge(context.Background(), req)
 	if err != nil || first.Outcome != OutcomeTestFailed {
 		t.Fatalf("setup Merge() res=%+v err=%v, want test_failed", first, err)
@@ -1270,7 +1315,7 @@ func TestResumeGatesTheResolvedCommitOnTheSuite(t *testing.T) {
 	sink := &recordingSink{}
 	suite := &fakeSuite{verdicts: []SuiteResult{{Passed: false, Tail: "resolved badly"}}}
 	e := newTestDriverWithSuite(t, sink, suite)
-	req := Request{Workspace: "/ws/rzgate-ws", Name: "rzgate-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+	req := withRun(t, sink, Request{Workspace: "/ws/rzgate-ws", Name: "rzgate-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
 	if res, err := e.Merge(context.Background(), req); err != nil || res.Outcome != OutcomeConflict {
 		t.Fatalf("setup Merge() res=%+v err=%v, want conflict", res, err)
 	}
@@ -1305,7 +1350,7 @@ func TestRollbackReturnsTheTargetToItsPreMergeHead(t *testing.T) {
 	sink := &recordingSink{}
 	suite := &fakeSuite{verdicts: []SuiteResult{{Passed: false, Tail: "boom"}}}
 	e := newTestDriverWithSuite(t, sink, suite)
-	req := Request{Workspace: "/ws/rb-ws", Name: "rb-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+	req := withRun(t, sink, Request{Workspace: "/ws/rb-ws", Name: "rb-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
 	res, err := e.Merge(context.Background(), req)
 	if err != nil || res.Outcome != OutcomeTestFailed {
 		t.Fatalf("setup Merge() res=%+v err=%v, want test_failed", res, err)
@@ -1330,7 +1375,7 @@ func TestRollbackWithoutAHeadIsRefused(t *testing.T) {
 	target := initTarget(t)
 	featureDir := addFeatureWorktree(t, target)
 	e := newTestDriver(t, &recordingSink{})
-	req := Request{Workspace: "/ws/rb0-ws", Name: "rb0-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+	req := withRun(t, &recordingSink{}, Request{Workspace: "/ws/rb0-ws", Name: "rb0-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
 
 	// Act.
 	err := e.Rollback(context.Background(), req, "")
@@ -1359,7 +1404,7 @@ func TestMergeReplayedAfterABounceSkipsTheCommitsThatAlreadyLanded(t *testing.T)
 	sink := &recordingSink{}
 	suite := &fakeSuite{verdicts: []SuiteResult{{Passed: false, Tail: "the daemon died here"}}}
 	e := newTestDriverWithSuite(t, sink, suite)
-	req := Request{Workspace: "/ws/replay-ws", Name: "replay-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target}
+	req := withRun(t, sink, Request{Workspace: "/ws/replay-ws", Name: "replay-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
 	if res, err := e.Merge(context.Background(), req); err != nil || res.Outcome != OutcomeTestFailed {
 		t.Fatalf("setup Merge() res=%+v err=%v, want test_failed", res, err)
 	}
