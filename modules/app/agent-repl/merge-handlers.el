@@ -26,18 +26,23 @@
 ;;     (`merge_queue_position' / `merge_queue_depth') and are RENDERED,
 ;;     never derived.
 ;;
-;; Emacs reacts to merge state in exactly two places, both outside this
-;; file: the state icons that render the pushed merge states, and the
-;; kill guard that refuses to tear down a workspace whose merge has not
-;; reached a terminal state.
+;; Emacs reacts to merge state in three places: the state icons that
+;; render the pushed merge states, the kill guard that refuses to tear
+;; down a workspace whose merge has not reached a terminal state, and the
+;; minibuffer echo below (`agent-repl--merge-echo-pushed-state'), which
+;; narrates each pushed merge-phase transition — without it, a merge that
+;; failed 400ms after its command was acked produced NO user-visible
+;; feedback at all (observed live: three refused merges, total silence).
 
 ;;; Code:
 
 (require 'cl-lib)
+(require 'subr-x)
 
 ;; Transport helpers; defined in frontend-uds.el / frontend-client.el /
 ;; workspace-create-client.el, resolved at call time (same module).
 (declare-function agent-repl--log "core" (ws fmt &rest args))
+(declare-function agent-repl--ws-get "core" (ws key))
 (declare-function agent-repl--uds-send-command "frontend-uds"
                   (field payload &optional workspace process))
 (declare-function agent-repl--frontend-ws-command-key "frontend-client" (ws))
@@ -83,6 +88,7 @@ other command; the DISPLAY name rides `:workspaceName'."
     (agent-repl--log ws
                      "merge-dispatch-over-uds: ws=%s command-issued request-id=%s"
                      ws req)
+    (message "agent-repl: merge of %s requested — the daemon reports each phase here" ws)
     ;; THE HOST ACTION'S OUTCOME IS THIS COMMAND'S ACK, not this dispatch.
     ;; Returning here without deferring is what let the daemon record a merge
     ;; as `ok=true' 52ms before its own rejection arrived, so the failure that
@@ -94,7 +100,8 @@ other command; the DISPLAY name rides `:workspaceName'."
        (agent-repl--host-action-settle req nil err)
        (agent-repl--log ws
                         "merge-dispatch-over-uds: ws=%s request-id=%s command REJECTED err=%s"
-                        ws req err))
+                        ws req err)
+       (message "agent-repl: merge of %s refused: %s" ws err))
      (lambda ()
        (agent-repl--host-action-settle req t nil)
        (agent-repl--log ws
@@ -118,6 +125,41 @@ request-id."
                      "merge-resume-over-uds: ws=%s command-issued request-id=%s tracking-registered"
                      ws req)
     req))
+
+(defconst agent-repl--merge-echo-states
+  '(:merge-enqueuing :merge-queued :merging :merge-conflict
+    :merge-failed :merged)
+  "The pushed render keywords that narrate a merge in the minibuffer.
+Closed by construction: exactly the merge arm of
+`agent-repl--frontend-render-state-map' (frontend-state.el).")
+
+(defun agent-repl--merge-echo-pushed-state (ws new previous)
+  "Echo WS's merge-phase transition NEW in the minibuffer.
+Subscriber for `agent-repl-ws-state-transition-functions'
+\(frontend-state.el).  Non-merge states and same-state re-pushes are
+ignored.  A `:merge-failed' echo carries the daemon's cause (the pushed
+`:cause-kind', minus its `merge_transition:' routing prefix), because
+\"merge failed\" with no reason is feedback that only creates a second
+question."
+  (when (and (memq new agent-repl--merge-echo-states)
+             (not (eq new previous)))
+    (let* ((meta (agent-repl--ws-get ws :pushed-render-state-meta))
+           (cause (plist-get meta :cause-kind))
+           (detail (and (eq new :merge-failed)
+                        (stringp cause)
+                        (string-remove-prefix "merge_transition:" cause)))
+           (phase (string-replace "-" " " (substring (symbol-name new) 1))))
+      (agent-repl--log ws "merge-echo-pushed-state: ws=%s %s -> %s cause=%S"
+                       ws previous new cause)
+      (message "agent-repl: %s %s%s" ws phase
+               (if detail (format " — %s" detail) "")))))
+
+;; Registered here (merge-handlers.el is the merge surface) though the hook
+;; variable is defined in frontend-state.el: `add-hook' auto-vivifies the
+;; unbound variable, and frontend-state.el's `defvar ... nil' does not reset
+;; an already-bound one, so this subscriber survives either load order.
+(add-hook 'agent-repl-ws-state-transition-functions
+          #'agent-repl--merge-echo-pushed-state)
 
 (provide 'merge-handlers)
 
