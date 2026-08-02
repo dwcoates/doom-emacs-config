@@ -1096,6 +1096,27 @@ local process this diagnostic could observe."
           (should-not (string-match-p "💬 Prompts" content))))
       (kill-buffer "*agent-repl-dump*"))))
 
+(ert-deftest agent-repl-test-dump-workspace-merge-section-carries-the-pushed-status ()
+  "The decoded `MergeStatus' is dumped under Merge, not under Other.
+It is the whole account of what a merge is doing, so a debugging dump
+that files it with the unclassified keys buries the answer."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws-m" :project-dir "/tmp/ws-m")
+    (agent-repl--ws-put "ws-m" :pushed-merge-status '(:phase :cherry-picking))
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (_prompt _coll &rest _) "ws-m")))
+      (agent-repl-debug/dump-workspace)
+      (with-current-buffer "*agent-repl-dump*"
+        (let* ((content (buffer-string))
+               (merge-pos (string-match "🔀 Merge" content))
+               (key-pos (string-match ":pushed-merge-status" content))
+               (other-pos (string-match agent-repl--dump-other-section content)))
+          (should merge-pos)
+          (should key-pos)
+          (should (< merge-pos key-pos))
+          (should (or (null other-pos) (< key-pos other-pos)))))
+      (kill-buffer "*agent-repl-dump*"))))
+
 (ert-deftest agent-repl-test-dump-workspace-unknown-key-goes-to-other ()
   "Keys not in `agent-repl--dump-sections' are rendered under Other."
   (agent-repl-test--with-clean-state
