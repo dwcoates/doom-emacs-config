@@ -184,6 +184,51 @@ func startShimStore(t *testing.T, bin, sock string) {
 	t.Fatalf("shim-store did not create %s in time", sock)
 }
 
+// isolatedShimSocket claims a per-test shim socket under sockDir and makes it
+// THE socket for everything this test stands up, by setting the same
+// environment override the production daemon resolves through
+// (shimlisten.SocketEnvVar).
+//
+// WHY THIS IS NOT OPTIONAL. shimlisten.DefaultSocketPath resolves
+// ~/.cache/agent-repl/sock/daemon-shim.sock, which on a developer machine is
+// the socket the OPERATOR'S LIVE DAEMON is listening on. Server.Listen removes
+// a "stale" file before binding, because on the real path a leftover socket IS
+// stale — so an e2e that resolved the real path would unlink the live daemon's
+// socket, bind its own, and take delivery of every shim that dialed
+// afterwards. That is a production incident caused by running a test, and it
+// has happened.
+//
+// Moving $HOME used to be the whole isolation. It is not a stated claim on the
+// socket, only a side effect of relocating eight unrelated paths, so a harness
+// that set the sockets up in a different order — or a code path that resolved
+// the socket before $HOME moved — silently bound the real one. Every harness
+// now derives its socket HERE, through DefaultSocketPath, so the test and the
+// daemon it builds cannot disagree about the path and neither can name the
+// real one.
+func isolatedShimSocket(t *testing.T, sockDir string) string {
+	t.Helper()
+	sock := filepath.Join(sockDir, ".cache", "agent-repl", "sock", "daemon-shim.sock")
+	// Production daemon boot creates the shared sock dir (frontend.ServeUDS
+	// MkdirAll for daemon-frontend.sock) before any shim spawn; the harness
+	// mirrors that guarantee — the shim itself does not mkdir, and node maps a
+	// missing parent dir to a fatal EACCES on bind.
+	if err := os.MkdirAll(filepath.Dir(sock), 0o700); err != nil {
+		t.Fatalf("make isolated shim socket dir: %v", err)
+	}
+	t.Setenv(shimlisten.SocketEnvVar, sock)
+	// Resolve through the PRODUCTION function rather than trusting the join: if
+	// the override ever stopped being honored, the test finds out HERE, before
+	// it binds, rather than after it has taken the live daemon's socket.
+	resolved, err := shimlisten.DefaultSocketPath()
+	if err != nil {
+		t.Fatalf("resolve the isolated shim socket: %v", err)
+	}
+	if resolved != sock {
+		t.Fatalf("shimlisten resolved %q while this test isolated %q: the daemon under test would bind a socket the test does not own", resolved, sock)
+	}
+	return resolved
+}
+
 type testLogWriter struct {
 	t   *testing.T
 	tag string
@@ -237,6 +282,20 @@ type emptyWorkspaceCreation struct {
 	available chan *frontendv1.WorkspaceAvailable
 	actions   chan *frontendv1.HostAction
 	closeOnce sync.Once
+	// beforeWSMerge / postprocessing are the CREATION-TIME merge actions this
+	// harness reports for every workspace, empty by default.
+	//
+	// They live on the creation stub because that is where the real answer
+	// comes from: both are fields of the create Request (before_ws_merge,
+	// postprocessing_prompt), recorded when the workspace was created and read
+	// back at merge time keyed by worktree path. A harness that injected them
+	// anywhere else would be testing a seam production does not have.
+	//
+	// They are not per-workspace: every e2e that configures an action has
+	// exactly one workspace merging, so a map would be ceremony around a single
+	// value.
+	beforeWSMerge  string
+	postprocessing string
 }
 
 func newEmptyWorkspaceCreation() *emptyWorkspaceCreation {
@@ -313,6 +372,10 @@ type harnessTuning struct {
 	// genuinely built bundle reporting a genuinely injected identity.
 	shimBuildSHA    string
 	currentBuildSHA string
+	// beforeWSMerge / postprocessing are the creation-time merge actions the
+	// harness's workspace-creation stub reports. Empty is "not configured".
+	beforeWSMerge  string
+	postprocessing string
 	// idleSweeper hands the daemon's idle sweeper a clock the TEST drives, so
 	// a hibernation is provoked by an event rather than waited out. It is the
 	// production trigger — sweepIdle calls controller.Hibernate — so what it
@@ -332,6 +395,15 @@ func withStaleShimBuild(baked, current string) harnessOption {
 
 // withIdleSweeper gives the harness a test-driven idle-sweep clock.
 func withIdleSweeper() harnessOption { return func(o *harnessTuning) { o.idleSweeper = true } }
+
+// withMergeActions configures the creation-time merge actions every workspace
+// of this harness reports: the before_ws_merge prompt that runs before any
+// commit is picked, and the postprocessing prompt that runs once they all
+// have. An empty string means "not configured", which is the state the spec's
+// "iff configured" phases turn on.
+func withMergeActions(before, after string) harnessOption {
+	return func(o *harnessTuning) { o.beforeWSMerge, o.postprocessing = before, after }
+}
 
 func withEstablishTimeout(d time.Duration) harnessOption {
 	return func(o *harnessTuning) { o.establishTimeout = d }
@@ -411,18 +483,13 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(sockDir) })
 	storeSock := filepath.Join(sockDir, "store.sock")
-	// The daemon's shim socket and the session locks resolve under $HOME
-	// (~/.cache/agent-repl/{sock,run}). Point HOME at the short dir so this
-	// harness listens on an isolated, sun_path-sized socket rather than the
-	// LIVE daemon's, and locks its own sessions rather than the real ones.
+	// The session locks resolve under $HOME (~/.cache/agent-repl/run). Point
+	// HOME at the short, sun_path-sized dir so this harness locks its own
+	// sessions rather than the real ones. The SHIM SOCKET is isolated
+	// separately and explicitly, because riding on $HOME made it an unstated
+	// claim — see isolatedShimSocket.
 	t.Setenv("HOME", sockDir)
-	// Production daemon boot creates the shared sock dir (frontend.ServeUDS
-	// MkdirAll for daemon-frontend.sock) before any shim spawn; the harness
-	// mirrors that guarantee — the shim itself does not mkdir, and node maps
-	// a missing parent dir to a fatal EACCES on bind.
-	if err := os.MkdirAll(filepath.Join(sockDir, ".cache", "agent-repl", "sock"), 0o700); err != nil {
-		t.Fatalf("make session socket dir: %v", err)
-	}
+	shimSock := isolatedShimSocket(t, sockDir)
 	startShimStore(t, storeBin, storeSock)
 
 	// ONE state store, as production opens it: the registry's identity tables
@@ -445,7 +512,6 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 
 	forwarder := &server.PushForwarder{Logf: t.Logf}
 	// Shims dial US: start the listener before anything is brought up.
-	shimSock := filepath.Join(sockDir, ".cache", "agent-repl", "sock", "daemon-shim.sock")
 	shimListener := shimlisten.New(t.Logf)
 	if err := shimListener.Listen(shimSock); err != nil {
 		t.Fatalf("listen for shims: %v", err)
@@ -534,6 +600,8 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 
 	binding := &server.SessionCommandBinding{Logf: t.Logf}
 	workspaceCreation := newEmptyWorkspaceCreation()
+	workspaceCreation.beforeWSMerge = tuning.beforeWSMerge
+	workspaceCreation.postprocessing = tuning.postprocessing
 	// The REAL merge.Lease over the real SSM and the real durable queue: an
 	// e2e that stubbed them would never exercise merge_lease_held or the queue
 	// facts the pushed WorkspaceState carries.
