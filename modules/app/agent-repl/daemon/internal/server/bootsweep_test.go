@@ -51,6 +51,13 @@ func (e *sweepEnsurer) Ensure(workspace string) error {
 	return e.err
 }
 
+// EnsureDriveable is never used by the boot sweep — it reattaches, it does not
+// send — so it routes to the same recording body rather than pretending to be a
+// second, differently-behaved bring-up.
+func (e *sweepEnsurer) EnsureDriveable(_ context.Context, workspace string) error {
+	return e.Ensure(workspace)
+}
+
 func (e *sweepEnsurer) ensured() []string {
 	e.mu.Lock()
 	defer e.mu.Unlock()

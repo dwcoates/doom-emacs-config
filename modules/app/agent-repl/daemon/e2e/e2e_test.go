@@ -252,6 +252,13 @@ type stubLifecycle struct{}
 func (stubLifecycle) Close(context.Context, string) error { return nil }
 func (stubLifecycle) Open(context.Context, string) error  { return nil }
 
+// OpenDriveable succeeds for the same reason Open does: the harnesses that bind
+// this stub run no merge ACTION, so nothing is ever sent to the session this
+// claims is driveable. The merge acceptance harness (newUDSHarness) binds the
+// production server.WorkspaceOpener instead, precisely so the bring-up decision
+// is exercised for real rather than stubbed past.
+func (stubLifecycle) OpenDriveable(context.Context, string) error { return nil }
+
 // stubMergeLease is the merge.Lease for E2E flows that never drive a merge.
 // The real one lives in internal/ssm and interrupts the workspace's turn; a
 // release func is still returned because a nil release is a hard panic in

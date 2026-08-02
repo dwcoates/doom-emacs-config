@@ -117,6 +117,10 @@ type stubLifecycle struct{}
 func (stubLifecycle) Close(context.Context, string) error { return nil }
 func (stubLifecycle) Open(context.Context, string) error  { return nil }
 
+// OpenDriveable is the merge's bring-up seam; these command-handler tests drive
+// no merge, so it answers exactly as Open does.
+func (stubLifecycle) OpenDriveable(context.Context, string) error { return nil }
+
 type stubState struct{ ssm *ssm.Manager }
 
 func (s stubState) Snapshot() *frontendv1.StateSnapshot {
