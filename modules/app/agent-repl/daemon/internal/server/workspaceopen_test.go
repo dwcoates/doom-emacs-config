@@ -6,22 +6,32 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"claude-repld/internal/registry"
 	"claude-repld/internal/session"
 	"claude-repld/internal/sessioncontroller"
+	"claude-repld/internal/workspace/merge"
 )
 
 // fakeEnsurer records the workspaces it was asked to bring up.
 type fakeEnsurer struct {
-	calls []string
-	err   error
+	calls     []string
+	driveable []string
+	err       error
 }
 
 func (f *fakeEnsurer) Ensure(workspace string) error {
 	f.calls = append(f.calls, workspace)
+	return f.err
+}
+
+// driveable records the workspaces the DRIVEABLE bring-up was asked for, kept
+// apart from calls so a test can tell which of the two an opener used.
+func (f *fakeEnsurer) EnsureDriveable(_ context.Context, workspace string) error {
+	f.driveable = append(f.driveable, workspace)
 	return f.err
 }
 
@@ -299,6 +309,97 @@ func TestOpenSurfacesAnEnsureFailure(t *testing.T) {
 	// Assert
 	if err == nil {
 		t.Fatalf("Open swallowed the bring-up failure")
+	}
+}
+
+// --- the driveable bring-up a merge takes --------------------------------
+
+// THE MATRIX A MERGE RUN DECIDES ON, in one table so the three answers cannot
+// drift apart: a workspace that never had a session, one whose session is
+// merely asleep, and one whose bring-up genuinely fails.
+func TestOpenDriveableForEachSessionDisposition(t *testing.T) {
+	tests := []struct {
+		name string
+		// record is the registry record to seed, if any. A zero SessionID
+		// seeds nothing, which is the "never had a session" row.
+		record registry.Record
+		// ensureErr is what the bring-up reports for a workspace that HAS one.
+		ensureErr error
+		// wantNoSession is whether the call must report merge.ErrNoSession.
+		wantNoSession bool
+		// wantErr is whether the call must fail at all.
+		wantErr bool
+		// wantDriveable is the workspaces the DRIVEABLE bring-up was asked for.
+		wantDriveable []string
+	}{
+		{
+			name:          "no session record at all: reported as ErrNoSession, nothing brought up",
+			wantNoSession: true,
+			wantErr:       true,
+		},
+		{
+			name:          "a hibernated (non-terminal) record: brought up and waited for",
+			record:        registry.Record{SessionID: "s_1", CWD: "/w", CreatedAt: "2026-07-25T10:00:00Z"},
+			wantDriveable: []string{"/w"},
+		},
+		{
+			name:          "a bring-up that fails: surfaced loudly, and NOT as an absent session",
+			record:        registry.Record{SessionID: "s_1", CWD: "/w", CreatedAt: "2026-07-25T10:00:00Z"},
+			ensureErr:     errBringUp,
+			wantErr:       true,
+			wantDriveable: []string{"/w"},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			cfg := t.TempDir()
+			o, reg, ens, _ := openerRig(t, cfg)
+			ens.err = tc.ensureErr
+			if tc.record.SessionID != "" {
+				tc.record.ConfigDir = cfg
+				if err := reg.Put(tc.record); err != nil {
+					t.Fatalf("put: %v", err)
+				}
+			}
+
+			// Act.
+			err := o.OpenDriveable(context.Background(), "/w")
+
+			// Assert.
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("OpenDriveable() error = %v, want error = %v", err, tc.wantErr)
+			}
+			if got := errors.Is(err, merge.ErrNoSession); got != tc.wantNoSession {
+				t.Fatalf("errors.Is(%v, merge.ErrNoSession) = %v, want %v: a workspace that never had a session and one whose session would not start must stay distinguishable",
+					err, got, tc.wantNoSession)
+			}
+			if !slices.Equal(ens.driveable, tc.wantDriveable) {
+				t.Fatalf("driveable bring-ups = %v, want %v", ens.driveable, tc.wantDriveable)
+			}
+		})
+	}
+}
+
+// THE WAITING BRING-UP IS THE ONE A MERGE GETS: Open's non-waiting Ensure would
+// hand the run a session whose shim is still handshaking, and the run's next act
+// is a send.
+func TestOpenDriveableNeverUsesTheNonWaitingEnsure(t *testing.T) {
+	// Arrange.
+	cfg := t.TempDir()
+	o, reg, ens, _ := openerRig(t, cfg)
+	if err := reg.Put(registry.Record{SessionID: "s_1", CWD: "/w", ConfigDir: cfg, CreatedAt: "2026-07-25T10:00:00Z"}); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+
+	// Act.
+	if err := o.OpenDriveable(context.Background(), "/w"); err != nil {
+		t.Fatalf("OpenDriveable: %v", err)
+	}
+
+	// Assert.
+	if len(ens.calls) != 0 {
+		t.Fatalf("the non-waiting Ensure was called for %v: a merge's bring-up must wait for the handshake", ens.calls)
 	}
 }
 
