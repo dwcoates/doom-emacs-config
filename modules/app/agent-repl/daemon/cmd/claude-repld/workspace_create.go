@@ -590,7 +590,7 @@ type WorkspaceCreateAssembly struct {
 	Inbox   *workspacecreate.Inbox
 	// Merges is the inbox's late-bound merge route. main sets its target once
 	// WireAgentShim has built the merge surface, before the inbox is started.
-	Merges    *WorkspaceMergeDispatchBinding
+	Merges    *server.MergeDispatchBinding
 	Forwarder *WorkspaceCreateHostForwarder
 }
 
@@ -795,7 +795,7 @@ func NewWorkspaceCreateAssembly(cfg WorkspaceCreateAssemblyConfig) (*WorkspaceCr
 	if interval <= 0 {
 		return nil, fmt.Errorf("workspace create: inbox interval must be positive")
 	}
-	merges := &WorkspaceMergeDispatchBinding{Logf: cfg.Logf}
+	merges := &server.MergeDispatchBinding{Logf: cfg.Logf}
 	return &WorkspaceCreateAssembly{
 		Store:   store,
 		Manager: manager,
