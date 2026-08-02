@@ -26,6 +26,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -165,23 +166,69 @@ func startShimStore(t *testing.T, bin, sock string) {
 	dbPath := filepath.Join(t.TempDir(), "events.db")
 	logPath := filepath.Join(t.TempDir(), "shim-store.log")
 	cmd := exec.Command(bin, "-socket", sock, "-db", dbPath, "-log", logPath)
-	cmd.Stderr = &testLogWriter{t: t, tag: "shim-store"}
+	// READINESS IS THE STORE'S OWN STATEMENT, NOT AN ELAPSED INTERVAL. The
+	// store logs `listening` to stderr only after server.Listen has bound the
+	// socket AND the accept loop owns it, so that record is strictly stronger
+	// evidence than the socket file existing — the file appears at bind, with
+	// nothing yet serving it. Waiting on the record also collapses the boot
+	// failure case: a store that dies during startup reports its exit status
+	// here instead of burning the whole timeout on a file that never arrives.
+	ready := make(chan struct{})
+	cmd.Stderr = &readyWriter{
+		inner:  &testLogWriter{t: t, tag: "shim-store"},
+		marker: []byte("listening"),
+		ready:  ready,
+	}
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start shim-store: %v", err)
 	}
+	// cmd.Wait (not Process.Wait) is what drains the stderr copier, so the
+	// cleanup below cannot let a pending testLogWriter write race the end of
+	// the test. Only this goroutine ever waits; cleanup reads its result.
+	exited := make(chan error, 1)
+	go func() { exited <- cmd.Wait() }()
 	t.Cleanup(func() {
 		_ = cmd.Process.Kill()
-		_, _ = cmd.Process.Wait()
+		<-exited
 	})
-	// Wait for the socket to appear (the store creates it on listen).
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		if _, err := os.Stat(sock); err == nil {
-			return
-		}
-		time.Sleep(20 * time.Millisecond)
+	select {
+	case <-ready:
+	case err := <-exited:
+		t.Fatalf("shim-store exited before it began listening on %s: %v", sock, err)
+	case <-time.After(10 * time.Second):
+		t.Fatalf("shim-store never reported listening on %s", sock)
 	}
-	t.Fatalf("shim-store did not create %s in time", sock)
+}
+
+// readyWriter forwards a child process's output to inner and closes ready the
+// first time the accumulated bytes contain marker. It is how the harness waits
+// on a process's OWN announcement that it is up rather than on a poll interval.
+//
+// Accumulation (rather than matching per Write) tolerates a record split across
+// writes; it stops the moment the marker lands, so the buffer cannot grow with
+// the process's lifetime.
+type readyWriter struct {
+	inner  io.Writer
+	marker []byte
+	ready  chan struct{}
+
+	mu   sync.Mutex
+	seen []byte
+	done bool
+}
+
+func (w *readyWriter) Write(p []byte) (int, error) {
+	n, err := w.inner.Write(p)
+	w.mu.Lock()
+	if !w.done {
+		w.seen = append(w.seen, p...)
+		if bytes.Contains(w.seen, w.marker) {
+			w.done, w.seen = true, nil
+			close(w.ready)
+		}
+	}
+	w.mu.Unlock()
+	return n, err
 }
 
 // isolatedShimSocket claims a per-test shim socket under sockDir and makes it
