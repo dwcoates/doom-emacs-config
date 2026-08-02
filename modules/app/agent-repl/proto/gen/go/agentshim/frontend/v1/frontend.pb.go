@@ -4233,13 +4233,7 @@ func (x *PermissionAnswerCmd) GetDenyMessage() string {
 
 type MergeWorkspaceCmd struct {
 	state                    protoimpl.MessageState `protogen:"open.v1"`
-	Handler                  string                 `protobuf:"bytes,1,opt,name=handler,proto3" json:"handler,omitempty"`                                                                      // e.g. "cherry-pick"
 	ConflictResolvedContinue bool                   `protobuf:"varint,2,opt,name=conflict_resolved_continue,json=conflictResolvedContinue,proto3" json:"conflict_resolved_continue,omitempty"` // the resolve-and-continue handoff
-	// Additive (S6): the daemon has no workspace→worktree mapping of its own,
-	// so the frontend supplies the merge geometry with the command.
-	SourceBranch string `protobuf:"bytes,3,opt,name=source_branch,json=sourceBranch,proto3" json:"source_branch,omitempty"`
-	SourceDir    string `protobuf:"bytes,4,opt,name=source_dir,json=sourceDir,proto3" json:"source_dir,omitempty"`
-	TargetDir    string `protobuf:"bytes,5,opt,name=target_dir,json=targetDir,proto3" json:"target_dir,omitempty"`
 	// Additive: the workspace's DISPLAY name, for the `merge/<name>` completion
 	// tag and the daemon's merge logs.
 	//
@@ -4286,39 +4280,11 @@ func (*MergeWorkspaceCmd) Descriptor() ([]byte, []int) {
 	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{34}
 }
 
-func (x *MergeWorkspaceCmd) GetHandler() string {
-	if x != nil {
-		return x.Handler
-	}
-	return ""
-}
-
 func (x *MergeWorkspaceCmd) GetConflictResolvedContinue() bool {
 	if x != nil {
 		return x.ConflictResolvedContinue
 	}
 	return false
-}
-
-func (x *MergeWorkspaceCmd) GetSourceBranch() string {
-	if x != nil {
-		return x.SourceBranch
-	}
-	return ""
-}
-
-func (x *MergeWorkspaceCmd) GetSourceDir() string {
-	if x != nil {
-		return x.SourceDir
-	}
-	return ""
-}
-
-func (x *MergeWorkspaceCmd) GetTargetDir() string {
-	if x != nil {
-		return x.TargetDir
-	}
-	return ""
 }
 
 func (x *MergeWorkspaceCmd) GetWorkspaceName() string {
@@ -6442,16 +6408,12 @@ const file_agentshim_frontend_v1_frontend_proto_rawDesc = "" +
 	"\x15permission_request_id\x18\x01 \x01(\tR\x13permissionRequestId\x12\x14\n" +
 	"\x05allow\x18\x02 \x01(\bR\x05allow\x12<\n" +
 	"\rupdated_input\x18\x03 \x01(\v2\x17.google.protobuf.StructR\fupdatedInput\x12!\n" +
-	"\fdeny_message\x18\x04 \x01(\tR\vdenyMessage\"\xf5\x01\n" +
-	"\x11MergeWorkspaceCmd\x12\x18\n" +
-	"\ahandler\x18\x01 \x01(\tR\ahandler\x12<\n" +
-	"\x1aconflict_resolved_continue\x18\x02 \x01(\bR\x18conflictResolvedContinue\x12#\n" +
-	"\rsource_branch\x18\x03 \x01(\tR\fsourceBranch\x12\x1d\n" +
-	"\n" +
-	"source_dir\x18\x04 \x01(\tR\tsourceDir\x12\x1d\n" +
-	"\n" +
-	"target_dir\x18\x05 \x01(\tR\ttargetDir\x12%\n" +
-	"\x0eworkspace_name\x18\x06 \x01(\tR\rworkspaceName\"\x13\n" +
+	"\fdeny_message\x18\x04 \x01(\tR\vdenyMessage\"\xc0\x01\n" +
+	"\x11MergeWorkspaceCmd\x12<\n" +
+	"\x1aconflict_resolved_continue\x18\x02 \x01(\bR\x18conflictResolvedContinue\x12%\n" +
+	"\x0eworkspace_name\x18\x06 \x01(\tR\rworkspaceNameJ\x04\b\x01\x10\x02J\x04\b\x03\x10\x04J\x04\b\x04\x10\x05J\x04\b\x05\x10\x06R\ahandlerR\rsource_branchR\n" +
+	"source_dirR\n" +
+	"target_dir\"\x13\n" +
 	"\x11CloseWorkspaceCmd\"\x12\n" +
 	"\x10OpenWorkspaceCmd\"&\n" +
 	"\tResyncCmd\x12\x19\n" +

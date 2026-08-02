@@ -655,70 +655,36 @@ func (h *commandHandler) SetModel(ctx context.Context, workspace, requestID stri
 	return selected, nil
 }
 
-// mergeGeometrySource names which of the two resolution paths answered a merge
-// command's geometry. It rides every merge log line so a merge that landed
-// somewhere surprising can be traced to the map that said so.
-type mergeGeometrySource string
-
-const (
-	// mergeGeometryFromCommand: the command stated all three coordinates.
-	mergeGeometryFromCommand mergeGeometrySource = "command"
-	// mergeGeometryFromRecord: the daemon's own record answered.
-	mergeGeometryFromRecord mergeGeometrySource = "record"
-)
-
-// resolveMergeGeometry fills in a merge request's three coordinates.
+// resolveMergeGeometry fills in a merge request's three coordinates from THE
+// daemon's own record, which is the only map there is.
 //
-// RESOLUTION ORDER:
-//
-//  1. The command's OWN geometry, when it states all three. That is explicit
-//     caller input, not a fallback: the integration suites drive merges against
-//     purpose-built fixture repositories the daemon never created, and a caller
-//     that names the coordinates has said something the daemon must honor.
-//  2. The daemon's recorded geometry for the workspace, which is what the
-//     post-cutover Emacs command (a bare name) resolves through.
-//
-// A PARTIALLY-stated geometry is refused outright rather than completed from
-// the record. Half a caller-stated geometry is a caller bug, and silently
-// mixing two maps' answers is precisely how a cherry-pick reaches a target
-// neither owner named.
+// A caller used to be able to state all three on the command instead. That path
+// is retired with MergeWorkspaceCmd's source_branch/source_dir/target_dir (see
+// the reservation in frontend.proto): two owners of one map is how a
+// cherry-pick reached a target the daemon had never heard of, and a caller that
+// wants a merge run against a repository the daemon did not create records the
+// geometry through geometry.Store rather than smuggling it past the map.
 //
 // An unrecorded workspace is refused with an explanation naming the workspace
 // and what to do about it. It is NEVER guessed at.
-func (h *commandHandler) resolveMergeGeometry(ctx context.Context, req merge.Request, cmd *frontendv1.MergeWorkspaceCmd) (merge.Request, mergeGeometrySource, error) {
-	branch, source, target := cmd.GetSourceBranch(), cmd.GetSourceDir(), cmd.GetTargetDir()
-	stated := 0
-	for _, value := range []string{branch, source, target} {
-		if value != "" {
-			stated++
-		}
-	}
-	if stated == 3 {
-		req.SourceBranch, req.SourceDir, req.TargetDir = branch, source, target
-		return req, mergeGeometryFromCommand, nil
-	}
-	if stated != 0 {
-		h.logf("frontend cmd: merge_workspace REFUSED ws=%s name=%q reason=partial-command-geometry source_branch=%q source_dir=%q target_dir=%q",
-			req.Workspace, req.Name, branch, source, target)
-		return req, "", fmt.Errorf("server: merge_workspace for %s states only part of its geometry (source_branch=%q source_dir=%q target_dir=%q); send all three or none and let the daemon resolve its record", req.Workspace, branch, source, target)
-	}
+func (h *commandHandler) resolveMergeGeometry(ctx context.Context, req merge.Request) (merge.Request, error) {
 	if h.mergeGeometry == nil {
 		h.logf("frontend cmd: merge_workspace REFUSED ws=%s name=%q reason=no-geometry-source", req.Workspace, req.Name)
-		return req, "", fmt.Errorf("server: merge_workspace for %s cannot be resolved: the daemon's merge-geometry record is not wired", req.Workspace)
+		return req, fmt.Errorf("server: merge_workspace for %s cannot be resolved: the daemon's merge-geometry record is not wired", req.Workspace)
 	}
 	rec, found, err := h.mergeGeometry.Lookup(ctx, req.Workspace)
 	if err != nil {
 		h.logf("frontend cmd: merge_workspace REFUSED ws=%s name=%q reason=geometry-lookup-failed: %v", req.Workspace, req.Name, err)
-		return req, "", fmt.Errorf("server: merge_workspace for %s: read recorded geometry: %w", req.Workspace, err)
+		return req, fmt.Errorf("server: merge_workspace for %s: read recorded geometry: %w", req.Workspace, err)
 	}
 	if !found {
 		h.logf("frontend cmd: merge_workspace REFUSED ws=%s name=%q reason=no-recorded-geometry", req.Workspace, req.Name)
-		return req, "", fmt.Errorf("server: merge_workspace for %s has no recorded merge geometry: the daemon records a workspace's source branch, source worktree, and merge target when it CREATES the workspace, and derives them at boot for older ones. A workspace with neither is one whose branch or worktree git cannot answer for (a detached HEAD, or a worktree that no longer exists), and merging it would mean guessing which repository to write commits into", req.Workspace)
+		return req, fmt.Errorf("server: merge_workspace for %s has no recorded merge geometry: the daemon records a workspace's source branch, source worktree, and merge target when it CREATES the workspace, and derives them at boot for older ones. A workspace with neither is one whose branch or worktree git cannot answer for (a detached HEAD, or a worktree that no longer exists), and merging it would mean guessing which repository to write commits into", req.Workspace)
 	}
 	req.SourceBranch, req.SourceDir, req.TargetDir = rec.SourceBranch, rec.SourceDir, rec.TargetDir
 	h.logf("frontend cmd: merge_workspace geometry RESOLVED ws=%s name=%q origin=%s source_branch=%q source_dir=%s target_dir=%s",
 		req.Workspace, req.Name, rec.Origin, rec.SourceBranch, rec.SourceDir, rec.TargetDir)
-	return req, mergeGeometryFromRecord, nil
+	return req, nil
 }
 
 // markMergeEnqueuing records merge_enqueuing for a merge attempt the moment the
@@ -766,15 +732,12 @@ func (h *commandHandler) failMergeAttempt(workspace, name, requestID, cause stri
 // MergeWorkspace runs a merge, or resumes one on the conflict_resolved_continue
 // handoff (§9.3).
 //
-// THE DAEMON OWNS THE GEOMETRY MAP. Emacs sends a bare request keyed by
-// workspace, and the three coordinates come from the record the daemon wrote
-// when it created that workspace (or derived at boot for a pre-cutover one).
-// Emacs used to compute all three and ride them on the command; two owners of
-// one map is how a merge landed against a target the daemon had never heard of.
-//
-// A caller that DOES state all three is honored — see resolveMergeGeometry for
-// why that is explicit input rather than a fallback — and every merge log line
-// names which path answered.
+// THE DAEMON OWNS THE GEOMETRY MAP. Every merge request is keyed by workspace
+// alone, and the three coordinates come from the record the daemon wrote when
+// it created that workspace (or derived at boot for a pre-cutover one). Emacs
+// used to compute all three and ride them on the command; two owners of one map
+// is how a merge landed against a target the daemon had never heard of, so
+// those fields are retired from the wire entirely.
 //
 // A request still missing a coordinate is refused by merge.Request's own
 // validation, which is the single place that decides what a runnable merge is.
@@ -797,12 +760,12 @@ func (h *commandHandler) MergeWorkspace(ctx context.Context, workspace, requestI
 	// on the queue and already holds its lease; marking it "enqueuing" would
 	// walk a live merge_conflict backwards to the weakest phase on the axis.
 	if cmd.GetConflictResolvedContinue() {
-		req, resolvedBy, err := h.resolveMergeGeometry(ctx, req, cmd)
+		req, err := h.resolveMergeGeometry(ctx, req)
 		if err != nil {
 			return err
 		}
-		h.logf("frontend cmd: merge_workspace RESUME ws=%s name=%q request_id=%s geometry=%s source_branch=%q source_dir=%q target_dir=%q",
-			workspace, req.Name, requestID, resolvedBy, req.SourceBranch, req.SourceDir, req.TargetDir)
+		h.logf("frontend cmd: merge_workspace RESUME ws=%s name=%q request_id=%s source_branch=%q source_dir=%q target_dir=%q",
+			workspace, req.Name, requestID, req.SourceBranch, req.SourceDir, req.TargetDir)
 		return h.merges.Resume(ctx, req)
 	}
 
@@ -816,12 +779,12 @@ func (h *commandHandler) MergeWorkspace(ctx context.Context, workspace, requestI
 	if err := h.markMergeEnqueuing(workspace, req.Name, requestID); err != nil {
 		return err
 	}
-	req, resolvedBy, err := h.resolveMergeGeometry(ctx, req, cmd)
+	req, err := h.resolveMergeGeometry(ctx, req)
 	if err != nil {
 		return h.failMergeAttempt(workspace, req.Name, requestID, "merge geometry unresolvable: "+err.Error(), err)
 	}
-	h.logf("frontend cmd: merge_workspace ws=%s name=%q request_id=%s handler=%s geometry=%s source_branch=%q source_dir=%q target_dir=%q",
-		workspace, req.Name, requestID, cmd.GetHandler(), resolvedBy, req.SourceBranch, req.SourceDir, req.TargetDir)
+	h.logf("frontend cmd: merge_workspace ws=%s name=%q request_id=%s source_branch=%q source_dir=%q target_dir=%q",
+		workspace, req.Name, requestID, req.SourceBranch, req.SourceDir, req.TargetDir)
 	pos, enqueueErr := h.merges.Enqueue(ctx, req)
 	if enqueueErr != nil {
 		h.logf("frontend cmd: merge_workspace ENQUEUE FAILED ws=%s name=%q request_id=%s: %v", workspace, req.Name, requestID, enqueueErr)

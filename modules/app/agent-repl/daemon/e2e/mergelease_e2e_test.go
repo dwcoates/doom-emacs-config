@@ -102,7 +102,7 @@ func mergeUnderLiveSession(t *testing.T, branch, requestID string) (*mergeWatch,
 	wsDir := repo.conflictingWorktree(branch)
 	_, conn, _, _ := liveSession(t, h, wsDir)
 	w := newMergeWatch(t, conn)
-	sendMerge(t, conn, requestID, mergeCmdFor(repo, wsDir, branch))
+	sendMerge(t, conn, requestID, mergeCmdFor(t, h.geometry, repo, wsDir, branch))
 	w.awaitOKAck(requestID)
 	w.awaitLeaseHeld(wsDir)
 	return w, wsDir
@@ -163,13 +163,13 @@ func TestE2EConversationItemsCarryWhoDroveTheirTurn(t *testing.T) {
 		name string
 		// drive produces a turn on the live workspace and returns once the
 		// turn's producer has been given the session.
-		drive func(t *testing.T, w *mergeWatch, repo *mergeRepo, wsDir, branch string)
+		drive func(t *testing.T, w *mergeWatch, geo mergeGeometryRecorder, repo *mergeRepo, wsDir, branch string)
 		// want is the provenance every item that turn produces must carry.
 		want frontendv1.ConversationSource
 	}{
 		{
 			name: "an ordinary prompt's turn is the user's",
-			drive: func(t *testing.T, w *mergeWatch, _ *mergeRepo, _, _ string) {
+			drive: func(t *testing.T, w *mergeWatch, _ mergeGeometryRecorder, _ *mergeRepo, _, _ string) {
 				t.Helper()
 				writeCmd(t, w.conn, `{"requestId":"r-user-turn","submitPrompt":{"text":"an ordinary prompt"}}`)
 				w.awaitOKAck("r-user-turn")
@@ -178,9 +178,9 @@ func TestE2EConversationItemsCarryWhoDroveTheirTurn(t *testing.T) {
 		},
 		{
 			name: "a turn driven under the merge lease is the merge's",
-			drive: func(t *testing.T, w *mergeWatch, repo *mergeRepo, wsDir, branch string) {
+			drive: func(t *testing.T, w *mergeWatch, geo mergeGeometryRecorder, repo *mergeRepo, wsDir, branch string) {
 				t.Helper()
-				sendMerge(t, w.conn, "r-merge-turn", mergeCmdFor(repo, wsDir, branch))
+				sendMerge(t, w.conn, "r-merge-turn", mergeCmdFor(t, geo, repo, wsDir, branch))
 				w.awaitOKAck("r-merge-turn")
 				w.awaitLeaseHeld(wsDir)
 			},
@@ -200,7 +200,7 @@ func TestE2EConversationItemsCarryWhoDroveTheirTurn(t *testing.T) {
 			w := newMergeWatch(t, conn)
 
 			// Act.
-			tc.drive(t, w, repo, wsDir, branch)
+			tc.drive(t, w, h.geometry, repo, wsDir, branch)
 
 			// Assert — the turn's items name their driver, and no item on the
 			// workspace leaves the field unset.

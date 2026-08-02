@@ -14,13 +14,14 @@
 // request is admitted, and the second request's merge_queued position is a
 // FACT rather than a race.
 //
-// WHY THE GEOMETRY IS SUPPLIED BY THE TEST. MergeWorkspaceCmd carries the
-// source branch and both worktree directories precisely because the daemon has
-// no workspace->worktree mapping of its own (frontendcmd.go MergeWorkspace,
-// "THE COMMAND'S OWN GEOMETRY IS AUTHORITATIVE"). The test is the frontend
-// here, so the test supplies them — from real `git worktree add` siblings, not
-// from fixtures pretending to be siblings, because the whole repo-key question
-// this file covers is about what sibling worktrees resolve to.
+// WHY THE GEOMETRY IS RECORDED RATHER THAN SENT. MergeWorkspaceCmd carries no
+// geometry at all any more (source_branch/source_dir/target_dir are reserved in
+// frontend.proto): THE daemon owns the workspace->worktree map, so a fixture
+// repository the daemon never created becomes mergeable by writing the record
+// the daemon would have written at creation time (mergeCmdFor). The worktrees
+// are still real `git worktree add` siblings rather than fixtures pretending to
+// be siblings, because the whole repo-key question this file covers is about
+// what sibling worktrees resolve to.
 //
 // This file is the HELPER HOME for the merge e2e suite. mergeconflict,
 // mergelease, mergeleaserelease and mergedurability reuse its fixtures and its
@@ -33,6 +34,7 @@
 package e2e
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -45,6 +47,8 @@ import (
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
 	"github.com/gorilla/websocket"
+
+	"claude-repld/internal/workspace/geometry"
 )
 
 // --- git fixtures -----------------------------------------------------------
@@ -238,49 +242,68 @@ func (r *mergeRepo) blockedWorktree(branch string) string {
 
 // --- the merge command surface ----------------------------------------------
 
-// mergeCmd is one MergeWorkspaceCmd's worth of geometry.
+// mergeCmd is one MergeWorkspaceCmd's worth of identity.
 //
 // `workspace` is the daemon's workspace KEY (the session cwd / the source
 // worktree), and `name` is the DISPLAY name the merge/<name> completion tag is
 // written from. They are separate fields precisely because conflating them
 // filed merge rows under a key nothing else used (frontend.proto
 // MergeWorkspaceCmd.workspace_name).
+//
+// IT CARRIES NO GEOMETRY, because the command no longer can: source_branch,
+// source_dir and target_dir are reserved in frontend.proto and the daemon
+// answers all three from the map it owns. The geometry a fixture repository
+// needs is RECORDED into that map by mergeCmdFor.
 type mergeCmd struct {
-	workspace    string
-	name         string
-	sourceBranch string
-	sourceDir    string
-	targetDir    string
+	workspace string
+	name      string
 }
 
-// mergeCmdFor builds the command for a sibling worktree merging into repo's
+// mergeGeometryRecorder is the harness-side half of THE daemon's geometry map:
+// what a test records is what the daemon's own resolution will read back.
+// Satisfied by *geometry.Store.
+type mergeGeometryRecorder interface {
+	Record(context.Context, geometry.Record) error
+}
+
+// mergeCmdFor records the geometry the daemon would have recorded when it
+// created worktreeDir, and returns the bare command that merges it into repo's
 // target. The workspace key and the source dir are the same directory, exactly
 // as they are in production (the session's cwd IS its worktree).
-func mergeCmdFor(repo *mergeRepo, worktreeDir, branch string) mergeCmd {
-	return mergeCmd{
-		workspace:    worktreeDir,
-		name:         branch,
-		sourceBranch: branch,
-		sourceDir:    worktreeDir,
-		targetDir:    repo.target,
+//
+// RECORDING IS PART OF BUILDING THE COMMAND rather than a separate step a test
+// could forget: a merge whose geometry was never recorded is refused by the
+// daemon, and a suite that discovered that as a nack deadline instead of a
+// missing setup line would be debugging the wrong thing.
+func mergeCmdFor(t *testing.T, geo mergeGeometryRecorder, repo *mergeRepo, worktreeDir, branch string) mergeCmd {
+	t.Helper()
+	if err := geo.Record(context.Background(), geometry.Record{
+		Workspace:    worktreeDir,
+		SourceBranch: branch,
+		SourceDir:    worktreeDir,
+		TargetDir:    repo.target,
+		Origin:       geometry.OriginCreated,
+	}); err != nil {
+		t.Fatalf("record merge geometry for %s: %v", worktreeDir, err)
 	}
+	return mergeCmd{workspace: worktreeDir, name: branch}
 }
 
 func sendMerge(t *testing.T, conn *websocket.Conn, requestID string, m mergeCmd) {
 	t.Helper()
 	writeCmd(t, conn, fmt.Sprintf(
-		`{"requestId":%q,"workspace":%q,"mergeWorkspace":{"handler":"cherry-pick","sourceBranch":%q,"sourceDir":%q,"targetDir":%q,"workspaceName":%q}}`,
-		requestID, m.workspace, m.sourceBranch, m.sourceDir, m.targetDir, m.name))
+		`{"requestId":%q,"workspace":%q,"mergeWorkspace":{"workspaceName":%q}}`,
+		requestID, m.workspace, m.name))
 }
 
-// sendMergeResume is the resolve-and-continue handoff: the same geometry with
+// sendMergeResume is the resolve-and-continue handoff: the same workspace with
 // conflict_resolved_continue set, which is how a human-resolved conflict is
 // handed back to the coordinator.
 func sendMergeResume(t *testing.T, conn *websocket.Conn, requestID string, m mergeCmd) {
 	t.Helper()
 	writeCmd(t, conn, fmt.Sprintf(
-		`{"requestId":%q,"workspace":%q,"mergeWorkspace":{"handler":"cherry-pick","conflictResolvedContinue":true,"sourceBranch":%q,"sourceDir":%q,"targetDir":%q,"workspaceName":%q}}`,
-		requestID, m.workspace, m.sourceBranch, m.sourceDir, m.targetDir, m.name))
+		`{"requestId":%q,"workspace":%q,"mergeWorkspace":{"conflictResolvedContinue":true,"workspaceName":%q}}`,
+		requestID, m.workspace, m.name))
 }
 
 // --- observation -------------------------------------------------------------
@@ -443,9 +466,9 @@ func assertQueuePosition(t *testing.T, state *frontendv1.WorkspaceState, wantInd
 // is PARKED — i.e. the repository's queue head is provably still held. Every
 // serialization test in this suite starts here, because a queue with nothing at
 // its head cannot demonstrate a queue.
-func parkTheQueueHead(t *testing.T, w *mergeWatch, repo *mergeRepo, worktreeDir, branch, requestID string) mergeCmd {
+func parkTheQueueHead(t *testing.T, geo mergeGeometryRecorder, w *mergeWatch, repo *mergeRepo, worktreeDir, branch, requestID string) mergeCmd {
 	t.Helper()
-	cmd := mergeCmdFor(repo, worktreeDir, branch)
+	cmd := mergeCmdFor(t, geo, repo, worktreeDir, branch)
 	sendMerge(t, w.conn, requestID, cmd)
 	head := w.awaitPhase(worktreeDir, phaseMergeConflict)
 	assertQueuePosition(t, head, 1, 1)
@@ -474,10 +497,10 @@ func TestE2EASecondMergeOnTheSameRepoIsQueuedBehindTheFirst(t *testing.T) {
 	conn := h.dialFrontend(t)
 	defer conn.Close()
 	w := newMergeWatch(t, conn)
-	parkTheQueueHead(t, w, repo, first, "feature-first", "r-merge-first")
+	parkTheQueueHead(t, h.geometry, w, repo, first, "feature-first", "r-merge-first")
 
 	// Act — the second workspace of the SAME repository asks to merge.
-	sendMerge(t, conn, "r-merge-second", mergeCmdFor(repo, second, "feature-second"))
+	sendMerge(t, conn, "r-merge-second", mergeCmdFor(t, h.geometry, repo, second, "feature-second"))
 
 	// Assert — admitted to the queue, behind the parked head, and not landed.
 	w.awaitOKAck("r-merge-second")
@@ -550,7 +573,7 @@ func TestE2EQueueDepthIsKeyedByRepositoryNotByWorktree(t *testing.T) {
 			conn := h.dialFrontend(t)
 			defer conn.Close()
 			w := newMergeWatch(t, conn)
-			parkTheQueueHead(t, w, parked, parkedDir, "feature-parked", "r-merge-parked")
+			parkTheQueueHead(t, h.geometry, w, parked, parkedDir, "feature-parked", "r-merge-parked")
 
 			subject := parked
 			if !tc.sameRepo {
@@ -559,7 +582,7 @@ func TestE2EQueueDepthIsKeyedByRepositoryNotByWorktree(t *testing.T) {
 			subjectDir := subject.cleanWorktree("feature-subject")
 
 			// Act.
-			sendMerge(t, conn, "r-merge-subject", mergeCmdFor(subject, subjectDir, "feature-subject"))
+			sendMerge(t, conn, "r-merge-subject", mergeCmdFor(t, h.geometry, subject, subjectDir, "feature-subject"))
 
 			// Assert — the queue the merge was admitted to is the repository's,
 			// not the worktree's.
