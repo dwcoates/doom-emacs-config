@@ -106,6 +106,10 @@ const (
 	causeTaskStarted     = "task_started"
 	causeTaskEnded       = "task_ended"
 	causeMergeTransition = "merge_transition"
+	// The merge axis was retired because a merged workspace was REOPENED. It is
+	// its own cause kind rather than a merge_transition detail because nothing
+	// about a merge produced it: a bring-up did. See mergereopen.go.
+	causeMergeReopened = "merge_axis_retired_on_reopen"
 	// The legacy connectivity projection's edges. The detail after the colon names which one moved
 	// it — the bring-up that started, the ShimReady that closed the gate, or the
 	// exit/hibernation/rotation that took the wiring away.

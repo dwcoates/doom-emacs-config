@@ -168,6 +168,24 @@ func (m *Manager) ApplySessionConnectivity(
 			workspace, sessionID, generationID, prior.state, state, causeKind, at, err)
 		return err
 	}
+	// A BRING-UP RETIRES A STICKY `merged`. Reopening a merged workspace is
+	// exactly a new generation entering `connecting`, and without this the
+	// workspace's live session would lose every row to a merge that already
+	// finished — `merged` outranks the whole color ladder and nothing but another
+	// merge row supersedes it. See mergereopen.go; the durable merged-at fact is
+	// untouched.
+	if state == SessionConnectivityConnecting {
+		retired, err := supersedeMergedAxisOnReopen(tx, workspace, m.nextAt())
+		if err != nil {
+			m.logf("ssm: session connectivity ERROR ws=%q session=%q generation=%q next=%q cause=%q branch=merge-axis-retire error=%q",
+				workspace, sessionID, generationID, state, causeKind, err)
+			return err
+		}
+		if retired {
+			m.logf("ssm: merge axis RETIRED ON REOPEN ws=%q session=%q generation=%q cause=%q — the workspace rested on `merged` and is being brought up again, so the axis is cleared and its live session resolves its own state (merged_at_ms is untouched)",
+				workspace, sessionID, generationID, causeKind)
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		err = fmt.Errorf("ssm: commit session connectivity ws=%q session=%q generation=%q prior=%q next=%q cause=%q at=%d: %w",
 			workspace, sessionID, generationID, prior.state, state, causeKind, at, err)
