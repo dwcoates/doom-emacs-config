@@ -392,6 +392,15 @@ workspace entry."
       (agent-repl--merge-echo-pushed-state "ws1" :thinking :ready))
     (should-not msgs)))
 
+(ert-deftest agent-repl-test-merge-echo-states-are-the-render-maps-merge-arm ()
+  "The narrated set IS the render map's merge arm, not a copy of it.
+Derived rather than restated so a merge state the daemon adds narrates
+itself instead of silently going unmentioned."
+  (should (equal (sort (copy-sequence agent-repl--merge-echo-states) #'string<)
+                 (sort (list :merge-enqueuing :merge-queued :merging
+                             :merge-conflict :merge-failed :merged)
+                       #'string<))))
+
 ;;;; ---- Tests: the narration reads MergeStatus ----
 
 (ert-deftest agent-repl-test-merge-echo-narrates-the-queue-position ()
