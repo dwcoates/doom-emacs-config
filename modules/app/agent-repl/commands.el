@@ -2771,9 +2771,26 @@ protected-workspace handling: when current is the nil-persp, switch to
           (let* ((visible (agent-repl--ws-tabline-names))
                  (perspc (length visible))
                  (index (cl-position current-name visible :test #'equal)))
-            (when (= perspc 1)
+            (when (zerop perspc)
+              (user-error "No visible workspaces to switch to"))
+            ;; CURRENT can legitimately be ABSENT from the tabline: a merged
+            ;; workspace is torn down and dropped from the list while its
+            ;; perspective is still the one the user sits in, and a folded
+            ;; repo hides its members. Cycling from such a workspace used to
+            ;; do arithmetic on the nil position — the number-or-marker-p nil
+            ;; error on every switch keypress after a merge. An absent
+            ;; current cycles from the list's edge instead: right lands on
+            ;; the first visible workspace, left on the last.
+            (unless index
+              (agent-repl--log current-name
+                               "workspace-cycle: current=%s not in tabline (%d visible) — cycling from the edge"
+                               current-name perspc))
+            (when (and index (= perspc 1))
               (user-error "No other workspaces"))
-            (agent-repl--ws-switch (nth (mod (+ index n) perspc) visible)))
+            (agent-repl--ws-switch
+             (if index
+                 (nth (mod (+ index n) perspc) visible)
+               (if (< n 0) (car (last visible)) (car visible)))))
         ('user-error (agent-repl--ws-error (cadr ex) t))
         ('error (agent-repl--ws-error ex t))))))
 
