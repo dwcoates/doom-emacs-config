@@ -155,9 +155,26 @@ func (r *RunStatus) SetPlan(plan CommitPlan) {
 	r.logf("merge: run plan {ws=%s run=%s commits_total=%d}", r.workspace, r.runID, r.commitsTotal)
 }
 
-// Enqueued publishes the enqueued phase.
-func (r *RunStatus) Enqueued(position, depth int32, cause string) error {
-	return r.publish(PhaseMergeQueued, cause, func(s *frontendv1.MergeStatus) {
+// Enqueued publishes the run's ADMISSION: the `enqueued` status arm, carrying
+// the place the entry landed at on its repository's queue.
+//
+// THE ARM AND THE AXIS TOKEN ARE NOT THE SAME WORD, which is why the caller
+// passes the token. Every admission is `enqueued` to a frontend — the run is on
+// a queue, at some position, and that is what the arm says — while the coarse
+// merge axis distinguishes the two admissions it has always distinguished: a
+// merge admitted at the HEAD stays at `merge_enqueuing` until the cherry-pick
+// itself moves it to `merging`, and only one deferred behind another merge is
+// `merge_queued`. Publishing `merge_queued` for a head admission would tell every
+// merge_phase reader that a merge starting immediately is waiting on something.
+//
+// Any other token is refused rather than published: it would put an `enqueued`
+// arm on a phase that has nothing to do with admission.
+func (r *RunStatus) Enqueued(phase Phase, position, depth int32, cause string) error {
+	if phase != PhaseMergeEnqueuing && phase != PhaseMergeQueued {
+		r.logf("merge: status REFUSING an enqueued arm on a non-admission phase {ws=%s run=%s phase=%s}", r.workspace, r.runID, phase)
+		return fmt.Errorf("merge: enqueued status for %q needs %s or %s, got %q", r.workspace, PhaseMergeEnqueuing, PhaseMergeQueued, phase)
+	}
+	return r.publish(phase, cause, func(s *frontendv1.MergeStatus) {
 		s.Phase = &frontendv1.MergeStatus_Enqueued{Enqueued: &frontendv1.MergeStatusEnqueued{
 			Position: position,
 			Depth:    depth,
