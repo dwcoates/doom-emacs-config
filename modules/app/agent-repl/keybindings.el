@@ -68,7 +68,8 @@
      (:done :done-acked :done-acked-at :last-notify-time))
     ("🔀 Merge"
      (:merge-completed :merge-completed-at :merge-conflict
-      :merge-failed :merge-proc :merge-queued :merging))
+      :merge-failed :merge-proc :merge-queued :merging
+      :pushed-merge-status :merge-echo-last))
     ("🪟 UI / Panels"
      (:input-buffer :pending-magit :pending-show-panels
       :pending-initial-buffers :fullscreen-config :ai-title-cache
