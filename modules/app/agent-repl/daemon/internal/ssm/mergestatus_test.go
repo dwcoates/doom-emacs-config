@@ -83,9 +83,12 @@ func TestATransitionWithNoPublishedStatusCarriesNoMergeStatus(t *testing.T) {
 	}
 }
 
-func TestATransitionWithNoPublishedStatusStillCarriesTheMergePhase(t *testing.T) {
-	// The coarse phase is what reports such a transition, which is why leaving
-	// merge_status unset loses nothing a frontend was already reading.
+func TestATransitionWithNoPublishedStatusStillResolvesTheMergingState(t *testing.T) {
+	// REWRITTEN off the retired flat merge_phase field: the coarse phase word is
+	// gone from the wire, but the merge AXIS that produced it is not, and the
+	// axis is what makes a merge with no published run visible at all. Asserting
+	// the resolved RenderState is asserting the same guarantee against the
+	// surface that still carries it.
 	// Arrange.
 	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
 
@@ -93,8 +96,8 @@ func TestATransitionWithNoPublishedStatusStillCarriesTheMergePhase(t *testing.T)
 	applyPhases(t, m, "ws1", merge.PhaseMerging)
 
 	// Assert.
-	if got := mustCurrent(t, m, "ws1").GetMergePhase(); got != string(merge.PhaseMerging) {
-		t.Fatalf("merge_phase = %q, want it still stamped where merge_status is absent", got)
+	if got := mustCurrent(t, m, "ws1").GetState(); got != frontendv1.RenderState_RENDER_STATE_MERGING {
+		t.Fatalf("state = %v where merge_status is absent, want RENDER_STATE_MERGING from the axis", got)
 	}
 }
 
@@ -138,9 +141,12 @@ func TestThePublishedStatusReachesTheWireVerbatim(t *testing.T) {
 	}
 }
 
-func TestMergeStatusRidesTheOldMergeFieldsRatherThanReplacingThem(t *testing.T) {
-	// Both forms coexist until the cutover wave, so a frontend that has not
-	// moved yet keeps reading the phase it always read.
+func TestMergeStatusRidesTheAxisThatResolvedTheFrame(t *testing.T) {
+	// REWRITTEN off the retired flat merge_phase field, which this used to assert
+	// coexisted with merge_status. There is no second form to coexist with any
+	// more; what the cutover must preserve is that a published status arrives on
+	// a frame the merge axis also resolved, so the run's progress and the state
+	// it is progressing through cannot disagree.
 	// Arrange.
 	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
 
@@ -151,7 +157,11 @@ func TestMergeStatusRidesTheOldMergeFieldsRatherThanReplacingThem(t *testing.T) 
 	}
 
 	// Assert.
-	if got := mustCurrent(t, m, "ws1").GetMergePhase(); got != string(merge.PhaseMerging) {
-		t.Fatalf("merge_phase = %q, want it still stamped alongside merge_status", got)
+	got := mustCurrent(t, m, "ws1")
+	if got.GetState() != frontendv1.RenderState_RENDER_STATE_MERGING {
+		t.Fatalf("state = %v alongside a published merge_status, want RENDER_STATE_MERGING", got.GetState())
+	}
+	if got.GetMergeStatus().GetRunId() != "run-both" {
+		t.Fatalf("run_id = %q, want the published run on the same frame the axis resolved", got.GetMergeStatus().GetRunId())
 	}
 }

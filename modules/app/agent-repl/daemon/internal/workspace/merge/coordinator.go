@@ -598,10 +598,9 @@ func (c *QueueCoordinator) drainLoop(repo string, ch <-chan Request) {
 // lease is released.
 //
 // That order is load-bearing. Releasing the lease is what re-pushes the
-// workspace's state, and the queue facts on that state (merge_queue_position /
-// merge_queue_depth) are read from the queue at push time. Releasing first
-// would publish a terminal merge that still claims position 1 on a queue it has
-// already left, with no later event to correct it.
+// workspace's state. Releasing first would publish a terminal merge whose
+// frame was built while it was still on the queue it has already left, with no
+// later event to correct it.
 //
 // The lease is released even when the entry could not be dropped: a lease must
 // never outlive the merge that took it, whatever the queue's storage did.

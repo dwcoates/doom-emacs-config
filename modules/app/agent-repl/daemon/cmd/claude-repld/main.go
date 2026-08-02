@@ -619,11 +619,11 @@ func main() {
 
 	// The merge queue's durable substrate and the shim exclusivity lease.
 	// Both are constructed HERE, not inside WireAgentShim, because the SSM's
-	// merge.Lease reads the SAME queue instance to resolve
-	// merge_queue_position / merge_queue_depth on every pushed WorkspaceState:
-	// a second queue over the same directory would report a depth nobody is
-	// draining. The queue directory lives under the state root so a queued
-	// merge survives the daemon bounce a self-merge of the daemon causes.
+	// merge.Lease binds the SAME queue instance the coordinator drains: two
+	// queues over one directory would put two merge subsystems behind one
+	// manager's leases. The queue directory lives under the state root so a
+	// queued merge survives the daemon bounce a self-merge of the daemon
+	// causes.
 	mergeQueueDir, err := stateroot.Root()
 	if err != nil {
 		daemonFatal(daemonLog, "claude-repld: resolve merge queue dir: %v", err)

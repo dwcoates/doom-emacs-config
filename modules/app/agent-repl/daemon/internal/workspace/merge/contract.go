@@ -10,8 +10,9 @@ import "context"
 // Nothing here has behavior. Implementations live beside it.
 
 // Position is where an enqueued merge sits on its repository's queue. It is
-// what the daemon pushes to the frontends as merge_queue_position /
-// merge_queue_depth on WorkspaceState.
+// what a run reports to the frontends through MergeStatus's `enqueued` arm:
+// the place the run was ADMITTED at, observed under the repository's advance
+// gate rather than re-read from a snapshot at push time.
 type Position struct {
 	// Index is 1-based: the merge currently cherry-picking is 1. Zero means
 	// not enqueued, and is never returned by a successful Enqueue.
