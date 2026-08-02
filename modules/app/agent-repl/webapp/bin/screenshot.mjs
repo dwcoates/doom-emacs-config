@@ -12,7 +12,7 @@
  *                              (cd ../agent-shim/claude/shim && npm run build)
  *   - webapp/dist              (npm run build in webapp/)
  *   - a claude-repld binary    (cd ../daemon && go build ./cmd/claude-repld)
- *   - Playwright Chromium      (.agents-sandbox installs chromium-headless-shell)
+ *   - Playwright Chromium      (npx playwright install chromium)
  *
  * Usage:
  *   node bin/screenshot.mjs [--theme light|dark] [--out FILE] \
@@ -70,7 +70,7 @@ function loadChromium() {
       /* try next */
     }
   }
-  throw new Error("playwright not found; install it or run inside the sandbox");
+  throw new Error("playwright not found; install it (npm i -D playwright)");
 }
 
 async function waitForHttp(url, attempts = 30) {
