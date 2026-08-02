@@ -632,6 +632,43 @@ export function userTurnKey(item: UserTurnItem): string | null {
   return null;
 }
 
+/**
+ * The failure types whose window CLOSING means the card DISAPPEARS, rather
+ * than settling in place with a "resolved" stamp.
+ *
+ * Every one of them reports a transport link that was momentarily down and is
+ * now up again. Once the link is back there is nothing left for the reader to
+ * do about it and nothing left for it to explain: the card names a condition
+ * that no longer exists, beside a feed that is once again live. A settled
+ * "lost the connection to the daemon; reconnecting (close=1005)" is worse than
+ * no card at all — it reads as a standing fault to anyone who does not notice
+ * the small resolved timestamp under it, and a flapping link leaves one such
+ * ghost per drop.
+ *
+ * This is deliberately NOT the rule for every window-shaped failure. A
+ * resolved `shim.store_write_rejected` carries `dropped=N` — conversation that
+ * is permanently gone — and a resolved rate limit explains a gap in the
+ * transcript. Those settle; only the pure connectivity windows vanish.
+ */
+export const CONNECTIVITY_WINDOW_FAILURE_TYPES: readonly string[] = [
+  /** This end's own socket to the daemon closed and then came back. */
+  "client.daemon_unreachable",
+  /** The daemon's missed-heartbeat window to the shim, since resumed. */
+  "shim.degraded",
+];
+
+/**
+ * Reports whether ITEM is a connectivity window that has CLOSED — the arrival
+ * whose meaning is "take the notice down".
+ */
+export function isSettledConnectivityFailure(item: ConversationItem): item is SystemFailureCard {
+  return (
+    item.kind === "failure" &&
+    item.resolvedAtMs > 0 &&
+    CONNECTIVITY_WINDOW_FAILURE_TYPES.includes(item.errorType)
+  );
+}
+
 /** The stable identity a conversation item is reconciled on, or null if it has none. */
 function itemKey(item: ConversationItem): string | null {
   switch (item.kind) {
@@ -648,7 +685,9 @@ function itemKey(item: ConversationItem): string | null {
       return `permission:${item.requestId}`;
     // A WINDOW-shaped failure is re-sent under its OPENING uuid with a
     // resolution stamp, so it must reconcile in place. Appending instead
-    // would leave the alarm standing beside its own all-clear.
+    // would leave the alarm standing beside its own all-clear. The same uuid
+    // is what a connectivity window's closing edge RETRACTS the opening card
+    // by (see `isSettledConnectivityFailure`).
     case "failure":
       return `failure:${item.uuid}`;
     // Terminal / one-shot items carry no reconcilable id: they are appended.
@@ -1076,6 +1115,15 @@ export class ConversationStore {
       return;
     }
     const key = itemKey(item);
+    // A closed connectivity window RETRACTS its own opening card instead of
+    // replacing it. Both edges reach the feed through this one seam — locally
+    // minted (`addFailure`) and daemon-pushed (`applyConversationItems`)
+    // alike — so the retraction is stated once and cannot drift between the
+    // two producers.
+    if (isSettledConnectivityFailure(item)) {
+      this.retractConnectivityCard(item, key);
+      return;
+    }
     if (key !== null) {
       const idx = this.state.items.findIndex((i) => itemKey(i) === key);
       if (idx !== -1) {
@@ -1093,6 +1141,31 @@ export class ConversationStore {
       }
     }
     insertBySeq(this.state.items, item, seq);
+  }
+
+  /**
+   * Take down the open card a closed connectivity window names, and never file
+   * the closing edge itself.
+   *
+   * A retraction that finds nothing is the ORDINARY case, not an anomaly: a
+   * view that loaded after the drop, or one whose feed was cleared, never held
+   * the opening card. It is traced rather than warned about, and it is
+   * deliberately not an insertion — filing an all-clear for an alarm the
+   * reader never saw is exactly the noise this removes.
+   */
+  private retractConnectivityCard(item: SystemFailureCard, key: string | null): void {
+    // Structurally impossible: `itemKey` keys every failure on its uuid.
+    if (key === null) throw new Error("store: failure card reached the feed with no key");
+    const idx = this.state.items.findIndex((i) => itemKey(i) === key);
+    if (idx === -1) {
+      this.log(
+        "info",
+        `connectivity window ${item.errorType} closed with no open card to retract (${key})`,
+      );
+      return;
+    }
+    this.state.items.splice(idx, 1);
+    this.log("info", `retracted the resolved connectivity card ${key} (${item.errorType})`);
   }
 
   /**

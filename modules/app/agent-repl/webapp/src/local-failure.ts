@@ -150,7 +150,15 @@ export function daemonUnreachableFailure(code: number, reason: string): SystemFa
   return clientFailure("client.daemon_unreachable", message, detail);
 }
 
-/** The resolved twin of the above, stamped when the socket comes back. */
+/**
+ * The resolved twin of the above, stamped when the socket comes back.
+ *
+ * It is a RETRACTION, not a card: `client.daemon_unreachable` is one of the
+ * connectivity windows the store takes down on resolution
+ * (`CONNECTIVITY_WINDOW_FAILURE_TYPES`), so handing this to `addFailure`
+ * removes the "lost the connection" card rather than settling it in place.
+ * Its message and stamp are what the store's trace records the removal by.
+ */
 export function daemonReachableFailure(atMs: number): SystemFailureCard {
   return clientFailure(
     "client.daemon_unreachable",
