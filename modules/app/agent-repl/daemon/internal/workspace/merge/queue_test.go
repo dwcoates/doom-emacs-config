@@ -226,6 +226,165 @@ func TestAReplayedEntryCarriesNoRunPublisher(t *testing.T) {
 	}
 }
 
+// --- the status watermark -----------------------------------------------
+
+// publishedRun publishes req under a live run and returns the run's id, which
+// is the key every watermark call is made against.
+func publishedRun(t *testing.T, q *FileQueue, req Request) (Request, string) {
+	t.Helper()
+	run, err := NewRunStatus(&recordingSink{}, t.Logf, req.Workspace, testClock())
+	if err != nil {
+		t.Fatalf("NewRunStatus: %v", err)
+	}
+	req.Run = run
+	if _, err := q.Publish(context.Background(), testRepoKey, req); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	return req, run.RunID()
+}
+
+// THE GUARANTEE: the watermark survives the bounce, so the next boot's resume
+// has a floor to seed above.
+func TestARecordedWatermarkSurvivesABounce(t *testing.T) {
+	// Arrange.
+	q, dir := newTestQueue(t)
+	_, runID := publishedRun(t, q, testRequest("a"))
+
+	// Act.
+	if err := q.RecordStatusWatermark(testRepoKey, runID, 9000); err != nil {
+		t.Fatalf("RecordStatusWatermark: %v", err)
+	}
+	next, err := NewFileQueue(dir, t.Logf)
+	if err != nil {
+		t.Fatalf("NewFileQueue: %v", err)
+	}
+
+	// Assert.
+	got := next.Snapshot()[testRepoKey]
+	if len(got) != 1 {
+		t.Fatalf("snapshot = %+v, want 1 entry", got)
+	}
+	if got[0].StatusWatermarkMs != 9000 {
+		t.Fatalf("replayed StatusWatermarkMs = %d, want 9000", got[0].StatusWatermarkMs)
+	}
+}
+
+// An entry that never recorded a watermark replays with none, which is the
+// "no floor to respect" case a resume serves from now() alone.
+func TestAnEntryWithNoRecordedWatermarkReplaysWithZero(t *testing.T) {
+	// Arrange.
+	q, dir := newTestQueue(t)
+	publishedRun(t, q, testRequest("a"))
+
+	// Act.
+	next, err := NewFileQueue(dir, t.Logf)
+	if err != nil {
+		t.Fatalf("NewFileQueue: %v", err)
+	}
+
+	// Assert.
+	got := next.Snapshot()[testRepoKey]
+	if len(got) != 1 {
+		t.Fatalf("snapshot = %+v, want 1 entry", got)
+	}
+	if got[0].StatusWatermarkMs != 0 {
+		t.Fatalf("replayed StatusWatermarkMs = %d, want 0", got[0].StatusWatermarkMs)
+	}
+}
+
+// THE VIOLATION EDGE: a watermark may only rise. Writing a lower one would hand
+// the next boot a floor beneath statuses already on the wire.
+func TestRecordStatusWatermarkRefusesARegression(t *testing.T) {
+	// Arrange.
+	q, _ := newTestQueue(t)
+	_, runID := publishedRun(t, q, testRequest("a"))
+	if err := q.RecordStatusWatermark(testRepoKey, runID, 9000); err != nil {
+		t.Fatalf("RecordStatusWatermark(9000): %v", err)
+	}
+
+	// Act.
+	err := q.RecordStatusWatermark(testRepoKey, runID, 8999)
+
+	// Assert.
+	if err == nil {
+		t.Fatal("RecordStatusWatermark(8999) error = nil, want the regression refused")
+	}
+}
+
+// Repeating the same value is a regression too: the watermark is the floor a
+// resume adds one to, and two runs' statuses must not be able to share it.
+func TestRecordStatusWatermarkRefusesTheSameValueTwice(t *testing.T) {
+	// Arrange.
+	q, _ := newTestQueue(t)
+	_, runID := publishedRun(t, q, testRequest("a"))
+	if err := q.RecordStatusWatermark(testRepoKey, runID, 9000); err != nil {
+		t.Fatalf("RecordStatusWatermark(9000): %v", err)
+	}
+
+	// Act.
+	err := q.RecordStatusWatermark(testRepoKey, runID, 9000)
+
+	// Assert.
+	if err == nil {
+		t.Fatal("RecordStatusWatermark(9000) twice error = nil, want the repeat refused")
+	}
+}
+
+// A retired entry is a no-op: the terminal status the post-merge hook
+// republishes lands after Complete dropped the record, and there is no longer a
+// resume for a watermark to protect.
+func TestRecordStatusWatermarkOnARetiredEntryIsANoOp(t *testing.T) {
+	// Arrange.
+	q, _ := newTestQueue(t)
+	req, runID := publishedRun(t, q, testRequest("a"))
+	if err := q.Complete(testRepoKey, req); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+
+	// Act.
+	err := q.RecordStatusWatermark(testRepoKey, runID, 9000)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("RecordStatusWatermark on a retired entry = %v, want a no-op", err)
+	}
+}
+
+// The watermark is keyed on the run, so a call with no run id names no entry and
+// is refused rather than raising whichever entry happened to be first.
+func TestRecordStatusWatermarkRefusesAnEmptyRunID(t *testing.T) {
+	// Arrange.
+	q, _ := newTestQueue(t)
+	publishedRun(t, q, testRequest("a"))
+
+	// Act.
+	err := q.RecordStatusWatermark(testRepoKey, "", 9000)
+
+	// Assert.
+	if err == nil {
+		t.Fatal("RecordStatusWatermark(\"\") error = nil, want the empty run id refused")
+	}
+}
+
+// Recording a watermark must not disturb the identity Complete matches the head
+// by, or a merge would fail to retire the entry it just finished.
+func TestRecordStatusWatermarkLeavesTheEntryCompletable(t *testing.T) {
+	// Arrange.
+	q, _ := newTestQueue(t)
+	req, runID := publishedRun(t, q, testRequest("a"))
+	if err := q.RecordStatusWatermark(testRepoKey, runID, 9000); err != nil {
+		t.Fatalf("RecordStatusWatermark: %v", err)
+	}
+
+	// Act.
+	err := q.Complete(testRepoKey, req)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Complete after a watermark write = %v, want the head retired", err)
+	}
+}
+
 func TestSnapshotOmitsRepositoriesWithNoOutstandingEntries(t *testing.T) {
 	// Arrange.
 	q, _ := newTestQueue(t)
