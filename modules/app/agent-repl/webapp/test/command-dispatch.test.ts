@@ -12,20 +12,26 @@ import {
 import { decodeFrontendFrame, type FrontendFrame } from "../src/frontend-proto.js";
 import { ForwardingLogger, resetLoggingForTests, setLogger } from "../src/wslog.js";
 
-function installLogging(): Array<Record<string, unknown>> {
+function installLogging(): {
+  records: Array<Record<string, unknown>>;
+  consoleRecords: Array<Record<string, unknown>>;
+} {
   const records: Array<Record<string, unknown>> = [];
+  const consoleRecords: Array<Record<string, unknown>> = [];
   setLogger(new ForwardingLogger((cmd) => {
     records.push(cmd.context as Record<string, unknown>);
     return true;
-  }, () => {}));
-  return records;
+  }, (_level, line) => {
+    consoleRecords.push(JSON.parse(line) as Record<string, unknown>);
+  }));
+  return { records, consoleRecords };
 }
 
 afterEach(() => resetLoggingForTests());
 
 function newDispatcher(sendReturns = true) {
   const sent: string[] = [];
-  const records = installLogging();
+  const { records, consoleRecords } = installLogging();
   let n = 0;
   const dispatcher = new CommandDispatcher({
     send: (raw) => {
@@ -35,7 +41,7 @@ function newDispatcher(sendReturns = true) {
     newRequestId: () => `r${++n}`,
     logLocal: (message) => records.push({ local_only: message }),
   });
-  return { dispatcher, sent, records };
+  return { dispatcher, sent, records, consoleRecords };
 }
 
 function ackFrame(requestId: string, ok: boolean, error = "", selectedModel = ""): FrontendFrame {
@@ -142,7 +148,7 @@ describe("ack-correlated commands", () => {
     // Arrange — a challenge is a question, and a failure card would answer it
     // with an alarm the user never earned.
     const failures: unknown[] = [];
-    const records = installLogging();
+    const { records } = installLogging();
     const dispatcher = new CommandDispatcher({
       send: () => true,
       newRequestId: () => "r1",
@@ -201,13 +207,25 @@ describe("ack-correlated commands", () => {
   });
 
   it("logs structured context for a commandAck for an unknown request", () => {
-    const { dispatcher, records } = newDispatcher();
+    const { dispatcher, consoleRecords } = newDispatcher();
     dispatcher.observe(ackFrame("ghost", true));
-    expect(records).toContainEqual(expect.objectContaining({
+    expect(consoleRecords).toContainEqual(expect.objectContaining({
       operation: "command-dispatch.ack-unknown-request",
       request_id: "ghost",
       context: expect.objectContaining({ ok: true, pending_count: 0 }),
     }));
+  });
+
+  it("never forwards the unknown-ack anomaly to the daemon", () => {
+    // Arrange — a forwarded unknown-ack warn is itself a clientLog whose ack
+    // can come back unknown, which is the self-sustaining command flood.
+    const { dispatcher, records } = newDispatcher();
+    // Act
+    dispatcher.observe(ackFrame("ghost", true));
+    // Assert
+    expect(records).not.toContainEqual(
+      expect.objectContaining({ operation: "command-dispatch.ack-unknown-request" }),
+    );
   });
 });
 
@@ -367,23 +385,29 @@ describe("clientLog (E4)", () => {
   });
 
   it("still reports a genuinely unknown ack as an anomaly", () => {
-    // Arrange — the clientLog carve-out must not blanket-silence onAck.
-    const { dispatcher, records } = newDispatcher();
+    // Arrange — the clientLog carve-out must not blanket-silence onAck. The
+    // report is console-only: forwarding it is the ack/clientLog loop.
+    const { dispatcher, consoleRecords } = newDispatcher();
     // Act
     dispatcher.observe(ackFrame("never-sent", true));
     // Assert
-    expect(records).toContainEqual(expect.objectContaining({ operation: "command-dispatch.ack-unknown-request" }));
+    expect(consoleRecords).toContainEqual(
+      expect.objectContaining({ operation: "command-dispatch.ack-unknown-request" }),
+    );
   });
 
   it("tracks no ack id for a frame the socket refused", () => {
     // Arrange — an undelivered log can never be acked, so remembering its id
     // would leak it.
-    const { dispatcher, records } = newDispatcher(false);
+    const { dispatcher, consoleRecords } = newDispatcher(false);
     dispatcher.clientLog("/w", "info", "m");
     // Act
     dispatcher.observe(ackFrame("r1", true));
-    // Assert — the id was never tracked, so this reads as an unknown ack.
-    expect(records).toContainEqual(expect.objectContaining({ operation: "command-dispatch.ack-unknown-request" }));
+    // Assert — the id was never tracked, so this reads as an unknown ack,
+    // reported console-only (see the no-reentry boundary in onAck).
+    expect(consoleRecords).toContainEqual(
+      expect.objectContaining({ operation: "command-dispatch.ack-unknown-request" }),
+    );
   });
 });
 

@@ -386,8 +386,14 @@ export class CommandDispatcher {
     }
     const p = this.pending.get(ack.requestId);
     if (p === undefined) {
+      // localOnly: this branch fires while HOLDING an ack — most often one
+      // whose clientLog id was evicted from the bounded tracking set above.
+      // Forwarding the warn sends another clientLog, whose ack is also
+      // evicted-unknown, re-entering this branch forever (the fe-9.2M
+      // request-counter flood). Same no-reentry boundary as `observe`.
       log("warn", `commandAck for unknown request '${ack.requestId}'`, {
         operation: "command-dispatch.ack-unknown-request",
+        localOnly: true,
         context: { request_id: ack.requestId, ok: ack.ok, error: ack.error, pending_count: this.pending.size },
       });
       return;
