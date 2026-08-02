@@ -116,6 +116,21 @@ type Request struct {
 	// cursor of a dead process describes work the resumed one has not done — only
 	// its name.
 	RunID string
+	// StatusWatermarkMs is the HIGHEST updated_at_ms the run had published when
+	// the durable entry was last written, and it is the other half of a run that
+	// survives the process.
+	//
+	// A resumed RunStatus seeds its clock from max(now, watermark+1). Without it
+	// the resume re-seeds from now() alone, and a wall clock that stepped
+	// BACKWARDS across the bounce (an ntp correction, a suspended laptop, a
+	// container's clock settling) would publish a merge_status sorting beneath
+	// the ones the pre-bounce process already sent — which is a receiver
+	// ordering on updated_at_ms silently rendering stale progress.
+	//
+	// LIKE RunID, IT IS SET BY THE QUEUE AND BY NOTHING ELSE, and it is the
+	// value the entry was HYDRATED with rather than a live figure. The live one
+	// belongs to the RunStatus, which is the sole writer of the durable field.
+	StatusWatermarkMs int64
 }
 
 // runIdentity is the id this request's run publishes under: the live publisher's
