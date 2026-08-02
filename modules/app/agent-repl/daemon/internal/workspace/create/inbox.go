@@ -21,14 +21,58 @@ const commandPrefix = "workspace_commands_"
 // do NOT carry this sentinel: a broken JobStore is structural.
 var errRejectedCommandFile = errors.New("workspace create: command file rejected")
 
-// Inbox owns the command-file ingress.  It atomically claims files, persists
-// every array entry, then deletes the claim only after persistence succeeds.
-// Claimed files are scanned on startup, so a crash never converts a command
-// into an untracked vanished request.
+// ErrUnknownMergeWorkspace marks a dispatched merge whose project_dir matches
+// no workspace the daemon has a record for.  There is deliberately NO name
+// resolution behind it: the daemon's recorded merge geometry is the only
+// workspace map, an exact project_dir is the only key into it, and a merge run
+// against a guessed target writes commits into a repository nobody asked for.
+var ErrUnknownMergeWorkspace = errors.New("workspace create: merge names no recorded workspace")
+
+// MergeCommand is one dispatched merge verb.
+//
+// ProjectDir is the KEY: an absolute path to the workspace's own worktree, the
+// same string the daemon's geometry record and session registry are keyed on.
+// Workspace is the emitter's display name and is diagnostic ONLY — it is never
+// resolved, matched, or fallen back to.
+type MergeCommand struct {
+	Workspace  string `json:"workspace"`
+	ProjectDir string `json:"project_dir"`
+	// ID is the entry's inbox identity (command file id plus array index). It
+	// rides the merge as its request id so a merge in the logs can be traced
+	// back to the file that asked for it. Never part of the wire payload.
+	ID string `json:"-"`
+}
+
+// MergeDispatcher routes a dispatched merge straight onto the merge queue for
+// the workspace's repository.  It is the seam that replaced a round trip
+// through Emacs: the editor used to receive a merge host action, resolve the
+// workspace name heuristically, and send a merge command back.
+//
+// An implementation MUST report a project_dir it cannot resolve as an error
+// wrapping ErrUnknownMergeWorkspace, and must return only after the request is
+// DURABLY enqueued.
+type MergeDispatcher interface {
+	DispatchMerge(ctx context.Context, cmd MergeCommand) error
+}
+
+// Inbox owns the command-file ingress and is a PURE ROUTER: it atomically
+// claims files, persists every array entry, routes the entry to its owner, then
+// deletes the claim only after persistence succeeds.  Claimed files are scanned
+// on startup, so a crash never converts a command into an untracked vanished
+// request.
+//
+// IT NEVER RUNS A JOB STATE MACHINE.  Creation is advanced by the manager's
+// creation worker and host actions are published by its host-action worker,
+// both of which the inbox reaches only by routing an id or raising a coalesced
+// signal.  A wedged job used to freeze every subsequent command file, because
+// ingestion and execution shared this one goroutine.
 type Inbox struct {
-	Dir      string
-	Store    JobStore
-	Manager  *Manager
+	Dir     string
+	Store   JobStore
+	Manager *Manager
+	// Merges routes the merge verb daemon-side.  Required: the verb no longer
+	// round-trips through Emacs, so an inbox without it could only drop merges.
+	Merges   MergeDispatcher
 	Logf     func(string, ...any)
 	Interval time.Duration
 }
@@ -41,6 +85,8 @@ func (i *Inbox) validate() error {
 		return fmt.Errorf("workspace create: inbox needs a JobStore")
 	case i.Manager == nil:
 		return fmt.Errorf("workspace create: inbox needs a Manager")
+	case i.Merges == nil:
+		return fmt.Errorf("workspace create: inbox needs a MergeDispatcher (the merge verb is routed daemon-side and no longer round-trips through Emacs)")
 	case i.Logf == nil:
 		return fmt.Errorf("workspace create: inbox needs a logger")
 	}
@@ -75,9 +121,11 @@ func (i *Inbox) Run(ctx context.Context) error {
 	}
 }
 
-// ScanAndDrain handles all visible fresh and previously claimed files, then
-// resumes durable work and non-create actions.  It is exported for daemon
-// startup and focused tests; Run is the continuous watcher entry point.
+// ScanAndDrain claims, persists, and ROUTES every visible fresh and previously
+// claimed file.  It returns as soon as the last file's entries are durable and
+// routed — it never waits on, and never runs, the work it routed.  It is
+// exported for daemon startup and focused tests; Run is the continuous watcher
+// entry point.
 func (i *Inbox) ScanAndDrain(ctx context.Context) error {
 	if err := i.validate(); err != nil {
 		return err
@@ -108,9 +156,6 @@ func (i *Inbox) ScanAndDrain(ctx context.Context) error {
 			}
 			return err
 		}
-	}
-	if err := i.Manager.Resume(ctx); err != nil {
-		return err
 	}
 	return nil
 }
@@ -144,24 +189,78 @@ func (i *Inbox) claimAndPersist(ctx context.Context, path string) error {
 		return i.quarantine(claimed, fmt.Errorf("%w: parse %s: %v", errRejectedCommandFile, claimed, err))
 	}
 	fileID := commandFileID(claimed)
+	routedHostAction := false
 	for index, command := range commands {
 		id := fmt.Sprintf("%s:%d", fileID, index)
-		if command.Type == "create" {
+		switch command.Type {
+		case "create":
 			job := Job{ID: id, SourceFile: fileID, SourceIndex: index, Request: command.Create, State: StateQueued}
-			if _, _, err := i.Store.Enqueue(job); err != nil {
+			persisted, _, err := i.Store.Enqueue(job)
+			if err != nil {
 				return fmt.Errorf("workspace create: persist create entry %d from %s: %w", index, claimed, err)
 			}
-			continue
+			// Route regardless of INSERTED: a redelivered file names a job that
+			// may still be mid-flight, and the worker's per-id guard is what
+			// makes a second route a no-op rather than a duplicate effect.
+			i.Manager.RouteJob(persisted.ID)
+		case "merge":
+			cmd := command.Merge
+			cmd.ID = id
+			if err := i.routeMerge(ctx, claimed, index, cmd); err != nil {
+				return err
+			}
+		default:
+			action := HostAction{ID: id, SourceFile: fileID, SourceIndex: index, Type: command.Type, Payload: command.Raw}
+			if _, _, err := i.Store.EnqueueHostAction(action); err != nil {
+				return fmt.Errorf("workspace create: persist host action entry %d from %s: %w", index, claimed, err)
+			}
+			routedHostAction = true
 		}
-		action := HostAction{ID: id, SourceFile: fileID, SourceIndex: index, Type: command.Type, Payload: command.Raw}
-		if _, _, err := i.Store.EnqueueHostAction(action); err != nil {
-			return fmt.Errorf("workspace create: persist host action entry %d from %s: %w", index, claimed, err)
-		}
+	}
+	if routedHostAction {
+		// PUBLICATION IS OFF THIS GOROUTINE.  The router raises a coalesced
+		// signal; the host-action worker does the publishing, so a host that is
+		// slow to accept an action cannot delay the next command file.
+		i.Manager.RouteHostActions()
 	}
 	if err := os.Remove(claimed); err != nil {
 		return fmt.Errorf("workspace create: delete durably ingested claim %s: %w", claimed, err)
 	}
 	i.Logf("workspace-create: ingested command file id=%s entries=%d", fileID, len(commands))
+	return nil
+}
+
+// routeMerge hands one dispatched merge to the daemon's merge queue.
+//
+// THE ONLY KEY IS AN EXACT, ABSOLUTE project_dir.  A merge naming a workspace
+// the daemon has no record for is REJECTED — quarantined and logged with both
+// the workspace name and the project_dir — never resolved by name, by branch
+// tail, or by any other heuristic.  This is a deliberate product decision: the
+// heuristic resolution that used to happen in Emacs is exactly how a merge
+// reached a workspace nobody named.
+//
+// A rejected merge does not stop the scan: the returned error wraps
+// errRejectedCommandFile, which ScanAndDrain steps over.
+func (i *Inbox) routeMerge(ctx context.Context, claimed string, index int, cmd MergeCommand) error {
+	switch {
+	case cmd.ProjectDir == "":
+		i.Logf("workspace-create: merge REJECTED reason=missing-project-dir file=%s entry=%d workspace=%q project_dir=%q", claimed, index, cmd.Workspace, cmd.ProjectDir)
+		return i.quarantine(claimed, fmt.Errorf("%w: entry %d merge reason=missing-project-dir workspace=%q project_dir=%q", errRejectedCommandFile, index, cmd.Workspace, cmd.ProjectDir))
+	case !filepath.IsAbs(cmd.ProjectDir):
+		i.Logf("workspace-create: merge REJECTED reason=relative-project-dir file=%s entry=%d workspace=%q project_dir=%q", claimed, index, cmd.Workspace, cmd.ProjectDir)
+		return i.quarantine(claimed, fmt.Errorf("%w: entry %d merge reason=relative-project-dir workspace=%q project_dir=%q", errRejectedCommandFile, index, cmd.Workspace, cmd.ProjectDir))
+	}
+	if err := i.Merges.DispatchMerge(ctx, cmd); err != nil {
+		if errors.Is(err, ErrUnknownMergeWorkspace) {
+			i.Logf("workspace-create: merge REJECTED reason=unknown-project-dir file=%s entry=%d workspace=%q project_dir=%q cause=%v", claimed, index, cmd.Workspace, cmd.ProjectDir, err)
+			return i.quarantine(claimed, fmt.Errorf("%w: entry %d merge reason=unknown-project-dir workspace=%q project_dir=%q: %v", errRejectedCommandFile, index, cmd.Workspace, cmd.ProjectDir, err))
+		}
+		// Anything else is the merge subsystem failing structurally (an
+		// unreachable queue, an unreadable geometry store).  The claim is left
+		// standing so the next scan retries it rather than losing the merge.
+		return fmt.Errorf("workspace create: dispatch merge entry %d from %s (workspace=%q project_dir=%q): %w", index, claimed, cmd.Workspace, cmd.ProjectDir, err)
+	}
+	i.Logf("workspace-create: routed merge entry=%d workspace=%q project_dir=%s", index, cmd.Workspace, cmd.ProjectDir)
 	return nil
 }
 
@@ -192,6 +291,7 @@ type parsedCommand struct {
 	Type   string
 	Raw    json.RawMessage
 	Create Request
+	Merge  MergeCommand
 }
 
 // parseCommands audits every type currently in Emacs' workspace-command
@@ -265,7 +365,19 @@ func parseCommands(payload []byte) ([]parsedCommand, error) {
 				return nil, fmt.Errorf("entry %d: %w", index, err)
 			}
 			command.Create = wire.Request
-		case "prompt", "finish", "close", "open", "clipboard", "send", "merge", "eval", "switch", "fold", "set-view", "task-create", "task-toggle-done", "task-open", "task-add-workspace":
+		case "merge":
+			// The merge verb is DAEMON-OWNED. It is deliberately not a host
+			// action: it used to be handed to Emacs, which resolved the
+			// workspace name heuristically and sent a merge command back, and
+			// that round trip is what let a merge land on a workspace nobody
+			// named. Carry the two fields the daemon-side route needs; the
+			// router validates and rejects.
+			var wire MergeCommand
+			if err := json.Unmarshal(item, &wire); err != nil {
+				return nil, fmt.Errorf("entry %d merge: %w", index, err)
+			}
+			command.Merge = wire
+		case "prompt", "finish", "close", "open", "clipboard", "send", "eval", "switch", "fold", "set-view", "task-create", "task-toggle-done", "task-open", "task-add-workspace":
 			// The host still owns these UI semantics.  Preserve the complete
 			// payload, including intentionally false/zero values, in the durable
 			// HostAction record rather than reinterpreting it here.
