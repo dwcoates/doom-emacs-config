@@ -13,13 +13,14 @@ import (
 
 // sameRequest compares two requests IGNORING the run they carry.
 //
-// merge.Request grew a *RunStatus, which is minted per run and is therefore
-// never equal across two values by construction. What these assertions are
-// about is the request's IDENTITY — which workspace, which branch, which target
-// — so the run is normalized away rather than every assertion being weakened to
-// a field-by-field spot check.
+// merge.Request grew a *RunStatus and the id it publishes under, both minted per
+// run and therefore never equal across two values by construction. What these
+// assertions are about is the request's IDENTITY — which workspace, which
+// branch, which target — so the run is normalized away rather than every
+// assertion being weakened to a field-by-field spot check.
 func sameRequest(a, b Request) bool {
 	a.Run, b.Run = nil, nil
+	a.RunID, b.RunID = "", ""
 	return a == b
 }
 
@@ -973,6 +974,64 @@ func TestDrainReconstructsADurableQueueAtBoot(t *testing.T) {
 	// Assert — the surviving entry is driven.
 	if got := <-h.picker.merges; !sameRequest(got, req) {
 		t.Fatalf("resumed merge = %+v, want %+v", got, req)
+	}
+}
+
+// THE BOUNCE INTERRUPTS A RUN, IT DOES NOT START A NEW ONE. The replayed entry
+// publishes under the id its admission published under, so the enqueued status a
+// user watched before the bounce and everything after it are one run.
+func TestDrainResumesTheRunIDTheEntryWasAdmittedUnder(t *testing.T) {
+	// Arrange — an entry admitted (and named) by a previous daemon.
+	q, dir := newTestQueue(t)
+	req := testRequest("a")
+	run, err := NewRunStatus(&recordingSink{}, t.Logf, req.Workspace, testClock())
+	if err != nil {
+		t.Fatalf("NewRunStatus: %v", err)
+	}
+	req.Run = run
+	if _, err := q.Publish(context.Background(), testRepoKey, req); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	next, err := NewFileQueue(dir, t.Logf)
+	if err != nil {
+		t.Fatalf("NewFileQueue: %v", err)
+	}
+	h := newHarnessWith(t, harnessOpts{queue: next, dir: dir})
+
+	// Act.
+	if err := h.coord.Drain(context.Background()); err != nil {
+		t.Fatalf("Drain: %v", err)
+	}
+
+	// Assert.
+	driven := <-h.picker.merges
+	if got := driven.Run.RunID(); got != run.RunID() {
+		t.Fatalf("resumed run id = %q, want the admitted %q", got, run.RunID())
+	}
+}
+
+// An entry written before the durable record carried a run id still drains: a
+// merge stranded because its record predates a field is work nobody gets back.
+func TestDrainMintsARunIDForAnUnnamedDurableEntry(t *testing.T) {
+	// Arrange — a durable entry with no run id at all.
+	q, dir := newTestQueue(t)
+	if _, err := q.Publish(context.Background(), testRepoKey, testRequest("a")); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	next, err := NewFileQueue(dir, t.Logf)
+	if err != nil {
+		t.Fatalf("NewFileQueue: %v", err)
+	}
+	h := newHarnessWith(t, harnessOpts{queue: next, dir: dir})
+
+	// Act.
+	if err := h.coord.Drain(context.Background()); err != nil {
+		t.Fatalf("Drain: %v", err)
+	}
+
+	// Assert.
+	if got := (<-h.picker.merges).Run.RunID(); got == "" {
+		t.Fatal("the replayed entry was driven under an empty run id")
 	}
 }
 

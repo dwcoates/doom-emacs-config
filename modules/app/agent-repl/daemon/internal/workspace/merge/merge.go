@@ -93,17 +93,39 @@ type Request struct {
 	// TargetDir is the worktree the cherry-pick lands in (git -C TargetDir).
 	TargetDir string
 	// Run publishes this RUN's phase-level MergeStatus. It is minted by
-	// merge.Coordinator when the repository's drain goroutine pops the entry, and
-	// is DELIBERATELY NOT PART OF THE DURABLE QUEUE PAYLOAD (the queue persists
-	// its own entry struct, field by field): a merge replayed by the next boot is
-	// a NEW run and mints a new id, which is exactly right — nothing about the
-	// dead process's progress is still true.
+	// merge.Coordinator.Enqueue when the request is admitted, and is DELIBERATELY
+	// NOT PART OF THE DURABLE QUEUE PAYLOAD (the queue persists its own entry
+	// struct, field by field): it is a live publisher bound to this process's
+	// sink, clock and logger, and none of that survives a bounce.
 	//
 	// It is nil only for a Request that has not reached the pipeline yet (an
 	// Enqueue's validation, a queue round-trip). Every merge.Driver entry point
 	// requires it, because a driver that could publish nothing would land commits
 	// no frontend could watch.
 	Run *RunStatus
+	// RunID is the run's IDENTITY as RESTORED FROM THE DURABLE ENTRY, and it is
+	// the half of a run that survives the process: the queue writes the id into
+	// the entry file, so a boot replay resumes publishing under the id the user
+	// has been watching since the admission rather than looking like an abandoned
+	// merge followed by a new one.
+	//
+	// IT IS SET BY THE QUEUE AND BY NOTHING ELSE. While a publisher is alive, Run
+	// is the sole authority on the id (runIdentity below reads it off there, which
+	// is what the durable write records), so the two can never name different
+	// runs. A run's PROGRESS is deliberately not persisted beside it — the commit
+	// cursor of a dead process describes work the resumed one has not done — only
+	// its name.
+	RunID string
+}
+
+// runIdentity is the id this request's run publishes under: the live publisher's
+// while there is one, and the id read back off the durable entry when there is
+// not. ONE authority in each direction, so a request cannot carry two names.
+func (r Request) runIdentity() string {
+	if r.Run != nil {
+		return r.Run.RunID()
+	}
+	return r.RunID
 }
 
 func (r Request) validate() error {
