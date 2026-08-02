@@ -897,7 +897,7 @@ func TestResumeRebuildsTheCursorForAPublisherThatLostIt(t *testing.T) {
 	gitRun(t, target, "add", "base.txt")
 	// The daemon that was publishing this run is gone; its successor rebuilds
 	// the publisher from the durable run id alone.
-	rebuilt, err := ResumeRunStatus(sink, t.Logf, req.Workspace, testClock(), req.Run.RunID())
+	rebuilt, err := ResumeRunStatus(sink, t.Logf, req.Workspace, testClock(), req.Run.RunID(), 0)
 	if err != nil {
 		t.Fatalf("ResumeRunStatus: %v", err)
 	}
