@@ -380,6 +380,90 @@ message WorkspaceState {
   // log, so a frontend ordering a recently-merged section reads the identical
   // instant from every push, snapshot and resync.
   int64 merged_at_ms = 17;
+  // THE merge run's live progress. See MergeStatus: it supersedes the coarse
+  // merge_phase / merge_queue_position / merge_queue_depth trio above, which
+  // stay stamped until the final cutover so both forms coexist for now.
+  //
+  // UNSET means this workspace has no merge to report — the merge axis has
+  // never spoken for it, or its axis is cleared. It is never a zero-valued
+  // status standing in for absence.
+  MergeStatus merge_status = 18;
+}
+
+// Live progress of the workspace's current (or most recent) merge run.
+// WHICH message is set in `phase` IS the phase — no enum to keep in sync,
+// no field that is meaningless for the current phase. Every phase
+// transition and every within-phase tick (a landed cherry-pick, a test
+// pass) is pushed as a WorkspaceState revision to both frontends.
+message MergeStatus {
+  string run_id = 1;  // daemon-minted, stable across the run
+
+  // When the CURRENT phase was entered. Set on every phase transition. For
+  // the terminal phases this is when the run finished — merged's landed
+  // instant, failed's failure instant.
+  int64 phase_started_at_ms = 2;
+
+  // Monotonic within the run; bumps on within-phase ticks too (a landed
+  // pick advances updated_at_ms but not phase_started_at_ms).
+  int64 updated_at_ms = 3;
+
+  oneof phase {
+    MergeStatusEnqueued      enqueued       = 4;
+    MergeStatusBeforeAction  before_action  = 5;
+    MergeStatusCherryPicking cherry_picking = 6;
+    MergeStatusTesting       testing        = 7;
+    MergeStatusConflict      conflict       = 8;
+    MergeStatusAfterAction   after_action   = 9;
+    MergeStatusMerged        merged         = 10;
+    MergeStatusFailed        failed         = 11;
+  }
+}
+
+message MergeStatusEnqueued {
+  int32 position = 1;  // 1-based
+  int32 depth    = 2;
+}
+
+message MergeStatusBeforeAction {
+  string prompt = 1;  // the configured action, for display
+}
+
+message MergeStatusCherryPicking {
+  int32  commits_total   = 1;
+  int32  commits_landed  = 2;
+  string current_sha     = 3;
+  string current_subject = 4;
+}
+
+message MergeStatusTesting {
+  int32  commits_total   = 1;
+  int32  commits_landed  = 2;  // the commit under test is landed but ungated
+  string current_sha     = 3;
+  string current_subject = 4;
+}
+
+message MergeStatusConflict {
+  string conflicted_sha     = 1;
+  string conflicted_subject = 2;
+  int32  commits_total      = 3;
+  int32  commits_landed     = 4;
+}
+
+message MergeStatusAfterAction {
+  string prompt = 1;
+}
+
+message MergeStatusMerged {
+  int32  commits_total      = 1;
+  string after_action_error = 2;  // empty when the after action succeeded or none ran
+}
+
+message MergeStatusFailed {
+  string cause           = 1;
+  int32  commits_total   = 2;  // 0 when planning never completed
+  int32  commits_landed  = 3;
+  string failing_sha     = 4;  // set only for commit-bound failures
+  string failing_subject = 5;
 }
 
 message SessionView {
