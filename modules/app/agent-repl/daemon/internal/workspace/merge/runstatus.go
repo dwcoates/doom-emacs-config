@@ -155,14 +155,6 @@ func (r *RunStatus) SetPlan(plan CommitPlan) {
 	r.logf("merge: run plan {ws=%s run=%s commits_total=%d}", r.workspace, r.runID, r.commitsTotal)
 }
 
-// Landed reports what the run has already put on the target, for a plan whose
-// earlier commits landed before this call (a resume, a boot replay, a skip).
-func (r *RunStatus) Landed() int32 {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.commitsLanded
-}
-
 // Enqueued publishes the enqueued phase.
 func (r *RunStatus) Enqueued(position, depth int32, cause string) error {
 	return r.publish(PhaseMergeQueued, cause, func(s *frontendv1.MergeStatus) {
