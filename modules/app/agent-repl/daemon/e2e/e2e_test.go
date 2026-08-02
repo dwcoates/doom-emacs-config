@@ -282,6 +282,20 @@ type emptyWorkspaceCreation struct {
 	available chan *frontendv1.WorkspaceAvailable
 	actions   chan *frontendv1.HostAction
 	closeOnce sync.Once
+	// beforeWSMerge / postprocessing are the CREATION-TIME merge actions this
+	// harness reports for every workspace, empty by default.
+	//
+	// They live on the creation stub because that is where the real answer
+	// comes from: both are fields of the create Request (before_ws_merge,
+	// postprocessing_prompt), recorded when the workspace was created and read
+	// back at merge time keyed by worktree path. A harness that injected them
+	// anywhere else would be testing a seam production does not have.
+	//
+	// They are not per-workspace: every e2e that configures an action has
+	// exactly one workspace merging, so a map would be ceremony around a single
+	// value.
+	beforeWSMerge  string
+	postprocessing string
 }
 
 func newEmptyWorkspaceCreation() *emptyWorkspaceCreation {
@@ -358,6 +372,10 @@ type harnessTuning struct {
 	// genuinely built bundle reporting a genuinely injected identity.
 	shimBuildSHA    string
 	currentBuildSHA string
+	// beforeWSMerge / postprocessing are the creation-time merge actions the
+	// harness's workspace-creation stub reports. Empty is "not configured".
+	beforeWSMerge  string
+	postprocessing string
 	// idleSweeper hands the daemon's idle sweeper a clock the TEST drives, so
 	// a hibernation is provoked by an event rather than waited out. It is the
 	// production trigger — sweepIdle calls controller.Hibernate — so what it
@@ -377,6 +395,15 @@ func withStaleShimBuild(baked, current string) harnessOption {
 
 // withIdleSweeper gives the harness a test-driven idle-sweep clock.
 func withIdleSweeper() harnessOption { return func(o *harnessTuning) { o.idleSweeper = true } }
+
+// withMergeActions configures the creation-time merge actions every workspace
+// of this harness reports: the before_ws_merge prompt that runs before any
+// commit is picked, and the postprocessing prompt that runs once they all
+// have. An empty string means "not configured", which is the state the spec's
+// "iff configured" phases turn on.
+func withMergeActions(before, after string) harnessOption {
+	return func(o *harnessTuning) { o.beforeWSMerge, o.postprocessing = before, after }
+}
 
 func withEstablishTimeout(d time.Duration) harnessOption {
 	return func(o *harnessTuning) { o.establishTimeout = d }
@@ -573,6 +600,8 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 
 	binding := &server.SessionCommandBinding{Logf: t.Logf}
 	workspaceCreation := newEmptyWorkspaceCreation()
+	workspaceCreation.beforeWSMerge = tuning.beforeWSMerge
+	workspaceCreation.postprocessing = tuning.postprocessing
 	// The REAL merge.Lease over the real SSM and the real durable queue: an
 	// e2e that stubbed them would never exercise merge_lease_held or the queue
 	// facts the pushed WorkspaceState carries.
