@@ -232,9 +232,18 @@ func newFakePostMergeHook(capacity int) *fakePostMergeHook {
 	}
 }
 
-// AfterAction reports the prompt the hook would deliver. The double has none;
-// the coordinator publishes the after_action phase with empty text.
-func (h *fakePostMergeHook) AfterAction(Request) (string, error) { return "", nil }
+// testAfterActionPrompt is the prompt both post-merge doubles report.
+//
+// IT IS NON-EMPTY DELIBERATELY. The coordinator publishes the after_action
+// phase IFF the workspace has one configured, so a double answering "" would
+// describe a workspace with no after-action and silence the very phase these
+// tests are about.
+const testAfterActionPrompt = "tell the parent what landed"
+
+// AfterAction reports the prompt the hook would deliver.
+func (h *fakePostMergeHook) AfterAction(Request) (string, error) {
+	return testAfterActionPrompt, nil
+}
 
 func (h *fakePostMergeHook) AfterMerged(_ context.Context, req Request) error {
 	h.calls <- req
@@ -256,7 +265,9 @@ func newAutoPostMergeHook(capacity int) *autoPostMergeHook {
 	return &autoPostMergeHook{calls: make(chan Request, capacity)}
 }
 
-func (h *autoPostMergeHook) AfterAction(Request) (string, error) { return "", nil }
+func (h *autoPostMergeHook) AfterAction(Request) (string, error) {
+	return testAfterActionPrompt, nil
+}
 
 func (h *autoPostMergeHook) AfterMerged(_ context.Context, req Request) error {
 	select {
