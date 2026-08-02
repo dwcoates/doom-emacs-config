@@ -145,6 +145,10 @@ type AgentShim struct {
 	// Close stops its drains; a merge in flight keeps its durable queue entry
 	// so the next daemon resumes it.
 	MergeCoordinator *merge.QueueCoordinator
+	// MergeDispatch routes the daemon's OWN merge ingress (the "merge" verb in
+	// a workspace command file) through the same command path a frontend merge
+	// takes. main binds it into the workspace-command inbox.
+	MergeDispatch *MergeDispatch
 
 	cancelPush               func()
 	cancelProgress           func()
@@ -358,6 +362,15 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 	}
 	handler.clientLogs = cfg.ClientLogs
 
+	// The daemon-side merge ingress. It shares the handler above so a dispatched
+	// merge and a frontend merge record the same phases through the same sink.
+	mergeDispatch, err := NewMergeDispatch(cfg.MergeGeometry, handler, logf)
+	if err != nil {
+		cancelWorkspaceAvailable()
+		cancelHostActions()
+		return nil, err
+	}
+
 	srv := frontend.New(frontend.Config{
 		Logf:        logf,
 		LogVerbosef: cfg.LogVerbosef,
@@ -418,7 +431,7 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 	}()
 
 	return &AgentShim{
-		Server: srv, SSM: mgr, Progress: prog, Merge: driver, MergeCoordinator: coordinator,
+		Server: srv, SSM: mgr, Progress: prog, Merge: driver, MergeCoordinator: coordinator, MergeDispatch: mergeDispatch,
 		cancelPush: cancel, cancelProgress: cancelProgress,
 		cancelWorkspaceAvailable: cancelWorkspaceAvailable, cancelHostActions: cancelHostActions, logf: logf,
 	}, nil
