@@ -443,3 +443,231 @@ func TestCompleteSurfacesARemoveFailureWithoutAdvancing(t *testing.T) {
 		t.Fatalf("depth after failed Complete = %d, want 1", got)
 	}
 }
+
+// --- the terminal word a run could not publish --------------------------
+
+// A record that could not be re-published faithfully is refused at the MARK,
+// not discovered at the boot that has to say it.
+func TestMarkTerminalRefusesARecordItCouldNotRepublish(t *testing.T) {
+	tests := []struct {
+		name    string
+		term    TerminalStatus
+		wantErr bool
+	}{
+		{
+			name: "merged",
+			term: TerminalStatus{Outcome: OutcomeMerged, Cause: "cherry-pick landed on target"},
+		},
+		{
+			name: "merged carrying an after-action failure",
+			term: TerminalStatus{Outcome: OutcomeMerged, Cause: "cherry-pick landed on target", AfterActionError: "the turn never ended"},
+		},
+		{
+			name: "failed",
+			term: TerminalStatus{Outcome: OutcomeFailed, Cause: "shim lease unavailable"},
+		},
+		{
+			name:    "a parking outcome is not terminal",
+			term:    TerminalStatus{Outcome: OutcomeConflict, Cause: "conflicted"},
+			wantErr: true,
+		},
+		{
+			name:    "no cause",
+			term:    TerminalStatus{Outcome: OutcomeMerged},
+			wantErr: true,
+		},
+		{
+			name:    "a failed run carries no after-action error",
+			term:    TerminalStatus{Outcome: OutcomeFailed, Cause: "shim lease unavailable", AfterActionError: "the turn never ended"},
+			wantErr: true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			q, _ := newTestQueue(t)
+			req := testRequest("a")
+			if _, err := q.Publish(context.Background(), testRepoKey, req); err != nil {
+				t.Fatalf("Publish: %v", err)
+			}
+
+			// Act.
+			err := q.MarkTerminal(testRepoKey, req, tc.term)
+
+			// Assert.
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("MarkTerminal(%+v) error = nil, want error", tc.term)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("MarkTerminal(%+v) error = %v", tc.term, err)
+			}
+		})
+	}
+}
+
+// THE MARK IS NOT AN ACK. The entry stays outstanding, which is what makes the
+// next boot find it at all.
+func TestMarkTerminalLeavesTheEntryOutstanding(t *testing.T) {
+	// Arrange.
+	q, _ := newTestQueue(t)
+	req := testRequest("a")
+	if _, err := q.Publish(context.Background(), testRepoKey, req); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+
+	// Act.
+	if err := q.MarkTerminal(testRepoKey, req, TerminalStatus{Outcome: OutcomeMerged, Cause: "cherry-pick landed on target"}); err != nil {
+		t.Fatalf("MarkTerminal: %v", err)
+	}
+
+	// Assert.
+	if got := len(q.Snapshot()[testRepoKey]); got != 1 {
+		t.Fatalf("depth after MarkTerminal = %d, want the entry still outstanding", got)
+	}
+}
+
+// The whole point of the record: a daemon that could not say the terminal word
+// hands it to the next one.
+func TestAMarkedTerminalSurvivesANewQueueOverTheSameDir(t *testing.T) {
+	// Arrange — mark through one queue, then model a daemon bounce.
+	q, dir := newTestQueue(t)
+	req := testRequest("a")
+	if _, err := q.Publish(context.Background(), testRepoKey, req); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	want := TerminalStatus{
+		Outcome:          OutcomeMerged,
+		Cause:            "cherry-pick landed on target",
+		AfterActionError: "the after-merge action did not complete",
+	}
+	if err := q.MarkTerminal(testRepoKey, req, want); err != nil {
+		t.Fatalf("MarkTerminal: %v", err)
+	}
+	next, err := NewFileQueue(dir, t.Logf)
+	if err != nil {
+		t.Fatalf("NewFileQueue: %v", err)
+	}
+	replayed := next.Snapshot()[testRepoKey]
+	if len(replayed) != 1 {
+		t.Fatalf("snapshot = %+v, want 1 entry", replayed)
+	}
+
+	// Act.
+	got, pending, err := next.PendingTerminal(testRepoKey, replayed[0])
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("PendingTerminal: %v", err)
+	}
+	if !pending || got != want {
+		t.Fatalf("PendingTerminal() = %+v, %v, want %+v, true", got, pending, want)
+	}
+}
+
+// The ordinary entry — every entry whose run has not reached a terminal — is
+// unchanged by the field existing.
+func TestPendingTerminalIsAbsentForAnOrdinaryEntry(t *testing.T) {
+	// Arrange.
+	q, _ := newTestQueue(t)
+	req := testRequest("a")
+	if _, err := q.Publish(context.Background(), testRepoKey, req); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+
+	// Act.
+	got, pending, err := q.PendingTerminal(testRepoKey, req)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("PendingTerminal: %v", err)
+	}
+	if pending {
+		t.Fatalf("PendingTerminal() = %+v, true, want no pending terminal", got)
+	}
+}
+
+// A retried mark must leave ONE entry carrying ONE word, not two of either.
+func TestMarkTerminalTwiceLeavesOneRecord(t *testing.T) {
+	// Arrange.
+	q, dir := newTestQueue(t)
+	req := testRequest("a")
+	if _, err := q.Publish(context.Background(), testRepoKey, req); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	want := TerminalStatus{Outcome: OutcomeMerged, Cause: "cherry-pick landed on target"}
+
+	// Act — the same terminal word is recorded twice.
+	if err := q.MarkTerminal(testRepoKey, req, want); err != nil {
+		t.Fatalf("first MarkTerminal: %v", err)
+	}
+	if err := q.MarkTerminal(testRepoKey, req, want); err != nil {
+		t.Fatalf("second MarkTerminal: %v", err)
+	}
+
+	// Assert — one durable entry, carrying that one word.
+	next, err := NewFileQueue(dir, t.Logf)
+	if err != nil {
+		t.Fatalf("NewFileQueue: %v", err)
+	}
+	replayed := next.Snapshot()[testRepoKey]
+	if len(replayed) != 1 {
+		t.Fatalf("snapshot = %+v, want exactly 1 entry", replayed)
+	}
+	got, pending, err := next.PendingTerminal(testRepoKey, replayed[0])
+	if err != nil || !pending || got != want {
+		t.Fatalf("PendingTerminal() = %+v, %v, %v, want %+v, true, nil", got, pending, err, want)
+	}
+}
+
+// A mark aimed at anything but the head is a violated single-ownership
+// invariant, exactly as it is for Complete.
+func TestMarkTerminalRefusesAHeadMismatch(t *testing.T) {
+	// Arrange.
+	q, _ := newTestQueue(t)
+	if _, err := q.Publish(context.Background(), testRepoKey, testRequest("a")); err != nil {
+		t.Fatalf("Publish(a): %v", err)
+	}
+	behind := testRequest("b")
+	if _, err := q.Publish(context.Background(), testRepoKey, behind); err != nil {
+		t.Fatalf("Publish(b): %v", err)
+	}
+
+	// Act.
+	err := q.MarkTerminal(testRepoKey, behind, TerminalStatus{Outcome: OutcomeMerged, Cause: "cherry-pick landed on target"})
+
+	// Assert.
+	if err == nil {
+		t.Fatal("MarkTerminal() on a non-head entry error = nil, want error")
+	}
+}
+
+// Completing a marked entry is what an eventually-published terminal word does,
+// and it must drop the record along with the entry.
+func TestCompleteDropsAMarkedEntry(t *testing.T) {
+	// Arrange.
+	q, dir := newTestQueue(t)
+	req := testRequest("a")
+	if _, err := q.Publish(context.Background(), testRepoKey, req); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if err := q.MarkTerminal(testRepoKey, req, TerminalStatus{Outcome: OutcomeFailed, Cause: "shim lease unavailable"}); err != nil {
+		t.Fatalf("MarkTerminal: %v", err)
+	}
+
+	// Act.
+	if err := q.Complete(testRepoKey, req); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+
+	// Assert — nothing survives for a later boot to replay.
+	next, err := NewFileQueue(dir, t.Logf)
+	if err != nil {
+		t.Fatalf("NewFileQueue: %v", err)
+	}
+	if got := next.Snapshot()[testRepoKey]; len(got) != 0 {
+		t.Fatalf("snapshot after Complete = %+v, want empty", got)
+	}
+}
