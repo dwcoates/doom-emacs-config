@@ -383,7 +383,7 @@ VIEW is the `DaemonView' plist the daemon last pushed (nil = none yet)."
     (should (null (agent-repl--ensure-frontend-daemon)))))
 
 (ert-deftest agent-repl-test-daemon-ensure-nil-when-inhibited ()
-  "Ensure returns nil under the batch/sandbox inhibit guard."
+  "Ensure returns nil under the batch inhibit guard."
   ;; Arrange
   (let ((agent-repl-frontend-auto-start t)
         (agent-repl--frontend-daemon-process nil))
@@ -1025,41 +1025,33 @@ whenever a real session happened to be mid-turn."
 
 ;;;; ---- Widget-assets doctor check -------------------------------------------
 
-(ert-deftest agent-repl-test--widget-doctor-nil-in-sandbox ()
-  "In the sandbox the widget doctor check is a no-op."
-  (cl-letf (((symbol-function 'agent-repl--in-sandbox-p) (lambda () t)))
-    (should-not (agent-repl--widget-doctor-issues))))
-
 (ert-deftest agent-repl-test--widget-doctor-warns-when-off ()
   "With nothing discoverable, the doctor warns the capability is off."
-  (cl-letf (((symbol-function 'agent-repl--in-sandbox-p) (lambda () nil)))
-    (let* ((agent-repl-frontend-widget-assets-dir "")
-           (agent-repl-frontend-widget-assets-search-root nil)
-           (issues (agent-repl--widget-doctor-issues)))
-      (should (= 1 (length issues)))
-      (should (eq 'warn (caar issues)))
-      (should (string-match-p "capability OFF" (cdar issues))))))
+  (let* ((agent-repl-frontend-widget-assets-dir "")
+         (agent-repl-frontend-widget-assets-search-root nil)
+         (issues (agent-repl--widget-doctor-issues)))
+    (should (= 1 (length issues)))
+    (should (eq 'warn (caar issues)))
+    (should (string-match-p "capability OFF" (cdar issues)))))
 
 (ert-deftest agent-repl-test--widget-doctor-clean-when-bundle-present ()
   "A discoverable dist holding chess-widget.js yields no doctor issue."
-  (cl-letf (((symbol-function 'agent-repl--in-sandbox-p) (lambda () nil)))
-    (agent-repl-test--with-temp-root root
-      (let ((agent-repl-frontend-widget-assets-dir "")
-            (agent-repl-frontend-widget-assets-search-root root))
-        (agent-repl-test--make-widget-dist
-         (expand-file-name "explanation-engine/apps/cee-web-widget/dist" root))
-        (should-not (agent-repl--widget-doctor-issues))))))
+  (agent-repl-test--with-temp-root root
+    (let ((agent-repl-frontend-widget-assets-dir "")
+          (agent-repl-frontend-widget-assets-search-root root))
+      (agent-repl-test--make-widget-dist
+       (expand-file-name "explanation-engine/apps/cee-web-widget/dist" root))
+      (should-not (agent-repl--widget-doctor-issues)))))
 
 (ert-deftest agent-repl-test--widget-doctor-warns-when-dir-lacks-bundle ()
   "An explicit dir without chess-widget.js warns about the missing bundle."
-  (cl-letf (((symbol-function 'agent-repl--in-sandbox-p) (lambda () nil)))
-    (agent-repl-test--with-temp-root root
-      ;; Override points at a real dir that lacks the mount bundle.
-      (let ((agent-repl-frontend-widget-assets-dir root))
-        (let ((issues (agent-repl--widget-doctor-issues)))
-          (should (= 1 (length issues)))
-          (should (eq 'warn (caar issues)))
-          (should (string-match-p "lacks chess-widget.js" (cdar issues))))))))
+  (agent-repl-test--with-temp-root root
+    ;; Override points at a real dir that lacks the mount bundle.
+    (let ((agent-repl-frontend-widget-assets-dir root))
+      (let ((issues (agent-repl--widget-doctor-issues)))
+        (should (= 1 (length issues)))
+        (should (eq 'warn (caar issues)))
+        (should (string-match-p "lacks chess-widget.js" (cdar issues)))))))
 
 ;;;; ---- Incompatible-daemon detection -------------------------------------
 

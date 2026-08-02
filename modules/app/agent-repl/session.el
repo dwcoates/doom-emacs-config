@@ -674,9 +674,8 @@ CLIs, which is what stops a foreign claude in the same cwd (e.g. a
 terminal session) from having its session id adopted onto the
 workspace (see `agent-repl--update-session-id-from-sentinel').
 
-agent-repl ALWAYS launches plain `claude'.  There is deliberately no
-sandbox branch here, and there never was one: the retired `:sandbox'
-environment was a label, not a container."
+agent-repl ALWAYS launches plain `claude': there is exactly one launch
+shape, with no environment-conditional branching."
   (let* ((base (concat "claude " claude-flags))
          (env-prefix (concat "AGENT_REPL_OWNED=1 "
                              (if config-dir
