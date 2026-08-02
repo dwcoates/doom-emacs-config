@@ -43,6 +43,60 @@ type DurableQueue interface {
 	// watermark could lower it, and a lowered watermark is exactly the
 	// regression it exists to prevent.
 	RecordStatusWatermark(repo, runID string, updatedAtMs int64) error
+
+	// MarkTerminal durably records term on repo's HEAD entry, which MUST be
+	// req, and leaves the entry OUTSTANDING.
+	//
+	// It is the other half of Complete, and it exists for exactly one moment:
+	// a run that reached a terminal outcome whose terminal STATUS could not be
+	// published. The merge itself is durable (the commits are on the target and
+	// the entry is still on the queue), so the terminal WORD is made durable
+	// beside it rather than dropped — the entry is kept, marked, and the next
+	// boot's Drain re-publishes it instead of replaying a merge that already
+	// happened.
+	MarkTerminal(repo string, req Request, term TerminalStatus) error
+	// PendingTerminal reports the terminal status recorded on repo's HEAD
+	// entry, which MUST be req. The bool is false for the ordinary entry, whose
+	// run has not reached a terminal at all.
+	PendingTerminal(repo string, req Request) (TerminalStatus, bool, error)
+}
+
+// TerminalStatus is a run's TERMINAL word, recorded durably when publishing it
+// FAILED.
+//
+// It carries exactly what re-publishing the status needs and nothing else: the
+// merged/failed classification, the cause a frontend renders, and — for a merged
+// run only — the after-action failure that rides the merged status. A run's
+// PROGRESS is deliberately absent for the same reason it is absent from the rest
+// of the entry: the commit cursor of a dead process describes work the resumed
+// one has not done.
+type TerminalStatus struct {
+	// Outcome is the terminal classification, either OutcomeMerged or
+	// OutcomeFailed. The two parking outcomes are not terminal and are refused.
+	Outcome Outcome
+	// Cause is the terminal status's cause text, the sentence a user reads.
+	Cause string
+	// AfterActionError is the after-action's failure carried on a merged
+	// status. It is empty for a failed run, which never reached an after-action.
+	AfterActionError string
+}
+
+// validate refuses a terminal record that could not be re-published faithfully.
+// A record written wrong is worse than none: the boot replay would put an
+// invented terminal word on the wire under a run id a user is watching.
+func (t TerminalStatus) validate() error {
+	switch t.Outcome {
+	case OutcomeMerged, OutcomeFailed:
+	default:
+		return fmt.Errorf("merge: terminal status outcome %q is not terminal", t.Outcome)
+	}
+	if t.Cause == "" {
+		return fmt.Errorf("merge: terminal status for outcome %q needs a cause", t.Outcome)
+	}
+	if t.Outcome == OutcomeFailed && t.AfterActionError != "" {
+		return fmt.Errorf("merge: a failed terminal status carries no after-action error, got %q", t.AfterActionError)
+	}
+	return nil
 }
 
 var _ DurableQueue = (*FileQueue)(nil)
@@ -100,6 +154,11 @@ type queueEntry struct {
 	// was HYDRATED with (what a resume seeds from), this carries the one the
 	// live run has reached.
 	watermarkMs int64
+	// terminal is the terminal word recorded by MarkTerminal, nil for the
+	// ordinary entry. It mirrors what is on disk, and it is set only AFTER the
+	// durable write lands — memory must never claim a terminal the next boot
+	// cannot read.
+	terminal *TerminalStatus
 }
 
 // entryFile is the on-disk form of a queue entry. The request's fields are
@@ -133,6 +192,40 @@ type entryFile struct {
 	// before the field existed. Both mean the same thing to a resume — there is
 	// no floor to respect — and both are served correctly by now().
 	StatusWatermarkMs int64 `json:"status_watermark_ms,omitempty"`
+	// PendingTerminal is the run's TERMINAL word, present ONLY on an entry whose
+	// terminal status could not be published. It is a pointer with omitempty
+	// deliberately: an ordinary entry's durable form is byte-for-byte what it
+	// always was, so this field is additive to the format rather than a new
+	// version of it.
+	//
+	// An entry carrying it is NOT a merge to replay. The merge already reached
+	// its outcome — the commits are on the target, or the run already failed —
+	// and re-running it would land a second time or fail a second time. What the
+	// next boot owes the user is the WORD, which is why the word is what is
+	// written down.
+	PendingTerminal *entryTerminal `json:"pending_terminal,omitempty"`
+}
+
+// entryTerminal is the on-disk form of a TerminalStatus, mirrored field by
+// field for the same reason the request is: a stated durable contract that a
+// later field rename cannot silently break.
+type entryTerminal struct {
+	Outcome          string `json:"outcome"`
+	Cause            string `json:"cause"`
+	AfterActionError string `json:"after_action_error,omitempty"`
+}
+
+// terminal decodes the recorded terminal word, reporting absence for an
+// ordinary entry.
+func (f entryFile) terminal() (TerminalStatus, bool) {
+	if f.PendingTerminal == nil {
+		return TerminalStatus{}, false
+	}
+	return TerminalStatus{
+		Outcome:          Outcome(f.PendingTerminal.Outcome),
+		Cause:            f.PendingTerminal.Cause,
+		AfterActionError: f.PendingTerminal.AfterActionError,
+	}, true
 }
 
 func (f entryFile) request() Request {
@@ -147,6 +240,9 @@ func (f entryFile) request() Request {
 	}
 }
 
+// newEntryFile is the durable form of a request that has NOT reached a terminal
+// outcome, which is every request at publish time. PendingTerminal is therefore
+// left nil here and set only by MarkTerminal.
 func newEntryFile(repo string, req Request) entryFile {
 	return entryFile{
 		Repo:              repo,
@@ -202,7 +298,7 @@ func (q *FileQueue) Publish(_ context.Context, repo string, req Request) (Positi
 		q.logf("merge: queue publish id FAILED {repo=%s ws=%s}: %v", repo, req.Workspace, err)
 		return Position{}, err
 	}
-	if err := q.writeEntry(repo, id, newEntryFile(repo, req)); err != nil {
+	if err := q.writeEntry(repo, id, req); err != nil {
 		q.logf("merge: queue publish write FAILED {repo=%s ws=%s id=%s}: %v", repo, req.Workspace, id, err)
 		return Position{}, err
 	}
@@ -375,7 +471,7 @@ func (q *FileQueue) RecordStatusWatermark(repo, runID string, updatedAtMs int64)
 		}
 		f := newEntryFile(repo, e.req)
 		f.StatusWatermarkMs = updatedAtMs
-		if err := q.writeEntry(repo, e.id, f); err != nil {
+		if err := q.writeEntryFile(repo, e.id, f); err != nil {
 			q.logf("merge: queue watermark write FAILED {repo=%s ws=%s run=%s id=%s}: %v", repo, e.req.Workspace, runID, e.id, err)
 			return fmt.Errorf("merge: record status watermark for run %s: %w", runID, err)
 		}
@@ -385,6 +481,79 @@ func (q *FileQueue) RecordStatusWatermark(repo, runID string, updatedAtMs int64)
 	q.logf("merge: queue watermark for an entry that is gone {repo=%s run=%s updated_at_ms=%d} — the run is retired, so there is nothing left to resume",
 		repo, runID, updatedAtMs)
 	return nil
+}
+
+// MarkTerminal implements DurableQueue: it records term on repo's head entry and
+// leaves the entry outstanding.
+//
+// THE ENTRY IS NOT ACKED. Complete is the ack, and only a terminal status that
+// actually reached a frontend earns it. Marking is the opposite word: this run
+// is over, its outcome stands, and the record is kept precisely because the
+// outcome has not been SAID yet.
+//
+// It is IDEMPOTENT. A second mark of the same head overwrites the first record
+// with the same discipline the first used, so a retry — or a caller that marks
+// twice for one terminal — leaves exactly one entry carrying exactly one word.
+func (q *FileQueue) MarkTerminal(repo string, req Request, term TerminalStatus) error {
+	if err := term.validate(); err != nil {
+		q.logf("merge: queue terminal mark REFUSED {repo=%s ws=%s outcome=%s}: %v", repo, req.Workspace, term.Outcome, err)
+		return err
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	head, err := q.headForLocked(repo, req, "terminal mark")
+	if err != nil {
+		return err
+	}
+	f := newEntryFile(repo, head.req)
+	f.PendingTerminal = &entryTerminal{
+		Outcome:          string(term.Outcome),
+		Cause:            term.Cause,
+		AfterActionError: term.AfterActionError,
+	}
+	if err := q.writeEntryFile(repo, head.id, f); err != nil {
+		q.logf("merge: queue terminal mark write FAILED {repo=%s ws=%s id=%s outcome=%s}: %v", repo, req.Workspace, head.id, term.Outcome, err)
+		return fmt.Errorf("merge: mark queue entry %s terminal: %w", q.entryPath(repo, head.id), err)
+	}
+	// Memory follows the disk, never leads it.
+	marked := term
+	head.terminal = &marked
+	q.logf("merge: queue terminal MARKED {repo=%s ws=%s id=%s run=%s outcome=%s cause=%s after_action_error=%s} — the entry is KEPT so the next boot re-publishes this terminal status",
+		repo, req.Workspace, head.id, head.req.runIdentity(), term.Outcome, term.Cause, term.AfterActionError)
+	return nil
+}
+
+// PendingTerminal implements DurableQueue: it reports the terminal word recorded
+// on repo's head entry, if any.
+func (q *FileQueue) PendingTerminal(repo string, req Request) (TerminalStatus, bool, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	head, err := q.headForLocked(repo, req, "terminal lookup")
+	if err != nil {
+		return TerminalStatus{}, false, err
+	}
+	if head.terminal == nil {
+		return TerminalStatus{}, false, nil
+	}
+	return *head.terminal, true, nil
+}
+
+// headForLocked resolves repo's head entry and asserts it IS req, which is the
+// same single-ownership invariant Complete asserts and for the same reason: one
+// owner drains a repo one entry at a time, so a head that is not the entry the
+// caller was handed is a violated invariant rather than an entry to guess at.
+func (q *FileQueue) headForLocked(repo string, req Request, op string) (*queueEntry, error) {
+	rq := q.repos[repo]
+	if rq == nil || len(rq.entries) == 0 {
+		q.logf("merge: queue %s on EMPTY queue {repo=%s ws=%s}", op, repo, req.Workspace)
+		return nil, fmt.Errorf("merge: queue %s for %q: repo %s has no outstanding entry", op, req.Workspace, repo)
+	}
+	head := rq.entries[0]
+	if head.req != req {
+		q.logf("merge: queue %s MISMATCH {repo=%s head_ws=%s got_ws=%s}", op, repo, head.req.Workspace, req.Workspace)
+		return nil, fmt.Errorf("merge: queue %s for %q: repo %s head is %q", op, req.Workspace, repo, head.req.Workspace)
+	}
+	return head, nil
 }
 
 // Snapshot implements merge.Queue: every repository's outstanding entries, in
@@ -526,12 +695,19 @@ func (q *FileQueue) readRepoDir(dir string) ([]*queueEntry, error) {
 			return nil, fmt.Errorf("merge: queue entry %s: %w", filepath.Join(dir, name), err)
 		}
 		id := strings.TrimSuffix(strings.TrimPrefix(name, queueFilePrefix), ".json")
-		entries = append(entries, &queueEntry{
+		entry := &queueEntry{
 			id:          id,
 			req:         req,
 			done:        make(chan struct{}),
 			watermarkMs: f.StatusWatermarkMs,
-		})
+		}
+		if term, ok := f.terminal(); ok {
+			if err := term.validate(); err != nil {
+				return nil, fmt.Errorf("merge: queue entry %s terminal record: %w", filepath.Join(dir, name), err)
+			}
+			entry.terminal = &term
+		}
+		entries = append(entries, entry)
 	}
 	return entries, nil
 }
@@ -551,11 +727,17 @@ func readEntryFile(path string) (entryFile, error) {
 // writeEntry lands one durable record atomically: the payload goes to a
 // dot-prefixed temp name the entry glob cannot match, then renames into place.
 // A reader therefore never sees a partial entry.
-//
-// The rename is also what makes a watermark update safe: an entry rewritten in
-// place would be readable half-old and half-new by the next boot, and a
-// truncated watermark reads as zero — no floor at all.
-func (q *FileQueue) writeEntry(repo, id string, f entryFile) error {
+func (q *FileQueue) writeEntry(repo, id string, req Request) error {
+	return q.writeEntryFile(repo, id, newEntryFile(repo, req))
+}
+
+// writeEntryFile lands one durable record atomically, whatever its contents.
+// MarkTerminal and RecordStatusWatermark rewrite an EXISTING entry through it,
+// and the dot-temp rename is what makes those rewrites atomic too: a reader
+// either sees the entry as it was or sees it carrying its new word, never a
+// half-written mixture — a truncated watermark would read as zero, no floor at
+// all.
+func (q *FileQueue) writeEntryFile(repo, id string, f entryFile) error {
 	dir := q.repoDir(repo)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("merge: create queue dir %s: %w", dir, err)
