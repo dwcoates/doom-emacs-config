@@ -809,10 +809,11 @@ Keys in the returned plist: :bg :fg :bracket-fg :bracket-bg :weight."
   "Return appearance spec applying STATE's color to the [N] bracket only.
 Pulls bracket-bg/bracket-fg/weight from STATE's palette row (per
 SELECTED) and leaves :bg/:fg unspecified so the separator and name
-region inherit defaults.  Used for workspaces whose agent panels
-have been dismissed: the bracket retains the state's color so the
-workspace's agent-state stays visible while the rest of the tab
-falls back to the default appearance."
+region inherit defaults.  Used wherever `agent-repl--ws-display-state'
+suppresses the full-tab color — panels dismissed, or a `:ready'
+workspace the user has already viewed — so the bracket retains the
+state's color and the workspace's state stays visible while the rest
+of the tab falls back to the default appearance."
   (let* ((full (agent-repl--tab-spec state selected))
          (bracket-bg (or (plist-get full :bracket-bg)
                          (plist-get full :bg))))
@@ -1014,15 +1015,111 @@ face so selection dims the state color."
     (when-let ((img (agent-repl--priority-image priority)))
       (propertize " " 'display img))))
 
+;;; Ready-view acknowledgment
+;;
+;; A `:ready' workspace paints its whole tab green so it can be found from
+;; across the tab-bar.  Once the user has actually stood in that workspace
+;; for a beat, the shout has done its job: the green name region is telling
+;; them something they just looked at.  After
+;; `agent-repl-ready-view-fade-delay' seconds of viewing, the tab drops back
+;; to the default name background and keeps the green on the [N] bracket
+;; alone, so the state stays legible without competing with the workspaces
+;; that still need attention.
+;;
+;; The acknowledgment is a LATCH, not a live predicate: it survives leaving
+;; the workspace (that is the whole point — the faded tab is what the user
+;; sees once they move on) and is cleared the moment the daemon pushes a
+;; render-state other than `:ready', so the next `:ready' shouts again.
+
+(defcustom agent-repl-ready-view-fade-delay 2.0
+  "Seconds of viewing after which a `:ready' workspace's tab name fades.
+Measured from `:last-viewed-at' — the stamp
+`agent-repl--record-workspace-history' writes at every perspective
+activation — for the workspace that is currently on screen.  Once the
+delay elapses the workspace is latched as ready-view-acknowledged
+\(`agent-repl--ws-ready-view-acknowledged-p'), which suppresses the
+state-colored name region and leaves only the [N] bracket green."
+  :type 'number
+  :group 'agent-repl)
+
+(defun agent-repl--ws-ready-view-acknowledged-p (ws)
+  "Return non-nil when WS's `:ready' tab has been viewed long enough to fade.
+Reads the `:ready-view-acknowledged' latch that
+`agent-repl--note-ready-view-dwell' sets and
+`agent-repl--clear-ready-view-ack-on-state-change' clears.
+
+UI-boundary tolerance: unknown WS answers nil (see
+`--ws-display-state' docstring for the rationale)."
+  (and (agent-repl--ws-known-p ws)
+       (agent-repl--ws-get ws :ready-view-acknowledged)
+       t))
+
+(defun agent-repl--ws-ready-view-dwell-elapsed-p (ws)
+  "Return non-nil when WS was last activated at least the fade delay ago.
+The dwell clock is `:last-viewed-at'; a workspace that has never been
+activated has no stamp and has therefore never been viewed."
+  (let ((viewed-at (agent-repl--ws-get ws :last-viewed-at)))
+    (and viewed-at
+         (>= (float-time (time-since viewed-at))
+             agent-repl-ready-view-fade-delay))))
+
+(defun agent-repl--note-ready-view-dwell ()
+  "Latch the ready-view acknowledgment for the workspace on screen.
+Rides the 1Hz heartbeat (`agent-repl--update-all-workspace-states'),
+which is the same tick that repaints the tab-bar, so the fade lands on
+the first repaint at or after the delay rather than needing a timer of
+its own.  Idempotent: the latch is written once and re-checking a
+latched workspace costs one plist read.
+
+Only the CURRENT workspace can dwell: a workspace nobody is looking at
+is not being viewed, whatever its `:last-viewed-at' says."
+  (let ((ws (agent-repl--ws-current-name)))
+    (when (and ws
+               (agent-repl--ws-known-p ws)
+               (not (agent-repl--ws-get ws :ready-view-acknowledged))
+               (eq (agent-repl--ws-render-status ws) :ready)
+               (agent-repl--ws-ready-view-dwell-elapsed-p ws))
+      (agent-repl--ws-put ws :ready-view-acknowledged t)
+      (agent-repl--log
+       ws
+       "ready-view-ack: latched ws=%s state=:ready dwell>=%.1fs — tab name falls back to default, [N] keeps green"
+       ws agent-repl-ready-view-fade-delay))))
+
+(defun agent-repl--clear-ready-view-ack-on-state-change (ws new _previous)
+  "Clear WS's ready-view acknowledgment when NEW is not `:ready'.
+Subscriber for `agent-repl-ws-state-transition-functions'.  The latch
+describes one visit to one `:ready' state; the moment the daemon pushes
+anything else the acknowledgment is stale, and the next `:ready' must
+shout with the full green name region again."
+  (when (and (not (eq new :ready))
+             (agent-repl--ws-known-p ws)
+             (agent-repl--ws-get ws :ready-view-acknowledged))
+    (agent-repl--ws-put ws :ready-view-acknowledged nil)
+    (agent-repl--log
+     ws "ready-view-ack: cleared ws=%s state=%s — tab returns to the full state color"
+     ws new)))
+
+(add-hook 'agent-repl-ws-state-transition-functions
+          #'agent-repl--clear-ready-view-ack-on-state-change)
+
 (defun agent-repl--ws-display-state (ws)
   "Return the palette display key for WS.
 Delegates to `agent-repl--ws-render-status' (the single source of
 truth for visual state across the tab-bar and project
-picker), then layers panel-visibility suppression on top: when the
-render-state is non-nil AND no agent panel is present in WS's
-live-or-saved window layout, returns nil regardless of state — this
-suppresses full-tab coloring (the state-colored name region) for
-workspaces whose panels the user has dismissed.
+picker), then layers two suppressions on top, both of which hand the
+tab to the bracket-only appearance (`agent-repl--tab-spec-bracket-only'
+plus the default name face):
+
+1. Panel visibility — when the render-state is non-nil AND no agent
+   panel is present in WS's live-or-saved window layout, returns nil
+   regardless of state, suppressing full-tab coloring (the
+   state-colored name region) for workspaces whose panels the user has
+   dismissed.
+2. Ready-view acknowledgment — when the render-state is `:ready' AND
+   WS has been viewed for `agent-repl-ready-view-fade-delay' seconds
+   \(`agent-repl--ws-ready-view-acknowledged-p'), returns nil so a
+   ready workspace the user has already stood in stops painting its
+   whole name region green.
 `:agent-state' is preserved on the plist so the original color
 reappears the next time the user reopens panels.  The nil-state
 shortcut avoids calling `agent-repl--ws-agent-open-p' on
@@ -1043,9 +1140,13 @@ should color the [N] bracket alone?\" is answered by
 the bracket keeps its color when panels are closed."
   (when (agent-repl--ws-known-p ws)
     (let ((state (agent-repl--ws-render-status ws)))
-      (if (and state (not (agent-repl--ws-agent-open-p ws)))
-          nil
-        state))))
+      (cond
+       ((null state) nil)
+       ((not (agent-repl--ws-agent-open-p ws)) nil)
+       ((and (eq state :ready)
+             (agent-repl--ws-ready-view-acknowledged-p ws))
+        nil)
+       (t state)))))
 
 (defun agent-repl--ws-bracket-state (ws)
   "Return WS's render-state for [N]-bracket coloring.
@@ -1065,8 +1166,9 @@ CURRENT-NAME is the active workspace name.  INDEX is the 1-based
 tab position.  The display state (from `agent-repl--ws-display-state')
 drives the name face.  The appearance spec is resolved via
 `agent-repl--tab-spec' when display-state is non-nil; when display-state
-is nil but `agent-repl--ws-bracket-state' returns a state (i.e., panels
-dismissed for a workspace that still has agent-state), the spec is
+is nil but `agent-repl--ws-bracket-state' returns a state (panels
+dismissed for a workspace that still has agent-state, or a `:ready'
+workspace whose ready-view acknowledgment has latched), the spec is
 built via `agent-repl--tab-spec-bracket-only' so only the [N] bracket
 keeps the state's color.  The bracket label is the tab's 1-based INDEX
 and nothing else: state reaches the bracket as COLOR, so a workspace
@@ -2399,7 +2501,10 @@ the poll."
 
 (defun agent-repl--update-all-workspace-states ()
   "Periodic 1Hz timer entrypoint for workspace-state updates.
-Always drives `agent-repl--force-tab-bar-redraw' to force a tab-bar
+Evaluates the ready-view dwell (`agent-repl--note-ready-view-dwell')
+first, so the `:ready' tab the user has been sitting in fades on the
+same tick it ripens, then always drives
+`agent-repl--force-tab-bar-redraw' to force a tab-bar
 repaint (DO NOT REMOVE — see the block comment above
 `agent-repl--tabline-space-toggle').  The redraw happens BEFORE the
 in-flight check so the tab-bar keeps animating even when the update
@@ -2429,6 +2534,9 @@ Event-driven callers (frame-focus, workspace-switch, show-panels)
 should call `-now' directly instead of this guarded entrypoint — they
 want to kick a fresh refresh and don't compete with the timer for
 the in-flight slot."
+  ;; Evaluate the ready-view dwell BEFORE the redraw so a latch that ripens
+  ;; on this tick is painted by this tick's repaint rather than the next.
+  (agent-repl--note-ready-view-dwell)
   ;; Drive the tab-bar redraw on every tick so face-only status
   ;; transitions (:thinking -> :done, etc.) actually reach the display.
   ;; DO NOT REMOVE — see the block comment above
