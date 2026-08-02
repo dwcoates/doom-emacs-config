@@ -1152,13 +1152,41 @@ func (c *consumer) Degraded(_ string, ds *corev1.DegradedState) {
 		c.logf("session-controller: runtime fault REJECTED ws=%q session=%q generation=%q component=%q reason=%q recovered=%v branch=unknown_component",
 			c.workspace, c.sessionID, c.generationID, ds.GetComponent(), ds.GetReason(), ds.GetRecovered())
 	} else {
-		c.applyRuntimeFault(ds.GetComponent(), classification, !ds.GetRecovered(), ds.GetReason())
+		c.applyRuntimeFault(ds.GetComponent(), classification, !ds.GetRecovered(), faultCauseKind(ds))
 	}
 	item := frontend.SystemFailureItemFromDegradedState(ds, c.now())
 	if item == nil {
 		return
 	}
 	c.pushFailure(c.degradedUUID(ds.GetComponent()), item)
+}
+
+// Canonical cause kinds for a fault edge whose DegradedState carried no
+// reason of its own. The SSM requires a non-empty cause kind on every edge,
+// and the reason is a proto3 string a reporting peer may leave unset — a
+// recovery that arrived without one used to be REJECTED for the empty cause,
+// which left the fault window open, the workspace blue, and only a "runtime
+// fault FAILED" line to say why.
+//
+// Deriving the cause here rather than demanding the peer populate it is the
+// daemon owning its OWN vocabulary: cause_kind is an SSM concept, and
+// ConnectionRecovered has always supplied one ("heartbeat_resumed") instead of
+// forwarding free text.
+const (
+	componentDegradedCause  = "component_degraded"
+	componentRecoveredCause = "component_recovered"
+)
+
+// faultCauseKind is the cause kind for the fault edge ds describes: its own
+// reason when it carries one, else this daemon's canonical name for the edge.
+func faultCauseKind(ds *corev1.DegradedState) string {
+	if reason := ds.GetReason(); reason != "" {
+		return reason
+	}
+	if ds.GetRecovered() {
+		return componentRecoveredCause
+	}
+	return componentDegradedCause
 }
 
 // ConnectionDegraded opens the transport heartbeat's typed connectivity fault

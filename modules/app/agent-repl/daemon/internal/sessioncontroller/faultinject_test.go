@@ -128,6 +128,20 @@ func (r *faultRig) wantState(want frontendv1.RenderState, context string) {
 	}
 }
 
+// activeFaults returns the workspace's currently OPEN runtime faults, which is
+// the session_fault window state as the resolver reads it.
+func (r *faultRig) activeFaults() []*frontendv1.RuntimeFault {
+	r.t.Helper()
+	ws, found, err := r.mgr.Current(r.ws)
+	if err != nil {
+		r.t.Fatalf("resolve current state: %v", err)
+	}
+	if !found {
+		return nil
+	}
+	return ws.GetActiveFaults()
+}
+
 // cards returns every system-failure item the consumer pushed, in push order.
 func (r *faultRig) cards() []*frontendv1.SystemFailureItem {
 	r.push.mu.Lock()
@@ -419,6 +433,145 @@ func TestConnectionRecoveryResolvesTheSameCardInPlace(t *testing.T) {
 	}
 	if got := retained[0].GetSystemFailure().GetResolvedAtMs(); got != recoveredAt {
 		t.Fatalf("retained resolved_at_ms = %d, want %d", got, recoveredAt)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Scenario 2b — the SHIM's store link drops and recovers on its own.
+//
+// A shim-store restart (a deploy step) kills every live shim's producer
+// connection and standing subscription at once. Each shim reports the outage
+// as DegradedState{component: "shim-store-client"}, which opens one
+// connectivity-impact fault per session and paints the fleet blue. What was
+// missing was the other edge: the shim never recovered its link and so never
+// reported recovered=true, and the fault rows stayed open forever. These pin
+// the daemon's half of that contract — the edge it opens, the edge it closes,
+// and the re-push that repaints a frontend without a bounce.
+// ---------------------------------------------------------------------------
+
+// The drop opens a CONNECTIVITY-impact fault, which is what moves the
+// workspace into the blue band: the daemon cannot see the session's merged
+// events while the shim's store link is down.
+func TestShimStoreLinkDropOpensAConnectivityFault(t *testing.T) {
+	// Arrange
+	rig := newFaultRig(t)
+	rig.settleGreen()
+
+	// Act
+	rig.cons.Degraded(rig.sid, &corev1.DegradedState{
+		Component: "shim-store-client",
+		Reason:    "store connection closed",
+	})
+
+	// Assert
+	faults := rig.activeFaults()
+	if len(faults) != 1 {
+		t.Fatalf("active faults = %d, want exactly 1", len(faults))
+	}
+	if got, want := faults[0].GetComponent(), "shim-store-client"; got != want {
+		t.Fatalf("fault component = %q, want %q", got, want)
+	}
+	if got, want := faults[0].GetFaultType(), "store-link"; got != want {
+		t.Fatalf("fault type = %q, want %q", got, want)
+	}
+	rig.wantState(frontendv1.RenderState_RENDER_STATE_DEGRADED, "store link down")
+}
+
+// The shim's own recovery report CLOSES that fault. This is the edge the
+// 2026-08-02 store restart never produced, which is why every workspace stayed
+// blue: the daemon had no other way to learn the link came back.
+func TestShimStoreLinkRecoveryClosesTheFault(t *testing.T) {
+	// Arrange
+	rig := newFaultRig(t)
+	rig.settleGreen()
+	rig.cons.Degraded(rig.sid, &corev1.DegradedState{
+		Component: "shim-store-client",
+		Reason:    "store subscription closed",
+	})
+
+	// Act
+	rig.cons.Degraded(rig.sid, &corev1.DegradedState{
+		Component: "shim-store-client",
+		Reason:    "store link recovered",
+		Recovered: true,
+	})
+
+	// Assert
+	if faults := rig.activeFaults(); len(faults) != 0 {
+		t.Fatalf("active faults = %d after recovery, want 0", len(faults))
+	}
+}
+
+// Closing the fault must return the color unaided: the workspace leaves the
+// blue band the moment the link is back, with no shim or daemon bounce.
+func TestShimStoreLinkRecoveryLeavesTheBlueBand(t *testing.T) {
+	// Arrange
+	rig := newFaultRig(t)
+	rig.settleGreen()
+	rig.cons.Degraded(rig.sid, &corev1.DegradedState{Component: "shim-store-client", Reason: "store connection closed"})
+	rig.wantState(frontendv1.RenderState_RENDER_STATE_DEGRADED, "store link down")
+
+	// Act
+	rig.cons.Degraded(rig.sid, &corev1.DegradedState{
+		Component: "shim-store-client",
+		Reason:    "store link recovered",
+		Recovered: true,
+	})
+
+	// Assert
+	rig.wantState(frontendv1.RenderState_RENDER_STATE_READY, "after store link recovery")
+}
+
+// A recovery that carries NO reason still closes the window. The SSM demands a
+// non-empty cause kind on every edge and `reason` is a proto3 string a peer may
+// leave unset, so forwarding it verbatim made an unreasoned recovery fail
+// validation — the fault stayed open and the workspace stayed blue over a link
+// that was working.
+func TestShimStoreLinkRecoveryWithoutAReasonStillClosesTheFault(t *testing.T) {
+	// Arrange
+	rig := newFaultRig(t)
+	rig.settleGreen()
+	rig.cons.Degraded(rig.sid, &corev1.DegradedState{Component: "shim-store-client", Reason: "store connection closed"})
+
+	// Act
+	rig.cons.Degraded(rig.sid, &corev1.DegradedState{Component: "shim-store-client", Recovered: true})
+
+	// Assert
+	if faults := rig.activeFaults(); len(faults) != 0 {
+		t.Fatalf("active faults = %d after an unreasoned recovery, want 0", len(faults))
+	}
+}
+
+// A closed fault that no frontend is TOLD about repaints nothing. The recovery
+// edge must re-resolve and PUSH the workspace state, which is what carries the
+// color change to a webapp that is already mounted.
+func TestShimStoreLinkRecoveryRepushesTheWorkspaceState(t *testing.T) {
+	// Arrange: subscribe the way a connected frontend does, after the outage
+	// has already opened, so the only push in the channel is the recovery's.
+	rig := newFaultRig(t)
+	rig.settleGreen()
+	rig.cons.Degraded(rig.sid, &corev1.DegradedState{Component: "shim-store-client", Reason: "store connection closed"})
+	states, cancel := rig.mgr.Subscribe()
+	defer cancel()
+
+	// Act
+	rig.cons.Degraded(rig.sid, &corev1.DegradedState{
+		Component: "shim-store-client",
+		Reason:    "store link recovered",
+		Recovered: true,
+	})
+
+	// Assert: a pushed state, carrying the recovered color and no open fault.
+	select {
+	case msg := <-states:
+		if got := msg.GetState(); got != frontendv1.RenderState_RENDER_STATE_READY {
+			t.Fatalf("pushed state = %s, want RENDER_STATE_READY", got)
+		}
+		if got := len(msg.GetActiveFaults()); got != 0 {
+			t.Fatalf("pushed state carries %d active fault(s), want 0", got)
+		}
+	default:
+		t.Fatal("the recovery pushed no workspace state; a mounted frontend would stay blue")
 	}
 }
 
