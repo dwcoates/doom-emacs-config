@@ -132,11 +132,20 @@ request-id."
     req))
 
 (defconst agent-repl--merge-echo-states
-  '(:merge-enqueuing :merge-queued :merging :merge-conflict
-    :merge-failed :merged)
+  (delete-dups
+   (mapcar #'cdr
+           (cl-remove-if-not
+            (lambda (entry) (string-prefix-p "RENDER_STATE_MERG" (car entry)))
+            agent-repl--frontend-render-state-map)))
   "The pushed render keywords that narrate a merge in the minibuffer.
-Closed by construction: exactly the merge arm of
-`agent-repl--frontend-render-state-map' (frontend-state.el).")
+DERIVED from the merge arm of `agent-repl--frontend-render-state-map'
+\(frontend-state.el) rather than restated, so a merge state added to the
+daemon's vocabulary narrates itself the moment the map learns it.  The
+restated version silently stopped narrating whichever state was added
+last, which is the failure mode of every list that claims in a comment to
+equal another list.  Load order is the frontend-state module first
+\(config.el), which is also how `agent-repl--frontend-render-state-map' is
+already resolvable here.")
 
 (defconst agent-repl--merge-phase-words
   '((:enqueued       . "merge queued")
