@@ -2,6 +2,7 @@ package ssm
 
 import (
 	"fmt"
+	"strings"
 
 	"claude-repld/internal/workspace/merge"
 )
@@ -27,11 +28,21 @@ import (
 var mergeAxisStates = []string{
 	sigMergeEnqueuing,
 	sigMerging,
+	sigMergeBeforeAction,
+	sigMergeAfterAction,
 	sigMergeQueued,
 	sigMergeConflict,
 	sigMergeFailed,
 	sigMerged,
 	sigMergeNone,
+}
+
+// mergeAxisPlaceholders renders one SQL bind placeholder per merge-axis token.
+// Every query that selects over the axis builds its IN list from here, so a new
+// token can never leave a hand-written placeholder count behind — the two would
+// disagree silently until some workspace resolved the wrong phase.
+func mergeAxisPlaceholders() string {
+	return strings.TrimSuffix(strings.Repeat("?,", len(mergeAxisStates)), ",")
 }
 
 // WorkspacesAtMergePhase reports every workspace whose LATEST merge-axis row
@@ -53,7 +64,7 @@ func (m *Manager) WorkspacesAtMergePhase(phase merge.Phase) ([]string, error) {
 	query := `
 WITH merge_rows AS (
   SELECT workspace, state, at FROM workspace_state
-  WHERE state IN (?,?,?,?,?,?,?)
+  WHERE state IN (` + mergeAxisPlaceholders() + `)
 )
 SELECT workspace FROM merge_rows r
 WHERE r.state = ?

@@ -80,6 +80,27 @@ type CoordinatorConfig struct {
 	// the workspace's postprocessing prompt), and a coordinator without it
 	// silently drops them exactly the way the deleted Emacs handler did.
 	PostMerge PostMergeHook
+	// Status receives every phase-level MergeStatus the pipeline publishes.
+	// Required, on the same footing as the rest: a coordinator that cannot
+	// publish phases drives merges no frontend can watch, which is the state
+	// this whole pipeline exists to end.
+	Status StatusSink
+	// Sessions brings the merging workspace's session up before the lease is
+	// taken. Required: a merge drives that session for the before-action, the
+	// conflict resolution and the test fix, and a hibernated workspace (which
+	// the idle sweeper produces routinely) would fail all three.
+	Sessions SessionBringUp
+	// BeforeActions resolves the before_ws_merge action a workspace was created
+	// with. Required: a coordinator without it would silently skip an action the
+	// user asked for at creation, which is indistinguishable from the action
+	// having run and done nothing.
+	BeforeActions BeforeActionSource
+	// BeforeActionRunner delivers that action to the workspace's own session.
+	// Required for the same reason.
+	BeforeActionRunner BeforeActionRunner
+	// Now returns unix millis for the phase timestamps. Nil uses the wall clock;
+	// a test injects one so both stamps are pinned.
+	Now func() int64
 }
 
 // QueueCoordinator is the merge.Coordinator implementation: one drain goroutine
@@ -102,6 +123,12 @@ type QueueCoordinator struct {
 	resolver     ConflictResolver
 	testResolver TestFailureResolver
 	postMerge    PostMergeHook
+
+	status         StatusSink
+	sessions       SessionBringUp
+	beforeActions  BeforeActionSource
+	beforeActionFn BeforeActionRunner
+	now            func() int64
 
 	// ctx bounds every DRIVEN merge, and is deliberately not the caller's
 	// Enqueue context: a cherry-pick outlives the frontend command that asked
@@ -186,6 +213,18 @@ func NewCoordinator(cfg CoordinatorConfig) (*QueueCoordinator, error) {
 		return nil, fmt.Errorf("merge: Coordinator TestResolver is required")
 	case cfg.PostMerge == nil:
 		return nil, fmt.Errorf("merge: Coordinator PostMerge hook is required")
+	case cfg.Status == nil:
+		return nil, fmt.Errorf("merge: Coordinator Status sink is required")
+	case cfg.Sessions == nil:
+		return nil, fmt.Errorf("merge: Coordinator Sessions bring-up is required")
+	case cfg.BeforeActions == nil:
+		return nil, fmt.Errorf("merge: Coordinator BeforeActions source is required")
+	case cfg.BeforeActionRunner == nil:
+		return nil, fmt.Errorf("merge: Coordinator BeforeActionRunner is required")
+	}
+	now := cfg.Now
+	if now == nil {
+		now = func() int64 { return time.Now().UnixMilli() }
 	}
 	ctx, stop := context.WithCancel(context.Background())
 	return &QueueCoordinator{
@@ -199,6 +238,12 @@ func NewCoordinator(cfg CoordinatorConfig) (*QueueCoordinator, error) {
 		resolver:     cfg.Resolver,
 		testResolver: cfg.TestResolver,
 		postMerge:    cfg.PostMerge,
+
+		status:         cfg.Status,
+		sessions:       cfg.Sessions,
+		beforeActions:  cfg.BeforeActions,
+		beforeActionFn: cfg.BeforeActionRunner,
+		now:            now,
 
 		ctx:      ctx,
 		stop:     stop,
@@ -229,6 +274,19 @@ func (c *QueueCoordinator) Enqueue(ctx context.Context, req Request) (Position, 
 		return Position{}, fmt.Errorf("merge: enqueue %q: %w", req.Name, err)
 	}
 
+	// THE RUN IS MINTED HERE, at the admission, and lives until this entry
+	// reaches a terminal outcome — so the `enqueued` phase a user watches and the
+	// `merged` that ends it carry ONE id. It rides the in-memory request through
+	// the queue and is deliberately absent from the durable entry, so a merge
+	// replayed by the next boot mints a new run: nothing about the dead process's
+	// progress is still true.
+	run, err := NewRunStatus(c.status, c.logf, req.Workspace, c.now)
+	if err != nil {
+		c.logf("merge: enqueue run construction FAILED {repo=%s ws=%s name=%s}: %v", repo, req.Workspace, req.Name, err)
+		return Position{}, fmt.Errorf("merge: enqueue %q: %w", req.Name, err)
+	}
+	req.Run = run
+
 	gate := c.gate(repo)
 	gate.Lock()
 	pos, err := c.queue.Publish(ctx, repo, req)
@@ -240,7 +298,7 @@ func (c *QueueCoordinator) Enqueue(ctx context.Context, req Request) (Position, 
 	var queuedErr error
 	if pos.Index > 1 {
 		cause := fmt.Sprintf("queued at position %d of %d behind another merge on repo %s", pos.Index, pos.Depth, repo)
-		if err := c.picker.MarkQueued(req.Workspace, cause); err != nil {
+		if err := run.Enqueued(int32(pos.Index), int32(pos.Depth), cause); err != nil {
 			c.logf("merge: enqueue merge_queued emit FAILED {repo=%s ws=%s name=%s}: %v", repo, req.Workspace, req.Name, err)
 			queuedErr = fmt.Errorf("merge: enqueue %q: record merge_queued: %w", req.Name, err)
 		}
@@ -535,7 +593,7 @@ func (c *QueueCoordinator) finish(repo string, req Request, release func()) bool
 // A merge whose queue entry could NOT be dropped does not fire the hook. That
 // entry is replayed by the next boot's Drain, so notifying now would phone the
 // parent home twice for one child.
-func (c *QueueCoordinator) finishTerminal(repo string, req Request, release func(), outcome Outcome) bool {
+func (c *QueueCoordinator) finishTerminal(repo string, req, driven Request, release func(), outcome Outcome) bool {
 	ok := c.finish(repo, req, release)
 	if outcome != OutcomeMerged {
 		return ok
@@ -545,7 +603,7 @@ func (c *QueueCoordinator) finishTerminal(repo string, req Request, release func
 			repo, req.Workspace, req.Name)
 		return ok
 	}
-	c.firePostMerge(repo, req)
+	c.fireAfterAction(repo, driven)
 	return ok
 }
 
@@ -557,17 +615,54 @@ func (c *QueueCoordinator) finishTerminal(repo string, req Request, release func
 // — a queue stalled by a nicety. The goroutine is tracked on c.wg and bounded
 // by c.ctx, so Close still waits for a hook that honors cancellation rather
 // than leaking it.
-func (c *QueueCoordinator) firePostMerge(repo string, req Request) {
+func (c *QueueCoordinator) fireAfterAction(repo string, req Request) {
 	c.wg.Add(1)
 	go func() {
 		defer c.wg.Done()
-		c.logf("merge: post-merge hook RUNNING {repo=%s ws=%s name=%s target=%s}", repo, req.Workspace, req.Name, req.TargetDir)
-		if err := c.postMerge.AfterMerged(c.ctx, req); err != nil {
-			c.recordPostMergeFailure(repo, req, err)
-			return
-		}
-		c.logf("merge: post-merge hook COMPLETE {repo=%s ws=%s name=%s}", repo, req.Workspace, req.Name)
+		c.publishAfterAction(repo, req)
 	}()
+}
+
+// publishAfterAction runs the after-action and publishes the run's TERMINAL
+// merged status.
+//
+// THE AFTER-ACTION CANNOT FAIL THE RUN. The commits are on the target the moment
+// the driver said `merged`, and reporting `failed` because a courtesy prompt did
+// not land would make the pushed status lie about the tree. Its error is carried
+// on the terminal merged status instead (after_action_error) and retained as a
+// merge.PostMergeFailure, so it is visible without being fatal.
+func (c *QueueCoordinator) publishAfterAction(repo string, req Request) {
+	prompt, err := c.postMerge.AfterAction(req)
+	switch {
+	case err != nil:
+		// The prompt could not be READ. The hook still runs — it also carries the
+		// child-to-parent phone-home, which does not depend on the prompt — but
+		// the phase is published without prompt text rather than with invented text.
+		c.logf("merge: after-action prompt lookup FAILED {repo=%s ws=%s name=%s run=%s}: %v — the phase is published without its text; the merge STANDS",
+			repo, req.Workspace, req.Name, req.Run.RunID(), err)
+	case prompt == "":
+		c.logf("merge: no after-action recorded {repo=%s ws=%s name=%s run=%s}", repo, req.Workspace, req.Name, req.Run.RunID())
+	}
+	if err := req.Run.AfterAction(prompt, "running the workspace's after-merge action"); err != nil {
+		c.logf("merge: after-action status FAILED {repo=%s ws=%s run=%s}: %v", repo, req.Workspace, req.Run.RunID(), err)
+	}
+
+	c.logf("merge: post-merge hook RUNNING {repo=%s ws=%s name=%s run=%s target=%s}", repo, req.Workspace, req.Name, req.Run.RunID(), req.TargetDir)
+	afterErr := c.postMerge.AfterMerged(c.ctx, req)
+	if afterErr != nil {
+		c.recordPostMergeFailure(repo, req, afterErr)
+	} else {
+		c.logf("merge: post-merge hook COMPLETE {repo=%s ws=%s name=%s run=%s}", repo, req.Workspace, req.Name, req.Run.RunID())
+	}
+
+	var afterActionErr string
+	if afterErr != nil {
+		afterActionErr = afterErr.Error()
+	}
+	if err := req.Run.Merged(afterActionErr, "the merge landed"); err != nil {
+		c.logf("merge: terminal merged status FAILED {repo=%s ws=%s run=%s}: %v — the merge STANDS (the commits are on the target); only its final status did not publish",
+			repo, req.Workspace, req.Run.RunID(), err)
+	}
 }
 
 // recordPostMergeFailure loud-logs a hook error and retains it.
@@ -622,10 +717,42 @@ func (c *QueueCoordinator) runOne(repo string, req Request) bool {
 		close(park.ended)
 	}()
 
+	// The run was minted at Enqueue and rides the in-memory request, so the
+	// `enqueued` phase a user already saw and everything that follows carry ONE
+	// id. An entry replayed from disk by a boot Drain has none — its run died
+	// with the process that was executing it — so this pop mints a fresh one,
+	// which is exactly right: it is a new attempt.
+	driven := req
+	if driven.Run == nil {
+		run, err := NewRunStatus(c.status, c.logf, req.Workspace, c.now)
+		if err != nil {
+			c.logf("merge: run status construction FAILED {repo=%s ws=%s name=%s}: %v", repo, req.Workspace, req.Name, err)
+			c.failed(req, "merge run could not be published: "+err.Error())
+			return c.finish(repo, req, nil)
+		}
+		// `req` is left EXACTLY as the queue delivered it: FileQueue.Complete
+		// identifies the head by struct equality, so the request the drain loop
+		// retires must be the one it received. The run rides a copy.
+		driven.Run = run
+		c.logf("merge: run MINTED for a replayed entry {repo=%s ws=%s name=%s run=%s}", repo, req.Workspace, req.Name, run.RunID())
+	}
+	c.logf("merge: run START {repo=%s ws=%s name=%s run=%s}", repo, req.Workspace, req.Name, driven.Run.RunID())
+
+	// SESSION FIRST, LEASE SECOND. The merge drives this workspace's own session
+	// (the before-action, a conflict resolution, a test fix), and a bring-up can
+	// be slow — holding the exclusivity lease across it would lock the user out
+	// of their session for the whole of it.
+	if err := c.sessions.EnsureLive(c.ctx, req.Workspace); err != nil {
+		c.logf("merge: session bring-up FAILED {repo=%s ws=%s name=%s run=%s}: %v — the merge cannot drive a session it cannot reach",
+			repo, req.Workspace, req.Name, driven.Run.RunID(), err)
+		c.failedRun(driven, "the workspace's agent session could not be brought up: "+err.Error())
+		return c.finish(repo, req, nil)
+	}
+
 	release, err := c.lease.Acquire(c.ctx, req.Workspace)
 	if err != nil {
 		c.logf("merge: lease acquire FAILED {repo=%s ws=%s name=%s}: %v", repo, req.Workspace, req.Name, err)
-		c.failed(req, "shim lease unavailable: "+err.Error())
+		c.failedRun(driven, "shim lease unavailable: "+err.Error())
 		// A merge that can never run must not hold the head forever.
 		return c.finish(repo, req, nil)
 	}
@@ -636,18 +763,76 @@ func (c *QueueCoordinator) runOne(repo string, req Request) bool {
 		panic(fmt.Sprintf("merge: Lease.Acquire returned a nil release for workspace %q", req.Workspace))
 	}
 
-	res, err := c.picker.Merge(c.ctx, req)
+	// THE BEFORE-ACTION RUNS UNDER THE LEASE AND BEFORE THE PLAN. It may create
+	// commits, so computing the cherry-pick plan first would replay a range that
+	// does not include the work the action was asked to produce. The plan is
+	// computed inside picker.Merge, which is why this sits above it.
+	if !c.runBeforeAction(repo, driven) {
+		return c.finish(repo, req, release)
+	}
+
+	res, err := c.picker.Merge(c.ctx, driven)
 	if err != nil {
 		// merge.Driver rejects a bad precondition BEFORE emitting anything, so
 		// without this the workspace would sit at merge_queued with no terminal
 		// state ever arriving. The coordinator owns the queued state, so it
 		// owns clearing it.
 		c.logf("merge: driver FAILED {repo=%s ws=%s name=%s}: %v", repo, req.Workspace, req.Name, err)
-		c.failed(req, "merge driver failed: "+err.Error())
+		c.failedRun(driven, "merge driver failed: "+err.Error())
 		return c.finish(repo, req, release)
 	}
 
-	return c.settle(repo, req, park, release, res)
+	return c.settle(repo, req, driven, park, release, res)
+}
+
+// runBeforeAction resolves and delivers the workspace's before_ws_merge action,
+// reporting whether the merge may continue.
+//
+// A WORKSPACE WITH NO ACTION IS THE COMMON CASE and passes straight through. An
+// action that cannot be READ, and an action whose turn does not end cleanly, both
+// FAIL the run: the whole point of the action is to change what gets
+// cherry-picked, so proceeding after it did not happen would land a plan the
+// user did not ask for.
+func (c *QueueCoordinator) runBeforeAction(repo string, req Request) bool {
+	prompt, err := c.beforeActions.BeforeAction(req.Workspace)
+	if err != nil {
+		c.logf("merge: before-action lookup FAILED {repo=%s ws=%s name=%s run=%s}: %v — the merge is failed rather than run without an action the workspace may have been created with",
+			repo, req.Workspace, req.Name, req.Run.RunID(), err)
+		c.failedRun(req, "the workspace's before-merge action could not be read: "+err.Error())
+		return false
+	}
+	if prompt == "" {
+		c.logf("merge: no before-action recorded {repo=%s ws=%s name=%s run=%s}", repo, req.Workspace, req.Name, req.Run.RunID())
+		return true
+	}
+
+	act := BeforeAction{
+		Workspace: req.Workspace,
+		RequestID: newBeforeActionRequestID(),
+		Prompt:    prompt,
+	}
+	if err := act.validate(); err != nil {
+		c.logf("merge: before-action NOT HANDED to the shim {repo=%s ws=%s name=%s}: %v", repo, req.Workspace, req.Name, err)
+		c.failedRun(req, "the workspace's before-merge action is not deliverable: "+err.Error())
+		return false
+	}
+	if err := req.Run.BeforeAction(prompt, "running the workspace's before-merge action"); err != nil {
+		c.logf("merge: before-action status FAILED {repo=%s ws=%s run=%s}: %v", repo, req.Workspace, req.Run.RunID(), err)
+		c.failedRun(req, "the before-merge action's phase could not be published: "+err.Error())
+		return false
+	}
+
+	c.logf("merge: before-action HANDED TO THE SHIM {repo=%s ws=%s name=%s run=%s request_id=%s}",
+		repo, req.Workspace, req.Name, req.Run.RunID(), act.RequestID)
+	if err := c.beforeActionFn.Run(c.ctx, act); err != nil {
+		c.logf("merge: before-action FAILED {repo=%s ws=%s name=%s run=%s request_id=%s}: %v — the merge is failed; cherry-picking a plan the action was meant to change would land the wrong commits",
+			repo, req.Workspace, req.Name, req.Run.RunID(), act.RequestID, err)
+		c.failedRun(req, "the workspace's before-merge action did not complete: "+err.Error())
+		return false
+	}
+	c.logf("merge: before-action TURN COMPLETE {repo=%s ws=%s name=%s run=%s request_id=%s} — computing the cherry-pick plan now",
+		repo, req.Workspace, req.Name, req.Run.RunID(), act.RequestID)
+	return true
 }
 
 // settle drives a merge Result to a terminal outcome and reports whether
@@ -664,7 +849,7 @@ func (c *QueueCoordinator) runOne(repo string, req Request) bool {
 // across every later step. Resume and ContinueAfterTestFix each start from a
 // target that already carries landed commits, so their own view of HEAD is not
 // a rollback point.
-func (c *QueueCoordinator) settle(repo string, req Request, park *conflictPark, release func(), res Result) bool {
+func (c *QueueCoordinator) settle(repo string, req, driven Request, park *conflictPark, release func(), res Result) bool {
 	preHead := res.PreMergeHead
 	// attempted records which failing commits have already had their ONE
 	// resolution attempt, so a suite that fails again on the same commit fails
@@ -674,21 +859,21 @@ func (c *QueueCoordinator) settle(repo string, req Request, park *conflictPark, 
 		switch res.Outcome {
 		case OutcomeConflict:
 			c.logf("merge: parked on conflict {repo=%s ws=%s name=%s commit=%s}", repo, req.Workspace, req.Name, res.ConflictCommit)
-			next, handled, cont := c.awaitResolution(repo, req, park, release, res.ConflictCommit)
+			next, handled, cont := c.awaitResolution(repo, req, driven, park, release, res.ConflictCommit)
 			if handled {
 				return cont
 			}
 			res = next
 		case OutcomeTestFailed:
 			c.logf("merge: test gate failed {repo=%s ws=%s name=%s commit=%s}", repo, req.Workspace, req.Name, res.FailingCommit)
-			next, handled, cont := c.awaitTestFix(repo, req, park, release, preHead, res, attempted)
+			next, handled, cont := c.awaitTestFix(repo, req, driven, park, release, preHead, res, attempted)
 			if handled {
 				return cont
 			}
 			res = next
 		default:
-			c.logf("merge: terminal {repo=%s ws=%s name=%s outcome=%s}", repo, req.Workspace, req.Name, res.Outcome)
-			return c.finishTerminal(repo, req, release, res.Outcome)
+			c.logf("merge: terminal {repo=%s ws=%s name=%s run=%s outcome=%s}", repo, req.Workspace, req.Name, driven.Run.RunID(), res.Outcome)
+			return c.finishTerminal(repo, req, driven, release, res.Outcome)
 		}
 	}
 }
@@ -712,7 +897,7 @@ func (c *QueueCoordinator) settle(repo string, req Request, park *conflictPark, 
 // (a suite run, a resolution turn, more picks) is reported through the pushed
 // merge state, and blocking a frontend command on it would make
 // conflict_resolved_continue hang for the length of a test suite.
-func (c *QueueCoordinator) awaitResolution(repo string, req Request, park *conflictPark, release func(), conflictCommit string) (Result, bool, bool) {
+func (c *QueueCoordinator) awaitResolution(repo string, req, driven Request, park *conflictPark, release func(), conflictCommit string) (Result, bool, bool) {
 	c.driveShimResolution(repo, req, park, conflictCommit)
 	for {
 		select {
@@ -732,7 +917,13 @@ func (c *QueueCoordinator) awaitResolution(repo string, req Request, park *confl
 			call.reply <- nil
 			return Result{}, true, ok
 		case call := <-park.calls:
-			res, err := c.picker.Resume(c.ctx, call.req)
+			// The resume carries the RUN this merge has been publishing all
+			// along. A human's conflict_resolved_continue arrives with none —
+			// the frontend has no run to name — and continuing a merge under a
+			// second run id would restart the progress a user is watching.
+			resumeReq := call.req
+			resumeReq.Run = driven.Run
+			res, err := c.picker.Resume(c.ctx, resumeReq)
 			if err != nil {
 				c.logf("merge: resume driver FAILED {repo=%s ws=%s name=%s}: %v", repo, req.Workspace, req.Name, err)
 				// The conflict is still in the tree, so the park survives and
@@ -766,11 +957,11 @@ func (c *QueueCoordinator) awaitResolution(repo string, req Request, park *confl
 // the re-run finish. The attempt's context is cancelled on that abandon, so the
 // cancelled fix cannot go on cherry-picking into a target the merge has already
 // given up.
-func (c *QueueCoordinator) awaitTestFix(repo string, req Request, park *conflictPark, release func(), preHead string, res Result, attempted map[string]bool) (Result, bool, bool) {
+func (c *QueueCoordinator) awaitTestFix(repo string, req, driven Request, park *conflictPark, release func(), preHead string, res Result, attempted map[string]bool) (Result, bool, bool) {
 	if attempted[res.FailingCommit] {
 		c.logf("merge: test failure NOT RE-ATTEMPTED {repo=%s ws=%s name=%s commit=%s} — its one resolution attempt already ran and the suite still fails",
 			repo, req.Workspace, req.Name, res.FailingCommit)
-		return Result{}, true, c.failTestGate(repo, req, release, preHead, res)
+		return Result{}, true, c.failTestGate(repo, req, driven, release, preHead, res)
 	}
 	attempted[res.FailingCommit] = true
 
@@ -787,7 +978,7 @@ func (c *QueueCoordinator) awaitTestFix(repo string, req Request, park *conflict
 		// which no valid Result produces. Prompting an agent with a half-empty
 		// instruction is worse than failing the merge with the reason.
 		c.logf("merge: test failure NOT HANDED to the shim {repo=%s ws=%s name=%s}: %v", repo, req.Workspace, req.Name, err)
-		return Result{}, true, c.failTestGate(repo, req, release, preHead, res)
+		return Result{}, true, c.failTestGate(repo, req, driven, release, preHead, res)
 	}
 
 	fixCtx, cancelFix := context.WithCancel(c.ctx)
@@ -796,13 +987,13 @@ func (c *QueueCoordinator) awaitTestFix(repo string, req Request, park *conflict
 	c.wg.Add(1)
 	go func() {
 		defer c.wg.Done()
-		done <- c.driveTestFix(fixCtx, repo, req, fix)
+		done <- c.driveTestFix(fixCtx, repo, driven, fix)
 	}()
 
 	select {
 	case out := <-done:
 		if out.err != nil {
-			return Result{}, true, c.failTestGate(repo, req, release, preHead, res)
+			return Result{}, true, c.failTestGate(repo, req, driven, release, preHead, res)
 		}
 		return out.res, false, false
 	case call := <-park.abandons:
@@ -858,7 +1049,7 @@ func (c *QueueCoordinator) driveTestFix(ctx context.Context, repo string, req Re
 // turns one workspace's failure into everyone's. Nothing is lost: the source
 // branch still holds every commit, and the merge can be retried once the work is
 // fixed there.
-func (c *QueueCoordinator) failTestGate(repo string, req Request, release func(), preHead string, res Result) bool {
+func (c *QueueCoordinator) failTestGate(repo string, req, driven Request, release func(), preHead string, res Result) bool {
 	cause := fmt.Sprintf("test suite failed after cherry-picking %s and the one resolution attempt did not fix it: %s",
 		res.FailingCommit, dlog.Clamp(res.TestFailureTail, testFailureCauseBytes))
 	switch {
@@ -881,7 +1072,7 @@ func (c *QueueCoordinator) failTestGate(repo string, req Request, release func()
 			cause += fmt.Sprintf(" (target rolled back to %s)", preHead)
 		}
 	}
-	c.failed(req, cause)
+	c.failedRun(driven, cause)
 	return c.finish(repo, req, release)
 }
 
@@ -970,6 +1161,19 @@ func (c *QueueCoordinator) driveShimResolution(repo string, req Request, park *c
 func (c *QueueCoordinator) failed(req Request, cause string) {
 	if err := c.emit.emit(req.Workspace, PhaseMergeFailed, cause); err != nil {
 		c.logf("merge: merge_failed record FAILED {ws=%s name=%s cause=%s}: %v", req.Workspace, req.Name, cause, err)
+	}
+}
+
+// failedRun records merge_failed for a request that HAS a run, so the terminal
+// status carries the run's identity and the commit context it died with.
+//
+// It is separate from failed() because the coordinator also fails requests that
+// never reached a run (the boot sweep of orphaned merge_enqueuing marks), and a
+// fabricated run id on those would let a frontend correlate two unrelated things.
+func (c *QueueCoordinator) failedRun(req Request, cause string) {
+	if err := req.Run.Failed(cause); err != nil {
+		c.logf("merge: merge_failed status FAILED {ws=%s name=%s run=%s cause=%s}: %v",
+			req.Workspace, req.Name, req.Run.RunID(), cause, err)
 	}
 }
 

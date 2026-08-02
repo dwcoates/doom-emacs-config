@@ -74,6 +74,30 @@ func (f *fanOutPostMergeHook) AfterMerged(ctx context.Context, req merge.Request
 	return errors.Join(errs...)
 }
 
+// AfterAction reports the FIRST non-empty prompt any bound hook will deliver.
+//
+// The fan-out's hooks are not peers here: exactly one of them (the parent
+// handoff) delivers a prompt at all, and the rest report "" because they have
+// none. Joining them would be inventing a composite prompt no session receives.
+// A lookup error is returned as-is so the coordinator can log it rather than
+// publish invented text.
+func (f *fanOutPostMergeHook) AfterAction(req merge.Request) (string, error) {
+	var errs []error
+	for _, h := range f.hooks {
+		prompt, err := h.hook.AfterAction(req)
+		if err != nil {
+			f.logf("server: post-merge hook %s after-action lookup FAILED {ws=%s name=%s}: %v",
+				h.name, req.Workspace, req.Name, err)
+			errs = append(errs, fmt.Errorf("%s: %w", h.name, err))
+			continue
+		}
+		if prompt != "" {
+			return prompt, errors.Join(errs...)
+		}
+	}
+	return "", errors.Join(errs...)
+}
+
 // buildPostMergeHook assembles the post-merge fan-out from cfg's existing
 // dependencies.
 func buildPostMergeHook(cfg AgentShimConfig, logf func(string, ...any)) (merge.PostMergeHook, error) {

@@ -78,7 +78,15 @@ const (
 	// boot (merge.Coordinator.Drain).
 	sigMergeEnqueuing = "merge_enqueuing"
 	sigMerging        = "merging"
-	sigMergeQueued    = "merge_queued"
+	// THE TWO AGENT-DRIVEN MERGE PHASES. Neither is a cherry-pick: the merging
+	// workspace's own session is running a recorded action under the merge
+	// lease, before the plan is computed (`merge_before_action`) or after the
+	// commits landed (`merge_after_action`). They are their own tokens rather
+	// than more `merging` rows because a user watching a merge sit here needs to
+	// know it is their agent working, not git.
+	sigMergeBeforeAction = "merge_before_action"
+	sigMergeAfterAction  = "merge_after_action"
+	sigMergeQueued       = "merge_queued"
 	sigMergeConflict  = "merge_conflict"
 	sigMergeFailed    = "merge_failed"
 	sigMerged         = "merged"
@@ -98,6 +106,10 @@ const (
 	causeTaskStarted     = "task_started"
 	causeTaskEnded       = "task_ended"
 	causeMergeTransition = "merge_transition"
+	// The merge axis was retired because a merged workspace was REOPENED. It is
+	// its own cause kind rather than a merge_transition detail because nothing
+	// about a merge produced it: a bring-up did. See mergereopen.go.
+	causeMergeReopened = "merge_axis_retired_on_reopen"
 	// The legacy connectivity projection's edges. The detail after the colon names which one moved
 	// it — the bring-up that started, the ShimReady that closed the gate, or the
 	// exit/hibernation/rotation that took the wiring away.
@@ -269,7 +281,12 @@ func renderStateOf(token string) frontendv1.RenderState {
 		return frontendv1.RenderState_RENDER_STATE_INIT
 	case sigMergeEnqueuing:
 		return frontendv1.RenderState_RENDER_STATE_MERGE_ENQUEUING
-	case sigMerging:
+	case sigMerging, sigMergeBeforeAction, sigMergeAfterAction:
+		// ALL THREE PROJECT TO MERGING. The render state answers "what can the
+		// user do", and the answer is identical for all three: a merge run owns
+		// this workspace's session and nothing else may use it. Which PHASE of
+		// the run it is travels on WorkspaceState.merge_status, which carries the
+		// prompt and the commit context a render state never could.
 		return frontendv1.RenderState_RENDER_STATE_MERGING
 	case sigMergeQueued:
 		return frontendv1.RenderState_RENDER_STATE_MERGE_QUEUED
@@ -394,6 +411,12 @@ WITH
     ('merge_failed','merge',2),
     ('merged','merge',3),
     ('merging','merge',4),
+    -- THE TWO AGENT-DRIVEN PHASES SHARE merging's RANK because they share its
+    -- claim: a merge run owns this workspace's session and nothing else may use
+    -- it. Only one merge row is ever a candidate (latest_merge takes the
+    -- newest), so the tie is never resolved and the rank decides nothing else.
+    ('merge_before_action','merge',4),
+    ('merge_after_action','merge',4),
     ('merge_queued','merge',5),
     -- DIRECTLY BELOW merge_queued, and that placement is the whole of what
     -- this rank says: merge_enqueuing is the WEAKEST claim the merge axis can
@@ -444,7 +467,7 @@ WITH
   ),
   latest_merge AS (
     SELECT r.* FROM rows r
-    WHERE r.state IN ('merge_enqueuing','merging','merge_queued','merge_conflict','merge_failed','merged','merge_none')
+    WHERE r.state IN ('merge_enqueuing','merging','merge_before_action','merge_after_action','merge_queued','merge_conflict','merge_failed','merged','merge_none')
     ORDER BY r.at DESC LIMIT 1
   ),
   latest_degraded AS (

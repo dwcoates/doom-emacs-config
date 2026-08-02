@@ -5,9 +5,23 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 )
 
 // --- fakes --------------------------------------------------------------
+
+// sameRequest compares two requests IGNORING the run they carry.
+//
+// merge.Request grew a *RunStatus, which is minted per run and is therefore
+// never equal across two values by construction. What these assertions are
+// about is the request's IDENTITY — which workspace, which branch, which target
+// — so the run is normalized away rather than every assertion being weakened to
+// a field-by-field spot check.
+func sameRequest(a, b Request) bool {
+	a.Run, b.Run = nil, nil
+	return a == b
+}
 
 const errStopped = sentinelError("fake picker stopped")
 
@@ -218,6 +232,10 @@ func newFakePostMergeHook(capacity int) *fakePostMergeHook {
 	}
 }
 
+// AfterAction reports the prompt the hook would deliver. The double has none;
+// the coordinator publishes the after_action phase with empty text.
+func (h *fakePostMergeHook) AfterAction(Request) (string, error) { return "", nil }
+
 func (h *fakePostMergeHook) AfterMerged(_ context.Context, req Request) error {
 	h.calls <- req
 	select {
@@ -237,6 +255,8 @@ type autoPostMergeHook struct {
 func newAutoPostMergeHook(capacity int) *autoPostMergeHook {
 	return &autoPostMergeHook{calls: make(chan Request, capacity)}
 }
+
+func (h *autoPostMergeHook) AfterAction(Request) (string, error) { return "", nil }
 
 func (h *autoPostMergeHook) AfterMerged(_ context.Context, req Request) error {
 	select {
@@ -265,10 +285,11 @@ func (k fakeKeyer) RepoKey(_ context.Context, dir string) (string, error) {
 
 // syncSink is a StateSink safe to read while a drain goroutine writes it.
 type syncSink struct {
-	mu  sync.Mutex
-	got []transition
-	ch  chan transition
-	err error
+	mu       sync.Mutex
+	got      []transition
+	statuses []*frontendv1.MergeStatus
+	ch       chan transition
+	err      error
 }
 
 func newSyncSink(capacity int) *syncSink {
@@ -278,10 +299,50 @@ func newSyncSink(capacity int) *syncSink {
 func (s *syncSink) RecordMergeTransition(ws string, phase Phase, cause string) error {
 	s.mu.Lock()
 	s.got = append(s.got, transition{ws, phase, cause})
+	err := s.err
 	s.mu.Unlock()
 	s.ch <- transition{ws, phase, cause}
-	return s.err
+	return err
 }
+
+// RecordMergeStatus makes the double the StatusSink too, exactly as the
+// production mergeSink is both: the two ends of one publication travel one
+// object here for the same reason they travel one call there.
+func (s *syncSink) RecordMergeStatus(ws string, phase Phase, cause string, status *frontendv1.MergeStatus) error {
+	s.mu.Lock()
+	s.statuses = append(s.statuses, status)
+	s.mu.Unlock()
+	return s.RecordMergeTransition(ws, phase, cause)
+}
+
+// transitions returns a copy of every transition recorded so far, in order.
+func (s *syncSink) transitions() []transition {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]transition(nil), s.got...)
+}
+
+// failNext makes every subsequent record fail with err, which is how a test
+// drives the "the transition could not be persisted" branch.
+func (s *syncSink) failNext(err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.err = err
+}
+
+// publishedStatuses returns a copy of every status published so far, in order.
+func (s *syncSink) publishedStatuses() []*frontendv1.MergeStatus {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]*frontendv1.MergeStatus, len(s.statuses))
+	copy(out, s.statuses)
+	return out
+}
+
+var (
+	_ StateSink  = (*syncSink)(nil)
+	_ StatusSink = (*syncSink)(nil)
+)
 
 // fakePhases is a PhaseSource: the workspaces a boot finds pinned on a phase.
 type fakePhases struct {
@@ -318,6 +379,8 @@ type harness struct {
 	resolver     *fakeResolver
 	testResolver *fakeTestFailureResolver
 	sink         *syncSink
+	sessions     *fakeSessionBringUp
+	beforeRunner *fakeBeforeActionRunner
 	dir          string
 }
 
@@ -334,6 +397,74 @@ type harnessOpts struct {
 	// phases replaces the empty default phase source for tests about the boot
 	// sweep of orphaned merge_enqueuing marks.
 	phases PhaseSource
+	// sessions replaces the always-succeeding bring-up.
+	sessions SessionBringUp
+	// beforeActions replaces the no-action-recorded source.
+	beforeActions BeforeActionSource
+	// beforeRunner replaces the always-succeeding action runner.
+	beforeRunner BeforeActionRunner
+	// now pins the phase timestamps. Nil takes the wall clock.
+	now func() int64
+}
+
+// fakeSessionBringUp is the merge.SessionBringUp double: it records the
+// workspaces a run asked to bring up and can be told to refuse.
+type fakeSessionBringUp struct {
+	mu   sync.Mutex
+	got  []string
+	err  error
+	done chan string
+}
+
+func (b *fakeSessionBringUp) EnsureLive(_ context.Context, ws string) error {
+	b.mu.Lock()
+	b.got = append(b.got, ws)
+	done, err := b.done, b.err
+	b.mu.Unlock()
+	if done != nil {
+		done <- ws
+	}
+	return err
+}
+
+func (b *fakeSessionBringUp) calls() []string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return append([]string(nil), b.got...)
+}
+
+// fakeBeforeActions is the merge.BeforeActionSource double.
+type fakeBeforeActions struct {
+	prompt string
+	err    error
+}
+
+func (s fakeBeforeActions) BeforeAction(string) (string, error) { return s.prompt, s.err }
+
+// fakeBeforeActionRunner is the merge.BeforeActionRunner double: it records the
+// deliveries and can be told to fail the turn.
+type fakeBeforeActionRunner struct {
+	mu   sync.Mutex
+	got  []BeforeAction
+	err  error
+	done chan BeforeAction
+}
+
+func (r *fakeBeforeActionRunner) Run(_ context.Context, act BeforeAction) error {
+	r.mu.Lock()
+	r.got = append(r.got, act)
+	done, err := r.done, r.err
+	r.mu.Unlock()
+	if done != nil {
+		done <- act
+	}
+	return err
+}
+
+func (r *fakeBeforeActionRunner) calls() []BeforeAction {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]BeforeAction(nil), r.got...)
 }
 
 func newHarness(t *testing.T) *harness {
@@ -360,6 +491,18 @@ func newHarnessWith(t *testing.T, opts harnessOpts) *harness {
 	if phases == nil {
 		phases = fakePhases{}
 	}
+	sessions := opts.sessions
+	if sessions == nil {
+		sessions = &fakeSessionBringUp{}
+	}
+	beforeActions := opts.beforeActions
+	if beforeActions == nil {
+		beforeActions = fakeBeforeActions{}
+	}
+	beforeRunner := opts.beforeRunner
+	if beforeRunner == nil {
+		beforeRunner = &fakeBeforeActionRunner{}
+	}
 	coord, err := NewCoordinator(CoordinatorConfig{
 		Logf:         t.Logf,
 		Sink:         sink,
@@ -371,6 +514,13 @@ func newHarnessWith(t *testing.T, opts harnessOpts) *harness {
 		Resolver:     resolver,
 		TestResolver: testResolver,
 		PostMerge:    hook,
+		Status:       sink,
+		Sessions:     sessions,
+		// The default harness workspace carries NO before-action, which is the
+		// common case; a test that wants one overrides the source.
+		BeforeActions:      beforeActions,
+		BeforeActionRunner: beforeRunner,
+		Now:                opts.now,
 	})
 	if err != nil {
 		t.Fatalf("NewCoordinator: %v", err)
@@ -383,7 +533,14 @@ func newHarnessWith(t *testing.T, opts harnessOpts) *harness {
 			t.Fatalf("Close: %v", err)
 		}
 	})
-	return &harness{coord: coord, queue: q, picker: picker, lease: lease, resolver: resolver, testResolver: testResolver, sink: sink, dir: dir}
+	h := &harness{coord: coord, queue: q, picker: picker, lease: lease, resolver: resolver, testResolver: testResolver, sink: sink, dir: dir}
+	if b, ok := sessions.(*fakeSessionBringUp); ok {
+		h.sessions = b
+	}
+	if r, ok := beforeRunner.(*fakeBeforeActionRunner); ok {
+		h.beforeRunner = r
+	}
+	return h
 }
 
 // --- construction -------------------------------------------------------
@@ -392,16 +549,20 @@ func TestNewCoordinatorRequiresEveryDependency(t *testing.T) {
 	q, _ := newTestQueue(t)
 	complete := func() CoordinatorConfig {
 		return CoordinatorConfig{
-			Logf:         func(string, ...any) {},
-			Sink:         newSyncSink(1),
-			Queue:        q,
-			Phases:       fakePhases{},
-			Keyer:        fakeKeyer{},
-			Picker:       newFakePicker(1),
-			Lease:        newFakeLease(1),
-			Resolver:     newFakeResolver(1),
-			TestResolver: newFakeTestFailureResolver(1),
-			PostMerge:    newAutoPostMergeHook(1),
+			Logf:               func(string, ...any) {},
+			Sink:               newSyncSink(1),
+			Queue:              q,
+			Phases:             fakePhases{},
+			Keyer:              fakeKeyer{},
+			Picker:             newFakePicker(1),
+			Lease:              newFakeLease(1),
+			Resolver:           newFakeResolver(1),
+			TestResolver:       newFakeTestFailureResolver(1),
+			PostMerge:          newAutoPostMergeHook(1),
+			Status:             newSyncSink(1),
+			Sessions:           &fakeSessionBringUp{},
+			BeforeActions:      fakeBeforeActions{},
+			BeforeActionRunner: &fakeBeforeActionRunner{},
 		}
 	}
 	tests := []struct {
@@ -419,6 +580,10 @@ func TestNewCoordinatorRequiresEveryDependency(t *testing.T) {
 		{name: "no lease", mutate: func(c *CoordinatorConfig) { c.Lease = nil }, wantErr: true},
 		{name: "no conflict resolver", mutate: func(c *CoordinatorConfig) { c.Resolver = nil }, wantErr: true},
 		{name: "no test resolver", mutate: func(c *CoordinatorConfig) { c.TestResolver = nil }, wantErr: true},
+		{name: "no status sink", mutate: func(c *CoordinatorConfig) { c.Status = nil }, wantErr: true},
+		{name: "no session bring-up", mutate: func(c *CoordinatorConfig) { c.Sessions = nil }, wantErr: true},
+		{name: "no before-action source", mutate: func(c *CoordinatorConfig) { c.BeforeActions = nil }, wantErr: true},
+		{name: "no before-action runner", mutate: func(c *CoordinatorConfig) { c.BeforeActionRunner = nil }, wantErr: true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -491,6 +656,8 @@ func TestEnqueueSurfacesAPublishFailure(t *testing.T) {
 		Logf: t.Logf, Sink: newSyncSink(1), Queue: failingQueue{err: sentinelError("disk full")},
 		Phases: fakePhases{}, Keyer: fakeKeyer{}, Picker: picker, Lease: newFakeLease(1), Resolver: newFakeResolver(1),
 		TestResolver: newFakeTestFailureResolver(1), PostMerge: newAutoPostMergeHook(1),
+		Status: newSyncSink(1), Sessions: &fakeSessionBringUp{},
+		BeforeActions: fakeBeforeActions{}, BeforeActionRunner: &fakeBeforeActionRunner{},
 	})
 	if err != nil {
 		t.Fatalf("NewCoordinator: %v", err)
@@ -527,8 +694,12 @@ func TestEnqueueAtTheHeadDoesNotRecordMergeQueued(t *testing.T) {
 		t.Fatalf("position = %+v, want index 1", pos)
 	}
 	<-h.picker.merges
-	if len(h.picker.queued) != 0 {
-		t.Fatalf("merge_queued recorded for an immediately admitted merge")
+	// The enqueued phase is published by the RUN now, through the same sink every
+	// other phase goes through, so its absence is read there.
+	for _, tr := range h.sink.transitions() {
+		if tr.phase == PhaseMergeQueued {
+			t.Fatalf("merge_queued recorded for an immediately admitted merge: %+v", tr)
+		}
 	}
 }
 
@@ -551,9 +722,65 @@ func TestEnqueueBehindTheHeadRecordsMergeQueued(t *testing.T) {
 	if pos.Index != 2 || pos.Depth != 2 {
 		t.Fatalf("position = %+v, want index 2 depth 2", pos)
 	}
-	rec := <-h.picker.queued
-	if rec.ws != second.Workspace {
-		t.Fatalf("merge_queued workspace = %q, want %q", rec.ws, second.Workspace)
+	rec := <-h.sink.ch
+	if rec.phase != PhaseMergeQueued || rec.ws != second.Workspace {
+		t.Fatalf("transition = %+v, want merge_queued on %q", rec, second.Workspace)
+	}
+}
+
+// The enqueued phase carries the queue facts the user is waiting on, so its
+// position and depth are the ones the publish actually returned.
+func TestEnqueueBehindTheHeadPublishesItsQueuePosition(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	if _, err := h.coord.Enqueue(context.Background(), testRequest("a")); err != nil {
+		t.Fatalf("Enqueue(a): %v", err)
+	}
+	<-h.picker.merges
+
+	// Act.
+	if _, err := h.coord.Enqueue(context.Background(), testRequest("b")); err != nil {
+		t.Fatalf("Enqueue(b): %v", err)
+	}
+	<-h.sink.ch
+
+	// Assert.
+	statuses := h.sink.publishedStatuses()
+	if len(statuses) != 1 {
+		t.Fatalf("published %d statuses, want 1", len(statuses))
+	}
+	enq := statuses[0].GetEnqueued()
+	if enq == nil {
+		t.Fatalf("status phase = %T, want MergeStatusEnqueued", statuses[0].GetPhase())
+	}
+	if enq.GetPosition() != 2 || enq.GetDepth() != 2 {
+		t.Fatalf("enqueued position/depth = %d/%d, want 2/2", enq.GetPosition(), enq.GetDepth())
+	}
+}
+
+// Every published phase carries a run id. Without one a frontend has nothing to
+// correlate a run's progress on and would blend two attempts.
+func TestAPublishedPhaseCarriesARunID(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	if _, err := h.coord.Enqueue(context.Background(), testRequest("a")); err != nil {
+		t.Fatalf("Enqueue(a): %v", err)
+	}
+	<-h.picker.merges
+
+	// Act.
+	if _, err := h.coord.Enqueue(context.Background(), testRequest("b")); err != nil {
+		t.Fatalf("Enqueue(b): %v", err)
+	}
+	<-h.sink.ch
+
+	// Assert.
+	statuses := h.sink.publishedStatuses()
+	if len(statuses) == 0 {
+		t.Fatal("no status was published")
+	}
+	if statuses[0].GetRunId() == "" {
+		t.Fatal("the published status carries no run id")
 	}
 }
 
@@ -561,7 +788,7 @@ func TestEnqueueSurfacesAMergeQueuedRecordFailure(t *testing.T) {
 	// Arrange — the head is mid-merge and the queued transition cannot be
 	// recorded.
 	h := newHarness(t)
-	h.picker.queuedErr = errFakeSink
+	h.sink.failNext(errFakeSink)
 	if _, err := h.coord.Enqueue(context.Background(), testRequest("a")); err != nil {
 		t.Fatalf("Enqueue(a): %v", err)
 	}
@@ -592,13 +819,15 @@ func TestDrainRunsOneMergePerRepositoryAtATime(t *testing.T) {
 	if _, err := h.coord.Enqueue(context.Background(), first); err != nil {
 		t.Fatalf("Enqueue(a): %v", err)
 	}
-	if got := <-h.picker.merges; got != first {
+	if got := <-h.picker.merges; !sameRequest(got, first) {
 		t.Fatalf("first merge = %+v, want %+v", got, first)
 	}
 	if _, err := h.coord.Enqueue(context.Background(), second); err != nil {
 		t.Fatalf("Enqueue(b): %v", err)
 	}
-	<-h.picker.queued
+	// The enqueued phase now travels the sink, not the picker: one publication
+	// per event, through the same channel every other phase uses.
+	<-h.sink.ch
 
 	// Act — the second merge must not have started while the first is running.
 	if len(h.picker.merges) != 0 {
@@ -607,7 +836,7 @@ func TestDrainRunsOneMergePerRepositoryAtATime(t *testing.T) {
 	h.picker.results <- pickResult{res: Result{Outcome: OutcomeMerged}}
 
 	// Assert — it starts only once the first finished.
-	if got := <-h.picker.merges; got != second {
+	if got := <-h.picker.merges; !sameRequest(got, second) {
 		t.Fatalf("second merge = %+v, want %+v", got, second)
 	}
 }
@@ -671,7 +900,7 @@ func TestDrainKeepsRepositoriesIndependent(t *testing.T) {
 	}
 
 	// Assert — a second repository's merge starts while the first is blocked.
-	if got := <-h.picker.merges; got != other {
+	if got := <-h.picker.merges; !sameRequest(got, other) {
 		t.Fatalf("second repo merge = %+v, want %+v", got, other)
 	}
 }
@@ -696,7 +925,7 @@ func TestDrainReconstructsADurableQueueAtBoot(t *testing.T) {
 	}
 
 	// Assert — the surviving entry is driven.
-	if got := <-h.picker.merges; got != req {
+	if got := <-h.picker.merges; !sameRequest(got, req) {
 		t.Fatalf("resumed merge = %+v, want %+v", got, req)
 	}
 }
@@ -779,7 +1008,9 @@ func TestConflictHoldsTheHeadAndTheLeaseUntilResumed(t *testing.T) {
 	if _, err := h.coord.Enqueue(context.Background(), second); err != nil {
 		t.Fatalf("Enqueue(b): %v", err)
 	}
-	<-h.picker.queued
+	// The enqueued phase now travels the sink, not the picker: one publication
+	// per event, through the same channel every other phase uses.
+	<-h.sink.ch
 
 	// Act — resolve the conflict.
 	go func() {
@@ -787,7 +1018,7 @@ func TestConflictHoldsTheHeadAndTheLeaseUntilResumed(t *testing.T) {
 			t.Errorf("Resume: %v", err)
 		}
 	}()
-	if got := <-h.picker.resumes; got != first {
+	if got := <-h.picker.resumes; !sameRequest(got, first) {
 		t.Fatalf("resume = %+v, want %+v", got, first)
 	}
 
@@ -798,7 +1029,7 @@ func TestConflictHoldsTheHeadAndTheLeaseUntilResumed(t *testing.T) {
 	}
 	h.picker.resumeResults <- pickResult{res: Result{Outcome: OutcomeMerged}}
 	<-h.lease.releases
-	if got := <-h.picker.merges; got != second {
+	if got := <-h.picker.merges; !sameRequest(got, second) {
 		t.Fatalf("next merge = %+v, want %+v", got, second)
 	}
 }
@@ -906,7 +1137,7 @@ func TestResumeWaitsForTheResolutionTurnToComplete(t *testing.T) {
 	h.resolver.results <- nil
 
 	// Assert — only now is the cherry-pick continued.
-	if got := <-h.picker.resumes; got != req {
+	if got := <-h.picker.resumes; !sameRequest(got, req) {
 		t.Fatalf("resume = %+v, want %+v", got, req)
 	}
 	h.picker.resumeResults <- pickResult{res: Result{Outcome: OutcomeMerged}}
@@ -963,7 +1194,7 @@ func TestShimResolutionFailureLeavesTheParkStanding(t *testing.T) {
 	// still there for the human, who drives it to its terminal outcome.
 	done := make(chan error, 1)
 	go func() { done <- h.coord.Resume(context.Background(), req) }()
-	if got := <-h.picker.resumes; got != req {
+	if got := <-h.picker.resumes; !sameRequest(got, req) {
 		t.Fatalf("resume = %+v, want the human's %+v", got, req)
 	}
 	if !h.lease.Held(req.Workspace) {
@@ -1062,7 +1293,7 @@ func TestResumeArrivingBeforeTheConflictIsServedNotRefused(t *testing.T) {
 
 	// Assert — the resume was served rather than refused for a conflict that
 	// was about to exist.
-	if got := <-h.picker.resumes; got != req {
+	if got := <-h.picker.resumes; !sameRequest(got, req) {
 		t.Fatalf("resume = %+v, want %+v", got, req)
 	}
 	h.picker.resumeResults <- pickResult{res: Result{Outcome: OutcomeMerged}}
@@ -1164,7 +1395,9 @@ func TestAbandonReleasesAParkedConflictAndAdvancesTheQueue(t *testing.T) {
 	if _, err := h.coord.Enqueue(context.Background(), second); err != nil {
 		t.Fatalf("Enqueue(b): %v", err)
 	}
-	<-h.picker.queued
+	// The enqueued phase now travels the sink, not the picker: one publication
+	// per event, through the same channel every other phase uses.
+	<-h.sink.ch
 
 	// Act.
 	abandoned, err := h.coord.Abandon(context.Background(), first.Workspace)
@@ -1176,7 +1409,7 @@ func TestAbandonReleasesAParkedConflictAndAdvancesTheQueue(t *testing.T) {
 	if got := <-h.lease.releases; got != first.Workspace {
 		t.Fatalf("lease released for %q, want %q", got, first.Workspace)
 	}
-	if got := <-h.picker.merges; got != second {
+	if got := <-h.picker.merges; !sameRequest(got, second) {
 		t.Fatalf("next merge = %+v, want %+v", got, second)
 	}
 }
@@ -1235,6 +1468,8 @@ func TestCloseRetainsAParkedConflictForTheNextBoot(t *testing.T) {
 		Logf: t.Logf, Sink: newSyncSink(4), Queue: q,
 		Phases: fakePhases{}, Keyer: fakeKeyer{}, Picker: picker, Lease: lease, Resolver: resolver,
 		TestResolver: newFakeTestFailureResolver(4), PostMerge: newAutoPostMergeHook(4),
+		Status: newSyncSink(4), Sessions: &fakeSessionBringUp{},
+		BeforeActions: fakeBeforeActions{}, BeforeActionRunner: &fakeBeforeActionRunner{},
 	})
 	if err != nil {
 		t.Fatalf("NewCoordinator: %v", err)

@@ -62,6 +62,11 @@ type PromptRouter interface {
 	// resolution turn has ended. It is the test-gate sibling of
 	// ResolveMergeConflict and lives here for the same reason.
 	ResolveMergeTestFailure(ctx context.Context, res merge.TestFailureResolution) error
+	// RunMergeBeforeAction drives the workspace's OWN session to run the
+	// before_ws_merge action it was created with, returning once that turn has
+	// ended. Third sibling of the two above, here for the same reason: it is a
+	// prompt on the one path the merge lease admits.
+	RunMergeBeforeAction(ctx context.Context, act merge.BeforeAction) error
 }
 
 // SessionRestarter hard-restarts one workspace's session: stop its shim, bring

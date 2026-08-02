@@ -39,6 +39,15 @@ import (
 //     cancelled only when the coordinator closes.
 type PostMergeHook interface {
 	AfterMerged(ctx context.Context, req Request) error
+	// AfterAction reports the prompt AfterMerged will deliver — the workspace's
+	// recorded postprocessing prompt — so the coordinator can PUBLISH the
+	// after_action phase with its text before the delivery starts.
+	//
+	// It is a separate read rather than a return value of AfterMerged because the
+	// phase has to be visible WHILE the action runs, not after it. A workspace
+	// with none reports "", nil; an unreadable record reports the error, which is
+	// logged and leaves the phase published without text rather than inventing any.
+	AfterAction(req Request) (string, error)
 }
 
 // PostMergeFailure is the retained record of one merge.PostMergeHook error.

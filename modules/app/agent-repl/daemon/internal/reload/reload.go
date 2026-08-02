@@ -104,6 +104,12 @@ func New(cfg Config) (*Trigger, error) {
 // lifetime, and a launch that instead fails LOUDLY (deploy-all.sh exiting
 // non-zero, logged by the reaper) is a broken deploy path that re-running on
 // the next merge would only break again.
+// AfterAction implements merge.PostMergeHook. The self-reload trigger delivers
+// no prompt to any session — it redeploys a binary — so it reports none. It is
+// an explicit empty answer rather than an absent method so a hook that DOES
+// deliver a prompt can never be confused with one that does not.
+func (t *Trigger) AfterAction(merge.Request) (string, error) { return "", nil }
+
 func (t *Trigger) AfterMerged(ctx context.Context, req merge.Request) error {
 	ident, err := IdentifyRepo(ctx, req.TargetDir)
 	if err != nil {

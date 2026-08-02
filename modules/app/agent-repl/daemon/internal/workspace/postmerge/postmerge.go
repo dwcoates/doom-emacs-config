@@ -187,6 +187,23 @@ func (n *Notifier) AfterMerged(ctx context.Context, req merge.Request) error {
 	return nil
 }
 
+// AfterAction implements merge.PostMergeHook: the postprocessing prompt this
+// notifier will deliver to the parent, read from the SAME creation record
+// AfterMerged reads it from.
+//
+// It is the same lookup deliberately, not a cached copy: two reads of one
+// durable record cannot disagree, whereas a value captured at one moment and
+// used at another can.
+func (n *Notifier) AfterAction(req merge.Request) (string, error) {
+	prompt, err := n.postprocessing.PostprocessingPrompt(req.SourceDir)
+	if err != nil {
+		n.logf("postmerge: after-action prompt lookup FAILED {child_ws=%s child_name=%s child_dir=%s}: %v — the phase is published without its text",
+			req.Workspace, req.Name, req.SourceDir, err)
+		return "", fmt.Errorf("postmerge: resolve after-action prompt for %q: %w", req.Name, err)
+	}
+	return prompt, nil
+}
+
 // submit sends one post-merge prompt to the parent on the ordinary user path.
 //
 // permissionMode is empty on purpose: these prompts inherit the parent
