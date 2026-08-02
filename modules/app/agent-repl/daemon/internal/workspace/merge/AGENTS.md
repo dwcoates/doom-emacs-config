@@ -141,6 +141,34 @@ as `after_action_error`. Publishing it from the driver put the run's terminal
 word on the wire before the `after_action` phase existed, so every frontend saw
 the merge finish and then watched a phase begin after it.
 
+## The terminal WORD is as durable as the merge
+
+A merge's outcome survives anything: the commits are on the target and the
+durable queue entry is still there. Its terminal STATUS used to survive
+nothing — a sink that refused `merged` or `merge_failed` got a loud log, the
+entry was acked anyway, and the run's last word could never reach a frontend.
+The two are now retired together.
+
+- ONLY A TERMINAL PUBLICATION THAT LANDED ACKS THE ENTRY. `DurableQueue.Complete`
+  is the ack and nothing else calls it.
+- A PUBLICATION THAT DID NOT LAND MARKS THE ENTRY. `DurableQueue.MarkTerminal`
+  writes the word onto the OUTSTANDING head entry (`pending_terminal`: the
+  outcome, the cause, and a merged run's `after_action_error`), the lease goes
+  back — a lease never outlives the merge that took it — and the repository's
+  drain HALTS, exactly as it does for a `Complete` that failed.
+- THE NEXT BOOT REPLAYS THE WORD, NOT THE MERGE. A marked entry belongs to a run
+  whose outcome was already reached, so `merge.Coordinator` publishes the
+  recorded status under the id the entry was admitted with and retires it. No
+  lease, no session bring-up, no cherry-pick: every one of those would redo work
+  that is over. The post-merge hook fires there for the first time, because the
+  entry was never dropped before.
+- A REPLAY THAT ITSELF CANNOT PUBLISH CHANGES NOTHING. The entry stays marked and
+  outstanding for the boot after it. The word is only ever dropped by a
+  publication that landed.
+- THE OUTCOME IS NEVER ROLLED BACK BY A PUBLISH FAILURE. A merged run stays
+  merged and a failed run stays failed; what was missing was the saying of it,
+  and that is the only thing this recovers.
+
 A MERGE OF A DELETED SESSION IS REFUSED. `merge.SessionDeaths` (the pipeline's
 fourth outbound port) reports whether the workspace's newest session is terminal
 by deletion, and is asked BEFORE `merge.SessionBringUp` -- asking after would be
