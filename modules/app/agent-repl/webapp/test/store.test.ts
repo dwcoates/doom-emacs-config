@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  CONNECTIVITY_WINDOW_FAILURE_TYPES,
   ConversationStore,
   contextTokens,
   liveContextDelta,
@@ -9,6 +10,7 @@ import {
   type ConversationItem,
   type ResultItem,
   type StoreState,
+  type SystemFailureCard,
   type TextItem,
   type ThinkingItem,
   type ToolItem,
@@ -109,6 +111,19 @@ const TS = "2026-07-19T12:00:00.000Z";
 
 function textItem(over: Partial<TextItem> = {}): TextItem {
   return { kind: "text", blockId: "b1", messageId: "m1", text: "hello", done: true, ts: TS, ...over };
+}
+
+function failureCard(over: Partial<SystemFailureCard> = {}): SystemFailureCard {
+  return {
+    kind: "failure",
+    errorClass: "INTERNAL",
+    errorType: "client.daemon_unreachable",
+    message: "lost the connection to the daemon; reconnecting",
+    sourceDetail: "close=1005",
+    resolvedAtMs: 0,
+    uuid: "local:client.daemon_unreachable",
+    ...over,
+  };
 }
 
 function toolItem(over: Partial<ToolItem> = {}): ToolItem {
@@ -1618,5 +1633,105 @@ describe("the tokens overlay's cumulative usage sources", () => {
     // Assert
     expect(store.state.modelUsage).toBeNull();
     expect(store.state.resultUsage).toBeNull();
+  });
+});
+
+// A connectivity window's closing edge RETRACTS its opening card: once the
+// link is back there is no condition left to report, and a settled
+// "reconnecting" card reads as a standing fault to anyone who misses the small
+// resolved stamp beneath it.
+describe("resolved connectivity failures", () => {
+  it("removes the open card when the local daemon-unreachable window closes", () => {
+    // Arrange
+    const store = new ConversationStore();
+    store.addFailure(failureCard());
+    // Act
+    store.addFailure(failureCard({ message: "reconnected to the daemon", sourceDetail: "", resolvedAtMs: 1700000000000 }));
+    // Assert
+    expect(store.state.items).toEqual([]);
+  });
+
+  it("removes the open card when the daemon's shim-degraded window closes", () => {
+    // Arrange
+    const store = new ConversationStore();
+    const open = failureCard({ errorType: "shim.degraded", uuid: "degraded:s1:connection" });
+    store.ingest([itemsEffect([open], 4)]);
+    // Act
+    store.ingest([itemsEffect([{ ...open, resolvedAtMs: 1700000000000 }], 5)]);
+    // Assert
+    expect(store.state.items).toEqual([]);
+  });
+
+  it("files no card when the closing edge finds nothing open", () => {
+    // Arrange — a view that loaded after the drop never held the opening card.
+    const store = new ConversationStore();
+    // Act
+    store.addFailure(failureCard({ resolvedAtMs: 1700000000000 }));
+    // Assert
+    expect(store.state.items).toEqual([]);
+  });
+
+  it("logs the retraction of a card it did remove", () => {
+    // Arrange
+    const lines: string[] = [];
+    const store = new ConversationStore((_level, message) => lines.push(message));
+    store.addFailure(failureCard());
+    // Act
+    store.addFailure(failureCard({ resolvedAtMs: 1700000000000 }));
+    // Assert
+    expect(lines).toContainEqual(
+      "retracted the resolved connectivity card failure:local:client.daemon_unreachable (client.daemon_unreachable)",
+    );
+  });
+
+  it("logs the closing edge that found no open card", () => {
+    // Arrange
+    const lines: string[] = [];
+    const store = new ConversationStore((_level, message) => lines.push(message));
+    // Act
+    store.addFailure(failureCard({ resolvedAtMs: 1700000000000 }));
+    // Assert
+    expect(lines).toContainEqual(
+      "connectivity window client.daemon_unreachable closed with no open card to retract (failure:local:client.daemon_unreachable)",
+    );
+  });
+
+  it("leaves an OPEN connectivity card standing", () => {
+    // Arrange
+    const store = new ConversationStore();
+    // Act
+    store.addFailure(failureCard());
+    // Assert
+    expect(store.state.items).toEqual([expect.objectContaining({ uuid: "local:client.daemon_unreachable" })]);
+  });
+
+  it("settles a resolved store-outage card in place rather than retracting it", () => {
+    // Arrange — dropped conversation is permanently gone, so its record stays.
+    const store = new ConversationStore();
+    const open = failureCard({ errorType: "shim.store_write_rejected", uuid: "degraded:s1:store" });
+    store.ingest([itemsEffect([open], 4)]);
+    // Act
+    store.ingest([itemsEffect([{ ...open, resolvedAtMs: 1700000000000 }], 5)]);
+    // Assert
+    expect(store.state.items).toEqual([expect.objectContaining({ resolvedAtMs: 1700000000000 })]);
+  });
+
+  it("retracts only the named window, leaving neighbouring items alone", () => {
+    // Arrange
+    const store = new ConversationStore();
+    store.ingest([itemsEffect([textItem()], 3)]);
+    store.addFailure(failureCard());
+    // Act
+    store.addFailure(failureCard({ resolvedAtMs: 1700000000000 }));
+    // Assert
+    expect(store.state.items).toEqual([expect.objectContaining({ kind: "text" })]);
+  });
+
+  it("names both transport windows and nothing else", () => {
+    // Arrange / Act / Assert — the closed set the retraction rule keys on.
+    expect(CONNECTIVITY_WINDOW_FAILURE_TYPES).toEqual([
+      "client.daemon_unreachable",
+      "shim.degraded",
+    ]);
   });
 });
