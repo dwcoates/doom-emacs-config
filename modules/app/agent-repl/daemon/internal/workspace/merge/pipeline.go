@@ -108,3 +108,48 @@ type BeforeActionRunner interface {
 // newBeforeActionRequestID mints the correlation id one before-action delivery
 // carries.
 func newBeforeActionRequestID() string { return "before-" + newRunID() }
+
+// AfterAction is one postprocessing delivery: the prompt the workspace was
+// CREATED with, run against its OWN session once every commit has landed.
+//
+// IT IS THE MERGING WORKSPACE'S SESSION, exactly as the before-action's is, and
+// the render vocabulary says so: `merge_after_action` projects to MERGING
+// precisely because "a merge run owns this workspace's session and nothing else
+// may use it" (see internal/ssm/resolve.go). It runs under the lease the merge
+// already holds, which is why it happens before the queue entry is retired.
+type AfterAction struct {
+	// Workspace is the merged workspace, whose session runs the action.
+	Workspace string
+	// RequestID correlates the delivery with its turn in the logs.
+	RequestID string
+	// Prompt is the recorded action text, verbatim.
+	Prompt string
+}
+
+func (a AfterAction) validate() error {
+	switch {
+	case a.Workspace == "":
+		return fmt.Errorf("merge: after-action Workspace is required")
+	case a.RequestID == "":
+		return fmt.Errorf("merge: after-action RequestID is required")
+	case a.Prompt == "":
+		return fmt.Errorf("merge: after-action Prompt is required")
+	}
+	return nil
+}
+
+// AfterActionRunner delivers a postprocessing action to the merged workspace's
+// own session and returns once THE TURN HAS ENDED.
+//
+// It is the before-action's sibling in every respect but one: its failure does
+// NOT fail the run. Every commit is on the target before the action starts, so
+// reporting `failed` would deny a merge that demonstrably happened. The error is
+// carried on the terminal merged status as after_action_error instead — visible
+// without being fatal, and never swallowed.
+type AfterActionRunner interface {
+	Run(ctx context.Context, act AfterAction) error
+}
+
+// newAfterActionRequestID mints the correlation id one after-action delivery
+// carries.
+func newAfterActionRequestID() string { return "after-" + newRunID() }

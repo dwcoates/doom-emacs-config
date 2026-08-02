@@ -719,16 +719,15 @@ func (e *Driver) finalizeMerged(ctx context.Context, req Request, alreadyIncorpo
 	} else {
 		e.logf("merge: tagged completion %s {ws=%s}", tag, req.Name)
 	}
-	cause := "cherry-pick landed on target"
-	if alreadyIncorporated {
-		cause = "range already incorporated (no-op merge)"
-	}
-	// The after-action has not run yet, so the terminal status carries no
-	// after-action error. merge.Coordinator republishes it with one when the
-	// after-action fails; the merged FACT is set-once and does not move.
-	if err := req.Run.Merged("", cause); err != nil {
-		return Result{}, err
-	}
+	// THE TERMINAL `merged` STATUS IS NOT PUBLISHED HERE, and its absence is the
+	// contract rather than an omission. The run is not over when the last commit
+	// lands: the workspace's after-action still has to run, and its failure rides
+	// on the terminal status as after_action_error. Publishing `merged` from here
+	// put the run's terminal word on the wire BEFORE the after_action phase
+	// existed, so every frontend saw the merge finish and then watched a phase
+	// begin after it — and the after-action's error reached a SECOND merged
+	// status nothing was still reading. merge.Coordinator publishes it once, with
+	// the action's outcome already on it (coordinator.go completeMergedRun).
 	return Result{Outcome: OutcomeMerged, AlreadyIncorporated: alreadyIncorporated, Tag: tag}, nil
 }
 
