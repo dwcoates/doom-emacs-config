@@ -227,6 +227,92 @@ export interface WorkspaceState {
    * session produces carries `CONVERSATION_SOURCE_MERGE`.
    */
   mergeLeaseHeld: boolean;
+  /**
+   * THE merge run's live progress, or `undefined` when this workspace has no
+   * merge to report.
+   *
+   * It supersedes `mergePhase` / `mergeQueuePosition` / `mergeQueueDepth`,
+   * which the daemon keeps stamping until the final cutover.
+   */
+  mergeStatus?: MergeStatus;
+}
+
+/**
+ * Live progress of a workspace's current (or most recent) merge run.
+ *
+ * WHICH member `phase` names IS the phase: there is no separate enum to keep in
+ * sync and no field that is meaningless for the phase in flight. `undefined`
+ * `phase` is a wire the decoder refuses — a status naming no phase says nothing
+ * a renderer could paint.
+ */
+export interface MergeStatus {
+  /** Daemon-minted, stable across the whole run. */
+  runId: string;
+  /** When the CURRENT phase was entered; for a terminal phase, when it ended. */
+  phaseStartedAtMs: number;
+  /** Monotonic within the run; a within-phase tick bumps this alone. */
+  updatedAtMs: number;
+  phase:
+    | { case: "enqueued"; value: MergeStatusEnqueued }
+    | { case: "beforeAction"; value: MergeStatusBeforeAction }
+    | { case: "cherryPicking"; value: MergeStatusCherryPicking }
+    | { case: "testing"; value: MergeStatusTesting }
+    | { case: "conflict"; value: MergeStatusConflict }
+    | { case: "afterAction"; value: MergeStatusAfterAction }
+    | { case: "merged"; value: MergeStatusMerged }
+    | { case: "failed"; value: MergeStatusFailed };
+}
+
+export interface MergeStatusEnqueued {
+  /** 1-based. */
+  position: number;
+  depth: number;
+}
+
+export interface MergeStatusBeforeAction {
+  prompt: string;
+}
+
+export interface MergeStatusCherryPicking {
+  commitsTotal: number;
+  commitsLanded: number;
+  currentSha: string;
+  currentSubject: string;
+}
+
+export interface MergeStatusTesting {
+  commitsTotal: number;
+  /** The commit under test is landed but ungated. */
+  commitsLanded: number;
+  currentSha: string;
+  currentSubject: string;
+}
+
+export interface MergeStatusConflict {
+  conflictedSha: string;
+  conflictedSubject: string;
+  commitsTotal: number;
+  commitsLanded: number;
+}
+
+export interface MergeStatusAfterAction {
+  prompt: string;
+}
+
+export interface MergeStatusMerged {
+  commitsTotal: number;
+  /** Empty when the after action succeeded, or when none ran. */
+  afterActionError: string;
+}
+
+export interface MergeStatusFailed {
+  cause: string;
+  /** 0 when planning never completed. */
+  commitsTotal: number;
+  commitsLanded: number;
+  /** Set only for commit-bound failures. */
+  failingSha: string;
+  failingSubject: string;
 }
 
 export interface SessionView {
@@ -846,6 +932,7 @@ const WORKSPACE_STATE_KEYS = new Set([
   "mergeQueuePosition",
   "mergeQueueDepth",
   "mergeLeaseHeld",
+  "mergeStatus",
 ]);
 function decodeWorkspaceState(v: unknown): WorkspaceState {
   const o = ensureObject(v, "WorkspaceState");
@@ -870,6 +957,12 @@ function decodeWorkspaceState(v: unknown): WorkspaceState {
     mergeQueueDepth: num(o, "mergeQueueDepth", "WorkspaceState"),
     mergeLeaseHeld: bool(o, "mergeLeaseHeld", "WorkspaceState"),
   };
+  // ABSENCE IS THE ABSENCE OF A MERGE, and it is the only reading: the daemon
+  // leaves the field unset for a workspace whose merge axis has never spoken,
+  // so there is no zero-valued status standing in for "no merge".
+  if (o.mergeStatus !== undefined && o.mergeStatus !== null) {
+    ws.mergeStatus = decodeMergeStatus(o.mergeStatus);
+  }
   if (ws.mergeQueuePosition < 0 || ws.mergeQueueDepth < 0) {
     throw new Error(
       `frontend-proto: WorkspaceState for '${ws.workspace}' has a negative merge-queue ` +
@@ -909,6 +1002,190 @@ function decodeWorkspaceState(v: unknown): WorkspaceState {
     );
   }
   return ws;
+}
+
+const MERGE_STATUS_KEYS = new Set([
+  "runId",
+  "phaseStartedAtMs",
+  "updatedAtMs",
+  "enqueued",
+  "beforeAction",
+  "cherryPicking",
+  "testing",
+  "conflict",
+  "afterAction",
+  "merged",
+  "failed",
+]);
+
+/**
+ * The `phase` oneof, decoded by NAME.
+ *
+ * The map is what makes the phase set closed: a member the webapp has never
+ * heard of lands in `rejectUnknown` above, and a status that names no member at
+ * all is refused below. Both are wires this build cannot paint, and painting a
+ * merge as "nothing in particular" is exactly the silence the status exists to
+ * end.
+ */
+const MERGE_PHASE_DECODERS: ReadonlyMap<string, (v: unknown) => MergeStatus["phase"]> = new Map<
+  string,
+  (v: unknown) => MergeStatus["phase"]
+>([
+  [
+    "enqueued",
+    (v: unknown) => {
+      const o = phaseObject(v, "MergeStatusEnqueued", ["position", "depth"]);
+      return {
+        case: "enqueued" as const,
+        value: {
+          position: num(o, "position", "MergeStatusEnqueued"),
+          depth: num(o, "depth", "MergeStatusEnqueued"),
+        },
+      };
+    },
+  ],
+  [
+    "beforeAction",
+    (v: unknown) => {
+      const o = phaseObject(v, "MergeStatusBeforeAction", ["prompt"]);
+      return {
+        case: "beforeAction" as const,
+        value: { prompt: str(o, "prompt", "MergeStatusBeforeAction") },
+      };
+    },
+  ],
+  [
+    "cherryPicking",
+    (v: unknown) => ({
+      case: "cherryPicking" as const,
+      value: decodeMergeCommitProgress(v, "MergeStatusCherryPicking"),
+    }),
+  ],
+  [
+    "testing",
+    (v: unknown) => ({
+      case: "testing" as const,
+      value: decodeMergeCommitProgress(v, "MergeStatusTesting"),
+    }),
+  ],
+  [
+    "conflict",
+    (v: unknown) => {
+      const o = phaseObject(v, "MergeStatusConflict", [
+        "conflictedSha",
+        "conflictedSubject",
+        "commitsTotal",
+        "commitsLanded",
+      ]);
+      return {
+        case: "conflict" as const,
+        value: {
+          conflictedSha: str(o, "conflictedSha", "MergeStatusConflict"),
+          conflictedSubject: str(o, "conflictedSubject", "MergeStatusConflict"),
+          commitsTotal: num(o, "commitsTotal", "MergeStatusConflict"),
+          commitsLanded: num(o, "commitsLanded", "MergeStatusConflict"),
+        },
+      };
+    },
+  ],
+  [
+    "afterAction",
+    (v: unknown) => {
+      const o = phaseObject(v, "MergeStatusAfterAction", ["prompt"]);
+      return {
+        case: "afterAction" as const,
+        value: { prompt: str(o, "prompt", "MergeStatusAfterAction") },
+      };
+    },
+  ],
+  [
+    "merged",
+    (v: unknown) => {
+      const o = phaseObject(v, "MergeStatusMerged", ["commitsTotal", "afterActionError"]);
+      return {
+        case: "merged" as const,
+        value: {
+          commitsTotal: num(o, "commitsTotal", "MergeStatusMerged"),
+          afterActionError: str(o, "afterActionError", "MergeStatusMerged"),
+        },
+      };
+    },
+  ],
+  [
+    "failed",
+    (v: unknown) => {
+      const o = phaseObject(v, "MergeStatusFailed", [
+        "cause",
+        "commitsTotal",
+        "commitsLanded",
+        "failingSha",
+        "failingSubject",
+      ]);
+      return {
+        case: "failed" as const,
+        value: {
+          cause: str(o, "cause", "MergeStatusFailed"),
+          commitsTotal: num(o, "commitsTotal", "MergeStatusFailed"),
+          commitsLanded: num(o, "commitsLanded", "MergeStatusFailed"),
+          failingSha: str(o, "failingSha", "MergeStatusFailed"),
+          failingSubject: str(o, "failingSubject", "MergeStatusFailed"),
+        },
+      };
+    },
+  ],
+]);
+
+function phaseObject(v: unknown, ctx: string, allowed: readonly string[]): Obj {
+  const o = ensureObject(v, ctx);
+  rejectUnknown(o, new Set(allowed), ctx);
+  return o;
+}
+
+/**
+ * cherry_picking and testing carry the identical four fields, and deliberately
+ * so: testing is the same commit walk with the suite gating each landing, so a
+ * renderer draws one progress bar for both.
+ */
+function decodeMergeCommitProgress(
+  v: unknown,
+  ctx: string,
+): MergeStatusCherryPicking & MergeStatusTesting {
+  const o = phaseObject(v, ctx, [
+    "commitsTotal",
+    "commitsLanded",
+    "currentSha",
+    "currentSubject",
+  ]);
+  return {
+    commitsTotal: num(o, "commitsTotal", ctx),
+    commitsLanded: num(o, "commitsLanded", ctx),
+    currentSha: str(o, "currentSha", ctx),
+    currentSubject: str(o, "currentSubject", ctx),
+  };
+}
+
+function decodeMergeStatus(v: unknown): MergeStatus {
+  const o = ensureObject(v, "MergeStatus");
+  rejectUnknown(o, MERGE_STATUS_KEYS, "MergeStatus");
+  const phaseKeys = Object.keys(o).filter((k) => MERGE_PHASE_DECODERS.has(k));
+  if (phaseKeys.length === 0) {
+    throw new Error(
+      "frontend-proto: MergeStatus sets no phase (WHICH member of the oneof is set IS the phase)",
+    );
+  }
+  if (phaseKeys.length > 1) {
+    throw new Error(`frontend-proto: MergeStatus sets multiple phases: ${phaseKeys.join(", ")}`);
+  }
+  const status: MergeStatus = {
+    runId: str(o, "runId", "MergeStatus"),
+    phaseStartedAtMs: num(o, "phaseStartedAtMs", "MergeStatus"),
+    updatedAtMs: num(o, "updatedAtMs", "MergeStatus"),
+    phase: MERGE_PHASE_DECODERS.get(phaseKeys[0])!(o[phaseKeys[0]]),
+  };
+  if (status.runId === "") {
+    throw new Error("frontend-proto: MergeStatus missing required `runId`");
+  }
+  return status;
 }
 
 const RUNTIME_FAULT_KEYS = new Set([
