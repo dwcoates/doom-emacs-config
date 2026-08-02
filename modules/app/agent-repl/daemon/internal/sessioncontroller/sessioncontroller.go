@@ -1630,8 +1630,8 @@ func (m *Manager) bringUpTracked(workspace string) (*sessionController, bool, er
 	// The per-turn wait (mergeresolve.go) rides the SAME stream the queue's
 	// edges do, but correlated by turn id rather than by edge. Bound before Run,
 	// so no boundary can reach the consumer with this unset.
-	cons.onTurnEvent = func(started bool, turnID string) {
-		m.onTurnEvent(d, started, turnID)
+	cons.onTurnEvent = func(started bool, turnID string, outcome turnOutcome) {
+		m.onTurnEvent(d, started, turnID, outcome)
 	}
 	// Every PERSISTENT store event names the conversation it belongs to.
 	// Keeping the record current off the live stream is what gives a later

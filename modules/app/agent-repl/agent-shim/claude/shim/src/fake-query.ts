@@ -9,6 +9,7 @@
  * - "!md" → a streamed markdown showcase reply (webapp render demo).
  * - "!rotate" → a VENDOR SESSION UUID ROTATION mid-turn, then an ordinary
  *   text turn under the NEW identity (see runRotateTurn).
+ * - text carrying FAIL_TURN_MARKER → a turn that ENDS IN ERROR.
  * - anything else → a streamed text block echoing the input.
  * Every turn ends with a `result` message.
  */
@@ -24,6 +25,22 @@ import {
 } from "./session.js";
 
 const LOGGER = bindLog({ component: "claude-shim-fake-query", operation: "shim.fake-query.lifecycle" });
+
+/**
+ * The prompt marker that makes a fake turn END IN ERROR.
+ *
+ * IT EXISTS BECAUSE A TURN FAILURE IS OTHERWISE UNPROVOKABLE OFFLINE. The
+ * daemon's merge pipeline classifies a before-action failure and an
+ * after-action failure in opposite directions — the first fails the run, the
+ * second rides on the terminal merged status as after_action_error — and
+ * neither branch is reachable in `--fake` mode without a way to make a turn go
+ * badly. The alternative is stubbing out the very prompt path under test.
+ *
+ * It is a MARKER WITHIN the prompt rather than an exact match, so a caller can
+ * say which of its turns should fail and still send readable text. The daemon's
+ * e2e acceptance gate spells it identically (mergeactions_e2e_test.go).
+ */
+export const FAIL_TURN_MARKER = "e2e-fail-this-turn";
 
 /**
  * The offline stand-in for `query.supportedModels()`. Two entries, not
@@ -184,6 +201,19 @@ export function createFakeQuery(
       },
     });
     emitResult("success", reply);
+  };
+
+  /**
+   * A turn that ENDS IN ERROR: no assistant content, and a non-success result
+   * whose `is_error` is true.
+   *
+   * It emits no message_start / message_stop pair on purpose. A turn that
+   * failed produced no assistant message, and fabricating an empty one would
+   * put a blank bubble on every frontend that renders the conversation.
+   */
+  const runFailingTurn = (messageId: string): void => {
+    LOGGER.log({ agent_repl_session_id: opts.sessionId, message_id: messageId }, "running fake FAILING turn");
+    emitResult("error_during_execution");
   };
 
   const runToolTurn = async (messageId: string, command: string): Promise<void> => {
@@ -394,6 +424,9 @@ export function createFakeQuery(
       } else if (text.startsWith("!bg ")) {
         LOGGER.log({ agent_repl_session_id: opts.sessionId, message_id: messageId, branch: "background" }, "selected fake turn branch");
         runBackgroundTurn(messageId, text.slice("!bg ".length));
+      } else if (text.includes(FAIL_TURN_MARKER)) {
+        LOGGER.log({ agent_repl_session_id: opts.sessionId, message_id: messageId, branch: "failing" }, "selected fake turn branch");
+        runFailingTurn(messageId);
       } else {
         LOGGER.log({ agent_repl_session_id: opts.sessionId, message_id: messageId, branch: "text" }, "selected fake turn branch");
         runTextTurn(messageId, text);
