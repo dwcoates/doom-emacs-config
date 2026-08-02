@@ -90,7 +90,13 @@ func bootMergeDaemon(t *testing.T, stateFile string) *mergeBoot {
 	}
 
 	forwarder := &server.PushForwarder{Logf: t.Logf}
-	shimSock := filepath.Join(os.Getenv("HOME"), ".cache", "agent-repl", "sock", "daemon-shim.sock")
+	// BOTH boots resolve the SAME isolated socket, through the production
+	// function, because bounceStateDir set the override for the whole test: a
+	// bounce that landed on a different socket would not be a bounce.
+	shimSock, err := shimlisten.DefaultSocketPath()
+	if err != nil {
+		t.Fatalf("resolve the isolated shim socket: %v", err)
+	}
 	shimListener := shimlisten.New(t.Logf)
 	if err := shimListener.Listen(shimSock); err != nil {
 		t.Fatalf("listen for shims: %v", err)
@@ -243,9 +249,7 @@ func bounceStateDir(t *testing.T) string {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(sockDir) })
 	t.Setenv("HOME", sockDir)
-	if err := os.MkdirAll(filepath.Join(sockDir, ".cache", "agent-repl", "sock"), 0o700); err != nil {
-		t.Fatalf("make session socket dir: %v", err)
-	}
+	isolatedShimSocket(t, sockDir)
 	return filepath.Join(sockDir, "state.db")
 }
 
