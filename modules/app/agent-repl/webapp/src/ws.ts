@@ -113,8 +113,13 @@ export class WsClient {
         return;
       }
       // WebSocket frames can arrive many times per second during replay.
+      // localOnly is a STRUCTURAL NO-REENTRY BOUNDARY, not volume control: a
+      // forwarded record here becomes a clientLog command, whose commandAck is
+      // itself an inbound frame that re-enters this handler — a perpetual 1:1
+      // ack/log loop (observed live at ~60 commands/s for two days).
       logVerbose("info", "websocket received frame", {
         operation: "ws.message",
+        localOnly: true,
         context: { epoch: connectionEpoch, byte_length: String(event.data).length, freshness: this.freshness },
       });
       this.opts.onMessage(String(event.data));
