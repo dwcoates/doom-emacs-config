@@ -444,11 +444,6 @@ workspace's durable session id."
   (should (string-prefix-p "AGENT_REPL_OWNED=1 "
                            (agent-repl--assemble-cmd "--resume abc" "/cc"))))
 
-(ert-deftest agent-repl-test-assemble-cmd-never-sandbox ()
-  "assemble-cmd never emits a claude-sandbox invocation, even with a config-dir."
-  (should-not (string-match-p "claude-sandbox"
-                              (agent-repl--assemble-cmd "--resume abc" "/cc"))))
-
 ;;;; ---- Tests: agent-repl--compute-config-dir ----
 
 (ert-deftest agent-repl-test-compute-config-dir-under-multi-repo ()

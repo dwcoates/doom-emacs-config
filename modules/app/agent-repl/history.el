@@ -10,10 +10,13 @@ Each workspace has one `agent-repl-instantiation' struct per environment.
 
 The `:sandbox' environment was retired: it never actually sandboxed
 anything (`agent-repl--build-start-cmd' always returned a hardcoded
-`:sandboxed-p nil'), so it was a label rather than a container, and it
-survives only as the migration in `agent-repl--migrate-saved-state'.
-The axis is kept — rather than collapsed away — because it is still the
-seam a real containerized environment would land on.")
+`:sandboxed-p nil'), so it was a label rather than a container.  The
+Docker-sandbox feature it named has since been removed from this repo
+outright; `:sandbox' survives ONLY as the migration in
+`agent-repl--migrate-saved-state', which still has to rewrite saved
+state written before the retirement.  The axis is kept — rather than
+collapsed away — because it is still the seam a real containerized
+environment would land on.")
 
 ;; These are defconsts (not defcustoms) so they update on every load — a
 ;; defcustom does NOT reset already-bound values, which leaves a running
@@ -149,7 +152,9 @@ lived in that instantiation, and relabeling without promoting would have
 stranded every sandbox-era conversation on a nil id.  Instantiations no
 longer persist anything (see `agent-repl--instantiation-to-plist\='), so the
 promotion is now purely about the shape.  It is kept rather than
-simplified away because a saved `:sandbox\=' still has to stop being one.
+simplified away because a saved `:sandbox\=' still has to stop being one —
+deleting it would strand every conversation saved before the retirement,
+even though the Docker-sandbox feature itself is entirely gone.
 
 `:frontend vterm' — the vterm frontend is no longer registered, and
 `agent-repl-frontend-get' signals on an unregistered name.  Dropping the

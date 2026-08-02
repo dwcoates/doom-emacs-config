@@ -15,29 +15,12 @@
 ;; settings.json hook-array writer that survived for the codex backend
 ;; went with codex's own hook plane.  What remains here is the skill
 ;; symlink provisioning + doctor.
-;;
-;; Host-only: no-ops when running inside the agent sandbox.
 
 ;;; Code:
 
 (require 'cl-lib)
 (require 'json)
 (require 'seq)
-
-(defcustom agent-repl-sandbox-dockerenv-path "/.dockerenv"
-  "Path to the Docker environment sentinel file for sandbox detection."
-  :type 'string
-  :group 'agent-repl)
-
-(defcustom agent-repl-sandbox-env-var "DOOM_SANDBOX"
-  "Environment variable name that signals sandbox mode."
-  :type 'string
-  :group 'agent-repl)
-
-(defcustom agent-repl-sandbox-env-value "1"
-  "Expected value of `agent-repl-sandbox-env-var' to indicate sandbox mode."
-  :type 'string
-  :group 'agent-repl)
 
 (defcustom agent-repl-install-shell "bash"
   "Shell interpreter used to invoke the install script."
@@ -121,16 +104,6 @@ Must match the `LOCAL_SKILLS_SRC' value in `.claude/install.sh'."
   :type '(choice (const :tag "Unset" nil) directory)
   :group 'agent-repl)
 
-;;;; ---- Sandbox detection ------------------------------------------------
-
-(defun agent-repl--in-sandbox-p ()
-  "Return non-nil when Emacs is running inside the agent sandbox.
-Mirrors the detection rule in `install.sh' so the Emacs wrappers no-op
-under the same conditions: a `/.dockerenv' file exists or the
-`DOOM_SANDBOX' environment variable is set to `1'."
-  (or (file-exists-p agent-repl-sandbox-dockerenv-path)
-      (equal (getenv agent-repl-sandbox-env-var) agent-repl-sandbox-env-value)))
-
 ;;;; ---- Running the bash script ------------------------------------------
 
 (defun agent-repl--run-install-script (action)
@@ -167,9 +140,8 @@ script cannot be located."
 
 (defun agent-repl--run-install-action (action &optional quiet)
   "Run install script ACTION (install / uninstall / reinstall).
-No-op in sandbox.  On success, messages the user with a pointer to the
-output buffer.  On failure, surfaces the output buffer and signals an
-error.
+On success, messages the user with a pointer to the output buffer.  On
+failure, surfaces the output buffer and signals an error.
 
 When QUIET is non-nil (the auto-install-on-load path driven by
 `agent-repl--maybe-install-hooks'), a failure routes the script output
@@ -180,26 +152,24 @@ reports an issue.  The output buffer is still populated for later
 inspection, and the error is still signaled so the caller's surfacing is
 preserved.  Interactive callers leave QUIET nil so a failure pops the
 output window as before."
-  (if (agent-repl--in-sandbox-p)
-      (agent-repl--info nil "Sandbox detected; skipping hooks %s." action)
-    (pcase-let ((`(,code ,output)
-                 (agent-repl--run-install-script action)))
-      (agent-repl--surface-install-output output)
-      (if (= code 0)
-          (progn
-            (agent-repl--log nil "hooks %s succeeded output:\n%s" action output)
-            (agent-repl--info nil "hooks %s succeeded (see %s)."
-                              action agent-repl--install-output-buffer))
-        (if quiet
-            (agent-repl--log nil
-                              "hooks %s failed (exit %d); output:\n%s"
-                              action code output)
+  (pcase-let ((`(,code ,output)
+               (agent-repl--run-install-script action)))
+    (agent-repl--surface-install-output output)
+    (if (= code 0)
+        (progn
+          (agent-repl--log nil "hooks %s succeeded output:\n%s" action output)
+          (agent-repl--info nil "hooks %s succeeded (see %s)."
+                            action agent-repl--install-output-buffer))
+      (if quiet
           (agent-repl--log nil
-                            "hooks %s failed interactively (exit %d); output:\n%s"
+                            "hooks %s failed (exit %d); output:\n%s"
                             action code output)
-          (display-buffer agent-repl--install-output-buffer))
-        (error "[agent-repl] hooks %s failed (exit %d); see %s"
-               action code agent-repl--install-output-buffer)))))
+        (agent-repl--log nil
+                          "hooks %s failed interactively (exit %d); output:\n%s"
+                          action code output)
+        (display-buffer agent-repl--install-output-buffer))
+      (error "[agent-repl] hooks %s failed (exit %d); see %s"
+             action code agent-repl--install-output-buffer))))
 
 ;;;; ---- Interactive entry points -----------------------------------------
 
@@ -233,16 +203,16 @@ from `~/.claude/skills/' and the repo's managed pre-commit git hook."
   "When non-nil, install managed skill symlinks on Emacs startup if missing.
 The install script is idempotent, but unconditional runs are noisy, so the
 auto-install short-circuits when `agent-repl--doctor-issues' reports no
-problems.  No-op inside the sandbox."
+problems."
   :type 'boolean
   :group 'agent-repl)
 
 (defun agent-repl--maybe-install-hooks ()
   "Run the install action only when a managed skill symlink is off.
 Guarded by `agent-repl--doctor-issues' so a healthy load is a pure
-symlink stat (no bash).  No-op in sandbox, in a `noninteractive' (batch)
-session, or when `agent-repl-auto-install-hooks' is nil.  Called inline
-from this file's load.
+symlink stat (no bash).  No-op in a `noninteractive' (batch) session, or
+when `agent-repl-auto-install-hooks' is nil.  Called inline from this
+file's load.
 
 Dispatches through `agent-repl--run-install-action' with QUIET set so a
 failed install (common when `doctor.el' still flags a stale skill
@@ -261,8 +231,6 @@ corrupts window-layout assertions in the test suite."
     (agent-repl--log nil "auto-install skipped: disabled"))
    (noninteractive
     (agent-repl--log nil "auto-install skipped: batch session"))
-   ((agent-repl--in-sandbox-p)
-    (agent-repl--log nil "auto-install skipped: sandbox"))
    (t
     (let ((issues (agent-repl--doctor-issues)))
       (if (null issues)
@@ -375,28 +343,22 @@ and not in our managed set — likely stale leftovers from old worktrees."
 (defun agent-repl--doctor-issues ()
   "Return a list of (LEVEL . MESSAGE) describing skill-install problems.
 LEVEL is `error' or `warn'.  Empty list means every managed skill symlink
-is present and points at its checked-in source.  No-ops (returns nil) when
-running inside the sandbox — the host is where installation happens, not
-the container.
+is present and points at its checked-in source.
 
 Emacs manages no Claude Code hooks any more (S8/S9 sentinel endgame), so
 this no longer checks `~/.claude/settings.json' registrations or hook
 scripts; only the managed skill symlinks (plus stale unmanaged broken
 links) are inspected."
-  (if (agent-repl--in-sandbox-p)
-      (progn
-        (agent-repl--log nil "doctor skipped: sandbox")
-        nil)
-    (let ((issues (list nil)))
-      (agent-repl--log nil "doctor starting managed-skill-count=%d local-skill-count=%d"
-                        (length agent-repl--managed-skills)
-                        (length agent-repl--managed-local-skills))
-      (agent-repl--check-skill-links issues)
-      (agent-repl--check-unmanaged-broken-links issues)
-      (setq issues (nreverse (car issues)))
-      (agent-repl--log nil "doctor complete issue-count=%d issues=%S"
-                        (length issues) issues)
-      issues)))
+  (let ((issues (list nil)))
+    (agent-repl--log nil "doctor starting managed-skill-count=%d local-skill-count=%d"
+                      (length agent-repl--managed-skills)
+                      (length agent-repl--managed-local-skills))
+    (agent-repl--check-skill-links issues)
+    (agent-repl--check-unmanaged-broken-links issues)
+    (setq issues (nreverse (car issues)))
+    (agent-repl--log nil "doctor complete issue-count=%d issues=%S"
+                      (length issues) issues)
+    issues))
 
 ;;;; ---- Legacy hook purge (first boot after the sentinel endgame) --------
 
@@ -490,9 +452,8 @@ action.
 
 Guarded three ways, in increasing cost:
   - once per Emacs session, so a `SPC j R' reload does not re-run it;
-  - never in sandbox or batch, matching every other install action here
-    (the host is where hooks live, and the test suite must not touch the
-    developer's real config);
+  - never in batch, matching every other install action here (the test
+    suite must not touch the developer's real config);
   - only when a legacy entry is actually registered, so a healthy load is
     a couple of small file reads and no bash at all.
 
@@ -505,8 +466,6 @@ reads, which must not be allowed to break module load."
     (agent-repl--log nil "purge-legacy-hooks: skipped; already attempted this session"))
    (noninteractive
     (agent-repl--log nil "purge-legacy-hooks: skipped; batch session"))
-   ((agent-repl--in-sandbox-p)
-    (agent-repl--log nil "purge-legacy-hooks: skipped; sandbox"))
    ((not agent-repl-auto-install-hooks)
     (agent-repl--log nil "purge-legacy-hooks: skipped; auto-install disabled"))
    (t
