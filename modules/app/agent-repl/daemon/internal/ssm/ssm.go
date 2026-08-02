@@ -11,6 +11,7 @@ import (
 	"claude-repld/internal/workspace/merge"
 
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	"google.golang.org/protobuf/proto"
 )
 
 // Resolver maps a session id to the workspace it is bound to. The binding
@@ -91,6 +92,18 @@ type Manager struct {
 	// refuses snapshots older than what it delivered, so AtMs must never
 	// regress within a process.
 	pushedAtMs map[string]int64
+	// stampedComposite is the last frame stamped per workspace, retained so
+	// stampFreshnessLocked can tell "the same state re-resolved" (which keeps
+	// its revision) from "a different state that resolved off an older row"
+	// (which earns watermark+1). Without the distinction the watermark clamp
+	// handed two different composites one revision, which the webapp reports as
+	// a `revision conflicted` invariant violation.
+	stampedComposite map[string]*frontendv1.WorkspaceState
+	// pipelineStatus is the newest MergeStatus the merge PIPELINE published per
+	// workspace. It is what the construction funnel stamps when the run is this
+	// process's; see mergestatus.go for why it is in memory and why the log
+	// projection only ever answers for a previous daemon's rows.
+	pipelineStatus map[string]*frontendv1.MergeStatus
 	// interruptedTurn names the workspaces whose IN-FLIGHT turn was stopped by
 	// a user-commanded interrupt the shim acknowledged as INTERRUPTED. The
 	// mark is consumed by that turn's own TurnEnded, which then reports
@@ -744,6 +757,32 @@ func (m *Manager) ApplyConnectionDegraded(workspace string, degraded bool, reaso
 // that knows the merge landed, rather than at a second producer that would
 // have to be told.
 func (m *Manager) ApplyMergeTransition(workspace, phase, cause string) error {
+	return m.applyMergeTransition(workspace, phase, cause, nil)
+}
+
+// ApplyMergeStatus records a merge transition TOGETHER with the phase-level
+// MergeStatus the merge pipeline published for it.
+//
+// It is the pipeline's entry point, and it is one call rather than two on
+// purpose: the axis row and the status describe the same event, so a caller that
+// could record one without the other is a caller that can leave a frontend
+// rendering a phase word that disagrees with the progress beneath it.
+//
+// The status rides the ONE WorkspaceState construction site
+// (workspaceMessageLocked, via stampMergeStatusLocked), exactly as the merge
+// queue facts and the merged-at instant do — never stamped onto a frame around
+// it.
+func (m *Manager) ApplyMergeStatus(workspace, phase, cause string, status *frontendv1.MergeStatus) error {
+	if status == nil {
+		// A pipeline publication with no status is the caller having lost the
+		// very thing this entry point exists to carry. ApplyMergeTransition is
+		// the call for a transition that has no run behind it.
+		return fmt.Errorf("ssm: ApplyMergeStatus for workspace %q phase %q got a nil status", workspace, phase)
+	}
+	return m.applyMergeTransition(workspace, phase, cause, status)
+}
+
+func (m *Manager) applyMergeTransition(workspace, phase, cause string, status *frontendv1.MergeStatus) error {
 	if workspace == "" {
 		return fmt.Errorf("ssm: ApplyMergeTransition got an empty workspace")
 	}
@@ -756,11 +795,22 @@ func (m *Manager) ApplyMergeTransition(workspace, phase, cause string) error {
 		causeKind = causeMergeTransition + ":" + cause
 	}
 
-	mergedAt, err := m.appendMergeTransition(workspace, token, causeKind)
+	mergedAt, established, err := m.appendMergeTransition(workspace, token, causeKind, status)
 	if err != nil {
 		return err
 	}
 	if token != sigMerged {
+		return nil
+	}
+	if !established {
+		// A SECOND `merged` row for a workspace that already landed. The merge
+		// pipeline writes one when it finishes the after-action so the terminal
+		// status can carry the after-action's outcome, and the durable merged-at
+		// fact is set-once, so this row moves nothing. Standing the session down
+		// AGAIN would hibernate a session the first teardown already took, which
+		// the log would report as a failure of something that in fact succeeded.
+		m.logf("ssm: merged teardown SKIPPED ws=%s merged_at_ms=%d — this workspace already landed and was already stood down; the row updates the phase status only",
+			workspace, mergedAt)
 		return nil
 	}
 	// OUTSIDE THE LOCK, and after the `merged` state has been handed to the
@@ -778,31 +828,44 @@ func (m *Manager) ApplyMergeTransition(workspace, phase, cause string) error {
 // exactly that span so the teardown that may follow runs outside it.
 //
 // mergedAt is the workspace's durable merge instant, and 0 for every phase
-// other than `merged`.
-func (m *Manager) appendMergeTransition(workspace, token, causeKind string) (mergedAt int64, err error) {
+// other than `merged`. established reports whether THIS row is the one that
+// landed the merge, which is what gates the one-time teardown.
+func (m *Manager) appendMergeTransition(workspace, token, causeKind string, status *frontendv1.MergeStatus) (mergedAt int64, established bool, err error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	switch {
+	case status != nil:
+		// Retained BEFORE the resolve below, so the very frame this transition
+		// pushes already carries the pipeline's account of it.
+		m.recordPipelineStatusLocked(workspace, status)
+	case token == sigMergeNone:
+		// The axis is cleared: the run is over and nothing it reported is true
+		// any more, so the retained status goes with it rather than describing a
+		// run no frontend should still be rendering.
+		m.clearPipelineStatusLocked(workspace)
+	}
 
 	at := m.nextAt()
 	// Daemon-local: no store seq, cause_seq stays NULL, and a merge is not a
 	// task so it carries no task id.
 	if err := appendRow(m.db, workspace, "", token, causeKind, sql.NullInt64{}, at, ""); err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	if token == sigMerged {
 		// BEFORE the resolve below, so the very frame that first says `merged`
 		// already carries merged_at_ms. Stamping it afterwards would push one
 		// merged state with a zero instant, and a frontend that ordered on it
 		// would file the workspace at the beginning of time.
-		mergedAt, _, err = m.recordMergedAtLocked(workspace, at)
+		mergedAt, established, err = m.recordMergedAtLocked(workspace, at)
 		if err != nil {
-			return 0, err
+			return 0, false, err
 		}
 	}
 	if err := m.reresolveLocked(workspace, causeKind, 0); err != nil {
-		return 0, err
+		return 0, false, err
 	}
-	return mergedAt, nil
+	return mergedAt, established, nil
 }
 
 // reresolveLocked recomputes the workspace's state, loud-logs a transition
@@ -914,6 +977,21 @@ func (m *Manager) workspaceMessageLocked(workspace string, r resolved) (*fronten
 // The watermark is deliberately IN-MEMORY: the frontend's delivered watermark
 // is in-memory too, and both reset together at daemon boot, so durability
 // would add nothing but a stale floor.
+//
+// IT BUMPS, IT DOES NOT CLAMP, AND THAT IS THE WHOLE OF THE SECOND RULE.
+// AtMs is not merely a freshness floor: the webapp treats it as the frame's
+// REVISION and holds the invariant that one revision names one state. Lifting a
+// regressing stamp to the watermark minted two DIFFERENT composites carrying the
+// identical revision, which the webapp reported as `revision conflicted`. A
+// composite that is not newer than the watermark and not identical to what was
+// last delivered therefore takes watermark+1 — still monotonic, still never
+// older than anything delivered, and never a duplicate revision.
+//
+// AN IDENTICAL COMPOSITE KEEPS ITS REVISION. A resync's Snapshot rebuilds the
+// same frame the last push carried; bumping there would mint a fresh revision
+// for a frame that says nothing new, and the frontend would see the state
+// change on every reconnect. Identity is compared over the whole message with
+// AtMs normalized away, so only a real content difference earns a new revision.
 func (m *Manager) stampFreshnessLocked(workspace string, msg *frontendv1.WorkspaceState) {
 	// Lazily initialized because the Manager has more than one construction
 	// path (Open plus the test rigs' direct literals); a nil map here must
@@ -921,11 +999,31 @@ func (m *Manager) stampFreshnessLocked(workspace string, msg *frontendv1.Workspa
 	if m.pushedAtMs == nil {
 		m.pushedAtMs = make(map[string]int64)
 	}
-	if prev, ok := m.pushedAtMs[workspace]; ok && msg.GetAtMs() < prev {
-		msg.AtMs = prev
-		return
+	if m.stampedComposite == nil {
+		m.stampedComposite = make(map[string]*frontendv1.WorkspaceState)
 	}
-	m.pushedAtMs[workspace] = msg.GetAtMs()
+	at := msg.GetAtMs()
+	if prev, ok := m.pushedAtMs[workspace]; ok && at <= prev {
+		if last := m.stampedComposite[workspace]; last != nil && sameComposite(last, msg) {
+			msg.AtMs = prev
+			return
+		}
+		at = prev + 1
+	}
+	msg.AtMs = at
+	m.pushedAtMs[workspace] = at
+	m.stampedComposite[workspace] = proto.Clone(msg).(*frontendv1.WorkspaceState)
+}
+
+// sameComposite reports whether two WorkspaceStates say the same thing, ignoring
+// AtMs. AtMs is the revision the caller is deciding, so comparing it would make
+// every frame differ from every other and defeat the check entirely.
+func sameComposite(a, b *frontendv1.WorkspaceState) bool {
+	lhs := proto.Clone(a).(*frontendv1.WorkspaceState)
+	rhs := proto.Clone(b).(*frontendv1.WorkspaceState)
+	lhs.AtMs = 0
+	rhs.AtMs = 0
+	return proto.Equal(lhs, rhs)
 }
 
 func (m *Manager) pushMessageLocked(workspace string, msg *frontendv1.WorkspaceState) error {
@@ -1139,7 +1237,8 @@ func mergeToken(phase string) (string, error) {
 	switch phase {
 	case "", sigMergeNone:
 		return sigMergeNone, nil
-	case sigMergeEnqueuing, sigMerging, sigMergeQueued, sigMergeConflict, sigMergeFailed, sigMerged:
+	case sigMergeEnqueuing, sigMerging, sigMergeBeforeAction, sigMergeAfterAction,
+		sigMergeQueued, sigMergeConflict, sigMergeFailed, sigMerged:
 		return phase, nil
 	default:
 		return "", fmt.Errorf("ssm: unknown merge phase %q", phase)

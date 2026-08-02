@@ -47,6 +47,23 @@ const (
 	PhaseMergeEnqueuing Phase = "merge_enqueuing"
 	// PhaseMerging: a cherry-pick is in flight for the workspace.
 	PhaseMerging Phase = "merging"
+	// PhaseMergeBeforeAction: the workspace's OWN agent session is running the
+	// before_ws_merge action it was created with, under the merge lease and
+	// BEFORE the cherry-pick plan is computed (the action may create commits).
+	//
+	// It is a merge-axis row of its own rather than another `merging` because it
+	// is not a cherry-pick: nothing is landing on the target yet, and a user
+	// watching a merge sit here needs to know it is their own agent working, not
+	// git.
+	PhaseMergeBeforeAction Phase = "merge_before_action"
+	// PhaseMergeAfterAction: the commits are on the target and the workspace's
+	// recorded postprocessing prompt is being delivered.
+	//
+	// IT IS NOT TERMINAL. The run ends at `merged` whether or not the action
+	// lands — a failed after-action cannot un-merge commits that are already on
+	// the target — so this phase exists to make the delivery VISIBLE, never to
+	// gate the outcome.
+	PhaseMergeAfterAction Phase = "merge_after_action"
 	// PhaseMergeQueued: the merge is deferred because another cherry-pick is
 	// already in flight against the same target worktree. The per-target
 	// serialization queue itself is bound at stitch (the daemon orchestrator);
@@ -68,12 +85,14 @@ const (
 // validPhases gates emit against a typo'd Phase. All in-tree call sites use
 // the constants above; this is loud belt-and-suspenders, never a fallback.
 var validPhases = map[Phase]bool{
-	PhaseMergeEnqueuing: true,
-	PhaseMerging:        true,
-	PhaseMergeQueued:    true,
-	PhaseMergeConflict:  true,
-	PhaseMergeFailed:    true,
-	PhaseMerged:         true,
+	PhaseMergeEnqueuing:    true,
+	PhaseMerging:           true,
+	PhaseMergeBeforeAction: true,
+	PhaseMergeAfterAction:  true,
+	PhaseMergeQueued:       true,
+	PhaseMergeConflict:     true,
+	PhaseMergeFailed:       true,
+	PhaseMerged:            true,
 }
 
 // StateSink receives every merge-state transition the engine produces. The

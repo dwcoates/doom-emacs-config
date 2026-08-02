@@ -194,6 +194,18 @@ func (s mergeSink) RecordMergeTransition(ws string, phase merge.Phase, cause str
 	return s.mgr.ApplyMergeTransition(ws, string(phase), cause)
 }
 
+// RecordMergeStatus is the same append, carrying the phase-level MergeStatus the
+// merge PIPELINE published with it. Both ends of the pair go through one SSM call
+// so a frame can never carry the phase word without the progress behind it.
+func (s mergeSink) RecordMergeStatus(ws string, phase merge.Phase, cause string, status *frontendv1.MergeStatus) error {
+	return s.mgr.ApplyMergeStatus(ws, string(phase), cause, status)
+}
+
+var (
+	_ merge.StateSink  = mergeSink{}
+	_ merge.StatusSink = mergeSink{}
+)
+
 // mergePhases adapts the SSM to merge.PhaseSource: the boot sweep's read of
 // which workspaces are still pinned on a merge phase. It is the same log
 // mergeSink writes to, read back — which is the point: merge_enqueuing has no
@@ -221,6 +233,67 @@ type mergeConflictResolver struct{ prompts PromptRouter }
 func (r mergeConflictResolver) Resolve(ctx context.Context, res merge.ConflictResolution) error {
 	return r.prompts.ResolveMergeConflict(ctx, res)
 }
+
+// mergeBeforeActionRunner adapts the PromptRouter to merge.BeforeActionRunner.
+// It is derived from Prompts for exactly the reason mergeConflictResolver is:
+// the action is admissible only against the session the merge lease was taken
+// over, and that lease is taken over the fleet Prompts routes to.
+type mergeBeforeActionRunner struct{ prompts PromptRouter }
+
+func (r mergeBeforeActionRunner) Run(ctx context.Context, act merge.BeforeAction) error {
+	return r.prompts.RunMergeBeforeAction(ctx, act)
+}
+
+var _ merge.BeforeActionRunner = mergeBeforeActionRunner{}
+
+// mergeBeforeActions adapts the geometry store to merge.BeforeActionSource: the
+// before_ws_merge action is recorded on the SAME geometry record the merge's
+// three coordinates are, so the run resolves all four from one lookup of one
+// map with one owner.
+type mergeBeforeActions struct{ geometry MergeGeometrySource }
+
+func (s mergeBeforeActions) BeforeAction(ws string) (string, error) {
+	if s.geometry == nil {
+		// The same posture the merge-command path takes on a nil geometry source:
+		// a merge cannot be answered at all without the map, and reporting "no
+		// action" would run a merge that silently skipped the action the user
+		// asked for at creation.
+		return "", fmt.Errorf("server: no merge-geometry source is wired, so the before-merge action for workspace %q cannot be read", ws)
+	}
+	rec, found, err := s.geometry.Lookup(context.Background(), ws)
+	if err != nil {
+		return "", fmt.Errorf("server: read the before-merge action for workspace %q: %w", ws, err)
+	}
+	if !found {
+		// A merge cannot even be dispatched without a geometry record, so by the
+		// time a run asks for its action the record exists. Its absence here is
+		// the record having gone missing between the two reads, which is a
+		// different fact from "this workspace has no action" and must not be
+		// reported as one.
+		return "", fmt.Errorf("server: workspace %q has no recorded merge geometry, so its before-merge action cannot be read", ws)
+	}
+	return rec.BeforeAction, nil
+}
+
+var _ merge.BeforeActionSource = mergeBeforeActions{}
+
+// mergeSessionBringUp adapts the workspace lifecycle to merge.SessionBringUp: a
+// merge brings its workspace's session up through THE SAME path a user's
+// open_workspace command does, so a merge can never establish a session in a
+// shape an ordinary open would not produce.
+type mergeSessionBringUp struct{ lifecycle WorkspaceLifecycle }
+
+func (b mergeSessionBringUp) EnsureLive(ctx context.Context, ws string) error {
+	if b.lifecycle == nil {
+		// A merge drives this workspace's session; without the bring-up path
+		// there is no way to establish one, and proceeding to the lease would
+		// discover that one phase later with the lease already taken.
+		return fmt.Errorf("server: no workspace lifecycle is wired, so the session for workspace %q cannot be brought up for its merge", ws)
+	}
+	return b.lifecycle.Open(ctx, ws)
+}
+
+var _ merge.SessionBringUp = mergeSessionBringUp{}
 
 var _ merge.ConflictResolver = mergeConflictResolver{}
 
@@ -312,6 +385,14 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 		Resolver:     mergeConflictResolver{prompts: cfg.Prompts},
 		TestResolver: mergeTestFailureResolver{prompts: cfg.Prompts},
 		PostMerge:    postMerge,
+		// The SAME sink the transitions go through, so a phase word and the
+		// progress beneath it cannot come from two different records.
+		Status:   mergeSink{mgr},
+		Sessions: mergeSessionBringUp{lifecycle: cfg.Lifecycle},
+		// The before-action rides the geometry record, so it is resolved from
+		// THE daemon's one workspace -> merge-geometry map.
+		BeforeActions:      mergeBeforeActions{geometry: cfg.MergeGeometry},
+		BeforeActionRunner: mergeBeforeActionRunner{prompts: cfg.Prompts},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("server: build merge coordinator: %w", err)
