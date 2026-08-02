@@ -1182,7 +1182,8 @@ func mergeToken(phase string) (string, error) {
 	switch phase {
 	case "", sigMergeNone:
 		return sigMergeNone, nil
-	case sigMergeEnqueuing, sigMerging, sigMergeQueued, sigMergeConflict, sigMergeFailed, sigMerged:
+	case sigMergeEnqueuing, sigMerging, sigMergeBeforeAction, sigMergeAfterAction,
+		sigMergeQueued, sigMergeConflict, sigMergeFailed, sigMerged:
 		return phase, nil
 	default:
 		return "", fmt.Errorf("ssm: unknown merge phase %q", phase)

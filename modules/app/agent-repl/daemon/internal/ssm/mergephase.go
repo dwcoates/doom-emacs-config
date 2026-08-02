@@ -2,6 +2,7 @@ package ssm
 
 import (
 	"fmt"
+	"strings"
 
 	"claude-repld/internal/workspace/merge"
 )
@@ -27,6 +28,8 @@ import (
 var mergeAxisStates = []string{
 	sigMergeEnqueuing,
 	sigMerging,
+	sigMergeBeforeAction,
+	sigMergeAfterAction,
 	sigMergeQueued,
 	sigMergeConflict,
 	sigMergeFailed,
@@ -50,10 +53,13 @@ func (m *Manager) WorkspacesAtMergePhase(phase merge.Phase) ([]string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	// The placeholder list is built from mergeAxisStates rather than written out,
+	// so adding a merge token can never leave the two silently out of step.
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(mergeAxisStates)), ",")
 	query := `
 WITH merge_rows AS (
   SELECT workspace, state, at FROM workspace_state
-  WHERE state IN (?,?,?,?,?,?,?)
+  WHERE state IN (` + placeholders + `)
 )
 SELECT workspace FROM merge_rows r
 WHERE r.state = ?
