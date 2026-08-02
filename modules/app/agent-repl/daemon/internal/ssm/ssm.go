@@ -87,6 +87,16 @@ type Manager struct {
 	// way. Keying the push on state alone left that change unpushed, which is
 	// how a swept ghost count stayed on screen.
 	lastTasks map[string]int64
+	// lastMergeStatus is the last-pushed merge_status per workspace. It is the
+	// THIRD push key beside the render state and the task count, and it exists
+	// because the merge pipeline reports progress the render state cannot see:
+	// cherry_picking → testing → cherry_picking all resolve to the same
+	// `merging` state, and both `merged` publications (the driver's, then the
+	// coordinator's carrying the after-action's outcome) resolve to the same
+	// `merged` one. Keying the push on state alone collapsed every one of those
+	// into a single frame, so a frontend was handed the run's FIRST word on each
+	// phase and never any of the progress that followed it.
+	lastMergeStatus map[string]*frontendv1.MergeStatus
 	// pushedAtMs is the per-workspace freshness watermark: the newest AtMs any
 	// outgoing WorkspaceState carried. See stampFreshnessLocked — the frontend
 	// refuses snapshots older than what it delivered, so AtMs must never
@@ -201,6 +211,7 @@ func Open(opts Options) (*Manager, error) {
 		clock:             clock,
 		last:              make(map[string]frontendv1.RenderState),
 		lastTasks:         make(map[string]int64),
+		lastMergeStatus:   make(map[string]*frontendv1.MergeStatus),
 		pushedAtMs:        make(map[string]int64),
 		interruptedTurn:   make(map[string]*interruptMark),
 		mergeLeases:       make(map[string][]leaseWindow),
@@ -303,6 +314,7 @@ func (m *Manager) warm() error {
 			}
 			m.last[ws] = msg.GetState()
 			m.lastTasks[ws] = msg.GetLiveTaskCount()
+			m.lastMergeStatus[ws] = msg.GetMergeStatus()
 			restored++
 		}
 	}
@@ -900,11 +912,21 @@ func (m *Manager) reresolveLocked(workspace, causeKind string, causeSeq uint64) 
 	oldTasks, hadTasks := m.lastTasks[workspace]
 	stateMoved := !had || old != msg.GetState()
 	tasksMoved := !hadTasks || oldTasks != msg.GetLiveTaskCount()
-	if !stateMoved && !tasksMoved {
+	// A MERGE RUN'S PROGRESS IS ITS OWN DELTA. Most of what a run publishes
+	// never moves the render state — every phase from the first pick to the last
+	// test resolves to `merging` — so without this key the whole middle of a
+	// merge is dropped as "nothing visible changed" and the user watches a
+	// progress bar that never advances. proto.Equal rather than a pointer
+	// compare: the pipeline builds a FRESH MergeStatus per publication, so two
+	// pointers differ even when the run said the same thing twice, and pushing on
+	// that would republish an unchanged run on every unrelated re-resolve.
+	statusMoved := !proto.Equal(m.lastMergeStatus[workspace], msg.GetMergeStatus())
+	if !stateMoved && !tasksMoved && !statusMoved {
 		return nil // nothing visible changed; stay quiet (§12: log deltas only)
 	}
 	m.last[workspace] = msg.GetState()
 	m.lastTasks[workspace] = msg.GetLiveTaskCount()
+	m.lastMergeStatus[workspace] = msg.GetMergeStatus()
 
 	if stateMoved {
 		oldName := "∅"
@@ -914,6 +936,11 @@ func (m *Manager) reresolveLocked(workspace, causeKind string, causeSeq uint64) 
 		// §12 SSM contract: every transition logged old→new + cause kind + seq.
 		m.logf("ssm: transition ws=%s %s→%s cause_kind=%s cause_seq=%d turn_active=%t live_tasks=%d merge=%q",
 			workspace, oldName, renderName(msg.GetState()), causeKind, causeSeq, msg.GetTurnActive(), msg.GetLiveTaskCount(), msg.GetMergePhase())
+	} else if !tasksMoved {
+		// A merge-progress-only push. Logged on its own axis so a within-phase
+		// tick is not reported as a live_tasks delta it did not cause.
+		m.logf("ssm: merge_status ws=%s run=%s phase=%T cause_kind=%s cause_seq=%d merge=%q",
+			workspace, msg.GetMergeStatus().GetRunId(), msg.GetMergeStatus().GetPhase(), causeKind, causeSeq, msg.GetMergePhase())
 	} else {
 		m.logf("ssm: live_tasks ws=%s %d→%d cause_kind=%s cause_seq=%d state=%s",
 			workspace, oldTasks, msg.GetLiveTaskCount(), causeKind, causeSeq, renderName(msg.GetState()))

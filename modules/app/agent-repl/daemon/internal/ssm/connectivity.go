@@ -364,6 +364,11 @@ func (m *Manager) publishCompositeLocked(workspace, causeKind string) error {
 	}
 	m.last[workspace] = msg.GetState()
 	m.lastTasks[workspace] = msg.GetLiveTaskCount()
+	// Recorded here too, so the merge-progress push key below stays in step with
+	// what actually went out. A connectivity edge that carried the run's newest
+	// status and did not record it would leave the next re-resolve believing the
+	// status had moved, and republish a run that said nothing new.
+	m.lastMergeStatus[workspace] = msg.GetMergeStatus()
 	for id, ch := range m.subs {
 		select {
 		case ch <- msg:
