@@ -24,6 +24,10 @@
  * explanation and the same logged record.
  */
 
+import { escapeHtml } from "./highlight.js";
+import { mergeFacts } from "./merge-status.js";
+import type { MergeStatus } from "./state-adapter.js";
+
 /**
  * The explanation shown in the composer and surfaced on a blocked attempt.
  *
@@ -33,6 +37,23 @@
 export const MERGE_GATE_NOTICE =
   "this workspace is being merged — the merge is driving the session, " +
   "so prompting is blocked until it finishes";
+
+/**
+ * What the merge is doing right now, appended to the notice when the daemon
+ * has stamped a structured status.
+ *
+ * The block's WORST property was never its length: it was that the user had no
+ * idea how far along the thing holding their composer was, so a merge waiting
+ * behind two other workspaces and a merge on its last commit read identically.
+ * The status carries that, so the notice says it.
+ *
+ * "" when nothing is known, which leaves the fixed notice exactly as it was.
+ */
+export function mergeGateProgress(status: MergeStatus | null): string {
+  const facts = mergeFacts(status);
+  if (facts === null) return "";
+  return [facts.word, facts.count, facts.activity].filter((part) => part !== "").join(" · ");
+}
 
 /** Whether a prompt may be submitted right now. */
 export function submitBlocked(mergeLeaseHeld: boolean): boolean {
@@ -48,16 +69,32 @@ export function submitBlocked(mergeLeaseHeld: boolean): boolean {
  * frame, so it cannot be closed while the block is in force. The text is a
  * fixed constant, so nothing caller-controlled is interpolated.
  */
-export function mergeGateNoticeHtml(mergeLeaseHeld: boolean): string {
+export function mergeGateNoticeHtml(
+  mergeLeaseHeld: boolean,
+  mergeStatus: MergeStatus | null = null,
+): string {
   if (!submitBlocked(mergeLeaseHeld)) return "";
   // No glyph: the notice explains a deliberate, temporary, benign block, and
   // the alarm marks in this stylesheet are spent on things that are wrong.
-  return `<span class="merge-gate-text">${MERGE_GATE_NOTICE}</span>`;
+  //
+  // The progress half is the DAEMON's text (a commit subject, a prompt), so it
+  // is escaped; the notice itself is a fixed constant with nothing to escape.
+  const progress = mergeGateProgress(mergeStatus);
+  const detail =
+    progress === ""
+      ? ""
+      : `<span class="merge-gate-progress">${escapeHtml(progress)}</span>`;
+  return `<span class="merge-gate-text">${MERGE_GATE_NOTICE}</span>${detail}`;
 }
 
 /** The disabled send button's tooltip, or "" when the composer is live. */
-export function mergeGateSendTitle(mergeLeaseHeld: boolean): string {
-  return submitBlocked(mergeLeaseHeld) ? MERGE_GATE_NOTICE : "";
+export function mergeGateSendTitle(
+  mergeLeaseHeld: boolean,
+  mergeStatus: MergeStatus | null = null,
+): string {
+  if (!submitBlocked(mergeLeaseHeld)) return "";
+  const progress = mergeGateProgress(mergeStatus);
+  return progress === "" ? MERGE_GATE_NOTICE : `${MERGE_GATE_NOTICE} (${progress})`;
 }
 
 /**
@@ -67,10 +104,14 @@ export function mergeGateSendTitle(mergeLeaseHeld: boolean): string {
  * one canonical logging API with its own operation and bound context, and so
  * the wording is assertable without a logger double.
  */
-export function mergeGateBlockedLog(promptLength: number): string {
+export function mergeGateBlockedLog(
+  promptLength: number,
+  mergeStatus: MergeStatus | null = null,
+): string {
+  const progress = mergeGateProgress(mergeStatus);
   return (
     `prompt submission blocked: the merge coordinator holds this workspace's ` +
     `session lease — ${MERGE_GATE_NOTICE} (prompt_length=${String(promptLength)}, ` +
-    `draft retained)`
+    `merge=${progress === "" ? "unreported" : progress}, draft retained)`
   );
 }

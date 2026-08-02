@@ -12,7 +12,8 @@
  */
 import { HostGlobal } from "./host.js";
 import { escapeHtml } from "./highlight.js";
-import type { WebRenderState } from "./state-adapter.js";
+import { mergeFacts, mergeStatusLogValue } from "./merge-status.js";
+import type { MergeStatus, WebRenderState } from "./state-adapter.js";
 import { log } from "./wslog.js";
 
 /**
@@ -379,6 +380,31 @@ export function statusDotHtml(status: WorkspaceStatus, monitoring = false): stri
   return `<span class="st st-${status}" title="${status}">${glyph}</span>`;
 }
 
+/**
+ * The current row's merge, as the two lines the rail has room for, or "" when
+ * no merge run touches this session.
+ *
+ * THE RAIL LEADS ON MERGES (the footer's phase-cell note says so explicitly),
+ * and until now the only thing it could say was the spinning recycle glyph:
+ * every phase of every merge looked exactly alike, including the one parked on
+ * a human. These lines are what the glyph could never carry — how far the run
+ * has got, which commit is in hand, and why it stopped.
+ *
+ * Session-local chrome over the Emacs-pushed roster, exactly like the
+ * monitoring overlay: it is drawn for THIS webview's own row only, because the
+ * revisioned `WorkspaceState` it comes from describes only this session.
+ */
+export function mergeRowHtml(status: MergeStatus | null): string {
+  const facts = mergeFacts(status);
+  if (facts === null) return "";
+  const head = [facts.word, facts.count, facts.activity].filter((part) => part !== "").join(" · ");
+  const note =
+    facts.note === ""
+      ? ""
+      : `<div class="ws-merge-note ${facts.tone}">${escapeHtml(facts.note)}</div>`;
+  return `<div class="ws-merge ${facts.tone}">${escapeHtml(head)}</div>${note}`;
+}
+
 /** Rows in a family tree, the whole tree counted (the chip's arithmetic). */
 function countRows(rows: readonly WorkspaceRow[]): number {
   return rows.reduce((n, r) => n + 1 + countRows(r.children), 0);
@@ -410,6 +436,7 @@ function workspaceHtml(
   open: ReadonlySet<string>,
   nowMs: number,
   monitoring: boolean,
+  mergeStatus: MergeStatus | null = null,
 ): string {
   const cls = ["ws"];
   if (row.current) cls.push("current");
@@ -420,7 +447,7 @@ function workspaceHtml(
     row.children.length === 0
       ? ""
       : `<div class="kids">${row.children
-          .map((c) => workspaceHtml(c, navDir, open, nowMs, monitoring))
+          .map((c) => workspaceHtml(c, navDir, open, nowMs, monitoring, mergeStatus))
           .join("")}</div>`;
   // The dir addresses the row for the mount's delegated click handler:
   // a body click switches to it, the chevron click toggles its panel.
@@ -432,6 +459,7 @@ function workspaceHtml(
       <span class="when">${formatRecency(row.mergedAt ?? row.lastViewedAt, nowMs)}</span>
       <span class="chev" data-chev>▸</span>
     </div>
+    ${row.current ? mergeRowHtml(mergeStatus) : ""}
     ${detailHtml(row)}
     ${kids}
   </div>`;
@@ -447,8 +475,11 @@ function repoSectionHtml(
   nowMs: number,
   extraClass = "",
   monitoring = false,
+  mergeStatus: MergeStatus | null = null,
 ): string {
-  const rows = group.rows.map((r) => workspaceHtml(r, navDir, open, nowMs, monitoring)).join("");
+  const rows = group.rows
+    .map((r) => workspaceHtml(r, navDir, open, nowMs, monitoring, mergeStatus))
+    .join("");
   return `<section class="repo${group.folded ? " folded" : ""}${
     extraClass === "" ? "" : ` ${extraClass}`
   }">
@@ -475,8 +506,11 @@ export function taskSectionHtml(
   open: ReadonlySet<string>,
   nowMs: number,
   monitoring = false,
+  mergeStatus: MergeStatus | null = null,
 ): string {
-  const rows = group.rows.map((r) => workspaceHtml(r, navDir, open, nowMs, monitoring)).join("");
+  const rows = group.rows
+    .map((r) => workspaceHtml(r, navDir, open, nowMs, monitoring, mergeStatus))
+    .join("");
   const isNoTask = group.key === NO_TASK_KEY;
   const doneCls = group.done ? " done" : "";
   const id = escapeHtml(group.key);
@@ -534,6 +568,7 @@ export function sidebarHtml(
   nowMs: number,
   errorNote: string | null,
   monitoring = false,
+  mergeStatus: MergeStatus | null = null,
 ): string {
   const taskView = roster.view === "task";
   const groups = taskView ? roster.tasks : roster.repos;
@@ -541,9 +576,11 @@ export function sidebarHtml(
   const err =
     errorNote === null ? "" : `<div class="sb-err" role="alert">${escapeHtml(errorNote)}</div>`;
   const sections = taskView
-    ? roster.tasks.map((g) => taskSectionHtml(g, roster.navDir, open, nowMs, monitoring)).join("")
+    ? roster.tasks
+        .map((g) => taskSectionHtml(g, roster.navDir, open, nowMs, monitoring, mergeStatus))
+        .join("")
     : roster.repos
-        .map((g) => repoSectionHtml(g, roster.navDir, open, nowMs, "", monitoring))
+        .map((g) => repoSectionHtml(g, roster.navDir, open, nowMs, "", monitoring, mergeStatus))
         .join("");
   // Settled merges render last, in their own section, so they read as
   // history rather than as live work sitting in the repo they came from.
@@ -612,6 +649,8 @@ export class WorkspaceSidebar {
   private monitoring = false;
   /** Current row status from this webview's revisioned WorkspaceState. */
   private authoritativeCurrentStatus: WorkspaceStatus | null = null;
+  /** The current row's merge run, from that same revisioned message. */
+  private mergeStatus: MergeStatus | null = null;
 
   constructor(mount: HTMLElement, opts: WorkspaceSidebarOptions) {
     this.mount = mount;
@@ -687,6 +726,7 @@ export class WorkspaceSidebar {
       this.now(),
       this.errorNote,
       this.monitoring,
+      this.mergeStatus,
     );
   }
 
@@ -714,6 +754,30 @@ export class WorkspaceSidebar {
    * Session-local chrome layered over the roster, so every other row
    * still shows exactly what Emacs last asserted.
    */
+  /**
+   * Adopt the current row's structured merge status and repaint when it moved.
+   *
+   * Session-local chrome layered over the Emacs roster, exactly like the
+   * monitoring gate: the revisioned `WorkspaceState` it comes from describes
+   * only THIS session, so every other row keeps what Emacs asserted.
+   *
+   * The comparison is on the log identity (phase, run, refresh stamp) rather
+   * than object identity: a merge ticks once per landed commit, and a repaint
+   * per arriving frame regardless of whether anything moved is the churn the
+   * rail's other setters exist to avoid.
+   */
+  setMergeStatus(status: MergeStatus | null): void {
+    const previous = mergeStatusLogValue(this.mergeStatus);
+    const next = mergeStatusLogValue(status);
+    if (previous === next) return;
+    this.mergeStatus = status;
+    log("info", "current row merge status changed", {
+      operation: "sidebar.merge-status-changed",
+      context: { previous, next },
+    });
+    this.render();
+  }
+
   setMonitoring(on: boolean): void {
     if (on === this.monitoring) return;
     this.monitoring = on;
