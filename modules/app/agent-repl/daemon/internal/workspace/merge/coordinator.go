@@ -633,18 +633,30 @@ func (c *QueueCoordinator) fireAfterAction(repo string, req Request) {
 // merge.PostMergeFailure, so it is visible without being fatal.
 func (c *QueueCoordinator) publishAfterAction(repo string, req Request) {
 	prompt, err := c.postMerge.AfterAction(req)
+	// THE PHASE IS PUBLISHED IFF THERE IS AN ACTION, which is the same rule the
+	// before-action follows. A workspace created with no postprocessing prompt
+	// has no after-action phase to be in, and publishing an empty one would tell
+	// every frontend the run was running a turn that does not exist.
+	//
+	// A lookup FAILURE still publishes. The action may well be configured — the
+	// daemon just could not read it — so suppressing the phase there would
+	// silently downgrade a broken read to "this workspace has none".
+	publish := err != nil || prompt != ""
 	switch {
 	case err != nil:
-		// The prompt could not be READ. The hook still runs — it also carries the
-		// child-to-parent phone-home, which does not depend on the prompt — but
-		// the phase is published without prompt text rather than with invented text.
+		// The hook still runs: it also carries the child-to-parent phone-home,
+		// which does not depend on the prompt. The phase goes out without prompt
+		// text rather than with invented text.
 		c.logf("merge: after-action prompt lookup FAILED {repo=%s ws=%s name=%s run=%s}: %v — the phase is published without its text; the merge STANDS",
 			repo, req.Workspace, req.Name, req.Run.RunID(), err)
 	case prompt == "":
-		c.logf("merge: no after-action recorded {repo=%s ws=%s name=%s run=%s}", repo, req.Workspace, req.Name, req.Run.RunID())
+		c.logf("merge: no after-action recorded {repo=%s ws=%s name=%s run=%s} — no after_action phase is published",
+			repo, req.Workspace, req.Name, req.Run.RunID())
 	}
-	if err := req.Run.AfterAction(prompt, "running the workspace's after-merge action"); err != nil {
-		c.logf("merge: after-action status FAILED {repo=%s ws=%s run=%s}: %v", repo, req.Workspace, req.Run.RunID(), err)
+	if publish {
+		if err := req.Run.AfterAction(prompt, "running the workspace's after-merge action"); err != nil {
+			c.logf("merge: after-action status FAILED {repo=%s ws=%s run=%s}: %v", repo, req.Workspace, req.Run.RunID(), err)
+		}
 	}
 
 	c.logf("merge: post-merge hook RUNNING {repo=%s ws=%s name=%s run=%s target=%s}", repo, req.Workspace, req.Name, req.Run.RunID(), req.TargetDir)
