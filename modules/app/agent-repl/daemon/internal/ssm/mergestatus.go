@@ -1,98 +1,36 @@
 package ssm
 
 import (
-	"database/sql"
-	"fmt"
-	"strings"
-
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 )
 
-// This file projects the merge axis onto WorkspaceState.merge_status.
+// This file carries the merge PIPELINE's own MergeStatus onto WorkspaceState.
 //
-// THE PROJECTION IS COARSE ON PURPOSE. The merge axis is six tokens over an
-// append-only log; MergeStatus is the shape the merge PIPELINE will fill in
-// (per-commit progress, the before/after actions, the suite gating each
-// landing), and that pipeline does not exist yet. Everything the current
-// system genuinely knows is mapped here, and everything it does not is left
-// at its zero value rather than invented: `merging` reports cherry_picking
-// with no commit counts because no component counts commits yet, and the
-// before/after action and testing phases are never produced because nothing
-// runs them.
+// THERE IS NO PROJECTION OVER THE STATE LOG ANY MORE, and its absence is the
+// contract rather than a gap. A MergeStatus names a RUN — `run_id` is the field
+// every other one hangs off — and the state log has no run identity in it. The
+// wave-0 projection stood in with `<workspace>@<instant>`, which changed on
+// every phase transition, so one run published a different id at each step and a
+// frontend correlating on the field blended and split runs at random. A status
+// stamped with an id nothing minted is worse than no status: the coarse
+// merge_phase (still stamped beside it) reports the run's phase honestly, and
+// merge_status stays UNSET until the run that owns it publishes.
 //
-// The old trio (merge_phase, merge_queue_position, merge_queue_depth) is still
-// stamped beside it. Both forms coexist until the cutover wave retires the
-// trio, so nothing downstream has to move in the same change that introduces
-// the status.
-
-// mergeTransitionRow is what the newest merge-axis row adds to the token the
-// resolution already produced: the instant it was written, and the cause detail
-// the transition carried.
-//
-// The row's own token is deliberately NOT read back. It would be the same token
-// `merge_phase` already carries — the resolution's latest_merge CTE and the
-// query below order the same rows the same way under the same lock — and a
-// second copy of one fact is a second thing that can disagree.
-type mergeTransitionRow struct {
-	causeKind string
-	at        int64
-}
-
-// newestMergeTransitionLocked reads the workspace's newest merge-axis row.
-// Caller holds mu.
-//
-// It selects over the SAME token set resolveQuery's latest_merge CTE does
-// (mergeAxisStates), which is what makes "the newest merge row" mean one thing
-// in the resolver and here. A workspace with no merge history at all reports
-// found=false, which is the only reading of absence.
-func (m *Manager) newestMergeTransitionLocked(workspace string) (row mergeTransitionRow, found bool, err error) {
-	// The placeholder list is derived from mergeAxisStates rather than written
-	// out, so adding a merge token can never leave the two silently out of step
-	// (a mismatched count is a bind error at every push, not a wrong answer).
-	query := `
-SELECT cause_kind, at FROM workspace_state
-WHERE workspace = ? AND state IN (` + mergeAxisPlaceholders() + `)
-ORDER BY at DESC LIMIT 1`
-	args := make([]any, 0, len(mergeAxisStates)+1)
-	args = append(args, workspace)
-	for _, s := range mergeAxisStates {
-		args = append(args, s)
-	}
-	var causeKind sql.NullString
-	err = m.db.QueryRow(query, args...).Scan(&causeKind, &row.at)
-	if err == sql.ErrNoRows {
-		return mergeTransitionRow{}, false, nil
-	}
-	if err != nil {
-		return mergeTransitionRow{}, false, fmt.Errorf("ssm: read newest merge transition for workspace %q: %w", workspace, err)
-	}
-	row.causeKind = causeKind.String
-	return row, true, nil
-}
-
-// mergeTransitionCause strips the routing prefix off a merge transition's cause
-// kind, leaving the human note the transition was recorded with.
-//
-// ApplyMergeTransition writes `merge_transition` when there was no note and
-// `merge_transition:<note>` when there was. The prefix is how the state log
-// routes the row; it is not part of what failed, and putting it in front of a
-// user-facing cause would report the daemon's own bookkeeping as the reason a
-// merge did not land.
-func mergeTransitionCause(causeKind string) string {
-	if causeKind == causeMergeTransition {
-		return ""
-	}
-	return strings.TrimPrefix(causeKind, causeMergeTransition+":")
-}
+// It is the same rule merge.QueueCoordinator already applies to a merge it fails
+// before any run exists (the boot sweep of orphaned merge_enqueuing marks): no
+// run, no status, never a fabricated identity.
 
 // recordPipelineStatusLocked retains the status the merge PIPELINE published for
-// a workspace, so the construction funnel stamps the pipeline's own account
-// rather than the coarse projection below. Caller holds mu.
+// a workspace, so every later frame carries the run's own account of itself
+// rather than nothing. Caller holds mu.
 //
-// IT IS IN MEMORY, AND DELIBERATELY SO. A MergeStatus describes a RUN, and a run
-// does not survive the process that is executing it: a daemon that dies mid-merge
-// leaves an entry the next boot replays as a NEW run with a new id. Persisting the
-// old run's progress would hand a frontend a run nothing is advancing.
+// IT IS IN MEMORY, AND DELIBERATELY SO. A MergeStatus describes a run's
+// PROGRESS, and progress does not survive the process that was making it: a
+// daemon that dies mid-merge leaves a durable queue entry the next boot replays,
+// and that replay resumes the run's IDENTITY (persisted with the entry) while
+// republishing its progress from what the resumed run actually observes.
+// Persisting the old process's commit cursor would hand a frontend figures
+// nothing is advancing.
 func (m *Manager) recordPipelineStatusLocked(workspace string, status *frontendv1.MergeStatus) {
 	if m.pipelineStatus == nil {
 		m.pipelineStatus = make(map[string]*frontendv1.MergeStatus)
@@ -107,109 +45,30 @@ func (m *Manager) clearPipelineStatusLocked(workspace string) {
 	delete(m.pipelineStatus, workspace)
 }
 
-// mergeRunIDFor mints the run identity every MergeStatus carries.
-//
-// IT IS A PLACEHOLDER. A real run id is minted by the merge pipeline when it
-// accepts a request and stays fixed for the whole run; this one is derived from
-// the workspace and the newest merge row's instant, so it changes on every
-// phase transition rather than naming one run. That is the best a projection
-// over the state log can do — the log has no run identity in it — and it is
-// replaced wholesale when the pipeline wave lands. Nothing may correlate on it
-// until then.
-func mergeRunIDFor(workspace string, at int64) string {
-	return fmt.Sprintf("%s@%d", workspace, at)
-}
-
-// mergeStatusFor maps a merge-axis token and its row onto the status that
-// describes it, coarsely (see the file comment). An unknown or axis-clearing
-// token reports nil, which leaves merge_status unset.
-func mergeStatusFor(workspace, token string, row mergeTransitionRow, position, depth int32) *frontendv1.MergeStatus {
-	status := &frontendv1.MergeStatus{
-		RunId:            mergeRunIDFor(workspace, row.at),
-		PhaseStartedAtMs: row.at,
-		// The SAME instant as the phase's own: the state log records phase
-		// transitions and nothing else, so there are no within-phase ticks to
-		// report until the merge pipeline produces them.
-		UpdatedAtMs: row.at,
-	}
-	switch token {
-	case sigMergeBeforeAction:
-		// The prompt is the pipeline's to report; a projection over the log has
-		// no access to it and must not invent one.
-		status.Phase = &frontendv1.MergeStatus_BeforeAction{BeforeAction: &frontendv1.MergeStatusBeforeAction{}}
-	case sigMergeAfterAction:
-		status.Phase = &frontendv1.MergeStatus_AfterAction{AfterAction: &frontendv1.MergeStatusAfterAction{}}
-	case sigMergeEnqueuing, sigMergeQueued:
-		// BOTH map to enqueued, and the queue facts come from the same snapshot
-		// that fills merge_queue_position/depth. merge_enqueuing has no durable
-		// queue entry behind it yet, so its position and depth are legitimately
-		// zero rather than missing.
-		status.Phase = &frontendv1.MergeStatus_Enqueued{Enqueued: &frontendv1.MergeStatusEnqueued{
-			Position: position,
-			Depth:    depth,
-		}}
-	case sigMerging:
-		// Counts stay zero: the current pipeline picks commits without ever
-		// reporting how many there are, so a number here would be invented.
-		status.Phase = &frontendv1.MergeStatus_CherryPicking{CherryPicking: &frontendv1.MergeStatusCherryPicking{}}
-	case sigMergeConflict:
-		// The conflicted commit is likewise unknown to the current pipeline.
-		status.Phase = &frontendv1.MergeStatus_Conflict{Conflict: &frontendv1.MergeStatusConflict{}}
-	case sigMerged:
-		status.Phase = &frontendv1.MergeStatus_Merged{Merged: &frontendv1.MergeStatusMerged{}}
-	case sigMergeFailed:
-		status.Phase = &frontendv1.MergeStatus_Failed{Failed: &frontendv1.MergeStatusFailed{
-			Cause: mergeTransitionCause(row.causeKind),
-		}}
-	default:
-		return nil
-	}
-	return status
-}
-
 // stampMergeStatusLocked writes merge_status onto a WorkspaceState about to be
 // pushed. Caller holds mu.
 //
 // IT RIDES THE SAME CONSTRUCTION FUNNEL the rest of the merge facts do
 // (stampMergeFactsLocked, called from workspaceMessageLocked and nowhere else),
-// so a frame carrying merge_phase but no merge_status is unrepresentable rather
-// than merely unlikely.
+// so a frame carrying a merge_status the pipeline did not publish is
+// unrepresentable rather than merely unlikely.
 //
-// ABSENCE IS THE ABSENCE OF A MERGE. A workspace whose merge axis has never
-// spoken, or whose axis was cleared, gets no status at all — never a
-// zero-valued one standing in for "no merge".
-func (m *Manager) stampMergeStatusLocked(workspace string, msg *frontendv1.WorkspaceState, position, depth int32) {
-	token := msg.GetMergePhase()
-	if token == "" {
+// ABSENCE IS THE ABSENCE OF A PUBLISHED RUN. A workspace whose merge axis has
+// never spoken, whose axis was cleared, or whose run belongs to a process that
+// is gone gets no status at all — never a zero-valued one, and never one keyed
+// to an invented run.
+func (m *Manager) stampMergeStatusLocked(workspace string, msg *frontendv1.WorkspaceState) {
+	status, ok := m.pipelineStatus[workspace]
+	if !ok {
 		return
 	}
-	// THE PIPELINE'S OWN ACCOUNT WINS. When the merge pipeline published a status
-	// for this run it knows things the log cannot hold — the run's identity, the
-	// commit plan's size, which commit is landing, the action prompts — so the
-	// projection below is only ever consulted for rows THIS process did not
-	// publish (a previous daemon's, read back after a restart). That is the log
-	// being the only evidence available, not a fallback around a failure.
-	if status, ok := m.pipelineStatus[workspace]; ok {
-		msg.MergeStatus = status
-		return
-	}
-	row, found, err := m.newestMergeTransitionLocked(workspace)
-	if err != nil {
-		m.logf("ssm: merge status read FAILED ws=%s merge_phase=%s error=%v — the workspace is merging and its WorkspaceState carries no merge_status, so no frontend can report the run's progress",
-			workspace, token, err)
-		return
-	}
-	if !found {
-		// The resolved merge phase came OFF a merge row, so its absence here
-		// means the two reads disagree about the same log.
-		m.logf("ssm: INVARIANT VIOLATION ws=%s resolved merge_phase=%s with NO merge-axis row behind it — merge_status is left unset",
-			workspace, token)
-		return
-	}
-	status := mergeStatusFor(workspace, token, row, position, depth)
-	if status == nil {
-		m.logf("ssm: INVARIANT VIOLATION ws=%s resolved merge_phase=%s which no MergeStatus phase covers — merge_status is left unset",
-			workspace, token)
+	if msg.GetMergePhase() == "" {
+		// The retained run says the workspace is merging and the resolution says
+		// it is not. Stamping the status anyway would push a frame whose two merge
+		// fields contradict each other, so the disagreement is reported and the
+		// resolution wins.
+		m.logf("ssm: INVARIANT VIOLATION ws=%s has a retained pipeline merge_status (run=%s) with NO resolved merge_phase behind it — merge_status is left unset",
+			workspace, status.GetRunId())
 		return
 	}
 	msg.MergeStatus = status
