@@ -449,6 +449,38 @@ func TestHealthRejectsNoSessionControllerAndWrongSession(t *testing.T) {
 	}
 }
 
+// TestEnsureDriveableWaitsForTheHandshake pins the difference between the two
+// bring-ups: Ensure returns while the shim is still connecting (its callers only
+// want the process running early), and EnsureDriveable does not, because its
+// caller's next act is a SEND. A merge lost exactly this race — its lease's
+// interrupt was refused with "no live shim connection" tens of milliseconds
+// before the link came up.
+func TestEnsureDriveableWaitsForTheHandshake(t *testing.T) {
+	// Arrange — a session whose shim has been spawned but has not handshaked.
+	notReady := make(chan struct{})
+	m, _ := newTestManagerNotReady(t, fakeLocator{m: map[string]string{"ws": "s1"}}, &fakeSpawner{}, notReady)
+
+	// Act — ask for a driveable session, then let the shim finish connecting.
+	done := make(chan error, 1)
+	go func() { done <- m.EnsureDriveable(context.Background(), "ws") }()
+	select {
+	case err := <-done:
+		t.Fatalf("EnsureDriveable returned %v while the shim was still connecting; the caller's next send would race the handshake", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(notReady)
+
+	// Assert.
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("EnsureDriveable = %v after the shim connected", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("EnsureDriveable never returned after the shim connected")
+	}
+}
+
 // TestHealthWaitsForABringUpAlreadyInMotion pins the race the probe used to
 // lose: createSession acks when the spawn is ISSUED, Emacs probes health a few
 // milliseconds later, and the shim attaches a few milliseconds after that.
