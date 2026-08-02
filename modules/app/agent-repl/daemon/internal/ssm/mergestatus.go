@@ -25,11 +25,15 @@ import (
 // trio, so nothing downstream has to move in the same change that introduces
 // the status.
 
-// mergeTransitionRow is the newest merge-axis row for a workspace: the token
-// that decides the phase, the instant it was written, and the cause detail the
-// transition carried.
+// mergeTransitionRow is what the newest merge-axis row adds to the token the
+// resolution already produced: the instant it was written, and the cause detail
+// the transition carried.
+//
+// The row's own token is deliberately NOT read back. It would be the same token
+// `merge_phase` already carries — the resolution's latest_merge CTE and the
+// query below order the same rows the same way under the same lock — and a
+// second copy of one fact is a second thing that can disagree.
 type mergeTransitionRow struct {
-	state     string
 	causeKind string
 	at        int64
 }
@@ -43,7 +47,7 @@ type mergeTransitionRow struct {
 // found=false, which is the only reading of absence.
 func (m *Manager) newestMergeTransitionLocked(workspace string) (row mergeTransitionRow, found bool, err error) {
 	query := `
-SELECT state, cause_kind, at FROM workspace_state
+SELECT cause_kind, at FROM workspace_state
 WHERE workspace = ? AND state IN (?,?,?,?,?,?,?)
 ORDER BY at DESC LIMIT 1`
 	args := make([]any, 0, len(mergeAxisStates)+1)
@@ -52,7 +56,7 @@ ORDER BY at DESC LIMIT 1`
 		args = append(args, s)
 	}
 	var causeKind sql.NullString
-	err = m.db.QueryRow(query, args...).Scan(&row.state, &causeKind, &row.at)
+	err = m.db.QueryRow(query, args...).Scan(&causeKind, &row.at)
 	if err == sql.ErrNoRows {
 		return mergeTransitionRow{}, false, nil
 	}
