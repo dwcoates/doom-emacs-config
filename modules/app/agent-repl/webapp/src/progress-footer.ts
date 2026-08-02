@@ -30,8 +30,10 @@ import { BreathState, BreathingTicker, breathColor } from "./breathing.js";
 import { CounterEntry, CounterSpec, isActive } from "./counter-menu.js";
 import { formatCountdown, formatElapsed } from "./duration.js";
 import { escapeHtml } from "./highlight.js";
+import { mergeFacts } from "./merge-status.js";
 import type {
   InterruptInput,
+  MergeStatus,
   ProgressInput,
   WebRenderState,
   WebSessionConnectivity,
@@ -75,6 +77,17 @@ export interface FooterInput {
    */
   mergeQueuePosition: number;
   mergeQueueDepth: number;
+  /**
+   * THE structured merge status, or null when no merge run touches this
+   * workspace.
+   *
+   * It does not replace the two figures above — the daemon still stamps them,
+   * and their chip still renders — but where it is present it OUTRANKS them,
+   * because it says the same thing plus everything they cannot: which commit of
+   * how many is landing, which one conflicted, and which pre/post-merge prompt
+   * the daemon is running.
+   */
+  mergeStatus: MergeStatus | null;
   /** Daemon-resolved route reliability for the same WorkspaceState. */
   connectivity: WebSessionConnectivity | null;
   /** Activity fact retained beneath a non-operational connectivity verdict. */
@@ -218,6 +231,43 @@ export function phaseLabel(state: WebRenderState): PhaseLabel {
       throw new Error(`progress-footer: unhandled render state ${String(never)}`);
     }
   }
+}
+
+/**
+ * The phase cell as the STRUCTURED merge status names it, or null to leave the
+ * cell to `phaseLabel` and the flat render state.
+ *
+ * This exists for the two phases the render state cannot name: the daemon now
+ * runs the pre- and post-merge prompts itself, and both arrive inside the
+ * merge's own `merging` render state. Without the override the footer says
+ * "merging" through a stretch where nothing is being merged at all — the
+ * session is being driven by a prompt the user cannot see or interrupt.
+ *
+ * It overrides the OTHER phases too, deliberately: the status and the render
+ * state are stamped on the same message and agree, so preferring the status
+ * everywhere means one source is read rather than two that could drift. The
+ * tones map onto `phaseLabel`'s own vocabulary, so a merge reads identically
+ * whichever path named it.
+ */
+export function mergeStatusPhaseLabel(status: MergeStatus | null): PhaseLabel | null {
+  const facts = mergeFacts(status);
+  if (facts === null) return null;
+  return { word: facts.word, tone: facts.tone, breathing: facts.breathing };
+}
+
+/**
+ * The structured merge status as the footer's chip, or null when there is no
+ * figure to show.
+ *
+ * Same cell and same reasoning as `mergeQueueChip`, which it supersedes while a
+ * status is present: the phase cell's geometry is fixed to the widest phrase
+ * the phase vocabulary produces, while the run's arithmetic is unbounded
+ * numbers. Read left to right the pair still says "merging 2/4".
+ */
+export function mergeStatusChip(status: MergeStatus | null): MergeQueueChip | null {
+  const facts = mergeFacts(status);
+  if (facts === null || facts.count === "") return null;
+  return { text: facts.count, title: facts.countTitle };
 }
 
 /** The merge queue's place, as the footer's chip beside the phase. */
@@ -373,6 +423,19 @@ export function activityDetail(input: FooterInput, nowMs: number): Activity | nu
   }
   if (p.retrying !== null) {
     return { text: `retrying · ${p.retrying.detail}`, tone: "retry" };
+  }
+  // THE MERGE, above the hook and the running tool. While a merge owns the
+  // session the user cannot prompt it, so the one thing the cell can usefully
+  // say is what the merge is doing with it — the commit in hand, or the
+  // pre/post-merge prompt the daemon is running. A tool call under a merge is
+  // that prompt's own work; naming the tool instead spent the slot on a detail
+  // of something the cell had not yet said was happening.
+  const merge = mergeFacts(input.mergeStatus);
+  if (merge !== null && merge.activity !== "") {
+    // `muted` for the in-flight band and `error` for a stopped run, matching
+    // the tones the phase word beside it already wears. `ok` has no activity
+    // to carry (a settled merge is doing nothing), so it never reaches here.
+    return { text: merge.activity, tone: merge.tone === "error" ? "error" : "muted" };
   }
   // NO COMPACTION RUNG. The compaction has its own PHASE WORD now
   // (phaseLabel's `compacting`), and the detail cell's job is to say what is
@@ -675,6 +738,14 @@ export function sheetHtml(input: FooterInput, nowMs: number): string {
   if (p.rateLimited !== null || p.rateLimitedWeekly !== null) {
     rows.push(`<span>${activityBody(rateLimitActivity(p, nowMs))}</span>`);
   }
+  // The merge's full account, including the parts the thin strip drops: the
+  // run's arithmetic when the chip had no room, and the commit or prompt in
+  // hand when a louder rung displaced it from the activity cell.
+  const merge = mergeFacts(input.mergeStatus);
+  if (merge !== null) {
+    const parts = [merge.word, merge.count, merge.activity].filter((part) => part !== "");
+    rows.push(`<span>${escapeHtml(parts.join(" · "))}</span>`);
+  }
   if (p.liveTaskCount > 0) {
     rows.push(`<span>${p.liveTaskCount} live task${p.liveTaskCount === 1 ? "" : "s"}</span>`);
   }
@@ -710,6 +781,28 @@ export function errorRowHtml(p: ProgressInput): string {
   return `<div class="${classes.join(" ")}"${attrs}>${escapeHtml(f.message)}</div>`;
 }
 
+/**
+ * The merge note as a standing row under the strip, or "" when the run has
+ * nothing to add.
+ *
+ * It is a ROW rather than a cell because both notes it carries are sentences,
+ * not figures: a failure's classified cause, and a landed merge whose
+ * after-action did not succeed. Neither fits a cell sized for a phase word, and
+ * neither may be hidden behind the expansion — a merge that stopped is exactly
+ * the state a user opens the tab to understand.
+ *
+ * It sits BESIDE the progress failure row rather than inside it: that row is
+ * the daemon's classified turn failure, and a merge note is a different fact
+ * with a different lifetime.
+ */
+export function mergeNoteRowHtml(status: MergeStatus | null): string {
+  const facts = mergeFacts(status);
+  if (facts === null || facts.note === "") return "";
+  return (
+    `<div class="pfooter-merge-note ${facts.tone}">${escapeHtml(facts.note)}</div>`
+  );
+}
+
 /** Marks the footer's whole clickable strip, so the expansion toggle delegates. */
 export const FOOTER_STRIP_ATTR = "data-pfooter-strip";
 
@@ -729,8 +822,12 @@ export function footerHtml(
   // The phase cell is present only once a state has actually been resolved.
   // Before that there is no phase to name, and naming one anyway is exactly
   // the fabrication the stale mirror used to commit.
-  if (input.renderState !== null) {
-    const phase = phaseLabel(input.renderState);
+  // The structured merge status names the phase where it has one, because it
+  // can name the two the render state cannot (before-action, after-action).
+  const phase =
+    mergeStatusPhaseLabel(input.mergeStatus) ??
+    (input.renderState === null ? null : phaseLabel(input.renderState));
+  if (phase !== null) {
     const secondary =
       input.connectivity !== null &&
       input.connectivity !== "operational" &&
@@ -761,7 +858,11 @@ export function footerHtml(
   }
   // The queue place sits immediately right of the phase word it qualifies, so
   // the pair reads as one statement: "merge queued 2/3".
-  const queue = mergeQueueChip(input.renderState, input.mergeQueuePosition, input.mergeQueueDepth);
+  // The structured chip where the daemon stamped a status, the flat one
+  // otherwise — never both, which would put two arithmetics side by side.
+  const queue =
+    mergeStatusChip(input.mergeStatus) ??
+    mergeQueueChip(input.renderState, input.mergeQueuePosition, input.mergeQueueDepth);
   if (queue !== null) {
     cells.push(
       `<div class="pfooter-cell pfooter-merge-queue" title="${escapeHtml(queue.title)}">` +
@@ -808,6 +909,7 @@ export function footerHtml(
     `<div class="pfooter" role="status" aria-live="polite">` +
     `<div class="pfooter-cells" ${FOOTER_STRIP_ATTR} role="button" tabindex="0" ` +
     `aria-expanded="${open.expanded}" title="click for detail">${cells.join("")}</div>` +
+    mergeNoteRowHtml(input.mergeStatus) +
     errorRowHtml(p) +
     (open.expanded ? sheetHtml(input, nowMs) : "") +
     `</div>`

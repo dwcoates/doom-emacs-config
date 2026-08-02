@@ -662,6 +662,36 @@ body::after {
   outline-offset: -1px;
 }
 
+/* The current row's merge (sidebar.ts `mergeRowHtml`). The rail LEADS on
+   merges, and the recycle glyph beside the name says only that one is
+   happening — identically for a run on its last commit and a run parked on a
+   conflict. These lines carry the rest: how far it has got, the commit or
+   prompt in hand, and the note a stopped run leaves behind.
+
+   Indented to the name's own column so it reads as this row's continuation
+   rather than a child workspace, and always visible: a merge the user must
+   act on may not hide behind the detail panel's chevron. */
+#ws-sidebar .ws-merge,
+#ws-sidebar .ws-merge-note {
+  margin: 0 0.7rem 0.1rem 2rem;
+  font-size: 0.72rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#ws-sidebar .kids .ws-merge,
+#ws-sidebar .kids .ws-merge-note { margin-left: 1.6rem; }
+/* The in-flight band spends no color, exactly as the merge dot does not. */
+#ws-sidebar .ws-merge.muted,
+#ws-sidebar .ws-merge-note.muted { color: var(--muted); }
+#ws-sidebar .ws-merge.ok,
+#ws-sidebar .ws-merge-note.ok { color: var(--ok); }
+/* A stopped run is the one merge state that DOES spend a color: it is the
+   only one waiting on the user. */
+#ws-sidebar .ws-merge.error,
+#ws-sidebar .ws-merge-note.error { color: var(--err); }
+#ws-sidebar .ws-merge-note { font-style: italic; }
+
 /* Expanded detail panel under a row. */
 #ws-sidebar .detail { display: none; }
 #ws-sidebar .ws.open > .detail {
@@ -1857,6 +1887,14 @@ pre {
 /* An empty slot collapses completely: an unmerged workspace pays no layout
    for a notice it does not carry. */
 #merge-gate-notice:empty { display: none; }
+/* What the merge is DOING, on its own line under the fixed explanation. The
+   block's worst property was never its length — it was that a merge waiting
+   behind two workspaces and a merge on its last commit read identically. */
+#merge-gate-notice .merge-gate-progress {
+  display: block;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.85;
+}
 
 #composer-input {
   flex: 1;
@@ -2648,6 +2686,27 @@ pre {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* The merge's standing note (progress-footer.ts `mergeNoteRowHtml`): a failed
+   run's classified cause, or a landed merge whose after-action did not
+   succeed. A ROW, not a cell, because both are sentences — and outside the
+   expansion sheet, because a merge that stopped is exactly what a user opens
+   the tab to understand. It sits beside the progress failure row rather than
+   inside it: that row is the daemon's classified TURN failure, a different
+   fact with a different lifetime. */
+.pfooter-merge-note {
+  font-size: 0.74rem;
+  border-top: 1px dashed var(--border);
+  padding: 4px 10px 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--muted);
+}
+/* A landed merge's after-action note stays calm: the commits are on the
+   target either way, and a red note would say to undo work that succeeded. */
+.pfooter-merge-note.ok { color: var(--muted); }
+.pfooter-merge-note.error { color: var(--err); }
+
 .pfooter-error.failure-internal { color: var(--init); }
 .pfooter-error.failure-api { color: var(--blocked); }
 .pfooter-error.addressable { cursor: pointer; }
