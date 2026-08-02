@@ -255,7 +255,7 @@ dropped rather than stub-created."
     ;; Act
     (agent-repl-test--apply-workspace-state
      '(:workspace "ws1" :state "RENDER_STATE_IDLE_ASYNC"
-       :turnActive t :liveTaskCount "3" :mergePhase "none"
+       :turnActive t :liveTaskCount "3"
        :causeKind "task_started" :causeSeq "42"))
     ;; Assert
     (let ((meta (agent-repl--ws-get "ws1" :pushed-render-state-meta)))
@@ -571,20 +571,25 @@ the whole contract, so a broken arm must name itself in the failure."
                      :mergeStatus (:runId "r1"))))
     (should-not (agent-repl--ws-get "ws1" :pushed-render-state))))
 
-(ert-deftest agent-repl-test-apply-workspace-state-keeps-the-flat-merge-phase ()
-  "The pre-cutover flat `mergePhase' still lands in the meta plist."
+(ert-deftest agent-repl-test-apply-workspace-state-drops-the-retired-flat-merge-phase ()
+  "REWRITTEN: this asserted the pre-cutover flat `mergePhase' landed in the
+meta plist.  The field is RETIRED from the wire contract, so what has to hold
+now is the opposite -- the meta plist carries no merge phase at all, and the
+merge inputs are the pushed render state plus `:pushed-merge-status'."
   ;; Arrange
   (agent-repl-test--with-clean-state
     (agent-repl-test--register-ws "ws1")
     ;; Act
     (agent-repl-test--apply-workspace-state
      '(:workspace "ws1" :state "RENDER_STATE_MERGING"
-       :mergePhase "merging"
        :mergeStatus (:runId "r1" :cherryPicking (:commitsTotal 2))))
     ;; Assert
-    (should (equal (plist-get (agent-repl--ws-get "ws1" :pushed-render-state-meta)
-                              :merge-phase)
-                   "merging"))))
+    (should-not (plist-get (agent-repl--ws-get "ws1" :pushed-render-state-meta)
+                           :merge-phase))
+    (should (eq (agent-repl--ws-get "ws1" :pushed-render-state) :merging))
+    (should (equal (plist-get (agent-repl--ws-get "ws1" :pushed-merge-status)
+                              :run-id)
+                   "r1"))))
 
 ;;;; ---- StateSnapshot resync --------------------------------------------
 
