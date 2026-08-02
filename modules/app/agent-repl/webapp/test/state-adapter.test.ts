@@ -100,6 +100,7 @@ describe("WorkspaceState mapping", () => {
           mergeQueuePosition: 0,
           mergeQueueDepth: 0,
           mergeLeaseHeld: false,
+          mergeStatus: null,
         },
       },
     ]);
@@ -123,10 +124,68 @@ describe("WorkspaceState mapping", () => {
     expect(lines).toEqual([
       expect.stringContaining(
         "connectivity=operational status=ready proto=READY keyword=ready turn_active=false live_tasks=0 merge_phase= " +
-          "merge_queue=0/0 merge_lease_held=false " +
+          "merge_queue=0/0 merge_lease_held=false merge_status=none " +
           "faults=none cause_kind=session_started cause_seq=9 at_ms=1234",
       ),
     ]);
+  });
+
+  it("carries the structured merge status through to the store input", () => {
+    // Arrange / Act
+    const effects = applyOne({
+      workspaceState: workspaceState({
+        state: "RENDER_STATE_MERGING",
+        mergeStatus: {
+          runId: "run-1",
+          phaseStartedAtMs: "900",
+          updatedAtMs: "1000",
+          cherryPicking: {
+            commitsTotal: 4,
+            commitsLanded: 1,
+            currentSha: "abc1234",
+            currentSubject: "fix the thing",
+          },
+        },
+      }),
+    });
+    // Assert
+    expect(effects[0]).toMatchObject({
+      kind: "workspace-state",
+      value: {
+        mergeStatus: {
+          runId: "run-1",
+          phase: { case: "cherryPicking", value: { commitsLanded: 1 } },
+        },
+      },
+    });
+  });
+
+  it("maps an absent merge status to null, which is 'no merge run'", () => {
+    // Arrange / Act
+    const effects = applyOne({ workspaceState: workspaceState({}) });
+    // Assert
+    expect(effects[0]).toMatchObject({ kind: "workspace-state", value: { mergeStatus: null } });
+  });
+
+  it("logs the merge status as its phase, run, and refresh stamp", () => {
+    // Arrange
+    const lines: string[] = [];
+    const adapter = new StateAdapter((_level, message) => lines.push(message));
+    // Act
+    adapter.apply(
+      frame({
+        workspaceState: workspaceState({
+          state: "RENDER_STATE_MERGE_CONFLICT",
+          mergeStatus: {
+            runId: "run-7",
+            updatedAtMs: "1000",
+            conflict: { conflictedSha: "bad1234", commitsTotal: 4, commitsLanded: 2 },
+          },
+        }),
+      }),
+    );
+    // Assert
+    expect(lines).toEqual([expect.stringContaining("merge_status=conflict/run-7@1000")]);
   });
 
   it("decodes RENDER_STATE_CLEARING into its own keyword", () => {

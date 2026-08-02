@@ -146,6 +146,7 @@ function flow(): Flow {
         renderState: s.renderState,
         mergeQueuePosition: s.mergeQueuePosition,
         mergeQueueDepth: s.mergeQueueDepth,
+        mergeStatus: s.mergeStatus,
         connectivity: s.sessionConnectivity,
         sessionStatus: s.sessionStatus,
         agents: sessionSubagents(s.items),

@@ -19,12 +19,14 @@ import {
   formatRecency,
   installWorkspaceExpandHook,
   installWorkspaceRosterHook,
+  mergeRowHtml,
   sidebarHtml,
   statusDotHtml,
   taskSectionHtml,
   validateWorkspaceRoster,
   workspaceStatusFromRenderState,
 } from "../src/sidebar.js";
+import type { MergeStatus } from "../src/state-adapter.js";
 import css from "../src/styles.css?raw";
 import { ForwardingLogger, setLogger } from "../src/wslog.js";
 
@@ -1131,5 +1133,193 @@ describe("installWorkspaceExpandHook", () => {
     installWorkspaceExpandHook(target, sidebar);
     // Act + Assert
     expect(() => (target[EXPAND_HOOK] as (d: unknown) => void)(7)).toThrow(/must be a string/);
+  });
+});
+
+// --- the current row's structured merge status ------------------------------
+
+describe("the rail's structured merge status", () => {
+  /** A merge status carrying PHASE, with the envelope fixed. */
+  const merge = (phase: MergeStatus["phase"]): MergeStatus => ({
+    runId: "run-1",
+    phaseStartedAtMs: NOW_MS - 5_000,
+    updatedAtMs: NOW_MS,
+    phase,
+  });
+
+  const PICKING = merge({
+    case: "cherryPicking",
+    value: { commitsTotal: 4, commitsLanded: 1, currentSha: "abc1234", currentSubject: "fix it" },
+  });
+
+  /** A roster whose single row is THIS session's, mid-merge. */
+  const mergingRoster = (): WorkspaceRoster =>
+    roster({ repos: [group({ rows: [row({ current: true, status: "merging" })] })] });
+
+  it("renders nothing when no merge touches the workspace", () => {
+    // Arrange / Act
+    const got = mergeRowHtml(null);
+    // Assert
+    expect(got).toBe("");
+  });
+
+  it("shows the queue place while enqueued", () => {
+    // Arrange / Act
+    const got = mergeRowHtml(merge({ case: "enqueued", value: { position: 2, depth: 3 } }));
+    // Assert
+    expect(got).toContain("merge queued · 2/3");
+  });
+
+  it("shows the commit in hand while cherry-picking", () => {
+    // Arrange / Act
+    const got = mergeRowHtml(PICKING);
+    // Assert
+    expect(got).toContain("merging · 1/4 · picking · abc1234 fix it");
+  });
+
+  it("shows the before-action prompt, which the recycle glyph never could", () => {
+    // Arrange / Act
+    const got = mergeRowHtml(merge({ case: "beforeAction", value: { prompt: "run the linter" } }));
+    // Assert
+    expect(got).toContain("merge before-action · before-action · run the linter");
+  });
+
+  it("shows the after-action prompt", () => {
+    // Arrange / Act
+    const got = mergeRowHtml(merge({ case: "afterAction", value: { prompt: "close it" } }));
+    // Assert
+    expect(got).toContain("merge after-action · after-action · close it");
+  });
+
+  it("names the conflicted commit", () => {
+    // Arrange / Act
+    const got = mergeRowHtml(
+      merge({
+        case: "conflict",
+        value: {
+          conflictedSha: "bad1234",
+          conflictedSubject: "same file",
+          commitsTotal: 4,
+          commitsLanded: 2,
+        },
+      }),
+    );
+    // Assert
+    expect(got).toContain("conflict · bad1234 same file");
+  });
+
+  it("paints a conflict loud: it is the one merge state waiting on the user", () => {
+    // Arrange / Act
+    const got = mergeRowHtml(
+      merge({
+        case: "conflict",
+        value: { conflictedSha: "bad1234", conflictedSubject: "x", commitsTotal: 4, commitsLanded: 2 },
+      }),
+    );
+    // Assert
+    expect(got).toContain('class="ws-merge error"');
+  });
+
+  it("carries a failed run's cause as its own note line", () => {
+    // Arrange / Act
+    const got = mergeRowHtml(
+      merge({
+        case: "failed",
+        value: {
+          cause: "tests failed",
+          commitsTotal: 4,
+          commitsLanded: 3,
+          failingSha: "fee1234",
+          failingSubject: "break it",
+        },
+      }),
+    );
+    // Assert
+    expect(got).toContain('<div class="ws-merge-note error">tests failed</div>');
+  });
+
+  it("notes a landed merge whose after-action failed", () => {
+    // Arrange / Act
+    const got = mergeRowHtml(
+      merge({ case: "merged", value: { commitsTotal: 4, afterActionError: "timed out" } }),
+    );
+    // Assert
+    expect(got).toContain("after-action failed: timed out");
+  });
+
+  it("escapes a commit subject, which is daemon text", () => {
+    // Arrange / Act
+    const got = mergeRowHtml(
+      merge({
+        case: "cherryPicking",
+        value: {
+          commitsTotal: 1,
+          commitsLanded: 0,
+          currentSha: "abc1234",
+          currentSubject: "<img src=x>",
+        },
+      }),
+    );
+    // Assert
+    expect(got).not.toContain("<img");
+  });
+
+  it("draws the merge on THIS session's row", () => {
+    // Arrange
+    const { mount, sidebar } = harness();
+    sidebar.update(mergingRoster());
+    // Act
+    sidebar.setMergeStatus(PICKING);
+    // Assert
+    expect(mount.querySelector(".ws-merge")?.textContent).toContain("1/4");
+  });
+
+  it("leaves every OTHER row exactly as Emacs asserted it", () => {
+    // Arrange — the status describes this session only.
+    const { mount, sidebar } = harness();
+    sidebar.update(
+      roster({
+        repos: [group({ rows: [row({ dir: "/tmp/other" }), row({ current: true, status: "merging" })] })],
+      }),
+    );
+    // Act
+    sidebar.setMergeStatus(PICKING);
+    // Assert
+    expect(mount.querySelectorAll(".ws-merge").length).toBe(1);
+  });
+
+  it("repaints when a per-commit tick moves the run on", () => {
+    // Arrange
+    const { mount, sidebar } = harness();
+    sidebar.update(mergingRoster());
+    sidebar.setMergeStatus(PICKING);
+    // Act
+    sidebar.setMergeStatus({
+      ...PICKING,
+      updatedAtMs: NOW_MS + 1,
+      phase: {
+        case: "cherryPicking",
+        value: { commitsTotal: 4, commitsLanded: 2, currentSha: "def5678", currentSubject: "next" },
+      },
+    });
+    // Assert
+    expect(mount.querySelector(".ws-merge")?.textContent).toContain("2/4");
+  });
+
+  it("clears the lines when the merge status goes away", () => {
+    // Arrange
+    const { mount, sidebar } = harness();
+    sidebar.update(mergingRoster());
+    sidebar.setMergeStatus(PICKING);
+    // Act
+    sidebar.setMergeStatus(null);
+    // Assert
+    expect(mount.querySelector(".ws-merge")).toBeNull();
+  });
+
+  it("styles both merge lines, so neither renders unthemed", () => {
+    // Assert — the class list is the whole visual contract for these rows.
+    expect(css).toContain("#ws-sidebar .ws-merge,");
+    expect(css).toContain("#ws-sidebar .ws-merge-note {");
   });
 });
