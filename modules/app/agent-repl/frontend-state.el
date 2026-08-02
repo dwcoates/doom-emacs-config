@@ -539,7 +539,6 @@ Fails loudly on a missing/blank `workspace' (invariant violation)."
            ;; which protojson encodes as JSON strings — stored verbatim.
            (turn-active (plist-get ws-state :turnActive))
            (live-tasks (plist-get ws-state :liveTaskCount))
-           (merge-phase (plist-get ws-state :mergePhase))
            (cause-kind (plist-get ws-state :causeKind))
            (cause-seq (plist-get ws-state :causeSeq))
            ;; The merge instant is a DURABLE workspace fact rather than a
@@ -554,7 +553,6 @@ Fails loudly on a missing/blank `workspace' (invariant violation)."
       (agent-repl--ws-put workspace :pushed-render-state-meta
                           (list :turn-active turn-active
                                 :live-task-count live-tasks
-                                :merge-phase merge-phase
                                 :cause-kind cause-kind
                                 :cause-seq cause-seq
                                 :at-ms (plist-get ws-state :atMs)
@@ -567,10 +565,10 @@ Fails loudly on a missing/blank `workspace' (invariant violation)."
       ;; the daemon has already moved past.
       (agent-repl--ws-put workspace :pushed-merge-status merge-status)
       (agent-repl--log workspace
-                       "frontend-apply-workspace-state: %s -> %s connectivity=%s status=%s session=%S generation=%S faults=%S cause=%s seq=%s turn-active=%S live-tasks=%s merge-phase=%s merged-at=%s merge-status-phase=%s merge-status-run=%s"
+                       "frontend-apply-workspace-state: %s -> %s connectivity=%s status=%s session=%S generation=%S faults=%S cause=%s seq=%s turn-active=%S live-tasks=%s merged-at=%s merge-status-phase=%s merge-status-run=%s"
                        previous keyword connectivity session-status session-id
                        generation-id faults cause-kind cause-seq turn-active
-                       live-tasks merge-phase merged-at
+                       live-tasks merged-at
                        (plist-get merge-status :phase)
                        (plist-get merge-status :run-id))
       ;; Session-ready latch (design §10 cutover gap): the SessionStart

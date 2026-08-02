@@ -74,7 +74,6 @@ describe("WorkspaceState mapping", () => {
         status: "SESSION_STATUS_THINKING",
         turnActive: true,
         liveTaskCount: "2",
-        mergePhase: "cherry-pick",
         causeKind: "prompt_accepted",
         causeSeq: "17",
         atMs: "1234",
@@ -89,7 +88,6 @@ describe("WorkspaceState mapping", () => {
           state: "thinking",
           turnActive: true,
           liveTaskCount: 2,
-          mergePhase: "cherry-pick",
           causeKind: "prompt_accepted",
           causeSeq: 17,
           atMs: 1234,
@@ -97,8 +95,6 @@ describe("WorkspaceState mapping", () => {
           sessionStatus: "thinking",
           controllerGenerationId: "g1",
           activeFaults: [],
-          mergeQueuePosition: 0,
-          mergeQueueDepth: 0,
           mergeLeaseHeld: false,
           mergeStatus: null,
         },
@@ -123,8 +119,8 @@ describe("WorkspaceState mapping", () => {
 
     expect(lines).toEqual([
       expect.stringContaining(
-        "connectivity=operational status=ready proto=READY keyword=ready turn_active=false live_tasks=0 merge_phase= " +
-          "merge_queue=0/0 merge_lease_held=false merge_status=none " +
+        "connectivity=operational status=ready proto=READY keyword=ready turn_active=false live_tasks=0 " +
+          "merge_lease_held=false merge_status=none " +
           "faults=none cause_kind=session_started cause_seq=9 at_ms=1234",
       ),
     ]);

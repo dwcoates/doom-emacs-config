@@ -113,9 +113,9 @@ type AgentShimConfig struct {
 	// implemented in internal/ssm and injected by main.
 	MergeLease merge.Lease
 	// MergeQueue is merge.Coordinator's DURABLE request channel. Required, and
-	// injected rather than constructed here because the SSM's merge.Lease reads
-	// the SAME instance to resolve merge_queue_position / merge_queue_depth: two
-	// queues over one directory would report a depth nobody is draining.
+	// injected rather than constructed here because the SSM's merge.Lease binds
+	// the SAME instance: two queues over one directory would put two merge
+	// subsystems behind one manager's leases.
 	MergeQueue merge.DurableQueue
 	// MergeGeometry is THE daemon's workspace -> merge-geometry map, and it is
 	// what a BARE merge_workspace command (the only kind Emacs sends) resolves

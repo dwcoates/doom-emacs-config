@@ -45,7 +45,6 @@ function workspaceEffect(over: Partial<WorkspaceStatusInput> = {}): AdapterEffec
       state: "thinking",
       turnActive: true,
       liveTaskCount: 0,
-      mergePhase: "",
       causeKind: "turn_started",
       causeSeq: 1,
       atMs: 1000,
@@ -53,8 +52,6 @@ function workspaceEffect(over: Partial<WorkspaceStatusInput> = {}): AdapterEffec
       sessionStatus: "thinking",
       controllerGenerationId: "g1",
       activeFaults: [],
-      mergeQueuePosition: 0,
-      mergeQueueDepth: 0,
       mergeLeaseHeld: false,
       mergeStatus: null,
       ...over,
@@ -178,15 +175,21 @@ describe("ingest workspace-state", () => {
   });
 
   it("adopts the merge-queue place beside the phase that names it", () => {
+    // REWRITTEN off the retired flat merge_queue_position / merge_queue_depth
+    // pair onto MergeStatus's `enqueued` arm, which is the only surface those
+    // figures arrive on now. The guarantee is unchanged: the queue place is
+    // adopted from the same revisioned message that named the phase.
     // Arrange
     const store = new ConversationStore();
     // Act
     store.ingest([
-      workspaceEffect({ state: "merge_queued", mergeQueuePosition: 2, mergeQueueDepth: 3 }),
+      workspaceEffect({ state: "merge_queued", mergeStatus: enqueuedStatus(2, 3) }),
     ]);
     // Assert
-    expect(store.state.mergeQueuePosition).toBe(2);
-    expect(store.state.mergeQueueDepth).toBe(3);
+    expect(store.state.mergeStatus?.phase).toEqual({
+      case: "enqueued",
+      value: { position: 2, depth: 3 },
+    });
   });
 
   it("releases the merge lease when a later revision clears it", () => {
@@ -212,16 +215,29 @@ describe("ingest workspace-state", () => {
   });
 
   it("drops the merge-queue place when frontend state is invalidated", () => {
+    // REWRITTEN off the retired flat pair onto the `enqueued` arm that carries
+    // the figures now. The guarantee is unchanged: a queue place that outlived
+    // its freshness lease must not stay on screen.
     // Arrange
     const store = new ConversationStore();
     store.ingest([
-      workspaceEffect({ state: "merge_queued", mergeQueuePosition: 2, mergeQueueDepth: 3 }),
+      workspaceEffect({ state: "merge_queued", mergeStatus: enqueuedStatus(2, 3) }),
     ]);
     // Act
     store.invalidateFrontendState("websocket_disconnected");
     // Assert
-    expect(store.state.mergeQueuePosition).toBe(0);
+    expect(store.state.mergeStatus).toBeNull();
   });
+
+  /** An enqueued merge status at a given place on its repository's queue. */
+  function enqueuedStatus(position: number, depth: number): MergeStatus {
+    return {
+      runId: "run-enqueued",
+      phaseStartedAtMs: 900,
+      updatedAtMs: 1000,
+      phase: { case: "enqueued", value: { position, depth } },
+    };
+  }
 
   // --- the structured merge status -----------------------------------------
 
@@ -404,7 +420,7 @@ describe("ingest workspace-state", () => {
       expect.stringContaining(
         "state=none->ready connectivity=none->operational status=none->thinking generation=g1 " +
           "turn_active=false->false live_tasks=0 faults=none " +
-          "merge_phase= merge_status=none cause_kind=session_started cause_seq=7 at_ms=1234",
+          "merge_lease_held=false merge_status=none cause_kind=session_started cause_seq=7 at_ms=1234",
       ),
     ]);
   });

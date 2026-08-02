@@ -19,13 +19,14 @@
 // rather than as a pile of nil dereferences.
 // ============================================================================
 //
-// WHAT MERGE_STATUS ADDS, and why this suite exists separately from the
-// merge_phase suites beside it. `merge_phase` is one word out of six. It can
-// say `merging`, and it can say `merged`, and it cannot say WHICH commit of
-// how many is being picked, which one conflicted, whether the configured
-// before-action ran, or why a failure failed. MergeStatus is the run's own
-// structured account of itself, and the properties this suite gates are the
-// ones a coarse string could never have carried:
+// WHAT MERGE_STATUS ADDS, and why this suite exists separately from the merge
+// AXIS suites beside it. The axis is one word out of six. It can say `merging`,
+// and it can say `merged`, and it cannot say WHICH commit of how many is being
+// picked, which one conflicted, whether the configured before-action ran, or
+// why a failure failed. That is why the flat `merge_phase` projection of the
+// axis is retired from the wire and MergeStatus is the only merge-run surface:
+// MergeStatus is the run's own structured account of itself, and the properties
+// this suite gates are the ones a coarse word could never have carried:
 //
 //   - the ORDER of the phases (mergepipeline, this file),
 //   - the ACTIONS around the picks (mergeactions),
@@ -35,7 +36,7 @@
 //   - and its SURVIVAL of a daemon bounce (mergestatusdurability).
 //
 // This file is the HELPER HOME for all six, the way mergequeue_e2e_test.go is
-// the helper home for the merge_phase suites. It reuses mergequeue's fixtures,
+// the helper home for the merge-axis suites. It reuses mergequeue's fixtures,
 // mergeWatch and geometry recording READ-ONLY.
 package e2e
 
@@ -398,7 +399,7 @@ func (r *mergeRepo) declareTestSuite(exitCode int) {
 
 // TestE2EMergePipelinePublishesItsPhasesInOrder is SPEC ITEM 1: the happy path
 // walks enqueued → cherry_picking → testing → merged, one WorkspaceState
-// revision per transition, with the structured payload the coarse merge_phase
+// revision per transition, with the structured payload the coarse merge axis
 // could never carry.
 //
 // The before/after action arms are absent here BY CONFIGURATION — this

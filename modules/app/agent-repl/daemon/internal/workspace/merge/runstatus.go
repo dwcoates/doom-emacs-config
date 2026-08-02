@@ -294,8 +294,8 @@ func (r *RunStatus) ResumePlan(full, remaining CommitPlan) error {
 // merge axis distinguishes the two admissions it has always distinguished: a
 // merge admitted at the HEAD stays at `merge_enqueuing` until the cherry-pick
 // itself moves it to `merging`, and only one deferred behind another merge is
-// `merge_queued`. Publishing `merge_queued` for a head admission would tell every
-// merge_phase reader that a merge starting immediately is waiting on something.
+// `merge_queued`. Publishing `merge_queued` for a head admission would resolve a
+// render state saying a merge starting immediately is waiting on something.
 //
 // Any other token is refused rather than published: it would put an `enqueued`
 // arm on a phase that has nothing to do with admission.
@@ -433,8 +433,8 @@ func (r *RunStatus) Failed(cause string) error {
 //
 // PHASE_STARTED_AT_MS IS KEYED ON THE PUBLISHED ARM, NOT ON THE MERGE AXIS.
 // The axis is coarser than the status by design — cherry_picking and testing
-// both ride PhaseMerging, because a frontend reading the one-word merge_phase
-// has no use for the distinction — so keying the clock on it made
+// both ride PhaseMerging, because the render state the axis resolves has no
+// use for the distinction — so keying the clock on it made
 // cherry_picking -> testing a change of arm that claimed to have begun when the
 // PREVIOUS arm did. A user watching "testing for 40s" was reading the age of the
 // pick that preceded it. The arm is what a frontend renders, so the arm is what

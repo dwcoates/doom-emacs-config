@@ -38,9 +38,9 @@ import (
 // scoped to what happened AT OR AFTER a transition rather than to the whole
 // history — the difference between "the lease was released by the terminal
 // phase" and "the lease had not been taken yet when we started looking".
-func (w *mergeWatch) phaseIndex(ws, phase string) int {
+func (w *mergeWatch) phaseIndex(ws string, phase frontendv1.RenderState) int {
 	for i, state := range w.states {
-		if state.GetWorkspace() == ws && state.GetMergePhase() == phase {
+		if state.GetWorkspace() == ws && stateInPhase(state, phase) {
 			return i
 		}
 	}
@@ -73,10 +73,10 @@ func (w *mergeWatch) awaitLeaseHeld(ws string) *frontendv1.WorkspaceState {
 // prompt, forever, with nothing on the wire to say otherwise. So the release is
 // required to be VISIBLE, and it is required to be visible by the time the
 // terminal phase has been reported.
-func (w *mergeWatch) awaitLeaseReleasedAtOrAfter(ws, phase string) *frontendv1.WorkspaceState {
+func (w *mergeWatch) awaitLeaseReleasedAtOrAfter(ws string, phase frontendv1.RenderState) *frontendv1.WorkspaceState {
 	w.t.Helper()
 	var released *frontendv1.WorkspaceState
-	w.until(fmt.Sprintf("a WorkspaceState for %s releasing the merge lease at or after merge_phase=%s", ws, phase), func() bool {
+	w.until(fmt.Sprintf("a WorkspaceState for %s releasing the merge lease at or after %s", ws, phase), func() bool {
 		from := w.phaseIndex(ws, phase)
 		if from < 0 {
 			return false

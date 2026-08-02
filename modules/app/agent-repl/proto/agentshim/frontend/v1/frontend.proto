@@ -346,7 +346,6 @@ message WorkspaceState {
   // Resolution inputs (SSM):
   bool turn_active = 4;
   int64 live_task_count = 5;
-  string merge_phase = 6;
   string cause_kind = 7;  // event kind that caused this transition
   uint64 cause_seq = 8;   // store seq when event-caused (0 = daemon-local)
   int64 at_ms = 9;
@@ -354,14 +353,21 @@ message WorkspaceState {
   SessionStatus status = 11;
   string controller_generation_id = 12;
   repeated RuntimeFault active_faults = 13;
-  // Merge-queue facts. `merge_phase` (6) says WHAT this workspace's merge is
-  // doing; the two fields below say WHERE it sits among the other workspaces
-  // contending for the same repository, which no per-workspace row can carry.
+  // The coarse flat merge trio: RETIRED, superseded by merge_status (18).
   //
-  // The queue is keyed by REPOSITORY, not by worktree: sibling worktrees of
-  // one repo cherry-pick into the same target and therefore share one queue.
-  int32 merge_queue_position = 14;  // 1-based; 0 when not enqueued
-  int32 merge_queue_depth = 15;     // total entries on this repo's queue
+  // `merge_phase` was one word for WHAT a merge was doing, and
+  // `merge_queue_position` / `merge_queue_depth` said WHERE it sat among the
+  // workspaces contending for the same repository. All three were a lossy
+  // re-derivation of facts the merge run itself already publishes: MergeStatus
+  // names a RUN, carries the phase as WHICH oneof arm is set, and reports the
+  // queue place the run was actually ADMITTED at rather than a snapshot
+  // re-read at push time. Two forms of the same fact could disagree on a
+  // frame, so the weaker one is gone rather than kept in sync.
+  //
+  // The merge AXIS is untouched: it still drives RenderState (3) and is still
+  // what MergeStatus is stamped behind.
+  reserved 6, 14, 15;
+  reserved "merge_phase", "merge_queue_position", "merge_queue_depth";
   // Whether merge.Coordinator holds the exclusivity lease on this workspace's
   // shim. While held, USER prompting is blocked (the merge owns the session)
   // and every conversation item the session produces carries
@@ -372,7 +378,7 @@ message WorkspaceState {
   // workspace always carries the instant it merged at.
   //
   // WRITTEN ONCE, at the `merged` transition, and never moved afterwards.
-  // `merge_phase` (6) reports whichever merge row is currently newest and can
+  // merge_status (18) reports whichever run is currently newest and can
   // therefore be superseded; this is the durable record that the merge
   // LANDED, so a later transition on any axis leaves it exactly where it was.
   //
@@ -380,9 +386,9 @@ message WorkspaceState {
   // log, so a frontend ordering a recently-merged section reads the identical
   // instant from every push, snapshot and resync.
   int64 merged_at_ms = 17;
-  // THE merge run's live progress. See MergeStatus: it supersedes the coarse
-  // merge_phase / merge_queue_position / merge_queue_depth trio above, which
-  // stay stamped until the final cutover so both forms coexist for now.
+  // THE merge run's live progress, and the ONLY merge-run surface on this
+  // message. See MergeStatus. The coarse flat trio it replaced is reserved
+  // above; there is no second, weaker form of these facts to disagree with.
   //
   // UNSET means this workspace has no merge to report — the merge axis has
   // never spoken for it, or its axis is cleared. It is never a zero-valued
