@@ -4,7 +4,7 @@
 // mergedurability_e2e_test.go already gates the QUEUE's survival: an entry
 // enqueued behind a parked head is reconstructed by merge.Coordinator.Drain on
 // the next boot and drains without anyone re-submitting it. That test's proof
-// is the coarse merge_phase reaching `merged`.
+// is the merge axis reaching `merged`.
 //
 // This file extends the same pattern to the STRUCTURED status, which is a
 // strictly stronger claim and a genuinely separate risk. A run's MergeStatus
@@ -12,7 +12,7 @@
 // cursor — and every one of those is the kind of thing a naive reconstruction
 // drops on the floor. A second boot that resumed the queue but published a
 // status with no run_id, or a cursor that restarted at zero, would satisfy the
-// merge_phase test completely while leaving every frontend unable to say what
+// merge-axis test completely while leaving every frontend unable to say what
 // the resumed run is doing.
 //
 // WHY THE BOUNCE IS THE ONLY WAY TO ASK. The daemon merges its own repository,
