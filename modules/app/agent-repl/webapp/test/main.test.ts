@@ -163,7 +163,7 @@ describe("the composer's merge gate", () => {
 
   it("surfaces the explanation on a blocked attempt rather than no-opping", () => {
     // Assert — a blocked send that showed nothing would read as a broken app.
-    expect(composerSubmit).toContain("mergeGateNoticeHtml(true)");
+    expect(composerSubmit).toContain("mergeGateNoticeHtml(true, store.state.mergeStatus)");
   });
 
   it("logs the blocked attempt through the canonical logging API", () => {

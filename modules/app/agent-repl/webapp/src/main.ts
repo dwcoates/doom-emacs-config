@@ -33,6 +33,7 @@ import {
   mergeGateSendTitle,
   submitBlocked,
 } from "./merge-gate.js";
+import { mergeStatusLogValue } from "./merge-status.js";
 import { configureChessGames, installChessNavHook } from "./chess-game.js";
 import { RenderCoalescer, windowFrameHost } from "./coalesce.js";
 import { SmoothReveal } from "./smooth.js";
@@ -469,6 +470,10 @@ async function boot(): Promise<void> {
     // renderer's own gate reading (idle + live async), read back here so the
     // rail mirrors the feed the last render already partitioned.
     sidebar.setMonitoring(feed.isMonitoring());
+    // THE RAIL LEADS ON MERGES, so it gets the structured status too: the
+    // recycle glyph said only "a merge is happening", identically for a run on
+    // its last commit and a run parked on a conflict.
+    sidebar.setMergeStatus(s.mergeStatus);
     // THE progress footer. Rendered on the chrome cadence (not the feed's), so
     // a dock rewrite never rides a feed reconcile. It reads the daemon's
     // resolved view plus the two rosters and the feed items the activity cell
@@ -482,6 +487,9 @@ async function boot(): Promise<void> {
       // the same reason the phase does: two copies would drift.
       mergeQueuePosition: s.mergeQueuePosition,
       mergeQueueDepth: s.mergeQueueDepth,
+      // THE structured status, on the same revisioned message as both of the
+      // above. Where it is present the footer reads it in preference to them.
+      mergeStatus: s.mergeStatus,
       connectivity: s.sessionConnectivity,
       sessionStatus: s.sessionStatus,
       agents: sessionSubagents(s.items),
@@ -493,7 +501,8 @@ async function boot(): Promise<void> {
     const footerStateSignature =
       `${s.renderState ?? "none"}|${s.sessionConnectivity ?? "none"}|` +
       `${s.sessionStatus ?? "none"}|${interruptOutcome}|` +
-      `${s.mergeQueuePosition}/${s.mergeQueueDepth}|${s.mergeLeaseHeld}`;
+      `${s.mergeQueuePosition}/${s.mergeQueueDepth}|${s.mergeLeaseHeld}|` +
+      mergeStatusLogValue(s.mergeStatus);
     if (footerStateSignature !== lastFooterStateSignature) {
       clog(
         "info",
@@ -504,7 +513,8 @@ async function boot(): Promise<void> {
           `faults=${s.activeFaults.map((fault) => `${fault.component}/${fault.faultType}`).join(",") || "none"} ` +
           `interrupt_outcome=${interruptOutcome} ` +
           `merge_queue=${s.mergeQueuePosition}/${s.mergeQueueDepth} ` +
-          `merge_lease_held=${s.mergeLeaseHeld} session=${s.sessionId}`,
+          `merge_lease_held=${s.mergeLeaseHeld} ` +
+          `merge_status=${mergeStatusLogValue(s.mergeStatus)} session=${s.sessionId}`,
         {
           phase: s.renderState ?? "none",
           connectivity: s.sessionConnectivity ?? "none",
@@ -515,6 +525,7 @@ async function boot(): Promise<void> {
           merge_queue_position: s.mergeQueuePosition,
           merge_queue_depth: s.mergeQueueDepth,
           merge_lease_held: s.mergeLeaseHeld,
+          merge_status: mergeStatusLogValue(s.mergeStatus),
           session_id: s.sessionId,
         },
       );
@@ -581,9 +592,9 @@ async function boot(): Promise<void> {
     // the webview with composer=0 and there are no controls to gate).
     if (composerEls !== null) {
       const blocked = submitBlocked(s.mergeLeaseHeld);
-      composerEls.notice.innerHTML = mergeGateNoticeHtml(s.mergeLeaseHeld);
+      composerEls.notice.innerHTML = mergeGateNoticeHtml(s.mergeLeaseHeld, s.mergeStatus);
       composerEls.send.disabled = blocked;
-      composerEls.send.title = mergeGateSendTitle(s.mergeLeaseHeld);
+      composerEls.send.title = mergeGateSendTitle(s.mergeLeaseHeld, s.mergeStatus);
     }
     spinnerEl.classList.toggle("on", s.turnInFlight);
     // The centered "current objective" label (§2.14): textContent (not
@@ -1183,11 +1194,11 @@ async function boot(): Promise<void> {
       // immediate explanation. The draft is deliberately KEPT — the user
       // will want to send it once the merge finishes.
       if (submitBlocked(store.state.mergeLeaseHeld)) {
-        clog("warn", mergeGateBlockedLog(text.length));
+        clog("warn", mergeGateBlockedLog(text.length, store.state.mergeStatus));
         // The standing notice is already the explanation; re-assert it in case
         // this attempt raced a frame that had not painted it yet, so an
         // attempted send NEVER reads as nothing having happened.
-        composerEls.notice.innerHTML = mergeGateNoticeHtml(true);
+        composerEls.notice.innerHTML = mergeGateNoticeHtml(true, store.state.mergeStatus);
         return;
       }
       submitPrompt(text);
