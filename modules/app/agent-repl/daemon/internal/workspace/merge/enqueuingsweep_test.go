@@ -76,7 +76,7 @@ func TestDrainLeavesAnEnqueuingMarkWithADurableEntryAlone(t *testing.T) {
 	// Assert — the merge is driven, and the drive is what proves nothing failed
 	// it: the sweep would have had to record merge_failed BEFORE Drain returned,
 	// so a merge reaching the picker with an empty sink is the retention.
-	if got := <-h.picker.merges; got != req {
+	if got := <-h.picker.merges; !sameRequest(got, req) {
 		t.Fatalf("driven merge = %+v, want %+v", got, req)
 	}
 	select {
