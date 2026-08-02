@@ -40,8 +40,8 @@ func TestMergeResolutionReturnsWhenItsOwnTurnEnds(t *testing.T) {
 	}()
 	<-submitted
 	d := h.controller()
-	h.m.onTurnEvent(d, true, "t1")
-	h.m.onTurnEvent(d, false, "t1")
+	h.m.onTurnEvent(d, true, "t1", turnOutcome{})
+	h.m.onTurnEvent(d, false, "t1", turnOutcome{})
 
 	// Assert.
 	if err := <-done; err != nil {
@@ -59,10 +59,10 @@ func TestMergeResolutionIgnoresAnotherTurnsEnd(t *testing.T) {
 	}()
 	<-submitted
 	d := h.controller()
-	h.m.onTurnEvent(d, true, "t1")
+	h.m.onTurnEvent(d, true, "t1", turnOutcome{})
 
 	// Act — a different turn ends.
-	h.m.onTurnEvent(d, false, "t2")
+	h.m.onTurnEvent(d, false, "t2", turnOutcome{})
 
 	// Assert — the wait stands until ITS turn ends.
 	select {
@@ -70,7 +70,7 @@ func TestMergeResolutionIgnoresAnotherTurnsEnd(t *testing.T) {
 		t.Fatalf("SubmitMergePromptAwaitingTurn returned %v on another turn's end", err)
 	default:
 	}
-	h.m.onTurnEvent(d, false, "t1")
+	h.m.onTurnEvent(d, false, "t1", turnOutcome{})
 	if err := <-done; err != nil {
 		t.Fatalf("SubmitMergePromptAwaitingTurn = %v, want nil", err)
 	}
@@ -89,7 +89,7 @@ func TestMergeResolutionIgnoresATurnThatStartedBeforeItArmed(t *testing.T) {
 	d := h.controller()
 
 	// Act — the older turn's end arrives with no start observed after arming.
-	h.m.onTurnEvent(d, false, "t0")
+	h.m.onTurnEvent(d, false, "t0", turnOutcome{})
 
 	// Assert — it wakes nothing, and the resolution's own turn still does.
 	select {
@@ -97,8 +97,8 @@ func TestMergeResolutionIgnoresATurnThatStartedBeforeItArmed(t *testing.T) {
 		t.Fatalf("SubmitMergePromptAwaitingTurn returned %v on the interrupted turn's end", err)
 	default:
 	}
-	h.m.onTurnEvent(d, true, "t1")
-	h.m.onTurnEvent(d, false, "t1")
+	h.m.onTurnEvent(d, true, "t1", turnOutcome{})
+	h.m.onTurnEvent(d, false, "t1", turnOutcome{})
 	if err := <-done; err != nil {
 		t.Fatalf("SubmitMergePromptAwaitingTurn = %v, want nil", err)
 	}
@@ -178,8 +178,8 @@ func TestResolveMergeConflictSubmitsThePromptAndCompletesOnItsTurn(t *testing.T)
 	}()
 	<-submitted
 	d := h.controller()
-	h.m.onTurnEvent(d, true, "t1")
-	h.m.onTurnEvent(d, false, "t1")
+	h.m.onTurnEvent(d, true, "t1", turnOutcome{})
+	h.m.onTurnEvent(d, false, "t1", turnOutcome{})
 
 	// Assert — the agent was told what to resolve, under a merge origin.
 	if err := <-done; err != nil {
@@ -242,8 +242,8 @@ func TestResolveMergeTestFailureSubmitsThePromptAndCompletesOnItsTurn(t *testing
 	}()
 	<-submitted
 	d := h.controller()
-	h.m.onTurnEvent(d, true, "t1")
-	h.m.onTurnEvent(d, false, "t1")
+	h.m.onTurnEvent(d, true, "t1", turnOutcome{})
+	h.m.onTurnEvent(d, false, "t1", turnOutcome{})
 
 	// Assert — the agent was told which commit broke what, under a merge origin.
 	if err := <-done; err != nil {
@@ -306,5 +306,64 @@ func TestResolveMergeTestFailureTurnThatNeverEndsIsAnError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "never reported its end") {
 		t.Fatalf("error = %q, want it to name the turn that never ended", err)
+	}
+}
+
+// --- a turn that ENDED BADLY ---------------------------------------------
+
+// THE GUARANTEE: an errored turn is reported as an error, not as a completed
+// action. "The turn ended" is not "the turn worked", and a merge action is a
+// turn the run demanded: reporting an errored before-action as complete lands a
+// cherry-pick plan the action was meant to change, and reporting an errored
+// after-action as complete never reaches after_action_error at all.
+func TestAMergeTurnThatEndsInErrorIsReportedAsAFailure(t *testing.T) {
+	// Arrange.
+	h := newMergeResolveHarness(t)
+	submitted := submitHook(h)
+	done := make(chan error, 1)
+
+	// Act — the turn ends, carrying its own failure.
+	go func() {
+		done <- h.m.RunMergeBeforeAction(context.Background(), merge.BeforeAction{
+			Workspace: "ws", RequestID: "req-1", Prompt: "run the pre-merge checks",
+		})
+	}()
+	<-submitted
+	d := h.controller()
+	h.m.onTurnEvent(d, true, "t1", turnOutcome{})
+	h.m.onTurnEvent(d, false, "t1", turnOutcome{isError: true, stopReason: "error_during_execution"})
+
+	// Assert.
+	err := <-done
+	if err == nil {
+		t.Fatal("RunMergeBeforeAction() = nil for a turn that ended in error: the failure was swallowed")
+	}
+	if !strings.Contains(err.Error(), "error_during_execution") {
+		t.Fatalf("error = %q, want it to carry the turn's own stop reason", err)
+	}
+}
+
+// The mirror edge: a turn that ends CLEANLY is still reported as complete, so
+// the check above cannot have been bought by failing every action.
+func TestAMergeTurnThatEndsCleanlyIsReportedAsComplete(t *testing.T) {
+	// Arrange.
+	h := newMergeResolveHarness(t)
+	submitted := submitHook(h)
+	done := make(chan error, 1)
+
+	// Act.
+	go func() {
+		done <- h.m.RunMergeBeforeAction(context.Background(), merge.BeforeAction{
+			Workspace: "ws", RequestID: "req-1", Prompt: "run the pre-merge checks",
+		})
+	}()
+	<-submitted
+	d := h.controller()
+	h.m.onTurnEvent(d, true, "t1", turnOutcome{})
+	h.m.onTurnEvent(d, false, "t1", turnOutcome{stopReason: "end_turn"})
+
+	// Assert.
+	if err := <-done; err != nil {
+		t.Fatalf("RunMergeBeforeAction() = %v, want nil for a turn that ended cleanly", err)
 	}
 }

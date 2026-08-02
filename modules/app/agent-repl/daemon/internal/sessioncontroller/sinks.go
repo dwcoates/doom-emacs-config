@@ -325,7 +325,7 @@ type consumer struct {
 	//
 	// Called on the shim read-loop goroutine, with the same non-blocking
 	// obligation onTurn carries.
-	onTurnEvent func(started bool, turnID string)
+	onTurnEvent func(started bool, turnID string, outcome turnOutcome)
 	// onBackfill reports a never-blue backfill transition (F2), once per
 	// distinct state. The controller persists it and re-pushes the SessionView.
 	onBackfill func(state string)
@@ -654,7 +654,13 @@ func (c *consumer) Apply(ev *corev1.Event) error {
 	// would otherwise never see it begin.
 	if turnResult != nil && c.onTurnEvent != nil {
 		_, started := ev.GetPayload().(*corev1.Event_TurnStarted)
-		c.onTurnEvent(started, turnResult.correlation)
+		// The end's own verdict rides with it. A waiter that only learned a turn
+		// ended could not tell a completed merge action from an errored one.
+		var outcome turnOutcome
+		if ended := ev.GetTurnEnded(); ended != nil {
+			outcome = turnOutcome{isError: ended.GetIsError(), stopReason: ended.GetStopReason()}
+		}
+		c.onTurnEvent(started, turnResult.correlation, outcome)
 	}
 	if applyState {
 		c.applyProgress(ev)
