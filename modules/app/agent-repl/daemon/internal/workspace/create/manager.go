@@ -24,11 +24,40 @@ type Config struct {
 	Logf        func(string, ...any)
 }
 
+// routedJobBuffer is how many job ids the creation worker may fall behind by
+// before the router stops naming them individually and falls back to the
+// coalesced store sweep.  It is a throughput knob and nothing more: the durable
+// job store is the source of truth, so a dropped id costs a re-list and never a
+// lost workspace.
+const routedJobBuffer = 256
+
 // Manager drives durable workspace creation jobs to the next safe boundary.
 // It has no dependency on frontend/server or sessioncontroller so ownership remains
 // unambiguous: this package owns creation; other packages supply adapters.
+//
+// EXECUTION IS OWNED BY WORKERS, NEVER BY A CALLER.  Every path that wants a
+// job advanced — the command-file router, an interactive create, a
+// materialization ACK, boot resume — ROUTES the job's id and returns.
+// RunCreationWorker is the single goroutine that runs the state machine, so a
+// job wedged inside Process can only ever stall creation, never the ingress
+// that feeds it.  Publication of host actions has its own worker for the same
+// reason.
 type Manager struct {
 	cfg Config
+
+	// jobs carries routed job IDS ONLY.  The durable store stays the source of
+	// truth: a bounce replays from disk, so nothing but an id is ever in
+	// flight.
+	jobs chan string
+	// sweep is the coalesced "re-list the non-terminal jobs" signal.  It is
+	// what makes routing total without ever blocking: when jobs is full the
+	// router raises this instead, and the worker recovers the ids from the
+	// store.  Capacity one because the worker re-lists after every wake, so a
+	// coalesced pair of signals loses nothing.
+	sweep chan struct{}
+	// hostWake is the coalesced "there are host actions to publish" signal,
+	// consumed by RunHostActionWorker.  Same shape and same reasoning as sweep.
+	hostWake chan struct{}
 
 	// running serializes every durable transition for one job.  Inbox polling,
 	// interactive submission, restart recovery, and a materialization ACK can
@@ -61,7 +90,207 @@ func NewManager(cfg Config) (*Manager, error) {
 	case cfg.Logf == nil:
 		return nil, fmt.Errorf("workspace create: manager needs a logger")
 	}
-	return &Manager{cfg: cfg, running: map[string]bool{}}, nil
+	return &Manager{
+		cfg:      cfg,
+		jobs:     make(chan string, routedJobBuffer),
+		sweep:    make(chan struct{}, 1),
+		hostWake: make(chan struct{}, 1),
+		running:  map[string]bool{},
+	}, nil
+}
+
+// RouteJob hands one job id to the creation worker.  IT NEVER BLOCKS, which is
+// the whole point: its callers are ingress paths (the command-file router, a
+// frontend command, a materialization ACK) and a creation worker stuck on a
+// wedged job must not be able to stop them.
+//
+// A full buffer degrades to the coalesced sweep rather than to a drop: the id
+// is recoverable from the durable store, and the worker re-lists every
+// non-terminal job when it sees the signal.
+func (m *Manager) RouteJob(id string) {
+	if id == "" {
+		m.cfg.Logf("workspace-create: ROUTE REFUSED empty job id")
+		return
+	}
+	select {
+	case m.jobs <- id:
+		m.cfg.Logf("workspace-create: routed job id=%s queued=%d", id, len(m.jobs))
+	default:
+		m.cfg.Logf("workspace-create: creation worker BEHIND buffer=%d id=%s; falling back to a store sweep", cap(m.jobs), id)
+		m.RouteSweep()
+	}
+}
+
+// RouteSweep asks the creation worker to re-derive its work from the durable
+// store.  Nonblocking and coalescing.
+func (m *Manager) RouteSweep() {
+	select {
+	case m.sweep <- struct{}{}:
+	default:
+	}
+}
+
+// RouteHostActions asks the host-action worker to publish whatever the store
+// holds.  Nonblocking and coalescing, so neither the command-file router nor
+// the creation worker can be stalled by a slow or absent host.
+func (m *Manager) RouteHostActions() {
+	select {
+	case m.hostWake <- struct{}{}:
+	default:
+	}
+}
+
+// RunCreationWorker is THE owner of Process.  It resumes every non-terminal job
+// through the same channel a fresh command uses, then serves routed ids until
+// CTX ends.
+//
+// One poisoned job is contained here and nowhere else: ErrJobFailed is already
+// durable, logged, and surfaced to the host, so the worker takes the next id.
+// A structural failure cannot be handed anywhere either — this goroutine has no
+// caller to return it to — so it is logged loudly and the worker keeps serving,
+// because a daemon that stops creating workspaces silently is strictly worse
+// than one that keeps trying and says why each time.
+func (m *Manager) RunCreationWorker(ctx context.Context) error {
+	m.cfg.Logf("workspace-create: creation worker STARTED buffer=%d", cap(m.jobs))
+	m.resumeAtBoot()
+	for {
+		for m.drainOnce(ctx) {
+		}
+		select {
+		case <-ctx.Done():
+			m.cfg.Logf("workspace-create: creation worker STOPPED: %v", ctx.Err())
+			return ctx.Err()
+		case id := <-m.jobs:
+			m.runRouted(ctx, id)
+		case <-m.sweep:
+			m.sweepStore(ctx)
+		}
+	}
+}
+
+// RunHostActionWorker is THE owner of DrainHostActions.  Publication is
+// deliberately off both the command-file router and the creation worker: a host
+// that is slow to accept an action must not delay the next command file or the
+// next workspace.
+func (m *Manager) RunHostActionWorker(ctx context.Context) error {
+	m.cfg.Logf("workspace-create: host-action worker STARTED")
+	m.RouteHostActions()
+	for {
+		for m.drainHostOnce(ctx) {
+		}
+		select {
+		case <-ctx.Done():
+			m.cfg.Logf("workspace-create: host-action worker STOPPED: %v", ctx.Err())
+			return ctx.Err()
+		case <-m.hostWake:
+			m.publishHostActions(ctx)
+		}
+	}
+}
+
+// drainOnce serves at most one pending creation signal WITHOUT blocking,
+// reporting whether it found work.  RunCreationWorker loops it to quiescence
+// before parking; tests loop it to run the worker's exact behavior
+// deterministically on the calling goroutine.
+func (m *Manager) drainOnce(ctx context.Context) bool {
+	select {
+	case id := <-m.jobs:
+		m.runRouted(ctx, id)
+		return true
+	default:
+	}
+	select {
+	case <-m.sweep:
+		m.sweepStore(ctx)
+		return true
+	default:
+	}
+	return false
+}
+
+// drainHostOnce is drainHostActions' nonblocking half; see drainOnce.
+func (m *Manager) drainHostOnce(ctx context.Context) bool {
+	select {
+	case <-m.hostWake:
+		m.publishHostActions(ctx)
+		return true
+	default:
+	}
+	return false
+}
+
+// runRouted advances one routed job and CONTAINS its failure.  A job-level
+// failure is already durable and surfaced; a structural one is logged loudly.
+// Neither may end the worker, because the next id in the channel belongs to a
+// different workspace that has nothing to do with this one.
+func (m *Manager) runRouted(ctx context.Context, id string) {
+	err := m.Process(ctx, id)
+	switch {
+	case err == nil:
+	case errors.Is(err, ErrJobFailed):
+		m.cfg.Logf("workspace-create: CONTAINED job failure id=%s error=%v; creation worker continuing", id, err)
+	default:
+		m.cfg.Logf("workspace-create: creation worker STRUCTURAL FAILURE id=%s error=%v; the job stays in the store and the worker continues", id, err)
+	}
+}
+
+// resumeAtBoot restarts every non-terminal job by ROUTING its id, so recovery
+// and fresh ingestion travel one path.  The external collaborators are
+// idempotent by job ID, which closes the crash gap between performing an effect
+// and persisting its succeeding state transition.
+func (m *Manager) resumeAtBoot() {
+	ids, err := m.resumableIDs()
+	if err != nil {
+		m.cfg.Logf("workspace-create: BOOT RESUME FAILED error=%v; no job is lost (the store still holds them) but none is resumed until the next sweep", err)
+		return
+	}
+	m.cfg.Logf("workspace-create: boot resume routing jobs=%d", len(ids))
+	for _, id := range ids {
+		m.RouteJob(id)
+	}
+	// Retained host work is published by its own worker, which signals itself
+	// at start; the creation worker deliberately does not reach into it.
+	m.RouteHostActions()
+}
+
+// sweepStore recovers the work a full route buffer could not name individually.
+func (m *Manager) sweepStore(ctx context.Context) {
+	ids, err := m.resumableIDs()
+	if err != nil {
+		m.cfg.Logf("workspace-create: SWEEP FAILED error=%v; re-raising the sweep so the work is not stranded", err)
+		m.RouteSweep()
+		return
+	}
+	m.cfg.Logf("workspace-create: sweep processing jobs=%d", len(ids))
+	for _, id := range ids {
+		m.runRouted(ctx, id)
+	}
+}
+
+// resumableIDs lists the ids of every job that is not resting on a terminal or
+// host-owned boundary.
+func (m *Manager) resumableIDs() ([]string, error) {
+	jobs, err := m.cfg.Store.List()
+	if err != nil {
+		return nil, fmt.Errorf("workspace create: list jobs for resume: %w", err)
+	}
+	ids := make([]string, 0, len(jobs))
+	for _, job := range jobs {
+		if job.State == StateReady || job.State == StateFailed || job.State == StateAwaitingEmacs {
+			continue
+		}
+		m.cfg.Logf("workspace-create: resumable job id=%s state=%s name=%q", job.ID, job.State, job.Request.Name)
+		ids = append(ids, job.ID)
+	}
+	return ids, nil
+}
+
+// publishHostActions runs one drain and contains its failure: a retained action
+// stays pending in the store, so the next signal redelivers it.
+func (m *Manager) publishHostActions(ctx context.Context) {
+	if err := m.DrainHostActions(ctx); err != nil {
+		m.cfg.Logf("workspace-create: host-action publication FAILED error=%v; the actions stay pending and are redelivered on the next signal", err)
+	}
 }
 
 // EnqueueInteractiveCreate durably accepts one frontend create command before
@@ -86,53 +315,28 @@ func (m *Manager) EnqueueInteractiveCreate(requestID string, request Request) (J
 	return persisted, inserted, nil
 }
 
-// StartInteractiveCreate queues the job durably, then advances it in a
-// goroutine.  CTX must be the daemon lifetime context, never a short-lived
-// frontend request context: an HTTP/UDS ACK is allowed to return immediately.
-func (m *Manager) StartInteractiveCreate(ctx context.Context, requestID string, request Request) (Job, bool, error) {
+// StartInteractiveCreate queues the job durably, then ROUTES it to the creation
+// worker.  It does not spawn a goroutine of its own: creation has exactly one
+// owner, and a frontend command that started a second one would race the
+// worker for the same state machine.  An HTTP/UDS ACK returns immediately
+// either way.
+func (m *Manager) StartInteractiveCreate(_ context.Context, requestID string, request Request) (Job, bool, error) {
 	job, inserted, err := m.EnqueueInteractiveCreate(requestID, request)
 	if err != nil || !inserted {
 		return job, inserted, err
 	}
-	go func() {
-		if processErr := m.Process(ctx, job.ID); processErr != nil {
-			m.cfg.Logf("workspace-create: interactive job FAILED id=%s request=%s error=%v", job.ID, requestID, processErr)
-		}
-	}()
+	m.cfg.Logf("workspace-create: interactive create routed id=%s request=%s", job.ID, requestID)
+	m.RouteJob(job.ID)
 	return job, true, nil
-}
-
-// Resume restarts every non-terminal job after daemon startup.  The external
-// collaborators are idempotent by job ID, which closes the crash gap between
-// performing an effect and persisting its succeeding state transition.
-func (m *Manager) Resume(ctx context.Context) error {
-	jobs, err := m.cfg.Store.List()
-	if err != nil {
-		return fmt.Errorf("workspace create: list jobs for resume: %w", err)
-	}
-	for _, job := range jobs {
-		if job.State == StateReady || job.State == StateFailed || job.State == StateAwaitingEmacs {
-			continue
-		}
-		m.cfg.Logf("workspace-create: resuming job id=%s state=%s name=%q", job.ID, job.State, job.Request.Name)
-		if err := m.Process(ctx, job.ID); err != nil {
-			// THE classification line: a job-level failure is already durable,
-			// logged, and surfaced to the host, so resuming the REMAINING jobs
-			// is the correct next move.  One poisoned job must never stop the
-			// subsystem.  Anything else is structural and still propagates.
-			if errors.Is(err, ErrJobFailed) {
-				m.cfg.Logf("workspace-create: CONTAINED job failure id=%s name=%q error=%v; continuing with remaining jobs", job.ID, job.Request.Name, err)
-				continue
-			}
-			return err
-		}
-	}
-	return m.DrainHostActions(ctx)
 }
 
 // Process advances one job until it is waiting on Emacs, ready, or failed.
 // It never creates an implicit alternate path: every missing prerequisite is
 // terminally recorded and returned to the caller.
+//
+// CALL IT FROM THE CREATION WORKER ONLY.  Every other path routes an id (see
+// RouteJob); the per-id running guard below is a second line of defense, not an
+// invitation to add owners.
 func (m *Manager) Process(ctx context.Context, id string) error {
 	m.mu.Lock()
 	if m.running[id] {
@@ -314,8 +518,11 @@ func (m *Manager) process(ctx context.Context, id string) error {
 	}
 }
 
-// MarkMaterialized records Emacs' acknowledgement.  Calling it repeatedly is
-// safe: a replayed ACK cannot resubmit an already-delivered initial prompt.
+// MarkMaterialized records Emacs' acknowledgement and ROUTES the job onward.
+// Calling it repeatedly is safe: a replayed ACK cannot resubmit an
+// already-delivered initial prompt.  The ACK's own transition is durable before
+// this returns; advancing past it belongs to the creation worker, so a frontend
+// command is never the thread that submits an initial prompt.
 func (m *Manager) MarkMaterialized(ctx context.Context, id string) error {
 	job, ok, err := m.cfg.Store.Get(id)
 	if err != nil {
