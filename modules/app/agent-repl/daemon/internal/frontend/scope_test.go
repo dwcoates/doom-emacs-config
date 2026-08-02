@@ -308,3 +308,23 @@ func TestFilterSnapshotHandlesNilAndSessionlessRecoveryViews(t *testing.T) {
 		t.Fatalf("sessionless recovery views = %+v, want only /w", got.GetSessions())
 	}
 }
+
+func TestFilterSnapshotPreservesDaemonIdentity(t *testing.T) {
+	// Arrange — DaemonView is connection-global, not workspace-scoped.
+	// Dropping it handed scoped webviews a snapshot with an empty boot id,
+	// which their version-skew gate rejects on every adoption — aborting the
+	// post-adoption conversation resync and leaving the pane empty.
+	sc := Scope{SessionID: "s_current", Workspace: "/w"}
+	snap := &frontendv1.StateSnapshot{
+		Daemon:   &frontendv1.DaemonView{BootId: "boot-1"},
+		Sessions: []*frontendv1.SessionView{{Workspace: "/w"}},
+	}
+
+	// Act
+	got := filterSnapshot(snap, sc)
+
+	// Assert
+	if got.GetDaemon().GetBootId() != "boot-1" {
+		t.Fatalf("filtered snapshot daemon = %+v, want boot id boot-1 preserved", got.GetDaemon())
+	}
+}
