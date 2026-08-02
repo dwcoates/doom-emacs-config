@@ -8,6 +8,7 @@ import (
 
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 
+	"claude-repld/internal/workspace/geometry"
 	"claude-repld/internal/workspace/merge"
 )
 
@@ -220,7 +221,9 @@ func TestMergeWithoutAWiredStateSinkIsRefused(t *testing.T) {
 func TestMergeFailedRecordFailureIsJoinedOntoTheNack(t *testing.T) {
 	// Arrange — the mark lands, the terminal record does not, and the enqueue
 	// is refused.
-	g := &fakeGeometry{}
+	g := &fakeGeometry{records: map[string]geometry.Record{
+		"ws1": {Workspace: "ws1", SourceBranch: "DWC/x", SourceDir: "/worktrees/x", TargetDir: "/repo", Origin: geometry.OriginCreated},
+	}}
 	m := &fakeMerges{enqueueErr: errors.New("disk full")}
 	states := &fakeMergeStates{failPhase: merge.PhaseMergeFailed}
 	h, err := newCommandHandler(&fakePrompts{}, m, &fakeLifecycle{}, nil, &fakeSessionCmds{}, nil, nil, nil,
@@ -229,9 +232,7 @@ func TestMergeFailedRecordFailureIsJoinedOntoTheNack(t *testing.T) {
 		t.Fatalf("newCommandHandler: %v", err)
 	}
 	// Act
-	got := h.MergeWorkspace(context.Background(), "ws1", "r1", &frontendv1.MergeWorkspaceCmd{
-		SourceBranch: "DWC/x", SourceDir: "/worktrees/x", TargetDir: "/repo",
-	})
+	got := h.MergeWorkspace(context.Background(), "ws1", "r1", &frontendv1.MergeWorkspaceCmd{})
 
 	// Assert — neither failure hides the other.
 	if got == nil || !strings.Contains(got.Error(), "disk full") ||

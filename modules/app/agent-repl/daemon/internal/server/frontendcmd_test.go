@@ -543,61 +543,6 @@ func TestCommandHandlerMergeResolvedContinueRoutesToResume(t *testing.T) {
 	}
 }
 
-// A caller that states all three coordinates is honored verbatim. That is
-// explicit caller input, not a fallback: the integration suites drive merges
-// against fixture repositories the daemon never created, and dropping a stated
-// geometry is what left every merge unrunnable before the daemon owned the map.
-
-func TestCommandHandlerMergeCarriesTheCommandGeometry(t *testing.T) {
-	// Arrange
-	h, _, m, _ := newTestHandler(t)
-	// Act
-	_ = h.MergeWorkspace(context.Background(), "/ws/ws1", "r1", &frontendv1.MergeWorkspaceCmd{
-		Handler:       "cherry-pick",
-		WorkspaceName: "ws1",
-		SourceBranch:  "DWC/feature-one",
-		SourceDir:     "/worktrees/feature-one",
-		TargetDir:     "/repo",
-	})
-	// Assert
-	want := merge.Request{
-		Workspace:    "/ws/ws1",
-		Name:         "ws1",
-		SourceBranch: "DWC/feature-one",
-		SourceDir:    "/worktrees/feature-one",
-		TargetDir:    "/repo",
-	}
-	if len(m.merged) != 1 || m.merged[0] != want {
-		t.Fatalf("merge request = %+v, want %+v", m.merged, want)
-	}
-}
-
-func TestCommandHandlerResumeCarriesTheCommandGeometry(t *testing.T) {
-	// Arrange — the daemon is stateless per call, so a resume must re-receive
-	// the same geometry rather than remembering the merge it continues.
-	h, _, m, _ := newTestHandler(t)
-	// Act
-	_ = h.MergeWorkspace(context.Background(), "/ws/ws1", "r1", &frontendv1.MergeWorkspaceCmd{
-		Handler:                  "cherry-pick",
-		ConflictResolvedContinue: true,
-		WorkspaceName:            "ws1",
-		SourceBranch:             "DWC/feature-one",
-		SourceDir:                "/worktrees/feature-one",
-		TargetDir:                "/repo",
-	})
-	// Assert
-	want := merge.Request{
-		Workspace:    "/ws/ws1",
-		Name:         "ws1",
-		SourceBranch: "DWC/feature-one",
-		SourceDir:    "/worktrees/feature-one",
-		TargetDir:    "/repo",
-	}
-	if len(m.resumed) != 1 || m.resumed[0] != want {
-		t.Fatalf("resume request = %+v, want %+v", m.resumed, want)
-	}
-}
-
 // --- merge geometry resolution ---------------------------------------------
 
 func TestBareMergeResolvesTheRecordedGeometry(t *testing.T) {
@@ -638,32 +583,6 @@ func TestBareResumeResolvesTheRecordedGeometry(t *testing.T) {
 	}
 }
 
-func TestACommandStatedGeometryIsHonoredOverTheRecord(t *testing.T) {
-	// Arrange — an explicit caller (the integration suites) names all three
-	// against a repository the daemon never created.
-	h, m, g, _ := newMergeTestHandler(t)
-
-	// Act.
-	err := h.MergeWorkspace(context.Background(), "ws1", "r1", &frontendv1.MergeWorkspaceCmd{
-		WorkspaceName: "ws1",
-		SourceBranch:  "DWC/stated",
-		SourceDir:     "/fixture/source",
-		TargetDir:     "/fixture/target",
-	})
-
-	// Assert — the stated coordinates win, and the record is never consulted.
-	if err != nil {
-		t.Fatalf("MergeWorkspace: %v", err)
-	}
-	want := merge.Request{Workspace: "ws1", Name: "ws1", SourceBranch: "DWC/stated", SourceDir: "/fixture/source", TargetDir: "/fixture/target"}
-	if len(m.merged) != 1 || m.merged[0] != want {
-		t.Fatalf("merge request = %+v, want %+v", m.merged, want)
-	}
-	if len(g.lookups) != 0 {
-		t.Fatalf("geometry lookups = %v, want none for a stated geometry", g.lookups)
-	}
-}
-
 func TestAMergeForAnUnrecordedWorkspaceIsRefusedWithAnExplanation(t *testing.T) {
 	// Arrange.
 	h, m, _, _ := newMergeTestHandler(t)
@@ -680,26 +599,6 @@ func TestAMergeForAnUnrecordedWorkspaceIsRefusedWithAnExplanation(t *testing.T) 
 	}
 	if len(m.merged) != 0 || len(m.resumed) != 0 {
 		t.Fatalf("a merge ran without geometry: merged=%v resumed=%v", m.merged, m.resumed)
-	}
-}
-
-func TestAPartiallyStatedGeometryIsRefusedRatherThanCompleted(t *testing.T) {
-	// Arrange — half a caller-stated geometry is a caller bug, and mixing it
-	// with the record would land the pick somewhere neither owner named.
-	h, m, g, _ := newMergeTestHandler(t)
-
-	// Act.
-	err := h.MergeWorkspace(context.Background(), "ws1", "r1", &frontendv1.MergeWorkspaceCmd{
-		WorkspaceName: "ws1",
-		SourceBranch:  "DWC/stated",
-	})
-
-	// Assert.
-	if err == nil || !strings.Contains(err.Error(), "only part of its geometry") {
-		t.Fatalf("MergeWorkspace error = %v, want a partial-geometry refusal", err)
-	}
-	if len(m.merged) != 0 || len(g.lookups) != 0 {
-		t.Fatalf("the partial command was completed anyway: merged=%v lookups=%v", m.merged, g.lookups)
 	}
 }
 
@@ -741,15 +640,19 @@ func TestMergeStateIsKeyedOnTheEnvelopeWorkspaceNotTheName(t *testing.T) {
 	// merge's rows under a workspace the SSM knew nothing else about, so its
 	// WorkspaceState carried no connectivity verdict and Emacs refused the
 	// frame. The merge landed on disk and its workspace was never torn down.
-	// Arrange
-	h, _, m, _ := newTestHandler(t)
+	// Arrange — the workspace's geometry is the daemon's own record, keyed by
+	// the cwd the envelope carries.
+	h, m, g, _ := newMergeTestHandler(t)
+	g.records["/Users/me/worktrees/feature-one"] = geometry.Record{
+		Workspace:    "/Users/me/worktrees/feature-one",
+		SourceBranch: "DWC/feature-one",
+		SourceDir:    "/Users/me/worktrees/feature-one",
+		TargetDir:    "/repo",
+		Origin:       geometry.OriginCreated,
+	}
 	// Act
 	_ = h.MergeWorkspace(context.Background(), "/Users/me/worktrees/feature-one", "r1", &frontendv1.MergeWorkspaceCmd{
-		Handler:       "cherry-pick",
 		WorkspaceName: "feature-one",
-		SourceBranch:  "DWC/feature-one",
-		SourceDir:     "/Users/me/worktrees/feature-one",
-		TargetDir:     "/repo",
 	})
 	// Assert — the state key is the cwd every other axis files under, and the
 	// name is carried separately for the tag.

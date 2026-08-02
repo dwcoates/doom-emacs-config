@@ -125,6 +125,34 @@ merged), stamped in `stampMergeFactsLocked` beside the queue facts — the one
 WorkspaceState construction funnel, so a push, a snapshot and a synchronous
 publication cannot disagree.
 
+## merge_status is a COARSE projection of the merge axis, for now
+
+`WorkspaceState.merge_status` (`mergestatus.go`) is the shape the merge
+pipeline will report its run through: one message per phase inside a oneof, so
+WHICH member is set IS the phase. It is stamped in `stampMergeFactsLocked`
+beside the queue facts, which is what makes a frame carrying `merge_phase`
+without a `merge_status` unrepresentable.
+
+Until that pipeline exists, the projection is over the state log and nothing
+else, so it reports only what the log knows:
+
+- The phase, mapped coarsely — `merge_enqueuing`/`merge_queued` to `enqueued`,
+  `merging` to `cherry_picking`, and the remaining tokens to their namesakes.
+- The instant of the newest merge row, as BOTH `phase_started_at_ms` and
+  `updated_at_ms`: the log records transitions and nothing else, so there are
+  no within-phase ticks yet.
+- The failure's cause, minus the `merge_transition:` prefix the log routes the
+  row by.
+
+Everything else — commit counts, the commit under test, the before/after
+actions — stays at its zero value rather than being invented, and `run_id` is
+an explicitly labeled PLACEHOLDER derived from the workspace and that instant.
+Nothing may correlate on it until the pipeline mints a real one.
+
+The older `merge_phase` / `merge_queue_position` / `merge_queue_depth` trio is
+still stamped beside it. Both forms coexist until the cutover wave retires the
+trio.
+
 ## The daemon stands a merged workspace down
 
 Reaching `merged` also ends the workspace's session. `ApplyMergeTransition`

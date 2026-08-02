@@ -434,6 +434,10 @@ func (m *Manager) stampMergeFactsLocked(workspace string, msg *frontendv1.Worksp
 	msg.MergeQueueDepth = depth
 	msg.MergeLeaseHeld = len(m.openMergeWindowsLocked(workspace)) > 0
 	msg.MergedAtMs = m.mergedAtLocked(workspace)
+	// The queue place is handed on rather than re-read: merge_status's enqueued
+	// phase reports the SAME position and depth the two fields above carry, and
+	// a second Snapshot could answer differently for one frame.
+	m.stampMergeStatusLocked(workspace, msg, position, depth)
 }
 
 // pushCurrentLocked re-resolves the workspace and pushes it unconditionally.

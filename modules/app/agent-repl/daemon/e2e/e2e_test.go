@@ -52,6 +52,7 @@ import (
 	"claude-repld/internal/shimlisten"
 	"claude-repld/internal/ssm"
 	"claude-repld/internal/statedb"
+	"claude-repld/internal/workspace/geometry"
 	"claude-repld/internal/workspace/merge"
 )
 
@@ -278,6 +279,12 @@ func (e *emptyWorkspaceCreation) close() {
 
 type e2eHarness struct {
 	ts *httptest.Server
+	// geometry is THE daemon's workspace -> merge-geometry map, exposed so a
+	// merge test can record what the daemon would have recorded when it created
+	// the worktree. MergeWorkspaceCmd no longer carries geometry (the fields are
+	// reserved in frontend.proto), so this record is the only way a fixture
+	// repository the daemon never created becomes mergeable.
+	geometry *geometry.Store
 	// shimSpawns reports how many shim processes this harness has exec'd.
 	shimSpawns func() int64
 	// sweepIdle fires the daemon's idle sweeper, which is the production
@@ -537,6 +544,10 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 	if err != nil {
 		t.Fatalf("build merge lease: %v", err)
 	}
+	geometryStore, err := geometry.Open(stateStore, t.Logf)
+	if err != nil {
+		t.Fatalf("open geometry: %v", err)
+	}
 	agentShim, err := server.WireAgentShim(server.AgentShimConfig{
 		// The real resolver over the real registry: an e2e that faked this
 		// would not exercise the daemon actually deciding what to resume.
@@ -554,6 +565,7 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 		EstablishTimeout:  tuning.establishTimeout,
 		MergeLease:        mergeLease,
 		MergeQueue:        mergeQueue,
+		MergeGeometry:     geometryStore,
 		Logf:              t.Logf,
 		LogVerbosef:       t.Logf,
 	})
@@ -587,7 +599,7 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 	mux.HandleFunc("/frontend", agentShim.Server.ServeWS)
 	ts := httptest.NewServer(mux)
 	t.Cleanup(ts.Close)
-	h := &e2eHarness{ts: ts, shimSpawns: spawnCount.Load}
+	h := &e2eHarness{ts: ts, geometry: geometryStore, shimSpawns: spawnCount.Load}
 	if sweepTicks != nil {
 		h.sweepIdle = sweepTicks
 	}
