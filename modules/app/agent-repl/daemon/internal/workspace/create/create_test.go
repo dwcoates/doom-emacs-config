@@ -126,6 +126,18 @@ func (f *fakeGeometry) RecordWorkspaceGeometry(_ context.Context, job Job) error
 	return f.err
 }
 
+// fakeMerges records every merge the router dispatched daemon-side, and can be
+// told to reject one the way an unrecorded project_dir is rejected.
+type fakeMerges struct {
+	calls []MergeCommand
+	err   error
+}
+
+func (f *fakeMerges) DispatchMerge(_ context.Context, cmd MergeCommand) error {
+	f.calls = append(f.calls, cmd)
+	return f.err
+}
+
 type fixture struct {
 	store     *FileJobStore
 	manager   *Manager
@@ -136,7 +148,19 @@ type fixture struct {
 	prompts   *fakePrompts
 	available *fakeAvailable
 	actions   *fakeActions
-	logs      []string
+	merges    *fakeMerges
+
+	// logs is written by the router goroutine AND by a worker goroutine in the
+	// tests that run one, so it carries its own lock rather than relying on the
+	// tests that happen to be single-threaded.
+	logMu sync.Mutex
+	logs  []string
+}
+
+func (f *fixture) log(format string, _ ...any) {
+	f.logMu.Lock()
+	defer f.logMu.Unlock()
+	f.logs = append(f.logs, format)
 }
 
 func newFixture(t *testing.T, statePath string) *fixture {
@@ -149,8 +173,9 @@ func newFixture(t *testing.T, statePath string) *fixture {
 		prompts:   &fakePrompts{},
 		available: &fakeAvailable{},
 		actions:   &fakeActions{},
+		merges:    &fakeMerges{},
 	}
-	logf := func(format string, args ...any) { f.logs = append(f.logs, format) }
+	logf := f.log
 	store, err := OpenJobStore(statePath, logf)
 	if err != nil {
 		t.Fatalf("OpenJobStore: %v", err)
@@ -167,7 +192,40 @@ func newFixture(t *testing.T, statePath string) *fixture {
 }
 
 func (f *fixture) inbox(dir string) *Inbox {
-	return &Inbox{Dir: dir, Store: f.store, Manager: f.manager, Logf: func(string, ...any) {}, Interval: 1}
+	return &Inbox{Dir: dir, Store: f.store, Manager: f.manager, Merges: f.merges, Logf: f.log, Interval: 1}
+}
+
+// drainWorkers runs the creation and host-action workers to quiescence ON THE
+// CALLING GOROUTINE. It is the exact loop RunCreationWorker and
+// RunHostActionWorker run, minus the parking, so a test observes a routed job's
+// effects deterministically instead of waiting on a background worker.
+func (f *fixture) drainWorkers(ctx context.Context) {
+	for f.manager.drainOnce(ctx) {
+	}
+	for f.manager.drainHostOnce(ctx) {
+	}
+}
+
+// ingest routes one scan's worth of command files and then runs the workers,
+// which together reproduce what the daemon does across its three goroutines.
+func (f *fixture) ingest(ctx context.Context, dir string) error {
+	err := f.inbox(dir).ScanAndDrain(ctx)
+	f.drainWorkers(ctx)
+	return err
+}
+
+// loggedFormat reports whether any log line's FORMAT contains want. The
+// fixture's logger keeps formats rather than rendered lines, which is what makes
+// a log assertion about the code path rather than about one job's data.
+func (f *fixture) loggedFormat(want string) bool {
+	f.logMu.Lock()
+	defer f.logMu.Unlock()
+	for _, line := range f.logs {
+		if strings.Contains(line, want) {
+			return true
+		}
+	}
+	return false
 }
 
 func writeCommandFile(t *testing.T, dir, name, body string) {
@@ -200,7 +258,7 @@ func TestInboxCrashRestartResumesClaimedInFlightJob(t *testing.T) {
 	// the file's entries were persisted.  A fresh daemon must consume it.
 	writeCommandFile(t, inboxDir, ".workspace_commands_recover.json.claimed", `[{"type":"create","name":"DWC/recover","git_root":"/repo"}]`)
 	f := newFixture(t, state)
-	if err := f.inbox(inboxDir).ScanAndDrain(context.Background()); err != nil {
+	if err := f.ingest(context.Background(), inboxDir); err != nil {
 		t.Fatalf("ScanAndDrain: %v", err)
 	}
 	got := job(t, f.store, "workspace_commands_recover:0")
@@ -213,9 +271,8 @@ func TestInboxCrashRestartResumesClaimedInFlightJob(t *testing.T) {
 	// Reopening the durable store simulates another daemon restart.  Awaiting
 	// Emacs is a stable boundary, so no creation effect may run again.
 	restarted := newFixture(t, state)
-	if err := restarted.manager.Resume(context.Background()); err != nil {
-		t.Fatalf("Resume after restart: %v", err)
-	}
+	restarted.manager.resumeAtBoot()
+	restarted.drainWorkers(context.Background())
 	if restarted.worktrees.calls != 0 || restarted.sessions.calls != 0 || restarted.available.calls != 0 {
 		t.Fatalf("restart repeated effects: worktrees=%d sessions=%d available=%d", restarted.worktrees.calls, restarted.sessions.calls, restarted.available.calls)
 	}
@@ -227,12 +284,12 @@ func TestInboxDuplicateFileMaterializesExactlyOneWorkspace(t *testing.T) {
 	f := newFixture(t, state)
 	body := `[{"type":"create","name":"DWC/duplicate","git_root":"/repo"}]`
 	writeCommandFile(t, inboxDir, "workspace_commands_same.json", body)
-	if err := f.inbox(inboxDir).ScanAndDrain(context.Background()); err != nil {
+	if err := f.ingest(context.Background(), inboxDir); err != nil {
 		t.Fatal(err)
 	}
 	// The exact same filename+index is redelivered after a producer retry.
 	writeCommandFile(t, inboxDir, "workspace_commands_same.json", body)
-	if err := f.inbox(inboxDir).ScanAndDrain(context.Background()); err != nil {
+	if err := f.ingest(context.Background(), inboxDir); err != nil {
 		t.Fatal(err)
 	}
 	if f.worktrees.calls != 1 || f.sessions.calls != 1 || f.available.calls != 1 {
@@ -257,7 +314,7 @@ func TestInboxBatchRoutesCreatesAndPreservesUIActions(t *testing.T) {
   {"type":"create","name":"DWC/two","git_root":"/repo"},
   {"type":"task-toggle-done","id":"t-7"}
 ]`)
-	if err := f.inbox(inboxDir).ScanAndDrain(context.Background()); err != nil {
+	if err := f.ingest(context.Background(), inboxDir); err != nil {
 		t.Fatal(err)
 	}
 	jobs, err := f.store.List()
@@ -727,7 +784,7 @@ func (f *blockingWorktrees) EnsureWorktree(ctx context.Context, job Job) error {
 
 func TestParseCommandsAuditsEveryKnownCommandType(t *testing.T) {
 	payload := `[
- {"type":"create","name":"DWC/a","git_root":"/repo"}, {"type":"prompt"}, {"type":"finish"}, {"type":"close"}, {"type":"open"}, {"type":"clipboard"}, {"type":"send","data":false}, {"type":"merge"}, {"type":"eval"}, {"type":"switch"}, {"type":"fold","folded":false}, {"type":"set-view"}, {"type":"task-create"}, {"type":"task-toggle-done"}, {"type":"task-open"}, {"type":"task-add-workspace"}
+ {"type":"create","name":"DWC/a","git_root":"/repo"}, {"type":"prompt"}, {"type":"finish"}, {"type":"close"}, {"type":"open"}, {"type":"clipboard"}, {"type":"send","data":false}, {"type":"merge","project_dir":"/worktrees/a"}, {"type":"eval"}, {"type":"switch"}, {"type":"fold","folded":false}, {"type":"set-view"}, {"type":"task-create"}, {"type":"task-toggle-done"}, {"type":"task-open"}, {"type":"task-add-workspace"}
 ]`
 	commands, err := parseCommands([]byte(payload))
 	if err != nil {
@@ -793,7 +850,7 @@ func TestScanAndDrainContainsJobFailureAndKeepsDrainingSiblings(t *testing.T) {
   {"type":"create","name":"DWC/healthy","git_root":"/repo"}
 ]`)
 
-	err := f.inbox(inboxDir).ScanAndDrain(context.Background())
+	err := f.ingest(context.Background(), inboxDir)
 
 	if err != nil {
 		t.Fatalf("ScanAndDrain = %v, want nil: a job failure must not stop the inbox", err)
@@ -806,19 +863,22 @@ func TestScanAndDrainContainsJobFailureAndKeepsDrainingSiblings(t *testing.T) {
 	}
 }
 
-// The failure classification itself, stated once: only a job-level failure is
-// stepped over; a structural failure keeps propagating.
-func TestResumeClassifiesJobFailureAgainstStructuralFailure(t *testing.T) {
+// The failure classification itself, stated once.  Neither class may end the
+// creation worker — it has no caller to return to — so each is DISTINGUISHED BY
+// THE RECORD IT LEAVES: a job-level failure is durable against the job, while a
+// structural one names the subsystem and strands nothing.
+func TestCreationWorkerClassifiesJobFailureAgainstStructuralFailure(t *testing.T) {
 	tests := []struct {
-		name      string
-		structual bool
-		wantErr   bool
+		name       string
+		structural bool
+		wantLog    string
 	}{
-		{name: "job failure is contained", structual: false, wantErr: false},
-		{name: "structural failure propagates", structual: true, wantErr: true},
+		{name: "job failure is contained", structural: false, wantLog: "CONTAINED job failure"},
+		{name: "structural failure is named", structural: true, wantLog: "BOOT RESUME FAILED"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			// Arrange
 			root := t.TempDir()
 			f := newFixture(t, filepath.Join(root, "jobs.json"))
 			planner := &selectivePlanner{fakeWorktrees: fakeWorktrees{path: "/worktrees/new"}, failName: "DWC/poison", failErr: errors.New("plan exploded")}
@@ -827,16 +887,42 @@ func TestResumeClassifiesJobFailureAgainstStructuralFailure(t *testing.T) {
 			if _, _, err := f.store.Enqueue(Job{ID: "j0", Request: Request{Name: "DWC/poison", GitRoot: "/repo"}, State: StateQueued}); err != nil {
 				t.Fatal(err)
 			}
-			if test.structual {
+			if test.structural {
 				f.manager.cfg.Store = listErrorStore{JobStore: f.store, err: errors.New("store is broken")}
 			}
 
-			err := f.manager.Resume(context.Background())
+			// Act
+			f.manager.resumeAtBoot()
+			f.drainWorkers(context.Background())
 
-			if (err != nil) != test.wantErr {
-				t.Fatalf("Resume = %v, wantErr %t", err, test.wantErr)
+			// Assert
+			if !f.loggedFormat(test.wantLog) {
+				t.Fatalf("logs = %v, want one naming %q", f.logs, test.wantLog)
 			}
 		})
+	}
+}
+
+// A job-level failure is DURABLE against the job, which is what makes stepping
+// over it safe rather than merely quiet.
+func TestCreationWorkerRecordsAContainedJobFailureDurably(t *testing.T) {
+	// Arrange
+	root := t.TempDir()
+	f := newFixture(t, filepath.Join(root, "jobs.json"))
+	planner := &selectivePlanner{fakeWorktrees: fakeWorktrees{path: "/worktrees/new"}, failName: "DWC/poison", failErr: errors.New("plan exploded")}
+	f.manager.cfg.Planner = planner
+	f.manager.cfg.Worktrees = planner
+	if _, _, err := f.store.Enqueue(Job{ID: "j0", Request: Request{Name: "DWC/poison", GitRoot: "/repo"}, State: StateQueued}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	f.manager.resumeAtBoot()
+	f.drainWorkers(context.Background())
+
+	// Assert
+	if got := job(t, f.store, "j0"); got.State != StateFailed || got.LastError == "" {
+		t.Fatalf("job = %#v, want a durably failed job carrying its cause", got)
 	}
 }
 
@@ -852,9 +938,8 @@ func TestFailedJobSurfacesDurableHostActionNamingJobAndError(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := f.manager.Resume(context.Background()); err != nil {
-		t.Fatalf("Resume: %v", err)
-	}
+	f.manager.resumeAtBoot()
+	f.drainWorkers(context.Background())
 
 	if len(f.actions.items) != 1 {
 		t.Fatalf("published host actions = %#v, want exactly the failure notice", f.actions.items)
@@ -892,7 +977,7 @@ func TestPoisonedCommandFileIsQuarantinedAndScanContinues(t *testing.T) {
 	writeCommandFile(t, inboxDir, "workspace_commands_a-poison.json", `{not even an array`)
 	writeCommandFile(t, inboxDir, "workspace_commands_b-good.json", `[{"type":"create","name":"DWC/good","git_root":"/repo"}]`)
 
-	err := f.inbox(inboxDir).ScanAndDrain(context.Background())
+	err := f.ingest(context.Background(), inboxDir)
 
 	if err != nil {
 		t.Fatalf("ScanAndDrain = %v, want nil: a poisoned file must not stop the scan", err)
@@ -908,7 +993,7 @@ func TestPoisonedCommandFileIsQuarantinedAndScanContinues(t *testing.T) {
 		t.Fatalf("quarantined files = %v, want exactly the poisoned one preserved", rejected)
 	}
 	// A second scan must not re-claim the quarantined file.
-	if err := f.inbox(inboxDir).ScanAndDrain(context.Background()); err != nil {
+	if err := f.ingest(context.Background(), inboxDir); err != nil {
 		t.Fatalf("second ScanAndDrain: %v", err)
 	}
 	again, err := filepath.Glob(filepath.Join(inboxDir, "*.rejected"))
@@ -1083,5 +1168,388 @@ func TestManagerRefusesConstructionWithoutAGeometryRecorder(t *testing.T) {
 	// Assert.
 	if err == nil || !strings.Contains(err.Error(), "WorkspaceGeometryRecorder") {
 		t.Fatalf("NewManager error = %v, want a WorkspaceGeometryRecorder refusal", err)
+	}
+}
+
+// ---- The router / worker split -------------------------------------------
+//
+// The inbox goroutine claims, persists, and routes. It never runs a job state
+// machine. These tests pin that separation from both sides: what the router
+// does NOT do, and what a wedged worker cannot do to it.
+
+// wedgedPlanner blocks inside PlanWorktree until released, which is the shape
+// of the production wedge that froze ingestion: a job whose state machine never
+// returns.
+type wedgedPlanner struct {
+	fakeWorktrees
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (w *wedgedPlanner) PlanWorktree(ctx context.Context, job Job) (WorktreeResult, error) {
+	select {
+	case w.entered <- struct{}{}:
+	default:
+	}
+	select {
+	case <-w.release:
+	case <-ctx.Done():
+		return WorktreeResult{}, ctx.Err()
+	}
+	return w.fakeWorktrees.PlanWorktree(ctx, job)
+}
+
+// THE REGRESSION THIS RESTRUCTURING EXISTS FOR. A job whose state machine never
+// returns used to freeze the single goroutine that also claimed command files,
+// so every later command vanished until the daemon was bounced.
+func TestRouterKeepsIngestingWhileTheCreationWorkerIsWedged(t *testing.T) {
+	// Arrange
+	root := t.TempDir()
+	f := newFixture(t, filepath.Join(root, "jobs.json"))
+	inboxDir := filepath.Join(root, "output")
+	wedge := &wedgedPlanner{
+		fakeWorktrees: fakeWorktrees{path: "/worktrees/new"},
+		entered:       make(chan struct{}, 1),
+		release:       make(chan struct{}),
+	}
+	f.manager.cfg.Planner = wedge
+	f.manager.cfg.Worktrees = wedge
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	worker := make(chan struct{})
+	go func() {
+		defer close(worker)
+		f.manager.RunCreationWorker(ctx) //nolint:errcheck // the worker ends only with ctx.Err()
+	}()
+	inbox := f.inbox(inboxDir)
+	writeCommandFile(t, inboxDir, "workspace_commands_wedge.json", `[{"type":"create","name":"DWC/wedge","git_root":"/repo"}]`)
+	if err := inbox.ScanAndDrain(ctx); err != nil {
+		t.Fatalf("first ScanAndDrain: %v", err)
+	}
+	<-wedge.entered
+
+	// Act: the worker is now parked inside the first job's state machine.
+	writeCommandFile(t, inboxDir, "workspace_commands_later.json", `[{"type":"create","name":"DWC/later","git_root":"/repo"}]`)
+	err := inbox.ScanAndDrain(ctx)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("ScanAndDrain while a job is wedged = %v, want nil", err)
+	}
+	if got := job(t, f.store, "workspace_commands_later:0"); got.State != StateQueued {
+		t.Fatalf("later job = %#v, want it durably ingested behind the wedge", got)
+	}
+	cancel()
+	<-worker
+	close(wedge.release)
+}
+
+// The router persists and routes; it does not create. Nothing but the worker
+// may touch a worktree, a session, or the host.
+func TestRouterPersistsACreateWithoutRunningIt(t *testing.T) {
+	// Arrange
+	root := t.TempDir()
+	f := newFixture(t, filepath.Join(root, "jobs.json"))
+	inboxDir := filepath.Join(root, "output")
+	writeCommandFile(t, inboxDir, "workspace_commands_routed.json", `[{"type":"create","name":"DWC/routed","git_root":"/repo"}]`)
+
+	// Act
+	if err := f.inbox(inboxDir).ScanAndDrain(context.Background()); err != nil {
+		t.Fatalf("ScanAndDrain: %v", err)
+	}
+
+	// Assert
+	if got := job(t, f.store, "workspace_commands_routed:0"); got.State != StateQueued {
+		t.Fatalf("routed job = %#v, want it still queued: the router must not advance it", got)
+	}
+	if f.worktrees.plans != 0 || f.sessions.calls != 0 {
+		t.Fatalf("router ran creation effects: plans=%d sessions=%d", f.worktrees.plans, f.sessions.calls)
+	}
+}
+
+// The routed id reaches the worker, and the worker is what materializes it.
+func TestRoutedCreateIsMaterializedByTheCreationWorker(t *testing.T) {
+	// Arrange
+	root := t.TempDir()
+	f := newFixture(t, filepath.Join(root, "jobs.json"))
+	inboxDir := filepath.Join(root, "output")
+	writeCommandFile(t, inboxDir, "workspace_commands_routed.json", `[{"type":"create","name":"DWC/routed","git_root":"/repo"}]`)
+	if err := f.inbox(inboxDir).ScanAndDrain(context.Background()); err != nil {
+		t.Fatalf("ScanAndDrain: %v", err)
+	}
+
+	// Act
+	f.drainWorkers(context.Background())
+
+	// Assert
+	if got := job(t, f.store, "workspace_commands_routed:0"); got.State != StateAwaitingEmacs {
+		t.Fatalf("routed job = %#v, want the worker to have materialized it", got)
+	}
+}
+
+// Host-action publication is off the router too: a host slow to accept an
+// action must not delay the next command file.
+func TestRouterPersistsAHostActionWithoutPublishingIt(t *testing.T) {
+	// Arrange
+	root := t.TempDir()
+	f := newFixture(t, filepath.Join(root, "jobs.json"))
+	inboxDir := filepath.Join(root, "output")
+	writeCommandFile(t, inboxDir, "workspace_commands_action.json", `[{"type":"switch","dir":"/worktrees/one"}]`)
+
+	// Act
+	if err := f.inbox(inboxDir).ScanAndDrain(context.Background()); err != nil {
+		t.Fatalf("ScanAndDrain: %v", err)
+	}
+
+	// Assert
+	if f.actions.calls != 0 {
+		t.Fatalf("router published %d host actions, want 0: publication belongs to the host-action worker", f.actions.calls)
+	}
+	pending, err := f.store.PendingHostActions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending) != 1 {
+		t.Fatalf("pending host actions = %#v, want the routed action retained durably", pending)
+	}
+}
+
+// ...and the host-action worker is what publishes it.
+func TestHostActionWorkerPublishesTheRoutedAction(t *testing.T) {
+	// Arrange
+	root := t.TempDir()
+	f := newFixture(t, filepath.Join(root, "jobs.json"))
+	inboxDir := filepath.Join(root, "output")
+	writeCommandFile(t, inboxDir, "workspace_commands_action.json", `[{"type":"switch","dir":"/worktrees/one"}]`)
+	if err := f.inbox(inboxDir).ScanAndDrain(context.Background()); err != nil {
+		t.Fatalf("ScanAndDrain: %v", err)
+	}
+
+	// Act
+	f.drainWorkers(context.Background())
+
+	// Assert
+	if f.actions.calls != 1 {
+		t.Fatalf("host action calls = %d, want exactly one publication", f.actions.calls)
+	}
+}
+
+// Boot resume travels the SAME channel a fresh command does; the durable store
+// is the only thing that survives a bounce, so the ids come from it.
+func TestBootResumeRoutesNonTerminalJobsThroughTheCreationChannel(t *testing.T) {
+	// Arrange
+	root := t.TempDir()
+	f := newFixture(t, filepath.Join(root, "jobs.json"))
+	if _, _, err := f.store.Enqueue(Job{ID: "resume-me", Request: Request{Name: "DWC/resume", GitRoot: "/repo"}, State: StateQueued}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := f.store.Enqueue(Job{ID: "already-done", Request: Request{Name: "DWC/done", GitRoot: "/repo"}, State: StateReady}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	f.manager.resumeAtBoot()
+
+	// Assert
+	select {
+	case id := <-f.manager.jobs:
+		if id != "resume-me" {
+			t.Fatalf("routed id = %q, want the non-terminal job", id)
+		}
+	default:
+		t.Fatal("boot resume routed nothing: the non-terminal job must reach the worker's channel")
+	}
+	select {
+	case id := <-f.manager.jobs:
+		t.Fatalf("boot resume also routed %q, want the terminal job left alone", id)
+	default:
+	}
+}
+
+// A full route buffer must never block the router. The id is recoverable from
+// the store, so the route degrades to the coalesced sweep instead.
+func TestRouteJobFallsBackToTheSweepWhenTheBufferIsFull(t *testing.T) {
+	// Arrange
+	root := t.TempDir()
+	f := newFixture(t, filepath.Join(root, "jobs.json"))
+	for i := 0; i < cap(f.manager.jobs); i++ {
+		f.manager.jobs <- "filler"
+	}
+
+	// Act
+	f.manager.RouteJob("overflow")
+
+	// Assert
+	select {
+	case <-f.manager.sweep:
+	default:
+		t.Fatal("a full route buffer did not raise the sweep: the id would be stranded")
+	}
+}
+
+// ---- The merge verb, routed daemon-side ----------------------------------
+
+// The merge verb no longer round-trips through Emacs: it is dispatched with the
+// project_dir the entry states, and nothing else.
+func TestRouterDispatchesMergeWithItsProjectDir(t *testing.T) {
+	// Arrange
+	root := t.TempDir()
+	f := newFixture(t, filepath.Join(root, "jobs.json"))
+	inboxDir := filepath.Join(root, "output")
+	writeCommandFile(t, inboxDir, "workspace_commands_merge.json", `[{"type":"merge","workspace":"DWC/feature","project_dir":"/worktrees/feature"}]`)
+
+	// Act
+	err := f.inbox(inboxDir).ScanAndDrain(context.Background())
+
+	// Assert
+	if err != nil {
+		t.Fatalf("ScanAndDrain: %v", err)
+	}
+	want := []MergeCommand{{Workspace: "DWC/feature", ProjectDir: "/worktrees/feature", ID: "workspace_commands_merge:0"}}
+	if !reflect.DeepEqual(f.merges.calls, want) {
+		t.Fatalf("dispatched merges = %#v, want %#v", f.merges.calls, want)
+	}
+}
+
+// A merge is NOT a host action any more. Emacs must never be handed one again:
+// that is the round trip whose heuristic name resolution this replaces.
+func TestRouterNeverPersistsAMergeAsAHostAction(t *testing.T) {
+	// Arrange
+	root := t.TempDir()
+	f := newFixture(t, filepath.Join(root, "jobs.json"))
+	inboxDir := filepath.Join(root, "output")
+	writeCommandFile(t, inboxDir, "workspace_commands_merge.json", `[{"type":"merge","workspace":"DWC/feature","project_dir":"/worktrees/feature"}]`)
+
+	// Act
+	if err := f.inbox(inboxDir).ScanAndDrain(context.Background()); err != nil {
+		t.Fatalf("ScanAndDrain: %v", err)
+	}
+
+	// Assert
+	pending, err := f.store.PendingHostActions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending) != 0 {
+		t.Fatalf("pending host actions = %#v, want none: the merge verb is daemon-owned", pending)
+	}
+}
+
+// EVERY unroutable merge is rejected loudly. There is deliberately no name
+// resolution, no branch tail, and no fallback of any kind behind these.
+func TestRouterRejectsAnUnroutableMerge(t *testing.T) {
+	tests := []struct {
+		name        string
+		entry       string
+		dispatchErr error
+		wantReason  string
+	}{
+		{
+			name:       "missing project_dir",
+			entry:      `{"type":"merge","workspace":"DWC/feature"}`,
+			wantReason: "missing-project-dir",
+		},
+		{
+			name:       "relative project_dir",
+			entry:      `{"type":"merge","workspace":"DWC/feature","project_dir":"worktrees/feature"}`,
+			wantReason: "relative-project-dir",
+		},
+		{
+			name:        "project_dir names no recorded workspace",
+			entry:       `{"type":"merge","workspace":"DWC/feature","project_dir":"/worktrees/ghost"}`,
+			dispatchErr: ErrUnknownMergeWorkspace,
+			wantReason:  "unknown-project-dir",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Arrange
+			root := t.TempDir()
+			f := newFixture(t, filepath.Join(root, "jobs.json"))
+			f.merges.err = test.dispatchErr
+			inboxDir := filepath.Join(root, "output")
+			writeCommandFile(t, inboxDir, "workspace_commands_bad.json", "["+test.entry+"]")
+
+			// Act
+			err := f.inbox(inboxDir).ScanAndDrain(context.Background())
+
+			// Assert
+			if err != nil {
+				t.Fatalf("ScanAndDrain = %v, want nil: a rejected file must not stop the scan", err)
+			}
+			rejected, globErr := filepath.Glob(filepath.Join(inboxDir, "*.rejected"))
+			if globErr != nil {
+				t.Fatal(globErr)
+			}
+			if len(rejected) != 1 {
+				t.Fatalf("quarantined files = %v, want the rejected merge preserved", rejected)
+			}
+			if !f.loggedFormat(test.wantReason) {
+				t.Fatalf("logs = %v, want one naming reason=%s", f.logs, test.wantReason)
+			}
+		})
+	}
+}
+
+// A rejection names BOTH identities. The project_dir is the only key, and the
+// workspace name is what the human who dispatched it recognizes.
+func TestRejectedMergeLogNamesWorkspaceAndProjectDir(t *testing.T) {
+	// Arrange
+	root := t.TempDir()
+	f := newFixture(t, filepath.Join(root, "jobs.json"))
+	inboxDir := filepath.Join(root, "output")
+	writeCommandFile(t, inboxDir, "workspace_commands_bad.json", `[{"type":"merge","workspace":"DWC/feature"}]`)
+
+	// Act
+	if err := f.inbox(inboxDir).ScanAndDrain(context.Background()); err != nil {
+		t.Fatalf("ScanAndDrain: %v", err)
+	}
+
+	// Assert
+	if !f.loggedFormat(`workspace=%q project_dir=%q`) {
+		t.Fatalf("logs = %v, want a rejection naming both the workspace and the project_dir", f.logs)
+	}
+}
+
+// A structural dispatch failure is NOT a rejection: the claim stays standing so
+// the next scan retries it rather than the emitter being blamed.
+func TestStructuralMergeDispatchFailureKeepsTheClaim(t *testing.T) {
+	// Arrange
+	root := t.TempDir()
+	f := newFixture(t, filepath.Join(root, "jobs.json"))
+	f.merges.err = errors.New("merge queue is unreachable")
+	inboxDir := filepath.Join(root, "output")
+	writeCommandFile(t, inboxDir, "workspace_commands_merge.json", `[{"type":"merge","workspace":"DWC/feature","project_dir":"/worktrees/feature"}]`)
+
+	// Act
+	err := f.inbox(inboxDir).ScanAndDrain(context.Background())
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "merge queue is unreachable") {
+		t.Fatalf("ScanAndDrain = %v, want the structural cause propagated", err)
+	}
+	claims, globErr := filepath.Glob(filepath.Join(inboxDir, "*.claimed"))
+	if globErr != nil {
+		t.Fatal(globErr)
+	}
+	if len(claims) != 1 {
+		t.Fatalf("claims = %v, want the claim left standing for the next scan", claims)
+	}
+}
+
+// An inbox without a merge route could only drop merges silently.
+func TestInboxRefusesToRunWithoutAMergeDispatcher(t *testing.T) {
+	// Arrange
+	root := t.TempDir()
+	f := newFixture(t, filepath.Join(root, "jobs.json"))
+	inbox := f.inbox(filepath.Join(root, "output"))
+	inbox.Merges = nil
+
+	// Act
+	err := inbox.ScanAndDrain(context.Background())
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "MergeDispatcher") {
+		t.Fatalf("ScanAndDrain = %v, want a MergeDispatcher refusal", err)
 	}
 }

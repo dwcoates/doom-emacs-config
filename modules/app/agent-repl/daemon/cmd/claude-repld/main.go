@@ -763,6 +763,29 @@ func main() {
 	// failures are contained inside the inbox loop (durable, logged, surfaced
 	// to the host); only a structural failure ends Run, and even that leaves
 	// the daemon serving its sessions with one loud, unmissable log line.
+	// The merge verb in a workspace command file is routed DAEMON-SIDE, through
+	// the same command path a frontend merge takes. It used to be handed to
+	// Emacs as a host action, resolved there by workspace name, and sent back as
+	// a merge command; that round trip is gone. Bind before the inbox starts so
+	// no claimed file can find the route unwired.
+	workspaceAssembly.Merges.SetTarget(agentShim.MergeDispatch)
+	// EXECUTION IS OFF THE ROUTER. The inbox goroutine only claims, persists,
+	// and routes; these two workers own the creation state machine and the host
+	// action publication respectively. A wedged job can stall creation, but it
+	// can no longer stop ingestion — which is exactly what it used to do, one
+	// goroutine having owned both.
+	go func() {
+		if err := workspaceAssembly.Manager.RunCreationWorker(workspaceCreateCtx); err != nil && workspaceCreateCtx.Err() == nil {
+			daemonLog.With("operation", "workspace-creation-worker", "level", "error").
+				Log("claude-repld: workspace creation worker stopped: %v", err)
+		}
+	}()
+	go func() {
+		if err := workspaceAssembly.Manager.RunHostActionWorker(workspaceCreateCtx); err != nil && workspaceCreateCtx.Err() == nil {
+			daemonLog.With("operation", "workspace-host-action-worker", "level", "error").
+				Log("claude-repld: workspace host-action worker stopped: %v", err)
+		}
+	}()
 	go func() {
 		if inboxErr := workspaceAssembly.Inbox.Run(workspaceCreateCtx); inboxErr != nil && workspaceCreateCtx.Err() == nil {
 			daemonLog.With("operation", "workspace-creation-inbox", "level", "error").
