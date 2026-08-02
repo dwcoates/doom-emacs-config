@@ -2,39 +2,28 @@
 
 ## Summary
 
-- **Total functions in session.el:** 37
-- **Functions with direct test coverage:** 30
-- **Functions without direct coverage:** 7
-- **Coverage by function count:** 81%
+This is a historical snapshot: it predates the removal of the Docker
+sandbox surface (`get-sandbox-image`, `resolve-sandbox-config`,
+`prompt-sandbox-build`, and friends), whose rows have been dropped along
+with the functions themselves. The per-function counts it once carried
+no longer describe the file and have been removed rather than guessed
+at; re-derive them before relying on a headline number.
 
 ## Coverage Status by Function
-
-### Sandbox Configuration
-
-| Function | Covered | Tests |
-|----------|---------|-------|
-| `agent-repl--docker-image-exists-p` | Yes | true/false cases for docker inspect exit code |
-| `agent-repl--find-sandbox-script` | Yes | prefers PATH, falls back to repo, returns nil |
-| `agent-repl--query-sandbox-image` | Yes | trimmed output, empty output returns nil |
-| `agent-repl--find-install-script` | Yes | exists, missing |
-| `agent-repl--resolve-sandbox-config` | Yes | no launcher, image ready, needs build, empty image |
-| `agent-repl--prompt-sandbox-build` | **No** | see edge cases below |
-| `agent-repl--get-sandbox-image` | **No** | see edge cases below |
 
 ### Command Building
 
 | Function | Covered | Tests |
 |----------|---------|-------|
 | `agent-repl--compute-claude-flags` | Yes | resume, fork, perm flag, all nil, combined resume+perm, system-prompt default period, system-prompt nil, system-prompt shell-quoting, system-prompt combined |
-| `agent-repl--compute-perm-flag` | Yes | sandboxed, ChessCom, personal, nil dir |
-| `agent-repl--assemble-cmd` | Yes | sandboxed, bare metal, no flags |
+| `agent-repl--compute-perm-flag` | Yes | ChessCom, personal, nil dir |
+| `agent-repl--assemble-cmd` | Yes | bare metal, no flags |
 | `agent-repl--build-start-cmd` | **No** | see edge cases below |
 
 ### Session Startup
 
 | Function | Covered | Tests |
 |----------|---------|-------|
-| `agent-repl--sandbox-mode-line` | Yes | sandboxed, bare metal |
 | `agent-repl--log-session-start` | **No** | pure logging, low value |
 
 (Session startup was merged into `agent-repl--initialize-claude` in panels.el; see
@@ -92,48 +81,17 @@
 
 ## Untested Functions -- Edge Case Analysis
 
-### `agent-repl--prompt-sandbox-build`
-
-Interactive function that calls `y-or-n-p` and signals `user-error`.
-
-**Edge cases:**
-1. User answers yes to build prompt -- should call `compile` with install script, then signal `user-error`
-2. User answers no to build prompt -- should fall through (no explicit handling of "no")
-3. No install-script in config -- should signal `user-error` with manual instruction
-4. Empty image string in config
-
-**Why not tested:** Signals `user-error` unconditionally, making standard ERT assertions awkward. Could test with `should-error` but the `y-or-n-p` interaction also needs stubbing.
-
-**Recommendation:** Add tests using `cl-letf` to stub `y-or-n-p`, `compile`, and `should-error` to catch the `user-error`.
-
-### `agent-repl--get-sandbox-image`
-
-Orchestrator that combines workspace state lookup with `resolve-sandbox-config` and `prompt-sandbox-build`.
-
-**Edge cases:**
-1. Non-worktree workspace -- should return nil without calling resolve
-2. Worktree with :active-env not :sandbox -- should return nil
-3. Worktree + sandbox + image exists -- should return config plist
-4. Worktree + sandbox + needs-build -- should call prompt-sandbox-build
-5. :project-dir is nil
-
-**Why not tested:** Depends on workspace state plumbing and calls prompt-sandbox-build (which signals user-error). Testable with appropriate stubs.
-
-**Recommendation:** Add tests with stubbed workspace state and resolve-sandbox-config.
-
 ### `agent-repl--build-start-cmd`
 
 Integration function assembling all parts of the start command.
 
 **Edge cases:**
 1. Bare-metal workspace with no session -- should produce `claude --permission-mode auto`
-2. Worktree sandbox with session -- should use sandbox script + --resume
-3. Fork session ID set -- should include --fork-session and clear fork-session-id
-4. Sandbox config needs-build -- docker-image should be nil, sandboxed-p false
-5. Nil project-dir
-6. Empty session-id on instantiation
+2. Fork session ID set -- should include --fork-session and clear fork-session-id
+3. Nil project-dir
+4. Empty session-id on instantiation
 
-**Why not tested:** Heavy orchestration depending on get-sandbox-image (which may signal user-error) and multiple workspace state lookups. Each sub-function is individually tested.
+**Why not tested:** Heavy orchestration across multiple workspace state lookups. Each sub-function is individually tested.
 
 **Recommendation:** Add integration-level tests with comprehensive stubs.
 
@@ -220,9 +178,7 @@ Trivial wrapper: `(agent-repl--vterm-process-alive-p (or ws (+workspace-current-
 
 ## Recommended Priority for Remaining Coverage
 
-1. **High:** `agent-repl--get-sandbox-image` -- orchestration logic with branching
-2. **High:** `agent-repl--build-start-cmd` -- integration point for all command building
-3. **Medium:** `agent-repl--prompt-sandbox-build` -- user-facing error paths
-4. **Low:** `agent-repl--log-session-start` -- pure logging
-5. **Low:** `agent-repl--claude-running-p` -- trivial wrapper
-6. **Low:** `agent-repl--set-session-id` -- trivial setter
+1. **High:** `agent-repl--build-start-cmd` -- integration point for all command building
+2. **Low:** `agent-repl--log-session-start` -- pure logging
+3. **Low:** `agent-repl--claude-running-p` -- trivial wrapper
+4. **Low:** `agent-repl--set-session-id` -- trivial setter
