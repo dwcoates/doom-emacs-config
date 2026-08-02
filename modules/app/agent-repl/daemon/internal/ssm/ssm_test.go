@@ -892,6 +892,65 @@ func TestStampFreshnessAdvancesWithNewerFrames(t *testing.T) {
 	}
 }
 
+// THE GUARANTEE: two DIFFERENT composites never carry the same AtMs. The
+// webapp reads AtMs as the frame's revision and holds "one revision names one
+// state"; the old clamp lifted a regressing stamp to the watermark and minted a
+// second composite with the first one's revision, which the webapp reported as
+// `revision conflicted`.
+func TestStampFreshnessGivesADifferentCompositeItsOwnRevision(t *testing.T) {
+	// Arrange — a delivered frame at the watermark.
+	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
+	delivered := &frontendv1.WorkspaceState{
+		Workspace: "ws1", AtMs: 2000, State: frontendv1.RenderState_RENDER_STATE_THINKING,
+	}
+	m.mu.Lock()
+	m.stampFreshnessLocked("ws1", delivered)
+	m.mu.Unlock()
+
+	// Act — a DIFFERENT composite resolves off an older row.
+	regressed := &frontendv1.WorkspaceState{
+		Workspace: "ws1", AtMs: 1000, State: frontendv1.RenderState_RENDER_STATE_DONE,
+	}
+	m.mu.Lock()
+	m.stampFreshnessLocked("ws1", regressed)
+	m.mu.Unlock()
+
+	// Assert.
+	if got := regressed.GetAtMs(); got == delivered.GetAtMs() {
+		t.Fatalf("a different composite got the delivered frame's revision %d; distinct composites must never share one", got)
+	}
+	if got := regressed.GetAtMs(); got <= delivered.GetAtMs() {
+		t.Fatalf("AtMs = %d, want strictly newer than the %d watermark", got, delivered.GetAtMs())
+	}
+}
+
+// THE VIOLATION EDGE: an IDENTICAL composite must NOT earn a new revision. A
+// resync's Snapshot rebuilds the frame the last push carried, and bumping there
+// would make the state appear to change on every reconnect.
+func TestStampFreshnessKeepsTheRevisionOfAnIdenticalComposite(t *testing.T) {
+	// Arrange.
+	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
+	delivered := &frontendv1.WorkspaceState{
+		Workspace: "ws1", AtMs: 2000, State: frontendv1.RenderState_RENDER_STATE_THINKING,
+	}
+	m.mu.Lock()
+	m.stampFreshnessLocked("ws1", delivered)
+	m.mu.Unlock()
+
+	// Act — the same state, resolved again at the same instant.
+	resync := &frontendv1.WorkspaceState{
+		Workspace: "ws1", AtMs: 2000, State: frontendv1.RenderState_RENDER_STATE_THINKING,
+	}
+	m.mu.Lock()
+	m.stampFreshnessLocked("ws1", resync)
+	m.mu.Unlock()
+
+	// Assert.
+	if got := resync.GetAtMs(); got != 2000 {
+		t.Fatalf("AtMs = %d for an identical composite, want the delivered 2000", got)
+	}
+}
+
 // Workspaces must not share a watermark: one workspace's newer frame cannot
 // inflate another's stamp.
 func TestStampFreshnessIsPerWorkspace(t *testing.T) {
