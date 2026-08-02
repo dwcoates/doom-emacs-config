@@ -110,8 +110,10 @@ type RunStatus struct {
 	workspace string
 	now       func() int64
 
-	mu               sync.Mutex
-	phase            Phase
+	mu sync.Mutex
+	// arm is the oneof case of the LAST published status, and it — not the
+	// coarse merge axis — is what phaseStartedAtMs is keyed on. See publish.
+	arm              string
 	phaseStartedAtMs int64
 	updatedAtMs      int64
 	commitsTotal     int32
@@ -323,28 +325,87 @@ func (r *RunStatus) Failed(cause string) error {
 
 // publish stamps the two timestamps and hands the status to the sink.
 //
-// phase_started_at_ms moves only on a phase CHANGE; updated_at_ms moves on every
-// call and is forced strictly increasing, so a clock that does not advance
-// between two ticks still produces two orderable statuses.
+// PHASE_STARTED_AT_MS IS KEYED ON THE PUBLISHED ARM, NOT ON THE MERGE AXIS.
+// The axis is coarser than the status by design — cherry_picking and testing
+// both ride PhaseMerging, because a frontend reading the one-word merge_phase
+// has no use for the distinction — so keying the clock on it made
+// cherry_picking -> testing a change of arm that claimed to have begun when the
+// PREVIOUS arm did. A user watching "testing for 40s" was reading the age of the
+// pick that preceded it. The arm is what a frontend renders, so the arm is what
+// the phase clock has to track: any arm change restarts it, and a repeat of the
+// same arm leaves it exactly where it was.
+//
+// updated_at_ms moves on every call and is forced strictly increasing, so a
+// clock that does not advance between two ticks still produces two orderable
+// statuses. phase_started_at_ms is stamped from that FORCED value rather than
+// from the raw clock, which is what makes an arm change under a stopped clock
+// still land strictly later than the arm it replaced.
 func (r *RunStatus) publish(phase Phase, cause string, fill func(*frontendv1.MergeStatus)) error {
 	r.mu.Lock()
-	now := r.now()
-	if phase != r.phase {
-		r.phase = phase
-		r.phaseStartedAtMs = now
+	status := &frontendv1.MergeStatus{RunId: r.runID}
+	fill(status)
+	arm := statusArm(status)
+	if arm == armNone {
+		// A fill that set no arm is a construction bug at the call site, and the
+		// emitter refuses it. The clocks are left untouched on the way out: a
+		// status that never reaches the sink must not burn an updated_at_ms, or
+		// the run's stream develops a gap no receiver can account for.
+		r.mu.Unlock()
+		return r.emit.emit(r.workspace, phase, cause, status)
 	}
+	now := r.now()
 	if now <= r.updatedAtMs {
 		now = r.updatedAtMs + 1
 	}
 	r.updatedAtMs = now
-	status := &frontendv1.MergeStatus{
-		RunId:            r.runID,
-		PhaseStartedAtMs: r.phaseStartedAtMs,
-		UpdatedAtMs:      r.updatedAtMs,
+	if arm != r.arm {
+		r.arm = arm
+		r.phaseStartedAtMs = now
 	}
-	fill(status)
+	status.PhaseStartedAtMs = r.phaseStartedAtMs
+	status.UpdatedAtMs = r.updatedAtMs
 	r.mu.Unlock()
 	return r.emit.emit(r.workspace, phase, cause, status)
+}
+
+// The oneof arm names, as the proto declares them. They are the words a
+// frontend switches on, and phase_started_at_ms is keyed on them.
+const (
+	armEnqueued      = "enqueued"
+	armBeforeAction  = "before_action"
+	armCherryPicking = "cherry_picking"
+	armTesting       = "testing"
+	armConflict      = "conflict"
+	armAfterAction   = "after_action"
+	armMerged        = "merged"
+	armFailed        = "failed"
+	// armNone is what an UNSET oneof reports as. It is never a phase: a status
+	// exists precisely to say which phase a run is in.
+	armNone = "<none>"
+)
+
+// statusArm reports which oneof arm a MergeStatus carries.
+func statusArm(status *frontendv1.MergeStatus) string {
+	switch status.GetPhase().(type) {
+	case *frontendv1.MergeStatus_Enqueued:
+		return armEnqueued
+	case *frontendv1.MergeStatus_BeforeAction:
+		return armBeforeAction
+	case *frontendv1.MergeStatus_CherryPicking:
+		return armCherryPicking
+	case *frontendv1.MergeStatus_Testing:
+		return armTesting
+	case *frontendv1.MergeStatus_Conflict:
+		return armConflict
+	case *frontendv1.MergeStatus_AfterAction:
+		return armAfterAction
+	case *frontendv1.MergeStatus_Merged:
+		return armMerged
+	case *frontendv1.MergeStatus_Failed:
+		return armFailed
+	default:
+		return armNone
+	}
 }
 
 // newRunID mints a run identity. It is random rather than derived from the
