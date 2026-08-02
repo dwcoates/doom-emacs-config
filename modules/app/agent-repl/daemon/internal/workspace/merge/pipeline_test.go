@@ -2,6 +2,7 @@ package merge
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -107,6 +108,117 @@ func TestABringUpFailurePublishesItsCause(t *testing.T) {
 	status := lastStatusOfPhase(t, h, func(s *frontendv1.MergeStatus) bool { return s.GetFailed() != nil })
 	if !strings.Contains(status.GetFailed().GetCause(), "shim refused to start") {
 		t.Fatalf("failed cause = %q, want it to name the bring-up failure", status.GetFailed().GetCause())
+	}
+}
+
+// THE SESSIONLESS RUN: a workspace with NO session record at all is mergeable.
+// The bring-up reports ErrNoSession, and the run takes the lease and carries on
+// — the cherry-pick, the test gate and the rollback are git, and none of them
+// needs an agent. Failing here would make "was this workspace ever opened in
+// the editor?" a precondition of merging it.
+func TestAWorkspaceWithNoSessionRecordMergesSessionlessly(t *testing.T) {
+	// Arrange.
+	h := newHarnessWith(t, harnessOpts{sessions: &fakeSessionBringUp{
+		err: fmt.Errorf("no record for /ws/a: %w", ErrNoSession),
+	}})
+
+	// Act.
+	if _, err := h.coord.Enqueue(context.Background(), testRequest("a")); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+
+	// Assert — the run reached the lease, which only a continuing run does.
+	if got := <-h.lease.acquires; got != "/ws/a" {
+		t.Fatalf("lease acquired for %q, want /ws/a: a workspace with no session is still mergeable", got)
+	}
+}
+
+// A SESSIONLESS RUN IS NOT A FAILED RUN: nothing terminal is published for the
+// absence itself, so a user is never told their merge failed because they had
+// not opened the workspace.
+func TestAWorkspaceWithNoSessionRecordIsNotFailedForTheAbsence(t *testing.T) {
+	// Arrange.
+	h := newHarnessWith(t, harnessOpts{sessions: &fakeSessionBringUp{
+		err: fmt.Errorf("no record for /ws/a: %w", ErrNoSession),
+	}})
+
+	// Act — the sessionless run reaches the cherry-pick, which lands clean.
+	if _, err := h.coord.Enqueue(context.Background(), testRequest("a")); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	<-h.picker.merges
+	h.picker.results <- pickResult{res: Result{Outcome: OutcomeMerged}}
+	waitForPhase(t, h, PhaseMerged)
+
+	// Assert.
+	for _, s := range h.sink.publishedStatuses() {
+		if s.GetFailed() != nil {
+			t.Fatalf("the sessionless run published failed(%q): the absence of a session is not a merge failure", s.GetFailed().GetCause())
+		}
+	}
+}
+
+// THE WHOLE DISPOSITION MATRIX IN ONE PLACE, so the three answers cannot drift
+// apart: they are one decision with three branches, and a change to any branch
+// has to be read against the other two.
+func TestTheRunsDecisionForEachSessionDisposition(t *testing.T) {
+	tests := []struct {
+		name string
+		// deaths is the deletion verdict the registry reports.
+		deaths fakeSessionDeaths
+		// bringUpErr is what the bring-up returns for this disposition.
+		bringUpErr error
+		// wantProceeds is whether the run reaches the lease.
+		wantProceeds bool
+		// wantCause is the substring the terminal failure must carry when the
+		// run does not proceed.
+		wantCause string
+	}{
+		{
+			name:         "no session record at all: the merge proceeds sessionless",
+			bringUpErr:   fmt.Errorf("no record for /ws/a: %w", ErrNoSession),
+			wantProceeds: true,
+		},
+		{
+			name:         "hibernated: the bring-up rehydrates it and the merge proceeds",
+			bringUpErr:   nil,
+			wantProceeds: true,
+		},
+		{
+			name:         "deleted: the merge fails and says so",
+			deaths:       fakeSessionDeaths{sessionID: "sess-gone", deleted: true},
+			wantProceeds: false,
+			wantCause:    "DELETED",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarnessWith(t, harnessOpts{
+				deaths:   tc.deaths,
+				sessions: &fakeSessionBringUp{err: tc.bringUpErr},
+			})
+
+			// Act.
+			if _, err := h.coord.Enqueue(context.Background(), testRequest("a")); err != nil {
+				t.Fatalf("Enqueue: %v", err)
+			}
+
+			// Assert.
+			if tc.wantProceeds {
+				if got := <-h.lease.acquires; got != "/ws/a" {
+					t.Fatalf("lease acquired for %q, want /ws/a", got)
+				}
+				return
+			}
+			tr := waitForPhase(t, h, PhaseMergeFailed)
+			if !strings.Contains(tr.cause, tc.wantCause) {
+				t.Fatalf("merge_failed cause = %q, want it to carry %q", tr.cause, tc.wantCause)
+			}
+			if len(h.lease.acquires) != 0 {
+				t.Fatal("the lease was taken for a run that must not have proceeded")
+			}
+		})
 	}
 }
 
