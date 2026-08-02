@@ -19,9 +19,11 @@ import (
 // context every phase after the plan shares, so no call site has to reassemble
 // them and no two call sites can assemble them differently.
 //
-// A RUN, NOT A WORKSPACE. The id is minted when the repository's drain
-// goroutine pops the entry, so a retry after a failure and a boot replay are
-// each a DIFFERENT run. A frontend keying progress on the workspace alone would
+// A RUN, NOT A WORKSPACE. The id is minted when merge.Coordinator ADMITS the
+// request and lives until that entry reaches a terminal outcome — across a
+// daemon bounce included, because the queue entry carries the id and a boot
+// replay resumes it. A retry submitted after a failure is a different run and
+// gets a different id. A frontend keying progress on the workspace alone would
 // blend two attempts into one nonsensical commit count.
 
 // StatusSink receives every MergeStatus the pipeline publishes, together with
@@ -121,6 +123,26 @@ type RunStatus struct {
 // NewRunStatus mints a run and its publisher. now returns unix millis and is
 // injectable so a test can pin both timestamps.
 func NewRunStatus(sink StatusSink, logf dlog.Logf, workspace string, now func() int64) (*RunStatus, error) {
+	return newRunStatus(sink, logf, workspace, now, newRunID())
+}
+
+// ResumeRunStatus rebuilds the publisher for a run that ALREADY HAS AN IDENTITY:
+// the durable queue entry a boot replays carries the id its admission published
+// under, and the resumed run must keep publishing under it.
+//
+// ONLY THE NAME IS RESTORED, never the progress. The commit cursor and the phase
+// clock start clean, because the process that was advancing them is gone and its
+// figures describe work this one has not done. What the caller gets is a run a
+// frontend can still recognize, reporting what the resumed drain actually
+// observes.
+func ResumeRunStatus(sink StatusSink, logf dlog.Logf, workspace string, now func() int64, runID string) (*RunStatus, error) {
+	if runID == "" {
+		return nil, fmt.Errorf("merge: resuming a RunStatus needs the run id it was admitted under")
+	}
+	return newRunStatus(sink, logf, workspace, now, runID)
+}
+
+func newRunStatus(sink StatusSink, logf dlog.Logf, workspace string, now func() int64, runID string) (*RunStatus, error) {
 	switch {
 	case sink == nil:
 		return nil, fmt.Errorf("merge: RunStatus needs a StatusSink")
@@ -134,7 +156,7 @@ func NewRunStatus(sink StatusSink, logf dlog.Logf, workspace string, now func() 
 	return &RunStatus{
 		emit:      &statusEmitter{sink: sink, logf: logf},
 		logf:      logf,
-		runID:     newRunID(),
+		runID:     runID,
 		workspace: workspace,
 		now:       now,
 	}, nil
@@ -155,9 +177,26 @@ func (r *RunStatus) SetPlan(plan CommitPlan) {
 	r.logf("merge: run plan {ws=%s run=%s commits_total=%d}", r.workspace, r.runID, r.commitsTotal)
 }
 
-// Enqueued publishes the enqueued phase.
-func (r *RunStatus) Enqueued(position, depth int32, cause string) error {
-	return r.publish(PhaseMergeQueued, cause, func(s *frontendv1.MergeStatus) {
+// Enqueued publishes the run's ADMISSION: the `enqueued` status arm, carrying
+// the place the entry landed at on its repository's queue.
+//
+// THE ARM AND THE AXIS TOKEN ARE NOT THE SAME WORD, which is why the caller
+// passes the token. Every admission is `enqueued` to a frontend — the run is on
+// a queue, at some position, and that is what the arm says — while the coarse
+// merge axis distinguishes the two admissions it has always distinguished: a
+// merge admitted at the HEAD stays at `merge_enqueuing` until the cherry-pick
+// itself moves it to `merging`, and only one deferred behind another merge is
+// `merge_queued`. Publishing `merge_queued` for a head admission would tell every
+// merge_phase reader that a merge starting immediately is waiting on something.
+//
+// Any other token is refused rather than published: it would put an `enqueued`
+// arm on a phase that has nothing to do with admission.
+func (r *RunStatus) Enqueued(phase Phase, position, depth int32, cause string) error {
+	if phase != PhaseMergeEnqueuing && phase != PhaseMergeQueued {
+		r.logf("merge: status REFUSING an enqueued arm on a non-admission phase {ws=%s run=%s phase=%s}", r.workspace, r.runID, phase)
+		return fmt.Errorf("merge: enqueued status for %q needs %s or %s, got %q", r.workspace, PhaseMergeEnqueuing, PhaseMergeQueued, phase)
+	}
+	return r.publish(phase, cause, func(s *frontendv1.MergeStatus) {
 		s.Phase = &frontendv1.MergeStatus_Enqueued{Enqueued: &frontendv1.MergeStatusEnqueued{
 			Position: position,
 			Depth:    depth,
