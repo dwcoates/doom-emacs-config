@@ -1495,7 +1495,6 @@ type WorkspaceState struct {
 	// Resolution inputs (SSM):
 	TurnActive             bool                `protobuf:"varint,4,opt,name=turn_active,json=turnActive,proto3" json:"turn_active,omitempty"`
 	LiveTaskCount          int64               `protobuf:"varint,5,opt,name=live_task_count,json=liveTaskCount,proto3" json:"live_task_count,omitempty"`
-	MergePhase             string              `protobuf:"bytes,6,opt,name=merge_phase,json=mergePhase,proto3" json:"merge_phase,omitempty"`
 	CauseKind              string              `protobuf:"bytes,7,opt,name=cause_kind,json=causeKind,proto3" json:"cause_kind,omitempty"` // event kind that caused this transition
 	CauseSeq               uint64              `protobuf:"varint,8,opt,name=cause_seq,json=causeSeq,proto3" json:"cause_seq,omitempty"`   // store seq when event-caused (0 = daemon-local)
 	AtMs                   int64               `protobuf:"varint,9,opt,name=at_ms,json=atMs,proto3" json:"at_ms,omitempty"`
@@ -1503,14 +1502,6 @@ type WorkspaceState struct {
 	Status                 SessionStatus       `protobuf:"varint,11,opt,name=status,proto3,enum=agentshim.frontend.v1.SessionStatus" json:"status,omitempty"`
 	ControllerGenerationId string              `protobuf:"bytes,12,opt,name=controller_generation_id,json=controllerGenerationId,proto3" json:"controller_generation_id,omitempty"`
 	ActiveFaults           []*RuntimeFault     `protobuf:"bytes,13,rep,name=active_faults,json=activeFaults,proto3" json:"active_faults,omitempty"`
-	// Merge-queue facts. `merge_phase` (6) says WHAT this workspace's merge is
-	// doing; the two fields below say WHERE it sits among the other workspaces
-	// contending for the same repository, which no per-workspace row can carry.
-	//
-	// The queue is keyed by REPOSITORY, not by worktree: sibling worktrees of
-	// one repo cherry-pick into the same target and therefore share one queue.
-	MergeQueuePosition int32 `protobuf:"varint,14,opt,name=merge_queue_position,json=mergeQueuePosition,proto3" json:"merge_queue_position,omitempty"` // 1-based; 0 when not enqueued
-	MergeQueueDepth    int32 `protobuf:"varint,15,opt,name=merge_queue_depth,json=mergeQueueDepth,proto3" json:"merge_queue_depth,omitempty"`          // total entries on this repo's queue
 	// Whether merge.Coordinator holds the exclusivity lease on this workspace's
 	// shim. While held, USER prompting is blocked (the merge owns the session)
 	// and every conversation item the session produces carries
@@ -1521,7 +1512,7 @@ type WorkspaceState struct {
 	// workspace always carries the instant it merged at.
 	//
 	// WRITTEN ONCE, at the `merged` transition, and never moved afterwards.
-	// `merge_phase` (6) reports whichever merge row is currently newest and can
+	// merge_status (18) reports whichever run is currently newest and can
 	// therefore be superseded; this is the durable record that the merge
 	// LANDED, so a later transition on any axis leaves it exactly where it was.
 	//
@@ -1529,9 +1520,9 @@ type WorkspaceState struct {
 	// log, so a frontend ordering a recently-merged section reads the identical
 	// instant from every push, snapshot and resync.
 	MergedAtMs int64 `protobuf:"varint,17,opt,name=merged_at_ms,json=mergedAtMs,proto3" json:"merged_at_ms,omitempty"`
-	// THE merge run's live progress. See MergeStatus: it supersedes the coarse
-	// merge_phase / merge_queue_position / merge_queue_depth trio above, which
-	// stay stamped until the final cutover so both forms coexist for now.
+	// THE merge run's live progress, and the ONLY merge-run surface on this
+	// message. See MergeStatus. The coarse flat trio it replaced is reserved
+	// above; there is no second, weaker form of these facts to disagree with.
 	//
 	// UNSET means this workspace has no merge to report — the merge axis has
 	// never spoken for it, or its axis is cleared. It is never a zero-valued
@@ -1606,13 +1597,6 @@ func (x *WorkspaceState) GetLiveTaskCount() int64 {
 	return 0
 }
 
-func (x *WorkspaceState) GetMergePhase() string {
-	if x != nil {
-		return x.MergePhase
-	}
-	return ""
-}
-
 func (x *WorkspaceState) GetCauseKind() string {
 	if x != nil {
 		return x.CauseKind
@@ -1660,20 +1644,6 @@ func (x *WorkspaceState) GetActiveFaults() []*RuntimeFault {
 		return x.ActiveFaults
 	}
 	return nil
-}
-
-func (x *WorkspaceState) GetMergeQueuePosition() int32 {
-	if x != nil {
-		return x.MergeQueuePosition
-	}
-	return 0
-}
-
-func (x *WorkspaceState) GetMergeQueueDepth() int32 {
-	if x != nil {
-		return x.MergeQueueDepth
-	}
-	return 0
 }
 
 func (x *WorkspaceState) GetMergeLeaseHeld() bool {
@@ -6894,7 +6864,7 @@ const file_agentshim_frontend_v1_frontend_proto_rawDesc = "" +
 	"\n" +
 	"session_id\x18\x03 \x01(\tR\tsessionId\x12\x18\n" +
 	"\ahealthy\x18\x04 \x01(\bR\ahealthy\x12\x16\n" +
-	"\x06reason\x18\x05 \x01(\tR\x06reason\"\xc5\x06\n" +
+	"\x06reason\x18\x05 \x01(\tR\x06reason\"\x8e\x06\n" +
 	"\x0eWorkspaceState\x12\x1c\n" +
 	"\tworkspace\x18\x01 \x01(\tR\tworkspace\x12\x1d\n" +
 	"\n" +
@@ -6902,9 +6872,7 @@ const file_agentshim_frontend_v1_frontend_proto_rawDesc = "" +
 	"\x05state\x18\x03 \x01(\x0e2\".agentshim.frontend.v1.RenderStateR\x05state\x12\x1f\n" +
 	"\vturn_active\x18\x04 \x01(\bR\n" +
 	"turnActive\x12&\n" +
-	"\x0flive_task_count\x18\x05 \x01(\x03R\rliveTaskCount\x12\x1f\n" +
-	"\vmerge_phase\x18\x06 \x01(\tR\n" +
-	"mergePhase\x12\x1d\n" +
+	"\x0flive_task_count\x18\x05 \x01(\x03R\rliveTaskCount\x12\x1d\n" +
 	"\n" +
 	"cause_kind\x18\a \x01(\tR\tcauseKind\x12\x1b\n" +
 	"\tcause_seq\x18\b \x01(\x04R\bcauseSeq\x12\x13\n" +
@@ -6913,13 +6881,11 @@ const file_agentshim_frontend_v1_frontend_proto_rawDesc = "" +
 	" \x01(\x0e2*.agentshim.frontend.v1.SessionConnectivityR\fconnectivity\x12<\n" +
 	"\x06status\x18\v \x01(\x0e2$.agentshim.frontend.v1.SessionStatusR\x06status\x128\n" +
 	"\x18controller_generation_id\x18\f \x01(\tR\x16controllerGenerationId\x12H\n" +
-	"\ractive_faults\x18\r \x03(\v2#.agentshim.frontend.v1.RuntimeFaultR\factiveFaults\x120\n" +
-	"\x14merge_queue_position\x18\x0e \x01(\x05R\x12mergeQueuePosition\x12*\n" +
-	"\x11merge_queue_depth\x18\x0f \x01(\x05R\x0fmergeQueueDepth\x12(\n" +
+	"\ractive_faults\x18\r \x03(\v2#.agentshim.frontend.v1.RuntimeFaultR\factiveFaults\x12(\n" +
 	"\x10merge_lease_held\x18\x10 \x01(\bR\x0emergeLeaseHeld\x12 \n" +
 	"\fmerged_at_ms\x18\x11 \x01(\x03R\n" +
 	"mergedAtMs\x12E\n" +
-	"\fmerge_status\x18\x12 \x01(\v2\".agentshim.frontend.v1.MergeStatusR\vmergeStatus\"\xe8\x05\n" +
+	"\fmerge_status\x18\x12 \x01(\v2\".agentshim.frontend.v1.MergeStatusR\vmergeStatusJ\x04\b\x06\x10\aJ\x04\b\x0e\x10\x0fJ\x04\b\x0f\x10\x10R\vmerge_phaseR\x14merge_queue_positionR\x11merge_queue_depth\"\xe8\x05\n" +
 	"\vMergeStatus\x12\x15\n" +
 	"\x06run_id\x18\x01 \x01(\tR\x05runId\x12-\n" +
 	"\x13phase_started_at_ms\x18\x02 \x01(\x03R\x10phaseStartedAtMs\x12\"\n" +
