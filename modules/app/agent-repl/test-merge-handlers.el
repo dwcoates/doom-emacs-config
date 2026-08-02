@@ -344,11 +344,25 @@ connectivity verdict and Emacs refused the frame."
                        (string-match-p "merge of ws1 refused: lease unavailable" m))
                      msgs))))
 
+(defmacro agent-repl-test--with-merge-echo (status last &rest body)
+  "Run BODY with the narrator's workspace reads stubbed.
+STATUS is what `:pushed-merge-status' answers, LAST what
+`:merge-echo-last' answers; `:pushed-render-state-meta' answers nil.
+`agent-repl--ws-put' is stubbed inert so narrating does not stub-create a
+workspace entry."
+  (declare (indent 2))
+  `(cl-letf (((symbol-function 'agent-repl--ws-get)
+              (lambda (_ws key)
+                (pcase key
+                  (:pushed-merge-status ,status)
+                  (:merge-echo-last ,last))))
+             ((symbol-function 'agent-repl--ws-put) (lambda (&rest _) nil)))
+     ,@body))
+
 (ert-deftest agent-repl-test-merge-echo-narrates-a-merge-phase ()
   "A pushed merge-phase transition is echoed in the minibuffer."
   (agent-repl-test--with-captured-messages msgs
-    (cl-letf (((symbol-function 'agent-repl--ws-get)
-               (lambda (_ws _key) nil)))
+    (agent-repl-test--with-merge-echo nil nil
       (agent-repl--merge-echo-pushed-state "ws1" :merging :merge-queued))
     (should (equal msgs '("agent-repl: ws1 merging")))))
 
@@ -358,7 +372,8 @@ connectivity verdict and Emacs refused the frame."
     (cl-letf (((symbol-function 'agent-repl--ws-get)
                (lambda (_ws key)
                  (when (eq key :pushed-render-state-meta)
-                   '(:cause-kind "merge_transition:shim lease unavailable")))))
+                   '(:cause-kind "merge_transition:shim lease unavailable"))))
+              ((symbol-function 'agent-repl--ws-put) (lambda (&rest _) nil)))
       (agent-repl--merge-echo-pushed-state "ws1" :merge-failed :merge-enqueuing))
     (should (equal msgs
                    '("agent-repl: ws1 merge failed — shim lease unavailable")))))
@@ -366,18 +381,156 @@ connectivity verdict and Emacs refused the frame."
 (ert-deftest agent-repl-test-merge-echo-skips-a-same-state-repush ()
   "Re-pushing the same merge state does not spam the minibuffer."
   (agent-repl-test--with-captured-messages msgs
-    (cl-letf (((symbol-function 'agent-repl--ws-get)
-               (lambda (_ws _key) nil)))
+    (agent-repl-test--with-merge-echo nil nil
       (agent-repl--merge-echo-pushed-state "ws1" :merging :merging))
     (should-not msgs)))
 
 (ert-deftest agent-repl-test-merge-echo-ignores-non-merge-states ()
   "Ordinary render states are not the merge narrator's business."
   (agent-repl-test--with-captured-messages msgs
-    (cl-letf (((symbol-function 'agent-repl--ws-get)
-               (lambda (_ws _key) nil)))
+    (agent-repl-test--with-merge-echo nil nil
       (agent-repl--merge-echo-pushed-state "ws1" :thinking :ready))
     (should-not msgs)))
+
+;;;; ---- Tests: the narration reads MergeStatus ----
+
+(ert-deftest agent-repl-test-merge-echo-narrates-the-queue-position ()
+  "An enqueued status reports where in its repository's queue it sits."
+  (agent-repl-test--with-captured-messages msgs
+    (agent-repl-test--with-merge-echo
+        '(:phase :enqueued :position 2 :depth 5) nil
+      (agent-repl--merge-echo-pushed-state "ws1" :merge-queued :merge-enqueuing))
+    (should (equal msgs '("agent-repl: ws1 merge queued — position 2 of 5")))))
+
+(ert-deftest agent-repl-test-merge-echo-narrates-the-pick-progress ()
+  "A cherry-picking status reports landed/total and the commit on the table."
+  (agent-repl-test--with-captured-messages msgs
+    (agent-repl-test--with-merge-echo
+        '(:phase :cherry-picking :commits-total 4 :commits-landed 1
+          :current-subject "fix the widget")
+        nil
+      (agent-repl--merge-echo-pushed-state "ws1" :merging :merge-queued))
+    (should (equal msgs
+                   '("agent-repl: ws1 cherry-picking — 1/4 commits, fix the widget")))))
+
+(ert-deftest agent-repl-test-merge-echo-narrates-the-testing-phase ()
+  "A testing status is narrated as testing, not as another pick."
+  (agent-repl-test--with-captured-messages msgs
+    (agent-repl-test--with-merge-echo
+        '(:phase :testing :commits-total 4 :commits-landed 2) nil
+      (agent-repl--merge-echo-pushed-state "ws1" :merging :merge-queued))
+    (should (equal msgs '("agent-repl: ws1 testing its merge — 2/4 commits")))))
+
+(ert-deftest agent-repl-test-merge-echo-narrates-the-pre-merge-action ()
+  "A before-action status quotes the action the daemon is running."
+  (agent-repl-test--with-captured-messages msgs
+    (agent-repl-test--with-merge-echo
+        '(:phase :before-action :prompt "bump the version") nil
+      (agent-repl--merge-echo-pushed-state "ws1" :merging :merge-queued))
+    (should (equal msgs
+                   '("agent-repl: ws1 running its pre-merge action — bump the version")))))
+
+(ert-deftest agent-repl-test-merge-echo-narrates-the-post-merge-action ()
+  "An after-action status quotes the action the daemon is running."
+  (agent-repl-test--with-captured-messages msgs
+    (agent-repl-test--with-merge-echo
+        '(:phase :after-action :prompt "run the suite") nil
+      (agent-repl--merge-echo-pushed-state "ws1" :merging :merge-queued))
+    (should (equal msgs
+                   '("agent-repl: ws1 running its post-merge action — run the suite")))))
+
+(ert-deftest agent-repl-test-merge-echo-narrates-the-conflicted-subject ()
+  "A conflict names the commit that conflicted."
+  (agent-repl-test--with-captured-messages msgs
+    (agent-repl-test--with-merge-echo
+        '(:phase :conflict :conflicted-subject "rename the widget"
+          :commits-total 4 :commits-landed 2)
+        nil
+      (agent-repl--merge-echo-pushed-state "ws1" :merge-conflict :merging))
+    (should (equal msgs
+                   '("agent-repl: ws1 merge conflicted — rename the widget, 2/4 commits")))))
+
+(ert-deftest agent-repl-test-merge-echo-narrates-the-structured-failure-cause ()
+  "A failed status reports the daemon's own cause, not the routing prefix."
+  (agent-repl-test--with-captured-messages msgs
+    (agent-repl-test--with-merge-echo
+        '(:phase :failed :cause "lease unavailable") nil
+      (agent-repl--merge-echo-pushed-state "ws1" :merge-failed :merging))
+    (should (equal msgs '("agent-repl: ws1 merge failed — lease unavailable")))))
+
+(ert-deftest agent-repl-test-merge-echo-narrates-a-failed-after-action ()
+  "A merge that landed with a failed post-merge action says so."
+  (agent-repl-test--with-captured-messages msgs
+    (agent-repl-test--with-merge-echo
+        '(:phase :merged :commits-total 3 :after-action-error "tests failed") nil
+      (agent-repl--merge-echo-pushed-state "ws1" :merged :merging))
+    (should (equal msgs
+                   '("agent-repl: ws1 merged — 3 commits, post-merge action failed: tests failed")))))
+
+(ert-deftest agent-repl-test-merge-echo-omits-an-empty-after-action-error ()
+  "An empty after-action error is no error — the clause is dropped."
+  (agent-repl-test--with-captured-messages msgs
+    (agent-repl-test--with-merge-echo
+        '(:phase :merged :commits-total 3 :after-action-error "") nil
+      (agent-repl--merge-echo-pushed-state "ws1" :merged :merging))
+    (should (equal msgs '("agent-repl: ws1 merged — 3 commits")))))
+
+(ert-deftest agent-repl-test-merge-echo-clips-a-long-subject ()
+  "A commit subject longer than the cap is clipped so the counts survive."
+  (agent-repl-test--with-captured-messages msgs
+    (agent-repl-test--with-merge-echo
+        (list :phase :cherry-picking :commits-total 1 :commits-landed 0
+              :current-subject (make-string 100 ?x))
+        nil
+      (agent-repl--merge-echo-pushed-state "ws1" :merging :merge-queued))
+    (should (string-suffix-p (concat (make-string 60 ?x) "…") (car msgs)))
+    (should-not (string-match-p (make-string 61 ?x) (car msgs)))))
+
+(ert-deftest agent-repl-test-merge-echo-narrates-a-phase-change-under-one-state ()
+  "A phase change with NO render-state change still narrates.
+The daemon runs the pre-merge action, the picks, the tests and the
+post-merge action all under one pushed `:merging'."
+  (agent-repl-test--with-captured-messages msgs
+    (agent-repl-test--with-merge-echo
+        '(:phase :testing :commits-total 2 :commits-landed 2)
+        '(:phase :cherry-picking :commits-landed 2)
+      (agent-repl--merge-echo-pushed-state "ws1" :merging :merging))
+    (should (equal msgs '("agent-repl: ws1 testing its merge — 2/2 commits")))))
+
+;;;; ---- Tests: the per-pick tick fires only on a changed count ----
+
+(ert-deftest agent-repl-test-merge-echo-ticks-when-a-commit-lands ()
+  "A landed commit inside one phase is echoed."
+  (agent-repl-test--with-captured-messages msgs
+    (agent-repl-test--with-merge-echo
+        '(:phase :cherry-picking :commits-total 4 :commits-landed 2)
+        '(:phase :cherry-picking :commits-landed 1)
+      (agent-repl--merge-echo-pushed-state "ws1" :merging :merging))
+    (should (equal msgs '("agent-repl: ws1 cherry-picking — 2/4 commits")))))
+
+(ert-deftest agent-repl-test-merge-echo-skips-a-tickless-revision ()
+  "A within-phase revision that lands no commit is silent."
+  (agent-repl-test--with-captured-messages msgs
+    (agent-repl-test--with-merge-echo
+        '(:phase :cherry-picking :commits-total 4 :commits-landed 2)
+        '(:phase :cherry-picking :commits-landed 2)
+      (agent-repl--merge-echo-pushed-state "ws1" :merging :merging))
+    (should-not msgs)))
+
+(ert-deftest agent-repl-test-merge-echo-records-what-it-narrated ()
+  "The narration records its phase and count so the next push can compare."
+  (let (puts)
+    (agent-repl-test--with-captured-messages _msgs
+      (cl-letf (((symbol-function 'agent-repl--ws-get)
+                 (lambda (_ws key)
+                   (when (eq key :pushed-merge-status)
+                     '(:phase :cherry-picking :commits-total 4 :commits-landed 2))))
+                ((symbol-function 'agent-repl--ws-put)
+                 (lambda (ws key value) (push (list ws key value) puts))))
+        (agent-repl--merge-echo-pushed-state "ws1" :merging :merge-queued)))
+    (should (equal puts
+                   '(("ws1" :merge-echo-last
+                      (:phase :cherry-picking :commits-landed 2)))))))
 
 (ert-deftest agent-repl-test-merge-echo-is-subscribed-to-the-transition-hook ()
   "The narrator is registered on `agent-repl-ws-state-transition-functions'."
@@ -444,6 +597,18 @@ that was open while the subscriber was absent or the state flapped."
   (agent-repl-test--with-kill-capture t closes _puts
     (agent-repl--merge-kill-on-merged "ws-a" :merged :merged)
     (should (equal closes '(("ws-a" . preserve-entry))))))
+
+(ert-deftest agent-repl-test-merge-kill-ignores-a-merged-merge-phase ()
+  "A `:merged' MergeStatus PHASE under a non-merged render state does not kill.
+The tab dies on the daemon's resolved render state, never on the merge
+axis's own report, so the two can never disagree about whether the
+workspace is gone."
+  (agent-repl-test--with-kill-capture t closes _puts
+    (cl-letf (((symbol-function 'agent-repl--ws-get)
+               (lambda (_ws key)
+                 (when (eq key :pushed-merge-status) '(:phase :merged)))))
+      (agent-repl--merge-kill-on-merged "ws-a" :merging :merging))
+    (should-not closes)))
 
 (ert-deftest agent-repl-test-merge-kill-is-subscribed-to-the-transition-hook ()
   "The kill subscriber is registered on the transition hook."

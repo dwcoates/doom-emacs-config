@@ -22,9 +22,11 @@
 ;;   - No handler registry, no `.claude/emacs/workspace-merge.eld' lookup,
 ;;     no per-repo override alist.  Every merge is the same request.
 ;;   - No queue, no in-flight bookkeeping, no dispatch marker.  A merge's
-;;     position and depth arrive on `WorkspaceState'
-;;     (`merge_queue_position' / `merge_queue_depth') and are RENDERED,
-;;     never derived.
+;;     position, depth, landed-commit count and failure cause all arrive
+;;     on `WorkspaceState.merge_status' and are RENDERED, never derived.
+;;   - No pre-merge or post-merge action.  The daemon runs both ends of
+;;     the pipeline itself and reports them as phases; Emacs neither
+;;     defers a merge behind an action nor delivers one as a turn.
 ;;
 ;; Emacs reacts to merge state in three places: the state icons that
 ;; render the pushed merge states, the kill guard that refuses to tear
@@ -136,26 +138,122 @@ request-id."
 Closed by construction: exactly the merge arm of
 `agent-repl--frontend-render-state-map' (frontend-state.el).")
 
+(defconst agent-repl--merge-phase-words
+  '((:enqueued       . "merge queued")
+    (:before-action  . "running its pre-merge action")
+    (:cherry-picking . "cherry-picking")
+    (:testing        . "testing its merge")
+    (:conflict       . "merge conflicted")
+    (:after-action   . "running its post-merge action")
+    (:merged         . "merged")
+    (:failed         . "merge failed"))
+  "The narrated word for each `MergeStatus' phase keyword.
+Finer than the render-state vocabulary on purpose: the daemon reports
+`:before-action', `:cherry-picking', `:testing' and `:after-action' all
+under one pushed `:merging' state, and \"merging\" for four different
+things is exactly the feedback that makes a user ask what it is doing.")
+
+(defconst agent-repl--merge-echo-detail-max 60
+  "Longest commit subject or action prompt the narration quotes.
+The echo area is one line, and a long subject pushed the counts that
+precede it off the end of it.")
+
+(defun agent-repl--merge-echo-clip (text)
+  "Return TEXT clipped to `agent-repl--merge-echo-detail-max', or nil.
+Answers nil for a nil or blank TEXT so callers can drop the clause
+entirely rather than narrate an empty one."
+  (when (and (stringp text) (not (string-empty-p text)))
+    (if (<= (length text) agent-repl--merge-echo-detail-max)
+        text
+      (concat (substring text 0 agent-repl--merge-echo-detail-max) "…"))))
+
+(defun agent-repl--merge-echo-facts (phase status)
+  "Return the narration clauses for PHASE of decoded merge STATUS.
+A list of strings, already clipped, with the absent ones dropped.  Each
+phase names only what it actually knows: a queue position while enqueued,
+the landed/total counts and the commit on the table while picking or
+testing, the conflicted subject on a conflict, the cause on a failure."
+  (let ((total (plist-get status :commits-total))
+        (landed (plist-get status :commits-landed)))
+    (delq nil
+          (pcase phase
+            (:enqueued
+             (list (when-let ((position (plist-get status :position))
+                              (depth (plist-get status :depth)))
+                     (format "position %s of %s" position depth))))
+            ((or :before-action :after-action)
+             (list (agent-repl--merge-echo-clip (plist-get status :prompt))))
+            ((or :cherry-picking :testing)
+             (list (when total (format "%s/%s commits" (or landed 0) total))
+                   (agent-repl--merge-echo-clip
+                    (plist-get status :current-subject))))
+            (:conflict
+             (list (agent-repl--merge-echo-clip
+                    (plist-get status :conflicted-subject))
+                   (when total (format "%s/%s commits" (or landed 0) total))))
+            (:merged
+             (list (when total (format "%s commits" total))
+                   (when-let ((err (plist-get status :after-action-error)))
+                     (and (not (string-empty-p err))
+                          (format "post-merge action failed: %s" err)))))
+            (:failed
+             (list (agent-repl--merge-echo-clip (plist-get status :cause))
+                   (agent-repl--merge-echo-clip
+                    (plist-get status :failing-subject))))))))
+
 (defun agent-repl--merge-echo-pushed-state (ws new previous)
-  "Echo WS's merge-phase transition NEW in the minibuffer.
+  "Echo WS's merge progress NEW in the minibuffer, one line per transition.
 Subscriber for `agent-repl-ws-state-transition-functions'
-\(frontend-state.el).  Non-merge states and same-state re-pushes are
-ignored.  A `:merge-failed' echo carries the daemon's cause (the pushed
-`:cause-kind', minus its `merge_transition:' routing prefix), because
-\"merge failed\" with no reason is feedback that only creates a second
-question."
-  (when (and (memq new agent-repl--merge-echo-states)
-             (not (eq new previous)))
-    (let* ((meta (agent-repl--ws-get ws :pushed-render-state-meta))
-           (cause (plist-get meta :cause-kind))
-           (detail (and (eq new :merge-failed)
-                        (stringp cause)
-                        (string-remove-prefix "merge_transition:" cause)))
-           (phase (string-replace "-" " " (substring (symbol-name new) 1))))
-      (agent-repl--log ws "merge-echo-pushed-state: ws=%s %s -> %s cause=%S"
-                       ws previous new cause)
-      (message "agent-repl: %s %s%s" ws phase
-               (if detail (format " — %s" detail) "")))))
+\(frontend-state.el).  Non-merge states are ignored.
+
+THREE things count as a transition worth narrating, and nothing else:
+
+  - the pushed render state changed (the pre-MergeStatus contract);
+  - the `MergeStatus' PHASE changed, which the render state cannot
+    always report — the daemon runs the pre-merge action, the picks, the
+    tests and the post-merge action all under one pushed `:merging';
+  - `commits_landed' changed, the per-pick tick.  Gated on the count
+    itself CHANGING rather than on a status arriving, because the daemon
+    also pushes within-phase revisions that land no commit, and echoing
+    those would narrate the same line repeatedly.
+
+What was last narrated is recorded on `:merge-echo-last', so a re-push
+that moved none of the three is silent.
+
+Without a `MergeStatus' (a daemon predating it, or a merge state pushed
+with no run to describe) the narration is the render-state word plus, for
+`:merge-failed', the pushed `:cause-kind' minus its `merge_transition:'
+routing prefix — \"merge failed\" with no reason is feedback that only
+creates a second question."
+  (when (memq new agent-repl--merge-echo-states)
+    (let* ((status (agent-repl--ws-get ws :pushed-merge-status))
+           (phase (plist-get status :phase))
+           (landed (plist-get status :commits-landed))
+           (last (agent-repl--ws-get ws :merge-echo-last))
+           (state-edge (not (eq new previous)))
+           (phase-edge (and phase (not (eq phase (plist-get last :phase)))))
+           (tick (and landed
+                      (not (equal landed (plist-get last :commits-landed))))))
+      (when (or state-edge phase-edge tick)
+        (let* ((meta (agent-repl--ws-get ws :pushed-render-state-meta))
+               (cause (plist-get meta :cause-kind))
+               (word (or (alist-get phase agent-repl--merge-phase-words)
+                         (string-replace "-" " " (substring (symbol-name new) 1))))
+               (facts (if status
+                          (agent-repl--merge-echo-facts phase status)
+                        (and (eq new :merge-failed)
+                             (stringp cause)
+                             (list (string-remove-prefix "merge_transition:"
+                                                         cause))))))
+          (agent-repl--ws-put ws :merge-echo-last
+                              (list :phase phase :commits-landed landed))
+          (agent-repl--log ws
+                           "merge-echo-pushed-state: ws=%s %s -> %s phase=%s landed=%s run-id=%s edges=(state=%S phase=%S tick=%S) cause=%S facts=%S"
+                           ws previous new phase landed
+                           (plist-get status :run-id)
+                           state-edge phase-edge tick cause facts)
+          (message "agent-repl: %s %s%s" ws word
+                   (if facts (format " — %s" (string-join facts ", ")) "")))))))
 
 ;; Registered here (merge-handlers.el is the merge surface) though the hook
 ;; variable is defined in frontend-state.el: `add-hook' auto-vivifies the
