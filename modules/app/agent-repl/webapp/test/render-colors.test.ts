@@ -23,6 +23,13 @@ interface ColorFixture {
   colors: string[];
   precedence: string[];
   render_states: Record<string, string>;
+  /**
+   * Surface name -> state name -> color. A surface may paint a state
+   * differently from `render_states`, but only by declaring it here. This
+   * renderer takes none: its rail carries a glyph and a status word beside
+   * every dot, so a state that spends no color still reports itself.
+   */
+  surface_overrides?: Record<string, Record<string, string>>;
   error_classes: Record<string, string>;
 }
 
@@ -87,6 +94,15 @@ describe("the shared color fixture", () => {
     expect(fixture.render_states.RENDER_STATE_HIBERNATED).not.toBe(
       fixture.render_states.RENDER_STATE_SEVERED,
     );
+  });
+
+  it("grants this renderer no surface override", () => {
+    // Arrange / Act — the Emacs tab bar overrides the in-flight merge states
+    // to red because it has neither a badge nor a glyph, so "none" renders
+    // there as no state at all. This rail does have both, and a red merge dot
+    // would collide with the thinking dot sitting beside it in the same list.
+    // Assert
+    expect(fixture.surface_overrides?.webapp).toBeUndefined();
   });
 
   it("ranks hibernated above every green state", () => {

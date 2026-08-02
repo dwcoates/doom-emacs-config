@@ -43,6 +43,10 @@
   "Return the render keyword ENUM-NAME maps to, or nil."
   (cdr (assoc enum-name agent-repl--frontend-render-state-map)))
 
+(defun agent-repl-test--surface-override (surface)
+  "Return the fixture's declared color overrides for SURFACE as an alist."
+  (cdr (assoc surface (agent-repl-test--fixture "surface_overrides"))))
+
 ;;;; ---- Fixture coverage ------------------------------------------------
 
 (ert-deftest agent-repl-test-colors-every-mapped-state-has-a-fixture-row ()
@@ -98,7 +102,7 @@ it — so `agent-repl--tab-appearance\=' fell back to
 tab painted uncolored.  A missing row is an assignment nothing honors,
 and it must FAIL rather than be skipped."
   ;; Act / Assert
-  (dolist (entry agent-repl--state-color)
+  (dolist (entry agent-repl--tab-bar-state-color)
     (let ((keyword (car entry))
           (name (cdr entry)))
       (unless (equal name "none")
@@ -115,7 +119,7 @@ Deliberately UNGUARDED on the row existing: a missing row used to make
 this pass silently, which is exactly how a colorless tab shipped.  The
 test above proves the row is there; this proves it is right."
   ;; Act / Assert
-  (dolist (entry agent-repl--state-color)
+  (dolist (entry agent-repl--tab-bar-state-color)
     (let* ((keyword (car entry))
            (name (cdr entry)))
       (unless (equal name "none")
@@ -125,10 +129,84 @@ test above proves the row is there; this proves it is right."
           (should (equal bg (alist-get name agent-repl--color-by-name nil nil #'equal))))))))
 
 (ert-deftest agent-repl-test-colors-merge-states-spend-no-color ()
-  "The merge states carry badges, never one of the six."
+  "The merge states spend none of the six in the SHARED assignment.
+The tab bar overrides three of them, but only by declaring it; the table
+every other surface reads still says \"none\" for all six."
   ;; Act / Assert
   (dolist (keyword '(:merge-enqueuing :merging :merge-queued :merge-conflict :merge-failed :merged))
     (should (equal (alist-get keyword agent-repl--state-color) "none"))))
+
+;;;; ---- The tab bar's declared divergence -------------------------------
+;;
+;; The tab bar is the one surface with neither a badge nor a glyph, so a
+;; state that spends no color renders there as no state at all.  It may
+;; therefore override the shared assignment — but only by DECLARING the
+;; override in the same fixture, which is what these pin.
+
+(ert-deftest agent-repl-test-colors-tab-bar-overrides-match-the-fixture ()
+  "Emacs's tab-bar overrides equal the fixture's, row for row.
+An override the fixture does not declare is exactly the undeclared drift
+the contract exists to catch, whichever direction it runs in."
+  ;; Arrange
+  (let ((declared (agent-repl-test--surface-override "emacs_tab_bar")))
+    ;; Act / Assert — every declared row is one Emacs honors.
+    (dolist (row declared)
+      (should (equal (alist-get (agent-repl-test--state-keyword (car row))
+                                agent-repl--tab-bar-color-overrides)
+                     (cdr row))))
+    ;; ...and Emacs overrides nothing the fixture did not declare.
+    (should (equal (length declared) (length agent-repl--tab-bar-color-overrides)))))
+
+(ert-deftest agent-repl-test-colors-tab-bar-overrides-the-in-flight-merges-to-red ()
+  "The three verdict-less merge states read red on the tab bar.
+A merge the daemon is carrying makes red's claim exactly: work is in
+flight and the user cannot act on the workspace."
+  ;; Act / Assert
+  (dolist (keyword '(:merge-enqueuing :merge-queued :merging))
+    (should (equal (alist-get keyword agent-repl--tab-bar-state-color) "red"))))
+
+(ert-deftest agent-repl-test-colors-tab-bar-leaves-the-settled-merges-colorless ()
+  "A conflict and the two terminal merge states take no tab-bar color.
+A conflict is waiting on the USER, which is the opposite of red's claim,
+and nothing is in flight for a merge that has already landed or failed."
+  ;; Act / Assert
+  (dolist (keyword '(:merge-conflict :merge-failed :merged))
+    (should (equal (alist-get keyword agent-repl--tab-bar-state-color) "none"))))
+
+(ert-deftest agent-repl-test-colors-tab-bar-table-covers-the-shared-states ()
+  "The tab-bar table names exactly the states the shared table does.
+It is derived from the shared table precisely so the two can disagree
+about a COLOR and never about which states exist."
+  ;; Act / Assert
+  (should (equal (mapcar #'car agent-repl--tab-bar-state-color)
+                 (mapcar #'car agent-repl--state-color))))
+
+(ert-deftest agent-repl-test-colors-tab-bar-overrides-only-diverge-where-declared ()
+  "Every state the fixture does NOT override reads the shared color.
+Without this the derived table could quietly repaint a state nobody
+declared, and the override section would document only part of the
+divergence."
+  ;; Act / Assert
+  (dolist (entry agent-repl--state-color)
+    (unless (assq (car entry) agent-repl--tab-bar-color-overrides)
+      (should (equal (alist-get (car entry) agent-repl--tab-bar-state-color)
+                     (cdr entry))))))
+
+(ert-deftest agent-repl-test-colors-every-override-is-one-of-the-six ()
+  "An override spends a real color, never a seventh vocabulary.
+\"none\" is not accepted either: an override exists to ADD a color to a
+surface, and one that removes it would be a second way to say what the
+shared table already says."
+  ;; Act / Assert
+  (dolist (row (agent-repl-test--surface-override "emacs_tab_bar"))
+    (should (member (cdr row) (cdr (assoc "colors" agent-repl-test--color-fixture))))))
+
+(ert-deftest agent-repl-test-colors-the-webapp-takes-no-override ()
+  "No surface override applies to the webapp's status indications.
+The rail carries a glyph and a status word beside every dot, so the merge
+pipeline already reports itself there without spending a color."
+  ;; Act / Assert
+  (should-not (agent-repl-test--surface-override "webapp")))
 
 ;;;; ---- Exhaustiveness across the three Emacs tables --------------------
 
@@ -171,17 +249,21 @@ makes their agreement structural rather than coincidental."
                        (alist-get keyword agent-repl--sidebar-status-wire)))))))
 
 (ert-deftest agent-repl-test-colors-the-dot-and-the-tab-take-the-same-color ()
-  "For every state, the rail's dot and the tab bar resolve the same color.
+  "Every state the tab bar does not override reads alike on both surfaces.
 Each renderer keeps its own shade; what may never differ is WHICH of the
-six a state gets, and that is what the shared fixture pins."
+six a state gets, and that is what the shared fixture pins.  The declared
+overrides are the sole exception and are checked above."
   ;; Act / Assert
   (dolist (entry agent-repl--frontend-render-state-map)
     (let* ((keyword (cdr entry))
            (fixture-color (cdr (assoc (car entry) (agent-repl-test--fixture "render_states")))))
-      ;; The rail has a row for it, and the tab bar assigns it the fixture's
-      ;; color: one assignment, read by both.
+      ;; The rail has a row for it, and it reads the fixture's color.
       (should (assq keyword agent-repl--sidebar-status-wire))
-      (should (equal (alist-get keyword agent-repl--state-color) fixture-color)))))
+      (should (equal (alist-get keyword agent-repl--state-color) fixture-color))
+      ;; So does the tab bar, everywhere it has not declared otherwise.
+      (unless (assq keyword agent-repl--tab-bar-color-overrides)
+        (should (equal (alist-get keyword agent-repl--tab-bar-state-color)
+                       fixture-color))))))
 
 ;;;; ---- Error classes ---------------------------------------------------
 
