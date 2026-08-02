@@ -146,7 +146,6 @@ export interface WorkspaceStatusInput {
   /** SSM resolution input, surfaced for debuggability (the tail row reads it). */
   turnActive: boolean;
   liveTaskCount: number;
-  mergePhase: string;
   /** SSM transition identity, retained so adoption logs can be correlated. */
   causeKind: string;
   causeSeq: number;
@@ -155,14 +154,6 @@ export interface WorkspaceStatusInput {
   sessionStatus: WebSessionStatus;
   controllerGenerationId: string;
   activeFaults: RuntimeFault[];
-  /**
-   * This workspace's 1-based place in its REPOSITORY's merge queue, or 0 when
-   * it is not enqueued. The phase says what the merge is doing; this says where
-   * it sits among the sibling worktrees contending for the same target.
-   */
-  mergeQueuePosition: number;
-  /** Total entries on that queue (0 when nothing is enqueued). */
-  mergeQueueDepth: number;
   /**
    * Whether the merge coordinator holds the exclusivity lease on this
    * workspace's shim. The merge OWNS the session while it is held: the daemon
@@ -545,8 +536,7 @@ export class StateAdapter {
         `generation=${ws.controllerGenerationId || "none"} ` +
         `connectivity=${connectivity} status=${sessionStatus ?? "none"} ` +
         `proto=${RenderState[ws.state]} keyword=${state} turn_active=${ws.turnActive} ` +
-        `live_tasks=${String(ws.liveTaskCount)} merge_phase=${ws.mergePhase} ` +
-        `merge_queue=${String(ws.mergeQueuePosition)}/${String(ws.mergeQueueDepth)} ` +
+        `live_tasks=${String(ws.liveTaskCount)} ` +
         `merge_lease_held=${ws.mergeLeaseHeld} ` +
         `merge_status=${mergeStatusLogValue(ws.mergeStatus ?? null)} ` +
         `faults=${ws.activeFaults.map((fault) => `${fault.component}/${fault.faultType}`).join(",") || "none"} ` +
@@ -560,7 +550,6 @@ export class StateAdapter {
         state,
         turnActive: ws.turnActive,
         liveTaskCount: Number(ws.liveTaskCount),
-        mergePhase: ws.mergePhase,
         causeKind: ws.causeKind,
         causeSeq: Number(ws.causeSeq),
         atMs: Number(ws.atMs),
@@ -568,8 +557,6 @@ export class StateAdapter {
         sessionStatus,
         controllerGenerationId: ws.controllerGenerationId,
         activeFaults: ws.activeFaults,
-        mergeQueuePosition: Number(ws.mergeQueuePosition),
-        mergeQueueDepth: Number(ws.mergeQueueDepth),
         mergeLeaseHeld: ws.mergeLeaseHeld,
         // Absent on the wire is "no merge run", which every consumer tests as
         // one null check rather than by interrogating a phase arm.
