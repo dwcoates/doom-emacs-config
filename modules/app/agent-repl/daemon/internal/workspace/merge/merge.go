@@ -248,10 +248,14 @@ func (e *Driver) Merge(ctx context.Context, req Request) (Result, error) {
 		return Result{}, err
 	}
 
-	if err := req.Run.PickingCurrent("cherry-pick starting for " + req.SourceBranch); err != nil {
-		return Result{}, err
-	}
-
+	// NOTHING IS PUBLISHED HERE. The opening used to publish a cherry_picking
+	// status before the plan was computed, which put commits_total=0 and an empty
+	// current_sha on the wire as the run's FIRST word about its picks — a
+	// progress bar reading 0 of 0 for a merge that is about to land three
+	// commits, and the only cherry_picking frame a frontend saw until the next
+	// one replaced it. A cherry_picking status exists to say which commit of how
+	// many is landing, so it is published from inside the loop, once the plan is
+	// the run's denominator and a commit is genuinely in flight.
 	base, err := e.cherryPickBase(ctx, req.TargetDir, req.SourceBranch)
 	if err != nil {
 		return Result{}, err
@@ -714,7 +718,18 @@ func (e *Driver) markConflict(ctx context.Context, req Request) (Result, error) 
 	if err != nil {
 		return Result{}, err
 	}
-	if err := req.Run.Conflict(short, "conflict cherry-picking "+short+" (left in tree for resolve)"); err != nil {
+	// THE STATUS CARRIES THE FULL SHA, the logs and the Result carry the short
+	// one. A conflict's entire purpose is to hand work to a human, and an
+	// abbreviated sha is ambiguous by construction: it is the prefix git happened
+	// to consider unique in THIS repository at THIS moment, so a frontend cannot
+	// use it to address the commit anywhere else. The short form stays where it
+	// has always been — the cause text a human reads, and ConflictCommit, which
+	// the resume path matches on.
+	full, err := e.gitString(ctx, req.TargetDir, "rev-parse", "CHERRY_PICK_HEAD")
+	if err != nil {
+		return Result{}, err
+	}
+	if err := req.Run.Conflict(full, "conflict cherry-picking "+short+" (left in tree for resolve)"); err != nil {
 		return Result{}, err
 	}
 	return Result{Outcome: OutcomeConflict, ConflictCommit: short}, nil
