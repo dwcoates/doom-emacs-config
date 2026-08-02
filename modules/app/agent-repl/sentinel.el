@@ -99,53 +99,13 @@ wrong perspective."
                                 dir canonical-target))
     match))
 
-(defun agent-repl--ws-for-dir-container (dir)
-  "Try container-path matching for DIR.
-Docker sandboxes mount worktrees at /<dirname>, so the sentinel CWD
-won't match any host path.  Extract the first path component after /
-as the container root name and match against workspace project dirs.
-Return the workspace name or nil."
-  (agent-repl--log-verbose nil "ws-for-dir-container: ENTER dir=%S persp-mode=%s"
-                    dir (if (agent-repl--ws-system-available-p) "yes" "no"))
-  (unless (agent-repl--ws-system-available-p)
-    (agent-repl--log nil "ws-for-dir-container: persp-mode not bound, aborting"))
-  (when (agent-repl--ws-system-available-p)
-    (let* ((container-root (car (split-string (substring dir 1) "/")))
-           (all-ws (agent-repl--ws-all-names))
-           (ws-dirs (mapcar (lambda (ws)
-                              (cons ws (agent-repl--ws-get ws :project-dir)))
-                            all-ws)))
-      (agent-repl--log-verbose nil "ws-for-dir-container: container-root=%S all-ws=%S ws-dirs=%S"
-                        container-root all-ws ws-dirs)
-      (let ((match (cl-loop for (ws . proj-dir) in ws-dirs
-                            for canonical = (when proj-dir
-                                              (agent-repl--path-canonical proj-dir))
-                            for basename = (when canonical
-                                             (file-name-nondirectory canonical))
-                            do (agent-repl--log-verbose ws "ws-for-dir-container: checking ws=%s proj-dir=%S canonical=%S basename=%S vs container-root=%S match=%s"
-                                                 ws proj-dir canonical basename container-root
-                                                 (if (and basename (string= container-root basename)) "YES" "no"))
-                            when (and basename (string= container-root basename))
-                            return ws)))
-        (if match
-            (agent-repl--log-verbose match "ws-for-dir-container: HIT dir=%S container-root=%S ws=%s"
-                              dir container-root match)
-          (agent-repl--log nil "ws-for-dir-container: MISS dir=%S container-root=%S"
-                            dir container-root))
-        match))))
-
 (defun agent-repl--ws-for-dir (dir)
   "Return the workspace name for an agent session rooted at DIR, or nil.
-First tries the fast path: git-root -> hash -> buffer -> workspace.
-Falls back to container-path matching for Docker sandbox workspaces."
+Resolves via the fast path: git-root -> hash -> buffer -> workspace."
   (agent-repl--log-verbose nil "ws-for-dir: ENTER dir=%S" dir)
-  (let* ((fast (agent-repl--ws-for-dir-fast dir))
-         (_ (agent-repl--log-verbose nil "ws-for-dir: fast-path returned %S" fast))
-         (container (unless fast (agent-repl--ws-for-dir-container dir)))
-         (_ (unless fast (agent-repl--log-verbose nil "ws-for-dir: container-path returned %S" container)))
-         (ws (or fast container)))
+  (let ((ws (agent-repl--ws-for-dir-fast dir)))
     (agent-repl--log-verbose nil "ws-for-dir: EXIT dir=%S ws=%S (via %s)"
-                      dir ws (cond (fast "fast-path") (container "container-path") (t "NONE")))
+                      dir ws (if ws "fast-path" "NONE"))
     ws))
 
 (defun agent-repl--delete-sentinel-file (file ws)
