@@ -106,6 +106,7 @@ function storeState(over: Partial<StoreState> = {}): StoreState {
     mergeQueuePosition: 0,
     mergeQueueDepth: 0,
     mergeLeaseHeld: false,
+    mergeStatus: null,
     workspaceStateCauseSeq: 0,
     ...over,
   };
