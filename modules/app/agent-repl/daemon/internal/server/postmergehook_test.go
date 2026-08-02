@@ -17,6 +17,8 @@ type stubPostMergeHook struct{}
 
 func (stubPostMergeHook) AfterMerged(context.Context, merge.Request) error { return nil }
 
+func (stubPostMergeHook) AfterAction(merge.Request) (string, error) { return "", nil }
+
 // Live makes the package's PromptRouter fake answer the liveness fact the
 // post-merge parent handoff needs. It reports every workspace live, so a
 // wiring test never depends on which workspaces a fake decided to know about.
@@ -104,6 +106,14 @@ func TestBuildPostMergeHookBindsBothDerivedDependencies(t *testing.T) {
 type recordingHook struct {
 	ran int
 	err error
+	// prompt is the after-action text this hook reports, and lookupErr the
+	// failure of reporting it. Both default to the common case: no prompt.
+	prompt    string
+	lookupErr error
+}
+
+func (h *recordingHook) AfterAction(merge.Request) (string, error) {
+	return h.prompt, h.lookupErr
 }
 
 func (h *recordingHook) AfterMerged(context.Context, merge.Request) error {

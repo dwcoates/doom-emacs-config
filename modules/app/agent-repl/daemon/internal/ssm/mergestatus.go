@@ -46,9 +46,12 @@ type mergeTransitionRow struct {
 // in the resolver and here. A workspace with no merge history at all reports
 // found=false, which is the only reading of absence.
 func (m *Manager) newestMergeTransitionLocked(workspace string) (row mergeTransitionRow, found bool, err error) {
+	// The placeholder list is derived from mergeAxisStates rather than written
+	// out, so adding a merge token can never leave the two silently out of step
+	// (a mismatched count is a bind error at every push, not a wrong answer).
 	query := `
 SELECT cause_kind, at FROM workspace_state
-WHERE workspace = ? AND state IN (?,?,?,?,?,?,?)
+WHERE workspace = ? AND state IN (` + mergeAxisPlaceholders() + `)
 ORDER BY at DESC LIMIT 1`
 	args := make([]any, 0, len(mergeAxisStates)+1)
 	args = append(args, workspace)
@@ -82,6 +85,28 @@ func mergeTransitionCause(causeKind string) string {
 	return strings.TrimPrefix(causeKind, causeMergeTransition+":")
 }
 
+// recordPipelineStatusLocked retains the status the merge PIPELINE published for
+// a workspace, so the construction funnel stamps the pipeline's own account
+// rather than the coarse projection below. Caller holds mu.
+//
+// IT IS IN MEMORY, AND DELIBERATELY SO. A MergeStatus describes a RUN, and a run
+// does not survive the process that is executing it: a daemon that dies mid-merge
+// leaves an entry the next boot replays as a NEW run with a new id. Persisting the
+// old run's progress would hand a frontend a run nothing is advancing.
+func (m *Manager) recordPipelineStatusLocked(workspace string, status *frontendv1.MergeStatus) {
+	if m.pipelineStatus == nil {
+		m.pipelineStatus = make(map[string]*frontendv1.MergeStatus)
+	}
+	m.pipelineStatus[workspace] = status
+}
+
+// clearPipelineStatusLocked drops a workspace's retained run status. It is called
+// when the merge axis is cleared: the run is over and nothing about it is true
+// any more. Caller holds mu.
+func (m *Manager) clearPipelineStatusLocked(workspace string) {
+	delete(m.pipelineStatus, workspace)
+}
+
 // mergeRunIDFor mints the run identity every MergeStatus carries.
 //
 // IT IS A PLACEHOLDER. A real run id is minted by the merge pipeline when it
@@ -108,6 +133,12 @@ func mergeStatusFor(workspace, token string, row mergeTransitionRow, position, d
 		UpdatedAtMs: row.at,
 	}
 	switch token {
+	case sigMergeBeforeAction:
+		// The prompt is the pipeline's to report; a projection over the log has
+		// no access to it and must not invent one.
+		status.Phase = &frontendv1.MergeStatus_BeforeAction{BeforeAction: &frontendv1.MergeStatusBeforeAction{}}
+	case sigMergeAfterAction:
+		status.Phase = &frontendv1.MergeStatus_AfterAction{AfterAction: &frontendv1.MergeStatusAfterAction{}}
 	case sigMergeEnqueuing, sigMergeQueued:
 		// BOTH map to enqueued, and the queue facts come from the same snapshot
 		// that fills merge_queue_position/depth. merge_enqueuing has no durable
@@ -150,6 +181,16 @@ func mergeStatusFor(workspace, token string, row mergeTransitionRow, position, d
 func (m *Manager) stampMergeStatusLocked(workspace string, msg *frontendv1.WorkspaceState, position, depth int32) {
 	token := msg.GetMergePhase()
 	if token == "" {
+		return
+	}
+	// THE PIPELINE'S OWN ACCOUNT WINS. When the merge pipeline published a status
+	// for this run it knows things the log cannot hold — the run's identity, the
+	// commit plan's size, which commit is landing, the action prompts — so the
+	// projection below is only ever consulted for rows THIS process did not
+	// publish (a previous daemon's, read back after a restart). That is the log
+	// being the only evidence available, not a fallback around a failure.
+	if status, ok := m.pipelineStatus[workspace]; ok {
+		msg.MergeStatus = status
 		return
 	}
 	row, found, err := m.newestMergeTransitionLocked(workspace)
