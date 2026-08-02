@@ -1537,7 +1537,8 @@ func TestStructuralMergeDispatchFailureKeepsTheClaim(t *testing.T) {
 	}
 }
 
-// An inbox without a merge route could only drop merges silently.
+// A long-lived watcher without a merge route could only ever drop merges, so it
+// refuses to START rather than shredding them one file at a time.
 func TestInboxRefusesToRunWithoutAMergeDispatcher(t *testing.T) {
 	// Arrange
 	root := t.TempDir()
@@ -1546,11 +1547,88 @@ func TestInboxRefusesToRunWithoutAMergeDispatcher(t *testing.T) {
 	inbox.Merges = nil
 
 	// Act
-	err := inbox.ScanAndDrain(context.Background())
+	err := inbox.Run(context.Background())
 
 	// Assert
 	if err == nil || !strings.Contains(err.Error(), "MergeDispatcher") {
-		t.Fatalf("ScanAndDrain = %v, want a MergeDispatcher refusal", err)
+		t.Fatalf("Run = %v, want a MergeDispatcher refusal", err)
+	}
+}
+
+// A one-shot drain treats the missing route as THAT FILE's failure: the entry
+// cannot be routed, so it is quarantined rather than propagated as an ingress
+// failure that stops every remaining file.
+func TestMergeWithoutADispatcherIsQuarantinedRatherThanAbortingTheDrain(t *testing.T) {
+	// Arrange
+	root := t.TempDir()
+	f := newFixture(t, filepath.Join(root, "jobs.json"))
+	inboxDir := filepath.Join(root, "output")
+	writeCommandFile(t, inboxDir, "workspace_commands_merge.json", `[{"type":"merge","workspace":"DWC/feature","project_dir":"/worktrees/feature"}]`)
+	inbox := f.inbox(inboxDir)
+	inbox.Merges = nil
+
+	// Act
+	err := inbox.ScanAndDrain(context.Background())
+
+	// Assert
+	if err != nil {
+		t.Fatalf("ScanAndDrain = %v, want nil: an unroutable file must not stop the scan", err)
+	}
+	rejected, globErr := filepath.Glob(filepath.Join(inboxDir, "*.rejected"))
+	if globErr != nil {
+		t.Fatal(globErr)
+	}
+	if len(rejected) != 1 {
+		t.Fatalf("quarantined files = %v, want the unroutable merge preserved as evidence", rejected)
+	}
+}
+
+// The MISCONFIGURATION itself stays loud. Quarantining the casualty without
+// naming the cause would tell an operator the emitter was at fault.
+func TestMergeWithoutADispatcherLogsTheMisconfiguration(t *testing.T) {
+	// Arrange
+	root := t.TempDir()
+	f := newFixture(t, filepath.Join(root, "jobs.json"))
+	inboxDir := filepath.Join(root, "output")
+	writeCommandFile(t, inboxDir, "workspace_commands_merge.json", `[{"type":"merge","workspace":"DWC/feature","project_dir":"/worktrees/feature"}]`)
+	inbox := f.inbox(inboxDir)
+	inbox.Merges = nil
+
+	// Act
+	if err := inbox.ScanAndDrain(context.Background()); err != nil {
+		t.Fatalf("ScanAndDrain: %v", err)
+	}
+
+	// Assert
+	if !f.loggedFormat("merge route MISCONFIGURED") {
+		t.Fatalf("logs = %v, want one naming the missing merge route as a daemon misconfiguration", f.logs)
+	}
+}
+
+// One wiring bug must not become a total ingress outage: the files SORTED AFTER
+// the unroutable one still get their turn.
+func TestMergeWithoutADispatcherStillIngestsTheFilesBehindIt(t *testing.T) {
+	// Arrange
+	root := t.TempDir()
+	f := newFixture(t, filepath.Join(root, "jobs.json"))
+	inboxDir := filepath.Join(root, "output")
+	writeCommandFile(t, inboxDir, "workspace_commands_a_merge.json", `[{"type":"merge","workspace":"DWC/feature","project_dir":"/worktrees/feature"}]`)
+	writeCommandFile(t, inboxDir, "workspace_commands_b_create.json", `[{"type":"create","name":"DWC/behind","git_root":"/repo"}]`)
+	inbox := f.inbox(inboxDir)
+	inbox.Merges = nil
+
+	// Act
+	if err := inbox.ScanAndDrain(context.Background()); err != nil {
+		t.Fatalf("ScanAndDrain: %v", err)
+	}
+
+	// Assert
+	jobs, err := f.store.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(jobs) != 1 || jobs[0].Request.Name != "DWC/behind" {
+		t.Fatalf("durable jobs = %#v, want the create file behind the unroutable merge ingested", jobs)
 	}
 }
 
