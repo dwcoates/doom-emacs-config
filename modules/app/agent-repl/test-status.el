@@ -248,6 +248,189 @@ reads distinctly from :idle orange and :thinking red."
                (lambda (_ws) nil)))
       (should-not (agent-repl--ws-display-state "ws1")))))
 
+;;;; ---- Tests: ready-view acknowledgment fades the tab name ----
+;;
+;; A `:ready' workspace shouts in full green until the user has actually
+;; stood in it for `agent-repl-ready-view-fade-delay' seconds; after that
+;; the name region falls back to the default face and only the [N] bracket
+;; stays green.
+
+(ert-deftest agent-repl-test-ready-view-ack-absent-by-default ()
+  "A fresh workspace carries no ready-view acknowledgment."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :pushed-render-state :ready)
+    (should-not (agent-repl--ws-ready-view-acknowledged-p "ws1"))))
+
+(ert-deftest agent-repl-test-ready-view-ack-unknown-ws-is-nil ()
+  "An unknown workspace answers nil rather than signalling at the boundary."
+  (agent-repl-test--with-clean-state
+    (should-not (agent-repl--ws-ready-view-acknowledged-p "never-registered"))))
+
+(ert-deftest agent-repl-test-ready-view-dwell-elapsed-without-stamp-is-nil ()
+  "A workspace never activated has no `:last-viewed-at' and so no dwell."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :pushed-render-state :ready)
+    (should-not (agent-repl--ws-ready-view-dwell-elapsed-p "ws1"))))
+
+(ert-deftest agent-repl-test-ready-view-dwell-elapsed-below-delay-is-nil ()
+  "A view younger than the fade delay has not dwelt long enough."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :last-viewed-at (current-time))
+    (should-not (agent-repl--ws-ready-view-dwell-elapsed-p "ws1"))))
+
+(ert-deftest agent-repl-test-ready-view-dwell-elapsed-past-delay-is-t ()
+  "A view older than the fade delay has dwelt long enough."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :last-viewed-at
+                        (time-subtract (current-time)
+                                       (1+ agent-repl-ready-view-fade-delay)))
+    (should (agent-repl--ws-ready-view-dwell-elapsed-p "ws1"))))
+
+(ert-deftest agent-repl-test-note-ready-view-dwell-latches-after-delay ()
+  "The heartbeat latches the acknowledgment for a viewed :ready workspace."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :pushed-render-state :ready)
+    (agent-repl--ws-put "ws1" :last-viewed-at
+                        (time-subtract (current-time)
+                                       (1+ agent-repl-ready-view-fade-delay)))
+    (cl-letf (((symbol-function 'agent-repl--ws-current-name)
+               (lambda () "ws1")))
+      (agent-repl--note-ready-view-dwell)
+      (should (agent-repl--ws-ready-view-acknowledged-p "ws1")))))
+
+(ert-deftest agent-repl-test-note-ready-view-dwell-waits-for-delay ()
+  "A :ready workspace viewed for less than the delay does not latch yet."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :pushed-render-state :ready)
+    (agent-repl--ws-put "ws1" :last-viewed-at (current-time))
+    (cl-letf (((symbol-function 'agent-repl--ws-current-name)
+               (lambda () "ws1")))
+      (agent-repl--note-ready-view-dwell)
+      (should-not (agent-repl--ws-ready-view-acknowledged-p "ws1")))))
+
+(ert-deftest agent-repl-test-note-ready-view-dwell-ignores-non-ready-state ()
+  "A long-viewed :thinking workspace never latches — the fade is :ready-only."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :pushed-render-state :thinking)
+    (agent-repl--ws-put "ws1" :last-viewed-at
+                        (time-subtract (current-time)
+                                       (1+ agent-repl-ready-view-fade-delay)))
+    (cl-letf (((symbol-function 'agent-repl--ws-current-name)
+               (lambda () "ws1")))
+      (agent-repl--note-ready-view-dwell)
+      (should-not (agent-repl--ws-ready-view-acknowledged-p "ws1")))))
+
+(ert-deftest agent-repl-test-note-ready-view-dwell-ignores-unviewed-workspace ()
+  "A :ready workspace that is not the current one does not latch."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws2" :pushed-render-state :ready)
+    (agent-repl--ws-put "ws2" :last-viewed-at
+                        (time-subtract (current-time)
+                                       (1+ agent-repl-ready-view-fade-delay)))
+    (cl-letf (((symbol-function 'agent-repl--ws-current-name)
+               (lambda () "ws1")))
+      (agent-repl--note-ready-view-dwell)
+      (should-not (agent-repl--ws-ready-view-acknowledged-p "ws2")))))
+
+(ert-deftest agent-repl-test-note-ready-view-dwell-no-current-workspace-noop ()
+  "With no current workspace the heartbeat check is a no-op."
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'agent-repl--ws-current-name)
+               (lambda () nil)))
+      (agent-repl--note-ready-view-dwell)
+      (should-not (agent-repl--ws-ready-view-acknowledged-p "ws1")))))
+
+(ert-deftest agent-repl-test-note-ready-view-dwell-unknown-current-ws-noop ()
+  "A current persp the workspace hash does not know is not stub-created."
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'agent-repl--ws-current-name)
+               (lambda () "none")))
+      (agent-repl--note-ready-view-dwell)
+      (should-not (agent-repl--ws-known-p "none")))))
+
+(ert-deftest agent-repl-test-clear-ready-view-ack-on-non-ready-push ()
+  "A pushed state other than :ready clears the acknowledgment."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :ready-view-acknowledged t)
+    (agent-repl--clear-ready-view-ack-on-state-change "ws1" :thinking :ready)
+    (should-not (agent-repl--ws-ready-view-acknowledged-p "ws1"))))
+
+(ert-deftest agent-repl-test-clear-ready-view-ack-keeps-latch-on-ready-push ()
+  "A re-pushed :ready leaves the acknowledgment latched."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :ready-view-acknowledged t)
+    (agent-repl--clear-ready-view-ack-on-state-change "ws1" :ready :ready)
+    (should (agent-repl--ws-ready-view-acknowledged-p "ws1"))))
+
+(ert-deftest agent-repl-test-clear-ready-view-ack-unknown-ws-noop ()
+  "Clearing for an unknown workspace does not stub-create an entry."
+  (agent-repl-test--with-clean-state
+    (agent-repl--clear-ready-view-ack-on-state-change "none" :thinking :ready)
+    (should-not (agent-repl--ws-known-p "none"))))
+
+(ert-deftest agent-repl-test-clear-ready-view-ack-registered-on-transition-hook ()
+  "The clear runs as a state-transition subscriber, not on an ad hoc call site."
+  (should (memq #'agent-repl--clear-ready-view-ack-on-state-change
+                agent-repl-ws-state-transition-functions)))
+
+(ert-deftest agent-repl-test-display-state-ready-acknowledged-renders-nil ()
+  "An acknowledged :ready workspace suppresses the state-colored name region."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :pushed-render-state :ready)
+    (agent-repl--ws-put "ws1" :ready-view-acknowledged t)
+    (cl-letf (((symbol-function 'agent-repl--ws-agent-open-p)
+               (lambda (_ws) t)))
+      (should-not (agent-repl--ws-display-state "ws1")))))
+
+(ert-deftest agent-repl-test-bracket-state-ready-acknowledged-stays-ready ()
+  "The [N] bracket keeps :ready green after the acknowledgment latches."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :pushed-render-state :ready)
+    (agent-repl--ws-put "ws1" :ready-view-acknowledged t)
+    (should (eq :ready (agent-repl--ws-bracket-state "ws1")))))
+
+(ert-deftest agent-repl-test-display-state-ready-unacknowledged-renders-ready ()
+  "An unviewed :ready workspace still paints the full green tab."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :pushed-render-state :ready)
+    (cl-letf (((symbol-function 'agent-repl--ws-agent-open-p)
+               (lambda (_ws) t)))
+      (should (eq :ready (agent-repl--ws-display-state "ws1"))))))
+
+(ert-deftest agent-repl-test-display-state-ack-does-not-suppress-other-states ()
+  "A stale acknowledgment cannot fade a non-:ready state."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :pushed-render-state :thinking)
+    (agent-repl--ws-put "ws1" :ready-view-acknowledged t)
+    (cl-letf (((symbol-function 'agent-repl--ws-agent-open-p)
+               (lambda (_ws) t)))
+      (should (eq :thinking (agent-repl--ws-display-state "ws1"))))))
+
+(ert-deftest agent-repl-test-render-tab-entry-ready-acknowledged-name-default-face ()
+  "The rendered tab of an acknowledged :ready workspace uses the default name face."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :pushed-render-state :ready)
+    (agent-repl--ws-put "ws1" :ready-view-acknowledged t)
+    (cl-letf (((symbol-function 'agent-repl--ws-agent-open-p)
+               (lambda (_ws) t)))
+      (let* ((entry (agent-repl--render-tab-entry "ws1" "other" 9))
+             (name-pos (string-match "ws1" entry)))
+        (should (eq (get-text-property name-pos 'face entry)
+                    '+workspace-tab-face))))))
+
+(ert-deftest agent-repl-test-render-tab-entry-ready-acknowledged-bracket-stays-green ()
+  "The [9] bracket of an acknowledged :ready workspace keeps the green background."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "ws1" :pushed-render-state :ready)
+    (agent-repl--ws-put "ws1" :ready-view-acknowledged t)
+    (cl-letf (((symbol-function 'agent-repl--ws-agent-open-p)
+               (lambda (_ws) t)))
+      (let* ((entry (agent-repl--render-tab-entry "ws1" "other" 9))
+             (bracket-pos (string-match "\\[9\\]" entry)))
+        (should (equal (plist-get (get-text-property bracket-pos 'face entry)
+                                  :background)
+                       agent-repl--color-done-green))))))
+
 ;;;; ---- Tests: Legacy wrappers still populate both axes ----
 
 (ert-deftest agent-repl-test-legacy-ws-set-writes-agent-state ()
