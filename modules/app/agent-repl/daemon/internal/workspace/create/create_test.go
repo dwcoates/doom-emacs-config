@@ -1553,3 +1553,89 @@ func TestInboxRefusesToRunWithoutAMergeDispatcher(t *testing.T) {
 		t.Fatalf("ScanAndDrain = %v, want a MergeDispatcher refusal", err)
 	}
 }
+
+// The sweep is what makes routing TOTAL: whatever a full buffer could not name
+// individually is still recovered from the durable store.
+func TestSweepRecoversWorkFromTheDurableStore(t *testing.T) {
+	// Arrange
+	root := t.TempDir()
+	f := newFixture(t, filepath.Join(root, "jobs.json"))
+	if _, _, err := f.store.Enqueue(Job{ID: "swept", Request: Request{Name: "DWC/swept", GitRoot: "/repo"}, State: StateQueued}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act: no id was ever routed — only the coalesced signal.
+	f.manager.RouteSweep()
+	f.drainWorkers(context.Background())
+
+	// Assert
+	if got := job(t, f.store, "swept"); got.State != StateAwaitingEmacs {
+		t.Fatalf("swept job = %#v, want the sweep to have recovered and run it", got)
+	}
+}
+
+// An interactive create is routed like every other creation rather than
+// spawning a goroutine of its own, so creation keeps exactly one owner.
+func TestStartInteractiveCreateRoutesInsteadOfRunningItsOwnGoroutine(t *testing.T) {
+	// Arrange
+	root := t.TempDir()
+	f := newFixture(t, filepath.Join(root, "jobs.json"))
+
+	// Act
+	job, inserted, err := f.manager.StartInteractiveCreate(context.Background(), "req-1", Request{Name: "DWC/interactive", GitRoot: "/repo"})
+
+	// Assert
+	if err != nil || !inserted {
+		t.Fatalf("StartInteractiveCreate = %v, %t", err, inserted)
+	}
+	select {
+	case id := <-f.manager.jobs:
+		if id != job.ID {
+			t.Fatalf("routed id = %q, want %q", id, job.ID)
+		}
+	default:
+		t.Fatal("interactive create routed nothing to the creation worker")
+	}
+	if f.worktrees.plans != 0 {
+		t.Fatalf("interactive create ran %d plans on the calling goroutine, want 0", f.worktrees.plans)
+	}
+}
+
+// signallingActions reports each publication on a channel so a test can observe
+// the worker goroutine without polling or sleeping.
+type signallingActions struct {
+	published chan HostAction
+}
+
+func (s *signallingActions) PublishHostAction(_ context.Context, action HostAction) error {
+	s.published <- action
+	return nil
+}
+
+// The host-action worker publishes what the router persisted, on its own
+// goroutine, until its context ends.
+func TestHostActionWorkerPublishesUntilItsContextEnds(t *testing.T) {
+	// Arrange
+	root := t.TempDir()
+	f := newFixture(t, filepath.Join(root, "jobs.json"))
+	actions := &signallingActions{published: make(chan HostAction, 1)}
+	f.manager.cfg.HostActions = actions
+	if _, _, err := f.store.EnqueueHostAction(HostAction{ID: "a0", Type: "switch", Payload: []byte(`{"type":"switch"}`)}); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stopped := make(chan error, 1)
+
+	// Act
+	go func() { stopped <- f.manager.RunHostActionWorker(ctx) }()
+
+	// Assert
+	if got := <-actions.published; got.ID != "a0" {
+		t.Fatalf("published = %#v, want the retained action", got)
+	}
+	cancel()
+	if err := <-stopped; !errors.Is(err, context.Canceled) {
+		t.Fatalf("RunHostActionWorker = %v, want the context's cancellation", err)
+	}
+}
