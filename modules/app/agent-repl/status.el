@@ -545,8 +545,54 @@ It names the color rather than its value: each renderer keeps its own
 hex, since a tab-bar background and a CSS dot legitimately want different
 shades of one idea.  What may never differ is the ASSIGNMENT.
 
-\"none\" is a real answer.  The merge states take none of the six:
-the sidebar reports them, and the tab-bar does not.")
+\"none\" is a real answer.  The merge states take none of the six here:
+the sidebar reports them with a glyph and a status word, so no color has
+to.  The tab bar, which has neither, DECLARES an override for the
+in-flight three — see `agent-repl--tab-bar-color-overrides\=' and the
+fixture\='s \"surface_overrides\" section.  This table is what every
+surface starts from, never what the tab bar finishes with; read
+`agent-repl--tab-bar-state-color\=' for that.")
+
+(defconst agent-repl--tab-bar-color-overrides
+  '((:merge-enqueuing . "red")
+    (:merge-queued    . "red")
+    (:merging         . "red"))
+  "Where the TAB BAR paints a state differently from `agent-repl--state-color\='.
+
+Emacs\='s corner of the fixture\='s \"surface_overrides.emacs_tab_bar\"
+section, asserted against it row for row.  The override is DECLARED in
+the shared file rather than kept as a private local table: a surface that
+quietly disagrees with the contract is the exact drift the contract
+exists to catch, so the escape hatch has to be legible from the contract
+itself.
+
+The tab bar carries no badges and no glyphs — a state reaches it only as
+the [N] bracket\='s color — so \"none\" there renders a workspace whose
+merge is running identically to one nobody has touched.  Red already
+means \"work is in flight and you cannot act on this\", which is what a
+merge the daemon is carrying is.
+
+Only the three merge states with no verdict yet: about to enqueue,
+waiting behind a sibling in its repository\='s queue, and running.
+`:merge-conflict\=' is NOT here — a conflict is waiting on the user, which
+is the opposite of red\='s claim — and `:merge-failed\=' and `:merged\=' are
+terminal.")
+
+(defconst agent-repl--tab-bar-state-color
+  (mapcar (lambda (row)
+            (cons (car row)
+                  (or (alist-get (car row) agent-repl--tab-bar-color-overrides)
+                      (cdr row))))
+          agent-repl--state-color)
+  "The color each render state takes ON THE TAB BAR, by name.
+
+`agent-repl--state-color\=' with `agent-repl--tab-bar-color-overrides\='
+layered over it.  DERIVED rather than written out, so the tab bar\='s
+table can never disagree with the shared one about which states EXIST —
+only about the handful of colors it explicitly overrides.
+
+This is the table `agent-repl--tab-palette\=' answers to.  The shared
+table remains the contract every other surface reads.")
 
 (defconst agent-repl--color-by-name
   `(("blue"   . ,agent-repl--color-init-blue)
@@ -784,6 +830,46 @@ same actionability claim blue does, and only the reason is benign.")
                   :fg ,agent-repl--color-dark
                   :bracket-bg ,agent-repl--color-init-blue
                   :bracket-fg ,agent-repl--color-light
+                  :weight ,agent-repl--tab-weight))
+    ;; The three IN-FLIGHT merge states borrow thinking's red, exactly as
+    ;; `:submitting' and the context cuts do, and for the same reason: the
+    ;; claim about what the user can do is identical.  Work is running that
+    ;; they neither drive nor can interrupt from the tab.  Which kind of work
+    ;; it is stays the sidebar's to say — the tab bar has no glyph to say it
+    ;; with, which is why these took no color at all until now and a merging
+    ;; workspace looked untouched.
+    (:merge-enqueuing
+     :face       agent-repl-tab-thinking
+     :unselected (:bg ,agent-repl--color-thinking-red
+                  :fg ,agent-repl--color-light
+                  :bracket-fg ,agent-repl--color-default-bracket
+                  :weight ,agent-repl--tab-weight)
+     :selected   (:bg ,agent-repl--color-selected-bg
+                  :fg ,agent-repl--color-dark
+                  :bracket-bg ,agent-repl--color-thinking-red
+                  :bracket-fg ,agent-repl--color-light
+                  :weight ,agent-repl--tab-weight))
+    (:merge-queued
+     :face       agent-repl-tab-thinking
+     :unselected (:bg ,agent-repl--color-thinking-red
+                  :fg ,agent-repl--color-light
+                  :bracket-fg ,agent-repl--color-default-bracket
+                  :weight ,agent-repl--tab-weight)
+     :selected   (:bg ,agent-repl--color-selected-bg
+                  :fg ,agent-repl--color-dark
+                  :bracket-bg ,agent-repl--color-thinking-red
+                  :bracket-fg ,agent-repl--color-light
+                  :weight ,agent-repl--tab-weight))
+    (:merging
+     :face       agent-repl-tab-thinking
+     :unselected (:bg ,agent-repl--color-thinking-red
+                  :fg ,agent-repl--color-light
+                  :bracket-fg ,agent-repl--color-default-bracket
+                  :weight ,agent-repl--tab-weight)
+     :selected   (:bg ,agent-repl--color-selected-bg
+                  :fg ,agent-repl--color-dark
+                  :bracket-bg ,agent-repl--color-thinking-red
+                  :bracket-fg ,agent-repl--color-light
                   :weight ,agent-repl--tab-weight)))
   "Per-state tab-appearance palette.
 Each entry fully describes both selected and unselected looks for a
@@ -791,10 +877,15 @@ agent-state keyword via nested `:unselected' and `:selected' plists.
 `:repl-state :inactive' does not contribute to color (it is bookkeeping
 only).
 
-The merge states have NO entry: they take none of the six colors, and
-the tab no longer carries badges, so the merge pipeline says what it has
-to say in the sidebar.  `:merged' likewise never reaches the tab-bar at
-all (`agent-repl--filter-merged-names').")
+The three IN-FLIGHT merge states have rows because the tab bar overrides
+them to red (`agent-repl--tab-bar-color-overrides'), which is the one
+place this palette answers to `agent-repl--tab-bar-state-color' rather
+than to the shared `agent-repl--state-color'.
+
+`:merge-conflict' and `:merge-failed' still have NO entry: they take none
+of the six, and with no badge on the tab the merge pipeline says what it
+has to say about them in the sidebar.  `:merged' likewise never reaches
+the tab-bar at all (`agent-repl--filter-merged-names').")
 
 (defun agent-repl--tab-spec (state selected)
   "Return the appearance spec (plist) for STATE with SELECTED flag.

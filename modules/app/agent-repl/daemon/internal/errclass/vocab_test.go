@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
@@ -18,10 +19,16 @@ const fixturePath = "../../../proto/vocab/render-colors.json"
 // colorFixture is the shape of render-colors.json. The `_comment` keys are
 // prose for a reader and are deliberately not decoded.
 type colorFixture struct {
-	Colors       []string          `json:"colors"`
-	Precedence   []string          `json:"precedence"`
+	Colors     []string `json:"colors"`
+	Precedence []string `json:"precedence"`
+	// RenderStates is what EVERY surface starts from. A surface may diverge
+	// from it, but only by declaring the divergence in SurfaceOverrides.
 	RenderStates map[string]string `json:"render_states"`
-	ErrorClasses map[string]string `json:"error_classes"`
+	// SurfaceOverrides is surface name -> state name -> color. The proto is
+	// the authority on which state names exist, so validating the section is
+	// this package's job even though no Go renderer reads it.
+	SurfaceOverrides map[string]map[string]string `json:"surface_overrides"`
+	ErrorClasses     map[string]string            `json:"error_classes"`
 }
 
 func loadFixture(t *testing.T) colorFixture {
@@ -42,12 +49,7 @@ func validColor(f colorFixture, c string) bool {
 	if c == "none" {
 		return true
 	}
-	for _, known := range f.Colors {
-		if known == c {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(f.Colors, c)
 }
 
 func TestEveryRenderStateHasAFixtureRow(t *testing.T) {
@@ -107,6 +109,94 @@ func TestEveryFixtureColorIsOneOfTheSix(t *testing.T) {
 		if !validColor(f, color) {
 			t.Errorf("ErrorClass %s takes %q, which is not one of the six (or none)", name, color)
 		}
+	}
+}
+
+func TestEverySurfaceOverrideNamesARealRenderState(t *testing.T) {
+	// Arrange: the generated name table is the authority on the enum's
+	// membership for overrides exactly as it is for the shared assignment. An
+	// override keyed on a state that does not exist is a divergence nobody can
+	// honor, and it would sit in the contract reading as coverage.
+	f := loadFixture(t)
+	known := map[string]bool{}
+	for _, name := range frontendv1.RenderState_name {
+		known[name] = true
+	}
+	// Act + Assert.
+	for surface, overrides := range f.SurfaceOverrides {
+		for name := range overrides {
+			if !known[name] {
+				t.Errorf("surface %s overrides %s, which is not a RenderState", surface, name)
+			}
+		}
+	}
+}
+
+func TestEverySurfaceOverrideSpendsOneOfTheSix(t *testing.T) {
+	// Arrange: an override exists to ADD a color to a surface that cannot
+	// otherwise say anything — the Emacs tab bar has no badge and no glyph, so
+	// a merge running there renders as no state at all. "none" is therefore
+	// not a legal override: it would be a second way to say what the shared
+	// table already says, and a seventh color would be a second vocabulary.
+	f := loadFixture(t)
+	// Act + Assert.
+	for surface, overrides := range f.SurfaceOverrides {
+		for name, color := range overrides {
+			if !slices.Contains(f.Colors, color) {
+				t.Errorf("surface %s paints %s %q, which is not one of the six", surface, name, color)
+			}
+		}
+	}
+}
+
+func TestEverySurfaceOverrideActuallyDiverges(t *testing.T) {
+	// Arrange: an override that restates the shared color is not an override.
+	// It reads as a deliberate divergence to anyone auditing this file, and it
+	// would silently outlive a change to the shared row it duplicates.
+	f := loadFixture(t)
+	// Act + Assert.
+	for surface, overrides := range f.SurfaceOverrides {
+		for name, color := range overrides {
+			if shared := f.RenderStates[name]; shared == color {
+				t.Errorf("surface %s overrides %s to %q, which is already the shared color", surface, name, shared)
+			}
+		}
+	}
+}
+
+func TestTheInFlightMergeStatesAreTheOnlyTabBarOverrides(t *testing.T) {
+	// Arrange: the Emacs tab bar spends red on the three merge states with no
+	// verdict yet, because red already means "work is in flight and you cannot
+	// act". MERGE_CONFLICT is deliberately excluded — it is waiting on the
+	// USER — and MERGED / MERGE_FAILED are terminal. Pinning the exact set
+	// here keeps a later "while we're at it" from quietly reddening a merge
+	// state that is not in flight.
+	f := loadFixture(t)
+	want := map[string]string{
+		"RENDER_STATE_MERGE_ENQUEUING": "red",
+		"RENDER_STATE_MERGE_QUEUED":    "red",
+		"RENDER_STATE_MERGING":         "red",
+	}
+	// Act + Assert.
+	got := f.SurfaceOverrides["emacs_tab_bar"]
+	if len(got) != len(want) {
+		t.Fatalf("emacs_tab_bar overrides %v, want exactly %v", got, want)
+	}
+	for name, color := range want {
+		if got[name] != color {
+			t.Errorf("emacs_tab_bar paints %s %q, want %q", name, got[name], color)
+		}
+	}
+}
+
+func TestTheWebappTakesNoSurfaceOverride(t *testing.T) {
+	// Arrange: the webapp's rail carries a glyph and a status word beside
+	// every dot, so the merge pipeline already reports itself there without
+	// spending a color. Its status indications stay on the shared assignment.
+	f := loadFixture(t)
+	// Act + Assert.
+	if overrides, ok := f.SurfaceOverrides["webapp"]; ok {
+		t.Fatalf("the webapp declares overrides %v; its dots read the shared assignment", overrides)
 	}
 }
 

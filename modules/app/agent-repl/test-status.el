@@ -129,13 +129,61 @@ default at restart and shouldn't pin behavior."
 ;; visibility layer that sits on top of the unified render-state.
 
 (ert-deftest agent-repl-test-tab-palette-has-no-merge-conflict-entry ()
-  "The merge states have no palette row: they take none of the five colors
-and the bracket no longer carries a glyph to distinguish them."
+  "`:merge-conflict' has no palette row: a conflict is waiting on the USER,
+which is the opposite of the in-flight claim the merging states' red makes."
   (should-not (alist-get :merge-conflict agent-repl--tab-palette)))
 
 (ert-deftest agent-repl-test-tab-palette-has-no-merge-failed-entry ()
-  "`:merge-failed' likewise has no palette row."
+  "`:merge-failed' likewise has no palette row: nothing is in flight."
   (should-not (alist-get :merge-failed agent-repl--tab-palette)))
+
+(ert-deftest agent-repl-test-tab-spec-merging-is-red ()
+  "A merge the daemon is RUNNING paints the tab thinking-red.
+Before the override this state had no palette row at all, so a merging
+workspace fell through to the default appearance and read as untouched."
+  ;; Act / Assert
+  (should (equal agent-repl--color-thinking-red
+                 (plist-get (agent-repl--tab-spec :merging nil) :bg))))
+
+(ert-deftest agent-repl-test-tab-spec-merge-enqueuing-is-red ()
+  "A merge on its way into the queue is already in flight, so it is red."
+  ;; Act / Assert
+  (should (equal agent-repl--color-thinking-red
+                 (plist-get (agent-repl--tab-spec :merge-enqueuing nil) :bg))))
+
+(ert-deftest agent-repl-test-tab-spec-merge-queued-is-red ()
+  "A merge waiting behind a sibling is in flight from the user's side.
+They can no more act on the workspace than during the merge itself."
+  ;; Act / Assert
+  (should (equal agent-repl--color-thinking-red
+                 (plist-get (agent-repl--tab-spec :merge-queued nil) :bg))))
+
+(ert-deftest agent-repl-test-tab-spec-merging-selected-brackets-red ()
+  "A SELECTED merging tab keeps red on the [N] bracket.
+Selection dims the name region to the shared grey for every state, so the
+bracket is the only place the merge can still be read."
+  ;; Arrange
+  (let ((spec (agent-repl--tab-spec :merging t)))
+    ;; Act / Assert
+    (should (equal agent-repl--color-selected-bg (plist-get spec :bg)))
+    (should (equal agent-repl--color-thinking-red (plist-get spec :bracket-bg)))))
+
+(ert-deftest agent-repl-test-tab-spec-bracket-only-merging-is-red ()
+  "A merging tab whose panels are dismissed keeps red on the bracket.
+The bracket-only path is what a workspace the user closed the panels on
+renders with, and a merge must stay visible through it."
+  ;; Arrange
+  (let ((spec (agent-repl--tab-spec-bracket-only :merging nil)))
+    ;; Act / Assert
+    (should (equal 'unspecified (plist-get spec :bg)))
+    (should (equal agent-repl--color-thinking-red (plist-get spec :bracket-bg)))))
+
+(ert-deftest agent-repl-test-tab-spec-merge-conflict-falls-back-to-default ()
+  "`:merge-conflict' takes no tab color, so its spec is the default."
+  ;; Arrange
+  (let ((spec (agent-repl--tab-spec :merge-conflict nil)))
+    ;; Act / Assert
+    (should (equal (plist-get spec :bg) 'unspecified))))
 
 (ert-deftest agent-repl-test-tab-spec-idle-async-is-yellow ()
   ":idle-async resolves to the amber background so an idle-but-working tab
