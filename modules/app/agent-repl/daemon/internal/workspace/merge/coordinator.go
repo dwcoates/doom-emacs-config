@@ -862,10 +862,7 @@ func (c *QueueCoordinator) runOne(repo string, req Request) bool {
 	// (the before-action, a conflict resolution, a test fix), and a bring-up can
 	// be slow — holding the exclusivity lease across it would lock the user out
 	// of their session for the whole of it.
-	if err := c.sessions.EnsureLive(c.ctx, req.Workspace); err != nil {
-		c.logf("merge: session bring-up FAILED {repo=%s ws=%s name=%s run=%s}: %v — the merge cannot drive a session it cannot reach",
-			repo, req.Workspace, req.Name, driven.Run.RunID(), err)
-		c.failedRun(driven, "the workspace's agent session could not be brought up: "+err.Error())
+	if !c.bringUpSession(repo, req, driven) {
 		return c.finish(repo, req, nil)
 	}
 
@@ -957,6 +954,38 @@ func (c *QueueCoordinator) refuseDeletedSession(repo string, req, driven Request
 		repo, req.Workspace, req.Name, driven.Run.RunID(), sessionID)
 	c.failedRun(driven, fmt.Sprintf("the agent session this merge needed was DELETED (session %s), and a deleted session is not brought back to run a merge action", sessionID))
 	return false
+}
+
+// bringUpSession makes the workspace's session driveable and reports whether
+// the merge may continue.
+//
+// THREE OUTCOMES, NOT TWO:
+//
+//   - a session came up (or was already up), and the run proceeds with it;
+//   - the workspace has NO session record, and the run proceeds SESSIONLESS.
+//     A plain worktree nobody ever opened a session on is mergeable — the
+//     cherry-pick, the test gate and the rollback are git — so failing here
+//     would make "was this ever opened in the editor?" a precondition of
+//     merging. Every step that genuinely needs a session fails loudly on its
+//     own path, which is the only place that knows whether the absence matters;
+//   - a bring-up for a workspace that HAS a session failed, and the run FAILS.
+//     That stays loud and terminal: the merge is about to submit turns into
+//     that session, and there is no session to submit them to.
+func (c *QueueCoordinator) bringUpSession(repo string, req, driven Request) bool {
+	err := c.sessions.EnsureLive(c.ctx, req.Workspace)
+	switch {
+	case err == nil:
+		return true
+	case errors.Is(err, ErrNoSession):
+		c.logf("merge: no session recorded {repo=%s ws=%s name=%s run=%s}: %v — the merge proceeds SESSIONLESS; a before-action, a conflict resolution or a test fix would each fail loudly on its own path, and this merge asks for none of them unless it does",
+			repo, req.Workspace, req.Name, driven.Run.RunID(), err)
+		return true
+	default:
+		c.logf("merge: session bring-up FAILED {repo=%s ws=%s name=%s run=%s}: %v — the merge cannot drive a session it cannot reach",
+			repo, req.Workspace, req.Name, driven.Run.RunID(), err)
+		c.failedRun(driven, "the workspace's agent session could not be brought up: "+err.Error())
+		return false
+	}
 }
 
 // runBeforeAction resolves and delivers the workspace's before_ws_merge action,
