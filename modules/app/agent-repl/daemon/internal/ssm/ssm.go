@@ -11,6 +11,7 @@ import (
 	"claude-repld/internal/workspace/merge"
 
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+	"google.golang.org/protobuf/proto"
 )
 
 // Resolver maps a session id to the workspace it is bound to. The binding
@@ -91,6 +92,13 @@ type Manager struct {
 	// refuses snapshots older than what it delivered, so AtMs must never
 	// regress within a process.
 	pushedAtMs map[string]int64
+	// stampedComposite is the last frame stamped per workspace, retained so
+	// stampFreshnessLocked can tell "the same state re-resolved" (which keeps
+	// its revision) from "a different state that resolved off an older row"
+	// (which earns watermark+1). Without the distinction the watermark clamp
+	// handed two different composites one revision, which the webapp reports as
+	// a `revision conflicted` invariant violation.
+	stampedComposite map[string]*frontendv1.WorkspaceState
 	// interruptedTurn names the workspaces whose IN-FLIGHT turn was stopped by
 	// a user-commanded interrupt the shim acknowledged as INTERRUPTED. The
 	// mark is consumed by that turn's own TurnEnded, which then reports
@@ -914,6 +922,21 @@ func (m *Manager) workspaceMessageLocked(workspace string, r resolved) (*fronten
 // The watermark is deliberately IN-MEMORY: the frontend's delivered watermark
 // is in-memory too, and both reset together at daemon boot, so durability
 // would add nothing but a stale floor.
+//
+// IT BUMPS, IT DOES NOT CLAMP, AND THAT IS THE WHOLE OF THE SECOND RULE.
+// AtMs is not merely a freshness floor: the webapp treats it as the frame's
+// REVISION and holds the invariant that one revision names one state. Lifting a
+// regressing stamp to the watermark minted two DIFFERENT composites carrying the
+// identical revision, which the webapp reported as `revision conflicted`. A
+// composite that is not newer than the watermark and not identical to what was
+// last delivered therefore takes watermark+1 — still monotonic, still never
+// older than anything delivered, and never a duplicate revision.
+//
+// AN IDENTICAL COMPOSITE KEEPS ITS REVISION. A resync's Snapshot rebuilds the
+// same frame the last push carried; bumping there would mint a fresh revision
+// for a frame that says nothing new, and the frontend would see the state
+// change on every reconnect. Identity is compared over the whole message with
+// AtMs normalized away, so only a real content difference earns a new revision.
 func (m *Manager) stampFreshnessLocked(workspace string, msg *frontendv1.WorkspaceState) {
 	// Lazily initialized because the Manager has more than one construction
 	// path (Open plus the test rigs' direct literals); a nil map here must
@@ -921,11 +944,31 @@ func (m *Manager) stampFreshnessLocked(workspace string, msg *frontendv1.Workspa
 	if m.pushedAtMs == nil {
 		m.pushedAtMs = make(map[string]int64)
 	}
-	if prev, ok := m.pushedAtMs[workspace]; ok && msg.GetAtMs() < prev {
-		msg.AtMs = prev
-		return
+	if m.stampedComposite == nil {
+		m.stampedComposite = make(map[string]*frontendv1.WorkspaceState)
 	}
-	m.pushedAtMs[workspace] = msg.GetAtMs()
+	at := msg.GetAtMs()
+	if prev, ok := m.pushedAtMs[workspace]; ok && at <= prev {
+		if last := m.stampedComposite[workspace]; last != nil && sameComposite(last, msg) {
+			msg.AtMs = prev
+			return
+		}
+		at = prev + 1
+	}
+	msg.AtMs = at
+	m.pushedAtMs[workspace] = at
+	m.stampedComposite[workspace] = proto.Clone(msg).(*frontendv1.WorkspaceState)
+}
+
+// sameComposite reports whether two WorkspaceStates say the same thing, ignoring
+// AtMs. AtMs is the revision the caller is deciding, so comparing it would make
+// every frame differ from every other and defeat the check entirely.
+func sameComposite(a, b *frontendv1.WorkspaceState) bool {
+	lhs := proto.Clone(a).(*frontendv1.WorkspaceState)
+	rhs := proto.Clone(b).(*frontendv1.WorkspaceState)
+	lhs.AtMs = 0
+	rhs.AtMs = 0
+	return proto.Equal(lhs, rhs)
 }
 
 func (m *Manager) pushMessageLocked(workspace string, msg *frontendv1.WorkspaceState) error {
