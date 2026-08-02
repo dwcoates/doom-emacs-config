@@ -399,6 +399,9 @@ func (q failingQueue) Subscribe(string) (<-chan Request, func()) {
 }
 func (q failingQueue) Snapshot() map[string][]Request { return nil }
 func (q failingQueue) Complete(string, Request) error { return nil }
+func (q failingQueue) RecordStatusWatermark(string, string, int64) error {
+	return nil
+}
 
 // harness bundles a coordinator with the fakes behind it.
 type harness struct {

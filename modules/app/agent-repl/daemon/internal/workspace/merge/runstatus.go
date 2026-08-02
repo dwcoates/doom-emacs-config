@@ -67,6 +67,18 @@ func (e *statusEmitter) emit(ws string, phase Phase, cause string, status *front
 	return nil
 }
 
+// StatusWatermarkSink persists a run's last published updated_at_ms somewhere
+// that outlives the process. merge.FileQueue implements it against the run's
+// durable queue entry; the interface exists so RunStatus needs no knowledge of
+// the queue, its repo keys, or its files.
+//
+// THE RUNSTATUS IS THE ONLY WRITER. The watermark is a floor a resume seeds
+// above, and a second writer could only lower it — which is precisely the
+// regression the field exists to make impossible.
+type StatusWatermarkSink interface {
+	RecordStatusWatermark(runID string, updatedAtMs int64) error
+}
+
 // CommitPlan is the cherry-pick plan a run computed, in replay order. It is
 // computed AFTER the before-action, because the before-action may create the
 // very commits the plan has to carry.
@@ -111,6 +123,10 @@ type RunStatus struct {
 	now       func() int64
 
 	mu sync.Mutex
+	// watermark persists updatedAtMs so the run RESUMED from this one's durable
+	// entry can seed above it. Nil for a publisher with no durable entry behind
+	// it (a unit fixture), which simply has nothing to resume.
+	watermark StatusWatermarkSink
 	// arm is the oneof case of the LAST published status, and it — not the
 	// coarse merge axis — is what phaseStartedAtMs is keyed on. See publish.
 	arm              string
@@ -125,7 +141,7 @@ type RunStatus struct {
 // NewRunStatus mints a run and its publisher. now returns unix millis and is
 // injectable so a test can pin both timestamps.
 func NewRunStatus(sink StatusSink, logf dlog.Logf, workspace string, now func() int64) (*RunStatus, error) {
-	return newRunStatus(sink, logf, workspace, now, newRunID())
+	return newRunStatus(sink, logf, workspace, now, newRunID(), 0)
 }
 
 // ResumeRunStatus rebuilds the publisher for a run that ALREADY HAS AN IDENTITY:
@@ -143,14 +159,30 @@ func NewRunStatus(sink StatusSink, logf dlog.Logf, workspace string, now func() 
 // both to ResumePlan before it publishes anything. A clean cursor is the
 // starting point of that reconstruction, not the figure a frontend ends up
 // rendering.
-func ResumeRunStatus(sink StatusSink, logf dlog.Logf, workspace string, now func() int64, runID string) (*RunStatus, error) {
+//
+// THE ONE FIGURE THAT IS RESTORED IS THE UPDATED_AT_MS WATERMARK, and it is
+// restored because it is not progress — it is the run's place in a total order
+// receivers already read. Seeding the clock from now() alone left that order at
+// the mercy of the wall clock: a backwards step across the bounce (an ntp
+// correction, a suspended laptop, a container's clock settling) published a
+// resumed status BELOW the pre-bounce ones, and a receiver ordering on
+// updated_at_ms then renders the dead process's progress as the newer word.
+//
+// watermarkMs is the highest updated_at_ms this run published before the bounce,
+// read off the durable entry. The resumed clock starts at max(now, watermark+1),
+// so the regression is not unlikely, it is unrepresentable. Zero means the run
+// published nothing (or predates the durable field), which needs no floor.
+func ResumeRunStatus(sink StatusSink, logf dlog.Logf, workspace string, now func() int64, runID string, watermarkMs int64) (*RunStatus, error) {
 	if runID == "" {
 		return nil, fmt.Errorf("merge: resuming a RunStatus needs the run id it was admitted under")
 	}
-	return newRunStatus(sink, logf, workspace, now, runID)
+	if watermarkMs < 0 {
+		return nil, fmt.Errorf("merge: resuming run %s with a negative status watermark %d", runID, watermarkMs)
+	}
+	return newRunStatus(sink, logf, workspace, now, runID, watermarkMs)
 }
 
-func newRunStatus(sink StatusSink, logf dlog.Logf, workspace string, now func() int64, runID string) (*RunStatus, error) {
+func newRunStatus(sink StatusSink, logf dlog.Logf, workspace string, now func() int64, runID string, watermarkMs int64) (*RunStatus, error) {
 	switch {
 	case sink == nil:
 		return nil, fmt.Errorf("merge: RunStatus needs a StatusSink")
@@ -167,11 +199,36 @@ func newRunStatus(sink StatusSink, logf dlog.Logf, workspace string, now func() 
 		runID:     runID,
 		workspace: workspace,
 		now:       now,
+		// The watermark IS the previous updatedAtMs as far as publish is
+		// concerned: its existing "force strictly increasing" step then yields
+		// max(now, watermark+1) with no second rule to keep in step with it.
+		updatedAtMs: watermarkMs,
 	}, nil
 }
 
 // RunID is the run's identity, stable for the whole run.
 func (r *RunStatus) RunID() string { return r.runID }
+
+// BindWatermark attaches the durable store this run records its updated_at_ms
+// watermark into. The coordinator calls it once the run's queue entry exists —
+// which is after the durable Publish for a fresh admission, and immediately for
+// a resumed one.
+//
+// IT BINDS ONCE. Two sinks would mean two durable floors for one run, and the
+// resume would seed from whichever the queue happened to read. A rebind is a
+// wiring bug, so it is refused rather than accepted as the newer intent.
+func (r *RunStatus) BindWatermark(w StatusWatermarkSink) error {
+	if w == nil {
+		return fmt.Errorf("merge: binding a nil watermark sink to run %s", r.runID)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.watermark != nil {
+		return fmt.Errorf("merge: run %s already has a watermark sink bound", r.runID)
+	}
+	r.watermark = w
+	return nil
+}
 
 // SetPlan records the cherry-pick plan's size. Every later phase reports
 // commits_total from here, so the figure a frontend renders comes from the plan
@@ -389,6 +446,13 @@ func (r *RunStatus) Failed(cause string) error {
 // statuses. phase_started_at_ms is stamped from that FORCED value rather than
 // from the raw clock, which is what makes an arm change under a stopped clock
 // still land strictly later than the arm it replaced.
+//
+// THE WATERMARK IS PERSISTED BEFORE THE STATUS IS EMITTED, and the clocks only
+// move once it is. Emitting first would let a bounce land between the two and
+// leave a published status ABOVE the durable floor its own resume seeds from —
+// the exact regression the floor exists to prevent. A persist failure therefore
+// refuses the publication and leaves the clocks untouched, exactly as an unset
+// arm does: a status that never reaches the sink must not burn an updated_at_ms.
 func (r *RunStatus) publish(phase Phase, cause string, fill func(*frontendv1.MergeStatus)) error {
 	r.mu.Lock()
 	status := &frontendv1.MergeStatus{RunId: r.runID}
@@ -405,6 +469,14 @@ func (r *RunStatus) publish(phase Phase, cause string, fill func(*frontendv1.Mer
 	now := r.now()
 	if now <= r.updatedAtMs {
 		now = r.updatedAtMs + 1
+	}
+	if r.watermark != nil {
+		if err := r.watermark.RecordStatusWatermark(r.runID, now); err != nil {
+			r.mu.Unlock()
+			r.logf("merge: status watermark FAILED {ws=%s run=%s phase=%s cause=%s updated_at_ms=%d}: %v — the status is NOT published, because one above an unrecorded floor is one a resume could publish beneath",
+				r.workspace, r.runID, phase, cause, now, err)
+			return fmt.Errorf("merge: record status watermark for %q run %s: %w", r.workspace, r.runID, err)
+		}
 	}
 	r.updatedAtMs = now
 	if arm != r.arm {
