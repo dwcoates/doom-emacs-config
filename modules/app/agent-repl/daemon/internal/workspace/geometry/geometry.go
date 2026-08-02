@@ -185,7 +185,12 @@ func (s *Store) Record(ctx context.Context, rec Record) error {
 	if found {
 		same := existing.SourceBranch == rec.SourceBranch && existing.SourceDir == rec.SourceDir && existing.TargetDir == rec.TargetDir
 		if same {
-			if existing.Origin == rec.Origin {
+			// THE ACTION IS PART OF "UNCHANGED" BUT NOT OF "same". A record whose
+			// three coordinates match but whose action moved is a real change and
+			// must reach the write below; a DERIVED record that merely does not
+			// know the action is not a conflict, which is why it stays out of
+			// `same` (the write's CASE expression is what keeps it from erasing).
+			if existing.Origin == rec.Origin && existing.BeforeAction == rec.BeforeAction {
 				s.logf("geometry: record UNCHANGED {workspace=%s branch=%q source=%s target=%s origin=%s}",
 					rec.Workspace, rec.SourceBranch, rec.SourceDir, rec.TargetDir, rec.Origin)
 				return nil
