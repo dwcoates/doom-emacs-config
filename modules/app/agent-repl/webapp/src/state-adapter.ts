@@ -48,6 +48,7 @@
 
 import type { CounterEntry, CounterStatus } from "./counter-menu.js";
 import type { ContentBlock, ModelInfo, ModelUsage, ResultSubtype, Usage } from "./protocol.js";
+import { mergeStatusLogValue } from "./merge-status.js";
 import { recordBlockIdentity } from "./streaming.js";
 import type {
   ContextClearedItem,
@@ -837,18 +838,6 @@ const RENDER_STATE_KEYWORD: Record<RenderState, WebRenderState | null> = {
   [RenderState.SEVERED]: "severed",
   [RenderState.HIBERNATED]: "hibernated",
 };
-
-/**
- * A merge status as ONE log field: `<phase>/<runId>@<updatedAtMs>`, or `none`.
- *
- * The phase and the run id are what correlate a record with the daemon's merge
- * run; `updatedAtMs` is what distinguishes the per-commit ticks that arrive as
- * separate revisions of that same run.
- */
-export function mergeStatusLogValue(status: MergeStatus | null): string {
-  if (status === null) return "none";
-  return `${status.phase.case}/${status.runId}@${String(status.updatedAtMs)}`;
-}
 
 function renderStateKeyword(state: RenderState): WebRenderState {
   const kw = RENDER_STATE_KEYWORD[state];

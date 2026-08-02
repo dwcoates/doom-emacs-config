@@ -28,7 +28,7 @@ import type {
   WebSessionStatus,
   WorkspaceStatusInput,
 } from "./state-adapter.js";
-import { mergeStatusLogValue } from "./state-adapter.js";
+import { mergeStatusLogValue } from "./merge-status.js";
 import { applyStreamDelta, blockKey, insertBySeq, settleStreamedBlock } from "./streaming.js";
 import {
   AsyncSource,
