@@ -646,6 +646,27 @@ workspace is gone."
                  agent-repl--persist-merge-queue))
     (should-not (fboundp sym))))
 
+(ert-deftest agent-repl-test-no-merge-host-action-remains ()
+  "Emacs runs no \"merge\" host action: a merge is a daemon COMMAND.
+The handler carried the whole name-resolution chain, whose miss branch
+logged and returned — a merge the user asked for producing nothing but a
+log line is the silent degradation the payload's `user-error' replaced."
+  (dolist (sym '(agent-repl--handle-merge-command
+                 agent-repl--resolve-merge-workspace-name))
+    (should-not (fboundp sym)))
+  (should-not (assoc "merge" agent-repl--legacy-host-action-handlers)))
+
+(ert-deftest agent-repl-test-no-merge-action-policy-remains ()
+  "Emacs neither defers a merge behind a pre-merge action nor runs one.
+The daemon executes both ends of the pipeline and reports them as
+`MergeStatus' phases; a second implementation here would be a second
+owner of the merge's ordering."
+  (dolist (sym '(agent-repl--maybe-run-before-ws-merge-prompt
+                 agent-repl--before-ws-merge-turn
+                 agent-repl--maybe-run-postprocessing-prompt))
+    (should-not (fboundp sym)))
+  (should-not (boundp 'agent-repl--before-ws-merge-reinvoke-instruction)))
+
 (provide 'test-merge-handlers)
 
 ;;; test-merge-handlers.el ends here

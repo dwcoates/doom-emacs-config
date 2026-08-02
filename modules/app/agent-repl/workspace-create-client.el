@@ -453,7 +453,10 @@ and redelivered forever, replacing a visible failure with a loop."
     ("open" . agent-repl--handle-open-command)
     ("clipboard" . agent-repl--handle-clipboard-command)
     ("send" . agent-repl--handle-send-command)
-    ("merge" . agent-repl--handle-merge-command)
+    ;; There is deliberately NO "merge" arm.  A merge is a daemon COMMAND
+    ;; (`mergeWorkspace', merge-handlers.el), not a UI effect the daemon
+    ;; asks Emacs to perform, and the host action existed only to carry a
+    ;; name-resolution and pre-merge-action policy the daemon now owns.
     ("eval" . agent-repl--handle-eval-command)
     ;; The sidebar view selector (webapp click delivered via the daemon).  Its
     ;; absence here left a durable set-view HostAction permanently refused: the
