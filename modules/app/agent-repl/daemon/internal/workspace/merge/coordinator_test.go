@@ -302,6 +302,12 @@ type syncSink struct {
 	statuses []*frontendv1.MergeStatus
 	ch       chan transition
 	err      error
+	// failPhase is the ONE phase whose record fails, and phaseErr is what it
+	// fails with. failNext's blanket failure cannot serve a test about a
+	// TERMINAL publication: every earlier phase of the run would fail with it,
+	// and the run would die somewhere else entirely.
+	failPhase Phase
+	phaseErr  error
 }
 
 func newSyncSink(capacity int) *syncSink {
@@ -312,6 +318,9 @@ func (s *syncSink) RecordMergeTransition(ws string, phase Phase, cause string) e
 	s.mu.Lock()
 	s.got = append(s.got, transition{ws, phase, cause})
 	err := s.err
+	if s.phaseErr != nil && phase == s.failPhase {
+		err = s.phaseErr
+	}
 	s.mu.Unlock()
 	s.ch <- transition{ws, phase, cause}
 	return err
@@ -350,6 +359,15 @@ func (s *syncSink) transitions() []transition {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]transition(nil), s.got...)
+}
+
+// failOnPhase makes the record of exactly one phase fail with err, which is how
+// a test drives "the TERMINAL status could not be published" without taking
+// every phase ahead of it down too.
+func (s *syncSink) failOnPhase(phase Phase, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.failPhase, s.phaseErr = phase, err
 }
 
 // failNext makes every subsequent record fail with err, which is how a test
@@ -1980,5 +1998,273 @@ func TestAbandonDuringATestFixIsNotLost(t *testing.T) {
 	}
 	if got := <-h.lease.releases; got != req.Workspace {
 		t.Fatalf("lease released for %q, want %q", got, req.Workspace)
+	}
+}
+
+// --- a terminal status that did not publish -----------------------------
+
+// THE MERGE STANDS AND SO DOES ITS ENTRY. A merged status the sink refused
+// leaves the commits on the target and the durable entry in place, marked with
+// the word that did not publish — which is the only thing a later boot could
+// re-publish from.
+func TestAMergedStatusThatDidNotPublishKeepsItsMarkedQueueEntry(t *testing.T) {
+	// Arrange — a merge whose TERMINAL publication is the one that fails.
+	h := newHarness(t)
+	h.sink.failOnPhase(PhaseMerged, sentinelError("state store down"))
+	req := testRequest("a")
+	if _, err := h.coord.Enqueue(context.Background(), req); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	<-h.picker.merges
+
+	// Act.
+	h.picker.results <- pickResult{res: Result{Outcome: OutcomeMerged}}
+
+	// Assert — the lease going back is the retirement's last step, so the mark
+	// is durable by the time it arrives.
+	if got := <-h.lease.releases; got != req.Workspace {
+		t.Fatalf("lease released for %q, want %q", got, req.Workspace)
+	}
+	outstanding := h.queue.Snapshot()[testRepoKey]
+	if len(outstanding) != 1 {
+		t.Fatalf("outstanding entries = %+v, want the merge's entry KEPT", outstanding)
+	}
+	term, pending, err := h.queue.PendingTerminal(testRepoKey, outstanding[0])
+	if err != nil {
+		t.Fatalf("PendingTerminal: %v", err)
+	}
+	want := TerminalStatus{Outcome: OutcomeMerged, Cause: "cherry-pick landed on target"}
+	if !pending || term != want {
+		t.Fatalf("PendingTerminal() = %+v, %v, want %+v, true", term, pending, want)
+	}
+}
+
+// The failed terminal is durable on exactly the same terms as the merged one:
+// a run that died and could not say so is as silent as a merge that landed and
+// could not say so.
+func TestAFailedStatusThatDidNotPublishKeepsItsMarkedQueueEntry(t *testing.T) {
+	// Arrange — a driver rejection, with the terminal publication failing.
+	h := newHarness(t)
+	h.sink.failOnPhase(PhaseMergeFailed, sentinelError("state store down"))
+	req := testRequest("a")
+	if _, err := h.coord.Enqueue(context.Background(), req); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	<-h.picker.merges
+
+	// Act.
+	h.picker.results <- pickResult{err: sentinelError("source worktree is dirty")}
+
+	// Assert.
+	if got := <-h.lease.releases; got != req.Workspace {
+		t.Fatalf("lease released for %q, want %q", got, req.Workspace)
+	}
+	outstanding := h.queue.Snapshot()[testRepoKey]
+	if len(outstanding) != 1 {
+		t.Fatalf("outstanding entries = %+v, want the run's entry KEPT", outstanding)
+	}
+	term, pending, err := h.queue.PendingTerminal(testRepoKey, outstanding[0])
+	if err != nil {
+		t.Fatalf("PendingTerminal: %v", err)
+	}
+	if !pending || term.Outcome != OutcomeFailed || !strings.Contains(term.Cause, "source worktree is dirty") {
+		t.Fatalf("PendingTerminal() = %+v, %v, want a failed record naming the driver error", term, pending)
+	}
+}
+
+// THE BOOT SAYS THE WORD, IT DOES NOT REDO THE MERGE. A marked entry belongs to
+// a run whose outcome was already reached, so the replay publishes the terminal
+// status and never touches the cherry-pick layer.
+func TestBootReplaysAnUnpublishedTerminalStatus(t *testing.T) {
+	tests := []struct {
+		name string
+		term TerminalStatus
+		want string
+	}{
+		{
+			name: "merged",
+			term: TerminalStatus{Outcome: OutcomeMerged, Cause: "cherry-pick landed on target"},
+			want: armMerged,
+		},
+		{
+			name: "merged carrying the after-action failure",
+			term: TerminalStatus{
+				Outcome:          OutcomeMerged,
+				Cause:            "cherry-pick landed on target",
+				AfterActionError: "the workspace's after-merge action did not complete: the turn never ended",
+			},
+			want: armMerged,
+		},
+		{
+			name: "failed",
+			term: TerminalStatus{Outcome: OutcomeFailed, Cause: "shim lease unavailable: shim gone"},
+			want: armFailed,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange — a previous daemon's entry, marked with the word it could
+			// not publish, then a new coordinator over the same directory.
+			q, dir := newTestQueue(t)
+			req := testRequest("a")
+			if _, err := q.Publish(context.Background(), testRepoKey, req); err != nil {
+				t.Fatalf("Publish: %v", err)
+			}
+			if err := q.MarkTerminal(testRepoKey, req, tc.term); err != nil {
+				t.Fatalf("MarkTerminal: %v", err)
+			}
+			next, err := NewFileQueue(dir, t.Logf)
+			if err != nil {
+				t.Fatalf("NewFileQueue: %v", err)
+			}
+			h := newHarnessWith(t, harnessOpts{queue: next, dir: dir})
+
+			// Act.
+			if err := h.coord.Drain(context.Background()); err != nil {
+				t.Fatalf("Drain: %v", err)
+			}
+
+			// Assert — the terminal word reaches the sink, with its recorded
+			// cause, and the merge itself is never re-run.
+			tr := h.sink.awaitPhase(t, terminalPhase(tc.term.Outcome))
+			if tr.cause != tc.term.Cause {
+				t.Fatalf("replayed cause = %q, want the recorded %q", tr.cause, tc.term.Cause)
+			}
+			statuses := h.sink.publishedStatuses()
+			last := statuses[len(statuses)-1]
+			if got := statusArm(last); got != tc.want {
+				t.Fatalf("replayed arm = %q, want %q", got, tc.want)
+			}
+			if got := last.GetMerged().GetAfterActionError(); got != tc.term.AfterActionError {
+				t.Fatalf("replayed after_action_error = %q, want %q", got, tc.term.AfterActionError)
+			}
+			if got := len(h.picker.merges); got != 0 {
+				t.Fatalf("picker Merge calls = %d, want the merge NOT re-run", got)
+			}
+		})
+	}
+}
+
+// terminalPhase is the merge-axis phase a terminal outcome publishes on.
+func terminalPhase(outcome Outcome) Phase {
+	if outcome == OutcomeMerged {
+		return PhaseMerged
+	}
+	return PhaseMergeFailed
+}
+
+// The run keeps its NAME across the silence: the terminal status arrives on the
+// run the user watched go quiet, not on a stranger.
+func TestAReplayedTerminalStatusKeepsTheRunItWasAdmittedUnder(t *testing.T) {
+	// Arrange.
+	q, dir := newTestQueue(t)
+	req := testRequest("a")
+	run, err := NewRunStatus(&recordingSink{}, t.Logf, req.Workspace, testClock())
+	if err != nil {
+		t.Fatalf("NewRunStatus: %v", err)
+	}
+	req.Run = run
+	if _, err := q.Publish(context.Background(), testRepoKey, req); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if err := q.MarkTerminal(testRepoKey, req, TerminalStatus{Outcome: OutcomeMerged, Cause: "cherry-pick landed on target"}); err != nil {
+		t.Fatalf("MarkTerminal: %v", err)
+	}
+	next, err := NewFileQueue(dir, t.Logf)
+	if err != nil {
+		t.Fatalf("NewFileQueue: %v", err)
+	}
+	h := newHarnessWith(t, harnessOpts{queue: next, dir: dir})
+
+	// Act.
+	if err := h.coord.Drain(context.Background()); err != nil {
+		t.Fatalf("Drain: %v", err)
+	}
+
+	// Assert.
+	h.sink.awaitPhase(t, PhaseMerged)
+	statuses := h.sink.publishedStatuses()
+	if got := statuses[len(statuses)-1].GetRunId(); got != run.RunID() {
+		t.Fatalf("replayed run id = %q, want the admitted %q", got, run.RunID())
+	}
+}
+
+// ONLY A PUBLICATION THAT LANDED ACKS THE ENTRY. Once the replayed word is on
+// the wire the entry is dropped, so nothing replays it a second time.
+func TestAReplayedTerminalStatusAcksItsQueueEntry(t *testing.T) {
+	// Arrange — a marked entry and a hook that announces the post-merge handoff,
+	// which runs strictly after the entry is dropped.
+	q, dir := newTestQueue(t)
+	req := testRequest("a")
+	if _, err := q.Publish(context.Background(), testRepoKey, req); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if err := q.MarkTerminal(testRepoKey, req, TerminalStatus{Outcome: OutcomeMerged, Cause: "cherry-pick landed on target"}); err != nil {
+		t.Fatalf("MarkTerminal: %v", err)
+	}
+	next, err := NewFileQueue(dir, t.Logf)
+	if err != nil {
+		t.Fatalf("NewFileQueue: %v", err)
+	}
+	hook := newFakePostMergeHook(4)
+	t.Cleanup(func() { close(hook.stop) })
+	h := newHarnessWith(t, harnessOpts{queue: next, dir: dir, postMerge: hook})
+
+	// Act.
+	if err := h.coord.Drain(context.Background()); err != nil {
+		t.Fatalf("Drain: %v", err)
+	}
+
+	// Assert — the hook only runs once the entry is gone, so its call is the
+	// rendezvous that proves the ack happened.
+	<-hook.calls
+	hook.results <- nil
+	if got := h.queue.Snapshot()[testRepoKey]; len(got) != 0 {
+		t.Fatalf("outstanding entries after the replay = %+v, want empty", got)
+	}
+}
+
+// ONE TERMINAL WORD, NOT TWO. A boot after the replay finds nothing to say: the
+// entry was acked, so a second daemon does not publish the run's terminal status
+// all over again.
+func TestASecondBootAfterAReplayedTerminalPublishesNothing(t *testing.T) {
+	// Arrange — a marked entry replayed to completion by one coordinator.
+	q, dir := newTestQueue(t)
+	req := testRequest("a")
+	if _, err := q.Publish(context.Background(), testRepoKey, req); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if err := q.MarkTerminal(testRepoKey, req, TerminalStatus{Outcome: OutcomeMerged, Cause: "cherry-pick landed on target"}); err != nil {
+		t.Fatalf("MarkTerminal: %v", err)
+	}
+	firstQueue, err := NewFileQueue(dir, t.Logf)
+	if err != nil {
+		t.Fatalf("NewFileQueue: %v", err)
+	}
+	hook := newFakePostMergeHook(4)
+	t.Cleanup(func() { close(hook.stop) })
+	first := newHarnessWith(t, harnessOpts{queue: firstQueue, dir: dir, postMerge: hook})
+	if err := first.coord.Drain(context.Background()); err != nil {
+		t.Fatalf("first Drain: %v", err)
+	}
+	<-hook.calls
+	hook.results <- nil
+
+	// Act — the boot after the one that finally published the word.
+	secondQueue, err := NewFileQueue(dir, t.Logf)
+	if err != nil {
+		t.Fatalf("NewFileQueue: %v", err)
+	}
+	second := newHarnessWith(t, harnessOpts{queue: secondQueue, dir: dir})
+	if err := second.coord.Drain(context.Background()); err != nil {
+		t.Fatalf("second Drain: %v", err)
+	}
+
+	// Assert — nothing left to replay, and nothing published.
+	if got := secondQueue.Snapshot()[testRepoKey]; len(got) != 0 {
+		t.Fatalf("outstanding entries at the second boot = %+v, want empty", got)
+	}
+	if got := second.sink.transitions(); len(got) != 0 {
+		t.Fatalf("second boot published %+v, want nothing", got)
 	}
 }
