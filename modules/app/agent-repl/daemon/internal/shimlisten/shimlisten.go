@@ -43,10 +43,35 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// SocketEnvVar overrides the shim socket path when set, the way
+// stateroot.EnvVar overrides the state root. It exists so a daemon can be
+// stood up somewhere OTHER than the operator's live socket — which is what an
+// end-to-end test does every time it runs.
+//
+// Without it the only way to move the socket was to move $HOME, and $HOME
+// moves eight other paths with it (the state store, the session locks, the
+// account cache). A test that forgot one bound the REAL
+// ~/.cache/agent-repl/sock/daemon-shim.sock and stole the live daemon's shims.
+// One explicit variable makes the isolation a stated fact rather than a
+// side effect of an unrelated one.
+const SocketEnvVar = "AGENT_REPL_SHIM_SOCKET"
+
 // DefaultSocketPath is the one socket every shim dials. Fixed and well-known:
 // there is exactly one daemon, so a surviving shim reconnects to the same path
 // it was given at spawn.
+//
+// A RELATIVE override is refused rather than resolved against the working
+// directory. The daemon and every shim it spawns must agree on this path, and
+// they do not share a working directory — a relative one would silently give
+// them two different sockets, which presents as shims that dial forever and
+// never arrive.
 func DefaultSocketPath() (string, error) {
+	if sock := os.Getenv(SocketEnvVar); sock != "" {
+		if !filepath.IsAbs(sock) {
+			return "", fmt.Errorf("shimlisten: %s must be an absolute path, got %q", SocketEnvVar, sock)
+		}
+		return sock, nil
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("shimlisten: resolving home dir: %w", err)
