@@ -125,33 +125,29 @@ merged), stamped in `stampMergeFactsLocked` beside the queue facts — the one
 WorkspaceState construction funnel, so a push, a snapshot and a synchronous
 publication cannot disagree.
 
-## merge_status is a COARSE projection of the merge axis, for now
+## merge_status comes from the merge PIPELINE and from nowhere else
 
-`WorkspaceState.merge_status` (`mergestatus.go`) is the shape the merge
-pipeline will report its run through: one message per phase inside a oneof, so
-WHICH member is set IS the phase. It is stamped in `stampMergeFactsLocked`
-beside the queue facts, which is what makes a frame carrying `merge_phase`
-without a `merge_status` unrepresentable.
+`WorkspaceState.merge_status` (`mergestatus.go`) is how the merge pipeline
+reports its run: one message per phase inside a oneof, so WHICH member is set IS
+the phase. `ApplyMergeStatus` is its only entry point — one call carrying the
+axis row and the status together, so the phase word and the progress beneath it
+cannot disagree — and the status is retained per workspace and stamped in
+`stampMergeFactsLocked`, the one WorkspaceState construction funnel.
 
-Until that pipeline exists, the projection is over the state log and nothing
-else, so it reports only what the log knows:
+THERE IS NO PROJECTION OVER THE STATE LOG. The wave-0 version derived a status
+(and a `<workspace>@<instant>` `run_id`) from the newest merge row, which meant
+one run published a different id at every phase and any reader correlating on
+the field blended and split runs at random. A `MergeStatus` names a RUN, and the
+log has no run identity in it, so a transition the pipeline published no status
+for leaves `merge_status` UNSET — the same rule
+`merge.QueueCoordinator` applies to a merge it fails before any run exists.
 
-- The phase, mapped coarsely — `merge_enqueuing`/`merge_queued` to `enqueued`,
-  `merging` to `cherry_picking`, and the remaining tokens to their namesakes.
-- The instant of the newest merge row, as BOTH `phase_started_at_ms` and
-  `updated_at_ms`: the log records transitions and nothing else, so there are
-  no within-phase ticks yet.
-- The failure's cause, minus the `merge_transition:` prefix the log routes the
-  row by.
-
-Everything else — commit counts, the commit under test, the before/after
-actions — stays at its zero value rather than being invented, and `run_id` is
-an explicitly labeled PLACEHOLDER derived from the workspace and that instant.
-Nothing may correlate on it until the pipeline mints a real one.
+The retained status is dropped when the axis is cleared (`merge_none`): the run
+is over and nothing it reported is still true.
 
 The older `merge_phase` / `merge_queue_position` / `merge_queue_depth` trio is
-still stamped beside it. Both forms coexist until the cutover wave retires the
-trio.
+still stamped beside it, and it is what reports a phase no run published a
+status for. Both forms coexist until the cutover wave retires the trio.
 
 ## The daemon stands a merged workspace down
 

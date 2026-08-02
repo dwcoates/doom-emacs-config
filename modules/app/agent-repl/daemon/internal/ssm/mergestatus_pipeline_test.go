@@ -56,16 +56,19 @@ func TestApplyMergeStatusStampsThePipelinesOwnAccount(t *testing.T) {
 	}
 }
 
-// The pipeline's account SUPERSEDES the coarse projection over the state log:
-// the log has no run identity, no plan size and no commit in it, so a
-// projection standing in for a live run would report a run nothing minted.
-func TestThePipelineStatusWinsOverTheLogProjection(t *testing.T) {
-	// Arrange — a plain transition first, which the projection answers for.
+// A plain transition NEVER stands in for a run. The state log has no run
+// identity, no plan size and no commit in it, so a status projected from it
+// could only report a run nothing minted — and once the pipeline does publish,
+// its account is the only one on the wire.
+func TestAPlainTransitionNeverStandsInForThePipelinesAccount(t *testing.T) {
+	// Arrange — a plain transition first, which nothing published a status for.
 	m, _, _ := openUnwiredTest(t, fakeResolver{"s1": "ws1"})
 	if err := m.ApplyMergeTransition("ws1", string(merge.PhaseMerging), "cherry-pick starting"); err != nil {
 		t.Fatalf("ApplyMergeTransition: %v", err)
 	}
-	projected := mustCurrent(t, m, "ws1").GetMergeStatus().GetRunId()
+	if got := mustCurrent(t, m, "ws1").GetMergeStatus(); got != nil {
+		t.Fatalf("merge_status = %v before the pipeline published one, want none", got)
+	}
 
 	// Act.
 	if err := m.ApplyMergeStatus("ws1", string(merge.PhaseMerging), "cherry-picking 1/1",
@@ -74,11 +77,7 @@ func TestThePipelineStatusWinsOverTheLogProjection(t *testing.T) {
 	}
 
 	// Assert.
-	got := mustCurrent(t, m, "ws1").GetMergeStatus().GetRunId()
-	if got == projected {
-		t.Fatalf("run_id stayed at the projection's %q; the pipeline's own account must win", got)
-	}
-	if got != "run-xyz" {
+	if got := mustCurrent(t, m, "ws1").GetMergeStatus().GetRunId(); got != "run-xyz" {
 		t.Fatalf("run_id = %q, want the pipeline's run-xyz", got)
 	}
 }

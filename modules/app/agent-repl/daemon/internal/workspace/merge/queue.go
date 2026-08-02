@@ -87,6 +87,13 @@ type queueEntry struct {
 // entryFile is the on-disk form of a queue entry. The request's fields are
 // mirrored explicitly (rather than embedding Request) so the durable format is
 // a stated contract that a later field rename cannot silently break.
+//
+// Request.Run is absent from it BY CONSTRUCTION, and that is the point of
+// mirroring rather than embedding: a *RunStatus is a live publisher bound to
+// this process's sink and clock, and nothing about it can be written down.
+// RunID is the half that can, and it is written down deliberately — an entry
+// replayed by the next boot resumes the run the user has been watching instead
+// of appearing as a fresh merge nobody asked for.
 type entryFile struct {
 	Repo         string `json:"repo"`
 	Workspace    string `json:"workspace"`
@@ -94,6 +101,10 @@ type entryFile struct {
 	SourceBranch string `json:"source_branch"`
 	SourceDir    string `json:"source_dir"`
 	TargetDir    string `json:"target_dir"`
+	// RunID is the identity of the run that owns this entry. Empty only for an
+	// entry written before the field existed, which the drain reports and
+	// replays under a freshly minted id.
+	RunID string `json:"run_id,omitempty"`
 }
 
 func (f entryFile) request() Request {
@@ -103,6 +114,7 @@ func (f entryFile) request() Request {
 		SourceBranch: f.SourceBranch,
 		SourceDir:    f.SourceDir,
 		TargetDir:    f.TargetDir,
+		RunID:        f.RunID,
 	}
 }
 
@@ -114,6 +126,7 @@ func newEntryFile(repo string, req Request) entryFile {
 		SourceBranch: req.SourceBranch,
 		SourceDir:    req.SourceDir,
 		TargetDir:    req.TargetDir,
+		RunID:        req.runIdentity(),
 	}
 }
 
@@ -172,8 +185,8 @@ func (q *FileQueue) Publish(_ context.Context, repo string, req Request) (Positi
 	case rq.wake <- struct{}{}:
 	default:
 	}
-	q.logf("merge: queue publish {repo=%s ws=%s name=%s id=%s index=%d depth=%d}",
-		repo, req.Workspace, req.Name, id, pos.Index, pos.Depth)
+	q.logf("merge: queue publish {repo=%s ws=%s name=%s id=%s run=%s index=%d depth=%d}",
+		repo, req.Workspace, req.Name, id, req.runIdentity(), pos.Index, pos.Depth)
 	return pos, nil
 }
 
