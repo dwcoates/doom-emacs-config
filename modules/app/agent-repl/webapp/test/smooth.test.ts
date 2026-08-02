@@ -74,6 +74,7 @@ function state(items: ConversationItem[]): StoreState {
     mergeQueuePosition: 0,
     mergeQueueDepth: 0,
     mergeLeaseHeld: false,
+    mergeStatus: null,
     workspaceStateCauseSeq: 0,
   };
 }

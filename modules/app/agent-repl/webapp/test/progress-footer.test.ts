@@ -21,7 +21,9 @@ import {
   footerHtml,
   hasLiveCounters,
   interruptChip,
+  mergeNoteRowHtml,
   mergeQueueChip,
+  mergeStatusChip,
   phaseLabel,
   rateLimitAccent,
   rateLimitActivity,
@@ -30,7 +32,7 @@ import {
   tokenCellHtml,
   toolElapsed,
 } from "../src/progress-footer.js";
-import type { ProgressInput } from "../src/state-adapter.js";
+import type { MergeStatus, ProgressInput } from "../src/state-adapter.js";
 import { ConversationItem, SystemFailureCard, ToolItem } from "../src/store.js";
 
 const NOW = Date.parse("2024-05-01T12:00:00.000Z");
@@ -86,6 +88,7 @@ function input(over: Partial<FooterInput> = {}): FooterInput {
     renderState: "idle",
     mergeQueuePosition: 0,
     mergeQueueDepth: 0,
+    mergeStatus: null,
     connectivity: "operational",
     sessionStatus: "ready",
     agents: [],
@@ -1705,5 +1708,243 @@ describe("ProgressFooter", () => {
     footer.render(input({ agents: [counterEntry()] }));
     // Assert — disclosure is renderer-owned, so the overlay outlives the frame.
     expect(el.querySelector(".agents-overlay")).not.toBeNull();
+  });
+});
+
+// --- the structured merge status (WorkspaceState.merge_status) ---------------
+
+describe("the footer's structured merge status", () => {
+  /** A merge status carrying PHASE, with the envelope fixed. */
+  const merge = (phase: MergeStatus["phase"]): MergeStatus => ({
+    runId: "run-1",
+    phaseStartedAtMs: NOW - 5_000,
+    updatedAtMs: NOW,
+    phase,
+  });
+
+  const PICKING = merge({
+    case: "cherryPicking",
+    value: { commitsTotal: 4, commitsLanded: 1, currentSha: "abc1234", currentSubject: "fix it" },
+  });
+
+  it("names the before-action phase, which no render state can", () => {
+    // Arrange — the daemon runs the pre-merge prompt inside `merging`, so
+    // without the override the footer says "merging" while nothing is merging.
+    const built = input({
+      renderState: "merging",
+      mergeStatus: merge({ case: "beforeAction", value: { prompt: "run the linter" } }),
+    });
+    // Act
+    const got = footerHtml(built, CLOSED, NOW);
+    // Assert
+    expect(got).toContain("merge before-action");
+  });
+
+  it("names the after-action phase", () => {
+    // Arrange
+    const built = input({
+      renderState: "merging",
+      mergeStatus: merge({ case: "afterAction", value: { prompt: "close the workspace" } }),
+    });
+    // Act
+    const got = footerHtml(built, CLOSED, NOW);
+    // Assert
+    expect(got).toContain("merge after-action");
+  });
+
+  it("shows the before-action prompt as the activity", () => {
+    // Arrange — it is what the daemon is making the session do under a lease
+    // the user cannot prompt through.
+    const built = input({
+      renderState: "merging",
+      mergeStatus: merge({ case: "beforeAction", value: { prompt: "run the linter" } }),
+    });
+    // Act
+    const got = activityDetail(built, NOW);
+    // Assert
+    expect(got?.text).toBe("before-action · run the linter");
+  });
+
+  it("shows the after-action prompt as the activity", () => {
+    // Arrange
+    const built = input({
+      renderState: "merging",
+      mergeStatus: merge({ case: "afterAction", value: { prompt: "close the workspace" } }),
+    });
+    // Act
+    const got = activityDetail(built, NOW);
+    // Assert
+    expect(got?.text).toBe("after-action · close the workspace");
+  });
+
+  it("counts the commits landed while cherry-picking", () => {
+    // Arrange / Act
+    const got = mergeStatusChip(PICKING);
+    // Assert
+    expect(got?.text).toBe("1/4");
+  });
+
+  it("shows the commit in hand as the activity while cherry-picking", () => {
+    // Arrange
+    const built = input({ renderState: "merging", mergeStatus: PICKING });
+    // Act
+    const got = activityDetail(built, NOW);
+    // Assert
+    expect(got?.text).toBe("picking · abc1234 fix it");
+  });
+
+  it("shows the commit under test as the activity while testing", () => {
+    // Arrange
+    const built = input({
+      renderState: "merging",
+      mergeStatus: merge({
+        case: "testing",
+        value: { commitsTotal: 4, commitsLanded: 4, currentSha: "def5678", currentSubject: "last" },
+      }),
+    });
+    // Act
+    const got = activityDetail(built, NOW);
+    // Assert
+    expect(got?.text).toBe("testing · def5678 last");
+  });
+
+  it("names the conflicted commit, which the phase word never did", () => {
+    // Arrange
+    const built = input({
+      renderState: "merge_conflict",
+      mergeStatus: merge({
+        case: "conflict",
+        value: {
+          conflictedSha: "bad1234",
+          conflictedSubject: "same file",
+          commitsTotal: 4,
+          commitsLanded: 2,
+        },
+      }),
+    });
+    // Act
+    const got = footerHtml(built, CLOSED, NOW);
+    // Assert
+    expect(got).toContain("conflict · bad1234 same file");
+  });
+
+  it("outranks the running tool for the activity cell", () => {
+    // Arrange — a tool call under a merge is the merge prompt's OWN work, so
+    // naming the tool spends the slot on a detail of an unnamed thing.
+    const built = input({
+      renderState: "merging",
+      mergeStatus: PICKING,
+      items: [tool({ ts: new Date(NOW - 4_000).toISOString() })],
+    });
+    // Act
+    const got = activityDetail(built, NOW);
+    // Assert
+    expect(got?.text).toBe("picking · abc1234 fix it");
+  });
+
+  it("yields the activity cell to an auth prompt, which stops the session dead", () => {
+    // Arrange
+    const built = input({
+      renderState: "merging",
+      mergeStatus: PICKING,
+      progress: progress({ authenticating: { sinceMs: NOW, detail: "device code" } }),
+    });
+    // Act
+    const got = activityDetail(built, NOW);
+    // Assert
+    expect(got?.text).toBe("auth · device code");
+  });
+
+  it("shows the failure cause as a standing note", () => {
+    // Arrange
+    const status = merge({
+      case: "failed",
+      value: {
+        cause: "tests failed",
+        commitsTotal: 4,
+        commitsLanded: 3,
+        failingSha: "fee1234",
+        failingSubject: "break it",
+      },
+    });
+    // Act
+    const got = mergeNoteRowHtml(status);
+    // Assert
+    expect(got).toContain("tests failed");
+  });
+
+  it("notes a landed merge whose after-action failed", () => {
+    // Arrange
+    const status = merge({
+      case: "merged",
+      value: { commitsTotal: 4, afterActionError: "prompt timed out" },
+    });
+    // Act
+    const got = mergeNoteRowHtml(status);
+    // Assert
+    expect(got).toContain("after-action failed: prompt timed out");
+  });
+
+  it("keeps a landed merge's note CALM, because the merge itself landed", () => {
+    // Arrange — a red note would tell the user to undo work that succeeded.
+    const status = merge({
+      case: "merged",
+      value: { commitsTotal: 4, afterActionError: "prompt timed out" },
+    });
+    // Act
+    const got = mergeNoteRowHtml(status);
+    // Assert
+    expect(got).toContain('class="pfooter-merge-note ok"');
+  });
+
+  it("renders no note row for a merge with nothing to add", () => {
+    // Arrange / Act
+    const got = mergeNoteRowHtml(PICKING);
+    // Assert
+    expect(got).toBe("");
+  });
+
+  it("renders no note row when no merge touches the workspace", () => {
+    // Arrange / Act
+    const got = mergeNoteRowHtml(null);
+    // Assert
+    expect(got).toBe("");
+  });
+
+  it("shows the structured count in place of the flat queue chip", () => {
+    // Arrange — two arithmetics side by side is two accounts of one run.
+    const built = input({
+      renderState: "merge_queued",
+      mergeQueuePosition: 2,
+      mergeQueueDepth: 3,
+      mergeStatus: merge({ case: "enqueued", value: { position: 1, depth: 5 } }),
+    });
+    // Act
+    const got = footerHtml(built, CLOSED, NOW);
+    // Assert
+    expect(got).toContain(">1/5<");
+  });
+
+  it("keeps the FLAT queue chip when the daemon stamped no status", () => {
+    // Arrange — the flat path stays the fallback until the daemon's cutover.
+    const built = input({
+      renderState: "merge_queued",
+      mergeQueuePosition: 2,
+      mergeQueueDepth: 3,
+      mergeStatus: null,
+    });
+    // Act
+    const got = footerHtml(built, CLOSED, NOW);
+    // Assert
+    expect(got).toContain(">2/3<");
+  });
+
+  it("puts the merge's full account in the expansion sheet", () => {
+    // Arrange — the sheet is where the detail the thin strip drops belongs.
+    const built = input({ renderState: "merging", mergeStatus: PICKING });
+    // Act
+    const got = sheetHtml(built, NOW);
+    // Assert
+    expect(got).toContain("merging · 1/4 · picking · abc1234 fix it");
   });
 });
