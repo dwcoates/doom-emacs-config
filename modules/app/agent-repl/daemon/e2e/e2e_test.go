@@ -344,6 +344,14 @@ type e2eHarness struct {
 	// reserved in frontend.proto), so this record is the only way a fixture
 	// repository the daemon never created becomes mergeable.
 	geometry *geometry.Store
+	// merges is THE daemon's own merge ingress route — the same
+	// *server.MergeDispatchBinding production binds into the workspace-command
+	// inbox, bound to the same *server.MergeDispatch WireAgentShim built here.
+	// A test that stands up its own create.Inbox against this harness hands it
+	// this value, so a dispatch-JSON merge takes the production path (including
+	// the rejection-sentinel translation the ingress quarantines on) rather than
+	// a harness-local imitation of it.
+	merges *server.MergeDispatchBinding
 	// shimSpawns reports how many shim processes this harness has exec'd.
 	shimSpawns func() int64
 	// sweepIdle fires the daemon's idle sweeper, which is the production
@@ -641,6 +649,12 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 		t.Fatalf("WireAgentShim: %v", err)
 	}
 	forwarder.SetTarget(agentShim.Server)
+	// Mirror main.go's late bind of the inbox's merge route (main.go
+	// `workspaceAssembly.Merges.SetTarget(agentShim.MergeDispatch)`). The
+	// harness wires no inbox of its own, but a test that builds one must be
+	// able to reach the merge surface the same way the daemon does.
+	mergeBinding := &server.MergeDispatchBinding{Logf: t.Logf}
+	mergeBinding.SetTarget(agentShim.MergeDispatch)
 	t.Cleanup(func() { _ = agentShim.Close() })
 
 	var sweepTicks chan time.Time
@@ -667,7 +681,7 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 	mux.HandleFunc("/frontend", agentShim.Server.ServeWS)
 	ts := httptest.NewServer(mux)
 	t.Cleanup(ts.Close)
-	h := &e2eHarness{ts: ts, geometry: geometryStore, shimSpawns: spawnCount.Load}
+	h := &e2eHarness{ts: ts, geometry: geometryStore, merges: mergeBinding, shimSpawns: spawnCount.Load}
 	if sweepTicks != nil {
 		h.sweepIdle = sweepTicks
 	}

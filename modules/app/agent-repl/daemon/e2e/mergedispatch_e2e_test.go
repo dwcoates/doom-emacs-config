@@ -226,7 +226,15 @@ type dispatchInbox struct {
 
 // newDispatchInbox builds the ingress with the production Inbox and Manager and
 // the strict stubs above.
-func newDispatchInbox(t *testing.T) *dispatchInbox {
+//
+// It takes the harness because the merge route is NOT a stub: h.merges is the
+// same *server.MergeDispatchBinding main.go binds into the daemon's own inbox,
+// already pointed at the *server.MergeDispatch that harness's WireAgentShim
+// built. Routing through it rather than through a local fake is what makes this
+// file a test of the dispatch-JSON route instead of a test of a fixture — the
+// rejection-sentinel translation the quarantine assertions depend on lives in
+// that binding and exists in exactly one place.
+func newDispatchInbox(t *testing.T, h *e2eHarness) *dispatchInbox {
 	t.Helper()
 	root := t.TempDir()
 	d := &dispatchInbox{
@@ -255,7 +263,7 @@ func newDispatchInbox(t *testing.T) *dispatchInbox {
 	if err != nil {
 		t.Fatalf("build the workspace-create manager: %v", err)
 	}
-	d.inbox = &create.Inbox{Dir: d.dir, Store: store, Manager: manager, Logf: d.log.logf, Interval: 1}
+	d.inbox = &create.Inbox{Dir: d.dir, Store: store, Manager: manager, Merges: h.merges, Logf: d.log.logf, Interval: 1}
 	if err := os.MkdirAll(d.dir, 0o755); err != nil {
 		t.Fatalf("make the command-file inbox directory: %v", err)
 	}
@@ -367,7 +375,7 @@ func TestE2EMergePipelineDispatchJSONMergeReachesTheQueue(t *testing.T) {
 	conn := h.dialFrontend(t)
 	defer conn.Close()
 	w := newMergeWatch(t, conn)
-	d := newDispatchInbox(t)
+	d := newDispatchInbox(t, h)
 
 	// Act — a skill drops the merge entry and the daemon drains it.
 	d.write("merge-reaches-queue", mergeDispatchEntry(wsDir, wsDir))
@@ -465,7 +473,7 @@ func TestE2EMergePipelineDispatchJSONUnusableProjectDirIsRejected(t *testing.T) 
 			repo := newMergeRepo(t)
 			wsDir := repo.cleanWorktree(branch)
 			_ = mergeCmdFor(t, h.geometry, repo, wsDir, branch)
-			d := newDispatchInbox(t)
+			d := newDispatchInbox(t, h)
 
 			// Act.
 			path := d.write("merge-bad-project-dir", mergeDispatchEntry(wsDir, tc.projectDir))
