@@ -302,6 +302,11 @@ var _ merge.BeforeActionSource = mergeBeforeActions{}
 // shape an ordinary open would not produce.
 type mergeSessionBringUp struct{ lifecycle WorkspaceLifecycle }
 
+// It is OpenDriveable rather than Open because the merge's very next act is a
+// SEND — the lease's interrupt — and Open returns while the shim is still
+// handshaking. Against a hibernated workspace that lost the race outright: the
+// interrupt was refused with "no live shim connection" tens of milliseconds
+// before the link came up, failing a merge whose session was in fact returning.
 func (b mergeSessionBringUp) EnsureLive(ctx context.Context, ws string) error {
 	if b.lifecycle == nil {
 		// A merge drives this workspace's session; without the bring-up path
@@ -309,7 +314,7 @@ func (b mergeSessionBringUp) EnsureLive(ctx context.Context, ws string) error {
 		// discover that one phase later with the lease already taken.
 		return fmt.Errorf("server: no workspace lifecycle is wired, so the session for workspace %q cannot be brought up for its merge", ws)
 	}
-	return b.lifecycle.Open(ctx, ws)
+	return b.lifecycle.OpenDriveable(ctx, ws)
 }
 
 var _ merge.SessionBringUp = mergeSessionBringUp{}

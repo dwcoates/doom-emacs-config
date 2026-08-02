@@ -211,8 +211,9 @@ func (f *fakeMerges) resumedWorkspaces() []string {
 }
 
 type fakeLifecycle struct {
-	closed []string
-	opened []string
+	closed          []string
+	opened          []string
+	openedDriveable []string
 }
 
 type fakeHealthRouter struct {
@@ -241,6 +242,13 @@ func (f *fakeLifecycle) Close(_ context.Context, ws string) error {
 }
 func (f *fakeLifecycle) Open(_ context.Context, ws string) error {
 	f.opened = append(f.opened, ws)
+	return nil
+}
+
+// OpenDriveable records separately from Open: these harnesses drive no merge,
+// and folding the two together would hide which bring-up a future one used.
+func (f *fakeLifecycle) OpenDriveable(_ context.Context, ws string) error {
+	f.openedDriveable = append(f.openedDriveable, ws)
 	return nil
 }
 

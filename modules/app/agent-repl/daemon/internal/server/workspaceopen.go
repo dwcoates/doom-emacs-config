@@ -63,12 +63,21 @@ import (
 	"claude-repld/internal/registry"
 	"claude-repld/internal/session"
 	"claude-repld/internal/sessioncontroller"
+	"claude-repld/internal/workspace/merge"
 )
 
 // WorkspaceEnsurer brings a workspace's session up without submitting a
 // prompt. Satisfied by *sessioncontroller.Manager.
 type WorkspaceEnsurer interface {
+	// Ensure STARTS the session and returns without waiting for its shim to
+	// finish handshaking. That is what an open wants: a workspace restore must
+	// not serialize behind N handshakes.
 	Ensure(workspace string) error
+	// EnsureDriveable is Ensure plus the wait for the handshake, for a caller
+	// whose next act is a SEND. It is a separate method rather than an option
+	// so that a caller which must not race the shim's boot cannot express the
+	// racing call by accident.
+	EnsureDriveable(ctx context.Context, workspace string) error
 }
 
 // WorkspaceOpener is the production WorkspaceLifecycle.
@@ -96,6 +105,31 @@ func (o *WorkspaceOpener) Open(_ context.Context, workspace string) error {
 	}
 	o.BindWorkspace(workspace)
 	return o.Ensurer.Ensure(workspace)
+}
+
+// OpenDriveable is Open for a caller that is about to DRIVE the session rather
+// than merely render it: it waits for the shim's handshake, so the caller's
+// next send cannot lose the race against the shim's boot.
+//
+// A WORKSPACE WITH NO SESSION RECORD IS NOT A FAILURE HERE. It reports
+// merge.ErrNoSession, and the difference is the whole point: "this workspace
+// has never had a session" and "this workspace's session would not come up" are
+// opposite facts that both used to arrive as one indistinguishable error. A
+// merge of a plain worktree is the first; it proceeds sessionless. Anything
+// else remains a loud failure, wrapped with the workspace it was for.
+func (o *WorkspaceOpener) OpenDriveable(ctx context.Context, workspace string) error {
+	if o.Ensurer == nil {
+		return fmt.Errorf("server: open-workspace %q has no session ensurer wired", workspace)
+	}
+	if _, ok := (&SessionLocator{Reg: o.Reg}).Locate(workspace); !ok {
+		// Loud, and NOT an error: the caller decides what a sessionless
+		// workspace means for it, and this is the only place that can tell
+		// "never had one" from "could not start one".
+		o.Logf("server: workspace %q has no session record to bring up; there is nothing to make driveable", workspace)
+		return fmt.Errorf("server: workspace %q has no session record: %w", workspace, merge.ErrNoSession)
+	}
+	o.BindWorkspace(workspace)
+	return o.Ensurer.EnsureDriveable(ctx, workspace)
 }
 
 // Close is still not exposed daemon-side: the workspacecmd channel carries no

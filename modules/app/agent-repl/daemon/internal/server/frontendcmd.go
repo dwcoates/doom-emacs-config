@@ -147,6 +147,15 @@ type MergeGeometrySource interface {
 type WorkspaceLifecycle interface {
 	Close(ctx context.Context, workspace string) error
 	Open(ctx context.Context, workspace string) error
+	// OpenDriveable is Open for a caller that will DRIVE the session it opens
+	// (merge.SessionBringUp): it returns only once the shim has handshaked, so
+	// the caller's next send cannot race the shim's boot, and it reports
+	// merge.ErrNoSession for a workspace that has no session record at all.
+	//
+	// It sits on this interface rather than behind a type assertion so a
+	// lifecycle that cannot serve a merge is a COMPILE error instead of a
+	// wiring-time one.
+	OpenDriveable(ctx context.Context, workspace string) error
 }
 
 // WorkspaceCreationBridge is the server-side seam for daemon-owned workspace
