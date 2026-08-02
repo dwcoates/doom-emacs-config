@@ -29,6 +29,10 @@ func (f *fakePrompts) Live(string) bool { return true }
 // ordinary case: most workspaces are created without one.
 func (f *fakeWorkspaceCreation) PostprocessingPrompt(string) (string, error) { return "", nil }
 
+// BeforeWSMergePrompt makes the same fake answer the creation-time before-merge
+// lookup, which comes out of the same records for the same reason.
+func (f *fakeWorkspaceCreation) BeforeWSMergePrompt(string) (string, error) { return "", nil }
+
 // promptRouterOnly carries the PromptRouter method set and NOTHING else: an
 // embedded interface contributes exactly its own methods, so this models a
 // controller fleet wired in without the liveness fact.
@@ -220,6 +224,7 @@ func TestWireAgentShimBindsThePostMergeHook(t *testing.T) {
 		Prompts:           &fakePrompts{},
 		Turns:             &fakePrompts{},
 		Lifecycle:         &fakeLifecycle{},
+		SessionDeaths:     stubSessionDeaths{},
 		SessionCommands:   &SessionCommandBinding{},
 		WorkspaceCreation: newFakeWorkspaceCreation(),
 		MergeLease:        stubMergeLease{},

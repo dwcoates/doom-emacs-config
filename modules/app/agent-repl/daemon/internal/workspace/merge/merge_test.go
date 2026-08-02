@@ -332,10 +332,13 @@ func TestMergeCleanCherryPick(t *testing.T) {
 	if res.Tag != "merge/clean-ws" {
 		t.Errorf("res.Tag = %q, want merge/clean-ws", res.Tag)
 	}
-	// A cherry_picking and a testing phase for each commit the replay picks,
-	// then the terminal merged. Nothing precedes them: a cherry_picking status
-	// published before the plan exists could only ever report 0 of 0.
-	assertPhases(t, sink.phases(), PhaseMerging, PhaseMerging, PhaseMerged)
+	// A cherry_picking and a testing phase for each commit the replay picks, and
+	// NOTHING ELSE. Nothing precedes them: a cherry_picking status published
+	// before the plan exists could only ever report 0 of 0. Nothing follows them
+	// either -- the terminal `merged` belongs to merge.Coordinator, which
+	// publishes it once the workspace's after-action has run and can therefore
+	// carry the action's outcome on it.
+	assertPhases(t, sink.phases(), PhaseMerging, PhaseMerging)
 }
 
 // --- conflict detection -------------------------------------------------
@@ -455,8 +458,9 @@ func TestResumeCompletesMergeAndOrdersTransitions(t *testing.T) {
 		t.Errorf("tag merge/rz-ws not created after Resume")
 	}
 	// The full ordered sequence across Merge + Resume: the opening pick, the
-	// conflict, the resume, the test gate on the RESUMED commit, the terminal.
-	assertPhases(t, sink.phases(), PhaseMerging, PhaseMergeConflict, PhaseMerging, PhaseMerging, PhaseMerged)
+	// conflict, the resume, the test gate on the RESUMED commit. The terminal
+	// `merged` is merge.Coordinator's, not the driver's.
+	assertPhases(t, sink.phases(), PhaseMerging, PhaseMergeConflict, PhaseMerging, PhaseMerging)
 }
 
 func TestResumeWithoutInProgressPickFails(t *testing.T) {
@@ -521,7 +525,7 @@ func TestMergeFlattensAMergeCommitInTheRange(t *testing.T) {
 			t.Errorf("%s did not land on the target: %v", name, statErr)
 		}
 	}
-	assertPhases(t, sink.phases(), PhaseMerging, PhaseMerging, PhaseMerging, PhaseMerging, PhaseMerged)
+	assertPhases(t, sink.phases(), PhaseMerging, PhaseMerging, PhaseMerging, PhaseMerging)
 }
 
 // --- preconditions abort with state intact ------------------------------
@@ -616,14 +620,16 @@ func TestMergeEmptyRangeReportsAlreadyIncorporated(t *testing.T) {
 	// Act.
 	res, err := e.Merge(context.Background(), req)
 
-	// Assert: a successful no-op, and the phases still say so out loud.
+	// Assert: a successful no-op. It publishes NO phase of its own -- there was
+	// no pick to report -- and the terminal `merged` is merge.Coordinator's,
+	// which publishes it with the after-action's outcome already on it.
 	if err != nil {
 		t.Fatalf("Merge() err = %v", err)
 	}
 	if res.Outcome != OutcomeMerged || !res.AlreadyIncorporated {
 		t.Fatalf("Merge() res = %+v, want merged + AlreadyIncorporated", res)
 	}
-	assertPhases(t, sink.phases(), PhaseMerged)
+	assertPhases(t, sink.phases())
 }
 
 func TestMergeRangeAlreadyIncorporatedByCherryPickBase(t *testing.T) {
@@ -655,7 +661,7 @@ func TestMergeRangeAlreadyIncorporatedByCherryPickBase(t *testing.T) {
 	if head := strings.TrimSpace(gitRun(t, target, "rev-parse", "HEAD")); head != headBefore {
 		t.Errorf("target HEAD moved from %s to %s; a no-op merge must not replay the patch", headBefore, head)
 	}
-	assertPhases(t, sink.phases(), PhaseMerged)
+	assertPhases(t, sink.phases())
 }
 
 func TestMergeRangeAlreadyIncorporatedByPatchID(t *testing.T) {
@@ -697,7 +703,7 @@ func TestMergeRangeAlreadyIncorporatedByPatchID(t *testing.T) {
 	if res.Outcome != OutcomeMerged || !res.AlreadyIncorporated {
 		t.Fatalf("Merge() res = %+v, want merged + AlreadyIncorporated via the patch-id probe", res)
 	}
-	assertPhases(t, sink.phases(), PhaseMerged)
+	assertPhases(t, sink.phases())
 }
 
 // --- a dirty or colliding TARGET tree -----------------------------------
@@ -1032,7 +1038,7 @@ func TestResumeSurfacesSinkError(t *testing.T) {
 }
 
 func TestMergeSurfacesSinkError(t *testing.T) {
-	// Arrange: a clean cherry-pick, but the sink rejects the terminal merged
+	// Arrange: a clean cherry-pick, but the sink rejects the per-pick `merging`
 	// transition. The driver must surface (not swallow) it.
 	target := initTarget(t)
 	featureDir := addFeatureWorktree(t, target)
@@ -1040,7 +1046,7 @@ func TestMergeSurfacesSinkError(t *testing.T) {
 	gitRun(t, featureDir, "add", ".")
 	gitRun(t, featureDir, "commit", "-q", "-m", "add feature.txt")
 
-	sink := &recordingSink{failOn: PhaseMerged}
+	sink := &recordingSink{failOn: PhaseMerging}
 	e := newTestDriver(t, sink)
 	req := withRun(t, sink, Request{Workspace: "/ws/sink-ws", Name: "sink-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
 

@@ -9,23 +9,25 @@
 //     the child was. Emacs used to do this with a headless `claude -p` fired
 //     from its merge handler, which meant it simply did not happen when no
 //     editor was watching the merge.
-//   - THE POSTPROCESSING PROMPT. A workspace can be CREATED with a
-//     postprocessing_prompt, a task meant to run in the parent once the child's
-//     work is merged in. The Emacs handoff that fired it is gone, and until
-//     this package nothing consumed the field at all.
+//   - THE POSTPROCESSING PROMPT'S RESOLUTION. A workspace can be CREATED with a
+//     postprocessing_prompt, and this package reads it back out of the creation
+//     records (AfterAction). It does NOT deliver it: that prompt is the merge
+//     run's after-action, a turn in the MERGED WORKSPACE'S OWN session run under
+//     the merge lease while the run publishes `merge_after_action`. Delivering it
+//     here as well ran one user-requested task twice per merge into a parent.
 //
-// BOTH ARE COURTESY NUDGES, not the merge's correctness. The commits are on the
+// THE PHONE-HOME IS A COURTESY NUDGE, not the merge's correctness. The commits are on the
 // target worktree before this package is ever called, and every state a
 // frontend renders is already published. So a parent with no live session is a
 // LOUD SKIP rather than an error: there is nothing to nudge, and spawning a
 // session for a workspace nobody has open — just to tell it something it can
 // read out of state — would be worse than saying so in the log.
 //
-// PROVENANCE. Both prompts go through the ORDINARY user prompt path
+// PROVENANCE. The phone-home goes through the ORDINARY user prompt path
 // (ParentSession.SubmitPrompt), never the merge-lease submit. The merge lease
 // is held over the CHILD's session and is already released by the time this
-// runs; the parent is under no lease at all, so its prompts are exactly what
-// they look like — prompts submitted to a session a user may also be using.
+// runs; the parent is under no lease at all, so its prompt is exactly what it
+// looks like — a prompt submitted to a session a user may also be using.
 package postmerge
 
 import (
@@ -126,7 +128,16 @@ func New(cfg Config) (*Notifier, error) {
 	}, nil
 }
 
-// AfterMerged implements merge.PostMergeHook.
+// AfterMerged implements merge.PostMergeHook: the child-to-parent PHONE-HOME.
+//
+// THE POSTPROCESSING PROMPT IS NOT DELIVERED HERE ANY MORE, and that is the
+// contract rather than a regression. It is the merge run's AFTER-ACTION, a turn
+// in the merged workspace's OWN session run under the merge lease while the run
+// publishes `merge_after_action` (see merge.AfterActionRunner). Delivering it
+// from here as well would run one user-requested task twice — once in the child,
+// once in the parent — for every merge into a linked worktree. This notifier
+// still RESOLVES it (AfterAction below), because the creation records are its
+// home; only the second delivery is gone.
 //
 // THE PARENT WORKSPACE IS req.TargetDir. The daemon's workspace key IS the
 // session's working directory, and a merge's target directory is the worktree
@@ -134,9 +145,6 @@ func New(cfg Config) (*Notifier, error) {
 // path is verbatim the key of the workspace whose session owns it. Both strings
 // come from the SAME frontend geometry on the merge command, so there is no
 // second spelling to reconcile.
-//
-// Ordering is phone-home FIRST, postprocessing second: the postprocessing task
-// only makes sense to an agent that has just been told what merged.
 func (n *Notifier) AfterMerged(ctx context.Context, req merge.Request) error {
 	// The request is NOT re-validated here. merge.Coordinator.Enqueue refuses
 	// an invalid merge.Request before it ever reaches a queue, so by the time a
@@ -144,7 +152,7 @@ func (n *Notifier) AfterMerged(ctx context.Context, req merge.Request) error {
 	// be defensive code against an invariant the merge subsystem owns.
 	linked, err := n.worktrees.IsLinkedWorktree(ctx, req.TargetDir)
 	if err != nil {
-		n.logf("postmerge: worktree probe FAILED {ws=%s name=%s target=%s}: %v — the merge stands, but neither the phone-home nor the postprocessing prompt could be routed",
+		n.logf("postmerge: worktree probe FAILED {ws=%s name=%s target=%s}: %v — the merge stands, but the phone-home could not be routed",
 			req.Workspace, req.Name, req.TargetDir, err)
 		return fmt.Errorf("postmerge: probe merge target %s for %q: %w", req.TargetDir, req.Name, err)
 	}
@@ -162,28 +170,11 @@ func (n *Notifier) AfterMerged(ctx context.Context, req merge.Request) error {
 	}
 
 	if err := n.submit(ctx, parent, "phone_home", PhoneHomePrompt(req)); err != nil {
-		n.logf("postmerge: phone-home submit FAILED {child_ws=%s child_name=%s parent_ws=%s}: %v — the merge stands and the postprocessing prompt is NOT sent, because a parent that refused the notification has no context for the task that follows it",
+		n.logf("postmerge: phone-home submit FAILED {child_ws=%s child_name=%s parent_ws=%s}: %v — the merge stands; the parent was not told its child landed",
 			req.Workspace, req.Name, parent, err)
 		return fmt.Errorf("postmerge: phone home to %s for %q: %w", parent, req.Name, err)
 	}
 	n.logf("postmerge: phone-home DELIVERED {child_ws=%s child_name=%s parent_ws=%s branch=%s}", req.Workspace, req.Name, parent, req.SourceBranch)
-
-	prompt, err := n.postprocessing.PostprocessingPrompt(req.SourceDir)
-	if err != nil {
-		n.logf("postmerge: postprocessing lookup FAILED {child_ws=%s child_name=%s child_dir=%s}: %v — the phone-home landed; only the postprocessing task did not",
-			req.Workspace, req.Name, req.SourceDir, err)
-		return fmt.Errorf("postmerge: resolve postprocessing prompt for %q: %w", req.Name, err)
-	}
-	if prompt == "" {
-		n.logf("postmerge: no postprocessing prompt recorded {child_ws=%s child_name=%s child_dir=%s}", req.Workspace, req.Name, req.SourceDir)
-		return nil
-	}
-	if err := n.submit(ctx, parent, "postprocessing", PostprocessingTaskPrompt(req, prompt)); err != nil {
-		n.logf("postmerge: postprocessing submit FAILED {child_ws=%s child_name=%s parent_ws=%s}: %v — the merge and the phone-home both stand",
-			req.Workspace, req.Name, parent, err)
-		return fmt.Errorf("postmerge: submit postprocessing prompt to %s for %q: %w", parent, req.Name, err)
-	}
-	n.logf("postmerge: postprocessing prompt DELIVERED {child_ws=%s child_name=%s parent_ws=%s}", req.Workspace, req.Name, parent)
 	return nil
 }
 
@@ -228,18 +219,6 @@ Its commits were cherry-picked from branch %s, so your working tree now carries 
 
 This is a notification, not a task. Take the merged work into account if it bears on what you are doing, and otherwise carry on with what you were doing.`,
 		req.Name, req.TargetDir, req.SourceBranch, req.SourceDir)
-}
-
-// PostprocessingTaskPrompt frames a workspace's creation-time
-// postprocessing_prompt for the parent session that runs it.
-//
-// The provenance header is not decoration: the parent never asked for this
-// turn, so a bare task body would arrive with no indication of which child
-// caused it or that the work it refers to has already landed.
-func PostprocessingTaskPrompt(req merge.Request, prompt string) string {
-	return fmt.Sprintf(`Post-merge task, requested when the workspace %q was created and now due because that workspace has merged into %s (from branch %s).
-
-%s`, req.Name, req.TargetDir, req.SourceBranch, prompt)
 }
 
 // newRequestID mints the id one post-merge prompt is submitted under. A

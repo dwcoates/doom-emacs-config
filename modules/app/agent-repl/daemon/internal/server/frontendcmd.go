@@ -67,6 +67,11 @@ type PromptRouter interface {
 	// ended. Third sibling of the two above, here for the same reason: it is a
 	// prompt on the one path the merge lease admits.
 	RunMergeBeforeAction(ctx context.Context, act merge.BeforeAction) error
+	// RunMergeAfterAction drives the workspace's OWN session to run the
+	// postprocessing action it was created with, once every commit has landed,
+	// returning when that turn has ended. Fourth sibling, here for the same
+	// reason: it is a prompt on the one path the merge lease admits.
+	RunMergeAfterAction(ctx context.Context, act merge.AfterAction) error
 }
 
 // SessionRestarter hard-restarts one workspace's session: stop its shim, bring
