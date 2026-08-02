@@ -411,6 +411,7 @@ type harness struct {
 	sink         *syncSink
 	sessions     *fakeSessionBringUp
 	beforeRunner *fakeBeforeActionRunner
+	afterRunner  *fakeAfterActionRunner
 	dir          string
 }
 
@@ -429,10 +430,14 @@ type harnessOpts struct {
 	phases PhaseSource
 	// sessions replaces the always-succeeding bring-up.
 	sessions SessionBringUp
+	// deaths replaces the nothing-was-deleted source.
+	deaths SessionDeaths
 	// beforeActions replaces the no-action-recorded source.
 	beforeActions BeforeActionSource
 	// beforeRunner replaces the always-succeeding action runner.
 	beforeRunner BeforeActionRunner
+	// afterRunner replaces the always-succeeding after-action runner.
+	afterRunner AfterActionRunner
 	// now pins the phase timestamps. Nil takes the wall clock.
 	now func() int64
 }
@@ -461,6 +466,18 @@ func (b *fakeSessionBringUp) calls() []string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return append([]string(nil), b.got...)
+}
+
+// fakeSessionDeaths is the merge.SessionDeaths double: it reports one canned
+// answer for every workspace.
+type fakeSessionDeaths struct {
+	sessionID string
+	deleted   bool
+	err       error
+}
+
+func (d fakeSessionDeaths) DeletedSession(string) (string, bool, error) {
+	return d.sessionID, d.deleted, d.err
 }
 
 // fakeBeforeActions is the merge.BeforeActionSource double.
@@ -497,6 +514,32 @@ func (r *fakeBeforeActionRunner) calls() []BeforeAction {
 	return append([]BeforeAction(nil), r.got...)
 }
 
+// fakeAfterActionRunner is the merge.AfterActionRunner double: it records the
+// deliveries and can be told to fail the turn.
+type fakeAfterActionRunner struct {
+	mu   sync.Mutex
+	got  []AfterAction
+	err  error
+	done chan AfterAction
+}
+
+func (r *fakeAfterActionRunner) Run(_ context.Context, act AfterAction) error {
+	r.mu.Lock()
+	r.got = append(r.got, act)
+	done, err := r.done, r.err
+	r.mu.Unlock()
+	if done != nil {
+		done <- act
+	}
+	return err
+}
+
+func (r *fakeAfterActionRunner) calls() []AfterAction {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]AfterAction(nil), r.got...)
+}
+
 func newHarness(t *testing.T) *harness {
 	t.Helper()
 	return newHarnessWith(t, harnessOpts{})
@@ -525,6 +568,10 @@ func newHarnessWith(t *testing.T, opts harnessOpts) *harness {
 	if sessions == nil {
 		sessions = &fakeSessionBringUp{}
 	}
+	deaths := opts.deaths
+	if deaths == nil {
+		deaths = fakeSessionDeaths{}
+	}
 	beforeActions := opts.beforeActions
 	if beforeActions == nil {
 		beforeActions = fakeBeforeActions{}
@@ -532,6 +579,10 @@ func newHarnessWith(t *testing.T, opts harnessOpts) *harness {
 	beforeRunner := opts.beforeRunner
 	if beforeRunner == nil {
 		beforeRunner = &fakeBeforeActionRunner{}
+	}
+	afterRunner := opts.afterRunner
+	if afterRunner == nil {
+		afterRunner = &fakeAfterActionRunner{}
 	}
 	coord, err := NewCoordinator(CoordinatorConfig{
 		Logf:         t.Logf,
@@ -546,10 +597,12 @@ func newHarnessWith(t *testing.T, opts harnessOpts) *harness {
 		PostMerge:    hook,
 		Status:       sink,
 		Sessions:     sessions,
+		Deaths:       deaths,
 		// The default harness workspace carries NO before-action, which is the
 		// common case; a test that wants one overrides the source.
 		BeforeActions:      beforeActions,
 		BeforeActionRunner: beforeRunner,
+		AfterActionRunner:  afterRunner,
 		Now:                opts.now,
 	})
 	if err != nil {
@@ -569,6 +622,9 @@ func newHarnessWith(t *testing.T, opts harnessOpts) *harness {
 	}
 	if r, ok := beforeRunner.(*fakeBeforeActionRunner); ok {
 		h.beforeRunner = r
+	}
+	if r, ok := afterRunner.(*fakeAfterActionRunner); ok {
+		h.afterRunner = r
 	}
 	return h
 }
@@ -591,8 +647,10 @@ func TestNewCoordinatorRequiresEveryDependency(t *testing.T) {
 			PostMerge:          newAutoPostMergeHook(1),
 			Status:             newSyncSink(1),
 			Sessions:           &fakeSessionBringUp{},
+			Deaths:             fakeSessionDeaths{},
 			BeforeActions:      fakeBeforeActions{},
 			BeforeActionRunner: &fakeBeforeActionRunner{},
+			AfterActionRunner:  &fakeAfterActionRunner{},
 		}
 	}
 	tests := []struct {
@@ -612,8 +670,10 @@ func TestNewCoordinatorRequiresEveryDependency(t *testing.T) {
 		{name: "no test resolver", mutate: func(c *CoordinatorConfig) { c.TestResolver = nil }, wantErr: true},
 		{name: "no status sink", mutate: func(c *CoordinatorConfig) { c.Status = nil }, wantErr: true},
 		{name: "no session bring-up", mutate: func(c *CoordinatorConfig) { c.Sessions = nil }, wantErr: true},
+		{name: "no session-deaths source", mutate: func(c *CoordinatorConfig) { c.Deaths = nil }, wantErr: true},
 		{name: "no before-action source", mutate: func(c *CoordinatorConfig) { c.BeforeActions = nil }, wantErr: true},
 		{name: "no before-action runner", mutate: func(c *CoordinatorConfig) { c.BeforeActionRunner = nil }, wantErr: true},
+		{name: "no after-action runner", mutate: func(c *CoordinatorConfig) { c.AfterActionRunner = nil }, wantErr: true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -686,7 +746,7 @@ func TestEnqueueSurfacesAPublishFailure(t *testing.T) {
 		Logf: t.Logf, Sink: newSyncSink(1), Queue: failingQueue{err: sentinelError("disk full")},
 		Phases: fakePhases{}, Keyer: fakeKeyer{}, Picker: picker, Lease: newFakeLease(1), Resolver: newFakeResolver(1),
 		TestResolver: newFakeTestFailureResolver(1), PostMerge: newAutoPostMergeHook(1),
-		Status: newSyncSink(1), Sessions: &fakeSessionBringUp{},
+		Status: newSyncSink(1), Sessions: &fakeSessionBringUp{}, Deaths: fakeSessionDeaths{}, AfterActionRunner: &fakeAfterActionRunner{},
 		BeforeActions: fakeBeforeActions{}, BeforeActionRunner: &fakeBeforeActionRunner{},
 	})
 	if err != nil {
@@ -1581,7 +1641,7 @@ func TestCloseRetainsAParkedConflictForTheNextBoot(t *testing.T) {
 		Logf: t.Logf, Sink: newSyncSink(4), Queue: q,
 		Phases: fakePhases{}, Keyer: fakeKeyer{}, Picker: picker, Lease: lease, Resolver: resolver,
 		TestResolver: newFakeTestFailureResolver(4), PostMerge: newAutoPostMergeHook(4),
-		Status: newSyncSink(4), Sessions: &fakeSessionBringUp{},
+		Status: newSyncSink(4), Sessions: &fakeSessionBringUp{}, Deaths: fakeSessionDeaths{}, AfterActionRunner: &fakeAfterActionRunner{},
 		BeforeActions: fakeBeforeActions{}, BeforeActionRunner: &fakeBeforeActionRunner{},
 	})
 	if err != nil {

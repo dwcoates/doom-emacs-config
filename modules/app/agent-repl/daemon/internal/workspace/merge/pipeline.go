@@ -34,6 +34,30 @@ type SessionBringUp interface {
 	EnsureLive(ctx context.Context, ws string) error
 }
 
+// SessionDeaths answers the ONE question merge.SessionBringUp cannot: was this
+// workspace's newest session destroyed ON PURPOSE?
+//
+// The two facts look identical from the bring-up path — neither a hibernated nor
+// a deleted workspace has a live session — and they resolve in OPPOSITE
+// directions. Hibernation is recoverable and a merge rehydrates it, because a
+// workspace that became unmergeable by sitting idle is the one thing hibernation
+// must never cost. A deletion is the user destroying the session, and bringing
+// it back to run a merge action would resurrect exactly what they asked to be
+// rid of.
+//
+// It is asked BEFORE SessionBringUp for that reason: `EnsureLive` on a deleted
+// workspace would spawn the resurrection this port exists to refuse.
+type SessionDeaths interface {
+	// DeletedSession names the deleted session and reports the deletion, or
+	// ("", false, nil) when the workspace's newest session is alive, asleep, or
+	// terminal for some other reason.
+	//
+	// A read failure is an ERROR, never the benign answer: "the records could
+	// not be read" and "the session is fine" differ by exactly the resurrection
+	// this port refuses.
+	DeletedSession(ws string) (sessionID string, deleted bool, err error)
+}
+
 // BeforeActionSource resolves the before_ws_merge action a workspace was created
 // with, from the daemon's own creation-time record.
 //
@@ -84,3 +108,48 @@ type BeforeActionRunner interface {
 // newBeforeActionRequestID mints the correlation id one before-action delivery
 // carries.
 func newBeforeActionRequestID() string { return "before-" + newRunID() }
+
+// AfterAction is one postprocessing delivery: the prompt the workspace was
+// CREATED with, run against its OWN session once every commit has landed.
+//
+// IT IS THE MERGING WORKSPACE'S SESSION, exactly as the before-action's is, and
+// the render vocabulary says so: `merge_after_action` projects to MERGING
+// precisely because "a merge run owns this workspace's session and nothing else
+// may use it" (see internal/ssm/resolve.go). It runs under the lease the merge
+// already holds, which is why it happens before the queue entry is retired.
+type AfterAction struct {
+	// Workspace is the merged workspace, whose session runs the action.
+	Workspace string
+	// RequestID correlates the delivery with its turn in the logs.
+	RequestID string
+	// Prompt is the recorded action text, verbatim.
+	Prompt string
+}
+
+func (a AfterAction) validate() error {
+	switch {
+	case a.Workspace == "":
+		return fmt.Errorf("merge: after-action Workspace is required")
+	case a.RequestID == "":
+		return fmt.Errorf("merge: after-action RequestID is required")
+	case a.Prompt == "":
+		return fmt.Errorf("merge: after-action Prompt is required")
+	}
+	return nil
+}
+
+// AfterActionRunner delivers a postprocessing action to the merged workspace's
+// own session and returns once THE TURN HAS ENDED.
+//
+// It is the before-action's sibling in every respect but one: its failure does
+// NOT fail the run. Every commit is on the target before the action starts, so
+// reporting `failed` would deny a merge that demonstrably happened. The error is
+// carried on the terminal merged status as after_action_error instead — visible
+// without being fatal, and never swallowed.
+type AfterActionRunner interface {
+	Run(ctx context.Context, act AfterAction) error
+}
+
+// newAfterActionRequestID mints the correlation id one after-action delivery
+// carries.
+func newAfterActionRequestID() string { return "after-" + newRunID() }

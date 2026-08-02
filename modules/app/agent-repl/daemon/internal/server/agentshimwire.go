@@ -63,6 +63,11 @@ type AgentShimConfig struct {
 	DaemonHealth DaemonHealthChecker
 	// Lifecycle closes/opens workspaces (the Emacs workspace-command channel).
 	Lifecycle WorkspaceLifecycle
+	// SessionDeaths reports whether a workspace's newest session was DELETED,
+	// which is the one thing Lifecycle's bring-up cannot tell from a
+	// hibernation. Required: without it a merge of a deleted workspace
+	// resurrects the very session the user destroyed. See sessiondeaths.go.
+	SessionDeaths SessionDeaths
 	// Sessions supplies SessionView metadata (model/slug/title) for snapshots.
 	Sessions SessionMetaSource
 	// Inits supplies the retained SystemInit of every live session as
@@ -246,33 +251,47 @@ func (r mergeBeforeActionRunner) Run(ctx context.Context, act merge.BeforeAction
 
 var _ merge.BeforeActionRunner = mergeBeforeActionRunner{}
 
-// mergeBeforeActions adapts the geometry store to merge.BeforeActionSource: the
-// before_ws_merge action is recorded on the SAME geometry record the merge's
-// three coordinates are, so the run resolves all four from one lookup of one
-// map with one owner.
-type mergeBeforeActions struct{ geometry MergeGeometrySource }
+// mergeAfterActionRunner adapts the PromptRouter to merge.AfterActionRunner. It
+// is derived from Prompts for the reason every other merge-driven prompt is: the
+// action is admissible only against the session the merge lease was taken over.
+type mergeAfterActionRunner struct{ prompts PromptRouter }
+
+func (r mergeAfterActionRunner) Run(ctx context.Context, act merge.AfterAction) error {
+	return r.prompts.RunMergeAfterAction(ctx, act)
+}
+
+var _ merge.AfterActionRunner = mergeAfterActionRunner{}
+
+// MergeBeforeActionSource resolves the before_ws_merge action a workspace was
+// CREATED with, keyed by that workspace's worktree path.
+//
+// It is the sibling of postmerge.PostprocessingSource and is satisfied by the
+// SAME WorkspaceCreation bridge, which is the whole point: `before_ws_merge` and
+// `postprocessing_prompt` are two fields of one create Request, so one merge run
+// must read both out of one set of creation records. Resolving one from the
+// creation store and the other from the geometry record gave the daemon two
+// spellings of one creation-time fact, and a workspace created through a path
+// that filled in only one of them merged with the other silently skipped.
+type MergeBeforeActionSource interface {
+	BeforeWSMergePrompt(worktreePath string) (string, error)
+}
+
+// mergeBeforeActions adapts the workspace-creation records to
+// merge.BeforeActionSource.
+type mergeBeforeActions struct{ creation MergeBeforeActionSource }
 
 func (s mergeBeforeActions) BeforeAction(ws string) (string, error) {
-	if s.geometry == nil {
-		// The same posture the merge-command path takes on a nil geometry source:
-		// a merge cannot be answered at all without the map, and reporting "no
-		// action" would run a merge that silently skipped the action the user
-		// asked for at creation.
-		return "", fmt.Errorf("server: no merge-geometry source is wired, so the before-merge action for workspace %q cannot be read", ws)
+	if s.creation == nil {
+		// A merge cannot be answered at all without the creation records, and
+		// reporting "no action" would run a merge that silently skipped the action
+		// the user asked for at creation.
+		return "", fmt.Errorf("server: no workspace-creation source is wired, so the before-merge action for workspace %q cannot be read", ws)
 	}
-	rec, found, err := s.geometry.Lookup(context.Background(), ws)
+	prompt, err := s.creation.BeforeWSMergePrompt(ws)
 	if err != nil {
 		return "", fmt.Errorf("server: read the before-merge action for workspace %q: %w", ws, err)
 	}
-	if !found {
-		// A merge cannot even be dispatched without a geometry record, so by the
-		// time a run asks for its action the record exists. Its absence here is
-		// the record having gone missing between the two reads, which is a
-		// different fact from "this workspace has no action" and must not be
-		// reported as one.
-		return "", fmt.Errorf("server: workspace %q has no recorded merge geometry, so its before-merge action cannot be read", ws)
-	}
-	return rec.BeforeAction, nil
+	return prompt, nil
 }
 
 var _ merge.BeforeActionSource = mergeBeforeActions{}
@@ -294,6 +313,21 @@ func (b mergeSessionBringUp) EnsureLive(ctx context.Context, ws string) error {
 }
 
 var _ merge.SessionBringUp = mergeSessionBringUp{}
+
+// mergeSessionDeaths adapts the registry's deletion fact to merge.SessionDeaths.
+type mergeSessionDeaths struct{ deaths SessionDeaths }
+
+func (d mergeSessionDeaths) DeletedSession(ws string) (string, bool, error) {
+	if d.deaths == nil {
+		// Never the benign answer. A merge decides whether to bring a session up
+		// on this, and "no source" reported as "not deleted" resurrects exactly
+		// the session the user destroyed.
+		return "", false, fmt.Errorf("server: no session-deaths source is wired, so the deletion state of workspace %q cannot be read for its merge", ws)
+	}
+	return d.deaths.DeletedSession(ws)
+}
+
+var _ merge.SessionDeaths = mergeSessionDeaths{}
 
 var _ merge.ConflictResolver = mergeConflictResolver{}
 
@@ -346,6 +380,8 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 		return nil, fmt.Errorf("server: WireAgentShim needs a merge.Lease (without it a cherry-pick would run into a session the user is still prompting)")
 	case cfg.MergeQueue == nil:
 		return nil, fmt.Errorf("server: WireAgentShim needs a merge.Queue (without it the merge queue is not durable and a self-merge's daemon bounce loses it)")
+	case cfg.SessionDeaths == nil:
+		return nil, fmt.Errorf("server: WireAgentShim needs a SessionDeaths source (without it a merge cannot tell a hibernated session from one the user deleted, and would resurrect the second while rehydrating the first)")
 	case cfg.Prompts == nil:
 		return nil, fmt.Errorf("server: WireAgentShim needs a PromptRouter (it is both the frontend's submit path and merge.Coordinator's conflict-resolution path)")
 	}
@@ -374,6 +410,14 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 	if err != nil {
 		return nil, err
 	}
+	// The before-action's source is a CHECKED derivation of the creation bridge,
+	// never a silent downgrade to "this workspace has none": a daemon whose
+	// merges quietly stop running the gate the user asked for at creation is the
+	// exact failure the acceptance gate exists to catch.
+	beforeActions, ok := cfg.WorkspaceCreation.(MergeBeforeActionSource)
+	if !ok {
+		return nil, fmt.Errorf("server: the WorkspaceCreation bridge (%T) cannot resolve a workspace's before_ws_merge action, so a workspace created with one would merge without ever running the gate it was created with", cfg.WorkspaceCreation)
+	}
 	coordinator, err := merge.NewCoordinator(merge.CoordinatorConfig{
 		Logf:         logf,
 		Sink:         mergeSink{mgr},
@@ -389,10 +433,15 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 		// progress beneath it cannot come from two different records.
 		Status:   mergeSink{mgr},
 		Sessions: mergeSessionBringUp{lifecycle: cfg.Lifecycle},
-		// The before-action rides the geometry record, so it is resolved from
-		// THE daemon's one workspace -> merge-geometry map.
-		BeforeActions:      mergeBeforeActions{geometry: cfg.MergeGeometry},
+		// Asked BEFORE the bring-up: a deleted session must never be spawned
+		// back to run a merge action.
+		Deaths: mergeSessionDeaths{deaths: cfg.SessionDeaths},
+		// The before-action is a creation-time fact, so it is resolved from THE
+		// records the create commands wrote — the same ones the after-action's
+		// prompt comes out of.
+		BeforeActions:      mergeBeforeActions{creation: beforeActions},
 		BeforeActionRunner: mergeBeforeActionRunner{prompts: cfg.Prompts},
+		AfterActionRunner:  mergeAfterActionRunner{prompts: cfg.Prompts},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("server: build merge coordinator: %w", err)

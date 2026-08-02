@@ -644,6 +644,17 @@ func (b *WorkspaceCreationBridge) PostprocessingPrompt(worktreePath string) (str
 	return workspacecreate.PostprocessingPromptFor(b.store, worktreePath)
 }
 
+// BeforeWSMergePrompt satisfies server.MergeBeforeActionSource: it reports the
+// before_ws_merge action the workspace at worktreePath was created with.
+//
+// It hangs off THIS bridge for the same reason PostprocessingPrompt does, and
+// beside it deliberately: the two prompts are fields of one create Request, so
+// answering them from two different bindings would let one merge run read one
+// workspace's creation from two records.
+func (b *WorkspaceCreationBridge) BeforeWSMergePrompt(worktreePath string) (string, error) {
+	return workspacecreate.BeforeWSMergePromptFor(b.store, worktreePath)
+}
+
 func (b *WorkspaceCreationBridge) SnapshotHostWork() server.WorkspaceHostWorkSnapshot {
 	jobs, err := b.store.List()
 	if err != nil {

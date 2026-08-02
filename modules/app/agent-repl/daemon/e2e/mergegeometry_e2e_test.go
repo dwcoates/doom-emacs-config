@@ -132,6 +132,7 @@ func bootGeometryDaemon(t *testing.T) *geometryBoot {
 		Turns:             controller,
 		Health:            controller,
 		Lifecycle:         stubLifecycle{},
+		SessionDeaths:     server.RegistrySessionDeaths{Reg: reg},
 		Resyncer:          controller,
 		Catalogs:          controller,
 		SessionCommands:   binding,

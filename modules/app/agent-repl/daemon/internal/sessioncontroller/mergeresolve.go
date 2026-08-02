@@ -299,6 +299,40 @@ func (m *Manager) RunMergeBeforeAction(ctx context.Context, act merge.BeforeActi
 	return nil
 }
 
+// RunMergeAfterAction implements merge.AfterActionRunner (through the server's
+// PromptRouter): it submits the workspace's recorded postprocessing action on
+// the merge lease holder's behalf and returns once that turn has ended.
+//
+// It is the fourth sibling, and it differs from the before-action in exactly one
+// place — and NOT here. Its turn is submitted, awaited and judged identically;
+// what merge.Coordinator does with a failure is the difference, and that
+// decision belongs there (the commits are already on the target, so the error
+// rides on the terminal merged status rather than failing the run). Softening
+// the verdict here would leave that status carrying nothing at all.
+func (m *Manager) RunMergeAfterAction(ctx context.Context, act merge.AfterAction) error {
+	if act.Workspace == "" {
+		return fmt.Errorf("session-controller: a merge after-action needs a workspace")
+	}
+	if act.RequestID == "" {
+		return fmt.Errorf("session-controller: a merge after-action for workspace %q needs a request id", act.Workspace)
+	}
+	if act.Prompt == "" {
+		return fmt.Errorf("session-controller: a merge after-action for workspace %q needs a prompt", act.Workspace)
+	}
+	m.logf("session-controller: merge after-action ws=%q request_id=%s — driving the workspace's own session under the merge lease now that every commit has landed",
+		act.Workspace, act.RequestID)
+
+	ctx, cancel := context.WithTimeout(ctx, m.mergeResolutionBound())
+	defer cancel()
+	if err := m.SubmitMergePromptAwaitingTurn(ctx, act.Workspace, act.RequestID, act.Prompt, mergeResolutionPermissionMode); err != nil {
+		m.logf("session-controller: merge after-action FAILED ws=%q request_id=%s: %v — the merge STANDS; merge.Coordinator carries this onto the terminal merged status",
+			act.Workspace, act.RequestID, err)
+		return err
+	}
+	m.logf("session-controller: merge after-action turn COMPLETE ws=%q request_id=%s", act.Workspace, act.RequestID)
+	return nil
+}
+
 // mergeResolutionBound resolves the wait's bound: the configured override when
 // a harness set one, the package default otherwise.
 func (m *Manager) mergeResolutionBound() time.Duration {

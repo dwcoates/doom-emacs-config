@@ -68,6 +68,7 @@ type fakePrompts struct {
 	// drive the workspace's own session through.
 	testFailures  []merge.TestFailureResolution
 	beforeActions []merge.BeforeAction
+	afterActions  []merge.AfterAction
 }
 
 // TurnActive makes the prompt double the gate's turn source.
@@ -92,6 +93,13 @@ func (f *fakePrompts) ResolveMergeTestFailure(_ context.Context, res merge.TestF
 // runner too, on the same footing as the two resolvers.
 func (f *fakePrompts) RunMergeBeforeAction(_ context.Context, act merge.BeforeAction) error {
 	f.beforeActions = append(f.beforeActions, act)
+	return f.err
+}
+
+// RunMergeAfterAction makes the prompt double merge.Coordinator's after-action
+// runner too, on the same footing as the before-action's.
+func (f *fakePrompts) RunMergeAfterAction(_ context.Context, act merge.AfterAction) error {
+	f.afterActions = append(f.afterActions, act)
 	return f.err
 }
 
@@ -1076,6 +1084,7 @@ func TestSnapshotProviderCombinesSSMAndSessions(t *testing.T) {
 		Prompts:           &fakePrompts{},
 		Turns:             &fakePrompts{},
 		Lifecycle:         &fakeLifecycle{},
+		SessionDeaths:     stubSessionDeaths{},
 		Sessions:          fakeSessions{views: []*frontendv1.SessionView{{Workspace: "/w", SessionId: "s1", Model: "haiku"}}},
 		SessionCommands:   &SessionCommandBinding{},
 		WorkspaceCreation: newFakeWorkspaceCreation(),
@@ -1133,6 +1142,7 @@ func TestWireAgentShimFeedsTheSsmTransitionIntoProgressWithoutAPhaseCopy(t *test
 		Prompts:           &fakePrompts{},
 		Turns:             &fakePrompts{},
 		Lifecycle:         &fakeLifecycle{},
+		SessionDeaths:     stubSessionDeaths{},
 		SessionCommands:   &SessionCommandBinding{},
 		WorkspaceCreation: newFakeWorkspaceCreation(),
 		MergeLease:        stubMergeLease{},
@@ -1188,6 +1198,7 @@ func TestWireAgentShimRejectsNilWorkspaceCreation(t *testing.T) {
 		Progress:        progress.New(progress.Options{Logf: func(string, ...any) {}}),
 		Prompts:         &fakePrompts{},
 		Lifecycle:       &fakeLifecycle{},
+		SessionDeaths:   stubSessionDeaths{},
 		SessionCommands: &SessionCommandBinding{},
 	})
 	if err == nil || !strings.Contains(err.Error(), "WorkspaceCreation") {
@@ -1253,10 +1264,12 @@ func newTestMergeCoordinator(t *testing.T) *merge.QueueCoordinator {
 		PostMerge: stubPostMergeHook{},
 		Status:    noopSink{},
 		Sessions:  stubSessionBringUp{},
+		Deaths:    stubSessionDeaths{},
 		// No workspace in these harnesses was created with a before-merge action,
 		// which is the common case; the run goes straight to the plan.
 		BeforeActions:      stubBeforeActions{},
 		BeforeActionRunner: stubBeforeActionRunner{},
+		AfterActionRunner:  stubAfterActionRunner{},
 	})
 	if err != nil {
 		t.Fatalf("coordinator: %v", err)
@@ -1281,6 +1294,12 @@ type stubSessionBringUp struct{}
 
 func (stubSessionBringUp) EnsureLive(context.Context, string) error { return nil }
 
+// stubSessionDeaths is the SessionDeaths a unit harness binds: no workspace of
+// a wiring test has ever had a session deleted.
+type stubSessionDeaths struct{}
+
+func (stubSessionDeaths) DeletedSession(string) (string, bool, error) { return "", false, nil }
+
 // stubBeforeActions is the merge.BeforeActionSource a unit harness binds: no
 // workspace here was created with an action.
 type stubBeforeActions struct{}
@@ -1291,6 +1310,11 @@ func (stubBeforeActions) BeforeAction(string) (string, error) { return "", nil }
 type stubBeforeActionRunner struct{}
 
 func (stubBeforeActionRunner) Run(context.Context, merge.BeforeAction) error { return nil }
+
+// stubAfterActionRunner is the merge.AfterActionRunner a unit harness binds.
+type stubAfterActionRunner struct{}
+
+func (stubAfterActionRunner) Run(context.Context, merge.AfterAction) error { return nil }
 
 // noopPhases is the merge.PhaseSource a unit harness binds: no workspace is
 // pinned on any phase, so the boot sweep has nothing to sweep.
@@ -1352,6 +1376,7 @@ func TestWireAgentShimMergeTransitionReachesSSM(t *testing.T) {
 		Prompts:           &fakePrompts{},
 		Turns:             &fakePrompts{},
 		Lifecycle:         &fakeLifecycle{},
+		SessionDeaths:     stubSessionDeaths{},
 		SessionCommands:   &SessionCommandBinding{},
 		WorkspaceCreation: newFakeWorkspaceCreation(),
 		MergeLease:        stubMergeLease{},
