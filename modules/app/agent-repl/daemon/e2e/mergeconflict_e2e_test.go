@@ -34,7 +34,7 @@ func TestE2EAConflictingCherryPickReportsMergeConflictAsItsTerminalPhase(t *test
 	w := newMergeWatch(t, conn)
 
 	// Act.
-	sendMerge(t, conn, "r-merge-conflict", mergeCmdFor(repo, wsDir, "feature-conflict"))
+	sendMerge(t, conn, "r-merge-conflict", mergeCmdFor(t, h.geometry, repo, wsDir, "feature-conflict"))
 
 	// Assert — merge_conflict, and not a disguised success or failure.
 	w.awaitOKAck("r-merge-conflict")
@@ -62,7 +62,7 @@ func TestE2EAConflictingCherryPickIsLeftParkedInTheTargetTree(t *testing.T) {
 	w := newMergeWatch(t, conn)
 
 	// Act.
-	sendMerge(t, conn, "r-merge-parked", mergeCmdFor(repo, wsDir, "feature-parked-in-tree"))
+	sendMerge(t, conn, "r-merge-parked", mergeCmdFor(t, h.geometry, repo, wsDir, "feature-parked-in-tree"))
 	w.awaitOKAck("r-merge-parked")
 	w.awaitPhase(wsDir, phaseMergeConflict)
 

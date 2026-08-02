@@ -175,6 +175,21 @@ describe("decodeFrontendFrame — protojson field coercion", () => {
     expect(frame.frame.value.mergeLeaseHeld).toBe(true);
   });
 
+  it("decodes the instant a merge landed", () => {
+    // The daemon stamps this on every frame for a merged workspace. It was
+    // absent from the decoder's field set, so the frames that mattered most
+    // were the ones it threw on.
+    const frame = decode({ workspaceState: { ...WS_STATE, mergedAtMs: "1700000000000" } });
+    if (frame.frame.case !== "workspaceState") throw new Error("wrong variant");
+    expect(frame.frame.value.mergedAtMs).toBe(1700000000000);
+  });
+
+  it("reads an ABSENT merged instant as never merged", () => {
+    const frame = decode({ workspaceState: WS_STATE });
+    if (frame.frame.case !== "workspaceState") throw new Error("wrong variant");
+    expect(frame.frame.value.mergedAtMs).toBe(0);
+  });
+
   it("reads an ABSENT merge lease as not held, the proto3 default protojson omits", () => {
     const frame = decode({ workspaceState: WS_STATE });
     if (frame.frame.case !== "workspaceState") throw new Error("wrong variant");
@@ -991,5 +1006,209 @@ describe("ProgressView decoding (F1)", () => {
     // Assert
     if (got.frame.case !== "snapshot") throw new Error("wrong variant");
     expect(got.frame.value.progress).toEqual([]);
+  });
+});
+
+describe("WorkspaceState.mergeStatus decoding", () => {
+  /** A merge status carrying `phase`, wrapped as a workspaceState frame. */
+  function withStatus(phase: Record<string, unknown>): ReturnType<typeof decodeFrontendFrame> {
+    return decode({
+      workspaceState: {
+        ...WS_STATE,
+        mergeStatus: {
+          runId: "run-1",
+          phaseStartedAtMs: "1700000000000",
+          updatedAtMs: "1700000000500",
+          ...phase,
+        },
+      },
+    });
+  }
+
+  /** The decoded status, or a thrown error when the frame carried none. */
+  function statusOf(frame: ReturnType<typeof decodeFrontendFrame>) {
+    if (frame.frame.case !== "workspaceState") throw new Error("wrong variant");
+    const status = frame.frame.value.mergeStatus;
+    if (status === undefined) throw new Error("no merge status decoded");
+    return status;
+  }
+
+  it("reads a workspace with no merge as an ABSENT status", () => {
+    // Arrange / Act
+    const frame = decode({ workspaceState: WS_STATE });
+    // Assert
+    if (frame.frame.case !== "workspaceState") throw new Error("wrong variant");
+    expect(frame.frame.value.mergeStatus).toBeUndefined();
+  });
+
+  it("decodes the run identity every phase carries", () => {
+    // Arrange / Act
+    const status = statusOf(withStatus({ enqueued: { position: 1, depth: 2 } }));
+    // Assert
+    expect(status.runId).toBe("run-1");
+  });
+
+  it("decodes the instant the current phase was entered", () => {
+    // Arrange / Act
+    const status = statusOf(withStatus({ enqueued: { position: 1, depth: 2 } }));
+    // Assert
+    expect(status.phaseStartedAtMs).toBe(1700000000000);
+  });
+
+  it("decodes the within-phase tick instant separately from the phase's", () => {
+    // Arrange / Act
+    const status = statusOf(withStatus({ enqueued: { position: 1, depth: 2 } }));
+    // Assert
+    expect(status.updatedAtMs).toBe(1700000000500);
+  });
+
+  it("decodes the enqueued phase's place in the queue", () => {
+    // Arrange / Act
+    const status = statusOf(withStatus({ enqueued: { position: 2, depth: 3 } }));
+    // Assert
+    if (status.phase.case !== "enqueued") throw new Error("wrong phase");
+    expect(status.phase.value).toEqual({ position: 2, depth: 3 });
+  });
+
+  it("decodes the before-action phase's prompt", () => {
+    // Arrange / Act
+    const status = statusOf(withStatus({ beforeAction: { prompt: "run the linter" } }));
+    // Assert
+    if (status.phase.case !== "beforeAction") throw new Error("wrong phase");
+    expect(status.phase.value.prompt).toBe("run the linter");
+  });
+
+  it("decodes the cherry-picking phase's commit walk", () => {
+    // Arrange / Act
+    const status = statusOf(
+      withStatus({
+        cherryPicking: {
+          commitsTotal: 4,
+          commitsLanded: 1,
+          currentSha: "abc1234",
+          currentSubject: "fix the thing",
+        },
+      }),
+    );
+    // Assert
+    if (status.phase.case !== "cherryPicking") throw new Error("wrong phase");
+    expect(status.phase.value).toEqual({
+      commitsTotal: 4,
+      commitsLanded: 1,
+      currentSha: "abc1234",
+      currentSubject: "fix the thing",
+    });
+  });
+
+  it("decodes the testing phase's commit under test", () => {
+    // Arrange / Act
+    const status = statusOf(
+      withStatus({
+        testing: {
+          commitsTotal: 4,
+          commitsLanded: 2,
+          currentSha: "def5678",
+          currentSubject: "cover the thing",
+        },
+      }),
+    );
+    // Assert
+    if (status.phase.case !== "testing") throw new Error("wrong phase");
+    expect(status.phase.value.currentSha).toBe("def5678");
+  });
+
+  it("decodes the conflict phase's conflicted commit", () => {
+    // Arrange / Act
+    const status = statusOf(
+      withStatus({
+        conflict: {
+          conflictedSha: "aaa1111",
+          conflictedSubject: "touch shared.txt",
+          commitsTotal: 3,
+          commitsLanded: 1,
+        },
+      }),
+    );
+    // Assert
+    if (status.phase.case !== "conflict") throw new Error("wrong phase");
+    expect(status.phase.value.conflictedSubject).toBe("touch shared.txt");
+  });
+
+  it("decodes the after-action phase's prompt", () => {
+    // Arrange / Act
+    const status = statusOf(withStatus({ afterAction: { prompt: "announce the merge" } }));
+    // Assert
+    if (status.phase.case !== "afterAction") throw new Error("wrong phase");
+    expect(status.phase.value.prompt).toBe("announce the merge");
+  });
+
+  it("decodes the merged phase's landed commit count", () => {
+    // Arrange / Act
+    const status = statusOf(withStatus({ merged: { commitsTotal: 3 } }));
+    // Assert
+    if (status.phase.case !== "merged") throw new Error("wrong phase");
+    expect(status.phase.value.commitsTotal).toBe(3);
+  });
+
+  it("reads a merged run's absent after-action error as empty", () => {
+    // An after action that succeeded, or one that never ran, is protojson's
+    // omitted default rather than a shape of its own.
+    // Arrange / Act
+    const status = statusOf(withStatus({ merged: { commitsTotal: 3 } }));
+    // Assert
+    if (status.phase.case !== "merged") throw new Error("wrong phase");
+    expect(status.phase.value.afterActionError).toBe("");
+  });
+
+  it("decodes the failed phase's cause", () => {
+    // Arrange / Act
+    const status = statusOf(withStatus({ failed: { cause: "merge enqueue refused" } }));
+    // Assert
+    if (status.phase.case !== "failed") throw new Error("wrong phase");
+    expect(status.phase.value.cause).toBe("merge enqueue refused");
+  });
+
+  it("decodes a failed run that never finished planning as zero commits", () => {
+    // Arrange / Act
+    const status = statusOf(withStatus({ failed: { cause: "geometry unresolvable" } }));
+    // Assert
+    if (status.phase.case !== "failed") throw new Error("wrong phase");
+    expect(status.phase.value.commitsTotal).toBe(0);
+  });
+
+  it("rejects a status that names no phase", () => {
+    // WHICH member is set IS the phase, so a status naming none says nothing a
+    // renderer could paint.
+    expect(() =>
+      decode({
+        workspaceState: { ...WS_STATE, mergeStatus: { runId: "run-1", updatedAtMs: "1" } },
+      }),
+    ).toThrow(/sets no phase/);
+  });
+
+  it("rejects a status that names two phases", () => {
+    expect(() =>
+      withStatus({ enqueued: { position: 1, depth: 1 }, merged: { commitsTotal: 1 } }),
+    ).toThrow(/sets multiple phases/);
+  });
+
+  it("rejects a status with no run id", () => {
+    expect(() =>
+      decode({
+        workspaceState: { ...WS_STATE, mergeStatus: { merged: { commitsTotal: 1 } } },
+      }),
+    ).toThrow(/missing required `runId`/);
+  });
+
+  it("rejects a phase this build has never heard of", () => {
+    expect(() => withStatus({ rebasing: { commitsTotal: 1 } })).toThrow(
+      /MergeStatus has unrecognized field\(s\): rebasing/,
+    );
+  });
+
+  it("rejects an unrecognized field inside a phase", () => {
+    expect(() => withStatus({ enqueued: { position: 1, depth: 1, eta: 5 } })).toThrow(
+      /MergeStatusEnqueued has unrecognized field\(s\): eta/,
+    );
   });
 });

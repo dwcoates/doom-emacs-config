@@ -1529,16 +1529,13 @@ type WorkspaceState struct {
 	// log, so a frontend ordering a recently-merged section reads the identical
 	// instant from every push, snapshot and resync.
 	MergedAtMs int64 `protobuf:"varint,17,opt,name=merged_at_ms,json=mergedAtMs,proto3" json:"merged_at_ms,omitempty"`
-	// THE PHASE-LEVEL ACCOUNT of the merge run this workspace currently has in
-	// flight, or the terminal account of the last one.
+	// THE merge run's live progress. See MergeStatus: it supersedes the coarse
+	// merge_phase / merge_queue_position / merge_queue_depth trio above, which
+	// stay stamped until the final cutover so both forms coexist for now.
 	//
-	// `merge_phase` (6) is a single word and cannot say WHICH commit of how many
-	// is landing, what the before-action prompt was, or why a run failed. This
-	// carries all of it, one message per phase, so a frontend renders progress
-	// without inventing a parser over the cause string.
-	//
-	// Fields 6/14/15 keep being stamped alongside it: every frontend that reads
-	// them predates this message, and retiring them is a separate wave.
+	// UNSET means this workspace has no merge to report — the merge axis has
+	// never spoken for it, or its axis is cleared. It is never a zero-valued
+	// status standing in for absence.
 	MergeStatus   *MergeStatus `protobuf:"bytes,18,opt,name=merge_status,json=mergeStatus,proto3" json:"merge_status,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1700,35 +1697,21 @@ func (x *WorkspaceState) GetMergeStatus() *MergeStatus {
 	return nil
 }
 
-// THE DAEMON-OWNED MERGE PIPELINE'S PHASE-LEVEL STATUS.
-//
-// One MergeStatus describes one RUN — a single trip of one workspace through
-// the merge pipeline — and its CURRENT phase. The daemon publishes a new one
-// on every phase transition and on every within-phase tick (a commit landing,
-// a test starting), each as its own WorkspaceState revision.
-//
-// A RUN, NOT A WORKSPACE. `run_id` is minted when the repository's drain
-// goroutine pops the queue entry, so a merge that is retried after a failure,
-// or replayed by the next daemon's boot, is a DIFFERENT run with a different
-// id. A frontend that keyed progress on the workspace alone would blend two
-// attempts into one nonsensical commit count.
+// Live progress of the workspace's current (or most recent) merge run.
+// WHICH message is set in `phase` IS the phase — no enum to keep in sync,
+// no field that is meaningless for the current phase. Every phase
+// transition and every within-phase tick (a landed cherry-pick, a test
+// pass) is pushed as a WorkspaceState revision to both frontends.
 type MergeStatus struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The run this status belongs to. Stable for the life of one pipeline trip.
-	RunId string `protobuf:"bytes,1,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
-	// WHEN THE CURRENT PHASE WAS ENTERED, in unix millis. For a terminal phase
-	// (merged, failed) it is when the run FINISHED. It deliberately does not
-	// move on a within-phase tick, so a frontend can render "cherry-picking for
-	// 40s" without the elapsed figure resetting every time a commit lands.
+	RunId string                 `protobuf:"bytes,1,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"` // daemon-minted, stable across the run
+	// When the CURRENT phase was entered. Set on every phase transition. For
+	// the terminal phases this is when the run finished — merged's landed
+	// instant, failed's failure instant.
 	PhaseStartedAtMs int64 `protobuf:"varint,2,opt,name=phase_started_at_ms,json=phaseStartedAtMs,proto3" json:"phase_started_at_ms,omitempty"`
-	// WHEN THIS STATUS WAS PUBLISHED, in unix millis, MONOTONIC WITHIN THE RUN.
-	// Unlike phase_started_at_ms it bumps on every publication including a
-	// within-phase tick, which is what lets a consumer order two statuses that
-	// share a phase.
+	// Monotonic within the run; bumps on within-phase ticks too (a landed
+	// pick advances updated_at_ms but not phase_started_at_ms).
 	UpdatedAtMs int64 `protobuf:"varint,3,opt,name=updated_at_ms,json=updatedAtMs,proto3" json:"updated_at_ms,omitempty"`
-	// Exactly one phase is set. An unset oneof is not a phase the pipeline can
-	// be in; it means the message was constructed wrong.
-	//
 	// Types that are valid to be assigned to Phase:
 	//
 	//	*MergeStatus_Enqueued
@@ -1926,12 +1909,10 @@ func (*MergeStatus_Merged) isMergeStatus_Phase() {}
 
 func (*MergeStatus_Failed) isMergeStatus_Phase() {}
 
-// The run is on its repository's queue and has not started. Position/depth are
-// the same queue facts WorkspaceState.merge_queue_position/depth carry.
 type MergeStatusEnqueued struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Position      int32                  `protobuf:"varint,1,opt,name=position,proto3" json:"position,omitempty"` // 1-based
-	Depth         int32                  `protobuf:"varint,2,opt,name=depth,proto3" json:"depth,omitempty"`       // total entries on this repository's queue
+	Depth         int32                  `protobuf:"varint,2,opt,name=depth,proto3" json:"depth,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1980,12 +1961,9 @@ func (x *MergeStatusEnqueued) GetDepth() int32 {
 	return 0
 }
 
-// The workspace's own agent session is running the before_ws_merge action the
-// workspace was created with, under the merge lease. `prompt` is the recorded
-// action text, so a frontend can show WHAT the session was asked to do.
 type MergeStatusBeforeAction struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Prompt        string                 `protobuf:"bytes,1,opt,name=prompt,proto3" json:"prompt,omitempty"`
+	Prompt        string                 `protobuf:"bytes,1,opt,name=prompt,proto3" json:"prompt,omitempty"` // the configured action, for display
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2027,13 +2005,12 @@ func (x *MergeStatusBeforeAction) GetPrompt() string {
 	return ""
 }
 
-// A commit is being cherry-picked onto the target.
 type MergeStatusCherryPicking struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
-	CommitsTotal   int32                  `protobuf:"varint,1,opt,name=commits_total,json=commitsTotal,proto3" json:"commits_total,omitempty"`      // commits in the computed plan
-	CommitsLanded  int32                  `protobuf:"varint,2,opt,name=commits_landed,json=commitsLanded,proto3" json:"commits_landed,omitempty"`   // commits of that plan already on the target
-	CurrentSha     string                 `protobuf:"bytes,3,opt,name=current_sha,json=currentSha,proto3" json:"current_sha,omitempty"`             // the commit being picked (short)
-	CurrentSubject string                 `protobuf:"bytes,4,opt,name=current_subject,json=currentSubject,proto3" json:"current_subject,omitempty"` // its subject line
+	CommitsTotal   int32                  `protobuf:"varint,1,opt,name=commits_total,json=commitsTotal,proto3" json:"commits_total,omitempty"`
+	CommitsLanded  int32                  `protobuf:"varint,2,opt,name=commits_landed,json=commitsLanded,proto3" json:"commits_landed,omitempty"`
+	CurrentSha     string                 `protobuf:"bytes,3,opt,name=current_sha,json=currentSha,proto3" json:"current_sha,omitempty"`
+	CurrentSubject string                 `protobuf:"bytes,4,opt,name=current_subject,json=currentSubject,proto3" json:"current_subject,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -2096,13 +2073,10 @@ func (x *MergeStatusCherryPicking) GetCurrentSubject() string {
 	return ""
 }
 
-// The target repository's test suite is running for the commit that just
-// landed. It carries the SAME commit context cherry_picking does, so a
-// frontend renders one progress figure across both phases.
 type MergeStatusTesting struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	CommitsTotal   int32                  `protobuf:"varint,1,opt,name=commits_total,json=commitsTotal,proto3" json:"commits_total,omitempty"`
-	CommitsLanded  int32                  `protobuf:"varint,2,opt,name=commits_landed,json=commitsLanded,proto3" json:"commits_landed,omitempty"`
+	CommitsLanded  int32                  `protobuf:"varint,2,opt,name=commits_landed,json=commitsLanded,proto3" json:"commits_landed,omitempty"` // the commit under test is landed but ungated
 	CurrentSha     string                 `protobuf:"bytes,3,opt,name=current_sha,json=currentSha,proto3" json:"current_sha,omitempty"`
 	CurrentSubject string                 `protobuf:"bytes,4,opt,name=current_subject,json=currentSubject,proto3" json:"current_subject,omitempty"`
 	unknownFields  protoimpl.UnknownFields
@@ -2167,8 +2141,6 @@ func (x *MergeStatusTesting) GetCurrentSubject() string {
 	return ""
 }
 
-// A cherry-pick left a conflict in the target tree. The pick is LEFT IN TREE
-// awaiting a resolution (the workspace's own session first, a human second).
 type MergeStatusConflict struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
 	ConflictedSha     string                 `protobuf:"bytes,1,opt,name=conflicted_sha,json=conflictedSha,proto3" json:"conflicted_sha,omitempty"`
@@ -2237,8 +2209,6 @@ func (x *MergeStatusConflict) GetCommitsLanded() int32 {
 	return 0
 }
 
-// The merge landed and the after-action (the workspace's postprocessing
-// prompt) is being delivered. `prompt` is the recorded prompt text.
 type MergeStatusAfterAction struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Prompt        string                 `protobuf:"bytes,1,opt,name=prompt,proto3" json:"prompt,omitempty"`
@@ -2283,15 +2253,10 @@ func (x *MergeStatusAfterAction) GetPrompt() string {
 	return ""
 }
 
-// TERMINAL: the work is on the target.
 type MergeStatusMerged struct {
-	state        protoimpl.MessageState `protogen:"open.v1"`
-	CommitsTotal int32                  `protobuf:"varint,1,opt,name=commits_total,json=commitsTotal,proto3" json:"commits_total,omitempty"`
-	// Why the after-action did not land, empty when it did (or when there was
-	// none). A FAILED AFTER-ACTION DOES NOT FAIL THE RUN: the commits are on the
-	// target either way, and reporting `failed` would make the status lie about
-	// the tree. The error is carried HERE so it is still visible.
-	AfterActionError string `protobuf:"bytes,2,opt,name=after_action_error,json=afterActionError,proto3" json:"after_action_error,omitempty"`
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	CommitsTotal     int32                  `protobuf:"varint,1,opt,name=commits_total,json=commitsTotal,proto3" json:"commits_total,omitempty"`
+	AfterActionError string                 `protobuf:"bytes,2,opt,name=after_action_error,json=afterActionError,proto3" json:"after_action_error,omitempty"` // empty when the after action succeeded or none ran
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -2340,13 +2305,12 @@ func (x *MergeStatusMerged) GetAfterActionError() string {
 	return ""
 }
 
-// TERMINAL: the run did not land the work.
 type MergeStatusFailed struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
-	Cause          string                 `protobuf:"bytes,1,opt,name=cause,proto3" json:"cause,omitempty"` // the human-readable reason
-	CommitsTotal   int32                  `protobuf:"varint,2,opt,name=commits_total,json=commitsTotal,proto3" json:"commits_total,omitempty"`
-	CommitsLanded  int32                  `protobuf:"varint,3,opt,name=commits_landed,json=commitsLanded,proto3" json:"commits_landed,omitempty"` // what had landed when the run failed
-	FailingSha     string                 `protobuf:"bytes,4,opt,name=failing_sha,json=failingSha,proto3" json:"failing_sha,omitempty"`           // the commit the run died on, when there is one
+	Cause          string                 `protobuf:"bytes,1,opt,name=cause,proto3" json:"cause,omitempty"`
+	CommitsTotal   int32                  `protobuf:"varint,2,opt,name=commits_total,json=commitsTotal,proto3" json:"commits_total,omitempty"` // 0 when planning never completed
+	CommitsLanded  int32                  `protobuf:"varint,3,opt,name=commits_landed,json=commitsLanded,proto3" json:"commits_landed,omitempty"`
+	FailingSha     string                 `protobuf:"bytes,4,opt,name=failing_sha,json=failingSha,proto3" json:"failing_sha,omitempty"` // set only for commit-bound failures
 	FailingSubject string                 `protobuf:"bytes,5,opt,name=failing_subject,json=failingSubject,proto3" json:"failing_subject,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
@@ -4968,13 +4932,7 @@ func (x *PermissionAnswerCmd) GetDenyMessage() string {
 
 type MergeWorkspaceCmd struct {
 	state                    protoimpl.MessageState `protogen:"open.v1"`
-	Handler                  string                 `protobuf:"bytes,1,opt,name=handler,proto3" json:"handler,omitempty"`                                                                      // e.g. "cherry-pick"
 	ConflictResolvedContinue bool                   `protobuf:"varint,2,opt,name=conflict_resolved_continue,json=conflictResolvedContinue,proto3" json:"conflict_resolved_continue,omitempty"` // the resolve-and-continue handoff
-	// Additive (S6): the daemon has no workspace→worktree mapping of its own,
-	// so the frontend supplies the merge geometry with the command.
-	SourceBranch string `protobuf:"bytes,3,opt,name=source_branch,json=sourceBranch,proto3" json:"source_branch,omitempty"`
-	SourceDir    string `protobuf:"bytes,4,opt,name=source_dir,json=sourceDir,proto3" json:"source_dir,omitempty"`
-	TargetDir    string `protobuf:"bytes,5,opt,name=target_dir,json=targetDir,proto3" json:"target_dir,omitempty"`
 	// Additive: the workspace's DISPLAY name, for the `merge/<name>` completion
 	// tag and the daemon's merge logs.
 	//
@@ -5021,39 +4979,11 @@ func (*MergeWorkspaceCmd) Descriptor() ([]byte, []int) {
 	return file_agentshim_frontend_v1_frontend_proto_rawDescGZIP(), []int{43}
 }
 
-func (x *MergeWorkspaceCmd) GetHandler() string {
-	if x != nil {
-		return x.Handler
-	}
-	return ""
-}
-
 func (x *MergeWorkspaceCmd) GetConflictResolvedContinue() bool {
 	if x != nil {
 		return x.ConflictResolvedContinue
 	}
 	return false
-}
-
-func (x *MergeWorkspaceCmd) GetSourceBranch() string {
-	if x != nil {
-		return x.SourceBranch
-	}
-	return ""
-}
-
-func (x *MergeWorkspaceCmd) GetSourceDir() string {
-	if x != nil {
-		return x.SourceDir
-	}
-	return ""
-}
-
-func (x *MergeWorkspaceCmd) GetTargetDir() string {
-	if x != nil {
-		return x.TargetDir
-	}
-	return ""
 }
 
 func (x *MergeWorkspaceCmd) GetWorkspaceName() string {
@@ -7226,16 +7156,12 @@ const file_agentshim_frontend_v1_frontend_proto_rawDesc = "" +
 	"\x15permission_request_id\x18\x01 \x01(\tR\x13permissionRequestId\x12\x14\n" +
 	"\x05allow\x18\x02 \x01(\bR\x05allow\x12<\n" +
 	"\rupdated_input\x18\x03 \x01(\v2\x17.google.protobuf.StructR\fupdatedInput\x12!\n" +
-	"\fdeny_message\x18\x04 \x01(\tR\vdenyMessage\"\xf5\x01\n" +
-	"\x11MergeWorkspaceCmd\x12\x18\n" +
-	"\ahandler\x18\x01 \x01(\tR\ahandler\x12<\n" +
-	"\x1aconflict_resolved_continue\x18\x02 \x01(\bR\x18conflictResolvedContinue\x12#\n" +
-	"\rsource_branch\x18\x03 \x01(\tR\fsourceBranch\x12\x1d\n" +
-	"\n" +
-	"source_dir\x18\x04 \x01(\tR\tsourceDir\x12\x1d\n" +
-	"\n" +
-	"target_dir\x18\x05 \x01(\tR\ttargetDir\x12%\n" +
-	"\x0eworkspace_name\x18\x06 \x01(\tR\rworkspaceName\"\x13\n" +
+	"\fdeny_message\x18\x04 \x01(\tR\vdenyMessage\"\xc0\x01\n" +
+	"\x11MergeWorkspaceCmd\x12<\n" +
+	"\x1aconflict_resolved_continue\x18\x02 \x01(\bR\x18conflictResolvedContinue\x12%\n" +
+	"\x0eworkspace_name\x18\x06 \x01(\tR\rworkspaceNameJ\x04\b\x01\x10\x02J\x04\b\x03\x10\x04J\x04\b\x04\x10\x05J\x04\b\x05\x10\x06R\ahandlerR\rsource_branchR\n" +
+	"source_dirR\n" +
+	"target_dir\"\x13\n" +
 	"\x11CloseWorkspaceCmd\"\x12\n" +
 	"\x10OpenWorkspaceCmd\"&\n" +
 	"\tResyncCmd\x12\x19\n" +

@@ -3,12 +3,11 @@
 // from the map it owns.
 //
 // WHY THIS FILE EXISTS SEPARATELY FROM THE REST OF THE MERGE SUITE. Every other
-// merge e2e file is the FRONTEND: it states the source branch and both
-// directories on the command, because it drives fixture repositories the daemon
-// never created. That is still a supported, explicit caller path. It is not the
-// path Emacs takes any more — Emacs sends a bare request keyed by workspace —
-// and a suite that only ever states the geometry cannot observe whether the
-// daemon can answer for a workspace on its own.
+// merge e2e file records its fixture's geometry through a helper
+// (mergequeue_e2e_test.go mergeCmdFor) and never observes the resolution
+// itself, so nothing there fails if the daemon stops consulting its map. This
+// file asks the map question directly: a RECORDED workspace merges into the
+// recorded target, and an UNRECORDED one is refused rather than guessed at.
 //
 // WHAT IS ACTUALLY PROVED HERE:
 //
@@ -211,7 +210,7 @@ func geometryStateDir(t *testing.T) string {
 func sendBareMerge(t *testing.T, conn *websocket.Conn, requestID, workspace, name string) {
 	t.Helper()
 	writeCmd(t, conn, fmt.Sprintf(
-		`{"requestId":%q,"workspace":%q,"mergeWorkspace":{"handler":"cherry-pick","workspaceName":%q}}`,
+		`{"requestId":%q,"workspace":%q,"mergeWorkspace":{"workspaceName":%q}}`,
 		requestID, workspace, name))
 }
 

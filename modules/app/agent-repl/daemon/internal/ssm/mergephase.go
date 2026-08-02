@@ -37,6 +37,14 @@ var mergeAxisStates = []string{
 	sigMergeNone,
 }
 
+// mergeAxisPlaceholders renders one SQL bind placeholder per merge-axis token.
+// Every query that selects over the axis builds its IN list from here, so a new
+// token can never leave a hand-written placeholder count behind — the two would
+// disagree silently until some workspace resolved the wrong phase.
+func mergeAxisPlaceholders() string {
+	return strings.TrimSuffix(strings.Repeat("?,", len(mergeAxisStates)), ",")
+}
+
 // WorkspacesAtMergePhase reports every workspace whose LATEST merge-axis row
 // is phase, in stable workspace order.
 //
@@ -53,13 +61,10 @@ func (m *Manager) WorkspacesAtMergePhase(phase merge.Phase) ([]string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// The placeholder list is built from mergeAxisStates rather than written out,
-	// so adding a merge token can never leave the two silently out of step.
-	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(mergeAxisStates)), ",")
 	query := `
 WITH merge_rows AS (
   SELECT workspace, state, at FROM workspace_state
-  WHERE state IN (` + placeholders + `)
+  WHERE state IN (` + mergeAxisPlaceholders() + `)
 )
 SELECT workspace FROM merge_rows r
 WHERE r.state = ?
