@@ -90,6 +90,11 @@ type CoordinatorConfig struct {
 	// conflict resolution and the test fix, and a hibernated workspace (which
 	// the idle sweeper produces routinely) would fail all three.
 	Sessions SessionBringUp
+	// Deaths reports whether the merging workspace's newest session was DELETED.
+	// Required, and asked before Sessions: without it the bring-up cannot tell a
+	// recoverable hibernation from a session the user destroyed, so it would
+	// resurrect the second while trying to rehydrate the first.
+	Deaths SessionDeaths
 	// BeforeActions resolves the before_ws_merge action a workspace was created
 	// with. Required: a coordinator without it would silently skip an action the
 	// user asked for at creation, which is indistinguishable from the action
@@ -126,6 +131,7 @@ type QueueCoordinator struct {
 
 	status         StatusSink
 	sessions       SessionBringUp
+	deaths         SessionDeaths
 	beforeActions  BeforeActionSource
 	beforeActionFn BeforeActionRunner
 	now            func() int64
@@ -217,6 +223,8 @@ func NewCoordinator(cfg CoordinatorConfig) (*QueueCoordinator, error) {
 		return nil, fmt.Errorf("merge: Coordinator Status sink is required")
 	case cfg.Sessions == nil:
 		return nil, fmt.Errorf("merge: Coordinator Sessions bring-up is required")
+	case cfg.Deaths == nil:
+		return nil, fmt.Errorf("merge: Coordinator Deaths source is required")
 	case cfg.BeforeActions == nil:
 		return nil, fmt.Errorf("merge: Coordinator BeforeActions source is required")
 	case cfg.BeforeActionRunner == nil:
@@ -241,6 +249,7 @@ func NewCoordinator(cfg CoordinatorConfig) (*QueueCoordinator, error) {
 
 		status:         cfg.Status,
 		sessions:       cfg.Sessions,
+		deaths:         cfg.Deaths,
 		beforeActions:  cfg.BeforeActions,
 		beforeActionFn: cfg.BeforeActionRunner,
 		now:            now,
@@ -764,6 +773,14 @@ func (c *QueueCoordinator) runOne(repo string, req Request) bool {
 	}
 	c.logf("merge: run START {repo=%s ws=%s name=%s run=%s}", repo, req.Workspace, req.Name, driven.Run.RunID())
 
+	// DELETION FIRST, BRING-UP SECOND. A hibernated session and a deleted one
+	// are indistinguishable to EnsureLive — neither is live — and they resolve
+	// in OPPOSITE directions. Asking afterwards would mean asking about a
+	// session the bring-up had already resurrected.
+	if !c.refuseDeletedSession(repo, req, driven) {
+		return c.finish(repo, req, nil)
+	}
+
 	// SESSION FIRST, LEASE SECOND. The merge drives this workspace's own session
 	// (the before-action, a conflict resolution, a test fix), and a bring-up can
 	// be slow — holding the exclusivity lease across it would lock the user out
@@ -835,6 +852,34 @@ func (c *QueueCoordinator) rebuildRun(repo string, req Request) (*RunStatus, err
 	}
 	c.logf("merge: run RESUMED for a replayed entry {repo=%s ws=%s name=%s run=%s}", repo, req.Workspace, req.Name, run.RunID())
 	return run, nil
+}
+
+// refuseDeletedSession fails the run when the workspace's newest session was
+// DELETED, and reports whether the merge may continue.
+//
+// THE CAUSE NAMES THE DELETION, and that wording is the contract rather than a
+// nicety: every terminal cause reaches a user, and "the merge failed" is
+// unactionable where "the session you deleted was the one this merge needed" is
+// a next step. A generic cause here is the defect.
+//
+// A LOOKUP FAILURE ALSO FAILS THE RUN. "The records could not be read" and "the
+// session is fine" differ by exactly the resurrection this refuses, so the
+// unreadable case must not proceed into a bring-up.
+func (c *QueueCoordinator) refuseDeletedSession(repo string, req, driven Request) bool {
+	sessionID, deleted, err := c.deaths.DeletedSession(req.Workspace)
+	if err != nil {
+		c.logf("merge: session-deletion lookup FAILED {repo=%s ws=%s name=%s run=%s}: %v — the merge is failed rather than brought up, because a session that was deleted must not be resurrected to run a merge action",
+			repo, req.Workspace, req.Name, driven.Run.RunID(), err)
+		c.failedRun(driven, "the workspace's session records could not be read: "+err.Error())
+		return false
+	}
+	if !deleted {
+		return true
+	}
+	c.logf("merge: session DELETED, merge REFUSED {repo=%s ws=%s name=%s run=%s session=%s} — bringing it back to run a merge action would resurrect exactly what the user destroyed",
+		repo, req.Workspace, req.Name, driven.Run.RunID(), sessionID)
+	c.failedRun(driven, fmt.Sprintf("the agent session this merge needed was DELETED (session %s), and a deleted session is not brought back to run a merge action", sessionID))
+	return false
 }
 
 // runBeforeAction resolves and delivers the workspace's before_ws_merge action,

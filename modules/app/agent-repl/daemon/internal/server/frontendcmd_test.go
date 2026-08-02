@@ -1076,6 +1076,7 @@ func TestSnapshotProviderCombinesSSMAndSessions(t *testing.T) {
 		Prompts:           &fakePrompts{},
 		Turns:             &fakePrompts{},
 		Lifecycle:         &fakeLifecycle{},
+		SessionDeaths:     stubSessionDeaths{},
 		Sessions:          fakeSessions{views: []*frontendv1.SessionView{{Workspace: "/w", SessionId: "s1", Model: "haiku"}}},
 		SessionCommands:   &SessionCommandBinding{},
 		WorkspaceCreation: newFakeWorkspaceCreation(),
@@ -1133,6 +1134,7 @@ func TestWireAgentShimFeedsTheSsmTransitionIntoProgressWithoutAPhaseCopy(t *test
 		Prompts:           &fakePrompts{},
 		Turns:             &fakePrompts{},
 		Lifecycle:         &fakeLifecycle{},
+		SessionDeaths:     stubSessionDeaths{},
 		SessionCommands:   &SessionCommandBinding{},
 		WorkspaceCreation: newFakeWorkspaceCreation(),
 		MergeLease:        stubMergeLease{},
@@ -1188,6 +1190,7 @@ func TestWireAgentShimRejectsNilWorkspaceCreation(t *testing.T) {
 		Progress:        progress.New(progress.Options{Logf: func(string, ...any) {}}),
 		Prompts:         &fakePrompts{},
 		Lifecycle:       &fakeLifecycle{},
+		SessionDeaths:   stubSessionDeaths{},
 		SessionCommands: &SessionCommandBinding{},
 	})
 	if err == nil || !strings.Contains(err.Error(), "WorkspaceCreation") {
@@ -1253,6 +1256,7 @@ func newTestMergeCoordinator(t *testing.T) *merge.QueueCoordinator {
 		PostMerge: stubPostMergeHook{},
 		Status:    noopSink{},
 		Sessions:  stubSessionBringUp{},
+		Deaths:    stubSessionDeaths{},
 		// No workspace in these harnesses was created with a before-merge action,
 		// which is the common case; the run goes straight to the plan.
 		BeforeActions:      stubBeforeActions{},
@@ -1280,6 +1284,12 @@ func (noopSink) RecordMergeStatus(string, merge.Phase, string, *frontendv1.Merge
 type stubSessionBringUp struct{}
 
 func (stubSessionBringUp) EnsureLive(context.Context, string) error { return nil }
+
+// stubSessionDeaths is the SessionDeaths a unit harness binds: no workspace of
+// a wiring test has ever had a session deleted.
+type stubSessionDeaths struct{}
+
+func (stubSessionDeaths) DeletedSession(string) (string, bool, error) { return "", false, nil }
 
 // stubBeforeActions is the merge.BeforeActionSource a unit harness binds: no
 // workspace here was created with an action.
@@ -1352,6 +1362,7 @@ func TestWireAgentShimMergeTransitionReachesSSM(t *testing.T) {
 		Prompts:           &fakePrompts{},
 		Turns:             &fakePrompts{},
 		Lifecycle:         &fakeLifecycle{},
+		SessionDeaths:     stubSessionDeaths{},
 		SessionCommands:   &SessionCommandBinding{},
 		WorkspaceCreation: newFakeWorkspaceCreation(),
 		MergeLease:        stubMergeLease{},
