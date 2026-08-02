@@ -110,6 +110,90 @@ func TestABringUpFailurePublishesItsCause(t *testing.T) {
 	}
 }
 
+// --- the deleted session -------------------------------------------------
+
+// THE GUARANTEE: a workspace whose newest session was DELETED fails the run
+// with a cause that SAYS SO, and its session is never brought up. Rehydrating
+// it would resurrect exactly what the user destroyed.
+func TestAMergeOfADeletedSessionFailsWithoutABringUp(t *testing.T) {
+	// Arrange - the registry reports the newest session terminal by deletion.
+	brought := &fakeSessionBringUp{}
+	h := newHarnessWith(t, harnessOpts{
+		deaths:   fakeSessionDeaths{sessionID: "sess-gone", deleted: true},
+		sessions: brought,
+	})
+
+	// Act.
+	if _, err := h.coord.Enqueue(context.Background(), testRequest("a")); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+
+	// Assert.
+	waitForPhase(t, h, PhaseMergeFailed)
+	if calls := brought.calls(); len(calls) != 0 {
+		t.Fatalf("the run brought up %v for a DELETED session: the merge resurrected what the user destroyed", calls)
+	}
+}
+
+// The failure's PUBLISHED CAUSE names the deletion, because "the merge failed"
+// is unactionable where "the session you deleted was the one this merge needed"
+// is a next step.
+func TestADeletedSessionFailurePublishesACauseNamingTheDeletion(t *testing.T) {
+	// Arrange.
+	h := newHarnessWith(t, harnessOpts{deaths: fakeSessionDeaths{sessionID: "sess-gone", deleted: true}})
+
+	// Act.
+	if _, err := h.coord.Enqueue(context.Background(), testRequest("a")); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	waitForPhase(t, h, PhaseMergeFailed)
+
+	// Assert.
+	status := lastStatusOfPhase(t, h, func(s *frontendv1.MergeStatus) bool { return s.GetFailed() != nil })
+	if !strings.Contains(strings.ToLower(status.GetFailed().GetCause()), "delet") {
+		t.Fatalf("failed cause = %q, which never says the session was DELETED", status.GetFailed().GetCause())
+	}
+}
+
+// AN UNREADABLE RECORD IS NOT A BENIGN ANSWER: the run fails rather than
+// proceeding into a bring-up that might resurrect a deleted session.
+func TestAnUnreadableDeletionRecordFailsTheRun(t *testing.T) {
+	// Arrange.
+	h := newHarnessWith(t, harnessOpts{deaths: fakeSessionDeaths{err: sentinelError("registry unreadable")}})
+
+	// Act.
+	if _, err := h.coord.Enqueue(context.Background(), testRequest("a")); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+
+	// Assert.
+	tr := waitForPhase(t, h, PhaseMergeFailed)
+	if !strings.Contains(tr.cause, "registry unreadable") {
+		t.Fatalf("merge_failed cause = %q, want it to name the unreadable record", tr.cause)
+	}
+}
+
+// A LIVE OR MERELY HIBERNATED SESSION IS NOT A DELETION: the run proceeds to
+// the bring-up, which is what keeps an idle workspace mergeable.
+func TestAWorkspaceWithNoDeletedSessionProceedsToTheBringUp(t *testing.T) {
+	// Arrange.
+	brought := make(chan string, 1)
+	h := newHarnessWith(t, harnessOpts{
+		deaths:   fakeSessionDeaths{},
+		sessions: &fakeSessionBringUp{done: brought},
+	})
+
+	// Act.
+	if _, err := h.coord.Enqueue(context.Background(), testRequest("a")); err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+
+	// Assert.
+	if got := <-brought; got != "/ws/a" {
+		t.Fatalf("brought up %q, want /ws/a", got)
+	}
+}
+
 // --- the before-action ---------------------------------------------------
 
 // THE COMMON CASE: a workspace with no recorded action goes straight to the

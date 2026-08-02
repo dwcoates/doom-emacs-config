@@ -701,12 +701,15 @@ func main() {
 		// conflict-resolution path (the controller implements
 		// merge.ConflictResolver), so the session a merge drives is necessarily
 		// the session the user prompts.
-		Prompts:           controller,
-		Turns:             controller,
-		Health:            controller,
-		Restarts:          controller,
-		DaemonHealth:      ready,
-		Lifecycle:         opener,
+		Prompts:      controller,
+		Turns:        controller,
+		Health:       controller,
+		Restarts:     controller,
+		DaemonHealth: ready,
+		Lifecycle:    opener,
+		// The registry's own record of a deliberate deletion, exposed so a merge
+		// can tell a hibernated session (rehydrate) from a deleted one (refuse).
+		SessionDeaths:     server.RegistrySessionDeaths{Reg: sessionRegistry},
 		Sessions:          registrySessions{reg: sessionRegistry, controller: controller, modelCatalogs: modelCatalogs, logf: legacyLog},
 		Inits:             controller,
 		Catalogs:          controller,

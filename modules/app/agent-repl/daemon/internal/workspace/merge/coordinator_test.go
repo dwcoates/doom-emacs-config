@@ -429,6 +429,8 @@ type harnessOpts struct {
 	phases PhaseSource
 	// sessions replaces the always-succeeding bring-up.
 	sessions SessionBringUp
+	// deaths replaces the nothing-was-deleted source.
+	deaths SessionDeaths
 	// beforeActions replaces the no-action-recorded source.
 	beforeActions BeforeActionSource
 	// beforeRunner replaces the always-succeeding action runner.
@@ -461,6 +463,18 @@ func (b *fakeSessionBringUp) calls() []string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return append([]string(nil), b.got...)
+}
+
+// fakeSessionDeaths is the merge.SessionDeaths double: it reports one canned
+// answer for every workspace.
+type fakeSessionDeaths struct {
+	sessionID string
+	deleted   bool
+	err       error
+}
+
+func (d fakeSessionDeaths) DeletedSession(string) (string, bool, error) {
+	return d.sessionID, d.deleted, d.err
 }
 
 // fakeBeforeActions is the merge.BeforeActionSource double.
@@ -525,6 +539,10 @@ func newHarnessWith(t *testing.T, opts harnessOpts) *harness {
 	if sessions == nil {
 		sessions = &fakeSessionBringUp{}
 	}
+	deaths := opts.deaths
+	if deaths == nil {
+		deaths = fakeSessionDeaths{}
+	}
 	beforeActions := opts.beforeActions
 	if beforeActions == nil {
 		beforeActions = fakeBeforeActions{}
@@ -546,6 +564,7 @@ func newHarnessWith(t *testing.T, opts harnessOpts) *harness {
 		PostMerge:    hook,
 		Status:       sink,
 		Sessions:     sessions,
+		Deaths:       deaths,
 		// The default harness workspace carries NO before-action, which is the
 		// common case; a test that wants one overrides the source.
 		BeforeActions:      beforeActions,
@@ -591,6 +610,7 @@ func TestNewCoordinatorRequiresEveryDependency(t *testing.T) {
 			PostMerge:          newAutoPostMergeHook(1),
 			Status:             newSyncSink(1),
 			Sessions:           &fakeSessionBringUp{},
+			Deaths:             fakeSessionDeaths{},
 			BeforeActions:      fakeBeforeActions{},
 			BeforeActionRunner: &fakeBeforeActionRunner{},
 		}
@@ -612,6 +632,7 @@ func TestNewCoordinatorRequiresEveryDependency(t *testing.T) {
 		{name: "no test resolver", mutate: func(c *CoordinatorConfig) { c.TestResolver = nil }, wantErr: true},
 		{name: "no status sink", mutate: func(c *CoordinatorConfig) { c.Status = nil }, wantErr: true},
 		{name: "no session bring-up", mutate: func(c *CoordinatorConfig) { c.Sessions = nil }, wantErr: true},
+		{name: "no session-deaths source", mutate: func(c *CoordinatorConfig) { c.Deaths = nil }, wantErr: true},
 		{name: "no before-action source", mutate: func(c *CoordinatorConfig) { c.BeforeActions = nil }, wantErr: true},
 		{name: "no before-action runner", mutate: func(c *CoordinatorConfig) { c.BeforeActionRunner = nil }, wantErr: true},
 	}
@@ -686,7 +707,7 @@ func TestEnqueueSurfacesAPublishFailure(t *testing.T) {
 		Logf: t.Logf, Sink: newSyncSink(1), Queue: failingQueue{err: sentinelError("disk full")},
 		Phases: fakePhases{}, Keyer: fakeKeyer{}, Picker: picker, Lease: newFakeLease(1), Resolver: newFakeResolver(1),
 		TestResolver: newFakeTestFailureResolver(1), PostMerge: newAutoPostMergeHook(1),
-		Status: newSyncSink(1), Sessions: &fakeSessionBringUp{},
+		Status: newSyncSink(1), Sessions: &fakeSessionBringUp{}, Deaths: fakeSessionDeaths{},
 		BeforeActions: fakeBeforeActions{}, BeforeActionRunner: &fakeBeforeActionRunner{},
 	})
 	if err != nil {
@@ -1581,7 +1602,7 @@ func TestCloseRetainsAParkedConflictForTheNextBoot(t *testing.T) {
 		Logf: t.Logf, Sink: newSyncSink(4), Queue: q,
 		Phases: fakePhases{}, Keyer: fakeKeyer{}, Picker: picker, Lease: lease, Resolver: resolver,
 		TestResolver: newFakeTestFailureResolver(4), PostMerge: newAutoPostMergeHook(4),
-		Status: newSyncSink(4), Sessions: &fakeSessionBringUp{},
+		Status: newSyncSink(4), Sessions: &fakeSessionBringUp{}, Deaths: fakeSessionDeaths{},
 		BeforeActions: fakeBeforeActions{}, BeforeActionRunner: &fakeBeforeActionRunner{},
 	})
 	if err != nil {

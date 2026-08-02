@@ -627,13 +627,20 @@ func newUDSHarness(t *testing.T, options ...harnessOption) *e2eHarness {
 	agentShim, err := server.WireAgentShim(server.AgentShimConfig{
 		// The real resolver over the real registry: an e2e that faked this
 		// would not exercise the daemon actually deciding what to resume.
-		Resumes:           &server.ConversationResolver{Reg: reg, Logf: t.Logf},
-		SSM:               ssmMgr,
-		Progress:          progressMgr,
-		Prompts:           controller,
-		Turns:             controller,
-		Health:            controller,
-		Lifecycle:         stubLifecycle{},
+		Resumes:  &server.ConversationResolver{Reg: reg, Logf: t.Logf},
+		SSM:      ssmMgr,
+		Progress: progressMgr,
+		Prompts:  controller,
+		Turns:    controller,
+		Health:   controller,
+		// THE PRODUCTION LIFECYCLE, not a stub. A merge brings its workspace's
+		// session up through this seam, and a no-op Open would report a
+		// hibernated workspace live without ever rehydrating it — so the merge
+		// would go on to submit its action's turn into a session that is not
+		// there. The bring-up must be the same one an open_workspace command
+		// performs, which is exactly what WorkspaceOpener is.
+		Lifecycle:         &server.WorkspaceOpener{Reg: reg, Ensurer: controller, Logf: t.Logf},
+		SessionDeaths:     server.RegistrySessionDeaths{Reg: reg},
 		Resyncer:          controller,
 		Catalogs:          controller,
 		SessionCommands:   binding,

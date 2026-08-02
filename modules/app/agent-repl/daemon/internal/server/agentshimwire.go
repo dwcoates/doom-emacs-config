@@ -63,6 +63,11 @@ type AgentShimConfig struct {
 	DaemonHealth DaemonHealthChecker
 	// Lifecycle closes/opens workspaces (the Emacs workspace-command channel).
 	Lifecycle WorkspaceLifecycle
+	// SessionDeaths reports whether a workspace's newest session was DELETED,
+	// which is the one thing Lifecycle's bring-up cannot tell from a
+	// hibernation. Required: without it a merge of a deleted workspace
+	// resurrects the very session the user destroyed. See sessiondeaths.go.
+	SessionDeaths SessionDeaths
 	// Sessions supplies SessionView metadata (model/slug/title) for snapshots.
 	Sessions SessionMetaSource
 	// Inits supplies the retained SystemInit of every live session as
@@ -298,6 +303,21 @@ func (b mergeSessionBringUp) EnsureLive(ctx context.Context, ws string) error {
 
 var _ merge.SessionBringUp = mergeSessionBringUp{}
 
+// mergeSessionDeaths adapts the registry's deletion fact to merge.SessionDeaths.
+type mergeSessionDeaths struct{ deaths SessionDeaths }
+
+func (d mergeSessionDeaths) DeletedSession(ws string) (string, bool, error) {
+	if d.deaths == nil {
+		// Never the benign answer. A merge decides whether to bring a session up
+		// on this, and "no source" reported as "not deleted" resurrects exactly
+		// the session the user destroyed.
+		return "", false, fmt.Errorf("server: no session-deaths source is wired, so the deletion state of workspace %q cannot be read for its merge", ws)
+	}
+	return d.deaths.DeletedSession(ws)
+}
+
+var _ merge.SessionDeaths = mergeSessionDeaths{}
+
 var _ merge.ConflictResolver = mergeConflictResolver{}
 
 // mergeTestFailureResolver adapts the PromptRouter to merge.TestFailureResolver,
@@ -349,6 +369,8 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 		return nil, fmt.Errorf("server: WireAgentShim needs a merge.Lease (without it a cherry-pick would run into a session the user is still prompting)")
 	case cfg.MergeQueue == nil:
 		return nil, fmt.Errorf("server: WireAgentShim needs a merge.Queue (without it the merge queue is not durable and a self-merge's daemon bounce loses it)")
+	case cfg.SessionDeaths == nil:
+		return nil, fmt.Errorf("server: WireAgentShim needs a SessionDeaths source (without it a merge cannot tell a hibernated session from one the user deleted, and would resurrect the second while rehydrating the first)")
 	case cfg.Prompts == nil:
 		return nil, fmt.Errorf("server: WireAgentShim needs a PromptRouter (it is both the frontend's submit path and merge.Coordinator's conflict-resolution path)")
 	}
@@ -400,6 +422,9 @@ func WireAgentShim(cfg AgentShimConfig) (*AgentShim, error) {
 		// progress beneath it cannot come from two different records.
 		Status:   mergeSink{mgr},
 		Sessions: mergeSessionBringUp{lifecycle: cfg.Lifecycle},
+		// Asked BEFORE the bring-up: a deleted session must never be spawned
+		// back to run a merge action.
+		Deaths: mergeSessionDeaths{deaths: cfg.SessionDeaths},
 		// The before-action is a creation-time fact, so it is resolved from THE
 		// records the create commands wrote — the same ones the after-action's
 		// prompt comes out of.

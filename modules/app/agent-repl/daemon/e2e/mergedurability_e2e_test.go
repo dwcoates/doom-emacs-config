@@ -165,6 +165,7 @@ func bootMergeDaemon(t *testing.T, stateFile string) *mergeBoot {
 		Turns:             controller,
 		Health:            controller,
 		Lifecycle:         stubLifecycle{},
+		SessionDeaths:     server.RegistrySessionDeaths{Reg: reg},
 		Resyncer:          controller,
 		Catalogs:          controller,
 		SessionCommands:   binding,
