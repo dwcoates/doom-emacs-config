@@ -14,7 +14,7 @@
  * whether anything visible changed; the caller schedules the render.
  */
 import type { CounterEntry } from "./counter-menu.js";
-import type { ErrorClass, RuntimeFault } from "./frontend-proto.js";
+import type { ErrorClass, MergeStatus, RuntimeFault } from "./frontend-proto.js";
 import type {
   AdapterEffect,
   ProgressInput,
@@ -28,6 +28,7 @@ import type {
   WebSessionStatus,
   WorkspaceStatusInput,
 } from "./state-adapter.js";
+import { mergeStatusLogValue } from "./state-adapter.js";
 import { applyStreamDelta, blockKey, insertBySeq, settleStreamedBlock } from "./streaming.js";
 import {
   AsyncSource,
@@ -508,6 +509,17 @@ export interface StoreState {
    * only possible outcome is a refusal.
    */
   mergeLeaseHeld: boolean;
+  /**
+   * THE structured merge status of the run touching this workspace, or null
+   * when none does.
+   *
+   * It retires nothing yet: the flat queue pair above still arrives and still
+   * renders. What it adds is everything a phase word cannot say — how many
+   * commits of how many have landed and which one is in hand, which commit
+   * conflicted, which pre/post-merge prompt the daemon is running, and why a
+   * run stopped.
+   */
+  mergeStatus: MergeStatus | null;
   /** Monotonic SSM revision of the adopted WorkspaceState. */
   workspaceStateAtMs: number;
   /** Store sequence that caused the adopted state, or zero for daemon-local. */
@@ -545,6 +557,7 @@ function initialState(): StoreState {
     mergeQueuePosition: 0,
     mergeQueueDepth: 0,
     mergeLeaseHeld: false,
+    mergeStatus: null,
     workspaceStateAtMs: 0,
     workspaceStateCauseSeq: 0,
   };
@@ -566,6 +579,12 @@ function workspaceStateFingerprint(ws: WorkspaceStatusInput): string {
     mergeQueuePosition: ws.mergeQueuePosition,
     mergeQueueDepth: ws.mergeQueueDepth,
     mergeLeaseHeld: ws.mergeLeaseHeld,
+    // The structured status is PART of the revision's identity. Its
+    // `updatedAtMs` ticks once per landed commit, and each tick arrives as its
+    // own WorkspaceState revision — leaving it out would fingerprint two
+    // genuinely different merge readings identically, so the equal-revision
+    // conflict check could no longer tell a real duplicate from a tick.
+    mergeStatus: ws.mergeStatus,
   });
 }
 
@@ -823,6 +842,7 @@ export class ConversationStore {
       s.turnInFlight ||
       s.mergeLeaseHeld ||
       s.mergeQueuePosition > 0 ||
+      s.mergeStatus !== null ||
       this.progress !== null;
     this.log(
       "warn",
@@ -842,6 +862,7 @@ export class ConversationStore {
     s.mergeQueuePosition = 0;
     s.mergeQueueDepth = 0;
     s.mergeLeaseHeld = false;
+    s.mergeStatus = null;
     s.turnInFlight = false;
     s.turnStartedAt = null;
     this.progress = null;
@@ -909,6 +930,7 @@ export class ConversationStore {
       mergeQueuePosition: this.state.mergeQueuePosition,
       mergeQueueDepth: this.state.mergeQueueDepth,
       mergeLeaseHeld: this.state.mergeLeaseHeld,
+      mergeStatus: this.state.mergeStatus,
     });
   }
 
@@ -951,6 +973,7 @@ export class ConversationStore {
     s.mergeQueuePosition = ws.mergeQueuePosition;
     s.mergeQueueDepth = ws.mergeQueueDepth;
     s.mergeLeaseHeld = ws.mergeLeaseHeld;
+    s.mergeStatus = ws.mergeStatus;
     s.workspaceStateAtMs = ws.atMs;
     s.workspaceStateCauseSeq = ws.causeSeq;
     const wasActive = s.turnInFlight;
@@ -969,7 +992,8 @@ export class ConversationStore {
         `generation=${ws.controllerGenerationId || "none"} ` +
         `turn_active=${previousActive}->${ws.turnActive} live_tasks=${ws.liveTaskCount} ` +
         `faults=${ws.activeFaults.map((fault) => `${fault.component}/${fault.faultType}`).join(",") || "none"} ` +
-        `merge_phase=${ws.mergePhase} cause_kind=${ws.causeKind} ` +
+        `merge_phase=${ws.mergePhase} ` +
+        `merge_status=${mergeStatusLogValue(ws.mergeStatus)} cause_kind=${ws.causeKind} ` +
         `cause_seq=${ws.causeSeq} at_ms=${ws.atMs}`,
     );
     return true;

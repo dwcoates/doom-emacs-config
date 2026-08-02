@@ -17,6 +17,8 @@ import {
 } from "../src/store.js";
 import type {
   AdapterEffect,
+  MergeStatus,
+  MergeStatusCherryPicking,
   ProgressInput,
   QueueInput,
   SessionViewInput,
@@ -54,6 +56,7 @@ function workspaceEffect(over: Partial<WorkspaceStatusInput> = {}): AdapterEffec
       mergeQueuePosition: 0,
       mergeQueueDepth: 0,
       mergeLeaseHeld: false,
+      mergeStatus: null,
       ...over,
     },
   };
@@ -220,6 +223,93 @@ describe("ingest workspace-state", () => {
     expect(store.state.mergeQueuePosition).toBe(0);
   });
 
+  // --- the structured merge status -----------------------------------------
+
+  /** A cherry-picking merge status, defaulted to the first of four commits. */
+  function pickingStatus(over: Partial<MergeStatusCherryPicking> = {}): MergeStatus {
+    return {
+      runId: "run-1",
+      phaseStartedAtMs: 900,
+      updatedAtMs: 1000,
+      phase: {
+        case: "cherryPicking",
+        value: {
+          commitsTotal: 4,
+          commitsLanded: 1,
+          currentSha: "abc1234",
+          currentSubject: "fix the thing",
+          ...over,
+        },
+      },
+    };
+  }
+
+  it("adopts the structured merge status beside the phase word", () => {
+    // Arrange
+    const store = new ConversationStore();
+    // Act
+    store.ingest([workspaceEffect({ state: "merging", mergeStatus: pickingStatus() })]);
+    // Assert
+    expect(store.state.mergeStatus?.phase).toEqual({
+      case: "cherryPicking",
+      value: { commitsTotal: 4, commitsLanded: 1, currentSha: "abc1234", currentSubject: "fix the thing" },
+    });
+  });
+
+  it("ingests a per-commit tick at a new revision without a conflict violation", () => {
+    // Arrange — the run's first commit has landed at revision 1000.
+    const store = new ConversationStore();
+    store.ingest([workspaceEffect({ state: "merging", mergeStatus: pickingStatus() })]);
+    // Act — the second lands, which is a NEW revision of the same run whose
+    // only moved fields live inside the merge status.
+    store.ingest([
+      workspaceEffect({
+        state: "merging",
+        atMs: 1001,
+        mergeStatus: {
+          ...pickingStatus({ commitsLanded: 2, currentSha: "def5678", currentSubject: "next one" }),
+          updatedAtMs: 1001,
+        },
+      }),
+    ]);
+    // Assert
+    expect(store.state.mergeStatus?.phase.value).toMatchObject({ commitsLanded: 2 });
+  });
+
+  it("rejects two different merge statuses claiming the SAME revision", () => {
+    // Arrange — the fingerprint must include the merge status, or a genuinely
+    // conflicting duplicate would fingerprint identically to the state held.
+    const store = new ConversationStore();
+    store.ingest([workspaceEffect({ state: "merging", mergeStatus: pickingStatus() })]);
+    // Act / Assert — same atMs, different landed count.
+    expect(() =>
+      store.ingest([
+        workspaceEffect({ state: "merging", mergeStatus: pickingStatus({ commitsLanded: 3 }) }),
+      ]),
+    ).toThrow(/revision conflicted/);
+  });
+
+  it("drops the merge status when frontend state is invalidated", () => {
+    // Arrange — a status that outlived its freshness lease would keep a merge
+    // on screen that nothing current claims.
+    const store = new ConversationStore();
+    store.ingest([workspaceEffect({ state: "merging", mergeStatus: pickingStatus() })]);
+    // Act
+    store.invalidateFrontendState("websocket_disconnected");
+    // Assert
+    expect(store.state.mergeStatus).toBeNull();
+  });
+
+  it("reports a change when invalidation clears a held merge status", () => {
+    // Arrange
+    const store = new ConversationStore();
+    store.ingest([workspaceEffect({ state: "merging", mergeStatus: pickingStatus() })]);
+    // Act
+    const changed = store.invalidateFrontendState("lease_expired");
+    // Assert
+    expect(changed).toBe(true);
+  });
+
   it("clears turnInFlight when turnActive is false", () => {
     // Arrange
     const store = new ConversationStore();
@@ -314,7 +404,7 @@ describe("ingest workspace-state", () => {
       expect.stringContaining(
         "state=none->ready connectivity=none->operational status=none->thinking generation=g1 " +
           "turn_active=false->false live_tasks=0 faults=none " +
-          "merge_phase= cause_kind=session_started cause_seq=7 at_ms=1234",
+          "merge_phase= merge_status=none cause_kind=session_started cause_seq=7 at_ms=1234",
       ),
     ]);
   });

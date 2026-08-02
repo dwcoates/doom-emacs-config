@@ -72,6 +72,7 @@ import {
   type ConversationItemArm,
   type ConversationItemFrame,
   type ErrorClass,
+  type MergeStatus,
   type SystemFailure,
   type FrontendFrame,
   type HeartbeatView,
@@ -168,7 +169,36 @@ export interface WorkspaceStatusInput {
    * leave and come back as an error.
    */
   mergeLeaseHeld: boolean;
+  /**
+   * THE structured merge status (`WorkspaceState.merge_status`), or null when
+   * this workspace has no merge run to report.
+   *
+   * It rides the SAME revisioned message as the phase and the flat queue pair
+   * above, for the reason those fields' own notes give: a merge fact carried in
+   * a second message is a merge fact kept in two copies, and the stale copy is
+   * the one that reads "picking 2 of 4" against a run that already settled.
+   *
+   * The flat trio stays beside it and stays rendered until the daemon's final
+   * cutover; this only ADDS the facts a phase word cannot carry.
+   */
+  mergeStatus: MergeStatus | null;
 }
+
+/**
+ * The merge-status wire shapes, re-exported so the render layer types against
+ * the adapter's vocabulary rather than reaching past it into the decoder.
+ */
+export type {
+  MergeStatus,
+  MergeStatusEnqueued,
+  MergeStatusBeforeAction,
+  MergeStatusCherryPicking,
+  MergeStatusTesting,
+  MergeStatusConflict,
+  MergeStatusAfterAction,
+  MergeStatusMerged,
+  MergeStatusFailed,
+} from "./frontend-proto.js";
 
 /** SessionView → topbar / session-info input. */
 export interface SessionViewInput {
@@ -517,6 +547,7 @@ export class StateAdapter {
         `live_tasks=${String(ws.liveTaskCount)} merge_phase=${ws.mergePhase} ` +
         `merge_queue=${String(ws.mergeQueuePosition)}/${String(ws.mergeQueueDepth)} ` +
         `merge_lease_held=${ws.mergeLeaseHeld} ` +
+        `merge_status=${mergeStatusLogValue(ws.mergeStatus ?? null)} ` +
         `faults=${ws.activeFaults.map((fault) => `${fault.component}/${fault.faultType}`).join(",") || "none"} ` +
         `cause_kind=${ws.causeKind} cause_seq=${String(ws.causeSeq)} at_ms=${String(ws.atMs)}`,
     );
@@ -539,6 +570,9 @@ export class StateAdapter {
         mergeQueuePosition: Number(ws.mergeQueuePosition),
         mergeQueueDepth: Number(ws.mergeQueueDepth),
         mergeLeaseHeld: ws.mergeLeaseHeld,
+        // Absent on the wire is "no merge run", which every consumer tests as
+        // one null check rather than by interrogating a phase arm.
+        mergeStatus: ws.mergeStatus ?? null,
       },
     };
   }
@@ -803,6 +837,18 @@ const RENDER_STATE_KEYWORD: Record<RenderState, WebRenderState | null> = {
   [RenderState.SEVERED]: "severed",
   [RenderState.HIBERNATED]: "hibernated",
 };
+
+/**
+ * A merge status as ONE log field: `<phase>/<runId>@<updatedAtMs>`, or `none`.
+ *
+ * The phase and the run id are what correlate a record with the daemon's merge
+ * run; `updatedAtMs` is what distinguishes the per-commit ticks that arrive as
+ * separate revisions of that same run.
+ */
+export function mergeStatusLogValue(status: MergeStatus | null): string {
+  if (status === null) return "none";
+  return `${status.phase.case}/${status.runId}@${String(status.updatedAtMs)}`;
+}
 
 function renderStateKeyword(state: RenderState): WebRenderState {
   const kw = RENDER_STATE_KEYWORD[state];
