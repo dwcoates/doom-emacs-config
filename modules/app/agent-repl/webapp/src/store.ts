@@ -495,14 +495,6 @@ export interface StoreState {
   /** Current generation's active explanatory fault windows. */
   activeFaults: RuntimeFault[];
   /**
-   * This workspace's 1-based place in its repository's merge queue, 0 when it
-   * is not enqueued. Read by the footer beside the phase word: `merge_queued`
-   * alone cannot say whether the merge is next or fifth in line.
-   */
-  mergeQueuePosition: number;
-  /** Total entries on that queue, 0 when nothing is enqueued. */
-  mergeQueueDepth: number;
-  /**
    * Whether the merge coordinator holds the exclusivity lease on this
    * workspace's shim. The composer gates on it: the daemon refuses user prompts
    * while it is held, so a composer that stayed live would send prompts whose
@@ -511,13 +503,13 @@ export interface StoreState {
   mergeLeaseHeld: boolean;
   /**
    * THE structured merge status of the run touching this workspace, or null
-   * when none does.
+   * when none does. It is the ONLY merge-run projection the store keeps — the
+   * flat phase/queue trio it replaced is retired from the wire.
    *
-   * It retires nothing yet: the flat queue pair above still arrives and still
-   * renders. What it adds is everything a phase word cannot say — how many
-   * commits of how many have landed and which one is in hand, which commit
-   * conflicted, which pre/post-merge prompt the daemon is running, and why a
-   * run stopped.
+   * It carries everything a phase word could not say: how many commits of how
+   * many have landed and which one is in hand, which commit conflicted, which
+   * pre/post-merge prompt the daemon is running, why a run stopped, and the
+   * queue place the run was ADMITTED at.
    */
   mergeStatus: MergeStatus | null;
   /** Monotonic SSM revision of the adopted WorkspaceState. */
@@ -554,8 +546,6 @@ function initialState(): StoreState {
     sessionStatus: null,
     controllerGenerationId: "",
     activeFaults: [],
-    mergeQueuePosition: 0,
-    mergeQueueDepth: 0,
     mergeLeaseHeld: false,
     mergeStatus: null,
     workspaceStateAtMs: 0,
@@ -576,8 +566,6 @@ function workspaceStateFingerprint(ws: WorkspaceStatusInput): string {
     controllerGenerationId: ws.controllerGenerationId,
     causeSeq: ws.causeSeq,
     activeFaults: ws.activeFaults,
-    mergeQueuePosition: ws.mergeQueuePosition,
-    mergeQueueDepth: ws.mergeQueueDepth,
     mergeLeaseHeld: ws.mergeLeaseHeld,
     // The structured status is PART of the revision's identity. Its
     // `updatedAtMs` ticks once per landed commit, and each tick arrives as its
@@ -841,7 +829,6 @@ export class ConversationStore {
       s.sessionStatus !== null ||
       s.turnInFlight ||
       s.mergeLeaseHeld ||
-      s.mergeQueuePosition > 0 ||
       s.mergeStatus !== null ||
       this.progress !== null;
     this.log(
@@ -857,10 +844,8 @@ export class ConversationStore {
     s.controllerGenerationId = "";
     s.activeFaults = [];
     // The merge projections are WorkspaceState facts like any other: a stale
-    // lease must not leave the composer gated (or a queue place on screen)
+    // lease must not leave the composer gated (or a run's progress on screen)
     // after the state that claimed it stopped being current.
-    s.mergeQueuePosition = 0;
-    s.mergeQueueDepth = 0;
     s.mergeLeaseHeld = false;
     s.mergeStatus = null;
     s.turnInFlight = false;
@@ -927,8 +912,6 @@ export class ConversationStore {
       controllerGenerationId: this.state.controllerGenerationId,
       causeSeq: this.state.workspaceStateCauseSeq,
       activeFaults: this.state.activeFaults,
-      mergeQueuePosition: this.state.mergeQueuePosition,
-      mergeQueueDepth: this.state.mergeQueueDepth,
       mergeLeaseHeld: this.state.mergeLeaseHeld,
       mergeStatus: this.state.mergeStatus,
     });
@@ -968,10 +951,8 @@ export class ConversationStore {
     s.sessionStatus = ws.sessionStatus;
     s.controllerGenerationId = ws.controllerGenerationId;
     s.activeFaults = ws.activeFaults;
-    // Merge-queue facts ride the SAME revisioned message as the phase, so the
-    // footer's "merge queued 2/3" and its phase word can never disagree.
-    s.mergeQueuePosition = ws.mergeQueuePosition;
-    s.mergeQueueDepth = ws.mergeQueueDepth;
+    // The merge facts ride the SAME revisioned message as the phase, so the
+    // footer's merge chip and its phase word can never disagree.
     s.mergeLeaseHeld = ws.mergeLeaseHeld;
     s.mergeStatus = ws.mergeStatus;
     s.workspaceStateAtMs = ws.atMs;
@@ -992,7 +973,7 @@ export class ConversationStore {
         `generation=${ws.controllerGenerationId || "none"} ` +
         `turn_active=${previousActive}->${ws.turnActive} live_tasks=${ws.liveTaskCount} ` +
         `faults=${ws.activeFaults.map((fault) => `${fault.component}/${fault.faultType}`).join(",") || "none"} ` +
-        `merge_phase=${ws.mergePhase} ` +
+        `merge_lease_held=${ws.mergeLeaseHeld} ` +
         `merge_status=${mergeStatusLogValue(ws.mergeStatus)} cause_kind=${ws.causeKind} ` +
         `cause_seq=${ws.causeSeq} at_ms=${ws.atMs}`,
     );

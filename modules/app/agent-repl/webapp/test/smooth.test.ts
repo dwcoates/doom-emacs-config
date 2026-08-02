@@ -71,8 +71,6 @@ function state(items: ConversationItem[]): StoreState {
     controllerGenerationId: "",
     activeFaults: [],
     workspaceStateAtMs: 0,
-    mergeQueuePosition: 0,
-    mergeQueueDepth: 0,
     mergeLeaseHeld: false,
     mergeStatus: null,
     workspaceStateCauseSeq: 0,

@@ -202,7 +202,6 @@ export interface WorkspaceState {
   state: RenderState;
   turnActive: boolean;
   liveTaskCount: number;
-  mergePhase: string;
   causeKind: string;
   causeSeq: number;
   atMs: number;
@@ -210,16 +209,6 @@ export interface WorkspaceState {
   status: SessionStatus;
   controllerGenerationId: string;
   activeFaults: RuntimeFault[];
-  /**
-   * MERGE-QUEUE facts. `mergePhase` says WHAT this workspace's merge is doing;
-   * these say WHERE it sits among the other workspaces contending for the same
-   * REPOSITORY, which no per-workspace phase can carry.
-   *
-   * 1-based position; 0 means this workspace is not enqueued at all.
-   */
-  mergeQueuePosition: number;
-  /** Total entries on this repository's queue (0 when nothing is enqueued). */
-  mergeQueueDepth: number;
   /**
    * Whether the merge coordinator holds the exclusivity lease on this
    * workspace's shim. While held the merge OWNS the session: the daemon refuses
@@ -239,8 +228,10 @@ export interface WorkspaceState {
    * THE merge run's live progress, or `undefined` when this workspace has no
    * merge to report.
    *
-   * It supersedes `mergePhase` / `mergeQueuePosition` / `mergeQueueDepth`,
-   * which the daemon keeps stamping until the final cutover.
+   * It is the ONLY merge-run surface on this message. The flat
+   * `mergePhase` / `mergeQueuePosition` / `mergeQueueDepth` trio it replaced is
+   * reserved on the wire and gone from here: a frame carrying it is a frame the
+   * decoder rejects as unknown, not one it silently prefers a field of.
    */
   mergeStatus?: MergeStatus;
 }
@@ -929,7 +920,6 @@ const WORKSPACE_STATE_KEYS = new Set([
   "state",
   "turnActive",
   "liveTaskCount",
-  "mergePhase",
   "causeKind",
   "causeSeq",
   "atMs",
@@ -937,8 +927,6 @@ const WORKSPACE_STATE_KEYS = new Set([
   "status",
   "controllerGenerationId",
   "activeFaults",
-  "mergeQueuePosition",
-  "mergeQueueDepth",
   "mergeLeaseHeld",
   "mergedAtMs",
   "mergeStatus",
@@ -952,7 +940,6 @@ function decodeWorkspaceState(v: unknown): WorkspaceState {
     state: enumRenderState(o, "state", "WorkspaceState"),
     turnActive: bool(o, "turnActive", "WorkspaceState"),
     liveTaskCount: num(o, "liveTaskCount", "WorkspaceState"),
-    mergePhase: str(o, "mergePhase", "WorkspaceState"),
     causeKind: str(o, "causeKind", "WorkspaceState"),
     causeSeq: num(o, "causeSeq", "WorkspaceState"),
     atMs: num(o, "atMs", "WorkspaceState"),
@@ -962,8 +949,6 @@ function decodeWorkspaceState(v: unknown): WorkspaceState {
     activeFaults: ensureArray(o.activeFaults ?? [], "WorkspaceState.activeFaults").map(
       decodeRuntimeFault,
     ),
-    mergeQueuePosition: num(o, "mergeQueuePosition", "WorkspaceState"),
-    mergeQueueDepth: num(o, "mergeQueueDepth", "WorkspaceState"),
     mergeLeaseHeld: bool(o, "mergeLeaseHeld", "WorkspaceState"),
     mergedAtMs: num(o, "mergedAtMs", "WorkspaceState"),
   };
@@ -972,21 +957,6 @@ function decodeWorkspaceState(v: unknown): WorkspaceState {
   // so there is no zero-valued status standing in for "no merge".
   if (o.mergeStatus !== undefined && o.mergeStatus !== null) {
     ws.mergeStatus = decodeMergeStatus(o.mergeStatus);
-  }
-  if (ws.mergeQueuePosition < 0 || ws.mergeQueueDepth < 0) {
-    throw new Error(
-      `frontend-proto: WorkspaceState for '${ws.workspace}' has a negative merge-queue ` +
-        `figure (position=${ws.mergeQueuePosition} depth=${ws.mergeQueueDepth})`,
-    );
-  }
-  // A 1-based position can never exceed the depth it indexes into. A pair that
-  // says otherwise is a daemon-side accounting bug, and rendering "3/2" would
-  // hide it behind a plausible-looking chip.
-  if (ws.mergeQueuePosition > ws.mergeQueueDepth) {
-    throw new Error(
-      `frontend-proto: WorkspaceState for '${ws.workspace}' has merge-queue position ` +
-        `${ws.mergeQueuePosition} beyond depth ${ws.mergeQueueDepth}`,
-    );
   }
   if (ws.workspace === "") {
     throw new Error("frontend-proto: WorkspaceState missing required `workspace`");
@@ -1045,12 +1015,31 @@ const MERGE_PHASE_DECODERS: ReadonlyMap<string, (v: unknown) => MergeStatus["pha
     "enqueued",
     (v: unknown) => {
       const o = phaseObject(v, "MergeStatusEnqueued", ["position", "depth"]);
+      const position = num(o, "position", "MergeStatusEnqueued");
+      const depth = num(o, "depth", "MergeStatusEnqueued");
+      // MOVED HERE from the retired flat merge_queue_position /
+      // merge_queue_depth pair, which used to carry these checks. The figures
+      // now arrive only on this arm, so this is where a nonsensical pair has to
+      // be refused -- dropping the checks with the fields would have retired
+      // real coverage along with the wire surface.
+      if (position < 0 || depth < 0) {
+        throw new Error(
+          `frontend-proto: MergeStatusEnqueued has a negative merge-queue figure ` +
+            `(position=${position} depth=${depth})`,
+        );
+      }
+      // A 1-based position can never exceed the depth it indexes into. A pair
+      // that says otherwise is a daemon-side accounting bug, and rendering
+      // "3/2" would hide it behind a plausible-looking chip.
+      if (position > depth) {
+        throw new Error(
+          `frontend-proto: MergeStatusEnqueued has merge-queue position ` +
+            `${position} beyond depth ${depth}`,
+        );
+      }
       return {
         case: "enqueued" as const,
-        value: {
-          position: num(o, "position", "MergeStatusEnqueued"),
-          depth: num(o, "depth", "MergeStatusEnqueued"),
-        },
+        value: { position, depth },
       };
     },
   ],
