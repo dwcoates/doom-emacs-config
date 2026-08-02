@@ -29,6 +29,6 @@ Do NOT attempt to close the workspace yourself in any way. Under NO circumstance
    ]
    EOF
    ```
-   If the command fails due to missing `uuidgen`, **stop immediately** and tell the user they need to rebuild the sandbox image by running `.claude/install.sh`.
+   If the command fails due to missing `uuidgen`, **stop immediately** and tell the user that the required `uuidgen` binary is not on PATH and must be installed.
 
 3. **Tell the user** which workspaces were targeted for close.
