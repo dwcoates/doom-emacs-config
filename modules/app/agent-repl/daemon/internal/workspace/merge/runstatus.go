@@ -137,6 +137,12 @@ func NewRunStatus(sink StatusSink, logf dlog.Logf, workspace string, now func() 
 // figures describe work this one has not done. What the caller gets is a run a
 // frontend can still recognize, reporting what the resumed drain actually
 // observes.
+//
+// THE CURSOR IS RE-ESTABLISHED FROM GIT, NOT REMEMBERED: the resumed driver
+// reads the range the workspace contributes and what is left of it, and hands
+// both to ResumePlan before it publishes anything. A clean cursor is the
+// starting point of that reconstruction, not the figure a frontend ends up
+// rendering.
 func ResumeRunStatus(sink StatusSink, logf dlog.Logf, workspace string, now func() int64, runID string) (*RunStatus, error) {
 	if runID == "" {
 		return nil, fmt.Errorf("merge: resuming a RunStatus needs the run id it was admitted under")
@@ -177,6 +183,49 @@ func (r *RunStatus) SetPlan(plan CommitPlan) {
 	r.commitsTotal = int32(len(plan.Commits))
 	r.commitsLanded = 0
 	r.logf("merge: run plan {ws=%s run=%s commits_total=%d}", r.workspace, r.runID, r.commitsTotal)
+}
+
+// ResumePlan re-establishes the commit cursor of a run whose replay is being
+// RE-ENTERED: a conflict a human resolved and continued, a committed test fix,
+// a queue entry a boot replayed.
+//
+// SetPlan CANNOT SERVE THIS MOMENT. A re-entered replay recomputes its
+// cherry-pick base, which has advanced past everything already on the target, so
+// the plan it reads is only what is LEFT. Recording that as the run's plan makes
+// commits_total SHRINK as the run progresses, and a run re-entered after its
+// last commit landed reads a plan of zero — which is how a `merged` status came
+// to report commits_total=0 for a merge that plainly landed something.
+//
+// So the two figures are reconstructed rather than replaced:
+//
+//   - total is the run's OWN total wherever it still has one. The run was
+//     admitted to land a particular range and that range does not change
+//     because part of it is now on the target. Only a publisher that lost its
+//     cursor with the process that held it (total zero, which is what
+//     ResumeRunStatus hands back) falls to full — the workspace's whole
+//     contribution — because it has nothing else to count from.
+//   - landed is whatever total no longer has left to do. It is read off git
+//     rather than remembered, so it is right across a bounce as well as within
+//     a process.
+//
+// A remainder LARGER than the total is refused rather than clamped: the caller
+// handed two plans that cannot describe one run, and publishing the nearest
+// sane-looking pair would put a fabricated progress figure on the wire.
+func (r *RunStatus) ResumePlan(full, remaining CommitPlan) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	total := r.commitsTotal
+	if total == 0 {
+		total = int32(len(full.Commits))
+	}
+	left := int32(len(remaining.Commits))
+	if left > total {
+		return fmt.Errorf("merge: run %s for %q has %d commits left of a %d-commit plan", r.runID, r.workspace, left, total)
+	}
+	r.commitsTotal, r.commitsLanded = total, total-left
+	r.logf("merge: run plan RESUMED {ws=%s run=%s commits_total=%d commits_landed=%d remaining=%d}",
+		r.workspace, r.runID, r.commitsTotal, r.commitsLanded, left)
+	return nil
 }
 
 // Enqueued publishes the run's ADMISSION: the `enqueued` status arm, carrying

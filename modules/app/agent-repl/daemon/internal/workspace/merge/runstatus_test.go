@@ -253,6 +253,77 @@ func TestPhaseStartedAtHoldsAcrossARepeatedArmOnAnotherCommit(t *testing.T) {
 	}
 }
 
+// --- the resumed cursor -------------------------------------------------
+
+func TestResumePlanRebuildsTheCursor(t *testing.T) {
+	// Arrange.
+	commits := func(n int) CommitPlan {
+		var plan CommitPlan
+		for i := 0; i < n; i++ {
+			plan.Commits = append(plan.Commits, PlannedCommit{SHA: string(rune('a' + i))})
+		}
+		return plan
+	}
+	tests := []struct {
+		name       string
+		setPlan    int // the plan the run already established, 0 for a rebuilt publisher
+		full       int
+		remaining  int
+		wantTotal  int32
+		wantLanded int32
+	}{
+		{name: "a publisher that lost its cursor counts the whole range", setPlan: 0, full: 3, remaining: 3, wantTotal: 3, wantLanded: 0},
+		{name: "a publisher that lost its cursor mid-run counts what is gone as landed", setPlan: 0, full: 3, remaining: 1, wantTotal: 3, wantLanded: 2},
+		{name: "a run that still knows its total keeps it", setPlan: 2, full: 5, remaining: 1, wantTotal: 2, wantLanded: 1},
+		{name: "a run with nothing left reports its total fully landed", setPlan: 1, full: 4, remaining: 0, wantTotal: 1, wantLanded: 1},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			sink := &recordingSink{}
+			run := newTestRun(t, sink, testClock())
+			if tc.setPlan > 0 {
+				run.SetPlan(commits(tc.setPlan))
+			}
+
+			// Act.
+			if err := run.ResumePlan(commits(tc.full), commits(tc.remaining)); err != nil {
+				t.Fatalf("ResumePlan: %v", err)
+			}
+			if err := run.Merged("", "landed"); err != nil {
+				t.Fatalf("Merged: %v", err)
+			}
+
+			// Assert.
+			if got := sink.statuses[0].GetMerged().GetCommitsTotal(); got != tc.wantTotal {
+				t.Fatalf("commits_total = %d, want %d", got, tc.wantTotal)
+			}
+			if got := run.commitsLanded; got != tc.wantLanded {
+				t.Fatalf("commits_landed = %d, want %d", got, tc.wantLanded)
+			}
+		})
+	}
+}
+
+// The VIOLATION EDGE: a remainder larger than the run's total describes no run
+// at all, and clamping it would put a fabricated progress figure on the wire.
+func TestResumePlanRefusesARemainderLargerThanTheTotal(t *testing.T) {
+	// Arrange — a run that established a one-commit plan.
+	sink := &recordingSink{}
+	run := newTestRun(t, sink, testClock())
+	run.SetPlan(CommitPlan{Commits: []PlannedCommit{{SHA: "a"}}})
+
+	// Act.
+	err := run.ResumePlan(
+		CommitPlan{Commits: []PlannedCommit{{SHA: "a"}}},
+		CommitPlan{Commits: []PlannedCommit{{SHA: "a"}, {SHA: "b"}}})
+
+	// Assert.
+	if err == nil {
+		t.Fatal("ResumePlan() error = nil, want a remainder larger than the total refused")
+	}
+}
+
 // --- the admission arm --------------------------------------------------
 
 // THE GUARANTEE: the `enqueued` ARM and the merge-axis TOKEN are separate. A

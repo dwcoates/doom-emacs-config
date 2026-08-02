@@ -326,7 +326,19 @@ func (e *Driver) pickLoop(ctx context.Context, req Request, base string, landedE
 	// THE PLAN IS THE RUN'S DENOMINATOR. Every phase from here on reports
 	// commits_total from it, so the figure a frontend renders is the plan being
 	// executed rather than whatever each call site happened to count.
-	req.Run.SetPlan(plan)
+	//
+	// A RE-ENTERED loop reconciles instead of replacing. Its base has advanced
+	// past everything already on the target, so `plan` here is only the REMAINDER
+	// of the run's range — recording it as the plan would make commits_total
+	// shrink as the run progressed, and a re-entry that finds nothing left would
+	// report a merge of zero commits.
+	if landedEarlier {
+		if err := e.resumeRunPlan(ctx, req, plan); err != nil {
+			return Result{}, err
+		}
+	} else {
+		req.Run.SetPlan(plan)
+	}
 	commits := plan.Commits
 	if len(commits) == 0 {
 		// The workspace's contribution is already on the target by ancestry —
@@ -477,6 +489,18 @@ func (e *Driver) Resume(ctx context.Context, req Request) (Result, error) {
 			req.TargetDir, req.Name)
 	}
 
+	// THE CURSOR IS REBUILT BEFORE THE FIRST PUBLICATION. A resume may be driven
+	// by a publisher that lost its progress with the process that held it (a boot
+	// replay), and the first thing it does is publish — so a cursor rebuilt any
+	// later would put "0 of 0" on the wire as the resumed run's opening word.
+	remaining, err := e.remainingPlan(ctx, req)
+	if err != nil {
+		return Result{}, err
+	}
+	if err := e.resumeRunPlan(ctx, req, remaining); err != nil {
+		return Result{}, err
+	}
+
 	if err := req.Run.PickingCurrent("resuming cherry-pick after resolve"); err != nil {
 		return Result{}, err
 	}
@@ -603,6 +627,48 @@ func (e *Driver) continueRange(ctx context.Context, req Request) (Result, error)
 		return Result{}, err
 	}
 	return e.pickLoop(ctx, req, base, true)
+}
+
+// remainingPlan is what the replay still has to pick: the range from the
+// recomputed cherry-pick base, which has advanced past every `-x` annotation
+// already on the target.
+func (e *Driver) remainingPlan(ctx context.Context, req Request) (CommitPlan, error) {
+	base, err := e.cherryPickBase(ctx, req.TargetDir, req.SourceBranch)
+	if err != nil {
+		return CommitPlan{}, err
+	}
+	return e.plan(ctx, req.TargetDir, base+".."+req.SourceBranch)
+}
+
+// resumeRunPlan re-establishes a RE-ENTERED run's commit cursor from git.
+//
+// The remainder alone cannot say how far a run has got — it is what is LEFT, and
+// a run one commit from done and a run that never started can both have one
+// commit left. The denominator comes from the whole range the workspace
+// contributes (merge-base..branch), which is the only figure on disk that
+// survives a daemon bounce, and RunStatus.ResumePlan decides which of the two
+// the run actually needs: its own total when it still has one, this one when its
+// publisher was rebuilt from nothing.
+//
+// The merge base is read directly rather than through cherryPickBase, because
+// the two answer different questions: cherryPickBase deliberately skips forward
+// over what already landed, and skipping forward is precisely what makes the
+// remainder unable to count it.
+func (e *Driver) resumeRunPlan(ctx context.Context, req Request, remaining CommitPlan) error {
+	mergeBase, err := e.gitString(ctx, req.TargetDir, "merge-base", "HEAD", req.SourceBranch)
+	if err != nil {
+		return err
+	}
+	full, err := e.plan(ctx, req.TargetDir, mergeBase+".."+req.SourceBranch)
+	if err != nil {
+		return err
+	}
+	if err := req.Run.ResumePlan(full, remaining); err != nil {
+		return err
+	}
+	e.logf("merge: run cursor REBUILT {ws=%s run=%s merge_base=%s range=%d remaining=%d}",
+		req.Name, req.Run.RunID(), shortSHA(mergeBase), len(full.Commits), len(remaining.Commits))
+	return nil
 }
 
 // Rollback resets the target worktree to head, undoing every commit this merge
