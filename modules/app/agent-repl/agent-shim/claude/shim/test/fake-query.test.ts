@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { writeSync } from "node:fs";
-import { FAKE_MODELS, MARKDOWN_SHOWCASE, createFakeQuery } from "../src/fake-query.js";
+import { FAIL_TURN_MARKER, FAKE_MODELS, MARKDOWN_SHOWCASE, createFakeQuery } from "../src/fake-query.js";
 import { AsyncQueue } from "../src/input-queue.js";
 import {
   CanUseToolLike,
@@ -92,6 +92,35 @@ describe("createFakeQuery", () => {
     expect(types).toContain("assistant");
     const result = msgs.find((m) => m.type === "result")!;
     expect(result).toMatchObject({ subtype: "success", result: expect.stringContaining("hello") });
+  });
+
+  // A TURN FAILURE IS OTHERWISE UNPROVOKABLE OFFLINE, and the daemon's merge
+  // pipeline classifies a failed before-action and a failed after-action in
+  // opposite directions. Neither branch is reachable in --fake mode without
+  // this.
+  it("ends a turn in error when the prompt carries the fail marker", async () => {
+    // Arrange
+    const h = makeFake();
+    // Act
+    h.input.push(userMsg(`${FAIL_TURN_MARKER}: the action the acceptance gate makes fail`));
+    h.input.end();
+    const msgs = await h.collect();
+    // Assert
+    const result = msgs.find((m) => m.type === "result")!;
+    expect(result).toMatchObject({ subtype: "error_during_execution", is_error: true });
+  });
+
+  // No assistant message accompanies it: the turn produced none, and an empty
+  // one would render as a blank bubble in every frontend.
+  it("emits no assistant message for a failed turn", async () => {
+    // Arrange
+    const h = makeFake();
+    // Act
+    h.input.push(userMsg(`${FAIL_TURN_MARKER}: nothing was produced`));
+    h.input.end();
+    const msgs = await h.collect();
+    // Assert
+    expect(msgs.some((m) => m.type === "assistant")).toBe(false);
   });
 
   it("asks canUseTool before running a !tool turn", async () => {
