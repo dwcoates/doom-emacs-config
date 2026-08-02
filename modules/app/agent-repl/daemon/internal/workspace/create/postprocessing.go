@@ -1,10 +1,5 @@
 package create
 
-import (
-	"fmt"
-	"path/filepath"
-)
-
 // PostprocessingPromptFor resolves the postprocessing prompt the workspace at
 // worktreePath was CREATED with, or "" when that workspace has none.
 //
@@ -19,31 +14,18 @@ import (
 // share: the job store records it as Job.WorktreePath, and the daemon's
 // workspace key IS the worktree the session runs in. The requested name is not
 // usable as a key — a colliding name is resolved to a different FinalName, so
-// two jobs can carry one requested name while no two carry one worktree.
+// two jobs can carry one requested name while no two carry one worktree. That
+// keying lives in creationRequestFor, the ONE lookup this accessor shares with
+// BeforeWSMergePromptFor.
 //
 // A workspace with no job record (created before the daemon owned creation, or
 // by hand) is NOT an error: it reports "", nil. An unreadable store IS an
 // error, because "the records could not be read" and "the record says nothing"
 // are different answers and must not collapse into one.
 func PostprocessingPromptFor(store JobStore, worktreePath string) (string, error) {
-	if store == nil {
-		return "", fmt.Errorf("workspace create: postprocessing lookup needs a job store")
+	req, found, err := creationRequestFor(store, worktreePath, "postprocessing")
+	if err != nil || !found {
+		return "", err
 	}
-	if worktreePath == "" {
-		return "", fmt.Errorf("workspace create: postprocessing lookup needs a worktree path")
-	}
-	jobs, err := store.List()
-	if err != nil {
-		return "", fmt.Errorf("workspace create: list jobs for postprocessing lookup: %w", err)
-	}
-	want := filepath.Clean(worktreePath)
-	for _, job := range jobs {
-		if job.WorktreePath == "" {
-			continue
-		}
-		if filepath.Clean(job.WorktreePath) == want {
-			return job.Request.PostprocessingPrompt, nil
-		}
-	}
-	return "", nil
+	return req.PostprocessingPrompt, nil
 }
