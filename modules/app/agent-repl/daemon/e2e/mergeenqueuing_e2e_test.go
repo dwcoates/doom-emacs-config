@@ -11,14 +11,18 @@
 // the rest of the merge e2e suite does.
 package e2e
 
-import "testing"
+import (
+	"testing"
+
+	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+)
 
 // phaseOrder returns the index of the FIRST recorded WorkspaceState for ws in
 // phase, or -1. Ordering between phases is the whole assertion here, and the
 // accumulating watch preserves the order frames arrived in.
-func phaseOrder(w *mergeWatch, ws, phase string) int {
+func phaseOrder(w *mergeWatch, ws string, phase frontendv1.RenderState) int {
 	for i, state := range w.states {
-		if state.GetWorkspace() == ws && state.GetMergePhase() == phase {
+		if state.GetWorkspace() == ws && stateInPhase(state, phase) {
 			return i
 		}
 	}

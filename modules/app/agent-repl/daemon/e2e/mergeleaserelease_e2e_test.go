@@ -27,6 +27,8 @@ import (
 	"fmt"
 	"testing"
 
+	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
+
 	"github.com/gorilla/websocket"
 )
 
@@ -45,7 +47,7 @@ func TestE2EEveryTerminalMergePhaseReleasesTheLease(t *testing.T) {
 		// worktree builds the sibling whose merge produces the row's phase.
 		worktree func(repo *mergeRepo, branch string) string
 		// terminal is the phase the merge must end on.
-		terminal string
+		terminal frontendv1.RenderState
 		// abandon, when set, is the user action that gives up on a conflict the
 		// merge parked in the target tree.
 		abandon bool
