@@ -5768,6 +5768,62 @@ are not counted, so index 1 lands on the next unfolded workspace."
         (agent-repl--workspace-cycle +1)
         (should (equal switched '("b")))))))
 
+(ert-deftest agent-repl-cmd-test-workspace-cycle/absent-current-cycles-right-to-first ()
+  "Cycling right from a workspace ABSENT from the tabline lands on the first
+visible workspace instead of erroring on a nil position.
+A merged workspace is torn down and dropped from the list while the user
+still sits in its perspective; cycling from it used to signal
+wrong-type-argument on every keypress."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "a" :group-key "/repos/doom/.git")
+    (agent-repl--ws-put "b" :group-key "/repos/doom/.git")
+    (let ((switched (list)))
+      (cl-letf (((symbol-function 'agent-repl--ws-list-names)
+                 (lambda () '("a" "b")))
+                ((symbol-function 'agent-repl--ws-current-name)
+                 (lambda () "just-merged"))
+                ((symbol-function 'agent-repl--ws-protected-p)
+                 (lambda (_ws) nil))
+                ((symbol-function '+workspace-switch)
+                 (lambda (name &optional _auto-create) (push name switched))))
+        (agent-repl--workspace-cycle +1)
+        (should (equal switched '("a")))))))
+
+(ert-deftest agent-repl-cmd-test-workspace-cycle/absent-current-cycles-left-to-last ()
+  "Cycling left from an absent current workspace lands on the LAST visible."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "a" :group-key "/repos/doom/.git")
+    (agent-repl--ws-put "b" :group-key "/repos/doom/.git")
+    (let ((switched (list)))
+      (cl-letf (((symbol-function 'agent-repl--ws-list-names)
+                 (lambda () '("a" "b")))
+                ((symbol-function 'agent-repl--ws-current-name)
+                 (lambda () "just-merged"))
+                ((symbol-function 'agent-repl--ws-protected-p)
+                 (lambda (_ws) nil))
+                ((symbol-function '+workspace-switch)
+                 (lambda (name &optional _auto-create) (push name switched))))
+        (agent-repl--workspace-cycle -1)
+        (should (equal switched '("b")))))))
+
+(ert-deftest agent-repl-cmd-test-workspace-cycle/absent-current-empty-list-user-errors ()
+  "An absent current over an EMPTY tabline is a clean user-error, not
+arithmetic on nil."
+  (agent-repl-test--with-clean-state
+    (let (seen)
+      (cl-letf (((symbol-function 'agent-repl--ws-list-names)
+                 (lambda () '()))
+                ((symbol-function 'agent-repl--ws-current-name)
+                 (lambda () "just-merged"))
+                ((symbol-function 'agent-repl--ws-protected-p)
+                 (lambda (_ws) nil))
+                ;; The cycle surfaces user-errors through the ws-error sink;
+                ;; a sink that records proves the refusal was clean.
+                ((symbol-function 'agent-repl--ws-error)
+                 (lambda (err _noerror) (setq seen err))))
+        (agent-repl--workspace-cycle +1)
+        (should seen)))))
+
 (ert-deftest agent-repl-cmd-test-switch-to-N/is-interactive ()
   "Each indexed switcher is an interactive command — required for keymap
 binding to invoke it via key press."
