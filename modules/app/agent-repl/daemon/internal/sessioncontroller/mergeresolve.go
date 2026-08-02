@@ -226,6 +226,39 @@ func (m *Manager) ResolveMergeTestFailure(ctx context.Context, res merge.TestFai
 	return nil
 }
 
+// RunMergeBeforeAction implements merge.BeforeActionRunner (through the server's
+// PromptRouter): it submits the workspace's recorded before_ws_merge action on
+// the merge lease holder's behalf and returns once that turn has ended.
+//
+// It is the third sibling of ResolveMergeConflict and ResolveMergeTestFailure and
+// shares all of their machinery — the same lease, the same session, the same
+// turn-boundary wait, the same bound. "DONE" IS THE TURN ENDING, never a sleep
+// or a poll, which is what lets merge.Coordinator compute the cherry-pick plan
+// knowing the action's commits (if any) are already in the branch.
+func (m *Manager) RunMergeBeforeAction(ctx context.Context, act merge.BeforeAction) error {
+	if act.Workspace == "" {
+		return fmt.Errorf("session-controller: a merge before-action needs a workspace")
+	}
+	if act.RequestID == "" {
+		return fmt.Errorf("session-controller: a merge before-action for workspace %q needs a request id", act.Workspace)
+	}
+	if act.Prompt == "" {
+		return fmt.Errorf("session-controller: a merge before-action for workspace %q needs a prompt", act.Workspace)
+	}
+	m.logf("session-controller: merge before-action ws=%q request_id=%s — driving the workspace's own session under the merge lease before the cherry-pick plan is computed",
+		act.Workspace, act.RequestID)
+
+	ctx, cancel := context.WithTimeout(ctx, m.mergeResolutionBound())
+	defer cancel()
+	if err := m.SubmitMergePromptAwaitingTurn(ctx, act.Workspace, act.RequestID, act.Prompt, mergeResolutionPermissionMode); err != nil {
+		m.logf("session-controller: merge before-action FAILED ws=%q request_id=%s: %v", act.Workspace, act.RequestID, err)
+		return err
+	}
+	m.logf("session-controller: merge before-action turn COMPLETE ws=%q request_id=%s — merge.Coordinator computes the cherry-pick plan now",
+		act.Workspace, act.RequestID)
+	return nil
+}
+
 // mergeResolutionBound resolves the wait's bound: the configured override when
 // a harness set one, the package default otherwise.
 func (m *Manager) mergeResolutionBound() time.Duration {

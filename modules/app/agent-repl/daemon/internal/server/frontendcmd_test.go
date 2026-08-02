@@ -66,7 +66,8 @@ type fakePrompts struct {
 	resolutions []merge.ConflictResolution
 	// testFailures records every merge test failure this double was asked to
 	// drive the workspace's own session through.
-	testFailures []merge.TestFailureResolution
+	testFailures  []merge.TestFailureResolution
+	beforeActions []merge.BeforeAction
 }
 
 // TurnActive makes the prompt double the gate's turn source.
@@ -84,6 +85,13 @@ func (f *fakePrompts) ResolveMergeConflict(_ context.Context, res merge.Conflict
 // resolver too, on the same footing as ResolveMergeConflict.
 func (f *fakePrompts) ResolveMergeTestFailure(_ context.Context, res merge.TestFailureResolution) error {
 	f.testFailures = append(f.testFailures, res)
+	return f.err
+}
+
+// RunMergeBeforeAction makes the prompt double merge.Coordinator's before-action
+// runner too, on the same footing as the two resolvers.
+func (f *fakePrompts) RunMergeBeforeAction(_ context.Context, act merge.BeforeAction) error {
+	f.beforeActions = append(f.beforeActions, act)
 	return f.err
 }
 
@@ -1243,6 +1251,12 @@ func newTestMergeCoordinator(t *testing.T) *merge.QueueCoordinator {
 		Logf: logf, Sink: noopSink{}, Queue: queue, Phases: noopPhases{}, Keyer: keyer, Picker: driver,
 		Lease: stubMergeLease{}, Resolver: stubMergeResolver{}, TestResolver: stubMergeTestResolver{},
 		PostMerge: stubPostMergeHook{},
+		Status:    noopSink{},
+		Sessions:  stubSessionBringUp{},
+		// No workspace in these harnesses was created with a before-merge action,
+		// which is the common case; the run goes straight to the plan.
+		BeforeActions:      stubBeforeActions{},
+		BeforeActionRunner: stubBeforeActionRunner{},
 	})
 	if err != nil {
 		t.Fatalf("coordinator: %v", err)
@@ -1254,6 +1268,29 @@ func newTestMergeCoordinator(t *testing.T) *merge.QueueCoordinator {
 type noopSink struct{}
 
 func (noopSink) RecordMergeTransition(string, merge.Phase, string) error { return nil }
+
+// RecordMergeStatus makes the double the StatusSink too, as the production sink
+// is: one call carries the axis row and the phase status.
+func (noopSink) RecordMergeStatus(string, merge.Phase, string, *frontendv1.MergeStatus) error {
+	return nil
+}
+
+// stubSessionBringUp is the merge.SessionBringUp a unit harness binds: nothing
+// here runs a shim, so every workspace is reported already live.
+type stubSessionBringUp struct{}
+
+func (stubSessionBringUp) EnsureLive(context.Context, string) error { return nil }
+
+// stubBeforeActions is the merge.BeforeActionSource a unit harness binds: no
+// workspace here was created with an action.
+type stubBeforeActions struct{}
+
+func (stubBeforeActions) BeforeAction(string) (string, error) { return "", nil }
+
+// stubBeforeActionRunner is the merge.BeforeActionRunner a unit harness binds.
+type stubBeforeActionRunner struct{}
+
+func (stubBeforeActionRunner) Run(context.Context, merge.BeforeAction) error { return nil }
 
 // noopPhases is the merge.PhaseSource a unit harness binds: no workspace is
 // pinned on any phase, so the boot sweep has nothing to sweep.

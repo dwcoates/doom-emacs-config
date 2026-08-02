@@ -92,6 +92,18 @@ type Request struct {
 	SourceDir string
 	// TargetDir is the worktree the cherry-pick lands in (git -C TargetDir).
 	TargetDir string
+	// Run publishes this RUN's phase-level MergeStatus. It is minted by
+	// merge.Coordinator when the repository's drain goroutine pops the entry, and
+	// is DELIBERATELY NOT PART OF THE DURABLE QUEUE PAYLOAD (the queue persists
+	// its own entry struct, field by field): a merge replayed by the next boot is
+	// a NEW run and mints a new id, which is exactly right — nothing about the
+	// dead process's progress is still true.
+	//
+	// It is nil only for a Request that has not reached the pipeline yet (an
+	// Enqueue's validation, a queue round-trip). Every merge.Driver entry point
+	// requires it, because a driver that could publish nothing would land commits
+	// no frontend could watch.
+	Run *RunStatus
 }
 
 func (r Request) validate() error {
@@ -106,6 +118,21 @@ func (r Request) validate() error {
 		return fmt.Errorf("merge: request SourceDir is required")
 	case r.TargetDir == "":
 		return fmt.Errorf("merge: request TargetDir is required")
+	}
+	return nil
+}
+
+// validateRun is the merge.Driver's extra precondition: a request the driver is
+// about to execute MUST carry the run it publishes through. It is separate from
+// validate() because merge.Coordinator.Enqueue validates a request BEFORE any
+// run exists — the run is minted when the entry is popped, not when it is
+// published.
+func (r Request) validateRun() error {
+	if err := r.validate(); err != nil {
+		return err
+	}
+	if r.Run == nil {
+		return fmt.Errorf("merge: request %q carries no RunStatus; a merge that publishes no phase status lands commits no frontend can watch", r.Name)
 	}
 	return nil
 }
@@ -181,7 +208,7 @@ var cherryPickAnnotationRE = regexp.MustCompile(`\(cherry picked from commit ([0
 // A conflict is LEFT IN THE TARGET TREE (never aborted); the caller resumes
 // it via Resume once the conflict has been resolved.
 func (e *Driver) Merge(ctx context.Context, req Request) (Result, error) {
-	if err := req.validate(); err != nil {
+	if err := req.validateRun(); err != nil {
 		return Result{}, err
 	}
 	e.logf("merge: Merge start {ws=%s key=%s branch=%s source=%s target=%s}",
@@ -221,7 +248,7 @@ func (e *Driver) Merge(ctx context.Context, req Request) (Result, error) {
 		return Result{}, err
 	}
 
-	if err := e.emit.emit(req.Workspace, PhaseMerging, "cherry-pick starting for "+req.SourceBranch); err != nil {
+	if err := req.Run.PickingCurrent("cherry-pick starting for " + req.SourceBranch); err != nil {
 		return Result{}, err
 	}
 
@@ -266,11 +293,15 @@ func (e *Driver) Merge(ctx context.Context, req Request) (Result, error) {
 // merge as a no-op when it plainly was not one.
 func (e *Driver) pickLoop(ctx context.Context, req Request, base string, landedEarlier bool) (Result, error) {
 	rng := base + ".." + req.SourceBranch
-	listOut, err := e.gitString(ctx, req.TargetDir, "rev-list", "--reverse", "--no-merges", rng)
+	plan, err := e.plan(ctx, req.TargetDir, rng)
 	if err != nil {
 		return Result{}, err
 	}
-	commits := splitLines(listOut)
+	// THE PLAN IS THE RUN'S DENOMINATOR. Every phase from here on reports
+	// commits_total from it, so the figure a frontend renders is the plan being
+	// executed rather than whatever each call site happened to count.
+	req.Run.SetPlan(plan)
+	commits := plan.Commits
 	if len(commits) == 0 {
 		// The workspace's contribution is already on the target by ancestry —
 		// a successful no-op merge.
@@ -279,9 +310,9 @@ func (e *Driver) pickLoop(ctx context.Context, req Request, base string, landedE
 	}
 
 	landed := 0
-	for i, sha := range commits {
+	for i, commit := range commits {
 		progress := fmt.Sprintf("%d/%d", i+1, len(commits))
-		short := shortSHA(sha)
+		sha, short := commit.SHA, commit.Short
 
 		already, err := e.commitAlreadyIncorporated(ctx, req.TargetDir, sha)
 		if err != nil {
@@ -292,7 +323,19 @@ func (e *Driver) pickLoop(ctx context.Context, req Request, base string, landedE
 			// state only `--skip` or `--quit` clears. Skipping it here keeps
 			// that state unrepresentable rather than recoverable.
 			e.logf("merge: SKIPPING %s (%s), already on the target by patch-id {ws=%s}", short, progress, req.Name)
+			// IT COUNTS AS LANDED. The commit is on the target — by this run or by
+			// the one the previous daemon died in the middle of — and a progress
+			// figure that skipped it would count down toward a total it could
+			// never reach.
+			req.Run.CommitLanded()
 			continue
+		}
+
+		// The phase is published BEFORE the pick, not after: the pick is the slow
+		// part, and a user watching a merge should see which commit is landing
+		// while it lands rather than only once it has.
+		if err := req.Run.CherryPicking(commit, "cherry-picking "+progress+": "+short); err != nil {
+			return Result{}, err
 		}
 
 		// A non-zero exit is not a spawn error; the exit code and the presence
@@ -327,6 +370,7 @@ func (e *Driver) pickLoop(ctx context.Context, req Request, base string, landedE
 				fmt.Sprintf("cherry-pick of %s (%s) exited %d with no conflict to resolve", short, progress, exit))
 		}
 		landed++
+		req.Run.CommitLanded()
 
 		failure, err := e.gateOnSuite(ctx, req, progress+" after cherry-pick of "+short, short)
 		if err != nil {
@@ -353,7 +397,10 @@ func (e *Driver) pickLoop(ctx context.Context, req Request, base string, landedE
 // the runner AND here, because a merge landing untested is precisely the fact a
 // user later needs to find in the log.
 func (e *Driver) gateOnSuite(ctx context.Context, req Request, progress, short string) (*Result, error) {
-	if err := e.emit.emit(req.Workspace, PhaseMerging, "testing "+progress); err != nil {
+	// The testing phase carries the SAME commit context the cherry_picking phase
+	// just did — the run holds it, so the two cannot disagree — which is what
+	// lets a frontend render one progress figure across both.
+	if err := req.Run.Testing("testing " + progress); err != nil {
 		return nil, err
 	}
 	sr, err := e.suite.RunSuite(ctx, req.TargetDir)
@@ -387,7 +434,7 @@ func (e *Driver) gateOnSuite(ctx context.Context, req Request, progress, short s
 // whatever is left of the range — so a resume is not the end of a merge, it is
 // the middle of one.
 func (e *Driver) Resume(ctx context.Context, req Request) (Result, error) {
-	if err := req.validate(); err != nil {
+	if err := req.validateRun(); err != nil {
 		return Result{}, err
 	}
 	e.logf("merge: Resume start {ws=%s key=%s target=%s}", req.Name, req.Workspace, req.TargetDir)
@@ -404,7 +451,7 @@ func (e *Driver) Resume(ctx context.Context, req Request) (Result, error) {
 			req.TargetDir, req.Name)
 	}
 
-	if err := e.emit.emit(req.Workspace, PhaseMerging, "resuming cherry-pick after resolve"); err != nil {
+	if err := req.Run.PickingCurrent("resuming cherry-pick after resolve"); err != nil {
 		return Result{}, err
 	}
 
@@ -470,7 +517,7 @@ func (e *Driver) Resume(ctx context.Context, req Request) (Result, error) {
 // merge down the rollback path — the honest outcome for an agent that did not
 // fix anything.
 func (e *Driver) ContinueAfterTestFix(ctx context.Context, req Request, failingCommit string) (Result, error) {
-	if err := req.validate(); err != nil {
+	if err := req.validateRun(); err != nil {
 		return Result{}, err
 	}
 	if failingCommit == "" {
@@ -581,6 +628,43 @@ func (e *Driver) commitAlreadyIncorporated(ctx context.Context, dir, sha string)
 	return e.rangeAlreadyIncorporated(ctx, dir, sha+"^", sha)
 }
 
+// planFieldSep is the ASCII unit separator `git log --pretty` writes between a
+// commit's sha and its subject. It is used rather than a space or a tab because
+// a subject may legitimately contain either, and a delimiter a commit message
+// can forge is a parser that mis-splits on somebody's commit.
+const planFieldSep = "\x1f"
+
+// plan lists the commits rng contributes, oldest first, each with the subject
+// line the phase status carries.
+//
+// IT IS THE SAME SELECTION THE REPLAY USED TO MAKE (`--reverse --no-merges`),
+// now carrying the subject too: a frontend rendering "3/7 — fix the parser" has
+// no other source for that text, and asking git a second time per commit would
+// make the plan and the replay two lists that can disagree.
+func (e *Driver) plan(ctx context.Context, dir, rng string) (CommitPlan, error) {
+	out, err := e.gitString(ctx, dir, "log", "--reverse", "--no-merges",
+		"--pretty=%H"+planFieldSep+"%s", rng)
+	if err != nil {
+		return CommitPlan{}, err
+	}
+	var plan CommitPlan
+	for _, line := range splitLines(out) {
+		sha, subject, found := strings.Cut(line, planFieldSep)
+		if !found {
+			// git wrote a line in a shape this format cannot produce. Guessing at
+			// it would put a sha-shaped subject (or a subject-shaped sha) into the
+			// replay, which picks by that string.
+			return CommitPlan{}, fmt.Errorf("merge: commit plan line %q in %s has no %q separator", line, dir, planFieldSep)
+		}
+		plan.Commits = append(plan.Commits, PlannedCommit{
+			SHA:     sha,
+			Short:   shortSHA(sha),
+			Subject: subject,
+		})
+	}
+	return plan, nil
+}
+
 // shortSHA abbreviates a full SHA for logs and causes. It is a pure string
 // operation rather than a `git rev-parse --short` call because it runs once per
 // commit in the range and the abbreviation is only ever read by a human.
@@ -613,7 +697,10 @@ func (e *Driver) finalizeMerged(ctx context.Context, req Request, alreadyIncorpo
 	if alreadyIncorporated {
 		cause = "range already incorporated (no-op merge)"
 	}
-	if err := e.emit.emit(req.Workspace, PhaseMerged, cause); err != nil {
+	// The after-action has not run yet, so the terminal status carries no
+	// after-action error. merge.Coordinator republishes it with one when the
+	// after-action fails; the merged FACT is set-once and does not move.
+	if err := req.Run.Merged("", cause); err != nil {
 		return Result{}, err
 	}
 	return Result{Outcome: OutcomeMerged, AlreadyIncorporated: alreadyIncorporated, Tag: tag}, nil
@@ -627,8 +714,7 @@ func (e *Driver) markConflict(ctx context.Context, req Request) (Result, error) 
 	if err != nil {
 		return Result{}, err
 	}
-	if err := e.emit.emit(req.Workspace, PhaseMergeConflict,
-		"conflict cherry-picking "+short+" (left in tree for resolve)"); err != nil {
+	if err := req.Run.Conflict(short, "conflict cherry-picking "+short+" (left in tree for resolve)"); err != nil {
 		return Result{}, err
 	}
 	return Result{Outcome: OutcomeConflict, ConflictCommit: short}, nil
@@ -637,7 +723,7 @@ func (e *Driver) markConflict(ctx context.Context, req Request) (Result, error) 
 // markFailed emits merge_failed for a pick git aborted with no conflict to
 // resolve (the elisp silent-failure sentinel).
 func (e *Driver) markFailed(_ context.Context, req Request, cause string) (Result, error) {
-	if err := e.emit.emit(req.Workspace, PhaseMergeFailed, cause); err != nil {
+	if err := req.Run.Failed(cause); err != nil {
 		return Result{}, err
 	}
 	return Result{Outcome: OutcomeFailed}, nil

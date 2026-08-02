@@ -63,6 +63,10 @@ func (r daemonGeometryRecorder) RecordWorkspaceGeometry(ctx context.Context, job
 		SourceBranch: job.Branch,
 		SourceDir:    filepath.Clean(job.WorktreePath),
 		TargetDir:    target,
+		// The creation request's `before_ws_merge` is a merge coordinate like the
+		// other three, and this is the one moment it is known as a fact. The merge
+		// pipeline reads it back out of this record when the run starts.
+		BeforeAction: job.Request.BeforeWSMerge,
 		Origin:       geometry.OriginCreated,
 	}
 	if err := r.Store.Record(ctx, rec); err != nil {
