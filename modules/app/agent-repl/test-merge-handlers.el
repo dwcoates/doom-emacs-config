@@ -302,6 +302,88 @@ connectivity verdict and Emacs refused the frame."
         (should-error (agent-repl--merge-resume-over-uds "") :type 'user-error)
         (should-not sent)))))
 
+;;;; ---- Tests: minibuffer feedback ----
+
+(defmacro agent-repl-test--with-captured-messages (messages-var &rest body)
+  "Run BODY with `message' capturing formatted strings into MESSAGES-VAR."
+  (declare (indent 1))
+  `(let (,messages-var)
+     (cl-letf (((symbol-function 'message)
+                (lambda (fmt &rest args)
+                  (push (apply #'format fmt args) ,messages-var))))
+       ,@body)))
+
+(ert-deftest agent-repl-test-merge-dispatch-echoes-the-request ()
+  "Issuing a merge immediately says so in the minibuffer."
+  (agent-repl-test--with-captured-messages msgs
+    (agent-repl-test--with-captured-merge-command sent
+      (cl-letf (((symbol-function 'agent-repl--frontend-ws-command-key)
+                 (lambda (ws) ws)))
+        (agent-repl--merge-dispatch-over-uds "ws1")))
+    (should (cl-some (lambda (m) (string-match-p "merge of ws1 requested" m))
+                     msgs))))
+
+(ert-deftest agent-repl-test-merge-dispatch-echoes-a-rejection ()
+  "A rejected merge command's error reaches the minibuffer."
+  (agent-repl-test--with-captured-messages msgs
+    (let (on-failure)
+      (cl-letf (((symbol-function 'agent-repl--uds-send-command)
+                 (lambda (&rest _) "req-1"))
+                ((symbol-function 'agent-repl--frontend-ws-command-key)
+                 (lambda (ws) ws))
+                ((symbol-function 'agent-repl--host-action-defer)
+                 (lambda (&rest _) nil))
+                ((symbol-function 'agent-repl--host-action-settle)
+                 (lambda (&rest _) nil))
+                ((symbol-function 'agent-repl--uds-track-command)
+                 (lambda (_req _field _ws &optional fail _ok _challenge)
+                   (setq on-failure fail))))
+        (agent-repl--merge-dispatch-over-uds "ws1")
+        (funcall on-failure "lease unavailable")))
+    (should (cl-some (lambda (m)
+                       (string-match-p "merge of ws1 refused: lease unavailable" m))
+                     msgs))))
+
+(ert-deftest agent-repl-test-merge-echo-narrates-a-merge-phase ()
+  "A pushed merge-phase transition is echoed in the minibuffer."
+  (agent-repl-test--with-captured-messages msgs
+    (cl-letf (((symbol-function 'agent-repl--ws-get)
+               (lambda (_ws _key) nil)))
+      (agent-repl--merge-echo-pushed-state "ws1" :merging :merge-queued))
+    (should (equal msgs '("agent-repl: ws1 merging")))))
+
+(ert-deftest agent-repl-test-merge-echo-carries-the-failure-cause ()
+  "A `:merge-failed' echo includes the daemon's cause, prefix stripped."
+  (agent-repl-test--with-captured-messages msgs
+    (cl-letf (((symbol-function 'agent-repl--ws-get)
+               (lambda (_ws key)
+                 (when (eq key :pushed-render-state-meta)
+                   '(:cause-kind "merge_transition:shim lease unavailable")))))
+      (agent-repl--merge-echo-pushed-state "ws1" :merge-failed :merge-enqueuing))
+    (should (equal msgs
+                   '("agent-repl: ws1 merge failed — shim lease unavailable")))))
+
+(ert-deftest agent-repl-test-merge-echo-skips-a-same-state-repush ()
+  "Re-pushing the same merge state does not spam the minibuffer."
+  (agent-repl-test--with-captured-messages msgs
+    (cl-letf (((symbol-function 'agent-repl--ws-get)
+               (lambda (_ws _key) nil)))
+      (agent-repl--merge-echo-pushed-state "ws1" :merging :merging))
+    (should-not msgs)))
+
+(ert-deftest agent-repl-test-merge-echo-ignores-non-merge-states ()
+  "Ordinary render states are not the merge narrator's business."
+  (agent-repl-test--with-captured-messages msgs
+    (cl-letf (((symbol-function 'agent-repl--ws-get)
+               (lambda (_ws _key) nil)))
+      (agent-repl--merge-echo-pushed-state "ws1" :thinking :ready))
+    (should-not msgs)))
+
+(ert-deftest agent-repl-test-merge-echo-is-subscribed-to-the-transition-hook ()
+  "The narrator is registered on `agent-repl-ws-state-transition-functions'."
+  (should (memq #'agent-repl--merge-echo-pushed-state
+                agent-repl-ws-state-transition-functions)))
+
 ;;;; ---- Tests: the removed surface stays removed ----
 
 (ert-deftest agent-repl-test-no-merge-handler-resolution-remains ()
