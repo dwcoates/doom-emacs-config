@@ -521,11 +521,12 @@ func TestToProtoActionMapsSidebarGesturesToTheirTypedArms(t *testing.T) {
 	}
 }
 
-// The eight verbs HostLegacyCommand's contract names still ride the legacy
-// arm: they have no typed arm to move to, and the host dispatches them from
-// that envelope alone.
+// The verbs HostLegacyCommand's contract names still ride the legacy arm: they
+// have no typed arm to move to, and the host dispatches them from that envelope
+// alone. "merge" is deliberately NOT among them any more — it is routed
+// daemon-side and never handed to the host at all.
 func TestToProtoActionKeepsTheLegacyVerbsOnTheLegacyArm(t *testing.T) {
-	for _, verb := range []string{"prompt", "finish", "close", "open", "clipboard", "send", "merge", "eval"} {
+	for _, verb := range []string{"prompt", "finish", "close", "open", "clipboard", "send", "eval"} {
 		t.Run(verb, func(t *testing.T) {
 			// Arrange
 			action := workspacecreate.HostAction{ID: "file:0", Type: verb, Payload: json.RawMessage(`{"type":"` + verb + `","workspace":"ws"}`)}

@@ -585,9 +585,12 @@ func (f *WorkspaceCreateHostForwarder) PublishHostAction(ctx context.Context, ac
 // it with the daemon lifetime context, binds the wire bridge to Forwarder, and
 // starts Inbox.Run only after both targets are set.
 type WorkspaceCreateAssembly struct {
-	Store     *workspacecreate.FileJobStore
-	Manager   *workspacecreate.Manager
-	Inbox     *workspacecreate.Inbox
+	Store   *workspacecreate.FileJobStore
+	Manager *workspacecreate.Manager
+	Inbox   *workspacecreate.Inbox
+	// Merges is the inbox's late-bound merge route. main sets its target once
+	// WireAgentShim has built the merge surface, before the inbox is started.
+	Merges    *WorkspaceMergeDispatchBinding
 	Forwarder *WorkspaceCreateHostForwarder
 }
 
@@ -792,5 +795,15 @@ func NewWorkspaceCreateAssembly(cfg WorkspaceCreateAssemblyConfig) (*WorkspaceCr
 	if interval <= 0 {
 		return nil, fmt.Errorf("workspace create: inbox interval must be positive")
 	}
-	return &WorkspaceCreateAssembly{Store: store, Manager: manager, Inbox: &workspacecreate.Inbox{Dir: inboxPath, Store: store, Manager: manager, Logf: cfg.Logf, Interval: interval}, Forwarder: forwarder}, nil
+	merges := &WorkspaceMergeDispatchBinding{Logf: cfg.Logf}
+	return &WorkspaceCreateAssembly{
+		Store:   store,
+		Manager: manager,
+		Inbox: &workspacecreate.Inbox{
+			Dir: inboxPath, Store: store, Manager: manager,
+			Merges: merges, Logf: cfg.Logf, Interval: interval,
+		},
+		Merges:    merges,
+		Forwarder: forwarder,
+	}, nil
 }
