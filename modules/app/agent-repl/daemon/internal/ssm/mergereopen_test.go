@@ -93,8 +93,14 @@ func TestReopeningAWorkspaceThatNeverMergedWritesNoMergeRow(t *testing.T) {
 	// Act.
 	connectOperational(t, m, "ws1", "s1", "gen-1")
 
-	// Assert.
-	if got := mustCurrent(t, m, "ws1").GetMergePhase(); got != "" {
-		t.Fatalf("merge_phase = %q after a bring-up on a never-merged workspace, want empty", got)
+	// Assert. REWRITTEN off the retired flat merge_phase wire field onto the
+	// merge AXIS it was projected from — the axis is what "no merge row" is a
+	// statement about, and it is untouched by the field's retirement.
+	r, err := resolve(m.db, "ws1", m.logf)
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if r.mergePhase != "" {
+		t.Fatalf("merge axis = %q after a bring-up on a never-merged workspace, want no merge row at all", r.mergePhase)
 	}
 }

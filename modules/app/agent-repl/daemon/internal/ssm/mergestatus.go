@@ -12,9 +12,10 @@ import (
 // wave-0 projection stood in with `<workspace>@<instant>`, which changed on
 // every phase transition, so one run published a different id at each step and a
 // frontend correlating on the field blended and split runs at random. A status
-// stamped with an id nothing minted is worse than no status: the coarse
-// merge_phase (still stamped beside it) reports the run's phase honestly, and
-// merge_status stays UNSET until the run that owns it publishes.
+// stamped with an id nothing minted is worse than no status, so merge_status
+// stays UNSET until the run that owns it publishes. The merge AXIS still
+// resolves the frame's render state in the meantime, so a merge in flight is
+// never invisible — only its per-run progress is withheld.
 //
 // It is the same rule merge.QueueCoordinator already applies to a merge it fails
 // before any run exists (the boot sweep of orphaned merge_enqueuing marks): no
@@ -57,17 +58,22 @@ func (m *Manager) clearPipelineStatusLocked(workspace string) {
 // never spoken, whose axis was cleared, or whose run belongs to a process that
 // is gone gets no status at all — never a zero-valued one, and never one keyed
 // to an invented run.
-func (m *Manager) stampMergeStatusLocked(workspace string, msg *frontendv1.WorkspaceState) {
+// resolvedMergePhase is the merge AXIS's own verdict for this frame, threaded
+// in from the resolution rather than read back off the message. It used to be
+// read back off msg.GetMergePhase(); that wire field is retired, but the axis
+// behind it is untouched and is still what a retained status must agree with,
+// so the check reads the resolution directly instead of being dropped.
+func (m *Manager) stampMergeStatusLocked(workspace, resolvedMergePhase string, msg *frontendv1.WorkspaceState) {
 	status, ok := m.pipelineStatus[workspace]
 	if !ok {
 		return
 	}
-	if msg.GetMergePhase() == "" {
+	if resolvedMergePhase == "" {
 		// The retained run says the workspace is merging and the resolution says
-		// it is not. Stamping the status anyway would push a frame whose two merge
-		// fields contradict each other, so the disagreement is reported and the
-		// resolution wins.
-		m.logf("ssm: INVARIANT VIOLATION ws=%s has a retained pipeline merge_status (run=%s) with NO resolved merge_phase behind it — merge_status is left unset",
+		// it is not. Stamping the status anyway would push a frame whose merge
+		// status contradicts the axis that resolved the frame's render state, so
+		// the disagreement is reported and the resolution wins.
+		m.logf("ssm: INVARIANT VIOLATION ws=%s has a retained pipeline merge_status (run=%s) with NO resolved merge axis behind it — merge_status is left unset",
 			workspace, status.GetRunId())
 		return
 	}
