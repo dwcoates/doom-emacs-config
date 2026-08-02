@@ -1,10 +1,15 @@
 package merge
 
 import (
+	"errors"
 	"testing"
 
 	frontendv1 "agentrepl/proto/agentshim/frontend/v1"
 )
+
+// errWatermarkStore stands in for a durable store that cannot record the run's
+// updated_at_ms floor.
+var errWatermarkStore = errors.New("watermark store unavailable")
 
 // pinnedClock returns a clock stuck at one instant, which is how a test drives
 // the "two ticks in the same millisecond" edge deterministically.
@@ -81,7 +86,7 @@ func TestResumeRunStatusKeepsTheAdmittedID(t *testing.T) {
 	sink := &recordingSink{}
 
 	// Act.
-	run, err := ResumeRunStatus(sink, t.Logf, "/ws/a", testClock(), "run-admitted")
+	run, err := ResumeRunStatus(sink, t.Logf, "/ws/a", testClock(), "run-admitted", 0)
 
 	// Assert.
 	if err != nil {
@@ -99,11 +104,238 @@ func TestResumeRunStatusRefusesAnEmptyID(t *testing.T) {
 	sink := &recordingSink{}
 
 	// Act.
-	_, err := ResumeRunStatus(sink, t.Logf, "/ws/a", testClock(), "")
+	_, err := ResumeRunStatus(sink, t.Logf, "/ws/a", testClock(), "", 0)
 
 	// Assert.
 	if err == nil {
 		t.Fatal("ResumeRunStatus(\"\") error = nil, want the empty id refused")
+	}
+}
+
+// --- the cross-bounce watermark -----------------------------------------
+
+// recordingWatermark is a StatusWatermarkSink that remembers every value it was
+// handed, and can be made to fail.
+type recordingWatermark struct {
+	runIDs []string
+	values []int64
+	err    error
+}
+
+func (w *recordingWatermark) RecordStatusWatermark(runID string, updatedAtMs int64) error {
+	if w.err != nil {
+		return w.err
+	}
+	w.runIDs = append(w.runIDs, runID)
+	w.values = append(w.values, updatedAtMs)
+	return nil
+}
+
+// THE GUARANTEE: a resumed run publishes STRICTLY ABOVE everything the
+// pre-bounce process published, whatever the wall clock did across the bounce.
+//
+// The stopped-clock case stands in for the backwards step: a clock reading at or
+// below the watermark is exactly what an ntp correction or a settled container
+// clock produces, and it is the reading that used to publish underneath the
+// statuses already on the wire.
+func TestResumedUpdatedAtClearsTheWatermarkUnderAStoppedClock(t *testing.T) {
+	// Arrange — the bounce lost 3000ms of wall clock; the run had reached 9000.
+	tests := []struct {
+		name      string
+		nowMs     int64
+		watermark int64
+		wantMin   int64
+	}{
+		{name: "clock stepped backwards", nowMs: 6000, watermark: 9000, wantMin: 9001},
+		{name: "clock stopped on the watermark", nowMs: 9000, watermark: 9000, wantMin: 9001},
+		{name: "clock advanced normally", nowMs: 12000, watermark: 9000, wantMin: 12000},
+		{name: "no watermark recorded", nowMs: 12000, watermark: 0, wantMin: 12000},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			sink := &recordingSink{}
+			run, err := ResumeRunStatus(sink, t.Logf, "/ws/a", pinnedClock(tc.nowMs), "run-admitted", tc.watermark)
+			if err != nil {
+				t.Fatalf("ResumeRunStatus: %v", err)
+			}
+
+			// Act.
+			if err := run.PickingCurrent("resumed"); err != nil {
+				t.Fatalf("PickingCurrent: %v", err)
+			}
+
+			// Assert.
+			if got := sink.statuses[0].GetUpdatedAtMs(); got != tc.wantMin {
+				t.Fatalf("resumed updated_at_ms = %d, want %d", got, tc.wantMin)
+			}
+		})
+	}
+}
+
+// The watermark seeds the clock and nothing else: a resume that inherited the
+// phase clock would report the dead process's phase age as the live one's.
+func TestAResumedRunStartsItsPhaseClockAtItsFirstPublication(t *testing.T) {
+	// Arrange.
+	sink := &recordingSink{}
+	run, err := ResumeRunStatus(sink, t.Logf, "/ws/a", pinnedClock(6000), "run-admitted", 9000)
+	if err != nil {
+		t.Fatalf("ResumeRunStatus: %v", err)
+	}
+
+	// Act.
+	if err := run.PickingCurrent("resumed"); err != nil {
+		t.Fatalf("PickingCurrent: %v", err)
+	}
+
+	// Assert.
+	if got := sink.statuses[0].GetPhaseStartedAtMs(); got != 9001 {
+		t.Fatalf("resumed phase_started_at_ms = %d, want the first publication's 9001", got)
+	}
+}
+
+// A negative watermark cannot have come off a run's clock, so it is refused
+// rather than used as a floor that lowers the resumed run's first status.
+func TestResumeRunStatusRefusesANegativeWatermark(t *testing.T) {
+	// Arrange.
+	sink := &recordingSink{}
+
+	// Act.
+	_, err := ResumeRunStatus(sink, t.Logf, "/ws/a", testClock(), "run-admitted", -1)
+
+	// Assert.
+	if err == nil {
+		t.Fatal("ResumeRunStatus(-1) error = nil, want the negative watermark refused")
+	}
+}
+
+// Every published updated_at_ms reaches the durable floor, or the next resume
+// seeds beneath the status it missed.
+func TestEveryPublicationRecordsItsWatermark(t *testing.T) {
+	// Arrange.
+	sink := &recordingSink{}
+	watermark := &recordingWatermark{}
+	run := newTestRun(t, sink, pinnedClock(5000))
+	if err := run.BindWatermark(watermark); err != nil {
+		t.Fatalf("BindWatermark: %v", err)
+	}
+
+	// Act.
+	if err := run.PickingCurrent("first"); err != nil {
+		t.Fatalf("PickingCurrent: %v", err)
+	}
+	if err := run.PickingCurrent("second"); err != nil {
+		t.Fatalf("PickingCurrent: %v", err)
+	}
+
+	// Assert.
+	if got, want := watermark.values, []int64{5000, 5001}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("recorded watermarks = %v, want %v", got, want)
+	}
+}
+
+// The floor is keyed on the run, so the sink must be told which run it is
+// raising: a value filed under the wrong name protects the wrong entry.
+func TestTheRecordedWatermarkCarriesTheRunID(t *testing.T) {
+	// Arrange.
+	sink := &recordingSink{}
+	watermark := &recordingWatermark{}
+	run, err := ResumeRunStatus(sink, t.Logf, "/ws/a", pinnedClock(5000), "run-admitted", 0)
+	if err != nil {
+		t.Fatalf("ResumeRunStatus: %v", err)
+	}
+	if err := run.BindWatermark(watermark); err != nil {
+		t.Fatalf("BindWatermark: %v", err)
+	}
+
+	// Act.
+	if err := run.PickingCurrent("resumed"); err != nil {
+		t.Fatalf("PickingCurrent: %v", err)
+	}
+
+	// Assert.
+	if got := watermark.runIDs; len(got) != 1 || got[0] != "run-admitted" {
+		t.Fatalf("recorded run ids = %v, want [run-admitted]", got)
+	}
+}
+
+// THE VIOLATION EDGE: a status must not reach the sink above a floor that was
+// never written down, because a bounce right after would resume beneath it.
+func TestAFailedWatermarkRefusesThePublication(t *testing.T) {
+	// Arrange.
+	sink := &recordingSink{}
+	run := newTestRun(t, sink, pinnedClock(5000))
+	if err := run.BindWatermark(&recordingWatermark{err: errWatermarkStore}); err != nil {
+		t.Fatalf("BindWatermark: %v", err)
+	}
+
+	// Act.
+	err := run.PickingCurrent("first")
+
+	// Assert.
+	if err == nil {
+		t.Fatal("PickingCurrent() error = nil, want the unrecordable watermark refused")
+	}
+	if len(sink.statuses) != 0 {
+		t.Fatalf("published %d statuses past a failed watermark, want none", len(sink.statuses))
+	}
+}
+
+// A refused publication must not burn an updated_at_ms either, or the run's
+// stream develops a gap no receiver can account for.
+func TestAFailedWatermarkLeavesTheClockUntouched(t *testing.T) {
+	// Arrange.
+	sink := &recordingSink{}
+	watermark := &recordingWatermark{err: errWatermarkStore}
+	run := newTestRun(t, sink, pinnedClock(5000))
+	if err := run.BindWatermark(watermark); err != nil {
+		t.Fatalf("BindWatermark: %v", err)
+	}
+	if err := run.PickingCurrent("refused"); err == nil {
+		t.Fatal("PickingCurrent() error = nil, want the failure")
+	}
+
+	// Act — the store recovers.
+	watermark.err = nil
+	if err := run.PickingCurrent("retried"); err != nil {
+		t.Fatalf("PickingCurrent: %v", err)
+	}
+
+	// Assert.
+	if got := sink.statuses[0].GetUpdatedAtMs(); got != 5000 {
+		t.Fatalf("updated_at_ms = %d after a refused publication, want the unburned 5000", got)
+	}
+}
+
+// Two sinks would mean two durable floors for one run, and the resume would seed
+// from whichever the queue happened to read.
+func TestBindWatermarkRefusesASecondSink(t *testing.T) {
+	// Arrange.
+	run := newTestRun(t, &recordingSink{}, testClock())
+	if err := run.BindWatermark(&recordingWatermark{}); err != nil {
+		t.Fatalf("BindWatermark: %v", err)
+	}
+
+	// Act.
+	err := run.BindWatermark(&recordingWatermark{})
+
+	// Assert.
+	if err == nil {
+		t.Fatal("BindWatermark() twice error = nil, want the rebind refused")
+	}
+}
+
+// A nil sink binds nothing while looking bound, which would silently leave the
+// run publishing above a floor nobody records.
+func TestBindWatermarkRefusesANilSink(t *testing.T) {
+	// Arrange.
+	run := newTestRun(t, &recordingSink{}, testClock())
+
+	// Act.
+	err := run.BindWatermark(nil)
+
+	// Assert.
+	if err == nil {
+		t.Fatal("BindWatermark(nil) error = nil, want the nil sink refused")
 	}
 }
 

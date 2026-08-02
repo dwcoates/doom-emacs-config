@@ -317,6 +317,14 @@ func (c *QueueCoordinator) Enqueue(ctx context.Context, req Request) (Position, 
 		c.logf("merge: enqueue publish FAILED {repo=%s ws=%s name=%s}: %v", repo, req.Workspace, req.Name, err)
 		return Position{}, fmt.Errorf("merge: enqueue %q: %w", req.Name, err)
 	}
+	// THE WATERMARK IS BOUND HERE and not at the mint, because the durable entry
+	// it writes into did not exist until Publish returned. Nothing has published
+	// yet — `enqueued` below is the run's first status — so no status can slip
+	// past an unbound run.
+	if err := c.bindWatermark(repo, run); err != nil {
+		gate.Unlock()
+		return Position{}, fmt.Errorf("merge: enqueue %q: %w", req.Name, err)
+	}
 	// THE ADMISSION IS ALWAYS PUBLISHED, at the head as well as behind another
 	// merge. `enqueued` is the run's FIRST status and the only one that reports
 	// where it landed, so skipping it for a head admission would leave the run's
@@ -917,15 +925,46 @@ func (c *QueueCoordinator) rebuildRun(repo string, req Request) (*RunStatus, err
 		if err != nil {
 			return nil, err
 		}
+		if err := c.bindWatermark(repo, run); err != nil {
+			return nil, err
+		}
 		c.logf("merge: run MINTED for an unnamed replayed entry {repo=%s ws=%s name=%s run=%s}", repo, req.Workspace, req.Name, run.RunID())
 		return run, nil
 	}
-	run, err := ResumeRunStatus(c.status, c.logf, req.Workspace, c.now, req.RunID)
+	run, err := ResumeRunStatus(c.status, c.logf, req.Workspace, c.now, req.RunID, req.StatusWatermarkMs)
 	if err != nil {
 		return nil, err
 	}
-	c.logf("merge: run RESUMED for a replayed entry {repo=%s ws=%s name=%s run=%s}", repo, req.Workspace, req.Name, run.RunID())
+	if err := c.bindWatermark(repo, run); err != nil {
+		return nil, err
+	}
+	c.logf("merge: run RESUMED for a replayed entry {repo=%s ws=%s name=%s run=%s watermark_ms=%d}",
+		repo, req.Workspace, req.Name, run.RunID(), req.StatusWatermarkMs)
 	return run, nil
+}
+
+// repoWatermark binds a repository key to the queue, so a RunStatus can record
+// its updated_at_ms floor without knowing what a repo key is.
+type repoWatermark struct {
+	queue DurableQueue
+	repo  string
+}
+
+func (w repoWatermark) RecordStatusWatermark(runID string, updatedAtMs int64) error {
+	return w.queue.RecordStatusWatermark(w.repo, runID, updatedAtMs)
+}
+
+// bindWatermark points run's watermark at its durable entry on repo's queue.
+//
+// EVERY RUN THE COORDINATOR OWNS IS BOUND, minted and resumed alike. An unbound
+// run publishes statuses its own durable entry never records, and the resume
+// that entry feeds then seeds beneath them.
+func (c *QueueCoordinator) bindWatermark(repo string, run *RunStatus) error {
+	if err := run.BindWatermark(repoWatermark{queue: c.queue, repo: repo}); err != nil {
+		c.logf("merge: run watermark bind FAILED {repo=%s run=%s}: %v", repo, run.RunID(), err)
+		return err
+	}
+	return nil
 }
 
 // refuseDeletedSession fails the run when the workspace's newest session was
