@@ -380,6 +380,122 @@ message WorkspaceState {
   // log, so a frontend ordering a recently-merged section reads the identical
   // instant from every push, snapshot and resync.
   int64 merged_at_ms = 17;
+  // THE PHASE-LEVEL ACCOUNT of the merge run this workspace currently has in
+  // flight, or the terminal account of the last one.
+  //
+  // `merge_phase` (6) is a single word and cannot say WHICH commit of how many
+  // is landing, what the before-action prompt was, or why a run failed. This
+  // carries all of it, one message per phase, so a frontend renders progress
+  // without inventing a parser over the cause string.
+  //
+  // Fields 6/14/15 keep being stamped alongside it: every frontend that reads
+  // them predates this message, and retiring them is a separate wave.
+  MergeStatus merge_status = 18;
+}
+
+// THE DAEMON-OWNED MERGE PIPELINE'S PHASE-LEVEL STATUS.
+//
+// One MergeStatus describes one RUN — a single trip of one workspace through
+// the merge pipeline — and its CURRENT phase. The daemon publishes a new one
+// on every phase transition and on every within-phase tick (a commit landing,
+// a test starting), each as its own WorkspaceState revision.
+//
+// A RUN, NOT A WORKSPACE. `run_id` is minted when the repository's drain
+// goroutine pops the queue entry, so a merge that is retried after a failure,
+// or replayed by the next daemon's boot, is a DIFFERENT run with a different
+// id. A frontend that keyed progress on the workspace alone would blend two
+// attempts into one nonsensical commit count.
+message MergeStatus {
+  // The run this status belongs to. Stable for the life of one pipeline trip.
+  string run_id = 1;
+  // WHEN THE CURRENT PHASE WAS ENTERED, in unix millis. For a terminal phase
+  // (merged, failed) it is when the run FINISHED. It deliberately does not
+  // move on a within-phase tick, so a frontend can render "cherry-picking for
+  // 40s" without the elapsed figure resetting every time a commit lands.
+  int64 phase_started_at_ms = 2;
+  // WHEN THIS STATUS WAS PUBLISHED, in unix millis, MONOTONIC WITHIN THE RUN.
+  // Unlike phase_started_at_ms it bumps on every publication including a
+  // within-phase tick, which is what lets a consumer order two statuses that
+  // share a phase.
+  int64 updated_at_ms = 3;
+  // Exactly one phase is set. An unset oneof is not a phase the pipeline can
+  // be in; it means the message was constructed wrong.
+  oneof phase {
+    MergeStatusEnqueued      enqueued       = 4;
+    MergeStatusBeforeAction  before_action  = 5;
+    MergeStatusCherryPicking cherry_picking = 6;
+    MergeStatusTesting       testing        = 7;
+    MergeStatusConflict      conflict       = 8;
+    MergeStatusAfterAction   after_action   = 9;
+    MergeStatusMerged        merged         = 10;
+    MergeStatusFailed        failed         = 11;
+  }
+}
+
+// The run is on its repository's queue and has not started. Position/depth are
+// the same queue facts WorkspaceState.merge_queue_position/depth carry.
+message MergeStatusEnqueued {
+  int32 position = 1;  // 1-based
+  int32 depth = 2;     // total entries on this repository's queue
+}
+
+// The workspace's own agent session is running the before_ws_merge action the
+// workspace was created with, under the merge lease. `prompt` is the recorded
+// action text, so a frontend can show WHAT the session was asked to do.
+message MergeStatusBeforeAction {
+  string prompt = 1;
+}
+
+// A commit is being cherry-picked onto the target.
+message MergeStatusCherryPicking {
+  int32 commits_total = 1;    // commits in the computed plan
+  int32 commits_landed = 2;   // commits of that plan already on the target
+  string current_sha = 3;     // the commit being picked (short)
+  string current_subject = 4; // its subject line
+}
+
+// The target repository's test suite is running for the commit that just
+// landed. It carries the SAME commit context cherry_picking does, so a
+// frontend renders one progress figure across both phases.
+message MergeStatusTesting {
+  int32 commits_total = 1;
+  int32 commits_landed = 2;
+  string current_sha = 3;
+  string current_subject = 4;
+}
+
+// A cherry-pick left a conflict in the target tree. The pick is LEFT IN TREE
+// awaiting a resolution (the workspace's own session first, a human second).
+message MergeStatusConflict {
+  string conflicted_sha = 1;
+  string conflicted_subject = 2;
+  int32 commits_total = 3;
+  int32 commits_landed = 4;
+}
+
+// The merge landed and the after-action (the workspace's postprocessing
+// prompt) is being delivered. `prompt` is the recorded prompt text.
+message MergeStatusAfterAction {
+  string prompt = 1;
+}
+
+// TERMINAL: the work is on the target.
+message MergeStatusMerged {
+  int32 commits_total = 1;
+  // Why the after-action did not land, empty when it did (or when there was
+  // none). A FAILED AFTER-ACTION DOES NOT FAIL THE RUN: the commits are on the
+  // target either way, and reporting `failed` would make the status lie about
+  // the tree. The error is carried HERE so it is still visible.
+  string after_action_error = 2;
+}
+
+// TERMINAL: the run did not land the work.
+message MergeStatusFailed {
+  string cause = 1;           // the human-readable reason
+  int32 commits_total = 2;
+  int32 commits_landed = 3;   // what had landed when the run failed
+  string failing_sha = 4;     // the commit the run died on, when there is one
+  string failing_subject = 5;
 }
 
 message SessionView {
