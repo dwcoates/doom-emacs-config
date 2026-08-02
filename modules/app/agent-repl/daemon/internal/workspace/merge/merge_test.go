@@ -332,9 +332,10 @@ func TestMergeCleanCherryPick(t *testing.T) {
 	if res.Tag != "merge/clean-ws" {
 		t.Errorf("res.Tag = %q, want merge/clean-ws", res.Tag)
 	}
-	// The opening transition, then a cherry_picking and a testing phase per
-	// commit the replay picks, then the terminal merged.
-	assertPhases(t, sink.phases(), PhaseMerging, PhaseMerging, PhaseMerging, PhaseMerged)
+	// A cherry_picking and a testing phase for each commit the replay picks,
+	// then the terminal merged. Nothing precedes them: a cherry_picking status
+	// published before the plan exists could only ever report 0 of 0.
+	assertPhases(t, sink.phases(), PhaseMerging, PhaseMerging, PhaseMerged)
 }
 
 // --- conflict detection -------------------------------------------------
@@ -407,7 +408,7 @@ func TestMergeConflictDetection(t *testing.T) {
 	if !cherryPickHeadPresent(t, target) {
 		t.Errorf("CHERRY_PICK_HEAD absent — driver aborted the conflict instead of leaving it in tree")
 	}
-	assertPhases(t, sink.phases(), PhaseMerging, PhaseMerging, PhaseMergeConflict)
+	assertPhases(t, sink.phases(), PhaseMerging, PhaseMergeConflict)
 }
 
 // --- resume-after-resolve completing the merge --------------------------
@@ -455,7 +456,7 @@ func TestResumeCompletesMergeAndOrdersTransitions(t *testing.T) {
 	}
 	// The full ordered sequence across Merge + Resume: the opening pick, the
 	// conflict, the resume, the test gate on the RESUMED commit, the terminal.
-	assertPhases(t, sink.phases(), PhaseMerging, PhaseMerging, PhaseMergeConflict, PhaseMerging, PhaseMerging, PhaseMerged)
+	assertPhases(t, sink.phases(), PhaseMerging, PhaseMergeConflict, PhaseMerging, PhaseMerging, PhaseMerged)
 }
 
 func TestResumeWithoutInProgressPickFails(t *testing.T) {
@@ -520,7 +521,7 @@ func TestMergeFlattensAMergeCommitInTheRange(t *testing.T) {
 			t.Errorf("%s did not land on the target: %v", name, statErr)
 		}
 	}
-	assertPhases(t, sink.phases(), PhaseMerging, PhaseMerging, PhaseMerging, PhaseMerging, PhaseMerging, PhaseMerged)
+	assertPhases(t, sink.phases(), PhaseMerging, PhaseMerging, PhaseMerging, PhaseMerging, PhaseMerged)
 }
 
 // --- preconditions abort with state intact ------------------------------
@@ -622,7 +623,7 @@ func TestMergeEmptyRangeReportsAlreadyIncorporated(t *testing.T) {
 	if res.Outcome != OutcomeMerged || !res.AlreadyIncorporated {
 		t.Fatalf("Merge() res = %+v, want merged + AlreadyIncorporated", res)
 	}
-	assertPhases(t, sink.phases(), PhaseMerging, PhaseMerged)
+	assertPhases(t, sink.phases(), PhaseMerged)
 }
 
 func TestMergeRangeAlreadyIncorporatedByCherryPickBase(t *testing.T) {
@@ -654,7 +655,7 @@ func TestMergeRangeAlreadyIncorporatedByCherryPickBase(t *testing.T) {
 	if head := strings.TrimSpace(gitRun(t, target, "rev-parse", "HEAD")); head != headBefore {
 		t.Errorf("target HEAD moved from %s to %s; a no-op merge must not replay the patch", headBefore, head)
 	}
-	assertPhases(t, sink.phases(), PhaseMerging, PhaseMerged)
+	assertPhases(t, sink.phases(), PhaseMerged)
 }
 
 func TestMergeRangeAlreadyIncorporatedByPatchID(t *testing.T) {
@@ -696,7 +697,7 @@ func TestMergeRangeAlreadyIncorporatedByPatchID(t *testing.T) {
 	if res.Outcome != OutcomeMerged || !res.AlreadyIncorporated {
 		t.Fatalf("Merge() res = %+v, want merged + AlreadyIncorporated via the patch-id probe", res)
 	}
-	assertPhases(t, sink.phases(), PhaseMerging, PhaseMerged)
+	assertPhases(t, sink.phases(), PhaseMerged)
 }
 
 // --- a dirty or colliding TARGET tree -----------------------------------
@@ -729,7 +730,7 @@ func TestMergeTargetDirtyUnstagedFails(t *testing.T) {
 	if got := readFile(t, target, "base.txt"); got != "local uncommitted work\n" {
 		t.Errorf("target base.txt = %q; the refused merge overwrote uncommitted work", got)
 	}
-	assertPhases(t, sink.phases(), PhaseMerging, PhaseMerging, PhaseMergeFailed)
+	assertPhases(t, sink.phases(), PhaseMerging, PhaseMergeFailed)
 }
 
 func TestMergeTargetDirtyStagedFails(t *testing.T) {
@@ -761,7 +762,7 @@ func TestMergeTargetDirtyStagedFails(t *testing.T) {
 	if cherryPickHeadPresent(t, target) {
 		t.Errorf("CHERRY_PICK_HEAD present; a refused pick is not a resolvable conflict")
 	}
-	assertPhases(t, sink.phases(), PhaseMerging, PhaseMerging, PhaseMergeFailed)
+	assertPhases(t, sink.phases(), PhaseMerging, PhaseMergeFailed)
 }
 
 func TestMergeUntrackedCollisionFails(t *testing.T) {
@@ -800,7 +801,7 @@ func TestMergeUntrackedCollisionFails(t *testing.T) {
 		t.Errorf("merge/untracked-ws tagged on a failed merge; git tag -l = %q", tags)
 	}
 	// The first commit landed and was tested; the second is what git refused.
-	assertPhases(t, sink.phases(), PhaseMerging, PhaseMerging, PhaseMerging, PhaseMerging, PhaseMergeFailed)
+	assertPhases(t, sink.phases(), PhaseMerging, PhaseMerging, PhaseMerging, PhaseMergeFailed)
 }
 
 // --- resume that hits a further conflict --------------------------------
@@ -852,7 +853,7 @@ func TestResumeSecondConflictReEmitsConflict(t *testing.T) {
 	if tags := strings.TrimSpace(gitRun(t, target, "tag", "-l", "merge/rz2-ws")); tags != "" {
 		t.Errorf("merge/rz2-ws tagged while still conflicted; git tag -l = %q", tags)
 	}
-	assertPhases(t, sink.phases(), PhaseMerging, PhaseMerging, PhaseMergeConflict, PhaseMerging, PhaseMerging, PhaseMerging, PhaseMergeConflict)
+	assertPhases(t, sink.phases(), PhaseMerging, PhaseMergeConflict, PhaseMerging, PhaseMerging, PhaseMerging, PhaseMergeConflict)
 }
 
 // --- sink-error propagation ---------------------------------------------
@@ -954,6 +955,126 @@ func TestMergeSurfacesSinkError(t *testing.T) {
 }
 
 // --- helpers ------------------------------------------------------------
+
+// --- what the published statuses say about the picks --------------------
+
+// firstStatusOnArm returns the first recorded status whose oneof arm matches
+// the predicate, or nil.
+func firstCherryPicking(statuses []*frontendv1.MergeStatus) *frontendv1.MergeStatusCherryPicking {
+	for _, s := range statuses {
+		if pick := s.GetCherryPicking(); pick != nil {
+			return pick
+		}
+	}
+	return nil
+}
+
+func firstConflictStatus(statuses []*frontendv1.MergeStatus) *frontendv1.MergeStatusConflict {
+	for _, s := range statuses {
+		if c := s.GetConflict(); c != nil {
+			return c
+		}
+	}
+	return nil
+}
+
+// THE GUARANTEE: the FIRST cherry_picking status a run publishes already carries
+// the plan's real size. The run used to open with one published before the plan
+// was computed, so the first thing any frontend learned about a three-commit
+// merge was that it was picking 0 of 0.
+func TestTheFirstCherryPickingStatusCarriesThePlanSize(t *testing.T) {
+	// Arrange — a branch with two commits, so the denominator is not 1 by luck.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	for _, name := range []string{"one.txt", "two.txt"} {
+		writeFile(t, featureDir, name, "hello\n")
+		gitRun(t, featureDir, "add", ".")
+		gitRun(t, featureDir, "commit", "-q", "-m", "add "+name)
+	}
+	sink := &recordingSink{}
+	e := newTestDriver(t, sink)
+	req := withRun(t, sink, Request{Workspace: "/ws/plan-ws", Name: "plan-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
+
+	// Act.
+	if _, err := e.Merge(context.Background(), req); err != nil {
+		t.Fatalf("Merge() err = %v", err)
+	}
+
+	// Assert.
+	pick := firstCherryPicking(sink.statuses)
+	if pick == nil {
+		t.Fatal("the run published no cherry_picking status at all")
+	}
+	if pick.GetCommitsTotal() != 2 {
+		t.Fatalf("the first cherry_picking status reports commits_total=%d, want 2 (the plan's real size)", pick.GetCommitsTotal())
+	}
+	if pick.GetCurrentSha() == "" {
+		t.Fatal("the first cherry_picking status carries an empty current_sha, so a frontend cannot say which commit is in flight")
+	}
+}
+
+// A NO-OP merge publishes no cherry_picking status. There is no commit in
+// flight and no denominator, so the only honest cherry_picking status would be
+// 0 of 0 — which reads to a frontend as a stalled merge rather than as one that
+// had nothing to do.
+func TestANoOpMergePublishesNoCherryPickingStatus(t *testing.T) {
+	// Arrange — a source branch that never committed anything.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	sink := &recordingSink{}
+	e := newTestDriver(t, sink)
+	req := withRun(t, sink, Request{Workspace: "/ws/noop-ws", Name: "noop-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
+
+	// Act.
+	if _, err := e.Merge(context.Background(), req); err != nil {
+		t.Fatalf("Merge() err = %v", err)
+	}
+
+	// Assert.
+	if pick := firstCherryPicking(sink.statuses); pick != nil {
+		t.Fatalf("a no-op merge published a cherry_picking status reporting %d of %d",
+			pick.GetCommitsLanded(), pick.GetCommitsTotal())
+	}
+}
+
+// THE GUARANTEE: conflicted_sha is the FULL sha. It is the one field a human
+// uses to go find the collision, and an abbreviated sha is only unique in the
+// repository that abbreviated it — a frontend cannot address the commit with it
+// anywhere else.
+func TestTheConflictStatusNamesTheFullShaOfTheCollidingCommit(t *testing.T) {
+	// Arrange — a feature edit that collides with a target edit to one file.
+	target := initTarget(t)
+	featureDir := addFeatureWorktree(t, target)
+	writeFile(t, featureDir, "base.txt", "feature\n")
+	gitRun(t, featureDir, "add", ".")
+	gitRun(t, featureDir, "commit", "-q", "-m", "feature edit")
+	wantSHA := strings.TrimSpace(gitRun(t, featureDir, "rev-parse", "HEAD"))
+	writeFile(t, target, "base.txt", "target\n")
+	gitRun(t, target, "add", ".")
+	gitRun(t, target, "commit", "-q", "-m", "target edit")
+
+	sink := &recordingSink{}
+	e := newTestDriver(t, sink)
+	req := withRun(t, sink, Request{Workspace: "/ws/full-sha-ws", Name: "full-sha-ws", SourceBranch: "feature", SourceDir: featureDir, TargetDir: target})
+
+	// Act.
+	res, err := e.Merge(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Merge() err = %v", err)
+	}
+	if res.Outcome != OutcomeConflict {
+		t.Fatalf("Merge() outcome = %s, want conflict", res.Outcome)
+	}
+
+	// Assert.
+	conflict := firstConflictStatus(sink.statuses)
+	if conflict == nil {
+		t.Fatal("the parked run published no conflict status")
+	}
+	if got := conflict.GetConflictedSha(); got != wantSHA {
+		t.Fatalf("conflicted_sha = %q, want the full sha %q", got, wantSHA)
+	}
+}
 
 func assertPhases(t *testing.T, got []Phase, want ...Phase) {
 	t.Helper()
@@ -1175,7 +1296,7 @@ func TestMergeReportsATestFailureWithTheFailingCommitAndTail(t *testing.T) {
 		t.Errorf("res.PreMergeHead = %q, want the pre-merge HEAD %q", res.PreMergeHead, head)
 	}
 	// No terminal transition: the coordinator classifies this one.
-	assertPhases(t, sink.phases(), PhaseMerging, PhaseMerging, PhaseMerging)
+	assertPhases(t, sink.phases(), PhaseMerging, PhaseMerging)
 }
 
 func TestMergeStopsPickingAfterATestFailure(t *testing.T) {

@@ -224,10 +224,16 @@ func (r *RunStatus) Testing(cause string) error {
 }
 
 // Conflict publishes the conflict phase for a pick left paused in the target.
-func (r *RunStatus) Conflict(short, cause string) error {
+//
+// sha is the FULL sha of the commit that collided, and the driver reads it as
+// such: conflicted_sha is the one field a human uses to go find the collision,
+// and an abbreviated sha is only unique in the repository that abbreviated it.
+// An empty sha leaves the run's current commit standing, which is what a
+// caller that already published the pick means.
+func (r *RunStatus) Conflict(sha, cause string) error {
 	r.mu.Lock()
-	if short != "" {
-		r.currentShort = short
+	if sha != "" {
+		r.currentShort = sha
 	}
 	r.mu.Unlock()
 	return r.publish(PhaseMergeConflict, cause, func(s *frontendv1.MergeStatus) {
