@@ -8,13 +8,17 @@ import (
 	"claude-repld/internal/workspace/merge"
 )
 
-// WorkspaceState.merge_status, the coarse projection of the merge axis. Each
-// test covers ONE mapping arm, plus absence and the cause's routing prefix.
+// WorkspaceState.merge_status, which ONLY the merge pipeline produces.
 //
-// Every case reads the status off mustCurrent rather than off the projection
-// helper directly: the whole claim being made is that the ONE WorkspaceState
-// construction funnel stamps it, so a test that called the mapper would pass
-// with the funnel unwired.
+// The wave-0 projection over the merge axis is gone: it minted a placeholder
+// run_id per state-log row, so one run published a different id at every phase.
+// What is asserted here is the replacement contract — a transition the pipeline
+// did not publish a status for carries NO status, and every status on the wire
+// is the one the run handed in.
+//
+// Every case reads the status off mustCurrent rather than off a helper directly:
+// the claim being made is that the ONE WorkspaceState construction funnel stamps
+// it, so a test that called the stamper would pass with the funnel unwired.
 
 // mustMergeStatus returns the workspace's stamped merge status, failing when
 // the frame carries none.
@@ -63,223 +67,74 @@ func TestMergeStatusIsAbsentOnAClearedMergeAxis(t *testing.T) {
 	}
 }
 
-func TestMergeEnqueuingMapsToTheEnqueuedPhase(t *testing.T) {
+func TestATransitionWithNoPublishedStatusCarriesNoMergeStatus(t *testing.T) {
+	// THE PLACEHOLDER'S GRAVE. A merge-axis row on its own says which phase the
+	// workspace is in and nothing about which run is in it, so a status stamped
+	// from it could only carry an id nothing minted.
 	// Arrange.
 	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	applyPhases(t, m, "ws1", merge.PhaseMergeEnqueuing)
 
 	// Act.
-	got := mustMergeStatus(t, m, "ws1")
-
-	// Assert.
-	if got.GetEnqueued() == nil {
-		t.Fatalf("merge_status phase = %T, want enqueued", got.GetPhase())
-	}
-}
-
-func TestMergeQueuedMapsToTheEnqueuedPhase(t *testing.T) {
-	// Arrange.
-	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	applyPhases(t, m, "ws1", merge.PhaseMergeQueued)
-
-	// Act.
-	got := mustMergeStatus(t, m, "ws1")
-
-	// Assert.
-	if got.GetEnqueued() == nil {
-		t.Fatalf("merge_status phase = %T, want enqueued", got.GetPhase())
-	}
-}
-
-func TestTheEnqueuedPhaseCarriesTheQueuePlace(t *testing.T) {
-	// Arrange — the SAME queue snapshot that fills merge_queue_position/depth.
-	m, _, q, _, _ := openLeaseTest(t, "ws1")
-	q.snapshot = map[string][]merge.Request{
-		"/repo": {
-			{Workspace: "ws-ahead", Name: "ahead"},
-			{Workspace: "ws1", Name: "one"},
-		},
-	}
-	applyPhases(t, m, "ws1", merge.PhaseMergeQueued)
-
-	// Act.
-	got := mustMergeStatus(t, m, "ws1").GetEnqueued()
-
-	// Assert — 1-based place, and the depth of the whole repository's queue.
-	if got.GetPosition() != 2 || got.GetDepth() != 2 {
-		t.Fatalf("enqueued = (position=%d depth=%d), want (2, 2)", got.GetPosition(), got.GetDepth())
-	}
-}
-
-func TestMergingMapsToTheCherryPickingPhase(t *testing.T) {
-	// Arrange.
-	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
 	applyPhases(t, m, "ws1", merge.PhaseMerging)
 
-	// Act.
-	got := mustMergeStatus(t, m, "ws1")
-
 	// Assert.
-	if got.GetCherryPicking() == nil {
-		t.Fatalf("merge_status phase = %T, want cherry_picking", got.GetPhase())
+	if got := mustCurrent(t, m, "ws1").GetMergeStatus(); got != nil {
+		t.Fatalf("merge_status = %v for a transition the pipeline published no status for, want none", got)
 	}
 }
 
-func TestTheCherryPickingPhaseClaimsNoCommitCountsItCannotKnow(t *testing.T) {
-	// The current pipeline picks commits without ever reporting how many there
-	// are, so a non-zero figure here would be invented rather than observed.
+func TestATransitionWithNoPublishedStatusStillCarriesTheMergePhase(t *testing.T) {
+	// The coarse phase is what reports such a transition, which is why leaving
+	// merge_status unset loses nothing a frontend was already reading.
 	// Arrange.
 	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
+
+	// Act.
 	applyPhases(t, m, "ws1", merge.PhaseMerging)
 
-	// Act.
-	got := mustMergeStatus(t, m, "ws1").GetCherryPicking()
-
 	// Assert.
-	if got.GetCommitsTotal() != 0 || got.GetCommitsLanded() != 0 {
-		t.Fatalf("cherry_picking counts = (%d, %d), want (0, 0)", got.GetCommitsTotal(), got.GetCommitsLanded())
+	if got := mustCurrent(t, m, "ws1").GetMergePhase(); got != string(merge.PhaseMerging) {
+		t.Fatalf("merge_phase = %q, want it still stamped where merge_status is absent", got)
 	}
 }
 
-func TestMergeConflictMapsToTheConflictPhase(t *testing.T) {
+func TestTheRetainedStatusRidesEveryLaterFrame(t *testing.T) {
+	// A run publishes at its phase edges, and the frames pushed BETWEEN them (a
+	// connectivity edge, a turn) must still report the run rather than dropping
+	// it until the next phase.
 	// Arrange.
 	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	applyPhases(t, m, "ws1", merge.PhaseMergeConflict)
+	if err := m.ApplyMergeStatus("ws1", string(merge.PhaseMerging), "cherry-picking 1/1",
+		pipelineStatus("run-retained", 1, 0, "deadbeef1234", "the only commit")); err != nil {
+		t.Fatalf("ApplyMergeStatus: %v", err)
+	}
 
-	// Act.
-	got := mustMergeStatus(t, m, "ws1")
+	// Act — an unrelated push for the same workspace.
+	if err := m.Apply(evSessionStarted("s1", 2)); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
 
 	// Assert.
-	if got.GetConflict() == nil {
-		t.Fatalf("merge_status phase = %T, want conflict", got.GetPhase())
+	if got := mustMergeStatus(t, m, "ws1").GetRunId(); got != "run-retained" {
+		t.Fatalf("run_id = %q on a frame between phase edges, want the retained run-retained", got)
 	}
 }
 
-func TestMergedMapsToTheMergedPhase(t *testing.T) {
+func TestThePublishedStatusReachesTheWireVerbatim(t *testing.T) {
 	// Arrange.
 	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	applyPhases(t, m, "ws1", merge.PhaseMerged)
+	want := pipelineStatus("run-verbatim", 4, 2, "cafebabe0000", "land the thing")
 
 	// Act.
+	if err := m.ApplyMergeStatus("ws1", string(merge.PhaseMerging), "cherry-picking 3/4", want); err != nil {
+		t.Fatalf("ApplyMergeStatus: %v", err)
+	}
+
+	// Assert — the run's own timestamps, not the state log's row instant.
 	got := mustMergeStatus(t, m, "ws1")
-
-	// Assert.
-	if got.GetMerged() == nil {
-		t.Fatalf("merge_status phase = %T, want merged", got.GetPhase())
-	}
-}
-
-func TestMergeFailedMapsToTheFailedPhase(t *testing.T) {
-	// Arrange.
-	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	applyPhases(t, m, "ws1", merge.PhaseMergeFailed)
-
-	// Act.
-	got := mustMergeStatus(t, m, "ws1")
-
-	// Assert.
-	if got.GetFailed() == nil {
-		t.Fatalf("merge_status phase = %T, want failed", got.GetPhase())
-	}
-}
-
-func TestTheFailedCauseDropsItsRoutingPrefix(t *testing.T) {
-	// The state log routes a merge row by prefixing its cause kind. The prefix
-	// is the daemon's own bookkeeping, so reporting it in front of the reason
-	// would tell the user their merge failed because of "merge_transition".
-	// Arrange.
-	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.ApplyMergeTransition("ws1", string(merge.PhaseMergeFailed), "merge enqueue refused: disk full"); err != nil {
-		t.Fatalf("ApplyMergeTransition: %v", err)
-	}
-
-	// Act.
-	got := mustMergeStatus(t, m, "ws1").GetFailed()
-
-	// Assert.
-	if got.GetCause() != "merge enqueue refused: disk full" {
-		t.Fatalf("failed cause = %q, want the note without the routing prefix", got.GetCause())
-	}
-}
-
-func TestAFailureRecordedWithNoNoteCarriesNoCause(t *testing.T) {
-	// Arrange — a transition whose cause kind is the bare routing token.
-	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	if err := m.ApplyMergeTransition("ws1", string(merge.PhaseMergeFailed), ""); err != nil {
-		t.Fatalf("ApplyMergeTransition: %v", err)
-	}
-
-	// Act.
-	got := mustMergeStatus(t, m, "ws1").GetFailed()
-
-	// Assert — an empty cause, never the routing token standing in for one.
-	if got.GetCause() != "" {
-		t.Fatalf("failed cause = %q, want empty for a transition recorded with no note", got.GetCause())
-	}
-}
-
-func TestMergeStatusReportsTheInstantThePhaseWasEntered(t *testing.T) {
-	// Arrange — a superseded phase, so the newest row is the one that must win.
-	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	applyPhases(t, m, "ws1", merge.PhaseMergeEnqueuing, merge.PhaseMerging)
-
-	// Act.
-	got := mustMergeStatus(t, m, "ws1")
-
-	// Assert — the state's own at_ms is the merging row's, and the phase agrees.
-	if got.GetPhaseStartedAtMs() != mustCurrent(t, m, "ws1").GetAtMs() {
-		t.Fatalf("phase_started_at_ms = %d, want the newest merge row's instant (%d)",
-			got.GetPhaseStartedAtMs(), mustCurrent(t, m, "ws1").GetAtMs())
-	}
-}
-
-func TestMergeStatusReportsNoTickAheadOfItsPhase(t *testing.T) {
-	// There are no within-phase ticks to report until the merge pipeline
-	// produces them, so the two instants are deliberately identical.
-	// Arrange.
-	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	applyPhases(t, m, "ws1", merge.PhaseMerging)
-
-	// Act.
-	got := mustMergeStatus(t, m, "ws1")
-
-	// Assert.
-	if got.GetUpdatedAtMs() != got.GetPhaseStartedAtMs() {
-		t.Fatalf("updated_at_ms = %d, want the phase instant %d", got.GetUpdatedAtMs(), got.GetPhaseStartedAtMs())
-	}
-}
-
-func TestMergeStatusAlwaysCarriesARunID(t *testing.T) {
-	// A status with no run id is one no reader can correlate at all; the
-	// placeholder is derived rather than left empty until the pipeline mints a
-	// real one.
-	// Arrange.
-	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	applyPhases(t, m, "ws1", merge.PhaseMerging)
-
-	// Act.
-	got := mustMergeStatus(t, m, "ws1")
-
-	// Assert.
-	if got.GetRunId() == "" {
-		t.Fatal("merge_status carries an empty run_id")
-	}
-}
-
-func TestMergeStatusRunIDSeparatesWorkspaces(t *testing.T) {
-	// Arrange — two workspaces on the same phase.
-	m, _, _ := openTest(t, fakeResolver{"s1": "ws1", "s2": "ws2"})
-	applyPhases(t, m, "ws1", merge.PhaseMerging)
-	applyPhases(t, m, "ws2", merge.PhaseMerging)
-
-	// Act.
-	one := mustMergeStatus(t, m, "ws1").GetRunId()
-	two := mustMergeStatus(t, m, "ws2").GetRunId()
-
-	// Assert — one id naming two workspaces' runs would collapse them in any
-	// reader that keys on it.
-	if one == two {
-		t.Fatalf("both workspaces report run_id %q", one)
+	if got.GetPhaseStartedAtMs() != want.GetPhaseStartedAtMs() || got.GetUpdatedAtMs() != want.GetUpdatedAtMs() {
+		t.Fatalf("timestamps = (%d, %d), want the run's own (%d, %d)",
+			got.GetPhaseStartedAtMs(), got.GetUpdatedAtMs(), want.GetPhaseStartedAtMs(), want.GetUpdatedAtMs())
 	}
 }
 
@@ -288,13 +143,15 @@ func TestMergeStatusRidesTheOldMergeFieldsRatherThanReplacingThem(t *testing.T) 
 	// moved yet keeps reading the phase it always read.
 	// Arrange.
 	m, _, _ := openTest(t, fakeResolver{"s1": "ws1"})
-	applyPhases(t, m, "ws1", merge.PhaseMerging)
 
 	// Act.
-	got := mustCurrent(t, m, "ws1")
+	if err := m.ApplyMergeStatus("ws1", string(merge.PhaseMerging), "cherry-picking 1/1",
+		pipelineStatus("run-both", 1, 0, "deadbeef1234", "the only commit")); err != nil {
+		t.Fatalf("ApplyMergeStatus: %v", err)
+	}
 
 	// Assert.
-	if got.GetMergePhase() != string(merge.PhaseMerging) {
-		t.Fatalf("merge_phase = %q, want it still stamped alongside merge_status", got.GetMergePhase())
+	if got := mustCurrent(t, m, "ws1").GetMergePhase(); got != string(merge.PhaseMerging) {
+		t.Fatalf("merge_phase = %q, want it still stamped alongside merge_status", got)
 	}
 }

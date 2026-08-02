@@ -74,6 +74,39 @@ func TestTwoRunsGetDifferentIDs(t *testing.T) {
 	}
 }
 
+// A resumed run keeps the name it was admitted under: a boot replay continues
+// the merge the user submitted, and a fresh id would make it look abandoned.
+func TestResumeRunStatusKeepsTheAdmittedID(t *testing.T) {
+	// Arrange.
+	sink := &recordingSink{}
+
+	// Act.
+	run, err := ResumeRunStatus(sink, t.Logf, "/ws/a", testClock(), "run-admitted")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ResumeRunStatus: %v", err)
+	}
+	if got := run.RunID(); got != "run-admitted" {
+		t.Fatalf("RunID = %q, want the admitted run-admitted", got)
+	}
+}
+
+// The VIOLATION EDGE: resuming with no id is a caller that lost the very thing
+// the resume exists to carry, and minting one silently would rename the run.
+func TestResumeRunStatusRefusesAnEmptyID(t *testing.T) {
+	// Arrange.
+	sink := &recordingSink{}
+
+	// Act.
+	_, err := ResumeRunStatus(sink, t.Logf, "/ws/a", testClock(), "")
+
+	// Assert.
+	if err == nil {
+		t.Fatal("ResumeRunStatus(\"\") error = nil, want the empty id refused")
+	}
+}
+
 // --- the two timestamps -------------------------------------------------
 
 // THE GUARANTEE: updated_at_ms is strictly increasing within a run, even when
@@ -144,6 +177,50 @@ func TestPhaseStartedAtMovesOnAPhaseChange(t *testing.T) {
 	}
 }
 
+// --- the admission arm --------------------------------------------------
+
+// THE GUARANTEE: the `enqueued` ARM and the merge-axis TOKEN are separate. A
+// head admission is `enqueued` to a frontend and merge_enqueuing on the axis,
+// because the coarse phase must not tell every reader that a merge starting
+// immediately is waiting on something.
+func TestAHeadAdmissionPublishesTheEnqueuedArmOnTheEnqueuingToken(t *testing.T) {
+	// Arrange.
+	sink := &recordingSink{}
+	run := newTestRun(t, sink, testClock())
+
+	// Act.
+	if err := run.Enqueued(PhaseMergeEnqueuing, 1, 1, "admitted at the head"); err != nil {
+		t.Fatalf("Enqueued: %v", err)
+	}
+
+	// Assert.
+	if got := sink.statuses[0].GetEnqueued(); got == nil {
+		t.Fatalf("phase = %T, want the enqueued arm", sink.statuses[0].GetPhase())
+	}
+	if got := sink.got[0].phase; got != PhaseMergeEnqueuing {
+		t.Fatalf("axis token = %q, want %q", got, PhaseMergeEnqueuing)
+	}
+}
+
+// The VIOLATION EDGE: an `enqueued` arm on a phase that is not an admission
+// would report a queue place for a run that is already cherry-picking.
+func TestEnqueuedRefusesANonAdmissionPhase(t *testing.T) {
+	// Arrange.
+	sink := &recordingSink{}
+	run := newTestRun(t, sink, testClock())
+
+	// Act.
+	err := run.Enqueued(PhaseMerging, 1, 1, "not an admission")
+
+	// Assert.
+	if err == nil {
+		t.Fatal("Enqueued(merging) error = nil, want the non-admission phase refused")
+	}
+	if len(sink.statuses) != 0 {
+		t.Fatalf("published %d statuses for a refused admission, want none", len(sink.statuses))
+	}
+}
+
 // --- per-phase publish content ------------------------------------------
 
 func TestEachPhasePublishesItsOwnPayload(t *testing.T) {
@@ -159,7 +236,7 @@ func TestEachPhasePublishesItsOwnPayload(t *testing.T) {
 	}{
 		{
 			name:    "enqueued carries its queue facts",
-			publish: func(r *RunStatus) error { return r.Enqueued(2, 5, "queued") },
+			publish: func(r *RunStatus) error { return r.Enqueued(PhaseMergeQueued, 2, 5, "queued") },
 			check: func(t *testing.T, s *frontendv1.MergeStatus) {
 				got := s.GetEnqueued()
 				if got == nil {
