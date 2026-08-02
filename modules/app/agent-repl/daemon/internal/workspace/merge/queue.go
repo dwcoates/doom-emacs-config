@@ -34,6 +34,15 @@ type DurableQueue interface {
 	// invariant and returns a hard error rather than guessing which entry was
 	// meant.
 	Complete(repo string, req Request) error
+
+	// RecordStatusWatermark persists runID's last published updated_at_ms onto
+	// its durable entry, so the run resumed from that entry after a bounce can
+	// seed its clock ABOVE everything the pre-bounce process published.
+	//
+	// It is called by merge.RunStatus and by nothing else. Two writers of one
+	// watermark could lower it, and a lowered watermark is exactly the
+	// regression it exists to prevent.
+	RecordStatusWatermark(repo, runID string, updatedAtMs int64) error
 }
 
 var _ DurableQueue = (*FileQueue)(nil)
@@ -82,6 +91,15 @@ type queueEntry struct {
 	id   string
 	req  Request
 	done chan struct{}
+	// watermarkMs mirrors the entry file's status_watermark_ms.
+	//
+	// IT IS DELIBERATELY NOT req.StatusWatermarkMs. Complete identifies the head
+	// by comparing whole Request values, so every field of req has to stay
+	// exactly as it was delivered; a field that moved while the merge ran would
+	// make the entry fail to match itself. req carries the watermark the entry
+	// was HYDRATED with (what a resume seeds from), this carries the one the
+	// live run has reached.
+	watermarkMs int64
 }
 
 // entryFile is the on-disk form of a queue entry. The request's fields are
@@ -105,28 +123,40 @@ type entryFile struct {
 	// entry written before the field existed, which the drain reports and
 	// replays under a freshly minted id.
 	RunID string `json:"run_id,omitempty"`
+	// StatusWatermarkMs is the HIGHEST updated_at_ms this entry's run has
+	// published. It is the one piece of a run's status a bounce must remember:
+	// the resumed publisher seeds its clock from max(now, watermark+1), so a
+	// backwards wall-clock step across the bounce cannot make a resumed status
+	// sort BELOW the ones the dead process already put on the wire.
+	//
+	// Zero for a run that has published nothing yet, and for an entry written
+	// before the field existed. Both mean the same thing to a resume — there is
+	// no floor to respect — and both are served correctly by now().
+	StatusWatermarkMs int64 `json:"status_watermark_ms,omitempty"`
 }
 
 func (f entryFile) request() Request {
 	return Request{
-		Workspace:    f.Workspace,
-		Name:         f.Name,
-		SourceBranch: f.SourceBranch,
-		SourceDir:    f.SourceDir,
-		TargetDir:    f.TargetDir,
-		RunID:        f.RunID,
+		Workspace:         f.Workspace,
+		Name:              f.Name,
+		SourceBranch:      f.SourceBranch,
+		SourceDir:         f.SourceDir,
+		TargetDir:         f.TargetDir,
+		RunID:             f.RunID,
+		StatusWatermarkMs: f.StatusWatermarkMs,
 	}
 }
 
 func newEntryFile(repo string, req Request) entryFile {
 	return entryFile{
-		Repo:         repo,
-		Workspace:    req.Workspace,
-		Name:         req.Name,
-		SourceBranch: req.SourceBranch,
-		SourceDir:    req.SourceDir,
-		TargetDir:    req.TargetDir,
-		RunID:        req.runIdentity(),
+		Repo:              repo,
+		Workspace:         req.Workspace,
+		Name:              req.Name,
+		SourceBranch:      req.SourceBranch,
+		SourceDir:         req.SourceDir,
+		TargetDir:         req.TargetDir,
+		RunID:             req.runIdentity(),
+		StatusWatermarkMs: req.StatusWatermarkMs,
 	}
 }
 
@@ -172,12 +202,17 @@ func (q *FileQueue) Publish(_ context.Context, repo string, req Request) (Positi
 		q.logf("merge: queue publish id FAILED {repo=%s ws=%s}: %v", repo, req.Workspace, err)
 		return Position{}, err
 	}
-	if err := q.writeEntry(repo, id, req); err != nil {
+	if err := q.writeEntry(repo, id, newEntryFile(repo, req)); err != nil {
 		q.logf("merge: queue publish write FAILED {repo=%s ws=%s id=%s}: %v", repo, req.Workspace, id, err)
 		return Position{}, err
 	}
 	rq := q.repos[repo]
-	rq.entries = append(rq.entries, &queueEntry{id: id, req: req, done: make(chan struct{})})
+	rq.entries = append(rq.entries, &queueEntry{
+		id:          id,
+		req:         req,
+		done:        make(chan struct{}),
+		watermarkMs: req.StatusWatermarkMs,
+	})
 	pos := Position{Index: len(rq.entries), Depth: len(rq.entries), Repo: repo}
 	// Non-blocking: the serve loop rechecks the slice after every wake, so a
 	// notification that finds the buffer full is redundant rather than lost.
@@ -294,6 +329,61 @@ func (q *FileQueue) Complete(repo string, req Request) error {
 	rq.entries = rq.entries[1:]
 	close(head.done)
 	q.logf("merge: queue complete {repo=%s ws=%s id=%s remaining=%d}", repo, req.Workspace, head.id, len(rq.entries))
+	return nil
+}
+
+// RecordStatusWatermark implements DurableQueue: it raises runID's entry's
+// status_watermark_ms to updatedAtMs and rewrites the durable record.
+//
+// THE WATERMARK ONLY EVER RISES. A lower value is refused rather than written,
+// because the whole point of the field is to be a floor no resume can publish
+// beneath; accepting a lower one would hand the next boot a floor below statuses
+// already on the wire. merge.RunStatus is the sole writer and its own clock is
+// strictly increasing, so a lower value reaching here is a violated invariant,
+// not a race to absorb.
+//
+// A RETIRED ENTRY IS A NO-OP, NOT A FAILURE. The watermark exists to seed a
+// resume, and a resume is built from a durable entry; once Complete has dropped
+// the record there is nothing left to resume and therefore nothing to protect.
+// The terminal `merged` status the post-merge hook republishes after the entry
+// is retired lands in exactly this case, and refusing it would deny a merge that
+// demonstrably happened over a file that is deliberately gone. It is logged so
+// the case is visible rather than silent.
+func (q *FileQueue) RecordStatusWatermark(repo, runID string, updatedAtMs int64) error {
+	if repo == "" {
+		return fmt.Errorf("merge: queue RecordStatusWatermark needs a repo key")
+	}
+	if runID == "" {
+		return fmt.Errorf("merge: queue RecordStatusWatermark for repo %s needs a run id", repo)
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	rq := q.repos[repo]
+	if rq == nil {
+		q.logf("merge: queue watermark for a repo with no entries {repo=%s run=%s updated_at_ms=%d} — the run is retired, so there is nothing left to resume",
+			repo, runID, updatedAtMs)
+		return nil
+	}
+	for _, e := range rq.entries {
+		if e.req.runIdentity() != runID {
+			continue
+		}
+		if updatedAtMs <= e.watermarkMs {
+			q.logf("merge: queue watermark REFUSING a regression {repo=%s ws=%s run=%s have=%d got=%d}",
+				repo, e.req.Workspace, runID, e.watermarkMs, updatedAtMs)
+			return fmt.Errorf("merge: queue watermark for run %s on repo %s is %d, refusing %d", runID, repo, e.watermarkMs, updatedAtMs)
+		}
+		f := newEntryFile(repo, e.req)
+		f.StatusWatermarkMs = updatedAtMs
+		if err := q.writeEntry(repo, e.id, f); err != nil {
+			q.logf("merge: queue watermark write FAILED {repo=%s ws=%s run=%s id=%s}: %v", repo, e.req.Workspace, runID, e.id, err)
+			return fmt.Errorf("merge: record status watermark for run %s: %w", runID, err)
+		}
+		e.watermarkMs = updatedAtMs
+		return nil
+	}
+	q.logf("merge: queue watermark for an entry that is gone {repo=%s run=%s updated_at_ms=%d} — the run is retired, so there is nothing left to resume",
+		repo, runID, updatedAtMs)
 	return nil
 }
 
@@ -436,7 +526,12 @@ func (q *FileQueue) readRepoDir(dir string) ([]*queueEntry, error) {
 			return nil, fmt.Errorf("merge: queue entry %s: %w", filepath.Join(dir, name), err)
 		}
 		id := strings.TrimSuffix(strings.TrimPrefix(name, queueFilePrefix), ".json")
-		entries = append(entries, &queueEntry{id: id, req: req, done: make(chan struct{})})
+		entries = append(entries, &queueEntry{
+			id:          id,
+			req:         req,
+			done:        make(chan struct{}),
+			watermarkMs: f.StatusWatermarkMs,
+		})
 	}
 	return entries, nil
 }
@@ -456,14 +551,18 @@ func readEntryFile(path string) (entryFile, error) {
 // writeEntry lands one durable record atomically: the payload goes to a
 // dot-prefixed temp name the entry glob cannot match, then renames into place.
 // A reader therefore never sees a partial entry.
-func (q *FileQueue) writeEntry(repo, id string, req Request) error {
+//
+// The rename is also what makes a watermark update safe: an entry rewritten in
+// place would be readable half-old and half-new by the next boot, and a
+// truncated watermark reads as zero — no floor at all.
+func (q *FileQueue) writeEntry(repo, id string, f entryFile) error {
 	dir := q.repoDir(repo)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("merge: create queue dir %s: %w", dir, err)
 	}
-	payload, err := json.Marshal(newEntryFile(repo, req))
+	payload, err := json.Marshal(f)
 	if err != nil {
-		return fmt.Errorf("merge: marshal queue entry for %q: %w", req.Workspace, err)
+		return fmt.Errorf("merge: marshal queue entry for %q: %w", f.Workspace, err)
 	}
 	tmp, err := os.CreateTemp(dir, "."+queueFilePrefix+"*.json")
 	if err != nil {
