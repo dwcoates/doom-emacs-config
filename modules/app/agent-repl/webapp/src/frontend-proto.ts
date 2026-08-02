@@ -228,6 +228,14 @@ export interface WorkspaceState {
    */
   mergeLeaseHeld: boolean;
   /**
+   * WHEN this workspace's merge landed, in unix millis; 0 means it never has.
+   *
+   * The decoder must know this field even where nothing renders it: unknown
+   * fields are rejected outright, so omitting it took down every frame for a
+   * workspace that had merged — the one state whose frames matter most.
+   */
+  mergedAtMs: number;
+  /**
    * THE merge run's live progress, or `undefined` when this workspace has no
    * merge to report.
    *
@@ -932,6 +940,7 @@ const WORKSPACE_STATE_KEYS = new Set([
   "mergeQueuePosition",
   "mergeQueueDepth",
   "mergeLeaseHeld",
+  "mergedAtMs",
   "mergeStatus",
 ]);
 function decodeWorkspaceState(v: unknown): WorkspaceState {
@@ -956,6 +965,7 @@ function decodeWorkspaceState(v: unknown): WorkspaceState {
     mergeQueuePosition: num(o, "mergeQueuePosition", "WorkspaceState"),
     mergeQueueDepth: num(o, "mergeQueueDepth", "WorkspaceState"),
     mergeLeaseHeld: bool(o, "mergeLeaseHeld", "WorkspaceState"),
+    mergedAtMs: num(o, "mergedAtMs", "WorkspaceState"),
   };
   // ABSENCE IS THE ABSENCE OF A MERGE, and it is the only reading: the daemon
   // leaves the field unset for a workspace whose merge axis has never spoken,
