@@ -79,7 +79,7 @@ func TestE2EEveryTerminalMergePhaseReleasesTheLease(t *testing.T) {
 			w := newMergeWatch(t, conn)
 
 			// Act — merge, then (for the abandonment row) give up on it.
-			sendMerge(t, conn, "r-merge-release", mergeCmdFor(repo, wsDir, branch))
+			sendMerge(t, conn, "r-merge-release", mergeCmdFor(t, h.geometry, repo, wsDir, branch))
 			w.awaitOKAck("r-merge-release")
 			w.awaitLeaseHeld(wsDir)
 			w.awaitPhase(wsDir, tc.terminal)

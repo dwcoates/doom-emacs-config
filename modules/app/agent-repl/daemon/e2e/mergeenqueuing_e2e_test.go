@@ -38,7 +38,7 @@ func TestE2EAMergeAtTheHeadGoesEnqueuingThenMerging(t *testing.T) {
 	w := newMergeWatch(t, conn)
 
 	// Act
-	sendMerge(t, conn, "r-merge-head", mergeCmdFor(repo, clean, "feature-head"))
+	sendMerge(t, conn, "r-merge-head", mergeCmdFor(t, h.geometry, repo, clean, "feature-head"))
 	w.awaitOKAck("r-merge-head")
 	w.awaitPhase(clean, phaseMerged)
 
@@ -68,10 +68,10 @@ func TestE2EAQueuedMergeIsMarkedEnqueuingBeforeItIsQueued(t *testing.T) {
 	conn := h.dialFrontend(t)
 	defer conn.Close()
 	w := newMergeWatch(t, conn)
-	parkTheQueueHead(t, w, repo, first, "feature-first", "r-merge-first")
+	parkTheQueueHead(t, h.geometry, w, repo, first, "feature-first", "r-merge-first")
 
 	// Act
-	sendMerge(t, conn, "r-merge-second", mergeCmdFor(repo, second, "feature-second"))
+	sendMerge(t, conn, "r-merge-second", mergeCmdFor(t, h.geometry, repo, second, "feature-second"))
 	w.awaitOKAck("r-merge-second")
 	w.awaitPhase(second, phaseMergeQueued)
 
