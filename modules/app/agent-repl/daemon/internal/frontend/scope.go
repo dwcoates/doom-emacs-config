@@ -97,6 +97,12 @@ func filterSnapshot(snap *frontendv1.StateSnapshot, sc Scope) *frontendv1.StateS
 		Inits:      filterScopedViews(snap.GetInits(), sc),
 		Queues:     filterScopedViews(snap.GetQueues(), sc),
 		Progress:   filterScopedViews(snap.GetProgress(), sc),
+		// Daemon identity is connection-global, not workspace-scoped. Dropping
+		// it here handed every scoped client a snapshot with an empty boot id,
+		// which the webapp's version-skew gate rejects on EVERY adoption —
+		// aborting its post-adoption resync and leaving the conversation pane
+		// empty while freshness read "current".
+		Daemon: snap.GetDaemon(),
 		// Host-only data has no session routing key. Server strips it from every
 		// non-host client after this scope pass; preserve it here so a future
 		// host-scoped transport cannot accidentally erase durable work.
