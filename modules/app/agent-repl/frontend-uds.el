@@ -512,7 +512,14 @@ and reconnects (design §4.4)."
                    (process-name proc) (string-trim event))
   (cond
    ((and (eq proc agent-repl--uds-process) (string-match-p "open" event))
-    (let ((elapsed (- (float-time) agent-repl--uds-connect-started-at))
+    ;; `agent-repl--uds-connect-started-at' can be nil here (a duplicate open
+    ;; event, or an open racing a state reset).  Arithmetic on nil would error
+    ;; INSIDE the sentinel, silently skipping the `open' transition below and
+    ;; stranding the connection state — observed live as state=`failed' over a
+    ;; provably open process, refusing every send.
+    (let ((elapsed (if agent-repl--uds-connect-started-at
+                       (- (float-time) agent-repl--uds-connect-started-at)
+                     -1.0))
           (queued agent-repl--uds-outbound-queue))
       (setq agent-repl--uds-connection-state 'open
             agent-repl--uds-connect-started-at nil
@@ -705,6 +712,23 @@ connection sentinel flushes them after `open'.  Returns `request_id'."
         ;; cwd — so it must not be rewritten.  LOG-WORKSPACE is a separate
         ;; binding used only for the log sink.
         (log-workspace (agent-repl--frontend-ws-name workspace)))
+    ;; STATE RECONCILIATION before the refusal. The state variable is
+    ;; bookkeeping; the PROCESS is reality. A live process whose status is
+    ;; `open' while the variable says otherwise is a recorded desync (observed
+    ;; live after a daemon bounce: every send refused over a healthy socket).
+    ;; Reconcile LOUDLY and proceed — refusing to talk over a working
+    ;; connection because a variable went stale is the dishonest option.
+    (when (and (process-live-p proc)
+               ;; `ignore-errors': PROC may be a non-process stand-in in the
+               ;; batch harness; a nil status simply means "cannot attest
+               ;; open", which keeps the refusal path — never a swallowed
+               ;; failure of a real process.
+               (eq (ignore-errors (process-status proc)) 'open)
+               (not (memq agent-repl--uds-connection-state '(dialing open))))
+      (agent-repl--log log-workspace
+                       "uds-send-command: STATE DESYNC state=%s over a live open process — reconciling to open (field=%s)"
+                       agent-repl--uds-connection-state field)
+      (setq agent-repl--uds-connection-state 'open))
     (unless (and (process-live-p proc)
                  (memq agent-repl--uds-connection-state '(dialing open)))
       (agent-repl--log log-workspace

@@ -1470,3 +1470,53 @@ workspace open."
 (provide 'test-frontend-uds)
 
 ;;; test-frontend-uds.el ends here
+
+(ert-deftest agent-repl-test-uds-send-reconciles-state-desync-over-open-process ()
+  "A live `open' process with a stale non-open state variable sends anyway.
+The state variable is bookkeeping and the process is reality: refusing to
+talk over a working connection because the variable went stale (observed
+after a daemon bounce) is the dishonest option.  The reconciliation is
+loud and flips the variable back to `open'."
+  (agent-repl-test--with-uds
+    (let (sent)
+      (cl-letf (((symbol-function 'process-live-p)
+                 (lambda (p) (eq p 'fake-proc)))
+                ((symbol-function 'process-status)
+                 (lambda (_p) 'open))
+                ((symbol-function 'agent-repl--uds-generate-request-id)
+                 (lambda () "req-fixed"))
+                ((symbol-function 'process-send-string)
+                 (lambda (_proc s) (setq sent s))))
+        (let ((agent-repl--uds-connection-state 'failed)
+              (agent-repl--uds-outbound-queue nil))
+          ;; Act
+          (agent-repl--uds-send-command "interrupt" '(:hard t) "ws1" 'fake-proc)
+          ;; Assert — the frame went out and the state reconciled.
+          (should sent)
+          (should (eq agent-repl--uds-connection-state 'open)))))))
+
+(ert-deftest agent-repl-test-uds-send-still-refuses-a-dead-process ()
+  "Reconciliation never resurrects a genuinely dead connection."
+  (agent-repl-test--with-uds
+    (cl-letf (((symbol-function 'process-live-p) (lambda (_p) nil)))
+      (let ((agent-repl--uds-connection-state 'failed))
+        ;; Act + Assert
+        (should-error
+         (agent-repl--uds-send-command "interrupt" '(:hard t) "ws1" 'dead-proc)
+         :type 'user-error)))))
+
+(ert-deftest agent-repl-test-uds-sentinel-open-survives-nil-started-at ()
+  "A duplicate/racing `open' sentinel event with no start timestamp must not
+error inside the sentinel — that silent skip is what stranded the
+connection state over an open socket."
+  (agent-repl-test--with-uds
+    (cl-letf (((symbol-function 'process-live-p) (lambda (_p) t))
+              ((symbol-function 'process-name) (lambda (_p) "fake")))
+      (let ((agent-repl--uds-process 'fake-proc)
+            (agent-repl--uds-connection-state 'dialing)
+            (agent-repl--uds-connect-started-at nil)
+            (agent-repl--uds-outbound-queue nil))
+        ;; Act — must not signal.
+        (agent-repl--uds-sentinel 'fake-proc "open\n")
+        ;; Assert
+        (should (eq agent-repl--uds-connection-state 'open))))))
