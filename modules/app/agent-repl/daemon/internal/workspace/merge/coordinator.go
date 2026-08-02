@@ -622,6 +622,61 @@ func (c *QueueCoordinator) finish(repo string, req Request, release func()) bool
 	return true
 }
 
+// keepForTerminalReplay retires a run whose terminal STATUS did not publish,
+// WITHOUT acking its durable queue entry.
+//
+// THE MERGE OUTCOME IS NEVER ROLLED BACK HERE. A merged run's commits are on the
+// target and a failed run's rollback already ran; what did not happen is the
+// SAYING of it. The entry is therefore kept and MARKED with the exact terminal
+// word that failed to publish, so the next boot's Drain re-publishes that word
+// instead of replaying a merge that already happened — which is what makes the
+// run's terminal status as durable as the merge itself.
+//
+// THE LEASE STILL GOES BACK. A lease must never outlive the merge that took it,
+// whatever the status sink did, exactly as in finish.
+//
+// THE DRAIN STOPS. The head is unacked, so the repository cannot advance past
+// it; stopping loudly here is the same response finish gives a Complete that
+// failed, and for the same reason — spinning on a storage or sink failure serves
+// nobody.
+func (c *QueueCoordinator) keepForTerminalReplay(repo string, req Request, release func(), term TerminalStatus, publishErr error) bool {
+	if err := c.queue.MarkTerminal(repo, req, term); err != nil {
+		// Both halves failed: the status did not publish AND the terminal word
+		// could not be written down. The merge still stands, but nothing will
+		// ever say so on its own, so this is the loudest line the subsystem has.
+		c.logf("merge: terminal status LOST {repo=%s ws=%s name=%s outcome=%s cause=%s}: the status did not publish (%v) and its durable record could not be written (%v) — the merge outcome STANDS, but no boot will re-publish this run's terminal word",
+			repo, req.Workspace, req.Name, term.Outcome, term.Cause, publishErr, err)
+	}
+	if release != nil {
+		release()
+	}
+	c.logf("merge: drain HALTED, terminal status unpublished {repo=%s ws=%s name=%s outcome=%s}: %v — the outcome STANDS and its durable queue entry is KEPT, so the next boot's Drain re-publishes the terminal status rather than replaying the merge",
+		repo, req.Workspace, req.Name, term.Outcome, publishErr)
+	return false
+}
+
+// terminalFailure is a run's terminal `failed` word together with whether
+// publishing it landed.
+//
+// The two travel as one value because every failure path in the coordinator has
+// to answer both questions at its retirement point — what did the run die of,
+// and was that ever said — and a path that carried only the first is exactly how
+// a terminal word went missing.
+type terminalFailure struct {
+	cause      string
+	publishErr error
+}
+
+// retireFailed retires a run whose terminal word is `failed`: the entry is acked
+// when the status published, and KEPT and marked when it did not.
+func (c *QueueCoordinator) retireFailed(repo string, req Request, release func(), fail terminalFailure) bool {
+	if fail.publishErr != nil {
+		return c.keepForTerminalReplay(repo, req, release,
+			TerminalStatus{Outcome: OutcomeFailed, Cause: fail.cause}, fail.publishErr)
+	}
+	return c.finish(repo, req, release)
+}
+
 // completeMergedRun runs the workspace's after-action and publishes the run's
 // ONE terminal `merged` status, carrying whatever the action did.
 //
@@ -642,17 +697,32 @@ func (c *QueueCoordinator) finish(repo string, req Request, release func()) bool
 // republication can carry it too: the merged FACT is set-once, but a hook that
 // fails later must not drop the action's error off the status while adding its
 // own.
-func (c *QueueCoordinator) completeMergedRun(repo string, req Request, res Result) string {
+//
+// It ALSO returns the publication's own error, and that is what makes the
+// terminal word durable rather than merely attempted: a merged status that did
+// not publish leaves the queue entry standing (see keepForTerminalReplay), so
+// the next boot says it instead of a run ending in silence.
+func (c *QueueCoordinator) completeMergedRun(repo string, req Request, res Result) (string, error) {
 	afterActionErr := c.runAfterAction(repo, req)
-	cause := "cherry-pick landed on target"
-	if res.AlreadyIncorporated {
-		cause = "range already incorporated (no-op merge)"
-	}
+	cause := mergedCause(res)
 	if err := req.Run.Merged(afterActionErr, cause); err != nil {
-		c.logf("merge: terminal merged status FAILED {repo=%s ws=%s run=%s}: %v — the merge STANDS (the commits are on the target); only its final status did not publish",
+		c.logf("merge: terminal merged status FAILED {repo=%s ws=%s run=%s}: %v — the merge STANDS (the commits are on the target); only its final status did not publish, and the durable queue entry is KEPT so the next boot re-publishes it",
 			repo, req.Workspace, req.Run.RunID(), err)
+		return afterActionErr, err
 	}
-	return afterActionErr
+	return afterActionErr, nil
+}
+
+// mergedCause is the cause text a merged terminal status carries. It is a
+// function rather than a literal at the publish site because the durable
+// terminal record has to carry the SAME sentence: a boot replay that invented
+// its own wording would tell a user a different story than the one the merge
+// would have told.
+func mergedCause(res Result) string {
+	if res.AlreadyIncorporated {
+		return "range already incorporated (no-op merge)"
+	}
+	return "cherry-pick landed on target"
 }
 
 // runAfterAction resolves, publishes and DELIVERS the workspace's postprocessing
@@ -821,6 +891,23 @@ func (c *QueueCoordinator) PostMergeFailures() []PostMergeFailure {
 // False means this repository's drain stops with its entry left durable, for
 // the next boot's Drain to pick up.
 func (c *QueueCoordinator) runOne(repo string, req Request) bool {
+	// A TERMINAL WORD OWED IS NOT A MERGE TO RUN. An entry whose durable record
+	// carries a terminal status belongs to a run that already reached its
+	// outcome and could not say so; re-running it would land a second time (or
+	// fail a second time) for a merge that is over. It is answered, not redone.
+	term, pending, err := c.queue.PendingTerminal(repo, req)
+	if err != nil {
+		// The head this drain was just handed is not the head the queue reports.
+		// That is a violated single-ownership invariant, and proceeding would
+		// mean merging without knowing whether this entry is a replay.
+		c.logf("merge: drain HALTED, terminal lookup FAILED {repo=%s ws=%s name=%s}: %v — the entry is KEPT rather than merged blind",
+			repo, req.Workspace, req.Name, err)
+		return false
+	}
+	if pending {
+		return c.replayTerminal(repo, req, term)
+	}
+
 	// The resume rendezvous is published before anything else happens, so a
 	// conflict_resolved_continue that arrives while the cherry-pick is still
 	// running waits for the conflict rather than racing the park that will
@@ -861,24 +948,24 @@ func (c *QueueCoordinator) runOne(repo string, req Request) bool {
 	// are indistinguishable to EnsureLive — neither is live — and they resolve
 	// in OPPOSITE directions. Asking afterwards would mean asking about a
 	// session the bring-up had already resurrected.
-	if !c.refuseDeletedSession(repo, req, driven) {
-		return c.finish(repo, req, nil)
+	if fail := c.refuseDeletedSession(repo, req, driven); fail != nil {
+		return c.retireFailed(repo, req, nil, *fail)
 	}
 
 	// SESSION FIRST, LEASE SECOND. The merge drives this workspace's own session
 	// (the before-action, a conflict resolution, a test fix), and a bring-up can
 	// be slow — holding the exclusivity lease across it would lock the user out
 	// of their session for the whole of it.
-	if !c.bringUpSession(repo, req, driven) {
-		return c.finish(repo, req, nil)
+	if fail := c.bringUpSession(repo, req, driven); fail != nil {
+		return c.retireFailed(repo, req, nil, *fail)
 	}
 
 	release, err := c.lease.Acquire(c.ctx, req.Workspace)
 	if err != nil {
 		c.logf("merge: lease acquire FAILED {repo=%s ws=%s name=%s}: %v", repo, req.Workspace, req.Name, err)
-		c.failedRun(driven, "shim lease unavailable: "+err.Error())
+		fail := c.failRun(driven, "shim lease unavailable: "+err.Error())
 		// A merge that can never run must not hold the head forever.
-		return c.finish(repo, req, nil)
+		return c.retireFailed(repo, req, nil, fail)
 	}
 	if release == nil {
 		// A successful Acquire that returns no release func would leak the
@@ -891,8 +978,8 @@ func (c *QueueCoordinator) runOne(repo string, req Request) bool {
 	// commits, so computing the cherry-pick plan first would replay a range that
 	// does not include the work the action was asked to produce. The plan is
 	// computed inside picker.Merge, which is why this sits above it.
-	if !c.runBeforeAction(repo, driven) {
-		return c.finish(repo, req, release)
+	if fail := c.runBeforeAction(repo, driven); fail != nil {
+		return c.retireFailed(repo, req, release, *fail)
 	}
 
 	res, err := c.picker.Merge(c.ctx, driven)
@@ -902,11 +989,69 @@ func (c *QueueCoordinator) runOne(repo string, req Request) bool {
 		// state ever arriving. The coordinator owns the queued state, so it
 		// owns clearing it.
 		c.logf("merge: driver FAILED {repo=%s ws=%s name=%s}: %v", repo, req.Workspace, req.Name, err)
-		c.failedRun(driven, "merge driver failed: "+err.Error())
-		return c.finish(repo, req, release)
+		fail := c.failRun(driven, "merge driver failed: "+err.Error())
+		return c.retireFailed(repo, req, release, fail)
 	}
 
 	return c.settle(repo, req, driven, park, release, res)
+}
+
+// replayTerminal says the terminal word a previous daemon could not publish, and
+// retires the entry once it lands.
+//
+// THE MERGE IS NOT RE-RUN. Its outcome was reached before the entry was marked —
+// the commits are on the target for a merged run, and a failed run's rollback
+// already happened — so the only thing owed is the status. No lease is taken, no
+// session is brought up, no cherry-pick is attempted: every one of those would
+// redo work that is over.
+//
+// THE RUN KEEPS ITS NAME. The publisher is rebuilt from the id on the durable
+// entry, so the terminal status arrives on the very run the user watched go
+// quiet rather than on a stranger.
+//
+// A REPLAY THAT ITSELF CANNOT PUBLISH CHANGES NOTHING. The entry stays marked and
+// outstanding, so the boot after this one tries again; the word is only ever
+// dropped by a publication that landed.
+func (c *QueueCoordinator) replayTerminal(repo string, req Request, term TerminalStatus) bool {
+	driven := req
+	if driven.Run == nil {
+		run, err := c.rebuildRun(repo, req)
+		if err != nil {
+			c.logf("merge: terminal REPLAY run construction FAILED {repo=%s ws=%s name=%s outcome=%s}: %v — the entry stays marked for the next boot",
+				repo, req.Workspace, req.Name, term.Outcome, err)
+			return false
+		}
+		driven.Run = run
+	}
+	c.logf("merge: terminal REPLAY {repo=%s ws=%s name=%s run=%s outcome=%s cause=%s} — a previous daemon reached this outcome and could not publish it; the merge is NOT re-run",
+		repo, req.Workspace, req.Name, driven.Run.RunID(), term.Outcome, term.Cause)
+
+	var err error
+	switch term.Outcome {
+	case OutcomeMerged:
+		err = driven.Run.Merged(term.AfterActionError, term.Cause)
+	case OutcomeFailed:
+		err = driven.Run.Failed(term.Cause)
+	default:
+		// MarkTerminal validates the outcome, so a record naming anything else
+		// was not written by this package. It is refused rather than guessed at,
+		// and the entry is left for a human to find.
+		c.logf("merge: terminal REPLAY REFUSED, unknown outcome {repo=%s ws=%s name=%s outcome=%s} — the durable record does not name a terminal this package publishes",
+			repo, req.Workspace, req.Name, term.Outcome)
+		return false
+	}
+	if err != nil {
+		c.logf("merge: terminal REPLAY status FAILED {repo=%s ws=%s run=%s outcome=%s}: %v — the outcome STANDS and the entry stays marked, so the next boot tries again",
+			repo, req.Workspace, driven.Run.RunID(), term.Outcome, err)
+		return false
+	}
+	c.logf("merge: terminal REPLAY PUBLISHED {repo=%s ws=%s run=%s outcome=%s} — the run's terminal word finally reached the frontends",
+		repo, req.Workspace, driven.Run.RunID(), term.Outcome)
+	// The lease died with the daemon that held it, so there is none to release
+	// here. finishTerminal drops the entry and — for a merged run, whose hook
+	// never fired because the entry was never dropped — runs the post-merge
+	// handoff exactly once.
+	return c.finishTerminal(repo, req, driven, nil, term.Outcome, term.AfterActionError)
 }
 
 // rebuildRun makes a publisher for an entry the queue delivered without one:
@@ -967,7 +1112,8 @@ func (c *QueueCoordinator) bindWatermark(repo string, run *RunStatus) error {
 }
 
 // refuseDeletedSession fails the run when the workspace's newest session was
-// DELETED, and reports whether the merge may continue.
+// DELETED. It returns nil when the merge may continue, and the terminal failure
+// the caller must retire through retireFailed when it may not.
 //
 // THE CAUSE NAMES THE DELETION, and that wording is the contract rather than a
 // nicety: every terminal cause reaches a user, and "the merge failed" is
@@ -977,25 +1123,26 @@ func (c *QueueCoordinator) bindWatermark(repo string, run *RunStatus) error {
 // A LOOKUP FAILURE ALSO FAILS THE RUN. "The records could not be read" and "the
 // session is fine" differ by exactly the resurrection this refuses, so the
 // unreadable case must not proceed into a bring-up.
-func (c *QueueCoordinator) refuseDeletedSession(repo string, req, driven Request) bool {
+func (c *QueueCoordinator) refuseDeletedSession(repo string, req, driven Request) *terminalFailure {
 	sessionID, deleted, err := c.deaths.DeletedSession(req.Workspace)
 	if err != nil {
 		c.logf("merge: session-deletion lookup FAILED {repo=%s ws=%s name=%s run=%s}: %v — the merge is failed rather than brought up, because a session that was deleted must not be resurrected to run a merge action",
 			repo, req.Workspace, req.Name, driven.Run.RunID(), err)
-		c.failedRun(driven, "the workspace's session records could not be read: "+err.Error())
-		return false
+		fail := c.failRun(driven, "the workspace's session records could not be read: "+err.Error())
+		return &fail
 	}
 	if !deleted {
-		return true
+		return nil
 	}
 	c.logf("merge: session DELETED, merge REFUSED {repo=%s ws=%s name=%s run=%s session=%s} — bringing it back to run a merge action would resurrect exactly what the user destroyed",
 		repo, req.Workspace, req.Name, driven.Run.RunID(), sessionID)
-	c.failedRun(driven, fmt.Sprintf("the agent session this merge needed was DELETED (session %s), and a deleted session is not brought back to run a merge action", sessionID))
-	return false
+	fail := c.failRun(driven, fmt.Sprintf("the agent session this merge needed was DELETED (session %s), and a deleted session is not brought back to run a merge action", sessionID))
+	return &fail
 }
 
-// bringUpSession makes the workspace's session driveable and reports whether
-// the merge may continue.
+// bringUpSession makes the workspace's session driveable. It returns nil when
+// the merge may continue, and the terminal failure the caller must retire
+// through retireFailed when it may not.
 //
 // THREE OUTCOMES, NOT TWO:
 //
@@ -1009,42 +1156,43 @@ func (c *QueueCoordinator) refuseDeletedSession(repo string, req, driven Request
 //   - a bring-up for a workspace that HAS a session failed, and the run FAILS.
 //     That stays loud and terminal: the merge is about to submit turns into
 //     that session, and there is no session to submit them to.
-func (c *QueueCoordinator) bringUpSession(repo string, req, driven Request) bool {
+func (c *QueueCoordinator) bringUpSession(repo string, req, driven Request) *terminalFailure {
 	err := c.sessions.EnsureLive(c.ctx, req.Workspace)
 	switch {
 	case err == nil:
-		return true
+		return nil
 	case errors.Is(err, ErrNoSession):
 		c.logf("merge: no session recorded {repo=%s ws=%s name=%s run=%s}: %v — the merge proceeds SESSIONLESS; a before-action, a conflict resolution or a test fix would each fail loudly on its own path, and this merge asks for none of them unless it does",
 			repo, req.Workspace, req.Name, driven.Run.RunID(), err)
-		return true
+		return nil
 	default:
 		c.logf("merge: session bring-up FAILED {repo=%s ws=%s name=%s run=%s}: %v — the merge cannot drive a session it cannot reach",
 			repo, req.Workspace, req.Name, driven.Run.RunID(), err)
-		c.failedRun(driven, "the workspace's agent session could not be brought up: "+err.Error())
-		return false
+		fail := c.failRun(driven, "the workspace's agent session could not be brought up: "+err.Error())
+		return &fail
 	}
 }
 
-// runBeforeAction resolves and delivers the workspace's before_ws_merge action,
-// reporting whether the merge may continue.
+// runBeforeAction resolves and delivers the workspace's before_ws_merge action.
+// It returns nil when the merge may continue, and the terminal failure the
+// caller must retire through retireFailed when it may not.
 //
 // A WORKSPACE WITH NO ACTION IS THE COMMON CASE and passes straight through. An
 // action that cannot be READ, and an action whose turn does not end cleanly, both
 // FAIL the run: the whole point of the action is to change what gets
 // cherry-picked, so proceeding after it did not happen would land a plan the
 // user did not ask for.
-func (c *QueueCoordinator) runBeforeAction(repo string, req Request) bool {
+func (c *QueueCoordinator) runBeforeAction(repo string, req Request) *terminalFailure {
 	prompt, err := c.beforeActions.BeforeAction(req.Workspace)
 	if err != nil {
 		c.logf("merge: before-action lookup FAILED {repo=%s ws=%s name=%s run=%s}: %v — the merge is failed rather than run without an action the workspace may have been created with",
 			repo, req.Workspace, req.Name, req.Run.RunID(), err)
-		c.failedRun(req, "the workspace's before-merge action could not be read: "+err.Error())
-		return false
+		fail := c.failRun(req, "the workspace's before-merge action could not be read: "+err.Error())
+		return &fail
 	}
 	if prompt == "" {
 		c.logf("merge: no before-action recorded {repo=%s ws=%s name=%s run=%s}", repo, req.Workspace, req.Name, req.Run.RunID())
-		return true
+		return nil
 	}
 
 	act := BeforeAction{
@@ -1054,13 +1202,13 @@ func (c *QueueCoordinator) runBeforeAction(repo string, req Request) bool {
 	}
 	if err := act.validate(); err != nil {
 		c.logf("merge: before-action NOT HANDED to the shim {repo=%s ws=%s name=%s}: %v", repo, req.Workspace, req.Name, err)
-		c.failedRun(req, "the workspace's before-merge action is not deliverable: "+err.Error())
-		return false
+		fail := c.failRun(req, "the workspace's before-merge action is not deliverable: "+err.Error())
+		return &fail
 	}
 	if err := req.Run.BeforeAction(prompt, "running the workspace's before-merge action"); err != nil {
 		c.logf("merge: before-action status FAILED {repo=%s ws=%s run=%s}: %v", repo, req.Workspace, req.Run.RunID(), err)
-		c.failedRun(req, "the before-merge action's phase could not be published: "+err.Error())
-		return false
+		fail := c.failRun(req, "the before-merge action's phase could not be published: "+err.Error())
+		return &fail
 	}
 
 	c.logf("merge: before-action HANDED TO THE SHIM {repo=%s ws=%s name=%s run=%s request_id=%s}",
@@ -1068,12 +1216,12 @@ func (c *QueueCoordinator) runBeforeAction(repo string, req Request) bool {
 	if err := c.beforeActionFn.Run(c.ctx, act); err != nil {
 		c.logf("merge: before-action FAILED {repo=%s ws=%s name=%s run=%s request_id=%s}: %v — the merge is failed; cherry-picking a plan the action was meant to change would land the wrong commits",
 			repo, req.Workspace, req.Name, req.Run.RunID(), act.RequestID, err)
-		c.failedRun(req, "the workspace's before-merge action did not complete: "+err.Error())
-		return false
+		fail := c.failRun(req, "the workspace's before-merge action did not complete: "+err.Error())
+		return &fail
 	}
 	c.logf("merge: before-action TURN COMPLETE {repo=%s ws=%s name=%s run=%s request_id=%s} — computing the cherry-pick plan now",
 		repo, req.Workspace, req.Name, req.Run.RunID(), act.RequestID)
-	return true
+	return nil
 }
 
 // settle drives a merge Result to a terminal outcome and reports whether
@@ -1119,7 +1267,18 @@ func (c *QueueCoordinator) settle(repo string, req, driven Request, park *confli
 			// still held here. finishTerminal releases that lease.
 			var afterActionErr string
 			if res.Outcome == OutcomeMerged {
-				afterActionErr = c.completeMergedRun(repo, driven, res)
+				var publishErr error
+				afterActionErr, publishErr = c.completeMergedRun(repo, driven, res)
+				if publishErr != nil {
+					// The commits are on the target and the entry is still on the
+					// queue. Keeping it — marked with the very word that did not
+					// publish — is what makes the next boot able to say it.
+					return c.keepForTerminalReplay(repo, req, release, TerminalStatus{
+						Outcome:          OutcomeMerged,
+						Cause:            mergedCause(res),
+						AfterActionError: afterActionErr,
+					}, publishErr)
+				}
 			}
 			return c.finishTerminal(repo, req, driven, release, res.Outcome, afterActionErr)
 		}
@@ -1320,8 +1479,7 @@ func (c *QueueCoordinator) failTestGate(repo string, req, driven Request, releas
 			cause += fmt.Sprintf(" (target rolled back to %s)", preHead)
 		}
 	}
-	c.failedRun(driven, cause)
-	return c.finish(repo, req, release)
+	return c.retireFailed(repo, req, release, c.failRun(driven, cause))
 }
 
 // testFailureCauseBytes bounds how much of the suite's output tail travels into
@@ -1412,17 +1570,24 @@ func (c *QueueCoordinator) failed(req Request, cause string) {
 	}
 }
 
-// failedRun records merge_failed for a request that HAS a run, so the terminal
-// status carries the run's identity and the commit context it died with.
+// failRun records merge_failed for a request that HAS a run, so the terminal
+// status carries the run's identity and the commit context it died with, and
+// reports whether that publication landed.
 //
 // It is separate from failed() because the coordinator also fails requests that
 // never reached a run (the boot sweep of orphaned merge_enqueuing marks), and a
 // fabricated run id on those would let a frontend correlate two unrelated things.
-func (c *QueueCoordinator) failedRun(req Request, cause string) {
-	if err := req.Run.Failed(cause); err != nil {
-		c.logf("merge: merge_failed status FAILED {ws=%s name=%s run=%s cause=%s}: %v",
+//
+// THE CALLER MUST RETIRE THE RUN THROUGH retireFailed. The returned value is not
+// a diagnostic: it is what decides whether the durable queue entry is acked or
+// kept for the next boot to re-publish.
+func (c *QueueCoordinator) failRun(req Request, cause string) terminalFailure {
+	err := req.Run.Failed(cause)
+	if err != nil {
+		c.logf("merge: merge_failed status FAILED {ws=%s name=%s run=%s cause=%s}: %v — the durable queue entry is KEPT so the next boot re-publishes this terminal status",
 			req.Workspace, req.Name, req.Run.RunID(), cause, err)
 	}
+	return terminalFailure{cause: cause, publishErr: err}
 }
 
 // gate returns repo's advance gate, the mutex that makes "publish observed
