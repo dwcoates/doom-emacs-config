@@ -32,6 +32,23 @@ strictly worse than a refused merge.
 disagreeing derived one, and a derived record never displaces an observed one
 (`ErrGeometryConflict`).
 
+## Retired columns
+
+`workspace_merge_geometry.before_action` is RETIRED. It once carried a second
+copy of the workspace's `before_ws_merge` prompt; nothing writes or reads it now.
+That prompt is a field of the create Request, and the merge resolves it through
+the one accessor over the one store it is written into
+(`create.BeforeWSMergePromptFor`, reached as
+`WorkspaceCreationBridge.BeforeWSMergePrompt`). A copy here was a duplicated
+creation-time fact with one writer and no reader, which is how a writer and a
+reader came to name two different columns in the first place.
+
+The `ALTER TABLE ... ADD COLUMN before_action` migration STAYS: databases in the
+field already have the column and it is `NOT NULL`, so dropping the migration
+would leave fresh and existing databases with two different table shapes. It is
+additive and idempotent, and its `DEFAULT ''` is what lets the writes omit the
+column. Do not re-add a `geometry.Record` field for it.
+
 ## Naming
 
 Always write the package-qualified form — `geometry.Store`, `geometry.Record`,
