@@ -858,6 +858,12 @@ func TestResumeReportsTheRunsWholeRangeRatherThanTheEmptyRemainder(t *testing.T)
 	if res.Outcome != OutcomeMerged {
 		t.Fatalf("Resume() outcome = %s, want merged", res.Outcome)
 	}
+	// The driver reports OutcomeMerged without publishing the terminal arm —
+	// that publish is the coordinator's, after the after-action — so this test
+	// performs the coordinator's terminal publish to read the run's totals.
+	if err := req.Run.Merged("", "the merge landed"); err != nil {
+		t.Fatalf("Merged(): %v", err)
+	}
 	if got := lastMergedStatus(t, sink).GetCommitsTotal(); got != 1 {
 		t.Fatalf("the merged status reports commits_total = %d, want 1 (the branch's single commit)", got)
 	}
@@ -906,6 +912,11 @@ func TestResumeRebuildsTheCursorForAPublisherThatLostIt(t *testing.T) {
 	}
 	if res.Outcome != OutcomeMerged {
 		t.Fatalf("Resume() outcome = %s, want merged", res.Outcome)
+	}
+	// The terminal merged publish moved to the coordinator (after the
+	// after-action), so the test performs it to read the rebuilt run's totals.
+	if err := req.Run.Merged("", "the merge landed"); err != nil {
+		t.Fatalf("Merged(): %v", err)
 	}
 	if got := lastMergedStatus(t, sink).GetCommitsTotal(); got != 2 {
 		t.Fatalf("the rebuilt run reports commits_total = %d, want 2 (the branch's whole range)", got)
