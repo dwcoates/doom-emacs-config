@@ -70,8 +70,11 @@ type Inbox struct {
 	Dir     string
 	Store   JobStore
 	Manager *Manager
-	// Merges routes the merge verb daemon-side.  Required: the verb no longer
-	// round-trips through Emacs, so an inbox without it could only drop merges.
+	// Merges routes the merge verb daemon-side.  Required to Run: the verb no
+	// longer round-trips through Emacs, so a watcher without it could only drop
+	// merges.  A one-shot ScanAndDrain tolerates its absence per FILE — a merge
+	// entry that finds no route is quarantined and the scan continues, so one
+	// wiring bug cannot also stop the creates and host actions behind it.
 	Merges   MergeDispatcher
 	Logf     func(string, ...any)
 	Interval time.Duration
@@ -85,13 +88,24 @@ func (i *Inbox) validate() error {
 		return fmt.Errorf("workspace create: inbox needs a JobStore")
 	case i.Manager == nil:
 		return fmt.Errorf("workspace create: inbox needs a Manager")
-	case i.Merges == nil:
-		return fmt.Errorf("workspace create: inbox needs a MergeDispatcher (the merge verb is routed daemon-side and no longer round-trips through Emacs)")
 	case i.Logf == nil:
 		return fmt.Errorf("workspace create: inbox needs a logger")
 	}
 	return nil
 }
+
+// errNoMergeDispatcher is the misconfiguration a merge entry runs into when the
+// daemon was assembled without a merge route.  It is deliberately NOT part of
+// validate: an inbox missing its merge route can still ingest every other verb
+// correctly, and refusing the whole drain would let one misconfigured seam stop
+// creates and host actions that have nothing to do with merging.
+//
+// It is nonetheless a DAEMON fault, not the emitter's, so routeMerge logs it as
+// a misconfiguration in its own right before quarantining the file that ran
+// into it — the quarantine keeps the request as durable evidence and keeps the
+// scan moving, and the log is what tells an operator the daemon, not the file,
+// is what needs fixing.
+var errNoMergeDispatcher = errors.New("workspace create: inbox needs a MergeDispatcher (the merge verb is routed daemon-side and no longer round-trips through Emacs)")
 
 // Run startup-drains then actively polls for newly emitted command files.
 // Polling keeps the core free of an OS-specific watcher while still providing
@@ -99,6 +113,14 @@ func (i *Inbox) validate() error {
 func (i *Inbox) Run(ctx context.Context) error {
 	if err := i.validate(); err != nil {
 		return err
+	}
+	// BRING-UP IS WHERE A MISSING MERGE ROUTE IS STILL FATAL.  A long-lived
+	// watcher without one would quarantine every merge the daemon is ever
+	// asked for, so it refuses to start at all rather than shredding requests
+	// one file at a time.  A one-shot ScanAndDrain stays tolerant: it is used
+	// for focused drains where the other verbs still have to get through.
+	if i.Merges == nil {
+		return errNoMergeDispatcher
 	}
 	if err := i.ScanAndDrain(ctx); err != nil {
 		return err
@@ -249,6 +271,16 @@ func (i *Inbox) routeMerge(ctx context.Context, claimed string, index int, cmd M
 	case !filepath.IsAbs(cmd.ProjectDir):
 		i.Logf("workspace-create: merge REJECTED reason=relative-project-dir file=%s entry=%d workspace=%q project_dir=%q", claimed, index, cmd.Workspace, cmd.ProjectDir)
 		return i.quarantine(claimed, fmt.Errorf("%w: entry %d merge reason=relative-project-dir workspace=%q project_dir=%q", errRejectedCommandFile, index, cmd.Workspace, cmd.ProjectDir))
+	}
+	if i.Merges == nil {
+		// THE DAEMON IS MISCONFIGURED, NOT THE FILE — say so loudly, and say it
+		// separately from the quarantine line so an operator reading the log
+		// sees the cause rather than only the casualty.  The file is still
+		// quarantined and the scan still continues: this one entry cannot be
+		// routed, and dropping every other file behind it would turn one
+		// wiring bug into a total ingress outage.
+		i.Logf("workspace-create: merge route MISCONFIGURED file=%s entry=%d workspace=%q project_dir=%q: %v", claimed, index, cmd.Workspace, cmd.ProjectDir, errNoMergeDispatcher)
+		return i.quarantine(claimed, fmt.Errorf("%w: entry %d merge reason=no-merge-dispatcher workspace=%q project_dir=%q: %v", errRejectedCommandFile, index, cmd.Workspace, cmd.ProjectDir, errNoMergeDispatcher))
 	}
 	if err := i.Merges.DispatchMerge(ctx, cmd); err != nil {
 		if errors.Is(err, ErrUnknownMergeWorkspace) {
